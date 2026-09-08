@@ -52,29 +52,32 @@ func createServiceExposureTools(ksServer *KubescapeMcpserver) {
 			args = map[string]any{}
 		}
 
-		namespace, ok := args["namespace"].(string)
-		if !ok || namespace == "" {
-			return mcp.NewToolResultError("namespace is required"), nil
+		namespace, toolErr := mcpRequiredStringArg(args, "namespace")
+		if toolErr != nil {
+			return toolErr, nil
 		}
-		serviceName, _ := args["service_name"].(string)
+		serviceName, toolErr := mcpStringArg(args, "service_name")
+		if toolErr != nil {
+			return toolErr, nil
+		}
 
 		k8sClient, err := ksServer.getK8sClient()
 		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed to get k8s client: %v", err)), nil
+			return mcpToolError(ErrCodeK8sClientError, fmt.Sprintf("failed to get k8s client: %v", err), nil), nil
 		}
 		dynClient := k8sClient.DynamicClient
 
 		serviceList, err := dynClient.Resource(serviceGVR).Namespace(namespace).List(ctx, metav1.ListOptions{})
 		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed to list Service objects: %v", err)), nil
+			return mcpToolError(classifyScanError(err), fmt.Sprintf("failed to list Service objects: %v", err), map[string]any{"resource_type": "Service"}), nil
 		}
 		ingressList, err := dynClient.Resource(ingressGVR).Namespace(namespace).List(ctx, metav1.ListOptions{})
 		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed to list Ingress objects: %v", err)), nil
+			return mcpToolError(classifyScanError(err), fmt.Sprintf("failed to list Ingress objects: %v", err), map[string]any{"resource_type": "Ingress"}), nil
 		}
 		namespaceList, err := dynClient.Resource(namespaceGVR).List(ctx, metav1.ListOptions{})
 		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed to list Namespace objects: %v", err)), nil
+			return mcpToolError(classifyScanError(err), fmt.Sprintf("failed to list Namespace objects: %v", err), map[string]any{"resource_type": "Namespace"}), nil
 		}
 
 		resources := make(map[string]workloadinterface.IMetadata, len(serviceList.Items)+len(ingressList.Items)+len(namespaceList.Items))
@@ -110,7 +113,7 @@ func createServiceExposureTools(ksServer *KubescapeMcpserver) {
 		gatewayResources := map[string]workloadinterface.IMetadata{}
 		routeList, routeErr := listGatewayKind(ctx, dynClient, httpRouteGVR, httpRouteGVRv1beta1)
 		if routeErr != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed to list HTTPRoute objects: %v", routeErr)), nil
+			return mcpToolError(classifyScanError(routeErr), fmt.Sprintf("failed to list HTTPRoute objects: %v", routeErr), map[string]any{"resource_type": "HTTPRoute"}), nil
 		}
 		for i := range routeList.Items {
 			w := workloadinterface.NewWorkloadObj(routeList.Items[i].Object)
@@ -118,7 +121,7 @@ func createServiceExposureTools(ksServer *KubescapeMcpserver) {
 		}
 		grpcRouteList, grpcRouteErr := listGatewayKind(ctx, dynClient, grpcRouteGVR, grpcRouteGVRv1alpha2)
 		if grpcRouteErr != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed to list GRPCRoute objects: %v", grpcRouteErr)), nil
+			return mcpToolError(classifyScanError(grpcRouteErr), fmt.Sprintf("failed to list GRPCRoute objects: %v", grpcRouteErr), map[string]any{"resource_type": "GRPCRoute"}), nil
 		}
 		for i := range grpcRouteList.Items {
 			w := workloadinterface.NewWorkloadObj(grpcRouteList.Items[i].Object)
@@ -133,7 +136,7 @@ func createServiceExposureTools(ksServer *KubescapeMcpserver) {
 		// invisible to idx.routeAttachesToAGateway.
 		gwList, gwErr := listGatewayKind(ctx, dynClient, gatewayGVR, gatewayGVRv1beta1)
 		if gwErr != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed to list Gateway objects: %v", gwErr)), nil
+			return mcpToolError(classifyScanError(gwErr), fmt.Sprintf("failed to list Gateway objects: %v", gwErr), map[string]any{"resource_type": "Gateway"}), nil
 		}
 		for i := range gwList.Items {
 			w := workloadinterface.NewWorkloadObj(gwList.Items[i].Object)
@@ -177,7 +180,7 @@ func createServiceExposureTools(ksServer *KubescapeMcpserver) {
 
 		resBytes, err := json.Marshal(result)
 		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed to marshal result: %v", err)), nil
+			return mcpToolError(ErrCodeMarshalError, fmt.Sprintf("failed to marshal result: %v", err), nil), nil
 		}
 		return mcp.NewToolResultText(string(resBytes)), nil
 	})

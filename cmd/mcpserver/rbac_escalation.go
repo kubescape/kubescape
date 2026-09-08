@@ -52,7 +52,7 @@ func createRBACEscalationTools(ksServer *KubescapeMcpserver) {
 		subjectKindStr, _ := args["subject_kind"].(string)
 		name, ok := args["name"].(string)
 		if !ok || name == "" {
-			return mcp.NewToolResultError("name is required"), nil
+			return mcpToolError(ErrCodeInvalidArgument, "name is required", map[string]any{"argument": "name"}), nil
 		}
 		namespace, _ := args["namespace"].(string)
 
@@ -61,24 +61,24 @@ func createRBACEscalationTools(ksServer *KubescapeMcpserver) {
 		case string(rbacgraph.KindServiceAccount):
 			kind = rbacgraph.KindServiceAccount
 			if namespace == "" {
-				return mcp.NewToolResultError("namespace is required when subject_kind is ServiceAccount"), nil
+				return mcpToolError(ErrCodeInvalidArgument, "namespace is required when subject_kind is ServiceAccount", map[string]any{"argument": "namespace"}), nil
 			}
 		case string(rbacgraph.KindUser):
 			kind = rbacgraph.KindUser
 		case string(rbacgraph.KindGroup):
 			kind = rbacgraph.KindGroup
 		default:
-			return mcp.NewToolResultError(fmt.Sprintf("subject_kind must be one of ServiceAccount, User, Group; got %q", subjectKindStr)), nil
+			return mcpToolError(ErrCodeInvalidArgument, fmt.Sprintf("subject_kind must be one of ServiceAccount, User, Group; got %q", subjectKindStr), map[string]any{"argument": "subject_kind", "supported_values": []string{"ServiceAccount", "User", "Group"}}), nil
 		}
 
 		k8sClient, err := ksServer.getK8sClient()
 		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed to get k8s client: %v", err)), nil
+			return mcpToolError(ErrCodeK8sClientError, fmt.Sprintf("failed to get k8s client: %v", err), nil), nil
 		}
 
 		resources, err := listRBACResources(ctx, k8sClient.DynamicClient)
 		if err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
+			return mcpToolError(ErrCodeK8sClientError, err.Error(), nil), nil
 		}
 
 		roles, clusterRoles, roleBindings, clusterRoleBindings, serviceAccounts, decodeErrs := rbacgraph.FromResources(resources)
@@ -106,7 +106,7 @@ func createRBACEscalationTools(ksServer *KubescapeMcpserver) {
 
 		resBytes, err := json.Marshal(out)
 		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed to marshal result: %v", err)), nil
+			return mcpToolError(ErrCodeMarshalError, fmt.Sprintf("failed to marshal result: %v", err), nil), nil
 		}
 		return mcp.NewToolResultText(string(resBytes)), nil
 	})

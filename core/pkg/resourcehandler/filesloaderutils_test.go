@@ -1,6 +1,7 @@
 package resourcehandler
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/kubescape/k8s-interface/workloadinterface"
@@ -223,6 +224,12 @@ func TestFindScanObjectResource(t *testing.T) {
 			localWorkloadWithPath("apps/v1", "Deployment", "default", "nginx", "/fileD.yaml"),
 			localWorkloadWithPath("apps/v1", "Deployment", "default", "web", "/fileF.yaml"),
 		},
+		"/v1/secrets": {
+			localWorkloadWithPath("v1", "Secret", "default", "my-secret", "/secret.yaml"),
+		},
+		"/v1/configmaps": {
+			localWorkloadWithPath("v1", "ConfigMap", "default", "my-config", "/config.yaml"),
+		},
 	}
 	tt := []struct {
 		name                 string
@@ -232,6 +239,7 @@ func TestFindScanObjectResource(t *testing.T) {
 		expectedApiVersion   string
 		expectErr            bool
 		expectedErrorString  string
+		expectedSentinel     error
 	}{
 		{
 			name:                 "scan object is nil",
@@ -369,6 +377,37 @@ func TestFindScanObjectResource(t *testing.T) {
 			expectedResourceName: "",
 			expectErr:            true,
 			expectedErrorString:  "not found",
+			expectedSentinel:     ErrResourceNotFound,
+		},
+		{
+			name: "matched Secret returns ErrSecretScanDenied",
+			scanObject: &objectsenvelopes.ScanObject{
+				Kind:       "Secret",
+				ApiVersion: "v1",
+				Metadata: objectsenvelopes.ScanObjectMetadata{
+					Namespace: "default",
+					Name:      "my-secret",
+				},
+			},
+			expectedResourceName: "",
+			expectErr:            true,
+			expectedErrorString:  "scanning Secret resources via single resource scan is not supported",
+			expectedSentinel:     ErrSecretScanDenied,
+		},
+		{
+			name: "matched non-workload ConfigMap returns ErrNotWorkload",
+			scanObject: &objectsenvelopes.ScanObject{
+				Kind:       "ConfigMap",
+				ApiVersion: "v1",
+				Metadata: objectsenvelopes.ScanObjectMetadata{
+					Namespace: "default",
+					Name:      "my-config",
+				},
+			},
+			expectedResourceName: "",
+			expectErr:            true,
+			expectedErrorString:  "is not a valid Kubernetes workload",
+			expectedSentinel:     ErrNotWorkload,
 		},
 	}
 
@@ -382,6 +421,9 @@ func TestFindScanObjectResource(t *testing.T) {
 
 			if tc.expectErr {
 				assert.ErrorContains(t, err, tc.expectedErrorString)
+				if tc.expectedSentinel != nil {
+					assert.True(t, errors.Is(err, tc.expectedSentinel), "expected error to wrap sentinel %v, got %v", tc.expectedSentinel, err)
+				}
 			}
 
 			if tc.expectedResourceName != "" {

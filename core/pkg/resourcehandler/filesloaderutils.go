@@ -136,6 +136,22 @@ func addCommitData(input string, workloadIDToSource map[string]reporthandling.So
 }
 */
 
+func isWorkloadMetadata(r workloadinterface.IMetadata) bool {
+	if r == nil {
+		return false
+	}
+	group, _ := k8sinterface.SplitApiVersion(r.GetApiVersion())
+	if group == "" || cautils.IsBuiltinGroup(group) {
+		switch strings.ToLower(cautils.NormalizeWorkloadKind(r.GetKind())) {
+		case "pod", "deployment", "daemonset", "statefulset", "job", "cronjob", "replicaset", "replicationcontroller":
+			return k8sinterface.IsTypeWorkload(r.GetObject())
+		default:
+			return false
+		}
+	}
+	return k8sinterface.IsTypeWorkload(r.GetObject())
+}
+
 // findScanObjectResource finds the requested k8s object to be scanned in the resources map
 func findScanObjectResource(mappedResources map[string][]workloadinterface.IMetadata, resource *objectsenvelopes.ScanObject) (workloadinterface.IWorkload, error) {
 	if resource == nil {
@@ -144,8 +160,13 @@ func findScanObjectResource(mappedResources map[string][]workloadinterface.IMeta
 
 	logger.L().Debug("Single resource scan", helpers.String("resource", resource.GetID()))
 
-	collectMatches := func(kindPredicate func(r workloadinterface.IMetadata) bool) []workloadinterface.IWorkload {
-		var wls []workloadinterface.IWorkload
+	type matchResult struct {
+		workloads    []workloadinterface.IWorkload
+		nonWorkloads []workloadinterface.IMetadata
+	}
+
+	collectMatches := func(kindPredicate func(r workloadinterface.IMetadata) bool) matchResult {
+		var res matchResult
 		seenResources := make(map[string]struct{})
 		for _, resources := range mappedResources {
 			for _, r := range resources {
@@ -167,20 +188,22 @@ func findScanObjectResource(mappedResources map[string][]workloadinterface.IMeta
 					continue
 				}
 
-				if k8sinterface.IsTypeWorkload(r.GetObject()) {
+				seenResources[r.GetID()] = struct{}{}
+				if isWorkloadMetadata(r) {
 					wl := workloadinterface.NewWorkloadObj(r.GetObject())
-					wls = append(wls, wl)
-					seenResources[r.GetID()] = struct{}{}
+					res.workloads = append(res.workloads, wl)
+				} else {
+					res.nonWorkloads = append(res.nonWorkloads, r)
 				}
 			}
 		}
-		return wls
+		return res
 	}
 
 	// Pass 1: Direct case-insensitive match on the requested kind.
 	// This preserves bare CRD Kinds (e.g. Deploy for an example.com/v1 resource)
 	// without alias normalization colliding or rewriting the kind.
-	wls := collectMatches(func(r workloadinterface.IMetadata) bool {
+	matches := collectMatches(func(r workloadinterface.IMetadata) bool {
 		return strings.EqualFold(r.GetKind(), resource.GetKind())
 	})
 
@@ -188,23 +211,39 @@ func findScanObjectResource(mappedResources map[string][]workloadinterface.IMeta
 	// If direct matching finds no candidates and the requested kind is a recognized
 	// alias/short name for a built-in workload (e.g. "deploy", "po", "ds"), attempt
 	// matching against built-in API group resources with the canonical kind.
-	if len(wls) == 0 {
+	if len(matches.workloads) == 0 && len(matches.nonWorkloads) == 0 {
 		normalizedKind := cautils.NormalizeWorkloadKind(resource.GetKind())
 		if !strings.EqualFold(normalizedKind, resource.GetKind()) {
-			wls = collectMatches(func(r workloadinterface.IMetadata) bool {
+			matches = collectMatches(func(r workloadinterface.IMetadata) bool {
 				group, _ := k8sinterface.SplitApiVersion(r.GetApiVersion())
 				return cautils.IsBuiltinGroup(group) && strings.EqualFold(r.GetKind(), normalizedKind)
 			})
 		}
 	}
 
-	if len(wls) == 0 {
-		return nil, fmt.Errorf("k8s resource '%s' not found", getReadableID(resource))
-	} else if len(wls) > 1 {
-		return nil, fmt.Errorf("more than one k8s resource found for '%s'", getReadableID(resource))
+	if len(matches.workloads) == 0 && len(matches.nonWorkloads) == 0 {
+		// mcpserver-sentinel: ErrResourceNotFound — do not change without updating cmd/mcpserver/mcperror_classify.go
+		return nil, fmt.Errorf("k8s resource '%s' not found: %w", getReadableID(resource), ErrResourceNotFound)
 	}
 
-	return wls[0], nil
+	if len(matches.workloads) == 0 && len(matches.nonWorkloads) > 0 {
+		for _, r := range matches.nonWorkloads {
+			group, _ := k8sinterface.SplitApiVersion(r.GetApiVersion())
+			if strings.EqualFold(r.GetKind(), "secret") && (group == "" || cautils.IsBuiltinGroup(group)) {
+				// mcpserver-sentinel: ErrSecretScanDenied — do not change without updating cmd/mcpserver/mcperror_classify.go
+				return nil, fmt.Errorf("scanning Secret resources via single resource scan is not supported: %s: %w", getReadableID(resource), ErrSecretScanDenied)
+			}
+		}
+		// mcpserver-sentinel: ErrNotWorkload — do not change without updating cmd/mcpserver/mcperror_classify.go
+		return nil, fmt.Errorf("%s is not a valid Kubernetes workload: %w", getReadableID(resource), ErrNotWorkload)
+	}
+
+	if len(matches.workloads) > 1 {
+		// mcpserver-sentinel: ErrAmbiguousResource — do not change without updating cmd/mcpserver/mcperror_classify.go
+		return nil, fmt.Errorf("more than one k8s resource found for '%s': %w", getReadableID(resource), ErrAmbiguousResource)
+	}
+
+	return matches.workloads[0], nil
 }
 
 // TODO: move this to k8s-interface
