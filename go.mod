@@ -35,7 +35,7 @@ require (
 	github.com/francoispqt/gojay v1.2.13
 	github.com/go-git/go-git/v5 v5.19.2
 	github.com/go-openapi/runtime v0.33.1
-	github.com/google/cel-go v0.29.0
+	github.com/google/cel-go v0.29.2
 	github.com/google/go-cmp v0.7.0
 	github.com/google/go-containerregistry v0.21.6
 	github.com/google/uuid v1.6.0
@@ -99,10 +99,10 @@ require (
 	gopkg.in/op/go-logging.v1 v1.0.0-20160211212156-b2cb9fa56473
 	gopkg.in/yaml.v3 v3.0.1
 	helm.sh/helm/v3 v3.21.4
-	k8s.io/api v0.36.2
-	k8s.io/apimachinery v0.36.2
-	k8s.io/apiserver v0.36.2
-	k8s.io/client-go v0.36.2
+	k8s.io/api v0.37.0
+	k8s.io/apimachinery v0.37.0
+	k8s.io/apiserver v0.37.0
+	k8s.io/client-go v0.37.0
 	k8s.io/utils v0.0.0-20260626114624-be93311217bd
 	sigs.k8s.io/controller-runtime v0.23.3
 	sigs.k8s.io/kustomize/api v0.21.1
@@ -567,7 +567,7 @@ require (
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	github.com/youmark/pkcs8 v0.0.0-20240726163527-a2c0da244d78 // indirect
 	gitlab.com/gitlab-org/api/client-go v1.46.0 // indirect
-	go.etcd.io/bbolt v1.4.3 // indirect
+	go.etcd.io/bbolt v1.5.0 // indirect
 	go.mongodb.org/mongo-driver v1.17.7 // indirect
 	go.opencensus.io v0.24.0 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
@@ -609,11 +609,11 @@ require (
 	gorm.io/gorm v1.31.1 // indirect
 	k8s.io/apiextensions-apiserver v0.36.2 // indirect
 	k8s.io/cli-runtime v0.36.2 // indirect
-	k8s.io/component-base v0.36.2 // indirect
+	k8s.io/component-base v0.37.0 // indirect
 	k8s.io/klog/v2 v2.140.0 // indirect
 	k8s.io/kube-openapi v0.0.0-20260721132016-d427ff9ee9ad // indirect
 	k8s.io/kubectl v0.36.2 // indirect
-	k8s.io/streaming v0.36.2 // indirect
+	k8s.io/streaming v0.37.0 // indirect
 	modernc.org/libc v1.67.6 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
