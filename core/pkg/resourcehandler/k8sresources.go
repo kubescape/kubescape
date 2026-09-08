@@ -618,7 +618,7 @@ func (k8sHandler *K8sResourceHandler) findScanObjectResource(ctx context.Context
 		// Keep the legacy single-resource behavior for built-in objects whose
 		// callers omit apiVersion. CRDs still require their declared apiVersion
 		// so discovery can select an unambiguous GVR.
-		groupVersionResource, err := k8sinterface.GetGroupVersionResource(resource.GetKind())
+		groupVersionResource, err := k8sinterface.GetGroupVersionResource(cautils.NormalizeWorkloadKind(resource.GetKind()))
 		if err == nil {
 			resolved = []resolvedResource{{
 				groupVersionResourceTriplet: k8sinterface.GroupVersionResourceToString(&groupVersionResource),
