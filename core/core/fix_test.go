@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/armosec/armoapi-go/armotypes"
+	"github.com/kubescape/go-logger"
 	metav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
 	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
 	"github.com/kubescape/opa-utils/reporthandling"
@@ -334,4 +335,105 @@ func TestFix_ReturnsErrorWhenApplyFails(t *testing.T) {
 	err := ks.Fix(&metav1.FixInfo{ReportFile: reportPath, NoConfirm: true})
 
 	assert.Error(t, err)
+}
+
+// captureLoggerOutput redirects the package logger to a file for the duration
+// of the test and returns a reader for whatever was written to it.
+func captureLoggerOutput(t *testing.T) func() string {
+	t.Helper()
+
+	f, err := os.Create(filepath.Join(t.TempDir(), "log"))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = f.Close() })
+
+	prev := logger.L().GetWriter()
+	logger.L().SetWriter(f)
+	t.Cleanup(func() { logger.L().SetWriter(prev) })
+
+	return func() string {
+		require.NoError(t, f.Sync())
+		b, err := os.ReadFile(f.Name())
+		require.NoError(t, err)
+		return string(b)
+	}
+}
+
+// TestFix_OutputDirIsIgnoredWithAWarningForFileReports covers #3733.
+// --output-dir applies only to cluster reports, whose fixes are emitted rather
+// than applied. Passing it to a file-based fix used to be accepted in silence:
+// the directory stayed empty, the manifests were rewritten in place, and
+// nothing told the user the flag had done nothing — so an empty ./patches read
+// as "the fix failed" rather than "that flag doesn't apply here".
+func TestFix_OutputDirIsIgnoredWithAWarningForFileReports(t *testing.T) {
+	dir := t.TempDir()
+	reportPath := buildFixableReport(t, dir)
+	outputDir := filepath.Join(dir, "patches")
+	require.NoError(t, os.MkdirAll(outputDir, 0o750))
+
+	readLog := captureLoggerOutput(t)
+
+	fixInfo := &metav1.FixInfo{ReportFile: reportPath, NoConfirm: true, OutputDir: outputDir}
+	ks := &Kubescape{Ctx: context.Background()}
+	require.NoError(t, ks.Fix(fixInfo))
+
+	assert.Contains(t, readLog(), "--output-dir has no effect when fixing manifest files",
+		"the user must be told the flag was ignored rather than left to guess from an empty directory")
+
+	entries, err := os.ReadDir(outputDir)
+	require.NoError(t, err)
+	assert.Empty(t, entries, "a file-based fix writes no manifests into --output-dir")
+
+	assert.Contains(t, manifestContent(t, dir), "privileged: false",
+		"the warning must not stop the in-place fix from being applied")
+
+	assert.Empty(t, fixInfo.OutputDir,
+		"the ignored --output-dir must be cleared, so no later code can act on a value the user was told is inert")
+}
+
+// TestFix_OutputDirWarnsBeforeDryRunReturns pins the placement of the warning:
+// it is about whether the flag applies at all, so it has to fire on every path
+// through Fix — including --dry-run, which returns long before any fix is
+// applied.
+func TestFix_OutputDirWarnsBeforeDryRunReturns(t *testing.T) {
+	dir := t.TempDir()
+	reportPath := buildFixableReport(t, dir)
+
+	readLog := captureLoggerOutput(t)
+
+	ks := &Kubescape{Ctx: context.Background()}
+	require.NoError(t, ks.Fix(&metav1.FixInfo{
+		ReportFile: reportPath,
+		DryRun:     true,
+		OutputDir:  filepath.Join(dir, "patches"),
+	}))
+
+	assert.Contains(t, readLog(), "--output-dir has no effect when fixing manifest files")
+}
+
+// TestFix_OutputDirIsKeptForClusterReports is the other half of #3733: the
+// warning must be scoped to file-based reports. A cluster report is exactly
+// what --output-dir exists for, so warning there — or clearing the field, which
+// would silently redirect the manifests to stdout — would be a regression.
+func TestFix_OutputDirIsKeptForClusterReports(t *testing.T) {
+	dir := t.TempDir()
+	report := &reporthandlingv2.PostureReport{
+		Metadata: reporthandlingv2.Metadata{
+			ScanMetadata: reporthandlingv2.ScanMetadata{ScanningTarget: reporthandlingv2.Cluster},
+			ContextMetadata: reporthandlingv2.ContextMetadata{
+				ClusterContextMetadata: &reporthandlingv2.ClusterMetadata{ContextName: "dev"},
+			},
+		},
+	}
+	reportPath := writeReportFile(t, dir, report)
+	outputDir := filepath.Join(dir, "fixes")
+
+	readLog := captureLoggerOutput(t)
+
+	fixInfo := &metav1.FixInfo{ReportFile: reportPath, NoConfirm: true, OutputDir: outputDir}
+	ks := &Kubescape{Ctx: context.Background()}
+	require.NoError(t, ks.Fix(fixInfo))
+
+	assert.NotContains(t, readLog(), "--output-dir has no effect",
+		"--output-dir is meaningful for a cluster report and must not be warned about")
+	assert.Equal(t, outputDir, fixInfo.OutputDir, "a cluster report must keep its --output-dir")
 }
