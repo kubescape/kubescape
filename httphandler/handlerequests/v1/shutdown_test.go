@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -20,6 +22,7 @@ import (
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/kubescape/storage/pkg/generated/clientset/versioned/fake"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -104,7 +107,7 @@ func TestShutdown_DrainsAcceptedScansAndRejectsAdmission(t *testing.T) {
 				close(started)
 				<-release // includes time spent persisting inside scanImpl
 			}
-			require.NoError(t, ctx.Err())
+			assert.NoError(t, ctx.Err())
 			executed = append(executed, id)
 			return nil, nil
 		}
@@ -191,8 +194,8 @@ func TestShutdown_AdmissionRace(t *testing.T) {
 			req := &scanRequestParams{scanID: fmt.Sprint(i), ctx: ctx, isUserScan: i%2 == 0}
 			err := h.enqueueScan(req, cancel)
 			if err != nil {
-				require.ErrorIs(t, err, errShuttingDown)
-				require.ErrorIs(t, ctx.Err(), context.Canceled)
+				assert.ErrorIs(t, err, errShuttingDown)
+				assert.ErrorIs(t, ctx.Err(), context.Canceled)
 			}
 		})
 	}
@@ -211,16 +214,26 @@ func TestShutdown_AdmissionRace(t *testing.T) {
 }
 
 func TestShutdown_DisconnectedWaiterDoesNotReleaseScan(t *testing.T) {
-	for _, metrics := range []bool{false, true} {
-		t.Run(fmt.Sprint("metrics=", metrics), func(t *testing.T) {
+	for _, mode := range []string{"scan", "metrics", "keep"} {
+		t.Run(mode, func(t *testing.T) {
+			withTempOutputDirs(t)
+			metrics := mode == "metrics"
 			synctest.Test(t, func(t *testing.T) {
 				started, release := make(chan struct{}), make(chan struct{})
+				var artifacts []string
 				original := scanImpl
 				defer func() { scanImpl = original }()
-				scanImpl = func(ctx context.Context, _ *cautils.ScanInfo, _ []cautils.PolicyIdentifier, _ string, _ bool) (*reporthandlingv2.PostureReport, error) {
+				scanImpl = func(ctx context.Context, _ *cautils.ScanInfo, _ []cautils.PolicyIdentifier, id string, _ bool) (*reporthandlingv2.PostureReport, error) {
+					artifacts = []string{filepath.Join(OutputDir, id), filepath.Join(OutputDir, id+".json")}
+					for _, path := range artifacts {
+						assert.NoError(t, os.WriteFile(path, []byte("partial"), 0600))
+					}
 					close(started)
 					<-release
-					require.NoError(t, ctx.Err())
+					assert.NoError(t, ctx.Err())
+					for _, path := range artifacts {
+						assert.NoError(t, os.WriteFile(path, []byte("complete"), 0600))
+					}
 					return nil, nil
 				}
 				h := NewHTTPHandler(false)
@@ -233,15 +246,27 @@ func TestShutdown_DisconnectedWaiterDoesNotReleaseScan(t *testing.T) {
 					if metrics {
 						h.Metrics(w, httptest.NewRequestWithContext(ctx, http.MethodGet, "/v1/metrics", nil))
 					} else {
-						h.Scan(w, httptest.NewRequestWithContext(ctx, http.MethodPost, "/v1/scan?wait=true", strings.NewReader(`{}`)))
+						h.Scan(w, httptest.NewRequestWithContext(ctx, http.MethodPost, "/v1/scan?wait=true&keep="+fmt.Sprint(mode == "keep"), strings.NewReader(`{}`)))
 					}
 				}()
 				<-started
 				cancel()
 				<-done
 				require.Equal(t, 1, h.state.len())
+				synctest.Wait()
+				for _, path := range artifacts {
+					require.FileExists(t, path, "cleanup must wait for the writer")
+				}
 				close(release)
 				require.NoError(t, h.Shutdown(context.Background(), time.Minute))
+				synctest.Wait()
+				for _, path := range artifacts {
+					if mode == "keep" {
+						require.FileExists(t, path)
+					} else {
+						require.NoFileExists(t, path)
+					}
+				}
 			})
 		})
 	}

@@ -76,6 +76,12 @@ func (handler *HTTPHandler) Metrics(w http.ResponseWriter, r *http.Request) {
 	select {
 	case results = <-scanParams.resp:
 	case <-r.Context().Done():
+		// Wait for the worker to finish writing before removing abandoned results.
+		go func() {
+			<-scanParams.resp
+			removeResultsFile(scanID)
+			os.Remove(resultsFile)
+		}()
 		return
 	}
 	defer removeResultsFile(scanID) // remove json format results file

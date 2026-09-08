@@ -241,6 +241,13 @@ func (handler *HTTPHandler) Scan(w http.ResponseWriter, r *http.Request) {
 		select {
 		case response = <-scanRequestParams.resp:
 		case <-r.Context().Done():
+			if !scanRequestParams.scanQueryParams.KeepResults {
+				// The worker may still be writing results after the caller leaves.
+				go func() {
+					<-scanRequestParams.resp
+					removeResultsFile(scanID)
+				}()
+			}
 			return
 		}
 
