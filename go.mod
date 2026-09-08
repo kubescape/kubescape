@@ -14,7 +14,7 @@ require (
 	github.com/anchore/stereoscope v0.1.22
 	github.com/anchore/syft v1.42.3
 	github.com/anubhav06/copa-grype v1.0.3-alpha.1
-	github.com/armosec/armoapi-go v0.0.757
+	github.com/armosec/armoapi-go v0.0.760
 	github.com/armosec/utils-go v0.0.58
 	github.com/armosec/utils-k8s-go v0.0.35
 	github.com/aws/aws-sdk-go-v2 v1.45.1
