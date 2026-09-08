@@ -221,6 +221,31 @@ func TestDownloadScanPolicies(t *testing.T) {
 				},
 			},
 		},
+		{
+			// Regression test: a ScanAll request appends all frameworks followed by all
+			// controls into the same []PolicyIdentifier (see core/core/scan.go). Before the
+			// fix, downloadScanPolicies used the *first* identifier's Kind for the whole
+			// batch, so with Framework first it tried to download every control identifier
+			// via GetFramework and failed with "framework '<control-id>' not found".
+			name:          "Mixed Framework and Control identifiers",
+			policyHandler: NewPolicyHandler("test-cluster"),
+			policyIdent: []cautils.PolicyIdentifier{
+				{Identifier: "framework-0006-0013", Kind: "Framework"},
+				{Identifier: "control1", Kind: "Control"},
+			},
+			scanInfo:      &cautils.ScanInfo{},
+			expectedError: nil,
+			expectedResult: []reporthandling.Framework{
+				*mocks.MockFramework_0006_0013(),
+				{
+					Controls: []reporthandling.Control{
+						{
+							ControlID: "",
+						},
+					},
+				},
+			},
+		},
 	}
 
 	for _, tc := range testCases {
