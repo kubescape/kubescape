@@ -464,3 +464,85 @@ func TestActionPrint_ControlViewVerboseOmitsRemediationOnPassedAndSkipped(t *tes
 	assert.NotContains(t, out, "spec.hostPID")
 	assert.NotContains(t, out, "spec.hostNetwork")
 }
+
+// --show-evidence was threaded to the printer by #3220 and then never read on
+// the control view: printResources gated the evidence on verboseMode alone, so
+// `kubescape scan -E --view control` produced byte-identical output to a bare
+// scan. The tests below pin the flag's own behaviour, independent of -v.
+
+// TestActionPrint_ControlViewShowEvidenceIncludesPathsWithoutVerbose is the
+// RED->GREEN case: it fails on the old verboseMode-only condition.
+func TestActionPrint_ControlViewShowEvidenceIncludesPathsWithoutVerbose(t *testing.T) {
+	pp, read := newControlViewPrettyPrinter(t, false)
+	pp.showEvidence = true
+	require.NoError(t, pp.ActionPrint(context.Background(), controlViewAssistedRemediationSession(), nil))
+
+	out := read()
+	assert.Contains(t, out, "checkout-api")
+	assert.Contains(t, out, controlViewEnvVarPath+" (current: DB_PASSWORD)")
+}
+
+// TestActionPrint_ControlViewShowEvidenceKeepsPassedResourcesHidden separates
+// the two flags. --verbose widens *which* resources are listed; --show-evidence
+// deepens what is shown about a failed one. -E must not start listing passing
+// resources, which would change the output of every control that has any.
+func TestActionPrint_ControlViewShowEvidenceKeepsPassedResourcesHidden(t *testing.T) {
+	pp, read := newControlViewPrettyPrinter(t, false)
+	pp.showEvidence = true
+	require.NoError(t, pp.ActionPrint(context.Background(), controlViewMixedStatusSession(), nil))
+
+	out := read()
+	assert.Contains(t, out, "failed-deploy")
+	assert.Contains(t, out, controlViewEnvVarPath)
+	assert.NotContains(t, out, "passed-deploy")
+}
+
+// TestActionPrint_ControlViewShowEvidenceDoesNotLeakEnvValue guards the new
+// route into evidence output. -E reaches attachAssistedRemediation without -v
+// now, so the C-0012 plaintext credential must still be redacted on that route.
+func TestActionPrint_ControlViewShowEvidenceDoesNotLeakEnvValue(t *testing.T) {
+	pp, read := newControlViewPrettyPrinter(t, false)
+	pp.showEvidence = true
+	require.NoError(t, pp.ActionPrint(context.Background(), controlViewEnvValueSession(), nil))
+
+	out := read()
+	assert.NotContains(t, out, controlViewEnvSecret)
+	assert.Contains(t, out, controlViewEnvValuePath+" (current: "+redactedValue+")")
+}
+
+// TestActionPrint_ControlViewShowSecretsWithoutVerbose confirms --show-secrets
+// still opts back in on the -E route, matching its behaviour under -v.
+func TestActionPrint_ControlViewShowSecretsWithoutVerbose(t *testing.T) {
+	pp, read := newControlViewPrettyPrinter(t, false)
+	pp.showEvidence = true
+	pp.showSecrets = true
+	require.NoError(t, pp.ActionPrint(context.Background(), controlViewEnvValueSession(), nil))
+
+	out := read()
+	assert.Contains(t, out, controlViewEnvValuePath+" (current: "+controlViewEnvSecret+")")
+}
+
+// TestActionPrint_ResourceViewShowEvidenceRendersTableWithoutVerbose covers the
+// second unread site. resourceTable is the one place that already consulted
+// showEvidence, but it sat behind --verbose, so the evidence column it builds
+// was unreachable unless -v was passed too.
+func TestActionPrint_ResourceViewShowEvidenceRendersTableWithoutVerbose(t *testing.T) {
+	pp, read := newControlViewPrettyPrinter(t, false)
+	pp.viewType = cautils.ResourceViewType
+	pp.showEvidence = true
+	require.NoError(t, pp.ActionPrint(context.Background(), controlViewAssistedRemediationSession(), nil))
+
+	out := read()
+	assert.Contains(t, out, "checkout-api")
+	assert.Contains(t, out, controlViewEnvVarPath)
+}
+
+// TestActionPrint_ResourceViewDefaultStillPrintsNoTable keeps the default
+// unchanged: neither -v nor -E means no resource table, exactly as before.
+func TestActionPrint_ResourceViewDefaultStillPrintsNoTable(t *testing.T) {
+	pp, read := newControlViewPrettyPrinter(t, false)
+	pp.viewType = cautils.ResourceViewType
+	require.NoError(t, pp.ActionPrint(context.Background(), controlViewAssistedRemediationSession(), nil))
+
+	assert.NotContains(t, read(), "checkout-api")
+}
