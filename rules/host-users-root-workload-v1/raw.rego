@@ -14,9 +14,11 @@ import rego.v1
 # container.
 #
 # Workloads are exempt when user namespaces cannot apply: pods using
-# hostPID, hostNetwork, hostIPC, or a privileged container (hostUsers:
-# false is incompatible with all of these), and Windows pods (the field
-# is Linux-only).
+# hostPID, hostNetwork, or hostIPC (the host namespaces Kubernetes
+# declares incompatible with user namespaces — a privileged container is
+# NOT incompatible: KEP-127 explicitly targets confining privileged
+# processes and capabilities inside the pod user namespace), and Windows
+# pods (the field is Linux-only).
 
 deny contains msga if {
 	wl := input[_]
@@ -72,7 +74,7 @@ workloadInHostUserNamespace(podSpec) if {
 # false cannot apply, so the workload must not be flagged.
 workloadExemptFromUserNamespace(wl) if {
 	podSpec := workloadPodSpec(wl)
-	usesHostNamespaceOrPrivileged(podSpec)
+	usesHostNamespace(podSpec)
 }
 
 workloadExemptFromUserNamespace(wl) if {
@@ -80,32 +82,24 @@ workloadExemptFromUserNamespace(wl) if {
 	podSpec.os.name == "windows"
 }
 
-usesHostNamespaceOrPrivileged(podSpec) if {
+# usesHostNamespace covers the host namespaces Kubernetes itself declares
+# incompatible with user namespaces (the K8s API rejects hostUsers: false
+# with any of them). A privileged container is deliberately absent: it is
+# not incompatible — KEP-127's goal is to confine privileged processes
+# and capabilities inside the pod user namespace, so a privileged root
+# container without hostUsers: false is one of the highest-risk cases
+# this rule exists to flag.
+usesHostNamespace(podSpec) if {
 	podSpec.hostPID == true
 }
 
-usesHostNamespaceOrPrivileged(podSpec) if {
+usesHostNamespace(podSpec) if {
 	podSpec.hostNetwork == true
 }
 
-usesHostNamespaceOrPrivileged(podSpec) if {
+usesHostNamespace(podSpec) if {
 	podSpec.hostIPC == true
 }
-
-usesHostNamespaceOrPrivileged(podSpec) if {
-	container := allContainers(podSpec)[_]
-	container.securityContext.privileged == true
-}
-
-# allContainers lists every container slice whose members can run as
-# root: containers, initContainers and ephemeralContainers.
-allContainers(podSpec) := array.concat(
-	object.get(podSpec, "containers", []),
-	array.concat(
-		object.get(podSpec, "initContainers", []),
-		object.get(podSpec, "ephemeralContainers", []),
-	),
-)
 
 # allContainerEntries pairs each container with its index-qualified path
 # fragment (relative to the pod spec), keeping the container slices

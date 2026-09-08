@@ -1,0 +1,20 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: privileged-agent
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: privileged-agent
+  template:
+    metadata:
+      labels:
+        app: privileged-agent
+    spec:
+      containers:
+      - name: agent
+        image: registry.example.com/privileged-agent:1.0.0
+        securityContext:
+          privileged: true
