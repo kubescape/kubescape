@@ -1,0 +1,24 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payments-api
+  namespace: default
+  labels:
+    app: payments-api
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: payments-api
+  template:
+    metadata:
+      labels:
+        app: payments-api
+    spec:
+      hostUsers: false
+      containers:
+      - name: api
+        image: registry.example.com/payments-api:1.4.2
+      volumes:
+      - name: cache
+        emptyDir: {}
