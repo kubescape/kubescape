@@ -26,6 +26,8 @@ const (
 
 	nonInteractiveWarning = "stdin is not interactive; treating the fix confirmation as declined and applying no changes (pass --no-confirm to apply without a prompt)"
 	stdinClosedWarning    = "stdin was closed before a confirmation was given; treating the fix confirmation as declined and applying no changes (pass --no-confirm to apply without a prompt)"
+
+	outputDirIgnoredWarning = "--output-dir has no effect when fixing manifest files; it applies to cluster scan reports. The files recorded in the report are fixed in place"
 )
 
 // isTerminal and isCygwinTerminal are vars (not direct isatty calls) so tests
@@ -43,6 +45,19 @@ func (ks *Kubescape) Fix(fixInfo *metav1.FixInfo) error {
 	handler, err := fixhandler.NewFixHandler(fixInfo)
 	if err != nil {
 		return err
+	}
+
+	// --output-dir only means something for a cluster report, whose fixes are
+	// rendered and emitted rather than applied. A file-based report is fixed in
+	// place, so passing it used to be accepted in silence: an empty directory,
+	// rewritten manifests, and nothing saying the flag did nothing (#3733).
+	// Which kind of report this is only becomes knowable once the report is
+	// parsed, which is why the check cannot live in the flag-parsing layer.
+	if fixInfo.OutputDir != "" && !handler.IsClusterReport() {
+		logger.L().Ctx(ks.Context()).Warning(outputDirIgnoredWarning)
+		// Cleared so nothing downstream can act on a value the user has just
+		// been told is inert.
+		fixInfo.OutputDir = ""
 	}
 
 	resourcesToFix := handler.PrepareResourcesToFix(ks.Context())

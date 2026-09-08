@@ -826,6 +826,9 @@ kubectl apply -f ./fixes
 > The prompt does not apply to cluster scans: that path edits nothing in place,
 > so there is nothing to confirm. With `--output-dir`, a non-empty directory is
 > refused unless you pass `--no-confirm`.
+>
+> `--output-dir` belongs to that cluster path alone. Passing it when fixing
+> manifest files warns and is ignored — those files are always fixed in place.
 
 ---
 
