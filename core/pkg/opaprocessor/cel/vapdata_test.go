@@ -1,7 +1,10 @@
 package cel
 
 import (
+	"crypto/sha256"
+	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -185,4 +188,113 @@ func TestBundleParamKindsAreResolvable(t *testing.T) {
 		assert.Containsf(t, refused, id,
 			"knownUnresolvableParamKinds lists control %s but its paramKind now resolves (or it left the bundle); remove the entry", id)
 	}
+}
+
+// makefilePath is the repo Makefile, relative to this package directory (the
+// tests run from there, same as vapdataDir).
+const makefilePath = "../../../../Makefile"
+
+// celVapDigestsVar is the Makefile variable holding one name=sha256 pair per
+// vendored asset.
+const celVapDigestsVar = "CEL_VAP_DIGESTS"
+
+var sha256Hex = regexp.MustCompile(`^[0-9a-f]{64}$`)
+
+// pinnedDigests parses the CEL_VAP_DIGESTS block out of the Makefile. The block
+// is a backslash-continued list, so parsing follows the continuations rather
+// than assuming a fixed number of lines.
+func pinnedDigests(t *testing.T) map[string]string {
+	t.Helper()
+
+	data, err := os.ReadFile(makefilePath)
+	require.NoError(t, err, "the Makefile must be readable from the package directory")
+
+	lines := strings.Split(string(data), "\n")
+	start := slices.IndexFunc(lines, func(l string) bool {
+		return strings.HasPrefix(l, celVapDigestsVar)
+	})
+	require.GreaterOrEqual(t, start, 0, "the Makefile must define %s", celVapDigestsVar)
+
+	digests := map[string]string{}
+	for i := start; i < len(lines); i++ {
+		line := lines[i]
+		// The declaration line carries the assignment; drop it so only the
+		// name=digest pairs are parsed.
+		if i == start {
+			_, line, _ = strings.Cut(line, ":=")
+		}
+		line = strings.TrimSpace(line)
+		more := strings.HasSuffix(line, `\`)
+		line = strings.TrimSpace(strings.TrimSuffix(line, `\`))
+
+		if name, digest, ok := strings.Cut(line, "="); ok {
+			require.Truef(t, sha256Hex.MatchString(digest),
+				"%s pins %s to %q, which is not a SHA256 digest", celVapDigestsVar, name, digest)
+			// Rejected rather than overwritten: keeping the last pin would leave
+			// the earlier one unchecked here while sync-vap, which walks every
+			// pair, still fails on it. A duplicate is most likely two version
+			// bumps merged together, which is one of the cases this guard exists
+			// to catch.
+			require.NotContainsf(t, digests, name, "%s pins %s more than once", celVapDigestsVar, name)
+			digests[name] = digest
+		}
+		if !more {
+			break
+		}
+	}
+
+	require.NotEmpty(t, digests, "%s must pin at least one file", celVapDigestsVar)
+	return digests
+}
+
+// TestVapdataMatchesPinnedDigests checks the bundle baked into the binary is the
+// release the Makefile pins.
+//
+// sync-vap verifies what it DOWNLOADS, which leaves the vendored copy itself
+// unguarded: a hand-edited policy, a bad merge, or a CEL_LIBRARY_VERSION bump
+// whose digests were pasted without running `make sync-vap` all produce a tree
+// where the pin and the embedded bundle disagree, and every other test still
+// passes. Since the engine enforces these policies as a security scanner, an
+// unnoticed edit to them is exactly the thing the digests exist to prevent.
+//
+// The hashes come from the embedded FS rather than from disk because that is
+// what actually ships.
+func TestVapdataMatchesPinnedDigests(t *testing.T) {
+	pinned := pinnedDigests(t)
+
+	entries, err := vapdataFS.ReadDir(vapdataDir)
+	require.NoError(t, err, "the vendored bundle must be embedded")
+
+	// README.md is vendored alongside the assets and is ours, not the release's,
+	// so only the YAML the loader reads is pinned.
+	embedded := map[string]string{}
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".yaml") {
+			continue
+		}
+		content, err := vapdataFS.ReadFile(path.Join(vapdataDir, entry.Name()))
+		require.NoError(t, err)
+		embedded[entry.Name()] = fmt.Sprintf("%x", sha256.Sum256(content))
+	}
+
+	require.Equal(t, sortedNames(pinned), sortedNames(embedded),
+		"%s and the vendored vapdata/*.yaml must cover the same files: a new release asset needs a digest, "+
+			"and a dropped one needs its digest removed", celVapDigestsVar)
+
+	for name, want := range pinned {
+		assert.Equalf(t, want, embedded[name],
+			"%s/%s does not match the SHA256 pinned in the Makefile. Either the vendored copy was edited by hand, "+
+				"or %s was bumped without running `make sync-vap`", vapdataDir, name, celVapDigestsVar)
+	}
+}
+
+// sortedNames returns a map's keys in a stable order, so a set mismatch
+// reports as a readable diff of file names.
+func sortedNames(m map[string]string) []string {
+	names := make([]string, 0, len(m))
+	for name := range m {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+	return names
 }
