@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/gorilla/schema"
@@ -43,7 +44,7 @@ type HTTPHandler struct {
 	offline             bool
 	state               *serverState
 	scanRequestChan     chan *scanRequestParams
-	cancelWatch         context.CancelFunc
+	workerDone          chan struct{}
 	maxRequestBodyBytes int64
 }
 
@@ -53,24 +54,77 @@ func NewHTTPHandler(offline bool) *HTTPHandler {
 	return newHTTPHandler(offline, queueCapacity, maxRequestBody)
 }
 
-// Shutdown stops the background scan watcher goroutine. It should be called
-// when the HTTP handler is no longer needed (e.g. on server shutdown).
-func (handler *HTTPHandler) Shutdown() {
-	if handler.cancelWatch != nil {
-		handler.cancelWatch()
+// BeginShutdown rejects new scans and closes the queue. Accepted scans continue
+// to drain. It is safe to call more than once, concurrently with admission.
+func (handler *HTTPHandler) BeginShutdown() {
+	handler.state.beginShutdown(func() { close(handler.scanRequestChan) })
+}
+
+// Shutdown drains accepted scans for drainPeriod, then cancels outstanding work.
+// A nil result guarantees the worker exited, including executeScan's persistence
+// path. If ctx expires first, an error is returned: work may still be running.
+func (handler *HTTPHandler) Shutdown(ctx context.Context, drainPeriod time.Duration) error {
+	handler.BeginShutdown()
+	timer := time.NewTimer(drainPeriod)
+	defer timer.Stop()
+	select {
+	case <-handler.workerDone:
+		return nil
+	case <-timer.C:
+	case <-ctx.Done():
+	}
+	handler.state.cancelAll()
+	select {
+	case <-handler.workerDone:
+		return nil
+	case <-ctx.Done():
+		// Prefer an already completed join when completion races with the deadline.
+		select {
+		case <-handler.workerDone:
+			return nil
+		default:
+			return fmt.Errorf("scan worker shutdown: %w", ctx.Err())
+		}
 	}
 }
 
+// enqueueScan is the only production path into the queue, for Scan and Metrics.
+func (handler *HTTPHandler) enqueueScan(req *scanRequestParams, cancel context.CancelFunc) error {
+	err := handler.state.admitScan(req.scanID, cancel, req.isUserScan, func() bool {
+		select {
+		case handler.scanRequestChan <- req:
+			return true
+		default:
+			return false
+		}
+	})
+	if err != nil {
+		cancel()
+	}
+	return err
+}
+
+func (handler *HTTPHandler) writeAdmissionError(w http.ResponseWriter, err error) {
+	status := http.StatusTooManyRequests
+	if errors.Is(err, errShuttingDown) {
+		status = http.StatusServiceUnavailable
+	}
+	w.Header().Set("Retry-After", "1")
+	handler.writeErrorWithStatus(w, err, "", status)
+}
+
 func newHTTPHandler(offline bool, queueCapacity int, maxRequestBodyBytes int64) *HTTPHandler {
-	ctx, cancel := context.WithCancel(context.Background())
 	handler := &HTTPHandler{
 		offline:             offline,
 		state:               newServerState(),
 		scanRequestChan:     make(chan *scanRequestParams, queueCapacity),
-		cancelWatch:         cancel,
+		workerDone:          make(chan struct{}),
 		maxRequestBodyBytes: maxRequestBodyBytes,
 	}
-	go handler.watchForScan(ctx)
+	go func() {
+		defer close(handler.workerDone)
+		handler.watchForScan()
+	}()
 	return handler
 }
 
@@ -171,24 +225,8 @@ func (handler *HTTPHandler) Scan(w http.ResponseWriter, r *http.Request) {
 		scanRequestParams.scanInfo.UseArtifactsFrom = getter.DefaultLocalStore
 	}
 
-	// Mark busy, enqueue, and record the accepted user scan as one atomic
-	// admission step. Status and the offline Results fallback resolve "latest"
-	// through latestUserScanID, so it has to be written in the same critical
-	// section that decides acceptance -- otherwise two concurrent requests can
-	// be accepted in one order and recorded in the other.
-	admitted := handler.state.admitUserScan(scanID, cancel, func() bool {
-		select {
-		case handler.scanRequestChan <- scanRequestParams:
-			return true
-		default:
-			return false
-		}
-	})
-	if !admitted {
-		w.Header().Set("Retry-After", "1")
-		handler.writeErrorWithStatus(w,
-			fmt.Errorf("scan queue is full; retry the request later"),
-			"", http.StatusTooManyRequests)
+	if err := handler.enqueueScan(scanRequestParams, cancel); err != nil {
+		handler.writeAdmissionError(w, err)
 		return
 	}
 	logger.L().Info("requesting scan", helpers.String("scanID", scanID), helpers.String("api", "v1/scan"))
@@ -200,7 +238,11 @@ func (handler *HTTPHandler) Scan(w http.ResponseWriter, r *http.Request) {
 	}
 	if scanRequestParams.resp != nil {
 		// wait for scan to complete
-		response = <-scanRequestParams.resp
+		select {
+		case response = <-scanRequestParams.resp:
+		case <-r.Context().Done():
+			return
+		}
 
 		if response.Type == utilsapisv1.ResultsV1ScanResponseType {
 			// populate the response with the report before it is deleted below

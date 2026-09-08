@@ -2,8 +2,14 @@ package v1
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
+)
+
+var (
+	errShuttingDown  = errors.New("server is shutting down")
+	errScanQueueFull = errors.New("scan queue is full; retry the request later")
 )
 
 type scanEntry struct {
@@ -12,6 +18,7 @@ type scanEntry struct {
 }
 
 type serverState struct {
+	shuttingDown      bool
 	statusID          map[string]*scanEntry
 	latestID          string
 	latestUserScanID  string
@@ -37,35 +44,47 @@ func (s *serverState) setBusy(id string, cancel context.CancelFunc) {
 	s.mtx.Unlock()
 }
 
-// admitUserScan runs the whole admission step for a user scan under a single
-// hold of the state mutex: it marks id busy, attempts the enqueue, and -- only
-// if that succeeded -- records id as the latest accepted user scan. It returns
-// false when enqueue failed, having rolled the busy entry back.
-//
-// enqueue must not block; Scan passes the non-blocking channel send. Holding
-// the mutex across it is what keeps acceptance order and latestUserScanID order
-// identical. With the enqueue and the bookkeeping in separate critical
-// sections, two concurrent Scan handlers can enqueue as A-then-B but run their
-// bookkeeping as B-then-A, leaving latestUserScanID on the older scan -- so
-// Status and the offline Results fallback resolve "latest" to a stale scan.
-//
-// The rollback deliberately leaves latestID pointing at the rejected scan,
-// matching what setBusy followed by setNotBusy did before. runningUserScanID
-// needs no rollback: only watchForScan sets it, and it never saw this id.
-func (s *serverState) admitUserScan(id string, cancel context.CancelFunc, enqueue func() bool) bool {
+// admitScan serializes registration, enqueueing and latest-user bookkeeping
+// with shutdown. enqueue must not block and is never called after shutdown.
+// Keeping enqueue and latestUserScanID under one lock preserves acceptance
+// order. A full queue rolls back busy state but retains the historical latestID
+// behavior; only an accepted user scan advances latestUserScanID.
+func (s *serverState) admitScan(id string, cancel context.CancelFunc, userScan bool, enqueue func() bool) error {
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
-
+	if s.shuttingDown {
+		return errShuttingDown
+	}
 	s.statusID[id] = &scanEntry{cancel: cancel}
 	s.latestID = id
-
 	if !enqueue() {
 		delete(s.statusID, id)
-		return false
+		return errScanQueueFull
 	}
+	if userScan {
+		s.latestUserScanID = id
+	}
+	return nil
+}
 
-	s.latestUserScanID = id
-	return true
+// beginShutdown closes admission and the queue under the same lock as all
+// producers. No sender can race with closeQueue.
+func (s *serverState) beginShutdown(closeQueue func()) {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	if !s.shuttingDown {
+		s.shuttingDown = true
+		closeQueue()
+	}
+}
+
+// cancelAll retains busy entries until the worker actually finishes them.
+func (s *serverState) cancelAll() {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	for id := range s.statusID {
+		s.releaseLocked(id)
+	}
 }
 
 func (s *serverState) setNotBusy(id string) {
@@ -90,7 +109,7 @@ func (s *serverState) getLatestID() string {
 // still resolve "latest" after the scan finishes, and Metrics never writes it,
 // which is what keeps a /v1/metrics scrape from hijacking those two endpoints.
 //
-// Request handling must not call this directly -- admitUserScan writes the
+// Request handling must not call this directly -- admitScan writes the
 // field as part of the admission critical section, and updating it separately
 // is exactly the race that serialization exists to prevent. It remains for
 // tests that need to seed an already-accepted user scan.
