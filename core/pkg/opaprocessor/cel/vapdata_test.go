@@ -230,6 +230,12 @@ func pinnedDigests(t *testing.T) map[string]string {
 		if name, digest, ok := strings.Cut(line, "="); ok {
 			require.Truef(t, sha256Hex.MatchString(digest),
 				"%s pins %s to %q, which is not a SHA256 digest", celVapDigestsVar, name, digest)
+			// Rejected rather than overwritten: keeping the last pin would leave
+			// the earlier one unchecked here while sync-vap, which walks every
+			// pair, still fails on it. A duplicate is most likely two version
+			// bumps merged together, which is one of the cases this guard exists
+			// to catch.
+			require.NotContainsf(t, digests, name, "%s pins %s more than once", celVapDigestsVar, name)
 			digests[name] = digest
 		}
 		if !more {
@@ -282,6 +288,8 @@ func TestVapdataMatchesPinnedDigests(t *testing.T) {
 	}
 }
 
+// sortedNames returns a map's keys in a stable order, so a set mismatch
+// reports as a readable diff of file names.
 func sortedNames(m map[string]string) []string {
 	names := make([]string, 0, len(m))
 	for name := range m {
