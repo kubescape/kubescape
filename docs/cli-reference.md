@@ -163,7 +163,11 @@ The file holds one policy per failed control, listing the resources that failed
 it by `kind`, `namespace` and `name`, in the same shape as the samples under
 [examples/exceptions](../examples/exceptions). Designators carry no `cluster`
 attribute, so the same file applies wherever those workloads run. Policies use
-the `alertOnly` action.
+the `disable` action, which suppresses the baseline findings as passed with
+exceptions. For evaluated findings, use `alertOnly` in a hand-written policy
+when a finding should be acknowledged but remain failed and continue
+contributing to the compliance score. Manual-review controls have separate
+status handling.
 
 It is a normal output format, so it composes with the others and honours
 `--output`, writing `scan-result.json` and `scan-result.exceptions.json`:

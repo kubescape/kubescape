@@ -1,6 +1,6 @@
 # Kubescape Exceptions
 
-Kubescape Exceptions allow you to exclude specific resources from affecting your security risk score. This is useful when certain resources intentionally deviate from security best practices and you want to acknowledge this without impacting your overall compliance metrics.
+Kubescape Exceptions let you suppress or acknowledge findings for specific resources. For evaluated findings, use `disable` when an accepted finding should pass with exceptions and stop affecting the compliance score. Use `alertOnly` when the finding should be annotated as acknowledged but remain failed and continue affecting the score. Manual-review controls have separate status handling.
 
 ## Table of Contents
 
@@ -30,7 +30,7 @@ An exception file is a JSON array containing one or more exception objects:
     {
         "name": "exception-name",
         "policyType": "postureExceptionPolicy",
-        "actions": ["alertOnly"],
+        "actions": ["disable"],
         "resources": [...],
         "posturePolicies": [...]
     }
@@ -43,9 +43,9 @@ An exception file is a JSON array containing one or more exception objects:
 |-------|-------------|
 | `name` | Unique name for this exception |
 | `policyType` | Must be `"postureExceptionPolicy"` |
-| `actions` | List of actions. Currently only `"alertOnly"` is supported |
+| `actions` | List of actions. `"disable"` suppresses a finding; `"alertOnly"` acknowledges it but keeps it failed |
 | `resources` | List of resources to apply this exception to |
-| `posturePolicies` | List of policies/controls to exclude |
+| `posturePolicies` | List of policies/controls targeted by the exception |
 
 ### Resource Attributes
 
@@ -81,7 +81,7 @@ Find framework names in the [frameworks directory](https://github.com/kubescape/
 kubescape scan --exceptions /path/to/exceptions.json
 ```
 
-Resources matching exceptions will be marked as `excluded` rather than `failed` in the results.
+For evaluated findings, resources matching `disable` exceptions are reported as passed with exceptions rather than failed. Resources matching `alertOnly` exceptions remain failed with exceptions and continue contributing to the compliance score. Manual-review controls have separate status handling.
 
 ### Logic Rules
 
@@ -123,7 +123,7 @@ Exclude control [C-0048 (HostPath mount)](https://kubescape.io/docs/controls/c-0
     {
         "name": "exclude-hostpath-control",
         "policyType": "postureExceptionPolicy",
-        "actions": ["alertOnly"],
+        "actions": ["disable"],
         "resources": [
             {
                 "designatorType": "Attributes",
@@ -150,7 +150,7 @@ Exclude all resources in the `kube-system` namespace from all frameworks:
     {
         "name": "exclude-kube-system",
         "policyType": "postureExceptionPolicy",
-        "actions": ["alertOnly"],
+        "actions": ["disable"],
         "resources": [
             {
                 "designatorType": "Attributes",
@@ -175,7 +175,7 @@ Exclude all resources in the `kube-system` namespace from all frameworks:
     {
         "name": "exclude-deployments-in-default",
         "policyType": "postureExceptionPolicy",
-        "actions": ["alertOnly"],
+        "actions": ["disable"],
         "resources": [
             {
                 "designatorType": "Attributes",
@@ -203,7 +203,7 @@ Exclude resources with label `environment=dev` from NSA and MITRE frameworks:
     {
         "name": "exclude-dev-environment",
         "policyType": "postureExceptionPolicy",
-        "actions": ["alertOnly"],
+        "actions": ["disable"],
         "resources": [
             {
                 "designatorType": "Attributes",
@@ -233,7 +233,7 @@ Exclude nginx resources in a minikube cluster:
     {
         "name": "exclude-nginx-minikube",
         "policyType": "postureExceptionPolicy",
-        "actions": ["alertOnly"],
+        "actions": ["disable"],
         "resources": [
             {
                 "designatorType": "Attributes",
@@ -261,7 +261,7 @@ You can combine multiple exceptions in a single file:
     {
         "name": "exclude-kube-namespaces",
         "policyType": "postureExceptionPolicy",
-        "actions": ["alertOnly"],
+        "actions": ["disable"],
         "resources": [
             {
                 "designatorType": "Attributes",
@@ -285,7 +285,7 @@ You can combine multiple exceptions in a single file:
     {
         "name": "exclude-privileged-control-for-monitoring",
         "policyType": "postureExceptionPolicy",
-        "actions": ["alertOnly"],
+        "actions": ["disable"],
         "resources": [
             {
                 "designatorType": "Attributes",
@@ -314,7 +314,7 @@ The example below scopes the exception narrowly: it suppresses only C-0041 (`hos
     {
         "name": "exclude-ot-sector-host-network",
         "policyType": "postureExceptionPolicy",
-        "actions": ["alertOnly"],
+        "actions": ["disable"],
         "resources": [
             {
                 "designatorType": "Attributes",

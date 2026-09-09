@@ -206,7 +206,11 @@ kubescape scan https://github.com/kubescape/kubescape
 kubescape scan --exceptions examples/exceptions/exclude-kube-namespaces.json
 ```
 
-Objects with exceptions will be presented as `exclude` and not `fail`.
+Objects matched by a `disable` exception are presented as passed with
+exceptions instead of failed. For evaluated findings, an `alertOnly` exception
+acknowledges a finding, but the object remains failed and continues
+contributing to the compliance score. Manual-review controls have separate
+status handling.
 
 [See more examples about exceptions.](../examples/exceptions/README.md)
 

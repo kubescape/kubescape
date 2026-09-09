@@ -16,11 +16,16 @@ import (
 	"github.com/anchore/grype/grype/match"
 	grypepkg "github.com/anchore/grype/grype/pkg"
 	"github.com/anchore/grype/grype/vulnerability"
+	"github.com/armosec/armoapi-go/armotypes"
+	"github.com/armosec/armoapi-go/identifiers"
+	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
+	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	helpersv1 "github.com/kubescape/opa-utils/reporthandling/helpers/v1"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
+	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -123,6 +128,90 @@ func TestTestSuites(t *testing.T) {
 	assert.Equal(t, listTestsSuite(results), junitTestSuites.Suites)
 	assert.Equal(t, results.Report.SummaryDetails.NumberOfControls().All(), junitTestSuites.Tests)
 	assert.Equal(t, "Kubescape Scanning", junitTestSuites.Name)
+}
+
+func TestJunitExceptionActionsPreserveFailureSemantics(t *testing.T) {
+	type finding struct {
+		resourceID  string
+		controlID   string
+		controlName string
+		action      *armotypes.PostureExceptionPolicyActions
+	}
+
+	disable := armotypes.Disable
+	alertOnly := armotypes.AlertOnly
+	findings := []finding{
+		{resourceID: "disabled", controlID: "C-DISABLE", controlName: "Disabled finding", action: &disable},
+		{resourceID: "acknowledged", controlID: "C-ALERT", controlName: "Acknowledged finding", action: &alertOnly},
+		{resourceID: "unrelated", controlID: "C-OTHER", controlName: "Unrelated finding"},
+	}
+
+	session := &cautils.OPASessionObj{
+		Report: &reporthandlingv2.PostureReport{
+			SummaryDetails: reportsummary.SummaryDetails{Controls: reportsummary.ControlSummaries{}},
+		},
+		AllResources: map[string]workloadinterface.IMetadata{},
+	}
+
+	for _, finding := range findings {
+		workload := exceptionsWorkload(t, "Pod", "default", finding.resourceID)
+		result := resourcesresults.Result{
+			ResourceID: finding.resourceID,
+			AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+				{
+					ControlID: finding.controlID,
+					Name:      finding.controlName,
+					Status:    apis.StatusInfo{InnerStatus: apis.StatusFailed},
+					ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{
+						{Name: "failed-rule", Status: apis.StatusFailed},
+					},
+				},
+			},
+		}
+
+		if finding.action != nil {
+			policy := armotypes.PostureExceptionPolicy{
+				PortalBase: armotypes.PortalBase{Name: "exception-" + finding.resourceID},
+				Actions:    []armotypes.PostureExceptionPolicyActions{*finding.action},
+				Resources: []identifiers.PortalDesignator{
+					{
+						DesignatorType: identifiers.DesignatorAttributes,
+						Attributes: map[string]string{
+							identifiers.AttributeKind:      "Pod",
+							identifiers.AttributeNamespace: "default",
+							identifiers.AttributeName:      finding.resourceID,
+						},
+					},
+				},
+				PosturePolicies: []armotypes.PosturePolicy{{ControlID: finding.controlID}},
+			}
+			result.SetExceptions(workload, []armotypes.PostureExceptionPolicy{policy}, "", map[string]reporthandling.Control{finding.controlID: {}})
+		}
+
+		session.AllResources[finding.resourceID] = workload
+		session.Report.Results = append(session.Report.Results, result)
+		session.Report.SummaryDetails.Controls[finding.controlID] = reportsummary.ControlSummary{
+			ControlID: finding.controlID,
+			Name:      finding.controlName,
+		}
+	}
+
+	session.Report.InitializeSummary()
+	suites := testsSuites(session)
+	require.Len(t, suites.Suites, 1)
+	assert.Equal(t, 3, suites.Suites[0].Tests)
+	assert.Equal(t, 2, suites.Suites[0].Failures)
+
+	testCases := map[string]JUnitTestCase{}
+	for _, testCase := range suites.Suites[0].TestCases {
+		testCases[testCase.Name] = testCase
+	}
+	require.Contains(t, testCases, "Disabled finding")
+	require.Contains(t, testCases, "Acknowledged finding")
+	require.Contains(t, testCases, "Unrelated finding")
+	assert.Nil(t, testCases["Disabled finding"].Failure, "disable must remove the JUnit failure")
+	assert.NotNil(t, testCases["Acknowledged finding"].Failure, "alertOnly must remain a JUnit failure")
+	assert.NotNil(t, testCases["Unrelated finding"].Failure, "unrelated findings must remain JUnit failures")
 }
 
 func TestJunitActionPrintCombinedScanIncludesPostureAndImages(t *testing.T) {
