@@ -371,6 +371,72 @@ func TestActionPrint_Csv_WithPaths(t *testing.T) {
 	assert.Equal(t, "manifests/deployment.yaml", foundRow[12], "Source Path column uses RelativePath")
 }
 
+// TestActionPrint_Csv_MissingAllResourcesEntryFailsClosed is a regression
+// test: when a resource's ResourcesResult entry has no corresponding
+// AllResources entry (a partial/degraded collection, or ordering the
+// printer has no control over), resKind in ActionPrint stays "". Before the
+// kind == "" fail-closed check in csvControlPaths, this resource's fix
+// values were written to the CSV unredacted regardless of --show-secrets,
+// since the Secret-kind check in isSensitivePath never got a chance to
+// fire.
+func TestActionPrint_Csv_MissingAllResourcesEntryFailsClosed(t *testing.T) {
+	const missingResourceID = "v1/Secret/default/orphaned"
+	session := cautils.NewOPASessionObjMock()
+	session.ResourcesResult[missingResourceID] = resourcesresults.Result{
+		ResourceID: missingResourceID,
+		AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+			{
+				ControlID: "C-0012",
+				Name:      "Credentials in env var",
+				Status:    apis.StatusInfo{InnerStatus: apis.StatusFailed},
+				ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{
+					{
+						Paths: []armotypes.PosturePaths{
+							{FixPath: armotypes.FixPath{Path: "data.password", Value: "s3cr3t-plaintext-password"}},
+						},
+					},
+				},
+			},
+		},
+	}
+	// Deliberately no session.AllResources[missingResourceID] entry.
+	session.Report = &reporthandlingv2.PostureReport{
+		SummaryDetails: reportsummary.SummaryDetails{
+			Controls: reportsummary.ControlSummaries{
+				"C-0012": reportsummary.ControlSummary{ControlID: "C-0012", Name: "Credentials in env var", ScoreFactor: 8.0},
+			},
+		},
+	}
+
+	tmpCsv, err := os.CreateTemp("", "csv-missing-resource-*.csv")
+	require.NoError(t, err)
+	defer os.Remove(tmpCsv.Name())
+
+	cp := NewCsvPrinter(false)
+	cp.writer = tmpCsv
+	require.NoError(t, cp.ActionPrint(context.TODO(), session, nil))
+	require.NoError(t, cp.CloseWriter())
+
+	f, err := os.Open(tmpCsv.Name())
+	require.NoError(t, err)
+	defer f.Close()
+
+	records, err := csv.NewReader(f).ReadAll()
+	require.NoError(t, err)
+
+	var foundRow []string
+	for _, row := range records[1:] {
+		if row[1] == "C-0012" {
+			foundRow = row
+			break
+		}
+	}
+	require.NotNil(t, foundRow, "should find the C-0012 row even though the resource is unresolved")
+	assert.Empty(t, foundRow[5], "Resource Kind column is empty: the AllResources lookup missed")
+	assert.NotContains(t, foundRow[9], "s3cr3t-plaintext-password", "Fix Paths column must not leak the value when kind is unresolved")
+	assert.Contains(t, foundRow[9], "[redacted]", "Fix Paths column must fail closed to redacted")
+}
+
 func TestActionPrint_Csv_NilSession(t *testing.T) {
 	cp := NewCsvPrinter(false)
 	cp.writer = os.Stdout
@@ -410,6 +476,7 @@ func TestCsvControlPaths(t *testing.T) {
 				},
 			}),
 			controlID:  "C-0057",
+			kind:       "Deployment",
 			wantFailed: "spec.containers[0].securityContext.privileged",
 			wantFix:    "spec.containers[0].securityContext.privileged=false",
 		},
@@ -437,6 +504,7 @@ func TestCsvControlPaths(t *testing.T) {
 				},
 			}),
 			controlID:  "C-0057",
+			kind:       "Deployment",
 			wantFailed: "",
 			wantFix:    "spec.hostNetwork=false",
 		},
@@ -519,6 +587,28 @@ func TestCsvControlPaths(t *testing.T) {
 			kind:       "Secret",
 			wantFailed: "",
 			wantFix:    "data.password=[redacted]",
+		},
+		{
+			// Regression: an unresolved kind ("" -- the caller's
+			// AllResources lookup missed) must redact regardless of
+			// whether the field name itself looks credential-shaped.
+			// isSensitivePath("", "data.customKey") is false on its own --
+			// the Secret.data/stringData check requires kind == "Secret" to
+			// fire, and "customKey" matches none of the generic
+			// secretFieldPatterns -- so without the explicit kind == ""
+			// fail-closed check, this exact case would leak.
+			name: "unresolved kind fails closed even for a non-pattern-matching field name",
+			result: makeResult("C-0012", []resourcesresults.ResourceAssociatedRule{
+				{
+					Paths: []armotypes.PosturePaths{
+						{FixPath: armotypes.FixPath{Path: "data.customKey", Value: "s3cr3t-plaintext-value"}},
+					},
+				},
+			}),
+			controlID:  "C-0012",
+			kind:       "",
+			wantFailed: "",
+			wantFix:    "data.customKey=[redacted]",
 		},
 	}
 

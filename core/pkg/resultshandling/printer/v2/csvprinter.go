@@ -184,7 +184,13 @@ func (cp *CsvPrinter) CloseWriter() error {
 // is not found or has no paths. FixPath.Value is redacted to [redacted] for
 // sensitive paths (Secret.data, container env[].value, and other
 // secret-shaped fields -- see isSensitivePath) unless showSecrets is true,
-// matching the terminal pretty-printer's default.
+// matching the terminal pretty-printer's default. kind == "" (the caller's
+// AllResources lookup missed, so the resource's real kind is unknown) is
+// treated as sensitive too: isSensitivePath's Secret.data/stringData check
+// requires kind == "Secret" to fire, so an unresolved kind would otherwise
+// silently skip that check and only catch a value that also happens to
+// match a known credential-shaped field name -- failing closed here instead
+// means an unresolvable resource never leaks its fix value by accident.
 func csvControlPaths(result resourcesresults.Result, controlID, kind string, showSecrets bool) (failedPaths, fixPaths string) {
 	for i := range result.AssociatedControls {
 		if result.AssociatedControls[i].GetID() != controlID {
@@ -199,7 +205,7 @@ func csvControlPaths(result resourcesresults.Result, controlID, kind string, sho
 				}
 				if p.FixPath.Path != "" {
 					v := p.FixPath.Value
-					if !showSecrets && isSensitivePath(kind, p.FixPath.Path) {
+					if !showSecrets && (kind == "" || isSensitivePath(kind, p.FixPath.Path)) {
 						v = redactedValue
 					}
 					if v != "" {
