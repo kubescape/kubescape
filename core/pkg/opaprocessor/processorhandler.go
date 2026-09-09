@@ -1918,11 +1918,21 @@ func (opap *OPAProcessor) celParamObjectFinder() func(apiVersion, kind, namespac
 	if opap.OPASessionObj == nil {
 		return func(apiVersion, kind, namespace, name string) (map[string]any, bool) { return nil, false }
 	}
+
+	// AllResources is grown concurrently mid-scan by other rules' aggregator
+	// write-back (processRuleOnScope, guarded by opap.mu) while this rule's CEL
+	// evaluation snapshots it here. Without the same lock this is an
+	// unsynchronized concurrent map read/write, which Go's runtime can turn
+	// into a process-wide crash (fatal error: concurrent map iteration and map
+	// write), not just a race-detector warning.
+	opap.mu.Lock()
 	idx := make(map[string]map[string]any, len(opap.AllResources))
 	for _, res := range opap.AllResources {
 		key := res.GetApiVersion() + "/" + res.GetKind() + "/" + res.GetNamespace() + "/" + res.GetName()
 		idx[key] = res.GetObject()
 	}
+	opap.mu.Unlock()
+
 	return func(apiVersion, kind, namespace, name string) (map[string]any, bool) {
 		obj, ok := idx[apiVersion+"/"+kind+"/"+namespace+"/"+name]
 		return obj, ok
