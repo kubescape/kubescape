@@ -861,8 +861,8 @@ func TestClosePrinter_AllV2PrintersImplementErrorCloser(t *testing.T) {
 		printer printer.IPrinter
 	}{
 		{"json", printerv2.NewJsonPrinter()},
-		{"sarif", printerv2.NewSARIFPrinter()},
-		{"html", printerv2.NewHtmlPrinter()},
+		{"sarif", printerv2.NewSARIFPrinter(false)},
+		{"html", printerv2.NewHtmlPrinter(false)},
 		{"yaml", printerv2.NewYamlPrinter()},
 		{"junit", printerv2.NewJunitPrinter(false)},
 		{"markdown", printerv2.NewMarkdownPrinter()},
@@ -870,9 +870,9 @@ func TestClosePrinter_AllV2PrintersImplementErrorCloser(t *testing.T) {
 		{"prometheus", printerv2.NewPrometheusPrinter(false)},
 		{"spdx", printerv2.NewSPDXPrinter()},
 		{"cyclonedx", printerv2.NewCycloneDXPrinter()},
-		{"gitlabsast", printerv2.NewGitLabSASTPrinter()},
+		{"gitlabsast", printerv2.NewGitLabSASTPrinter(false)},
 		{"githubactions", printerv2.NewGitHubActionsPrinter()},
-		{"csv", printerv2.NewCsvPrinter()},
+		{"csv", printerv2.NewCsvPrinter(false)},
 		{"exceptions", printerv2.NewExceptionsPrinter()},
 		{"pretty", printerv2.NewPrettyPrinter(false, "1.0", false, cautils.ControlViewType, cautils.ScanTypeCluster, nil, "", false, false)},
 		{"silent", &printerv2.SilentPrinter{}},

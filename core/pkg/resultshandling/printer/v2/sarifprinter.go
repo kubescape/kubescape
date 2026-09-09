@@ -69,11 +69,18 @@ var _ printer.IPrinter = &SARIFPrinter{}
 type SARIFPrinter struct {
 	// outputFile is the name of the output file
 	writer *os.File
+	// showSecrets controls whether sensitive field values (Secret.data,
+	// container env[].value, and other secret-shaped fields -- see
+	// isSensitivePath) are redacted in the fix-path evidence emitted below.
+	// SARIF output is routinely uploaded to CI code-scanning dashboards or
+	// committed as a pipeline artifact, so this must default to redacted
+	// the same way the pretty-printer and resource table already do.
+	showSecrets bool
 }
 
 // NewSARIFPrinter returns a new SARIF printer instance
-func NewSARIFPrinter() *SARIFPrinter {
-	return &SARIFPrinter{}
+func NewSARIFPrinter(showSecrets bool) *SARIFPrinter {
+	return &SARIFPrinter{showSecrets: showSecrets}
 }
 
 func (sp *SARIFPrinter) Score(score float32) {
@@ -117,7 +124,7 @@ func (sp *SARIFPrinter) addRule(scanRun *sarif.Run, control reportsummary.IContr
 func (sp *SARIFPrinter) addResult(scanRun *sarif.Run, ctl reportsummary.IControlSummary, filepath string, location locationresolver.Location, ac *resourcesresults.ResourceAssociatedControl, resourceID string, resource workloadinterface.IMetadata, reviewPathLocations map[string]locationresolver.Location) *sarif.Result {
 	msg := ctl.GetDescription()
 	if resource != nil {
-		if paths := AssistedRemediationPathsWithCurrentValues(ac, resource); len(paths) > 0 {
+		if paths := AssistedRemediationPathsWithCurrentValuesFiltered(ac, resource, sp.showSecrets); len(paths) > 0 {
 			addContainerNameToAssistedRemediation(resource, &paths)
 			msg += "\n\nAffected fields:\n" + strings.Join(paths, "\n")
 		}
@@ -611,7 +618,14 @@ func (sp *SARIFPrinter) printConfigurationScan(ctx context.Context, opaSessionOb
 				sp.addRule(run, ctl)
 				rsrc := opaSessionObj.AllResources[resource.resourceID]
 				r := sp.addResult(run, ctl, resource.relPath, location, &ac, resource.resourceID, rsrc, reviewPathLocations)
-				collectFixes(ctx, cache, r, ac, opaSessionObj, resource.resourceID, resource.relPath, resource.absPath)
+				// kind stays "" when rsrc is nil (the resource lookup missed) --
+				// collectFixes below treats an unresolved kind as sensitive,
+				// the same fail-closed rule csvControlPaths applies.
+				kind := ""
+				if rsrc != nil {
+					kind = rsrc.GetKind()
+				}
+				collectFixes(ctx, cache, r, ac, opaSessionObj, resource.resourceID, resource.relPath, resource.absPath, kind, sp.showSecrets)
 			}
 		}
 	}
@@ -803,7 +817,15 @@ func closesFixRegion(delta []string, index int) bool {
 	return true
 }
 
-func collectFixes(ctx context.Context, cache *fixReportCache, result *sarif.Result, ac resourcesresults.ResourceAssociatedControl, opaSessionObj *cautils.OPASessionObj, resourceID string, filepath string, rsrcAbsPath string) {
+// collectFixes builds the SARIF "fixes" suggestions from each failed rule's
+// FixPath. This is a second, independent place FixPath.Value gets
+// serialized into the report -- separate from the Message.Text path
+// addResult builds via AssistedRemediationPathsWithCurrentValuesFiltered --
+// so it applies the same isSensitivePath redaction itself rather than
+// relying on that filtering having already happened. kind == "" (the
+// resource lookup that would have supplied it missed) is treated as
+// sensitive: fail closed rather than guess a value is safe to reveal.
+func collectFixes(ctx context.Context, cache *fixReportCache, result *sarif.Result, ac resourcesresults.ResourceAssociatedControl, opaSessionObj *cautils.OPASessionObj, resourceID string, filepath string, rsrcAbsPath string, kind string, showSecrets bool) {
 	// the index is the resource's, not a fix path's, so without one there is
 	// nothing to report
 	documentIndex, ok := getDocIndex(opaSessionObj, resourceID)
@@ -822,9 +844,14 @@ func collectFixes(ctx context.Context, cache *fixReportCache, result *sarif.Resu
 				continue
 			}
 
+			value := rulePaths.FixPath.Value
+			if !showSecrets && (kind == "" || isSensitivePath(kind, fixPath)) {
+				value = redactedValue
+			}
+
 			// Empty means the path is not a plain yaml path and must not be
 			// evaluated as a yq expression.
-			yamlExpression := fixhandler.FixPathToValidYamlExpression(fixPath, rulePaths.FixPath.Value, documentIndex)
+			yamlExpression := fixhandler.FixPathToValidYamlExpression(fixPath, value, documentIndex)
 			if yamlExpression == "" {
 				continue
 			}

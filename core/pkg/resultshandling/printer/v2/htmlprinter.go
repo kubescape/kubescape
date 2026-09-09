@@ -62,10 +62,15 @@ type HTMLReportingCtx struct {
 
 type HtmlPrinter struct {
 	writer *os.File
+	// showSecrets controls whether sensitive field values (Secret.data,
+	// container env[].value, and other secret-shaped fields -- see
+	// isSensitivePath) are redacted in the resource table's fix-path
+	// evidence below, matching the terminal pretty-printer's default.
+	showSecrets bool
 }
 
-func NewHtmlPrinter() *HtmlPrinter {
-	return &HtmlPrinter{}
+func NewHtmlPrinter(showSecrets bool) *HtmlPrinter {
+	return &HtmlPrinter{showSecrets: showSecrets}
 }
 
 func (hp *HtmlPrinter) SetWriter(ctx context.Context, outputFile string) error {
@@ -151,7 +156,7 @@ func (hp *HtmlPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.O
 	var resourceTableView ResourceTableView
 	var imageScanSummary *imageprinter.ImageScanSummary
 	if opaSessionObj != nil {
-		resourceTableView = buildResourceTableView(opaSessionObj)
+		resourceTableView = buildResourceTableView(opaSessionObj, hp.showSecrets)
 	} else {
 		imageScanSummary = buildImageScanSummary(imageScanData)
 	}
@@ -170,7 +175,7 @@ func (hp *HtmlPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.O
 func (hp *HtmlPrinter) Score(score float32) {
 }
 
-func buildResourceTableView(opaSessionObj *cautils.OPASessionObj) ResourceTableView {
+func buildResourceTableView(opaSessionObj *cautils.OPASessionObj, showSecrets bool) ResourceTableView {
 	resourceTableView := make(ResourceTableView, 0)
 	for resourceID, result := range opaSessionObj.ResourcesResult {
 		if result.GetStatus(nil).IsFailed() {
@@ -180,7 +185,7 @@ func buildResourceTableView(opaSessionObj *cautils.OPASessionObj) ResourceTableV
 					helpers.String("resourceID", resourceID))
 				continue
 			}
-			ctlResults := buildResourceControlResultTable(result.AssociatedControls, &opaSessionObj.Report.SummaryDetails, resource)
+			ctlResults := buildResourceControlResultTable(result.AssociatedControls, &opaSessionObj.Report.SummaryDetails, resource, showSecrets)
 			resourceTableView = append(resourceTableView, ResourceResult{resource, ctlResults})
 		}
 	}
@@ -188,18 +193,18 @@ func buildResourceTableView(opaSessionObj *cautils.OPASessionObj) ResourceTableV
 	return resourceTableView
 }
 
-func buildResourceControlResult(resourceControl resourcesresults.ResourceAssociatedControl, control reportsummary.IControlSummary, resource workloadinterface.IMetadata) ResourceControlResult {
+func buildResourceControlResult(resourceControl resourcesresults.ResourceAssociatedControl, control reportsummary.IControlSummary, resource workloadinterface.IMetadata, showSecrets bool) ResourceControlResult {
 	ctlSeverity := apis.ControlSeverityToString(control.GetScoreFactor())
 	ctlName := resourceControl.GetName()
 	ctlID := resourceControl.GetID()
 	ctlURL := cautils.GetControlLink(resourceControl.GetID())
-	failedPaths := AssistedRemediationPathsWithCurrentValues(&resourceControl, resource)
+	failedPaths := AssistedRemediationPathsWithCurrentValuesFiltered(&resourceControl, resource, showSecrets)
 	addContainerNameToAssistedRemediation(resource, &failedPaths)
 
 	return ResourceControlResult{ctlSeverity, ctlName, ctlID, ctlURL, failedPaths}
 }
 
-func buildResourceControlResultTable(resourceControls []resourcesresults.ResourceAssociatedControl, summaryDetails *reportsummary.SummaryDetails, resource workloadinterface.IMetadata) []ResourceControlResult {
+func buildResourceControlResultTable(resourceControls []resourcesresults.ResourceAssociatedControl, summaryDetails *reportsummary.SummaryDetails, resource workloadinterface.IMetadata, showSecrets bool) []ResourceControlResult {
 	var ctlResults []ResourceControlResult
 	for _, resourceControl := range resourceControls {
 		if resourceControl.GetStatus(nil).IsFailed() {
@@ -207,7 +212,7 @@ func buildResourceControlResultTable(resourceControls []resourcesresults.Resourc
 			if control == nil {
 				continue
 			}
-			ctlResult := buildResourceControlResult(resourceControl, control, resource)
+			ctlResult := buildResourceControlResult(resourceControl, control, resource, showSecrets)
 
 			ctlResults = append(ctlResults, ctlResult)
 		}
