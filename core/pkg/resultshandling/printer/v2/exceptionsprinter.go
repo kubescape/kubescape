@@ -116,7 +116,7 @@ func buildExceptionPolicies(ctx context.Context, opaSessionObj *cautils.OPASessi
 			PortalBase:      armotypes.PortalBase{Name: "exclude-" + controlID},
 			PolicyType:      exceptionPolicyType,
 			CreationTime:    creationTime.UTC().Format(time.RFC3339),
-			Actions:         []armotypes.PostureExceptionPolicyActions{armotypes.AlertOnly},
+			Actions:         []armotypes.PostureExceptionPolicyActions{armotypes.Disable},
 			Resources:       designators(failures[controlID]),
 			PosturePolicies: []armotypes.PosturePolicy{{ControlID: regexp.QuoteMeta(controlID)}},
 		})

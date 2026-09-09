@@ -3,7 +3,7 @@
         "name": "exclude-allowed-hostPath-control",
         "policyType": "postureExceptionPolicy",
         "actions": [
-            "alertOnly"
+            "disable"
         ],
         "resources": [
             {
