@@ -51,6 +51,24 @@ func TestSetWriter_Json_CaseInsensitiveExtension(t *testing.T) {
 	}
 }
 
+// TestSetWriter_Json_StdoutAndDevNullSinks guards the well-known output
+// sinks: /dev/stdout must write to real stdout (not a /dev/stdout.json
+// file) and /dev/null must discard, exactly like PrettyPrinter treats
+// them, for every printer that routes through ResolveOutputFile.
+func TestSetWriter_Json_StdoutAndDevNullSinks(t *testing.T) {
+	jp := NewJsonPrinter()
+	require.NoError(t, jp.SetWriter(context.TODO(), os.Stdout.Name()))
+	require.NotNil(t, jp.writer)
+	assert.Equal(t, os.Stdout.Name(), jp.writer.Name(), "stdout sink must resolve to real stdout")
+	require.NoError(t, jp.CloseWriter())
+
+	jp = NewJsonPrinter()
+	require.NoError(t, jp.SetWriter(context.TODO(), os.DevNull))
+	require.NotNil(t, jp.writer)
+	assert.Equal(t, os.DevNull, jp.writer.Name(), "devnull sink must resolve to /dev/null, not /dev/null.json")
+	require.NoError(t, jp.CloseWriter())
+}
+
 func TestScore_Json(t *testing.T) {
 	tests := []struct {
 		name  string

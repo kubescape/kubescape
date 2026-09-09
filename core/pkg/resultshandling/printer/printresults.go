@@ -93,6 +93,18 @@ func ResolveOutputFile(format, outputFile, defaultBaseName string) (string, bool
 		outputFile = defaultBaseName
 	}
 
+	// Well-known sinks bypass extension logic, exactly like PrettyPrinter
+	// treats them: /dev/stdout resolves to real stdout (callers take the
+	// non-explicit path into GetWriter with an empty name), and /dev/null
+	// stays explicit so a failure to open it still surfaces as an error
+	// instead of silently falling back to stdout.
+	if outputFile == os.Stdout.Name() {
+		return "", false
+	}
+	if outputFile == os.DevNull {
+		return outputFile, true
+	}
+
 	ext, ok := FormatOutputExt[format]
 	if !ok || ext == "" {
 		return outputFile, true

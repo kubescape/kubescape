@@ -392,6 +392,8 @@ func TestResolvedOutputPath(t *testing.T) {
 		{"append SPDX", printer.SPDXFormat, "report.json", "report.json.spdx.json"},
 		{"append markdown", printer.MarkdownFormat, "report", "report.md"},
 		{"preserve markdown", printer.MarkdownFormat, "report.md", "report.md"},
+		{"stdout sink skips collision tracking", printer.JsonFormat, os.Stdout.Name(), ""},
+		{"devnull sink skips collision tracking", printer.JsonFormat, os.DevNull, ""},
 	}
 
 	for _, test := range tests {
