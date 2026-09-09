@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/armosec/armoapi-go/armotypes"
@@ -230,18 +231,21 @@ func TestApplyFixKeepsFormatting(t *testing.T) {
 
 // TestApplyFixToContent_EmptyLeadingDocument guards the regression from issue
 // #2495: a file whose first document is empty (a comment followed by "---") is
-// decoded inconsistently by go-yaml and yqlib, which used to make the fix
-// renderer call logger.Fatal and os.Exit the whole process mid-write (leaving
-// an empty SARIF file). It must now return an error gracefully instead.
+// decoded inconsistently by go-yaml and yqlib. The source editor must use
+// the scanner's workload numbering and preserve the leading comment.
 func TestApplyFixToContent_EmptyLeadingDocument(t *testing.T) {
 	yamlContent := "# a comment, followed by a document separator\n---\napiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: demo\nspec:\n  template:\n    spec:\n      containers:\n        - name: app\n          image: nginx:1.27\n"
-	// The scanner counts the empty leading document, so the Deployment is di==1.
-	expression := FixPathToValidYamlExpression("spec.template.spec.containers[0].image", "nginx:1.28", 1)
+	// The scanner discards the empty document before numbering workloads.
+	expression := FixPathToValidYamlExpression("spec.template.spec.containers[0].image", "nginx:1.28", 0)
 
 	got, err := ApplyFixToContent(context.Background(), yamlContent, expression)
 
-	assert.Error(t, err, "expected a graceful error rather than a process exit")
-	assert.Empty(t, got)
+	require.NoError(t, err)
+	assert.Equal(t, strings.Replace(yamlContent, "nginx:1.27", "nginx:1.28", 1), got)
+	got, err = ApplyFixToContent(context.Background(), yamlContent,
+		FixPathToValidYamlExpression("spec.template.spec.containers[0].image", "nginx:1.28", 1))
+	require.Error(t, err)
+	require.Empty(t, got)
 }
 
 // TestApplyFixToContent_TopLevelFlowSequence covers a flow collection that is not nested
@@ -627,134 +631,6 @@ func TestDetermineNewlineSeparator(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestSanitizeYaml(t *testing.T) {
-	type args struct {
-		fileString string
-	}
-	tests := []struct {
-		name string
-		args args
-		want string
-	}{
-		{
-			name: "empty yaml",
-			args: args{
-				fileString: "",
-			},
-			want: "",
-		},
-		{
-			name: "empty yaml with two characters",
-			args: args{
-				fileString: "##",
-			},
-			want: "##",
-		},
-		{
-			name: "yaml/v3",
-			args: args{
-				fileString: `apiVersion: v1
-kind: Pod
-metadata:
-  name: insert_to_mapping_node_1
-`,
-			},
-			want: `apiVersion: v1
-kind: Pod
-metadata:
-  name: insert_to_mapping_node_1
-`,
-		},
-		{
-			name: "yaml/v2",
-			args: args{
-				fileString: `apiVersion: v1
-kind: Pod
-metadata:
-  name: insert_to_mapping_node_1
----
-apiVersion: v1
-kind: Pod
-metadata:
-  name: insert_to_mapping_node_2
-`,
-			},
-			want: `apiVersion: v1
-kind: Pod
-metadata:
-  name: insert_to_mapping_node_1
----
-apiVersion: v1
-kind: Pod
-metadata:
-  name: insert_to_mapping_node_2
-`,
-		},
-		{
-			name: "yaml/v1",
-			args: args{
-				fileString: `---
-apiVersion: v1
-kind: Pod
-metadata:
-  name: insert_to_mapping_node_1
-`,
-			},
-			want: `# ---
-apiVersion: v1
-kind: Pod
-metadata:
-  name: insert_to_mapping_node_1
-`,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := sanitizeYaml(tt.args.fileString); got != tt.want {
-				t.Errorf("sanitizeYaml() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
-// TestRevertSanitizeYaml guards the `< 5` / `[:5]` pairing: the guard was
-// previously `< 3` while the slice was `[:5]`, so any 3-4 byte input panicked
-// with "slice bounds out of range". Covers every length from 0 up to and past
-// the "# ---" marker, since that boundary is exactly where the bug lived.
-func TestRevertSanitizeYaml(t *testing.T) {
-	tests := []struct {
-		name string
-		in   string
-		want string
-	}{
-		{name: "length 0", in: "", want: ""},
-		{name: "length 1", in: "-", want: "-"},
-		{name: "length 2", in: "--", want: "--"},
-		{name: "length 3 (previously panicked)", in: "# -", want: "# -"},
-		{name: "length 4 (previously panicked)", in: "# --", want: "# --"},
-		{name: "length 5, marker present", in: "# ---", want: "---"},
-		{name: "length 5, marker absent", in: "# abc", want: "# abc"},
-		{name: "marker with trailing content", in: "# ---\nkind: Pod\n", want: "---\nkind: Pod\n"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			assert.NotPanics(t, func() {
-				got := revertSanitizeYaml(tt.in)
-				assert.Equal(t, tt.want, got)
-			})
-		})
-	}
-}
-
-// TestSanitizeYaml_RoundTrip confirms revertSanitizeYaml undoes sanitizeYaml
-// for the case both were built for: a document starting with "---".
-func TestSanitizeYaml_RoundTrip(t *testing.T) {
-	original := "---\napiVersion: v1\nkind: Pod\n"
-	sanitized := sanitizeYaml(original)
-	assert.Equal(t, "# ---\napiVersion: v1\nkind: Pod\n", sanitized)
-	assert.Equal(t, original, revertSanitizeYaml(sanitized))
 }
 
 func TestReduceYamlExpressions(t *testing.T) {
