@@ -318,6 +318,30 @@ func TestResolveOutputFile(t *testing.T) {
 			wantFile:     "report.custom",
 			wantExplicit: true,
 		},
+		{
+			name:         "stdout sink bypasses extension logic",
+			format:       JsonFormat,
+			outputFile:   os.Stdout.Name(),
+			defaultBase:  "report",
+			wantFile:     "",
+			wantExplicit: false,
+		},
+		{
+			name:         "stdout sink with surrounding whitespace is trimmed first",
+			format:       JsonFormat,
+			outputFile:   "  " + os.Stdout.Name() + "  ",
+			defaultBase:  "report",
+			wantFile:     "",
+			wantExplicit: false,
+		},
+		{
+			name:         "devnull sink keeps explicit path without extension",
+			format:       JsonFormat,
+			outputFile:   os.DevNull,
+			defaultBase:  "report",
+			wantFile:     os.DevNull,
+			wantExplicit: true,
+		},
 	}
 
 	for _, tt := range tests {

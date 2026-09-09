@@ -215,13 +215,24 @@ func resolvedOutputPath(format, outputFile string) string {
 	if trimmed == "" {
 		return ""
 	}
+	// Well-known sinks are shared destinations, not files: two formats both
+	// writing stdout (or both discarding to /dev/null) is the intended
+	// multi-format behavior, same as an empty --output, so they are skipped
+	// from collision tracking. This mirrors the sink handling in
+	// printer.ResolveOutputFile so the detector and the printers agree.
+	if trimmed == os.Stdout.Name() || trimmed == os.DevNull {
+		return ""
+	}
 	ext := fileExtForFormat(format)
 
-	if ext == printer.YamlOutputExt && strings.HasSuffix(trimmed, ".yml") {
+	// Case-insensitive, exactly like printer.HasOutputExt in
+	// ResolveOutputFile, so the detector predicts the same path the
+	// printers actually open for mixed-case extensions (see #3334).
+	if ext == printer.YamlOutputExt && printer.HasOutputExt(trimmed, ".yml") {
 		return trimmed
 	}
 
-	if ext != "" && !strings.HasSuffix(trimmed, ext) {
+	if ext != "" && !printer.HasOutputExt(trimmed, ext) {
 		return trimmed + ext
 	}
 	return trimmed
