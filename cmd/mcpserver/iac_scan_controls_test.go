@@ -78,9 +78,8 @@ func TestIaCScanControls_InvalidPath(t *testing.T) {
 
 func TestIaCScanControls_ValidPath(t *testing.T) {
 	ksServer := &KubescapeMcpserver{
-		policyGetter: getter.NewDownloadReleasedPolicy(),
+		policyGetter: getSharedLiveClusterPolicyGetter(t),
 	}
-	_, _ = ksServer.policyGetter.SetRegoObjectsWithFallback()
 
 	respBytes, err := ksServer.runIaCScanControls(context.Background(), "testdata/privileged-pod.yaml", []string{"C-0017"})
 	if err != nil {
@@ -98,9 +97,8 @@ func TestIaCScanControls_ValidPath(t *testing.T) {
 // the absolute path of the scanned file, and the raw resources.
 func TestIaCScanControlsReport_ReturnsPostureReport(t *testing.T) {
 	ksServer := &KubescapeMcpserver{
-		policyGetter: getter.NewDownloadReleasedPolicy(),
+		policyGetter: getSharedLiveClusterPolicyGetter(t),
 	}
-	_, _ = ksServer.policyGetter.SetRegoObjectsWithFallback()
 
 	fixture := filepath.Join(t.TempDir(), "privileged-pod.yaml")
 	if err := os.WriteFile(fixture, []byte(privilegedPodManifest), 0o600); err != nil {

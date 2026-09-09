@@ -27,13 +27,7 @@ func TestIaCScan_InvalidPath(t *testing.T) {
 
 func TestIaCScan_ValidPath(t *testing.T) {
 	ksServer := &KubescapeMcpserver{
-		policyGetter: getter.NewDownloadReleasedPolicy(),
-	}
-
-	// Initialize the getter so it can read from the ~/.kubescape cache
-	_, err := ksServer.policyGetter.SetRegoObjectsWithFallback()
-	if err != nil {
-		t.Logf("Warning: SetRegoObjectsWithFallback returned error (expected if fully offline): %v", err)
+		policyGetter: getSharedLiveClusterPolicyGetter(t),
 	}
 
 	// Test with a small fixture containing a privileged pod.
