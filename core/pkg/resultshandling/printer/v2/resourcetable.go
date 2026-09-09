@@ -221,7 +221,17 @@ func annotateFixPathLines(paths *[]string, control *resourcesresults.ResourceAss
 		return
 	}
 
+	// fixPathsToString does not deduplicate, and one control's rules can name
+	// the same field more than once, while the rendered list this annotates has
+	// already been deduplicated. Resolving a path twice would append the line
+	// twice to the single entry that survived.
+	seen := make(map[string]bool)
 	for _, fixPath := range fixPathsToString(control, true) {
+		if seen[fixPath] {
+			continue
+		}
+		seen[fixPath] = true
+
 		line, ok := lineFor(fixPath)
 		if !ok {
 			continue

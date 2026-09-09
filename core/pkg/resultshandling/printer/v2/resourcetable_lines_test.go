@@ -100,6 +100,20 @@ func TestAnnotateFixPathLines(t *testing.T) {
 			want:    []string{"spec.containers[0].image=nginx:1 (app) (line 9)"},
 		},
 		{
+			// A control can carry the same fix path more than once across its
+			// rules, and fixPathsToString does not deduplicate while the
+			// rendered list does. Resolving per bare path would then stamp the
+			// one surviving entry twice.
+			name:  "a fix path repeated across rules is annotated once",
+			paths: []string{"spec.hostPID=false"},
+			control: fixPathControl(
+				armotypes.FixPath{Path: "spec.hostPID", Value: "false"},
+				armotypes.FixPath{Path: "spec.hostPID", Value: "false"},
+			),
+			lineFor: stubLineFor(map[string]int{"spec.hostPID": 23}),
+			want:    []string{"spec.hostPID=false (line 23)"},
+		},
+		{
 			name:    "empty path list is a no-op",
 			paths:   nil,
 			control: fixPathControl(armotypes.FixPath{Path: "spec.hostPID", Value: "false"}),
