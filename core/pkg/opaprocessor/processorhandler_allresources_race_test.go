@@ -1,11 +1,16 @@
 package opaprocessor
 
 import (
+	"context"
 	"fmt"
+	"sync"
 	"testing"
 
 	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/kubescape/v4/core/pkg/scancache"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
+	"github.com/kubescape/opa-utils/resources"
+	"github.com/stretchr/testify/require"
 )
 
 // TestCelParamObjectFinderRacesAggregatorWriteback reproduces a crash seen in
@@ -28,7 +33,10 @@ func TestCelParamObjectFinderRacesAggregatorWriteback(t *testing.T) {
 	opap.AllResources = map[string]workloadinterface.IMetadata{}
 
 	done := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		for {
 			select {
 			case <-done:
@@ -53,4 +61,52 @@ func TestCelParamObjectFinderRacesAggregatorWriteback(t *testing.T) {
 		opap.mu.Unlock()
 	}
 	close(done)
+	wg.Wait()
+}
+
+// TestProcessControlRacesAggregatorWriteback covers the second unguarded
+// reader of opap.AllResources: when the incremental cache is attached,
+// processControl looks up each result's resource by ID (to hash it for the
+// cache entry) with no lock, while a sibling worker's processRuleOnScope can
+// concurrently grow the same map under opap.mu (processScope fans control
+// evaluation out across a worker pool, so both readers and the aggregator
+// writer run concurrently in a real scan). Run with `-race`.
+func TestProcessControlRacesAggregatorWriteback(t *testing.T) {
+	sess, _, _ := nsCacheSession(t)
+	store, err := scancache.Load(t.TempDir(), "v1")
+	require.NoError(t, err)
+	opap := NewOPAProcessor(sess, resources.NewRegoDependenciesDataMock(), "test", "", "", false, nil)
+	opap.SetIncrementalCache(store)
+	ctrl := nsCacheControl()
+
+	done := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-done:
+				return
+			default:
+				_, _ = opap.processControl(context.Background(), ctrl, evaluationScope{})
+			}
+		}
+	}()
+
+	for i := 0; i < 2000; i++ {
+		obj := workloadinterface.NewWorkloadObj(map[string]any{
+			"apiVersion": "v1",
+			"kind":       "ConfigMap",
+			"metadata": map[string]any{
+				"name":      fmt.Sprintf("cm-%d", i),
+				"namespace": "default",
+			},
+		})
+		opap.mu.Lock()
+		opap.AllResources[obj.GetID()] = obj
+		opap.mu.Unlock()
+	}
+	close(done)
+	wg.Wait()
 }

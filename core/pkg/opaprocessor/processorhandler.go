@@ -717,7 +717,7 @@ func (scope evaluationScope) matchedObjects(rule *reporthandling.PolicyRule) []w
 // so aggregator write-back during evaluation cannot re-bucket namespaces
 // mid-scan.
 func (opap *OPAProcessor) evaluationScopes() []evaluationScope {
-	resident, batches := cautils.PartitionResources(opap.initialResourceCount, opap.K8SResources, opap.ExternalResources, opap.AllResources, opap.largeClusterSizeThreshold)
+	resident, batches := cautils.PartitionResources(opap.initialResourceCount, opap.K8SResources, opap.ExternalResources, opap.snapshotAllResources(), opap.largeClusterSizeThreshold)
 
 	residentGroups := newResidentIndex(resident)
 
@@ -746,9 +746,24 @@ func (opap *OPAProcessor) wholeClusterScope() evaluationScope {
 		Scope:             cautils.ClusterScope,
 		K8SResources:      opap.K8SResources,
 		ExternalResources: opap.ExternalResources,
-		AllResources:      opap.AllResources,
+		AllResources:      opap.snapshotAllResources(),
 	}
 	return newEvaluationScope(cautils.ClusterScope, nil, newResidentIndex(batch))
+}
+
+// snapshotAllResources returns a shallow copy of opap.AllResources, taken
+// under opap.mu. AllResources is grown concurrently mid-scan by aggregator
+// write-back (processRuleOnScope), so any caller that hands the map to code
+// outside opap.mu's protection — rather than doing a single guarded map
+// lookup itself — must work from a private copy, not the live map.
+func (opap *OPAProcessor) snapshotAllResources() map[string]workloadinterface.IMetadata {
+	opap.mu.Lock()
+	defer opap.mu.Unlock()
+	snapshot := make(map[string]workloadinterface.IMetadata, len(opap.AllResources))
+	for k, v := range opap.AllResources {
+		snapshot[k] = v
+	}
+	return snapshot
 }
 
 type policyControl struct {
@@ -1052,7 +1067,9 @@ func (opap *OPAProcessor) processControl(ctx context.Context, control *reporthan
 
 	if len(ruleErrs) == 0 && opap.incrementalCache != nil && controlCacheEligible(control) {
 		for resourceID, result := range resourcesAssociatedControl {
+			opap.mu.Lock()
 			resource, ok := opap.AllResources[resourceID]
+			opap.mu.Unlock()
 			if !ok {
 				continue
 			}
