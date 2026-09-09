@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/cautils/getter"
+	"github.com/kubescape/kubescape/v4/core/pkg/resourcehandler"
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -355,6 +357,7 @@ func TestRunWorkloadScan_NotFoundInFile(t *testing.T) {
 	_, err := ksServer.RunWorkloadScan(context.Background(), "Deployment/absent", "", "testdata/deployment.yaml", "nsa")
 	require.Error(t, err)
 	assert.Contains(t, strings.ToLower(err.Error()), "not found")
+	assert.True(t, errors.Is(err, resourcehandler.ErrResourceNotFound), "expected ErrResourceNotFound sentinel in error chain")
 }
 
 func TestRunWorkloadScan_AmbiguousInFile(t *testing.T) {
@@ -366,6 +369,7 @@ func TestRunWorkloadScan_AmbiguousInFile(t *testing.T) {
 	_, err := ksServer.RunWorkloadScan(context.Background(), "Deployment/nginx", "", "testdata/two-workloads.yaml", "nsa")
 	require.Error(t, err)
 	assert.Contains(t, strings.ToLower(err.Error()), "more than one")
+	assert.True(t, errors.Is(err, resourcehandler.ErrAmbiguousResource), "expected ErrAmbiguousResource sentinel in error chain")
 }
 
 func TestRunWorkloadScan_NamespaceDisambiguates(t *testing.T) {
@@ -525,12 +529,12 @@ func TestCallTool_ScanWorkload_ForwardsArguments(t *testing.T) {
 }
 
 // TestCallTool_ScanWorkload_ScanFailureIsToolError asserts a failing scan comes
-// back as a tool error the agent can read, not a transport-level Go error.
+// back as a structured tool error the agent can read, not a transport-level Go error.
 func TestCallTool_ScanWorkload_ScanFailureIsToolError(t *testing.T) {
 	orig := workloadScanFn
 	t.Cleanup(func() { workloadScanFn = orig })
 	workloadScanFn = func(_ *KubescapeMcpserver, _ context.Context, _, _, _, _ string) ([]byte, error) {
-		return nil, errors.New("resource nginx was not found")
+		return nil, fmt.Errorf("resource nginx was not found: %w", resourcehandler.ErrResourceNotFound)
 	}
 	ksServer := newWorkloadToolServer(t)
 
@@ -539,8 +543,10 @@ func TestCallTool_ScanWorkload_ScanFailureIsToolError(t *testing.T) {
 	require.NotNil(t, res)
 	assert.True(t, res.IsError)
 	text := toolResultText(t, res)
-	assert.Contains(t, text, "failed to run workload scan")
-	assert.Contains(t, text, "was not found", "the underlying reason must survive to the caller")
+	var toolErr ToolError
+	require.NoError(t, json.Unmarshal([]byte(text), &toolErr))
+	assert.Equal(t, ErrCodeResourceNotFound, toolErr.Code)
+	assert.Contains(t, toolErr.Message, "was not found", "the underlying reason must survive to the caller")
 }
 
 func TestCreateWorkloadScanningTools_RegistersScanWorkload(t *testing.T) {

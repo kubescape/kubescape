@@ -33,14 +33,14 @@ func createAdvancedTools(ksServer *KubescapeMcpserver) {
 
 		kind, ok := args["resource_kind"].(string)
 		if !ok || kind == "" {
-			return mcp.NewToolResultError("resource_kind is required"), nil
+			return mcpToolError(ErrCodeInvalidArgument, "resource_kind is required", map[string]any{"argument": "resource_kind"}), nil
 		}
 		namespace, _ := args["namespace"].(string)
 
 		limit := int64(10)
 		if l, ok := args["limit"].(float64); ok {
 			if l <= 0 || l != float64(int64(l)) {
-				return mcp.NewToolResultError("limit must be a positive integer"), nil
+				return mcpToolError(ErrCodeInvalidArgument, "limit must be a positive integer", map[string]any{"argument": "limit"}), nil
 			}
 			limit = int64(l)
 			if limit > 500 {
@@ -63,12 +63,12 @@ func createAdvancedTools(ksServer *KubescapeMcpserver) {
 		case "statefulsets", "statefulset":
 			gvr = schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "statefulsets"}
 		default:
-			return mcp.NewToolResultError(fmt.Sprintf("unsupported resource kind %q; supported kinds are: pods, deployments, daemonsets, statefulsets", kind)), nil
+			return mcpToolError(ErrCodeUnsupportedResource, fmt.Sprintf("unsupported resource kind %q; supported kinds are: pods, deployments, daemonsets, statefulsets", kind), map[string]any{"kind": kind, "supported_kinds": []string{"pods", "deployments", "daemonsets", "statefulsets"}}), nil
 		}
 
 		k8sClient, err := ksServer.getK8sClient()
 		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed to get k8s client: %v", err)), nil
+			return mcpToolError(ErrCodeK8sClientError, fmt.Sprintf("failed to get k8s client: %v", err), nil), nil
 		}
 
 		listOpts := metav1.ListOptions{
@@ -85,7 +85,7 @@ func createAdvancedTools(ksServer *KubescapeMcpserver) {
 		}
 
 		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed to list resources: %v", err)), nil
+			return mcpToolError(ErrCodeK8sClientError, fmt.Sprintf("failed to list resources: %v", err), map[string]any{"resource_type": kind}), nil
 		}
 
 		nextContinueToken := list.GetContinue()
@@ -133,44 +133,44 @@ func createAdvancedTools(ksServer *KubescapeMcpserver) {
 
 		celExpr, ok := args["cel_expression"].(string)
 		if !ok || celExpr == "" {
-			return mcp.NewToolResultError("cel_expression is required"), nil
+			return mcpToolError(ErrCodeInvalidArgument, "cel_expression is required", map[string]any{"argument": "cel_expression"}), nil
 		}
 		resourceJSON, ok := args["resource_json"].(string)
 		if !ok || resourceJSON == "" {
-			return mcp.NewToolResultError("resource_json is required"), nil
+			return mcpToolError(ErrCodeInvalidArgument, "resource_json is required", map[string]any{"argument": "resource_json"}), nil
 		}
 
 		if len(resourceJSON) > 1000000 || len(celExpr) > 10000 {
-			return mcp.NewToolResultError("input exceeds size limits"), nil
+			return mcpToolError(ErrCodeInvalidArgument, "input exceeds size limits", nil), nil
 		}
 
 		var resourceObj map[string]any
 		if err := json.Unmarshal([]byte(resourceJSON), &resourceObj); err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed to parse resource_json: %v", err)), nil
+			return mcpToolError(ErrCodeInvalidArgument, fmt.Sprintf("failed to parse resource_json: %v", err), nil), nil
 		}
 
 		env, err := cel.NewEnv(
 			cel.Variable("object", cel.DynType),
 		)
 		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed to create CEL env: %v", err)), nil
+			return mcpToolError(ErrCodeScanFailed, fmt.Sprintf("failed to create CEL env: %v", err), nil), nil
 		}
 
 		ast, issues := env.Compile(celExpr)
 		if issues != nil && issues.Err() != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed to compile CEL expression: %v", issues.Err())), nil
+			return mcpToolError(ErrCodeInvalidArgument, fmt.Sprintf("failed to compile CEL expression: %v", issues.Err()), nil), nil
 		}
 
 		prg, err := env.Program(ast, cel.CostLimit(100000))
 		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed to create CEL program: %v", err)), nil
+			return mcpToolError(ErrCodeScanFailed, fmt.Sprintf("failed to create CEL program: %v", err), nil), nil
 		}
 
 		out, _, err := prg.Eval(map[string]any{
 			"object": resourceObj,
 		})
 		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed to evaluate CEL rule: %v", err)), nil
+			return mcpToolError(ErrCodeScanFailed, fmt.Sprintf("failed to evaluate CEL rule: %v", err), nil), nil
 		}
 
 		return mcp.NewToolResultText(fmt.Sprintf("%v", out.Value())), nil
@@ -198,7 +198,7 @@ func createAdvancedTools(ksServer *KubescapeMcpserver) {
 		patchJSON, _ := args["patch_json"].(string)
 
 		if kind == "" || name == "" || patchJSON == "" {
-			return mcp.NewToolResultError("resource_kind, resource_name, and patch_json are required"), nil
+			return mcpToolError(ErrCodeInvalidArgument, "resource_kind, resource_name, and patch_json are required", nil), nil
 		}
 
 		// Security/Privilege Drop checks: explicitly allow only certain workload kinds.
@@ -209,12 +209,12 @@ func createAdvancedTools(ksServer *KubescapeMcpserver) {
 			"statefulset": true, "statefulsets": true,
 		}
 		if !allowedKinds[strings.ToLower(kind)] {
-			return mcp.NewToolResultError(fmt.Sprintf("security barrier: patching kind '%s' is not permitted", kind)), nil
+			return mcpToolError(ErrCodeUnsupportedResource, fmt.Sprintf("security barrier: patching kind '%s' is not permitted", kind), map[string]any{"kind": kind}), nil
 		}
 
 		k8sClient, err := ksServer.getK8sClient()
 		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed to get k8s client: %v", err)), nil
+			return mcpToolError(ErrCodeK8sClientError, fmt.Sprintf("failed to get k8s client: %v", err), nil), nil
 		}
 
 		var gvr schema.GroupVersionResource
@@ -245,7 +245,7 @@ func createAdvancedTools(ksServer *KubescapeMcpserver) {
 		}
 
 		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("dry-run patch failed: %v", err)), nil
+			return mcpToolError(ErrCodeK8sClientError, fmt.Sprintf("dry-run patch failed: %v", err), nil), nil
 		}
 
 		resBytes, _ := json.Marshal(patchedObj.Object)

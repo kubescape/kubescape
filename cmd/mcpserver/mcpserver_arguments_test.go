@@ -40,7 +40,10 @@ func TestRegisteredStorageToolsRejectMalformedArguments(t *testing.T) {
 				t.Run(tt.name, func(t *testing.T) {
 					result := registeredToolResult(t, dispatchRegisteredTool(t, ksServer, tool, tt.arguments))
 					assert.True(t, result.IsError)
-					assert.Equal(t, "arguments must be a JSON object", toolResultText(t, result))
+					var toolErr ToolError
+					require.NoError(t, json.Unmarshal([]byte(toolResultText(t, result)), &toolErr))
+					assert.Equal(t, ErrCodeInvalidArgument, toolErr.Code)
+					assert.Equal(t, "arguments must be a JSON object", toolErr.Message)
 				})
 			}
 		})

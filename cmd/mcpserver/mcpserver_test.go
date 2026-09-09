@@ -284,14 +284,14 @@ func TestCallTool_RunFrameworkScan(t *testing.T) {
 			arguments: map[string]any{
 				"framework_name": "",
 			},
-			wantErrString: "framework_name argument must not be empty",
+			wantErrString: "framework_name argument is required and cannot be empty",
 		},
 		{
 			name: "whitespace framework_name",
 			arguments: map[string]any{
 				"framework_name": "   ",
 			},
-			wantErrString: "framework_name argument must not be empty",
+			wantErrString: "framework_name argument is required and cannot be empty",
 		},
 		{
 			name: "allcontrols framework_name rejected (case-insensitive)",

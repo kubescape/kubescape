@@ -1,6 +1,7 @@
 package mcpserver
 
 import (
+	"encoding/json"
 	"errors"
 	"testing"
 
@@ -66,12 +67,14 @@ func TestScanResourceSlice_UnsupportedKindReturnsError(t *testing.T) {
 		"resource_kind": "jobs",
 	}))
 	require.True(t, result.IsError)
-	text := toolResultText(t, result)
-	require.Contains(t, text, `unsupported resource kind "jobs"`)
-	require.Contains(t, text, "pods")
-	require.Contains(t, text, "deployments")
-	require.Contains(t, text, "daemonsets")
-	require.Contains(t, text, "statefulsets")
+	var toolErr ToolError
+	require.NoError(t, json.Unmarshal([]byte(toolResultText(t, result)), &toolErr))
+	require.Equal(t, ErrCodeUnsupportedResource, toolErr.Code)
+	require.Contains(t, toolErr.Message, `unsupported resource kind "jobs"`)
+	require.Contains(t, toolErr.Message, "pods")
+	require.Contains(t, toolErr.Message, "deployments")
+	require.Contains(t, toolErr.Message, "daemonsets")
+	require.Contains(t, toolErr.Message, "statefulsets")
 }
 
 // TestScanResourceSlice_UnsupportedKindReturnsErrorWithoutClusterConfig
@@ -98,5 +101,8 @@ func TestScanResourceSlice_UnsupportedKindReturnsErrorWithoutClusterConfig(t *te
 		"resource_kind": "jobs",
 	}))
 	require.True(t, result.IsError)
-	require.Contains(t, toolResultText(t, result), `unsupported resource kind "jobs"`)
+	var toolErr ToolError
+	require.NoError(t, json.Unmarshal([]byte(toolResultText(t, result)), &toolErr))
+	require.Equal(t, ErrCodeUnsupportedResource, toolErr.Code)
+	require.Contains(t, toolErr.Message, `unsupported resource kind "jobs"`)
 }
