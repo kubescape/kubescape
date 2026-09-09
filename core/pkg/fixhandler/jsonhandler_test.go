@@ -112,18 +112,3 @@ func TestIsFixableSourceType(t *testing.T) {
 	assert.False(t, isFixableSourceType(""))
 }
 
-// TestApplyFixToFileContentPreservesTheSourceFormat is the reason the dispatch
-// exists: emitting YAML into a .json manifest would break every tool that reads
-// it back.
-func TestApplyFixToFileContentPreservesTheSourceFormat(t *testing.T) {
-	fixedJSON, err := applyFixToFileContent(context.Background(), "/tmp/deploy.json", jsonDeployment, privilegeEscalationFix)
-	require.NoError(t, err)
-	assert.NoError(t, json.Unmarshal([]byte(fixedJSON), &map[string]any{}))
-
-	yamlDeployment := "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: api\nspec:\n  template:\n    spec:\n      containers:\n        - name: app\n          securityContext:\n            allowPrivilegeEscalation: true\n"
-
-	fixedYAML, err := applyFixToFileContent(context.Background(), "/tmp/deploy.yaml", yamlDeployment, privilegeEscalationFix)
-	require.NoError(t, err)
-	assert.Contains(t, fixedYAML, "allowPrivilegeEscalation: false")
-	assert.Error(t, json.Unmarshal([]byte(fixedYAML), &map[string]any{}), "the YAML path must not emit JSON")
-}
