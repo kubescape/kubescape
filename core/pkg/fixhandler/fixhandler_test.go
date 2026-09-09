@@ -1508,4 +1508,3 @@ func TestWriteFixesToFile_PropagatesCloseError(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "fixed: true\n", string(got))
 }
-// fix: added missing brace
