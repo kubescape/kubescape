@@ -98,7 +98,12 @@ func (pp *PrettyPrinter) ActionPrint(_ context.Context, opaSessionObj *cautils.O
 		case cautils.ControlViewType:
 			pp.printResults(&opaSessionObj.Report.SummaryDetails.Controls, opaSessionObj.AllResources, opaSessionObj.ResourcesResult, sortedControlIDs)
 		case cautils.ResourceViewType:
-			if pp.verboseMode {
+			// The resource table is the one place that already reads
+			// showEvidence (see generateResourceRows), so gating it on
+			// --verbose alone meant `-E --view resource` printed no table at
+			// all and the evidence column it builds was unreachable without
+			// also passing --verbose.
+			if pp.verboseMode || pp.showEvidence {
 				pp.resourceTable(opaSessionObj)
 			}
 		case cautils.NamespaceViewType:
@@ -243,13 +248,23 @@ func (prettyPrinter *PrettyPrinter) printTitle(controlSummary reportsummary.ICon
 func (pp *PrettyPrinter) printResources(controlSummary reportsummary.IControlSummary, allResources map[string]workloadinterface.IMetadata, resourcesResult map[string]resourcesresults.Result) {
 
 	workloadsSummary := listResultSummary(controlSummary, allResources)
-	if pp.verboseMode {
+	// --show-evidence asks for the evidence, so it enables the evidence on its
+	// own here. Gating this on --verbose alone left the flag unread on the
+	// control view: showEvidence was threaded all the way to the printer and
+	// then never consulted on this path, so `kubescape scan -E --view control`
+	// printed exactly what a bare scan printed.
+	if pp.verboseMode || pp.showEvidence {
 		attachAssistedRemediation(workloadsSummary, controlSummary.GetID(), resourcesResult, pp.showSecrets)
 	}
 
 	failedWorkloads := groupByNamespaceOrKind(workloadsSummary, workloadSummaryFailed)
 	skippedWorkloads := groupByNamespaceOrKind(workloadsSummary, workloadSummarySkipped)
 
+	// Passed resources stay behind --verbose. They are a different request:
+	// --verbose widens *which resources* are listed, --show-evidence deepens
+	// *what is shown* about a failed one. Widening on -E would change the
+	// output of every control that has passing resources, which is not what
+	// the flag asks for.
 	var passedWorkloads map[string][]WorkloadSummary
 	if pp.verboseMode {
 		passedWorkloads = groupByNamespaceOrKind(workloadsSummary, workloadSummaryPassed)
