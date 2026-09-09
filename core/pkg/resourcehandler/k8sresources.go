@@ -631,7 +631,7 @@ func (k8sHandler *K8sResourceHandler) findScanObjectResource(ctx context.Context
 		resolved = resolver(g, v, resource.GetKind())
 	}
 	if len(resolved) != 1 {
-		return nil, fmt.Errorf("resource not found in Kubernetes discovery: %s", getReadableID(resource))
+		return nil, fmt.Errorf("resource not found in Kubernetes discovery: %s", k8sinterface.GetReadableID(resource))
 	}
 	apiGroup, apiVersion, resourceName := k8sinterface.StringToResourceGroup(resolved[0].groupVersionResourceTriplet)
 	if apiGroup == "" && resourceName == "secrets" {
@@ -647,7 +647,7 @@ func (k8sHandler *K8sResourceHandler) findScanObjectResource(ctx context.Context
 		// The GVR is resolved from cluster discovery, not from the
 		// client-supplied kind string, so this check cannot be sidestepped with
 		// casing or aliasing tricks.
-		return nil, fmt.Errorf("scanning Secret resources via single resource scan is not supported: %s", getReadableID(resource))
+		return nil, fmt.Errorf("scanning Secret resources via single resource scan is not supported: %s", k8sinterface.GetReadableID(resource))
 	}
 	gvr := schema.GroupVersionResource{Group: apiGroup, Version: apiVersion, Resource: resourceName}
 	isNamespaced := (resolved[0].namespaced != nil && *resolved[0].namespaced) || (resolved[0].namespaced == nil && k8sinterface.IsNamespaceScope(&gvr))
@@ -661,7 +661,7 @@ func (k8sHandler *K8sResourceHandler) findScanObjectResource(ctx context.Context
 			targetNS = resource.GetName()
 		}
 		if globalFieldSelector != nil && !globalFieldSelector.AllowsNamespace(&gvr, targetNS, resolved[0].namespaced) {
-			return nil, fmt.Errorf("resource %s was not found", getReadableID(resource))
+			return nil, fmt.Errorf("resource %s was not found", k8sinterface.GetReadableID(resource))
 		}
 
 		var clientResource dynamic.ResourceInterface = k8sHandler.k8s.DynamicClient.Resource(gvr)
@@ -676,25 +676,25 @@ func (k8sHandler *K8sResourceHandler) findScanObjectResource(ctx context.Context
 					objNS = uObj.GetName()
 				}
 				if !globalFieldSelector.AllowsNamespace(&gvr, objNS, resolved[0].namespaced) {
-					return nil, fmt.Errorf("resource %s was not found", getReadableID(resource))
+					return nil, fmt.Errorf("resource %s was not found", k8sinterface.GetReadableID(resource))
 				}
 			}
 			if k8sinterface.IsTypeWorkload(uObj.Object) && k8sinterface.WorkloadHasParent(workloadinterface.NewWorkloadObj(uObj.Object)) {
-				return nil, fmt.Errorf("resource %s has a parent and cannot be scanned", getReadableID(resource))
+				return nil, fmt.Errorf("resource %s has a parent and cannot be scanned", k8sinterface.GetReadableID(resource))
 			}
 			if !k8sinterface.IsTypeWorkload(uObj.Object) {
-				return nil, fmt.Errorf("%s is not a valid Kubernetes workload", getReadableID(resource))
+				return nil, fmt.Errorf("%s is not a valid Kubernetes workload", k8sinterface.GetReadableID(resource))
 			}
 			return workloadinterface.NewWorkloadObj(uObj.Object), nil
 		}
 		if apierrors.IsNotFound(err) {
-			return nil, fmt.Errorf("resource %s was not found", getReadableID(resource))
+			return nil, fmt.Errorf("resource %s was not found", k8sinterface.GetReadableID(resource))
 		}
 		// If Get failed with another error (e.g. Forbidden if the account was granted
 		// 'list' but not 'get', or an unexpected API issue), log and fall back to
 		// pullSingleResource for backwards compatibility.
 		logger.L().Debug("direct get failed, falling back to list",
-			helpers.String("resource", getReadableID(resource)),
+			helpers.String("resource", k8sinterface.GetReadableID(resource)),
 			helpers.Error(err))
 	}
 
@@ -706,30 +706,30 @@ func (k8sHandler *K8sResourceHandler) findScanObjectResource(ctx context.Context
 	}
 	result, selectorErrs := k8sHandler.pullSingleResource(ctx, &gvr, "", fieldSelectors, globalFieldSelector, resolved[0].namespaced)
 	if len(result) == 0 && len(selectorErrs) > 0 {
-		return nil, fmt.Errorf("failed to get resource %s, reason: %v", getReadableID(resource), selectorErrs[0].err)
+		return nil, fmt.Errorf("failed to get resource %s, reason: %v", k8sinterface.GetReadableID(resource), selectorErrs[0].err)
 	}
 	for _, se := range selectorErrs {
 		logger.L().Warning("partial collection during single resource scan",
-			helpers.String("resource", getReadableID(resource)),
+			helpers.String("resource", k8sinterface.GetReadableID(resource)),
 			helpers.String("selector", se.selector),
 			helpers.Error(se.err))
 	}
 
 	if len(result) == 0 {
-		return nil, fmt.Errorf("resource %s was not found", getReadableID(resource))
+		return nil, fmt.Errorf("resource %s was not found", k8sinterface.GetReadableID(resource))
 	}
 
 	metaObjs := ConvertMapListToMeta(k8sinterface.ConvertUnstructuredSliceToMap(result))
 	if len(metaObjs) == 0 {
-		return nil, fmt.Errorf("resource %s has a parent and cannot be scanned", getReadableID(resource))
+		return nil, fmt.Errorf("resource %s has a parent and cannot be scanned", k8sinterface.GetReadableID(resource))
 	}
 
 	if len(metaObjs) > 1 {
-		return nil, fmt.Errorf("more than one resource found for %s", getReadableID(resource))
+		return nil, fmt.Errorf("more than one resource found for %s", k8sinterface.GetReadableID(resource))
 	}
 
 	if !k8sinterface.IsTypeWorkload(metaObjs[0].GetObject()) {
-		return nil, fmt.Errorf("%s is not a valid Kubernetes workload", getReadableID(resource))
+		return nil, fmt.Errorf("%s is not a valid Kubernetes workload", k8sinterface.GetReadableID(resource))
 	}
 
 	wl := workloadinterface.NewWorkloadObj(metaObjs[0].GetObject())
