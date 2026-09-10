@@ -93,8 +93,15 @@ type ClusterResult struct {
 	// stays readable to a human skimming a report; a consumer that needs to
 	// compute with it can parse it back with time.ParseDuration.
 	Duration string `json:"duration,omitempty"`
-	// Report is the unmodified single-cluster report. It is nil for any
-	// non-scanned cluster, so every consumer has to check Status first.
+	// Report is the cluster's own report with its raw resources removed. The
+	// per-context output file already carries the manifests, and keeping every
+	// cluster's resident until the last context finishes would make the fleet
+	// report's memory cost scale with the size of the fleet rather than with
+	// the size of its largest cluster. The summary and the per-resource
+	// results, which are what the aggregation reads, are kept in full.
+	//
+	// It is nil for any non-scanned cluster, so every consumer has to check
+	// Status first.
 	Report *reporthandlingv2.PostureReport `json:"report,omitempty"`
 }
 

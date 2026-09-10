@@ -97,8 +97,9 @@
 //     cluster and reports posture divergence separately from coverage gaps. It
 //     reads the matrix built here, so the matrix settles first.
 //   - The compliance rollup across clusters.
-//   - Printers for the aggregate, and the wiring that produces a FleetReport
-//     from a multi-context run.
+//   - Printers for the aggregate. The wiring exists: --fleet-report on a
+//     --kube-contexts scan writes the FleetReport as JSON, and that is the
+//     only format so far.
 //   - Concurrency. Contexts are scanned one at a time because k8sinterface's
 //     process-global connection state has no locking around it, so two scans
 //     running concurrently would race on that state regardless of

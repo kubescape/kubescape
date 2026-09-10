@@ -14,6 +14,7 @@ import (
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/cautils/getter"
 	"github.com/kubescape/kubescape/v4/core/meta"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling"
 	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	reporthandlingapis "github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
@@ -124,7 +125,8 @@ func getFrameworkCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comm
 
 			ctx, cancel := deriveTimeoutContext(scanInfo, ks)
 			defer cancel()
-			return runFrameworkScan(ctx, scanInfo, ks, policyIdentifiers)
+			_, err := runFrameworkScan(ctx, scanInfo, ks, policyIdentifiers)
+			return err
 		},
 	}
 
@@ -135,35 +137,35 @@ func getFrameworkCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comm
 // command performs for the single-context path. Factored out so fleetScan
 // can run the exact same per-cluster behavior once per --kube-contexts
 // entry, instead of a parallel, divergent copy of this logic.
-func runFrameworkScan(ctx context.Context, scanInfo *cautils.ScanInfo, ks meta.IKubescape, policyIdentifiers []cautils.PolicyIdentifier) error {
+func runFrameworkScan(ctx context.Context, scanInfo *cautils.ScanInfo, ks meta.IKubescape, policyIdentifiers []cautils.PolicyIdentifier) (*resultshandling.ResultsHandler, error) {
 	results, err := ks.ScanContext(ctx, scanInfo, policyIdentifiers)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	if err = results.HandleResults(ctx, scanInfo); err != nil {
-		return err
+		return results, err
 	}
 
 	if results.GetComplianceScore() < float32(scanInfo.ComplianceThreshold) {
-		return fmt.Errorf("scan compliance-score is below permitted threshold: %.2f (compliance-threshold: %.2f)", results.GetComplianceScore(), scanInfo.ComplianceThreshold)
+		return results, fmt.Errorf("scan compliance-score is below permitted threshold: %.2f (compliance-threshold: %.2f)", results.GetComplianceScore(), scanInfo.ComplianceThreshold)
 	}
 
 	if err := enforceSeverityThresholds(&results.GetData().Report.SummaryDetails, scanInfo); err != nil {
-		return err
+		return results, err
 	}
 	if scanInfo.ScanImages {
 		if err := enforceImageSeverityThresholds(results.ImageScanData, scanInfo); err != nil {
-			return err
+			return results, err
 		}
 	}
 	if err := enforceCoverageThreshold(results.GetData().ScanCoverage, len(results.GetData().Report.SummaryDetails.Controls), scanInfo); err != nil {
-		return err
+		return results, err
 	}
 	if err := enforcePolicyDegradation(results.GetData().ScanCoverage, scanInfo); err != nil {
-		return err
+		return results, err
 	}
-	return enforceBaselineDrift(ctx, results, scanInfo)
+	return results, enforceBaselineDrift(ctx, results, scanInfo)
 }
 
 // countersExceedSeverityThreshold returns true if a failed control has severity
