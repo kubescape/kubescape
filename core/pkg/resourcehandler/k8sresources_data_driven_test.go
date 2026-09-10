@@ -228,6 +228,24 @@ func TestFindScanObjectResourceDataDriven(t *testing.T) {
 			wantName:      "checkout",
 			listForbidden: true,
 		},
+		{
+			name:      "workload queried with default namespace does not find workload in staging",
+			request:   scanObject("apps/v1", "Deployment", "default", "checkout"),
+			objects:   []runtime.Object{unstructuredResource("apps/v1", "Deployment", "staging", "checkout")},
+			wantError: "was not found",
+		},
+		{
+			name:     "cluster-wide query with empty namespace finds single workload across namespaces",
+			request:  scanObject("apps/v1", "Deployment", "", "checkout"),
+			objects:  []runtime.Object{unstructuredResource("apps/v1", "Deployment", "staging", "checkout")},
+			wantName: "checkout",
+		},
+		{
+			name:      "cluster-wide query with empty namespace fails when duplicates exist across namespaces",
+			request:   scanObject("apps/v1", "Deployment", "", "checkout"),
+			objects:   []runtime.Object{unstructuredResource("apps/v1", "Deployment", "shop", "checkout"), unstructuredResource("apps/v1", "Deployment", "staging", "checkout")},
+			wantError: "more than one resource found",
+		},
 	}
 
 	for _, test := range tests {

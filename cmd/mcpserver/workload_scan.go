@@ -2,6 +2,7 @@ package mcpserver
 
 import (
 	"context"
+	"errors"
 	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -25,6 +26,25 @@ import (
 // fraction of what a namespace scan would pull.
 var workloadScanFrameworks = []string{"workloadscan", "allcontrols"}
 
+const mcpNamespaceDefaultedHint = "namespace defaulted to 'default'; pass namespace: '*' to search cluster-wide"
+
+type defaultedNamespaceError struct {
+	err  error
+	hint string
+}
+
+func (e *defaultedNamespaceError) Error() string {
+	return e.err.Error()
+}
+
+func (e *defaultedNamespaceError) Unwrap() error {
+	return e.err
+}
+
+func (e *defaultedNamespaceError) Hint() string {
+	return e.hint
+}
+
 // buildWorkloadScanRequest translates the tool arguments into a scanRequest.
 //
 // It is separate from RunWorkloadScan so the identifier parsing, the namespace
@@ -36,30 +56,14 @@ func buildWorkloadScanRequest(workload, namespace, path, frameworkName string) (
 		return scanRequest{}, err
 	}
 
-	// Namespace resolution has three cases, and "" cannot be made to stand for
-	// two of them:
-	//
-	//	""   not supplied      — fall back to the namespace in the identifier
-	//	"*"  cluster-wide      — override the identifier, search every namespace
-	//	ns   explicit          — override the identifier
-	//
-	// An explicit namespace winning over the identifier's matches the CLI
-	// (cmd/scan/workload.go). The "*" case is why the dispatch reads this
-	// argument with mcpStringArg rather than mcpScanNamespace: that helper folds
-	// "*" into "" before it reaches here, which would make an explicitly
-	// cluster-wide request indistinguishable from an omitted one and silently
-	// pin the scan to the identifier's namespace. Trimming here as well as at
-	// the dispatch keeps the exported entry point honest, since both handlers
-	// compare namespaces exactly and a stray space resolves nothing.
-	switch namespace = strings.TrimSpace(namespace); namespace {
-	case "":
-		namespace = identNamespace
-	case "*":
-		namespace = ""
+	isClusterScan := strings.TrimSpace(path) == ""
+	targetNamespace, namespaceDefaulted, err := cautils.ResolveWorkloadNamespace(identNamespace, namespace, isClusterScan)
+	if err != nil {
+		return scanRequest{}, err
 	}
 
 	scanObject := &objectsenvelopes.ScanObject{}
-	scanObject.SetNamespace(namespace)
+	scanObject.SetNamespace(targetNamespace)
 	scanObject.SetKind(kind)
 	scanObject.SetName(name)
 	// Left unset for a bare kind so the cluster handler can fall back to
@@ -74,10 +78,11 @@ func buildWorkloadScanRequest(workload, namespace, path, frameworkName string) (
 	}
 
 	req := scanRequest{
-		namespace:         namespace,
-		policyIdentifiers: cautils.BuildPolicyIdentifiers(frameworks, apisv1.KindFramework),
-		label:             "Workload",
-		scanObject:        scanObject,
+		namespace:          targetNamespace,
+		namespaceDefaulted: namespaceDefaulted,
+		policyIdentifiers:  cautils.BuildPolicyIdentifiers(frameworks, apisv1.KindFramework),
+		label:              "Workload",
+		scanObject:         scanObject,
 	}
 
 	if path = strings.TrimSpace(path); path != "" {
@@ -101,7 +106,14 @@ func (ksServer *KubescapeMcpserver) RunWorkloadScan(ctx context.Context, workloa
 	if err != nil {
 		return nil, err
 	}
-	return runScan(ctx, ksServer, req)
+	resp, err := runScan(ctx, ksServer, req)
+	if err != nil {
+		if req.namespaceDefaulted && (errors.Is(err, resourcehandler.ErrResourceNotFound) || errors.Is(err, resourcehandler.ErrResourceNotInDiscovery)) {
+			return nil, &defaultedNamespaceError{err: err, hint: mcpNamespaceDefaultedHint}
+		}
+		return nil, err
+	}
+	return resp, nil
 }
 
 // workloadScanFn is a package-level var so CallTool tests can observe argument
@@ -119,7 +131,7 @@ func createWorkloadScanningTools(ksServer *KubescapeMcpserver) {
 			mcp.Description("Workload identifier as <kind>[.<version>[.<group>]]/<name>, optionally namespace-qualified: \"Deployment/nginx\", \"default/Deployment/nginx\", or \"Deployment.v1.apps/nginx\". A non-built-in kind (CRD) must include its version and group."),
 		),
 		mcp.WithString("namespace",
-			mcp.Description("Namespace of the workload (optional). Overrides a namespace embedded in the workload identifier; pass \"*\" to override it and search every namespace. Omit to use the identifier's namespace, or to search every namespace when the identifier has none."),
+			mcp.Description("Namespace of the workload (optional; defaults to 'default' for live-cluster scans, or unconstrained when path is provided). Pass '*' to search across all namespaces in a live cluster (requires cluster-wide list permissions). Note: the workload identifier prefix (if any) and this parameter must not conflict."),
 		),
 		mcp.WithString("path",
 			mcp.Description("Optional path to local YAML manifests. When set, the workload is resolved from those files instead of the live cluster."),

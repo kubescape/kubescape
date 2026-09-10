@@ -558,16 +558,19 @@ Scan a specific workload.
 ### Synopsis
 
 ```bash
-kubescape scan workload <kind>[.<version>[.<group>]]/<name> [`<glob pattern>`/`-`] [flags]
+kubescape scan workload [<namespace>/]<kind>[.<version>[.<group>]]/<name> [`<glob pattern>`/`-`] [flags]
 ```
 
-Unlike `kubectl`'s `TYPE.VERSION.GROUP` (which takes a plural resource), this command requires a **Kind** (e.g. `Deployment.v1.apps`, not `deployments.v1.apps`).
+Unlike `kubectl`'s `TYPE.VERSION.GROUP` (which takes a plural resource), this command requires a **Kind** (e.g. `Deployment.v1.apps`, not `deployments.v1.apps`). The workload identifier can optionally include a namespace prefix (e.g. `staging/Deployment/nginx`).
+
+> [!NOTE]
+> When providing both a namespace prefix in the workload argument and the `--namespace` / `-n` flag, the two values must agree. If they differ (for example, `staging/Deployment/nginx --namespace prod` or `staging/Deployment/nginx -n "*"`), the command exits with a conflict error rather than silently overriding one value with the other. To fix this error, specify the namespace in only one place or ensure both values match.
 
 ### Flags
 
 | Flag | Description |
 |------|-------------|
-| `--namespace <ns>` | Namespace of the workload |
+| `--namespace <ns>` | Namespace of the workload (defaults to `'default'` for live-cluster scans, or pass `'*'` for cluster-wide search which requires cluster-level list permissions. When scanning local files or stdin, an omitted namespace matches manifests across any namespace. Must not conflict with a namespace prefix in the workload argument) |
 | `--file-path <path>` | Path to a manifest that contains the workload |
 | `--chart-path <path>` | Path to the Helm chart the workload is part of. Must be used with `--file-path` |
 
@@ -575,6 +578,8 @@ Unlike `kubectl`'s `TYPE.VERSION.GROUP` (which takes a plural resource), this co
 
 ```bash
 kubescape scan workload Deployment/nginx --namespace default
+kubescape scan workload staging/Deployment/nginx
+kubescape scan workload Deployment/nginx -n "*"
 kubescape scan workload Deployment.v1.apps/nginx
 kubescape scan workload DaemonSet/fluentd --namespace logging
 kubescape scan workload Deployment/nginx ./manifests

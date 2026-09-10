@@ -3,12 +3,15 @@ package scan
 import (
 	"bytes"
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/mocks"
+	"github.com/kubescape/kubescape/v4/core/pkg/resourcehandler"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer"
 	v1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
@@ -414,10 +417,14 @@ func (p *fakePrinter) Score(_ float32)                               {}
 type recordingKubescape struct {
 	mocks.MockIKubescape
 	captured *cautils.ScanInfo
+	scanErr  error
 }
 
 func (m *recordingKubescape) Scan(scanInfo *cautils.ScanInfo, _ []cautils.PolicyIdentifier) (*resultshandling.ResultsHandler, error) {
 	m.captured = scanInfo
+	if m.scanErr != nil {
+		return nil, m.scanErr
+	}
 	rh := resultshandling.NewResultsHandler(nil, []printer.IPrinter{&fakePrinter{}}, &fakePrinter{})
 	rh.SetData(cautils.NewOPASessionObjMock())
 	return rh, nil
@@ -600,4 +607,121 @@ func TestGetWorkloadCmd_EnforcesComplianceThreshold(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestGetWorkloadCmd_NamespaceResolution(t *testing.T) {
+	t.Run("omitted namespace defaults to default", func(t *testing.T) {
+		scanInfo := cautils.ScanInfo{}
+		mock := &recordingKubescape{}
+		cmd := getWorkloadCmd(mock, &scanInfo)
+		cmd.SilenceErrors = true
+		cmd.SilenceUsage = true
+		cmd.SetArgs([]string{"Deployment/nginx"})
+
+		err := cmd.Execute()
+		require.NoError(t, err)
+		assert.Equal(t, "default", mock.captured.Namespace)
+		assert.True(t, mock.captured.NamespaceDefaulted)
+		assert.Equal(t, "default", mock.captured.ScanObject.GetNamespace())
+	})
+
+	t.Run("wildcard namespace flag resolves to cluster-wide", func(t *testing.T) {
+		scanInfo := cautils.ScanInfo{}
+		mock := &recordingKubescape{}
+		cmd := getWorkloadCmd(mock, &scanInfo)
+		cmd.SilenceErrors = true
+		cmd.SilenceUsage = true
+		cmd.SetArgs([]string{"Deployment/nginx", "-n", "*"})
+
+		err := cmd.Execute()
+		require.NoError(t, err)
+		assert.Equal(t, "", mock.captured.Namespace)
+		assert.False(t, mock.captured.NamespaceDefaulted)
+		assert.Equal(t, "", mock.captured.ScanObject.GetNamespace())
+	})
+
+	t.Run("identifier namespace is preserved when flag omitted", func(t *testing.T) {
+		scanInfo := cautils.ScanInfo{}
+		mock := &recordingKubescape{}
+		cmd := getWorkloadCmd(mock, &scanInfo)
+		cmd.SilenceErrors = true
+		cmd.SilenceUsage = true
+		cmd.SetArgs([]string{"kube-system/Deployment/coredns"})
+
+		err := cmd.Execute()
+		require.NoError(t, err)
+		assert.Equal(t, "kube-system", mock.captured.Namespace)
+		assert.False(t, mock.captured.NamespaceDefaulted)
+		assert.Equal(t, "kube-system", mock.captured.ScanObject.GetNamespace())
+	})
+
+	t.Run("conflicting flag and identifier namespace returns error", func(t *testing.T) {
+		scanInfo := cautils.ScanInfo{}
+		mock := &recordingKubescape{}
+		cmd := getWorkloadCmd(mock, &scanInfo)
+		cmd.SilenceErrors = true
+		cmd.SilenceUsage = true
+		cmd.SetArgs([]string{"staging/Deployment/nginx", "-n", "prod"})
+
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "conflicting namespaces")
+	})
+
+	t.Run("conflicting namespace with local input rejects conflict before file access", func(t *testing.T) {
+		scanInfo := cautils.ScanInfo{}
+		mock := &recordingKubescape{}
+		cmd := getWorkloadCmd(mock, &scanInfo)
+		cmd.SilenceErrors = true
+		cmd.SilenceUsage = true
+		// Even if the file does not exist, namespace conflict must be detected first
+		cmd.SetArgs([]string{"staging/Deployment/nginx", "-n", "prod", "nonexistent-manifest.yaml"})
+
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "conflicting namespaces")
+	})
+
+	t.Run("omitted namespace with file path leaves namespace unconstrained", func(t *testing.T) {
+		scanInfo := cautils.ScanInfo{}
+		mock := &recordingKubescape{}
+		cmd := getWorkloadCmd(mock, &scanInfo)
+		cmd.SilenceErrors = true
+		cmd.SilenceUsage = true
+		cmd.SetArgs([]string{"Deployment/nginx", "--file-path", "testdata/dep.yaml"})
+
+		err := cmd.Execute()
+		require.NoError(t, err)
+		assert.Equal(t, "", mock.captured.Namespace)
+		assert.False(t, mock.captured.NamespaceDefaulted)
+		assert.Equal(t, "", mock.captured.ScanObject.GetNamespace())
+	})
+
+	t.Run("omitted namespace with positional input path leaves namespace unconstrained", func(t *testing.T) {
+		scanInfo := cautils.ScanInfo{}
+		mock := &recordingKubescape{}
+		cmd := getWorkloadCmd(mock, &scanInfo)
+		cmd.SilenceErrors = true
+		cmd.SilenceUsage = true
+		cmd.SetArgs([]string{"Deployment/nginx", "testdata/dep.yaml"})
+
+		err := cmd.Execute()
+		require.NoError(t, err)
+		assert.Equal(t, "", mock.captured.Namespace)
+		assert.False(t, mock.captured.NamespaceDefaulted)
+		assert.Equal(t, "", mock.captured.ScanObject.GetNamespace())
+	})
+
+	t.Run("runWorkloadScan wraps not found error with hint and preserves sentinel", func(t *testing.T) {
+		scanInfo := cautils.ScanInfo{
+			NamespaceDefaulted: true,
+		}
+		mock := &recordingKubescape{
+			scanErr: fmt.Errorf("lookup workload: %w", resourcehandler.ErrResourceNotFound),
+		}
+		err := runWorkloadScan(context.Background(), &scanInfo, mock, nil)
+		require.Error(t, err)
+		assert.True(t, errors.Is(err, resourcehandler.ErrResourceNotFound), "sentinel ErrResourceNotFound must be preserved in error chain")
+		assert.Contains(t, err.Error(), cliNamespaceDefaultedHint)
+	})
 }

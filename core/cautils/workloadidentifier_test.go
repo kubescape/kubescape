@@ -504,3 +504,140 @@ func TestNormalizeWorkloadKind_MockDriftCheck(t *testing.T) {
 	assert.Equal(t, "MyUnknownCRD", NormalizeWorkloadKind("MyUnknownCRD"))
 	assert.Equal(t, "myunknowncrd", NormalizeWorkloadKind("myunknowncrd"))
 }
+
+func TestResolveWorkloadNamespace(t *testing.T) {
+	tests := []struct {
+		name              string
+		identNamespace    string
+		explicitNamespace string
+		isClusterScan     bool
+		wantNamespace     string
+		wantDefaulted     bool
+		wantErr           string
+	}{
+		{
+			name:              "cluster scan: both omitted defaults to default",
+			identNamespace:    "",
+			explicitNamespace: "",
+			isClusterScan:     true,
+			wantNamespace:     "default",
+			wantDefaulted:     true,
+		},
+		{
+			name:              "cluster scan: whitespace only defaults to default",
+			identNamespace:    "   ",
+			explicitNamespace: "  ",
+			isClusterScan:     true,
+			wantNamespace:     "default",
+			wantDefaulted:     true,
+		},
+		{
+			name:              "file scan: both omitted leaves namespace empty",
+			identNamespace:    "",
+			explicitNamespace: "",
+			isClusterScan:     false,
+			wantNamespace:     "",
+			wantDefaulted:     false,
+		},
+		{
+			name:              "file scan: whitespace only leaves namespace empty",
+			identNamespace:    "  ",
+			explicitNamespace: "   ",
+			isClusterScan:     false,
+			wantNamespace:     "",
+			wantDefaulted:     false,
+		},
+		{
+			name:              "identifier provides namespace",
+			identNamespace:    "kube-system",
+			explicitNamespace: "",
+			isClusterScan:     true,
+			wantNamespace:     "kube-system",
+			wantDefaulted:     false,
+		},
+		{
+			name:              "file scan: identifier provides namespace",
+			identNamespace:    "staging",
+			explicitNamespace: "",
+			isClusterScan:     false,
+			wantNamespace:     "staging",
+			wantDefaulted:     false,
+		},
+		{
+			name:              "explicit provides namespace",
+			identNamespace:    "",
+			explicitNamespace: "staging",
+			isClusterScan:     true,
+			wantNamespace:     "staging",
+			wantDefaulted:     false,
+		},
+		{
+			name:              "both provide same namespace",
+			identNamespace:    "prod",
+			explicitNamespace: "prod",
+			isClusterScan:     true,
+			wantNamespace:     "prod",
+			wantDefaulted:     false,
+		},
+		{
+			name:              "explicit wildcard resolves to empty cluster-wide",
+			identNamespace:    "",
+			explicitNamespace: "*",
+			isClusterScan:     true,
+			wantNamespace:     "",
+			wantDefaulted:     false,
+		},
+		{
+			name:              "identifier wildcard resolves to empty cluster-wide",
+			identNamespace:    "*",
+			explicitNamespace: "",
+			isClusterScan:     true,
+			wantNamespace:     "",
+			wantDefaulted:     false,
+		},
+		{
+			name:              "both provide wildcard",
+			identNamespace:    "*",
+			explicitNamespace: "*",
+			isClusterScan:     true,
+			wantNamespace:     "",
+			wantDefaulted:     false,
+		},
+		{
+			name:              "conflict between two different namespaces",
+			identNamespace:    "staging",
+			explicitNamespace: "prod",
+			isClusterScan:     true,
+			wantErr:           "conflicting namespaces: workload identifier specifies \"staging\" but namespace specifies \"prod\"",
+		},
+		{
+			name:              "conflict between identifier namespace and explicit wildcard",
+			identNamespace:    "staging",
+			explicitNamespace: "*",
+			isClusterScan:     true,
+			wantErr:           "conflicting namespaces: workload identifier specifies \"staging\" but namespace specifies \"*\"",
+		},
+		{
+			name:              "conflict between identifier wildcard and explicit namespace",
+			identNamespace:    "*",
+			explicitNamespace: "prod",
+			isClusterScan:     false,
+			wantErr:           "conflicting namespaces: workload identifier specifies \"*\" but namespace specifies \"prod\"",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotNamespace, gotDefaulted, err := ResolveWorkloadNamespace(tt.identNamespace, tt.explicitNamespace, tt.isClusterScan)
+			if tt.wantErr != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.wantErr)
+				assert.False(t, gotDefaulted)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantNamespace, gotNamespace)
+			assert.Equal(t, tt.wantDefaulted, gotDefaulted)
+		})
+	}
+}

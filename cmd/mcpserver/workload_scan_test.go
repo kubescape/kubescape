@@ -69,10 +69,11 @@ func TestBuildWorkloadScanRequest_ScanObject(t *testing.T) {
 		wantAPIVer    string
 	}{
 		{
-			name:     "bare kind and name leaves apiVersion unset for discovery",
-			workload: "Deployment/nginx",
-			wantKind: "Deployment",
-			wantName: "nginx",
+			name:          "bare kind and name leaves apiVersion unset for discovery and defaults namespace to default",
+			workload:      "Deployment/nginx",
+			wantNamespace: "default",
+			wantKind:      "Deployment",
+			wantName:      "nginx",
 		},
 		{
 			name:          "namespace from the identifier",
@@ -82,31 +83,34 @@ func TestBuildWorkloadScanRequest_ScanObject(t *testing.T) {
 			wantName:      "nginx",
 		},
 		{
-			name:          "explicit namespace wins over the identifier's",
-			workload:      "a/Deployment/nginx",
+			name:          "explicit namespace when identifier has none",
+			workload:      "Deployment/nginx",
 			namespace:     "b",
 			wantNamespace: "b",
 			wantKind:      "Deployment",
 			wantName:      "nginx",
 		},
 		{
-			name:       "dotted kind resolves to a group/version apiVersion",
-			workload:   "Deployment.v1.apps/nginx",
-			wantKind:   "Deployment",
-			wantName:   "nginx",
-			wantAPIVer: "apps/v1",
+			name:          "dotted kind resolves to a group/version apiVersion",
+			workload:      "Deployment.v1.apps/nginx",
+			wantNamespace: "default",
+			wantKind:      "Deployment",
+			wantName:      "nginx",
+			wantAPIVer:    "apps/v1",
 		},
 		{
-			name:     "bare short name preserves raw kind",
-			workload: "deploy/nginx",
-			wantKind: "deploy",
-			wantName: "nginx",
+			name:          "bare short name preserves raw kind",
+			workload:      "deploy/nginx",
+			wantNamespace: "default",
+			wantKind:      "deploy",
+			wantName:      "nginx",
 		},
 		{
-			name:     "bare CRD kind preserves casing",
-			workload: "Deploy/crd-deploy",
-			wantKind: "Deploy",
-			wantName: "crd-deploy",
+			name:          "bare CRD kind preserves casing",
+			workload:      "Deploy/crd-deploy",
+			wantNamespace: "default",
+			wantKind:      "Deploy",
+			wantName:      "crd-deploy",
 		},
 	}
 
@@ -124,70 +128,130 @@ func TestBuildWorkloadScanRequest_ScanObject(t *testing.T) {
 	}
 }
 
-// TestBuildWorkloadScanRequest_NamespacePrecedence pins the three-way namespace
-// rule. The wildcard cases are the ones worth reading: "*" means "search every
-// namespace" and must beat a namespace embedded in the identifier, which is
-// impossible to express if "*" has already been folded into "" (the empty
-// string means the argument was omitted).
+// TestBuildWorkloadScanRequest_NamespacePrecedence pins the namespace resolution rules.
+// An omitted namespace defaults to "default" for cluster scans, and remains unconstrained for file scans.
 func TestBuildWorkloadScanRequest_NamespacePrecedence(t *testing.T) {
 	tests := []struct {
-		name      string
-		workload  string
-		namespace string
-		want      string
+		name          string
+		workload      string
+		namespace     string
+		path          string
+		want          string
+		wantDefaulted bool
 	}{
 		{
-			name:     "omitted, identifier has none",
-			workload: "Deployment/nginx",
-			want:     "",
+			name:          "omitted, identifier has none defaults to default",
+			workload:      "Deployment/nginx",
+			want:          "default",
+			wantDefaulted: true,
 		},
 		{
-			name:     "omitted, identifier supplies one",
-			workload: "default/Deployment/nginx",
-			want:     "default",
+			name:          "file scan: omitted, identifier has none leaves namespace empty",
+			workload:      "Deployment/nginx",
+			path:          "testdata/deployment.yaml",
+			want:          "",
+			wantDefaulted: false,
 		},
 		{
-			name:      "explicit overrides the identifier",
-			workload:  "a/Deployment/nginx",
-			namespace: "b",
-			want:      "b",
+			name:          "omitted, identifier supplies one",
+			workload:      "default/Deployment/nginx",
+			want:          "default",
+			wantDefaulted: false,
 		},
 		{
-			name:      "wildcard overrides the identifier and searches everywhere",
-			workload:  "default/Deployment/nginx",
-			namespace: "*",
-			want:      "",
+			name:          "matching explicit and identifier",
+			workload:      "default/Deployment/nginx",
+			namespace:     "default",
+			want:          "default",
+			wantDefaulted: false,
 		},
 		{
-			name:      "wildcard with no identifier namespace stays cluster-wide",
-			workload:  "Deployment/nginx",
-			namespace: "*",
-			want:      "",
+			name:          "explicit namespace when identifier has none",
+			workload:      "Deployment/nginx",
+			namespace:     "b",
+			want:          "b",
+			wantDefaulted: false,
 		},
 		{
-			// Both resolution paths compare namespaces exactly, so an untrimmed
-			// value resolves nothing at all.
-			name:      "explicit namespace is trimmed",
-			workload:  "Deployment/nginx",
-			namespace: "  default  ",
-			want:      "default",
+			name:          "wildcard with no identifier namespace stays cluster-wide",
+			workload:      "Deployment/nginx",
+			namespace:     "*",
+			want:          "",
+			wantDefaulted: false,
 		},
 		{
-			name:      "whitespace-only namespace reads as omitted",
-			workload:  "default/Deployment/nginx",
-			namespace: "   ",
-			want:      "default",
+			name:          "identifier wildcard with no namespace argument stays cluster-wide",
+			workload:      "*/Deployment/nginx",
+			namespace:     "",
+			want:          "",
+			wantDefaulted: false,
+		},
+		{
+			name:          "explicit namespace is trimmed",
+			workload:      "Deployment/nginx",
+			namespace:     "  default  ",
+			want:          "default",
+			wantDefaulted: false,
+		},
+		{
+			name:          "whitespace-only namespace reads as omitted",
+			workload:      "default/Deployment/nginx",
+			namespace:     "   ",
+			want:          "default",
+			wantDefaulted: false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			req, err := buildWorkloadScanRequest(tt.workload, tt.namespace, "", "")
+			req, err := buildWorkloadScanRequest(tt.workload, tt.namespace, tt.path, "")
 			require.NoError(t, err)
 			require.NotNil(t, req.scanObject)
 			assert.Equal(t, tt.want, req.scanObject.GetNamespace(),
 				"the scan object's namespace is what both resource handlers match on")
-			assert.Equal(t, tt.want, req.namespace)
+			if tt.path == "" {
+				assert.Equal(t, tt.want, req.namespace)
+			} else {
+				assert.Equal(t, "", req.namespace, "file scan request leaves collection namespace empty")
+			}
+			assert.Equal(t, tt.wantDefaulted, req.namespaceDefaulted)
+		})
+	}
+}
+
+func TestBuildWorkloadScanRequest_NamespaceConflict(t *testing.T) {
+	tests := []struct {
+		name      string
+		workload  string
+		namespace string
+		wantErr   string
+	}{
+		{
+			name:      "explicit differs from identifier",
+			workload:  "a/Deployment/nginx",
+			namespace: "b",
+			wantErr:   "conflicting namespaces",
+		},
+		{
+			name:      "wildcard differs from identifier namespace",
+			workload:  "default/Deployment/nginx",
+			namespace: "*",
+			wantErr:   "conflicting namespaces",
+		},
+		{
+			name:      "identifier wildcard differs from explicit namespace",
+			workload:  "*/Deployment/nginx",
+			namespace: "prod",
+			wantErr:   "conflicting namespaces",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := buildWorkloadScanRequest(tt.workload, tt.namespace, "", "")
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.wantErr)
+			assert.True(t, errors.Is(err, cautils.ErrInvalidWorkloadIdentifier))
 		})
 	}
 }
@@ -221,7 +285,7 @@ func TestBuildScanInfo_WorkloadTimeout(t *testing.T) {
 		namespace     string
 		wantNamespace string
 	}{
-		{namespace: "", wantNamespace: ""},
+		{namespace: "", wantNamespace: "default"},
 		{namespace: "*", wantNamespace: ""},
 		{namespace: "default", wantNamespace: "default"},
 	}
@@ -235,9 +299,6 @@ func TestBuildScanInfo_WorkloadTimeout(t *testing.T) {
 			require.NotNil(t, scanInfo.ScanObject)
 			assert.Equal(t, "nginx", scanInfo.ScanObject.GetName(),
 				"the scan object must reach ScanInfo, which is what drives single-resource collection")
-			// Asserted here too because an earlier version of this test fed "*"
-			// while checking only the timeout, and so did not notice that the
-			// wildcard was reaching the scan object verbatim.
 			assert.Equal(t, tt.wantNamespace, scanInfo.ScanObject.GetNamespace())
 		})
 	}
@@ -328,9 +389,18 @@ func newWorkloadScanTestServer(t *testing.T) *KubescapeMcpserver {
 func TestRunWorkloadScan_ResolvesFromFile(t *testing.T) {
 	ksServer := newWorkloadScanTestServer(t)
 
+	// File scan with omitted namespace resolves cleanly and does not default namespace
 	respBytes, err := ksServer.RunWorkloadScan(context.Background(), "Deployment/nginx", "", "testdata/deployment.yaml", "nsa")
 	require.NoError(t, err)
 	assert.Contains(t, string(respBytes), `"total_failed":`)
+	assert.NotContains(t, string(respBytes), `"warning":`)
+	assert.NotContains(t, string(respBytes), `"namespace_defaulted": true`)
+
+	respBytesExplicit, err := ksServer.RunWorkloadScan(context.Background(), "Deployment/nginx", "default", "testdata/deployment.yaml", "nsa")
+	require.NoError(t, err)
+	assert.Contains(t, string(respBytesExplicit), `"total_failed":`)
+	assert.NotContains(t, string(respBytesExplicit), `"warning":`)
+	assert.NotContains(t, string(respBytesExplicit), `"namespace_defaulted": true`)
 }
 
 func TestRunWorkloadScan_CaseInsensitiveAndShortName(t *testing.T) {
@@ -373,10 +443,21 @@ func TestRunWorkloadScan_NotFoundInFile(t *testing.T) {
 func TestRunWorkloadScan_AmbiguousInFile(t *testing.T) {
 	ksServer := newWorkloadScanTestServer(t)
 
-	// Two Deployments named nginx in different namespaces: without a namespace
-	// the request matches both, and reporting that beats scanning an arbitrary
-	// one of them.
+	// Two Deployments named nginx in different namespaces: without a namespace,
+	// file resolution does not restrict to "default", matching both and reporting ambiguity.
 	_, err := ksServer.RunWorkloadScan(context.Background(), "Deployment/nginx", "", "testdata/two-workloads.yaml", "nsa")
+	require.Error(t, err)
+	assert.Contains(t, strings.ToLower(err.Error()), "more than one")
+	assert.True(t, errors.Is(err, resourcehandler.ErrAmbiguousResource), "expected ErrAmbiguousResource sentinel in error chain")
+
+	// Explicit wildcard "*" also matches both across namespaces
+	_, err = ksServer.RunWorkloadScan(context.Background(), "*/Deployment/nginx", "", "testdata/two-workloads.yaml", "nsa")
+	require.Error(t, err)
+	assert.Contains(t, strings.ToLower(err.Error()), "more than one")
+	assert.True(t, errors.Is(err, resourcehandler.ErrAmbiguousResource), "expected ErrAmbiguousResource sentinel in error chain")
+
+	// Also verify passing namespace: "*" parameter directly
+	_, err = ksServer.RunWorkloadScan(context.Background(), "Deployment/nginx", "*", "testdata/two-workloads.yaml", "nsa")
 	require.Error(t, err)
 	assert.Contains(t, strings.ToLower(err.Error()), "more than one")
 	assert.True(t, errors.Is(err, resourcehandler.ErrAmbiguousResource), "expected ErrAmbiguousResource sentinel in error chain")
@@ -605,9 +686,12 @@ func TestRunWorkloadScan_LiveClusterPath(t *testing.T) {
 
 	ksServer := newLiveClusterWorkloadScanTestServer(t, deploy)
 
-	// path is empty: forces executeScan to construct NewK8sResourceHandler
-	respBytes, err := ksServer.RunWorkloadScan(context.Background(), "Deployment/nginx", "default", "", "nsa")
+	// path is empty and namespace omitted: forces executeScan to construct NewK8sResourceHandler
+	// and defaults namespace to default with warning
+	respBytes, err := ksServer.RunWorkloadScan(context.Background(), "Deployment/nginx", "", "", "nsa")
 	require.NoError(t, err)
+	assert.Contains(t, string(respBytes), `"warning":`)
+	assert.Contains(t, string(respBytes), `"namespace_defaulted": true`)
 
 	var resp struct {
 		FrameworkName   string `json:"framework_name"`
@@ -647,9 +731,19 @@ func TestRunWorkloadScan_LiveClusterPath_NotFound(t *testing.T) {
 	// Empty cluster (no objects seeded)
 	ksServer := newLiveClusterWorkloadScanTestServer(t)
 
-	_, err := ksServer.RunWorkloadScan(context.Background(), "Deployment/absent", "default", "", "nsa")
+	// Omitted namespace: defaults to default and wraps hint
+	_, err := ksServer.RunWorkloadScan(context.Background(), "Deployment/absent", "", "", "nsa")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, resourcehandler.ErrResourceNotFound), "expected ErrResourceNotFound sentinel in error chain")
+	var hinted interface{ Hint() string }
+	require.True(t, errors.As(err, &hinted))
+	assert.Equal(t, mcpNamespaceDefaultedHint, hinted.Hint())
+
+	// Explicit namespace: no hint wrapped
+	_, errExplicit := ksServer.RunWorkloadScan(context.Background(), "Deployment/absent", "default", "", "nsa")
+	require.Error(t, errExplicit)
+	assert.True(t, errors.Is(errExplicit, resourcehandler.ErrResourceNotFound))
+	assert.False(t, errors.As(errExplicit, &hinted))
 }
 
 // --- tool dispatch --------------------------------------------------------
@@ -793,11 +887,16 @@ func TestCallTool_ScanWorkload_ForwardsArguments(t *testing.T) {
 func TestCallTool_ScanWorkload_ScanFailureIsToolError(t *testing.T) {
 	orig := workloadScanFn
 	t.Cleanup(func() { workloadScanFn = orig })
-	workloadScanFn = func(_ *KubescapeMcpserver, _ context.Context, _, _, _, _ string) ([]byte, error) {
-		return nil, fmt.Errorf("resource nginx was not found: %w", resourcehandler.ErrResourceNotFound)
+	workloadScanFn = func(_ *KubescapeMcpserver, _ context.Context, _, ns, _, _ string) ([]byte, error) {
+		baseErr := fmt.Errorf("resource nginx was not found: %w", resourcehandler.ErrResourceNotFound)
+		if ns == "" {
+			return nil, &defaultedNamespaceError{err: baseErr, hint: mcpNamespaceDefaultedHint}
+		}
+		return nil, baseErr
 	}
 	ksServer := newWorkloadToolServer(t)
 
+	// Omitted namespace: defaulted to default, includes hint
 	res, err := ksServer.CallTool(context.Background(), "scan_workload", map[string]any{"workload": "Deployment/nginx"})
 	require.NoError(t, err)
 	require.NotNil(t, res)
@@ -807,6 +906,20 @@ func TestCallTool_ScanWorkload_ScanFailureIsToolError(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(text), &toolErr))
 	assert.Equal(t, ErrCodeResourceNotFound, toolErr.Code)
 	assert.Contains(t, toolErr.Message, "was not found", "the underlying reason must survive to the caller")
+	assert.Contains(t, toolErr.Message, mcpNamespaceDefaultedHint)
+	assert.Equal(t, mcpNamespaceDefaultedHint, toolErr.Details["hint"])
+
+	// Explicit namespace: no defaulted hint
+	resExplicit, err := ksServer.CallTool(context.Background(), "scan_workload", map[string]any{"workload": "Deployment/nginx", "namespace": "default"})
+	require.NoError(t, err)
+	require.NotNil(t, resExplicit)
+	assert.True(t, resExplicit.IsError)
+	textExplicit := toolResultText(t, resExplicit)
+	var toolErrExplicit ToolError
+	require.NoError(t, json.Unmarshal([]byte(textExplicit), &toolErrExplicit))
+	assert.Equal(t, ErrCodeResourceNotFound, toolErrExplicit.Code)
+	assert.NotContains(t, toolErrExplicit.Message, mcpNamespaceDefaultedHint)
+	assert.Nil(t, toolErrExplicit.Details["hint"])
 }
 
 func TestCreateWorkloadScanningTools_RegistersScanWorkload(t *testing.T) {

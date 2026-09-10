@@ -2,12 +2,14 @@ package scan
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 
 	"github.com/kubescape/kubescape/v4/cmd/shared"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/meta"
+	"github.com/kubescape/kubescape/v4/core/pkg/resourcehandler"
 	v1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/spf13/cobra"
@@ -55,6 +57,8 @@ var (
 	validateWorkloadIdentifier    = cautils.ValidateWorkloadIdentifier
 )
 
+const cliNamespaceDefaultedHint = "namespace defaulted to 'default'; pass -n '*' to search cluster-wide"
+
 // controlCmd represents the control command
 func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Command {
 	var apiVersion string
@@ -79,14 +83,18 @@ func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comma
 			if scanInfo.LabelSelector != "" {
 				return fmt.Errorf("--label-selector is not supported for workload scans: the named resource is fetched by identity, not by label")
 			}
-			namespace, kind, name, workloadAPIVersion, err := parseWorkloadIdentifierString(args[0])
+			identNamespace, kind, name, workloadAPIVersion, err := parseWorkloadIdentifierString(args[0])
 			if err != nil {
 				return fmt.Errorf("invalid input: %w", err)
 			}
 
-			if namespace != "" && scanInfo.Namespace == "" {
-				scanInfo.Namespace = namespace
+			isClusterScan := len(args) == 1 && len(scanInfo.InputPatterns) == 0 && scanInfo.FilePath == ""
+			targetNamespace, namespaceDefaulted, err := cautils.ResolveWorkloadNamespace(identNamespace, scanInfo.Namespace, isClusterScan)
+			if err != nil {
+				return err
 			}
+			scanInfo.Namespace = targetNamespace
+			scanInfo.NamespaceDefaulted = namespaceDefaulted
 
 			cleanup, err := prepareWorkloadInput(cmd.InOrStdin(), args, scanInfo)
 			if err != nil {
@@ -123,7 +131,7 @@ func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comma
 		},
 	}
 
-	workloadCmd.PersistentFlags().StringVarP(&scanInfo.Namespace, "namespace", "n", "", "Namespace of the workload. Default will be empty.")
+	workloadCmd.PersistentFlags().StringVarP(&scanInfo.Namespace, "namespace", "n", "", "Namespace of the workload (defaults to 'default' for live-cluster scans, pass '*' for cluster-wide search; cluster-wide search requires cluster-level list permissions). Must not conflict with namespace prefix in workload argument.")
 	workloadCmd.PersistentFlags().StringVar(&scanInfo.FilePath, "file-path", "", "Path to the workload file.")
 	workloadCmd.PersistentFlags().StringVar(&scanInfo.ChartPath, "chart-path", "", "Path to the helm chart the workload is part of. Must be used with --file-path.")
 	workloadCmd.PersistentFlags().StringVar(&apiVersion, "api-version", "", "API version of the workload (e.g. apps/v1). Default will be empty.")
@@ -139,6 +147,9 @@ func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comma
 func runWorkloadScan(ctx context.Context, scanInfo *cautils.ScanInfo, ks meta.IKubescape, policyIdentifiers []cautils.PolicyIdentifier) error {
 	results, err := ks.ScanContext(ctx, scanInfo, policyIdentifiers)
 	if err != nil {
+		if errors.Is(err, resourcehandler.ErrResourceNotFound) && scanInfo.NamespaceDefaulted {
+			return fmt.Errorf("%w (%s)", err, cliNamespaceDefaultedHint)
+		}
 		return err
 	}
 

@@ -32,6 +32,43 @@ func ValidateWorkloadIdentifier(workloadIdentifier string) error {
 	return err
 }
 
+// ResolveWorkloadNamespace resolves the target namespace from the workload identifier's
+// prefix and the explicit parameter/flag. When isClusterScan is true and no namespace is
+// specified, it defaults to "default" (defaulted = true). For local/offline scans (isClusterScan = false),
+// an omitted namespace remains "" (defaulted = false) so manifest resolution is unconstrained.
+// Conflicting non-empty namespaces are rejected.
+func ResolveWorkloadNamespace(identNamespace, explicitNamespace string, isClusterScan bool) (targetNamespace string, defaulted bool, err error) {
+	identNamespace = strings.TrimSpace(identNamespace)
+	explicitNamespace = strings.TrimSpace(explicitNamespace)
+
+	// 1. Conflict validation: reject non-empty differing namespaces
+	if identNamespace != "" && explicitNamespace != "" && explicitNamespace != identNamespace {
+		return "", false, fmt.Errorf("%w: conflicting namespaces: workload identifier specifies %q but namespace specifies %q", ErrInvalidWorkloadIdentifier, identNamespace, explicitNamespace)
+	}
+
+	// 2. Wildcard resolution: explicit wildcard matches all namespaces
+	if explicitNamespace == "*" || identNamespace == "*" {
+		return "", false, nil
+	}
+
+	// 3. Explicit namespace from tool argument or flag
+	if explicitNamespace != "" {
+		return explicitNamespace, false, nil
+	}
+
+	// 4. Namespace embedded in workload identifier
+	if identNamespace != "" {
+		return identNamespace, false, nil
+	}
+
+	// 5. Default fallback (only for cluster scans)
+	if isClusterScan {
+		return "default", true, nil
+	}
+
+	return "", false, nil
+}
+
 // ParseWorkloadIdentifierString splits a workload identifier into its parts.
 //
 // The namespace is optional and empty when the identifier omits it; the caller

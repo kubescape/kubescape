@@ -223,6 +223,9 @@ func TestFindScanObjectResource(t *testing.T) {
 		"apps/v1/deployments": {
 			localWorkloadWithPath("apps/v1", "Deployment", "default", "nginx", "/fileD.yaml"),
 			localWorkloadWithPath("apps/v1", "Deployment", "default", "web", "/fileF.yaml"),
+			localWorkloadWithPath("apps/v1", "Deployment", "staging", "staging-only", "/fileG.yaml"),
+			localWorkloadWithPath("apps/v1", "Deployment", "", "multi-unnamespaced", "/overlay1.yaml"),
+			localWorkloadWithPath("apps/v1", "Deployment", "", "multi-unnamespaced", "/overlay2.yaml"),
 		},
 		"/v1/secrets": {
 			localWorkloadWithPath("v1", "Secret", "default", "my-secret", "/secret.yaml"),
@@ -408,6 +411,81 @@ func TestFindScanObjectResource(t *testing.T) {
 			expectErr:            true,
 			expectedErrorString:  "is not a valid Kubernetes workload",
 			expectedSentinel:     ErrNotWorkload,
+		},
+		{
+			name: "unnamespaced manifest matches default namespace query",
+			scanObject: &objectsenvelopes.ScanObject{
+				Kind:       "Pod",
+				ApiVersion: "v1",
+				Metadata: objectsenvelopes.ScanObjectMetadata{
+					Namespace: "default",
+					Name:      "mariadb",
+				},
+			},
+			expectedResourceName: "mariadb",
+			expectedKind:         "Pod",
+			expectedApiVersion:   "v1",
+			expectErr:            false,
+		},
+		{
+			name: "explicit staging workload excluded when default namespace queried",
+			scanObject: &objectsenvelopes.ScanObject{
+				Kind:       "Deployment",
+				ApiVersion: "apps/v1",
+				Metadata: objectsenvelopes.ScanObjectMetadata{
+					Namespace: "default",
+					Name:      "staging-only",
+				},
+			},
+			expectedResourceName: "",
+			expectErr:            true,
+			expectedErrorString:  "not found",
+			expectedSentinel:     ErrResourceNotFound,
+		},
+		{
+			name: "explicit staging workload matches when staging namespace queried",
+			scanObject: &objectsenvelopes.ScanObject{
+				Kind:       "Deployment",
+				ApiVersion: "apps/v1",
+				Metadata: objectsenvelopes.ScanObjectMetadata{
+					Namespace: "staging",
+					Name:      "staging-only",
+				},
+			},
+			expectedResourceName: "staging-only",
+			expectedKind:         "Deployment",
+			expectedApiVersion:   "apps/v1",
+			expectErr:            false,
+		},
+		{
+			name: "omitted namespace in file scan matches staging workload",
+			scanObject: &objectsenvelopes.ScanObject{
+				Kind:       "Deployment",
+				ApiVersion: "apps/v1",
+				Metadata: objectsenvelopes.ScanObjectMetadata{
+					Namespace: "",
+					Name:      "staging-only",
+				},
+			},
+			expectedResourceName: "staging-only",
+			expectedKind:         "Deployment",
+			expectedApiVersion:   "apps/v1",
+			expectErr:            false,
+		},
+		{
+			name: "multiple unnamespaced manifests for same resource return ErrAmbiguousResource",
+			scanObject: &objectsenvelopes.ScanObject{
+				Kind:       "Deployment",
+				ApiVersion: "apps/v1",
+				Metadata: objectsenvelopes.ScanObjectMetadata{
+					Namespace: "default",
+					Name:      "multi-unnamespaced",
+				},
+			},
+			expectedResourceName: "",
+			expectErr:            true,
+			expectedErrorString:  "more than one k8s resource found",
+			expectedSentinel:     ErrAmbiguousResource,
 		},
 	}
 
