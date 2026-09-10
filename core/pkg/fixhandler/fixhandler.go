@@ -599,7 +599,7 @@ func (h *FixHandler) resolveResourceSource(ctx context.Context, resourceObj *rep
 }
 
 // PrepareResourcesToFix returns the YAML-source resources that the existing
-// yq-based pipeline can patch. Helm-rendered resources are split off into
+// remediation pipeline can patch. Helm-rendered resources are split off into
 // PrepareHelmSuggestions because their fix paths reference rendered output
 // that has no reliable line mapping back to the source template.
 func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInfo {
@@ -1169,34 +1169,7 @@ func (h *FixHandler) getFilePathAndIndex(filePathWithIndex string) (filePath str
 }
 
 func ApplyFixToContent(ctx context.Context, yamlAsString, yamlExpression string) (fixedString string, err error) {
-	yamlAsString = sanitizeYaml(yamlAsString)
-	newline := determineNewlineSeparator(yamlAsString)
-
-	yamlLines := strings.Split(yamlAsString, newline)
-
-	originalRootNodes, err := decodeDocumentRoots(yamlAsString)
-
-	if err != nil {
-		return "", err
-	}
-
-	fixedRootNodes, err := getFixedNodes(ctx, yamlAsString, yamlExpression)
-
-	if err != nil {
-		return "", err
-	}
-
-	fixInfo, err := getFixInfo(ctx, originalRootNodes, fixedRootNodes)
-	if err != nil {
-		return "", err
-	}
-
-	fixedYamlLines := getFixedYamlLines(yamlLines, fixInfo, newline)
-
-	fixedString = getStringFromSlice(fixedYamlLines, newline)
-	fixedString = revertSanitizeYaml(fixedString)
-
-	return fixedString, nil
+	return (YAMLTreeEditor{}).Apply(ctx, yamlAsString, yamlExpression)
 }
 
 // isFixableSourceType reports whether the scan parsed a file the fix engine can
@@ -1599,29 +1572,4 @@ func determineNewlineSeparator(contents string) string {
 	default:
 		return unixNewline
 	}
-}
-
-// sanitizeYaml receives a YAML file as a string, sanitizes it and returns the result
-//
-// Callers should remember to call the corresponding revertSanitizeYaml function.
-//
-// It applies the following sanitization:
-//
-// - Since `yaml/v3` fails to serialize documents starting with a document
-// separator, we comment it out to be compatible.
-func sanitizeYaml(fileAsString string) string {
-	if strings.HasPrefix(fileAsString, "---") {
-		fileAsString = "# " + fileAsString
-	}
-	return fileAsString
-}
-
-// revertSanitizeYaml receives a sanitized YAML file as a string and reverts the applied sanitization
-//
-// For sanitization details, refer to the sanitizeYaml() function.
-func revertSanitizeYaml(fixedYamlString string) string {
-	if strings.HasPrefix(fixedYamlString, "# ---") {
-		fixedYamlString = fixedYamlString[2:]
-	}
-	return fixedYamlString
 }
