@@ -52,7 +52,7 @@ require (
 	github.com/kubescape/k8s-interface v0.0.220
 	github.com/kubescape/opa-utils v0.0.312
 	github.com/kubescape/rbac-utils v0.0.21
-	github.com/kubescape/regolibrary/v2 v2.0.1
+	github.com/kubescape/regolibrary/v2 v2.0.36-0.20260910055212-64b3775e7c88
 	github.com/kubescape/sizing-checker v0.0.0-20250323151332-73a18561dc73
 	github.com/kubescape/storage v0.0.305
 	github.com/mark3labs/mcp-go v1.0.0
