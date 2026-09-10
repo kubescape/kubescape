@@ -85,18 +85,29 @@ func parsePath(path string) []pathSegment {
 		case '.':
 			flush()
 		case '[':
-			contents, next := readBracket(path, i)
+			contents, quoted, next := readBracket(path, i)
 			i = next
 
-			if index, err := strconv.Atoi(contents); err == nil && index >= 0 {
-				// An index qualifies the segment it follows. Without one -
-				// a path opening with "[0]" - there is nothing to qualify,
-				// so it is dropped rather than inventing an empty segment.
-				if started {
+			// Quoting is how a rule says "this is a key, not an index", so a
+			// quoted run of digits stays a key: data['0'] selects the Secret
+			// entry named "0", not the first element of a list.
+			if index, ok := digitIndex(contents); ok && !quoted {
+				switch {
+				case started:
+					// The index qualifies the segment being read.
 					segments = append(segments, pathSegment{key: key.String(), index: index})
 					key.Reset()
 					started = false
+				case len(segments) > 0 && segments[len(segments)-1].index < 0:
+					// The index follows a segment that is already closed - a
+					// bracketed key, as in annotations[foo.bar/list][2]. It
+					// qualifies that one. Dropping it would resolve the path
+					// to the whole list, the same "succeeds against the wrong
+					// thing" failure that reading brackets exists to end.
+					segments[len(segments)-1].index = index
 				}
+				// Anything else has nothing to qualify: a leading "[0]", or a
+				// second index on an already-indexed segment.
 				continue
 			}
 
@@ -114,29 +125,59 @@ func parsePath(path string) []pathSegment {
 	return segments
 }
 
-// readBracket reads the contents of the bracket opening at open, returning the
-// contents with any surrounding quotes stripped and the index of the closing
-// bracket. An unclosed bracket yields the rest of the string, so a malformed
-// path degrades to a lookup that finds nothing rather than to a panic.
-func readBracket(path string, open int) (contents string, closing int) {
+// readBracket reads the contents of the bracket opening at open. It returns the
+// contents with any surrounding quotes stripped, whether they were quoted, and
+// the index of the closing bracket. An unclosed bracket yields the rest of the
+// string, so a malformed path degrades to a lookup that finds nothing rather
+// than to a panic.
+//
+// Whether the contents were quoted is reported separately because stripping the
+// quotes discards the one signal that says a run of digits is a key.
+func readBracket(path string, open int) (contents string, quoted bool, closing int) {
 	end := strings.IndexByte(path[open+1:], ']')
 	if end < 0 {
-		return unquote(path[open+1:]), len(path) - 1
+		contents, quoted = unquote(path[open+1:])
+		return contents, quoted, len(path) - 1
 	}
 	end += open + 1
-	return unquote(path[open+1 : end]), end
+	contents, quoted = unquote(path[open+1 : end])
+	return contents, quoted, end
 }
 
 // unquote strips one layer of matching single or double quotes, which rules use
 // for keys that would otherwise be ambiguous: metadata.annotations['%v'].
-func unquote(s string) string {
+func unquote(s string) (string, bool) {
 	if len(s) < 2 {
-		return s
+		return s, false
 	}
 	if (s[0] == '\'' && s[len(s)-1] == '\'') || (s[0] == '"' && s[len(s)-1] == '"') {
-		return s[1 : len(s)-1]
+		return s[1 : len(s)-1], true
 	}
-	return s
+	return s, false
+}
+
+// digitIndex reports the list index a bracket's contents name, if the contents
+// are a plain run of digits.
+//
+// The digits are checked explicitly rather than left to strconv.Atoi, which
+// also accepts a sign: "[+0]" is not a list index any rule would write, and
+// reading it as one would silently resolve the path to an element. This matches
+// how isContainerEnvValuePath reads env[N] in pathvalue.go.
+func digitIndex(contents string) (int, bool) {
+	if contents == "" {
+		return 0, false
+	}
+	for i := 0; i < len(contents); i++ {
+		if contents[i] < '0' || contents[i] > '9' {
+			return 0, false
+		}
+	}
+	index, err := strconv.Atoi(contents)
+	if err != nil {
+		// Only reachable for a run of digits too long for an int.
+		return 0, false
+	}
+	return index, true
 }
 
 // truncateAtValueSeparator drops the "=<value>" half of an assisted-remediation

@@ -148,6 +148,51 @@ func TestParsePath_IndexBelongsToItsSegment(t *testing.T) {
 			path: "spec.containers[-1].image",
 			want: []pathSegment{seg("spec", -1), seg("containers", -1), seg("-1", -1), seg("image", -1)},
 		},
+		{
+			// An index can follow a bracketed key, and it qualifies that key.
+			// Dropping it would resolve the path to the whole list - the same
+			// "succeeds against the wrong thing" failure reading brackets
+			// exists to end.
+			name: "index following a bracketed key qualifies it",
+			path: "metadata.annotations[foo.bar/list][2]",
+			want: []pathSegment{seg("metadata", -1), seg("annotations", -1), seg("foo.bar/list", 2)},
+		},
+		{
+			name: "index following a bracketed key mid-path",
+			path: "metadata.annotations[foo.bar/list][2].name",
+			want: []pathSegment{seg("metadata", -1), seg("annotations", -1), seg("foo.bar/list", 2), seg("name", -1)},
+		},
+		{
+			// A second index has nothing left to qualify: the segment already
+			// carries one. Kubernetes has no nested lists here, so this is
+			// malformed input rather than a shape to support.
+			name: "a second index on an already-indexed segment is dropped",
+			path: "spec.containers[0][1]",
+			want: []pathSegment{seg("spec", -1), seg("containers", 0)},
+		},
+		{
+			// Quoting is how a rule says "key, not index". Stripping the quotes
+			// before testing for digits would throw that signal away.
+			name: "quoted digits stay a key",
+			path: "data['0']",
+			want: []pathSegment{seg("data", -1), seg("0", -1)},
+		},
+		{
+			name: "double-quoted digits stay a key",
+			path: `data["12"]`,
+			want: []pathSegment{seg("data", -1), seg("12", -1)},
+		},
+		{
+			// strconv.Atoi accepts a sign; a list index never carries one.
+			name: "signed digits are a key, not an index",
+			path: "data[+0]",
+			want: []pathSegment{seg("data", -1), seg("+0", -1)},
+		},
+		{
+			name: "leading zeros are still digits",
+			path: "spec.containers[007].image",
+			want: []pathSegment{seg("spec", -1), seg("containers", 7), seg("image", -1)},
+		},
 	}
 
 	for _, tc := range cases {
