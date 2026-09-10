@@ -6,9 +6,11 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -117,11 +119,11 @@ func (sp *SARIFPrinter) addRule(scanRun *sarif.Run, control reportsummary.IContr
 		})
 }
 
-// addResult adds a result of checking a rule to the scan run based on the given control summary.
+// createResult builds one finding without retaining it in a run.
 // reviewPathLocations, when non-empty, adds one relatedLocation per resolved ReviewPath so each
 // field that actually caused the failure gets its own precise location in the manifest, distinct
 // from the single primary location (which points at the fix, not necessarily at every failed field).
-func (sp *SARIFPrinter) addResult(scanRun *sarif.Run, ctl reportsummary.IControlSummary, filepath string, location locationresolver.Location, ac *resourcesresults.ResourceAssociatedControl, resourceID string, resource workloadinterface.IMetadata, reviewPathLocations map[string]locationresolver.Location) *sarif.Result {
+func (sp *SARIFPrinter) createResult(ctl reportsummary.IControlSummary, filepath string, location locationresolver.Location, ac *resourcesresults.ResourceAssociatedControl, resourceID string, resource workloadinterface.IMetadata, reviewPathLocations map[string]locationresolver.Location) *sarif.Result {
 	msg := ctl.GetDescription()
 	if resource != nil {
 		if paths := AssistedRemediationPathsWithCurrentValuesFiltered(ac, resource, sp.showSecrets); len(paths) > 0 {
@@ -129,7 +131,7 @@ func (sp *SARIFPrinter) addResult(scanRun *sarif.Run, ctl reportsummary.IControl
 			msg += "\n\nAffected fields:\n" + strings.Join(paths, "\n")
 		}
 	}
-	result := scanRun.CreateResultForRule(ctl.GetID()).
+	result := sarif.NewRuleResult(ctl.GetID()).
 		WithMessage(sarif.NewTextMessage(msg)).
 		WithLocations([]*sarif.Location{
 			sarif.NewLocationWithPhysicalLocation(
@@ -563,6 +565,10 @@ func (sp *SARIFPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.
 }
 
 func (sp *SARIFPrinter) printConfigurationScan(ctx context.Context, opaSessionObj *cautils.OPASessionObj) error {
+	return sp.writeConfigurationSARIF(ctx, sp.writer, opaSessionObj)
+}
+
+func (sp *SARIFPrinter) writeConfigurationSARIF(ctx context.Context, w io.Writer, opaSessionObj *cautils.OPASessionObj) error {
 	startedAt := opaSessionObj.Report.ReportGenerationTime
 	if startedAt.IsZero() {
 		startedAt = time.Now().UTC()
@@ -599,12 +605,50 @@ func (sp *SARIFPrinter) printConfigurationScan(ctx context.Context, opaSessionOb
 		})
 	}
 
+	ordered := groupByManifest(failed)
+	// Rules are compact and precede results. Retain their indexes, not a
+	// second graph of findings, locations and fixes.
+	ruleIndexes := make(map[string]int)
+	for _, resource := range ordered {
+		for _, ac := range sortedSARIFControls(opaSessionObj.ResourcesResult[resource.resourceID].AssociatedControls) {
+			if !ac.GetStatus(nil).IsFailed() {
+				continue
+			}
+			ctl := opaSessionObj.Report.SummaryDetails.Controls.GetControl(reportsummary.EControlCriteriaID, ac.GetID())
+			if ctl == nil {
+				continue
+			}
+			if _, exists := ruleIndexes[ctl.GetID()]; !exists {
+				ruleIndexes[ctl.GetID()] = len(run.Tool.Driver.Rules)
+				sp.addRule(run, ctl)
+			}
+		}
+	}
+	stream := newJSONStream(w)
+	stream.raw("{\n  \"version\":")
+	stream.value(report.Version)
+	stream.raw(",\n  \"$schema\":")
+	stream.value(report.Schema)
+	stream.raw(",\n  \"runs\": [\n    {\n      \"tool\": ")
+	stream.encoder.SetIndent("      ", "  ")
+	stream.value(run.Tool)
+	// Run.Results has no omitempty tag. Never marshal the run as a header:
+	// that would emit a second results key before the streamed array.
+	stream.raw(",\n      \"results\": [")
+	stream.encoder.SetIndent("        ", "  ")
+	firstResult := true
 	var caches manifestCache
-	for _, resource := range groupByManifest(failed) {
+	for _, resource := range ordered {
+		if stream.err != nil {
+			return fmt.Errorf("failed to write SARIF report: %w", stream.err)
+		}
 		cache := caches.get(resource.absPath)
 		locationResolver := cache.locationResolver(resource.absPath, "SARIF")
 
-		for _, toPin := range opaSessionObj.ResourcesResult[resource.resourceID].AssociatedControls {
+		for _, toPin := range sortedSARIFControls(opaSessionObj.ResourcesResult[resource.resourceID].AssociatedControls) {
+			if stream.err != nil {
+				return fmt.Errorf("failed to write SARIF report: %w", stream.err)
+			}
 			ac := toPin
 
 			if ac.GetStatus(nil).IsFailed() {
@@ -615,9 +659,9 @@ func (sp *SARIFPrinter) printConfigurationScan(ctx context.Context, opaSessionOb
 				}
 				location := resolveFixLocation(opaSessionObj, locationResolver, &ac, resource.resourceID)
 				reviewPathLocations := resolveReviewPathLocations(opaSessionObj, locationResolver, &ac, resource.resourceID)
-				sp.addRule(run, ctl)
 				rsrc := opaSessionObj.AllResources[resource.resourceID]
-				r := sp.addResult(run, ctl, resource.relPath, location, &ac, resource.resourceID, rsrc, reviewPathLocations)
+				r := sp.createResult(ctl, resource.relPath, location, &ac, resource.resourceID, rsrc, reviewPathLocations)
+				r.WithRuleIndex(ruleIndexes[ctl.GetID()])
 				// kind stays "" when rsrc is nil (the resource lookup missed) --
 				// collectFixes below treats an unresolved kind as sensitive,
 				// the same fail-closed rule csvControlPaths applies.
@@ -626,6 +670,9 @@ func (sp *SARIFPrinter) printConfigurationScan(ctx context.Context, opaSessionOb
 					kind = rsrc.GetKind()
 				}
 				collectFixes(ctx, cache, r, ac, opaSessionObj, resource.resourceID, resource.relPath, resource.absPath, kind, sp.showSecrets)
+				stream.separator(&firstResult)
+				stream.raw("\n        ")
+				stream.value(r)
 			}
 		}
 	}
@@ -638,14 +685,22 @@ func (sp *SARIFPrinter) printConfigurationScan(ctx context.Context, opaSessionOb
 		ExecutionSuccessful: &executionSuccessful,
 	})
 
-	report.AddRun(run)
-
-	// Surface write failures instead of silently leaving an empty/partial file.
-	if err := report.PrettyWrite(sp.writer); err != nil {
-		return fmt.Errorf("failed to write SARIF report: %w", err)
+	stream.raw("\n      ],\n      \"invocations\": ")
+	stream.encoder.SetIndent("      ", "  ")
+	stream.value(run.Invocations)
+	stream.raw("\n    }\n  ]\n}\n")
+	if stream.err != nil {
+		return fmt.Errorf("failed to write SARIF report: %w", stream.err)
 	}
-
 	return nil
+}
+
+func sortedSARIFControls(controls []resourcesresults.ResourceAssociatedControl) []resourcesresults.ResourceAssociatedControl {
+	ordered := slices.Clone(controls)
+	slices.SortFunc(ordered, func(a, b resourcesresults.ResourceAssociatedControl) int {
+		return strings.Compare(a.ControlID, b.ControlID)
+	})
+	return ordered
 }
 
 // resolveFixLocation resolves a failed control's location in the manifest, falling back to line 1. Shared by the SARIF and GitLab SAST printers

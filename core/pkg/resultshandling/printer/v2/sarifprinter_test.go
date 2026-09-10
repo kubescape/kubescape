@@ -1,11 +1,14 @@
 package printer
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -385,7 +388,6 @@ func TestAddRule_SetsSecuritySeverity(t *testing.T) {
 }
 
 func TestAddResult_AnnotatesInitAndEphemeralContainerNames(t *testing.T) {
-	run := sarif.NewRunWithInformationURI(toolName, toolInfoURI)
 	control := &reportsummary.ControlSummary{
 		ControlID:   "C-0057",
 		Name:        "Privileged container",
@@ -394,12 +396,11 @@ func TestAddResult_AnnotatesInitAndEphemeralContainerNames(t *testing.T) {
 	}
 
 	sp := NewSARIFPrinter(false)
-	sp.addRule(run, control)
 
 	ac := makeControlWithPaths(privilegedInitAndEphemeralPaths(), nil)
 	ac.ControlID = "C-0057"
 
-	result := sp.addResult(run, control, "pod.yaml", locationresolver.Location{Line: 1, Column: 1}, ac, "apps/v1/Deployment/default/demo", privilegedInitAndEphemeralPod(), nil)
+	result := sp.createResult(control, "pod.yaml", locationresolver.Location{Line: 1, Column: 1}, ac, "apps/v1/Deployment/default/demo", privilegedInitAndEphemeralPod(), nil)
 	require.NotNil(t, result.Message)
 	require.NotNil(t, result.Message.Text)
 	for _, path := range privilegedInitAndEphemeralNamedPaths() {
@@ -433,20 +434,16 @@ func TestAddResult_RedactsSecretFixPathValueUnlessShowSecrets(t *testing.T) {
 	}
 
 	t.Run("redacted by default", func(t *testing.T) {
-		run := sarif.NewRunWithInformationURI(toolName, toolInfoURI)
 		sp := NewSARIFPrinter(false)
-		sp.addRule(run, control)
-		result := sp.addResult(run, control, "secret.yaml", locationresolver.Location{Line: 1, Column: 1}, ac, "v1/Secret/default/demo", resource, nil)
+		result := sp.createResult(control, "secret.yaml", locationresolver.Location{Line: 1, Column: 1}, ac, "v1/Secret/default/demo", resource, nil)
 		require.NotNil(t, result.Message.Text)
 		assert.NotContains(t, *result.Message.Text, "s3cr3t-plaintext-password")
 		assert.Contains(t, *result.Message.Text, "[redacted]")
 	})
 
 	t.Run("revealed with showSecrets", func(t *testing.T) {
-		run := sarif.NewRunWithInformationURI(toolName, toolInfoURI)
 		sp := NewSARIFPrinter(true)
-		sp.addRule(run, control)
-		result := sp.addResult(run, control, "secret.yaml", locationresolver.Location{Line: 1, Column: 1}, ac, "v1/Secret/default/demo", resource, nil)
+		result := sp.createResult(control, "secret.yaml", locationresolver.Location{Line: 1, Column: 1}, ac, "v1/Secret/default/demo", resource, nil)
 		require.NotNil(t, result.Message.Text)
 		assert.Contains(t, *result.Message.Text, "s3cr3t-plaintext-password")
 	})
@@ -1705,4 +1702,118 @@ func TestPrintImageScan_MultipleImagesAggregatesRuns(t *testing.T) {
 		require.NotNil(t, run.Tool.Driver)
 		assert.Equal(t, "Kubescape", run.Tool.Driver.Name, "driver name must be Kubescape for run %d", i)
 	}
+}
+
+func TestConfigurationSARIFStreamingStructureAndOrdering(t *testing.T) {
+	for _, count := range []int{0, 1, 3} {
+		t.Run(fmt.Sprint(count), func(t *testing.T) {
+			s := configurationOutputFixture(t, count)
+			before := snapshotJSONSession(t, s)
+			sp := NewSARIFPrinter(false)
+			var output bytes.Buffer
+			require.NoError(t, sp.writeConfigurationSARIF(context.Background(), &output, s))
+			require.NoError(t, checkJSONDocument(output.Bytes()))
+			var report sarif.Report
+			require.NoError(t, json.Unmarshal(output.Bytes(), &report))
+			expectedEnvelope, err := sarif.New(sarif.Version210)
+			require.NoError(t, err)
+			require.Equal(t, expectedEnvelope.Version, report.Version)
+			require.Equal(t, expectedEnvelope.Schema, report.Schema)
+			require.Len(t, report.Runs, 1)
+			run := report.Runs[0]
+			require.NotNil(t, run.Results, "empty results must be [] rather than null")
+			require.Len(t, run.Results, count*10)
+			if count > 0 {
+				require.Len(t, run.Tool.Driver.Rules, 10)
+			}
+			for i, result := range run.Results {
+				require.NotNil(t, result.RuleIndex)
+				require.Less(t, int(*result.RuleIndex), len(run.Tool.Driver.Rules))
+				require.Equal(t, *result.RuleID, run.Tool.Driver.Rules[*result.RuleIndex].ID)
+				require.Equal(t, fmt.Sprintf("C-%04d", i%10), *result.RuleID)
+				require.NotEmpty(t, result.PartialFingerprints["kubescapeFindingFingerprint"])
+				require.Equal(t, "pod.yaml", *result.Locations[0].PhysicalLocation.ArtifactLocation.URI)
+			}
+			require.Len(t, run.Invocations, 1)
+			require.Equal(t, s.Report.ReportGenerationTime, *run.Invocations[0].StartTimeUTC)
+			require.True(t, *run.Invocations[0].ExecutionSuccessful)
+			require.Equal(t, before, snapshotJSONSession(t, s))
+			for id, r := range s.ResourcesResult {
+				slices.Reverse(r.AssociatedControls)
+				delete(s.ResourcesResult, id)
+				s.ResourcesResult[id] = r
+			}
+			var again bytes.Buffer
+			require.NoError(t, sp.writeConfigurationSARIF(context.Background(), &again, s))
+			require.NoError(t, checkJSONDocument(again.Bytes()))
+			var next sarif.Report
+			require.NoError(t, json.Unmarshal(again.Bytes(), &next))
+			report.Runs[0].Invocations[0].EndTimeUTC = nil
+			next.Runs[0].Invocations[0].EndTimeUTC = nil
+			require.Equal(t, report, next)
+		})
+	}
+}
+
+func TestConfigurationSARIFStreamingSkipsIneligibleFindings(t *testing.T) {
+	s := configurationOutputFixture(t, 3)
+	delete(s.Report.SummaryDetails.Controls, "C-0000")
+	delete(s.ResourceSource, "resource-000000")
+	for i := range s.ResourcesResult["resource-000001"].AssociatedControls {
+		s.ResourcesResult["resource-000001"].AssociatedControls[i].Status = apis.StatusInfo{InnerStatus: apis.StatusPassed}
+	}
+	var output bytes.Buffer
+	require.NoError(t, NewSARIFPrinter(false).writeConfigurationSARIF(context.Background(), &output, s))
+	require.NoError(t, checkJSONDocument(output.Bytes()))
+	var report sarif.Report
+	require.NoError(t, json.Unmarshal(output.Bytes(), &report))
+	require.Len(t, report.Runs[0].Results, 9)
+	require.Len(t, report.Runs[0].Tool.Driver.Rules, 9)
+}
+
+func TestConfigurationSARIFWriteFailures(t *testing.T) {
+	s := configurationOutputFixture(t, 2)
+	before := snapshotJSONSession(t, s)
+	sp := NewSARIFPrinter(false)
+	var output bytes.Buffer
+	require.NoError(t, sp.writeConfigurationSARIF(context.Background(), &output, s))
+	cuts := []int{0, 1}
+	for _, marker := range []string{`"tool":`, `"results": [`, `"kubescapeFindingFingerprint":`, `"invocations":`} {
+		index := strings.Index(output.String(), marker)
+		require.NotEqual(t, -1, index)
+		cuts = append(cuts, index, index+len(marker)+1)
+	}
+	for _, cut := range cuts {
+		w := &failAfterWriter{remaining: cut}
+		require.ErrorIs(t, sp.writeConfigurationSARIF(context.Background(), w, s), errOutputTest)
+		require.Zero(t, w.callsAfterFailure)
+		require.Equal(t, before, snapshotJSONSession(t, s))
+	}
+	closing := &stopAtResultWriter{marker: "\n    }\n  ]\n}\n"}
+	require.ErrorIs(t, sp.writeConfigurationSARIF(context.Background(), closing, s), errOutputTest)
+	require.ErrorIs(t, sp.writeConfigurationSARIF(context.Background(), shortOutputWriter{}, s), io.ErrShortWrite)
+	var buffer bytes.Buffer
+	stream := newJSONStream(&buffer)
+	result := sarif.NewRuleResult("C-0000")
+	result.Properties = sarif.Properties{"unsupported": make(chan int)}
+	stream.value(result)
+	require.Error(t, stream.err)
+	stream.raw("}")
+	require.Empty(t, buffer.String(), "encoding failures must stop framing too")
+}
+
+func TestConfigurationSARIFStopsBeforeTransformingLaterResources(t *testing.T) {
+	s := configurationOutputFixture(t, 2)
+	w := &stopAtResultWriter{marker: `"kubescapeFindingFingerprint":`}
+	reads := [2]int{}
+	for i := range reads {
+		id := fmt.Sprintf("resource-%06d", i)
+		s.AllResources[id] = observedResource{s.AllResources[id], func() {
+			require.Contains(t, w.String(), `"results": [`)
+			reads[i]++
+		}}
+	}
+	require.ErrorIs(t, NewSARIFPrinter(false).writeConfigurationSARIF(context.Background(), w, s), errOutputTest)
+	require.Positive(t, reads[0])
+	require.Zero(t, reads[1])
 }
