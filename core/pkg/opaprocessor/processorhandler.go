@@ -234,29 +234,29 @@ func (opap *OPAProcessor) SetIncrementalCache(cache *scancache.Store) {
 	opap.incrementalCache = cache
 }
 
-// effectiveExcludedRules merges the session's rule exclusions with the
-// --skip-controls and --include-controls filters. Both the eager and the
-// streaming entry point build AllPolicies from it, so the same cluster is
+// effectivePolicies returns the session's frameworks with the
+// --skip-controls and --include-controls filters applied. Both the eager and
+// the streaming entry point build AllPolicies from it, so the same cluster is
 // scanned against the same control set whichever path a scan takes.
 // It returns a hard error when the filter leaves nothing to scan, preventing
 // a 0-control, exit-0 result that would silently pass a CI gate.
-func (opap *OPAProcessor) effectiveExcludedRules() (map[string]bool, error) {
+func (opap *OPAProcessor) effectivePolicies() ([]reporthandling.Framework, error) {
 	if opap.SkipControls == "" && opap.IncludeControls == "" {
-		return opap.ExcludedRules, nil
+		return opap.Policies, nil
 	}
-	return buildControlExcludedRules(opap.ExcludedRules, opap.Policies, split(opap.SkipControls), split(opap.IncludeControls))
+	return filterFrameworkControls(opap.Policies, split(opap.SkipControls), split(opap.IncludeControls))
 }
 
 func (opap *OPAProcessor) ProcessRulesListener(ctx context.Context, progressListener IJobProgressNotificationClient) error {
 	scanningScope := cautils.GetScanningScope(opap.Metadata.ContextMetadata)
 
-	excludedRules, err := opap.effectiveExcludedRules()
+	frameworks, err := opap.effectivePolicies()
 	if err != nil {
 		return err
 	}
-	opap.AllPolicies = convertFrameworksToPolicies(opap.Policies, excludedRules, scanningScope)
+	opap.AllPolicies = convertFrameworksToPolicies(frameworks, opap.ExcludedRules, scanningScope)
 
-	ConvertFrameworksToSummaryDetails(&opap.Report.SummaryDetails, opap.Policies, opap.AllPolicies)
+	ConvertFrameworksToSummaryDetails(&opap.Report.SummaryDetails, frameworks, opap.AllPolicies)
 
 	// process
 	processErr := opap.Process(ctx, opap.AllPolicies, progressListener)
@@ -314,12 +314,12 @@ func (opap *OPAProcessor) ProcessWithStreaming(ctx context.Context, batchChan <-
 	opap.loggerStartScanning()
 	defer opap.loggerDoneScanning()
 
-	excludedRules, err := opap.effectiveExcludedRules()
+	frameworks, err := opap.effectivePolicies()
 	if err != nil {
 		return err
 	}
-	opap.AllPolicies = convertFrameworksToPolicies(opap.Policies, excludedRules, cautils.GetScanningScope(opap.Metadata.ContextMetadata))
-	ConvertFrameworksToSummaryDetails(&opap.Report.SummaryDetails, opap.Policies, opap.AllPolicies)
+	opap.AllPolicies = convertFrameworksToPolicies(frameworks, opap.ExcludedRules, cautils.GetScanningScope(opap.Metadata.ContextMetadata))
+	ConvertFrameworksToSummaryDetails(&opap.Report.SummaryDetails, frameworks, opap.AllPolicies)
 
 	scopeControlIDs, wholeClusterControlIDs := splitWholeClusterControls(opap.AllPolicies, sortedControlIDs(opap.AllPolicies))
 
