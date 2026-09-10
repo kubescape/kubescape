@@ -802,10 +802,17 @@ func controlMatchesAny(control *reporthandling.Control, set map[string]struct{})
 	return false
 }
 
-// buildControlExcludedRules merges the existing rule-exclusion map with any
-// --skip-controls or --include-controls filters. The resulting map marks
-// individual rule names with `true` so that convertFrameworksToPolicies drops
-// them. Include is a whitelist; skip is a blacklist and wins over include.
+// filterFrameworkControls applies the --skip-controls and --include-controls
+// filters to frameworks and returns copies with the deselected controls
+// removed. Include is a whitelist; skip is a blacklist and wins over include.
+//
+// The filter operates on whole controls, never on their rules. Rules are
+// shared across controls in the policy library (for example
+// non-root-containers backs both C-0013 and C-0211), so expressing "skip
+// C-0211" as "exclude every rule C-0211 uses" would silently drop every other
+// control built on those rules too, and "include C-0013" would strip C-0013's
+// own rule while excluding its siblings. This mirrors
+// policyhandler.excludeControls, which --exclude-controls uses.
 //
 // Matching is case-insensitive and accepts either identifier a control can be
 // named by, mirroring --exclude-controls (see policyhandler/controlfilter.go's
@@ -814,14 +821,13 @@ func controlMatchesAny(control *reporthandling.Control, set map[string]struct{})
 // --include-controls treats "not in the include set" as "exclude", a single
 // mistyped case produces a silently empty scan instead of the requested
 // control.
-func buildControlExcludedRules(base map[string]bool, frameworks []reporthandling.Framework, skip, include []string) (map[string]bool, error) {
-	excludedRules := make(map[string]bool, len(base)+4)
-	for k, v := range base {
-		excludedRules[k] = v
-	}
-
+//
+// The returned frameworks share their Control values with the input but never
+// its Controls backing arrays, so the caller's slice (which may be a cached
+// policy set reused across scans) is left untouched.
+func filterFrameworkControls(frameworks []reporthandling.Framework, skip, include []string) ([]reporthandling.Framework, error) {
 	if len(skip) == 0 && len(include) == 0 {
-		return excludedRules, nil
+		return frameworks, nil
 	}
 
 	skipSet := make(map[string]struct{}, len(skip))
@@ -872,28 +878,23 @@ func buildControlExcludedRules(base map[string]bool, frameworks []reporthandling
 		}
 	}
 
-	if len(includeSet) > 0 {
-		for _, fw := range frameworks {
-			for i := range fw.Controls {
-				if controlMatchesAny(&fw.Controls[i], includeSet) {
-					continue
-				}
-				for r := range fw.Controls[i].Rules {
-					excludedRules[fw.Controls[i].Rules[r].Name] = true
-				}
-			}
-		}
-	}
-
+	filtered := make([]reporthandling.Framework, 0, len(frameworks))
+	remaining := 0
 	for _, fw := range frameworks {
+		kept := make([]reporthandling.Control, 0, len(fw.Controls))
 		for i := range fw.Controls {
-			if !controlMatchesAny(&fw.Controls[i], skipSet) {
+			control := &fw.Controls[i]
+			if len(includeSet) > 0 && !controlMatchesAny(control, includeSet) {
 				continue
 			}
-			for r := range fw.Controls[i].Rules {
-				excludedRules[fw.Controls[i].Rules[r].Name] = true
+			if controlMatchesAny(control, skipSet) {
+				continue
 			}
+			kept = append(kept, *control)
 		}
+		fw.Controls = kept
+		remaining += len(kept)
+		filtered = append(filtered, fw)
 	}
 
 	// Guard against a filter that leaves nothing to scan. This can happen
@@ -901,26 +902,9 @@ func buildControlExcludedRules(base map[string]bool, frameworks []reporthandling
 	// --skip-controls, or when --skip-controls alone excludes every loaded
 	// control. Mirroring excludeControls' remaining==0 check prevents a
 	// 0-control, 0-failure, exit-0 scan that silently passes a CI gate.
-	if countRemainingControls(frameworks, excludedRules) == 0 {
+	if remaining == 0 {
 		return nil, errNoControlsAfterFilter
 	}
 
-	return excludedRules, nil
-}
-
-// countRemainingControls returns the number of controls that still have at
-// least one rule not marked excluded.
-func countRemainingControls(frameworks []reporthandling.Framework, excludedRules map[string]bool) int {
-	count := 0
-	for _, fw := range frameworks {
-		for i := range fw.Controls {
-			for r := range fw.Controls[i].Rules {
-				if !excludedRules[fw.Controls[i].Rules[r].Name] {
-					count++
-					break
-				}
-			}
-		}
-	}
-	return count
+	return filtered, nil
 }

@@ -26,7 +26,7 @@ func controlIDsInResults(opap *OPAProcessor) map[string]struct{} {
 // TestProcessWithStreaming_HonorsSkipControls runs the eager and streaming
 // pipelines over the same manifests with --skip-controls C-0013 and asserts
 // both drop the control. ProcessRulesListener applies the filter via
-// buildControlExcludedRules; ProcessWithStreaming must reach the same verdict,
+// filterFrameworkControls; ProcessWithStreaming must reach the same verdict,
 // otherwise the same cluster is scanned against a different control set once it
 // grows past the streaming threshold.
 func TestProcessWithStreaming_HonorsSkipControls(t *testing.T) {
