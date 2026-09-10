@@ -5,16 +5,28 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/cautils/getter"
 	"github.com/kubescape/kubescape/v4/core/pkg/resourcehandler"
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/version"
+	discoveryfake "k8s.io/client-go/discovery/fake"
+	dynamicfake "k8s.io/client-go/dynamic/fake"
+	kubernetesfake "k8s.io/client-go/kubernetes/fake"
 )
 
 // --- request building (no scan) -------------------------------------------
@@ -308,11 +320,9 @@ func TestBuildWorkloadScanRequest_HandlerSelection(t *testing.T) {
 
 func newWorkloadScanTestServer(t *testing.T) *KubescapeMcpserver {
 	t.Helper()
-	ksServer := &KubescapeMcpserver{
-		policyGetter: getter.NewDownloadReleasedPolicy(),
+	return &KubescapeMcpserver{
+		policyGetter: getSharedLiveClusterPolicyGetter(t),
 	}
-	_, _ = ksServer.policyGetter.SetRegoObjectsWithFallback()
-	return ksServer
 }
 
 func TestRunWorkloadScan_ResolvesFromFile(t *testing.T) {
@@ -390,6 +400,256 @@ func TestRunWorkloadScan_InvalidIdentifierDoesNotScan(t *testing.T) {
 	_, err := ksServer.RunWorkloadScan(context.Background(), "nginx", "", "testdata/deployment.yaml", "nsa")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, cautils.ErrInvalidWorkloadIdentifier))
+}
+
+// --- resolution against live cluster ---------------------------------------
+//
+// These run the real collect-policies -> collect-resources pipeline with an
+// empty path, forcing executeScan to construct K8sResourceHandler from
+// ksServer.k8sClient instead of FileResourceHandler.
+
+var (
+	sharedLiveClusterPolicyGetter     getter.IPolicyGetter
+	sharedLiveClusterPolicyGetterErr  error
+	sharedLiveClusterPolicyFallback   bool
+	sharedLiveClusterPolicyGetterOnce sync.Once
+	initMockResourcesOnce             sync.Once
+)
+
+func initMockResources() {
+	initMockResourcesOnce.Do(func() {
+		k8sinterface.InitializeMapResourcesMock()
+	})
+}
+
+func getSharedLiveClusterPolicyGetter(t *testing.T) getter.IPolicyGetter {
+	t.Helper()
+	sharedLiveClusterPolicyGetterOnce.Do(func() {
+		drp := getter.NewDownloadReleasedPolicy()
+		sharedLiveClusterPolicyFallback, sharedLiveClusterPolicyGetterErr = drp.SetRegoObjectsWithFallback()
+		if sharedLiveClusterPolicyGetterErr != nil {
+			return
+		}
+		if sharedLiveClusterPolicyFallback {
+			paths := make([]string, 0, len(getter.NativeFrameworks)+4)
+			for _, fw := range getter.NativeFrameworks {
+				paths = append(paths, getter.GetDefaultPath(fw+".json"))
+			}
+			paths = append(paths,
+				getter.GetDefaultPath("allcontrols.json"),
+				getter.GetDefaultPath("c-0017.json"),
+				filepath.Join("..", "..", "core", "cautils", "getter", "testdata", "NSA.json"),
+				filepath.Join("..", "..", "core", "cautils", "getter", "testdata", "MITRE.json"),
+			)
+			sharedLiveClusterPolicyGetter = getter.NewLoadPolicy(paths)
+		} else {
+			sharedLiveClusterPolicyGetter = drp
+		}
+	})
+	require.NoError(t, sharedLiveClusterPolicyGetterErr, "failed to initialize policy getter from network/disk fallback")
+	if sharedLiveClusterPolicyFallback {
+		t.Log("using fallback policy store for live-cluster test")
+	}
+	return sharedLiveClusterPolicyGetter
+}
+
+func newLiveClusterWorkloadScanTestServer(t *testing.T, objects ...runtime.Object) *KubescapeMcpserver {
+	t.Helper()
+	initMockResources()
+
+	listKinds := map[schema.GroupVersionResource]string{
+		{Group: "apps", Version: "v1", Resource: "deployments"}:                                             "DeploymentList",
+		{Group: "apps", Version: "v1", Resource: "replicasets"}:                                             "ReplicaSetList",
+		{Group: "apps", Version: "v1", Resource: "daemonsets"}:                                              "DaemonSetList",
+		{Group: "apps", Version: "v1", Resource: "statefulsets"}:                                            "StatefulSetList",
+		{Group: "batch", Version: "v1", Resource: "jobs"}:                                                   "JobList",
+		{Group: "batch", Version: "v1", Resource: "cronjobs"}:                                               "CronJobList",
+		{Group: "", Version: "v1", Resource: "pods"}:                                                        "PodList",
+		{Group: "", Version: "v1", Resource: "nodes"}:                                                       "NodeList",
+		{Group: "", Version: "v1", Resource: "namespaces"}:                                                  "NamespaceList",
+		{Group: "", Version: "v1", Resource: "services"}:                                                    "ServiceList",
+		{Group: "", Version: "v1", Resource: "serviceaccounts"}:                                             "ServiceAccountList",
+		{Group: "", Version: "v1", Resource: "configmaps"}:                                                  "ConfigMapList",
+		{Group: "", Version: "v1", Resource: "endpoints"}:                                                   "EndpointsList",
+		{Group: "networking.k8s.io", Version: "v1", Resource: "networkpolicies"}:                            "NetworkPolicyList",
+		{Group: "networking.k8s.io", Version: "v1", Resource: "ingresses"}:                                  "IngressList",
+		{Group: "policy", Version: "v1", Resource: "poddisruptionbudgets"}:                                  "PodDisruptionBudgetList",
+		{Group: "policy", Version: "v1beta1", Resource: "podsecuritypolicies"}:                              "PodSecurityPolicyList",
+		{Group: "rbac.authorization.k8s.io", Version: "v1", Resource: "roles"}:                              "RoleList",
+		{Group: "rbac.authorization.k8s.io", Version: "v1", Resource: "rolebindings"}:                       "RoleBindingList",
+		{Group: "rbac.authorization.k8s.io", Version: "v1", Resource: "clusterroles"}:                       "ClusterRoleList",
+		{Group: "rbac.authorization.k8s.io", Version: "v1", Resource: "clusterrolebindings"}:                "ClusterRoleBindingList",
+		{Group: "admissionregistration.k8s.io", Version: "v1", Resource: "validatingwebhookconfigurations"}: "ValidatingWebhookConfigurationList",
+		{Group: "admissionregistration.k8s.io", Version: "v1", Resource: "mutatingwebhookconfigurations"}:   "MutatingWebhookConfigurationList",
+	}
+
+	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), listKinds, objects...)
+
+	dummyNode := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "test-node",
+		},
+	}
+	k8sClient := kubernetesfake.NewSimpleClientset(dummyNode)
+
+	discovery := k8sClient.Discovery().(*discoveryfake.FakeDiscovery)
+	discovery.FakedServerVersion = &version.Info{
+		GitVersion: "v1.28.0",
+		Major:      "1",
+		Minor:      "28",
+	}
+	discovery.Resources = []*metav1.APIResourceList{
+		{
+			GroupVersion: "apps/v1",
+			APIResources: []metav1.APIResource{
+				{Name: "deployments", Kind: "Deployment", Namespaced: true, Verbs: []string{"get", "list", "watch"}},
+				{Name: "replicasets", Kind: "ReplicaSet", Namespaced: true, Verbs: []string{"get", "list", "watch"}},
+				{Name: "daemonsets", Kind: "DaemonSet", Namespaced: true, Verbs: []string{"get", "list", "watch"}},
+				{Name: "statefulsets", Kind: "StatefulSet", Namespaced: true, Verbs: []string{"get", "list", "watch"}},
+			},
+		},
+		{
+			GroupVersion: "batch/v1",
+			APIResources: []metav1.APIResource{
+				{Name: "jobs", Kind: "Job", Namespaced: true, Verbs: []string{"get", "list", "watch"}},
+				{Name: "cronjobs", Kind: "CronJob", Namespaced: true, Verbs: []string{"get", "list", "watch"}},
+			},
+		},
+		{
+			GroupVersion: "v1",
+			APIResources: []metav1.APIResource{
+				{Name: "pods", Kind: "Pod", Namespaced: true, Verbs: []string{"get", "list", "watch"}},
+				{Name: "nodes", Kind: "Node", Namespaced: false, Verbs: []string{"get", "list", "watch"}},
+				{Name: "namespaces", Kind: "Namespace", Namespaced: false, Verbs: []string{"get", "list", "watch"}},
+				{Name: "services", Kind: "Service", Namespaced: true, Verbs: []string{"get", "list", "watch"}},
+				{Name: "serviceaccounts", Kind: "ServiceAccount", Namespaced: true, Verbs: []string{"get", "list", "watch"}},
+				{Name: "configmaps", Kind: "ConfigMap", Namespaced: true, Verbs: []string{"get", "list", "watch"}},
+				{Name: "endpoints", Kind: "Endpoints", Namespaced: true, Verbs: []string{"get", "list", "watch"}},
+			},
+		},
+		{
+			GroupVersion: "networking.k8s.io/v1",
+			APIResources: []metav1.APIResource{
+				{Name: "networkpolicies", Kind: "NetworkPolicy", Namespaced: true, Verbs: []string{"get", "list", "watch"}},
+				{Name: "ingresses", Kind: "Ingress", Namespaced: true, Verbs: []string{"get", "list", "watch"}},
+			},
+		},
+		{
+			GroupVersion: "policy/v1",
+			APIResources: []metav1.APIResource{
+				{Name: "poddisruptionbudgets", Kind: "PodDisruptionBudget", Namespaced: true, Verbs: []string{"get", "list", "watch"}},
+			},
+		},
+		{
+			GroupVersion: "policy/v1beta1",
+			APIResources: []metav1.APIResource{
+				{Name: "podsecuritypolicies", Kind: "PodSecurityPolicy", Namespaced: false, Verbs: []string{"get", "list", "watch"}},
+			},
+		},
+		{
+			GroupVersion: "rbac.authorization.k8s.io/v1",
+			APIResources: []metav1.APIResource{
+				{Name: "roles", Kind: "Role", Namespaced: true, Verbs: []string{"get", "list", "watch"}},
+				{Name: "rolebindings", Kind: "RoleBinding", Namespaced: true, Verbs: []string{"get", "list", "watch"}},
+				{Name: "clusterroles", Kind: "ClusterRole", Namespaced: false, Verbs: []string{"get", "list", "watch"}},
+				{Name: "clusterrolebindings", Kind: "ClusterRoleBinding", Namespaced: false, Verbs: []string{"get", "list", "watch"}},
+			},
+		},
+		{
+			GroupVersion: "admissionregistration.k8s.io/v1",
+			APIResources: []metav1.APIResource{
+				{Name: "validatingwebhookconfigurations", Kind: "ValidatingWebhookConfiguration", Namespaced: false, Verbs: []string{"get", "list", "watch"}},
+				{Name: "mutatingwebhookconfigurations", Kind: "MutatingWebhookConfiguration", Namespaced: false, Verbs: []string{"get", "list", "watch"}},
+			},
+		},
+	}
+
+	ksServer := &KubescapeMcpserver{
+		policyGetter: getSharedLiveClusterPolicyGetter(t),
+		k8sClient: &k8sinterface.KubernetesApi{
+			DynamicClient:    dyn,
+			KubernetesClient: k8sClient,
+			DiscoveryClient:  discovery,
+		},
+	}
+	return ksServer
+}
+
+func TestRunWorkloadScan_LiveClusterPath(t *testing.T) {
+	deploy := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata": map[string]any{
+			"name":      "nginx",
+			"namespace": "default",
+		},
+		"spec": map[string]any{
+			"selector": map[string]any{
+				"matchLabels": map[string]any{"app": "nginx"},
+			},
+			"template": map[string]any{
+				"metadata": map[string]any{
+					"labels": map[string]any{"app": "nginx"},
+				},
+				"spec": map[string]any{
+					"containers": []any{
+						map[string]any{
+							"name":  "nginx",
+							"image": "nginx:latest",
+						},
+					},
+				},
+			},
+		},
+	}}
+
+	ksServer := newLiveClusterWorkloadScanTestServer(t, deploy)
+
+	// path is empty: forces executeScan to construct NewK8sResourceHandler
+	respBytes, err := ksServer.RunWorkloadScan(context.Background(), "Deployment/nginx", "default", "", "nsa")
+	require.NoError(t, err)
+
+	var resp struct {
+		FrameworkName   string `json:"framework_name"`
+		TotalControls   int    `json:"total_controls"`
+		TotalFailed     int    `json:"total_failed"`
+		ReturnedFailed  int    `json:"returned_failed"`
+		Truncated       bool   `json:"truncated"`
+		FailedResources []any  `json:"failed_resources"`
+	}
+	err = json.Unmarshal(respBytes, &resp)
+	require.NoError(t, err)
+
+	assert.Greater(t, resp.TotalControls, 0)
+	assert.GreaterOrEqual(t, resp.TotalFailed, 0)
+	assert.LessOrEqual(t, resp.ReturnedFailed, resp.TotalFailed)
+	assert.False(t, resp.Truncated)
+
+	if resp.ReturnedFailed > 0 {
+		firstFailed, ok := resp.FailedResources[0].(map[string]any)
+		require.True(t, ok, "expected failed resource entry to be an object")
+		resourceID, _ := firstFailed["resourceID"].(string)
+		assert.Contains(t, resourceID, "Deployment")
+		assert.Contains(t, resourceID, "nginx")
+
+		if rawRes, ok := firstFailed["rawResource"].(map[string]any); ok {
+			if obj, ok := rawRes["object"].(map[string]any); ok {
+				assert.Equal(t, "Deployment", obj["kind"])
+				if meta, ok := obj["metadata"].(map[string]any); ok {
+					assert.Equal(t, "nginx", meta["name"])
+				}
+			}
+		}
+	}
+}
+
+func TestRunWorkloadScan_LiveClusterPath_NotFound(t *testing.T) {
+	// Empty cluster (no objects seeded)
+	ksServer := newLiveClusterWorkloadScanTestServer(t)
+
+	_, err := ksServer.RunWorkloadScan(context.Background(), "Deployment/absent", "default", "", "nsa")
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, resourcehandler.ErrResourceNotFound), "expected ErrResourceNotFound sentinel in error chain")
 }
 
 // --- tool dispatch --------------------------------------------------------

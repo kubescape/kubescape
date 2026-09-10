@@ -133,7 +133,7 @@ type KubescapeMcpserver struct {
 	k8sClientMu    sync.Mutex
 	k8sClient      *k8sinterface.KubernetesApi
 	policyGetterMu sync.Mutex
-	policyGetter   *getter.DownloadReleasedPolicy
+	policyGetter   getter.IPolicyGetter
 	scanSemMu      sync.Mutex
 	scanSem        *semaphore.Weighted
 	scanGroup      singleflight.Group
@@ -152,7 +152,7 @@ type KubescapeMcpserver struct {
 // any tool call can reach this method - sync.Once wouldn't know that
 // initialization already happened, and would discard the warmed instance on
 // the first concurrent call.
-func (ksServer *KubescapeMcpserver) getPolicyGetter() *getter.DownloadReleasedPolicy {
+func (ksServer *KubescapeMcpserver) getPolicyGetter() getter.IPolicyGetter {
 	ksServer.policyGetterMu.Lock()
 	defer ksServer.policyGetterMu.Unlock()
 	if ksServer.policyGetter == nil {
@@ -1354,16 +1354,26 @@ func mcpServerEntrypoint(transport string, port int) error {
 		server.WithRecovery(),
 	)
 
-	ksServer := &KubescapeMcpserver{
-		s:            s,
-		policyGetter: getter.NewDownloadReleasedPolicy(),
-	}
+	drp := getter.NewDownloadReleasedPolicy()
+	var pg getter.IPolicyGetter = drp
 
 	// Initialize the policy getter to load the local ~/.kubescape cache.
 	// Without this, the getter will always hit the GitHub API directly for every scan,
 	// defeating offline scanning and causing rate limits.
-	if _, err := ksServer.policyGetter.SetRegoObjectsWithFallback(); err != nil {
+	if fallback, err := drp.SetRegoObjectsWithFallback(); err != nil {
 		logger.L().Warning("Failed to initialize policy store at startup (falling back to direct download later)", helpers.Error(err))
+	} else if fallback {
+		logger.L().Warning("Failed to get policies from github release, loading policies from cache")
+		paths := make([]string, 0, len(getter.NativeFrameworks))
+		for _, fw := range getter.NativeFrameworks {
+			paths = append(paths, getter.GetDefaultPath(fw+".json"))
+		}
+		pg = getter.NewLoadPolicy(paths)
+	}
+
+	ksServer := &KubescapeMcpserver{
+		s:            s,
+		policyGetter: pg,
 	}
 
 	// Creating Kubescape tools and resources
