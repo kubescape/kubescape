@@ -138,27 +138,30 @@ func enrichControlsWithSeverity(controls reportsummary.ControlSummaries) map[str
 func enrichResultsWithSeverity(results []resourcesresults.Result, controlSummaries reportsummary.ControlSummaries, allResources map[string]workloadinterface.IMetadata) []ResultWithSeverity {
 	enrichedResults := make([]ResultWithSeverity, len(results))
 	for i, result := range results {
-		resource := allResources[result.ResourceID]
-		enrichedControls := make([]ResourceAssociatedControlWithSeverity, len(result.AssociatedControls))
-		for j, control := range result.AssociatedControls {
-			// Get the severity from the control summary
-			severity := "Unknown"
-			if controlSummary, exists := controlSummaries[control.GetID()]; exists {
-				severity = apis.ControlSeverityToString(controlSummary.GetScoreFactor())
-			}
-			enrichedControls[j] = ResourceAssociatedControlWithSeverity{
-				ResourceAssociatedControl: control,
-				Severity:                  severity,
-				Evidence:                  failedPathValues(&control, resource),
-			}
-		}
-		enrichedResults[i] = ResultWithSeverity{
-			ResourceID:          result.ResourceID,
-			AssociatedControls:  enrichedControls,
-			PrioritizedResource: result.PrioritizedResource,
-		}
+		enrichedResults[i] = enrichResultWithSeverity(result, controlSummaries, allResources[result.ResourceID])
 	}
 	return enrichedResults
+}
+
+func enrichResultWithSeverity(result resourcesresults.Result, controlSummaries reportsummary.ControlSummaries, resource workloadinterface.IMetadata) ResultWithSeverity {
+	enrichedControls := make([]ResourceAssociatedControlWithSeverity, len(result.AssociatedControls))
+	for j, control := range result.AssociatedControls {
+		// Get the severity from the control summary
+		severity := "Unknown"
+		if controlSummary, exists := controlSummaries[control.GetID()]; exists {
+			severity = apis.ControlSeverityToString(controlSummary.GetScoreFactor())
+		}
+		enrichedControls[j] = ResourceAssociatedControlWithSeverity{
+			ResourceAssociatedControl: control,
+			Severity:                  severity,
+			Evidence:                  failedPathValues(&control, resource),
+		}
+	}
+	return ResultWithSeverity{
+		ResourceID:          result.ResourceID,
+		AssociatedControls:  enrichedControls,
+		PrioritizedResource: result.PrioritizedResource,
+	}
 }
 
 // severityRank returns a comparable rank for a severity string; unknown values rank lowest.
@@ -266,23 +269,7 @@ func extractResourceLabels(allResources map[string]workloadinterface.IMetadata, 
 	resourceLabels := make(map[string]map[string]string)
 
 	for resourceID, resource := range allResources {
-		// IMetadata doesn't have GetLabels, need to cast to IBasicWorkload
-		basicWorkload, ok := resource.(workloadinterface.IBasicWorkload)
-		if !ok {
-			continue
-		}
-
-		labels := basicWorkload.GetLabels()
-		if labels == nil {
-			continue
-		}
-
-		extractedLabels := make(map[string]string)
-		for _, labelKey := range labelsToCopy {
-			if value, exists := labels[labelKey]; exists {
-				extractedLabels[labelKey] = value
-			}
-		}
+		extractedLabels := extractResourceLabelsForResource(resource, labelsToCopy)
 
 		// Only add to result if at least one label was found
 		if len(extractedLabels) > 0 {
@@ -291,6 +278,27 @@ func extractResourceLabels(allResources map[string]workloadinterface.IMetadata, 
 	}
 
 	return resourceLabels
+}
+
+func extractResourceLabelsForResource(resource workloadinterface.IMetadata, labelsToCopy []string) map[string]string {
+	// IMetadata doesn't have GetLabels, need to cast to IBasicWorkload
+	basicWorkload, ok := resource.(workloadinterface.IBasicWorkload)
+	if !ok {
+		return nil
+	}
+
+	labels := basicWorkload.GetLabels()
+	if labels == nil {
+		return nil
+	}
+
+	extractedLabels := make(map[string]string)
+	for _, labelKey := range labelsToCopy {
+		if value, exists := labels[labelKey]; exists {
+			extractedLabels[labelKey] = value
+		}
+	}
+	return extractedLabels
 }
 
 // scanContextName returns the kube context this scan actually ran against.
