@@ -351,5 +351,3 @@ func TestScanInfoCleanupSequentialIdempotency(t *testing.T) {
 	scanInfo.Cleanup()
 	assert.Equal(t, 1, count)
 }
-
-
