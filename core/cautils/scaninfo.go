@@ -563,8 +563,12 @@ func (scanInfo *ScanInfo) GetClusterContextName() string {
 	return k8sinterface.GetContextName()
 }
 
-// getScanningContext gets the scanning context by inspecting the input parameter.
-// This is a pure classification function that performs no network or disk I/O.
+// getScanningContext classifies the scan target type from the input string.
+// Remote URL classification (ContextGitRemote) is purely syntactic and performs
+// no network or disk I/O — in particular, it no longer clones the repository.
+// Local-path classification still inspects the filesystem (os.Getwd,
+// NewLocalGitRepository, isFile) to distinguish directories, files, and local
+// git repositories.
 func (scanInfo *ScanInfo) getScanningContext(input string) ScanningContext {
 	//  cluster
 	if input == "" {
