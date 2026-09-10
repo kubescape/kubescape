@@ -403,9 +403,18 @@ func hasSecretShapedFieldName(kind, path string) bool {
 //     ConfigMap entry named apiKey, a CRD's spec.auth.token, and so on.
 func isSensitivePath(kind, path string) bool {
 	trimmed := truncateAtValueSeparator(path)
-	if kind == "Secret" && (trimmed == "data" || strings.HasPrefix(trimmed, "data.") ||
-		trimmed == "stringData" || strings.HasPrefix(trimmed, "stringData.")) {
-		return true
+
+	// Everything under a Secret's data or stringData is sensitive, whatever the
+	// individual key happens to be called. That is decided on the parsed first
+	// segment rather than a "data." string prefix, because a key can arrive
+	// bracketed: "data[username]" holds Secret content exactly as
+	// "data.password" does, but it does not start with "data." and its own name
+	// is not credential-shaped, so a prefix test let it through.
+	if kind == "Secret" {
+		if segments := splitPath(path); len(segments) > 0 &&
+			(segments[0].key == "data" || segments[0].key == "stringData") {
+			return true
+		}
 	}
 	// C-0012 plaintext credentials live on container env .value, not Secret.data.
 	if isContainerEnvValuePath(trimmed) {

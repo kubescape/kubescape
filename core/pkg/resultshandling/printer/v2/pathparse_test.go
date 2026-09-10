@@ -376,6 +376,60 @@ func TestBracketedKeyRedaction(t *testing.T) {
 			path: "spec.template.metadata.labels[app.kubernetes.io/name]",
 			want: false,
 		},
+		// Everything under a Secret's data is sensitive whatever the key is
+		// called. A bracketed key does not start with "data.", so the prefix
+		// test that used to gate this let any key through whose own name was
+		// not credential-shaped.
+		{
+			name: "secret data key with an ordinary name is still redacted",
+			kind: "Secret",
+			path: "data[username]",
+			want: true,
+		},
+		{
+			name: "secret stringData key with an ordinary name is still redacted",
+			kind: "Secret",
+			path: "stringData[config]",
+			want: true,
+		},
+		{
+			name: "quoted secret data key is redacted",
+			kind: "Secret",
+			path: "data['username']",
+			want: true,
+		},
+		{
+			name: "dotted secret data key is redacted",
+			kind: "Secret",
+			path: "data[my.config.file]",
+			want: true,
+		},
+		{
+			name: "dotted secret data path is still redacted",
+			kind: "Secret",
+			path: "data.username",
+			want: true,
+		},
+		{
+			// The Secret exception is scoped to its content, not to the kind.
+			name: "secret metadata is not redacted",
+			kind: "Secret",
+			path: "metadata.name",
+			want: false,
+		},
+		{
+			// A field merely starting with the same letters is not Secret data.
+			name: "a field named like data is not Secret data",
+			kind: "Secret",
+			path: "dataSomethingElse",
+			want: false,
+		},
+		{
+			name: "an ordinary key on a non-Secret kind is unaffected",
+			kind: "ConfigMap",
+			path: "data[username]",
+			want: false,
+		},
 	}
 
 	for _, tc := range cases {
