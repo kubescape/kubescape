@@ -3,12 +3,10 @@ package printer
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 
-	"github.com/anchore/clio"
-	grypejson "github.com/anchore/grype/grype/presenter/json"
-	"github.com/anchore/grype/grype/presenter/models"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v4/core/cautils"
@@ -58,22 +56,7 @@ func (yp *YamlPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.O
 	if opaSessionObj != nil {
 		err = printConfigurationsScanningYaml(opaSessionObj, imageScanData, yp)
 	} else if len(imageScanData) > 0 {
-		model, err2 := models.NewDocument(clio.Identification{}, imageScanData[0].Packages, imageScanData[0].Context,
-			imageScanData[0].Matches, imageScanData[0].IgnoredMatches, imageScanData[0].VulnerabilityProvider, nil, nil, models.DefaultSortStrategy, false)
-		if err2 != nil {
-			return fmt.Errorf("failed to create document: %w", err2)
-		}
-
-		// Use grype json presenter and convert json to yaml
-		var buf bytes.Buffer
-		err = grypejson.NewPresenter(models.PresenterConfig{Document: model, SBOM: imageScanData[0].SBOM}).Present(&buf)
-		if err == nil {
-			var yamlData []byte
-			yamlData, err = yaml.JSONToYAML(buf.Bytes())
-			if err == nil {
-				_, err = yp.writer.Write(yamlData)
-			}
-		}
+		err = printImageScanningYaml(imageScanData, yp)
 	} else {
 		err = fmt.Errorf("no data provided")
 	}
@@ -85,6 +68,43 @@ func (yp *YamlPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.O
 
 	printer.LogOutputFile(yp.writer.Name())
 	return nil
+}
+
+func printImageScanningYaml(imageScanData []cautils.ImageScanData, yp *YamlPrinter) error {
+	if len(imageScanData) == 1 {
+		var buf bytes.Buffer
+		if err := presentImageScan(imageScanData[0], &buf); err != nil {
+			return fmt.Errorf("failed to create document: %w", err)
+		}
+		yamlData, err := yaml.JSONToYAML(buf.Bytes())
+		if err != nil {
+			return fmt.Errorf("failed to convert json to yaml: %w", err)
+		}
+		_, err = yp.writer.Write(yamlData)
+		return err
+	}
+
+	documents := make([]json.RawMessage, 0, len(imageScanData))
+	for i := range imageScanData {
+		var buf bytes.Buffer
+		if err := presentImageScan(imageScanData[i], &buf); err != nil {
+			return err
+		}
+		documents = append(documents, json.RawMessage(bytes.TrimSpace(buf.Bytes())))
+	}
+
+	encoded, err := json.MarshalIndent(documents, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal multi-image json output: %w", err)
+	}
+
+	yamlData, err := yaml.JSONToYAML(encoded)
+	if err != nil {
+		return fmt.Errorf("failed to convert multi-image json to yaml: %w", err)
+	}
+
+	_, err = yp.writer.Write(yamlData)
+	return err
 }
 
 func printConfigurationsScanningYaml(opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData, yp *YamlPrinter) error {
