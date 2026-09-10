@@ -178,6 +178,34 @@ func TestYAMLTreeEditor_DocumentsAndNewlines(t *testing.T) {
 	checkYAMLEdit(t, "spec:\n  old: true", `select(di==0).spec.new |= false`, "spec:\n  old: true\n  new: false")
 }
 
+func TestYAMLTreeEditor_NonWorkloadClassification(t *testing.T) {
+	for _, nonWorkload := range []string{"1: a\n", "? [one, two]\n: a\n"} {
+		t.Run(nonWorkload, func(t *testing.T) {
+			prefix := nonWorkload + "---\napiVersion: v1\nkind: Pod\nmetadata: {name: first}\nspec: {hostNetwork: true}\n---\n"
+			target := "apiVersion: v1\nkind: Pod\nmetadata: {name: second}\nspec: {hostNetwork: true}\n"
+			input := prefix + target
+			docs, err := decodeDocumentRoots(input)
+			require.NoError(t, err, "non-workload documents are valid YAML")
+			require.Len(t, docs, 3)
+
+			got, err := ApplyFixToContent(context.Background(), input, FixPathToValidYamlExpression("spec.hostNetwork", "false", 1))
+			require.NoError(t, err)
+			require.Equal(t, prefix+strings.Replace(target, "true", "false", 1), got)
+			fixedDocs, err := decodeDocumentRoots(got)
+			require.NoError(t, err)
+			require.Len(t, fixedDocs, 3)
+			var resource map[string]any
+			require.NoError(t, fixedDocs[2].Decode(&resource))
+			require.Equal(t, false, resource["spec"].(map[string]any)["hostNetwork"])
+
+			// Without any workload, generic documents retain their fallback index.
+			indices, err := yamlWorkloadDocuments(docs[:1])
+			require.NoError(t, err)
+			require.Equal(t, []int{0}, indices)
+		})
+	}
+}
+
 func TestYAMLTreeEditor_UntouchedConstructs(t *testing.T) {
 	input := "# --- this is a real comment\nbase: &defaults {name: demo}\ncopy: *defaults\nmerged: {<<: *defaults}\nscript: |\n  echo ---\n  # literal comment\nquoted: '--- inside a scalar'\n\ntarget:   true  # note\n"
 	checkYAMLEdit(t, input, `select(di==0).target |= false`, strings.Replace(input, "target:   true", "target:   false", 1))

@@ -108,7 +108,9 @@ func yamlWorkloadDocuments(docs []yaml.Node) ([]int, error) {
 		}
 		var obj map[string]any
 		if err := n.Decode(&obj); err != nil {
-			return nil, fmt.Errorf("invalid YAML document %d: %w", i, err)
+			// Classification requires string keys, but valid non-workload YAML
+			// may use complex keys. Keep it in nonempty without blocking workloads.
+			continue
 		}
 		kind, _ := obj["kind"].(string)
 		metadata, _ := obj["metadata"].(map[string]any)
