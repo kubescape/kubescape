@@ -18,32 +18,11 @@ type pathSegment struct {
 	index int
 }
 
+// splitPath parses a path into its segments. See parsePath in pathparse.go,
+// which it delegates to: bracket contents are read as a unit, so a key
+// containing a "." survives intact rather than being split apart by one.
 func splitPath(path string) []pathSegment {
-	path = strings.TrimPrefix(path, ".")
-	if i := strings.Index(path, "="); i >= 0 {
-		path = path[:i]
-	}
-
-	var segments []pathSegment
-	for _, part := range strings.Split(path, ".") {
-		if part == "" {
-			continue
-		}
-		seg := pathSegment{index: -1}
-		if i := strings.Index(part, "["); i >= 0 {
-			seg.key = part[:i]
-			tail := part[i+1:]
-			if j := strings.Index(tail, "]"); j >= 0 {
-				if n, err := strconv.Atoi(tail[:j]); err == nil {
-					seg.index = n
-				}
-			}
-		} else {
-			seg.key = part
-		}
-		segments = append(segments, seg)
-	}
-	return segments
+	return parsePath(path)
 }
 
 // anyToString converts a value to its string representation.
@@ -393,9 +372,7 @@ func matchesSafeField(kind, name string, parents []pathSegment) bool {
 // it (e.g. that same env var's "name"), which is a separate, harder problem
 // left out of scope here.
 func hasSecretShapedFieldName(kind, path string) bool {
-	if i := strings.Index(path, "="); i >= 0 {
-		path = path[:i]
-	}
+	// splitPath drops the "=<value>" half itself, and does so bracket-aware.
 	segments := splitPath(path)
 	if len(segments) == 0 {
 		return false
@@ -425,14 +402,19 @@ func hasSecretShapedFieldName(kind, path string) bool {
 //     a hardcoded secret can live in a plain field on any resource - a
 //     ConfigMap entry named apiKey, a CRD's spec.auth.token, and so on.
 func isSensitivePath(kind, path string) bool {
-	trimmed := path
-	if i := strings.Index(trimmed, "="); i >= 0 {
-		trimmed = trimmed[:i]
-	}
-	trimmed = strings.TrimLeft(trimmed, ".")
-	if kind == "Secret" && (trimmed == "data" || strings.HasPrefix(trimmed, "data.") ||
-		trimmed == "stringData" || strings.HasPrefix(trimmed, "stringData.")) {
-		return true
+	trimmed := truncateAtValueSeparator(path)
+
+	// Everything under a Secret's data or stringData is sensitive, whatever the
+	// individual key happens to be called. That is decided on the parsed first
+	// segment rather than a "data." string prefix, because a key can arrive
+	// bracketed: "data[username]" holds Secret content exactly as
+	// "data.password" does, but it does not start with "data." and its own name
+	// is not credential-shaped, so a prefix test let it through.
+	if kind == "Secret" {
+		if segments := splitPath(path); len(segments) > 0 &&
+			(segments[0].key == "data" || segments[0].key == "stringData") {
+			return true
+		}
 	}
 	// C-0012 plaintext credentials live on container env .value, not Secret.data.
 	if isContainerEnvValuePath(trimmed) {
