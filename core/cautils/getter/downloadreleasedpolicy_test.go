@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +14,7 @@ import (
 
 	jsoniter "github.com/json-iterator/go"
 	"github.com/kubescape/kubescape/v4/internal/testutils"
+	"github.com/kubescape/regolibrary/v2/gitregostore"
 	"github.com/stretchr/testify/require"
 )
 
@@ -230,5 +233,42 @@ func TestSetRegoObjectsWithFallback(t *testing.T) {
 		require.Error(t, err)
 		require.False(t, fallback)
 		require.Contains(t, err.Error(), "v0.0.0-does-not-exist")
+	})
+}
+
+func TestSetRegoObjectsWithFallbackChecksumVerificationFailure(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/download/checksums.txt", r.URL.Path)
+		_, err := fmt.Fprintln(w, "not-a-valid-checksum-manifest")
+		require.NoError(t, err)
+	}))
+	t.Cleanup(server.Close)
+
+	t.Run("unversioned release does not fall back on checksum failure", func(t *testing.T) {
+		t.Parallel()
+
+		p := NewDownloadReleasedPolicyWithVersion("")
+		p.gs.URL = server.URL + "/download"
+
+		fallback, err := p.SetRegoObjectsWithFallback()
+
+		require.Error(t, err)
+		require.False(t, fallback)
+		require.True(t, errors.Is(err, gitregostore.ErrChecksumVerification))
+	})
+
+	t.Run("pinned release returns checksum failure", func(t *testing.T) {
+		t.Parallel()
+
+		p := NewDownloadReleasedPolicyWithVersion("v2.0.301")
+		p.gs.URL = server.URL + "/download"
+
+		fallback, err := p.SetRegoObjectsWithFallback()
+
+		require.Error(t, err)
+		require.False(t, fallback)
+		require.True(t, errors.Is(err, gitregostore.ErrChecksumVerification))
 	})
 }

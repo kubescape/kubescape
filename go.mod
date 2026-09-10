@@ -52,7 +52,7 @@ require (
 	github.com/kubescape/k8s-interface v0.0.220
 	github.com/kubescape/opa-utils v0.0.312
 	github.com/kubescape/rbac-utils v0.0.21
-	github.com/kubescape/regolibrary/v2 v2.0.1
+	github.com/kubescape/regolibrary/v2 v2.0.35-0.20260908055419-b5a54be48d8a
 	github.com/kubescape/sizing-checker v0.0.0-20250323151332-73a18561dc73
 	github.com/kubescape/storage v0.0.305
 	github.com/mark3labs/mcp-go v1.0.0
@@ -630,3 +630,5 @@ replace github.com/google/go-containerregistry => github.com/matthyx/go-containe
 replace github.com/containerd/containerd => github.com/Retr0-Xd/containerd v0.0.0-20260322054632-16583c73e9b8
 
 replace github.com/distribution/reference => github.com/distribution/reference v0.5.0
+
+replace github.com/kubescape/regolibrary/v2 => ../regolibrary
