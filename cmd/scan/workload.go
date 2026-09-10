@@ -10,6 +10,7 @@ import (
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/meta"
 	"github.com/kubescape/kubescape/v4/core/pkg/resourcehandler"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling"
 	v1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/spf13/cobra"
@@ -127,7 +128,8 @@ func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comma
 
 			ctx, cancel := deriveTimeoutContext(scanInfo, ks)
 			defer cancel()
-			return runWorkloadScan(ctx, scanInfo, ks, policyIdentifiers)
+			_, err = runWorkloadScan(ctx, scanInfo, ks, policyIdentifiers)
+			return err
 		},
 	}
 
@@ -144,39 +146,39 @@ func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comma
 // command performs for the single-context path. Factored out so fleetScan
 // can run the exact same per-cluster behavior once per --kube-contexts
 // entry, instead of a parallel, divergent copy of this logic.
-func runWorkloadScan(ctx context.Context, scanInfo *cautils.ScanInfo, ks meta.IKubescape, policyIdentifiers []cautils.PolicyIdentifier) error {
+func runWorkloadScan(ctx context.Context, scanInfo *cautils.ScanInfo, ks meta.IKubescape, policyIdentifiers []cautils.PolicyIdentifier) (*resultshandling.ResultsHandler, error) {
 	results, err := ks.ScanContext(ctx, scanInfo, policyIdentifiers)
 	if err != nil {
 		if errors.Is(err, resourcehandler.ErrResourceNotFound) && scanInfo.NamespaceDefaulted {
-			return fmt.Errorf("%w (%s)", err, cliNamespaceDefaultedHint)
+			return nil, fmt.Errorf("%w (%s)", err, cliNamespaceDefaultedHint)
 		}
-		return err
+		return nil, err
 	}
 
 	if err = results.HandleResults(ctx, scanInfo); err != nil {
-		return err
+		return results, err
 	}
 
 	if results.GetComplianceScore() < float32(scanInfo.ComplianceThreshold) {
-		return fmt.Errorf("scan compliance-score is below permitted threshold: %.2f (compliance-threshold: %.2f)", results.GetComplianceScore(), scanInfo.ComplianceThreshold)
+		return results, fmt.Errorf("scan compliance-score is below permitted threshold: %.2f (compliance-threshold: %.2f)", results.GetComplianceScore(), scanInfo.ComplianceThreshold)
 	}
 
 	if err := enforceSeverityThresholds(&results.GetData().Report.SummaryDetails, scanInfo); err != nil {
-		return err
+		return results, err
 	}
 	if scanInfo.ScanImages {
 		if err := enforceImageSeverityThresholds(results.ImageScanData, scanInfo); err != nil {
-			return err
+			return results, err
 		}
 	}
 	if err := enforceCoverageThreshold(results.GetData().ScanCoverage, len(results.GetData().Report.SummaryDetails.Controls), scanInfo); err != nil {
-		return err
+		return results, err
 	}
 	if err := enforcePolicyDegradation(results.GetData().ScanCoverage, scanInfo); err != nil {
-		return err
+		return results, err
 	}
 
-	return enforceBaselineDrift(ctx, results, scanInfo)
+	return results, enforceBaselineDrift(ctx, results, scanInfo)
 }
 
 func validateWorkloadArgs(args []string, scanInfo *cautils.ScanInfo) error {

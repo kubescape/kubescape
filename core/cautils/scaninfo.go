@@ -217,6 +217,7 @@ type ScanInfo struct {
 	BaselineSeverityThreshold string            // Only count new/incomparable baseline failures at or above this severity when enforcing BaselineFailOnNew
 	BaselineGranularity       string            // Comparison unit for the baseline diff: "evidence" (default) or "control"
 	KubeContexts              []string          // --kube-contexts: scan each of these kube contexts sequentially, one report per context (fleet mode)
+	FleetReport               string            // --fleet-report: with --kube-contexts, also write one combined JSON report across every context to this path
 }
 
 type Getters struct {
