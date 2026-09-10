@@ -1,6 +1,7 @@
 package cautils
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -234,6 +235,9 @@ func TestScanningContextClonesAndCleansEveryRemoteInput(t *testing.T) {
 	}
 	scanInfo := &ScanInfo{InputPatterns: inputs}
 	require.Equal(t, ContextGitRemote, scanInfo.GetScanningContext())
+	assert.Equal(t, int32(0), cloneCalls.Load())
+
+	require.NoError(t, scanInfo.MaterializeRemoteInputs(context.Background()))
 	assert.Equal(t, int32(2), cloneCalls.Load())
 
 	workspaces := make([]string, 0, len(inputs))
@@ -263,6 +267,9 @@ func TestScanningContextClonesTrailingRemoteInputAfterLocalInput(t *testing.T) {
 	remoteInput := "https://github.com/example/remote"
 	scanInfo := &ScanInfo{InputPatterns: []string{t.TempDir(), remoteInput}}
 	require.Equal(t, ContextDir, scanInfo.GetScanningContext())
+	assert.Equal(t, int32(0), cloneCalls.Load())
+
+	require.NoError(t, scanInfo.MaterializeRemoteInputs(context.Background()))
 	assert.Equal(t, int32(1), cloneCalls.Load())
 
 	workspace := GetClonedPath(remoteInput)
@@ -273,3 +280,76 @@ func TestScanningContextClonesTrailingRemoteInputAfterLocalInput(t *testing.T) {
 	assert.Empty(t, GetClonedPath(remoteInput))
 	assert.NoDirExists(t, workspace)
 }
+
+func TestMaterializeRemoteInputsPropagatesError(t *testing.T) {
+	resetRepoWorkspaceState(t)
+	t.Setenv("GITHUB_TOKEN", "test-token")
+	useFakeClone(t, func(path string, _ bool, options *git.CloneOptions) (*git.Repository, error) {
+		return nil, errors.New("authentication failed: 401 Unauthorized")
+	})
+
+	remoteInput := "https://github.com/example/private-repo"
+	scanInfo := &ScanInfo{InputPatterns: []string{remoteInput}}
+	require.Equal(t, ContextGitRemote, scanInfo.GetScanningContext())
+
+	err := scanInfo.MaterializeRemoteInputs(context.Background())
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "failed to clone remote git repository")
+	assert.ErrorContains(t, err, "401 Unauthorized")
+	assert.Empty(t, GetClonedPath(remoteInput))
+}
+
+func TestScanInfoInitPropagatesCloneError(t *testing.T) {
+	resetRepoWorkspaceState(t)
+	t.Setenv("GITHUB_TOKEN", "test-token")
+	useFakeClone(t, func(path string, _ bool, options *git.CloneOptions) (*git.Repository, error) {
+		return nil, errors.New("repository not found")
+	})
+
+	remoteInput := "https://github.com/example/nonexistent-repo"
+	scanInfo := &ScanInfo{InputPatterns: []string{remoteInput}}
+	err := scanInfo.Init(context.Background(), nil)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "failed to clone remote git repository")
+	assert.ErrorContains(t, err, "repository not found")
+}
+
+// TestMaterializeRemoteInputsPreCloneCancellation verifies that a cancelled
+// context prevents any clone from starting. This is pre-clone cancellation
+// only; an already-running git.PlainClone is not interrupted because
+// CloneGitRepo does not accept a context today.
+func TestMaterializeRemoteInputsPreCloneCancellation(t *testing.T) {
+	resetRepoWorkspaceState(t)
+	var cloneCalls atomic.Int32
+	useFakeClone(t, func(path string, _ bool, options *git.CloneOptions) (*git.Repository, error) {
+		cloneCalls.Add(1)
+		return initializeCloneWorkspace(path, options)
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	scanInfo := &ScanInfo{InputPatterns: []string{"https://github.com/example/repo"}}
+	err := scanInfo.MaterializeRemoteInputs(ctx)
+	require.ErrorIs(t, err, context.Canceled)
+	assert.Equal(t, int32(0), cloneCalls.Load())
+}
+
+// TestScanInfoCleanupSequentialIdempotency verifies that cleanup hooks are
+// consumed on first call, so repeated sequential calls are safe. This matters
+// because MaterializeRemoteInputs calls Cleanup() on failure to roll back
+// partial clones, and the outer scan lifecycle calls it again via defer.
+// Note: this is sequential idempotency, not concurrent safety.
+func TestScanInfoCleanupSequentialIdempotency(t *testing.T) {
+	var count int
+	scanInfo := &ScanInfo{}
+	scanInfo.AddCleanup(func() {
+		count++
+	})
+	scanInfo.Cleanup()
+	assert.Equal(t, 1, count)
+	scanInfo.Cleanup()
+	assert.Equal(t, 1, count)
+}
+
+
