@@ -5,6 +5,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils/getter"
 	metav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
 	"github.com/stretchr/testify/assert"
@@ -17,6 +18,11 @@ func TestViewCachedConfig_KeyedLookup(t *testing.T) {
 	getter.DefaultLocalStore = t.TempDir()
 	t.Cleanup(func() { getter.DefaultLocalStore = originalStore })
 
+	// stub k8s API to prevent flaky tests in cluster-connected environments
+	origK8s := kubernetesAPIFunc
+	kubernetesAPIFunc = func() *k8sinterface.KubernetesApi { return nil }
+	t.Cleanup(func() { kubernetesAPIFunc = origK8s })
+
 	ks := NewKubescape(context.Background())
 
 	// Set cached config values
@@ -27,11 +33,11 @@ func TestViewCachedConfig_KeyedLookup(t *testing.T) {
 	require.NoError(t, ks.SetCachedConfig(setConfig))
 
 	tests := []struct {
-		name       string
-		key        string
-		format     string
-		want       string
-		wantErr    string
+		name    string
+		key     string
+		format  string
+		want    string
+		wantErr string
 	}{
 		{
 			name:   "Found key",

@@ -40,7 +40,7 @@ func getNormalizedKey(key string) string {
 
 // View cached configurations
 func (ks *Kubescape) ViewCachedConfig(viewConfig *metav1.ViewConfig) error {
-	tenant := cautils.GetTenantConfig(ks.Context(), "", "", "", "", getKubernetesApi()) // change k8sinterface
+	tenant := cautils.GetTenantConfig(ks.Context(), "", "", "", "", kubernetesAPIFunc()) // change k8sinterface
 	configObj := tenant.GetConfigObj()
 
 	if viewConfig.Key != "" {
