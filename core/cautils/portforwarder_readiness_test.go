@@ -1,7 +1,11 @@
 package cautils
 
 import (
+	"bufio"
 	"context"
+	"net"
+	"net/http"
+	"net/url"
 	"testing"
 	"time"
 
@@ -186,4 +190,97 @@ func TestCreatePortForwarder_ResolvesReadyTimeoutFromEnvOnce(t *testing.T) {
 	// "resolved once" guarantee for localPort.
 	t.Setenv(PortForwardReadyTimeoutEnv, "1")
 	assert.Equal(t, 7*time.Second, pf.readyTimeout)
+}
+
+// TestStartPortForwarder_WithheldUpgradeTerminatesSocketNotJustCaller
+// reproduces matthyx's PR #3800 review finding: k8s.io/streaming's
+// SpdyRoundTripper.RoundTrip reads the upgrade response via a hand-rolled
+// bufio/http.ReadResponse over the raw socket, which never checks the
+// request context or the merged http.Client.Timeout. A peer that completes
+// the TCP handshake and then withholds the upgrade response left that read
+// -- and the goroutine and socket behind it -- blocked forever, even though
+// waitForPortForwardReadiness's own timer correctly returned an error to the
+// caller. This proves both sides now unblock: the caller via the returned
+// error, and the socket via the deadline armed in newPortForwardRoundTripper.
+func TestStartPortForwarder_WithheldUpgradeTerminatesSocketNotJustCaller(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	defer ln.Close()
+
+	serverConn := make(chan net.Conn, 1)
+	go func() {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		// Read and parse the upgrade request, then withhold the response
+		// entirely -- simulating a peer that completes the TCP handshake
+		// but never finishes the SPDY upgrade.
+		_, _ = http.ReadRequest(bufio.NewReader(conn))
+		serverConn <- conn
+		// deliberately: no response written, connection left open
+	}()
+
+	t.Setenv(PortForwardReadyTimeoutEnv, "1") // 1s, keep the test fast
+
+	k8sClient := &k8sinterface.KubernetesApi{
+		K8SConfig: &rest.Config{Host: "http://" + ln.Addr().String()},
+	}
+	pod := &v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "operator"}}
+	connector, err := CreatePortForwarder(k8sClient, pod, "1234", "kubescape")
+	require.NoError(t, err)
+
+	start := time.Now()
+	err = connector.StartPortForwarder()
+	require.Error(t, err)
+	assert.Less(t, time.Since(start), 3*time.Second, "must not hang past readyTimeout")
+
+	// Prove the SERVER side observes the connection actually close/reset --
+	// not just that the caller gave up. This is what distinguishes this test
+	// from the existing timeout tests, which only check the caller side.
+	select {
+	case conn := <-serverConn:
+		require.NoError(t, conn.SetReadDeadline(time.Now().Add(2*time.Second)))
+		buf := make([]byte, 1)
+		_, err := conn.Read(buf)
+		assert.Error(t, err, "server should observe the client closing the stalled connection")
+	case <-time.After(2 * time.Second):
+		t.Fatal("server never accepted a connection")
+	}
+}
+
+// TestCreatePortForwarder_ProxyConfiguredUsesFallbackPath is the sanity check
+// for the deliberate scope boundary in newPortForwardRoundTripper: setting
+// UpgradeTransport (needed to arm the handshake deadline) bypasses the SPDY
+// library's own proxy-CONNECT tunneling entirely, so when a proxy applies to
+// the target, CreatePortForwarder must fall back to the unmodified
+// spdy.RoundTripperFor path -- not silently use the deadline path without
+// proxy support, and not error out.
+func TestCreatePortForwarder_ProxyConfiguredUsesFallbackPath(t *testing.T) {
+	k8sClient := k8sinterface.KubernetesApi{
+		KubernetesClient: fake.NewClientset(),
+		K8SConfig: &rest.Config{
+			Host: "any",
+			Proxy: func(*http.Request) (*url.URL, error) {
+				return url.Parse("http://proxy.example.com:8080")
+			},
+		},
+		Context: context.Background(),
+	}
+
+	operatorPod := v1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   "first",
+			Labels: map[string]string{"app": "operator"},
+		},
+	}
+	createdPod, err := k8sClient.KubernetesClient.CoreV1().Pods(kubescapeNamespace).Create(k8sClient.Context, &operatorPod, metav1.CreateOptions{})
+	require.NoError(t, err)
+
+	connector, err := CreatePortForwarder(&k8sClient, createdPod, "1234", "any")
+	require.NoError(t, err)
+
+	pf, ok := connector.(*portForward)
+	require.True(t, ok)
+	assert.Nil(t, pf.handshakeConn, "a configured proxy must take the fallback path without a handshake-level deadline")
 }
