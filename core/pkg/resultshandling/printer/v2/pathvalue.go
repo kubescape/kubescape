@@ -123,6 +123,22 @@ func extractValueAtPath(obj map[string]any, path string) (string, bool) {
 				cur = next
 			}
 		default:
+			// A named segment is a map lookup, and this is not a map. Every
+			// segment the parser produces carries a key, so reaching here means
+			// the path asks for a field of a list - "env['ignored'][1]" - which
+			// no resource has.
+			//
+			// It fails rather than indexing past the name. Indexing anyway
+			// would resolve the path by quietly discarding a segment, and
+			// isSensitivePath reads that same segment: it would see "ignored"
+			// where traversal saw the env list, judge the path harmless, and
+			// print a credential the two functions disagreed about. Traversal
+			// and classification have to give the same answer about what a path
+			// means, and the safe direction for a malformed path is to resolve
+			// nothing.
+			if seg.key != "" {
+				return "", false
+			}
 			elem, ok := indexList(v, seg.index)
 			if !ok {
 				return "", false
@@ -402,47 +418,47 @@ func hasSecretShapedFieldName(kind, path string) bool {
 //     a hardcoded secret can live in a plain field on any resource - a
 //     ConfigMap entry named apiKey, a CRD's spec.auth.token, and so on.
 func isSensitivePath(kind, path string) bool {
-	trimmed := truncateAtValueSeparator(path)
+	// Sensitivity is decided on the parsed path, the same grammar
+	// extractValueAtPath resolves with. Classifying from the raw string instead
+	// lets the two disagree about what a path means, and a field the classifier
+	// does not recognise but extraction does resolve is a value printed in the
+	// clear.
+	segments := splitPath(path)
 
 	// Everything under a Secret's data or stringData is sensitive, whatever the
-	// individual key happens to be called. That is decided on the parsed first
-	// segment rather than a "data." string prefix, because a key can arrive
-	// bracketed: "data[username]" holds Secret content exactly as
+	// individual key happens to be called. Deciding that on the first segment
+	// covers a bracketed key: "data[username]" holds Secret content exactly as
 	// "data.password" does, but it does not start with "data." and its own name
 	// is not credential-shaped, so a prefix test let it through.
-	if kind == "Secret" {
-		if segments := splitPath(path); len(segments) > 0 &&
-			(segments[0].key == "data" || segments[0].key == "stringData") {
-			return true
-		}
+	if kind == "Secret" && len(segments) > 0 &&
+		(segments[0].key == "data" || segments[0].key == "stringData") {
+		return true
 	}
 	// C-0012 plaintext credentials live on container env .value, not Secret.data.
-	if isContainerEnvValuePath(trimmed) {
+	if isContainerEnvValue(segments) {
 		return true
 	}
 	return hasSecretShapedFieldName(kind, path)
 }
 
-// isContainerEnvValuePath reports whether path selects env[N].value
-// (including under spec.template.spec / initContainers / ephemeralContainers).
-func isContainerEnvValuePath(path string) bool {
-	if !strings.HasSuffix(path, "].value") {
+// isContainerEnvValue reports whether segments select the value of a container
+// environment variable - the C-0012 plaintext credential, which lives on the
+// workload rather than on a Secret. Matching the last two segments covers every
+// container list and pod-template nesting without enumerating them.
+//
+// This reads segments rather than the path string. The same field has several
+// spellings - env[0].value, ['env'][0].value, ["env"][0].value - and a string
+// search for "env[" recognises only the first, while extraction resolves all
+// three. Classifying from the grammar extraction already uses is what stops the
+// two from disagreeing, because a path the classifier misses and extraction
+// resolves is a credential printed without --show-secrets.
+func isContainerEnvValue(segments []pathSegment) bool {
+	if len(segments) < 2 {
 		return false
 	}
-	env := strings.LastIndex(path, "env[")
-	if env < 0 {
-		return false
-	}
-	inner := path[env+len("env[") : len(path)-len("].value")]
-	if inner == "" {
-		return false
-	}
-	for i := 0; i < len(inner); i++ {
-		if inner[i] < '0' || inner[i] > '9' {
-			return false
-		}
-	}
-	return true
+	value := segments[len(segments)-1]
+	env := segments[len(segments)-2]
+	return value.key == "value" && env.key == "env" && env.index >= 0
 }
 
 // enrichedPathsForField iterates a control's rule paths, extracts the string
