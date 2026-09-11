@@ -527,8 +527,12 @@ func getSharedLiveClusterPolicyGetter(t *testing.T) getter.IPolicyGetter {
 			sharedLiveClusterPolicyGetter = drp
 		}
 	})
-	if sharedLiveClusterPolicyGetterErr != nil {
-		t.Skipf("failed to initialize policy getter from network/disk fallback: %v", sharedLiveClusterPolicyGetterErr)
+	require.NoError(t, sharedLiveClusterPolicyGetterErr, "failed to initialize policy getter")
+	if _, err := sharedLiveClusterPolicyGetter.GetFramework("nsa"); err != nil {
+		t.Skipf("skipping test due to missing nsa framework: %v", err)
+	}
+	if _, err := sharedLiveClusterPolicyGetter.GetControl("C-0017"); err != nil {
+		t.Skipf("skipping test due to missing C-0017 control: %v", err)
 	}
 	if sharedLiveClusterPolicyFallback {
 		t.Log("using fallback policy store for live-cluster test")
