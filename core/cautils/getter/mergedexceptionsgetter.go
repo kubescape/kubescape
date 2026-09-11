@@ -60,6 +60,19 @@ func (g *MergedExceptionsGetter) GetExceptions(ctx context.Context, clusterName 
 	return deduplicateExceptions(exceptions, crdExceptions), nil
 }
 
+// ConsumedFileDigest forwards provenance from the primary local source. CRD
+// exceptions are not files and therefore deliberately have no file digest.
+func (g *MergedExceptionsGetter) ConsumedFileDigest() (path, digest string, ok bool) {
+	if g == nil {
+		return "", "", false
+	}
+	digester, ok := g.primary.(ConsumedFileDigester)
+	if !ok {
+		return "", "", false
+	}
+	return digester.ConsumedFileDigest()
+}
+
 // deduplicateExceptions enforces the design review's precedence rule: cloud/file
 // (primary) exceptions are added first, and a CRD exception is appended only for the
 // control+workload designators not already covered by a primary exception. Partial

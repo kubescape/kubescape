@@ -1,0 +1,27 @@
+{
+    "name": "duplicate-env-var",
+    "attributes": {
+    },
+    "ruleLanguage": "Rego",
+    "match": [
+        {
+            "apiGroups": [""],
+            "apiVersions": ["v1"],
+            "resources": ["Pod", "ReplicationController"]
+        },
+        {
+            "apiGroups": ["apps"],
+            "apiVersions": ["v1"],
+            "resources": ["Deployment", "ReplicaSet", "DaemonSet", "StatefulSet"]
+        },
+        {
+            "apiGroups": ["batch"],
+            "apiVersions": ["*"],
+            "resources": ["Job", "CronJob"]
+        }
+    ],
+    "ruleDependencies": [],
+    "description": "fails if a container defines the same environment variable name more than once",
+    "remediation": "Remove or rename duplicate environment variable entries so each container defines each environment variable name only once.",
+    "ruleQuery": "armo_builtins"
+}

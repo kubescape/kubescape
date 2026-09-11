@@ -13,6 +13,7 @@ import (
 	"github.com/kubescape/kubescape/v4/core/cautils/getter"
 	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	"github.com/kubescape/opa-utils/reporthandling"
+	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"go.opentelemetry.io/otel"
 )
 
@@ -25,6 +26,16 @@ type cachedPoliciesEntry struct {
 	frameworks  []reporthandling.Framework
 }
 
+type cachedExceptionsEntry struct {
+	exceptions  []armotypes.PostureExceptionPolicy
+	runnerInput reporthandlingv2.ScanContractRunnerInput
+}
+
+type cachedControlInputsEntry struct {
+	controlInputs map[string][]string
+	runnerInput   reporthandlingv2.ScanContractRunnerInput
+}
+
 type policyArtifactPersistence interface {
 	ShouldPersistPolicyArtifacts() bool
 }
@@ -33,8 +44,8 @@ type policyArtifactPersistence interface {
 type PolicyHandler struct {
 	clusterName         string
 	cachedPolicies      *TimedCache[cachedPoliciesEntry]
-	cachedExceptions    *TimedCache[[]armotypes.PostureExceptionPolicy]
-	cachedControlInputs *TimedCache[map[string][]string]
+	cachedExceptions    *TimedCache[cachedExceptionsEntry]
+	cachedControlInputs *TimedCache[cachedControlInputsEntry]
 }
 
 // NewPolicyHandler returns the shared, cluster-isolated *PolicyHandler for
@@ -68,8 +79,8 @@ func NewRequestScopedPolicyHandler(clusterName string) *PolicyHandler {
 	return &PolicyHandler{
 		clusterName:         clusterName,
 		cachedPolicies:      NewTimedCache[cachedPoliciesEntry](cacheTtl),
-		cachedExceptions:    NewTimedCache[[]armotypes.PostureExceptionPolicy](cacheTtl),
-		cachedControlInputs: NewTimedCache[map[string][]string](cacheTtl),
+		cachedExceptions:    NewTimedCache[cachedExceptionsEntry](cacheTtl),
+		cachedControlInputs: NewTimedCache[cachedControlInputsEntry](cacheTtl),
 	}
 }
 
@@ -87,13 +98,12 @@ func (policyHandler *PolicyHandler) Close() {
 }
 
 func (policyHandler *PolicyHandler) CollectPolicies(ctx context.Context, policyIdentifier []cautils.PolicyIdentifier, scanInfo *cautils.ScanInfo, getters *cautils.Getters) (*cautils.OPASessionObj, error) {
-	opaSessionObj := cautils.NewOPASessionObj(ctx, nil, nil, scanInfo, policyIdentifier)
-
 	// get policies, exceptions and controls inputs
-	policies, exceptions, controlInputs, degradations, err := policyHandler.getPolicies(ctx, policyIdentifier, getters)
+	policies, exceptions, controlInputs, degradations, err := policyHandler.getPolicies(ctx, policyIdentifier, scanInfo, getters)
 	if err != nil {
-		return opaSessionObj, err
+		return cautils.NewOPASessionObj(ctx, nil, nil, scanInfo, policyIdentifier), err
 	}
+	opaSessionObj := cautils.NewOPASessionObj(ctx, nil, nil, scanInfo, policyIdentifier)
 
 	// load user-authored custom rules, if any
 	if scanInfo.CustomRules != "" {
@@ -130,7 +140,7 @@ func (policyHandler *PolicyHandler) CollectPolicies(ctx context.Context, policyI
 	return opaSessionObj, nil
 }
 
-func (policyHandler *PolicyHandler) getPolicies(ctx context.Context, policyIdentifier []cautils.PolicyIdentifier, getters *cautils.Getters) (policies []reporthandling.Framework, exceptions []armotypes.PostureExceptionPolicy, controlInputs map[string][]string, degradations []cautils.PolicyDegradation, err error) {
+func (policyHandler *PolicyHandler) getPolicies(ctx context.Context, policyIdentifier []cautils.PolicyIdentifier, scanInfo *cautils.ScanInfo, getters *cautils.Getters) (policies []reporthandling.Framework, exceptions []armotypes.PostureExceptionPolicy, controlInputs map[string][]string, degradations []cautils.PolicyDegradation, err error) {
 	ctx, span := otel.Tracer("").Start(ctx, "policyHandler.getPolicies")
 	defer span.End()
 
@@ -149,7 +159,7 @@ func (policyHandler *PolicyHandler) getPolicies(ctx context.Context, policyIdent
 	logger.L().Start("Loading exceptions...")
 
 	// get exceptions
-	if exceptions, err = policyHandler.getExceptions(ctx, getters); err != nil {
+	if exceptions, err = policyHandler.getExceptions(ctx, scanInfo, getters); err != nil {
 		logger.L().Ctx(ctx).StopError("Failed to load exceptions", helpers.Error(err))
 		degradations = append(degradations, cautils.PolicyDegradation{Component: "exceptions", Reason: err.Error()})
 		exceptions = []armotypes.PostureExceptionPolicy{}
@@ -160,7 +170,7 @@ func (policyHandler *PolicyHandler) getPolicies(ctx context.Context, policyIdent
 	logger.L().Start("Loading account configurations...")
 
 	// get account configuration
-	if controlInputs, err = policyHandler.getControlInputs(ctx, getters); err != nil {
+	if controlInputs, err = policyHandler.getControlInputs(ctx, scanInfo, getters); err != nil {
 		logger.L().Ctx(ctx).StopError("Failed to load account configurations", helpers.Error(err))
 		degradations = append(degradations, cautils.PolicyDegradation{Component: "controlInputs", Reason: err.Error()})
 
@@ -229,9 +239,16 @@ func (policyHandler *PolicyHandler) downloadScanPolicies(ctx context.Context, po
 		persistPolicyArtifacts = persistence.ShouldPersistPolicyArtifacts()
 	}
 
-	switch getScanKind(policyIdentifier) {
-	case apisv1.KindFramework: // Download frameworks
-		for _, rule := range policyIdentifier {
+	// Requests can mix Framework and Control identifiers in the same slice (e.g. a
+	// ScanAll request appends both, see core/core/scan.go). Switch on each rule's own
+	// Kind rather than assuming the whole batch shares policyIdentifier[0]'s kind -
+	// otherwise control identifiers get downloaded via GetFramework and fail with a
+	// misleading "framework '<control-id>' not found" error.
+	controlsFramework := reporthandling.Framework{}
+	var hasControls bool
+	for _, rule := range policyIdentifier {
+		switch rule.Kind {
+		case apisv1.KindFramework: // Download framework
 			logger.L().Debug("Downloading framework", helpers.String("framework", rule.Identifier))
 			receivedFramework, err := getters.PolicyGetter.GetFramework(rule.Identifier)
 			if err != nil {
@@ -254,57 +271,58 @@ func (policyHandler *PolicyHandler) downloadScanPolicies(ctx context.Context, po
 					logger.L().Ctx(ctx).Warning("failed to cache framework", helpers.String("file", cache), helpers.Error(err))
 				}
 			}
-		}
-	case apisv1.KindControl: // Download controls
-		f := reporthandling.Framework{}
-		var receivedControl *reporthandling.Control
-		var err error
-		for _, policy := range policyIdentifier {
-			logger.L().Debug("Downloading control", helpers.String("control", policy.Identifier))
-			receivedControl, err = getters.PolicyGetter.GetControl(policy.Identifier)
+		case apisv1.KindControl: // Download control
+			logger.L().Debug("Downloading control", helpers.String("control", rule.Identifier))
+			receivedControl, err := getters.PolicyGetter.GetControl(rule.Identifier)
 			if err != nil {
-				return frameworks, controlDownloadError(err, policy.Identifier)
+				return frameworks, controlDownloadError(err, rule.Identifier)
 			}
 			if receivedControl != nil {
-				f.Controls = append(f.Controls, *receivedControl)
+				hasControls = true
+				controlsFramework.Controls = append(controlsFramework.Controls, *receivedControl)
 				if !persistPolicyArtifacts {
 					continue
 				}
-				cache, err := getter.PolicyCachePath(policy.Identifier)
+				cache, err := getter.PolicyCachePath(rule.Identifier)
 				if err != nil {
-					logger.L().Ctx(ctx).Warning("skipping control cache write", helpers.String("identifier", policy.Identifier), helpers.Error(err))
+					logger.L().Ctx(ctx).Warning("skipping control cache write", helpers.String("identifier", rule.Identifier), helpers.Error(err))
 					continue
 				}
 				if err := getter.SaveInFile(receivedControl, cache); err != nil {
 					logger.L().Ctx(ctx).Warning("failed to cache control", helpers.String("file", cache), helpers.Error(err))
 				}
 			}
+		default:
+			return frameworks, fmt.Errorf("unknown policy kind")
 		}
-		frameworks = append(frameworks, f)
-	default:
-		return frameworks, fmt.Errorf("unknown policy kind")
+	}
+	if hasControls {
+		frameworks = append(frameworks, controlsFramework)
 	}
 	return frameworks, nil
 }
 
-func (policyHandler *PolicyHandler) getExceptions(ctx context.Context, getters *cautils.Getters) ([]armotypes.PostureExceptionPolicy, error) {
+func (policyHandler *PolicyHandler) getExceptions(ctx context.Context, scanInfo *cautils.ScanInfo, getters *cautils.Getters) ([]armotypes.PostureExceptionPolicy, error) {
 	if cachedExceptions, exist := policyHandler.cachedExceptions.Get(); exist {
 		logger.L().Info("Using cached exceptions")
-		return cachedExceptions, nil
+		cautils.RecordCachedScanContractRunnerInput(scanInfo, cachedExceptions.runnerInput)
+		return cachedExceptions.exceptions, nil
 	}
 
 	exceptions, err := getters.ExceptionsGetter.GetExceptions(ctx, policyHandler.clusterName)
 	if err == nil {
-		policyHandler.cachedExceptions.Set(exceptions)
+		runnerInput, _ := cautils.RecordScanContractRunnerInput(scanInfo, "exceptions", getters.ExceptionsGetter)
+		policyHandler.cachedExceptions.Set(cachedExceptionsEntry{exceptions: exceptions, runnerInput: runnerInput})
 	}
 
 	return exceptions, err
 }
 
-func (policyHandler *PolicyHandler) getControlInputs(ctx context.Context, getters *cautils.Getters) (map[string][]string, error) {
+func (policyHandler *PolicyHandler) getControlInputs(ctx context.Context, scanInfo *cautils.ScanInfo, getters *cautils.Getters) (map[string][]string, error) {
 	if cachedControlInputs, exist := policyHandler.cachedControlInputs.Get(); exist {
 		logger.L().Info("Using cached control inputs")
-		return cachedControlInputs, nil
+		cautils.RecordCachedScanContractRunnerInput(scanInfo, cachedControlInputs.runnerInput)
+		return cachedControlInputs.controlInputs, nil
 	}
 
 	controlInputs, err := getters.ControlsInputsGetter.GetControlsInputs(ctx, policyHandler.clusterName)
@@ -315,6 +333,7 @@ func (policyHandler *PolicyHandler) getControlInputs(ctx context.Context, getter
 		return nil, fmt.Errorf("no control configuration inputs available")
 	}
 
-	policyHandler.cachedControlInputs.Set(controlInputs)
+	runnerInput, _ := cautils.RecordScanContractRunnerInput(scanInfo, "controlsConfig", getters.ControlsInputsGetter)
+	policyHandler.cachedControlInputs.Set(cachedControlInputsEntry{controlInputs: controlInputs, runnerInput: runnerInput})
 	return controlInputs, nil
 }

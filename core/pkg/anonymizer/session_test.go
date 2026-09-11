@@ -138,7 +138,7 @@ func TestTransformSession_NamesAndNamespacesReplaced(t *testing.T) {
 		ResourcesResult:      make(map[string]resourcesresults.Result),
 		ResourceSource:       make(map[string]reporthandling.Source),
 		ResourcesPrioritized: make(map[string]prioritization.PrioritizedResource),
-		ResourceAttackTracks: make(map[string]v1alpha1.IAttackTrack),
+		ResourceAttackTracks: make(map[string][]v1alpha1.IAttackTrack),
 	}
 
 	err := transformSession(session, NewMapping(), NewMappingTransformer())
@@ -150,6 +150,60 @@ func TestTransformSession_NamesAndNamespacesReplaced(t *testing.T) {
 		assert.Contains(t, resource.GetName(), "res-")
 		assert.Contains(t, resource.GetNamespace(), "ns-")
 	}
+}
+
+// TestTransformSession_NamespaceSummariesRedacted covers a gap that would
+// otherwise leak the real namespace name: --hide/--encrypt transform a
+// resource's own namespace field, but NamespaceSummaries is a separate report
+// section that must be redacted independently, and it must get the exact
+// same pseudonym as the resource it summarizes so the two stay joinable. The
+// cluster-scoped bucket is not a real namespace and must survive untouched.
+func TestTransformSession_NamespaceSummariesRedacted(t *testing.T) {
+	pod := workloadinterface.NewWorkloadObj(map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Pod",
+		"metadata": map[string]any{
+			"name":      "my-secret-pod",
+			"namespace": "my-secret-ns",
+		},
+	})
+	oldID := pod.GetID()
+
+	session := &cautils.OPASessionObj{
+		AllResources:         map[string]workloadinterface.IMetadata{oldID: pod},
+		ResourcesResult:      make(map[string]resourcesresults.Result),
+		ResourceSource:       make(map[string]reporthandling.Source),
+		ResourcesPrioritized: make(map[string]prioritization.PrioritizedResource),
+		ResourceAttackTracks: make(map[string][]v1alpha1.IAttackTrack),
+		NamespaceSummaries: cautils.NamespaceSummaries{
+			{Namespace: "my-secret-ns", ComplianceScore: 80},
+			{Namespace: cautils.ClusterScopedNamespace, ComplianceScore: 95},
+		},
+	}
+
+	err := transformSession(session, NewMapping(), NewMappingTransformer())
+	require.NoError(t, err)
+
+	var transformedNs, clusterScoped string
+	for _, s := range session.NamespaceSummaries {
+		switch s.ComplianceScore {
+		case 80:
+			transformedNs = s.Namespace
+		case 95:
+			clusterScoped = s.Namespace
+		}
+	}
+
+	assert.NotEqual(t, "my-secret-ns", transformedNs)
+	assert.Contains(t, transformedNs, "ns-")
+
+	var resourceNs string
+	for _, resource := range session.AllResources {
+		resourceNs = resource.GetNamespace()
+	}
+	assert.Equal(t, resourceNs, transformedNs, "the namespace summary must carry the same pseudonym as the resource")
+
+	assert.Equal(t, cautils.ClusterScopedNamespace, clusterScoped, "the cluster-scoped marker must not be pseudonymized")
 }
 
 // TestTransformSession_CollidingNamesKeepDistinctResources covers what a
@@ -188,7 +242,7 @@ func TestTransformSession_CollidingNamesKeepDistinctResources(t *testing.T) {
 		},
 		ResourceSource:       make(map[string]reporthandling.Source),
 		ResourcesPrioritized: make(map[string]prioritization.PrioritizedResource),
-		ResourceAttackTracks: make(map[string]v1alpha1.IAttackTrack),
+		ResourceAttackTracks: make(map[string][]v1alpha1.IAttackTrack),
 	}
 
 	require.NoError(t, transformSession(session, NewMapping(), NewMappingTransformer()))
@@ -271,8 +325,8 @@ func TestTransformSession_IDConsistencyAcrossMaps(t *testing.T) {
 		ResourcesPrioritized: map[string]prioritization.PrioritizedResource{
 			oldID: {ResourceID: oldID},
 		},
-		ResourceAttackTracks: map[string]v1alpha1.IAttackTrack{
-			oldID: &v1alpha1.AttackTrack{},
+		ResourceAttackTracks: map[string][]v1alpha1.IAttackTrack{
+			oldID: {&v1alpha1.AttackTrack{}},
 		},
 		Report: &reporthandlingv2.PostureReport{
 			SummaryDetails: reportsummary.SummaryDetails{
@@ -455,7 +509,7 @@ func TestTransformSession_LabelHandling(t *testing.T) {
 				ResourcesResult:      make(map[string]resourcesresults.Result),
 				ResourceSource:       make(map[string]reporthandling.Source),
 				ResourcesPrioritized: make(map[string]prioritization.PrioritizedResource),
-				ResourceAttackTracks: make(map[string]v1alpha1.IAttackTrack),
+				ResourceAttackTracks: make(map[string][]v1alpha1.IAttackTrack),
 				LabelsToCopy:         test.labelsToCopy,
 			}
 
@@ -639,7 +693,7 @@ func TestTransformSession_Annotations(t *testing.T) {
 				ResourcesResult:      make(map[string]resourcesresults.Result),
 				ResourceSource:       make(map[string]reporthandling.Source),
 				ResourcesPrioritized: make(map[string]prioritization.PrioritizedResource),
-				ResourceAttackTracks: make(map[string]v1alpha1.IAttackTrack),
+				ResourceAttackTracks: make(map[string][]v1alpha1.IAttackTrack),
 			}
 
 			assert.NotPanics(t, func() {
@@ -676,7 +730,7 @@ func TestTransformSession_RepoContextMetadata(t *testing.T) {
 		ResourcesResult:      make(map[string]resourcesresults.Result),
 		ResourceSource:       make(map[string]reporthandling.Source),
 		ResourcesPrioritized: make(map[string]prioritization.PrioritizedResource),
-		ResourceAttackTracks: make(map[string]v1alpha1.IAttackTrack),
+		ResourceAttackTracks: make(map[string][]v1alpha1.IAttackTrack),
 
 		Metadata: &reporthandlingv2.Metadata{
 			ContextMetadata: reporthandlingv2.ContextMetadata{
@@ -1039,7 +1093,7 @@ func TestTransformSession_ResourceSourceEncryption(
 
 		ResourcesResult:      make(map[string]resourcesresults.Result),
 		ResourcesPrioritized: make(map[string]prioritization.PrioritizedResource),
-		ResourceAttackTracks: make(map[string]v1alpha1.IAttackTrack),
+		ResourceAttackTracks: make(map[string][]v1alpha1.IAttackTrack),
 	}
 
 	err = transformSession(
@@ -1378,7 +1432,7 @@ func TestTransformSession_DirectoryContextMetadata(t *testing.T) {
 		ResourcesResult:      make(map[string]resourcesresults.Result),
 		ResourceSource:       make(map[string]reporthandling.Source),
 		ResourcesPrioritized: make(map[string]prioritization.PrioritizedResource),
-		ResourceAttackTracks: make(map[string]v1alpha1.IAttackTrack),
+		ResourceAttackTracks: make(map[string][]v1alpha1.IAttackTrack),
 
 		Metadata: &reporthandlingv2.Metadata{
 			ContextMetadata: reporthandlingv2.ContextMetadata{DirectoryContextMetadata: directoryContext()},
@@ -1424,7 +1478,7 @@ func TestTransformSession_FileContextMetadata(t *testing.T) {
 		ResourcesResult:      make(map[string]resourcesresults.Result),
 		ResourceSource:       make(map[string]reporthandling.Source),
 		ResourcesPrioritized: make(map[string]prioritization.PrioritizedResource),
-		ResourceAttackTracks: make(map[string]v1alpha1.IAttackTrack),
+		ResourceAttackTracks: make(map[string][]v1alpha1.IAttackTrack),
 
 		Metadata: &reporthandlingv2.Metadata{
 			ContextMetadata: reporthandlingv2.ContextMetadata{FileContextMetadata: fileContext()},
@@ -1460,7 +1514,7 @@ func TestTransformSession_HostNameSharedAcrossContexts(t *testing.T) {
 		ResourcesResult:      make(map[string]resourcesresults.Result),
 		ResourceSource:       make(map[string]reporthandling.Source),
 		ResourcesPrioritized: make(map[string]prioritization.PrioritizedResource),
-		ResourceAttackTracks: make(map[string]v1alpha1.IAttackTrack),
+		ResourceAttackTracks: make(map[string][]v1alpha1.IAttackTrack),
 
 		Metadata: &reporthandlingv2.Metadata{
 			ContextMetadata: reporthandlingv2.ContextMetadata{
@@ -1483,7 +1537,7 @@ func TestTransformSession_NoDirectoryContextMetadata(t *testing.T) {
 		ResourcesResult:      make(map[string]resourcesresults.Result),
 		ResourceSource:       make(map[string]reporthandling.Source),
 		ResourcesPrioritized: make(map[string]prioritization.PrioritizedResource),
-		ResourceAttackTracks: make(map[string]v1alpha1.IAttackTrack),
+		ResourceAttackTracks: make(map[string][]v1alpha1.IAttackTrack),
 		Metadata:             &reporthandlingv2.Metadata{},
 		Report:               &reporthandlingv2.PostureReport{},
 	}
@@ -1523,7 +1577,7 @@ func TestTransformSession_ClusterContextMetadata(t *testing.T) {
 		ResourcesResult:      make(map[string]resourcesresults.Result),
 		ResourceSource:       make(map[string]reporthandling.Source),
 		ResourcesPrioritized: make(map[string]prioritization.PrioritizedResource),
-		ResourceAttackTracks: make(map[string]v1alpha1.IAttackTrack),
+		ResourceAttackTracks: make(map[string][]v1alpha1.IAttackTrack),
 
 		Metadata: &reporthandlingv2.Metadata{
 			ContextMetadata: reporthandlingv2.ContextMetadata{ClusterContextMetadata: clusterContext()},
@@ -1585,7 +1639,7 @@ func TestTransformSession_ClusterNamespaceCountsStayJoinable(t *testing.T) {
 		ResourcesResult:      make(map[string]resourcesresults.Result),
 		ResourceSource:       make(map[string]reporthandling.Source),
 		ResourcesPrioritized: make(map[string]prioritization.PrioritizedResource),
-		ResourceAttackTracks: make(map[string]v1alpha1.IAttackTrack),
+		ResourceAttackTracks: make(map[string][]v1alpha1.IAttackTrack),
 
 		Metadata: &reporthandlingv2.Metadata{
 			ContextMetadata: reporthandlingv2.ContextMetadata{
@@ -1617,7 +1671,7 @@ func TestTransformSession_NoClusterContextMetadata(t *testing.T) {
 		ResourcesResult:      make(map[string]resourcesresults.Result),
 		ResourceSource:       make(map[string]reporthandling.Source),
 		ResourcesPrioritized: make(map[string]prioritization.PrioritizedResource),
-		ResourceAttackTracks: make(map[string]v1alpha1.IAttackTrack),
+		ResourceAttackTracks: make(map[string][]v1alpha1.IAttackTrack),
 
 		Metadata: &reporthandlingv2.Metadata{},
 		Report:   &reporthandlingv2.PostureReport{},
@@ -1648,7 +1702,7 @@ func TestTransformSession_ClusterNamespaceCountsJoinAfterDecryption(t *testing.T
 		ResourcesResult:      make(map[string]resourcesresults.Result),
 		ResourceSource:       make(map[string]reporthandling.Source),
 		ResourcesPrioritized: make(map[string]prioritization.PrioritizedResource),
-		ResourceAttackTracks: make(map[string]v1alpha1.IAttackTrack),
+		ResourceAttackTracks: make(map[string][]v1alpha1.IAttackTrack),
 
 		Metadata: &reporthandlingv2.Metadata{
 			ContextMetadata: reporthandlingv2.ContextMetadata{

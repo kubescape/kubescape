@@ -34,6 +34,13 @@ type (
 	IAttackTracksGetter interface {
 		GetAttackTracks() ([]v1alpha1.AttackTrack, error)
 	}
+
+	// ConsumedFileDigester is implemented by local getters that retain the
+	// digest of the exact file bytes they successfully consumed. It is optional
+	// so remote and CRD-backed getters keep their existing interfaces.
+	ConsumedFileDigester interface {
+		ConsumedFileDigest() (path, digest string, ok bool)
+	}
 )
 
 // isContextErr reports whether err was caused by context cancellation or a deadline.

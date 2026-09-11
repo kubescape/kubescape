@@ -97,7 +97,7 @@ type OPASessionObj struct {
 	ResourcesResult       map[string]resourcesresults.Result            // resources scan results, map[<resource ID>]<resource result>
 	ResourceSource        map[string]reporthandling.Source              // resources sources, map[<resource ID>]<resource result>
 	ResourcesPrioritized  map[string]prioritization.PrioritizedResource // resources prioritization information, map[<resource ID>]<prioritized resource>
-	ResourceAttackTracks  map[string]v1alpha1.IAttackTrack              // resources attack tracks, map[<resource ID>]<attack track>
+	ResourceAttackTracks  map[string][]v1alpha1.IAttackTrack            // resources attack tracks, map[<resource ID>][]<attack track> -- a resource can be implicated by more than one attack track at once, each contributing to its score
 	AttackTracks          map[string]v1alpha1.IAttackTrack
 	Report                *reporthandlingv2.PostureReport // scan results v2 - Remove
 	RegoInputData         RegoInputData                   // input passed to rego for scanning. map[<control name>][<input arguments>]
@@ -107,6 +107,7 @@ type OPASessionObj struct {
 	ScanCoverage          ScanCoverage                       // runtime coverage gaps (failed GVR pulls + not-evaluated controls)
 	PartialGVRFailures    []PartialGVRPull                   // per-selector LIST failures for GVRs that were partially collected
 	UnexaminedKinds       []UnexaminedKind                   // cluster-served resource kinds no control in the policy set queried
+	NamespaceSummaries    NamespaceSummaries                 // per-namespace compliance rollup, see BuildNamespaceSummaries
 	PolicyDegradations    []PolicyDegradation                // policy inputs (control configurations, exceptions) served from a fallback
 	SkippedManifests      []SkippedManifest                  // manifest files skipped during loading (invalid YAML, missing kind, etc.)
 	SessionID             string                             // SessionID

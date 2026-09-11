@@ -41,37 +41,39 @@ func createNetworkReachabilityTools(ksServer *KubescapeMcpserver) {
 			args = map[string]any{}
 		}
 
-		srcNS, ok := args["source_namespace"].(string)
-		if !ok || srcNS == "" {
-			return mcp.NewToolResultError("source_namespace is required"), nil
+		srcNS, toolErr := mcpRequiredStringArg(args, "source_namespace")
+		if toolErr != nil {
+			return toolErr, nil
 		}
-		srcName, ok := args["source_pod"].(string)
-		if !ok || srcName == "" {
-			return mcp.NewToolResultError("source_pod is required"), nil
+		srcName, toolErr := mcpRequiredStringArg(args, "source_pod")
+		if toolErr != nil {
+			return toolErr, nil
 		}
-		dstNS, ok := args["destination_namespace"].(string)
-		if !ok || dstNS == "" {
-			return mcp.NewToolResultError("destination_namespace is required"), nil
+		dstNS, toolErr := mcpRequiredStringArg(args, "destination_namespace")
+		if toolErr != nil {
+			return toolErr, nil
 		}
-		dstName, ok := args["destination_pod"].(string)
-		if !ok || dstName == "" {
-			return mcp.NewToolResultError("destination_pod is required"), nil
+		dstName, toolErr := mcpRequiredStringArg(args, "destination_pod")
+		if toolErr != nil {
+			return toolErr, nil
 		}
 
 		var port *networkpolicy.PortSpec
 		if raw, ok := args["port"]; ok {
 			f, ok := raw.(float64)
 			if !ok || f <= 0 || f > 65535 || f != float64(int64(f)) {
-				return mcp.NewToolResultError("port must be a positive integer between 1 and 65535"), nil
+				return mcpToolError(ErrCodeInvalidArgument, "port must be a positive integer between 1 and 65535", map[string]any{"argument": "port"}), nil
 			}
 			proto := corev1.ProtocolTCP
-			if rawProto, ok := args["protocol"].(string); ok && rawProto != "" {
+			if rawProto, toolErr := mcpStringArg(args, "protocol"); toolErr != nil {
+				return toolErr, nil
+			} else if rawProto != "" {
 				normalized := corev1.Protocol(strings.ToUpper(rawProto))
 				switch normalized {
 				case corev1.ProtocolTCP, corev1.ProtocolUDP, corev1.ProtocolSCTP:
 					proto = normalized
 				default:
-					return mcp.NewToolResultError(fmt.Sprintf("protocol must be one of TCP, UDP, SCTP (got %q)", rawProto)), nil
+					return mcpToolError(ErrCodeInvalidArgument, fmt.Sprintf("protocol must be one of TCP, UDP, SCTP (got %q)", rawProto), map[string]any{"argument": "protocol", "supported_values": []string{"TCP", "UDP", "SCTP"}}), nil
 				}
 			}
 			port = &networkpolicy.PortSpec{Protocol: proto, Port: int32(f)}
@@ -79,25 +81,25 @@ func createNetworkReachabilityTools(ksServer *KubescapeMcpserver) {
 
 		k8sClient, err := ksServer.getK8sClient()
 		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed to get k8s client: %v", err)), nil
+			return mcpToolError(ErrCodeK8sClientError, fmt.Sprintf("failed to get k8s client: %v", err), nil), nil
 		}
 		dynClient := k8sClient.DynamicClient
 
 		policyList, err := dynClient.Resource(networkPolicyGVR).List(ctx, metav1.ListOptions{})
 		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed to list NetworkPolicy objects: %v", err)), nil
+			return mcpToolError(classifyScanError(err), fmt.Sprintf("failed to list NetworkPolicy objects: %v", err), map[string]any{"resource_type": "NetworkPolicy"}), nil
 		}
 		namespaceList, err := dynClient.Resource(namespaceGVR).List(ctx, metav1.ListOptions{})
 		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed to list Namespace objects: %v", err)), nil
+			return mcpToolError(classifyScanError(err), fmt.Sprintf("failed to list Namespace objects: %v", err), map[string]any{"resource_type": "Namespace"}), nil
 		}
 		srcPodObj, err := dynClient.Resource(podGVR).Namespace(srcNS).Get(ctx, srcName, metav1.GetOptions{})
 		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed to get source pod %s/%s: %v", srcNS, srcName, err)), nil
+			return mcpToolError(classifyScanError(err), fmt.Sprintf("failed to get source pod %s/%s: %v", srcNS, srcName, err), map[string]any{"resource_type": "Pod", "namespace": srcNS, "name": srcName}), nil
 		}
 		dstPodObj, err := dynClient.Resource(podGVR).Namespace(dstNS).Get(ctx, dstName, metav1.GetOptions{})
 		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed to get destination pod %s/%s: %v", dstNS, dstName, err)), nil
+			return mcpToolError(classifyScanError(err), fmt.Sprintf("failed to get destination pod %s/%s: %v", dstNS, dstName, err), map[string]any{"resource_type": "Pod", "namespace": dstNS, "name": dstName}), nil
 		}
 
 		resources := make(map[string]workloadinterface.IMetadata, len(policyList.Items)+len(namespaceList.Items))
@@ -159,7 +161,7 @@ func createNetworkReachabilityTools(ksServer *KubescapeMcpserver) {
 
 		resBytes, err := json.Marshal(result)
 		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed to marshal result: %v", err)), nil
+			return mcpToolError(ErrCodeMarshalError, fmt.Sprintf("failed to marshal result: %v", err), nil), nil
 		}
 		return mcp.NewToolResultText(string(resBytes)), nil
 	})

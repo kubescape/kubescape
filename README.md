@@ -140,7 +140,7 @@ Kubescape provides a comprehensive CLI with the following commands:
 |---------|-------------|
 | [`kubescape scan`](#scanning) | Scan cluster, files, or images for security issues |
 | [`kubescape scan image`](#image-scanning) | Scan container images for vulnerabilities |
-| [`kubescape fix`](#auto-fix) | Auto-fix misconfigurations in manifest files |
+| [`kubescape fix`](#auto-fix) | Auto-fix misconfigurations in manifest files, or print fixes for a cluster scan |
 | [`kubescape patch`](#image-patching) | Patch container images to fix vulnerabilities |
 | [`kubescape list`](#list-frameworks-and-controls) | List available frameworks and controls |
 | [`kubescape download`](#offline-support) | Download artifacts for offline/air-gapped use |
@@ -273,6 +273,10 @@ kubescape fix results.json --dry-run
 
 # Apply fixes without confirmation prompts
 kubescape fix results.json --no-confirm
+
+# Fix a cluster scan: the patched manifests are printed, never applied for you
+kubescape scan --format json --output cluster.json
+kubescape fix cluster.json | kubectl apply -f -
 ```
 
 ### Image Patching

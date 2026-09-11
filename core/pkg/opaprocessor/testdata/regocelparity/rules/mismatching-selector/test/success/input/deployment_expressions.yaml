@@ -1,0 +1,29 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: matching-selector-expressions
+spec:
+  selector:
+    matchExpressions:
+    - key: app
+      operator: In
+      values:
+      - api
+    - key: tier
+      operator: NotIn
+      values:
+      - frontend
+    - key: track
+      operator: Exists
+    - key: deprecated
+      operator: DoesNotExist
+  template:
+    metadata:
+      labels:
+        app: api
+        tier: backend
+        track: stable
+    spec:
+      containers:
+      - name: app
+        image: nginx

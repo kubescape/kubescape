@@ -1,0 +1,239 @@
+// Package exposure models which of a cluster's Service objects are reachable
+// from outside the cluster, and by what mechanism: a Service of type
+// LoadBalancer or NodePort is exposed directly; a networking.k8s.io/v1
+// Ingress or a Gateway API HTTPRoute/GRPCRoute exposes whatever Service it
+// names as a backend.
+//
+// This is the "outside-in" counterpart to core/pkg/networkpolicy's
+// reachability model: that package answers "can this pod reach that pod
+// inside the cluster," this one answers "does anything let traffic in from
+// outside the cluster in the first place." Like that package, this is a
+// static model computed from spec -- existence of an Ingress/HTTPRoute
+// naming a Service is treated as intent to expose it, the same trust model
+// the rest of kubescape's posture scanning uses; it does not verify that an
+// Ingress controller or Gateway implementation is actually running and
+// wired up to fulfil what the object declares.
+package exposure
+
+import (
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+)
+
+// ExposureKind identifies which Kubernetes mechanism exposes a Service.
+type ExposureKind int
+
+const (
+	// ExposureLoadBalancer means the Service itself is type LoadBalancer:
+	// exposed directly via a cloud load balancer, no Ingress/Route needed.
+	ExposureLoadBalancer ExposureKind = iota
+	// ExposureNodePort means the Service itself is type NodePort: exposed
+	// directly on every node's IP, no Ingress/Route needed.
+	ExposureNodePort
+	// ExposureIngress means a networking.k8s.io/v1 Ingress names this
+	// Service as a backend (a rule's path backend, or the defaultBackend).
+	ExposureIngress
+	// ExposureHTTPRoute means a Gateway API HTTPRoute names this Service as
+	// a backend, and at least one of its parentRefs names a Gateway object
+	// this Index was given whose listener admits the route (per
+	// AllowedRoutes -- see Index.gatewayAdmitsRouteNamespace). A listener
+	// whose admission can't be confirmed one way or the other is
+	// conservatively treated as admitting it.
+	ExposureHTTPRoute
+	// ExposureGRPCRoute means a Gateway API GRPCRoute names this Service as
+	// a backend. GRPCRoute has been a v1 core Gateway API kind since
+	// Gateway API v1.1 and carries the same parentRefs/hostnames/
+	// backendRefs shape as HTTPRoute, so the same admission model applies;
+	// only the wire protocol the Gateway serves differs, which is outside
+	// this package's concern.
+	ExposureGRPCRoute
+	// ExposureExternalIP means the Service has one or more spec.externalIPs
+	// set. kube-proxy programs these on every node regardless of
+	// spec.type, so a ClusterIP Service with externalIPs set is reachable
+	// from off-cluster the same as a NodePort Service -- this is the
+	// mechanism behind CVE-2020-8554 (arbitrary externalIPs hijack via a
+	// Service create/update in a namespace an attacker controls).
+	ExposureExternalIP
+)
+
+func (k ExposureKind) String() string {
+	switch k {
+	case ExposureLoadBalancer:
+		return "LoadBalancer"
+	case ExposureNodePort:
+		return "NodePort"
+	case ExposureIngress:
+		return "Ingress"
+	case ExposureHTTPRoute:
+		return "HTTPRoute"
+	case ExposureGRPCRoute:
+		return "GRPCRoute"
+	case ExposureExternalIP:
+		return "ExternalIP"
+	default:
+		return "unknown"
+	}
+}
+
+// ExposurePath is one specific reason a Service is reachable from outside
+// the cluster.
+type ExposurePath struct {
+	Kind ExposureKind
+	// Source names the object responsible: the Ingress/HTTPRoute/GRPCRoute
+	// (namespace/name) that names this Service as a backend, or the
+	// Service itself for LoadBalancer/NodePort.
+	Source string
+	// Host is the hostname traffic must arrive with to reach this path, per
+	// the responsible Ingress rule or route hostname. Empty means any
+	// host (an Ingress rule/defaultBackend with no host restriction, a
+	// LoadBalancer/NodePort Service, or a route with no hostnames
+	// declared).
+	Host string
+}
+
+// ServiceRef identifies one Service by namespace and name.
+type ServiceRef struct {
+	Namespace string
+	Name      string
+}
+
+// NamespaceInfo carries a namespace's own labels, needed for a Gateway
+// listener's AllowedRoutes selector (see gatewayAdmitsRouteNamespace).
+type NamespaceInfo struct {
+	Name   string
+	Labels map[string]string
+}
+
+// gatewayRoute is a minimal local mirror of the Gateway API route kinds
+// this package models (HTTPRoute, and GRPCRoute which shares its spec
+// shape) -- only the fields exposure analysis needs, plus which kind the
+// object is so exposure paths can be attributed correctly. Defined locally
+// rather than vendoring sigs.k8s.io/gateway-api, since decoding the
+// handful of fields used here from the same generic unstructured object
+// this package's adapter already reads for every other resource kind needs
+// nothing else from that module.
+type gatewayRoute struct {
+	// Kind is the object's Gateway API kind: "HTTPRoute" or "GRPCRoute".
+	// The spec fields below are identical across the two kinds, so all
+	// route logic is kind-blind; only ExposurePath attribution differs.
+	Kind       string
+	Namespace  string
+	Name       string
+	ParentRefs []parentRef
+	Hostnames  []string
+	Rules      []gatewayRouteRule
+}
+
+// gatewayAPIGroup is the Gateway API group all route kinds and their
+// parent references belong to. Gateway API's own defaulting rules treat an
+// absent group on a ParentReference as this group.
+const gatewayAPIGroup = "gateway.networking.k8s.io"
+
+// parentRef names the Gateway (or other parent) a route attaches to.
+// Namespace is a pointer because the API defaults an absent namespace to
+// the route's own, per Gateway API's own defaulting rules -- this mirrors
+// that rather than assuming empty-string means "same namespace" implicitly.
+// Group and Kind follow the same rules: an absent group is the Gateway API
+// group and an absent kind is Gateway, so a reference to anything else
+// (e.g. a Service parent for mesh use cases) is not a Gateway reference
+// and must not attach a route to a Gateway that merely shares its name.
+// SectionName, when present, pins the attachment to the one listener with
+// that name: per the Gateway API spec the route then attaches to that
+// section only, and no other listener of the Gateway may admit it.
+type parentRef struct {
+	Group       *string
+	Kind        *string
+	Namespace   *string
+	Name        string
+	SectionName *string
+}
+
+// isGatewayParentRef reports whether ref effectively names a Gateway once
+// Gateway API's own group/kind defaults are applied.
+func isGatewayParentRef(ref parentRef) bool {
+	return (ref.Group == nil || *ref.Group == gatewayAPIGroup) &&
+		(ref.Kind == nil || *ref.Kind == "Gateway")
+}
+
+type gatewayRouteRule struct {
+	BackendRefs []backendRef
+}
+
+// backendRef names a Service a route rule sends traffic to. Namespace
+// defaults to the route's own namespace when nil, same as parentRef --
+// Gateway API does not support a backendRef reaching into another
+// namespace without a ReferenceGrant, which this package does not model
+// (see AnalyzeExposure's doc comment). Group and Kind default to a
+// core-group Service when absent; anything else names a non-Service
+// backend (e.g. a multicluster ServiceImport) that this package does not
+// model as a Service exposure path, however closely its name matches one.
+type backendRef struct {
+	Group     *string
+	Kind      *string
+	Namespace *string
+	Name      string
+}
+
+// isServiceBackendRef reports whether ref effectively names a core-group
+// Service once Gateway API's own group/kind defaults are applied.
+func isServiceBackendRef(ref backendRef) bool {
+	return (ref.Group == nil || *ref.Group == "") &&
+		(ref.Kind == nil || *ref.Kind == "Service")
+}
+
+// gateway is a minimal local mirror of gateway.networking.k8s.io/v1 Gateway.
+type gateway struct {
+	Namespace string
+	Name      string
+	Listeners []listener
+}
+
+type listener struct {
+	Name          string
+	AllowedRoutes *allowedRoutes
+}
+
+// allowedRoutes mirrors Gateway API's AllowedRoutes: which namespaces'
+// routes this listener admits, and which route kinds. A nil AllowedRoutes
+// (or a nil Namespaces within it) defaults to "Same" -- routes in the
+// Gateway's own namespace only -- per the Gateway API spec's own default.
+// A nil or empty Kinds list admits every route kind, also per the spec's
+// default.
+type allowedRoutes struct {
+	Namespaces *routeNamespaces
+	Kinds      []routeGroupKind
+}
+
+// routeGroupKind mirrors Gateway API's RouteGroupKind. An absent group is
+// the Gateway API group, per the spec's defaulting rules.
+type routeGroupKind struct {
+	Group *string
+	Kind  string
+}
+
+// admitsRouteKind reports whether the AllowedRoutes kinds list admits a
+// route of the given kind once the group default is applied. An empty list
+// admits every kind.
+func (ar *allowedRoutes) admitsRouteKind(routeKind string) bool {
+	if len(ar.Kinds) == 0 {
+		return true
+	}
+	for _, k := range ar.Kinds {
+		if (k.Group == nil || *k.Group == gatewayAPIGroup) && k.Kind == routeKind {
+			return true
+		}
+	}
+	return false
+}
+
+type fromNamespaces string
+
+const (
+	fromAll      fromNamespaces = "All"
+	fromSelector fromNamespaces = "Selector"
+	fromSame     fromNamespaces = "Same"
+)
+
+type routeNamespaces struct {
+	From     *fromNamespaces
+	Selector *metav1.LabelSelector
+}

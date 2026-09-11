@@ -18,12 +18,15 @@ func applyWithTransformer(
 	resultsHandler *resultshandling.ResultsHandler,
 	transformer Transformer,
 ) error {
-	if resultsHandler == nil || resultsHandler.ScanData == nil {
+	if resultsHandler == nil {
 		return nil
 	}
 
 	mapping := NewMapping()
 
+	// transformSession guards a nil session itself. The nil-ScanData check
+	// used to sit on this function instead, where it also skipped everything
+	// below it.
 	if err := transformSession(
 		resultsHandler.ScanData,
 		mapping,
@@ -32,7 +35,14 @@ func applyWithTransformer(
 		return err
 	}
 
-	return nil
+	// Image results hang off the handler rather than off the session, so
+	// transformSession never saw them. They are transformed with the same
+	// Transformer, and therefore the same mapping, because the pseudonyms
+	// have to agree with the ones just written onto the workloads.
+	return transformImageScanData(
+		resultsHandler.ImageScanData,
+		transformer,
+	)
 }
 
 // ApplyEncrypted anonymizes a scan session while encrypting

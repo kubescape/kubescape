@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/armosec/armoapi-go/armotypes"
@@ -230,18 +231,21 @@ func TestApplyFixKeepsFormatting(t *testing.T) {
 
 // TestApplyFixToContent_EmptyLeadingDocument guards the regression from issue
 // #2495: a file whose first document is empty (a comment followed by "---") is
-// decoded inconsistently by go-yaml and yqlib, which used to make the fix
-// renderer call logger.Fatal and os.Exit the whole process mid-write (leaving
-// an empty SARIF file). It must now return an error gracefully instead.
+// decoded inconsistently by go-yaml and yqlib. The source editor must use
+// the scanner's workload numbering and preserve the leading comment.
 func TestApplyFixToContent_EmptyLeadingDocument(t *testing.T) {
 	yamlContent := "# a comment, followed by a document separator\n---\napiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: demo\nspec:\n  template:\n    spec:\n      containers:\n        - name: app\n          image: nginx:1.27\n"
-	// The scanner counts the empty leading document, so the Deployment is di==1.
-	expression := FixPathToValidYamlExpression("spec.template.spec.containers[0].image", "nginx:1.28", 1)
+	// The scanner discards the empty document before numbering workloads.
+	expression := FixPathToValidYamlExpression("spec.template.spec.containers[0].image", "nginx:1.28", 0)
 
 	got, err := ApplyFixToContent(context.Background(), yamlContent, expression)
 
-	assert.Error(t, err, "expected a graceful error rather than a process exit")
-	assert.Empty(t, got)
+	require.NoError(t, err)
+	assert.Equal(t, strings.Replace(yamlContent, "nginx:1.27", "nginx:1.28", 1), got)
+	got, err = ApplyFixToContent(context.Background(), yamlContent,
+		FixPathToValidYamlExpression("spec.template.spec.containers[0].image", "nginx:1.28", 1))
+	require.Error(t, err)
+	require.Empty(t, got)
 }
 
 // TestApplyFixToContent_TopLevelFlowSequence covers a flow collection that is not nested
@@ -627,134 +631,6 @@ func TestDetermineNewlineSeparator(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestSanitizeYaml(t *testing.T) {
-	type args struct {
-		fileString string
-	}
-	tests := []struct {
-		name string
-		args args
-		want string
-	}{
-		{
-			name: "empty yaml",
-			args: args{
-				fileString: "",
-			},
-			want: "",
-		},
-		{
-			name: "empty yaml with two characters",
-			args: args{
-				fileString: "##",
-			},
-			want: "##",
-		},
-		{
-			name: "yaml/v3",
-			args: args{
-				fileString: `apiVersion: v1
-kind: Pod
-metadata:
-  name: insert_to_mapping_node_1
-`,
-			},
-			want: `apiVersion: v1
-kind: Pod
-metadata:
-  name: insert_to_mapping_node_1
-`,
-		},
-		{
-			name: "yaml/v2",
-			args: args{
-				fileString: `apiVersion: v1
-kind: Pod
-metadata:
-  name: insert_to_mapping_node_1
----
-apiVersion: v1
-kind: Pod
-metadata:
-  name: insert_to_mapping_node_2
-`,
-			},
-			want: `apiVersion: v1
-kind: Pod
-metadata:
-  name: insert_to_mapping_node_1
----
-apiVersion: v1
-kind: Pod
-metadata:
-  name: insert_to_mapping_node_2
-`,
-		},
-		{
-			name: "yaml/v1",
-			args: args{
-				fileString: `---
-apiVersion: v1
-kind: Pod
-metadata:
-  name: insert_to_mapping_node_1
-`,
-			},
-			want: `# ---
-apiVersion: v1
-kind: Pod
-metadata:
-  name: insert_to_mapping_node_1
-`,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := sanitizeYaml(tt.args.fileString); got != tt.want {
-				t.Errorf("sanitizeYaml() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
-// TestRevertSanitizeYaml guards the `< 5` / `[:5]` pairing: the guard was
-// previously `< 3` while the slice was `[:5]`, so any 3-4 byte input panicked
-// with "slice bounds out of range". Covers every length from 0 up to and past
-// the "# ---" marker, since that boundary is exactly where the bug lived.
-func TestRevertSanitizeYaml(t *testing.T) {
-	tests := []struct {
-		name string
-		in   string
-		want string
-	}{
-		{name: "length 0", in: "", want: ""},
-		{name: "length 1", in: "-", want: "-"},
-		{name: "length 2", in: "--", want: "--"},
-		{name: "length 3 (previously panicked)", in: "# -", want: "# -"},
-		{name: "length 4 (previously panicked)", in: "# --", want: "# --"},
-		{name: "length 5, marker present", in: "# ---", want: "---"},
-		{name: "length 5, marker absent", in: "# abc", want: "# abc"},
-		{name: "marker with trailing content", in: "# ---\nkind: Pod\n", want: "---\nkind: Pod\n"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			assert.NotPanics(t, func() {
-				got := revertSanitizeYaml(tt.in)
-				assert.Equal(t, tt.want, got)
-			})
-		})
-	}
-}
-
-// TestSanitizeYaml_RoundTrip confirms revertSanitizeYaml undoes sanitizeYaml
-// for the case both were built for: a document starting with "---".
-func TestSanitizeYaml_RoundTrip(t *testing.T) {
-	original := "---\napiVersion: v1\nkind: Pod\n"
-	sanitized := sanitizeYaml(original)
-	assert.Equal(t, "# ---\napiVersion: v1\nkind: Pod\n", sanitized)
-	assert.Equal(t, original, revertSanitizeYaml(sanitized))
 }
 
 func TestReduceYamlExpressions(t *testing.T) {
@@ -1186,13 +1062,18 @@ func TestNewFixHandler_MalformedReportishJSON(t *testing.T) {
 }
 
 func TestNewFixHandler_ClusterReportUnsupportedTarget(t *testing.T) {
-	// Regression test: cluster reports must surface "unsupported scanning target"
+	// Cluster scans are supported now (their resources are patched in memory
+	// and printed), but only when the report carries the cluster context a real
+	// cluster scan records. Cluster is the zero enum value and scanningTarget is
+	// tagged omitempty, so a report that simply lost the field deserializes as a
+	// cluster scan. Those must still surface "unsupported scanning target"
+	// rather than being accepted as an empty cluster scan — and still must not
+	// fall back to the generic "invalid report file".
 	const unsupported = "unsupported scanning target"
 	const invalid = "invalid report file: not a valid kubescape scan report. Please provide a JSON file generated by 'kubescape scan --format json'"
 	for name, reportJSON := range map[string]string{
-		"explicit-0-minimal":          `{"metadata":{"scanMetadata":{"scanningTarget":0}},"generationTime":"2024-01-01T00:00:00Z","results":[]}`,
-		"explicit-0-with-cluster-ctx": `{"metadata":{"scanMetadata":{"scanningTarget":0},"targetMetadata":{"clusterContextMetadata":{"contextName":"dev"}}},"generationTime":"2024-01-01T00:00:00Z","results":[]}`,
-		"omitempty-absent-target":     `{"metadata":{"scanMetadata":{"targetType":"cluster"}},"generationTime":"2024-01-01T00:00:00Z","results":[]}`,
+		"explicit-0-no-cluster-ctx": `{"metadata":{"scanMetadata":{"scanningTarget":0}},"generationTime":"2024-01-01T00:00:00Z","results":[]}`,
+		"omitempty-absent-target":   `{"metadata":{"scanMetadata":{"targetType":"cluster"}},"generationTime":"2024-01-01T00:00:00Z","results":[]}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			tmpFile, err := os.CreateTemp("", "report-*.json")
@@ -1211,12 +1092,29 @@ func TestNewFixHandler_ClusterReportUnsupportedTarget(t *testing.T) {
 	}
 }
 
+func TestNewFixHandler_ClusterReportAccepted(t *testing.T) {
+	// The counterpart to the above: a report that does carry cluster context is
+	// a genuine cluster scan and now loads, so its resources can be patched in
+	// memory.
+	reportJSON := `{"metadata":{"scanMetadata":{"scanningTarget":0},"targetMetadata":{"clusterContextMetadata":{"contextName":"dev"}}},"generationTime":"2024-01-01T00:00:00Z","results":[]}`
+	tmpFile, err := os.CreateTemp("", "report-*.json")
+	require.NoError(t, err)
+	defer os.Remove(tmpFile.Name())
+	_, err = tmpFile.WriteString(reportJSON)
+	require.NoError(t, err)
+	tmpFile.Close()
+
+	handler, err := NewFixHandler(&metav1.FixInfo{ReportFile: tmpFile.Name()})
+	require.NoError(t, err)
+	assert.True(t, handler.isClusterReport())
+}
+
 func TestNewFixHandler_ClusterReportRoundTrip(t *testing.T) {
-	// Regression test for the round-trip case: a cluster report marshaled from
-	// reporthandlingv2 types. Cluster is the zero enum value (0) and scanningTarget
-	// is tagged omitempty, so scanMetadata serializes as {} with no scanningTarget
-	// key. Such a report must surface "unsupported scanning target", not
-	// "invalid report file" — it is recognized by its clusterContextMetadata.
+	// Round-trip case: a cluster report marshaled from reporthandlingv2 types.
+	// Cluster is the zero enum value (0) and scanningTarget is tagged omitempty,
+	// so scanMetadata serializes as {} with no scanningTarget key. Such a report
+	// is still recognized as a cluster scan by its clusterContextMetadata, and
+	// is now accepted rather than rejected.
 	var report reporthandlingv2.PostureReport
 	report.Metadata.ScanMetadata.ScanningTarget = reporthandlingv2.Cluster
 	report.Metadata.ContextMetadata.ClusterContextMetadata = &reporthandlingv2.ClusterMetadata{ContextName: "dev"}
@@ -1233,10 +1131,9 @@ func TestNewFixHandler_ClusterReportRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	tmpFile.Close()
 
-	_, err = NewFixHandler(&metav1.FixInfo{ReportFile: tmpFile.Name()})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "unsupported scanning target")
-	assert.NotContains(t, err.Error(), "invalid report file")
+	handler, err := NewFixHandler(&metav1.FixInfo{ReportFile: tmpFile.Name()})
+	require.NoError(t, err, "a round-tripped cluster report must be recognized despite the dropped enum")
+	assert.True(t, handler.isClusterReport())
 }
 
 func TestNewFixHandler_EmptyReportGUID(t *testing.T) {

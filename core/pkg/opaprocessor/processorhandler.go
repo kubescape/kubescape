@@ -234,29 +234,29 @@ func (opap *OPAProcessor) SetIncrementalCache(cache *scancache.Store) {
 	opap.incrementalCache = cache
 }
 
-// effectiveExcludedRules merges the session's rule exclusions with the
-// --skip-controls and --include-controls filters. Both the eager and the
-// streaming entry point build AllPolicies from it, so the same cluster is
+// effectivePolicies returns the session's frameworks with the
+// --skip-controls and --include-controls filters applied. Both the eager and
+// the streaming entry point build AllPolicies from it, so the same cluster is
 // scanned against the same control set whichever path a scan takes.
 // It returns a hard error when the filter leaves nothing to scan, preventing
 // a 0-control, exit-0 result that would silently pass a CI gate.
-func (opap *OPAProcessor) effectiveExcludedRules() (map[string]bool, error) {
+func (opap *OPAProcessor) effectivePolicies() ([]reporthandling.Framework, error) {
 	if opap.SkipControls == "" && opap.IncludeControls == "" {
-		return opap.ExcludedRules, nil
+		return opap.Policies, nil
 	}
-	return buildControlExcludedRules(opap.ExcludedRules, opap.Policies, split(opap.SkipControls), split(opap.IncludeControls))
+	return filterFrameworkControls(opap.Policies, split(opap.SkipControls), split(opap.IncludeControls))
 }
 
 func (opap *OPAProcessor) ProcessRulesListener(ctx context.Context, progressListener IJobProgressNotificationClient) error {
 	scanningScope := cautils.GetScanningScope(opap.Metadata.ContextMetadata)
 
-	excludedRules, err := opap.effectiveExcludedRules()
+	frameworks, err := opap.effectivePolicies()
 	if err != nil {
 		return err
 	}
-	opap.AllPolicies = convertFrameworksToPolicies(opap.Policies, excludedRules, scanningScope)
+	opap.AllPolicies = convertFrameworksToPolicies(frameworks, opap.ExcludedRules, scanningScope)
 
-	ConvertFrameworksToSummaryDetails(&opap.Report.SummaryDetails, opap.Policies, opap.AllPolicies)
+	ConvertFrameworksToSummaryDetails(&opap.Report.SummaryDetails, frameworks, opap.AllPolicies)
 
 	// process
 	processErr := opap.Process(ctx, opap.AllPolicies, progressListener)
@@ -281,6 +281,11 @@ func (opap *OPAProcessor) ProcessRulesListener(ctx context.Context, progressList
 	if err := scorewrapper.Calculate(score.EPostureReportV2); err != nil {
 		logger.L().Ctx(ctx).Warning("failed to calculate score", helpers.Error(err))
 	}
+
+	// BuildNamespaceSummaries relies on ControlSummary.ComplianceScore for
+	// controls it has no resource for in a given namespace, so it must run
+	// after scorewrapper.Calculate has populated that field.
+	opap.NamespaceSummaries = cautils.BuildNamespaceSummaries(opap.Report.SummaryDetails.Controls, opap.AllResources)
 
 	opap.reweightComplianceScores()
 
@@ -309,12 +314,12 @@ func (opap *OPAProcessor) ProcessWithStreaming(ctx context.Context, batchChan <-
 	opap.loggerStartScanning()
 	defer opap.loggerDoneScanning()
 
-	excludedRules, err := opap.effectiveExcludedRules()
+	frameworks, err := opap.effectivePolicies()
 	if err != nil {
 		return err
 	}
-	opap.AllPolicies = convertFrameworksToPolicies(opap.Policies, excludedRules, cautils.GetScanningScope(opap.Metadata.ContextMetadata))
-	ConvertFrameworksToSummaryDetails(&opap.Report.SummaryDetails, opap.Policies, opap.AllPolicies)
+	opap.AllPolicies = convertFrameworksToPolicies(frameworks, opap.ExcludedRules, cautils.GetScanningScope(opap.Metadata.ContextMetadata))
+	ConvertFrameworksToSummaryDetails(&opap.Report.SummaryDetails, frameworks, opap.AllPolicies)
 
 	scopeControlIDs, wholeClusterControlIDs := splitWholeClusterControls(opap.AllPolicies, sortedControlIDs(opap.AllPolicies))
 
@@ -476,6 +481,11 @@ done:
 	if err := scorewrapper.Calculate(score.EPostureReportV2); err != nil {
 		logger.L().Ctx(ctx).Warning("failed to calculate score", helpers.Error(err))
 	}
+
+	// BuildNamespaceSummaries relies on ControlSummary.ComplianceScore for
+	// controls it has no resource for in a given namespace, so it must run
+	// after scorewrapper.Calculate has populated that field.
+	opap.NamespaceSummaries = cautils.BuildNamespaceSummaries(opap.Report.SummaryDetails.Controls, opap.AllResources)
 
 	opap.reweightComplianceScores()
 
@@ -707,7 +717,7 @@ func (scope evaluationScope) matchedObjects(rule *reporthandling.PolicyRule) []w
 // so aggregator write-back during evaluation cannot re-bucket namespaces
 // mid-scan.
 func (opap *OPAProcessor) evaluationScopes() []evaluationScope {
-	resident, batches := cautils.PartitionResources(opap.initialResourceCount, opap.K8SResources, opap.ExternalResources, opap.AllResources, opap.largeClusterSizeThreshold)
+	resident, batches := cautils.PartitionResources(opap.initialResourceCount, opap.K8SResources, opap.ExternalResources, opap.snapshotAllResources(), opap.largeClusterSizeThreshold)
 
 	residentGroups := newResidentIndex(resident)
 
@@ -736,9 +746,24 @@ func (opap *OPAProcessor) wholeClusterScope() evaluationScope {
 		Scope:             cautils.ClusterScope,
 		K8SResources:      opap.K8SResources,
 		ExternalResources: opap.ExternalResources,
-		AllResources:      opap.AllResources,
+		AllResources:      opap.snapshotAllResources(),
 	}
 	return newEvaluationScope(cautils.ClusterScope, nil, newResidentIndex(batch))
+}
+
+// snapshotAllResources returns a shallow copy of opap.AllResources, taken
+// under opap.mu. AllResources is grown concurrently mid-scan by aggregator
+// write-back (processRuleOnScope), so any caller that hands the map to code
+// outside opap.mu's protection — rather than doing a single guarded map
+// lookup itself — must work from a private copy, not the live map.
+func (opap *OPAProcessor) snapshotAllResources() map[string]workloadinterface.IMetadata {
+	opap.mu.Lock()
+	defer opap.mu.Unlock()
+	snapshot := make(map[string]workloadinterface.IMetadata, len(opap.AllResources))
+	for k, v := range opap.AllResources {
+		snapshot[k] = v
+	}
+	return snapshot
 }
 
 type policyControl struct {
@@ -1042,7 +1067,9 @@ func (opap *OPAProcessor) processControl(ctx context.Context, control *reporthan
 
 	if len(ruleErrs) == 0 && opap.incrementalCache != nil && controlCacheEligible(control) {
 		for resourceID, result := range resourcesAssociatedControl {
+			opap.mu.Lock()
 			resource, ok := opap.AllResources[resourceID]
+			opap.mu.Unlock()
 			if !ok {
 				continue
 			}
@@ -1908,11 +1935,21 @@ func (opap *OPAProcessor) celParamObjectFinder() func(apiVersion, kind, namespac
 	if opap.OPASessionObj == nil {
 		return func(apiVersion, kind, namespace, name string) (map[string]any, bool) { return nil, false }
 	}
+
+	// AllResources is grown concurrently mid-scan by other rules' aggregator
+	// write-back (processRuleOnScope, guarded by opap.mu) while this rule's CEL
+	// evaluation snapshots it here. Without the same lock this is an
+	// unsynchronized concurrent map read/write, which Go's runtime can turn
+	// into a process-wide crash (fatal error: concurrent map iteration and map
+	// write), not just a race-detector warning.
+	opap.mu.Lock()
 	idx := make(map[string]map[string]any, len(opap.AllResources))
 	for _, res := range opap.AllResources {
 		key := res.GetApiVersion() + "/" + res.GetKind() + "/" + res.GetNamespace() + "/" + res.GetName()
 		idx[key] = res.GetObject()
 	}
+	opap.mu.Unlock()
+
 	return func(apiVersion, kind, namespace, name string) (map[string]any, bool) {
 		obj, ok := idx[apiVersion+"/"+kind+"/"+namespace+"/"+name]
 		return obj, ok

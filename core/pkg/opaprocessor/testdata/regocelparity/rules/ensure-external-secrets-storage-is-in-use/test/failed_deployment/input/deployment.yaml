@@ -1,0 +1,33 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-deployment
+  labels:
+    purpose: demonstrate-command
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      purpose: demonstrate-command
+  template:
+    metadata:
+      labels:
+        purpose: demonstrate-command
+    spec :
+      containers :
+        -
+          image : k8s.gcr.io/test-webserver
+          name : test-container
+          volumeMounts :
+            - mountPath : /test-pd
+              name : test-volume
+
+            - mountPath : /test-pd2
+              name : test-volume
+      volumes :
+        - name : test-volume
+          hostPath :
+            path : /.aws/credentials
+        - name : test-volume2
+          hostPath :
+            path : /.aws/

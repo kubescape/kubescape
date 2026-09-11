@@ -6,16 +6,9 @@ import (
 	"time"
 
 	"github.com/kubescape/kubescape/v4/core/cautils"
-	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	"github.com/kubescape/opa-utils/reporthandling"
 )
 
-func getScanKind(policyIdentifier []cautils.PolicyIdentifier) apisv1.NotificationPolicyKind {
-	if len(policyIdentifier) > 0 {
-		return policyIdentifier[0].Kind
-	}
-	return "unknown"
-}
 func frameworkDownloadError(err error, fwName string) error {
 	if strings.Contains(err.Error(), "unsupported protocol scheme") {
 		err = fmt.Errorf("failed to download from GitHub release, try running with `--use-default` flag")

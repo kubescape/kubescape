@@ -149,10 +149,11 @@ func TestGitHubActionsPrinter_GoldenAnnotation(t *testing.T) {
 
 	lines := strings.Split(strings.TrimRight(output, "\n"), "\n")
 	require.NotEmpty(t, lines)
+	wantMsg := fmt.Sprintf("High severity finding on apps/v1/Deployment/default/demo. Remediation: https://hub.armosec.io/docs/c-0057%%0AFailed paths:%%0Aspec.template.spec.containers[0].securityContext.privileged=false")
 	assert.Equal(t,
-		fmt.Sprintf("::error file=deploy.yaml,line=%d,title=C-0057 Privileged container::High severity finding on apps/v1/Deployment/default/demo. Remediation: https://hub.armosec.io/docs/c-0057",
-			privilegedLine),
-		lines[0], "the first line must be the exact workflow command")
+		fmt.Sprintf("::error file=deploy.yaml,line=%d,title=C-0057 Privileged container::%s",
+			privilegedLine, wantMsg),
+		lines[0], "the first line must be the exact workflow command with evidence paths")
 	assert.Contains(t, output, "1 of 1 High/Critical finding(s) annotated")
 }
 
@@ -307,4 +308,47 @@ func TestEscapeAnnotationProperty(t *testing.T) {
 	assert.Equal(t, "100%25 done", escapeAnnotationProperty("100% done"))
 	assert.Equal(t, "a%2Cb%3Ac", escapeAnnotationProperty("a,b:c"))
 	assert.Equal(t, "nl%0Aend", escapeAnnotationProperty("nl\nend"))
+}
+
+// TestGitHubActionsPrinter_EvidencePathsInMessage verifies that when a
+// resource has assisted-remediation paths, they are appended to the annotation
+// message so developers see the failing field directly in the PR annotation.
+func TestGitHubActionsPrinter_EvidencePathsInMessage(t *testing.T) {
+	origWD, err := os.Getwd()
+	require.NoError(t, err)
+	defer func() { _ = os.Chdir(origWD) }()
+	require.NoError(t, os.Chdir(t.TempDir()))
+
+	session := ghSessionFixture(t, "C-0057", 8.0)
+	output := ghOutputFor(t, session)
+
+	// The fix path from the fixture is spec.template.spec.containers[0].securityContext.privileged=false.
+	// After workflow-command escaping, newlines become %0A.
+	assert.Contains(t, output, "Failed paths:%0Aspec.template.spec.containers[0].securityContext.privileged=false",
+		"annotation message must include assisted-remediation paths so the failing field is visible in the PR")
+}
+
+// TestGitHubActionsPrinter_NoEvidencePathsWhenNone verifies that when a
+// control has no fix/delete/review paths, the annotation message does not
+// contain a stray "Failed paths:" header.
+func TestGitHubActionsPrinter_NoEvidencePathsWhenNone(t *testing.T) {
+	origWD, err := os.Getwd()
+	require.NoError(t, err)
+	defer func() { _ = os.Chdir(origWD) }()
+	require.NoError(t, os.Chdir(t.TempDir()))
+
+	session := ghSessionFixture(t, "C-0057", 8.0)
+	// Remove all paths from the control so AssistedRemediationPathsWithCurrentValues returns empty.
+	resourceID := "apps/v1/Deployment/default/demo"
+	result := session.ResourcesResult[resourceID]
+	for i := range result.AssociatedControls {
+		for j := range result.AssociatedControls[i].ResourceAssociatedRules {
+			result.AssociatedControls[i].ResourceAssociatedRules[j].Paths = nil
+		}
+	}
+	session.ResourcesResult[resourceID] = result
+
+	output := ghOutputFor(t, session)
+	assert.NotContains(t, output, "Failed paths:",
+		"annotation message must not contain a paths header when there are no evidence paths")
 }

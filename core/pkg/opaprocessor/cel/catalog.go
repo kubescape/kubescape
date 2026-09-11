@@ -2,6 +2,7 @@ package cel
 
 import (
 	"fmt"
+	"sort"
 
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 )
@@ -103,4 +104,110 @@ func MatchConstraintsForPolicy(policyName string) (matchConstraints *admissionre
 		return nil, false, nil
 	}
 	return vap.matchConstraints.DeepCopy(), true, nil
+}
+
+// PolicyInfo describes one policy in the embedded bundle. The two duplicate
+// flags map onto the lookups a caller will reach for: DuplicateName means the
+// metadata.name is claimed more than once, so create-policy-binding --policy
+// refuses it, while DuplicateControl means the controlId is, so --control
+// refuses it. They are independent - a name claimed twice by policies carrying
+// distinct control IDs leaves both controls perfectly bindable.
+type PolicyInfo struct {
+	PolicyName       string
+	ControlID        string
+	TakesParams      bool
+	FailurePolicy    string
+	Resources        []string
+	DuplicateName    bool
+	DuplicateControl bool
+}
+
+// ListPolicies returns every policy in the embedded bundle, ordered by policy
+// name then control ID. Policies that carry no controlId label are the
+// cluster-scoped helpers and are reported with an empty ControlID.
+//
+// byName and byControl are poisoned independently (indexUnique in loader.go),
+// so neither index alone sees the whole bundle: a name claimed twice is dropped
+// from byName while each of its distinct control IDs stays resolvable through
+// byControl. Listing walks both, because a control the binding command accepts
+// must not be missing from the command that exists to discover it.
+func ListPolicies() ([]PolicyInfo, error) {
+	catalog, err := getVAPCatalog()
+	if err != nil {
+		return nil, err
+	}
+	return listPolicies(catalog), nil
+}
+
+func listPolicies(catalog *vapCatalog) []PolicyInfo {
+	policies := make([]PolicyInfo, 0, len(catalog.byName)+len(catalog.byControl))
+	listed := make(map[*VAP]struct{}, len(catalog.byName)+len(catalog.byControl))
+	names := make(map[string]struct{}, len(catalog.byName))
+
+	for name, vap := range catalog.byName {
+		policies = append(policies, policyInfo(catalog, name, vap))
+		listed[vap] = struct{}{}
+		names[name] = struct{}{}
+	}
+
+	for _, vap := range catalog.byControl {
+		if _, done := listed[vap]; done {
+			continue
+		}
+		policies = append(policies, policyInfo(catalog, vap.PolicyName, vap))
+		listed[vap] = struct{}{}
+		names[vap.PolicyName] = struct{}{}
+	}
+
+	for name := range catalog.dupNames {
+		if _, covered := names[name]; covered {
+			continue
+		}
+		policies = append(policies, PolicyInfo{PolicyName: name, DuplicateName: true})
+	}
+
+	sort.Slice(policies, func(i, j int) bool {
+		if policies[i].PolicyName != policies[j].PolicyName {
+			return policies[i].PolicyName < policies[j].PolicyName
+		}
+		return policies[i].ControlID < policies[j].ControlID
+	})
+
+	return policies
+}
+
+func policyInfo(catalog *vapCatalog, name string, vap *VAP) PolicyInfo {
+	_, duplicateName := catalog.dupNames[name]
+	_, duplicateControl := catalog.dupControls[vap.ControlID]
+
+	return PolicyInfo{
+		PolicyName:       name,
+		ControlID:        vap.ControlID,
+		TakesParams:      vap.TakesParams(),
+		FailurePolicy:    string(vap.failurePolicy),
+		Resources:        matchedResources(vap.matchConstraints),
+		DuplicateName:    duplicateName,
+		DuplicateControl: vap.ControlID != "" && duplicateControl,
+	}
+}
+
+func matchedResources(matchConstraints *admissionregistrationv1.MatchResources) []string {
+	if matchConstraints == nil {
+		return nil
+	}
+
+	seen := make(map[string]struct{})
+	resources := make([]string, 0)
+	for _, rule := range matchConstraints.ResourceRules {
+		for _, resource := range rule.Resources {
+			if _, ok := seen[resource]; ok {
+				continue
+			}
+			seen[resource] = struct{}{}
+			resources = append(resources, resource)
+		}
+	}
+	sort.Strings(resources)
+
+	return resources
 }

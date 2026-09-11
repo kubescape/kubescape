@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: akia-key-pod
+spec:
+  containers:
+  - name: app
+    env:
+    - name: DB_URL
+      value: AKIAIOSFODNN7EXAMPLE
+    image: nginx:1.25

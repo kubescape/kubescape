@@ -53,10 +53,10 @@ jobs:
           CGO_ENABLED: 1
         run: ${{ env.DOCKER_CMD }} go test -v -race ./core/cautils/...
 
-      - name: Test httphandler pkg
-        run: ${{ env.DOCKER_CMD }} sh -c 'cd httphandler && go test -v ./...'
+      - name: Check MCP structured errors
+        run: bash .github/scripts/check_mcp_errors.sh
 
-      - uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+      - uses: anchore/sbom-action/download-syft@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
         name: Setup Syft
 
       - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
@@ -78,7 +78,7 @@ jobs:
 
       - name: golangci-lint
         continue-on-error: false
-        uses: golangci/golangci-lint-action@1e7e51e771db61008b38414a730f564565cf7c20 # v9.2.0
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
           version: v2.12.2
           args: --timeout 10m

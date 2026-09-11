@@ -46,17 +46,17 @@ kubescape scan [target] [flags]
 | `--exceptions <path>` | Path to exceptions file | - |
 | `--audit-exceptions` | Include exception usage details in supported scan outputs | `false` |
 | `--fail-coverage-below <float>` | Fail if the scan coverage score is below threshold (`0` disables). Applies in every view — see [score thresholds](#score-thresholds). | `0` |
-| `-f, --format <format>` | Output format: `pretty-printer`, `json`, `junit`, `prometheus`, `pdf`, `html`, `sarif`, `gitlab-sast`, `github-actions`, `yaml`, `csv`, `markdown`, `policyreport`, `exceptions` — see [generating an exceptions baseline](#generating-an-exceptions-baseline). `github-actions` emits failed High/Critical controls as `::error` workflow commands for inline PR annotations; local file scans only, capped at GitHub's 10-annotations-per-step limit | `pretty-printer` |
+| `-f, --format <format>` | Output format: `pretty-printer`, `json`, `junit`, `prometheus`, `pdf`, `html`, `sarif`, `gitlab-sast`, `github-actions`, `yaml`, `csv`, `markdown`, `policyreport`, `exceptions`, `cyclonedx-json`, `spdx-json` — see [generating an exceptions baseline](#generating-an-exceptions-baseline) and [generating an SBOM](#generating-an-sbom). `github-actions` emits failed High/Critical controls as `::error` workflow commands for inline PR annotations; local file scans only, capped at GitHub's 10-annotations-per-step limit | `pretty-printer` |
 | `--hide` | Replace sensitive report metadata with deterministic pseudonyms. Ignored when `--encrypt` is also specified. | `false` |
 | `--host-scan` | Enable host data collection from cluster nodes for certain controls. When not set, Kubescape auto-detects node-agent CRDs and uses a CRD-based host sensor if available. Use `--host-scan=false` to disable host data collection. See the [Kubescape operator](https://github.com/kubescape/helm-charts/tree/main/charts/kubescape-operator) for a managed alternative. | auto-detect |
 | `--include-namespaces <ns>` | Namespaces to include (comma-separated) | - |
 | `--label-selector <selector>` | Filter collected resources by Kubernetes label selector. Accepts any expression `kubectl -l` supports, e.g. `app=nginx,env!=dev` or `env in (prod,staging)`. Syntax is validated before scanning begins; filtering is applied during live cluster collection and ignored when scanning local files. | - |
 | `--keep-local` | Don't report results to backend | `false` |
-| `--notify <url>` | POST the posture scan summary to a webhook URL. Slack incoming webhooks receive Block Kit; other destinations receive generic JSON. Repeat for multiple endpoints. Delivery is best-effort and does not affect scan exit status. Not supported by `scan image`. | - |
+| `--notify <url>` | POST the posture scan summary to a webhook URL. Slack incoming webhooks receive Block Kit, Microsoft Teams webhooks an Adaptive Card, and other destinations generic JSON. Repeat for multiple endpoints. Delivery is best-effort and does not affect scan exit status. Not supported by `scan image`. | - |
 | `--kubeconfig <path>` | Path to kubeconfig file | - |
 | `-o, --output <path>` | Output file path | stdout |
 | `--otel-endpoint <endpoint>` | Export scan traces and metrics to an OTLP collector — see [OpenTelemetry export](#opentelemetry-export). Accepts `host:port` (plaintext) or a `http(s)://` URL. | `OTEL_EXPORTER_OTLP_ENDPOINT` |
-| `--scan-images` | Also scan container images for vulnerabilities | `false` |
+| `--scan-images` | Also scan container images for vulnerabilities. Required for `--format cyclonedx-json` and `--format spdx-json` — see [generating an SBOM](#generating-an-sbom) | `false` |
 | `--image-platform <platform>` | OCI platform for workload image scans, such as `linux/amd64`. Overrides platform inferred from Nodes and hard scheduling constraints | inferred |
 | `--min-severity <sev>` | Only show controls at or above this severity: `low`, `medium`, `high`, `critical`. Output-only — exit codes are computed on the full unfiltered report | - |
 | `--max-severity <sev>` | Only show controls at or below this severity. Output-only — exit codes are computed on the full unfiltered report | - |
@@ -70,11 +70,14 @@ kubescape scan [target] [flags]
 
 ### Webhook notifications
 
-Use `--notify` to send a compact summary after a posture scan. Official Slack and GovSlack incoming webhook URLs receive a Block Kit message; every other URL receives the existing JSON `summaryDetails` object:
+Use `--notify` to send a compact summary after a posture scan. Official Slack and GovSlack incoming webhook URLs receive a Block Kit message, Microsoft Teams incoming webhooks (`*.webhook.office.com`, `outlook.office.com`, `outlook.office365.com`) receive an Adaptive Card, and every other URL receives the existing JSON `summaryDetails` object:
 
 ```bash
 export SLACK_WEBHOOK_URL='https://hooks.slack.com/services/T00000000/B00000000/SECRET'
 kubescape scan manifests/ --notify "$SLACK_WEBHOOK_URL"
+
+export TEAMS_WEBHOOK_URL='https://contoso.webhook.office.com/webhookb2/00000000-0000-0000-0000-000000000000@.../IncomingWebhook/.../...'
+kubescape scan manifests/ --notify "$TEAMS_WEBHOOK_URL"
 kubescape scan manifests/ --notify https://hooks.example.com/kubescape
 kubescape scan manifests/ --notify https://ops.example.com/kubescape --notify https://audit.example.com/kubescape
 ```
@@ -97,6 +100,36 @@ Slack messages contain the compliance score, passed/failed/skipped control count
 }
 ```
 
+Teams messages carry the same content as an Adaptive Card wrapped in the incoming-webhook envelope, with the counts in a `FactSet` and the failing controls keyed by control ID. For example:
+
+```json
+{
+  "type": "message",
+  "attachments": [{
+    "contentType": "application/vnd.microsoft.card.adaptive",
+    "contentUrl": null,
+    "content": {
+      "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+      "type": "AdaptiveCard",
+      "version": "1.4",
+      "body": [
+        {"type": "TextBlock", "text": "Kubescape scan results", "size": "Large", "weight": "Bolder", "wrap": true},
+        {"type": "FactSet", "facts": [
+          {"title": "Compliance score", "value": "73.2%"},
+          {"title": "Controls failed", "value": "2 of 8"},
+          {"title": "Passed", "value": "5"},
+          {"title": "Skipped", "value": "1"}
+        ]},
+        {"type": "TextBlock", "text": "Top failing controls", "weight": "Bolder", "wrap": true},
+        {"type": "FactSet", "facts": [
+          {"title": "C-0001", "value": "Critical — Privileged container"}
+        ]}
+      ]
+    }
+  }]
+}
+```
+
 Generic destinations continue to receive only the scan summary. An abridged example is:
 
 ```json
@@ -109,7 +142,7 @@ Generic destinations continue to receive only the scan summary. An abridged exam
 }
 ```
 
-The summary and Slack control names may contain identifiers from the scan. Use `--hide` where appropriate and send only to trusted webhook endpoints. A Slack webhook URL is itself a secret; keep it out of source control and prefer passing it through an environment variable. Microsoft Teams Adaptive Card formatting is not currently included.
+The summary and control names may contain identifiers from the scan. Use `--hide` where appropriate and send only to trusted webhook endpoints. Slack and Teams webhook URLs are secrets; keep them out of source control and prefer passing them through environment variables.
 
 ### Generating an exceptions baseline
 
@@ -130,7 +163,11 @@ The file holds one policy per failed control, listing the resources that failed
 it by `kind`, `namespace` and `name`, in the same shape as the samples under
 [examples/exceptions](../examples/exceptions). Designators carry no `cluster`
 attribute, so the same file applies wherever those workloads run. Policies use
-the `alertOnly` action.
+the `disable` action, which suppresses the baseline findings as passed with
+exceptions. For evaluated findings, use `alertOnly` in a hand-written policy
+when a finding should be acknowledged but remain failed and continue
+contributing to the compliance score. Manual-review controls have separate
+status handling.
 
 It is a normal output format, so it composes with the others and honours
 `--output`, writing `scan-result.json` and `scan-result.exceptions.json`:
@@ -165,6 +202,39 @@ resources from it, or widen one by replacing an escaped `name` with a regular
 expression of your own.
 
 Exceptions are posture-only and the format is rejected for `scan image`.
+
+### Generating an SBOM
+
+`--scan-images` already pulls and analyses every image a scan finds. Adding
+`--format cyclonedx-json` or `--format spdx-json` writes the software bill of
+materials that analysis produced, so one command inventories everything running
+in a cluster or referenced by a set of manifests:
+
+```bash
+# CycloneDX SBOM for every image running in the cluster
+kubescape scan --scan-images --format cyclonedx-json --output cluster.cdx.json
+
+# SPDX SBOM for the images referenced by a manifest directory
+kubescape scan ./manifests --scan-images --format spdx-json --output manifests.spdx.json
+
+# Posture report and SBOM from a single scan
+kubescape scan --scan-images --format json,cyclonedx-json --output report
+```
+
+One document is emitted per image, as a JSON array when the scan covered several
+and as the bare document when it covered one — the same shape `kubescape scan
+image` produces. The SBOM describes images only; posture results belong to the
+other formats, so pair them with `--format` when both are needed.
+
+Without `--scan-images` there is nothing to describe and the scan stops before it
+starts, rather than writing an empty file. To scan an image directly, without a
+posture scan around it, use [`kubescape scan image`](#kubescape-scan-image).
+
+`--hide` and `--encrypt` are rejected with these formats. An SBOM is the Anchore
+scan document, whose package identity and relationships are keyed by
+content-derived IDs that anonymization cannot rewrite, so it would name the
+images and packages a `--hide` run is meant to conceal. Anonymized runs keep the
+posture formats, where image references are pseudonymized.
 
 ### Custom rules
 
@@ -229,6 +299,27 @@ A bare rule is matched against every resource kind, so it must filter input
 itself. Prefer a rule directory when the rule targets specific kinds.
 
 Every custom rule becomes a control named `custom-<rule>` in the report.
+
+#### Custom rule severity
+
+A custom rule is **medium** severity (base score `5`) unless it says otherwise.
+Either layout can declare its own severity with a `# @baseScore <1-10>` comment
+anywhere in its Rego source:
+
+```rego
+package armo_builtins
+
+# @baseScore 9
+
+deny[msga] { ... }
+```
+
+The base score is bucketed the same way as a built-in control — `1-3` low,
+`4-6` medium, `7-8` high, `9-10` critical — so it drives the report's severity
+column, `--min-severity`/`--max-severity` and `--severity-threshold`. A value
+outside `1-10`, a malformed value, or duplicate annotations in the same file
+fail the scan rather than defaulting, because a rule whose severity cannot be
+determined is treated as exceeding every `--severity-threshold`.
 
 
 ### Exception Audit
@@ -467,16 +558,19 @@ Scan a specific workload.
 ### Synopsis
 
 ```bash
-kubescape scan workload <kind>[.<version>[.<group>]]/<name> [`<glob pattern>`/`-`] [flags]
+kubescape scan workload [<namespace>/]<kind>[.<version>[.<group>]]/<name> [`<glob pattern>`/`-`] [flags]
 ```
 
-Unlike `kubectl`'s `TYPE.VERSION.GROUP` (which takes a plural resource), this command requires a **Kind** (e.g. `Deployment.v1.apps`, not `deployments.v1.apps`).
+Unlike `kubectl`'s `TYPE.VERSION.GROUP` (which takes a plural resource), this command requires a **Kind** (e.g. `Deployment.v1.apps`, not `deployments.v1.apps`). The workload identifier can optionally include a namespace prefix (e.g. `staging/Deployment/nginx`).
+
+> [!NOTE]
+> When providing both a namespace prefix in the workload argument and the `--namespace` / `-n` flag, the two values must agree. If they differ (for example, `staging/Deployment/nginx --namespace prod` or `staging/Deployment/nginx -n "*"`), the command exits with a conflict error rather than silently overriding one value with the other. To fix this error, specify the namespace in only one place or ensure both values match.
 
 ### Flags
 
 | Flag | Description |
 |------|-------------|
-| `--namespace <ns>` | Namespace of the workload |
+| `--namespace <ns>` | Namespace of the workload (defaults to `'default'` for live-cluster scans, or pass `'*'` for cluster-wide search which requires cluster-level list permissions. When scanning local files or stdin, an omitted namespace matches manifests across any namespace. Must not conflict with a namespace prefix in the workload argument) |
 | `--file-path <path>` | Path to a manifest that contains the workload |
 | `--chart-path <path>` | Path to the Helm chart the workload is part of. Must be used with `--file-path` |
 
@@ -484,6 +578,8 @@ Unlike `kubectl`'s `TYPE.VERSION.GROUP` (which takes a plural resource), this co
 
 ```bash
 kubescape scan workload Deployment/nginx --namespace default
+kubescape scan workload staging/Deployment/nginx
+kubescape scan workload Deployment/nginx -n "*"
 kubescape scan workload Deployment.v1.apps/nginx
 kubescape scan workload DaemonSet/fluentd --namespace logging
 kubescape scan workload Deployment/nginx ./manifests
@@ -496,30 +592,58 @@ kubescape scan workload Deployment/nginx --chart-path ./chart --file-path ./char
 
 ## kubescape scan image
 
-Scan a container image for vulnerabilities.
+Scan one or more container images for vulnerabilities.
 
 ### Synopsis
 
 ```bash
-kubescape scan image <image>:<tag> [flags]
+kubescape scan image <image>:<tag> [<image>:<tag>...] [flags]
 ```
 
 ### Flags
 
 | Flag | Description |
 |------|-------------|
-| `--exceptions <path>` | Path to exceptions file |
+| `--exceptions <path>` | Path to exceptions file. Targets are matched per image, so one file can carry rules for every image in the run |
 | `-f, --format <format>` | Output format: `pretty-printer`, `json`, `junit`, `prometheus`, `pdf`, `html`, `sarif`, `gitlab-sast`, `yaml`, `markdown`, `cyclonedx-json`, `spdx-json` |
+| `--image-scan-concurrency <n>` | Number of images scanned in parallel (default `1`) |
 | `-p, --password <pass>` | Registry password |
-| `--platform <platform>` | OCI platform to scan, for example `linux/amd64`, `linux/arm64/v8`, or `windows/amd64` |
+| `--platform <platform>` | OCI platform to scan, for example `linux/amd64`, `linux/arm64/v8`, or `windows/amd64`. Applies to every image in the run |
 | `-u, --username <user>` | Registry username |
 | `--use-default-matchers` | Use default vulnerability matchers | `true` |
+
+### Scanning several images at once
+
+Passing several images scans them in a single run: the vulnerability database is
+loaded and updated once instead of once per image, and every image lands in one
+report. Repeated arguments are scanned once.
+
+Credentials, `--platform` and `--exceptions` apply to the whole run, so images
+that need different registry credentials still need separate invocations.
+
+An image that cannot be scanned — an unreachable registry, a bad reference — does
+not abort the run: the remaining images are still scanned and reported, the
+failures are summarized at the end, and the command exits non-zero. The severity
+threshold is evaluated across all images, so `--severity-threshold` fails the run
+when any single image crosses it.
+
+Output formats behave as follows for a multi-image run: `json`, `cyclonedx-json`
+and `spdx-json` emit a JSON array with one document per image (a single image
+keeps the bare document shape), while the table, HTML, PDF, markdown, SARIF,
+GitLab SAST, JUnit and Prometheus outputs report every image in one document.
 
 ### Examples
 
 ```bash
 # Scan public image
 kubescape scan image nginx:1.21
+
+# Scan several images in one run
+kubescape scan image nginx:1.27 redis:7 postgres:16
+
+# Scan several images four at a time and write one SARIF report
+kubescape scan image nginx:1.27 redis:7 postgres:16 \
+  --image-scan-concurrency 4 --format sarif --output images.sarif
 
 # Scan with verbose output
 kubescape scan image nginx:1.21 -v
@@ -537,7 +661,9 @@ See [multi-architecture image scanning](multi-architecture-image-scanning.md) fo
 
 ## kubescape fix
 
-Auto-fix misconfigurations in Kubernetes manifest files.
+Auto-fix misconfigurations found by a scan. Manifest files are fixed in place;
+a cluster scan has no files to rewrite, so its fixes are printed for you to
+review and apply.
 
 ### Synopsis
 
@@ -561,6 +687,58 @@ Helm charts are reported as suggestions rather than edited, because a rendered
 resource's fix path does not map reliably back to a template line. Resources
 from any other source are listed as unfixed with the reason.
 
+### Cluster scans
+
+A cluster scan records live objects, not manifests, so there is no file to
+rewrite. The scanned object is patched in memory and the resulting manifest is
+printed to stdout as a `---` separated document stream, which pipes straight
+into `kubectl apply -f -`. Progress and summary output goes to stderr, so the
+pipe carries manifests only.
+
+Nothing is ever written to the cluster. Applying is your decision.
+
+Two details worth knowing:
+
+- The manifests reflect the cluster **as it was scanned**, not a live read. A
+  resource that changed since the scan should be re-scanned before applying.
+- Server-managed fields (`status`, `metadata.managedFields`, `resourceVersion`,
+  `uid`, `generation`, `creationTimestamp`, and the
+  `kubectl.kubernetes.io/last-applied-configuration` annotation) are stripped,
+  since a manifest carrying them will not apply cleanly.
+
+#### What is skipped, and why
+
+A cluster fix is only offered where the emitted manifest would be both correct
+and applyable. Everything else is listed as unfixed with its reason, so nothing
+disappears silently:
+
+- **Resources whose scan record is redacted.** A scan report is built for
+  reporting, not for round-tripping: before results are aggregated Kubescape
+  replaces every container environment value with `XXXXXX` and drops
+  `valueFrom`/`envFrom`, and redacts `data`/`stringData` on Secrets and
+  ConfigMaps. A manifest rendered from such a record would overwrite your real
+  configuration with the placeholder, so workloads with container environment
+  variables, along with Secrets and ConfigMaps, are declined.
+
+  This is the main limitation of cluster fixes today, and it is why a cluster
+  with many findings may yield few manifests. Fixing a manifest file is
+  unaffected — that path patches the file on disk and only reads the report to
+  decide which edits to make.
+
+- **Resources owned by another.** A Pod belonging to a ReplicaSet, or a static
+  control-plane Pod owned by its Node, cannot be patched where it stands: the
+  API server rejects nearly every change to an existing Pod's spec, and the
+  owner would recreate it from its own template regardless. Fix the owner.
+
+- **RBAC and cloud findings.** These describe a relationship across several
+  related objects rather than one addressable resource, so there is no single
+  manifest to emit.
+
+One known gap: a container that uses only `envFrom` cannot be detected, because
+`envFrom` is removed outright rather than replaced with a marker. The manifest
+is then incomplete rather than wrong, and `kubectl apply` does not delete fields
+a config omits, so the live `envFrom` survives.
+
 ### Flags
 
 | Flag | Description | Default |
@@ -568,6 +746,52 @@ from any other source are listed as unfixed with the reason.
 | `--dry-run` | Preview changes without applying | `false` |
 | `--no-confirm` | Apply without confirmation | `false` |
 | `--skip-user-values` | Skip changes requiring user values | `true` |
+| `--output-dir` | Cluster scans only: write one patched manifest per resource here instead of printing them | *(print to stdout)* |
+| `--include-controls` | Remediate only these control IDs (comma-separated, case-insensitive). Disables `--container-profile` drift remediation — see [selecting controls to fix](#selecting-controls-to-fix) | *(all)* |
+| `--skip-controls` | Leave these control IDs untouched (comma-separated, case-insensitive). Takes precedence over `--include-controls`, and disables `--container-profile` drift remediation | - |
+
+### Selecting controls to fix
+
+By default `kubescape fix` remediates every failed control it can. In a pipeline
+that is rarely what you want: some remediations are safe to apply unattended,
+others need a human. `--include-controls` and `--skip-controls` narrow the run to
+the controls you trust:
+
+```bash
+# Only apply the two remediations this pipeline has signed off on
+kubescape fix results.json --no-confirm --include-controls C-0016,C-0017
+
+# Apply everything except the one that breaks this workload
+kubescape fix results.json --no-confirm --skip-controls C-0055
+```
+
+Matching is case-insensitive on the control ID, and `--skip-controls` wins when a
+control appears in both. Controls outside the selection are left untouched and
+are not listed as unfixed, so the run's counts describe only what you asked for.
+
+A field can be remediated by more than one control, so skipping a control does
+not always leave its field unchanged — another selected control may still set it.
+
+Each run reports how much of the report the selection kept, so the later
+"Fixed N of M" counts are read against the right total:
+
+```
+--include-controls selected 1 of 22 flagged control instances
+Fixed 1 of 1 flagged control instances across 1 file(s).
+```
+
+`--container-profile` drift remediation is skipped while a selection is active,
+and says so. Those fixes come from observed runtime behaviour rather than from a
+control, so nothing attributes them to a selected one — applying them anyway
+would edit the manifest for controls you excluded. Drop the selection flags to
+get profile drift remediation back; behaviour without them is unchanged.
+
+A selection that matches nothing warns rather than fails, since a targeted
+control can legitimately have passed in that report:
+
+```
+--include-controls excluded all 22 flagged control instances; nothing will be remediated
+```
 
 ### Examples
 
@@ -585,11 +809,35 @@ kubescape fix results.json --dry-run
 kubescape fix results.json --no-confirm
 ```
 
+Fixing a cluster scan:
+
+```bash
+# Scan the cluster
+kubescape scan --format json --output cluster.json
+
+# Print the patched manifests
+kubescape fix cluster.json
+
+# Review, then apply
+kubescape fix cluster.json | kubectl apply -f -
+
+# For a cluster with many findings, write one manifest per resource
+kubescape fix cluster.json --output-dir ./fixes
+kubectl apply -f ./fixes
+```
+
 > **Note:** The confirmation prompt requires a real interactive terminal. If
 > stdin isn't a TTY — `kubescape fix results.json < /dev/null`, a piped
 > answer like `echo y | kubescape fix results.json`, or any CI/script
 > context — the prompt is skipped and no changes are applied. Use
 > `--no-confirm` to apply fixes in non-interactive contexts.
+>
+> The prompt does not apply to cluster scans: that path edits nothing in place,
+> so there is nothing to confirm. With `--output-dir`, a non-empty directory is
+> refused unless you pass `--no-confirm`.
+>
+> `--output-dir` belongs to that cluster path alone. Passing it when fixing
+> manifest files warns and is ignored — those files are always fixed in place.
 
 ---
 
@@ -912,10 +1160,10 @@ Manage Kubescape configuration.
 kubescape config view
 
 # View configuration as JSON
-kubescape config view -o json
+kubescape config view --format json
 
 # View configuration as YAML
-kubescape config view -o yaml
+kubescape config view -f yaml
 
 # Set account ID
 kubescape config set accountID <account-id>
@@ -960,6 +1208,35 @@ kubescape operator scan vulnerabilities
 Manage Kubernetes Validating Admission Policies.
 
 ### Subcommands
+
+#### list-policies
+
+List the ValidatingAdmissionPolicies in the library embedded in this binary,
+alongside the Kubescape control each one implements. Use it to find the values
+`create-policy-binding` accepts: control IDs for `--control`, policy names for
+`--policy`.
+
+```bash
+kubescape vap list-policies
+kubescape vap list-policies --controls-only --format json
+```
+
+**Flags:**
+
+| Flag | Description | Default |
+|---|---|---|
+| `-f`, `--format` | Output format: `pretty-print`, `json`, `yaml` or `csv`. | `pretty-print` |
+| `--controls-only` | Keep only the entries with a control ID, hiding the cluster-scoped helpers. | `false` |
+| `-o`, `--output` | Write the output to a file instead of stdout. | - |
+
+The `Params` column reports whether a policy reads a parameter object, which is
+what `create-policy-binding --parameter-reference` supplies. The two duplicate
+markers are independent and say which flag will be refused: a policy name shown
+as `(duplicate name)` is claimed more than once, so `--policy` cannot resolve
+it, while a control ID shown as `(duplicate)` is claimed by more than one
+policy, so `--control` cannot. A name claimed twice by policies carrying
+distinct control IDs is listed once per control, because each of those controls
+still binds.
 
 #### deploy-library
 

@@ -67,17 +67,13 @@ jobs:
           fi
 
           rc=0
-          for dir in . httphandler; do
-            path="$(sed -n 's|^module[[:space:]][[:space:]]*||p' "$dir/go.mod" | head -n1)"
-            # The submodule's path is the root module's path plus /httphandler.
-            base="${path%/httphandler}"
-            got="$(printf '%s' "$base" | sed -n 's|.*\(/v[0-9][0-9]*\)$|\1|p')"
+          path="$(sed -n 's|^module[[:space:]][[:space:]]*||p' go.mod | head -n1)"
+          got="$(printf '%s' "$path" | sed -n 's|.*\(/v[0-9][0-9]*\)$|\1|p')"
 
-            if [ "$got" != "$want" ]; then
-              echo "::error file=$dir/go.mod::module path '$path' does not match release tag $TAG (expected it to end in '${want:-no /vN suffix}'). Releasing this tag would produce a version that cannot be resolved with 'go get' or 'go install'."
-              rc=1
-            fi
-          done
+          if [ "$got" != "$want" ]; then
+            echo "::error file=go.mod::module path '$path' does not match release tag $TAG (expected it to end in '${want:-no /vN suffix}'). Releasing this tag would produce a version that cannot be resolved with 'go get' or 'go install'."
+            rc=1
+          fi
           exit $rc
 
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -85,7 +81,7 @@ jobs:
           go-version: "1.26"
 
       - name: Set up Python
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.9"
 
@@ -100,13 +96,13 @@ jobs:
           sudo rm -rf /var/lib/apt/lists/*
 
       - name: Install Cosign
-        uses: sigstore/cosign-installer@59acb6260d9c0ba8f4a2f9d9b48431a222b68e20 # v3.5.0
+        uses: sigstore/cosign-installer@7e8b541eb2e61bf99390e1afd4be13a184e9ebc5 # v3.10.1
 
       - name: Create Cosign Key
         run: echo "${{ secrets.COSIGN_PRIVATE_KEY_V1 }}" > cosign.key
 
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
+        uses: docker/setup-qemu-action@1f40c72289eff860ee54a304f1438e3cff362e0a # v4.3.0
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
@@ -118,11 +114,11 @@ jobs:
           username: ${{ secrets.QUAYIO_REGISTRY_USERNAME }}
           password: ${{ secrets.QUAYIO_REGISTRY_PASSWORD }}
 
-      - uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+      - uses: anchore/sbom-action/download-syft@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
         name: Setup Syft
 
       - name: Create k8s Kind Cluster
-        uses: helm/kind-action@ef37e7f390d99f746eb8b610417061a60e82a6cc # v1.14.0
+        uses: helm/kind-action@06c1ae10762d3b9c1644e7fe69596ae519e015a2 # v1.15.0
         with:
           cluster_name: kubescape-e2e
 
@@ -171,7 +167,7 @@ jobs:
           ls -laR test-results/system-tests || true
 
       - name: System Tests Report
-        uses: mikepenz/action-junit-report@d9f48fc87bc235f7e214acf696ca5abc0a986f16 # v6.4.2
+        uses: mikepenz/action-junit-report@a9170d5795813c01ab4901ffb045b52bab4ab09d # v6.5.0
         if: always()
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}

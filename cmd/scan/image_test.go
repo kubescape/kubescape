@@ -53,12 +53,12 @@ func TestGetImageCmd(t *testing.T) {
 	parentCmd.AddCommand(cmd)
 
 	// Verify the command name and short description
-	assert.Equal(t, "image <image>:<tag> [flags]", cmd.Use)
-	assert.Equal(t, "Scan an image for vulnerabilities", cmd.Short)
+	assert.Equal(t, "image <image>:<tag> [<image>:<tag>...] [flags]", cmd.Use)
+	assert.Equal(t, "Scan one or more images for vulnerabilities", cmd.Short)
 	assert.Equal(t, imageExample, cmd.Example)
 
 	err := cmd.Args(&cobra.Command{}, []string{})
-	expectedErrorMessage := "the command takes exactly one image name as an argument"
+	expectedErrorMessage := "the command takes at least one image name as an argument"
 	assert.Equal(t, expectedErrorMessage, err.Error())
 
 	err = cmd.Args(&cobra.Command{}, []string{"nginx"})
@@ -191,7 +191,7 @@ func TestGetImageCmd_RunE_ForwardsRegistryTokenCredentials(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, "registry.example.com", mockKubescape.imgScanInfo.Authority)
 	assert.Equal(t, "token", mockKubescape.imgScanInfo.Token)
-	assert.Equal(t, "registry.example.com/app:tag", mockKubescape.imgScanInfo.Image)
+	assert.Equal(t, []string{"registry.example.com/app:tag"}, mockKubescape.imgScanInfo.Images)
 }
 
 func TestGetImageCmd_RunE_ForwardsCanonicalPlatform(t *testing.T) {
@@ -377,7 +377,7 @@ func TestGetScanCommand_ImageRegistryTokenAndAuthorityReachImageScan(t *testing.
 	assert.NoError(t, err)
 	assert.Equal(t, "registry.example.com", mockKubescape.imgScanInfo.Authority)
 	assert.Equal(t, "token", mockKubescape.imgScanInfo.Token)
-	assert.Equal(t, "registry.example.com/app:tag", mockKubescape.imgScanInfo.Image)
+	assert.Equal(t, []string{"registry.example.com/app:tag"}, mockKubescape.imgScanInfo.Images)
 }
 
 func TestGetImageCmd_RunE_ForwardsLocalTarball(t *testing.T) {
@@ -397,5 +397,60 @@ func TestGetImageCmd_RunE_ForwardsLocalTarball(t *testing.T) {
 
 	err = cmd.RunE(cmd, []string{tmpFile.Name()})
 	assert.NoError(t, err)
-	assert.Equal(t, "docker-archive:"+tmpFile.Name(), mockKubescape.imgScanInfo.Image)
+	assert.Equal(t, []string{"docker-archive:" + tmpFile.Name()}, mockKubescape.imgScanInfo.Images)
+}
+
+func TestGetImageCmd_ArgsAcceptsSeveralImages(t *testing.T) {
+	cmd := getImageCmd(&mocks.MockIKubescape{}, &cautils.ScanInfo{})
+
+	assert.NoError(t, cmd.Args(cmd, []string{"nginx:1.27", "redis:7", "postgres:16"}))
+	assert.EqualError(t, cmd.Args(cmd, []string{}), "the command takes at least one image name as an argument")
+	assert.EqualError(t, cmd.Args(cmd, []string{"nginx", "  "}), "image name cannot be empty")
+}
+
+func TestGetImageCmd_RunE_ForwardsEveryImageInOrder(t *testing.T) {
+	mockKubescape := &imageScanCaptureKubescape{}
+	scanInfo := cautils.ScanInfo{}
+
+	cmd := getImageCmd(mockKubescape, &scanInfo)
+	parentCmd := &cobra.Command{Use: "scan"}
+	parentCmd.PersistentFlags().StringVarP(&scanInfo.Format, "format", "f", "pretty-printer", "")
+	parentCmd.AddCommand(cmd)
+
+	err := cmd.RunE(cmd, []string{"nginx:1.27", "redis:7", "postgres:16"})
+	assert.NoError(t, err)
+	assert.Equal(t, []string{"nginx:1.27", "redis:7", "postgres:16"}, mockKubescape.imgScanInfo.Images)
+}
+
+func TestGetImageCmd_RunE_ScansRepeatedImageOnce(t *testing.T) {
+	mockKubescape := &imageScanCaptureKubescape{}
+	scanInfo := cautils.ScanInfo{}
+
+	cmd := getImageCmd(mockKubescape, &scanInfo)
+	parentCmd := &cobra.Command{Use: "scan"}
+	parentCmd.PersistentFlags().StringVarP(&scanInfo.Format, "format", "f", "pretty-printer", "")
+	parentCmd.AddCommand(cmd)
+
+	err := cmd.RunE(cmd, []string{"nginx:1.27", " nginx:1.27 ", "redis:7"})
+	assert.NoError(t, err)
+	assert.Equal(t, []string{"nginx:1.27", "redis:7"}, mockKubescape.imgScanInfo.Images)
+}
+
+func TestGetImageCmd_RunE_ForwardsMixedTarballAndRegistryImages(t *testing.T) {
+	mockKubescape := &imageScanCaptureKubescape{}
+	scanInfo := cautils.ScanInfo{}
+
+	cmd := getImageCmd(mockKubescape, &scanInfo)
+	parentCmd := &cobra.Command{Use: "scan"}
+	parentCmd.PersistentFlags().StringVarP(&scanInfo.Format, "format", "f", "pretty-printer", "")
+	parentCmd.AddCommand(cmd)
+
+	tmpFile, err := os.CreateTemp("", "dummy-*.tar")
+	require.NoError(t, err)
+	defer os.Remove(tmpFile.Name())
+	tmpFile.Close()
+
+	err = cmd.RunE(cmd, []string{tmpFile.Name(), "nginx:1.27"})
+	assert.NoError(t, err)
+	assert.Equal(t, []string{"docker-archive:" + tmpFile.Name(), "nginx:1.27"}, mockKubescape.imgScanInfo.Images)
 }

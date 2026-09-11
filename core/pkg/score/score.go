@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/pkg/hostsensorutils"
 	"github.com/kubescape/opa-utils/score"
@@ -36,6 +38,8 @@ func (su *ScoreWrapper) Calculate(reportVersion PostureReportVersion) error {
 	return fmt.Errorf("unsupported score calculator")
 }
 
+// CalculateWithTelemetry dynamically adjusts scores based on eBPF telemetry events.
+// Note: Library code must never write directly to stdout as it would corrupt JSON/SARIF output.
 func (su *ScoreWrapper) CalculateWithTelemetry(ctx context.Context, reportVersion PostureReportVersion, telemetryChan <-chan hostsensorutils.SyscallEvent) error {
 	// Dynamically adjust scores based on eBPF telemetry
 	// This is a stub implementation
@@ -48,7 +52,7 @@ func (su *ScoreWrapper) CalculateWithTelemetry(ctx context.Context, reportVersio
 				// Channel closed, compute final score
 				return su.Calculate(reportVersion)
 			}
-			fmt.Printf("Received telemetry: %+v\n", event)
+			logger.L().Debug("received telemetry", helpers.Interface("event", event))
 			// Adjust su.opaSessionObj.Report scores dynamically based on utilized capabilities
 		}
 	}

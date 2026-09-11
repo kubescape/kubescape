@@ -35,7 +35,20 @@ func splitNamespaces(s string) []string {
 
 type IFieldSelector interface {
 	GetNamespacesSelectors(*schema.GroupVersionResource, *bool) []string
+	// GetNamespaceScopedQueries returns the namespaces whose namespaced
+	// collection endpoint the scan may address directly for this resource,
+	// or nil when collection must stay cluster-scoped. Addressing
+	// /apis/<gv>/namespaces/<ns>/<resource> returns the same objects a
+	// cluster-scoped LIST filtered by metadata.namespace does, but Kubernetes
+	// authorizes it against a namespaced Role rather than requiring a
+	// ClusterRole.
+	GetNamespaceScopedQueries(*schema.GroupVersionResource, *bool) []string
 	GetClusterScope(*schema.GroupVersionResource) bool
+	// AllowsNamespace reports whether the given resource identity and namespace
+	// are permitted by the selector. For cluster-scoped resources, it returns true
+	// (except for the "namespaces" resource itself, where namespace/name is filtered).
+	// For namespaced resources, it checks whether the namespace is allowed.
+	AllowsNamespace(resource *schema.GroupVersionResource, namespace string, namespaced *bool) bool
 }
 
 type EmptySelector struct {
@@ -45,7 +58,15 @@ func (es *EmptySelector) GetNamespacesSelectors(resource *schema.GroupVersionRes
 	return []string{""} //
 }
 
+func (es *EmptySelector) GetNamespaceScopedQueries(*schema.GroupVersionResource, *bool) []string {
+	return nil
+}
+
 func (es *EmptySelector) GetClusterScope(*schema.GroupVersionResource) bool {
+	return true
+}
+
+func (es *EmptySelector) AllowsNamespace(resource *schema.GroupVersionResource, namespace string, namespaced *bool) bool {
 	return true
 }
 
@@ -62,6 +83,37 @@ func (es *ExcludeSelector) GetClusterScope(resource *schema.GroupVersionResource
 	return resource.Resource == "namespaces"
 }
 
+// GetNamespaceScopedQueries always returns nil: excluding namespaces means
+// collecting every other one, which needs the cluster-scoped collection and so
+// cannot be expressed as a bounded set of namespaced queries.
+func (es *ExcludeSelector) GetNamespaceScopedQueries(*schema.GroupVersionResource, *bool) []string {
+	return nil
+}
+
+func (es *ExcludeSelector) AllowsNamespace(resource *schema.GroupVersionResource, namespace string, namespaced *bool) bool {
+	excluded := splitNamespaces(es.namespace)
+	if len(excluded) == 0 {
+		return true
+	}
+	if resource != nil && resource.Resource == "namespaces" {
+		for _, ex := range excluded {
+			if namespace == ex {
+				return false
+			}
+		}
+		return true
+	}
+	if !isNamespacedTarget(resource, namespaced) {
+		return true
+	}
+	for _, ex := range excluded {
+		if namespace == ex {
+			return false
+		}
+	}
+	return true
+}
+
 type IncludeSelector struct {
 	namespace string
 }
@@ -73,6 +125,59 @@ func NewIncludeSelector(ns string) *IncludeSelector {
 func (is *IncludeSelector) GetClusterScope(resource *schema.GroupVersionResource) bool {
 	// for selector, 'namespace' is in Namespaced scope
 	return resource.Resource == "namespaces"
+}
+
+// GetNamespaceScopedQueries returns the included namespaces when the resource is
+// namespaced, so collection can address each namespace's own endpoint. A
+// cluster-scoped resource, and the Namespace kind itself (which the include
+// selector narrows by metadata.name on a cluster-scoped collection), keep the
+// cluster-scoped query and return nil.
+func (is *IncludeSelector) GetNamespaceScopedQueries(resource *schema.GroupVersionResource, namespaced *bool) []string {
+	if !isNamespacedTarget(resource, namespaced) {
+		return nil
+	}
+	return splitNamespaces(is.namespace)
+}
+
+func (is *IncludeSelector) AllowsNamespace(resource *schema.GroupVersionResource, namespace string, namespaced *bool) bool {
+	included := splitNamespaces(is.namespace)
+	if len(included) == 0 {
+		return true
+	}
+	if resource != nil && resource.Resource == "namespaces" {
+		for _, inc := range included {
+			if namespace == inc {
+				return true
+			}
+		}
+		return false
+	}
+	if !isNamespacedTarget(resource, namespaced) {
+		return true
+	}
+	for _, inc := range included {
+		if namespace == inc {
+			return true
+		}
+	}
+	return false
+}
+
+// isNamespacedTarget reports whether resource is served under a namespaced
+// endpoint, preferring the scope discovery reported and falling back to
+// k8s-interface's static table when it did not, mirroring
+// getNamespacesSelectorWithOptionalScope.
+func isNamespacedTarget(resource *schema.GroupVersionResource, namespaced *bool) bool {
+	if resource != nil && resource.Resource == "namespaces" {
+		return false
+	}
+	if namespaced != nil {
+		return *namespaced
+	}
+	if resource != nil {
+		return k8sinterface.IsResourceInNamespaceScope(resource.Resource)
+	}
+	return false
 }
 
 func (es *ExcludeSelector) GetNamespacesSelectors(resource *schema.GroupVersionResource, namespaced *bool) []string {

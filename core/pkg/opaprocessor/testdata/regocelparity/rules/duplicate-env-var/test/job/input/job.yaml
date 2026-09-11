@@ -1,0 +1,18 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: duplicate-env-job
+spec:
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: worker
+        image: busybox
+        env:
+        - name: WORKER_MODE
+          value: batch
+        - name: WORKER_MODE
+          value: retry
+        - name: WORKER_MODE
+          value: debug

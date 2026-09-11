@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: ReplicationController
+metadata:
+  name: duplicate-env-replicationcontroller
+spec:
+  selector:
+    app: duplicate-env
+  template:
+    metadata:
+      labels:
+        app: duplicate-env
+    spec:
+      containers:
+      - name: app
+        image: nginx
+        env:
+        - name: RC_MODE
+          value: active
+        - name: RC_MODE
+          value: standby

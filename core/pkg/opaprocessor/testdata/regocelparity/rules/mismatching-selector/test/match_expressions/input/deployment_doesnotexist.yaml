@@ -1,0 +1,17 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mismatching-selector-doesnotexist
+spec:
+  selector:
+    matchExpressions:
+    - key: tier
+      operator: DoesNotExist
+  template:
+    metadata:
+      labels:
+        tier: frontend
+    spec:
+      containers:
+      - name: app
+        image: nginx

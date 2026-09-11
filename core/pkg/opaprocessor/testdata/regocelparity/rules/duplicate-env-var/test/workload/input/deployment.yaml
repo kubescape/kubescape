@@ -1,0 +1,23 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: duplicate-env-deployment
+spec:
+  selector:
+    matchLabels:
+      app: duplicate-env
+  template:
+    metadata:
+      labels:
+        app: duplicate-env
+    spec:
+      containers:
+      - name: app
+        image: nginx
+        env:
+        - name: APP_MODE
+          value: production
+        - name: APP_MODE
+          value: staging
+        - name: APP_MODE
+          value: debug

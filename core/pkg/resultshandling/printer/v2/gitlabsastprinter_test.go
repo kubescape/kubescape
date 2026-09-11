@@ -2,7 +2,9 @@ package printer
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -13,6 +15,8 @@ import (
 	"github.com/anchore/grype/grype/vulnerability"
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/locationresolver"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
 	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
@@ -127,7 +131,7 @@ func gitLabReportFor(t *testing.T, session *cautils.OPASessionObj) gitLabSASTRep
 		assert.NoError(t, os.Remove(tmp.Name()))
 	})
 
-	gp := NewGitLabSASTPrinter()
+	gp := NewGitLabSASTPrinter(false)
 	gp.writer = tmp
 	require.NoError(t, gp.printConfigurationScan(context.Background(), session))
 
@@ -355,6 +359,119 @@ func TestGitLabVulnerabilityID(t *testing.T) {
 		"a different resource must produce a different id")
 }
 
+// TestToGitLabVulnerability_RedactsSecretFixPathValueUnlessShowSecrets is a
+// regression test: GitLab SAST reports are committed as CI pipeline
+// artifacts, so a Secret's plaintext fix-path value must be redacted in the
+// Solution field by default, matching the pretty-printer and resource
+// table, and only revealed when the caller explicitly opts in via
+// --show-secrets.
+func TestToGitLabVulnerability_RedactsSecretFixPathValueUnlessShowSecrets(t *testing.T) {
+	control := &reportsummary.ControlSummary{
+		ControlID:   "C-0012",
+		Name:        "Credentials in env var",
+		ScoreFactor: 8.0,
+	}
+	resource := &mockResource{kind: "Secret", obj: map[string]any{}}
+	ac := &resourcesresults.ResourceAssociatedControl{
+		ControlID: "C-0012",
+		ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{
+			{Paths: []armotypes.PosturePaths{
+				{FixPath: armotypes.FixPath{Path: "data.password", Value: "s3cr3t-plaintext-password"}},
+			}},
+		},
+	}
+	location := locationresolver.Location{Line: 1, Column: 1}
+
+	redacted := toGitLabVulnerability(control, ac, resource, "v1/Secret/default/demo", "secret.yaml", location, false)
+	assert.NotContains(t, redacted.Solution, "s3cr3t-plaintext-password")
+	assert.Contains(t, redacted.Solution, "[redacted]")
+
+	revealed := toGitLabVulnerability(control, ac, resource, "v1/Secret/default/demo", "secret.yaml", location, true)
+	assert.Contains(t, revealed.Solution, "s3cr3t-plaintext-password")
+}
+
+func TestGitLabImageVulnerabilityID(t *testing.T) {
+	const (
+		image   = "docker.io/library/nginx:1.25"
+		pkg     = "zlib1g"
+		version = "1.2.13"
+		cveID   = "CVE-2023-45853"
+	)
+
+	first := gitLabImageVulnerabilityID(image, pkg, version, cveID, "linux/amd64")
+
+	assert.Equal(t, first, gitLabImageVulnerabilityID(image, pkg, version, cveID, "linux/amd64"),
+		"the same finding must keep a stable id so GitLab can track it across scans")
+	assert.NotEqual(t, first, gitLabImageVulnerabilityID(image, pkg, version, cveID, "linux/arm64"),
+		"a different platform must produce a different id")
+	assert.NotEqual(t, first, gitLabImageVulnerabilityID(image, pkg, version, cveID, ""),
+		"a platform-specific scan must not collide with an unspecified one")
+	assert.NotEqual(t, first, gitLabImageVulnerabilityID(image, "openssl", version, cveID, "linux/amd64"),
+		"a different package must produce a different id")
+	assert.NotEqual(t, first, gitLabImageVulnerabilityID(image, pkg, "1.3.0", cveID, "linux/amd64"),
+		"a different version must produce a different id")
+	assert.NotEqual(t, first, gitLabImageVulnerabilityID(image, pkg, version, "CVE-2024-0001", "linux/amd64"),
+		"a different CVE must produce a different id")
+}
+
+// TestGitLabImageVulnerabilityID_UnspecifiedPlatformIsUnchanged pins the migration guarantee.
+// Adding the platform to the id would otherwise renumber every existing finding and drop the
+// dismissals GitLab has recorded against them. Appending it only when a platform was requested
+// keeps ids identical for everyone who does not pass --platform.
+func TestGitLabImageVulnerabilityID_UnspecifiedPlatformIsUnchanged(t *testing.T) {
+	sum := sha256.Sum256([]byte("docker.io/library/nginx:1.25/zlib1g/1.2.13/CVE-2023-45853"))
+
+	assert.Equal(t, fmt.Sprintf("%x", sum),
+		gitLabImageVulnerabilityID("docker.io/library/nginx:1.25", "zlib1g", "1.2.13", "CVE-2023-45853", ""))
+}
+
+// TestGitLabImageVulnerability_PlatformIsPartOfIdentity checks the mapper passes the platform
+// through to the id. It reports the platform in the description, so without this the same CVE
+// on the same package and version across two platform scans of a multi-arch image produced one
+// id, and dismissing it on one platform dismissed it on the other.
+func TestGitLabImageVulnerability_PlatformIsPartOfIdentity(t *testing.T) {
+	cve := imageprinter.CVE{
+		ID:       "CVE-2023-45853",
+		Package:  "zlib1g",
+		Version:  "1.2.13",
+		Severity: "High",
+	}
+	const image = "docker.io/library/nginx:1.25"
+
+	amd64 := toGitLabImageVulnerability(image, "linux/amd64", cve)
+	arm64 := toGitLabImageVulnerability(image, "linux/arm64", cve)
+
+	assert.NotEqual(t, amd64.ID, arm64.ID,
+		"two platform scans of the same image must not share a finding id")
+	assert.Contains(t, amd64.Description, "linux/amd64")
+	assert.Contains(t, arm64.Description, "linux/arm64")
+}
+
+// TestGitLabImageScan_PlatformVariantsGetDistinctIDs covers the case #3345 introduced when it
+// scanned every observed platform for a workload that can run across a heterogeneous cluster.
+// Both variants land in one report, so identifying them without the platform put two entries
+// with the same id in a single document.
+func TestGitLabImageScan_PlatformVariantsGetDistinctIDs(t *testing.T) {
+	variant := func(platform string) cautils.ImageScanData {
+		return cautils.ImageScanData{
+			Image:    "nginx:1.25",
+			Platform: platform,
+			Matches: match.NewMatches(match.Match{
+				Package: grypepkg.Package{ID: "pkg-1", Name: "openssl", Version: "3.0.0"},
+				Vulnerability: vulnerability.Vulnerability{
+					Metadata: &vulnerability.Metadata{ID: "CVE-2026-0001", Severity: "High"},
+				},
+			}),
+		}
+	}
+
+	report := gitLabImageReportFor(t, []cautils.ImageScanData{variant("linux/amd64"), variant("linux/arm64")})
+	require.Len(t, report.Vulnerabilities, 2)
+
+	assert.NotEqual(t, report.Vulnerabilities[0].ID, report.Vulnerabilities[1].ID,
+		"two platform variants of one image must not share an id within a single report")
+}
+
 // gitLabImageReportFor runs the printer against image scan data and returns the decoded report
 func gitLabImageReportFor(t *testing.T, imageScanData []cautils.ImageScanData) gitLabSASTReport {
 	t.Helper()
@@ -366,7 +483,7 @@ func gitLabImageReportFor(t *testing.T, imageScanData []cautils.ImageScanData) g
 		assert.NoError(t, os.Remove(tmp.Name()))
 	})
 
-	gp := NewGitLabSASTPrinter()
+	gp := NewGitLabSASTPrinter(false)
 	gp.writer = tmp
 	require.NoError(t, gp.printImageScan(imageScanData))
 
@@ -409,8 +526,8 @@ func TestGitLabImageScan_LocationHasFile(t *testing.T) {
 	withoutPlatform[0].Platform = ""
 	legacyReport := gitLabImageReportFor(t, withoutPlatform)
 	require.Len(t, legacyReport.Vulnerabilities, 1)
-	assert.Equal(t, legacyReport.Vulnerabilities[0].ID, report.Vulnerabilities[0].ID,
-		"adding platform metadata must not change GitLab's vulnerability fingerprint")
+	assert.NotEqual(t, legacyReport.Vulnerabilities[0].ID, report.Vulnerabilities[0].ID,
+		"a platform-specific finding must not share an id with an unspecified one")
 }
 
 // TestGitLabImageScan_VersionKeyAlwaysPresent guards against #2782's schema violation:
@@ -437,7 +554,7 @@ func TestGitLabImageScan_VersionKeyAlwaysPresent(t *testing.T) {
 		assert.NoError(t, os.Remove(tmp.Name()))
 	})
 
-	gp := NewGitLabSASTPrinter()
+	gp := NewGitLabSASTPrinter(false)
 	gp.writer = tmp
 	require.NoError(t, gp.printImageScan(imageScanData))
 
@@ -512,7 +629,7 @@ func TestGitLabImageScan_NoData(t *testing.T) {
 		assert.NoError(t, os.Remove(tmp.Name()))
 	})
 
-	gp := NewGitLabSASTPrinter()
+	gp := NewGitLabSASTPrinter(false)
 	gp.writer = tmp
 
 	gp.ActionPrint(context.Background(), nil, nil)
@@ -555,7 +672,7 @@ func TestGitLabSASTPrintConfigurationScan_NilResourceDoesNotPanic(t *testing.T) 
 		assert.NoError(t, os.Remove(tmp.Name()))
 	})
 
-	gp := NewGitLabSASTPrinter()
+	gp := NewGitLabSASTPrinter(false)
 	gp.writer = tmp
 	require.NotPanics(t, func() {
 		_ = gp.printConfigurationScan(context.Background(), session)

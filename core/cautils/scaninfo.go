@@ -106,6 +106,12 @@ const (
 	// action-required resources are always listed, and passed resources are
 	// listed in verbose mode.
 	ControlViewType ViewTypes = "control"
+
+	// NamespaceViewType prints the per-namespace compliance rollup: every
+	// control in the scan's policy set is counted toward each namespace's
+	// score, so namespaces are ranked worst-first and stay comparable to one
+	// another and to the cluster-wide score.
+	NamespaceViewType ViewTypes = "namespace"
 )
 
 type PolicyIdentifier struct {
@@ -143,6 +149,7 @@ type ScanInfo struct {
 	ExcludePaths              []string                     // gitignore-style patterns excluding paths from file, directory and repository scans
 	NoIgnoreFile              bool                         // do not read the .kubescapeignore file at the scan root
 	Namespace                 string                       // target namespace for workload scans
+	NamespaceDefaulted        bool                         // true when target namespace for workload scans was defaulted to "default"
 	InputPatterns             []string                     // Yaml files input patterns
 	Silent                    bool                         // Silent mode - Do not print progress logs
 	FailThreshold             float32                      // DEPRECATED - Failure score threshold
@@ -209,6 +216,7 @@ type ScanInfo struct {
 	BaselineFailOnNew         bool              // Exit with code 1 when the baseline diff finds new or incomparable failures
 	BaselineSeverityThreshold string            // Only count new/incomparable baseline failures at or above this severity when enforcing BaselineFailOnNew
 	BaselineGranularity       string            // Comparison unit for the baseline diff: "evidence" (default) or "control"
+	KubeContexts              []string          // --kube-contexts: scan each of these kube contexts sequentially, one report per context (fleet mode)
 }
 
 type Getters struct {
@@ -230,11 +238,21 @@ func (scanInfo *ScanInfo) Init(ctx context.Context, policyIdentifiers []PolicyId
 	if scanInfo.ScanID == "" {
 		scanInfo.ScanID = uuid.NewString()
 	}
+	if err := scanInfo.MaterializeRemoteInputs(ctx); err != nil {
+		return err
+	}
 	return nil
 }
 
+// Cleanup executes all registered cleanup hooks and clears the list so that
+// repeated sequential calls do not run the same hooks twice. This is important
+// because MaterializeRemoteInputs calls Cleanup on failure to roll back
+// partial clones, and the outer scan lifecycle (defer scanInfo.Cleanup()) may
+// call it again on return. This method is not safe for concurrent use.
 func (scanInfo *ScanInfo) Cleanup() {
-	for _, cleanup := range scanInfo.cleanups {
+	cleanups := scanInfo.cleanups
+	scanInfo.cleanups = nil
+	for _, cleanup := range cleanups {
 		cleanup()
 	}
 }
@@ -458,9 +476,6 @@ func (scanInfo *ScanInfo) GetScanningContext() ScanningContext {
 	if scanInfo.scanningContext == nil {
 		input := scanInfo.GetInputFiles()
 		scanningContext := scanInfo.getScanningContext(input)
-		if input != "" {
-			scanInfo.cloneAdditionalRemoteInputs(input)
-		}
 		scanInfo.scanningContext = &scanningContext
 	}
 	return *scanInfo.scanningContext
@@ -474,6 +489,31 @@ func (scanInfo *ScanInfo) SetKubeconfigSelection(path, contextName string) {
 	scanInfo.kubeContextOverride = contextName
 	scanInfo.clusterContextName = ""
 	scanInfo.contextResolved = false
+}
+
+// CloneForContext returns a copy of scanInfo prepared for scanning one kube
+// context as part of a multi-context ("fleet") scan, reusing the same
+// kubeconfig file the parent ScanInfo was configured with (fleet mode
+// switches context within one kubeconfig, not the file itself) but
+// targeting kubeContext. Every field is copied verbatim except the three
+// that must not be shared across sibling scans sharing one parent ScanInfo:
+//   - ScanID: cleared, so Init generates a fresh one for this context instead
+//     of reusing whichever sibling happened to run first.
+//   - cleanups: dropped, so this context's Cleanup() doesn't re-invoke
+//     closures another sibling already ran (or hasn't registered yet).
+//   - Output: replaced with the caller-supplied path (fleet mode gives each
+//     context its own report file; see cmd/scan/fleetscan.go).
+//
+// SetKubeconfigSelection also resets clusterContextName/contextResolved so
+// each clone re-resolves its own context rather than inheriting the
+// parent's.
+func (scanInfo *ScanInfo) CloneForContext(kubeContext, output string) *ScanInfo {
+	clone := *scanInfo
+	clone.ScanID = ""
+	clone.cleanups = nil
+	clone.Output = output
+	clone.SetKubeconfigSelection(scanInfo.kubeconfigPath, kubeContext)
+	return &clone
 }
 
 // ResolveClusterContextName resolves the context from the same kubeconfig
@@ -524,8 +564,12 @@ func (scanInfo *ScanInfo) GetClusterContextName() string {
 	return k8sinterface.GetContextName()
 }
 
-// getScanningContext get scanning context from the input param
-// this function should be called only once. Call GetScanningContext() to get the scanning context
+// getScanningContext classifies the scan target type from the input string.
+// Remote URL classification (ContextGitRemote) is purely syntactic and performs
+// no network or disk I/O — in particular, it no longer clones the repository.
+// Local-path classification still inspects the filesystem (os.Getwd,
+// NewLocalGitRepository, isFile) to distinguish directories, files, and local
+// git repositories.
 func (scanInfo *ScanInfo) getScanningContext(input string) ScanningContext {
 	//  cluster
 	if input == "" {
@@ -535,28 +579,9 @@ func (scanInfo *ScanInfo) getScanningContext(input string) ScanningContext {
 	// Check if input is a URL (http:// or https://)
 	isURL := isHTTPURL(input)
 
-	// git url
+	// git remote url
 	if _, err := giturl.NewGitURL(input); err == nil {
-		originalInput := input
-		if repo, err := CloneGitRepo(&input); err == nil {
-			if _, err := NewLocalGitRepository(repo); err == nil {
-				scanInfo.AddCleanup(func() {
-					if err := ReleaseClonedRepo(originalInput); err != nil {
-						logger.L().Warning("failed to clean up cloned repository", helpers.String("url", originalInput), helpers.Error(err))
-					}
-				})
-				return ContextGitRemote
-			}
-			if err := ReleaseClonedRepo(originalInput); err != nil {
-				logger.L().Warning("failed to clean up invalid cloned repository", helpers.String("url", originalInput), helpers.Error(err))
-			}
-		}
-		// If giturl.NewGitURL succeeded but cloning failed, the input is a git URL
-		// that couldn't be cloned. Don't treat it as a local path.
-		// The clone error was already logged by CloneGitRepo.
-		// Return ContextDir to prevent the URL from being joined with the current directory
-		// and to trigger a "no files found" error with the actual URL (not a mangled path).
-		return ContextDir
+		return ContextGitRemote
 	}
 
 	// If it looks like a URL but wasn't recognized as a git URL, still don't treat it as a local path
@@ -585,29 +610,49 @@ func (scanInfo *ScanInfo) getScanningContext(input string) ScanningContext {
 	return ContextDir
 }
 
-// cloneAdditionalRemoteInputs prepares every remote input before file loading.
-// Previously only the first URL was cloned, so later URL inputs were interpreted
-// as local filesystem paths and silently skipped.
-func (scanInfo *ScanInfo) cloneAdditionalRemoteInputs(firstInput string) {
+// MaterializeRemoteInputs clones all remote git repositories declared in
+// InputPatterns, registers their cleanup hooks with ScanInfo, and returns
+// an error immediately if cloning fails.
+//
+// The ctx parameter provides pre-clone cancellation: if the context is
+// cancelled or expired, no further clones are attempted and any already-
+// cloned workspaces are cleaned up. Note that CloneGitRepo itself does
+// not accept a context (it delegates to git.PlainClone, not
+// git.PlainCloneContext), so an in-progress clone cannot be interrupted
+// mid-operation. Making the underlying clone context-aware is a possible
+// future improvement outside the scope of this refactor.
+func (scanInfo *ScanInfo) MaterializeRemoteInputs(ctx context.Context) error {
 	for _, candidate := range scanInfo.InputPatterns {
-		if candidate == firstInput {
-			continue
+		if err := ctx.Err(); err != nil {
+			scanInfo.Cleanup()
+			return err
 		}
 		if _, err := giturl.NewGitURL(candidate); err != nil {
 			continue
 		}
 
 		originalInput := candidate
-		if _, err := CloneGitRepo(&candidate); err != nil {
-			logger.L().Error("failed to clone additional git input", helpers.String("url", originalInput), helpers.Error(err))
-			continue
+		clonedDir, err := CloneGitRepo(&candidate)
+		if err != nil {
+			scanInfo.Cleanup()
+			return fmt.Errorf("failed to clone remote git repository %q: %w", originalInput, err)
 		}
+
+		if _, err := NewLocalGitRepository(clonedDir); err != nil {
+			if releaseErr := ReleaseClonedRepo(originalInput); releaseErr != nil {
+				logger.L().Warning("failed to clean up invalid cloned repository", helpers.String("url", originalInput), helpers.Error(releaseErr))
+			}
+			scanInfo.Cleanup()
+			return fmt.Errorf("cloned repository %q is not a valid git repository: %w", originalInput, err)
+		}
+
 		scanInfo.AddCleanup(func() {
 			if err := ReleaseClonedRepo(originalInput); err != nil {
 				logger.L().Warning("failed to clean up cloned repository", helpers.String("url", originalInput), helpers.Error(err))
 			}
 		})
 	}
+	return nil
 }
 
 func (scanInfo *ScanInfo) setContextMetadata(ctx context.Context, contextMetadata *reporthandlingv2.ContextMetadata) {

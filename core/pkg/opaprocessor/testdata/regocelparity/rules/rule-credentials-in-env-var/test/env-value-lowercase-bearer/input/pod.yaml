@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: lowercase-bearer-pod
+spec:
+  containers:
+  - name: app
+    env:
+    - name: AUTH_HEADER
+      value: bearer abc123def
+    image: nginx:1.25

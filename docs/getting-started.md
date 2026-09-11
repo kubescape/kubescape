@@ -206,7 +206,11 @@ kubescape scan https://github.com/kubescape/kubescape
 kubescape scan --exceptions examples/exceptions/exclude-kube-namespaces.json
 ```
 
-Objects with exceptions will be presented as `exclude` and not `fail`.
+Objects matched by a `disable` exception are presented as passed with
+exceptions instead of failed. For evaluated findings, an `alertOnly` exception
+acknowledges a finding, but the object remains failed and continues
+contributing to the compliance score. Manual-review controls have separate
+status handling.
 
 [See more examples about exceptions.](../examples/exceptions/README.md)
 
@@ -408,6 +412,7 @@ kubescape fix results.json
 |------|-------------|
 | `--dry-run` | Preview changes without applying them |
 | `--no-confirm` | Apply fixes without confirmation prompts |
+| `--output-dir` | Cluster scans only: write one patched manifest per resource here instead of printing them |
 | `--skip-user-values` | Skip changes that require user-defined values (default: true) |
 
 ### Example
@@ -420,8 +425,23 @@ kubescape fix results.json --dry-run
 kubescape fix results.json --no-confirm
 ```
 
+You can also fix a cluster scan. There are no manifests to rewrite in that case,
+so the patched YAML is printed for you to review and apply yourself:
+
+```bash
+kubescape scan --format json --output cluster.json
+kubescape fix cluster.json | kubectl apply -f -
+```
+
+Scan reports redact container environment variables and Secret/ConfigMap data,
+so resources carrying those are declined rather than emitted with placeholder
+values — each is listed with its reason. See the
+[CLI reference](cli-reference.md#cluster-scans) for the full list.
+
 > **Warning**  
-> The fix command modifies files in-place. Always review changes or use `--dry-run` first.
+> When fixing manifest files, the fix command modifies them in-place. Always
+> review changes or use `--dry-run` first. Fixing a cluster scan never writes to
+> your files or your cluster — it only prints the manifests.
 
 ## Image Patching
 

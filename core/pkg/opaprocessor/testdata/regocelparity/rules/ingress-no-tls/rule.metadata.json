@@ -1,0 +1,22 @@
+{
+  "name": "ingress-no-tls",
+  "attributes": {
+  },
+  "ruleLanguage": "Rego",
+  "match": [
+    {
+        "apiGroups": [
+          "networking.k8s.io"
+        ],
+        "apiVersions": [
+          "v1"
+        ],
+        "resources": [
+          "Ingress"
+        ]
+    }
+  ],
+  "description": "Ingress should not be configured without TLS",
+  "remediation": "",
+  "ruleQuery": "armo_builtins"
+}

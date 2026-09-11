@@ -1,0 +1,9 @@
+apiVersion: coordination.k8s.io/v1
+kind: Lease
+metadata:
+  name: kubescape
+  namespace: default
+spec:
+  holderIdentity: node1
+  leaseDurationSeconds: 40
+  leaseTransitions: 0

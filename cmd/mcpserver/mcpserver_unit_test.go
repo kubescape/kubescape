@@ -181,6 +181,7 @@ func TestMCPToolAndResourceRegistration(t *testing.T) {
 		createRBACScanningTools(ksServer)
 		createNetworkScanningTools(ksServer)
 		createFrameworkScanningTools(ksServer)
+		createWorkloadScanningTools(ksServer)
 	})
 	assert.NotNil(t, GetMCPServerCmd())
 }
@@ -294,6 +295,28 @@ func TestGetConfigurationDrift_SupportsAllWorkloadKinds(t *testing.T) {
 			// The error should be "not found" (workload doesn't exist in the fake client),
 			// NOT "unsupported workload kind" which would mean the kind was rejected.
 			assert.NotContains(t, text, "unsupported workload kind")
+		})
+	}
+}
+
+func TestGetConfigurationDrift_WhitespaceArgumentsRejected(t *testing.T) {
+	ksServer := &KubescapeMcpserver{}
+	requiredArgs := []string{"profile_name", "workload_name", "workload_kind"}
+	for _, arg := range requiredArgs {
+		t.Run(arg, func(t *testing.T) {
+			args := map[string]any{
+				"profile_name":  "test-profile",
+				"workload_name": "test-workload",
+				"workload_kind": "pod",
+			}
+			args[arg] = "   "
+			result, err := ksServer.CallTool(context.Background(), "get_configuration_drift", args)
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			require.True(t, result.IsError)
+			var toolErr ToolError
+			require.NoError(t, json.Unmarshal([]byte(toolResultText(t, result)), &toolErr))
+			assert.Equal(t, ErrCodeInvalidArgument, toolErr.Code)
 		})
 	}
 }

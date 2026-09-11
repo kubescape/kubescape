@@ -1,0 +1,36 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  namespace: default
+  name: test2
+  labels:
+    app: audit-pod
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: audit-pod
+  template:
+    metadata:
+      labels:
+        app: audit-pod
+    spec :
+      containers :
+        -
+          name : test-container
+          env :
+            -
+              name : random
+              value : "Hello from the environment"
+          image : hashicorp/http-echo:0.2.3
+          securityContext :
+            allowPrivilegeEscalation : true
+        -
+          name : test-container2
+          env :
+            -
+              name : bla
+              value : "Hello from the environment"
+            - name : some-name
+              value : JWT
+          image : hashicorp/http-echo:0.2.3

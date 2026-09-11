@@ -43,7 +43,12 @@ func (ksServer *KubescapeMcpserver) runIaCScanControls(ctx context.Context, path
 		return nil, err
 	}
 	fileHandler := resourcehandler.NewFileResourceHandler()
-	return runScan(ctx, ksServer, "", policyIdentifiers, "Local IaC Control", false, fileHandler, []string{path}, nil)
+	return runScan(ctx, ksServer, scanRequest{
+		policyIdentifiers: policyIdentifiers,
+		label:             "Local IaC Control",
+		rsrcHandler:       fileHandler,
+		inputPatterns:     []string{path},
+	})
 }
 
 // iacScanOutcome carries the PostureReport together with the scan's coverage
@@ -78,7 +83,12 @@ func (ksServer *KubescapeMcpserver) runIaCScanControlsReport(ctx context.Context
 		return nil, err
 	}
 	fileHandler := resourcehandler.NewFileResourceHandler()
-	scanData, processErr, err := executeScan(ctx, ksServer, "", policyIdentifiers, "Local IaC Remediation", false, fileHandler, []string{path}, nil)
+	scanData, processErr, err := executeScan(ctx, ksServer, scanRequest{
+		policyIdentifiers: policyIdentifiers,
+		label:             "Local IaC Remediation",
+		rsrcHandler:       fileHandler,
+		inputPatterns:     []string{path},
+	})
 	if err != nil {
 		return nil, err
 	}

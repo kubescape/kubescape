@@ -40,6 +40,10 @@ func (m *MockIKubescape) ViewCachedConfig(_ *metav1.ViewConfig) error {
 	return nil
 }
 
+func (m *MockIKubescape) ValidateCachedConfig(_ *metav1.ValidateConfig) error {
+	return nil
+}
+
 func (m *MockIKubescape) DeleteCachedConfig(_ *metav1.DeleteConfig) error {
 	return nil
 }

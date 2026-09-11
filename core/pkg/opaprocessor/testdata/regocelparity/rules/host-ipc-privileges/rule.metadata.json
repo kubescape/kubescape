@@ -1,0 +1,50 @@
+{
+    "name": "host-ipc-privileges",
+    "attributes": {
+    },
+    "ruleLanguage": "Rego",
+    "match": [
+      {
+        "apiGroups": [
+          ""
+        ],
+        "apiVersions": [
+          "v1"
+        ],
+        "resources": [
+          "Pod"
+        ]
+      },
+      {
+        "apiGroups": [
+          "apps"
+        ],
+        "apiVersions": [
+          "v1"
+        ],
+        "resources": [
+            "Deployment",
+            "ReplicaSet",
+            "DaemonSet",
+            "StatefulSet"
+        ]
+      },
+      {
+        "apiGroups": [
+          "batch"
+        ],
+        "apiVersions": [
+          "*"
+        ],
+        "resources": [
+            "Job",
+            "CronJob"
+        ]
+      }
+    ],
+    "ruleDependencies": [
+    ],
+    "description": "Containers should be as isolated as possible from the host machine. The hostIPC field in Kubernetes may excessively expose the host to potentially malicious actions.",
+    "remediation": "Make sure that the field hostIPC in the pod spec is not set to true (set to false or not present)",
+    "ruleQuery": "armo_builtins"
+}

@@ -1,15 +1,15 @@
 package scan
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
-	"regexp"
-	"strings"
 
 	"github.com/kubescape/kubescape/v4/cmd/shared"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/meta"
+	"github.com/kubescape/kubescape/v4/core/pkg/resourcehandler"
 	v1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/spf13/cobra"
@@ -41,9 +41,23 @@ var (
 
 
 `, cautils.ExecName())
-
-	ErrInvalidWorkloadIdentifier = errors.New("invalid workload identifier, expected <kind>[.<version>[.<group>]]/<name>")
 )
+
+// The workload identifier grammar is shared with the MCP server, which cannot
+// import cmd/scan without pulling in cobra and the whole command tree, so it
+// lives in core/cautils/workloadidentifier.go. These aliases keep the call
+// sites below unchanged.
+//
+// ErrInvalidWorkloadIdentifier is aliased rather than redeclared on purpose:
+// callers compare against it by identity, which a second errors.New carrying
+// the same message would not satisfy.
+var (
+	ErrInvalidWorkloadIdentifier  = cautils.ErrInvalidWorkloadIdentifier
+	parseWorkloadIdentifierString = cautils.ParseWorkloadIdentifierString
+	validateWorkloadIdentifier    = cautils.ValidateWorkloadIdentifier
+)
+
+const cliNamespaceDefaultedHint = "namespace defaulted to 'default'; pass -n '*' to search cluster-wide"
 
 // controlCmd represents the control command
 func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Command {
@@ -57,9 +71,6 @@ func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comma
 			return validateWorkloadArgs(args, scanInfo)
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx, cancel := deriveTimeoutContext(scanInfo, ks)
-			defer cancel()
-
 			if err := validateWorkloadArgs(args, scanInfo); err != nil {
 				return err
 			}
@@ -72,14 +83,18 @@ func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comma
 			if scanInfo.LabelSelector != "" {
 				return fmt.Errorf("--label-selector is not supported for workload scans: the named resource is fetched by identity, not by label")
 			}
-			namespace, kind, name, workloadAPIVersion, err := parseWorkloadIdentifierString(args[0])
+			identNamespace, kind, name, workloadAPIVersion, err := parseWorkloadIdentifierString(args[0])
 			if err != nil {
 				return fmt.Errorf("invalid input: %w", err)
 			}
 
-			if namespace != "" && scanInfo.Namespace == "" {
-				scanInfo.Namespace = namespace
+			isClusterScan := len(args) == 1 && len(scanInfo.InputPatterns) == 0 && scanInfo.FilePath == ""
+			targetNamespace, namespaceDefaulted, err := cautils.ResolveWorkloadNamespace(identNamespace, scanInfo.Namespace, isClusterScan)
+			if err != nil {
+				return err
 			}
+			scanInfo.Namespace = targetNamespace
+			scanInfo.NamespaceDefaulted = namespaceDefaulted
 
 			cleanup, err := prepareWorkloadInput(cmd.InOrStdin(), args, scanInfo)
 			if err != nil {
@@ -96,44 +111,72 @@ func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comma
 				return err
 			}
 
-			results, err := ks.ScanContext(ctx, scanInfo, policyIdentifiers)
-			if err != nil {
-				return err
-			}
-
-			if err = results.HandleResults(ctx, scanInfo); err != nil {
-				return err
-			}
-
-			if results.GetComplianceScore() < float32(scanInfo.ComplianceThreshold) {
-				return fmt.Errorf("scan compliance-score is below permitted threshold: %.2f (compliance-threshold: %.2f)", results.GetComplianceScore(), scanInfo.ComplianceThreshold)
-			}
-
-			if err := enforceSeverityThresholds(&results.GetData().Report.SummaryDetails, scanInfo); err != nil {
-				return err
-			}
-			if scanInfo.ScanImages {
-				if err := enforceImageSeverityThresholds(results.ImageScanData, scanInfo); err != nil {
+			if len(scanInfo.KubeContexts) > 0 {
+				if _, err := validateFleetScanInvocation(scanInfo); err != nil {
 					return err
 				}
 			}
-			if err := enforceCoverageThreshold(results.GetData().ScanCoverage, len(results.GetData().Report.SummaryDetails.Controls), scanInfo); err != nil {
-				return err
-			}
-			if err := enforcePolicyDegradation(results.GetData().ScanCoverage, scanInfo); err != nil {
-				return err
+
+			// The invocation is valid from this point on. Runtime and result-gate
+			// failures should not print command usage.
+			cmd.SilenceUsage = true
+
+			if len(scanInfo.KubeContexts) > 0 {
+				return fleetScan(*scanInfo, ks, policyIdentifiers, runWorkloadScan)
 			}
 
-			return enforceBaselineDrift(ctx, results, scanInfo)
+			ctx, cancel := deriveTimeoutContext(scanInfo, ks)
+			defer cancel()
+			return runWorkloadScan(ctx, scanInfo, ks, policyIdentifiers)
 		},
 	}
 
-	workloadCmd.PersistentFlags().StringVarP(&scanInfo.Namespace, "namespace", "n", "", "Namespace of the workload. Default will be empty.")
+	workloadCmd.PersistentFlags().StringVarP(&scanInfo.Namespace, "namespace", "n", "", "Namespace of the workload (defaults to 'default' for live-cluster scans, pass '*' for cluster-wide search; cluster-wide search requires cluster-level list permissions). Must not conflict with namespace prefix in workload argument.")
 	workloadCmd.PersistentFlags().StringVar(&scanInfo.FilePath, "file-path", "", "Path to the workload file.")
 	workloadCmd.PersistentFlags().StringVar(&scanInfo.ChartPath, "chart-path", "", "Path to the helm chart the workload is part of. Must be used with --file-path.")
 	workloadCmd.PersistentFlags().StringVar(&apiVersion, "api-version", "", "API version of the workload (e.g. apps/v1). Default will be empty.")
 
 	return workloadCmd
+}
+
+// runWorkloadScan runs one cluster's workload scan to completion: Scan,
+// HandleResults, then every threshold/drift enforcement the workload
+// command performs for the single-context path. Factored out so fleetScan
+// can run the exact same per-cluster behavior once per --kube-contexts
+// entry, instead of a parallel, divergent copy of this logic.
+func runWorkloadScan(ctx context.Context, scanInfo *cautils.ScanInfo, ks meta.IKubescape, policyIdentifiers []cautils.PolicyIdentifier) error {
+	results, err := ks.ScanContext(ctx, scanInfo, policyIdentifiers)
+	if err != nil {
+		if errors.Is(err, resourcehandler.ErrResourceNotFound) && scanInfo.NamespaceDefaulted {
+			return fmt.Errorf("%w (%s)", err, cliNamespaceDefaultedHint)
+		}
+		return err
+	}
+
+	if err = results.HandleResults(ctx, scanInfo); err != nil {
+		return err
+	}
+
+	if results.GetComplianceScore() < float32(scanInfo.ComplianceThreshold) {
+		return fmt.Errorf("scan compliance-score is below permitted threshold: %.2f (compliance-threshold: %.2f)", results.GetComplianceScore(), scanInfo.ComplianceThreshold)
+	}
+
+	if err := enforceSeverityThresholds(&results.GetData().Report.SummaryDetails, scanInfo); err != nil {
+		return err
+	}
+	if scanInfo.ScanImages {
+		if err := enforceImageSeverityThresholds(results.ImageScanData, scanInfo); err != nil {
+			return err
+		}
+	}
+	if err := enforceCoverageThreshold(results.GetData().ScanCoverage, len(results.GetData().Report.SummaryDetails.Controls), scanInfo); err != nil {
+		return err
+	}
+	if err := enforcePolicyDegradation(results.GetData().ScanCoverage, scanInfo); err != nil {
+		return err
+	}
+
+	return enforceBaselineDrift(ctx, results, scanInfo)
 }
 
 func validateWorkloadArgs(args []string, scanInfo *cautils.ScanInfo) error {
@@ -185,63 +228,4 @@ func setWorkloadScanInfo(scanInfo *cautils.ScanInfo, kind string, name string, a
 	}
 
 	return policyIdentifiers
-}
-
-func validateWorkloadIdentifier(workloadIdentifier string) error {
-	_, _, _, _, err := parseWorkloadIdentifierString(workloadIdentifier)
-	return err
-}
-
-func parseWorkloadIdentifierString(workloadIdentifier string) (namespace, kind, name, apiVersion string, err error) {
-	// workloadIdentifier is in the form of kind/name or namespace/kind/name
-	// example: default/Deployment/nginx-deployment
-	x := strings.Split(workloadIdentifier, "/")
-	if len(x) == 2 {
-		if x[0] == "" || x[1] == "" {
-			return "", "", "", "", ErrInvalidWorkloadIdentifier
-		}
-		parsedKind, parsedApiVersion, err := parseKindAndApiVersion(x[0])
-		if err != nil {
-			return "", "", "", "", err
-		}
-		return "", parsedKind, x[1], parsedApiVersion, nil
-	}
-	if len(x) == 3 {
-		if x[0] == "" || x[1] == "" || x[2] == "" {
-			return "", "", "", "", ErrInvalidWorkloadIdentifier
-		}
-		parsedKind, parsedApiVersion, err := parseKindAndApiVersion(x[1])
-		if err != nil {
-			return "", "", "", "", err
-		}
-		return x[0], parsedKind, x[2], parsedApiVersion, nil
-	}
-
-	return "", "", "", "", ErrInvalidWorkloadIdentifier
-}
-
-var apiVersionPattern = regexp.MustCompile(`^v\d+((alpha|beta)\d+)?$`)
-
-func parseKindAndApiVersion(kindStr string) (kind, apiVersion string, err error) {
-	parts := strings.Split(kindStr, ".")
-	if len(parts) == 1 {
-		return kindStr, "", nil
-	}
-
-	// Reject empty components
-	for _, part := range parts {
-		if part == "" {
-			return "", "", fmt.Errorf("%w: empty component in %q", ErrInvalidWorkloadIdentifier, kindStr)
-		}
-	}
-
-	if !apiVersionPattern.MatchString(parts[1]) {
-		return "", "", fmt.Errorf("%w: %q is not a valid API version in %q", ErrInvalidWorkloadIdentifier, parts[1], kindStr)
-	}
-
-	if len(parts) >= 3 {
-		group := strings.Join(parts[2:], ".")
-		return parts[0], group + "/" + parts[1], nil // kind.version.group -> group/version
-	}
-	return parts[0], parts[1], nil // kind.version -> version
 }

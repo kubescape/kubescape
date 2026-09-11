@@ -40,6 +40,9 @@ func (s *stubKubescape) Download(*metav1.DownloadInfo) (*metav1.DownloadResult, 
 }
 func (s *stubKubescape) SetCachedConfig(*metav1.SetConfig) error   { return nil }
 func (s *stubKubescape) ViewCachedConfig(*metav1.ViewConfig) error { return nil }
+func (s *stubKubescape) ValidateCachedConfig(*metav1.ValidateConfig) error {
+	return nil
+}
 func (s *stubKubescape) DeleteCachedConfig(*metav1.DeleteConfig) error {
 	return nil
 }

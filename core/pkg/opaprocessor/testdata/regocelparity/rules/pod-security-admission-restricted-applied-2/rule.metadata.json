@@ -1,0 +1,23 @@
+{
+    "name": "pod-security-admission-restricted-applied-2",
+    "attributes": {
+    },
+    "ruleLanguage": "Rego",
+    "match": [
+        {
+            "apiGroups": [
+                ""
+            ],
+            "apiVersions": [
+                "v1"
+            ],
+            "resources": [
+                "Namespace"
+            ]
+        }
+    ],
+    "ruleDependencies": [],
+    "description": "Checks that every namespace has restricted pod security admission enabled via the pod-security.kubernetes.io/enforce=restricted label",
+    "remediation": "Add the label pod-security.kubernetes.io/enforce=restricted to every namespace that contains user workloads.\n\n#### Impact Statement\nWhere policy control systems are in place, there is a risk that workloads required for the operation of the cluster may be stopped from running. Care is required when implementing admission control policies to ensure that this does not occur.\n\n#### Default Value\nBy default, Pod Security Admission is enabled but no policies are in place.",
+    "ruleQuery": "armo_builtins"
+}

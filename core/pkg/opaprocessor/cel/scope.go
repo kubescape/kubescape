@@ -26,10 +26,8 @@ import (
 // rule that fires only on other operations does not match here either. The one
 // selector NOT evaluated is namespaceSelector — its input is the namespace's
 // labels, which the scan cannot guarantee to have — so a policy narrowing with
-// it is refused at load instead (see requireSupported). matchPolicy is
-// genuinely irrelevant offline: Equivalent matching only widens a rule across
-// API conversions, and a scan never converts — the object is matched at the
-// exact group/version it was scanned at.
+// it is refused at load instead (see requireSupported). matchPolicy decides how
+// strictly a rule's apiVersions are read, see matchesAPIVersion.
 func (v *VAP) AppliesTo(obj map[string]any) bool {
 	if v.matchConstraints == nil || len(v.matchConstraints.ResourceRules) == 0 {
 		return true // no scoping info: evaluate (a malformed-policy edge)
@@ -40,10 +38,11 @@ func (v *VAP) AppliesTo(obj map[string]any) bool {
 	}
 	name, _, _ := unstructured.NestedString(obj, "metadata", "name")
 	target := scopedObject{gvr: gvr, resources: resources, name: name, namespaced: isNamespaced(obj)}
+	matchPolicy := effectiveMatchPolicy(v.matchConstraints)
 
 	included := false
 	for i := range v.matchConstraints.ResourceRules {
-		if resourceRuleMatches(&v.matchConstraints.ResourceRules[i], target) {
+		if resourceRuleMatches(&v.matchConstraints.ResourceRules[i], target, matchPolicy) {
 			included = true
 			break
 		}
@@ -52,7 +51,7 @@ func (v *VAP) AppliesTo(obj map[string]any) bool {
 		return false
 	}
 	for i := range v.matchConstraints.ExcludeResourceRules {
-		if resourceRuleMatches(&v.matchConstraints.ExcludeResourceRules[i], target) {
+		if resourceRuleMatches(&v.matchConstraints.ExcludeResourceRules[i], target, matchPolicy) {
 			return false
 		}
 	}
@@ -182,13 +181,41 @@ type scopedObject struct {
 	namespaced bool
 }
 
-func resourceRuleMatches(rule *admissionregistrationv1.NamedRuleWithOperations, target scopedObject) bool {
+func resourceRuleMatches(rule *admissionregistrationv1.NamedRuleWithOperations, target scopedObject, matchPolicy admissionregistrationv1.MatchPolicyType) bool {
 	return matchesOperation(rule.Operations) &&
 		matchesScope(rule.Scope, target.namespaced) &&
 		matchesValue(rule.APIGroups, target.gvr.Group) &&
-		matchesValue(rule.APIVersions, target.gvr.Version) &&
+		matchesAPIVersion(rule.APIVersions, target.gvr.Version, matchPolicy) &&
 		matchesResource(rule.Resources, target.resources) &&
 		matchesName(rule.ResourceNames, target.name)
+}
+
+// effectiveMatchPolicy resolves matchConstraints.matchPolicy, which the API
+// defaults to Equivalent when it is unset - as every policy in the bundle
+// leaves it.
+func effectiveMatchPolicy(mr *admissionregistrationv1.MatchResources) admissionregistrationv1.MatchPolicyType {
+	if mr == nil || mr.MatchPolicy == nil {
+		return admissionregistrationv1.Equivalent
+	}
+	return *mr.MatchPolicy
+}
+
+// matchesAPIVersion reports whether the rule's apiVersions admit the object's
+// version. Exact matchPolicy requires the rule to name it. Equivalent (the API
+// default, which every bundle policy leaves unset) does not: the apiserver
+// converts a request into whichever version the rule names, so naming one
+// version of a group's resource covers every other version it is served at.
+// Offline there is no discovery to say which those are, so the version is
+// dropped from the comparison instead of resolved.
+//
+// The group is not widened with it. Equivalence can cross groups on a cluster,
+// but only its registry knows which pairs, and two same-named resources in
+// unrelated groups are separate storage.
+func matchesAPIVersion(allowed []string, version string, matchPolicy admissionregistrationv1.MatchPolicyType) bool {
+	if matchPolicy != admissionregistrationv1.Exact {
+		return true
+	}
+	return matchesValue(allowed, version)
 }
 
 // matchesScope reports whether the rule's scope admits the object. nil and "*"

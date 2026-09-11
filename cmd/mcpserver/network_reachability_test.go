@@ -6,6 +6,7 @@ import (
 
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/mark3labs/mcp-go/server"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -274,4 +275,26 @@ func TestAnalyzeNetworkReachability_MalformedPodSelectorDowngradesVerdictToUnkno
 	require.NoError(t, json.Unmarshal([]byte(toolResultText(t, result)), &parsed))
 	require.Equal(t, "unknown", parsed["verdict"], "a dropped, unparseable policy must downgrade the verdict, not silently report a confident allowed")
 	require.NotEmpty(t, parsed["decode_warnings"])
+}
+
+func TestAnalyzeNetworkReachability_WhitespaceArgumentsRejected(t *testing.T) {
+	ksServer := newReachabilityTestServer()
+
+	requiredArgs := []string{"source_namespace", "source_pod", "destination_namespace", "destination_pod"}
+	for _, arg := range requiredArgs {
+		t.Run(arg, func(t *testing.T) {
+			args := map[string]any{
+				"source_namespace":      "prod",
+				"source_pod":            "client",
+				"destination_namespace": "prod",
+				"destination_pod":       "server",
+			}
+			args[arg] = "   "
+			result := registeredToolResult(t, dispatchRegisteredTool(t, ksServer, "analyze_network_reachability", args))
+			require.True(t, result.IsError)
+			var toolErr ToolError
+			require.NoError(t, json.Unmarshal([]byte(toolResultText(t, result)), &toolErr))
+			assert.Equal(t, ErrCodeInvalidArgument, toolErr.Code)
+		})
+	}
 }

@@ -33,12 +33,13 @@ var mutatingAdmissionPolicyOperations = map[string]admissionregistrationv1alpha1
 func createMutatingAdmissionPolicyTools(ksServer *KubescapeMcpserver) {
 	tool := mcp.NewTool(
 		"analyze_mutating_admission_policy_impact",
-		mcp.WithDescription("Determine which of the cluster's live MutatingAdmissionPolicy objects would mutate a specific resource on a given operation (default CREATE), and what each one's raw CEL mutation expression is. This surfaces implicit mutation that happens at admission time and never appears in the manifest a user applied -- it reports that a policy's mutation would run and what its expression is, it does not evaluate the expression to compute the resulting object."),
+		mcp.WithDescription("Determine which of the cluster's live MutatingAdmissionPolicy objects would mutate a specific resource on a given operation (default CREATE), and what each one's raw CEL mutation expression is. This surfaces implicit mutation that happens at admission time and never appears in the manifest a user applied -- it reports that a policy's mutation would run and what its expression is, it does not evaluate the expression to compute the resulting object. A match with determinable false is one that might apply rather than one that does: match_conditions lists the CEL gates the apiserver still evaluates on the request."),
 		mcp.WithString("namespace", mcp.Description("Namespace of the resource (omit for a cluster-scoped resource)")),
 		mcp.WithString("name", mcp.Required(), mcp.Description("Name of the resource")),
 		mcp.WithString("api_group", mcp.Description("API group of the resource (omit or empty for the core group, e.g. Pod/ConfigMap)")),
 		mcp.WithString("api_version", mcp.Required(), mcp.Description("API version of the resource, e.g. v1")),
 		mcp.WithString("resource", mcp.Required(), mcp.Description("Plural resource name, e.g. pods, deployments")),
+		mcp.WithString("subresource", mcp.Description("Subresource the request targets, e.g. status or scale (omit for the resource itself). A policy scoped to the resource does not cover its subresources, and the reverse, so this changes which policies match")),
 		mcp.WithString("operation", mcp.Description("Admission operation to check: CREATE, UPDATE, or CONNECT (default CREATE)")),
 		mcp.WithBoolean("cluster_scoped", mcp.Description("Set true for a cluster-scoped resource (namespace is ignored, and any namespaceSelector is treated as non-restricting, matching the Kubernetes API's own documented behavior)")),
 	)
@@ -51,19 +52,30 @@ func createMutatingAdmissionPolicyTools(ksServer *KubescapeMcpserver) {
 
 		name, ok := args["name"].(string)
 		if !ok || name == "" {
-			return mcp.NewToolResultError("name is required"), nil
+			return mcpToolError(ErrCodeInvalidArgument, "name is required", map[string]any{"argument": "name"}), nil
 		}
 		apiVersion, ok := args["api_version"].(string)
 		if !ok || apiVersion == "" {
-			return mcp.NewToolResultError("api_version is required"), nil
+			return mcpToolError(ErrCodeInvalidArgument, "api_version is required", map[string]any{"argument": "api_version"}), nil
 		}
 		resource, ok := args["resource"].(string)
 		if !ok || resource == "" {
-			return mcp.NewToolResultError("resource is required"), nil
+			return mcpToolError(ErrCodeInvalidArgument, "resource is required", map[string]any{"argument": "resource"}), nil
 		}
 		apiGroup, _ := args["api_group"].(string)
 		namespace, _ := args["namespace"].(string)
 		clusterScoped, _ := args["cluster_scoped"].(bool)
+
+		// A subresource is one path segment: "status", not "pods/status". A
+		// caller repeating the parent would otherwise match no rule at all and
+		// read as "nothing mutates this".
+		subresource, subresourceErr := optionalStringArg(args, "subresource")
+		if subresourceErr != nil {
+			return mcpToolError(ErrCodeInvalidArgument, subresourceErr.Error(), map[string]any{"argument": "subresource"}), nil
+		}
+		if strings.Contains(subresource, "/") {
+			return mcpToolError(ErrCodeInvalidArgument, fmt.Sprintf("subresource must name one subresource without the parent resource (got %q, want e.g. %q)", subresource, "status"), map[string]any{"argument": "subresource"}), nil
+		}
 
 		// A Namespace object is itself cluster-scoped ("Namespace API
 		// objects are cluster-scoped", per Rule.Scope's own doc comment)
@@ -75,7 +87,7 @@ func createMutatingAdmissionPolicyTools(ksServer *KubescapeMcpserver) {
 		effectiveClusterScoped := clusterScoped || isNamespaceResource
 
 		if !effectiveClusterScoped && namespace == "" {
-			return mcp.NewToolResultError("namespace is required unless cluster_scoped is true"), nil
+			return mcpToolError(ErrCodeInvalidArgument, "namespace is required unless cluster_scoped is true", map[string]any{"argument": "namespace"}), nil
 		}
 
 		operation := admissionregistrationv1alpha1.Create
@@ -83,14 +95,14 @@ func createMutatingAdmissionPolicyTools(ksServer *KubescapeMcpserver) {
 			normalized := strings.ToUpper(rawOp)
 			op, known := mutatingAdmissionPolicyOperations[normalized]
 			if !known {
-				return mcp.NewToolResultError(fmt.Sprintf("operation must be one of CREATE, UPDATE, CONNECT (got %q)", rawOp)), nil
+				return mcpToolError(ErrCodeInvalidArgument, fmt.Sprintf("operation must be one of CREATE, UPDATE, CONNECT (got %q)", rawOp), map[string]any{"argument": "operation", "supported_values": []string{"CREATE", "UPDATE", "CONNECT"}}), nil
 			}
 			operation = op
 		}
 
 		k8sClient, err := ksServer.getK8sClient()
 		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed to get k8s client: %v", err)), nil
+			return mcpToolError(ErrCodeK8sClientError, fmt.Sprintf("failed to get k8s client: %v", err), nil), nil
 		}
 
 		policies, bindings, decodeErrs, err := mapreconcile.Collect(ctx, k8sClient)
@@ -98,7 +110,7 @@ func createMutatingAdmissionPolicyTools(ksServer *KubescapeMcpserver) {
 			if errors.Is(err, mapreconcile.ErrUnsupported) {
 				return mcp.NewToolResultText(`{"supported":false,"reason":"cluster does not serve MutatingAdmissionPolicy resources"}`), nil
 			}
-			return mcp.NewToolResultError(fmt.Sprintf("failed to collect MutatingAdmissionPolicy resources: %v", err)), nil
+			return mcpToolError(ErrCodeK8sClientError, fmt.Sprintf("failed to collect MutatingAdmissionPolicy resources: %v", err), nil), nil
 		}
 
 		gvr := schema.GroupVersionResource{Group: apiGroup, Version: apiVersion, Resource: resource}
@@ -113,13 +125,19 @@ func createMutatingAdmissionPolicyTools(ksServer *KubescapeMcpserver) {
 			obj, getErr = resourceInterface.Namespace(namespace).Get(ctx, name, metav1.GetOptions{})
 		}
 		if getErr != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed to get resource %s/%s (%s): %v", namespace, name, gvr.String(), getErr)), nil
+			if apierrors.IsNotFound(getErr) {
+				// ErrCodeResourceNotFound: the requested target object does not exist in the cluster.
+				// Semantics align with classifyScanError: agent recovery action is to verify kind/name/ns.
+				return mcpToolError(ErrCodeResourceNotFound, fmt.Sprintf("resource %s/%s (%s) not found: %v", namespace, name, gvr.String(), getErr), map[string]any{"resource_type": resource, "namespace": namespace, "name": name}), nil
+			}
+			return mcpToolError(ErrCodeK8sClientError, fmt.Sprintf("failed to get resource %s/%s (%s): %v", namespace, name, gvr.String(), getErr), map[string]any{"resource_type": resource, "namespace": namespace, "name": name}), nil
 		}
 
 		info := mapreconcile.ObjectInfo{
 			Group:             apiGroup,
 			Version:           apiVersion,
 			Resource:          resource,
+			Subresource:       subresource,
 			Name:              name,
 			Namespace:         namespace,
 			Labels:            obj.GetLabels(),
@@ -134,7 +152,7 @@ func createMutatingAdmissionPolicyTools(ksServer *KubescapeMcpserver) {
 				info.NamespaceLabels = nsObj.GetLabels()
 				info.NamespaceLabelsKnown = true
 			} else if !apierrors.IsNotFound(nsErr) {
-				return mcp.NewToolResultError(fmt.Sprintf("failed to get namespace %s: %v", namespace, nsErr)), nil
+				return mcpToolError(ErrCodeK8sClientError, fmt.Sprintf("failed to get namespace %s: %v", namespace, nsErr), map[string]any{"namespace": namespace}), nil
 			}
 		}
 
@@ -156,10 +174,27 @@ func createMutatingAdmissionPolicyTools(ksServer *KubescapeMcpserver) {
 
 		resBytes, err := json.Marshal(result)
 		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed to marshal result: %v", err)), nil
+			return mcpToolError(ErrCodeMarshalError, fmt.Sprintf("failed to marshal result: %v", err), nil), nil
 		}
 		return mcp.NewToolResultText(string(resBytes)), nil
 	})
+}
+
+// optionalStringArg reads one optional string tool argument. The server runs
+// without input schema validation, so a wrong type arrives here untouched and
+// asserting it away would coerce it to "". For an argument that narrows a
+// query that silently widens the answer instead of refusing it, so a present
+// non-string is an error. An explicit null counts as absent.
+func optionalStringArg(args map[string]any, key string) (string, error) {
+	raw, present := args[key]
+	if !present || raw == nil {
+		return "", nil
+	}
+	value, ok := raw.(string)
+	if !ok {
+		return "", fmt.Errorf("%s must be a string (got %T)", key, raw)
+	}
+	return value, nil
 }
 
 func buildMatchSummaries(matches []mapreconcile.MatchedPolicy) []map[string]any {
@@ -172,13 +207,21 @@ func buildMatchSummaries(matches []mapreconcile.MatchedPolicy) []map[string]any 
 				"expression": mut.Expression,
 			})
 		}
+		conditions := make([]map[string]any, 0, len(m.MatchConditions))
+		for _, cond := range m.MatchConditions {
+			conditions = append(conditions, map[string]any{
+				"name":       cond.Name,
+				"expression": cond.Expression,
+			})
+		}
 		out = append(out, map[string]any{
-			"policy_name":    m.PolicyName,
-			"binding_name":   m.BindingName,
-			"mutations":      mutations,
-			"failure_policy": string(m.FailurePolicy),
-			"has_params":     m.HasParams,
-			"determinable":   m.Determinable,
+			"policy_name":      m.PolicyName,
+			"binding_name":     m.BindingName,
+			"mutations":        mutations,
+			"failure_policy":   string(m.FailurePolicy),
+			"has_params":       m.HasParams,
+			"match_conditions": conditions,
+			"determinable":     m.Determinable,
 		})
 	}
 	return out

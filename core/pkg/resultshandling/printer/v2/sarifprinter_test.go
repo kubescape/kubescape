@@ -1,11 +1,14 @@
 package printer
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -374,7 +377,7 @@ func TestAddRule_SetsSecuritySeverity(t *testing.T) {
 		ScoreFactor: 8.5,
 	}
 
-	sp := NewSARIFPrinter()
+	sp := NewSARIFPrinter(false)
 	sp.addRule(run, control)
 
 	require.Len(t, run.Tool.Driver.Rules, 1)
@@ -385,7 +388,6 @@ func TestAddRule_SetsSecuritySeverity(t *testing.T) {
 }
 
 func TestAddResult_AnnotatesInitAndEphemeralContainerNames(t *testing.T) {
-	run := sarif.NewRunWithInformationURI(toolName, toolInfoURI)
 	control := &reportsummary.ControlSummary{
 		ControlID:   "C-0057",
 		Name:        "Privileged container",
@@ -393,13 +395,12 @@ func TestAddResult_AnnotatesInitAndEphemeralContainerNames(t *testing.T) {
 		ScoreFactor: 8.0,
 	}
 
-	sp := NewSARIFPrinter()
-	sp.addRule(run, control)
+	sp := NewSARIFPrinter(false)
 
 	ac := makeControlWithPaths(privilegedInitAndEphemeralPaths(), nil)
 	ac.ControlID = "C-0057"
 
-	result := sp.addResult(run, control, "pod.yaml", locationresolver.Location{Line: 1, Column: 1}, ac, "apps/v1/Deployment/default/demo", privilegedInitAndEphemeralPod(), nil)
+	result := sp.createResult(control, "pod.yaml", locationresolver.Location{Line: 1, Column: 1}, ac, "apps/v1/Deployment/default/demo", privilegedInitAndEphemeralPod(), nil)
 	require.NotNil(t, result.Message)
 	require.NotNil(t, result.Message.Text)
 	for _, path := range privilegedInitAndEphemeralNamedPaths() {
@@ -407,6 +408,45 @@ func TestAddResult_AnnotatesInitAndEphemeralContainerNames(t *testing.T) {
 	}
 	require.NotNil(t, result.PartialFingerprints)
 	assert.NotEmpty(t, result.PartialFingerprints["kubescapeFindingFingerprint"])
+}
+
+// TestAddResult_RedactsSecretFixPathValueUnlessShowSecrets is a regression
+// test: SARIF is routinely uploaded to CI code-scanning dashboards or
+// committed as a pipeline artifact, so a Secret's plaintext fix-path value
+// must be redacted by default the same way the pretty-printer and resource
+// table already are, and only revealed when the caller explicitly opts in
+// via --show-secrets.
+func TestAddResult_RedactsSecretFixPathValueUnlessShowSecrets(t *testing.T) {
+	control := &reportsummary.ControlSummary{
+		ControlID:   "C-0012",
+		Name:        "Credentials in env var",
+		Description: "test",
+		ScoreFactor: 8.0,
+	}
+	resource := &mockResource{kind: "Secret", obj: map[string]any{}}
+	ac := &resourcesresults.ResourceAssociatedControl{
+		ControlID: "C-0012",
+		ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{
+			{Paths: []armotypes.PosturePaths{
+				{FixPath: armotypes.FixPath{Path: "data.password", Value: "s3cr3t-plaintext-password"}},
+			}},
+		},
+	}
+
+	t.Run("redacted by default", func(t *testing.T) {
+		sp := NewSARIFPrinter(false)
+		result := sp.createResult(control, "secret.yaml", locationresolver.Location{Line: 1, Column: 1}, ac, "v1/Secret/default/demo", resource, nil)
+		require.NotNil(t, result.Message.Text)
+		assert.NotContains(t, *result.Message.Text, "s3cr3t-plaintext-password")
+		assert.Contains(t, *result.Message.Text, "[redacted]")
+	})
+
+	t.Run("revealed with showSecrets", func(t *testing.T) {
+		sp := NewSARIFPrinter(true)
+		result := sp.createResult(control, "secret.yaml", locationresolver.Location{Line: 1, Column: 1}, ac, "v1/Secret/default/demo", resource, nil)
+		require.NotNil(t, result.Message.Text)
+		assert.Contains(t, *result.Message.Text, "s3cr3t-plaintext-password")
+	})
 }
 
 func TestSARIFFindingFingerprintStableAcrossEvidenceOrdering(t *testing.T) {
@@ -790,7 +830,7 @@ func TestPrintConfigurationScan_MissingControl(t *testing.T) {
 		assert.NoError(t, os.Remove(tmp.Name()))
 	}()
 
-	sp := NewSARIFPrinter()
+	sp := NewSARIFPrinter(false)
 	sp.writer = tmp
 
 	assert.NotPanics(t, func() {
@@ -860,7 +900,7 @@ func TestPrintConfigurationScan_SkipsResourcesWithoutRelativePath(t *testing.T) 
 				assert.NoError(t, os.Remove(tmp.Name()))
 			}()
 
-			sp := NewSARIFPrinter()
+			sp := NewSARIFPrinter(false)
 			sp.writer = tmp
 			require.NoError(t, sp.printConfigurationScan(context.Background(), session))
 			require.NoError(t, tmp.Close())
@@ -899,7 +939,7 @@ func TestPrintConfigurationScan_PopulatesInvocations(t *testing.T) {
 		assert.NoError(t, os.Remove(tmp.Name()))
 	}()
 
-	sp := NewSARIFPrinter()
+	sp := NewSARIFPrinter(false)
 	sp.writer = tmp
 
 	before := time.Now().UTC()
@@ -951,7 +991,7 @@ func TestPrintConfigurationScan_InvocationStartTimeUsesReportGenerationTime(t *t
 		assert.NoError(t, os.Remove(tmp.Name()))
 	}()
 
-	sp := NewSARIFPrinter()
+	sp := NewSARIFPrinter(false)
 	sp.writer = tmp
 
 	require.NoError(t, sp.printConfigurationScan(context.Background(), session))
@@ -1265,7 +1305,7 @@ spec:
 	otherWD := t.TempDir()
 	require.NoError(t, os.Chdir(otherWD))
 
-	sp := NewSARIFPrinter()
+	sp := NewSARIFPrinter(false)
 	sp.writer = tmp
 	require.NoError(t, sp.printConfigurationScan(context.Background(), session))
 
@@ -1289,6 +1329,155 @@ spec:
 		"SARIF must resolve the privileged field to line %d, got startLines=%v", privilegedLine, startLines)
 	assert.NotEqual(t, []int{1}, startLines,
 		"all findings must not collapse to line 1 for absolute-path file scans")
+}
+
+// TestPrintConfigurationScan_FixSuggestionRedactsSecretValueUnlessShowSecrets
+// is a regression test: collectFixes builds SARIF's "fixes" suggestions
+// (result.fixes[].artifactChanges[].replacements[].insertedContent) from
+// the same FixPath.Value that addResult's Message.Text already redacts --
+// but it is a second, independent place that value gets serialized into the
+// report, so it needs its own isSensitivePath check rather than relying on
+// the Message.Text filtering having already happened. This drives a full
+// serialized-SARIF report through printConfigurationScan and unmarshals it
+// back, the same way TestPrintConfigurationScan_FileScanResolvesLineNumbers
+// does, so it catches the fixes array specifically, not just the message.
+func TestPrintConfigurationScan_FixSuggestionRedactsSecretValueUnlessShowSecrets(t *testing.T) {
+	manifestDir := t.TempDir()
+	manifestPath := filepath.Join(manifestDir, "secret.yaml")
+	manifest := `apiVersion: v1
+kind: Secret
+metadata: {name: demo, namespace: default}
+data:
+  password: "0000000000000000"
+`
+	require.NoError(t, os.WriteFile(manifestPath, []byte(manifest), 0600))
+
+	resourceID := "v1/Secret/default/demo"
+	obj := map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "Secret",
+		"metadata": map[string]interface{}{
+			"name":      "demo",
+			"namespace": "default",
+		},
+		"data": map[string]interface{}{},
+	}
+	lw := localworkload.NewLocalWorkload(obj)
+	lw.SetPath("secret.yaml:0")
+
+	const secretValue = "s3cr3t-plaintext-password"
+	controlID := "C-0012"
+	ac := resourcesresults.ResourceAssociatedControl{
+		ControlID: controlID,
+		Status:    apis.StatusInfo{InnerStatus: apis.StatusFailed},
+		ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{
+			{
+				Name:   "credentials-in-env-var",
+				Status: apis.StatusFailed,
+				Paths: []armotypes.PosturePaths{
+					{
+						FixPath: armotypes.FixPath{
+							Path:  "data.password",
+							Value: secretValue,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	buildSession := func() *cautils.OPASessionObj {
+		session := cautils.NewOPASessionObjMock()
+		session.Metadata = &reporthandlingv2.Metadata{
+			ScanMetadata: reporthandlingv2.ScanMetadata{
+				ScanningTarget: reporthandlingv2.File,
+			},
+			ContextMetadata: reporthandlingv2.ContextMetadata{
+				FileContextMetadata: &reporthandlingv2.FileContextMetadata{
+					FilePath: manifestPath,
+				},
+			},
+		}
+		session.ResourcesResult[resourceID] = resourcesresults.Result{
+			ResourceID:         resourceID,
+			AssociatedControls: []resourcesresults.ResourceAssociatedControl{ac},
+		}
+		session.ResourceSource = map[string]reporthandling.Source{
+			resourceID: {
+				Path:         manifestDir,
+				RelativePath: "secret.yaml",
+				FileType:     reporthandling.SourceTypeYaml,
+			},
+		}
+		session.AllResources[resourceID] = lw
+		session.Report = &reporthandlingv2.PostureReport{
+			SummaryDetails: reportsummary.SummaryDetails{
+				Controls: reportsummary.ControlSummaries{
+					controlID: reportsummary.ControlSummary{
+						ControlID:   controlID,
+						Name:        "Credentials in env var",
+						Description: "test",
+						Remediation: "redact the credential",
+						ScoreFactor: 8.0,
+					},
+				},
+			},
+		}
+		return session
+	}
+
+	insertedTexts := func(t *testing.T, sp *SARIFPrinter, session *cautils.OPASessionObj) []string {
+		t.Helper()
+		tmp, err := os.CreateTemp("", "sarif-fix-redaction-*.sarif")
+		require.NoError(t, err)
+		defer func() {
+			assert.NoError(t, tmp.Close())
+			assert.NoError(t, os.Remove(tmp.Name()))
+		}()
+		sp.writer = tmp
+		require.NoError(t, sp.printConfigurationScan(context.Background(), session))
+
+		raw, err := os.ReadFile(tmp.Name())
+		require.NoError(t, err)
+		var report sarif.Report
+		require.NoError(t, json.Unmarshal(raw, &report))
+		require.Len(t, report.Runs, 1)
+		require.NotEmpty(t, report.Runs[0].Results)
+
+		var texts []string
+		for _, result := range report.Runs[0].Results {
+			for _, fix := range result.Fixes {
+				for _, change := range fix.ArtifactChanges {
+					for _, replacement := range change.Replacements {
+						if replacement.InsertedContent != nil && replacement.InsertedContent.Text != nil {
+							texts = append(texts, *replacement.InsertedContent.Text)
+						}
+					}
+				}
+			}
+		}
+		return texts
+	}
+
+	origWD, err := os.Getwd()
+	require.NoError(t, err)
+	defer func() { _ = os.Chdir(origWD) }()
+	otherWD := t.TempDir()
+	require.NoError(t, os.Chdir(otherWD))
+
+	t.Run("redacted by default", func(t *testing.T) {
+		texts := insertedTexts(t, NewSARIFPrinter(false), buildSession())
+		require.NotEmpty(t, texts, "collectFixes must still produce a fix suggestion")
+		joined := strings.Join(texts, " ")
+		assert.NotContains(t, joined, secretValue)
+		assert.Contains(t, joined, redactedValue)
+	})
+
+	t.Run("revealed with showSecrets", func(t *testing.T) {
+		texts := insertedTexts(t, NewSARIFPrinter(true), buildSession())
+		require.NotEmpty(t, texts)
+		assert.Contains(t, strings.Join(texts, " "), secretValue)
+	})
 }
 
 // TestPrintConfigurationScan_ReviewPathGetsRelatedLocation is a regression test for evidence
@@ -1406,7 +1595,7 @@ spec:
 	otherWD := t.TempDir()
 	require.NoError(t, os.Chdir(otherWD))
 
-	sp := NewSARIFPrinter()
+	sp := NewSARIFPrinter(false)
 	sp.writer = tmp
 	require.NoError(t, sp.printConfigurationScan(context.Background(), session))
 
@@ -1450,7 +1639,7 @@ func TestPrintImageScan_WriterIsNonSeekablePipe(t *testing.T) {
 	r, w, err := os.Pipe()
 	require.NoError(t, err)
 
-	sp := NewSARIFPrinter()
+	sp := NewSARIFPrinter(false)
 	sp.writer = w
 
 	imageScanData := buildSeverityExceptionImageScanData()
@@ -1493,7 +1682,7 @@ func TestPrintImageScan_MultipleImagesAggregatesRuns(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = os.Remove(tmp.Name()) }()
 
-	sp := NewSARIFPrinter()
+	sp := NewSARIFPrinter(false)
 	sp.writer = tmp
 
 	scan1 := buildSeverityExceptionImageScanData()
@@ -1513,4 +1702,118 @@ func TestPrintImageScan_MultipleImagesAggregatesRuns(t *testing.T) {
 		require.NotNil(t, run.Tool.Driver)
 		assert.Equal(t, "Kubescape", run.Tool.Driver.Name, "driver name must be Kubescape for run %d", i)
 	}
+}
+
+func TestConfigurationSARIFStreamingStructureAndOrdering(t *testing.T) {
+	for _, count := range []int{0, 1, 3} {
+		t.Run(fmt.Sprint(count), func(t *testing.T) {
+			s := configurationOutputFixture(t, count)
+			before := snapshotJSONSession(t, s)
+			sp := NewSARIFPrinter(false)
+			var output bytes.Buffer
+			require.NoError(t, sp.writeConfigurationSARIF(context.Background(), &output, s))
+			require.NoError(t, checkJSONDocument(output.Bytes()))
+			var report sarif.Report
+			require.NoError(t, json.Unmarshal(output.Bytes(), &report))
+			expectedEnvelope, err := sarif.New(sarif.Version210)
+			require.NoError(t, err)
+			require.Equal(t, expectedEnvelope.Version, report.Version)
+			require.Equal(t, expectedEnvelope.Schema, report.Schema)
+			require.Len(t, report.Runs, 1)
+			run := report.Runs[0]
+			require.NotNil(t, run.Results, "empty results must be [] rather than null")
+			require.Len(t, run.Results, count*10)
+			if count > 0 {
+				require.Len(t, run.Tool.Driver.Rules, 10)
+			}
+			for i, result := range run.Results {
+				require.NotNil(t, result.RuleIndex)
+				require.Less(t, int(*result.RuleIndex), len(run.Tool.Driver.Rules))
+				require.Equal(t, *result.RuleID, run.Tool.Driver.Rules[*result.RuleIndex].ID)
+				require.Equal(t, fmt.Sprintf("C-%04d", i%10), *result.RuleID)
+				require.NotEmpty(t, result.PartialFingerprints["kubescapeFindingFingerprint"])
+				require.Equal(t, "pod.yaml", *result.Locations[0].PhysicalLocation.ArtifactLocation.URI)
+			}
+			require.Len(t, run.Invocations, 1)
+			require.Equal(t, s.Report.ReportGenerationTime, *run.Invocations[0].StartTimeUTC)
+			require.True(t, *run.Invocations[0].ExecutionSuccessful)
+			require.Equal(t, before, snapshotJSONSession(t, s))
+			for id, r := range s.ResourcesResult {
+				slices.Reverse(r.AssociatedControls)
+				delete(s.ResourcesResult, id)
+				s.ResourcesResult[id] = r
+			}
+			var again bytes.Buffer
+			require.NoError(t, sp.writeConfigurationSARIF(context.Background(), &again, s))
+			require.NoError(t, checkJSONDocument(again.Bytes()))
+			var next sarif.Report
+			require.NoError(t, json.Unmarshal(again.Bytes(), &next))
+			report.Runs[0].Invocations[0].EndTimeUTC = nil
+			next.Runs[0].Invocations[0].EndTimeUTC = nil
+			require.Equal(t, report, next)
+		})
+	}
+}
+
+func TestConfigurationSARIFStreamingSkipsIneligibleFindings(t *testing.T) {
+	s := configurationOutputFixture(t, 3)
+	delete(s.Report.SummaryDetails.Controls, "C-0000")
+	delete(s.ResourceSource, "resource-000000")
+	for i := range s.ResourcesResult["resource-000001"].AssociatedControls {
+		s.ResourcesResult["resource-000001"].AssociatedControls[i].Status = apis.StatusInfo{InnerStatus: apis.StatusPassed}
+	}
+	var output bytes.Buffer
+	require.NoError(t, NewSARIFPrinter(false).writeConfigurationSARIF(context.Background(), &output, s))
+	require.NoError(t, checkJSONDocument(output.Bytes()))
+	var report sarif.Report
+	require.NoError(t, json.Unmarshal(output.Bytes(), &report))
+	require.Len(t, report.Runs[0].Results, 9)
+	require.Len(t, report.Runs[0].Tool.Driver.Rules, 9)
+}
+
+func TestConfigurationSARIFWriteFailures(t *testing.T) {
+	s := configurationOutputFixture(t, 2)
+	before := snapshotJSONSession(t, s)
+	sp := NewSARIFPrinter(false)
+	var output bytes.Buffer
+	require.NoError(t, sp.writeConfigurationSARIF(context.Background(), &output, s))
+	cuts := []int{0, 1}
+	for _, marker := range []string{`"tool":`, `"results": [`, `"kubescapeFindingFingerprint":`, `"invocations":`} {
+		index := strings.Index(output.String(), marker)
+		require.NotEqual(t, -1, index)
+		cuts = append(cuts, index, index+len(marker)+1)
+	}
+	for _, cut := range cuts {
+		w := &failAfterWriter{remaining: cut}
+		require.ErrorIs(t, sp.writeConfigurationSARIF(context.Background(), w, s), errOutputTest)
+		require.Zero(t, w.callsAfterFailure)
+		require.Equal(t, before, snapshotJSONSession(t, s))
+	}
+	closing := &stopAtResultWriter{marker: "\n    }\n  ]\n}\n"}
+	require.ErrorIs(t, sp.writeConfigurationSARIF(context.Background(), closing, s), errOutputTest)
+	require.ErrorIs(t, sp.writeConfigurationSARIF(context.Background(), shortOutputWriter{}, s), io.ErrShortWrite)
+	var buffer bytes.Buffer
+	stream := newJSONStream(&buffer)
+	result := sarif.NewRuleResult("C-0000")
+	result.Properties = sarif.Properties{"unsupported": make(chan int)}
+	stream.value(result)
+	require.Error(t, stream.err)
+	stream.raw("}")
+	require.Empty(t, buffer.String(), "encoding failures must stop framing too")
+}
+
+func TestConfigurationSARIFStopsBeforeTransformingLaterResources(t *testing.T) {
+	s := configurationOutputFixture(t, 2)
+	w := &stopAtResultWriter{marker: `"kubescapeFindingFingerprint":`}
+	reads := [2]int{}
+	for i := range reads {
+		id := fmt.Sprintf("resource-%06d", i)
+		s.AllResources[id] = observedResource{s.AllResources[id], func() {
+			require.Contains(t, w.String(), `"results": [`)
+			reads[i]++
+		}}
+	}
+	require.ErrorIs(t, NewSARIFPrinter(false).writeConfigurationSARIF(context.Background(), w, s), errOutputTest)
+	require.Positive(t, reads[0])
+	require.Zero(t, reads[1])
 }

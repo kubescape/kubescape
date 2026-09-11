@@ -1,0 +1,22 @@
+apiVersion: v1
+data:
+  accountID: 12345678-1234-1234-1234-123456789012
+  adminMail: mail
+  clusterName: minikube1
+kind: ConfigMap
+metadata:
+  creationTimestamp: "2022-09-22T10:16:10Z"
+  managedFields:
+  - apiVersion: v1
+    fieldsType: FieldsV1
+    fieldsV1:
+      f:data:
+        .: {}
+        f:accountID: {}
+        f:adminMail: {}
+        f:clusterName: {}
+    manager: kubescape
+    operation: Update
+    time: "2022-09-22T10:16:10Z"
+  name: kubescape
+  namespace: default

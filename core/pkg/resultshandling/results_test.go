@@ -434,16 +434,16 @@ func TestValidatePrinter(t *testing.T) {
 			expectErr: nil,
 		},
 		{
-			name:      "cyclonedx-json format for cluster scan should return error",
+			name:      "cyclonedx-json format for cluster scan should not return error",
 			scanType:  cautils.ScanTypeCluster,
 			format:    printer.CycloneDXFormat,
-			expectErr: errors.New("format \"cyclonedx-json\" is only supported for image scanning"),
+			expectErr: nil,
 		},
 		{
-			name:      "spdx-json format for cluster scan should return error",
+			name:      "spdx-json format for cluster scan should not return error",
 			scanType:  cautils.ScanTypeCluster,
 			format:    printer.SPDXFormat,
-			expectErr: errors.New("format \"spdx-json\" is only supported for image scanning"),
+			expectErr: nil,
 		},
 		{
 			name:      "markdown format for cluster scan should not return error",
@@ -861,8 +861,8 @@ func TestClosePrinter_AllV2PrintersImplementErrorCloser(t *testing.T) {
 		printer printer.IPrinter
 	}{
 		{"json", printerv2.NewJsonPrinter()},
-		{"sarif", printerv2.NewSARIFPrinter()},
-		{"html", printerv2.NewHtmlPrinter()},
+		{"sarif", printerv2.NewSARIFPrinter(false)},
+		{"html", printerv2.NewHtmlPrinter(false)},
 		{"yaml", printerv2.NewYamlPrinter()},
 		{"junit", printerv2.NewJunitPrinter(false)},
 		{"markdown", printerv2.NewMarkdownPrinter()},
@@ -870,9 +870,9 @@ func TestClosePrinter_AllV2PrintersImplementErrorCloser(t *testing.T) {
 		{"prometheus", printerv2.NewPrometheusPrinter(false)},
 		{"spdx", printerv2.NewSPDXPrinter()},
 		{"cyclonedx", printerv2.NewCycloneDXPrinter()},
-		{"gitlabsast", printerv2.NewGitLabSASTPrinter()},
+		{"gitlabsast", printerv2.NewGitLabSASTPrinter(false)},
 		{"githubactions", printerv2.NewGitHubActionsPrinter()},
-		{"csv", printerv2.NewCsvPrinter()},
+		{"csv", printerv2.NewCsvPrinter(false)},
 		{"exceptions", printerv2.NewExceptionsPrinter()},
 		{"pretty", printerv2.NewPrettyPrinter(false, "1.0", false, cautils.ControlViewType, cautils.ScanTypeCluster, nil, "", false, false)},
 		{"silent", &printerv2.SilentPrinter{}},
@@ -1097,6 +1097,26 @@ func makeFilteredSession() *cautils.OPASessionObj {
 			},
 		},
 	}
+}
+
+// TestSnapshotRestoreReport_NamespaceSummaries verifies the namespace rollup
+// follows the same output-only contract as the rest of the report: severity
+// filtering may replace it for printers and submission, and restoreReport must
+// put the pre-filter rollup back for the caller's threshold evaluation.
+func TestSnapshotRestoreReport_NamespaceSummaries(t *testing.T) {
+	sessionObj := &cautils.OPASessionObj{Report: &reporthandlingv2.PostureReport{}}
+	original := cautils.NamespaceSummaries{{Namespace: "app", ComplianceScore: 100, TotalControls: 1}}
+	sessionObj.NamespaceSummaries = original
+
+	snap := snapshotReport(sessionObj)
+
+	filtered := cautils.NamespaceSummaries{{Namespace: "app", ComplianceScore: 50, TotalControls: 1}}
+	sessionObj.NamespaceSummaries = filtered
+	require.Equal(t, filtered, sessionObj.NamespaceSummaries)
+
+	restoreReport(sessionObj, snap)
+	assert.Equal(t, original, sessionObj.NamespaceSummaries,
+		"restoreReport must put back the pre-filter namespace rollup")
 }
 
 // TestHandleResults_RestoresReportOnPrinterError verifies that the deferred

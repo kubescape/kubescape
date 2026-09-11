@@ -8,6 +8,7 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/reporthandling"
 )
@@ -26,7 +27,12 @@ func providerRank(fileType string) int {
 
 // resourceIdentity returns the path-independent k8s identity tuple used for dedup.
 func resourceIdentity(w workloadinterface.IMetadata) string {
-	return fmt.Sprintf("%s/%s/%s/%s", w.GetApiVersion(), w.GetNamespace(), w.GetKind(), w.GetName())
+	group, _ := k8sinterface.SplitApiVersion(w.GetApiVersion())
+	kind := w.GetKind()
+	if cautils.IsBuiltinGroup(group) {
+		kind = cautils.NormalizeWorkloadKind(kind)
+	}
+	return fmt.Sprintf("%s/%s/%s/%s", w.GetApiVersion(), w.GetNamespace(), kind, w.GetName())
 }
 
 // dedupWorkloads drops lower-ranked cross-provider duplicates only; same-rank duplicates are kept.
@@ -130,6 +136,22 @@ func addCommitData(input string, workloadIDToSource map[string]reporthandling.So
 }
 */
 
+func isWorkloadMetadata(r workloadinterface.IMetadata) bool {
+	if r == nil {
+		return false
+	}
+	group, _ := k8sinterface.SplitApiVersion(r.GetApiVersion())
+	if group == "" || cautils.IsBuiltinGroup(group) {
+		switch strings.ToLower(cautils.NormalizeWorkloadKind(r.GetKind())) {
+		case "pod", "deployment", "daemonset", "statefulset", "job", "cronjob", "replicaset", "replicationcontroller":
+			return k8sinterface.IsTypeWorkload(r.GetObject())
+		default:
+			return false
+		}
+	}
+	return k8sinterface.IsTypeWorkload(r.GetObject())
+}
+
 // findScanObjectResource finds the requested k8s object to be scanned in the resources map
 func findScanObjectResource(mappedResources map[string][]workloadinterface.IMetadata, resource *objectsenvelopes.ScanObject) (workloadinterface.IWorkload, error) {
 	if resource == nil {
@@ -138,39 +160,96 @@ func findScanObjectResource(mappedResources map[string][]workloadinterface.IMeta
 
 	logger.L().Debug("Single resource scan", helpers.String("resource", resource.GetID()))
 
-	var wls []workloadinterface.IWorkload
-	seenResources := make(map[string]struct{})
-	for _, resources := range mappedResources {
-		for _, r := range resources {
-			// File-loaded resource IDs include their source path, so aliases of
-			// one object collapse while distinct manifests remain distinguishable.
-			if _, seen := seenResources[r.GetID()]; seen {
-				continue
-			}
-			if r.GetKind() == resource.GetKind() && r.GetName() == resource.GetName() {
-				if resource.GetNamespace() != "" && resource.GetNamespace() != r.GetNamespace() {
+	type matchResult struct {
+		workloads    []workloadinterface.IWorkload
+		nonWorkloads []workloadinterface.IMetadata
+	}
+
+	collectMatches := func(kindPredicate func(r workloadinterface.IMetadata) bool) matchResult {
+		var res matchResult
+		seenResources := make(map[string]struct{})
+		for _, resources := range mappedResources {
+			for _, r := range resources {
+				// File-loaded resource IDs include their source path, so aliases of
+				// one object collapse while distinct manifests remain distinguishable.
+				if _, seen := seenResources[r.GetID()]; seen {
 					continue
 				}
-				if resource.GetApiVersion() != "" && resource.GetApiVersion() != r.GetApiVersion() {
+				if r.GetName() != resource.GetName() {
+					continue
+				}
+				if resource.GetNamespace() != "" {
+					if resource.GetNamespace() == "default" {
+						if r.GetNamespace() != "" && r.GetNamespace() != "default" {
+							continue
+						}
+					} else if resource.GetNamespace() != r.GetNamespace() {
+						continue
+					}
+				}
+				if resource.GetApiVersion() != "" && !strings.EqualFold(resource.GetApiVersion(), r.GetApiVersion()) {
+					continue
+				}
+				if !kindPredicate(r) {
 					continue
 				}
 
-				if k8sinterface.IsTypeWorkload(r.GetObject()) {
+				seenResources[r.GetID()] = struct{}{}
+				if isWorkloadMetadata(r) {
 					wl := workloadinterface.NewWorkloadObj(r.GetObject())
-					wls = append(wls, wl)
-					seenResources[r.GetID()] = struct{}{}
+					res.workloads = append(res.workloads, wl)
+				} else {
+					res.nonWorkloads = append(res.nonWorkloads, r)
 				}
 			}
 		}
+		return res
 	}
 
-	if len(wls) == 0 {
-		return nil, fmt.Errorf("k8s resource '%s' not found", getReadableID(resource))
-	} else if len(wls) > 1 {
-		return nil, fmt.Errorf("more than one k8s resource found for '%s'", getReadableID(resource))
+	// Pass 1: Direct case-insensitive match on the requested kind.
+	// This preserves bare CRD Kinds (e.g. Deploy for an example.com/v1 resource)
+	// without alias normalization colliding or rewriting the kind.
+	matches := collectMatches(func(r workloadinterface.IMetadata) bool {
+		return strings.EqualFold(r.GetKind(), resource.GetKind())
+	})
+
+	// Pass 2: Fallback alias normalization for built-in Kubernetes resources.
+	// If direct matching finds no candidates and the requested kind is a recognized
+	// alias/short name for a built-in workload (e.g. "deploy", "po", "ds"), attempt
+	// matching against built-in API group resources with the canonical kind.
+	if len(matches.workloads) == 0 && len(matches.nonWorkloads) == 0 {
+		normalizedKind := cautils.NormalizeWorkloadKind(resource.GetKind())
+		if !strings.EqualFold(normalizedKind, resource.GetKind()) {
+			matches = collectMatches(func(r workloadinterface.IMetadata) bool {
+				group, _ := k8sinterface.SplitApiVersion(r.GetApiVersion())
+				return cautils.IsBuiltinGroup(group) && strings.EqualFold(r.GetKind(), normalizedKind)
+			})
+		}
 	}
 
-	return wls[0], nil
+	if len(matches.workloads) == 0 && len(matches.nonWorkloads) == 0 {
+		// mcpserver-sentinel: ErrResourceNotFound — do not change without updating cmd/mcpserver/mcperror_classify.go
+		return nil, fmt.Errorf("k8s resource '%s' not found: %w", getReadableID(resource), ErrResourceNotFound)
+	}
+
+	if len(matches.workloads) == 0 && len(matches.nonWorkloads) > 0 {
+		for _, r := range matches.nonWorkloads {
+			group, _ := k8sinterface.SplitApiVersion(r.GetApiVersion())
+			if strings.EqualFold(r.GetKind(), "secret") && (group == "" || cautils.IsBuiltinGroup(group)) {
+				// mcpserver-sentinel: ErrSecretScanDenied — do not change without updating cmd/mcpserver/mcperror_classify.go
+				return nil, fmt.Errorf("scanning Secret resources via single resource scan is not supported: %s: %w", getReadableID(resource), ErrSecretScanDenied)
+			}
+		}
+		// mcpserver-sentinel: ErrNotWorkload — do not change without updating cmd/mcpserver/mcperror_classify.go
+		return nil, fmt.Errorf("%s is not a valid Kubernetes workload: %w", getReadableID(resource), ErrNotWorkload)
+	}
+
+	if len(matches.workloads) > 1 {
+		// mcpserver-sentinel: ErrAmbiguousResource — do not change without updating cmd/mcpserver/mcperror_classify.go
+		return nil, fmt.Errorf("more than one k8s resource found for '%s': %w", getReadableID(resource), ErrAmbiguousResource)
+	}
+
+	return matches.workloads[0], nil
 }
 
 // TODO: move this to k8s-interface

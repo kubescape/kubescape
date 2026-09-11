@@ -144,13 +144,13 @@ func transformSession(session *cautils.OPASessionObj, _ *Mapping, transformer Tr
 	}
 	session.ResourcesPrioritized = newResourcesPrioritized
 
-	newResourceAttackTracks := make(map[string]v1alpha1.IAttackTrack, len(session.ResourceAttackTracks))
-	for oldID, attackTrack := range session.ResourceAttackTracks {
+	newResourceAttackTracks := make(map[string][]v1alpha1.IAttackTrack, len(session.ResourceAttackTracks))
+	for oldID, attackTracks := range session.ResourceAttackTracks {
 		newID, err := resolveMappedID(transformer, idMapping, oldID, "ref")
 		if err != nil {
 			return err
 		}
-		newResourceAttackTracks[newID] = attackTrack
+		newResourceAttackTracks[newID] = attackTracks
 	}
 	session.ResourceAttackTracks = newResourceAttackTracks
 
@@ -226,6 +226,30 @@ func transformSession(session *cautils.OPASessionObj, _ *Mapping, transformer Tr
 			control.ResourceIDs = remappedResourceIDs
 			session.Report.SummaryDetails.Controls[controlID] = control
 		}
+	}
+
+	if err := transformNamespaceSummaries(session.NamespaceSummaries, transformer); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// transformNamespaceSummaries anonymizes the namespace name in each
+// NamespaceSummary in place. It reuses the "ns" prefix transformResourceMetadata
+// uses for a resource's own namespace, so a namespace gets the same pseudonym
+// here as everywhere else in the report. ClusterScopedNamespace is a
+// Kubescape-internal marker, not a real namespace, so it is left untouched.
+func transformNamespaceSummaries(summaries cautils.NamespaceSummaries, transformer Transformer) error {
+	for i := range summaries {
+		if summaries[i].Namespace == cautils.ClusterScopedNamespace {
+			continue
+		}
+		namespace, err := transformValue(transformer, "ns", summaries[i].Namespace)
+		if err != nil {
+			return err
+		}
+		summaries[i].Namespace = namespace
 	}
 	return nil
 }

@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -43,12 +44,34 @@ func unstructuredResource(apiVersion, kind, namespace, name string) *unstructure
 	}}
 }
 
+func unstructuredResourceWithParent(apiVersion, kind, namespace, name string) *unstructured.Unstructured {
+	return &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": apiVersion,
+		"kind":       kind,
+		"metadata": map[string]any{
+			"name":      name,
+			"namespace": namespace,
+			"ownerReferences": []any{
+				map[string]any{
+					"apiVersion": "apps/v1",
+					"kind":       "Deployment",
+					"name":       "parent-deploy",
+				},
+			},
+		},
+	}}
+}
+
 func TestFindScanObjectResourceDataDriven(t *testing.T) {
 	k8sinterface.InitializeMapResourcesMock()
 	deploymentGVR := schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"}
+	daemonSetGVR := schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "daemonsets"}
+	replicaSetGVR := schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "replicasets"}
 	secretGVR := schema.GroupVersionResource{Group: "", Version: "v1", Resource: "secrets"}
 	listKinds := map[schema.GroupVersionResource]string{
 		deploymentGVR: "DeploymentList",
+		daemonSetGVR:  "DaemonSetList",
+		replicaSetGVR: "ReplicaSetList",
 		// Secrets are registered so the fake client is genuinely able to serve
 		// them. Without this the client cannot list secrets at all and the
 		// "no API calls were issued" assertion below would hold even for an
@@ -64,6 +87,8 @@ func TestFindScanObjectResourceDataDriven(t *testing.T) {
 		wantError        string
 		wantNil          bool
 		wantNoAPIActions bool
+		listForbidden    bool
+		selector         IFieldSelector
 	}{
 		{name: "nil request is not a single-resource scan", request: nil, wantNil: true},
 		{
@@ -73,16 +98,67 @@ func TestFindScanObjectResourceDataDriven(t *testing.T) {
 			wantName: "checkout",
 		},
 		{
+			name:          "deployment is returned via get when list is forbidden",
+			request:       scanObject("apps/v1", "Deployment", "shop", "checkout"),
+			objects:       []runtime.Object{unstructuredResource("apps/v1", "Deployment", "shop", "checkout")},
+			wantName:      "checkout",
+			listForbidden: true,
+		},
+		{
+			name:      "workload with parent cannot be scanned",
+			request:   scanObject("apps/v1", "ReplicaSet", "shop", "checkout-rs"),
+			objects:   []runtime.Object{unstructuredResourceWithParent("apps/v1", "ReplicaSet", "shop", "checkout-rs")},
+			wantError: "has a parent and cannot be scanned",
+		},
+		{
+			// When namespace is omitted, cluster-wide list is used; pullSingleResourceInto
+			// filters out workloads with parents, returning not found rather than parent error.
+			name:      "workload with parent and omitted namespace reports not found",
+			request:   scanObject("apps/v1", "ReplicaSet", "", "checkout-rs"),
+			objects:   []runtime.Object{unstructuredResourceWithParent("apps/v1", "ReplicaSet", "shop", "checkout-rs")},
+			wantError: "was not found",
+		},
+		{
+			name:     "deployment with lowercase kind resolves cleanly without apiVersion",
+			request:  scanObject("", "deployment", "shop", "checkout"),
+			objects:  []runtime.Object{unstructuredResource("apps/v1", "Deployment", "shop", "checkout")},
+			wantName: "checkout",
+		},
+		{
+			name:     "deployment with short name deploy resolves cleanly without apiVersion",
+			request:  scanObject("", "deploy", "shop", "checkout"),
+			objects:  []runtime.Object{unstructuredResource("apps/v1", "Deployment", "shop", "checkout")},
+			wantName: "checkout",
+		},
+		{
+			name:     "deployment with uppercase short name DEPLOY resolves cleanly without apiVersion",
+			request:  scanObject("", "DEPLOY", "shop", "checkout"),
+			objects:  []runtime.Object{unstructuredResource("apps/v1", "Deployment", "shop", "checkout")},
+			wantName: "checkout",
+		},
+		{
+			name:     "daemonset with lowercase kind resolves cleanly without apiVersion",
+			request:  scanObject("", "daemonset", "kube-system", "fluentd"),
+			objects:  []runtime.Object{unstructuredResource("apps/v1", "DaemonSet", "kube-system", "fluentd")},
+			wantName: "fluentd",
+		},
+		{
+			name:     "daemonset with short name ds resolves cleanly without apiVersion",
+			request:  scanObject("", "ds", "kube-system", "fluentd"),
+			objects:  []runtime.Object{unstructuredResource("apps/v1", "DaemonSet", "kube-system", "fluentd")},
+			wantName: "fluentd",
+		},
+		{
 			name:      "missing deployment reports the requested identity",
 			request:   scanObject("apps/v1", "Deployment", "shop", "missing"),
 			wantError: "was not found",
 		},
 		{
 			name:    "ambiguous result is rejected",
-			request: scanObject("apps/v1", "Deployment", "shop", "checkout"),
+			request: scanObject("apps/v1", "Deployment", "", "checkout"),
 			objects: []runtime.Object{
 				unstructuredResource("apps/v1", "Deployment", "shop", "checkout"),
-				unstructuredResource("apps/v1", "Deployment", "shop", "checkout-copy"),
+				unstructuredResource("apps/v1", "Deployment", "staging", "checkout"),
 			},
 			wantError: "more than one resource found",
 		},
@@ -100,10 +176,8 @@ func TestFindScanObjectResourceDataDriven(t *testing.T) {
 			// Defense in depth: a Secret is not a useful single-resource scan
 			// target, so it must be rejected before retrieval rather than
 			// fetched and then sanitized downstream. Rejecting early also
-			// avoids an unnecessary Kubernetes API call. The Secret exists in
-			// the fake client here, so the rejection is proven to be a policy
-			// decision and not a lookup miss.
-			name:             "secret is rejected even when it exists",
+			// avoids the need for Secret-reading RBAC permissions.
+			name:             "secret is rejected before API retrieval",
 			request:          scanObject("v1", "Secret", "shop", "db-creds"),
 			objects:          []runtime.Object{unstructuredResource("v1", "Secret", "shop", "db-creds")},
 			wantError:        "scanning Secret resources via single resource scan is not supported",
@@ -116,16 +190,81 @@ func TestFindScanObjectResourceDataDriven(t *testing.T) {
 			wantError:        "scanning Secret resources via single resource scan is not supported",
 			wantNoAPIActions: true,
 		},
+		{
+			name:             "workload in excluded namespace is rejected without API call",
+			request:          scanObject("apps/v1", "Deployment", "dev", "checkout"),
+			objects:          []runtime.Object{unstructuredResource("apps/v1", "Deployment", "dev", "checkout")},
+			selector:         NewExcludeSelector("dev"),
+			wantError:        "was not found",
+			wantNoAPIActions: true,
+		},
+		{
+			name:     "workload in non-excluded namespace is returned via get",
+			request:  scanObject("apps/v1", "Deployment", "shop", "checkout"),
+			objects:  []runtime.Object{unstructuredResource("apps/v1", "Deployment", "shop", "checkout")},
+			selector: NewExcludeSelector("dev"),
+			wantName: "checkout",
+		},
+		{
+			name:     "workload in included namespace is returned via get",
+			request:  scanObject("apps/v1", "Deployment", "shop", "checkout"),
+			objects:  []runtime.Object{unstructuredResource("apps/v1", "Deployment", "shop", "checkout")},
+			selector: NewIncludeSelector("shop,staging"),
+			wantName: "checkout",
+		},
+		{
+			name:             "workload not in included namespace is rejected without API call",
+			request:          scanObject("apps/v1", "Deployment", "dev", "checkout"),
+			objects:          []runtime.Object{unstructuredResource("apps/v1", "Deployment", "dev", "checkout")},
+			selector:         NewIncludeSelector("shop"),
+			wantError:        "was not found",
+			wantNoAPIActions: true,
+		},
+		{
+			name:          "workload in included namespace is returned via get when list is forbidden",
+			request:       scanObject("apps/v1", "Deployment", "shop", "checkout"),
+			objects:       []runtime.Object{unstructuredResource("apps/v1", "Deployment", "shop", "checkout")},
+			selector:      NewIncludeSelector("shop"),
+			wantName:      "checkout",
+			listForbidden: true,
+		},
+		{
+			name:      "workload queried with default namespace does not find workload in staging",
+			request:   scanObject("apps/v1", "Deployment", "default", "checkout"),
+			objects:   []runtime.Object{unstructuredResource("apps/v1", "Deployment", "staging", "checkout")},
+			wantError: "was not found",
+		},
+		{
+			name:     "cluster-wide query with empty namespace finds single workload across namespaces",
+			request:  scanObject("apps/v1", "Deployment", "", "checkout"),
+			objects:  []runtime.Object{unstructuredResource("apps/v1", "Deployment", "staging", "checkout")},
+			wantName: "checkout",
+		},
+		{
+			name:      "cluster-wide query with empty namespace fails when duplicates exist across namespaces",
+			request:   scanObject("apps/v1", "Deployment", "", "checkout"),
+			objects:   []runtime.Object{unstructuredResource("apps/v1", "Deployment", "shop", "checkout"), unstructuredResource("apps/v1", "Deployment", "staging", "checkout")},
+			wantError: "more than one resource found",
+		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			dynamicClient := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), listKinds, test.objects...)
+			if test.listForbidden {
+				dynamicClient.PrependReactor("list", "deployments", func(action k8stesting.Action) (bool, runtime.Object, error) {
+					return true, nil, apierrors.NewForbidden(schema.GroupResource{Group: "apps", Resource: "deployments"}, "", errors.New("cannot list resource"))
+				})
+			}
 			handler := &K8sResourceHandler{k8s: &k8sinterface.KubernetesApi{DynamicClient: dynamicClient}}
 			resolver, discoveryFailures := newDiscoveryResourceResolver(nil)
 			require.Empty(t, discoveryFailures)
 
-			workload, err := handler.findScanObjectResource(context.Background(), test.request, &EmptySelector{}, resolver)
+			selector := test.selector
+			if selector == nil {
+				selector = &EmptySelector{}
+			}
+			workload, err := handler.findScanObjectResource(context.Background(), test.request, selector, resolver)
 			if test.wantNoAPIActions {
 				// Defense in depth: the rejection must happen before the live
 				// API pull, so no Kubernetes API/RBAC operation is issued for a

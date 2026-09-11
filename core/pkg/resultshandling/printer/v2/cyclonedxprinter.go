@@ -39,15 +39,12 @@ func (cp *CycloneDXPrinter) SetWriter(ctx context.Context, outputFile string) er
 	return nil
 }
 
-// Score is a no-op: HandleResults only calls Score when opaSessionObj != nil
-// (core/pkg/resultshandling/results.go), and this printer only ever runs
-// against image scans, so it is never invoked in practice.
 func (cp *CycloneDXPrinter) Score(score float32) {}
 
 func (cp *CycloneDXPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
-	if opaSessionObj != nil || len(imageScanData) == 0 {
-		logger.L().Ctx(ctx).Error("cyclonedx-json output is only supported for image scans")
-		return fmt.Errorf("cyclonedx-json output is only supported for image scans")
+	if len(imageScanData) == 0 {
+		logger.L().Ctx(ctx).Error("cyclonedx-json output requires scanned images")
+		return fmt.Errorf("cyclonedx-json output requires scanned images")
 	}
 
 	encoder, err := cyclonedxjson.NewFormatEncoderWithConfig(cyclonedxjson.DefaultEncoderConfig())

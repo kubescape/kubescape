@@ -5,6 +5,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils/getter"
 	metav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
 	"github.com/stretchr/testify/assert"
@@ -16,6 +17,11 @@ func TestViewCachedConfig_KeyedLookup(t *testing.T) {
 	originalStore := getter.DefaultLocalStore
 	getter.DefaultLocalStore = t.TempDir()
 	t.Cleanup(func() { getter.DefaultLocalStore = originalStore })
+
+	// stub k8s API to prevent flaky tests in cluster-connected environments
+	origK8s := kubernetesAPIFunc
+	kubernetesAPIFunc = func() *k8sinterface.KubernetesApi { return nil }
+	t.Cleanup(func() { kubernetesAPIFunc = origK8s })
 
 	ks := NewKubescape(context.Background())
 
@@ -62,6 +68,9 @@ func TestViewCachedConfig_KeyedLookup(t *testing.T) {
 			key:     "cloudReportURL",
 			format:  "",
 			wantErr: `key "cloudReportURL" is not set`,
+			key:     "clusterName",
+			format:  "",
+			wantErr: `key "clusterName" is not set`,
 		},
 		{
 			name:   "Format JSON",

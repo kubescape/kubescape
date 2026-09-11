@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -204,6 +205,117 @@ func TestLoadCustomRules_MalformedMetadataIsReported(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "rule.metadata.json")
+}
+
+// A control with a zero base score is "Unknown" severity, which the
+// --severity-threshold gate treats as exceeding every threshold. Custom rules
+// must therefore always carry a base score that buckets to a real severity.
+func TestLoadCustomRules_BaseScoreDefaultsToMedium(t *testing.T) {
+	dir := t.TempDir()
+	writeRuleDir(t, dir, "approve-csr-v1", rbacRuleMetadata)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "no-root.rego"), []byte(`package armo_builtins
+
+deny[{"alertMessage": msg}] { msg := "root user found" }`), 0o600))
+
+	fw, err := LoadCustomRules(dir)
+	require.NoError(t, err)
+	require.Len(t, fw.Controls, 2)
+
+	for _, control := range fw.Controls {
+		assert.Equal(t, float32(defaultCustomRuleBaseScore), control.BaseScore, control.ControlID)
+		assert.Equal(t, apis.SeverityMediumString, apis.ControlSeverityToString(control.BaseScore), control.ControlID)
+	}
+}
+
+func TestLoadCustomRules_BaseScoreAnnotationOverridesDefault(t *testing.T) {
+	testCases := []struct {
+		Description  string
+		Annotation   string
+		Want         float32
+		WantSeverity string
+	}{
+		{"critical", "# @baseScore 9", 9, apis.SeverityCriticalString},
+		{"low", "# @baseScore 1", 1, apis.SeverityLowString},
+		{"fractional", "# @baseScore 7.5", 7.5, apis.SeverityHighString},
+		{"no space after the comment marker", "#@baseScore 10", 10, apis.SeverityCriticalString},
+		{"indented", "   #  @baseScore 4  ", 4, apis.SeverityMediumString},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.Description, func(t *testing.T) {
+			dir := t.TempDir()
+			require.NoError(t, os.WriteFile(filepath.Join(dir, "no-root.rego"), []byte(tc.Annotation+`
+package armo_builtins
+
+deny[{"alertMessage": msg}] { msg := "root user found" }`), 0o600))
+
+			fw, err := LoadCustomRules(dir)
+			require.NoError(t, err)
+
+			require.Len(t, fw.Controls, 1)
+			assert.Equal(t, tc.Want, fw.Controls[0].BaseScore)
+			assert.Equal(t, tc.WantSeverity, apis.ControlSeverityToString(fw.Controls[0].BaseScore))
+		})
+	}
+}
+
+func TestLoadCustomRules_BaseScoreAnnotationInRuleDirectory(t *testing.T) {
+	dir := t.TempDir()
+	ruleDir := writeRuleDir(t, dir, "approve-csr-v1", rbacRuleMetadata)
+	require.NoError(t, os.WriteFile(filepath.Join(ruleDir, "raw.rego"), []byte(`package armo_builtins
+
+# @baseScore 9.5
+deny[{"alertMessage": msg}] { msg := "finding" }`), 0o600))
+
+	fw, err := LoadCustomRules(dir)
+	require.NoError(t, err)
+
+	require.Len(t, fw.Controls, 1)
+	assert.Equal(t, float32(9.5), fw.Controls[0].BaseScore)
+}
+
+func TestLoadCustomRules_InvalidBaseScoreAnnotationIsRejected(t *testing.T) {
+	testCases := []struct {
+		Description string
+		Annotation  string
+	}{
+		{"not a number", "# @baseScore high"},
+		{"above the range", "# @baseScore 11"},
+		{"below the range, which would bucket as unknown", "# @baseScore 0"},
+		{"negative", "# @baseScore -3"},
+		{"not a number ParseFloat would accept", "# @baseScore NaN"},
+		{"no value", "# @baseScore"},
+		{"more than one value", "# @baseScore 5 7"},
+		{"duplicate annotations", "# @baseScore 9\n# @baseScore 1"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.Description, func(t *testing.T) {
+			f := filepath.Join(t.TempDir(), "no-root.rego")
+			require.NoError(t, os.WriteFile(f, []byte(tc.Annotation+"\npackage armo_builtins"), 0o600))
+
+			// Defaulting on a malformed annotation would report a severity the
+			// rule did not ask for, so the load fails and names the file.
+			fw, err := LoadCustomRules(f)
+			require.Error(t, err)
+			assert.Nil(t, fw)
+			assert.Contains(t, err.Error(), "@baseScore")
+			assert.Contains(t, err.Error(), "no-root.rego")
+		})
+	}
+}
+
+func TestLoadCustomRules_UnrelatedCommentsAreNotBaseScoreAnnotations(t *testing.T) {
+	f := filepath.Join(t.TempDir(), "no-root.rego")
+	require.NoError(t, os.WriteFile(f, []byte(`# @baseScoreOfSomethingElse nonsense
+# see @baseScore in the docs
+package armo_builtins`), 0o600))
+
+	fw, err := LoadCustomRules(f)
+	require.NoError(t, err)
+
+	require.Len(t, fw.Controls, 1)
+	assert.Equal(t, float32(defaultCustomRuleBaseScore), fw.Controls[0].BaseScore)
 }
 
 func TestLoadCustomRules_DuplicateNameAcrossLayoutsIsRejected(t *testing.T) {

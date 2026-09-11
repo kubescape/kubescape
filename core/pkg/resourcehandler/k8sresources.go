@@ -31,6 +31,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/version"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/tools/pager"
 )
 
@@ -42,6 +43,21 @@ var cloudResourceGetterMapping = map[string]cloudResourceGetter{
 	cloudapis.CloudProviderListEntitiesForPoliciesKind: cloudsupport.GetListEntitiesForPoliciesFromCloudProvider,
 	cloudapis.CloudProviderPolicyVersionKind:           cloudsupport.GetPolicyVersionFromCloudProvider,
 }
+
+// Sentinel errors for single-resource scan outcomes. The MCP server's
+// error classifier (cmd/mcpserver/mcperror_classify.go) uses errors.Is
+// against these values to produce machine-readable error codes.
+//
+// If you rename, remove, or stop wrapping one of these sentinels,
+// TestResourceHandlerSentinels_WrappingSitesExist will fail.
+var (
+	ErrResourceNotFound       = errors.New("resource not found")
+	ErrAmbiguousResource      = errors.New("ambiguous resource")
+	ErrResourceHasParent      = errors.New("resource has parent")
+	ErrNotWorkload            = errors.New("not a workload")
+	ErrSecretScanDenied       = errors.New("secret scan denied")
+	ErrResourceNotInDiscovery = errors.New("resource not in discovery")
+)
 
 var _ IResourceHandler = &K8sResourceHandler{}
 
@@ -617,7 +633,7 @@ func (k8sHandler *K8sResourceHandler) findScanObjectResource(ctx context.Context
 		// Keep the legacy single-resource behavior for built-in objects whose
 		// callers omit apiVersion. CRDs still require their declared apiVersion
 		// so discovery can select an unambiguous GVR.
-		groupVersionResource, err := k8sinterface.GetGroupVersionResource(resource.GetKind())
+		groupVersionResource, err := k8sinterface.GetGroupVersionResource(cautils.NormalizeWorkloadKind(resource.GetKind()))
 		if err == nil {
 			resolved = []resolvedResource{{
 				groupVersionResourceTriplet: k8sinterface.GroupVersionResourceToString(&groupVersionResource),
@@ -630,7 +646,8 @@ func (k8sHandler *K8sResourceHandler) findScanObjectResource(ctx context.Context
 		resolved = resolver(g, v, resource.GetKind())
 	}
 	if len(resolved) != 1 {
-		return nil, fmt.Errorf("resource not found in Kubernetes discovery: %s", getReadableID(resource))
+		// mcpserver-sentinel: ErrResourceNotInDiscovery — do not change without updating cmd/mcpserver/mcperror_classify.go
+		return nil, fmt.Errorf("resource not found in Kubernetes discovery: %s: %w", getReadableID(resource), ErrResourceNotInDiscovery)
 	}
 	apiGroup, apiVersion, resourceName := k8sinterface.StringToResourceGroup(resolved[0].groupVersionResourceTriplet)
 	if apiGroup == "" && resourceName == "secrets" {
@@ -646,17 +663,72 @@ func (k8sHandler *K8sResourceHandler) findScanObjectResource(ctx context.Context
 		// The GVR is resolved from cluster discovery, not from the
 		// client-supplied kind string, so this check cannot be sidestepped with
 		// casing or aliasing tricks.
-		return nil, fmt.Errorf("scanning Secret resources via single resource scan is not supported: %s", getReadableID(resource))
+		// mcpserver-sentinel: ErrSecretScanDenied — do not change without updating cmd/mcpserver/mcperror_classify.go
+		return nil, fmt.Errorf("scanning Secret resources via single resource scan is not supported: %s: %w", getReadableID(resource), ErrSecretScanDenied)
 	}
 	gvr := schema.GroupVersionResource{Group: apiGroup, Version: apiVersion, Resource: resourceName}
+	isNamespaced := (resolved[0].namespaced != nil && *resolved[0].namespaced) || (resolved[0].namespaced == nil && k8sinterface.IsNamespaceScope(&gvr))
 
+	// When the target resource's namespace is known (or the resource is cluster-scoped),
+	// retrieve it directly via Get. This adheres to least-privilege RBAC (requires only 'get',
+	// not 'list') and respects RBAC resourceNames restrictions.
+	if !isNamespaced || resource.GetNamespace() != "" {
+		targetNS := resource.GetNamespace()
+		if targetNS == "" && gvr.Resource == "namespaces" {
+			targetNS = resource.GetName()
+		}
+		if globalFieldSelector != nil && !globalFieldSelector.AllowsNamespace(&gvr, targetNS, resolved[0].namespaced) {
+			// mcpserver-sentinel: ErrResourceNotFound — do not change without updating cmd/mcpserver/mcperror_classify.go
+			return nil, fmt.Errorf("resource %s was not found: %w", getReadableID(resource), ErrResourceNotFound)
+		}
+
+		var clientResource dynamic.ResourceInterface = k8sHandler.k8s.DynamicClient.Resource(gvr)
+		if isNamespaced {
+			clientResource = k8sHandler.k8s.DynamicClient.Resource(gvr).Namespace(resource.GetNamespace())
+		}
+		uObj, err := clientResource.Get(ctx, resource.GetName(), metav1.GetOptions{})
+		if err == nil {
+			if globalFieldSelector != nil {
+				objNS := uObj.GetNamespace()
+				if objNS == "" && gvr.Resource == "namespaces" {
+					objNS = uObj.GetName()
+				}
+				if !globalFieldSelector.AllowsNamespace(&gvr, objNS, resolved[0].namespaced) {
+					// mcpserver-sentinel: ErrResourceNotFound — do not change without updating cmd/mcpserver/mcperror_classify.go
+					return nil, fmt.Errorf("resource %s was not found: %w", getReadableID(resource), ErrResourceNotFound)
+				}
+			}
+			if k8sinterface.IsTypeWorkload(uObj.Object) && k8sinterface.WorkloadHasParent(workloadinterface.NewWorkloadObj(uObj.Object)) {
+				// mcpserver-sentinel: ErrResourceHasParent — do not change without updating cmd/mcpserver/mcperror_classify.go
+				return nil, fmt.Errorf("resource %s has a parent and cannot be scanned: %w", getReadableID(resource), ErrResourceHasParent)
+			}
+			if !k8sinterface.IsTypeWorkload(uObj.Object) {
+				// mcpserver-sentinel: ErrNotWorkload — do not change without updating cmd/mcpserver/mcperror_classify.go
+				return nil, fmt.Errorf("%s is not a valid Kubernetes workload: %w", getReadableID(resource), ErrNotWorkload)
+			}
+			return workloadinterface.NewWorkloadObj(uObj.Object), nil
+		}
+		if apierrors.IsNotFound(err) {
+			// mcpserver-sentinel: ErrResourceNotFound — do not change without updating cmd/mcpserver/mcperror_classify.go
+			return nil, fmt.Errorf("resource %s was not found: %w", getReadableID(resource), ErrResourceNotFound)
+		}
+		// If Get failed with another error (e.g. Forbidden if the account was granted
+		// 'list' but not 'get', or an unexpected API issue), log and fall back to
+		// pullSingleResource for backwards compatibility.
+		logger.L().Debug("direct get failed, falling back to list",
+			helpers.String("resource", getReadableID(resource)),
+			helpers.Error(err))
+	}
+
+	// For namespaced resources where namespace is omitted (cluster-wide search across all namespaces),
+	// or as a fallback if Get failed, search via List using field selectors.
 	fieldSelectors := getNameFieldSelectorString(resource.GetName(), FieldSelectorsEqualsOperator)
-	if resource.GetNamespace() != "" && ((resolved[0].namespaced != nil && *resolved[0].namespaced) || (resolved[0].namespaced == nil && k8sinterface.IsNamespaceScope(&gvr))) {
+	if resource.GetNamespace() != "" && isNamespaced {
 		fieldSelectors = combineFieldSelectors(fieldSelectors, getNamespaceFieldSelectorString(resource.GetNamespace(), FieldSelectorsEqualsOperator))
 	}
 	result, selectorErrs := k8sHandler.pullSingleResource(ctx, &gvr, "", fieldSelectors, globalFieldSelector, resolved[0].namespaced)
 	if len(result) == 0 && len(selectorErrs) > 0 {
-		return nil, fmt.Errorf("failed to get resource %s, reason: %v", getReadableID(resource), selectorErrs[0].err)
+		return nil, fmt.Errorf("failed to get resource %s, reason: %w", getReadableID(resource), selectorErrs[0].err)
 	}
 	for _, se := range selectorErrs {
 		logger.L().Warning("partial collection during single resource scan",
@@ -666,20 +738,24 @@ func (k8sHandler *K8sResourceHandler) findScanObjectResource(ctx context.Context
 	}
 
 	if len(result) == 0 {
-		return nil, fmt.Errorf("resource %s was not found", getReadableID(resource))
+		// mcpserver-sentinel: ErrResourceNotFound — do not change without updating cmd/mcpserver/mcperror_classify.go
+		return nil, fmt.Errorf("resource %s was not found: %w", getReadableID(resource), ErrResourceNotFound)
 	}
 
 	metaObjs := ConvertMapListToMeta(k8sinterface.ConvertUnstructuredSliceToMap(result))
 	if len(metaObjs) == 0 {
-		return nil, fmt.Errorf("resource %s has a parent and cannot be scanned", getReadableID(resource))
+		// mcpserver-sentinel: ErrResourceHasParent — do not change without updating cmd/mcpserver/mcperror_classify.go
+		return nil, fmt.Errorf("resource %s has a parent and cannot be scanned: %w", getReadableID(resource), ErrResourceHasParent)
 	}
 
 	if len(metaObjs) > 1 {
-		return nil, fmt.Errorf("more than one resource found for %s", getReadableID(resource))
+		// mcpserver-sentinel: ErrAmbiguousResource — do not change without updating cmd/mcpserver/mcperror_classify.go
+		return nil, fmt.Errorf("more than one resource found for %s: %w", getReadableID(resource), ErrAmbiguousResource)
 	}
 
 	if !k8sinterface.IsTypeWorkload(metaObjs[0].GetObject()) {
-		return nil, fmt.Errorf("%s is not a valid Kubernetes workload", getReadableID(resource))
+		// mcpserver-sentinel: ErrNotWorkload — do not change without updating cmd/mcpserver/mcperror_classify.go
+		return nil, fmt.Errorf("%s is not a valid Kubernetes workload: %w", getReadableID(resource), ErrNotWorkload)
 	}
 
 	wl := workloadinterface.NewWorkloadObj(metaObjs[0].GetObject())
@@ -1082,7 +1158,15 @@ func (k8sHandler *K8sResourceHandler) pullSingleResource(ctx context.Context, re
 func (k8sHandler *K8sResourceHandler) pullSingleResourceInto(ctx context.Context, resource *schema.GroupVersionResource, labelSelector string, fields string, fieldSelector IFieldSelector, namespaced *bool, sink resourceSink) []selectorFailure {
 	var selectorErrs []selectorFailure
 
-	fieldSelectors := fieldSelector.GetNamespacesSelectors(resource, namespaced)
+	// A namespaced query addresses the namespace's own endpoint, which already
+	// restricts the result set, so it carries no metadata.namespace selector of
+	// its own. When there are none, collection stays cluster-scoped and narrows
+	// by field selector as before.
+	queryNamespaces := fieldSelector.GetNamespaceScopedQueries(resource, namespaced)
+	fieldSelectors := make([]string, len(queryNamespaces))
+	if len(queryNamespaces) == 0 {
+		fieldSelectors = fieldSelector.GetNamespacesSelectors(resource, namespaced)
+	}
 
 	for i := range fieldSelectors {
 		listOptions := metav1.ListOptions{}
@@ -1099,7 +1183,10 @@ func (k8sHandler *K8sResourceHandler) pullSingleResourceInto(ctx context.Context
 			listOptions.FieldSelector = ""
 		}
 
-		clientResource := k8sHandler.k8s.DynamicClient.Resource(*resource)
+		var clientResource dynamic.ResourceInterface = k8sHandler.k8s.DynamicClient.Resource(*resource)
+		if len(queryNamespaces) > 0 {
+			clientResource = k8sHandler.k8s.DynamicClient.Resource(*resource).Namespace(queryNamespaces[i])
+		}
 
 		collected := 0
 

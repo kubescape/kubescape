@@ -1,6 +1,7 @@
 package resourcehandler
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/kubescape/k8s-interface/workloadinterface"
@@ -53,6 +54,16 @@ func TestResourceIdentity(t *testing.T) {
 			expected: true,
 		},
 		{
+			name:     "same identity lowercase kind",
+			other:    localWorkloadWithPath("apps/v1", "deployment", "default", "bad-deploy", "/some/dir"),
+			expected: true,
+		},
+		{
+			name:     "same identity short name kind",
+			other:    localWorkloadWithPath("apps/v1", "deploy", "default", "bad-deploy", "/some/dir"),
+			expected: true,
+		},
+		{
 			name:     "different namespace",
 			other:    localWorkloadWithPath("apps/v1", "Deployment", "other", "bad-deploy", "x"),
 			expected: false,
@@ -84,6 +95,11 @@ func TestResourceIdentity(t *testing.T) {
 			}
 		})
 	}
+
+	// Custom API groups preserve distinct kinds (e.g. Deploy vs Deployment) without normalization collision
+	crdDeploy := localWorkloadWithPath("example.com/v1", "Deploy", "default", "bad-deploy", "deploy.yaml:0")
+	crdDeployment := localWorkloadWithPath("example.com/v1", "Deployment", "default", "bad-deploy", "/some/dir")
+	assert.NotEqual(t, resourceIdentity(crdDeploy), resourceIdentity(crdDeployment))
 }
 
 func TestDedupWorkloads(t *testing.T) {
@@ -92,7 +108,10 @@ func TestDedupWorkloads(t *testing.T) {
 	rendered := localWorkloadWithPath("apps/v1", "Deployment", "default", "bad-deploy", "/some/dir")
 	helmCopy := localWorkloadWithPath("apps/v1", "Deployment", "default", "bad-deploy", "/helm")
 	kustomizeCopy := localWorkloadWithPath("apps/v1", "Deployment", "default", "bad-deploy", "/kustomize")
+	rawShort := localWorkloadWithPath("apps/v1", "deploy", "default", "bad-deploy", "deploy.yaml:0")
 	other := localWorkloadWithPath("apps/v1", "Deployment", "default", "other", "other.yaml:0")
+	crdDeploy := localWorkloadWithPath("example.com/v1", "Deploy", "default", "bad-deploy", "deploy.yaml:0")
+	crdDeployment := localWorkloadWithPath("example.com/v1", "Deployment", "default", "bad-deploy", "/some/dir")
 
 	tt := []struct {
 		name               string
@@ -100,6 +119,24 @@ func TestDedupWorkloads(t *testing.T) {
 		workloadIDToSource map[string]reporthandling.Source
 		expectedIDs        []string
 	}{
+		{
+			name:      "distinct custom resources in same group with alias-like kinds are both kept",
+			workloads: []workloadinterface.IMetadata{crdDeploy, crdDeployment},
+			workloadIDToSource: map[string]reporthandling.Source{
+				crdDeploy.GetID():     {FileType: reporthandling.SourceTypeYaml},
+				crdDeployment.GetID(): {FileType: reporthandling.SourceTypeKustomizeDirectory},
+			},
+			expectedIDs: []string{crdDeploy.GetID(), crdDeployment.GetID()},
+		},
+		{
+			name:      "rendered copy replaces raw copy with short name kind",
+			workloads: []workloadinterface.IMetadata{rawShort, rendered},
+			workloadIDToSource: map[string]reporthandling.Source{
+				rawShort.GetID(): {FileType: reporthandling.SourceTypeYaml},
+				rendered.GetID(): {FileType: reporthandling.SourceTypeKustomizeDirectory},
+			},
+			expectedIDs: []string{rendered.GetID()},
+		},
 		{
 			name:      "rendered copy replaces raw copy (raw discovered first)",
 			workloads: []workloadinterface.IMetadata{raw, rendered},
@@ -179,13 +216,33 @@ func TestFindScanObjectResource(t *testing.T) {
 			localWorkloadWithPath("v1", "Pod", "default", "nginx", "/fileB.yaml"),
 			localWorkloadWithPath("v1", "Pod", "", "mariadb", "/fileB.yaml"),
 		},
+		"example.com/v1/deploys": {
+			localWorkloadWithPath("example.com/v1", "Deploy", "default", "crd-deploy", "/fileC.yaml"),
+			localWorkloadWithPath("example.com/v1", "Deploy", "default", "web", "/fileE.yaml"),
+		},
+		"apps/v1/deployments": {
+			localWorkloadWithPath("apps/v1", "Deployment", "default", "nginx", "/fileD.yaml"),
+			localWorkloadWithPath("apps/v1", "Deployment", "default", "web", "/fileF.yaml"),
+			localWorkloadWithPath("apps/v1", "Deployment", "staging", "staging-only", "/fileG.yaml"),
+			localWorkloadWithPath("apps/v1", "Deployment", "", "multi-unnamespaced", "/overlay1.yaml"),
+			localWorkloadWithPath("apps/v1", "Deployment", "", "multi-unnamespaced", "/overlay2.yaml"),
+		},
+		"/v1/secrets": {
+			localWorkloadWithPath("v1", "Secret", "default", "my-secret", "/secret.yaml"),
+		},
+		"/v1/configmaps": {
+			localWorkloadWithPath("v1", "ConfigMap", "default", "my-config", "/config.yaml"),
+		},
 	}
 	tt := []struct {
 		name                 string
 		scanObject           *objectsenvelopes.ScanObject
 		expectedResourceName string
+		expectedKind         string
+		expectedApiVersion   string
 		expectErr            bool
 		expectedErrorString  string
+		expectedSentinel     error
 	}{
 		{
 			name:                 "scan object is nil",
@@ -223,6 +280,94 @@ func TestFindScanObjectResource(t *testing.T) {
 			expectedErrorString:  "",
 		},
 		{
+			name: "case-insensitive kind match",
+			scanObject: &objectsenvelopes.ScanObject{
+				Kind:       "pod",
+				ApiVersion: "v1",
+				Metadata: objectsenvelopes.ScanObjectMetadata{
+					Name:      "mariadb",
+					Namespace: "",
+				},
+			},
+			expectedResourceName: "mariadb",
+			expectErr:            false,
+			expectedErrorString:  "",
+		},
+		{
+			name: "case-insensitive apiVersion match",
+			scanObject: &objectsenvelopes.ScanObject{
+				Kind:       "Pod",
+				ApiVersion: "V1",
+				Metadata: objectsenvelopes.ScanObjectMetadata{
+					Name:      "mariadb",
+					Namespace: "",
+				},
+			},
+			expectedResourceName: "mariadb",
+			expectErr:            false,
+			expectedErrorString:  "",
+		},
+		{
+			name: "CRD match with PascalCase kind",
+			scanObject: &objectsenvelopes.ScanObject{
+				Kind:       "Deploy",
+				ApiVersion: "",
+				Metadata: objectsenvelopes.ScanObjectMetadata{
+					Name:      "crd-deploy",
+					Namespace: "default",
+				},
+			},
+			expectedResourceName: "crd-deploy",
+			expectedKind:         "Deploy",
+			expectedApiVersion:   "example.com/v1",
+			expectErr:            false,
+		},
+		{
+			name: "CRD match with lowercase alias kind in pass 1",
+			scanObject: &objectsenvelopes.ScanObject{
+				Kind:       "deploy",
+				ApiVersion: "",
+				Metadata: objectsenvelopes.ScanObjectMetadata{
+					Name:      "crd-deploy",
+					Namespace: "default",
+				},
+			},
+			expectedResourceName: "crd-deploy",
+			expectedKind:         "Deploy",
+			expectedApiVersion:   "example.com/v1",
+			expectErr:            false,
+		},
+		{
+			name: "built-in resource match via pass 2 alias expansion fallback",
+			scanObject: &objectsenvelopes.ScanObject{
+				Kind:       "deploy",
+				ApiVersion: "",
+				Metadata: objectsenvelopes.ScanObjectMetadata{
+					Name:      "nginx",
+					Namespace: "default",
+				},
+			},
+			expectedResourceName: "nginx",
+			expectedKind:         "Deployment",
+			expectedApiVersion:   "apps/v1",
+			expectErr:            false,
+		},
+		{
+			name: "CRD kind takes precedence over built-in alias expansion when names collide",
+			scanObject: &objectsenvelopes.ScanObject{
+				Kind:       "deploy",
+				ApiVersion: "",
+				Metadata: objectsenvelopes.ScanObjectMetadata{
+					Name:      "web",
+					Namespace: "default",
+				},
+			},
+			expectedResourceName: "web",
+			expectedKind:         "Deploy",
+			expectedApiVersion:   "example.com/v1",
+			expectErr:            false,
+		},
+		{
 			name: "no workload match",
 			scanObject: &objectsenvelopes.ScanObject{
 				Kind:       "Deployment",
@@ -235,6 +380,112 @@ func TestFindScanObjectResource(t *testing.T) {
 			expectedResourceName: "",
 			expectErr:            true,
 			expectedErrorString:  "not found",
+			expectedSentinel:     ErrResourceNotFound,
+		},
+		{
+			name: "matched Secret returns ErrSecretScanDenied",
+			scanObject: &objectsenvelopes.ScanObject{
+				Kind:       "Secret",
+				ApiVersion: "v1",
+				Metadata: objectsenvelopes.ScanObjectMetadata{
+					Namespace: "default",
+					Name:      "my-secret",
+				},
+			},
+			expectedResourceName: "",
+			expectErr:            true,
+			expectedErrorString:  "scanning Secret resources via single resource scan is not supported",
+			expectedSentinel:     ErrSecretScanDenied,
+		},
+		{
+			name: "matched non-workload ConfigMap returns ErrNotWorkload",
+			scanObject: &objectsenvelopes.ScanObject{
+				Kind:       "ConfigMap",
+				ApiVersion: "v1",
+				Metadata: objectsenvelopes.ScanObjectMetadata{
+					Namespace: "default",
+					Name:      "my-config",
+				},
+			},
+			expectedResourceName: "",
+			expectErr:            true,
+			expectedErrorString:  "is not a valid Kubernetes workload",
+			expectedSentinel:     ErrNotWorkload,
+		},
+		{
+			name: "unnamespaced manifest matches default namespace query",
+			scanObject: &objectsenvelopes.ScanObject{
+				Kind:       "Pod",
+				ApiVersion: "v1",
+				Metadata: objectsenvelopes.ScanObjectMetadata{
+					Namespace: "default",
+					Name:      "mariadb",
+				},
+			},
+			expectedResourceName: "mariadb",
+			expectedKind:         "Pod",
+			expectedApiVersion:   "v1",
+			expectErr:            false,
+		},
+		{
+			name: "explicit staging workload excluded when default namespace queried",
+			scanObject: &objectsenvelopes.ScanObject{
+				Kind:       "Deployment",
+				ApiVersion: "apps/v1",
+				Metadata: objectsenvelopes.ScanObjectMetadata{
+					Namespace: "default",
+					Name:      "staging-only",
+				},
+			},
+			expectedResourceName: "",
+			expectErr:            true,
+			expectedErrorString:  "not found",
+			expectedSentinel:     ErrResourceNotFound,
+		},
+		{
+			name: "explicit staging workload matches when staging namespace queried",
+			scanObject: &objectsenvelopes.ScanObject{
+				Kind:       "Deployment",
+				ApiVersion: "apps/v1",
+				Metadata: objectsenvelopes.ScanObjectMetadata{
+					Namespace: "staging",
+					Name:      "staging-only",
+				},
+			},
+			expectedResourceName: "staging-only",
+			expectedKind:         "Deployment",
+			expectedApiVersion:   "apps/v1",
+			expectErr:            false,
+		},
+		{
+			name: "omitted namespace in file scan matches staging workload",
+			scanObject: &objectsenvelopes.ScanObject{
+				Kind:       "Deployment",
+				ApiVersion: "apps/v1",
+				Metadata: objectsenvelopes.ScanObjectMetadata{
+					Namespace: "",
+					Name:      "staging-only",
+				},
+			},
+			expectedResourceName: "staging-only",
+			expectedKind:         "Deployment",
+			expectedApiVersion:   "apps/v1",
+			expectErr:            false,
+		},
+		{
+			name: "multiple unnamespaced manifests for same resource return ErrAmbiguousResource",
+			scanObject: &objectsenvelopes.ScanObject{
+				Kind:       "Deployment",
+				ApiVersion: "apps/v1",
+				Metadata: objectsenvelopes.ScanObjectMetadata{
+					Namespace: "default",
+					Name:      "multi-unnamespaced",
+				},
+			},
+			expectedResourceName: "",
+			expectErr:            true,
+			expectedErrorString:  "more than one k8s resource found",
+			expectedSentinel:     ErrAmbiguousResource,
 		},
 	}
 
@@ -248,10 +499,19 @@ func TestFindScanObjectResource(t *testing.T) {
 
 			if tc.expectErr {
 				assert.ErrorContains(t, err, tc.expectedErrorString)
+				if tc.expectedSentinel != nil {
+					assert.True(t, errors.Is(err, tc.expectedSentinel), "expected error to wrap sentinel %v, got %v", tc.expectedSentinel, err)
+				}
 			}
 
 			if tc.expectedResourceName != "" {
 				assert.Equal(t, tc.expectedResourceName, resource.GetName())
+			}
+			if tc.expectedKind != "" {
+				assert.Equal(t, tc.expectedKind, resource.GetKind())
+			}
+			if tc.expectedApiVersion != "" {
+				assert.Equal(t, tc.expectedApiVersion, resource.GetApiVersion())
 			}
 		})
 

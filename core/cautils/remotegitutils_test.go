@@ -1,6 +1,7 @@
 package cautils
 
 import (
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net/http"
@@ -154,4 +155,23 @@ func TestGetDirPath(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestHashRepoURL verifies that hashRepoURL returns a valid 64-character hex-encoded
+// SHA-256 digest that is deterministic and unique per URL.
+func TestHashRepoURL(t *testing.T) {
+	url := "https://github.com/kubescape/kubescape.git"
+	hash := hashRepoURL(url)
+
+	assert.Len(t, hash, 64)
+	decoded, err := hex.DecodeString(hash)
+	require.NoError(t, err, "hash must be valid hexadecimal")
+	assert.Len(t, decoded, 32, "decoded hash must be 32 bytes")
+
+	// Ensure determinism
+	assert.Equal(t, hash, hashRepoURL(url))
+
+	// Ensure different URLs produce different hashes
+	otherHash := hashRepoURL("https://github.com/kubescape/other.git")
+	assert.NotEqual(t, hash, otherHash)
 }

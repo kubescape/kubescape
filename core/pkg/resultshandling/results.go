@@ -1,10 +1,12 @@
 package resultshandling
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"slices"
 
 	"github.com/kubescape/go-logger"
@@ -81,8 +83,8 @@ func (rh *ResultsHandler) GetReporter() reporter.IReport {
 	return rh.ReporterObj
 }
 
-// ToJson returns the results in the JSON format
-func (rh *ResultsHandler) ToJson() ([]byte, error) {
+// WriteJson streams the results in JSON format directly to the given writer
+func (rh *ResultsHandler) WriteJson(w io.Writer) error {
 	finalizedReport := printerv2.FinalizeResults(rh.ScanData)
 	enrichedReport := printerv2.ConvertToPostureReportWithSeverityLabelsAndCoverage(
 		finalizedReport,
@@ -114,24 +116,37 @@ func (rh *ResultsHandler) ToJson() ([]byte, error) {
 
 	output := struct {
 		*reporthandlingv2.PostureReport
-		SummaryDetails summaryWithEnrichment        `json:"summaryDetails,omitempty"`
-		Results        []resultWithEnrichment       `json:"results,omitempty"`
-		ResourceLabels map[string]map[string]string `json:"resourceLabels,omitempty"`
-		ScanCoverage   *cautils.ScanCoverage        `json:"scanCoverage,omitempty"`
-		ExceptionAudit *cautils.ExceptionAudit      `json:"exceptionAudit,omitempty"`
+		SummaryDetails     summaryWithEnrichment        `json:"summaryDetails,omitempty"`
+		Results            []resultWithEnrichment       `json:"results,omitempty"`
+		ResourceLabels     map[string]map[string]string `json:"resourceLabels,omitempty"`
+		ScanCoverage       *cautils.ScanCoverage        `json:"scanCoverage,omitempty"`
+		ExceptionAudit     *cautils.ExceptionAudit      `json:"exceptionAudit,omitempty"`
+		NamespaceSummaries cautils.NamespaceSummaries   `json:"namespaceSummaries,omitempty"`
 	}{
 		PostureReport: finalizedReport,
 		SummaryDetails: summaryWithEnrichment{
 			SummaryDetails: finalizedReport.SummaryDetails,
 			Controls:       enrichedReport.SummaryDetails.Controls,
 		},
-		Results:        results,
-		ResourceLabels: enrichedReport.ResourceLabels,
-		ScanCoverage:   enrichedReport.ScanCoverage,
-		ExceptionAudit: rh.ScanData.ExceptionAudit,
+		Results:            results,
+		ResourceLabels:     enrichedReport.ResourceLabels,
+		ScanCoverage:       enrichedReport.ScanCoverage,
+		ExceptionAudit:     rh.ScanData.ExceptionAudit,
+		NamespaceSummaries: rh.ScanData.NamespaceSummaries,
 	}
 
-	return json.Marshal(&output)
+	return json.NewEncoder(w).Encode(&output)
+}
+
+// ToJson returns the results in the JSON format
+func (rh *ResultsHandler) ToJson() ([]byte, error) {
+	var buf bytes.Buffer
+	err := rh.WriteJson(&buf)
+	res := buf.Bytes()
+	if len(res) > 0 && res[len(res)-1] == '\n' {
+		res = res[:len(res)-1]
+	}
+	return res, err
 }
 
 // GetResults returns the results
@@ -158,6 +173,9 @@ type reportSnapshot struct {
 	status                     apis.ScanningStatus
 	frameworksStatusCounters   []reportsummary.StatusCounters
 	frameworksStatuses         []apis.ScanningStatus
+	// The per-namespace rollup is replaced (not mutated) by ApplySeverityFilters,
+	// so capturing the slice header is enough to restore the pre-filter rollup.
+	namespaceSummaries cautils.NamespaceSummaries
 }
 
 func snapshotReport(sessionObj *cautils.OPASessionObj) reportSnapshot {
@@ -201,6 +219,7 @@ func snapshotReport(sessionObj *cautils.OPASessionObj) reportSnapshot {
 		status:                     sessionObj.Report.SummaryDetails.Status,
 		frameworksStatusCounters:   fwStatusCounters,
 		frameworksStatuses:         fwStatuses,
+		namespaceSummaries:         sessionObj.NamespaceSummaries,
 	}
 }
 
@@ -232,6 +251,7 @@ func restoreReport(sessionObj *cautils.OPASessionObj, snap reportSnapshot) {
 			sessionObj.ResourcesResult[id] = result
 		}
 	}
+	sessionObj.NamespaceSummaries = snap.namespaceSummaries
 }
 
 // HandleResults handles all necessary actions for the scan results
@@ -376,7 +396,7 @@ func NewPrinter(ctx context.Context, printFormat string, scanInfo *cautils.ScanI
 		}
 		return printerv2.NewYamlPrinter()
 	case printer.CsvFormat:
-		return printerv2.NewCsvPrinter()
+		return printerv2.NewCsvPrinter(scanInfo.ShowSecrets)
 	case printer.MarkdownFormat:
 		return printerv2.NewMarkdownPrinter()
 	case printer.JunitResultFormat:
@@ -386,11 +406,11 @@ func NewPrinter(ctx context.Context, printFormat string, scanInfo *cautils.ScanI
 	case printer.PdfFormat:
 		return printerv2.NewPdfPrinter()
 	case printer.HtmlFormat:
-		return printerv2.NewHtmlPrinter()
+		return printerv2.NewHtmlPrinter(scanInfo.ShowSecrets)
 	case printer.SARIFFormat:
-		return printerv2.NewSARIFPrinter()
+		return printerv2.NewSARIFPrinter(scanInfo.ShowSecrets)
 	case printer.GitLabSASTFormat:
-		return printerv2.NewGitLabSASTPrinter()
+		return printerv2.NewGitLabSASTPrinter(scanInfo.ShowSecrets)
 	case printer.GitHubActionsFormat:
 		return printerv2.NewGitHubActionsPrinter()
 	case printer.CycloneDXFormat:
@@ -428,12 +448,8 @@ func ValidatePrinter(scanType cautils.ScanTypes, scanContext cautils.ScanningCon
 			return false, fmt.Errorf("format \"%s\" is only supported when scanning local files", printFormat)
 		}
 	}
-	if printFormat == printer.CycloneDXFormat || printFormat == printer.SPDXFormat {
-		return false, fmt.Errorf("format \"%s\" is only supported for image scanning", printFormat)
-	}
-
 	switch printFormat {
-	case printer.JsonFormat, printer.HtmlFormat, printer.JunitResultFormat, printer.PrometheusFormat, printer.PdfFormat, printer.YamlFormat, printer.CsvFormat, printer.MarkdownFormat, printer.PolicyReportFormat, printer.ExceptionsFormat:
+	case printer.JsonFormat, printer.HtmlFormat, printer.JunitResultFormat, printer.PrometheusFormat, printer.PdfFormat, printer.YamlFormat, printer.CsvFormat, printer.MarkdownFormat, printer.PolicyReportFormat, printer.ExceptionsFormat, printer.CycloneDXFormat, printer.SPDXFormat:
 		return false, nil
 	default:
 		return true, nil

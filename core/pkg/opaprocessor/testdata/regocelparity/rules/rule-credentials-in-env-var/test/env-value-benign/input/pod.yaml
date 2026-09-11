@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: benign-pod
+spec:
+  containers:
+  - name: app
+    env:
+    - name: DB_URL
+      value: AKIA
+    image: nginx:1.25

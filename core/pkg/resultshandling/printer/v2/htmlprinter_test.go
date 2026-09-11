@@ -4,8 +4,10 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
@@ -15,7 +17,7 @@ import (
 )
 
 func TestNewHtmlPrinter(t *testing.T) {
-	hp := NewHtmlPrinter()
+	hp := NewHtmlPrinter(false)
 	assert.NotNil(t, hp)
 	assert.Nil(t, hp.writer)
 }
@@ -65,7 +67,7 @@ func TestSetWriter_Html(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			hp := NewHtmlPrinter()
+			hp := NewHtmlPrinter(false)
 			hp.SetWriter(ctx, tt.outputFile)
 			t.Cleanup(func() {
 				_ = hp.writer.Close()
@@ -87,8 +89,38 @@ func TestBuildResourceControlResult_AnnotatesInitAndEphemeralContainerNames(t *t
 	ac.ControlID = "C-0057"
 	ac.Name = "Privileged container"
 
-	got := buildResourceControlResult(*ac, control, privilegedInitAndEphemeralPod())
+	got := buildResourceControlResult(*ac, control, privilegedInitAndEphemeralPod(), false)
 	require.Equal(t, privilegedInitAndEphemeralNamedPaths(), got.FailedPaths)
+}
+
+// TestBuildResourceControlResult_RedactsSecretFixPathValueUnlessShowSecrets
+// is a regression test: the HTML report's resource table must redact a
+// Secret's plaintext fix-path value by default, matching the terminal
+// pretty-printer, and only reveal it when the caller explicitly opts in via
+// --show-secrets.
+func TestBuildResourceControlResult_RedactsSecretFixPathValueUnlessShowSecrets(t *testing.T) {
+	control := &reportsummary.ControlSummary{
+		ControlID:   "C-0012",
+		Name:        "Credentials in env var",
+		ScoreFactor: 8.0,
+	}
+	resource := &mockResource{kind: "Secret", obj: map[string]any{}}
+	ac := resourcesresults.ResourceAssociatedControl{
+		ControlID: "C-0012",
+		ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{
+			{Paths: []armotypes.PosturePaths{
+				{FixPath: armotypes.FixPath{Path: "data.password", Value: "s3cr3t-plaintext-password"}},
+			}},
+		},
+	}
+
+	redacted := buildResourceControlResult(ac, control, resource, false)
+	redactedJoined := strings.Join(redacted.FailedPaths, " ")
+	assert.NotContains(t, redactedJoined, "s3cr3t-plaintext-password")
+	assert.Contains(t, redactedJoined, "[redacted]")
+
+	revealed := buildResourceControlResult(ac, control, resource, true)
+	assert.Contains(t, strings.Join(revealed.FailedPaths, " "), "s3cr3t-plaintext-password")
 }
 
 func TestBuildResourceControlResultTable_MissingControl(t *testing.T) {
@@ -102,7 +134,7 @@ func TestBuildResourceControlResultTable_MissingControl(t *testing.T) {
 	}
 
 	assert.NotPanics(t, func() {
-		results := buildResourceControlResultTable([]resourcesresults.ResourceAssociatedControl{ac}, summaryDetails, nil)
+		results := buildResourceControlResultTable([]resourcesresults.ResourceAssociatedControl{ac}, summaryDetails, nil, false)
 		assert.Empty(t, results)
 	})
 }
@@ -122,7 +154,7 @@ func TestBuildResourceTableView_SkipsMissingResource(t *testing.T) {
 	}
 	// Do not populate session.AllResources["r-1"]
 
-	view := buildResourceTableView(session)
+	view := buildResourceTableView(session, false)
 	assert.Empty(t, view, "missing resource should be skipped, not included with nil")
 }
 
@@ -135,7 +167,7 @@ func TestHtmlPrinter_ActionPrint_LogoIsEmbeddedNotFetchedFromNetwork(t *testing.
 	ctx := context.Background()
 	out := filepath.Join(t.TempDir(), "report.html")
 
-	hp := NewHtmlPrinter()
+	hp := NewHtmlPrinter(false)
 	assert.NoError(t, hp.SetWriter(ctx, out))
 
 	session := cautils.NewOPASessionObjMock()
@@ -156,7 +188,7 @@ func TestHtmlPrinter_ActionPrint_RiskScoreRounding(t *testing.T) {
 	ctx := context.Background()
 	out := filepath.Join(t.TempDir(), "report.html")
 
-	hp := NewHtmlPrinter()
+	hp := NewHtmlPrinter(false)
 	hp.SetWriter(ctx, out)
 
 	// Fixture counters (FailedResources: 2, AllResources: 100) are intentionally

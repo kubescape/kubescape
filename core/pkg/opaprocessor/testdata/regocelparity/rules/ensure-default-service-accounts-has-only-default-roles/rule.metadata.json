@@ -1,0 +1,27 @@
+{
+    "name": "ensure-default-service-accounts-has-only-default-roles",
+    "attributes": {
+    },
+    "ruleLanguage": "Rego",
+    "match": [
+      {
+        "apiGroups": [
+          "rbac.authorization.k8s.io"
+        ],
+        "apiVersions": [
+          "v1"
+        ],
+        "resources": [
+          "ClusterRoleBinding",
+          "RoleBinding"
+        ]
+      }
+    ],
+    "ruleDependencies": [
+  
+    ],
+    "description": "",
+    "remediation": "",
+    "ruleQuery": "armo_builtins"
+  }
+  

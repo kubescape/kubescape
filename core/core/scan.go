@@ -147,6 +147,22 @@ func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo, policyIdenti
 	}, nil
 }
 
+func validateSBOMOutput(scanInfo *cautils.ScanInfo, format string) error {
+	if format != printer.CycloneDXFormat && format != printer.SPDXFormat {
+		return nil
+	}
+	if scanInfo.ScanType == cautils.ScanTypeImage {
+		return nil
+	}
+	if !scanInfo.ScanImages {
+		return fmt.Errorf("format %q describes scanned images: add --scan-images, or run %q to scan an image directly", format, cautils.ExecName()+" scan image")
+	}
+	if scanInfo.Hide || scanInfo.EncryptionEnabled {
+		return fmt.Errorf("format %q is not supported with --hide or --encrypt: an SBOM is the Anchore scan document, whose package identity and relationships are keyed by content-derived IDs that anonymization cannot rewrite", format)
+	}
+	return nil
+}
+
 func GetOutputPrinters(scanInfo *cautils.ScanInfo, ctx context.Context, clusterName string) ([]printer.IPrinter, error) {
 	formats := scanInfo.Formats()
 	containPrettyPrinter := false
@@ -160,6 +176,10 @@ func GetOutputPrinters(scanInfo *cautils.ScanInfo, ctx context.Context, clusterN
 	for _, format := range formats {
 		usesPrettyPrinter, err := resultshandling.ValidatePrinter(scanInfo.ScanType, scanInfo.GetScanningContext(), format)
 		if err != nil {
+			return nil, closeConfiguredPrinters(err)
+		}
+
+		if err := validateSBOMOutput(scanInfo, format); err != nil {
 			return nil, closeConfiguredPrinters(err)
 		}
 
@@ -195,13 +215,24 @@ func resolvedOutputPath(format, outputFile string) string {
 	if trimmed == "" {
 		return ""
 	}
+	// Well-known sinks are shared destinations, not files: two formats both
+	// writing stdout (or both discarding to /dev/null) is the intended
+	// multi-format behavior, same as an empty --output, so they are skipped
+	// from collision tracking. This mirrors the sink handling in
+	// printer.ResolveOutputFile so the detector and the printers agree.
+	if trimmed == os.Stdout.Name() || trimmed == os.DevNull {
+		return ""
+	}
 	ext := fileExtForFormat(format)
 
-	if ext == printer.YamlOutputExt && strings.HasSuffix(trimmed, ".yml") {
+	// Case-insensitive, exactly like printer.HasOutputExt in
+	// ResolveOutputFile, so the detector predicts the same path the
+	// printers actually open for mixed-case extensions (see #3334).
+	if ext == printer.YamlOutputExt && printer.HasOutputExt(trimmed, ".yml") {
 		return trimmed
 	}
 
-	if ext != "" && !strings.HasSuffix(trimmed, ext) {
+	if ext != "" && !printer.HasOutputExt(trimmed, ext) {
 		return trimmed + ext
 	}
 	return trimmed
@@ -245,26 +276,14 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo, policyIdentifiers []cautil
 // mid-operation ks.Context() read could observe a different deadline than
 // the one that started the operation, or an already-restored/canceled one.
 func (ks *Kubescape) ScanContext(ctx context.Context, scanInfo *cautils.ScanInfo, policyIdentifiers []cautils.PolicyIdentifier) (scanResult *resultshandling.ResultsHandler, scanErr error) {
-	ctxInit, spanInit := otel.Tracer("").Start(ctx, "initialization")
-	logger.L().Start("Kubescape scanner initializing...")
+	var (
+		interfaces             componentInterfaces
+		getters                cautils.Getters
+		controlInputsFromCache bool
+		exceptionsFromCache    bool
+		resultsHandling        *resultshandling.ResultsHandler
+	)
 
-	// ===================== Initialization =====================
-	policyIdentifiers = resolveDefaultScanAllPolicies(scanInfo, policyIdentifiers) // resolve the ScanAll expansion while Init can still cache its paths
-	if err := scanInfo.Init(ctxInit, policyIdentifiers); err != nil {              // initialize scan info
-		spanInit.End()
-		return nil, err
-	}
-	defer scanInfo.Cleanup()
-	if err := resolveClusterContext(scanInfo); err != nil {
-		spanInit.End()
-		return nil, err
-	}
-
-	interfaces, err := getInterfaces(ctxInit, scanInfo, policyIdentifiers)
-	if err != nil {
-		spanInit.End()
-		return nil, err
-	}
 	// Output printers open their writers during interface setup. Scan owns
 	// those writers until a successful return hands them to ResultsHandler.
 	printersOwnedByScan := true
@@ -275,91 +294,118 @@ func (ks *Kubescape) ScanContext(ctx context.Context, scanInfo *cautils.ScanInfo
 			}
 		}
 	}()
-	interfaces.report.SetTenantConfig(interfaces.tenantConfig)
 
 	// remove host scanner components
 	defer func() {
-		if err := interfaces.hostSensorHandler.TearDown(); err != nil {
-			logger.L().Ctx(ctx).StopError("Failed to tear down host scanner", helpers.Error(err))
+		if interfaces.hostSensorHandler != nil {
+			if err := interfaces.hostSensorHandler.TearDown(); err != nil {
+				logger.L().Ctx(ctx).StopError("Failed to tear down host scanner", helpers.Error(err))
+			}
 		}
 	}()
 
-	// Only create DownloadReleasedPolicy if not in air-gapped mode
-	airGapped := isAirGappedMode(scanInfo)
-	var downloadReleasedPolicy *getter.DownloadReleasedPolicy
-	if airGapped {
-		// In air-gapped mode (--use-from is set — the user explicitly wants to load everything
-		// from local files with no network access), don't initialize the downloader to prevent
-		// network access
-		downloadReleasedPolicy = nil
-	} else {
-		downloadReleasedPolicy = getter.NewDownloadReleasedPolicyWithVersion(scanInfo.ControlsVersion) // download config inputs from github release
-	}
+	// ===================== Initialization =====================
+	err := func() error {
+		ctxInit, spanInit := otel.Tracer("").Start(ctx, "initialization")
+		defer spanInit.End()
+		logger.L().Start("Kubescape scanner initializing...")
 
-	// set policy getter only after setting the customerGUID
-	var getters cautils.Getters
-	getters.PolicyGetter, err = getPolicyGetter(ctxInit, scanInfo.UseFrom, interfaces.tenantConfig.GetAccountID(), scanInfo.FrameworkScan, downloadReleasedPolicy, airGapped)
-	if err != nil {
-		spanInit.End()
-		return nil, err
-	}
-	var controlInputsFromCache bool
-	getters.ControlsInputsGetter, controlInputsFromCache, err = getConfigInputsGetterForTarget(ctxInit, scanInfo.ControlsInputs, interfaces.tenantConfig.GetAccountID(), downloadReleasedPolicy, scanInfo.GetScanningContext() == cautils.ContextCluster, airGapped, interfaces.k8s)
-	if err != nil {
-		spanInit.End()
-		return nil, err
-	}
-	var exceptionsFromCache bool
-	getters.ExceptionsGetter, exceptionsFromCache, err = getExceptionsGetterForTarget(ctxInit, scanInfo.UseExceptions, interfaces.tenantConfig.GetAccountID(), downloadReleasedPolicy, airGapped, interfaces.k8s)
-	if err != nil {
-		spanInit.End()
-		return nil, err
-	}
-	getters.AttackTracksGetter, err = getAttackTracksGetter(ctxInit, scanInfo.AttackTracks, interfaces.tenantConfig.GetAccountID(), downloadReleasedPolicy, airGapped)
-	if err != nil {
-		spanInit.End()
-		return nil, err
-	}
-
-	if scanInfo.ScanAll {
-		// Add all frameworks
-		policyIdentifiers = cautils.AppendPolicyIdentifiers(policyIdentifiers, listFrameworksNames(getters.PolicyGetter), apisv1.KindFramework)
-
-		// Add all controls
-		if controls, err := getters.PolicyGetter.ListControls(); err == nil {
-			controlIDs := make([]string, 0, len(controls))
-			for _, control := range controls {
-				controlIDs = append(controlIDs, parseControlEntry(control).ID)
-			}
-			policyIdentifiers = cautils.AppendPolicyIdentifiers(policyIdentifiers, controlIDs, apisv1.KindControl)
-		} else {
-			logger.L().Ctx(ctxInit).Warning("failed to list controls for ScanAll", helpers.Error(err))
+		policyIdentifiers = resolveDefaultScanAllPolicies(scanInfo, policyIdentifiers) // resolve the ScanAll expansion while Init can still cache its paths
+		if err := scanInfo.Init(ctxInit, policyIdentifiers); err != nil {              // initialize scan info
+			return err
 		}
+		if err := resolveClusterContext(scanInfo); err != nil {
+			return err
+		}
+
+		var err error
+		interfaces, err = getInterfaces(ctxInit, scanInfo, policyIdentifiers)
+		if err != nil {
+			return err
+		}
+		interfaces.report.SetTenantConfig(interfaces.tenantConfig)
+
+		// Only create DownloadReleasedPolicy if not in air-gapped mode
+		airGapped := isAirGappedMode(scanInfo)
+		var downloadReleasedPolicy *getter.DownloadReleasedPolicy
+		if airGapped {
+			// In air-gapped mode (--use-from is set — the user explicitly wants to load everything
+			// from local files with no network access), don't initialize the downloader to prevent
+			// network access
+			downloadReleasedPolicy = nil
+		} else {
+			downloadReleasedPolicy = getter.NewDownloadReleasedPolicyWithVersion(scanInfo.ControlsVersion) // download config inputs from github release
+		}
+
+		// set policy getter only after setting the customerGUID
+		getters.PolicyGetter, err = getPolicyGetter(ctxInit, scanInfo.UseFrom, interfaces.tenantConfig.GetAccountID(), scanInfo.FrameworkScan, downloadReleasedPolicy, airGapped)
+		if err != nil {
+			return err
+		}
+		getters.ControlsInputsGetter, controlInputsFromCache, err = getConfigInputsGetterForTarget(ctxInit, scanInfo.ControlsInputs, interfaces.tenantConfig.GetAccountID(), downloadReleasedPolicy, scanInfo.GetScanningContext() == cautils.ContextCluster, airGapped, interfaces.k8s)
+		if err != nil {
+			return err
+		}
+		getters.ExceptionsGetter, exceptionsFromCache, err = getExceptionsGetterForTarget(ctxInit, scanInfo.UseExceptions, interfaces.tenantConfig.GetAccountID(), downloadReleasedPolicy, airGapped, interfaces.k8s)
+		if err != nil {
+			return err
+		}
+		getters.AttackTracksGetter, err = getAttackTracksGetter(ctxInit, scanInfo.AttackTracks, interfaces.tenantConfig.GetAccountID(), downloadReleasedPolicy, airGapped)
+		if err != nil {
+			return err
+		}
+
+		if scanInfo.ScanAll {
+			// Add all frameworks
+			policyIdentifiers = cautils.AppendPolicyIdentifiers(policyIdentifiers, listFrameworksNames(getters.PolicyGetter), apisv1.KindFramework)
+
+			// Add all controls
+			if controls, err := getters.PolicyGetter.ListControls(); err == nil {
+				controlIDs := make([]string, 0, len(controls))
+				for _, control := range controls {
+					controlIDs = append(controlIDs, parseControlEntry(control).ID)
+				}
+				policyIdentifiers = cautils.AppendPolicyIdentifiers(policyIdentifiers, controlIDs, apisv1.KindControl)
+			} else {
+				logger.L().Ctx(ctxInit).Warning("failed to list controls for ScanAll", helpers.Error(err))
+			}
+		}
+
+		logger.L().StopSuccess("Initialized scanner")
+		resultsHandling = resultshandling.NewResultsHandler(interfaces.report, interfaces.outputPrinters, interfaces.uiPrinter)
+		return nil
+	}()
+	defer scanInfo.Cleanup()
+	if err != nil {
+		return nil, err
 	}
-
-	logger.L().StopSuccess("Initialized scanner")
-
-	resultsHandling := resultshandling.NewResultsHandler(interfaces.report, interfaces.outputPrinters, interfaces.uiPrinter)
 
 	// ===================== policies =====================
-	ctxPolicies, spanPolicies := otel.Tracer("").Start(ctxInit, "policies")
-	scanData, err := collectPolicies(ctxPolicies, interfaces.tenantConfig.GetContextName(), policyIdentifiers, scanInfo, &getters)
+	var scanData *cautils.OPASessionObj
+	err = func() error {
+		ctxPolicies, spanPolicies := otel.Tracer("").Start(ctx, "policies")
+		defer spanPolicies.End()
+
+		var err error
+		scanData, err = collectPolicies(ctxPolicies, interfaces.tenantConfig.GetContextName(), policyIdentifiers, scanInfo, &getters)
+		if err != nil {
+			return err
+		}
+		if controlInputsFromCache {
+			scanData.PolicyDegradations = append(scanData.PolicyDegradations, cautils.PolicyDegradation{Component: "controlInputs", Reason: "failed to fetch from GitHub, loaded from local cache"})
+		}
+		if exceptionsFromCache {
+			scanData.PolicyDegradations = append(scanData.PolicyDegradations, cautils.PolicyDegradation{Component: "exceptions", Reason: "failed to fetch from GitHub, loaded from local cache"})
+		}
+		return nil
+	}()
 	if err != nil {
-		spanInit.End()
 		return resultsHandling, err
 	}
-	if controlInputsFromCache {
-		scanData.PolicyDegradations = append(scanData.PolicyDegradations, cautils.PolicyDegradation{Component: "controlInputs", Reason: "failed to fetch from GitHub, loaded from local cache"})
-	}
-	if exceptionsFromCache {
-		scanData.PolicyDegradations = append(scanData.PolicyDegradations, cautils.PolicyDegradation{Component: "exceptions", Reason: "failed to fetch from GitHub, loaded from local cache"})
-	}
-	spanPolicies.End()
 
 	if scanInfo.DryRun {
-		spanInit.End()
 		resultsHandling.SetData(scanData)
-		result, err := interfaces.resourceHandler.Preflight(ctxInit, scanData, scanInfo)
+		result, err := interfaces.resourceHandler.Preflight(ctx, scanData, scanInfo)
 		if err != nil {
 			return resultsHandling, err
 		}
@@ -372,8 +418,6 @@ func (ks *Kubescape) ScanContext(ctx context.Context, scanInfo *cautils.ScanInfo
 	}
 
 	// ===================== resources =====================
-	ctxResources, spanResources := otel.Tracer("").Start(ctxInit, "resources")
-
 	// Determine if streaming should be enabled
 	enableStreaming := scanInfo.EnableStreaming
 	// Snapshot the pre-scan cluster size before the streaming decision. The
@@ -383,13 +427,13 @@ func (ks *Kubescape) ScanContext(ctx context.Context, scanInfo *cautils.ScanInfo
 	// up front also covers explicit --enable-streaming on large clusters.
 	var estimatedClusterSize int
 	if scanInfo.GetScanningContext() == cautils.ContextCluster {
-		estimatedClusterSize = estimateClusterSize(interfaces.resourceHandler, ctxResources, scanInfo)
+		estimatedClusterSize = estimateClusterSize(interfaces.resourceHandler, ctx, scanInfo)
 	}
 	if !enableStreaming && scanInfo.GetScanningContext() == cautils.ContextCluster {
 		// Auto-enable streaming for large clusters
 		enableStreaming = cautils.IsLargeCluster(estimatedClusterSize)
 		if enableStreaming {
-			logger.L().Ctx(ctxResources).Info("Large cluster detected, enabling resource streaming")
+			logger.L().Ctx(ctx).Info("Large cluster detected, enabling resource streaming")
 		}
 	}
 
@@ -399,12 +443,22 @@ func (ks *Kubescape) ScanContext(ctx context.Context, scanInfo *cautils.ScanInfo
 
 	if enableStreaming {
 		// Use streaming approach for large clusters
-		err = collectAndProcessResourcesWithStreaming(ctxResources, interfaces.resourceHandler, scanData, scanInfo, interfaces.tenantConfig.GetContextName(), scanInfo.ExcludedNamespaces, scanInfo.IncludeNamespaces, scanInfo.EnableRegoPrint, scanInfo.ControlTimeout, estimatedClusterSize)
+		err = func() error {
+			ctxResources, spanResources := otel.Tracer("").Start(ctx, "resources")
+			defer spanResources.End()
+			return collectAndProcessResourcesWithStreaming(ctxResources, interfaces.resourceHandler, scanData, scanInfo, interfaces.tenantConfig.GetContextName(), scanInfo.ExcludedNamespaces, scanInfo.IncludeNamespaces, scanInfo.EnableRegoPrint, scanInfo.ControlTimeout, estimatedClusterSize)
+		}()
+		if err != nil {
+			return resultsHandling, err
+		}
 	} else {
 		// Use traditional approach for small clusters
-		err = resourcehandler.CollectResources(ctxResources, interfaces.resourceHandler, scanData, scanInfo)
+		err = func() error {
+			ctxResources, spanResources := otel.Tracer("").Start(ctx, "resources")
+			defer spanResources.End()
+			return resourcehandler.CollectResources(ctxResources, interfaces.resourceHandler, scanData, scanInfo)
+		}()
 		if err != nil {
-			spanInit.End()
 			return resultsHandling, err
 		}
 
@@ -432,25 +486,28 @@ func (ks *Kubescape) ScanContext(ctx context.Context, scanInfo *cautils.ScanInfo
 		}
 	}
 
-	if err != nil {
-		spanInit.End()
-		return resultsHandling, err
-	}
-	spanResources.End()
-	spanInit.End()
-
 	// ======================== prioritization ===================
 	if scanInfo.PrintAttackTree || isPrioritizationScanType(scanInfo.ScanType) {
-		_, spanPrioritization := otel.Tracer("").Start(ctxOpa, "prioritization")
-		if priotizationHandler, err := resourcesprioritization.NewResourcesPrioritizationHandler(ctxOpa, getters.AttackTracksGetter, scanInfo.PrintAttackTree); err != nil {
-			logger.L().Ctx(ctx).Warning("failed to get attack tracks, this may affect the scanning results", helpers.Error(err))
-		} else if err := priotizationHandler.PrioritizeResources(scanData); err != nil {
-			return resultsHandling, fmt.Errorf("%w", err)
+		err := func() error {
+			_, spanPrioritization := otel.Tracer("").Start(ctxOpa, "prioritization")
+			defer spanPrioritization.End()
+
+			priotizationHandler, err := resourcesprioritization.NewResourcesPrioritizationHandler(ctxOpa, getters.AttackTracksGetter, scanInfo.PrintAttackTree)
+			if err != nil {
+				logger.L().Ctx(ctx).Warning("failed to get attack tracks, this may affect the scanning results", helpers.Error(err))
+				return nil
+			}
+			if err := priotizationHandler.PrioritizeResources(scanData); err != nil {
+				return fmt.Errorf("%w", err)
+			}
+			return nil
+		}()
+		if err != nil {
+			return resultsHandling, err
 		}
 		if isPrioritizationScanType(scanInfo.ScanType) {
 			scanData.SetTopWorkloads()
 		}
-		spanPrioritization.End()
 	}
 
 	if scanInfo.ScanImages {
@@ -600,7 +657,7 @@ func scanImageJobsWithDiscoveryErrors(ctx context.Context, svc imageScanService,
 }
 
 func scanImageJobs(ctx context.Context, svc imageScanService, concurrency int, jobs []ImageScanJob, resultsHandling *resultshandling.ResultsHandler) error {
-	logger.L().Info(fmt.Sprintf("Scanning %d images concurrently with %d workers...", len(jobs), concurrency))
+	logger.L().Info(fmt.Sprintf("Scanning %s with %s...", countedNoun(len(jobs), "image"), countedNoun(imageScanWorkers(concurrency), "worker")))
 	orchestrator := NewImageScanOrchestrator(svc, concurrency)
 	results := orchestrator.ScanImages(ctx, jobs)
 	sort.Slice(results, func(i, j int) bool {

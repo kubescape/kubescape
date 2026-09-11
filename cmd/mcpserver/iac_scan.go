@@ -20,5 +20,11 @@ func (ksServer *KubescapeMcpserver) runIaCScan(ctx context.Context, path string,
 
 	fileHandler := resourcehandler.NewFileResourceHandler()
 
-	return runScan(ctx, ksServer, "", policyIdentifiers, "Local IaC", true, fileHandler, []string{path}, nil)
+	return runScan(ctx, ksServer, scanRequest{
+		policyIdentifiers:   policyIdentifiers,
+		label:               "Local IaC",
+		wantComplianceScore: true,
+		rsrcHandler:         fileHandler,
+		inputPatterns:       []string{path},
+	})
 }

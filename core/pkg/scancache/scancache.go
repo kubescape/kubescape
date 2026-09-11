@@ -73,8 +73,8 @@ func (s *Store) Put(controlID, resourceID, hash string, verdict resourcesresults
 }
 
 func (s *Store) Flush() error {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if !s.dirty {
 		return nil
 	}
@@ -86,7 +86,11 @@ func (s *Store) Flush() error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(s.path, b, 0o600)
+	if err := os.WriteFile(s.path, b, 0o600); err != nil {
+		return err
+	}
+	s.dirty = false
+	return nil
 }
 
 // ResourceHash hashes the whole object except status and volatile metadata.

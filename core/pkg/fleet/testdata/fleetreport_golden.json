@@ -1,0 +1,214 @@
+{
+  "metadata": {
+    "generatedAt": "2026-08-14T09:30:00Z",
+    "kubescapeVersion": "v4.0.0",
+    "contexts": [
+      "prod",
+      "staging",
+      "dr"
+    ]
+  },
+  "clusters": [
+    {
+      "clusterID": "prod",
+      "context": "prod",
+      "status": "scanned",
+      "complianceScore": 72,
+      "coverage": {
+        "coverageScore": 88,
+        "evaluatedControls": 44,
+        "totalControls": 50,
+        "degraded": true
+      },
+      "duration": "4m12s",
+      "report": {
+        "generationTime": "0001-01-01T00:00:00Z",
+        "clusterAPIServerInfo": null,
+        "clusterCloudProvider": "",
+        "customerGUID": "",
+        "clusterName": "prod",
+        "reportGUID": "",
+        "jobID": "",
+        "summaryDetails": {
+          "controls": {
+            "C-0016": {
+              "statusInfo": {
+                "status": "failed"
+              },
+              "controlID": "C-0016",
+              "name": "Allow privilege escalation",
+              "status": "failed",
+              "resourceIDs": {},
+              "ResourceCounters": {
+                "passedResources": 0,
+                "failedResources": 18,
+                "skippedResources": 0,
+                "excludedResources": 0
+              },
+              "subStatusCounters": {
+                "ignoredResources": 0,
+                "acknowledgedResources": 0
+              },
+              "score": 0,
+              "complianceScore": 0,
+              "scoreFactor": 8
+            }
+          },
+          "status": "",
+          "frameworks": null,
+          "resourcesSeverityCounters": {
+            "criticalSeverity": 0,
+            "highSeverity": 0,
+            "mediumSeverity": 0,
+            "lowSeverity": 0
+          },
+          "controlsSeverityCounters": {
+            "criticalSeverity": 0,
+            "highSeverity": 0,
+            "mediumSeverity": 0,
+            "lowSeverity": 0
+          },
+          "ResourceCounters": {
+            "passedResources": 0,
+            "failedResources": 0,
+            "skippedResources": 0,
+            "excludedResources": 0
+          },
+          "vulnerabilities": {
+            "mapsSeverityToSummary": null,
+            "CVEs": null,
+            "packageScores": null,
+            "images": null
+          },
+          "score": 0,
+          "complianceScore": 0
+        },
+        "attributes": null,
+        "metadata": {
+          "targetMetadata": {},
+          "clusterMetadata": {},
+          "scanMetadata": {}
+        },
+        "paginationInfo": {
+          "chunkNumber": 0,
+          "isLastChunk": false
+        },
+        "customerGUIDGenerated": false
+      }
+    },
+    {
+      "clusterID": "staging",
+      "context": "staging",
+      "status": "scanned",
+      "complianceScore": 100,
+      "coverage": {
+        "coverageScore": 100,
+        "evaluatedControls": 0,
+        "totalControls": 0,
+        "degraded": false
+      },
+      "duration": "2m05s",
+      "report": {
+        "generationTime": "0001-01-01T00:00:00Z",
+        "clusterAPIServerInfo": null,
+        "clusterCloudProvider": "",
+        "customerGUID": "",
+        "clusterName": "staging",
+        "reportGUID": "",
+        "jobID": "",
+        "summaryDetails": {
+          "controls": {
+            "C-0016": {
+              "statusInfo": {
+                "status": "passed"
+              },
+              "controlID": "C-0016",
+              "name": "Allow privilege escalation",
+              "status": "passed",
+              "resourceIDs": {},
+              "ResourceCounters": {
+                "passedResources": 0,
+                "failedResources": 0,
+                "skippedResources": 0,
+                "excludedResources": 0
+              },
+              "subStatusCounters": {
+                "ignoredResources": 0,
+                "acknowledgedResources": 0
+              },
+              "score": 0,
+              "complianceScore": 100,
+              "scoreFactor": 8
+            }
+          },
+          "status": "",
+          "frameworks": null,
+          "resourcesSeverityCounters": {
+            "criticalSeverity": 0,
+            "highSeverity": 0,
+            "mediumSeverity": 0,
+            "lowSeverity": 0
+          },
+          "controlsSeverityCounters": {
+            "criticalSeverity": 0,
+            "highSeverity": 0,
+            "mediumSeverity": 0,
+            "lowSeverity": 0
+          },
+          "ResourceCounters": {
+            "passedResources": 0,
+            "failedResources": 0,
+            "skippedResources": 0,
+            "excludedResources": 0
+          },
+          "vulnerabilities": {
+            "mapsSeverityToSummary": null,
+            "CVEs": null,
+            "packageScores": null,
+            "images": null
+          },
+          "score": 0,
+          "complianceScore": 0
+        },
+        "attributes": null,
+        "metadata": {
+          "targetMetadata": {},
+          "clusterMetadata": {},
+          "scanMetadata": {}
+        },
+        "paginationInfo": {
+          "chunkNumber": 0,
+          "isLastChunk": false
+        },
+        "customerGUIDGenerated": false
+      }
+    },
+    {
+      "clusterID": "dr",
+      "context": "dr",
+      "status": "unreachable",
+      "error": "context deadline exceeded"
+    }
+  ],
+  "controlMatrix": {
+    "controls": [
+      {
+        "controlID": "C-0016",
+        "name": "Allow privilege escalation",
+        "severity": "High",
+        "byCluster": {
+          "prod": {
+            "status": "failed",
+            "failedResources": 18,
+            "complianceScore": 0
+          },
+          "staging": {
+            "status": "passed",
+            "failedResources": 0,
+            "complianceScore": 100
+          }
+        }
+      }
+    ]
+  }
+}

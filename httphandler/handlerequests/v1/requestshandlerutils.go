@@ -137,48 +137,43 @@ func (handler *HTTPHandler) executeScan(scanReq *scanRequestParams) {
 
 // watchForScan dequeues scan requests and executes them, honoring
 // cancellation that happened while a request was still queued.
-func (handler *HTTPHandler) watchForScan(ctx context.Context) {
-	for {
-		select {
-		case scanReq := <-handler.scanRequestChan:
-			logger.L().Info("triggering scan", helpers.String("scanID", scanReq.scanID))
-			if scanReq.isUserScan {
-				handler.state.setRunningUserScanID(scanReq.scanID)
-			}
-			if handler.state.isCancelled(scanReq.scanID) {
-				logger.L().Info("skipping cancelled scan", helpers.String("scanID", scanReq.scanID))
-				if scanReq.resp != nil {
-					select {
-					case scanReq.resp <- &utilsmetav1.Response{
-						ID:       scanReq.scanID,
-						Type:     utilsapisv1.ErrorScanResponseType,
-						Response: fmt.Sprintf("scan '%s' was cancelled", scanReq.scanID),
-					}:
-					default:
-					}
+func (handler *HTTPHandler) watchForScan() {
+	for scanReq := range handler.scanRequestChan {
+		logger.L().Info("triggering scan", helpers.String("scanID", scanReq.scanID))
+		if scanReq.isUserScan {
+			handler.state.setRunningUserScanID(scanReq.scanID)
+		}
+		if handler.state.isCancelled(scanReq.scanID) {
+			logger.L().Info("skipping cancelled scan", helpers.String("scanID", scanReq.scanID))
+			if scanReq.resp != nil {
+				select {
+				case scanReq.resp <- &utilsmetav1.Response{
+					ID:       scanReq.scanID,
+					Type:     utilsapisv1.ErrorScanResponseType,
+					Response: fmt.Sprintf("scan '%s' was cancelled", scanReq.scanID),
+				}:
+				default:
 				}
-				if scanReq.callbackURL != "" {
-					payload := scanCallbackPayload{ID: scanReq.scanID, Status: callbackStatusFailed, Error: "scan cancelled"}
-					cbCtx := context.WithoutCancel(scanReq.ctx)
-					go func() {
-						defer func() {
-							if r := recover(); r != nil {
-								logger.L().Ctx(cbCtx).Error("scan completion callback panicked", helpers.String("ID", scanReq.scanID), helpers.Error(fmt.Errorf("%v", r)))
-							}
-						}()
-						if cbErr := postScanCallback(cbCtx, scanReq.callbackURL, payload); cbErr != nil {
-							logger.L().Ctx(cbCtx).Error("failed to deliver scan completion callback", helpers.String("ID", scanReq.scanID), helpers.Error(cbErr))
+			}
+			if scanReq.callbackURL != "" {
+				payload := scanCallbackPayload{ID: scanReq.scanID, Status: callbackStatusFailed, Error: "scan cancelled"}
+				cbCtx := context.WithoutCancel(scanReq.ctx)
+				go func() {
+					defer func() {
+						if r := recover(); r != nil {
+							logger.L().Ctx(cbCtx).Error("scan completion callback panicked", helpers.String("ID", scanReq.scanID), helpers.Error(fmt.Errorf("%v", r)))
 						}
 					}()
-				}
-				handler.state.releaseCancel(scanReq.scanID)
-				handler.state.setNotBusy(scanReq.scanID)
-				continue
+					if cbErr := postScanCallback(cbCtx, scanReq.callbackURL, payload); cbErr != nil {
+						logger.L().Ctx(cbCtx).Error("failed to deliver scan completion callback", helpers.String("ID", scanReq.scanID), helpers.Error(cbErr))
+					}
+				}()
 			}
-			handler.executeScan(scanReq)
-		case <-ctx.Done():
-			return
+			handler.state.releaseCancel(scanReq.scanID)
+			handler.state.setNotBusy(scanReq.scanID)
+			continue
 		}
+		handler.executeScan(scanReq)
 	}
 }
 func scan(ctx context.Context, scanInfo *cautils.ScanInfo, policyIdentifiers []cautils.PolicyIdentifier, scanID string, skipPersistence bool) (*reporthandlingv2.PostureReport, error) {
@@ -249,17 +244,23 @@ func shouldPersistCanonicalResult(ctx context.Context, scanInfo *cautils.ScanInf
 	return true
 }
 
-func persistCanonicalResult(result *resultshandling.ResultsHandler, scanID string) error {
-	parsedUUID, err := uuid.Parse(scanID)
-	if err != nil {
-		return fmt.Errorf("failed to persist canonical scan results: invalid scan ID: %w", err)
+func persistCanonicalResult(result *resultshandling.ResultsHandler, scanID string) (err error) {
+	parsedUUID, parseErr := uuid.Parse(scanID)
+	if parseErr != nil {
+		return fmt.Errorf("failed to persist canonical scan results: invalid scan ID: %w", parseErr)
 	}
-	data, err := result.ToJson()
-	if err != nil {
-		return fmt.Errorf("failed to marshal canonical scan results: %w", err)
+	f, createErr := os.OpenFile(filepath.Join(OutputDir, parsedUUID.String()), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if createErr != nil {
+		return fmt.Errorf("failed to create canonical scan results file: %w", createErr)
 	}
-	if err := os.WriteFile(filepath.Join(OutputDir, parsedUUID.String()), data, 0o600); err != nil {
-		return fmt.Errorf("failed to persist canonical scan results: %w", err)
+	defer func() {
+		closeErr := f.Close()
+		if err == nil && closeErr != nil {
+			err = fmt.Errorf("failed to close canonical scan results file: %w", closeErr)
+		}
+	}()
+	if writeErr := result.WriteJson(f); writeErr != nil {
+		return fmt.Errorf("failed to persist canonical scan results: %w", writeErr)
 	}
 	return nil
 }

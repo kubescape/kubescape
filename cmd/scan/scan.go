@@ -112,6 +112,9 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 					return err
 				}
 			}
+			if err := validateKubeContextsSupported(cmd, &scanInfo); err != nil {
+				return err
+			}
 			captureKubeconfigSelection(cmd, &scanInfo)
 			applyRegistryCredentialsFromEnv(cmd, &scanInfo)
 			return nil
@@ -141,11 +144,27 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 
 			if policyIdentifiers := contractPolicyIdentifiers(selectedContract); len(policyIdentifiers) > 0 {
 				setContractScanTarget(args, &scanInfo)
+				if len(scanInfo.KubeContexts) > 0 {
+					if _, err := validateFleetScanInvocation(&scanInfo); err != nil {
+						return err
+					}
+				}
+				// The invocation is valid from this point on. Runtime and result-gate
+				// failures should not print command usage.
+				cmd.SilenceUsage = true
 				return securityScan(scanInfo, ks, policyIdentifiers)
 			}
 
 			if scanInfo.View == string(cautils.SecurityViewType) {
 				policyIdentifiers := setSecurityViewScanInfo(args, &scanInfo)
+				if len(scanInfo.KubeContexts) > 0 {
+					if _, err := validateFleetScanInvocation(&scanInfo); err != nil {
+						return err
+					}
+				}
+				// The invocation is valid from this point on. Runtime and result-gate
+				// failures should not print command usage.
+				cmd.SilenceUsage = true
 
 				if err := securityScan(scanInfo, ks, policyIdentifiers); err != nil {
 					return err
@@ -185,7 +204,7 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	scanCmd.PersistentFlags().StringVar(&scanInfo.UseExceptions, "exceptions", "", "Path to an exceptions obj. If not set will download exceptions from ARMO management portal")
 	scanCmd.PersistentFlags().BoolVar(&scanInfo.AuditExceptions, "audit-exceptions", false, "Include an exception usage audit in supported scan outputs")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.UseArtifactsFrom, "use-artifacts-from", "", "Load artifacts from local directory. If not used will download them")
-	scanCmd.PersistentFlags().StringVar(&scanInfo.CustomRules, "custom-rules", "", "Path to user-authored custom rules: a rule directory holding raw.rego and rule.metadata.json (the layout used by 'kubescape policy test'), a directory of such rule directories, or a directory of bare *.rego files. A rule's declared match selectors are honoured; a bare .rego file is matched against every resource kind")
+	scanCmd.PersistentFlags().StringVar(&scanInfo.CustomRules, "custom-rules", "", "Path to user-authored custom rules: a rule directory holding raw.rego and rule.metadata.json (the layout used by 'kubescape policy test'), a directory of such rule directories, or a directory of bare *.rego files. A rule's declared match selectors are honoured; a bare .rego file is matched against every resource kind. A custom rule is medium severity unless its Rego declares '# @baseScore <1-10>'")
 	scanCmd.PersistentFlags().StringVarP(&scanInfo.ExcludedNamespaces, "exclude-namespaces", "e", "", "Namespaces to exclude from scanning. e.g: --exclude-namespaces ns-a,ns-b. Notice, when running with `exclude-namespace` kubescape does not scan cluster-scoped objects.")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.MinSeverity, "min-severity", "", "Only include controls at or above this severity (low, medium, high, critical) in the output. Does not affect exit codes — --compliance-threshold, --severity-threshold, --fail-coverage-below and --fail-on-degraded-config are always computed on the full unfiltered report")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.MaxSeverity, "max-severity", "", "Only include controls at or below this severity (low, medium, high, critical) in the output. Does not affect exit codes — thresholds are always computed on the full unfiltered report")
@@ -228,11 +247,11 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	scanCmd.PersistentFlags().StringVar(&scanInfo.LabelSelector, "label-selector", "", "Filter collected Kubernetes resources by label selector. Accepts any selector that kubectl -l supports, e.g: --label-selector app=nginx,env!=dev")
 	scanCmd.PersistentFlags().BoolVarP(&scanInfo.Local, "keep-local", "", false, "If you do not want your Kubescape results reported to configured backend.")
 	scanCmd.PersistentFlags().StringVarP(&scanInfo.Output, "output", "o", "", "Output file. Print output to file and not stdout")
-	scanCmd.PersistentFlags().StringArrayVar(&scanInfo.NotifyURLs, "notify", nil, "POST the scan summary to this webhook URL; Slack incoming webhooks use Block Kit; repeat for multiple destinations")
+	scanCmd.PersistentFlags().StringArrayVar(&scanInfo.NotifyURLs, "notify", nil, "POST the scan summary to this webhook URL; Slack incoming webhooks use Block Kit and Microsoft Teams webhooks an Adaptive Card; repeat for multiple destinations")
 	scanCmd.PersistentFlags().BoolVarP(&scanInfo.VerboseMode, "verbose", "v", false, "Display all of the input resources and not only failed resources")
 	scanCmd.PersistentFlags().BoolVarP(&scanInfo.ShowEvidence, "show-evidence", "E", false, "Show evidence paths with current field values for each failed control (pretty-printer only)")
 	scanCmd.PersistentFlags().BoolVar(&scanInfo.ShowSecrets, "show-secrets", false, "Show secret field values in evidence output. By default secret values are redacted. Only effective with --show-evidence")
-	scanCmd.PersistentFlags().StringVar(&scanInfo.View, "view", string(cautils.SecurityViewType), fmt.Sprintf("View results based on the %s/%s/%s. default is --view=%s", cautils.ResourceViewType, cautils.ControlViewType, cautils.SecurityViewType, cautils.SecurityViewType))
+	scanCmd.PersistentFlags().StringVar(&scanInfo.View, "view", string(cautils.SecurityViewType), fmt.Sprintf("View results based on the %s/%s/%s/%s. default is --view=%s", cautils.ResourceViewType, cautils.ControlViewType, cautils.SecurityViewType, cautils.NamespaceViewType, cautils.SecurityViewType))
 	scanCmd.PersistentFlags().BoolVar(&scanInfo.UseDefault, "use-default", false, "Load local policy object from default path. If not used will download latest")
 	scanCmd.PersistentFlags().StringSliceVar(&scanInfo.UseFrom, "use-from", nil, "Load local policy object from specified path. If not used will download latest")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.FormatVersion, "format-version", "v2", "Output object can be different between versions, this is for maintaining backward and forward compatibility. Supported:'v1'/'v2'")
@@ -255,8 +274,8 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	scanCmd.PersistentFlags().BoolVar(&scanInfo.Hide, "hide", false, "Replace sensitive report metadata with deterministic pseudonyms")
 	scanCmd.PersistentFlags().BoolVar(&scanInfo.EncryptionEnabled, "encrypt", false, "Encrypt sensitive report metadata using the KUBESCAPE_MASTER_KEY environment variable")
 	scanCmd.PersistentFlags().StringSliceVar(&scanInfo.LabelsToCopy, "labels-to-copy", nil, "Labels to copy from workloads to scan reports for easy identification. e.g: --labels-to-copy=app,team,environment")
-	scanCmd.PersistentFlags().StringVar(&scanInfo.SkipControls, "skip-controls", "", "Comma-separated control IDs to skip, e.g. --skip-controls C-0001,C-0020")
-	scanCmd.PersistentFlags().StringVar(&scanInfo.IncludeControls, "include-controls", "", "Comma-separated control IDs to include; all other controls are skipped, e.g. --include-controls C-0001,C-0002")
+	scanCmd.PersistentFlags().StringVar(&scanInfo.SkipControls, "skip-controls", "", "Comma-separated control IDs to skip (case-insensitive). A control's CIS section number is accepted where the control carries one. e.g. --skip-controls C-0001,C-0020")
+	scanCmd.PersistentFlags().StringVar(&scanInfo.IncludeControls, "include-controls", "", "Comma-separated control IDs to include (case-insensitive); all other controls are skipped. A control's CIS section number is accepted where the control carries one. e.g. --include-controls C-0001,C-0002")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.ListingURL, "grype-db-url", "", "Grype vulnerability database URL")
 	scanCmd.PersistentFlags().BoolVar(&scanInfo.SkipDBUpdate, "skip-db-update", false, "Do not update the vulnerability database before scanning images. Uses the locally cached database; fails if none is cached.")
 	scanCmd.PersistentFlags().DurationVar(&scanInfo.ScanTimeout, "scan-timeout", 0, "Maximum duration for the scan (e.g. 5m, 30s, 1h). 0 means no timeout. When the timeout is reached the scan exits with a non-zero code.")
@@ -289,6 +308,8 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 
 	// Retrieve --kubeconfig flag from https://github.com/kubernetes/kubectl/blob/master/pkg/cmd/cmd.go
 	scanCmd.PersistentFlags().AddGoFlag(flag.Lookup("kubeconfig"))
+
+	scanCmd.PersistentFlags().StringSliceVar(&scanInfo.KubeContexts, "kube-contexts", nil, "Scan each of these kube contexts in one run (comma-separated, or repeat the flag), writing one report per context to a context-suffixed --output path. Requires --output. Distinct from --kube-context, which selects a single context; when --kube-contexts is set it takes over the scan instead.")
 
 	scanCmd.PersistentFlags().StringVar(&scanInfo.Baseline, "baseline", "", "Path to a saved JSON scan report to diff the fresh scan against.")
 	scanCmd.PersistentFlags().BoolVar(&scanInfo.BaselineFailOnNew, "baseline-fail-on-new", false, "With --baseline, exit with code 1 when new failures are found versus the baseline.")
@@ -376,34 +397,46 @@ func deriveTimeoutContext(scanInfo *cautils.ScanInfo, ks meta.IKubescape) (conte
 }
 
 func securityScan(scanInfo cautils.ScanInfo, ks meta.IKubescape, policyIdentifiers []cautils.PolicyIdentifier) error {
+	if len(scanInfo.KubeContexts) > 0 {
+		return fleetScan(scanInfo, ks, policyIdentifiers, runSecurityScan)
+	}
+
 	ctx, cancel := deriveTimeoutContext(&scanInfo, ks)
 	defer cancel()
+	return runSecurityScan(ctx, &scanInfo, ks, policyIdentifiers)
+}
 
-	results, err := ks.ScanContext(ctx, &scanInfo, policyIdentifiers)
+// runSecurityScan runs one cluster's scan to completion: Scan, HandleResults,
+// then every threshold/drift enforcement securityScan performs for the
+// single-context path. It's factored out so fleetScan (cmd/scan/fleetscan.go)
+// can run the exact same per-cluster behavior once per requested context,
+// instead of a parallel, divergent copy of this logic.
+func runSecurityScan(ctx context.Context, scanInfo *cautils.ScanInfo, ks meta.IKubescape, policyIdentifiers []cautils.PolicyIdentifier) error {
+	results, err := ks.ScanContext(ctx, scanInfo, policyIdentifiers)
 	if err != nil {
 		return err
 	}
 
-	if err = results.HandleResults(ctx, &scanInfo); err != nil {
+	if err = results.HandleResults(ctx, scanInfo); err != nil {
 		return err
 	}
 
-	if err := enforceSeverityThresholds(&results.GetData().Report.SummaryDetails, &scanInfo); err != nil {
+	if err := enforceSeverityThresholds(&results.GetData().Report.SummaryDetails, scanInfo); err != nil {
 		return err
 	}
 	if scanInfo.ScanImages {
-		if err := enforceImageSeverityThresholds(results.ImageScanData, &scanInfo); err != nil {
+		if err := enforceImageSeverityThresholds(results.ImageScanData, scanInfo); err != nil {
 			return err
 		}
 	}
-	if err := enforceCoverageThreshold(results.GetData().ScanCoverage, len(results.GetData().Report.SummaryDetails.Controls), &scanInfo); err != nil {
+	if err := enforceCoverageThreshold(results.GetData().ScanCoverage, len(results.GetData().Report.SummaryDetails.Controls), scanInfo); err != nil {
 		return err
 	}
-	if err := enforcePolicyDegradation(results.GetData().ScanCoverage, &scanInfo); err != nil {
+	if err := enforcePolicyDegradation(results.GetData().ScanCoverage, scanInfo); err != nil {
 		return err
 	}
 
-	return enforceBaselineDrift(ctx, results, &scanInfo)
+	return enforceBaselineDrift(ctx, results, scanInfo)
 }
 
 func enforceBaselineDrift(ctx context.Context, results *resultshandling.ResultsHandler, scanInfo *cautils.ScanInfo) error {

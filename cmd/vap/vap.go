@@ -30,6 +30,11 @@ var vapHelperCmdExamples = fmt.Sprintf(`
 
   Examples:
 
+  # List the policies in the embedded library, with the control each one implements
+  %[1]s vap list-policies
+  # List only the control-backed policies, as JSON
+  %[1]s vap list-policies --controls-only --format json
+
   # Install Kubescape CEL admission policy library (the copy embedded in this binary)
   %[1]s vap deploy-library | kubectl apply -f -
   # Install a specific cel-admission-library release instead of the embedded copy
@@ -56,6 +61,7 @@ func GetVapHelperCmd() *cobra.Command {
 	}
 
 	// Create subcommands
+	vapHelperCmd.AddCommand(getListPoliciesCmd())
 	vapHelperCmd.AddCommand(getDeployLibraryCmd())
 	vapHelperCmd.AddCommand(getCreatePolicyBindingCmd())
 

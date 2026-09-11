@@ -1,0 +1,311 @@
+package exposure
+
+import (
+	"fmt"
+
+	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
+)
+
+// Index indexes a cluster's Service, Ingress, Gateway API route
+// (HTTPRoute/GRPCRoute), Gateway, and Namespace objects for repeated
+// exposure queries against the same snapshot.
+type Index struct {
+	services         map[ServiceRef]*corev1.Service
+	ingressesByNS    map[string][]*networkingv1.Ingress
+	routesByNS       map[string][]*gatewayRoute
+	gateways         map[ServiceRef]*gateway // keyed the same shape as ServiceRef: namespace+name
+	namespacesByName map[string]NamespaceInfo
+}
+
+// NewIndex builds an Index from a cluster's (or a query's) collected
+// objects. A nil slice for any parameter is treated as "none collected,"
+// not an error -- a cluster without the Gateway API installed simply has no
+// routes/gateways to pass, and every query still works, just without
+// that exposure mechanism ever matching.
+func NewIndex(services []corev1.Service, ingresses []networkingv1.Ingress, routes []gatewayRoute, gateways []gateway, namespaces []NamespaceInfo) *Index {
+	idx := &Index{
+		services:         make(map[ServiceRef]*corev1.Service, len(services)),
+		ingressesByNS:    make(map[string][]*networkingv1.Ingress),
+		routesByNS:       make(map[string][]*gatewayRoute),
+		gateways:         make(map[ServiceRef]*gateway, len(gateways)),
+		namespacesByName: make(map[string]NamespaceInfo, len(namespaces)),
+	}
+
+	for i := range services {
+		s := &services[i]
+		idx.services[ServiceRef{Namespace: s.Namespace, Name: s.Name}] = s
+	}
+	for i := range ingresses {
+		ing := &ingresses[i]
+		idx.ingressesByNS[ing.Namespace] = append(idx.ingressesByNS[ing.Namespace], ing)
+	}
+	for i := range routes {
+		r := &routes[i]
+		idx.routesByNS[r.Namespace] = append(idx.routesByNS[r.Namespace], r)
+	}
+	for i := range gateways {
+		g := &gateways[i]
+		idx.gateways[ServiceRef{Namespace: g.Namespace, Name: g.Name}] = g
+	}
+	for _, ns := range namespaces {
+		idx.namespacesByName[ns.Name] = ns
+	}
+
+	return idx
+}
+
+// ServiceExposure reports every path that exposes the named Service to
+// traffic from outside the cluster, plus whether at least one plausible but
+// unmodeled exposure path exists that this function cannot confirm either
+// way. An empty paths with unclear=false means nothing in this snapshot
+// exposes the Service -- it is only reachable from inside the cluster (or
+// not collected/does not exist at all, which this function cannot tell
+// apart from "exists but not exposed"). unclear=true means paths must NOT
+// be read as a confirmed all-clear: a cross-namespace route backendRef
+// names this Service, and whether that reference is authorized (via a
+// ReferenceGrant this package does not collect or evaluate -- see the
+// package doc comment) is genuinely unknown.
+func (idx *Index) ServiceExposure(ref ServiceRef) (paths []ExposurePath, unclear bool) {
+	svc, ok := idx.services[ref]
+	if !ok {
+		return nil, false
+	}
+
+	switch svc.Spec.Type {
+	case corev1.ServiceTypeLoadBalancer:
+		paths = append(paths, ExposurePath{Kind: ExposureLoadBalancer, Source: fmt.Sprintf("%s/%s", ref.Namespace, ref.Name)})
+	case corev1.ServiceTypeNodePort:
+		paths = append(paths, ExposurePath{Kind: ExposureNodePort, Source: fmt.Sprintf("%s/%s", ref.Namespace, ref.Name)})
+	}
+	if len(svc.Spec.ExternalIPs) > 0 {
+		paths = append(paths, ExposurePath{Kind: ExposureExternalIP, Source: fmt.Sprintf("%s/%s", ref.Namespace, ref.Name)})
+	}
+
+	for _, ing := range idx.ingressesByNS[ref.Namespace] {
+		paths = append(paths, ingressPathsFor(ing, ref.Name)...)
+	}
+
+	for _, route := range idx.routesByNS[ref.Namespace] {
+		if !idx.routeAttachesToAGateway(route) {
+			continue
+		}
+		if !routeReferencesService(route, ref) {
+			continue
+		}
+		source := fmt.Sprintf("%s/%s", route.Namespace, route.Name)
+		if len(route.Hostnames) == 0 {
+			paths = append(paths, ExposurePath{Kind: routeExposureKind(route.Kind), Source: source})
+			continue
+		}
+		for _, host := range route.Hostnames {
+			paths = append(paths, ExposurePath{Kind: routeExposureKind(route.Kind), Source: source, Host: host})
+		}
+	}
+
+	return paths, idx.crossNamespaceBackendRefIsUnmodeled(ref)
+}
+
+// routeExposureKind maps a Gateway API route kind to the ExposureKind that
+// attributes its paths. Unrecognized kinds (possible only if a future
+// Gateway API route kind is decoded before this mapping learns it) fall
+// back to ExposureHTTPRoute, keeping the conservative-report-a-path
+// posture of the rest of the package.
+func routeExposureKind(routeKind string) ExposureKind {
+	if routeKind == "GRPCRoute" {
+		return ExposureGRPCRoute
+	}
+	return ExposureHTTPRoute
+}
+
+// crossNamespaceBackendRefIsUnmodeled reports whether some route this
+// Index was given, living outside ref's namespace and admitted by at least
+// one Gateway, explicitly names ref as a backend via backendRef.namespace.
+// That is a real, working, externally-reachable path when a matching
+// ReferenceGrant exists in ref's namespace -- a resource kind this package
+// does not collect or evaluate (see the package doc comment) -- so its
+// presence must not be silently folded into a confirmed "not exposed".
+func (idx *Index) crossNamespaceBackendRefIsUnmodeled(ref ServiceRef) bool {
+	for ns, routes := range idx.routesByNS {
+		if ns == ref.Namespace {
+			continue
+		}
+		for _, route := range routes {
+			if !idx.routeAttachesToAGateway(route) {
+				continue
+			}
+			for _, rule := range route.Rules {
+				for _, backend := range rule.BackendRefs {
+					// Only an effective core-Service backendRef names this
+					// Service; a non-Service backend sharing its name says
+					// nothing about its exposure.
+					if !isServiceBackendRef(backend) {
+						continue
+					}
+					if backend.Namespace != nil && *backend.Namespace == ref.Namespace && backend.Name == ref.Name {
+						return true
+					}
+				}
+			}
+		}
+	}
+	return false
+}
+
+// ingressPathsFor returns one ExposurePath per Ingress rule (or the
+// defaultBackend) whose backend names serviceName.
+func ingressPathsFor(ing *networkingv1.Ingress, serviceName string) []ExposurePath {
+	var paths []ExposurePath
+	source := fmt.Sprintf("%s/%s", ing.Namespace, ing.Name)
+
+	if backendNamesService(ing.Spec.DefaultBackend, serviceName) {
+		paths = append(paths, ExposurePath{Kind: ExposureIngress, Source: source})
+	}
+
+	for _, rule := range ing.Spec.Rules {
+		if rule.HTTP == nil {
+			continue
+		}
+		for _, path := range rule.HTTP.Paths {
+			if backendNamesService(&path.Backend, serviceName) {
+				paths = append(paths, ExposurePath{Kind: ExposureIngress, Source: source, Host: rule.Host})
+			}
+		}
+	}
+
+	return paths
+}
+
+func backendNamesService(backend *networkingv1.IngressBackend, serviceName string) bool {
+	return backend != nil && backend.Service != nil && backend.Service.Name == serviceName
+}
+
+// routeReferencesService reports whether any rule in route sends
+// traffic to ref. Only effective core-Service backends count (per Gateway
+// API's group/kind defaults -- a backendRef naming another kind must not
+// produce a Service exposure path however closely its name matches). A
+// backendRef with no Namespace defaults to the route's own namespace, per
+// Gateway API's own defaulting rules -- this package does not model a
+// backendRef reaching into another namespace via a ReferenceGrant, since
+// that requires collecting and evaluating a third resource kind this Index
+// is not given.
+func routeReferencesService(route *gatewayRoute, ref ServiceRef) bool {
+	for _, rule := range route.Rules {
+		for _, backend := range rule.BackendRefs {
+			if !isServiceBackendRef(backend) {
+				continue
+			}
+			ns := route.Namespace
+			if backend.Namespace != nil {
+				ns = *backend.Namespace
+			}
+			if ns == ref.Namespace && backend.Name == ref.Name {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// routeAttachesToAGateway reports whether route is admitted by at least
+// one listener of a Gateway object this Index was given, via any of the
+// route's parentRefs. Only effective Gateway parents count (per Gateway
+// API's group/kind defaults -- a parentRef naming another kind must not
+// attach a route to a Gateway that merely shares its namespace/name). When
+// a parentRef carries a sectionName, it pins the attachment to the one
+// listener with that name -- no other listener of the Gateway may admit
+// the route, and a sectionName naming no collected listener contributes
+// nothing. Otherwise every listener is evaluated. A listener must admit
+// the route on BOTH axes: its AllowedRoutes namespaces policy and its
+// AllowedRoutes kinds policy. A listener whose namespace admission cannot
+// be confirmed to exclude the route (a Selector needing namespace labels
+// this Index was not given) is conservatively treated as admitting it:
+// this package errs toward reporting a possible exposure rather than
+// silently hiding one, the same choice core/pkg/mapreconcile makes for its
+// own indeterminate matches. A parentRef naming a Gateway this Index has
+// no record of at all is the most indeterminate case there is -- the
+// Gateway may simply live outside what was collected (a cross-namespace
+// reference, or a caller without RBAC to list it elsewhere) rather than
+// not exist -- so it gets the same conservative treatment rather than
+// being silently treated as a non-match.
+func (idx *Index) routeAttachesToAGateway(route *gatewayRoute) bool {
+	for _, ref := range route.ParentRefs {
+		if !isGatewayParentRef(ref) {
+			continue
+		}
+		ns := route.Namespace
+		if ref.Namespace != nil {
+			ns = *ref.Namespace
+		}
+		gw, ok := idx.gateways[ServiceRef{Namespace: ns, Name: ref.Name}]
+		if !ok {
+			return true
+		}
+		for _, l := range gw.Listeners {
+			if ref.SectionName != nil && l.Name != *ref.SectionName {
+				continue
+			}
+			if !idx.listenerAdmitsRouteKind(l, route.Kind) {
+				continue
+			}
+			admits, determinable := idx.gatewayAdmitsRouteNamespace(l, route.Namespace, gw.Namespace)
+			if admits || !determinable {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// listenerAdmitsRouteKind reports whether the listener's allowedRoutes
+// kinds list admits a route of the given kind. The kinds policy is always
+// determinable -- unlike the namespace policy it never depends on labels
+// this Index was not given. A listener with no allowedRoutes (or an empty
+// kinds list) admits every kind, per the Gateway API default.
+func (idx *Index) listenerAdmitsRouteKind(l listener, routeKind string) bool {
+	if l.AllowedRoutes == nil {
+		return true
+	}
+	return l.AllowedRoutes.admitsRouteKind(routeKind)
+}
+
+// gatewayAdmitsRouteNamespace evaluates one listener's AllowedRoutes against
+// a candidate route namespace, honestly reporting indeterminate when a
+// Selector's target needs namespace labels this Index was not given -- the
+// same "determinable" pattern core/pkg/networkpolicy's peer matching uses.
+func (idx *Index) gatewayAdmitsRouteNamespace(l listener, routeNamespace, gatewayNamespace string) (admits bool, determinable bool) {
+	if l.AllowedRoutes == nil || l.AllowedRoutes.Namespaces == nil {
+		return routeNamespace == gatewayNamespace, true // default: Same
+	}
+	ns := l.AllowedRoutes.Namespaces
+	from := fromSame
+	if ns.From != nil {
+		from = *ns.From
+	}
+	switch from {
+	case fromAll:
+		return true, true
+	case fromSame:
+		return routeNamespace == gatewayNamespace, true
+	case fromSelector:
+		if ns.Selector == nil {
+			return false, true
+		}
+		sel, err := metav1.LabelSelectorAsSelector(ns.Selector)
+		if err != nil {
+			return false, true
+		}
+		if sel.Empty() {
+			return true, true
+		}
+		info, ok := idx.namespacesByName[routeNamespace]
+		if !ok {
+			return false, false
+		}
+		return sel.Matches(labels.Set(info.Labels)), true
+	default:
+		return false, true
+	}
+}

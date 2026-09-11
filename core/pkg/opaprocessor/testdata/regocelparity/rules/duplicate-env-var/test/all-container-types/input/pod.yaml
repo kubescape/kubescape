@@ -1,0 +1,29 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: duplicate-env-all-container-types
+spec:
+  initContainers:
+  - name: setup
+    image: busybox
+    env:
+    - name: SETUP_MODE
+      value: fast
+    - name: SETUP_MODE
+      value: slow
+  containers:
+  - name: app
+    image: nginx
+    env:
+    - name: APP_MODE
+      value: production
+    - name: APP_MODE
+      value: staging
+  ephemeralContainers:
+  - name: debug
+    image: busybox
+    env:
+    - name: DEBUG_MODE
+      value: shell
+    - name: DEBUG_MODE
+      value: trace

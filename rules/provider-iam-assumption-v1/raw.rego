@@ -15,6 +15,7 @@ deny contains msga if {
 	provider := [
 		{"annotation": "eks.amazonaws.com/role-arn", "description": "AWS IAM role"},
 		{"annotation": "iam.gke.io/gcp-service-account", "description": "GCP service account"},
+		{"annotation": "azure.workload.identity/client-id", "description": "Azure workload identity client ID"},
 	][_]
 
 	identity := sa.metadata.annotations[provider.annotation]

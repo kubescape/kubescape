@@ -15,6 +15,7 @@ import (
 	giturl "github.com/kubescape/go-git-url"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils/getter"
+	"github.com/kubescape/kubescape/v4/internal/testutils"
 	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/stretchr/testify/assert"
@@ -126,10 +127,40 @@ func TestScanContractProvenanceUsesFinalPolicySelection(t *testing.T) {
 	assert.Equal(t, []string{"C-0001"}, provenance.Effective.Policy.Controls)
 	assert.Regexp(t, `^sha256:[0-9a-f]{64}$`, provenance.EffectiveRunDigest)
 	assert.Equal(t, []string{"mitre"}, scanInfo.ScanContract.Effective.Policy.Frameworks, "report finalization must not mutate the reusable scan input")
+}
 
-	scanInfo.ControlsInputs = "runner-controls.json"
-	metadata = scanInfoToScanMetadata(context.Background(), scanInfo, nil)
-	assert.Empty(t, metadata.ScanMetadata.ScanContract.EffectiveRunDigest, "a later getter owns runner-file bytes, so no incomplete digest is emitted")
+func TestScanContractProvenanceRecordsConsumedRunnerInputs(t *testing.T) {
+	controls := getter.NewLoadPolicy([]string{filepath.Join(testutils.CurrentDir(), "getter", "testdata", "controls-inputs.json")})
+	_, err := controls.GetControlsInputs(context.Background(), "")
+	require.NoError(t, err)
+
+	exceptions := getter.NewLoadPolicy([]string{filepath.Join(testutils.CurrentDir(), "getter", "testdata", "exceptions.json")})
+	_, err = exceptions.GetExceptions(context.Background(), "")
+	require.NoError(t, err)
+
+	scanInfo := &ScanInfo{ScanContract: &reporthandlingv2.ScanContractMetadata{
+		APIVersion:     "config.kubescape.io/v1alpha1",
+		Contract:       "ci",
+		DigestSchema:   "kubescape-scan-contract:v1",
+		ContractDigest: "sha256:contract",
+	}}
+	_, ok := RecordScanContractRunnerInput(scanInfo, "controlsConfig", controls)
+	require.True(t, ok)
+	_, ok = RecordScanContractRunnerInput(scanInfo, "exceptions", getter.NewMergedExceptionsGetter(exceptions, nil))
+	require.True(t, ok)
+
+	metadata := scanInfoToScanMetadata(context.Background(), scanInfo, nil)
+	provenance := metadata.ScanMetadata.ScanContract
+	require.NotNil(t, provenance)
+	require.Len(t, provenance.RunnerInputs, 2)
+	assert.Equal(t, "controlsConfig", provenance.RunnerInputs[0].Role)
+	assert.Equal(t, "exceptions", provenance.RunnerInputs[1].Role)
+	for _, input := range provenance.RunnerInputs {
+		assert.NotEmpty(t, input.Source)
+		assert.False(t, filepath.IsAbs(input.Source))
+		assert.Regexp(t, `^sha256:[0-9a-f]{64}$`, input.Digest)
+	}
+	assert.Regexp(t, `^sha256:[0-9a-f]{64}$`, provenance.EffectiveRunDigest)
 }
 
 func TestResolveClusterContextNameRejectsInvalidSelection(t *testing.T) {
@@ -170,6 +201,33 @@ contexts:
 		err := scanInfo.ResolveClusterContextName()
 		require.ErrorContains(t, err, `context "" does not exist`)
 	})
+}
+
+func TestCloneForContext(t *testing.T) {
+	kubeconfig := writeScanInfoMultiContextKubeconfig(t)
+	parent := &ScanInfo{
+		ScanID:  "parent-scan-id",
+		Output:  "report.json",
+		Format:  "json",
+		ScanAll: true,
+	}
+	parent.SetKubeconfigSelection(kubeconfig, "context-current")
+	require.NoError(t, parent.ResolveClusterContextName())
+	require.Equal(t, "context-current", parent.GetClusterContextName())
+	parent.AddCleanup(func() { t.Fatal("parent's cleanup must not run from the clone") })
+
+	clone := parent.CloneForContext("context-selected", "report.context-selected.json")
+
+	assert.Empty(t, clone.ScanID, "ScanID must be cleared so Init generates a fresh one per context")
+	assert.Equal(t, "report.context-selected.json", clone.Output)
+	assert.Equal(t, "json", clone.Format, "unrelated fields must be copied verbatim")
+	assert.True(t, clone.ScanAll)
+
+	require.NoError(t, clone.ResolveClusterContextName())
+	assert.Equal(t, "context-selected", clone.GetClusterContextName(), "clone must resolve its own context, not inherit the parent's")
+	assert.Equal(t, "context-current", parent.GetClusterContextName(), "cloning must not mutate the parent's already-resolved context")
+
+	clone.Cleanup() // must not panic or invoke the parent's registered cleanup
 }
 
 func TestResolveClusterContextNameUsesDefaultLoadingRulesForOverride(t *testing.T) {
@@ -308,15 +366,7 @@ func TestGetHostname(t *testing.T) {
 }
 
 func TestGetScanningContext(t *testing.T) {
-	repoRoot, err := os.MkdirTemp("", "repo")
-	require.NoError(t, err)
-	defer func(name string) {
-		_ = os.Remove(name)
-	}(repoRoot)
-	_, err = git.PlainClone(repoRoot, false, &git.CloneOptions{
-		URL: "https://github.com/kubescape/http-request",
-	})
-	require.NoError(t, err)
+	repoRoot := newGitFixture(t, "https://github.com/kubescape/http-request")
 	tmpFile, err := os.CreateTemp("", "single.*.txt")
 	require.NoError(t, err)
 	defer func(name string) {
@@ -353,14 +403,14 @@ func TestGetScanningContext(t *testing.T) {
 			want:  ContextDir,
 		},
 		{
-			name:  "self-hosted GitLab URL that can't be cloned",
+			name:  "self-hosted GitLab URL",
 			input: "https://gitlab.private-domain.com/my-org/my-repo.git",
-			want:  ContextDir, // Should return ContextDir when clone fails, not try to treat as local path
+			want:  ContextGitRemote,
 		},
 		{
-			name:  "http URL that can't be cloned",
+			name:  "http URL git repo",
 			input: "http://gitlab.example.com/org/repo",
-			want:  ContextDir, // Should return ContextDir when clone fails, not try to treat as local path
+			want:  ContextGitRemote,
 		},
 	}
 	for _, tt := range tests {

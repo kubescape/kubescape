@@ -12,10 +12,15 @@ import (
 )
 
 const (
-	maxSlackFailingControls     = 10
+	maxFailingControls          = 10
 	maxSlackSectionTextLength   = 3000
 	maxSlackControlIDTextLength = 80
 	slackTopControlsHeading     = "*Top failing controls*"
+
+	maxTeamsControlIDLength   = 80
+	maxTeamsControlNameLength = 160
+	teamsCardVersion          = "1.4"
+	teamsTopControlsHeading   = "Top failing controls"
 )
 
 var slackTextEscaper = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;")
@@ -54,16 +59,20 @@ func IsSlackEndpoint(endpoint string) bool {
 }
 
 // MarshalPayload formats summary for endpoint. Slack incoming webhooks receive
-// a compact Block Kit message; every other endpoint receives the existing
-// generic SummaryDetails JSON object.
+// a compact Block Kit message, Microsoft Teams webhooks an Adaptive Card, and
+// every other endpoint the existing generic SummaryDetails JSON object.
 func MarshalPayload(endpoint string, summary *reportsummary.SummaryDetails) ([]byte, error) {
 	if summary == nil {
 		return nil, fmt.Errorf("marshal notification payload: summary is nil")
 	}
-	if IsSlackEndpoint(endpoint) {
+	switch {
+	case IsSlackEndpoint(endpoint):
 		return json.Marshal(newSlackPayload(summary))
+	case IsTeamsEndpoint(endpoint):
+		return json.Marshal(newTeamsPayload(summary))
+	default:
+		return json.Marshal(summary)
 	}
-	return json.Marshal(summary)
 }
 
 func newSlackPayload(summary *reportsummary.SummaryDetails) slackPayload {
@@ -144,8 +153,8 @@ func summarizeControls(controls reportsummary.ControlSummaries) controlSummary {
 		}
 		return left.Name < right.Name
 	})
-	if len(result.topFailing) > maxSlackFailingControls {
-		result.topFailing = result.topFailing[:maxSlackFailingControls]
+	if len(result.topFailing) > maxFailingControls {
+		result.topFailing = result.topFailing[:maxFailingControls]
 	}
 	return result
 }
@@ -179,14 +188,18 @@ func maxSlackControlLineLength() int {
 	// Reserve one newline for each possible entry. Bounding every line to the
 	// remaining equal share guarantees the complete section stays within Slack's
 	// 3,000-character section text limit even when all ten entries are present.
-	return (maxSlackSectionTextLength - utf8.RuneCountInString(slackTopControlsHeading) - maxSlackFailingControls) / maxSlackFailingControls
+	return (maxSlackSectionTextLength - utf8.RuneCountInString(slackTopControlsHeading) - maxFailingControls) / maxFailingControls
 }
 
 func escapeAndTruncateSlackText(value string, maxLength int) string {
+	return escapeAndTruncate(slackTextEscaper, value, maxLength)
+}
+
+func escapeAndTruncate(escaper *strings.Replacer, value string, maxLength int) string {
 	if maxLength <= 0 {
 		return ""
 	}
-	escaped := escapeSlackText(value)
+	escaped := escaper.Replace(value)
 	if utf8.RuneCountInString(escaped) <= maxLength {
 		return escaped
 	}
@@ -197,7 +210,7 @@ func escapeAndTruncateSlackText(value string, maxLength int) string {
 	var result strings.Builder
 	used := 0
 	for _, r := range value {
-		piece := escapeSlackText(string(r))
+		piece := escaper.Replace(string(r))
 		pieceLength := utf8.RuneCountInString(piece)
 		if used+pieceLength > maxLength-1 {
 			break

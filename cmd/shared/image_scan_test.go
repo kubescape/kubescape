@@ -272,3 +272,59 @@ func TestValidateRegistryCredentials_EnvVarBug(t *testing.T) {
 	// Should return conflict error because both token and username are present
 	assert.Equal(t, ErrRegistryAuthConflict, err)
 }
+
+// TestValidateImageScanAnonymization guards a silent data leak: --hide and
+// --encrypt are registered on the parent scan command, so `scan image`
+// inherits them, but the anonymizer only ever runs over a posture session.
+// On the image path the flags were accepted and did nothing while the image
+// reference, its SBOM and the package file inventory were written out.
+func TestValidateImageScanAnonymization(t *testing.T) {
+	tests := []struct {
+		name     string
+		scanInfo *cautils.ScanInfo
+		wantErr  bool
+	}{
+		{
+			name:     "nil scan info",
+			scanInfo: nil,
+		},
+		{
+			name:     "neither flag set",
+			scanInfo: &cautils.ScanInfo{},
+		},
+		{
+			name:     "hide is rejected",
+			scanInfo: &cautils.ScanInfo{Hide: true},
+			wantErr:  true,
+		},
+		{
+			name:     "encrypt is rejected",
+			scanInfo: &cautils.ScanInfo{EncryptionEnabled: true},
+			wantErr:  true,
+		},
+		{
+			name:     "both flags rejected",
+			scanInfo: &cautils.ScanInfo{Hide: true, EncryptionEnabled: true},
+			wantErr:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateImageScanAnonymization(tt.scanInfo)
+			if !tt.wantErr {
+				assert.NoError(t, err)
+				return
+			}
+			assert.ErrorIs(t, err, ErrImageScanAnonymization)
+		})
+	}
+}
+
+// TestValidateImageScanInfoAllowsAnonymization pins the boundary: the
+// combined `scan framework --scan-images` path shares ValidateImageScanInfo
+// and does support both flags, so the rejection must not leak into it.
+func TestValidateImageScanInfoAllowsAnonymization(t *testing.T) {
+	assert.NoError(t, ValidateImageScanInfo(&cautils.ScanInfo{Hide: true}))
+	assert.NoError(t, ValidateImageScanInfo(&cautils.ScanInfo{EncryptionEnabled: true}))
+}

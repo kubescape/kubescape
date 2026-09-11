@@ -3,12 +3,15 @@ package scan
 import (
 	"bytes"
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/mocks"
+	"github.com/kubescape/kubescape/v4/core/pkg/resourcehandler"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer"
 	v1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
@@ -402,151 +405,6 @@ func TestGetWorkloadCmd_RunE_ForwardsPositionalLocalInputs(t *testing.T) {
 	assert.Equal(t, "nginx", ks.scanInfo.ScanObject.GetName())
 }
 
-func Test_parseWorkloadIdentifierString_Invalid(t *testing.T) {
-	tests := []struct {
-		name  string
-		input string
-	}{
-		{
-			name:  "empty identifier",
-			input: "",
-		},
-		{
-			name:  "too many segments",
-			input: "cluster/default/Deployment/nginx",
-		},
-		{
-			name:  "empty segment",
-			input: "default//nginx",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			_, _, _, _, err := parseWorkloadIdentifierString(tt.input)
-			assert.Error(t, err)
-		})
-	}
-}
-
-func Test_parseWorkloadIdentifierString_Valid(t *testing.T) {
-	t.Run("valid identifier", func(t *testing.T) {
-		namespace, kind, name, apiVersion, err := parseWorkloadIdentifierString("default/Deployment/nginx-deployment")
-		assert.NoError(t, err)
-		assert.Equal(t, "default", namespace)
-		assert.Equal(t, "Deployment", kind)
-		assert.Equal(t, "nginx-deployment", name)
-		assert.Equal(t, "", apiVersion)
-	})
-}
-
-func Test_parseWorkloadIdentifierString_Values(t *testing.T) {
-	testCases := []struct {
-		Description    string
-		Input          string
-		WantNamespace  string
-		WantKind       string
-		WantName       string
-		WantApiVersion string
-		WantErr        bool
-	}{
-		{
-			Description:    "valid kind and name",
-			Input:          "Deployment/nginx",
-			WantNamespace:  "",
-			WantKind:       "Deployment",
-			WantName:       "nginx",
-			WantApiVersion: "",
-			WantErr:        false,
-		},
-		{
-			Description:    "valid namespace kind and name",
-			Input:          "default/Deployment/nginx",
-			WantNamespace:  "default",
-			WantKind:       "Deployment",
-			WantName:       "nginx",
-			WantApiVersion: "",
-			WantErr:        false,
-		},
-		{
-			Description:    "valid kind.version and name",
-			Input:          "Pod.v1/nginx",
-			WantNamespace:  "",
-			WantKind:       "Pod",
-			WantName:       "nginx",
-			WantApiVersion: "v1",
-			WantErr:        false,
-		},
-		{
-			Description:    "valid kind.version.group and name",
-			Input:          "Deployment.v1.apps/nginx",
-			WantNamespace:  "",
-			WantKind:       "Deployment",
-			WantName:       "nginx",
-			WantApiVersion: "apps/v1",
-			WantErr:        false,
-		},
-		{
-			Description:    "valid namespace kind.version.group and name",
-			Input:          "default/Deployment.v1.apps/nginx",
-			WantNamespace:  "default",
-			WantKind:       "Deployment",
-			WantName:       "nginx",
-			WantApiVersion: "apps/v1",
-			WantErr:        false,
-		},
-		{
-			Description:    "valid multi-label group",
-			Input:          "Ingress.v1.networking.k8s.io/name",
-			WantNamespace:  "",
-			WantKind:       "Ingress",
-			WantName:       "name",
-			WantApiVersion: "networking.k8s.io/v1",
-			WantErr:        false,
-		},
-		{
-			Description: "invalid empty dotted component",
-			Input:       "Deployment..apps/nginx",
-			WantErr:     true,
-		},
-		{
-			Description: "invalid empty trailing component",
-			Input:       "Deployment./nginx",
-			WantErr:     true,
-		},
-		{
-			Description: "invalid missing apiVersion",
-			Input:       "Deployment.apps/nginx",
-			WantErr:     true,
-		},
-		{
-			Description: "invalid apiVersion segment",
-			Input:       "Deployment.bogus/nginx",
-			WantErr:     true,
-		},
-		{
-			Description: "too many segments",
-			Input:       "cluster/default/Deployment/nginx",
-			WantErr:     true,
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.Description, func(t *testing.T) {
-			namespace, kind, name, apiVersion, err := parseWorkloadIdentifierString(tc.Input)
-			if tc.WantErr {
-				assert.Error(t, err)
-				return
-			}
-			assert.NoError(t, err)
-			assert.Equal(t, tc.WantNamespace, namespace)
-			assert.Equal(t, tc.WantKind, kind)
-			assert.Equal(t, tc.WantName, name)
-			assert.Equal(t, tc.WantApiVersion, apiVersion)
-		})
-	}
-}
-
 type fakePrinter struct{}
 
 func (p *fakePrinter) PrintNextSteps() {}
@@ -559,10 +417,14 @@ func (p *fakePrinter) Score(_ float32)                               {}
 type recordingKubescape struct {
 	mocks.MockIKubescape
 	captured *cautils.ScanInfo
+	scanErr  error
 }
 
 func (m *recordingKubescape) Scan(scanInfo *cautils.ScanInfo, _ []cautils.PolicyIdentifier) (*resultshandling.ResultsHandler, error) {
 	m.captured = scanInfo
+	if m.scanErr != nil {
+		return nil, m.scanErr
+	}
 	rh := resultshandling.NewResultsHandler(nil, []printer.IPrinter{&fakePrinter{}}, &fakePrinter{})
 	rh.SetData(cautils.NewOPASessionObjMock())
 	return rh, nil
@@ -745,4 +607,121 @@ func TestGetWorkloadCmd_EnforcesComplianceThreshold(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestGetWorkloadCmd_NamespaceResolution(t *testing.T) {
+	t.Run("omitted namespace defaults to default", func(t *testing.T) {
+		scanInfo := cautils.ScanInfo{}
+		mock := &recordingKubescape{}
+		cmd := getWorkloadCmd(mock, &scanInfo)
+		cmd.SilenceErrors = true
+		cmd.SilenceUsage = true
+		cmd.SetArgs([]string{"Deployment/nginx"})
+
+		err := cmd.Execute()
+		require.NoError(t, err)
+		assert.Equal(t, "default", mock.captured.Namespace)
+		assert.True(t, mock.captured.NamespaceDefaulted)
+		assert.Equal(t, "default", mock.captured.ScanObject.GetNamespace())
+	})
+
+	t.Run("wildcard namespace flag resolves to cluster-wide", func(t *testing.T) {
+		scanInfo := cautils.ScanInfo{}
+		mock := &recordingKubescape{}
+		cmd := getWorkloadCmd(mock, &scanInfo)
+		cmd.SilenceErrors = true
+		cmd.SilenceUsage = true
+		cmd.SetArgs([]string{"Deployment/nginx", "-n", "*"})
+
+		err := cmd.Execute()
+		require.NoError(t, err)
+		assert.Equal(t, "", mock.captured.Namespace)
+		assert.False(t, mock.captured.NamespaceDefaulted)
+		assert.Equal(t, "", mock.captured.ScanObject.GetNamespace())
+	})
+
+	t.Run("identifier namespace is preserved when flag omitted", func(t *testing.T) {
+		scanInfo := cautils.ScanInfo{}
+		mock := &recordingKubescape{}
+		cmd := getWorkloadCmd(mock, &scanInfo)
+		cmd.SilenceErrors = true
+		cmd.SilenceUsage = true
+		cmd.SetArgs([]string{"kube-system/Deployment/coredns"})
+
+		err := cmd.Execute()
+		require.NoError(t, err)
+		assert.Equal(t, "kube-system", mock.captured.Namespace)
+		assert.False(t, mock.captured.NamespaceDefaulted)
+		assert.Equal(t, "kube-system", mock.captured.ScanObject.GetNamespace())
+	})
+
+	t.Run("conflicting flag and identifier namespace returns error", func(t *testing.T) {
+		scanInfo := cautils.ScanInfo{}
+		mock := &recordingKubescape{}
+		cmd := getWorkloadCmd(mock, &scanInfo)
+		cmd.SilenceErrors = true
+		cmd.SilenceUsage = true
+		cmd.SetArgs([]string{"staging/Deployment/nginx", "-n", "prod"})
+
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "conflicting namespaces")
+	})
+
+	t.Run("conflicting namespace with local input rejects conflict before file access", func(t *testing.T) {
+		scanInfo := cautils.ScanInfo{}
+		mock := &recordingKubescape{}
+		cmd := getWorkloadCmd(mock, &scanInfo)
+		cmd.SilenceErrors = true
+		cmd.SilenceUsage = true
+		// Even if the file does not exist, namespace conflict must be detected first
+		cmd.SetArgs([]string{"staging/Deployment/nginx", "-n", "prod", "nonexistent-manifest.yaml"})
+
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "conflicting namespaces")
+	})
+
+	t.Run("omitted namespace with file path leaves namespace unconstrained", func(t *testing.T) {
+		scanInfo := cautils.ScanInfo{}
+		mock := &recordingKubescape{}
+		cmd := getWorkloadCmd(mock, &scanInfo)
+		cmd.SilenceErrors = true
+		cmd.SilenceUsage = true
+		cmd.SetArgs([]string{"Deployment/nginx", "--file-path", "testdata/dep.yaml"})
+
+		err := cmd.Execute()
+		require.NoError(t, err)
+		assert.Equal(t, "", mock.captured.Namespace)
+		assert.False(t, mock.captured.NamespaceDefaulted)
+		assert.Equal(t, "", mock.captured.ScanObject.GetNamespace())
+	})
+
+	t.Run("omitted namespace with positional input path leaves namespace unconstrained", func(t *testing.T) {
+		scanInfo := cautils.ScanInfo{}
+		mock := &recordingKubescape{}
+		cmd := getWorkloadCmd(mock, &scanInfo)
+		cmd.SilenceErrors = true
+		cmd.SilenceUsage = true
+		cmd.SetArgs([]string{"Deployment/nginx", "testdata/dep.yaml"})
+
+		err := cmd.Execute()
+		require.NoError(t, err)
+		assert.Equal(t, "", mock.captured.Namespace)
+		assert.False(t, mock.captured.NamespaceDefaulted)
+		assert.Equal(t, "", mock.captured.ScanObject.GetNamespace())
+	})
+
+	t.Run("runWorkloadScan wraps not found error with hint and preserves sentinel", func(t *testing.T) {
+		scanInfo := cautils.ScanInfo{
+			NamespaceDefaulted: true,
+		}
+		mock := &recordingKubescape{
+			scanErr: fmt.Errorf("lookup workload: %w", resourcehandler.ErrResourceNotFound),
+		}
+		err := runWorkloadScan(context.Background(), &scanInfo, mock, nil)
+		require.Error(t, err)
+		assert.True(t, errors.Is(err, resourcehandler.ErrResourceNotFound), "sentinel ErrResourceNotFound must be preserved in error chain")
+		assert.Contains(t, err.Error(), cliNamespaceDefaultedHint)
+	})
 }

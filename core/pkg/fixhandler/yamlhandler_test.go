@@ -52,100 +52,7 @@ func TestDecodeDocumentRoots(t *testing.T) {
 	}
 }
 
-func TestRemoveNewLinesAtTheEnd(t *testing.T) {
-	tests := []struct {
-		name     string
-		input    []string
-		expected []string
-	}{
-		{
-			name:     "no trailing newlines",
-			input:    []string{"line1", "line2"},
-			expected: []string{"line1", "line2"},
-		},
-		{
-			name:     "one trailing newline",
-			input:    []string{"line1", "line2", "\n"},
-			expected: []string{"line1", "line2"},
-		},
-		{
-			name:     "multiple trailing newlines",
-			input:    []string{"line1", "line2", "\n", "\n"},
-			expected: []string{"line1", "line2"},
-		},
-		{
-			name:     "single element non-newline",
-			input:    []string{"line1"},
-			expected: []string{"line1"},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := removeNewLinesAtTheEnd(tt.input)
-			assert.Equal(t, tt.expected, result)
-		})
-	}
-}
-
-func TestFlattenWithDFS(t *testing.T) {
-	t.Run("simple scalar node", func(t *testing.T) {
-		node := &yaml.Node{
-			Kind:  yaml.ScalarNode,
-			Value: "hello",
-		}
-		result := flattenWithDFS(node)
-		require.NotNil(t, result)
-		assert.Len(t, *result, 1)
-		assert.Equal(t, "hello", (*result)[0].node.Value)
-		assert.Nil(t, (*result)[0].parent)
-	})
-
-	t.Run("mapping node with one key-value pair", func(t *testing.T) {
-		node := &yaml.Node{
-			Kind: yaml.MappingNode,
-			Content: []*yaml.Node{
-				{Kind: yaml.ScalarNode, Value: "key"},
-				{Kind: yaml.ScalarNode, Value: "value"},
-			},
-		}
-		result := flattenWithDFS(node)
-		require.NotNil(t, result)
-		assert.Len(t, *result, 3)
-		assert.Equal(t, yaml.MappingNode, (*result)[0].node.Kind)
-		assert.Equal(t, "key", (*result)[1].node.Value)
-		assert.Equal(t, "value", (*result)[2].node.Value)
-	})
-
-	t.Run("sequence node with items", func(t *testing.T) {
-		node := &yaml.Node{
-			Kind: yaml.SequenceNode,
-			Content: []*yaml.Node{
-				{Kind: yaml.ScalarNode, Value: "item1"},
-				{Kind: yaml.ScalarNode, Value: "item2"},
-			},
-		}
-		result := flattenWithDFS(node)
-		require.NotNil(t, result)
-		assert.Len(t, *result, 3)
-	})
-
-	t.Run("parent references and indexes are set correctly", func(t *testing.T) {
-		var root yaml.Node
-		require.NoError(t, yaml.Unmarshal([]byte("metadata:\n  name: demo\nspec:\n  replicas: 2\n"), &root))
-
-		result := flattenWithDFS(&root)
-		require.NotNil(t, result)
-		require.GreaterOrEqual(t, len(*result), 7)
-		assert.Same(t, &root, (*result)[0].node)
-		assert.Nil(t, (*result)[0].parent)
-		assert.Equal(t, 0, (*result)[0].index)
-		assert.Same(t, &root, (*result)[1].parent)
-		assert.Equal(t, 0, (*result)[1].index)
-	})
-}
-
-func TestGetFixedNodes(t *testing.T) {
+func TestYAMLEditorCompatibility(t *testing.T) {
 	tests := []struct {
 		name       string
 		input      string
@@ -185,12 +92,14 @@ func TestGetFixedNodes(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := getFixedNodes(context.Background(), tt.input, tt.expression)
+			fixed, err := ApplyFixToContent(context.Background(), tt.input, tt.expression)
 			if tt.wantError {
 				require.Error(t, err)
 				return
 			}
 
+			require.NoError(t, err)
+			got, err := decodeDocumentRoots(fixed)
 			require.NoError(t, err)
 			tt.assert(t, got)
 		})

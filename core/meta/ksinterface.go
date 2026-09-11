@@ -27,6 +27,7 @@ type IKubescape interface {
 	// config
 	SetCachedConfig(setConfig *metav1.SetConfig) error
 	ViewCachedConfig(viewConfig *metav1.ViewConfig) error
+	ValidateCachedConfig(validateConfig *metav1.ValidateConfig) error
 	DeleteCachedConfig(deleteConfig *metav1.DeleteConfig) error
 
 	// fix

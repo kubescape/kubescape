@@ -207,9 +207,9 @@ func mockOPASessionObj(t testing.TB) *cautils.OPASessionObj {
 		o.AllResources[k] = val
 	}
 
-	o.ResourceAttackTracks = make(map[string]v1alpha1.IAttackTrack, len(v.ResourceAttackTracks))
+	o.ResourceAttackTracks = make(map[string][]v1alpha1.IAttackTrack, len(v.ResourceAttackTracks))
 	for k, val := range v.ResourceAttackTracks {
-		o.ResourceAttackTracks[k] = val
+		o.ResourceAttackTracks[k] = []v1alpha1.IAttackTrack{val}
 	}
 
 	o.AttackTracks = make(map[string]v1alpha1.IAttackTrack, len(v.AttackTracks))

@@ -2,6 +2,7 @@ package cautils
 
 import (
 	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	nethttp "net/http"
@@ -31,10 +32,11 @@ var (
 	gitTransportOnce sync.Once
 )
 
+// hashRepoURL returns a hex-encoded SHA-256 digest of the given repository URL.
 func hashRepoURL(repoURL string) string {
 	h := sha256.New()
 	h.Write([]byte(repoURL))
-	return string(h.Sum(nil))
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 func repoWorkspaceKey(gitURL giturl.IGitAPI) string {

@@ -286,3 +286,82 @@ func TestCompileMatchResources_ExactMatchPolicyMissIsAConfidentNonMatch(t *testi
 	assert.False(t, matched)
 	assert.True(t, determinable, "Exact matchPolicy has no equivalence expansion to be uncertain about")
 }
+
+// TestRuleMatches_SubresourceForm pins the Resources examples Rule.Resources'
+// own doc comment gives, plus the two the apiserver's matcher settles beyond
+// the doc: a bare "*" never reaches a subresource request, and a "resource/*"
+// entry does reach the bare parent.
+func TestRuleMatches_SubresourceForm(t *testing.T) {
+	tests := []struct {
+		name        string
+		resources   []string
+		resource    string
+		subresource string
+		want        bool
+	}{
+		{name: "bare resource named verbatim", resources: []string{"pods"}, resource: "pods", want: true},
+		{name: "resource wildcard covers a bare resource", resources: []string{"*"}, resource: "pods", want: true},
+		{name: "resource wildcard does not reach a subresource", resources: []string{"*"}, resource: "pods", subresource: "status", want: false},
+		{name: "full wildcard covers a bare resource", resources: []string{"*/*"}, resource: "pods", want: true},
+		{name: "full wildcard covers a subresource", resources: []string{"*/*"}, resource: "deployments", subresource: "scale", want: true},
+		{name: "subresource wildcard covers its bare parent", resources: []string{"pods/*"}, resource: "pods", want: true},
+		{name: "subresource wildcard covers a subresource", resources: []string{"pods/*"}, resource: "pods", subresource: "exec", want: true},
+		{name: "subresource wildcard does not cross resources", resources: []string{"configmaps/*"}, resource: "pods", want: false},
+		{name: "named subresource does not cover its bare parent", resources: []string{"pods/status"}, resource: "pods", want: false},
+		{name: "named subresource matches verbatim", resources: []string{"pods/status"}, resource: "pods", subresource: "status", want: true},
+		{name: "named subresource does not cover another subresource", resources: []string{"pods/status"}, resource: "pods", subresource: "exec", want: false},
+		{name: "one subresource across every resource", resources: []string{"*/scale"}, resource: "deployments", subresource: "scale", want: true},
+		{name: "one subresource across every resource ignores others", resources: []string{"*/scale"}, resource: "deployments", subresource: "status", want: false},
+		{name: "one matching entry among several", resources: []string{"configmaps", "pods/*"}, resource: "pods", want: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := rule([]string{"*"}, []string{"*"}, tt.resources, admissionregistrationv1alpha1.OperationAll)
+			got := ruleMatches(r, obj(func(o *ObjectInfo) {
+				o.Resource = tt.resource
+				o.Subresource = tt.subresource
+			}))
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+// TestCompileMatchResources_EquivalentMatchPolicyWildcardResourceAtAnotherVersion
+// checks that a full-wildcard rule reaches the equivalence question at all: it
+// covers the queried resource, so a version the rule does not name is the
+// indeterminate case Equivalent matchPolicy resolves with discovery data this
+// package is not given.
+func TestCompileMatchResources_EquivalentMatchPolicyWildcardResourceAtAnotherVersion(t *testing.T) {
+	c, err := compileMatchResources(&admissionregistrationv1alpha1.MatchResources{
+		ResourceRules: []admissionregistrationv1alpha1.NamedRuleWithOperations{
+			rule([]string{"autoscaling"}, []string{"v1"}, []string{"*/*"}, admissionregistrationv1alpha1.OperationAll),
+		},
+	})
+	require.NoError(t, err)
+
+	_, determinable := c.matches(obj(func(o *ObjectInfo) {
+		o.Group = "autoscaling"
+		o.Version = "v2"
+		o.Resource = "horizontalpodautoscalers"
+	}))
+	assert.False(t, determinable, "a rule covering this resource at another version is the indeterminate case, not a confident non-match")
+}
+
+// TestCompileMatchResources_EquivalentMatchPolicySubresourceIsNeverEquivalent
+// is the boundary the subresource split must not cross. Group/version
+// equivalence maps a resource onto the same resource at another version; it
+// never turns a subresource rule into coverage of the parent, so this stays a
+// confident non-match instead of becoming indeterminate.
+func TestCompileMatchResources_EquivalentMatchPolicySubresourceIsNeverEquivalent(t *testing.T) {
+	c, err := compileMatchResources(&admissionregistrationv1alpha1.MatchResources{
+		ResourceRules: []admissionregistrationv1alpha1.NamedRuleWithOperations{
+			rule([]string{""}, []string{"v1"}, []string{"pods/exec"}, admissionregistrationv1alpha1.OperationAll),
+		},
+	})
+	require.NoError(t, err)
+
+	matched, determinable := c.matches(obj(func(o *ObjectInfo) { o.Version = "v2" }))
+	assert.False(t, matched)
+	assert.True(t, determinable)
+}

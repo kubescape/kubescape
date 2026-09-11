@@ -47,6 +47,12 @@ var _ printer.IPrinter = &GitLabSASTPrinter{}
 // It also emits image-scan CVEs as a GitLab Dependency Scanning report, which uses the same top-level schema (#2782).
 type GitLabSASTPrinter struct {
 	writer *os.File
+	// showSecrets controls whether sensitive field values (Secret.data,
+	// container env[].value, and other secret-shaped fields -- see
+	// isSensitivePath) are redacted in the Solution field below. GitLab SAST
+	// reports are committed as CI pipeline artifacts, so this must default
+	// to redacted the same way the pretty-printer and resource table do.
+	showSecrets bool
 }
 
 // gitLabSASTReport mirrors the GitLab SAST report schema; only the fields Kubescape can populate are modelled
@@ -122,8 +128,8 @@ type gitLabIdentifier struct {
 }
 
 // NewGitLabSASTPrinter returns a new GitLab SAST printer instance
-func NewGitLabSASTPrinter() *GitLabSASTPrinter {
-	return &GitLabSASTPrinter{}
+func NewGitLabSASTPrinter(showSecrets bool) *GitLabSASTPrinter {
+	return &GitLabSASTPrinter{showSecrets: showSecrets}
 }
 
 // Score is a no-op: the GitLab SAST report has no field for the overall risk score
@@ -248,7 +254,7 @@ func toGitLabImageVulnerability(image, platform string, cve imageprinter.CVE) gi
 	}
 
 	return gitLabVulnerability{
-		ID:          gitLabImageVulnerabilityID(image, cve.Package, cve.Version, cve.ID),
+		ID:          gitLabImageVulnerabilityID(image, cve.Package, cve.Version, cve.ID, platform),
 		Category:    "dependency_scanning",
 		Name:        message,
 		Message:     message,
@@ -273,9 +279,17 @@ func toGitLabImageVulnerability(image, platform string, cve imageprinter.CVE) gi
 	}
 }
 
-// gitLabImageVulnerabilityID returns a stable id so GitLab can track a CVE finding across scans for triage and dismissal
-func gitLabImageVulnerabilityID(image, pkg, version, cveID string) string {
-	return fmt.Sprintf("%x", sha256.Sum256([]byte(image+"/"+pkg+"/"+version+"/"+cveID)))
+// gitLabImageVulnerabilityID returns a stable id so GitLab can track a CVE finding across scans for triage and dismissal.
+// The platform is part of that identity: one image reference can be scanned for several platforms, and a finding
+// dismissed on one is not thereby dismissed on another. It is appended only when a platform was requested, so ids
+// for scans that do not pass --platform stay as they were.
+func gitLabImageVulnerabilityID(image, pkg, version, cveID, platform string) string {
+	id := image + "/" + pkg + "/" + version + "/" + cveID
+	if platform != "" {
+		id += "/" + platform
+	}
+
+	return fmt.Sprintf("%x", sha256.Sum256([]byte(id)))
 }
 
 // printConfigurationScan maps each failed control on each failed resource to a GitLab SAST vulnerability and writes the report
@@ -339,7 +353,7 @@ func (gp *GitLabSASTPrinter) printConfigurationScan(ctx context.Context, opaSess
 
 			location := resolveFixLocation(opaSessionObj, locationResolver, &ac, resource.resourceID)
 			res := opaSessionObj.AllResources[resource.resourceID]
-			report.Vulnerabilities = append(report.Vulnerabilities, toGitLabVulnerability(ctl, &ac, res, resource.resourceID, resource.relPath, location))
+			report.Vulnerabilities = append(report.Vulnerabilities, toGitLabVulnerability(ctl, &ac, res, resource.resourceID, resource.relPath, location, gp.showSecrets))
 		}
 	}
 
@@ -386,14 +400,14 @@ func (gp *GitLabSASTPrinter) printConfigurationScan(ctx context.Context, opaSess
 // toGitLabVulnerability maps a failed control on a resource to a GitLab SAST vulnerability.
 // ac and resource are used to populate the Solution field with fix paths and current field values,
 // matching what the pretty-printer and HTML printer already emit.
-func toGitLabVulnerability(ctl reportsummary.IControlSummary, ac *resourcesresults.ResourceAssociatedControl, resource workloadinterface.IMetadata, resourceID, filePath string, location locationresolver.Location) gitLabVulnerability {
+func toGitLabVulnerability(ctl reportsummary.IControlSummary, ac *resourcesresults.ResourceAssociatedControl, resource workloadinterface.IMetadata, resourceID, filePath string, location locationresolver.Location, showSecrets bool) gitLabVulnerability {
 	controlID := ctl.GetID()
 	// Kubescape severities (Critical/High/Medium/Low/Unknown) are all valid GitLab severities
 	severity := apis.ControlSeverityToString(ctl.GetScoreFactor())
 
 	var solution string
 	if resource != nil {
-		if paths := AssistedRemediationPathsWithCurrentValues(ac, resource); len(paths) > 0 {
+		if paths := AssistedRemediationPathsWithCurrentValuesFiltered(ac, resource, showSecrets); len(paths) > 0 {
 			solution = strings.Join(paths, "\n")
 		}
 	}

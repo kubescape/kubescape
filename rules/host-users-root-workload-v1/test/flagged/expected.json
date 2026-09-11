@@ -1,0 +1,73 @@
+[
+    {
+        "alertMessage": "container api in Deployment payments-api runs as root in the host user namespace; set spec.hostUsers: false to map container root to an unprivileged host UID (GA in Kubernetes 1.36)",
+        "failedPaths": [
+            "spec.template.spec.containers[0]"
+        ],
+        "reviewPaths": [
+            "spec.template.spec.containers[0]"
+        ],
+        "deletePaths": null,
+        "fixPaths": [],
+        "ruleStatus": "",
+        "packagename": "armo_builtins",
+        "alertScore": 7,
+        "alertObject": {
+            "k8sApiObjects": [
+                {
+                    "apiVersion": "apps/v1",
+                    "kind": "Deployment",
+                    "metadata": {
+                        "labels": {
+                            "app": "payments-api"
+                        },
+                        "name": "payments-api",
+                        "namespace": "default"
+                    },
+                    "spec": {
+                        "replicas": 2,
+                        "selector": {
+                            "matchLabels": {
+                                "app": "payments-api"
+                            }
+                        },
+                        "template": {
+                            "metadata": {
+                                "labels": {
+                                    "app": "payments-api"
+                                }
+                            },
+                            "spec": {
+                                "containers": [
+                                    {
+                                        "image": "registry.example.com/payments-api:1.4.2",
+                                        "name": "api",
+                                        "volumeMounts": [
+                                            {
+                                                "mountPath": "/var/cache",
+                                                "name": "cache"
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "image": "registry.example.com/log-shipper:2.1.0",
+                                        "name": "sidecar",
+                                        "securityContext": {
+                                            "runAsUser": 1000
+                                        }
+                                    }
+                                ],
+                                "volumes": [
+                                    {
+                                        "emptyDir": {},
+                                        "name": "cache"
+                                    }
+                                ]
+                            }
+                        }
+                    }
+                }
+            ]
+        }
+    }
+]

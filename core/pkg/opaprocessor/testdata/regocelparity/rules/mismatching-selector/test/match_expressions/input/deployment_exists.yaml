@@ -1,0 +1,17 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mismatching-selector-exists
+spec:
+  selector:
+    matchExpressions:
+    - key: tier
+      operator: Exists
+  template:
+    metadata:
+      labels:
+        app: api
+    spec:
+      containers:
+      - name: app
+        image: nginx
