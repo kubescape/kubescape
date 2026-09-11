@@ -1,6 +1,7 @@
 package cautils
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -26,12 +27,107 @@ func TestParseWorkloadIdentifierString_Invalid(t *testing.T) {
 			name:  "empty segment",
 			input: "default//nginx",
 		},
+		{
+			name:  "uppercase name",
+			input: "Deployment/NGINX",
+		},
+		{
+			name:  "name with symbols",
+			input: "Deployment/nginx@latest",
+		},
+		{
+			name:  "name with spaces",
+			input: "Deployment/my nginx",
+		},
+		{
+			name:  "name with underscores",
+			input: "Deployment/nginx_app",
+		},
+		{
+			name:  "name with leading hyphen",
+			input: "Deployment/-nginx",
+		},
+		{
+			name:  "name with trailing dot",
+			input: "Deployment/nginx.",
+		},
+		{
+			name:  "kind with symbol",
+			input: "Deploy!/nginx",
+		},
+		{
+			name:  "kind with space",
+			input: "Deploy ment/nginx",
+		},
+		{
+			name:  "kind with hyphen",
+			input: "Pod-App/nginx",
+		},
+		{
+			name:  "invalid namespace uppercase",
+			input: "Default/Deployment/nginx",
+		},
+		{
+			name:  "invalid namespace dots",
+			input: "my.ns/Deployment/nginx",
+		},
+		{
+			name:  "invalid namespace symbols",
+			input: "ns_prod/Deployment/nginx",
+		},
+		{
+			name:  "invalid API group symbols",
+			input: "Deployment.v1.apps@bad/nginx",
+		},
+		{
+			name:  "invalid API group spaces",
+			input: "Deployment.v1.apps core/nginx",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			_, _, _, _, err := ParseWorkloadIdentifierString(tt.input)
 			assert.Error(t, err)
+			assert.True(t, errors.Is(err, ErrInvalidWorkloadIdentifier), "error must wrap ErrInvalidWorkloadIdentifier")
+		})
+	}
+}
+
+func TestParseWorkloadIdentifierString_SentinelErrorWrapping(t *testing.T) {
+	tests := []struct {
+		domain string
+		input  string
+		errMsg string
+	}{
+		{
+			domain: "name",
+			input:  "Deployment/nginx@latest",
+			errMsg: "invalid workload name",
+		},
+		{
+			domain: "kind",
+			input:  "Deploy!/nginx",
+			errMsg: "invalid workload kind",
+		},
+		{
+			domain: "group",
+			input:  "Deployment.v1.apps@bad/nginx",
+			errMsg: "invalid API group",
+		},
+		{
+			domain: "namespace",
+			input:  "Prod!/Deployment/nginx",
+			errMsg: "invalid namespace",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.domain, func(t *testing.T) {
+			_, _, _, _, err := ParseWorkloadIdentifierString(tt.input)
+			require.Error(t, err)
+			assert.True(t, errors.Is(err, ErrInvalidWorkloadIdentifier), "must wrap ErrInvalidWorkloadIdentifier sentinel")
+			assert.Contains(t, err.Error(), tt.errMsg)
 		})
 	}
 }
@@ -442,6 +538,57 @@ func TestParseWorkloadIdentifierString_Values(t *testing.T) {
 			Input:       "cluster/default/Deployment/nginx",
 			WantErr:     true,
 		},
+		{
+			Description:    "valid name boundary 253 chars",
+			Input:          "Deployment/" + strings.Repeat("a", 253),
+			WantNamespace:  "",
+			WantKind:       "Deployment",
+			WantName:       strings.Repeat("a", 253),
+			WantApiVersion: "",
+			WantErr:        false,
+		},
+		{
+			Description: "invalid name boundary 254 chars",
+			Input:       "Deployment/" + strings.Repeat("a", 254),
+			WantErr:     true,
+		},
+		{
+			Description:    "valid namespace boundary 63 chars",
+			Input:          strings.Repeat("a", 63) + "/Deployment/nginx",
+			WantNamespace:  strings.Repeat("a", 63),
+			WantKind:       "Deployment",
+			WantName:       "nginx",
+			WantApiVersion: "",
+			WantErr:        false,
+		},
+		{
+			Description: "invalid namespace boundary 64 chars",
+			Input:       strings.Repeat("a", 64) + "/Deployment/nginx",
+			WantErr:     true,
+		},
+		{
+			Description:    "valid multi-segment CRD domain group",
+			Input:          "Custom.v1alpha1.custom.sub.domain.example.com/my-cr",
+			WantNamespace:  "",
+			WantKind:       "Custom",
+			WantName:       "my-cr",
+			WantApiVersion: "custom.sub.domain.example.com/v1alpha1",
+			WantErr:        false,
+		},
+		{
+			Description: "invalid multi-segment CRD domain group with symbol",
+			Input:       "Custom.v1alpha1.custom.sub@domain.example.com/my-cr",
+			WantErr:     true,
+		},
+		{
+			Description:    "misspelled kind passes parser format validation (typo tradeoff)",
+			Input:          "Deploymnet/nginx",
+			WantNamespace:  "",
+			WantKind:       "Deploymnet",
+			WantName:       "nginx",
+			WantApiVersion: "",
+			WantErr:        false,
+		},
 	}
 
 	for _, tc := range testCases {
@@ -623,6 +770,56 @@ func TestResolveWorkloadNamespace(t *testing.T) {
 			explicitNamespace: "prod",
 			isClusterScan:     false,
 			wantErr:           "conflicting namespaces: workload identifier specifies \"*\" but namespace specifies \"prod\"",
+		},
+		{
+			name:              "error precedence: format error in explicit namespace fires before conflict",
+			identNamespace:    "staging",
+			explicitNamespace: "Prod!",
+			isClusterScan:     true,
+			wantErr:           "invalid namespace \"Prod!\"",
+		},
+		{
+			name:              "error precedence: format error in identifier namespace fires before conflict",
+			identNamespace:    "Staging!",
+			explicitNamespace: "prod",
+			isClusterScan:     true,
+			wantErr:           "invalid namespace \"Staging!\"",
+		},
+		{
+			name:              "file scan: invalid explicit namespace returns format error",
+			identNamespace:    "",
+			explicitNamespace: "Invalid_NS!",
+			isClusterScan:     false,
+			wantErr:           "invalid namespace \"Invalid_NS!\"",
+		},
+		{
+			name:              "file scan: invalid identifier namespace returns format error",
+			identNamespace:    "Invalid_NS!",
+			explicitNamespace: "",
+			isClusterScan:     false,
+			wantErr:           "invalid namespace \"Invalid_NS!\"",
+		},
+		{
+			name:              "namespace with dots rejected as RFC 1123 label violation",
+			identNamespace:    "ns.with.dots",
+			explicitNamespace: "",
+			isClusterScan:     true,
+			wantErr:           "invalid namespace \"ns.with.dots\"",
+		},
+		{
+			name:              "namespace length boundary 63 chars valid",
+			identNamespace:    strings.Repeat("a", 63),
+			explicitNamespace: "",
+			isClusterScan:     true,
+			wantNamespace:     strings.Repeat("a", 63),
+			wantDefaulted:     false,
+		},
+		{
+			name:              "namespace length boundary 64 chars invalid",
+			identNamespace:    strings.Repeat("a", 64),
+			explicitNamespace: "",
+			isClusterScan:     true,
+			wantErr:           "invalid namespace",
 		},
 	}
 

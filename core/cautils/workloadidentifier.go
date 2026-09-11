@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+
+	"k8s.io/apimachinery/pkg/util/validation"
 )
 
 // Workload identifiers name a single Kubernetes resource to scan, in the form
@@ -24,6 +26,42 @@ import (
 // level error rather than being reconstructed per call site.
 var ErrInvalidWorkloadIdentifier = errors.New("invalid workload identifier, expected <kind>[.<version>[.<group>]]/<name>")
 
+var kindPattern = regexp.MustCompile(`^[a-zA-Z0-9]+$`)
+
+func validateWorkloadName(name string) error {
+	if errs := validation.IsDNS1123Subdomain(name); len(errs) > 0 {
+		return fmt.Errorf("%w: invalid workload name %q: %s", ErrInvalidWorkloadIdentifier, name, strings.Join(errs, "; "))
+	}
+	return nil
+}
+
+func validateWorkloadKind(kind string) error {
+	if !kindPattern.MatchString(kind) {
+		return fmt.Errorf("%w: invalid workload kind %q: must be alphanumeric", ErrInvalidWorkloadIdentifier, kind)
+	}
+	return nil
+}
+
+func validateWorkloadNamespace(ns string) error {
+	if ns == "" || ns == "*" {
+		return nil
+	}
+	if errs := validation.IsDNS1123Label(ns); len(errs) > 0 {
+		return fmt.Errorf("%w: invalid namespace %q: %s", ErrInvalidWorkloadIdentifier, ns, strings.Join(errs, "; "))
+	}
+	return nil
+}
+
+func validateWorkloadGroup(group string) error {
+	if group == "" {
+		return nil
+	}
+	if errs := validation.IsDNS1123Subdomain(group); len(errs) > 0 {
+		return fmt.Errorf("%w: invalid API group %q: %s", ErrInvalidWorkloadIdentifier, group, strings.Join(errs, "; "))
+	}
+	return nil
+}
+
 // ValidateWorkloadIdentifier reports whether workloadIdentifier is well formed,
 // discarding the parsed components. It exists so argument validation can run
 // before a command is willing to do any other work.
@@ -41,27 +79,35 @@ func ResolveWorkloadNamespace(identNamespace, explicitNamespace string, isCluste
 	identNamespace = strings.TrimSpace(identNamespace)
 	explicitNamespace = strings.TrimSpace(explicitNamespace)
 
-	// 1. Conflict validation: reject non-empty differing namespaces
+	// 1. Format validation: syntax validation runs before conflict checks
+	if err := validateWorkloadNamespace(identNamespace); err != nil {
+		return "", false, err
+	}
+	if err := validateWorkloadNamespace(explicitNamespace); err != nil {
+		return "", false, err
+	}
+
+	// 2. Conflict validation: reject non-empty differing namespaces
 	if identNamespace != "" && explicitNamespace != "" && explicitNamespace != identNamespace {
 		return "", false, fmt.Errorf("%w: conflicting namespaces: workload identifier specifies %q but namespace specifies %q", ErrInvalidWorkloadIdentifier, identNamespace, explicitNamespace)
 	}
 
-	// 2. Wildcard resolution: explicit wildcard matches all namespaces
+	// 3. Wildcard resolution: explicit wildcard matches all namespaces
 	if explicitNamespace == "*" || identNamespace == "*" {
 		return "", false, nil
 	}
 
-	// 3. Explicit namespace from tool argument or flag
+	// 4. Explicit namespace from tool argument or flag
 	if explicitNamespace != "" {
 		return explicitNamespace, false, nil
 	}
 
-	// 4. Namespace embedded in workload identifier
+	// 5. Namespace embedded in workload identifier
 	if identNamespace != "" {
 		return identNamespace, false, nil
 	}
 
-	// 5. Default fallback (only for cluster scans)
+	// 6. Default fallback (only for cluster scans)
 	if isClusterScan {
 		return "default", true, nil
 	}
@@ -88,14 +134,23 @@ func ParseWorkloadIdentifierString(workloadIdentifier string) (namespace, kind, 
 		if err != nil {
 			return "", "", "", "", err
 		}
+		if err := validateWorkloadName(x[1]); err != nil {
+			return "", "", "", "", err
+		}
 		return "", parsedKind, x[1], parsedApiVersion, nil
 	}
 	if len(x) == 3 {
 		if x[0] == "" || x[1] == "" || x[2] == "" {
 			return "", "", "", "", ErrInvalidWorkloadIdentifier
 		}
+		if err := validateWorkloadNamespace(x[0]); err != nil {
+			return "", "", "", "", err
+		}
 		parsedKind, parsedApiVersion, err := parseKindAndApiVersion(x[1])
 		if err != nil {
+			return "", "", "", "", err
+		}
+		if err := validateWorkloadName(x[2]); err != nil {
 			return "", "", "", "", err
 		}
 		return x[0], parsedKind, x[2], parsedApiVersion, nil
@@ -256,6 +311,9 @@ func IsBuiltinGroup(group string) bool {
 func parseKindAndApiVersion(kindStr string) (kind, apiVersion string, err error) {
 	parts := strings.Split(kindStr, ".")
 	if len(parts) == 1 {
+		if err := validateWorkloadKind(kindStr); err != nil {
+			return "", "", err
+		}
 		return kindStr, "", nil
 	}
 
@@ -266,12 +324,19 @@ func parseKindAndApiVersion(kindStr string) (kind, apiVersion string, err error)
 		}
 	}
 
+	if err := validateWorkloadKind(parts[0]); err != nil {
+		return "", "", err
+	}
+
 	if !apiVersionPattern.MatchString(parts[1]) {
 		return "", "", fmt.Errorf("%w: %q is not a valid API version in %q", ErrInvalidWorkloadIdentifier, parts[1], kindStr)
 	}
 
 	if len(parts) >= 3 {
 		group := strings.Join(parts[2:], ".")
+		if err := validateWorkloadGroup(group); err != nil {
+			return "", "", err
+		}
 		// Preserve custom resource Kind when an explicit custom API group is present,
 		// preventing CRDs whose name matches a built-in kind or alias (e.g. Deploy.v1.example.com)
 		// from being incorrectly rewritten to a built-in kind.

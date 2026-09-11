@@ -724,4 +724,46 @@ func TestGetWorkloadCmd_NamespaceResolution(t *testing.T) {
 		assert.True(t, errors.Is(err, resourcehandler.ErrResourceNotFound), "sentinel ErrResourceNotFound must be preserved in error chain")
 		assert.Contains(t, err.Error(), cliNamespaceDefaultedHint)
 	})
+
+	t.Run("invalid workload name fails early in argument validation", func(t *testing.T) {
+		scanInfo := cautils.ScanInfo{}
+		mock := &recordingKubescape{}
+		cmd := getWorkloadCmd(mock, &scanInfo)
+		cmd.SilenceErrors = true
+		cmd.SilenceUsage = true
+		cmd.SetArgs([]string{"Deployment/nginx@invalid"})
+
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.True(t, errors.Is(err, cautils.ErrInvalidWorkloadIdentifier))
+		assert.Contains(t, err.Error(), "invalid workload name")
+	})
+
+	t.Run("invalid namespace flag fails early in argument validation", func(t *testing.T) {
+		scanInfo := cautils.ScanInfo{}
+		mock := &recordingKubescape{}
+		cmd := getWorkloadCmd(mock, &scanInfo)
+		cmd.SilenceErrors = true
+		cmd.SilenceUsage = true
+		cmd.SetArgs([]string{"Deployment/nginx", "-n", "Invalid_NS!"})
+
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.True(t, errors.Is(err, cautils.ErrInvalidWorkloadIdentifier))
+		assert.Contains(t, err.Error(), "invalid namespace")
+	})
+
+	t.Run("invalid API group fails early in argument validation", func(t *testing.T) {
+		scanInfo := cautils.ScanInfo{}
+		mock := &recordingKubescape{}
+		cmd := getWorkloadCmd(mock, &scanInfo)
+		cmd.SilenceErrors = true
+		cmd.SilenceUsage = true
+		cmd.SetArgs([]string{"Deployment.v1.invalid@group/nginx"})
+
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.True(t, errors.Is(err, cautils.ErrInvalidWorkloadIdentifier))
+		assert.Contains(t, err.Error(), "invalid API group")
+	})
 }
