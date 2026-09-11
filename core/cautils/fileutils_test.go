@@ -1399,3 +1399,94 @@ items:
 		})
 	}
 }
+
+func generateLargeJSON(count int) []byte {
+	var objects []map[string]interface{}
+	for i := 0; i < count; i++ {
+		objects = append(objects, map[string]interface{}{
+			"apiVersion": "apps/v1",
+			"kind":       "Deployment",
+			"metadata": map[string]interface{}{
+				"name":      "deploy-" + strconv.Itoa(i),
+				"namespace": "default",
+			},
+			"spec": map[string]interface{}{
+				"replicas": 3,
+				"template": map[string]interface{}{
+					"metadata": map[string]interface{}{
+						"labels": map[string]interface{}{
+							"app": "nginx",
+						},
+					},
+					"spec": map[string]interface{}{
+						"containers": []interface{}{
+							map[string]interface{}{
+								"name":  "nginx",
+								"image": "nginx:latest",
+							},
+						},
+					},
+				},
+			},
+		})
+	}
+	data, _ := json.Marshal(objects)
+	return data
+}
+
+func BenchmarkReadJsonFile(b *testing.B) {
+	jsonData := generateLargeJSON(1000)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, err := readJsonFile(jsonData)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkLoadFiles(b *testing.B) {
+	tmpDir := b.TempDir()
+
+	// Create 500 JSON files and 500 YAML files
+	for i := 0; i < 500; i++ {
+		jsonPath := filepath.Join(tmpDir, "manifest-"+strconv.Itoa(i)+".json")
+		yamlPath := filepath.Join(tmpDir, "manifest-"+strconv.Itoa(i)+".yaml")
+
+		jsonData, _ := json.Marshal(map[string]interface{}{
+			"apiVersion": "apps/v1",
+			"kind":       "Deployment",
+			"metadata": map[string]interface{}{
+				"name":      "deploy-json-" + strconv.Itoa(i),
+				"namespace": "default",
+			},
+			"spec": map[string]interface{}{
+				"replicas": 1,
+			},
+		})
+		os.WriteFile(jsonPath, jsonData, 0o600)
+
+		yamlData := []byte(`
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: deploy-yaml-` + strconv.Itoa(i) + `
+spec:
+  replicas: 1
+`)
+		os.WriteFile(yamlPath, yamlData, 0o600)
+	}
+
+	files, _ := listFiles(tmpDir, nil)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		workloads, _, errs := loadFiles(tmpDir, files)
+		if len(errs) > 0 {
+			b.Fatal(errs[0])
+		}
+		if len(workloads) == 0 {
+			b.Fatal("no workloads loaded")
+		}
+	}
+}
