@@ -16,10 +16,10 @@ import (
 
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	v1 "k8s.io/api/core/v1"
-	apimachineryspdy "k8s.io/apimachinery/pkg/util/httpstream/spdy"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/portforward"
 	"k8s.io/client-go/transport/spdy"
+	streamingspdy "k8s.io/streaming/pkg/httpstream/spdy"
 )
 
 const (
@@ -220,18 +220,18 @@ func newPortForwardRoundTripper(config *rest.Config, serverURL *url.URL, readyTi
 		},
 	}
 
-	spdyUpgrader, err := apimachineryspdy.NewRoundTripperWithConfig(apimachineryspdy.RoundTripperConfig{
+	spdyRoundTripper, err := streamingspdy.NewRoundTripperWithConfig(streamingspdy.RoundTripperConfig{
 		PingPeriod:       time.Second * 5,
 		UpgradeTransport: upgradeTransport,
 	})
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	roundTripper, err := rest.HTTPWrappersForConfig(config, spdyUpgrader)
+	roundTripper, err := rest.HTTPWrappersForConfig(config, spdyRoundTripper)
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	return roundTripper, spdyUpgrader, handshakeConn, nil
+	return roundTripper, spdy.NewUpgraderForStreaming(spdyRoundTripper), handshakeConn, nil
 }
 
 // waitForPortForwardReadiness blocks until the port-forward is ready, fails,
