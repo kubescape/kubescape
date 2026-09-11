@@ -475,6 +475,54 @@ func TestBracketedKeyRedaction(t *testing.T) {
 			path: "data[username]",
 			want: false,
 		},
+		// A container env value has several spellings. Extraction resolves all
+		// of them, so classification has to recognise all of them: one it
+		// misses is a credential printed without --show-secrets.
+		{
+			name: "env value, plain spelling",
+			kind: "Deployment",
+			path: "spec.containers[0].env[1].value",
+			want: true,
+		},
+		{
+			name: "env value, single-quoted bracket spelling",
+			kind: "Deployment",
+			path: "spec.containers[0]['env'][1].value",
+			want: true,
+		},
+		{
+			name: "env value, double-quoted bracket spelling",
+			kind: "Deployment",
+			path: `spec.containers[0]["env"][1].value`,
+			want: true,
+		},
+		{
+			name: "env value through a pod template",
+			kind: "Deployment",
+			path: "spec.template.spec.initContainers[0]['env'][0].value",
+			want: true,
+		},
+		{
+			// The name of an env var is not its value, in any spelling.
+			name: "env name is not a value",
+			kind: "Deployment",
+			path: "spec.containers[0]['env'][1].name",
+			want: false,
+		},
+		{
+			// valueFrom is a reference; the Secret it names is redacted by kind.
+			name: "env valueFrom is a reference, not a literal",
+			kind: "Deployment",
+			path: "spec.containers[0]['env'][0].valueFrom.secretKeyRef.name",
+			want: false,
+		},
+		{
+			// Without an index this is not an element of the env list.
+			name: "env without an index is not an env value",
+			kind: "Deployment",
+			path: "spec.containers[0].env.value",
+			want: false,
+		},
 	}
 
 	for _, tc := range cases {

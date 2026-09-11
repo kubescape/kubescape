@@ -162,7 +162,7 @@ func unquote(s string) (string, bool) {
 // The digits are checked explicitly rather than left to strconv.Atoi, which
 // also accepts a sign: "[+0]" is not a list index any rule would write, and
 // reading it as one would silently resolve the path to an element. This matches
-// how isContainerEnvValuePath reads env[N] in pathvalue.go.
+// how isContainerEnvValue reads env[N] in pathvalue.go.
 func digitIndex(contents string) (int, bool) {
 	if contents == "" {
 		return 0, false
