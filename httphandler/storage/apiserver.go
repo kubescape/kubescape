@@ -71,6 +71,7 @@ func NewAPIServerStorage(clusterName string, namespace string, ksClient spdxv1be
 func (a *APIServerStore) StorePostureReportResults(ctx context.Context, pr *v2.PostureReport) error {
 	recoveredResources := 0
 	recoveredControls := 0
+	failedResults := 0
 	for i := range pr.Results {
 		workloadScan, err := a.BuildWorkloadConfigurationScan(ctx, pr, &pr.Results[i])
 		if err != nil {
@@ -85,19 +86,26 @@ func (a *APIServerStore) StorePostureReportResults(ctx context.Context, pr *v2.P
 			recoveredControls += len(workloadScan.Spec.Controls)
 		}
 
+		failed := false
 		if a.continuousPostureScan {
 			if err := a.StoreWorkloadConfigurationScanResult(ctx, workloadScan); err != nil {
-				return err
+				failed = true
 			}
 		}
 
 		if _, err := a.StoreWorkloadConfigurationScanResultSummary(ctx, workloadScan); err != nil {
-			return err
+			failed = true
+		}
+		if failed {
+			failedResults++
 		}
 	}
 	if recoveredResources > 0 {
 		logger.L().Ctx(ctx).Warning("recovered missing per-resource controls from aggregate posture summary",
 			helpers.Int("resources", recoveredResources), helpers.Int("controls", recoveredControls))
+	}
+	if failedResults > 0 {
+		return fmt.Errorf("failed to store %d of %d posture scan results", failedResults, len(pr.Results))
 	}
 	return nil
 }

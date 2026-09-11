@@ -675,6 +675,54 @@ func TestStorePostureReportResults_SkipsOrphanedRoleBinding(t *testing.T) {
 	assert.Equal(t, "pod-test-pod", summaries.Items[0].Name)
 }
 
+func TestStorePostureReportResults_ContinuesAfterUnstorableResult(t *testing.T) {
+	ctx := context.Background()
+
+	// An object the storage backend refuses — the real case is a name at the
+	// 253-byte limit, which the file backend cannot write.
+	client := fake.NewSimpleClientset()
+	storeErr := errors.New("open payload file: file name too long")
+	client.PrependReactor("create", "workloadconfigurationscansummaries", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		summary, ok := action.(k8stesting.CreateAction).GetObject().(*v1beta1.WorkloadConfigurationScanSummary)
+		if ok && summary.Name == "pod-unstorable" {
+			return true, nil, storeErr
+		}
+		return false, nil, nil
+	})
+	store := &APIServerStore{StorageClient: client.SpdxV1beta1(), namespace: "kubescape"}
+
+	pod := func(name string) map[string]any {
+		return map[string]any{
+			"apiVersion": "v1",
+			"kind":       "Pod",
+			"metadata":   map[string]any{"name": name, "namespace": "default"},
+		}
+	}
+	pr := &v2.PostureReport{
+		Resources: []reporthandling.Resource{
+			{ResourceID: "unstorable-id", Object: pod("unstorable")},
+			{ResourceID: "storable-id", Object: pod("storable")},
+		},
+		Results: []resourcesresults.Result{
+			{ResourceID: "unstorable-id"},
+			{ResourceID: "storable-id"},
+		},
+	}
+
+	err := store.StorePostureReportResults(ctx, pr)
+
+	// The failure is still reported — it must not become a silent success. The
+	// cause is not re-wrapped here; StoreWorkloadConfigurationScanResultSummary
+	// already logs it with the object name.
+	assert.EqualError(t, err, "failed to store 1 of 2 posture scan results")
+
+	// ...and the result that came after it was still stored.
+	summaries, listErr := store.StorageClient.WorkloadConfigurationScanSummaries("default").List(ctx, metav1.ListOptions{})
+	assert.NoError(t, listErr)
+	assert.Len(t, summaries.Items, 1)
+	assert.Equal(t, "pod-storable", summaries.Items[0].Name)
+}
+
 func TestStorePostureReportResults_NonRecoverableError(t *testing.T) {
 	store := NewFakeAPIServerStorage("kubescape")
 	ctx := context.Background()
