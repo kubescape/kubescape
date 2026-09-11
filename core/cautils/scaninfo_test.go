@@ -366,15 +366,7 @@ func TestGetHostname(t *testing.T) {
 }
 
 func TestGetScanningContext(t *testing.T) {
-	repoRoot, err := os.MkdirTemp("", "repo")
-	require.NoError(t, err)
-	defer func(name string) {
-		_ = os.Remove(name)
-	}(repoRoot)
-	_, err = git.PlainClone(repoRoot, false, &git.CloneOptions{
-		URL: "https://github.com/kubescape/http-request",
-	})
-	require.NoError(t, err)
+	repoRoot := newGitFixture(t, "https://github.com/kubescape/http-request")
 	tmpFile, err := os.CreateTemp("", "single.*.txt")
 	require.NoError(t, err)
 	defer func(name string) {
@@ -411,14 +403,14 @@ func TestGetScanningContext(t *testing.T) {
 			want:  ContextDir,
 		},
 		{
-			name:  "self-hosted GitLab URL that can't be cloned",
+			name:  "self-hosted GitLab URL",
 			input: "https://gitlab.private-domain.com/my-org/my-repo.git",
-			want:  ContextDir, // Should return ContextDir when clone fails, not try to treat as local path
+			want:  ContextGitRemote,
 		},
 		{
-			name:  "http URL that can't be cloned",
+			name:  "http URL git repo",
 			input: "http://gitlab.example.com/org/repo",
-			want:  ContextDir, // Should return ContextDir when clone fails, not try to treat as local path
+			want:  ContextGitRemote,
 		},
 	}
 	for _, tt := range tests {
