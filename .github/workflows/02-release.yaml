@@ -98,8 +98,26 @@ jobs:
       - name: Install Cosign
         uses: sigstore/cosign-installer@7e8b541eb2e61bf99390e1afd4be13a184e9ebc5 # v3.10.1
 
+      # goreleaser's docker_signs block reads this file to sign the container
+      # images, so the key has to exist on disk for the length of the release
+      # run. Everything after this step shares the same workspace - the E2E
+      # hook, the system tests, and three third-party actions - so the key is
+      # created owner-only and removed again once the job finishes.
+      #
+      # The secret goes through `env` rather than being interpolated into the
+      # script: `${{ }}` substitution happens before the shell runs, which puts
+      # the key material into the command line itself.
       - name: Create Cosign Key
-        run: echo "${{ secrets.COSIGN_PRIVATE_KEY_V1 }}" > cosign.key
+        env:
+          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY_V1 }}
+        run: |
+          set -euo pipefail
+
+          # umask only applies to a file it creates, so remove any leftover
+          # first - otherwise a pre-existing file keeps its old mode.
+          rm -f cosign.key
+          umask 077
+          printf '%s\n' "$COSIGN_PRIVATE_KEY" > cosign.key
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@1f40c72289eff860ee54a304f1438e3cff362e0a # v4.3.0
@@ -174,3 +192,10 @@ jobs:
           report_paths: "test-results/system-tests/**/results_xml_format/**.xml"
           annotate_only: true
           job_summary: true
+
+      # Last in the job, and unconditional: goreleaser is the only consumer of
+      # the key, and a failed or cancelled release must not leave signing
+      # material behind in the workspace.
+      - name: Remove Cosign Key
+        if: always()
+        run: rm -f cosign.key
