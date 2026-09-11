@@ -5,13 +5,14 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/kubescape/kubescape/v4/core/cautils"
+	printerv2 "github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer/v2"
 	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
+	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -106,60 +107,73 @@ spec:
 	controlsInputsPath := writeAgentRuntimeScanFile(t, dir, "controls-inputs.json", `{}`)
 	exceptionsPath := writeAgentRuntimeScanFile(t, dir, "exceptions.json", `[]`)
 	attackTracksPath := writeAgentRuntimeScanFile(t, dir, "attack-tracks.json", `[]`)
-	scanInfo := &cautils.ScanInfo{
-		UseFrom:          []string{frameworkPath},
-		ControlsInputs:   controlsInputsPath,
-		UseExceptions:    exceptionsPath,
-		AttackTracks:     attackTracksPath,
-		InputPatterns:    []string{manifestPath},
-		Local:            true,
-		FrameworkScan:    true,
-		ScanType:         cautils.ScanTypeFramework,
-		OmitRawResources: true,
-	}
-	scanInfo.Submit.SetBool(false)
-
-	results, err := NewKubescape(context.Background()).Scan(scanInfo, []cautils.PolicyIdentifier{{
-		Identifier: framework.Name,
-		Kind:       apisv1.KindFramework,
-	}})
-
-	require.NoError(t, err)
-	require.NotNil(t, results)
-	require.NotNil(t, results.GetData())
-	data := results.GetData()
-	require.Len(t, data.ResourcesResult, 6)
-
-	for _, control := range controls {
-		summary, ok := data.Report.SummaryDetails.Controls[control.ControlID]
-		require.Truef(t, ok, "missing summary for %s", control.ControlID)
-		assert.Equal(t, apis.StatusFailed, summary.GetStatus().Status())
-		assert.Equal(t, 1, summary.StatusCounters.FailedResources)
-		assert.Equal(t, 1, summary.StatusCounters.PassedResources)
-	}
-
-	type expectedResult struct {
-		controlID  string
-		status     apis.ScanningStatus
-		failedPath string
-	}
-	expected := map[string]expectedResult{
-		"/agents/Sandbox/unsafe-sandbox":             {"C-0297", apis.StatusFailed, "spec.podTemplate.spec.runtimeClassName"},
-		"/agents/Sandbox/isolated-sandbox":           {"C-0297", apis.StatusPassed, ""},
-		"/agents/SandboxTemplate/unmanaged-template": {"C-0314", apis.StatusFailed, "spec.networkPolicyManagement"},
-		"/agents/SandboxTemplate/managed-template":   {"C-0314", apis.StatusPassed, ""},
-		"/agents/WorkerPool/unbounded-pool":          {"C-0317", apis.StatusFailed, "spec.template.resources.limits.cpu"},
-		"/agents/WorkerPool/bounded-pool":            {"C-0317", apis.StatusPassed, ""},
-	}
-	for _, resource := range data.ResourcesResult {
-		var want expectedResult
-		for suffix, expectedResource := range expected {
-			if strings.HasSuffix(resource.ResourceID, suffix) {
-				want = expectedResource
-				break
+	for _, test := range []struct {
+		name             string
+		omitRawResources bool
+	}{
+		{name: "include raw resources", omitRawResources: false},
+		{name: "omit raw resources", omitRawResources: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			scanInfo := &cautils.ScanInfo{
+				UseFrom:          []string{frameworkPath},
+				ControlsInputs:   controlsInputsPath,
+				UseExceptions:    exceptionsPath,
+				AttackTracks:     attackTracksPath,
+				InputPatterns:    []string{manifestPath},
+				Local:            true,
+				FrameworkScan:    true,
+				ScanType:         cautils.ScanTypeFramework,
+				OmitRawResources: test.omitRawResources,
 			}
-		}
-		require.NotEmptyf(t, want.controlID, "unexpected resource result %q", resource.ResourceID)
+			scanInfo.Submit.SetBool(false)
+
+			results, err := NewKubescape(context.Background()).Scan(scanInfo, []cautils.PolicyIdentifier{{
+				Identifier: framework.Name,
+				Kind:       apisv1.KindFramework,
+			}})
+
+			require.NoError(t, err)
+			require.NotNil(t, results)
+			require.NotNil(t, results.GetData())
+			data := results.GetData()
+			require.Len(t, data.ResourcesResult, 6)
+
+			for _, control := range controls {
+				summary, ok := data.Report.SummaryDetails.Controls[control.ControlID]
+				require.Truef(t, ok, "missing summary for %s", control.ControlID)
+				assert.Equal(t, apis.StatusFailed, summary.GetStatus().Status())
+				assert.Equal(t, 1, summary.StatusCounters.FailedResources)
+				assert.Equal(t, 1, summary.StatusCounters.PassedResources)
+			}
+
+			assertAgentRuntimeResourceResults(t, data.ResourcesResult)
+			assertAgentRuntimeSerializedResources(t, data, test.omitRawResources)
+		})
+	}
+}
+
+type agentRuntimeExpectedResult struct {
+	controlID  string
+	status     apis.ScanningStatus
+	failedPath string
+}
+
+func assertAgentRuntimeResourceResults(t *testing.T, resources map[string]resourcesresults.Result) {
+	t.Helper()
+	expected := map[string]agentRuntimeExpectedResult{
+		"path=2781081350/api=agents.x-k8s.io/v1beta1/agents/Sandbox/unsafe-sandbox":                        {"C-0297", apis.StatusFailed, "spec.podTemplate.spec.runtimeClassName"},
+		"path=2797858969/api=agents.x-k8s.io/v1beta1/agents/Sandbox/isolated-sandbox":                      {"C-0297", apis.StatusPassed, ""},
+		"path=2747526112/api=extensions.agents.x-k8s.io/v1beta1/agents/SandboxTemplate/unmanaged-template": {"C-0314", apis.StatusFailed, "spec.networkPolicyManagement"},
+		"path=2764303731/api=extensions.agents.x-k8s.io/v1beta1/agents/SandboxTemplate/managed-template":   {"C-0314", apis.StatusPassed, ""},
+		"path=2848191826/api=ate.dev/v1alpha1/agents/WorkerPool/unbounded-pool":                            {"C-0317", apis.StatusFailed, "spec.template.resources.limits.cpu"},
+		"path=2864969445/api=ate.dev/v1alpha1/agents/WorkerPool/bounded-pool":                              {"C-0317", apis.StatusPassed, ""},
+	}
+	require.Equal(t, len(expected), len(resources))
+	for resourceID, want := range expected {
+		resource, ok := resources[resourceID]
+		require.Truef(t, ok, "missing resource result %q", resourceID)
+		assert.Equal(t, resourceID, resource.ResourceID)
 		require.Len(t, resource.AssociatedControls, 1)
 		associatedControl := resource.AssociatedControls[0]
 		assert.Equal(t, want.controlID, associatedControl.ControlID)
@@ -169,8 +183,25 @@ spec:
 			require.Len(t, associatedControl.ResourceAssociatedRules[0].Paths, 1)
 			assert.Equal(t, want.failedPath, associatedControl.ResourceAssociatedRules[0].Paths[0].ReviewPath)
 		}
-		assert.Nil(t, resource.RawResource)
 	}
+}
+
+func assertAgentRuntimeSerializedResources(t *testing.T, data *cautils.OPASessionObj, omitRawResources bool) {
+	t.Helper()
+	serialized, err := json.Marshal(printerv2.FinalizeResults(data))
+	require.NoError(t, err)
+
+	var report map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(serialized, &report))
+	if omitRawResources {
+		assert.NotContains(t, report, "resources")
+		return
+	}
+
+	require.Contains(t, report, "resources")
+	var resources []json.RawMessage
+	require.NoError(t, json.Unmarshal(report["resources"], &resources))
+	assert.Len(t, resources, 6)
 }
 
 func agentRuntimeIntegrationControl(controlID, controlName, ruleName string, match reporthandling.RuleMatchObjects, condition, failedPath string) reporthandling.Control {
