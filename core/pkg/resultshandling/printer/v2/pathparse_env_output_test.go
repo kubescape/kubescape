@@ -114,3 +114,59 @@ func TestEnvValueSpellingsAllResolve(t *testing.T) {
 		})
 	}
 }
+
+// malformedKeyedSegmentPaths name a field of a list, which no resource has:
+// "env['ignored'][1]" asks for the key "ignored" on the env slice and then its
+// element 1. Traversal used to satisfy that by discarding the key and indexing
+// anyway, which resolved the credential - while isSensitivePath, reading the
+// same segments, saw "ignored" rather than "env" and judged the path harmless.
+// Traversal now fails closed, so both agree the path means nothing.
+var malformedKeyedSegmentPaths = []string{
+	"spec.template.spec.containers[0].env['ignored'][1].value",
+	`spec.template.spec.containers[0].env["ignored"][1].value`,
+	"spec.template.spec.containers[0].env[ignored][1].value",
+}
+
+func TestMalformedKeyedSegmentResolvesNothing(t *testing.T) {
+	obj := envCredentialResource().GetObject()
+	for _, path := range malformedKeyedSegmentPaths {
+		t.Run(path, func(t *testing.T) {
+			got, ok := extractValueAtPath(obj, path)
+			assert.False(t, ok, "a keyed segment on a list must not resolve")
+			assert.Empty(t, got)
+		})
+	}
+}
+
+// TestMalformedKeyedSegmentNeverReachesOutput is the output-level guard for the
+// same paths: whatever the classifier makes of them, nothing may reach Evidence
+// or the --show-evidence column.
+func TestMalformedKeyedSegmentNeverReachesOutput(t *testing.T) {
+	for _, path := range malformedKeyedSegmentPaths {
+		t.Run(path, func(t *testing.T) {
+			resource := envCredentialResource()
+
+			evidence := failedPathValues(&resourcesresults.ResourceAssociatedControl{
+				ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{
+					{Paths: []armotypes.PosturePaths{{FailedPath: path}}},
+				},
+			}, resource)
+			for _, pv := range evidence {
+				assert.NotContains(t, pv.Value, envFixtureValue,
+					"malformed path reached Evidence")
+			}
+
+			control := &resourcesresults.ResourceAssociatedControl{
+				ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{
+					{Paths: []armotypes.PosturePaths{{ReviewPath: path}}},
+				},
+			}
+			for _, showSecrets := range []bool{false, true} {
+				out := strings.Join(
+					AssistedRemediationPathsWithCurrentValuesFiltered(control, resource, showSecrets), "\n")
+				assert.NotContains(t, out, envFixtureValue,
+					"malformed path reached the evidence column (showSecrets=%v)", showSecrets)
+			}
+		})
+	}
+}

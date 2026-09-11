@@ -123,6 +123,22 @@ func extractValueAtPath(obj map[string]any, path string) (string, bool) {
 				cur = next
 			}
 		default:
+			// A named segment is a map lookup, and this is not a map. Every
+			// segment the parser produces carries a key, so reaching here means
+			// the path asks for a field of a list - "env['ignored'][1]" - which
+			// no resource has.
+			//
+			// It fails rather than indexing past the name. Indexing anyway
+			// would resolve the path by quietly discarding a segment, and
+			// isSensitivePath reads that same segment: it would see "ignored"
+			// where traversal saw the env list, judge the path harmless, and
+			// print a credential the two functions disagreed about. Traversal
+			// and classification have to give the same answer about what a path
+			// means, and the safe direction for a malformed path is to resolve
+			// nothing.
+			if seg.key != "" {
+				return "", false
+			}
 			elem, ok := indexList(v, seg.index)
 			if !ok {
 				return "", false
