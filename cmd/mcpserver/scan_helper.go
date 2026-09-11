@@ -23,16 +23,25 @@ import (
 
 const maxFailedResources = 100
 
+type TargetResourceInfo struct {
+	Kind               string `json:"kind,omitempty"`
+	Name               string `json:"name,omitempty"`
+	Namespace          string `json:"namespace,omitempty"`
+	NamespaceDefaulted bool   `json:"namespace_defaulted,omitempty"`
+}
+
 type scanResponse struct {
-	ComplianceScore      *float32      `json:"compliance_score,omitempty"`
-	FrameworkName        string        `json:"framework_name,omitempty"`
-	Degraded             bool          `json:"degraded"`
-	NotEvaluatedControls int           `json:"not_evaluated_controls"`
-	TotalControls        int           `json:"total_controls"`
-	TotalFailed          int           `json:"total_failed"`
-	ReturnedFailed       int           `json:"returned_failed"`
-	Truncated            bool          `json:"truncated"`
-	FailedResources      []interface{} `json:"failed_resources"`
+	ComplianceScore      *float32            `json:"compliance_score,omitempty"`
+	FrameworkName        string              `json:"framework_name,omitempty"`
+	Degraded             bool                `json:"degraded"`
+	NotEvaluatedControls int                 `json:"not_evaluated_controls"`
+	TotalControls        int                 `json:"total_controls"`
+	TotalFailed          int                 `json:"total_failed"`
+	ReturnedFailed       int                 `json:"returned_failed"`
+	Truncated            bool                `json:"truncated"`
+	FailedResources      []interface{}       `json:"failed_resources"`
+	Warning              string              `json:"warning,omitempty"`
+	TargetResource       *TargetResourceInfo `json:"target_resource,omitempty"`
 }
 
 // scanRequest carries the parameters shared by every MCP scan entry point.
@@ -41,8 +50,9 @@ type scanResponse struct {
 type scanRequest struct {
 	// namespace scopes a live-cluster scan. Empty or "*" means cluster-wide;
 	// buildScanInfo normalizes "*" and derives the timeout from the scope.
-	namespace         string
-	policyIdentifiers []cautils.PolicyIdentifier
+	namespace          string
+	namespaceDefaulted bool
+	policyIdentifiers  []cautils.PolicyIdentifier
 	// label names the scan in log lines and error messages ("RBAC", "Framework").
 	label string
 	// wantComplianceScore makes runScan report the framework compliance score
@@ -180,6 +190,15 @@ func runScan(ctx context.Context, ksServer *KubescapeMcpserver, req scanRequest)
 	}
 
 	response := buildScanResponse(scanData.ResourcesResult, complianceScore, frameworkName, degraded, notEvaluated, totalControls)
+	if req.namespaceDefaulted && req.scanObject != nil {
+		response.Warning = "Workload namespace was omitted and defaulted to 'default'. If your workload is in another namespace, specify 'namespace' explicitly or pass '*' to search cluster-wide."
+		response.TargetResource = &TargetResourceInfo{
+			Kind:               req.scanObject.GetKind(),
+			Name:               req.scanObject.GetName(),
+			Namespace:          req.scanObject.GetNamespace(),
+			NamespaceDefaulted: true,
+		}
+	}
 
 	logger.L().Ctx(ctx).Info(fmt.Sprintf("Completed on-demand MCP %s security scan", req.label),
 		helpers.Int("failed_resources", response.TotalFailed),

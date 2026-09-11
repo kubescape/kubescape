@@ -3,6 +3,7 @@ package mcpserver
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"strings"
@@ -1323,7 +1324,13 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		if err != nil {
 			code := classifyScanError(err)
 			msg := classifyScanErrorMessage(code, "workload", err)
-			return mcpToolError(code, msg, nil), nil
+			var extra map[string]any
+			var hinted interface{ Hint() string }
+			if errors.As(err, &hinted) && code == ErrCodeResourceNotFound {
+				msg = fmt.Sprintf("%s (%s)", msg, hinted.Hint())
+				extra = map[string]any{"hint": hinted.Hint()}
+			}
+			return mcpToolError(code, msg, extra), nil
 		}
 		return mcp.NewToolResultText(string(v.([]byte))), nil
 	case "list_frameworks":

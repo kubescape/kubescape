@@ -149,6 +149,7 @@ type ScanInfo struct {
 	ExcludePaths              []string                     // gitignore-style patterns excluding paths from file, directory and repository scans
 	NoIgnoreFile              bool                         // do not read the .kubescapeignore file at the scan root
 	Namespace                 string                       // target namespace for workload scans
+	NamespaceDefaulted        bool                         // true when target namespace for workload scans was defaulted to "default"
 	InputPatterns             []string                     // Yaml files input patterns
 	Silent                    bool                         // Silent mode - Do not print progress logs
 	FailThreshold             float32                      // DEPRECATED - Failure score threshold
