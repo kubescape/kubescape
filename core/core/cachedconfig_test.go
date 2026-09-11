@@ -18,6 +18,12 @@ func TestViewCachedConfig_KeyedLookup(t *testing.T) {
 	getter.DefaultLocalStore = t.TempDir()
 	t.Cleanup(func() { getter.DefaultLocalStore = originalStore })
 
+	// Force the LocalConfig path so the test never reads the host's cluster
+	// ConfigMap/Secret/kube-context.
+	originalConnected := k8sinterface.IsConnectedToCluster()
+	k8sinterface.SetConnectedToCluster(false)
+	t.Cleanup(func() { k8sinterface.SetConnectedToCluster(originalConnected) })
+
 	// stub k8s API to prevent flaky tests in cluster-connected environments
 	origK8s := kubernetesAPIFunc
 	kubernetesAPIFunc = func() *k8sinterface.KubernetesApi { return nil }
@@ -68,9 +74,6 @@ func TestViewCachedConfig_KeyedLookup(t *testing.T) {
 			key:     "cloudReportURL",
 			format:  "",
 			wantErr: `key "cloudReportURL" is not set`,
-			key:     "clusterName",
-			format:  "",
-			wantErr: `key "clusterName" is not set`,
 		},
 		{
 			name:   "Format JSON",
