@@ -43,6 +43,10 @@ func TestBuildWorkloadScanRequest_InvalidIdentifier(t *testing.T) {
 		{name: "empty segment", workload: "default//nginx"},
 		{name: "bad api version", workload: "Deployment.vX.apps/nginx", wantErr: "is not a valid API version"},
 		{name: "missing api version", workload: "Deployment.apps/nginx", wantErr: "is not a valid API version"},
+		{name: "invalid workload name", workload: "Deployment/nginx@invalid", wantErr: "invalid workload name"},
+		{name: "invalid workload kind", workload: "Deploy!/nginx", wantErr: "invalid workload kind"},
+		{name: "invalid namespace in identifier", workload: "Bad_NS!/Deployment/nginx", wantErr: "invalid namespace"},
+		{name: "invalid API group", workload: "Deployment.v1.apps@bad/nginx", wantErr: "invalid API group"},
 	}
 
 	for _, tt := range tests {
@@ -56,6 +60,13 @@ func TestBuildWorkloadScanRequest_InvalidIdentifier(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestBuildWorkloadScanRequest_InvalidNamespace(t *testing.T) {
+	_, err := buildWorkloadScanRequest("Deployment/nginx", "Bad_NS!", "", "")
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, cautils.ErrInvalidWorkloadIdentifier))
+	assert.Contains(t, err.Error(), "invalid namespace")
 }
 
 func TestBuildWorkloadScanRequest_ScanObject(t *testing.T) {
