@@ -21,4 +21,5 @@ type ValidateConfig struct {
 	IncludeOK bool
 }
 type DeleteConfig struct {
+	Keys []string
 }
