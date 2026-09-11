@@ -8,9 +8,9 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-type configOutputField struct {
-	name  string
-	value string
+type ConfigOutputField struct {
+	Name  string
+	Value string
 }
 
 // FormatConfigOutput renders configuration data in the requested output format.
@@ -39,9 +39,9 @@ func FormatConfigOutput(cfg *ConfigObj, format string, includeEmpty bool) ([]byt
 
 func formatConfigOutputJSON(cfg *ConfigObj, includeEmpty bool) ([]byte, error) {
 	payload := map[string]string{}
-	for _, field := range configOutputFields(cfg) {
-		if includeEmpty || field.value != "" {
-			payload[field.name] = field.value
+	for _, field := range ConfigOutputFields(cfg) {
+		if includeEmpty || field.Value != "" {
+			payload[field.Name] = field.Value
 		}
 	}
 	return json.MarshalIndent(payload, "", "  ")
@@ -49,9 +49,9 @@ func formatConfigOutputJSON(cfg *ConfigObj, includeEmpty bool) ([]byte, error) {
 
 func formatConfigOutputYAML(cfg *ConfigObj, includeEmpty bool) ([]byte, error) {
 	payload := map[string]string{}
-	for _, field := range configOutputFields(cfg) {
-		if includeEmpty || field.value != "" {
-			payload[field.name] = field.value
+	for _, field := range ConfigOutputFields(cfg) {
+		if includeEmpty || field.Value != "" {
+			payload[field.Name] = field.Value
 		}
 	}
 	return yaml.Marshal(payload)
@@ -59,21 +59,40 @@ func formatConfigOutputYAML(cfg *ConfigObj, includeEmpty bool) ([]byte, error) {
 
 func formatConfigOutputText(cfg *ConfigObj, includeEmpty bool) ([]byte, error) {
 	var lines []string
-	for _, field := range configOutputFields(cfg) {
-		if includeEmpty || field.value != "" {
-			lines = append(lines, fmt.Sprintf("%s: %s", field.name, field.value))
+	for _, field := range ConfigOutputFields(cfg) {
+		if includeEmpty || field.Value != "" {
+			lines = append(lines, fmt.Sprintf("%s: %s", field.Name, field.Value))
 		}
 	}
 	return []byte(strings.Join(lines, "\n") + "\n"), nil
 }
 
-func configOutputFields(cfg *ConfigObj) []configOutputField {
-	return []configOutputField{
-		{name: "accountID", value: cfg.AccountID},
-		{name: "clusterName", value: cfg.ClusterName},
-		{name: "cloudReportURL", value: cfg.CloudReportURL},
-		{name: "cloudAPIURL", value: cfg.CloudAPIURL},
-		{name: "accessKey", value: maskAccessKey(cfg.AccessKey)},
+func ConfigOutputFields(cfg *ConfigObj) []ConfigOutputField {
+	return []ConfigOutputField{
+		{Name: "accountID", Value: cfg.AccountID},
+		{Name: "clusterName", Value: cfg.ClusterName},
+		{Name: "cloudReportURL", Value: cfg.CloudReportURL},
+		{Name: "cloudAPIURL", Value: cfg.CloudAPIURL},
+		{Name: "accessKey", Value: maskAccessKey(cfg.AccessKey)},
+	}
+}
+
+// FormatConfigFieldOutput renders a single configuration field.
+func FormatConfigFieldOutput(field ConfigOutputField, format string) ([]byte, error) {
+	format = strings.ToLower(strings.TrimSpace(format))
+	if format == "" {
+		format = "text"
+	}
+
+	switch format {
+	case "json":
+		return json.MarshalIndent(map[string]string{field.Name: field.Value}, "", "  ")
+	case "yaml":
+		return yaml.Marshal(map[string]string{field.Name: field.Value})
+	case "text":
+		return []byte(field.Value + "\n"), nil
+	default:
+		return nil, fmt.Errorf("unsupported output format %q", format)
 	}
 }
 
