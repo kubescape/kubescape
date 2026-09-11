@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"testing"
 	"time"
 
@@ -140,12 +141,32 @@ func Test_getPortForwardReadyTimeout(t *testing.T) {
 			envValue: "soon",
 			want:     defaultPortForwardReadyTimeout,
 		},
+		{
+			// 9223372037 is the first value above maxPortForwardReadyTimeoutSeconds
+			// (math.MaxInt64 / time.Second): time.Duration(secs) * time.Second
+			// would wrap to a negative duration, silently disabling the
+			// http.Client.Timeout it is meant to bound.
+			name:     "value overflowing time.Duration falls back to default",
+			setEnv:   true,
+			envValue: "9223372037",
+			want:     defaultPortForwardReadyTimeout,
+		},
+		{
+			name:     "largest non-overflowing value is honored",
+			setEnv:   true,
+			envValue: strconv.FormatInt(maxPortForwardReadyTimeoutSeconds, 10),
+			want:     time.Duration(maxPortForwardReadyTimeoutSeconds) * time.Second,
+		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			if tc.setEnv {
 				t.Setenv(PortForwardReadyTimeoutEnv, tc.envValue)
+			} else {
+				// Isolate the default-case test from a KS_PORT_FORWARD_READY_TIMEOUT_SECONDS
+				// value set in the parent process's environment.
+				t.Setenv(PortForwardReadyTimeoutEnv, "")
 			}
 			assert.Equal(t, tc.want, getPortForwardReadyTimeout())
 		})

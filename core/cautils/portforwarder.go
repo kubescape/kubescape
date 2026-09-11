@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"math"
 	"net"
 	"net/http"
 	"net/url"
@@ -31,6 +32,13 @@ const (
 	PortForwardReadyTimeoutEnv string = "KS_PORT_FORWARD_READY_TIMEOUT_SECONDS"
 
 	defaultPortForwardReadyTimeout time.Duration = 30 * time.Second
+
+	// maxPortForwardReadyTimeoutSeconds is the largest value
+	// PortForwardReadyTimeoutEnv can hold without overflowing time.Duration
+	// (an int64 nanosecond count) when multiplied by time.Second. Anything
+	// above this wraps to a negative duration, which turns into a
+	// non-positive http.Client.Timeout -- i.e. no timeout at all.
+	maxPortForwardReadyTimeoutSeconds int64 = math.MaxInt64 / int64(time.Second)
 )
 
 // handshakeConnHolder lets the custom DialContext (running inside the
@@ -85,7 +93,7 @@ func getPortForwardingPort() string {
 // cannot disagree if the environment changes mid-run.
 func getPortForwardReadyTimeout() time.Duration {
 	if raw, exist := os.LookupEnv(PortForwardReadyTimeoutEnv); exist {
-		if secs, err := strconv.Atoi(raw); err == nil && secs > 0 {
+		if secs, err := strconv.Atoi(raw); err == nil && secs > 0 && int64(secs) <= maxPortForwardReadyTimeoutSeconds {
 			return time.Duration(secs) * time.Second
 		}
 	}
