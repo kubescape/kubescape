@@ -90,6 +90,11 @@ func (mp *MarkdownPrinter) ActionPrint(ctx context.Context, opaSessionObj *cauti
 	if err := mdWriteFailedSection(ctx, w, sorted, opaSessionObj); err != nil {
 		return err
 	}
+	if len(imageScanData) > 0 {
+		if err := mdWriteImageScanReport(w, imageScanData); err != nil {
+			return err
+		}
+	}
 
 	printer.LogOutputFile(w.Name())
 	return nil

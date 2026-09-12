@@ -218,3 +218,29 @@ func TestHtmlPrinter_ActionPrint_RiskScoreRounding(t *testing.T) {
 	assert.Contains(t, htmlContent, `<td class="controlRiskCell numericCell">1</td>`)
 	assert.NotContains(t, htmlContent, `<td class="controlRiskCell numericCell">0</td>`)
 }
+
+func TestHtmlPrinter_ActionPrint_CombinedPostureAndImageScan(t *testing.T) {
+	ctx := context.Background()
+	out := filepath.Join(t.TempDir(), "report.html")
+
+	hp := NewHtmlPrinter(false)
+	hp.SetWriter(ctx, out)
+
+	session := cautils.NewOPASessionObjMock()
+	imageScanData := []cautils.ImageScanData{
+		{
+			Image: "registry.example.com/combined-html:v1",
+		},
+	}
+
+	assert.NoError(t, hp.ActionPrint(ctx, session, imageScanData))
+	assert.NoError(t, hp.CloseWriter())
+
+	content, err := os.ReadFile(out)
+	assert.NoError(t, err)
+	htmlContent := string(content)
+
+	assert.Contains(t, htmlContent, "<h1>Kubescape Scan Report</h1>")
+	assert.Contains(t, htmlContent, "<h2>Images scanned:</h2>")
+	assert.Contains(t, htmlContent, "registry.example.com/combined-html:v1")
+}
