@@ -52,10 +52,12 @@ func controlReportV2ToV1(opaSessionObj *OPASessionObj, frameworkName string, con
 		crv1.Score = crv2.GetScore()
 		crv1.Control_ID = controlID
 
-		// TODO - add fields
-		crv1.Description = crv2.Description
-		crv1.Remediation = crv2.Remediation
+		crv1.Description = crv2.GetDescription()
+		crv1.Remediation = crv2.GetRemediation()
 
+		crv1.TotalResources = crv2.StatusCounters.PassedResources + crv2.StatusCounters.FailedResources + crv2.StatusCounters.SkippedResources + crv2.StatusCounters.ExcludedResources
+		crv1.FailedResources = crv2.StatusCounters.FailedResources
+		crv1.WarningResources = crv2.StatusCounters.SkippedResources + crv2.StatusCounters.ExcludedResources
 		rulesv1 := map[string]reporthandling.RuleReport{}
 		l := helpersv1.GetAllListsFromPool()
 		for resourceID := range crv2.ListResourcesIDs(l).All() {
