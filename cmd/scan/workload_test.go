@@ -719,7 +719,7 @@ func TestGetWorkloadCmd_NamespaceResolution(t *testing.T) {
 		mock := &recordingKubescape{
 			scanErr: fmt.Errorf("lookup workload: %w", resourcehandler.ErrResourceNotFound),
 		}
-		err := runWorkloadScan(context.Background(), &scanInfo, mock, nil)
+		_, err := runWorkloadScan(context.Background(), &scanInfo, mock, nil)
 		require.Error(t, err)
 		assert.True(t, errors.Is(err, resourcehandler.ErrResourceNotFound), "sentinel ErrResourceNotFound must be preserved in error chain")
 		assert.Contains(t, err.Error(), cliNamespaceDefaultedHint)
