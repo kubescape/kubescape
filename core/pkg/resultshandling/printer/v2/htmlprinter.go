@@ -157,7 +157,8 @@ func (hp *HtmlPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.O
 	var imageScanSummary *imageprinter.ImageScanSummary
 	if opaSessionObj != nil {
 		resourceTableView = buildResourceTableView(opaSessionObj, hp.showSecrets)
-	} else {
+	}
+	if len(imageScanData) > 0 {
 		imageScanSummary = buildImageScanSummary(imageScanData)
 	}
 
