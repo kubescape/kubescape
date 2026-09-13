@@ -295,6 +295,7 @@ func TestAnalyzeNetworkReachability_WhitespaceArgumentsRejected(t *testing.T) {
 			var toolErr ToolError
 			require.NoError(t, json.Unmarshal([]byte(toolResultText(t, result)), &toolErr))
 			assert.Equal(t, ErrCodeInvalidArgument, toolErr.Code)
+			assert.Equal(t, arg, toolErr.Details["argument"])
 		})
 	}
 }
