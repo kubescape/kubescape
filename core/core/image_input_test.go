@@ -3,6 +3,8 @@ package core
 import (
 	"testing"
 
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	ksmetav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -58,4 +60,43 @@ func TestClassifyImageInput(t *testing.T) {
 func TestGetAttributesFromImageRejectsArchive(t *testing.T) {
 	_, err := getAttributesFromImage("docker-archive:/tmp/x.tar")
 	assert.Error(t, err)
+}
+
+func TestGetUniqueExceptionsRejectsNonRegistry(t *testing.T) {
+	policies := []VulnerabilitiesIgnorePolicy{
+		{
+			Metadata:        Metadata{Name: "x"},
+			Kind:            "VulnerabilitiesIgnorePolicy",
+			Targets:         []Target{{DesignatorType: "Attributes", Attributes: Attributes{Registry: "quay.io"}}},
+			Vulnerabilities: []string{"CVE-2023-42365"},
+		},
+	}
+	_, _, err := getUniqueVulnerabilitiesAndSeverities(policies, "docker-archive:/tmp/x.tar")
+	assert.ErrorContains(t, err, "non-registry input")
+	_, _, err = getUniqueVulnerabilitiesAndSeverities(policies, "oci-dir:/tmp/layout")
+	assert.ErrorContains(t, err, "non-registry input")
+	// No policies → no error, archives still scannable.
+	_, _, err = getUniqueVulnerabilitiesAndSeverities(nil, "docker-archive:/tmp/x.tar")
+	assert.NoError(t, err)
+}
+
+func TestBuildImageScanJobsMixedArchive(t *testing.T) {
+	policies := []VulnerabilitiesIgnorePolicy{
+		{
+			Metadata:        Metadata{Name: "x"},
+			Kind:            "VulnerabilitiesIgnorePolicy",
+			Targets:         []Target{{DesignatorType: "Attributes", Attributes: Attributes{Registry: "quay.io"}}},
+			Vulnerabilities: []string{"CVE-2023-42365"},
+		},
+	}
+	imgScanInfo := &ksmetav1.ImageScanInfo{
+		Images:     []string{"docker-archive:/tmp/x.tar", "quay.io/kubescape/kubescape-cli:v3.0.0"},
+		Exceptions: "/tmp/exc.json",
+	}
+	jobs := buildImageScanJobs(imgScanInfo, &cautils.ScanInfo{}, policies)
+	assert.Len(t, jobs, 2)
+	assert.ErrorContains(t, jobs[0].ExceptionErr, "non-registry input")
+	assert.ErrorContains(t, jobs[0].ExceptionErr, "/tmp/exc.json")
+	assert.NoError(t, jobs[1].ExceptionErr)
+	assert.Contains(t, jobs[1].VulnerabilityExceptions, "CVE-2023-42365")
 }

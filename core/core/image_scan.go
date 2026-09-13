@@ -263,14 +263,15 @@ func getUniqueVulnerabilitiesAndSeverities(policies []VulnerabilitiesIgnorePolic
 	uniqueVulns := make(map[string][]string)
 	uniqueSevers := make(map[string][]string)
 
-	if len(policies) > 0 {
-		if _, _, errEmpty := classifyImageInput(image, osStatExists); errEmpty != nil {
-			return nil, nil, errEmpty
-		}
-		if isNonRegistryInput(image) {
-			_, scheme, _ := classifyImageInput(image, osStatExists)
-			return nil, nil, fmt.Errorf("image exceptions cannot target non-registry input %q (detected %q): scan by registry reference or remove --exceptions", image, scheme)
-		}
+	if len(policies) == 0 {
+		return nil, nil, nil
+	}
+	if _, _, errEmpty := classifyImageInput(image, osStatExists); errEmpty != nil {
+		return nil, nil, errEmpty
+	}
+	if isNonRegistryInput(image) {
+		_, scheme, _ := classifyImageInput(image, osStatExists)
+		return nil, nil, fmt.Errorf("image exceptions cannot target non-registry input %q (detected %q): scan by registry reference or remove --exceptions", image, scheme)
 	}
 
 	imageAttributes, err := getAttributesFromImage(image)
@@ -476,6 +477,12 @@ func (ks *Kubescape) ScanImage(imgScanInfo *ksmetav1.ImageScanInfo, scanInfo *ca
 // concurrently against it. The images share one vulnerability database load
 // and the worker pool the cluster scan already uses, so an image that fails
 // never hides the results of the ones that succeeded.
+//
+// Image exceptions (--exceptions) require registry references. A non-registry
+// input (archive, local directory, SBOM) combined with exceptions is reported
+// as a per-image "Image Exceptions/Unsupported Input" error: siblings still
+// scan, the report covers succeeded images, and the returned error keeps the
+// exit code non-zero. Thresholds are evaluated over succeeded scans only.
 func (ks *Kubescape) ScanImageContext(ctx context.Context, imgScanInfo *ksmetav1.ImageScanInfo, scanInfo *cautils.ScanInfo) (bool, error) {
 	images := imgScanInfo.Images
 	if len(images) == 0 {
