@@ -99,6 +99,90 @@ func validateImageExceptionTargetRegexes(policies []VulnerabilitiesIgnorePolicy)
 	return nil
 }
 
+// classifyImageInput reports whether img is a registry reference or a
+// non-registry input (archive, local directory, SBOM, ...). It returns the
+// detected scheme ("" when none) for error messages. stat reports local path
+// existence and is injectable so tests stay hermetic; callers pass osStatExists.
+func classifyImageInput(img string, stat func(string) bool) (registry bool, scheme string, errEmpty error) {
+	trimmed := strings.TrimSpace(img)
+	if trimmed == "" {
+		return false, "", fmt.Errorf("image name cannot be empty")
+	}
+	lower := strings.ToLower(trimmed)
+	_ = lower
+	if scheme := detectScheme(trimmed); scheme != "" {
+		return false, scheme, nil
+	}
+	// Strip @digest, then :tag (only a colon after the last "/" can be a
+	// tag; a colon before it is a registry port like myregistry.io:5000).
+	path := trimmed
+	if i := strings.Index(path, "@"); i != -1 {
+		path = path[:i]
+	}
+	if slash := strings.LastIndex(path, "/"); slash != -1 {
+		if i := strings.Index(path[slash:], ":"); i != -1 {
+			path = path[:slash+i]
+		}
+	} else if i := strings.Index(path, ":"); i != -1 {
+		path = path[:i]
+	}
+	checkPath := path
+	// Strip a known scheme prefix for the filesystem checks only.
+	if i := strings.Index(checkPath, ":"); i != -1 && isKnownInputScheme(strings.ToLower(checkPath[:i])) {
+		checkPath = checkPath[i+1:]
+	}
+	lowerPath := strings.ToLower(checkPath)
+	isTar := strings.HasSuffix(lowerPath, ".tar") || strings.HasSuffix(lowerPath, ".tgz") || strings.HasSuffix(lowerPath, ".tar.gz")
+	// A registry repository may legitimately end in ".tar" (e.g.
+	// "myregistry.io:5000/team/my.tar:v1"), so a tar suffix alone must not
+	// reclassify a tagged registry ref. Only treat as file when it exists on
+	// disk or is unambiguously a filesystem path (absolute or ./-relative).
+	if isTar && (stat != nil && stat(checkPath) || strings.HasPrefix(checkPath, "/") || strings.HasPrefix(checkPath, "./") || strings.HasPrefix(checkPath, "../")) {
+		return false, detectScheme(trimmed), nil
+	}
+	// Bare local path (./mydir, /tmp/app.img, ...) without scheme or suffix:
+	// exists on disk and looks like a path, but parses fine as a registry
+	// ref — must not be silently treated as registry. Conservative: prefer a
+	// loud error over a silent exception skip.
+	if stat != nil && stat(checkPath) && (strings.Contains(checkPath, "/") || strings.HasPrefix(checkPath, ".")) {
+		return false, detectScheme(trimmed), nil
+	}
+	if _, err := reference.ParseNormalizedNamed(trimmed); err != nil {
+		return false, detectScheme(trimmed), nil
+	}
+	return true, "", nil
+}
+
+func isKnownInputScheme(s string) bool {
+	switch s {
+	case "docker-archive", "oci-archive", "oci-dir", "oci-layout", "dir", "file", "sbom":
+		return true
+	}
+	return false
+}
+
+func detectScheme(trimmed string) string {
+	lower := strings.ToLower(trimmed)
+	if i := strings.Index(lower, ":"); i != -1 {
+		candidate := lower[:i]
+		if !strings.Contains(candidate, "/") && isKnownInputScheme(candidate) {
+			return trimmed[:i]
+		}
+	}
+	return ""
+}
+
+func osStatExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+// isNonRegistryInput is the production wrapper around classifyImageInput.
+func isNonRegistryInput(img string) bool {
+	registry, _, errEmpty := classifyImageInput(img, osStatExists)
+	return errEmpty != nil || !registry
+}
+
 // This function will identify the registry, organization and image tag from the image name
 func getAttributesFromImage(imgName string) (Attributes, error) {
 	ref, err := reference.ParseNormalizedNamed(imgName)
@@ -525,6 +609,11 @@ const (
 	ErrCategoryCredentials ScanErrorCategory = "Registry Credentials/Authentication" // #nosec G101 -- descriptive error category label, not a hardcoded credential
 	ErrCategoryParser      ScanErrorCategory = "Image Manifest/Parser Issue"
 	ErrCategoryGeneral     ScanErrorCategory = "General Error"
+	// ErrCategoryExceptionUnsupported groups per-image failures where image
+	// exceptions were requested for a non-registry input (archive, local
+	// directory, SBOM, ...). Kept distinct from General Error so dashboards
+	// can tell "user asked for the impossible" apart from scanner breakage.
+	ErrCategoryExceptionUnsupported ScanErrorCategory = "Image Exceptions/Unsupported Input"
 )
 
 // CategorizeScanError inspects an error and assigns a ScanErrorCategory.
