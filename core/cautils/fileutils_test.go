@@ -1179,6 +1179,38 @@ func TestReadJsonFile(t *testing.T) {
 			wantCount: 0,
 			wantErr:   true,
 		},
+		{
+			name: "nested array still yields the manifests it holds",
+			content: `[
+				[{"apiVersion": "v1", "kind": "Pod", "metadata": {"name": "pod-1", "namespace": "default"}}],
+				[{"apiVersion": "v1", "kind": "Service", "metadata": {"name": "svc-1", "namespace": "default"}}]
+			]`,
+			wantCount: 2,
+		},
+		{
+			name: "array mixing manifests and plain values keeps the manifests",
+			content: `[
+				{"apiVersion": "v1", "kind": "Pod", "metadata": {"name": "pod-1", "namespace": "default"}},
+				"not-a-manifest",
+				null
+			]`,
+			wantCount: 1,
+		},
+		{
+			name:      "top-level string is ignored, not a parse error",
+			content:   `"not-a-manifest"`,
+			wantCount: 0,
+		},
+		{
+			name:      "top-level null is ignored, not a parse error",
+			content:   `null`,
+			wantCount: 0,
+		},
+		{
+			name:      "top-level number is ignored, not a parse error",
+			content:   `123`,
+			wantCount: 0,
+		},
 	}
 
 	for _, tt := range tests {

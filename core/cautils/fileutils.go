@@ -1061,28 +1061,33 @@ func readJsonFile(jsonFile []byte) (workloads []workloadinterface.IMetadata, err
 		return workloads, err
 	}
 
+	if convertErr := convertFastjsonToWorkloads(v, &workloads); convertErr != nil {
+		return workloads, convertErr
+	}
+
+	return workloads, nil
+}
+
+// convertFastjsonToWorkloads recurses so a manifest nested inside arrays is
+// still collected. Anything that is neither object nor array is skipped rather
+// than failing the file, the way readYamlFile skips a document that is not a
+// mapping.
+func convertFastjsonToWorkloads(v *fastjson.Value, workloads *[]workloadinterface.IMetadata) error {
 	switch v.Type() {
 	case fastjson.TypeObject:
-		jsonObj := convertFastjsonToMap(v)
-		objects, err := manifestObjectToWorkloads(jsonObj)
-		workloads = append(workloads, objects...)
-		return workloads, err
+		objects, err := manifestObjectToWorkloads(convertFastjsonToMap(v))
+		*workloads = append(*workloads, objects...)
+		return err
 	case fastjson.TypeArray:
 		var itemErrs []error
 		for i, val := range v.GetArray() {
-			if val.Type() == fastjson.TypeObject {
-				jsonObj := convertFastjsonToMap(val)
-				objects, err := manifestObjectToWorkloads(jsonObj)
-				workloads = append(workloads, objects...)
-				if err != nil {
-					itemErrs = append(itemErrs, fmt.Errorf("array item %d: %w", i, err))
-				}
+			if err := convertFastjsonToWorkloads(val, workloads); err != nil {
+				itemErrs = append(itemErrs, fmt.Errorf("array item %d: %w", i, err))
 			}
 		}
-		return workloads, errors.Join(itemErrs...)
-	default:
-		return workloads, errors.New("invalid JSON format: expected object or array")
+		return errors.Join(itemErrs...)
 	}
+	return nil
 }
 
 func convertFastjsonToMap(v *fastjson.Value) map[string]any {
@@ -1124,8 +1129,6 @@ func convertFastjsonValue(v *fastjson.Value) any {
 		return nil
 	}
 }
-
-
 
 // manifestObjectToWorkloads normalizes Kubernetes list envelopes before object
 // envelopes are created. Both YAML and JSON readers use it so the accepted
