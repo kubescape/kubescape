@@ -1,4 +1,4 @@
-package printer
+package pathparse
 
 import (
 	"strconv"
@@ -28,20 +28,25 @@ import (
 // path still resolves - but to the whole labels map rather than the one key
 // asked for, which reads as a successful lookup of the wrong thing.
 //
-// parsePath scans the string instead of splitting it, so a bracket is read as a
+// ParsePath scans the string instead of splitting it, so a bracket is read as a
 // unit and its contents never reach the "." rule.
 
-// pathSegment is one step of a parsed path: a map key, optionally indexed when
-// the path selects an element of a list at that key.
+// Segment is one step of a parsed path: a map key, optionally indexed when
+// the path selects an element of a list at that key. Index is -1 when the
+// segment names a map entry rather than a list element.
 //
 // An index belongs to the segment it indexes rather than standing alone as its
 // own segment: "containers[0]" is one step, not two. Callers depend on that.
-// matchesSafeField compares a field's parent segments positionally against the
+// The printer compares a field's parent segments positionally against the
 // canonical location its Kubernetes schema defines, so splitting an index into
 // a separate segment would shift every parent path by one and quietly unmatch
 // every safe-field rule guarding redaction.
+type Segment struct {
+	Key   string
+	Index int
+}
 
-// parsePath splits a path into its segments.
+// ParsePath splits a path into its segments.
 //
 // A bracket holds either a list index or a map key. All-digit contents are read
 // as an index and attached to the preceding segment; anything else is a key and
@@ -58,11 +63,11 @@ import (
 // resolves to nothing is already handled everywhere downstream. An unclosed
 // bracket takes the rest of the string as its contents; empty segments from a
 // leading or doubled "." are skipped.
-func parsePath(path string) []pathSegment {
-	path = truncateAtValueSeparator(path)
+func ParsePath(path string) []Segment {
+	path = TruncateAtValueSeparator(path)
 
 	var (
-		segments []pathSegment
+		segments []Segment
 		key      strings.Builder
 		started  bool
 	)
@@ -75,7 +80,7 @@ func parsePath(path string) []pathSegment {
 		if !started {
 			return
 		}
-		segments = append(segments, pathSegment{key: key.String(), index: -1})
+		segments = append(segments, Segment{Key: key.String(), Index: -1})
 		key.Reset()
 		started = false
 	}
@@ -95,16 +100,16 @@ func parsePath(path string) []pathSegment {
 				switch {
 				case started:
 					// The index qualifies the segment being read.
-					segments = append(segments, pathSegment{key: key.String(), index: index})
+					segments = append(segments, Segment{Key: key.String(), Index: index})
 					key.Reset()
 					started = false
-				case len(segments) > 0 && segments[len(segments)-1].index < 0:
+				case len(segments) > 0 && segments[len(segments)-1].Index < 0:
 					// The index follows a segment that is already closed - a
 					// bracketed key, as in annotations[foo.bar/list][2]. It
 					// qualifies that one. Dropping it would resolve the path
 					// to the whole list, the same "succeeds against the wrong
 					// thing" failure that reading brackets exists to end.
-					segments[len(segments)-1].index = index
+					segments[len(segments)-1].Index = index
 				}
 				// Anything else has nothing to qualify: a leading "[0]", or a
 				// second index on an already-indexed segment.
@@ -113,7 +118,7 @@ func parsePath(path string) []pathSegment {
 
 			flush()
 			if contents != "" {
-				segments = append(segments, pathSegment{key: contents, index: -1})
+				segments = append(segments, Segment{Key: contents, Index: -1})
 			}
 		default:
 			key.WriteByte(path[i])
@@ -180,14 +185,14 @@ func digitIndex(contents string) (int, bool) {
 	return index, true
 }
 
-// truncateAtValueSeparator drops the "=<value>" half of an assisted-remediation
+// TruncateAtValueSeparator drops the "=<value>" half of an assisted-remediation
 // string, along with any leading ".".
 //
 // The split has to be on the first "=" that is not inside a bracket. Fix values
 // routinely contain "=" themselves - the CIS control-plane rules emit
 // "--anonymous-auth=false" - so a later separator must not be mistaken for the
 // first, and an annotation key holding an "=" must not be cut in half.
-func truncateAtValueSeparator(path string) string {
+func TruncateAtValueSeparator(path string) string {
 	depth := 0
 	for i := 0; i < len(path); i++ {
 		switch path[i] {

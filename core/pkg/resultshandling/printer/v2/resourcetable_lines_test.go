@@ -328,3 +328,30 @@ func TestResourceTable_ClusterResourceHasNoLines(t *testing.T) {
 	assert.Contains(t, out, "privileged=false")
 	assert.NotContains(t, out, "(line ")
 }
+
+// TestResourceTable_BracketedFixPathResolvesToLine is the end-to-end case for
+// the parser and resolver working together. Before the resolver built its
+// expressions from parsed segments, a fix path naming a label key printed with
+// no line at all: yq was handed ".metadata.labels[app.kubernetes.io/name]",
+// read the dots inside the key as path separators, and failed to parse it.
+func TestResourceTable_BracketedFixPathResolvesToLine(t *testing.T) {
+	manifest := "apiVersion: apps/v1\n" + // 1
+		"kind: Deployment\n" + // 2
+		"metadata:\n" + // 3
+		"  name: demo\n" + // 4
+		"  labels:\n" + // 5
+		"    app.kubernetes.io/name: payments\n" // 6
+
+	session := resourceTableLineNumberSession(t, manifest, ":0")
+	const resourceID = "apps/v1/default/Deployment/demo"
+	result := session.ResourcesResult[resourceID]
+	result.AssociatedControls[0].ResourceAssociatedRules[0].Paths = []armotypes.PosturePaths{
+		{FixPath: armotypes.FixPath{Path: "metadata.labels[app.kubernetes.io/name]", Value: "payments"}},
+	}
+	session.ResourcesResult[resourceID] = result
+
+	out := renderResourceTable(t, session, true)
+
+	assert.Contains(t, out, "metadata.labels[app.kubernetes.io/name]=payments")
+	assert.Contains(t, out, "(line 6)")
+}

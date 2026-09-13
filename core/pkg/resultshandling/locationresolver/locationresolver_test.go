@@ -35,7 +35,7 @@ func TestResolveLocation(t *testing.T) {
 		"spec.template.spec.containers[0].resources.limits.cpu=YOUR_VALUE":                    {Line: 49, Column: 18},
 	}
 
-	resolver, _ := NewFixPathLocationResolver(yamlFilePath)
+	resolver, _ := NewPathLocationResolver(yamlFilePath)
 
 	for fixPath := range fixPathToExpectedLineAndColumn {
 		location, err := resolver.ResolveLocation(fixPath, 100000)
@@ -63,15 +63,18 @@ func TestResolveLocation(t *testing.T) {
 		assert.Equalf(t, expected.Line, location.Line, "fixPath %s, expected line: %d, actual line: %d", fixPath, expected.Line, location.Line)
 		assert.Equalf(t, expected.Column, location.Column, "fixPath %s, expected column: %d, actual column: %d", fixPath, expected.Column, location.Column)
 	}
-	_, err := resolver.ResolveLocation("some invalid string as an input", 0)
-	assert.ErrorContains(t, err, "failed to evaluate yaml expression")
-	assert.ErrorContains(t, err, "invalid input")
-
+	// A path that is not a path resolves to nothing rather than failing. Every
+	// key is rendered quoted, so this is a well-formed expression asking for a
+	// key that happens not to exist - which is the same answer the resolver
+	// gives for any absent field, and what callers already treat as "no line".
+	location, err := resolver.ResolveLocation("some invalid string as an input", 0)
+	assert.NoError(t, err)
+	assert.Equal(t, Location{}, location)
 }
 
 func TestResolveLocation_ZeroCandidateNodesDoesNotPanic(t *testing.T) {
 	yamlFilePath := filepath.Join(onlineBoutiquePath(), "adservice.yaml")
-	resolver, err := NewFixPathLocationResolver(yamlFilePath)
+	resolver, err := NewPathLocationResolver(yamlFilePath)
 	assert.NoError(t, err)
 
 	// traversing into a scalar yields zero candidate nodes, which previously
@@ -92,17 +95,17 @@ func TestFixPathToValidYamlExpression(t *testing.T) {
 		{
 			name:    "path with no value is prefixed only",
 			fixPath: "spec.template.spec.containers[0].image",
-			want:    ".spec.template.spec.containers[0].image",
+			want:    `.["spec"]["template"]["spec"]["containers"][0]["image"]`,
 		},
 		{
 			name:    "value is stripped",
 			fixPath: "spec.template.spec.containers[0].securityContext.privileged=true",
-			want:    ".spec.template.spec.containers[0].securityContext.privileged",
+			want:    `.["spec"]["template"]["spec"]["containers"][0]["securityContext"]["privileged"]`,
 		},
 		{
 			name:    "placeholder value is stripped",
 			fixPath: "spec.template.spec.containers[0].resources.limits.cpu=YOUR_VALUE",
-			want:    ".spec.template.spec.containers[0].resources.limits.cpu",
+			want:    `.["spec"]["template"]["spec"]["containers"][0]["resources"]["limits"]["cpu"]`,
 		},
 		{
 			// The CIS control-plane rules emit flag-style fix values that themselves
@@ -110,22 +113,22 @@ func TestFixPathToValidYamlExpression(t *testing.T) {
 			// to the path and yields an expression yq cannot evaluate.
 			name:    "flag-style value containing = is fully stripped",
 			fixPath: "spec.containers[0].command[3]=--anonymous-auth=false",
-			want:    ".spec.containers[0].command[3]",
+			want:    `.["spec"]["containers"][0]["command"][3]`,
 		},
 		{
 			name:    "value with multiple = is fully stripped",
 			fixPath: "spec.containers[0].command[0]=--enable-admission-plugins=NodeRestriction",
-			want:    ".spec.containers[0].command[0]",
+			want:    `.["spec"]["containers"][0]["command"][0]`,
 		},
 		{
 			name:    "value containing = and a path separator is fully stripped",
 			fixPath: "spec.containers[0].command[1]=--encryption-provider-config=/etc/kubernetes/enc.yaml",
-			want:    ".spec.containers[0].command[1]",
+			want:    `.["spec"]["containers"][0]["command"][1]`,
 		},
 		{
 			name:    "empty value after separator",
 			fixPath: "metadata.namespace=",
-			want:    ".metadata.namespace",
+			want:    `.["metadata"]["namespace"]`,
 		},
 		{
 			name:    "empty input",
@@ -141,16 +144,16 @@ func TestFixPathToValidYamlExpression(t *testing.T) {
 	}
 }
 
-func TestFixPathLocationResolver_NonExistentYaml(t *testing.T) {
+func TestPathLocationResolver_NonExistentYaml(t *testing.T) {
 	yamlFilePath := filepath.Join(onlineBoutiquePath(), "adservice_invalid.yaml")
-	resolver, err := NewFixPathLocationResolver(yamlFilePath)
+	resolver, err := NewPathLocationResolver(yamlFilePath)
 	assert.Nil(t, resolver)
 	assert.NotNil(t, err)
 }
 
-func TestFixPathLocationResolver_InvalidYaml(t *testing.T) {
+func TestPathLocationResolver_InvalidYaml(t *testing.T) {
 	yamlFilePath := filepath.Join(onlineBoutiquePath(), "invalid.yaml")
-	resolver, err := NewFixPathLocationResolver(yamlFilePath)
+	resolver, err := NewPathLocationResolver(yamlFilePath)
 	assert.Nil(t, resolver)
 	assert.NotNil(t, err)
 }

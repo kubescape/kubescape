@@ -10,20 +10,15 @@ import (
 
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/pathparse"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 )
 
-type pathSegment struct {
-	key   string
-	index int
-}
-
-// splitPath parses a path into its segments. See parsePath in pathparse.go,
-// which it delegates to: bracket contents are read as a unit, so a key
-// containing a "." survives intact rather than being split apart by one.
-func splitPath(path string) []pathSegment {
-	return parsePath(path)
-}
+// pathSegment aliases the shared parser's segment so this package's existing
+// spelling keeps working. The grammar lives in pathparse because the location
+// resolver needs it too, and it cannot import this package: printer/v2 already
+// imports locationresolver, so the dependency only runs one way.
+type pathSegment = pathparse.Segment
 
 // anyToString converts a value to its string representation.
 // It handles all numeric types that may appear in JSON-decoded or
@@ -100,7 +95,7 @@ func extractValueAtPath(obj map[string]any, path string) (string, bool) {
 	if len(obj) == 0 || path == "" {
 		return "", false
 	}
-	segments := splitPath(path)
+	segments := pathparse.ParsePath(path)
 	if len(segments) == 0 {
 		return "", false
 	}
@@ -109,12 +104,12 @@ func extractValueAtPath(obj map[string]any, path string) (string, bool) {
 	for _, seg := range segments {
 		switch v := cur.(type) {
 		case map[string]any:
-			next, ok := v[seg.key]
+			next, ok := v[seg.Key]
 			if !ok {
 				return "", false
 			}
-			if seg.index >= 0 {
-				elem, ok := indexList(next, seg.index)
+			if seg.Index >= 0 {
+				elem, ok := indexList(next, seg.Index)
 				if !ok {
 					return "", false
 				}
@@ -136,10 +131,10 @@ func extractValueAtPath(obj map[string]any, path string) (string, bool) {
 			// and classification have to give the same answer about what a path
 			// means, and the safe direction for a malformed path is to resolve
 			// nothing.
-			if seg.key != "" {
+			if seg.Key != "" {
 				return "", false
 			}
-			elem, ok := indexList(v, seg.index)
+			elem, ok := indexList(v, seg.Index)
 			if !ok {
 				return "", false
 			}
@@ -217,7 +212,7 @@ var podSpecPrefixes = map[string][]parentSegment{
 // parentSegment is one segment of a safe field's canonical parent path, with
 // whether the Kubernetes schema defines that segment as a list.
 //
-// The shape has to be part of the match, not just the key. splitPath records
+// The shape has to be part of the match, not just the key. pathparse.ParsePath records
 // an index only for a bracketed segment, and extractValueAtPath walks an
 // unindexed segment straight through a map - so spec.volumes.secret.secretName
 // resolves against a manifest that happens to carry an object named "volumes",
@@ -329,7 +324,7 @@ func normalizeFieldName(key string) string {
 // for; comparing the shape is what stops an object-shaped path from borrowing
 // a list-shaped path's exception.
 //
-// A segment splitPath could not read an index from - "volumes[container_ndx]",
+// A segment pathparse.ParsePath could not read an index from - "volumes[container_ndx]",
 // an unsubstituted rule placeholder - carries index -1 and so reads as
 // unindexed, failing a list segment's match. That is the safe direction: an
 // unresolvable path is redacted rather than excused.
@@ -338,10 +333,10 @@ func equalParentPath(parents []pathSegment, want []parentSegment) bool {
 		return false
 	}
 	for i := range want {
-		if !strings.EqualFold(parents[i].key, want[i].key) {
+		if !strings.EqualFold(parents[i].Key, want[i].key) {
 			return false
 		}
-		if want[i].list != (parents[i].index >= 0) {
+		if want[i].list != (parents[i].Index >= 0) {
 			return false
 		}
 	}
@@ -388,12 +383,12 @@ func matchesSafeField(kind, name string, parents []pathSegment) bool {
 // it (e.g. that same env var's "name"), which is a separate, harder problem
 // left out of scope here.
 func hasSecretShapedFieldName(kind, path string) bool {
-	// splitPath drops the "=<value>" half itself, and does so bracket-aware.
-	segments := splitPath(path)
+	// pathparse.ParsePath drops the "=<value>" half itself, and does so bracket-aware.
+	segments := pathparse.ParsePath(path)
 	if len(segments) == 0 {
 		return false
 	}
-	name := normalizeFieldName(segments[len(segments)-1].key)
+	name := normalizeFieldName(segments[len(segments)-1].Key)
 	if matchesSafeField(kind, name, segments[:len(segments)-1]) {
 		return false
 	}
@@ -423,7 +418,7 @@ func isSensitivePath(kind, path string) bool {
 	// lets the two disagree about what a path means, and a field the classifier
 	// does not recognise but extraction does resolve is a value printed in the
 	// clear.
-	segments := splitPath(path)
+	segments := pathparse.ParsePath(path)
 
 	// Everything under a Secret's data or stringData is sensitive, whatever the
 	// individual key happens to be called. Deciding that on the first segment
@@ -431,7 +426,7 @@ func isSensitivePath(kind, path string) bool {
 	// "data.password" does, but it does not start with "data." and its own name
 	// is not credential-shaped, so a prefix test let it through.
 	if kind == "Secret" && len(segments) > 0 &&
-		(segments[0].key == "data" || segments[0].key == "stringData") {
+		(segments[0].Key == "data" || segments[0].Key == "stringData") {
 		return true
 	}
 	// C-0012 plaintext credentials live on container env .value, not Secret.data.
@@ -458,7 +453,7 @@ func isContainerEnvValue(segments []pathSegment) bool {
 	}
 	value := segments[len(segments)-1]
 	env := segments[len(segments)-2]
-	return value.key == "value" && env.key == "env" && env.index >= 0
+	return value.Key == "value" && env.Key == "env" && env.Index >= 0
 }
 
 // enrichedPathsForField iterates a control's rule paths, extracts the string

@@ -44,7 +44,7 @@ type readResult struct {
 // lookup has the same answer. One cache per report.
 type fixReportCache struct {
 	reads     map[string]readResult
-	resolvers map[string]*locationresolver.FixPathLocationResolver
+	resolvers map[string]*locationresolver.PathLocationResolver
 	regions   map[fixCacheKey][]fixRegion
 }
 
@@ -91,7 +91,7 @@ func (m *manifestCache) get(path string) *fixReportCache {
 func newFixReportCache() *fixReportCache {
 	return &fixReportCache{
 		reads:     make(map[string]readResult),
-		resolvers: make(map[string]*locationresolver.FixPathLocationResolver),
+		resolvers: make(map[string]*locationresolver.PathLocationResolver),
 		regions:   make(map[fixCacheKey][]fixRegion),
 	}
 }
@@ -115,12 +115,12 @@ func (c *fixReportCache) fileString(path string) (string, error) {
 // between them by index, so it is the file's resolver, not a resource's. format
 // only names the output format in the warning. A failure caches a nil resolver,
 // which resolveFixLocation already reads as "fall back to line 1".
-func (c *fixReportCache) locationResolver(path, format string) *locationresolver.FixPathLocationResolver {
+func (c *fixReportCache) locationResolver(path, format string) *locationresolver.PathLocationResolver {
 	if resolver, ok := c.resolvers[path]; ok {
 		return resolver
 	}
 
-	resolver, err := locationresolver.NewFixPathLocationResolver(path)
+	resolver, err := locationresolver.NewPathLocationResolver(path)
 	if err != nil {
 		logger.L().Warning("failed to create location resolver, "+format+" locations will default to line 1", helpers.Error(err))
 		resolver = nil

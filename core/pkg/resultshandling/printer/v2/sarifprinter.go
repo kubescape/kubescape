@@ -412,7 +412,7 @@ func intPointerValue(value *int) int {
 // its own precise location instead of all sharing the fix location. A path that doesn't resolve
 // (unknown docIndex, or ResolveLocation finding nothing) is omitted rather than defaulted to line
 // 1 - a relatedLocation with a fabricated line number would be worse than no relatedLocation at all.
-func resolveReviewPathLocations(opaSessionObj *cautils.OPASessionObj, locationResolver *locationresolver.FixPathLocationResolver, ac *resourcesresults.ResourceAssociatedControl, resourceID string) map[string]locationresolver.Location {
+func resolveReviewPathLocations(opaSessionObj *cautils.OPASessionObj, locationResolver *locationresolver.PathLocationResolver, ac *resourcesresults.ResourceAssociatedControl, resourceID string) map[string]locationresolver.Location {
 	if locationResolver == nil {
 		return nil
 	}
@@ -704,7 +704,7 @@ func sortedSARIFControls(controls []resourcesresults.ResourceAssociatedControl) 
 }
 
 // resolveFixLocation resolves a failed control's location in the manifest, falling back to line 1. Shared by the SARIF and GitLab SAST printers
-func resolveFixLocation(opaSessionObj *cautils.OPASessionObj, locationResolver *locationresolver.FixPathLocationResolver, ac *resourcesresults.ResourceAssociatedControl, resourceID string) locationresolver.Location {
+func resolveFixLocation(opaSessionObj *cautils.OPASessionObj, locationResolver *locationresolver.PathLocationResolver, ac *resourcesresults.ResourceAssociatedControl, resourceID string) locationresolver.Location {
 	defaultLocation := locationresolver.Location{Line: 1, Column: 1}
 	if locationResolver == nil {
 		return defaultLocation
