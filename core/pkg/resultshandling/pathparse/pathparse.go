@@ -216,10 +216,10 @@ func readBracket(path string, open int) (contents string, quoted bool, closing i
 		return "", false, 0, "unclosed '['"
 	}
 	contents = path[start : start+end]
-	switch {
-	case contents == "":
+	switch contents {
+	case "":
 		return "", false, 0, "empty '[]'"
-	case contents == "*":
+	case "*":
 		// yq reads "[*]" as an operator, not a key, and the resolver's evaluator
 		// rejects it outright. Accepting it as a key named "*" would turn a
 		// lookup that fails into a walk up to whatever encloses it.
