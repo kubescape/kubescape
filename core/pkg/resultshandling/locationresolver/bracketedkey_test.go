@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/pathparse"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -143,14 +144,13 @@ func TestResolveLocation_BracketedKeyWalksUp(t *testing.T) {
 }
 
 // TestResolveLocation_KeysNeedingEscapes covers keys carrying the characters
-// that would otherwise end the quoted expression early and leave the rest of
-// the key to be read as expression syntax.
+// that would otherwise end the rendered expression's quoted key early and leave
+// the rest to be read as yq syntax.
 //
-// Kubernetes cannot actually produce these: a label or annotation key must
-// match [a-zA-Z0-9]([-a-zA-Z0-9_.]*[a-zA-Z0-9])? with an optional DNS-subdomain
-// prefix, so neither a quote nor a backslash is legal in one. What is pinned
-// here is therefore that malformed input degrades safely - no evaluation error,
-// and no silent resolution to some *other* key - rather than an exact line.
+// Kubernetes cannot produce these - a label or annotation key must match
+// [a-zA-Z0-9]([-a-zA-Z0-9_.]*[a-zA-Z0-9])? with an optional DNS-subdomain
+// prefix - so what is pinned is that such input is either read exactly or
+// refused, never approximated.
 func TestResolveLocation_KeysNeedingEscapes(t *testing.T) {
 	manifest := "metadata:\n" + // 1
 		"  annotations:\n" + // 2
@@ -159,23 +159,90 @@ func TestResolveLocation_KeysNeedingEscapes(t *testing.T) {
 
 	resolver := newResolverFor(t, manifest)
 
-	t.Run("quote in key resolves", func(t *testing.T) {
-		location, err := resolver.ResolveLocation(`metadata.annotations[with"quote]`, 0)
+	t.Run("double quote in a single-quoted key is escaped and resolves", func(t *testing.T) {
+		location, err := resolver.ResolveLocation(`metadata.annotations.'with"quote'`, 0)
 		require.NoError(t, err)
 		assert.Equal(t, 3, location.Line)
 	})
 
-	t.Run("backslash in key does not error or mis-resolve", func(t *testing.T) {
+	t.Run("backslash in a key does not error or mis-resolve", func(t *testing.T) {
 		location, err := resolver.ResolveLocation(`metadata.annotations[with\backslash]`, 0)
 		require.NoError(t, err)
-		// Absent, so it walks up to the annotations block rather than landing
-		// on a neighbouring key.
 		assert.NotEqual(t, 4, location.Line, "must not resolve to a different key")
 	})
 
-	t.Run("expression syntax in a key cannot escape the brackets", func(t *testing.T) {
-		location, err := resolver.ResolveLocation(`metadata.annotations["] | .metadata]`, 0)
-		require.NoError(t, err)
-		assert.NotEqual(t, 4, location.Line)
-	})
+	// Expression syntax smuggled into a key is refused by the parser before
+	// any expression is built, so it never reaches yq at all.
+	for _, path := range []string{
+		`metadata.annotations[with"quote]`,
+		`metadata.annotations["] | .metadata]`,
+	} {
+		t.Run("refused: "+path, func(t *testing.T) {
+			location, err := resolver.ResolveLocation(path, 0)
+			assert.ErrorIs(t, err, pathparse.ErrMalformedPath)
+			assert.Equal(t, Location{}, location)
+		})
+	}
+}
+
+// TestResolveLocation_DotQuotedKeyWithPrecedingSibling covers the spelling
+// kubescape fix already uses for a key holding dots. Split at the dot inside
+// its quotes, the key is not found and walking up lands on the annotations
+// map - whose line is that of its first entry, a sibling the path never named.
+// The sibling here is placed first so that wrong answer is distinguishable
+// from the right one.
+func TestResolveLocation_DotQuotedKeyWithPrecedingSibling(t *testing.T) {
+	manifest := "metadata:\n" + // 1
+		"  annotations:\n" + // 2
+		"    other.io/first: a\n" + // 3
+		"    foo.bar/baz: b\n" // 4
+
+	resolver := newResolverFor(t, manifest)
+
+	for _, path := range []string{
+		`metadata.annotations."foo.bar/baz"`,
+		`metadata.annotations.'foo.bar/baz'`,
+		`metadata.annotations."foo.bar/baz"=hello`,
+	} {
+		t.Run(path, func(t *testing.T) {
+			location, err := resolver.ResolveLocation(path, 0)
+			require.NoError(t, err)
+			assert.Equal(t, 4, location.Line, "must point at foo.bar/baz, not the sibling above it")
+		})
+	}
+}
+
+// TestResolveLocation_MalformedPathIsRejectedBeforeWalkingUp covers paths that
+// are not well formed but whose nearest well-formed reading exists in the
+// manifest. Each used to resolve to a real line with no error. Walking up is
+// for a well-formed path whose field is absent; a path that cannot be read has
+// to be refused first, or an ancestor's line is reported as the finding's.
+func TestResolveLocation_MalformedPathIsRejectedBeforeWalkingUp(t *testing.T) {
+	manifest := "metadata:\n" + // 1
+		"  labels:\n" + // 2
+		"    app: demo\n" + // 3
+		"spec:\n" + // 4
+		"  image: nginx\n" + // 5
+		"  containers:\n" + // 6
+		"    - name: a\n" + // 7
+		"      image: one\n" // 8
+
+	resolver := newResolverFor(t, manifest)
+
+	for _, path := range []string{
+		"metadata.labels[app",   // unclosed bracket; "app" exists
+		"metadata.labels]",      // stray ']'; "labels" exists
+		"spec..image",           // doubled '.'; "spec.image" exists
+		"spec.image.",           // trailing '.'
+		"metadata.labels[].app", // empty brackets
+		"spec[*].image",         // wildcard on a map
+		"spec.containers[0][1]", // second index
+		`metadata.labels."app`,  // unclosed quote
+	} {
+		t.Run(path, func(t *testing.T) {
+			location, err := resolver.ResolveLocation(path, 0)
+			assert.ErrorIs(t, err, pathparse.ErrMalformedPath)
+			assert.Equal(t, Location{}, location)
+		})
+	}
 }

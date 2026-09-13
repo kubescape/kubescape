@@ -4,10 +4,19 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func seg(key string, index int) Segment {
 	return Segment{Key: key, Index: index}
+}
+
+// mustParse parses a path the test expects to be well-formed.
+func mustParse(t *testing.T, path string) []Segment {
+	t.Helper()
+	segments, err := ParsePath(path)
+	require.NoError(t, err, "path %q should parse", path)
+	return segments
 }
 
 // TestParsePath_EmittedByRules covers every path shape a regolibrary rule
@@ -100,7 +109,7 @@ func TestParsePath_EmittedByRules(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			assert.Equal(t, tc.want, ParsePath(tc.path), "path emitted by %s", tc.rule)
+			assert.Equal(t, tc.want, mustParse(t, tc.path), "path emitted by %s", tc.rule)
 		})
 	}
 }
@@ -163,14 +172,6 @@ func TestParsePath_IndexBelongsToItsSegment(t *testing.T) {
 			want: []Segment{seg("metadata", -1), seg("annotations", -1), seg("foo.bar/list", 2), seg("name", -1)},
 		},
 		{
-			// A second index has nothing left to qualify: the segment already
-			// carries one. Kubernetes has no nested lists here, so this is
-			// malformed input rather than a shape to support.
-			name: "a second index on an already-indexed segment is dropped",
-			path: "spec.containers[0][1]",
-			want: []Segment{seg("spec", -1), seg("containers", 0)},
-		},
-		{
 			// Quoting is how a rule says "key, not index". Stripping the quotes
 			// before testing for digits would throw that signal away.
 			name: "quoted digits stay a key",
@@ -197,7 +198,7 @@ func TestParsePath_IndexBelongsToItsSegment(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			assert.Equal(t, tc.want, ParsePath(tc.path))
+			assert.Equal(t, tc.want, mustParse(t, tc.path))
 		})
 	}
 }
@@ -237,49 +238,101 @@ func TestParsePath_ValueSeparator(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			assert.Equal(t, tc.want, ParsePath(tc.path))
+			assert.Equal(t, tc.want, mustParse(t, tc.path))
 		})
 	}
 }
 
-// TestParsePath_Malformed covers input the scanner does not control. These
-// paths come from rules, so the parser reads what it can rather than rejecting:
-// a path resolving to nothing is already handled by every caller.
+// TestParsePath_Malformed pins that input outside the grammar is rejected, not
+// approximated. Each of these used to be read as the nearest well-formed path,
+// and that path names a real field: a location resolved for it pointed at a
+// line the rule never named, with nothing to say it was a guess.
 func TestParsePath_Malformed(t *testing.T) {
+	for _, path := range []string{
+		"metadata.labels[app",          // unclosed bracket
+		"metadata.labels]",             // stray ']'
+		"spec..image",                  // empty segment
+		"spec.image.",                  // trailing '.'
+		"..spec",                       // empty leading segment
+		"metadata.labels[].app",        // empty brackets
+		"spec.containers[*].image",     // wildcard is a yq operator, not a key
+		"[0].spec",                     // index with no key to qualify
+		"spec.containers[0][1]",        // second index on one segment
+		"spec.containers.[0]",          // bracket directly after '.'
+		"metadata.labels[app]x",        // text straight after a bracket
+		`metadata.annotations."a.b"x`,  // text straight after a quoted key
+		`metadata.annotations."a.b`,    // unclosed dot-quoted key
+		`metadata.annotations['a.b]`,   // unclosed quote inside a bracket
+		`metadata.annotations['a.b'x]`, // text between closing quote and ']'
+		`metadata.labels[a'b]`,         // stray quote inside a bracket
+		`metadata.annotations.""`,      // empty quoted key
+		`metadata.labels[app]x=value`,  // malformed before the value separator
+	} {
+		t.Run(path, func(t *testing.T) {
+			segments, err := ParsePath(path)
+			assert.ErrorIs(t, err, ErrMalformedPath)
+			assert.Nil(t, segments)
+		})
+	}
+}
+
+// TestParsePath_Empty covers input with no path in it at all, which is not an
+// error: there is simply nothing to resolve.
+func TestParsePath_Empty(t *testing.T) {
+	for _, path := range []string{"", ".", "=value"} {
+		t.Run(path, func(t *testing.T) {
+			segments, err := ParsePath(path)
+			assert.NoError(t, err)
+			assert.Nil(t, segments)
+		})
+	}
+}
+
+// TestParsePath_QuotedKeys covers both quoting forms. A dot-quoted key is how
+// kubescape fix already spells a key holding dots - its tests pin
+// metadata.annotations."foo.bar/baz" - so it has to parse as one segment
+// rather than being split at the dot inside the quotes.
+func TestParsePath_QuotedKeys(t *testing.T) {
 	cases := []struct {
-		name string
 		path string
 		want []Segment
 	}{
-		{name: "empty path", path: "", want: nil},
-		{name: "only a dot", path: ".", want: nil},
-		{name: "doubled dots are skipped", path: "spec..image", want: []Segment{seg("spec", -1), seg("image", -1)}},
-		{name: "trailing dot", path: "spec.image.", want: []Segment{seg("spec", -1), seg("image", -1)}},
 		{
-			name: "unclosed bracket takes the rest of the string",
-			path: "metadata.labels[app",
-			want: []Segment{seg("metadata", -1), seg("labels", -1), seg("app", -1)},
+			path: `metadata.annotations."foo.bar/baz"`,
+			want: []Segment{seg("metadata", -1), seg("annotations", -1), seg("foo.bar/baz", -1)},
 		},
 		{
-			name: "empty brackets contribute nothing",
-			path: "metadata.labels[].app",
-			want: []Segment{seg("metadata", -1), seg("labels", -1), seg("app", -1)},
+			path: `metadata.annotations.'foo.bar/baz'`,
+			want: []Segment{seg("metadata", -1), seg("annotations", -1), seg("foo.bar/baz", -1)},
 		},
 		{
-			name: "leading index has nothing to qualify",
-			path: "[0].spec",
-			want: []Segment{seg("spec", -1)},
-		},
-		{
-			name: "double-quoted key is unquoted like a single-quoted one",
 			path: `metadata.annotations["a.b/c"]`,
 			want: []Segment{seg("metadata", -1), seg("annotations", -1), seg("a.b/c", -1)},
+		},
+		{
+			// A "]" inside quotes belongs to the key.
+			path: `metadata.annotations['a]b']`,
+			want: []Segment{seg("metadata", -1), seg("annotations", -1), seg("a]b", -1)},
+		},
+		{
+			// An index can follow a dot-quoted key and qualifies it.
+			path: `spec."containers"[0].image`,
+			want: []Segment{seg("spec", -1), seg("containers", 0), seg("image", -1)},
+		},
+		{
+			// A quoted "=" is part of the key, not the value separator.
+			path: `metadata.annotations."a=b"=value`,
+			want: []Segment{seg("metadata", -1), seg("annotations", -1), seg("a=b", -1)},
+		},
+		{
+			path: "metadata.annotations.foo/bar",
+			want: []Segment{seg("metadata", -1), seg("annotations", -1), seg("foo/bar", -1)},
 		},
 	}
 
 	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			assert.Equal(t, tc.want, ParsePath(tc.path))
+		t.Run(tc.path, func(t *testing.T) {
+			assert.Equal(t, tc.want, mustParse(t, tc.path))
 		})
 	}
 }
@@ -326,7 +379,7 @@ func TestParsePath_SafeFieldPathsAreUnchanged(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.path, func(t *testing.T) {
-			assert.Equal(t, tc.want, ParsePath(tc.path))
+			assert.Equal(t, tc.want, mustParse(t, tc.path))
 		})
 	}
 }

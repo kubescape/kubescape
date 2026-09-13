@@ -1,6 +1,8 @@
 package pathparse
 
 import (
+	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 )
@@ -28,8 +30,11 @@ import (
 // path still resolves - but to the whole labels map rather than the one key
 // asked for, which reads as a successful lookup of the wrong thing.
 //
-// ParsePath scans the string instead of splitting it, so a bracket is read as a
-// unit and its contents never reach the "." rule.
+// ParsePath scans the string instead of splitting it, so a bracket or a quoted
+// key is read as a unit and its contents never reach the "." rule.
+
+// ErrMalformedPath reports a path outside the grammar ParsePath accepts.
+var ErrMalformedPath = errors.New("malformed path")
 
 // Segment is one step of a parsed path: a map key, optionally indexed when
 // the path selects an element of a list at that key. Index is -1 when the
@@ -46,119 +51,181 @@ type Segment struct {
 	Index int
 }
 
-// ParsePath splits a path into its segments.
+// ParsePath splits a path into its segments, or reports ErrMalformedPath.
 //
-// A bracket holds either a list index or a map key. All-digit contents are read
-// as an index and attached to the preceding segment; anything else is a key and
-// becomes a segment of its own, with surrounding quotes stripped. That keeps
-// "containers[0].image" at two segments while giving "labels[app]" three, which
-// is what each one means.
+// The grammar is deliberately narrow:
 //
-// Assisted-remediation strings arrive as "<path>=<value>" and only the path is
-// parseable, so everything from the first "=" outside a bracket is dropped. A
-// "=" inside a bracket is part of the key and survives.
+//	path     = key { "." key | "[" bracket "]" }
+//	key      = bare | '"' text '"' | "'" text "'"
+//	bracket  = digits | bare-bracket | '"' text '"' | "'" text "'"
 //
-// Malformed input is parsed as far as it makes sense rather than rejected:
-// these paths come from rules the scanner does not control, and a path that
-// resolves to nothing is already handled everywhere downstream. An unclosed
-// bracket takes the rest of the string as its contents; empty segments from a
-// leading or doubled "." are skipped.
-func ParsePath(path string) []Segment {
+// A bare key runs until ".", "[", "]" or a quote. A quoted key - dot-quoted as
+// in metadata.annotations."foo.bar/baz", or bracketed as in ['foo.bar/baz'] -
+// runs to its closing quote and may hold dots. Unquoted all-digit bracket
+// contents are a list index and attach to the segment before them; anything
+// else in a bracket is a map key and becomes its own segment. Quoting is how a
+// rule says "key, not index", so data['0'] names the entry "0".
+//
+// Anything else is rejected rather than approximated: an unclosed bracket or
+// quote, a stray "]", an empty or doubled ".", an empty bracket, a "[*]"
+// wildcard, an index with nothing to qualify, a second index on one segment,
+// or text straight after a closing bracket or quote. Each of those used to be
+// read as the nearest well-formed path, and that path is a real field: a
+// location resolved for it points at a line of YAML the rule never named,
+// with nothing to say it is a guess. A caller told the path is malformed can
+// show no location instead.
+//
+// Assisted-remediation strings arrive as "<path>=<value>", so everything from
+// the first "=" outside a bracket or quote is dropped first, along with one
+// leading ".". An empty path yields no segments and no error.
+func ParsePath(path string) ([]Segment, error) {
+	original := path
 	path = TruncateAtValueSeparator(path)
-
-	var (
-		segments []Segment
-		key      strings.Builder
-		started  bool
-	)
-
-	// flush ends the segment being read. started tracks whether a segment is
-	// open at all, so that "a..b" skips the empty middle rather than emitting
-	// a segment with an empty key, while "labels[app]" can still close the
-	// bracket key as its own segment.
-	flush := func() {
-		if !started {
-			return
-		}
-		segments = append(segments, Segment{Key: key.String(), Index: -1})
-		key.Reset()
-		started = false
+	if path == "" {
+		return nil, nil
 	}
 
-	for i := 0; i < len(path); i++ {
-		switch path[i] {
-		case '.':
-			flush()
-		case '[':
-			contents, quoted, next := readBracket(path, i)
-			i = next
+	malformed := func(reason string) ([]Segment, error) {
+		return nil, fmt.Errorf("%w %q: %s", ErrMalformedPath, original, reason)
+	}
 
-			// Quoting is how a rule says "this is a key, not an index", so a
-			// quoted run of digits stays a key: data['0'] selects the Secret
-			// entry named "0", not the first element of a list.
-			if index, ok := digitIndex(contents); ok && !quoted {
-				switch {
-				case started:
-					// The index qualifies the segment being read.
-					segments = append(segments, Segment{Key: key.String(), Index: index})
-					key.Reset()
-					started = false
-				case len(segments) > 0 && segments[len(segments)-1].Index < 0:
-					// The index follows a segment that is already closed - a
-					// bracketed key, as in annotations[foo.bar/list][2]. It
-					// qualifies that one. Dropping it would resolve the path
-					// to the whole list, the same "succeeds against the wrong
-					// thing" failure that reading brackets exists to end.
-					segments[len(segments)-1].Index = index
+	var segments []Segment
+	expectKey := true // at the start, or just past a "."
+	afterDot := false
+
+	for i := 0; i < len(path); {
+		c := path[i]
+
+		if expectKey {
+			switch c {
+			case '.':
+				return malformed("empty segment")
+			case ']':
+				return malformed("unmatched ']'")
+			case '[':
+				if afterDot {
+					return malformed("'[' directly after '.'")
 				}
-				// Anything else has nothing to qualify: a leading "[0]", or a
-				// second index on an already-indexed segment.
-				continue
+				contents, quoted, end, reason := readBracket(path, i)
+				if reason != "" {
+					return malformed(reason)
+				}
+				if _, isIndex := digitIndex(contents); isIndex && !quoted {
+					return malformed("index with no key to qualify")
+				}
+				segments = append(segments, Segment{Key: contents, Index: -1})
+				i = end + 1
+			case '"', '\'':
+				key, end, reason := readQuoted(path, i)
+				if reason != "" {
+					return malformed(reason)
+				}
+				segments = append(segments, Segment{Key: key, Index: -1})
+				i = end + 1
+			default:
+				end := i
+				for end < len(path) && !isDelimiter(path[end]) {
+					end++
+				}
+				segments = append(segments, Segment{Key: path[i:end], Index: -1})
+				i = end
 			}
+			expectKey = false
+			afterDot = false
+			continue
+		}
 
-			flush()
-			if contents != "" {
+		switch c {
+		case '.':
+			if i == len(path)-1 {
+				return malformed("trailing '.'")
+			}
+			expectKey = true
+			afterDot = true
+			i++
+		case '[':
+			contents, quoted, end, reason := readBracket(path, i)
+			if reason != "" {
+				return malformed(reason)
+			}
+			if index, isIndex := digitIndex(contents); isIndex && !quoted {
+				last := &segments[len(segments)-1]
+				if last.Index >= 0 {
+					return malformed("second index on one segment")
+				}
+				last.Index = index
+			} else {
 				segments = append(segments, Segment{Key: contents, Index: -1})
 			}
+			i = end + 1
 		default:
-			key.WriteByte(path[i])
-			started = true
+			return malformed(fmt.Sprintf("unexpected %q after a key", c))
 		}
 	}
-	flush()
 
-	return segments
+	return segments, nil
 }
 
-// readBracket reads the contents of the bracket opening at open. It returns the
-// contents with any surrounding quotes stripped, whether they were quoted, and
-// the index of the closing bracket. An unclosed bracket yields the rest of the
-// string, so a malformed path degrades to a lookup that finds nothing rather
-// than to a panic.
+// isDelimiter reports whether c ends a bare key.
+func isDelimiter(c byte) bool {
+	return c == '.' || c == '[' || c == ']' || c == '"' || c == '\''
+}
+
+// readBracket reads the bracket opening at open. It returns the contents with
+// any quotes stripped, whether they were quoted, and the index of the closing
+// bracket; or a reason the bracket is malformed.
 //
 // Whether the contents were quoted is reported separately because stripping the
-// quotes discards the one signal that says a run of digits is a key.
-func readBracket(path string, open int) (contents string, quoted bool, closing int) {
-	end := strings.IndexByte(path[open+1:], ']')
-	if end < 0 {
-		contents, quoted = unquote(path[open+1:])
-		return contents, quoted, len(path) - 1
+// quotes discards the one signal that says a run of digits is a key. A quoted
+// key is read to its closing quote first, so a "]" inside the quotes belongs to
+// the key rather than closing the bracket.
+func readBracket(path string, open int) (contents string, quoted bool, closing int, reason string) {
+	start := open + 1
+	if start < len(path) && (path[start] == '"' || path[start] == '\'') {
+		key, end, reason := readQuoted(path, start)
+		if reason != "" {
+			return "", false, 0, reason
+		}
+		if end+1 >= len(path) || path[end+1] != ']' {
+			return "", false, 0, "quoted key not followed by ']'"
+		}
+		return key, true, end + 1, ""
 	}
-	end += open + 1
-	contents, quoted = unquote(path[open+1 : end])
-	return contents, quoted, end
+
+	end := strings.IndexByte(path[start:], ']')
+	if end < 0 {
+		return "", false, 0, "unclosed '['"
+	}
+	contents = path[start : start+end]
+	switch {
+	case contents == "":
+		return "", false, 0, "empty '[]'"
+	case contents == "*":
+		// yq reads "[*]" as an operator, not a key, and the resolver's evaluator
+		// rejects it outright. Accepting it as a key named "*" would turn a
+		// lookup that fails into a walk up to whatever encloses it.
+		return "", false, 0, "unsupported '[*]'"
+	case strings.ContainsAny(contents, `"'`):
+		return "", false, 0, "stray quote inside '[]'"
+	}
+	return contents, false, start + end, ""
 }
 
-// unquote strips one layer of matching single or double quotes, which rules use
-// for keys that would otherwise be ambiguous: metadata.annotations['%v'].
-func unquote(s string) (string, bool) {
-	if len(s) < 2 {
-		return s, false
+// readQuoted reads a quoted key whose opening quote is at open, returning the
+// key and the index of its closing quote, or a reason it is malformed. Keys
+// are read verbatim: Kubernetes label and annotation keys cannot contain a
+// quote, so there is no escape syntax to honour.
+func readQuoted(path string, open int) (key string, closing int, reason string) {
+	quote := path[open]
+	end := strings.IndexByte(path[open+1:], quote)
+	if end < 0 {
+		return "", 0, "unclosed quote"
 	}
-	if (s[0] == '\'' && s[len(s)-1] == '\'') || (s[0] == '"' && s[len(s)-1] == '"') {
-		return s[1 : len(s)-1], true
+	key = path[open+1 : open+1+end]
+	if key == "" {
+		return "", 0, "empty quoted key"
 	}
-	return s, false
+	return key, open + 1 + end, ""
 }
 
 // digitIndex reports the list index a bracket's contents name, if the contents
@@ -188,14 +255,24 @@ func digitIndex(contents string) (int, bool) {
 // TruncateAtValueSeparator drops the "=<value>" half of an assisted-remediation
 // string, along with any leading ".".
 //
-// The split has to be on the first "=" that is not inside a bracket. Fix values
-// routinely contain "=" themselves - the CIS control-plane rules emit
-// "--anonymous-auth=false" - so a later separator must not be mistaken for the
-// first, and an annotation key holding an "=" must not be cut in half.
+// The split has to be on the first "=" that is not inside a bracket or a quoted
+// key. Fix values routinely contain "=" themselves - the CIS control-plane
+// rules emit "--anonymous-auth=false" - so a later separator must not be
+// mistaken for the first, and a key holding an "=" must not be cut in half.
 func TruncateAtValueSeparator(path string) string {
 	depth := 0
+	var quote byte
 	for i := 0; i < len(path); i++ {
-		switch path[i] {
+		c := path[i]
+		if quote != 0 {
+			if c == quote {
+				quote = 0
+			}
+			continue
+		}
+		switch c {
+		case '"', '\'':
+			quote = c
 		case '[':
 			depth++
 		case ']':

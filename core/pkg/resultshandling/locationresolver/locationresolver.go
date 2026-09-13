@@ -93,12 +93,20 @@ func (l *PathLocationResolver) ResolveLocation(path string, nodeIndex int) (Loca
 		return Location{}, fmt.Errorf("node index [%d] out of range [%d]", nodeIndex, len(l.yamlNodes))
 	}
 
+	// A malformed path is rejected before any walking up. Walking up exists for
+	// a well-formed path whose field is absent; applied to a path that could
+	// not be read, it would hand back the line of some ancestor as though the
+	// rule had named it.
+	segments, err := pathparse.ParsePath(path)
+	if err != nil {
+		return Location{}, err
+	}
+
 	// Walking up drops a parsed segment rather than trimming text off the
 	// expression. A trailing ".<segment>" regex cannot see that a bracketed key
 	// holds dots of its own, so on
 	// metadata.labels[app.kubernetes.io/name] it would peel the key apart one
 	// fragment at a time and ask yq about paths that never existed.
-	segments := pathparse.ParsePath(path)
 	for len(segments) > 0 {
 		yamlExpression := segmentsToYamlExpression(segments)
 
@@ -156,8 +164,13 @@ func quoteYamlKey(key string) string {
 var yamlKeyEscaper = strings.NewReplacer(`\`, `\\`, `"`, `\"`)
 
 // FixPathToValidYamlExpression renders a path as the yq expression that selects
-// it. Retained for callers outside this package; ResolveLocation works from the
-// parsed segments directly.
+// it, or "" for a malformed path - the same convention fixhandler's function of
+// this name uses for input it refuses. Retained for callers outside this
+// package; ResolveLocation works from the parsed segments directly.
 func FixPathToValidYamlExpression(fixPath string) string {
-	return segmentsToYamlExpression(pathparse.ParsePath(fixPath))
+	segments, err := pathparse.ParsePath(fixPath)
+	if err != nil {
+		return ""
+	}
+	return segmentsToYamlExpression(segments)
 }

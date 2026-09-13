@@ -95,8 +95,11 @@ func extractValueAtPath(obj map[string]any, path string) (string, bool) {
 	if len(obj) == 0 || path == "" {
 		return "", false
 	}
-	segments := pathparse.ParsePath(path)
-	if len(segments) == 0 {
+	// A malformed path resolves nothing. The nearest well-formed reading of it
+	// is a real field, and returning that field's value would present it as
+	// the value the rule pointed at.
+	segments, err := pathparse.ParsePath(path)
+	if err != nil || len(segments) == 0 {
 		return "", false
 	}
 
@@ -382,9 +385,7 @@ func matchesSafeField(kind, name string, parents []pathSegment) bool {
 // field (e.g. a container env var's "value") with a sibling field that names
 // it (e.g. that same env var's "name"), which is a separate, harder problem
 // left out of scope here.
-func hasSecretShapedFieldName(kind, path string) bool {
-	// pathparse.ParsePath drops the "=<value>" half itself, and does so bracket-aware.
-	segments := pathparse.ParsePath(path)
+func hasSecretShapedFieldName(kind string, segments []pathSegment) bool {
 	if len(segments) == 0 {
 		return false
 	}
@@ -418,7 +419,14 @@ func isSensitivePath(kind, path string) bool {
 	// lets the two disagree about what a path means, and a field the classifier
 	// does not recognise but extraction does resolve is a value printed in the
 	// clear.
-	segments := pathparse.ParsePath(path)
+	segments, err := pathparse.ParsePath(path)
+	if err != nil {
+		// A path that cannot be read cannot be cleared. Extraction refuses it
+		// too, so no resource value is at stake here, but a fix path's value
+		// comes from the rule rather than the resource and is printed without
+		// extraction - so it is hidden rather than shown on a guess.
+		return true
+	}
 
 	// Everything under a Secret's data or stringData is sensitive, whatever the
 	// individual key happens to be called. Deciding that on the first segment
@@ -433,7 +441,7 @@ func isSensitivePath(kind, path string) bool {
 	if isContainerEnvValue(segments) {
 		return true
 	}
-	return hasSecretShapedFieldName(kind, path)
+	return hasSecretShapedFieldName(kind, segments)
 }
 
 // isContainerEnvValue reports whether segments select the value of a container

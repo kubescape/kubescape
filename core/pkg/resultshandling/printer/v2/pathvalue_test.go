@@ -74,19 +74,12 @@ func TestSplitPath(t *testing.T) {
 			input: "",
 			want:  nil,
 		},
-		{
-			name:  "empty segments from double dot",
-			input: "spec..image",
-			want: []pathSegment{
-				{Key: "spec", Index: -1},
-				{Key: "image", Index: -1},
-			},
-		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := pathparse.ParsePath(tc.input)
+			got, err := pathparse.ParsePath(tc.input)
+			require.NoError(t, err)
 			assert.Equal(t, tc.want, got)
 		})
 	}
