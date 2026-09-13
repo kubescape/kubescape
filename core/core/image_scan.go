@@ -255,15 +255,27 @@ func isTargetImage(targets []Target, attributes Attributes) bool {
 }
 
 // Generates a list of unique CVE-IDs and the severities which are to be excluded for
-// the image being scanned.
-func getUniqueVulnerabilitiesAndSeverities(policies []VulnerabilitiesIgnorePolicy, image string) ([]string, []string) {
+// the image being scanned. Returns an error when exceptions are configured for
+// a non-registry input (archive, local directory, SBOM, ...), where exception
+// targets are undefinable — callers must surface it per image, never swallow it.
+func getUniqueVulnerabilitiesAndSeverities(policies []VulnerabilitiesIgnorePolicy, image string) ([]string, []string, error) {
 	// Create maps with slices as values to store unique vulnerabilities and severities (case-insensitive)
 	uniqueVulns := make(map[string][]string)
 	uniqueSevers := make(map[string][]string)
 
+	if len(policies) > 0 {
+		if _, _, errEmpty := classifyImageInput(image, osStatExists); errEmpty != nil {
+			return nil, nil, errEmpty
+		}
+		if isNonRegistryInput(image) {
+			_, scheme, _ := classifyImageInput(image, osStatExists)
+			return nil, nil, fmt.Errorf("image exceptions cannot target non-registry input %q (detected %q): scan by registry reference or remove --exceptions", image, scheme)
+		}
+	}
+
 	imageAttributes, err := getAttributesFromImage(image)
 	if err != nil {
-		logger.L().StopError(fmt.Sprintf("Failed to generate image attributes: %s", err))
+		return nil, nil, fmt.Errorf("failed to generate image attributes for %q: %w", image, err)
 	}
 
 	// Iterate over each policy and its vulnerabilities/severities
@@ -312,7 +324,7 @@ func getUniqueVulnerabilitiesAndSeverities(policies []VulnerabilitiesIgnorePolic
 		uniqueSeversList = append(uniqueSeversList, sever)
 	}
 
-	return uniqueVulnsList, uniqueSeversList
+	return uniqueVulnsList, uniqueSeversList, nil
 }
 
 // applyRegistryMapping replaces the registry part of the image name if a match
@@ -320,6 +332,11 @@ func getUniqueVulnerabilitiesAndSeverities(policies []VulnerabilitiesIgnorePolic
 // mapping key actually matched; callers should only retry when matched is true.
 func applyRegistryMapping(imgName string, registryMapping map[string]string) (string, bool, error) {
 	if len(registryMapping) == 0 {
+		return imgName, false, nil
+	}
+	// Registry mapping can never match a non-registry input; skip parsing so
+	// archives don't produce confusing mapping errors.
+	if isNonRegistryInput(imgName) {
 		return imgName, false, nil
 	}
 	canonicalImageName, err := cautils.NormalizeImageName(imgName)
@@ -467,6 +484,39 @@ func (ks *Kubescape) ScanImageContext(ctx context.Context, imgScanInfo *ksmetav1
 
 	logger.L().Start(imageScanStartMessage(images))
 
+	var exceptionPolicies []VulnerabilitiesIgnorePolicy
+	var err error
+	if imgScanInfo.Exceptions != "" {
+		exceptionPolicies, err = GetImageExceptionsFromFile(imgScanInfo.Exceptions)
+		if err != nil {
+			logger.L().StopError(fmt.Sprintf("Failed to load exceptions from file: %s", imgScanInfo.Exceptions))
+			return false, err
+		}
+	}
+
+	// Fail fast before the Grype DB download when every image is a
+	// non-registry input combined with --exceptions. Mixed scans fall through
+	// to per-image errors so valid registry siblings still scan.
+	if len(exceptionPolicies) > 0 {
+		allNonRegistry := true
+		for _, image := range images {
+			if _, _, errEmpty := classifyImageInput(image, osStatExists); errEmpty != nil {
+				allNonRegistry = false
+				break
+			}
+			if !isNonRegistryInput(image) {
+				allNonRegistry = false
+				break
+			}
+		}
+		if allNonRegistry {
+			_, scheme, _ := classifyImageInput(images[0], osStatExists)
+			err := fmt.Errorf("[%s] image exceptions cannot target non-registry input %q (detected %q): scan by registry reference or remove --exceptions %q", ErrCategoryExceptionUnsupported, images[0], scheme, imgScanInfo.Exceptions)
+			logger.L().StopError(err.Error())
+			return false, err
+		}
+	}
+
 	failOnStale, maxDBAge := imagescan.ResolveDBAgeGate(scanInfo.FailOnStaleDB, scanInfo.FailOnStaleDBSet, scanInfo.MaxDBAge, scanInfo.MaxDBAgeSet)
 	distCfg, installCfg, shouldUpdate, err := imagescan.NewDefaultDBConfig(scanInfo.ListingURL, scanInfo.SkipDBUpdate, failOnStale)
 	if err != nil {
@@ -484,14 +534,6 @@ func (ks *Kubescape) ScanImageContext(ctx context.Context, imgScanInfo *ksmetav1
 	// The failure is deferred until after results are printed so the user keeps the report.
 	staleDBErr := imagescan.EnforceDBAge(svc, shouldUpdate, failOnStale, maxDBAge)
 
-	var exceptionPolicies []VulnerabilitiesIgnorePolicy
-	if imgScanInfo.Exceptions != "" {
-		exceptionPolicies, err = GetImageExceptionsFromFile(imgScanInfo.Exceptions)
-		if err != nil {
-			logger.L().StopError(fmt.Sprintf("Failed to load exceptions from file: %s", imgScanInfo.Exceptions))
-			return false, err
-		}
-	}
 
 	jobs := buildImageScanJobs(imgScanInfo, scanInfo, exceptionPolicies)
 
@@ -539,10 +581,15 @@ func buildImageScanJobs(imgScanInfo *ksmetav1.ImageScanInfo, scanInfo *cautils.S
 	for _, image := range imgScanInfo.Images {
 		// Resolving exceptions parses the image as a registry reference, which
 		// archive and directory references are not, so it stays behind the
-		// check for configured policies.
+		// check for configured policies. Resolution failures are stored per
+		// job so one archive never poisons sibling registry images.
 		var vulnerabilityExceptions, severityExceptions []string
+		var exceptionErr error
 		if len(exceptionPolicies) > 0 {
-			vulnerabilityExceptions, severityExceptions = getUniqueVulnerabilitiesAndSeverities(exceptionPolicies, image)
+			vulnerabilityExceptions, severityExceptions, exceptionErr = getUniqueVulnerabilitiesAndSeverities(exceptionPolicies, image)
+			if exceptionErr != nil {
+				exceptionErr = fmt.Errorf("%w (exceptions from %q)", exceptionErr, imgScanInfo.Exceptions)
+			}
 		}
 		jobs = append(jobs, ImageScanJob{
 			Image:                   image,
@@ -551,6 +598,7 @@ func buildImageScanJobs(imgScanInfo *ksmetav1.ImageScanInfo, scanInfo *cautils.S
 			VulnerabilityExceptions: vulnerabilityExceptions,
 			SeverityExceptions:      severityExceptions,
 			RegistryMapping:         scanInfo.RegistryMapping,
+			ExceptionErr:            exceptionErr,
 		})
 	}
 	return jobs
@@ -747,6 +795,10 @@ type ImageScanJob struct {
 	VulnerabilityExceptions []string
 	SeverityExceptions      []string
 	RegistryMapping         map[string]string
+	// ExceptionErr carries a per-image exception-resolution failure (e.g.
+	// exceptions requested for a non-registry input). Workers surface it as
+	// the job result without invoking the scanner.
+	ExceptionErr error
 }
 
 // ImageScanResult conveys the scan output and categorized errors from a worker.
@@ -813,6 +865,20 @@ func (o *ImageScanOrchestrator) ScanImages(ctx context.Context, jobs []ImageScan
 			defer wg.Done()
 			for job := range jobChan {
 				target := imageScanTarget(job.Image, job.Platform)
+				// Exception-resolution failures surface first: an archive with
+				// --exceptions must report as unsupported even if it also has
+				// a platform hint or mapping that would otherwise skip it.
+				if job.ExceptionErr != nil {
+					if o.errorAggregator != nil {
+						o.errorAggregator.Add(target, fmt.Errorf("[%s] %w", ErrCategoryExceptionUnsupported, job.ExceptionErr))
+					}
+					resultChan <- ImageScanResult{
+						Image:    job.Image,
+						Platform: job.Platform,
+						Error:    fmt.Errorf("[%s] %w", ErrCategoryExceptionUnsupported, job.ExceptionErr),
+					}
+					continue
+				}
 				select {
 				case <-ctx.Done():
 					cancelErr := fmt.Errorf("scan canceled: %w", ctx.Err())
