@@ -8,9 +8,11 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
+	celast "github.com/google/cel-go/common/ast"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"sigs.k8s.io/yaml"
@@ -297,4 +299,88 @@ func sortedNames(m map[string]string) []string {
 	}
 	slices.Sort(names)
 	return names
+}
+
+// TestBundleDoesNotReadNamespaceObject pins the one gap in docs/cel-engine.md
+// that is not a safe skip.
+//
+// The scan binds namespaceObject to null whenever it did not collect that
+// Namespace, and collection follows what the framework's controls match, not
+// what the loaded policies need. Under failurePolicy Fail, the bundle default,
+// an unguarded read of that null is reported as a violation, so the policy
+// fails workloads a cluster would admit.
+//
+// It is latent only because no bundle policy reads the variable, which is a
+// property of the vendored bundle rather than of the engine: a pin bump can end
+// it silently. This test makes it end as a failed build instead.
+//
+// It walks the compiled AST rather than grepping, so a mention inside a message
+// string does not trip it. An expression that does not compile is skipped,
+// since such a policy is already skipped at runtime.
+func TestBundleDoesNotReadNamespaceObject(t *testing.T) {
+	catalog, err := getVAPCatalog()
+	require.NoError(t, err)
+	require.NotEmpty(t, catalog.byName, "empty bundle; the guard would pass vacuously")
+
+	e, err := NewEvaluator()
+	require.NoError(t, err)
+
+	readers := map[string][]string{}
+	for name, vap := range catalog.byName {
+		for _, expr := range bundleExpressions(vap) {
+			compiled, issues := e.env.Compile(expr.source)
+			if issues != nil && issues.Err() != nil {
+				continue
+			}
+			root := celast.NavigateAST(compiled.NativeRep())
+			for _, node := range celast.MatchDescendants(root, celast.KindMatcher(celast.IdentKind)) {
+				if node.AsIdent() != "namespaceObject" {
+					continue
+				}
+				if !slices.Contains(readers[name], expr.where) {
+					readers[name] = append(readers[name], expr.where)
+				}
+			}
+		}
+	}
+
+	for name, where := range readers {
+		slices.Sort(where)
+		assert.Failf(t, "a bundle policy now reads namespaceObject",
+			"%s reads it in %s.\n\n"+
+				"The gap in docs/cel-engine.md just went live. The scan binds namespaceObject to null when "+
+				"it did not collect that Namespace, and under failurePolicy Fail an unguarded read of that "+
+				"null is reported as a violation, so this policy can now fail workloads a cluster would "+
+				"admit.\n\n"+
+				"Do not silence this by deleting the test. Either guarantee Namespace collection when a "+
+				"loaded policy needs one, or classify an uncollected Namespace so it skips instead of "+
+				"failing.",
+			name, strings.Join(where, ", "))
+	}
+}
+
+// bundleExpression is one CEL expression from a policy, with where it came from
+// so a failure names the field rather than just the policy.
+type bundleExpression struct {
+	source string
+	where  string
+}
+
+// bundleExpressions returns every CEL expression a policy evaluates. All of them
+// compile against the same env, so any of them can read namespaceObject.
+func bundleExpressions(vap *VAP) []bundleExpression {
+	var out []bundleExpression
+	for _, v := range vap.Variables {
+		out = append(out, bundleExpression{v.Expression, "variable " + v.Name})
+	}
+	for i, v := range vap.Validations {
+		out = append(out, bundleExpression{v.Expression, "validation " + strconv.Itoa(i)})
+		if v.MessageExpression != "" {
+			out = append(out, bundleExpression{v.MessageExpression, "messageExpression " + strconv.Itoa(i)})
+		}
+	}
+	for _, c := range vap.matchConditions {
+		out = append(out, bundleExpression{c.Expression, "matchCondition " + c.Name})
+	}
+	return out
 }
