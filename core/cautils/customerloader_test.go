@@ -235,6 +235,63 @@ func Test_initializeCloudAPI_backPropagatesURLsFromConnector(t *testing.T) {
 	assert.Equal(t, "https://api.example.com", cfg.configObj.CloudAPIURL)
 }
 
+// Test_initializeCloudAPI_identityFollowsEachClustersConfig guards #3773. The
+// connector is a process global, and --kube-contexts scans several clusters in
+// one process, each reaching initializeCloudAPI through NewClusterConfig. Each
+// case starts from the state the previously scanned cluster leaves behind — an
+// onboarded tenant on the connector — and asserts that the next cluster's
+// config fully determines the identity the connector ends up with. An
+// unconfigured cluster (no cached config, no in-cluster secret, no flag or env
+// var) must come out with no identity at all, not the previous tenant's; with
+// --submit that meant its report was filed under the wrong account.
+func Test_initializeCloudAPI_identityFollowsEachClustersConfig(t *testing.T) {
+	tests := []struct {
+		name          string
+		next          *ConfigObj
+		wantAccountID string
+		wantAccessKey string
+	}{
+		{
+			name:          "unconfigured cluster does not inherit the previous tenant",
+			next:          &ConfigObj{},
+			wantAccountID: "",
+			wantAccessKey: "",
+		},
+		{
+			name:          "onboarded cluster replaces the previous tenant outright",
+			next:          &ConfigObj{AccountID: "tenant-BBBB", AccessKey: "key-BBBB"},
+			wantAccountID: "tenant-BBBB",
+			wantAccessKey: "key-BBBB",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			prev := getter.GetKSCloudAPIConnector()
+			t.Cleanup(func() { getter.SetKSCloudAPIConnector(prev) })
+
+			// The previously scanned cluster was onboarded and left its tenant
+			// on the global connector.
+			previous, err := v1.NewKSCloudAPI("https://api.example.com", "https://report.example.com", "tenant-AAAA", "key-AAAA")
+			require.NoError(t, err)
+			getter.SetKSCloudAPIConnector(previous)
+
+			initializeCloudAPI(&ClusterConfig{configObj: tt.next})
+
+			got := getter.GetKSCloudAPIConnector()
+			assert.Equal(t, tt.wantAccountID, got.GetAccountID())
+			assert.Equal(t, tt.wantAccessKey, got.GetAccessKey())
+
+			// The URLs are deliberately outside this contract: they name the
+			// backend rather than the tenant, and initializeSaaSEnv seeds them
+			// on the connector before any config exists, so an empty config URL
+			// keeps the connector's rather than clearing it.
+			assert.Equal(t, "https://api.example.com", got.GetCloudAPIURL())
+			assert.Equal(t, "https://report.example.com", got.GetCloudReportURL())
+		})
+	}
+}
+
 func TestGetConfigMapNamespace(t *testing.T) {
 	tests := []struct {
 		name string

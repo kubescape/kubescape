@@ -576,11 +576,21 @@ func initializeCloudAPI(c ITenantConfig) *v1.KSCloudAPI {
 				logger.L().Warning("failed to apply KS Cloud Report URL from config", helpers.Error(err))
 			}
 		}
-		if val := c.GetAccountID(); val != "" && val != ksCloud.GetAccountID() {
+		// Identity is taken from the config as-is, empty included. The connector
+		// is a process global and --kube-contexts scans several clusters in one
+		// process, each reaching here through NewClusterConfig; guarded on
+		// non-empty like the URLs above, an unconfigured cluster kept whatever
+		// tenant the previous cluster left behind and, with --submit, reported
+		// under it (#3773). An empty account ID or access key means "not
+		// onboarded", not "same as last time". The URLs keep their guard on
+		// purpose: they name the backend rather than the tenant, and
+		// initializeSaaSEnv seeds them on the connector before any config
+		// exists — which is what the back-propagation block below relies on.
+		if val := c.GetAccountID(); val != ksCloud.GetAccountID() {
 			logger.L().Debug("updating Account ID from config", helpers.String("old", ksCloud.GetAccountID()), helpers.String("new", val))
 			ksCloud.SetAccountID(val)
 		}
-		if val := c.GetAccessKey(); val != "" && val != ksCloud.GetAccessKey() {
+		if val := c.GetAccessKey(); val != ksCloud.GetAccessKey() {
 			logger.L().Debug("updating Access Key from config", helpers.Int("old (len)", len(ksCloud.GetAccessKey())), helpers.Int("new (len)", len(val)))
 			ksCloud.SetAccessKey(val)
 		}
