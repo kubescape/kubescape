@@ -257,6 +257,9 @@ func TestDiffOutputPath(t *testing.T) {
 		{"pretty output path stays exact", "pretty-printer", "pretty.out", "pretty.out"},
 		{"yaml accepts yml", "yaml", "report.yml", "report.yml"},
 		{"unknown format is untouched", "unknown", "report", "report"},
+		{"stdout sink keeps exact path", "json", os.Stdout.Name(), os.Stdout.Name()},
+		{"devnull sink keeps exact path", "sarif", os.DevNull, os.DevNull},
+		{"summary-json stdout sink keeps exact path", "summary-json", os.Stdout.Name(), os.Stdout.Name()},
 	}
 
 	for _, test := range tests {

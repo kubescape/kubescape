@@ -90,6 +90,11 @@ func diffOutputPath(format, outputFile string) string {
 	if outputFile == "" {
 		return ""
 	}
+	// Well-known sinks are not files: keep them exact, like
+	// printer.ResolveOutputFile, instead of opening /dev/stdout.json.
+	if outputFile == os.Stdout.Name() || outputFile == os.DevNull {
+		return outputFile
+	}
 	if format == printer.PrettyFormat {
 		return outputFile
 	}
