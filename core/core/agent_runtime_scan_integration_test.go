@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/kubescape/kubescape/v4/core/cautils"
@@ -162,18 +163,28 @@ type agentRuntimeExpectedResult struct {
 func assertAgentRuntimeResourceResults(t *testing.T, resources map[string]resourcesresults.Result) {
 	t.Helper()
 	expected := map[string]agentRuntimeExpectedResult{
-		"path=2781081350/api=agents.x-k8s.io/v1beta1/agents/Sandbox/unsafe-sandbox":                        {"C-0297", apis.StatusFailed, "spec.podTemplate.spec.runtimeClassName"},
-		"path=2797858969/api=agents.x-k8s.io/v1beta1/agents/Sandbox/isolated-sandbox":                      {"C-0297", apis.StatusPassed, ""},
-		"path=2747526112/api=extensions.agents.x-k8s.io/v1beta1/agents/SandboxTemplate/unmanaged-template": {"C-0314", apis.StatusFailed, "spec.networkPolicyManagement"},
-		"path=2764303731/api=extensions.agents.x-k8s.io/v1beta1/agents/SandboxTemplate/managed-template":   {"C-0314", apis.StatusPassed, ""},
-		"path=2848191826/api=ate.dev/v1alpha1/agents/WorkerPool/unbounded-pool":                            {"C-0317", apis.StatusFailed, "spec.template.resources.limits.cpu"},
-		"path=2864969445/api=ate.dev/v1alpha1/agents/WorkerPool/bounded-pool":                              {"C-0317", apis.StatusPassed, ""},
+		"agents.x-k8s.io/v1beta1/agents/Sandbox/unsafe-sandbox":                        {"C-0297", apis.StatusFailed, "spec.podTemplate.spec.runtimeClassName"},
+		"agents.x-k8s.io/v1beta1/agents/Sandbox/isolated-sandbox":                      {"C-0297", apis.StatusPassed, ""},
+		"extensions.agents.x-k8s.io/v1beta1/agents/SandboxTemplate/unmanaged-template": {"C-0314", apis.StatusFailed, "spec.networkPolicyManagement"},
+		"extensions.agents.x-k8s.io/v1beta1/agents/SandboxTemplate/managed-template":   {"C-0314", apis.StatusPassed, ""},
+		"ate.dev/v1alpha1/agents/WorkerPool/unbounded-pool":                            {"C-0317", apis.StatusFailed, "spec.template.resources.limits.cpu"},
+		"ate.dev/v1alpha1/agents/WorkerPool/bounded-pool":                              {"C-0317", apis.StatusPassed, ""},
 	}
-	require.Equal(t, len(expected), len(resources))
-	for resourceID, want := range expected {
-		resource, ok := resources[resourceID]
-		require.Truef(t, ok, "missing resource result %q", resourceID)
+	resourcesByIdentity := make(map[string]resourcesresults.Result, len(resources))
+	for resourceID, resource := range resources {
+		path, identity, ok := strings.Cut(resourceID, "/api=")
+		require.Truef(t, ok, "resource ID %q does not contain the /api= separator", resourceID)
+		require.Truef(t, strings.HasPrefix(path, "path=") && len(path) > len("path="), "resource ID %q does not contain a path value", resourceID)
+		require.NotEmptyf(t, identity, "resource ID %q does not contain an API identity", resourceID)
+		require.NotContainsf(t, resourcesByIdentity, identity, "duplicate resource identity %q", identity)
 		assert.Equal(t, resourceID, resource.ResourceID)
+		resourcesByIdentity[identity] = resource
+	}
+
+	require.Equal(t, len(expected), len(resourcesByIdentity))
+	for identity, want := range expected {
+		resource, ok := resourcesByIdentity[identity]
+		require.Truef(t, ok, "missing resource result %q", identity)
 		require.Len(t, resource.AssociatedControls, 1)
 		associatedControl := resource.AssociatedControls[0]
 		assert.Equal(t, want.controlID, associatedControl.ControlID)
