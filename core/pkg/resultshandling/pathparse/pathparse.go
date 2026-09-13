@@ -59,17 +59,19 @@ type Segment struct {
 //	key      = bare | '"' text '"' | "'" text "'"
 //	bracket  = digits | bare-bracket | '"' text '"' | "'" text "'"
 //
-// A bare key runs until ".", "[", "]" or a quote. A quoted key - dot-quoted as
-// in metadata.annotations."foo.bar/baz", or bracketed as in ['foo.bar/baz'] -
-// runs to its closing quote and may hold dots. Unquoted all-digit bracket
+// An unquoted key holds only letters, digits, "_", "-" and "/" - plus "." when
+// bracketed - which covers every path regolibrary emits. A quoted key -
+// dot-quoted as in metadata.annotations."foo.bar/baz", or bracketed as in
+// ['foo.bar/baz'] - runs to its closing quote and may hold anything else. Unquoted all-digit bracket
 // contents are a list index and attach to the segment before them; anything
 // else in a bracket is a map key and becomes its own segment. Quoting is how a
 // rule says "key, not index", so data['0'] names the entry "0".
 //
-// Anything else is rejected rather than approximated: an unclosed bracket or
-// quote, a stray "]", an empty or doubled ".", an empty bracket, a "[*]"
-// wildcard, an index with nothing to qualify, a second index on one segment,
-// or text straight after a closing bracket or quote. Each of those used to be
+// Anything else is rejected rather than approximated: a character outside the
+// key alphabet in an unquoted key (an unmatched "[", a space, a "*" wildcard),
+// an unclosed bracket or quote, a stray "]", an empty or doubled ".", an empty
+// bracket, an index with nothing to qualify, a second index on one segment, or
+// text straight after a closing bracket or quote. Each of those used to be
 // read as the nearest well-formed path, and that path is a real field: a
 // location resolved for it points at a line of YAML the rule never named,
 // with nothing to say it is a guess. A caller told the path is malformed can
@@ -124,8 +126,11 @@ func ParsePath(path string) ([]Segment, error) {
 				i = end + 1
 			default:
 				end := i
-				for end < len(path) && !isDelimiter(path[end]) {
+				for end < len(path) && isKeyChar(path[end]) {
 					end++
+				}
+				if end == i {
+					return malformed(fmt.Sprintf("unexpected %q", c))
 				}
 				segments = append(segments, Segment{Key: path[i:end], Index: -1})
 				i = end
@@ -166,9 +171,23 @@ func ParsePath(path string) ([]Segment, error) {
 	return segments, nil
 }
 
-// isDelimiter reports whether c ends a bare key.
-func isDelimiter(c byte) bool {
-	return c == '.' || c == '[' || c == ']' || c == '"' || c == '\''
+// isKeyChar reports whether c may appear in an unquoted key: the characters
+// Kubernetes field names and label, annotation and data keys are built from.
+// A bracketed key may also hold "."; a bare one cannot, since "." separates.
+//
+// The set is closed on purpose. Every character outside it - a space, "[",
+// "|", "=" - is one no real key contains, so a path carrying one unquoted is
+// malformed. Accepting it as a key would let it miss, walk up, and report an
+// ancestor's line as the finding's. A key that genuinely holds such a
+// character can still be written quoted.
+func isKeyChar(c byte) bool {
+	switch {
+	case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9':
+		return true
+	case c == '_', c == '-', c == '/':
+		return true
+	}
+	return false
 }
 
 // readBracket reads the bracket opening at open. It returns the contents with
@@ -205,8 +224,16 @@ func readBracket(path string, open int) (contents string, quoted bool, closing i
 		// rejects it outright. Accepting it as a key named "*" would turn a
 		// lookup that fails into a walk up to whatever encloses it.
 		return "", false, 0, "unsupported '[*]'"
-	case strings.ContainsAny(contents, `"'`):
-		return "", false, 0, "stray quote inside '[]'"
+	}
+	// The bracket ends at the first "]", so anything the key alphabet does not
+	// allow is rejected here - including an unmatched "[", which would
+	// otherwise make metadata.labels[app[foo] the key "app[foo", miss, and
+	// walk up to the labels block. A key that really holds such a character
+	// uses the quoted form, ['app[foo'].
+	for i := 0; i < len(contents); i++ {
+		if c := contents[i]; c != '.' && !isKeyChar(c) {
+			return "", false, 0, fmt.Sprintf("unexpected %q inside '[]'", c)
+		}
 	}
 	return contents, false, start + end, ""
 }

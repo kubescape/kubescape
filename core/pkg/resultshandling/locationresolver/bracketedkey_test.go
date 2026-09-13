@@ -165,17 +165,12 @@ func TestResolveLocation_KeysNeedingEscapes(t *testing.T) {
 		assert.Equal(t, 3, location.Line)
 	})
 
-	t.Run("backslash in a key does not error or mis-resolve", func(t *testing.T) {
-		location, err := resolver.ResolveLocation(`metadata.annotations[with\backslash]`, 0)
-		require.NoError(t, err)
-		assert.NotEqual(t, 4, location.Line, "must not resolve to a different key")
-	})
-
-	// Expression syntax smuggled into a key is refused by the parser before
-	// any expression is built, so it never reaches yq at all.
+	// A character outside the key alphabet, unquoted, is refused by the parser
+	// before any expression is built, so it never reaches yq at all.
 	for _, path := range []string{
 		`metadata.annotations[with"quote]`,
 		`metadata.annotations["] | .metadata]`,
+		`metadata.annotations[with\backslash]`,
 	} {
 		t.Run("refused: "+path, func(t *testing.T) {
 			location, err := resolver.ResolveLocation(path, 0)
@@ -238,6 +233,16 @@ func TestResolveLocation_MalformedPathIsRejectedBeforeWalkingUp(t *testing.T) {
 		"spec[*].image",         // wildcard on a map
 		"spec.containers[0][1]", // second index
 		`metadata.labels."app`,  // unclosed quote
+		// Unmatched '[' inside a bracket. The manifest holds only labels.app,
+		// so each of these used to walk up and return the labels block.
+		"metadata.labels[app[foo]",
+		"metadata.labels[app[foo]=value",
+		"metadata.labels[[app]",
+		// Characters no real key holds, unquoted. labels.app exists, so each
+		// of these would otherwise miss and walk up to the labels block.
+		"metadata.labels[app foo]",
+		"metadata.labels[app foo]=value",
+		"metadata.labels[a|b]",
 	} {
 		t.Run(path, func(t *testing.T) {
 			location, err := resolver.ResolveLocation(path, 0)

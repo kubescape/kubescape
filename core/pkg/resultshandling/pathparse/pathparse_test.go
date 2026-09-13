@@ -184,12 +184,6 @@ func TestParsePath_IndexBelongsToItsSegment(t *testing.T) {
 			want: []Segment{seg("data", -1), seg("12", -1)},
 		},
 		{
-			// strconv.Atoi accepts a sign; a list index never carries one.
-			name: "signed digits are a key, not an index",
-			path: "data[+0]",
-			want: []Segment{seg("data", -1), seg("+0", -1)},
-		},
-		{
 			name: "leading zeros are still digits",
 			path: "spec.containers[007].image",
 			want: []Segment{seg("spec", -1), seg("containers", 7), seg("image", -1)},
@@ -224,9 +218,10 @@ func TestParsePath_ValueSeparator(t *testing.T) {
 			want: []Segment{seg("spec", -1), seg("containers", 0), seg("command", -1)},
 		},
 		{
-			// An "=" inside a bracket is part of the key.
-			name: "separator inside a bracket is part of the key",
-			path: "metadata.labels[a=b]=c",
+			// An "=" inside a quoted bracket key is part of the key, not the
+			// value separator.
+			name: "separator inside a quoted bracket key is part of the key",
+			path: "metadata.labels['a=b']=c",
 			want: []Segment{seg("metadata", -1), seg("labels", -1), seg("a=b", -1)},
 		},
 		{
@@ -249,24 +244,34 @@ func TestParsePath_ValueSeparator(t *testing.T) {
 // line the rule never named, with nothing to say it was a guess.
 func TestParsePath_Malformed(t *testing.T) {
 	for _, path := range []string{
-		"metadata.labels[app",          // unclosed bracket
-		"metadata.labels]",             // stray ']'
-		"spec..image",                  // empty segment
-		"spec.image.",                  // trailing '.'
-		"..spec",                       // empty leading segment
-		"metadata.labels[].app",        // empty brackets
-		"spec.containers[*].image",     // wildcard is a yq operator, not a key
-		"[0].spec",                     // index with no key to qualify
-		"spec.containers[0][1]",        // second index on one segment
-		"spec.containers.[0]",          // bracket directly after '.'
-		"metadata.labels[app]x",        // text straight after a bracket
-		`metadata.annotations."a.b"x`,  // text straight after a quoted key
-		`metadata.annotations."a.b`,    // unclosed dot-quoted key
-		`metadata.annotations['a.b]`,   // unclosed quote inside a bracket
-		`metadata.annotations['a.b'x]`, // text between closing quote and ']'
-		`metadata.labels[a'b]`,         // stray quote inside a bracket
-		`metadata.annotations.""`,      // empty quoted key
-		`metadata.labels[app]x=value`,  // malformed before the value separator
+		"metadata.labels[app",            // unclosed bracket
+		"metadata.labels]",               // stray ']'
+		"spec..image",                    // empty segment
+		"spec.image.",                    // trailing '.'
+		"..spec",                         // empty leading segment
+		"metadata.labels[].app",          // empty brackets
+		"spec.containers[*].image",       // wildcard is a yq operator, not a key
+		"[0].spec",                       // index with no key to qualify
+		"spec.containers[0][1]",          // second index on one segment
+		"spec.containers.[0]",            // bracket directly after '.'
+		"metadata.labels[app]x",          // text straight after a bracket
+		`metadata.annotations."a.b"x`,    // text straight after a quoted key
+		`metadata.annotations."a.b`,      // unclosed dot-quoted key
+		`metadata.annotations['a.b]`,     // unclosed quote inside a bracket
+		`metadata.annotations['a.b'x]`,   // text between closing quote and ']'
+		`metadata.labels[a'b]`,           // stray quote inside a bracket
+		`metadata.annotations.""`,        // empty quoted key
+		`metadata.labels[app]x=value`,    // malformed before the value separator
+		"metadata.labels[app[foo]",       // unmatched '[' inside a bracket
+		"metadata.labels[app[foo]=value", // same, in the <path>=<value> form
+		"metadata.labels[[app]",          // '[' opening the bracket contents
+		"data[+0]",                       // a sign is not an index, and no key contains one
+		"metadata.labels[app foo]",       // space inside a bracket
+		"metadata.labels[a|b]",           // yq operator inside a bracket
+		"metadata.labels[a=b]",           // '=' is not a key character unquoted
+		"metadata.lab els",               // space in a bare key
+		`metadata.labels\app`,            // backslash in a bare key
+		"metadata.labels[app foo]=value", // same, in the <path>=<value> form
 	} {
 		t.Run(path, func(t *testing.T) {
 			segments, err := ParsePath(path)
@@ -313,6 +318,16 @@ func TestParsePath_QuotedKeys(t *testing.T) {
 			// A "]" inside quotes belongs to the key.
 			path: `metadata.annotations['a]b']`,
 			want: []Segment{seg("metadata", -1), seg("annotations", -1), seg("a]b", -1)},
+		},
+		{
+			// The quoted form is how a key holding a literal "[" is written;
+			// unquoted, the same key is rejected.
+			path: `metadata.labels['app[foo']`,
+			want: []Segment{seg("metadata", -1), seg("labels", -1), seg("app[foo", -1)},
+		},
+		{
+			path: `metadata.labels['app[foo']=value`,
+			want: []Segment{seg("metadata", -1), seg("labels", -1), seg("app[foo", -1)},
 		},
 		{
 			// An index can follow a dot-quoted key and qualifies it.

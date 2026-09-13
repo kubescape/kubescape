@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/pathparse"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -63,12 +64,11 @@ func TestResolveLocation(t *testing.T) {
 		assert.Equalf(t, expected.Line, location.Line, "fixPath %s, expected line: %d, actual line: %d", fixPath, expected.Line, location.Line)
 		assert.Equalf(t, expected.Column, location.Column, "fixPath %s, expected column: %d, actual column: %d", fixPath, expected.Column, location.Column)
 	}
-	// A path that is not a path resolves to nothing rather than failing. Every
-	// key is rendered quoted, so this is a well-formed expression asking for a
-	// key that happens not to exist - which is the same answer the resolver
-	// gives for any absent field, and what callers already treat as "no line".
+	// A string that is not a path is refused rather than resolved: its spaces
+	// are outside the key alphabet, so it is reported as malformed instead of
+	// being looked up as a key that happens not to exist.
 	location, err := resolver.ResolveLocation("some invalid string as an input", 0)
-	assert.NoError(t, err)
+	assert.ErrorIs(t, err, pathparse.ErrMalformedPath)
 	assert.Equal(t, Location{}, location)
 }
 
