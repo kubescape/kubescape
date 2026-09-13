@@ -2,11 +2,11 @@ package printer
 
 import (
 	"encoding/json"
-	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/pathparse"
 	"testing"
 
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/pathparse"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
