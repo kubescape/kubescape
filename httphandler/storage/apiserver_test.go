@@ -678,7 +678,7 @@ func TestStorePostureReportResults_SkipsOrphanedRoleBinding(t *testing.T) {
 func TestStorePostureReportResults_ContinuesAfterUnstorableResult(t *testing.T) {
 	ctx := context.Background()
 
-	// An object the storage backend refuses — the real case is a name at the
+	// An object the storage backend refuses. The real case is a name at the
 	// 253-byte limit, which the file backend cannot write.
 	client := fake.NewSimpleClientset()
 	storeErr := errors.New("open payload file: file name too long")
@@ -711,7 +711,7 @@ func TestStorePostureReportResults_ContinuesAfterUnstorableResult(t *testing.T) 
 
 	err := store.StorePostureReportResults(ctx, pr)
 
-	// The failure is still reported — it must not become a silent success. The
+	// The failure is still reported and must not become a silent success. The
 	// cause is not re-wrapped here; StoreWorkloadConfigurationScanResultSummary
 	// already logs it with the object name.
 	assert.EqualError(t, err, "failed to store 1 of 2 posture scan results")
@@ -721,6 +721,56 @@ func TestStorePostureReportResults_ContinuesAfterUnstorableResult(t *testing.T) 
 	assert.NoError(t, listErr)
 	assert.Len(t, summaries.Items, 1)
 	assert.Equal(t, "pod-storable", summaries.Items[0].Name)
+}
+
+func TestStorePostureReportResults_ContinuesAfterUnstorableScan(t *testing.T) {
+	ctx := context.Background()
+
+	// The full scan and its summary are separate objects. A scan that cannot be
+	// written must not stop the summary for the same result.
+	client := fake.NewSimpleClientset()
+	storeErr := errors.New("open payload file: file name too long")
+	client.PrependReactor("create", "workloadconfigurationscans", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		scan, ok := action.(k8stesting.CreateAction).GetObject().(*v1beta1.WorkloadConfigurationScan)
+		if ok && scan.Name == "pod-unstorable" {
+			return true, nil, storeErr
+		}
+		return false, nil, nil
+	})
+	store := &APIServerStore{StorageClient: client.SpdxV1beta1(), namespace: "kubescape", continuousPostureScan: true}
+
+	pod := func(name string) map[string]any {
+		return map[string]any{
+			"apiVersion": "v1",
+			"kind":       "Pod",
+			"metadata":   map[string]any{"name": name, "namespace": "default"},
+		}
+	}
+	pr := &v2.PostureReport{
+		Resources: []reporthandling.Resource{
+			{ResourceID: "unstorable-id", Object: pod("unstorable")},
+			{ResourceID: "storable-id", Object: pod("storable")},
+		},
+		Results: []resourcesresults.Result{
+			{ResourceID: "unstorable-id"},
+			{ResourceID: "storable-id"},
+		},
+	}
+
+	err := store.StorePostureReportResults(ctx, pr)
+
+	assert.EqualError(t, err, "failed to store 1 of 2 posture scan results")
+
+	// Both summaries land, including the one whose full scan was refused.
+	summaries, listErr := store.StorageClient.WorkloadConfigurationScanSummaries("default").List(ctx, metav1.ListOptions{})
+	assert.NoError(t, listErr)
+	assert.Len(t, summaries.Items, 2)
+
+	// Only the refused scan is missing.
+	scans, listErr := store.StorageClient.WorkloadConfigurationScans("default").List(ctx, metav1.ListOptions{})
+	assert.NoError(t, listErr)
+	assert.Len(t, scans.Items, 1)
+	assert.Equal(t, "pod-storable", scans.Items[0].Name)
 }
 
 func TestStorePostureReportResults_NonRecoverableError(t *testing.T) {
