@@ -72,6 +72,7 @@ func (a *APIServerStore) StorePostureReportResults(ctx context.Context, pr *v2.P
 	recoveredResources := 0
 	recoveredControls := 0
 	failedResults := 0
+	var firstStoreErr error
 	for i := range pr.Results {
 		workloadScan, err := a.BuildWorkloadConfigurationScan(ctx, pr, &pr.Results[i])
 		if err != nil {
@@ -86,18 +87,21 @@ func (a *APIServerStore) StorePostureReportResults(ctx context.Context, pr *v2.P
 			recoveredControls += len(workloadScan.Spec.Controls)
 		}
 
-		failed := false
+		var storeErr error
 		if a.continuousPostureScan {
 			if err := a.StoreWorkloadConfigurationScanResult(ctx, workloadScan); err != nil {
-				failed = true
+				storeErr = err
 			}
 		}
 
 		if _, err := a.StoreWorkloadConfigurationScanResultSummary(ctx, workloadScan); err != nil {
-			failed = true
+			storeErr = err
 		}
-		if failed {
+		if storeErr != nil {
 			failedResults++
+			if firstStoreErr == nil {
+				firstStoreErr = fmt.Errorf("%s: %w", workloadScan.Name, storeErr)
+			}
 		}
 	}
 	if recoveredResources > 0 {
@@ -105,7 +109,8 @@ func (a *APIServerStore) StorePostureReportResults(ctx context.Context, pr *v2.P
 			helpers.Int("resources", recoveredResources), helpers.Int("controls", recoveredControls))
 	}
 	if failedResults > 0 {
-		return fmt.Errorf("failed to store %d of %d posture scan results", failedResults, len(pr.Results))
+		return fmt.Errorf("failed to store %d of %d posture scan results: %w",
+			failedResults, len(pr.Results), firstStoreErr)
 	}
 	return nil
 }

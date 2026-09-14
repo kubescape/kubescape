@@ -711,10 +711,10 @@ func TestStorePostureReportResults_ContinuesAfterUnstorableResult(t *testing.T) 
 
 	err := store.StorePostureReportResults(ctx, pr)
 
-	// The failure is still reported and must not become a silent success. The
-	// cause is not re-wrapped here; StoreWorkloadConfigurationScanResultSummary
-	// already logs it with the object name.
-	assert.EqualError(t, err, "failed to store 1 of 2 posture scan results")
+	// The failure is still reported, and with the backend cause: the storage
+	// helpers log theirs at Warning, which KS_LOGGER_LEVEL=error filters out.
+	assert.ErrorContains(t, err, "failed to store 1 of 2 posture scan results")
+	assert.ErrorIs(t, err, storeErr)
 
 	// ...and the result that came after it was still stored.
 	summaries, listErr := store.StorageClient.WorkloadConfigurationScanSummaries("default").List(ctx, metav1.ListOptions{})
@@ -759,7 +759,8 @@ func TestStorePostureReportResults_ContinuesAfterUnstorableScan(t *testing.T) {
 
 	err := store.StorePostureReportResults(ctx, pr)
 
-	assert.EqualError(t, err, "failed to store 1 of 2 posture scan results")
+	assert.ErrorContains(t, err, "failed to store 1 of 2 posture scan results")
+	assert.ErrorIs(t, err, storeErr)
 
 	// Both summaries land, including the one whose full scan was refused.
 	summaries, listErr := store.StorageClient.WorkloadConfigurationScanSummaries("default").List(ctx, metav1.ListOptions{})
