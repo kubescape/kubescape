@@ -7,11 +7,16 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v4/core/cautils"
+	utilsapisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
+	utilsmetav1 "github.com/kubescape/opa-utils/httpserver/meta/v1"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -26,7 +31,26 @@ func (s stubResolver) LookupIPAddr(context.Context, string) ([]net.IPAddr, error
 	return s.ips, s.err
 }
 
-// callbackReceiver starts a server that captures the first delivered payload.
+// countingCallbackReceiver starts a server that records every delivered
+// payload (unbounded), so a duplicate delivery can never be silently dropped
+// the way a one-slot channel could. No t.Parallel alongside scanImpl stubs.
+func countingCallbackReceiver(t *testing.T) (string, <-chan scanCallbackPayload, *atomic.Int32) {
+	t.Helper()
+	var count atomic.Int32
+	received := make(chan scanCallbackPayload, 16)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var p scanCallbackPayload
+		_ = json.NewDecoder(r.Body).Decode(&p)
+		count.Add(1)
+		select {
+		case received <- p:
+		default:
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+	return srv.URL, received, &count
+}
 func callbackReceiver(t *testing.T) (string, <-chan scanCallbackPayload) {
 	t.Helper()
 	received := make(chan scanCallbackPayload, 1)
@@ -182,4 +206,260 @@ func TestScreenCallbackHost_PinsResolvedIP(t *testing.T) {
 	ip, err := screenCallbackHost(context.Background(), "public.example.com")
 	require.NoError(t, err)
 	assert.Equal(t, "203.0.113.7", ip.String())
+}
+
+// TestExecuteScan_CallbackOnPanic pins the #3825 contract: a panicking scan
+// with a callbackURL still delivers exactly one generic failed signal, and
+// waiters still get their error response. No t.Parallel: global scanImpl stub.
+func TestExecuteScan_CallbackOnPanic(t *testing.T) {
+	t.Setenv(callbackAllowlistEnv, "127.0.0.1/32")
+	withTempOutputDirs(t)
+	defer func(o scanner) { scanImpl = o }(scanImpl)
+	scanImpl = func(context.Context, *cautils.ScanInfo, []cautils.PolicyIdentifier, string, bool) (*reporthandlingv2.PostureReport, error) {
+		panic("boom")
+	}
+
+	url, received, deliveries := countingCallbackReceiver(t)
+	h := NewHTTPHandler(false)
+	resp := make(chan *utilsmetav1.Response, 1)
+	h.executeScan(&scanRequestParams{
+		scanInfo:        &cautils.ScanInfo{},
+		scanQueryParams: &ScanQueryParams{ReturnResults: true},
+		scanID:          "scan-panicked",
+		ctx:             context.Background(),
+		resp:            resp,
+		callbackURL:     url,
+	})
+
+	select {
+	case r := <-resp:
+		assert.Equal(t, "scan-panicked", r.ID)
+		assert.Equal(t, utilsapisv1.ErrorScanResponseType, r.Type)
+	case <-time.After(5 * time.Second):
+		t.Fatal("panic response was not fed within 5s")
+	}
+
+	select {
+	case p := <-received:
+		assert.Equal(t, "scan-panicked", p.ID)
+		assert.Equal(t, callbackStatusFailed, p.Status)
+		assert.Equal(t, callbackErrPanicked, p.Error)
+		assert.NotContains(t, p.Error, "boom")
+	case <-time.After(5 * time.Second):
+		t.Fatal("panic callback was not delivered within 5s")
+	}
+
+	select {
+	case p := <-received:
+		t.Fatalf("duplicate panic callback delivered: %+v", p)
+	case <-time.After(500 * time.Millisecond):
+	}
+	assert.Equal(t, int32(1), deliveries.Load(), "panic path must deliver exactly one callback")
+}
+
+// TestExecuteScan_PanicWithoutCallbackURL ensures a panicking scan without a
+// webhook still releases cleanly and feeds waiters.
+func TestExecuteScan_PanicWithoutCallbackURL(t *testing.T) {
+	withTempOutputDirs(t)
+	defer func(o scanner) { scanImpl = o }(scanImpl)
+	scanImpl = func(context.Context, *cautils.ScanInfo, []cautils.PolicyIdentifier, string, bool) (*reporthandlingv2.PostureReport, error) {
+		panic("boom")
+	}
+
+	h := NewHTTPHandler(false)
+	resp := make(chan *utilsmetav1.Response, 1)
+	h.executeScan(&scanRequestParams{
+		scanInfo:        &cautils.ScanInfo{},
+		scanQueryParams: &ScanQueryParams{ReturnResults: true},
+		scanID:          "scan-panicked-nocb",
+		ctx:             context.Background(),
+		resp:            resp,
+	})
+
+	select {
+	case r := <-resp:
+		assert.Equal(t, "scan-panicked-nocb", r.ID)
+		assert.Equal(t, utilsapisv1.ErrorScanResponseType, r.Type)
+	case <-time.After(5 * time.Second):
+		t.Fatal("panic response was not fed within 5s")
+	}
+	assert.False(t, h.state.isBusy("scan-panicked-nocb"))
+}
+
+// TestExecuteScan_PanicNilParams guards the recover block itself: nil
+// scanQueryParams/ctx must not cause a secondary panic that kills the worker.
+func TestExecuteScan_PanicNilParams(t *testing.T) {
+	t.Setenv(callbackAllowlistEnv, "127.0.0.1/32")
+	withTempOutputDirs(t)
+	defer func(o scanner) { scanImpl = o }(scanImpl)
+	scanImpl = func(context.Context, *cautils.ScanInfo, []cautils.PolicyIdentifier, string, bool) (*reporthandlingv2.PostureReport, error) {
+		panic("boom")
+	}
+
+	url, received := callbackReceiver(t)
+	h := NewHTTPHandler(false)
+	h.executeScan(&scanRequestParams{
+		scanID:      "scan-panicked-nil",
+		callbackURL: url,
+	})
+
+	select {
+	case p := <-received:
+		assert.Equal(t, "scan-panicked-nil", p.ID)
+		assert.Equal(t, callbackStatusFailed, p.Status)
+	case <-time.After(5 * time.Second):
+		t.Fatal("panic callback was not delivered within 5s")
+	}
+}
+
+// TestExecuteScan_PanicCleansPartialResults mirrors the cancel invariant: a
+// panicking scan must not leave a truncated OutputDir artifact servable as
+// valid, while the error signal lands in FailedOutputDir.
+func TestExecuteScan_PanicCleansPartialResults(t *testing.T) {
+	withTempOutputDirs(t)
+	defer func(o scanner) { scanImpl = o }(scanImpl)
+	scanImpl = func(context.Context, *cautils.ScanInfo, []cautils.PolicyIdentifier, string, bool) (*reporthandlingv2.PostureReport, error) {
+		panic("boom")
+	}
+
+	scanID := "123e4567-e89b-12d3-a456-426614174000"
+	require.NoError(t, os.WriteFile(filepath.Join(OutputDir, scanID), []byte("partial"), 0o600))
+
+	h := NewHTTPHandler(false)
+	h.executeScan(&scanRequestParams{
+		scanInfo:        &cautils.ScanInfo{},
+		scanQueryParams: &ScanQueryParams{},
+		scanID:          scanID,
+		ctx:             context.Background(),
+	})
+
+	_, err := os.Stat(filepath.Join(OutputDir, scanID))
+	assert.True(t, os.IsNotExist(err), "partial results artifact must be removed on panic")
+	_, err = os.Stat(filepath.Join(FailedOutputDir, scanID))
+	assert.NoError(t, err, "panic error signal must be persisted")
+}
+
+// captureLogger records Error messages for failure-path assertions without
+// touching the process-global logger (race-safe: no t.Parallel concerns
+// beyond the existing scanImpl-stub rule).
+type captureLogger struct {
+	helpers.ILogger
+	msgs []string
+}
+
+func (c *captureLogger) Error(msg string, _ ...helpers.IDetails) {
+	c.msgs = append(c.msgs, msg)
+}
+
+func TestPanicLog_NilSafe(t *testing.T) {
+	assert.NotNil(t, panicLog(nil))
+	assert.NotNil(t, panicLog(&scanRequestParams{}))
+	assert.NotNil(t, panicLog(&scanRequestParams{ctx: context.Background()}))
+}
+
+func TestRunGuarded_RecordsRecovery(t *testing.T) {
+	cap := &captureLogger{}
+	runGuarded(cap, "persisting panic error", "scan-1", func() {
+		panic("disk gone")
+	})
+	require.Len(t, cap.msgs, 1)
+	assert.Contains(t, cap.msgs[0], "persisting panic error")
+}
+
+func TestRunGuarded_Passthrough(t *testing.T) {
+	cap := &captureLogger{}
+	ran := false
+	runGuarded(cap, "removing partial results", "scan-1", func() {
+		ran = true
+	})
+	assert.True(t, ran)
+	assert.Empty(t, cap.msgs)
+}
+
+// TestExecuteScan_PanicNilCtxPersistFailure is the exact evidence-loss
+// scenario from review: ctx == nil is supported, and when the failure
+// artifact cannot be persisted the waiter must still learn about it via the
+// persist error (previously the only log was suppressed and the waiter got
+// the same message with no diagnostic anywhere).
+func TestExecuteScan_PanicNilCtxPersistFailure(t *testing.T) {
+	t.Setenv(callbackAllowlistEnv, "127.0.0.1/32")
+	out := withTempOutputDirs(t)
+	// A regular file where the failed-output dir should be: MkdirAll fails
+	// deterministically, even as root (no chmod tricks).
+	blocker := filepath.Join(out, "blocker")
+	require.NoError(t, os.WriteFile(blocker, []byte("x"), 0o600))
+	oldFailed := FailedOutputDir
+	FailedOutputDir = blocker
+	t.Cleanup(func() { FailedOutputDir = oldFailed })
+
+	defer func(o scanner) { scanImpl = o }(scanImpl)
+	scanImpl = func(context.Context, *cautils.ScanInfo, []cautils.PolicyIdentifier, string, bool) (*reporthandlingv2.PostureReport, error) {
+		panic("boom")
+	}
+
+	url, received := callbackReceiver(t)
+	h := NewHTTPHandler(false)
+	resp := make(chan *utilsmetav1.Response, 1)
+	h.executeScan(&scanRequestParams{
+		scanInfo:        &cautils.ScanInfo{},
+		scanQueryParams: &ScanQueryParams{ReturnResults: true},
+		scanID:          "scan-persist-failed",
+		ctx:             nil,
+		resp:            resp,
+		callbackURL:     url,
+	})
+
+	select {
+	case r := <-resp:
+		assert.Equal(t, utilsapisv1.ErrorScanResponseType, r.Type)
+		assert.Contains(t, fmt.Sprintf("%v", r.Response), "failed to save error in file")
+	case <-time.After(5 * time.Second):
+		t.Fatal("panic response was not fed within 5s")
+	}
+
+	select {
+	case p := <-received:
+		assert.Equal(t, "scan-persist-failed", p.ID)
+		assert.Equal(t, callbackStatusFailed, p.Status)
+		assert.Equal(t, callbackErrPanicked, p.Error)
+	case <-time.After(5 * time.Second):
+		t.Fatal("panic callback was not delivered within 5s")
+	}
+	assert.False(t, h.state.isBusy("scan-persist-failed"))
+}
+
+// TestExecuteScan_PanicPersistFailureWithCtx covers the context-bound log
+// branch of the same failure: identical observable contract, ctx-scoped log.
+func TestExecuteScan_PanicPersistFailureWithCtx(t *testing.T) {
+	t.Setenv(callbackAllowlistEnv, "127.0.0.1/32")
+	out := withTempOutputDirs(t)
+	blocker := filepath.Join(out, "blocker")
+	require.NoError(t, os.WriteFile(blocker, []byte("x"), 0o600))
+	oldFailed := FailedOutputDir
+	FailedOutputDir = blocker
+	t.Cleanup(func() { FailedOutputDir = oldFailed })
+
+	defer func(o scanner) { scanImpl = o }(scanImpl)
+	scanImpl = func(context.Context, *cautils.ScanInfo, []cautils.PolicyIdentifier, string, bool) (*reporthandlingv2.PostureReport, error) {
+		panic("boom")
+	}
+
+	h := NewHTTPHandler(false)
+	resp := make(chan *utilsmetav1.Response, 1)
+	h.executeScan(&scanRequestParams{
+		scanInfo:        &cautils.ScanInfo{},
+		scanQueryParams: &ScanQueryParams{ReturnResults: true},
+		scanID:          "scan-persist-failed-ctx",
+		ctx:             context.Background(),
+		resp:            resp,
+	})
+
+	select {
+	case r := <-resp:
+		assert.Equal(t, utilsapisv1.ErrorScanResponseType, r.Type)
+		assert.Contains(t, fmt.Sprintf("%v", r.Response), "failed to save error in file")
+	case <-time.After(5 * time.Second):
+		t.Fatal("panic response was not fed within 5s")
+	}
+	assert.False(t, h.state.isBusy("scan-persist-failed-ctx"))
 }

@@ -53,28 +53,107 @@ func withCanonicalResultPersistence(ctx context.Context) context.Context {
 	return context.WithValue(ctx, canonicalResultPersistenceKey{}, true)
 }
 
+// deliverScanCallback makes one best-effort completion-signal attempt when
+// callbackURL is set. Every terminal path with a callbackURL (success,
+// failure, queued-cancel, panic) funnels through here so none can silently
+// skip the at-least-once signal. Failures beyond postScanCallback's own retry
+// bounds are logged, not re-queued. Safe on nil scanReq/ctx.
+func deliverScanCallback(scanReq *scanRequestParams, status, errMsg string) {
+	if scanReq == nil || scanReq.callbackURL == "" {
+		return
+	}
+	payload := scanCallbackPayload{ID: scanReq.scanID, Status: status, Error: errMsg}
+	cbCtx := context.Background()
+	if scanReq.ctx != nil {
+		cbCtx = context.WithoutCancel(scanReq.ctx)
+	}
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				logger.L().Ctx(cbCtx).Error("scan completion callback panicked", helpers.String("ID", scanReq.scanID), helpers.Error(fmt.Errorf("%v", r)))
+			}
+		}()
+		if cbErr := postScanCallback(cbCtx, scanReq.callbackURL, payload); cbErr != nil {
+			logger.L().Ctx(cbCtx).Error("failed to deliver scan completion callback", helpers.String("ID", scanReq.scanID), helpers.Error(cbErr))
+		}
+	}()
+}
+
+// feedScanResponse forwards response to a waiter without blocking. It is a
+// no-op when nobody is listening (nil channel); callers never need to check.
+func feedScanResponse(scanReq *scanRequestParams, response *utilsmetav1.Response) {
+	if scanReq == nil || scanReq.resp == nil {
+		return
+	}
+	select {
+	case scanReq.resp <- response:
+	default:
+	}
+}
+
+// feedPanicResponse preserves the panic path's original contract: only feed
+// waiters that asked for results.
+func feedPanicResponse(scanReq *scanRequestParams, response *utilsmetav1.Response) {
+	if scanReq == nil || scanReq.scanQueryParams == nil || !scanReq.scanQueryParams.ReturnResults {
+		return
+	}
+	feedScanResponse(scanReq, response)
+}
+
+// panicLog returns a context-bound logger when the request carries one,
+// otherwise the background logger. A nil ctx is a supported path, so
+// failure-path logging must never assume scanReq.ctx is usable.
+func panicLog(scanReq *scanRequestParams) helpers.ILogger {
+	if scanReq != nil && scanReq.ctx != nil {
+		return logger.L().Ctx(scanReq.ctx)
+	}
+	return logger.L()
+}
+
+// runGuarded runs fn, recording any panic on log instead of swallowing it.
+// State release and callback delivery always proceed after it returns.
+func runGuarded(log helpers.ILogger, op, scanID string, fn func()) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			log.Error("recovered while "+op+" after panic",
+				helpers.String("ID", scanID), helpers.Error(fmt.Errorf("%v", rec)))
+		}
+	}()
+	fn()
+}
+
 func (handler *HTTPHandler) executeScan(scanReq *scanRequestParams) {
 	response := &utilsmetav1.Response{ID: scanReq.scanID}
 
 	defer func() {
 		if r := recover(); r != nil {
 			err := fmt.Errorf("scan panicked: %v", r)
-			logger.L().Ctx(scanReq.ctx).Error("scan panic recovered", helpers.String("ID", scanReq.scanID), helpers.Error(err))
-			responseMsg := err.Error()
-			if persistErr := writeScanErrorToFile(err, scanReq.scanID); persistErr != nil {
-				logger.L().Ctx(scanReq.ctx).Error("failed to persist panic error to file", helpers.String("ID", scanReq.scanID), helpers.Error(persistErr))
-				responseMsg = persistErr.Error()
+			scanID := ""
+			if scanReq != nil {
+				scanID = scanReq.scanID
 			}
+			panicLog(scanReq).Error("scan panic recovered", helpers.String("ID", scanID), helpers.Error(err))
+			responseMsg := err.Error()
+			// Remove any partial results artifact FIRST so /v1/results can
+			// never serve truncated output from the panicked scan (mirrors
+			// cancel). removeResultsFile also covers FailedOutputDir, so this
+			// must precede the error-file write below.
+			runGuarded(panicLog(scanReq), "removing partial results", scanID, func() {
+				_ = removeResultsFile(scanID)
+			})
+			runGuarded(panicLog(scanReq), "persisting panic error", scanID, func() {
+				if persistErr := writeScanErrorToFile(err, scanID); persistErr != nil {
+					panicLog(scanReq).Error("failed to persist panic error to file",
+						helpers.String("ID", scanID), helpers.Error(persistErr))
+					responseMsg = persistErr.Error()
+				}
+			})
 			handler.state.releaseCancel(scanReq.scanID)
 			handler.state.setNotBusy(scanReq.scanID)
-			if scanReq.scanQueryParams.ReturnResults {
-				response.Type = utilsapisv1.ErrorScanResponseType
-				response.Response = responseMsg
-				select {
-				case scanReq.resp <- response:
-				default:
-				}
-			}
+			response.Type = utilsapisv1.ErrorScanResponseType
+			response.Response = responseMsg
+			feedPanicResponse(scanReq, response)
+			deliverScanCallback(scanReq, callbackStatusFailed, callbackErrPanicked)
 		}
 	}()
 
@@ -110,28 +189,12 @@ func (handler *HTTPHandler) executeScan(scanReq *scanRequestParams) {
 	handler.state.setNotBusy(scanReq.scanID)
 
 	// return results, if someone's waiting for them; never block.
-	select {
-	case scanReq.resp <- response:
-	default:
-	}
+	feedScanResponse(scanReq, response)
 
-	if scanReq.callbackURL != "" {
-		payload := scanCallbackPayload{ID: scanReq.scanID, Status: callbackStatusCompleted}
-		if err != nil {
-			payload.Status = callbackStatusFailed
-			payload.Error = "scan failed"
-		}
-		cbCtx := context.WithoutCancel(scanReq.ctx)
-		go func() {
-			defer func() {
-				if r := recover(); r != nil {
-					logger.L().Ctx(cbCtx).Error("scan completion callback panicked", helpers.String("ID", scanReq.scanID), helpers.Error(fmt.Errorf("%v", r)))
-				}
-			}()
-			if cbErr := postScanCallback(cbCtx, scanReq.callbackURL, payload); cbErr != nil {
-				logger.L().Ctx(cbCtx).Error("failed to deliver scan completion callback", helpers.String("ID", scanReq.scanID), helpers.Error(cbErr))
-			}
-		}()
+	if err != nil {
+		deliverScanCallback(scanReq, callbackStatusFailed, "scan failed")
+	} else {
+		deliverScanCallback(scanReq, callbackStatusCompleted, "")
 	}
 }
 
@@ -155,20 +218,7 @@ func (handler *HTTPHandler) watchForScan() {
 				default:
 				}
 			}
-			if scanReq.callbackURL != "" {
-				payload := scanCallbackPayload{ID: scanReq.scanID, Status: callbackStatusFailed, Error: "scan cancelled"}
-				cbCtx := context.WithoutCancel(scanReq.ctx)
-				go func() {
-					defer func() {
-						if r := recover(); r != nil {
-							logger.L().Ctx(cbCtx).Error("scan completion callback panicked", helpers.String("ID", scanReq.scanID), helpers.Error(fmt.Errorf("%v", r)))
-						}
-					}()
-					if cbErr := postScanCallback(cbCtx, scanReq.callbackURL, payload); cbErr != nil {
-						logger.L().Ctx(cbCtx).Error("failed to deliver scan completion callback", helpers.String("ID", scanReq.scanID), helpers.Error(cbErr))
-					}
-				}()
-			}
+			deliverScanCallback(scanReq, callbackStatusFailed, "scan cancelled")
 			handler.state.releaseCancel(scanReq.scanID)
 			handler.state.setNotBusy(scanReq.scanID)
 			continue
@@ -467,6 +517,11 @@ func responseToBytes(res *utilsmetav1.Response) []byte {
 const (
 	callbackStatusCompleted = "completed"
 	callbackStatusFailed    = "failed"
+
+	// callbackErrPanicked is the generic webhook error for the scan-panic
+	// path. Generic by design: the full panic value stays in server logs
+	// (mirroring how the failure path redacts scan internals).
+	callbackErrPanicked = "scan panicked"
 
 	// callbackAllowlistEnv, when set, is an authoritative comma-separated list of
 	// CIDRs (or bare IPs) the resolved callback host must fall within.
