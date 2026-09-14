@@ -100,39 +100,54 @@ func feedPanicResponse(scanReq *scanRequestParams, response *utilsmetav1.Respons
 	feedScanResponse(scanReq, response)
 }
 
+// panicLog returns a context-bound logger when the request carries one,
+// otherwise the background logger. A nil ctx is a supported path, so
+// failure-path logging must never assume scanReq.ctx is usable.
+func panicLog(scanReq *scanRequestParams) helpers.ILogger {
+	if scanReq != nil && scanReq.ctx != nil {
+		return logger.L().Ctx(scanReq.ctx)
+	}
+	return logger.L()
+}
+
+// runGuarded runs fn, recording any panic on log instead of swallowing it.
+// State release and callback delivery always proceed after it returns.
+func runGuarded(log helpers.ILogger, op, scanID string, fn func()) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			log.Error("recovered while "+op+" after panic",
+				helpers.String("ID", scanID), helpers.Error(fmt.Errorf("%v", rec)))
+		}
+	}()
+	fn()
+}
+
 func (handler *HTTPHandler) executeScan(scanReq *scanRequestParams) {
 	response := &utilsmetav1.Response{ID: scanReq.scanID}
 
 	defer func() {
 		if r := recover(); r != nil {
 			err := fmt.Errorf("scan panicked: %v", r)
-			if scanReq != nil && scanReq.ctx != nil {
-				logger.L().Ctx(scanReq.ctx).Error("scan panic recovered", helpers.String("ID", scanReq.scanID), helpers.Error(err))
-			} else {
-				logger.L().Error("scan panic recovered", helpers.Error(err))
+			scanID := ""
+			if scanReq != nil {
+				scanID = scanReq.scanID
 			}
+			panicLog(scanReq).Error("scan panic recovered", helpers.String("ID", scanID), helpers.Error(err))
 			responseMsg := err.Error()
 			// Remove any partial results artifact FIRST so /v1/results can
 			// never serve truncated output from the panicked scan (mirrors
 			// cancel). removeResultsFile also covers FailedOutputDir, so this
 			// must precede the error-file write below.
-			func() {
-				defer func() {
-					_ = recover()
-				}()
-				_ = removeResultsFile(scanReq.scanID)
-			}()
-			func() {
-				defer func() {
-					_ = recover()
-				}()
-				if persistErr := writeScanErrorToFile(err, scanReq.scanID); persistErr != nil {
-					if scanReq != nil && scanReq.ctx != nil {
-						logger.L().Ctx(scanReq.ctx).Error("failed to persist panic error to file", helpers.String("ID", scanReq.scanID), helpers.Error(persistErr))
-					}
+			runGuarded(panicLog(scanReq), "removing partial results", scanID, func() {
+				_ = removeResultsFile(scanID)
+			})
+			runGuarded(panicLog(scanReq), "persisting panic error", scanID, func() {
+				if persistErr := writeScanErrorToFile(err, scanID); persistErr != nil {
+					panicLog(scanReq).Error("failed to persist panic error to file",
+						helpers.String("ID", scanID), helpers.Error(persistErr))
 					responseMsg = persistErr.Error()
 				}
-			}()
+			})
 			handler.state.releaseCancel(scanReq.scanID)
 			handler.state.setNotBusy(scanReq.scanID)
 			response.Type = utilsapisv1.ErrorScanResponseType
