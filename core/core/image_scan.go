@@ -395,6 +395,10 @@ func (ks *Kubescape) ScanImageContext(ctx context.Context, imgScanInfo *ksmetav1
 	}
 	defer svc.Close()
 
+	// Warn on a stale vulnerability DB (always); fail only with --fail-on-stale-db.
+	// The failure is deferred until after results are printed so the user keeps the report.
+	staleDBErr := imagescan.EnforceDBAge(svc, shouldUpdate, scanInfo.FailOnStaleDB, scanInfo.MaxDBAge)
+
 	var exceptionPolicies []VulnerabilitiesIgnorePolicy
 	if imgScanInfo.Exceptions != "" {
 		exceptionPolicies, err = GetImageExceptionsFromFile(imgScanInfo.Exceptions)
@@ -435,7 +439,7 @@ func (ks *Kubescape) ScanImageContext(ctx context.Context, imgScanInfo *ksmetav1
 		}
 	}
 
-	return exceedsSeverityThreshold, errors.Join(scanErr, resultsHandler.HandleResults(ctx, scanInfo))
+	return exceedsSeverityThreshold, errors.Join(scanErr, staleDBErr, resultsHandler.HandleResults(ctx, scanInfo))
 }
 
 func buildImageScanJobs(imgScanInfo *ksmetav1.ImageScanInfo, scanInfo *cautils.ScanInfo, exceptionPolicies []VulnerabilitiesIgnorePolicy) []ImageScanJob {

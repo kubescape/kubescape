@@ -65,6 +65,9 @@ func (ks *Kubescape) Patch(patchInfo *ksmetav1.PatchInfo, scanInfo *cautils.Scan
 		return false, err
 	}
 	defer svc.Close()
+	// Warn on a stale vulnerability DB. Patch always updates (shouldUpdate=true),
+	// so this only ever warns when upstream itself is stale — it never fails.
+	_ = imagescan.EnforceDBAge(svc, shouldUpdate, scanInfo.FailOnStaleDB, scanInfo.MaxDBAge)
 	creds := imagescan.RegistryCredentials{
 		Username: patchInfo.Username,
 		Password: patchInfo.Password,

@@ -603,6 +603,9 @@ func scanImages(scanType cautils.ScanTypes, scanData *cautils.OPASessionObj, ctx
 		return errors.Join(append(containerErrors, fmt.Errorf("failed to initialize image scanner: %w", err))...)
 	}
 	defer svc.Close()
+	// Warn on a stale vulnerability DB (always); fail only with --fail-on-stale-db.
+	// Deferred into the joined error so image results are still collected first.
+	staleDBErr := imagescan.EnforceDBAge(svc, shouldUpdate, scanInfo.FailOnStaleDB, scanInfo.MaxDBAge)
 	defaultCreds := registryCredentialsFromScanInfo(scanInfo)
 	var jobs []ImageScanJob
 	for target := range imagesToScan.Iter() {
@@ -648,7 +651,7 @@ func scanImages(scanType cautils.ScanTypes, scanData *cautils.OPASessionObj, ctx
 		concurrency = 1
 	}
 
-	return scanImageJobsWithDiscoveryErrors(ctx, svc, concurrency, jobs, resultsHandling, containerErrors)
+	return errors.Join(staleDBErr, scanImageJobsWithDiscoveryErrors(ctx, svc, concurrency, jobs, resultsHandling, containerErrors))
 }
 
 func scanImageJobsWithDiscoveryErrors(ctx context.Context, svc imageScanService, concurrency int, jobs []ImageScanJob, resultsHandling *resultshandling.ResultsHandler, discoveryErrors []error) error {

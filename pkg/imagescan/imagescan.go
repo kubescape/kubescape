@@ -5,8 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/adrg/xdg"
 	"github.com/anchore/grype/grype"
@@ -129,6 +132,104 @@ func validateDBLoad(loadErr error, status *vulnerability.ProviderStatus) error {
 	}
 	if status.Error != nil {
 		return fmt.Errorf("db could not be loaded: %w", status.Error)
+	}
+	return nil
+}
+
+// DefaultMaxDBAge matches grype upstream's max-allowed-built-age default (5 days).
+// A successfully loaded DB older than this is usable but stale: results may miss recent CVEs.
+const DefaultMaxDBAge = 5 * 24 * time.Hour
+
+// Env vars for non-CLI paths (httphandler/MCP construct ScanInfo programmatically,
+// so CLI flags never reach them).
+const (
+	envFailOnStaleDB = "KS_FAIL_ON_STALE_DB"
+	envMaxDBAge      = "KS_MAX_DB_AGE"
+)
+
+// dbNowFunc is injectable so age-gate tests stay hermetic.
+var dbNowFunc = time.Now
+
+// CheckDBAge reports whether a loaded vulnerability DB is stale.
+// It never fails: unknown (zero Built) and future Built (clock skew) yield a
+// warning with stale=false. Callers decide whether stale=true is fatal.
+// maxAge <= 0 selects DefaultMaxDBAge.
+func CheckDBAge(status *vulnerability.ProviderStatus, maxAge time.Duration) (warn string, stale bool) {
+	if status == nil {
+		return "", false
+	}
+	if maxAge <= 0 {
+		maxAge = DefaultMaxDBAge
+	}
+	built := status.Built
+	if built.IsZero() {
+		return "vulnerability DB build time is unknown; results may miss recent CVEs", false
+	}
+	now := dbNowFunc().UTC()
+	builtUTC := built.UTC()
+	if now.Before(builtUTC) {
+		return fmt.Sprintf("vulnerability DB built in the future (%s); possible clock skew, treating as fresh", builtUTC.Format(time.RFC3339)), false
+	}
+	age := now.Sub(builtUTC)
+	if age <= maxAge {
+		return "", false
+	}
+	days := int(age.Hours() / 24)
+	return fmt.Sprintf("vulnerability DB was built %s (%d days ago), older than max allowed age %s; results may miss recent CVEs",
+		builtUTC.Format("2006-01-02"), days, maxAge), true
+}
+
+// ResolveDBAgeGate merges explicit flag values with KS_* env fallbacks.
+// Flags win when set (fail=true or maxAge>0); otherwise env applies.
+// Returns the effective fail flag and max age (<=0 still means DefaultMaxDBAge;
+// callers pass it straight to CheckDBAge). An unparseable env duration is
+// ignored (warned once) rather than failing the scan.
+func ResolveDBAgeGate(failFlag bool, maxAge time.Duration) (bool, time.Duration) {
+	fail := failFlag
+	if !fail {
+		if v, ok := os.LookupEnv(envFailOnStaleDB); ok {
+			if b, err := strconv.ParseBool(strings.TrimSpace(v)); err == nil {
+				fail = b
+			} else {
+				logger.L().Warning(fmt.Sprintf("ignoring invalid %s=%q (want bool)", envFailOnStaleDB, v))
+			}
+		}
+	}
+	if maxAge <= 0 {
+		if v, ok := os.LookupEnv(envMaxDBAge); ok {
+			if d, err := time.ParseDuration(strings.TrimSpace(v)); err == nil && d > 0 {
+				maxAge = d
+			} else {
+				logger.L().Warning(fmt.Sprintf("ignoring invalid %s=%q (want positive duration like 120h)", envMaxDBAge, v))
+			}
+		}
+	}
+	return fail, maxAge
+}
+
+// EnforceDBAge warns on any stale/unknown DB and returns a fatal error only when
+// the caller opted into fail-closed (failOnStale) AND the DB was loaded without
+// a fresh update (shouldUpdate=false). A stale DB that was just updated means
+// upstream itself hasn't published — warn only, never fail. Patch (always
+// shouldUpdate=true) therefore warns but never fails. Must be called once per
+// invocation right after service creation, before scanning.
+func EnforceDBAge(svc *Service, shouldUpdate bool, failOnStale bool, maxAge time.Duration) error {
+	if svc == nil {
+		return nil
+	}
+	fail, effectiveMax := ResolveDBAgeGate(failOnStale, maxAge)
+	warn, stale := CheckDBAge(svc.VulnDBStatus(), effectiveMax)
+	if warn != "" {
+		if !shouldUpdate {
+			logger.L().Warning(warn + " (database update was skipped — run once without --skip-db-update to refresh it)")
+		} else if stale {
+			logger.L().Warning(warn + " (upstream database itself appears stale — freshest available was used)")
+		} else {
+			logger.L().Warning(warn)
+		}
+	}
+	if stale && fail && !shouldUpdate {
+		return fmt.Errorf("vulnerability DB is stale: %s (use --max-db-age to allow older databases, or refresh the DB)", warn)
 	}
 	return nil
 }
@@ -377,6 +478,15 @@ func (s *Service) ExceedsSeverityThreshold(severity vulnerability.Severity, matc
 
 func (s *Service) Close() {
 	_ = s.vp.Close()
+}
+
+// VulnDBStatus exposes the loaded DB status so callers can age-gate it
+// (see CheckDBAge/EnforceDBAge) without breaking the constructor signature.
+func (s *Service) VulnDBStatus() *vulnerability.ProviderStatus {
+	if s == nil {
+		return nil
+	}
+	return s.dbStatus
 }
 
 func NewVulnerabilityDB(distCfg distribution.Config, installCfg installation.Config, update bool) (vulnerability.Provider, *vulnerability.ProviderStatus, error) {

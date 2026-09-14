@@ -163,6 +163,9 @@ func ValidateCommonScanFlags(cmd *cobra.Command, scanInfo *cautils.ScanInfo, sup
 	if err := ValidateExcludeControls(scanInfo); err != nil {
 		return err
 	}
+	if scanInfo.MaxDBAge < 0 {
+		return fmt.Errorf("invalid --max-db-age %q: must be a positive duration (e.g. 120h) or 0 for the default", scanInfo.MaxDBAge)
+	}
 	return nil
 }
 
