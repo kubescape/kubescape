@@ -46,7 +46,7 @@ func TestBuildImageScanJobsResolvesExceptionsPerImage(t *testing.T) {
 			Severities:      []string{"Low"},
 		},
 	}
-	imgScanInfo := &ksmetav1.ImageScanInfo{Images: []string{"nginx:1.27", "redis:7"}}
+	imgScanInfo := &ksmetav1.ImageScanInfo{Images: []string{"nginx:1.27", "redis:7"}, Exceptions: "/tmp/exc.json"}
 
 	jobs := buildImageScanJobs(imgScanInfo, &cautils.ScanInfo{}, policies)
 

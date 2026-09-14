@@ -105,7 +105,8 @@ func validateImageExceptionTargetRegexes(policies []VulnerabilitiesIgnorePolicy)
 // existence and is injectable so tests stay hermetic; callers pass osStatExists.
 //
 // Classification uses exact input semantics in this order:
-//  1. known source scheme (docker-archive:, oci-dir:, ...) → non-registry;
+//  1. known local-source scheme (docker-archive:, oci-dir:, dir:, purl:,
+//     local-file:, local-directory:, singularity:, ...) → non-registry;
 //  2. the RAW trimmed input exists on disk → non-registry. Checking the raw
 //     string before any tag/digest stripping is deliberate: stripping first
 //     would let an unrelated local "team/my.tar" reject the valid registry
@@ -140,10 +141,19 @@ func classifyImageInput(img string, stat func(string) bool) (registry bool, sche
 }
 
 // isKnownInputScheme reports whether s is a local-source scheme that can
-// never denote a registry reference.
+// never denote a registry reference. The set mirrors the pinned Grype/Syft
+// stack's local-source handling, verified against grype v0.104.1 / syft
+// v1.42.3: grype's SBOM path strips "sbom:"/"purl:" to local files, and
+// stereoscope's ExtractSchemeSource strips any provider-name tag
+// ("local-file", "local-directory", "singularity", archive schemes) before
+// opening the remainder as a local path. Daemon/registry schemes ("docker",
+// "podman", "containerd", "oci-registry", "oci-model") and the ambiguous
+// "snap" (local file or remote store) are deliberately excluded: daemon
+// inputs are registry references with derivable attributes.
 func isKnownInputScheme(s string) bool {
 	switch s {
-	case "docker-archive", "oci-archive", "oci-dir", "oci-layout", "dir", "file", "sbom":
+	case "docker-archive", "oci-archive", "oci-dir", "oci-layout", "dir", "file", "sbom",
+		"purl", "local-file", "local-directory", "singularity":
 		return true
 	}
 	return false
@@ -255,12 +265,17 @@ func isTargetImage(targets []Target, attributes Attributes) bool {
 // the image being scanned. Returns an error when exceptions are configured for
 // a non-registry input (archive, local directory, SBOM, ...), where exception
 // targets are undefinable — callers must surface it per image, never swallow it.
-func getUniqueVulnerabilitiesAndSeverities(policies []VulnerabilitiesIgnorePolicy, image string) ([]string, []string, error) {
+//
+// exceptionsConfigured tracks whether --exceptions was explicitly passed,
+// independently of how many policies the file held: an explicitly configured
+// but empty file (valid [] or null) must still reject non-registry inputs,
+// while an unconfigured run keeps the old lenient path.
+func getUniqueVulnerabilitiesAndSeverities(policies []VulnerabilitiesIgnorePolicy, image string, exceptionsConfigured bool) ([]string, []string, error) {
 	// Create maps with slices as values to store unique vulnerabilities and severities (case-insensitive)
 	uniqueVulns := make(map[string][]string)
 	uniqueSevers := make(map[string][]string)
 
-	if len(policies) == 0 {
+	if len(policies) == 0 && !exceptionsConfigured {
 		return nil, nil, nil
 	}
 	if _, _, errEmpty := classifyImageInput(image, osStatExists); errEmpty != nil {
@@ -500,11 +515,13 @@ func (ks *Kubescape) ScanImageContext(ctx context.Context, imgScanInfo *ksmetav1
 	}
 
 	// Fail fast before the Grype DB download when every image is a
-	// non-registry input combined with --exceptions. Mixed scans fall through
+	// non-registry input combined with --exceptions. The guard keys on flag
+	// presence, not policy count: an explicitly configured empty file still
+	// rejects. Mixed scans fall through
 	// to per-image errors so valid registry siblings still scan. Every image
 	// gets its own categorized error (with its own scheme) so multi-archive
 	// runs report each offender, not just the first.
-	if len(exceptionPolicies) > 0 {
+	if imgScanInfo.Exceptions != "" {
 		allNonRegistry := true
 		for _, image := range images {
 			if _, _, errEmpty := classifyImageInput(image, osStatExists); errEmpty != nil {
@@ -590,12 +607,14 @@ func buildImageScanJobs(imgScanInfo *ksmetav1.ImageScanInfo, scanInfo *cautils.S
 	for _, image := range imgScanInfo.Images {
 		// Resolving exceptions parses the image as a registry reference, which
 		// archive and directory references are not, so it stays behind the
-		// check for configured policies. Resolution failures are stored per
-		// job so one archive never poisons sibling registry images.
+		// check for the explicitly configured flag — not the parsed policy
+		// count, so an empty-but-configured file still validates. Resolution
+		// failures are stored per job so one archive never poisons sibling
+		// registry images.
 		var vulnerabilityExceptions, severityExceptions []string
 		var exceptionErr error
-		if len(exceptionPolicies) > 0 {
-			vulnerabilityExceptions, severityExceptions, exceptionErr = getUniqueVulnerabilitiesAndSeverities(exceptionPolicies, image)
+		if imgScanInfo.Exceptions != "" {
+			vulnerabilityExceptions, severityExceptions, exceptionErr = getUniqueVulnerabilitiesAndSeverities(exceptionPolicies, image, true)
 			if exceptionErr != nil {
 				exceptionErr = fmt.Errorf("%w (exceptions from %q)", exceptionErr, imgScanInfo.Exceptions)
 			}
