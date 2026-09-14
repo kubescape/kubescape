@@ -6,6 +6,7 @@ import (
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	ksmetav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestClassifyImageInput(t *testing.T) {
@@ -37,8 +38,13 @@ func TestClassifyImageInput(t *testing.T) {
 		{name: "dir scheme", image: "dir:/tmp/rootfs", wantRegistry: false, wantScheme: "dir"},
 		{name: "sbom scheme", image: "sbom:/tmp/sbom.json", wantRegistry: false, wantScheme: "sbom"},
 		{name: "bare tar existing file", image: "/tmp/x.tar", statExisting: []string{"/tmp/x.tar"}, wantRegistry: false},
+		{name: "absolute tar missing file still non-registry", image: "/tmp/missing.tar", wantRegistry: false},
 		{name: "bare tgz path", image: "./rel/a.tgz", statExisting: []string{"./rel/a.tgz"}, wantRegistry: false},
 		{name: "bare dir existing", image: "./mydir", statExisting: []string{"./mydir"}, wantRegistry: false},
+		{name: "bare dirname without slash or dot", image: "rootfs", statExisting: []string{"rootfs"}, wantRegistry: false},
+		{name: "bare sbom filename without slash", image: "sbom.json", statExisting: []string{"sbom.json"}, wantRegistry: false},
+		{name: "tagged ref unaffected by colliding local file", image: "team/my.tar:v1", statExisting: []string{"team/my.tar"}, wantRegistry: true},
+		{name: "untagged ref matching local file prefers loud error", image: "team/my.tar", statExisting: []string{"team/my.tar"}, wantRegistry: false},
 		{name: "nonexistent relative no slash stays registry", image: "myimage", wantRegistry: true},
 		{name: "empty", image: "   ", wantRegistry: false, wantEmptyErr: true},
 	}
@@ -99,4 +105,31 @@ func TestBuildImageScanJobsMixedArchive(t *testing.T) {
 	assert.ErrorContains(t, jobs[0].ExceptionErr, "/tmp/exc.json")
 	assert.NoError(t, jobs[1].ExceptionErr)
 	assert.Contains(t, jobs[1].VulnerabilityExceptions, "CVE-2023-42365")
+}
+
+func TestCategorizeScanError_PreservesExceptionUnsupported(t *testing.T) {
+	assert.NotEqual(t, ErrCategoryExceptionUnsupported, CategorizeScanError(assert.AnError))
+
+	// Same wrapping the worker applies: the category prefix must survive
+	// aggregation instead of collapsing to General.
+	wrapped := NewScanErrorAggregator()
+	wrapped.Add("docker-archive:/tmp/x.tar", formatExceptionUnsupportedError(assert.AnError))
+	assert.Equal(t, map[ScanErrorCategory]int{ErrCategoryExceptionUnsupported: 1}, wrapped.Summary())
+}
+
+func TestExceptionUnsupportedErrorCategoryRoundTrip(t *testing.T) {
+	policies := []VulnerabilitiesIgnorePolicy{
+		{
+			Metadata:        Metadata{Name: "x"},
+			Kind:            "VulnerabilitiesIgnorePolicy",
+			Targets:         []Target{{DesignatorType: "Attributes", Attributes: Attributes{Registry: "quay.io"}}},
+			Vulnerabilities: []string{"CVE-2023-42365"},
+		},
+	}
+	_, _, err := getUniqueVulnerabilitiesAndSeverities(policies, "docker-archive:/tmp/x.tar")
+	require.Error(t, err)
+	// The reporting layers (worker, fail-fast) tag the error via
+	// formatExceptionUnsupportedError; the tagged form must survive
+	// categorization instead of collapsing to General.
+	assert.Equal(t, ErrCategoryExceptionUnsupported, CategorizeScanError(formatExceptionUnsupportedError(err)))
 }

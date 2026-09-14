@@ -103,56 +103,44 @@ func validateImageExceptionTargetRegexes(policies []VulnerabilitiesIgnorePolicy)
 // non-registry input (archive, local directory, SBOM, ...). It returns the
 // detected scheme ("" when none) for error messages. stat reports local path
 // existence and is injectable so tests stay hermetic; callers pass osStatExists.
+//
+// Classification uses exact input semantics in this order:
+//  1. known source scheme (docker-archive:, oci-dir:, ...) → non-registry;
+//  2. the RAW trimmed input exists on disk → non-registry. Checking the raw
+//     string before any tag/digest stripping is deliberate: stripping first
+//     would let an unrelated local "team/my.tar" reject the valid registry
+//     reference "team/my.tar:v1", and would miss bare names like "rootfs" or
+//     "sbom.json". An existing local path always wins over registry
+//     interpretation — a loud error beats a silent exception skip;
+//  3. unambiguous tarball path (absolute or ./-relative .tar/.tgz) →
+//     non-registry even when the file is absent (the scan itself will then
+//     fail loudly on the missing file, not silently on exceptions);
+//  4. unparseable as a registry reference → non-registry;
+//  5. otherwise registry.
 func classifyImageInput(img string, stat func(string) bool) (registry bool, scheme string, errEmpty error) {
 	trimmed := strings.TrimSpace(img)
 	if trimmed == "" {
 		return false, "", fmt.Errorf("image name cannot be empty")
 	}
-	lower := strings.ToLower(trimmed)
-	_ = lower
 	if scheme := detectScheme(trimmed); scheme != "" {
 		return false, scheme, nil
 	}
-	// Strip @digest, then :tag (only a colon after the last "/" can be a
-	// tag; a colon before it is a registry port like myregistry.io:5000).
-	path := trimmed
-	if i := strings.Index(path, "@"); i != -1 {
-		path = path[:i]
+	if stat != nil && stat(trimmed) {
+		return false, "", nil
 	}
-	if slash := strings.LastIndex(path, "/"); slash != -1 {
-		if i := strings.Index(path[slash:], ":"); i != -1 {
-			path = path[:slash+i]
-		}
-	} else if i := strings.Index(path, ":"); i != -1 {
-		path = path[:i]
-	}
-	checkPath := path
-	// Strip a known scheme prefix for the filesystem checks only.
-	if i := strings.Index(checkPath, ":"); i != -1 && isKnownInputScheme(strings.ToLower(checkPath[:i])) {
-		checkPath = checkPath[i+1:]
-	}
-	lowerPath := strings.ToLower(checkPath)
-	isTar := strings.HasSuffix(lowerPath, ".tar") || strings.HasSuffix(lowerPath, ".tgz") || strings.HasSuffix(lowerPath, ".tar.gz")
-	// A registry repository may legitimately end in ".tar" (e.g.
-	// "myregistry.io:5000/team/my.tar:v1"), so a tar suffix alone must not
-	// reclassify a tagged registry ref. Only treat as file when it exists on
-	// disk or is unambiguously a filesystem path (absolute or ./-relative).
-	if isTar && (stat != nil && stat(checkPath) || strings.HasPrefix(checkPath, "/") || strings.HasPrefix(checkPath, "./") || strings.HasPrefix(checkPath, "../")) {
-		return false, detectScheme(trimmed), nil
-	}
-	// Bare local path (./mydir, /tmp/app.img, ...) without scheme or suffix:
-	// exists on disk and looks like a path, but parses fine as a registry
-	// ref — must not be silently treated as registry. Conservative: prefer a
-	// loud error over a silent exception skip.
-	if stat != nil && stat(checkPath) && (strings.Contains(checkPath, "/") || strings.HasPrefix(checkPath, ".")) {
-		return false, detectScheme(trimmed), nil
+	lower := strings.ToLower(trimmed)
+	isTar := strings.HasSuffix(lower, ".tar") || strings.HasSuffix(lower, ".tgz") || strings.HasSuffix(lower, ".tar.gz")
+	if isTar && (strings.HasPrefix(trimmed, "/") || strings.HasPrefix(trimmed, "./") || strings.HasPrefix(trimmed, "../")) {
+		return false, "", nil
 	}
 	if _, err := reference.ParseNormalizedNamed(trimmed); err != nil {
-		return false, detectScheme(trimmed), nil
+		return false, "", nil
 	}
 	return true, "", nil
 }
 
+// isKnownInputScheme reports whether s is a local-source scheme that can
+// never denote a registry reference.
 func isKnownInputScheme(s string) bool {
 	switch s {
 	case "docker-archive", "oci-archive", "oci-dir", "oci-layout", "dir", "file", "sbom":
@@ -161,6 +149,10 @@ func isKnownInputScheme(s string) bool {
 	return false
 }
 
+// detectScheme extracts a known local-source scheme prefix (preserving the
+// original casing for error messages), or "" when the input has none. A
+// registry port (myregistry.io:5000/...) never qualifies: its prefix contains
+// "/" (or is not a known scheme), so tagged registry refs stay registry.
 func detectScheme(trimmed string) string {
 	lower := strings.ToLower(trimmed)
 	if i := strings.Index(lower, ":"); i != -1 {
@@ -172,6 +164,7 @@ func detectScheme(trimmed string) string {
 	return ""
 }
 
+// osStatExists is the production existence check passed as classifyImageInput's stat.
 func osStatExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
@@ -503,7 +496,9 @@ func (ks *Kubescape) ScanImageContext(ctx context.Context, imgScanInfo *ksmetav1
 
 	// Fail fast before the Grype DB download when every image is a
 	// non-registry input combined with --exceptions. Mixed scans fall through
-	// to per-image errors so valid registry siblings still scan.
+	// to per-image errors so valid registry siblings still scan. Every image
+	// gets its own categorized error (with its own scheme) so multi-archive
+	// runs report each offender, not just the first.
 	if len(exceptionPolicies) > 0 {
 		allNonRegistry := true
 		for _, image := range images {
@@ -517,8 +512,12 @@ func (ks *Kubescape) ScanImageContext(ctx context.Context, imgScanInfo *ksmetav1
 			}
 		}
 		if allNonRegistry {
-			_, scheme, _ := classifyImageInput(images[0], osStatExists)
-			err := fmt.Errorf("[%s] image exceptions cannot target non-registry input %q (detected %q): scan by registry reference or remove --exceptions %q", ErrCategoryExceptionUnsupported, images[0], scheme, imgScanInfo.Exceptions)
+			errs := make([]error, 0, len(images))
+			for _, image := range images {
+				_, scheme, _ := classifyImageInput(image, osStatExists)
+				errs = append(errs, fmt.Errorf("[%s] image exceptions cannot target non-registry input %q (detected %q): scan by registry reference or remove --exceptions %q", ErrCategoryExceptionUnsupported, image, scheme, imgScanInfo.Exceptions))
+			}
+			err := errors.Join(errs...)
 			logger.L().StopError(err.Error())
 			return false, err
 		}
@@ -670,10 +669,24 @@ const (
 	ErrCategoryExceptionUnsupported ScanErrorCategory = "Image Exceptions/Unsupported Input"
 )
 
+// formatExceptionUnsupportedError tags err with the category prefix that
+// CategorizeScanError recognizes, keeping these failures distinct from
+// General errors in aggregator summaries. Single formatting site for the
+// worker, the fail-fast branch, and tests.
+func formatExceptionUnsupportedError(err error) error {
+	return fmt.Errorf("[%s] %w", ErrCategoryExceptionUnsupported, err)
+}
+
 // CategorizeScanError inspects an error and assigns a ScanErrorCategory.
+// Explicit "[Category] ..." prefixes (emitted by this package's own error
+// paths) win over the heuristic substring checks below, so intentionally
+// categorized failures survive aggregation instead of collapsing to General.
 func CategorizeScanError(err error) ScanErrorCategory {
 	if err == nil {
 		return ""
+	}
+	if strings.Contains(err.Error(), "["+string(ErrCategoryExceptionUnsupported)+"]") {
+		return ErrCategoryExceptionUnsupported
 	}
 	if isResolutionError(err) {
 		return ErrCategoryDNSTimeout
@@ -871,12 +884,12 @@ func (o *ImageScanOrchestrator) ScanImages(ctx context.Context, jobs []ImageScan
 				// a platform hint or mapping that would otherwise skip it.
 				if job.ExceptionErr != nil {
 					if o.errorAggregator != nil {
-						o.errorAggregator.Add(target, fmt.Errorf("[%s] %w", ErrCategoryExceptionUnsupported, job.ExceptionErr))
+						o.errorAggregator.Add(target, formatExceptionUnsupportedError(job.ExceptionErr))
 					}
 					resultChan <- ImageScanResult{
 						Image:    job.Image,
 						Platform: job.Platform,
-						Error:    fmt.Errorf("[%s] %w", ErrCategoryExceptionUnsupported, job.ExceptionErr),
+						Error:    formatExceptionUnsupportedError(job.ExceptionErr),
 					}
 					continue
 				}
