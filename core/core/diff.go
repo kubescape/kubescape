@@ -21,9 +21,11 @@ func (ks *Kubescape) Diff(diffInfo *metav1.DiffInfo) (newFailures int, err error
 		return 0, err
 	}
 
+	// A normalized stdout sink writes through the descriptor the process
+	// already has; only a file this function opens itself is closed here.
 	w := os.Stdout
-	if diffInfo.Output != "" {
-		w, err = printer.GetWriterNoFallback(diffOutputPath(diffInfo.Format, diffInfo.Output))
+	if outputFile, explicit := diffOutputPath(diffInfo.Format, diffInfo.Output); explicit {
+		w, err = printer.GetWriterNoFallback(outputFile)
 		if err != nil {
 			return 0, fmt.Errorf("opening diff output: %w", err)
 		}
@@ -85,40 +87,60 @@ func closeDiffOutput(closer io.Closer, err error) error {
 	return err
 }
 
-func diffOutputPath(format, outputFile string) string {
+// diffOutputPath applies the diff output-path rules to an --output value and
+// reports whether the result must be opened as a file. It mirrors
+// printer.ResolveOutputFile: the well-known sinks skip extension handling, and
+// stdout resolves to no file at all so the caller writes through the existing
+// os.Stdout descriptor. Reopening the stdout path with os.Create
+// (O_RDWR|O_CREATE|O_TRUNC) is not the same thing: it fails with ENXIO when
+// stdout is a socket and truncates a regular file stdout was redirected to.
+// /dev/null stays a real open, so failing to open it still surfaces as an
+// error instead of silently falling back to stdout.
+func diffOutputPath(format, outputFile string) (string, bool) {
+	if outputFile == "" {
+		return "", false
+	}
 	outputFile = strings.TrimSpace(outputFile)
 	if outputFile == "" {
-		return ""
+		// An explicitly requested but blank path stays explicit, so opening
+		// it reports the failure rather than writing to stdout.
+		return "", true
+	}
+	if outputFile == os.Stdout.Name() {
+		return "", false
+	}
+	if outputFile == os.DevNull {
+		return outputFile, true
 	}
 	if format == printer.PrettyFormat {
-		return outputFile
+		return outputFile, true
 	}
 	switch format {
 	case diff.SummaryJSONFormat:
 		if printer.HasOutputExt(outputFile, printer.JsonOutputExt) {
-			return outputFile
+			return outputFile, true
 		}
-		return outputFile + printer.JsonOutputExt
+		return outputFile + printer.JsonOutputExt, true
 	case diff.SummaryYAMLFormat:
 		if printer.HasOutputExt(outputFile, printer.YamlOutputExt) || printer.HasOutputExt(outputFile, ".yml") {
-			return outputFile
+			return outputFile, true
 		}
-		return outputFile + printer.YamlOutputExt
+		return outputFile + printer.YamlOutputExt, true
 	case diff.SummaryCSVFormat:
 		if printer.HasOutputExt(outputFile, printer.CsvOutputExt) {
-			return outputFile
+			return outputFile, true
 		}
-		return outputFile + printer.CsvOutputExt
+		return outputFile + printer.CsvOutputExt, true
 	}
 	ext, ok := printer.FormatOutputExt[format]
 	if !ok || ext == "" {
-		return outputFile
+		return outputFile, true
 	}
 	if ext == printer.YamlOutputExt && strings.HasSuffix(outputFile, ".yml") {
-		return outputFile
+		return outputFile, true
 	}
 	if printer.HasOutputExt(outputFile, ext) {
-		return outputFile
+		return outputFile, true
 	}
-	return outputFile + ext
+	return outputFile + ext, true
 }

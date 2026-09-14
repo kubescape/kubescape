@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	metav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
@@ -237,33 +238,91 @@ func TestDiff_MachineFormatsWriteExpectedOutputFiles(t *testing.T) {
 
 func TestDiffOutputPath(t *testing.T) {
 	tests := []struct {
-		name       string
-		format     string
-		outputFile string
-		want       string
+		name         string
+		format       string
+		outputFile   string
+		want         string
+		wantExplicit bool
 	}{
-		{"empty output stays empty", "sarif", "", ""},
-		{"whitespace is trimmed", "sarif", " report ", "report.sarif"},
-		{"known extension is appended", "sarif", "report", "report.sarif"},
-		{"existing extension is preserved", "sarif", "report.sarif", "report.sarif"},
-		{"existing extension comparison is case-insensitive", "sarif", "report.SARIF", "report.SARIF"},
-		{"summary-json appends json extension", "summary-json", "report", "report.json"},
-		{"summary-json preserves json extension", "summary-json", "report.JSON", "report.JSON"},
-		{"summary-yaml appends yaml extension", "summary-yaml", "report", "report.yaml"},
-		{"summary-yaml preserves yaml extension", "summary-yaml", "report.YAML", "report.YAML"},
-		{"summary-yaml preserves yml extension", "summary-yaml", "report.yml", "report.yml"},
-		{"summary-csv appends csv extension", "summary-csv", "report", "report.csv"},
-		{"summary-csv preserves csv extension", "summary-csv", "report.CSV", "report.CSV"},
-		{"pretty output path stays exact", "pretty-printer", "pretty.out", "pretty.out"},
-		{"yaml accepts yml", "yaml", "report.yml", "report.yml"},
-		{"unknown format is untouched", "unknown", "report", "report"},
+		{"empty output stays empty", "sarif", "", "", false},
+		{"blank output stays explicit", "sarif", " ", "", true},
+		{"whitespace is trimmed", "sarif", " report ", "report.sarif", true},
+		{"known extension is appended", "sarif", "report", "report.sarif", true},
+		{"existing extension is preserved", "sarif", "report.sarif", "report.sarif", true},
+		{"existing extension comparison is case-insensitive", "sarif", "report.SARIF", "report.SARIF", true},
+		{"summary-json appends json extension", "summary-json", "report", "report.json", true},
+		{"summary-json preserves json extension", "summary-json", "report.JSON", "report.JSON", true},
+		{"summary-yaml appends yaml extension", "summary-yaml", "report", "report.yaml", true},
+		{"summary-yaml preserves yaml extension", "summary-yaml", "report.YAML", "report.YAML", true},
+		{"summary-yaml preserves yml extension", "summary-yaml", "report.yml", "report.yml", true},
+		{"summary-csv appends csv extension", "summary-csv", "report", "report.csv", true},
+		{"summary-csv preserves csv extension", "summary-csv", "report.CSV", "report.CSV", true},
+		{"pretty output path stays exact", "pretty-printer", "pretty.out", "pretty.out", true},
+		{"yaml accepts yml", "yaml", "report.yml", "report.yml", true},
+		{"unknown format is untouched", "unknown", "report", "report", true},
+		{"stdout sink resolves to no file", "json", os.Stdout.Name(), "", false},
+		{"pretty stdout sink resolves to no file", "pretty-printer", os.Stdout.Name(), "", false},
+		{"devnull sink keeps exact path", "sarif", os.DevNull, os.DevNull, true},
+		{"summary-json stdout sink resolves to no file", "summary-json", os.Stdout.Name(), "", false},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			assert.Equal(t, test.want, diffOutputPath(test.format, test.outputFile))
+			got, gotExplicit := diffOutputPath(test.format, test.outputFile)
+			assert.Equal(t, test.want, got)
+			assert.Equal(t, test.wantExplicit, gotExplicit)
 		})
 	}
+}
+
+// TestDiff_StdoutSinkWritesThroughExistingStdout checks the writer behind the
+// stdout sink, not just the path it resolves to: the diff must go through the
+// descriptor os.Stdout already holds, appending to whatever stdout was
+// redirected to instead of reopening and truncating that path, and the
+// borrowed descriptor must still be usable after Diff returns.
+func TestDiff_StdoutSinkWritesThroughExistingStdout(t *testing.T) {
+	base := writeReport(t, `{"results":[],"summaryDetails":{"controls":{}}}`)
+	head := writeReport(t, `{
+		"results":[{"resourceID":"res1","controls":[
+			{"controlID":"C-HIGH","name":"High","status":{"status":"failed"}}
+		]}],
+		"summaryDetails":{"controls":{"C-HIGH":{"scoreFactor":7.0}}}
+	}`)
+
+	const prelude = "written before the diff\n"
+	redirect := filepath.Join(t.TempDir(), "redirected-stdout")
+	require.NoError(t, os.WriteFile(redirect, []byte(prelude), 0o600))
+	fakeStdout, err := os.OpenFile(redirect, os.O_WRONLY|os.O_APPEND, 0o600)
+	require.NoError(t, err)
+
+	realStdout := os.Stdout
+	os.Stdout = fakeStdout
+	defer func() {
+		os.Stdout = realStdout
+		_ = fakeStdout.Close()
+	}()
+
+	ks := NewKubescape(context.Background())
+	count, err := ks.Diff(&metav1.DiffInfo{
+		BaseFile: base,
+		HeadFile: head,
+		Format:   "json",
+		Output:   os.Stdout.Name(),
+	})
+	require.NoError(t, err)
+	assert.Equal(t, 1, count)
+
+	// Diff borrowed this descriptor, so it must not have closed it.
+	_, err = os.Stdout.WriteString("written after the diff\n")
+	require.NoError(t, err, "Diff closed the process stdout descriptor")
+
+	require.NoError(t, fakeStdout.Sync())
+	data, err := os.ReadFile(redirect)
+	require.NoError(t, err)
+	written := string(data)
+	assert.True(t, strings.HasPrefix(written, prelude), "stdout redirection was truncated: %q", written)
+	assert.Contains(t, written, "C-HIGH")
+	assert.Contains(t, written, "written after the diff")
 }
 
 func TestDiff_ExplicitOutputSetupFailureIsReturned(t *testing.T) {
