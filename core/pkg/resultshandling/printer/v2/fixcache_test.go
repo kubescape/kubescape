@@ -142,7 +142,7 @@ func TestFixReportCache_LocationResolverMatchesFreshResolver(t *testing.T) {
 
 	for _, lookup := range lookups {
 		t.Run(fmt.Sprintf("%s@%d", lookup.fixPath, lookup.docIndex), func(t *testing.T) {
-			fresh, err := locationresolver.NewFixPathLocationResolver(path)
+			fresh, err := locationresolver.NewPathLocationResolver(path)
 			require.NoError(t, err)
 			want, err := fresh.ResolveLocation(lookup.fixPath, lookup.docIndex)
 			require.NoError(t, err)

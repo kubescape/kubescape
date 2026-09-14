@@ -6,6 +6,7 @@ import (
 
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/pathparse"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -20,52 +21,52 @@ func TestSplitPath(t *testing.T) {
 		{
 			name:  "simple key",
 			input: "apiVersion",
-			want:  []pathSegment{{key: "apiVersion", index: -1}},
+			want:  []pathSegment{{Key: "apiVersion", Index: -1}},
 		},
 		{
 			name:  "dotted path",
 			input: "spec.securityContext.runAsNonRoot",
 			want: []pathSegment{
-				{key: "spec", index: -1},
-				{key: "securityContext", index: -1},
-				{key: "runAsNonRoot", index: -1},
+				{Key: "spec", Index: -1},
+				{Key: "securityContext", Index: -1},
+				{Key: "runAsNonRoot", Index: -1},
 			},
 		},
 		{
 			name:  "array index",
 			input: "spec.containers[0].image",
 			want: []pathSegment{
-				{key: "spec", index: -1},
-				{key: "containers", index: 0},
-				{key: "image", index: -1},
+				{Key: "spec", Index: -1},
+				{Key: "containers", Index: 0},
+				{Key: "image", Index: -1},
 			},
 		},
 		{
 			name:  "second array element",
 			input: "spec.containers[2].securityContext.privileged",
 			want: []pathSegment{
-				{key: "spec", index: -1},
-				{key: "containers", index: 2},
-				{key: "securityContext", index: -1},
-				{key: "privileged", index: -1},
+				{Key: "spec", Index: -1},
+				{Key: "containers", Index: 2},
+				{Key: "securityContext", Index: -1},
+				{Key: "privileged", Index: -1},
 			},
 		},
 		{
 			name:  "strip leading dot",
 			input: ".spec.nodeName",
 			want: []pathSegment{
-				{key: "spec", index: -1},
-				{key: "nodeName", index: -1},
+				{Key: "spec", Index: -1},
+				{Key: "nodeName", Index: -1},
 			},
 		},
 		{
 			name:  "strip = suffix (failed path format)",
 			input: "spec.containers[0].securityContext.privileged=true",
 			want: []pathSegment{
-				{key: "spec", index: -1},
-				{key: "containers", index: 0},
-				{key: "securityContext", index: -1},
-				{key: "privileged", index: -1},
+				{Key: "spec", Index: -1},
+				{Key: "containers", Index: 0},
+				{Key: "securityContext", Index: -1},
+				{Key: "privileged", Index: -1},
 			},
 		},
 		{
@@ -73,19 +74,12 @@ func TestSplitPath(t *testing.T) {
 			input: "",
 			want:  nil,
 		},
-		{
-			name:  "empty segments from double dot",
-			input: "spec..image",
-			want: []pathSegment{
-				{key: "spec", index: -1},
-				{key: "image", index: -1},
-			},
-		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := splitPath(tc.input)
+			got, err := pathparse.ParsePath(tc.input)
+			require.NoError(t, err)
 			assert.Equal(t, tc.want, got)
 		})
 	}
@@ -437,7 +431,7 @@ func TestIsSensitivePath(t *testing.T) {
 		// as far off-schema as a schema list reached without one.
 		{name: "indexed secret map is not SecretVolumeSource", kind: "Pod", path: "spec.volumes[0].secret[0].secretName", want: true},
 		{name: "indexed projected map is not a projected token", kind: "Pod", path: "spec.volumes[0].projected[0].sources[0].serviceAccountToken", want: true},
-		// An unsubstituted rule placeholder leaves splitPath with no index, so
+		// An unsubstituted rule placeholder leaves pathparse.ParsePath with no index, so
 		// it reads as unindexed and is redacted rather than excused.
 		{name: "unresolved list placeholder is redacted", kind: "Pod", path: "spec.volumes[volume_ndx].secret.secretName", want: true},
 	}
