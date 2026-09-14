@@ -176,7 +176,10 @@ func isNonRegistryInput(img string) bool {
 	return errEmpty != nil || !registry
 }
 
-// This function will identify the registry, organization and image tag from the image name
+// getAttributesFromImage identifies registry, organization, image name and
+// tag from a registry-style image reference. Non-registry inputs fail here;
+// callers must not fall back to zero-value attributes (see
+// getUniqueVulnerabilitiesAndSeverities for the fail-closed contract).
 func getAttributesFromImage(imgName string) (Attributes, error) {
 	ref, err := reference.ParseNormalizedNamed(imgName)
 	if err != nil {
@@ -219,7 +222,9 @@ func getAttributesFromImage(imgName string) (Attributes, error) {
 	return attributes, nil
 }
 
-// Checks if the target string matches the regex pattern
+// regexStringMatch reports whether pattern matches target. Unanchored
+// matching is intentional (exception targets use partial regexes); an
+// invalid pattern logs and returns false rather than panicking.
 func regexStringMatch(pattern, target string) bool {
 	re, err := regexp.Compile(pattern)
 	if err != nil {
@@ -234,9 +239,8 @@ func regexStringMatch(pattern, target string) bool {
 	return false
 }
 
-// Compares the registry, organization, image name, image tag against the targets specified
-// in the exception policy object to check if the image being scanned qualifies for an
-// exception policy.
+// isTargetImage reports whether the image attributes match any exception
+// policy target (registry, organization, image name, tag — all regex).
 func isTargetImage(targets []Target, attributes Attributes) bool {
 	for _, target := range targets {
 		if regexStringMatch(target.Attributes.Registry, attributes.Registry) && regexStringMatch(target.Attributes.Organization, attributes.Organization) && regexStringMatch(target.Attributes.ImageName, attributes.ImageName) && regexStringMatch(target.Attributes.ImageTag, attributes.ImageTag) {
@@ -324,6 +328,7 @@ func getUniqueVulnerabilitiesAndSeverities(policies []VulnerabilitiesIgnorePolic
 // applyRegistryMapping replaces the registry part of the image name if a match
 // is found in the provided mapping. The returned bool indicates whether a
 // mapping key actually matched; callers should only retry when matched is true.
+// Non-registry inputs are never mapped (a mapping key can never match them).
 func applyRegistryMapping(imgName string, registryMapping map[string]string) (string, bool, error) {
 	if len(registryMapping) == 0 {
 		return imgName, false, nil
@@ -575,6 +580,10 @@ func (ks *Kubescape) ScanImageContext(ctx context.Context, imgScanInfo *ksmetav1
 	return exceedsSeverityThreshold, errors.Join(scanErr, staleDBErr, resultsHandler.HandleResults(ctx, scanInfo))
 }
 
+// buildImageScanJobs converts imgScanInfo.Images into per-image scan jobs.
+// Exceptions are resolved per image; resolution failures are stored on the
+// job (ExceptionErr) rather than aborting the whole run, so a non-registry
+// input never poisons sibling registry images.
 func buildImageScanJobs(imgScanInfo *ksmetav1.ImageScanInfo, scanInfo *cautils.ScanInfo, exceptionPolicies []VulnerabilitiesIgnorePolicy) []ImageScanJob {
 	creds := imagescan.RegistryCredentials{
 		Authority: imgScanInfo.Authority,
@@ -610,6 +619,7 @@ func buildImageScanJobs(imgScanInfo *ksmetav1.ImageScanInfo, scanInfo *cautils.S
 	return jobs
 }
 
+// imageScanStartMessage renders the progress message for the image list.
 func imageScanStartMessage(images []string) string {
 	if len(images) == 1 {
 		return fmt.Sprintf("Scanning image %s...", images[0])
@@ -642,6 +652,8 @@ func imageScanFailureMessage(images []string) string {
 	return fmt.Sprintf("Failed to scan %s", countedNoun(len(images), "image"))
 }
 
+// imageScanSuccessMessage renders the final message; it reflects partial
+// success when fewer images produced results than were requested.
 func imageScanSuccessMessage(images []string, scanned []cautils.ImageScanData) string {
 	switch {
 	case len(images) == 1:
@@ -653,6 +665,7 @@ func imageScanSuccessMessage(images []string, scanned []cautils.ImageScanData) s
 	}
 }
 
+// countedNoun renders "1 image" / "3 images" for log and CLI messages.
 func countedNoun(n int, singular string) string {
 	if n == 1 {
 		return fmt.Sprintf("%d %s", n, singular)
