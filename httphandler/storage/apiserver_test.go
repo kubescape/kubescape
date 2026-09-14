@@ -680,6 +680,7 @@ func TestStorePostureReportResults_ContinuesAfterUnstorableResult(t *testing.T) 
 
 	// An object the storage backend refuses. The real case is a name at the
 	// 253-byte limit, which the file backend cannot write.
+	//nolint:staticcheck // The pinned storage client lacks the summary apply schema required by NewClientset.
 	client := fake.NewSimpleClientset()
 	storeErr := errors.New("open payload file: file name too long")
 	client.PrependReactor("create", "workloadconfigurationscansummaries", func(action k8stesting.Action) (bool, runtime.Object, error) {
@@ -728,6 +729,7 @@ func TestStorePostureReportResults_ContinuesAfterUnstorableScan(t *testing.T) {
 
 	// The full scan and its summary are separate objects. A scan that cannot be
 	// written must not stop the summary for the same result.
+	//nolint:staticcheck // The pinned storage client lacks the summary apply schema required by NewClientset.
 	client := fake.NewSimpleClientset()
 	storeErr := errors.New("open payload file: file name too long")
 	client.PrependReactor("create", "workloadconfigurationscans", func(action k8stesting.Action) (bool, runtime.Object, error) {
@@ -780,6 +782,7 @@ func TestStorePostureReportResults_ContinuesAfterUnstorableScan(t *testing.T) {
 func TestStorePostureReportResults_ReportsTheFirstFailureForAResult(t *testing.T) {
 	ctx := context.Background()
 
+	//nolint:staticcheck // The pinned storage client lacks the summary apply schema required by NewClientset.
 	client := fake.NewSimpleClientset()
 	scanErr := errors.New("scan refused")
 	summaryErr := errors.New("summary refused")
