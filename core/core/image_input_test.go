@@ -47,6 +47,13 @@ func TestClassifyImageInput(t *testing.T) {
 		// "purl" as a scheme always denotes grype's local purl-list path
 		// (grype opens the remainder as a file), never a registry repo.
 		{name: "purl repo-like input still local", image: "purl:latest", wantRegistry: false, wantScheme: "purl"},
+		// "snap" sources never provide OCI registry attributes: syft resolves
+		// the remainder through its local (.snap file) or remote (Snap Store)
+		// providers, and grype strips the tag in both forms.
+		{name: "snap local file", image: "snap:/tmp/img.snap", wantRegistry: false, wantScheme: "snap"},
+		{name: "snap remote store name", image: "snap:firefox", wantRegistry: false, wantScheme: "snap"},
+		{name: "uppercase snap scheme", image: "SNAP:/tmp/img.snap", wantRegistry: false, wantScheme: "SNAP"},
+		{name: "snap-named repo in registry stays registry", image: "example.io/snap/image:v1", wantRegistry: true},
 		{name: "bare tar existing file", image: "/tmp/x.tar", statExisting: []string{"/tmp/x.tar"}, wantRegistry: false},
 		{name: "absolute tar missing file still non-registry", image: "/tmp/missing.tar", wantRegistry: false},
 		{name: "bare tgz path", image: "./rel/a.tgz", statExisting: []string{"./rel/a.tgz"}, wantRegistry: false},
@@ -90,6 +97,10 @@ func TestGetUniqueExceptionsRejectsNonRegistry(t *testing.T) {
 	_, _, err := getUniqueVulnerabilitiesAndSeverities(policies, "docker-archive:/tmp/x.tar", true)
 	assert.ErrorContains(t, err, "non-registry input")
 	_, _, err = getUniqueVulnerabilitiesAndSeverities(policies, "oci-dir:/tmp/layout", true)
+	assert.ErrorContains(t, err, "non-registry input")
+	_, _, err = getUniqueVulnerabilitiesAndSeverities(policies, "snap:/tmp/img.snap", true)
+	assert.ErrorContains(t, err, "non-registry input")
+	_, _, err = getUniqueVulnerabilitiesAndSeverities(policies, "snap:firefox", true)
 	assert.ErrorContains(t, err, "non-registry input")
 	// No flag → no error, archives still scannable.
 	_, _, err = getUniqueVulnerabilitiesAndSeverities(nil, "docker-archive:/tmp/x.tar", false)

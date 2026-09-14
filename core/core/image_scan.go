@@ -106,7 +106,7 @@ func validateImageExceptionTargetRegexes(policies []VulnerabilitiesIgnorePolicy)
 //
 // Classification uses exact input semantics in this order:
 //  1. known local-source scheme (docker-archive:, oci-dir:, dir:, purl:,
-//     local-file:, local-directory:, singularity:, ...) → non-registry;
+//     local-file:, local-directory:, singularity:, snap:, ...) → non-registry;
 //  2. the RAW trimmed input exists on disk → non-registry. Checking the raw
 //     string before any tag/digest stripping is deliberate: stripping first
 //     would let an unrelated local "team/my.tar" reject the valid registry
@@ -142,18 +142,22 @@ func classifyImageInput(img string, stat func(string) bool) (registry bool, sche
 
 // isKnownInputScheme reports whether s is a local-source scheme that can
 // never denote a registry reference. The set mirrors the pinned Grype/Syft
-// stack's local-source handling, verified against grype v0.104.1 / syft
-// v1.42.3: grype's SBOM path strips "sbom:"/"purl:" to local files, and
+// stack's source handling, verified against grype v0.104.1 / syft v1.42.3:
+// grype's SBOM path strips "sbom:"/"purl:" to local files, and
 // stereoscope's ExtractSchemeSource strips any provider-name tag
 // ("local-file", "local-directory", "singularity", archive schemes) before
-// opening the remainder as a local path. Daemon/registry schemes ("docker",
-// "podman", "containerd", "oci-registry", "oci-model") and the ambiguous
-// "snap" (local file or remote store) are deliberately excluded: daemon
-// inputs are registry references with derivable attributes.
+// opening the remainder as a local path. Snap sources never provide OCI
+// registry attributes either: syft resolves "snap:<rest>" through
+// snapsource's local provider (.snap file) or remote provider (Snap Store
+// name), and grype's allSourceTags()/ExtractSchemeSource strips the tag in
+// both forms, so every "snap:"-prefixed input is fail-closed non-registry.
+// Daemon/registry schemes ("docker", "podman", "containerd", "oci-registry",
+// "oci-model") stay excluded: daemon inputs are registry references with
+// derivable attributes.
 func isKnownInputScheme(s string) bool {
 	switch s {
 	case "docker-archive", "oci-archive", "oci-dir", "oci-layout", "dir", "file", "sbom",
-		"purl", "local-file", "local-directory", "singularity":
+		"purl", "local-file", "local-directory", "singularity", "snap":
 		return true
 	}
 	return false
