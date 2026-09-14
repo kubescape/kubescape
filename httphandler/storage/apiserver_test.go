@@ -774,6 +774,39 @@ func TestStorePostureReportResults_ContinuesAfterUnstorableScan(t *testing.T) {
 	assert.Equal(t, "pod-storable", scans.Items[0].Name)
 }
 
+// TestStorePostureReportResults_ReportsTheFirstFailureForAResult covers a result
+// whose scan and summary both fail. The aggregate must carry the scan error,
+// which came first, rather than the summary error that followed it.
+func TestStorePostureReportResults_ReportsTheFirstFailureForAResult(t *testing.T) {
+	ctx := context.Background()
+
+	client := fake.NewSimpleClientset()
+	scanErr := errors.New("scan refused")
+	summaryErr := errors.New("summary refused")
+	client.PrependReactor("create", "workloadconfigurationscans", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, scanErr
+	})
+	client.PrependReactor("create", "workloadconfigurationscansummaries", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, summaryErr
+	})
+	store := &APIServerStore{StorageClient: client.SpdxV1beta1(), namespace: "kubescape", continuousPostureScan: true}
+
+	pr := &v2.PostureReport{
+		Resources: []reporthandling.Resource{{ResourceID: "pod-id", Object: map[string]any{
+			"apiVersion": "v1",
+			"kind":       "Pod",
+			"metadata":   map[string]any{"name": "unstorable", "namespace": "default"},
+		}}},
+		Results: []resourcesresults.Result{{ResourceID: "pod-id"}},
+	}
+
+	err := store.StorePostureReportResults(ctx, pr)
+
+	assert.ErrorContains(t, err, "failed to store 1 of 1 posture scan results")
+	assert.ErrorIs(t, err, scanErr)
+	assert.NotErrorIs(t, err, summaryErr)
+}
+
 func TestStorePostureReportResults_NonRecoverableError(t *testing.T) {
 	store := NewFakeAPIServerStorage("kubescape")
 	ctx := context.Background()

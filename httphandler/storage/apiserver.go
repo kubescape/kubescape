@@ -95,7 +95,9 @@ func (a *APIServerStore) StorePostureReportResults(ctx context.Context, pr *v2.P
 		}
 
 		if _, err := a.StoreWorkloadConfigurationScanResultSummary(ctx, workloadScan); err != nil {
-			storeErr = err
+			if storeErr == nil {
+				storeErr = err
+			}
 		}
 		if storeErr != nil {
 			failedResults++
