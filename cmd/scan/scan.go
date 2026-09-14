@@ -213,7 +213,7 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	scanCmd.PersistentFlags().Float32Var(&scanInfo.FailCoverageThreshold, "fail-coverage-below", 0, "Fail (exit code 1) when the scan coverage score drops below this percentage (0 to disable). The score is the ratio of evaluated controls discounted by 3 points per silent failed GVR pull (a resource type that failed to collect entirely but whose dependent controls still evaluated via other resource types), 2 points per partial GVR pull, and 5 points per degraded policy input, so a scan with every control evaluated can still fail on partial resource collection or fallback policy inputs")
 	scanCmd.PersistentFlags().BoolVar(&scanInfo.FailOnDegradedConfig, "fail-on-degraded-config", false, "Fail the scan (exit code 1) if control configurations or exceptions could not be loaded from their configured source and bundled defaults were used instead")
 
-	scanCmd.PersistentFlags().StringVar(&scanInfo.FailThresholdSeverity, "severity-threshold", "", "Severity threshold is the severity of failed controls at which the command fails and returns exit code 1. Failed controls whose severity is unknown (missing base score) are treated as exceeding any threshold")
+	scanCmd.PersistentFlags().StringVar(&scanInfo.FailThresholdSeverity, "severity-threshold", "", "Severity threshold is the severity of failed controls at which the command fails and returns exit code 1. Failed controls whose severity is unknown (missing base score) are treated as exceeding any threshold. On image scans, vulnerabilities whose severity cannot be determined are likewise counted as exceeding any threshold")
 	scanCmd.PersistentFlags().BoolVar(&scanInfo.OnlyFixable, "only-fixable", false, "When used with --severity-threshold on image scans, only count CVEs that have an available fix toward the pass/fail decision")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.ControlsVersion, "controls-version", "", "Pin the regolibrary release tag used to download controls (see https://github.com/kubescape/regolibrary/releases). If not used will download the latest release. Has no effect when --account is set (cloud backend is used instead)")
 
@@ -469,26 +469,39 @@ func enforceImageSeverityThresholds(imageScanData []cautils.ImageScanData, scanI
 		return nil
 	}
 
+	unknownCount := 0
 	for _, data := range imageScanData {
 		for m := range data.Matches.Enumerate() {
-			metadata := m.Vulnerability.Metadata
-			if metadata == nil || imagescan.ParseSeverity(metadata.Severity) == vulnerability.UnknownSeverity {
-				if data.VulnerabilityProvider == nil {
+			matchSeverity, unknown := imagescan.MatchSeverity(m, data.VulnerabilityProvider)
+			if unknown {
+				// Fail closed, mirroring the posture gate: an indeterminate
+				// CVE must not silently pass. The onlyFixable carve-out is
+				// preserved only for definitively unfixable CVEs.
+				if scanInfo.OnlyFixable && imagescan.IsDefinitivelyUnfixable(m.Vulnerability.Fix.State) {
 					continue
 				}
-				var err error
-				//nolint:staticcheck // fallback for matches without a known embedded severity
-				metadata, err = data.VulnerabilityProvider.VulnerabilityMetadata(m.Vulnerability.Reference)
-				if err != nil {
-					continue
-				}
+				unknownCount++
+				continue
 			}
 
-			if imagescan.ParseSeverity(metadata.Severity) >= thresholdSeverity &&
+			if matchSeverity >= thresholdSeverity &&
 				(!scanInfo.OnlyFixable || m.Vulnerability.Fix.State == vulnerability.FixStateFixed) {
-				return fmt.Errorf("image scan result exceeds severity threshold: %s", scanInfo.FailThresholdSeverity)
+				return thresholdExceededError(scanInfo.FailThresholdSeverity, unknownCount)
 			}
 		}
 	}
+	if unknownCount > 0 {
+		return thresholdExceededError(scanInfo.FailThresholdSeverity, unknownCount)
+	}
 	return nil
+}
+
+// thresholdExceededError keeps the base message byte-identical when no
+// unknown-severity CVE contributed, so existing consumers are unaffected;
+// the unknown count is appended only when it is non-zero.
+func thresholdExceededError(threshold string, unknownCount int) error {
+	if unknownCount > 0 {
+		return fmt.Errorf("image scan result exceeds severity threshold: %s (%d vulnerability(s) with unknown severity counted as exceeding)", threshold, unknownCount)
+	}
+	return fmt.Errorf("image scan result exceeds severity threshold: %s", threshold)
 }

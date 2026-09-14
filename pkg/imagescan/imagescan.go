@@ -294,29 +294,67 @@ func applyDBFreshness(pb *cautils.ImageScanData, status *vulnerability.ProviderS
 	}
 }
 
+// MatchSeverity resolves the severity of a single image-scan match.
+// It prefers the embedded match metadata and falls back to a provider lookup.
+// The second return is true when the severity cannot be determined: the
+// embedded metadata is missing, unparseable or Unknown AND the provider is
+// nil, errored, or also reports Unknown. Callers implementing a severity
+// threshold must treat unknown as exceeding (fail closed): an indeterminate
+// CVE must not silently pass. Negligible is a determinate severity and is
+// never reported as unknown.
+func MatchSeverity(m match.Match, vp vulnerability.Provider) (vulnerability.Severity, bool) {
+	metadata := m.Vulnerability.Metadata
+	if metadata == nil || vulnerability.ParseSeverity(metadata.Severity) == vulnerability.UnknownSeverity {
+		if vp == nil {
+			return vulnerability.UnknownSeverity, true
+		}
+		var err error
+		//nolint:staticcheck // fallback for matches without a known embedded severity
+		metadata, err = vp.VulnerabilityMetadata(m.Vulnerability.Reference)
+		if err != nil {
+			return vulnerability.UnknownSeverity, true
+		}
+	}
+	severity := vulnerability.ParseSeverity(metadata.Severity)
+	return severity, severity == vulnerability.UnknownSeverity
+}
+
+// IsDefinitivelyUnfixable reports whether grype has determined a CVE to be
+// unfixable (not-fixed/wont-fix). Unknown and empty fix states do not qualify:
+// absence of fix information cannot prove unfixability.
+func IsDefinitivelyUnfixable(state vulnerability.FixState) bool {
+	return state == vulnerability.FixStateNotFixed || state == vulnerability.FixStateWontFix
+}
+
 // ExceedsSeverityThreshold returns true if vulnerabilities in the scan results exceed the severity threshold, false otherwise.
 //
 // Values equal to the threshold are considered failing, too. When onlyFixable is true, a CVE only
 // counts toward the threshold if grype reports a fix state of "fixed" for it.
+// Vulnerabilities whose severity cannot be determined count as exceeding any
+// set threshold (fail closed, mirroring the posture gate): the single
+// exception is onlyFixable with a definitively unfixable CVE (not-fixed or
+// wont-fix), which keeps the flag's contract. Unknown severity with an
+// unknown or empty fix state still fails.
 func (s *Service) ExceedsSeverityThreshold(severity vulnerability.Severity, matches match.Matches, onlyFixable bool) bool {
 	if severity == vulnerability.UnknownSeverity {
 		return false
 	}
 	for m := range matches.Enumerate() {
-		metadata := m.Vulnerability.Metadata
-		if metadata == nil || vulnerability.ParseSeverity(metadata.Severity) == vulnerability.UnknownSeverity {
-			if s.vp == nil {
+		matchSeverity, unknown := MatchSeverity(m, s.vp)
+		if unknown {
+			// Fail closed: an indeterminate CVE must not silently pass.
+			// The onlyFixable carve-out is preserved only when grype
+			// definitively reports the CVE as unfixable (not-fixed/wont-fix);
+			// an unknown or empty fix state cannot prove that, so it fails.
+			if onlyFixable && IsDefinitivelyUnfixable(m.Vulnerability.Fix.State) {
 				continue
 			}
-			var err error
-			//nolint:staticcheck // fallback for matches without a known embedded severity
-			metadata, err = s.vp.VulnerabilityMetadata(m.Vulnerability.Reference)
-			if err != nil {
-				continue
-			}
+			logger.L().Warning("vulnerability with unknown severity counted toward the severity threshold",
+				helpers.String("vulnerability", m.Vulnerability.Reference.ID))
+			return true
 		}
 
-		if vulnerability.ParseSeverity(metadata.Severity) < severity {
+		if matchSeverity < severity {
 			continue
 		}
 
