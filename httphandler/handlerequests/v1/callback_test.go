@@ -30,7 +30,26 @@ func (s stubResolver) LookupIPAddr(context.Context, string) ([]net.IPAddr, error
 	return s.ips, s.err
 }
 
-// callbackReceiver starts a server that captures the first delivered payload.
+// countingCallbackReceiver starts a server that records every delivered
+// payload (unbounded), so a duplicate delivery can never be silently dropped
+// the way a one-slot channel could. No t.Parallel alongside scanImpl stubs.
+func countingCallbackReceiver(t *testing.T) (string, <-chan scanCallbackPayload, *atomic.Int32) {
+	t.Helper()
+	var count atomic.Int32
+	received := make(chan scanCallbackPayload, 16)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var p scanCallbackPayload
+		_ = json.NewDecoder(r.Body).Decode(&p)
+		count.Add(1)
+		select {
+		case received <- p:
+		default:
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+	return srv.URL, received, &count
+}
 func callbackReceiver(t *testing.T) (string, <-chan scanCallbackPayload) {
 	t.Helper()
 	received := make(chan scanCallbackPayload, 1)
@@ -199,7 +218,7 @@ func TestExecuteScan_CallbackOnPanic(t *testing.T) {
 		panic("boom")
 	}
 
-	url, received := callbackReceiver(t)
+	url, received, deliveries := countingCallbackReceiver(t)
 	h := NewHTTPHandler(false)
 	resp := make(chan *utilsmetav1.Response, 1)
 	h.executeScan(&scanRequestParams{
@@ -234,6 +253,7 @@ func TestExecuteScan_CallbackOnPanic(t *testing.T) {
 		t.Fatalf("duplicate panic callback delivered: %+v", p)
 	case <-time.After(500 * time.Millisecond):
 	}
+	assert.Equal(t, int32(1), deliveries.Load(), "panic path must deliver exactly one callback")
 }
 
 // TestExecuteScan_PanicWithoutCallbackURL ensures a panicking scan without a

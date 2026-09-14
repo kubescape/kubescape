@@ -63,7 +63,7 @@ func deliverScanCallback(scanReq *scanRequestParams, status, errMsg string) {
 		return
 	}
 	payload := scanCallbackPayload{ID: scanReq.scanID, Status: status, Error: errMsg}
-	var cbCtx context.Context = context.Background()
+	cbCtx := context.Background()
 	if scanReq.ctx != nil {
 		cbCtx = context.WithoutCancel(scanReq.ctx)
 	}
@@ -79,6 +79,8 @@ func deliverScanCallback(scanReq *scanRequestParams, status, errMsg string) {
 	}()
 }
 
+// feedScanResponse forwards response to a waiter without blocking. It is a
+// no-op when nobody is listening (nil channel); callers never need to check.
 func feedScanResponse(scanReq *scanRequestParams, response *utilsmetav1.Response) {
 	if scanReq == nil || scanReq.resp == nil {
 		return
