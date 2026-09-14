@@ -821,3 +821,92 @@ func TestWrapDBLoadError(t *testing.T) {
 		assert.ErrorContains(t, got, "--skip-db-update")
 	})
 }
+
+func TestCheckDBAge(t *testing.T) {
+	fixedNow := time.Date(2026, 9, 14, 12, 0, 0, 0, time.UTC)
+	oldNow := dbNowFunc
+	dbNowFunc = func() time.Time { return fixedNow }
+	defer func() { dbNowFunc = oldNow }()
+
+	maxAge := 5 * 24 * time.Hour
+	tests := []struct {
+		name      string
+		status    *vulnerability.ProviderStatus
+		maxAge    time.Duration
+		wantWarn  bool
+		wantStale bool
+	}{
+		{"nil status is fresh", nil, maxAge, false, false},
+		{"zero Built warns but never fails", &vulnerability.ProviderStatus{}, maxAge, true, false},
+		{"fresh DB is silent", &vulnerability.ProviderStatus{Built: fixedNow.Add(-24 * time.Hour)}, maxAge, false, false},
+		{"boundary is fresh", &vulnerability.ProviderStatus{Built: fixedNow.Add(-maxAge)}, maxAge, false, false},
+		{"stale DB warns and flags", &vulnerability.ProviderStatus{Built: fixedNow.Add(-10 * 24 * time.Hour)}, maxAge, true, true},
+		{"future Built warns but never fails", &vulnerability.ProviderStatus{Built: fixedNow.Add(time.Hour)}, maxAge, true, false},
+		{"custom max age honored", &vulnerability.ProviderStatus{Built: fixedNow.Add(-8 * 24 * time.Hour)}, 10 * 24 * time.Hour, false, false},
+		{"non-positive max age selects default", &vulnerability.ProviderStatus{Built: fixedNow.Add(-10 * 24 * time.Hour)}, 0, true, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			warn, stale := CheckDBAge(tt.status, tt.maxAge)
+			assert.Equal(t, tt.wantStale, stale)
+			if tt.wantWarn {
+				assert.NotEmpty(t, warn)
+			} else {
+				assert.Empty(t, warn)
+			}
+		})
+	}
+}
+
+func TestEnforceDBAge(t *testing.T) {
+	fixedNow := time.Date(2026, 9, 14, 12, 0, 0, 0, time.UTC)
+	oldNow := dbNowFunc
+	dbNowFunc = func() time.Time { return fixedNow }
+	defer func() { dbNowFunc = oldNow }()
+
+	stale := &vulnerability.ProviderStatus{Built: fixedNow.Add(-30 * 24 * time.Hour)}
+	fresh := &vulnerability.ProviderStatus{Built: fixedNow.Add(-time.Hour)}
+
+	t.Run("nil service is a no-op", func(t *testing.T) {
+		assert.NoError(t, EnforceDBAge(nil, false, true, 0))
+	})
+	t.Run("fresh DB never errors", func(t *testing.T) {
+		assert.NoError(t, EnforceDBAge(&Service{dbStatus: fresh}, false, true, 0))
+	})
+	t.Run("stale DB warns only by default", func(t *testing.T) {
+		assert.NoError(t, EnforceDBAge(&Service{dbStatus: stale}, false, false, 0))
+	})
+	t.Run("stale DB with skipped update and flag fails", func(t *testing.T) {
+		err := EnforceDBAge(&Service{dbStatus: stale}, false, true, 0)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "--max-db-age")
+	})
+	t.Run("stale DB that was just updated warns only even with flag", func(t *testing.T) {
+		assert.NoError(t, EnforceDBAge(&Service{dbStatus: stale}, true, true, 0))
+	})
+	t.Run("unknown build time never fails", func(t *testing.T) {
+		assert.NoError(t, EnforceDBAge(&Service{dbStatus: &vulnerability.ProviderStatus{}}, false, true, 0))
+	})
+}
+
+func TestResolveDBAgeGate(t *testing.T) {
+	t.Run("flags pass through", func(t *testing.T) {
+		fail, maxAge := ResolveDBAgeGate(true, time.Hour)
+		assert.True(t, fail)
+		assert.Equal(t, time.Hour, maxAge)
+	})
+	t.Run("env fallback applies", func(t *testing.T) {
+		t.Setenv("KS_FAIL_ON_STALE_DB", "true")
+		t.Setenv("KS_MAX_DB_AGE", "72h")
+		fail, maxAge := ResolveDBAgeGate(false, 0)
+		assert.True(t, fail)
+		assert.Equal(t, 72*time.Hour, maxAge)
+	})
+	t.Run("invalid env is ignored", func(t *testing.T) {
+		t.Setenv("KS_FAIL_ON_STALE_DB", "notabool")
+		t.Setenv("KS_MAX_DB_AGE", "bogus")
+		fail, maxAge := ResolveDBAgeGate(false, 0)
+		assert.False(t, fail)
+		assert.Equal(t, time.Duration(0), maxAge)
+	})
+}
