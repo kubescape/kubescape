@@ -312,8 +312,8 @@ github.com/anmitsu/go-shlex v0.0.0-20200514113438-38f4b401e2be/go.mod h1:ySMOLuW
 github.com/antihax/optional v1.0.0/go.mod h1:uupD/76wgC+ih3iEmQUL+0Ugr19nfwCT1kdvxnR2qWY=
 github.com/antlr4-go/antlr/v4 v4.13.1 h1:SqQKkuVZ+zWkMMNkjy5FZe5mr5WURWnlpmOuzYWrPrQ=
 github.com/antlr4-go/antlr/v4 v4.13.1/go.mod h1:GKmUxMtwp6ZgGwZSva4eWPC5mS6vUAmOABFgjdkM7Nw=
-github.com/anubhav06/copa-grype v1.0.3-alpha.1 h1:hXuFSOVekcPFENdUdvMyGx+SvIh0vIgzY+j1pnkoJaw=
-github.com/anubhav06/copa-grype v1.0.3-alpha.1/go.mod h1:JhE+hPD6XOcS2dfgw8MwOQVCUlIQUHN+XiwBItxFIfM=
+github.com/anubhav06/copa-grype v1.0.4-alpha.1 h1:wxQRBMIR7C5BUusqpUVXMIRFU/OvD4SyAHqhhBrwn7o=
+github.com/anubhav06/copa-grype v1.0.4-alpha.1/go.mod h1:JhE+hPD6XOcS2dfgw8MwOQVCUlIQUHN+XiwBItxFIfM=
 github.com/apparentlymart/go-textseg/v13 v13.0.0/go.mod h1:ZK2fH7c4NqDTLtiYLvIkEghdlcqw7yxLeM89kiTRPUo=
 github.com/apparentlymart/go-textseg/v15 v15.0.0 h1:uYvfpb3DyLSCGWnctWKGj857c6ew1u1fNQOlOtuGxQY=
 github.com/apparentlymart/go-textseg/v15 v15.0.0/go.mod h1:K8XmNZdhEBkdlyDdvbmmsvpAG721bKi0joRfFdHIWJ4=
