@@ -739,7 +739,7 @@ func TestGetVulnerabilitiesAndSeverities(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.image, func(t *testing.T) {
-			vulnerabilities, severities, err := getUniqueVulnerabilitiesAndSeverities(tt.policies, tt.image)
+			vulnerabilities, severities, err := getUniqueVulnerabilitiesAndSeverities(tt.policies, tt.image, true)
 			assert.NoError(t, err)
 			sort.Strings(tt.expectedVulnerabilities)
 			sort.Strings(vulnerabilities)
