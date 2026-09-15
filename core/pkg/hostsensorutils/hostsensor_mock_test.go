@@ -14,9 +14,10 @@ func TestHostSensorHandlerMock(t *testing.T) {
 
 	require.NoError(t, h.Init(ctx))
 
-	envelope, status, err := h.CollectResources(ctx)
+	envelope, status, partials, err := h.CollectResources(ctx)
 	require.Empty(t, envelope)
 	require.Nil(t, status)
+	require.Empty(t, partials)
 	require.NoError(t, err)
 
 	require.NoError(t, h.TearDown())
