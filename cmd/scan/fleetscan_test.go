@@ -1126,3 +1126,30 @@ func TestValidateKubeContextsSupported_FleetReportRequiresKubeContexts(t *testin
 
 	assert.NoError(t, validateKubeContextsSupported(cmd, &cautils.ScanInfo{}), "neither flag set is the ordinary single-cluster scan")
 }
+
+// TestPerContextOutputPath_DevNullStaysDevNull pins the discard sink through
+// the per-context derivation. printer.ResolveOutputFile treats os.DevNull as a
+// well-known sink and hands it back untouched, so a single-context scan with
+// --output /dev/null throws its report away. Deriving "/dev/null.<context>"
+// from it turns that same request into a real path in /dev: a write that fails
+// with "permission denied" for an ordinary user, and that litters /dev with
+// report files for the root user a scanner container usually runs as.
+func TestPerContextOutputPath_DevNullStaysDevNull(t *testing.T) {
+	got, err := perContextOutputPath(os.DevNull, "prod")
+
+	require.NoError(t, err)
+	assert.Equal(t, os.DevNull, got)
+}
+
+// TestPerContextOutputPaths_DevNullIsNotACollision covers the batch path: every
+// context legitimately discards to the same sink, so sharing it is not the
+// silent overwrite the collision check exists to catch.
+func TestPerContextOutputPaths_DevNullIsNotACollision(t *testing.T) {
+	paths, err := perContextOutputPaths(os.DevNull, []string{"prod", "staging"}, []string{"json"})
+
+	require.NoError(t, err)
+	assert.Equal(t, map[string]string{
+		"prod":    os.DevNull,
+		"staging": os.DevNull,
+	}, paths)
+}
