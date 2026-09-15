@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/distribution/reference"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	ksmetav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
 	"github.com/stretchr/testify/assert"
@@ -55,11 +56,9 @@ func TestClassifyImageInput(t *testing.T) {
 		{name: "uppercase snap scheme", image: "SNAP:/tmp/img.snap", wantRegistry: false, wantScheme: "SNAP"},
 		{name: "snap-named repo in registry stays registry", image: "example.io/snap/image:v1", wantRegistry: true},
 		// Generic "image:" selector (Syft's ImageTag): peel once, reclassify.
-		{name: "image selector with existing local file", image: "image:archive.tar", statExisting: []string{"archive.tar"}, wantRegistry: false, wantScheme: "image"},
 		{name: "image selector with registry remainder", image: "image:nginx", wantRegistry: true},
-		{name: "image selector with nested archive scheme", image: "image:docker-archive:/tmp/x.tar", wantRegistry: false, wantScheme: "docker-archive"},
 		{name: "image selector with nested registry ref", image: "image:image:nginx", wantRegistry: true},
-		{name: "uppercase image selector", image: "IMAGE:archive.tar", statExisting: []string{"archive.tar"}, wantRegistry: false, wantScheme: "IMAGE"},
+		{name: "image-named repo in registry stays registry", image: "example.io/image/foo:v1", wantRegistry: true},
 		{name: "image-named repo in registry stays registry", image: "example.io/image/foo:v1", wantRegistry: true},
 		{name: "bare tar existing file", image: "/tmp/x.tar", statExisting: []string{"/tmp/x.tar"}, wantRegistry: false},
 		{name: "absolute tar missing file still non-registry", image: "/tmp/missing.tar", wantRegistry: false},
@@ -225,9 +224,11 @@ func TestBuildImageScanJobsEmptyExceptionsFile(t *testing.T) {
 	})
 }
 
-// Syft's generic "image:" selector peels once: the remainder shares the
-// normal pipeline, so "image:nginx" matches nginx-targeted policies while
-// "image:docker-archive:/x.tar" is rejected as local content.
+// Syft's generic "image:" selector peels once and passes the remainder
+// literally to the narrowed image providers (no second scheme strip):
+// "image:nginx" matches nginx-targeted policies, an existing archive is
+// local content, and "image:dir:latest" stays a registry identity exactly
+// as grype resolves it.
 func TestImageSelectorResolvesStrippedIdentity(t *testing.T) {
 	policies := []VulnerabilitiesIgnorePolicy{
 		{
@@ -241,8 +242,59 @@ func TestImageSelectorResolvesStrippedIdentity(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, vulns, "CVE-2023-42365")
 
-	_, _, err = getUniqueVulnerabilitiesAndSeverities(policies, "image:docker-archive:/tmp/x.tar", true)
-	assert.ErrorContains(t, err, "non-registry input")
+	// A remainder with a scheme prefix is not re-stripped: grype passes
+	// "dir:latest" literally to the image providers, whose daemon parser
+	// treats it as a registry ref for repo "dir".
+	vulns, _, err = getUniqueVulnerabilitiesAndSeverities(policies, "image:dir:latest", true)
+	require.NoError(t, err, "dir:latest is a registry identity for the narrowed providers")
+	assert.Empty(t, vulns, "dir:latest does not identity-match nginx CVEs (different repo)")
+}
+
+// Real-fixture rows for the os.Stat-backed image-remainder check (injected
+// stat bools cannot express IsDir).
+func TestImageRemainderLocalFixtures(t *testing.T) {
+	dir := t.TempDir()
+	tarPath := filepath.Join(dir, "archive.tar")
+	require.NoError(t, os.WriteFile(tarPath, []byte("x"), 0o600))
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "rootfs"), 0o755))
+	plainFile := filepath.Join(dir, "nginx")
+	require.NoError(t, os.WriteFile(plainFile, []byte("x"), 0o600))
+
+	// Existing archive -> local (scheme "image" from the generic prefix).
+	registry, scheme, err := classifyImageInput("image:"+tarPath, osStatExists)
+	assert.False(t, registry)
+	assert.Equal(t, "image", scheme)
+	assert.NoError(t, err)
+
+	// Existing directory -> local.
+	registry, scheme, err = classifyImageInput("image:"+filepath.Join(dir, "rootfs"), osStatExists)
+	assert.False(t, registry)
+	assert.Equal(t, "image", scheme)
+	assert.NoError(t, err)
+
+	// A plain local file named exactly like the remainder must NOT shadow
+	// the registry identity: grype's narrowed file providers reject
+	// non-archives and fall through to the daemon pull. Prediction depends
+	// on the path: a lowercase parseable path parses as registry, a
+	// non-lowercase temp path is loud-invalid (loud either way).
+	registry, _, err = classifyImageInput("image:"+plainFile, osStatExists)
+	if _, parseErr := reference.ParseNormalizedNamed("image:" + plainFile); parseErr == nil {
+		assert.True(t, registry)
+		assert.NoError(t, err)
+	} else {
+		assert.False(t, registry)
+		assert.NoError(t, err)
+	}
+
+	// Scheme-like remainder is never re-interpreted as local.
+	registry, _, err = classifyImageInput("image:dir:latest", osStatExists)
+	assert.True(t, registry)
+	assert.NoError(t, err)
+
+	// Missing absolute archive stays loud-local (scanner fails on the open).
+	registry, _, err = classifyImageInput("image:"+filepath.Join(dir, "missing.tar"), osStatExists)
+	assert.False(t, registry)
+	assert.NoError(t, err)
 }
 
 // Explicit daemon/registry selectors resolve exception identity from the
@@ -298,20 +350,16 @@ func TestIsNonRegistryForExceptionsMirrorsResolver(t *testing.T) {
 	}
 }
 
-// Daemon/registry selectors never consult the filesystem: a local file named
-// exactly like the stripped remainder must not shadow the daemon identity
-// (grype narrows daemon selectors to daemon/pull providers, never file stat).
+// Daemon/registry selectors never consult the filesystem at all: a local
+// file named exactly like the stripped remainder must not shadow the daemon
+// identity (grype narrows daemon selectors to daemon/pull providers, never
+// file stat). The image-remainder path uses os.Stat directly instead of the
+// injected bool, so a shadowing fixture proves nothing there — real-fixture
+// shadowing is covered by TestImageRemainderLocalFixtures.
 func TestDaemonSelectorIgnoresCollidingLocalFile(t *testing.T) {
 	shadow := func(string) bool { return true } // every path "exists"
 	attrs, _, err := imageAttributesForExceptions("docker:nginx", shadow)
 	require.NoError(t, err)
 	assert.Equal(t, "nginx", attrs.ImageName)
 	assert.False(t, isNonRegistryForExceptions("docker:nginx", shadow))
-
-	// The generic image: selector keeps file-first semantics: the same
-	// shadowing file does route to non-registry, matching syft's provider
-	// order (local sources before pulls).
-	_, scheme, err := imageAttributesForExceptions("image:nginx", shadow)
-	assert.Error(t, err)
-	assert.Equal(t, "image", scheme)
 }
