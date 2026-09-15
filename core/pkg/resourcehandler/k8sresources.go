@@ -163,15 +163,7 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 	// Partial failures (some selectors succeeded for the GVR) are returned
 	// separately so they can be surfaced without overriding the whole-GVR status.
 	partialFailures := recordFailedQueryStatuses(failedQueries, k8sResourcesMap, sessionObj.InfoMap)
-	if len(partialFailures) > 0 {
-		sessionObj.PartialGVRFailures = append(sessionObj.PartialGVRFailures, partialFailures...)
-		for _, p := range partialFailures {
-			logger.L().Ctx(ctx).Warning("partial resource collection: some resources may be missing from scan results",
-				helpers.String("gvr", p.GVR),
-				helpers.String("selector", p.Selector),
-				helpers.String("error", p.Error))
-		}
-	}
+	appendPartialPullsToSession(ctx, sessionObj, partialFailures, "partial resource collection: some resources may be missing from scan results")
 
 	if len(allResources) == 0 && len(failedQueries) > 0 {
 		// Every query failed — nothing was collected; treat as fatal.
@@ -230,12 +222,13 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 				// using hostSensor mock
 				cautils.SetInfoMapForResources("failed to init host scanner", hostResources, sessionObj.InfoMap)
 			} else {
-				infoMap, err := k8sHandler.collectHostResources(ctx, allResources, ksResourceMap)
+				infoMap, partialPulls, err := k8sHandler.collectHostResources(ctx, allResources, ksResourceMap)
 				if err != nil {
 					logger.L().Ctx(ctx).Warning("failed to collect host scanner resources", helpers.Error(err))
 					cautils.SetInfoMapForResources(err.Error(), hostResources, sessionObj.InfoMap)
 				} else {
 					maps.Copy(sessionObj.InfoMap, infoMap)
+					appendHostSensorPartialPulls(ctx, sessionObj, partialPulls)
 				}
 			}
 			cautils.StopSpinner()
@@ -603,12 +596,13 @@ func (k8sHandler *K8sResourceHandler) collectAndStreamBatches(ctx context.Contex
 			if k8sHandler.hostSensorHandler == nil {
 				cautils.SetInfoMapForResources("failed to init host scanner", hostResources, sessionObj.InfoMap)
 			} else {
-				infoMap, err := k8sHandler.collectHostResources(ctx, allResources, ksResourceMap)
+				infoMap, partialPulls, err := k8sHandler.collectHostResources(ctx, allResources, ksResourceMap)
 				if err != nil {
 					logger.L().Ctx(ctx).Warning("failed to collect host scanner resources", helpers.Error(err))
 					cautils.SetInfoMapForResources(err.Error(), hostResources, sessionObj.InfoMap)
 				} else {
 					maps.Copy(sessionObj.InfoMap, infoMap)
+					appendHostSensorPartialPulls(ctx, sessionObj, partialPulls)
 				}
 			}
 			logger.L().Success("Requested Host scanner data")
@@ -1373,11 +1367,11 @@ func ConvertMapListToMeta(resourceMap []map[string]any) []workloadinterface.IMet
 	return workloads
 }
 
-func (k8sHandler *K8sResourceHandler) collectHostResources(ctx context.Context, allResources map[string]workloadinterface.IMetadata, externalResourceMap cautils.ExternalResources) (map[string]apis.StatusInfo, error) {
+func (k8sHandler *K8sResourceHandler) collectHostResources(ctx context.Context, allResources map[string]workloadinterface.IMetadata, externalResourceMap cautils.ExternalResources) (map[string]apis.StatusInfo, []cautils.PartialGVRPull, error) {
 	logger.L().Debug("Collecting host scanner resources")
-	hostResources, infoMap, err := k8sHandler.hostSensorHandler.CollectResources(ctx)
+	hostResources, infoMap, partialPulls, err := k8sHandler.hostSensorHandler.CollectResources(ctx)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	for rscIdx := range hostResources {
@@ -1389,7 +1383,30 @@ func (k8sHandler *K8sResourceHandler) collectHostResources(ctx context.Context, 
 		groupResource := k8sinterface.JoinResourceTriplets(g, v, hostResources[rscIdx].GetKind())
 		externalResourceMap[groupResource] = append(externalResourceMap[groupResource], hostResources[rscIdx].GetID())
 	}
-	return infoMap, nil
+	return infoMap, partialPulls, nil
+}
+
+// appendPartialPullsToSession records partial-collection gaps on the session
+// (surfaced as ScanCoverage.partialGVRPulls) with one warning per gap. It is
+// a no-op for empty input.
+func appendPartialPullsToSession(ctx context.Context, sessionObj *cautils.OPASessionObj, partialPulls []cautils.PartialGVRPull, message string) {
+	if len(partialPulls) == 0 {
+		return
+	}
+	sessionObj.PartialGVRFailures = append(sessionObj.PartialGVRFailures, partialPulls...)
+	for _, p := range partialPulls {
+		logger.L().Ctx(ctx).Warning(message,
+			helpers.String("gvr", p.GVR),
+			helpers.String("selector", p.Selector),
+			helpers.String("error", p.Error))
+	}
+}
+
+// appendHostSensorPartialPulls records host-sensor conversion gaps the same
+// way: the readable envelopes still flow to the scan, while the gap is
+// visible as partialGVRPulls instead of vanishing.
+func appendHostSensorPartialPulls(ctx context.Context, sessionObj *cautils.OPASessionObj, partialPulls []cautils.PartialGVRPull) {
+	appendPartialPullsToSession(ctx, sessionObj, partialPulls, "partial host-sensor collection: some node data may be missing from scan results")
 }
 
 func (k8sHandler *K8sResourceHandler) collectRbacResources(allResources map[string]workloadinterface.IMetadata) error {

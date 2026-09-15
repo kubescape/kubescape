@@ -360,6 +360,23 @@ func TestBuildScanCoverage_PartialGVRPullsPassedThrough(t *testing.T) {
 	assert.Empty(t, coverage.NotEvaluatedControls)
 }
 
+func TestBuildScanCoverage_HostSensorConversionPartial(t *testing.T) {
+	// A host-sensor conversion gap (some node envelopes unreadable) must
+	// surface as partialGVRPulls — never as a total pull failure and never
+	// as a not-evaluated control, since the readable subset was evaluated.
+	partials := []PartialGVRPull{
+		{GVR: "hostdata.kubescape.io/v1beta0/kubeletinfos", Selector: "conversion", Error: "node-agent reported 2 KubeletInfo but only 1 could be read"},
+	}
+	coverage := BuildScanCoverage(nil, map[string][]string{
+		"hostdata.kubescape.io/v1beta0/kubeletinfos": {"C-0267"},
+	}, nil, partials, nil, nil)
+
+	require.Len(t, coverage.PartialGVRPulls, 1)
+	assert.Equal(t, "conversion", coverage.PartialGVRPulls[0].Selector)
+	assert.Empty(t, coverage.FailedGVRPulls)
+	assert.Empty(t, coverage.NotEvaluatedControls)
+}
+
 func TestBuildScanCoverage_SortsPartialGVRPullsWithoutMutatingInput(t *testing.T) {
 	partials := []PartialGVRPull{
 		{GVR: "apps/v1/deployments", Selector: "metadata.namespace==b", Error: "z error"},

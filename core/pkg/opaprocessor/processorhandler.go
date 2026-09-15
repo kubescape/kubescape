@@ -1684,17 +1684,22 @@ func (opap *OPAProcessor) processRuleOnScope(ctx context.Context, rule *reportha
 // hasUnreachableDependency reports whether controlID depends (per
 // ResourceToControlsMap, built from the control's declared rule.Match/
 // DynamicMatch resources) on at least one GVR that failed to collect this
-// scan. opap.InfoMap is mixed-purpose (whole-GVR pull failures keyed by GVR
+// scan — totally (InfoMap pull failure) or partially (a PartialGVRFailures
+// entry, e.g. host-sensor envelopes that converted for some nodes but not
+// all). opap.InfoMap is mixed-purpose (whole-GVR pull failures keyed by GVR
 // string, plus per-resource eval skips keyed by resource ID); checking that
 // the key is also present in ResourceToControlsMap, the same guard
 // cautils.BuildScanCoverage uses, is what keeps this from matching a
-// per-resource skip as if it were a GVR pull failure.
+// per-resource skip as if it were a GVR pull failure. Partial entries carry
+// their own GVR strings, so the same guard applies to them directly.
 //
 // This runs once per rule-scope evaluation (not once per resource), so its
 // O(len(ResourceToControlsMap)) cost is paid a small, bounded number of times
 // per scan rather than once per resource. It runs on processScope's worker
 // goroutines concurrently with markResourcesSkipped/seedCELSkips, which write
-// InfoMap under mu, so the read must hold mu as well.
+// InfoMap under mu, so the read must hold mu as well. PartialGVRFailures is
+// only appended during resource collection (before evaluation starts), so
+// reading it under the same lock is consistent.
 func (opap *OPAProcessor) hasUnreachableDependency(controlID string) bool {
 	opap.mu.Lock()
 	defer opap.mu.Unlock()
@@ -1704,6 +1709,11 @@ func (opap *OPAProcessor) hasUnreachableDependency(controlID string) bool {
 		}
 		if info, ok := opap.InfoMap[gvr]; ok && info.InnerStatus == apis.StatusSkipped {
 			return true
+		}
+		for _, partial := range opap.PartialGVRFailures {
+			if partial.GVR == gvr {
+				return true
+			}
 		}
 	}
 	return false

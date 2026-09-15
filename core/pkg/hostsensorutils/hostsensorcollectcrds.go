@@ -10,6 +10,7 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	k8shostsensor "github.com/kubescape/k8s-interface/hostsensor"
 	"github.com/kubescape/k8s-interface/k8sinterface"
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/opa-utils/objectsenvelopes/hostsensor"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -34,28 +35,55 @@ func (c crdCollection) dropped() int {
 // A resource whose reported items were all unreadable is recorded on the scan
 // like an empty one: it reached the scan with no data, and without an entry the
 // controls that read it are inferred as passing off data that never arrived.
-// A partial loss only warns, because the resource keeps what it did read and
-// marking it skipped would discard real results.
+// A partial loss keeps what it did read and additionally records one
+// PartialGVRPull per GVR: the readable envelopes still flow to the scan, but
+// passes inferred over the surviving subset are marked incomplete downstream
+// instead of looking like a fully inspected fleet.
 //
 // The zero-item case is deliberately not judged here. Whether it is a problem
 // depends on what the caller expected: for a per-node resource it means the
 // node-agent has not reported for its nodes, while for CloudProviderInfo it is
 // the normal answer on an on-prem cluster.
-func reportCollectionGaps(ctx context.Context, resource k8shostsensor.HostSensorResource, collected crdCollection, infoMap map[string]apis.StatusInfo) {
+func reportCollectionGaps(ctx context.Context, resource k8shostsensor.HostSensorResource, collected crdCollection, infoMap map[string]apis.StatusInfo) []cautils.PartialGVRPull {
 	switch {
 	case collected.listed == 0:
+		return nil
 	case collected.converted == 0:
 		err := fmt.Errorf("node-agent reported %d %s but none of them could be read", collected.listed, resource.String())
 		addInfoToMap(resource, infoMap, err)
 		logger.L().Ctx(ctx).Warning("No readable CRD items",
 			helpers.String("resource", resource.String()),
 			helpers.Error(err))
+		return nil
 	case collected.dropped() > 0:
+		err := fmt.Errorf("node-agent reported %d %s but only %d could be read", collected.listed, resource.String(), collected.converted)
 		logger.L().Ctx(ctx).Warning("Some CRD items could not be read",
 			helpers.String("resource", resource.String()),
 			helpers.Int("read", collected.converted),
-			helpers.Int("reported", collected.listed))
+			helpers.Int("reported", collected.listed),
+			helpers.Error(err))
+		return partialGVRPullsForResource(resource, err)
 	}
+	return nil
+}
+
+// partialGVRPullsForResource builds one PartialGVRPull per GVR backing a host
+// sensor resource, using the same normalization addInfoToMap uses so the
+// entries line up with ResourceToControlsMap without a key-mapping layer.
+// Selector "conversion" scopes the failure to envelope decoding, distinct
+// from per-selector LIST failures that share the same array.
+func partialGVRPullsForResource(resource k8shostsensor.HostSensorResource, err error) []cautils.PartialGVRPull {
+	group, version := k8sinterface.SplitApiVersion(k8shostsensor.MapHostSensorResourceToApiGroup(resource))
+	gvrs := k8sinterface.ResourceGroupToString(group, version, resource.String())
+	partials := make([]cautils.PartialGVRPull, 0, len(gvrs))
+	for _, gvr := range gvrs {
+		partials = append(partials, cautils.PartialGVRPull{
+			GVR:      gvr,
+			Selector: "conversion",
+			Error:    err.Error(),
+		})
+	}
+	return partials
 }
 
 // getCRDResources retrieves resources from CRDs and converts them to HostSensorDataEnvelope format
@@ -106,8 +134,16 @@ func (hsh *HostSensorHandler) getCRDResources(ctx context.Context, resourceType 
 		helpers.String("kind", resourceType.String()),
 		helpers.Int("count", len(result)))
 
-	// Save to cache
-	if err := saveToCache(clusterName, resourceType.String(), result); err != nil {
+	// Save to cache. A partially converted collection is never cached: the
+	// cache stores converted envelopes only and reconstructs listed ==
+	// converted on a hit, so a later scan would forget the gap and serve the
+	// subset as apparently complete.
+	if collected.dropped() > 0 {
+		logger.L().Warning("Skipping cache write for partially converted resource",
+			helpers.String("kind", resourceType.String()),
+			helpers.Int("read", collected.converted),
+			helpers.Int("reported", collected.listed))
+	} else if err := saveToCache(clusterName, resourceType.String(), result); err != nil {
 		logger.L().Warning("Failed to save to cache", helpers.Error(err))
 	}
 
@@ -239,10 +275,14 @@ func hasCloudProviderInfo(cpi []hostsensor.HostSensorDataEnvelope) bool {
 	return false
 }
 
-// CollectResources collects all required information from CRDs.
-func (hsh *HostSensorHandler) CollectResources(ctx context.Context) ([]hostsensor.HostSensorDataEnvelope, map[string]apis.StatusInfo, error) {
+// CollectResources collects all required information from CRDs. Partial
+// conversion losses are returned as PartialGVRPull records alongside the
+// readable envelopes so callers can surface them on the session without
+// touching InfoMap (which BuildScanCoverage reads as total pull failures).
+func (hsh *HostSensorHandler) CollectResources(ctx context.Context) ([]hostsensor.HostSensorDataEnvelope, map[string]apis.StatusInfo, []cautils.PartialGVRPull, error) {
 	res := make([]hostsensor.HostSensorDataEnvelope, 0)
 	infoMap := make(map[string]apis.StatusInfo)
+	var partialPulls []cautils.PartialGVRPull
 
 	logger.L().Info("Collecting host sensor data from CRDs")
 
@@ -258,7 +298,7 @@ func (hsh *HostSensorHandler) CollectResources(ctx context.Context) ([]hostsenso
 		// item it reported and still leave no status behind. It also decides
 		// whether ControlPlaneInfo is collected at all, and an unreadable
 		// answer reads the same as "no cloud provider".
-		reportCollectionGaps(ctx, k8shostsensor.CloudProviderInfo, collected, infoMap)
+		partialPulls = append(partialPulls, reportCollectionGaps(ctx, k8shostsensor.CloudProviderInfo, collected, infoMap)...)
 		hasCloudProvider = hasCloudProviderInfo(cloudProviderData)
 		if len(cloudProviderData) > 0 {
 			res = append(res, cloudProviderData...)
@@ -329,7 +369,7 @@ func (hsh *HostSensorHandler) CollectResources(ctx context.Context) ([]hostsenso
 				helpers.String("resource", k8sInfo.Resource.String()),
 				helpers.Error(err))
 		default:
-			reportCollectionGaps(ctx, k8sInfo.Resource, collected, infoMap)
+			partialPulls = append(partialPulls, reportCollectionGaps(ctx, k8sInfo.Resource, collected, infoMap)...)
 		}
 
 		if len(kcData) > 0 {
@@ -338,5 +378,5 @@ func (hsh *HostSensorHandler) CollectResources(ctx context.Context) ([]hostsenso
 	}
 
 	logger.L().Info("Done collecting information from CRDs", helpers.Int("totalResources", len(res)))
-	return res, infoMap, nil
+	return res, infoMap, partialPulls, nil
 }
