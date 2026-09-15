@@ -1231,6 +1231,45 @@ func TestEnforceImageSeverityThresholdsUnknownCountSuffix(t *testing.T) {
 	assert.EqualError(t, err, "image scan result exceeds severity threshold: high (1 vulnerability(s) with unknown severity counted as exceeding)")
 }
 
+// TestEnforceImageSeverityThresholdsOrderIndependent proves the unknown count
+// does not depend on match enumeration order: Matches is map-backed, so a
+// determinate breach must not hide later unknowns from the message.
+func TestEnforceImageSeverityThresholdsOrderIndependent(t *testing.T) {
+	breach := match.Match{
+		Vulnerability: vulnerability.Vulnerability{
+			Reference: vulnerability.Reference{ID: "CVE-BREACH"},
+			Metadata:  &vulnerability.Metadata{Severity: vulnerability.CriticalSeverity.String()},
+		},
+	}
+	unknown := match.Match{
+		Vulnerability: vulnerability.Vulnerability{
+			Reference: vulnerability.Reference{ID: "CVE-UNKNOWN"},
+		},
+	}
+	scanInfo := &cautils.ScanInfo{FailThresholdSeverity: "high"}
+	want := "image scan result exceeds severity threshold: high (1 vulnerability(s) with unknown severity counted as exceeding)"
+	// One entry per match keeps slice order deterministic; the map-backed
+	// Matches within each entry still enumerates in random order across runs.
+	multi := []cautils.ImageScanData{
+		{Matches: match.NewMatches(breach), VulnerabilityProvider: mockVulnerabilityProvider{severity: "Critical"}},
+		{Matches: match.NewMatches(unknown), VulnerabilityProvider: mockVulnerabilityProvider{severity: ""}},
+	}
+	err := enforceImageSeverityThresholds(multi, scanInfo)
+	require.Error(t, err)
+	assert.EqualError(t, err, want)
+
+	// Same matches in a single entry, repeated: map iteration order varies
+	// across runs, but the message must be identical every time.
+	single := []cautils.ImageScanData{
+		{Matches: match.NewMatches(breach, unknown), VulnerabilityProvider: mockVulnerabilityProvider{severity: ""}},
+	}
+	for i := 0; i < 20; i++ {
+		err := enforceImageSeverityThresholds(single, scanInfo)
+		require.Error(t, err)
+		assert.EqualError(t, err, want)
+	}
+}
+
 func TestGetScanCommand_RunE_SubmitExclusivity(t *testing.T) {
 	mockKubescape := &mocks.MockIKubescape{}
 	cmd := GetScanCommand(mockKubescape)

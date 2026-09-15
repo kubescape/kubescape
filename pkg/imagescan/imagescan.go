@@ -339,6 +339,10 @@ func (s *Service) ExceedsSeverityThreshold(severity vulnerability.Severity, matc
 	if severity == vulnerability.UnknownSeverity {
 		return false
 	}
+	// Drain matches.Enumerate() fully: it is fed by a goroutine over an
+	// unbuffered channel, so any early return would strand the producer and
+	// leak a goroutine per call. Collect the verdict, decide once at the end.
+	exceeds, unknownCount := false, 0
 	for m := range matches.Enumerate() {
 		matchSeverity, unknown := MatchSeverity(m, s.vp)
 		if unknown {
@@ -349,9 +353,8 @@ func (s *Service) ExceedsSeverityThreshold(severity vulnerability.Severity, matc
 			if onlyFixable && IsDefinitivelyUnfixable(m.Vulnerability.Fix.State) {
 				continue
 			}
-			logger.L().Warning("vulnerability with unknown severity counted toward the severity threshold",
-				helpers.String("vulnerability", m.Vulnerability.Reference.ID))
-			return true
+			unknownCount++
+			continue
 		}
 
 		if matchSeverity < severity {
@@ -362,9 +365,14 @@ func (s *Service) ExceedsSeverityThreshold(severity vulnerability.Severity, matc
 			continue
 		}
 
+		exceeds = true
+	}
+	if unknownCount > 0 {
+		logger.L().Warning("vulnerabilities with unknown severity counted toward the severity threshold",
+			helpers.Int("count", unknownCount))
 		return true
 	}
-	return false
+	return exceeds
 }
 
 func (s *Service) Close() {

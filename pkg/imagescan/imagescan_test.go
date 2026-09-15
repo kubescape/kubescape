@@ -2,6 +2,7 @@ package imagescan
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -493,6 +494,37 @@ func TestExceedsSeverityThreshold(t *testing.T) {
 			assert.Equal(t, tt.want, svc.ExceedsSeverityThreshold(tt.threshold, tt.matches, tt.onlyFixable))
 		})
 	}
+}
+
+// countingThresholdProvider counts provider lookups to prove the gate visits
+// every match: matches.Enumerate() is fed by a goroutine over an unbuffered
+// channel, so stopping early would strand the producer and leak a goroutine.
+type countingThresholdProvider struct {
+	thresholdStubVulnerabilityProvider
+	calls *int
+}
+
+func (s countingThresholdProvider) VulnerabilityMetadata(ref vulnerability.Reference) (*vulnerability.Metadata, error) {
+	(*s.calls)++
+	return s.thresholdStubVulnerabilityProvider.VulnerabilityMetadata(ref)
+}
+
+func TestExceedsSeverityThresholdDrainsAllMatches(t *testing.T) {
+	var calls int
+	provider := countingThresholdProvider{
+		thresholdStubVulnerabilityProvider: thresholdStubVulnerabilityProvider{},
+		calls:                              &calls,
+	}
+	const n = 25
+	ms := make([]match.Match, 0, n)
+	for i := 0; i < n; i++ {
+		// No embedded metadata and no stub entry: every match needs a
+		// (failing) provider lookup, so each must be visited.
+		ms = append(ms, makeThresholdTestMatch(fmt.Sprintf("CVE-unknown-%d", i)))
+	}
+	svc := &Service{vp: provider}
+	assert.True(t, svc.ExceedsSeverityThreshold(vulnerability.LowSeverity, match.NewMatches(ms...), false))
+	assert.Equal(t, n, calls, "every unknown match must be visited; stopping early leaks the Enumerate producer goroutine")
 }
 
 func TestExceedsSeverityThresholdNilProvider(t *testing.T) {

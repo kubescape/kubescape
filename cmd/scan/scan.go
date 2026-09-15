@@ -469,7 +469,12 @@ func enforceImageSeverityThresholds(imageScanData []cautils.ImageScanData, scanI
 		return nil
 	}
 
-	unknownCount := 0
+	// Drain every Enumerate() channel fully: each is fed by a goroutine over
+	// an unbuffered channel, so an early return would strand the producer
+	// and leak a goroutine per call. A single full pass also makes the
+	// unknown count order-independent: a determinate breach no longer hides
+	// later unknowns from the message.
+	breach, unknownCount := false, 0
 	for _, data := range imageScanData {
 		for m := range data.Matches.Enumerate() {
 			matchSeverity, unknown := imagescan.MatchSeverity(m, data.VulnerabilityProvider)
@@ -486,11 +491,11 @@ func enforceImageSeverityThresholds(imageScanData []cautils.ImageScanData, scanI
 
 			if matchSeverity >= thresholdSeverity &&
 				(!scanInfo.OnlyFixable || m.Vulnerability.Fix.State == vulnerability.FixStateFixed) {
-				return thresholdExceededError(scanInfo.FailThresholdSeverity, unknownCount)
+				breach = true
 			}
 		}
 	}
-	if unknownCount > 0 {
+	if breach || unknownCount > 0 {
 		return thresholdExceededError(scanInfo.FailThresholdSeverity, unknownCount)
 	}
 	return nil
