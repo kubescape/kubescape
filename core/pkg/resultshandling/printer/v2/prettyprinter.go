@@ -84,7 +84,6 @@ func (pp *PrettyPrinter) PrintImageScan(imageScanData []cautils.ImageScanData) e
 
 func (pp *PrettyPrinter) ActionPrint(_ context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
 	if opaSessionObj != nil {
-		// TODO line is currently printed on framework scan only
 		if isPrintSeparatorType(pp.scanType) {
 			fmt.Fprintf(pp.writer, "\n%s\n\n",
 				gchalk.WithAnsi256(238).Bold(strings.Repeat("─", 50)))
@@ -365,10 +364,10 @@ func getSeparator(sep string) string {
 
 func isPrintSeparatorType(scanType cautils.ScanTypes) bool {
 	switch scanType {
-	case cautils.ScanTypeCluster, cautils.ScanTypeRepo, cautils.ScanTypeImage, cautils.ScanTypeWorkload:
-		return false
-	default:
+	case cautils.ScanTypeControl, cautils.ScanTypeFramework:
 		return true
+	default:
+		return false
 	}
 }
 
