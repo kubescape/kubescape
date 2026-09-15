@@ -131,16 +131,62 @@ func classifyImageInput(img string, stat func(string) bool) (registry bool, sche
 		return false, "", fmt.Errorf("image name cannot be empty")
 	}
 	if rest, prefix := peelGenericImageSelector(trimmed); rest != "" {
-		registry, innerScheme, errEmpty := classifyRemainder(rest, stat)
-		if errEmpty != nil {
-			return false, prefix, errEmpty
-		}
-		if !registry && innerScheme == "" {
+		// Grype strips "image:" once and passes the remainder literally to
+		// the narrowed image providers — no second scheme pass. An ordinary
+		// local file (e.g. "nginx" existing as a file) must not shadow it,
+		// and a scheme like "dir:latest" must not be misread as a local dir
+		// source: the narrowed providers only accept directories or archives,
+		// and existence-only checks would reject valid registry refs.
+		if isImageRemainderLocal(rest) {
 			return false, prefix, nil
 		}
-		return registry, innerScheme, nil
+		if rest == "" {
+			return false, prefix, fmt.Errorf("image name cannot be empty")
+		}
+		if _, err := reference.ParseNormalizedNamed(rest); err != nil {
+			return false, prefix, nil
+		}
+		return true, "", nil
 	}
 	return classifyRemainder(trimmed, stat)
+}
+
+// isImageRemainderLocal reports whether the remainder after a generic
+// "image:" strip would be handled by grype's narrowed image providers as
+// local content. Only a directory or an archive-ish file (.tar/.tgz/.tar.gz/
+// .sif) qualifies; mere file existence (e.g. a plain "nginx" file) does not,
+// and scheme prefixes like "dir:latest" are not re-interpreted. The check is
+// intentionally filesystem-backed (os.Stat, not the injected bool) so IsDir
+// can be distinguished; the injected stat remains for the plain pipeline.
+func isImageRemainderLocal(rest string) bool {
+	if rest == "" {
+		return false
+	}
+	lower := strings.ToLower(rest)
+	isArchive := strings.HasSuffix(lower, ".tar") || strings.HasSuffix(lower, ".tgz") ||
+		strings.HasSuffix(lower, ".tar.gz") || strings.HasSuffix(lower, ".sif")
+	// Colon without a slash before it (e.g. "dir:latest"): image providers do
+	// not re-strip schemes, and a bare host:path "docker:nginx" name would be
+	// ambiguous — treat such remainders as registry unless they are archive
+	// paths, which the daemon parser rejects anyway (loud both ways).
+	if idx := strings.Index(rest, ":"); idx != -1 && !strings.Contains(rest[:idx], "/") {
+		return false
+	}
+	if info, err := os.Stat(rest); err == nil {
+		if info.IsDir() {
+			return true
+		}
+		if isArchive {
+			return true
+		}
+	}
+	// Unambiguous archive-ish paths are non-registry even when missing (the
+	// scanner fails loudly on the open, never silently), matching the bare
+	// pipeline's tarball rule.
+	if isArchive && (strings.HasPrefix(rest, "/") || strings.HasPrefix(rest, "./") || strings.HasPrefix(rest, "../")) {
+		return true
+	}
+	return false
 }
 
 // classifyRemainder runs steps 1-5 of the pipeline on an already-trimmed,
@@ -326,10 +372,10 @@ func imageAttributesForExceptions(image string, stat func(string) bool) (Attribu
 		return Attributes{}, scheme, fmt.Errorf("image exceptions cannot target non-registry input %q (detected %q): scan by registry reference or remove --exceptions", image, scheme)
 	}
 	if rest, _ := peelGenericImageSelector(trimmed); rest != "" {
-		if _, _, errEmpty := classifyImageInput(rest, stat); errEmpty != nil {
-			return Attributes{}, "", errEmpty
+		if rest == "" {
+			return Attributes{}, "", fmt.Errorf("image name cannot be empty")
 		}
-		if isNonRegistryInputWithStat(rest, stat) {
+		if isImageRemainderLocal(rest) {
 			_, scheme, _ := classifyImageInput(image, stat)
 			return Attributes{}, scheme, fmt.Errorf("image exceptions cannot target non-registry input %q (detected %q): scan by registry reference or remove --exceptions", image, scheme)
 		}
@@ -408,10 +454,14 @@ func isNonRegistryForExceptions(img string, stat func(string) bool) bool {
 		return err != nil
 	}
 	if rest, _ := peelGenericImageSelector(trimmed); rest != "" {
-		if _, _, errEmpty := classifyImageInput(rest, stat); errEmpty != nil {
+		if rest == "" {
 			return true
 		}
-		return isNonRegistryInputWithStat(rest, stat)
+		if isImageRemainderLocal(rest) {
+			return true
+		}
+		_, err := getAttributesFromImage(rest)
+		return err != nil
 	}
 	if _, _, errEmpty := classifyImageInput(img, stat); errEmpty != nil {
 		return true
