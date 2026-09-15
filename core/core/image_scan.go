@@ -186,27 +186,82 @@ func peelGenericImageSelector(trimmed string) (string, string) {
 	return rest, trimmed[:idx]
 }
 
-// isKnownInputScheme reports whether s is a local-source scheme that can
-// never denote a registry reference. The set mirrors the pinned Grype/Syft
-// stack's source handling, verified against grype v0.104.1 / syft v1.42.3:
-// grype's SBOM path strips "sbom:"/"purl:" to local files, and
-// stereoscope's ExtractSchemeSource strips any provider-name tag
-// ("local-file", "local-directory", "singularity", archive schemes) before
-// opening the remainder as a local path. Snap sources never provide OCI
-// registry attributes either: syft resolves "snap:<rest>" through
-// snapsource's local provider (.snap file) or remote provider (Snap Store
-// name), and grype's allSourceTags()/ExtractSchemeSource strips the tag in
-// both forms, so every "snap:"-prefixed input is fail-closed non-registry.
-// Daemon/registry schemes ("docker", "podman", "containerd", "oci-registry",
-// "oci-model") stay excluded: daemon inputs are registry references with
-// derivable attributes.
-func isKnownInputScheme(s string) bool {
-	switch s {
-	case "docker-archive", "oci-archive", "oci-dir", "oci-layout", "dir", "file", "sbom",
-		"purl", "local-file", "local-directory", "singularity", "snap":
-		return true
+// selectorKind classifies how grype resolves an explicit source selector
+// after ExtractSchemeSource strips it.
+type selectorKind int
+
+const (
+	selectorNone selectorKind = iota
+	// selectorLocal: the remainder is opaque local content; the input is
+	// fail-closed non-registry for exception purposes.
+	selectorLocal
+	// selectorRegistry: the remainder must parse as a registry reference;
+	// exception identity derives from it.
+	selectorRegistry
+	// selectorImage: Syft's generic tag; the remainder goes to the narrowed
+	// image providers (see classifyImageInput step 0).
+	selectorImage
+)
+
+// sourceSelectors is the effective provider contract, enumerated once and
+// shared by classification (detectScheme), preflight
+// (isNonRegistryForExceptions) and attribute derivation
+// (imageAttributesForExceptions). Verified against grype v0.104.1 / syft
+// v1.42.3 and the replaced Stereoscope: FileTag..RegistryTag, provider
+// Names, syft local-file/local-directory/snap/oci-model, and ImageTag on
+// every stereoscope-backed provider. Daemon/registry schemes ("docker",
+// "podman", "containerd", "oci-registry", "oci-model") plus the generic
+// "registry", "daemon" and "pull" tags resolve to registry pulls, so their
+// remainders carry derivable registry identity.
+var sourceSelectors = []struct {
+	name string
+	kind selectorKind
+}{
+	{"docker-archive", selectorLocal},
+	{"oci-archive", selectorLocal},
+	{"oci-dir", selectorLocal},
+	{"oci-layout", selectorLocal},
+	{"dir", selectorLocal},
+	{"file", selectorLocal},
+	{"sbom", selectorLocal},
+	{"purl", selectorLocal},
+	{"local-file", selectorLocal},
+	{"local-directory", selectorLocal},
+	{"singularity", selectorLocal},
+	{"snap", selectorLocal},
+	{"docker", selectorRegistry},
+	{"podman", selectorRegistry},
+	{"containerd", selectorRegistry},
+	{"oci-registry", selectorRegistry},
+	{"oci-model", selectorRegistry},
+	{"registry", selectorRegistry},
+	{"daemon", selectorRegistry},
+	{"pull", selectorRegistry},
+	{"image", selectorImage},
+}
+
+// lookupSourceSelector returns the contract kind for a lowercased,
+// slash-free scheme candidate, or selectorNone when it is not a selector.
+func lookupSourceSelector(s string) selectorKind {
+	for _, sel := range sourceSelectors {
+		if sel.name == s {
+			return sel.kind
+		}
 	}
-	return false
+	return selectorNone
+}
+
+// isKnownInputScheme reports whether s is a local-source scheme that can
+// never denote a registry reference.
+func isKnownInputScheme(s string) bool {
+	return lookupSourceSelector(s) == selectorLocal
+}
+
+// isRegistrySelectorScheme reports whether s is a selector whose remainder
+// must parse as a registry reference (daemon/registry pulls and the generic
+// registry/daemon/pull tags).
+func isRegistrySelectorScheme(s string) bool {
+	return lookupSourceSelector(s) == selectorRegistry
 }
 
 // detectScheme extracts a known local-source scheme prefix (preserving the
@@ -242,21 +297,13 @@ func isNonRegistryInputWithStat(img string, stat func(string) bool) bool {
 	return errEmpty != nil || !registry
 }
 
-func isDaemonRegistrySelectorScheme(s string) bool {
-	switch s {
-	case "docker", "podman", "containerd", "oci-registry", "oci-model":
-		return true
-	}
-	return false
-}
-
 func stripRegistrySelectorScheme(trimmed string) (string, string, bool) {
 	idx := strings.Index(trimmed, ":")
 	if idx < 0 {
 		return "", "", false
 	}
 	candidateLower := strings.ToLower(trimmed[:idx])
-	if strings.Contains(candidateLower, "/") || !isDaemonRegistrySelectorScheme(candidateLower) {
+	if strings.Contains(candidateLower, "/") || !isRegistrySelectorScheme(candidateLower) {
 		return "", "", false
 	}
 	rest := strings.TrimSpace(trimmed[idx+1:])

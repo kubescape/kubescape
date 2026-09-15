@@ -248,7 +248,9 @@ func TestImageSelectorResolvesStrippedIdentity(t *testing.T) {
 // Explicit daemon/registry selectors resolve exception identity from the
 // stripped remainder: "docker:nginx" shares CVEs with "nginx", and tagged
 // forms like "docker:nginx:1.27" parse instead of failing as unparseable.
-func TestDaemonSelectorResolvesStrippedIdentity(t *testing.T) {
+// The generic "registry", "daemon" and "pull" tags behave identically: grype
+// strips every registered tag before resolution.
+func TestRegistrySelectorResolvesStrippedIdentity(t *testing.T) {
 	policies := []VulnerabilitiesIgnorePolicy{
 		{
 			Metadata:        Metadata{Name: "x"},
@@ -257,7 +259,7 @@ func TestDaemonSelectorResolvesStrippedIdentity(t *testing.T) {
 			Vulnerabilities: []string{"CVE-2023-42365"},
 		},
 	}
-	for _, input := range []string{"docker:nginx", "docker:nginx:1.27", "podman:nginx", "containerd:nginx", "oci-registry:nginx", "oci-model:nginx"} {
+	for _, input := range []string{"docker:nginx", "docker:nginx:1.27", "podman:nginx", "containerd:nginx", "oci-registry:nginx", "oci-model:nginx", "registry:nginx", "registry:nginx:1.27", "daemon:nginx", "pull:nginx"} {
 		vulns, _, err := getUniqueVulnerabilitiesAndSeverities(policies, input, true)
 		require.NoError(t, err, "input %q must resolve", input)
 		assert.Contains(t, vulns, "CVE-2023-42365", "input %q must share nginx CVEs", input)
@@ -281,6 +283,12 @@ func TestIsNonRegistryForExceptionsMirrorsResolver(t *testing.T) {
 		{"docker:nginx:1.27", false},
 		{"docker:!!!", true},
 		{"podman:nginx", false},
+		{"registry:nginx", false},
+		{"registry:nginx:1.27", false},
+		{"daemon:nginx", false},
+		{"pull:nginx", false},
+		{"registry:!!!", true},
+		{"example.io/pull/nginx:v1", false},
 		{"   ", true},
 	}
 	for _, tt := range tests {
