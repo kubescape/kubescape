@@ -698,11 +698,11 @@ func (k8sHandler *K8sResourceHandler) findScanObjectResource(ctx context.Context
 					return nil, fmt.Errorf("resource %s was not found: %w", getReadableID(resource), ErrResourceNotFound)
 				}
 			}
-			if k8sinterface.IsTypeWorkload(uObj.Object) && k8sinterface.WorkloadHasParent(workloadinterface.NewWorkloadObj(uObj.Object)) {
+			if isTypeWorkload(uObj.Object) && k8sinterface.WorkloadHasParent(workloadinterface.NewWorkloadObj(uObj.Object)) {
 				// mcpserver-sentinel: ErrResourceHasParent — do not change without updating cmd/mcpserver/mcperror_classify.go
 				return nil, fmt.Errorf("resource %s has a parent and cannot be scanned: %w", getReadableID(resource), ErrResourceHasParent)
 			}
-			if !k8sinterface.IsTypeWorkload(uObj.Object) {
+			if !isTypeWorkload(uObj.Object) {
 				// mcpserver-sentinel: ErrNotWorkload — do not change without updating cmd/mcpserver/mcperror_classify.go
 				return nil, fmt.Errorf("%s is not a valid Kubernetes workload: %w", getReadableID(resource), ErrNotWorkload)
 			}
@@ -753,13 +753,31 @@ func (k8sHandler *K8sResourceHandler) findScanObjectResource(ctx context.Context
 		return nil, fmt.Errorf("more than one resource found for %s: %w", getReadableID(resource), ErrAmbiguousResource)
 	}
 
-	if !k8sinterface.IsTypeWorkload(metaObjs[0].GetObject()) {
+	if !isTypeWorkload(metaObjs[0].GetObject()) {
 		// mcpserver-sentinel: ErrNotWorkload — do not change without updating cmd/mcpserver/mcperror_classify.go
 		return nil, fmt.Errorf("%s is not a valid Kubernetes workload: %w", getReadableID(resource), ErrNotWorkload)
 	}
 
 	wl := workloadinterface.NewWorkloadObj(metaObjs[0].GetObject())
 	return wl, nil
+}
+
+func isTypeWorkload(obj map[string]interface{}) bool {
+	if k8sinterface.IsTypeWorkload(obj) {
+		return true
+	}
+	if obj == nil {
+		return false
+	}
+	apiVersion, ok := obj["apiVersion"].(string)
+	if !ok {
+		return false
+	}
+	kind, ok := obj["kind"].(string)
+	if !ok {
+		return false
+	}
+	return cautils.IsLegacyEvent(kind, apiVersion)
 }
 
 func (k8sHandler *K8sResourceHandler) collectCloudResources(ctx context.Context, sessionObj *cautils.OPASessionObj, allResources map[string]workloadinterface.IMetadata, externalResourceMap cautils.ExternalResources, cloudResources []string) error {

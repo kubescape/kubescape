@@ -16,6 +16,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/version"
+	"k8s.io/client-go/discovery"
 	discoveryfake "k8s.io/client-go/discovery/fake"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 	kubernetesfake "k8s.io/client-go/kubernetes/fake"
@@ -62,16 +63,95 @@ func unstructuredResourceWithParent(apiVersion, kind, namespace, name string) *u
 	}}
 }
 
+func clusterTrustBundleDiscovery() *discoveryfake.FakeDiscovery {
+	discovery := &discoveryfake.FakeDiscovery{Fake: &k8stesting.Fake{}}
+	discovery.Resources = []*metav1.APIResourceList{
+		{
+			GroupVersion: "certificates.k8s.io/v1",
+			APIResources: []metav1.APIResource{{Name: "clustertrustbundles", Kind: "ClusterTrustBundle", Namespaced: false, Verbs: metav1.Verbs{"get", "list"}}},
+		},
+		{
+			GroupVersion: "certificates.k8s.io/v1beta1",
+			APIResources: []metav1.APIResource{{Name: "clustertrustbundles", Kind: "ClusterTrustBundle", Namespaced: false, Verbs: metav1.Verbs{"get", "list"}}},
+		},
+	}
+	return discovery
+}
+
+func apiServiceDiscovery() *discoveryfake.FakeDiscovery {
+	discovery := &discoveryfake.FakeDiscovery{Fake: &k8stesting.Fake{}}
+	discovery.Resources = []*metav1.APIResourceList{
+		{
+			GroupVersion: "apiregistration.k8s.io/v1",
+			APIResources: []metav1.APIResource{{Name: "apiservices", Kind: "APIService", Namespaced: false, Verbs: metav1.Verbs{"get", "list"}}},
+		},
+	}
+	return discovery
+}
+
+func ipAddressDiscovery() *discoveryfake.FakeDiscovery {
+	discovery := &discoveryfake.FakeDiscovery{Fake: &k8stesting.Fake{}}
+	discovery.Resources = []*metav1.APIResourceList{
+		{
+			GroupVersion: "networking.k8s.io/v1",
+			APIResources: []metav1.APIResource{{Name: "ipaddresses", Kind: "IPAddress", Namespaced: false, Verbs: metav1.Verbs{"get", "list"}}},
+		},
+	}
+	return discovery
+}
+
+func eventDiscovery() *discoveryfake.FakeDiscovery {
+	discovery := &discoveryfake.FakeDiscovery{Fake: &k8stesting.Fake{}}
+	discovery.Resources = []*metav1.APIResourceList{
+		{
+			GroupVersion: "v1",
+			APIResources: []metav1.APIResource{{Name: "events", Kind: "Event", Namespaced: true, Verbs: metav1.Verbs{"get", "list"}}},
+		},
+	}
+	return discovery
+}
+
+func customCRDDiscovery(group, version, kind, resource string) *discoveryfake.FakeDiscovery {
+	discovery := &discoveryfake.FakeDiscovery{Fake: &k8stesting.Fake{}}
+	discovery.Resources = []*metav1.APIResourceList{
+		{
+			GroupVersion: group + "/" + version,
+			APIResources: []metav1.APIResource{{Name: resource, Kind: kind, Namespaced: false, Verbs: metav1.Verbs{"get", "list"}}},
+		},
+	}
+	return discovery
+}
+
 func TestFindScanObjectResourceDataDriven(t *testing.T) {
 	k8sinterface.InitializeMapResourcesMock()
 	deploymentGVR := schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"}
 	daemonSetGVR := schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "daemonsets"}
 	replicaSetGVR := schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "replicasets"}
+	clusterRoleGVR := schema.GroupVersionResource{Group: "rbac.authorization.k8s.io", Version: "v1", Resource: "clusterroles"}
+	clusterTrustBundleV1GVR := schema.GroupVersionResource{Group: "certificates.k8s.io", Version: "v1", Resource: "clustertrustbundles"}
+	clusterTrustBundleV1Beta1GVR := schema.GroupVersionResource{Group: "certificates.k8s.io", Version: "v1beta1", Resource: "clustertrustbundles"}
+	csrGVR := schema.GroupVersionResource{Group: "certificates.k8s.io", Version: "v1", Resource: "certificatesigningrequests"}
+	apiServiceGVR := schema.GroupVersionResource{Group: "apiregistration.k8s.io", Version: "v1", Resource: "apiservices"}
+	ipAddressGVR := schema.GroupVersionResource{Group: "networking.k8s.io", Version: "v1", Resource: "ipaddresses"}
+	eventGVR := schema.GroupVersionResource{Group: "", Version: "v1", Resource: "events"}
+	crdClusterTrustBundleGVR := schema.GroupVersionResource{Group: "example.com", Version: "v1", Resource: "clustertrustbundles"}
+	crdAPIServiceGVR := schema.GroupVersionResource{Group: "example.com", Version: "v1", Resource: "apiservices"}
+	crdIPAddressGVR := schema.GroupVersionResource{Group: "example.com", Version: "v1", Resource: "ipaddresses"}
 	secretGVR := schema.GroupVersionResource{Group: "", Version: "v1", Resource: "secrets"}
 	listKinds := map[schema.GroupVersionResource]string{
-		deploymentGVR: "DeploymentList",
-		daemonSetGVR:  "DaemonSetList",
-		replicaSetGVR: "ReplicaSetList",
+		deploymentGVR:                "DeploymentList",
+		daemonSetGVR:                 "DaemonSetList",
+		replicaSetGVR:                "ReplicaSetList",
+		clusterRoleGVR:               "ClusterRoleList",
+		clusterTrustBundleV1GVR:      "ClusterTrustBundleList",
+		clusterTrustBundleV1Beta1GVR: "ClusterTrustBundleList",
+		csrGVR:                       "CertificateSigningRequestList",
+		apiServiceGVR:                "APIServiceList",
+		ipAddressGVR:                 "IPAddressList",
+		eventGVR:                     "EventList",
+		crdClusterTrustBundleGVR:     "ClusterTrustBundleList",
+		crdAPIServiceGVR:             "APIServiceList",
+		crdIPAddressGVR:              "IPAddressList",
 		// Secrets are registered so the fake client is genuinely able to serve
 		// them. Without this the client cannot list secrets at all and the
 		// "no API calls were issued" assertion below would hold even for an
@@ -89,6 +169,7 @@ func TestFindScanObjectResourceDataDriven(t *testing.T) {
 		wantNoAPIActions bool
 		listForbidden    bool
 		selector         IFieldSelector
+		discovery        discovery.DiscoveryInterface
 	}{
 		{name: "nil request is not a single-resource scan", request: nil, wantNil: true},
 		{
@@ -96,6 +177,81 @@ func TestFindScanObjectResourceDataDriven(t *testing.T) {
 			request:  scanObject("apps/v1", "Deployment", "shop", "checkout"),
 			objects:  []runtime.Object{unstructuredResource("apps/v1", "Deployment", "shop", "checkout")},
 			wantName: "checkout",
+		},
+		{
+			name:     "clusterrole with path segment name system:discovery is returned as a workload",
+			request:  scanObject("rbac.authorization.k8s.io/v1", "ClusterRole", "", "system:discovery"),
+			objects:  []runtime.Object{unstructuredResource("rbac.authorization.k8s.io/v1", "ClusterRole", "", "system:discovery")},
+			wantName: "system:discovery",
+		},
+		{
+			name:      "clustertrustbundle v1 with signer-linked name example.com:foo:abc is returned as a workload",
+			request:   scanObject("certificates.k8s.io/v1", "ClusterTrustBundle", "", "example.com:foo:abc"),
+			objects:   []runtime.Object{unstructuredResource("certificates.k8s.io/v1", "ClusterTrustBundle", "", "example.com:foo:abc")},
+			discovery: clusterTrustBundleDiscovery(),
+			wantName:  "example.com:foo:abc",
+		},
+		{
+			name:      "clustertrustbundle v1beta1 with signer-linked name example.com:foo:abc is returned as a workload",
+			request:   scanObject("certificates.k8s.io/v1beta1", "ClusterTrustBundle", "", "example.com:foo:abc"),
+			objects:   []runtime.Object{unstructuredResource("certificates.k8s.io/v1beta1", "ClusterTrustBundle", "", "example.com:foo:abc")},
+			discovery: clusterTrustBundleDiscovery(),
+			wantName:  "example.com:foo:abc",
+		},
+		{
+			name:     "certificatesigningrequest with path segment name client:alice is returned as a workload",
+			request:  scanObject("certificates.k8s.io/v1", "CertificateSigningRequest", "", "client:alice"),
+			objects:  []runtime.Object{unstructuredResource("certificates.k8s.io/v1", "CertificateSigningRequest", "", "client:alice")},
+			wantName: "client:alice",
+		},
+		{
+			name:      "apiservice with trailing dot name v1. is returned as a workload",
+			request:   scanObject("apiregistration.k8s.io/v1", "APIService", "", "v1."),
+			objects:   []runtime.Object{unstructuredResource("apiregistration.k8s.io/v1", "APIService", "", "v1.")},
+			discovery: apiServiceDiscovery(),
+			wantName:  "v1.",
+		},
+		{
+			name:      "ipaddress with IPv6 name 2001:db8::1 is returned as a workload",
+			request:   scanObject("networking.k8s.io/v1", "IPAddress", "", "2001:db8::1"),
+			objects:   []runtime.Object{unstructuredResource("networking.k8s.io/v1", "IPAddress", "", "2001:db8::1")},
+			discovery: ipAddressDiscovery(),
+			wantName:  "2001:db8::1",
+		},
+		{
+			name:      "core/v1 event with path segment name event:legacy is returned as a workload",
+			request:   scanObject("v1", "Event", "default", "event:legacy"),
+			objects:   []runtime.Object{unstructuredResource("v1", "Event", "default", "event:legacy")},
+			discovery: eventDiscovery(),
+			wantName:  "event:legacy",
+		},
+		{
+			name:      "bare event with path segment name event:legacy is returned as a workload",
+			request:   scanObject("", "Event", "default", "event:legacy"),
+			objects:   []runtime.Object{unstructuredResource("v1", "Event", "default", "event:legacy")},
+			discovery: eventDiscovery(),
+			wantName:  "event:legacy",
+		},
+		{
+			name:      "crd clustertrustbundle with custom group and standard name my-bundle is returned as a workload",
+			request:   scanObject("example.com/v1", "ClusterTrustBundle", "", "my-bundle"),
+			objects:   []runtime.Object{unstructuredResource("example.com/v1", "ClusterTrustBundle", "", "my-bundle")},
+			discovery: customCRDDiscovery("example.com", "v1", "ClusterTrustBundle", "clustertrustbundles"),
+			wantName:  "my-bundle",
+		},
+		{
+			name:      "crd apiservice with custom group and standard name my-api is returned as a workload",
+			request:   scanObject("example.com/v1", "APIService", "", "my-api"),
+			objects:   []runtime.Object{unstructuredResource("example.com/v1", "APIService", "", "my-api")},
+			discovery: customCRDDiscovery("example.com", "v1", "APIService", "apiservices"),
+			wantName:  "my-api",
+		},
+		{
+			name:      "crd ipaddress with custom group and standard name my-address is returned as a workload",
+			request:   scanObject("example.com/v1", "IPAddress", "", "my-address"),
+			objects:   []runtime.Object{unstructuredResource("example.com/v1", "IPAddress", "", "my-address")},
+			discovery: customCRDDiscovery("example.com", "v1", "IPAddress", "ipaddresses"),
+			wantName:  "my-address",
 		},
 		{
 			name:          "deployment is returned via get when list is forbidden",
@@ -257,7 +413,7 @@ func TestFindScanObjectResourceDataDriven(t *testing.T) {
 				})
 			}
 			handler := &K8sResourceHandler{k8s: &k8sinterface.KubernetesApi{DynamicClient: dynamicClient}}
-			resolver, discoveryFailures := newDiscoveryResourceResolver(nil)
+			resolver, discoveryFailures := newDiscoveryResourceResolver(test.discovery)
 			require.Empty(t, discoveryFailures)
 
 			selector := test.selector
