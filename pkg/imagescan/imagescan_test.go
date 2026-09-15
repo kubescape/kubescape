@@ -2,6 +2,7 @@ package imagescan
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -367,14 +368,14 @@ func TestExceedsSeverityThreshold(t *testing.T) {
 			want:        true,
 		},
 		{
-			name:      "metadata errors are ignored when no remaining match exceeds threshold",
+			name:      "metadata errors fail closed when no remaining match exceeds threshold",
 			threshold: vulnerability.MediumSeverity,
 			matches: match.NewMatches(
 				makeThresholdTestMatch("CVE-error"),
 				makeThresholdTestMatch("CVE-low"),
 			),
 			onlyFixable: false,
-			want:        false,
+			want:        true,
 		},
 		{
 			name:      "embedded metadata gates when provider lookup fails",
@@ -430,6 +431,60 @@ func TestExceedsSeverityThreshold(t *testing.T) {
 			onlyFixable: true,
 			want:        true,
 		},
+		{
+			name:      "unknown severity fails closed on a set threshold",
+			threshold: vulnerability.LowSeverity,
+			matches: match.NewMatches(
+				makeThresholdTestMatch("CVE-error"),
+			),
+			onlyFixable: false,
+			want:        true,
+		},
+		{
+			name:      "unknown severity with unresolvable provider entry fails closed",
+			threshold: vulnerability.LowSeverity,
+			matches: match.NewMatches(
+				makeThresholdTestMatch("CVE-unknown-no-provider"),
+			),
+			onlyFixable: false,
+			want:        true,
+		},
+		{
+			name:      "unknown severity respects onlyFixable for definitively unfixable CVEs",
+			threshold: vulnerability.LowSeverity,
+			matches: match.NewMatches(
+				makeThresholdTestMatchWithFixState("CVE-error", vulnerability.FixStateNotFixed),
+			),
+			onlyFixable: true,
+			want:        false,
+		},
+		{
+			name:      "unknown severity with unknown fix state still fails when onlyFixable",
+			threshold: vulnerability.LowSeverity,
+			matches: match.NewMatches(
+				makeThresholdTestMatch("CVE-error"),
+			),
+			onlyFixable: true,
+			want:        true,
+		},
+		{
+			name:      "negligible severity still passes a low threshold",
+			threshold: vulnerability.LowSeverity,
+			matches: match.NewMatches(
+				makeThresholdTestMatchWithMetadata("CVE-negligible", vulnerability.NegligibleSeverity.String()),
+			),
+			onlyFixable: false,
+			want:        false,
+		},
+		{
+			name:      "negligible threshold with unknown severity fails closed",
+			threshold: vulnerability.NegligibleSeverity,
+			matches: match.NewMatches(
+				makeThresholdTestMatch("CVE-error"),
+			),
+			onlyFixable: false,
+			want:        true,
+		},
 	}
 
 	svc := &Service{vp: provider}
@@ -439,6 +494,88 @@ func TestExceedsSeverityThreshold(t *testing.T) {
 			assert.Equal(t, tt.want, svc.ExceedsSeverityThreshold(tt.threshold, tt.matches, tt.onlyFixable))
 		})
 	}
+}
+
+// countingThresholdProvider counts provider lookups to prove the gate visits
+// every match: matches.Enumerate() is fed by a goroutine over an unbuffered
+// channel, so stopping early would strand the producer and leak a goroutine.
+type countingThresholdProvider struct {
+	thresholdStubVulnerabilityProvider
+	calls *int
+}
+
+func (s countingThresholdProvider) VulnerabilityMetadata(ref vulnerability.Reference) (*vulnerability.Metadata, error) {
+	(*s.calls)++
+	return s.thresholdStubVulnerabilityProvider.VulnerabilityMetadata(ref)
+}
+
+func TestExceedsSeverityThresholdDrainsAllMatches(t *testing.T) {
+	var calls int
+	provider := countingThresholdProvider{
+		thresholdStubVulnerabilityProvider: thresholdStubVulnerabilityProvider{},
+		calls:                              &calls,
+	}
+	const n = 25
+	ms := make([]match.Match, 0, n)
+	for i := 0; i < n; i++ {
+		// No embedded metadata and no stub entry: every match needs a
+		// (failing) provider lookup, so each must be visited.
+		ms = append(ms, makeThresholdTestMatch(fmt.Sprintf("CVE-unknown-%d", i)))
+	}
+	svc := &Service{vp: provider}
+	assert.True(t, svc.ExceedsSeverityThreshold(vulnerability.LowSeverity, match.NewMatches(ms...), false))
+	assert.Equal(t, n, calls, "every unknown match must be visited; stopping early leaks the Enumerate producer goroutine")
+}
+
+func TestExceedsSeverityThresholdNilProvider(t *testing.T) {
+	svc := &Service{}
+	matches := match.NewMatches(makeThresholdTestMatch("CVE-anything"))
+	assert.True(t, svc.ExceedsSeverityThreshold(vulnerability.LowSeverity, matches, false),
+		"nil provider with unknown severity must fail closed")
+}
+
+func TestMatchSeverity(t *testing.T) {
+	provider := thresholdStubVulnerabilityProvider{
+		metadataByID: map[string]*vulnerability.Metadata{
+			"CVE-high": {Severity: vulnerability.HighSeverity.String()},
+		},
+		errByID: map[string]error{
+			"CVE-error": errors.New("lookup failed"),
+		},
+	}
+
+	t.Run("embedded known severity wins without provider", func(t *testing.T) {
+		sev, unknown := MatchSeverity(makeThresholdTestMatchWithMetadata("CVE-x", vulnerability.CriticalSeverity.String()), nil)
+		assert.False(t, unknown)
+		assert.Equal(t, vulnerability.CriticalSeverity, sev)
+	})
+	t.Run("nil metadata with nil provider is unknown", func(t *testing.T) {
+		_, unknown := MatchSeverity(makeThresholdTestMatch("CVE-x"), nil)
+		assert.True(t, unknown)
+	})
+	t.Run("provider fallback resolves", func(t *testing.T) {
+		sev, unknown := MatchSeverity(makeThresholdTestMatch("CVE-high"), provider)
+		assert.False(t, unknown)
+		assert.Equal(t, vulnerability.HighSeverity, sev)
+	})
+	t.Run("provider error is unknown", func(t *testing.T) {
+		_, unknown := MatchSeverity(makeThresholdTestMatch("CVE-error"), provider)
+		assert.True(t, unknown)
+	})
+	t.Run("provider unknown severity is unknown", func(t *testing.T) {
+		p := thresholdStubVulnerabilityProvider{
+			metadataByID: map[string]*vulnerability.Metadata{
+				"CVE-u": {Severity: vulnerability.UnknownSeverity.String()},
+			},
+		}
+		_, unknown := MatchSeverity(makeThresholdTestMatch("CVE-u"), p)
+		assert.True(t, unknown)
+	})
+	t.Run("negligible is determinate", func(t *testing.T) {
+		sev, unknown := MatchSeverity(makeThresholdTestMatchWithMetadata("CVE-n", vulnerability.NegligibleSeverity.String()), nil)
+		assert.False(t, unknown)
+		assert.Equal(t, vulnerability.NegligibleSeverity, sev)
+	})
 }
 
 func TestValidateDBLoad(t *testing.T) {

@@ -1138,6 +1138,27 @@ func TestEnforceImageSeverityThresholds(t *testing.T) {
 			fixState:      vulnerability.FixStateNotFixed,
 			expectedError: true,
 		},
+		{
+			name:          "unknown match severity fails closed",
+			threshold:     "high",
+			matchSeverity: "",
+			expectedError: true,
+		},
+		{
+			name:          "unknown match severity respects onlyFixable for unfixable CVEs",
+			threshold:     "high",
+			matchSeverity: "",
+			fixState:      vulnerability.FixStateNotFixed,
+			onlyFixable:   true,
+			expectedError: false,
+		},
+		{
+			name:          "unknown match severity with unknown fix state still fails when onlyFixable",
+			threshold:     "high",
+			matchSeverity: "",
+			onlyFixable:   true,
+			expectedError: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -1148,15 +1169,16 @@ func TestEnforceImageSeverityThresholds(t *testing.T) {
 			}
 
 			matches := match.NewMatches()
-			if tt.matchSeverity != "" {
-				matches.Add(match.Match{
-					Vulnerability: vulnerability.Vulnerability{
-						Reference: vulnerability.Reference{ID: "CVE-TEST"},
-						Metadata:  tt.metadata,
-						Fix:       vulnerability.Fix{State: tt.fixState},
-					},
-				})
-			}
+			// Always add the match: an empty matchSeverity with nil metadata
+			// is the unknown-severity path (provider also resolves unknown),
+			// which must still be exercised rather than skipped.
+			matches.Add(match.Match{
+				Vulnerability: vulnerability.Vulnerability{
+					Reference: vulnerability.Reference{ID: "CVE-TEST"},
+					Metadata:  tt.metadata,
+					Fix:       vulnerability.Fix{State: tt.fixState},
+				},
+			})
 
 			imgData := []cautils.ImageScanData{
 				{
@@ -1189,6 +1211,63 @@ func TestEnforceImageSeverityThresholdsUsesEmbeddedMetadataWithoutProvider(t *te
 	)
 
 	assert.EqualError(t, err, "image scan result exceeds severity threshold: high")
+}
+
+func TestEnforceImageSeverityThresholdsUnknownCountSuffix(t *testing.T) {
+	unknownMatches := match.NewMatches(match.Match{
+		Vulnerability: vulnerability.Vulnerability{
+			Reference: vulnerability.Reference{ID: "CVE-UNKNOWN"},
+		},
+	})
+	imgData := []cautils.ImageScanData{
+		{
+			Matches:               unknownMatches,
+			VulnerabilityProvider: mockVulnerabilityProvider{severity: ""},
+		},
+	}
+
+	err := enforceImageSeverityThresholds(imgData, &cautils.ScanInfo{FailThresholdSeverity: "high"})
+	require.Error(t, err)
+	assert.EqualError(t, err, "image scan result exceeds severity threshold: high (1 vulnerability(s) with unknown severity counted as exceeding)")
+}
+
+// TestEnforceImageSeverityThresholdsOrderIndependent proves the unknown count
+// does not depend on match enumeration order: Matches is map-backed, so a
+// determinate breach must not hide later unknowns from the message.
+func TestEnforceImageSeverityThresholdsOrderIndependent(t *testing.T) {
+	breach := match.Match{
+		Vulnerability: vulnerability.Vulnerability{
+			Reference: vulnerability.Reference{ID: "CVE-BREACH"},
+			Metadata:  &vulnerability.Metadata{Severity: vulnerability.CriticalSeverity.String()},
+		},
+	}
+	unknown := match.Match{
+		Vulnerability: vulnerability.Vulnerability{
+			Reference: vulnerability.Reference{ID: "CVE-UNKNOWN"},
+		},
+	}
+	scanInfo := &cautils.ScanInfo{FailThresholdSeverity: "high"}
+	want := "image scan result exceeds severity threshold: high (1 vulnerability(s) with unknown severity counted as exceeding)"
+	// One entry per match keeps slice order deterministic; the map-backed
+	// Matches within each entry still enumerates in random order across runs.
+	multi := []cautils.ImageScanData{
+		{Matches: match.NewMatches(breach), VulnerabilityProvider: mockVulnerabilityProvider{severity: "Critical"}},
+		{Matches: match.NewMatches(unknown), VulnerabilityProvider: mockVulnerabilityProvider{severity: ""}},
+	}
+	err := enforceImageSeverityThresholds(multi, scanInfo)
+	require.Error(t, err)
+	assert.EqualError(t, err, want)
+
+	// Same matches in a single entry, repeated: map iteration order varies
+	// across runs, but the message must be identical every time.
+	single := []cautils.ImageScanData{
+		{Matches: match.NewMatches(breach, unknown), VulnerabilityProvider: mockVulnerabilityProvider{severity: ""}},
+	}
+	for i := 0; i < 20; i++ {
+		err := enforceImageSeverityThresholds(single, scanInfo)
+		require.Error(t, err)
+		assert.EqualError(t, err, want)
+	}
 }
 
 func TestGetScanCommand_RunE_SubmitExclusivity(t *testing.T) {
