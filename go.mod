@@ -26,7 +26,7 @@ require (
 	github.com/chainguard-dev/git-urls v1.0.2
 	github.com/containerd/platforms v1.0.0-rc.4
 	github.com/cyberphone/json-canonicalization v0.0.0-20241213102144-19d51d7fe467
-	github.com/deckarep/golang-set/v2 v2.8.0
+	github.com/deckarep/golang-set/v2 v2.9.0
 	github.com/distribution/reference v0.6.0
 	github.com/docker/buildx v0.33.0
 	github.com/docker/cli v29.5.3+incompatible
