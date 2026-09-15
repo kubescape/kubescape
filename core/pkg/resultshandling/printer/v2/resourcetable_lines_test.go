@@ -1,13 +1,16 @@
 package printer
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/locationresolver"
 	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
@@ -36,7 +39,15 @@ func fixPathControl(paths ...armotypes.FixPath) *resourcesresults.ResourceAssoci
 	}
 }
 
-func TestAnnotateFixPathLines(t *testing.T) {
+// postureControl builds a control from arbitrary rule paths, so a case can mix
+// fix, delete and review paths the way real rules do.
+func postureControl(paths ...armotypes.PosturePaths) *resourcesresults.ResourceAssociatedControl {
+	return &resourcesresults.ResourceAssociatedControl{
+		ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{{Paths: paths}},
+	}
+}
+
+func TestAnnotatePathLines(t *testing.T) {
 	cases := []struct {
 		name    string
 		paths   []string
@@ -44,6 +55,7 @@ func TestAnnotateFixPathLines(t *testing.T) {
 		lineFor func(string) (int, bool)
 		want    []string
 	}{
+		// Fix paths, rendered "<path>=<value>".
 		{
 			name:    "resolved fix path is annotated",
 			paths:   []string{"spec.hostPID=false"},
@@ -59,29 +71,9 @@ func TestAnnotateFixPathLines(t *testing.T) {
 			want:    []string{"spec.hostPID=false"},
 		},
 		{
-			name:    "nil lookup leaves every path untouched",
-			paths:   []string{"spec.hostPID=false"},
-			control: fixPathControl(armotypes.FixPath{Path: "spec.hostPID", Value: "false"}),
-			lineFor: nil,
-			want:    []string{"spec.hostPID=false"},
-		},
-		{
-			// PR scope is FixPath only. A review path renders as
-			// "<path> (current: <value>)" and a delete path renders bare, so
-			// neither carries the "<path>=" shape the annotation matches on.
-			name:  "review and delete paths are not annotated",
-			paths: []string{"spec.hostPID (current: true)", "spec.hostNetwork"},
-			control: fixPathControl(
-				armotypes.FixPath{Path: "spec.hostPID", Value: "false"},
-				armotypes.FixPath{Path: "spec.hostNetwork", Value: "false"},
-			),
-			lineFor: stubLineFor(map[string]int{"spec.hostPID": 12, "spec.hostNetwork": 14}),
-			want:    []string{"spec.hostPID (current: true)", "spec.hostNetwork"},
-		},
-		{
 			// The "=" in the match is what keeps a shorter path from claiming
 			// a longer one that merely starts the same way.
-			name:  "a shorter path does not claim a longer one",
+			name:  "a shorter fix path does not claim a longer one",
 			paths: []string{"spec.host=a", "spec.hostPID=false"},
 			control: fixPathControl(
 				armotypes.FixPath{Path: "spec.host", Value: "a"},
@@ -90,20 +82,120 @@ func TestAnnotateFixPathLines(t *testing.T) {
 			lineFor: stubLineFor(map[string]int{"spec.host": 7}),
 			want:    []string{"spec.host=a (line 7)", "spec.hostPID=false"},
 		},
+
+		// Review paths, rendered bare or with " (current: <value>)".
 		{
-			// annotateFixPathLines runs after addContainerNameToAssistedRemediation,
-			// so the line lands last and the container hint keeps its place.
-			name:    "line is appended after an existing container-name suffix",
+			name:    "review path with a current value is annotated",
+			paths:   []string{"spec.automountServiceAccountToken (current: true)"},
+			control: postureControl(armotypes.PosturePaths{ReviewPath: "spec.automountServiceAccountToken"}),
+			lineFor: stubLineFor(map[string]int{"spec.automountServiceAccountToken": 12}),
+			want:    []string{"spec.automountServiceAccountToken (current: true) (line 12)"},
+		},
+		{
+			name:    "bare review path is annotated",
+			paths:   []string{"spec.automountServiceAccountToken"},
+			control: postureControl(armotypes.PosturePaths{ReviewPath: "spec.automountServiceAccountToken"}),
+			lineFor: stubLineFor(map[string]int{"spec.automountServiceAccountToken": 12}),
+			want:    []string{"spec.automountServiceAccountToken (line 12)"},
+		},
+		{
+			name:    "unresolved review path is left alone",
+			paths:   []string{"spec.automountServiceAccountToken (current: true)"},
+			control: postureControl(armotypes.PosturePaths{ReviewPath: "spec.automountServiceAccountToken"}),
+			lineFor: stubLineFor(nil),
+			want:    []string{"spec.automountServiceAccountToken (current: true)"},
+		},
+
+		// Delete paths, rendered bare.
+		{
+			name:    "delete path is annotated",
+			paths:   []string{"spec.hostNetwork"},
+			control: postureControl(armotypes.PosturePaths{DeletePath: "spec.hostNetwork"}),
+			lineFor: stubLineFor(map[string]int{"spec.hostNetwork": 14}),
+			want:    []string{"spec.hostNetwork (line 14)"},
+		},
+		{
+			name:    "unresolved delete path is left alone",
+			paths:   []string{"spec.hostNetwork"},
+			control: postureControl(armotypes.PosturePaths{DeletePath: "spec.hostNetwork"}),
+			lineFor: stubLineFor(nil),
+			want:    []string{"spec.hostNetwork"},
+		},
+
+		// Every type in one control, as real rules emit them.
+		{
+			name:  "fix, delete and review paths each get their own line",
+			paths: []string{"spec.hostPID=false", "spec.hostNetwork", "spec.automountServiceAccountToken (current: true)"},
+			control: postureControl(
+				armotypes.PosturePaths{FixPath: armotypes.FixPath{Path: "spec.hostPID", Value: "false"}},
+				armotypes.PosturePaths{DeletePath: "spec.hostNetwork"},
+				armotypes.PosturePaths{ReviewPath: "spec.automountServiceAccountToken"},
+			),
+			lineFor: stubLineFor(map[string]int{"spec.hostPID": 10, "spec.hostNetwork": 11, "spec.automountServiceAccountToken": 12}),
+			want: []string{
+				"spec.hostPID=false (line 10)",
+				"spec.hostNetwork (line 11)",
+				"spec.automountServiceAccountToken (current: true) (line 12)",
+			},
+		},
+
+		// Matching stays pinned to each entry's own path.
+		{
+			// A bare path must not claim a longer path that starts with it: the
+			// match requires the path alone or followed by " (".
+			name:  "a shorter bare path does not claim a longer one",
+			paths: []string{"spec.containers[0] (current: x)", "spec.containers[0].image (current: nginx)"},
+			control: postureControl(
+				armotypes.PosturePaths{ReviewPath: "spec.containers[0]"},
+				armotypes.PosturePaths{ReviewPath: "spec.containers[0].image"},
+			),
+			lineFor: stubLineFor(map[string]int{"spec.containers[0]": 20}),
+			want:    []string{"spec.containers[0] (current: x) (line 20)", "spec.containers[0].image (current: nginx)"},
+		},
+		{
+			// Without its own fix path, a "<path>=<value>" entry is not
+			// claimed by a review path of the same field, and vice versa.
+			name:    "a review path does not claim a fix entry",
+			paths:   []string{"spec.hostPID=false"},
+			control: postureControl(armotypes.PosturePaths{ReviewPath: "spec.hostPID"}),
+			lineFor: stubLineFor(map[string]int{"spec.hostPID": 12}),
+			want:    []string{"spec.hostPID=false"},
+		},
+		{
+			name:    "a fix path does not claim a review entry",
+			paths:   []string{"spec.hostPID (current: true)"},
+			control: fixPathControl(armotypes.FixPath{Path: "spec.hostPID", Value: "false"}),
+			lineFor: stubLineFor(map[string]int{"spec.hostPID": 12}),
+			want:    []string{"spec.hostPID (current: true)"},
+		},
+
+		// Container-name suffixes are appended before annotation.
+		{
+			name:    "fix path: line lands after the container-name suffix",
 			paths:   []string{"spec.containers[0].image=nginx:1 (app)"},
 			control: fixPathControl(armotypes.FixPath{Path: "spec.containers[0].image", Value: "nginx:1"}),
 			lineFor: stubLineFor(map[string]int{"spec.containers[0].image": 9}),
 			want:    []string{"spec.containers[0].image=nginx:1 (app) (line 9)"},
 		},
 		{
-			// A control can carry the same fix path more than once across its
-			// rules, and fixPathsToString does not deduplicate while the
-			// rendered list does. Resolving per bare path would then stamp the
-			// one surviving entry twice.
+			name:    "review path: line lands after the container-name suffix",
+			paths:   []string{"spec.containers[0].image (current: nginx:1) (app)"},
+			control: postureControl(armotypes.PosturePaths{ReviewPath: "spec.containers[0].image"}),
+			lineFor: stubLineFor(map[string]int{"spec.containers[0].image": 9}),
+			want:    []string{"spec.containers[0].image (current: nginx:1) (app) (line 9)"},
+		},
+		{
+			name:    "delete path: line lands after the container-name suffix",
+			paths:   []string{"spec.containers[0].securityContext (app)"},
+			control: postureControl(armotypes.PosturePaths{DeletePath: "spec.containers[0].securityContext"}),
+			lineFor: stubLineFor(map[string]int{"spec.containers[0].securityContext": 8}),
+			want:    []string{"spec.containers[0].securityContext (app) (line 8)"},
+		},
+
+		// Each entry is annotated at most once.
+		{
+			// fixPathsToString does not deduplicate while the rendered list
+			// does, so a fix path repeated across rules matches one entry twice.
 			name:  "a fix path repeated across rules is annotated once",
 			paths: []string{"spec.hostPID=false"},
 			control: fixPathControl(
@@ -112,6 +204,27 @@ func TestAnnotateFixPathLines(t *testing.T) {
 			),
 			lineFor: stubLineFor(map[string]int{"spec.hostPID": 23}),
 			want:    []string{"spec.hostPID=false (line 23)"},
+		},
+		{
+			// The rendered list deduplicates with " (current: ...)" stripped, so
+			// a delete path and a review path naming the same field survive as
+			// one entry. Both types match it; it must still get one line.
+			name:  "a delete and review path collapsed into one entry is annotated once",
+			paths: []string{"spec.hostPID"},
+			control: postureControl(
+				armotypes.PosturePaths{DeletePath: "spec.hostPID"},
+				armotypes.PosturePaths{ReviewPath: "spec.hostPID"},
+			),
+			lineFor: stubLineFor(map[string]int{"spec.hostPID": 12}),
+			want:    []string{"spec.hostPID (line 12)"},
+		},
+
+		{
+			name:    "nil lookup leaves every path untouched",
+			paths:   []string{"spec.hostPID=false", "spec.hostNetwork"},
+			control: postureControl(armotypes.PosturePaths{DeletePath: "spec.hostNetwork"}),
+			lineFor: nil,
+			want:    []string{"spec.hostPID=false", "spec.hostNetwork"},
 		},
 		{
 			name:    "empty path list is a no-op",
@@ -125,10 +238,38 @@ func TestAnnotateFixPathLines(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			paths := tc.paths
-			annotateFixPathLines(&paths, tc.control, tc.lineFor)
+			annotatePathLines(&paths, tc.control, tc.lineFor)
 			assert.Equal(t, tc.want, paths)
 		})
 	}
+}
+
+// TestAnnotatePathLines_ResolvesEachPathOnce pins that a path named by several
+// rules, or by several path types, is resolved once. Each resolution evaluates
+// a yq expression against the manifest.
+func TestAnnotatePathLines_ResolvesEachPathOnce(t *testing.T) {
+	calls := make(map[string]int)
+	lineFor := func(path string) (int, bool) {
+		calls[path]++
+		return 5, true
+	}
+
+	paths := []string{"spec.hostPID=false", "spec.hostPID (current: true)", "spec.hostNetwork"}
+	control := postureControl(
+		armotypes.PosturePaths{FixPath: armotypes.FixPath{Path: "spec.hostPID", Value: "false"}},
+		armotypes.PosturePaths{ReviewPath: "spec.hostPID"},
+		armotypes.PosturePaths{DeletePath: "spec.hostNetwork"},
+		armotypes.PosturePaths{DeletePath: "spec.hostNetwork"},
+	)
+
+	annotatePathLines(&paths, control, lineFor)
+
+	assert.Equal(t, map[string]int{"spec.hostPID": 1, "spec.hostNetwork": 1}, calls)
+	assert.Equal(t, []string{
+		"spec.hostPID=false (line 5)",
+		"spec.hostPID (current: true) (line 5)",
+		"spec.hostNetwork (line 5)",
+	}, paths)
 }
 
 // TestFailedResourcesInPrintOrder pins the ordering the manifest cache depends
@@ -381,4 +522,131 @@ func TestResourceTable_DotQuotedFixPathPointsAtItsOwnLine(t *testing.T) {
 
 	assert.Contains(t, out, "(line 7)")
 	assert.NotContains(t, out, "(line 6)")
+}
+
+// allPathTypesManifest places each field these tests name on its own line.
+const allPathTypesManifest = "apiVersion: apps/v1\n" + // 1
+	"kind: Deployment\n" + // 2
+	"metadata:\n" + // 3
+	"  name: demo\n" + // 4
+	"spec:\n" + // 5
+	"  template:\n" + // 6
+	"    spec:\n" + // 7
+	"      hostNetwork: true\n" + // 8
+	"      automountServiceAccountToken: true\n" + // 9
+	"      containers:\n" + // 10
+	"        - name: app\n" + // 11
+	"          image: nginx:1\n" + // 12
+	"          securityContext:\n" + // 13
+	"            privileged: true\n" // 14
+
+const allPathTypesResourceID = "apps/v1/default/Deployment/demo"
+
+// withControlPaths replaces the session's single control's rule paths.
+func withControlPaths(session *cautils.OPASessionObj, paths ...armotypes.PosturePaths) {
+	result := session.ResourcesResult[allPathTypesResourceID]
+	result.AssociatedControls[0].ResourceAssociatedRules[0].Paths = paths
+	session.ResourcesResult[allPathTypesResourceID] = result
+}
+
+// outputLineWith returns the rendered line carrying needle, failing if none does.
+func outputLineWith(t *testing.T, out, needle string) string {
+	t.Helper()
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, needle) {
+			return line
+		}
+	}
+	t.Fatalf("no output line contains %q:\n%s", needle, out)
+	return ""
+}
+
+// TestResourceTable_EveryPathTypeResolvesToLine is the end-to-end case for each
+// path type against a real manifest.
+func TestResourceTable_EveryPathTypeResolvesToLine(t *testing.T) {
+	session := resourceTableLineNumberSession(t, allPathTypesManifest, ":0")
+	withControlPaths(session,
+		armotypes.PosturePaths{FixPath: armotypes.FixPath{Path: "spec.template.spec.containers[0].securityContext.privileged", Value: "false"}},
+		armotypes.PosturePaths{DeletePath: "spec.template.spec.hostNetwork"},
+		armotypes.PosturePaths{ReviewPath: "spec.template.spec.automountServiceAccountToken"},
+	)
+
+	out := renderResourceTable(t, session, true)
+
+	assert.Contains(t, outputLineWith(t, out, "securityContext.privileged=false"), "(line 14)", "fix path")
+	assert.Contains(t, outputLineWith(t, out, "spec.template.spec.hostNetwork"), "(line 8)", "delete path")
+	assert.Contains(t, outputLineWith(t, out, "spec.template.spec.automountServiceAccountToken"), "(line 9)", "review path")
+}
+
+// TestResourceTable_AbsentReviewAndDeletePathsMatchSARIF covers a review or
+// delete path whose field is not in the manifest. It gets its nearest existing
+// ancestor's line - the answer SARIF already reports as the review path's
+// related location - so both outputs point at the same place.
+func TestResourceTable_AbsentReviewAndDeletePathsMatchSARIF(t *testing.T) {
+	const (
+		absentReview = "spec.template.spec.securityContext.runAsNonRoot"
+		absentDelete = "spec.template.spec.hostPID"
+	)
+	session := resourceTableLineNumberSession(t, allPathTypesManifest, ":0")
+	withControlPaths(session,
+		armotypes.PosturePaths{ReviewPath: absentReview},
+		armotypes.PosturePaths{DeletePath: absentDelete},
+	)
+
+	out := renderResourceTable(t, session, true)
+
+	source := session.ResourceSource[allPathTypesResourceID]
+	resolver, err := locationresolver.NewPathLocationResolver(filepath.Join(source.Path, source.RelativePath))
+	require.NoError(t, err)
+	control := session.ResourcesResult[allPathTypesResourceID].AssociatedControls[0]
+	sarif := resolveReviewPathLocations(session, resolver, &control, allPathTypesResourceID)
+	require.Contains(t, sarif, absentReview, "SARIF should report a related location for the absent review path")
+
+	// Both absent fields sit directly under the pod spec, whose first entry is
+	// on line 8.
+	assert.Equal(t, 8, sarif[absentReview].Line)
+	assert.Contains(t, outputLineWith(t, out, absentReview), fmt.Sprintf("(line %d)", sarif[absentReview].Line))
+	assert.Contains(t, outputLineWith(t, out, absentDelete), "(line 8)")
+}
+
+// TestResourceTable_ManyControlsKeepOneLinePerPath covers a resource failing
+// many controls at once, each naming every path type. Every path must carry
+// exactly one line annotation, whichever table layout the width check picks.
+func TestResourceTable_ManyControlsKeepOneLinePerPath(t *testing.T) {
+	const controlCount = 12
+	session := resourceTableLineNumberSession(t, allPathTypesManifest, ":0")
+
+	result := session.ResourcesResult[allPathTypesResourceID]
+	result.AssociatedControls = nil
+	summaries := reportsummary.ControlSummaries{}
+	for i := range controlCount {
+		id := fmt.Sprintf("C-%04d", i+1)
+		result.AssociatedControls = append(result.AssociatedControls, resourcesresults.ResourceAssociatedControl{
+			ControlID: id,
+			Name:      "Control " + id,
+			Status:    apis.StatusInfo{InnerStatus: apis.StatusFailed},
+			ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{{
+				Name:   "rule-" + id,
+				Status: apis.StatusFailed,
+				Paths: []armotypes.PosturePaths{
+					{FixPath: armotypes.FixPath{Path: "spec.template.spec.containers[0].securityContext.privileged", Value: "false"}},
+					{DeletePath: "spec.template.spec.hostNetwork"},
+					{ReviewPath: "spec.template.spec.automountServiceAccountToken"},
+				},
+			}},
+		})
+		summaries[id] = reportsummary.ControlSummary{ControlID: id, Name: "Control " + id, ScoreFactor: 5.0}
+	}
+	session.ResourcesResult[allPathTypesResourceID] = result
+	session.Report.SummaryDetails = reportsummary.SummaryDetails{Controls: summaries}
+
+	out := renderResourceTable(t, session, true)
+
+	assert.Equal(t, 3*controlCount, strings.Count(out, "(line "), "one annotation per path per control")
+	assert.Equal(t, controlCount, strings.Count(out, "privileged=false (line 14)"))
+	assert.Equal(t, controlCount, strings.Count(out, "spec.template.spec.hostNetwork (line 8)"))
+	assert.Equal(t, controlCount, strings.Count(out, "spec.template.spec.automountServiceAccountToken (line 9)"))
+	for _, line := range strings.Split(out, "\n") {
+		assert.LessOrEqual(t, strings.Count(line, "(line "), 1, "no path annotated twice: %q", line)
+	}
 }
