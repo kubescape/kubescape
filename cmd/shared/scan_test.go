@@ -2,10 +2,13 @@ package shared
 
 import (
 	"testing"
+	"time"
 
 	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/pkg/imagescan"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestValidateScanFormat(t *testing.T) {
@@ -223,6 +226,45 @@ func TestValidateCommonScanFlags(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestApplyDBAgeGatePresence(t *testing.T) {
+	newCmd := func() *cobra.Command {
+		cmd := &cobra.Command{}
+		cmd.Flags().Bool("fail-on-stale-db", false, "")
+		cmd.Flags().Duration("max-db-age", 0, "")
+		return cmd
+	}
+
+	t.Run("unset flags leave presence false", func(t *testing.T) {
+		scanInfo := &cautils.ScanInfo{}
+		ApplyDBAgeGatePresence(newCmd(), scanInfo)
+		assert.False(t, scanInfo.FailOnStaleDBSet)
+		assert.False(t, scanInfo.MaxDBAgeSet)
+	})
+
+	t.Run("explicit false and zero mark presence", func(t *testing.T) {
+		cmd := newCmd()
+		require.NoError(t, cmd.Flags().Set("fail-on-stale-db", "false"))
+		require.NoError(t, cmd.Flags().Set("max-db-age", "0s"))
+		scanInfo := &cautils.ScanInfo{}
+		ApplyDBAgeGatePresence(cmd, scanInfo)
+		assert.True(t, scanInfo.FailOnStaleDBSet)
+		assert.True(t, scanInfo.MaxDBAgeSet)
+	})
+
+	t.Run("explicit values beat conflicting env end to end", func(t *testing.T) {
+		t.Setenv("KS_FAIL_ON_STALE_DB", "true")
+		t.Setenv("KS_MAX_DB_AGE", "2160h")
+		cmd := newCmd()
+		require.NoError(t, cmd.Flags().Set("fail-on-stale-db", "false"))
+		require.NoError(t, cmd.Flags().Set("max-db-age", "0s"))
+		scanInfo := &cautils.ScanInfo{}
+		require.NoError(t, ValidateCommonScanFlags(cmd, scanInfo, ScanFormats))
+		fail, maxAge := imagescan.ResolveDBAgeGate(scanInfo.FailOnStaleDB, scanInfo.FailOnStaleDBSet, scanInfo.MaxDBAge, scanInfo.MaxDBAgeSet)
+		assert.False(t, fail, "explicit --fail-on-stale-db=false must win over env true")
+		assert.Equal(t, time.Duration(0), maxAge, "explicit --max-db-age=0 must win over env 2160h")
+	})
 }
 
 func TestValidateKindFilters(t *testing.T) {

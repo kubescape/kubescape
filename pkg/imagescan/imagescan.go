@@ -50,7 +50,13 @@ func (c RegistryCredentials) hasAuthenticator() bool {
 	return c.Token != "" || (c.Username != "" && c.Password != "")
 }
 
-func NewDefaultDBConfig(grypeURL string, skipDBUpdate bool) (distribution.Config, installation.Config, bool, error) {
+// NewDefaultDBConfig builds the Grype distribution/installation configs.
+// failOnStale opts into the strict freshness gate: when an update will be
+// attempted (shouldUpdate), grype's RequireUpdateCheck is enabled so a failed
+// update check surfaces as a load error instead of silently serving the stale
+// cache. A successful check that finds nothing newer still proceeds, leaving
+// the warn-only path for genuinely stale upstream data.
+func NewDefaultDBConfig(grypeURL string, skipDBUpdate bool, failOnStale bool) (distribution.Config, installation.Config, bool, error) {
 	dir := filepath.Join(xdg.CacheHome, defaultDBDirName)
 	finalURL := defaultGrypeListingURL
 
@@ -78,7 +84,8 @@ func NewDefaultDBConfig(grypeURL string, skipDBUpdate bool) (distribution.Config
 	shouldUpdate := !skipDBUpdate
 
 	return distribution.Config{
-			LatestURL: finalURL,
+			LatestURL:          finalURL,
+			RequireUpdateCheck: shouldUpdate && failOnStale,
 		}, installation.Config{
 			DBRootDir: dir,
 		}, shouldUpdate, nil
@@ -179,14 +186,16 @@ func CheckDBAge(status *vulnerability.ProviderStatus, maxAge time.Duration) (war
 		builtUTC.Format("2006-01-02"), days, maxAge), true
 }
 
-// ResolveDBAgeGate merges explicit flag values with KS_* env fallbacks.
-// Flags win when set (fail=true or maxAge>0); otherwise env applies.
+// ResolveDBAgeGate merges explicit CLI values with KS_* env fallbacks using
+// tri-state presence: an explicitly passed flag (even false/zero) always wins
+// over the environment; the environment applies only when the flag was left
+// at its default. Precedence: CLI (when set) → env → default.
 // Returns the effective fail flag and max age (<=0 still means DefaultMaxDBAge;
-// callers pass it straight to CheckDBAge). An unparseable env duration is
-// ignored (warned once) rather than failing the scan.
-func ResolveDBAgeGate(failFlag bool, maxAge time.Duration) (bool, time.Duration) {
+// callers pass it straight to CheckDBAge). An unparseable env value is
+// ignored (warned) rather than failing the scan.
+func ResolveDBAgeGate(failFlag, failSet bool, maxAge time.Duration, maxSet bool) (bool, time.Duration) {
 	fail := failFlag
-	if !fail {
+	if !failSet {
 		if v, ok := os.LookupEnv(envFailOnStaleDB); ok {
 			if b, err := strconv.ParseBool(strings.TrimSpace(v)); err == nil {
 				fail = b
@@ -195,7 +204,7 @@ func ResolveDBAgeGate(failFlag bool, maxAge time.Duration) (bool, time.Duration)
 			}
 		}
 	}
-	if maxAge <= 0 {
+	if !maxSet {
 		if v, ok := os.LookupEnv(envMaxDBAge); ok {
 			if d, err := time.ParseDuration(strings.TrimSpace(v)); err == nil && d > 0 {
 				maxAge = d
@@ -209,16 +218,22 @@ func ResolveDBAgeGate(failFlag bool, maxAge time.Duration) (bool, time.Duration)
 
 // EnforceDBAge warns on any stale/unknown DB and returns a fatal error only when
 // the caller opted into fail-closed (failOnStale) AND the DB was loaded without
-// a fresh update (shouldUpdate=false). A stale DB that was just updated means
-// upstream itself hasn't published — warn only, never fail. Patch (always
-// shouldUpdate=true) therefore warns but never fails. Must be called once per
-// invocation right after service creation, before scanning.
+// a fresh update (shouldUpdate=false).
+//
+// Both failOnStale and maxAge must already be resolved (see ResolveDBAgeGate);
+// this function performs no environment lookup itself.
+//
+// A stale DB served after a requested update means the update check succeeded
+// but upstream has nothing newer — warn only, never fail. Callers running the
+// strict gate pass RequireUpdateCheck through NewDefaultDBConfig, so a failed
+// update check surfaces as a load error before this function is ever reached.
+// Patch (always shouldUpdate=true) therefore warns but never fails. Must be
+// called once per invocation right after service creation, before scanning.
 func EnforceDBAge(svc *Service, shouldUpdate bool, failOnStale bool, maxAge time.Duration) error {
 	if svc == nil {
 		return nil
 	}
-	fail, effectiveMax := ResolveDBAgeGate(failOnStale, maxAge)
-	warn, stale := CheckDBAge(svc.VulnDBStatus(), effectiveMax)
+	warn, stale := CheckDBAge(svc.VulnDBStatus(), maxAge)
 	if warn != "" {
 		if !shouldUpdate {
 			logger.L().Warning(warn + " (database update was skipped — run once without --skip-db-update to refresh it)")
@@ -228,7 +243,7 @@ func EnforceDBAge(svc *Service, shouldUpdate bool, failOnStale bool, maxAge time
 			logger.L().Warning(warn)
 		}
 	}
-	if stale && fail && !shouldUpdate {
+	if stale && failOnStale && !shouldUpdate {
 		return fmt.Errorf("vulnerability DB is stale: %s (use --max-db-age to allow older databases, or refresh the DB)", warn)
 	}
 	return nil

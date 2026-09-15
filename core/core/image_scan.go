@@ -383,7 +383,8 @@ func (ks *Kubescape) ScanImageContext(ctx context.Context, imgScanInfo *ksmetav1
 
 	logger.L().Start(imageScanStartMessage(images))
 
-	distCfg, installCfg, shouldUpdate, err := imagescan.NewDefaultDBConfig(scanInfo.ListingURL, scanInfo.SkipDBUpdate)
+	failOnStale, maxDBAge := imagescan.ResolveDBAgeGate(scanInfo.FailOnStaleDB, scanInfo.FailOnStaleDBSet, scanInfo.MaxDBAge, scanInfo.MaxDBAgeSet)
+	distCfg, installCfg, shouldUpdate, err := imagescan.NewDefaultDBConfig(scanInfo.ListingURL, scanInfo.SkipDBUpdate, failOnStale)
 	if err != nil {
 		logger.L().StopError(fmt.Sprintf("Invalid Grype database URL '%s': %v", scanInfo.ListingURL, err))
 		return false, err
@@ -397,7 +398,7 @@ func (ks *Kubescape) ScanImageContext(ctx context.Context, imgScanInfo *ksmetav1
 
 	// Warn on a stale vulnerability DB (always); fail only with --fail-on-stale-db.
 	// The failure is deferred until after results are printed so the user keeps the report.
-	staleDBErr := imagescan.EnforceDBAge(svc, shouldUpdate, scanInfo.FailOnStaleDB, scanInfo.MaxDBAge)
+	staleDBErr := imagescan.EnforceDBAge(svc, shouldUpdate, failOnStale, maxDBAge)
 
 	var exceptionPolicies []VulnerabilitiesIgnorePolicy
 	if imgScanInfo.Exceptions != "" {
