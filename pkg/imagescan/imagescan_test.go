@@ -962,3 +962,32 @@ func TestLoadVulnerabilityDBStrictFailsOnCheckError(t *testing.T) {
 	require.Error(t, err)
 	assert.NotContains(t, err.Error(), "unable to update db")
 }
+
+// TestPatchBoundaryStaysWarnOnly replays patch's exact boundary contract: it
+// pins fail=false as if explicitly passed (so even KS_FAIL_ON_STALE_DB=true
+// cannot enable strictness), builds the DB config without the update check,
+// and enforces warn-only on a stale cache. A transient mirror failure must
+// therefore never abort patching when a usable cache exists.
+func TestPatchBoundaryStaysWarnOnly(t *testing.T) {
+	t.Setenv("KS_FAIL_ON_STALE_DB", "true")
+	t.Setenv("KS_MAX_DB_AGE", "72h")
+
+	fixedNow := time.Date(2026, 9, 14, 12, 0, 0, 0, time.UTC)
+	oldNow := dbNowFunc
+	dbNowFunc = func() time.Time { return fixedNow }
+	defer func() { dbNowFunc = oldNow }()
+
+	// Patch boundary: strict pinned off, warning threshold still env-resolved.
+	fail, maxDBAge := ResolveDBAgeGate(false, true, 0, false)
+	assert.False(t, fail)
+	assert.Equal(t, 72*time.Hour, maxDBAge)
+
+	distCfg, _, shouldUpdate, err := NewDefaultDBConfig("", false, fail)
+	require.NoError(t, err)
+	assert.True(t, shouldUpdate)
+	assert.False(t, distCfg.RequireUpdateCheck)
+
+	// Usable-but-stale cache under a failed refresh: warn-only, never fatal.
+	stale := &vulnerability.ProviderStatus{Built: fixedNow.Add(-30 * 24 * time.Hour)}
+	assert.NoError(t, EnforceDBAge(&Service{dbStatus: stale}, shouldUpdate, fail, maxDBAge))
+}
