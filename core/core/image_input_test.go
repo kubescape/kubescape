@@ -54,6 +54,13 @@ func TestClassifyImageInput(t *testing.T) {
 		{name: "snap remote store name", image: "snap:firefox", wantRegistry: false, wantScheme: "snap"},
 		{name: "uppercase snap scheme", image: "SNAP:/tmp/img.snap", wantRegistry: false, wantScheme: "SNAP"},
 		{name: "snap-named repo in registry stays registry", image: "example.io/snap/image:v1", wantRegistry: true},
+		// Generic "image:" selector (Syft's ImageTag): peel once, reclassify.
+		{name: "image selector with existing local file", image: "image:archive.tar", statExisting: []string{"archive.tar"}, wantRegistry: false, wantScheme: "image"},
+		{name: "image selector with registry remainder", image: "image:nginx", wantRegistry: true},
+		{name: "image selector with nested archive scheme", image: "image:docker-archive:/tmp/x.tar", wantRegistry: false, wantScheme: "docker-archive"},
+		{name: "image selector with nested registry ref", image: "image:image:nginx", wantRegistry: true},
+		{name: "uppercase image selector", image: "IMAGE:archive.tar", statExisting: []string{"archive.tar"}, wantRegistry: false, wantScheme: "IMAGE"},
+		{name: "image-named repo in registry stays registry", image: "example.io/image/foo:v1", wantRegistry: true},
 		{name: "bare tar existing file", image: "/tmp/x.tar", statExisting: []string{"/tmp/x.tar"}, wantRegistry: false},
 		{name: "absolute tar missing file still non-registry", image: "/tmp/missing.tar", wantRegistry: false},
 		{name: "bare tgz path", image: "./rel/a.tgz", statExisting: []string{"./rel/a.tgz"}, wantRegistry: false},
@@ -216,4 +223,87 @@ func TestBuildImageScanJobsEmptyExceptionsFile(t *testing.T) {
 		require.Len(t, jobs, 1)
 		assert.NoError(t, jobs[0].ExceptionErr)
 	})
+}
+
+// Syft's generic "image:" selector peels once: the remainder shares the
+// normal pipeline, so "image:nginx" matches nginx-targeted policies while
+// "image:docker-archive:/x.tar" is rejected as local content.
+func TestImageSelectorResolvesStrippedIdentity(t *testing.T) {
+	policies := []VulnerabilitiesIgnorePolicy{
+		{
+			Metadata:        Metadata{Name: "x"},
+			Kind:            "VulnerabilitiesIgnorePolicy",
+			Targets:         []Target{{DesignatorType: "Attributes", Attributes: Attributes{ImageName: "nginx"}}},
+			Vulnerabilities: []string{"CVE-2023-42365"},
+		},
+	}
+	vulns, _, err := getUniqueVulnerabilitiesAndSeverities(policies, "image:nginx", true)
+	require.NoError(t, err)
+	assert.Contains(t, vulns, "CVE-2023-42365")
+
+	_, _, err = getUniqueVulnerabilitiesAndSeverities(policies, "image:docker-archive:/tmp/x.tar", true)
+	assert.ErrorContains(t, err, "non-registry input")
+}
+
+// Explicit daemon/registry selectors resolve exception identity from the
+// stripped remainder: "docker:nginx" shares CVEs with "nginx", and tagged
+// forms like "docker:nginx:1.27" parse instead of failing as unparseable.
+func TestDaemonSelectorResolvesStrippedIdentity(t *testing.T) {
+	policies := []VulnerabilitiesIgnorePolicy{
+		{
+			Metadata:        Metadata{Name: "x"},
+			Kind:            "VulnerabilitiesIgnorePolicy",
+			Targets:         []Target{{DesignatorType: "Attributes", Attributes: Attributes{ImageName: "nginx"}}},
+			Vulnerabilities: []string{"CVE-2023-42365"},
+		},
+	}
+	for _, input := range []string{"docker:nginx", "docker:nginx:1.27", "podman:nginx", "containerd:nginx", "oci-registry:nginx", "oci-model:nginx"} {
+		vulns, _, err := getUniqueVulnerabilitiesAndSeverities(policies, input, true)
+		require.NoError(t, err, "input %q must resolve", input)
+		assert.Contains(t, vulns, "CVE-2023-42365", "input %q must share nginx CVEs", input)
+	}
+	_, _, err := getUniqueVulnerabilitiesAndSeverities(policies, "docker:!!!", true)
+	assert.Error(t, err, "unparseable remainder must fail loudly")
+}
+
+// The preflight fail-fast mirror must agree with the resolver: stripped
+// selectors that resolve must not trigger it, unresolvable ones must.
+func TestIsNonRegistryForExceptionsMirrorsResolver(t *testing.T) {
+	tests := []struct {
+		image string
+		want  bool
+	}{
+		{"nginx:1.27", false},
+		{"docker-archive:/tmp/x.tar", true},
+		{"image:nginx", false},
+		{"image:docker-archive:/tmp/x.tar", true},
+		{"docker:nginx", false},
+		{"docker:nginx:1.27", false},
+		{"docker:!!!", true},
+		{"podman:nginx", false},
+		{"   ", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.image, func(t *testing.T) {
+			assert.Equal(t, tt.want, isNonRegistryForExceptions(tt.image, osStatExists))
+		})
+	}
+}
+
+// Daemon/registry selectors never consult the filesystem: a local file named
+// exactly like the stripped remainder must not shadow the daemon identity
+// (grype narrows daemon selectors to daemon/pull providers, never file stat).
+func TestDaemonSelectorIgnoresCollidingLocalFile(t *testing.T) {
+	shadow := func(string) bool { return true } // every path "exists"
+	attrs, _, err := imageAttributesForExceptions("docker:nginx", shadow)
+	require.NoError(t, err)
+	assert.Equal(t, "nginx", attrs.ImageName)
+	assert.False(t, isNonRegistryForExceptions("docker:nginx", shadow))
+
+	// The generic image: selector keeps file-first semantics: the same
+	// shadowing file does route to non-registry, matching syft's provider
+	// order (local sources before pulls).
+	_, scheme, err := imageAttributesForExceptions("image:nginx", shadow)
+	assert.Error(t, err)
+	assert.Equal(t, "image", scheme)
 }
