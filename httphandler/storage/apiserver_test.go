@@ -675,6 +675,141 @@ func TestStorePostureReportResults_SkipsOrphanedRoleBinding(t *testing.T) {
 	assert.Equal(t, "pod-test-pod", summaries.Items[0].Name)
 }
 
+func TestStorePostureReportResults_ContinuesAfterUnstorableResult(t *testing.T) {
+	ctx := context.Background()
+
+	// An object the storage backend refuses. The real case is a name at the
+	// 253-byte limit, which the file backend cannot write.
+	//nolint:staticcheck // The pinned storage client lacks the summary apply schema required by NewClientset.
+	client := fake.NewSimpleClientset()
+	storeErr := errors.New("open payload file: file name too long")
+	client.PrependReactor("create", "workloadconfigurationscansummaries", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		summary, ok := action.(k8stesting.CreateAction).GetObject().(*v1beta1.WorkloadConfigurationScanSummary)
+		if ok && summary.Name == "pod-unstorable" {
+			return true, nil, storeErr
+		}
+		return false, nil, nil
+	})
+	store := &APIServerStore{StorageClient: client.SpdxV1beta1(), namespace: "kubescape"}
+
+	pod := func(name string) map[string]any {
+		return map[string]any{
+			"apiVersion": "v1",
+			"kind":       "Pod",
+			"metadata":   map[string]any{"name": name, "namespace": "default"},
+		}
+	}
+	pr := &v2.PostureReport{
+		Resources: []reporthandling.Resource{
+			{ResourceID: "unstorable-id", Object: pod("unstorable")},
+			{ResourceID: "storable-id", Object: pod("storable")},
+		},
+		Results: []resourcesresults.Result{
+			{ResourceID: "unstorable-id"},
+			{ResourceID: "storable-id"},
+		},
+	}
+
+	err := store.StorePostureReportResults(ctx, pr)
+
+	// The failure is still reported, and with the backend cause: the storage
+	// helpers log theirs at Warning, which KS_LOGGER_LEVEL=error filters out.
+	assert.ErrorContains(t, err, "failed to store 1 of 2 posture scan results")
+	assert.ErrorIs(t, err, storeErr)
+
+	// ...and the result that came after it was still stored.
+	summaries, listErr := store.StorageClient.WorkloadConfigurationScanSummaries("default").List(ctx, metav1.ListOptions{})
+	assert.NoError(t, listErr)
+	assert.Len(t, summaries.Items, 1)
+	assert.Equal(t, "pod-storable", summaries.Items[0].Name)
+}
+
+func TestStorePostureReportResults_ContinuesAfterUnstorableScan(t *testing.T) {
+	ctx := context.Background()
+
+	// The full scan and its summary are separate objects. A scan that cannot be
+	// written must not stop the summary for the same result.
+	//nolint:staticcheck // The pinned storage client lacks the summary apply schema required by NewClientset.
+	client := fake.NewSimpleClientset()
+	storeErr := errors.New("open payload file: file name too long")
+	client.PrependReactor("create", "workloadconfigurationscans", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		scan, ok := action.(k8stesting.CreateAction).GetObject().(*v1beta1.WorkloadConfigurationScan)
+		if ok && scan.Name == "pod-unstorable" {
+			return true, nil, storeErr
+		}
+		return false, nil, nil
+	})
+	store := &APIServerStore{StorageClient: client.SpdxV1beta1(), namespace: "kubescape", continuousPostureScan: true}
+
+	pod := func(name string) map[string]any {
+		return map[string]any{
+			"apiVersion": "v1",
+			"kind":       "Pod",
+			"metadata":   map[string]any{"name": name, "namespace": "default"},
+		}
+	}
+	pr := &v2.PostureReport{
+		Resources: []reporthandling.Resource{
+			{ResourceID: "unstorable-id", Object: pod("unstorable")},
+			{ResourceID: "storable-id", Object: pod("storable")},
+		},
+		Results: []resourcesresults.Result{
+			{ResourceID: "unstorable-id"},
+			{ResourceID: "storable-id"},
+		},
+	}
+
+	err := store.StorePostureReportResults(ctx, pr)
+
+	assert.ErrorContains(t, err, "failed to store 1 of 2 posture scan results")
+	assert.ErrorIs(t, err, storeErr)
+
+	// Both summaries land, including the one whose full scan was refused.
+	summaries, listErr := store.StorageClient.WorkloadConfigurationScanSummaries("default").List(ctx, metav1.ListOptions{})
+	assert.NoError(t, listErr)
+	assert.Len(t, summaries.Items, 2)
+
+	// Only the refused scan is missing.
+	scans, listErr := store.StorageClient.WorkloadConfigurationScans("default").List(ctx, metav1.ListOptions{})
+	assert.NoError(t, listErr)
+	assert.Len(t, scans.Items, 1)
+	assert.Equal(t, "pod-storable", scans.Items[0].Name)
+}
+
+// TestStorePostureReportResults_ReportsTheFirstFailureForAResult covers a result
+// whose scan and summary both fail. The aggregate must carry the scan error,
+// which came first, rather than the summary error that followed it.
+func TestStorePostureReportResults_ReportsTheFirstFailureForAResult(t *testing.T) {
+	ctx := context.Background()
+
+	//nolint:staticcheck // The pinned storage client lacks the summary apply schema required by NewClientset.
+	client := fake.NewSimpleClientset()
+	scanErr := errors.New("scan refused")
+	summaryErr := errors.New("summary refused")
+	client.PrependReactor("create", "workloadconfigurationscans", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, scanErr
+	})
+	client.PrependReactor("create", "workloadconfigurationscansummaries", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, summaryErr
+	})
+	store := &APIServerStore{StorageClient: client.SpdxV1beta1(), namespace: "kubescape", continuousPostureScan: true}
+
+	pr := &v2.PostureReport{
+		Resources: []reporthandling.Resource{{ResourceID: "pod-id", Object: map[string]any{
+			"apiVersion": "v1",
+			"kind":       "Pod",
+			"metadata":   map[string]any{"name": "unstorable", "namespace": "default"},
+		}}},
+		Results: []resourcesresults.Result{{ResourceID: "pod-id"}},
+	}
+
+	err := store.StorePostureReportResults(ctx, pr)
+
+	assert.ErrorContains(t, err, "failed to store 1 of 1 posture scan results")
+	assert.ErrorIs(t, err, scanErr)
+	assert.NotErrorIs(t, err, summaryErr)
+}
+
 func TestStorePostureReportResults_NonRecoverableError(t *testing.T) {
 	store := NewFakeAPIServerStorage("kubescape")
 	ctx := context.Background()
