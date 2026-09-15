@@ -203,6 +203,10 @@ type ScanInfo struct {
 	cleanups                  []func()
 	ListingURL                string            //Grype vulnerability database URL
 	SkipDBUpdate              bool              // Do not update the vulnerability database before image scanning
+	FailOnStaleDB             bool              // Fail image scans when the vulnerability DB is older than MaxDBAge (default: warn only)
+	FailOnStaleDBSet          bool              // True when --fail-on-stale-db was explicitly passed (even false); the CLI populates this via Cobra Changed so explicit values win over KS_FAIL_ON_STALE_DB. Programmatic setters must set it alongside FailOnStaleDB.
+	MaxDBAge                  time.Duration     // Max allowed vulnerability DB age (default 120h); <=0 selects the default
+	MaxDBAgeSet               bool              // True when --max-db-age was explicitly passed (even 0); the CLI populates this via Cobra Changed so explicit values win over KS_MAX_DB_AGE. Programmatic setters must set it alongside MaxDBAge.
 	RegistryMapping           map[string]string // Map internal registry URLs to external ones
 	RegistryAuthority         string            // Registry host[:port] explicit credentials apply to
 	RegistryUsername          string            // Username for workload image registry authentication

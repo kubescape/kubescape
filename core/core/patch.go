@@ -54,7 +54,13 @@ func (ks *Kubescape) Patch(patchInfo *ksmetav1.PatchInfo, scanInfo *cautils.Scan
 
 	// Setup the scan service
 	// patch never exposes --skip-db-update; SkipDBUpdate is always false here, so the DB is always updated.
-	distCfg, installCfg, shouldUpdate, err := imagescan.NewDefaultDBConfig(scanInfo.ListingURL, false)
+	// patch never fails on staleness either: it must scan to build the patch
+	// document, so the strict update check stays disabled here even when
+	// requested elsewhere (e.g. via KS_FAIL_ON_STALE_DB) — a transient mirror
+	// failure must not abort patching when a usable cache exists. Only the
+	// warning threshold (maxDBAge) is resolved from flags/env.
+	_, maxDBAge := imagescan.ResolveDBAgeGate(false, true, scanInfo.MaxDBAge, scanInfo.MaxDBAgeSet)
+	distCfg, installCfg, shouldUpdate, err := imagescan.NewDefaultDBConfig(scanInfo.ListingURL, false, false)
 	if err != nil {
 		logger.L().StopError(fmt.Sprintf("Invalid Grype database URL '%s': %v", scanInfo.ListingURL, err))
 		return false, err
@@ -65,6 +71,10 @@ func (ks *Kubescape) Patch(patchInfo *ksmetav1.PatchInfo, scanInfo *cautils.Scan
 		return false, err
 	}
 	defer svc.Close()
+	// Warn on a stale vulnerability DB. Patch always updates (shouldUpdate=true)
+	// without the strict check, so this only ever warns when upstream itself
+	// is stale — it never fails.
+	_ = imagescan.EnforceDBAge(svc, shouldUpdate, false, maxDBAge)
 	creds := imagescan.RegistryCredentials{
 		Username: patchInfo.Username,
 		Password: patchInfo.Password,

@@ -11,6 +11,8 @@ import (
 
 	"github.com/adrg/xdg"
 
+	"github.com/anchore/grype/grype/db/v6/distribution"
+	"github.com/anchore/grype/grype/db/v6/installation"
 	"github.com/anchore/grype/grype/match"
 	grypepkg "github.com/anchore/grype/grype/pkg"
 	"github.com/anchore/grype/grype/vulnerability"
@@ -313,7 +315,7 @@ func TestNewScanServiceWithMatchersIntegration(t *testing.T) {
 		t.Skip("skipping integration test; set KUBESCAPE_INTEGRATION_TESTS=1 to run")
 	}
 	// Test the actual NewScanServiceWithMatchers function
-	distCfg, installCfg, _, _ := NewDefaultDBConfig("", false)
+	distCfg, installCfg, _, _ := NewDefaultDBConfig("", false, false)
 
 	// Test with default matchers enabled
 	svcWithDefault, err := NewScanServiceWithMatchers(distCfg, installCfg, true)
@@ -623,13 +625,15 @@ func TestValidateDBLoad(t *testing.T) {
 
 func TestNewDefaultDBConfig(t *testing.T) {
 	tests := []struct {
-		name         string
-		grypeURL     string
-		skipDBUpdate bool
-		wantURL      string
-		wantErr      string
-		wantDir      string
-		wantUpdate   bool
+		name             string
+		grypeURL         string
+		skipDBUpdate     bool
+		failOnStale      bool
+		wantURL          string
+		wantErr          string
+		wantDir          string
+		wantUpdate       bool
+		wantRequireCheck bool
 	}{
 		{
 			name:       "default config uses bundled database URL",
@@ -640,6 +644,22 @@ func TestNewDefaultDBConfig(t *testing.T) {
 		{
 			name:         "skip database update sets shouldUpdate to false",
 			skipDBUpdate: true,
+			wantURL:      defaultGrypeListingURL,
+			wantDir:      filepath.Join(xdg.CacheHome, defaultDBDirName),
+			wantUpdate:   false,
+		},
+		{
+			name:             "strict gate requires the update check when updating",
+			failOnStale:      true,
+			wantURL:          defaultGrypeListingURL,
+			wantDir:          filepath.Join(xdg.CacheHome, defaultDBDirName),
+			wantUpdate:       true,
+			wantRequireCheck: true,
+		},
+		{
+			name:         "strict gate without update requires nothing",
+			skipDBUpdate: true,
+			failOnStale:  true,
 			wantURL:      defaultGrypeListingURL,
 			wantDir:      filepath.Join(xdg.CacheHome, defaultDBDirName),
 			wantUpdate:   false,
@@ -665,7 +685,7 @@ func TestNewDefaultDBConfig(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			distCfg, installCfg, shouldUpdate, err := NewDefaultDBConfig(tt.grypeURL, tt.skipDBUpdate)
+			distCfg, installCfg, shouldUpdate, err := NewDefaultDBConfig(tt.grypeURL, tt.skipDBUpdate, tt.failOnStale)
 			if tt.wantErr != "" {
 				require.Error(t, err)
 				assert.EqualError(t, err, tt.wantErr)
@@ -676,6 +696,7 @@ func TestNewDefaultDBConfig(t *testing.T) {
 			assert.Equal(t, tt.wantURL, distCfg.LatestURL)
 			assert.Equal(t, tt.wantDir, installCfg.DBRootDir)
 			assert.Equal(t, tt.wantUpdate, shouldUpdate)
+			assert.Equal(t, tt.wantRequireCheck, distCfg.RequireUpdateCheck)
 		})
 	}
 }
@@ -726,7 +747,7 @@ func TestNewDefaultDBConfig_SanitizationHarden(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			distCfg, _, _, err := NewDefaultDBConfig(tt.inputURL, false)
+			distCfg, _, _, err := NewDefaultDBConfig(tt.inputURL, false, false)
 
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("NewDefaultDBConfig() error = %v, wantErr %v", err, tt.wantErr)
@@ -801,7 +822,7 @@ func TestNewScanServiceIntegration(t *testing.T) {
 	if testing.Short() || os.Getenv("KUBESCAPE_INTEGRATION_TESTS") != "1" {
 		t.Skip("skipping integration test; set KUBESCAPE_INTEGRATION_TESTS=1 to run")
 	}
-	distCfg, installCfg, _, _ := NewDefaultDBConfig("", false)
+	distCfg, installCfg, _, _ := NewDefaultDBConfig("", false, false)
 
 	svc, err := NewScanService(distCfg, installCfg)
 	require.NoError(t, err)
@@ -820,4 +841,153 @@ func TestWrapDBLoadError(t *testing.T) {
 		assert.ErrorContains(t, got, "local vulnerability database could not be used")
 		assert.ErrorContains(t, got, "--skip-db-update")
 	})
+}
+
+func TestCheckDBAge(t *testing.T) {
+	fixedNow := time.Date(2026, 9, 14, 12, 0, 0, 0, time.UTC)
+	oldNow := dbNowFunc
+	dbNowFunc = func() time.Time { return fixedNow }
+	defer func() { dbNowFunc = oldNow }()
+
+	maxAge := 5 * 24 * time.Hour
+	tests := []struct {
+		name      string
+		status    *vulnerability.ProviderStatus
+		maxAge    time.Duration
+		wantWarn  bool
+		wantStale bool
+	}{
+		{"nil status is fresh", nil, maxAge, false, false},
+		{"zero Built warns but never fails", &vulnerability.ProviderStatus{}, maxAge, true, false},
+		{"fresh DB is silent", &vulnerability.ProviderStatus{Built: fixedNow.Add(-24 * time.Hour)}, maxAge, false, false},
+		{"boundary is fresh", &vulnerability.ProviderStatus{Built: fixedNow.Add(-maxAge)}, maxAge, false, false},
+		{"stale DB warns and flags", &vulnerability.ProviderStatus{Built: fixedNow.Add(-10 * 24 * time.Hour)}, maxAge, true, true},
+		{"future Built warns but never fails", &vulnerability.ProviderStatus{Built: fixedNow.Add(time.Hour)}, maxAge, true, false},
+		{"custom max age honored", &vulnerability.ProviderStatus{Built: fixedNow.Add(-8 * 24 * time.Hour)}, 10 * 24 * time.Hour, false, false},
+		{"non-positive max age selects default", &vulnerability.ProviderStatus{Built: fixedNow.Add(-10 * 24 * time.Hour)}, 0, true, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			warn, stale := CheckDBAge(tt.status, tt.maxAge)
+			assert.Equal(t, tt.wantStale, stale)
+			if tt.wantWarn {
+				assert.NotEmpty(t, warn)
+			} else {
+				assert.Empty(t, warn)
+			}
+		})
+	}
+}
+
+func TestEnforceDBAge(t *testing.T) {
+	fixedNow := time.Date(2026, 9, 14, 12, 0, 0, 0, time.UTC)
+	oldNow := dbNowFunc
+	dbNowFunc = func() time.Time { return fixedNow }
+	defer func() { dbNowFunc = oldNow }()
+
+	stale := &vulnerability.ProviderStatus{Built: fixedNow.Add(-30 * 24 * time.Hour)}
+	fresh := &vulnerability.ProviderStatus{Built: fixedNow.Add(-time.Hour)}
+
+	t.Run("nil service is a no-op", func(t *testing.T) {
+		assert.NoError(t, EnforceDBAge(nil, false, true, 0))
+	})
+	t.Run("fresh DB never errors", func(t *testing.T) {
+		assert.NoError(t, EnforceDBAge(&Service{dbStatus: fresh}, false, true, 0))
+	})
+	t.Run("stale DB warns only by default", func(t *testing.T) {
+		assert.NoError(t, EnforceDBAge(&Service{dbStatus: stale}, false, false, 0))
+	})
+	t.Run("stale DB with skipped update and flag fails", func(t *testing.T) {
+		err := EnforceDBAge(&Service{dbStatus: stale}, false, true, 0)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "--max-db-age")
+	})
+	t.Run("stale DB that was just updated warns only even with flag", func(t *testing.T) {
+		assert.NoError(t, EnforceDBAge(&Service{dbStatus: stale}, true, true, 0))
+	})
+	t.Run("unknown build time never fails", func(t *testing.T) {
+		assert.NoError(t, EnforceDBAge(&Service{dbStatus: &vulnerability.ProviderStatus{}}, false, true, 0))
+	})
+}
+
+func TestResolveDBAgeGate(t *testing.T) {
+	t.Run("flags pass through", func(t *testing.T) {
+		fail, maxAge := ResolveDBAgeGate(true, true, time.Hour, true)
+		assert.True(t, fail)
+		assert.Equal(t, time.Hour, maxAge)
+	})
+	t.Run("env fallback applies when flags unset", func(t *testing.T) {
+		t.Setenv("KS_FAIL_ON_STALE_DB", "true")
+		t.Setenv("KS_MAX_DB_AGE", "72h")
+		fail, maxAge := ResolveDBAgeGate(false, false, 0, false)
+		assert.True(t, fail)
+		assert.Equal(t, 72*time.Hour, maxAge)
+	})
+	t.Run("explicit false beats env true", func(t *testing.T) {
+		t.Setenv("KS_FAIL_ON_STALE_DB", "true")
+		fail, _ := ResolveDBAgeGate(false, true, 0, false)
+		assert.False(t, fail)
+	})
+	t.Run("explicit zero beats env duration", func(t *testing.T) {
+		t.Setenv("KS_MAX_DB_AGE", "2160h")
+		_, maxAge := ResolveDBAgeGate(false, false, 0, true)
+		assert.Equal(t, time.Duration(0), maxAge)
+	})
+	t.Run("invalid env is ignored", func(t *testing.T) {
+		t.Setenv("KS_FAIL_ON_STALE_DB", "notabool")
+		t.Setenv("KS_MAX_DB_AGE", "bogus")
+		fail, maxAge := ResolveDBAgeGate(false, false, 0, false)
+		assert.False(t, fail)
+		assert.Equal(t, time.Duration(0), maxAge)
+	})
+}
+
+func TestLoadVulnerabilityDBStrictFailsOnCheckError(t *testing.T) {
+	unreachable := distribution.Config{
+		LatestURL:          "http://127.0.0.1:9/definitely-not-here",
+		RequireUpdateCheck: true,
+	}
+	installCfg := installation.Config{DBRootDir: t.TempDir()}
+
+	// Strict gate: a failed update check surfaces as a load error instead of
+	// silently serving the (absent/stale) cache.
+	_, _, err := NewVulnerabilityDB(unreachable, installCfg, true)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unable to update db")
+
+	// Lenient default: the same failure is swallowed by grype and surfaces
+	// later as a missing/unusable local database, never as an update error.
+	unreachable.RequireUpdateCheck = false
+	_, _, err = NewVulnerabilityDB(unreachable, installCfg, true)
+	require.Error(t, err)
+	assert.NotContains(t, err.Error(), "unable to update db")
+}
+
+// TestPatchBoundaryStaysWarnOnly replays patch's exact boundary contract: it
+// pins fail=false as if explicitly passed (so even KS_FAIL_ON_STALE_DB=true
+// cannot enable strictness), builds the DB config without the update check,
+// and enforces warn-only on a stale cache. A transient mirror failure must
+// therefore never abort patching when a usable cache exists.
+func TestPatchBoundaryStaysWarnOnly(t *testing.T) {
+	t.Setenv("KS_FAIL_ON_STALE_DB", "true")
+	t.Setenv("KS_MAX_DB_AGE", "72h")
+
+	fixedNow := time.Date(2026, 9, 14, 12, 0, 0, 0, time.UTC)
+	oldNow := dbNowFunc
+	dbNowFunc = func() time.Time { return fixedNow }
+	defer func() { dbNowFunc = oldNow }()
+
+	// Patch boundary: strict pinned off, warning threshold still env-resolved.
+	fail, maxDBAge := ResolveDBAgeGate(false, true, 0, false)
+	assert.False(t, fail)
+	assert.Equal(t, 72*time.Hour, maxDBAge)
+
+	distCfg, _, shouldUpdate, err := NewDefaultDBConfig("", false, fail)
+	require.NoError(t, err)
+	assert.True(t, shouldUpdate)
+	assert.False(t, distCfg.RequireUpdateCheck)
+
+	// Usable-but-stale cache under a failed refresh: warn-only, never fatal.
+	stale := &vulnerability.ProviderStatus{Built: fixedNow.Add(-30 * 24 * time.Hour)}
+	assert.NoError(t, EnforceDBAge(&Service{dbStatus: stale}, shouldUpdate, fail, maxDBAge))
 }
