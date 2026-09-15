@@ -105,6 +105,13 @@ func validateImageExceptionTargetRegexes(policies []VulnerabilitiesIgnorePolicy)
 // existence and is injectable so tests stay hermetic; callers pass osStatExists.
 //
 // Classification uses exact input semantics in this order:
+//  0. generic "image:" prefix (Syft's ImageTag; every stereoscope archive/SIF/
+//     OCI-directory provider is tagged "image" and grype strips that tag via
+//     ExtractSchemeSource before resolution) — peel exactly once, then
+//     re-classify the remainder through the normal pipeline (scheme → stat →
+//     tar → parse). Peeling once reproduces grype for every shape, including
+//     "image:image:nginx" where the remainder "image:nginx" correctly derives
+//     the synthetic identity docker.io/library/image:nginx.
 //  1. known local-source scheme (docker-archive:, oci-dir:, dir:, purl:,
 //     local-file:, local-directory:, singularity:, snap:, ...) → non-registry;
 //  2. the RAW trimmed input exists on disk → non-registry. Checking the raw
@@ -123,6 +130,24 @@ func classifyImageInput(img string, stat func(string) bool) (registry bool, sche
 	if trimmed == "" {
 		return false, "", fmt.Errorf("image name cannot be empty")
 	}
+	if rest, prefix := peelGenericImageSelector(trimmed); rest != "" {
+		registry, innerScheme, errEmpty := classifyRemainder(rest, stat)
+		if errEmpty != nil {
+			return false, prefix, errEmpty
+		}
+		if !registry && innerScheme == "" {
+			return false, prefix, nil
+		}
+		return registry, innerScheme, nil
+	}
+	return classifyRemainder(trimmed, stat)
+}
+
+// classifyRemainder runs steps 1-5 of the pipeline on an already-trimmed,
+// already-peeled input. Split from classifyImageInput so the generic "image:"
+// peel happens exactly once: a nested "image:image:nginx" remainder keeps its
+// inner prefix and derives docker.io/library/image:nginx, matching grype.
+func classifyRemainder(trimmed string, stat func(string) bool) (registry bool, scheme string, errEmpty error) {
 	if scheme := detectScheme(trimmed); scheme != "" {
 		return false, scheme, nil
 	}
@@ -138,6 +163,27 @@ func classifyImageInput(img string, stat func(string) bool) (registry bool, sche
 		return false, "", nil
 	}
 	return true, "", nil
+}
+
+// peelGenericImageSelector detects Syft's unstripped generic "image:" prefix
+// (all stereoscope-backed providers are tagged "image" and grype strips that
+// tag via SplitN on the first colon) without treating registry refs that
+// merely contain a slash before the colon as selectors. One peel only.
+func peelGenericImageSelector(trimmed string) (string, string) {
+	lower := strings.ToLower(trimmed)
+	idx := strings.Index(lower, ":")
+	if idx < 0 {
+		return "", ""
+	}
+	candidate := lower[:idx]
+	// No slash guard needed: the only accepted candidate is the bare word
+	// "image", which cannot contain one — so "example.io/image/foo:v1"
+	// never peels.
+	if candidate != "image" {
+		return "", ""
+	}
+	rest := strings.TrimSpace(trimmed[idx+1:])
+	return rest, trimmed[:idx]
 }
 
 // isKnownInputScheme reports whether s is a local-source scheme that can
@@ -186,8 +232,144 @@ func osStatExists(path string) bool {
 
 // isNonRegistryInput is the production wrapper around classifyImageInput.
 func isNonRegistryInput(img string) bool {
-	registry, _, errEmpty := classifyImageInput(img, osStatExists)
+	return isNonRegistryInputWithStat(img, osStatExists)
+}
+
+// isNonRegistryInputWithStat is the injectable-stat variant so exception
+// plumbing stays hermetic in tests; production passes osStatExists.
+func isNonRegistryInputWithStat(img string, stat func(string) bool) bool {
+	registry, _, errEmpty := classifyImageInput(img, stat)
 	return errEmpty != nil || !registry
+}
+
+func isDaemonRegistrySelectorScheme(s string) bool {
+	switch s {
+	case "docker", "podman", "containerd", "oci-registry", "oci-model":
+		return true
+	}
+	return false
+}
+
+func stripRegistrySelectorScheme(trimmed string) (string, string, bool) {
+	idx := strings.Index(trimmed, ":")
+	if idx < 0 {
+		return "", "", false
+	}
+	candidateLower := strings.ToLower(trimmed[:idx])
+	if strings.Contains(candidateLower, "/") || !isDaemonRegistrySelectorScheme(candidateLower) {
+		return "", "", false
+	}
+	rest := strings.TrimSpace(trimmed[idx+1:])
+	return rest, trimmed[:idx], true
+}
+
+func imageAttributesForExceptions(image string, stat func(string) bool) (Attributes, string, error) {
+	trimmed := strings.TrimSpace(image)
+	if rest, scheme, ok := stripRegistrySelectorScheme(trimmed); ok {
+		// Daemon/registry selectors never touch the filesystem (grype
+		// narrows to daemon/pull providers), so the remainder skips the
+		// existence/archive pipeline and goes straight to registry parse:
+		// a local file named like the remainder must not shadow it.
+		if rest == "" {
+			return Attributes{}, scheme, fmt.Errorf("image name cannot be empty")
+		}
+		if attrs, err := getAttributesFromImage(rest); err == nil {
+			return attrs, "", nil
+		}
+		return Attributes{}, scheme, fmt.Errorf("image exceptions cannot target non-registry input %q (detected %q): scan by registry reference or remove --exceptions", image, scheme)
+	}
+	if rest, _ := peelGenericImageSelector(trimmed); rest != "" {
+		if _, _, errEmpty := classifyImageInput(rest, stat); errEmpty != nil {
+			return Attributes{}, "", errEmpty
+		}
+		if isNonRegistryInputWithStat(rest, stat) {
+			_, scheme, _ := classifyImageInput(image, stat)
+			return Attributes{}, scheme, fmt.Errorf("image exceptions cannot target non-registry input %q (detected %q): scan by registry reference or remove --exceptions", image, scheme)
+		}
+		if attrs, err := getAttributesFromImage(rest); err == nil {
+			return attrs, "", nil
+		}
+		return Attributes{}, "", fmt.Errorf("failed to generate image attributes for %q: %w", image, fmt.Errorf("unable to parse stripped remainder %q", rest))
+	}
+	if _, _, errEmpty := classifyImageInput(image, stat); errEmpty != nil {
+		return Attributes{}, "", errEmpty
+	}
+	if isNonRegistryInputWithStat(image, stat) {
+		_, scheme, _ := classifyImageInput(image, stat)
+		return Attributes{}, scheme, fmt.Errorf("image exceptions cannot target non-registry input %q (detected %q): scan by registry reference or remove --exceptions", image, scheme)
+	}
+	attrs, err := getAttributesFromImage(image)
+	if err != nil {
+		return Attributes{}, "", fmt.Errorf("failed to generate image attributes for %q: %w", image, err)
+	}
+	return attrs, "", nil
+}
+
+func matchPolicies(policies []VulnerabilitiesIgnorePolicy, attrs Attributes) ([]string, []string) {
+	uniqueVulns := make(map[string][]string)
+	uniqueSevers := make(map[string][]string)
+	for _, policy := range policies {
+		if isTargetImage(policy.Targets, attrs) {
+			for _, vulnerability := range policy.Vulnerabilities {
+				// grype's IgnoreRule matching is case-sensitive and advisory
+				// sources do not share a single casing convention: CVE IDs
+				// are uppercase, while GHSA IDs keep a lowercase suffix
+				// (e.g. "GHSA-jc7w-c686-c4v9"). Emit the trimmed original
+				// casing plus the uppercased and lowercased forms so users
+				// can list the ID in any casing without the filter silently
+				// missing the match (kubescape issue #1870).
+				vulnerability = strings.TrimSpace(vulnerability)
+				if vulnerability == "" {
+					continue
+				}
+				uniqueVulns[vulnerability] = append(uniqueVulns[vulnerability], vulnerability)
+				vulnerabilityUppercase := strings.ToUpper(vulnerability)
+				if vulnerabilityUppercase != vulnerability {
+					uniqueVulns[vulnerabilityUppercase] = append(uniqueVulns[vulnerabilityUppercase], vulnerability)
+				}
+				vulnerabilityLowercase := strings.ToLower(vulnerability)
+				if vulnerabilityLowercase != vulnerability && vulnerabilityLowercase != vulnerabilityUppercase {
+					uniqueVulns[vulnerabilityLowercase] = append(uniqueVulns[vulnerabilityLowercase], vulnerability)
+				}
+			}
+			for _, severity := range policy.Severities {
+				severityUppercase := strings.ToUpper(severity)
+				uniqueSevers[severityUppercase] = append(uniqueSevers[severityUppercase], severity)
+			}
+		}
+	}
+	uniqueVulnsList := make([]string, 0, len(uniqueVulns))
+	for vuln := range uniqueVulns {
+		uniqueVulnsList = append(uniqueVulnsList, vuln)
+	}
+	uniqueSeversList := make([]string, 0, len(uniqueSevers))
+	for sever := range uniqueSevers {
+		uniqueSeversList = append(uniqueSeversList, sever)
+	}
+	return uniqueVulnsList, uniqueSeversList
+}
+
+func isNonRegistryForExceptions(img string, stat func(string) bool) bool {
+	trimmed := strings.TrimSpace(img)
+	if rest, _, ok := stripRegistrySelectorScheme(trimmed); ok {
+		// Mirror the resolver: daemon/registry selectors skip the
+		// filesystem pipeline; only an unparseable remainder is loud.
+		if rest == "" {
+			return true
+		}
+		_, err := getAttributesFromImage(rest)
+		return err != nil
+	}
+	if rest, _ := peelGenericImageSelector(trimmed); rest != "" {
+		if _, _, errEmpty := classifyImageInput(rest, stat); errEmpty != nil {
+			return true
+		}
+		return isNonRegistryInputWithStat(rest, stat)
+	}
+	if _, _, errEmpty := classifyImageInput(img, stat); errEmpty != nil {
+		return true
+	}
+	return isNonRegistryInputWithStat(img, stat)
 }
 
 // getAttributesFromImage identifies registry, organization, image name and
@@ -275,73 +457,23 @@ func isTargetImage(targets []Target, attributes Attributes) bool {
 // but empty file (valid [] or null) must still reject non-registry inputs,
 // while an unconfigured run keeps the old lenient path.
 func getUniqueVulnerabilitiesAndSeverities(policies []VulnerabilitiesIgnorePolicy, image string, exceptionsConfigured bool) ([]string, []string, error) {
-	// Create maps with slices as values to store unique vulnerabilities and severities (case-insensitive)
-	uniqueVulns := make(map[string][]string)
-	uniqueSevers := make(map[string][]string)
-
 	if len(policies) == 0 && !exceptionsConfigured {
 		return nil, nil, nil
 	}
-	if _, _, errEmpty := classifyImageInput(image, osStatExists); errEmpty != nil {
-		return nil, nil, errEmpty
-	}
-	if isNonRegistryInput(image) {
-		_, scheme, _ := classifyImageInput(image, osStatExists)
-		return nil, nil, fmt.Errorf("image exceptions cannot target non-registry input %q (detected %q): scan by registry reference or remove --exceptions", image, scheme)
-	}
 
-	imageAttributes, err := getAttributesFromImage(image)
+	// Derive the registry identity grype resolves after stripping any
+	// Syft/stereoscope selector; the raw input is preserved for scanner
+	// dispatch (job.Image keeps the original).
+	imageAttributes, _, err := imageAttributesForExceptions(image, osStatExists)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to generate image attributes for %q: %w", image, err)
+		return nil, nil, err
 	}
 
-	// Iterate over each policy and its vulnerabilities/severities
-	for _, policy := range policies {
-		// Include the exceptions only if the image is one of the targets
-		if isTargetImage(policy.Targets, imageAttributes) {
-			for _, vulnerability := range policy.Vulnerabilities {
-				// grype's IgnoreRule matching is case-sensitive and advisory
-				// sources do not share a single casing convention: CVE IDs
-				// are uppercase, while GHSA IDs keep a lowercase suffix
-				// (e.g. "GHSA-jc7w-c686-c4v9"). Emit the trimmed original
-				// casing plus the uppercased and lowercased forms so users
-				// can list the ID in any casing without the filter silently
-				// missing the match (kubescape issue #1870).
-				vulnerability = strings.TrimSpace(vulnerability)
-				if vulnerability == "" {
-					continue
-				}
-				uniqueVulns[vulnerability] = append(uniqueVulns[vulnerability], vulnerability)
-				vulnerabilityUppercase := strings.ToUpper(vulnerability)
-				if vulnerabilityUppercase != vulnerability {
-					uniqueVulns[vulnerabilityUppercase] = append(uniqueVulns[vulnerabilityUppercase], vulnerability)
-				}
-				vulnerabilityLowercase := strings.ToLower(vulnerability)
-				if vulnerabilityLowercase != vulnerability && vulnerabilityLowercase != vulnerabilityUppercase {
-					uniqueVulns[vulnerabilityLowercase] = append(uniqueVulns[vulnerabilityLowercase], vulnerability)
-				}
-			}
+	// Iterate over each policy and its vulnerabilities/severities.
+	// Include the exceptions only if the image is one of the targets.
+	vulns, severs := matchPolicies(policies, imageAttributes)
 
-			for _, severity := range policy.Severities {
-				// Add to slice directly
-				severityUppercase := strings.ToUpper(severity)
-				uniqueSevers[severityUppercase] = append(uniqueSevers[severityUppercase], severity)
-			}
-		}
-	}
-
-	// Extract unique keys (which are unique vulnerabilities/severities) and their slices
-	uniqueVulnsList := make([]string, 0, len(uniqueVulns))
-	for vuln := range uniqueVulns {
-		uniqueVulnsList = append(uniqueVulnsList, vuln)
-	}
-
-	uniqueSeversList := make([]string, 0, len(uniqueSevers))
-	for sever := range uniqueSevers {
-		uniqueSeversList = append(uniqueSeversList, sever)
-	}
-
-	return uniqueVulnsList, uniqueSeversList, nil
+	return vulns, severs, nil
 }
 
 // applyRegistryMapping replaces the registry part of the image name if a match
@@ -521,7 +653,9 @@ func (ks *Kubescape) ScanImageContext(ctx context.Context, imgScanInfo *ksmetav1
 	// Fail fast before the Grype DB download when every image is a
 	// non-registry input combined with --exceptions. The guard keys on flag
 	// presence, not policy count: an explicitly configured empty file still
-	// rejects. Mixed scans fall through
+	// rejects. Source selection mirrors the resolver (isNonRegistryForExceptions)
+	// so stripped selectors (image:, docker:, ...) never false-trigger here
+	// while producing per-image errors later. Mixed scans fall through
 	// to per-image errors so valid registry siblings still scan. Every image
 	// gets its own categorized error (with its own scheme) so multi-archive
 	// runs report each offender, not just the first.
@@ -532,7 +666,7 @@ func (ks *Kubescape) ScanImageContext(ctx context.Context, imgScanInfo *ksmetav1
 				allNonRegistry = false
 				break
 			}
-			if !isNonRegistryInput(image) {
+			if !isNonRegistryForExceptions(image, osStatExists) {
 				allNonRegistry = false
 				break
 			}
@@ -540,7 +674,9 @@ func (ks *Kubescape) ScanImageContext(ctx context.Context, imgScanInfo *ksmetav1
 		if allNonRegistry {
 			errs := make([]error, 0, len(images))
 			for _, image := range images {
-				_, scheme, _ := classifyImageInput(image, osStatExists)
+				// Scheme comes from the resolver so stripped selectors
+				// report the same detected value as per-job errors.
+				_, scheme, _ := imageAttributesForExceptions(image, osStatExists)
 				errs = append(errs, fmt.Errorf("[%s] image exceptions cannot target non-registry input %q (detected %q): scan by registry reference or remove --exceptions %q", ErrCategoryExceptionUnsupported, image, scheme, imgScanInfo.Exceptions))
 			}
 			err := errors.Join(errs...)
