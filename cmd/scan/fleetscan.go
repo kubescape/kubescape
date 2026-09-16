@@ -424,7 +424,7 @@ func fleetScan(baseScanInfo cautils.ScanInfo, ks meta.IKubescape, policyIdentifi
 
 		logger.L().Info("fleet scan: scanning context", helpers.String("context", kubeContext), helpers.String("output", outputPath))
 
-		results, err, elapsed := runFleetContext(kubeContext, contextScanInfo, ks, policyIdentifiers, run)
+		results, elapsed, err := runFleetContext(kubeContext, contextScanInfo, ks, policyIdentifiers, run)
 
 		if wantFleetReport {
 			clusters = append(clusters, newClusterResult(kubeContext, results, err, elapsed))
@@ -478,16 +478,10 @@ func fleetScan(baseScanInfo cautils.ScanInfo, ks meta.IKubescape, policyIdentifi
 	return nil
 }
 
-// runFleetContext owns every piece of process and request state that is scoped
-// to one context in a fleet scan. Both cleanups are deferred before the runner
-// is invoked so they execute on normal returns, errors and panics alike.
-//
-// Restoring the Kubernetes context matters even when a panic will eventually
-// terminate the CLI. The same orchestration is also used by embedded callers,
-// tests and long-running processes that may recover at a higher boundary. If
-// the global context is left pointing at the failed cluster, the next scan can
-// silently read a different cluster from the one it was asked to inspect.
-func runFleetContext(kubeContext string, scanInfo *cautils.ScanInfo, ks meta.IKubescape, policyIdentifiers []cautils.PolicyIdentifier, run fleetRunner) (results *resultshandling.ResultsHandler, err error, elapsed time.Duration) {
+// runFleetContext scopes the Kubernetes context and timeout to one fleet
+// iteration. The deferred cleanup satisfies EnterClusterContext's contract on
+// normal returns, errors and panics without deferring across the whole loop.
+func runFleetContext(kubeContext string, scanInfo *cautils.ScanInfo, ks meta.IKubescape, policyIdentifiers []cautils.PolicyIdentifier, run fleetRunner) (results *resultshandling.ResultsHandler, elapsed time.Duration, err error) {
 	leave := cautils.EnterClusterContext(kubeContext)
 	defer leave()
 
@@ -496,7 +490,7 @@ func runFleetContext(kubeContext string, scanInfo *cautils.ScanInfo, ks meta.IKu
 
 	started := time.Now()
 	results, err = run(ctx, scanInfo, ks, policyIdentifiers)
-	return results, err, time.Since(started)
+	return results, time.Since(started), err
 }
 
 // newClusterResult turns one context's outcome into the row the fleet report

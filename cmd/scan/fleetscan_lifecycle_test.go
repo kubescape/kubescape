@@ -104,7 +104,7 @@ func TestRunFleetContext_RestoresAmbientContextOnEveryReturn(t *testing.T) {
 				return tt.result, tt.runErr
 			}
 
-			got, err, elapsed := runFleetContext("target", lifecycleScanInfo(t, "target"), lifecycleKubescape(), nil, run)
+			got, elapsed, err := runFleetContext("target", lifecycleScanInfo(t, "target"), lifecycleKubescape(), nil, run)
 
 			assert.Equal(t, "target", selectedInside)
 			assert.Equal(t, "ambient", k8sinterface.GetContextName())
@@ -245,7 +245,7 @@ func TestRunFleetContext_PreservesRunnerOutputs(t *testing.T) {
 	wantResults := &resultshandling.ResultsHandler{}
 	wantErr := errors.New("threshold failed")
 	policies := []cautils.PolicyIdentifier{{Kind: "framework", Identifier: "nsa"}}
-	result, err, elapsed := runFleetContext("target", lifecycleScanInfo(t, "target"), lifecycleKubescape(), policies,
+	result, elapsed, err := runFleetContext("target", lifecycleScanInfo(t, "target"), lifecycleKubescape(), policies,
 		func(_ context.Context, info *cautils.ScanInfo, _ meta.IKubescape, gotPolicies []cautils.PolicyIdentifier) (*resultshandling.ResultsHandler, error) {
 			assert.Equal(t, "target", info.GetClusterContextName())
 			assert.Equal(t, policies, gotPolicies)
@@ -265,7 +265,7 @@ func TestRunFleetContext_MeasuresRunnerDuration(t *testing.T) {
 	installLifecycleKubeconfig(t, "ambient", "target")
 
 	const work = 20 * time.Millisecond
-	_, _, elapsed := runFleetContext("target", lifecycleScanInfo(t, "target"), lifecycleKubescape(), nil,
+	_, elapsed, _ := runFleetContext("target", lifecycleScanInfo(t, "target"), lifecycleKubescape(), nil,
 		func(_ context.Context, _ *cautils.ScanInfo, _ meta.IKubescape, _ []cautils.PolicyIdentifier) (*resultshandling.ResultsHandler, error) {
 			time.Sleep(work)
 			return nil, nil
@@ -283,7 +283,7 @@ func TestRunFleetContext_HonorsPerClusterTimeoutAndRestoresContext(t *testing.T)
 	ks := &lifecycleContextKubescape{ctx: context.Background()}
 	var runnerContext context.Context
 
-	result, err, elapsed := runFleetContext("slow", info, ks, nil,
+	result, elapsed, err := runFleetContext("slow", info, ks, nil,
 		func(ctx context.Context, _ *cautils.ScanInfo, _ meta.IKubescape, _ []cautils.PolicyIdentifier) (*resultshandling.ResultsHandler, error) {
 			runnerContext = ctx
 			assert.Equal(t, "slow", k8sinterface.GetContextName())
@@ -308,7 +308,7 @@ func TestRunFleetContext_PropagatesCancelledParentContext(t *testing.T) {
 	info := lifecycleScanInfo(t, "target")
 	info.ScanTimeout = time.Minute
 
-	_, err, _ := runFleetContext("target", info, ks, nil,
+	_, _, err := runFleetContext("target", info, ks, nil,
 		func(ctx context.Context, _ *cautils.ScanInfo, _ meta.IKubescape, _ []cautils.PolicyIdentifier) (*resultshandling.ResultsHandler, error) {
 			assert.Equal(t, "target", k8sinterface.GetContextName())
 			assert.ErrorIs(t, ctx.Err(), context.Canceled)
@@ -327,7 +327,7 @@ func TestRunFleetContext_TimeoutContextIsCancelledAfterFastSuccess(t *testing.T)
 	ks := &lifecycleContextKubescape{ctx: context.Background()}
 	var runnerContext context.Context
 
-	_, err, _ := runFleetContext("target", info, ks, nil,
+	_, _, err := runFleetContext("target", info, ks, nil,
 		func(ctx context.Context, _ *cautils.ScanInfo, _ meta.IKubescape, _ []cautils.PolicyIdentifier) (*resultshandling.ResultsHandler, error) {
 			runnerContext = ctx
 			assert.NoError(t, ctx.Err())
@@ -382,7 +382,7 @@ func TestRunFleetContext_SequentialCallsDoNotLeakContextBetweenClusters(t *testi
 	observed := make([]string, 0, 3)
 	for _, name := range []string{"prod", "staging", "dr"} {
 		info := lifecycleScanInfo(t, name)
-		_, err, _ := runFleetContext(name, info, ks, nil,
+		_, _, err := runFleetContext(name, info, ks, nil,
 			func(_ context.Context, _ *cautils.ScanInfo, _ meta.IKubescape, _ []cautils.PolicyIdentifier) (*resultshandling.ResultsHandler, error) {
 				observed = append(observed, k8sinterface.GetContextName())
 				return nil, nil
@@ -405,7 +405,7 @@ func TestRunFleetContext_PassesExactInputsToRunner(t *testing.T) {
 	}
 	called := false
 
-	_, err, _ := runFleetContext("target", info, ks, policies,
+	_, _, err := runFleetContext("target", info, ks, policies,
 		func(_ context.Context, gotInfo *cautils.ScanInfo, gotKS meta.IKubescape, gotPolicies []cautils.PolicyIdentifier) (*resultshandling.ResultsHandler, error) {
 			called = true
 			assert.Same(t, info, gotInfo)
@@ -423,7 +423,7 @@ func TestRunFleetContext_ErrorIdentitySurvivesCleanup(t *testing.T) {
 	installLifecycleKubeconfig(t, "ambient", "target")
 
 	sentinel := errors.New("sentinel runner failure")
-	_, err, _ := runFleetContext("target", lifecycleScanInfo(t, "target"), lifecycleKubescape(), nil,
+	_, _, err := runFleetContext("target", lifecycleScanInfo(t, "target"), lifecycleKubescape(), nil,
 		func(_ context.Context, _ *cautils.ScanInfo, _ meta.IKubescape, _ []cautils.PolicyIdentifier) (*resultshandling.ResultsHandler, error) {
 			return nil, fmt.Errorf("scan target: %w", sentinel)
 		})
@@ -443,7 +443,7 @@ func TestRunFleetContext_NoTimeoutDoesNotCancelSharedParent(t *testing.T) {
 	info.ScanTimeout = 0
 	var observed context.Context
 
-	_, err, _ := runFleetContext("target", info, ks, nil,
+	_, _, err := runFleetContext("target", info, ks, nil,
 		func(ctx context.Context, _ *cautils.ScanInfo, _ meta.IKubescape, _ []cautils.PolicyIdentifier) (*resultshandling.ResultsHandler, error) {
 			observed = ctx
 			return nil, nil
