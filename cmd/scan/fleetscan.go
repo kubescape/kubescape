@@ -424,13 +424,7 @@ func fleetScan(baseScanInfo cautils.ScanInfo, ks meta.IKubescape, policyIdentifi
 
 		logger.L().Info("fleet scan: scanning context", helpers.String("context", kubeContext), helpers.String("output", outputPath))
 
-		leave := cautils.EnterClusterContext(kubeContext)
-		ctx, cancel := deriveTimeoutContext(contextScanInfo, ks)
-		started := time.Now()
-		results, err := run(ctx, contextScanInfo, ks, policyIdentifiers)
-		elapsed := time.Since(started)
-		cancel()
-		leave()
+		results, err, elapsed := runFleetContext(kubeContext, contextScanInfo, ks, policyIdentifiers, run)
 
 		if wantFleetReport {
 			clusters = append(clusters, newClusterResult(kubeContext, results, err, elapsed))
@@ -482,6 +476,27 @@ func fleetScan(baseScanInfo cautils.ScanInfo, ks meta.IKubescape, policyIdentifi
 		return fmt.Errorf("fleet scan: every context was scanned but the fleet report was not written: %w", fleetReportErr)
 	}
 	return nil
+}
+
+// runFleetContext owns every piece of process and request state that is scoped
+// to one context in a fleet scan. Both cleanups are deferred before the runner
+// is invoked so they execute on normal returns, errors and panics alike.
+//
+// Restoring the Kubernetes context matters even when a panic will eventually
+// terminate the CLI. The same orchestration is also used by embedded callers,
+// tests and long-running processes that may recover at a higher boundary. If
+// the global context is left pointing at the failed cluster, the next scan can
+// silently read a different cluster from the one it was asked to inspect.
+func runFleetContext(kubeContext string, scanInfo *cautils.ScanInfo, ks meta.IKubescape, policyIdentifiers []cautils.PolicyIdentifier, run fleetRunner) (results *resultshandling.ResultsHandler, err error, elapsed time.Duration) {
+	leave := cautils.EnterClusterContext(kubeContext)
+	defer leave()
+
+	ctx, cancel := deriveTimeoutContext(scanInfo, ks)
+	defer cancel()
+
+	started := time.Now()
+	results, err = run(ctx, scanInfo, ks, policyIdentifiers)
+	return results, err, time.Since(started)
 }
 
 // newClusterResult turns one context's outcome into the row the fleet report
