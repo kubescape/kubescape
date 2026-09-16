@@ -239,11 +239,10 @@ func validateFleetReportPath(fleetReport string, outputPaths map[string]string, 
 	return fleetReportAliasesPerContextReport(fleetReport, outputPaths, formats)
 }
 
-// fleetReportAliasesPerContextReport catches what the string comparison cannot:
-// a --fleet-report path that reaches one of the per-context reports through a
-// symlink. os.Create follows symlinks, so writing the fleet report through one
-// would put fleet JSON at a cluster's own report path, truncating the report if
-// that context wrote one and leaving a misleading file there if it did not.
+// fleetReportAliasesPerContextReport catches aliases that string comparison
+// cannot. Atomic publication replaces a symlink in the final path component,
+// but a symlinked parent directory can still route the write onto a
+// per-context report. Existing files may also alias through hard links.
 //
 // Both sides are reduced to the same canonical form before comparing, see
 // resolvePath, so it does not matter whether the link is the final component,
@@ -455,9 +454,8 @@ func fleetScan(baseScanInfo cautils.ScanInfo, ks meta.IKubescape, policyIdentifi
 			Clusters:      clusters,
 			ControlMatrix: fleet.BuildControlMatrix(clusters),
 		}
-		// Re-checked here, not only up front: the per-context files exist now,
-		// so a symlink that pointed at nothing before the scan can resolve to
-		// one of them at this point.
+		// Re-check after the per-context files exist so os.SameFile can detect
+		// hard-link aliases that were not observable before the scans ran.
 		fleetReportErr = fleetReportAliasesPerContextReport(baseScanInfo.FleetReport, outputPaths, baseScanInfo.Formats())
 		if fleetReportErr == nil {
 			fleetReportErr = writeFleetReport(baseScanInfo.FleetReport, &report)
@@ -559,7 +557,7 @@ func writeFleetReport(path string, report *fleet.FleetReport) error {
 		return fmt.Errorf("encode fleet report %q: %w", path, err)
 	}
 	data = append(data, '\n')
-	if err := cautils.WriteFileAtomically(path, data, 0o600); err != nil {
+	if err := cautils.WriteFileAtomically(path, data, 0o644); err != nil {
 		return fmt.Errorf("write fleet report %q: %w", path, err)
 	}
 	return nil

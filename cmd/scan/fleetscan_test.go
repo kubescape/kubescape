@@ -46,6 +46,11 @@ func TestWriteFleetReport_ReplacesExistingReportAtomically(t *testing.T) {
 	assert.Equal(t, []string{"prod"}, got.Metadata.Contexts)
 	require.Len(t, got.Clusters, 1)
 	assert.Equal(t, "prod", got.Clusters[0].ClusterID)
+	if runtime.GOOS != "windows" {
+		info, err := os.Stat(path)
+		require.NoError(t, err)
+		assert.Equal(t, os.FileMode(0o600), info.Mode().Perm(), "replacing a report must preserve its existing mode")
+	}
 }
 
 func TestWriteFleetReport_DoesNotFollowExistingSymlink(t *testing.T) {
@@ -103,7 +108,7 @@ func TestWriteFleetReport_CreatesNestedDestinationPrivately(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		info, err := os.Stat(path)
 		require.NoError(t, err)
-		assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+		assert.Equal(t, os.FileMode(0o644), info.Mode().Perm())
 	}
 }
 

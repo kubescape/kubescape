@@ -18,10 +18,7 @@ import (
 
 func atomicTempFiles(t *testing.T, destination string) []string {
 	t.Helper()
-	matches, err := filepath.Glob(filepath.Join(
-		filepath.Dir(destination),
-		"."+filepath.Base(destination)+".tmp-*",
-	))
+	matches, err := filepath.Glob(filepath.Join(filepath.Dir(destination), ".kubescape-output-*.tmp"))
 	require.NoError(t, err)
 	return matches
 }
@@ -90,19 +87,20 @@ func TestWriteFileAtomically_AppliesRequestedPermissions(t *testing.T) {
 	}
 }
 
-func TestWriteFileAtomically_ReplacementUsesNewPermissions(t *testing.T) {
+func TestWriteFileAtomically_ReplacementPreservesExistingPermissions(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Windows does not expose Unix permission bits")
 	}
 
 	path := filepath.Join(t.TempDir(), "report")
-	require.NoError(t, os.WriteFile(path, []byte("old"), 0o644))
+	require.NoError(t, os.WriteFile(path, []byte("old"), 0o644)) // #nosec G306 -- the fixture verifies that atomic replacement preserves this intentionally wider mode
+	require.NoError(t, os.Chmod(path, 0o644), "make the fixture independent of the test runner's umask")
 
 	require.NoError(t, WriteFileAtomically(path, []byte("new"), 0o600))
 
 	info, err := os.Stat(path)
 	require.NoError(t, err)
-	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+	assert.Equal(t, os.FileMode(0o644), info.Mode().Perm())
 }
 
 func TestWriteFileAtomically_EmptyPayloadIsACompleteFile(t *testing.T) {
