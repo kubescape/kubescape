@@ -91,15 +91,41 @@
 // sticky, that test fails here rather than surfacing later as a fleet report
 // quietly describing the wrong cluster.
 //
+// # The rollup
+//
+// BuildComplianceRollup averages the clusters that were measured well enough to
+// speak for themselves and names every cluster it left out, because a single
+// number standing for a fleet is only honest if the reader can see its basis.
+// Two decisions in it are worth stating.
+//
+// Clusters are weighted equally rather than by size. The question a fleet score
+// answers is how compliant the clusters are, not how compliant the resources
+// are, and weighting by resource count would let one large cluster speak for
+// every other.
+//
+// A framework's score is skipped wherever it was vacuous, which is to say
+// wherever it reported 100% only because every control in it was irrelevant.
+// Kubescape already detects that per cluster, in ScanCoverage.VacuousFrameworks.
+// Folding such a result into a fleet average would raise the fleet's apparent
+// standing on the strength of nothing having been checked, which is the same
+// mistake, one level up, that keeping skipped apart from not-evaluated avoids.
+//
 // # Not here yet
 //
-//   - Drift detection, which compares each control's cell against a baseline
-//     cluster and reports posture divergence separately from coverage gaps. It
-//     reads the matrix built here, so the matrix settles first.
-//   - The compliance rollup across clusters.
+//   - Cross-cluster divergence, which compares each control's cell between
+//     clusters and reports a difference in posture separately from a gap in
+//     what was measured. It reads the matrix built here, so the matrix settles
+//     first.
+//
+//     Deliberately not called drift. Since --baseline landed, drift means
+//     comparing one cluster against a report saved earlier, which is a
+//     question about time rather than about the fleet. Reusing the word would
+//     leave two different comparisons sharing a name.
+//
 //   - Printers for the aggregate. The wiring exists: --fleet-report on a
 //     --kube-contexts scan writes the FleetReport as JSON, and that is the
 //     only format so far.
+//
 //   - Concurrency. Contexts are scanned one at a time because k8sinterface's
 //     process-global connection state has no locking around it, so two scans
 //     running concurrently would race on that state regardless of
