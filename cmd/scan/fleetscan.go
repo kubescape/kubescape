@@ -239,11 +239,10 @@ func validateFleetReportPath(fleetReport string, outputPaths map[string]string, 
 	return fleetReportAliasesPerContextReport(fleetReport, outputPaths, formats)
 }
 
-// fleetReportAliasesPerContextReport catches what the string comparison cannot:
-// a --fleet-report path that reaches one of the per-context reports through a
-// symlink. os.Create follows symlinks, so writing the fleet report through one
-// would put fleet JSON at a cluster's own report path, truncating the report if
-// that context wrote one and leaving a misleading file there if it did not.
+// fleetReportAliasesPerContextReport catches aliases that string comparison
+// cannot. Atomic publication replaces a symlink in the final path component,
+// but a symlinked parent directory can still route the write onto a
+// per-context report. Existing files may also alias through hard links.
 //
 // Both sides are reduced to the same canonical form before comparing, see
 // resolvePath, so it does not matter whether the link is the final component,
@@ -460,9 +459,8 @@ func fleetScan(baseScanInfo cautils.ScanInfo, ks meta.IKubescape, policyIdentifi
 			Compliance:    fleet.BuildComplianceRollup(clusters, baseScanInfo.FailCoverageThreshold),
 			ControlMatrix: fleet.BuildControlMatrix(clusters),
 		}
-		// Re-checked here, not only up front: the per-context files exist now,
-		// so a symlink that pointed at nothing before the scan can resolve to
-		// one of them at this point.
+		// Re-check after the per-context files exist so os.SameFile can detect
+		// hard-link aliases that were not observable before the scans ran.
 		fleetReportErr = fleetReportAliasesPerContextReport(baseScanInfo.FleetReport, outputPaths, baseScanInfo.Formats())
 		if fleetReportErr == nil {
 			fleetReportErr = writeFleetReport(baseScanInfo.FleetReport, &report)
@@ -554,22 +552,17 @@ func newClusterResult(kubeContext string, results *resultshandling.ResultsHandle
 	return cluster
 }
 
-// writeFleetReport serialises the report to path as indented JSON. The path is
-// opened without any stdout fallback: the operator asked for a file, and a
-// report that quietly went somewhere else is worse than an error.
+// writeFleetReport serialises the report to path as indented JSON. The
+// destination is replaced atomically only after the complete report has been
+// encoded and flushed, so a failed write cannot destroy a previous good
+// report or leave a truncated report that still looks like the latest run.
 func writeFleetReport(path string, report *fleet.FleetReport) error {
-	f, err := printer.GetWriterNoFallback(path)
+	data, err := json.MarshalIndent(report, "", "  ")
 	if err != nil {
-		return err
+		return fmt.Errorf("encode fleet report %q: %w", path, err)
 	}
-
-	encoder := json.NewEncoder(f)
-	encoder.SetIndent("", "  ")
-	if err := encoder.Encode(report); err != nil {
-		_ = f.Close()
-		return fmt.Errorf("write fleet report %q: %w", path, err)
-	}
-	if err := f.Close(); err != nil {
+	data = append(data, '\n')
+	if err := cautils.WriteFileAtomically(path, data, 0o644); err != nil {
 		return fmt.Errorf("write fleet report %q: %w", path, err)
 	}
 	return nil
