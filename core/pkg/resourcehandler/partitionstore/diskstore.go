@@ -673,7 +673,7 @@ func isDiskFull(err error) bool {
 	if err == nil {
 		return false
 	}
-	if errors.Is(err, syscall.ENOSPC) {
+	if errors.Is(err, syscall.ENOSPC) || isPlatformDiskFull(err) {
 		return true
 	}
 	str := strings.ToLower(err.Error())
