@@ -423,13 +423,7 @@ func fleetScan(baseScanInfo cautils.ScanInfo, ks meta.IKubescape, policyIdentifi
 
 		logger.L().Info("fleet scan: scanning context", helpers.String("context", kubeContext), helpers.String("output", outputPath))
 
-		leave := cautils.EnterClusterContext(kubeContext)
-		ctx, cancel := deriveTimeoutContext(contextScanInfo, ks)
-		started := time.Now()
-		results, err := run(ctx, contextScanInfo, ks, policyIdentifiers)
-		elapsed := time.Since(started)
-		cancel()
-		leave()
+		results, elapsed, err := runFleetContext(kubeContext, contextScanInfo, ks, policyIdentifiers, run)
 
 		if wantFleetReport {
 			clusters = append(clusters, newClusterResult(kubeContext, results, err, elapsed))
@@ -485,6 +479,21 @@ func fleetScan(baseScanInfo cautils.ScanInfo, ks meta.IKubescape, policyIdentifi
 		return fmt.Errorf("fleet scan: every context was scanned but the fleet report was not written: %w", fleetReportErr)
 	}
 	return nil
+}
+
+// runFleetContext scopes the Kubernetes context and timeout to one fleet
+// iteration. The deferred cleanup satisfies EnterClusterContext's contract on
+// normal returns, errors and panics without deferring across the whole loop.
+func runFleetContext(kubeContext string, scanInfo *cautils.ScanInfo, ks meta.IKubescape, policyIdentifiers []cautils.PolicyIdentifier, run fleetRunner) (results *resultshandling.ResultsHandler, elapsed time.Duration, err error) {
+	leave := cautils.EnterClusterContext(kubeContext)
+	defer leave()
+
+	ctx, cancel := deriveTimeoutContext(scanInfo, ks)
+	defer cancel()
+
+	started := time.Now()
+	results, err = run(ctx, scanInfo, ks, policyIdentifiers)
+	return results, time.Since(started), err
 }
 
 // newClusterResult turns one context's outcome into the row the fleet report
