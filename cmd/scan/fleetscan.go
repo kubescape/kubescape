@@ -452,7 +452,12 @@ func fleetScan(baseScanInfo cautils.ScanInfo, ks meta.IKubescape, policyIdentifi
 				KubescapeVersion: versioncheck.BuildNumber,
 				Contexts:         baseScanInfo.KubeContexts,
 			},
-			Clusters:      clusters,
+			Clusters: clusters,
+			// --fail-coverage-below is the operator's own statement of the
+			// coverage they are prepared to stand behind, so the rollup reuses
+			// it rather than introducing a second, separate threshold that
+			// could contradict it. Unset means no floor.
+			Compliance:    fleet.BuildComplianceRollup(clusters, baseScanInfo.FailCoverageThreshold),
 			ControlMatrix: fleet.BuildControlMatrix(clusters),
 		}
 		// Re-checked here, not only up front: the per-context files exist now,

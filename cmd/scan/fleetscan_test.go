@@ -476,6 +476,105 @@ func TestFleetScan_WritesFleetReportAcrossEveryOutcome(t *testing.T) {
 	assert.NotContains(t, row.ByCluster, "dr", "an unreachable cluster has no opinion about any control")
 }
 
+// resultsWithCoverage is resultsWithControl with a chosen coverage score, so a
+// test can drive the rollup's coverage floor.
+func resultsWithCoverage(status apis.ScanningStatus, complianceScore, coverageScore float32) *resultshandling.ResultsHandler {
+	results := resultsWithControl(status, complianceScore)
+	results.GetData().ScanCoverage.CoverageScore = coverageScore
+	results.GetData().ScanCoverage.Degraded = coverageScore < 100
+	return results
+}
+
+func TestFleetScan_FleetReportCarriesTheComplianceRollup(t *testing.T) {
+	dir := t.TempDir()
+	fleetReport := filepath.Join(dir, "fleet.json")
+	ks := &fleetOutcomeKubescape{outcomes: map[string]func() (*resultshandling.ResultsHandler, error){
+		"prod": func() (*resultshandling.ResultsHandler, error) { return resultsWithControl(apis.StatusFailed, 60), nil },
+		"staging": func() (*resultshandling.ResultsHandler, error) {
+			return resultsWithControl(apis.StatusPassed, 100), nil
+		},
+		"dr": func() (*resultshandling.ResultsHandler, error) {
+			return nil, fmt.Errorf("dr: %w", core.ErrClusterConnection)
+		},
+	}}
+	scanInfo := cautils.ScanInfo{
+		KubeContexts: []string{"prod", "staging", "dr"},
+		Output:       filepath.Join(dir, "report.json"),
+		FleetReport:  fleetReport,
+		ScanType:     cautils.ScanTypeCluster,
+	}
+
+	require.Error(t, fleetScan(scanInfo, ks, nil, scanContextOnlyRunner), "dr was unreachable")
+
+	report := fleetReportFromFile(t, fleetReport)
+	require.NotNil(t, report.Compliance.ComplianceScore)
+	assert.InDelta(t, 80, *report.Compliance.ComplianceScore, 0.001, "the mean of prod's 60 and staging's 100")
+	assert.Equal(t, 2, report.Compliance.ClustersScored)
+	assert.Equal(t, 3, report.Compliance.ClustersTotal)
+
+	require.Len(t, report.Compliance.Excluded, 1)
+	assert.Equal(t, "dr", report.Compliance.Excluded[0].ClusterID)
+	assert.Equal(t, fleet.ExcludedNotScanned, report.Compliance.Excluded[0].Reason,
+		"a cluster nobody could reach has no opinion about compliance")
+}
+
+func TestFleetScan_RollupFloorComesFromFailCoverageBelow(t *testing.T) {
+	newScanInfo := func(dir string, threshold float32) cautils.ScanInfo {
+		return cautils.ScanInfo{
+			KubeContexts:          []string{"prod", "dr"},
+			Output:                filepath.Join(dir, "report.json"),
+			FleetReport:           filepath.Join(dir, "fleet.json"),
+			ScanType:              cautils.ScanTypeCluster,
+			FailCoverageThreshold: threshold,
+		}
+	}
+	// dr scanned almost nothing and passed what little it ran. Whether its 100
+	// counts is exactly what --fail-coverage-below decides.
+	outcomes := func() map[string]func() (*resultshandling.ResultsHandler, error) {
+		return map[string]func() (*resultshandling.ResultsHandler, error){
+			"prod": func() (*resultshandling.ResultsHandler, error) {
+				return resultsWithCoverage(apis.StatusFailed, 50, 100), nil
+			},
+			"dr": func() (*resultshandling.ResultsHandler, error) {
+				return resultsWithCoverage(apis.StatusPassed, 100, 5), nil
+			},
+		}
+	}
+
+	t.Run("no threshold means no floor", func(t *testing.T) {
+		dir := t.TempDir()
+		scanInfo := newScanInfo(dir, 0)
+		require.NoError(t, fleetScan(scanInfo, &fleetOutcomeKubescape{outcomes: outcomes()}, nil, scanContextOnlyRunner))
+
+		report := fleetReportFromFile(t, scanInfo.FleetReport)
+		require.NotNil(t, report.Compliance.ComplianceScore)
+		assert.InDelta(t, 75, *report.Compliance.ComplianceScore, 0.001,
+			"an operator who set no threshold asked for nothing to be dropped")
+		assert.Empty(t, report.Compliance.Excluded)
+		assert.InDelta(t, 0, report.Compliance.MinCoverage, 0)
+	})
+
+	t.Run("a threshold holds the barely scanned cluster back", func(t *testing.T) {
+		dir := t.TempDir()
+		scanInfo := newScanInfo(dir, 50)
+		// prod fails its own coverage gate in a real run, but this runner does
+		// not enforce gates, so the scan itself succeeds.
+		require.NoError(t, fleetScan(scanInfo, &fleetOutcomeKubescape{outcomes: outcomes()}, nil, scanContextOnlyRunner))
+
+		report := fleetReportFromFile(t, scanInfo.FleetReport)
+		require.NotNil(t, report.Compliance.ComplianceScore)
+		assert.InDelta(t, 50, *report.Compliance.ComplianceScore, 0.001,
+			"dr's 100 came from a scan that barely ran and must not lift the fleet")
+		assert.InDelta(t, 50, report.Compliance.MinCoverage, 0)
+		require.Len(t, report.Compliance.Excluded, 1)
+		assert.Equal(t, "dr", report.Compliance.Excluded[0].ClusterID)
+		assert.Equal(t, fleet.ExcludedLowCoverage, report.Compliance.Excluded[0].Reason)
+		require.NotNil(t, report.Compliance.Excluded[0].ComplianceScore)
+		assert.InDelta(t, 100, *report.Compliance.Excluded[0].ComplianceScore, 0.001,
+			"the uncounted score stays visible so the exclusion can be checked")
+	})
+}
+
 func TestFleetScan_WithoutFleetReportWritesNothingExtra(t *testing.T) {
 	dir := t.TempDir()
 	ks := &fleetTrackingKubescape{}
