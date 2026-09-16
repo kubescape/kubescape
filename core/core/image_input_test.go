@@ -1,11 +1,11 @@
 package core
 
 import (
+	"archive/tar"
 	"os"
 	"path/filepath"
 	"testing"
 
-	"github.com/distribution/reference"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	ksmetav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
 	"github.com/stretchr/testify/assert"
@@ -69,6 +69,9 @@ func TestClassifyImageInput(t *testing.T) {
 		{name: "tagged ref unaffected by colliding local file", image: "team/my.tar:v1", statExisting: []string{"team/my.tar"}, wantRegistry: true},
 		{name: "untagged ref matching local file prefers loud error", image: "team/my.tar", statExisting: []string{"team/my.tar"}, wantRegistry: false},
 		{name: "nonexistent relative no slash stays registry", image: "myimage", wantRegistry: true},
+		// "oci-layout" is not a tag/provider in the pinned stack (oci-dir
+		// is), so grype never strips it: a repo/tag spelling stays registry.
+		{name: "oci-layout repo and tag stays registry", image: "oci-layout:latest", wantRegistry: true},
 		{name: "empty", image: "   ", wantRegistry: false, wantEmptyErr: true},
 	}
 
@@ -250,41 +253,85 @@ func TestImageSelectorResolvesStrippedIdentity(t *testing.T) {
 	assert.Empty(t, vulns, "dir:latest does not identity-match nginx CVEs (different repo)")
 }
 
-// Real-fixture rows for the os.Stat-backed image-remainder check (injected
-// stat bools cannot express IsDir).
+// writeDockerTarball writes the smallest archive the docker tarball provider
+// accepts (manifest.json plus its config), so fixtures exercise provider
+// acceptance instead of asserting a suffix heuristic.
+func writeDockerTarball(t *testing.T, path string) {
+	t.Helper()
+	f, err := os.Create(path)
+	require.NoError(t, err)
+	defer func() { _ = f.Close() }()
+	tw := tar.NewWriter(f)
+	defer func() { _ = tw.Close() }()
+	manifest := `[{"Config":"config.json","RepoTags":["test:latest"],"Layers":[]}]`
+	config := `{}`
+	for name, body := range map[string]string{"manifest.json": manifest, "config.json": config} {
+		require.NoError(t, tw.WriteHeader(&tar.Header{Name: name, Mode: 0o600, Size: int64(len(body))}))
+		_, err = tw.Write([]byte(body))
+		require.NoError(t, err)
+	}
+}
+
+// writeOCILayoutDir writes the smallest directory the OCI directory provider
+// accepts: an index.json carrying exactly one manifest.
+func writeOCILayoutDir(t *testing.T, path string) {
+	t.Helper()
+	require.NoError(t, os.MkdirAll(filepath.Join(path, "blobs", "sha256"), 0o755))
+	index := `{"schemaVersion":2,"manifests":[{"mediaType":"application/vnd.oci.image.manifest.v1+json","digest":"sha256:abc","size":10}]}`
+	require.NoError(t, os.WriteFile(filepath.Join(path, "index.json"), []byte(index), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(path, "oci-layout"), []byte(`{"imageLayoutVersion":"1.0.0"}`), 0o600))
+}
+
+// Real-fixture rows for the provider-backed image-remainder check: each
+// fixture is content the narrowed providers genuinely accept or reject, so
+// the tests pin resolution instead of the old suffix heuristic.
 func TestImageRemainderLocalFixtures(t *testing.T) {
 	dir := t.TempDir()
-	tarPath := filepath.Join(dir, "archive.tar")
-	require.NoError(t, os.WriteFile(tarPath, []byte("x"), 0o600))
-	require.NoError(t, os.MkdirAll(filepath.Join(dir, "rootfs"), 0o755))
+	validTar := filepath.Join(dir, "imagetar")
+	writeDockerTarball(t, validTar)
+	colonTar := filepath.Join(dir, "dir:latest")
+	writeDockerTarball(t, colonTar)
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "plainrootfs"), 0o755))
+	writeOCILayoutDir(t, filepath.Join(dir, "ocilayout"))
 	plainFile := filepath.Join(dir, "nginx")
 	require.NoError(t, os.WriteFile(plainFile, []byte("x"), 0o600))
+	corruptTar := filepath.Join(dir, "bad.tar")
+	require.NoError(t, os.WriteFile(corruptTar, []byte("not a tarball at all"), 0o600))
 
-	// Existing archive -> local (scheme "image" from the generic prefix).
-	registry, scheme, err := classifyImageInput("image:"+tarPath, osStatExists)
+	// Valid extensionless tarball -> local (tarball provider has no ext gate).
+	registry, scheme, err := classifyImageInput("image:"+validTar, osStatExists)
 	assert.False(t, registry)
 	assert.Equal(t, "image", scheme)
 	assert.NoError(t, err)
 
-	// Existing directory -> local.
-	registry, scheme, err = classifyImageInput("image:"+filepath.Join(dir, "rootfs"), osStatExists)
+	// Valid colon-named tarball -> local (literal path tried before any parse).
+	registry, scheme, err = classifyImageInput("image:"+colonTar, osStatExists)
 	assert.False(t, registry)
 	assert.Equal(t, "image", scheme)
+	assert.NoError(t, err)
+
+	// Valid OCI layout dir -> local.
+	registry, scheme, err = classifyImageInput("image:"+filepath.Join(dir, "ocilayout"), osStatExists)
+	assert.False(t, registry)
+	assert.Equal(t, "image", scheme)
+	assert.NoError(t, err)
+
+	// Plain directory and corrupt archive are rejected by the local
+	// providers and fall through to daemon/registry: the temp paths are not
+	// lowercase-parseable, so both land loud-invalid (loud either way).
+	registry, _, err = classifyImageInput("image:"+filepath.Join(dir, "plainrootfs"), osStatExists)
+	assert.False(t, registry)
+	assert.NoError(t, err)
+	registry, _, err = classifyImageInput("image:"+corruptTar, osStatExists)
+	assert.False(t, registry)
 	assert.NoError(t, err)
 
 	// A plain local file named exactly like the remainder must NOT shadow
-	// the registry identity: grype's narrowed file providers reject
-	// non-archives and fall through to the daemon pull. Prediction depends
-	// on the path: a lowercase parseable path parses as registry, a
-	// non-lowercase temp path is loud-invalid (loud either way).
-	registry, _, err = classifyImageInput("image:"+plainFile, osStatExists)
-	if _, parseErr := reference.ParseNormalizedNamed("image:" + plainFile); parseErr == nil {
-		assert.True(t, registry)
-		assert.NoError(t, err)
-	} else {
-		assert.False(t, registry)
-		assert.NoError(t, err)
-	}
+	// a parseable registry identity: grype's narrowed file providers reject
+	// non-archives and fall through to the daemon pull.
+	registry, _, err = classifyImageInput("image:nginx", osStatExists)
+	assert.True(t, registry)
+	assert.NoError(t, err)
 
 	// Scheme-like remainder is never re-interpreted as local.
 	registry, _, err = classifyImageInput("image:dir:latest", osStatExists)
@@ -294,6 +341,40 @@ func TestImageRemainderLocalFixtures(t *testing.T) {
 	// Missing absolute archive stays loud-local (scanner fails on the open).
 	registry, _, err = classifyImageInput("image:"+filepath.Join(dir, "missing.tar"), osStatExists)
 	assert.False(t, registry)
+	assert.NoError(t, err)
+}
+
+// Grype resolves raw SBOM content before selector extraction: a valid SBOM
+// file is scanned locally whatever its name — including selector-shaped
+// spellings like "docker:nginx" that the selector branches would otherwise
+// strip into a synthetic registry identity.
+func TestRawSBOMInputTakesPrecedence(t *testing.T) {
+	dir := t.TempDir()
+	sbomDoc := `{"spdxVersion": "SPDX-2.3", "name": "test", "packages": []}`
+	for _, name := range []string{"docker:nginx", "registry:nginx", "image:nginx", "report.json"} {
+		path := filepath.Join(dir, name)
+		// Colon-named files need their parent to exist; Join keeps them flat.
+		require.NoError(t, os.WriteFile(path, []byte(sbomDoc), 0o600))
+
+		registry, scheme, err := classifyImageInput(path, osStatExists)
+		assert.False(t, registry, "raw SBOM %q must be non-registry", name)
+		assert.Equal(t, "sbom", scheme)
+		assert.NoError(t, err)
+
+		assert.True(t, isNonRegistryForExceptions(path, osStatExists))
+
+		_, scheme, err = imageAttributesForExceptions(path, osStatExists)
+		assert.ErrorContains(t, err, "non-registry input")
+		assert.Equal(t, "sbom", scheme)
+	}
+
+	// A non-text file of selector-shaped spelling keeps selector semantics:
+	// grype's MIME gate rejects it before any SBOM decode is attempted.
+	binPath := filepath.Join(dir, "docker:binary")
+	require.NoError(t, os.WriteFile(binPath, []byte{0x00, 0x01, 0x02, 0x1f, 0x8b, 0x08}, 0o600))
+	registry, scheme, err := classifyImageInput(binPath, osStatExists)
+	assert.False(t, registry, "binary content is still non-registry via existence")
+	assert.NotEqual(t, "sbom", scheme)
 	assert.NoError(t, err)
 }
 

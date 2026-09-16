@@ -1,10 +1,13 @@
 package core
 
 import (
+	"archive/tar"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -13,8 +16,13 @@ import (
 	"sync"
 	"syscall"
 
+	"github.com/anchore/go-homedir"
 	stereoscopeimage "github.com/anchore/stereoscope/pkg/image"
 	"github.com/distribution/reference"
+	"github.com/gabriel-vasile/mimetype"
+	"github.com/google/go-containerregistry/pkg/v1/layout"
+	"github.com/google/go-containerregistry/pkg/v1/tarball"
+	"github.com/sylabs/sif/v2/pkg/sif"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/kubescape/v4/core/cautils"
@@ -99,49 +107,86 @@ func validateImageExceptionTargetRegexes(policies []VulnerabilitiesIgnorePolicy)
 	return nil
 }
 
+// isRawSBOMInput mirrors grype's raw-SBOM resolution, which runs before any
+// selector extraction (getSBOMReader: stdin → purl: → sbom: → isPossibleSBOM
+// on the raw spelling → default). A literal file — including one whose name
+// carries a scheme-shaped prefix such as "docker:nginx" — is opened and MIME
+// sniffed; text/plain descendants decode as SBOM documents. The check is a
+// single open plus a prefix sample, so misses cost one failed open.
+func isRawSBOMInput(trimmed string) bool {
+	expandedPath, err := homedir.Expand(trimmed)
+	if err != nil {
+		return false
+	}
+	f, err := os.Open(expandedPath)
+	if err != nil {
+		return false
+	}
+	defer func() { _ = f.Close() }()
+	mType, err := mimetype.DetectReader(f)
+	if err != nil {
+		return false
+	}
+	for cur := mType; cur != nil; cur = cur.Parent() {
+		if cur.Is("text/plain") {
+			return true
+		}
+	}
+	return false
+}
+
 // classifyImageInput reports whether img is a registry reference or a
 // non-registry input (archive, local directory, SBOM, ...). It returns the
 // detected scheme ("" when none) for error messages. stat reports local path
 // existence and is injectable so tests stay hermetic; callers pass osStatExists.
 //
 // Classification uses exact input semantics in this order:
-//  0. generic "image:" prefix (Syft's ImageTag; every stereoscope archive/SIF/
-//     OCI-directory provider is tagged "image" and grype strips that tag via
-//     ExtractSchemeSource before resolution) — peel exactly once, then
-//     re-classify the remainder through the normal pipeline (scheme → stat →
-//     tar → parse). Peeling once reproduces grype for every shape, including
-//     "image:image:nginx" where the remainder "image:nginx" correctly derives
-//     the synthetic identity docker.io/library/image:nginx.
-//  1. known local-source scheme (docker-archive:, oci-dir:, dir:, purl:,
-//     local-file:, local-directory:, singularity:, snap:, ...) → non-registry;
-//  2. the RAW trimmed input exists on disk → non-registry. Checking the raw
-//     string before any tag/digest stripping is deliberate: stripping first
-//     would let an unrelated local "team/my.tar" reject the valid registry
-//     reference "team/my.tar:v1", and would miss bare names like "rootfs" or
-//     "sbom.json". An existing local path always wins over registry
-//     interpretation — a loud error beats a silent exception skip;
-//  3. unambiguous tarball path (absolute or ./-relative .tar/.tgz) →
-//     non-registry even when the file is absent (the scan itself will then
-//     fail loudly on the missing file, not silently on exceptions);
-//  4. unparseable as a registry reference → non-registry;
-//  5. otherwise registry.
+//
+//	-1. raw SBOM content (grype's isPossibleSBOM runs before selector
+//	   extraction): an existing text/plain-descendant file — whatever its
+//	   name, including selector-shaped spellings like "docker:nginx" —
+//	   decodes as an SBOM document → non-registry;
+//	0. generic "image:" prefix (Syft's ImageTag; every stereoscope archive/SIF/
+//	   OCI-directory provider is tagged "image" and grype strips that tag via
+//	   ExtractSchemeSource before resolution) — peel exactly once, then
+//	   resolve the remainder the way the narrowed image providers do (content
+//	   validation, not a second scheme pass). Peeling once reproduces grype
+//	   for every shape, including "image:image:nginx" where the remainder
+//	   "image:nginx" correctly derives the synthetic identity
+//	   docker.io/library/image:nginx.
+//	1. known local-source scheme (docker-archive:, oci-dir:, dir:, purl:,
+//	   local-file:, local-directory:, singularity:, snap:, ...) → non-registry;
+//	2. the RAW trimmed input exists on disk → non-registry. Checking the raw
+//	   string before any tag/digest stripping is deliberate: stripping first
+//	   would let an unrelated local "team/my.tar" reject the valid registry
+//	   reference "team/my.tar:v1", and would miss bare names like "rootfs" or
+//	   "sbom.json". An existing local path always wins over registry
+//	   interpretation — a loud error beats a silent exception skip;
+//	3. unambiguous tarball path (absolute or ./-relative .tar/.tgz) →
+//	   non-registry even when the file is absent (the scan itself will then
+//	   fail loudly on the missing file, not silently on exceptions);
+//	4. unparseable as a registry reference → non-registry;
+//	5. otherwise registry.
 func classifyImageInput(img string, stat func(string) bool) (registry bool, scheme string, errEmpty error) {
 	trimmed := strings.TrimSpace(img)
 	if trimmed == "" {
 		return false, "", fmt.Errorf("image name cannot be empty")
 	}
-	if rest, prefix := peelGenericImageSelector(trimmed); rest != "" {
+	if isRawSBOMInput(trimmed) {
+		return false, "sbom", nil
+	}
+	if rest, prefix := peelGenericImageSelector(trimmed); prefix != "" {
 		// Grype strips "image:" once and passes the remainder literally to
-		// the narrowed image providers — no second scheme pass. An ordinary
-		// local file (e.g. "nginx" existing as a file) must not shadow it,
-		// and a scheme like "dir:latest" must not be misread as a local dir
-		// source: the narrowed providers only accept directories or archives,
-		// and existence-only checks would reject valid registry refs.
+		// the narrowed image providers — no second scheme pass. Locality is
+		// decided the way those providers decide it (content, not suffixes):
+		// an ordinary local file (e.g. "nginx") is rejected by the file
+		// providers and falls through to the daemon pull, while "dir:latest"
+		// is never re-interpreted as a local dir source.
+		if strings.TrimSpace(rest) == "" {
+			return false, prefix, fmt.Errorf("image name cannot be empty")
+		}
 		if isImageRemainderLocal(rest) {
 			return false, prefix, nil
-		}
-		if rest == "" {
-			return false, prefix, fmt.Errorf("image name cannot be empty")
 		}
 		if _, err := reference.ParseNormalizedNamed(rest); err != nil {
 			return false, prefix, nil
@@ -153,40 +198,124 @@ func classifyImageInput(img string, stat func(string) bool) (registry bool, sche
 
 // isImageRemainderLocal reports whether the remainder after a generic
 // "image:" strip would be handled by grype's narrowed image providers as
-// local content. Only a directory or an archive-ish file (.tar/.tgz/.tar.gz/
-// .sif) qualifies; mere file existence (e.g. a plain "nginx" file) does not,
-// and scheme prefixes like "dir:latest" are not re-interpreted. The check is
-// intentionally filesystem-backed (os.Stat, not the injected bool) so IsDir
-// can be distinguished; the injected stat remains for the plain pipeline.
+// local content. It mirrors provider acceptance instead of guessing from
+// suffixes or bare existence, because both directions disagree silently
+// otherwise: an extensionless or colon-named tarball must be local, while a
+// plain directory or corrupt archive must fall through to daemon/registry.
+// Accepts: OCI-layout directories (layout + index with ≥1 manifest,
+// mirroring the OCI directory provider's gate), docker tarballs
+// (tarball.ImageFromPath reads manifest+config only — no layer unpack),
+// SIF images (header load), and OCI-layout tarballs (in-stream index.json
+// with ≥1 manifest, no extraction). Anything else defers to the daemon
+// parser, exactly like the providers' fallthrough.
 func isImageRemainderLocal(rest string) bool {
 	if rest == "" {
 		return false
 	}
-	lower := strings.ToLower(rest)
-	isArchive := strings.HasSuffix(lower, ".tar") || strings.HasSuffix(lower, ".tgz") ||
-		strings.HasSuffix(lower, ".tar.gz") || strings.HasSuffix(lower, ".sif")
-	// Colon without a slash before it (e.g. "dir:latest"): image providers do
-	// not re-strip schemes, and a bare host:path "docker:nginx" name would be
-	// ambiguous — treat such remainders as registry unless they are archive
-	// paths, which the daemon parser rejects anyway (loud both ways).
-	if idx := strings.Index(rest, ":"); idx != -1 && !strings.Contains(rest[:idx], "/") {
+	info, err := os.Stat(rest)
+	if err != nil {
+		// Absent absolute archive-ish path stays loud-local (the scanner
+		// fails on the open, never silently), matching the bare pipeline's
+		// tarball rule.
+		lower := strings.ToLower(rest)
+		isArchive := strings.HasSuffix(lower, ".tar") || strings.HasSuffix(lower, ".tgz") ||
+			strings.HasSuffix(lower, ".tar.gz") || strings.HasSuffix(lower, ".sif")
+		return isArchive && (strings.HasPrefix(rest, "/") || strings.HasPrefix(rest, "./") || strings.HasPrefix(rest, "../"))
+	}
+	if info.IsDir() {
+		return isOCILayoutDir(rest)
+	}
+	return isTarballFile(rest) || isSIFFile(rest) || isOCILayoutTarball(rest)
+}
+
+// isOCILayoutDir mirrors the OCI directory provider's acceptance gate:
+// a readable layout whose index carries at least one manifest (the provider
+// further requires exactly one, or several with equal digests — accepting
+// more here only ever fails closed loud, never silent).
+func isOCILayoutDir(path string) bool {
+	if _, err := layout.FromPath(path); err != nil {
 		return false
 	}
-	if info, err := os.Stat(rest); err == nil {
-		if info.IsDir() {
-			return true
-		}
-		if isArchive {
-			return true
-		}
+	index, err := layout.ImageIndexFromPath(path)
+	if err != nil {
+		return false
 	}
-	// Unambiguous archive-ish paths are non-registry even when missing (the
-	// scanner fails loudly on the open, never silently), matching the bare
-	// pipeline's tarball rule.
-	if isArchive && (strings.HasPrefix(rest, "/") || strings.HasPrefix(rest, "./") || strings.HasPrefix(rest, "../")) {
+	manifest, err := index.IndexManifest()
+	if err != nil || len(manifest.Manifests) == 0 {
+		return false
+	}
+	return true
+}
+
+// isTarballFile mirrors the docker-archive provider: manifest.json plus its
+// config must read. Reads metadata only, never layers.
+func isTarballFile(path string) bool {
+	img, err := tarball.ImageFromPath(path, nil)
+	return err == nil && img != nil
+}
+
+// isSIFFile mirrors the SIF provider's acceptance: the container header must
+// load read-only. UnloadContainer closes the handle immediately.
+func isSIFFile(path string) bool {
+	f, err := sif.LoadContainerFromPath(path, sif.OptLoadWithFlag(os.O_RDONLY))
+	if err != nil {
+		return false
+	}
+	_ = f.UnloadContainer()
+	return true
+}
+
+// ociIndexManifestDescriptor is the minimal index.json shape needed to apply
+// the manifest-count gate without a full layout parse.
+type ociIndexManifestDescriptor struct {
+	Manifests []struct {
+		Digest string `json:"digest"`
+	} `json:"manifests"`
+}
+
+// isOCILayoutTarball mirrors the OCI-archive provider without extracting:
+// it untars to a temp dir, so stream the tar in memory instead and accept on
+// a decodable index.json carrying at least one manifest. Plain and gzipped
+// streams are both walked; anything else fails closed to the daemon path.
+func isOCILayoutTarball(path string) bool {
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer func() { _ = f.Close() }()
+	if isOCILayoutTarStream(f) {
 		return true
 	}
-	return false
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return false
+	}
+	gz, err := gzip.NewReader(f)
+	if err != nil {
+		return false
+	}
+	defer func() { _ = gz.Close() }()
+	return isOCILayoutTarStream(gz)
+}
+
+// isOCILayoutTarStream walks one tar stream looking for a usable OCI
+// index.json, stopping at the first hit instead of consuming the archive.
+func isOCILayoutTarStream(r io.Reader) bool {
+	tr := tar.NewReader(r)
+	for {
+		hdr, err := tr.Next()
+		if err != nil {
+			return false
+		}
+		name := strings.TrimPrefix(hdr.Name, "./")
+		if hdr.Typeflag != tar.TypeReg || name != "index.json" {
+			continue
+		}
+		var desc ociIndexManifestDescriptor
+		if err := json.NewDecoder(io.LimitReader(tr, 1<<20)).Decode(&desc); err != nil {
+			return false
+		}
+		return len(desc.Manifests) > 0
+	}
 }
 
 // classifyRemainder runs steps 1-5 of the pipeline on an already-trimmed,
@@ -266,7 +395,6 @@ var sourceSelectors = []struct {
 	{"docker-archive", selectorLocal},
 	{"oci-archive", selectorLocal},
 	{"oci-dir", selectorLocal},
-	{"oci-layout", selectorLocal},
 	{"dir", selectorLocal},
 	{"file", selectorLocal},
 	{"sbom", selectorLocal},
@@ -358,6 +486,12 @@ func stripRegistrySelectorScheme(trimmed string) (string, string, bool) {
 
 func imageAttributesForExceptions(image string, stat func(string) bool) (Attributes, string, error) {
 	trimmed := strings.TrimSpace(image)
+	// Raw-SBOM content wins before any selector handling, mirroring grype's
+	// getSBOMReader order (purl:/sbom: cases operate on stripped paths and
+	// cannot collide with a literal existing file of the full spelling).
+	if isRawSBOMInput(trimmed) {
+		return Attributes{}, "sbom", fmt.Errorf("image exceptions cannot target non-registry input %q (detected %q): scan by registry reference or remove --exceptions", image, "sbom")
+	}
 	if rest, scheme, ok := stripRegistrySelectorScheme(trimmed); ok {
 		// Daemon/registry selectors never touch the filesystem (grype
 		// narrows to daemon/pull providers), so the remainder skips the
@@ -444,6 +578,9 @@ func matchPolicies(policies []VulnerabilitiesIgnorePolicy, attrs Attributes) ([]
 
 func isNonRegistryForExceptions(img string, stat func(string) bool) bool {
 	trimmed := strings.TrimSpace(img)
+	if isRawSBOMInput(trimmed) {
+		return true
+	}
 	if rest, _, ok := stripRegistrySelectorScheme(trimmed); ok {
 		// Mirror the resolver: daemon/registry selectors skip the
 		// filesystem pipeline; only an unparseable remainder is loud.
@@ -798,7 +935,6 @@ func (ks *Kubescape) ScanImageContext(ctx context.Context, imgScanInfo *ksmetav1
 	// Warn on a stale vulnerability DB (always); fail only with --fail-on-stale-db.
 	// The failure is deferred until after results are printed so the user keeps the report.
 	staleDBErr := imagescan.EnforceDBAge(svc, shouldUpdate, failOnStale, maxDBAge)
-
 
 	jobs := buildImageScanJobs(imgScanInfo, scanInfo, exceptionPolicies)
 
