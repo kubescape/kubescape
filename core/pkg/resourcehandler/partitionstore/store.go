@@ -59,11 +59,13 @@ type Store interface {
 	// Only valid after Seal().
 	Namespaces() []string
 
-	// NamespaceCounts returns accumulated scannable resource counts per namespace.
+	// NamespaceCounts returns scannable resource counts for partitions that are
+	// still present in the store. Purged namespaces are not included.
 	// Valid after Seal().
 	NamespaceCounts() map[string]int
 
-	// TotalResources returns the total count of namespaced resources stored.
+	// TotalResources returns the total count of namespaced resources currently
+	// stored. Purging a namespace removes its resources from this count.
 	TotalResources() int
 
 	// LoadBatch deserializes and returns a *cautils.ResourceBatch for the specified namespace.

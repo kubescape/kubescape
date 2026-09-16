@@ -575,7 +575,7 @@ func (d *DiskStore) LoadBatch(ctx context.Context, namespace string) (*cautils.R
 		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 			return nil, fmt.Errorf("failed to purge partition file for namespace %s: %w", namespace, err)
 		}
-		delete(d.namespaces, namespace)
+		d.purgeNamespaceAccountingLocked(namespace)
 	}
 
 	return batch, nil
@@ -600,12 +600,22 @@ func (d *DiskStore) PurgeNamespace(namespace string) error {
 	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to purge partition file for namespace %s: %w", namespace, err)
 	}
-	delete(d.namespaces, namespace)
+	d.purgeNamespaceAccountingLocked(namespace)
 	delete(d.unrestoredPartitions, namespace)
 	if len(d.unrestoredPartitions) == 0 {
 		d.rollbackErr = nil
 	}
 	return nil
+}
+
+func (d *DiskStore) purgeNamespaceAccountingLocked(namespace string) {
+	count, exists := d.committedCounts[namespace]
+	if !exists {
+		return
+	}
+	delete(d.namespaces, namespace)
+	delete(d.committedCounts, namespace)
+	d.totalResources -= count
 }
 
 func (d *DiskStore) Close() error {
