@@ -29,6 +29,7 @@ import (
 	"github.com/anchore/grype/grype/vulnerability"
 	"github.com/anchore/stereoscope/pkg/image"
 	"github.com/anchore/syft/syft"
+	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v4/core/cautils"
@@ -249,7 +250,7 @@ func EnforceDBAge(svc *Service, shouldUpdate bool, failOnStale bool, maxAge time
 	return nil
 }
 
-func getProviderConfig(creds RegistryCredentials, sources []string, options ScanOptions) pkg.ProviderConfig {
+func getProviderConfig(creds RegistryCredentials, sources []string, options ScanOptions, keychain authn.Keychain) pkg.ProviderConfig {
 	var syftCreds []image.RegistryCredentials
 	if creds.hasAuthenticator() {
 		syftCreds = append(syftCreds, image.RegistryCredentials{
@@ -261,6 +262,11 @@ func getProviderConfig(creds RegistryCredentials, sources []string, options Scan
 	}
 	regOpts := &image.RegistryOptions{
 		Credentials: syftCreds,
+		// Explicit Credentials above still win per-registry (see
+		// image.RegistryOptions.Authenticator). keychain is the composed,
+		// build-once fallback chain from newRegistryKeychain - see its
+		// docstring for the precedence within it.
+		Keychain: keychain,
 	}
 	pc := pkg.ProviderConfig{
 		SyftProviderConfig: pkg.SyftProviderConfig{
@@ -289,6 +295,13 @@ type Service struct {
 	// dbStatus carries the loaded vulnerability DB status so scan results can
 	// surface DB freshness (ProviderStatus.Built). Nil when the DB failed to load.
 	dbStatus *vulnerability.ProviderStatus
+	// keychain is the composed, build-once fallback used when no explicit
+	// RegistryCredentials/imagePullSecret matches a registry. See
+	// newRegistryKeychain for what it's composed of and in what order. It's
+	// built once per Service, but that does not itself cache credentials
+	// across images - each Resolve() call (once per image pull) re-runs the
+	// wrapped keychain; see acrKeychainRefreshInterval's comment for why.
+	keychain authn.Keychain
 }
 
 func getIgnoredMatches(vulnerabilityExceptions []string, vp vulnerability.Provider, packages []pkg.Package, pkgContext pkg.Context, useDefaultMatchers bool) (*match.Matches, []match.IgnoredMatch, error) {
@@ -367,7 +380,7 @@ func (s *Service) ScanWithOptions(ctx context.Context, userInput string, creds R
 	}
 	options.Platform = platform
 
-	packages, pkgContext, sbom, err := pkg.Provide(userInput, getProviderConfig(creds, s.sources, options))
+	packages, pkgContext, sbom, err := pkg.Provide(userInput, getProviderConfig(creds, s.sources, options, s.keychain))
 	if err != nil {
 		return nil, err
 	}
@@ -533,6 +546,7 @@ func NewScanServiceWithMatchersAndSources(distCfg distribution.Config, installCf
 		useDefaultMatchers: useDefaultMatchers,
 		vexClient:          NewVexClient(),
 		sources:            sources,
+		keychain:           newRegistryKeychain(),
 	}, nil
 }
 
