@@ -549,22 +549,17 @@ func newClusterResult(kubeContext string, results *resultshandling.ResultsHandle
 	return cluster
 }
 
-// writeFleetReport serialises the report to path as indented JSON. The path is
-// opened without any stdout fallback: the operator asked for a file, and a
-// report that quietly went somewhere else is worse than an error.
+// writeFleetReport serialises the report to path as indented JSON. The
+// destination is replaced atomically only after the complete report has been
+// encoded and flushed, so a failed write cannot destroy a previous good
+// report or leave a truncated report that still looks like the latest run.
 func writeFleetReport(path string, report *fleet.FleetReport) error {
-	f, err := printer.GetWriterNoFallback(path)
+	data, err := json.MarshalIndent(report, "", "  ")
 	if err != nil {
-		return err
+		return fmt.Errorf("encode fleet report %q: %w", path, err)
 	}
-
-	encoder := json.NewEncoder(f)
-	encoder.SetIndent("", "  ")
-	if err := encoder.Encode(report); err != nil {
-		_ = f.Close()
-		return fmt.Errorf("write fleet report %q: %w", path, err)
-	}
-	if err := f.Close(); err != nil {
+	data = append(data, '\n')
+	if err := cautils.WriteFileAtomically(path, data, 0o600); err != nil {
 		return fmt.Errorf("write fleet report %q: %w", path, err)
 	}
 	return nil

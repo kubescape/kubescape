@@ -1,6 +1,7 @@
 package scan
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -23,6 +24,88 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestWriteFleetReport_ReplacesExistingReportAtomically(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "fleet.json")
+	require.NoError(t, os.WriteFile(path, []byte("{\"generation\":\"old\"}"), 0o600))
+
+	report := &fleet.FleetReport{
+		Metadata: fleet.FleetMetadata{
+			GeneratedAt: time.Date(2026, time.January, 2, 3, 4, 5, 0, time.UTC),
+			Contexts:    []string{"prod"},
+		},
+		Clusters: []fleet.ClusterResult{{ClusterID: "prod", Context: "prod", Status: fleet.ClusterScanned}},
+	}
+	require.NoError(t, writeFleetReport(path, report))
+
+	raw, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.True(t, json.Valid(raw))
+	assert.True(t, bytes.HasSuffix(raw, []byte("\n")))
+	got := fleetReportFromFile(t, path)
+	assert.Equal(t, []string{"prod"}, got.Metadata.Contexts)
+	require.Len(t, got.Clusters, 1)
+	assert.Equal(t, "prod", got.Clusters[0].ClusterID)
+}
+
+func TestWriteFleetReport_DoesNotFollowExistingSymlink(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation is not generally available to unprivileged Windows tests")
+	}
+
+	dir := t.TempDir()
+	victim := filepath.Join(dir, "per-context.json")
+	path := filepath.Join(dir, "fleet.json")
+	require.NoError(t, os.WriteFile(victim, []byte("per-context result"), 0o600))
+	require.NoError(t, os.Symlink(victim, path))
+
+	report := &fleet.FleetReport{Metadata: fleet.FleetMetadata{Contexts: []string{"prod"}}}
+	require.NoError(t, writeFleetReport(path, report))
+
+	victimData, err := os.ReadFile(victim)
+	require.NoError(t, err)
+	assert.Equal(t, "per-context result", string(victimData))
+	reportData, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.True(t, json.Valid(reportData))
+	info, err := os.Lstat(path)
+	require.NoError(t, err)
+	assert.Zero(t, info.Mode()&os.ModeSymlink)
+}
+
+func TestWriteFleetReport_PreservesExistingDestinationWhenCommitFails(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("directory replacement errors differ on Windows")
+	}
+
+	path := filepath.Join(t.TempDir(), "fleet.json")
+	require.NoError(t, os.Mkdir(path, 0o750))
+	marker := filepath.Join(path, "previous-report")
+	require.NoError(t, os.WriteFile(marker, []byte("keep"), 0o600))
+
+	err := writeFleetReport(path, &fleet.FleetReport{})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "write fleet report")
+	got, readErr := os.ReadFile(marker)
+	require.NoError(t, readErr)
+	assert.Equal(t, "keep", string(got))
+}
+
+func TestWriteFleetReport_CreatesNestedDestinationPrivately(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "reports", "fleet", "result.json")
+	report := &fleet.FleetReport{Metadata: fleet.FleetMetadata{Contexts: []string{"prod", "dr"}}}
+
+	require.NoError(t, writeFleetReport(path, report))
+
+	got := fleetReportFromFile(t, path)
+	assert.Equal(t, []string{"prod", "dr"}, got.Metadata.Contexts)
+	if runtime.GOOS != "windows" {
+		info, err := os.Stat(path)
+		require.NoError(t, err)
+		assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+	}
+}
 
 func TestPerContextOutputPath(t *testing.T) {
 	tests := []struct {
