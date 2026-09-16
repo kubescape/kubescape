@@ -1134,6 +1134,21 @@ func (opap *OPAProcessor) processRuleOnScope(ctx context.Context, rule *reportha
 				for _, cr := range cached.ResourceAssociatedRules {
 					if cr.Name == rule.Name {
 						rr := cr
+						// A restored verdict predates the current scan's
+						// coverage state: recompute the incomplete-coverage
+						// marker instead of replaying it. A pass stored while
+						// a dependency was partially missing must not survive
+						// collection recovery as IncompleteCoverage, and a
+						// pass stored while complete must gain the marker when
+						// the current scan has gaps. Failures and skips are
+						// left exactly as stored.
+						if rr.Status == apis.StatusPassed {
+							if opap.hasUnreachableDependency(controlID) {
+								rr.SubStatus = apis.SubStatusIncompleteCoverage
+							} else if rr.SubStatus == apis.SubStatusIncompleteCoverage {
+								rr.SubStatus = ""
+							}
+						}
 						resources[r.GetID()] = &rr
 					}
 				}
