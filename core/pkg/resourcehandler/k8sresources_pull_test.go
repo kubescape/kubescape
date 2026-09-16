@@ -308,7 +308,7 @@ func TestGetResources_HostSensorInfoMapMerged(t *testing.T) {
 			"KubeletInfo": {InnerStatus: apis.StatusSkipped, InnerInfo: "node-1: connection refused"},
 		},
 		partials: []cautils.PartialGVRPull{
-			{GVR: "hostdata.kubescape.io/v1beta0/kubeletinfos", Selector: "conversion", Error: "node-agent reported 2 KubeletInfo but only 1 could be read"},
+			{GVR: "hostdata.kubescape.cloud/v1beta0/KubeletInfo", Selector: "conversion", Error: "node-agent reported 2 KubeletInfo but only 1 could be read"},
 		},
 	}
 
@@ -344,6 +344,6 @@ func TestGetResources_HostSensorInfoMapMerged(t *testing.T) {
 	assert.True(t, ok, "host-sensor infoMap entries must be present in sessionObj.InfoMap after merge")
 
 	require.Len(t, sessionObj.PartialGVRFailures, 1, "host-sensor partial gaps must reach the session")
-	assert.Equal(t, "hostdata.kubescape.io/v1beta0/kubeletinfos", sessionObj.PartialGVRFailures[0].GVR)
+	assert.Equal(t, "hostdata.kubescape.cloud/v1beta0/KubeletInfo", sessionObj.PartialGVRFailures[0].GVR)
 	assert.Equal(t, "conversion", sessionObj.PartialGVRFailures[0].Selector)
 }
