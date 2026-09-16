@@ -2,7 +2,6 @@ package core
 
 import (
 	"archive/tar"
-	"compress/gzip"
 	"context"
 	"encoding/json"
 	"errors"
@@ -202,12 +201,14 @@ func classifyImageInput(img string, stat func(string) bool) (registry bool, sche
 // suffixes or bare existence, because both directions disagree silently
 // otherwise: an extensionless or colon-named tarball must be local, while a
 // plain directory or corrupt archive must fall through to daemon/registry.
-// Accepts: OCI-layout directories (layout + index with ≥1 manifest,
-// mirroring the OCI directory provider's gate), docker tarballs
-// (tarball.ImageFromPath reads manifest+config only — no layer unpack),
-// SIF images (header load), and OCI-layout tarballs (in-stream index.json
-// with ≥1 manifest, no extraction). Anything else defers to the daemon
-// parser, exactly like the providers' fallthrough.
+// Accepts: OCI-layout directories (layout + index with one manifest, or
+// several with equal digests, plus every referenced blob on disk —
+// mirroring the OCI directory provider's gate and its layer reads),
+// docker tarballs (tarball.ImageFromPath reads manifest+config only — no
+// layer unpack), SIF images (header load), and OCI-layout tarballs (the
+// provider's untar-then-directory-gate reproduced as an entry walk: cleaned
+// names, complete index, referenced blobs present, no gunzip). Anything else
+// defers to the daemon parser, exactly like the providers' fallthrough.
 func isImageRemainderLocal(rest string) bool {
 	if rest == "" {
 		return false
@@ -228,12 +229,16 @@ func isImageRemainderLocal(rest string) bool {
 	return isTarballFile(rest) || isSIFFile(rest) || isOCILayoutTarball(rest)
 }
 
-// isOCILayoutDir mirrors the OCI directory provider's acceptance gate:
-// a readable layout whose index carries at least one manifest (the provider
-// further requires exactly one, or several with equal digests — accepting
-// more here only ever fails closed loud, never silent).
+// isOCILayoutDir mirrors the OCI directory provider's acceptance gate
+// (pkg/image/oci directoryImageProvider.Provide) without unpacking layers:
+// a readable layout whose index carries exactly one manifest — or several
+// with equal digests — whose manifest, config, and layer blobs all exist on
+// disk. The provider's Read unpacks every referenced blob, so a layout
+// missing any of them is rejected and Syft falls through to daemon/registry;
+// accepting it here would hand a registry-resolved scan a local identity.
 func isOCILayoutDir(path string) bool {
-	if _, err := layout.FromPath(path); err != nil {
+	pathObj, err := layout.FromPath(path)
+	if err != nil {
 		return false
 	}
 	index, err := layout.ImageIndexFromPath(path)
@@ -244,7 +249,57 @@ func isOCILayoutDir(path string) bool {
 	if err != nil || len(manifest.Manifests) == 0 {
 		return false
 	}
+	first := manifest.Manifests[0].Digest
+	for _, m := range manifest.Manifests[1:] {
+		if m.Digest != first {
+			return false
+		}
+	}
+	img, err := pathObj.Image(first)
+	if err != nil {
+		return false
+	}
+	raw, err := img.RawManifest()
+	if err != nil {
+		return false
+	}
+	var desc ociManifestBlobDescriptor
+	if err := json.Unmarshal(raw, &desc); err != nil {
+		return false
+	}
+	if !layoutBlobExists(path, desc.Config.Digest) {
+		return false
+	}
+	for _, layer := range desc.Layers {
+		if !layoutBlobExists(path, layer.Digest) {
+			return false
+		}
+	}
 	return true
+}
+
+// ociManifestBlobDescriptor is the minimal manifest shape needed to verify
+// the blobs the provider's Read would unpack, without unpacking them.
+type ociManifestBlobDescriptor struct {
+	Config struct {
+		Digest string `json:"digest"`
+	} `json:"config"`
+	Layers []struct {
+		Digest string `json:"digest"`
+	} `json:"layers"`
+}
+
+// layoutBlobExists reports whether digest names a blob file under the
+// layout, mirroring the on-disk reads the provider performs after the index
+// gate. Digests carrying path separators are rejected so manifest content
+// can never escape the blobs directory.
+func layoutBlobExists(layoutPath, digest string) bool {
+	algo, hex, ok := strings.Cut(digest, ":")
+	if !ok || algo == "" || hex == "" || strings.ContainsAny(hex, `/\.`) {
+		return false
+	}
+	info, err := os.Stat(filepath.Join(layoutPath, "blobs", algo, hex))
+	return err == nil && !info.IsDir()
 }
 
 // isTarballFile mirrors the docker-archive provider: manifest.json plus its
@@ -274,48 +329,148 @@ type ociIndexManifestDescriptor struct {
 }
 
 // isOCILayoutTarball mirrors the OCI-archive provider without extracting:
-// it untars to a temp dir, so stream the tar in memory instead and accept on
-// a decodable index.json carrying at least one manifest. Plain and gzipped
-// streams are both walked; anything else fails closed to the daemon path.
+// the provider untars to a temp dir (no gunzip — a gzipped stream fails the
+// tar parse and falls through) and applies the directory gate there, so the
+// walk reproduces both: entry names cleaned exactly the way filepath.Join
+// cleans them on extraction, the complete index decoded, and every blob the
+// manifest references verified present. Anything else fails closed to the
+// daemon path.
 func isOCILayoutTarball(path string) bool {
-	f, err := os.Open(path)
+	indexBody, entries, ok := walkTarEntries(path)
+	if !ok {
+		return false
+	}
+	var desc ociIndexManifestDescriptor
+	if err := json.Unmarshal(indexBody, &desc); err != nil || len(desc.Manifests) == 0 {
+		return false
+	}
+	first := desc.Manifests[0].Digest
+	for _, m := range desc.Manifests[1:] {
+		if m.Digest != first {
+			return false
+		}
+	}
+	manifestBody, err := readTarEntryBody(path, "blobs/"+digestPath(first))
 	if err != nil {
 		return false
 	}
-	defer func() { _ = f.Close() }()
-	if isOCILayoutTarStream(f) {
-		return true
-	}
-	if _, err := f.Seek(0, io.SeekStart); err != nil {
+	var blobDesc ociManifestBlobDescriptor
+	if err := json.Unmarshal(manifestBody, &blobDesc); err != nil {
 		return false
 	}
-	gz, err := gzip.NewReader(f)
-	if err != nil {
+	if !entries["blobs/"+digestPath(blobDesc.Config.Digest)] {
 		return false
 	}
-	defer func() { _ = gz.Close() }()
-	return isOCILayoutTarStream(gz)
+	for _, layer := range blobDesc.Layers {
+		if !entries["blobs/"+digestPath(layer.Digest)] {
+			return false
+		}
+	}
+	return true
 }
 
-// isOCILayoutTarStream walks one tar stream looking for a usable OCI
-// index.json, stopping at the first hit instead of consuming the archive.
-func isOCILayoutTarStream(r io.Reader) bool {
-	tr := tar.NewReader(r)
+// digestPath maps an "algo:hex" digest to its layout-relative blob path.
+// Malformed digests map to a path no entry can hold.
+func digestPath(digest string) string {
+	algo, hex, ok := strings.Cut(digest, ":")
+	if !ok || algo == "" || hex == "" || strings.ContainsAny(hex, `/\.`) {
+		return "\x00invalid"
+	}
+	return algo + "/" + hex
+}
+
+// walkTarEntries lists one plain-tar stream the way the provider's
+// extraction materializes it: cleaned relative paths of regular files, plus
+// the index.json body. ok is false when the stream is not a readable tar,
+// an entry would escape the extraction root (the provider hard-fails the
+// whole extraction on those), or no index.json is present. The index entry
+// is bounded by the archive itself and the provider reads the extracted
+// index.json whole, so no size cap applies here either.
+func walkTarEntries(path string) (indexBody []byte, entries map[string]bool, ok bool) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, nil, false
+	}
+	defer func() { _ = f.Close() }()
+	entries = make(map[string]bool)
+	tr := tar.NewReader(f)
 	for {
 		hdr, err := tr.Next()
-		if err != nil {
-			return false
+		if errors.Is(err, io.EOF) {
+			break
 		}
-		name := strings.TrimPrefix(hdr.Name, "./")
-		if hdr.Typeflag != tar.TypeReg || name != "index.json" {
+		if err != nil {
+			return nil, nil, false
+		}
+		rel, ok := tarEntryRelPath(hdr.Name)
+		if !ok {
+			return nil, nil, false
+		}
+		if hdr.Typeflag != tar.TypeReg {
+			// Only regular files are materialized by the provider's
+			// extraction switch (directories are created, links skipped,
+			// other types dropped), so only they satisfy anything.
 			continue
 		}
-		var desc ociIndexManifestDescriptor
-		if err := json.NewDecoder(io.LimitReader(tr, 1<<20)).Decode(&desc); err != nil {
-			return false
+		entries[rel] = true
+		if rel != "index.json" || indexBody != nil {
+			continue
 		}
-		return len(desc.Manifests) > 0
+		body, err := io.ReadAll(tr)
+		if err != nil {
+			return nil, nil, false
+		}
+		indexBody = body
 	}
+	if indexBody == nil {
+		return nil, nil, false
+	}
+	return indexBody, entries, true
+}
+
+// readTarEntryBody returns the body of the regular file at rel in a
+// plain-tar stream, mirroring the same cleaning and rejection walkTarEntries
+// applies.
+func readTarEntryBody(path, rel string) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = f.Close() }()
+	tr := tar.NewReader(f)
+	for {
+		hdr, err := tr.Next()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		entryRel, ok := tarEntryRelPath(hdr.Name)
+		if !ok {
+			return nil, fmt.Errorf("entry escapes extraction root: %q", hdr.Name)
+		}
+		if entryRel != rel || hdr.Typeflag != tar.TypeReg {
+			continue
+		}
+		return io.ReadAll(tr)
+	}
+	return nil, fmt.Errorf("entry not found: %q", rel)
+}
+
+// tarEntryRelPath cleans a tar entry name exactly the way the provider's
+// extraction does (filepath.Join with the destination) and reports the path
+// relative to the extraction root. ok is false when the entry would escape
+// the root — the provider hard-fails the whole extraction on such an entry,
+// so the archive is not a usable OCI layout.
+func tarEntryRelPath(name string) (rel string, ok bool) {
+	const dst = string(filepath.Separator) + "oci-classify"
+	target := filepath.Join(dst, name)
+	rel, err := filepath.Rel(dst, target)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", false
+	}
+	return filepath.ToSlash(rel), true
 }
 
 // classifyRemainder runs steps 1-5 of the pipeline on an already-trimmed,

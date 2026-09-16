@@ -2,10 +2,18 @@ package core
 
 import (
 	"archive/tar"
+	"compress/gzip"
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	stereoscopefile "github.com/anchore/stereoscope/pkg/file"
+	ociprovider "github.com/anchore/stereoscope/pkg/image/oci"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	ksmetav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
 	"github.com/stretchr/testify/assert"
@@ -272,14 +280,143 @@ func writeDockerTarball(t *testing.T, path string) {
 	}
 }
 
-// writeOCILayoutDir writes the smallest directory the OCI directory provider
-// accepts: an index.json carrying exactly one manifest.
-func writeOCILayoutDir(t *testing.T, path string) {
+// sha256Digest returns the "sha256:<hex>" digest of content, the addressing
+// the OCI layout uses for blobs.
+func sha256Digest(content []byte) string {
+	sum := sha256.Sum256(content)
+	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+// writeBlob stores content under blobs/<algo>/<hex> for digest, creating the
+// directory the layout reader expects.
+func writeBlob(t *testing.T, layoutPath, digest string, content []byte) {
 	t.Helper()
-	require.NoError(t, os.MkdirAll(filepath.Join(path, "blobs", "sha256"), 0o755))
-	index := `{"schemaVersion":2,"manifests":[{"mediaType":"application/vnd.oci.image.manifest.v1+json","digest":"sha256:abc","size":10}]}`
-	require.NoError(t, os.WriteFile(filepath.Join(path, "index.json"), []byte(index), 0o600))
+	algo, hexPart, ok := strings.Cut(digest, ":")
+	require.True(t, ok, "digest %q must be algo:hex", digest)
+	dir := filepath.Join(layoutPath, "blobs", algo)
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, hexPart), content, 0o600))
+}
+
+// ociLayoutContent builds a minimal but genuinely provider-accepted layout:
+// index.json pointing at a real manifest blob pointing at a real config
+// blob. Digests are computed over the bytes written, so the fixture passes
+// the provider's own reads — not just the classifier's shape check.
+func ociLayoutContent() (index, manifest, config []byte, manifestDigest string) {
+	config = []byte(`{"architecture":"amd64","os":"linux","rootfs":{"type":"layers","diff_ids":[]}}`)
+	configDigest := sha256Digest(config)
+	manifest = []byte(fmt.Sprintf(`{"schemaVersion":2,"mediaType":"application/vnd.oci.image.manifest.v1+json","config":{"mediaType":"application/vnd.oci.image.config.v1+json","digest":%q,"size":%d},"layers":[]}`, configDigest, len(config)))
+	manifestDigest = sha256Digest(manifest)
+	index = []byte(fmt.Sprintf(`{"schemaVersion":2,"manifests":[{"mediaType":"application/vnd.oci.image.manifest.v1+json","digest":%q,"size":%d}]}`, manifestDigest, len(manifest)))
+	return index, manifest, config, manifestDigest
+}
+
+// writeOCILayoutDir writes the smallest directory the OCI directory provider
+// accepts: oci-layout, an index.json carrying exactly one manifest, and the
+// manifest plus config blobs it references. It returns the manifest digest
+// so tests can name same/differing multi-manifest variants.
+func writeOCILayoutDir(t *testing.T, path string) string {
+	t.Helper()
+	index, manifest, config, manifestDigest := ociLayoutContent()
+	configDigest := sha256Digest(config)
+	writeBlob(t, path, manifestDigest, manifest)
+	writeBlob(t, path, configDigest, config)
+	require.NoError(t, os.WriteFile(filepath.Join(path, "index.json"), index, 0o600))
 	require.NoError(t, os.WriteFile(filepath.Join(path, "oci-layout"), []byte(`{"imageLayoutVersion":"1.0.0"}`), 0o600))
+	return manifestDigest
+}
+
+// writeOCILayoutDirMissingBlob writes a well-formed layout whose manifest
+// blob is absent: the provider rejects it (its manifest read fails) and
+// Syft falls through to daemon/registry. This is the incomplete-layout
+// probe the classifier must agree with.
+func writeOCILayoutDirMissingBlob(t *testing.T, path string) {
+	t.Helper()
+	index, _, config, _ := ociLayoutContent()
+	writeBlob(t, path, sha256Digest(config), config)
+	require.NoError(t, os.WriteFile(filepath.Join(path, "index.json"), index, 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(path, "oci-layout"), []byte(`{"imageLayoutVersion":"1.0.0"}`), 0o600))
+}
+
+// writeOCIArchive tars a provider-accepted layout without extracting it:
+// indexEntryName controls the index.json entry spelling (e.g. "././index.json"
+// exercises the provider's path cleaning), indexPad inflates the index past
+// any size cap while keeping it decodable, and dropManifest omits the
+// manifest blob to model the incomplete-archive probe.
+func writeOCIArchive(t *testing.T, path, indexEntryName, indexPad string, dropManifest bool) {
+	t.Helper()
+	index, manifest, config, manifestDigest := ociLayoutContent()
+	if indexPad != "" {
+		padded := fmt.Sprintf(`{"schemaVersion":2,"annotations":{"pad":%q},"manifests":[{"mediaType":"application/vnd.oci.image.manifest.v1+json","digest":%q,"size":%d}]}`, indexPad, manifestDigest, len(manifest))
+		index = []byte(padded)
+	}
+	configDigest := sha256Digest(config)
+	entries := map[string][]byte{
+		"oci-layout":   []byte(`{"imageLayoutVersion":"1.0.0"}`),
+		indexEntryName: index,
+		"blobs/sha256/" + strings.TrimPrefix(configDigest, "sha256:"):   config,
+		"blobs/sha256/" + strings.TrimPrefix(manifestDigest, "sha256:"): manifest,
+	}
+	if dropManifest {
+		delete(entries, "blobs/sha256/"+strings.TrimPrefix(manifestDigest, "sha256:"))
+	}
+	f, err := os.Create(path)
+	require.NoError(t, err)
+	defer func() { _ = f.Close() }()
+	tw := tar.NewWriter(f)
+	defer func() { _ = tw.Close() }()
+	// Explicit directory entries first: the provider's extraction only
+	// creates parents for listed directories, like real buildah archives.
+	for _, dirEntry := range []string{"blobs/", "blobs/sha256/"} {
+		require.NoError(t, tw.WriteHeader(&tar.Header{Name: dirEntry, Typeflag: tar.TypeDir, Mode: 0o755}))
+	}
+	for _, name := range sortedBlobKeys(entries) {
+		body := entries[name]
+		require.NoError(t, tw.WriteHeader(&tar.Header{Name: name, Mode: 0o600, Size: int64(len(body))}))
+		_, err = tw.Write(body)
+		require.NoError(t, err)
+	}
+}
+
+func sortedBlobKeys(m map[string][]byte) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	for i := 1; i < len(keys); i++ {
+		for j := i; j > 0 && keys[j] < keys[j-1]; j-- {
+			keys[j], keys[j-1] = keys[j-1], keys[j]
+		}
+	}
+	return keys
+}
+
+// requireDirectoryProviderVerdict runs the real OCI directory provider over
+// path: the ground truth the classifier must agree with.
+func requireDirectoryProviderVerdict(t *testing.T, path string, accept bool) {
+	t.Helper()
+	gen := stereoscopefile.NewTempDirGenerator("classify-probe")
+	defer func() { _ = gen.Cleanup() }()
+	_, err := ociprovider.NewDirectoryProvider(gen, path).Provide(context.Background())
+	if accept {
+		require.NoError(t, err, "provider must accept %q", path)
+	} else {
+		require.Error(t, err, "provider must reject %q", path)
+	}
+}
+
+// requireArchiveProviderVerdict runs the real OCI archive provider over
+// path: the ground truth the tarball classifier must agree with.
+func requireArchiveProviderVerdict(t *testing.T, path string, accept bool) {
+	t.Helper()
+	gen := stereoscopefile.NewTempDirGenerator("classify-probe")
+	defer func() { _ = gen.Cleanup() }()
+	_, err := ociprovider.NewArchiveProvider(gen, path).Provide(context.Background())
+	if accept {
+		require.NoError(t, err, "provider must accept %q", path)
+	} else {
+		require.Error(t, err, "provider must reject %q", path)
+	}
 }
 
 // Real-fixture rows for the provider-backed image-remainder check: each
@@ -342,6 +479,133 @@ func TestImageRemainderLocalFixtures(t *testing.T) {
 	registry, _, err = classifyImageInput("image:"+filepath.Join(dir, "missing.tar"), osStatExists)
 	assert.False(t, registry)
 	assert.NoError(t, err)
+}
+
+// TestImageRemainderOCIDirectoryParity pins the classifier to the real OCI
+// directory provider: every layout the provider accepts must classify
+// local, and every layout it rejects must not.
+func TestImageRemainderOCIDirectoryParity(t *testing.T) {
+	dir := t.TempDir()
+	valid := filepath.Join(dir, "ocivalid")
+	writeOCILayoutDir(t, valid)
+	incomplete := filepath.Join(dir, "ociincomplete")
+	writeOCILayoutDirMissingBlob(t, incomplete)
+
+	requireDirectoryProviderVerdict(t, valid, true)
+	requireDirectoryProviderVerdict(t, incomplete, false)
+
+	assert.True(t, isOCILayoutDir(valid), "provider-accepted layout must classify local")
+	assert.False(t, isOCILayoutDir(incomplete), "provider-rejected layout (missing manifest blob) must not classify local")
+
+	registry, scheme, err := classifyImageInput("image:"+valid, osStatExists)
+	assert.False(t, registry)
+	assert.Equal(t, "image", scheme)
+	assert.NoError(t, err)
+}
+
+// TestImageRemainderOCIArchiveParity pins the tarball classifier to the
+// real OCI archive provider across the exact gaps reported: normalized
+// entry spellings (././index.json), indexes past the old 1 MiB cap,
+// incomplete archives, and gzipped streams (the provider never gunzips).
+func TestImageRemainderOCIArchiveParity(t *testing.T) {
+	dir := t.TempDir()
+	valid := filepath.Join(dir, "valid.tar")
+	writeOCIArchive(t, valid, "index.json", "", false)
+	normalized := filepath.Join(dir, "normalized.tar")
+	writeOCIArchive(t, normalized, "././index.json", "", false)
+	large := filepath.Join(dir, "large.tar")
+	writeOCIArchive(t, large, "index.json", strings.Repeat("p", 2<<20), false)
+	incomplete := filepath.Join(dir, "incomplete.tar")
+	writeOCIArchive(t, incomplete, "index.json", "", true)
+	gzipped := filepath.Join(dir, "gzipped.tar")
+	gzipFile(t, valid, gzipped)
+
+	for path, accept := range map[string]bool{valid: true, normalized: true, large: true, incomplete: false, gzipped: false} {
+		requireArchiveProviderVerdict(t, path, accept)
+		assert.Equal(t, accept, isOCILayoutTarball(path), "classifier must agree with the provider on %q", path)
+	}
+}
+
+// TestImageRemainderOCIRelativeParity is the collision scenario: relative
+// names that also parse as registry references, so a detection miss yields
+// registry identity (not a loud-local absolute path that proves nothing).
+// A colliding relative directory the provider rejects must resolve registry
+// — the scan Grype actually performs — instead of taking local identity.
+func TestImageRemainderOCIRelativeParity(t *testing.T) {
+	dir := t.TempDir()
+	writeOCILayoutDir(t, filepath.Join(dir, "nginx"))
+	writeOCILayoutDirMissingBlob(t, filepath.Join(dir, "brokenimg"))
+	writeOCIArchive(t, filepath.Join(dir, "pkg"), "index.json", "", false)
+	writeOCIArchive(t, filepath.Join(dir, "normimg"), "././index.json", "", false)
+	writeOCIArchive(t, filepath.Join(dir, "holeimg"), "index.json", "", true)
+	writeMultiManifestLayout(t, filepath.Join(dir, "twinequal"), true)
+	writeMultiManifestLayout(t, filepath.Join(dir, "twindiffer"), false)
+	t.Chdir(dir)
+
+	cases := []struct {
+		input string
+		local bool
+	}{
+		{"image:nginx", true},       // valid layout under a registry-parseable name
+		{"image:pkg", true},         // valid extensionless archive
+		{"image:normimg", true},     // normalized index entry spelling
+		{"image:twinequal", true},   // several manifests, equal digests
+		{"image:brokenimg", false},  // missing blob: provider rejects, name parses registry
+		{"image:holeimg", false},    // missing manifest blob in archive
+		{"image:twindiffer", false}, // several manifests, differing digests
+	}
+	for _, tc := range cases {
+		registry, _, err := classifyImageInput(tc.input, osStatExists)
+		assert.Equal(t, !tc.local, registry, "%s must resolve %s", tc.input, map[bool]string{true: "local", false: "registry"}[tc.local])
+		assert.NoError(t, err)
+	}
+
+	// A gzipped OCI stream is rejected by the provider (no gunzip) and must
+	// resolve registry under a parseable relative name.
+	gzipFile(t, filepath.Join(dir, "pkg"), filepath.Join(dir, "gzipimg"))
+	registry, _, err := classifyImageInput("image:gzipimg", osStatExists)
+	assert.True(t, registry, "gzipped OCI archive must fall through to registry")
+	assert.NoError(t, err)
+}
+
+// writeMultiManifestLayout writes a layout whose index carries two
+// manifests: the same digest twice when equal (provider-accepted) or two
+// distinct digests (provider-rejected).
+func writeMultiManifestLayout(t *testing.T, path string, equal bool) {
+	t.Helper()
+	_, manifest, config, manifestDigest := ociLayoutContent()
+	configDigest := sha256Digest(config)
+	writeBlob(t, path, manifestDigest, manifest)
+	writeBlob(t, path, configDigest, config)
+	second := manifestDigest
+	if !equal {
+		other := sha256Digest(append(manifest, byte('x')))
+		writeBlob(t, path, other, append(manifest, byte('x')))
+		second = other
+	}
+	index := []byte(fmt.Sprintf(`{"schemaVersion":2,"manifests":[{"mediaType":"application/vnd.oci.image.manifest.v1+json","digest":%q,"size":%d},{"mediaType":"application/vnd.oci.image.manifest.v1+json","digest":%q,"size":%d}]}`,
+		manifestDigest, len(manifest), second, len(manifest)))
+	require.NoError(t, os.WriteFile(filepath.Join(path, "index.json"), index, 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(path, "oci-layout"), []byte(`{"imageLayoutVersion":"1.0.0"}`), 0o600))
+	if equal {
+		requireDirectoryProviderVerdict(t, path, true)
+	} else {
+		requireDirectoryProviderVerdict(t, path, false)
+	}
+}
+
+// gzipFile compresses src to dst.
+func gzipFile(t *testing.T, src, dst string) {
+	t.Helper()
+	content, err := os.ReadFile(src)
+	require.NoError(t, err)
+	f, err := os.Create(dst)
+	require.NoError(t, err)
+	defer func() { _ = f.Close() }()
+	gz := gzip.NewWriter(f)
+	defer func() { _ = gz.Close() }()
+	_, err = gz.Write(content)
+	require.NoError(t, err)
 }
 
 // Grype resolves raw SBOM content before selector extraction: a valid SBOM
