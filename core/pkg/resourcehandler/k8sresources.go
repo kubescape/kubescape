@@ -1405,8 +1405,27 @@ func appendPartialPullsToSession(ctx context.Context, sessionObj *cautils.OPASes
 // appendHostSensorPartialPulls records host-sensor conversion gaps the same
 // way: the readable envelopes still flow to the scan, while the gap is
 // visible as partialGVRPulls instead of vanishing.
+//
+// Every gap keeps its warning: an unreadable host CRD is always worth
+// surfacing. But only gaps for GVRs a selected control depends on (present
+// in sessionObj.ResourceToControlsMap) reach PartialGVRFailures and the
+// coverage penalty. CollectResources queries every host resource while the
+// map holds only selected policy matches, so an unrelated unreadable CRD
+// must not fail --fail-coverage-below when every requested control was
+// fully evaluated.
 func appendHostSensorPartialPulls(ctx context.Context, sessionObj *cautils.OPASessionObj, partialPulls []cautils.PartialGVRPull) {
-	appendPartialPullsToSession(ctx, sessionObj, partialPulls, "partial host-sensor collection: some node data may be missing from scan results")
+	if len(partialPulls) == 0 {
+		return
+	}
+	for _, p := range partialPulls {
+		logger.L().Ctx(ctx).Warning("partial host-sensor collection: some node data may be missing from scan results",
+			helpers.String("gvr", p.GVR),
+			helpers.String("selector", p.Selector),
+			helpers.String("error", p.Error))
+		if _, mapped := sessionObj.ResourceToControlsMap[p.GVR]; mapped {
+			sessionObj.PartialGVRFailures = append(sessionObj.PartialGVRFailures, p)
+		}
+	}
 }
 
 func (k8sHandler *K8sResourceHandler) collectRbacResources(allResources map[string]workloadinterface.IMetadata) error {
