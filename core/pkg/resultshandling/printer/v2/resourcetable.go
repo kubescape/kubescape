@@ -107,7 +107,7 @@ func (prettyPrinter *PrettyPrinter) resourceTable(opaSessionObj *cautils.OPASess
 		if src, ok := opaSessionObj.ResourceSource[resourceID]; ok {
 			sourcePath = src.RelativePath
 		}
-		lineFor := prettyPrinter.fixPathLineResolver(opaSessionObj, &caches, scanned)
+		lineFor := prettyPrinter.pathLineResolver(opaSessionObj, &caches, scanned)
 		resourceRows := generateResourceRows(result.ListControls(), &opaSessionObj.Report.SummaryDetails, resource, prettyPrinter.showEvidence, prettyPrinter.showSecrets, sourcePath, lineFor)
 
 		short := utils.CheckShortTerminalWidth(resourceRows, generateResourceHeader(false))
@@ -123,8 +123,8 @@ func (prettyPrinter *PrettyPrinter) resourceTable(opaSessionObj *cautils.OPASess
 
 }
 
-// fixPathLineResolver returns the lookup generateResourceRows uses to turn a
-// fix path into a line in the manifest, or nil when no line can be resolved for
+// pathLineResolver returns the lookup generateResourceRows uses to turn a fix,
+// delete or review path into a line in the manifest, or nil when no line can be resolved for
 // this resource. Three things have to hold, and each rules out a real case:
 //
 //   - --show-evidence is set. Without it no evidence is printed at all, so
@@ -137,7 +137,7 @@ func (prettyPrinter *PrettyPrinter) resourceTable(opaSessionObj *cautils.OPASess
 //     applies to LocalWorkload at all.
 //
 // A nil return is the caller's signal to print paths exactly as before.
-func (prettyPrinter *PrettyPrinter) fixPathLineResolver(opaSessionObj *cautils.OPASessionObj, caches *manifestCache, scanned scannedResource) func(string) (int, bool) {
+func (prettyPrinter *PrettyPrinter) pathLineResolver(opaSessionObj *cautils.OPASessionObj, caches *manifestCache, scanned scannedResource) func(string) (int, bool) {
 	if !prettyPrinter.showEvidence || scanned.absPath == "" {
 		return nil
 	}
@@ -152,14 +152,14 @@ func (prettyPrinter *PrettyPrinter) fixPathLineResolver(opaSessionObj *cautils.O
 		return nil
 	}
 
-	return func(fixPath string) (int, bool) {
+	return func(path string) (int, bool) {
 		// ResolveLocation is called directly rather than through
 		// resolveFixLocation, which defaults to line 1 when nothing resolves.
 		// A fabricated line is worse than none for an auditor reading this
 		// column, so an unresolved path degrades to today's bare output -
 		// the same choice resolveReviewPathLocations makes for SARIF's
 		// related locations.
-		location, err := resolver.ResolveLocation(fixPath, docIndex)
+		location, err := resolver.ResolveLocation(path, docIndex)
 		if err != nil || location.Line == 0 {
 			return 0, false
 		}
@@ -181,7 +181,7 @@ func generateResourceRows(controls []resourcesresults.ResourceAssociatedControl,
 		if showEvidence {
 			paths := AssistedRemediationPathsWithCurrentValuesFiltered(&controls[i], resource, showSecrets)
 			addContainerNameToAssistedRemediation(resource, &paths)
-			annotateFixPathLines(&paths, &controls[i], lineFor)
+			annotatePathLines(&paths, &controls[i], lineFor)
 			if sourcePath != "" {
 				paths = append([]string{"@ " + sourcePath}, paths...)
 			}
@@ -199,50 +199,96 @@ func generateResourceRows(controls []resourcesresults.ResourceAssociatedControl,
 	return rows
 }
 
-// annotateFixPathLines appends " (line N)" to the assisted-remediation entries
-// that came from a FixPath and resolve to a line in the manifest.
+// annotatePathLines appends " (line N)" to each assisted-remediation entry whose
+// path resolves to a line in the manifest - fix, delete and review paths alike.
 //
-// It has to re-derive which entries those are.
-// AssistedRemediationPathsWithCurrentValuesFiltered returns fix, delete and
-// review paths already rendered into one flat, deduplicated []string, so by
-// this point the path type is no longer visible: a fix path reads
-// "<path>=<value>", a delete path is bare, and a review path carries
-// " (current: <value>)". fixPathsToString with onlyPath re-reads the control
-// for the bare fix paths, and matching on "<path>=" pins the annotation to
-// those entries alone - the "=" is what stops "spec.a" from also matching
-// "spec.ab=x".
+// It has to re-derive which path each entry came from.
+// AssistedRemediationPathsWithCurrentValuesFiltered returns all three types
+// already rendered into one flat, deduplicated []string, so the path type is
+// no longer visible. Each type is re-read from the control and matched by the
+// shape it renders to: a fix path as "<path>=<value>", a delete path bare, and
+// a review path bare or followed by " (current: <value>)". Any entry may also
+// carry a " (<container>)" suffix by this point.
 //
 // Deriving it here, rather than having the path builders return structured
 // values, keeps this local to the pretty-printer: those builders are shared
 // with the SARIF, GitLab SAST, HTML and CSV printers, and changing their
 // output would change four report formats to annotate one table.
-func annotateFixPathLines(paths *[]string, control *resourcesresults.ResourceAssociatedControl, lineFor func(string) (int, bool)) {
+//
+// A path whose field is absent from the manifest gets its nearest existing
+// ancestor's line, for every path type. That is ResolveLocation's walk-up, and
+// it matches what SARIF already reports as a review path's related location,
+// so the two outputs point at the same place for the same finding.
+func annotatePathLines(paths *[]string, control *resourcesresults.ResourceAssociatedControl, lineFor func(string) (int, bool)) {
 	if lineFor == nil || len(*paths) == 0 {
 		return
 	}
 
-	// fixPathsToString does not deduplicate, and one control's rules can name
-	// the same field more than once, while the rendered list this annotates has
-	// already been deduplicated. Resolving a path twice would append the line
-	// twice to the single entry that survived.
-	seen := make(map[string]bool)
-	for _, fixPath := range fixPathsToString(control, true) {
-		if seen[fixPath] {
-			continue
-		}
-		seen[fixPath] = true
+	renderings := []struct {
+		paths   []string
+		matches func(entry, path string) bool
+	}{
+		{paths: fixPathsToString(control, true), matches: renderedAsFixPath},
+		{paths: deletePathsToString(control), matches: renderedAsBarePath},
+		{paths: reviewPathsToString(control), matches: renderedAsBarePath},
+	}
 
-		line, ok := lineFor(fixPath)
-		if !ok {
-			continue
+	// Each entry is annotated at most once. The rendered list is deduplicated
+	// on the path with any " (current: ...)" stripped, so a delete path and a
+	// review path naming the same field collapse into one entry; and the path
+	// builders do not deduplicate, so one control's rules can name the same
+	// field twice. Either way several paths can match a single entry, and each
+	// would otherwise append its line again.
+	annotated := make([]bool, len(*paths))
+
+	// Resolving a path evaluates a yq expression against the manifest, so each
+	// distinct path is resolved once however many times it is named.
+	type resolution struct {
+		line int
+		ok   bool
+	}
+	resolved := make(map[string]resolution)
+	lookup := func(path string) (int, bool) {
+		if r, seen := resolved[path]; seen {
+			return r.line, r.ok
 		}
-		prefix := fixPath + "="
-		for i := range *paths {
-			if strings.HasPrefix((*paths)[i], prefix) {
-				(*paths)[i] += fmt.Sprintf(" (line %d)", line)
+		line, ok := lineFor(path)
+		resolved[path] = resolution{line: line, ok: ok}
+		return line, ok
+	}
+
+	for _, rendering := range renderings {
+		for _, path := range rendering.paths {
+			for i, entry := range *paths {
+				if annotated[i] || !rendering.matches(entry, path) {
+					continue
+				}
+				line, ok := lookup(path)
+				if !ok {
+					continue
+				}
+				(*paths)[i] = entry + fmt.Sprintf(" (line %d)", line)
+				annotated[i] = true
 			}
 		}
 	}
+}
+
+// renderedAsFixPath reports whether entry is path rendered as a fix path,
+// "<path>=<value>". Matching on the "=" is what stops "spec.a" from also
+// claiming "spec.ab=x".
+func renderedAsFixPath(entry, path string) bool {
+	return strings.HasPrefix(entry, path+"=")
+}
+
+// renderedAsBarePath reports whether entry is path rendered as a delete or
+// review path: the path alone, or followed by " (" - a review path's
+// " (current: <value>)" or a " (<container>)" hint. Requiring the " (" rather
+// than a bare prefix is what stops "spec.containers[0]" from claiming
+// "spec.containers[0].image"; unquoted keys cannot contain a space, so the
+// suffix cannot be part of a longer path either.
+func renderedAsBarePath(entry, path string) bool {
+	return entry == path || strings.HasPrefix(entry, path+" (")
 }
 
 func addContainerNameToAssistedRemediation(resource workloadinterface.IMetadata, paths *[]string) {
