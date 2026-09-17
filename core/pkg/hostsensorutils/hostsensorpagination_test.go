@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/kubescape/kubescape/v4/core/cautils/getter"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
@@ -87,8 +88,8 @@ func TestHostSensorPagination(t *testing.T) {
 		listFunc: func(ctx context.Context, opts metav1.ListOptions) (*unstructured.UnstructuredList, error) {
 			listCount++
 			limit := opts.Limit
-			if limit != 50 {
-				panic(fmt.Sprintf("expected limit 50, got %d", limit))
+			if limit != 100 {
+				panic(fmt.Sprintf("expected limit 100, got %d", limit))
 			}
 			startIndex := 0
 			if opts.Continue != "" {
@@ -133,7 +134,7 @@ func TestHostSensorPagination(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, totalItems, len(items))
-	assert.Equal(t, 11, listCount)
+	assert.Equal(t, 6, listCount)
 }
 
 func TestHostSensorRateLimitRetry(t *testing.T) {
@@ -173,4 +174,29 @@ func TestHostSensorRateLimitRetry(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 0, len(items))
 	assert.Equal(t, 3, listCount)
+}
+
+func TestHostSensorPaginationRejectsRepeatedToken(t *testing.T) {
+	listCount := 0
+	mockResource := &mockNamespaceableResourceInterface{
+		listFunc: func(context.Context, metav1.ListOptions) (*unstructured.UnstructuredList, error) {
+			listCount++
+			list := &unstructured.UnstructuredList{}
+			list.SetContinue("stalled")
+			return list, nil
+		},
+	}
+	hsh := &HostSensorHandler{dynamicClient: &mockDynamicClient{
+		resourceFunc: func(schema.GroupVersionResource) dynamic.NamespaceableResourceInterface {
+			return mockResource
+		},
+	}}
+
+	err := hsh.listCRDResources(context.Background(), "osreleasefiles", "OsReleaseFile", func([]unstructured.Unstructured) error {
+		return nil
+	})
+
+	require.ErrorIs(t, err, getter.ErrPaginationTokenRepeated)
+	assert.Contains(t, err.Error(), "failed to list OsReleaseFile CRDs")
+	assert.Equal(t, 2, listCount)
 }

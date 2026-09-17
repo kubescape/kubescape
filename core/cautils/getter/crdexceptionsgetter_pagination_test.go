@@ -142,3 +142,26 @@ func TestListCRDsWithPagination_ContextCancelled(t *testing.T) {
 	require.Error(t, err)
 	assert.ErrorIs(t, err, context.Canceled)
 }
+
+func TestListCRDsWithPagination_RejectsRepeatedToken(t *testing.T) {
+	ctx := context.Background()
+	gvr := schema.GroupVersionResource{Resource: "securityexceptions"}
+	calls := 0
+	mockClient := &mockPaginatedDynamicClient{
+		t: t,
+		listFunc: func(opts metav1.ListOptions) (*unstructured.UnstructuredList, error) {
+			calls++
+			list := &unstructured.UnstructuredList{}
+			list.SetContinue("stalled")
+			return list, nil
+		},
+	}
+
+	err := listCRDsWithPagination(ctx, gvr, mockClient, func(*unstructured.UnstructuredList) error {
+		return nil
+	})
+
+	require.ErrorIs(t, err, ErrPaginationTokenRepeated)
+	assert.Contains(t, err.Error(), "failed to list securityexceptions CRDs")
+	assert.Equal(t, 2, calls)
+}
