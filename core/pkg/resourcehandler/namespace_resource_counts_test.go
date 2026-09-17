@@ -64,7 +64,7 @@ func TestCollectAndStreamBatches_DeduplicatesSingleResourceNamespaceCount(t *tes
 	resident := <-batches
 	namespace := <-batches
 	resourceID := session.SingleResourceScan.GetID()
-	assert.Contains(t, resident.AllResources, resourceID)
+	assert.NotContains(t, resident.AllResources, resourceID)
 	assert.Contains(t, namespace.AllResources, resourceID)
 }
 

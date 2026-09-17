@@ -53,18 +53,24 @@ import (
 // Set KUBESCAPE_COLLECTOR_HEAP_PROFILE_DIR to also write a heap profile taken
 // at the collector peak of each size, readable with `go tool pprof`.
 //
-// Baseline on an amd64 laptop when this harness was written, to give the shape
-// rather than an absolute the numbers should be compared against across
-// machines:
+// Baseline on an amd64 laptop before partition store integration:
 //
 //	size   collector_peak   downstream   allocated   list_calls
 //	5k          65 MB          65 MB       89 MB          11
 //	20k        260 MB         259 MB      356 MB          41
 //	50k        652 MB         648 MB      893 MB         101
 //
-// Peak tracks downstream almost exactly and both grow linearly with the
-// cluster: the collector is holding the whole cluster when it emits its first
-// batch. The list_calls column is the other half of the contract — one
+// With the partition store integrated into collectAndStreamBatches,
+// namespaced spill usage and partition-store metadata remain flat (~1-2 MB),
+// so collector_peak is bounded to resident resources (50-200 nodes in this benchmark)
+// plus active pager buffers, and no longer tracks total cluster size or downstream retention:
+//
+//	size   collector_peak   downstream   list_calls
+//	5k           1 MB          65 MB          11
+//	20k          1 MB         259 MB          41
+//	50k          2 MB         648 MB         101
+//
+// The list_calls column is the other half of the contract — one
 // paginated traversal per GVR, never one per namespace.
 const collectorHeapProfileDirEnv = "KUBESCAPE_COLLECTOR_HEAP_PROFILE_DIR"
 

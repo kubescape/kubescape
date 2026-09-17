@@ -5,8 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"os"
 	"slices"
-	"sort"
 	"strings"
 	"sync"
 
@@ -21,6 +21,7 @@ import (
 	"github.com/kubescape/kubescape/v4/core/cautils/getter"
 	"github.com/kubescape/kubescape/v4/core/metrics"
 	"github.com/kubescape/kubescape/v4/core/pkg/hostsensorutils"
+	"github.com/kubescape/kubescape/v4/core/pkg/resourcehandler/partitionstore"
 	"github.com/kubescape/kubescape/v4/core/pkg/vapreconcile"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
@@ -67,6 +68,37 @@ type K8sResourceHandler struct {
 	k8s               *k8sinterface.KubernetesApi
 	hostSensorHandler hostsensorutils.IHostSensor
 	rbacObjectsAPI    *cautils.RBACObjects
+	storeFactory      func() (partitionstore.Store, error)
+}
+
+// SetStoreFactory overrides the default DiskStore factory for testing or memory-only environments.
+func (k8sHandler *K8sResourceHandler) SetStoreFactory(factory func() (partitionstore.Store, error)) {
+	k8sHandler.storeFactory = factory
+}
+
+func (k8sHandler *K8sResourceHandler) newStore() (partitionstore.Store, error) {
+	if k8sHandler.storeFactory != nil {
+		return k8sHandler.storeFactory()
+	}
+	if v := os.Getenv("KUBESCAPE_PARTITION_STORE"); v != "" {
+		if strings.EqualFold(v, "memory") {
+			logger.L().Info("using in-memory partition store (configured by KUBESCAPE_PARTITION_STORE)")
+			return partitionstore.NewMemoryStore(), nil
+		}
+		if !strings.EqualFold(v, "disk") {
+			logger.L().Warning("unknown KUBESCAPE_PARTITION_STORE value, defaulting to disk", helpers.String("value", v))
+		}
+	}
+	var opts []partitionstore.Option
+	if baseDir := os.Getenv("KUBESCAPE_SPILL_DIR"); baseDir != "" {
+		opts = append(opts, partitionstore.WithBaseDir(baseDir))
+	}
+	store, err := partitionstore.NewDiskStore(opts...)
+	if err != nil {
+		logger.L().Warning("failed to create disk partition store, falling back to in-memory store", helpers.Error(err))
+		return partitionstore.NewMemoryStore(), nil
+	}
+	return store, nil
 }
 
 func NewK8sResourceHandler(ctx context.Context, k8s *k8sinterface.KubernetesApi, hostSensorHandler hostsensorutils.IHostSensor, rbacObjects *cautils.RBACObjects, clusterName string) *K8sResourceHandler {
@@ -354,22 +386,6 @@ func streamingResourceScope(obj workloadinterface.IMetadata, namespaced *bool) s
 	return cautils.ClusterScope
 }
 
-// streamingKubernetesResourceCount returns the number of unique Kubernetes
-// resources retained across the resident and namespace batches. A single
-// resource scan may add an object to resident that was already collected in a
-// namespace batch, so resident IDs are excluded from the namespace count.
-func streamingKubernetesResourceCount(resident *cautils.ResourceBatch, namespaceBatches map[string]*cautils.ResourceBatch) int {
-	count := len(resident.AllResources)
-	for _, batch := range namespaceBatches {
-		for id := range batch.AllResources {
-			if _, alreadyCounted := resident.AllResources[id]; !alreadyCounted {
-				count++
-			}
-		}
-	}
-	return count
-}
-
 // collectAndStreamBatches pulls every queryable GVR exactly once, partitions
 // the results into a single resident batch (cluster-scoped and external
 // resources) and one batch per namespace, then streams the resident batch
@@ -379,22 +395,25 @@ func streamingKubernetesResourceCount(resident *cautils.ResourceBatch, namespace
 // streamNamespaceBatches) which re-listed every GVR once per namespace,
 // resulting in O(L × N) API-server LIST calls on large clusters.
 //
-// What this bounds is the evaluation input, not the collection peak: every GVR
-// is traversed and partitioned before the first batch is sent, so the whole
-// cluster is still resident in this function at that point. The consumer
-// (OPAProcessor.ProcessWithStreaming) evaluates one namespace batch at a time,
-// so only the resident batch plus one namespace batch are in the evaluation
-// input at any moment.
-//
-// Objects are partitioned as the pager yields them, so the collector no longer
-// materializes a whole-GVR slice on top of the batches that retain the objects
-// anyway. What still grows with the cluster is the batches themselves: every
-// namespace partition is held on the Go heap until its turn to be emitted.
-// Bounding that needs a partition store the collector can spill to, which is a
-// larger change than this one.
+// What this bounds is both the evaluation input and the collection peak: every
+// GVR is traversed in a single pass, with namespaced objects written to an
+// on-disk partition store as the pager yields them rather than held on the Go
+// heap. The resident batch is emitted first, followed by each namespace batch
+// loaded and streamed one at a time from disk in deterministic sorted order.
 func (k8sHandler *K8sResourceHandler) collectAndStreamBatches(ctx context.Context, queryableResources QueryableResources, globalFieldSelectors IFieldSelector, sessionObj *cautils.OPASessionObj, scanInfo *cautils.ScanInfo, ksResourceMap cautils.ExternalResources, batchChan chan<- *cautils.ResourceBatch, resolver resourceResolver) error {
+	store, err := k8sHandler.newStore()
+	if err != nil {
+		return fmt.Errorf("failed to create partition store: %w", err)
+	}
+	defer func() {
+		if closeErr := store.Close(); closeErr != nil {
+			logger.L().Ctx(ctx).Warning("failed to clean up partition store", helpers.Error(closeErr))
+		}
+	}()
+
 	resident := cautils.NewResourceBatch(cautils.ClusterScope)
-	namespaceBatches := make(map[string]*cautils.ResourceBatch)
+	mapNamespaceToNumberOfResources := make(map[string]int)
+	committedSingleResourceInStore := false
 	collectedK8sResources := queryableResources.ToK8sResourceMap()
 	failedQueries := make(map[string]queryFailure)
 	collectedAnyResource := false
@@ -405,15 +424,18 @@ func (k8sHandler *K8sResourceHandler) collectAndStreamBatches(ctx context.Contex
 		apiGroup, apiVersion, resource := k8sinterface.StringToResourceGroup(qr.GroupVersionResourceTriplet)
 		gvr := schema.GroupVersionResource{Group: apiGroup, Version: apiVersion, Resource: resource}
 
-		// Partition each object as the pager yields it, so the collector never
-		// holds a whole-GVR []unstructured.Unstructured — nor the two
-		// same-length slices the map/meta conversion built from it — on top of
-		// the batches that retain the objects anyway. The partition is the only
-		// thing that keeps an object alive past the callback, and it keeps
-		// obj.Object rather than the pointer into the pager's page.
+		if err := store.BeginGVR(ctx, qr.GroupVersionResourceTriplet); err != nil {
+			return fmt.Errorf("failed to begin partition store transaction for %s: %w", qr.GroupVersionResourceTriplet, err)
+		}
+
 		var firstResourceID string
 		collectedFromGVR := false
-		selectorErrs := k8sHandler.pullSingleResourceInto(ctx, &gvr, scanInfo.LabelSelector, qr.FieldSelectors, globalFieldSelectors, qr.Namespaced, func(obj *unstructured.Unstructured) error {
+		stagedSingleResourceInStore := false
+
+		// Partition each object as the pager yields it: cluster-scoped objects
+		// land in the resident batch, while namespaced objects are spilled to
+		// the partition store rather than held on the Go heap.
+		selectorErrs, sinkErr := k8sHandler.pullSingleResourceInto(ctx, &gvr, scanInfo.LabelSelector, qr.FieldSelectors, globalFieldSelectors, qr.Namespaced, func(obj *unstructured.Unstructured) error {
 			metaObj := objectsenvelopes.NewObject(obj.Object)
 			if metaObj == nil {
 				// Same drop as ConvertMapListToMeta: an object no envelope
@@ -426,24 +448,69 @@ func (k8sHandler *K8sResourceHandler) collectAndStreamBatches(ctx context.Contex
 			}
 
 			scope := streamingResourceScope(metaObj, qr.Namespaced)
-			batch := resident
-			if scope != cautils.ClusterScope {
-				existing, ok := namespaceBatches[scope]
-				if !ok {
-					existing = cautils.NewResourceBatch(scope)
-					namespaceBatches[scope] = existing
+			if scope == cautils.ClusterScope {
+				resident.K8SResources[qr.GroupVersionResourceTriplet] = append(resident.K8SResources[qr.GroupVersionResourceTriplet], metaObj.GetID())
+				resident.AllResources[metaObj.GetID()] = metaObj
+			} else {
+				if sessionObj.SingleResourceScan != nil && metaObj.GetID() == sessionObj.SingleResourceScan.GetID() {
+					stagedSingleResourceInStore = true
 				}
-				batch = existing
+				if err := store.Put(ctx, scope, metaObj); err != nil {
+					return err
+				}
 			}
-			batch.K8SResources[qr.GroupVersionResourceTriplet] = append(batch.K8SResources[qr.GroupVersionResourceTriplet], metaObj.GetID())
-			batch.AllResources[metaObj.GetID()] = metaObj
 			return nil
 		})
+
 		for k, v := range classifySelectorFailures(qr.GroupVersionResourceTriplet, selectorErrs) {
 			failedQueries[k] = v
 		}
 
-		if collectedFromGVR {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			_ = store.RollbackGVR(context.WithoutCancel(ctx), qr.GroupVersionResourceTriplet)
+			return ctxErr
+		}
+
+		if sinkErr != nil {
+			if rbErr := store.RollbackGVR(context.WithoutCancel(ctx), qr.GroupVersionResourceTriplet); rbErr != nil {
+				combined := errors.Join(sinkErr, fmt.Errorf("failed to rollback GVR %s: %w", qr.GroupVersionResourceTriplet, rbErr))
+				failedQueries[qr.GroupVersionResourceTriplet] = queryFailure{
+					gvr: qr.GroupVersionResourceTriplet,
+					err: combined,
+				}
+				return fmt.Errorf("failed to rollback GVR transaction for %s: %w", qr.GroupVersionResourceTriplet, combined)
+			}
+			failedQueries[qr.GroupVersionResourceTriplet] = queryFailure{
+				gvr: qr.GroupVersionResourceTriplet,
+				err: sinkErr,
+			}
+		} else if len(selectorErrs) > 0 && !collectedFromGVR {
+			if rbErr := store.RollbackGVR(context.WithoutCancel(ctx), qr.GroupVersionResourceTriplet); rbErr != nil {
+				origErrs := make([]error, 0, len(selectorErrs)+1)
+				for _, se := range selectorErrs {
+					origErrs = append(origErrs, se.err)
+				}
+				origErrs = append(origErrs, fmt.Errorf("failed to rollback GVR %s: %w", qr.GroupVersionResourceTriplet, rbErr))
+				combined := errors.Join(origErrs...)
+				failedQueries[qr.GroupVersionResourceTriplet] = queryFailure{
+					gvr: qr.GroupVersionResourceTriplet,
+					err: combined,
+				}
+				return fmt.Errorf("failed to rollback GVR transaction for %s: %w", qr.GroupVersionResourceTriplet, combined)
+			}
+		} else {
+			if err := store.CommitGVR(ctx, qr.GroupVersionResourceTriplet); err != nil {
+				if rbErr := store.RollbackGVR(context.WithoutCancel(ctx), qr.GroupVersionResourceTriplet); rbErr != nil {
+					return fmt.Errorf("failed to commit GVR transaction for %s (%w) and rollback failed: %w", qr.GroupVersionResourceTriplet, err, rbErr)
+				}
+				return fmt.Errorf("failed to commit GVR transaction for %s: %w", qr.GroupVersionResourceTriplet, err)
+			}
+			if stagedSingleResourceInStore {
+				committedSingleResourceInStore = true
+			}
+		}
+
+		if collectedFromGVR && sinkErr == nil {
 			// recordFailedQueryStatuses only distinguishes an empty GVR from a
 			// non-empty one. Keep one representative ID instead of duplicating
 			// every ID already retained in the streaming batches.
@@ -454,12 +521,10 @@ func (k8sHandler *K8sResourceHandler) collectAndStreamBatches(ctx context.Contex
 
 	// A resource served at several API versions is scoped identically under
 	// every version (same metadata.namespace), so its aliases always land in
-	// the same batch and can be deduplicated per batch. See
-	// dedupeServedVersionAliases.
+	// the same batch and can be deduplicated per batch. Resident aliases are
+	// collapsed here; namespaced aliases are collapsed per partition as each
+	// batch is loaded from the store during streaming.
 	dedupeServedVersionAliases(resident.K8SResources, resident.AllResources)
-	for _, batch := range namespaceBatches {
-		dedupeServedVersionAliases(batch.K8SResources, batch.AllResources)
-	}
 
 	// Preserve the eager collector's failure contract. Whole-GVR failures feed
 	// InfoMap, while selector failures for a GVR that returned some resources
@@ -489,27 +554,37 @@ func (k8sHandler *K8sResourceHandler) collectAndStreamBatches(ctx context.Contex
 			helpers.String("gvr", f.gvr), helpers.Error(f.err))
 	}
 
+	if err := store.Seal(ctx); err != nil {
+		return fmt.Errorf("failed to seal partition store: %w", err)
+	}
+
 	// Collect external resources (host, cloud, RBAC, VAP) into the resident batch.
 	allResources := resident.AllResources
 
-	if !scanInfo.IsDeletedScanObject && sessionObj.SingleResourceScan != nil {
+	singleResourceAlreadyCollected := committedSingleResourceInStore
+	if sessionObj.SingleResourceScan != nil {
+		if _, inResident := resident.AllResources[sessionObj.SingleResourceScan.GetID()]; inResident {
+			singleResourceAlreadyCollected = true
+		}
+	}
+
+	if !scanInfo.IsDeletedScanObject &&
+		sessionObj.SingleResourceScan != nil &&
+		!singleResourceAlreadyCollected {
 		addSingleResourceToResourceMaps(resident.K8SResources, allResources, sessionObj.SingleResourceScan, resolver)
 	}
 
 	if err := applyKindFilter(resident.K8SResources, resident.AllResources, scanInfo, sessionObj.SingleResourceScan); err != nil {
 		return err
 	}
-	for _, batch := range namespaceBatches {
-		if err := applyKindFilter(batch.K8SResources, batch.AllResources, scanInfo, nil); err != nil {
-			return err
+
+	residentK8sCount := len(resident.AllResources)
+	if committedSingleResourceInStore && sessionObj.SingleResourceScan != nil {
+		if _, inResident := resident.AllResources[sessionObj.SingleResourceScan.GetID()]; inResident {
+			residentK8sCount--
 		}
 	}
 
-	// Match the eager collector's metric timing: report the complete Kubernetes
-	// resource snapshot before adding host, RBAC, or cloud resources. Resource
-	// telemetry is independent of the worker-node LIST and must survive a node
-	// permission or transport failure.
-	metrics.UpdateKubernetesResourcesCount(ctx, int64(streamingKubernetesResourceCount(resident, namespaceBatches)))
 	if k8sHandler.k8s != nil {
 		numberOfWorkerNodes, err := k8sHandler.pullWorkerNodesNumber(ctx)
 		if err != nil {
@@ -548,21 +623,32 @@ func (k8sHandler *K8sResourceHandler) collectAndStreamBatches(ctx context.Contex
 
 	cloudResources := cautils.MapCloudResources(ksResourceMap)
 
-	// allResources is resident.AllResources, which only ever holds
-	// cluster-scoped resources (see the partition loop above); namespaced
-	// resources live in namespaceBatches. Count across both before the batches
-	// are drained below, without building a second whole-cluster map just for
-	// this report metadata. Count namespace batches first, then skip a resident
-	// entry when the same ID is already present in its namespace batch. This
-	// preserves the old merged-map deduplication for resources injected into the
-	// resident batch (for example SingleResourceScan and RBAC resources) without
-	// allocating a whole-cluster seen-ID set.
-	mapNamespaceToNumberOfResources := make(map[string]int)
-	for _, batch := range namespaceBatches {
-		addNamespaceResourceCounts(ctx, batch.AllResources, mapNamespaceToNumberOfResources, nil)
+	// Accumulate resident top-level resources into mapNamespaceToNumberOfResources,
+	// skipping SingleResourceScan if it was already ingested and counted in the store.
+	// Track counted IDs to prevent double counting RBAC-injected or resident namespaced
+	// resources when partition batches are streamed.
+	residentCountedIDs := make(map[string]struct{})
+	for resourceID, resource := range allResources {
+		if committedSingleResourceInStore && sessionObj.SingleResourceScan != nil && resourceID == sessionObj.SingleResourceScan.GetID() {
+			continue
+		}
+		if obj := workloadinterface.NewWorkloadObj(resource.GetObject()); obj != nil {
+			ownerReferences, err := obj.GetOwnerReferences()
+			if err == nil {
+				if len(ownerReferences) == 0 {
+					if ns := resource.GetNamespace(); ns != "" {
+						if obj.GetKind() != "Job" {
+							mapNamespaceToNumberOfResources[ns]++
+							residentCountedIDs[resourceID] = struct{}{}
+						}
+					}
+				}
+			} else {
+				logger.L().Ctx(ctx).Warning(fmt.Sprintf("failed to get owner references. Resource %s will not be counted", obj.GetName()), helpers.Error(err))
+			}
+		}
 	}
-	addNamespaceResourceCounts(ctx, allResources, mapNamespaceToNumberOfResources, namespaceBatches)
-	sessionObj.SetMapNamespaceToNumberOfResources(mapNamespaceToNumberOfResources)
+
 	if len(cloudResources) > 0 {
 		if err := k8sHandler.collectCloudResources(ctx, sessionObj, allResources, ksResourceMap, cloudResources); err != nil {
 			cautils.SetInfoMapForResources(err.Error(), cloudResources, sessionObj.InfoMap)
@@ -597,25 +683,44 @@ func (k8sHandler *K8sResourceHandler) collectAndStreamBatches(ctx context.Contex
 		return ctx.Err()
 	}
 
-	// Stream namespace batches in deterministic order.
-	sortedNamespaces := make([]string, 0, len(namespaceBatches))
-	for ns := range namespaceBatches {
-		sortedNamespaces = append(sortedNamespaces, ns)
-	}
-	sort.Strings(sortedNamespaces)
-	for _, ns := range sortedNamespaces {
+	// Stream namespace batches in deterministic sorted order, loading one
+	// partition at a time and purging it from disk to bound storage.
+	deduplicatedStoredResources := 0
+	for _, ns := range store.Namespaces() {
 		select {
-		case batchChan <- namespaceBatches[ns]:
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		batch, err := store.LoadBatch(ctx, ns)
+		if err != nil {
+			return fmt.Errorf("failed to load partition for namespace %s: %w", ns, err)
+		}
+
+		dedupeServedVersionAliases(batch.K8SResources, batch.AllResources)
+		if err := applyKindFilter(batch.K8SResources, batch.AllResources, scanInfo, sessionObj.SingleResourceScan); err != nil {
+			return err
+		}
+
+		addNamespaceResourceCounts(ctx, batch.AllResources, mapNamespaceToNumberOfResources, residentCountedIDs)
+		deduplicatedStoredResources += len(batch.AllResources)
+
+		select {
+		case batchChan <- batch:
 		case <-ctx.Done():
 			return ctx.Err()
 		}
-		// Drop the producer's reference to the batch now that it has been
-		// handed off. This bounds the producer's retention during drain when
-		// the consumer is slower than the producer; it is not a peak-memory
-		// reduction — the resources stay reachable via the consumer's
-		// AllResources for downstream stages.
-		delete(namespaceBatches, ns)
+
+		if err := store.PurgeNamespace(ns); err != nil {
+			logger.L().Ctx(ctx).Warning("failed to purge partition for namespace", helpers.String("namespace", ns), helpers.Error(err))
+		}
+		batch = nil
 	}
+
+	sessionObj.SetMapNamespaceToNumberOfResources(mapNamespaceToNumberOfResources)
+	totalK8sResources := residentK8sCount + deduplicatedStoredResources
+	metrics.UpdateKubernetesResourcesCount(ctx, int64(totalK8sResources))
 
 	return nil
 }
@@ -872,18 +977,14 @@ func setMapNamespaceToNumOfResources(ctx context.Context, allResources map[strin
 }
 
 // addNamespaceResourceCounts accumulates reportable top-level resources into
-// an existing namespace-count map. Keeping accumulation separate lets the
-// streaming collector count resident and namespace batches in place instead
-// of copying every resource into a temporary whole-cluster map. When
-// alreadyCounted is non-nil, a resource already present in its namespace batch
-// is skipped; callers with one already-unique map can pass nil.
-func addNamespaceResourceCounts(ctx context.Context, allResources map[string]workloadinterface.IMetadata, mapNamespaceToNumberOfResources map[string]int, alreadyCounted map[string]*cautils.ResourceBatch) {
+// mapNamespaceToNumberOfResources (workloads without ownerReferences, excluding
+// Jobs). If alreadyCounted is non-nil, a resource whose ID is present in alreadyCounted
+// is skipped; callers with unique maps can pass nil.
+func addNamespaceResourceCounts(ctx context.Context, allResources map[string]workloadinterface.IMetadata, mapNamespaceToNumberOfResources map[string]int, alreadyCounted map[string]struct{}) {
 	for resourceID, resource := range allResources {
 		if alreadyCounted != nil {
-			if batch := alreadyCounted[resource.GetNamespace()]; batch != nil {
-				if _, counted := batch.AllResources[resourceID]; counted {
-					continue
-				}
+			if _, counted := alreadyCounted[resourceID]; counted {
+				continue
 			}
 		}
 		if obj := workloadinterface.NewWorkloadObj(resource.GetObject()); obj != nil {
@@ -1149,7 +1250,7 @@ type resourceSink func(obj *unstructured.Unstructured) error
 // this slice.
 func (k8sHandler *K8sResourceHandler) pullSingleResource(ctx context.Context, resource *schema.GroupVersionResource, labelSelector string, fields string, fieldSelector IFieldSelector, namespaced *bool) ([]unstructured.Unstructured, []selectorFailure) {
 	var resourceList []unstructured.Unstructured
-	selectorErrs := k8sHandler.pullSingleResourceInto(ctx, resource, labelSelector, fields, fieldSelector, namespaced, func(obj *unstructured.Unstructured) error {
+	selectorErrs, _ := k8sHandler.pullSingleResourceInto(ctx, resource, labelSelector, fields, fieldSelector, namespaced, func(obj *unstructured.Unstructured) error {
 		resourceList = append(resourceList, *obj)
 		return nil
 	})
@@ -1170,10 +1271,10 @@ func (k8sHandler *K8sResourceHandler) pullSingleResource(ctx context.Context, re
 //   - A selector that fails part-way keeps the objects it already yielded and
 //     records a selectorFailure, which the callers surface as partial coverage
 //     rather than as a missing GVR. Remaining selectors are still walked.
-//   - A sink error stops the current selector the same way a LIST error does,
-//     so a caller whose per-object work can fail reports it as that selector's
-//     failure.
-func (k8sHandler *K8sResourceHandler) pullSingleResourceInto(ctx context.Context, resource *schema.GroupVersionResource, labelSelector string, fields string, fieldSelector IFieldSelector, namespaced *bool, sink resourceSink) []selectorFailure {
+//   - A sink error terminates the current selector immediately and is returned
+//     separately from selectorErrs so that writes are not committed as partial
+//     coverage.
+func (k8sHandler *K8sResourceHandler) pullSingleResourceInto(ctx context.Context, resource *schema.GroupVersionResource, labelSelector string, fields string, fieldSelector IFieldSelector, namespaced *bool, sink resourceSink) ([]selectorFailure, error) {
 	var selectorErrs []selectorFailure
 
 	// A namespaced query addresses the namespace's own endpoint, which already
@@ -1207,6 +1308,7 @@ func (k8sHandler *K8sResourceHandler) pullSingleResourceInto(ctx context.Context
 		}
 
 		collected := 0
+		var sinkErr error
 
 		if err := pager.New(func(pCtx context.Context, opts metav1.ListOptions) (runtime.Object, error) {
 			return clientResource.List(pCtx, opts)
@@ -1228,12 +1330,16 @@ func (k8sHandler *K8sResourceHandler) pullSingleResourceInto(ctx context.Context
 			}
 
 			if err := sink(uObject); err != nil {
+				sinkErr = err
 				return err
 			}
 			collected++
 			return nil
 
 		}); err != nil {
+			if sinkErr != nil {
+				return selectorErrs, sinkErr
+			}
 			selectorErrs = append(selectorErrs, selectorFailure{
 				selector: listOptions.FieldSelector,
 				err:      fmt.Errorf("failed to get resource: %v, labelSelector: %v, fieldSelector: %v, reason: %w", resource, listOptions.LabelSelector, listOptions.FieldSelector, err),
@@ -1254,7 +1360,7 @@ func (k8sHandler *K8sResourceHandler) pullSingleResourceInto(ctx context.Context
 		)
 	}
 
-	return selectorErrs
+	return selectorErrs, nil
 }
 func ConvertMapListToMeta(resourceMap []map[string]any) []workloadinterface.IMetadata {
 	var workloads []workloadinterface.IMetadata

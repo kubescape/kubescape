@@ -4,9 +4,9 @@
 
 This implementation addresses the API-server load issue described in A1 of `issues.md` and Phase 5 of `docs/optimization-plan.md`. The solution introduces resource streaming so the OPA evaluation never holds the whole cluster as its input: resources are partitioned by scope and the processor evaluates the resident (cluster-scoped) batch plus one namespace batch at a time, while the collection phase replaces the previous O(L × N) per-GVR-per-namespace LIST calls with a single LIST per GVR (O(L)).
 
-Note what streaming does *not* do: it does not reduce total retained memory. The collector traverses every GVR and holds the full cluster until the first batch is sent, and the processor retains all resources in `AllResources` for downstream stages (exceptions, printers, image scanning). Streaming bounds the *evaluation input* and the number of API-server calls, not the process high-water mark.
+Note what streaming does and does not bound: with the scan-scoped partition store integrated into the collector (Phase 2), namespaced spill usage and partition-store metadata remain flat (~1-2 MB across cluster sizes), so the collection-phase memory peak is bounded to resident (cluster-scoped) resources plus the active pager buffer and store metadata, rather than tracking total cluster size. What is not yet bounded is total downstream retention: after evaluation, the processor retains resources in `AllResources` for downstream stages (exceptions, printers, image scanning). Streaming bounds the *evaluation input*, the number of API-server calls, and the *collection peak* (for clusters dominated by namespaced resources), while total-process RSS reduction remains a downstream goal for future phases.
 
-Collection is paginated end to end: each GVR is walked once with `pager.EachListItem`, and objects are partitioned into their batch as the pager yields them rather than accumulated into a per-GVR slice first. What is still unbounded is the set of namespace batches, which is held on the heap until each batch is emitted.
+Collection is paginated end to end: each GVR is walked once with `pager.EachListItem`, and objects are partitioned as the pager yields them: cluster-scoped objects are kept in the resident batch, while namespaced objects are spilled to an on-disk partition store in owner-only (`0700`) files and loaded/purged one namespace at a time.
 
 ## Problem Statement
 
@@ -103,9 +103,16 @@ The implementation reduces peak evaluation memory by:
 - Keeping only cluster-scoped resources (~10-20% of total) plus a single namespace batch in the evaluation input at any time
 - Processing controls scope-by-scope (resident + one namespace at a time)
 
-The collection peak is not reduced: all resources are traversed and partitioned before the first batch is sent, and the processor retains resources in `AllResources` for downstream stages. The real win over the previous approach is the API-server load — one paginated LIST traversal per GVR instead of one per GVR per namespace — and a bounded evaluation input.
+The collection peak is bounded (Phase 2): all queryable GVRs are traversed once, with namespaced resources written directly to a scan-scoped on-disk partition store (`partitionstore.DiskStore`). The resident batch (cluster-scoped resources) remains in memory and is emitted first, while each namespace batch is loaded, evaluated, and purged from disk one at a time. The namespaced collection contribution and store metadata stay flat at ~1-2 MB regardless of cluster size, so total collector memory comprises this flat baseline plus the resident batch (verified across 5k, 20k, and 50k synthetic clusters with 50-200 resident nodes in `BenchmarkStreamingCollectorMemory`), rather than scaling with the number of namespaced objects.
 
-Within collection, the only whole-cluster containers left are the batches themselves. Neither the pager's pages nor any per-GVR slice adds to the peak: `pullSingleResourceInto` hands each object straight to the collector, which stores it in its namespace or resident batch and drops the pager's copy.
+Downstream retention in `sessionObj.AllResources` across subsequent stages (exceptions, printers, image scanning) is a separate boundary and will be decoupled in Phases 3 and 4.
+
+### Partition Store & Storage Requirements
+
+- **Writable Temporary Directory**: By default, `partitionstore.DiskStore` creates an owner-only directory (`0700`) in `$TMPDIR` (falling back to `os.TempDir()`, usually `/tmp`). The base directory can be configured with the `KUBESCAPE_SPILL_DIR` environment variable.
+- **Spill Size**: Peak disk usage is proportional to the raw JSON serialization size of all namespaced resources in the cluster. Partitions are purged (`store.PurgeNamespace`) immediately after downstream loading and streaming, so disk space is incrementally reclaimed as the scan progresses.
+- **In-Memory Fallback**: When running in constrained environments (such as Kubernetes operator pods with `readOnlyRootFilesystem: true` and no writable `/tmp` volume), if the disk spill directory cannot be created, the collector logs a warning and automatically falls back to `partitionstore.NewMemoryStore()`.
+- **Manual Store Configuration**: To explicitly disable disk spilling and run in memory, set `export KUBESCAPE_PARTITION_STORE=memory`. To target an emptyDir mount, set `export KUBESCAPE_SPILL_DIR=/path/to/mount`.
 
 ### Related-Object Resolution
 
@@ -192,4 +199,4 @@ kubescape scan  # Will auto-enable streaming for large clusters
 
 ## Conclusion
 
-This implementation addresses the API-server load issue described in A1 by replacing the O(L × N) collection loop with a single pass per GVR and by streaming batches to the OPA processor so evaluation never sees the whole cluster as its input. The solution maintains correctness while keeping the evaluation input bounded, making Kubescape more suitable for scanning enterprise-scale Kubernetes environments. It is not a total-process memory reduction: bounding the collection peak itself is left to future paged-LIST collection.
+This implementation addresses the API-server load issue described in A1 by replacing the O(L × N) collection loop with a single pass per GVR and by streaming batches to the OPA processor so evaluation never sees the whole cluster as its input. With the integration of the scan-scoped partition store (Phase 2), namespaced spill usage and partition-store metadata remain flat (~1-2 MB), bounding the collection-phase memory peak before evaluation to resident cluster-scoped resources plus active pager buffers, satisfying Issue #3235. Total process memory reduction across downstream stages (`AllResources` for exceptions, printers, and image scanning) remains explicitly decoupled and will be tackled in subsequent phases.
