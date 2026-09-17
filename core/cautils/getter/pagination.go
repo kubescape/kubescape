@@ -2,6 +2,8 @@ package getter
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"time"
 
 	"github.com/kubescape/go-logger"
@@ -9,6 +11,11 @@ import (
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
+
+// ErrPaginationTokenRepeated means a paginated API returned a continuation
+// token that was already consumed. Retrying that token cannot make progress
+// and would otherwise leave the caller in an infinite loop.
+var ErrPaginationTokenRepeated = errors.New("pagination continuation token repeated")
 
 // ListFunc performs a single paginated request and returns the continuation token or an error.
 type ListFunc func(metav1.ListOptions) (string, error)
@@ -18,6 +25,7 @@ type ListFunc func(metav1.ListOptions) (string, error)
 func ListWithPagination(ctx context.Context, listFunc ListFunc) error {
 	limit := int64(100)
 	continueToken := ""
+	seenTokens := make(map[string]struct{})
 
 	for {
 		if err := ctx.Err(); err != nil {
@@ -70,6 +78,10 @@ func ListWithPagination(ctx context.Context, listFunc ListFunc) error {
 		if nextToken == "" {
 			break
 		}
+		if _, seen := seenTokens[nextToken]; seen {
+			return fmt.Errorf("continuation token %q: %w", nextToken, ErrPaginationTokenRepeated)
+		}
+		seenTokens[nextToken] = struct{}{}
 		continueToken = nextToken
 	}
 	return nil
