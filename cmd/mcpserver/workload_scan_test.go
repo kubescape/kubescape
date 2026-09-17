@@ -43,6 +43,13 @@ func TestBuildWorkloadScanRequest_InvalidIdentifier(t *testing.T) {
 		{name: "empty segment", workload: "default//nginx"},
 		{name: "bad api version", workload: "Deployment.vX.apps/nginx", wantErr: "is not a valid API version"},
 		{name: "missing api version", workload: "Deployment.apps/nginx", wantErr: "is not a valid API version"},
+		{name: "invalid workload name", workload: "Deployment/nginx@invalid", wantErr: "invalid workload name"},
+		{name: "invalid workload kind", workload: "Deploy!/nginx", wantErr: "invalid workload kind"},
+		{name: "invalid namespace in identifier", workload: "Bad_NS!/Deployment/nginx", wantErr: "invalid namespace"},
+		{name: "invalid API group", workload: "Deployment.v1.apps@bad/nginx", wantErr: "invalid API group"},
+		{name: "Event with custom group and colon in name", workload: "Event.v1.example.com/event:legacy", wantErr: "invalid workload name"},
+		{name: "workload kind with leading digit", workload: "1Pod.v1.example.com/nginx", wantErr: "invalid workload kind"},
+		{name: "workload kind with trailing hyphen", workload: "Pod-.v1.example.com/nginx", wantErr: "invalid workload kind"},
 	}
 
 	for _, tt := range tests {
@@ -56,6 +63,13 @@ func TestBuildWorkloadScanRequest_InvalidIdentifier(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestBuildWorkloadScanRequest_InvalidNamespace(t *testing.T) {
+	_, err := buildWorkloadScanRequest("Deployment/nginx", "Bad_NS!", "", "")
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, cautils.ErrInvalidWorkloadIdentifier))
+	assert.Contains(t, err.Error(), "invalid namespace")
 }
 
 func TestBuildWorkloadScanRequest_ScanObject(t *testing.T) {
@@ -111,6 +125,166 @@ func TestBuildWorkloadScanRequest_ScanObject(t *testing.T) {
 			wantNamespace: "default",
 			wantKind:      "Deploy",
 			wantName:      "crd-deploy",
+		},
+		{
+			name:          "alphanumeric CRD kind preserves casing and parses custom group",
+			workload:      "PodApp.v1.example.com/nginx",
+			wantNamespace: "default",
+			wantKind:      "PodApp",
+			wantName:      "nginx",
+			wantAPIVer:    "example.com/v1",
+		},
+		{
+			name:          "live RBAC clusterrole with colon in name",
+			workload:      "ClusterRole.v1.rbac.authorization.k8s.io/system:discovery",
+			wantNamespace: "default",
+			wantKind:      "ClusterRole",
+			wantName:      "system:discovery",
+			wantAPIVer:    "rbac.authorization.k8s.io/v1",
+		},
+		{
+			name:          "live ClusterTrustBundle v1 with signer name containing colons",
+			workload:      "ClusterTrustBundle.v1.certificates.k8s.io/example.com:foo:abc",
+			wantNamespace: "default",
+			wantKind:      "ClusterTrustBundle",
+			wantName:      "example.com:foo:abc",
+			wantAPIVer:    "certificates.k8s.io/v1",
+		},
+		{
+			name:          "live ClusterTrustBundle v1beta1 with signer name containing colons",
+			workload:      "ClusterTrustBundle.v1beta1.certificates.k8s.io/example.com:foo:abc",
+			wantNamespace: "default",
+			wantKind:      "ClusterTrustBundle",
+			wantName:      "example.com:foo:abc",
+			wantAPIVer:    "certificates.k8s.io/v1beta1",
+		},
+		{
+			name:          "live CertificateSigningRequest v1 with colon in name",
+			workload:      "CertificateSigningRequest.v1.certificates.k8s.io/client:alice",
+			wantNamespace: "default",
+			wantKind:      "CertificateSigningRequest",
+			wantName:      "client:alice",
+			wantAPIVer:    "certificates.k8s.io/v1",
+		},
+		{
+			name:          "live csr alias v1 with colon in name",
+			workload:      "csr.v1.certificates.k8s.io/client:alice",
+			wantNamespace: "default",
+			wantKind:      "CertificateSigningRequest",
+			wantName:      "client:alice",
+			wantAPIVer:    "certificates.k8s.io/v1",
+		},
+		{
+			name:          "live APIService v1 with trailing dot in name",
+			workload:      "APIService.v1.apiregistration.k8s.io/v1.",
+			wantNamespace: "default",
+			wantKind:      "APIService",
+			wantName:      "v1.",
+			wantAPIVer:    "apiregistration.k8s.io/v1",
+		},
+		{
+			name:          "live IPAddress v1 with IPv6 in name",
+			workload:      "IPAddress.v1.networking.k8s.io/2001:db8::1",
+			wantNamespace: "default",
+			wantKind:      "IPAddress",
+			wantName:      "2001:db8::1",
+			wantAPIVer:    "networking.k8s.io/v1",
+		},
+		{
+			name:          "live Event v1 with colon in name",
+			workload:      "Event.v1/event:legacy",
+			wantNamespace: "default",
+			wantKind:      "Event",
+			wantName:      "event:legacy",
+			wantAPIVer:    "v1",
+		},
+		{
+			name:          "live event alias with colon in name",
+			workload:      "ev.v1/event:legacy",
+			wantNamespace: "default",
+			wantKind:      "Event",
+			wantName:      "event:legacy",
+			wantAPIVer:    "v1",
+		},
+		{
+			name:          "bare Event with colon in name",
+			workload:      "Event/event:legacy",
+			wantNamespace: "default",
+			wantKind:      "Event",
+			wantName:      "event:legacy",
+			wantAPIVer:    "",
+		},
+		{
+			name:          "live Event v1 with events.k8s.io group and colon in name",
+			workload:      "Event.v1.events.k8s.io/event:legacy",
+			wantNamespace: "default",
+			wantKind:      "Event",
+			wantName:      "event:legacy",
+			wantAPIVer:    "events.k8s.io/v1",
+		},
+		{
+			name:          "live ev alias v1 with events.k8s.io group and colon in name",
+			workload:      "ev.v1.events.k8s.io/event:legacy",
+			wantNamespace: "default",
+			wantKind:      "Event",
+			wantName:      "event:legacy",
+			wantAPIVer:    "events.k8s.io/v1",
+		},
+		{
+			name:          "live events alias v1 with events.k8s.io group and colon in name",
+			workload:      "events.v1.events.k8s.io/event:legacy",
+			wantNamespace: "default",
+			wantKind:      "Event",
+			wantName:      "event:legacy",
+			wantAPIVer:    "events.k8s.io/v1",
+		},
+		{
+			name:          "live Event v1beta1 with events.k8s.io group and colon in name",
+			workload:      "Event.v1beta1.events.k8s.io/event:legacy",
+			wantNamespace: "default",
+			wantKind:      "Event",
+			wantName:      "event:legacy",
+			wantAPIVer:    "events.k8s.io/v1beta1",
+		},
+		{
+			name:          "live Event v1 with custom group and standard name",
+			workload:      "Event.v1.example.com/my-event",
+			wantNamespace: "default",
+			wantKind:      "Event",
+			wantName:      "my-event",
+			wantAPIVer:    "example.com/v1",
+		},
+		{
+			name:          "bare APIService with custom resource name",
+			workload:      "APIService/my-api",
+			wantNamespace: "default",
+			wantKind:      "APIService",
+			wantName:      "my-api",
+			wantAPIVer:    "",
+		},
+		{
+			name:          "bare IPAddress with custom resource name",
+			workload:      "IPAddress/my-address",
+			wantNamespace: "default",
+			wantKind:      "IPAddress",
+			wantName:      "my-address",
+			wantAPIVer:    "",
+		},
+		{
+			name:          "bare ClusterTrustBundle with custom resource name",
+			workload:      "ClusterTrustBundle/my-bundle",
+			wantNamespace: "default",
+			wantKind:      "ClusterTrustBundle",
+			wantName:      "my-bundle",
+			wantAPIVer:    "",
+		},
+		{
+			name:          "hyphenated custom CRD kind",
+			workload:      "Pod-App.v1.example.com/nginx",
+			wantNamespace: "default",
+			wantKind:      "Pod-App",
+			wantName:      "nginx",
+			wantAPIVer:    "example.com/v1",
 		},
 	}
 
