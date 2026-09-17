@@ -58,6 +58,12 @@ func NormalizeSeverity(severity string) string {
 }
 
 // ProcessImages iterates over imageIDs and calls the provided fetch function, handling errors and aggregating results.
+//
+// On error the result from processFunc is still appended so callers always
+// receive a 1:1 mapping between input imageIDs and output results. The
+// aggregated error communicates which images encountered failures; callers
+// must check the returned error to distinguish a clean result from one
+// produced during a failed API call.
 func ProcessImages[T any](
 	imageIDs []ContainerImageIdentifier,
 	processFunc func(imageID ContainerImageIdentifier) (T, error),
@@ -68,7 +74,7 @@ func ProcessImages[T any](
 	for _, imageID := range imageIDs {
 		res, err := processFunc(imageID)
 		if err != nil {
-			logger.L().Warning("skipping image due to api error", helpers.Error(err))
+			logger.L().Warning("image scan api error, result may be incomplete", helpers.Error(err))
 			aggErr = errors.Join(aggErr, err)
 		}
 

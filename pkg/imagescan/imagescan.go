@@ -341,7 +341,7 @@ func filterMatchesBasedOnSeverity(severityExceptions []string, remainingMatches 
 		for _, sever := range severityExceptions {
 			if strings.ToUpper(metadata.Severity) == sever {
 				excludeSeverity = true
-				continue
+				break
 			}
 		}
 
