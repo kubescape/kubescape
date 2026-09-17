@@ -780,3 +780,41 @@ func getAbsPath(p string) string {
 func isHTTPURL(input string) bool {
 	return strings.HasPrefix(input, "http://") || strings.HasPrefix(input, "https://")
 }
+
+// EvidenceFlagWarnings returns what --show-evidence cannot deliver alongside
+// the other flags this scan was given, one message per combination.
+//
+// Neither combination is an error: each flag still does what it says, and
+// refusing the scan over a weaker evidence column would be worse than running
+// it. What the user cannot be left to discover is the part that silently does
+// not happen - a missing line number, or a value printed by one flag that
+// another asked to keep out of the output.
+func (scanInfo *ScanInfo) EvidenceFlagWarnings() []string {
+	if !scanInfo.ShowEvidence {
+		return nil
+	}
+
+	var warnings []string
+
+	// --hide and --encrypt replace every source path with a pseudonym before
+	// the report is printed, so the manifest a finding came from can no longer
+	// be opened to find its line. Paths and values are still shown.
+	if scanInfo.Hide || scanInfo.EncryptionEnabled {
+		flag := "--hide"
+		if scanInfo.EncryptionEnabled {
+			flag = "--encrypt"
+		}
+		warnings = append(warnings,
+			"--show-evidence cannot resolve line numbers with "+flag+": source paths are anonymized, so the manifests cannot be read")
+	}
+
+	// --omit-raw-resources keeps the scanned resources out of the report, but
+	// evidence reads those same resources to show each failing field's current
+	// value, so the values still reach the terminal.
+	if scanInfo.OmitRawResources {
+		warnings = append(warnings,
+			"--show-evidence still prints field values read from the scanned resources, which --omit-raw-resources keeps out of the report")
+	}
+
+	return warnings
+}

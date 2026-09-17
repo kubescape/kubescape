@@ -117,6 +117,7 @@ type OPASessionObj struct {
 	AuditExceptions       bool                               // include exception usage audit in supported outputs
 	HonorInlineExceptions bool                               // honor kubescape.io/skip-* annotations as inline exception policies
 	OmitRawResources      bool                               // omit raw resources from output
+	SourcePathsAnonymized bool                               // ResourceSource paths are pseudonyms (--hide/--encrypt), so no manifest can be opened from them
 	SingleResourceScan    workloadinterface.IWorkload        // single resource scan
 	TopWorkloadsByScore   []reporthandling.IResource
 	TriggeredByCLI        bool

@@ -650,3 +650,39 @@ func TestResourceTable_ManyControlsKeepOneLinePerPath(t *testing.T) {
 		assert.LessOrEqual(t, strings.Count(line, "(line "), 1, "no path annotated twice: %q", line)
 	}
 }
+
+// TestResourceTable_AnonymizedSourcePathsHaveNoLines covers --hide and
+// --encrypt. Both replace every source path with a pseudonym before the report
+// prints, so the manifest a finding came from cannot be opened. Paths still
+// print; only the line is missing, and the scan warns about that up front.
+func TestResourceTable_AnonymizedSourcePathsHaveNoLines(t *testing.T) {
+	session := resourceTableLineNumberSession(t, allPathTypesManifest, ":0")
+	withControlPaths(session,
+		armotypes.PosturePaths{FixPath: armotypes.FixPath{Path: "spec.template.spec.containers[0].securityContext.privileged", Value: "false"}},
+		armotypes.PosturePaths{DeletePath: "spec.template.spec.hostNetwork"},
+		armotypes.PosturePaths{ReviewPath: "spec.template.spec.automountServiceAccountToken"},
+	)
+	session.SourcePathsAnonymized = true
+
+	out := renderResourceTable(t, session, true)
+
+	assert.Contains(t, out, "privileged=false", "paths are still printed")
+	assert.Contains(t, out, "spec.template.spec.hostNetwork")
+	assert.NotContains(t, out, "(line ", "no line can be resolved from a pseudonymized path")
+}
+
+// TestResourceTable_OmitRawResourcesStillShowsEvidence pins that the flag does
+// not quietly change what --show-evidence prints: it keeps resources out of the
+// report, while the evidence column is terminal output the user asked for. The
+// scan warns that the two overlap.
+func TestResourceTable_OmitRawResourcesStillShowsEvidence(t *testing.T) {
+	session := resourceTableLineNumberSession(t, allPathTypesManifest, ":0")
+	withControlPaths(session,
+		armotypes.PosturePaths{FixPath: armotypes.FixPath{Path: "spec.template.spec.containers[0].securityContext.privileged", Value: "false"}},
+	)
+	session.OmitRawResources = true
+
+	out := renderResourceTable(t, session, true)
+
+	assert.Contains(t, outputLineWith(t, out, "privileged=false"), "(line 14)")
+}

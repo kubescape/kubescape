@@ -133,6 +133,13 @@ func transformSession(session *cautils.OPASessionObj, _ *Mapping, transformer Tr
 	}
 	session.ResourceSource = newResourceSource
 
+	// Every source path is now a pseudonym, so nothing downstream can open the
+	// manifest it came from. The evidence column reads these paths to resolve a
+	// finding's line, and recording the fact here - rather than re-deriving it
+	// from --hide or --encrypt at each reader - keeps it true by construction:
+	// whatever anonymizes the session says so.
+	session.SourcePathsAnonymized = true
+
 	newResourcesPrioritized := make(map[string]prioritization.PrioritizedResource, len(session.ResourcesPrioritized))
 	for oldID, prioritized := range session.ResourcesPrioritized {
 		newID, err := resolveMappedID(transformer, idMapping, oldID, "ref")

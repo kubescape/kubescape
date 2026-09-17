@@ -759,3 +759,51 @@ func TestScanInfoToScanMetadataNamespaces(t *testing.T) {
 		assert.Empty(t, md.ScanMetadata.IncludeNamespaces)
 	})
 }
+
+func TestEvidenceFlagWarnings(t *testing.T) {
+	cases := []struct {
+		name     string
+		scanInfo ScanInfo
+		want     []string
+	}{
+		{
+			name:     "no evidence, nothing to warn about",
+			scanInfo: ScanInfo{Hide: true, EncryptionEnabled: true, OmitRawResources: true},
+			want:     nil,
+		},
+		{
+			name:     "evidence alone",
+			scanInfo: ScanInfo{ShowEvidence: true},
+			want:     nil,
+		},
+		{
+			name:     "hide anonymizes the source paths lines are resolved from",
+			scanInfo: ScanInfo{ShowEvidence: true, Hide: true},
+			want:     []string{"--show-evidence cannot resolve line numbers with --hide: source paths are anonymized, so the manifests cannot be read"},
+		},
+		{
+			name:     "encrypt does the same",
+			scanInfo: ScanInfo{ShowEvidence: true, EncryptionEnabled: true},
+			want:     []string{"--show-evidence cannot resolve line numbers with --encrypt: source paths are anonymized, so the manifests cannot be read"},
+		},
+		{
+			name:     "omit-raw-resources still leaves values in the terminal",
+			scanInfo: ScanInfo{ShowEvidence: true, OmitRawResources: true},
+			want:     []string{"--show-evidence still prints field values read from the scanned resources, which --omit-raw-resources keeps out of the report"},
+		},
+		{
+			name:     "both combinations warn independently",
+			scanInfo: ScanInfo{ShowEvidence: true, Hide: true, OmitRawResources: true},
+			want: []string{
+				"--show-evidence cannot resolve line numbers with --hide: source paths are anonymized, so the manifests cannot be read",
+				"--show-evidence still prints field values read from the scanned resources, which --omit-raw-resources keeps out of the report",
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, tc.scanInfo.EvidenceFlagWarnings())
+		})
+	}
+}
