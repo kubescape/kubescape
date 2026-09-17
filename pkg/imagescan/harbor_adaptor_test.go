@@ -136,6 +136,42 @@ func TestExtractProjectAndRepo(t *testing.T) {
 	}
 }
 
+func TestHarborRepositoryPathSegment(t *testing.T) {
+	tests := map[string]string{
+		"api":                  "api",
+		"backend/api":          "backend%252Fapi",
+		"team/backend/service": "team%252Fbackend%252Fservice",
+	}
+
+	for repository, expected := range tests {
+		t.Run(repository, func(t *testing.T) {
+			assert.Equal(t, expected, harborRepositoryPathSegment(repository))
+		})
+	}
+}
+
+func TestHarborAPIWrapperPreservesNestedRepositoryAsOnePathSegment(t *testing.T) {
+	var requestURI string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestURI = r.RequestURI
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer server.Close()
+
+	wrapper := &harborAPIWrapper{
+		baseURL:         server.URL,
+		httpClient:      server.Client(),
+		maxResponseSize: maxRegistryAPIResponseBytes,
+	}
+	path := "/api/v2.0/projects/platform/repositories/backend%252Fapi/artifacts/latest"
+
+	_, err := wrapper.DoRequest(context.Background(), http.MethodGet, path)
+
+	assert.NoError(t, err)
+	assert.Equal(t, path, requestURI)
+}
+
 func TestHarborAdaptor_GetImagesScanStatus(t *testing.T) {
 	mockAPI := &mockHarborAPI{
 		responses: map[string][]byte{
@@ -144,6 +180,14 @@ func TestHarborAdaptor_GetImagesScanStatus(t *testing.T) {
 					"application/vnd.security.vulnerability.report; version=1.1": {
 						"scan_status": "Success",
 						"end_time": "2023-01-01T10:00:00Z"
+					}
+				}
+			}`),
+			"/api/v2.0/projects/myproject/repositories/team%252Fbackend/artifacts/sha256:nested?with_scan_overview=true": []byte(`{
+				"scan_overview": {
+					"application/vnd.security.vulnerability.report; version=1.1": {
+						"scan_status": "Success",
+						"end_time": "2024-02-03T10:00:00Z"
 					}
 				}
 			}`),
@@ -174,6 +218,7 @@ func TestHarborAdaptor_GetImagesScanStatus(t *testing.T) {
 		{Repository: "myproject/notfound", Hash: "sha256:000"},      // Mock won't find this
 		{Repository: "invalidformat", Hash: "sha256:111"},           // Format error
 		{Repository: "myproject/malformedrepo", Hash: "sha256:999"}, // Malformed payload
+		{Repository: "myproject/team/backend", Hash: "sha256:nested"},
 	}
 
 	statuses, err := adaptor.GetImagesScanStatus(context.Background(), imageIDs)
@@ -183,7 +228,7 @@ func TestHarborAdaptor_GetImagesScanStatus(t *testing.T) {
 	assert.Contains(t, err.Error(), "invalid harbor repository format")
 	assert.Contains(t, err.Error(), "api error")
 
-	assert.Len(t, statuses, 6)
+	assert.Len(t, statuses, 7)
 
 	assert.True(t, statuses[0].IsScanAvailable)
 	assert.Equal(t, 2023, statuses[0].LastScanDate.Year())
@@ -192,6 +237,7 @@ func TestHarborAdaptor_GetImagesScanStatus(t *testing.T) {
 	assert.False(t, statuses[2].IsScanAvailable) // errorrepo
 	assert.False(t, statuses[4].IsScanAvailable) // invalidformat
 	assert.False(t, statuses[5].IsScanAvailable) // malformedrepo
+	assert.True(t, statuses[6].IsScanAvailable)  // nested Harbor repository
 }
 
 func TestHarborAdaptor_GetImagesVulnerabilities(t *testing.T) {
@@ -209,6 +255,18 @@ func TestHarborAdaptor_GetImagesVulnerabilities(t *testing.T) {
 					]
 				}
 			}`),
+			"/api/v2.0/projects/myproject/repositories/team%252Fbackend/artifacts/sha256:nested/additions/vulnerabilities": []byte(`{
+				"application/vnd.security.vulnerability.report; version=1.1": {
+					"vulnerabilities": [
+						{
+							"id": "CVE-NESTED",
+							"severity": "Critical",
+							"description": "Nested repository finding",
+							"links": []
+						}
+					]
+				}
+			}`),
 			"/api/v2.0/projects/myproject/repositories/malformedrepo/artifacts/sha256:999/additions/vulnerabilities": []byte(`{
 				malformed json
 			}`),
@@ -221,6 +279,7 @@ func TestHarborAdaptor_GetImagesVulnerabilities(t *testing.T) {
 	imageIDs := []ContainerImageIdentifier{
 		{Repository: "myproject/myrepo", Hash: "sha256:123"},
 		{Repository: "myproject/malformedrepo", Hash: "sha256:999"},
+		{Repository: "myproject/team/backend", Hash: "sha256:nested"},
 	}
 
 	reports, err := adaptor.GetImagesVulnerabilities(context.Background(), imageIDs)
@@ -228,13 +287,15 @@ func TestHarborAdaptor_GetImagesVulnerabilities(t *testing.T) {
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to parse vulnerability payload")
 
-	assert.Len(t, reports, 2)
+	assert.Len(t, reports, 3)
 	assert.Len(t, reports[0].Vulnerabilities, 1)
 	assert.Equal(t, "CVE-2023-1234", reports[0].Vulnerabilities[0].ID)
 	assert.Equal(t, "High", reports[0].Vulnerabilities[0].Severity)
 	assert.Equal(t, "Test vulnerability", reports[0].Vulnerabilities[0].Description)
 
 	assert.Len(t, reports[1].Vulnerabilities, 0) // Malformed should return empty
+	assert.Len(t, reports[2].Vulnerabilities, 1)
+	assert.Equal(t, "CVE-NESTED", reports[2].Vulnerabilities[0].ID)
 }
 
 func TestNormalizeSeverity(t *testing.T) {
