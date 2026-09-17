@@ -229,7 +229,7 @@ func findScanObjectResource(mappedResources map[string][]workloadinterface.IMeta
 
 	if len(matches.workloads) == 0 && len(matches.nonWorkloads) == 0 {
 		// mcpserver-sentinel: ErrResourceNotFound — do not change without updating cmd/mcpserver/mcperror_classify.go
-		return nil, fmt.Errorf("k8s resource '%s' not found: %w", getReadableID(resource), ErrResourceNotFound)
+		return nil, fmt.Errorf("k8s resource '%s' not found: %w", cautils.GetReadableID(resource), ErrResourceNotFound)
 	}
 
 	if len(matches.workloads) == 0 && len(matches.nonWorkloads) > 0 {
@@ -237,33 +237,18 @@ func findScanObjectResource(mappedResources map[string][]workloadinterface.IMeta
 			group, _ := k8sinterface.SplitApiVersion(r.GetApiVersion())
 			if strings.EqualFold(r.GetKind(), "secret") && (group == "" || cautils.IsBuiltinGroup(group)) {
 				// mcpserver-sentinel: ErrSecretScanDenied — do not change without updating cmd/mcpserver/mcperror_classify.go
-				return nil, fmt.Errorf("scanning Secret resources via single resource scan is not supported: %s: %w", getReadableID(resource), ErrSecretScanDenied)
+				return nil, fmt.Errorf("scanning Secret resources via single resource scan is not supported: %s: %w", cautils.GetReadableID(resource), ErrSecretScanDenied)
 			}
 		}
 		// mcpserver-sentinel: ErrNotWorkload — do not change without updating cmd/mcpserver/mcperror_classify.go
-		return nil, fmt.Errorf("%s is not a valid Kubernetes workload: %w", getReadableID(resource), ErrNotWorkload)
+		return nil, fmt.Errorf("%s is not a valid Kubernetes workload: %w", cautils.GetReadableID(resource), ErrNotWorkload)
 	}
 
 	if len(matches.workloads) > 1 {
 		// mcpserver-sentinel: ErrAmbiguousResource — do not change without updating cmd/mcpserver/mcperror_classify.go
-		return nil, fmt.Errorf("more than one k8s resource found for '%s': %w", getReadableID(resource), ErrAmbiguousResource)
+		return nil, fmt.Errorf("more than one k8s resource found for '%s': %w", cautils.GetReadableID(resource), ErrAmbiguousResource)
 	}
 
 	return matches.workloads[0], nil
 }
 
-// TODO: move this to k8s-interface
-func getReadableID(obj *objectsenvelopes.ScanObject) string {
-	var ID string
-	if obj.GetApiVersion() != "" {
-		ID += fmt.Sprintf("%s/", k8sinterface.JoinGroupVersion(k8sinterface.SplitApiVersion(obj.GetApiVersion())))
-	}
-
-	if obj.GetNamespace() != "" {
-		ID += fmt.Sprintf("%s/", obj.GetNamespace())
-	}
-
-	ID += fmt.Sprintf("%s/%s", obj.GetKind(), obj.GetName())
-
-	return ID
-}

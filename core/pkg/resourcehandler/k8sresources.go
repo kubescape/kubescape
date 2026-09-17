@@ -647,7 +647,7 @@ func (k8sHandler *K8sResourceHandler) findScanObjectResource(ctx context.Context
 	}
 	if len(resolved) != 1 {
 		// mcpserver-sentinel: ErrResourceNotInDiscovery — do not change without updating cmd/mcpserver/mcperror_classify.go
-		return nil, fmt.Errorf("resource not found in Kubernetes discovery: %s: %w", getReadableID(resource), ErrResourceNotInDiscovery)
+		return nil, fmt.Errorf("resource not found in Kubernetes discovery: %s: %w", cautils.GetReadableID(resource), ErrResourceNotInDiscovery)
 	}
 	apiGroup, apiVersion, resourceName := k8sinterface.StringToResourceGroup(resolved[0].groupVersionResourceTriplet)
 	if apiGroup == "" && resourceName == "secrets" {
@@ -664,7 +664,7 @@ func (k8sHandler *K8sResourceHandler) findScanObjectResource(ctx context.Context
 		// client-supplied kind string, so this check cannot be sidestepped with
 		// casing or aliasing tricks.
 		// mcpserver-sentinel: ErrSecretScanDenied — do not change without updating cmd/mcpserver/mcperror_classify.go
-		return nil, fmt.Errorf("scanning Secret resources via single resource scan is not supported: %s: %w", getReadableID(resource), ErrSecretScanDenied)
+		return nil, fmt.Errorf("scanning Secret resources via single resource scan is not supported: %s: %w", cautils.GetReadableID(resource), ErrSecretScanDenied)
 	}
 	gvr := schema.GroupVersionResource{Group: apiGroup, Version: apiVersion, Resource: resourceName}
 	isNamespaced := (resolved[0].namespaced != nil && *resolved[0].namespaced) || (resolved[0].namespaced == nil && k8sinterface.IsNamespaceScope(&gvr))
@@ -679,7 +679,7 @@ func (k8sHandler *K8sResourceHandler) findScanObjectResource(ctx context.Context
 		}
 		if globalFieldSelector != nil && !globalFieldSelector.AllowsNamespace(&gvr, targetNS, resolved[0].namespaced) {
 			// mcpserver-sentinel: ErrResourceNotFound — do not change without updating cmd/mcpserver/mcperror_classify.go
-			return nil, fmt.Errorf("resource %s was not found: %w", getReadableID(resource), ErrResourceNotFound)
+			return nil, fmt.Errorf("resource %s was not found: %w", cautils.GetReadableID(resource), ErrResourceNotFound)
 		}
 
 		var clientResource dynamic.ResourceInterface = k8sHandler.k8s.DynamicClient.Resource(gvr)
@@ -695,28 +695,28 @@ func (k8sHandler *K8sResourceHandler) findScanObjectResource(ctx context.Context
 				}
 				if !globalFieldSelector.AllowsNamespace(&gvr, objNS, resolved[0].namespaced) {
 					// mcpserver-sentinel: ErrResourceNotFound — do not change without updating cmd/mcpserver/mcperror_classify.go
-					return nil, fmt.Errorf("resource %s was not found: %w", getReadableID(resource), ErrResourceNotFound)
+					return nil, fmt.Errorf("resource %s was not found: %w", cautils.GetReadableID(resource), ErrResourceNotFound)
 				}
 			}
 			if k8sinterface.IsTypeWorkload(uObj.Object) && k8sinterface.WorkloadHasParent(workloadinterface.NewWorkloadObj(uObj.Object)) {
 				// mcpserver-sentinel: ErrResourceHasParent — do not change without updating cmd/mcpserver/mcperror_classify.go
-				return nil, fmt.Errorf("resource %s has a parent and cannot be scanned: %w", getReadableID(resource), ErrResourceHasParent)
+				return nil, fmt.Errorf("resource %s has a parent and cannot be scanned: %w", cautils.GetReadableID(resource), ErrResourceHasParent)
 			}
 			if !k8sinterface.IsTypeWorkload(uObj.Object) {
 				// mcpserver-sentinel: ErrNotWorkload — do not change without updating cmd/mcpserver/mcperror_classify.go
-				return nil, fmt.Errorf("%s is not a valid Kubernetes workload: %w", getReadableID(resource), ErrNotWorkload)
+				return nil, fmt.Errorf("%s is not a valid Kubernetes workload: %w", cautils.GetReadableID(resource), ErrNotWorkload)
 			}
 			return workloadinterface.NewWorkloadObj(uObj.Object), nil
 		}
 		if apierrors.IsNotFound(err) {
 			// mcpserver-sentinel: ErrResourceNotFound — do not change without updating cmd/mcpserver/mcperror_classify.go
-			return nil, fmt.Errorf("resource %s was not found: %w", getReadableID(resource), ErrResourceNotFound)
+			return nil, fmt.Errorf("resource %s was not found: %w", cautils.GetReadableID(resource), ErrResourceNotFound)
 		}
 		// If Get failed with another error (e.g. Forbidden if the account was granted
 		// 'list' but not 'get', or an unexpected API issue), log and fall back to
 		// pullSingleResource for backwards compatibility.
 		logger.L().Debug("direct get failed, falling back to list",
-			helpers.String("resource", getReadableID(resource)),
+			helpers.String("resource", cautils.GetReadableID(resource)),
 			helpers.Error(err))
 	}
 
@@ -728,34 +728,34 @@ func (k8sHandler *K8sResourceHandler) findScanObjectResource(ctx context.Context
 	}
 	result, selectorErrs := k8sHandler.pullSingleResource(ctx, &gvr, "", fieldSelectors, globalFieldSelector, resolved[0].namespaced)
 	if len(result) == 0 && len(selectorErrs) > 0 {
-		return nil, fmt.Errorf("failed to get resource %s, reason: %w", getReadableID(resource), selectorErrs[0].err)
+		return nil, fmt.Errorf("failed to get resource %s, reason: %w", cautils.GetReadableID(resource), selectorErrs[0].err)
 	}
 	for _, se := range selectorErrs {
 		logger.L().Warning("partial collection during single resource scan",
-			helpers.String("resource", getReadableID(resource)),
+			helpers.String("resource", cautils.GetReadableID(resource)),
 			helpers.String("selector", se.selector),
 			helpers.Error(se.err))
 	}
 
 	if len(result) == 0 {
 		// mcpserver-sentinel: ErrResourceNotFound — do not change without updating cmd/mcpserver/mcperror_classify.go
-		return nil, fmt.Errorf("resource %s was not found: %w", getReadableID(resource), ErrResourceNotFound)
+		return nil, fmt.Errorf("resource %s was not found: %w", cautils.GetReadableID(resource), ErrResourceNotFound)
 	}
 
 	metaObjs := ConvertMapListToMeta(k8sinterface.ConvertUnstructuredSliceToMap(result))
 	if len(metaObjs) == 0 {
 		// mcpserver-sentinel: ErrResourceHasParent — do not change without updating cmd/mcpserver/mcperror_classify.go
-		return nil, fmt.Errorf("resource %s has a parent and cannot be scanned: %w", getReadableID(resource), ErrResourceHasParent)
+		return nil, fmt.Errorf("resource %s has a parent and cannot be scanned: %w", cautils.GetReadableID(resource), ErrResourceHasParent)
 	}
 
 	if len(metaObjs) > 1 {
 		// mcpserver-sentinel: ErrAmbiguousResource — do not change without updating cmd/mcpserver/mcperror_classify.go
-		return nil, fmt.Errorf("more than one resource found for %s: %w", getReadableID(resource), ErrAmbiguousResource)
+		return nil, fmt.Errorf("more than one resource found for %s: %w", cautils.GetReadableID(resource), ErrAmbiguousResource)
 	}
 
 	if !k8sinterface.IsTypeWorkload(metaObjs[0].GetObject()) {
 		// mcpserver-sentinel: ErrNotWorkload — do not change without updating cmd/mcpserver/mcperror_classify.go
-		return nil, fmt.Errorf("%s is not a valid Kubernetes workload: %w", getReadableID(resource), ErrNotWorkload)
+		return nil, fmt.Errorf("%s is not a valid Kubernetes workload: %w", cautils.GetReadableID(resource), ErrNotWorkload)
 	}
 
 	wl := workloadinterface.NewWorkloadObj(metaObjs[0].GetObject())
