@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/k8s-interface/names"
@@ -29,6 +30,58 @@ func NewFakeAPIServerStorage(namespace string) *APIServerStore {
 	return &APIServerStore{
 		StorageClient: fake.NewSimpleClientset().SpdxV1beta1(),
 		namespace:     namespace,
+	}
+}
+
+func TestBuildWorkloadConfigurationScan_UsesReportGenerationTime(t *testing.T) {
+	const resourceID = "v1/default/Pod/test-pod"
+	generatedAt := time.Date(2026, time.September, 18, 12, 34, 56, 123456789, time.UTC)
+	report := &v2.PostureReport{
+		ReportGenerationTime: generatedAt,
+		Resources: []reporthandling.Resource{{
+			ResourceID: resourceID,
+			Object: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "Pod",
+				"metadata": map[string]any{
+					"name":      "test-pod",
+					"namespace": "default",
+				},
+			},
+		}},
+	}
+
+	scan, err := NewFakeAPIServerStorage("kubescape").BuildWorkloadConfigurationScan(
+		context.Background(), report, &resourcesresults.Result{ResourceID: resourceID})
+
+	assert.NoError(t, err)
+	if assert.NotNil(t, scan) && assert.NotNil(t, scan.Spec.Metadata) {
+		assert.True(t, scan.Spec.Metadata.Report.CreatedAt.Time.Equal(generatedAt))
+	}
+}
+
+func TestBuildWorkloadConfigurationScan_LeavesMetadataUnsetWithoutReportGenerationTime(t *testing.T) {
+	const resourceID = "v1/default/Pod/test-pod"
+	report := &v2.PostureReport{
+		Resources: []reporthandling.Resource{{
+			ResourceID: resourceID,
+			Object: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "Pod",
+				"metadata": map[string]any{
+					"name":      "test-pod",
+					"namespace": "default",
+				},
+			},
+		}},
+	}
+
+	scan, err := NewFakeAPIServerStorage("kubescape").BuildWorkloadConfigurationScan(
+		context.Background(), report, &resourcesresults.Result{ResourceID: resourceID})
+
+	assert.NoError(t, err)
+	if assert.NotNil(t, scan) {
+		assert.Nil(t, scan.Spec.Metadata)
 	}
 }
 
@@ -1197,6 +1250,94 @@ func TestMergeWorkloadConfigurationScanSpec(t *testing.T) {
 		}
 		assert.Len(t, spec.Controls["C-001"].Rules, 1)
 	})
+}
+
+func TestMergeWorkloadConfigurationScanSpec_RefreshesReportTimestamp(t *testing.T) {
+	initialCreatedAt := metav1.NewTime(time.Date(2026, time.September, 1, 8, 0, 0, 0, time.UTC))
+	refreshedCreatedAt := metav1.NewTime(time.Date(2026, time.September, 18, 12, 34, 56, 123456789, time.UTC))
+	existing := v1beta1.WorkloadConfigurationScanSpec{
+		Metadata: &v1beta1.WorkloadConfigurationScanMeta{Report: v1beta1.ReportMeta{CreatedAt: initialCreatedAt}},
+	}
+	newSpec := v1beta1.WorkloadConfigurationScanSpec{
+		Metadata: &v1beta1.WorkloadConfigurationScanMeta{Report: v1beta1.ReportMeta{CreatedAt: refreshedCreatedAt}},
+	}
+
+	merged := mergeWorkloadConfigurationScanSpec(existing, newSpec)
+
+	if assert.NotNil(t, merged.Metadata) {
+		assert.True(t, merged.Metadata.Report.CreatedAt.Time.Equal(refreshedCreatedAt.Time))
+	}
+}
+
+func TestMergeWorkloadConfigurationScanSpec_PreservesReportTimestampWhenNewMetadataIsMissing(t *testing.T) {
+	initialCreatedAt := metav1.NewTime(time.Date(2026, time.September, 1, 8, 0, 0, 0, time.UTC))
+	existing := v1beta1.WorkloadConfigurationScanSpec{
+		Metadata: &v1beta1.WorkloadConfigurationScanMeta{Report: v1beta1.ReportMeta{CreatedAt: initialCreatedAt}},
+	}
+
+	merged := mergeWorkloadConfigurationScanSpec(existing, v1beta1.WorkloadConfigurationScanSpec{})
+
+	if assert.NotNil(t, merged.Metadata) {
+		assert.True(t, merged.Metadata.Report.CreatedAt.Time.Equal(initialCreatedAt.Time))
+	}
+}
+
+func TestMergeWorkloadConfigurationScanSpec_AddsReportTimestampToLegacyScan(t *testing.T) {
+	newCreatedAt := metav1.NewTime(time.Date(2026, time.September, 18, 12, 34, 56, 123456789, time.UTC))
+	newSpec := v1beta1.WorkloadConfigurationScanSpec{
+		Metadata: &v1beta1.WorkloadConfigurationScanMeta{Report: v1beta1.ReportMeta{CreatedAt: newCreatedAt}},
+	}
+
+	merged := mergeWorkloadConfigurationScanSpec(v1beta1.WorkloadConfigurationScanSpec{}, newSpec)
+
+	if assert.NotNil(t, merged.Metadata) {
+		assert.True(t, merged.Metadata.Report.CreatedAt.Time.Equal(newCreatedAt.Time))
+	}
+}
+
+func TestStorePostureReportResults_RefreshesPersistedReportTimestamp(t *testing.T) {
+	const resourceID = "v1/default/Pod/test-pod"
+	initialGeneratedAt := time.Date(2026, time.September, 1, 8, 0, 0, 0, time.UTC)
+	refreshedGeneratedAt := time.Date(2026, time.September, 18, 12, 34, 56, 123456789, time.UTC)
+	report := &v2.PostureReport{
+		ReportGenerationTime: initialGeneratedAt,
+		Resources: []reporthandling.Resource{{
+			ResourceID: resourceID,
+			Object: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "Pod",
+				"metadata": map[string]any{
+					"name":      "test-pod",
+					"namespace": "default",
+				},
+			},
+		}},
+		Results: []resourcesresults.Result{{ResourceID: resourceID}},
+	}
+	client := fake.NewSimpleClientset()
+	store := &APIServerStore{
+		StorageClient:         client.SpdxV1beta1(),
+		namespace:             "kubescape",
+		continuousPostureScan: true,
+	}
+	ctx := context.Background()
+
+	assert.NoError(t, store.StorePostureReportResults(ctx, report))
+	stored, err := store.StorageClient.WorkloadConfigurationScans("default").Get(
+		ctx, "pod-test-pod", metav1.GetOptions{})
+	assert.NoError(t, err)
+	if assert.NotNil(t, stored.Spec.Metadata) {
+		assert.True(t, stored.Spec.Metadata.Report.CreatedAt.Time.Equal(initialGeneratedAt))
+	}
+
+	report.ReportGenerationTime = refreshedGeneratedAt
+	assert.NoError(t, store.StorePostureReportResults(ctx, report))
+	stored, err = store.StorageClient.WorkloadConfigurationScans("default").Get(
+		ctx, "pod-test-pod", metav1.GetOptions{})
+	assert.NoError(t, err)
+	if assert.NotNil(t, stored.Spec.Metadata) {
+		assert.True(t, stored.Spec.Metadata.Report.CreatedAt.Time.Equal(refreshedGeneratedAt))
+	}
 }
 
 func TestMergeWorkloadConfigurationScanSummarySpec(t *testing.T) {
