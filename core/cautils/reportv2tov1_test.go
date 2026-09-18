@@ -129,3 +129,15 @@ func TestReportV2ToV1_DoesNotMutateAllResources(t *testing.T) {
 	require.Len(t, alertObjects, 1)
 	assert.NotContains(t, alertObjects[0], "spec")
 }
+
+func TestFrameworkScopedReportV2ToV1(t *testing.T) {
+	control := reportsummary.ControlSummary{ControlID: "C-0034"}
+	control.Append(helpersv1.NewStatus(apis.StatusFailed), "resource")
+	session := &OPASessionObj{ResourcesResult: map[string]resourcesresults.Result{"resource": {ResourceID: "resource", AssociatedControls: []resourcesresults.ResourceAssociatedControl{{ControlID: "C-0034", ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{{Name: "R1", Status: apis.StatusFailed, Exception: []armotypes.PostureExceptionPolicy{{Actions: []armotypes.PostureExceptionPolicyActions{armotypes.Disable}, PosturePolicies: []armotypes.PosturePolicy{{FrameworkName: "NSA", ControlID: "C-0034", RuleName: "R1"}}}}}}}}}}}
+	for _, framework := range []string{"NSA", "MITRE"} {
+		reports := controlReportV2ToV1(session, framework, reportsummary.ControlSummaries{"C-0034": control})
+		require.Len(t, reports, 1)
+		require.Len(t, reports[0].RuleReports, 1)
+		assert.Equal(t, framework == "MITRE", len(reports[0].RuleReports[0].RuleResponses) > 0, framework)
+	}
+}

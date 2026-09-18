@@ -131,7 +131,7 @@ func (handler *ResourcesPrioritizationHandler) PrioritizeResources(sessionObj *c
 
 		if workload != nil && handler.isSupportedKind(workload) {
 			// build a map of attack track categories to a list of failed controls for the specific resource
-			controlsIds := result.ListControlsIDs(nil)
+			controlsIds := cautils.ControlIDsByStatus(&sessionObj.Report.SummaryDetails, &result)
 			if controlsIds.Failed() > 0 {
 				failedControls := controlsIds.GetItems(apis.StatusFailed)
 				controlsLookup := v1alpha1.NewAttackTrackControlsLookup(handler.attackTracks, failedControls, allControls)

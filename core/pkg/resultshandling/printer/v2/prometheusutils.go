@@ -432,12 +432,12 @@ func (m *Metrics) setCoverageScore(coverage cautils.ScanCoverage) {
 }
 
 // return -> (passed, skipped, failed)
-func resourceControlStatusCounters(result *resourcesresults.Result) (int, int, int) {
+func resourceControlStatusCounters(result *resourcesresults.Result, summary *reportsummary.SummaryDetails) (int, int, int) {
 	failed := 0
 	skipped := 0
 	passed := 0
 	for i := range result.ListControls() {
-		switch result.ListControls()[i].GetStatus(nil).Status() {
+		switch cautils.ControlStatus(summary, &result.AssociatedControls[i]).Status() {
 		case apis.StatusSkipped:
 			skipped++
 		case apis.StatusFailed:
@@ -451,14 +451,14 @@ func resourceControlStatusCounters(result *resourcesresults.Result) (int, int, i
 
 func (m *Metrics) setResourcesCounters(
 	resources map[string]workloadinterface.IMetadata,
-	results map[string]resourcesresults.Result) {
+	results map[string]resourcesresults.Result, summary *reportsummary.SummaryDetails) {
 
 	for resourceID, result := range results {
 		r, ok := resources[resourceID]
 		if !ok {
 			continue
 		}
-		passed, skipped, failed := resourceControlStatusCounters(&result)
+		passed, skipped, failed := resourceControlStatusCounters(&result, summary)
 
 		mrc := mResources{}
 		mrc.apiVersion = r.GetApiVersion()
