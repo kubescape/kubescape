@@ -1314,6 +1314,7 @@ func TestStorePostureReportResults_RefreshesPersistedReportTimestamp(t *testing.
 		}},
 		Results: []resourcesresults.Result{{ResourceID: resourceID}},
 	}
+	//nolint:staticcheck // The pinned storage client lacks the summary apply schema required by NewClientset.
 	client := fake.NewSimpleClientset()
 	store := &APIServerStore{
 		StorageClient:         client.SpdxV1beta1(),
