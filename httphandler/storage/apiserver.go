@@ -14,6 +14,7 @@ import (
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/names"
 	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
@@ -117,7 +118,8 @@ func (a *APIServerStore) StorePostureReportResults(ctx context.Context, pr *v2.P
 	return nil
 }
 
-func getControlsMapFromResult(ctx context.Context, result *resourcesresults.Result, controlSummaries reportsummary.ControlSummaries) map[string]v1beta1.ScannedControl {
+func getControlsMapFromResult(ctx context.Context, result *resourcesresults.Result, summary *reportsummary.SummaryDetails) map[string]v1beta1.ScannedControl {
+	controlSummaries := summary.Controls
 	m := map[string]v1beta1.ScannedControl{}
 
 	for i := range result.AssociatedControls {
@@ -128,8 +130,8 @@ func getControlsMapFromResult(ctx context.Context, result *resourcesresults.Resu
 			ControlID: control.GetID(),
 			Name:      control.GetName(),
 			Severity:  parseControlSeverity(ctrlSummary),
-			Status:    parseScannedControlStatus(&control),
-			Rules:     parseScannedControlRules(&control),
+			Status:    parseScannedControlStatus(&control, summary),
+			Rules:     parseScannedControlRules(&control, summary),
 		}
 
 	}
@@ -241,7 +243,7 @@ func (a *APIServerStore) BuildWorkloadConfigurationScan(ctx context.Context, rep
 			Namespace:   namespace,
 		},
 		Spec: v1beta1.WorkloadConfigurationScanSpec{
-			Controls:       getControlsMapFromResult(ctx, result, report.SummaryDetails.Controls),
+			Controls:       getControlsMapFromResult(ctx, result, &report.SummaryDetails),
 			RelatedObjects: parseWorkloadScanRelatedObjectList(relatedObjects),
 			Metadata:       workloadConfigurationScanMetadata(report),
 		},
@@ -626,9 +628,10 @@ func parseControlSeverity(controlSummary reportsummary.IControlSummary) v1beta1.
 	}
 }
 
-func parseScannedControlRules(control *resourcesresults.ResourceAssociatedControl) []v1beta1.ScannedControlRule {
+func parseScannedControlRules(control *resourcesresults.ResourceAssociatedControl, summary *reportsummary.SummaryDetails) []v1beta1.ScannedControlRule {
 	rules := make([]v1beta1.ScannedControlRule, len(control.ResourceAssociatedRules))
 	for i, rule := range control.ResourceAssociatedRules {
+		status := cautils.RuleStatus(summary, control.ControlID, &rule)
 		paths := make([]v1beta1.RulePath, len(rule.Paths))
 		for j, path := range rule.Paths {
 			paths[j] = v1beta1.RulePath{
@@ -649,8 +652,8 @@ func parseScannedControlRules(control *resourcesresults.ResourceAssociatedContro
 		rules[i] = v1beta1.ScannedControlRule{
 			Name: rule.GetName(),
 			Status: v1beta1.RuleStatus{
-				Status:    string(rule.GetStatus(nil).Status()),
-				SubStatus: string(rule.GetStatus(nil).GetSubStatus()),
+				Status:    string(status.Status()),
+				SubStatus: string(status.GetSubStatus()),
 			},
 			ControlConfigurations: controlConfigurations,
 			Paths:                 paths,
@@ -674,11 +677,12 @@ func ruleToControlConfigurations(rule resourcesresults.ResourceAssociatedRule) m
 	return controlConfigurations
 }
 
-func parseScannedControlStatus(control *resourcesresults.ResourceAssociatedControl) v1beta1.ScannedControlStatus {
+func parseScannedControlStatus(control *resourcesresults.ResourceAssociatedControl, summary *reportsummary.SummaryDetails) v1beta1.ScannedControlStatus {
+	status := cautils.ControlStatus(summary, control)
 	return v1beta1.ScannedControlStatus{
-		Status:    string(control.GetStatus(nil).Status()),
-		SubStatus: string(control.GetSubStatus()),
-		Info:      control.GetStatus(nil).Info(),
+		Status:    string(status.Status()),
+		SubStatus: string(status.GetSubStatus()),
+		Info:      status.Info(),
 	}
 }
 

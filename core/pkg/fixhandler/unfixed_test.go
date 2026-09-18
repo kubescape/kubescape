@@ -142,7 +142,7 @@ func TestAddYamlExpressions_PerPathClassification(t *testing.T) {
 		ac := failedControl("C-1", "fixable",
 			failedRuleWithFix("spec.containers[0].securityContext.privileged", "false"),
 		)
-		added, skipped := rfi.addYamlExpressionsFromResourceAssociatedControl(0, &ac, false)
+		added, skipped := rfi.addYamlExpressionsFromResourceAssociatedControl(0, &ac, false, nil)
 		assert.Equal(t, 1, added)
 		assert.Empty(t, skipped)
 		assert.Len(t, rfi.YamlExpressions, 1)
@@ -150,7 +150,7 @@ func TestAddYamlExpressions_PerPathClassification(t *testing.T) {
 	t.Run("rule with no fix path → no auto-fix skipped reason", func(t *testing.T) {
 		rfi := &ResourceFixInfo{YamlExpressions: map[string]armotypes.FixPath{}}
 		ac := failedControl("C-2", "no-fix", failedRuleNoFix())
-		added, skipped := rfi.addYamlExpressionsFromResourceAssociatedControl(0, &ac, false)
+		added, skipped := rfi.addYamlExpressionsFromResourceAssociatedControl(0, &ac, false, nil)
 		assert.Equal(t, 0, added)
 		if assert.Len(t, skipped, 1) {
 			assert.Contains(t, skipped[0], "no auto-fix")
@@ -161,7 +161,7 @@ func TestAddYamlExpressions_PerPathClassification(t *testing.T) {
 		ac := failedControl("C-3", "user-val",
 			failedRuleWithFix("metadata.namespace", "YOUR_NAMESPACE"),
 		)
-		added, skipped := rfi.addYamlExpressionsFromResourceAssociatedControl(0, &ac, true)
+		added, skipped := rfi.addYamlExpressionsFromResourceAssociatedControl(0, &ac, true, nil)
 		assert.Equal(t, 0, added)
 		if assert.Len(t, skipped, 1) {
 			assert.Contains(t, skipped[0], "user-supplied value")
@@ -172,7 +172,7 @@ func TestAddYamlExpressions_PerPathClassification(t *testing.T) {
 		ac := failedControl("C-3", "user-val",
 			failedRuleWithFix("metadata.namespace", "YOUR_NAMESPACE"),
 		)
-		added, skipped := rfi.addYamlExpressionsFromResourceAssociatedControl(0, &ac, false)
+		added, skipped := rfi.addYamlExpressionsFromResourceAssociatedControl(0, &ac, false, nil)
 		assert.Equal(t, 1, added)
 		assert.Empty(t, skipped)
 	})
@@ -182,7 +182,7 @@ func TestAddYamlExpressions_PerPathClassification(t *testing.T) {
 			failedRuleWithFix("metadata.namespace", "YOUR_NAMESPACE"),
 			failedRuleWithFix("spec.containers[0].securityContext.privileged", "false"),
 		)
-		added, skipped := rfi.addYamlExpressionsFromResourceAssociatedControl(0, &ac, true)
+		added, skipped := rfi.addYamlExpressionsFromResourceAssociatedControl(0, &ac, true, nil)
 		assert.Equal(t, 1, added, "the concrete rule produces a fix")
 		if assert.Len(t, skipped, 1, "the YOUR_-gated rule must be reported as skipped") {
 			assert.Contains(t, skipped[0], "user-supplied value")
@@ -194,7 +194,7 @@ func TestAddYamlExpressions_PerPathClassification(t *testing.T) {
 			failedRuleWithFix("spec.containers[0].securityContext.privileged", "false"),
 			failedRuleNoFix(),
 		)
-		added, skipped := rfi.addYamlExpressionsFromResourceAssociatedControl(0, &ac, false)
+		added, skipped := rfi.addYamlExpressionsFromResourceAssociatedControl(0, &ac, false, nil)
 		assert.Equal(t, 1, added)
 		if assert.Len(t, skipped, 1) {
 			assert.Contains(t, skipped[0], "no auto-fix")
