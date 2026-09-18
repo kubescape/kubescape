@@ -3,6 +3,7 @@ package resultshandling
 import (
 	"testing"
 
+	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
@@ -532,4 +533,21 @@ func TestApplySeverityFilters_StatusCountersRecomputedOverRetainedControls(t *te
 	assert.Equal(t, apis.StatusPassed, summary.Status)
 	assert.Equal(t, 0, summary.Frameworks[0].StatusCounters.Failed())
 	assert.Equal(t, apis.StatusPassed, summary.Frameworks[0].Status)
+}
+
+func TestFrameworkScopedSeverityCounters(t *testing.T) {
+	s := makeSessionWithControls(map[string]reportsummary.ControlSummary{"C-0034": makeControl("C-0034", scoreHigh)})
+	s.Report.SummaryDetails.Frameworks = []reportsummary.FrameworkSummary{{Name: "NSA", Controls: s.Report.SummaryDetails.Controls}}
+	rule := resourcesresults.ResourceAssociatedRule{Name: "R1", Status: apis.StatusFailed}
+	rule.Exception = []armotypes.PostureExceptionPolicy{{Actions: []armotypes.PostureExceptionPolicyActions{armotypes.Disable}, PosturePolicies: []armotypes.PosturePolicy{{FrameworkName: "NSA", ControlID: "C-0034", RuleName: "R1"}}}}
+	control := resourcesresults.ResourceAssociatedControl{ControlID: "C-0034", Status: apis.StatusInfo{InnerStatus: apis.StatusFailed}, ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{rule}}
+	s.ResourcesResult = map[string]resourcesresults.Result{"resource": {ResourceID: "resource", AssociatedControls: []resourcesresults.ResourceAssociatedControl{control}}}
+	result := s.ResourcesResult["resource"]
+	s.Report.AppendResourceResultToSummary(&result)
+	s.Report.SummaryDetails.InitResourcesSummary(nil)
+	assert.True(t, result.AssociatedControls[0].GetStatus(nil).IsFailed(), "raw failure is retained")
+	assert.Zero(t, s.Report.SummaryDetails.ControlsSeverityCounters.HighSeverityCounter)
+	ApplySeverityFilters(s, "high", "")
+	assert.Zero(t, s.Report.SummaryDetails.ControlsSeverityCounters.HighSeverityCounter)
+	assert.Zero(t, s.Report.SummaryDetails.ResourcesSeverityCounters.HighSeverityCounter)
 }

@@ -29,6 +29,7 @@ import (
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer"
 	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
 	"github.com/kubescape/opa-utils/reporthandling"
+	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	v2 "github.com/kubescape/opa-utils/reporthandling/v2"
@@ -212,7 +213,9 @@ func sarifEvidenceIdentity(ac *resourcesresults.ResourceAssociatedControl) []sar
 	}
 	fragments := make([]sarifEvidenceFragment, 0, len(ac.ResourceAssociatedRules))
 	for _, rule := range ac.ResourceAssociatedRules {
-		if !rule.GetStatus(nil).IsFailed() {
+		// The caller already selected effective failing rules for this control.
+		// Reapplying exceptions without its framework context can discard evidence.
+		if rule.Status != apis.StatusFailed {
 			continue
 		}
 		fragment := sarifEvidenceFragment{
@@ -423,7 +426,7 @@ func resolveReviewPathLocations(opaSessionObj *cautils.OPASessionObj, locationRe
 
 	var locations map[string]locationresolver.Location
 	for i := range ac.ResourceAssociatedRules {
-		if !ac.ResourceAssociatedRules[i].GetStatus(nil).IsFailed() {
+		if !cautils.RuleStatus(&opaSessionObj.Report.SummaryDetails, ac.ControlID, &ac.ResourceAssociatedRules[i]).IsFailed() {
 			continue
 		}
 		for _, p := range ac.ResourceAssociatedRules[i].Paths {
@@ -583,7 +586,7 @@ func (sp *SARIFPrinter) writeConfigurationSARIF(ctx context.Context, w io.Writer
 	basePath := getBasePathFromMetadata(opaSessionObj)
 	failed := make([]scannedResource, 0, len(opaSessionObj.ResourcesResult))
 	for resourceID, result := range opaSessionObj.ResourcesResult {
-		if !result.GetStatus(nil).IsFailed() {
+		if !cautils.ResourceStatus(&opaSessionObj.Report.SummaryDetails, &result).IsFailed() {
 			continue
 		}
 
@@ -611,7 +614,7 @@ func (sp *SARIFPrinter) writeConfigurationSARIF(ctx context.Context, w io.Writer
 	ruleIndexes := make(map[string]int)
 	for _, resource := range ordered {
 		for _, ac := range sortedSARIFControls(opaSessionObj.ResourcesResult[resource.resourceID].AssociatedControls) {
-			if !ac.GetStatus(nil).IsFailed() {
+			if !cautils.ControlStatus(&opaSessionObj.Report.SummaryDetails, &ac).IsFailed() {
 				continue
 			}
 			ctl := opaSessionObj.Report.SummaryDetails.Controls.GetControl(reportsummary.EControlCriteriaID, ac.GetID())
@@ -651,7 +654,8 @@ func (sp *SARIFPrinter) writeConfigurationSARIF(ctx context.Context, w io.Writer
 			}
 			ac := toPin
 
-			if ac.GetStatus(nil).IsFailed() {
+			if cautils.ControlStatus(&opaSessionObj.Report.SummaryDetails, &ac).IsFailed() {
+				ac = cautils.FailedRules(&opaSessionObj.Report.SummaryDetails, ac)
 				ctl := opaSessionObj.Report.SummaryDetails.Controls.GetControl(reportsummary.EControlCriteriaID, ac.GetID())
 				if ctl == nil {
 					logger.L().Debug("control not found in summary details, skipping", helpers.String("controlID", ac.GetID()))
@@ -889,7 +893,7 @@ func collectFixes(ctx context.Context, cache *fixReportCache, result *sarif.Resu
 	}
 
 	for _, rule := range ac.ResourceAssociatedRules {
-		if !rule.GetStatus(nil).IsFailed() {
+		if !cautils.RuleStatus(&opaSessionObj.Report.SummaryDetails, ac.ControlID, &rule).IsFailed() {
 			continue
 		}
 

@@ -8,6 +8,7 @@ import (
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/opa-utils/exceptions"
+	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 )
 
@@ -26,6 +27,7 @@ func buildExceptionAudit(
 	policies *cautils.Policies,
 	processor *exceptions.Processor,
 	manualControlMatches []manualControlExceptionMatch,
+	summary *reportsummary.SummaryDetails,
 ) *cautils.ExceptionAudit {
 	items := make(map[string]*cautils.ExceptionAuditItem, len(loadedExceptions))
 	active := make(map[string]struct{}, len(activeExceptions))
@@ -49,6 +51,11 @@ func buildExceptionAudit(
 			controlID := control.GetID()
 			for _, rule := range control.ResourceAssociatedRules {
 				for _, exception := range rule.Exception {
+					// Match with framework context, but retain the original policy's
+					// identity and tuples in the audit entry.
+					if len(exceptions.FilterExceptionsByFrameworks([]armotypes.PostureExceptionPolicy{exception}, cautils.ControlFilters(summary, controlID).FrameworkNames, controlID, rule.GetName())) == 0 {
+						continue
+					}
 					key := exceptionAuditKey(exception)
 					if _, ok := items[key]; !ok {
 						item := exceptionAuditItem(exception, policies, processor)

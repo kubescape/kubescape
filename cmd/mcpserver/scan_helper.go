@@ -17,6 +17,7 @@ import (
 	"github.com/kubescape/kubescape/v4/core/pkg/resourcehandler"
 	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
+	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	"github.com/kubescape/opa-utils/resources"
 )
@@ -170,12 +171,14 @@ func runScan(ctx context.Context, ksServer *KubescapeMcpserver, req scanRequest)
 	}
 
 	var complianceScore *float32
+	var summary *reportsummary.SummaryDetails
 	var frameworkName string
 	degraded := false
 	notEvaluated := 0
 	totalControls := 0
 
 	if scanData.Report != nil {
+		summary = &scanData.Report.SummaryDetails
 		degraded = scanData.ScanCoverage.Degraded || processErr != nil
 		notEvaluated = len(scanData.ScanCoverage.NotEvaluatedControls)
 		totalControls = len(scanData.Report.SummaryDetails.Controls)
@@ -189,7 +192,7 @@ func runScan(ctx context.Context, ksServer *KubescapeMcpserver, req scanRequest)
 		}
 	}
 
-	response := buildScanResponse(scanData.ResourcesResult, complianceScore, frameworkName, degraded, notEvaluated, totalControls)
+	response := buildScanResponse(scanData.ResourcesResult, complianceScore, frameworkName, degraded, notEvaluated, totalControls, summary)
 	if req.namespaceDefaulted && req.scanObject != nil {
 		response.Warning = "Workload namespace was omitted and defaulted to 'default'. If your workload is in another namespace, specify 'namespace' explicitly or pass '*' to search cluster-wide."
 		response.TargetResource = &TargetResourceInfo{
@@ -254,7 +257,7 @@ func buildScanInfo(req scanRequest) *cautils.ScanInfo {
 	}
 }
 
-func buildScanResponse(results map[string]resourcesresults.Result, complianceScore *float32, frameworkName string, degraded bool, notEvaluated int, totalControls int) scanResponse {
+func buildScanResponse(results map[string]resourcesresults.Result, complianceScore *float32, frameworkName string, degraded bool, notEvaluated int, totalControls int, summary *reportsummary.SummaryDetails) scanResponse {
 	failedResources := make([]interface{}, 0)
 	totalFailed := 0
 
@@ -266,7 +269,7 @@ func buildScanResponse(results map[string]resourcesresults.Result, complianceSco
 
 	for _, k := range keys {
 		result := results[k]
-		if result.GetStatus(nil).IsFailed() {
+		if cautils.ResourceStatus(summary, &result).IsFailed() {
 			totalFailed++
 			if len(failedResources) < maxFailedResources {
 				failedResources = append(failedResources, result)

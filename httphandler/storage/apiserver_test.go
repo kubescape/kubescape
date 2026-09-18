@@ -183,7 +183,7 @@ func Test_getControlsMapFromResult(t *testing.T) {
 		},
 	}
 
-	actual := getControlsMapFromResult(context.Background(), &scanResult, controlSummaries)
+	actual := getControlsMapFromResult(context.Background(), &scanResult, &reportsummary.SummaryDetails{Controls: controlSummaries})
 	assert.Len(t, actual, len(scanResult.AssociatedControls))
 	if assert.Len(t, actual["C-002"].Rules, 1) {
 		assert.Equal(t, []string{"resource-1"}, actual["C-002"].Rules[0].RelatedResourcesIDs)
@@ -208,7 +208,7 @@ func TestGetControlsMapFromResult_MissingControl(t *testing.T) {
 	}
 
 	assert.NotPanics(t, func() {
-		actual := getControlsMapFromResult(context.Background(), &scanResult, reportsummary.ControlSummaries{})
+		actual := getControlsMapFromResult(context.Background(), &scanResult, &reportsummary.SummaryDetails{})
 		assert.Contains(t, actual, "C-MISSING")
 		assert.Equal(t, v1beta1.ControlSeverity{}, actual["C-MISSING"].Severity)
 	})
@@ -233,10 +233,10 @@ func TestGetControlsMapFromResult_RecoversMissingAssociationsFromSummary(t *test
 
 	actual := getControlsMapFromResult(context.Background(), &resourcesresults.Result{
 		ResourceID: resourceID,
-	}, reportsummary.ControlSummaries{
+	}, &reportsummary.SummaryDetails{Controls: reportsummary.ControlSummaries{
 		"C-001": failedControl,
 		"C-002": otherControl,
-	})
+	}})
 
 	if assert.Len(t, actual, 1) {
 		control := actual["C-001"]
@@ -270,7 +270,7 @@ func TestGetControlsMapFromResult_PrefersDetailedAssociationOverSummaryFallback(
 				Status: apis.StatusPassed,
 			}},
 		}},
-	}, reportsummary.ControlSummaries{"C-001": controlSummary})
+	}, &reportsummary.SummaryDetails{Controls: reportsummary.ControlSummaries{"C-001": controlSummary}})
 
 	if assert.Contains(t, actual, "C-001") {
 		control := actual["C-001"]
@@ -1446,6 +1446,34 @@ func TestMergeWorkloadConfigurationScanSummarySpec(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got := mergeWorkloadConfigurationScanSummarySpec(tt.existing, tt.new)
 			assert.Equal(t, tt.expected, got.Controls)
+		})
+	}
+}
+
+func TestGetControlsMapFrameworkScoped(t *testing.T) {
+	for _, dual := range []bool{false, true} {
+		name := "single"
+		if dual {
+			name = "dual"
+		}
+		t.Run(name, func(t *testing.T) {
+			summary := reportsummary.SummaryDetails{Controls: reportsummary.ControlSummaries{"C-0034": {}}, Frameworks: []reportsummary.FrameworkSummary{{Name: "NSA", Controls: reportsummary.ControlSummaries{"C-0034": {}}}}}
+			if dual {
+				summary.Frameworks = append(summary.Frameworks, reportsummary.FrameworkSummary{Name: "MITRE", Controls: reportsummary.ControlSummaries{"C-0034": {}}})
+			}
+			result := resourcesresults.Result{ResourceID: "pod", AssociatedControls: []resourcesresults.ResourceAssociatedControl{{ControlID: "C-0034", Status: apis.StatusInfo{InnerStatus: apis.StatusFailed}, ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{{Name: "R1", Status: apis.StatusFailed, Exception: []armotypes.PostureExceptionPolicy{{PosturePolicies: []armotypes.PosturePolicy{{FrameworkName: "NSA", ControlID: "C-0034", RuleName: "R1"}}}}}}}}}
+			control := getControlsMapFromResult(context.Background(), &result, &summary)["C-0034"]
+			expected := apis.StatusPassed
+			if dual {
+				expected = apis.StatusFailed
+			}
+			assert.Equal(t, string(expected), control.Status.Status)
+			assert.Equal(t, string(apis.SubStatusException), control.Status.SubStatus)
+			if assert.Len(t, control.Rules, 1) {
+				assert.Equal(t, string(expected), control.Rules[0].Status.Status)
+				assert.Equal(t, string(apis.SubStatusException), control.Rules[0].Status.SubStatus)
+			}
+			assert.Equal(t, apis.StatusFailed, result.AssociatedControls[0].ResourceAssociatedRules[0].Status)
 		})
 	}
 }

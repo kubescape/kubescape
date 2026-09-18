@@ -127,7 +127,7 @@ func (cp *CsvPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OP
 				severity = "Unknown"
 			}
 
-			status := string(assocCtrl.GetStatus(nil).Status())
+			status := string(cautils.ControlStatus(&finalizedReport.SummaryDetails, &assocCtrl.ResourceAssociatedControl).Status())
 			if status == "" {
 				status = "unknown"
 			}
@@ -135,7 +135,7 @@ func (cp *CsvPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OP
 			failedPaths := ""
 			fixPaths := ""
 			if hasResult {
-				failedPaths, fixPaths = csvControlPaths(resourceResult, ctrlID, resKind, cp.showSecrets)
+				failedPaths, fixPaths = csvControlPaths(resourceResult, ctrlID, resKind, cp.showSecrets, &finalizedReport.SummaryDetails)
 			}
 
 			remediation := ""
@@ -191,15 +191,17 @@ func (cp *CsvPrinter) CloseWriter() error {
 // silently skip that check and only catch a value that also happens to
 // match a known credential-shaped field name -- failing closed here instead
 // means an unresolvable resource never leaks its fix value by accident.
-func csvControlPaths(result resourcesresults.Result, controlID, kind string, showSecrets bool) (failedPaths, fixPaths string) {
+func csvControlPaths(result resourcesresults.Result, controlID, kind string, showSecrets bool, summary *reportsummary.SummaryDetails) (failedPaths, fixPaths string) {
 	for i := range result.AssociatedControls {
 		if result.AssociatedControls[i].GetID() != controlID {
 			continue
 		}
+		control := result.AssociatedControls[i]
+		control = cautils.FailedRules(summary, control)
 		var failed, fix []string
-		for j := range result.AssociatedControls[i].ResourceAssociatedRules {
-			for k := range result.AssociatedControls[i].ResourceAssociatedRules[j].Paths {
-				p := result.AssociatedControls[i].ResourceAssociatedRules[j].Paths[k]
+		for j := range control.ResourceAssociatedRules {
+			for k := range control.ResourceAssociatedRules[j].Paths {
+				p := control.ResourceAssociatedRules[j].Paths[k]
 				if p.ReviewPath != "" {
 					failed = append(failed, p.ReviewPath)
 				}

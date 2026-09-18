@@ -179,7 +179,7 @@ func (hp *HtmlPrinter) Score(score float32) {
 func buildResourceTableView(opaSessionObj *cautils.OPASessionObj, showSecrets bool) ResourceTableView {
 	resourceTableView := make(ResourceTableView, 0)
 	for resourceID, result := range opaSessionObj.ResourcesResult {
-		if result.GetStatus(nil).IsFailed() {
+		if cautils.ResourceStatus(&opaSessionObj.Report.SummaryDetails, &result).IsFailed() {
 			resource, ok := opaSessionObj.GetResource(resourceID)
 			if !ok || resource == nil {
 				logger.L().Debug("resource missing from AllResources, skipping",
@@ -208,12 +208,12 @@ func buildResourceControlResult(resourceControl resourcesresults.ResourceAssocia
 func buildResourceControlResultTable(resourceControls []resourcesresults.ResourceAssociatedControl, summaryDetails *reportsummary.SummaryDetails, resource workloadinterface.IMetadata, showSecrets bool) []ResourceControlResult {
 	var ctlResults []ResourceControlResult
 	for _, resourceControl := range resourceControls {
-		if resourceControl.GetStatus(nil).IsFailed() {
+		if cautils.ControlStatus(summaryDetails, &resourceControl).IsFailed() {
 			control := summaryDetails.Controls.GetControl(reportsummary.EControlCriteriaID, resourceControl.GetID())
 			if control == nil {
 				continue
 			}
-			ctlResult := buildResourceControlResult(resourceControl, control, resource, showSecrets)
+			ctlResult := buildResourceControlResult(cautils.FailedRules(summaryDetails, resourceControl), control, resource, showSecrets)
 
 			ctlResults = append(ctlResults, ctlResult)
 		}
