@@ -17,7 +17,6 @@ import (
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
-	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 )
 
 const (
@@ -186,7 +185,7 @@ func collectFailures(ctx context.Context, opaSessionObj *cautils.OPASessionObj) 
 	for resourceID, result := range opaSessionObj.ResourcesResult {
 		resource, ok := opaSessionObj.AllResources[resourceID]
 		if !ok || resource == nil {
-			if hasFailedControl(result) {
+			if cautils.ResourceStatus(&opaSessionObj.Report.SummaryDetails, &result).IsFailed() {
 				logger.L().Ctx(ctx).Warning("skipping failed resource with no scanned object; its findings are not in the baseline",
 					helpers.String("resourceID", resourceID))
 			}
@@ -200,7 +199,7 @@ func collectFailures(ctx context.Context, opaSessionObj *cautils.OPASessionObj) 
 			path:      sourcePath(resource),
 		}
 		if key.kind == "" || key.name == "" {
-			if hasFailedControl(result) {
+			if cautils.ResourceStatus(&opaSessionObj.Report.SummaryDetails, &result).IsFailed() {
 				logger.L().Ctx(ctx).Warning("skipping failed resource with no kind or name; its findings are not in the baseline",
 					helpers.String("resourceID", resourceID))
 			}
@@ -209,7 +208,7 @@ func collectFailures(ctx context.Context, opaSessionObj *cautils.OPASessionObj) 
 
 		for i := range result.AssociatedControls {
 			control := &result.AssociatedControls[i]
-			if control.GetStatus(nil).Status() != apis.StatusFailed {
+			if cautils.ControlStatus(&opaSessionObj.Report.SummaryDetails, control).Status() != apis.StatusFailed {
 				continue
 			}
 			if _, ok := failures[control.ControlID]; !ok {
@@ -220,15 +219,6 @@ func collectFailures(ctx context.Context, opaSessionObj *cautils.OPASessionObj) 
 	}
 
 	return failures
-}
-
-func hasFailedControl(result resourcesresults.Result) bool {
-	for i := range result.AssociatedControls {
-		if result.AssociatedControls[i].GetStatus(nil).Status() == apis.StatusFailed {
-			return true
-		}
-	}
-	return false
 }
 
 // sourcePath returns the manifest a locally scanned resource was read from.

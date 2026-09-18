@@ -96,7 +96,7 @@ func (pp *PrettyPrinter) ActionPrint(_ context.Context, opaSessionObj *cautils.O
 
 		switch pp.viewType {
 		case cautils.ControlViewType:
-			pp.printResults(&opaSessionObj.Report.SummaryDetails.Controls, opaSessionObj.AllResources, opaSessionObj.ResourcesResult, sortedControlIDs)
+			pp.printResults(&opaSessionObj.Report.SummaryDetails.Controls, opaSessionObj.AllResources, opaSessionObj.ResourcesResult, sortedControlIDs, &opaSessionObj.Report.SummaryDetails)
 		case cautils.ResourceViewType:
 			// The resource table is the one place that already reads
 			// showEvidence (see generateResourceRows), so gating it on
@@ -201,12 +201,12 @@ func (pp *PrettyPrinter) SetWriter(ctx context.Context, outputFile string) error
 func (pp *PrettyPrinter) Score(_ float32) {
 }
 
-func (pp *PrettyPrinter) printResults(controls *reportsummary.ControlSummaries, allResources map[string]workloadinterface.IMetadata, resourcesResult map[string]resourcesresults.Result, sortedControlIDs [][]string) {
+func (pp *PrettyPrinter) printResults(controls *reportsummary.ControlSummaries, allResources map[string]workloadinterface.IMetadata, resourcesResult map[string]resourcesresults.Result, sortedControlIDs [][]string, summary *reportsummary.SummaryDetails) {
 	for _, sortedControlID := range slices.Backward(sortedControlIDs) {
 		for _, c := range sortedControlID {
 			controlSummary := controls.GetControl(reportsummary.EControlCriteriaID, c) //  summaryDetails.Controls ListControls().All() Controls.GetControl(ca)
 			pp.printTitle(controlSummary)
-			pp.printResources(controlSummary, allResources, resourcesResult)
+			pp.printResources(controlSummary, allResources, resourcesResult, summary)
 			pp.printSummary(controlSummary)
 		}
 	}
@@ -245,7 +245,7 @@ func (prettyPrinter *PrettyPrinter) printTitle(controlSummary reportsummary.ICon
 	}
 }
 
-func (pp *PrettyPrinter) printResources(controlSummary reportsummary.IControlSummary, allResources map[string]workloadinterface.IMetadata, resourcesResult map[string]resourcesresults.Result) {
+func (pp *PrettyPrinter) printResources(controlSummary reportsummary.IControlSummary, allResources map[string]workloadinterface.IMetadata, resourcesResult map[string]resourcesresults.Result, summary *reportsummary.SummaryDetails) {
 
 	workloadsSummary := listResultSummary(controlSummary, allResources)
 	// --show-evidence asks for the evidence, so it enables the evidence on its
@@ -254,7 +254,7 @@ func (pp *PrettyPrinter) printResources(controlSummary reportsummary.IControlSum
 	// then never consulted on this path, so `kubescape scan -E --view control`
 	// printed exactly what a bare scan printed.
 	if pp.verboseMode || pp.showEvidence {
-		attachAssistedRemediation(workloadsSummary, controlSummary.GetID(), resourcesResult, pp.showSecrets)
+		attachAssistedRemediation(workloadsSummary, controlSummary.GetID(), resourcesResult, pp.showSecrets, summary)
 	}
 
 	failedWorkloads := groupByNamespaceOrKind(workloadsSummary, workloadSummaryFailed)
@@ -284,7 +284,7 @@ func (pp *PrettyPrinter) printResources(controlSummary reportsummary.IControlSum
 
 }
 
-func attachAssistedRemediation(workloads []WorkloadSummary, controlID string, resourcesResult map[string]resourcesresults.Result, showSecrets bool) {
+func attachAssistedRemediation(workloads []WorkloadSummary, controlID string, resourcesResult map[string]resourcesresults.Result, showSecrets bool, summary *reportsummary.SummaryDetails) {
 	for i := range workloads {
 		if workloads[i].status != apis.StatusFailed {
 			continue
@@ -297,10 +297,11 @@ func attachAssistedRemediation(workloads []WorkloadSummary, controlID string, re
 			if result.AssociatedControls[j].GetID() != controlID {
 				continue
 			}
-			if !result.AssociatedControls[j].GetStatus(nil).IsFailed() {
+			if !cautils.ControlStatus(summary, &result.AssociatedControls[j]).IsFailed() {
 				continue
 			}
-			paths := AssistedRemediationPathsWithCurrentValuesFiltered(&result.AssociatedControls[j], workloads[i].resource, showSecrets)
+			evidence := cautils.FailedRules(summary, result.AssociatedControls[j])
+			paths := AssistedRemediationPathsWithCurrentValuesFiltered(&evidence, workloads[i].resource, showSecrets)
 			if len(paths) > 0 {
 				workloads[i].assistedRemediation = strings.Join(paths, ", ")
 			}

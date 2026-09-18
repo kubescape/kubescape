@@ -43,6 +43,7 @@ func ReportV2ToV1(opaSessionObj *OPASessionObj) *reporthandling.PostureReport {
 }
 
 func controlReportV2ToV1(opaSessionObj *OPASessionObj, frameworkName string, controls map[string]reportsummary.ControlSummary) []reporthandling.ControlReport {
+	view := reportsummary.SummaryDetails{Frameworks: []reportsummary.FrameworkSummary{{Name: frameworkName, Controls: controls}}}
 	controlReports := []reporthandling.ControlReport{}
 	for controlID, crv2 := range controls {
 		crv1 := reporthandling.ControlReport{}
@@ -72,7 +73,7 @@ func controlReportV2ToV1(opaSessionObj *OPASessionObj, frameworkName string, con
 					}
 
 					rulev1 := rulesv1[rulev2.GetName()]
-					status := rulev2.GetStatus(nil)
+					status := RuleStatus(&view, controlID, &rulev2)
 
 					if status.IsFailed() {
 

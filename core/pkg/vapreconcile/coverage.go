@@ -347,11 +347,20 @@ func BuildCoverage(
 // CollectFailingResourcesByControl derives, for every control, the identity
 // (ID, namespace, labels) of each resource that failed it -- the input
 // BuildCoverage needs to check per-resource binding scope, since neither
-// ResourcesResult nor the OPA session tracks that on its own.
+// ResourcesResult nor the OPA session tracks that on its own. The first optional
+// status view supplies the caller's framework context; when omitted or nil,
+// existing callers retain the cached, framework-agnostic status behavior.
 func CollectFailingResourcesByControl(
 	resourcesResult map[string]resourcesresults.Result,
 	allResources map[string]workloadinterface.IMetadata,
+	statusViews ...func(*resourcesresults.ResourceAssociatedControl) bool,
 ) map[string][]ResourceInfo {
+	isFailed := func(control *resourcesresults.ResourceAssociatedControl) bool {
+		return control.GetStatus(nil).IsFailed()
+	}
+	if len(statusViews) > 0 && statusViews[0] != nil {
+		isFailed = statusViews[0]
+	}
 	byControl := make(map[string][]ResourceInfo)
 	for resourceID, result := range resourcesResult {
 		resource, ok := allResources[resourceID]
@@ -366,7 +375,7 @@ func CollectFailingResourcesByControl(
 			Labels:     resourceLabels(resource),
 		}
 		for _, ac := range result.AssociatedControls {
-			if !ac.GetStatus(nil).IsFailed() {
+			if !isFailed(&ac) {
 				continue
 			}
 			byControl[ac.ControlID] = append(byControl[ac.ControlID], info)

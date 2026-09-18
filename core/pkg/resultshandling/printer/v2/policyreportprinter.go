@@ -180,7 +180,7 @@ func buildPolicyReports(opaSessionObj *cautils.OPASessionObj) []policyReport {
 
 		for _, assocCtrl := range result.AssociatedControls {
 			ac := assocCtrl
-			status := ac.GetStatus(nil)
+			status := cautils.ControlStatus(&opaSessionObj.Report.SummaryDetails, &ac)
 
 			if status.Status() == "" {
 				continue
