@@ -304,7 +304,7 @@ func (gp *GitLabSASTPrinter) printConfigurationScan(ctx context.Context, opaSess
 		Vulnerabilities: []gitLabVulnerability{},
 	}
 
-	basePath := getBasePathFromMetadata(*opaSessionObj)
+	basePath := getBasePathFromMetadata(opaSessionObj)
 
 	var withoutFilePath, outsideRepository int
 	failed := make([]scannedResource, 0, len(opaSessionObj.ResourcesResult))

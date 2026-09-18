@@ -105,7 +105,7 @@ The implementation reduces peak evaluation memory by:
 
 The collection peak is bounded (Phase 2): all queryable GVRs are traversed once, with namespaced resources written directly to a scan-scoped on-disk partition store (`partitionstore.DiskStore`). The resident batch (cluster-scoped resources) remains in memory and is emitted first, while each namespace batch is loaded, evaluated, and purged from disk one at a time. The namespaced collection contribution and store metadata stay flat at ~1-2 MB regardless of cluster size, so total collector memory comprises this flat baseline plus the resident batch (verified across 5k, 20k, and 50k synthetic clusters with 50-200 resident nodes in `BenchmarkStreamingCollectorMemory`), rather than scaling with the number of namespaced objects.
 
-Downstream retention in `sessionObj.AllResources` across subsequent stages (exceptions, printers, image scanning) is a separate boundary and will be decoupled in Phases 3 and 4.
+Downstream retention in `sessionObj.AllResources` across subsequent stages (exceptions, printers, image scanning) is a separate boundary; Phase 3a introduces the `ResourceCatalog` accessor abstraction while retention remains unbounded, before decoupling retention in later phases.
 
 ### Partition Store & Storage Requirements
 

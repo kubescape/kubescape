@@ -892,7 +892,7 @@ func TestPrintConfigurationScan_SkipsResourcesWithoutRelativePath(t *testing.T) 
 			}
 
 			// the base path is non-empty, so only the missing relative path can skip this finding
-			require.NotEmpty(t, getBasePathFromMetadata(*session))
+			require.NotEmpty(t, getBasePathFromMetadata(session))
 
 			tmp, err := os.CreateTemp("", "sarif-norelpath-*.sarif")
 			require.NoError(t, err)
@@ -1064,12 +1064,12 @@ func TestGetBasePathFromMetadata(t *testing.T) {
 
 	tests := []struct {
 		name    string
-		session cautils.OPASessionObj
+		session *cautils.OPASessionObj
 		want    string
 	}{
 		{
 			name: "GitLocal",
-			session: cautils.OPASessionObj{
+			session: &cautils.OPASessionObj{
 				Metadata: &reporthandlingv2.Metadata{
 					ScanMetadata: reporthandlingv2.ScanMetadata{
 						ScanningTarget: reporthandlingv2.GitLocal,
@@ -1085,7 +1085,7 @@ func TestGetBasePathFromMetadata(t *testing.T) {
 		},
 		{
 			name: "GitLocal without repository metadata",
-			session: cautils.OPASessionObj{
+			session: &cautils.OPASessionObj{
 				Metadata: &reporthandlingv2.Metadata{
 					ScanMetadata: reporthandlingv2.ScanMetadata{
 						ScanningTarget: reporthandlingv2.GitLocal,
@@ -1096,12 +1096,12 @@ func TestGetBasePathFromMetadata(t *testing.T) {
 		},
 		{
 			name:    "missing metadata",
-			session: cautils.OPASessionObj{},
+			session: &cautils.OPASessionObj{},
 			want:    "",
 		},
 		{
 			name: "Directory",
-			session: cautils.OPASessionObj{
+			session: &cautils.OPASessionObj{
 				Metadata: &reporthandlingv2.Metadata{
 					ScanMetadata: reporthandlingv2.ScanMetadata{
 						ScanningTarget: reporthandlingv2.Directory,
@@ -1117,7 +1117,7 @@ func TestGetBasePathFromMetadata(t *testing.T) {
 		},
 		{
 			name: "File",
-			session: cautils.OPASessionObj{
+			session: &cautils.OPASessionObj{
 				Metadata: &reporthandlingv2.Metadata{
 					ScanMetadata: reporthandlingv2.ScanMetadata{
 						ScanningTarget: reporthandlingv2.File,
@@ -1133,7 +1133,7 @@ func TestGetBasePathFromMetadata(t *testing.T) {
 		},
 		{
 			name: "File without metadata",
-			session: cautils.OPASessionObj{
+			session: &cautils.OPASessionObj{
 				Metadata: &reporthandlingv2.Metadata{
 					ScanMetadata: reporthandlingv2.ScanMetadata{
 						ScanningTarget: reporthandlingv2.File,
@@ -1144,7 +1144,7 @@ func TestGetBasePathFromMetadata(t *testing.T) {
 		},
 		{
 			name: "Cluster",
-			session: cautils.OPASessionObj{
+			session: &cautils.OPASessionObj{
 				Metadata: &reporthandlingv2.Metadata{
 					ScanMetadata: reporthandlingv2.ScanMetadata{
 						ScanningTarget: reporthandlingv2.Cluster,
