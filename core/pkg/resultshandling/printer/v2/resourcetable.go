@@ -129,6 +129,10 @@ func (prettyPrinter *PrettyPrinter) resourceTable(opaSessionObj *cautils.OPASess
 //
 //   - --show-evidence is set. Without it no evidence is printed at all, so
 //     opening and decoding manifests would be work whose result is discarded.
+//   - The session's source paths are real. --hide and --encrypt replace them
+//     with pseudonyms, so every open would fail on a path that never existed,
+//     warning per manifest about a lookup that was never possible. The scan
+//     says once, up front, that lines are unavailable.
 //   - The resource came from a file. Cluster-scanned resources have no manifest
 //     to point into, and asking the cache for an empty path would try to open
 //     "", fail, and warn once per scan about something that was never possible.
@@ -138,7 +142,7 @@ func (prettyPrinter *PrettyPrinter) resourceTable(opaSessionObj *cautils.OPASess
 //
 // A nil return is the caller's signal to print paths exactly as before.
 func (prettyPrinter *PrettyPrinter) pathLineResolver(opaSessionObj *cautils.OPASessionObj, caches *manifestCache, scanned scannedResource) func(string) (int, bool) {
-	if !prettyPrinter.showEvidence || scanned.absPath == "" {
+	if !prettyPrinter.showEvidence || scanned.absPath == "" || opaSessionObj.SourcePathsAnonymized {
 		return nil
 	}
 

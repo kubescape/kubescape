@@ -100,6 +100,13 @@ func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo, policyIdenti
 		}
 	}
 
+	// Said before the scan runs rather than alongside the results: what these
+	// combinations cost is a gap in the evidence column, and a gap is only
+	// noticeable if the user was told to expect it.
+	for _, warning := range scanInfo.EvidenceFlagWarnings() {
+		logger.L().Ctx(ctx).Warning(warning)
+	}
+
 	// ================== version testing ======================================
 	// Skip version check in air-gapped mode (when keep-local flag is set)
 	if !scanInfo.Local {
