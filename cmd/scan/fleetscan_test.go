@@ -1313,3 +1313,147 @@ func TestValidateKubeContextsSupported_FleetReportRequiresKubeContexts(t *testin
 
 	assert.NoError(t, validateKubeContextsSupported(cmd, &cautils.ScanInfo{}), "neither flag set is the ordinary single-cluster scan")
 }
+
+func TestFleetScan_FleetReportCarriesTheDivergence(t *testing.T) {
+	dir := t.TempDir()
+	fleetReport := filepath.Join(dir, "fleet.json")
+	ks := &fleetOutcomeKubescape{outcomes: map[string]func() (*resultshandling.ResultsHandler, error){
+		"prod": func() (*resultshandling.ResultsHandler, error) {
+			return resultsWithControl(apis.StatusPassed, 100), nil
+		},
+		"staging": func() (*resultshandling.ResultsHandler, error) { return resultsWithControl(apis.StatusFailed, 40), nil },
+	}}
+	scanInfo := cautils.ScanInfo{
+		KubeContexts: []string{"prod", "staging"},
+		Output:       filepath.Join(dir, "report.json"),
+		FleetReport:  fleetReport,
+		ScanType:     cautils.ScanTypeCluster,
+	}
+
+	require.NoError(t, fleetScan(scanInfo, ks, nil, scanContextOnlyRunner))
+
+	report := fleetReportFromFile(t, fleetReport)
+	require.Len(t, report.Divergence.Controls, 1)
+	control := report.Divergence.Controls[0]
+	assert.Equal(t, "C-0016", control.ControlID)
+	assert.True(t, control.PostureDiverges)
+	assert.Equal(t, []string{"prod"}, control.Passed)
+	assert.Equal(t, []string{"staging"}, control.Failed)
+	assert.Empty(t, report.Divergence.ReferenceCluster, "none was asked for")
+}
+
+func TestFleetScan_DivergenceUsesTheReferenceCluster(t *testing.T) {
+	dir := t.TempDir()
+	fleetReport := filepath.Join(dir, "fleet.json")
+	ks := &fleetOutcomeKubescape{outcomes: map[string]func() (*resultshandling.ResultsHandler, error){
+		"prod": func() (*resultshandling.ResultsHandler, error) {
+			return resultsWithControl(apis.StatusPassed, 100), nil
+		},
+		"staging": func() (*resultshandling.ResultsHandler, error) { return resultsWithControl(apis.StatusFailed, 40), nil },
+	}}
+	scanInfo := cautils.ScanInfo{
+		KubeContexts:     []string{"prod", "staging"},
+		Output:           filepath.Join(dir, "report.json"),
+		FleetReport:      fleetReport,
+		ReferenceCluster: "prod",
+		ScanType:         cautils.ScanTypeCluster,
+	}
+
+	require.NoError(t, fleetScan(scanInfo, ks, nil, scanContextOnlyRunner))
+
+	report := fleetReportFromFile(t, fleetReport)
+	assert.Equal(t, "prod", report.Divergence.ReferenceCluster)
+	assert.False(t, report.Divergence.ReferenceUnavailable)
+	require.Len(t, report.Divergence.Controls, 1)
+	assert.Equal(t, fleet.CellPassed, report.Divergence.Controls[0].ReferenceStatus,
+		"the reference's own verdict is what the others are read against")
+}
+
+func TestFleetScan_ReferenceClusterThatCouldNotBeScanned(t *testing.T) {
+	dir := t.TempDir()
+	fleetReport := filepath.Join(dir, "fleet.json")
+	ks := &fleetOutcomeKubescape{outcomes: map[string]func() (*resultshandling.ResultsHandler, error){
+		"golden": func() (*resultshandling.ResultsHandler, error) {
+			return nil, fmt.Errorf("golden: %w", core.ErrClusterConnection)
+		},
+		"prod": func() (*resultshandling.ResultsHandler, error) {
+			return resultsWithControl(apis.StatusPassed, 100), nil
+		},
+		"staging": func() (*resultshandling.ResultsHandler, error) { return resultsWithControl(apis.StatusFailed, 40), nil },
+	}}
+	scanInfo := cautils.ScanInfo{
+		KubeContexts:     []string{"golden", "prod", "staging"},
+		Output:           filepath.Join(dir, "report.json"),
+		FleetReport:      fleetReport,
+		ReferenceCluster: "golden",
+		ScanType:         cautils.ScanTypeCluster,
+	}
+
+	require.Error(t, fleetScan(scanInfo, ks, nil, scanContextOnlyRunner), "golden was unreachable")
+
+	report := fleetReportFromFile(t, fleetReport)
+	assert.True(t, report.Divergence.ReferenceUnavailable,
+		"a reference nobody could reach has to be called out, not quietly ignored")
+	require.Len(t, report.Divergence.Controls, 1, "the other clusters still disagree")
+	assert.Empty(t, report.Divergence.Controls[0].ReferenceStatus)
+}
+
+func TestValidateReferenceCluster(t *testing.T) {
+	tests := []struct {
+		name     string
+		scanInfo cautils.ScanInfo
+		wantErr  string
+	}{
+		{
+			name:     "not asked for",
+			scanInfo: cautils.ScanInfo{KubeContexts: []string{"prod"}, FleetReport: "fleet.json"},
+		},
+		{
+			name:     "names a scanned context",
+			scanInfo: cautils.ScanInfo{KubeContexts: []string{"prod", "staging"}, FleetReport: "fleet.json", ReferenceCluster: "prod"},
+		},
+		{
+			name:     "without a fleet report it would change nothing",
+			scanInfo: cautils.ScanInfo{KubeContexts: []string{"prod"}, ReferenceCluster: "prod"},
+			wantErr:  "requires --fleet-report",
+		},
+		{
+			name:     "a context the run is not scanning is almost always a typo",
+			scanInfo: cautils.ScanInfo{KubeContexts: []string{"prod", "staging"}, FleetReport: "fleet.json", ReferenceCluster: "prodd"},
+			wantErr:  "is not one of --kube-contexts",
+		},
+		{
+			name:     "blank",
+			scanInfo: cautils.ScanInfo{KubeContexts: []string{"prod"}, FleetReport: "fleet.json", ReferenceCluster: "  "},
+			wantErr:  "is blank",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateReferenceCluster(&tt.scanInfo)
+			if tt.wantErr == "" {
+				assert.NoError(t, err)
+				return
+			}
+			require.ErrorContains(t, err, tt.wantErr)
+		})
+	}
+}
+
+func TestFleetScan_RejectsBadReferenceClusterBeforeScanning(t *testing.T) {
+	dir := t.TempDir()
+	ks := &fleetTrackingKubescape{}
+	scanInfo := cautils.ScanInfo{
+		KubeContexts:     []string{"prod", "staging"},
+		Output:           filepath.Join(dir, "report.json"),
+		FleetReport:      filepath.Join(dir, "fleet.json"),
+		ReferenceCluster: "prodd",
+		ScanType:         cautils.ScanTypeCluster,
+	}
+
+	err := fleetScan(scanInfo, ks, nil, scanContextOnlyRunner)
+
+	require.ErrorContains(t, err, "is not one of --kube-contexts")
+	assert.Empty(t, ks.callsOutputs, "a typo is a configuration error and must be caught before any cluster is touched")
+}

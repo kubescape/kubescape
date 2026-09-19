@@ -110,17 +110,32 @@
 // standing on the strength of nothing having been checked, which is the same
 // mistake, one level up, that keeping skipped apart from not-evaluated avoids.
 //
+// # Divergence
+//
+// BuildDivergence keeps only the controls the clusters disagree on, because a
+// grid of thirty clusters agreeing everywhere sends nobody anywhere. It reads
+// the matrix rather than the results, so what it reports and what the matrix
+// shows cannot drift apart.
+//
+// It separates two things a grid makes look alike. Clusters reaching different
+// verdicts is a real difference worth investigating. A cluster that could not
+// evaluate a control at all is a gap in what was measured and says nothing
+// about posture in either direction. That is the same distinction CellStatus
+// draws between skipped and not-evaluated, one level up, and it is reported
+// through PostureDiverges and CoverageGap rather than left to the reader.
+//
+// An optional reference cluster names the one the others are read against, for
+// the common case of a fleet with a cluster its operators already trust.
+// Naming one does not change which controls appear, since the reference is one
+// of the clusters and they either disagree or they do not. What it adds is the
+// reference's own verdict on each row.
+//
+// The word drift is deliberately avoided. Since --baseline landed it means
+// comparing one cluster against a report saved earlier, which is a question
+// about time rather than about the fleet, and reusing it would leave two
+// different comparisons sharing a name.
+//
 // # Not here yet
-//
-//   - Cross-cluster divergence, which compares each control's cell between
-//     clusters and reports a difference in posture separately from a gap in
-//     what was measured. It reads the matrix built here, so the matrix settles
-//     first.
-//
-//     Deliberately not called drift. Since --baseline landed, drift means
-//     comparing one cluster against a report saved earlier, which is a
-//     question about time rather than about the fleet. Reusing the word would
-//     leave two different comparisons sharing a name.
 //
 //   - Printers for the aggregate. The wiring exists: --fleet-report on a
 //     --kube-contexts scan writes the FleetReport as JSON, and that is the
