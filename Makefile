@@ -16,7 +16,7 @@ test:
 # it stays reproducible instead of hand-maintained. Bump CEL_LIBRARY_VERSION to
 # vendor a newer bundle.
 CEL_VAPDATA_DIR := core/pkg/opaprocessor/cel/vapdata
-CEL_LIBRARY_VERSION := v0.14
+CEL_LIBRARY_VERSION := v0.15
 CEL_LIBRARY_BASE_URL := https://github.com/kubescape/cel-admission-library/releases/download/$(CEL_LIBRARY_VERSION)
 CEL_VAP_FILES := \
 	kubescape-validating-admission-policies.yaml \
@@ -33,9 +33,9 @@ CEL_VAP_FILES := \
 # `make sync-vap-digests`, check the values against the upstream release, then
 # paste them below in the same commit as the version bump.
 CEL_VAP_DIGESTS := \
-	kubescape-validating-admission-policies.yaml=fac9c82f348da6b68a2a57b13c788227cd61238a7d310b6f94417359641d152c \
-	basic-control-configuration.yaml=7fc2194b4a646ba110fbf43b51f7c0eb605f5ae4af1ba9fb66339834a98ca284 \
-	policy-configuration-definition.yaml=f1e1d0bda1e82ef880223a429fc5ecf99c957b5069b1ec759a9b65ab8620c7ef
+	kubescape-validating-admission-policies.yaml=ce32ba2e8e23e600125d72ffc080d5b63797f8a6aabeb057e094b4c4b1ec0d22 \
+	basic-control-configuration.yaml=e6ff3c18cfb60d8eaf463049dbfea9eae69891d32304193df727cebad2f8a285 \
+	policy-configuration-definition.yaml=04c872af48fa6d8c43b7969b742b32a9438ce1d77558f4c3efe50963a365df5d
 
 # sha256sum on GNU coreutils, shasum on macOS; both print "<digest>  <file>".
 # Each branch pipes its own command into awk so a missing tool surfaces as a

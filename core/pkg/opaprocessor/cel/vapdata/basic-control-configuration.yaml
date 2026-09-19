@@ -3,6 +3,8 @@ kind: ControlConfiguration
 metadata:
   name: basic-control-configuration
 settings:
+  hardenedSandboxRuntimeClasses:
+  - gvisor
   # Set this to eks, aks or gke to make C-0020 check that cloud's credential
   # paths. An empty value means "unknown cloud", so C-0020 checks none of them.
   cloudProvider: ""
@@ -129,4 +131,3 @@ settings:
   - ca-webhook
   - ca-websocket
   - clair-clair
-

@@ -153,10 +153,13 @@ var canonicalKinds = map[string]string{
 	"replicationcontrollers":   "ReplicationController",
 	"rolebindings":             "RoleBinding",
 	"roles":                    "Role",
+	"sandboxes":                "Sandbox",
+	"sandboxtemplates":         "SandboxTemplate",
 	"secrets":                  "Secret",
 	"serviceaccounts":          "ServiceAccount",
 	"services":                 "Service",
 	"statefulsets":             "StatefulSet",
+	"workerpools":              "WorkerPool",
 }
 
 // TestVAPAppliesToCoversEveryBundleKind walks every policy in the embedded bundle
