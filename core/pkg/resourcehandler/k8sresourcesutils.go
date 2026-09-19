@@ -198,5 +198,5 @@ func getWorkloadFromScanObject(resource *objectsenvelopes.ScanObject) (workloadi
 	if k8sinterface.IsTypeWorkload(obj) {
 		return workloadinterface.NewWorkloadObj(obj), nil
 	}
-	return nil, fmt.Errorf("resource %s is not a valid workload", getReadableID(resource))
+	return nil, fmt.Errorf("resource %s is not a valid workload", k8sinterface.GetReadableID(resource))
 }
