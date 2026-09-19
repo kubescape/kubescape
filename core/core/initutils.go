@@ -185,7 +185,6 @@ func getResourceHandler(ctx context.Context, scanInfo *cautils.ScanInfo, tenantC
 //
 // A noop sensor is returned whenever host scanning is disabled or an error prevented the scanner to properly deploy.
 func getHostSensorHandler(ctx context.Context, scanInfo *cautils.ScanInfo, k8s *k8sinterface.KubernetesApi) hostsensorutils.IHostSensor {
-	const wantsHostSensorControls = true // defaults to disabling the scanner if not explicitly enabled (TODO(fredbi): should be addressed by injecting ScanInfo defaults)
 	hostSensorVal := scanInfo.HostSensorEnabled.Get()
 
 	switch {
@@ -212,7 +211,7 @@ func getHostSensorHandler(ctx context.Context, scanInfo *cautils.ScanInfo, k8s *
 
 		return hostSensorHandler
 
-	case hostSensorVal == nil && wantsHostSensorControls:
+	case hostSensorVal == nil && scanInfo.HostSensorEnabledDefault != nil && *scanInfo.HostSensorEnabledDefault:
 		// Auto-detect: if node-agent CRDs are available, use them instead of deploying the host-sensor daemonset.
 		hostSensorHandler, err := hostsensorutils.NewHostSensorHandler(k8s, "")
 		if err != nil {
