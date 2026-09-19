@@ -30,9 +30,18 @@ var updateGolden = flag.Bool("update-golden", false, "regenerate the fleet repor
 // fixtures must not be able to describe one. Building both views from the same
 // input makes that impossible by construction rather than by review.
 func newFleetReport() FleetReport {
+	// C-0016 diverges on posture, C-0260 on coverage, so the fixture pins both
+	// kinds of disagreement and every outcome list the wire carries rather than
+	// leaving half the shape unexercised.
 	results := []ClusterResult{
-		scannedCluster("prod", failed("C-0016", "Allow privilege escalation", 18)),
-		scannedCluster("staging", passed("C-0016", "Allow privilege escalation")),
+		scannedCluster("prod",
+			failed("C-0016", "Allow privilege escalation", 18),
+			skipped("C-0260", "Missing network policy"),
+		),
+		scannedCluster("staging",
+			passed("C-0016", "Allow privilege escalation"),
+			notEvaluated("C-0260", "Missing network policy"),
+		),
 		unreachableCluster("dr", "context deadline exceeded"),
 	}
 
@@ -61,7 +70,7 @@ func newFleetReport() FleetReport {
 	}
 	results[1].Coverage.VacuousFrameworks = []string{"MITRE"}
 
-	return FleetReport{
+	report := FleetReport{
 		Metadata: FleetMetadata{
 			GeneratedAt:      time.Date(2026, 8, 14, 9, 30, 0, 0, time.UTC),
 			KubescapeVersion: "v4.0.0",
@@ -76,6 +85,11 @@ func newFleetReport() FleetReport {
 		Compliance:    BuildComplianceRollup(results, 90),
 		ControlMatrix: BuildControlMatrix(results),
 	}
+	// Derived from the matrix rather than assembled separately, so the fixture
+	// cannot describe a disagreement the matrix does not show. prod is the
+	// reference, so the fixture pins a reference verdict as well.
+	report.Divergence = BuildDivergence(report.ControlMatrix, "prod")
+	return report
 }
 
 // requireFleetReportIsSelfConsistent fails unless the report obeys the
@@ -94,6 +108,11 @@ func newFleetReport() FleetReport {
 // every cluster it left out is one the report carries, and no cluster is both
 // counted and excluded. A rollup that disagreed with its own cluster list would
 // be a fleet score nobody could check.
+//
+// The divergence has to agree with them too. Every cluster it names is one the
+// report carries and actually scanned, every row names at least two clusters
+// because one cluster cannot disagree with itself, and a reference it names is
+// either present or reported as unavailable.
 func requireFleetReportIsSelfConsistent(t *testing.T, report *FleetReport) {
 	t.Helper()
 
@@ -126,6 +145,31 @@ func requireFleetReportIsSelfConsistent(t *testing.T, report *FleetReport) {
 				"%q is excluded as unscanned but carries a usable report", excluded.ClusterID)
 		}
 	}
+	for i := range report.Divergence.Controls {
+		control := &report.Divergence.Controls[i]
+		for _, clusters := range [][]string{
+			control.Passed, control.Failed, control.Skipped, control.NotEvaluated,
+		} {
+			for _, clusterID := range clusters {
+				cluster, ok := byID[clusterID]
+				if !assert.True(t, ok,
+					"control %s reports %q as diverging, which is absent from clusters", control.ControlID, clusterID) {
+					continue
+				}
+				assert.True(t, cluster.Scanned(),
+					"control %s reports %q as diverging, which produced no usable report", control.ControlID, clusterID)
+			}
+		}
+		assert.GreaterOrEqual(t,
+			len(control.Passed)+len(control.Failed)+len(control.Skipped)+len(control.NotEvaluated), 2,
+			"control %s is reported as diverging but names fewer than two clusters", control.ControlID)
+	}
+	if reference := report.Divergence.ReferenceCluster; reference != "" {
+		_, ok := byID[reference]
+		assert.True(t, ok || report.Divergence.ReferenceUnavailable,
+			"the divergence names %q as its reference, which is neither in clusters nor reported unavailable", reference)
+	}
+
 	for _, framework := range report.Compliance.Frameworks {
 		assert.LessOrEqual(t, framework.ClustersScored, framework.ClustersReporting,
 			"framework %s cannot be scored in more clusters than reported it", framework.Name)
@@ -245,12 +289,33 @@ func TestFleetReportRoundTrips(t *testing.T) {
 	assert.Equal(t, []string{"staging"}, got.Compliance.Frameworks[0].VacuousIn,
 		"a vacuous framework must survive the wire, or the reason a score was left out is lost")
 
-	require.Len(t, got.ControlMatrix.Controls, 1)
+	require.Len(t, got.ControlMatrix.Controls, 2)
 	row := got.ControlMatrix.Controls[0]
 	assert.Equal(t, "C-0016", row.ControlID)
 	assert.Equal(t, CellFailed, row.ByCluster["prod"].Status)
 	assert.Equal(t, CellPassed, row.ByCluster["staging"].Status)
 	assert.NotContains(t, row.ByCluster, "dr", "an unreachable cluster must not decode a cell")
+
+	require.Len(t, got.Divergence.Controls, 2)
+	assert.Equal(t, "prod", got.Divergence.ReferenceCluster)
+	assert.False(t, got.Divergence.ReferenceUnavailable)
+
+	posture := got.Divergence.Controls[0]
+	assert.Equal(t, "C-0016", posture.ControlID)
+	assert.True(t, posture.PostureDiverges)
+	assert.False(t, posture.CoverageGap)
+	assert.Equal(t, CellFailed, posture.ReferenceStatus)
+	assert.Equal(t, []string{"staging"}, posture.Passed)
+	assert.Equal(t, []string{"prod"}, posture.Failed)
+
+	coverage := got.Divergence.Controls[1]
+	assert.Equal(t, "C-0260", coverage.ControlID)
+	assert.False(t, coverage.PostureDiverges,
+		"a deliberate skip against a control that could not run is not a difference in posture")
+	assert.True(t, coverage.CoverageGap)
+	assert.Equal(t, []string{"prod"}, coverage.Skipped)
+	assert.Equal(t, []string{"staging"}, coverage.NotEvaluated,
+		"the outcome lists must survive the wire, or the reason a control is listed is lost")
 }
 
 // TestClusterResultScanned pins the guard the aggregation dereferences behind.
