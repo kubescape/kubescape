@@ -559,8 +559,122 @@ func matchesKubernetesObjectValue(policyValue, objectValue string) bool {
 	if policyValue == "*" || policyValue == objectValue {
 		return true
 	}
-	return policyValue == "core" && objectValue == ""
+	return (policyValue == "core" && objectValue == "") || (policyValue == "" && objectValue == "core")
 }
+
+// matchesRuleObjects reports whether a resource identified by group, version, resource, and kind
+// matches any RuleMatchObjects block.
+func matchesRuleObjects(group, version, resource, kind string, matchers []reporthandling.RuleMatchObjects) bool {
+	for m := range matchers {
+		mt := &matchers[m]
+		groupMatch := false
+		for _, g := range mt.APIGroups {
+			if matchesKubernetesObjectValue(g, group) {
+				groupMatch = true
+				break
+			}
+		}
+		if !groupMatch {
+			continue
+		}
+
+		versionMatch := false
+		for _, v := range mt.APIVersions {
+			if matchesKubernetesObjectValue(v, version) {
+				versionMatch = true
+				break
+			}
+		}
+		if !versionMatch {
+			continue
+		}
+
+		for _, r := range mt.Resources {
+			if r == "*" || strings.EqualFold(r, resource) || strings.EqualFold(r, kind) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// workloadMatchesRuleObjects reports whether workload wl matches any of matchers.
+func workloadMatchesRuleObjects(wl workloadinterface.IMetadata, matchers []reporthandling.RuleMatchObjects) bool {
+	if wl == nil || len(matchers) == 0 {
+		return false
+	}
+	apiVersion := wl.GetApiVersion()
+	group := ""
+	version := apiVersion
+	if i := strings.IndexByte(apiVersion, '/'); i >= 0 {
+		group = apiVersion[:i]
+		version = apiVersion[i+1:]
+	}
+	return matchesRuleObjects(group, version, "", wl.GetKind(), matchers)
+}
+
+// compileWholeClusterMatchers extracts the union of RuleMatchObjects across all
+// rules and dynamic rules of wholeClusterControlIDs.
+func compileWholeClusterMatchers(policies *cautils.Policies, wholeClusterControlIDs []string) []reporthandling.RuleMatchObjects {
+	if policies == nil || len(wholeClusterControlIDs) == 0 {
+		return nil
+	}
+	var matchers []reporthandling.RuleMatchObjects
+	for _, id := range wholeClusterControlIDs {
+		ctrl, ok := policies.Controls[id]
+		if !ok {
+			continue
+		}
+		for i := range ctrl.Rules {
+			matchers = append(matchers, ctrl.Rules[i].Match...)
+			matchers = append(matchers, ctrl.Rules[i].DynamicMatch...)
+		}
+	}
+	return matchers
+}
+
+// filterProjectedBatch creates a new ResourceBatch containing only the resources
+// matching matchers from sourceK8s, sourceExternal, and sourceAll.
+func filterProjectedBatch(sourceK8s cautils.K8SResources, sourceExternal cautils.ExternalResources, sourceAll map[string]workloadinterface.IMetadata, matchers []reporthandling.RuleMatchObjects) *cautils.ResourceBatch {
+	batch := cautils.NewResourceBatch(cautils.ClusterScope)
+	appendProjectedResources(sourceK8s, sourceExternal, sourceAll, matchers, batch)
+	return batch
+}
+
+// appendProjectedResources filters resources from sourceK8s and sourceExternal against matchers
+// and appends matching entries to target batch.
+func appendProjectedResources(sourceK8s cautils.K8SResources, sourceExternal cautils.ExternalResources, sourceAll map[string]workloadinterface.IMetadata, matchers []reporthandling.RuleMatchObjects, target *cautils.ResourceBatch) {
+	if target == nil || len(matchers) == 0 {
+		return
+	}
+	for key, ids := range sourceK8s {
+		group, version, resource := k8sinterface.StringToResourceGroup(key)
+		for _, id := range ids {
+			obj, ok := sourceAll[id]
+			if !ok || obj == nil {
+				continue
+			}
+			if matchesRuleObjects(group, version, resource, obj.GetKind(), matchers) {
+				target.K8SResources[key] = append(target.K8SResources[key], id)
+				target.AllResources[id] = obj
+			}
+		}
+	}
+	for key, ids := range sourceExternal {
+		group, version, resource := k8sinterface.StringToResourceGroup(key)
+		for _, id := range ids {
+			obj, ok := sourceAll[id]
+			if !ok || obj == nil {
+				continue
+			}
+			if matchesRuleObjects(group, version, resource, obj.GetKind(), matchers) {
+				target.ExternalResources[key] = append(target.ExternalResources[key], id)
+				target.AllResources[id] = obj
+			}
+		}
+	}
+}
+
 func getRuleDependencies(ctx context.Context) (map[string]string, error) {
 	modules := resources.LoadRegoModules()
 	if len(modules) == 0 {
