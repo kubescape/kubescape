@@ -331,9 +331,14 @@ another. A policy that null-guards its access reaches a verdict that may not be 
 one admission would reach. One that selects into `namespaceObject` unguarded gets
 an evaluation error, and under `failurePolicy: Fail` that is reported as a failure,
 so an uncollected Namespace can produce a finding a cluster would not. This is the
-one gap here that is not a safe skip. Nothing in the bundle reads `namespaceObject`
-today, so it is latent. Making it unconditional means guaranteeing Namespace
-collection whenever a loaded policy needs it.
+one gap here that is not a safe skip. It stays latent only because nothing in the
+bundle reads `namespaceObject`, and `TestBundleDoesNotReadNamespaceObject` enforces
+that rather than assuming it: a pin bump that introduces a read fails the build
+instead of quietly changing scan results. Closing it properly takes two parts,
+because they cover different scans. A cluster scan can guarantee Namespace
+collection when a loaded policy needs one. A file scan cannot, since the manifest
+may simply not be there, so an uncollected Namespace has to be classified as an
+offline-only failure that skips rather than reports.
 
 **Only CREATE is modelled.** A policy whose resource rules exclude CREATE is never
 matched offline.
