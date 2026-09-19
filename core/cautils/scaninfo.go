@@ -202,28 +202,97 @@ type ScanInfo struct {
 	clusterContextName        string
 	contextResolved           bool
 	cleanups                  []func()
-	ListingURL                string            //Grype vulnerability database URL
-	SkipDBUpdate              bool              // Do not update the vulnerability database before image scanning
-	FailOnStaleDB             bool              // Fail image scans when the vulnerability DB is older than MaxDBAge (default: warn only)
-	FailOnStaleDBSet          bool              // True when --fail-on-stale-db was explicitly passed (even false); the CLI populates this via Cobra Changed so explicit values win over KS_FAIL_ON_STALE_DB. Programmatic setters must set it alongside FailOnStaleDB.
-	MaxDBAge                  time.Duration     // Max allowed vulnerability DB age (default 120h); <=0 selects the default
-	MaxDBAgeSet               bool              // True when --max-db-age was explicitly passed (even 0); the CLI populates this via Cobra Changed so explicit values win over KS_MAX_DB_AGE. Programmatic setters must set it alongside MaxDBAge.
-	RegistryMapping           map[string]string // Map internal registry URLs to external ones
-	RegistryAuthority         string            // Registry host[:port] explicit credentials apply to
-	RegistryUsername          string            // Username for workload image registry authentication
-	RegistryPassword          string            // Password for workload image registry authentication
-	RegistryToken             string            // Bearer token for workload image registry authentication
-	ImageScanConcurrency      int               // Number of concurrent workers for image scanning
-	ImagePlatform             string            // OCI platform used for image scanning (os/architecture[/variant])
-	MinSeverity               string            // Only include controls at or above this severity in the output
-	MaxSeverity               string            // Only include controls at or below this severity in the output
-	Baseline                  string            // Path to a saved JSON scan report; when set, the fresh scan is diffed against it
-	BaselineFailOnNew         bool              // Exit with code 1 when the baseline diff finds new or incomparable failures
-	BaselineSeverityThreshold string            // Only count new/incomparable baseline failures at or above this severity when enforcing BaselineFailOnNew
-	BaselineGranularity       string            // Comparison unit for the baseline diff: "evidence" (default) or "control"
-	KubeContexts              []string          // --kube-contexts: scan each of these kube contexts sequentially, one report per context (fleet mode)
-	FleetReport               string            // --fleet-report: with --kube-contexts, also write one combined JSON report across every context to this path
-	ReferenceCluster          string            // --reference-cluster: with --fleet-report, the kube context whose findings the other clusters are read against
+	ListingURL                string                      //Grype vulnerability database URL
+	SkipDBUpdate              bool                        // Do not update the vulnerability database before image scanning
+	FailOnStaleDB             bool                        // Fail image scans when the vulnerability DB is older than MaxDBAge (default: warn only)
+	FailOnStaleDBSet          bool                        // True when --fail-on-stale-db was explicitly passed (even false); the CLI populates this via Cobra Changed so explicit values win over KS_FAIL_ON_STALE_DB. Programmatic setters must set it alongside FailOnStaleDB.
+	MaxDBAge                  time.Duration               // Max allowed vulnerability DB age (default 120h); <=0 selects the default
+	MaxDBAgeSet               bool                        // True when --max-db-age was explicitly passed (even 0); the CLI populates this via Cobra Changed so explicit values win over KS_MAX_DB_AGE. Programmatic setters must set it alongside MaxDBAge.
+	RegistryMapping           map[string]string           // Map internal registry URLs to external ones
+	RegistryAuthority         string                      // Registry host[:port] explicit credentials apply to
+	RegistryUsername          string                      // Username for workload image registry authentication
+	RegistryPassword          string                      // Password for workload image registry authentication
+	RegistryToken             string                      // Bearer token for workload image registry authentication
+	ImageScanConcurrency      int                         // Number of concurrent workers for image scanning
+	ImagePlatform             string                      // OCI platform used for image scanning (os/architecture[/variant])
+	MinSeverity               string                      // Only include controls at or above this severity in the output
+	MaxSeverity               string                      // Only include controls at or below this severity in the output
+	Baseline                  string                      // Path to a saved JSON scan report; when set, the fresh scan is diffed against it
+	BaselineFailOnNew         bool                        // Exit with code 1 when the baseline diff finds new or incomparable failures
+	BaselineSeverityThreshold string                      // Only count new/incomparable baseline failures at or above this severity when enforcing BaselineFailOnNew
+	BaselineGranularity       string                      // Comparison unit for the baseline diff: "evidence" (default) or "control"
+	KubeContexts              []string                    // --kube-contexts: scan each of these kube contexts sequentially, one report per context (fleet mode)
+	FleetReport               string                      // --fleet-report: with --kube-contexts, also write one combined JSON report across every context to this path
+	ReferenceCluster          string                      // --reference-cluster: with --fleet-report, the kube context whose findings the other clusters are read against
+	WholeClusterPolicy        WholeClusterExecutionPolicy // Execution policy for whole-cluster controls (projected, fallback, skip, verify)
+}
+
+type WholeClusterExecutionPolicy string
+
+const (
+	// WholeClusterPolicyProjected accumulates only resources matching whole-cluster controls
+	// across batches, maintaining cross-namespace join correctness while keeping peak memory bounded.
+	WholeClusterPolicyProjected WholeClusterExecutionPolicy = "projected"
+
+	// WholeClusterPolicyFallback materializes all resources across the entire cluster into memory
+	// for whole-cluster control evaluation.
+	WholeClusterPolicyFallback WholeClusterExecutionPolicy = "fallback"
+
+	// WholeClusterPolicySkip bypasses whole-cluster controls entirely, marking them as skipped
+	// in scan coverage for strict memory bounds.
+	WholeClusterPolicySkip WholeClusterExecutionPolicy = "skip"
+
+	// WholeClusterPolicyVerify evaluates whole-cluster controls using both projected and fallback scopes
+	// and diffs verdicts across all evaluated resources (debug/cross-check mode).
+	WholeClusterPolicyVerify WholeClusterExecutionPolicy = "verify"
+)
+
+// ValidateWholeClusterPolicy validates that the policy is one of the supported values.
+func ValidateWholeClusterPolicy(policy WholeClusterExecutionPolicy) error {
+	switch policy {
+	case WholeClusterPolicyProjected, WholeClusterPolicyFallback, WholeClusterPolicySkip, WholeClusterPolicyVerify:
+		return nil
+	default:
+		return fmt.Errorf("invalid whole-cluster policy %q: supported policies are %q, %q, %q, %q",
+			policy, WholeClusterPolicyProjected, WholeClusterPolicyFallback, WholeClusterPolicySkip, WholeClusterPolicyVerify)
+	}
+}
+
+// ResolveWholeClusterPolicy determines the effective WholeClusterExecutionPolicy:
+// explicit string if provided, then KUBESCAPE_WHOLE_CLUSTER_POLICY, then KUBESCAPE_WHOLE_CLUSTER_PARITY_CHECK,
+// defaulting to WholeClusterPolicyProjected.
+func ResolveWholeClusterPolicy(explicitPolicy string) (WholeClusterExecutionPolicy, error) {
+	if explicitPolicy != "" {
+		p := WholeClusterExecutionPolicy(strings.ToLower(strings.TrimSpace(explicitPolicy)))
+		if err := ValidateWholeClusterPolicy(p); err != nil {
+			return "", err
+		}
+		return p, nil
+	}
+	if envVal := os.Getenv("KUBESCAPE_WHOLE_CLUSTER_POLICY"); envVal != "" {
+		p := WholeClusterExecutionPolicy(strings.ToLower(strings.TrimSpace(envVal)))
+		if err := ValidateWholeClusterPolicy(p); err != nil {
+			return "", err
+		}
+		return p, nil
+	}
+	if strings.EqualFold(os.Getenv("KUBESCAPE_WHOLE_CLUSTER_PARITY_CHECK"), "true") {
+		return WholeClusterPolicyVerify, nil
+	}
+	return WholeClusterPolicyProjected, nil
+}
+
+// GetWholeClusterPolicy returns the resolved WholeClusterExecutionPolicy for scanInfo.
+func (scanInfo *ScanInfo) GetWholeClusterPolicy() WholeClusterExecutionPolicy {
+	if scanInfo == nil || scanInfo.WholeClusterPolicy == "" {
+		p, _ := ResolveWholeClusterPolicy("")
+		return p
+	}
+	p, err := ResolveWholeClusterPolicy(string(scanInfo.WholeClusterPolicy))
+	if err != nil {
+		return WholeClusterPolicyProjected
+	}
+	return p
 }
 
 type Getters struct {
