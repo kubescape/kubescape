@@ -62,7 +62,7 @@ func (cp *CsvPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OP
 	}
 
 	finalizedReport := FinalizeResults(opaSessionObj)
-	reportWithSeverity := ConvertToPostureReportWithSeverityLabelsAndCoverage(finalizedReport, opaSessionObj.LabelsToCopy, opaSessionObj.AllResources, &opaSessionObj.ScanCoverage)
+	reportWithSeverity := ConvertToPostureReportWithSeverityLabelsAndCoverageFromCatalog(finalizedReport, opaSessionObj.LabelsToCopy, opaSessionObj.GetCatalog(), &opaSessionObj.ScanCoverage)
 
 	summaryControls := finalizedReport.SummaryDetails.Controls
 
@@ -104,7 +104,7 @@ func (cp *CsvPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OP
 		resID := result.ResourceID
 		var resName, resKind, resNamespace, resApiVersion string
 
-		if resourceData, ok := opaSessionObj.AllResources[resID]; ok {
+		if resourceData, ok := opaSessionObj.GetResource(resID); ok && resourceData != nil {
 			resName = resourceData.GetName()
 			resKind = resourceData.GetKind()
 			resNamespace = resourceData.GetNamespace()

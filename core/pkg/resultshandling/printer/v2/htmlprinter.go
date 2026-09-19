@@ -180,8 +180,8 @@ func buildResourceTableView(opaSessionObj *cautils.OPASessionObj, showSecrets bo
 	resourceTableView := make(ResourceTableView, 0)
 	for resourceID, result := range opaSessionObj.ResourcesResult {
 		if result.GetStatus(nil).IsFailed() {
-			resource, ok := opaSessionObj.AllResources[resourceID]
-			if !ok {
+			resource, ok := opaSessionObj.GetResource(resourceID)
+			if !ok || resource == nil {
 				logger.L().Debug("resource missing from AllResources, skipping",
 					helpers.String("resourceID", resourceID))
 				continue

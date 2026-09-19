@@ -24,47 +24,63 @@ func transformSession(session *cautils.OPASessionObj, _ *Mapping, transformer Tr
 
 	idMapping := make(map[string]string)
 
-	newAllResources := make(map[string]workloadinterface.IMetadata, len(session.AllResources))
-	for oldID, resource := range session.AllResources {
-
-		if err := transformResourceMetadata(resource, transformer); err != nil {
-			return err
-		}
-
-		// sourcePath may expose manifest filenames and line references
-		// (for example test-anonymize.yaml:1), so transform it alongside
-		// other resource-local metadata.
-		if err := transformResourceObjectSourcePath(resource, transformer); err != nil {
-			return err
-		}
-
-		// Annotations may contain infrastructure identifiers, secret paths, or
-		// other sensitive metadata at both top-level and nested workload templates.
-		if err := transformResourceAnnotations(resource, transformer); err != nil {
-			return err
-		}
-
-		// Container-related metadata is transformed separately to preserve the
-		// existing typed/unstructured traversal behavior while supporting
-		// multiple transformation strategies. session.EnvVarSecretRefs[oldID]
-		// is nil for a resource whose removeData pass found no reference-backed
-		// env vars; transformTypedEnv/transformUnstructuredEnv treat that the
-		// same as "no additional names to anonymize", which is correct.
-		if err := transformContainerMetadata(resource, session.EnvVarSecretRefs[oldID], transformer); err != nil {
-			return err
-		}
-
-		if len(session.LabelsToCopy) > 0 {
-			if err := transformResourceLabels(resource, session.LabelsToCopy, transformer); err != nil {
-				return err
+	newCatalog := cautils.NewMapResourceCatalog()
+	catalog := session.GetCatalog()
+	var transformErr error
+	if catalog != nil {
+		catalog.ForEach(func(oldID string, resource workloadinterface.IMetadata) bool {
+			if resource == nil {
+				return true
 			}
-		}
 
-		newID := resource.GetID()
-		idMapping[oldID] = newID
-		newAllResources[newID] = resource
+			if err := transformResourceMetadata(resource, transformer); err != nil {
+				transformErr = err
+				return false
+			}
+
+			// sourcePath may expose manifest filenames and line references
+			// (for example test-anonymize.yaml:1), so transform it alongside
+			// other resource-local metadata.
+			if err := transformResourceObjectSourcePath(resource, transformer); err != nil {
+				transformErr = err
+				return false
+			}
+
+			// Annotations may contain infrastructure identifiers, secret paths, or
+			// other sensitive metadata at both top-level and nested workload templates.
+			if err := transformResourceAnnotations(resource, transformer); err != nil {
+				transformErr = err
+				return false
+			}
+
+			// Container-related metadata is transformed separately to preserve the
+			// existing typed/unstructured traversal behavior while supporting
+			// multiple transformation strategies. session.EnvVarSecretRefs[oldID]
+			// is nil for a resource whose removeData pass found no reference-backed
+			// env vars; transformTypedEnv/transformUnstructuredEnv treat that the
+			// same as "no additional names to anonymize", which is correct.
+			if err := transformContainerMetadata(resource, session.EnvVarSecretRefs[oldID], transformer); err != nil {
+				transformErr = err
+				return false
+			}
+
+			if len(session.LabelsToCopy) > 0 {
+				if err := transformResourceLabels(resource, session.LabelsToCopy, transformer); err != nil {
+					transformErr = err
+					return false
+				}
+			}
+
+			newID := resource.GetID()
+			idMapping[oldID] = newID
+			newCatalog.Add(resource)
+			return true
+		})
 	}
-	session.AllResources = newAllResources
+	if transformErr != nil {
+		return transformErr
+	}
+	session.SetCatalog(newCatalog)
 
 	newResourcesResult := make(map[string]resourcesresults.Result, len(session.ResourcesResult))
 	for oldID, result := range session.ResourcesResult {

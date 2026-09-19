@@ -659,7 +659,7 @@ func (sp *SARIFPrinter) writeConfigurationSARIF(ctx context.Context, w io.Writer
 				}
 				location := resolveFixLocation(opaSessionObj, locationResolver, &ac, resource.resourceID)
 				reviewPathLocations := resolveReviewPathLocations(opaSessionObj, locationResolver, &ac, resource.resourceID)
-				rsrc := opaSessionObj.AllResources[resource.resourceID]
+				rsrc, _ := opaSessionObj.GetResource(resource.resourceID)
 				r := sp.createResult(ctl, resource.relPath, location, &ac, resource.resourceID, rsrc, reviewPathLocations)
 				r.WithRuleIndex(ruleIndexes[ctl.GetID()])
 				// kind stays "" when rsrc is nil (the resource lookup missed) --
@@ -916,7 +916,10 @@ func collectFixes(ctx context.Context, cache *fixReportCache, result *sarif.Resu
 }
 
 func getDocIndex(opaSessionObj *cautils.OPASessionObj, resourceID string) (int, bool) {
-	resource := opaSessionObj.AllResources[resourceID]
+	resource, ok := opaSessionObj.GetResource(resourceID)
+	if !ok || resource == nil {
+		return 0, false
+	}
 	localworkload, ok := resource.(*localworkload.LocalWorkload)
 	if !ok {
 		return 0, false

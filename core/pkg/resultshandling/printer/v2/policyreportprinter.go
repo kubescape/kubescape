@@ -165,8 +165,8 @@ func buildPolicyReports(opaSessionObj *cautils.OPASessionObj) []policyReport {
 
 	for _, resourceID := range resourceIDs {
 		result := opaSessionObj.ResourcesResult[resourceID]
-		resourceData, ok := opaSessionObj.AllResources[resourceID]
-		if !ok {
+		resourceData, ok := opaSessionObj.GetResource(resourceID)
+		if !ok || resourceData == nil {
 			continue
 		}
 

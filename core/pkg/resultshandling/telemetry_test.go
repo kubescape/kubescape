@@ -282,3 +282,74 @@ func TestBuildScanOutcomeRedactsWhenHideOrEncryptSet(t *testing.T) {
 		})
 	}
 }
+
+type mockCatalog struct {
+	items map[string]workloadinterface.IMetadata
+}
+
+func (m *mockCatalog) Get(id string) (workloadinterface.IMetadata, bool) {
+	v, ok := m.items[id]
+	return v, ok
+}
+
+func (m *mockCatalog) ListIDs() []string {
+	ids := make([]string, 0, len(m.items))
+	for k := range m.items {
+		ids = append(ids, k)
+	}
+	return ids
+}
+
+func (m *mockCatalog) Len() int {
+	return len(m.items)
+}
+
+func (m *mockCatalog) Add(resource workloadinterface.IMetadata) {
+	if resource != nil {
+		if m.items == nil {
+			m.items = make(map[string]workloadinterface.IMetadata)
+		}
+		m.items[resource.GetID()] = resource
+	}
+}
+
+func (m *mockCatalog) AddAll(resources map[string]workloadinterface.IMetadata) {
+	for _, res := range resources {
+		m.Add(res)
+	}
+}
+
+func (m *mockCatalog) Remove(id string) {
+	delete(m.items, id)
+}
+
+func (m *mockCatalog) All() map[string]workloadinterface.IMetadata {
+	return m.items
+}
+
+func (m *mockCatalog) ForEach(fn func(id string, res workloadinterface.IMetadata) bool) {
+	for k, v := range m.items {
+		if !fn(k, v) {
+			break
+		}
+	}
+}
+
+var _ cautils.ResourceCatalog = (*mockCatalog)(nil)
+
+func TestCountResourcesByKind_UsesCatalogWithoutAllResources(t *testing.T) {
+	session := &cautils.OPASessionObj{}
+	mc := &mockCatalog{
+		items: map[string]workloadinterface.IMetadata{
+			"1": newWorkload(t, "Pod", "pod-1"),
+			"2": newWorkload(t, "Pod", "pod-2"),
+			"3": newWorkload(t, "ConfigMap", "cm-1"),
+		},
+	}
+	session.SetCatalog(mc)
+	assert.Nil(t, session.AllResources, "AllResources should remain nil when custom catalog is used")
+
+	counts := countResourcesByKind(session)
+	assert.Equal(t, int64(2), counts["Pod"])
+	assert.Equal(t, int64(1), counts["ConfigMap"])
+}

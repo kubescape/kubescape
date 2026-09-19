@@ -122,8 +122,8 @@ func (handler *ResourcesPrioritizationHandler) PrioritizeResources(sessionObj *c
 
 	for resourceId, result := range sessionObj.ResourcesResult {
 		resourcePriorityVector := []prioritization.ControlsVector{}
-		resource, exist := sessionObj.AllResources[resourceId]
-		if !exist {
+		resource, exist := sessionObj.GetResource(resourceId)
+		if !exist || resource == nil {
 			continue
 		}
 

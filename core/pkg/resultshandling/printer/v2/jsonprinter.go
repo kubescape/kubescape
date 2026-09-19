@@ -191,7 +191,8 @@ func writeConfigurationJSON(w io.Writer, opaSessionObj *cautils.OPASessionObj, i
 			if prioritized, ok := opaSessionObj.ResourcesPrioritized[id]; ok {
 				result.PrioritizedResource = &prioritized
 			}
-			enriched := enrichResultWithSeverity(result, opaSessionObj.Report.SummaryDetails.Controls, opaSessionObj.AllResources[result.ResourceID])
+			res, _ := opaSessionObj.GetResource(result.ResourceID)
+			enriched := enrichResultWithSeverity(result, opaSessionObj.Report.SummaryDetails.Controls, res)
 			slices.SortFunc(enriched.AssociatedControls, func(a, b ResourceAssociatedControlWithSeverity) int {
 				return strings.Compare(a.ControlID, b.ControlID)
 			})
@@ -207,8 +208,8 @@ func writeConfigurationJSON(w io.Writer, opaSessionObj *cautils.OPASessionObj, i
 				return s.err
 			}
 			result := opaSessionObj.ResourcesResult[id]
-			obj, ok := opaSessionObj.AllResources[result.ResourceID]
-			if !ok {
+			obj, ok := opaSessionObj.GetResource(result.ResourceID)
+			if !ok || obj == nil {
 				continue
 			}
 			if firstResource {
@@ -228,17 +229,19 @@ func writeConfigurationJSON(w io.Writer, opaSessionObj *cautils.OPASessionObj, i
 	}
 	if len(opaSessionObj.LabelsToCopy) > 0 && s.err == nil {
 		// Labels apply to all resources, including those without a result.
-		ids := make([]string, 0, len(opaSessionObj.AllResources))
-		for id := range opaSessionObj.AllResources {
-			ids = append(ids, id)
-		}
+		catalog := opaSessionObj.GetCatalog()
+		ids := catalog.ListIDs()
 		sort.Strings(ids)
 		firstLabels := true
 		for _, id := range ids {
 			if s.err != nil {
 				return s.err
 			}
-			labels := extractResourceLabelsForResource(opaSessionObj.AllResources[id], opaSessionObj.LabelsToCopy)
+			res, ok := catalog.Get(id)
+			if !ok || res == nil {
+				continue
+			}
+			labels := extractResourceLabelsForResource(res, opaSessionObj.LabelsToCopy)
 			if len(labels) == 0 {
 				continue
 			}
