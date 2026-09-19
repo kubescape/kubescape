@@ -1,9 +1,15 @@
 package cautils
 
 import (
+	"bufio"
+	"bytes"
 	"context"
+	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"strconv"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -338,4 +344,229 @@ func TestStopPortForwarder_Idempotent(t *testing.T) {
 		p.StopPortForwarder()
 		p.StopPortForwarder()
 	})
+}
+
+func Test_getPortForwardReadyTimeout(t *testing.T) {
+	testCases := []struct {
+		name     string
+		envValue string
+		setEnv   bool
+		want     time.Duration
+	}{
+		{
+			name: "unset falls back to default",
+			want: defaultPortForwardReadyTimeout,
+		},
+		{
+			name:     "valid override is honored",
+			setEnv:   true,
+			envValue: "5",
+			want:     5 * time.Second,
+		},
+		{
+			name:     "zero falls back to default rather than firing instantly",
+			setEnv:   true,
+			envValue: "0",
+			want:     defaultPortForwardReadyTimeout,
+		},
+		{
+			name:     "negative falls back to default",
+			setEnv:   true,
+			envValue: "-5",
+			want:     defaultPortForwardReadyTimeout,
+		},
+		{
+			name:     "non-numeric falls back to default",
+			setEnv:   true,
+			envValue: "soon",
+			want:     defaultPortForwardReadyTimeout,
+		},
+		{
+			name:     "value overflowing time.Duration falls back to default",
+			setEnv:   true,
+			envValue: "9223372037",
+			want:     defaultPortForwardReadyTimeout,
+		},
+		{
+			name:     "largest non-overflowing value is honored",
+			setEnv:   true,
+			envValue: strconv.FormatInt(maxPortForwardReadyTimeoutSeconds, 10),
+			want:     time.Duration(maxPortForwardReadyTimeoutSeconds) * time.Second,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.setEnv {
+				t.Setenv(PortForwardReadyTimeoutEnv, tc.envValue)
+			} else {
+				t.Setenv(PortForwardReadyTimeoutEnv, "")
+			}
+			assert.Equal(t, tc.want, getPortForwardReadyTimeout())
+		})
+	}
+}
+
+func TestCreatePortForwarder_ResolvesReadyTimeoutFromEnvOnce(t *testing.T) {
+	t.Setenv(PortForwardReadyTimeoutEnv, "7")
+
+	k8sClient := k8sinterface.KubernetesApi{
+		KubernetesClient: fake.NewClientset(),
+		K8SConfig: &rest.Config{
+			Host: "any",
+		},
+		Context: context.Background(),
+	}
+
+	operatorPod := v1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "first",
+			Labels: map[string]string{
+				"app": "operator",
+			},
+		},
+	}
+	createdPod, err := k8sClient.KubernetesClient.CoreV1().Pods(kubescapeNamespace).Create(k8sClient.Context, &operatorPod, metav1.CreateOptions{})
+	require.NoError(t, err)
+
+	connector, err := CreatePortForwarder(&k8sClient, createdPod, "1234", "any")
+	require.NoError(t, err)
+
+	pf, ok := connector.(*portForward)
+	require.True(t, ok)
+	assert.Equal(t, 7*time.Second, pf.readyTimeout)
+
+	t.Setenv(PortForwardReadyTimeoutEnv, "1")
+	assert.Equal(t, 7*time.Second, pf.readyTimeout)
+}
+
+func TestCreatePortForwarder_ProxyConfiguredUsesFallbackPath(t *testing.T) {
+	k8sClient := k8sinterface.KubernetesApi{
+		KubernetesClient: fake.NewClientset(),
+		K8SConfig: &rest.Config{
+			Host: "any",
+			Proxy: func(*http.Request) (*url.URL, error) {
+				return url.Parse("http://proxy.example.com:8080")
+			},
+		},
+		Context: context.Background(),
+	}
+
+	operatorPod := v1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "first",
+			Labels: map[string]string{
+				"app": "operator",
+			},
+		},
+	}
+	createdPod, err := k8sClient.KubernetesClient.CoreV1().Pods(kubescapeNamespace).Create(k8sClient.Context, &operatorPod, metav1.CreateOptions{})
+	require.NoError(t, err)
+
+	connector, err := CreatePortForwarder(&k8sClient, createdPod, "1234", "any")
+	require.NoError(t, err)
+
+	pf, ok := connector.(*portForward)
+	require.True(t, ok)
+	assert.Nil(t, pf.handshakeConn, "a configured proxy must take the fallback path without a handshake-level deadline")
+}
+
+func Test_waitForPortForwardReadiness_Timeout(t *testing.T) {
+	p := &portForward{
+		stopChan:     make(chan struct{}),
+		readyChan:    make(chan struct{}),
+		errChan:      make(chan error, 1),
+		out:          new(bytes.Buffer),
+		errOut:       bytes.NewBufferString("spdy connection handshake failed"),
+		readyTimeout: 50 * time.Millisecond,
+	}
+
+	err := p.waitForPortForwardReadiness()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "timed out after 50ms waiting for the port-forward to the Kubescape Operator pod to become ready")
+	assert.Contains(t, err.Error(), "spdy connection handshake failed")
+
+	// Ensure StopPortForwarder was called and stopChan was closed
+	select {
+	case <-p.stopChan:
+		// success: stopChan is closed
+	default:
+		t.Fatal("expected stopChan to be closed on timeout")
+	}
+}
+
+func Test_waitForPortForwardReadiness_Ready(t *testing.T) {
+	readyChan := make(chan struct{})
+	close(readyChan)
+
+	p := &portForward{
+		stopChan:     make(chan struct{}),
+		readyChan:    readyChan,
+		errChan:      make(chan error, 1),
+		out:          new(bytes.Buffer),
+		errOut:       new(bytes.Buffer),
+		readyTimeout: 5 * time.Second,
+	}
+
+	err := p.waitForPortForwardReadiness()
+	require.NoError(t, err)
+}
+
+func Test_waitForPortForwardReadiness_Error(t *testing.T) {
+	errChan := make(chan error, 1)
+	errChan <- fmt.Errorf("connection refused")
+
+	p := &portForward{
+		stopChan:     make(chan struct{}),
+		readyChan:    make(chan struct{}),
+		errChan:      errChan,
+		out:          new(bytes.Buffer),
+		errOut:       new(bytes.Buffer),
+		readyTimeout: 5 * time.Second,
+	}
+
+	err := p.waitForPortForwardReadiness()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "connection refused")
+}
+
+func TestStartPortForwarder_WithheldUpgradeTerminatesSocketNotJustCaller(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	defer ln.Close()
+
+	serverConn := make(chan net.Conn, 1)
+	go func() {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		// Read and parse the upgrade request, then withhold the response entirely
+		_, _ = http.ReadRequest(bufio.NewReader(conn))
+		serverConn <- conn
+	}()
+
+	t.Setenv(PortForwardReadyTimeoutEnv, "1")
+
+	k8sClient := &k8sinterface.KubernetesApi{
+		K8SConfig: &rest.Config{Host: "http://" + ln.Addr().String()},
+	}
+	pod := &v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "operator"}}
+	connector, err := CreatePortForwarder(k8sClient, pod, "1234", "kubescape")
+	require.NoError(t, err)
+
+	start := time.Now()
+	err = connector.StartPortForwarder()
+	require.Error(t, err)
+	assert.Less(t, time.Since(start), 3*time.Second, "must not hang past readyTimeout")
+
+	select {
+	case conn := <-serverConn:
+		require.NoError(t, conn.SetReadDeadline(time.Now().Add(2*time.Second)))
+		buf := make([]byte, 1)
+		_, err := conn.Read(buf)
+		assert.Error(t, err, "server should observe the client closing the stalled connection")
+	case <-time.After(2 * time.Second):
+		t.Fatal("server never accepted a connection")
+	}
 }
