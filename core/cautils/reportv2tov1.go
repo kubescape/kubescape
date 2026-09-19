@@ -36,6 +36,27 @@ func ReportV2ToV1(opaSessionObj *OPASessionObj) *reporthandling.PostureReport {
 	for f := range frameworks {
 		// set counters
 		reporthandling.SetUniqueResourcesCounter(&frameworks[f])
+
+		// apply the summary-derived control counters after the helper recomputation
+		var controls map[string]reportsummary.ControlSummary
+		if len(opaSessionObj.Report.SummaryDetails.Frameworks) > 0 {
+			for _, fwv2 := range opaSessionObj.Report.SummaryDetails.Frameworks {
+				if fwv2.GetName() == frameworks[f].Name {
+					controls = fwv2.Controls
+					break
+				}
+			}
+		} else {
+			controls = opaSessionObj.Report.SummaryDetails.Controls
+		}
+
+		for c := range frameworks[f].ControlReports {
+			if crv2, ok := controls[frameworks[f].ControlReports[c].ControlID]; ok {
+				frameworks[f].ControlReports[c].TotalResources = crv2.StatusCounters.PassedResources + crv2.StatusCounters.FailedResources + crv2.StatusCounters.SkippedResources + crv2.StatusCounters.ExcludedResources
+				frameworks[f].ControlReports[c].FailedResources = crv2.StatusCounters.FailedResources
+				frameworks[f].ControlReports[c].WarningResources = crv2.StatusCounters.SkippedResources + crv2.StatusCounters.ExcludedResources
+			}
+		}
 	}
 
 	report.FrameworkReports = frameworks
