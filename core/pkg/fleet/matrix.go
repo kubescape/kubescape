@@ -19,14 +19,17 @@ import (
 // without sorting the same fleet would render its rows in a different order on
 // every run and two JSON reports of an unchanged fleet would not compare equal.
 //
-// A row's Name and Severity are taken from the first scanned cluster that
-// reports the control, which is deterministic because results is a slice. Two
-// clusters could in principle disagree on either, for instance when they were
-// scanned against different control versions, and the first one wins. That is
-// deliberate: the matrix reports what each cluster found rather than trying to
-// reconcile the definitions behind it.
+// Two clusters can describe the same control differently, most often when they
+// were scanned against different control library versions, so a row's Name and
+// Severity are settled by value rather than by whichever cluster was read
+// first. Any rule is arbitrary once they disagree, and the matrix does not try
+// to reconcile the definitions behind them, but it must not answer differently
+// depending on the order the clusters happened to be scanned in. The highest
+// score factor wins, so a row never reports a control as milder than some
+// cluster rated it, and an equal score factor is settled on the name.
 func BuildControlMatrix(results []ClusterResult) FleetControlMatrix {
 	rows := make(map[string]*FleetControlRow)
+	descriptions := make(map[string]controlDescription)
 
 	for i := range results {
 		cluster := &results[i]
@@ -47,18 +50,34 @@ func BuildControlMatrix(results []ClusterResult) FleetControlMatrix {
 			if !ok {
 				row = &FleetControlRow{
 					ControlID: controlID,
-					Name:      summary.GetName(),
-					Severity:  apis.ControlSeverityToString(summary.GetScoreFactor()),
 					ByCluster: make(map[string]ControlStatusCell),
 				}
 				rows[controlID] = row
 			}
-			row.ByCluster[cluster.ClusterID] = newControlStatusCell(&summary)
+			if describes, ok := descriptions[controlID]; !ok || describes.losesTo(summary.GetScoreFactor(), summary.GetName()) {
+				descriptions[controlID] = controlDescription{
+					scoreFactor: summary.GetScoreFactor(),
+					name:        summary.GetName(),
+				}
+			}
+			cell := newControlStatusCell(&summary)
+			if existing, ok := row.ByCluster[cluster.ClusterID]; ok &&
+				outcomeRank(existing.Status) >= outcomeRank(cell.Status) {
+				// Two results carrying the same cluster ID describe one
+				// cluster, so the cell has to resolve to one of them by value
+				// rather than by whichever arrived last. The worse outcome
+				// wins: a cell reading passed while one of the results said
+				// failed would hide the finding.
+				continue
+			}
+			row.ByCluster[cluster.ClusterID] = cell
 		}
 	}
 
 	controls := make([]FleetControlRow, 0, len(rows))
-	for _, row := range rows {
+	for controlID, row := range rows {
+		row.Name = descriptions[controlID].name
+		row.Severity = apis.ControlSeverityToString(descriptions[controlID].scoreFactor)
 		controls = append(controls, *row)
 	}
 	sort.Slice(controls, func(i, j int) bool {
@@ -66,6 +85,41 @@ func BuildControlMatrix(results []ClusterResult) FleetControlMatrix {
 	})
 
 	return FleetControlMatrix{Controls: controls}
+}
+
+// controlDescription is how one cluster described a control, kept so a row can
+// settle on one description by value once the clusters disagree.
+type controlDescription struct {
+	scoreFactor float32
+	name        string
+}
+
+// losesTo reports whether this description gives way to the candidate one. The
+// higher score factor wins, and an equal score factor is settled on the name so
+// the result never depends on scan order.
+func (d controlDescription) losesTo(scoreFactor float32, name string) bool {
+	if scoreFactor != d.scoreFactor {
+		return scoreFactor > d.scoreFactor
+	}
+	return name < d.name
+}
+
+// outcomeRank orders the cell outcomes from most to least alarming, so that a
+// cluster reported more than once resolves to its worst outcome rather than to
+// whichever result happened to be read last.
+func outcomeRank(status CellStatus) int {
+	switch status {
+	case CellFailed:
+		return 3
+	case CellNotEvaluated:
+		return 2
+	case CellSkipped:
+		return 1
+	case CellPassed:
+		return 0
+	default:
+		return 0
+	}
 }
 
 // newControlStatusCell reads one control summary into a cell.

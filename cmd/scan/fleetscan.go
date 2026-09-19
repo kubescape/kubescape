@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -48,6 +49,9 @@ func validateKubeContextsSupported(cmd *cobra.Command, scanInfo *cautils.ScanInf
 		if len(scanInfo.KubeContexts) == 0 {
 			return fmt.Errorf("--fleet-report requires --kube-contexts: it aggregates the reports of a multi-context scan, so with a single context there is nothing to combine")
 		}
+	}
+	if err := validateReferenceCluster(scanInfo); err != nil {
+		return err
 	}
 	if len(scanInfo.KubeContexts) == 0 {
 		return nil
@@ -164,6 +168,32 @@ func validateFleetReportPrivacyModes(scanInfo *cautils.ScanInfo) error {
 	return nil
 }
 
+// validateReferenceCluster rejects a --reference-cluster that cannot mean
+// anything.
+//
+// It only has an effect inside the combined report, so asking for one without
+// --fleet-report would silently do nothing. Naming a context that is not being
+// scanned is almost always a typo, and left alone it would produce a report
+// saying the reference was unavailable, which reads as an infrastructure
+// problem rather than a misspelling. Both are worth catching before a scan
+// starts rather than after every cluster has been visited.
+func validateReferenceCluster(scanInfo *cautils.ScanInfo) error {
+	reference := strings.TrimSpace(scanInfo.ReferenceCluster)
+	if scanInfo.ReferenceCluster != "" && reference == "" {
+		return fmt.Errorf("--reference-cluster %q is blank: it needs the name of a kube context", scanInfo.ReferenceCluster)
+	}
+	if reference == "" {
+		return nil
+	}
+	if !fleetReportRequested(scanInfo.FleetReport) {
+		return fmt.Errorf("--reference-cluster requires --fleet-report: it only changes the combined report, which is not being written")
+	}
+	if !slices.Contains(scanInfo.KubeContexts, reference) {
+		return fmt.Errorf("--reference-cluster %q is not one of --kube-contexts (%s): the reference has to be a cluster the run is scanning", reference, strings.Join(scanInfo.KubeContexts, ", "))
+	}
+	return nil
+}
+
 // printerDestinations returns every file the printers will actually write for
 // one context's --output path, one per requested format.
 //
@@ -211,6 +241,9 @@ func validateFleetScanInvocation(scanInfo *cautils.ScanInfo) (map[string]string,
 		if err := validateFleetReportPrivacyModes(scanInfo); err != nil {
 			return nil, err
 		}
+	}
+	if err := validateReferenceCluster(scanInfo); err != nil {
+		return nil, err
 	}
 
 	formats := scanInfo.Formats()
@@ -453,6 +486,7 @@ func fleetScan(baseScanInfo cautils.ScanInfo, ks meta.IKubescape, policyIdentifi
 			Compliance:    fleet.BuildComplianceRollup(clusters, baseScanInfo.FailCoverageThreshold),
 			ControlMatrix: fleet.BuildControlMatrix(clusters),
 		}
+		report.Divergence = fleet.BuildDivergence(report.ControlMatrix, baseScanInfo.ReferenceCluster)
 		// Re-check after the per-context files exist so os.SameFile can detect
 		// hard-link aliases that were not observable before the scans ran.
 		fleetReportErr = fleetReportAliasesPerContextReport(baseScanInfo.FleetReport, outputPaths, baseScanInfo.Formats())

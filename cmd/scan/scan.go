@@ -314,6 +314,8 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	scanCmd.PersistentFlags().StringSliceVar(&scanInfo.KubeContexts, "kube-contexts", nil, "Scan each of these kube contexts in one run (comma-separated, or repeat the flag), writing one report per context to a context-suffixed --output path. Requires --output. Distinct from --kube-context, which selects a single context; when --kube-contexts is set it takes over the scan instead.")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.FleetReport, "fleet-report", "", "With --kube-contexts, also write one combined JSON report across every scanned context to this path, alongside the per-context reports. Every requested context appears in it, including the ones that could not be scanned, with a control-by-cluster matrix over those that could. Not supported with --hide or --encrypt.")
 
+	scanCmd.PersistentFlags().StringVar(&scanInfo.ReferenceCluster, "reference-cluster", "", "With --fleet-report, the kube context whose findings the other clusters are read against, so the combined report shows what that cluster found on every control they disagree on. Must be one of --kube-contexts. Without it the report simply says where the clusters disagree.")
+
 	scanCmd.PersistentFlags().StringVar(&scanInfo.Baseline, "baseline", "", "Path to a saved JSON scan report to diff the fresh scan against.")
 	scanCmd.PersistentFlags().BoolVar(&scanInfo.BaselineFailOnNew, "baseline-fail-on-new", false, "With --baseline, exit with code 1 when new failures are found versus the baseline.")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.BaselineSeverityThreshold, "baseline-severity-threshold", "", "With --baseline, only count new failures at or above this severity when using --baseline-fail-on-new.")
