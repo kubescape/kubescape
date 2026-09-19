@@ -129,3 +129,36 @@ func TestReportV2ToV1_DoesNotMutateAllResources(t *testing.T) {
 	require.Len(t, alertObjects, 1)
 	assert.NotContains(t, alertObjects[0], "spec")
 }
+
+func TestReportV2ToV1_StatusCounters(t *testing.T) {
+	controlID := "C-001"
+	controlSummary := reportsummary.ControlSummary{
+		ControlID:   controlID,
+		Name:        "control demo",
+		ScoreFactor: 5,
+		StatusCounters: reportsummary.StatusCounters{
+			PassedResources:   1,
+			FailedResources:   2,
+			SkippedResources:  3,
+			ExcludedResources: 4,
+		},
+	}
+
+	session := &OPASessionObj{
+		Report: &reporthandlingv2.PostureReport{
+			SummaryDetails: reportsummary.SummaryDetails{
+				Controls: reportsummary.ControlSummaries{controlID: controlSummary},
+			},
+		},
+	}
+
+	got := ReportV2ToV1(session)
+
+	require.Len(t, got.FrameworkReports, 1)
+	require.Len(t, got.FrameworkReports[0].ControlReports, 1)
+
+	cr := got.FrameworkReports[0].ControlReports[0]
+	assert.Equal(t, 10, cr.TotalResources)
+	assert.Equal(t, 2, cr.FailedResources)
+	assert.Equal(t, 7, cr.WarningResources)
+}
