@@ -222,6 +222,58 @@ func TestLoadFromCache_UnresolvedClusterIdentityIsRejected(t *testing.T) {
 	assert.ErrorIs(t, err, os.ErrNotExist)
 }
 
+// TestLoadFromCache_LegacyV1EntryIsRejectedAndRemoved guards the upgrade
+// path: a v1 file may hold a converted-only subset recorded as complete by
+// the pre-partial-tracking collector. It must never be served, and the load
+// removes it best-effort so it cannot linger past its TTL either.
+func TestLoadFromCache_LegacyV1EntryIsRejectedAndRemoved(t *testing.T) {
+	withTempCacheDir(t)
+	t.Setenv(HostSensorCacheTtlEnvVar, "1h")
+	withK8sHost(t, "https://cluster-a.example.com")
+
+	env := hostsensor.HostSensorDataEnvelope{}
+	env.SetName("node-a")
+	legacyPath, err := getCacheFilePathForVersion("ctx", "KubeletInfo", legacyHostSensorCacheFormatVersion)
+	require.NoError(t, err)
+	require.NoError(t, os.MkdirAll(filepath.Dir(legacyPath), 0700))
+	data, err := json.Marshal([]hostsensor.HostSensorDataEnvelope{env})
+	require.NoError(t, err)
+	var buf bytes.Buffer
+	gw := gzip.NewWriter(&buf)
+	_, err = gw.Write(data)
+	require.NoError(t, err)
+	require.NoError(t, gw.Close())
+	require.NoError(t, os.WriteFile(legacyPath, buf.Bytes(), 0600))
+
+	_, err = loadFromCache("ctx", "KubeletInfo")
+	assert.Error(t, err, "legacy v1 entries must never be served")
+
+	_, statErr := os.Stat(legacyPath)
+	assert.ErrorIs(t, statErr, os.ErrNotExist, "legacy v1 entries must be removed on load")
+}
+
+// TestSaveToCache_WritesCurrentFormatVersion pins the write side of the
+// version bump: new entries land under the current format so the loader's
+// legacy rejection can never starve a warm cache.
+func TestSaveToCache_WritesCurrentFormatVersion(t *testing.T) {
+	withTempCacheDir(t)
+	t.Setenv(HostSensorCacheTtlEnvVar, "1h")
+	withK8sHost(t, "https://cluster-a.example.com")
+
+	env := hostsensor.HostSensorDataEnvelope{}
+	env.SetName("node-a")
+	require.NoError(t, saveToCache("ctx", "KubeletInfo", []hostsensor.HostSensorDataEnvelope{env}))
+
+	path, err := getCacheFilePath("ctx", "KubeletInfo")
+	require.NoError(t, err)
+	assert.Contains(t, filepath.Base(path), "-"+hostSensorCacheFormatVersion+".json.gz")
+
+	got, err := loadFromCache("ctx", "KubeletInfo")
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	assert.Equal(t, "node-a", got[0].GetName())
+}
+
 // TestLoadFromCache_BoundedDecompressionRead guards against decompression bombs
 // or corrupted oversized cache files triggering unbounded memory allocation.
 func TestLoadFromCache_BoundedDecompressionRead(t *testing.T) {

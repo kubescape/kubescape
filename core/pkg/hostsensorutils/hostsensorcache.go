@@ -25,6 +25,17 @@ import (
 // sensor data is live node state that a scan is expected to reflect.
 const HostSensorCacheTtlEnvVar = "HOSTSENSOR_CACHE_TTL"
 
+// hostSensorCacheFormatVersion versions the on-disk cache entries. v1
+// entries predate partial-loss tracking: the old collector cached converted
+// envelopes only, so a v1 hit reconstructs listed == converted and a stale
+// subset would be served as complete. v1 files are never read back; a stale
+// one found on load is removed best-effort so it cannot linger past its TTL.
+const hostSensorCacheFormatVersion = "v2"
+
+// legacyHostSensorCacheFormatVersion is the pre-partial-tracking format.
+// Entries under it may hold a converted-only subset recorded as complete.
+const legacyHostSensorCacheFormatVersion = "v1"
+
 // maxHostSensorCachePayloadBytes bounds decompressed cache reads to prevent
 // memory exhaustion / decompression bombs from corrupted or oversized cache files.
 const maxHostSensorCachePayloadBytes = 50 * 1024 * 1024 // 50 MB
@@ -62,6 +73,10 @@ func clusterIdentity() string {
 }
 
 func getCacheFilePath(clusterName, resourceName string) (string, error) {
+	return getCacheFilePathForVersion(clusterName, resourceName, hostSensorCacheFormatVersion)
+}
+
+func getCacheFilePathForVersion(clusterName, resourceName, version string) (string, error) {
 	dir, err := getCacheDir()
 	if err != nil {
 		return "", err
@@ -74,7 +89,20 @@ func getCacheFilePath(clusterName, resourceName string) (string, error) {
 		safeClusterName = "default"
 	}
 
-	return filepath.Join(dir, fmt.Sprintf("%s-%s-%s-v1.json.gz", safeClusterName, clusterIdentity(), resourceName)), nil
+	return filepath.Join(dir, fmt.Sprintf("%s-%s-%s-%s.json.gz", safeClusterName, clusterIdentity(), resourceName, version)), nil
+}
+
+// removeLegacyCacheEntry deletes a pre-partial-tracking v1 entry best-effort:
+// it is never served again, so leaving it would only waste disk until the
+// operator cleans the cache directory by hand.
+func removeLegacyCacheEntry(clusterName, resourceName string) {
+	legacyPath, err := getCacheFilePathForVersion(clusterName, resourceName, legacyHostSensorCacheFormatVersion)
+	if err != nil {
+		return
+	}
+	if err := os.Remove(legacyPath); err != nil && !os.IsNotExist(err) {
+		logger.L().Debug("failed to remove legacy host-sensor cache entry", helpers.String("path", legacyPath), helpers.Error(err))
+	}
 }
 
 func loadFromCache(clusterName, resourceName string) ([]hostsensor.HostSensorDataEnvelope, error) {
@@ -88,6 +116,10 @@ func loadFromCache(clusterName, resourceName string) ([]hostsensor.HostSensorDat
 		// same cache key; serving it would risk mixing in another cluster's data.
 		return nil, os.ErrNotExist
 	}
+
+	// Drop any legacy v1 entry first: it may hold a converted-only subset
+	// that predates partial-loss tracking and must never be served again.
+	removeLegacyCacheEntry(clusterName, resourceName)
 
 	path, err := getCacheFilePath(clusterName, resourceName)
 	if err != nil {
