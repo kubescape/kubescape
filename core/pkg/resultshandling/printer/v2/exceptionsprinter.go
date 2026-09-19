@@ -184,7 +184,7 @@ func collectFailures(ctx context.Context, opaSessionObj *cautils.OPASessionObj) 
 	failures := map[string]map[resourceKey]struct{}{}
 
 	for resourceID, result := range opaSessionObj.ResourcesResult {
-		resource, ok := opaSessionObj.AllResources[resourceID]
+		resource, ok := opaSessionObj.GetResource(resourceID)
 		if !ok || resource == nil {
 			if hasFailedControl(result) {
 				logger.L().Ctx(ctx).Warning("skipping failed resource with no scanned object; its findings are not in the baseline",

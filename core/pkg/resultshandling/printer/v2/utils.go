@@ -136,9 +136,17 @@ func enrichControlsWithSeverity(controls reportsummary.ControlSummaries) map[str
 // - when allResources has an entry for the result's ResourceID - resolved
 // evidence values for each control's failed paths.
 func enrichResultsWithSeverity(results []resourcesresults.Result, controlSummaries reportsummary.ControlSummaries, allResources map[string]workloadinterface.IMetadata) []ResultWithSeverity {
+	return enrichResultsWithSeverityFromCatalog(results, controlSummaries, cautils.NewMapResourceCatalog(allResources))
+}
+
+func enrichResultsWithSeverityFromCatalog(results []resourcesresults.Result, controlSummaries reportsummary.ControlSummaries, catalog cautils.ResourceCatalog) []ResultWithSeverity {
 	enrichedResults := make([]ResultWithSeverity, len(results))
 	for i, result := range results {
-		enrichedResults[i] = enrichResultWithSeverity(result, controlSummaries, allResources[result.ResourceID])
+		var resource workloadinterface.IMetadata
+		if catalog != nil {
+			resource, _ = catalog.Get(result.ResourceID)
+		}
+		enrichedResults[i] = enrichResultWithSeverity(result, controlSummaries, resource)
 	}
 	return enrichedResults
 }
@@ -216,19 +224,31 @@ func ConvertToPostureReportWithSeverityAndLabels(report *reporthandlingv2.Postur
 	return ConvertToPostureReportWithSeverityLabelsAndCoverage(report, labelsToCopy, allResources, nil)
 }
 
+// ConvertToPostureReportWithSeverityAndLabelsFromCatalog converts PostureReport to PostureReportWithSeverity
+// and extracts specified labels from workloads via ResourceCatalog.
+func ConvertToPostureReportWithSeverityAndLabelsFromCatalog(report *reporthandlingv2.PostureReport, labelsToCopy []string, catalog cautils.ResourceCatalog) *PostureReportWithSeverity {
+	return ConvertToPostureReportWithSeverityLabelsAndCoverageFromCatalog(report, labelsToCopy, catalog, nil)
+}
+
 // ConvertToPostureReportWithSeverityLabelsAndCoverage converts PostureReport to PostureReportWithSeverity,
 // extracts specified labels from workloads, and attaches scan coverage gaps.
 func ConvertToPostureReportWithSeverityLabelsAndCoverage(report *reporthandlingv2.PostureReport, labelsToCopy []string, allResources map[string]workloadinterface.IMetadata, coverage *cautils.ScanCoverage) *PostureReportWithSeverity {
+	return ConvertToPostureReportWithSeverityLabelsAndCoverageFromCatalog(report, labelsToCopy, cautils.NewMapResourceCatalog(allResources), coverage)
+}
+
+// ConvertToPostureReportWithSeverityLabelsAndCoverageFromCatalog converts PostureReport to PostureReportWithSeverity,
+// extracts specified labels from workloads via ResourceCatalog, and attaches scan coverage gaps.
+func ConvertToPostureReportWithSeverityLabelsAndCoverageFromCatalog(report *reporthandlingv2.PostureReport, labelsToCopy []string, catalog cautils.ResourceCatalog, coverage *cautils.ScanCoverage) *PostureReportWithSeverity {
 	if report == nil {
 		return nil
 	}
 	enrichedControls := enrichControlsWithSeverity(report.SummaryDetails.Controls)
-	enrichedResults := enrichResultsWithSeverity(report.Results, report.SummaryDetails.Controls, allResources)
+	enrichedResults := enrichResultsWithSeverityFromCatalog(report.Results, report.SummaryDetails.Controls, catalog)
 
 	// Extract labels from resources if labelsToCopy is specified
 	var resourceLabels map[string]map[string]string
-	if len(labelsToCopy) > 0 && allResources != nil {
-		resourceLabels = extractResourceLabels(allResources, labelsToCopy)
+	if len(labelsToCopy) > 0 && catalog != nil {
+		resourceLabels = extractResourceLabelsFromCatalog(catalog, labelsToCopy)
 	}
 
 	// only attach coverage when there is something to show
@@ -266,16 +286,23 @@ func ConvertToPostureReportWithSeverityLabelsAndCoverage(report *reporthandlingv
 
 // extractResourceLabels extracts specified labels from all resources
 func extractResourceLabels(allResources map[string]workloadinterface.IMetadata, labelsToCopy []string) map[string]map[string]string {
+	return extractResourceLabelsFromCatalog(cautils.NewMapResourceCatalog(allResources), labelsToCopy)
+}
+
+// extractResourceLabelsFromCatalog extracts specified labels from all resources in the catalog
+func extractResourceLabelsFromCatalog(catalog cautils.ResourceCatalog, labelsToCopy []string) map[string]map[string]string {
 	resourceLabels := make(map[string]map[string]string)
+	if catalog == nil || len(labelsToCopy) == 0 {
+		return resourceLabels
+	}
 
-	for resourceID, resource := range allResources {
+	catalog.ForEach(func(resourceID string, resource workloadinterface.IMetadata) bool {
 		extractedLabels := extractResourceLabelsForResource(resource, labelsToCopy)
-
-		// Only add to result if at least one label was found
 		if len(extractedLabels) > 0 {
 			resourceLabels[resourceID] = extractedLabels
 		}
-	}
+		return true
+	})
 
 	return resourceLabels
 }
@@ -331,7 +358,6 @@ func FinalizeResults(data *cautils.OPASessionObj) *reporthandlingv2.PostureRepor
 	}
 	report := reporthandlingv2.PostureReport{
 		SummaryDetails:       data.Report.SummaryDetails,
-		Metadata:             *data.Metadata,
 		ClusterAPIServerInfo: data.Report.ClusterAPIServerInfo,
 		ReportGenerationTime: data.Report.ReportGenerationTime,
 		Attributes:           data.Report.Attributes,
@@ -340,12 +366,15 @@ func FinalizeResults(data *cautils.OPASessionObj) *reporthandlingv2.PostureRepor
 		ReportID:             data.Report.ReportID,
 		ClusterCloudProvider: data.Report.ClusterCloudProvider,
 	}
+	if data.Metadata != nil {
+		report.Metadata = *data.Metadata
+	}
 
 	report.Results = make([]resourcesresults.Result, len(data.ResourcesResult))
 	finalizeResults(report.Results, data.ResourcesResult, data.ResourcesPrioritized)
 
 	if !data.OmitRawResources {
-		report.Resources = finalizeResources(report.Results, data.AllResources, data.ResourceSource)
+		report.Resources = finalizeResourcesFromCatalog(report.Results, data.GetCatalog(), data.ResourceSource)
 	}
 
 	return &report
@@ -411,9 +440,16 @@ func mapInfoToPrintInfo(controls reportsummary.ControlSummaries) []infoStars {
 }
 
 func finalizeResources(results []resourcesresults.Result, allResources map[string]workloadinterface.IMetadata, resourcesSource map[string]reporthandling.Source) []reporthandling.Resource {
+	return finalizeResourcesFromCatalog(results, cautils.NewMapResourceCatalog(allResources), resourcesSource)
+}
+
+func finalizeResourcesFromCatalog(results []resourcesresults.Result, catalog cautils.ResourceCatalog, resourcesSource map[string]reporthandling.Source) []reporthandling.Resource {
 	resources := make([]reporthandling.Resource, 0)
+	if catalog == nil {
+		return resources
+	}
 	for i := range results {
-		if obj, ok := allResources[results[i].ResourceID]; ok {
+		if obj, ok := catalog.Get(results[i].ResourceID); ok && obj != nil {
 			resource := *reporthandling.NewResourceIMetadata(obj)
 			if r, ok := resourcesSource[results[i].ResourceID]; ok {
 				resource.SetSource(&r)

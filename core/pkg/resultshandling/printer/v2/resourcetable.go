@@ -51,7 +51,7 @@ func failedResourcesInPrintOrder(opaSessionObj *cautils.OPASessionObj) []scanned
 		if !result.GetStatus(nil).IsFailed() {
 			continue
 		}
-		if _, ok := opaSessionObj.AllResources[resourceID]; !ok {
+		if res, ok := opaSessionObj.GetResource(resourceID); !ok || res == nil {
 			continue
 		}
 
@@ -79,7 +79,10 @@ func (prettyPrinter *PrettyPrinter) resourceTable(opaSessionObj *cautils.OPASess
 	for _, scanned := range failedResourcesInPrintOrder(opaSessionObj) {
 		resourceID := scanned.resourceID
 		result := opaSessionObj.ResourcesResult[resourceID]
-		resource := opaSessionObj.AllResources[resourceID]
+		resource, ok := opaSessionObj.GetResource(resourceID)
+		if !ok || resource == nil {
+			continue
+		}
 
 		fmt.Fprintf(prettyPrinter.writer, "\n%s\n", getSeparator("#"))
 

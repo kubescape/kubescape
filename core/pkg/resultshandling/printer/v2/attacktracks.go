@@ -103,8 +103,8 @@ func (prettyPrinter *PrettyPrinter) printAttackTracks(opaSessionObj *cautils.OPA
 			break
 		}
 
-		resourceObj, ok := opaSessionObj.AllResources[resource.ResourceID]
-		if !ok {
+		resourceObj, ok := opaSessionObj.GetResource(resource.ResourceID)
+		if !ok || resourceObj == nil {
 			logger.L().Debug("resource missing from AllResources, skipping",
 				helpers.String("resourceID", resource.ResourceID))
 			continue

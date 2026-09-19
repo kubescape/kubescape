@@ -705,7 +705,7 @@ func collectImageScanTargets(scanType cautils.ScanTypes, scanData *cautils.OPASe
 	imagesToScan := mapset.NewSet[ImageScanTarget]()
 	imageToCreds := make(map[string][]imagescan.RegistryCredentials)
 	var containerErrors []error
-	nodePlatforms := buildNodePlatformIndex(scanData.AllResources)
+	nodePlatforms := buildNodePlatformIndexFromCatalog(scanData.GetCatalog())
 	if scanningContext != cautils.ContextCluster {
 		// imagePullSecrets belong to a live cluster target. A manifest or repository
 		// may contain the same Secret name as the current kube context, but that must
@@ -761,10 +761,13 @@ func collectImageScanTargets(scanType cautils.ScanTypes, scanData *cautils.OPASe
 
 	if scanType == cautils.ScanTypeWorkload {
 		collectWorkload(workloadinterface.NewWorkloadObj(scanData.SingleResourceScan.GetObject()))
-	} else {
-		for _, workload := range scanData.AllResources {
-			collectWorkload(workloadinterface.NewWorkloadObj(workload.GetObject()))
-		}
+	} else if catalog := scanData.GetCatalog(); catalog != nil {
+		catalog.ForEach(func(_ string, workload workloadinterface.IMetadata) bool {
+			if workload != nil {
+				collectWorkload(workloadinterface.NewWorkloadObj(workload.GetObject()))
+			}
+			return true
+		})
 	}
 
 	return imagesToScan, imageToCreds, containerErrors

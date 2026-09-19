@@ -325,8 +325,8 @@ func testsCases(results *cautils.OPASessionObj, controls reportsummary.IControls
 					continue
 				}
 
-				resource, ok := results.AllResources[rId]
-				if !ok {
+				resource, ok := results.GetResource(rId)
+				if !ok || resource == nil {
 					logger.L().Debug("resource missing from AllResources, reporting by ID",
 						helpers.String("resourceID", rId))
 					resources[fmt.Sprintf("resourceID: %s", rId)] = nil

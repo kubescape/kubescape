@@ -3,6 +3,7 @@ package printer
 import (
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	helpersv1 "github.com/kubescape/opa-utils/reporthandling/helpers/v1"
@@ -67,6 +68,10 @@ func isKindToBeGrouped(kind string) bool {
 }
 
 func listResultSummary(controlSummary reportsummary.IControlSummary, allResources map[string]workloadinterface.IMetadata) []WorkloadSummary {
+	return listResultSummaryFromCatalog(controlSummary, cautils.NewMapResourceCatalog(allResources))
+}
+
+func listResultSummaryFromCatalog(controlSummary reportsummary.IControlSummary, catalog cautils.ResourceCatalog) []WorkloadSummary {
 	resourceIds := helpersv1.GetAllListsFromPool()
 	defer helpersv1.PutAllListsToPool(resourceIds)
 
@@ -77,11 +82,13 @@ func listResultSummary(controlSummary reportsummary.IControlSummary, allResource
 			continue
 		}
 
-		if r, ok := allResources[rId]; ok {
-			workloadsSummary = append(workloadsSummary, WorkloadSummary{
-				resource: r,
-				status:   status,
-			})
+		if catalog != nil {
+			if r, ok := catalog.Get(rId); ok && r != nil {
+				workloadsSummary = append(workloadsSummary, WorkloadSummary{
+					resource: r,
+					status:   status,
+				})
+			}
 		}
 	}
 

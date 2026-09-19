@@ -207,8 +207,8 @@ func mdWriteFailedSection(ctx context.Context, w io.Writer, controls []reportsum
 		ew.printf("|---|---|---|\n")
 
 		for _, id := range failedIDs {
-			res, ok := session.AllResources[id]
-			if !ok {
+			res, ok := session.GetResource(id)
+			if !ok || res == nil {
 				logger.L().Ctx(ctx).Debug("resource missing from AllResources", helpers.String("resourceID", id))
 				ew.printf("| %s | — | — |\n", mdEscapeCell(id))
 				continue
