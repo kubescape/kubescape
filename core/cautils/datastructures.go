@@ -2,7 +2,9 @@ package cautils
 
 import (
 	"context"
+	"reflect"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/anchore/grype/grype/match"
@@ -93,6 +95,8 @@ type OPASessionObj struct {
 	ExternalResources     ExternalResources                             // input non-k8s objects (external resources)
 	AllPolicies           *Policies                                     // list of all frameworks
 	ExcludedRules         map[string]bool                               // rules to exclude map[rule name>]X
+	catalogMu             sync.RWMutex                                  // guards lazy initialization and catalog swaps
+	catalog               ResourceCatalog                               // accessor abstraction over scan resources; access via GetCatalog/SetCatalog
 	AllResources          map[string]workloadinterface.IMetadata        // all scanned resources, map[<resource ID>]<resource>
 	ResourcesResult       map[string]resourcesresults.Result            // resources scan results, map[<resource ID>]<resource result>
 	ResourceSource        map[string]reporthandling.Source              // resources sources, map[<resource ID>]<resource result>
@@ -161,12 +165,14 @@ func NewOPASessionObj(ctx context.Context, frameworks []reporthandling.Framework
 		scanInfo.HonorInlineExceptions.SetBool(len(scanInfo.InputPatterns) > 0)
 	}
 	clusterSize := max(estimateClusterSize(k8sResources), 100)
+	allResources := make(map[string]workloadinterface.IMetadata, clusterSize)
 
 	return &OPASessionObj{
 		Report:                &reporthandlingv2.PostureReport{},
 		Policies:              frameworks,
 		K8SResources:          k8sResources,
-		AllResources:          make(map[string]workloadinterface.IMetadata, clusterSize),
+		catalog:               NewMapResourceCatalog(allResources),
+		AllResources:          allResources,
 		ResourcesResult:       make(map[string]resourcesresults.Result, clusterSize),
 		ResourcesPrioritized:  make(map[string]prioritization.PrioritizedResource, clusterSize/10),
 		InfoMap:               make(map[string]apis.StatusInfo, clusterSize/10),
@@ -256,7 +262,7 @@ func (sessionObj *OPASessionObj) SetTopWorkloads() {
 
 		source := sessionObj.ResourceSource[wl.ResourceID]
 
-		res, ok := sessionObj.AllResources[wl.ResourceID]
+		res, ok := sessionObj.GetResource(wl.ResourceID)
 		if !ok {
 			logger.L().Debug("resource missing from AllResources, skipping",
 				helpers.String("resourceID", wl.ResourceID))
@@ -291,10 +297,12 @@ func (sessionObj *OPASessionObj) SetNumberOfWorkerNodes(n int) {
 }
 
 func NewOPASessionObjMock() *OPASessionObj {
+	allResources := make(map[string]workloadinterface.IMetadata)
 	return &OPASessionObj{
 		Policies:             nil,
 		K8SResources:         nil,
-		AllResources:         make(map[string]workloadinterface.IMetadata),
+		catalog:              NewMapResourceCatalog(allResources),
+		AllResources:         allResources,
 		ResourcesResult:      make(map[string]resourcesresults.Result),
 		ResourcesPrioritized: make(map[string]prioritization.PrioritizedResource),
 		Report:               &reporthandlingv2.PostureReport{},
@@ -304,6 +312,69 @@ func NewOPASessionObjMock() *OPASessionObj {
 			},
 		},
 	}
+}
+
+// GetCatalog returns the ResourceCatalog associated with this session.
+// If catalog is nil, it is lazily initialized with a MapResourceCatalog backed by AllResources.
+// If AllResources was re-assigned to a different map, catalog is updated to wrap the new map.
+func (sessionObj *OPASessionObj) GetCatalog() ResourceCatalog {
+	sessionObj.catalogMu.RLock()
+	if sessionObj.catalog != nil {
+		if mc, ok := sessionObj.catalog.(*MapResourceCatalog); ok && mc != nil && sessionObj.AllResources != nil {
+			if reflect.ValueOf(mc.resources).Pointer() == reflect.ValueOf(sessionObj.AllResources).Pointer() {
+				defer sessionObj.catalogMu.RUnlock()
+				return sessionObj.catalog
+			}
+		} else {
+			defer sessionObj.catalogMu.RUnlock()
+			return sessionObj.catalog
+		}
+	}
+	sessionObj.catalogMu.RUnlock()
+
+	sessionObj.catalogMu.Lock()
+	defer sessionObj.catalogMu.Unlock()
+	if sessionObj.catalog == nil {
+		if sessionObj.AllResources == nil {
+			sessionObj.AllResources = make(map[string]workloadinterface.IMetadata)
+		}
+		sessionObj.catalog = NewMapResourceCatalog(sessionObj.AllResources)
+		return sessionObj.catalog
+	}
+	if mc, ok := sessionObj.catalog.(*MapResourceCatalog); ok && mc != nil && sessionObj.AllResources != nil {
+		if reflect.ValueOf(mc.resources).Pointer() != reflect.ValueOf(sessionObj.AllResources).Pointer() {
+			sessionObj.catalog = NewMapResourceCatalog(sessionObj.AllResources)
+		}
+	}
+	return sessionObj.catalog
+}
+
+// SetCatalog sets the ResourceCatalog for this session.
+func (sessionObj *OPASessionObj) SetCatalog(catalog ResourceCatalog) {
+	sessionObj.catalogMu.Lock()
+	defer sessionObj.catalogMu.Unlock()
+	if mc, ok := catalog.(*MapResourceCatalog); ok && mc == nil {
+		catalog = nil
+	}
+	if mc, ok := catalog.(*MapResourceCatalog); ok && mc != nil {
+		sessionObj.AllResources = mc.resources
+	}
+	sessionObj.catalog = catalog
+}
+
+// GetResource retrieves a resource by ID from the session's catalog.
+func (sessionObj *OPASessionObj) GetResource(id string) (workloadinterface.IMetadata, bool) {
+	return sessionObj.GetCatalog().Get(id)
+}
+
+// SetResource stores or updates a resource in the session's catalog.
+func (sessionObj *OPASessionObj) SetResource(resource workloadinterface.IMetadata) {
+	sessionObj.GetCatalog().Add(resource)
+}
+
+// ResourceCount returns the total number of unique resources in the catalog.
+func (sessionObj *OPASessionObj) ResourceCount() int {
+	return sessionObj.GetCatalog().Len()
 }
 
 type ComponentConfig struct {

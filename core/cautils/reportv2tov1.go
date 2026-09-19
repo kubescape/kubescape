@@ -92,7 +92,7 @@ func controlReportV2ToV1(opaSessionObj *OPASessionObj, frameworkName string, con
 							ruleResponse.Exception = &rulev2.Exception[0]
 						}
 
-						if fullResource, ok := opaSessionObj.AllResources[resourceID]; ok {
+						if fullResource, ok := opaSessionObj.GetResource(resourceID); ok {
 							tmp := maps.Clone(fullResource.GetObject())
 							workloadinterface.RemoveFromMap(tmp, "spec")
 							ruleResponse.AlertObject.K8SApiObjects = append(ruleResponse.AlertObject.K8SApiObjects, tmp)

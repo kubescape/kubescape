@@ -44,7 +44,7 @@ const (
 // still belong in this table. They carry an empty absPath and simply resolve no
 // lines.
 func failedResourcesInPrintOrder(opaSessionObj *cautils.OPASessionObj) []scannedResource {
-	basePath := getBasePathFromMetadata(*opaSessionObj)
+	basePath := getBasePathFromMetadata(opaSessionObj)
 
 	failed := make([]scannedResource, 0, len(opaSessionObj.ResourcesResult))
 	for resourceID, result := range opaSessionObj.ResourcesResult {

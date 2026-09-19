@@ -580,7 +580,7 @@ func (sp *SARIFPrinter) writeConfigurationSARIF(ctx context.Context, w io.Writer
 	}
 
 	run := sarif.NewRunWithInformationURI(toolName, toolInfoURI)
-	basePath := getBasePathFromMetadata(*opaSessionObj)
+	basePath := getBasePathFromMetadata(opaSessionObj)
 	failed := make([]scannedResource, 0, len(opaSessionObj.ResourcesResult))
 	for resourceID, result := range opaSessionObj.ResourcesResult {
 		if !result.GetStatus(nil).IsFailed() {
@@ -947,8 +947,8 @@ func getDocIndex(opaSessionObj *cautils.OPASessionObj, resourceID string) (int, 
 	return docIndex, true
 }
 
-func getBasePathFromMetadata(opaSessionObj cautils.OPASessionObj) string {
-	if opaSessionObj.Metadata == nil {
+func getBasePathFromMetadata(opaSessionObj *cautils.OPASessionObj) string {
+	if opaSessionObj == nil || opaSessionObj.Metadata == nil {
 		return ""
 	}
 	switch opaSessionObj.Metadata.ScanMetadata.ScanningTarget {

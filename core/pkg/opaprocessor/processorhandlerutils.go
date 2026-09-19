@@ -42,14 +42,15 @@ func (opap *OPAProcessor) updateResults(ctx context.Context) {
 	defer cautils.StopSpinner()
 
 	// remove data from all objects
-	for i := range opap.AllResources {
-		if refsByContainer := removeData(opap.AllResources[i]); len(refsByContainer) > 0 {
+	opap.GetCatalog().ForEach(func(i string, res workloadinterface.IMetadata) bool {
+		if refsByContainer := removeData(res); len(refsByContainer) > 0 {
 			if opap.EnvVarSecretRefs == nil {
 				opap.EnvVarSecretRefs = make(map[string]map[string]map[string]struct{})
 			}
 			opap.EnvVarSecretRefs[i] = refsByContainer
 		}
-	}
+		return true
+	})
 
 	processor := exceptions.NewProcessor()
 
@@ -68,7 +69,7 @@ func (opap *OPAProcessor) updateResults(ctx context.Context) {
 		t := opap.ResourcesResult[i]
 
 		// first set exceptions (reuse the same exceptions processor)
-		if resource, ok := opap.AllResources[i]; ok {
+		if resource, ok := opap.GetResource(i); ok {
 			t.SetExceptions(
 				resource,
 				resourceScopedExceptions(opap.Exceptions, i),
@@ -95,7 +96,7 @@ func (opap *OPAProcessor) updateResults(ctx context.Context) {
 	opap.Report.SummaryDetails.InitResourcesSummary(controlToInfoMap)
 
 	if opap.AuditExceptions {
-		opap.ExceptionAudit = buildExceptionAudit(loadedExceptions, opap.Exceptions, opap.ResourcesResult, opap.AllResources, opap.AllPolicies, processor, manualControlMatches)
+		opap.ExceptionAudit = buildExceptionAudit(loadedExceptions, opap.Exceptions, opap.ResourcesResult, opap.GetCatalog(), opap.AllPolicies, processor, manualControlMatches)
 	}
 }
 
@@ -318,12 +319,12 @@ func inlineExceptionFromResource(obj workloadinterface.IMetadata, clusterName st
 // policies synthesised from their kubescape.io/skip-* annotations.
 func (opap *OPAProcessor) gatherInlineExceptions() []armotypes.PostureExceptionPolicy {
 	var exceptions []armotypes.PostureExceptionPolicy
-	for _, resource := range opap.AllResources {
-		if resource == nil {
-			continue
+	opap.GetCatalog().ForEach(func(_ string, resource workloadinterface.IMetadata) bool {
+		if resource != nil {
+			exceptions = append(exceptions, inlineExceptionFromResource(resource, opap.clusterName)...)
 		}
-		exceptions = append(exceptions, inlineExceptionFromResource(resource, opap.clusterName)...)
-	}
+		return true
+	})
 	return exceptions
 }
 

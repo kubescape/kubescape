@@ -56,9 +56,7 @@ func TestCelParamObjectFinderRacesAggregatorWriteback(t *testing.T) {
 				"namespace": "default",
 			},
 		})
-		opap.mu.Lock()
-		opap.AllResources[obj.GetID()] = obj
-		opap.mu.Unlock()
+		opap.SetResource(obj)
 	}
 	close(done)
 	wg.Wait()
@@ -103,9 +101,7 @@ func TestProcessControlRacesAggregatorWriteback(t *testing.T) {
 				"namespace": "default",
 			},
 		})
-		opap.mu.Lock()
-		opap.AllResources[obj.GetID()] = obj
-		opap.mu.Unlock()
+		opap.SetResource(obj)
 	}
 	close(done)
 	wg.Wait()

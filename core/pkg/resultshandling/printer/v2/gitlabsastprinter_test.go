@@ -290,7 +290,7 @@ func TestGitLabSASTPrintConfigurationScan_SkipsUnanchorablePaths(t *testing.T) {
 			}
 
 			// the base path is non-empty, so only the path check can skip this finding
-			require.NotEmpty(t, getBasePathFromMetadata(*session))
+			require.NotEmpty(t, getBasePathFromMetadata(session))
 
 			report := gitLabReportFor(t, session)
 			assert.Empty(t, report.Vulnerabilities, "a finding GitLab cannot anchor to a repository file must not be emitted")

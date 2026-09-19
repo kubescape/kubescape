@@ -146,7 +146,7 @@ func NewOPAProcessor(sessionObj *cautils.OPASessionObj, regoDependenciesData *re
 
 	initialResourceCount := 0
 	if sessionObj != nil {
-		initialResourceCount = len(sessionObj.AllResources)
+		initialResourceCount = sessionObj.ResourceCount()
 	}
 
 	largeClusterSizeThreshold, _ := cautils.ParseIntEnvVar("LARGE_CLUSTER_SIZE", cautils.DefaultLargeClusterSize)
@@ -184,7 +184,12 @@ func indexNamespaces(sessionObj *cautils.OPASessionObj) map[string]map[string]an
 		return nil
 	}
 	index := make(map[string]map[string]any)
-	addNamespacesToIndex(index, sessionObj.AllResources)
+	sessionObj.GetCatalog().ForEach(func(_ string, res workloadinterface.IMetadata) bool {
+		if res != nil && res.GetKind() == "Namespace" && res.GetApiVersion() == "v1" && res.GetName() != "" {
+			index[res.GetName()] = res.GetObject()
+		}
+		return true
+	})
 	return index
 }
 
@@ -285,7 +290,7 @@ func (opap *OPAProcessor) ProcessRulesListener(ctx context.Context, progressList
 	// BuildNamespaceSummaries relies on ControlSummary.ComplianceScore for
 	// controls it has no resource for in a given namespace, so it must run
 	// after scorewrapper.Calculate has populated that field.
-	opap.NamespaceSummaries = cautils.BuildNamespaceSummaries(opap.Report.SummaryDetails.Controls, opap.AllResources)
+	opap.NamespaceSummaries = cautils.BuildNamespaceSummariesFromCatalog(opap.Report.SummaryDetails.Controls, opap.GetCatalog())
 
 	opap.reweightComplianceScores()
 
@@ -382,10 +387,7 @@ haveResident:
 		opap.K8SResources[k] = v
 	}
 	opap.ExternalResources = residentBatch.ExternalResources
-	opap.AllResources = make(map[string]workloadinterface.IMetadata)
-	for k, v := range residentBatch.AllResources {
-		opap.AllResources[k] = v
-	}
+	opap.GetCatalog().AddAll(residentBatch.AllResources)
 
 	// Index any Namespace objects the resident batch carries before evaluating,
 	// so CEL's namespaceObject binding is populated for this scope's objects.
@@ -423,12 +425,10 @@ haveResident:
 				return err
 			}
 
-			// Merge namespace batch resources into the session-wide map so
+			// Merge namespace batch resources into the session-wide catalog so
 			// downstream stages (exception matching, printers, image scanning,
 			// prioritisation) can access them.
-			for resourceID, resource := range batch.AllResources {
-				opap.AllResources[resourceID] = resource
-			}
+			opap.GetCatalog().AddAll(batch.AllResources)
 			for gvr, ids := range batch.K8SResources {
 				opap.K8SResources[gvr] = append(opap.K8SResources[gvr], ids...)
 			}
@@ -485,7 +485,7 @@ done:
 	// BuildNamespaceSummaries relies on ControlSummary.ComplianceScore for
 	// controls it has no resource for in a given namespace, so it must run
 	// after scorewrapper.Calculate has populated that field.
-	opap.NamespaceSummaries = cautils.BuildNamespaceSummaries(opap.Report.SummaryDetails.Controls, opap.AllResources)
+	opap.NamespaceSummaries = cautils.BuildNamespaceSummariesFromCatalog(opap.Report.SummaryDetails.Controls, opap.GetCatalog())
 
 	opap.reweightComplianceScores()
 
@@ -751,19 +751,10 @@ func (opap *OPAProcessor) wholeClusterScope() evaluationScope {
 	return newEvaluationScope(cautils.ClusterScope, nil, newResidentIndex(batch))
 }
 
-// snapshotAllResources returns a shallow copy of opap.AllResources, taken
-// under opap.mu. AllResources is grown concurrently mid-scan by aggregator
-// write-back (processRuleOnScope), so any caller that hands the map to code
-// outside opap.mu's protection — rather than doing a single guarded map
-// lookup itself — must work from a private copy, not the live map.
+// snapshotAllResources returns a shallow copy of the catalog's resources.
+// The catalog's internal RWMutex decouples scope reads from concurrent aggregator write-backs.
 func (opap *OPAProcessor) snapshotAllResources() map[string]workloadinterface.IMetadata {
-	opap.mu.Lock()
-	defer opap.mu.Unlock()
-	snapshot := make(map[string]workloadinterface.IMetadata, len(opap.AllResources))
-	for k, v := range opap.AllResources {
-		snapshot[k] = v
-	}
-	return snapshot
+	return opap.GetCatalog().All()
 }
 
 type policyControl struct {
@@ -1067,9 +1058,7 @@ func (opap *OPAProcessor) processControl(ctx context.Context, control *reporthan
 
 	if len(ruleErrs) == 0 && opap.incrementalCache != nil && controlCacheEligible(control) {
 		for resourceID, result := range resourcesAssociatedControl {
-			opap.mu.Lock()
-			resource, ok := opap.AllResources[resourceID]
-			opap.mu.Unlock()
+			resource, ok := opap.GetResource(resourceID)
 			if !ok {
 				continue
 			}
@@ -1227,15 +1216,14 @@ func (opap *OPAProcessor) processRuleOnScope(ctx context.Context, rule *reportha
 	}
 
 	if len(addedResources) > 0 {
-		opap.mu.Lock()
 		for _, inputResource := range addedResources {
 			// AllResources is also the partitioning input (evaluationScopes →
-			// PartitionResources), so this aggregator write-back grows the map
-			// mid-scan. Bucketing must keep using the frozen initialResourceCount,
-			// not the live length, or later rules could see per-namespace scopes.
-			opap.AllResources[inputResource.GetID()] = inputResource
+			// PartitionResources), so this aggregator write-back grows the catalog
+			// mid-scan (synchronized via the catalog's RWMutex). Bucketing must keep
+			// using the frozen initialResourceCount, not the live length, or later
+			// rules could see per-namespace scopes.
+			opap.SetResource(inputResource)
 		}
-		opap.mu.Unlock()
 	}
 
 	ruleResponses, celOut, err := opap.runOPAOnSingleRule(ctx, rule, inputRawResources, ruleData, ruleRegoDependenciesData, controlID)
@@ -1937,18 +1925,20 @@ func (opap *OPAProcessor) celParamObjectFinder() func(apiVersion, kind, namespac
 	}
 
 	// AllResources is grown concurrently mid-scan by other rules' aggregator
-	// write-back (processRuleOnScope, guarded by opap.mu) while this rule's CEL
-	// evaluation snapshots it here. Without the same lock this is an
+	// write-back (processRuleOnScope, guarded by the catalog's RWMutex) while this rule's CEL
+	// evaluation snapshots it here. Without catalog synchronization this would be an
 	// unsynchronized concurrent map read/write, which Go's runtime can turn
 	// into a process-wide crash (fatal error: concurrent map iteration and map
 	// write), not just a race-detector warning.
-	opap.mu.Lock()
-	idx := make(map[string]map[string]any, len(opap.AllResources))
-	for _, res := range opap.AllResources {
-		key := res.GetApiVersion() + "/" + res.GetKind() + "/" + res.GetNamespace() + "/" + res.GetName()
-		idx[key] = res.GetObject()
-	}
-	opap.mu.Unlock()
+	catalog := opap.GetCatalog()
+	idx := make(map[string]map[string]any, catalog.Len())
+	catalog.ForEach(func(_ string, res workloadinterface.IMetadata) bool {
+		if res != nil {
+			key := res.GetApiVersion() + "/" + res.GetKind() + "/" + res.GetNamespace() + "/" + res.GetName()
+			idx[key] = res.GetObject()
+		}
+		return true
+	})
 
 	return func(apiVersion, kind, namespace, name string) (map[string]any, bool) {
 		obj, ok := idx[apiVersion+"/"+kind+"/"+namespace+"/"+name]
