@@ -251,4 +251,3 @@ func findScanObjectResource(mappedResources map[string][]workloadinterface.IMeta
 
 	return matches.workloads[0], nil
 }
-

@@ -115,6 +115,23 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 			if err := validateKubeContextsSupported(cmd, &scanInfo); err != nil {
 				return err
 			}
+			if cmd.Flags().Changed("whole-cluster-policy") {
+				raw := strings.TrimSpace(string(scanInfo.WholeClusterPolicy))
+				if raw == "" {
+					return cautils.ValidateWholeClusterPolicy(scanInfo.WholeClusterPolicy)
+				}
+				resolved, err := cautils.ResolveWholeClusterPolicy(raw)
+				if err != nil {
+					return err
+				}
+				scanInfo.WholeClusterPolicy = resolved
+			} else {
+				resolved, err := cautils.ResolveWholeClusterPolicy("")
+				if err != nil {
+					return err
+				}
+				scanInfo.WholeClusterPolicy = resolved
+			}
 			captureKubeconfigSelection(cmd, &scanInfo)
 			applyRegistryCredentialsFromEnv(cmd, &scanInfo)
 			return nil
@@ -283,6 +300,7 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	scanCmd.PersistentFlags().DurationVar(&scanInfo.ScanTimeout, "scan-timeout", 0, "Maximum duration for the scan (e.g. 5m, 30s, 1h). 0 means no timeout. When the timeout is reached the scan exits with a non-zero code.")
 	scanCmd.PersistentFlags().DurationVar(&scanInfo.ControlTimeout, "control-timeout", 0, "Maximum duration for evaluating a single control (e.g. 30s, 1m). 0 means no timeout. Controls that exceed this are marked as not evaluated and the scan continues. Must be lower than --scan-timeout when both are set.")
 	scanCmd.PersistentFlags().BoolVar(&scanInfo.EnableStreaming, "enable-streaming", false, "Enable resource streaming for large clusters to reduce memory usage. Resources are processed in batches instead of loading all at once. Automatically enabled for clusters with >2500 resources.")
+	scanCmd.PersistentFlags().StringVar((*string)(&scanInfo.WholeClusterPolicy), "whole-cluster-policy", string(cautils.WholeClusterPolicyProjected), "Execution policy for whole-cluster controls (C-0261, C-0266, C-0267, C-0272): 'projected' (incremental projection of matching resources), 'fallback' (materialize full cluster in memory), 'skip' (skip whole-cluster controls for minimum memory), or 'verify' (debug parity check between projected and fallback).")
 	scanCmd.PersistentFlags().BoolVar(&scanInfo.DryRun, "dry-run", false, "Check whether the current credentials can list every resource type the requested policies need, without collecting resources or evaluating controls. Cluster scans only.")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.OtelEndpoint, "otel-endpoint", "", fmt.Sprintf("Export scan traces and metrics to an OTLP collector, e.g. --otel-endpoint localhost:4317. Accepts host:port (plaintext) or a http(s):// URL. When unset, the standard %s environment variable is used; when neither is set no telemetry is collected.", telemetry.EnvEndpoint))
 	scanCmd.PersistentFlags().BoolVar(&scanInfo.Incremental, "incremental", false, "Cache the verdict for each resource, keyed by a hash of its spec/metadata plus the controls-config version, and skip re-evaluating unchanged resources on the next scan. Opt-in; scan output is unaffected. Cache automatically invalidates when the controls-config version changes; clear it manually with 'kubescape config delete cache'.")
