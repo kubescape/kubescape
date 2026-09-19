@@ -654,10 +654,4 @@ func ecrFinalPage(vulnerabilityID string) *ecr.DescribeImageScanFindingsOutput {
 	return page
 }
 
-func vulnerabilityIDs(report ContainerImageVulnerabilityReport) []string {
-	ids := make([]string, 0, len(report.Vulnerabilities))
-	for _, vulnerability := range report.Vulnerabilities {
-		ids = append(ids, vulnerability.ID)
-	}
-	return ids
-}
+
