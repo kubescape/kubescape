@@ -28,6 +28,11 @@ var _ IContainerImageVulnerabilityAdaptor = (*AzureAdaptor)(nil)
 
 var validKQLInputRegex = regexp.MustCompile(`^[a-zA-Z0-9.\-_/:]+$`)
 
+const (
+	maxAzureVulnerabilities    = 1000
+	maxAzureVulnerabilityPages = 50
+)
+
 // AzureAPI defines the interface for the Azure Resource Graph functions we use, enabling mocking in tests.
 type AzureAPI interface {
 	Resources(ctx context.Context, query armresourcegraph.QueryRequest, options *armresourcegraph.ClientResourcesOptions) (armresourcegraph.ClientResourcesResponse, error)
@@ -260,12 +265,10 @@ func (a *AzureAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs []
 		`, registryName, imageID.Repository, imageID.Hash)
 
 			var skipToken *string
+			seenSkipTokens := make(map[string]struct{})
 			count := 0
-			const maxVulns = 1000
-			const maxPages = 50
-			truncatedByPageLimit := false
 
-			for page := 0; page < maxPages; page++ {
+			for pagesFetched := 0; ; pagesFetched++ {
 				req := armresourcegraph.QueryRequest{
 					Query: to.Ptr(queryStr),
 					Options: &armresourcegraph.QueryRequestOptions{
@@ -287,9 +290,9 @@ func (a *AzureAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs []
 					}
 					malformed := false
 					for _, item := range dataList {
-						if count >= maxVulns {
+						if count >= maxAzureVulnerabilities {
 							// Log truncation rather than failing hard
-							logger.L().Warning("truncated vulnerabilities", helpers.String("repository", imageID.Repository), helpers.Int("limit", maxVulns))
+							logger.L().Warning("truncated vulnerabilities", helpers.String("repository", imageID.Repository), helpers.Int("limit", maxAzureVulnerabilities))
 							break
 						}
 
@@ -309,7 +312,7 @@ func (a *AzureAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs []
 						// Try to get primary CVE if it exists
 						if cves := getMultipleNestedStringSafe(row, "cve", "title"); len(cves) > 0 {
 							for _, cve := range cves {
-								if count >= maxVulns {
+								if count >= maxAzureVulnerabilities {
 									break
 								}
 								newVuln := vuln
@@ -327,25 +330,51 @@ func (a *AzureAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs []
 					}
 				}
 
-				if count >= maxVulns || res.SkipToken == nil || *res.SkipToken == "" {
+				if count >= maxAzureVulnerabilities {
 					break
 				}
-				skipToken = res.SkipToken
 
-				if page == maxPages-1 {
-					// About to exit the loop solely because maxPages was reached,
-					// while the server still has more pages (SkipToken is set).
-					truncatedByPageLimit = true
+				nextToken, hasNextPage, cursorErr := nextAzureVulnerabilityToken(
+					res.SkipToken,
+					seenSkipTokens,
+					pagesFetched+1,
+				)
+				if cursorErr != nil {
+					return report, fmt.Errorf("failed to query vulnerabilities for repository %s: %w", imageID.Repository, cursorErr)
 				}
-			}
-
-			if truncatedByPageLimit {
-				return report, fmt.Errorf("exceeded max pages (%d) fetching vulnerabilities for repository %s", maxPages, imageID.Repository)
+				if !hasNextPage {
+					break
+				}
+				skipToken = to.Ptr(nextToken)
 			}
 
 			return report, nil
 		},
 	)
+}
+
+// nextAzureVulnerabilityToken decides whether another Resource Graph request
+// can make progress. Skip tokens are opaque, but they must change between
+// pages. Reusing any token already seen means the service has formed a cycle;
+// continuing would append duplicate findings until the page cap is reached.
+func nextAzureVulnerabilityToken(skipToken *string, seen map[string]struct{}, pagesFetched int) (string, bool, error) {
+	if skipToken == nil || *skipToken == "" {
+		return "", false, nil
+	}
+
+	token := *skipToken
+	if strings.TrimSpace(token) == "" {
+		return "", false, fmt.Errorf("azure resource graph pagination returned a blank skip token")
+	}
+	if _, exists := seen[token]; exists {
+		return "", false, fmt.Errorf("azure resource graph pagination repeated skip token %q", token)
+	}
+	if pagesFetched >= maxAzureVulnerabilityPages {
+		return "", false, fmt.Errorf("exceeded max pages (%d) fetching azure vulnerabilities", maxAzureVulnerabilityPages)
+	}
+
+	seen[token] = struct{}{}
+	return token, true, nil
 }
 
 // GetImagesInformation retrieves the BOM and manifest information for a list of image identifiers.

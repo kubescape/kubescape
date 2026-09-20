@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -273,6 +274,383 @@ func TestAzureAdaptor_GetImagesVulnerabilities_Cap(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Len(t, reports, 1)
 	assert.Len(t, reports[0].Vulnerabilities, 1000) // Truncated cleanly
+}
+
+func TestNextAzureVulnerabilityToken(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name         string
+		skipToken    *string
+		seen         map[string]struct{}
+		pagesFetched int
+		wantToken    string
+		wantNext     bool
+		wantError    string
+	}{
+		{
+			name:         "nil token completes pagination",
+			seen:         map[string]struct{}{},
+			pagesFetched: 1,
+		},
+		{
+			name:         "empty token completes pagination",
+			skipToken:    to.Ptr(""),
+			seen:         map[string]struct{}{},
+			pagesFetched: 1,
+		},
+		{
+			name:         "new token advances pagination",
+			skipToken:    to.Ptr("page-two"),
+			seen:         map[string]struct{}{},
+			pagesFetched: 1,
+			wantToken:    "page-two",
+			wantNext:     true,
+		},
+		{ //nolint:gosec // opaque pagination cursor fixture, not a credential
+			name:         "opaque token is not normalized",
+			skipToken:    to.Ptr(" token-with-space "),
+			seen:         map[string]struct{}{},
+			pagesFetched: 1,
+			wantToken:    " token-with-space ",
+			wantNext:     true,
+		},
+		{
+			name:         "blank token is malformed",
+			skipToken:    to.Ptr(" \t "),
+			seen:         map[string]struct{}{},
+			pagesFetched: 1,
+			wantError:    "blank skip token",
+		},
+		{
+			name:         "immediate repeat is rejected",
+			skipToken:    to.Ptr("page-two"),
+			seen:         map[string]struct{}{"page-two": {}},
+			pagesFetched: 2,
+			wantError:    `repeated skip token "page-two"`,
+		},
+		{
+			name:         "cycle to old token is rejected",
+			skipToken:    to.Ptr("page-two"),
+			seen:         map[string]struct{}{"page-two": {}, "page-three": {}},
+			pagesFetched: 3,
+			wantError:    `repeated skip token "page-two"`,
+		},
+		{
+			name:         "last allowed page may complete",
+			seen:         map[string]struct{}{},
+			pagesFetched: maxAzureVulnerabilityPages,
+		},
+		{
+			name:         "last allowed page may not continue",
+			skipToken:    to.Ptr("too-many"),
+			seen:         map[string]struct{}{},
+			pagesFetched: maxAzureVulnerabilityPages,
+			wantError:    "exceeded max pages",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			before := len(tt.seen)
+			token, hasNext, err := nextAzureVulnerabilityToken(tt.skipToken, tt.seen, tt.pagesFetched)
+
+			if tt.wantError != "" {
+				require.ErrorContains(t, err, tt.wantError)
+				assert.Empty(t, token)
+				assert.False(t, hasNext)
+				assert.Len(t, tt.seen, before)
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantToken, token)
+			assert.Equal(t, tt.wantNext, hasNext)
+			if tt.wantNext {
+				assert.Contains(t, tt.seen, tt.wantToken)
+			} else {
+				assert.Len(t, tt.seen, before)
+			}
+		})
+	}
+}
+
+func TestAzureAdaptorPaginationStopsOnImmediateTokenRepeat(t *testing.T) {
+	t.Parallel()
+
+	callCount := 0
+	requestedTokens := []string{}
+	adaptor := newAzurePaginationTestAdaptor(func(req armresourcegraph.QueryRequest) (armresourcegraph.ClientResourcesResponse, error) {
+		callCount++
+		requestedTokens = append(requestedTokens, azureRequestSkipToken(req))
+		return azureVulnerabilityPage("stalled", fmt.Sprintf("CVE-%d", callCount)), nil
+	})
+
+	reports, err := adaptor.GetImagesVulnerabilities(context.Background(), []ContainerImageIdentifier{
+		azureTestImage("stalled-repository"),
+	})
+
+	require.ErrorContains(t, err, `repeated skip token "stalled"`)
+	assert.Equal(t, 2, callCount, "the repeated token must stop a third network request")
+	assert.Equal(t, []string{"", "stalled"}, requestedTokens)
+	require.Len(t, reports, 1)
+	assert.Equal(t, []string{"CVE-1", "CVE-2"}, vulnerabilityIDs(reports[0]))
+}
+
+func TestAzureAdaptorPaginationStopsOnTokenCycle(t *testing.T) {
+	t.Parallel()
+
+	pages := []armresourcegraph.ClientResourcesResponse{
+		azureVulnerabilityPage("cursor-a", "CVE-FIRST"),
+		azureVulnerabilityPage("cursor-b", "CVE-SECOND"),
+		azureVulnerabilityPage("cursor-a", "CVE-THIRD"),
+	}
+	requests := []string{}
+	adaptor := newAzurePaginationTestAdaptor(func(req armresourcegraph.QueryRequest) (armresourcegraph.ClientResourcesResponse, error) {
+		requests = append(requests, azureRequestSkipToken(req))
+		return pages[len(requests)-1], nil
+	})
+
+	reports, err := adaptor.GetImagesVulnerabilities(context.Background(), []ContainerImageIdentifier{
+		azureTestImage("cyclic-repository"),
+	})
+
+	require.ErrorContains(t, err, `repeated skip token "cursor-a"`)
+	assert.Equal(t, []string{"", "cursor-a", "cursor-b"}, requests)
+	require.Len(t, reports, 1)
+	assert.Equal(t, []string{"CVE-FIRST", "CVE-SECOND", "CVE-THIRD"}, vulnerabilityIDs(reports[0]))
+}
+
+func TestAzureAdaptorPaginationRejectsBlankToken(t *testing.T) {
+	t.Parallel()
+
+	callCount := 0
+	adaptor := newAzurePaginationTestAdaptor(func(armresourcegraph.QueryRequest) (armresourcegraph.ClientResourcesResponse, error) {
+		callCount++
+		return azureVulnerabilityPage("  ", "CVE-PARTIAL"), nil
+	})
+
+	reports, err := adaptor.GetImagesVulnerabilities(context.Background(), []ContainerImageIdentifier{
+		azureTestImage("blank-token"),
+	})
+
+	require.ErrorContains(t, err, "blank skip token")
+	assert.Equal(t, 1, callCount)
+	require.Len(t, reports, 1)
+	assert.Equal(t, []string{"CVE-PARTIAL"}, vulnerabilityIDs(reports[0]))
+}
+
+func TestAzureAdaptorPaginationTreatsEmptyTokenAsCompletion(t *testing.T) {
+	t.Parallel()
+
+	callCount := 0
+	adaptor := newAzurePaginationTestAdaptor(func(armresourcegraph.QueryRequest) (armresourcegraph.ClientResourcesResponse, error) {
+		callCount++
+		return azureVulnerabilityPage("", "CVE-FINAL"), nil
+	})
+
+	reports, err := adaptor.GetImagesVulnerabilities(context.Background(), []ContainerImageIdentifier{
+		azureTestImage("empty-token"),
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, 1, callCount)
+	require.Len(t, reports, 1)
+	assert.Equal(t, []string{"CVE-FINAL"}, vulnerabilityIDs(reports[0]))
+}
+
+func TestAzureAdaptorPaginationUsesEveryDistinctTokenOnce(t *testing.T) {
+	t.Parallel()
+
+	pages := map[string]armresourcegraph.ClientResourcesResponse{
+		"":       azureVulnerabilityPage("second", "CVE-FIRST"),
+		"second": azureVulnerabilityPage("third", "CVE-SECOND"),
+		"third":  azureFinalVulnerabilityPage("CVE-THIRD"),
+	}
+	requests := []string{}
+	adaptor := newAzurePaginationTestAdaptor(func(req armresourcegraph.QueryRequest) (armresourcegraph.ClientResourcesResponse, error) {
+		token := azureRequestSkipToken(req)
+		requests = append(requests, token)
+		page, ok := pages[token]
+		if !ok {
+			return armresourcegraph.ClientResourcesResponse{}, fmt.Errorf("unexpected token %q", token)
+		}
+		return page, nil
+	})
+
+	reports, err := adaptor.GetImagesVulnerabilities(context.Background(), []ContainerImageIdentifier{
+		azureTestImage("healthy"),
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, []string{"", "second", "third"}, requests)
+	require.Len(t, reports, 1)
+	assert.Equal(t, []string{"CVE-FIRST", "CVE-SECOND", "CVE-THIRD"}, vulnerabilityIDs(reports[0]))
+}
+
+func TestAzureAdaptorPaginationKeepsOtherImageResults(t *testing.T) {
+	t.Parallel()
+
+	callsByRepository := map[string]int{}
+	adaptor := newAzurePaginationTestAdaptor(func(req armresourcegraph.QueryRequest) (armresourcegraph.ClientResourcesResponse, error) {
+		query := toValue(req.Query)
+		repository := "healthy"
+		if strings.Contains(query, `repositoryName == "stalled"`) {
+			repository = "stalled"
+		}
+		callsByRepository[repository]++
+		if repository == "healthy" {
+			return azureFinalVulnerabilityPage("CVE-HEALTHY"), nil
+		}
+		return azureVulnerabilityPage("same", fmt.Sprintf("CVE-STALL-%d", callsByRepository[repository])), nil
+	})
+
+	reports, err := adaptor.GetImagesVulnerabilities(context.Background(), []ContainerImageIdentifier{
+		azureTestImage("healthy"),
+		azureTestImage("stalled"),
+	})
+
+	require.ErrorContains(t, err, "repeated skip token")
+	require.Len(t, reports, 2)
+	assert.Equal(t, []string{"CVE-HEALTHY"}, vulnerabilityIDs(reports[0]))
+	assert.Equal(t, []string{"CVE-STALL-1", "CVE-STALL-2"}, vulnerabilityIDs(reports[1]))
+	assert.Equal(t, map[string]int{"healthy": 1, "stalled": 2}, callsByRepository)
+}
+
+func TestAzureAdaptorPaginationKeepsPartialDataOnAPIFailure(t *testing.T) {
+	t.Parallel()
+
+	callCount := 0
+	adaptor := newAzurePaginationTestAdaptor(func(armresourcegraph.QueryRequest) (armresourcegraph.ClientResourcesResponse, error) {
+		callCount++
+		if callCount == 1 {
+			return azureVulnerabilityPage("second", "CVE-FIRST"), nil
+		}
+		return armresourcegraph.ClientResourcesResponse{}, fmt.Errorf("temporary ARG failure")
+	})
+
+	reports, err := adaptor.GetImagesVulnerabilities(context.Background(), []ContainerImageIdentifier{
+		azureTestImage("partial"),
+	})
+
+	require.ErrorContains(t, err, "temporary ARG failure")
+	require.Len(t, reports, 1)
+	assert.Equal(t, []string{"CVE-FIRST"}, vulnerabilityIDs(reports[0]))
+	assert.Equal(t, 2, callCount)
+}
+
+func TestAzureAdaptorPaginationCursorStateIsScopedPerImage(t *testing.T) {
+	t.Parallel()
+
+	callsByRepository := map[string]int{}
+	adaptor := newAzurePaginationTestAdaptor(func(req armresourcegraph.QueryRequest) (armresourcegraph.ClientResourcesResponse, error) {
+		query := toValue(req.Query)
+		repository := "first"
+		if strings.Contains(query, `repositoryName == "second"`) {
+			repository = "second"
+		}
+		callsByRepository[repository]++
+		if req.Options.SkipToken == nil {
+			return azureVulnerabilityPage("shared-token", repository+"-first"), nil
+		}
+		assert.Equal(t, "shared-token", *req.Options.SkipToken)
+		return azureFinalVulnerabilityPage(repository + "-second"), nil
+	})
+
+	reports, err := adaptor.GetImagesVulnerabilities(context.Background(), []ContainerImageIdentifier{
+		azureTestImage("first"),
+		azureTestImage("second"),
+	})
+
+	require.NoError(t, err)
+	require.Len(t, reports, 2)
+	assert.Equal(t, []string{"first-first", "first-second"}, vulnerabilityIDs(reports[0]))
+	assert.Equal(t, []string{"second-first", "second-second"}, vulnerabilityIDs(reports[1]))
+	assert.Equal(t, map[string]int{"first": 2, "second": 2}, callsByRepository)
+}
+
+func TestAzureAdaptorPaginationAdvancesAcrossEmptyDataPages(t *testing.T) {
+	t.Parallel()
+
+	requests := []string{}
+	adaptor := newAzurePaginationTestAdaptor(func(req armresourcegraph.QueryRequest) (armresourcegraph.ClientResourcesResponse, error) {
+		token := azureRequestSkipToken(req)
+		requests = append(requests, token)
+		if token == "" {
+			return armresourcegraph.ClientResourcesResponse{
+				QueryResponse: armresourcegraph.QueryResponse{SkipToken: to.Ptr("after-empty")},
+			}, nil
+		}
+		return azureFinalVulnerabilityPage("CVE-AFTER-EMPTY"), nil
+	})
+
+	reports, err := adaptor.GetImagesVulnerabilities(context.Background(), []ContainerImageIdentifier{
+		azureTestImage("sparse"),
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, []string{"", "after-empty"}, requests)
+	require.Len(t, reports, 1)
+	assert.Equal(t, []string{"CVE-AFTER-EMPTY"}, vulnerabilityIDs(reports[0]))
+}
+
+func newAzurePaginationTestAdaptor(fetch func(armresourcegraph.QueryRequest) (armresourcegraph.ClientResourcesResponse, error)) *AzureAdaptor {
+	adaptor := NewAzureAdaptor()
+	adaptor.registryHost = "test.azurecr.io"
+	adaptor.client = &mockAzureClient{resourcesOut: fetch}
+	return adaptor
+}
+
+func azureTestImage(repository string) ContainerImageIdentifier {
+	return ContainerImageIdentifier{
+		Registry:   "test.azurecr.io",
+		Repository: repository,
+		Hash:       "sha256:1234",
+	}
+}
+
+func azureVulnerabilityPage(skipToken, vulnerabilityID string) armresourcegraph.ClientResourcesResponse {
+	return armresourcegraph.ClientResourcesResponse{
+		QueryResponse: armresourcegraph.QueryResponse{
+			Data: []interface{}{
+				map[string]interface{}{
+					"id":          vulnerabilityID,
+					"severity":    "High",
+					"description": "fixture vulnerability",
+				},
+			},
+			SkipToken: to.Ptr(skipToken),
+		},
+	}
+}
+
+func azureFinalVulnerabilityPage(vulnerabilityID string) armresourcegraph.ClientResourcesResponse {
+	page := azureVulnerabilityPage("unused", vulnerabilityID)
+	page.SkipToken = nil
+	return page
+}
+
+func azureRequestSkipToken(req armresourcegraph.QueryRequest) string {
+	if req.Options == nil || req.Options.SkipToken == nil {
+		return ""
+	}
+	return *req.Options.SkipToken
+}
+
+func toValue(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
+}
+
+func vulnerabilityIDs(report ContainerImageVulnerabilityReport) []string {
+	ids := make([]string, 0, len(report.Vulnerabilities))
+	for _, vulnerability := range report.Vulnerabilities {
+		ids = append(ids, vulnerability.ID)
+	}
+	return ids
 }
 
 // --- newACRKeychain / azureACRKeychain ---
