@@ -89,7 +89,7 @@ func NewPathLocationResolver(yamlPath string) (*PathLocationResolver, error) {
 // at the enclosing block. A path that resolves to nothing at all yields the
 // zero Location, which callers read as "no line".
 func (l *PathLocationResolver) ResolveLocation(path string, nodeIndex int) (Location, error) {
-	if nodeIndex >= len(l.yamlNodes) {
+	if nodeIndex < 0 || nodeIndex >= len(l.yamlNodes) {
 		return Location{}, fmt.Errorf("node index [%d] out of range [%d]", nodeIndex, len(l.yamlNodes))
 	}
 
