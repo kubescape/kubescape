@@ -222,6 +222,7 @@ type ScanInfo struct {
 	BaselineGranularity       string            // Comparison unit for the baseline diff: "evidence" (default) or "control"
 	KubeContexts              []string          // --kube-contexts: scan each of these kube contexts sequentially, one report per context (fleet mode)
 	FleetReport               string            // --fleet-report: with --kube-contexts, also write one combined JSON report across every context to this path
+	ReferenceCluster          string            // --reference-cluster: with --fleet-report, the kube context whose findings the other clusters are read against
 }
 
 type Getters struct {

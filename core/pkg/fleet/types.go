@@ -16,6 +16,10 @@ type FleetReport struct {
 	// produced it. It is derived from Clusters, so the two cannot disagree.
 	Compliance    ComplianceRollup   `json:"compliance"`
 	ControlMatrix FleetControlMatrix `json:"controlMatrix"`
+	// Divergence is the controls the clusters do not agree on. It is derived
+	// from ControlMatrix, so it cannot report a disagreement the matrix does
+	// not show.
+	Divergence FleetDivergence `json:"divergence"`
 }
 
 // FleetMetadata describes the run that produced the report.

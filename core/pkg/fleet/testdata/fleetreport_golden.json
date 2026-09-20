@@ -52,6 +52,29 @@
               "score": 0,
               "complianceScore": 0,
               "scoreFactor": 8
+            },
+            "C-0260": {
+              "statusInfo": {
+                "status": "skipped",
+                "subStatus": "irrelevant"
+              },
+              "controlID": "C-0260",
+              "name": "Missing network policy",
+              "status": "skipped",
+              "resourceIDs": {},
+              "ResourceCounters": {
+                "passedResources": 0,
+                "failedResources": 0,
+                "skippedResources": 0,
+                "excludedResources": 0
+              },
+              "subStatusCounters": {
+                "ignoredResources": 0,
+                "acknowledgedResources": 0
+              },
+              "score": 0,
+              "complianceScore": 100,
+              "scoreFactor": 8
             }
           },
           "status": "",
@@ -168,6 +191,28 @@
               },
               "score": 0,
               "complianceScore": 100,
+              "scoreFactor": 8
+            },
+            "C-0260": {
+              "statusInfo": {
+                "status": "skipped",
+                "subStatus": "notEvaluated"
+              },
+              "controlID": "C-0260",
+              "name": "Missing network policy",
+              "status": "skipped",
+              "resourceIDs": {},
+              "ResourceCounters": {
+                "passedResources": 0,
+                "failedResources": 0,
+                "skippedResources": 0,
+                "excludedResources": 0
+              },
+              "subStatusCounters": {
+                "ignoredResources": 0,
+                "acknowledgedResources": 0
+              },
+              "score": 0,
               "scoreFactor": 8
             }
           },
@@ -299,6 +344,56 @@
             "complianceScore": 100
           }
         }
+      },
+      {
+        "controlID": "C-0260",
+        "name": "Missing network policy",
+        "severity": "High",
+        "byCluster": {
+          "prod": {
+            "status": "skipped",
+            "failedResources": 0,
+            "complianceScore": 100
+          },
+          "staging": {
+            "status": "notEvaluated",
+            "failedResources": 0,
+            "complianceScore": -1
+          }
+        }
+      }
+    ]
+  },
+  "divergence": {
+    "referenceCluster": "prod",
+    "controls": [
+      {
+        "controlID": "C-0016",
+        "name": "Allow privilege escalation",
+        "severity": "High",
+        "postureDiverges": true,
+        "coverageGap": false,
+        "referenceStatus": "failed",
+        "passed": [
+          "staging"
+        ],
+        "failed": [
+          "prod"
+        ]
+      },
+      {
+        "controlID": "C-0260",
+        "name": "Missing network policy",
+        "severity": "High",
+        "postureDiverges": false,
+        "coverageGap": true,
+        "referenceStatus": "skipped",
+        "skipped": [
+          "prod"
+        ],
+        "notEvaluated": [
+          "staging"
+        ]
       }
     ]
   }
