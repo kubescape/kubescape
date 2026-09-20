@@ -179,3 +179,72 @@ func TestOutputPaths_PlansOneDestinationPerFile(t *testing.T) {
 		noRelativePath: filepath.Join(outputDir, "other.yaml"),
 	}, paths)
 }
+
+// TestApplyChanges_OutputDirRefusesASymlinkThatLeavesTheDirectory: the relative
+// path is report input and --no-confirm lets the output directory already have
+// content, so a symlink below it could carry a write somewhere else. "sub/x"
+// passes OutputPaths' lexical check, and only resolving it shows where it goes.
+func TestApplyChanges_OutputDirRefusesASymlinkThatLeavesTheDirectory(t *testing.T) {
+	baseDir := t.TempDir()
+	source := writeManifest(t, baseDir, "pod.yaml", twoPods)
+	outputDir := t.TempDir()
+	outside := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(outputDir, "sub")); err != nil {
+		t.Skipf("cannot create a symlink here: %v", err)
+	}
+
+	h := outputDirHandler(baseDir, outputDir)
+	count, errs := h.ApplyChanges(context.Background(), []ResourceFixInfo{imageFix(source, "sub/pod.yaml", 0)})
+
+	assert.Equal(t, 0, count)
+	require.Len(t, errs, 1)
+	assert.NoFileExists(t, filepath.Join(outside, "pod.yaml"), "nothing may be written outside the output directory")
+}
+
+// TestApplyChanges_OutputDirRefusesADestinationItAlreadyWrote: two destinations
+// that OutputPaths sees as different paths can still be one file. A link in the
+// directory stands in here for the case-insensitive filesystem where Pod.yaml
+// and pod.yaml are the same file. Whichever is written second must be refused
+// rather than truncate the first.
+func TestApplyChanges_OutputDirRefusesADestinationItAlreadyWrote(t *testing.T) {
+	baseDir := t.TempDir()
+	otherDir := t.TempDir()
+	first := writeManifest(t, baseDir, "a.yaml", twoPods)
+	second := writeManifest(t, otherDir, "b.yaml", twoPods)
+	outputDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(outputDir, "a.yaml"), nil, 0600))
+	if err := os.Symlink("a.yaml", filepath.Join(outputDir, "b.yaml")); err != nil {
+		t.Skipf("cannot create a symlink here: %v", err)
+	}
+
+	h := outputDirHandler(baseDir, outputDir)
+	count, errs := h.ApplyChanges(context.Background(), []ResourceFixInfo{imageFix(first, "a.yaml", 0), imageFix(second, "b.yaml", 0)})
+
+	assert.Equal(t, 1, count, "one of the two must be written")
+	require.Len(t, errs, 1, "and the other refused")
+	assert.Contains(t, errs[0].Error(), "already written")
+}
+
+// TestApplyChanges_OutputDirTightensAnExistingDestination: the mode passed to
+// OpenFile only applies to a file it creates. An existing, more readable
+// destination must not keep its mode once it holds a private manifest.
+func TestApplyChanges_OutputDirTightensAnExistingDestination(t *testing.T) {
+	if os.PathSeparator == '\\' {
+		t.Skip("permission bits are not meaningful on Windows")
+	}
+
+	baseDir := t.TempDir()
+	source := writeManifest(t, baseDir, "pod.yaml", twoPods) // written 0600
+	outputDir := t.TempDir()
+	existing := filepath.Join(outputDir, "pod.yaml")
+	require.NoError(t, os.WriteFile(existing, []byte("stale"), 0600))
+	require.NoError(t, os.Chmod(existing, 0644)) // wider than the 0600 source
+
+	h := outputDirHandler(baseDir, outputDir)
+	_, errs := h.ApplyChanges(context.Background(), []ResourceFixInfo{imageFix(source, "pod.yaml", 0)})
+	require.Empty(t, errs)
+
+	info, err := os.Stat(existing)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0600), info.Mode().Perm())
+}

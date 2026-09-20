@@ -1090,11 +1090,16 @@ func (h *FixHandler) ApplyChanges(ctx context.Context, resourcesToFix []Resource
 	// Resolved in full before the first write, so a destination that cannot be
 	// honoured fails the run with nothing written rather than part-way through.
 	var outputPaths map[string]string
+	var output *outputTree
 	if h.fixInfo != nil && h.fixInfo.OutputDir != "" {
 		var err error
 		if outputPaths, err = h.OutputPaths(resourcesToFix); err != nil {
 			return 0, []error{err}
 		}
+		if output, err = openOutputTree(h.fixInfo.OutputDir); err != nil {
+			return 0, []error{err}
+		}
+		defer output.close()
 	}
 
 	fileYamlExpressions := h.getFileYamlExpressions(resourcesToFix)
@@ -1114,8 +1119,8 @@ func (h *FixHandler) ApplyChanges(ctx context.Context, resourcesToFix []Resource
 			continue
 		}
 
-		if outputPaths != nil {
-			err = writeFixedCopy(filepath, outputPaths[filepath], fixedContent)
+		if output != nil {
+			err = output.write(filepath, outputPaths[filepath], fixedContent)
 		} else {
 			err = writeFixesToFile(filepath, fixedContent)
 		}
@@ -1628,11 +1633,42 @@ func writeFixesToFile(path, content string) error {
 	return writeAndClose(file, content)
 }
 
-// writeFixedCopy writes the fixed content of source to destination, creating
-// the directories in between. The copy takes the source's permissions: it is
-// the same manifest, and a fixed copy of a private file should not come out
-// more readable than the original.
-func writeFixedCopy(source, destination, content string) error {
+// outputTree writes fixed copies under --output-dir.
+//
+// Every write goes through an os.Root opened on the directory. OutputPaths
+// already refuses a relative path that climbs out lexically, but the path is
+// report input and the directory may already have content (--no-confirm allows
+// that), so a symlink below it could still carry a write somewhere else. The
+// root refuses any path that resolves outside the directory, and does so at the
+// moment of the operation, which a check made ahead of os.OpenFile cannot.
+type outputTree struct {
+	dir  string
+	root *os.Root
+	// written identifies the copies made so far in this run, see write.
+	written []os.FileInfo
+}
+
+func openOutputTree(dir string) (*outputTree, error) {
+	dir = filepath.Clean(dir)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return nil, fmt.Errorf("failed to create output directory %q: %w", dir, err)
+	}
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open output directory %q: %w", dir, err)
+	}
+	return &outputTree{dir: dir, root: root}, nil
+}
+
+func (o *outputTree) close() {
+	_ = o.root.Close()
+}
+
+// write writes the fixed content of source to destination, a path under the
+// output directory, creating the directories in between. The copy takes the
+// source's permissions: it is the same manifest, and a fixed copy of a private
+// file should not come out more readable than the original.
+func (o *outputTree) write(source, destination, content string) error {
 	perm := os.FileMode(0644)
 	if info, err := os.Stat(filepath.Clean(source)); err == nil {
 		perm = info.Mode().Perm()
@@ -1640,17 +1676,53 @@ func writeFixedCopy(source, destination, content string) error {
 		return fmt.Errorf("error reading file permissions: %w", err)
 	}
 
-	destination = filepath.Clean(destination)
-	if err := os.MkdirAll(filepath.Dir(destination), 0755); err != nil {
-		return fmt.Errorf("error creating directory for fixed file: %w", err)
+	relativePath, err := filepath.Rel(o.dir, filepath.Clean(destination))
+	if err != nil {
+		return fmt.Errorf("error writing fixes to file: %w", err)
+	}
+	if parent := filepath.Dir(relativePath); parent != "." {
+		if err := o.root.MkdirAll(parent, 0755); err != nil {
+			return fmt.Errorf("error creating directory for fixed file: %w", err)
+		}
 	}
 
-	file, err := os.OpenFile(destination, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, perm)
+	// OutputPaths keeps two manifests off one destination by comparing paths,
+	// which cannot see that two paths are one file: names differing only in
+	// case on a case-insensitive filesystem, or a link already in the
+	// directory. Opening such a destination would truncate a copy this run
+	// has just written.
+	if existing, err := o.root.Stat(relativePath); err == nil {
+		for _, written := range o.written {
+			if os.SameFile(written, existing) {
+				return fmt.Errorf("error writing fixes to file: %q is a file this run has already written under another name", destination)
+			}
+		}
+	}
+
+	file, err := o.root.OpenFile(relativePath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, perm)
 	if err != nil {
 		return fmt.Errorf("error writing fixes to file: %w", err)
 	}
 
-	return writeAndClose(file, content)
+	// The mode given to OpenFile only applies to a file it creates. With
+	// --no-confirm the destination may already exist, and would otherwise keep
+	// whatever mode it had, however much wider than the source's.
+	if err := file.Chmod(perm); err != nil {
+		_ = file.Close()
+		return fmt.Errorf("error setting permissions on fixed file: %w", err)
+	}
+
+	info, err := file.Stat()
+	if err != nil {
+		_ = file.Close()
+		return fmt.Errorf("error writing fixes to file: %w", err)
+	}
+
+	if err := writeAndClose(file, content); err != nil {
+		return err
+	}
+	o.written = append(o.written, info)
+	return nil
 }
 
 // writeStringCloser is the subset of *os.File that writeAndClose needs to
