@@ -161,6 +161,7 @@ type ScanInfo struct {
 	Submit                    BoolPtrFlag                  // Submit results to Kubescape Cloud BE. Get() is nil unless explicitly set by the caller (flag/env/request field)
 	ScanID                    string                       // Report id of the current scan
 	HostSensorEnabled         BoolPtrFlag                  // Deploy Kubescape K8s host scanner to collect data from certain controls
+	HostSensorEnabledDefault  *bool                        // Default fallback when HostSensorEnabled is unset (injected via ScanInfo defaults)
 	HostSensorYamlPath        string                       // Path to hostsensor file
 	Local                     bool                         // Do not submit results
 	AccountID                 string                       // account ID
@@ -246,6 +247,12 @@ func (scanInfo *ScanInfo) Init(ctx context.Context, policyIdentifiers []PolicyId
 	}
 	if err := scanInfo.MaterializeRemoteInputs(ctx); err != nil {
 		return err
+	}
+
+	if scanInfo.HostSensorEnabledDefault == nil {
+		// Inject default for host sensor control to enable autodetect
+		defaultHostSensor := true
+		scanInfo.HostSensorEnabledDefault = &defaultHostSensor
 	}
 	return nil
 }
