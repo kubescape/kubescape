@@ -92,9 +92,22 @@ func cloneEffectiveSettings(settings *reporthandlingv2.ScanContractEffectiveSett
 		scope.ExcludeNamespaces = append([]string(nil), settings.Scope.ExcludeNamespaces...)
 		clone.Scope = &scope
 	}
+	if settings.Evaluation != nil {
+		evaluation := *settings.Evaluation
+		clone.Evaluation = &evaluation
+	}
+	if settings.Failure != nil {
+		failure := *settings.Failure
+		failure.SeverityAtLeast = clonePtr(settings.Failure.SeverityAtLeast)
+		failure.ComplianceBelow = clonePtr(settings.Failure.ComplianceBelow)
+		failure.CoverageBelow = clonePtr(settings.Failure.CoverageBelow)
+		failure.DegradedPolicyInput = clonePtr(settings.Failure.DegradedPolicyInput)
+		clone.Failure = &failure
+	}
 	if settings.Output != nil {
 		output := *settings.Output
 		output.Formats = append([]string(nil), settings.Output.Formats...)
+		output.OmitRawResources = clonePtr(settings.Output.OmitRawResources)
 		clone.Output = &output
 	}
 	return &clone

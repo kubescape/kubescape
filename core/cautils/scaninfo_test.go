@@ -230,6 +230,291 @@ func TestCloneForContext(t *testing.T) {
 	clone.Cleanup() // must not panic or invoke the parent's registered cleanup
 }
 
+func TestCloneForContextIsolatesMutableConfiguration(t *testing.T) {
+	t.Parallel()
+
+	trueValue := true
+	parent := &ScanInfo{
+		UseFrom:                  []string{"framework.json"},
+		NotifyURLs:               []string{"https://example.invalid/hook"},
+		ExcludeControls:          []string{"C-0001"},
+		ExcludePaths:             []string{"vendor/**"},
+		InputPatterns:            []string{"manifests/**"},
+		HelmValueFiles:           []string{"values.yaml"},
+		HelmSetValues:            []string{"replicas=2"},
+		HelmSetStringValues:      []string{"image.tag=latest"},
+		HelmSetFileValues:        []string{"tls.crt=cert.pem"},
+		LabelsToCopy:             []string{"team"},
+		KubeContexts:             []string{"east", "west"},
+		RegistryMapping:          map[string]string{"internal.invalid": "mirror.invalid"},
+		HostSensorEnabledDefault: &trueValue,
+	}
+	parent.HonorInlineExceptions.SetBool(true)
+	parent.Submit.SetBool(true)
+	parent.HostSensorEnabled.SetBool(true)
+
+	first := parent.CloneForContext("east", "east.json")
+	second := parent.CloneForContext("west", "west.json")
+
+	first.UseFrom[0] = "first-framework.json"
+	first.NotifyURLs[0] = "https://first.invalid/hook"
+	first.ExcludeControls[0] = "C-9999"
+	first.ExcludePaths[0] = "generated/**"
+	first.InputPatterns[0] = "first/**"
+	first.HelmValueFiles[0] = "first-values.yaml"
+	first.HelmSetValues[0] = "replicas=9"
+	first.HelmSetStringValues[0] = "image.tag=first"
+	first.HelmSetFileValues[0] = "tls.crt=first.pem"
+	first.LabelsToCopy[0] = "owner"
+	first.KubeContexts[0] = "mutated"
+	first.RegistryMapping["internal.invalid"] = "first.invalid"
+	first.HonorInlineExceptions.SetBool(false)
+	first.Submit.SetBool(false)
+	first.HostSensorEnabled.SetBool(false)
+	*first.HostSensorEnabledDefault = false
+
+	assert.Equal(t, []string{"framework.json"}, parent.UseFrom)
+	assert.Equal(t, []string{"framework.json"}, second.UseFrom)
+	assert.Equal(t, []string{"https://example.invalid/hook"}, parent.NotifyURLs)
+	assert.Equal(t, []string{"https://example.invalid/hook"}, second.NotifyURLs)
+	assert.Equal(t, []string{"C-0001"}, parent.ExcludeControls)
+	assert.Equal(t, []string{"C-0001"}, second.ExcludeControls)
+	assert.Equal(t, []string{"vendor/**"}, parent.ExcludePaths)
+	assert.Equal(t, []string{"vendor/**"}, second.ExcludePaths)
+	assert.Equal(t, []string{"manifests/**"}, parent.InputPatterns)
+	assert.Equal(t, []string{"manifests/**"}, second.InputPatterns)
+	assert.Equal(t, []string{"values.yaml"}, parent.HelmValueFiles)
+	assert.Equal(t, []string{"values.yaml"}, second.HelmValueFiles)
+	assert.Equal(t, []string{"replicas=2"}, parent.HelmSetValues)
+	assert.Equal(t, []string{"replicas=2"}, second.HelmSetValues)
+	assert.Equal(t, []string{"image.tag=latest"}, parent.HelmSetStringValues)
+	assert.Equal(t, []string{"image.tag=latest"}, second.HelmSetStringValues)
+	assert.Equal(t, []string{"tls.crt=cert.pem"}, parent.HelmSetFileValues)
+	assert.Equal(t, []string{"tls.crt=cert.pem"}, second.HelmSetFileValues)
+	assert.Equal(t, []string{"team"}, parent.LabelsToCopy)
+	assert.Equal(t, []string{"team"}, second.LabelsToCopy)
+	assert.Equal(t, []string{"east", "west"}, parent.KubeContexts)
+	assert.Equal(t, []string{"east", "west"}, second.KubeContexts)
+	assert.Equal(t, "mirror.invalid", parent.RegistryMapping["internal.invalid"])
+	assert.Equal(t, "mirror.invalid", second.RegistryMapping["internal.invalid"])
+	assert.True(t, parent.HonorInlineExceptions.GetBool())
+	assert.True(t, second.HonorInlineExceptions.GetBool())
+	assert.True(t, parent.Submit.GetBool())
+	assert.True(t, second.Submit.GetBool())
+	assert.True(t, parent.HostSensorEnabled.GetBool())
+	assert.True(t, second.HostSensorEnabled.GetBool())
+	assert.True(t, *parent.HostSensorEnabledDefault)
+	assert.True(t, *second.HostSensorEnabledDefault)
+}
+
+func TestCloneForContextPreservesNilAndEmptyCollections(t *testing.T) {
+	t.Parallel()
+
+	parent := &ScanInfo{
+		UseFrom:         []string{},
+		NotifyURLs:      nil,
+		RegistryMapping: map[string]string{},
+		KubeContexts:    []string{},
+	}
+	clone := parent.CloneForContext("context", "report.json")
+
+	assert.NotNil(t, clone.UseFrom)
+	assert.Empty(t, clone.UseFrom)
+	assert.Nil(t, clone.NotifyURLs)
+	assert.NotNil(t, clone.RegistryMapping)
+	assert.Empty(t, clone.RegistryMapping)
+	assert.NotNil(t, clone.KubeContexts)
+	assert.Empty(t, clone.KubeContexts)
+	assert.Nil(t, clone.HonorInlineExceptions.Get())
+	assert.Nil(t, clone.Submit.Get())
+	assert.Nil(t, clone.HostSensorEnabled.Get())
+	assert.Nil(t, clone.HostSensorEnabledDefault)
+	assert.Nil(t, clone.ScanContract)
+}
+
+func TestCloneForContextIsolatesScanContractProvenance(t *testing.T) {
+	t.Parallel()
+
+	severity := "high"
+	compliance := 80.0
+	coverage := 90.0
+	degraded := true
+	omitRaw := true
+	frameworksOverride := []string{"nsa"}
+	controlsOverride := []string{"C-0001"}
+	includeOverride := []string{"prod"}
+	excludeOverride := []string{"dev"}
+	formatsOverride := []string{"json"}
+	controlsVersion := "v1"
+	scanTimeout := "5m"
+	controlTimeout := "30s"
+
+	parent := &ScanInfo{ScanContract: &reporthandlingv2.ScanContractMetadata{
+		AllowedSections: []string{"policy", "scope"},
+		DeniedSections:  []string{"output"},
+		RunnerInputs: []reporthandlingv2.ScanContractRunnerInput{
+			{Role: "exceptions", Source: "exceptions.json", Digest: "sha256:one"},
+		},
+		Effective: &reporthandlingv2.ScanContractEffectiveSettings{
+			Policy: &reporthandlingv2.ScanContractPolicy{
+				Frameworks: []string{"mitre"},
+				Controls:   []string{"C-0002"},
+			},
+			Scope: &reporthandlingv2.ScanContractScope{
+				IncludeNamespaces: []string{"production"},
+				ExcludeNamespaces: []string{"development"},
+			},
+			Evaluation: &reporthandlingv2.ScanContractEvaluation{
+				ScanTimeout: "10m",
+			},
+			Failure: &reporthandlingv2.ScanContractFailure{
+				SeverityAtLeast:     &severity,
+				ComplianceBelow:     &compliance,
+				CoverageBelow:       &coverage,
+				DegradedPolicyInput: &degraded,
+			},
+			Output: &reporthandlingv2.ScanContractOutput{
+				Formats:          []string{"json", "sarif"},
+				OmitRawResources: &omitRaw,
+			},
+		},
+		GateResolution: &reporthandlingv2.ScanContractGateResolution{
+			SeverityAtLeast: reporthandlingv2.ScanContractStringGateResolution{
+				Contract: &severity,
+			},
+			ComplianceBelow: reporthandlingv2.ScanContractNumberGateResolution{
+				Contract: &compliance,
+			},
+			DegradedPolicyInput: reporthandlingv2.ScanContractBoolGateResolution{
+				Contract: &degraded,
+			},
+		},
+		OrdinaryCLIOverrides: &reporthandlingv2.ScanContractCLIOverrides{
+			Policy: &reporthandlingv2.ScanContractPolicyOverrides{
+				Frameworks:      &frameworksOverride,
+				Controls:        &controlsOverride,
+				ControlsVersion: &controlsVersion,
+			},
+			Scope: &reporthandlingv2.ScanContractScopeOverrides{
+				IncludeNamespaces: &includeOverride,
+				ExcludeNamespaces: &excludeOverride,
+			},
+			Evaluation: &reporthandlingv2.ScanContractEvaluationOverrides{
+				ScanTimeout:    &scanTimeout,
+				ControlTimeout: &controlTimeout,
+			},
+			Output: &reporthandlingv2.ScanContractOutputOverrides{
+				Formats:          &formatsOverride,
+				OmitRawResources: &omitRaw,
+			},
+		},
+	}}
+
+	clone := parent.CloneForContext("context-a", "a.json")
+	contract := clone.ScanContract
+	contract.AllowedSections[0] = "mutated"
+	contract.DeniedSections[0] = "mutated"
+	contract.RunnerInputs[0].Digest = "sha256:mutated"
+	contract.Effective.Policy.Frameworks[0] = "mutated"
+	contract.Effective.Policy.Controls[0] = "mutated"
+	contract.Effective.Scope.IncludeNamespaces[0] = "mutated"
+	contract.Effective.Scope.ExcludeNamespaces[0] = "mutated"
+	contract.Effective.Evaluation.ScanTimeout = "1s"
+	*contract.Effective.Failure.SeverityAtLeast = "low"
+	*contract.Effective.Failure.ComplianceBelow = 1
+	*contract.Effective.Failure.CoverageBelow = 2
+	*contract.Effective.Failure.DegradedPolicyInput = false
+	contract.Effective.Output.Formats[0] = "mutated"
+	*contract.Effective.Output.OmitRawResources = false
+	*contract.GateResolution.SeverityAtLeast.Contract = "critical"
+	*contract.GateResolution.ComplianceBelow.Contract = 3
+	*contract.GateResolution.DegradedPolicyInput.Contract = false
+	(*contract.OrdinaryCLIOverrides.Policy.Frameworks)[0] = "mutated"
+	(*contract.OrdinaryCLIOverrides.Policy.Controls)[0] = "mutated"
+	*contract.OrdinaryCLIOverrides.Policy.ControlsVersion = "mutated"
+	(*contract.OrdinaryCLIOverrides.Scope.IncludeNamespaces)[0] = "mutated"
+	(*contract.OrdinaryCLIOverrides.Scope.ExcludeNamespaces)[0] = "mutated"
+	*contract.OrdinaryCLIOverrides.Evaluation.ScanTimeout = "mutated"
+	*contract.OrdinaryCLIOverrides.Evaluation.ControlTimeout = "mutated"
+	(*contract.OrdinaryCLIOverrides.Output.Formats)[0] = "mutated"
+	*contract.OrdinaryCLIOverrides.Output.OmitRawResources = false
+
+	original := parent.ScanContract
+	assert.Equal(t, "policy", original.AllowedSections[0])
+	assert.Equal(t, "output", original.DeniedSections[0])
+	assert.Equal(t, "sha256:one", original.RunnerInputs[0].Digest)
+	assert.Equal(t, "mitre", original.Effective.Policy.Frameworks[0])
+	assert.Equal(t, "C-0002", original.Effective.Policy.Controls[0])
+	assert.Equal(t, "production", original.Effective.Scope.IncludeNamespaces[0])
+	assert.Equal(t, "development", original.Effective.Scope.ExcludeNamespaces[0])
+	assert.Equal(t, "10m", original.Effective.Evaluation.ScanTimeout)
+	assert.Equal(t, "high", *original.Effective.Failure.SeverityAtLeast)
+	assert.Equal(t, 80.0, *original.Effective.Failure.ComplianceBelow)
+	assert.Equal(t, 90.0, *original.Effective.Failure.CoverageBelow)
+	assert.True(t, *original.Effective.Failure.DegradedPolicyInput)
+	assert.Equal(t, "json", original.Effective.Output.Formats[0])
+	assert.True(t, *original.Effective.Output.OmitRawResources)
+	assert.Equal(t, "high", *original.GateResolution.SeverityAtLeast.Contract)
+	assert.Equal(t, 80.0, *original.GateResolution.ComplianceBelow.Contract)
+	assert.True(t, *original.GateResolution.DegradedPolicyInput.Contract)
+	assert.Equal(t, "nsa", (*original.OrdinaryCLIOverrides.Policy.Frameworks)[0])
+	assert.Equal(t, "C-0001", (*original.OrdinaryCLIOverrides.Policy.Controls)[0])
+	assert.Equal(t, "v1", *original.OrdinaryCLIOverrides.Policy.ControlsVersion)
+	assert.Equal(t, "prod", (*original.OrdinaryCLIOverrides.Scope.IncludeNamespaces)[0])
+	assert.Equal(t, "dev", (*original.OrdinaryCLIOverrides.Scope.ExcludeNamespaces)[0])
+	assert.Equal(t, "5m", *original.OrdinaryCLIOverrides.Evaluation.ScanTimeout)
+	assert.Equal(t, "30s", *original.OrdinaryCLIOverrides.Evaluation.ControlTimeout)
+	assert.Equal(t, "json", (*original.OrdinaryCLIOverrides.Output.Formats)[0])
+	assert.True(t, *original.OrdinaryCLIOverrides.Output.OmitRawResources)
+}
+
+func TestCloneForContextRunnerInputsDoNotLeakAcrossContexts(t *testing.T) {
+	t.Parallel()
+
+	parent := &ScanInfo{ScanContract: &reporthandlingv2.ScanContractMetadata{}}
+	first := parent.CloneForContext("first", "first.json")
+	second := parent.CloneForContext("second", "second.json")
+
+	RecordCachedScanContractRunnerInput(first, reporthandlingv2.ScanContractRunnerInput{
+		Role: "controlsConfig", Source: "first.json", Digest: "sha256:first",
+	})
+
+	require.Len(t, first.ScanContract.RunnerInputs, 1)
+	assert.Empty(t, second.ScanContract.RunnerInputs)
+	assert.Empty(t, parent.ScanContract.RunnerInputs)
+
+	RecordCachedScanContractRunnerInput(second, reporthandlingv2.ScanContractRunnerInput{
+		Role: "exceptions", Source: "second.json", Digest: "sha256:second",
+	})
+
+	require.Len(t, second.ScanContract.RunnerInputs, 1)
+	assert.Equal(t, "exceptions", second.ScanContract.RunnerInputs[0].Role)
+	require.Len(t, first.ScanContract.RunnerInputs, 1)
+	assert.Equal(t, "controlsConfig", first.ScanContract.RunnerInputs[0].Role)
+	assert.Empty(t, parent.ScanContract.RunnerInputs)
+}
+
+func TestCloneForContextInitializesPointerDefaultsIndependently(t *testing.T) {
+	t.Parallel()
+
+	parent := &ScanInfo{}
+	first := parent.CloneForContext("first", "first.json")
+	second := parent.CloneForContext("second", "second.json")
+
+	require.NoError(t, first.Init(context.Background(), nil))
+	require.NotNil(t, first.HostSensorEnabledDefault)
+	assert.True(t, *first.HostSensorEnabledDefault)
+	assert.Nil(t, parent.HostSensorEnabledDefault)
+	assert.Nil(t, second.HostSensorEnabledDefault)
+
+	*first.HostSensorEnabledDefault = false
+	require.NoError(t, second.Init(context.Background(), nil))
+	require.NotNil(t, second.HostSensorEnabledDefault)
+	assert.True(t, *second.HostSensorEnabledDefault)
+	assert.False(t, *first.HostSensorEnabledDefault)
+	assert.Nil(t, parent.HostSensorEnabledDefault)
+}
+
 func TestResolveClusterContextNameUsesDefaultLoadingRulesForOverride(t *testing.T) {
 	defaultPath := writeScanInfoMultiContextKubeconfig(t)
 	t.Setenv(clientcmd.RecommendedConfigPathEnvVar, defaultPath)
