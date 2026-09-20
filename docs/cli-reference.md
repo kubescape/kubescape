@@ -746,7 +746,7 @@ a config omits, so the live `envFrom` survives.
 | `--dry-run` | Preview changes without applying | `false` |
 | `--no-confirm` | Apply without confirmation | `false` |
 | `--skip-user-values` | Skip changes requiring user values | `true` |
-| `--output-dir` | Cluster scans only: write one patched manifest per resource here instead of printing them | *(print to stdout)* |
+| `--output-dir` | Write the fixes into this directory instead of their default destination. Manifest files: fixed copies that mirror the scanned tree, originals untouched. Cluster scans: one patched manifest per resource | *(fix in place / print to stdout)* |
 | `--include-controls` | Remediate only these control IDs (comma-separated, case-insensitive). Disables `--container-profile` drift remediation — see [selecting controls to fix](#selecting-controls-to-fix) | *(all)* |
 | `--skip-controls` | Leave these control IDs untouched (comma-separated, case-insensitive). Takes precedence over `--include-controls`, and disables `--container-profile` drift remediation | - |
 
@@ -807,7 +807,16 @@ kubescape fix results.json --dry-run
 
 # Apply without prompts
 kubescape fix results.json --no-confirm
+
+# Leave the manifests untouched: write the fixed copies to a directory instead
+kubescape fix results.json --output-dir ./fixed
 ```
+
+With `--output-dir` the copies mirror the scanned directory —
+`/path/to/manifests/k8s/prod/deploy.yaml` is written to
+`./fixed/k8s/prod/deploy.yaml` — and a multi-document file stays one file. Review them with `diff -r`, then copy them over the originals or apply
+them as they are. A directory that is the scanned one is refused: writing there
+would be an in-place fix under another name.
 
 Fixing a cluster scan:
 
@@ -832,12 +841,10 @@ kubectl apply -f ./fixes
 > context — the prompt is skipped and no changes are applied. Use
 > `--no-confirm` to apply fixes in non-interactive contexts.
 >
-> The prompt does not apply to cluster scans: that path edits nothing in place,
-> so there is nothing to confirm. With `--output-dir`, a non-empty directory is
-> refused unless you pass `--no-confirm`.
->
-> `--output-dir` belongs to that cluster path alone. Passing it when fixing
-> manifest files warns and is ignored — those files are always fixed in place.
+> The prompt does not apply to cluster scans, or to manifest files fixed with
+> `--output-dir`: neither path edits anything in place, so there is nothing to
+> confirm. With `--output-dir`, a non-empty directory is refused unless you pass
+> `--no-confirm`.
 
 ---
 

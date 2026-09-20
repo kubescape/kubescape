@@ -26,8 +26,6 @@ const (
 
 	nonInteractiveWarning = "stdin is not interactive; treating the fix confirmation as declined and applying no changes (pass --no-confirm to apply without a prompt)"
 	stdinClosedWarning    = "stdin was closed before a confirmation was given; treating the fix confirmation as declined and applying no changes (pass --no-confirm to apply without a prompt)"
-
-	outputDirIgnoredWarning = "--output-dir has no effect when fixing manifest files; it applies to cluster scan reports. The files recorded in the report are fixed in place"
 )
 
 // isTerminal and isCygwinTerminal are vars (not direct isatty calls) so tests
@@ -45,19 +43,6 @@ func (ks *Kubescape) Fix(fixInfo *metav1.FixInfo) error {
 	handler, err := fixhandler.NewFixHandler(fixInfo)
 	if err != nil {
 		return err
-	}
-
-	// --output-dir only means something for a cluster report, whose fixes are
-	// rendered and emitted rather than applied. A file-based report is fixed in
-	// place, so passing it used to be accepted in silence: an empty directory,
-	// rewritten manifests, and nothing saying the flag did nothing (#3733).
-	// Which kind of report this is only becomes knowable once the report is
-	// parsed, which is why the check cannot live in the flag-parsing layer.
-	if fixInfo.OutputDir != "" && !handler.IsClusterReport() {
-		logger.L().Ctx(ks.Context()).Warning(outputDirIgnoredWarning)
-		// Cleared so nothing downstream can act on a value the user has just
-		// been told is inert.
-		fixInfo.OutputDir = ""
 	}
 
 	resourcesToFix := handler.PrepareResourcesToFix(ks.Context())
@@ -99,6 +84,13 @@ func (ks *Kubescape) Fix(fixInfo *metav1.FixInfo) error {
 		return ks.emitClusterFixes(handler, resourcesToFix, fixInfo)
 	}
 
+	// --output-dir turns the in-place fix into fixed copies. Like the cluster
+	// path it sits before the confirmation prompt: the prompt guards edits to
+	// the user's own manifests, and this path makes none.
+	if fixInfo.OutputDir != "" {
+		return ks.writeFixedCopies(handler, resourcesToFix, fixInfo)
+	}
+
 	if !fixInfo.NoConfirm && !userConfirmed() {
 		logger.L().Info(noChangesApplied)
 		handler.PrintUnfixedControls(fixhandler.PhasePlanned)
@@ -129,6 +121,50 @@ func (ks *Kubescape) Fix(fixInfo *metav1.FixInfo) error {
 			plannedControls, totalFailed, plannedFilesCount, updatedFilesCount))
 		handler.PrintUnfixedControls(fixhandler.PhasePlanned)
 	}
+
+	if len(errors) > 0 {
+		for _, err := range errors {
+			logger.L().Ctx(ks.Context()).Warning("failed to fix resource", helpers.Error(err))
+		}
+		return fmt.Errorf("failed to fix some resources, check the logs for more details")
+	}
+
+	return nil
+}
+
+// writeFixedCopies fixes a file-based report into --output-dir instead of in
+// place: every manifest that would have been rewritten is written, fixed, to
+// the same relative path under the directory, and the originals are left alone.
+func (ks *Kubescape) writeFixedCopies(handler *fixhandler.FixHandler, resourcesToFix []fixhandler.ResourceFixInfo, fixInfo *metav1.FixInfo) error {
+	// Planned before the directory is touched. An output directory that is the
+	// scanned one is refused here with the reason; checked after
+	// prepareOutputDir it would be reported as "not empty; pass --no-confirm",
+	// advice that leads straight to overwriting the originals.
+	outputPaths, err := handler.OutputPaths(resourcesToFix)
+	if err != nil {
+		return err
+	}
+
+	if err := prepareOutputDir(fixInfo.OutputDir, fixInfo.NoConfirm); err != nil {
+		return err
+	}
+
+	writtenFilesCount, errors := handler.ApplyChanges(ks.Context(), resourcesToFix)
+	plannedControls := handler.FixedControlsCount()
+	totalFailed := plannedControls + len(handler.UnfixedControls())
+
+	if writtenFilesCount == len(outputPaths) && len(errors) == 0 {
+		logger.L().Info(fmt.Sprintf("Wrote %d fixed file(s) to %s, covering %d of %d flagged control instances. The original files were not modified.",
+			writtenFilesCount, fixInfo.OutputDir, plannedControls, totalFailed))
+	} else {
+		logger.L().Info(fmt.Sprintf(
+			"Planned fixes for %d of %d flagged control instances across %d file(s); wrote %d file(s) to %s — the remaining files errored, see warnings below. The original files were not modified.",
+			plannedControls, totalFailed, len(outputPaths), writtenFilesCount, fixInfo.OutputDir))
+	}
+
+	// PhasePlanned, not PhaseApplied: the copies are proposals. The manifests
+	// the scan read are unchanged, and saying "auto-fixed" would claim otherwise.
+	handler.PrintUnfixedControls(fixhandler.PhasePlanned)
 
 	if len(errors) > 0 {
 		for _, err := range errors {

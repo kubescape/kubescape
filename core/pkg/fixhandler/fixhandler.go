@@ -387,6 +387,10 @@ type resourceSource struct {
 	filePath string
 	// documentIndex is the resource's position within a multi-document file.
 	documentIndex int
+	// relativePath is filePath as the report recorded it, relative to the
+	// resource's own base path. --output-dir mirrors it, so a fixed copy lands
+	// at the same place in the output tree as its source has in the scanned one.
+	relativePath string
 	// reportedPath is the raw path the report recorded for this resource. It is
 	// kept separately from filePath because the user-facing skip entry needs it
 	// even on the paths where resolution never produced a filePath.
@@ -594,6 +598,7 @@ func (h *FixHandler) resolveResourceSource(ctx context.Context, resourceObj *rep
 	}
 
 	src.filePath = candidatePath
+	src.relativePath = relativePath
 	src.documentIndex = idx
 	return src
 }
@@ -695,6 +700,7 @@ func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInf
 
 		rfi := ResourceFixInfo{
 			FilePath:        src.filePath,
+			relativePath:    src.relativePath,
 			fileKey:         h.resourceFileKey(resourceObj),
 			Resource:        resourceObj,
 			YamlExpressions: make(map[string]armotypes.FixPath, 0),
@@ -1074,9 +1080,22 @@ func (h *FixHandler) PrintExpectedChanges(resourcesToFix []ResourceFixInfo) {
 	logger.L().Info(sb.String())
 }
 
+// ApplyChanges writes the planned fixes. By default each manifest is rewritten
+// in place. With FixInfo.OutputDir set, the fixed content goes to a copy under
+// that directory instead (see OutputPaths) and the source is left untouched.
 func (h *FixHandler) ApplyChanges(ctx context.Context, resourcesToFix []ResourceFixInfo) (int, []error) {
 	updatedFiles := make(map[string]bool)
 	errors := make([]error, 0)
+
+	// Resolved in full before the first write, so a destination that cannot be
+	// honoured fails the run with nothing written rather than part-way through.
+	var outputPaths map[string]string
+	if h.fixInfo != nil && h.fixInfo.OutputDir != "" {
+		var err error
+		if outputPaths, err = h.OutputPaths(resourcesToFix); err != nil {
+			return 0, []error{err}
+		}
+	}
 
 	fileYamlExpressions := h.getFileYamlExpressions(resourcesToFix)
 
@@ -1095,7 +1114,12 @@ func (h *FixHandler) ApplyChanges(ctx context.Context, resourcesToFix []Resource
 			continue
 		}
 
-		if err := writeFixesToFile(filepath, fixedContent); err != nil {
+		if outputPaths != nil {
+			err = writeFixedCopy(filepath, outputPaths[filepath], fixedContent)
+		} else {
+			err = writeFixesToFile(filepath, fixedContent)
+		}
+		if err != nil {
 			logger.L().Ctx(ctx).Warning(fmt.Sprintf("Failed to write fixes to file %s, %v", filepath, err.Error()))
 			errors = append(errors, err)
 			continue
@@ -1105,6 +1129,76 @@ func (h *FixHandler) ApplyChanges(ctx context.Context, resourcesToFix []Resource
 	}
 
 	return len(updatedFiles), errors
+}
+
+// OutputPaths maps every manifest ApplyChanges would rewrite to the path its
+// fixed copy is written to under FixInfo.OutputDir. The output tree mirrors the
+// scanned one: a manifest keeps the relative path the report recorded for it,
+// so nested directories survive and a multi-document file stays one file.
+//
+// It refuses, before anything is written, a plan that could not do what the
+// flag promises:
+//   - a destination outside the output directory. The relative path is report
+//     input, the same field resolveResourceSource containment-checks on the
+//     source side.
+//   - a destination that is the source itself, which happens when the output
+//     directory is the scanned directory. Writing there is an in-place fix
+//     under another name, the one outcome --output-dir exists to avoid.
+//   - two manifests that map to the same destination, as the inputs of a
+//     multi-input scan can when they share file names. One copy would silently
+//     replace the other.
+func (h *FixHandler) OutputPaths(resourcesToFix []ResourceFixInfo) (map[string]string, error) {
+	if h.fixInfo == nil || h.fixInfo.OutputDir == "" {
+		return nil, fmt.Errorf("no output directory was given")
+	}
+	outputDir := filepath.Clean(h.fixInfo.OutputDir)
+
+	destinations := make(map[string]string)
+	claimedBy := make(map[string]string)
+	for i := range resourcesToFix {
+		resource := &resourcesToFix[i]
+		if resource.inMemory {
+			continue
+		}
+		source := resource.FilePath
+		if _, planned := destinations[source]; planned {
+			continue
+		}
+
+		relativePath := resource.relativePath
+		if relativePath == "" {
+			relativePath = filepath.Base(source)
+		}
+		destination := filepath.Join(outputDir, relativePath)
+
+		if rel, err := filepath.Rel(outputDir, destination); err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return nil, fmt.Errorf("refusing to write %q outside the output directory %q", sanitizeForLog(relativePath), outputDir)
+		}
+		if isSameFile(source, destination) {
+			return nil, fmt.Errorf("output directory %q is where the scanned manifests are: writing there would overwrite %q. Choose another directory, or omit --output-dir to fix the manifests in place", outputDir, sanitizeForLog(source))
+		}
+		if other, claimed := claimedBy[destination]; claimed {
+			return nil, fmt.Errorf("%q and %q would both be written to %q; fix them in separate runs", sanitizeForLog(other), sanitizeForLog(source), destination)
+		}
+
+		destinations[source] = destination
+		claimedBy[destination] = source
+	}
+	return destinations, nil
+}
+
+// isSameFile reports whether two paths name the same file, either because they
+// are the same path or because the filesystem resolves them to the same file
+// (a symlinked output directory, for one).
+func isSameFile(a, b string) bool {
+	absA, errA := filepath.Abs(a)
+	absB, errB := filepath.Abs(b)
+	if errA == nil && errB == nil && absA == absB {
+		return true
+	}
+	infoA, errA := os.Stat(a)
+	infoB, errB := os.Stat(b)
+	return errA == nil && errB == nil && os.SameFile(infoA, infoB)
 }
 
 // isPathContained reports whether target resolves to a path inside base,
@@ -1527,6 +1621,31 @@ func writeFixesToFile(path, content string) error {
 	}
 
 	file, err := os.OpenFile(filepath.Clean(path), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, perm)
+	if err != nil {
+		return fmt.Errorf("error writing fixes to file: %w", err)
+	}
+
+	return writeAndClose(file, content)
+}
+
+// writeFixedCopy writes the fixed content of source to destination, creating
+// the directories in between. The copy takes the source's permissions: it is
+// the same manifest, and a fixed copy of a private file should not come out
+// more readable than the original.
+func writeFixedCopy(source, destination, content string) error {
+	perm := os.FileMode(0644)
+	if info, err := os.Stat(filepath.Clean(source)); err == nil {
+		perm = info.Mode().Perm()
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("error reading file permissions: %w", err)
+	}
+
+	destination = filepath.Clean(destination)
+	if err := os.MkdirAll(filepath.Dir(destination), 0755); err != nil {
+		return fmt.Errorf("error creating directory for fixed file: %w", err)
+	}
+
+	file, err := os.OpenFile(destination, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, perm)
 	if err != nil {
 		return fmt.Errorf("error writing fixes to file: %w", err)
 	}

@@ -274,6 +274,9 @@ kubescape fix results.json --dry-run
 # Apply fixes without confirmation prompts
 kubescape fix results.json --no-confirm
 
+# Keep the originals untouched: write the fixed copies to a directory instead
+kubescape fix results.json --output-dir ./fixed
+
 # Fix a cluster scan: the patched manifests are printed, never applied for you
 kubescape scan --format json --output cluster.json
 kubescape fix cluster.json | kubectl apply -f -
