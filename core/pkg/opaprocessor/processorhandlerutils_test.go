@@ -1724,3 +1724,184 @@ func TestFilterFrameworkControls_IdentifierFormsAreInterchangeable(t *testing.T)
 	require.NoError(t, err)
 	assert.Equal(t, keptControlIDs(includeByControlID), keptControlIDs(includeBySectionNumber), "--include-controls must treat a control's ID and its section number as the same control")
 }
+
+func TestMatchesRuleObjects(t *testing.T) {
+	matchers := []reporthandling.RuleMatchObjects{
+		{
+			APIGroups:   []string{""},
+			APIVersions: []string{"v1"},
+			Resources:   []string{"Pod", "ServiceAccount"},
+		},
+		{
+			APIGroups:   []string{"core"},
+			APIVersions: []string{"v1"},
+			Resources:   []string{"Endpoints"},
+		},
+		{
+			APIGroups:   []string{"rbac.authorization.k8s.io"},
+			APIVersions: []string{"v1"},
+			Resources:   []string{"RoleBinding"},
+		},
+		{
+			APIGroups:   []string{"*"},
+			APIVersions: []string{"*"},
+			Resources:   []string{"wildcardkind"},
+		},
+	}
+
+	assert.True(t, matchesRuleObjects("", "v1", "pods", "Pod", matchers), "Pod in core/v1 should match")
+	assert.True(t, matchesRuleObjects("", "v1", "endpoints", "Endpoints", matchers), "Endpoints with core policy group should match empty object group")
+	assert.True(t, matchesRuleObjects("", "v1", "serviceaccounts", "ServiceAccount", matchers), "ServiceAccount in core/v1 should match")
+	assert.True(t, matchesRuleObjects("rbac.authorization.k8s.io", "v1", "rolebindings", "RoleBinding", matchers), "RoleBinding in rbac/v1 should match")
+	assert.True(t, matchesRuleObjects("any.group", "v2", "wildcardkinds", "wildcardkind", matchers), "Wildcard group/version should match")
+
+	assert.False(t, matchesRuleObjects("", "v1", "configmaps", "ConfigMap", matchers), "ConfigMap should not match")
+	assert.False(t, matchesRuleObjects("", "v1", "secrets", "Secret", matchers), "Secret should not match")
+	assert.False(t, matchesRuleObjects("apps", "v1", "deployments", "Deployment", matchers), "Deployment should not match")
+}
+
+func TestCompileWholeClusterMatchers(t *testing.T) {
+	policies := &cautils.Policies{
+		Controls: map[string]reporthandling.Control{
+			"C-0261": {
+				ControlID: "C-0261",
+				Rules: []reporthandling.PolicyRule{
+					{
+						Match: []reporthandling.RuleMatchObjects{
+							{APIGroups: []string{""}, APIVersions: []string{"v1"}, Resources: []string{"Pod", "ServiceAccount"}},
+							{APIGroups: []string{"rbac.authorization.k8s.io"}, APIVersions: []string{"v1"}, Resources: []string{"RoleBinding"}},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	matchers := compileWholeClusterMatchers(policies, []string{"C-0261"})
+	require.Len(t, matchers, 2)
+	assert.Equal(t, []string{"Pod", "ServiceAccount"}, matchers[0].Resources)
+	assert.Equal(t, []string{"RoleBinding"}, matchers[1].Resources)
+
+	assert.Empty(t, compileWholeClusterMatchers(nil, []string{"C-0261"}))
+	assert.Empty(t, compileWholeClusterMatchers(policies, nil))
+	assert.Empty(t, compileWholeClusterMatchers(policies, []string{"C-NONEXISTENT"}))
+}
+
+func TestFilterProjectedBatch(t *testing.T) {
+	matchers := []reporthandling.RuleMatchObjects{
+		{
+			APIGroups:   []string{""},
+			APIVersions: []string{"v1"},
+			Resources:   []string{"Pod"},
+		},
+	}
+
+	pod := workloadinterface.NewWorkloadObj(map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Pod",
+		"metadata":   map[string]any{"name": "p1", "namespace": "ns-1"},
+	})
+	cm := workloadinterface.NewWorkloadObj(map[string]any{
+		"apiVersion": "v1",
+		"kind":       "ConfigMap",
+		"metadata":   map[string]any{"name": "c1", "namespace": "ns-1"},
+	})
+
+	k8sResources := cautils.K8SResources{
+		"/v1/pods":       {pod.GetID()},
+		"/v1/configmaps": {cm.GetID()},
+	}
+	allResources := map[string]workloadinterface.IMetadata{
+		pod.GetID(): pod,
+		cm.GetID():  cm,
+	}
+
+	projected := filterProjectedBatch(k8sResources, nil, allResources, matchers)
+	require.NotNil(t, projected)
+	assert.Equal(t, 1, projected.Len(), "only the Pod should be in the projected batch")
+	assert.Contains(t, projected.AllResources, pod.GetID())
+	assert.NotContains(t, projected.AllResources, cm.GetID())
+	assert.Len(t, projected.K8SResources["/v1/pods"], 1)
+	assert.Empty(t, projected.K8SResources["/v1/configmaps"])
+}
+
+func TestControlHasMatcherEvidence(t *testing.T) {
+	assert.False(t, controlHasMatcherEvidence(nil), "nil control has no matcher evidence")
+	assert.False(t, controlHasMatcherEvidence(&reporthandling.Control{}), "control without rules has no matcher evidence")
+
+	controlNoMatchers := &reporthandling.Control{
+		Rules: []reporthandling.PolicyRule{
+			{Match: nil, DynamicMatch: nil},
+		},
+	}
+	assert.False(t, controlHasMatcherEvidence(controlNoMatchers), "rule with nil matchers has no matcher evidence")
+
+	controlEmptyResources := &reporthandling.Control{
+		Rules: []reporthandling.PolicyRule{
+			{
+				Match: []reporthandling.RuleMatchObjects{
+					{APIGroups: []string{""}, APIVersions: []string{"v1"}},
+				},
+			},
+		},
+	}
+	assert.False(t, controlHasMatcherEvidence(controlEmptyResources), "rule with empty Resources has no matcher evidence")
+
+	controlMissingAPIVersions := &reporthandling.Control{
+		Rules: []reporthandling.PolicyRule{
+			{
+				Match: []reporthandling.RuleMatchObjects{
+					{APIGroups: []string{""}, Resources: []string{"Pod"}},
+				},
+			},
+		},
+	}
+	assert.False(t, controlHasMatcherEvidence(controlMissingAPIVersions), "rule with missing APIVersions has no matcher evidence")
+
+	controlMissingAPIGroups := &reporthandling.Control{
+		Rules: []reporthandling.PolicyRule{
+			{
+				Match: []reporthandling.RuleMatchObjects{
+					{APIVersions: []string{"v1"}, Resources: []string{"Pod"}},
+				},
+			},
+		},
+	}
+	assert.False(t, controlHasMatcherEvidence(controlMissingAPIGroups), "rule with missing APIGroups has no matcher evidence")
+
+	controlWithMatch := &reporthandling.Control{
+		Rules: []reporthandling.PolicyRule{
+			{
+				Match: []reporthandling.RuleMatchObjects{
+					{APIGroups: []string{""}, APIVersions: []string{"v1"}, Resources: []string{"Pod"}},
+				},
+			},
+		},
+	}
+	assert.True(t, controlHasMatcherEvidence(controlWithMatch), "rule with Match has matcher evidence")
+
+	controlWithDynamicMatch := &reporthandling.Control{
+		Rules: []reporthandling.PolicyRule{
+			{
+				DynamicMatch: []reporthandling.RuleMatchObjects{
+					{APIGroups: []string{""}, APIVersions: []string{"v1"}, Resources: []string{"Service"}},
+				},
+			},
+		},
+	}
+	assert.True(t, controlHasMatcherEvidence(controlWithDynamicMatch), "rule with DynamicMatch has matcher evidence")
+
+	controlMixedRules := &reporthandling.Control{
+		Rules: []reporthandling.PolicyRule{
+			{
+				Match: []reporthandling.RuleMatchObjects{
+					{APIGroups: []string{""}, APIVersions: []string{"v1"}, Resources: []string{"Pod"}},
+				},
+			},
+			{
+				Match: nil,
+			},
+		},
+	}
+	assert.False(t, controlHasMatcherEvidence(controlMixedRules), "control where any rule lacks matchers fails matcher evidence")
+}

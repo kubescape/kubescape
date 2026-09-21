@@ -1411,3 +1411,136 @@ func TestGetScanCommand_SkipDBUpdateDefaultsToFalse(t *testing.T) {
 	require.NotNil(t, mockKubescape.scanInfo)
 	assert.False(t, mockKubescape.scanInfo.SkipDBUpdate)
 }
+
+func TestScanCommandRegistersWholeClusterPolicyFlag(t *testing.T) {
+	mockKubescape := &mocks.MockIKubescape{}
+	cmd := GetScanCommand(mockKubescape)
+	flag := cmd.PersistentFlags().Lookup("whole-cluster-policy")
+	require.NotNil(t, flag)
+	assert.Equal(t, "projected", flag.DefValue)
+}
+
+func TestResolveWholeClusterPolicy(t *testing.T) {
+	t.Run("explicit values", func(t *testing.T) {
+		p, err := cautils.ResolveWholeClusterPolicy("projected")
+		require.NoError(t, err)
+		assert.Equal(t, cautils.WholeClusterPolicyProjected, p)
+
+		p, err = cautils.ResolveWholeClusterPolicy("fallback")
+		require.NoError(t, err)
+		assert.Equal(t, cautils.WholeClusterPolicyFallback, p)
+
+		p, err = cautils.ResolveWholeClusterPolicy("skip")
+		require.NoError(t, err)
+		assert.Equal(t, cautils.WholeClusterPolicySkip, p)
+
+		p, err = cautils.ResolveWholeClusterPolicy("verify")
+		require.NoError(t, err)
+		assert.Equal(t, cautils.WholeClusterPolicyVerify, p)
+
+		_, err = cautils.ResolveWholeClusterPolicy("invalid")
+		assert.Error(t, err)
+	})
+
+	t.Run("env var policy", func(t *testing.T) {
+		t.Setenv("KUBESCAPE_WHOLE_CLUSTER_POLICY", "fallback")
+		p, err := cautils.ResolveWholeClusterPolicy("")
+		require.NoError(t, err)
+		assert.Equal(t, cautils.WholeClusterPolicyFallback, p)
+	})
+
+	t.Run("env var parity check", func(t *testing.T) {
+		t.Setenv("KUBESCAPE_WHOLE_CLUSTER_POLICY", "")
+		t.Setenv("KUBESCAPE_WHOLE_CLUSTER_PARITY_CHECK", "true")
+		p, err := cautils.ResolveWholeClusterPolicy("")
+		require.NoError(t, err)
+		assert.Equal(t, cautils.WholeClusterPolicyVerify, p)
+	})
+
+	t.Run("default is projected", func(t *testing.T) {
+		t.Setenv("KUBESCAPE_WHOLE_CLUSTER_POLICY", "")
+		t.Setenv("KUBESCAPE_WHOLE_CLUSTER_PARITY_CHECK", "")
+		p, err := cautils.ResolveWholeClusterPolicy("")
+		require.NoError(t, err)
+		assert.Equal(t, cautils.WholeClusterPolicyProjected, p)
+	})
+}
+
+func TestScanCommandPersistentPreRunE_ResolvesPolicyFromEnv(t *testing.T) {
+	t.Run("resolves env policy when flag unchanged", func(t *testing.T) {
+		t.Setenv("KUBESCAPE_WHOLE_CLUSTER_POLICY", "fallback")
+		mockKubescape := &mocks.MockIKubescape{}
+		cmd := GetScanCommand(mockKubescape)
+		err := cmd.PersistentPreRunE(cmd, []string{})
+		require.NoError(t, err)
+		val, err := cmd.PersistentFlags().GetString("whole-cluster-policy")
+		require.NoError(t, err)
+		assert.Equal(t, "fallback", val)
+	})
+
+	t.Run("resolves parity check env when flag unchanged", func(t *testing.T) {
+		t.Setenv("KUBESCAPE_WHOLE_CLUSTER_POLICY", "")
+		t.Setenv("KUBESCAPE_WHOLE_CLUSTER_PARITY_CHECK", "true")
+		mockKubescape := &mocks.MockIKubescape{}
+		cmd := GetScanCommand(mockKubescape)
+		err := cmd.PersistentPreRunE(cmd, []string{})
+		require.NoError(t, err)
+		val, err := cmd.PersistentFlags().GetString("whole-cluster-policy")
+		require.NoError(t, err)
+		assert.Equal(t, "verify", val)
+	})
+
+	t.Run("explicit flag overrides env policy", func(t *testing.T) {
+		tests := []struct {
+			name        string
+			flagArg     string
+			expectedVal string
+			expectError bool
+		}{
+			{
+				name:        "lowercase skip flag overrides env",
+				flagArg:     "--whole-cluster-policy=skip",
+				expectedVal: "skip",
+			},
+			{
+				name:        "uppercase VERIFY flag is normalized to verify",
+				flagArg:     "--whole-cluster-policy=VERIFY",
+				expectedVal: "verify",
+			},
+			{
+				name:        "whitespace-padded flag is normalized",
+				flagArg:     "--whole-cluster-policy=  fallback  ",
+				expectedVal: "fallback",
+			},
+			{
+				name:        "invalid flag returns error",
+				flagArg:     "--whole-cluster-policy=invalid",
+				expectError: true,
+			},
+			{
+				name:        "empty flag returns error",
+				flagArg:     "--whole-cluster-policy=",
+				expectError: true,
+			},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				t.Setenv("KUBESCAPE_WHOLE_CLUSTER_POLICY", "fallback")
+				mockKubescape := &mocks.MockIKubescape{}
+				cmd := GetScanCommand(mockKubescape)
+				err := cmd.ParseFlags([]string{tt.flagArg})
+				require.NoError(t, err)
+				err = cmd.PersistentPreRunE(cmd, []string{})
+				if tt.expectError {
+					require.Error(t, err)
+					return
+				}
+				require.NoError(t, err)
+				val, err := cmd.PersistentFlags().GetString("whole-cluster-policy")
+				require.NoError(t, err)
+				assert.Equal(t, tt.expectedVal, val)
+			})
+		}
+	})
+}
