@@ -72,7 +72,7 @@ type policyReportResult struct {
 	Severity   string                    `json:"severity,omitempty"`
 	Result     string                    `json:"result"`
 	Message    string                    `json:"message,omitempty"`
-	Timestamp  metav1.Time               `json:"timestamp,omitempty"`
+	Timestamp  metav1.Timestamp          `json:"timestamp,omitempty"`
 	Resources  []policyReportResourceRef `json:"resources,omitempty"`
 	Properties map[string]string         `json:"properties,omitempty"`
 }
@@ -150,7 +150,8 @@ func buildPolicyReports(opaSessionObj *cautils.OPASessionObj) []policyReport {
 	if timestamp.IsZero() {
 		timestamp = time.Now().UTC()
 	}
-	metaTime := metav1.NewTime(timestamp)
+	reportTime := metav1.NewTime(timestamp)
+	resultTimestamp := *reportTime.ProtoTime()
 
 	summaryControls := opaSessionObj.Report.SummaryDetails.Controls
 
@@ -208,7 +209,7 @@ func buildPolicyReports(opaSessionObj *cautils.OPASessionObj) []policyReport {
 				Severity:  mapPolicyReportSeverity(severity),
 				Result:    policyResult,
 				Message:   message,
-				Timestamp: metaTime,
+				Timestamp: resultTimestamp,
 				Resources: []policyReportResourceRef{ref},
 				Properties: map[string]string{
 					"controlURL": cautils.GetControlLink(ac.GetID()),
