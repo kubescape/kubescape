@@ -419,5 +419,21 @@ func TestReaches_MultipleRulesOnOnePolicyAreOR(t *testing.T) {
 	}
 }
 
+func TestReaches_SamePodIsAlwaysAllowedDespiteDefaultDeny(t *testing.T) {
+	denyAll := policy("ns", "deny-all", metav1.LabelSelector{},
+		[]networkingv1.PolicyType{networkingv1.PolicyTypeIngress, networkingv1.PolicyTypeEgress}, nil, nil)
+	idx, _ := NewIndex([]*networkingv1.NetworkPolicy{denyAll}, nil)
+
+	self := Endpoint{Namespace: "ns", Name: "server", IP: "10.244.0.2", Labels: map[string]string{"app": "server"}}
+	other := Endpoint{Namespace: "ns", Name: "other", IP: "10.244.0.3", Labels: map[string]string{"app": "server"}}
+
+	if v, _, _ := idx.Reaches(other, self, portSpec(80)); v != Denied {
+		t.Errorf("control: a different pod must still be denied by the default-deny policy: verdict = %v", v)
+	}
+	if v, egress, ingress := idx.Reaches(self, self, portSpec(80)); v != Allowed {
+		t.Errorf("a pod must always be able to reach itself, even under a default-deny policy: verdict = %v (egress=%v, ingress=%v)", v, egress.Verdict, ingress.Verdict)
+	}
+}
+
 func podSelectorPtr(s metav1.LabelSelector) *metav1.LabelSelector       { return &s }
 func namespaceSelectorPtr(s metav1.LabelSelector) *metav1.LabelSelector { return &s }
