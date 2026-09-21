@@ -1,6 +1,9 @@
 package anonymizer
 
 import (
+	"encoding/json"
+	"errors"
+	"fmt"
 	"maps"
 	"strings"
 
@@ -9,18 +12,187 @@ import (
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/attacktrack/v1alpha1"
+	helpersv1 "github.com/kubescape/opa-utils/reporthandling/helpers/v1"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/prioritization"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
+	"k8s.io/apimachinery/pkg/runtime"
 )
 
 // transformSession applies the supplied Transformer to sensitive resource
 // identifiers and metadata while preserving referential integrity across
-// the full OPA session.
+// the full OPA session. Transformation is transactional: callers either get
+// a completely transformed session or the original session remains untouched.
 func transformSession(session *cautils.OPASessionObj, _ *Mapping, transformer Transformer) error {
 	if session == nil {
 		return nil
 	}
+	if transformer == nil {
+		return errors.New("transformer is required")
+	}
+
+	transaction, err := cloneSessionForTransform(session)
+	if err != nil {
+		return err
+	}
+	if err := transformSessionInPlace(transaction.working, transformer); err != nil {
+		return err
+	}
+	commitTransformedSession(session, transaction)
+	return nil
+}
+
+type sessionTransform struct {
+	working         *cautils.OPASessionObj
+	originalByClone map[workloadinterface.IMetadata]workloadinterface.IMetadata
+}
+
+// cloneSessionForTransform copies every field transformSessionInPlace may
+// mutate. It intentionally does not copy OPASessionObj itself because it owns
+// synchronization primitives. Read-only configuration is assigned directly.
+func cloneSessionForTransform(session *cautils.OPASessionObj) (*sessionTransform, error) {
+	working := &cautils.OPASessionObj{
+		LabelsToCopy:          append([]string(nil), session.LabelsToCopy...),
+		EnvVarSecretRefs:      session.EnvVarSecretRefs,
+		SourcePathsAnonymized: session.SourcePathsAnonymized,
+	}
+
+	resourcesResult, err := cloneJSON(session.ResourcesResult)
+	if err != nil {
+		return nil, fmt.Errorf("clone resource results: %w", err)
+	}
+	working.ResourcesResult = resourcesResult
+
+	resourceSource, err := cloneJSON(session.ResourceSource)
+	if err != nil {
+		return nil, fmt.Errorf("clone resource sources: %w", err)
+	}
+	working.ResourceSource = resourceSource
+
+	resourcesPrioritized, err := cloneJSON(session.ResourcesPrioritized)
+	if err != nil {
+		return nil, fmt.Errorf("clone prioritized resources: %w", err)
+	}
+	working.ResourcesPrioritized = resourcesPrioritized
+
+	// Attack-track values are not mutated by anonymization. Copy the map and
+	// each slice so key remapping cannot affect the caller before commit.
+	working.ResourceAttackTracks = make(map[string][]v1alpha1.IAttackTrack, len(session.ResourceAttackTracks))
+	for resourceID, tracks := range session.ResourceAttackTracks {
+		working.ResourceAttackTracks[resourceID] = append([]v1alpha1.IAttackTrack(nil), tracks...)
+	}
+
+	metadata, err := cloneJSON(session.Metadata)
+	if err != nil {
+		return nil, fmt.Errorf("clone report metadata: %w", err)
+	}
+	working.Metadata = metadata
+
+	report, err := clonePostureReport(session.Report)
+	if err != nil {
+		return nil, fmt.Errorf("clone posture report: %w", err)
+	}
+	working.Report = report
+
+	namespaceSummaries, err := cloneJSON(session.NamespaceSummaries)
+	if err != nil {
+		return nil, fmt.Errorf("clone namespace summaries: %w", err)
+	}
+	working.NamespaceSummaries = namespaceSummaries
+
+	resources, originalByClone, err := cloneCatalog(session.GetCatalog())
+	if err != nil {
+		return nil, err
+	}
+	working.SetCatalog(cautils.NewMapResourceCatalog(resources))
+	return &sessionTransform{working: working, originalByClone: originalByClone}, nil
+}
+
+func cloneJSON[T any](value T) (T, error) {
+	var cloned T
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return cloned, err
+	}
+	if err := json.Unmarshal(raw, &cloned); err != nil {
+		return cloned, err
+	}
+	return cloned, nil
+}
+
+func clonePostureReport(report *reporthandlingv2.PostureReport) (*reporthandlingv2.PostureReport, error) {
+	cloned, err := cloneJSON(report)
+	if err != nil || report == nil {
+		return cloned, err
+	}
+	for controlID, originalControl := range report.SummaryDetails.Controls {
+		clonedControl, ok := cloned.SummaryDetails.Controls[controlID]
+		if !ok {
+			continue
+		}
+		resourceIDs := helpersv1.AllLists{}
+		resourceIDs.Initialize(len(originalControl.ResourceIDs.All()))
+		for resourceID, status := range originalControl.ResourceIDs.All() {
+			resourceIDs.Append(status, resourceID)
+		}
+		clonedControl.ResourceIDs = resourceIDs
+		cloned.SummaryDetails.Controls[controlID] = clonedControl
+	}
+	return cloned, nil
+}
+
+func cloneCatalog(catalog cautils.ResourceCatalog) (map[string]workloadinterface.IMetadata, map[workloadinterface.IMetadata]workloadinterface.IMetadata, error) {
+	resources := make(map[string]workloadinterface.IMetadata)
+	originalByClone := make(map[workloadinterface.IMetadata]workloadinterface.IMetadata)
+	if catalog == nil {
+		return resources, originalByClone, nil
+	}
+
+	var cloneErr error
+	catalog.ForEach(func(resourceID string, resource workloadinterface.IMetadata) bool {
+		if resource == nil {
+			return true
+		}
+		object := resource.GetObject()
+		if object == nil {
+			cloneErr = fmt.Errorf("clone resource %q: object is unavailable", resourceID)
+			return false
+		}
+		cloned := workloadinterface.NewWorkloadObj(runtime.DeepCopyJSON(object))
+		resources[resourceID] = cloned
+		originalByClone[cloned] = resource
+		return true
+	})
+	if cloneErr != nil {
+		return nil, nil, cloneErr
+	}
+	return resources, originalByClone, nil
+}
+
+func commitTransformedSession(session *cautils.OPASessionObj, transaction *sessionTransform) {
+	working := transaction.working
+	committedResources := make(map[string]workloadinterface.IMetadata, len(transaction.originalByClone))
+	working.GetCatalog().ForEach(func(_ string, transformed workloadinterface.IMetadata) bool {
+		original, ok := transaction.originalByClone[transformed]
+		if !ok {
+			return true
+		}
+		original.SetObject(runtime.DeepCopyJSON(transformed.GetObject()))
+		committedResources[original.GetID()] = original
+		return true
+	})
+	session.SetCatalog(cautils.NewMapResourceCatalog(committedResources))
+	session.ResourcesResult = working.ResourcesResult
+	session.ResourceSource = working.ResourceSource
+	session.SourcePathsAnonymized = working.SourcePathsAnonymized
+	session.ResourcesPrioritized = working.ResourcesPrioritized
+	session.ResourceAttackTracks = working.ResourceAttackTracks
+	session.Metadata = working.Metadata
+	session.Report = working.Report
+	session.NamespaceSummaries = working.NamespaceSummaries
+}
+
+func transformSessionInPlace(session *cautils.OPASessionObj, transformer Transformer) error {
 
 	idMapping := make(map[string]string)
 
