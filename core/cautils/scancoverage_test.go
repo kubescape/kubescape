@@ -498,3 +498,42 @@ func TestDetectVacuousFrameworks_OnlyVacuousFrameworksReturned(t *testing.T) {
 	}
 	assert.Equal(t, []string{"istio-security"}, DetectVacuousFrameworks(frameworks))
 }
+
+func TestNotEvaluatedControl_ReasonString(t *testing.T) {
+	tests := []struct {
+		name     string
+		control  NotEvaluatedControl
+		expected string
+	}{
+		{
+			name: "explicit reason has precedence",
+			control: NotEvaluatedControl{
+				ControlID:   "C-0261",
+				Reason:      "whole-cluster control C-0261 skipped by execution policy (policy: skip)",
+				MissingGVRs: []string{"apps/v1/deployments"},
+			},
+			expected: "whole-cluster control C-0261 skipped by execution policy (policy: skip)",
+		},
+		{
+			name: "missing GVRs formatted when reason empty",
+			control: NotEvaluatedControl{
+				ControlID:   "C-0001",
+				MissingGVRs: []string{"apps/v1/deployments", "v1/pods"},
+			},
+			expected: "missing: apps/v1/deployments, v1/pods",
+		},
+		{
+			name: "empty when neither is set",
+			control: NotEvaluatedControl{
+				ControlID: "C-0002",
+			},
+			expected: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, tt.control.ReasonString())
+		})
+	}
+}

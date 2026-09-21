@@ -155,6 +155,18 @@ type NotEvaluatedControl struct {
 	Reason      string   `json:"reason,omitempty"`
 }
 
+// ReasonString returns the diagnostic reason why this control was not evaluated.
+// It returns Reason if set, or "missing: <missingGVRs>" if GVRs failed to pull.
+func (nec NotEvaluatedControl) ReasonString() string {
+	if nec.Reason != "" {
+		return nec.Reason
+	}
+	if len(nec.MissingGVRs) > 0 {
+		return "missing: " + strings.Join(nec.MissingGVRs, ", ")
+	}
+	return ""
+}
+
 // BuildScanCoverage derives a ScanCoverage from the InfoMap,
 // ResourceToControlsMap, timedOutControls, and any partial GVR pull failures
 // on the session.

@@ -569,6 +569,18 @@ func TestTestCases_SkipMessage(t *testing.T) {
 			wantMsg:   "notEvaluated: " + string(apis.SubStatusNotEvaluatedInfo),
 		},
 		{
+			name:      "not evaluated with missing GVRs reason",
+			subStatus: apis.SubStatusNotEvaluated,
+			innerInfo: "missing: apps/v1/deployments",
+			wantMsg:   "notEvaluated: missing: apps/v1/deployments",
+		},
+		{
+			name:      "not evaluated with policy skip reason",
+			subStatus: apis.SubStatusNotEvaluated,
+			innerInfo: "whole-cluster control C-0261 skipped by execution policy (policy: skip)",
+			wantMsg:   "notEvaluated: whole-cluster control C-0261 skipped by execution policy (policy: skip)",
+		},
+		{
 			name:      "configuration",
 			subStatus: apis.SubStatusConfiguration,
 			innerInfo: string(apis.SubStatusConfigurationInfo),
@@ -694,6 +706,16 @@ func TestBuildSkipMessage(t *testing.T) {
 			expected: "notEvaluated: not evaluated",
 		},
 		{
+			name:     "notEvaluated substatus with missing GVRs",
+			status:   &apis.StatusInfo{InnerStatus: apis.StatusSkipped, SubStatus: apis.SubStatusNotEvaluated, InnerInfo: "missing: apps/v1/deployments"},
+			expected: "notEvaluated: missing: apps/v1/deployments",
+		},
+		{
+			name:     "notEvaluated substatus with policy skip reason",
+			status:   &apis.StatusInfo{InnerStatus: apis.StatusSkipped, SubStatus: apis.SubStatusNotEvaluated, InnerInfo: "whole-cluster control C-0261 skipped by execution policy (policy: skip)"},
+			expected: "notEvaluated: whole-cluster control C-0261 skipped by execution policy (policy: skip)",
+		},
+		{
 			name:     "requires review substatus no InnerInfo",
 			status:   &apis.StatusInfo{InnerStatus: apis.StatusSkipped, SubStatus: apis.SubStatusRequiresReview},
 			expected: "requires review",
@@ -711,6 +733,82 @@ func TestBuildSkipMessage(t *testing.T) {
 			assert.Equal(t, tt.expected, got)
 		})
 	}
+}
+
+func TestCoverageProperties(t *testing.T) {
+	tests := []struct {
+		name     string
+		coverage cautils.ScanCoverage
+		expected []JUnitProperty
+	}{
+		{
+			name:     "Zero total controls returns nil",
+			coverage: cautils.ScanCoverage{TotalControls: 0},
+			expected: nil,
+		},
+		{
+			name: "Full coverage not degraded",
+			coverage: cautils.ScanCoverage{
+				CoverageScore:     100.0,
+				EvaluatedControls: 10,
+				TotalControls:     10,
+				Degraded:          false,
+			},
+			expected: []JUnitProperty{
+				{Name: "coverageScore", Value: "100.00"},
+				{Name: "evaluatedControls", Value: "10"},
+				{Name: "totalControls", Value: "10"},
+				{Name: "degraded", Value: "false"},
+			},
+		},
+		{
+			name: "Degraded coverage with skipped controls",
+			coverage: cautils.ScanCoverage{
+				CoverageScore:     85.5,
+				EvaluatedControls: 17,
+				TotalControls:     20,
+				Degraded:          true,
+			},
+			expected: []JUnitProperty{
+				{Name: "coverageScore", Value: "85.50"},
+				{Name: "evaluatedControls", Value: "17"},
+				{Name: "totalControls", Value: "20"},
+				{Name: "degraded", Value: "true"},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := coverageProperties(tt.coverage)
+			assert.Equal(t, tt.expected, got)
+		})
+	}
+}
+
+func TestListTestsSuite_IncludesCoverageProperties(t *testing.T) {
+	results := cautils.NewOPASessionObjMock()
+	results.ScanCoverage = cautils.ScanCoverage{
+		CoverageScore:     85.0,
+		EvaluatedControls: 17,
+		TotalControls:     20,
+		Degraded:          true,
+	}
+
+	suites := listTestsSuite(results)
+	require.NotEmpty(t, suites)
+	suite := suites[0]
+
+	propertyMap := make(map[string]string)
+	for _, prop := range suite.Properties {
+		propertyMap[prop.Name] = prop.Value
+	}
+
+	assert.Equal(t, "85.00", propertyMap["coverageScore"])
+	assert.Equal(t, "17", propertyMap["evaluatedControls"])
+	assert.Equal(t, "20", propertyMap["totalControls"])
+	assert.Equal(t, "true", propertyMap["degraded"])
+	assert.Contains(t, propertyMap, "complianceScore")
 }
 
 // TestJunitOutputInvariants is a regression test for the bugs reported in
