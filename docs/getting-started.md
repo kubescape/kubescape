@@ -412,7 +412,7 @@ kubescape fix results.json
 |------|-------------|
 | `--dry-run` | Preview changes without applying them |
 | `--no-confirm` | Apply fixes without confirmation prompts |
-| `--output-dir` | Cluster scans only: write one patched manifest per resource here instead of printing them |
+| `--output-dir` | Write the fixes into this directory instead: fixed copies of the manifest files (originals untouched), or one patched manifest per resource for a cluster scan |
 | `--skip-user-values` | Skip changes that require user-defined values (default: true) |
 
 ### Example
