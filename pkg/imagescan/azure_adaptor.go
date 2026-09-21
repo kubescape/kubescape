@@ -177,8 +177,7 @@ func (a *AzureAdaptor) GetImagesScanStatus(ctx context.Context, imageIDs []Conta
 			}
 
 			if err := a.validateImageID(imageID); err != nil {
-				logger.L().Warning("skipping image", helpers.String("repository", imageID.Repository), helpers.Error(err))
-				return status, nil
+				return status, err
 			}
 
 			// Query ARG for parent assessment to determine scan availability
@@ -245,8 +244,7 @@ func (a *AzureAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs []
 			}
 
 			if err := a.validateImageID(imageID); err != nil {
-				logger.L().Warning("skipping image", helpers.String("repository", imageID.Repository), helpers.Error(err))
-				return report, nil
+				return report, err
 			}
 
 			queryStr := fmt.Sprintf(`
