@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -591,10 +593,119 @@ func (scanInfo *ScanInfo) SetKubeconfigSelection(path, contextName string) {
 // parent's.
 func (scanInfo *ScanInfo) CloneForContext(kubeContext, output string) *ScanInfo {
 	clone := *scanInfo
+
+	// Fleet contexts are initialized independently. A struct assignment is not
+	// enough here because slices, maps and pointer-backed flags would still
+	// alias the parent and every sibling clone. Init and the policy getters
+	// legitimately update several of these values, most notably UseFrom and
+	// ScanContract.RunnerInputs. Give each context ownership of its mutable
+	// configuration before any of those updates can happen.
+	clone.UseFrom = slices.Clone(scanInfo.UseFrom)
+	clone.NotifyURLs = slices.Clone(scanInfo.NotifyURLs)
+	clone.ExcludeControls = slices.Clone(scanInfo.ExcludeControls)
+	clone.ExcludePaths = slices.Clone(scanInfo.ExcludePaths)
+	clone.InputPatterns = slices.Clone(scanInfo.InputPatterns)
+	clone.HelmValueFiles = slices.Clone(scanInfo.HelmValueFiles)
+	clone.HelmSetValues = slices.Clone(scanInfo.HelmSetValues)
+	clone.HelmSetStringValues = slices.Clone(scanInfo.HelmSetStringValues)
+	clone.HelmSetFileValues = slices.Clone(scanInfo.HelmSetFileValues)
+	clone.LabelsToCopy = slices.Clone(scanInfo.LabelsToCopy)
+	clone.KubeContexts = slices.Clone(scanInfo.KubeContexts)
+	clone.RegistryMapping = maps.Clone(scanInfo.RegistryMapping)
+	clone.HonorInlineExceptions = scanInfo.HonorInlineExceptions.clone()
+	clone.Submit = scanInfo.Submit.clone()
+	clone.HostSensorEnabled = scanInfo.HostSensorEnabled.clone()
+	clone.HostSensorEnabledDefault = clonePtr(scanInfo.HostSensorEnabledDefault)
+	clone.ScanContract = cloneScanContractMetadata(scanInfo.ScanContract)
+
 	clone.ScanID = ""
 	clone.cleanups = nil
 	clone.Output = output
 	clone.SetKubeconfigSelection(scanInfo.kubeconfigPath, kubeContext)
+	return &clone
+}
+
+func (bpf BoolPtrFlag) clone() BoolPtrFlag {
+	return BoolPtrFlag{valPtr: clonePtr(bpf.valPtr)}
+}
+
+func clonePtr[T any](value *T) *T {
+	if value == nil {
+		return nil
+	}
+	clone := *value
+	return &clone
+}
+
+func cloneSlicePtr[T any](value *[]T) *[]T {
+	if value == nil {
+		return nil
+	}
+	clone := slices.Clone(*value)
+	return &clone
+}
+
+// cloneScanContractMetadata isolates every mutable part of report provenance.
+// The metadata is enriched while a scan runs, so sharing even a nested slice
+// would let one fleet context change the digest and audit trail of another.
+func cloneScanContractMetadata(metadata *reporthandlingv2.ScanContractMetadata) *reporthandlingv2.ScanContractMetadata {
+	if metadata == nil {
+		return nil
+	}
+
+	clone := *metadata
+	clone.AllowedSections = slices.Clone(metadata.AllowedSections)
+	clone.DeniedSections = slices.Clone(metadata.DeniedSections)
+	clone.RunnerInputs = slices.Clone(metadata.RunnerInputs)
+	clone.Effective = cloneEffectiveSettings(metadata.Effective)
+
+	if metadata.GateResolution != nil {
+		resolution := *metadata.GateResolution
+		resolution.SeverityAtLeast.Contract = clonePtr(metadata.GateResolution.SeverityAtLeast.Contract)
+		resolution.SeverityAtLeast.RunnerFloor = clonePtr(metadata.GateResolution.SeverityAtLeast.RunnerFloor)
+		resolution.SeverityAtLeast.Effective = clonePtr(metadata.GateResolution.SeverityAtLeast.Effective)
+		resolution.ComplianceBelow.Contract = clonePtr(metadata.GateResolution.ComplianceBelow.Contract)
+		resolution.ComplianceBelow.RunnerFloor = clonePtr(metadata.GateResolution.ComplianceBelow.RunnerFloor)
+		resolution.ComplianceBelow.Effective = clonePtr(metadata.GateResolution.ComplianceBelow.Effective)
+		resolution.CoverageBelow.Contract = clonePtr(metadata.GateResolution.CoverageBelow.Contract)
+		resolution.CoverageBelow.RunnerFloor = clonePtr(metadata.GateResolution.CoverageBelow.RunnerFloor)
+		resolution.CoverageBelow.Effective = clonePtr(metadata.GateResolution.CoverageBelow.Effective)
+		resolution.DegradedPolicyInput.Contract = clonePtr(metadata.GateResolution.DegradedPolicyInput.Contract)
+		resolution.DegradedPolicyInput.RunnerFloor = clonePtr(metadata.GateResolution.DegradedPolicyInput.RunnerFloor)
+		resolution.DegradedPolicyInput.Effective = clonePtr(metadata.GateResolution.DegradedPolicyInput.Effective)
+		clone.GateResolution = &resolution
+	}
+
+	if metadata.OrdinaryCLIOverrides != nil {
+		overrides := *metadata.OrdinaryCLIOverrides
+		if metadata.OrdinaryCLIOverrides.Policy != nil {
+			policy := *metadata.OrdinaryCLIOverrides.Policy
+			policy.Frameworks = cloneSlicePtr(policy.Frameworks)
+			policy.Controls = cloneSlicePtr(policy.Controls)
+			policy.ControlsVersion = clonePtr(policy.ControlsVersion)
+			overrides.Policy = &policy
+		}
+		if metadata.OrdinaryCLIOverrides.Scope != nil {
+			scope := *metadata.OrdinaryCLIOverrides.Scope
+			scope.IncludeNamespaces = cloneSlicePtr(scope.IncludeNamespaces)
+			scope.ExcludeNamespaces = cloneSlicePtr(scope.ExcludeNamespaces)
+			overrides.Scope = &scope
+		}
+		if metadata.OrdinaryCLIOverrides.Evaluation != nil {
+			evaluation := *metadata.OrdinaryCLIOverrides.Evaluation
+			evaluation.ScanTimeout = clonePtr(evaluation.ScanTimeout)
+			evaluation.ControlTimeout = clonePtr(evaluation.ControlTimeout)
+			overrides.Evaluation = &evaluation
+		}
+		if metadata.OrdinaryCLIOverrides.Output != nil {
+			outputSettings := *metadata.OrdinaryCLIOverrides.Output
+			outputSettings.Formats = cloneSlicePtr(outputSettings.Formats)
+			outputSettings.OmitRawResources = clonePtr(outputSettings.OmitRawResources)
+			overrides.Output = &outputSettings
+		}
+		clone.OrdinaryCLIOverrides = &overrides
+	}
+
 	return &clone
 }
 
