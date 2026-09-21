@@ -851,37 +851,85 @@ func estimateClusterSize(resourceHandler resourcehandler.IResourceHandler, ctx c
 // decision was made from; the OPA processor uses it as its frozen resource
 // count because sessionObj.AllResources is populated asynchronously by the
 // producer goroutine.
-// loadIncrementalCacheIfEnabled builds the version key from scanData's
-// resolved policies (plus local controls-config bytes when set) and loads
-// the incremental scan cache. Returns (nil, nil) when --incremental is off,
-// so callers can call SetIncrementalCache unconditionally with the result
-// only when non-nil.
+const incrementalCacheSchemaVersion = "2"
+
+// incrementalCacheContext contains every scan-wide value that can affect a
+// cache-eligible rule. ResourceHash covers the resource itself; this context
+// covers the inputs shared by every resource evaluation.
+//
+// Keep this as a named, versioned wire format. Adding a policy input without
+// including it here could make an old verdict look valid for a different scan.
+type incrementalCacheContext struct {
+	SchemaVersion  string `json:"schemaVersion"`
+	RuntimeVersion string `json:"runtimeVersion"`
+	CloudProvider  string `json:"cloudProvider"`
+}
+
+// incrementalCacheVersion derives the cache namespace from both policy
+// content and scan-wide evaluation inputs. In particular, cloudProvider is
+// exposed to Rego as data.dataControlInputs.cloudProvider, so two otherwise
+// identical resources from different providers must never share a verdict.
+func incrementalCacheVersion(scanInfo *cautils.ScanInfo, scanData *cautils.OPASessionObj, runtimeVersion string) (string, error) {
+	if scanInfo == nil {
+		return "", errors.New("scan info is required")
+	}
+	if scanData == nil {
+		return "", errors.New("scan data is required")
+	}
+	if scanData.Report == nil {
+		return "", errors.New("scan report is required")
+	}
+
+	contextBytes, err := json.Marshal(incrementalCacheContext{
+		SchemaVersion:  incrementalCacheSchemaVersion,
+		RuntimeVersion: runtimeVersion,
+		CloudProvider:  scanData.Report.ClusterCloudProvider,
+	})
+	if err != nil {
+		return "", fmt.Errorf("marshal incremental cache context: %w", err)
+	}
+	policyBytes, err := json.Marshal(scanData.Policies)
+	if err != nil {
+		return "", fmt.Errorf("marshal resolved policies: %w", err)
+	}
+	allPoliciesBytes, err := json.Marshal(scanData.AllPolicies)
+	if err != nil {
+		return "", fmt.Errorf("marshal resolved policy rules: %w", err)
+	}
+	regoInputBytes, err := json.Marshal(scanData.RegoInputData)
+	if err != nil {
+		return "", fmt.Errorf("marshal Rego input data: %w", err)
+	}
+
+	versionParts := [][]byte{
+		contextBytes,
+		[]byte(scanInfo.ControlsVersion),
+		policyBytes,
+		allPoliciesBytes,
+		regoInputBytes,
+	}
+	if scanInfo.ControlsInputs != "" {
+		localConfig, readErr := os.ReadFile(scanInfo.ControlsInputs)
+		if readErr != nil {
+			return "", fmt.Errorf("read controls inputs for cache version: %w", readErr)
+		}
+		versionParts = append(versionParts, localConfig)
+	}
+	return scancache.VersionKey(versionParts...), nil
+}
+
+// loadIncrementalCacheIfEnabled builds the version key from the complete
+// evaluation context and loads the incremental scan cache. It returns nil
+// when incremental mode is off or a safe version cannot be derived.
 func loadIncrementalCacheIfEnabled(ctx context.Context, scanInfo *cautils.ScanInfo, scanData *cautils.OPASessionObj) *scancache.Store {
 	if !scanInfo.Incremental {
 		return nil
 	}
-	policyBytes, marshalErr := json.Marshal(scanData.Policies)
-	if marshalErr != nil {
-		logger.L().Ctx(ctx).Warning("failed to derive incremental scan cache version, proceeding without cache", helpers.Error(marshalErr))
+	cacheVersion, versionErr := incrementalCacheVersion(scanInfo, scanData, versioncheck.BuildNumber)
+	if versionErr != nil {
+		logger.L().Ctx(ctx).Warning("failed to derive incremental scan cache version, proceeding without cache", helpers.Error(versionErr))
 		return nil
 	}
-	allPoliciesBytes, marshalErr := json.Marshal(scanData.AllPolicies)
-	if marshalErr != nil {
-		logger.L().Ctx(ctx).Warning("failed to derive incremental scan cache version, proceeding without cache", helpers.Error(marshalErr))
-		return nil
-	}
-	regoInputBytes, marshalErr := json.Marshal(scanData.RegoInputData)
-	if marshalErr != nil {
-		logger.L().Ctx(ctx).Warning("failed to derive incremental scan cache version, proceeding without cache", helpers.Error(marshalErr))
-		return nil
-	}
-	versionParts := [][]byte{[]byte(scanInfo.ControlsVersion), policyBytes, allPoliciesBytes, regoInputBytes}
-	if scanInfo.ControlsInputs != "" {
-		if localConfig, readErr := os.ReadFile(scanInfo.ControlsInputs); readErr == nil {
-			versionParts = append(versionParts, localConfig)
-		}
-	}
-	cacheVersion := scancache.VersionKey(versionParts...)
 	cacheStore, cacheErr := scancache.Load(getter.DefaultLocalStore, cacheVersion)
 	if cacheErr != nil {
 		logger.L().Ctx(ctx).Warning("failed to load incremental scan cache, proceeding without it", helpers.Error(cacheErr))
