@@ -240,9 +240,16 @@ func TestSetRegoObjectsWithFallbackChecksumVerificationFailure(t *testing.T) {
 	t.Parallel()
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		require.Equal(t, "/download/checksums.txt", r.URL.Path)
-		_, err := fmt.Fprintln(w, "not-a-valid-checksum-manifest")
-		require.NoError(t, err)
+		switch r.URL.Path {
+		case "/download/checksums.txt":
+			_, err := fmt.Fprintln(w, "not-a-valid-checksum-manifest")
+			require.NoError(t, err)
+		case "/download/checksums.sigstore.json":
+			_, err := fmt.Fprintln(w, "not-valid-json")
+			require.NoError(t, err)
+		default:
+			http.NotFound(w, r)
+		}
 	}))
 	t.Cleanup(server.Close)
 

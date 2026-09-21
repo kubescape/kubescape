@@ -54,7 +54,7 @@ require (
 	github.com/kubescape/k8s-interface v0.0.221
 	github.com/kubescape/opa-utils v0.0.312
 	github.com/kubescape/rbac-utils v0.0.21
-	github.com/kubescape/regolibrary/v2 v2.0.36-0.20260910055212-64b3775e7c88
+	github.com/kubescape/regolibrary/v2 v2.0.36
 	github.com/kubescape/sizing-checker v0.0.0-20250323151332-73a18561dc73
 	github.com/kubescape/storage v0.0.342
 	github.com/mark3labs/mcp-go v1.0.0
@@ -440,7 +440,7 @@ require (
 	github.com/moby/moby/api v1.55.0 // indirect
 	github.com/moby/moby/client v0.5.0 // indirect
 	github.com/moby/patternmatcher v0.6.1 // indirect
-	github.com/moby/policy-helpers v0.0.0-20260901104222-dd6c5499c491 // indirect
+	github.com/moby/policy-helpers v0.0.0-20260901142052-72f704e6cdb6 // indirect
 	github.com/moby/spdystream v0.5.1 // indirect
 	github.com/moby/sys/atomicwriter v0.1.0 // indirect
 	github.com/moby/sys/mountinfo v0.7.2 // indirect
@@ -518,8 +518,8 @@ require (
 	github.com/sigstore/rekor v1.5.3 // indirect
 	github.com/sigstore/rekor-tiles/v2 v2.3.0 // indirect
 	github.com/sigstore/sigstore v1.10.8 // indirect
-	github.com/sigstore/sigstore-go v1.2.2 // indirect
-	github.com/sigstore/timestamp-authority/v2 v2.1.2 // indirect
+	github.com/sigstore/sigstore-go v1.3.0 // indirect
+	github.com/sigstore/timestamp-authority/v2 v2.1.3 // indirect
 	github.com/skeema/knownhosts v1.3.1 // indirect
 	github.com/smallnest/ringbuffer v0.0.0-20241116012123-461381446e3d // indirect
 	github.com/sorairolake/lzip-go v0.3.8 // indirect
