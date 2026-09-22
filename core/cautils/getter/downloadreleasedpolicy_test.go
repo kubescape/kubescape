@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	jsoniter "github.com/json-iterator/go"
@@ -239,36 +240,46 @@ func TestSetRegoObjectsWithFallback(t *testing.T) {
 func TestSetRegoObjectsWithFallbackChecksumVerificationFailure(t *testing.T) {
 	t.Parallel()
 
+	var signatureRequests atomic.Int32
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		require.Equal(t, "/download/checksums.txt", r.URL.Path)
-		_, err := fmt.Fprintln(w, "not-a-valid-checksum-manifest")
-		require.NoError(t, err)
+		switch r.URL.Path {
+		case "/download/checksums.txt":
+			_, err := fmt.Fprintln(w, "0000000000000000000000000000000000000000000000000000000000000000  artifact.tar.gz")
+			require.NoError(t, err)
+		case "/download/checksums.sigstore.json":
+			signatureRequests.Add(1)
+			_, err := fmt.Fprintln(w, "not-valid-json")
+			require.NoError(t, err)
+		default:
+			http.NotFound(w, r)
+		}
 	}))
 	t.Cleanup(server.Close)
 
-	t.Run("unversioned release does not fall back on checksum failure", func(t *testing.T) {
-		t.Parallel()
-
+	t.Run("unversioned release does not fall back on checksum signature failure", func(t *testing.T) {
 		p := NewDownloadReleasedPolicyWithVersion("")
 		p.gs.URL = server.URL + "/download"
 
 		fallback, err := p.SetRegoObjectsWithFallback()
 
 		require.Error(t, err)
+		require.Contains(t, err.Error(), "error verifying checksums.txt")
 		require.False(t, fallback)
 		require.True(t, errors.Is(err, gitregostore.ErrChecksumVerification))
 	})
 
-	t.Run("pinned release returns checksum failure", func(t *testing.T) {
-		t.Parallel()
-
+	t.Run("pinned release returns checksum signature failure", func(t *testing.T) {
 		p := NewDownloadReleasedPolicyWithVersion("v2.0.301")
 		p.gs.URL = server.URL + "/download"
 
 		fallback, err := p.SetRegoObjectsWithFallback()
 
 		require.Error(t, err)
+		require.Contains(t, err.Error(), "error verifying checksums.txt")
 		require.False(t, fallback)
 		require.True(t, errors.Is(err, gitregostore.ErrChecksumVerification))
 	})
+
+	require.Equal(t, int32(2), signatureRequests.Load())
 }
