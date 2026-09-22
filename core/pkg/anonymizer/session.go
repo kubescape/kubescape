@@ -14,6 +14,7 @@ import (
 	"github.com/kubescape/opa-utils/reporthandling/attacktrack/v1alpha1"
 	helpersv1 "github.com/kubescape/opa-utils/reporthandling/helpers/v1"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/prioritization"
+	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -125,8 +126,24 @@ func clonePostureReport(report *reporthandlingv2.PostureReport) (*reporthandling
 	if err != nil || report == nil {
 		return cloned, err
 	}
-	for controlID, originalControl := range report.SummaryDetails.Controls {
-		clonedControl, ok := cloned.SummaryDetails.Controls[controlID]
+	cloneControlResourceIDs(report.SummaryDetails.Controls, cloned.SummaryDetails.Controls)
+	for frameworkIndex, originalFramework := range report.SummaryDetails.Frameworks {
+		if frameworkIndex >= len(cloned.SummaryDetails.Frameworks) {
+			continue
+		}
+		cloneControlResourceIDs(
+			originalFramework.Controls,
+			cloned.SummaryDetails.Frameworks[frameworkIndex].Controls,
+		)
+	}
+	return cloned, nil
+}
+
+// cloneControlResourceIDs restores AllLists after JSON cloning. AllLists has
+// an unexported backing map, so encoding/json cannot retain its entries.
+func cloneControlResourceIDs(original, cloned reportsummary.ControlSummaries) {
+	for controlID, originalControl := range original {
+		clonedControl, ok := cloned[controlID]
 		if !ok {
 			continue
 		}
@@ -136,9 +153,8 @@ func clonePostureReport(report *reporthandlingv2.PostureReport) (*reporthandling
 			resourceIDs.Append(status, resourceID)
 		}
 		clonedControl.ResourceIDs = resourceIDs
-		cloned.SummaryDetails.Controls[controlID] = clonedControl
+		cloned[controlID] = clonedControl
 	}
-	return cloned, nil
 }
 
 func cloneCatalog(catalog cautils.ResourceCatalog) (map[string]workloadinterface.IMetadata, map[workloadinterface.IMetadata]workloadinterface.IMetadata, error) {
@@ -389,37 +405,13 @@ func transformSessionInPlace(session *cautils.OPASessionObj, transformer Transfo
 			return err
 		}
 
-		for controlID, control := range session.Report.SummaryDetails.Controls {
-			remappedResourceIDs := control.ResourceIDs
-
-			originalResourceIDs := make(
-				map[string]apis.ScanningStatus,
-				len(control.ResourceIDs.All()),
-			)
-
-			maps.Copy(originalResourceIDs, control.ResourceIDs.All())
-
-			remappedResourceIDs.Clear()
-
-			for oldID, status := range originalResourceIDs {
-				newID, err := resolveMappedID(
-					transformer,
-					idMapping,
-					oldID,
-					"ref",
-				)
-				if err != nil {
-					return err
-				}
-
-				remappedResourceIDs.Append(
-					status,
-					newID,
-				)
+		if err := remapControlResourceIDs(session.Report.SummaryDetails.Controls, transformer, idMapping); err != nil {
+			return err
+		}
+		for frameworkIndex := range session.Report.SummaryDetails.Frameworks {
+			if err := remapControlResourceIDs(session.Report.SummaryDetails.Frameworks[frameworkIndex].Controls, transformer, idMapping); err != nil {
+				return err
 			}
-
-			control.ResourceIDs = remappedResourceIDs
-			session.Report.SummaryDetails.Controls[controlID] = control
 		}
 	}
 
@@ -427,6 +419,27 @@ func transformSessionInPlace(session *cautils.OPASessionObj, transformer Transfo
 		return err
 	}
 
+	return nil
+}
+
+func remapControlResourceIDs(controls reportsummary.ControlSummaries, transformer Transformer, idMapping map[string]string) error {
+	for controlID, control := range controls {
+		remappedResourceIDs := control.ResourceIDs
+		originalResourceIDs := make(map[string]apis.ScanningStatus, len(control.ResourceIDs.All()))
+		maps.Copy(originalResourceIDs, control.ResourceIDs.All())
+		remappedResourceIDs.Clear()
+
+		for oldID, status := range originalResourceIDs {
+			newID, err := resolveMappedID(transformer, idMapping, oldID, "ref")
+			if err != nil {
+				return err
+			}
+			remappedResourceIDs.Append(status, newID)
+		}
+
+		control.ResourceIDs = remappedResourceIDs
+		controls[controlID] = control
+	}
 	return nil
 }
 

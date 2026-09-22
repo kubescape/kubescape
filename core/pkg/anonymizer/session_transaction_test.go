@@ -8,9 +8,13 @@ import (
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/opa-utils/reporthandling"
+	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/attacktrack/v1alpha1"
+	helpersv1 "github.com/kubescape/opa-utils/reporthandling/helpers/v1"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/prioritization"
+	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
+	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -267,4 +271,43 @@ func TestCloneCatalogDoesNotShareNestedMaps(t *testing.T) {
 
 	originalAnnotation := resource.GetObject()["metadata"].(map[string]any)["annotations"].(map[string]any)["sensitive"]
 	assert.Equal(t, "original", originalAnnotation)
+}
+
+func TestTransformSessionPreservesFrameworkControlResourceIDs(t *testing.T) {
+	resource := workloadinterface.NewWorkloadObj(map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Pod",
+		"metadata": map[string]any{
+			"name":      "framework-control-resource",
+			"namespace": "default",
+		},
+	})
+	oldID := resource.GetID()
+	resourceIDs := helpersv1.AllLists{}
+	resourceIDs.Append(apis.StatusFailed, oldID)
+
+	session := &cautils.OPASessionObj{
+		AllResources: map[string]workloadinterface.IMetadata{oldID: resource},
+		Report: &reporthandlingv2.PostureReport{
+			SummaryDetails: reportsummary.SummaryDetails{
+				Frameworks: []reportsummary.FrameworkSummary{{
+					Name: "framework",
+					Controls: reportsummary.ControlSummaries{
+						"C-framework": {ResourceIDs: resourceIDs},
+					},
+				}},
+			},
+		},
+	}
+
+	require.NoError(t, transformSession(session, NewMapping(), NewMappingTransformer()))
+
+	var newID string
+	for resourceID := range session.AllResources {
+		newID = resourceID
+	}
+	frameworkControl := session.Report.SummaryDetails.Frameworks[0].Controls["C-framework"]
+	require.NotNil(t, frameworkControl.ResourceIDs.All())
+	assert.Equal(t, apis.StatusFailed, frameworkControl.ResourceIDs.All()[newID])
+	assert.NotContains(t, frameworkControl.ResourceIDs.All(), oldID)
 }
