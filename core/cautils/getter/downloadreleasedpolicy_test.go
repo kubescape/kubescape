@@ -245,7 +245,7 @@ func TestSetRegoObjectsWithFallbackChecksumVerificationFailure(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/download/checksums.txt":
-			_, err := fmt.Fprintln(w, "sha256  artifact.tar.gz")
+			_, err := fmt.Fprintln(w, "0000000000000000000000000000000000000000000000000000000000000000  artifact.tar.gz")
 			require.NoError(t, err)
 		case "/download/checksums.sigstore.json":
 			signatureRequests.Add(1)
@@ -264,6 +264,7 @@ func TestSetRegoObjectsWithFallbackChecksumVerificationFailure(t *testing.T) {
 		fallback, err := p.SetRegoObjectsWithFallback()
 
 		require.Error(t, err)
+		require.Contains(t, err.Error(), "error verifying checksums.txt")
 		require.False(t, fallback)
 		require.True(t, errors.Is(err, gitregostore.ErrChecksumVerification))
 	})
@@ -275,6 +276,7 @@ func TestSetRegoObjectsWithFallbackChecksumVerificationFailure(t *testing.T) {
 		fallback, err := p.SetRegoObjectsWithFallback()
 
 		require.Error(t, err)
+		require.Contains(t, err.Error(), "error verifying checksums.txt")
 		require.False(t, fallback)
 		require.True(t, errors.Is(err, gitregostore.ErrChecksumVerification))
 	})
