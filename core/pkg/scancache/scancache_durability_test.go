@@ -248,9 +248,22 @@ func TestAtomicFlushNeverExposesPartialJSON(t *testing.T) {
 	go func() {
 		defer close(readerDone)
 		for i := 0; i < 500; i++ {
+			// Load holds this shared lock before it opens the cache file. Mirror
+			// that production path here so the test does not create a Windows
+			// sharing violation that real cache readers cannot create.
+			readerLock := flock.New(cachePath(dir) + ".lock")
+			if err := readerLock.RLock(); err != nil {
+				readerErr <- err
+				return
+			}
 			raw, err := os.ReadFile(cachePath(dir))
+			unlockErr := readerLock.Unlock()
 			if err != nil {
 				readerErr <- err
+				return
+			}
+			if unlockErr != nil {
+				readerErr <- unlockErr
 				return
 			}
 			var generation diskCache
