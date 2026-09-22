@@ -6,12 +6,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
+	"sort"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/core"
 	"github.com/kubescape/kubescape/v4/core/meta"
@@ -1456,4 +1461,218 @@ func TestFleetScan_RejectsBadReferenceClusterBeforeScanning(t *testing.T) {
 
 	require.ErrorContains(t, err, "is not one of --kube-contexts")
 	assert.Empty(t, ks.callsOutputs, "a typo is a configuration error and must be caught before any cluster is touched")
+}
+
+// captureStdout runs fn with os.Stdout redirected and returns what it wrote,
+// with the escape sequences stripped so assertions read as words.
+func captureStdout(t *testing.T, fn func()) string {
+	t.Helper()
+
+	read, write, err := os.Pipe()
+	require.NoError(t, err)
+	original := os.Stdout
+	os.Stdout = write
+	defer func() { os.Stdout = original }()
+
+	done := make(chan string, 1)
+	go func() {
+		var buf bytes.Buffer
+		_, _ = io.Copy(&buf, read)
+		done <- buf.String()
+	}()
+
+	fn()
+	require.NoError(t, write.Close())
+	out := <-done
+	require.NoError(t, read.Close())
+
+	return regexp.MustCompile(`\x1b\[[0-9;]*m`).ReplaceAllString(out, "")
+}
+
+// TestFleetScan_AlwaysPrintsTheSummary covers the case the summary exists for:
+// a run where part of the fleet could not be reached. The scan returns an
+// error, and the operator still gets what was found on the clusters that did
+// answer, including the fact that one of them did not.
+func TestFleetScan_AlwaysPrintsTheSummary(t *testing.T) {
+	dir := t.TempDir()
+	ks := &fleetOutcomeKubescape{outcomes: map[string]func() (*resultshandling.ResultsHandler, error){
+		"prod": func() (*resultshandling.ResultsHandler, error) {
+			return resultsWithControl(apis.StatusPassed, 100), nil
+		},
+		"staging": func() (*resultshandling.ResultsHandler, error) { return resultsWithControl(apis.StatusFailed, 40), nil },
+		"dr": func() (*resultshandling.ResultsHandler, error) {
+			return nil, fmt.Errorf("dr: %w", core.ErrClusterConnection)
+		},
+	}}
+	scanInfo := cautils.ScanInfo{
+		KubeContexts: []string{"prod", "staging", "dr"},
+		Output:       filepath.Join(dir, "report.json"),
+		FleetReport:  filepath.Join(dir, "fleet.json"),
+		ScanType:     cautils.ScanTypeCluster,
+	}
+
+	out := captureStdout(t, func() {
+		require.Error(t, fleetScan(scanInfo, ks, nil, scanContextOnlyRunner), "dr was unreachable")
+	})
+
+	assert.Contains(t, out, "Fleet summary")
+	assert.Contains(t, out, "prod")
+	assert.Contains(t, out, "staging")
+	assert.Contains(t, out, "dr", "a cluster nobody could reach still belongs in the summary")
+	assert.Contains(t, out, "unreachable")
+	assert.Contains(t, out, "Fleet compliance")
+	assert.Contains(t, out, "C-0016", "the clusters disagree on it, so it is worth showing")
+}
+
+// TestFleetScan_PrintsTheSummaryEvenWhenTheFileCannotBeWritten pins that a run
+// which scanned every cluster still tells the operator what it found. The
+// summary is the only place they would otherwise see it.
+func TestFleetScan_PrintsTheSummaryEvenWhenTheFileCannotBeWritten(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "report.json"), []byte("{}"), 0o600))
+	ks := &fleetTrackingKubescape{}
+	scanInfo := cautils.ScanInfo{
+		KubeContexts: []string{"ctx-a"},
+		Output:       filepath.Join(dir, "report.json"),
+		FleetReport:  filepath.Join(dir, "report.json", "fleet.json"),
+		ScanType:     cautils.ScanTypeCluster,
+	}
+
+	out := captureStdout(t, func() {
+		require.ErrorContains(t, fleetScan(scanInfo, ks, nil, scanContextOnlyRunner), "fleet report")
+	})
+
+	assert.Contains(t, out, "Fleet summary")
+	assert.Contains(t, out, "ctx-a")
+}
+
+// TestFleetScan_NoSummaryWithoutAFleetReport pins that a plain --kube-contexts
+// run prints nothing extra. Without --fleet-report no aggregate is built at
+// all, which is what keeps that run's memory flat, so there is nothing to show.
+func TestFleetScan_NoSummaryWithoutAFleetReport(t *testing.T) {
+	dir := t.TempDir()
+	ks := &fleetTrackingKubescape{}
+	scanInfo := cautils.ScanInfo{
+		KubeContexts: []string{"ctx-a", "ctx-b"},
+		Output:       filepath.Join(dir, "report.json"),
+		ScanType:     cautils.ScanTypeCluster,
+	}
+
+	out := captureStdout(t, func() {
+		require.NoError(t, fleetScan(scanInfo, ks, nil, scanContextOnlyRunner))
+	})
+
+	assert.NotContains(t, out, "Fleet summary")
+}
+
+// contextWindow is when one context was being scanned, and which kube context
+// was actually active while it was.
+type contextWindow struct {
+	kubeContext string
+	activeAs    string
+	start, end  time.Time
+}
+
+// windowRecorder collects one contextWindow per scanned context.
+//
+// The mutex is not decoration. The point of the assertions below is to fail if
+// contexts are ever scanned concurrently, so the recorder has to stay correct
+// under exactly the change it is meant to catch. Without it a concurrent
+// implementation would trip the race detector inside this helper instead of
+// reporting the invariant that actually broke.
+type windowRecorder struct {
+	mu      sync.Mutex
+	windows []contextWindow
+}
+
+// runner returns a fleetRunner that records the window each scan ran in and the
+// kube context that was active inside it.
+func (r *windowRecorder) runner() fleetRunner {
+	return func(ctx context.Context, scanInfo *cautils.ScanInfo, ks meta.IKubescape, policyIdentifiers []cautils.PolicyIdentifier) (*resultshandling.ResultsHandler, error) {
+		window := contextWindow{
+			kubeContext: scanInfo.GetClusterContextName(),
+			activeAs:    k8sinterface.GetContextName(),
+			start:       time.Now(),
+		}
+		results, err := ks.ScanContext(ctx, scanInfo, policyIdentifiers)
+
+		// A real scan takes time; this fake one returns instantly. Without a
+		// dwell the windows are so narrow that concurrent scans would still not
+		// overlap in wall-clock time, and the overlap assertion below could
+		// never fail however the loop was rewritten.
+		time.Sleep(2 * time.Millisecond)
+		window.end = time.Now()
+
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		r.windows = append(r.windows, window)
+		return results, err
+	}
+}
+
+// byStart returns the recorded windows ordered by the time each scan began,
+// which is the order the scans actually happened in rather than the order they
+// finished reporting themselves.
+func (r *windowRecorder) byStart() []contextWindow {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	ordered := append([]contextWindow(nil), r.windows...)
+	sort.Slice(ordered, func(i, j int) bool { return ordered[i].start.Before(ordered[j].start) })
+	return ordered
+}
+
+// TestFleetScan_ContextWindowsDoNotOverlap pins that one context is scanned at
+// a time and that the process is pointed at that context while it is.
+//
+// Both properties are structural today, since the loop is sequential and
+// EnterClusterContext brackets each iteration. The assertions exist so they
+// cannot stop being true quietly. The active context lives in k8sinterface as
+// process-global state with no locking around it, so two contexts being live at
+// once means a scan can read the wrong cluster. A change that scans contexts
+// concurrently has to face that here, and delete this test deliberately, rather
+// than discover it later in a report that describes a cluster it never read.
+func TestFleetScan_ContextWindowsDoNotOverlap(t *testing.T) {
+	// The kube context name is process-global, so this test must not run in
+	// parallel with anything else that touches it.
+	previousContext := k8sinterface.GetContextName()
+	t.Cleanup(func() { k8sinterface.SetClusterContextName(previousContext) })
+
+	var recorder windowRecorder
+	dir := t.TempDir()
+	scanInfo := cautils.ScanInfo{
+		KubeContexts: []string{"prod", "staging", "dr"},
+		Output:       filepath.Join(dir, "report.json"),
+		ScanType:     cautils.ScanTypeCluster,
+	}
+
+	require.NoError(t, fleetScan(scanInfo, &fleetTrackingKubescape{}, nil, recorder.runner()))
+
+	windows := recorder.byStart()
+	require.Len(t, windows, len(scanInfo.KubeContexts), "every context has to be scanned exactly once")
+
+	// Sorted by start time, any two windows overlap if and only if one begins
+	// before the one before it ended, so neighbours are the only pairs worth
+	// comparing.
+	for i, window := range windows {
+		if i == 0 {
+			continue
+		}
+
+		previous := windows[i-1]
+		assert.Falsef(t, window.start.Before(previous.end),
+			"context %q began at %s, before %q ended at %s, so two contexts were live at once",
+			window.kubeContext, window.start, previous.kubeContext, previous.end)
+	}
+
+	for i, window := range windows {
+		assert.Equalf(t, scanInfo.KubeContexts[i], window.kubeContext,
+			"contexts must be scanned in the order they were given")
+		assert.Equalf(t, window.kubeContext, window.activeAs,
+			"the process must be pointed at %q while %q is being scanned, or the scan reads another cluster",
+			window.kubeContext, window.kubeContext)
+	}
+
+	assert.Equal(t, previousContext, k8sinterface.GetContextName(),
+		"the run must leave the process on the context it found it on")
 }
