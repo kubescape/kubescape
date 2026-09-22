@@ -31,8 +31,8 @@ func createNetworkReachabilityTools(ksServer *KubescapeMcpserver) {
 		mcp.WithString("source_pod", mcp.Required(), mcp.Description("Name of the source pod")),
 		mcp.WithString("destination_namespace", mcp.Required(), mcp.Description("Namespace of the destination pod")),
 		mcp.WithString("destination_pod", mcp.Required(), mcp.Description("Name of the destination pod")),
-		mcp.WithNumber("port", mcp.Description("Destination port to check (optional; omit to check reachability without regard to port)")),
-		mcp.WithString("protocol", mcp.Description("Protocol for the port check: TCP, UDP, or SCTP (optional, defaults to TCP)")),
+		mcp.WithNumber("port", mcp.Description("Destination port to check (optional; omit to check whether any port/protocol pair is allowed by both source egress and destination ingress)")),
+		mcp.WithString("protocol", mcp.Description("Protocol for the port check: TCP, UDP, or SCTP (optional, defaults to TCP when port is supplied; ignored when port is omitted, which checks all three protocols)")),
 	)
 
 	ksServer.s.AddTool(tool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
