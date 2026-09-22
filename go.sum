@@ -1357,6 +1357,7 @@ github.com/moby/patternmatcher v0.6.1 h1:qlhtafmr6kgMIJjKJMDmMWq7WLkKIo23hsrpR3x
 github.com/moby/patternmatcher v0.6.1/go.mod h1:hDPoyOpDY7OrrMDLaYoY3hf52gNCR/YOUYxkhApJIxc=
 github.com/moby/policy-helpers v0.0.0-20260901104222-dd6c5499c491 h1:5qXAyBr9AXXAqPoFK/wY85wggaKyYSMCNh8QF/O21Rk=
 github.com/moby/policy-helpers v0.0.0-20260901104222-dd6c5499c491/go.mod h1:77BSYHqLljY8i6FWZhQ2V7xmgNP3eftoIRV5yHYspDs=
+github.com/moby/policy-helpers v0.0.0-20260901142052-72f704e6cdb6 h1:wxmKL9KLJGSNWvWZwkEmhN5RhGpmz+Jzp4Yu4scoM0I=
 github.com/moby/policy-helpers v0.0.0-20260901142052-72f704e6cdb6/go.mod h1:hNMdiq4WjSmuyvy8lWcflH6erzSg/MgZlFyM7vC7Z2c=
 github.com/moby/spdystream v0.5.1 h1:9sNYeYZUcci9R6/w7KDaFWEWeV4LStVG78Mpyq/Zm/Y=
 github.com/moby/spdystream v0.5.1/go.mod h1:xBAYlnt/ay+11ShkdFKNAG7LsyK/tmNBVvVOwrfMgdI=
