@@ -17,6 +17,7 @@ import (
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	corev1 "k8s.io/api/core/v1"
 )
 
 var errInjectedTransform = errors.New("injected transform failure")
@@ -310,4 +311,44 @@ func TestTransformSessionPreservesFrameworkControlResourceIDs(t *testing.T) {
 	require.NotNil(t, frameworkControl.ResourceIDs.All())
 	assert.Equal(t, apis.StatusFailed, frameworkControl.ResourceIDs.All()[newID])
 	assert.NotContains(t, frameworkControl.ResourceIDs.All(), oldID)
+}
+
+func TestTransformSessionSupportsTypedKubernetesContainers(t *testing.T) {
+	resource := workloadinterface.NewWorkloadObj(map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Pod",
+		"metadata": map[string]any{
+			"name":      "typed-container-pod",
+			"namespace": "default",
+		},
+		"spec": map[string]any{
+			"containers": []corev1.Container{{
+				Name:  "app",
+				Image: "registry.example/private/app:latest",
+				Env:   []corev1.EnvVar{{Name: "DB_PASSWORD", Value: "redacted"}},
+			}},
+		},
+	})
+	oldID := resource.GetID()
+	session := &cautils.OPASessionObj{
+		AllResources: map[string]workloadinterface.IMetadata{oldID: resource},
+		EnvVarSecretRefs: map[string]map[string]map[string]struct{}{
+			oldID: {"app": {"DB_PASSWORD": {}}},
+		},
+	}
+
+	require.NotPanics(t, func() {
+		require.NoError(t, transformSession(session, NewMapping(), NewMappingTransformer()))
+	})
+	require.Len(t, session.AllResources, 1)
+
+	for _, transformed := range session.AllResources {
+		workload := workloadinterface.NewWorkloadObj(transformed.GetObject())
+		containers, err := workload.GetContainers()
+		require.NoError(t, err)
+		require.Len(t, containers, 1)
+		assert.NotEqual(t, "app", containers[0].Name)
+		assert.NotEqual(t, "registry.example/private/app:latest", containers[0].Image)
+		assert.NotEqual(t, "DB_PASSWORD", containers[0].Env[0].Name)
+	}
 }

@@ -17,7 +17,6 @@ import (
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
-	"k8s.io/apimachinery/pkg/runtime"
 )
 
 // transformSession applies the supplied Transformer to sensitive resource
@@ -39,8 +38,7 @@ func transformSession(session *cautils.OPASessionObj, _ *Mapping, transformer Tr
 	if err := transformSessionInPlace(transaction.working, transformer); err != nil {
 		return err
 	}
-	commitTransformedSession(session, transaction)
-	return nil
+	return commitTransformedSession(session, transaction)
 }
 
 type sessionTransform struct {
@@ -174,7 +172,12 @@ func cloneCatalog(catalog cautils.ResourceCatalog) (map[string]workloadinterface
 			cloneErr = fmt.Errorf("clone resource %q: object is unavailable", resourceID)
 			return false
 		}
-		cloned := workloadinterface.NewWorkloadObj(runtime.DeepCopyJSON(object))
+		clonedObject, err := cloneResourceObject(object)
+		if err != nil {
+			cloneErr = fmt.Errorf("clone resource %q: %w", resourceID, err)
+			return false
+		}
+		cloned := workloadinterface.NewWorkloadObj(clonedObject)
 		resources[resourceID] = cloned
 		originalByClone[cloned] = resource
 		return true
@@ -185,18 +188,48 @@ func cloneCatalog(catalog cautils.ResourceCatalog) (map[string]workloadinterface
 	return resources, originalByClone, nil
 }
 
-func commitTransformedSession(session *cautils.OPASessionObj, transaction *sessionTransform) {
+// cloneResourceObject uses JSON as a representation-safe deep copy. Unlike
+// runtime.DeepCopyJSON, it accepts typed Kubernetes values such as
+// []corev1.Container that the scan pipeline keeps inside otherwise
+// unstructured resource maps.
+func cloneResourceObject(object map[string]any) (map[string]any, error) {
+	cloned, err := cloneJSON(object)
+	if err != nil {
+		return nil, fmt.Errorf("serialize resource object: %w", err)
+	}
+	return cloned, nil
+}
+
+func commitTransformedSession(session *cautils.OPASessionObj, transaction *sessionTransform) error {
 	working := transaction.working
-	committedResources := make(map[string]workloadinterface.IMetadata, len(transaction.originalByClone))
+	type committedResource struct {
+		original workloadinterface.IMetadata
+		object   map[string]any
+	}
+	updates := make([]committedResource, 0, len(transaction.originalByClone))
+	var commitErr error
 	working.GetCatalog().ForEach(func(_ string, transformed workloadinterface.IMetadata) bool {
 		original, ok := transaction.originalByClone[transformed]
 		if !ok {
 			return true
 		}
-		original.SetObject(runtime.DeepCopyJSON(transformed.GetObject()))
-		committedResources[original.GetID()] = original
+		object, err := cloneResourceObject(transformed.GetObject())
+		if err != nil {
+			commitErr = fmt.Errorf("prepare transformed resource for commit: %w", err)
+			return false
+		}
+		updates = append(updates, committedResource{original: original, object: object})
 		return true
 	})
+	if commitErr != nil {
+		return commitErr
+	}
+
+	committedResources := make(map[string]workloadinterface.IMetadata, len(transaction.originalByClone))
+	for _, update := range updates {
+		update.original.SetObject(update.object)
+		committedResources[update.original.GetID()] = update.original
+	}
 	session.SetCatalog(cautils.NewMapResourceCatalog(committedResources))
 	session.ResourcesResult = working.ResourcesResult
 	session.ResourceSource = working.ResourceSource
@@ -206,6 +239,7 @@ func commitTransformedSession(session *cautils.OPASessionObj, transaction *sessi
 	session.Metadata = working.Metadata
 	session.Report = working.Report
 	session.NamespaceSummaries = working.NamespaceSummaries
+	return nil
 }
 
 func transformSessionInPlace(session *cautils.OPASessionObj, transformer Transformer) error {
