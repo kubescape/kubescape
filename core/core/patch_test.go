@@ -52,7 +52,14 @@ func TestUpdatesCountToleratesUpdateAllMode(t *testing.T) {
 	assert.Equal(t, 0, updatesCount(nil))
 	assert.Equal(t, 0, updatesCount(&unversioned.UpdateManifest{}))
 	assert.Equal(t, 2, updatesCount(&unversioned.UpdateManifest{
-		Updates: unversioned.UpdatePackages{{}, {}},
+		OSUpdates: unversioned.UpdatePackages{{}, {}},
+	}))
+	assert.Equal(t, 2, updatesCount(&unversioned.UpdateManifest{
+		LangUpdates: unversioned.LangUpdatePackages{{}, {}},
+	}))
+	assert.Equal(t, 3, updatesCount(&unversioned.UpdateManifest{
+		OSUpdates:   unversioned.UpdatePackages{{}},
+		LangUpdates: unversioned.LangUpdatePackages{{}, {}},
 	}))
 }
 
