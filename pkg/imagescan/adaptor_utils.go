@@ -74,7 +74,7 @@ func ProcessImages[T any](
 	for _, imageID := range imageIDs {
 		res, err := processFunc(imageID)
 		if err != nil {
-			logger.L().Warning("image scan api error, result may be incomplete", helpers.Error(err))
+			logger.L().Warning("image scan error, result may be incomplete", helpers.Error(err))
 			aggErr = errors.Join(aggErr, err)
 		}
 
