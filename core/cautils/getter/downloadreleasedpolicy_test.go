@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	jsoniter "github.com/json-iterator/go"
@@ -239,12 +240,15 @@ func TestSetRegoObjectsWithFallback(t *testing.T) {
 func TestSetRegoObjectsWithFallbackChecksumVerificationFailure(t *testing.T) {
 	t.Parallel()
 
+	var signatureRequests atomic.Int32
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/download/checksums.txt":
-			_, err := fmt.Fprintln(w, "not-a-valid-checksum-manifest")
+			_, err := fmt.Fprintln(w, "sha256  artifact.tar.gz")
 			require.NoError(t, err)
 		case "/download/checksums.sigstore.json":
+			signatureRequests.Add(1)
 			_, err := fmt.Fprintln(w, "not-valid-json")
 			require.NoError(t, err)
 		default:
@@ -253,9 +257,7 @@ func TestSetRegoObjectsWithFallbackChecksumVerificationFailure(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	t.Run("unversioned release does not fall back on checksum failure", func(t *testing.T) {
-		t.Parallel()
-
+	t.Run("unversioned release does not fall back on checksum signature failure", func(t *testing.T) {
 		p := NewDownloadReleasedPolicyWithVersion("")
 		p.gs.URL = server.URL + "/download"
 
@@ -266,9 +268,7 @@ func TestSetRegoObjectsWithFallbackChecksumVerificationFailure(t *testing.T) {
 		require.True(t, errors.Is(err, gitregostore.ErrChecksumVerification))
 	})
 
-	t.Run("pinned release returns checksum failure", func(t *testing.T) {
-		t.Parallel()
-
+	t.Run("pinned release returns checksum signature failure", func(t *testing.T) {
 		p := NewDownloadReleasedPolicyWithVersion("v2.0.301")
 		p.gs.URL = server.URL + "/download"
 
@@ -278,4 +278,6 @@ func TestSetRegoObjectsWithFallbackChecksumVerificationFailure(t *testing.T) {
 		require.False(t, fallback)
 		require.True(t, errors.Is(err, gitregostore.ErrChecksumVerification))
 	})
+
+	require.Equal(t, int32(2), signatureRequests.Load())
 }
