@@ -40,6 +40,25 @@ func Load(cacheDir, controlsConfigVersion string) (*Store, error) {
 		pending: map[string]Entry{},
 	}
 
+	// Do not create either the cache directory or its sidecar lock for a read
+	// that has nothing to load. Besides keeping Load side-effect free, this
+	// preserves Delete's historical idempotence for a missing cache directory.
+	if _, err := os.Stat(cacheDir); os.IsNotExist(err) {
+		return s, nil
+	} else if err != nil {
+		return nil, fmt.Errorf("inspect incremental scan cache directory: %w", err)
+	}
+
+	// A Windows reader keeps the destination file open while os.ReadFile runs.
+	// Atomic replacement uses MoveFileEx, which can fail with a sharing
+	// violation unless that read is coordinated with the publisher. The shared
+	// sidecar lock also gives every platform one read/merge/write contract.
+	fileLock := flock.New(path + ".lock")
+	if err := fileLock.RLock(); err != nil {
+		return nil, fmt.Errorf("read-lock incremental scan cache: %w", err)
+	}
+	defer func() { _ = fileLock.Unlock() }()
+
 	onDisk, err := readCache(path)
 	if os.IsNotExist(err) {
 		return s, nil
@@ -218,8 +237,18 @@ func VersionKey(parts ...[]byte) string {
 
 func Delete(cacheDir string) error {
 	path := filepath.Join(cacheDir, cacheFileName)
+	if _, err := os.Stat(cacheDir); os.IsNotExist(err) {
+		return nil
+	} else if err != nil {
+		return fmt.Errorf("inspect incremental scan cache directory for deletion: %w", err)
+	}
+
 	fileLock := flock.New(path + ".lock")
 	if err := fileLock.Lock(); err != nil {
+		if os.IsNotExist(err) {
+			// A concurrent Delete may have removed the directory after the Stat.
+			return nil
+		}
 		return fmt.Errorf("lock incremental scan cache for deletion: %w", err)
 	}
 	defer func() { _ = fileLock.Unlock() }()

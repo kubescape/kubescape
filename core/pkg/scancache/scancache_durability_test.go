@@ -5,9 +5,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"testing"
+	"time"
 
+	"github.com/gofrs/flock"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -73,7 +76,9 @@ func TestFlushCreatesMissingCacheDirectory(t *testing.T) {
 	require.NoError(t, store.Flush())
 	info, err := os.Stat(cachePath(dir))
 	require.NoError(t, err)
-	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+	if runtime.GOOS != "windows" {
+		assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+	}
 }
 
 func TestFlushReplacesMalformedGeneration(t *testing.T) {
@@ -288,5 +293,97 @@ func TestDeleteAndFlushUseSameLock(t *testing.T) {
 	loaded, err := Load(dir, "v1")
 	require.NoError(t, err)
 	_, ok := loaded.Get("C-2", "resource", "hash-2")
+	assert.True(t, ok)
+}
+
+func TestDeleteMissingDirectoryIsANoOp(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "does-not-exist")
+
+	require.NoError(t, Delete(dir))
+	_, err := os.Stat(dir)
+	assert.True(t, os.IsNotExist(err), "Delete must not create a cache directory or lock file")
+}
+
+func TestLoadWaitsForCacheWriterLock(t *testing.T) {
+	dir := t.TempDir()
+	seed, err := Load(dir, "v1")
+	require.NoError(t, err)
+	seed.Put("C-seed", "resource", "hash", cacheVerdict("C-seed"))
+	require.NoError(t, seed.Flush())
+
+	writerLock := flock.New(cachePath(dir) + ".lock")
+	require.NoError(t, writerLock.Lock())
+	writerLocked := true
+	defer func() {
+		if writerLocked {
+			require.NoError(t, writerLock.Unlock())
+		}
+	}()
+
+	loaded := make(chan error, 1)
+	go func() {
+		_, loadErr := Load(dir, "v1")
+		loaded <- loadErr
+	}()
+
+	select {
+	case err := <-loaded:
+		t.Fatalf("Load completed while an exclusive cache writer lock was held: %v", err)
+	case <-time.After(100 * time.Millisecond):
+		// Load must stay out of the replacement window. This is especially
+		// important on Windows, where an uncoordinated os.ReadFile can make
+		// MoveFileEx fail with a sharing violation.
+	}
+
+	require.NoError(t, writerLock.Unlock())
+	writerLocked = false
+	select {
+	case err := <-loaded:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("Load did not resume after the cache writer released its lock")
+	}
+}
+
+func TestFlushWaitsForCacheReaderLock(t *testing.T) {
+	dir := t.TempDir()
+	store, err := Load(dir, "v1")
+	require.NoError(t, err)
+	store.Put("C-1", "resource", "hash", cacheVerdict("C-1"))
+
+	readerLock := flock.New(cachePath(dir) + ".lock")
+	require.NoError(t, readerLock.RLock())
+	readerLocked := true
+	defer func() {
+		if readerLocked {
+			require.NoError(t, readerLock.Unlock())
+		}
+	}()
+
+	flushed := make(chan error, 1)
+	go func() {
+		flushed <- store.Flush()
+	}()
+
+	select {
+	case err := <-flushed:
+		t.Fatalf("Flush completed while a cache reader lock was held: %v", err)
+	case <-time.After(100 * time.Millisecond):
+		// The writer must not begin atomic replacement while a Load could
+		// still have the destination open.
+	}
+
+	require.NoError(t, readerLock.Unlock())
+	readerLocked = false
+	select {
+	case err := <-flushed:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("Flush did not resume after the cache reader released its lock")
+	}
+
+	loaded, err := Load(dir, "v1")
+	require.NoError(t, err)
+	_, ok := loaded.Get("C-1", "resource", "hash")
 	assert.True(t, ok)
 }
