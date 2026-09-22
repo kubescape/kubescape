@@ -30,7 +30,7 @@ The code is merged, no other actions are needed.
 
 `00-pr-scanner.yaml` then runs again on the push to `master`, under the same `paths-ignore` filter, so the merge commit gets the same build, tests and lint the PR got. This matters because a PR run only proves the branch was green against the base *as it stood when that run started*: two PRs can each pass, merge, and still break `master` between them. Without the push run the failure first surfaces on the next contributor's PR, pointing at files they never touched.
 
-The E2E system tests do **not** run on merge — `run-system-tests` is gated on `github.event_name != 'push'`. In-progress runs are cancelled for pull requests only, so one merge cannot cancel another merge's verdict. `internal/ghworkflows/masterbuild_test.go` asserts all of this.
+The E2E system tests do **not** run on merge — `run-system-tests` is gated on `github.event_name != 'push'`. Each push run gets a concurrency group of its own (`github.run_id`) and is never cancelled, so a burst of merges cannot cancel or replace another merge's run; pull request runs are still grouped by ref and superseded by the next push to the PR. `internal/ghworkflows/masterbuild_test.go` asserts all of this.
 
 
 ## Release process
