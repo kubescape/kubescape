@@ -4,12 +4,17 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
 
+	"github.com/gofrs/flock"
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 )
+
+const cacheFileName = "incremental-scan-cache.json"
 
 type Entry struct {
 	Hash    string                                     `json:"hash"`
@@ -22,33 +27,89 @@ type Store struct {
 	version string // controls-config version; a mismatch invalidates everything
 	mu      sync.RWMutex
 	data    map[string]Entry
+	pending map[string]Entry
 	dirty   bool
 }
 
 func Load(cacheDir, controlsConfigVersion string) (*Store, error) {
-	path := filepath.Join(cacheDir, "incremental-scan-cache.json")
-	s := &Store{path: path, version: controlsConfigVersion, data: map[string]Entry{}}
+	path := filepath.Join(cacheDir, cacheFileName)
+	s := &Store{
+		path:    path,
+		version: controlsConfigVersion,
+		data:    map[string]Entry{},
+		pending: map[string]Entry{},
+	}
 
-	raw, err := os.ReadFile(path)
+	// Do not create either the cache directory or its sidecar lock for a read
+	// that has nothing to load. Besides keeping Load side-effect free, this
+	// preserves Delete's historical idempotence for a missing cache directory.
+	if _, err := os.Stat(cacheDir); os.IsNotExist(err) {
+		return s, nil
+	} else if err != nil {
+		return nil, fmt.Errorf("inspect incremental scan cache directory: %w", err)
+	}
+
+	// A Windows reader keeps the destination file open while os.ReadFile runs.
+	// Atomic replacement uses MoveFileEx, which can fail with a sharing
+	// violation unless that read is coordinated with the publisher. The shared
+	// sidecar lock also gives every platform one read/merge/write contract.
+	fileLock := flock.New(path + ".lock")
+	if err := fileLock.RLock(); err != nil {
+		return nil, fmt.Errorf("read-lock incremental scan cache: %w", err)
+	}
+	defer func() { _ = fileLock.Unlock() }()
+
+	onDisk, err := readCache(path)
 	if os.IsNotExist(err) {
 		return s, nil
 	}
 	if err != nil {
+		if isInvalidCache(err) {
+			return s, nil // corrupt cache: treat as empty rather than fail the scan
+		}
 		return nil, err
-	}
-
-	var onDisk struct {
-		Version string           `json:"version"`
-		Entries map[string]Entry `json:"entries"`
-	}
-	if err := json.Unmarshal(raw, &onDisk); err != nil {
-		return s, nil // corrupt cache: treat as empty rather than fail the scan
 	}
 	if onDisk.Version != controlsConfigVersion {
 		return s, nil // controls-config bumped: automatic invalidation
 	}
-	s.data = onDisk.Entries
+	if onDisk.Entries != nil {
+		s.data = onDisk.Entries
+	}
 	return s, nil
+}
+
+type diskCache struct {
+	Version string           `json:"version"`
+	Entries map[string]Entry `json:"entries"`
+}
+
+type invalidCacheError struct {
+	err error
+}
+
+func (e *invalidCacheError) Error() string {
+	return "invalid incremental scan cache: " + e.err.Error()
+}
+
+func (e *invalidCacheError) Unwrap() error {
+	return e.err
+}
+
+func isInvalidCache(err error) bool {
+	_, ok := err.(*invalidCacheError)
+	return ok
+}
+
+func readCache(path string) (diskCache, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return diskCache{}, err
+	}
+	var onDisk diskCache
+	if err := json.Unmarshal(raw, &onDisk); err != nil {
+		return diskCache{}, &invalidCacheError{err: err}
+	}
+	return onDisk, nil
 }
 
 func (s *Store) key(controlID, resourceID string) string {
@@ -68,7 +129,16 @@ func (s *Store) Get(controlID, resourceID, hash string) (resourcesresults.Resour
 func (s *Store) Put(controlID, resourceID, hash string, verdict resourcesresults.ResourceAssociatedControl) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.data[s.key(controlID, resourceID)] = Entry{Hash: hash, Verdict: verdict}
+	if s.data == nil {
+		s.data = map[string]Entry{}
+	}
+	if s.pending == nil {
+		s.pending = map[string]Entry{}
+	}
+	key := s.key(controlID, resourceID)
+	entry := Entry{Hash: hash, Verdict: verdict}
+	s.data[key] = entry
+	s.pending[key] = entry
 	s.dirty = true
 }
 
@@ -78,17 +148,47 @@ func (s *Store) Flush() error {
 	if !s.dirty {
 		return nil
 	}
-	out := struct {
-		Version string           `json:"version"`
-		Entries map[string]Entry `json:"entries"`
-	}{Version: s.version, Entries: s.data}
-	b, err := json.Marshal(out)
+
+	// Store instances are process-local, but the cache path is shared by CLI
+	// invocations. Serialize the read-merge-write transaction so two scans that
+	// finish together do not silently discard each other's new verdicts.
+	if err := os.MkdirAll(filepath.Dir(s.path), 0o750); err != nil {
+		return fmt.Errorf("create incremental scan cache directory: %w", err)
+	}
+	fileLock := flock.New(s.path + ".lock")
+	if err := fileLock.Lock(); err != nil {
+		return fmt.Errorf("lock incremental scan cache: %w", err)
+	}
+	defer func() { _ = fileLock.Unlock() }()
+
+	merged := make(map[string]Entry, len(s.data)+len(s.pending))
+	onDisk, readErr := readCache(s.path)
+	switch {
+	case readErr == nil && onDisk.Version == s.version:
+		for key, entry := range onDisk.Entries {
+			merged[key] = entry
+		}
+	case readErr == nil:
+		// A different policy context owns the file. Start a fresh generation.
+	case os.IsNotExist(readErr):
+	case isInvalidCache(readErr):
+		// Replace an incomplete or malformed generation with a valid one.
+	default:
+		return fmt.Errorf("reload incremental scan cache: %w", readErr)
+	}
+	for key, entry := range s.pending {
+		merged[key] = entry
+	}
+
+	b, err := json.Marshal(diskCache{Version: s.version, Entries: merged})
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(s.path, b, 0o600); err != nil {
+	if err := cautils.WriteFileAtomically(s.path, b, 0o600); err != nil {
 		return err
 	}
+	s.data = merged
+	clear(s.pending)
 	s.dirty = false
 	return nil
 }
@@ -136,7 +236,24 @@ func VersionKey(parts ...[]byte) string {
 }
 
 func Delete(cacheDir string) error {
-	err := os.Remove(filepath.Join(cacheDir, "incremental-scan-cache.json"))
+	path := filepath.Join(cacheDir, cacheFileName)
+	if _, err := os.Stat(cacheDir); os.IsNotExist(err) {
+		return nil
+	} else if err != nil {
+		return fmt.Errorf("inspect incremental scan cache directory for deletion: %w", err)
+	}
+
+	fileLock := flock.New(path + ".lock")
+	if err := fileLock.Lock(); err != nil {
+		if os.IsNotExist(err) {
+			// A concurrent Delete may have removed the directory after the Stat.
+			return nil
+		}
+		return fmt.Errorf("lock incremental scan cache for deletion: %w", err)
+	}
+	defer func() { _ = fileLock.Unlock() }()
+
+	err := os.Remove(path)
 	if os.IsNotExist(err) {
 		return nil
 	}
