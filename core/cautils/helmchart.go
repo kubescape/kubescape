@@ -263,23 +263,70 @@ func (hc *HelmChart) GetWorkloadsWithOptions(values map[string]any, releaseOpts 
 		if firstPathSeparatorIndex := strings.Index(path, "/"); firstPathSeparatorIndex != -1 {
 			absPath := filepath.Join(hc.path, path[firstPathSeparatorIndex:])
 
+			// The resolver (locationresolver.go, via getDocIndex/ResolveLocation)
+			// reads its line numbers from the source *template* file on disk at
+			// absPath, not from renderedYaml above - it has no rendered content
+			// to work from at all. That is only safe when the template is one
+			// Helm passed through unchanged: no "{{" anywhere. The moment a
+			// template contains an action, three things can go wrong if we still
+			// claim a line:
+			//   - the template is not valid YAML on its own (control structures,
+			//     "{{- include ... | nindent 4 }}") so the resolver's YAML
+			//     decode of absPath fails outright;
+			//   - even when it happens to still parse, "{{ if }}" can drop a
+			//     document that exists in the raw file, and "{{ range }}" can
+			//     expand one raw document into several rendered ones, so the
+			//     rendered ordinal i no longer names the same document in the
+			//     raw file it named in the render;
+			//   - either way the resolver would be reading the wrong document,
+			//     which is a *wrong* line, not merely a missing one - exactly
+			//     what the evidence feature exists to avoid printing.
+			// So the index is appended, the same way fileutils.go and
+			// terraform.go already do for plain YAML and Terraform-rendered
+			// manifests ("<path>:<index>"), only for a template proven static.
+			// Everything else keeps the pre-existing bare path: no line is
+			// printed, same as before this change, rather than a confidently
+			// wrong one. isStaticTemplate reads the same file the resolver will
+			// later open, so "unchanged by rendering" and "safe to index" are
+			// decided from the same evidence.
+			static, err := isStaticTemplate(absPath)
+			if err != nil {
+				logger.L().Debug("failed to check Helm template for template actions, leaving path unindexed",
+					helpers.String("file", absPath), helpers.Error(err))
+			}
+
 			workloads[absPath] = []workloadinterface.IMetadata{}
 			for i := range wls {
 				lw := localworkload.NewLocalWorkload(wls[i].GetObject())
-				// The document index is appended the same way fileutils.go and
-				// terraform.go already do for plain YAML and Terraform-rendered
-				// manifests: "<path>:<index>". Without it, getDocIndex
-				// (sarifprinter.go) rejects the path before ResolveLocation is
-				// ever called, so a rendered chart's resources can never map
-				// back to a line even though the resolver fully supports them.
-				// The map key stays the bare absPath - callers that join
-				// against Provenance() (keyed the same way) are unaffected.
-				lw.SetPath(fmt.Sprintf("%s:%d", absPath, i))
+				// The map key stays the bare absPath either way - callers that
+				// join against Provenance() (keyed the same way) are unaffected.
+				if static {
+					lw.SetPath(fmt.Sprintf("%s:%d", absPath, i))
+				} else {
+					lw.SetPath(absPath)
+				}
 				workloads[absPath] = append(workloads[absPath], lw)
 			}
 		}
 	}
 	return workloads, errs
+}
+
+// isStaticTemplate reports whether the file at absPath contains no Go template
+// action delimiter ("{{"), i.e. Helm's render passed it through byte-for-byte.
+// This is deliberately conservative: a literal "{{" that is not really a
+// template action (vanishingly rare in a Kubernetes manifest) is enough to
+// call a file templated, which only costs a missed opportunity to show a
+// line - never a wrong one. A read failure is treated the same way, for the
+// same reason: os.Open is what the resolver itself will do with this exact
+// path once evidence is requested, so if that is going to fail, failing safe
+// here is consistent with failing safe there.
+func isStaticTemplate(absPath string) (bool, error) {
+	content, err := os.ReadFile(absPath)
+	if err != nil {
+		return false, err
+	}
+	return !bytes.Contains(content, []byte("{{")), nil
 }
 
 // HelmValueOptions describes the user-supplied Helm value overrides and release identity

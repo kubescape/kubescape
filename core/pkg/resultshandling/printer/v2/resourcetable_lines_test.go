@@ -434,10 +434,13 @@ func TestResourceTable_WithoutShowEvidenceHasNoLines(t *testing.T) {
 
 // TestResourceTable_MissingDocIndexDegrades covers any resource whose path
 // carries no ":<index>" suffix at all, so getDocIndex reports nothing and the
-// resolver is never reached. This used to be every Helm-rendered resource;
-// since helmchart.go started appending the index (PR 7), it is now only a
-// resource source that predates that convention, or one hand-constructed
-// without it.
+// resolver is never reached. This is still most Helm-rendered resources:
+// helmchart.go only appends the index for a template proven static (no
+// "{{" anywhere), since the resolver reads the raw template file, and a
+// templated one is either not valid YAML on its own or does not line up
+// document-for-document with the render. See
+// TestGetWorkloadsWithOptions_StaticTemplateGetsIndex in helmchart_test.go
+// for both halves of that split.
 func TestResourceTable_MissingDocIndexDegrades(t *testing.T) {
 	out := renderResourceTable(t, resourceTableLineNumberSession(t, lineNumberManifest, ""), true)
 
@@ -445,16 +448,21 @@ func TestResourceTable_MissingDocIndexDegrades(t *testing.T) {
 	assert.NotContains(t, out, "(line ")
 }
 
-// TestResourceTable_HelmRenderedResourceResolvesToLine is the end-to-end case
-// for a Helm-rendered resource: helmchart.go now appends the document index
-// the same way plain YAML and Terraform sources do, so a rendered chart's
-// resource reaches the resolver and prints a real line instead of always
-// degrading to the bare path.
-func TestResourceTable_HelmRenderedResourceResolvesToLine(t *testing.T) {
+// TestResourceTable_IndexedPathResolvesRegardlessOfSource checks the resolver
+// side only: a "<path>:<index>" path reaches a line, whatever put the index
+// there. It is not a Helm test - it hand-builds the path the same way
+// TestResourceTable_FixPathResolvesToLine does, so it proves nothing about
+// whether a real Helm render is safe to index. That question - whether a
+// template's raw source and its rendered output are the same document, so
+// the index means the same thing on both sides - is answered in
+// helmchart.go's isStaticTemplate and pinned by
+// TestGetWorkloadsWithOptions_StaticTemplateGetsIndex in helmchart_test.go,
+// which renders a real chart with both a static and a templated file.
+func TestResourceTable_IndexedPathResolvesRegardlessOfSource(t *testing.T) {
 	out := renderResourceTable(t, resourceTableLineNumberSession(t, lineNumberManifest, ":0"), true)
 
-	assert.Contains(t, out, "(line 12)", "a Helm-rendered resource's path now carries the same "+
-		"\":<index>\" suffix a plain YAML resource does, so it must resolve identically")
+	assert.Contains(t, out, "(line 12)", "the resolver does not care what produced the \":<index>\" "+
+		"suffix - only whether the file at that path parses and the index is in range")
 }
 
 // TestResourceTable_SecondDocumentResolvesAgainstItsOwnDocument checks the doc

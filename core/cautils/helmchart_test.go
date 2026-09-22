@@ -4,7 +4,6 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -161,8 +160,12 @@ func (s *HelmChartTestSuite) TestGetWorkloadsWithOverride() {
 
 		for i := range fileToWorkloads[expectedFile] {
 			pathInWorkload := fileToWorkloads[expectedFile][i].(*localworkload.LocalWorkload).GetPath()
-			expectedPath := fmt.Sprintf("%s:%d", expectedFile, i)
-			s.Equal(expectedPath, pathInWorkload, "Expected GetPath() to carry the rendered document's index, the same convention plain YAML and Terraform sources use")
+			// Every template in this chart uses "{{ include ... }}", so none of
+			// them is static (see isStaticTemplate) and GetPath() must stay
+			// index-free - the safe degradation, not a resolvable-but-possibly-
+			// wrong line. TestGetWorkloadsWithOptions_StaticTemplateGetsIndex
+			// covers the templated-and-static split this chart cannot exercise.
+			s.Equal(expectedFile, pathInWorkload, "Expected GetPath() to return the bare path: every template here contains \"{{\", so none is provably safe to index")
 		}
 
 		if strings.Contains(expectedFile, "cronjob.yaml") {
@@ -205,6 +208,48 @@ func (s *HelmChartTestSuite) TestGetWorkloadsWithOptions_ReleaseName() {
 
 	jsonBytes, _ := json.Marshal(wls[0].GetObject())
 	s.Contains(string(jsonBytes), `"namespace":"my-ns"`, "release namespace should propagate to subject namespace")
+}
+
+// TestGetWorkloadsWithOptions_StaticTemplateGetsIndex is the regression matthyx's
+// review asked for: a real chart render, not a hand-built session, proving the
+// document index is only ever attached to a template proven static.
+// testdata/helm_chart_layout/mychart carries all three shapes at once -
+// templates/serviceaccount.yaml has no "{{" anywhere and must resolve to a
+// line; templates/deployment.yaml uses ".Release.Name" and ".Values.*" and
+// must not; its subchart's charts/mysubchart/templates/service.yaml templates
+// too and must not, proving the check applies at every nesting depth, not
+// just the parent chart's own templates/.
+func (s *HelmChartTestSuite) TestGetWorkloadsWithOptions_StaticTemplateGetsIndex() {
+	o, _ := os.Getwd()
+	chartPath := filepath.Join(o, "testdata", "helm_chart_layout", "mychart")
+	chart, err := NewHelmChart(chartPath)
+	s.Require().NoError(err)
+
+	fileToWorkloads, errs := chart.GetWorkloadsWithDefaultValues()
+	s.Require().Len(errs, 0)
+
+	staticPath := filepath.Join(chartPath, "templates", "serviceaccount.yaml")
+	staticWls, ok := fileToWorkloads[staticPath]
+	s.Require().True(ok, "static template should be rendered")
+	s.Require().Len(staticWls, 1)
+	s.Equal(staticPath+":0", staticWls[0].(*localworkload.LocalWorkload).GetPath(),
+		"a template with no \"{{\" anywhere is unchanged by rendering, so its document index is safe to claim")
+
+	templatedPath := filepath.Join(chartPath, "templates", "deployment.yaml")
+	templatedWls, ok := fileToWorkloads[templatedPath]
+	s.Require().True(ok, "templated file should still be rendered")
+	s.Require().Len(templatedWls, 1)
+	s.Equal(templatedPath, templatedWls[0].(*localworkload.LocalWorkload).GetPath(),
+		"a template using \"{{ .Values }}\"/\"{{ .Release }}\" must keep the bare path: "+
+			"the resolver would read the unrendered source, which is not valid YAML and "+
+			"in general is not even the same document by the time it templates")
+
+	subchartPath := filepath.Join(chartPath, "charts", "mysubchart", "templates", "service.yaml")
+	subchartWls, ok := fileToWorkloads[subchartPath]
+	s.Require().True(ok, "subchart template should still be rendered")
+	s.Require().Len(subchartWls, 1)
+	s.Equal(subchartPath, subchartWls[0].(*localworkload.LocalWorkload).GetPath(),
+		"the static/templated check must apply to a subchart's templates too, not just the parent's")
 }
 
 // TestHelmValueOptions_MergeValues exercises the helm-style value merger so we can be sure
