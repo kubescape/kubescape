@@ -4,6 +4,7 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -160,7 +161,8 @@ func (s *HelmChartTestSuite) TestGetWorkloadsWithOverride() {
 
 		for i := range fileToWorkloads[expectedFile] {
 			pathInWorkload := fileToWorkloads[expectedFile][i].(*localworkload.LocalWorkload).GetPath()
-			s.Equal(pathInWorkload, expectedFile, "Expected GetPath() to return a valid path on workload")
+			expectedPath := fmt.Sprintf("%s:%d", expectedFile, i)
+			s.Equal(expectedPath, pathInWorkload, "Expected GetPath() to carry the rendered document's index, the same convention plain YAML and Terraform sources use")
 		}
 
 		if strings.Contains(expectedFile, "cronjob.yaml") {

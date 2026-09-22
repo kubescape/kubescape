@@ -432,14 +432,29 @@ func TestResourceTable_WithoutShowEvidenceHasNoLines(t *testing.T) {
 	assert.NotContains(t, out, "privileged=false")
 }
 
-// TestResourceTable_MissingDocIndexDegrades covers Helm-rendered resources,
-// whose path carries no ":<index>" suffix, so getDocIndex reports nothing and
-// the resolver is never reached.
+// TestResourceTable_MissingDocIndexDegrades covers any resource whose path
+// carries no ":<index>" suffix at all, so getDocIndex reports nothing and the
+// resolver is never reached. This used to be every Helm-rendered resource;
+// since helmchart.go started appending the index (PR 7), it is now only a
+// resource source that predates that convention, or one hand-constructed
+// without it.
 func TestResourceTable_MissingDocIndexDegrades(t *testing.T) {
 	out := renderResourceTable(t, resourceTableLineNumberSession(t, lineNumberManifest, ""), true)
 
 	assert.Contains(t, out, "privileged=false")
 	assert.NotContains(t, out, "(line ")
+}
+
+// TestResourceTable_HelmRenderedResourceResolvesToLine is the end-to-end case
+// for a Helm-rendered resource: helmchart.go now appends the document index
+// the same way plain YAML and Terraform sources do, so a rendered chart's
+// resource reaches the resolver and prints a real line instead of always
+// degrading to the bare path.
+func TestResourceTable_HelmRenderedResourceResolvesToLine(t *testing.T) {
+	out := renderResourceTable(t, resourceTableLineNumberSession(t, lineNumberManifest, ":0"), true)
+
+	assert.Contains(t, out, "(line 12)", "a Helm-rendered resource's path now carries the same "+
+		"\":<index>\" suffix a plain YAML resource does, so it must resolve identically")
 }
 
 // TestResourceTable_SecondDocumentResolvesAgainstItsOwnDocument checks the doc

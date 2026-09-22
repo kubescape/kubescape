@@ -266,7 +266,15 @@ func (hc *HelmChart) GetWorkloadsWithOptions(values map[string]any, releaseOpts 
 			workloads[absPath] = []workloadinterface.IMetadata{}
 			for i := range wls {
 				lw := localworkload.NewLocalWorkload(wls[i].GetObject())
-				lw.SetPath(absPath)
+				// The document index is appended the same way fileutils.go and
+				// terraform.go already do for plain YAML and Terraform-rendered
+				// manifests: "<path>:<index>". Without it, getDocIndex
+				// (sarifprinter.go) rejects the path before ResolveLocation is
+				// ever called, so a rendered chart's resources can never map
+				// back to a line even though the resolver fully supports them.
+				// The map key stays the bare absPath - callers that join
+				// against Provenance() (keyed the same way) are unaffected.
+				lw.SetPath(fmt.Sprintf("%s:%d", absPath, i))
 				workloads[absPath] = append(workloads[absPath], lw)
 			}
 		}
