@@ -870,6 +870,13 @@ type incrementalCacheContext struct {
 // exposed to Rego as data.dataControlInputs.cloudProvider, so two otherwise
 // identical resources from different providers must never share a verdict.
 func incrementalCacheVersion(scanInfo *cautils.ScanInfo, scanData *cautils.OPASessionObj, runtimeVersion string) (string, error) {
+	// Development builds intentionally do not have a stable build identity.
+	// Reusing a persistent verdict cache for them is unsafe: source changes can
+	// alter evaluator behavior while the binary continues to report "dev".
+	// Returning an error makes the caller run without the persistent cache.
+	if runtimeVersion == "" || runtimeVersion == "dev" {
+		return "", errors.New("incremental cache requires a release build identity")
+	}
 	if scanInfo == nil {
 		return "", errors.New("scan info is required")
 	}

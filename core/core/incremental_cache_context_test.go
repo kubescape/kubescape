@@ -100,11 +100,16 @@ func TestIncrementalCacheVersionSeparatesRuntimeVersions(t *testing.T) {
 
 	oldRuntime := requireCacheVersion(t, scanInfo, scanData, "v4.0.0")
 	newRuntime := requireCacheVersion(t, scanInfo, scanData, "v4.1.0")
-	developmentRuntime := requireCacheVersion(t, scanInfo, scanData, "")
 
 	assert.NotEqual(t, oldRuntime, newRuntime)
-	assert.NotEqual(t, oldRuntime, developmentRuntime)
-	assert.NotEqual(t, newRuntime, developmentRuntime)
+	for _, runtimeVersion := range []string{"", "dev"} {
+		t.Run("rejects "+runtimeVersion, func(t *testing.T) {
+			version, err := incrementalCacheVersion(scanInfo, scanData, runtimeVersion)
+
+			assert.Empty(t, version)
+			require.EqualError(t, err, "incremental cache requires a release build identity")
+		})
+	}
 }
 
 func TestIncrementalCacheVersionTracksControlsVersion(t *testing.T) {
