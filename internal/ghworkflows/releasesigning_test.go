@@ -90,6 +90,12 @@ var guardedFiles = append([]string{
 	// the same "**.yaml" blind spot as everything else in this list.
 	filepath.Join(".github", "workflows", commentsWorkflowName),
 	filepath.Join("internal", "ghworkflows", "comments_test.go"),
+	// masterbuild_test.go guards 00-pr-scanner.yaml's push trigger. That file
+	// is doubly invisible to itself: it matches both "**.yaml" and ".github/*"
+	// in its own deny-list, so a PR that deleted the trigger would run neither
+	// the build it removes nor the guard that would have caught the removal.
+	filepath.Join(".github", "workflows", prScannerWorkflowName),
+	filepath.Join("internal", "ghworkflows", "masterbuild_test.go"),
 }, installScripts...)
 
 // goreleaserSign is the subset of a `signs` / `docker_signs` entry these tests
