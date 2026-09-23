@@ -162,3 +162,54 @@ func TestReportV2ToV1_StatusCounters(t *testing.T) {
 	assert.Equal(t, 2, cr.FailedResources)
 	assert.Equal(t, 7, cr.WarningResources)
 }
+
+func TestReportV2ToV1_DuplicateFrameworkNames(t *testing.T) {
+	session := &OPASessionObj{
+		Report: &reporthandlingv2.PostureReport{
+			SummaryDetails: reportsummary.SummaryDetails{
+				Frameworks: []reportsummary.FrameworkSummary{
+					{
+						Name: "custom-rules",
+						Controls: reportsummary.ControlSummaries{
+							"C-001": reportsummary.ControlSummary{
+								ControlID: "C-001",
+								StatusCounters: reportsummary.StatusCounters{
+									PassedResources: 1,
+									FailedResources: 1,
+								},
+							},
+						},
+					},
+					{
+						Name: "custom-rules",
+						Controls: reportsummary.ControlSummaries{
+							"C-002": reportsummary.ControlSummary{
+								ControlID: "C-002",
+								StatusCounters: reportsummary.StatusCounters{
+									SkippedResources:  1,
+									ExcludedResources: 1,
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	got := ReportV2ToV1(session)
+
+	require.Len(t, got.FrameworkReports, 2)
+	assert.Equal(t, "custom-rules", got.FrameworkReports[0].Name)
+	assert.Equal(t, "custom-rules", got.FrameworkReports[1].Name)
+
+	require.Len(t, got.FrameworkReports[0].ControlReports, 1)
+	assert.Equal(t, "C-001", got.FrameworkReports[0].ControlReports[0].ControlID)
+	assert.Equal(t, 2, got.FrameworkReports[0].ControlReports[0].TotalResources)
+
+	require.Len(t, got.FrameworkReports[1].ControlReports, 1)
+	cr2 := got.FrameworkReports[1].ControlReports[0]
+	assert.Equal(t, "C-002", cr2.ControlID)
+	assert.Equal(t, 2, cr2.TotalResources)
+	assert.Equal(t, 2, cr2.WarningResources)
+}

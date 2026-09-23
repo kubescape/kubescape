@@ -40,12 +40,7 @@ func ReportV2ToV1(opaSessionObj *OPASessionObj) *reporthandling.PostureReport {
 		// apply the summary-derived control counters after the helper recomputation
 		var controls map[string]reportsummary.ControlSummary
 		if len(opaSessionObj.Report.SummaryDetails.Frameworks) > 0 {
-			for _, fwv2 := range opaSessionObj.Report.SummaryDetails.Frameworks {
-				if fwv2.GetName() == frameworks[f].Name {
-					controls = fwv2.Controls
-					break
-				}
-			}
+			controls = opaSessionObj.Report.SummaryDetails.Frameworks[f].Controls
 		} else {
 			controls = opaSessionObj.Report.SummaryDetails.Controls
 		}
