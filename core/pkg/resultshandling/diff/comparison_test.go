@@ -97,6 +97,13 @@ func TestComputeEvidence_DetectsNewPosturePathEvidenceInsideFailingControl(t *te
 		wantPath     string
 	}{
 		{
+			name:         "failed path",
+			existingPath: evidencePath{FailedPath: "$.spec.template.spec.containers[0].securityContext.privileged"},
+			newPath:      evidencePath{FailedPath: "$.spec.template.spec.containers[1].securityContext.privileged"},
+			evidenceType: evidenceTypeFailedPath,
+			wantPath:     "spec.template.spec.containers[1].securityContext.privileged",
+		},
+		{
 			name:         "fix path",
 			existingPath: evidencePath{FixPath: fixPath{Path: "$.spec.template.spec.containers[0].securityContext.runAsNonRoot", Value: []byte("true")}},
 			newPath:      evidencePath{FixPath: fixPath{Path: "$.spec.template.spec.containers[0].securityContext.allowPrivilegeEscalation", Value: []byte("false")}},
