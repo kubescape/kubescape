@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/locationresolver"
 	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -250,6 +252,105 @@ func (s *HelmChartTestSuite) TestGetWorkloadsWithOptions_StaticTemplateGetsIndex
 	s.Require().Len(subchartWls, 1)
 	s.Equal(subchartPath, subchartWls[0].(*localworkload.LocalWorkload).GetPath(),
 		"the static/templated check must apply to a subchart's templates too, not just the parent's")
+}
+
+// findWorkloadByName returns the workload named name from wls, failing the
+// test if it is not present exactly once - the tests below rely on picking
+// out a specific document's workload rather than assuming render order.
+func findWorkloadByName(t *testing.T, wls []workloadinterface.IMetadata, name string) workloadinterface.IMetadata {
+	t.Helper()
+	var found workloadinterface.IMetadata
+	for _, wl := range wls {
+		if wl.GetName() == name {
+			require.Nil(t, found, "expected exactly one workload named %q", name)
+			found = wl
+		}
+	}
+	require.NotNil(t, found, "expected a workload named %q", name)
+	return found
+}
+
+// TestGetWorkloadsWithOptions_SkippedDocumentKeepsLaterIndexesAligned is the
+// regression matthyx's second review asked for: a static template whose
+// first YAML document is empty (two consecutive "---" markers). readYamlFile
+// silently drops that document from its own output - it never becomes a
+// workload - but NewPathLocationResolver's decoder still counts it as
+// document 0, the same way it would count a null or comment-only document.
+// Before this fix, GetWorkloadsWithOptions numbered documents by their
+// position in readYamlFile's *output* (skipping the drop), which assigns
+// "mychart-static-a" index 0 instead of its real raw index 1, and
+// "mychart-static-b" index 1 instead of its real raw index 2 - exactly the
+// off-by-one matthyx described, where the second resource's evidence would
+// resolve against the first resource's document and cite its line.
+//
+// This asserts both the assigned index and, by actually resolving through
+// locationresolver.PathLocationResolver, the line each one resolves to -
+// proving the fix holds end to end, not just that GetPath() carries some
+// index.
+func (s *HelmChartTestSuite) TestGetWorkloadsWithOptions_SkippedDocumentKeepsLaterIndexesAligned() {
+	o, _ := os.Getwd()
+	chartPath := filepath.Join(o, "testdata", "helm_chart_layout", "mychart")
+	chart, err := NewHelmChart(chartPath)
+	s.Require().NoError(err)
+
+	fileToWorkloads, errs := chart.GetWorkloadsWithDefaultValues()
+	s.Require().Len(errs, 0)
+
+	path := filepath.Join(chartPath, "templates", "skipped-document.yaml")
+	wls, ok := fileToWorkloads[path]
+	s.Require().True(ok, "skipped-document.yaml should be rendered")
+	s.Require().Len(wls, 2, "the leading empty document must not become a phantom workload")
+
+	a := findWorkloadByName(s.T(), wls, "mychart-static-a")
+	b := findWorkloadByName(s.T(), wls, "mychart-static-b")
+
+	// Raw document layout of skipped-document.yaml: doc 0 is the empty
+	// document between the two leading "---" lines, doc 1 is
+	// mychart-static-a (lines 3-8), doc 2 is mychart-static-b (lines 10-15).
+	s.Equal(path+":1", a.(*localworkload.LocalWorkload).GetPath(),
+		"mychart-static-a is the second raw document (index 1), not the first output workload (index 0)")
+	s.Equal(path+":2", b.(*localworkload.LocalWorkload).GetPath(),
+		"mychart-static-b is the third raw document (index 2), not the second output workload (index 1)")
+
+	resolver, err := locationresolver.NewPathLocationResolver(path)
+	s.Require().NoError(err)
+
+	locA, err := resolver.ResolveLocation(".metadata.labels.marker", 1)
+	s.Require().NoError(err)
+	s.Equal(8, locA.Line, "doc-a's marker label is on line 8")
+
+	locB, err := resolver.ResolveLocation(".metadata.labels.marker", 2)
+	s.Require().NoError(err)
+	s.Equal(15, locB.Line, "doc-b's marker label is on line 15, not doc-a's line 8")
+}
+
+// TestGetWorkloadsWithOptions_ListEnvelopeStaysUnindexed is the other
+// regression matthyx's second review asked for: a static template that is a
+// single "kind: List" document expanding into two workloads. The resolver
+// retains one YAML node per raw document, not one per item inside it, so a
+// document index alone cannot tell the first item's evidence apart from the
+// second's - the same ambiguity as the skipped-document case, just from a
+// document producing too many workloads instead of readYamlFile dropping it
+// to zero. Both items must keep the bare, unindexed path.
+func (s *HelmChartTestSuite) TestGetWorkloadsWithOptions_ListEnvelopeStaysUnindexed() {
+	o, _ := os.Getwd()
+	chartPath := filepath.Join(o, "testdata", "helm_chart_layout", "mychart")
+	chart, err := NewHelmChart(chartPath)
+	s.Require().NoError(err)
+
+	fileToWorkloads, errs := chart.GetWorkloadsWithDefaultValues()
+	s.Require().Len(errs, 0)
+
+	path := filepath.Join(chartPath, "templates", "list-envelope.yaml")
+	wls, ok := fileToWorkloads[path]
+	s.Require().True(ok, "list-envelope.yaml should be rendered")
+	s.Require().Len(wls, 2, "both List items should be expanded into workloads")
+
+	for _, name := range []string{"mychart-list-item-a", "mychart-list-item-b"} {
+		wl := findWorkloadByName(s.T(), wls, name)
+		s.Equal(path, wl.(*localworkload.LocalWorkload).GetPath(),
+			"a List envelope's items share one raw document, so none of them may claim an index")
+	}
 }
 
 // TestHelmValueOptions_MergeValues exercises the helm-style value merger so we can be sure
