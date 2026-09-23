@@ -867,8 +867,12 @@ func (opap *OPAProcessor) filterControlsWithMatcherEvidence(
 			}
 			reason := fmt.Sprintf("whole-cluster control %s skipped: no Match or DynamicMatch declared for projected evaluation (policy: %s)", id, policy)
 			opap.skippedWholeClusterControls[id] = reason
+			opap.setControlStatus(id, &apis.StatusInfo{
+				InnerStatus: apis.StatusSkipped,
+				SubStatus:   apis.SubStatusNotEvaluated,
+				InnerInfo:   reason,
+			})
 		}
-		opap.markControlsSkipped(unmatchableIDs)
 	}
 
 	return evalIDs
@@ -901,8 +905,12 @@ func (opap *OPAProcessor) evaluateWholeClusterControls(
 				opap.skippedWholeClusterControls = make(map[string]string)
 			}
 			opap.skippedWholeClusterControls[id] = reason
+			opap.setControlStatus(id, &apis.StatusInfo{
+				InnerStatus: apis.StatusSkipped,
+				SubStatus:   apis.SubStatusNotEvaluated,
+				InnerInfo:   reason,
+			})
 		}
-		opap.markControlsSkipped(wholeClusterControlIDs)
 		return nil
 
 	case cautils.WholeClusterPolicyFallback:
@@ -1682,15 +1690,56 @@ func (opap *OPAProcessor) markResourcesSkipped(out map[string]*resourcesresults.
 	}
 }
 
+func (opap *OPAProcessor) setControlStatus(controlID string, status *apis.StatusInfo) {
+	if opap.AllPolicies != nil {
+		if _, inPolicies := opap.AllPolicies.Controls[controlID]; !inPolicies {
+			return
+		}
+	}
+	if opap.Report.SummaryDetails.Controls == nil {
+		opap.Report.SummaryDetails.Controls = make(reportsummary.ControlSummaries)
+	}
+	ctrl, ok := opap.Report.SummaryDetails.Controls[controlID]
+	if !ok {
+		if opap.AllPolicies == nil {
+			return
+		}
+		policyCtrl, inPolicies := opap.AllPolicies.Controls[controlID]
+		if !inPolicies {
+			return
+		}
+		ctrl = reportsummary.ControlSummary{
+			Name:        policyCtrl.Name,
+			ControlID:   controlID,
+			ScoreFactor: policyCtrl.BaseScore,
+			Description: policyCtrl.Description,
+			Remediation: policyCtrl.Remediation,
+			Category:    policyCtrl.Category,
+		}
+	}
+	ctrl.SetStatus(status)
+	opap.Report.SummaryDetails.Controls[controlID] = ctrl
+
+	for i := range opap.Report.SummaryDetails.Frameworks {
+		if ctrl, ok := opap.Report.SummaryDetails.Frameworks[i].Controls[controlID]; ok {
+			ctrl.SetStatus(status)
+			opap.Report.SummaryDetails.Frameworks[i].Controls[controlID] = ctrl
+		}
+	}
+}
+
 func (opap *OPAProcessor) markNotEvaluatedControlsSkipped() {
 	if len(opap.ScanCoverage.NotEvaluatedControls) == 0 {
 		return
 	}
-	controlIDs := make([]string, 0, len(opap.ScanCoverage.NotEvaluatedControls))
 	for _, notEvaluated := range opap.ScanCoverage.NotEvaluatedControls {
-		controlIDs = append(controlIDs, notEvaluated.ControlID)
+		status := &apis.StatusInfo{
+			InnerStatus: apis.StatusSkipped,
+			SubStatus:   apis.SubStatusNotEvaluated,
+			InnerInfo:   notEvaluated.ReasonString(),
+		}
+		opap.setControlStatus(notEvaluated.ControlID, status)
 	}
-	opap.markControlsSkipped(controlIDs)
 }
 
 // markTimedOutControlsSkipped is retained for callers and focused tests that
@@ -1701,29 +1750,13 @@ func (opap *OPAProcessor) markTimedOutControlsSkipped() {
 	if len(opap.TimedOutControls) == 0 {
 		return
 	}
-	controlIDs := make([]string, 0, len(opap.TimedOutControls))
-	for controlID := range opap.TimedOutControls {
-		controlIDs = append(controlIDs, controlID)
-	}
-	opap.markControlsSkipped(controlIDs)
-}
-
-func (opap *OPAProcessor) markControlsSkipped(controlIDs []string) {
-	status := &apis.StatusInfo{
-		InnerStatus: apis.StatusSkipped,
-		SubStatus:   apis.SubStatusNotEvaluated,
-	}
-	for _, controlID := range controlIDs {
-		if ctrl, ok := opap.Report.SummaryDetails.Controls[controlID]; ok {
-			ctrl.SetStatus(status)
-			opap.Report.SummaryDetails.Controls[controlID] = ctrl
+	for controlID, reason := range opap.TimedOutControls {
+		status := &apis.StatusInfo{
+			InnerStatus: apis.StatusSkipped,
+			SubStatus:   apis.SubStatusNotEvaluated,
+			InnerInfo:   reason,
 		}
-		for i := range opap.Report.SummaryDetails.Frameworks {
-			if ctrl, ok := opap.Report.SummaryDetails.Frameworks[i].Controls[controlID]; ok {
-				ctrl.SetStatus(status)
-				opap.Report.SummaryDetails.Frameworks[i].Controls[controlID] = ctrl
-			}
-		}
+		opap.setControlStatus(controlID, status)
 	}
 }
 

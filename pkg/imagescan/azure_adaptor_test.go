@@ -645,14 +645,6 @@ func toValue(value *string) string {
 	return *value
 }
 
-func vulnerabilityIDs(report ContainerImageVulnerabilityReport) []string {
-	ids := make([]string, 0, len(report.Vulnerabilities))
-	for _, vulnerability := range report.Vulnerabilities {
-		ids = append(ids, vulnerability.ID)
-	}
-	return ids
-}
-
 // --- newACRKeychain / azureACRKeychain ---
 
 type stubTokenCredential struct {

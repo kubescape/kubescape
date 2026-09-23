@@ -130,6 +130,7 @@ func TestProcess_ControlTimeout(t *testing.T) {
 	ctrl := opaSessionObj.Report.SummaryDetails.Controls[controlID]
 	assert.NotEqual(t, apis.StatusPassed, ctrl.GetStatus().Status(), "timed-out control must not show as Passed in SummaryDetails")
 	assert.Equal(t, apis.StatusSkipped, ctrl.GetStatus().Status(), "timed-out control must be Skipped in SummaryDetails")
+	assert.Contains(t, ctrl.GetStatus().Info(), "timed out", "timed-out control must include reason in StatusInfo.InnerInfo")
 
 	scorewrapper := score.NewScoreWrapper(opaSessionObj)
 	require.NoError(t, scorewrapper.Calculate(score.EPostureReportV2))
