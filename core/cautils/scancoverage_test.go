@@ -498,3 +498,183 @@ func TestDetectVacuousFrameworks_OnlyVacuousFrameworksReturned(t *testing.T) {
 	}
 	assert.Equal(t, []string{"istio-security"}, DetectVacuousFrameworks(frameworks))
 }
+
+func TestNotEvaluatedControl_ReasonString(t *testing.T) {
+	tests := []struct {
+		name     string
+		control  NotEvaluatedControl
+		expected string
+	}{
+		{
+			name: "explicit reason has precedence",
+			control: NotEvaluatedControl{
+				ControlID:   "C-0261",
+				Reason:      "whole-cluster control C-0261 skipped by execution policy (policy: skip)",
+				MissingGVRs: []string{"apps/v1/deployments"},
+			},
+			expected: "whole-cluster control C-0261 skipped by execution policy (policy: skip)",
+		},
+		{
+			name: "missing GVRs formatted when reason empty",
+			control: NotEvaluatedControl{
+				ControlID:   "C-0001",
+				MissingGVRs: []string{"apps/v1/deployments", "v1/pods"},
+			},
+			expected: "missing: apps/v1/deployments, v1/pods",
+		},
+		{
+			name: "empty when neither is set",
+			control: NotEvaluatedControl{
+				ControlID: "C-0002",
+			},
+			expected: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, tt.control.ReasonString())
+		})
+	}
+}
+
+func TestFilterResourceToControlsMap(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    map[string][]string
+		inScope  map[string]struct{}
+		expected map[string][]string
+	}{
+		{
+			name:     "nil input",
+			input:    nil,
+			inScope:  map[string]struct{}{"C-0001": {}},
+			expected: nil,
+		},
+		{
+			name:     "empty inScope returns input as-is",
+			input:    map[string][]string{"/v1/pods": {"C-0001"}},
+			inScope:  nil,
+			expected: map[string][]string{"/v1/pods": {"C-0001"}},
+		},
+		{
+			name: "filters out-of-scope controls and prunes empty GVRs",
+			input: map[string][]string{
+				"/v1/pods":                {"C-0001", "C-EXCLUDED"},
+				"example.com/v1/crontabs": {"C-EXCLUDED"},
+				"apps/v1/deployments":     {"C-0002"},
+			},
+			inScope: map[string]struct{}{
+				"C-0001": {},
+			},
+			expected: map[string][]string{
+				"/v1/pods": {"C-0001"},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := FilterResourceToControlsMap(tt.input, tt.inScope)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestBuildScanCoverage_ScopedToActiveControls(t *testing.T) {
+	infoMap := map[string]apis.StatusInfo{
+		"custom.io/v1/widgets": {
+			InnerStatus: apis.StatusSkipped,
+			InnerInfo:   "connection refused",
+		},
+	}
+	resourceToControlsMap := map[string][]string{
+		"/v1/pods":             {"C-PASS"},
+		"custom.io/v1/widgets": {"C-EXCLUDED"},
+	}
+	timedOutControls := map[string]string{
+		"C-TIMEOUT-EXCLUDED": "exceeded timeout",
+	}
+
+	t.Run("unconstrained includes all failures", func(t *testing.T) {
+		coverage := BuildScanCoverage(infoMap, resourceToControlsMap, timedOutControls, nil, nil, nil)
+		require.Len(t, coverage.FailedGVRPulls, 1)
+		assert.Equal(t, "custom.io/v1/widgets", coverage.FailedGVRPulls[0].GVR)
+		require.Len(t, coverage.NotEvaluatedControls, 2)
+		assert.Equal(t, "C-EXCLUDED", coverage.NotEvaluatedControls[0].ControlID)
+		assert.Equal(t, "C-TIMEOUT-EXCLUDED", coverage.NotEvaluatedControls[1].ControlID)
+	})
+
+	t.Run("scoped to passing control ignores excluded dependency and timeout failures", func(t *testing.T) {
+		inScope := map[string]struct{}{
+			"C-PASS": {},
+		}
+		coverage := BuildScanCoverage(infoMap, resourceToControlsMap, timedOutControls, nil, nil, nil, inScope)
+		assert.Empty(t, coverage.FailedGVRPulls)
+		assert.Empty(t, coverage.NotEvaluatedControls)
+
+		coverage.ComputeCoverageScore(1)
+		assert.Equal(t, 1, coverage.TotalControls)
+		assert.Equal(t, 1, coverage.EvaluatedControls)
+		assert.Equal(t, float32(100), coverage.CoverageScore)
+		assert.False(t, coverage.Degraded)
+	})
+
+	t.Run("scoped to failing control captures its failure", func(t *testing.T) {
+		inScope := map[string]struct{}{
+			"C-EXCLUDED": {},
+		}
+		coverage := BuildScanCoverage(infoMap, resourceToControlsMap, timedOutControls, nil, nil, nil, inScope)
+		require.Len(t, coverage.FailedGVRPulls, 1)
+		assert.Equal(t, "custom.io/v1/widgets", coverage.FailedGVRPulls[0].GVR)
+		require.Len(t, coverage.NotEvaluatedControls, 1)
+		assert.Equal(t, "C-EXCLUDED", coverage.NotEvaluatedControls[0].ControlID)
+
+		coverage.ComputeCoverageScore(1)
+		assert.Equal(t, 1, coverage.TotalControls)
+		assert.Equal(t, 0, coverage.EvaluatedControls)
+		assert.Equal(t, float32(0), coverage.CoverageScore)
+		assert.True(t, coverage.Degraded)
+	})
+
+	t.Run("filters partial pulls for excluded controls while preserving in-scope and unmapped", func(t *testing.T) {
+		partialPulls := []PartialGVRPull{
+			{GVR: "custom.io/v1/widgets", Selector: "app=widget", Error: "timeout"},
+			{GVR: "/v1/pods", Selector: "tier=frontend", Error: "forbidden"},
+			{GVR: "unmapped.io/v1/clusters", Selector: "", Error: "server error"},
+		}
+
+		inScope := map[string]struct{}{
+			"C-PASS": {},
+		}
+		coverage := BuildScanCoverage(nil, resourceToControlsMap, nil, partialPulls, nil, nil, inScope)
+
+		// custom.io/v1/widgets belongs only to C-EXCLUDED, so it must be dropped.
+		// /v1/pods belongs to C-PASS (in-scope), so it must be preserved.
+		// unmapped.io/v1/clusters has no mapped control, so it must be preserved.
+		require.Len(t, coverage.PartialGVRPulls, 2)
+		assert.Equal(t, "/v1/pods", coverage.PartialGVRPulls[0].GVR)
+		assert.Equal(t, "unmapped.io/v1/clusters", coverage.PartialGVRPulls[1].GVR)
+
+		// 2 partial pulls * 2 penalty = 4 points deducted from 100 -> 96
+		coverage.ComputeCoverageScore(1)
+		assert.Equal(t, float32(96), coverage.CoverageScore)
+		assert.True(t, coverage.Degraded)
+	})
+
+	t.Run("partial pull for excluded control alone does not degrade scan", func(t *testing.T) {
+		partialPulls := []PartialGVRPull{
+			{GVR: "custom.io/v1/widgets", Selector: "app=widget", Error: "timeout"},
+		}
+
+		inScope := map[string]struct{}{
+			"C-PASS": {},
+		}
+		coverage := BuildScanCoverage(nil, resourceToControlsMap, nil, partialPulls, nil, nil, inScope)
+		assert.Empty(t, coverage.PartialGVRPulls)
+
+		coverage.ComputeCoverageScore(1)
+		assert.Equal(t, float32(100), coverage.CoverageScore)
+		assert.False(t, coverage.Degraded)
+	})
+}

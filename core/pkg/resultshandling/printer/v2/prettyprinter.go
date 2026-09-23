@@ -84,7 +84,6 @@ func (pp *PrettyPrinter) PrintImageScan(imageScanData []cautils.ImageScanData) e
 
 func (pp *PrettyPrinter) ActionPrint(_ context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
 	if opaSessionObj != nil {
-		// TODO line is currently printed on framework scan only
 		if isPrintSeparatorType(pp.scanType) {
 			fmt.Fprintf(pp.writer, "\n%s\n\n",
 				gchalk.WithAnsi256(238).Bold(strings.Repeat("─", 50)))
@@ -96,9 +95,14 @@ func (pp *PrettyPrinter) ActionPrint(_ context.Context, opaSessionObj *cautils.O
 
 		switch pp.viewType {
 		case cautils.ControlViewType:
-			pp.printResults(&opaSessionObj.Report.SummaryDetails.Controls, opaSessionObj.AllResources, opaSessionObj.ResourcesResult, sortedControlIDs)
+			pp.printResults(&opaSessionObj.Report.SummaryDetails.Controls, opaSessionObj.GetCatalog(), opaSessionObj.ResourcesResult, sortedControlIDs)
 		case cautils.ResourceViewType:
-			if pp.verboseMode {
+			// The resource table is the one place that already reads
+			// showEvidence (see generateResourceRows), so gating it on
+			// --verbose alone meant `-E --view resource` printed no table at
+			// all and the evidence column it builds was unreachable without
+			// also passing --verbose.
+			if pp.verboseMode || pp.showEvidence {
 				pp.resourceTable(opaSessionObj)
 			}
 		case cautils.NamespaceViewType:
@@ -196,12 +200,12 @@ func (pp *PrettyPrinter) SetWriter(ctx context.Context, outputFile string) error
 func (pp *PrettyPrinter) Score(_ float32) {
 }
 
-func (pp *PrettyPrinter) printResults(controls *reportsummary.ControlSummaries, allResources map[string]workloadinterface.IMetadata, resourcesResult map[string]resourcesresults.Result, sortedControlIDs [][]string) {
+func (pp *PrettyPrinter) printResults(controls *reportsummary.ControlSummaries, catalog cautils.ResourceCatalog, resourcesResult map[string]resourcesresults.Result, sortedControlIDs [][]string) {
 	for _, sortedControlID := range slices.Backward(sortedControlIDs) {
 		for _, c := range sortedControlID {
 			controlSummary := controls.GetControl(reportsummary.EControlCriteriaID, c) //  summaryDetails.Controls ListControls().All() Controls.GetControl(ca)
 			pp.printTitle(controlSummary)
-			pp.printResources(controlSummary, allResources, resourcesResult)
+			pp.printResources(controlSummary, catalog, resourcesResult)
 			pp.printSummary(controlSummary)
 		}
 	}
@@ -240,16 +244,26 @@ func (prettyPrinter *PrettyPrinter) printTitle(controlSummary reportsummary.ICon
 	}
 }
 
-func (pp *PrettyPrinter) printResources(controlSummary reportsummary.IControlSummary, allResources map[string]workloadinterface.IMetadata, resourcesResult map[string]resourcesresults.Result) {
+func (pp *PrettyPrinter) printResources(controlSummary reportsummary.IControlSummary, catalog cautils.ResourceCatalog, resourcesResult map[string]resourcesresults.Result) {
 
-	workloadsSummary := listResultSummary(controlSummary, allResources)
-	if pp.verboseMode {
+	workloadsSummary := listResultSummaryFromCatalog(controlSummary, catalog)
+	// --show-evidence asks for the evidence, so it enables the evidence on its
+	// own here. Gating this on --verbose alone left the flag unread on the
+	// control view: showEvidence was threaded all the way to the printer and
+	// then never consulted on this path, so `kubescape scan -E --view control`
+	// printed exactly what a bare scan printed.
+	if pp.verboseMode || pp.showEvidence {
 		attachAssistedRemediation(workloadsSummary, controlSummary.GetID(), resourcesResult, pp.showSecrets)
 	}
 
 	failedWorkloads := groupByNamespaceOrKind(workloadsSummary, workloadSummaryFailed)
 	skippedWorkloads := groupByNamespaceOrKind(workloadsSummary, workloadSummarySkipped)
 
+	// Passed resources stay behind --verbose. They are a different request:
+	// --verbose widens *which resources* are listed, --show-evidence deepens
+	// *what is shown* about a failed one. Widening on -E would change the
+	// output of every control that has passing resources, which is not what
+	// the flag asks for.
 	var passedWorkloads map[string][]WorkloadSummary
 	if pp.verboseMode {
 		passedWorkloads = groupByNamespaceOrKind(workloadsSummary, workloadSummaryPassed)
@@ -350,10 +364,10 @@ func getSeparator(sep string) string {
 
 func isPrintSeparatorType(scanType cautils.ScanTypes) bool {
 	switch scanType {
-	case cautils.ScanTypeCluster, cautils.ScanTypeRepo, cautils.ScanTypeImage, cautils.ScanTypeWorkload:
-		return false
-	default:
+	case cautils.ScanTypeControl, cautils.ScanTypeFramework:
 		return true
+	default:
+		return false
 	}
 }
 

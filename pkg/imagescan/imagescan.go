@@ -5,8 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/adrg/xdg"
 	"github.com/anchore/grype/grype"
@@ -26,6 +29,7 @@ import (
 	"github.com/anchore/grype/grype/vulnerability"
 	"github.com/anchore/stereoscope/pkg/image"
 	"github.com/anchore/syft/syft"
+	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v4/core/cautils"
@@ -47,7 +51,13 @@ func (c RegistryCredentials) hasAuthenticator() bool {
 	return c.Token != "" || (c.Username != "" && c.Password != "")
 }
 
-func NewDefaultDBConfig(grypeURL string, skipDBUpdate bool) (distribution.Config, installation.Config, bool, error) {
+// NewDefaultDBConfig builds the Grype distribution/installation configs.
+// failOnStale opts into the strict freshness gate: when an update will be
+// attempted (shouldUpdate), grype's RequireUpdateCheck is enabled so a failed
+// update check surfaces as a load error instead of silently serving the stale
+// cache. A successful check that finds nothing newer still proceeds, leaving
+// the warn-only path for genuinely stale upstream data.
+func NewDefaultDBConfig(grypeURL string, skipDBUpdate bool, failOnStale bool) (distribution.Config, installation.Config, bool, error) {
 	dir := filepath.Join(xdg.CacheHome, defaultDBDirName)
 	finalURL := defaultGrypeListingURL
 
@@ -75,7 +85,8 @@ func NewDefaultDBConfig(grypeURL string, skipDBUpdate bool) (distribution.Config
 	shouldUpdate := !skipDBUpdate
 
 	return distribution.Config{
-			LatestURL: finalURL,
+			LatestURL:          finalURL,
+			RequireUpdateCheck: shouldUpdate && failOnStale,
 		}, installation.Config{
 			DBRootDir: dir,
 		}, shouldUpdate, nil
@@ -133,7 +144,113 @@ func validateDBLoad(loadErr error, status *vulnerability.ProviderStatus) error {
 	return nil
 }
 
-func getProviderConfig(creds RegistryCredentials, sources []string, options ScanOptions) pkg.ProviderConfig {
+// DefaultMaxDBAge matches grype upstream's max-allowed-built-age default (5 days).
+// A successfully loaded DB older than this is usable but stale: results may miss recent CVEs.
+const DefaultMaxDBAge = 5 * 24 * time.Hour
+
+// Env vars for non-CLI paths (httphandler/MCP construct ScanInfo programmatically,
+// so CLI flags never reach them).
+const (
+	envFailOnStaleDB = "KS_FAIL_ON_STALE_DB"
+	envMaxDBAge      = "KS_MAX_DB_AGE"
+)
+
+// dbNowFunc is injectable so age-gate tests stay hermetic.
+var dbNowFunc = time.Now
+
+// CheckDBAge reports whether a loaded vulnerability DB is stale.
+// It never fails: unknown (zero Built) and future Built (clock skew) yield a
+// warning with stale=false. Callers decide whether stale=true is fatal.
+// maxAge <= 0 selects DefaultMaxDBAge.
+func CheckDBAge(status *vulnerability.ProviderStatus, maxAge time.Duration) (warn string, stale bool) {
+	if status == nil {
+		return "", false
+	}
+	if maxAge <= 0 {
+		maxAge = DefaultMaxDBAge
+	}
+	built := status.Built
+	if built.IsZero() {
+		return "vulnerability DB build time is unknown; results may miss recent CVEs", false
+	}
+	now := dbNowFunc().UTC()
+	builtUTC := built.UTC()
+	if now.Before(builtUTC) {
+		return fmt.Sprintf("vulnerability DB built in the future (%s); possible clock skew, treating as fresh", builtUTC.Format(time.RFC3339)), false
+	}
+	age := now.Sub(builtUTC)
+	if age <= maxAge {
+		return "", false
+	}
+	days := int(age.Hours() / 24)
+	return fmt.Sprintf("vulnerability DB was built %s (%d days ago), older than max allowed age %s; results may miss recent CVEs",
+		builtUTC.Format("2006-01-02"), days, maxAge), true
+}
+
+// ResolveDBAgeGate merges explicit CLI values with KS_* env fallbacks using
+// tri-state presence: an explicitly passed flag (even false/zero) always wins
+// over the environment; the environment applies only when the flag was left
+// at its default. Precedence: CLI (when set) → env → default.
+// Returns the effective fail flag and max age (<=0 still means DefaultMaxDBAge;
+// callers pass it straight to CheckDBAge). An unparseable env value is
+// ignored (warned) rather than failing the scan.
+func ResolveDBAgeGate(failFlag, failSet bool, maxAge time.Duration, maxSet bool) (bool, time.Duration) {
+	fail := failFlag
+	if !failSet {
+		if v, ok := os.LookupEnv(envFailOnStaleDB); ok {
+			if b, err := strconv.ParseBool(strings.TrimSpace(v)); err == nil {
+				fail = b
+			} else {
+				logger.L().Warning(fmt.Sprintf("ignoring invalid %s=%q (want bool)", envFailOnStaleDB, v))
+			}
+		}
+	}
+	if !maxSet {
+		if v, ok := os.LookupEnv(envMaxDBAge); ok {
+			if d, err := time.ParseDuration(strings.TrimSpace(v)); err == nil && d > 0 {
+				maxAge = d
+			} else {
+				logger.L().Warning(fmt.Sprintf("ignoring invalid %s=%q (want positive duration like 120h)", envMaxDBAge, v))
+			}
+		}
+	}
+	return fail, maxAge
+}
+
+// EnforceDBAge warns on any stale/unknown DB and returns a fatal error only when
+// the caller opted into fail-closed (failOnStale) AND the DB was loaded without
+// a fresh update (shouldUpdate=false).
+//
+// Both failOnStale and maxAge must already be resolved (see ResolveDBAgeGate);
+// this function performs no environment lookup itself.
+//
+// A stale DB served after a requested update means the update check succeeded
+// but upstream has nothing newer — warn only, never fail. Callers running the
+// strict gate pass RequireUpdateCheck through NewDefaultDBConfig, so a failed
+// update check surfaces as a load error before this function is ever reached.
+// Patch (always shouldUpdate=true) therefore warns but never fails. Must be
+// called once per invocation right after service creation, before scanning.
+func EnforceDBAge(svc *Service, shouldUpdate bool, failOnStale bool, maxAge time.Duration) error {
+	if svc == nil {
+		return nil
+	}
+	warn, stale := CheckDBAge(svc.VulnDBStatus(), maxAge)
+	if warn != "" {
+		if !shouldUpdate {
+			logger.L().Warning(warn + " (database update was skipped — run once without --skip-db-update to refresh it)")
+		} else if stale {
+			logger.L().Warning(warn + " (upstream database itself appears stale — freshest available was used)")
+		} else {
+			logger.L().Warning(warn)
+		}
+	}
+	if stale && failOnStale && !shouldUpdate {
+		return fmt.Errorf("vulnerability DB is stale: %s (use --max-db-age to allow older databases, or refresh the DB)", warn)
+	}
+	return nil
+}
+
+func getProviderConfig(creds RegistryCredentials, sources []string, options ScanOptions, keychain authn.Keychain) pkg.ProviderConfig {
 	var syftCreds []image.RegistryCredentials
 	if creds.hasAuthenticator() {
 		syftCreds = append(syftCreds, image.RegistryCredentials{
@@ -145,6 +262,11 @@ func getProviderConfig(creds RegistryCredentials, sources []string, options Scan
 	}
 	regOpts := &image.RegistryOptions{
 		Credentials: syftCreds,
+		// Explicit Credentials above still win per-registry (see
+		// image.RegistryOptions.Authenticator). keychain is the composed,
+		// build-once fallback chain from newRegistryKeychain - see its
+		// docstring for the precedence within it.
+		Keychain: keychain,
 	}
 	pc := pkg.ProviderConfig{
 		SyftProviderConfig: pkg.SyftProviderConfig{
@@ -173,6 +295,13 @@ type Service struct {
 	// dbStatus carries the loaded vulnerability DB status so scan results can
 	// surface DB freshness (ProviderStatus.Built). Nil when the DB failed to load.
 	dbStatus *vulnerability.ProviderStatus
+	// keychain is the composed, build-once fallback used when no explicit
+	// RegistryCredentials/imagePullSecret matches a registry. See
+	// newRegistryKeychain for what it's composed of and in what order. It's
+	// built once per Service, but that does not itself cache credentials
+	// across images - each Resolve() call (once per image pull) re-runs the
+	// wrapped keychain; see acrKeychainRefreshInterval's comment for why.
+	keychain authn.Keychain
 }
 
 func getIgnoredMatches(vulnerabilityExceptions []string, vp vulnerability.Provider, packages []pkg.Package, pkgContext pkg.Context, useDefaultMatchers bool) (*match.Matches, []match.IgnoredMatch, error) {
@@ -225,7 +354,7 @@ func filterMatchesBasedOnSeverity(severityExceptions []string, remainingMatches 
 		for _, sever := range severityExceptions {
 			if strings.ToUpper(metadata.Severity) == sever {
 				excludeSeverity = true
-				continue
+				break
 			}
 		}
 
@@ -251,7 +380,7 @@ func (s *Service) ScanWithOptions(ctx context.Context, userInput string, creds R
 	}
 	options.Platform = platform
 
-	packages, pkgContext, sbom, err := pkg.Provide(userInput, getProviderConfig(creds, s.sources, options))
+	packages, pkgContext, sbom, err := pkg.Provide(userInput, getProviderConfig(creds, s.sources, options, s.keychain))
 	if err != nil {
 		return nil, err
 	}
@@ -294,29 +423,70 @@ func applyDBFreshness(pb *cautils.ImageScanData, status *vulnerability.ProviderS
 	}
 }
 
+// MatchSeverity resolves the severity of a single image-scan match.
+// It prefers the embedded match metadata and falls back to a provider lookup.
+// The second return is true when the severity cannot be determined: the
+// embedded metadata is missing, unparseable or Unknown AND the provider is
+// nil, errored, or also reports Unknown. Callers implementing a severity
+// threshold must treat unknown as exceeding (fail closed): an indeterminate
+// CVE must not silently pass. Negligible is a determinate severity and is
+// never reported as unknown.
+func MatchSeverity(m match.Match, vp vulnerability.Provider) (vulnerability.Severity, bool) {
+	metadata := m.Vulnerability.Metadata
+	if metadata == nil || vulnerability.ParseSeverity(metadata.Severity) == vulnerability.UnknownSeverity {
+		if vp == nil {
+			return vulnerability.UnknownSeverity, true
+		}
+		var err error
+		//nolint:staticcheck // fallback for matches without a known embedded severity
+		metadata, err = vp.VulnerabilityMetadata(m.Vulnerability.Reference)
+		if err != nil {
+			return vulnerability.UnknownSeverity, true
+		}
+	}
+	severity := vulnerability.ParseSeverity(metadata.Severity)
+	return severity, severity == vulnerability.UnknownSeverity
+}
+
+// IsDefinitivelyUnfixable reports whether grype has determined a CVE to be
+// unfixable (not-fixed/wont-fix). Unknown and empty fix states do not qualify:
+// absence of fix information cannot prove unfixability.
+func IsDefinitivelyUnfixable(state vulnerability.FixState) bool {
+	return state == vulnerability.FixStateNotFixed || state == vulnerability.FixStateWontFix
+}
+
 // ExceedsSeverityThreshold returns true if vulnerabilities in the scan results exceed the severity threshold, false otherwise.
 //
 // Values equal to the threshold are considered failing, too. When onlyFixable is true, a CVE only
 // counts toward the threshold if grype reports a fix state of "fixed" for it.
+// Vulnerabilities whose severity cannot be determined count as exceeding any
+// set threshold (fail closed, mirroring the posture gate): the single
+// exception is onlyFixable with a definitively unfixable CVE (not-fixed or
+// wont-fix), which keeps the flag's contract. Unknown severity with an
+// unknown or empty fix state still fails.
 func (s *Service) ExceedsSeverityThreshold(severity vulnerability.Severity, matches match.Matches, onlyFixable bool) bool {
 	if severity == vulnerability.UnknownSeverity {
 		return false
 	}
+	// Drain matches.Enumerate() fully: it is fed by a goroutine over an
+	// unbuffered channel, so any early return would strand the producer and
+	// leak a goroutine per call. Collect the verdict, decide once at the end.
+	exceeds, unknownCount := false, 0
 	for m := range matches.Enumerate() {
-		metadata := m.Vulnerability.Metadata
-		if metadata == nil || vulnerability.ParseSeverity(metadata.Severity) == vulnerability.UnknownSeverity {
-			if s.vp == nil {
+		matchSeverity, unknown := MatchSeverity(m, s.vp)
+		if unknown {
+			// Fail closed: an indeterminate CVE must not silently pass.
+			// The onlyFixable carve-out is preserved only when grype
+			// definitively reports the CVE as unfixable (not-fixed/wont-fix);
+			// an unknown or empty fix state cannot prove that, so it fails.
+			if onlyFixable && IsDefinitivelyUnfixable(m.Vulnerability.Fix.State) {
 				continue
 			}
-			var err error
-			//nolint:staticcheck // fallback for matches without a known embedded severity
-			metadata, err = s.vp.VulnerabilityMetadata(m.Vulnerability.Reference)
-			if err != nil {
-				continue
-			}
+			unknownCount++
+			continue
 		}
 
-		if vulnerability.ParseSeverity(metadata.Severity) < severity {
+		if matchSeverity < severity {
 			continue
 		}
 
@@ -324,13 +494,27 @@ func (s *Service) ExceedsSeverityThreshold(severity vulnerability.Severity, matc
 			continue
 		}
 
+		exceeds = true
+	}
+	if unknownCount > 0 {
+		logger.L().Warning("vulnerabilities with unknown severity counted toward the severity threshold",
+			helpers.Int("count", unknownCount))
 		return true
 	}
-	return false
+	return exceeds
 }
 
 func (s *Service) Close() {
 	_ = s.vp.Close()
+}
+
+// VulnDBStatus exposes the loaded DB status so callers can age-gate it
+// (see CheckDBAge/EnforceDBAge) without breaking the constructor signature.
+func (s *Service) VulnDBStatus() *vulnerability.ProviderStatus {
+	if s == nil {
+		return nil
+	}
+	return s.dbStatus
 }
 
 func NewVulnerabilityDB(distCfg distribution.Config, installCfg installation.Config, update bool) (vulnerability.Provider, *vulnerability.ProviderStatus, error) {
@@ -362,6 +546,7 @@ func NewScanServiceWithMatchersAndSources(distCfg distribution.Config, installCf
 		useDefaultMatchers: useDefaultMatchers,
 		vexClient:          NewVexClient(),
 		sources:            sources,
+		keychain:           newRegistryKeychain(),
 	}, nil
 }
 

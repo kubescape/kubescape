@@ -2,6 +2,7 @@ package getter
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -78,6 +79,9 @@ func (drp *DownloadReleasedPolicy) ShouldPersistPolicyArtifacts() bool {
 func (drp *DownloadReleasedPolicy) SetRegoObjectsWithFallback() (fallback bool, err error) {
 	if err := drp.SetRegoObjects(); err != nil {
 		if drp.version != "" {
+			return false, err
+		}
+		if errors.Is(err, gitregostore.ErrChecksumVerification) {
 			return false, err
 		}
 		return true, nil

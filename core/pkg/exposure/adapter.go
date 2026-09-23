@@ -49,26 +49,27 @@ func FromResources(resources map[string]workloadinterface.IMetadata) (services [
 	return services, ingresses, namespaces, errs
 }
 
-// FromUnstructuredGatewayAPI decodes Gateway API HTTPRoute and Gateway
-// objects from their generic unstructured representation. Kept separate
-// from FromResources because these two kinds are not part of kubescape's
-// generic scanned-resource set on every cluster (the Gateway API CRDs may
-// not even be installed) and have no typed Go representation this repo
-// already vendors to decode into. A malformed object of either kind is
-// skipped, with its error appended to errs, same as FromResources.
-func FromUnstructuredGatewayAPI(resources map[string]workloadinterface.IMetadata) (httpRoutes []httpRoute, gateways []gateway, errs []error) {
+// FromUnstructuredGatewayAPI decodes Gateway API route (HTTPRoute,
+// GRPCRoute) and Gateway objects from their generic unstructured
+// representation. Kept separate from FromResources because these kinds are
+// not part of kubescape's generic scanned-resource set on every cluster
+// (the Gateway API CRDs may not even be installed) and have no typed Go
+// representation this repo already vendors to decode into. A malformed
+// object of any of these kinds is skipped, with its error appended to
+// errs, same as FromResources.
+func FromUnstructuredGatewayAPI(resources map[string]workloadinterface.IMetadata) (routes []gatewayRoute, gateways []gateway, errs []error) {
 	for _, resource := range resources {
 		if resource == nil {
 			continue
 		}
 		switch resource.GetKind() {
-		case "HTTPRoute":
-			r, err := decodeHTTPRoute(resource.GetObject())
+		case "HTTPRoute", "GRPCRoute":
+			r, err := decodeGatewayRoute(resource.GetKind(), resource.GetObject())
 			if err != nil {
 				errs = append(errs, fmt.Errorf("resource %s: %w", resource.GetID(), err))
 				continue
 			}
-			httpRoutes = append(httpRoutes, r)
+			routes = append(routes, r)
 		case "Gateway":
 			g, err := decodeGateway(resource.GetObject())
 			if err != nil {
@@ -78,7 +79,7 @@ func FromUnstructuredGatewayAPI(resources map[string]workloadinterface.IMetadata
 			gateways = append(gateways, g)
 		}
 	}
-	return httpRoutes, gateways, errs
+	return routes, gateways, errs
 }
 
 // decode converts an unstructured object's generic map into its typed shape
@@ -96,25 +97,31 @@ func decode(obj map[string]any, out any) error {
 	return nil
 }
 
-// gatewayAPIWireShape mirrors just the fields this package reads from an
-// HTTPRoute or Gateway's spec, in their real Gateway API JSON shape
-// (camelCase, pointer-optional fields), separate from this package's own
-// internal httpRoute/gateway types so a JSON round-trip can populate it
-// directly without custom unmarshaling.
+// gatewayAPIWireShape mirrors just the fields this package reads from a
+// Gateway API route (HTTPRoute, GRPCRoute) or Gateway's spec, in their
+// real Gateway API JSON shape (camelCase, pointer-optional fields),
+// separate from this package's own internal gatewayRoute/gateway types so
+// a JSON round-trip can populate it directly without custom unmarshaling.
+// The route spec fields are identical between HTTPRoute and GRPCRoute.
 type gatewayAPIWireShape struct {
 	Metadata struct {
 		Namespace string `json:"namespace"`
 		Name      string `json:"name"`
 	} `json:"metadata"`
 	Spec struct {
-		// HTTPRoute fields.
+		// Route fields (HTTPRoute and GRPCRoute share this shape).
 		ParentRefs []struct {
-			Namespace *string `json:"namespace,omitempty"`
-			Name      string  `json:"name"`
+			Group       *string `json:"group,omitempty"`
+			Kind        *string `json:"kind,omitempty"`
+			Namespace   *string `json:"namespace,omitempty"`
+			Name        string  `json:"name"`
+			SectionName *string `json:"sectionName,omitempty"`
 		} `json:"parentRefs,omitempty"`
 		Hostnames []string `json:"hostnames,omitempty"`
 		Rules     []struct {
 			BackendRefs []struct {
+				Group     *string `json:"group,omitempty"`
+				Kind      *string `json:"kind,omitempty"`
 				Namespace *string `json:"namespace,omitempty"`
 				Name      string  `json:"name"`
 			} `json:"backendRefs,omitempty"`
@@ -128,6 +135,10 @@ type gatewayAPIWireShape struct {
 					From     *string              `json:"from,omitempty"`
 					Selector *unstructuredRawJSON `json:"selector,omitempty"`
 				} `json:"namespaces,omitempty"`
+				Kinds []struct {
+					Group *string `json:"group,omitempty"`
+					Kind  string  `json:"kind"`
+				} `json:"kinds,omitempty"`
 			} `json:"allowedRoutes,omitempty"`
 		} `json:"listeners,omitempty"`
 	} `json:"spec"`
@@ -139,26 +150,30 @@ type gatewayAPIWireShape struct {
 // blob into that type rather than duplicating its field shape here too.
 type unstructuredRawJSON map[string]any
 
-func decodeHTTPRoute(obj map[string]any) (httpRoute, error) {
+// decodeGatewayRoute decodes an HTTPRoute or GRPCRoute. The spec fields
+// this package reads are identical between the two kinds, so only the
+// kind attribution differs.
+func decodeGatewayRoute(kind string, obj map[string]any) (gatewayRoute, error) {
 	var wire gatewayAPIWireShape
 	if err := decode(obj, &wire); err != nil {
-		return httpRoute{}, err
+		return gatewayRoute{}, err
 	}
 
-	r := httpRoute{
+	r := gatewayRoute{
+		Kind:      kind,
 		Namespace: wire.Metadata.Namespace,
 		Name:      wire.Metadata.Name,
 		Hostnames: wire.Spec.Hostnames,
 	}
 	for _, p := range wire.Spec.ParentRefs {
-		r.ParentRefs = append(r.ParentRefs, parentRef{Namespace: p.Namespace, Name: p.Name})
+		r.ParentRefs = append(r.ParentRefs, parentRef{Group: p.Group, Kind: p.Kind, Namespace: p.Namespace, Name: p.Name, SectionName: p.SectionName})
 	}
 	for _, rule := range wire.Spec.Rules {
 		var backends []backendRef
 		for _, b := range rule.BackendRefs {
-			backends = append(backends, backendRef{Namespace: b.Namespace, Name: b.Name})
+			backends = append(backends, backendRef{Group: b.Group, Kind: b.Kind, Namespace: b.Namespace, Name: b.Name})
 		}
-		r.Rules = append(r.Rules, httpRouteRule{BackendRefs: backends})
+		r.Rules = append(r.Rules, gatewayRouteRule{BackendRefs: backends})
 	}
 	return r, nil
 }
@@ -188,6 +203,9 @@ func decodeGateway(obj map[string]any) (gateway, error) {
 					rn.Selector = sel
 				}
 				ar.Namespaces = rn
+			}
+			for _, k := range l.AllowedRoutes.Kinds {
+				ar.Kinds = append(ar.Kinds, routeGroupKind{Group: k.Group, Kind: k.Kind})
 			}
 			out.AllowedRoutes = ar
 		}

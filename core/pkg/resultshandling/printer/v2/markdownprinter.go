@@ -90,6 +90,11 @@ func (mp *MarkdownPrinter) ActionPrint(ctx context.Context, opaSessionObj *cauti
 	if err := mdWriteFailedSection(ctx, w, sorted, opaSessionObj); err != nil {
 		return err
 	}
+	if len(imageScanData) > 0 {
+		if err := mdWriteImageScanReport(w, imageScanData); err != nil {
+			return err
+		}
+	}
 
 	printer.LogOutputFile(w.Name())
 	return nil
@@ -202,8 +207,8 @@ func mdWriteFailedSection(ctx context.Context, w io.Writer, controls []reportsum
 		ew.printf("|---|---|---|\n")
 
 		for _, id := range failedIDs {
-			res, ok := session.AllResources[id]
-			if !ok {
+			res, ok := session.GetResource(id)
+			if !ok || res == nil {
 				logger.L().Ctx(ctx).Debug("resource missing from AllResources", helpers.String("resourceID", id))
 				ew.printf("| %s | — | — |\n", mdEscapeCell(id))
 				continue

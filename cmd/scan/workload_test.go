@@ -3,12 +3,15 @@ package scan
 import (
 	"bytes"
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/mocks"
+	"github.com/kubescape/kubescape/v4/core/pkg/resourcehandler"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer"
 	v1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
@@ -414,10 +417,14 @@ func (p *fakePrinter) Score(_ float32)                               {}
 type recordingKubescape struct {
 	mocks.MockIKubescape
 	captured *cautils.ScanInfo
+	scanErr  error
 }
 
 func (m *recordingKubescape) Scan(scanInfo *cautils.ScanInfo, _ []cautils.PolicyIdentifier) (*resultshandling.ResultsHandler, error) {
 	m.captured = scanInfo
+	if m.scanErr != nil {
+		return nil, m.scanErr
+	}
 	rh := resultshandling.NewResultsHandler(nil, []printer.IPrinter{&fakePrinter{}}, &fakePrinter{})
 	rh.SetData(cautils.NewOPASessionObjMock())
 	return rh, nil
@@ -600,4 +607,562 @@ func TestGetWorkloadCmd_EnforcesComplianceThreshold(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestGetWorkloadCmd_NamespaceResolution(t *testing.T) {
+	t.Run("omitted namespace defaults to default", func(t *testing.T) {
+		scanInfo := cautils.ScanInfo{}
+		mock := &recordingKubescape{}
+		cmd := getWorkloadCmd(mock, &scanInfo)
+		cmd.SilenceErrors = true
+		cmd.SilenceUsage = true
+		cmd.SetArgs([]string{"Deployment/nginx"})
+
+		err := cmd.Execute()
+		require.NoError(t, err)
+		assert.Equal(t, "default", mock.captured.Namespace)
+		assert.True(t, mock.captured.NamespaceDefaulted)
+		assert.Equal(t, "default", mock.captured.ScanObject.GetNamespace())
+	})
+
+	t.Run("wildcard namespace flag resolves to cluster-wide", func(t *testing.T) {
+		scanInfo := cautils.ScanInfo{}
+		mock := &recordingKubescape{}
+		cmd := getWorkloadCmd(mock, &scanInfo)
+		cmd.SilenceErrors = true
+		cmd.SilenceUsage = true
+		cmd.SetArgs([]string{"Deployment/nginx", "-n", "*"})
+
+		err := cmd.Execute()
+		require.NoError(t, err)
+		assert.Equal(t, "", mock.captured.Namespace)
+		assert.False(t, mock.captured.NamespaceDefaulted)
+		assert.Equal(t, "", mock.captured.ScanObject.GetNamespace())
+	})
+
+	t.Run("identifier namespace is preserved when flag omitted", func(t *testing.T) {
+		scanInfo := cautils.ScanInfo{}
+		mock := &recordingKubescape{}
+		cmd := getWorkloadCmd(mock, &scanInfo)
+		cmd.SilenceErrors = true
+		cmd.SilenceUsage = true
+		cmd.SetArgs([]string{"kube-system/Deployment/coredns"})
+
+		err := cmd.Execute()
+		require.NoError(t, err)
+		assert.Equal(t, "kube-system", mock.captured.Namespace)
+		assert.False(t, mock.captured.NamespaceDefaulted)
+		assert.Equal(t, "kube-system", mock.captured.ScanObject.GetNamespace())
+	})
+
+	t.Run("conflicting flag and identifier namespace returns error", func(t *testing.T) {
+		scanInfo := cautils.ScanInfo{}
+		mock := &recordingKubescape{}
+		cmd := getWorkloadCmd(mock, &scanInfo)
+		cmd.SilenceErrors = true
+		cmd.SilenceUsage = true
+		cmd.SetArgs([]string{"staging/Deployment/nginx", "-n", "prod"})
+
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "conflicting namespaces")
+	})
+
+	t.Run("conflicting namespace with local input rejects conflict before file access", func(t *testing.T) {
+		scanInfo := cautils.ScanInfo{}
+		mock := &recordingKubescape{}
+		cmd := getWorkloadCmd(mock, &scanInfo)
+		cmd.SilenceErrors = true
+		cmd.SilenceUsage = true
+		// Even if the file does not exist, namespace conflict must be detected first
+		cmd.SetArgs([]string{"staging/Deployment/nginx", "-n", "prod", "nonexistent-manifest.yaml"})
+
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "conflicting namespaces")
+	})
+
+	t.Run("omitted namespace with file path leaves namespace unconstrained", func(t *testing.T) {
+		scanInfo := cautils.ScanInfo{}
+		mock := &recordingKubescape{}
+		cmd := getWorkloadCmd(mock, &scanInfo)
+		cmd.SilenceErrors = true
+		cmd.SilenceUsage = true
+		cmd.SetArgs([]string{"Deployment/nginx", "--file-path", "testdata/dep.yaml"})
+
+		err := cmd.Execute()
+		require.NoError(t, err)
+		assert.Equal(t, "", mock.captured.Namespace)
+		assert.False(t, mock.captured.NamespaceDefaulted)
+		assert.Equal(t, "", mock.captured.ScanObject.GetNamespace())
+	})
+
+	t.Run("omitted namespace with positional input path leaves namespace unconstrained", func(t *testing.T) {
+		scanInfo := cautils.ScanInfo{}
+		mock := &recordingKubescape{}
+		cmd := getWorkloadCmd(mock, &scanInfo)
+		cmd.SilenceErrors = true
+		cmd.SilenceUsage = true
+		cmd.SetArgs([]string{"Deployment/nginx", "testdata/dep.yaml"})
+
+		err := cmd.Execute()
+		require.NoError(t, err)
+		assert.Equal(t, "", mock.captured.Namespace)
+		assert.False(t, mock.captured.NamespaceDefaulted)
+		assert.Equal(t, "", mock.captured.ScanObject.GetNamespace())
+	})
+
+	t.Run("runWorkloadScan wraps not found error with hint and preserves sentinel", func(t *testing.T) {
+		scanInfo := cautils.ScanInfo{
+			NamespaceDefaulted: true,
+		}
+		mock := &recordingKubescape{
+			scanErr: fmt.Errorf("lookup workload: %w", resourcehandler.ErrResourceNotFound),
+		}
+		_, err := runWorkloadScan(context.Background(), &scanInfo, mock, nil)
+		require.Error(t, err)
+		assert.True(t, errors.Is(err, resourcehandler.ErrResourceNotFound), "sentinel ErrResourceNotFound must be preserved in error chain")
+		assert.Contains(t, err.Error(), cliNamespaceDefaultedHint)
+	})
+
+	t.Run("invalid workload name fails early in argument validation", func(t *testing.T) {
+		scanInfo := cautils.ScanInfo{}
+		mock := &recordingKubescape{}
+		cmd := getWorkloadCmd(mock, &scanInfo)
+		cmd.SilenceErrors = true
+		cmd.SilenceUsage = true
+		cmd.SetArgs([]string{"Deployment/nginx@invalid"})
+
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.True(t, errors.Is(err, cautils.ErrInvalidWorkloadIdentifier))
+		assert.Contains(t, err.Error(), "invalid workload name")
+	})
+
+	t.Run("invalid namespace flag fails early in argument validation", func(t *testing.T) {
+		scanInfo := cautils.ScanInfo{}
+		mock := &recordingKubescape{}
+		cmd := getWorkloadCmd(mock, &scanInfo)
+		cmd.SilenceErrors = true
+		cmd.SilenceUsage = true
+		cmd.SetArgs([]string{"Deployment/nginx", "-n", "Invalid_NS!"})
+
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.True(t, errors.Is(err, cautils.ErrInvalidWorkloadIdentifier))
+		assert.Contains(t, err.Error(), "invalid namespace")
+	})
+
+	t.Run("invalid API group fails early in argument validation", func(t *testing.T) {
+		scanInfo := cautils.ScanInfo{}
+		mock := &recordingKubescape{}
+		cmd := getWorkloadCmd(mock, &scanInfo)
+		cmd.SilenceErrors = true
+		cmd.SilenceUsage = true
+		cmd.SetArgs([]string{"Deployment.v1.invalid@group/nginx"})
+
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.True(t, errors.Is(err, cautils.ErrInvalidWorkloadIdentifier))
+		assert.Contains(t, err.Error(), "invalid API group")
+	})
+
+	t.Run("valid live RBAC clusterrole with colon name passes argument validation and populates scan object", func(t *testing.T) {
+		scanInfo := cautils.ScanInfo{}
+		mock := &recordingKubescape{}
+		cmd := getWorkloadCmd(mock, &scanInfo)
+		cmd.SilenceErrors = true
+		cmd.SilenceUsage = true
+		cmd.SetArgs([]string{"ClusterRole.v1.rbac.authorization.k8s.io/system:discovery"})
+
+		err := cmd.Execute()
+		require.NoError(t, err)
+		require.NotNil(t, scanInfo.ScanObject)
+		assert.Equal(t, "ClusterRole", scanInfo.ScanObject.GetKind())
+		assert.Equal(t, "system:discovery", scanInfo.ScanObject.GetName())
+		assert.Equal(t, "rbac.authorization.k8s.io/v1", scanInfo.ScanObject.GetApiVersion())
+		assert.Equal(t, "default", scanInfo.Namespace)
+	})
+
+	t.Run("valid hyphenated CRD kind passes argument validation and populates scan object", func(t *testing.T) {
+		scanInfo := cautils.ScanInfo{}
+		mock := &recordingKubescape{}
+		cmd := getWorkloadCmd(mock, &scanInfo)
+		cmd.SilenceErrors = true
+		cmd.SilenceUsage = true
+		cmd.SetArgs([]string{"Pod-App.v1.example.com/nginx"})
+
+		err := cmd.Execute()
+		require.NoError(t, err)
+		require.NotNil(t, scanInfo.ScanObject)
+		assert.Equal(t, "Pod-App", scanInfo.ScanObject.GetKind())
+		assert.Equal(t, "nginx", scanInfo.ScanObject.GetName())
+		assert.Equal(t, "example.com/v1", scanInfo.ScanObject.GetApiVersion())
+		assert.Equal(t, "default", scanInfo.Namespace)
+	})
+
+	t.Run("CRD kind with leading digit is rejected by argument validation", func(t *testing.T) {
+		scanInfo := cautils.ScanInfo{}
+		mock := &recordingKubescape{}
+		cmd := getWorkloadCmd(mock, &scanInfo)
+		cmd.SilenceErrors = true
+		cmd.SilenceUsage = true
+		cmd.SetArgs([]string{"1Pod.v1.example.com/nginx"})
+
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.True(t, errors.Is(err, cautils.ErrInvalidWorkloadIdentifier))
+		assert.Contains(t, err.Error(), "invalid workload kind")
+	})
+
+	t.Run("valid alphanumeric CRD kind passes argument validation and populates scan object", func(t *testing.T) {
+		scanInfo := cautils.ScanInfo{}
+		mock := &recordingKubescape{}
+		cmd := getWorkloadCmd(mock, &scanInfo)
+		cmd.SilenceErrors = true
+		cmd.SilenceUsage = true
+		cmd.SetArgs([]string{"PodApp.v1.example.com/nginx"})
+
+		err := cmd.Execute()
+		require.NoError(t, err)
+		require.NotNil(t, scanInfo.ScanObject)
+		assert.Equal(t, "PodApp", scanInfo.ScanObject.GetKind())
+		assert.Equal(t, "nginx", scanInfo.ScanObject.GetName())
+		assert.Equal(t, "example.com/v1", scanInfo.ScanObject.GetApiVersion())
+		assert.Equal(t, "default", scanInfo.Namespace)
+	})
+
+	t.Run("valid live ClusterTrustBundle v1 with signer name passes argument validation and populates scan object", func(t *testing.T) {
+		scanInfo := cautils.ScanInfo{}
+		mock := &recordingKubescape{}
+		cmd := getWorkloadCmd(mock, &scanInfo)
+		cmd.SilenceErrors = true
+		cmd.SilenceUsage = true
+		cmd.SetArgs([]string{"ClusterTrustBundle.v1.certificates.k8s.io/example.com:foo:abc"})
+
+		err := cmd.Execute()
+		require.NoError(t, err)
+		require.NotNil(t, scanInfo.ScanObject)
+		assert.Equal(t, "ClusterTrustBundle", scanInfo.ScanObject.GetKind())
+		assert.Equal(t, "example.com:foo:abc", scanInfo.ScanObject.GetName())
+		assert.Equal(t, "certificates.k8s.io/v1", scanInfo.ScanObject.GetApiVersion())
+		assert.Equal(t, "default", scanInfo.Namespace)
+	})
+
+	t.Run("valid live ClusterTrustBundle v1beta1 with signer name passes argument validation and populates scan object", func(t *testing.T) {
+		scanInfo := cautils.ScanInfo{}
+		mock := &recordingKubescape{}
+		cmd := getWorkloadCmd(mock, &scanInfo)
+		cmd.SilenceErrors = true
+		cmd.SilenceUsage = true
+		cmd.SetArgs([]string{"ClusterTrustBundle.v1beta1.certificates.k8s.io/example.com:foo:abc"})
+
+		err := cmd.Execute()
+		require.NoError(t, err)
+		require.NotNil(t, scanInfo.ScanObject)
+		assert.Equal(t, "ClusterTrustBundle", scanInfo.ScanObject.GetKind())
+		assert.Equal(t, "example.com:foo:abc", scanInfo.ScanObject.GetName())
+		assert.Equal(t, "certificates.k8s.io/v1beta1", scanInfo.ScanObject.GetApiVersion())
+		assert.Equal(t, "default", scanInfo.Namespace)
+	})
+
+	t.Run("valid live CertificateSigningRequest v1 with colon name passes argument validation and populates scan object", func(t *testing.T) {
+		scanInfo := cautils.ScanInfo{}
+		mock := &recordingKubescape{}
+		cmd := getWorkloadCmd(mock, &scanInfo)
+		cmd.SilenceErrors = true
+		cmd.SilenceUsage = true
+		cmd.SetArgs([]string{"CertificateSigningRequest.v1.certificates.k8s.io/client:alice"})
+
+		err := cmd.Execute()
+		require.NoError(t, err)
+		require.NotNil(t, scanInfo.ScanObject)
+		assert.Equal(t, "CertificateSigningRequest", scanInfo.ScanObject.GetKind())
+		assert.Equal(t, "client:alice", scanInfo.ScanObject.GetName())
+		assert.Equal(t, "certificates.k8s.io/v1", scanInfo.ScanObject.GetApiVersion())
+		assert.Equal(t, "default", scanInfo.Namespace)
+	})
+
+	t.Run("valid live csr alias v1 with colon name passes argument validation and populates scan object", func(t *testing.T) {
+		scanInfo := cautils.ScanInfo{}
+		mock := &recordingKubescape{}
+		cmd := getWorkloadCmd(mock, &scanInfo)
+		cmd.SilenceErrors = true
+		cmd.SilenceUsage = true
+		cmd.SetArgs([]string{"csr.v1.certificates.k8s.io/client:alice"})
+
+		err := cmd.Execute()
+		require.NoError(t, err)
+		require.NotNil(t, scanInfo.ScanObject)
+		assert.Equal(t, "CertificateSigningRequest", scanInfo.ScanObject.GetKind())
+		assert.Equal(t, "client:alice", scanInfo.ScanObject.GetName())
+		assert.Equal(t, "certificates.k8s.io/v1", scanInfo.ScanObject.GetApiVersion())
+		assert.Equal(t, "default", scanInfo.Namespace)
+	})
+
+	t.Run("valid live APIService v1 with trailing dot name passes argument validation and populates scan object", func(t *testing.T) {
+		scanInfo := cautils.ScanInfo{}
+		mock := &recordingKubescape{}
+		cmd := getWorkloadCmd(mock, &scanInfo)
+		cmd.SilenceErrors = true
+		cmd.SilenceUsage = true
+		cmd.SetArgs([]string{"APIService.v1.apiregistration.k8s.io/v1."})
+
+		err := cmd.Execute()
+		require.NoError(t, err)
+		require.NotNil(t, scanInfo.ScanObject)
+		assert.Equal(t, "APIService", scanInfo.ScanObject.GetKind())
+		assert.Equal(t, "v1.", scanInfo.ScanObject.GetName())
+		assert.Equal(t, "apiregistration.k8s.io/v1", scanInfo.ScanObject.GetApiVersion())
+		assert.Equal(t, "default", scanInfo.Namespace)
+	})
+
+	t.Run("valid live IPAddress v1 with IPv6 name passes argument validation and populates scan object", func(t *testing.T) {
+		scanInfo := cautils.ScanInfo{}
+		mock := &recordingKubescape{}
+		cmd := getWorkloadCmd(mock, &scanInfo)
+		cmd.SilenceErrors = true
+		cmd.SilenceUsage = true
+		cmd.SetArgs([]string{"IPAddress.v1.networking.k8s.io/2001:db8::1"})
+
+		err := cmd.Execute()
+		require.NoError(t, err)
+		require.NotNil(t, scanInfo.ScanObject)
+		assert.Equal(t, "IPAddress", scanInfo.ScanObject.GetKind())
+		assert.Equal(t, "2001:db8::1", scanInfo.ScanObject.GetName())
+		assert.Equal(t, "networking.k8s.io/v1", scanInfo.ScanObject.GetApiVersion())
+		assert.Equal(t, "default", scanInfo.Namespace)
+	})
+
+	t.Run("valid live Event v1 with colon name passes argument validation and populates scan object", func(t *testing.T) {
+		scanInfo := cautils.ScanInfo{}
+		mock := &recordingKubescape{}
+		cmd := getWorkloadCmd(mock, &scanInfo)
+		cmd.SilenceErrors = true
+		cmd.SilenceUsage = true
+		cmd.SetArgs([]string{"Event.v1/event:legacy"})
+
+		err := cmd.Execute()
+		require.NoError(t, err)
+		require.NotNil(t, scanInfo.ScanObject)
+		assert.Equal(t, "Event", scanInfo.ScanObject.GetKind())
+		assert.Equal(t, "event:legacy", scanInfo.ScanObject.GetName())
+		assert.Equal(t, "v1", scanInfo.ScanObject.GetApiVersion())
+		assert.Equal(t, "default", scanInfo.Namespace)
+	})
+
+	t.Run("valid live event alias with colon name passes argument validation and populates scan object", func(t *testing.T) {
+		scanInfo := cautils.ScanInfo{}
+		mock := &recordingKubescape{}
+		cmd := getWorkloadCmd(mock, &scanInfo)
+		cmd.SilenceErrors = true
+		cmd.SilenceUsage = true
+		cmd.SetArgs([]string{"ev.v1/event:legacy"})
+
+		err := cmd.Execute()
+		require.NoError(t, err)
+		require.NotNil(t, scanInfo.ScanObject)
+		assert.Equal(t, "Event", scanInfo.ScanObject.GetKind())
+		assert.Equal(t, "event:legacy", scanInfo.ScanObject.GetName())
+		assert.Equal(t, "v1", scanInfo.ScanObject.GetApiVersion())
+		assert.Equal(t, "default", scanInfo.Namespace)
+	})
+
+	t.Run("valid bare Event with colon name passes argument validation and populates scan object", func(t *testing.T) {
+		scanInfo := cautils.ScanInfo{}
+		mock := &recordingKubescape{}
+		cmd := getWorkloadCmd(mock, &scanInfo)
+		cmd.SilenceErrors = true
+		cmd.SilenceUsage = true
+		cmd.SetArgs([]string{"Event/event:legacy"})
+
+		err := cmd.Execute()
+		require.NoError(t, err)
+		require.NotNil(t, scanInfo.ScanObject)
+		assert.Equal(t, "Event", scanInfo.ScanObject.GetKind())
+		assert.Equal(t, "event:legacy", scanInfo.ScanObject.GetName())
+		assert.Equal(t, "", scanInfo.ScanObject.GetApiVersion())
+		assert.Equal(t, "default", scanInfo.Namespace)
+	})
+
+	t.Run("valid bare APIService with explicit api-version flag passes argument validation and populates scan object", func(t *testing.T) {
+		scanInfo := cautils.ScanInfo{}
+		mock := &recordingKubescape{}
+		cmd := getWorkloadCmd(mock, &scanInfo)
+		cmd.SilenceErrors = true
+		cmd.SilenceUsage = true
+		cmd.SetArgs([]string{"APIService/my-api", "--api-version", "example.com/v1"})
+
+		err := cmd.Execute()
+		require.NoError(t, err)
+		require.NotNil(t, scanInfo.ScanObject)
+		assert.Equal(t, "APIService", scanInfo.ScanObject.GetKind())
+		assert.Equal(t, "my-api", scanInfo.ScanObject.GetName())
+		assert.Equal(t, "example.com/v1", scanInfo.ScanObject.GetApiVersion())
+		assert.Equal(t, "default", scanInfo.Namespace)
+	})
+
+	t.Run("valid bare IPAddress with explicit api-version flag passes argument validation and populates scan object", func(t *testing.T) {
+		scanInfo := cautils.ScanInfo{}
+		mock := &recordingKubescape{}
+		cmd := getWorkloadCmd(mock, &scanInfo)
+		cmd.SilenceErrors = true
+		cmd.SilenceUsage = true
+		cmd.SetArgs([]string{"IPAddress/my-address", "--api-version", "example.com/v1"})
+
+		err := cmd.Execute()
+		require.NoError(t, err)
+		require.NotNil(t, scanInfo.ScanObject)
+		assert.Equal(t, "IPAddress", scanInfo.ScanObject.GetKind())
+		assert.Equal(t, "my-address", scanInfo.ScanObject.GetName())
+		assert.Equal(t, "example.com/v1", scanInfo.ScanObject.GetApiVersion())
+		assert.Equal(t, "default", scanInfo.Namespace)
+	})
+
+	t.Run("valid bare ClusterTrustBundle with explicit api-version flag passes argument validation and populates scan object", func(t *testing.T) {
+		scanInfo := cautils.ScanInfo{}
+		mock := &recordingKubescape{}
+		cmd := getWorkloadCmd(mock, &scanInfo)
+		cmd.SilenceErrors = true
+		cmd.SilenceUsage = true
+		cmd.SetArgs([]string{"ClusterTrustBundle/my-bundle", "--api-version", "example.com/v1"})
+
+		err := cmd.Execute()
+		require.NoError(t, err)
+		require.NotNil(t, scanInfo.ScanObject)
+		assert.Equal(t, "ClusterTrustBundle", scanInfo.ScanObject.GetKind())
+		assert.Equal(t, "my-bundle", scanInfo.ScanObject.GetName())
+		assert.Equal(t, "example.com/v1", scanInfo.ScanObject.GetApiVersion())
+		assert.Equal(t, "default", scanInfo.Namespace)
+	})
+
+	t.Run("bare ambiguous kind with custom api-version flag rejects non-DNS-subdomain name", func(t *testing.T) {
+		scanInfo := cautils.ScanInfo{}
+		mock := &recordingKubescape{}
+		cmd := getWorkloadCmd(mock, &scanInfo)
+		cmd.SilenceErrors = true
+		cmd.SilenceUsage = true
+		cmd.SetArgs([]string{"APIService/invalid:name", "--api-version", "example.com/v1"})
+
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.True(t, errors.Is(err, cautils.ErrInvalidWorkloadIdentifier))
+		assert.Contains(t, err.Error(), "invalid workload name")
+	})
+
+	t.Run("valid bare ClusterTrustBundle passes argument validation and populates scan object", func(t *testing.T) {
+		scanInfo := cautils.ScanInfo{}
+		mock := &recordingKubescape{}
+		cmd := getWorkloadCmd(mock, &scanInfo)
+		cmd.SilenceErrors = true
+		cmd.SilenceUsage = true
+		cmd.SetArgs([]string{"ClusterTrustBundle/my-bundle"})
+
+		err := cmd.Execute()
+		require.NoError(t, err)
+		require.NotNil(t, scanInfo.ScanObject)
+		assert.Equal(t, "ClusterTrustBundle", scanInfo.ScanObject.GetKind())
+		assert.Equal(t, "my-bundle", scanInfo.ScanObject.GetName())
+		assert.Equal(t, "", scanInfo.ScanObject.GetApiVersion())
+		assert.Equal(t, "default", scanInfo.Namespace)
+	})
+
+	t.Run("valid live Event v1 with events.k8s.io group and colon name passes argument validation and populates scan object", func(t *testing.T) {
+		scanInfo := cautils.ScanInfo{}
+		mock := &recordingKubescape{}
+		cmd := getWorkloadCmd(mock, &scanInfo)
+		cmd.SilenceErrors = true
+		cmd.SilenceUsage = true
+		cmd.SetArgs([]string{"Event.v1.events.k8s.io/event:legacy"})
+
+		err := cmd.Execute()
+		require.NoError(t, err)
+		require.NotNil(t, scanInfo.ScanObject)
+		assert.Equal(t, "Event", scanInfo.ScanObject.GetKind())
+		assert.Equal(t, "event:legacy", scanInfo.ScanObject.GetName())
+		assert.Equal(t, "events.k8s.io/v1", scanInfo.ScanObject.GetApiVersion())
+		assert.Equal(t, "default", scanInfo.Namespace)
+	})
+
+	t.Run("valid live ev alias with events.k8s.io group and colon name passes argument validation and populates scan object", func(t *testing.T) {
+		scanInfo := cautils.ScanInfo{}
+		mock := &recordingKubescape{}
+		cmd := getWorkloadCmd(mock, &scanInfo)
+		cmd.SilenceErrors = true
+		cmd.SilenceUsage = true
+		cmd.SetArgs([]string{"ev.v1.events.k8s.io/event:legacy"})
+
+		err := cmd.Execute()
+		require.NoError(t, err)
+		require.NotNil(t, scanInfo.ScanObject)
+		assert.Equal(t, "Event", scanInfo.ScanObject.GetKind())
+		assert.Equal(t, "event:legacy", scanInfo.ScanObject.GetName())
+		assert.Equal(t, "events.k8s.io/v1", scanInfo.ScanObject.GetApiVersion())
+		assert.Equal(t, "default", scanInfo.Namespace)
+	})
+
+	t.Run("valid live events alias with events.k8s.io group and colon name passes argument validation and populates scan object", func(t *testing.T) {
+		scanInfo := cautils.ScanInfo{}
+		mock := &recordingKubescape{}
+		cmd := getWorkloadCmd(mock, &scanInfo)
+		cmd.SilenceErrors = true
+		cmd.SilenceUsage = true
+		cmd.SetArgs([]string{"events.v1.events.k8s.io/event:legacy"})
+
+		err := cmd.Execute()
+		require.NoError(t, err)
+		require.NotNil(t, scanInfo.ScanObject)
+		assert.Equal(t, "Event", scanInfo.ScanObject.GetKind())
+		assert.Equal(t, "event:legacy", scanInfo.ScanObject.GetName())
+		assert.Equal(t, "events.k8s.io/v1", scanInfo.ScanObject.GetApiVersion())
+		assert.Equal(t, "default", scanInfo.Namespace)
+	})
+
+	t.Run("valid bare Event with explicit events.k8s.io api-version flag passes argument validation and populates scan object", func(t *testing.T) {
+		scanInfo := cautils.ScanInfo{}
+		mock := &recordingKubescape{}
+		cmd := getWorkloadCmd(mock, &scanInfo)
+		cmd.SilenceErrors = true
+		cmd.SilenceUsage = true
+		cmd.SetArgs([]string{"Event/event:legacy", "--api-version", "events.k8s.io/v1"})
+
+		err := cmd.Execute()
+		require.NoError(t, err)
+		require.NotNil(t, scanInfo.ScanObject)
+		assert.Equal(t, "Event", scanInfo.ScanObject.GetKind())
+		assert.Equal(t, "event:legacy", scanInfo.ScanObject.GetName())
+		assert.Equal(t, "events.k8s.io/v1", scanInfo.ScanObject.GetApiVersion())
+		assert.Equal(t, "default", scanInfo.Namespace)
+	})
+
+	t.Run("valid live Event v1 with custom group and standard name passes argument validation and populates scan object", func(t *testing.T) {
+		scanInfo := cautils.ScanInfo{}
+		mock := &recordingKubescape{}
+		cmd := getWorkloadCmd(mock, &scanInfo)
+		cmd.SilenceErrors = true
+		cmd.SilenceUsage = true
+		cmd.SetArgs([]string{"Event.v1.example.com/my-event"})
+
+		err := cmd.Execute()
+		require.NoError(t, err)
+		require.NotNil(t, scanInfo.ScanObject)
+		assert.Equal(t, "Event", scanInfo.ScanObject.GetKind())
+		assert.Equal(t, "my-event", scanInfo.ScanObject.GetName())
+		assert.Equal(t, "example.com/v1", scanInfo.ScanObject.GetApiVersion())
+		assert.Equal(t, "default", scanInfo.Namespace)
+	})
+
+	t.Run("invalid Event with custom group and colon name is rejected by DNS validation", func(t *testing.T) {
+		scanInfo := cautils.ScanInfo{}
+		mock := &recordingKubescape{}
+		cmd := getWorkloadCmd(mock, &scanInfo)
+		cmd.SilenceErrors = true
+		cmd.SilenceUsage = true
+		cmd.SetArgs([]string{"Event.v1.example.com/event:legacy"})
+
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.True(t, errors.Is(err, cautils.ErrInvalidWorkloadIdentifier))
+		assert.Contains(t, err.Error(), "invalid workload name")
+	})
 }

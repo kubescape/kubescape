@@ -272,7 +272,7 @@ func TestServerState_UserScanIDLifecycle(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// admitUserScan concurrency tests
+// admitScan concurrency tests
 //
 // Scan() runs one goroutine per HTTP request, so nothing orders two handlers
 // against each other. If the enqueue and the latestUserScanID write are not in
@@ -294,7 +294,7 @@ func TestServerState_AdmitUserScan_BookkeepingFollowsAcceptanceOrder(t *testing.
 		// stall is the window the race needs: with the steps unserialized,
 		// scan-B runs to completion during it and scan-A's write still lands
 		// last, so "latest" ends up on scan-A.
-		s.admitUserScan("scan-A", func() {}, func() bool {
+		s.admitScan("scan-A", func() {}, true, func() bool {
 			close(inFirstEnqueue)
 			time.Sleep(100 * time.Millisecond)
 			return true
@@ -304,7 +304,7 @@ func TestServerState_AdmitUserScan_BookkeepingFollowsAcceptanceOrder(t *testing.
 	<-inFirstEnqueue
 	go func() {
 		defer close(secondDone)
-		s.admitUserScan("scan-B", func() {}, func() bool { return true })
+		s.admitScan("scan-B", func() {}, true, func() bool { return true })
 	}()
 
 	<-firstDone
@@ -321,11 +321,11 @@ func TestServerState_AdmitUserScan_BookkeepingFollowsAcceptanceOrder(t *testing.
 func TestServerState_AdmitUserScan_RejectedScanNeverBecomesLatest(t *testing.T) {
 	s := newServerState()
 
-	if !s.admitUserScan("accepted", func() {}, func() bool { return true }) {
-		t.Fatal("admitUserScan returned false for a successful enqueue")
+	if err := s.admitScan("accepted", func() {}, true, func() bool { return true }); err != nil {
+		t.Fatal("admitScan rejected a successful enqueue")
 	}
-	if s.admitUserScan("rejected", func() {}, func() bool { return false }) {
-		t.Fatal("admitUserScan returned true for a failed enqueue")
+	if err := s.admitScan("rejected", func() {}, true, func() bool { return false }); err == nil {
+		t.Fatal("admitScan accepted a failed enqueue")
 	}
 
 	if id := s.getLatestUserScanID(); id != "accepted" {
@@ -353,8 +353,8 @@ func TestServerState_AdmitUserScan_ConcurrentAdmissions(t *testing.T) {
 		wg.Add(1)
 		go func(id string) {
 			defer wg.Done()
-			if !s.admitUserScan(id, func() {}, func() bool { return true }) {
-				t.Errorf("admitUserScan(%q) = false; want true", id)
+			if err := s.admitScan(id, func() {}, true, func() bool { return true }); err != nil {
+				t.Errorf("admitScan(%q) failed", id)
 			}
 		}(ids[i])
 	}

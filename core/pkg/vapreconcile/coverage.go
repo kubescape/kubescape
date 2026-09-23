@@ -344,17 +344,64 @@ func BuildCoverage(
 	return coverage
 }
 
+// ResourceCatalog abstracts the resource lookups and iteration required by coverage checks.
+// It is implemented by cautils.ResourceCatalog and any mock or map catalog.
+type ResourceCatalog interface {
+	Get(id string) (workloadinterface.IMetadata, bool)
+	ForEach(fn func(id string, res workloadinterface.IMetadata) bool)
+}
+
+type mapResourceCatalog map[string]workloadinterface.IMetadata
+
+func (m mapResourceCatalog) Get(id string) (workloadinterface.IMetadata, bool) {
+	if m == nil {
+		return nil, false
+	}
+	res, ok := m[id]
+	return res, ok
+}
+
+func (m mapResourceCatalog) ForEach(fn func(id string, res workloadinterface.IMetadata) bool) {
+	for id, res := range m {
+		if !fn(id, res) {
+			break
+		}
+	}
+}
+
 // CollectFailingResourcesByControl derives, for every control, the identity
 // (ID, namespace, labels) of each resource that failed it -- the input
 // BuildCoverage needs to check per-resource binding scope, since neither
 // ResourcesResult nor the OPA session tracks that on its own.
+// Maintained for backward compatibility.
 func CollectFailingResourcesByControl(
 	resourcesResult map[string]resourcesresults.Result,
 	allResources map[string]workloadinterface.IMetadata,
 ) map[string][]ResourceInfo {
+	return CollectFailingResourcesByControlFromCatalog(resourcesResult, mapResourceCatalog(allResources))
+}
+
+// CollectFailingResourcesByControlFromCatalog derives failing resource identities on demand from catalog.
+func CollectFailingResourcesByControlFromCatalog(
+	resourcesResult map[string]resourcesresults.Result,
+	catalog ResourceCatalog,
+) map[string][]ResourceInfo {
 	byControl := make(map[string][]ResourceInfo)
+	if catalog == nil {
+		return byControl
+	}
 	for resourceID, result := range resourcesResult {
-		resource, ok := allResources[resourceID]
+		hasFailed := false
+		for _, ac := range result.AssociatedControls {
+			if ac.GetStatus(nil).IsFailed() {
+				hasFailed = true
+				break
+			}
+		}
+		if !hasFailed {
+			continue
+		}
+		resource, ok := catalog.Get(resourceID)
 		if !ok || resource == nil {
 			continue
 		}
@@ -380,18 +427,28 @@ func CollectFailingResourcesByControl(
 // from this map was not collected by the scan (out of scope, or the scan
 // predates namespace collection), and BuildCoverage treats that as "cannot
 // determine" rather than "matches everything".
+// Maintained for backward compatibility.
 func CollectNamespaceLabels(allResources map[string]workloadinterface.IMetadata) map[string]map[string]string {
+	return CollectNamespaceLabelsFromCatalog(mapResourceCatalog(allResources))
+}
+
+// CollectNamespaceLabelsFromCatalog indexes scanned Namespace object labels using catalog iteration.
+func CollectNamespaceLabelsFromCatalog(catalog ResourceCatalog) map[string]map[string]string {
 	nsLabels := make(map[string]map[string]string)
-	for _, resource := range allResources {
+	if catalog == nil {
+		return nsLabels
+	}
+	catalog.ForEach(func(_ string, resource workloadinterface.IMetadata) bool {
 		if resource == nil || resource.GetApiVersion() != namespaceAPIVersion || resource.GetKind() != namespaceKind {
-			continue
+			return true
 		}
 		name := resource.GetName()
 		if name == "" {
-			continue
+			return true
 		}
 		nsLabels[name] = resourceLabels(resource)
-	}
+		return true
+	})
 	return nsLabels
 }
 

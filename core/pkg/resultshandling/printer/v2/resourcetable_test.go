@@ -527,7 +527,7 @@ func TestGenerateResourceRows_Loop(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			rows := generateResourceRows(tt.controls, &tt.summaryDetails, tt.resource, true, false, "")
+			rows := generateResourceRows(tt.controls, &tt.summaryDetails, tt.resource, true, false, "", nil)
 			assert.Equal(t, tt.expectedLen, len(rows))
 			//remediation is the last column of the first row
 			if len(rows) != 0 {

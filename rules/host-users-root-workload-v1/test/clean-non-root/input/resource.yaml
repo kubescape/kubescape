@@ -1,0 +1,24 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: queue-worker
+  namespace: default
+  labels:
+    app: queue-worker
+spec:
+  serviceName: queue-worker
+  replicas: 1
+  selector:
+    matchLabels:
+      app: queue-worker
+  template:
+    metadata:
+      labels:
+        app: queue-worker
+    spec:
+      containers:
+      - name: worker
+        image: registry.example.com/queue-worker:3.0.1
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 10001

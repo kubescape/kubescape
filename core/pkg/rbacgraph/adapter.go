@@ -3,6 +3,8 @@ package rbacgraph
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
+	"slices"
 
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	corev1 "k8s.io/api/core/v1"
@@ -15,8 +17,15 @@ import (
 // ignored. An object of one of those five kinds that fails to decode is
 // skipped, with its error appended to errs, rather than aborting the whole
 // conversion over one bad object.
+//
+// Resources are visited in resource-ID order rather than map order: every
+// slice returned here becomes part of an Index, and the order of that data
+// reaches the reported escalation paths. Map iteration order is randomized,
+// so reading it directly would make the same cluster snapshot produce a
+// differently-ordered report on every run.
 func FromResources(resources map[string]workloadinterface.IMetadata) (roles []rbacv1.Role, clusterRoles []rbacv1.ClusterRole, roleBindings []rbacv1.RoleBinding, clusterRoleBindings []rbacv1.ClusterRoleBinding, serviceAccounts []corev1.ServiceAccount, errs []error) {
-	for _, resource := range resources {
+	for _, id := range slices.Sorted(maps.Keys(resources)) {
+		resource := resources[id]
 		if resource == nil {
 			continue
 		}

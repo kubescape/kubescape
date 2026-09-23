@@ -70,6 +70,10 @@ func GetDiffCmd(ks meta.IKubescape) *cobra.Command {
 				return err
 			}
 
+			// The invocation is valid from this point on. Runtime and result-gate
+			// failures should not print command usage.
+			cmd.SilenceUsage = true
+
 			newFailures, err := ks.Diff(&diffInfo)
 			if err != nil {
 				return err

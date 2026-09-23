@@ -86,10 +86,10 @@ func (rh *ResultsHandler) GetReporter() reporter.IReport {
 // WriteJson streams the results in JSON format directly to the given writer
 func (rh *ResultsHandler) WriteJson(w io.Writer) error {
 	finalizedReport := printerv2.FinalizeResults(rh.ScanData)
-	enrichedReport := printerv2.ConvertToPostureReportWithSeverityLabelsAndCoverage(
+	enrichedReport := printerv2.ConvertToPostureReportWithSeverityLabelsAndCoverageFromCatalog(
 		finalizedReport,
 		rh.ScanData.LabelsToCopy,
-		rh.ScanData.AllResources,
+		rh.ScanData.GetCatalog(),
 		&rh.ScanData.ScanCoverage,
 	)
 
@@ -289,8 +289,8 @@ func (rh *ResultsHandler) HandleResults(ctx context.Context, scanInfo *cautils.S
 		// Refine that coarse per-control Bound signal with per-resource
 		// binding-scope matching, before ApplySeverityFilters below narrows
 		// which resources/controls are considered.
-		failing := vapreconcile.CollectFailingResourcesByControl(rh.ScanData.ResourcesResult, rh.ScanData.AllResources)
-		namespaceLabels := vapreconcile.CollectNamespaceLabels(rh.ScanData.AllResources)
+		failing := vapreconcile.CollectFailingResourcesByControlFromCatalog(rh.ScanData.ResourcesResult, rh.ScanData.GetCatalog())
+		namespaceLabels := vapreconcile.CollectNamespaceLabelsFromCatalog(rh.ScanData.GetCatalog())
 		rh.ScanData.VAPCoverage = vapreconcile.BuildCoverage(rh.ScanData.VAPPolicies, rh.ScanData.VAPBindings, failing, namespaceLabels)
 	}
 
@@ -396,7 +396,7 @@ func NewPrinter(ctx context.Context, printFormat string, scanInfo *cautils.ScanI
 		}
 		return printerv2.NewYamlPrinter()
 	case printer.CsvFormat:
-		return printerv2.NewCsvPrinter()
+		return printerv2.NewCsvPrinter(scanInfo.ShowSecrets)
 	case printer.MarkdownFormat:
 		return printerv2.NewMarkdownPrinter()
 	case printer.JunitResultFormat:
@@ -406,11 +406,11 @@ func NewPrinter(ctx context.Context, printFormat string, scanInfo *cautils.ScanI
 	case printer.PdfFormat:
 		return printerv2.NewPdfPrinter()
 	case printer.HtmlFormat:
-		return printerv2.NewHtmlPrinter()
+		return printerv2.NewHtmlPrinter(scanInfo.ShowSecrets)
 	case printer.SARIFFormat:
-		return printerv2.NewSARIFPrinter()
+		return printerv2.NewSARIFPrinter(scanInfo.ShowSecrets)
 	case printer.GitLabSASTFormat:
-		return printerv2.NewGitLabSASTPrinter()
+		return printerv2.NewGitLabSASTPrinter(scanInfo.ShowSecrets)
 	case printer.GitHubActionsFormat:
 		return printerv2.NewGitHubActionsPrinter()
 	case printer.CycloneDXFormat:

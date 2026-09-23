@@ -1,6 +1,9 @@
 package anonymizer
 
 import (
+	"encoding/json"
+	"errors"
+	"fmt"
 	"maps"
 	"strings"
 
@@ -9,62 +12,297 @@ import (
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/attacktrack/v1alpha1"
+	helpersv1 "github.com/kubescape/opa-utils/reporthandling/helpers/v1"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/prioritization"
+	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 )
 
 // transformSession applies the supplied Transformer to sensitive resource
 // identifiers and metadata while preserving referential integrity across
-// the full OPA session.
+// the full OPA session. Transformation is transactional: callers either get
+// a completely transformed session or the original session remains untouched.
 func transformSession(session *cautils.OPASessionObj, _ *Mapping, transformer Transformer) error {
 	if session == nil {
 		return nil
 	}
+	if transformer == nil {
+		return errors.New("transformer is required")
+	}
+
+	transaction, err := cloneSessionForTransform(session)
+	if err != nil {
+		return err
+	}
+	if err := transformSessionInPlace(transaction.working, transformer); err != nil {
+		return err
+	}
+	return commitTransformedSession(session, transaction)
+}
+
+type sessionTransform struct {
+	working         *cautils.OPASessionObj
+	originalByClone map[workloadinterface.IMetadata]workloadinterface.IMetadata
+}
+
+// cloneSessionForTransform copies every field transformSessionInPlace may
+// mutate. It intentionally does not copy OPASessionObj itself because it owns
+// synchronization primitives. Read-only configuration is assigned directly.
+func cloneSessionForTransform(session *cautils.OPASessionObj) (*sessionTransform, error) {
+	working := &cautils.OPASessionObj{
+		LabelsToCopy:          append([]string(nil), session.LabelsToCopy...),
+		EnvVarSecretRefs:      session.EnvVarSecretRefs,
+		SourcePathsAnonymized: session.SourcePathsAnonymized,
+	}
+
+	resourcesResult, err := cloneJSON(session.ResourcesResult)
+	if err != nil {
+		return nil, fmt.Errorf("clone resource results: %w", err)
+	}
+	working.ResourcesResult = resourcesResult
+
+	resourceSource, err := cloneJSON(session.ResourceSource)
+	if err != nil {
+		return nil, fmt.Errorf("clone resource sources: %w", err)
+	}
+	working.ResourceSource = resourceSource
+
+	resourcesPrioritized, err := cloneJSON(session.ResourcesPrioritized)
+	if err != nil {
+		return nil, fmt.Errorf("clone prioritized resources: %w", err)
+	}
+	working.ResourcesPrioritized = resourcesPrioritized
+
+	// Attack-track values are not mutated by anonymization. Copy the map and
+	// each slice so key remapping cannot affect the caller before commit.
+	working.ResourceAttackTracks = make(map[string][]v1alpha1.IAttackTrack, len(session.ResourceAttackTracks))
+	for resourceID, tracks := range session.ResourceAttackTracks {
+		working.ResourceAttackTracks[resourceID] = append([]v1alpha1.IAttackTrack(nil), tracks...)
+	}
+
+	metadata, err := cloneJSON(session.Metadata)
+	if err != nil {
+		return nil, fmt.Errorf("clone report metadata: %w", err)
+	}
+	working.Metadata = metadata
+
+	report, err := clonePostureReport(session.Report)
+	if err != nil {
+		return nil, fmt.Errorf("clone posture report: %w", err)
+	}
+	working.Report = report
+
+	namespaceSummaries, err := cloneJSON(session.NamespaceSummaries)
+	if err != nil {
+		return nil, fmt.Errorf("clone namespace summaries: %w", err)
+	}
+	working.NamespaceSummaries = namespaceSummaries
+
+	resources, originalByClone, err := cloneCatalog(session.GetCatalog())
+	if err != nil {
+		return nil, err
+	}
+	working.SetCatalog(cautils.NewMapResourceCatalog(resources))
+	return &sessionTransform{working: working, originalByClone: originalByClone}, nil
+}
+
+func cloneJSON[T any](value T) (T, error) {
+	var cloned T
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return cloned, err
+	}
+	if err := json.Unmarshal(raw, &cloned); err != nil {
+		return cloned, err
+	}
+	return cloned, nil
+}
+
+func clonePostureReport(report *reporthandlingv2.PostureReport) (*reporthandlingv2.PostureReport, error) {
+	cloned, err := cloneJSON(report)
+	if err != nil || report == nil {
+		return cloned, err
+	}
+	cloneControlResourceIDs(report.SummaryDetails.Controls, cloned.SummaryDetails.Controls)
+	for frameworkIndex, originalFramework := range report.SummaryDetails.Frameworks {
+		if frameworkIndex >= len(cloned.SummaryDetails.Frameworks) {
+			continue
+		}
+		cloneControlResourceIDs(
+			originalFramework.Controls,
+			cloned.SummaryDetails.Frameworks[frameworkIndex].Controls,
+		)
+	}
+	return cloned, nil
+}
+
+// cloneControlResourceIDs restores AllLists after JSON cloning. AllLists has
+// an unexported backing map, so encoding/json cannot retain its entries.
+func cloneControlResourceIDs(original, cloned reportsummary.ControlSummaries) {
+	for controlID, originalControl := range original {
+		clonedControl, ok := cloned[controlID]
+		if !ok {
+			continue
+		}
+		resourceIDs := helpersv1.AllLists{}
+		resourceIDs.Initialize(len(originalControl.ResourceIDs.All()))
+		for resourceID, status := range originalControl.ResourceIDs.All() {
+			resourceIDs.Append(status, resourceID)
+		}
+		clonedControl.ResourceIDs = resourceIDs
+		cloned[controlID] = clonedControl
+	}
+}
+
+func cloneCatalog(catalog cautils.ResourceCatalog) (map[string]workloadinterface.IMetadata, map[workloadinterface.IMetadata]workloadinterface.IMetadata, error) {
+	resources := make(map[string]workloadinterface.IMetadata)
+	originalByClone := make(map[workloadinterface.IMetadata]workloadinterface.IMetadata)
+	if catalog == nil {
+		return resources, originalByClone, nil
+	}
+
+	var cloneErr error
+	catalog.ForEach(func(resourceID string, resource workloadinterface.IMetadata) bool {
+		if resource == nil {
+			return true
+		}
+		object := resource.GetObject()
+		if object == nil {
+			cloneErr = fmt.Errorf("clone resource %q: object is unavailable", resourceID)
+			return false
+		}
+		clonedObject, err := cloneResourceObject(object)
+		if err != nil {
+			cloneErr = fmt.Errorf("clone resource %q: %w", resourceID, err)
+			return false
+		}
+		cloned := workloadinterface.NewWorkloadObj(clonedObject)
+		resources[resourceID] = cloned
+		originalByClone[cloned] = resource
+		return true
+	})
+	if cloneErr != nil {
+		return nil, nil, cloneErr
+	}
+	return resources, originalByClone, nil
+}
+
+// cloneResourceObject uses JSON as a representation-safe deep copy. Unlike
+// runtime.DeepCopyJSON, it accepts typed Kubernetes values such as
+// []corev1.Container that the scan pipeline keeps inside otherwise
+// unstructured resource maps.
+func cloneResourceObject(object map[string]any) (map[string]any, error) {
+	cloned, err := cloneJSON(object)
+	if err != nil {
+		return nil, fmt.Errorf("serialize resource object: %w", err)
+	}
+	return cloned, nil
+}
+
+func commitTransformedSession(session *cautils.OPASessionObj, transaction *sessionTransform) error {
+	working := transaction.working
+	type committedResource struct {
+		original workloadinterface.IMetadata
+		object   map[string]any
+	}
+	updates := make([]committedResource, 0, len(transaction.originalByClone))
+	var commitErr error
+	working.GetCatalog().ForEach(func(_ string, transformed workloadinterface.IMetadata) bool {
+		original, ok := transaction.originalByClone[transformed]
+		if !ok {
+			return true
+		}
+		object, err := cloneResourceObject(transformed.GetObject())
+		if err != nil {
+			commitErr = fmt.Errorf("prepare transformed resource for commit: %w", err)
+			return false
+		}
+		updates = append(updates, committedResource{original: original, object: object})
+		return true
+	})
+	if commitErr != nil {
+		return commitErr
+	}
+
+	committedResources := make(map[string]workloadinterface.IMetadata, len(transaction.originalByClone))
+	for _, update := range updates {
+		update.original.SetObject(update.object)
+		committedResources[update.original.GetID()] = update.original
+	}
+	session.SetCatalog(cautils.NewMapResourceCatalog(committedResources))
+	session.ResourcesResult = working.ResourcesResult
+	session.ResourceSource = working.ResourceSource
+	session.SourcePathsAnonymized = working.SourcePathsAnonymized
+	session.ResourcesPrioritized = working.ResourcesPrioritized
+	session.ResourceAttackTracks = working.ResourceAttackTracks
+	session.Metadata = working.Metadata
+	session.Report = working.Report
+	session.NamespaceSummaries = working.NamespaceSummaries
+	return nil
+}
+
+func transformSessionInPlace(session *cautils.OPASessionObj, transformer Transformer) error {
 
 	idMapping := make(map[string]string)
 
-	newAllResources := make(map[string]workloadinterface.IMetadata, len(session.AllResources))
-	for oldID, resource := range session.AllResources {
-
-		if err := transformResourceMetadata(resource, transformer); err != nil {
-			return err
-		}
-
-		// sourcePath may expose manifest filenames and line references
-		// (for example test-anonymize.yaml:1), so transform it alongside
-		// other resource-local metadata.
-		if err := transformResourceObjectSourcePath(resource, transformer); err != nil {
-			return err
-		}
-
-		// Annotations may contain infrastructure identifiers, secret paths, or
-		// other sensitive metadata at both top-level and nested workload templates.
-		if err := transformResourceAnnotations(resource, transformer); err != nil {
-			return err
-		}
-
-		// Container-related metadata is transformed separately to preserve the
-		// existing typed/unstructured traversal behavior while supporting
-		// multiple transformation strategies. session.EnvVarSecretRefs[oldID]
-		// is nil for a resource whose removeData pass found no reference-backed
-		// env vars; transformTypedEnv/transformUnstructuredEnv treat that the
-		// same as "no additional names to anonymize", which is correct.
-		if err := transformContainerMetadata(resource, session.EnvVarSecretRefs[oldID], transformer); err != nil {
-			return err
-		}
-
-		if len(session.LabelsToCopy) > 0 {
-			if err := transformResourceLabels(resource, session.LabelsToCopy, transformer); err != nil {
-				return err
+	newCatalog := cautils.NewMapResourceCatalog()
+	catalog := session.GetCatalog()
+	var transformErr error
+	if catalog != nil {
+		catalog.ForEach(func(oldID string, resource workloadinterface.IMetadata) bool {
+			if resource == nil {
+				return true
 			}
-		}
 
-		newID := resource.GetID()
-		idMapping[oldID] = newID
-		newAllResources[newID] = resource
+			if err := transformResourceMetadata(resource, transformer); err != nil {
+				transformErr = err
+				return false
+			}
+
+			// sourcePath may expose manifest filenames and line references
+			// (for example test-anonymize.yaml:1), so transform it alongside
+			// other resource-local metadata.
+			if err := transformResourceObjectSourcePath(resource, transformer); err != nil {
+				transformErr = err
+				return false
+			}
+
+			// Annotations may contain infrastructure identifiers, secret paths, or
+			// other sensitive metadata at both top-level and nested workload templates.
+			if err := transformResourceAnnotations(resource, transformer); err != nil {
+				transformErr = err
+				return false
+			}
+
+			// Container-related metadata is transformed separately to preserve the
+			// existing typed/unstructured traversal behavior while supporting
+			// multiple transformation strategies. session.EnvVarSecretRefs[oldID]
+			// is nil for a resource whose removeData pass found no reference-backed
+			// env vars; transformTypedEnv/transformUnstructuredEnv treat that the
+			// same as "no additional names to anonymize", which is correct.
+			if err := transformContainerMetadata(resource, session.EnvVarSecretRefs[oldID], transformer); err != nil {
+				transformErr = err
+				return false
+			}
+
+			if len(session.LabelsToCopy) > 0 {
+				if err := transformResourceLabels(resource, session.LabelsToCopy, transformer); err != nil {
+					transformErr = err
+					return false
+				}
+			}
+
+			newID := resource.GetID()
+			idMapping[oldID] = newID
+			newCatalog.Add(resource)
+			return true
+		})
 	}
-	session.AllResources = newAllResources
+	if transformErr != nil {
+		return transformErr
+	}
+	session.SetCatalog(newCatalog)
 
 	newResourcesResult := make(map[string]resourcesresults.Result, len(session.ResourcesResult))
 	for oldID, result := range session.ResourcesResult {
@@ -133,6 +371,13 @@ func transformSession(session *cautils.OPASessionObj, _ *Mapping, transformer Tr
 	}
 	session.ResourceSource = newResourceSource
 
+	// Every source path is now a pseudonym, so nothing downstream can open the
+	// manifest it came from. The evidence column reads these paths to resolve a
+	// finding's line, and recording the fact here - rather than re-deriving it
+	// from --hide or --encrypt at each reader - keeps it true by construction:
+	// whatever anonymizes the session says so.
+	session.SourcePathsAnonymized = true
+
 	newResourcesPrioritized := make(map[string]prioritization.PrioritizedResource, len(session.ResourcesPrioritized))
 	for oldID, prioritized := range session.ResourcesPrioritized {
 		newID, err := resolveMappedID(transformer, idMapping, oldID, "ref")
@@ -194,37 +439,13 @@ func transformSession(session *cautils.OPASessionObj, _ *Mapping, transformer Tr
 			return err
 		}
 
-		for controlID, control := range session.Report.SummaryDetails.Controls {
-			remappedResourceIDs := control.ResourceIDs
-
-			originalResourceIDs := make(
-				map[string]apis.ScanningStatus,
-				len(control.ResourceIDs.All()),
-			)
-
-			maps.Copy(originalResourceIDs, control.ResourceIDs.All())
-
-			remappedResourceIDs.Clear()
-
-			for oldID, status := range originalResourceIDs {
-				newID, err := resolveMappedID(
-					transformer,
-					idMapping,
-					oldID,
-					"ref",
-				)
-				if err != nil {
-					return err
-				}
-
-				remappedResourceIDs.Append(
-					status,
-					newID,
-				)
+		if err := remapControlResourceIDs(session.Report.SummaryDetails.Controls, transformer, idMapping); err != nil {
+			return err
+		}
+		for frameworkIndex := range session.Report.SummaryDetails.Frameworks {
+			if err := remapControlResourceIDs(session.Report.SummaryDetails.Frameworks[frameworkIndex].Controls, transformer, idMapping); err != nil {
+				return err
 			}
-
-			control.ResourceIDs = remappedResourceIDs
-			session.Report.SummaryDetails.Controls[controlID] = control
 		}
 	}
 
@@ -232,6 +453,27 @@ func transformSession(session *cautils.OPASessionObj, _ *Mapping, transformer Tr
 		return err
 	}
 
+	return nil
+}
+
+func remapControlResourceIDs(controls reportsummary.ControlSummaries, transformer Transformer, idMapping map[string]string) error {
+	for controlID, control := range controls {
+		remappedResourceIDs := control.ResourceIDs
+		originalResourceIDs := make(map[string]apis.ScanningStatus, len(control.ResourceIDs.All()))
+		maps.Copy(originalResourceIDs, control.ResourceIDs.All())
+		remappedResourceIDs.Clear()
+
+		for oldID, status := range originalResourceIDs {
+			newID, err := resolveMappedID(transformer, idMapping, oldID, "ref")
+			if err != nil {
+				return err
+			}
+			remappedResourceIDs.Append(status, newID)
+		}
+
+		control.ResourceIDs = remappedResourceIDs
+		controls[controlID] = control
+	}
 	return nil
 }
 

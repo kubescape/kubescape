@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	v1 "github.com/kubescape/backend/pkg/client/v1"
@@ -39,7 +41,21 @@ const (
 var serviceDiscoveryTimeout = 10 * time.Second
 
 func main() {
-	ctx := context.Background()
+	if err := runWithSignals(run); err != nil {
+		logger.L().Error("Kubescape server stopped", helpers.Error(err))
+		os.Exit(1)
+	}
+}
+
+// Keep signal registration and deferred application cleanup inside the runner,
+// so even an error exit from main happens after cleanup has completed.
+func runWithSignals(serve func(context.Context) error) error {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	return serve(ctx)
+}
+
+func run(ctx context.Context) error {
 	versioncheck.BuildNumber = version
 
 	logger.L().Info("Starting Kubescape server",
@@ -58,12 +74,12 @@ func main() {
 
 	// to enable otel, set OTEL_COLLECTOR_SVC=otel-collector:4317
 	if otelHost, present := os.LookupEnv("OTEL_COLLECTOR_SVC"); present {
-		ctx = logger.InitOtel("kubescape",
+		logger.InitOtel("kubescape",
 			version,
 			config.GetAccount(),
 			clusterName,
 			url.URL{Host: otelHost})
-		defer logger.ShutdownOtel(ctx)
+		defer flushOtel(ctx, logger.ShutdownOtel)
 	}
 
 	logger.L().Debug("setting cluster context name", helpers.String("context", os.Getenv("KS_CONTEXT")))
@@ -75,7 +91,13 @@ func main() {
 	initializeStorage(clusterName, cfg)
 	// traces will be created by otelmux.Middleware in SetupHTTPListener()
 
-	logger.L().Ctx(ctx).Fatal(listener.SetupHTTPListener().Error())
+	return listener.SetupHTTPListener(ctx)
+}
+
+func flushOtel(ctx context.Context, shutdown func(context.Context)) {
+	flushCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	shutdown(flushCtx)
 }
 
 func initializeStorage(clusterName string, cfg config.Config) {

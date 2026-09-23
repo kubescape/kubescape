@@ -63,6 +63,10 @@ func GetPatchCmd(ks meta.IKubescape) *cobra.Command {
 			// Set the UseDefaultMatchers field in scanInfo
 			scanInfo.UseDefaultMatchers = useDefaultMatchers
 
+			// The invocation is valid from this point on. Runtime and result-gate
+			// failures should not print command usage.
+			cmd.SilenceUsage = true
+
 			exceedsSeverityThreshold, err := ks.Patch(&patchInfo, &scanInfo)
 			if err != nil {
 				return err
@@ -94,7 +98,7 @@ func GetPatchCmd(ks meta.IKubescape) *cobra.Command {
 	patchCmd.PersistentFlags().StringVarP(&scanInfo.Output, "output", "o", "", "Output file. Print output to file and not stdout")
 	patchCmd.PersistentFlags().BoolVarP(&scanInfo.VerboseMode, "verbose", "v", false, "Display full report. Default to false")
 
-	patchCmd.PersistentFlags().StringVarP(&scanInfo.FailThresholdSeverity, "severity-threshold", "s", "", "Severity threshold is the severity of a vulnerability at which the command fails and returns exit code 1")
+	patchCmd.PersistentFlags().StringVarP(&scanInfo.FailThresholdSeverity, "severity-threshold", "s", "", "Severity threshold is the severity of a vulnerability at which the command fails and returns exit code 1. Vulnerabilities whose severity cannot be determined are counted as exceeding any threshold")
 	patchCmd.PersistentFlags().BoolVarP(&useDefaultMatchers, "use-default-matchers", "", true, "Use default matchers (true) or CPE matchers (false) for image scanning")
 	patchCmd.PersistentFlags().StringVar(&scanInfo.ListingURL, "grype-db-url", "", "Grype vulnerability database URL")
 

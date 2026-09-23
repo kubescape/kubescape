@@ -1,13 +1,19 @@
 package cel
 
 import (
+	"crypto/sha256"
+	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
+	"github.com/google/cel-go/cel"
+	celast "github.com/google/cel-go/common/ast"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"sigs.k8s.io/yaml"
@@ -185,4 +191,337 @@ func TestBundleParamKindsAreResolvable(t *testing.T) {
 		assert.Containsf(t, refused, id,
 			"knownUnresolvableParamKinds lists control %s but its paramKind now resolves (or it left the bundle); remove the entry", id)
 	}
+}
+
+// makefilePath is the repo Makefile, relative to this package directory (the
+// tests run from there, same as vapdataDir).
+const makefilePath = "../../../../Makefile"
+
+// celVapDigestsVar is the Makefile variable holding one name=sha256 pair per
+// vendored asset.
+const celVapDigestsVar = "CEL_VAP_DIGESTS"
+
+var sha256Hex = regexp.MustCompile(`^[0-9a-f]{64}$`)
+
+// pinnedDigests parses the CEL_VAP_DIGESTS block out of the Makefile. The block
+// is a backslash-continued list, so parsing follows the continuations rather
+// than assuming a fixed number of lines.
+func pinnedDigests(t *testing.T) map[string]string {
+	t.Helper()
+
+	data, err := os.ReadFile(makefilePath)
+	require.NoError(t, err, "the Makefile must be readable from the package directory")
+
+	lines := strings.Split(string(data), "\n")
+	start := slices.IndexFunc(lines, func(l string) bool {
+		return strings.HasPrefix(l, celVapDigestsVar)
+	})
+	require.GreaterOrEqual(t, start, 0, "the Makefile must define %s", celVapDigestsVar)
+
+	digests := map[string]string{}
+	for i := start; i < len(lines); i++ {
+		line := lines[i]
+		// The declaration line carries the assignment; drop it so only the
+		// name=digest pairs are parsed.
+		if i == start {
+			_, line, _ = strings.Cut(line, ":=")
+		}
+		line = strings.TrimSpace(line)
+		more := strings.HasSuffix(line, `\`)
+		line = strings.TrimSpace(strings.TrimSuffix(line, `\`))
+
+		if name, digest, ok := strings.Cut(line, "="); ok {
+			require.Truef(t, sha256Hex.MatchString(digest),
+				"%s pins %s to %q, which is not a SHA256 digest", celVapDigestsVar, name, digest)
+			// Rejected rather than overwritten: keeping the last pin would leave
+			// the earlier one unchecked here while sync-vap, which walks every
+			// pair, still fails on it. A duplicate is most likely two version
+			// bumps merged together, which is one of the cases this guard exists
+			// to catch.
+			require.NotContainsf(t, digests, name, "%s pins %s more than once", celVapDigestsVar, name)
+			digests[name] = digest
+		}
+		if !more {
+			break
+		}
+	}
+
+	require.NotEmpty(t, digests, "%s must pin at least one file", celVapDigestsVar)
+	return digests
+}
+
+// TestVapdataMatchesPinnedDigests checks the bundle baked into the binary is the
+// release the Makefile pins.
+//
+// sync-vap verifies what it DOWNLOADS, which leaves the vendored copy itself
+// unguarded: a hand-edited policy, a bad merge, or a CEL_LIBRARY_VERSION bump
+// whose digests were pasted without running `make sync-vap` all produce a tree
+// where the pin and the embedded bundle disagree, and every other test still
+// passes. Since the engine enforces these policies as a security scanner, an
+// unnoticed edit to them is exactly the thing the digests exist to prevent.
+//
+// The hashes come from the embedded FS rather than from disk because that is
+// what actually ships.
+func TestVapdataMatchesPinnedDigests(t *testing.T) {
+	pinned := pinnedDigests(t)
+
+	entries, err := vapdataFS.ReadDir(vapdataDir)
+	require.NoError(t, err, "the vendored bundle must be embedded")
+
+	// README.md is vendored alongside the assets and is ours, not the release's,
+	// so only the YAML the loader reads is pinned.
+	embedded := map[string]string{}
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".yaml") {
+			continue
+		}
+		content, err := vapdataFS.ReadFile(path.Join(vapdataDir, entry.Name()))
+		require.NoError(t, err)
+		embedded[entry.Name()] = fmt.Sprintf("%x", sha256.Sum256(content))
+	}
+
+	require.Equal(t, sortedNames(pinned), sortedNames(embedded),
+		"%s and the vendored vapdata/*.yaml must cover the same files: a new release asset needs a digest, "+
+			"and a dropped one needs its digest removed", celVapDigestsVar)
+
+	for name, want := range pinned {
+		assert.Equalf(t, want, embedded[name],
+			"%s/%s does not match the SHA256 pinned in the Makefile. Either the vendored copy was edited by hand, "+
+				"or %s was bumped without running `make sync-vap`", vapdataDir, name, celVapDigestsVar)
+	}
+}
+
+// sortedNames returns a map's keys in a stable order, so a set mismatch
+// reports as a readable diff of file names.
+func sortedNames(m map[string]string) []string {
+	names := make([]string, 0, len(m))
+	for name := range m {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+	return names
+}
+
+// TestBundleDoesNotReadNamespaceObject pins the one gap in docs/cel-engine.md
+// that is not a safe skip.
+//
+// The scan binds namespaceObject to null whenever it did not collect that
+// Namespace, and collection follows what the framework's controls match, not
+// what the loaded policies need. Under failurePolicy Fail, the bundle default,
+// an unguarded read of that null is reported as a violation, so the policy
+// fails workloads a cluster would admit.
+//
+// It is latent only because no bundle policy reads the variable, which is a
+// property of the vendored bundle rather than of the engine: a pin bump can end
+// it silently. This test makes it end as a failed build instead.
+func TestBundleDoesNotReadNamespaceObject(t *testing.T) {
+	catalog, err := getVAPCatalog()
+	require.NoError(t, err)
+
+	vaps := runtimeReachableVAPs(catalog)
+	require.NotEmpty(t, vaps, "empty bundle; the guard would pass vacuously")
+
+	e, err := NewEvaluator()
+	require.NoError(t, err)
+
+	for _, vap := range vaps {
+		for _, expr := range bundleExpressions(vap) {
+			if !readsNamespaceObject(e.env, expr.source) {
+				continue
+			}
+			assert.Failf(t, "a bundle policy now reads namespaceObject",
+				"%s (%s) reads it in %s.\n\n"+
+					"The gap in docs/cel-engine.md just went live. The scan binds namespaceObject to null "+
+					"when it did not collect that Namespace, and under failurePolicy Fail an unguarded read "+
+					"of that null is reported as a violation, so this policy can now fail workloads a "+
+					"cluster would admit.\n\n"+
+					"Do not silence this by deleting the test. Either guarantee Namespace collection when a "+
+					"loaded policy needs one, or classify an uncollected Namespace so it skips instead of "+
+					"failing.",
+				vap.PolicyName, vap.ControlID, expr.where)
+		}
+	}
+}
+
+// runtimeReachableVAPs returns every policy loadVAP can reach, deduplicated by
+// policy.
+//
+// byName and byControl are poisoned independently (see catalog.go): a name
+// claimed by two policies is dropped from byName, while each of their distinct
+// control IDs stays resolvable through byControl, which is the index loadVAP
+// uses. Walking byName alone would let exactly those policies read
+// namespaceObject unguarded.
+func runtimeReachableVAPs(catalog *vapCatalog) []*VAP {
+	seen := make(map[*VAP]struct{}, len(catalog.byName)+len(catalog.byControl))
+	out := make([]*VAP, 0, len(seen))
+	for _, index := range []map[string]*VAP{catalog.byName, catalog.byControl} {
+		for _, vap := range index {
+			if _, done := seen[vap]; done {
+				continue
+			}
+			seen[vap] = struct{}{}
+			out = append(out, vap)
+		}
+	}
+	return out
+}
+
+const (
+	namespaceObjectIdent = "namespaceObject"
+	// CEL's absolute name for the global, which is how a real global read
+	// survives inside a comprehension that shadowed the plain name.
+	namespaceObjectAbsolute = "." + namespaceObjectIdent
+)
+
+// readsNamespaceObject reports whether expr reads the global namespaceObject.
+//
+// Scope matters in both directions, so this cannot be a string match. A
+// comprehension may bind a variable of the same name, and reading that local
+// never touches the activation. Where one does, a genuine global read is kept
+// as the absolute name instead.
+//
+// An expression that does not compile reads nothing: such a policy is already
+// skipped at runtime and cannot produce the finding this guards against.
+func readsNamespaceObject(env *cel.Env, expr string) bool {
+	compiled, issues := env.Compile(expr)
+	if issues != nil && issues.Err() != nil {
+		return false
+	}
+	root := celast.NavigateAST(compiled.NativeRep())
+	for _, node := range celast.MatchDescendants(root, celast.KindMatcher(celast.IdentKind)) {
+		switch node.AsIdent() {
+		case namespaceObjectAbsolute:
+			return true
+		case namespaceObjectIdent:
+			if !shadowedByComprehension(node, namespaceObjectIdent) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// shadowedByComprehension reports whether name is bound by an enclosing
+// comprehension at this node rather than by the activation.
+//
+// A comprehension's iteration range and its accumulator initializer are both
+// evaluated in the OUTER scope, so an ident reached by ascending through either
+// is not shadowed by that comprehension.
+func shadowedByComprehension(node celast.NavigableExpr, name string) bool {
+	child := node
+	for {
+		parent, ok := child.Parent()
+		if !ok {
+			return false
+		}
+		if parent.Kind() == celast.ComprehensionKind {
+			c := parent.AsComprehension()
+			binds := c.IterVar() == name || (c.HasIterVar2() && c.IterVar2() == name) || c.AccuVar() == name
+			outerScope := child.ID() == c.IterRange().ID() || child.ID() == c.AccuInit().ID()
+			if binds && !outerScope {
+				return true
+			}
+		}
+		child = parent
+	}
+}
+
+// bundleExpression is one CEL expression from a policy, with where it came from
+// so a failure names the field rather than just the policy.
+type bundleExpression struct {
+	source string
+	where  string
+}
+
+// bundleExpressions returns every CEL expression a policy evaluates. All of them
+// compile against the same env, so any of them can read namespaceObject.
+func bundleExpressions(vap *VAP) []bundleExpression {
+	var out []bundleExpression
+	for _, v := range vap.Variables {
+		out = append(out, bundleExpression{v.Expression, "variable " + v.Name})
+	}
+	for i, v := range vap.Validations {
+		out = append(out, bundleExpression{v.Expression, "validation " + strconv.Itoa(i)})
+		if v.MessageExpression != "" {
+			out = append(out, bundleExpression{v.MessageExpression, "messageExpression " + strconv.Itoa(i)})
+		}
+	}
+	for _, c := range vap.matchConditions {
+		out = append(out, bundleExpression{c.Expression, "matchCondition " + c.Name})
+	}
+	return out
+}
+
+// TestReadsNamespaceObjectScoping covers the two ways a plain name comparison
+// gets the answer wrong: a comprehension local that never touches the
+// activation, and a real global read that shadowing rewrites to its absolute
+// name.
+func TestReadsNamespaceObjectScoping(t *testing.T) {
+	e, err := NewEvaluator()
+	require.NoError(t, err)
+
+	for _, tc := range []struct {
+		name  string
+		expr  string
+		reads bool
+	}{
+		{"plain global read", "namespaceObject.metadata.name == 'x'", true},
+		{"shadowed global kept as an absolute name", "[true].all(namespaceObject, .namespaceObject.metadata.name == 'allowed')", true},
+		{"comprehension local of the same name", "[true].all(namespaceObject, namespaceObject)", false},
+		{"an iteration range is the outer scope", "namespaceObject.metadata.labels.all(namespaceObject, namespaceObject != '')", true},
+		{"a mention inside a string", "'see the namespaceObject docs'", false},
+		{"unrelated expression", "has(object.spec)", false},
+		{"does not compile", "namespaceObject.(((", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.reads, readsNamespaceObject(e.env, tc.expr))
+		})
+	}
+}
+
+// TestBundleGuardCoversDuplicateNamePolicies covers the catalog shape where the
+// two indexes disagree. A name claimed twice is poisoned out of byName, but each
+// distinct control ID stays resolvable through byControl, which is what loadVAP
+// uses, so a guard walking byName alone would see nothing at all here.
+func TestBundleGuardCoversDuplicateNamePolicies(t *testing.T) {
+	catalog, err := parseVAPBundle([]byte(`apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: policy-a
+  labels:
+    controlId: C-0001
+spec:
+  validations:
+    - expression: "namespaceObject.metadata.name == 'allowed'"
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: policy-a
+  labels:
+    controlId: C-0002
+spec:
+  validations:
+    - expression: "true"
+`))
+	require.NoError(t, err)
+	require.Empty(t, catalog.byName, "a name claimed twice is poisoned out of byName")
+	require.Len(t, catalog.byControl, 2, "each control ID stays resolvable")
+
+	vaps := runtimeReachableVAPs(catalog)
+	require.Len(t, vaps, 2, "both policies are still reachable through loadVAP")
+
+	e, err := NewEvaluator()
+	require.NoError(t, err)
+
+	var found []string
+	for _, vap := range vaps {
+		for _, expr := range bundleExpressions(vap) {
+			if readsNamespaceObject(e.env, expr.source) {
+				found = append(found, vap.ControlID)
+			}
+		}
+	}
+	assert.Equal(t, []string{"C-0001"}, found,
+		"a read reachable only through byControl must still be caught")
 }

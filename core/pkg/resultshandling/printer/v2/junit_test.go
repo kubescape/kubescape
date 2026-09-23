@@ -16,11 +16,16 @@ import (
 	"github.com/anchore/grype/grype/match"
 	grypepkg "github.com/anchore/grype/grype/pkg"
 	"github.com/anchore/grype/grype/vulnerability"
+	"github.com/armosec/armoapi-go/armotypes"
+	"github.com/armosec/armoapi-go/identifiers"
+	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
+	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	helpersv1 "github.com/kubescape/opa-utils/reporthandling/helpers/v1"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
+	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -123,6 +128,90 @@ func TestTestSuites(t *testing.T) {
 	assert.Equal(t, listTestsSuite(results), junitTestSuites.Suites)
 	assert.Equal(t, results.Report.SummaryDetails.NumberOfControls().All(), junitTestSuites.Tests)
 	assert.Equal(t, "Kubescape Scanning", junitTestSuites.Name)
+}
+
+func TestJunitExceptionActionsPreserveFailureSemantics(t *testing.T) {
+	type finding struct {
+		resourceID  string
+		controlID   string
+		controlName string
+		action      *armotypes.PostureExceptionPolicyActions
+	}
+
+	disable := armotypes.Disable
+	alertOnly := armotypes.AlertOnly
+	findings := []finding{
+		{resourceID: "disabled", controlID: "C-DISABLE", controlName: "Disabled finding", action: &disable},
+		{resourceID: "acknowledged", controlID: "C-ALERT", controlName: "Acknowledged finding", action: &alertOnly},
+		{resourceID: "unrelated", controlID: "C-OTHER", controlName: "Unrelated finding"},
+	}
+
+	session := &cautils.OPASessionObj{
+		Report: &reporthandlingv2.PostureReport{
+			SummaryDetails: reportsummary.SummaryDetails{Controls: reportsummary.ControlSummaries{}},
+		},
+		AllResources: map[string]workloadinterface.IMetadata{},
+	}
+
+	for _, finding := range findings {
+		workload := exceptionsWorkload(t, "Pod", "default", finding.resourceID)
+		result := resourcesresults.Result{
+			ResourceID: finding.resourceID,
+			AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+				{
+					ControlID: finding.controlID,
+					Name:      finding.controlName,
+					Status:    apis.StatusInfo{InnerStatus: apis.StatusFailed},
+					ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{
+						{Name: "failed-rule", Status: apis.StatusFailed},
+					},
+				},
+			},
+		}
+
+		if finding.action != nil {
+			policy := armotypes.PostureExceptionPolicy{
+				PortalBase: armotypes.PortalBase{Name: "exception-" + finding.resourceID},
+				Actions:    []armotypes.PostureExceptionPolicyActions{*finding.action},
+				Resources: []identifiers.PortalDesignator{
+					{
+						DesignatorType: identifiers.DesignatorAttributes,
+						Attributes: map[string]string{
+							identifiers.AttributeKind:      "Pod",
+							identifiers.AttributeNamespace: "default",
+							identifiers.AttributeName:      finding.resourceID,
+						},
+					},
+				},
+				PosturePolicies: []armotypes.PosturePolicy{{ControlID: finding.controlID}},
+			}
+			result.SetExceptions(workload, []armotypes.PostureExceptionPolicy{policy}, "", map[string]reporthandling.Control{finding.controlID: {}})
+		}
+
+		session.AllResources[finding.resourceID] = workload
+		session.Report.Results = append(session.Report.Results, result)
+		session.Report.SummaryDetails.Controls[finding.controlID] = reportsummary.ControlSummary{
+			ControlID: finding.controlID,
+			Name:      finding.controlName,
+		}
+	}
+
+	session.Report.InitializeSummary()
+	suites := testsSuites(session)
+	require.Len(t, suites.Suites, 1)
+	assert.Equal(t, 3, suites.Suites[0].Tests)
+	assert.Equal(t, 2, suites.Suites[0].Failures)
+
+	testCases := map[string]JUnitTestCase{}
+	for _, testCase := range suites.Suites[0].TestCases {
+		testCases[testCase.Name] = testCase
+	}
+	require.Contains(t, testCases, "Disabled finding")
+	require.Contains(t, testCases, "Acknowledged finding")
+	require.Contains(t, testCases, "Unrelated finding")
+	assert.Nil(t, testCases["Disabled finding"].Failure, "disable must remove the JUnit failure")
+	assert.NotNil(t, testCases["Acknowledged finding"].Failure, "alertOnly must remain a JUnit failure")
+	assert.NotNil(t, testCases["Unrelated finding"].Failure, "unrelated findings must remain JUnit failures")
 }
 
 func TestJunitActionPrintCombinedScanIncludesPostureAndImages(t *testing.T) {
@@ -480,6 +569,18 @@ func TestTestCases_SkipMessage(t *testing.T) {
 			wantMsg:   "notEvaluated: " + string(apis.SubStatusNotEvaluatedInfo),
 		},
 		{
+			name:      "not evaluated with missing GVRs reason",
+			subStatus: apis.SubStatusNotEvaluated,
+			innerInfo: "missing: apps/v1/deployments",
+			wantMsg:   "notEvaluated: missing: apps/v1/deployments",
+		},
+		{
+			name:      "not evaluated with policy skip reason",
+			subStatus: apis.SubStatusNotEvaluated,
+			innerInfo: "whole-cluster control C-0261 skipped by execution policy (policy: skip)",
+			wantMsg:   "notEvaluated: whole-cluster control C-0261 skipped by execution policy (policy: skip)",
+		},
+		{
 			name:      "configuration",
 			subStatus: apis.SubStatusConfiguration,
 			innerInfo: string(apis.SubStatusConfigurationInfo),
@@ -605,6 +706,16 @@ func TestBuildSkipMessage(t *testing.T) {
 			expected: "notEvaluated: not evaluated",
 		},
 		{
+			name:     "notEvaluated substatus with missing GVRs",
+			status:   &apis.StatusInfo{InnerStatus: apis.StatusSkipped, SubStatus: apis.SubStatusNotEvaluated, InnerInfo: "missing: apps/v1/deployments"},
+			expected: "notEvaluated: missing: apps/v1/deployments",
+		},
+		{
+			name:     "notEvaluated substatus with policy skip reason",
+			status:   &apis.StatusInfo{InnerStatus: apis.StatusSkipped, SubStatus: apis.SubStatusNotEvaluated, InnerInfo: "whole-cluster control C-0261 skipped by execution policy (policy: skip)"},
+			expected: "notEvaluated: whole-cluster control C-0261 skipped by execution policy (policy: skip)",
+		},
+		{
 			name:     "requires review substatus no InnerInfo",
 			status:   &apis.StatusInfo{InnerStatus: apis.StatusSkipped, SubStatus: apis.SubStatusRequiresReview},
 			expected: "requires review",
@@ -622,6 +733,82 @@ func TestBuildSkipMessage(t *testing.T) {
 			assert.Equal(t, tt.expected, got)
 		})
 	}
+}
+
+func TestCoverageProperties(t *testing.T) {
+	tests := []struct {
+		name     string
+		coverage cautils.ScanCoverage
+		expected []JUnitProperty
+	}{
+		{
+			name:     "Zero total controls returns nil",
+			coverage: cautils.ScanCoverage{TotalControls: 0},
+			expected: nil,
+		},
+		{
+			name: "Full coverage not degraded",
+			coverage: cautils.ScanCoverage{
+				CoverageScore:     100.0,
+				EvaluatedControls: 10,
+				TotalControls:     10,
+				Degraded:          false,
+			},
+			expected: []JUnitProperty{
+				{Name: "coverageScore", Value: "100.00"},
+				{Name: "evaluatedControls", Value: "10"},
+				{Name: "totalControls", Value: "10"},
+				{Name: "degraded", Value: "false"},
+			},
+		},
+		{
+			name: "Degraded coverage with skipped controls",
+			coverage: cautils.ScanCoverage{
+				CoverageScore:     85.5,
+				EvaluatedControls: 17,
+				TotalControls:     20,
+				Degraded:          true,
+			},
+			expected: []JUnitProperty{
+				{Name: "coverageScore", Value: "85.50"},
+				{Name: "evaluatedControls", Value: "17"},
+				{Name: "totalControls", Value: "20"},
+				{Name: "degraded", Value: "true"},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := coverageProperties(tt.coverage)
+			assert.Equal(t, tt.expected, got)
+		})
+	}
+}
+
+func TestListTestsSuite_IncludesCoverageProperties(t *testing.T) {
+	results := cautils.NewOPASessionObjMock()
+	results.ScanCoverage = cautils.ScanCoverage{
+		CoverageScore:     85.0,
+		EvaluatedControls: 17,
+		TotalControls:     20,
+		Degraded:          true,
+	}
+
+	suites := listTestsSuite(results)
+	require.NotEmpty(t, suites)
+	suite := suites[0]
+
+	propertyMap := make(map[string]string)
+	for _, prop := range suite.Properties {
+		propertyMap[prop.Name] = prop.Value
+	}
+
+	assert.Equal(t, "85.00", propertyMap["coverageScore"])
+	assert.Equal(t, "17", propertyMap["evaluatedControls"])
+	assert.Equal(t, "20", propertyMap["totalControls"])
+	assert.Equal(t, "true", propertyMap["degraded"])
+	assert.Contains(t, propertyMap, "complianceScore")
 }
 
 // TestJunitOutputInvariants is a regression test for the bugs reported in

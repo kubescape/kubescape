@@ -452,10 +452,20 @@ func resourceControlStatusCounters(result *resourcesresults.Result) (int, int, i
 func (m *Metrics) setResourcesCounters(
 	resources map[string]workloadinterface.IMetadata,
 	results map[string]resourcesresults.Result) {
+	m.setResourcesCountersFromCatalog(cautils.NewMapResourceCatalog(resources), results)
+}
+
+func (m *Metrics) setResourcesCountersFromCatalog(
+	catalog cautils.ResourceCatalog,
+	results map[string]resourcesresults.Result) {
+
+	if catalog == nil {
+		return
+	}
 
 	for resourceID, result := range results {
-		r, ok := resources[resourceID]
-		if !ok {
+		r, ok := catalog.Get(resourceID)
+		if !ok || r == nil {
 			continue
 		}
 		passed, skipped, failed := resourceControlStatusCounters(&result)

@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -149,6 +151,7 @@ type ScanInfo struct {
 	ExcludePaths              []string                     // gitignore-style patterns excluding paths from file, directory and repository scans
 	NoIgnoreFile              bool                         // do not read the .kubescapeignore file at the scan root
 	Namespace                 string                       // target namespace for workload scans
+	NamespaceDefaulted        bool                         // true when target namespace for workload scans was defaulted to "default"
 	InputPatterns             []string                     // Yaml files input patterns
 	Silent                    bool                         // Silent mode - Do not print progress logs
 	FailThreshold             float32                      // DEPRECATED - Failure score threshold
@@ -160,6 +163,7 @@ type ScanInfo struct {
 	Submit                    BoolPtrFlag                  // Submit results to Kubescape Cloud BE. Get() is nil unless explicitly set by the caller (flag/env/request field)
 	ScanID                    string                       // Report id of the current scan
 	HostSensorEnabled         BoolPtrFlag                  // Deploy Kubescape K8s host scanner to collect data from certain controls
+	HostSensorEnabledDefault  *bool                        // Default fallback when HostSensorEnabled is unset (injected via ScanInfo defaults)
 	HostSensorYamlPath        string                       // Path to hostsensor file
 	Local                     bool                         // Do not submit results
 	AccountID                 string                       // account ID
@@ -200,22 +204,97 @@ type ScanInfo struct {
 	clusterContextName        string
 	contextResolved           bool
 	cleanups                  []func()
-	ListingURL                string            //Grype vulnerability database URL
-	SkipDBUpdate              bool              // Do not update the vulnerability database before image scanning
-	RegistryMapping           map[string]string // Map internal registry URLs to external ones
-	RegistryAuthority         string            // Registry host[:port] explicit credentials apply to
-	RegistryUsername          string            // Username for workload image registry authentication
-	RegistryPassword          string            // Password for workload image registry authentication
-	RegistryToken             string            // Bearer token for workload image registry authentication
-	ImageScanConcurrency      int               // Number of concurrent workers for image scanning
-	ImagePlatform             string            // OCI platform used for image scanning (os/architecture[/variant])
-	MinSeverity               string            // Only include controls at or above this severity in the output
-	MaxSeverity               string            // Only include controls at or below this severity in the output
-	Baseline                  string            // Path to a saved JSON scan report; when set, the fresh scan is diffed against it
-	BaselineFailOnNew         bool              // Exit with code 1 when the baseline diff finds new or incomparable failures
-	BaselineSeverityThreshold string            // Only count new/incomparable baseline failures at or above this severity when enforcing BaselineFailOnNew
-	BaselineGranularity       string            // Comparison unit for the baseline diff: "evidence" (default) or "control"
-	KubeContexts              []string          // --kube-contexts: scan each of these kube contexts sequentially, one report per context (fleet mode)
+	ListingURL                string                      //Grype vulnerability database URL
+	SkipDBUpdate              bool                        // Do not update the vulnerability database before image scanning
+	FailOnStaleDB             bool                        // Fail image scans when the vulnerability DB is older than MaxDBAge (default: warn only)
+	FailOnStaleDBSet          bool                        // True when --fail-on-stale-db was explicitly passed (even false); the CLI populates this via Cobra Changed so explicit values win over KS_FAIL_ON_STALE_DB. Programmatic setters must set it alongside FailOnStaleDB.
+	MaxDBAge                  time.Duration               // Max allowed vulnerability DB age (default 120h); <=0 selects the default
+	MaxDBAgeSet               bool                        // True when --max-db-age was explicitly passed (even 0); the CLI populates this via Cobra Changed so explicit values win over KS_MAX_DB_AGE. Programmatic setters must set it alongside MaxDBAge.
+	RegistryMapping           map[string]string           // Map internal registry URLs to external ones
+	RegistryAuthority         string                      // Registry host[:port] explicit credentials apply to
+	RegistryUsername          string                      // Username for workload image registry authentication
+	RegistryPassword          string                      // Password for workload image registry authentication
+	RegistryToken             string                      // Bearer token for workload image registry authentication
+	ImageScanConcurrency      int                         // Number of concurrent workers for image scanning
+	ImagePlatform             string                      // OCI platform used for image scanning (os/architecture[/variant])
+	MinSeverity               string                      // Only include controls at or above this severity in the output
+	MaxSeverity               string                      // Only include controls at or below this severity in the output
+	Baseline                  string                      // Path to a saved JSON scan report; when set, the fresh scan is diffed against it
+	BaselineFailOnNew         bool                        // Exit with code 1 when the baseline diff finds new or incomparable failures
+	BaselineSeverityThreshold string                      // Only count new/incomparable baseline failures at or above this severity when enforcing BaselineFailOnNew
+	BaselineGranularity       string                      // Comparison unit for the baseline diff: "evidence" (default) or "control"
+	KubeContexts              []string                    // --kube-contexts: scan each of these kube contexts sequentially, one report per context (fleet mode)
+	FleetReport               string                      // --fleet-report: with --kube-contexts, also write one combined JSON report across every context to this path
+	ReferenceCluster          string                      // --reference-cluster: with --fleet-report, the kube context whose findings the other clusters are read against
+	WholeClusterPolicy        WholeClusterExecutionPolicy // Execution policy for whole-cluster controls (projected, fallback, skip, verify)
+}
+
+type WholeClusterExecutionPolicy string
+
+const (
+	// WholeClusterPolicyProjected accumulates only resources matching whole-cluster controls
+	// across batches, maintaining cross-namespace join correctness while keeping peak memory bounded.
+	WholeClusterPolicyProjected WholeClusterExecutionPolicy = "projected"
+
+	// WholeClusterPolicyFallback materializes all resources across the entire cluster into memory
+	// for whole-cluster control evaluation.
+	WholeClusterPolicyFallback WholeClusterExecutionPolicy = "fallback"
+
+	// WholeClusterPolicySkip bypasses whole-cluster controls entirely, marking them as skipped
+	// in scan coverage for strict memory bounds.
+	WholeClusterPolicySkip WholeClusterExecutionPolicy = "skip"
+
+	// WholeClusterPolicyVerify evaluates whole-cluster controls using both projected and fallback scopes
+	// and diffs verdicts across all evaluated resources (debug/cross-check mode).
+	WholeClusterPolicyVerify WholeClusterExecutionPolicy = "verify"
+)
+
+// ValidateWholeClusterPolicy validates that the policy is one of the supported values.
+func ValidateWholeClusterPolicy(policy WholeClusterExecutionPolicy) error {
+	switch policy {
+	case WholeClusterPolicyProjected, WholeClusterPolicyFallback, WholeClusterPolicySkip, WholeClusterPolicyVerify:
+		return nil
+	default:
+		return fmt.Errorf("invalid whole-cluster policy %q: supported policies are %q, %q, %q, %q",
+			policy, WholeClusterPolicyProjected, WholeClusterPolicyFallback, WholeClusterPolicySkip, WholeClusterPolicyVerify)
+	}
+}
+
+// ResolveWholeClusterPolicy determines the effective WholeClusterExecutionPolicy:
+// explicit string if provided, then KUBESCAPE_WHOLE_CLUSTER_POLICY, then KUBESCAPE_WHOLE_CLUSTER_PARITY_CHECK,
+// defaulting to WholeClusterPolicyProjected.
+func ResolveWholeClusterPolicy(explicitPolicy string) (WholeClusterExecutionPolicy, error) {
+	if explicitPolicy != "" {
+		p := WholeClusterExecutionPolicy(strings.ToLower(strings.TrimSpace(explicitPolicy)))
+		if err := ValidateWholeClusterPolicy(p); err != nil {
+			return "", err
+		}
+		return p, nil
+	}
+	if envVal := os.Getenv("KUBESCAPE_WHOLE_CLUSTER_POLICY"); envVal != "" {
+		p := WholeClusterExecutionPolicy(strings.ToLower(strings.TrimSpace(envVal)))
+		if err := ValidateWholeClusterPolicy(p); err != nil {
+			return "", err
+		}
+		return p, nil
+	}
+	if strings.EqualFold(os.Getenv("KUBESCAPE_WHOLE_CLUSTER_PARITY_CHECK"), "true") {
+		return WholeClusterPolicyVerify, nil
+	}
+	return WholeClusterPolicyProjected, nil
+}
+
+// GetWholeClusterPolicy returns the resolved WholeClusterExecutionPolicy for scanInfo.
+func (scanInfo *ScanInfo) GetWholeClusterPolicy() WholeClusterExecutionPolicy {
+	if scanInfo == nil || scanInfo.WholeClusterPolicy == "" {
+		p, _ := ResolveWholeClusterPolicy("")
+		return p
+	}
+	p, err := ResolveWholeClusterPolicy(string(scanInfo.WholeClusterPolicy))
+	if err != nil {
+		return WholeClusterPolicyProjected
+	}
+	return p
 }
 
 type Getters struct {
@@ -237,11 +316,27 @@ func (scanInfo *ScanInfo) Init(ctx context.Context, policyIdentifiers []PolicyId
 	if scanInfo.ScanID == "" {
 		scanInfo.ScanID = uuid.NewString()
 	}
+	if err := scanInfo.MaterializeRemoteInputs(ctx); err != nil {
+		return err
+	}
+
+	if scanInfo.HostSensorEnabledDefault == nil {
+		// Inject default for host sensor control to enable autodetect
+		defaultHostSensor := true
+		scanInfo.HostSensorEnabledDefault = &defaultHostSensor
+	}
 	return nil
 }
 
+// Cleanup executes all registered cleanup hooks and clears the list so that
+// repeated sequential calls do not run the same hooks twice. This is important
+// because MaterializeRemoteInputs calls Cleanup on failure to roll back
+// partial clones, and the outer scan lifecycle (defer scanInfo.Cleanup()) may
+// call it again on return. This method is not safe for concurrent use.
 func (scanInfo *ScanInfo) Cleanup() {
-	for _, cleanup := range scanInfo.cleanups {
+	cleanups := scanInfo.cleanups
+	scanInfo.cleanups = nil
+	for _, cleanup := range cleanups {
 		cleanup()
 	}
 }
@@ -465,9 +560,6 @@ func (scanInfo *ScanInfo) GetScanningContext() ScanningContext {
 	if scanInfo.scanningContext == nil {
 		input := scanInfo.GetInputFiles()
 		scanningContext := scanInfo.getScanningContext(input)
-		if input != "" {
-			scanInfo.cloneAdditionalRemoteInputs(input)
-		}
 		scanInfo.scanningContext = &scanningContext
 	}
 	return *scanInfo.scanningContext
@@ -501,10 +593,119 @@ func (scanInfo *ScanInfo) SetKubeconfigSelection(path, contextName string) {
 // parent's.
 func (scanInfo *ScanInfo) CloneForContext(kubeContext, output string) *ScanInfo {
 	clone := *scanInfo
+
+	// Fleet contexts are initialized independently. A struct assignment is not
+	// enough here because slices, maps and pointer-backed flags would still
+	// alias the parent and every sibling clone. Init and the policy getters
+	// legitimately update several of these values, most notably UseFrom and
+	// ScanContract.RunnerInputs. Give each context ownership of its mutable
+	// configuration before any of those updates can happen.
+	clone.UseFrom = slices.Clone(scanInfo.UseFrom)
+	clone.NotifyURLs = slices.Clone(scanInfo.NotifyURLs)
+	clone.ExcludeControls = slices.Clone(scanInfo.ExcludeControls)
+	clone.ExcludePaths = slices.Clone(scanInfo.ExcludePaths)
+	clone.InputPatterns = slices.Clone(scanInfo.InputPatterns)
+	clone.HelmValueFiles = slices.Clone(scanInfo.HelmValueFiles)
+	clone.HelmSetValues = slices.Clone(scanInfo.HelmSetValues)
+	clone.HelmSetStringValues = slices.Clone(scanInfo.HelmSetStringValues)
+	clone.HelmSetFileValues = slices.Clone(scanInfo.HelmSetFileValues)
+	clone.LabelsToCopy = slices.Clone(scanInfo.LabelsToCopy)
+	clone.KubeContexts = slices.Clone(scanInfo.KubeContexts)
+	clone.RegistryMapping = maps.Clone(scanInfo.RegistryMapping)
+	clone.HonorInlineExceptions = scanInfo.HonorInlineExceptions.clone()
+	clone.Submit = scanInfo.Submit.clone()
+	clone.HostSensorEnabled = scanInfo.HostSensorEnabled.clone()
+	clone.HostSensorEnabledDefault = clonePtr(scanInfo.HostSensorEnabledDefault)
+	clone.ScanContract = cloneScanContractMetadata(scanInfo.ScanContract)
+
 	clone.ScanID = ""
 	clone.cleanups = nil
 	clone.Output = output
 	clone.SetKubeconfigSelection(scanInfo.kubeconfigPath, kubeContext)
+	return &clone
+}
+
+func (bpf BoolPtrFlag) clone() BoolPtrFlag {
+	return BoolPtrFlag{valPtr: clonePtr(bpf.valPtr)}
+}
+
+func clonePtr[T any](value *T) *T {
+	if value == nil {
+		return nil
+	}
+	clone := *value
+	return &clone
+}
+
+func cloneSlicePtr[T any](value *[]T) *[]T {
+	if value == nil {
+		return nil
+	}
+	clone := slices.Clone(*value)
+	return &clone
+}
+
+// cloneScanContractMetadata isolates every mutable part of report provenance.
+// The metadata is enriched while a scan runs, so sharing even a nested slice
+// would let one fleet context change the digest and audit trail of another.
+func cloneScanContractMetadata(metadata *reporthandlingv2.ScanContractMetadata) *reporthandlingv2.ScanContractMetadata {
+	if metadata == nil {
+		return nil
+	}
+
+	clone := *metadata
+	clone.AllowedSections = slices.Clone(metadata.AllowedSections)
+	clone.DeniedSections = slices.Clone(metadata.DeniedSections)
+	clone.RunnerInputs = slices.Clone(metadata.RunnerInputs)
+	clone.Effective = cloneEffectiveSettings(metadata.Effective)
+
+	if metadata.GateResolution != nil {
+		resolution := *metadata.GateResolution
+		resolution.SeverityAtLeast.Contract = clonePtr(metadata.GateResolution.SeverityAtLeast.Contract)
+		resolution.SeverityAtLeast.RunnerFloor = clonePtr(metadata.GateResolution.SeverityAtLeast.RunnerFloor)
+		resolution.SeverityAtLeast.Effective = clonePtr(metadata.GateResolution.SeverityAtLeast.Effective)
+		resolution.ComplianceBelow.Contract = clonePtr(metadata.GateResolution.ComplianceBelow.Contract)
+		resolution.ComplianceBelow.RunnerFloor = clonePtr(metadata.GateResolution.ComplianceBelow.RunnerFloor)
+		resolution.ComplianceBelow.Effective = clonePtr(metadata.GateResolution.ComplianceBelow.Effective)
+		resolution.CoverageBelow.Contract = clonePtr(metadata.GateResolution.CoverageBelow.Contract)
+		resolution.CoverageBelow.RunnerFloor = clonePtr(metadata.GateResolution.CoverageBelow.RunnerFloor)
+		resolution.CoverageBelow.Effective = clonePtr(metadata.GateResolution.CoverageBelow.Effective)
+		resolution.DegradedPolicyInput.Contract = clonePtr(metadata.GateResolution.DegradedPolicyInput.Contract)
+		resolution.DegradedPolicyInput.RunnerFloor = clonePtr(metadata.GateResolution.DegradedPolicyInput.RunnerFloor)
+		resolution.DegradedPolicyInput.Effective = clonePtr(metadata.GateResolution.DegradedPolicyInput.Effective)
+		clone.GateResolution = &resolution
+	}
+
+	if metadata.OrdinaryCLIOverrides != nil {
+		overrides := *metadata.OrdinaryCLIOverrides
+		if metadata.OrdinaryCLIOverrides.Policy != nil {
+			policy := *metadata.OrdinaryCLIOverrides.Policy
+			policy.Frameworks = cloneSlicePtr(policy.Frameworks)
+			policy.Controls = cloneSlicePtr(policy.Controls)
+			policy.ControlsVersion = clonePtr(policy.ControlsVersion)
+			overrides.Policy = &policy
+		}
+		if metadata.OrdinaryCLIOverrides.Scope != nil {
+			scope := *metadata.OrdinaryCLIOverrides.Scope
+			scope.IncludeNamespaces = cloneSlicePtr(scope.IncludeNamespaces)
+			scope.ExcludeNamespaces = cloneSlicePtr(scope.ExcludeNamespaces)
+			overrides.Scope = &scope
+		}
+		if metadata.OrdinaryCLIOverrides.Evaluation != nil {
+			evaluation := *metadata.OrdinaryCLIOverrides.Evaluation
+			evaluation.ScanTimeout = clonePtr(evaluation.ScanTimeout)
+			evaluation.ControlTimeout = clonePtr(evaluation.ControlTimeout)
+			overrides.Evaluation = &evaluation
+		}
+		if metadata.OrdinaryCLIOverrides.Output != nil {
+			outputSettings := *metadata.OrdinaryCLIOverrides.Output
+			outputSettings.Formats = cloneSlicePtr(outputSettings.Formats)
+			outputSettings.OmitRawResources = clonePtr(outputSettings.OmitRawResources)
+			overrides.Output = &outputSettings
+		}
+		clone.OrdinaryCLIOverrides = &overrides
+	}
+
 	return &clone
 }
 
@@ -556,8 +757,12 @@ func (scanInfo *ScanInfo) GetClusterContextName() string {
 	return k8sinterface.GetContextName()
 }
 
-// getScanningContext get scanning context from the input param
-// this function should be called only once. Call GetScanningContext() to get the scanning context
+// getScanningContext classifies the scan target type from the input string.
+// Remote URL classification (ContextGitRemote) is purely syntactic and performs
+// no network or disk I/O — in particular, it no longer clones the repository.
+// Local-path classification still inspects the filesystem (os.Getwd,
+// NewLocalGitRepository, isFile) to distinguish directories, files, and local
+// git repositories.
 func (scanInfo *ScanInfo) getScanningContext(input string) ScanningContext {
 	//  cluster
 	if input == "" {
@@ -567,28 +772,9 @@ func (scanInfo *ScanInfo) getScanningContext(input string) ScanningContext {
 	// Check if input is a URL (http:// or https://)
 	isURL := isHTTPURL(input)
 
-	// git url
+	// git remote url
 	if _, err := giturl.NewGitURL(input); err == nil {
-		originalInput := input
-		if repo, err := CloneGitRepo(&input); err == nil {
-			if _, err := NewLocalGitRepository(repo); err == nil {
-				scanInfo.AddCleanup(func() {
-					if err := ReleaseClonedRepo(originalInput); err != nil {
-						logger.L().Warning("failed to clean up cloned repository", helpers.String("url", originalInput), helpers.Error(err))
-					}
-				})
-				return ContextGitRemote
-			}
-			if err := ReleaseClonedRepo(originalInput); err != nil {
-				logger.L().Warning("failed to clean up invalid cloned repository", helpers.String("url", originalInput), helpers.Error(err))
-			}
-		}
-		// If giturl.NewGitURL succeeded but cloning failed, the input is a git URL
-		// that couldn't be cloned. Don't treat it as a local path.
-		// The clone error was already logged by CloneGitRepo.
-		// Return ContextDir to prevent the URL from being joined with the current directory
-		// and to trigger a "no files found" error with the actual URL (not a mangled path).
-		return ContextDir
+		return ContextGitRemote
 	}
 
 	// If it looks like a URL but wasn't recognized as a git URL, still don't treat it as a local path
@@ -617,29 +803,49 @@ func (scanInfo *ScanInfo) getScanningContext(input string) ScanningContext {
 	return ContextDir
 }
 
-// cloneAdditionalRemoteInputs prepares every remote input before file loading.
-// Previously only the first URL was cloned, so later URL inputs were interpreted
-// as local filesystem paths and silently skipped.
-func (scanInfo *ScanInfo) cloneAdditionalRemoteInputs(firstInput string) {
+// MaterializeRemoteInputs clones all remote git repositories declared in
+// InputPatterns, registers their cleanup hooks with ScanInfo, and returns
+// an error immediately if cloning fails.
+//
+// The ctx parameter provides pre-clone cancellation: if the context is
+// cancelled or expired, no further clones are attempted and any already-
+// cloned workspaces are cleaned up. Note that CloneGitRepo itself does
+// not accept a context (it delegates to git.PlainClone, not
+// git.PlainCloneContext), so an in-progress clone cannot be interrupted
+// mid-operation. Making the underlying clone context-aware is a possible
+// future improvement outside the scope of this refactor.
+func (scanInfo *ScanInfo) MaterializeRemoteInputs(ctx context.Context) error {
 	for _, candidate := range scanInfo.InputPatterns {
-		if candidate == firstInput {
-			continue
+		if err := ctx.Err(); err != nil {
+			scanInfo.Cleanup()
+			return err
 		}
 		if _, err := giturl.NewGitURL(candidate); err != nil {
 			continue
 		}
 
 		originalInput := candidate
-		if _, err := CloneGitRepo(&candidate); err != nil {
-			logger.L().Error("failed to clone additional git input", helpers.String("url", originalInput), helpers.Error(err))
-			continue
+		clonedDir, err := CloneGitRepo(&candidate)
+		if err != nil {
+			scanInfo.Cleanup()
+			return fmt.Errorf("failed to clone remote git repository %q: %w", originalInput, err)
 		}
+
+		if _, err := NewLocalGitRepository(clonedDir); err != nil {
+			if releaseErr := ReleaseClonedRepo(originalInput); releaseErr != nil {
+				logger.L().Warning("failed to clean up invalid cloned repository", helpers.String("url", originalInput), helpers.Error(releaseErr))
+			}
+			scanInfo.Cleanup()
+			return fmt.Errorf("cloned repository %q is not a valid git repository: %w", originalInput, err)
+		}
+
 		scanInfo.AddCleanup(func() {
 			if err := ReleaseClonedRepo(originalInput); err != nil {
 				logger.L().Warning("failed to clean up cloned repository", helpers.String("url", originalInput), helpers.Error(err))
 			}
 		})
 	}
+	return nil
 }
 
 func (scanInfo *ScanInfo) setContextMetadata(ctx context.Context, contextMetadata *reporthandlingv2.ContextMetadata) {
@@ -761,4 +967,42 @@ func getAbsPath(p string) string {
 // isHTTPURL checks if the input string is an HTTP or HTTPS URL
 func isHTTPURL(input string) bool {
 	return strings.HasPrefix(input, "http://") || strings.HasPrefix(input, "https://")
+}
+
+// EvidenceFlagWarnings returns what --show-evidence cannot deliver alongside
+// the other flags this scan was given, one message per combination.
+//
+// Neither combination is an error: each flag still does what it says, and
+// refusing the scan over a weaker evidence column would be worse than running
+// it. What the user cannot be left to discover is the part that silently does
+// not happen - a missing line number, or a value printed by one flag that
+// another asked to keep out of the output.
+func (scanInfo *ScanInfo) EvidenceFlagWarnings() []string {
+	if !scanInfo.ShowEvidence {
+		return nil
+	}
+
+	var warnings []string
+
+	// --hide and --encrypt replace every source path with a pseudonym before
+	// the report is printed, so the manifest a finding came from can no longer
+	// be opened to find its line. Paths and values are still shown.
+	if scanInfo.Hide || scanInfo.EncryptionEnabled {
+		flag := "--hide"
+		if scanInfo.EncryptionEnabled {
+			flag = "--encrypt"
+		}
+		warnings = append(warnings,
+			"--show-evidence cannot resolve line numbers with "+flag+": source paths are anonymized, so the manifests cannot be read")
+	}
+
+	// --omit-raw-resources keeps the scanned resources out of the report, but
+	// evidence reads those same resources to show each failing field's current
+	// value, so the values still reach the terminal.
+	if scanInfo.OmitRawResources {
+		warnings = append(warnings,
+			"--show-evidence still prints field values read from the scanned resources, which --omit-raw-resources keeps out of the report")
+	}
+
+	return warnings
 }

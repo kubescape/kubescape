@@ -3,7 +3,7 @@
         "name": "exclude-deployments-in-ns-default",
         "policyType": "postureExceptionPolicy",
         "actions": [
-            "alertOnly"
+            "disable"
         ],
         "resources": [
             {

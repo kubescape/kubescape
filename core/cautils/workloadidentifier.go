@@ -3,8 +3,12 @@ package cautils
 import (
 	"errors"
 	"fmt"
+	"net"
 	"regexp"
 	"strings"
+
+	"k8s.io/apimachinery/pkg/api/validate/content"
+	"k8s.io/apimachinery/pkg/util/validation"
 )
 
 // Workload identifiers name a single Kubernetes resource to scan, in the form
@@ -24,12 +28,310 @@ import (
 // level error rather than being reconstructed per call site.
 var ErrInvalidWorkloadIdentifier = errors.New("invalid workload identifier, expected <kind>[.<version>[.<group>]]/<name>")
 
+func isRBACResource(kind, apiVersion string) bool {
+	if strings.Contains(apiVersion, "/") {
+		parts := strings.SplitN(apiVersion, "/", 2)
+		if parts[0] != "rbac.authorization.k8s.io" {
+			return false
+		}
+	}
+	switch NormalizeWorkloadKind(kind) {
+	case "Role", "ClusterRole", "RoleBinding", "ClusterRoleBinding":
+		return true
+	default:
+		return false
+	}
+}
+
+func isOfficialEvent(kind, apiVersion string) bool {
+	if NormalizeWorkloadKind(kind) != "Event" {
+		return false
+	}
+	if strings.Contains(apiVersion, "/") {
+		parts := strings.SplitN(apiVersion, "/", 2)
+		return parts[0] == "" || parts[0] == "events.k8s.io"
+	}
+	return true
+}
+
+// IsOfficialEvent reports whether kind is Event and apiVersion belongs to an official Event group (core or events.k8s.io).
+func IsOfficialEvent(kind, apiVersion string) bool {
+	return isOfficialEvent(kind, apiVersion)
+}
+
+func isClusterTrustBundle(kind, apiVersion string) bool {
+	if NormalizeWorkloadKind(kind) != "ClusterTrustBundle" {
+		return false
+	}
+	if strings.Contains(apiVersion, "/") {
+		parts := strings.SplitN(apiVersion, "/", 2)
+		return parts[0] == "certificates.k8s.io"
+	}
+	return false
+}
+
+func isCertificateSigningRequest(kind, apiVersion string) bool {
+	if strings.Contains(apiVersion, "/") {
+		parts := strings.SplitN(apiVersion, "/", 2)
+		if parts[0] != "certificates.k8s.io" {
+			return false
+		}
+	}
+	switch NormalizeWorkloadKind(kind) {
+	case "CertificateSigningRequest":
+		return true
+	default:
+		return false
+	}
+}
+
+func validateClusterTrustBundleName(name string) []string {
+	if !strings.Contains(name, ":") {
+		return validation.IsDNS1123Subdomain(name)
+	}
+
+	splitPoint := strings.LastIndex(name, ":")
+	bundleName := name[splitPoint+1:]
+	signerPrefix := name[:splitPoint]
+
+	if bundleName == "" {
+		return []string{"bundle name suffix after last ':' cannot be empty"}
+	}
+	if errs := validation.IsDNS1123Subdomain(bundleName); len(errs) > 0 {
+		return errs
+	}
+
+	segments := strings.Split(signerPrefix, ":")
+	if len(segments) != 2 {
+		return []string{"signer prefix must have exactly two colon-separated segments: <domain>:<path>"}
+	}
+
+	domain := segments[0]
+	path := segments[1]
+
+	if len(domain) == 0 {
+		return []string{"signer domain cannot be empty"}
+	}
+	if len(domain) > validation.DNS1123SubdomainMaxLength {
+		return []string{fmt.Sprintf("signer domain exceeds maximum length of %d characters", validation.DNS1123SubdomainMaxLength)}
+	}
+	domainLabels := strings.Split(domain, ".")
+	if len(domainLabels) < 2 {
+		return []string{"signer domain must contain at least two dot-separated segments"}
+	}
+	for _, lbl := range domainLabels {
+		if errs := validation.IsDNS1123Label(lbl); len(errs) > 0 {
+			return errs
+		}
+	}
+
+	if len(path) == 0 {
+		return []string{"signer path cannot be empty"}
+	}
+	pathLabels := strings.Split(path, ".")
+	for _, lbl := range pathLabels {
+		if errs := validation.IsDNS1123Subdomain(lbl); len(errs) > 0 {
+			return errs
+		}
+	}
+
+	maxPathSegmentLength := validation.DNS1123SubdomainMaxLength + validation.DNS1123LabelMaxLength + 1
+	maxSignerNameLength := validation.DNS1123SubdomainMaxLength + maxPathSegmentLength + 1
+	signerName := domain + "/" + path
+	if len(signerName) > maxSignerNameLength {
+		return []string{fmt.Sprintf("signer name exceeds maximum length of %d characters", maxSignerNameLength)}
+	}
+
+	return nil
+}
+
+func isAPIService(kind, apiVersion string) bool {
+	if NormalizeWorkloadKind(kind) != "APIService" {
+		return false
+	}
+	if strings.Contains(apiVersion, "/") {
+		parts := strings.SplitN(apiVersion, "/", 2)
+		return parts[0] == "apiregistration.k8s.io"
+	}
+	return false
+}
+
+func validateAPIServiceName(name string) []string {
+	if errs := content.IsPathSegmentName(name); len(errs) > 0 {
+		return errs
+	}
+	if strings.HasSuffix(name, ".") {
+		version := strings.TrimSuffix(name, ".")
+		if errs := validation.IsDNS1035Label(version); len(errs) > 0 {
+			return errs
+		}
+		return nil
+	}
+	parts := strings.SplitN(name, ".", 2)
+	if len(parts) != 2 {
+		return []string{"name must be in the form <version>.<group> or <version>."}
+	}
+	if errs := validation.IsDNS1035Label(parts[0]); len(errs) > 0 {
+		return errs
+	}
+	return validation.IsDNS1123Subdomain(parts[1])
+}
+
+func isIPAddress(kind, apiVersion string) bool {
+	if NormalizeWorkloadKind(kind) != "IPAddress" {
+		return false
+	}
+	if strings.Contains(apiVersion, "/") {
+		parts := strings.SplitN(apiVersion, "/", 2)
+		return parts[0] == "networking.k8s.io"
+	}
+	return false
+}
+
+func validateIPAddressName(name string) []string {
+	if errs := content.IsPathSegmentName(name); len(errs) > 0 {
+		return errs
+	}
+	ip := net.ParseIP(name)
+	if ip == nil {
+		return []string{fmt.Sprintf("%q is not a valid IP address", name)}
+	}
+	if ip.String() != name {
+		return []string{fmt.Sprintf("%q is not a canonical IP address", name)}
+	}
+	return nil
+}
+
+func isUnresolvedResource(kind, apiVersion string) bool {
+	if strings.Contains(apiVersion, "/") {
+		return false
+	}
+	switch NormalizeWorkloadKind(kind) {
+	case "APIService", "IPAddress", "ClusterTrustBundle":
+		return true
+	default:
+		return false
+	}
+}
+
+func validateWorkloadName(name, kind, apiVersion string) error {
+	if isClusterTrustBundle(kind, apiVersion) {
+		if errs := validateClusterTrustBundleName(name); len(errs) > 0 {
+			return fmt.Errorf("%w: invalid workload name %q: %s", ErrInvalidWorkloadIdentifier, name, strings.Join(errs, "; "))
+		}
+		return nil
+	}
+
+	if isAPIService(kind, apiVersion) {
+		if errs := validateAPIServiceName(name); len(errs) > 0 {
+			return fmt.Errorf("%w: invalid workload name %q: %s", ErrInvalidWorkloadIdentifier, name, strings.Join(errs, "; "))
+		}
+		return nil
+	}
+
+	if isIPAddress(kind, apiVersion) {
+		if errs := validateIPAddressName(name); len(errs) > 0 {
+			return fmt.Errorf("%w: invalid workload name %q: %s", ErrInvalidWorkloadIdentifier, name, strings.Join(errs, "; "))
+		}
+		return nil
+	}
+
+	if isOfficialEvent(kind, apiVersion) || isRBACResource(kind, apiVersion) || isCertificateSigningRequest(kind, apiVersion) || isUnresolvedResource(kind, apiVersion) {
+		if errs := content.IsPathSegmentName(name); len(errs) > 0 {
+			return fmt.Errorf("%w: invalid workload name %q: %s", ErrInvalidWorkloadIdentifier, name, strings.Join(errs, "; "))
+		}
+		return nil
+	}
+
+	if errs := validation.IsDNS1123Subdomain(name); len(errs) > 0 {
+		return fmt.Errorf("%w: invalid workload name %q: %s", ErrInvalidWorkloadIdentifier, name, strings.Join(errs, "; "))
+	}
+	return nil
+}
+
+func validateWorkloadKind(kind string) error {
+	if errs := validation.IsDNS1035Label(strings.ToLower(kind)); len(errs) > 0 {
+		return fmt.Errorf("%w: invalid workload kind %q: %s", ErrInvalidWorkloadIdentifier, kind, strings.Join(errs, "; "))
+	}
+	return nil
+}
+
+func validateWorkloadNamespace(ns string) error {
+	if ns == "" || ns == "*" {
+		return nil
+	}
+	if errs := validation.IsDNS1123Label(ns); len(errs) > 0 {
+		return fmt.Errorf("%w: invalid namespace %q: %s", ErrInvalidWorkloadIdentifier, ns, strings.Join(errs, "; "))
+	}
+	return nil
+}
+
+func validateWorkloadGroup(group string) error {
+	if group == "" {
+		return nil
+	}
+	if errs := validation.IsDNS1123Subdomain(group); len(errs) > 0 {
+		return fmt.Errorf("%w: invalid API group %q: %s", ErrInvalidWorkloadIdentifier, group, strings.Join(errs, "; "))
+	}
+	return nil
+}
+
 // ValidateWorkloadIdentifier reports whether workloadIdentifier is well formed,
 // discarding the parsed components. It exists so argument validation can run
 // before a command is willing to do any other work.
 func ValidateWorkloadIdentifier(workloadIdentifier string) error {
 	_, _, _, _, err := ParseWorkloadIdentifierString(workloadIdentifier)
 	return err
+}
+
+// ValidateWorkloadName checks that name conforms to Kubernetes naming conventions for kind and apiVersion.
+func ValidateWorkloadName(name, kind, apiVersion string) error {
+	return validateWorkloadName(name, kind, apiVersion)
+}
+
+// ResolveWorkloadNamespace resolves the target namespace from the workload identifier's
+// prefix and the explicit parameter/flag. When isClusterScan is true and no namespace is
+// specified, it defaults to "default" (defaulted = true). For local/offline scans (isClusterScan = false),
+// an omitted namespace remains "" (defaulted = false) so manifest resolution is unconstrained.
+// Conflicting non-empty namespaces are rejected.
+func ResolveWorkloadNamespace(identNamespace, explicitNamespace string, isClusterScan bool) (targetNamespace string, defaulted bool, err error) {
+	identNamespace = strings.TrimSpace(identNamespace)
+	explicitNamespace = strings.TrimSpace(explicitNamespace)
+
+	// 1. Format validation: syntax validation runs before conflict checks
+	if err := validateWorkloadNamespace(identNamespace); err != nil {
+		return "", false, err
+	}
+	if err := validateWorkloadNamespace(explicitNamespace); err != nil {
+		return "", false, err
+	}
+
+	// 2. Conflict validation: reject non-empty differing namespaces
+	if identNamespace != "" && explicitNamespace != "" && explicitNamespace != identNamespace {
+		return "", false, fmt.Errorf("%w: conflicting namespaces: workload identifier specifies %q but namespace specifies %q", ErrInvalidWorkloadIdentifier, identNamespace, explicitNamespace)
+	}
+
+	// 3. Wildcard resolution: explicit wildcard matches all namespaces
+	if explicitNamespace == "*" || identNamespace == "*" {
+		return "", false, nil
+	}
+
+	// 4. Explicit namespace from tool argument or flag
+	if explicitNamespace != "" {
+		return explicitNamespace, false, nil
+	}
+
+	// 5. Namespace embedded in workload identifier
+	if identNamespace != "" {
+		return identNamespace, false, nil
+	}
+
+	// 6. Default fallback (only for cluster scans)
+	if isClusterScan {
+		return "default", true, nil
+	}
+
+	return "", false, nil
 }
 
 // ParseWorkloadIdentifierString splits a workload identifier into its parts.
@@ -51,14 +353,23 @@ func ParseWorkloadIdentifierString(workloadIdentifier string) (namespace, kind, 
 		if err != nil {
 			return "", "", "", "", err
 		}
+		if err := validateWorkloadName(x[1], parsedKind, parsedApiVersion); err != nil {
+			return "", "", "", "", err
+		}
 		return "", parsedKind, x[1], parsedApiVersion, nil
 	}
 	if len(x) == 3 {
 		if x[0] == "" || x[1] == "" || x[2] == "" {
 			return "", "", "", "", ErrInvalidWorkloadIdentifier
 		}
+		if err := validateWorkloadNamespace(x[0]); err != nil {
+			return "", "", "", "", err
+		}
 		parsedKind, parsedApiVersion, err := parseKindAndApiVersion(x[1])
 		if err != nil {
+			return "", "", "", "", err
+		}
+		if err := validateWorkloadName(x[2], parsedKind, parsedApiVersion); err != nil {
 			return "", "", "", "", err
 		}
 		return x[0], parsedKind, x[2], parsedApiVersion, nil
@@ -72,6 +383,147 @@ func ParseWorkloadIdentifierString(workloadIdentifier string) (namespace, kind, 
 // is rejected as a missing version rather than being silently read as one.
 var apiVersionPattern = regexp.MustCompile(`^v\d+((alpha|beta)\d+)?$`)
 
+// canonicalKinds maps lowercase resource kinds, plural names, standard kubectl
+// short names (from `kubectl api-resources`), and common informal aliases (e.g.,
+// "pc", "limits", "quota") to their canonical PascalCase Kind.
+var canonicalKinds = map[string]string{
+	// Workloads
+	"pod": "Pod", "pods": "Pod", "po": "Pod",
+	"deployment": "Deployment", "deployments": "Deployment", "deploy": "Deployment",
+	"daemonset": "DaemonSet", "daemonsets": "DaemonSet", "ds": "DaemonSet",
+	"statefulset": "StatefulSet", "statefulsets": "StatefulSet", "sts": "StatefulSet",
+	"job": "Job", "jobs": "Job",
+	"cronjob": "CronJob", "cronjobs": "CronJob", "cj": "CronJob",
+	"replicaset": "ReplicaSet", "replicasets": "ReplicaSet", "rs": "ReplicaSet",
+	"replicationcontroller": "ReplicationController", "replicationcontrollers": "ReplicationController", "rc": "ReplicationController",
+
+	// Configuration & Storage
+	"configmap": "ConfigMap", "configmaps": "ConfigMap", "cm": "ConfigMap",
+	"secret": "Secret", "secrets": "Secret",
+	"persistentvolumeclaim": "PersistentVolumeClaim", "persistentvolumeclaims": "PersistentVolumeClaim", "pvc": "PersistentVolumeClaim",
+	"persistentvolume": "PersistentVolume", "persistentvolumes": "PersistentVolume", "pv": "PersistentVolume",
+	"storageclass": "StorageClass", "storageclasses": "StorageClass", "sc": "StorageClass",
+	"volumeattachment": "VolumeAttachment", "volumeattachments": "VolumeAttachment",
+
+	// Networking
+	"service": "Service", "services": "Service", "svc": "Service",
+	"ingress": "Ingress", "ingresses": "Ingress", "ing": "Ingress",
+	"networkpolicy": "NetworkPolicy", "networkpolicies": "NetworkPolicy", "netpol": "NetworkPolicy",
+	"endpoints": "Endpoints", "ep": "Endpoints",
+	"endpointslice": "EndpointSlice", "endpointslices": "EndpointSlice",
+	"ingressclass": "IngressClass", "ingressclasses": "IngressClass",
+	"ipaddress": "IPAddress", "ipaddresses": "IPAddress",
+
+	// Cluster, Node & RBAC
+	"namespace": "Namespace", "namespaces": "Namespace", "ns": "Namespace",
+	"node": "Node", "nodes": "Node", "no": "Node",
+	"serviceaccount": "ServiceAccount", "serviceaccounts": "ServiceAccount", "sa": "ServiceAccount",
+	"role": "Role", "roles": "Role",
+	"rolebinding": "RoleBinding", "rolebindings": "RoleBinding",
+	"clusterrole": "ClusterRole", "clusterroles": "ClusterRole",
+	"clusterrolebinding": "ClusterRoleBinding", "clusterrolebindings": "ClusterRoleBinding",
+	"customresourcedefinition": "CustomResourceDefinition", "customresourcedefinitions": "CustomResourceDefinition", "crd": "CustomResourceDefinition", "crds": "CustomResourceDefinition",
+
+	// Policy, Scheduling & Quota
+	"horizontalpodautoscaler": "HorizontalPodAutoscaler", "horizontalpodautoscalers": "HorizontalPodAutoscaler", "hpa": "HorizontalPodAutoscaler",
+	"poddisruptionbudget": "PodDisruptionBudget", "poddisruptionbudgets": "PodDisruptionBudget", "pdb": "PodDisruptionBudget",
+	"podsecuritypolicy": "PodSecurityPolicy", "podsecuritypolicies": "PodSecurityPolicy", "psp": "PodSecurityPolicy",
+	"resourcequota": "ResourceQuota", "resourcequotas": "ResourceQuota", "quota": "ResourceQuota",
+	"limitrange": "LimitRange", "limitranges": "LimitRange", "limits": "LimitRange",
+	"priorityclass": "PriorityClass", "priorityclasses": "PriorityClass", "pc": "PriorityClass",
+	"lease": "Lease", "leases": "Lease",
+	"runtimeclass": "RuntimeClass", "runtimeclasses": "RuntimeClass",
+	"flowschema": "FlowSchema", "flowschemas": "FlowSchema",
+	"prioritylevelconfiguration": "PriorityLevelConfiguration", "prioritylevelconfigurations": "PriorityLevelConfiguration",
+	"controllerrevision": "ControllerRevision", "controllerrevisions": "ControllerRevision",
+
+	// Core cluster metadata & Storage migration/snapshots
+	"componentstatus": "ComponentStatus", "componentstatuses": "ComponentStatus", "cs": "ComponentStatus",
+	"event": "Event", "events": "Event", "ev": "Event",
+	"binding": "Binding", "bindings": "Binding",
+	// "vs" is the official kubectl short name for VolumeSnapshot.
+	// Note: Istio also registers "vs" for VirtualService as a CRD short name.
+	// CRDs require explicit apiVersion so Istio users are unaffected in practice,
+	// but passing vs/<name> without apiVersion resolves to VolumeSnapshot not VirtualService.
+	"volumesnapshot": "VolumeSnapshot", "volumesnapshots": "VolumeSnapshot", "vs": "VolumeSnapshot",
+	"volumesnapshotcontent": "VolumeSnapshotContent", "volumesnapshotcontents": "VolumeSnapshotContent",
+	"volumesnapshotclass": "VolumeSnapshotClass", "volumesnapshotclasses": "VolumeSnapshotClass",
+	"storageversionmigration": "StorageVersionMigration", "storageversionmigrations": "StorageVersionMigration",
+	"storagestate": "StorageState", "storagestates": "StorageState",
+
+	// Storage & CSI
+	"csinode": "CSINode", "csinodes": "CSINode",
+	"csidriver": "CSIDriver", "csidrivers": "CSIDriver",
+	"csistoragecapacity": "CSIStorageCapacity", "csistoragecapacities": "CSIStorageCapacity",
+	"podtemplate": "PodTemplate", "podtemplates": "PodTemplate",
+
+	// Admission, Authorization & Certificates
+	"apiservice": "APIService", "apiservices": "APIService",
+	"mutatingwebhookconfiguration": "MutatingWebhookConfiguration", "mutatingwebhookconfigurations": "MutatingWebhookConfiguration",
+	"validatingwebhookconfiguration": "ValidatingWebhookConfiguration", "validatingwebhookconfigurations": "ValidatingWebhookConfiguration",
+	"certificatesigningrequest": "CertificateSigningRequest", "certificatesigningrequests": "CertificateSigningRequest", "csr": "CertificateSigningRequest",
+	"clustertrustbundle": "ClusterTrustBundle", "clustertrustbundles": "ClusterTrustBundle", "ctb": "ClusterTrustBundle",
+	"tokenreview": "TokenReview", "tokenreviews": "TokenReview",
+	"subjectaccessreview": "SubjectAccessReview", "subjectaccessreviews": "SubjectAccessReview",
+	"selfsubjectaccessreview": "SelfSubjectAccessReview", "selfsubjectaccessreviews": "SelfSubjectAccessReview",
+	"selfsubjectrulesreview": "SelfSubjectRulesReview", "selfsubjectrulesreviews": "SelfSubjectRulesReview",
+	"localsubjectaccessreview": "LocalSubjectAccessReview", "localsubjectaccessreviews": "LocalSubjectAccessReview",
+}
+
+// NormalizeWorkloadKind maps a Kubernetes resource kind, plural name, registered
+// kubectl short name (from `kubectl api-resources`), or common informal alias to
+// its canonical PascalCase Kind (e.g., "deployment", "deployments", "deploy" -> "Deployment").
+//
+// If the kind is unrecognized (such as a custom resource definition), the input string
+// is returned unaltered.
+func NormalizeWorkloadKind(kind string) string {
+	if canonical, ok := canonicalKinds[strings.ToLower(kind)]; ok {
+		return canonical
+	}
+	return kind
+}
+
+// builtinAPIGroups is an explicit allowlist of official Kubernetes built-in API groups.
+// Domain-based groups outside this list (such as custom .k8s.io domains like example.k8s.io)
+// are treated as custom resource groups so that declared custom resource Kinds are preserved.
+var builtinAPIGroups = map[string]struct{}{
+	"":                             {}, // core
+	"admissionregistration.k8s.io": {},
+	"apiextensions.k8s.io":         {},
+	"apiregistration.k8s.io":       {},
+	"apps":                         {},
+	"authentication.k8s.io":        {},
+	"authorization.k8s.io":         {},
+	"autoscaling":                  {},
+	"batch":                        {},
+	"certificates.k8s.io":          {},
+	"coordination.k8s.io":          {},
+	"discovery.k8s.io":             {},
+	"events.k8s.io":                {},
+	"extensions":                   {},
+	"flowcontrol.apiserver.k8s.io": {},
+	"imagepolicy.k8s.io":           {},
+	"internal.apiserver.k8s.io":    {},
+	"migration.k8s.io":             {},
+	"networking.k8s.io":            {},
+	"node.k8s.io":                  {},
+	"policy":                       {},
+	"policy.k8s.io":                {},
+	"rbac.authorization.k8s.io":    {},
+	"resource.k8s.io":              {},
+	"scheduling":                   {},
+	"scheduling.k8s.io":            {},
+	"snapshot.storage.k8s.io":      {},
+	"storage.k8s.io":               {},
+	"storagemigration.k8s.io":      {},
+}
+
+// IsBuiltinGroup reports whether group corresponds to a recognized official Kubernetes built-in API group.
+func IsBuiltinGroup(group string) bool {
+	_, ok := builtinAPIGroups[strings.ToLower(group)]
+	return ok
+}
+
 // parseKindAndApiVersion splits the kind segment of an identifier into a kind
 // and, when present, the apiVersion it encodes. The dotted form orders the
 // components kind.version.group for readability, while Kubernetes apiVersion
@@ -80,6 +532,9 @@ var apiVersionPattern = regexp.MustCompile(`^v\d+((alpha|beta)\d+)?$`)
 func parseKindAndApiVersion(kindStr string) (kind, apiVersion string, err error) {
 	parts := strings.Split(kindStr, ".")
 	if len(parts) == 1 {
+		if err := validateWorkloadKind(kindStr); err != nil {
+			return "", "", err
+		}
 		return kindStr, "", nil
 	}
 
@@ -90,13 +545,27 @@ func parseKindAndApiVersion(kindStr string) (kind, apiVersion string, err error)
 		}
 	}
 
+	if err := validateWorkloadKind(parts[0]); err != nil {
+		return "", "", err
+	}
+
 	if !apiVersionPattern.MatchString(parts[1]) {
 		return "", "", fmt.Errorf("%w: %q is not a valid API version in %q", ErrInvalidWorkloadIdentifier, parts[1], kindStr)
 	}
 
 	if len(parts) >= 3 {
 		group := strings.Join(parts[2:], ".")
-		return parts[0], group + "/" + parts[1], nil // kind.version.group -> group/version
+		if err := validateWorkloadGroup(group); err != nil {
+			return "", "", err
+		}
+		// Preserve custom resource Kind when an explicit custom API group is present,
+		// preventing CRDs whose name matches a built-in kind or alias (e.g. Deploy.v1.example.com)
+		// from being incorrectly rewritten to a built-in kind.
+		kind := parts[0]
+		if IsBuiltinGroup(group) {
+			kind = NormalizeWorkloadKind(parts[0])
+		}
+		return kind, group + "/" + parts[1], nil // kind.version.group -> group/version
 	}
-	return parts[0], parts[1], nil // kind.version -> version
+	return NormalizeWorkloadKind(parts[0]), parts[1], nil // kind.version -> version
 }

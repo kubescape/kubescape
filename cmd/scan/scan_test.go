@@ -1138,6 +1138,27 @@ func TestEnforceImageSeverityThresholds(t *testing.T) {
 			fixState:      vulnerability.FixStateNotFixed,
 			expectedError: true,
 		},
+		{
+			name:          "unknown match severity fails closed",
+			threshold:     "high",
+			matchSeverity: "",
+			expectedError: true,
+		},
+		{
+			name:          "unknown match severity respects onlyFixable for unfixable CVEs",
+			threshold:     "high",
+			matchSeverity: "",
+			fixState:      vulnerability.FixStateNotFixed,
+			onlyFixable:   true,
+			expectedError: false,
+		},
+		{
+			name:          "unknown match severity with unknown fix state still fails when onlyFixable",
+			threshold:     "high",
+			matchSeverity: "",
+			onlyFixable:   true,
+			expectedError: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -1148,15 +1169,16 @@ func TestEnforceImageSeverityThresholds(t *testing.T) {
 			}
 
 			matches := match.NewMatches()
-			if tt.matchSeverity != "" {
-				matches.Add(match.Match{
-					Vulnerability: vulnerability.Vulnerability{
-						Reference: vulnerability.Reference{ID: "CVE-TEST"},
-						Metadata:  tt.metadata,
-						Fix:       vulnerability.Fix{State: tt.fixState},
-					},
-				})
-			}
+			// Always add the match: an empty matchSeverity with nil metadata
+			// is the unknown-severity path (provider also resolves unknown),
+			// which must still be exercised rather than skipped.
+			matches.Add(match.Match{
+				Vulnerability: vulnerability.Vulnerability{
+					Reference: vulnerability.Reference{ID: "CVE-TEST"},
+					Metadata:  tt.metadata,
+					Fix:       vulnerability.Fix{State: tt.fixState},
+				},
+			})
 
 			imgData := []cautils.ImageScanData{
 				{
@@ -1189,6 +1211,63 @@ func TestEnforceImageSeverityThresholdsUsesEmbeddedMetadataWithoutProvider(t *te
 	)
 
 	assert.EqualError(t, err, "image scan result exceeds severity threshold: high")
+}
+
+func TestEnforceImageSeverityThresholdsUnknownCountSuffix(t *testing.T) {
+	unknownMatches := match.NewMatches(match.Match{
+		Vulnerability: vulnerability.Vulnerability{
+			Reference: vulnerability.Reference{ID: "CVE-UNKNOWN"},
+		},
+	})
+	imgData := []cautils.ImageScanData{
+		{
+			Matches:               unknownMatches,
+			VulnerabilityProvider: mockVulnerabilityProvider{severity: ""},
+		},
+	}
+
+	err := enforceImageSeverityThresholds(imgData, &cautils.ScanInfo{FailThresholdSeverity: "high"})
+	require.Error(t, err)
+	assert.EqualError(t, err, "image scan result exceeds severity threshold: high (1 vulnerability(s) with unknown severity counted as exceeding)")
+}
+
+// TestEnforceImageSeverityThresholdsOrderIndependent proves the unknown count
+// does not depend on match enumeration order: Matches is map-backed, so a
+// determinate breach must not hide later unknowns from the message.
+func TestEnforceImageSeverityThresholdsOrderIndependent(t *testing.T) {
+	breach := match.Match{
+		Vulnerability: vulnerability.Vulnerability{
+			Reference: vulnerability.Reference{ID: "CVE-BREACH"},
+			Metadata:  &vulnerability.Metadata{Severity: vulnerability.CriticalSeverity.String()},
+		},
+	}
+	unknown := match.Match{
+		Vulnerability: vulnerability.Vulnerability{
+			Reference: vulnerability.Reference{ID: "CVE-UNKNOWN"},
+		},
+	}
+	scanInfo := &cautils.ScanInfo{FailThresholdSeverity: "high"}
+	want := "image scan result exceeds severity threshold: high (1 vulnerability(s) with unknown severity counted as exceeding)"
+	// One entry per match keeps slice order deterministic; the map-backed
+	// Matches within each entry still enumerates in random order across runs.
+	multi := []cautils.ImageScanData{
+		{Matches: match.NewMatches(breach), VulnerabilityProvider: mockVulnerabilityProvider{severity: "Critical"}},
+		{Matches: match.NewMatches(unknown), VulnerabilityProvider: mockVulnerabilityProvider{severity: ""}},
+	}
+	err := enforceImageSeverityThresholds(multi, scanInfo)
+	require.Error(t, err)
+	assert.EqualError(t, err, want)
+
+	// Same matches in a single entry, repeated: map iteration order varies
+	// across runs, but the message must be identical every time.
+	single := []cautils.ImageScanData{
+		{Matches: match.NewMatches(breach, unknown), VulnerabilityProvider: mockVulnerabilityProvider{severity: ""}},
+	}
+	for i := 0; i < 20; i++ {
+		err := enforceImageSeverityThresholds(single, scanInfo)
+		require.Error(t, err)
+		assert.EqualError(t, err, want)
+	}
 }
 
 func TestGetScanCommand_RunE_SubmitExclusivity(t *testing.T) {
@@ -1331,4 +1410,137 @@ func TestGetScanCommand_SkipDBUpdateDefaultsToFalse(t *testing.T) {
 	require.NoError(t, cmd.Execute())
 	require.NotNil(t, mockKubescape.scanInfo)
 	assert.False(t, mockKubescape.scanInfo.SkipDBUpdate)
+}
+
+func TestScanCommandRegistersWholeClusterPolicyFlag(t *testing.T) {
+	mockKubescape := &mocks.MockIKubescape{}
+	cmd := GetScanCommand(mockKubescape)
+	flag := cmd.PersistentFlags().Lookup("whole-cluster-policy")
+	require.NotNil(t, flag)
+	assert.Equal(t, "projected", flag.DefValue)
+}
+
+func TestResolveWholeClusterPolicy(t *testing.T) {
+	t.Run("explicit values", func(t *testing.T) {
+		p, err := cautils.ResolveWholeClusterPolicy("projected")
+		require.NoError(t, err)
+		assert.Equal(t, cautils.WholeClusterPolicyProjected, p)
+
+		p, err = cautils.ResolveWholeClusterPolicy("fallback")
+		require.NoError(t, err)
+		assert.Equal(t, cautils.WholeClusterPolicyFallback, p)
+
+		p, err = cautils.ResolveWholeClusterPolicy("skip")
+		require.NoError(t, err)
+		assert.Equal(t, cautils.WholeClusterPolicySkip, p)
+
+		p, err = cautils.ResolveWholeClusterPolicy("verify")
+		require.NoError(t, err)
+		assert.Equal(t, cautils.WholeClusterPolicyVerify, p)
+
+		_, err = cautils.ResolveWholeClusterPolicy("invalid")
+		assert.Error(t, err)
+	})
+
+	t.Run("env var policy", func(t *testing.T) {
+		t.Setenv("KUBESCAPE_WHOLE_CLUSTER_POLICY", "fallback")
+		p, err := cautils.ResolveWholeClusterPolicy("")
+		require.NoError(t, err)
+		assert.Equal(t, cautils.WholeClusterPolicyFallback, p)
+	})
+
+	t.Run("env var parity check", func(t *testing.T) {
+		t.Setenv("KUBESCAPE_WHOLE_CLUSTER_POLICY", "")
+		t.Setenv("KUBESCAPE_WHOLE_CLUSTER_PARITY_CHECK", "true")
+		p, err := cautils.ResolveWholeClusterPolicy("")
+		require.NoError(t, err)
+		assert.Equal(t, cautils.WholeClusterPolicyVerify, p)
+	})
+
+	t.Run("default is projected", func(t *testing.T) {
+		t.Setenv("KUBESCAPE_WHOLE_CLUSTER_POLICY", "")
+		t.Setenv("KUBESCAPE_WHOLE_CLUSTER_PARITY_CHECK", "")
+		p, err := cautils.ResolveWholeClusterPolicy("")
+		require.NoError(t, err)
+		assert.Equal(t, cautils.WholeClusterPolicyProjected, p)
+	})
+}
+
+func TestScanCommandPersistentPreRunE_ResolvesPolicyFromEnv(t *testing.T) {
+	t.Run("resolves env policy when flag unchanged", func(t *testing.T) {
+		t.Setenv("KUBESCAPE_WHOLE_CLUSTER_POLICY", "fallback")
+		mockKubescape := &mocks.MockIKubescape{}
+		cmd := GetScanCommand(mockKubescape)
+		err := cmd.PersistentPreRunE(cmd, []string{})
+		require.NoError(t, err)
+		val, err := cmd.PersistentFlags().GetString("whole-cluster-policy")
+		require.NoError(t, err)
+		assert.Equal(t, "fallback", val)
+	})
+
+	t.Run("resolves parity check env when flag unchanged", func(t *testing.T) {
+		t.Setenv("KUBESCAPE_WHOLE_CLUSTER_POLICY", "")
+		t.Setenv("KUBESCAPE_WHOLE_CLUSTER_PARITY_CHECK", "true")
+		mockKubescape := &mocks.MockIKubescape{}
+		cmd := GetScanCommand(mockKubescape)
+		err := cmd.PersistentPreRunE(cmd, []string{})
+		require.NoError(t, err)
+		val, err := cmd.PersistentFlags().GetString("whole-cluster-policy")
+		require.NoError(t, err)
+		assert.Equal(t, "verify", val)
+	})
+
+	t.Run("explicit flag overrides env policy", func(t *testing.T) {
+		tests := []struct {
+			name        string
+			flagArg     string
+			expectedVal string
+			expectError bool
+		}{
+			{
+				name:        "lowercase skip flag overrides env",
+				flagArg:     "--whole-cluster-policy=skip",
+				expectedVal: "skip",
+			},
+			{
+				name:        "uppercase VERIFY flag is normalized to verify",
+				flagArg:     "--whole-cluster-policy=VERIFY",
+				expectedVal: "verify",
+			},
+			{
+				name:        "whitespace-padded flag is normalized",
+				flagArg:     "--whole-cluster-policy=  fallback  ",
+				expectedVal: "fallback",
+			},
+			{
+				name:        "invalid flag returns error",
+				flagArg:     "--whole-cluster-policy=invalid",
+				expectError: true,
+			},
+			{
+				name:        "empty flag returns error",
+				flagArg:     "--whole-cluster-policy=",
+				expectError: true,
+			},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				t.Setenv("KUBESCAPE_WHOLE_CLUSTER_POLICY", "fallback")
+				mockKubescape := &mocks.MockIKubescape{}
+				cmd := GetScanCommand(mockKubescape)
+				err := cmd.ParseFlags([]string{tt.flagArg})
+				require.NoError(t, err)
+				err = cmd.PersistentPreRunE(cmd, []string{})
+				if tt.expectError {
+					require.Error(t, err)
+					return
+				}
+				require.NoError(t, err)
+				val, err := cmd.PersistentFlags().GetString("whole-cluster-policy")
+				require.NoError(t, err)
+				assert.Equal(t, tt.expectedVal, val)
+			})
+		}
+	})
 }

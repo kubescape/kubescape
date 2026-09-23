@@ -2,7 +2,12 @@ package imagescan
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"net/url"
 	"regexp"
 	"strings"
 	"time"
@@ -10,9 +15,11 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/arm"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/cloud"
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/to"
 	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/resourcegraph/armresourcegraph"
+	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 )
@@ -20,6 +27,11 @@ import (
 var _ IContainerImageVulnerabilityAdaptor = (*AzureAdaptor)(nil)
 
 var validKQLInputRegex = regexp.MustCompile(`^[a-zA-Z0-9.\-_/:]+$`)
+
+const (
+	maxAzureVulnerabilities    = 1000
+	maxAzureVulnerabilityPages = 50
+)
 
 // AzureAPI defines the interface for the Azure Resource Graph functions we use, enabling mocking in tests.
 type AzureAPI interface {
@@ -49,9 +61,7 @@ type AzureAdaptor struct {
 // NewAzureAdaptor creates a new Azure adaptor instance.
 func NewAzureAdaptor() *AzureAdaptor {
 	return &AzureAdaptor{
-		credProvider: func(options *azidentity.DefaultAzureCredentialOptions) (azcore.TokenCredential, error) {
-			return azidentity.NewDefaultAzureCredential(options)
-		},
+		credProvider: newDefaultAzureCredential,
 		clientFactory: func(cred azcore.TokenCredential, options *arm.ClientOptions) (AzureAPI, error) {
 			c, err := armresourcegraph.NewClient(cred, options)
 			if err != nil {
@@ -62,6 +72,20 @@ func NewAzureAdaptor() *AzureAdaptor {
 	}
 }
 
+// newDefaultAzureCredential builds the Azure credential chain shared by
+// AzureAdaptor (querying Azure Resource Graph, above) and newACRKeychain
+// (authenticating pulls from ACR, below): azidentity.NewDefaultAzureCredential's
+// full chain, in order - environment (service principal client secret,
+// client certificate, or username/password), workload identity federation,
+// managed identity (system- or user-assigned), then Azure CLI, Azure
+// Developer CLI, and Azure PowerShell sessions.
+func newDefaultAzureCredential(options *azidentity.DefaultAzureCredentialOptions) (azcore.TokenCredential, error) {
+	return azidentity.NewDefaultAzureCredential(options)
+}
+
+// resolveAzureCloudConfig maps an ACR hostname to its Azure cloud. Azure
+// Germany (which would have used .azurecr.de) was retired in October 2021
+// and is intentionally not handled here.
 func resolveAzureCloudConfig(registryHost string) (cloud.Configuration, error) {
 	registryLower := strings.ToLower(registryHost)
 	if strings.HasSuffix(registryLower, ".azurecr.io") {
@@ -241,12 +265,10 @@ func (a *AzureAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs []
 		`, registryName, imageID.Repository, imageID.Hash)
 
 			var skipToken *string
+			seenSkipTokens := make(map[string]struct{})
 			count := 0
-			const maxVulns = 1000
-			const maxPages = 50
-			truncatedByPageLimit := false
 
-			for page := 0; page < maxPages; page++ {
+			for pagesFetched := 0; ; pagesFetched++ {
 				req := armresourcegraph.QueryRequest{
 					Query: to.Ptr(queryStr),
 					Options: &armresourcegraph.QueryRequestOptions{
@@ -268,9 +290,9 @@ func (a *AzureAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs []
 					}
 					malformed := false
 					for _, item := range dataList {
-						if count >= maxVulns {
+						if count >= maxAzureVulnerabilities {
 							// Log truncation rather than failing hard
-							logger.L().Warning("truncated vulnerabilities", helpers.String("repository", imageID.Repository), helpers.Int("limit", maxVulns))
+							logger.L().Warning("truncated vulnerabilities", helpers.String("repository", imageID.Repository), helpers.Int("limit", maxAzureVulnerabilities))
 							break
 						}
 
@@ -290,7 +312,7 @@ func (a *AzureAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs []
 						// Try to get primary CVE if it exists
 						if cves := getMultipleNestedStringSafe(row, "cve", "title"); len(cves) > 0 {
 							for _, cve := range cves {
-								if count >= maxVulns {
+								if count >= maxAzureVulnerabilities {
 									break
 								}
 								newVuln := vuln
@@ -308,25 +330,51 @@ func (a *AzureAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs []
 					}
 				}
 
-				if count >= maxVulns || res.SkipToken == nil || *res.SkipToken == "" {
+				if count >= maxAzureVulnerabilities {
 					break
 				}
-				skipToken = res.SkipToken
 
-				if page == maxPages-1 {
-					// About to exit the loop solely because maxPages was reached,
-					// while the server still has more pages (SkipToken is set).
-					truncatedByPageLimit = true
+				nextToken, hasNextPage, cursorErr := nextAzureVulnerabilityToken(
+					res.SkipToken,
+					seenSkipTokens,
+					pagesFetched+1,
+				)
+				if cursorErr != nil {
+					return report, fmt.Errorf("failed to query vulnerabilities for repository %s: %w", imageID.Repository, cursorErr)
 				}
-			}
-
-			if truncatedByPageLimit {
-				return report, fmt.Errorf("exceeded max pages (%d) fetching vulnerabilities for repository %s", maxPages, imageID.Repository)
+				if !hasNextPage {
+					break
+				}
+				skipToken = to.Ptr(nextToken)
 			}
 
 			return report, nil
 		},
 	)
+}
+
+// nextAzureVulnerabilityToken decides whether another Resource Graph request
+// can make progress. Skip tokens are opaque, but they must change between
+// pages. Reusing any token already seen means the service has formed a cycle;
+// continuing would append duplicate findings until the page cap is reached.
+func nextAzureVulnerabilityToken(skipToken *string, seen map[string]struct{}, pagesFetched int) (string, bool, error) {
+	if skipToken == nil || *skipToken == "" {
+		return "", false, nil
+	}
+
+	token := *skipToken
+	if strings.TrimSpace(token) == "" {
+		return "", false, fmt.Errorf("azure resource graph pagination returned a blank skip token")
+	}
+	if _, exists := seen[token]; exists {
+		return "", false, fmt.Errorf("azure resource graph pagination repeated skip token %q", token)
+	}
+	if pagesFetched >= maxAzureVulnerabilityPages {
+		return "", false, fmt.Errorf("exceeded max pages (%d) fetching azure vulnerabilities", maxAzureVulnerabilityPages)
+	}
+
+	seen[token] = struct{}{}
+	return token, true, nil
 }
 
 // GetImagesInformation retrieves the BOM and manifest information for a list of image identifiers.
@@ -365,4 +413,212 @@ func getMultipleNestedStringSafe(m map[string]interface{}, key1, key2 string) []
 		}
 	}
 	return results
+}
+
+// --- Azure Container Registry image-pull authentication ---
+//
+// This is unrelated to AzureAdaptor above: AzureAdaptor asks Azure Resource
+// Graph for scan results Microsoft Defender for Cloud already produced for
+// an image already in ACR. newACRKeychain, instead, is what lets Kubescape's
+// own pull-and-scan path (Service.ScanWithOptions in imagescan.go)
+// authenticate to ACR in the first place. It shares newDefaultAzureCredential
+// and resolveAzureCloudConfig with AzureAdaptor above, so it supports every
+// auth method AzureAdaptor.Login does: service principal (client secret,
+// client certificate, or username/password), workload identity federation,
+// managed identity (system- or user-assigned), and Azure CLI/Developer
+// CLI/PowerShell sessions.
+//
+// All cloud-provider-specific keychain code belongs here (or in a sibling
+// *_adaptor.go, for another provider) - imagescan.go stays generic and only
+// ever calls newRegistryKeychain(), never a provider directly.
+
+// newRegistryKeychain composes the registry credential fallback used when no
+// explicit RegistryCredentials/imagePullSecret matches a target registry.
+// This mirrors the composition pattern documented by go-containerregistry
+// itself (authn.NewMultiKeychain(authn.DefaultKeychain, google.Keychain,
+// authn.NewKeychainFromHelper(ecr.ECRHelper{...}), ...)) - one flat,
+// build-once list, so adding another cloud provider (e.g. AWS ECR via
+// authn.NewKeychainFromHelper(ecr.ECRHelper{...}), or GKE/Artifact Registry
+// via google.Keychain) is a matter of adding one more entry here, not a
+// struct or function-signature change elsewhere.
+//
+// authn.DefaultKeychain (docker config / credential helpers on $PATH) is
+// checked before any cloud-specific keychain: authn.NewMultiKeychain stops
+// at the first non-anonymous result without verifying it actually works, so
+// a deliberately configured docker login must take priority over an ambient
+// cloud identity that merely happens to be present in the environment.
+func newRegistryKeychain() authn.Keychain {
+	return authn.NewMultiKeychain(
+		authn.DefaultKeychain,
+		newACRKeychain(),
+	)
+}
+
+// acrKeychainRefreshInterval bounds how long a single already-resolved ACR
+// authenticator is reused by a later Authorization() call on that same
+// authenticator (see authn.RefreshingKeychain). It does NOT cache across
+// separate images: authn.RefreshingKeychain.Resolve calls the wrapped
+// keychain fresh every time, so a --scan-images run over N images still
+// does a fresh Azure AD + /oauth2/exchange round trip per image, each
+// bounded by httpClient's own timeout below.
+const acrKeychainRefreshInterval = 30 * time.Minute
+
+// newACRKeychain returns an authn.Keychain that authenticates to Azure
+// Container Registry (*.azurecr.io/.cn/.us). It resolves to authn.Anonymous
+// - not an error - for any other registry or when no Azure credential is
+// available, so it's safe to compose with other keychains via
+// authn.NewMultiKeychain without breaking non-ACR pulls.
+func newACRKeychain() authn.Keychain {
+	return authn.RefreshingKeychain(&azureACRKeychain{
+		httpClient: &http.Client{
+			Timeout: 15 * time.Second,
+			// The exchange POST carries an AAD access token in its body,
+			// which Go's client preserves across 307/308 redirects since
+			// the request body is replayable (strings.NewReader supplies
+			// GetBody). Refuse to follow any redirect so that token can
+			// never be replayed to a different host.
+			CheckRedirect: func(*http.Request, []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
+		},
+		credProvider: func(cloudConfig cloud.Configuration) (azcore.TokenCredential, error) {
+			return newDefaultAzureCredential(&azidentity.DefaultAzureCredentialOptions{
+				ClientOptions: azcore.ClientOptions{Cloud: cloudConfig},
+			})
+		},
+	}, acrKeychainRefreshInterval)
+}
+
+// azureACRKeychain implements authn.Keychain for Azure Container Registry.
+var _ authn.Keychain = (*azureACRKeychain)(nil)
+
+type azureACRKeychain struct {
+	httpClient   *http.Client
+	credProvider func(cloudConfig cloud.Configuration) (azcore.TokenCredential, error)
+}
+
+// Resolve implements authn.Keychain.
+func (k *azureACRKeychain) Resolve(target authn.Resource) (authn.Authenticator, error) {
+	registry := target.RegistryStr()
+
+	cloudConfig, err := resolveAzureCloudConfig(registry)
+	if err != nil {
+		// Not a registry we recognize as ACR.
+		return authn.Anonymous, nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	identityToken, err := k.acrIdentityToken(ctx, registry, cloudConfig)
+	if err != nil {
+		// Soft-fail: let the caller fall back to the next keychain (e.g. the
+		// default docker-config keychain) instead of aborting the pull.
+		logger.L().Debug("azure keychain: failed to obtain ACR credentials",
+			helpers.String("registry", registry), helpers.Error(err))
+		return authn.Anonymous, nil
+	}
+
+	return authn.FromConfig(authn.AuthConfig{IdentityToken: identityToken}), nil
+}
+
+// acrIdentityToken acquires an ARM-scoped Azure AD access token for
+// registry's cloud, then exchanges it for an ACR refresh token. The
+// resulting refresh token is presented to go-containerregistry as an
+// authn.AuthConfig.IdentityToken, which drives the standard OAuth2
+// refresh_token flow against the registry's own /oauth2/token endpoint -
+// the same exchange `az acr login` performs.
+func (k *azureACRKeychain) acrIdentityToken(ctx context.Context, registry string, cloudConfig cloud.Configuration) (string, error) {
+	cred, err := k.credProvider(cloudConfig)
+	if err != nil {
+		return "", fmt.Errorf("no Azure credential available: %w", err)
+	}
+
+	armConf, ok := cloudConfig.Services[cloud.ResourceManager]
+	if !ok || armConf.Audience == "" {
+		return "", fmt.Errorf("no Azure Resource Manager audience configured for this cloud")
+	}
+
+	aadToken, err := cred.GetToken(ctx, policy.TokenRequestOptions{Scopes: []string{armConf.Audience + "/.default"}})
+	if err != nil {
+		return "", fmt.Errorf("failed to acquire Azure AD access token: %w", err)
+	}
+
+	return k.exchangeForACRRefreshToken(ctx, registry, aadToken.Token, tenantIDFromToken(aadToken.Token))
+}
+
+// exchangeForACRRefreshToken exchanges an AAD access token for an ACR
+// refresh token via the registry's /oauth2/exchange endpoint.
+func (k *azureACRKeychain) exchangeForACRRefreshToken(ctx context.Context, registry, aadAccessToken, tenantID string) (string, error) {
+	form := url.Values{}
+	form.Set("grant_type", "access_token")
+	form.Set("service", registry)
+	form.Set("access_token", aadAccessToken)
+	if tenantID != "" {
+		form.Set("tenant", tenantID)
+	}
+
+	exchangeURL := "https://" + registry + "/oauth2/exchange"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, exchangeURL, strings.NewReader(form.Encode()))
+	if err != nil {
+		return "", fmt.Errorf("failed to build ACR token exchange request for %s: %w", registry, err)
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	resp, err := k.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("failed to reach ACR token exchange endpoint for %s: %w", registry, err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return "", fmt.Errorf("failed to read ACR token exchange response from %s: %w", registry, err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("ACR token exchange for %s failed with status %d: %s", registry, resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+
+	var exchangeResp struct {
+		RefreshToken string `json:"refresh_token"`
+	}
+	if err := json.Unmarshal(body, &exchangeResp); err != nil {
+		return "", fmt.Errorf("failed to parse ACR token exchange response from %s: %w", registry, err)
+	}
+	if exchangeResp.RefreshToken == "" {
+		return "", fmt.Errorf("ACR token exchange for %s returned no refresh token", registry)
+	}
+
+	return exchangeResp.RefreshToken, nil
+}
+
+// tenantIDFromToken extracts the "tid" (tenant ID) claim from an AAD JWT
+// access token, without verifying its signature - the token was already
+// obtained from a trusted azidentity credential; this only reads a claim off
+// it, to tell the ACR exchange endpoint which tenant the token belongs to
+// regardless of which of the six DefaultAzureCredential methods produced it
+// (an active `az login` session, for instance, need not match any
+// AZURE_TENANT_ID environment variable). Returns "" if the token can't be
+// parsed; the exchange endpoint treats an absent tenant as "infer it from
+// the token", which is sufficient for single-tenant scenarios.
+func tenantIDFromToken(token string) string {
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		return ""
+	}
+	payload := parts[1]
+	if m := len(payload) % 4; m != 0 {
+		payload += strings.Repeat("=", 4-m)
+	}
+	decoded, err := base64.URLEncoding.DecodeString(payload)
+	if err != nil {
+		return ""
+	}
+	var claims struct {
+		TenantID string `json:"tid"`
+	}
+	if err := json.Unmarshal(decoded, &claims); err != nil {
+		return ""
+	}
+	return claims.TenantID
 }

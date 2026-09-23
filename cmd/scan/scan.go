@@ -115,6 +115,23 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 			if err := validateKubeContextsSupported(cmd, &scanInfo); err != nil {
 				return err
 			}
+			if cmd.Flags().Changed("whole-cluster-policy") {
+				raw := strings.TrimSpace(string(scanInfo.WholeClusterPolicy))
+				if raw == "" {
+					return cautils.ValidateWholeClusterPolicy(scanInfo.WholeClusterPolicy)
+				}
+				resolved, err := cautils.ResolveWholeClusterPolicy(raw)
+				if err != nil {
+					return err
+				}
+				scanInfo.WholeClusterPolicy = resolved
+			} else {
+				resolved, err := cautils.ResolveWholeClusterPolicy("")
+				if err != nil {
+					return err
+				}
+				scanInfo.WholeClusterPolicy = resolved
+			}
 			captureKubeconfigSelection(cmd, &scanInfo)
 			applyRegistryCredentialsFromEnv(cmd, &scanInfo)
 			return nil
@@ -213,7 +230,7 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	scanCmd.PersistentFlags().Float32Var(&scanInfo.FailCoverageThreshold, "fail-coverage-below", 0, "Fail (exit code 1) when the scan coverage score drops below this percentage (0 to disable). The score is the ratio of evaluated controls discounted by 3 points per silent failed GVR pull (a resource type that failed to collect entirely but whose dependent controls still evaluated via other resource types), 2 points per partial GVR pull, and 5 points per degraded policy input, so a scan with every control evaluated can still fail on partial resource collection or fallback policy inputs")
 	scanCmd.PersistentFlags().BoolVar(&scanInfo.FailOnDegradedConfig, "fail-on-degraded-config", false, "Fail the scan (exit code 1) if control configurations or exceptions could not be loaded from their configured source and bundled defaults were used instead")
 
-	scanCmd.PersistentFlags().StringVar(&scanInfo.FailThresholdSeverity, "severity-threshold", "", "Severity threshold is the severity of failed controls at which the command fails and returns exit code 1. Failed controls whose severity is unknown (missing base score) are treated as exceeding any threshold")
+	scanCmd.PersistentFlags().StringVar(&scanInfo.FailThresholdSeverity, "severity-threshold", "", "Severity threshold is the severity of failed controls at which the command fails and returns exit code 1. Failed controls whose severity is unknown (missing base score) are treated as exceeding any threshold. On image scans, vulnerabilities whose severity cannot be determined are likewise counted as exceeding any threshold")
 	scanCmd.PersistentFlags().BoolVar(&scanInfo.OnlyFixable, "only-fixable", false, "When used with --severity-threshold on image scans, only count CVEs that have an available fix toward the pass/fail decision")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.ControlsVersion, "controls-version", "", "Pin the regolibrary release tag used to download controls (see https://github.com/kubescape/regolibrary/releases). If not used will download the latest release. Has no effect when --account is set (cloud backend is used instead)")
 
@@ -278,9 +295,12 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	scanCmd.PersistentFlags().StringVar(&scanInfo.IncludeControls, "include-controls", "", "Comma-separated control IDs to include (case-insensitive); all other controls are skipped. A control's CIS section number is accepted where the control carries one. e.g. --include-controls C-0001,C-0002")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.ListingURL, "grype-db-url", "", "Grype vulnerability database URL")
 	scanCmd.PersistentFlags().BoolVar(&scanInfo.SkipDBUpdate, "skip-db-update", false, "Do not update the vulnerability database before scanning images. Uses the locally cached database; fails if none is cached.")
+	scanCmd.PersistentFlags().BoolVar(&scanInfo.FailOnStaleDB, "fail-on-stale-db", false, "Fail image scans when the vulnerability database is older than --max-db-age (default: warn only). An explicitly passed value (even false) wins over KS_FAIL_ON_STALE_DB. Failing requires network access for the update check when the DB is updated.")
+	scanCmd.PersistentFlags().DurationVar(&scanInfo.MaxDBAge, "max-db-age", 0, "Maximum allowed age of the vulnerability database before it is considered stale (e.g. 120h, 168h). Warns always; fails only with --fail-on-stale-db. 0 selects the default (120h). An explicitly passed value (even 0) wins over KS_MAX_DB_AGE.")
 	scanCmd.PersistentFlags().DurationVar(&scanInfo.ScanTimeout, "scan-timeout", 0, "Maximum duration for the scan (e.g. 5m, 30s, 1h). 0 means no timeout. When the timeout is reached the scan exits with a non-zero code.")
 	scanCmd.PersistentFlags().DurationVar(&scanInfo.ControlTimeout, "control-timeout", 0, "Maximum duration for evaluating a single control (e.g. 30s, 1m). 0 means no timeout. Controls that exceed this are marked as not evaluated and the scan continues. Must be lower than --scan-timeout when both are set.")
 	scanCmd.PersistentFlags().BoolVar(&scanInfo.EnableStreaming, "enable-streaming", false, "Enable resource streaming for large clusters to reduce memory usage. Resources are processed in batches instead of loading all at once. Automatically enabled for clusters with >2500 resources.")
+	scanCmd.PersistentFlags().StringVar((*string)(&scanInfo.WholeClusterPolicy), "whole-cluster-policy", string(cautils.WholeClusterPolicyProjected), "Execution policy for whole-cluster controls (C-0261, C-0266, C-0267, C-0272): 'projected' (incremental projection of matching resources), 'fallback' (materialize full cluster in memory), 'skip' (skip whole-cluster controls for minimum memory), or 'verify' (debug parity check between projected and fallback; mismatches are logged at error level, exit code is 0).")
 	scanCmd.PersistentFlags().BoolVar(&scanInfo.DryRun, "dry-run", false, "Check whether the current credentials can list every resource type the requested policies need, without collecting resources or evaluating controls. Cluster scans only.")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.OtelEndpoint, "otel-endpoint", "", fmt.Sprintf("Export scan traces and metrics to an OTLP collector, e.g. --otel-endpoint localhost:4317. Accepts host:port (plaintext) or a http(s):// URL. When unset, the standard %s environment variable is used; when neither is set no telemetry is collected.", telemetry.EnvEndpoint))
 	scanCmd.PersistentFlags().BoolVar(&scanInfo.Incremental, "incremental", false, "Cache the verdict for each resource, keyed by a hash of its spec/metadata plus the controls-config version, and skip re-evaluating unchanged resources on the next scan. Opt-in; scan output is unaffected. Cache automatically invalidates when the controls-config version changes; clear it manually with 'kubescape config delete cache'.")
@@ -310,6 +330,9 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	scanCmd.PersistentFlags().AddGoFlag(flag.Lookup("kubeconfig"))
 
 	scanCmd.PersistentFlags().StringSliceVar(&scanInfo.KubeContexts, "kube-contexts", nil, "Scan each of these kube contexts in one run (comma-separated, or repeat the flag), writing one report per context to a context-suffixed --output path. Requires --output. Distinct from --kube-context, which selects a single context; when --kube-contexts is set it takes over the scan instead.")
+	scanCmd.PersistentFlags().StringVar(&scanInfo.FleetReport, "fleet-report", "", "With --kube-contexts, also write one combined JSON report across every scanned context to this path, alongside the per-context reports. Every requested context appears in it, including the ones that could not be scanned, with a control-by-cluster matrix over those that could. Not supported with --hide or --encrypt.")
+
+	scanCmd.PersistentFlags().StringVar(&scanInfo.ReferenceCluster, "reference-cluster", "", "With --fleet-report, the kube context whose findings the other clusters are read against, so the combined report shows what that cluster found on every control they disagree on. Must be one of --kube-contexts. Without it the report simply says where the clusters disagree.")
 
 	scanCmd.PersistentFlags().StringVar(&scanInfo.Baseline, "baseline", "", "Path to a saved JSON scan report to diff the fresh scan against.")
 	scanCmd.PersistentFlags().BoolVar(&scanInfo.BaselineFailOnNew, "baseline-fail-on-new", false, "With --baseline, exit with code 1 when new failures are found versus the baseline.")
@@ -403,7 +426,8 @@ func securityScan(scanInfo cautils.ScanInfo, ks meta.IKubescape, policyIdentifie
 
 	ctx, cancel := deriveTimeoutContext(&scanInfo, ks)
 	defer cancel()
-	return runSecurityScan(ctx, &scanInfo, ks, policyIdentifiers)
+	_, err := runSecurityScan(ctx, &scanInfo, ks, policyIdentifiers)
+	return err
 }
 
 // runSecurityScan runs one cluster's scan to completion: Scan, HandleResults,
@@ -411,32 +435,32 @@ func securityScan(scanInfo cautils.ScanInfo, ks meta.IKubescape, policyIdentifie
 // single-context path. It's factored out so fleetScan (cmd/scan/fleetscan.go)
 // can run the exact same per-cluster behavior once per requested context,
 // instead of a parallel, divergent copy of this logic.
-func runSecurityScan(ctx context.Context, scanInfo *cautils.ScanInfo, ks meta.IKubescape, policyIdentifiers []cautils.PolicyIdentifier) error {
+func runSecurityScan(ctx context.Context, scanInfo *cautils.ScanInfo, ks meta.IKubescape, policyIdentifiers []cautils.PolicyIdentifier) (*resultshandling.ResultsHandler, error) {
 	results, err := ks.ScanContext(ctx, scanInfo, policyIdentifiers)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	if err = results.HandleResults(ctx, scanInfo); err != nil {
-		return err
+		return results, err
 	}
 
 	if err := enforceSeverityThresholds(&results.GetData().Report.SummaryDetails, scanInfo); err != nil {
-		return err
+		return results, err
 	}
 	if scanInfo.ScanImages {
 		if err := enforceImageSeverityThresholds(results.ImageScanData, scanInfo); err != nil {
-			return err
+			return results, err
 		}
 	}
 	if err := enforceCoverageThreshold(results.GetData().ScanCoverage, len(results.GetData().Report.SummaryDetails.Controls), scanInfo); err != nil {
-		return err
+		return results, err
 	}
 	if err := enforcePolicyDegradation(results.GetData().ScanCoverage, scanInfo); err != nil {
-		return err
+		return results, err
 	}
 
-	return enforceBaselineDrift(ctx, results, scanInfo)
+	return results, enforceBaselineDrift(ctx, results, scanInfo)
 }
 
 func enforceBaselineDrift(ctx context.Context, results *resultshandling.ResultsHandler, scanInfo *cautils.ScanInfo) error {
@@ -467,26 +491,44 @@ func enforceImageSeverityThresholds(imageScanData []cautils.ImageScanData, scanI
 		return nil
 	}
 
+	// Drain every Enumerate() channel fully: each is fed by a goroutine over
+	// an unbuffered channel, so an early return would strand the producer
+	// and leak a goroutine per call. A single full pass also makes the
+	// unknown count order-independent: a determinate breach no longer hides
+	// later unknowns from the message.
+	breach, unknownCount := false, 0
 	for _, data := range imageScanData {
 		for m := range data.Matches.Enumerate() {
-			metadata := m.Vulnerability.Metadata
-			if metadata == nil || imagescan.ParseSeverity(metadata.Severity) == vulnerability.UnknownSeverity {
-				if data.VulnerabilityProvider == nil {
+			matchSeverity, unknown := imagescan.MatchSeverity(m, data.VulnerabilityProvider)
+			if unknown {
+				// Fail closed, mirroring the posture gate: an indeterminate
+				// CVE must not silently pass. The onlyFixable carve-out is
+				// preserved only for definitively unfixable CVEs.
+				if scanInfo.OnlyFixable && imagescan.IsDefinitivelyUnfixable(m.Vulnerability.Fix.State) {
 					continue
 				}
-				var err error
-				//nolint:staticcheck // fallback for matches without a known embedded severity
-				metadata, err = data.VulnerabilityProvider.VulnerabilityMetadata(m.Vulnerability.Reference)
-				if err != nil {
-					continue
-				}
+				unknownCount++
+				continue
 			}
 
-			if imagescan.ParseSeverity(metadata.Severity) >= thresholdSeverity &&
+			if matchSeverity >= thresholdSeverity &&
 				(!scanInfo.OnlyFixable || m.Vulnerability.Fix.State == vulnerability.FixStateFixed) {
-				return fmt.Errorf("image scan result exceeds severity threshold: %s", scanInfo.FailThresholdSeverity)
+				breach = true
 			}
 		}
 	}
+	if breach || unknownCount > 0 {
+		return thresholdExceededError(scanInfo.FailThresholdSeverity, unknownCount)
+	}
 	return nil
+}
+
+// thresholdExceededError keeps the base message byte-identical when no
+// unknown-severity CVE contributed, so existing consumers are unaffected;
+// the unknown count is appended only when it is non-zero.
+func thresholdExceededError(threshold string, unknownCount int) error {
+	if unknownCount > 0 {
+		return fmt.Errorf("image scan result exceeds severity threshold: %s (%d vulnerability(s) with unknown severity counted as exceeding)", threshold, unknownCount)
+	}
+	return fmt.Errorf("image scan result exceeds severity threshold: %s", threshold)
 }

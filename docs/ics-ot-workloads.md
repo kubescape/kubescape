@@ -89,7 +89,7 @@ When a finding represents a documented and risk-accepted OT deviation, suppress 
     {
         "name": "exclude-ot-sector-host-network",
         "policyType": "postureExceptionPolicy",
-        "actions": ["alertOnly"],
+        "actions": ["disable"],
         "resources": [
             {
                 "designatorType": "Attributes",
@@ -115,7 +115,7 @@ The C-0041 finding against `modbus-controller` moves out of the failed set (it a
 
 ## Network Policies for OT Namespaces
 
-Suppressing a Kubescape finding does not remove the underlying risk, it only acknowledges it. For every OT exception, document a compensating control. The most common compensating control in OT namespaces is a NetworkPolicy that restricts which pods may open a session to the protocol port.
+Suppressing a Kubescape finding does not remove the underlying risk; it records that the risk was accepted. For every OT exception, document a compensating control. The most common compensating control in OT namespaces is a NetworkPolicy that restricts which pods may open a session to the protocol port.
 
 The following pattern works for Modbus controllers: default-deny all ingress to the `ot-modbus` namespace, then allow TCP/502 only from the HMI namespace.
 

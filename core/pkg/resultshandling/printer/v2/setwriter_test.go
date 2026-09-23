@@ -51,7 +51,7 @@ func TestSetWriterUsesSharedOutputResolution(t *testing.T) {
 			name:       "csv",
 			format:     baseprinter.CsvFormat,
 			baseName:   csvOutputFile,
-			newPrinter: func() setWriterPrinter { return NewCsvPrinter() },
+			newPrinter: func() setWriterPrinter { return NewCsvPrinter(false) },
 			writerName: func(p setWriterPrinter) string { return p.(*CsvPrinter).writer.Name() },
 			closeWriter: func(p setWriterPrinter) error {
 				return p.(*CsvPrinter).CloseWriter()
@@ -81,7 +81,7 @@ func TestSetWriterUsesSharedOutputResolution(t *testing.T) {
 			name:       "sarif",
 			format:     baseprinter.SARIFFormat,
 			baseName:   sarifOutputFile,
-			newPrinter: func() setWriterPrinter { return NewSARIFPrinter() },
+			newPrinter: func() setWriterPrinter { return NewSARIFPrinter(false) },
 			writerName: func(p setWriterPrinter) string { return p.(*SARIFPrinter).writer.Name() },
 			closeWriter: func(p setWriterPrinter) error {
 				return p.(*SARIFPrinter).CloseWriter()
@@ -91,7 +91,7 @@ func TestSetWriterUsesSharedOutputResolution(t *testing.T) {
 			name:       "gitlab-sast",
 			format:     baseprinter.GitLabSASTFormat,
 			baseName:   gitLabSASTOutputFile,
-			newPrinter: func() setWriterPrinter { return NewGitLabSASTPrinter() },
+			newPrinter: func() setWriterPrinter { return NewGitLabSASTPrinter(false) },
 			writerName: func(p setWriterPrinter) string { return p.(*GitLabSASTPrinter).writer.Name() },
 			closeWriter: func(p setWriterPrinter) error {
 				return p.(*GitLabSASTPrinter).CloseWriter()
@@ -131,7 +131,7 @@ func TestSetWriterUsesSharedOutputResolution(t *testing.T) {
 			name:       "html",
 			format:     baseprinter.HtmlFormat,
 			baseName:   htmlOutputFile,
-			newPrinter: func() setWriterPrinter { return NewHtmlPrinter() },
+			newPrinter: func() setWriterPrinter { return NewHtmlPrinter(false) },
 			writerName: func(p setWriterPrinter) string { return p.(*HtmlPrinter).writer.Name() },
 			closeWriter: func(p setWriterPrinter) error {
 				return p.(*HtmlPrinter).CloseWriter()

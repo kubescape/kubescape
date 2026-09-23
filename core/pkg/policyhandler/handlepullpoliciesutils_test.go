@@ -59,31 +59,6 @@ func Test_validateFramework(t *testing.T) {
 	}
 }
 
-func TestGetScanKind(t *testing.T) {
-	tests := []struct {
-		policyIdentifier []cautils.PolicyIdentifier
-		want             string
-	}{
-		{
-			policyIdentifier: []cautils.PolicyIdentifier{
-				{Kind: "ClusterAdmissionRule", Identifier: "policy1"},
-				{Kind: "K8sPSP", Identifier: "policy2"},
-			},
-			want: "ClusterAdmissionRule",
-		},
-		{
-			policyIdentifier: []cautils.PolicyIdentifier{},
-			want:             "unknown",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.want, func(t *testing.T) {
-			assert.Equal(t, tt.want, string(getScanKind(tt.policyIdentifier)))
-		})
-	}
-}
-
 func TestPolicyDownloadError(t *testing.T) {
 	tests := []struct {
 		err  error

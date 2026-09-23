@@ -142,7 +142,7 @@ func TestFixReportCache_LocationResolverMatchesFreshResolver(t *testing.T) {
 
 	for _, lookup := range lookups {
 		t.Run(fmt.Sprintf("%s@%d", lookup.fixPath, lookup.docIndex), func(t *testing.T) {
-			fresh, err := locationresolver.NewFixPathLocationResolver(path)
+			fresh, err := locationresolver.NewPathLocationResolver(path)
 			require.NoError(t, err)
 			want, err := fresh.ResolveLocation(lookup.fixPath, lookup.docIndex)
 			require.NoError(t, err)
@@ -275,7 +275,7 @@ func TestPrintConfigurationScan_MultiDocumentFixesPerDocument(t *testing.T) {
 	require.NoError(t, err)
 	defer out.Close()
 
-	sp := NewSARIFPrinter()
+	sp := NewSARIFPrinter(false)
 	sp.writer = out
 	require.NoError(t, sp.printConfigurationScan(context.Background(), session))
 
@@ -341,7 +341,7 @@ func BenchmarkPrintConfigurationScan(b *testing.B) {
 			for i := 0; i < b.N; i++ {
 				out, err := os.CreateTemp(b.TempDir(), "bench-*.sarif")
 				require.NoError(b, err)
-				sp := NewSARIFPrinter()
+				sp := NewSARIFPrinter(false)
 				sp.writer = out
 				require.NoError(b, sp.printConfigurationScan(context.Background(), session))
 				require.NoError(b, out.Close())

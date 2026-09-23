@@ -141,12 +141,13 @@ func TestPullSingleResourceInto_YieldsEveryPagedObjectOnce(t *testing.T) {
 	handler := lister.handler()
 
 	var seen []*unstructured.Unstructured
-	selectorErrs := handler.pullSingleResourceInto(context.Background(), sinkTestGVR, "", "", &EmptySelector{}, nil, func(obj *unstructured.Unstructured) error {
+	selectorErrs, err := handler.pullSingleResourceInto(context.Background(), sinkTestGVR, "", "", &EmptySelector{}, nil, func(obj *unstructured.Unstructured) error {
 		// Copy: obj aims into the page the pager still owns.
 		seen = append(seen, obj.DeepCopy())
 		return nil
 	})
 
+	require.NoError(t, err)
 	require.Empty(t, selectorErrs)
 	assert.Equal(t,
 		[]string{"pod-0", "pod-1", "pod-2", "pod-3", "pod-4", "pod-5", "pod-6"},
@@ -180,11 +181,12 @@ func TestPullSingleResourceInto_ExpiredContinuationTokenIsNotReplayed(t *testing
 		failSelectorAfterPage("", 1, expired)
 
 	var seen []*unstructured.Unstructured
-	selectorErrs := lister.handler().pullSingleResourceInto(context.Background(), sinkTestGVR, "", "", &EmptySelector{}, nil, func(obj *unstructured.Unstructured) error {
+	selectorErrs, err := lister.handler().pullSingleResourceInto(context.Background(), sinkTestGVR, "", "", &EmptySelector{}, nil, func(obj *unstructured.Unstructured) error {
 		seen = append(seen, obj.DeepCopy())
 		return nil
 	})
 
+	require.NoError(t, err)
 	assert.Equal(t, []string{"pod-0", "pod-1"}, collectNames(seen),
 		"the objects served before the token expired must be kept, and only once")
 
@@ -212,11 +214,12 @@ func TestPullSingleResourceInto_PartialSelectorFailureKeepsWalkingRemainingSelec
 	selectors := &staticFieldSelector{selectors: []string{"metadata.namespace=broken", "metadata.namespace=healthy"}}
 
 	var seen []*unstructured.Unstructured
-	selectorErrs := lister.handler().pullSingleResourceInto(context.Background(), sinkTestGVR, "", "", selectors, nil, func(obj *unstructured.Unstructured) error {
+	selectorErrs, err := lister.handler().pullSingleResourceInto(context.Background(), sinkTestGVR, "", "", selectors, nil, func(obj *unstructured.Unstructured) error {
 		seen = append(seen, obj.DeepCopy())
 		return nil
 	})
 
+	require.NoError(t, err)
 	require.Len(t, seen, 5, "page 1 of the failed selector plus every object of the healthy one")
 	assert.Equal(t, []string{"broken", "broken", "healthy", "healthy", "healthy"},
 		[]string{seen[0].GetNamespace(), seen[1].GetNamespace(), seen[2].GetNamespace(), seen[3].GetNamespace(), seen[4].GetNamespace()})
@@ -226,14 +229,14 @@ func TestPullSingleResourceInto_PartialSelectorFailureKeepsWalkingRemainingSelec
 	assert.ErrorContains(t, selectorErrs[0].err, "etcd unavailable")
 }
 
-// A sink whose per-object work fails stops the selector it is walking the same
-// way a LIST error does, and the caller learns which selector it was.
+// A sink whose per-object work fails terminates traversal immediately and returns
+// the sink error separately from selectorErrs.
 func TestPullSingleResourceInto_SinkErrorStopsTheSelectorAndIsReported(t *testing.T) {
 	sinkErr := errors.New("partition store is full")
 	lister := newPagedLister(2).serve("", sinkTestPods("default", 6)...)
 
 	handed := 0
-	selectorErrs := lister.handler().pullSingleResourceInto(context.Background(), sinkTestGVR, "", "", &EmptySelector{}, nil, func(*unstructured.Unstructured) error {
+	selectorErrs, err := lister.handler().pullSingleResourceInto(context.Background(), sinkTestGVR, "", "", &EmptySelector{}, nil, func(*unstructured.Unstructured) error {
 		handed++
 		if handed == 3 {
 			return sinkErr
@@ -242,8 +245,8 @@ func TestPullSingleResourceInto_SinkErrorStopsTheSelectorAndIsReported(t *testin
 	})
 
 	assert.Equal(t, 3, handed, "the traversal must stop at the failing object")
-	require.Len(t, selectorErrs, 1)
-	assert.ErrorIs(t, selectorErrs[0].err, sinkErr)
+	assert.Empty(t, selectorErrs, "sink error is returned directly, not recorded as selector failure")
+	require.ErrorIs(t, err, sinkErr)
 }
 
 // Parent filtering happens before the sink, so a sink never stores an object
@@ -255,11 +258,12 @@ func TestPullSingleResourceInto_FiltersOwnedWorkloadsBeforeTheSink(t *testing.T)
 	lister := newPagedLister(2).serve("", sinkTestPod("bare-pod", "default"), owned)
 
 	var seen []*unstructured.Unstructured
-	selectorErrs := lister.handler().pullSingleResourceInto(context.Background(), sinkTestGVR, "", "", &EmptySelector{}, nil, func(obj *unstructured.Unstructured) error {
+	selectorErrs, err := lister.handler().pullSingleResourceInto(context.Background(), sinkTestGVR, "", "", &EmptySelector{}, nil, func(obj *unstructured.Unstructured) error {
 		seen = append(seen, obj.DeepCopy())
 		return nil
 	})
 
+	require.NoError(t, err)
 	require.Empty(t, selectorErrs)
 	assert.Equal(t, []string{"bare-pod"}, collectNames(seen))
 }
@@ -273,11 +277,12 @@ func TestPullSingleResourceInto_CancelledContextNeverReachesTheSink(t *testing.T
 	cancel()
 
 	handed := 0
-	selectorErrs := lister.handler().pullSingleResourceInto(ctx, sinkTestGVR, "", "", &EmptySelector{}, nil, func(*unstructured.Unstructured) error {
+	selectorErrs, err := lister.handler().pullSingleResourceInto(ctx, sinkTestGVR, "", "", &EmptySelector{}, nil, func(*unstructured.Unstructured) error {
 		handed++
 		return nil
 	})
 
+	require.NoError(t, err)
 	assert.Zero(t, handed)
 	assert.Empty(t, lister.recordedCalls())
 	require.Len(t, selectorErrs, 1)

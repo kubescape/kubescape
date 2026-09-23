@@ -1395,7 +1395,19 @@ func TestUpdateResults_ScopeLessExceptionSuppressesResourceBackedFinding(t *test
 	})
 }
 
-func TestBuildControlExcludedRules(t *testing.T) {
+// keptControlIDs flattens the control IDs that survive filterFrameworkControls,
+// in framework order, so tests can assert on the selected control set.
+func keptControlIDs(frameworks []reporthandling.Framework) []string {
+	ids := []string{}
+	for _, fw := range frameworks {
+		for i := range fw.Controls {
+			ids = append(ids, fw.Controls[i].ControlID)
+		}
+	}
+	return ids
+}
+
+func TestFilterFrameworkControls(t *testing.T) {
 	framework := []reporthandling.Framework{{
 		Controls: []reporthandling.Control{
 			{ControlID: "C-0001", Rules: []reporthandling.PolicyRule{{PortalBase: armotypes.PortalBase{Name: "rule-a"}}}},
@@ -1405,73 +1417,116 @@ func TestBuildControlExcludedRules(t *testing.T) {
 	}}
 
 	tests := []struct {
-		name          string
-		base          map[string]bool
-		skip          []string
-		include       []string
-		excludedRules []string
-		notExcluded   []string
+		name    string
+		skip    []string
+		include []string
+		want    []string
 	}{
 		{
-			name:          "no filters",
-			base:          map[string]bool{"rule-a": false},
-			excludedRules: nil,
-			notExcluded:   []string{"rule-a", "rule-b", "rule-c"},
+			name: "no filters",
+			want: []string{"C-0001", "C-0002", "C-0003"},
 		},
 		{
-			name:          "skip one control",
-			skip:          []string{"C-0002"},
-			excludedRules: []string{"rule-b"},
-			notExcluded:   []string{"rule-a", "rule-c"},
+			name: "skip one control",
+			skip: []string{"C-0002"},
+			want: []string{"C-0001", "C-0003"},
 		},
 		{
-			name:          "include only two controls",
-			include:       []string{"C-0001", "C-0002"},
-			excludedRules: []string{"rule-c"},
-			notExcluded:   []string{"rule-a", "rule-b"},
+			name:    "include only two controls",
+			include: []string{"C-0001", "C-0002"},
+			want:    []string{"C-0001", "C-0002"},
 		},
 		{
-			name:          "include two and skip one of them",
-			include:       []string{"C-0001", "C-0002"},
-			skip:          []string{"C-0002"},
-			excludedRules: []string{"rule-b", "rule-c"},
-			notExcluded:   []string{"rule-a"},
+			name:    "include two and skip one of them",
+			include: []string{"C-0001", "C-0002"},
+			skip:    []string{"C-0002"},
+			want:    []string{"C-0001"},
 		},
 		{
-			name:          "unknown control ids are ignored",
-			skip:          []string{"C-9999"},
-			excludedRules: nil,
-			notExcluded:   []string{"rule-a", "rule-b", "rule-c"},
+			name: "unknown control ids are ignored",
+			skip: []string{"C-9999"},
+			want: []string{"C-0001", "C-0002", "C-0003"},
 		},
 		{
-			name:          "include matches regardless of case",
-			include:       []string{"c-0002"},
-			excludedRules: []string{"rule-a", "rule-c"},
-			notExcluded:   []string{"rule-b"},
+			name:    "include matches regardless of case",
+			include: []string{"c-0002"},
+			want:    []string{"C-0002"},
 		},
 		{
-			name:          "skip matches regardless of case",
-			skip:          []string{"c-0002"},
-			excludedRules: []string{"rule-b"},
-			notExcluded:   []string{"rule-a", "rule-c"},
+			name: "skip matches regardless of case",
+			skip: []string{"c-0002"},
+			want: []string{"C-0001", "C-0003"},
+		},
+		{
+			name: "blank entries are ignored",
+			skip: []string{" ", "", "C-0002"},
+			want: []string{"C-0001", "C-0003"},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := buildControlExcludedRules(tt.base, framework, tt.skip, tt.include)
+			got, err := filterFrameworkControls(framework, tt.skip, tt.include)
 			require.NoError(t, err)
-			for _, rule := range tt.excludedRules {
-				assert.True(t, got[rule], "expected rule %q to be excluded", rule)
-			}
-			for _, rule := range tt.notExcluded {
-				assert.False(t, got[rule], "expected rule %q not to be excluded", rule)
-			}
+			assert.Equal(t, tt.want, keptControlIDs(got))
 		})
 	}
 }
 
-func TestBuildControlExcludedRules_IncludeNoMatchReturnsError(t *testing.T) {
+// TestFilterFrameworkControls_SharedRulesStayWithOtherControls guards the
+// reason the filter selects whole controls rather than rule names. The policy
+// library shares rules between controls (non-root-containers backs both
+// C-0013 and C-0211, for example), so skipping one control must not remove
+// the rules of every other control that happens to use them, and including a
+// control must keep its rules even when a sibling that shares them is dropped.
+func TestFilterFrameworkControls_SharedRulesStayWithOtherControls(t *testing.T) {
+	shared := reporthandling.PolicyRule{PortalBase: armotypes.PortalBase{Name: "non-root-containers"}}
+	framework := []reporthandling.Framework{{
+		Controls: []reporthandling.Control{
+			{ControlID: "C-0013", Rules: []reporthandling.PolicyRule{shared}},
+			{ControlID: "C-0211", Rules: []reporthandling.PolicyRule{shared, {PortalBase: armotypes.PortalBase{Name: "rule-privilege-escalation"}}}},
+			{ControlID: "C-0057", Rules: []reporthandling.PolicyRule{{PortalBase: armotypes.PortalBase{Name: "rule-privilege-escalation"}}}},
+		},
+	}}
+
+	t.Run("skip keeps the siblings that share the skipped control's rules", func(t *testing.T) {
+		got, err := filterFrameworkControls(framework, []string{"C-0211"}, nil)
+		require.NoError(t, err)
+		assert.Equal(t, []string{"C-0013", "C-0057"}, keptControlIDs(got))
+		assert.Equal(t, []string{"non-root-containers"}, ruleNames(got[0].Controls[0]))
+		assert.Equal(t, []string{"rule-privilege-escalation"}, ruleNames(got[0].Controls[1]))
+	})
+
+	t.Run("include keeps the requested control's rules intact", func(t *testing.T) {
+		got, err := filterFrameworkControls(framework, nil, []string{"C-0013"})
+		require.NoError(t, err)
+		assert.Equal(t, []string{"C-0013"}, keptControlIDs(got))
+		assert.Equal(t, []string{"non-root-containers"}, ruleNames(got[0].Controls[0]))
+	})
+
+	t.Run("the selected controls survive conversion to policies", func(t *testing.T) {
+		got, err := filterFrameworkControls(framework, []string{"C-0211"}, nil)
+		require.NoError(t, err)
+		policies := convertFrameworksToPolicies(got, nil, reporthandling.ScopeCluster)
+		assert.Contains(t, policies.Controls, "C-0013")
+		assert.Contains(t, policies.Controls, "C-0057")
+		assert.NotContains(t, policies.Controls, "C-0211")
+	})
+}
+
+func ruleNames(control reporthandling.Control) []string {
+	names := make([]string, 0, len(control.Rules))
+	for _, rule := range control.Rules {
+		names = append(names, rule.Name)
+	}
+	return names
+}
+
+// TestFilterFrameworkControls_DoesNotMutateInput guards the cached policy set:
+// the frameworks handed to the processor may be reused across scans, so the
+// filter must hand back new Controls slices instead of compacting the
+// caller's backing array in place.
+func TestFilterFrameworkControls_DoesNotMutateInput(t *testing.T) {
 	framework := []reporthandling.Framework{{
 		Controls: []reporthandling.Control{
 			{ControlID: "C-0001", Rules: []reporthandling.PolicyRule{{PortalBase: armotypes.PortalBase{Name: "rule-a"}}}},
@@ -1479,38 +1534,51 @@ func TestBuildControlExcludedRules_IncludeNoMatchReturnsError(t *testing.T) {
 		},
 	}}
 
-	_, err := buildControlExcludedRules(nil, framework, nil, []string{"C-9999"})
+	got, err := filterFrameworkControls(framework, []string{"C-0001"}, nil)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"C-0002"}, keptControlIDs(got))
+	assert.Equal(t, []string{"C-0001", "C-0002"}, keptControlIDs(framework), "input frameworks must be left untouched")
+}
+
+func TestFilterFrameworkControls_IncludeNoMatchReturnsError(t *testing.T) {
+	framework := []reporthandling.Framework{{
+		Controls: []reporthandling.Control{
+			{ControlID: "C-0001", Rules: []reporthandling.PolicyRule{{PortalBase: armotypes.PortalBase{Name: "rule-a"}}}},
+			{ControlID: "C-0002", Rules: []reporthandling.PolicyRule{{PortalBase: armotypes.PortalBase{Name: "rule-b"}}}},
+		},
+	}}
+
+	_, err := filterFrameworkControls(framework, nil, []string{"C-9999"})
 	require.ErrorIs(t, err, errIncludeControlsNoMatch)
 
-	_, err = buildControlExcludedRules(nil, framework, nil, []string{"c-9999"})
+	_, err = filterFrameworkControls(framework, nil, []string{"c-9999"})
 	require.ErrorIs(t, err, errIncludeControlsNoMatch)
 
-	_, err = buildControlExcludedRules(nil, framework, nil, []string{"C-9999", "C-8888"})
+	_, err = filterFrameworkControls(framework, nil, []string{"C-9999", "C-8888"})
 	require.ErrorIs(t, err, errIncludeControlsNoMatch)
 
 	// Mixed: one valid + one invalid should NOT error, invalid is warned but valid keeps scan alive
-	got, err := buildControlExcludedRules(nil, framework, nil, []string{"C-0001", "C-9999"})
+	got, err := filterFrameworkControls(framework, nil, []string{"C-0001", "C-9999"})
 	require.NoError(t, err)
-	assert.True(t, got["rule-b"], "rule-b should be excluded (not included)")
-	assert.False(t, got["rule-a"], "rule-a should not be excluded")
+	assert.Equal(t, []string{"C-0001"}, keptControlIDs(got))
 
 	// Include valid then skip same => leaves zero controls => noControlsAfterFilter
-	_, err = buildControlExcludedRules(nil, framework, []string{"C-0001"}, []string{"C-0001"})
+	_, err = filterFrameworkControls(framework, []string{"C-0001"}, []string{"C-0001"})
 	require.ErrorIs(t, err, errNoControlsAfterFilter)
 
 	// Skip all controls via skip alone => leaves zero
-	_, err = buildControlExcludedRules(nil, framework, []string{"C-0001", "C-0002"}, nil)
+	_, err = filterFrameworkControls(framework, []string{"C-0001", "C-0002"}, nil)
 	require.ErrorIs(t, err, errNoControlsAfterFilter)
 }
 
-// TestBuildControlExcludedRules_MatchesCISSectionNumber guards the identifier
+// TestFilterFrameworkControls_MatchesCISSectionNumber guards the identifier
 // parity between --skip-controls/--include-controls and --exclude-controls.
 // CIS controls carry their section number in Control_ID (JSON "id", e.g.
 // "CIS-3.1.1") rather than in ControlID; matching only on ControlID made
 // --skip-controls CIS-3.1.1 a silent no-op while --exclude-controls CIS-3.1.1
 // worked, and made a mixed --include-controls list silently drop the section
 // -numbered entry without erroring.
-func TestBuildControlExcludedRules_MatchesCISSectionNumber(t *testing.T) {
+func TestFilterFrameworkControls_MatchesCISSectionNumber(t *testing.T) {
 	framework := []reporthandling.Framework{{
 		Controls: []reporthandling.Control{
 			{ControlID: "C-0286", Control_ID: "CIS-3.1.1", Rules: []reporthandling.PolicyRule{{PortalBase: armotypes.PortalBase{Name: "rule-a"}}}},
@@ -1520,68 +1588,56 @@ func TestBuildControlExcludedRules_MatchesCISSectionNumber(t *testing.T) {
 	}}
 
 	tests := []struct {
-		name          string
-		skip          []string
-		include       []string
-		excludedRules []string
-		notExcluded   []string
+		name    string
+		skip    []string
+		include []string
+		want    []string
 	}{
 		{
-			name:          "skip by CIS section number",
-			skip:          []string{"CIS-3.1.1"},
-			excludedRules: []string{"rule-a"},
-			notExcluded:   []string{"rule-b", "rule-c"},
+			name: "skip by CIS section number",
+			skip: []string{"CIS-3.1.1"},
+			want: []string{"C-0287", "C-0003"},
 		},
 		{
-			name:          "skip by CIS section number regardless of case",
-			skip:          []string{"cis-3.1.1"},
-			excludedRules: []string{"rule-a"},
-			notExcluded:   []string{"rule-b", "rule-c"},
+			name: "skip by CIS section number regardless of case",
+			skip: []string{"cis-3.1.1"},
+			want: []string{"C-0287", "C-0003"},
 		},
 		{
-			name:          "include by CIS section number",
-			include:       []string{"CIS-3.1.1"},
-			excludedRules: []string{"rule-b", "rule-c"},
-			notExcluded:   []string{"rule-a"},
+			name:    "include by CIS section number",
+			include: []string{"CIS-3.1.1"},
+			want:    []string{"C-0286"},
 		},
 		{
-			name:          "control ID still matches when a section number is present",
-			skip:          []string{"C-0286"},
-			excludedRules: []string{"rule-a"},
-			notExcluded:   []string{"rule-b", "rule-c"},
+			name: "control ID still matches when a section number is present",
+			skip: []string{"C-0286"},
+			want: []string{"C-0287", "C-0003"},
 		},
 		{
-			name:          "mixed include list keeps the section-numbered control",
-			include:       []string{"C-0287", "CIS-3.1.1"},
-			excludedRules: []string{"rule-c"},
-			notExcluded:   []string{"rule-a", "rule-b"},
+			name:    "mixed include list keeps the section-numbered control",
+			include: []string{"C-0287", "CIS-3.1.1"},
+			want:    []string{"C-0286", "C-0287"},
 		},
 		{
-			name:          "naming a control by both its forms at once excludes it exactly once",
-			skip:          []string{"C-0286", "CIS-3.1.1"},
-			excludedRules: []string{"rule-a"},
-			notExcluded:   []string{"rule-b", "rule-c"},
+			name: "naming a control by both its forms at once excludes it exactly once",
+			skip: []string{"C-0286", "CIS-3.1.1"},
+			want: []string{"C-0287", "C-0003"},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := buildControlExcludedRules(nil, framework, tt.skip, tt.include)
+			got, err := filterFrameworkControls(framework, tt.skip, tt.include)
 			require.NoError(t, err)
-			for _, rule := range tt.excludedRules {
-				assert.True(t, got[rule], "expected rule %q to be excluded", rule)
-			}
-			for _, rule := range tt.notExcluded {
-				assert.False(t, got[rule], "expected rule %q not to be excluded", rule)
-			}
+			assert.Equal(t, tt.want, keptControlIDs(got))
 		})
 	}
 }
 
-// TestBuildControlExcludedRules_CISSectionIsAKnownID checks that a section
+// TestFilterFrameworkControls_CISSectionIsAKnownID checks that a section
 // number counts as a known identifier, so --include-controls CIS-3.1.1 alone
 // is not mistaken for a typo and rejected by errIncludeControlsNoMatch.
-func TestBuildControlExcludedRules_CISSectionIsAKnownID(t *testing.T) {
+func TestFilterFrameworkControls_CISSectionIsAKnownID(t *testing.T) {
 	framework := []reporthandling.Framework{{
 		Controls: []reporthandling.Control{
 			{ControlID: "C-0286", Control_ID: "CIS-3.1.1", Rules: []reporthandling.PolicyRule{{PortalBase: armotypes.PortalBase{Name: "rule-a"}}}},
@@ -1589,12 +1645,12 @@ func TestBuildControlExcludedRules_CISSectionIsAKnownID(t *testing.T) {
 		},
 	}}
 
-	got, err := buildControlExcludedRules(nil, framework, nil, []string{"CIS-3.1.1"})
+	got, err := filterFrameworkControls(framework, nil, []string{"CIS-3.1.1"})
 	require.NoError(t, err)
-	assert.False(t, got["rule-a"])
+	assert.Equal(t, []string{"C-0286"}, keptControlIDs(got))
 
 	// A genuinely unknown section number must still be a hard error.
-	_, err = buildControlExcludedRules(nil, framework, nil, []string{"CIS-9.9.9"})
+	_, err = filterFrameworkControls(framework, nil, []string{"CIS-9.9.9"})
 	require.ErrorIs(t, err, errIncludeControlsNoMatch)
 }
 
@@ -1643,12 +1699,12 @@ func TestControlIdentifiers(t *testing.T) {
 	}
 }
 
-// TestBuildControlExcludedRules_IdentifierFormsAreInterchangeable asserts the
-// two ways of naming one control produce byte-identical exclusion maps. The
-// table case above cannot catch a one-sided regression: naming a control by
-// both forms at once still passes when only ControlID is honoured, because the
+// TestFilterFrameworkControls_IdentifierFormsAreInterchangeable asserts the
+// two ways of naming one control produce identical control sets. The table
+// case above cannot catch a one-sided regression: naming a control by both
+// forms at once still passes when only ControlID is honoured, because the
 // ControlID half carries the match on its own.
-func TestBuildControlExcludedRules_IdentifierFormsAreInterchangeable(t *testing.T) {
+func TestFilterFrameworkControls_IdentifierFormsAreInterchangeable(t *testing.T) {
 	framework := []reporthandling.Framework{{
 		Controls: []reporthandling.Control{
 			{ControlID: "C-0286", Control_ID: "CIS-3.1.1", Rules: []reporthandling.PolicyRule{{PortalBase: armotypes.PortalBase{Name: "rule-a"}}}},
@@ -1656,15 +1712,196 @@ func TestBuildControlExcludedRules_IdentifierFormsAreInterchangeable(t *testing.
 		},
 	}}
 
-	byControlID, err := buildControlExcludedRules(nil, framework, []string{"C-0286"}, nil)
+	byControlID, err := filterFrameworkControls(framework, []string{"C-0286"}, nil)
 	require.NoError(t, err)
-	bySectionNumber, err := buildControlExcludedRules(nil, framework, []string{"CIS-3.1.1"}, nil)
+	bySectionNumber, err := filterFrameworkControls(framework, []string{"CIS-3.1.1"}, nil)
 	require.NoError(t, err)
-	assert.Equal(t, byControlID, bySectionNumber, "--skip-controls must treat a control's ID and its section number as the same control")
+	assert.Equal(t, keptControlIDs(byControlID), keptControlIDs(bySectionNumber), "--skip-controls must treat a control's ID and its section number as the same control")
 
-	includeByControlID, err := buildControlExcludedRules(nil, framework, nil, []string{"C-0286"})
+	includeByControlID, err := filterFrameworkControls(framework, nil, []string{"C-0286"})
 	require.NoError(t, err)
-	includeBySectionNumber, err := buildControlExcludedRules(nil, framework, nil, []string{"CIS-3.1.1"})
+	includeBySectionNumber, err := filterFrameworkControls(framework, nil, []string{"CIS-3.1.1"})
 	require.NoError(t, err)
-	assert.Equal(t, includeByControlID, includeBySectionNumber, "--include-controls must treat a control's ID and its section number as the same control")
+	assert.Equal(t, keptControlIDs(includeByControlID), keptControlIDs(includeBySectionNumber), "--include-controls must treat a control's ID and its section number as the same control")
+}
+
+func TestMatchesRuleObjects(t *testing.T) {
+	matchers := []reporthandling.RuleMatchObjects{
+		{
+			APIGroups:   []string{""},
+			APIVersions: []string{"v1"},
+			Resources:   []string{"Pod", "ServiceAccount"},
+		},
+		{
+			APIGroups:   []string{"core"},
+			APIVersions: []string{"v1"},
+			Resources:   []string{"Endpoints"},
+		},
+		{
+			APIGroups:   []string{"rbac.authorization.k8s.io"},
+			APIVersions: []string{"v1"},
+			Resources:   []string{"RoleBinding"},
+		},
+		{
+			APIGroups:   []string{"*"},
+			APIVersions: []string{"*"},
+			Resources:   []string{"wildcardkind"},
+		},
+	}
+
+	assert.True(t, matchesRuleObjects("", "v1", "pods", "Pod", matchers), "Pod in core/v1 should match")
+	assert.True(t, matchesRuleObjects("", "v1", "endpoints", "Endpoints", matchers), "Endpoints with core policy group should match empty object group")
+	assert.True(t, matchesRuleObjects("", "v1", "serviceaccounts", "ServiceAccount", matchers), "ServiceAccount in core/v1 should match")
+	assert.True(t, matchesRuleObjects("rbac.authorization.k8s.io", "v1", "rolebindings", "RoleBinding", matchers), "RoleBinding in rbac/v1 should match")
+	assert.True(t, matchesRuleObjects("any.group", "v2", "wildcardkinds", "wildcardkind", matchers), "Wildcard group/version should match")
+
+	assert.False(t, matchesRuleObjects("", "v1", "configmaps", "ConfigMap", matchers), "ConfigMap should not match")
+	assert.False(t, matchesRuleObjects("", "v1", "secrets", "Secret", matchers), "Secret should not match")
+	assert.False(t, matchesRuleObjects("apps", "v1", "deployments", "Deployment", matchers), "Deployment should not match")
+}
+
+func TestCompileWholeClusterMatchers(t *testing.T) {
+	policies := &cautils.Policies{
+		Controls: map[string]reporthandling.Control{
+			"C-0261": {
+				ControlID: "C-0261",
+				Rules: []reporthandling.PolicyRule{
+					{
+						Match: []reporthandling.RuleMatchObjects{
+							{APIGroups: []string{""}, APIVersions: []string{"v1"}, Resources: []string{"Pod", "ServiceAccount"}},
+							{APIGroups: []string{"rbac.authorization.k8s.io"}, APIVersions: []string{"v1"}, Resources: []string{"RoleBinding"}},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	matchers := compileWholeClusterMatchers(policies, []string{"C-0261"})
+	require.Len(t, matchers, 2)
+	assert.Equal(t, []string{"Pod", "ServiceAccount"}, matchers[0].Resources)
+	assert.Equal(t, []string{"RoleBinding"}, matchers[1].Resources)
+
+	assert.Empty(t, compileWholeClusterMatchers(nil, []string{"C-0261"}))
+	assert.Empty(t, compileWholeClusterMatchers(policies, nil))
+	assert.Empty(t, compileWholeClusterMatchers(policies, []string{"C-NONEXISTENT"}))
+}
+
+func TestFilterProjectedBatch(t *testing.T) {
+	matchers := []reporthandling.RuleMatchObjects{
+		{
+			APIGroups:   []string{""},
+			APIVersions: []string{"v1"},
+			Resources:   []string{"Pod"},
+		},
+	}
+
+	pod := workloadinterface.NewWorkloadObj(map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Pod",
+		"metadata":   map[string]any{"name": "p1", "namespace": "ns-1"},
+	})
+	cm := workloadinterface.NewWorkloadObj(map[string]any{
+		"apiVersion": "v1",
+		"kind":       "ConfigMap",
+		"metadata":   map[string]any{"name": "c1", "namespace": "ns-1"},
+	})
+
+	k8sResources := cautils.K8SResources{
+		"/v1/pods":       {pod.GetID()},
+		"/v1/configmaps": {cm.GetID()},
+	}
+	allResources := map[string]workloadinterface.IMetadata{
+		pod.GetID(): pod,
+		cm.GetID():  cm,
+	}
+
+	projected := filterProjectedBatch(k8sResources, nil, allResources, matchers)
+	require.NotNil(t, projected)
+	assert.Equal(t, 1, projected.Len(), "only the Pod should be in the projected batch")
+	assert.Contains(t, projected.AllResources, pod.GetID())
+	assert.NotContains(t, projected.AllResources, cm.GetID())
+	assert.Len(t, projected.K8SResources["/v1/pods"], 1)
+	assert.Empty(t, projected.K8SResources["/v1/configmaps"])
+}
+
+func TestControlHasMatcherEvidence(t *testing.T) {
+	assert.False(t, controlHasMatcherEvidence(nil), "nil control has no matcher evidence")
+	assert.False(t, controlHasMatcherEvidence(&reporthandling.Control{}), "control without rules has no matcher evidence")
+
+	controlNoMatchers := &reporthandling.Control{
+		Rules: []reporthandling.PolicyRule{
+			{Match: nil, DynamicMatch: nil},
+		},
+	}
+	assert.False(t, controlHasMatcherEvidence(controlNoMatchers), "rule with nil matchers has no matcher evidence")
+
+	controlEmptyResources := &reporthandling.Control{
+		Rules: []reporthandling.PolicyRule{
+			{
+				Match: []reporthandling.RuleMatchObjects{
+					{APIGroups: []string{""}, APIVersions: []string{"v1"}},
+				},
+			},
+		},
+	}
+	assert.False(t, controlHasMatcherEvidence(controlEmptyResources), "rule with empty Resources has no matcher evidence")
+
+	controlMissingAPIVersions := &reporthandling.Control{
+		Rules: []reporthandling.PolicyRule{
+			{
+				Match: []reporthandling.RuleMatchObjects{
+					{APIGroups: []string{""}, Resources: []string{"Pod"}},
+				},
+			},
+		},
+	}
+	assert.False(t, controlHasMatcherEvidence(controlMissingAPIVersions), "rule with missing APIVersions has no matcher evidence")
+
+	controlMissingAPIGroups := &reporthandling.Control{
+		Rules: []reporthandling.PolicyRule{
+			{
+				Match: []reporthandling.RuleMatchObjects{
+					{APIVersions: []string{"v1"}, Resources: []string{"Pod"}},
+				},
+			},
+		},
+	}
+	assert.False(t, controlHasMatcherEvidence(controlMissingAPIGroups), "rule with missing APIGroups has no matcher evidence")
+
+	controlWithMatch := &reporthandling.Control{
+		Rules: []reporthandling.PolicyRule{
+			{
+				Match: []reporthandling.RuleMatchObjects{
+					{APIGroups: []string{""}, APIVersions: []string{"v1"}, Resources: []string{"Pod"}},
+				},
+			},
+		},
+	}
+	assert.True(t, controlHasMatcherEvidence(controlWithMatch), "rule with Match has matcher evidence")
+
+	controlWithDynamicMatch := &reporthandling.Control{
+		Rules: []reporthandling.PolicyRule{
+			{
+				DynamicMatch: []reporthandling.RuleMatchObjects{
+					{APIGroups: []string{""}, APIVersions: []string{"v1"}, Resources: []string{"Service"}},
+				},
+			},
+		},
+	}
+	assert.True(t, controlHasMatcherEvidence(controlWithDynamicMatch), "rule with DynamicMatch has matcher evidence")
+
+	controlMixedRules := &reporthandling.Control{
+		Rules: []reporthandling.PolicyRule{
+			{
+				Match: []reporthandling.RuleMatchObjects{
+					{APIGroups: []string{""}, APIVersions: []string{"v1"}, Resources: []string{"Pod"}},
+				},
+			},
+			{
+				Match: nil,
+			},
+		},
+	}
+	assert.False(t, controlHasMatcherEvidence(controlMixedRules), "control where any rule lacks matchers fails matcher evidence")
 }

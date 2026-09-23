@@ -163,7 +163,11 @@ The file holds one policy per failed control, listing the resources that failed
 it by `kind`, `namespace` and `name`, in the same shape as the samples under
 [examples/exceptions](../examples/exceptions). Designators carry no `cluster`
 attribute, so the same file applies wherever those workloads run. Policies use
-the `alertOnly` action.
+the `disable` action, which suppresses the baseline findings as passed with
+exceptions. For evaluated findings, use `alertOnly` in a hand-written policy
+when a finding should be acknowledged but remain failed and continue
+contributing to the compliance score. Manual-review controls have separate
+status handling.
 
 It is a normal output format, so it composes with the others and honours
 `--output`, writing `scan-result.json` and `scan-result.exceptions.json`:
@@ -554,16 +558,19 @@ Scan a specific workload.
 ### Synopsis
 
 ```bash
-kubescape scan workload <kind>[.<version>[.<group>]]/<name> [`<glob pattern>`/`-`] [flags]
+kubescape scan workload [<namespace>/]<kind>[.<version>[.<group>]]/<name> [`<glob pattern>`/`-`] [flags]
 ```
 
-Unlike `kubectl`'s `TYPE.VERSION.GROUP` (which takes a plural resource), this command requires a **Kind** (e.g. `Deployment.v1.apps`, not `deployments.v1.apps`).
+Unlike `kubectl`'s `TYPE.VERSION.GROUP` (which takes a plural resource), this command requires a **Kind** (e.g. `Deployment.v1.apps`, not `deployments.v1.apps`). The workload identifier can optionally include a namespace prefix (e.g. `staging/Deployment/nginx`).
+
+> [!NOTE]
+> When providing both a namespace prefix in the workload argument and the `--namespace` / `-n` flag, the two values must agree. If they differ (for example, `staging/Deployment/nginx --namespace prod` or `staging/Deployment/nginx -n "*"`), the command exits with a conflict error rather than silently overriding one value with the other. To fix this error, specify the namespace in only one place or ensure both values match.
 
 ### Flags
 
 | Flag | Description |
 |------|-------------|
-| `--namespace <ns>` | Namespace of the workload |
+| `--namespace <ns>` | Namespace of the workload (defaults to `'default'` for live-cluster scans, or pass `'*'` for cluster-wide search which requires cluster-level list permissions. When scanning local files or stdin, an omitted namespace matches manifests across any namespace. Must not conflict with a namespace prefix in the workload argument) |
 | `--file-path <path>` | Path to a manifest that contains the workload |
 | `--chart-path <path>` | Path to the Helm chart the workload is part of. Must be used with `--file-path` |
 
@@ -571,6 +578,8 @@ Unlike `kubectl`'s `TYPE.VERSION.GROUP` (which takes a plural resource), this co
 
 ```bash
 kubescape scan workload Deployment/nginx --namespace default
+kubescape scan workload staging/Deployment/nginx
+kubescape scan workload Deployment/nginx -n "*"
 kubescape scan workload Deployment.v1.apps/nginx
 kubescape scan workload DaemonSet/fluentd --namespace logging
 kubescape scan workload Deployment/nginx ./manifests
@@ -737,7 +746,7 @@ a config omits, so the live `envFrom` survives.
 | `--dry-run` | Preview changes without applying | `false` |
 | `--no-confirm` | Apply without confirmation | `false` |
 | `--skip-user-values` | Skip changes requiring user values | `true` |
-| `--output-dir` | Cluster scans only: write one patched manifest per resource here instead of printing them | *(print to stdout)* |
+| `--output-dir` | Write the fixes into this directory instead of their default destination. Manifest files: fixed copies that mirror the scanned tree, originals untouched. Cluster scans: one patched manifest per resource | *(fix in place / print to stdout)* |
 | `--include-controls` | Remediate only these control IDs (comma-separated, case-insensitive). Disables `--container-profile` drift remediation — see [selecting controls to fix](#selecting-controls-to-fix) | *(all)* |
 | `--skip-controls` | Leave these control IDs untouched (comma-separated, case-insensitive). Takes precedence over `--include-controls`, and disables `--container-profile` drift remediation | - |
 
@@ -798,7 +807,16 @@ kubescape fix results.json --dry-run
 
 # Apply without prompts
 kubescape fix results.json --no-confirm
+
+# Leave the manifests untouched: write the fixed copies to a directory instead
+kubescape fix results.json --output-dir ./fixed
 ```
+
+With `--output-dir` the copies mirror the scanned directory —
+`/path/to/manifests/k8s/prod/deploy.yaml` is written to
+`./fixed/k8s/prod/deploy.yaml` — and a multi-document file stays one file. Review them with `diff -r`, then copy them over the originals or apply
+them as they are. A directory that is the scanned one is refused: writing there
+would be an in-place fix under another name.
 
 Fixing a cluster scan:
 
@@ -823,9 +841,10 @@ kubectl apply -f ./fixes
 > context — the prompt is skipped and no changes are applied. Use
 > `--no-confirm` to apply fixes in non-interactive contexts.
 >
-> The prompt does not apply to cluster scans: that path edits nothing in place,
-> so there is nothing to confirm. With `--output-dir`, a non-empty directory is
-> refused unless you pass `--no-confirm`.
+> The prompt does not apply to cluster scans, or to manifest files fixed with
+> `--output-dir`: neither path edits anything in place, so there is nothing to
+> confirm. With `--output-dir`, a non-empty directory is refused unless you pass
+> `--no-confirm`.
 
 ---
 

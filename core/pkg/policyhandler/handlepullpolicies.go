@@ -239,9 +239,16 @@ func (policyHandler *PolicyHandler) downloadScanPolicies(ctx context.Context, po
 		persistPolicyArtifacts = persistence.ShouldPersistPolicyArtifacts()
 	}
 
-	switch getScanKind(policyIdentifier) {
-	case apisv1.KindFramework: // Download frameworks
-		for _, rule := range policyIdentifier {
+	// Requests can mix Framework and Control identifiers in the same slice (e.g. a
+	// ScanAll request appends both, see core/core/scan.go). Switch on each rule's own
+	// Kind rather than assuming the whole batch shares policyIdentifier[0]'s kind -
+	// otherwise control identifiers get downloaded via GetFramework and fail with a
+	// misleading "framework '<control-id>' not found" error.
+	controlsFramework := reporthandling.Framework{}
+	var hasControls bool
+	for _, rule := range policyIdentifier {
+		switch rule.Kind {
+		case apisv1.KindFramework: // Download framework
 			logger.L().Debug("Downloading framework", helpers.String("framework", rule.Identifier))
 			receivedFramework, err := getters.PolicyGetter.GetFramework(rule.Identifier)
 			if err != nil {
@@ -264,35 +271,33 @@ func (policyHandler *PolicyHandler) downloadScanPolicies(ctx context.Context, po
 					logger.L().Ctx(ctx).Warning("failed to cache framework", helpers.String("file", cache), helpers.Error(err))
 				}
 			}
-		}
-	case apisv1.KindControl: // Download controls
-		f := reporthandling.Framework{}
-		var receivedControl *reporthandling.Control
-		var err error
-		for _, policy := range policyIdentifier {
-			logger.L().Debug("Downloading control", helpers.String("control", policy.Identifier))
-			receivedControl, err = getters.PolicyGetter.GetControl(policy.Identifier)
+		case apisv1.KindControl: // Download control
+			logger.L().Debug("Downloading control", helpers.String("control", rule.Identifier))
+			receivedControl, err := getters.PolicyGetter.GetControl(rule.Identifier)
 			if err != nil {
-				return frameworks, controlDownloadError(err, policy.Identifier)
+				return frameworks, controlDownloadError(err, rule.Identifier)
 			}
 			if receivedControl != nil {
-				f.Controls = append(f.Controls, *receivedControl)
+				hasControls = true
+				controlsFramework.Controls = append(controlsFramework.Controls, *receivedControl)
 				if !persistPolicyArtifacts {
 					continue
 				}
-				cache, err := getter.PolicyCachePath(policy.Identifier)
+				cache, err := getter.PolicyCachePath(rule.Identifier)
 				if err != nil {
-					logger.L().Ctx(ctx).Warning("skipping control cache write", helpers.String("identifier", policy.Identifier), helpers.Error(err))
+					logger.L().Ctx(ctx).Warning("skipping control cache write", helpers.String("identifier", rule.Identifier), helpers.Error(err))
 					continue
 				}
 				if err := getter.SaveInFile(receivedControl, cache); err != nil {
 					logger.L().Ctx(ctx).Warning("failed to cache control", helpers.String("file", cache), helpers.Error(err))
 				}
 			}
+		default:
+			return frameworks, fmt.Errorf("unknown policy kind")
 		}
-		frameworks = append(frameworks, f)
-	default:
-		return frameworks, fmt.Errorf("unknown policy kind")
+	}
+	if hasControls {
+		frameworks = append(frameworks, controlsFramework)
 	}
 	return frameworks, nil
 }

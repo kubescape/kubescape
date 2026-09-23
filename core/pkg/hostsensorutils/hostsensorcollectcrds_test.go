@@ -8,6 +8,7 @@ import (
 
 	k8shostsensor "github.com/kubescape/k8s-interface/hostsensor"
 	"github.com/kubescape/k8s-interface/k8sinterface"
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/opa-utils/objectsenvelopes/hostsensor"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/stretchr/testify/assert"
@@ -218,6 +219,12 @@ func TestCollectResources_RecordsQueryErrors(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, res)
 	assert.Len(t, infoMap, 2)
+	const key = "hostdata.kubescape.cloud/v1beta0/KubeletInfo"
+	require.Contains(t, infoMap, key)
+	assert.Equal(t, apis.StatusSkipped, infoMap[key].InnerStatus)
+	coverage := cautils.BuildScanCoverage(infoMap, map[string][]string{key: {"C-0172"}}, nil, nil, nil, nil)
+	require.Len(t, coverage.NotEvaluatedControls, 1)
+	assert.Equal(t, "C-0172", coverage.NotEvaluatedControls[0].ControlID)
 }
 
 func TestCollectResources_RecordsZeroItemsErrors(t *testing.T) {
@@ -243,10 +250,9 @@ func TestCollectResources_RecordsZeroItemsErrors(t *testing.T) {
 	} {
 		expectedErr := fmt.Sprintf("node-agent didn't report any %s for 1 nodes", resource.String())
 		group, version := k8sinterface.SplitApiVersion(k8shostsensor.MapHostSensorResourceToApiGroup(resource))
-		for _, r := range k8sinterface.ResourceGroupToString(group, version, resource.String()) {
-			assert.Contains(t, infoMap, r)
-			assert.Equal(t, expectedErr, infoMap[r].InnerInfo)
-		}
+		r := k8sinterface.JoinResourceTriplets(group, version, resource.String())
+		assert.Contains(t, infoMap, r)
+		assert.Equal(t, expectedErr, infoMap[r].InnerInfo)
 	}
 }
 
@@ -323,9 +329,8 @@ func TestCollectResources_KeepsPartiallyReadableItems(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, hasKind(res, k8shostsensor.KubeProxyInfo))
 	group, version := k8sinterface.SplitApiVersion(k8shostsensor.MapHostSensorResourceToApiGroup(k8shostsensor.KubeProxyInfo))
-	for _, r := range k8sinterface.ResourceGroupToString(group, version, k8shostsensor.KubeProxyInfo.String()) {
-		assert.NotContains(t, infoMap, r)
-	}
+	r := k8sinterface.JoinResourceTriplets(group, version, k8shostsensor.KubeProxyInfo.String())
+	assert.NotContains(t, infoMap, r)
 }
 
 // dropped is what tells a partial loss from a total one, so it is pinned
@@ -336,18 +341,15 @@ func TestCrdCollectionDropped(t *testing.T) {
 	assert.Zero(t, crdCollection{}.dropped())
 }
 
-// assertInfoMapContains checks that a resource was recorded as skipped under
-// every key ResourceGroupToString spells it with, since that is what the scan
-// looks it up by.
+// assertInfoMapContains checks the virtual resource key used by the control dependencies.
 func assertInfoMapContains(t *testing.T, infoMap map[string]apis.StatusInfo, resource k8shostsensor.HostSensorResource, want string) {
 	t.Helper()
 
 	group, version := k8sinterface.SplitApiVersion(k8shostsensor.MapHostSensorResourceToApiGroup(resource))
-	for _, r := range k8sinterface.ResourceGroupToString(group, version, resource.String()) {
-		require.Contains(t, infoMap, r)
-		assert.Equal(t, want, infoMap[r].InnerInfo)
-		assert.Equal(t, apis.StatusSkipped, infoMap[r].InnerStatus)
-	}
+	r := k8sinterface.JoinResourceTriplets(group, version, resource.String())
+	require.Contains(t, infoMap, r)
+	assert.Equal(t, want, infoMap[r].InnerInfo)
+	assert.Equal(t, apis.StatusSkipped, infoMap[r].InnerStatus)
 }
 
 // CloudProviderInfo is queried ahead of the loop, so it needs its own coverage:
@@ -378,7 +380,6 @@ func TestCollectResources_IgnoresAbsentCloudProviderInfo(t *testing.T) {
 
 	require.NoError(t, err)
 	group, version := k8sinterface.SplitApiVersion(k8shostsensor.MapHostSensorResourceToApiGroup(k8shostsensor.CloudProviderInfo))
-	for _, r := range k8sinterface.ResourceGroupToString(group, version, k8shostsensor.CloudProviderInfo.String()) {
-		assert.NotContains(t, infoMap, r)
-	}
+	r := k8sinterface.JoinResourceTriplets(group, version, k8shostsensor.CloudProviderInfo.String())
+	assert.NotContains(t, infoMap, r)
 }

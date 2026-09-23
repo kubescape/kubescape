@@ -74,6 +74,8 @@ spec:
       labels:
         app: kubescape
     spec:
+      # Allow 25s for shutdown, 5s for telemetry, and a scheduling margin.
+      terminationGracePeriodSeconds: 35
       serviceAccountName: kubescape-discovery
       containers:
       - name: kubescape

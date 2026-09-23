@@ -214,3 +214,89 @@ func TestActionPrint_ImageScan_Yaml(t *testing.T) {
 
 	assert.Equal(t, gotJson, gotYaml)
 }
+
+func TestActionPrint_MultiImageScan_Yaml(t *testing.T) {
+	// A populated []cautils.ImageScanData with multiple distinct images.
+	// Image itself is never serialized (presentImageScan in jsonprinter.go
+	// only consumes Packages, Context, Matches, IgnoredMatches,
+	// VulnerabilityProvider and SBOM), so the fixtures must also differ in
+	// one of those fields - otherwise an implementation that emits the first
+	// document twice would still pass.
+	first := buildSeverityExceptionImageScanData()
+	first.Image = "test-image:one"
+
+	second := buildSeverityExceptionImageScanData()
+	second.Image = "test-image:two"
+	second.Packages[0].Version = "2.0.0" // pkg-CVE-KEPT: distinct, serialized version
+
+	imageScanData := []cautils.ImageScanData{first, second}
+
+	tmpYaml, err := os.CreateTemp("", "yaml-multiimagescan-*.yaml")
+	assert.NoError(t, err)
+	defer func() {
+		_ = os.Remove(tmpYaml.Name())
+	}()
+
+	yp := NewYamlPrinter()
+	yp.writer = tmpYaml
+	err = yp.ActionPrint(context.Background(), nil, imageScanData)
+	assert.NoError(t, err)
+	assert.NoError(t, tmpYaml.Close())
+
+	rawYaml, err := os.ReadFile(tmpYaml.Name())
+	assert.NoError(t, err)
+
+	var gotYaml []interface{}
+	err = yaml.Unmarshal(rawYaml, &gotYaml)
+	assert.NoError(t, err, "output must be valid YAML array")
+	require.Len(t, gotYaml, 2, "multi-image YAML output must contain all scanned images")
+
+	assert.Equal(t, "1.0.0", findArtifactVersion(t, gotYaml[0], "pkg-CVE-KEPT"),
+		"first YAML element must reflect the first image's package version")
+	assert.Equal(t, "2.0.0", findArtifactVersion(t, gotYaml[1], "pkg-CVE-KEPT"),
+		"second YAML element must reflect the second image's package version")
+
+	tmpJson, err := os.CreateTemp("", "json-multiimagescan-*.json")
+	assert.NoError(t, err)
+	defer func() {
+		_ = os.Remove(tmpJson.Name())
+	}()
+
+	jp := NewJsonPrinter()
+	jp.writer = tmpJson
+	err = jp.ActionPrint(context.Background(), nil, imageScanData)
+	assert.NoError(t, err)
+	assert.NoError(t, tmpJson.Close())
+
+	rawJson, err := os.ReadFile(tmpJson.Name())
+	assert.NoError(t, err)
+
+	var gotJson interface{}
+	err = json.Unmarshal(rawJson, &gotJson)
+	assert.NoError(t, err, "output must be valid JSON")
+
+	assert.Equal(t, gotJson, gotYaml)
+}
+
+// findArtifactVersion returns the "version" of the matches[].artifact entry
+// named packageName within a decoded image-scan document (YAML or JSON,
+// both unmarshal into plain map[string]interface{} / []interface{}).
+func findArtifactVersion(t *testing.T, doc interface{}, packageName string) string {
+	t.Helper()
+	m, ok := doc.(map[string]interface{})
+	require.True(t, ok, "expected a document mapping")
+	matches, ok := m["matches"].([]interface{})
+	require.True(t, ok, "expected a matches array")
+	for _, raw := range matches {
+		match, ok := raw.(map[string]interface{})
+		require.True(t, ok, "expected a match mapping")
+		artifact, ok := match["artifact"].(map[string]interface{})
+		require.True(t, ok, "expected an artifact mapping")
+		if artifact["name"] == packageName {
+			version, _ := artifact["version"].(string)
+			return version
+		}
+	}
+	t.Fatalf("package %q not found in matches", packageName)
+	return ""
+}

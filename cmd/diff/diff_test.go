@@ -184,7 +184,6 @@ func TestGetDiffCmd_FailOnNewAndSeverity(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			diffCmd := GetDiffCmd(&stubKubescape{newFailures: tt.newFailures})
-			diffCmd.SilenceUsage = true
 			diffCmd.SilenceErrors = true
 			diffCmd.SetArgs(tt.args)
 
@@ -194,6 +193,65 @@ func TestGetDiffCmd_FailOnNewAndSeverity(t *testing.T) {
 			} else {
 				assert.NoError(t, err)
 			}
+		})
+	}
+}
+
+func TestGetDiffCmd_FailOnNewDoesNotPrintUsage(t *testing.T) {
+	stub := &stubKubescape{newFailures: 1}
+	diffCmd := GetDiffCmd(stub)
+	var buf strings.Builder
+	diffCmd.SetOut(&buf)
+	diffCmd.SetErr(&buf)
+	diffCmd.SetArgs([]string{"base.json", "head.json", "--fail-on-new"})
+
+	err := diffCmd.Execute()
+
+	assert.ErrorContains(t, err, "found 1 new or incomparable failure(s)")
+	assert.NotContains(t, buf.String(), "Usage:", "threshold failure must not dump command usage")
+}
+
+func TestGetDiffCmd_ValidationErrorStillPrintsUsage(t *testing.T) {
+	tests := []struct {
+		name     string
+		args     []string
+		errMatch string
+	}{
+		{
+			name:     "missing arguments",
+			args:     []string{"base.json"},
+			errMatch: "accepts 2 arg(s), received 1",
+		},
+		{
+			name:     "invalid format",
+			args:     []string{"base.json", "head.json", "--format", "invalid"},
+			errMatch: "invalid format",
+		},
+		{
+			name:     "invalid severity",
+			args:     []string{"base.json", "head.json", "--severity-threshold", "invalid"},
+			errMatch: "unknown severity",
+		},
+		{
+			name:     "invalid granularity",
+			args:     []string{"base.json", "head.json", "--granularity", "invalid"},
+			errMatch: "invalid diff granularity",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stub := &stubKubescape{}
+			diffCmd := GetDiffCmd(stub)
+			var buf strings.Builder
+			diffCmd.SetOut(&buf)
+			diffCmd.SetErr(&buf)
+			diffCmd.SetArgs(tt.args)
+
+			err := diffCmd.Execute()
+
+			assert.ErrorContains(t, err, tt.errMatch)
+			assert.Contains(t, buf.String(), "Usage:", "input validation errors must print command usage")
 		})
 	}
 }

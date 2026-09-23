@@ -54,7 +54,13 @@ func (ks *Kubescape) Patch(patchInfo *ksmetav1.PatchInfo, scanInfo *cautils.Scan
 
 	// Setup the scan service
 	// patch never exposes --skip-db-update; SkipDBUpdate is always false here, so the DB is always updated.
-	distCfg, installCfg, shouldUpdate, err := imagescan.NewDefaultDBConfig(scanInfo.ListingURL, false)
+	// patch never fails on staleness either: it must scan to build the patch
+	// document, so the strict update check stays disabled here even when
+	// requested elsewhere (e.g. via KS_FAIL_ON_STALE_DB) — a transient mirror
+	// failure must not abort patching when a usable cache exists. Only the
+	// warning threshold (maxDBAge) is resolved from flags/env.
+	_, maxDBAge := imagescan.ResolveDBAgeGate(false, true, scanInfo.MaxDBAge, scanInfo.MaxDBAgeSet)
+	distCfg, installCfg, shouldUpdate, err := imagescan.NewDefaultDBConfig(scanInfo.ListingURL, false, false)
 	if err != nil {
 		logger.L().StopError(fmt.Sprintf("Invalid Grype database URL '%s': %v", scanInfo.ListingURL, err))
 		return false, err
@@ -65,6 +71,10 @@ func (ks *Kubescape) Patch(patchInfo *ksmetav1.PatchInfo, scanInfo *cautils.Scan
 		return false, err
 	}
 	defer svc.Close()
+	// Warn on a stale vulnerability DB. Patch always updates (shouldUpdate=true)
+	// without the strict check, so this only ever warns when upstream itself
+	// is stale — it never fails.
+	_ = imagescan.EnforceDBAge(svc, shouldUpdate, false, maxDBAge)
 	creds := imagescan.RegistryCredentials{
 		Username: patchInfo.Username,
 		Password: patchInfo.Password,
@@ -202,7 +212,7 @@ func updatesCount(updates *unversioned.UpdateManifest) int {
 	if updates == nil {
 		return 0
 	}
-	return len(updates.Updates)
+	return len(updates.OSUpdates) + len(updates.LangUpdates)
 }
 
 // runWithCopaLoggerMuted mutes copa's logrus output for the duration of fn,
@@ -315,8 +325,13 @@ func patchWithContext(ctx context.Context, buildkitAddr, image, reportFile, patc
 	}
 
 	buildFn := func(ctx context.Context, c gwclient.Client) (*gwclient.Result, error) {
+		platform := platforms.Normalize(platforms.DefaultSpec())
+		if platform.OS != "linux" {
+			platform.OS = "linux"
+		}
+
 		// Configure buildctl/client for use by package manager
-		config, err := buildkit.InitializeBuildkitConfig(ctx, c, image)
+		config, err := buildkit.InitializeBuildkitConfig(ctx, c, image, &platform)
 		if err != nil {
 			return nil, fmt.Errorf("copa: error initializing buildkit config for image %s :: %w", image, err)
 		}
@@ -361,11 +376,6 @@ func patchWithContext(ctx context.Context, buildkitAddr, image, reportFile, patc
 			return nil, fmt.Errorf("copa: error installing updates :: %w", err)
 		}
 
-		platform := platforms.Normalize(platforms.DefaultSpec())
-		if platform.OS != "linux" {
-			platform.OS = "linux"
-		}
-
 		def, err := patchedImageState.Marshal(ctx, llb.Platform(platform))
 		if err != nil {
 			return nil, err
@@ -394,13 +404,20 @@ func patchWithContext(ctx context.Context, buildkitAddr, image, reportFile, patc
 						Arch: updates.Metadata.Config.Arch,
 					},
 				},
-				Updates: []unversioned.UpdatePackage{},
+				OSUpdates:   []unversioned.UpdatePackage{},
+				LangUpdates: []unversioned.UpdatePackage{},
 			}
-			for _, update := range updates.Updates {
+			for _, update := range updates.OSUpdates {
 				if !slices.Contains(errPkgs, update.Name) {
-					validatedManifest.Updates = append(validatedManifest.Updates, update)
+					validatedManifest.OSUpdates = append(validatedManifest.OSUpdates, update)
 				}
 			}
+			for _, update := range updates.LangUpdates {
+				if !slices.Contains(errPkgs, update.Name) {
+					validatedManifest.LangUpdates = append(validatedManifest.LangUpdates, update)
+				}
+			}
+			_ = validatedManifest
 		}
 		return res, nil
 	}
@@ -571,12 +588,12 @@ func tryParseScanReport(file string) (*unversioned.UpdateManifest, error) {
 	um.Metadata.OS.Type = manifest.Metadata.OS.Type
 	um.Metadata.OS.Version = manifest.Metadata.OS.Version
 	um.Metadata.Config.Arch = manifest.Metadata.Config.Arch
-	um.Updates = make([]unversioned.UpdatePackage, len(manifest.Updates))
+	um.OSUpdates = make([]unversioned.UpdatePackage, len(manifest.Updates))
 	for i, update := range manifest.Updates {
-		um.Updates[i].Name = update.Name
-		um.Updates[i].InstalledVersion = update.InstalledVersion
-		um.Updates[i].FixedVersion = update.FixedVersion
-		um.Updates[i].VulnerabilityID = update.VulnerabilityID
+		um.OSUpdates[i].Name = update.Name
+		um.OSUpdates[i].InstalledVersion = update.InstalledVersion
+		um.OSUpdates[i].FixedVersion = update.FixedVersion
+		um.OSUpdates[i].VulnerabilityID = update.VulnerabilityID
 	}
 
 	return &um, nil

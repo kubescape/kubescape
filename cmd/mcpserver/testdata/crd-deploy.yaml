@@ -1,0 +1,12 @@
+apiVersion: example.com/v1
+kind: Deploy
+metadata:
+  name: crd-deploy
+  namespace: default
+spec:
+  replicas: 1
+  template:
+    spec:
+      containers:
+      - name: app
+        image: nginx:latest

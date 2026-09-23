@@ -89,10 +89,9 @@ func TestContentNewlinesMatchTarget(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.Name, func(t *testing.T) {
-			c := &contentToAdd{content: tc.InputContent}
 			want := tc.WantedContent
 
-			got := c.Content(tc.TargetNewline)
+			got := withNewline(tc.InputContent, tc.TargetNewline)
 
 			assert.Equal(t, want, got)
 		})

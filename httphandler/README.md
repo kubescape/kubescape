@@ -5,6 +5,7 @@ The HTTP Handler provides a REST API for running Kubescape scans programmaticall
 ## Table of Contents
 
 - [Overview](#overview)
+- [Graceful shutdown](#graceful-shutdown)
 - [API Reference](#api-reference)
   - [Trigger Scan](#trigger-scan)
   - [Get Results](#get-results)
@@ -28,6 +29,23 @@ When running Kubescape as a service, it starts a web server on port `8080` that 
 - Managing cached results
 
 ---
+
+## Graceful shutdown
+
+On SIGTERM or SIGINT, the server stops accepting connections and new scans.
+Scan requests already being parsed, including metrics scans, receive `503` if
+shutdown closes admission before they enqueue. Accepted scans drain for up to
+20 seconds, including result handling and persistence. Remaining scans are then
+cancelled using the same cancellation mechanism as `DELETE /v1/scan`.
+
+Successful shutdown waits for the scan worker to exit. If HTTP draining or the
+worker has not finished within 25 seconds, shutdown reports an error, closes
+remaining connections and exits unsuccessfully after attempting an OpenTelemetry
+flush (up to five additional seconds). This failure path may interrupt work;
+it does not guarantee persistence. Size the pod termination grace period for
+your workload; Kubernetes can forcibly terminate the process before cleanup
+finishes. Completion callbacks retain their existing best-effort behavior and
+are not included in the worker-join guarantee.
 
 ## API Reference
 

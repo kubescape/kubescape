@@ -14,6 +14,7 @@ import (
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer"
 	"github.com/kubescape/opa-utils/exceptions"
+	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
@@ -98,7 +99,7 @@ func TestBuildExceptionPoliciesGroupsResourcesByControl(t *testing.T) {
 
 	for _, policy := range policies {
 		assert.Equal(t, exceptionPolicyType, policy.PolicyType)
-		assert.Equal(t, []armotypes.PostureExceptionPolicyActions{armotypes.AlertOnly}, policy.Actions)
+		assert.Equal(t, []armotypes.PostureExceptionPolicyActions{armotypes.Disable}, policy.Actions)
 		assert.Equal(t, "2026-03-04T05:06:07Z", policy.CreationTime)
 		require.Len(t, policy.PosturePolicies, 1)
 	}
@@ -225,8 +226,42 @@ func TestExceptionDocumentsRoundTripIntoTheConsumedType(t *testing.T) {
 		assert.Equal(t, policies[i].Resources, parsed[i].Resources)
 		require.Len(t, parsed[i].PosturePolicies, 1)
 		assert.Equal(t, policies[i].PosturePolicies[0].ControlID, parsed[i].PosturePolicies[0].ControlID)
-		assert.True(t, parsed[i].IsAlertOnly())
+		assert.True(t, parsed[i].IsDisable())
 	}
+}
+
+// TestGeneratedExceptionDocumentsSuppressBaselineFindings protects the
+// baseline contract end to end: generated JSON must parse through the public
+// exception type and suppress the same finding when applied by the real
+// exception processor.
+func TestGeneratedExceptionDocumentsSuppressBaselineFindings(t *testing.T) {
+	policies := buildExceptionPolicies(context.Background(), exceptionsSession(t))
+
+	encoded, err := json.Marshal(exceptionDocuments(policies))
+	require.NoError(t, err)
+
+	var parsed []armotypes.PostureExceptionPolicy
+	require.NoError(t, json.Unmarshal(encoded, &parsed))
+
+	workload := exceptionsWorkload(t, "Deployment", "prod", "api")
+	result := resourcesresults.Result{
+		ResourceID: "api",
+		AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+			{
+				ControlID: "C-0002",
+				Status:    apis.StatusInfo{InnerStatus: apis.StatusFailed},
+				ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{
+					{Name: "failed-rule", Status: apis.StatusFailed},
+				},
+			},
+		},
+	}
+
+	result.SetExceptions(workload, parsed, "", map[string]reporthandling.Control{"C-0002": {}})
+
+	status := result.AssociatedControls[0].GetStatus(nil)
+	assert.Equal(t, apis.StatusPassed, status.Status())
+	assert.Equal(t, apis.SubStatusException, status.GetSubStatus())
 }
 
 func keysOf(m map[string]any) []string {
@@ -292,7 +327,7 @@ func TestActionPrintWritesAFileThatParsesBack(t *testing.T) {
 	require.NoError(t, json.Unmarshal(contents, &parsed))
 	require.Len(t, parsed, 2)
 	assert.Equal(t, "exclude-C-0001", parsed[0].Name)
-	assert.True(t, parsed[0].IsAlertOnly())
+	assert.True(t, parsed[0].IsDisable())
 	assert.Equal(t, byte('\n'), contents[len(contents)-1], "file should end with a newline")
 }
 

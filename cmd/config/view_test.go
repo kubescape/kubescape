@@ -29,7 +29,7 @@ func TestGetViewCmd(t *testing.T) {
 	configCmd := getViewCmd(mockKubescape)
 
 	// Verify the command name and short description
-	assert.Equal(t, "view", configCmd.Use)
+	assert.Equal(t, "view [KEY]", configCmd.Use)
 	assert.Equal(t, "View cached configurations", configCmd.Short)
 	assert.Equal(t, "View cached Kubescape configuration in a human-readable text format, or render it as JSON or YAML.", configCmd.Long)
 

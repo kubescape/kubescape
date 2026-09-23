@@ -2,6 +2,8 @@ package rbacgraph
 
 import (
 	"fmt"
+	"maps"
+	"slices"
 	"sort"
 
 	rbacv1 "k8s.io/api/rbac/v1"
@@ -175,7 +177,8 @@ func (idx *Index) escalateVerbEdges(rules []ScopedRule) []EscalationEdge {
 			}
 		}
 
-		for scope, esc := range escalateByScope {
+		for _, scope := range slices.Sorted(maps.Keys(escalateByScope)) {
+			esc := escalateByScope[scope]
 			if resource == "clusterroles" && scope != "" {
 				continue
 			}
@@ -396,22 +399,21 @@ func (idx *Index) mintServiceAccountTokenEdges(rules []ScopedRule) []EscalationE
 // targetNamespaces expands a ScopedRule's own scope into the namespaces an
 // edge should enumerate targets against: just that one namespace for a
 // namespace-scoped rule, or every namespace this Index has ServiceAccount
-// data for when the rule is cluster-wide.
+// data for when the rule is cluster-wide. Sorted, like every other
+// map-derived list in this package -- see matchingClusterRoles.
 func (idx *Index) targetNamespaces(scopeNamespace string) []string {
 	if scopeNamespace != "" {
 		return []string{scopeNamespace}
 	}
-	out := make([]string, 0, len(idx.serviceAccountsByNS))
-	for ns := range idx.serviceAccountsByNS {
-		out = append(out, ns)
-	}
-	return out
+	return slices.Sorted(maps.Keys(idx.serviceAccountsByNS))
 }
 
 // knownNamespaces returns every namespace this Index has any evidence of,
 // drawn from collected ServiceAccounts, Roles, and RoleBindings -- used to
 // expand a cluster-wide grant (e.g. create rolebindings with no namespace
 // restriction) into the concrete namespaces this package can reason about.
+// Sorted, like every other map-derived list in this package -- see
+// matchingClusterRoles.
 func (idx *Index) knownNamespaces() []string {
 	seen := map[string]bool{}
 	var out []string
@@ -431,12 +433,20 @@ func (idx *Index) knownNamespaces() []string {
 	for _, rb := range idx.roleBindings {
 		add(rb.Namespace)
 	}
+	sort.Strings(out)
 	return out
 }
 
+// matchingClusterRoles returns the collected ClusterRoles a grant covers, in
+// name order. idx.clusterRoles is a map, and every list this package derives
+// from a map feeds an EscalationEdge and so reaches the reported result, both
+// as the order edges are emitted in and as the order the BFS discovers
+// subjects in. Reading map order directly would make the same cluster
+// snapshot report differently-ordered escalation paths on every run.
 func (idx *Index) matchingClusterRoles(names []string, restricted bool) []*rbacv1.ClusterRole {
 	var out []*rbacv1.ClusterRole
-	for _, cr := range idx.clusterRoles {
+	for _, name := range slices.Sorted(maps.Keys(idx.clusterRoles)) {
+		cr := idx.clusterRoles[name]
 		if restricted && !containsOrWildcard(names, cr.Name) {
 			continue
 		}
@@ -447,7 +457,8 @@ func (idx *Index) matchingClusterRoles(names []string, restricted bool) []*rbacv
 
 func (idx *Index) matchingRoles(namespace string, names []string, restricted bool) []*rbacv1.Role {
 	var out []*rbacv1.Role
-	for _, r := range idx.roles {
+	for _, key := range slices.Sorted(maps.Keys(idx.roles)) {
+		r := idx.roles[key]
 		if r.Namespace != namespace {
 			continue
 		}
@@ -464,7 +475,8 @@ func (idx *Index) matchingRoles(namespace string, names []string, restricted boo
 // which applies to Role objects in every namespace, not just one.
 func (idx *Index) matchingRolesAnyNamespace(names []string, restricted bool) []*rbacv1.Role {
 	var out []*rbacv1.Role
-	for _, r := range idx.roles {
+	for _, key := range slices.Sorted(maps.Keys(idx.roles)) {
+		r := idx.roles[key]
 		if restricted && !containsOrWildcard(names, r.Name) {
 			continue
 		}

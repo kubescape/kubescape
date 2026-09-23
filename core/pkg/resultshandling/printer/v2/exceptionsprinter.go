@@ -116,7 +116,7 @@ func buildExceptionPolicies(ctx context.Context, opaSessionObj *cautils.OPASessi
 			PortalBase:      armotypes.PortalBase{Name: "exclude-" + controlID},
 			PolicyType:      exceptionPolicyType,
 			CreationTime:    creationTime.UTC().Format(time.RFC3339),
-			Actions:         []armotypes.PostureExceptionPolicyActions{armotypes.AlertOnly},
+			Actions:         []armotypes.PostureExceptionPolicyActions{armotypes.Disable},
 			Resources:       designators(failures[controlID]),
 			PosturePolicies: []armotypes.PosturePolicy{{ControlID: regexp.QuoteMeta(controlID)}},
 		})
@@ -184,7 +184,7 @@ func collectFailures(ctx context.Context, opaSessionObj *cautils.OPASessionObj) 
 	failures := map[string]map[resourceKey]struct{}{}
 
 	for resourceID, result := range opaSessionObj.ResourcesResult {
-		resource, ok := opaSessionObj.AllResources[resourceID]
+		resource, ok := opaSessionObj.GetResource(resourceID)
 		if !ok || resource == nil {
 			if hasFailedControl(result) {
 				logger.L().Ctx(ctx).Warning("skipping failed resource with no scanned object; its findings are not in the baseline",

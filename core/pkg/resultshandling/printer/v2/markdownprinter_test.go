@@ -670,3 +670,32 @@ func TestMdFixedIn(t *testing.T) {
 		})
 	}
 }
+
+func TestMarkdownPrinter_ActionPrint_CombinedPostureAndImageScan(t *testing.T) {
+	ctx := context.Background()
+	tmp, err := os.CreateTemp("", "kubescape-md-combined-*.md")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = os.Remove(tmp.Name()) })
+
+	mp := NewMarkdownPrinter()
+	mp.writer = tmp
+
+	session := mdSessionFixture()
+	imageScanData := []cautils.ImageScanData{
+		{
+			Image: "registry.example.com/combined:v1",
+		},
+	}
+
+	err = mp.ActionPrint(ctx, session, imageScanData)
+	require.NoError(t, err)
+	require.NoError(t, mp.CloseWriter())
+
+	content, err := os.ReadFile(tmp.Name())
+	require.NoError(t, err)
+	text := string(content)
+
+	assert.Contains(t, text, "# Kubescape Security Report", "must contain posture report heading")
+	assert.Contains(t, text, "# Kubescape Image Scan Report", "must contain image scan report heading")
+	assert.Contains(t, text, "`registry.example.com/combined:v1`", "must contain scanned image name")
+}

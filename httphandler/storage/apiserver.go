@@ -71,6 +71,8 @@ func NewAPIServerStorage(clusterName string, namespace string, ksClient spdxv1be
 func (a *APIServerStore) StorePostureReportResults(ctx context.Context, pr *v2.PostureReport) error {
 	recoveredResources := 0
 	recoveredControls := 0
+	failedResults := 0
+	var firstStoreErr error
 	for i := range pr.Results {
 		workloadScan, err := a.BuildWorkloadConfigurationScan(ctx, pr, &pr.Results[i])
 		if err != nil {
@@ -85,19 +87,32 @@ func (a *APIServerStore) StorePostureReportResults(ctx context.Context, pr *v2.P
 			recoveredControls += len(workloadScan.Spec.Controls)
 		}
 
+		var storeErr error
 		if a.continuousPostureScan {
 			if err := a.StoreWorkloadConfigurationScanResult(ctx, workloadScan); err != nil {
-				return err
+				storeErr = err
 			}
 		}
 
 		if _, err := a.StoreWorkloadConfigurationScanResultSummary(ctx, workloadScan); err != nil {
-			return err
+			if storeErr == nil {
+				storeErr = err
+			}
+		}
+		if storeErr != nil {
+			failedResults++
+			if firstStoreErr == nil {
+				firstStoreErr = fmt.Errorf("%s: %w", workloadScan.Name, storeErr)
+			}
 		}
 	}
 	if recoveredResources > 0 {
 		logger.L().Ctx(ctx).Warning("recovered missing per-resource controls from aggregate posture summary",
 			helpers.Int("resources", recoveredResources), helpers.Int("controls", recoveredControls))
+	}
+	if failedResults > 0 {
+		return fmt.Errorf("failed to store %d of %d posture scan results: %w",
+			failedResults, len(pr.Results), firstStoreErr)
 	}
 	return nil
 }
@@ -228,10 +243,23 @@ func (a *APIServerStore) BuildWorkloadConfigurationScan(ctx context.Context, rep
 		Spec: v1beta1.WorkloadConfigurationScanSpec{
 			Controls:       getControlsMapFromResult(ctx, result, report.SummaryDetails.Controls),
 			RelatedObjects: parseWorkloadScanRelatedObjectList(relatedObjects),
+			Metadata:       workloadConfigurationScanMetadata(report),
 		},
 	}
 
 	return &manifest, nil
+}
+
+func workloadConfigurationScanMetadata(report *v2.PostureReport) *v1beta1.WorkloadConfigurationScanMeta {
+	if report == nil || report.ReportGenerationTime.IsZero() {
+		return nil
+	}
+
+	return &v1beta1.WorkloadConfigurationScanMeta{
+		Report: v1beta1.ReportMeta{
+			CreatedAt: metav1.NewTime(report.ReportGenerationTime),
+		},
+	}
 }
 
 // StoreWorkloadConfigurationScanResult stores a WorkloadConfigurationScan manifest
@@ -327,6 +355,9 @@ func mergeWorkloadConfigurationScanSpec(existingSpec v1beta1.WorkloadConfigurati
 		}
 	}
 
+	if newSpec.Metadata != nil {
+		existingSpec.Metadata = newSpec.Metadata.DeepCopy()
+	}
 	existingSpec.RelatedObjects = newSpec.RelatedObjects
 	return existingSpec
 }

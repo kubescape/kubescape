@@ -14,6 +14,7 @@ import (
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -23,23 +24,46 @@ import (
 type mockDynamicClient struct {
 	dynamic.Interface
 	listFunc func(ctx context.Context, opts metav1.ListOptions) (*unstructured.UnstructuredList, error)
+	getFunc  func(ctx context.Context, namespace, name string, opts metav1.GetOptions, subresources ...string) (*unstructured.Unstructured, error)
 }
 
 func (m *mockDynamicClient) Resource(resource schema.GroupVersionResource) dynamic.NamespaceableResourceInterface {
-	return &mockNamespaceableResourceClient{listFunc: m.listFunc}
+	return &mockNamespaceableResourceClient{listFunc: m.listFunc, getFunc: m.getFunc}
 }
 
 type mockNamespaceableResourceClient struct {
 	dynamic.NamespaceableResourceInterface
-	listFunc func(ctx context.Context, opts metav1.ListOptions) (*unstructured.UnstructuredList, error)
+	namespace string
+	listFunc  func(ctx context.Context, opts metav1.ListOptions) (*unstructured.UnstructuredList, error)
+	getFunc   func(ctx context.Context, namespace, name string, opts metav1.GetOptions, subresources ...string) (*unstructured.Unstructured, error)
 }
 
 func (m *mockNamespaceableResourceClient) Namespace(s string) dynamic.ResourceInterface {
-	return m
+	clone := *m
+	clone.namespace = s
+	return &clone
 }
 
 func (m *mockNamespaceableResourceClient) List(ctx context.Context, opts metav1.ListOptions) (*unstructured.UnstructuredList, error) {
 	return m.listFunc(ctx, opts)
+}
+
+func (m *mockNamespaceableResourceClient) Get(ctx context.Context, name string, opts metav1.GetOptions, subresources ...string) (*unstructured.Unstructured, error) {
+	if m.getFunc != nil {
+		return m.getFunc(ctx, m.namespace, name, opts, subresources...)
+	}
+	if m.listFunc != nil {
+		list, err := m.listFunc(ctx, metav1.ListOptions{})
+		if err != nil {
+			return nil, err
+		}
+		for i := range list.Items {
+			if list.Items[i].GetName() == name && (m.namespace == "" || list.Items[i].GetNamespace() == "" || list.Items[i].GetNamespace() == m.namespace) {
+				return &list.Items[i], nil
+			}
+		}
+	}
+	return nil, apierrors.NewNotFound(schema.GroupResource{}, name)
 }
 
 func TestPullResources_PartialFailureSurface(t *testing.T) {

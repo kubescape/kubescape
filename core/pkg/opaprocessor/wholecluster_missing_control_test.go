@@ -3,11 +3,15 @@ package opaprocessor
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"testing"
 
+	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/mocks"
 	"github.com/kubescape/opa-utils/reporthandling"
+	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/resources"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -121,8 +125,9 @@ func TestControlRequiresWholeClusterInput_C0261(t *testing.T) {
 // without the whole-cluster deferral the partitioned pass would never see it.
 func TestProcess_C0261ShapedControlCatchesCrossNamespaceBinding(t *testing.T) {
 	control := saTokenBindingControl("C-0261")
+	frameworks := []reporthandling.Framework{{Controls: []reporthandling.Control{control}}}
 	policies := convertFrameworksToPolicies(
-		[]reporthandling.Framework{{Controls: []reporthandling.Control{control}}},
+		frameworks,
 		nil, reporthandling.ScopeCluster,
 	)
 
@@ -135,6 +140,7 @@ func TestProcess_C0261ShapedControlCatchesCrossNamespaceBinding(t *testing.T) {
 		sessionObj.AllResources = allResources
 		opap := NewOPAProcessor(sessionObj, resources.NewRegoDependenciesDataMock(), "test", "", "", false, nil)
 		opap.AllPolicies = policies
+		ConvertFrameworksToSummaryDetails(&opap.Report.SummaryDetails, frameworks, policies)
 		return opap
 	}
 
@@ -157,5 +163,375 @@ func TestProcess_C0261ShapedControlCatchesCrossNamespaceBinding(t *testing.T) {
 		partitionedResult := opap.ResourcesResult[podID]
 		assert.True(t, partitionedResult.GetStatus(nil).IsFailed(),
 			"whole-cluster control must be evaluated once after the scopes merge, so the cross-namespace binding is still caught")
+	})
+
+	t.Run("policy projected", func(t *testing.T) {
+		t.Setenv("LARGE_CLUSTER_SIZE", "1")
+		opap := newProcessor()
+		opap.SetWholeClusterPolicy(cautils.WholeClusterPolicyProjected)
+		require.NoError(t, opap.Process(context.Background(), policies, nil))
+		require.Contains(t, opap.ResourcesResult, podID)
+		res := opap.ResourcesResult[podID]
+		assert.True(t, res.GetStatus(nil).IsFailed(), "projected policy must detect cross-namespace binding")
+	})
+
+	t.Run("policy fallback", func(t *testing.T) {
+		t.Setenv("LARGE_CLUSTER_SIZE", "1")
+		opap := newProcessor()
+		opap.SetWholeClusterPolicy(cautils.WholeClusterPolicyFallback)
+		require.NoError(t, opap.Process(context.Background(), policies, nil))
+		require.Contains(t, opap.ResourcesResult, podID)
+		res := opap.ResourcesResult[podID]
+		assert.True(t, res.GetStatus(nil).IsFailed(), "fallback policy must detect cross-namespace binding")
+	})
+
+	t.Run("policy skip", func(t *testing.T) {
+		t.Setenv("LARGE_CLUSTER_SIZE", "1")
+		opap := newProcessor()
+		opap.SetWholeClusterPolicy(cautils.WholeClusterPolicySkip)
+		require.NoError(t, opap.Process(context.Background(), policies, nil))
+		// Control should be skipped, not evaluated
+		assert.Contains(t, opap.skippedWholeClusterControls, "C-0261")
+		if ctrl, ok := opap.Report.SummaryDetails.Controls["C-0261"]; assert.True(t, ok, "C-0261 must exist in SummaryDetails.Controls") {
+			assert.True(t, ctrl.GetStatus().IsSkipped(), "control must have skipped status")
+			assert.Equal(t, apis.SubStatusNotEvaluated, ctrl.GetStatus().GetSubStatus())
+			assert.Contains(t, ctrl.GetStatus().Info(), "skipped by execution policy")
+		}
+		if res, ok := opap.ResourcesResult[podID]; ok {
+			assert.False(t, res.GetStatus(nil).IsFailed(), "pod must not fail for skipped whole-cluster control")
+		}
+	})
+
+	t.Run("policy verify", func(t *testing.T) {
+		t.Setenv("LARGE_CLUSTER_SIZE", "1")
+		opap := newProcessor()
+		opap.SetWholeClusterPolicy(cautils.WholeClusterPolicyVerify)
+		require.NoError(t, opap.Process(context.Background(), policies, nil))
+		require.Contains(t, opap.ResourcesResult, podID)
+		res := opap.ResourcesResult[podID]
+		assert.True(t, res.GetStatus(nil).IsFailed(), "verify policy must pass parity check and detect failure")
+	})
+}
+
+// TestProcess_WholeClusterPolicy_NoiseIsolation verifies that when a cluster contains
+// hundreds of unrelated resources (ConfigMaps, Secrets), the projected whole-cluster scope
+// successfully filters them out and retains only matching resources while catching the join.
+func TestProcess_WholeClusterPolicy_NoiseIsolation(t *testing.T) {
+	control := saTokenBindingControl("C-0261")
+	policies := convertFrameworksToPolicies(
+		[]reporthandling.Framework{{Controls: []reporthandling.Control{control}}},
+		nil, reporthandling.ScopeCluster,
+	)
+
+	const podID = "/v1/ns-a/Pod/app"
+	k8sResources, allResources := saTokenBindingFixture()
+
+	// Inject 500 mock ConfigMaps
+	for i := 0; i < 500; i++ {
+		cmRaw := fmt.Sprintf(`{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"cm-%d","namespace":"ns-a"}}`, i)
+		var obj map[string]any
+		require.NoError(t, json.Unmarshal([]byte(cmRaw), &obj))
+		wl := workloadinterface.NewWorkloadObj(obj)
+		allResources[wl.GetID()] = wl
+		k8sResources["/v1/configmaps"] = append(k8sResources["/v1/configmaps"], wl.GetID())
+	}
+
+	sessionObj := cautils.NewOPASessionObjMock()
+	sessionObj.K8SResources = k8sResources
+	sessionObj.AllResources = allResources
+	opap := NewOPAProcessor(sessionObj, resources.NewRegoDependenciesDataMock(), "test", "", "", false, nil)
+	opap.AllPolicies = policies
+	opap.SetWholeClusterPolicy(cautils.WholeClusterPolicyProjected)
+
+	t.Setenv("LARGE_CLUSTER_SIZE", "1")
+	require.NoError(t, opap.Process(context.Background(), policies, nil))
+	require.Contains(t, opap.ResourcesResult, podID)
+	res := opap.ResourcesResult[podID]
+	assert.True(t, res.GetStatus(nil).IsFailed(), "cross-namespace join must fire even with 500 noise configmaps")
+
+	// Verify the projection filtered out ConfigMaps
+	matchers := compileWholeClusterMatchers(policies, []string{"C-0261"})
+	projected := filterProjectedBatch(k8sResources, nil, allResources, matchers)
+	assert.NotContains(t, projected.K8SResources, "/v1/configmaps", "projected batch must not contain configmaps")
+	assert.Len(t, projected.AllResources, 3, "projected batch should only retain Pod, ServiceAccount, and RoleBinding")
+}
+
+// TestProcessWithStreaming_WholeClusterPolicies verifies that ProcessWithStreaming respects
+// all whole-cluster execution policies (projected, fallback, skip, verify).
+func TestProcessWithStreaming_WholeClusterPolicies(t *testing.T) {
+	control := saTokenBindingControl("C-0261")
+	policies := convertFrameworksToPolicies(
+		[]reporthandling.Framework{{Controls: []reporthandling.Control{control}}},
+		nil, reporthandling.ScopeCluster,
+	)
+
+	const podID = "/v1/ns-a/Pod/app"
+
+	runStreamingWithPolicy := func(policy cautils.WholeClusterExecutionPolicy) *OPAProcessor {
+		t.Setenv("LARGE_CLUSTER_SIZE", "1")
+		k8sResources, allResources := saTokenBindingFixture()
+		sessionObj := cautils.NewOPASessionObjMock()
+		sessionObj.Policies = []reporthandling.Framework{{Controls: []reporthandling.Control{control}}}
+
+		opap := NewOPAProcessor(sessionObj, resources.NewRegoDependenciesDataMock(), "test", "", "", false, nil)
+		opap.AllPolicies = policies
+		opap.SetWholeClusterPolicy(policy)
+
+		resident, batches := cautils.PartitionResources(len(allResources), k8sResources, nil, allResources, 1)
+
+		batchChan := make(chan *cautils.ResourceBatch, len(batches)+1)
+		errChan := make(chan error, 1)
+		close(errChan)
+		batchChan <- resident
+		for _, batch := range batches {
+			batchChan <- batch
+		}
+		close(batchChan)
+
+		err := opap.ProcessWithStreaming(context.Background(), batchChan, errChan, cautils.NewProgressHandler(""), len(batches))
+		require.NoError(t, err)
+		return opap
+	}
+
+	t.Run("streaming projected", func(t *testing.T) {
+		opap := runStreamingWithPolicy(cautils.WholeClusterPolicyProjected)
+		require.Contains(t, opap.ResourcesResult, podID)
+		res := opap.ResourcesResult[podID]
+		assert.True(t, res.GetStatus(nil).IsFailed())
+	})
+
+	t.Run("streaming fallback", func(t *testing.T) {
+		opap := runStreamingWithPolicy(cautils.WholeClusterPolicyFallback)
+		require.Contains(t, opap.ResourcesResult, podID)
+		res := opap.ResourcesResult[podID]
+		assert.True(t, res.GetStatus(nil).IsFailed())
+	})
+
+	t.Run("streaming skip", func(t *testing.T) {
+		opap := runStreamingWithPolicy(cautils.WholeClusterPolicySkip)
+		assert.Contains(t, opap.skippedWholeClusterControls, "C-0261")
+		// Verify coverage accounting
+		found := false
+		for _, ne := range opap.ScanCoverage.NotEvaluatedControls {
+			if ne.ControlID == "C-0261" {
+				found = true
+				assert.Contains(t, ne.Reason, "policy: skip")
+			}
+		}
+		assert.True(t, found, "C-0261 must be in NotEvaluatedControls when skipped")
+	})
+
+	t.Run("streaming verify", func(t *testing.T) {
+		opap := runStreamingWithPolicy(cautils.WholeClusterPolicyVerify)
+		require.Contains(t, opap.ResourcesResult, podID)
+		res := opap.ResourcesResult[podID]
+		assert.True(t, res.GetStatus(nil).IsFailed())
+	})
+}
+
+func TestAppendSkippedWholeClusterControlsToCoverage_DeterministicOrder(t *testing.T) {
+	opap := &OPAProcessor{
+		OPASessionObj: cautils.NewOPASessionObjMock(),
+		skippedWholeClusterControls: map[string]string{
+			"C-0272": "skipped 272",
+			"C-0261": "skipped 261",
+			"C-0266": "skipped 266",
+			"C-0267": "skipped 267",
+		},
+	}
+	opap.appendSkippedWholeClusterControlsToCoverage()
+	require.Len(t, opap.ScanCoverage.NotEvaluatedControls, 4)
+	assert.Equal(t, "C-0261", opap.ScanCoverage.NotEvaluatedControls[0].ControlID)
+	assert.Equal(t, "C-0266", opap.ScanCoverage.NotEvaluatedControls[1].ControlID)
+	assert.Equal(t, "C-0267", opap.ScanCoverage.NotEvaluatedControls[2].ControlID)
+	assert.Equal(t, "C-0272", opap.ScanCoverage.NotEvaluatedControls[3].ControlID)
+}
+
+func TestVerifyWholeClusterControl_ReturnsEvaluationErrors(t *testing.T) {
+	deployment := mocks.MockDevelopmentWithHostpath()
+	k8sResources := make(cautils.K8SResources)
+	k8sResources["apps/v1/deployments"] = workloadinterface.ListMetaIDs([]workloadinterface.IMetadata{deployment})
+
+	opaSessionObj := cautils.NewOPASessionObjMock()
+	opaSessionObj.K8SResources = k8sResources
+	opaSessionObj.AllResources[deployment.GetID()] = deployment
+	const controlID = "C-TEST-ERR"
+	policies := &cautils.Policies{
+		Controls: map[string]reporthandling.Control{
+			controlID: {
+				PortalBase: armotypes.PortalBase{
+					Name: "erroring whole-cluster control",
+					Attributes: map[string]any{
+						ControlAttributeRequiresWholeClusterInput: true,
+					},
+				},
+				ControlID: controlID,
+				Rules: []reporthandling.PolicyRule{
+					{
+						Rule: "invalid rego syntax (((",
+						Match: []reporthandling.RuleMatchObjects{
+							{
+								APIGroups:   []string{"apps"},
+								APIVersions: []string{"v1"},
+								Resources:   []string{"Deployment"},
+							},
+						},
+						RuleQuery:    "data",
+						RuleLanguage: reporthandling.RegoLanguage,
+					},
+				},
+			},
+		},
+	}
+
+	opap := NewOPAProcessor(opaSessionObj, resources.NewRegoDependenciesDataMock(), "test", "", "", false, nil)
+	opap.AllPolicies = policies
+	opap.SetWholeClusterPolicy(cautils.WholeClusterPolicyVerify)
+
+	err := opap.Process(context.Background(), policies, nil)
+	require.Error(t, err, "verify mode must propagate evaluation errors")
+}
+
+func TestVerifyWholeCluster_MismatchDetection(t *testing.T) {
+	control := saTokenBindingControl("C-0261")
+	policies := convertFrameworksToPolicies(
+		[]reporthandling.Framework{{Controls: []reporthandling.Control{control}}},
+		nil, reporthandling.ScopeCluster,
+	)
+
+	const podID = "/v1/ns-a/Pod/app"
+	k8sResources, allResources := saTokenBindingFixture()
+
+	sessionObj := cautils.NewOPASessionObjMock()
+	sessionObj.K8SResources = k8sResources
+	sessionObj.AllResources = allResources
+	opap := NewOPAProcessor(sessionObj, resources.NewRegoDependenciesDataMock(), "test", "", "", false, nil)
+	opap.AllPolicies = policies
+
+	fallbackScope := opap.wholeClusterScope()
+
+	// Deliberately construct an incomplete projected batch that omits the RoleBinding,
+	// so projected evaluates the Pod as passed while fallback evaluates it as failed.
+	incompleteBatch := cautils.NewResourceBatch(cautils.ClusterScope)
+	incompleteBatch.K8SResources["/v1/pods"] = []string{podID}
+	incompleteBatch.AllResources[podID] = allResources[podID]
+	projectedScope := newEvaluationScope(cautils.ClusterScope, nil, newResidentIndex(incompleteBatch))
+
+	err := opap.verifyAndProcessWholeCluster(context.Background(), policies, []string{"C-0261"}, projectedScope, fallbackScope, nil)
+	require.NoError(t, err, "verify mode logs parity mismatches at error level but does not return an error (exit code 0)")
+
+	// Parity verification records results from projectedScope
+	require.Contains(t, opap.ResourcesResult, podID)
+	res := opap.ResourcesResult[podID]
+	assert.True(t, res.GetStatus(nil).IsPassed(), "projected scope without RoleBinding evaluates to passed")
+}
+
+func TestProcess_WholeClusterControl_NoMatchers_FailsClosed(t *testing.T) {
+	const controlID = "C-TEST-NOMATCH"
+	policies := &cautils.Policies{
+		Controls: map[string]reporthandling.Control{
+			controlID: {
+				PortalBase: armotypes.PortalBase{
+					Name: "whole-cluster control with no matchers",
+					Attributes: map[string]any{
+						ControlAttributeRequiresWholeClusterInput: true,
+					},
+				},
+				ControlID: controlID,
+				Rules: []reporthandling.PolicyRule{
+					{
+						Rule:         saTokenBindingRule,
+						RuleQuery:    "armo_builtins",
+						RuleLanguage: reporthandling.RegoLanguage,
+						Match:        nil,
+						DynamicMatch: nil,
+					},
+				},
+			},
+		},
+	}
+
+	t.Run("process projected policy", func(t *testing.T) {
+		k8sResources, allResources := saTokenBindingFixture()
+		sessionObj := cautils.NewOPASessionObjMock()
+		sessionObj.K8SResources = k8sResources
+		sessionObj.AllResources = allResources
+		opap := NewOPAProcessor(sessionObj, resources.NewRegoDependenciesDataMock(), "test", "", "", false, nil)
+		opap.AllPolicies = policies
+		opap.SetWholeClusterPolicy(cautils.WholeClusterPolicyProjected)
+
+		err := opap.Process(context.Background(), policies, nil)
+		require.NoError(t, err)
+		opap.appendSkippedWholeClusterControlsToCoverage()
+
+		assert.Contains(t, opap.skippedWholeClusterControls, controlID)
+		found := false
+		for _, ne := range opap.ScanCoverage.NotEvaluatedControls {
+			if ne.ControlID == controlID {
+				found = true
+				assert.Contains(t, ne.Reason, "no Match or DynamicMatch declared for projected evaluation")
+				assert.Contains(t, ne.Reason, "policy: projected")
+			}
+		}
+		assert.True(t, found, "control without matchers must be in NotEvaluatedControls (fail closed)")
+	})
+
+	t.Run("process verify policy", func(t *testing.T) {
+		k8sResources, allResources := saTokenBindingFixture()
+		sessionObj := cautils.NewOPASessionObjMock()
+		sessionObj.K8SResources = k8sResources
+		sessionObj.AllResources = allResources
+		opap := NewOPAProcessor(sessionObj, resources.NewRegoDependenciesDataMock(), "test", "", "", false, nil)
+		opap.AllPolicies = policies
+		opap.SetWholeClusterPolicy(cautils.WholeClusterPolicyVerify)
+
+		err := opap.Process(context.Background(), policies, nil)
+		require.NoError(t, err)
+		opap.appendSkippedWholeClusterControlsToCoverage()
+
+		assert.Contains(t, opap.skippedWholeClusterControls, controlID)
+		found := false
+		for _, ne := range opap.ScanCoverage.NotEvaluatedControls {
+			if ne.ControlID == controlID {
+				found = true
+				assert.Contains(t, ne.Reason, "no Match or DynamicMatch declared for projected evaluation")
+				assert.Contains(t, ne.Reason, "policy: verify")
+			}
+		}
+		assert.True(t, found, "control without matchers must be in NotEvaluatedControls under verify policy")
+	})
+
+	t.Run("streaming projected policy", func(t *testing.T) {
+		k8sResources, allResources := saTokenBindingFixture()
+		sessionObj := cautils.NewOPASessionObjMock()
+		sessionObj.Policies = []reporthandling.Framework{{Controls: []reporthandling.Control{policies.Controls[controlID]}}}
+
+		opap := NewOPAProcessor(sessionObj, resources.NewRegoDependenciesDataMock(), "test", "", "", false, nil)
+		opap.AllPolicies = policies
+		opap.SetWholeClusterPolicy(cautils.WholeClusterPolicyProjected)
+
+		resident, batches := cautils.PartitionResources(len(allResources), k8sResources, nil, allResources, 1)
+
+		batchChan := make(chan *cautils.ResourceBatch, len(batches)+1)
+		errChan := make(chan error, 1)
+		close(errChan)
+		batchChan <- resident
+		for _, batch := range batches {
+			batchChan <- batch
+		}
+		close(batchChan)
+
+		err := opap.ProcessWithStreaming(context.Background(), batchChan, errChan, cautils.NewProgressHandler(""), len(batches))
+		require.NoError(t, err)
+
+		assert.Contains(t, opap.skippedWholeClusterControls, controlID)
+		found := false
+		for _, ne := range opap.ScanCoverage.NotEvaluatedControls {
+			if ne.ControlID == controlID {
+				found = true
+				assert.Contains(t, ne.Reason, "no Match or DynamicMatch declared for projected evaluation")
+			}
+		}
+		assert.True(t, found, "control without matchers must be in NotEvaluatedControls for streaming")
 	})
 }

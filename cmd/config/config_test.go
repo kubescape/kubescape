@@ -27,7 +27,7 @@ func TestGetConfigCmd(t *testing.T) {
 		switch subcmd.Name() {
 		case "delete":
 			// Verify that the delete subcommand is added correctly
-			assert.Equal(t, "delete", subcmd.Use)
+			assert.Equal(t, "delete [KEY...]", subcmd.Use)
 			assert.Equal(t, "Delete cached configurations", subcmd.Short)
 		case "set":
 			// Verify that the set subcommand is added correctly
@@ -38,7 +38,7 @@ func TestGetConfigCmd(t *testing.T) {
 			assert.Equal(t, "Validate cached configurations", subcmd.Short)
 		case "view":
 			// Verify that the view subcommand is added correctly
-			assert.Equal(t, "view", subcmd.Use)
+			assert.Equal(t, "view [KEY]", subcmd.Use)
 			assert.Equal(t, "View cached configurations", subcmd.Short)
 		default:
 			t.Errorf("Unexpected subcommand name: %s", subcmd.Name())

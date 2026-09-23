@@ -163,7 +163,29 @@ func ValidateCommonScanFlags(cmd *cobra.Command, scanInfo *cautils.ScanInfo, sup
 	if err := ValidateExcludeControls(scanInfo); err != nil {
 		return err
 	}
+	if scanInfo.MaxDBAge < 0 {
+		return fmt.Errorf("invalid --max-db-age %q: must be a positive duration (e.g. 120h) or 0 for the default", scanInfo.MaxDBAge)
+	}
+	ApplyDBAgeGatePresence(cmd, scanInfo)
 	return nil
+}
+
+// ApplyDBAgeGatePresence records whether the DB age-gate flags were explicitly
+// passed (even false/zero) so explicit CLI values win over KS_* environment
+// fallbacks in ResolveDBAgeGate. It runs inside ValidateCommonScanFlags, which
+// every scan subcommand invokes, and is a no-op when the flags are not
+// registered on the command (e.g. unit tests with bare commands).
+func ApplyDBAgeGatePresence(cmd *cobra.Command, scanInfo *cautils.ScanInfo) {
+	if flag := cmd.Flags().Lookup("fail-on-stale-db"); flag != nil {
+		scanInfo.FailOnStaleDBSet = flag.Changed
+	} else if flag := cmd.InheritedFlags().Lookup("fail-on-stale-db"); flag != nil {
+		scanInfo.FailOnStaleDBSet = flag.Changed
+	}
+	if flag := cmd.Flags().Lookup("max-db-age"); flag != nil {
+		scanInfo.MaxDBAgeSet = flag.Changed
+	} else if flag := cmd.InheritedFlags().Lookup("max-db-age"); flag != nil {
+		scanInfo.MaxDBAgeSet = flag.Changed
+	}
 }
 
 func ValidateExcludeControls(scanInfo *cautils.ScanInfo) error {

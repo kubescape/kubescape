@@ -52,15 +52,15 @@ func createMutatingAdmissionPolicyTools(ksServer *KubescapeMcpserver) {
 
 		name, ok := args["name"].(string)
 		if !ok || name == "" {
-			return mcp.NewToolResultError("name is required"), nil
+			return mcpToolError(ErrCodeInvalidArgument, "name is required", map[string]any{"argument": "name"}), nil
 		}
 		apiVersion, ok := args["api_version"].(string)
 		if !ok || apiVersion == "" {
-			return mcp.NewToolResultError("api_version is required"), nil
+			return mcpToolError(ErrCodeInvalidArgument, "api_version is required", map[string]any{"argument": "api_version"}), nil
 		}
 		resource, ok := args["resource"].(string)
 		if !ok || resource == "" {
-			return mcp.NewToolResultError("resource is required"), nil
+			return mcpToolError(ErrCodeInvalidArgument, "resource is required", map[string]any{"argument": "resource"}), nil
 		}
 		apiGroup, _ := args["api_group"].(string)
 		namespace, _ := args["namespace"].(string)
@@ -71,10 +71,10 @@ func createMutatingAdmissionPolicyTools(ksServer *KubescapeMcpserver) {
 		// read as "nothing mutates this".
 		subresource, subresourceErr := optionalStringArg(args, "subresource")
 		if subresourceErr != nil {
-			return mcp.NewToolResultError(subresourceErr.Error()), nil
+			return mcpToolError(ErrCodeInvalidArgument, subresourceErr.Error(), map[string]any{"argument": "subresource"}), nil
 		}
 		if strings.Contains(subresource, "/") {
-			return mcp.NewToolResultError(fmt.Sprintf("subresource must name one subresource without the parent resource (got %q, want e.g. %q)", subresource, "status")), nil
+			return mcpToolError(ErrCodeInvalidArgument, fmt.Sprintf("subresource must name one subresource without the parent resource (got %q, want e.g. %q)", subresource, "status"), map[string]any{"argument": "subresource"}), nil
 		}
 
 		// A Namespace object is itself cluster-scoped ("Namespace API
@@ -87,7 +87,7 @@ func createMutatingAdmissionPolicyTools(ksServer *KubescapeMcpserver) {
 		effectiveClusterScoped := clusterScoped || isNamespaceResource
 
 		if !effectiveClusterScoped && namespace == "" {
-			return mcp.NewToolResultError("namespace is required unless cluster_scoped is true"), nil
+			return mcpToolError(ErrCodeInvalidArgument, "namespace is required unless cluster_scoped is true", map[string]any{"argument": "namespace"}), nil
 		}
 
 		operation := admissionregistrationv1alpha1.Create
@@ -95,14 +95,14 @@ func createMutatingAdmissionPolicyTools(ksServer *KubescapeMcpserver) {
 			normalized := strings.ToUpper(rawOp)
 			op, known := mutatingAdmissionPolicyOperations[normalized]
 			if !known {
-				return mcp.NewToolResultError(fmt.Sprintf("operation must be one of CREATE, UPDATE, CONNECT (got %q)", rawOp)), nil
+				return mcpToolError(ErrCodeInvalidArgument, fmt.Sprintf("operation must be one of CREATE, UPDATE, CONNECT (got %q)", rawOp), map[string]any{"argument": "operation", "supported_values": []string{"CREATE", "UPDATE", "CONNECT"}}), nil
 			}
 			operation = op
 		}
 
 		k8sClient, err := ksServer.getK8sClient()
 		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed to get k8s client: %v", err)), nil
+			return mcpToolError(ErrCodeK8sClientError, fmt.Sprintf("failed to get k8s client: %v", err), nil), nil
 		}
 
 		policies, bindings, decodeErrs, err := mapreconcile.Collect(ctx, k8sClient)
@@ -110,7 +110,7 @@ func createMutatingAdmissionPolicyTools(ksServer *KubescapeMcpserver) {
 			if errors.Is(err, mapreconcile.ErrUnsupported) {
 				return mcp.NewToolResultText(`{"supported":false,"reason":"cluster does not serve MutatingAdmissionPolicy resources"}`), nil
 			}
-			return mcp.NewToolResultError(fmt.Sprintf("failed to collect MutatingAdmissionPolicy resources: %v", err)), nil
+			return mcpToolError(ErrCodeK8sClientError, fmt.Sprintf("failed to collect MutatingAdmissionPolicy resources: %v", err), nil), nil
 		}
 
 		gvr := schema.GroupVersionResource{Group: apiGroup, Version: apiVersion, Resource: resource}
@@ -125,7 +125,12 @@ func createMutatingAdmissionPolicyTools(ksServer *KubescapeMcpserver) {
 			obj, getErr = resourceInterface.Namespace(namespace).Get(ctx, name, metav1.GetOptions{})
 		}
 		if getErr != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed to get resource %s/%s (%s): %v", namespace, name, gvr.String(), getErr)), nil
+			if apierrors.IsNotFound(getErr) {
+				// ErrCodeResourceNotFound: the requested target object does not exist in the cluster.
+				// Semantics align with classifyScanError: agent recovery action is to verify kind/name/ns.
+				return mcpToolError(ErrCodeResourceNotFound, fmt.Sprintf("resource %s/%s (%s) not found: %v", namespace, name, gvr.String(), getErr), map[string]any{"resource_type": resource, "namespace": namespace, "name": name}), nil
+			}
+			return mcpToolError(ErrCodeK8sClientError, fmt.Sprintf("failed to get resource %s/%s (%s): %v", namespace, name, gvr.String(), getErr), map[string]any{"resource_type": resource, "namespace": namespace, "name": name}), nil
 		}
 
 		info := mapreconcile.ObjectInfo{
@@ -147,7 +152,7 @@ func createMutatingAdmissionPolicyTools(ksServer *KubescapeMcpserver) {
 				info.NamespaceLabels = nsObj.GetLabels()
 				info.NamespaceLabelsKnown = true
 			} else if !apierrors.IsNotFound(nsErr) {
-				return mcp.NewToolResultError(fmt.Sprintf("failed to get namespace %s: %v", namespace, nsErr)), nil
+				return mcpToolError(ErrCodeK8sClientError, fmt.Sprintf("failed to get namespace %s: %v", namespace, nsErr), map[string]any{"namespace": namespace}), nil
 			}
 		}
 
@@ -169,7 +174,7 @@ func createMutatingAdmissionPolicyTools(ksServer *KubescapeMcpserver) {
 
 		resBytes, err := json.Marshal(result)
 		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed to marshal result: %v", err)), nil
+			return mcpToolError(ErrCodeMarshalError, fmt.Sprintf("failed to marshal result: %v", err), nil), nil
 		}
 		return mcp.NewToolResultText(string(resBytes)), nil
 	})

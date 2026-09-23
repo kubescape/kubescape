@@ -42,12 +42,6 @@ func (handler *HTTPHandler) Metrics(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	scanCtx, cancel := context.WithCancel(context.WithoutCancel(r.Context()))
-	defer cancel()
-
-	handler.state.setBusy(scanID, cancel)
-	defer handler.state.setNotBusy(scanID)
-
 	metricsQueryParams := &MetricsQueryParams{}
 	if err := schema.NewDecoder().Decode(metricsQueryParams, r.URL.Query()); err != nil {
 		handler.writeError(w, fmt.Errorf("failed to parse query params, reason: %w", err), scanID)
@@ -56,6 +50,7 @@ func (handler *HTTPHandler) Metrics(w http.ResponseWriter, r *http.Request) {
 	resultsFile := filepath.Join(OutputDir, scanID)
 	scanInfo, policyIdentifiers := getPrometheusDefaultScanCommand(scanID, resultsFile, metricsQueryParams.Frameworks)
 
+	scanCtx, cancel := context.WithCancel(context.WithoutCancel(r.Context()))
 	scanParams := &scanRequestParams{
 		scanQueryParams: &ScanQueryParams{
 			ReturnResults:   true,
@@ -71,18 +66,24 @@ func (handler *HTTPHandler) Metrics(w http.ResponseWriter, r *http.Request) {
 
 	// send to scan queue
 	logger.L().Info("requesting scan", helpers.String("scanID", scanID), helpers.String("api", "v1/metrics"))
-	select {
-	case handler.scanRequestChan <- scanParams:
-	default:
-		w.Header().Set("Retry-After", "1")
-		handler.writeErrorWithStatus(w,
-			fmt.Errorf("scan queue is full; retry the request later"),
-			"", http.StatusTooManyRequests)
+	if err := handler.enqueueScan(scanParams, cancel); err != nil {
+		handler.writeAdmissionError(w, err)
 		return
 	}
 
-	// wait for scan to complete
-	results := <-scanParams.resp
+	// The worker owns accepted work even if the HTTP caller disconnects.
+	var results *utilsmetav1.Response
+	select {
+	case results = <-scanParams.resp:
+	case <-r.Context().Done():
+		// Wait for the worker to finish writing before removing abandoned results.
+		go func() {
+			<-scanParams.resp
+			removeResultsFile(scanID)
+			os.Remove(resultsFile)
+		}()
+		return
+	}
 	defer removeResultsFile(scanID) // remove json format results file
 	defer os.Remove(resultsFile)    // remove prometheus format results file
 

@@ -12,6 +12,7 @@ type ViewConfig struct {
 	Writer       io.Writer
 	OutputFormat string
 	IncludeEmpty bool
+	Key          string
 }
 type ValidateConfig struct {
 	Writer    io.Writer
@@ -20,4 +21,5 @@ type ValidateConfig struct {
 	IncludeOK bool
 }
 type DeleteConfig struct {
+	Keys []string
 }

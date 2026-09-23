@@ -2,12 +2,15 @@ package scan
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 
 	"github.com/kubescape/kubescape/v4/cmd/shared"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/meta"
+	"github.com/kubescape/kubescape/v4/core/pkg/resourcehandler"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling"
 	v1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/spf13/cobra"
@@ -55,6 +58,8 @@ var (
 	validateWorkloadIdentifier    = cautils.ValidateWorkloadIdentifier
 )
 
+const cliNamespaceDefaultedHint = "namespace defaulted to 'default'; pass -n '*' to search cluster-wide"
+
 // controlCmd represents the control command
 func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Command {
 	var apiVersion string
@@ -79,14 +84,18 @@ func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comma
 			if scanInfo.LabelSelector != "" {
 				return fmt.Errorf("--label-selector is not supported for workload scans: the named resource is fetched by identity, not by label")
 			}
-			namespace, kind, name, workloadAPIVersion, err := parseWorkloadIdentifierString(args[0])
+			identNamespace, kind, name, workloadAPIVersion, err := parseWorkloadIdentifierString(args[0])
 			if err != nil {
 				return fmt.Errorf("invalid input: %w", err)
 			}
 
-			if namespace != "" && scanInfo.Namespace == "" {
-				scanInfo.Namespace = namespace
+			isClusterScan := len(args) == 1 && len(scanInfo.InputPatterns) == 0 && scanInfo.FilePath == ""
+			targetNamespace, namespaceDefaulted, err := cautils.ResolveWorkloadNamespace(identNamespace, scanInfo.Namespace, isClusterScan)
+			if err != nil {
+				return err
 			}
+			scanInfo.Namespace = targetNamespace
+			scanInfo.NamespaceDefaulted = namespaceDefaulted
 
 			cleanup, err := prepareWorkloadInput(cmd.InOrStdin(), args, scanInfo)
 			if err != nil {
@@ -96,6 +105,10 @@ func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comma
 
 			if apiVersion == "" {
 				apiVersion = workloadAPIVersion
+			} else if apiVersion != workloadAPIVersion {
+				if err := cautils.ValidateWorkloadName(name, kind, apiVersion); err != nil {
+					return fmt.Errorf("invalid input: %w", err)
+				}
 			}
 
 			policyIdentifiers := setWorkloadScanInfo(scanInfo, kind, name, apiVersion)
@@ -119,11 +132,12 @@ func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comma
 
 			ctx, cancel := deriveTimeoutContext(scanInfo, ks)
 			defer cancel()
-			return runWorkloadScan(ctx, scanInfo, ks, policyIdentifiers)
+			_, err = runWorkloadScan(ctx, scanInfo, ks, policyIdentifiers)
+			return err
 		},
 	}
 
-	workloadCmd.PersistentFlags().StringVarP(&scanInfo.Namespace, "namespace", "n", "", "Namespace of the workload. Default will be empty.")
+	workloadCmd.PersistentFlags().StringVarP(&scanInfo.Namespace, "namespace", "n", "", "Namespace of the workload (defaults to 'default' for live-cluster scans, pass '*' for cluster-wide search; cluster-wide search requires cluster-level list permissions). Must not conflict with namespace prefix in workload argument.")
 	workloadCmd.PersistentFlags().StringVar(&scanInfo.FilePath, "file-path", "", "Path to the workload file.")
 	workloadCmd.PersistentFlags().StringVar(&scanInfo.ChartPath, "chart-path", "", "Path to the helm chart the workload is part of. Must be used with --file-path.")
 	workloadCmd.PersistentFlags().StringVar(&apiVersion, "api-version", "", "API version of the workload (e.g. apps/v1). Default will be empty.")
@@ -136,36 +150,39 @@ func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comma
 // command performs for the single-context path. Factored out so fleetScan
 // can run the exact same per-cluster behavior once per --kube-contexts
 // entry, instead of a parallel, divergent copy of this logic.
-func runWorkloadScan(ctx context.Context, scanInfo *cautils.ScanInfo, ks meta.IKubescape, policyIdentifiers []cautils.PolicyIdentifier) error {
+func runWorkloadScan(ctx context.Context, scanInfo *cautils.ScanInfo, ks meta.IKubescape, policyIdentifiers []cautils.PolicyIdentifier) (*resultshandling.ResultsHandler, error) {
 	results, err := ks.ScanContext(ctx, scanInfo, policyIdentifiers)
 	if err != nil {
-		return err
+		if errors.Is(err, resourcehandler.ErrResourceNotFound) && scanInfo.NamespaceDefaulted {
+			return nil, fmt.Errorf("%w (%s)", err, cliNamespaceDefaultedHint)
+		}
+		return nil, err
 	}
 
 	if err = results.HandleResults(ctx, scanInfo); err != nil {
-		return err
+		return results, err
 	}
 
 	if results.GetComplianceScore() < float32(scanInfo.ComplianceThreshold) {
-		return fmt.Errorf("scan compliance-score is below permitted threshold: %.2f (compliance-threshold: %.2f)", results.GetComplianceScore(), scanInfo.ComplianceThreshold)
+		return results, fmt.Errorf("scan compliance-score is below permitted threshold: %.2f (compliance-threshold: %.2f)", results.GetComplianceScore(), scanInfo.ComplianceThreshold)
 	}
 
 	if err := enforceSeverityThresholds(&results.GetData().Report.SummaryDetails, scanInfo); err != nil {
-		return err
+		return results, err
 	}
 	if scanInfo.ScanImages {
 		if err := enforceImageSeverityThresholds(results.ImageScanData, scanInfo); err != nil {
-			return err
+			return results, err
 		}
 	}
 	if err := enforceCoverageThreshold(results.GetData().ScanCoverage, len(results.GetData().Report.SummaryDetails.Controls), scanInfo); err != nil {
-		return err
+		return results, err
 	}
 	if err := enforcePolicyDegradation(results.GetData().ScanCoverage, scanInfo); err != nil {
-		return err
+		return results, err
 	}
 
-	return enforceBaselineDrift(ctx, results, scanInfo)
+	return results, enforceBaselineDrift(ctx, results, scanInfo)
 }
 
 func validateWorkloadArgs(args []string, scanInfo *cautils.ScanInfo) error {

@@ -70,6 +70,10 @@ func DecryptReport(data, masterKey []byte) ([]byte, error) {
 	if err := decryptor.decryptResourceLabels(); err != nil {
 		return nil, err
 	}
+
+	if err := decryptor.decryptNamespaceSummaries(); err != nil {
+		return nil, err
+	}
 	if err := decryptor.validateNoEncryptedValues(); err != nil {
 		return nil, err
 	}
@@ -510,6 +514,51 @@ func (d *reportDecryptor) remapRule(rule rawObject, context string) error {
 		return fmt.Errorf("failed to marshal %s.relatedResourcesIDs: %w", context, err)
 	}
 	rule["relatedResourcesIDs"] = updatedRelated
+
+	return nil
+}
+
+// decryptNamespaceSummaries restores the namespace each per-namespace rollup
+// entry is keyed by. The cluster-scoped entry is never encrypted, so it passes
+// through untouched.
+func (d *reportDecryptor) decryptNamespaceSummaries() error {
+	summariesRaw, ok := d.report["namespaceSummaries"]
+	if !ok || isJSONNull(summariesRaw) {
+		return nil
+	}
+
+	summaries, err := decodeObjectArray(summariesRaw, "namespaceSummaries")
+	if err != nil {
+		return err
+	}
+
+	for i := range summaries {
+		context := fmt.Sprintf("namespaceSummaries[%d]", i)
+		namespaceRaw, ok := summaries[i]["namespace"]
+		if !ok || isJSONNull(namespaceRaw) {
+			continue
+		}
+
+		var namespace string
+		if err := json.Unmarshal(namespaceRaw, &namespace); err != nil {
+			return fmt.Errorf("failed to parse %s.namespace: %w", context, err)
+		}
+
+		restored, err := decryptIfEncrypted(namespace, d.dek)
+		if err != nil {
+			return fmt.Errorf("failed to decrypt %s.namespace: %w", context, err)
+		}
+
+		summaries[i]["namespace"], err = json.Marshal(restored)
+		if err != nil {
+			return fmt.Errorf("failed to marshal %s.namespace: %w", context, err)
+		}
+	}
+
+	d.report["namespaceSummaries"], err = json.Marshal(summaries)
+	if err != nil {
+		return fmt.Errorf("failed to marshal namespaceSummaries: %w", err)
+	}
 
 	return nil
 }

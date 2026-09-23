@@ -387,6 +387,10 @@ type resourceSource struct {
 	filePath string
 	// documentIndex is the resource's position within a multi-document file.
 	documentIndex int
+	// relativePath is filePath as the report recorded it, relative to the
+	// resource's own base path. --output-dir mirrors it, so a fixed copy lands
+	// at the same place in the output tree as its source has in the scanned one.
+	relativePath string
 	// reportedPath is the raw path the report recorded for this resource. It is
 	// kept separately from filePath because the user-facing skip entry needs it
 	// even on the paths where resolution never produced a filePath.
@@ -594,12 +598,13 @@ func (h *FixHandler) resolveResourceSource(ctx context.Context, resourceObj *rep
 	}
 
 	src.filePath = candidatePath
+	src.relativePath = relativePath
 	src.documentIndex = idx
 	return src
 }
 
 // PrepareResourcesToFix returns the YAML-source resources that the existing
-// yq-based pipeline can patch. Helm-rendered resources are split off into
+// remediation pipeline can patch. Helm-rendered resources are split off into
 // PrepareHelmSuggestions because their fix paths reference rendered output
 // that has no reliable line mapping back to the source template.
 func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInfo {
@@ -695,6 +700,7 @@ func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInf
 
 		rfi := ResourceFixInfo{
 			FilePath:        src.filePath,
+			relativePath:    src.relativePath,
 			fileKey:         h.resourceFileKey(resourceObj),
 			Resource:        resourceObj,
 			YamlExpressions: make(map[string]armotypes.FixPath, 0),
@@ -1074,9 +1080,27 @@ func (h *FixHandler) PrintExpectedChanges(resourcesToFix []ResourceFixInfo) {
 	logger.L().Info(sb.String())
 }
 
+// ApplyChanges writes the planned fixes. By default each manifest is rewritten
+// in place. With FixInfo.OutputDir set, the fixed content goes to a copy under
+// that directory instead (see OutputPaths) and the source is left untouched.
 func (h *FixHandler) ApplyChanges(ctx context.Context, resourcesToFix []ResourceFixInfo) (int, []error) {
 	updatedFiles := make(map[string]bool)
 	errors := make([]error, 0)
+
+	// Resolved in full before the first write, so a destination that cannot be
+	// honoured fails the run with nothing written rather than part-way through.
+	var outputPaths map[string]string
+	var output *outputTree
+	if h.fixInfo != nil && h.fixInfo.OutputDir != "" {
+		var err error
+		if outputPaths, err = h.OutputPaths(resourcesToFix); err != nil {
+			return 0, []error{err}
+		}
+		if output, err = openOutputTree(h.fixInfo.OutputDir); err != nil {
+			return 0, []error{err}
+		}
+		defer output.close()
+	}
 
 	fileYamlExpressions := h.getFileYamlExpressions(resourcesToFix)
 
@@ -1095,7 +1119,12 @@ func (h *FixHandler) ApplyChanges(ctx context.Context, resourcesToFix []Resource
 			continue
 		}
 
-		if err := writeFixesToFile(filepath, fixedContent); err != nil {
+		if output != nil {
+			err = output.write(filepath, outputPaths[filepath], fixedContent)
+		} else {
+			err = writeFixesToFile(filepath, fixedContent)
+		}
+		if err != nil {
 			logger.L().Ctx(ctx).Warning(fmt.Sprintf("Failed to write fixes to file %s, %v", filepath, err.Error()))
 			errors = append(errors, err)
 			continue
@@ -1105,6 +1134,76 @@ func (h *FixHandler) ApplyChanges(ctx context.Context, resourcesToFix []Resource
 	}
 
 	return len(updatedFiles), errors
+}
+
+// OutputPaths maps every manifest ApplyChanges would rewrite to the path its
+// fixed copy is written to under FixInfo.OutputDir. The output tree mirrors the
+// scanned one: a manifest keeps the relative path the report recorded for it,
+// so nested directories survive and a multi-document file stays one file.
+//
+// It refuses, before anything is written, a plan that could not do what the
+// flag promises:
+//   - a destination outside the output directory. The relative path is report
+//     input, the same field resolveResourceSource containment-checks on the
+//     source side.
+//   - a destination that is the source itself, which happens when the output
+//     directory is the scanned directory. Writing there is an in-place fix
+//     under another name, the one outcome --output-dir exists to avoid.
+//   - two manifests that map to the same destination, as the inputs of a
+//     multi-input scan can when they share file names. One copy would silently
+//     replace the other.
+func (h *FixHandler) OutputPaths(resourcesToFix []ResourceFixInfo) (map[string]string, error) {
+	if h.fixInfo == nil || h.fixInfo.OutputDir == "" {
+		return nil, fmt.Errorf("no output directory was given")
+	}
+	outputDir := filepath.Clean(h.fixInfo.OutputDir)
+
+	destinations := make(map[string]string)
+	claimedBy := make(map[string]string)
+	for i := range resourcesToFix {
+		resource := &resourcesToFix[i]
+		if resource.inMemory {
+			continue
+		}
+		source := resource.FilePath
+		if _, planned := destinations[source]; planned {
+			continue
+		}
+
+		relativePath := resource.relativePath
+		if relativePath == "" {
+			relativePath = filepath.Base(source)
+		}
+		destination := filepath.Join(outputDir, relativePath)
+
+		if rel, err := filepath.Rel(outputDir, destination); err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return nil, fmt.Errorf("refusing to write %q outside the output directory %q", sanitizeForLog(relativePath), outputDir)
+		}
+		if isSameFile(source, destination) {
+			return nil, fmt.Errorf("output directory %q is where the scanned manifests are: writing there would overwrite %q. Choose another directory, or omit --output-dir to fix the manifests in place", outputDir, sanitizeForLog(source))
+		}
+		if other, claimed := claimedBy[destination]; claimed {
+			return nil, fmt.Errorf("%q and %q would both be written to %q; fix them in separate runs", sanitizeForLog(other), sanitizeForLog(source), destination)
+		}
+
+		destinations[source] = destination
+		claimedBy[destination] = source
+	}
+	return destinations, nil
+}
+
+// isSameFile reports whether two paths name the same file, either because they
+// are the same path or because the filesystem resolves them to the same file
+// (a symlinked output directory, for one).
+func isSameFile(a, b string) bool {
+	absA, errA := filepath.Abs(a)
+	absB, errB := filepath.Abs(b)
+	if errA == nil && errB == nil && absA == absB {
+		return true
+	}
+	infoA, errA := os.Stat(a)
+	infoB, errB := os.Stat(b)
+	return errA == nil && errB == nil && os.SameFile(infoA, infoB)
 }
 
 // isPathContained reports whether target resolves to a path inside base,
@@ -1169,34 +1268,7 @@ func (h *FixHandler) getFilePathAndIndex(filePathWithIndex string) (filePath str
 }
 
 func ApplyFixToContent(ctx context.Context, yamlAsString, yamlExpression string) (fixedString string, err error) {
-	yamlAsString = sanitizeYaml(yamlAsString)
-	newline := determineNewlineSeparator(yamlAsString)
-
-	yamlLines := strings.Split(yamlAsString, newline)
-
-	originalRootNodes, err := decodeDocumentRoots(yamlAsString)
-
-	if err != nil {
-		return "", err
-	}
-
-	fixedRootNodes, err := getFixedNodes(ctx, yamlAsString, yamlExpression)
-
-	if err != nil {
-		return "", err
-	}
-
-	fixInfo, err := getFixInfo(ctx, originalRootNodes, fixedRootNodes)
-	if err != nil {
-		return "", err
-	}
-
-	fixedYamlLines := getFixedYamlLines(yamlLines, fixInfo, newline)
-
-	fixedString = getStringFromSlice(fixedYamlLines, newline)
-	fixedString = revertSanitizeYaml(fixedString)
-
-	return fixedString, nil
+	return (YAMLTreeEditor{}).Apply(ctx, yamlAsString, yamlExpression)
 }
 
 // isFixableSourceType reports whether the scan parsed a file the fix engine can
@@ -1561,6 +1633,98 @@ func writeFixesToFile(path, content string) error {
 	return writeAndClose(file, content)
 }
 
+// outputTree writes fixed copies under --output-dir.
+//
+// Every write goes through an os.Root opened on the directory. OutputPaths
+// already refuses a relative path that climbs out lexically, but the path is
+// report input and the directory may already have content (--no-confirm allows
+// that), so a symlink below it could still carry a write somewhere else. The
+// root refuses any path that resolves outside the directory, and does so at the
+// moment of the operation, which a check made ahead of os.OpenFile cannot.
+type outputTree struct {
+	dir  string
+	root *os.Root
+	// written identifies the copies made so far in this run, see write.
+	written []os.FileInfo
+}
+
+func openOutputTree(dir string) (*outputTree, error) {
+	dir = filepath.Clean(dir)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return nil, fmt.Errorf("failed to create output directory %q: %w", dir, err)
+	}
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open output directory %q: %w", dir, err)
+	}
+	return &outputTree{dir: dir, root: root}, nil
+}
+
+func (o *outputTree) close() {
+	_ = o.root.Close()
+}
+
+// write writes the fixed content of source to destination, a path under the
+// output directory, creating the directories in between. The copy takes the
+// source's permissions: it is the same manifest, and a fixed copy of a private
+// file should not come out more readable than the original.
+func (o *outputTree) write(source, destination, content string) error {
+	perm := os.FileMode(0644)
+	if info, err := os.Stat(filepath.Clean(source)); err == nil {
+		perm = info.Mode().Perm()
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("error reading file permissions: %w", err)
+	}
+
+	relativePath, err := filepath.Rel(o.dir, filepath.Clean(destination))
+	if err != nil {
+		return fmt.Errorf("error writing fixes to file: %w", err)
+	}
+	if parent := filepath.Dir(relativePath); parent != "." {
+		if err := o.root.MkdirAll(parent, 0755); err != nil {
+			return fmt.Errorf("error creating directory for fixed file: %w", err)
+		}
+	}
+
+	// OutputPaths keeps two manifests off one destination by comparing paths,
+	// which cannot see that two paths are one file: names differing only in
+	// case on a case-insensitive filesystem, or a link already in the
+	// directory. Opening such a destination would truncate a copy this run
+	// has just written.
+	if existing, err := o.root.Stat(relativePath); err == nil {
+		for _, written := range o.written {
+			if os.SameFile(written, existing) {
+				return fmt.Errorf("error writing fixes to file: %q is a file this run has already written under another name", destination)
+			}
+		}
+	}
+
+	file, err := o.root.OpenFile(relativePath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, perm)
+	if err != nil {
+		return fmt.Errorf("error writing fixes to file: %w", err)
+	}
+
+	// The mode given to OpenFile only applies to a file it creates. With
+	// --no-confirm the destination may already exist, and would otherwise keep
+	// whatever mode it had, however much wider than the source's.
+	if err := file.Chmod(perm); err != nil {
+		_ = file.Close()
+		return fmt.Errorf("error setting permissions on fixed file: %w", err)
+	}
+
+	info, err := file.Stat()
+	if err != nil {
+		_ = file.Close()
+		return fmt.Errorf("error writing fixes to file: %w", err)
+	}
+
+	if err := writeAndClose(file, content); err != nil {
+		return err
+	}
+	o.written = append(o.written, info)
+	return nil
+}
+
 // writeStringCloser is the subset of *os.File that writeAndClose needs to
 // write the fixed manifest and close the file, checking both errors. It
 // exists so a fake can simulate a Close-time failure deterministically in
@@ -1599,29 +1763,4 @@ func determineNewlineSeparator(contents string) string {
 	default:
 		return unixNewline
 	}
-}
-
-// sanitizeYaml receives a YAML file as a string, sanitizes it and returns the result
-//
-// Callers should remember to call the corresponding revertSanitizeYaml function.
-//
-// It applies the following sanitization:
-//
-// - Since `yaml/v3` fails to serialize documents starting with a document
-// separator, we comment it out to be compatible.
-func sanitizeYaml(fileAsString string) string {
-	if strings.HasPrefix(fileAsString, "---") {
-		fileAsString = "# " + fileAsString
-	}
-	return fileAsString
-}
-
-// revertSanitizeYaml receives a sanitized YAML file as a string and reverts the applied sanitization
-//
-// For sanitization details, refer to the sanitizeYaml() function.
-func revertSanitizeYaml(fixedYamlString string) string {
-	if strings.HasPrefix(fixedYamlString, "# ---") {
-		fixedYamlString = fixedYamlString[2:]
-	}
-	return fixedYamlString
 }

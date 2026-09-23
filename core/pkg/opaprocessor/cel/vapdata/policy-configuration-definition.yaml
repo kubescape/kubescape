@@ -27,6 +27,10 @@ spec:
                   items:
                     type: string
                   type: array
+                hardenedSandboxRuntimeClasses:
+                  items:
+                    type: string
+                  type: array
                 insecureCapabilities:
                   items:
                     type: string

@@ -62,6 +62,9 @@ type dependabotUpdate struct {
 	Schedule         struct {
 		Interval string `yaml:"interval"`
 	} `yaml:"schedule"`
+	Groups map[string]struct {
+		Patterns []string `yaml:"patterns"`
+	} `yaml:"groups"`
 }
 
 type dependabotConfig struct {
@@ -195,6 +198,34 @@ func TestDependabotCoversEveryGoModule(t *testing.T) {
 				directory, gomodEcosystem, dependabotConfigName)
 		})
 	}
+}
+
+// TestDependabotGroupsKubernetesModules prevents Dependabot from updating one
+// Kubernetes staging module independently. These modules are released and must
+// be upgraded together; mixing their minor versions breaks compilation.
+func TestDependabotGroupsKubernetesModules(t *testing.T) {
+	config := loadDependabotConfig(t)
+
+	want := []string{
+		"k8s.io/api",
+		"k8s.io/apimachinery",
+		"k8s.io/apiserver",
+		"k8s.io/client-go",
+	}
+
+	for _, update := range config.Updates {
+		if update.PackageEcosystem != gomodEcosystem || normalizeDirectory(update.Directory) != "/" {
+			continue
+		}
+
+		group, ok := update.Groups["kubernetes"]
+		require.True(t, ok, "the root Go module must define a Kubernetes dependency group")
+		assert.ElementsMatch(t, want, group.Patterns,
+			"Kubernetes staging modules must be updated together to avoid incompatible minor versions")
+		return
+	}
+
+	t.Fatal("no root Go module Dependabot update found")
 }
 
 // TestDependabotTracksGitHubActions guards the supply chain of CI itself: every

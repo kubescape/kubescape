@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/anchore/grype/grype/vulnerability"
+	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/pkg/telemetry"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
@@ -51,12 +52,20 @@ func countResourcesByKind(scanData *cautils.OPASessionObj) map[string]int64 {
 	// Sized for the number of distinct kinds, not the resource count: a large
 	// cluster has tens of thousands of resources across a few dozen kinds.
 	counts := make(map[string]int64, 32)
-	for _, resource := range scanData.AllResources {
+	if scanData == nil {
+		return counts
+	}
+	catalog := scanData.GetCatalog()
+	if catalog == nil {
+		return counts
+	}
+	catalog.ForEach(func(_ string, resource workloadinterface.IMetadata) bool {
 		if resource == nil {
-			continue
+			return true
 		}
 		counts[resource.GetKind()]++
-	}
+		return true
+	})
 	return counts
 }
 

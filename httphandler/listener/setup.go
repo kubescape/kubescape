@@ -1,8 +1,10 @@
 package listener
 
 import (
+	"context"
 	"crypto/subtle"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -21,6 +23,9 @@ import (
 )
 
 const (
+	scanDrainPeriod            = 20 * time.Second
+	applicationShutdownTimeout = 25 * time.Second
+
 	// v1 paths
 	v1PathPrefix            = "/v1"
 	v1ScanPath              = "/scan"
@@ -38,8 +43,9 @@ const (
 	authTokenEnv = "KS_API_TOKEN"
 )
 
-// SetupHTTPListener set up listening http servers
-func SetupHTTPListener() error {
+// SetupHTTPListener serves requests until ctx is cancelled or serving fails.
+// Successful shutdown drains HTTP requests and joins the scan worker.
+func SetupHTTPListener(ctx context.Context) error {
 	keyPair, err := loadTLSKey(getCertFile(), getKeyFile())
 	if err != nil {
 		return err
@@ -125,12 +131,54 @@ func SetupHTTPListener() error {
 
 	servePprof()
 
-	defer httpHandler.Shutdown()
+	return serveUntilShutdown(ctx, server, ln, httpHandler, scanDrainPeriod, applicationShutdownTimeout)
+}
 
-	if keyPair != nil {
-		return server.ServeTLS(ln, "", "")
+// serveUntilShutdown joins both HTTP draining and the application-owned worker.
+// Durations are internal policy, passed explicitly for deterministic tests.
+func serveUntilShutdown(ctx context.Context, server *http.Server, ln net.Listener, handler *handlerequestsv1.HTTPHandler, drainPeriod, shutdownTimeout time.Duration) error {
+	served := make(chan error, 1)
+	go func() {
+		if server.TLSConfig != nil {
+			served <- server.ServeTLS(ln, "", "")
+		} else {
+			served <- server.Serve(ln)
+		}
+	}()
+	var serveErr error
+	expectedClose := false
+	select {
+	case serveErr = <-served:
+		// A serve failure must also cancel and join application-owned work.
+		drainPeriod = 0
+	case <-ctx.Done():
+		expectedClose = true
+		logger.L().Info("Shutting down Kubescape server")
 	}
-	return server.Serve(ln)
+	shutdownStarted := time.Now()
+	handler.BeginShutdown()
+	shutdownCtx, cancel := context.WithDeadline(context.Background(), shutdownStarted.Add(shutdownTimeout))
+	defer cancel()
+	workerResult := make(chan error, 1)
+	go func() {
+		workerResult <- handler.Shutdown(shutdownCtx, time.Until(shutdownStarted.Add(drainPeriod)))
+	}()
+	httpErr := server.Shutdown(shutdownCtx)
+	if httpErr != nil {
+		httpErr = errors.Join(httpErr, server.Close())
+	}
+	workerErr := <-workerResult
+	if serveErr == nil {
+		serveErr = <-served
+	}
+	if expectedClose && errors.Is(serveErr, http.ErrServerClosed) {
+		serveErr = nil
+	}
+	err := errors.Join(serveErr, httpErr, workerErr)
+	if err == nil {
+		logger.L().Info("Kubescape server shutdown complete")
+	}
+	return err
 }
 
 func loadTLSKey(certFile, keyFile string) (*tls.Certificate, error) {

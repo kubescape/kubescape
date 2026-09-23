@@ -172,7 +172,7 @@ func TestSARIFPrinter_ImageScan_HonorsSeverityExceptions(t *testing.T) {
 		assert.NoError(t, os.Remove(tmp.Name()))
 	}()
 
-	sp := NewSARIFPrinter()
+	sp := NewSARIFPrinter(false)
 	sp.writer = tmp
 
 	require.NoError(t, sp.printImageScan([]cautils.ImageScanData{imageScanData}))
@@ -248,7 +248,7 @@ const imageSARIFStdoutHelperEnv = "KUBESCAPE_TEST_IMAGE_SARIF_STDOUT_HELPER"
 // single write to stdout.
 func TestSARIFPrinter_ImageScan_StdoutPipeCompletes(t *testing.T) {
 	if os.Getenv(imageSARIFStdoutHelperEnv) == "1" {
-		sp := NewSARIFPrinter()
+		sp := NewSARIFPrinter(false)
 		sp.SetWriter(context.Background(), "")
 		if err := sp.printImageScan([]cautils.ImageScanData{buildSeverityExceptionImageScanData()}); err != nil {
 			_, _ = fmt.Fprintln(os.Stderr, err)

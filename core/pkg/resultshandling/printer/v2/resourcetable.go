@@ -2,6 +2,7 @@ package printer
 
 import (
 	"fmt"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -26,16 +27,63 @@ const (
 	_resourceRowLen        = iota
 )
 
-func (prettyPrinter *PrettyPrinter) resourceTable(opaSessionObj *cautils.OPASessionObj) {
+// failedResourcesInPrintOrder collects the failed resources the table will
+// print, paired with the manifest each came from, and orders them so every
+// resource of one manifest is visited consecutively.
+//
+// The order matters beyond tidiness. Evidence line numbers are resolved through
+// fixcache's manifestCache, which keeps exactly one manifest's decoded
+// documents alive and drops them when the walk reaches the next file. Ranging
+// over ResourcesResult directly hands them over in Go's randomised map order,
+// which would rebuild a file's resolver once per resource instead of once per
+// file. Sorting also makes the printed order reproducible between runs, which
+// map order never was.
+//
+// Unlike the SARIF collector, a resource with no source path is kept rather
+// than skipped: cluster scans have no manifests at all, and those resources
+// still belong in this table. They carry an empty absPath and simply resolve no
+// lines.
+func failedResourcesInPrintOrder(opaSessionObj *cautils.OPASessionObj) []scannedResource {
+	basePath := getBasePathFromMetadata(opaSessionObj)
 
+	failed := make([]scannedResource, 0, len(opaSessionObj.ResourcesResult))
 	for resourceID, result := range opaSessionObj.ResourcesResult {
 		if !result.GetStatus(nil).IsFailed() {
 			continue
 		}
-		resource, ok := opaSessionObj.AllResources[resourceID]
-		if !ok {
+		if res, ok := opaSessionObj.GetResource(resourceID); !ok || res == nil {
 			continue
 		}
+
+		resourceSource := opaSessionObj.ResourceSource[resourceID]
+		relPath := resourceSource.RelativePath
+
+		var absPath string
+		if relPath != "" {
+			absPath = filepath.Join(effectiveBasePath(resourceSource, basePath), relPath)
+		}
+
+		failed = append(failed, scannedResource{
+			resourceID: resourceID,
+			relPath:    relPath,
+			absPath:    absPath,
+		})
+	}
+
+	return groupByManifest(failed)
+}
+
+func (prettyPrinter *PrettyPrinter) resourceTable(opaSessionObj *cautils.OPASessionObj) {
+
+	var caches manifestCache
+	for _, scanned := range failedResourcesInPrintOrder(opaSessionObj) {
+		resourceID := scanned.resourceID
+		result := opaSessionObj.ResourcesResult[resourceID]
+		resource, ok := opaSessionObj.GetResource(resourceID)
+		if !ok || resource == nil {
+			continue
+		}
+
 		fmt.Fprintf(prettyPrinter.writer, "\n%s\n", getSeparator("#"))
 
 		if source, ok := opaSessionObj.ResourceSource[resourceID]; ok {
@@ -62,7 +110,8 @@ func (prettyPrinter *PrettyPrinter) resourceTable(opaSessionObj *cautils.OPASess
 		if src, ok := opaSessionObj.ResourceSource[resourceID]; ok {
 			sourcePath = src.RelativePath
 		}
-		resourceRows := generateResourceRows(result.ListControls(), &opaSessionObj.Report.SummaryDetails, resource, prettyPrinter.showEvidence, prettyPrinter.showSecrets, sourcePath)
+		lineFor := prettyPrinter.pathLineResolver(opaSessionObj, &caches, scanned)
+		resourceRows := generateResourceRows(result.ListControls(), &opaSessionObj.Report.SummaryDetails, resource, prettyPrinter.showEvidence, prettyPrinter.showSecrets, sourcePath, lineFor)
 
 		short := utils.CheckShortTerminalWidth(resourceRows, generateResourceHeader(false))
 		if short {
@@ -77,7 +126,55 @@ func (prettyPrinter *PrettyPrinter) resourceTable(opaSessionObj *cautils.OPASess
 
 }
 
-func generateResourceRows(controls []resourcesresults.ResourceAssociatedControl, summaryDetails *reportsummary.SummaryDetails, resource workloadinterface.IMetadata, showEvidence bool, showSecrets bool, sourcePath string) []table.Row {
+// pathLineResolver returns the lookup generateResourceRows uses to turn a fix,
+// delete or review path into a line in the manifest, or nil when no line can be resolved for
+// this resource. Three things have to hold, and each rules out a real case:
+//
+//   - --show-evidence is set. Without it no evidence is printed at all, so
+//     opening and decoding manifests would be work whose result is discarded.
+//   - The session's source paths are real. --hide and --encrypt replace them
+//     with pseudonyms, so every open would fail on a path that never existed,
+//     warning per manifest about a lookup that was never possible. The scan
+//     says once, up front, that lines are unavailable.
+//   - The resource came from a file. Cluster-scanned resources have no manifest
+//     to point into, and asking the cache for an empty path would try to open
+//     "", fail, and warn once per scan about something that was never possible.
+//   - The document index is known. getDocIndex reads the "<path>:<index>"
+//     convention, which Helm-rendered resources do not carry, and it only
+//     applies to LocalWorkload at all.
+//
+// A nil return is the caller's signal to print paths exactly as before.
+func (prettyPrinter *PrettyPrinter) pathLineResolver(opaSessionObj *cautils.OPASessionObj, caches *manifestCache, scanned scannedResource) func(string) (int, bool) {
+	if !prettyPrinter.showEvidence || scanned.absPath == "" || opaSessionObj.SourcePathsAnonymized {
+		return nil
+	}
+
+	docIndex, ok := getDocIndex(opaSessionObj, scanned.resourceID)
+	if !ok {
+		return nil
+	}
+
+	resolver := caches.get(scanned.absPath).locationResolver(scanned.absPath, "evidence")
+	if resolver == nil {
+		return nil
+	}
+
+	return func(path string) (int, bool) {
+		// ResolveLocation is called directly rather than through
+		// resolveFixLocation, which defaults to line 1 when nothing resolves.
+		// A fabricated line is worse than none for an auditor reading this
+		// column, so an unresolved path degrades to today's bare output -
+		// the same choice resolveReviewPathLocations makes for SARIF's
+		// related locations.
+		location, err := resolver.ResolveLocation(path, docIndex)
+		if err != nil || location.Line == 0 {
+			return 0, false
+		}
+		return location.Line, true
+	}
+}
+
+func generateResourceRows(controls []resourcesresults.ResourceAssociatedControl, summaryDetails *reportsummary.SummaryDetails, resource workloadinterface.IMetadata, showEvidence bool, showSecrets bool, sourcePath string, lineFor func(string) (int, bool)) []table.Row {
 	var rows []table.Row
 
 	for i := range controls {
@@ -91,6 +188,7 @@ func generateResourceRows(controls []resourcesresults.ResourceAssociatedControl,
 		if showEvidence {
 			paths := AssistedRemediationPathsWithCurrentValuesFiltered(&controls[i], resource, showSecrets)
 			addContainerNameToAssistedRemediation(resource, &paths)
+			annotatePathLines(&paths, &controls[i], lineFor)
 			if sourcePath != "" {
 				paths = append([]string{"@ " + sourcePath}, paths...)
 			}
@@ -106,6 +204,98 @@ func generateResourceRows(controls []resourcesresults.ResourceAssociatedControl,
 	}
 
 	return rows
+}
+
+// annotatePathLines appends " (line N)" to each assisted-remediation entry whose
+// path resolves to a line in the manifest - fix, delete and review paths alike.
+//
+// It has to re-derive which path each entry came from.
+// AssistedRemediationPathsWithCurrentValuesFiltered returns all three types
+// already rendered into one flat, deduplicated []string, so the path type is
+// no longer visible. Each type is re-read from the control and matched by the
+// shape it renders to: a fix path as "<path>=<value>", a delete path bare, and
+// a review path bare or followed by " (current: <value>)". Any entry may also
+// carry a " (<container>)" suffix by this point.
+//
+// Deriving it here, rather than having the path builders return structured
+// values, keeps this local to the pretty-printer: those builders are shared
+// with the SARIF, GitLab SAST, HTML and CSV printers, and changing their
+// output would change four report formats to annotate one table.
+//
+// A path whose field is absent from the manifest gets its nearest existing
+// ancestor's line, for every path type. That is ResolveLocation's walk-up, and
+// it matches what SARIF already reports as a review path's related location,
+// so the two outputs point at the same place for the same finding.
+func annotatePathLines(paths *[]string, control *resourcesresults.ResourceAssociatedControl, lineFor func(string) (int, bool)) {
+	if lineFor == nil || len(*paths) == 0 {
+		return
+	}
+
+	renderings := []struct {
+		paths   []string
+		matches func(entry, path string) bool
+	}{
+		{paths: fixPathsToString(control, true), matches: renderedAsFixPath},
+		{paths: deletePathsToString(control), matches: renderedAsBarePath},
+		{paths: reviewPathsToString(control), matches: renderedAsBarePath},
+	}
+
+	// Each entry is annotated at most once. The rendered list is deduplicated
+	// on the path with any " (current: ...)" stripped, so a delete path and a
+	// review path naming the same field collapse into one entry; and the path
+	// builders do not deduplicate, so one control's rules can name the same
+	// field twice. Either way several paths can match a single entry, and each
+	// would otherwise append its line again.
+	annotated := make([]bool, len(*paths))
+
+	// Resolving a path evaluates a yq expression against the manifest, so each
+	// distinct path is resolved once however many times it is named.
+	type resolution struct {
+		line int
+		ok   bool
+	}
+	resolved := make(map[string]resolution)
+	lookup := func(path string) (int, bool) {
+		if r, seen := resolved[path]; seen {
+			return r.line, r.ok
+		}
+		line, ok := lineFor(path)
+		resolved[path] = resolution{line: line, ok: ok}
+		return line, ok
+	}
+
+	for _, rendering := range renderings {
+		for _, path := range rendering.paths {
+			for i, entry := range *paths {
+				if annotated[i] || !rendering.matches(entry, path) {
+					continue
+				}
+				line, ok := lookup(path)
+				if !ok {
+					continue
+				}
+				(*paths)[i] = entry + fmt.Sprintf(" (line %d)", line)
+				annotated[i] = true
+			}
+		}
+	}
+}
+
+// renderedAsFixPath reports whether entry is path rendered as a fix path,
+// "<path>=<value>". Matching on the "=" is what stops "spec.a" from also
+// claiming "spec.ab=x".
+func renderedAsFixPath(entry, path string) bool {
+	return strings.HasPrefix(entry, path+"=")
+}
+
+// renderedAsBarePath reports whether entry is path rendered as a delete or
+// review path: the path alone, or followed by " (" - a review path's
+// " (current: <value>)" or a " (<container>)" hint. Requiring the " (" rather
+// than a bare prefix is what stops "spec.containers[0]" from claiming
+// "spec.containers[0].image"; unquoted keys cannot contain a space, so the
+// suffix cannot be part of a longer path either.
+func renderedAsBarePath(entry, path string) bool {
+	return entry == path || strings.HasPrefix(entry, path+" (")
 }
 
 func addContainerNameToAssistedRemediation(resource workloadinterface.IMetadata, paths *[]string) {
