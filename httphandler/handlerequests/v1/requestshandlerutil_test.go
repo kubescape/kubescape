@@ -138,9 +138,9 @@ func TestReadResultsFile(t *testing.T) {
 	targetFile := dir + "/" + validUUID + ".json"
 	otherFile := dir + "/other-xyz.json"
 
-	err := os.WriteFile(targetFile, []byte("{}"), 0644)
+	err := os.WriteFile(targetFile, []byte("{}"), 0600)
 	assert.NoError(t, err)
-	err = os.WriteFile(otherFile, []byte("{}"), 0644)
+	err = os.WriteFile(otherFile, []byte("{}"), 0600)
 	assert.NoError(t, err)
 
 	// readResultsFile should find the target via exact match
@@ -171,7 +171,7 @@ func TestRemoveResultsFile(t *testing.T) {
 	validUUID := "123e4567-e89b-12d3-a456-426614174000"
 	targetFile := dir + "/" + validUUID + ".json"
 
-	err := os.WriteFile(targetFile, []byte("{}"), 0644)
+	err := os.WriteFile(targetFile, []byte("{}"), 0600)
 	assert.NoError(t, err)
 
 	// removeResultsFile should succeed
