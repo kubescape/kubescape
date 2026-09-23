@@ -653,3 +653,5 @@ func ecrFinalPage(vulnerabilityID string) *ecr.DescribeImageScanFindingsOutput {
 	page.NextToken = nil
 	return page
 }
+
+
