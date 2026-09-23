@@ -1,7 +1,12 @@
 package networkpolicy
 
 import (
+	"fmt"
+	"slices"
+
+	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
 )
 
 // ruleVerdict evaluates one rule's peer list and port list -- both must
@@ -92,10 +97,16 @@ func (idx *Index) AllowsEgress(src, dst Endpoint, port *PortSpec) Decision {
 
 // Reaches reports whether src can reach dst on port: real NetworkPolicy
 // semantics require BOTH src's egress rules AND dst's ingress rules to
-// allow the connection independently -- one side allowing is not enough.
+// allow the same port and protocol. A nil port asks whether any such pair
+// exists across TCP, UDP, and SCTP on ports 1 through 65535.
 // The two Decisions are always returned alongside the combined Verdict so a
-// caller can explain which side (or both) was responsible.
+// caller can explain which side (or both) was responsible. With a nil port,
+// a Denied verdict can accompany two independently Allowed decisions when
+// the directions allow different ports/protocols; their reasons explain this.
 func (idx *Index) Reaches(src, dst Endpoint, port *PortSpec) (Verdict, Decision, Decision) {
+	if port == nil {
+		return idx.reachesAnyPort(src, dst)
+	}
 	egress := idx.AllowsEgress(src, dst, port)
 	ingress := idx.AllowsIngress(src, dst, port)
 
@@ -106,4 +117,95 @@ func (idx *Index) Reaches(src, dst Endpoint, port *PortSpec) (Verdict, Decision,
 		return Unknown, egress, ingress
 	}
 	return Allowed, egress, ingress
+}
+
+// reachabilityPorts partitions the valid port space at every numeric rule
+// boundary. For a fixed protocol, explicit matching is constant between these
+// boundaries: peers do not depend on ports, and named ports remain Unknown.
+// Evaluating one port per partition therefore covers every possible outcome
+// without exhaustively checking all 65535 ports.
+func (idx *Index) reachabilityPorts(src, dst Endpoint) []int32 {
+	ports := []int32{1}
+	add := func(boundary int32) {
+		if boundary >= 1 && boundary <= 65535 {
+			ports = append(ports, boundary)
+		}
+	}
+	collect := func(entries []networkingv1.NetworkPolicyPort) {
+		for _, p := range entries {
+			if p.Port == nil || p.Port.Type == intstr.String {
+				continue
+			}
+			lo, ok := safePort(p.Port.IntValue())
+			if !ok {
+				continue
+			}
+			hi := lo
+			if p.EndPort != nil {
+				hi = *p.EndPort
+			}
+			add(lo)
+			// Check before adding to avoid overflowing malformed manifest
+			// values. Boundaries outside the valid query space are irrelevant.
+			if hi >= 1 && hi < 65535 {
+				add(hi + 1)
+			}
+		}
+	}
+	for _, cp := range idx.matchingPolicies(src) {
+		if cp.hasEgress {
+			for _, rule := range cp.policy.Spec.Egress {
+				collect(rule.Ports)
+			}
+		}
+	}
+	for _, cp := range idx.matchingPolicies(dst) {
+		if cp.hasIngress {
+			for _, rule := range cp.policy.Spec.Ingress {
+				collect(rule.Ports)
+			}
+		}
+	}
+	slices.Sort(ports)
+	return slices.Compact(ports)
+}
+
+func (idx *Index) reachesAnyPort(src, dst Endpoint) (Verdict, Decision, Decision) {
+	ports := idx.reachabilityPorts(src, dst)
+	egressSummary := deny("no egress rule allows any port/protocol to this destination")
+	ingressSummary := deny("no ingress rule allows any port/protocol from this source")
+	var unknownEgress, unknownIngress Decision
+	sawUnknown := false
+	// Each direction is an OR across all candidates: Allowed wins over
+	// Unknown, which wins over Denied. Preserve the first supporting decision.
+	summarize := func(summary *Decision, candidate Decision) {
+		if (candidate.Verdict == Allowed && summary.Verdict != Allowed) ||
+			(candidate.Verdict == Unknown && summary.Verdict == Denied) {
+			*summary = candidate
+		}
+	}
+	for _, protocol := range []corev1.Protocol{corev1.ProtocolTCP, corev1.ProtocolUDP, corev1.ProtocolSCTP} {
+		for _, port := range ports {
+			v, egress, ingress := idx.Reaches(src, dst, &PortSpec{Port: port, Protocol: protocol})
+			prefix := fmt.Sprintf("port %d/%s: ", port, protocol)
+			egress.Reason = prefix + egress.Reason
+			ingress.Reason = prefix + ingress.Reason
+			if v == Allowed {
+				return Allowed, egress, ingress
+			}
+			if v == Unknown && !sawUnknown {
+				sawUnknown = true
+				unknownEgress, unknownIngress = egress, ingress
+			}
+			summarize(&egressSummary, egress)
+			summarize(&ingressSummary, ingress)
+		}
+	}
+	if sawUnknown {
+		return Unknown, unknownEgress, unknownIngress
+	}
+	const noOverlap = "; no common port/protocol is possible across egress and ingress"
+	egressSummary.Reason = "egress considered independently: " + egressSummary.Reason + noOverlap
+	ingressSummary.Reason = "ingress considered independently: " + ingressSummary.Reason + noOverlap
+	return Denied, egressSummary, ingressSummary
 }

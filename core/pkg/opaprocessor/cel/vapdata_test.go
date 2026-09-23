@@ -8,9 +8,12 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
+	"github.com/google/cel-go/cel"
+	celast "github.com/google/cel-go/common/ast"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"sigs.k8s.io/yaml"
@@ -297,4 +300,228 @@ func sortedNames(m map[string]string) []string {
 	}
 	slices.Sort(names)
 	return names
+}
+
+// TestBundleDoesNotReadNamespaceObject pins the one gap in docs/cel-engine.md
+// that is not a safe skip.
+//
+// The scan binds namespaceObject to null whenever it did not collect that
+// Namespace, and collection follows what the framework's controls match, not
+// what the loaded policies need. Under failurePolicy Fail, the bundle default,
+// an unguarded read of that null is reported as a violation, so the policy
+// fails workloads a cluster would admit.
+//
+// It is latent only because no bundle policy reads the variable, which is a
+// property of the vendored bundle rather than of the engine: a pin bump can end
+// it silently. This test makes it end as a failed build instead.
+func TestBundleDoesNotReadNamespaceObject(t *testing.T) {
+	catalog, err := getVAPCatalog()
+	require.NoError(t, err)
+
+	vaps := runtimeReachableVAPs(catalog)
+	require.NotEmpty(t, vaps, "empty bundle; the guard would pass vacuously")
+
+	e, err := NewEvaluator()
+	require.NoError(t, err)
+
+	for _, vap := range vaps {
+		for _, expr := range bundleExpressions(vap) {
+			if !readsNamespaceObject(e.env, expr.source) {
+				continue
+			}
+			assert.Failf(t, "a bundle policy now reads namespaceObject",
+				"%s (%s) reads it in %s.\n\n"+
+					"The gap in docs/cel-engine.md just went live. The scan binds namespaceObject to null "+
+					"when it did not collect that Namespace, and under failurePolicy Fail an unguarded read "+
+					"of that null is reported as a violation, so this policy can now fail workloads a "+
+					"cluster would admit.\n\n"+
+					"Do not silence this by deleting the test. Either guarantee Namespace collection when a "+
+					"loaded policy needs one, or classify an uncollected Namespace so it skips instead of "+
+					"failing.",
+				vap.PolicyName, vap.ControlID, expr.where)
+		}
+	}
+}
+
+// runtimeReachableVAPs returns every policy loadVAP can reach, deduplicated by
+// policy.
+//
+// byName and byControl are poisoned independently (see catalog.go): a name
+// claimed by two policies is dropped from byName, while each of their distinct
+// control IDs stays resolvable through byControl, which is the index loadVAP
+// uses. Walking byName alone would let exactly those policies read
+// namespaceObject unguarded.
+func runtimeReachableVAPs(catalog *vapCatalog) []*VAP {
+	seen := make(map[*VAP]struct{}, len(catalog.byName)+len(catalog.byControl))
+	out := make([]*VAP, 0, len(seen))
+	for _, index := range []map[string]*VAP{catalog.byName, catalog.byControl} {
+		for _, vap := range index {
+			if _, done := seen[vap]; done {
+				continue
+			}
+			seen[vap] = struct{}{}
+			out = append(out, vap)
+		}
+	}
+	return out
+}
+
+const (
+	namespaceObjectIdent = "namespaceObject"
+	// CEL's absolute name for the global, which is how a real global read
+	// survives inside a comprehension that shadowed the plain name.
+	namespaceObjectAbsolute = "." + namespaceObjectIdent
+)
+
+// readsNamespaceObject reports whether expr reads the global namespaceObject.
+//
+// Scope matters in both directions, so this cannot be a string match. A
+// comprehension may bind a variable of the same name, and reading that local
+// never touches the activation. Where one does, a genuine global read is kept
+// as the absolute name instead.
+//
+// An expression that does not compile reads nothing: such a policy is already
+// skipped at runtime and cannot produce the finding this guards against.
+func readsNamespaceObject(env *cel.Env, expr string) bool {
+	compiled, issues := env.Compile(expr)
+	if issues != nil && issues.Err() != nil {
+		return false
+	}
+	root := celast.NavigateAST(compiled.NativeRep())
+	for _, node := range celast.MatchDescendants(root, celast.KindMatcher(celast.IdentKind)) {
+		switch node.AsIdent() {
+		case namespaceObjectAbsolute:
+			return true
+		case namespaceObjectIdent:
+			if !shadowedByComprehension(node, namespaceObjectIdent) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// shadowedByComprehension reports whether name is bound by an enclosing
+// comprehension at this node rather than by the activation.
+//
+// A comprehension's iteration range and its accumulator initializer are both
+// evaluated in the OUTER scope, so an ident reached by ascending through either
+// is not shadowed by that comprehension.
+func shadowedByComprehension(node celast.NavigableExpr, name string) bool {
+	child := node
+	for {
+		parent, ok := child.Parent()
+		if !ok {
+			return false
+		}
+		if parent.Kind() == celast.ComprehensionKind {
+			c := parent.AsComprehension()
+			binds := c.IterVar() == name || (c.HasIterVar2() && c.IterVar2() == name) || c.AccuVar() == name
+			outerScope := child.ID() == c.IterRange().ID() || child.ID() == c.AccuInit().ID()
+			if binds && !outerScope {
+				return true
+			}
+		}
+		child = parent
+	}
+}
+
+// bundleExpression is one CEL expression from a policy, with where it came from
+// so a failure names the field rather than just the policy.
+type bundleExpression struct {
+	source string
+	where  string
+}
+
+// bundleExpressions returns every CEL expression a policy evaluates. All of them
+// compile against the same env, so any of them can read namespaceObject.
+func bundleExpressions(vap *VAP) []bundleExpression {
+	var out []bundleExpression
+	for _, v := range vap.Variables {
+		out = append(out, bundleExpression{v.Expression, "variable " + v.Name})
+	}
+	for i, v := range vap.Validations {
+		out = append(out, bundleExpression{v.Expression, "validation " + strconv.Itoa(i)})
+		if v.MessageExpression != "" {
+			out = append(out, bundleExpression{v.MessageExpression, "messageExpression " + strconv.Itoa(i)})
+		}
+	}
+	for _, c := range vap.matchConditions {
+		out = append(out, bundleExpression{c.Expression, "matchCondition " + c.Name})
+	}
+	return out
+}
+
+// TestReadsNamespaceObjectScoping covers the two ways a plain name comparison
+// gets the answer wrong: a comprehension local that never touches the
+// activation, and a real global read that shadowing rewrites to its absolute
+// name.
+func TestReadsNamespaceObjectScoping(t *testing.T) {
+	e, err := NewEvaluator()
+	require.NoError(t, err)
+
+	for _, tc := range []struct {
+		name  string
+		expr  string
+		reads bool
+	}{
+		{"plain global read", "namespaceObject.metadata.name == 'x'", true},
+		{"shadowed global kept as an absolute name", "[true].all(namespaceObject, .namespaceObject.metadata.name == 'allowed')", true},
+		{"comprehension local of the same name", "[true].all(namespaceObject, namespaceObject)", false},
+		{"an iteration range is the outer scope", "namespaceObject.metadata.labels.all(namespaceObject, namespaceObject != '')", true},
+		{"a mention inside a string", "'see the namespaceObject docs'", false},
+		{"unrelated expression", "has(object.spec)", false},
+		{"does not compile", "namespaceObject.(((", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.reads, readsNamespaceObject(e.env, tc.expr))
+		})
+	}
+}
+
+// TestBundleGuardCoversDuplicateNamePolicies covers the catalog shape where the
+// two indexes disagree. A name claimed twice is poisoned out of byName, but each
+// distinct control ID stays resolvable through byControl, which is what loadVAP
+// uses, so a guard walking byName alone would see nothing at all here.
+func TestBundleGuardCoversDuplicateNamePolicies(t *testing.T) {
+	catalog, err := parseVAPBundle([]byte(`apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: policy-a
+  labels:
+    controlId: C-0001
+spec:
+  validations:
+    - expression: "namespaceObject.metadata.name == 'allowed'"
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: policy-a
+  labels:
+    controlId: C-0002
+spec:
+  validations:
+    - expression: "true"
+`))
+	require.NoError(t, err)
+	require.Empty(t, catalog.byName, "a name claimed twice is poisoned out of byName")
+	require.Len(t, catalog.byControl, 2, "each control ID stays resolvable")
+
+	vaps := runtimeReachableVAPs(catalog)
+	require.Len(t, vaps, 2, "both policies are still reachable through loadVAP")
+
+	e, err := NewEvaluator()
+	require.NoError(t, err)
+
+	var found []string
+	for _, vap := range vaps {
+		for _, expr := range bundleExpressions(vap) {
+			if readsNamespaceObject(e.env, expr.source) {
+				found = append(found, vap.ControlID)
+			}
+		}
+	}
+	assert.Equal(t, []string{"C-0001"}, found,
+		"a read reachable only through byControl must still be caught")
 }

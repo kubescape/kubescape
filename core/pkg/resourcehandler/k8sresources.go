@@ -1384,17 +1384,10 @@ func (k8sHandler *K8sResourceHandler) collectHostResources(ctx context.Context, 
 		g, v := getGroupNVersion(hostResources[rscIdx].GetApiVersion())
 		allResources[hostResources[rscIdx].GetID()] = &hostResources[rscIdx]
 
-		// Use ResourceGroupToString (not JoinResourceTriplets) to match the key format used by
-		// setKSResourceMap: when the host sensor CRD exists in the cluster, IsKindKubernetes returns
-		// true and ResourceGroupToString normalizes the kind to lowercase+plural ("kubeletinfos").
-		groupResources := k8sinterface.ResourceGroupToString(g, v, hostResources[rscIdx].GetKind())
-		for _, groupResource := range groupResources {
-			grpResourceList, ok := externalResourceMap[groupResource]
-			if !ok {
-				grpResourceList = make([]string, 0)
-			}
-			externalResourceMap[groupResource] = append(grpResourceList, hostResources[rscIdx].GetID())
-		}
+		// Host envelopes are virtual v1beta0 resources, distinct from the
+		// v1beta1 CRDs transporting them. Discovery must not rewrite their keys.
+		groupResource := k8sinterface.JoinResourceTriplets(g, v, hostResources[rscIdx].GetKind())
+		externalResourceMap[groupResource] = append(externalResourceMap[groupResource], hostResources[rscIdx].GetID())
 	}
 	return infoMap, nil
 }

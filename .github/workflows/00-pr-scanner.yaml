@@ -14,10 +14,43 @@ on:
             - "docs/*"
             - "build/*"
             - ".github/*"
+    # A pull_request run builds the PR merged into the base as the base stood
+    # when the run started. Two PRs can therefore each be green against a base
+    # that does not yet contain the other, merge, and leave master broken with
+    # nothing having failed along the way. Until this trigger existed nothing
+    # ran on master at all - 02-release.yaml is tag-only and scorecard.yml
+    # analyses the repository rather than building it - so the first sign was
+    # the next contributor's PR going red on an error in files they had never
+    # touched.
+    #
+    # Running the same checks on the merge commit attributes that breakage to
+    # the merge that caused it, within minutes. The paths-ignore list mirrors
+    # the pull_request one above: a merge that changes only docs cannot change
+    # whether master compiles. Keep the two lists in step.
+    push:
+        branches: [master]
+        paths-ignore:
+            - "**.yaml"
+            - "**.yml"
+            - "**.md"
+            - "**.sh"
+            - "website/*"
+            - "examples/*"
+            - "docs/*"
+            - "build/*"
+            - ".github/*"
 
 concurrency:
-    group: ${{ github.workflow }}-${{ github.ref }}
-    cancel-in-progress: true
+    # A PR's runs share its ref, so a new push supersedes the run it made
+    # obsolete. Every other run gets a group of its own: a group holds one
+    # running and one pending run and a newer arrival replaces the pending one
+    # even without cancel-in-progress, so keying master on github.ref would let
+    # a burst of merges drop one of them unchecked.
+    group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+    # Superseded PR runs are still cancelled, but a master run is not: cancelling
+    # it would leave the merge that triggered it with no verdict, which is the
+    # state this workflow's push trigger exists to end.
+    cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
     pr-scanner:
@@ -68,7 +101,14 @@ jobs:
 
     run-system-tests:
         needs: [wf-preparation, pr-scanner]
-        if: ${{ (needs.wf-preparation.outputs.is-secret-set == 'true') && (always() && (contains(needs.*.result, 'success') || contains(needs.*.result, 'skipped')) && !(contains(needs.*.result, 'failure')) && !(contains(needs.*.result, 'cancelled'))) }}
+        # Not on a merge. The E2E suite is dispatched to a private repository and
+        # polled for up to an hour, and its correlation id and KS_BRANCH come
+        # from the head ref, which on a push to master is just master - a run
+        # identifying no pull request. It is a review gate on a proposed change,
+        # not a health check on the merged branch, so the push trigger stops at
+        # the build and tests. Excluding push rather than requiring
+        # pull_request leaves the existing workflow_dispatch path untouched.
+        if: ${{ (github.event_name != 'push') && (needs.wf-preparation.outputs.is-secret-set == 'true') && (always() && (contains(needs.*.result, 'success') || contains(needs.*.result, 'skipped')) && !(contains(needs.*.result, 'failure')) && !(contains(needs.*.result, 'cancelled'))) }}
         runs-on: ubuntu-latest
         permissions:
             actions: read

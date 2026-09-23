@@ -11,6 +11,7 @@ import (
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/mocks"
 	"github.com/kubescape/opa-utils/reporthandling"
+	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/resources"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -124,8 +125,9 @@ func TestControlRequiresWholeClusterInput_C0261(t *testing.T) {
 // without the whole-cluster deferral the partitioned pass would never see it.
 func TestProcess_C0261ShapedControlCatchesCrossNamespaceBinding(t *testing.T) {
 	control := saTokenBindingControl("C-0261")
+	frameworks := []reporthandling.Framework{{Controls: []reporthandling.Control{control}}}
 	policies := convertFrameworksToPolicies(
-		[]reporthandling.Framework{{Controls: []reporthandling.Control{control}}},
+		frameworks,
 		nil, reporthandling.ScopeCluster,
 	)
 
@@ -138,6 +140,7 @@ func TestProcess_C0261ShapedControlCatchesCrossNamespaceBinding(t *testing.T) {
 		sessionObj.AllResources = allResources
 		opap := NewOPAProcessor(sessionObj, resources.NewRegoDependenciesDataMock(), "test", "", "", false, nil)
 		opap.AllPolicies = policies
+		ConvertFrameworksToSummaryDetails(&opap.Report.SummaryDetails, frameworks, policies)
 		return opap
 	}
 
@@ -189,6 +192,11 @@ func TestProcess_C0261ShapedControlCatchesCrossNamespaceBinding(t *testing.T) {
 		require.NoError(t, opap.Process(context.Background(), policies, nil))
 		// Control should be skipped, not evaluated
 		assert.Contains(t, opap.skippedWholeClusterControls, "C-0261")
+		if ctrl, ok := opap.Report.SummaryDetails.Controls["C-0261"]; assert.True(t, ok, "C-0261 must exist in SummaryDetails.Controls") {
+			assert.True(t, ctrl.GetStatus().IsSkipped(), "control must have skipped status")
+			assert.Equal(t, apis.SubStatusNotEvaluated, ctrl.GetStatus().GetSubStatus())
+			assert.Contains(t, ctrl.GetStatus().Info(), "skipped by execution policy")
+		}
 		if res, ok := opap.ResourcesResult[podID]; ok {
 			assert.False(t, res.GetStatus(nil).IsFailed(), "pod must not fail for skipped whole-cluster control")
 		}
