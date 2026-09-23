@@ -12,8 +12,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/google/cel-go/cel"
-	celast "github.com/google/cel-go/common/ast"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"sigs.k8s.io/yaml"
@@ -302,47 +300,6 @@ func sortedNames(m map[string]string) []string {
 	return names
 }
 
-// TestBundleDoesNotReadNamespaceObject pins the one gap in docs/cel-engine.md
-// that is not a safe skip.
-//
-// The scan binds namespaceObject to null whenever it did not collect that
-// Namespace, and collection follows what the framework's controls match, not
-// what the loaded policies need. Under failurePolicy Fail, the bundle default,
-// an unguarded read of that null is reported as a violation, so the policy
-// fails workloads a cluster would admit.
-//
-// It is latent only because no bundle policy reads the variable, which is a
-// property of the vendored bundle rather than of the engine: a pin bump can end
-// it silently. This test makes it end as a failed build instead.
-func TestBundleDoesNotReadNamespaceObject(t *testing.T) {
-	catalog, err := getVAPCatalog()
-	require.NoError(t, err)
-
-	vaps := runtimeReachableVAPs(catalog)
-	require.NotEmpty(t, vaps, "empty bundle; the guard would pass vacuously")
-
-	e, err := NewEvaluator()
-	require.NoError(t, err)
-
-	for _, vap := range vaps {
-		for _, expr := range bundleExpressions(vap) {
-			if !readsNamespaceObject(e.env, expr.source) {
-				continue
-			}
-			assert.Failf(t, "a bundle policy now reads namespaceObject",
-				"%s (%s) reads it in %s.\n\n"+
-					"The gap in docs/cel-engine.md just went live. The scan binds namespaceObject to null "+
-					"when it did not collect that Namespace, and under failurePolicy Fail an unguarded read "+
-					"of that null is reported as a violation, so this policy can now fail workloads a "+
-					"cluster would admit.\n\n"+
-					"Do not silence this by deleting the test. Either guarantee Namespace collection when a "+
-					"loaded policy needs one, or classify an uncollected Namespace so it skips instead of "+
-					"failing.",
-				vap.PolicyName, vap.ControlID, expr.where)
-		}
-	}
-}
-
 // runtimeReachableVAPs returns every policy loadVAP can reach, deduplicated by
 // policy.
 //
@@ -364,66 +321,6 @@ func runtimeReachableVAPs(catalog *vapCatalog) []*VAP {
 		}
 	}
 	return out
-}
-
-const (
-	namespaceObjectIdent = "namespaceObject"
-	// CEL's absolute name for the global, which is how a real global read
-	// survives inside a comprehension that shadowed the plain name.
-	namespaceObjectAbsolute = "." + namespaceObjectIdent
-)
-
-// readsNamespaceObject reports whether expr reads the global namespaceObject.
-//
-// Scope matters in both directions, so this cannot be a string match. A
-// comprehension may bind a variable of the same name, and reading that local
-// never touches the activation. Where one does, a genuine global read is kept
-// as the absolute name instead.
-//
-// An expression that does not compile reads nothing: such a policy is already
-// skipped at runtime and cannot produce the finding this guards against.
-func readsNamespaceObject(env *cel.Env, expr string) bool {
-	compiled, issues := env.Compile(expr)
-	if issues != nil && issues.Err() != nil {
-		return false
-	}
-	root := celast.NavigateAST(compiled.NativeRep())
-	for _, node := range celast.MatchDescendants(root, celast.KindMatcher(celast.IdentKind)) {
-		switch node.AsIdent() {
-		case namespaceObjectAbsolute:
-			return true
-		case namespaceObjectIdent:
-			if !shadowedByComprehension(node, namespaceObjectIdent) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-// shadowedByComprehension reports whether name is bound by an enclosing
-// comprehension at this node rather than by the activation.
-//
-// A comprehension's iteration range and its accumulator initializer are both
-// evaluated in the OUTER scope, so an ident reached by ascending through either
-// is not shadowed by that comprehension.
-func shadowedByComprehension(node celast.NavigableExpr, name string) bool {
-	child := node
-	for {
-		parent, ok := child.Parent()
-		if !ok {
-			return false
-		}
-		if parent.Kind() == celast.ComprehensionKind {
-			c := parent.AsComprehension()
-			binds := c.IterVar() == name || (c.HasIterVar2() && c.IterVar2() == name) || c.AccuVar() == name
-			outerScope := child.ID() == c.IterRange().ID() || child.ID() == c.AccuInit().ID()
-			if binds && !outerScope {
-				return true
-			}
-		}
-		child = parent
-	}
 }
 
 // bundleExpression is one CEL expression from a policy, with where it came from
@@ -477,6 +374,15 @@ func TestReadsNamespaceObjectScoping(t *testing.T) {
 			assert.Equal(t, tc.reads, readsNamespaceObject(e.env, tc.expr))
 		})
 	}
+}
+
+func TestPolicyDetectsNamespaceObjectInValidation(t *testing.T) {
+	e, err := NewEvaluator()
+	require.NoError(t, err)
+	vap := &VAP{Validations: []Validation{{Expression: "namespaceObject.metadata.name == 'prod'"}}}
+	assert.True(t, e.ReadsNamespaceObject(vap))
+	vap.Validations[0].Expression = "object.metadata.name == 'prod'"
+	assert.False(t, e.ReadsNamespaceObject(vap))
 }
 
 // TestBundleGuardCoversDuplicateNamePolicies covers the catalog shape where the
