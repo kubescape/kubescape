@@ -186,9 +186,13 @@ spec:
 			eager := NewOPAProcessor(eagerSession, resources.NewRegoDependenciesDataMock(), "test", "", "", false, nil)
 			require.NoError(t, eager.ProcessRulesListener(context.Background(), cautils.NewProgressHandler("")))
 
-			// ScanCoverage properly identifies C-EXCLUDED as not evaluated
-			require.NotEmpty(t, eager.ScanCoverage.NotEvaluatedControls)
-			assert.Equal(t, "C-EXCLUDED", eager.ScanCoverage.NotEvaluatedControls[0].ControlID)
+			// ScanCoverage must NOT include excluded controls in NotEvaluatedControls,
+			// and their dependency failures must not depress coverage score or flag degraded.
+			assert.Empty(t, eager.ScanCoverage.NotEvaluatedControls, "excluded control should not be in NotEvaluatedControls")
+			assert.Equal(t, 1, eager.ScanCoverage.TotalControls, "totalControls should match in-scope controls")
+			assert.Equal(t, 1, eager.ScanCoverage.EvaluatedControls, "evaluatedControls should match in-scope evaluated controls")
+			assert.Equal(t, float32(100), eager.ScanCoverage.CoverageScore, "coverage score must remain 100% for passing in-scope controls")
+			assert.False(t, eager.ScanCoverage.Degraded, "scan must not be degraded due to excluded control's dependency failure")
 
 			// Excluded control must NOT be inserted into SummaryDetails.Controls
 			assert.NotContains(t, eager.Report.SummaryDetails.Controls, "C-EXCLUDED", "excluded control must not be reinserted into SummaryDetails.Controls")
@@ -231,9 +235,12 @@ spec:
 			streaming.SetInitialResourceCount(0)
 			require.NoError(t, streaming.ProcessWithStreaming(context.Background(), batchChan, errChan, cautils.NewProgressHandler(""), expectedBatches))
 
-			// ScanCoverage properly identifies C-EXCLUDED as not evaluated
-			require.NotEmpty(t, streaming.ScanCoverage.NotEvaluatedControls)
-			assert.Equal(t, "C-EXCLUDED", streaming.ScanCoverage.NotEvaluatedControls[0].ControlID)
+			// ScanCoverage must NOT include excluded controls in NotEvaluatedControls in streaming
+			assert.Empty(t, streaming.ScanCoverage.NotEvaluatedControls, "excluded control should not be in NotEvaluatedControls in streaming")
+			assert.Equal(t, 1, streaming.ScanCoverage.TotalControls, "totalControls should match in-scope controls in streaming")
+			assert.Equal(t, 1, streaming.ScanCoverage.EvaluatedControls, "evaluatedControls should match in-scope evaluated controls in streaming")
+			assert.Equal(t, float32(100), streaming.ScanCoverage.CoverageScore, "coverage score must remain 100% in streaming")
+			assert.False(t, streaming.ScanCoverage.Degraded, "scan must not be degraded due to excluded control's dependency failure in streaming")
 
 			// Excluded control must NOT be inserted into SummaryDetails.Controls
 			assert.NotContains(t, streaming.Report.SummaryDetails.Controls, "C-EXCLUDED", "excluded control must not be reinserted into SummaryDetails.Controls in streaming")
@@ -249,4 +256,60 @@ spec:
 			assert.Len(t, streaming.Report.SummaryDetails.Frameworks[0].Controls, 1)
 		})
 	}
+}
+
+// TestProcess_FilteredScan_InScopeDependencyFailure_ReflectedInCoverage ensures that
+// when an in-scope control has a failed GVR dependency, it is accurately reflected in
+// ScanCoverage.NotEvaluatedControls and depresses the coverage score accordingly.
+func TestProcess_FilteredScan_InScopeDependencyFailure_ReflectedInCoverage(t *testing.T) {
+	t.Setenv("LARGE_CLUSTER_SIZE", "10000")
+
+	dir := t.TempDir()
+	manifest := []byte(`apiVersion: v1
+kind: Pod
+metadata:
+  name: clean-pod
+  namespace: default
+spec:
+  containers:
+  - name: nginx
+    image: nginx
+`)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "pod.yaml"), manifest, 0o600))
+
+	const failedGVR = "example.com/v1/crontabs"
+
+	// Select BOTH controls (C-PASS and C-EXCLUDED)
+	scanInfo := &cautils.ScanInfo{
+		InputPatterns:   []string{dir},
+		IncludeControls: "C-PASS,C-EXCLUDED",
+	}
+
+	handler := resourcehandler.NewFileResourceHandler()
+	frameworks := failedDependencyTestFramework()
+
+	session := cautils.NewOPASessionObj(context.Background(), frameworks, nil, scanInfo, nil)
+	session.Metadata.ContextMetadata.ClusterContextMetadata = &reporthandlingv2.ClusterMetadata{}
+	require.NoError(t, resourcehandler.CollectResources(context.Background(), handler, session, scanInfo))
+
+	session.ResourceToControlsMap = map[string][]string{
+		"/v1/Pod": {"C-PASS"},
+		failedGVR: {"C-EXCLUDED"},
+	}
+	session.InfoMap = map[string]apis.StatusInfo{
+		failedGVR: {
+			InnerStatus: apis.StatusSkipped,
+			InnerInfo:   "failed to pull CRD",
+		},
+	}
+
+	opap := NewOPAProcessor(session, resources.NewRegoDependenciesDataMock(), "test", "", "", false, nil)
+	require.NoError(t, opap.ProcessRulesListener(context.Background(), cautils.NewProgressHandler("")))
+
+	require.Len(t, opap.ScanCoverage.NotEvaluatedControls, 1)
+	assert.Equal(t, "C-EXCLUDED", opap.ScanCoverage.NotEvaluatedControls[0].ControlID)
+	assert.Equal(t, 2, opap.ScanCoverage.TotalControls)
+	assert.Equal(t, 1, opap.ScanCoverage.EvaluatedControls)
+	assert.Equal(t, float32(50), opap.ScanCoverage.CoverageScore)
+	assert.True(t, opap.ScanCoverage.Degraded)
 }
