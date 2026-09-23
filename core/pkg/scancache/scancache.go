@@ -193,9 +193,11 @@ func (s *Store) Flush() error {
 	return nil
 }
 
-// ResourceHash hashes the whole object except status and volatile metadata.
+// ResourceHash hashes the whole object except status.
 // Rules that read status are kept out of the cache by ruleCacheEligible, so
-// stripping it here cannot hide an input change. Everything else is included,
+// stripping it here cannot hide an input change. Metadata must remain in the
+// hash: custom policies may inspect resourceVersion or managedFields, even if
+// those values are volatile from the scanner's perspective. Everything else is included,
 // so a change to any evaluation-relevant field — including root-level fields
 // like RoleBinding.roleRef/subjects or Role.rules — cannot be missed.
 func ResourceHash(obj map[string]any) string {
@@ -204,15 +206,6 @@ func ResourceHash(obj map[string]any) string {
 		stripped[k] = v
 	}
 	delete(stripped, "status")
-	if md, ok := stripped["metadata"].(map[string]any); ok {
-		mdCopy := make(map[string]any, len(md))
-		for k, v := range md {
-			mdCopy[k] = v
-		}
-		delete(mdCopy, "managedFields")
-		delete(mdCopy, "resourceVersion")
-		stripped["metadata"] = mdCopy
-	}
 
 	h := sha256.New()
 	enc := json.NewEncoder(h)
