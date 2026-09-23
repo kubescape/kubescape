@@ -624,6 +624,33 @@ func (sp *SARIFPrinter) writeConfigurationSARIF(ctx context.Context, w io.Writer
 			}
 		}
 	}
+
+	skippedControls := collectSkippedControls(opaSessionObj)
+	for _, sc := range skippedControls {
+		if _, exists := ruleIndexes[sc.controlID]; exists {
+			continue
+		}
+		var ctl reportsummary.IControlSummary
+		if opaSessionObj.Report != nil {
+			ctl = opaSessionObj.Report.SummaryDetails.Controls.GetControl(reportsummary.EControlCriteriaID, sc.controlID)
+		}
+		if ctl == nil {
+			name := sc.name
+			if name == "" {
+				name = sc.controlID
+			}
+			ctl = &reportsummary.ControlSummary{
+				ControlID:   sc.controlID,
+				Name:        name,
+				Description: sc.description,
+				Remediation: sc.remediation,
+				ScoreFactor: sc.scoreFactor,
+			}
+		}
+		ruleIndexes[sc.controlID] = len(run.Tool.Driver.Rules)
+		sp.addRule(run, ctl)
+	}
+
 	stream := newJSONStream(w)
 	stream.raw("{\n  \"version\":")
 	stream.value(report.Version)
@@ -679,11 +706,49 @@ func (sp *SARIFPrinter) writeConfigurationSARIF(ctx context.Context, w io.Writer
 
 	finishedAt := time.Now().UTC()
 	executionSuccessful := true
-	run.Invocations = append(run.Invocations, &sarif.Invocation{
+	inv := &sarif.Invocation{
 		StartTimeUTC:        &startedAt,
 		EndTimeUTC:          &finishedAt,
 		ExecutionSuccessful: &executionSuccessful,
-	})
+	}
+
+	if opaSessionObj.ScanCoverage.TotalControls > 0 {
+		if inv.Properties == nil {
+			inv.Properties = make(sarif.Properties)
+		}
+		inv.Properties["coverageScore"] = cautils.ComplianceScoreToString(opaSessionObj.ScanCoverage.CoverageScore, 2)
+		inv.Properties["evaluatedControls"] = strconv.Itoa(opaSessionObj.ScanCoverage.EvaluatedControls)
+		inv.Properties["totalControls"] = strconv.Itoa(opaSessionObj.ScanCoverage.TotalControls)
+		inv.Properties["degraded"] = strconv.FormatBool(opaSessionObj.ScanCoverage.Degraded)
+	}
+
+	if opaSessionObj.ScanCoverage.Degraded {
+		scoreStr := cautils.ComplianceScoreToString(opaSessionObj.ScanCoverage.CoverageScore, 2)
+		degradedMsg := fmt.Sprintf("Scan coverage is degraded (%s%%): %d of %d controls evaluated",
+			scoreStr, opaSessionObj.ScanCoverage.EvaluatedControls, opaSessionObj.ScanCoverage.TotalControls)
+		inv.ToolExecutionNotifications = append(inv.ToolExecutionNotifications,
+			sarif.NewNotification().
+				WithLevel(string(sarifSeverityLevelWarning)).
+				WithTextMessage(degradedMsg))
+
+		for _, sc := range skippedControls {
+			msg := fmt.Sprintf("Control %s was not evaluated: %s", sc.controlID, sc.reason)
+			if sc.reason == "" {
+				msg = fmt.Sprintf("Control %s was not evaluated", sc.controlID)
+			}
+			ruleRef := sarif.NewReportingDescriptorReference().WithId(sc.controlID)
+			if idx, ok := ruleIndexes[sc.controlID]; ok {
+				ruleRef = ruleRef.WithIndex(idx)
+			}
+			inv.ToolExecutionNotifications = append(inv.ToolExecutionNotifications,
+				sarif.NewNotification().
+					WithLevel(string(sarifSeverityLevelWarning)).
+					WithAssociatedRule(ruleRef).
+					WithTextMessage(msg))
+		}
+	}
+
+	run.Invocations = append(run.Invocations, inv)
 
 	stream.raw("\n      ],\n      \"invocations\": ")
 	stream.encoder.SetIndent("      ", "  ")

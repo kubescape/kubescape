@@ -23,6 +23,19 @@ const (
 	// cap: at most 10 error annotations are rendered per step and the rest are
 	// silently dropped, so emitting more would lose findings invisibly.
 	githubActionsMaxAnnotations = 10
+
+	// githubActionsMaxSkippedControlWarnings limits skipped-control warning
+	// annotations to 9, reserving 1 of the 10 per-step warning annotation slots
+	// for the scan-level degraded coverage warning.
+	githubActionsMaxSkippedControlWarnings = 9
+
+	// githubActionsMaxStepSummaryBytes mirrors GitHub's 1 MiB step summary limit.
+	// Summaries exceeding this limit are rejected by the GitHub Actions runner.
+	githubActionsMaxStepSummaryBytes = 1024 * 1024
+
+	// githubActionsStepSummarySafetyMargin keeps appended content clear of
+	// runner edge cases near the exact 1 MiB boundary.
+	githubActionsStepSummarySafetyMargin = 4 * 1024
 )
 
 var _ printer.IPrinter = &GitHubActionsPrinter{}
@@ -35,11 +48,14 @@ var _ printer.IPrinter = &GitHubActionsPrinter{}
 // manifest path cannot be anchored to a PR line and are skipped with a
 // warning, following the same rules as the GitLab SAST printer.
 type GitHubActionsPrinter struct {
-	writer *os.File
+	writer          *os.File
+	stepSummaryPath string
 }
 
 func NewGitHubActionsPrinter() *GitHubActionsPrinter {
-	return &GitHubActionsPrinter{}
+	return &GitHubActionsPrinter{
+		stepSummaryPath: os.Getenv("GITHUB_STEP_SUMMARY"),
+	}
 }
 
 // Score is a no-op: workflow commands carry no aggregate score.
@@ -102,7 +118,292 @@ func (gp *GitHubActionsPrinter) ActionPrint(ctx context.Context, opaSessionObj *
 	fmt.Fprintf(gp.writer, "Kubescape: %d of %d High/Critical finding(s) annotated; %d suppressed by GitHub's 10-annotation step limit; %d finding(s) below the High severity threshold. Use --format json for the complete report.\n",
 		emitted, len(annotations), len(annotations)-emitted, belowThreshold)
 
+	if opaSessionObj.ScanCoverage.Degraded {
+		scoreStr := cautils.ComplianceScoreToString(opaSessionObj.ScanCoverage.CoverageScore, 2)
+		fmt.Fprintf(gp.writer, "::warning title=Degraded Scan Coverage::Scan coverage is degraded (%s%%): %d of %d controls evaluated\n",
+			scoreStr, opaSessionObj.ScanCoverage.EvaluatedControls, opaSessionObj.ScanCoverage.TotalControls)
+
+		skippedControls := collectSkippedControls(opaSessionObj)
+		emittedWarnings := 0
+		for _, sc := range skippedControls {
+			if emittedWarnings == githubActionsMaxSkippedControlWarnings {
+				break
+			}
+			msg := fmt.Sprintf("Control %s was not evaluated: %s", sc.controlID, sc.reason)
+			if sc.reason == "" {
+				msg = fmt.Sprintf("Control %s was not evaluated", sc.controlID)
+			}
+			fmt.Fprintf(gp.writer, "::warning title=%s::%s\n",
+				escapeAnnotationProperty("Control "+sc.controlID+" Skipped"),
+				escapeAnnotationData(msg))
+			emittedWarnings++
+		}
+		if omitted := len(skippedControls) - emittedWarnings; omitted > 0 {
+			fmt.Fprintf(gp.writer, "Kubescape: %d of %d skipped control(s) annotated as warnings; %d omitted due to GitHub's 10-warning step limit. See step summary for full list.\n",
+				emittedWarnings, len(skippedControls), omitted)
+			logger.L().Ctx(ctx).Warning("skipped controls omitted from GitHub Actions warning annotations",
+				helpers.Int("omittedControls", omitted),
+				helpers.Int("totalSkippedControls", len(skippedControls)))
+		}
+	}
+
+	if summaryPath := gp.stepSummaryPath; summaryPath != "" {
+		if err := writeStepSummary(ctx, summaryPath, opaSessionObj); err != nil {
+			logger.L().Ctx(ctx).Warning("failed to write GitHub Actions step summary", helpers.Error(err))
+		}
+	}
+
 	printer.LogOutputFile(gp.writer.Name())
+	return nil
+}
+
+type summarySection struct {
+	header string
+	rows   []string
+}
+
+func formatTruncationNotice(omittedCount int) string {
+	if omittedCount == 1 {
+		return "\n\n> **Note:** Summary truncated to stay within GitHub's 1 MiB limit (1 entry omitted).\n"
+	}
+	return fmt.Sprintf("\n\n> **Note:** Summary truncated to stay within GitHub's 1 MiB limit (%d entries omitted).\n", omittedCount)
+}
+
+func generateStepSummaryWithBudget(opaSessionObj *cautils.OPASessionObj, maxBytes int) string {
+	if opaSessionObj == nil || maxBytes <= 0 {
+		return ""
+	}
+
+	var base strings.Builder
+	base.WriteString("### Kubescape Scan Coverage Summary\n\n")
+
+	status := "Full Coverage"
+	if opaSessionObj.ScanCoverage.Degraded {
+		status = "Degraded"
+	}
+
+	base.WriteString("| Metric | Value |\n")
+	base.WriteString("| --- | --- |\n")
+	fmt.Fprintf(&base, "| Coverage Score | %s%% |\n", cautils.ComplianceScoreToString(opaSessionObj.ScanCoverage.CoverageScore, 2))
+	fmt.Fprintf(&base, "| Status | %s |\n", status)
+	fmt.Fprintf(&base, "| Evaluated Controls | %d / %d |\n", opaSessionObj.ScanCoverage.EvaluatedControls, opaSessionObj.ScanCoverage.TotalControls)
+	if opaSessionObj.Report != nil &&
+		opaSessionObj.ScanCoverage.EvaluatedControls > 0 &&
+		opaSessionObj.Report.SummaryDetails.ComplianceScore >= 0 {
+		fmt.Fprintf(&base, "| Compliance Score | %s%% |\n", cautils.ComplianceScoreToString(opaSessionObj.Report.SummaryDetails.ComplianceScore, 2))
+	}
+
+	var sections []summarySection
+
+	skippedControls := collectSkippedControls(opaSessionObj)
+	if len(skippedControls) > 0 {
+		rows := make([]string, 0, len(skippedControls))
+		for _, sc := range skippedControls {
+			name := sc.name
+			if name == "" {
+				name = sc.controlID
+			}
+			reason := sc.reason
+			if reason == "" {
+				reason = "not evaluated"
+			}
+			rows = append(rows, fmt.Sprintf("| %s | %s | %s |\n",
+				sc.controlID,
+				sanitizeMarkdownTableCell(name),
+				sanitizeMarkdownTableCell(reason)))
+		}
+		sections = append(sections, summarySection{
+			header: "\n#### Skipped Controls\n\n| Control ID | Name | Reason |\n| --- | --- | --- |\n",
+			rows:   rows,
+		})
+	}
+
+	failedGVRs := opaSessionObj.ScanCoverage.FailedGVRPulls
+	partialPulls := opaSessionObj.ScanCoverage.PartialGVRPulls
+	if len(failedGVRs) > 0 || len(partialPulls) > 0 {
+		rows := make([]string, 0, len(failedGVRs)+len(partialPulls))
+		for _, f := range failedGVRs {
+			rows = append(rows, fmt.Sprintf("| %s | %s |\n",
+				sanitizeMarkdownTableCell(f.GVR),
+				sanitizeMarkdownTableCell(f.Error)))
+		}
+		for _, p := range partialPulls {
+			target := p.GVR
+			if p.Selector != "" {
+				target = fmt.Sprintf("%s (%s)", p.GVR, p.Selector)
+			}
+			rows = append(rows, fmt.Sprintf("| %s | %s |\n",
+				sanitizeMarkdownTableCell(target),
+				sanitizeMarkdownTableCell(p.Error)))
+		}
+		sections = append(sections, summarySection{
+			header: "\n#### Failed Resource Queries\n\n| Resource (GVR) | Error |\n| --- | --- |\n",
+			rows:   rows,
+		})
+	}
+
+	if len(opaSessionObj.ScanCoverage.SkippedManifests) > 0 {
+		rows := make([]string, 0, len(opaSessionObj.ScanCoverage.SkippedManifests))
+		for _, sm := range opaSessionObj.ScanCoverage.SkippedManifests {
+			rows = append(rows, fmt.Sprintf("| %s | %s |\n",
+				sanitizeMarkdownTableCell(sm.Path),
+				sanitizeMarkdownTableCell(sm.Reason)))
+		}
+		sections = append(sections, summarySection{
+			header: "\n#### Skipped Manifests\n\n| File | Reason |\n| --- | --- |\n",
+			rows:   rows,
+		})
+	}
+
+	if len(opaSessionObj.ScanCoverage.PolicyDegradations) > 0 {
+		rows := make([]string, 0, len(opaSessionObj.ScanCoverage.PolicyDegradations))
+		for _, pd := range opaSessionObj.ScanCoverage.PolicyDegradations {
+			rows = append(rows, fmt.Sprintf("| %s | %s |\n",
+				sanitizeMarkdownTableCell(pd.Component),
+				sanitizeMarkdownTableCell(pd.Reason)))
+		}
+		sections = append(sections, summarySection{
+			header: "\n#### Policy Degradations\n\n| Component | Reason |\n| --- | --- |\n",
+			rows:   rows,
+		})
+	}
+
+	totalEntries := 0
+	for _, sec := range sections {
+		totalEntries += len(sec.rows)
+	}
+
+	if totalEntries == 0 {
+		if base.Len() <= maxBytes {
+			return base.String()
+		}
+		return ""
+	}
+
+	// Fast path: if the entire summary fits within maxBytes, return it un-truncated.
+	totalFullLen := base.Len()
+	for _, sec := range sections {
+		totalFullLen += len(sec.header)
+		for _, r := range sec.rows {
+			totalFullLen += len(r)
+		}
+	}
+	if totalFullLen <= maxBytes {
+		var sb strings.Builder
+		sb.WriteString(base.String())
+		for _, sec := range sections {
+			sb.WriteString(sec.header)
+			for _, r := range sec.rows {
+				sb.WriteString(r)
+			}
+		}
+		return sb.String()
+	}
+
+	// Truncation required.
+	if base.Len()+len(formatTruncationNotice(totalEntries)) > maxBytes {
+		notice := formatTruncationNotice(totalEntries)
+		if len(notice) <= maxBytes {
+			return notice
+		}
+		return ""
+	}
+
+	var sb strings.Builder
+	sb.WriteString(base.String())
+
+	emittedEntries := 0
+outerLoop:
+	for _, sec := range sections {
+		if len(sec.rows) == 0 {
+			continue
+		}
+
+		noticeLenForFirst := 0
+		if rem := totalEntries - (emittedEntries + 1); rem > 0 {
+			noticeLenForFirst = len(formatTruncationNotice(rem))
+		}
+		neededForFirst := len(sec.header) + len(sec.rows[0]) + noticeLenForFirst
+		if sb.Len()+neededForFirst > maxBytes {
+			break outerLoop
+		}
+
+		sb.WriteString(sec.header)
+		sb.WriteString(sec.rows[0])
+		emittedEntries++
+
+		for _, row := range sec.rows[1:] {
+			noticeLen := 0
+			if rem := totalEntries - (emittedEntries + 1); rem > 0 {
+				noticeLen = len(formatTruncationNotice(rem))
+			}
+			needed := len(row) + noticeLen
+			if sb.Len()+needed > maxBytes {
+				break outerLoop
+			}
+			sb.WriteString(row)
+			emittedEntries++
+		}
+	}
+
+	omitted := totalEntries - emittedEntries
+	if omitted > 0 {
+		sb.WriteString(formatTruncationNotice(omitted))
+	}
+
+	return sb.String()
+}
+
+func sanitizeMarkdownTableCell(s string) string {
+	s = strings.ReplaceAll(s, "|", "\\|")
+	s = strings.ReplaceAll(s, "\r\n", " ")
+	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.ReplaceAll(s, "\r", " ")
+	return strings.TrimSpace(s)
+}
+
+func writeStepSummary(ctx context.Context, summaryPath string, opaSessionObj *cautils.OPASessionObj) error {
+	if summaryPath == "" || opaSessionObj == nil {
+		return nil
+	}
+
+	cleanPath := filepath.Clean(summaryPath)
+	var existingSize int64
+	if stat, err := os.Stat(cleanPath); err == nil {
+		existingSize = stat.Size()
+	}
+
+	if existingSize >= githubActionsMaxStepSummaryBytes {
+		logger.L().Ctx(ctx).Warning("GitHub Actions step summary limit reached by existing content, skipping append",
+			helpers.Int("existingSize", int(existingSize)),
+			helpers.Int("maxBytes", githubActionsMaxStepSummaryBytes))
+		return nil
+	}
+
+	remainingBytes := int(githubActionsMaxStepSummaryBytes - githubActionsStepSummarySafetyMargin - existingSize)
+	if remainingBytes <= 0 {
+		logger.L().Ctx(ctx).Warning("GitHub Actions step summary remaining capacity within safety margin, skipping append",
+			helpers.Int("existingSize", int(existingSize)),
+			helpers.Int("maxBytes", githubActionsMaxStepSummaryBytes),
+			helpers.Int("safetyMarginBytes", githubActionsStepSummarySafetyMargin))
+		return nil
+	}
+	content := generateStepSummaryWithBudget(opaSessionObj, remainingBytes)
+	if content == "" {
+		logger.L().Ctx(ctx).Warning("GitHub Actions step summary content could not fit within remaining budget, skipping append",
+			helpers.Int("remainingBytes", remainingBytes))
+		return nil
+	}
+
+	f, err := os.OpenFile(cleanPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600) // #nosec G703, G304 -- summaryPath is passed from GitHub runner environment variable
+	if err != nil {
+		return fmt.Errorf("failed to open step summary file: %w", err)
+	}
+	defer f.Close()
+
+	if _, err := f.WriteString(content); err != nil {
+		return fmt.Errorf("failed to write to step summary file: %w", err)
+	}
 	return nil
 }
 

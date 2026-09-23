@@ -362,23 +362,6 @@ func testsCases(results *cautils.OPASessionObj, controls reportsummary.IControls
 	return testCases
 }
 
-// buildSkipMessage constructs a human-readable skip reason from IStatus.
-// It uses SubStatus (e.g. "configuration", "irrelevant") and appends Info when available.
-func buildSkipMessage(status apis.IStatus) string {
-	if status == nil {
-		return ""
-	}
-	subStatus := strings.TrimSpace(string(status.GetSubStatus()))
-	info := strings.TrimSpace(status.Info())
-	if subStatus != "" && info != "" {
-		return fmt.Sprintf("%s: %s", subStatus, info)
-	}
-	if info != "" {
-		return info
-	}
-	return subStatus
-}
-
 func resourceToString(resource workloadinterface.IMetadata, sourcePath string) string {
 	sep := "; "
 	s := ""
