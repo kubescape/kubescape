@@ -242,13 +242,36 @@ func evalWorkflowCondition(t *testing.T, field string, event concurrencyEvent) b
 }
 
 // evalWorkflowTemplate renders a workflow field the way the runner does: literal
-// text is kept and each ${{ }} is replaced by its value. It understands the
-// subset of the expression language concurrency blocks are written in - context
-// properties, string literals, true/false/null, parentheses, ==, !=, !, && and
-// || with GitHub's value-returning semantics - and fails the test on anything
-// else rather than guessing.
+// text is kept and each ${{ }} is replaced by its value. It fails the test on
+// any expression renderWorkflowTemplate cannot evaluate exactly.
 func evalWorkflowTemplate(t *testing.T, field string, event concurrencyEvent) string {
 	t.Helper()
+
+	out, err := renderWorkflowTemplate(field, event.context())
+	require.NoErrorf(t, err, "cannot evaluate %q; extend renderWorkflowTemplate to model it exactly", field)
+	return out
+}
+
+// renderWorkflowTemplate understands the subset of the expression language
+// concurrency blocks are written in - context properties, string literals,
+// true/false/null, parentheses, ==, !=, !, && and || with GitHub's precedence
+// and value-returning semantics - and returns an error on anything else rather
+// than guessing.
+//
+// Comparisons are limited to operands of the same type. GitHub coerces mixed
+// types to numbers ('0' == false is true, and false != 'pull_request' is true
+// because the string becomes NaN), which this helper deliberately does not
+// model, so a mixed comparison is rejected instead of silently evaluated.
+func renderWorkflowTemplate(field string, context map[string]string) (rendered string, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			failure, ok := r.(exprError)
+			if !ok {
+				panic(r)
+			}
+			err = failure
+		}
+	}()
 
 	var out strings.Builder
 	rest := field
@@ -256,23 +279,34 @@ func evalWorkflowTemplate(t *testing.T, field string, event concurrencyEvent) st
 		open := strings.Index(rest, "${{")
 		if open < 0 {
 			out.WriteString(rest)
-			return strings.TrimSpace(out.String())
+			return strings.TrimSpace(out.String()), nil
 		}
 		end := strings.Index(rest[open:], "}}")
-		require.GreaterOrEqualf(t, end, 0, "unterminated expression in %q", field)
+		if end < 0 {
+			exprFail("unterminated expression in %q", field)
+		}
 
 		out.WriteString(rest[:open])
-		parser := exprParser{t: t, source: field, tokens: tokenizeExpr(t, rest[open+3:open+end]), context: event.context()}
+		parser := exprParser{source: field, tokens: tokenizeExpr(rest[open+3 : open+end]), context: context}
 		value := parser.or()
-		require.Equalf(t, len(parser.tokens), parser.pos, "unexpected trailing tokens in %q", field)
+		if parser.pos != len(parser.tokens) {
+			exprFail("unexpected %q in %q", parser.peek(), field)
+		}
 		out.WriteString(exprString(value))
 		rest = rest[open+end+2:]
 	}
 }
 
-func tokenizeExpr(t *testing.T, expr string) []string {
-	t.Helper()
+// exprError aborts evaluation of an expression the helper cannot model exactly.
+type exprError string
 
+func (e exprError) Error() string { return string(e) }
+
+func exprFail(format string, args ...any) {
+	panic(exprError(fmt.Sprintf(format, args...)))
+}
+
+func tokenizeExpr(expr string) []string {
 	var tokens []string
 	for i := 0; i < len(expr); {
 		switch c := expr[i]; {
@@ -300,7 +334,9 @@ func tokenizeExpr(t *testing.T, expr string) []string {
 					break
 				}
 			}
-			require.Lessf(t, j, len(expr), "unterminated string literal in %q", expr)
+			if j >= len(expr) {
+				exprFail("unterminated string literal in %q", expr)
+			}
 			tokens = append(tokens, expr[i:j+1])
 			i = j + 1
 		case unicode.IsLetter(rune(c)) || c == '_':
@@ -312,16 +348,15 @@ func tokenizeExpr(t *testing.T, expr string) []string {
 			tokens = append(tokens, expr[i:j])
 			i = j
 		default:
-			require.Failf(t, "unsupported expression", "cannot evaluate %q at %q; extend evalWorkflowTemplate",
-				expr, expr[i:])
+			exprFail("cannot evaluate %q at %q", expr, expr[i:])
 		}
 	}
 	return tokens
 }
 
-// exprParser evaluates while it parses. Values are string, bool or nil.
+// exprParser evaluates while it parses. Values are string, bool or nil. From
+// loosest to tightest binding, as in GitHub: ||, &&, == and !=, then !.
 type exprParser struct {
-	t       *testing.T
 	source  string
 	tokens  []string
 	pos     int
@@ -348,13 +383,22 @@ func (p *exprParser) or() any {
 }
 
 func (p *exprParser) and() any {
-	left := p.unary()
+	left := p.comparison()
 	for p.peek() == "&&" {
 		p.pos++
-		right := p.unary()
+		right := p.comparison()
 		if exprTruthy(left) {
 			left = right
 		}
+	}
+	return left
+}
+
+func (p *exprParser) comparison() any {
+	left := p.unary()
+	for op := p.peek(); op == "==" || op == "!="; op = p.peek() {
+		p.pos++
+		left = exprEqual(p.source, left, p.unary()) == (op == "==")
 	}
 	return left
 }
@@ -364,32 +408,22 @@ func (p *exprParser) unary() any {
 		p.pos++
 		return !exprTruthy(p.unary())
 	}
-	return p.comparison()
-}
-
-func (p *exprParser) comparison() any {
-	left := p.primary()
-	switch op := p.peek(); op {
-	case "==", "!=":
-		p.pos++
-		// String comparison in workflow expressions ignores case.
-		equal := strings.EqualFold(exprString(left), exprString(p.primary()))
-		return equal == (op == "==")
-	}
-	return left
+	return p.primary()
 }
 
 func (p *exprParser) primary() any {
-	p.t.Helper()
-
 	token := p.peek()
-	require.NotEmptyf(p.t, token, "expression in %q ends early", p.source)
+	if token == "" {
+		exprFail("expression in %q ends early", p.source)
+	}
 	p.pos++
 
 	switch {
 	case token == "(":
 		value := p.or()
-		require.Equalf(p.t, ")", p.peek(), "unbalanced parentheses in %q", p.source)
+		if p.peek() != ")" {
+			exprFail("unbalanced parentheses in %q", p.source)
+		}
 		p.pos++
 		return value
 	case strings.HasPrefix(token, "'"):
@@ -401,8 +435,32 @@ func (p *exprParser) primary() any {
 	}
 
 	value, ok := p.context[token]
-	require.Truef(p.t, ok, "%q in %q is not modelled by concurrencyEvent; add it there", token, p.source)
+	if !ok {
+		exprFail("%q in %q is not modelled by concurrencyEvent; add it there", token, p.source)
+	}
 	return value
+}
+
+// exprEqual compares two operands of the same type. String comparison in
+// workflow expressions ignores case.
+func exprEqual(source string, left, right any) bool {
+	switch l := left.(type) {
+	case string:
+		if r, ok := right.(string); ok {
+			return strings.EqualFold(l, r)
+		}
+	case bool:
+		if r, ok := right.(bool); ok {
+			return l == r
+		}
+	case nil:
+		if right == nil {
+			return true
+		}
+	}
+	exprFail("%q compares %T with %T; GitHub coerces mixed types to numbers, which this helper does not model",
+		source, left, right)
+	return false
 }
 
 func exprTruthy(value any) bool {
@@ -427,6 +485,49 @@ func exprString(value any) string {
 		return v
 	default:
 		return ""
+	}
+}
+
+// TestRenderWorkflowTemplateMatchesGitHubOrRefuses pins the evaluator the
+// concurrency tests above rely on. Every expression it accepts must evaluate
+// as GitHub would; everything else must be an error, never a plausible value.
+func TestRenderWorkflowTemplateMatchesGitHubOrRefuses(t *testing.T) {
+	push := masterPush("a1a1a1a", "1001").context()
+
+	for field, want := range map[string]string{
+		"${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}": "00-pr_scanner-1001",
+		"${{ github.event_name == 'PUSH' }}":           "true",
+		"${{ github.event_name != 'pull_request' }}":   "true",
+		"${{ null == null }}":                          "true",
+		"${{ (github.event_name == 'push') == true }}": "true",
+		// ! binds tighter than && and ||.
+		"${{ !github.head_ref && github.ref }}": "refs/heads/master",
+		"${{ !github.ref || github.sha }}":      "a1a1a1a",
+		// ...and than == and !=, which for booleans agrees with either reading.
+		"${{ !true == false }}":  "true",
+		"${{ !false != false }}": "true",
+	} {
+		got, err := renderWorkflowTemplate(field, push)
+		if assert.NoErrorf(t, err, "%q", field) {
+			assert.Equalf(t, want, got, "%q", field)
+		}
+	}
+
+	for field, reason := range map[string]string{
+		// ! applies to github.event_name alone, so GitHub compares false with
+		// 'pull_request' as numbers (0 != NaN) and gets true for every event.
+		"${{ !github.event_name != 'pull_request' }}": "compares bool with string",
+		// GitHub coerces both sides to 0 and gets true.
+		"${{ '0' == false }}":            "compares string with bool",
+		"${{ github.head_ref == null }}": "compares string with <nil>",
+		"${{ github.event.number }}":     "not modelled",
+		"${{ github.run_id == 1001 }}":   "cannot evaluate",
+		"${{ github.ref }":               "unterminated expression",
+		"${{ (github.ref }}":             "unbalanced parentheses",
+		"${{ github.ref github.sha }}":   "unexpected",
+	} {
+		_, err := renderWorkflowTemplate(field, push)
+		assert.ErrorContainsf(t, err, reason, "%q", field)
 	}
 }
 
