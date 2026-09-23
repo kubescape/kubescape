@@ -315,6 +315,7 @@ Configure the HTTP handler using environment variables:
 | `KS_ACCESS_KEY` | Kubescape SaaS access key used for every scan | `your-access-key` |
 | `KS_EXCLUDE_NAMESPACES` | Default namespaces to exclude | `kube-system,kube-public` |
 | `KS_INCLUDE_NAMESPACES` | Default namespaces to include | `production,staging` |
+| `KS_NAMESPACE_FILTERS_FILE` | Optional JSON file supplying live namespace defaults for scan and metrics requests | `/etc/namespace-filters/namespaceFilters.json` |
 | `KS_FORMAT` | Default output format | `json` |
 | `KS_LOGGER_NAME` | Logger name | `kubescape` |
 | `KS_LOGGER_LEVEL` | Log level | `info`, `debug`, `warning`, `error` |
@@ -328,6 +329,74 @@ Configure the HTTP handler using environment variables:
 ---
 
 ## Deployment Examples
+
+### Live namespace defaults
+
+Set `KS_NAMESPACE_FILTERS_FILE` to a JSON file mounted from a ConfigMap to change
+namespace defaults without restarting Kubescape. For example:
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kubescape-namespace-filters
+data:
+  namespaceFilters.json: |
+    {
+      "includeNamespaces": ["production", "payments"],
+      "excludeNamespaces": []
+    }
+```
+
+Add the following environment variable and directory mount to the Kubescape
+container, and the volume to its Pod specification:
+
+```yaml
+# Container configuration
+env:
+  - name: KS_NAMESPACE_FILTERS_FILE
+    value: /etc/namespace-filters/namespaceFilters.json
+volumeMounts:
+  - name: namespace-filters
+    mountPath: /etc/namespace-filters
+    readOnly: true
+# Pod configuration
+volumes:
+  - name: namespace-filters
+    configMap:
+      name: kubescape-namespace-filters
+```
+
+Mount the directory, **not a file using `subPath`**: Kubernetes does not propagate
+ConfigMap changes to `subPath` mounts. ConfigMap volume updates are eventually
+propagated by kubelet, so a saved edit is not necessarily visible immediately.
+See [Kubernetes ConfigMap updates](https://kubernetes.io/docs/concepts/configuration/configmap/#mounted-configmaps-are-updated-automatically).
+
+The server validates the file at startup and reopens it whenever it prepares a
+`POST /v1/scan` or `GET /v1/metrics` scan. Both keys are required and accept arrays
+of exact namespace names or comma-separated strings. Whitespace and empty entries
+are ignored. Regex fields are not supported by this file format; unknown fields,
+invalid namespace names, and malformed documents are rejected.
+
+- A valid document replaces **both** environment namespace defaults. Use empty
+  arrays (or empty strings) for both keys to clear filtering. To switch to
+  exclusions, clear `includeNamespaces` and populate `excludeNamespaces`.
+- Existing include-over-exclude precedence remains unchanged. Nonempty namespace
+  lists in an individual scan request still override the corresponding defaults;
+  omitted or empty request lists use the current defaults. These settings are
+  scan defaults, not an authorization boundary.
+- A missing or invalid initial file prevents server startup. If a later update
+  is invalid or the file disappears, the server logs a warning and retains the
+  last valid pair of lists. A subsequent valid file is picked up on the next scan.
+- Queued and running scans keep the snapshot captured when their request was
+  prepared. Updates apply to newly prepared scans and do not delete old reports.
+- With `KS_NAMESPACE_FILTERS_FILE` unset or empty, the existing environment-based
+  behavior is unchanged. CLI scans are unaffected.
+
+After the initial deployment wiring, edit the ConfigMap's `namespaceFilters.json`
+to change the defaults for subsequent scans. This is the Kubescape HTTP-server
+portion of [helm-charts issue #664](https://github.com/kubescape/helm-charts/issues/664);
+the chart and other components need their own integration to share live filters.
 
 ### Microservice Deployment
 

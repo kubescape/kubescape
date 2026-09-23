@@ -444,6 +444,11 @@ func defaultScanInfo() *cautils.ScanInfo {
 	scanInfo.HostSensorYamlPath = envToString("KS_HOST_SCAN_YAML", "")       // path to host scan YAML
 	scanInfo.FormatVersion = envToString("KS_FORMAT_VERSION", "v2")          // output format version
 	scanInfo.Format = envToString("KS_FORMAT", "json")                       // default output should be json
+
+	if filters, enabled := config.GetNamespaceFilters(); enabled {
+		scanInfo.IncludeNamespaces = filters.Include
+		scanInfo.ExcludedNamespaces = filters.Exclude
+	}
 	// KS_SUBMIT is presence-checked (not just envToBool'd): its mere presence
 	// marks Submit as explicitly requested, so an unparsable value (including
 	// "", which Helm commonly renders for an unset value) must not silently
