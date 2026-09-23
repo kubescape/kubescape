@@ -279,7 +279,7 @@ func (opap *OPAProcessor) ProcessRulesListener(ctx context.Context, progressList
 	// rebuild ScanCoverage so controls that timed out during evaluation
 	// (recorded in TimedOutControls by markControlTimedOut) are reflected in
 	// NotEvaluatedControls alongside any collection-phase failures
-	opap.ScanCoverage = cautils.BuildScanCoverage(opap.InfoMap, opap.ResourceToControlsMap, opap.TimedOutControls, opap.PartialGVRFailures, opap.PolicyDegradations, opap.SkippedManifests)
+	opap.ScanCoverage = cautils.BuildScanCoverage(opap.InfoMap, opap.ResourceToControlsMap, opap.TimedOutControls, opap.PartialGVRFailures, opap.PolicyDegradations, opap.SkippedManifests, opap.inScopeControlIDs())
 	opap.appendSkippedWholeClusterControlsToCoverage()
 	opap.ScanCoverage.ComputeCoverageScore(len(opap.Report.SummaryDetails.Controls))
 
@@ -490,7 +490,7 @@ done:
 	}
 
 	// Rebuild scan coverage
-	opap.ScanCoverage = cautils.BuildScanCoverage(opap.InfoMap, opap.ResourceToControlsMap, opap.TimedOutControls, opap.PartialGVRFailures, opap.PolicyDegradations, opap.SkippedManifests)
+	opap.ScanCoverage = cautils.BuildScanCoverage(opap.InfoMap, opap.ResourceToControlsMap, opap.TimedOutControls, opap.PartialGVRFailures, opap.PolicyDegradations, opap.SkippedManifests, opap.inScopeControlIDs())
 	opap.appendSkippedWholeClusterControlsToCoverage()
 	opap.ScanCoverage.ComputeCoverageScore(len(opap.Report.SummaryDetails.Controls))
 
@@ -803,14 +803,44 @@ func (opap *OPAProcessor) GetWholeClusterPolicy() cautils.WholeClusterExecutionP
 	return opap.wholeClusterPolicy
 }
 
+// inScopeControlIDs returns a set of control IDs that are in scope for this scan,
+// derived from SummaryDetails.Controls (or AllPolicies.Controls as fallback).
+// Returns nil if no controls are tracked, leaving coverage unconstrained.
+func (opap *OPAProcessor) inScopeControlIDs() map[string]struct{} {
+	if opap == nil {
+		return nil
+	}
+	if len(opap.Report.SummaryDetails.Controls) > 0 {
+		ids := make(map[string]struct{}, len(opap.Report.SummaryDetails.Controls))
+		for id := range opap.Report.SummaryDetails.Controls {
+			ids[id] = struct{}{}
+		}
+		return ids
+	}
+	if opap.AllPolicies != nil && len(opap.AllPolicies.Controls) > 0 {
+		ids := make(map[string]struct{}, len(opap.AllPolicies.Controls))
+		for id := range opap.AllPolicies.Controls {
+			ids[id] = struct{}{}
+		}
+		return ids
+	}
+	return nil
+}
+
 // appendSkippedWholeClusterControlsToCoverage appends skipped whole-cluster controls
 // to opap.ScanCoverage.NotEvaluatedControls in deterministic, sorted order by ControlID.
 func (opap *OPAProcessor) appendSkippedWholeClusterControlsToCoverage() {
 	if opap.OPASessionObj == nil || len(opap.skippedWholeClusterControls) == 0 {
 		return
 	}
+	inScope := opap.inScopeControlIDs()
 	sortedIDs := make([]string, 0, len(opap.skippedWholeClusterControls))
 	for id := range opap.skippedWholeClusterControls {
+		if inScope != nil {
+			if _, ok := inScope[id]; !ok {
+				continue
+			}
+		}
 		sortedIDs = append(sortedIDs, id)
 	}
 	sort.Strings(sortedIDs)
