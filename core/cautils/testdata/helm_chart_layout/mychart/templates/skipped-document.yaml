@@ -1,0 +1,15 @@
+---
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mychart-static-a
+  labels:
+    marker: doc-a
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mychart-static-b
+  labels:
+    marker: doc-b
