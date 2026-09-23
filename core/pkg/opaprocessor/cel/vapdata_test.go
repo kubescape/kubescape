@@ -376,13 +376,26 @@ func TestReadsNamespaceObjectScoping(t *testing.T) {
 	}
 }
 
-func TestPolicyDetectsNamespaceObjectInValidation(t *testing.T) {
+func TestPolicyDetectsNamespaceObjectOnlyWhenValidationCanReachIt(t *testing.T) {
 	e, err := NewEvaluator()
 	require.NoError(t, err)
-	vap := &VAP{Validations: []Validation{{Expression: "namespaceObject.metadata.name == 'prod'"}}}
-	assert.True(t, e.ReadsNamespaceObject(vap))
-	vap.Validations[0].Expression = "object.metadata.name == 'prod'"
-	assert.False(t, e.ReadsNamespaceObject(vap))
+
+	for _, tc := range []struct {
+		name string
+		vap  *VAP
+		want bool
+	}{
+		{"validation reads namespace", &VAP{Validations: []Validation{{Expression: "namespaceObject.metadata.name == 'prod'"}}}, true},
+		{"validation reaches variable", &VAP{Variables: []Variable{{Name: "namespace", Expression: "namespaceObject.metadata.name"}}, Validations: []Validation{{Expression: "variables.namespace == 'prod'"}}}, true},
+		{"validation reaches nested variable", &VAP{Variables: []Variable{{Name: "namespace", Expression: "namespaceObject.metadata.name"}, {Name: "allowed", Expression: "variables.namespace == 'prod'"}}, Validations: []Validation{{Expression: "variables.allowed"}}}, true},
+		{"unused lazy variable", &VAP{Variables: []Variable{{Name: "namespace", Expression: "namespaceObject.metadata.name"}}, Validations: []Validation{{Expression: "object.metadata.name == 'pod'"}}}, false},
+		{"message expression", &VAP{Validations: []Validation{{Expression: "true", MessageExpression: "namespaceObject.metadata.name"}}}, false},
+		{"match condition", &VAP{matchConditions: []MatchCondition{{Name: "gate", Expression: "namespaceObject.metadata.name == 'prod'"}}, Validations: []Validation{{Expression: "true"}}}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, e.ReadsNamespaceObjectInValidations(tc.vap))
+		})
+	}
 }
 
 // TestBundleGuardCoversDuplicateNamePolicies covers the catalog shape where the
