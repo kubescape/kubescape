@@ -151,6 +151,23 @@ func TestResourceHash(t *testing.T) {
 	assert.NotEqual(t, h1, h3)
 }
 
+func TestResourceHashIncludesPolicyVisibleMetadata(t *testing.T) {
+	obj := map[string]any{
+		"metadata": map[string]any{
+			"name":            "pod",
+			"resourceVersion": "123",
+			"managedFields":   []any{map[string]any{"manager": "first"}},
+		},
+	}
+	initial := ResourceHash(obj)
+	metadata := obj["metadata"].(map[string]any)
+	metadata["resourceVersion"] = "124"
+	assert.NotEqual(t, initial, ResourceHash(obj), "a rule may inspect resourceVersion")
+	metadata["resourceVersion"] = "123"
+	metadata["managedFields"] = []any{map[string]any{"manager": "second"}}
+	assert.NotEqual(t, initial, ResourceHash(obj), "a rule may inspect managedFields")
+}
+
 func TestVersionKey(t *testing.T) {
 	k1 := VersionKey([]byte("a"), []byte("b"))
 	k2 := VersionKey([]byte("a"), []byte("b"))
