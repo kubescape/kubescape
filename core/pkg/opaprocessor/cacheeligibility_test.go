@@ -58,6 +58,11 @@ func TestRuleCacheEligibleStatusReadingRule(t *testing.T) {
 			want: false,
 		},
 		{
+			name: "status reached by standalone object.get call",
+			rego: "deny contains msga if {\n\tnode := input[_]\n\tobject.get(node, \"status\", {}, true)\n}",
+			want: false,
+		},
+		{
 			name: "status as object.get default is not a read",
 			rego: "deny contains msga if {\n\tnode := input[_]\n\tobject.get(node, \"spec\", \"status\") != {}\n}",
 			want: true,
