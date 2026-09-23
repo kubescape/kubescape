@@ -48,6 +48,21 @@ func TestRuleCacheEligibleStatusReadingRule(t *testing.T) {
 			want: false,
 		},
 		{
+			name: "status reached through a single object.get key",
+			rego: "deny contains msga if {\n\tnode := input[_]\n\tobject.get(node, \"status\", {}) != {}\n}",
+			want: false,
+		},
+		{
+			name: "status reached through an aliased object.get key",
+			rego: "deny contains msga if {\n\tnode := input[_]\n\tkey := \"status\"\n\tobject.get(node, key, {}) != {}\n}",
+			want: false,
+		},
+		{
+			name: "status as object.get default is not a read",
+			rego: "deny contains msga if {\n\tnode := input[_]\n\tobject.get(node, \"spec\", \"status\") != {}\n}",
+			want: true,
+		},
+		{
 			name: "whitespace inside the index cannot hide the read",
 			rego: "deny contains msga if {\n\tnode := input[_]\n\tnode[ \"status\" ].nodeInfo.osImage == \"x\"\n}",
 			want: false,

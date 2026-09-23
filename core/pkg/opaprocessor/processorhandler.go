@@ -1263,6 +1263,12 @@ func moduleReadsStatus(module *ast.Module) bool {
 			return true
 		}
 		switch value := term.Value.(type) {
+		case ast.Call:
+			// Calls nested in assignments/comparisons are terms rather than
+			// expressions. object.get's second argument is a direct key here.
+			if len(value) >= 3 && value[0].String() == "object.get" && isStatus(value[2]) {
+				reads = true
+			}
 		case ast.Ref:
 			for _, part := range value {
 				if isStatus(part) {
