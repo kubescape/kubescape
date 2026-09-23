@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mychart-aligned-first
+  labels:
+    marker: first
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mychart-aligned-second
+  labels:
+    marker: second
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mychart-aligned-third
+  labels:
+    marker: third

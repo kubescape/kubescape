@@ -293,13 +293,37 @@ func (hc *HelmChart) GetWorkloadsWithOptions(values map[string]any, releaseOpts 
 		}
 
 		var wls []workloadinterface.IMetadata
-		// docIndexAt[n] is the raw YAML document index workload n of wls may
-		// safely claim. It is only ever populated below for a document that
-		// (a) the same yaml.v3 decoder the resolver uses also decoded, at the
-		// same position, and (b) produced exactly one workload - so the index
-		// and the workload it is attached to name the same thing on both
-		// sides, with no room for the mismatch described next to slip in.
-		docIndexAt := map[int]int{}
+		// indexable[n] marks workload n of wls as safe to carry a ":<index>"
+		// suffix. The suffix has two consumers that number documents
+		// differently, and only one number can be written down:
+		//
+		//   - line resolution reads it as a *raw document index*.
+		//     locationresolver.NewPathLocationResolver decodes every document
+		//     the yaml.v3 decoder emits - nulls and comment-only documents
+		//     included - and ResolveLocation indexes straight into that slice.
+		//   - SARIF remediation reads it as a *workload ordinal*.
+		//     collectFixes turns it into "select(di==n)", and
+		//     fixhandler.YAMLTreeEditor.Apply resolves n against
+		//     yamlWorkloadDocuments(), the *compacted* list of workload-bearing
+		//     documents. That is also the repo-wide convention every other
+		//     source emits (fileutils.go, terraform.go), pinned by
+		//     TestYAMLTreeEditor_ReportApplicationUsesScannerIndex.
+		//
+		// The two numberings coincide only while nothing has been dropped or
+		// expanded earlier in the file. One skipped document (null,
+		// comment-only, not a manifest) shifts every later workload's raw
+		// index past its ordinal, and a List envelope expands one raw document
+		// into several ordinals. Feed the resolver's number to remediation and
+		// it edits a *different resource*, or runs off the end of the
+		// compacted list; feed remediation's number to the resolver and it
+		// cites another document's line.
+		//
+		// So an index is only emitted where both readings are the same number,
+		// which is what the doc.index == ordinal test below establishes. Where
+		// they disagree there is no honest answer, and the bare path - no line,
+		// no fix region, exactly the behaviour before any of this - is the only
+		// safe one.
+		indexable := map[int]bool{}
 		if static {
 			docs, docErr := renderedDocuments([]byte(renderedYaml))
 			if docErr != nil {
@@ -308,16 +332,16 @@ func (hc *HelmChart) GetWorkloadsWithOptions(values map[string]any, releaseOpts 
 				static = false
 			} else {
 				for _, doc := range docs {
-					// A document that produced more than one workload - a
-					// List/PodList envelope's items - has no single line of
-					// its own to claim: the resolver retains one YAML node
-					// per raw document, not one per item inside it, so doc.index
-					// cannot tell Pod A's item apart from Pod B's. A document
-					// that produced zero (null, comment-only, not a workload)
-					// has nothing to attach an index to either. Only the
-					// exactly-one case is unambiguous.
-					if len(doc.workloads) == 1 {
-						docIndexAt[len(wls)] = doc.index
+					ordinal := len(wls)
+					// A List/PodList envelope is excluded structurally rather
+					// than by item count: even a *singleton* list is unsafe,
+					// because its one workload is the object at items[0] while
+					// both consumers address the wrapper at the document root.
+					// The resolver would evaluate the resource's path against
+					// the wrapper (citing wrapper metadata, or nothing), and
+					// YAMLTreeEditor refuses a List wrapper outright.
+					if !doc.isList && len(doc.workloads) == 1 && doc.index == ordinal {
+						indexable[ordinal] = true
 					}
 					wls = append(wls, doc.workloads...)
 				}
@@ -338,10 +362,13 @@ func (hc *HelmChart) GetWorkloadsWithOptions(values map[string]any, releaseOpts 
 		workloads[absPath] = []workloadinterface.IMetadata{}
 		for i := range wls {
 			lw := localworkload.NewLocalWorkload(wls[i].GetObject())
+			// i is the workload ordinal, and indexable[i] is only set where
+			// this workload's raw document index is the same number, so the
+			// one suffix written here is correct under both readings.
 			// The map key stays the bare absPath either way - callers that
 			// join against Provenance() (keyed the same way) are unaffected.
-			if docIndex, ok := docIndexAt[i]; ok {
-				lw.SetPath(fmt.Sprintf("%s:%d", absPath, docIndex))
+			if indexable[i] {
+				lw.SetPath(fmt.Sprintf("%s:%d", absPath, i))
 			} else {
 				lw.SetPath(absPath)
 			}
@@ -352,11 +379,13 @@ func (hc *HelmChart) GetWorkloadsWithOptions(values map[string]any, releaseOpts 
 }
 
 // renderedDocument is one YAML document decoded from a rendered chart
-// template, along with the workloads readYamlFile produced from it and the
-// position it was decoded at.
+// template, along with the workloads readYamlFile produced from it, the
+// position it was decoded at, and whether it is a List envelope whose
+// workloads are nested items rather than the document root.
 type renderedDocument struct {
 	index     int
 	workloads []workloadinterface.IMetadata
+	isList    bool
 }
 
 // renderedDocuments splits renderedYaml into documents the same way
@@ -405,9 +434,30 @@ func renderedDocuments(renderedYaml []byte) ([]renderedDocument, error) {
 		if err != nil {
 			return nil, fmt.Errorf("document %d: %w", i, err)
 		}
-		docs = append(docs, renderedDocument{index: i, workloads: wls})
+		docs = append(docs, renderedDocument{index: i, workloads: wls, isList: isListEnvelope(docBytes)})
 	}
 	return docs, nil
+}
+
+// isListEnvelope reports whether a single rendered document is a List or
+// typed-list wrapper, using the same classification readYamlFile applies when
+// it decides to expand one. It is asked structurally rather than inferred
+// from how many workloads came out, because a one-item list produces exactly
+// one workload while still keeping that workload under items[0] instead of at
+// the document root. Anything unreadable counts as a list: the only use of
+// this answer is to withhold an index, so the unsure case takes the same
+// route as the known-unsafe one.
+func isListEnvelope(doc []byte) bool {
+	var decoded any
+	if err := yaml.Unmarshal(doc, &decoded); err != nil {
+		return true
+	}
+	obj, ok := convertYamlToJson(decoded).(map[string]any)
+	if !ok {
+		return false
+	}
+	_, isList, err := listEnvelopeKind(obj)
+	return isList || err != nil
 }
 
 // isStaticTemplate reports whether the file at absPath contains no Go template
