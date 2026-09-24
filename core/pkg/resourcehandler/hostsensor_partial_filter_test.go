@@ -124,7 +124,12 @@ func TestCollectAndStreamBatches_HostPartialUnrelatedToSelectedControlsNotPenali
 	}
 	scanInfo, session := streamingTestSession(ctx)
 	session.Metadata.ScanMetadata.HostScanner = true
-	session.ResourceToControlsMap = map[string][]string{mappedHostGVR: {"kubelet-control"}}
+	framework := hostFilterFramework()
+	session.Policies = append(session.Policies, *framework)
+	// Map by the control's real ID (whatever the mock carries) so the
+	// fixture stays consistent with the effective-control predicate, which
+	// reads Policies — not just the map.
+	session.ResourceToControlsMap = map[string][]string{mappedHostGVR: {framework.Controls[0].ControlID}}
 	batches := make(chan *cautils.ResourceBatch, 1)
 
 	err := handler.collectAndStreamBatches(
