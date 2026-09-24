@@ -2,9 +2,11 @@ package cautils
 
 import (
 	"testing"
+	"time"
 
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	helpersv1 "github.com/kubescape/opa-utils/reporthandling/helpers/v1"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
@@ -12,6 +14,7 @@ import (
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"k8s.io/apimachinery/pkg/version"
 )
 
 func TestReportV2ToV1(t *testing.T) {
@@ -161,6 +164,10 @@ func TestReportV2ToV1_StatusCounters(t *testing.T) {
 	assert.Equal(t, 10, cr.TotalResources)
 	assert.Equal(t, 2, cr.FailedResources)
 	assert.Equal(t, 7, cr.WarningResources)
+
+	assert.Equal(t, 10, got.FrameworkReports[0].TotalResources)
+	assert.Equal(t, 2, got.FrameworkReports[0].FailedResources)
+	assert.Equal(t, 7, got.FrameworkReports[0].WarningResources)
 }
 
 func TestReportV2ToV1_DuplicateFrameworkNames(t *testing.T) {
@@ -212,4 +219,117 @@ func TestReportV2ToV1_DuplicateFrameworkNames(t *testing.T) {
 	assert.Equal(t, "C-002", cr2.ControlID)
 	assert.Equal(t, 2, cr2.TotalResources)
 	assert.Equal(t, 2, cr2.WarningResources)
+
+	assert.Equal(t, 2, got.FrameworkReports[0].TotalResources)
+	assert.Equal(t, 1, got.FrameworkReports[0].FailedResources)
+	assert.Equal(t, 2, got.FrameworkReports[1].TotalResources)
+	assert.Equal(t, 2, got.FrameworkReports[1].WarningResources)
+}
+
+func TestReportV2ToV1_Metadata(t *testing.T) {
+	now := time.Now().UTC()
+	apiServerInfo := &version.Info{GitVersion: "v1.30.0", Platform: "linux/amd64"}
+	resources := []reporthandling.Resource{
+		{
+			ResourceID: "apps/v1/default/Deployment/demo-app",
+		},
+	}
+	session := &OPASessionObj{
+		Report: &reporthandlingv2.PostureReport{
+			CustomerGUID:         "customer-123",
+			ClusterName:          "prod-cluster",
+			ClusterAPIServerInfo: apiServerInfo,
+			ClusterCloudProvider: "gke",
+			ReportID:             "report-456",
+			JobID:                "job-789",
+			ReportGenerationTime: now,
+			Resources:            resources,
+		},
+	}
+
+	got := ReportV2ToV1(session)
+
+	assert.Equal(t, "customer-123", got.CustomerGUID)
+	assert.Equal(t, "prod-cluster", got.ClusterName)
+	assert.Equal(t, apiServerInfo, got.ClusterAPIServerInfo)
+	assert.Equal(t, "gke", got.ClusterCloudProvider)
+	assert.Equal(t, "report-456", got.ReportID)
+	assert.Equal(t, "job-789", got.JobID)
+	assert.Equal(t, now, got.ReportGenerationTime)
+	assert.Equal(t, resources, got.Resources)
+}
+
+func TestReportV2ToV1_NilSafety(t *testing.T) {
+	gotNil := ReportV2ToV1(nil)
+	require.NotNil(t, gotNil)
+	assert.Empty(t, gotNil.FrameworkReports)
+
+	gotEmpty := ReportV2ToV1(&OPASessionObj{})
+	require.NotNil(t, gotEmpty)
+	assert.Empty(t, gotEmpty.FrameworkReports)
+}
+
+func TestReportV2ToV1_FrameworkStatusCounters_MultipleControls(t *testing.T) {
+	// Framework counters aggregate unique resources across multiple controls
+	// and therefore differ from any individual control's counters.
+	session := &OPASessionObj{
+		Report: &reporthandlingv2.PostureReport{
+			SummaryDetails: reportsummary.SummaryDetails{
+				Frameworks: []reportsummary.FrameworkSummary{
+					{
+						Name: "cis-v1.23",
+						StatusCounters: reportsummary.StatusCounters{
+							PassedResources:   5,
+							FailedResources:   3,
+							SkippedResources:  2,
+							ExcludedResources: 1,
+						},
+						Controls: reportsummary.ControlSummaries{
+							"C-001": reportsummary.ControlSummary{
+								ControlID: "C-001",
+								StatusCounters: reportsummary.StatusCounters{
+									PassedResources: 3,
+									FailedResources: 1,
+								},
+							},
+							"C-002": reportsummary.ControlSummary{
+								ControlID: "C-002",
+								StatusCounters: reportsummary.StatusCounters{
+									PassedResources:   3,
+									FailedResources:   2,
+									SkippedResources:  2,
+									ExcludedResources: 1,
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	got := ReportV2ToV1(session)
+
+	require.Len(t, got.FrameworkReports, 1)
+	fw := got.FrameworkReports[0]
+	assert.Equal(t, "cis-v1.23", fw.Name)
+
+	// Framework totals: Passed(5) + Failed(3) + Skipped(2) + Excluded(1) = 11
+	assert.Equal(t, 11, fw.TotalResources)
+	assert.Equal(t, 3, fw.FailedResources)
+	assert.Equal(t, 3, fw.WarningResources) // Skipped(2) + Excluded(1) = 3
+
+	// Controls have their own individual totals
+	require.Len(t, fw.ControlReports, 2)
+	for _, cr := range fw.ControlReports {
+		switch cr.ControlID {
+		case "C-001":
+			assert.Equal(t, 4, cr.TotalResources)
+			assert.Equal(t, 1, cr.FailedResources)
+		case "C-002":
+			assert.Equal(t, 8, cr.TotalResources)
+			assert.Equal(t, 2, cr.FailedResources)
+			assert.Equal(t, 3, cr.WarningResources)
+		}
+	}
 }
