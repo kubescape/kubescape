@@ -57,3 +57,9 @@ When scanning multi-architecture images, you can specify the target platform (e.
 ```bash
 kubescape scan image "nginx" --platform linux/amd64
 ```
+
+For more details on scanning images built for multiple architectures, please see the [Multi-Architecture Image Scanning guide](multi-architecture-image-scanning.md).
+
+## Further Reading
+
+For a complete list of flags and options available for the `scan image` command, refer to the [CLI Reference](cli-reference.md).
