@@ -42,6 +42,10 @@ const (
 	// Matching on this rather than on cosignKeySecret keeps the assertion
 	// honest if the environment variable is ever named after the secret.
 	secretsExpression = "secrets."
+
+	// goreleaserAction is the action behind the Run GoReleaser step, the only
+	// consumer of the key.
+	goreleaserAction = "goreleaser/goreleaser-action@"
 )
 
 // cosignKeyStep is the subset of a workflow step these tests assert on.
@@ -49,6 +53,7 @@ const (
 // `name`/`uses`, so the step body is decoded here instead of widening that one.
 type cosignKeyStep struct {
 	Name string            `yaml:"name"`
+	Uses string            `yaml:"uses"`
 	If   string            `yaml:"if"`
 	Run  string            `yaml:"run"`
 	Env  map[string]string `yaml:"env"`
@@ -162,4 +167,42 @@ func TestCosignKeyIsRemovedAfterTheRelease(t *testing.T) {
 		"%s removes %s only on success; a release that fails after the key is written leaves it behind, "+
 			"so the cleanup needs `if: always()`",
 		releaseWorkflowName, cosignKeyFile)
+}
+
+// TestCosignKeyExistsOnlyAroundGoReleaser pins how long the key is on disk.
+// Creating and removing it is not enough on its own: written at the top of the
+// job and removed at the bottom, it was readable by every action in between -
+// QEMU, Buildx, the registry login, Syft, Kind, the provenance attestation and
+// the krew bot - none of which need it. Only goreleaser does, so the step
+// that writes it has to come immediately before goreleaser and the cleanup
+// immediately after, with nothing else in between.
+func TestCosignKeyExistsOnlyAroundGoReleaser(t *testing.T) {
+	steps := releaseSteps(t)
+
+	writer, release, cleanup := -1, -1, -1
+	for i, step := range steps {
+		switch {
+		case strings.Contains(step.Run, "> "+cosignKeyFile):
+			writer = i
+		case strings.Contains(step.Run, "rm -f "+cosignKeyFile):
+			cleanup = i
+		case strings.HasPrefix(step.Uses, goreleaserAction):
+			release = i
+		}
+	}
+	require.NotEqualf(t, -1, writer, "no step in %s writes %s", releaseWorkflowName, cosignKeyFile)
+	require.NotEqualf(t, -1, release, "no step in %s uses %s", releaseWorkflowName, goreleaserAction)
+	require.NotEqualf(t, -1, cleanup, "no step in %s removes %s", releaseWorkflowName, cosignKeyFile)
+
+	assert.Equalf(t, release-1, writer,
+		"%s's %q step writes %s at position %d but goreleaser runs at %d; create the key immediately "+
+			"before goreleaser so no other step can read it",
+		releaseWorkflowName, steps[writer].Name, cosignKeyFile, writer, release)
+	assert.Equalf(t, release+1, cleanup,
+		"%s's %q step removes %s at position %d but goreleaser runs at %d; remove the key immediately "+
+			"after goreleaser so no later step can read it",
+		releaseWorkflowName, steps[cleanup].Name, cosignKeyFile, cleanup, release)
+	assert.Containsf(t, steps[cleanup].If, "always()",
+		"%s's %q step must keep `if: always()`, or a failed release leaves %s behind for the steps after it",
+		releaseWorkflowName, steps[cleanup].Name, cosignKeyFile)
 }
