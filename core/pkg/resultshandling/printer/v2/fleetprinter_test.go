@@ -28,6 +28,19 @@ func renderFleet(report *fleet.FleetReport) string {
 // measurement apart from a zero one.
 func scorePtr(v float32) *float32 { return &v }
 
+// matrixOver builds a matrix in which each named cluster reached the same
+// outcome on one control, which is what a fleet that agrees looks like.
+func matrixOver(clusterIDs ...string) fleet.FleetControlMatrix {
+	byCluster := make(map[string]fleet.ControlStatusCell, len(clusterIDs))
+	for _, clusterID := range clusterIDs {
+		byCluster[clusterID] = fleet.ControlStatusCell{Status: fleet.CellPassed}
+	}
+	return fleet.FleetControlMatrix{Controls: []fleet.FleetControlRow{{
+		ControlID: "C-0016", Name: "Allow privilege escalation",
+		Severity: "High", ByCluster: byCluster,
+	}}}
+}
+
 // TestPrintFleetReportListsEveryCluster pins that a cluster which could not be
 // scanned still gets a row. Dropping it would make the fleet look smaller and
 // healthier than it is, which is the mistake the report itself exists to avoid.
@@ -253,13 +266,55 @@ func TestPrintFleetReportReferenceUnavailable(t *testing.T) {
 
 // TestPrintFleetReportAgreementIsWorthSaying pins that a fleet which agrees
 // everywhere gets told so, rather than an empty space a reader has to interpret.
+//
+// It takes two clusters that both reported, because that is the only situation
+// in which agreement means anything. With fewer, nothing was compared.
 func TestPrintFleetReportAgreementIsWorthSaying(t *testing.T) {
 	out := renderFleet(&fleet.FleetReport{
-		Clusters:   []fleet.ClusterResult{{ClusterID: "prod", Status: fleet.ClusterScanned}},
-		Compliance: fleet.ComplianceRollup{ComplianceScore: scorePtr(100), ClustersScored: 1, ClustersTotal: 1},
+		Clusters: []fleet.ClusterResult{
+			{ClusterID: "prod", Status: fleet.ClusterScanned},
+			{ClusterID: "staging", Status: fleet.ClusterScanned},
+		},
+		Compliance:    fleet.ComplianceRollup{ComplianceScore: scorePtr(100), ClustersScored: 2, ClustersTotal: 2},
+		ControlMatrix: matrixOver("prod", "staging"),
 	})
 
 	assert.Contains(t, out, "Every cluster agreed on every control it ran")
+}
+
+// TestPrintFleetReportWillNotClaimAgreementNobodyReached covers the fleet that
+// produced too little to compare.
+//
+// BuildDivergence drops any control fewer than two clusters reached an outcome
+// on, so a run where every context failed, or where one succeeded and the rest
+// did not, arrives here with an empty divergence that looks exactly like
+// agreement. Reporting it as agreement would turn the worst runs into the
+// cleanest-looking summaries.
+func TestPrintFleetReportWillNotClaimAgreementNobodyReached(t *testing.T) {
+	t.Run("every context unreachable", func(t *testing.T) {
+		out := renderFleet(&fleet.FleetReport{
+			Clusters: []fleet.ClusterResult{
+				{ClusterID: "prod", Status: fleet.ClusterUnreachable, Error: "i/o timeout"},
+				{ClusterID: "dr", Status: fleet.ClusterUnreachable, Error: "i/o timeout"},
+			},
+		})
+
+		assert.Contains(t, out, "No cluster produced results, so there was nothing to compare")
+		assert.NotContains(t, out, "agreed", "nobody reported, so nobody agreed")
+	})
+
+	t.Run("one scanned and the rest failed", func(t *testing.T) {
+		out := renderFleet(&fleet.FleetReport{
+			Clusters: []fleet.ClusterResult{
+				{ClusterID: "prod", Status: fleet.ClusterScanned},
+				{ClusterID: "dr", Status: fleet.ClusterUnreachable, Error: "i/o timeout"},
+			},
+			ControlMatrix: matrixOver("prod"),
+		})
+
+		assert.Contains(t, out, "Only one cluster produced results, so there was nothing to compare")
+		assert.NotContains(t, out, "agreed", "one cluster has nobody to agree with")
+	})
 }
 
 // TestPrintFleetReportHandlesNothing covers the degenerate inputs, since a
@@ -355,6 +410,6 @@ func TestPrintFleetReportReportsAnUnavailableReferenceWithNoDivergence(t *testin
 	assert.Contains(t, out, "dr", "the reference has to be named")
 	assert.Contains(t, out, "produced no results",
 		"a reference nobody could read is worth saying even when nothing diverged")
-	assert.Contains(t, out, "Every cluster agreed",
-		"the clusters that did report still agreed, and that is still worth saying")
+	assert.NotContains(t, out, "agreed",
+		"only prod reported, so there was nobody for it to agree with")
 }
