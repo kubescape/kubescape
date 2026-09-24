@@ -2,6 +2,7 @@ package core
 
 import (
 	"archive/tar"
+	"bytes"
 	"compress/gzip"
 	"context"
 	"crypto/sha256"
@@ -391,6 +392,88 @@ func sortedBlobKeys(m map[string][]byte) []string {
 	return keys
 }
 
+// ociLayoutContentWithLayers builds layout content whose manifest references
+// the given layer bodies: index, manifest, and config bytes, the manifest
+// digest, and every blob body keyed by digest.
+func ociLayoutContentWithLayers(layerBodies ...[]byte) (index, manifest, config []byte, manifestDigest, configDigest string, blobs map[string][]byte) {
+	config = []byte(`{"architecture":"amd64","os":"linux","rootfs":{"type":"layers","diff_ids":[]}}`)
+	configDigest = sha256Digest(config)
+	blobs = make(map[string][]byte)
+	var layersJSON strings.Builder
+	for i, body := range layerBodies {
+		digest := sha256Digest(body)
+		blobs[digest] = body
+		if i > 0 {
+			layersJSON.WriteString(",")
+		}
+		fmt.Fprintf(&layersJSON, `{"mediaType":"application/vnd.oci.image.layer.v1.tar+gzip","digest":%q,"size":%d}`, digest, len(body))
+	}
+	manifest = []byte(fmt.Sprintf(`{"schemaVersion":2,"mediaType":"application/vnd.oci.image.manifest.v1+json","config":{"mediaType":"application/vnd.oci.image.config.v1+json","digest":%q,"size":%d},"layers":[%s]}`,
+		sha256Digest(config), len(config), layersJSON.String()))
+	manifestDigest = sha256Digest(manifest)
+	blobs[manifestDigest] = manifest
+	blobs[configDigest] = config
+	index = []byte(fmt.Sprintf(`{"schemaVersion":2,"manifests":[{"mediaType":"application/vnd.oci.image.manifest.v1+json","digest":%q,"size":%d}]}`, manifestDigest, len(manifest)))
+	return index, manifest, config, manifestDigest, configDigest, blobs
+}
+
+// tarMember is one ordered tar member; repeating a name models duplicate
+// entries exactly as the extractor replays them.
+type tarMember struct {
+	name string
+	body []byte
+}
+
+// writeTarOrdered tars members in order with explicit blob directories,
+// like real buildah archives (the provider's extraction only creates
+// parents for listed directories).
+func writeTarOrdered(t *testing.T, path string, members []tarMember) {
+	t.Helper()
+	f, err := os.Create(path)
+	require.NoError(t, err)
+	defer func() { _ = f.Close() }()
+	tw := tar.NewWriter(f)
+	defer func() { _ = tw.Close() }()
+	for _, dirEntry := range []string{"blobs/", "blobs/sha256/"} {
+		require.NoError(t, tw.WriteHeader(&tar.Header{Name: dirEntry, Typeflag: tar.TypeDir, Mode: 0o755}))
+	}
+	for _, m := range members {
+		require.NoError(t, tw.WriteHeader(&tar.Header{Name: m.name, Mode: 0o600, Size: int64(len(m.body))}))
+		_, err = tw.Write(m.body)
+		require.NoError(t, err)
+	}
+}
+
+// blobEntry maps a digest to its layout-relative tar entry name.
+func blobEntry(digest string) string {
+	return "blobs/" + digestPath(digest)
+}
+
+// gzipBytes compresses content.
+func gzipBytes(t *testing.T, content []byte) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	_, err := gz.Write(content)
+	require.NoError(t, err)
+	require.NoError(t, gz.Close())
+	return buf.Bytes()
+}
+
+// tinyLayerTar builds the smallest valid layer content: a tar with one file,
+// returned compressed and uncompressed.
+func tinyLayerTar(t *testing.T) (compressed, uncompressed []byte) {
+	t.Helper()
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	content := []byte("hello")
+	require.NoError(t, tw.WriteHeader(&tar.Header{Name: "hello.txt", Mode: 0o600, Size: int64(len(content))}))
+	_, err := tw.Write(content)
+	require.NoError(t, err)
+	require.NoError(t, tw.Close())
+	return gzipBytes(t, buf.Bytes()), buf.Bytes()
+}
+
 // requireDirectoryProviderVerdict runs the real OCI directory provider over
 // path: the ground truth the classifier must agree with.
 func requireDirectoryProviderVerdict(t *testing.T, path string, accept bool) {
@@ -526,6 +609,192 @@ func TestImageRemainderOCIArchiveParity(t *testing.T) {
 	}
 }
 
+// TestImageRemainderOCIDuplicateEntries pins the extractor's no-truncate
+// overwrite semantics: duplicates replay in order at offset zero, so the
+// first entry never wins by position and the last never wins by truncation.
+func TestImageRemainderOCIDuplicateEntries(t *testing.T) {
+	dir := t.TempDir()
+
+	// Later valid index over an initial "{}": the provider materializes the
+	// later content and accepts; first-wins would say registry.
+	validIndex, _, _, validDigest, validConfigDigest, validBlobs := ociLayoutContentWithLayers()
+	members := []tarMember{
+		{name: "oci-layout", body: []byte(`{"imageLayoutVersion":"1.0.0"}`)},
+		{name: "index.json", body: []byte(`{}`)},
+		{name: blobEntry(validDigest), body: validBlobs[validDigest]},
+	}
+	for digest, body := range validBlobs {
+		if digest == validDigest {
+			continue
+		}
+		members = append(members, tarMember{name: blobEntry(digest), body: body})
+	}
+	members = append(members, tarMember{name: "index.json", body: validIndex})
+	dupValid := filepath.Join(dir, "dupvalid.tar")
+	writeTarOrdered(t, dupValid, members)
+
+	// Later truncated index (valid minus its last byte): the shorter body
+	// overwrites the prefix and keeps the earlier tail, so the materialized
+	// file is still the valid index. Last-wins would say registry.
+	dupTruncated := filepath.Join(dir, "duptruncated.tar")
+	writeTarOrdered(t, dupTruncated, []tarMember{
+		{name: "oci-layout", body: []byte(`{"imageLayoutVersion":"1.0.0"}`)},
+		{name: "index.json", body: validIndex},
+		{name: blobEntry(validDigest), body: validBlobs[validDigest]},
+		{name: blobEntry(validConfigDigest), body: validBlobs[validConfigDigest]},
+		{name: "index.json", body: validIndex[:len(validIndex)-1]},
+	})
+
+	// Later "{}" over a valid index: the materialized file is "{}" plus the
+	// valid tail — undecodable — so both reject.
+	dupBroken := filepath.Join(dir, "dupbroken.tar")
+	writeTarOrdered(t, dupBroken, []tarMember{
+		{name: "oci-layout", body: []byte(`{"imageLayoutVersion":"1.0.0"}`)},
+		{name: "index.json", body: validIndex},
+		{name: blobEntry(validDigest), body: validBlobs[validDigest]},
+		{name: blobEntry(validConfigDigest), body: validBlobs[validConfigDigest]},
+		{name: "index.json", body: []byte(`{}`)},
+	})
+
+	// Duplicated layer blob (identical content twice): exercises the
+	// temp-file overlay branch for layers; both accept.
+	layerCompressed, _ := tinyLayerTar(t)
+	layerIndex, _, _, _, _, layerBlobs := ociLayoutContentWithLayers(layerCompressed)
+	dupLayerMembers := []tarMember{
+		{name: "oci-layout", body: []byte(`{"imageLayoutVersion":"1.0.0"}`)},
+		{name: "index.json", body: layerIndex},
+	}
+	for digest, body := range layerBlobs {
+		dupLayerMembers = append(dupLayerMembers, tarMember{name: blobEntry(digest), body: body})
+	}
+	for digest, body := range layerBlobs {
+		dupLayerMembers = append(dupLayerMembers, tarMember{name: blobEntry(digest), body: body})
+	}
+	dupLayer := filepath.Join(dir, "duplayer.tar")
+	writeTarOrdered(t, dupLayer, dupLayerMembers)
+
+	for path, accept := range map[string]bool{dupValid: true, dupTruncated: true, dupBroken: false, dupLayer: true} {
+		requireArchiveProviderVerdict(t, path, accept)
+		assert.Equal(t, accept, isOCILayoutTarball(path), "classifier must agree with the provider on %q", path)
+	}
+}
+
+// TestImageRemainderOCICorruptContent pins the content-validation direction:
+// present-but-corrupt configs and layers are rejected by the provider's
+// reads, so the classifier must fall through instead of taking local
+// identity for a registry-resolved scan.
+func TestImageRemainderOCICorruptContent(t *testing.T) {
+	dir := t.TempDir()
+	layerCompressed, _ := tinyLayerTar(t)
+
+	// Baseline with a real layer: both accept.
+	goodIndex, _, _, _, goodConfigDigest, goodBlobs := ociLayoutContentWithLayers(layerCompressed)
+	goodMembers := []tarMember{
+		{name: "oci-layout", body: []byte(`{"imageLayoutVersion":"1.0.0"}`)},
+		{name: "index.json", body: goodIndex},
+	}
+	for digest, body := range goodBlobs {
+		goodMembers = append(goodMembers, tarMember{name: blobEntry(digest), body: body})
+	}
+	goodArchive := filepath.Join(dir, "goodlayer.tar")
+	writeTarOrdered(t, goodArchive, goodMembers)
+
+	goodDir := filepath.Join(dir, "goodlayerdir")
+	require.NoError(t, os.MkdirAll(goodDir, 0o755))
+	for digest, body := range goodBlobs {
+		writeBlob(t, goodDir, digest, body)
+	}
+	require.NoError(t, os.WriteFile(filepath.Join(goodDir, "index.json"), goodIndex, 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(goodDir, "oci-layout"), []byte(`{"imageLayoutVersion":"1.0.0"}`), 0o600))
+
+	// Corrupt config (present, undecodable).
+	badConfigMembers := []tarMember{
+		{name: "oci-layout", body: []byte(`{"imageLayoutVersion":"1.0.0"}`)},
+		{name: "index.json", body: goodIndex},
+	}
+	for digest, body := range goodBlobs {
+		if digest == goodConfigDigest {
+			body = []byte(`{invalid json`)
+		}
+		badConfigMembers = append(badConfigMembers, tarMember{name: blobEntry(digest), body: body})
+	}
+	badConfigArchive := filepath.Join(dir, "badconfig.tar")
+	writeTarOrdered(t, badConfigArchive, badConfigMembers)
+
+	badConfigDir := filepath.Join(dir, "badconfigdir")
+	require.NoError(t, os.MkdirAll(badConfigDir, 0o755))
+	for digest, body := range goodBlobs {
+		if digest == goodConfigDigest {
+			body = []byte(`{invalid json`)
+		}
+		writeBlob(t, badConfigDir, digest, body)
+	}
+	require.NoError(t, os.WriteFile(filepath.Join(badConfigDir, "index.json"), goodIndex, 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(badConfigDir, "oci-layout"), []byte(`{"imageLayoutVersion":"1.0.0"}`), 0o600))
+
+	// Corrupt layers (present, unreadable): raw garbage and gzip-wrapped garbage.
+	layerDigest := ""
+	for digest, body := range goodBlobs {
+		if !bytes.Equal(body, layerCompressed) {
+			continue
+		}
+		layerDigest = digest
+	}
+	require.NotEmpty(t, layerDigest, "layer blob must be addressable")
+
+	badLayerRawMembers := []tarMember{
+		{name: "oci-layout", body: []byte(`{"imageLayoutVersion":"1.0.0"}`)},
+		{name: "index.json", body: goodIndex},
+	}
+	for digest, body := range goodBlobs {
+		if digest == layerDigest {
+			body = []byte("not a tarball at all")
+		}
+		badLayerRawMembers = append(badLayerRawMembers, tarMember{name: blobEntry(digest), body: body})
+	}
+	badLayerRawArchive := filepath.Join(dir, "badlayerraw.tar")
+	writeTarOrdered(t, badLayerRawArchive, badLayerRawMembers)
+
+	badLayerGzipMembers := []tarMember{
+		{name: "oci-layout", body: []byte(`{"imageLayoutVersion":"1.0.0"}`)},
+		{name: "index.json", body: goodIndex},
+	}
+	for digest, body := range goodBlobs {
+		if digest == layerDigest {
+			body = gzipBytes(t, []byte("decompresses fine, parses as nothing"))
+		}
+		badLayerGzipMembers = append(badLayerGzipMembers, tarMember{name: blobEntry(digest), body: body})
+	}
+	badLayerGzipArchive := filepath.Join(dir, "badlayergzip.tar")
+	writeTarOrdered(t, badLayerGzipArchive, badLayerGzipMembers)
+
+	badLayerDir := filepath.Join(dir, "badlayerdir")
+	require.NoError(t, os.MkdirAll(badLayerDir, 0o755))
+	for digest, body := range goodBlobs {
+		if digest == layerDigest {
+			body = []byte("not a tarball at all")
+		}
+		writeBlob(t, badLayerDir, digest, body)
+	}
+	require.NoError(t, os.WriteFile(filepath.Join(badLayerDir, "index.json"), goodIndex, 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(badLayerDir, "oci-layout"), []byte(`{"imageLayoutVersion":"1.0.0"}`), 0o600))
+
+	requireDirectoryProviderVerdict(t, goodDir, true)
+	assert.True(t, isOCILayoutDir(goodDir))
+	requireDirectoryProviderVerdict(t, badConfigDir, false)
+	assert.False(t, isOCILayoutDir(badConfigDir), "undecodable config must not classify local")
+	requireDirectoryProviderVerdict(t, badLayerDir, false)
+	assert.False(t, isOCILayoutDir(badLayerDir), "unreadable layer must not classify local")
+
+	for path, accept := range map[string]bool{
+		goodArchive: true, badConfigArchive: false,
+		badLayerRawArchive: false, badLayerGzipArchive: false,
+	} {
+		requireArchiveProviderVerdict(t, path, accept)
+		assert.Equal(t, accept, isOCILayoutTarball(path), "classifier must agree with the provider on %q", path)
+	}
+}
+
 // TestImageRemainderOCIRelativeParity is the collision scenario: relative
 // names that also parse as registry references, so a detection miss yields
 // registry identity (not a loud-local absolute path that proves nothing).
@@ -540,19 +809,51 @@ func TestImageRemainderOCIRelativeParity(t *testing.T) {
 	writeOCIArchive(t, filepath.Join(dir, "holeimg"), "index.json", "", true)
 	writeMultiManifestLayout(t, filepath.Join(dir, "twinequal"), true)
 	writeMultiManifestLayout(t, filepath.Join(dir, "twindiffer"), false)
+
+	// Duplicate index (initial "{}", later valid) under a parseable name:
+	// the provider materializes the later content, so this stays local.
+	dupRelIndex, _, _, dupRelDigest, _, dupRelBlobs := ociLayoutContentWithLayers()
+	dupRelMembers := []tarMember{
+		{name: "oci-layout", body: []byte(`{"imageLayoutVersion":"1.0.0"}`)},
+		{name: "index.json", body: []byte(`{}`)},
+	}
+	for digest, body := range dupRelBlobs {
+		dupRelMembers = append(dupRelMembers, tarMember{name: blobEntry(digest), body: body})
+	}
+	dupRelMembers = append(dupRelMembers, tarMember{name: "index.json", body: dupRelIndex})
+	writeTarOrdered(t, filepath.Join(dir, "duprel"), dupRelMembers)
+	_ = dupRelDigest
+
+	// Corrupt config and corrupt layer under parseable names: the provider
+	// rejects both, so both resolve registry.
+	layerCompressed, _ := tinyLayerTar(t)
+	badRelIndex, _, _, _, badRelConfigDigest, badRelBlobs := ociLayoutContentWithLayers(layerCompressed)
+	badRelConfigMembers := []tarMember{
+		{name: "oci-layout", body: []byte(`{"imageLayoutVersion":"1.0.0"}`)},
+		{name: "index.json", body: badRelIndex},
+	}
+	for digest, body := range badRelBlobs {
+		if digest == badRelConfigDigest {
+			body = []byte(`{invalid json`)
+		}
+		badRelConfigMembers = append(badRelConfigMembers, tarMember{name: blobEntry(digest), body: body})
+	}
+	writeTarOrdered(t, filepath.Join(dir, "badrelconfig"), badRelConfigMembers)
 	t.Chdir(dir)
 
 	cases := []struct {
 		input string
 		local bool
 	}{
-		{"image:nginx", true},       // valid layout under a registry-parseable name
-		{"image:pkg", true},         // valid extensionless archive
-		{"image:normimg", true},     // normalized index entry spelling
-		{"image:twinequal", true},   // several manifests, equal digests
-		{"image:brokenimg", false},  // missing blob: provider rejects, name parses registry
-		{"image:holeimg", false},    // missing manifest blob in archive
-		{"image:twindiffer", false}, // several manifests, differing digests
+		{"image:nginx", true},         // valid layout under a registry-parseable name
+		{"image:pkg", true},           // valid extensionless archive
+		{"image:normimg", true},       // normalized index entry spelling
+		{"image:twinequal", true},     // several manifests, equal digests
+		{"image:duprel", true},        // duplicate index, later valid wins
+		{"image:brokenimg", false},    // missing blob: provider rejects, name parses registry
+		{"image:holeimg", false},      // missing manifest blob in archive
+		{"image:twindiffer", false},   // several manifests, differing digests
+		{"image:badrelconfig", false}, // corrupt config: provider rejects
 	}
 	for _, tc := range cases {
 		registry, _, err := classifyImageInput(tc.input, osStatExists)

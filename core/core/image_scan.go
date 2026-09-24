@@ -2,6 +2,8 @@ package core
 
 import (
 	"archive/tar"
+	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"errors"
@@ -19,6 +21,7 @@ import (
 	stereoscopeimage "github.com/anchore/stereoscope/pkg/image"
 	"github.com/distribution/reference"
 	"github.com/gabriel-vasile/mimetype"
+	v1 "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/google/go-containerregistry/pkg/v1/layout"
 	"github.com/google/go-containerregistry/pkg/v1/tarball"
 	"github.com/sylabs/sif/v2/pkg/sif"
@@ -202,13 +205,15 @@ func classifyImageInput(img string, stat func(string) bool) (registry bool, sche
 // otherwise: an extensionless or colon-named tarball must be local, while a
 // plain directory or corrupt archive must fall through to daemon/registry.
 // Accepts: OCI-layout directories (layout + index with one manifest, or
-// several with equal digests, plus every referenced blob on disk —
-// mirroring the OCI directory provider's gate and its layer reads),
-// docker tarballs (tarball.ImageFromPath reads manifest+config only — no
-// layer unpack), SIF images (header load), and OCI-layout tarballs (the
-// provider's untar-then-directory-gate reproduced as an entry walk: cleaned
-// names, complete index, referenced blobs present, no gunzip). Anything else
-// defers to the daemon parser, exactly like the providers' fallthrough.
+// several with equal digests, plus a decoding config and layer reads for
+// everything referenced — mirroring the OCI directory provider's gate and
+// content validation), docker tarballs (tarball.ImageFromPath reads
+// manifest+config only — no layer unpack), SIF images (header load), and
+// OCI-layout tarballs (the provider's untar-then-directory-gate reproduced
+// as an entry walk: cleaned names, duplicate overwrite with no truncation,
+// complete index, decoding config, streamed layer reads, no gunzip).
+// Anything else defers to the daemon parser, exactly like the providers'
+// fallthrough.
 func isImageRemainderLocal(rest string) bool {
 	if rest == "" {
 		return false
@@ -230,12 +235,12 @@ func isImageRemainderLocal(rest string) bool {
 }
 
 // isOCILayoutDir mirrors the OCI directory provider's acceptance gate
-// (pkg/image/oci directoryImageProvider.Provide) without unpacking layers:
-// a readable layout whose index carries exactly one manifest — or several
-// with equal digests — whose manifest, config, and layer blobs all exist on
-// disk. The provider's Read unpacks every referenced blob, so a layout
-// missing any of them is rejected and Syft falls through to daemon/registry;
-// accepting it here would hand a registry-resolved scan a local identity.
+// (pkg/image/oci directoryImageProvider.Provide) without unpacking layers
+// to disk: a readable layout whose index carries exactly one manifest — or
+// several with equal digests — whose manifest reads, whose config decodes,
+// and whose layers all read as tar streams. Corrupt-but-present blobs are
+// rejected and Syft falls through to daemon/registry; accepting them here
+// would hand a registry-resolved scan a local identity.
 func isOCILayoutDir(path string) bool {
 	pathObj, err := layout.FromPath(path)
 	if err != nil {
@@ -267,15 +272,83 @@ func isOCILayoutDir(path string) bool {
 	if err := json.Unmarshal(raw, &desc); err != nil {
 		return false
 	}
-	if !layoutBlobExists(path, desc.Config.Digest) {
+	configBody, err := os.ReadFile(filepath.Join(path, "blobs", digestPath(desc.Config.Digest)))
+	if err != nil {
+		return false
+	}
+	var config v1.ConfigFile
+	if err := json.Unmarshal(configBody, &config); err != nil {
 		return false
 	}
 	for _, layer := range desc.Layers {
-		if !layoutBlobExists(path, layer.Digest) {
+		f, err := os.Open(filepath.Join(path, "blobs", digestPath(layer.Digest)))
+		if err != nil {
+			return false
+		}
+		err = validateLayerStream(f)
+		_ = f.Close()
+		if err != nil {
 			return false
 		}
 	}
 	return true
+}
+
+// validateLayerStream validates one layer the way the provider's layer Read
+// does: the blob must decompress (when compressed) and walk as a tar stream
+// to EOF, and an entry escaping the layer root fails the read. Bodies stream
+// without buffering and never touch disk.
+func validateLayerStream(r io.Reader) error {
+	head := make([]byte, 2)
+	n, err := io.ReadFull(r, head)
+	if err != nil {
+		// Empty layers carry no content; anything else truncated is corrupt.
+		return err
+	}
+	body := io.MultiReader(bytes.NewReader(head[:n]), r)
+	if n == 2 && head[0] == 0x1f && head[1] == 0x8b {
+		gz, err := gzip.NewReader(body)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = gz.Close() }()
+		body = gz
+	}
+	return walkLayerTar(body)
+}
+
+// layerReadLimit bounds one layer-entry stream the way the provider bounds
+// its per-file extraction reads (2 GiB): reaching it fails the read on both
+// sides, and it keeps classification from unpacking bombs.
+const layerReadLimit = 2 << 30
+
+// walkLayerTar consumes a layer tar stream the way the provider's unpack
+// does: every entry must parse, and an entry escaping the layer root fails
+// the whole read.
+func walkLayerTar(r io.Reader) error {
+	tr := tar.NewReader(r)
+	for {
+		hdr, err := tr.Next()
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if _, ok := tarEntryRelPath(hdr.Name); !ok {
+			return fmt.Errorf("layer entry escapes layer root: %q", hdr.Name)
+		}
+		// Cap each entry like the provider caps each extracted file; the
+		// cap resets per entry so large multi-file layers match provider
+		// acceptance instead of failing stricter.
+		n, err := io.Copy(io.Discard, io.LimitReader(tr, layerReadLimit+1))
+		if err != nil {
+			return err
+		}
+		if n > layerReadLimit {
+			return fmt.Errorf("layer entry exceeds read limit")
+		}
+	}
 }
 
 // ociManifestBlobDescriptor is the minimal manifest shape needed to verify
@@ -287,19 +360,6 @@ type ociManifestBlobDescriptor struct {
 	Layers []struct {
 		Digest string `json:"digest"`
 	} `json:"layers"`
-}
-
-// layoutBlobExists reports whether digest names a blob file under the
-// layout, mirroring the on-disk reads the provider performs after the index
-// gate. Digests carrying path separators are rejected so manifest content
-// can never escape the blobs directory.
-func layoutBlobExists(layoutPath, digest string) bool {
-	algo, hex, ok := strings.Cut(digest, ":")
-	if !ok || algo == "" || hex == "" || strings.ContainsAny(hex, `/\.`) {
-		return false
-	}
-	info, err := os.Stat(filepath.Join(layoutPath, "blobs", algo, hex))
-	return err == nil && !info.IsDir()
 }
 
 // isTarballFile mirrors the docker-archive provider: manifest.json plus its
@@ -332,11 +392,12 @@ type ociIndexManifestDescriptor struct {
 // the provider untars to a temp dir (no gunzip — a gzipped stream fails the
 // tar parse and falls through) and applies the directory gate there, so the
 // walk reproduces both: entry names cleaned exactly the way filepath.Join
-// cleans them on extraction, the complete index decoded, and every blob the
-// manifest references verified present. Anything else fails closed to the
-// daemon path.
+// cleans them on extraction, duplicates overlaid with the extractor's
+// no-truncate semantics, the complete index decoded, the config decoded,
+// and every layer streamed as a tar stream. Anything else fails closed to
+// the daemon path.
 func isOCILayoutTarball(path string) bool {
-	indexBody, entries, ok := walkTarEntries(path)
+	indexBody, ok := walkTarEntries(path)
 	if !ok {
 		return false
 	}
@@ -350,7 +411,7 @@ func isOCILayoutTarball(path string) bool {
 			return false
 		}
 	}
-	manifestBody, err := readTarEntryBody(path, "blobs/"+digestPath(first))
+	manifestBody, err := overlayTarEntryBody(path, "blobs/"+digestPath(first))
 	if err != nil {
 		return false
 	}
@@ -358,11 +419,16 @@ func isOCILayoutTarball(path string) bool {
 	if err := json.Unmarshal(manifestBody, &blobDesc); err != nil {
 		return false
 	}
-	if !entries["blobs/"+digestPath(blobDesc.Config.Digest)] {
+	configBody, err := overlayTarEntryBody(path, "blobs/"+digestPath(blobDesc.Config.Digest))
+	if err != nil {
+		return false
+	}
+	var config v1.ConfigFile
+	if err := json.Unmarshal(configBody, &config); err != nil {
 		return false
 	}
 	for _, layer := range blobDesc.Layers {
-		if !entries["blobs/"+digestPath(layer.Digest)] {
+		if err := validateTarLayer(path, "blobs/"+digestPath(layer.Digest)); err != nil {
 			return false
 		}
 	}
@@ -379,20 +445,36 @@ func digestPath(digest string) string {
 	return algo + "/" + hex
 }
 
-// walkTarEntries lists one plain-tar stream the way the provider's
-// extraction materializes it: cleaned relative paths of regular files, plus
-// the index.json body. ok is false when the stream is not a readable tar,
-// an entry would escape the extraction root (the provider hard-fails the
-// whole extraction on those), or no index.json is present. The index entry
-// is bounded by the archive itself and the provider reads the extracted
-// index.json whole, so no size cap applies here either.
-func walkTarEntries(path string) (indexBody []byte, entries map[string]bool, ok bool) {
+// overlayNoTruncate replays the provider's extraction write for one entry:
+// the body lands at offset zero of the same path without truncation, so a
+// longer body replaces the file while a shorter body overwrites the prefix
+// and keeps the earlier tail.
+func overlayNoTruncate(cur, body []byte) []byte {
+	if len(body) >= len(cur) {
+		out := make([]byte, len(body))
+		copy(out, body)
+		return out
+	}
+	out := make([]byte, len(cur))
+	copy(out, cur)
+	copy(out, body)
+	return out
+}
+
+// walkTarEntries returns the final materialized index.json body of one
+// plain-tar stream — duplicates overlaid with the extractor's no-truncate
+// semantics, so the first entry never wins by position. ok is false when the
+// stream is not a readable tar, an entry would escape the extraction root
+// (the provider hard-fails the whole extraction on those), or no index.json
+// is present. The index entry is bounded by the archive itself and the
+// provider reads the extracted index.json whole, so no size cap applies
+// here either.
+func walkTarEntries(path string) (indexBody []byte, ok bool) {
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, nil, false
+		return nil, false
 	}
 	defer func() { _ = f.Close() }()
-	entries = make(map[string]bool)
 	tr := tar.NewReader(f)
 	for {
 		hdr, err := tr.Next()
@@ -400,11 +482,11 @@ func walkTarEntries(path string) (indexBody []byte, entries map[string]bool, ok 
 			break
 		}
 		if err != nil {
-			return nil, nil, false
+			return nil, false
 		}
 		rel, ok := tarEntryRelPath(hdr.Name)
 		if !ok {
-			return nil, nil, false
+			return nil, false
 		}
 		if hdr.Typeflag != tar.TypeReg {
 			// Only regular files are materialized by the provider's
@@ -412,50 +494,127 @@ func walkTarEntries(path string) (indexBody []byte, entries map[string]bool, ok 
 			// other types dropped), so only they satisfy anything.
 			continue
 		}
-		entries[rel] = true
-		if rel != "index.json" || indexBody != nil {
+		if rel != "index.json" {
 			continue
 		}
 		body, err := io.ReadAll(tr)
 		if err != nil {
-			return nil, nil, false
+			return nil, false
 		}
-		indexBody = body
+		indexBody = overlayNoTruncate(indexBody, body)
 	}
 	if indexBody == nil {
-		return nil, nil, false
+		return nil, false
 	}
-	return indexBody, entries, true
+	return indexBody, true
 }
 
-// readTarEntryBody returns the body of the regular file at rel in a
-// plain-tar stream, mirroring the same cleaning and rejection walkTarEntries
-// applies.
-func readTarEntryBody(path, rel string) ([]byte, error) {
-	f, err := os.Open(path)
+// overlayTarEntryBody returns the final materialized body of the regular
+// file at rel: every occurrence overlaid in order with the extractor's
+// no-truncate semantics.
+func overlayTarEntryBody(path, rel string) ([]byte, error) {
+	var final []byte
+	found := false
+	err := streamTarEntryBodies(path, rel, func(body io.Reader) error {
+		chunk, err := io.ReadAll(body)
+		if err != nil {
+			return err
+		}
+		final = overlayNoTruncate(final, chunk)
+		found = true
+		return nil
+	})
 	if err != nil {
 		return nil, err
+	}
+	if !found {
+		return nil, fmt.Errorf("entry not found: %q", rel)
+	}
+	return final, nil
+}
+
+// validateTarLayer validates the final materialized bytes of one layer
+// entry the way the provider's layer Read does. A single occurrence streams
+// straight through; duplicates overlay to a temp file first so validation
+// sees exactly what extraction materialized, without buffering layers in
+// memory.
+func validateTarLayer(path, rel string) error {
+	occurrences := 0
+	err := streamTarEntryBodies(path, rel, func(io.Reader) error {
+		occurrences++
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	if occurrences == 0 {
+		return fmt.Errorf("entry not found: %q", rel)
+	}
+	if occurrences == 1 {
+		return streamTarEntryBodies(path, rel, func(body io.Reader) error {
+			return validateLayerStream(body)
+		})
+	}
+	tmp, err := os.CreateTemp("", "oci-classify-layer-")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer func() { _ = os.Remove(tmpName) }()
+	if _, err := tmp.Seek(0, io.SeekStart); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	err = streamTarEntryBodies(path, rel, func(body io.Reader) error {
+		if _, err := tmp.Seek(0, io.SeekStart); err != nil {
+			return err
+		}
+		_, err = io.Copy(tmp, body)
+		return err
+	})
+	if closeErr := tmp.Close(); closeErr != nil && err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		return err
+	}
+	f, err := os.Open(tmpName)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = f.Close() }()
+	return validateLayerStream(f)
+}
+
+// streamTarEntryBodies calls fn with the body of every regular-file
+// occurrence of rel in order, mirroring the same cleaning and rejection
+// walkTarEntries applies. Bodies stream bounded by their entries.
+func streamTarEntryBodies(path, rel string, fn func(io.Reader) error) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return err
 	}
 	defer func() { _ = f.Close() }()
 	tr := tar.NewReader(f)
 	for {
 		hdr, err := tr.Next()
 		if errors.Is(err, io.EOF) {
-			break
+			return nil
 		}
 		if err != nil {
-			return nil, err
+			return err
 		}
 		entryRel, ok := tarEntryRelPath(hdr.Name)
 		if !ok {
-			return nil, fmt.Errorf("entry escapes extraction root: %q", hdr.Name)
+			return fmt.Errorf("entry escapes extraction root: %q", hdr.Name)
 		}
 		if entryRel != rel || hdr.Typeflag != tar.TypeReg {
 			continue
 		}
-		return io.ReadAll(tr)
+		if err := fn(tr); err != nil {
+			return err
+		}
 	}
-	return nil, fmt.Errorf("entry not found: %q", rel)
 }
 
 // tarEntryRelPath cleans a tar entry name exactly the way the provider's
