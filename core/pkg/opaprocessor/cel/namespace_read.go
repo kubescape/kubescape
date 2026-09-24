@@ -3,6 +3,7 @@ package cel
 import (
 	"github.com/google/cel-go/cel"
 	celast "github.com/google/cel-go/common/ast"
+	"github.com/google/cel-go/common/types"
 )
 
 // ReadsNamespaceObjectInValidations reports whether a validation can evaluate
@@ -62,9 +63,11 @@ func readsNamespaceObject(env *cel.Env, expr string) bool {
 	return false
 }
 
-// referencedVariables returns the first field of variables.<name> selections
-// in an expression. The compiler resolves the selection before this runs, so
-// this follows the same dependency shape used by lazyVariables at evaluation.
+// referencedVariables returns names referenced through variables.<name> and
+// variables["name"]. Dynamic indexes are deliberately excluded because their
+// target cannot be known until evaluation. The compiler resolves these accesses
+// before this runs, so this follows the same dependency shape used by
+// lazyVariables at evaluation.
 func referencedVariables(env *cel.Env, expr string) []string {
 	if expr == "" {
 		return nil
@@ -80,14 +83,29 @@ func referencedVariables(env *cel.Env, expr string) []string {
 			continue
 		}
 		parent, ok := node.Parent()
-		if !ok || parent.Kind() != celast.SelectKind {
+		if !ok {
 			continue
 		}
-		selection := parent.AsSelect()
-		if selection.Operand().ID() != node.ID() {
-			continue
+		switch parent.Kind() {
+		case celast.SelectKind:
+			selection := parent.AsSelect()
+			if selection.Operand().ID() == node.ID() {
+				seen[selection.FieldName()] = struct{}{}
+			}
+		case celast.CallKind:
+			call := parent.AsCall()
+			args := call.Args()
+			if call.FunctionName() != "_[_]" || len(args) != 2 || args[0].ID() != node.ID() {
+				continue
+			}
+			if args[1].Kind() != celast.LiteralKind {
+				continue
+			}
+			key, ok := args[1].AsLiteral().(types.String)
+			if ok {
+				seen[string(key)] = struct{}{}
+			}
 		}
-		seen[selection.FieldName()] = struct{}{}
 	}
 	result := make([]string, 0, len(seen))
 	for name := range seen {
