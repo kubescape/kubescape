@@ -343,20 +343,19 @@ func TestCollectResources_KeepsPartiallyReadableItems(t *testing.T) {
 }
 
 // assertPartialContains checks that a partially converted resource produced
-// exactly the partial records the scan looks up by GVR, carrying the
-// conversion scope and both counts.
+// the partial record under its virtual policy-Kind identity — the key the
+// scan looks up in ResourceToControlsMap — carrying the conversion scope
+// and both counts.
 func assertPartialContains(t *testing.T, partials []cautils.PartialGVRPull, resource k8shostsensor.HostSensorResource, read, reported int) {
 	t.Helper()
 
 	group, version := k8sinterface.SplitApiVersion(k8shostsensor.MapHostSensorResourceToApiGroup(resource))
-	wantGVRs := k8sinterface.ResourceGroupToString(group, version, resource.String())
-	require.Len(t, partials, len(wantGVRs))
-	for i, r := range wantGVRs {
-		assert.Equal(t, r, partials[i].GVR)
-		assert.Equal(t, "conversion", partials[i].Selector)
-		assert.Contains(t, partials[i].Error, fmt.Sprintf("%d", reported))
-		assert.Contains(t, partials[i].Error, fmt.Sprintf("%d", read))
-	}
+	wantGVR := k8sinterface.JoinResourceTriplets(group, version, resource.String())
+	require.Len(t, partials, 1)
+	assert.Equal(t, wantGVR, partials[0].GVR)
+	assert.Equal(t, "conversion", partials[0].Selector)
+	assert.Contains(t, partials[0].Error, fmt.Sprintf("%d", reported))
+	assert.Contains(t, partials[0].Error, fmt.Sprintf("%d", read))
 }
 
 // A partially converted collection must never be cached: the cache stores

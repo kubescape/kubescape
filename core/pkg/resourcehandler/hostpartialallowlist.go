@@ -5,28 +5,27 @@ import (
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 )
 
 // effectiveHostGapAllowlist returns the GVR identities whose host-sensor
-// conversion gaps may reach coverage. A partial is eligible only when it
-// backs an effective selected-control dependency:
+// conversion gaps may reach coverage: the dependencies of the effective
+// selected controls.
 //
-//   - Selected, not merely loaded: --include-controls/--skip-controls are
-//     applied here via the shared control filter, because the collection
-//     phase runs before the evaluation phase narrows the control set. A gap
-//     required only by a filtered-out control must not penalize the scan.
-//     When the filter itself errors (e.g. an include that matches nothing),
-//     the allowlist falls back to the unfiltered map: evaluation re-applies
-//     the same filter and fails loudly there with the proper message.
-//   - Resolver-expanded, not raw-keyed: DynamicMatch dependencies bypass the
-//     resolver (insertControls stores the policy's Kind spelling, e.g.
-//     .../KubeletInfo) while conversion gaps use the discovered spelling
-//     (.../kubeletinfos). Every mapped key is expanded through the same
-//     resolver — primary plus comparison triplets — so both spellings,
-//     with or without CRD discovery, resolve to the same membership.
-func effectiveHostGapAllowlist(sessionObj *cautils.OPASessionObj, resolver resourceResolver) map[string]bool {
+// --include-controls/--skip-controls are applied here via the shared control
+// filter, because the collection phase runs before the evaluation phase
+// narrows the control set. A gap required only by a filtered-out control
+// must not penalize the scan. When the filter itself errors (e.g. an include
+// that matches nothing), the allowlist falls back to the unfiltered map:
+// evaluation re-applies the same filter and fails loudly there with the
+// proper message.
+//
+// No spelling normalization is needed: host identities are virtual
+// policy-Kind keys on both sides — DynamicMatch stores the Kind spelling,
+// and conversion gaps are emitted under the same spelling even when
+// discovery serves the transport CRDs under plural REST names — so plain
+// membership is the correct predicate.
+func effectiveHostGapAllowlist(sessionObj *cautils.OPASessionObj) map[string]bool {
 	allowed := make(map[string]bool)
 	if sessionObj == nil {
 		return allowed
@@ -34,31 +33,14 @@ func effectiveHostGapAllowlist(sessionObj *cautils.OPASessionObj, resolver resou
 	effective := cautils.EffectiveControlIDs(sessionObj.Policies, sessionObj.SkipControls, sessionObj.IncludeControls)
 	unfiltered := effective == nil
 	for gvr, controls := range sessionObj.ResourceToControlsMap {
-		if !unfiltered {
-			selected := false
-			for _, controlID := range controls {
-				if _, ok := effective[controlID]; ok {
-					selected = true
-					break
-				}
-			}
-			if !selected {
-				continue
-			}
-		}
-		allowed[gvr] = true
-		if resolver == nil {
+		if unfiltered {
+			allowed[gvr] = true
 			continue
 		}
-		group, version, resource := k8sinterface.StringToResourceGroup(gvr)
-		for _, resolved := range resolver(group, version, resource) {
-			if resolved.groupVersionResourceTriplet != "" {
-				allowed[resolved.groupVersionResourceTriplet] = true
-			}
-			for _, comparison := range resolved.comparisonTriplets {
-				if comparison != "" {
-					allowed[comparison] = true
-				}
+		for _, controlID := range controls {
+			if _, ok := effective[controlID]; ok {
+				allowed[gvr] = true
+				break
 			}
 		}
 	}
@@ -71,11 +53,11 @@ func effectiveHostGapAllowlist(sessionObj *cautils.OPASessionObj, resolver resou
 //
 // Every gap keeps its warning: an unreadable host CRD is always worth
 // surfacing. But only gaps in the allowlist — GVRs backing an effective
-// selected-control dependency, resolver-expanded so policy and discovery
-// spellings agree — reach PartialGVRFailures and the coverage penalty.
-// CollectResources queries every host resource while the map holds only
-// selected policy matches, so an unrelated unreadable CRD must not fail
-// --fail-coverage-below when every requested control was fully evaluated.
+// selected-control dependency — reach PartialGVRFailures and the coverage
+// penalty. CollectResources queries every host resource while the map holds
+// only selected policy matches, so an unrelated unreadable CRD must not
+// fail --fail-coverage-below when every requested control was fully
+// evaluated.
 func appendHostSensorPartialPulls(ctx context.Context, sessionObj *cautils.OPASessionObj, partialPulls []cautils.PartialGVRPull, allowed map[string]bool) {
 	if len(partialPulls) == 0 {
 		return

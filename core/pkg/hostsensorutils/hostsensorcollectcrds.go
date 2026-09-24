@@ -67,23 +67,21 @@ func reportCollectionGaps(ctx context.Context, resource k8shostsensor.HostSensor
 	return nil
 }
 
-// partialGVRPullsForResource builds one PartialGVRPull per GVR backing a host
-// sensor resource, using the same normalization addInfoToMap uses so the
-// entries line up with ResourceToControlsMap without a key-mapping layer.
+// partialGVRPullsForResource builds the PartialGVRPull for a host sensor
+// resource using its virtual policy-Kind identity — the same key addInfoToMap
+// and ResourceToControlsMap use since host identities stopped following
+// discovery. Discovery may serve the v1beta1 transport CRDs under plural
+// REST names, but the envelopes are virtual v1beta0 resources, so the gap
+// lines up with control dependencies without a key-mapping layer.
 // Selector "conversion" scopes the failure to envelope decoding, distinct
 // from per-selector LIST failures that share the same array.
 func partialGVRPullsForResource(resource k8shostsensor.HostSensorResource, err error) []cautils.PartialGVRPull {
 	group, version := k8sinterface.SplitApiVersion(k8shostsensor.MapHostSensorResourceToApiGroup(resource))
-	gvrs := k8sinterface.ResourceGroupToString(group, version, resource.String())
-	partials := make([]cautils.PartialGVRPull, 0, len(gvrs))
-	for _, gvr := range gvrs {
-		partials = append(partials, cautils.PartialGVRPull{
-			GVR:      gvr,
-			Selector: "conversion",
-			Error:    err.Error(),
-		})
-	}
-	return partials
+	return []cautils.PartialGVRPull{{
+		GVR:      k8sinterface.JoinResourceTriplets(group, version, resource.String()),
+		Selector: "conversion",
+		Error:    err.Error(),
+	}}
 }
 
 // getCRDResources retrieves resources from CRDs and converts them to HostSensorDataEnvelope format

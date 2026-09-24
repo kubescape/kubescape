@@ -2,7 +2,6 @@ package resourcehandler
 
 import (
 	"context"
-	"strings"
 	"testing"
 
 	"github.com/kubescape/k8s-interface/k8sinterface"
@@ -16,14 +15,11 @@ import (
 )
 
 const (
-	// discoveredHostKubeletGVR is what partialGVRPullsForResource emits with
-	// the host CRD installed: the discovered (lowercase plural) spelling.
-	discoveredHostKubeletGVR = "hostdata.kubescape.cloud/v1beta0/kubeletinfos"
-	discoveredHostProxyGVR   = "hostdata.kubescape.cloud/v1beta0/kubeproxyinfos"
-	// rawHostKubeletGVR is what a DynamicMatch stores via insertControls:
-	// the policy's Kind spelling, bypassing the resolver.
-	rawHostKubeletGVR = "hostdata.kubescape.cloud/v1beta0/KubeletInfo"
-	rawHostProxyGVR   = "hostdata.kubescape.cloud/v1beta0/KubeProxyInfo"
+	// Virtual host identities: policy-Kind keys used by control
+	// dependencies, the external map, infoMap, and conversion gaps alike —
+	// even when discovery serves the transport CRDs under plural REST names.
+	virtualHostKubeletGVR = "hostdata.kubescape.cloud/v1beta0/KubeletInfo"
+	virtualHostProxyGVR   = "hostdata.kubescape.cloud/v1beta0/KubeProxyInfo"
 )
 
 // hostCRDResourceLists advertises the host-sensor CRDs the way a cluster
@@ -42,9 +38,9 @@ func hostCRDResourceLists() []*metav1.APIResourceList {
 	}
 }
 
-// newHandlerWithHostCRDs builds a handler whose discovery resolver sees the
-// host CRDs (like a cluster with the node-agent installed) and whose dynamic
-// client lists nothing, so collection reaches the host-sensor stub.
+// newHandlerWithHostCRDs builds a handler whose discovery sees the host CRDs
+// (like a cluster with the node-agent installed) and whose dynamic client
+// lists nothing, so collection reaches the host-sensor stub.
 func newHandlerWithHostCRDs(t *testing.T) *K8sResourceHandler {
 	t.Helper()
 	client := fakeclientset.NewClientset()
@@ -61,13 +57,12 @@ func newHandlerWithHostCRDs(t *testing.T) *K8sResourceHandler {
 }
 
 // dynamicMatchControl builds a C-0069-shaped control: its host dependency
-// arrives via DynamicMatch, which stores the raw Kind spelling in
-// ResourceToControlsMap without consulting the resolver.
+// arrives via DynamicMatch under the virtual Kind identity.
 func dynamicMatchControl(controlID, resource string) reporthandling.Control {
 	rule := mockRule(controlID+"-rule", nil, "")
 	rule.DynamicMatch = []reporthandling.RuleMatchObjects{{
-		APIGroups:   []string{""},
-		APIVersions: []string{"v1"},
+		APIGroups:   []string{"hostdata.kubescape.cloud"},
+		APIVersions: []string{"v1beta0"},
 		Resources:   []string{resource},
 	}}
 	control := mockControl(controlID, nil)
@@ -87,23 +82,25 @@ func dynamicMatchFramework() *reporthandling.Framework {
 	return framework
 }
 
-// discoveryStubPartials are conversion gaps in the discovered spelling, as
-// partialGVRPullsForResource emits them with the host CRD installed.
-func discoveryStubPartials() []cautils.PartialGVRPull {
+// virtualStubPartials are conversion gaps under the virtual Kind identity,
+// as partialGVRPullsForResource emits them even with the host CRD installed.
+func virtualStubPartials() []cautils.PartialGVRPull {
 	return []cautils.PartialGVRPull{
-		{GVR: discoveredHostKubeletGVR, Selector: "conversion", Error: "node-agent reported 2 KubeletInfo but only 1 could be read"},
-		{GVR: discoveredHostProxyGVR, Selector: "conversion", Error: "node-agent reported 2 KubeProxyInfo but only 1 could be read"},
+		{GVR: virtualHostKubeletGVR, Selector: "conversion", Error: "node-agent reported 2 KubeletInfo but only 1 could be read"},
+		{GVR: virtualHostProxyGVR, Selector: "conversion", Error: "node-agent reported 2 KubeProxyInfo but only 1 could be read"},
 	}
 }
 
-// TestGetResources_HostGapDiscoveryAwareDynamicMatch is the HIGH regression:
-// with the host CRD installed, a relevant conversion gap in the discovered
-// spelling must survive even though the DynamicMatch map holds the raw Kind
-// spelling. Dropping it would let passing results escape IncompleteCoverage.
-func TestGetResources_HostGapDiscoveryAwareDynamicMatch(t *testing.T) {
+// TestGetResources_HostGapVirtualIdentityAcrossDiscovery is the HIGH
+// regression under the virtual-identity scheme: with the host CRD installed
+// (plural REST names on the wire), a relevant conversion gap still carries
+// the Kind identity the DynamicMatch dependency uses, so it reaches coverage
+// instead of being discarded as unrelated. Dropping it would let passing
+// results escape IncompleteCoverage.
+func TestGetResources_HostGapVirtualIdentityAcrossDiscovery(t *testing.T) {
 	k8sinterface.InitializeMapResourcesMock()
 	handler := newHandlerWithHostCRDs(t)
-	handler.hostSensorHandler = &stubHostSensor{partials: discoveryStubPartials()}
+	handler.hostSensorHandler = &stubHostSensor{partials: virtualStubPartials()}
 
 	scanInfo := &cautils.ScanInfo{}
 	scanInfo.HostSensorEnabled.SetBool(true)
@@ -112,14 +109,12 @@ func TestGetResources_HostGapDiscoveryAwareDynamicMatch(t *testing.T) {
 
 	_, _, _, _, _ = handler.GetResources(context.Background(), sessionObj, scanInfo)
 
-	require.Contains(t, sessionObj.ResourceToControlsMap, rawHostKubeletGVR,
-		"precondition: DynamicMatch must store the raw Kind spelling")
-	require.NotContains(t, sessionObj.ResourceToControlsMap, discoveredHostKubeletGVR,
-		"precondition: nothing may store the discovered spelling, or raw membership alone would pass")
+	require.Contains(t, sessionObj.ResourceToControlsMap, virtualHostKubeletGVR,
+		"precondition: DynamicMatch must store the virtual Kind identity")
 	require.Len(t, sessionObj.PartialGVRFailures, 2,
-		"both discovered gaps back effective selected controls and must reach the session")
-	assert.Equal(t, discoveredHostKubeletGVR, sessionObj.PartialGVRFailures[0].GVR)
-	assert.Equal(t, discoveredHostProxyGVR, sessionObj.PartialGVRFailures[1].GVR)
+		"both gaps carry the virtual identity backing effective selected controls")
+	assert.Equal(t, virtualHostKubeletGVR, sessionObj.PartialGVRFailures[0].GVR)
+	assert.Equal(t, virtualHostProxyGVR, sessionObj.PartialGVRFailures[1].GVR)
 }
 
 // TestGetResources_HostGapRespectsIncludeSkipControls is the MEDIUM
@@ -134,15 +129,15 @@ func TestGetResources_HostGapRespectsIncludeSkipControls(t *testing.T) {
 		wantGVRs   []string
 		wantAbsent []string
 	}{
-		{name: "skip proxy control", skip: "C-0070", wantGVRs: []string{discoveredHostKubeletGVR}, wantAbsent: []string{discoveredHostProxyGVR}},
-		{name: "include kubelet control", include: "C-0069", wantGVRs: []string{discoveredHostKubeletGVR}, wantAbsent: []string{discoveredHostProxyGVR}},
-		{name: "no flags keeps both", wantGVRs: []string{discoveredHostKubeletGVR, discoveredHostProxyGVR}},
+		{name: "skip proxy control", skip: "C-0070", wantGVRs: []string{virtualHostKubeletGVR}, wantAbsent: []string{virtualHostProxyGVR}},
+		{name: "include kubelet control", include: "C-0069", wantGVRs: []string{virtualHostKubeletGVR}, wantAbsent: []string{virtualHostProxyGVR}},
+		{name: "no flags keeps both", wantGVRs: []string{virtualHostKubeletGVR, virtualHostProxyGVR}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			k8sinterface.InitializeMapResourcesMock()
 			handler := newHandlerWithHostCRDs(t)
-			handler.hostSensorHandler = &stubHostSensor{partials: discoveryStubPartials()}
+			handler.hostSensorHandler = &stubHostSensor{partials: virtualStubPartials()}
 
 			scanInfo := &cautils.ScanInfo{SkipControls: tt.skip, IncludeControls: tt.include}
 			scanInfo.HostSensorEnabled.SetBool(true)
@@ -167,38 +162,19 @@ func TestGetResources_HostGapRespectsIncludeSkipControls(t *testing.T) {
 	}
 }
 
-// discoveryBridgingResolver mimics cluster discovery for host kinds: the raw
-// Kind spelling expands to the discovered (lowercase plural) triplet plus
-// kind/plural comparison aliases, mirroring newDiscoveryResourceResolver.
-func discoveryBridgingResolver(group, version, resource string) []resolvedResource {
-	triplet := k8sinterface.JoinResourceTriplets(group, version, resource)
-	lower := k8sinterface.JoinResourceTriplets(group, version, strings.ToLower(resource))
-	plural := k8sinterface.JoinResourceTriplets(group, version, strings.ToLower(resource)+"s")
-	if triplet == lower {
-		return []resolvedResource{{groupVersionResourceTriplet: triplet}}
-	}
-	return []resolvedResource{{
-		groupVersionResourceTriplet: lower,
-		comparisonTriplets:          []string{triplet, plural},
-	}}
-}
-
-func TestCollectAndStreamBatches_HostGapDiscoveryAware(t *testing.T) {
-	// Streaming-path mirror of the HIGH regression: the resolver is the
-	// real discovery resolver over a fake API server advertising the host
-	// CRDs, so raw map keys bridge to discovered gap spellings exactly as
-	// in production.
+// TestCollectAndStreamBatches_HostGapVirtualIdentity is the streaming-path
+// mirror of the HIGH regression.
+func TestCollectAndStreamBatches_HostGapVirtualIdentity(t *testing.T) {
 	ctx := context.Background()
 	handler := newHandlerWithHostCRDs(t)
-	handler.hostSensorHandler = &stubHostSensor{partials: discoveryStubPartials()}
-	resolver, _, _ := newDiscoveryResourceResolverWithKinds(handler.k8s.DiscoveryClient)
+	handler.hostSensorHandler = &stubHostSensor{partials: virtualStubPartials()}
 	scanInfo, session := streamingTestSession(ctx)
 	session.Metadata.ScanMetadata.HostScanner = true
 	framework := dynamicMatchFramework()
 	session.Policies = append(session.Policies, *framework)
 	session.ResourceToControlsMap = map[string][]string{
-		rawHostKubeletGVR: {framework.Controls[0].ControlID},
-		rawHostProxyGVR:   {framework.Controls[1].ControlID},
+		virtualHostKubeletGVR: {framework.Controls[0].ControlID},
+		virtualHostProxyGVR:   {framework.Controls[1].ControlID},
 	}
 	batches := make(chan *cautils.ResourceBatch, 1)
 
@@ -208,14 +184,14 @@ func TestCollectAndStreamBatches_HostGapDiscoveryAware(t *testing.T) {
 		&EmptySelector{},
 		session,
 		scanInfo,
-		cautils.ExternalResources{rawHostKubeletGVR: nil, rawHostProxyGVR: nil},
+		cautils.ExternalResources{virtualHostKubeletGVR: nil, virtualHostProxyGVR: nil},
 		batches,
-		resolver,
+		nil,
 	)
 
 	require.NoError(t, err)
 	require.Len(t, session.PartialGVRFailures, 2,
-		"resolver expansion must bridge raw map keys to discovered gap spellings")
+		"virtual-identity gaps backing effective selected controls must reach the session")
 }
 
 // TestCollectAndStreamBatches_HostGapRespectsIncludeSkipControls is the
@@ -227,15 +203,14 @@ func TestCollectAndStreamBatches_HostGapRespectsIncludeSkipControls(t *testing.T
 		include  string
 		wantGVRs []string
 	}{
-		{name: "skip proxy control", skip: "C-0070", wantGVRs: []string{discoveredHostKubeletGVR}},
-		{name: "include kubelet control", include: "C-0069", wantGVRs: []string{discoveredHostKubeletGVR}},
+		{name: "skip proxy control", skip: "C-0070", wantGVRs: []string{virtualHostKubeletGVR}},
+		{name: "include kubelet control", include: "C-0069", wantGVRs: []string{virtualHostKubeletGVR}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := context.Background()
 			handler := newHandlerWithHostCRDs(t)
-			handler.hostSensorHandler = &stubHostSensor{partials: discoveryStubPartials()}
-			resolver, _, _ := newDiscoveryResourceResolverWithKinds(handler.k8s.DiscoveryClient)
+			handler.hostSensorHandler = &stubHostSensor{partials: virtualStubPartials()}
 			scanInfo, session := streamingTestSession(ctx)
 			session.Metadata.ScanMetadata.HostScanner = true
 			framework := dynamicMatchFramework()
@@ -243,8 +218,8 @@ func TestCollectAndStreamBatches_HostGapRespectsIncludeSkipControls(t *testing.T
 			session.SkipControls = tt.skip
 			session.IncludeControls = tt.include
 			session.ResourceToControlsMap = map[string][]string{
-				rawHostKubeletGVR: {framework.Controls[0].ControlID},
-				rawHostProxyGVR:   {framework.Controls[1].ControlID},
+				virtualHostKubeletGVR: {framework.Controls[0].ControlID},
+				virtualHostProxyGVR:   {framework.Controls[1].ControlID},
 			}
 			batches := make(chan *cautils.ResourceBatch, 1)
 
@@ -254,9 +229,9 @@ func TestCollectAndStreamBatches_HostGapRespectsIncludeSkipControls(t *testing.T
 				&EmptySelector{},
 				session,
 				scanInfo,
-				cautils.ExternalResources{rawHostKubeletGVR: nil, rawHostProxyGVR: nil},
+				cautils.ExternalResources{virtualHostKubeletGVR: nil, virtualHostProxyGVR: nil},
 				batches,
-				resolver,
+				nil,
 			)
 
 			require.NoError(t, err)
@@ -270,54 +245,46 @@ func TestCollectAndStreamBatches_HostGapRespectsIncludeSkipControls(t *testing.T
 }
 
 // TestEffectiveHostGapAllowlist_Unit pins the allowlist semantics directly:
-// raw-plus-expansion membership, effective-control scoping, nil-resolver
-// fallback, and unfiltered fallback when the control filter errors.
+// selected-control scoping, nil-session emptiness, and unfiltered fallback
+// when the control filter errors.
 func TestEffectiveHostGapAllowlist_Unit(t *testing.T) {
 	framework := dynamicMatchFramework()
 	policies := []reporthandling.Framework{*framework}
 
 	newSession := func() *cautils.OPASessionObj {
-		session := &cautils.OPASessionObj{
+		return &cautils.OPASessionObj{
 			Policies: policies,
 			ResourceToControlsMap: map[string][]string{
-				rawHostKubeletGVR: {framework.Controls[0].ControlID},
-				rawHostProxyGVR:   {framework.Controls[1].ControlID},
+				virtualHostKubeletGVR: {framework.Controls[0].ControlID},
+				virtualHostProxyGVR:   {framework.Controls[1].ControlID},
 			},
 		}
-		return session
 	}
 
-	t.Run("expansion bridges spellings", func(t *testing.T) {
-		allowed := effectiveHostGapAllowlist(newSession(), discoveryBridgingResolver)
-		assert.True(t, allowed[rawHostKubeletGVR])
-		assert.True(t, allowed[discoveredHostKubeletGVR])
-		assert.True(t, allowed[discoveredHostProxyGVR])
+	t.Run("no flags keeps all mapped gaps", func(t *testing.T) {
+		allowed := effectiveHostGapAllowlist(newSession())
+		assert.True(t, allowed[virtualHostKubeletGVR])
+		assert.True(t, allowed[virtualHostProxyGVR])
+		assert.False(t, allowed["other.example.com/v1/Things"])
 	})
 
 	t.Run("skip narrows to selected", func(t *testing.T) {
 		session := newSession()
 		session.SkipControls = "C-0070"
-		allowed := effectiveHostGapAllowlist(session, discoveryBridgingResolver)
-		assert.True(t, allowed[discoveredHostKubeletGVR])
-		assert.False(t, allowed[discoveredHostProxyGVR])
-		assert.False(t, allowed[rawHostProxyGVR])
-	})
-
-	t.Run("nil resolver keeps raw keys", func(t *testing.T) {
-		allowed := effectiveHostGapAllowlist(newSession(), nil)
-		assert.True(t, allowed[rawHostKubeletGVR])
-		assert.False(t, allowed[discoveredHostKubeletGVR])
+		allowed := effectiveHostGapAllowlist(session)
+		assert.True(t, allowed[virtualHostKubeletGVR])
+		assert.False(t, allowed[virtualHostProxyGVR])
 	})
 
 	t.Run("filter error falls back unfiltered", func(t *testing.T) {
 		session := newSession()
 		session.IncludeControls = "C-9999"
-		allowed := effectiveHostGapAllowlist(session, discoveryBridgingResolver)
-		assert.True(t, allowed[discoveredHostKubeletGVR])
-		assert.True(t, allowed[discoveredHostProxyGVR])
+		allowed := effectiveHostGapAllowlist(session)
+		assert.True(t, allowed[virtualHostKubeletGVR])
+		assert.True(t, allowed[virtualHostProxyGVR])
 	})
 
 	t.Run("nil session is empty", func(t *testing.T) {
-		assert.Empty(t, effectiveHostGapAllowlist(nil, discoveryBridgingResolver))
+		assert.Empty(t, effectiveHostGapAllowlist(nil))
 	})
 }

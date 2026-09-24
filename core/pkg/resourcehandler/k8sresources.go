@@ -228,7 +228,7 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 					cautils.SetInfoMapForResources(err.Error(), hostResources, sessionObj.InfoMap)
 				} else {
 					maps.Copy(sessionObj.InfoMap, infoMap)
-					appendHostSensorPartialPulls(ctx, sessionObj, partialPulls, effectiveHostGapAllowlist(sessionObj, resolver))
+					appendHostSensorPartialPulls(ctx, sessionObj, partialPulls, effectiveHostGapAllowlist(sessionObj))
 				}
 			}
 			cautils.StopSpinner()
@@ -602,7 +602,7 @@ func (k8sHandler *K8sResourceHandler) collectAndStreamBatches(ctx context.Contex
 					cautils.SetInfoMapForResources(err.Error(), hostResources, sessionObj.InfoMap)
 				} else {
 					maps.Copy(sessionObj.InfoMap, infoMap)
-					appendHostSensorPartialPulls(ctx, sessionObj, partialPulls, effectiveHostGapAllowlist(sessionObj, resolver))
+					appendHostSensorPartialPulls(ctx, sessionObj, partialPulls, effectiveHostGapAllowlist(sessionObj))
 				}
 			}
 			logger.L().Success("Requested Host scanner data")
