@@ -121,13 +121,14 @@ func TestAzureAdaptor_NormalizeSeverity(t *testing.T) {
 func TestAzureAdaptor_GetImagesScanStatus(t *testing.T) {
 	tests := []struct {
 		name          string
-		mockFunc      func(req armresourcegraph.QueryRequest) (armresourcegraph.ClientResourcesResponse, error)
+		mockFunc      func(t *testing.T, req armresourcegraph.QueryRequest) (armresourcegraph.ClientResourcesResponse, error)
+		images        []ContainerImageIdentifier
 		expectedScan  bool
 		expectedError bool
 	}{
 		{
 			name: "scan complete with timeGenerated",
-			mockFunc: func(req armresourcegraph.QueryRequest) (armresourcegraph.ClientResourcesResponse, error) {
+			mockFunc: func(t *testing.T, req armresourcegraph.QueryRequest) (armresourcegraph.ClientResourcesResponse, error) {
 				return armresourcegraph.ClientResourcesResponse{
 					QueryResponse: armresourcegraph.QueryResponse{
 						TotalRecords: to.Ptr[int64](1),
@@ -143,7 +144,7 @@ func TestAzureAdaptor_GetImagesScanStatus(t *testing.T) {
 		},
 		{
 			name: "scan pending or no data",
-			mockFunc: func(req armresourcegraph.QueryRequest) (armresourcegraph.ClientResourcesResponse, error) {
+			mockFunc: func(t *testing.T, req armresourcegraph.QueryRequest) (armresourcegraph.ClientResourcesResponse, error) {
 				return armresourcegraph.ClientResourcesResponse{
 					QueryResponse: armresourcegraph.QueryResponse{
 						TotalRecords: to.Ptr[int64](0),
@@ -154,10 +155,44 @@ func TestAzureAdaptor_GetImagesScanStatus(t *testing.T) {
 		},
 		{
 			name: "arg api error path",
-			mockFunc: func(req armresourcegraph.QueryRequest) (armresourcegraph.ClientResourcesResponse, error) {
+			mockFunc: func(t *testing.T, req armresourcegraph.QueryRequest) (armresourcegraph.ClientResourcesResponse, error) {
 				return armresourcegraph.ClientResourcesResponse{}, fmt.Errorf("arg failed")
 			},
 			expectedError: true,
+		},
+		{
+			name: "invalid identifier (validation error)",
+			mockFunc: func(t *testing.T, req armresourcegraph.QueryRequest) (armresourcegraph.ClientResourcesResponse, error) {
+				t.Fatalf("API should not be called for invalid identifier")
+				return armresourcegraph.ClientResourcesResponse{}, nil
+			},
+			images: []ContainerImageIdentifier{
+				{Registry: "test.azurecr.io", Repository: "invalid'repo", Hash: "sha256:1234"},
+			},
+			expectedError: true,
+		},
+		{
+			name: "mixed valid and invalid identifiers",
+			mockFunc: func(t *testing.T, req armresourcegraph.QueryRequest) (armresourcegraph.ClientResourcesResponse, error) {
+				assert.Contains(t, *req.Query, "sha256:valid")
+				assert.NotContains(t, *req.Query, "sha256:invalid")
+				return armresourcegraph.ClientResourcesResponse{
+					QueryResponse: armresourcegraph.QueryResponse{
+						TotalRecords: to.Ptr[int64](1),
+						Data: []interface{}{
+							map[string]interface{}{
+								"timeGenerated": "2023-01-01T12:00:00Z",
+							},
+						},
+					},
+				}, nil
+			},
+			images: []ContainerImageIdentifier{
+				{Registry: "test.azurecr.io", Repository: "invalid'repo", Hash: "sha256:invalid"},
+				{Registry: "test.azurecr.io", Repository: "test-repo", Hash: "sha256:valid"},
+			},
+			expectedError: true,
+			expectedScan:  true,
 		},
 	}
 
@@ -165,18 +200,30 @@ func TestAzureAdaptor_GetImagesScanStatus(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			adaptor := NewAzureAdaptor()
 			adaptor.registryHost = "test.azurecr.io"
-			adaptor.client = &mockAzureClient{resourcesOut: tt.mockFunc}
+			adaptor.client = &mockAzureClient{
+				resourcesOut: func(req armresourcegraph.QueryRequest) (armresourcegraph.ClientResourcesResponse, error) {
+					return tt.mockFunc(t, req)
+				},
+			}
 
-			images := []ContainerImageIdentifier{
-				{Registry: "test.azurecr.io", Repository: "test-repo", Hash: "sha256:1234"},
+			images := tt.images
+			if images == nil {
+				images = []ContainerImageIdentifier{
+					{Registry: "test.azurecr.io", Repository: "test-repo", Hash: "sha256:1234"},
+				}
 			}
 
 			statuses, err := adaptor.GetImagesScanStatus(context.Background(), images)
 			if tt.expectedError {
 				assert.Error(t, err)
+				assert.Len(t, statuses, len(images))
+				if tt.name == "mixed valid and invalid identifiers" {
+					assert.False(t, statuses[0].IsScanAvailable, "invalid identifier should result in failed scan status")
+					assert.True(t, statuses[1].IsScanAvailable, "valid identifier should process successfully")
+				}
 			} else {
 				assert.NoError(t, err)
-				assert.Len(t, statuses, 1)
+				assert.Len(t, statuses, len(images))
 				assert.Equal(t, tt.expectedScan, statuses[0].IsScanAvailable)
 				if tt.name == "scan complete with timeGenerated" {
 					expectedTime, _ := time.Parse(time.RFC3339Nano, "2023-01-01T12:00:00Z")
@@ -185,6 +232,48 @@ func TestAzureAdaptor_GetImagesScanStatus(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestAzureAdaptor_GetImagesVulnerabilities_ValidationErrors(t *testing.T) {
+	adaptor := NewAzureAdaptor()
+	adaptor.registryHost = "test.azurecr.io"
+
+	apiCalled := false
+	adaptor.client = &mockAzureClient{
+		resourcesOut: func(req armresourcegraph.QueryRequest) (armresourcegraph.ClientResourcesResponse, error) {
+			apiCalled = true
+			assert.Contains(t, *req.Query, "test-repo")
+			assert.NotContains(t, *req.Query, "invalid'repo")
+			return armresourcegraph.ClientResourcesResponse{
+				QueryResponse: armresourcegraph.QueryResponse{
+					Data: []interface{}{
+						map[string]interface{}{
+							"id":          "vuln1",
+							"severity":    "High",
+							"description": "Test vuln 1",
+						},
+					},
+				},
+			}, nil
+		},
+	}
+
+	images := []ContainerImageIdentifier{
+		{Registry: "test.azurecr.io", Repository: "invalid'repo", Hash: "sha256:1234"},
+		{Registry: "test.azurecr.io", Repository: "test-repo", Hash: "sha256:1234"},
+	}
+
+	reports, err := adaptor.GetImagesVulnerabilities(context.Background(), images)
+	assert.Error(t, err)
+	assert.Len(t, reports, 2)
+	assert.True(t, apiCalled, "API should have been called for the valid identifier")
+
+	// First report should be empty due to validation error
+	assert.Empty(t, reports[0].Vulnerabilities)
+
+	// Second report should contain the vulnerability from the API
+	assert.Len(t, reports[1].Vulnerabilities, 1)
+	assert.Equal(t, "vuln1", reports[1].Vulnerabilities[0].ID)
 }
 
 func TestAzureAdaptor_GetImagesVulnerabilities_PaginationAndCVE(t *testing.T) {

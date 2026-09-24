@@ -221,7 +221,7 @@ func (a *GitlabAdaptor) GetImagesScanStatus(ctx context.Context, imageIDs []Cont
 		fullPath, _, err := splitGitLabProjectPath(imageID.Repository)
 		if err != nil {
 			fetchErr := fmt.Errorf("failed to parse gitlab path: %w", err)
-			logger.L().Warning("skipping image scan status due to format error", helpers.Error(fetchErr))
+			logger.L().Warning("image scan status error, result may be incomplete", helpers.Error(fetchErr))
 			aggErr = errors.Join(aggErr, fetchErr)
 			statuses = append(statuses, status)
 			continue
@@ -255,7 +255,7 @@ func (a *GitlabAdaptor) GetImagesScanStatus(ctx context.Context, imageIDs []Cont
 		data, err := a.client.DoGraphQL(ctx, query, variables)
 		if err != nil {
 			fetchErr := fmt.Errorf("failed to query scan status for repository %s: %w", fullPath, err)
-			logger.L().Warning("skipping image scan status due to api error", helpers.Error(fetchErr))
+			logger.L().Warning("image scan status error, result may be incomplete", helpers.Error(fetchErr))
 			cache[fullPath] = scanCacheEntry{isAvailable: false, err: fetchErr}
 			aggErr = errors.Join(aggErr, fetchErr)
 			statuses = append(statuses, status)
@@ -265,7 +265,7 @@ func (a *GitlabAdaptor) GetImagesScanStatus(ctx context.Context, imageIDs []Cont
 		var resp gitlabGraphQLResponse
 		if err := json.Unmarshal(data, &resp); err != nil {
 			fetchErr := fmt.Errorf("failed to parse scan status payload: %w", err)
-			logger.L().Warning("skipping image scan status due to payload error", helpers.Error(fetchErr))
+			logger.L().Warning("image scan status error, result may be incomplete", helpers.Error(fetchErr))
 			cache[fullPath] = scanCacheEntry{isAvailable: false, err: fetchErr}
 			aggErr = errors.Join(aggErr, fetchErr)
 			statuses = append(statuses, status)
@@ -274,7 +274,7 @@ func (a *GitlabAdaptor) GetImagesScanStatus(ctx context.Context, imageIDs []Cont
 
 		if len(resp.Errors) > 0 {
 			fetchErr := fmt.Errorf("graphql error: %s", resp.Errors[0].Message)
-			logger.L().Warning("skipping image scan status due to graphql error", helpers.Error(fetchErr))
+			logger.L().Warning("image scan status error, result may be incomplete", helpers.Error(fetchErr))
 			cache[fullPath] = scanCacheEntry{isAvailable: false, err: fetchErr}
 			aggErr = errors.Join(aggErr, fetchErr)
 			statuses = append(statuses, status)
@@ -283,7 +283,7 @@ func (a *GitlabAdaptor) GetImagesScanStatus(ctx context.Context, imageIDs []Cont
 
 		if resp.Data.Project == nil {
 			fetchErr := fmt.Errorf("project not found or permission denied (project is null)")
-			logger.L().Warning("skipping image scan status due to missing project", helpers.Error(fetchErr))
+			logger.L().Warning("image scan status error, result may be incomplete", helpers.Error(fetchErr))
 			cache[fullPath] = scanCacheEntry{isAvailable: false, err: fetchErr}
 			aggErr = errors.Join(aggErr, fetchErr)
 			statuses = append(statuses, status)
@@ -361,7 +361,7 @@ func (a *GitlabAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs [
 		fullPath, _, err := splitGitLabProjectPath(imageID.Repository)
 		if err != nil {
 			fetchErr := fmt.Errorf("failed to parse gitlab path: %w", err)
-			logger.L().Warning("skipping image vulnerabilities due to format error", helpers.Error(fetchErr))
+			logger.L().Warning("image scan error, result may be incomplete", helpers.Error(fetchErr))
 			aggErr = errors.Join(aggErr, fetchErr)
 			reports = append(reports, report)
 			continue
@@ -418,26 +418,26 @@ func (a *GitlabAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs [
 				data, err := a.client.DoGraphQL(ctx, query, variables)
 				if err != nil {
 					fetchErr = fmt.Errorf("failed to query vulnerabilities for repository %s: %w", fullPath, err)
-					logger.L().Warning("skipping image vulnerabilities due to api error", helpers.Error(fetchErr))
+					logger.L().Warning("image scan error, result may be incomplete", helpers.Error(fetchErr))
 					break
 				}
 
 				var resp gitlabGraphQLResponse
 				if err := json.Unmarshal(data, &resp); err != nil {
 					fetchErr = fmt.Errorf("failed to parse vulnerability payload: %w", err)
-					logger.L().Warning("failed to parse vulnerability payload", helpers.Error(fetchErr))
+					logger.L().Warning("failed to parse vulnerability payload, result may be incomplete", helpers.Error(fetchErr))
 					break
 				}
 
 				if len(resp.Errors) > 0 {
 					fetchErr = fmt.Errorf("graphql error: %s", resp.Errors[0].Message)
-					logger.L().Warning("failed to fetch vulnerabilities due to graphql error", helpers.Error(fetchErr))
+					logger.L().Warning("failed to fetch vulnerabilities due to graphql error, result may be incomplete", helpers.Error(fetchErr))
 					break
 				}
 
 				if resp.Data.Project == nil {
 					fetchErr = fmt.Errorf("project not found or permission denied (project is null)")
-					logger.L().Warning("failed to fetch vulnerabilities due to missing project", helpers.Error(fetchErr))
+					logger.L().Warning("failed to fetch vulnerabilities due to missing project, result may be incomplete", helpers.Error(fetchErr))
 					break
 				}
 
@@ -451,7 +451,7 @@ func (a *GitlabAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs [
 					pagesFetched,
 				)
 				if fetchErr != nil {
-					logger.L().Warning("stopping invalid gitlab vulnerability pagination", helpers.Error(fetchErr))
+					logger.L().Warning("stopping invalid gitlab vulnerability pagination, result may be incomplete", helpers.Error(fetchErr))
 					break
 				}
 			}
