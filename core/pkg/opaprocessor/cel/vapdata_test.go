@@ -388,6 +388,8 @@ func TestPolicyDetectsNamespaceObjectOnlyWhenValidationCanReachIt(t *testing.T) 
 		{"validation reads namespace", &VAP{Validations: []Validation{{Expression: "namespaceObject.metadata.name == 'prod'"}}}, true},
 		{"validation reaches variable", &VAP{Variables: []Variable{{Name: "namespace", Expression: "namespaceObject.metadata.name"}}, Validations: []Validation{{Expression: "variables.namespace == 'prod'"}}}, true},
 		{"validation reaches nested variable", &VAP{Variables: []Variable{{Name: "namespace", Expression: "namespaceObject.metadata.name"}, {Name: "allowed", Expression: "variables.namespace == 'prod'"}}, Validations: []Validation{{Expression: "variables.allowed"}}}, true},
+		{"absolute global variable inside a shadowing comprehension", &VAP{Variables: []Variable{{Name: "allowed", Expression: "namespaceObject.metadata.name == 'prod'"}}, Validations: []Validation{{Expression: "[true].all(variables, .variables.allowed)"}}}, true},
+		{"comprehension-local variable does not reach global declaration", &VAP{Variables: []Variable{{Name: "allowed", Expression: "namespaceObject.metadata.name == 'prod'"}}, Validations: []Validation{{Expression: "[{'allowed': false}].all(variables, variables.allowed)"}}}, false},
 		{"unused lazy variable", &VAP{Variables: []Variable{{Name: "namespace", Expression: "namespaceObject.metadata.name"}}, Validations: []Validation{{Expression: "object.metadata.name == 'pod'"}}}, false},
 		{"message expression", &VAP{Validations: []Validation{{Expression: "true", MessageExpression: "namespaceObject.metadata.name"}}}, false},
 		{"match condition", &VAP{matchConditions: []MatchCondition{{Name: "gate", Expression: "namespaceObject.metadata.name == 'prod'"}}, Validations: []Validation{{Expression: "true"}}}, false},

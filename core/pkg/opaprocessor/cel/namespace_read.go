@@ -55,13 +55,8 @@ func readsNamespaceObject(env *cel.Env, expr string) bool {
 	}
 	root := celast.NavigateAST(compiled.NativeRep())
 	for _, node := range celast.MatchDescendants(root, celast.KindMatcher(celast.IdentKind)) {
-		switch node.AsIdent() {
-		case ".namespaceObject":
+		if globalIdentifier(node, "namespaceObject") {
 			return true
-		case "namespaceObject":
-			if !shadowedByComprehension(node, "namespaceObject") {
-				return true
-			}
 		}
 	}
 	return false
@@ -80,9 +75,16 @@ func referencedVariables(env *cel.Env, expr string) []string {
 	}
 	seen := map[string]struct{}{}
 	root := celast.NavigateAST(compiled.NativeRep())
-	for _, node := range celast.MatchDescendants(root, celast.KindMatcher(celast.SelectKind)) {
-		selection := node.AsSelect()
-		if selection.Operand().Kind() != celast.IdentKind || selection.Operand().AsIdent() != "variables" {
+	for _, node := range celast.MatchDescendants(root, celast.KindMatcher(celast.IdentKind)) {
+		if !globalIdentifier(node, "variables") {
+			continue
+		}
+		parent, ok := node.Parent()
+		if !ok || parent.Kind() != celast.SelectKind {
+			continue
+		}
+		selection := parent.AsSelect()
+		if selection.Operand().ID() != node.ID() {
 			continue
 		}
 		seen[selection.FieldName()] = struct{}{}
@@ -92,6 +94,21 @@ func referencedVariables(env *cel.Env, expr string) []string {
 		result = append(result, name)
 	}
 	return result
+}
+
+// globalIdentifier reports whether node names the activation binding instead
+// of a comprehension local. CEL keeps an explicitly global identifier as
+// `.name`, which remains global even when an enclosing comprehension shadows
+// the unqualified spelling.
+func globalIdentifier(node celast.NavigableExpr, name string) bool {
+	switch node.AsIdent() {
+	case "." + name:
+		return true
+	case name:
+		return !shadowedByComprehension(node, name)
+	default:
+		return false
+	}
 }
 
 func shadowedByComprehension(node celast.NavigableExpr, name string) bool {
