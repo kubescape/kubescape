@@ -10,6 +10,7 @@ import (
 const (
 	evidenceTypeControl    = "control"
 	evidenceTypeRule       = "rule"
+	evidenceTypeFailedPath = "failedPath"
 	evidenceTypeReviewPath = "reviewPath"
 	evidenceTypeDeletePath = "deletePath"
 	evidenceTypeFixPath    = "fixPath"
@@ -81,6 +82,10 @@ func aggregateFinding(controlKey key, control controlEntry, severity string) fin
 func findingsForRule(controlKey key, control controlEntry, rule ruleEntry, severity string) []finding {
 	findings := make([]finding, 0, len(rule.Paths)*5)
 	for _, path := range rule.Paths {
+		failedPath := normalizeEvidencePath(path.FailedPath)
+		if failedPath != "" {
+			findings = append(findings, makeEvidenceFinding(controlKey, control, rule.Name, evidenceTypeFailedPath, failedPath, path.ResourceID, severity))
+		}
 		reviewPath := normalizeEvidencePath(path.ReviewPath)
 		if reviewPath != "" {
 			findings = append(findings, makeEvidenceFinding(controlKey, control, rule.Name, evidenceTypeReviewPath, reviewPath, path.ResourceID, severity))

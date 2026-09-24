@@ -78,17 +78,21 @@ func TestFindingsForControl_ExtractsFailedAndReviewPaths(t *testing.T) {
 		"Workload configuration",
 		failedRule("container-security", evidencePath{
 			ResourceID: "/v1/default/Pod/demo",
+			FailedPath: "$.spec.containers[0].securityContext.privileged",
 			ReviewPath: "$.spec.containers[0].securityContext.capabilities",
 		}),
 	)
 
 	findings := findingsForControl(controlKey, control, "Critical", GranularityEvidence)
 
-	require.Len(t, findings, 1)
-	assert.Equal(t, evidenceTypeReviewPath, findings[0].fingerprint.evidenceType)
-	assert.Equal(t, "spec.containers[0].securityContext.capabilities", findings[0].fingerprint.path)
-	assert.Equal(t, "container-security", findings[0].fingerprint.ruleName)
-	assert.Equal(t, "/v1/default/Pod/demo", findings[0].fingerprint.evidenceResourceID)
+	require.Len(t, findings, 2)
+	assert.ElementsMatch(t, []findingFingerprint{
+		{resourceID: "/v1/default/Pod/demo", controlID: "C-002", ruleName: "container-security", evidenceType: evidenceTypeFailedPath, path: "spec.containers[0].securityContext.privileged", evidenceResourceID: "/v1/default/Pod/demo"},
+		{resourceID: "/v1/default/Pod/demo", controlID: "C-002", ruleName: "container-security", evidenceType: evidenceTypeReviewPath, path: "spec.containers[0].securityContext.capabilities", evidenceResourceID: "/v1/default/Pod/demo"},
+	}, []findingFingerprint{
+		findings[0].fingerprint,
+		findings[1].fingerprint,
+	})
 }
 
 func TestFindingsForControl_ExtractsAllPosturePathEvidence(t *testing.T) {
@@ -98,6 +102,7 @@ func TestFindingsForControl_ExtractsAllPosturePathEvidence(t *testing.T) {
 		"Workload configuration",
 		failedRule("container-security", evidencePath{
 			ResourceID: "/v1/default/Pod/demo",
+			FailedPath: "$.spec.containers[0].securityContext.privileged",
 			ReviewPath: "$.spec.containers[0].securityContext.capabilities",
 			DeletePath: "$.spec.hostNetwork",
 			FixPath:    fixPath{Path: "$.spec.securityContext.runAsNonRoot", Value: []byte("true")},
@@ -107,8 +112,9 @@ func TestFindingsForControl_ExtractsAllPosturePathEvidence(t *testing.T) {
 
 	findings := findingsForControl(controlKey, control, "Critical", GranularityEvidence)
 
-	require.Len(t, findings, 4)
+	require.Len(t, findings, 5)
 	assert.ElementsMatch(t, []findingFingerprint{
+		{resourceID: "/v1/default/Pod/demo", controlID: "C-010", ruleName: "container-security", evidenceType: evidenceTypeFailedPath, path: "spec.containers[0].securityContext.privileged", evidenceResourceID: "/v1/default/Pod/demo"},
 		{resourceID: "/v1/default/Pod/demo", controlID: "C-010", ruleName: "container-security", evidenceType: evidenceTypeReviewPath, path: "spec.containers[0].securityContext.capabilities", evidenceResourceID: "/v1/default/Pod/demo"},
 		{resourceID: "/v1/default/Pod/demo", controlID: "C-010", ruleName: "container-security", evidenceType: evidenceTypeDeletePath, path: "spec.hostNetwork", evidenceResourceID: "/v1/default/Pod/demo"},
 		{resourceID: "/v1/default/Pod/demo", controlID: "C-010", ruleName: "container-security", evidenceType: evidenceTypeFixPath, path: "spec.securityContext.runAsNonRoot", evidenceResourceID: "/v1/default/Pod/demo"},
@@ -118,7 +124,34 @@ func TestFindingsForControl_ExtractsAllPosturePathEvidence(t *testing.T) {
 		findings[1].fingerprint,
 		findings[2].fingerprint,
 		findings[3].fingerprint,
+		findings[4].fingerprint,
 	})
+}
+
+func TestFindingsForControl_MultiContainerFailedPathsDifferentiated(t *testing.T) {
+	controlKey := key{resourceID: "apps/v1/default/Deployment/multi-container", controlID: "C-0057"}
+	control := failedControlWithRules(
+		"C-0057",
+		"Privileged container",
+		failedRule("privileged-container",
+			evidencePath{
+				ResourceID: "apps/v1/default/Deployment/multi-container",
+				FailedPath: "$.spec.template.spec.containers[0].securityContext.privileged",
+			},
+			evidencePath{
+				ResourceID: "apps/v1/default/Deployment/multi-container",
+				FailedPath: "$.spec.template.spec.containers[1].securityContext.privileged",
+			},
+		),
+	)
+
+	findings := findingsForControl(controlKey, control, "High", GranularityEvidence)
+
+	require.Len(t, findings, 2)
+	assert.Equal(t, evidenceTypeFailedPath, findings[0].fingerprint.evidenceType)
+	assert.Equal(t, evidenceTypeFailedPath, findings[1].fingerprint.evidenceType)
+	assert.Equal(t, "spec.template.spec.containers[0].securityContext.privileged", findings[0].fingerprint.path)
+	assert.Equal(t, "spec.template.spec.containers[1].securityContext.privileged", findings[1].fingerprint.path)
 }
 
 func TestFindingsForControl_PathlessFailedRuleUsesRuleFingerprint(t *testing.T) {
