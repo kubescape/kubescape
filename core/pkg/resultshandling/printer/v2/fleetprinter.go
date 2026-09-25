@@ -40,7 +40,7 @@ func PrintFleetReport(w io.Writer, report *fleet.FleetReport) {
 	cautils.InfoTextDisplay(w, "\nFleet summary\n")
 	printFleetClusters(w, report)
 	printFleetCompliance(w, &report.Compliance)
-	printFleetDivergence(w, &report.Divergence, clustersCompared(&report.ControlMatrix))
+	printFleetDivergence(w, &report.Divergence, comparability(&report.ControlMatrix))
 }
 
 // printFleetClusters lists every context the run was asked for, including the
@@ -117,7 +117,7 @@ func printFleetCompliance(w io.Writer, rollup *fleet.ComplianceRollup) {
 
 // printFleetDivergence shows the controls the clusters did not agree on, worst
 // severity first, so the row worth reading is the one at the top.
-func printFleetDivergence(w io.Writer, divergence *fleet.FleetDivergence, compared int) {
+func printFleetDivergence(w io.Writer, divergence *fleet.FleetDivergence, compared matrixComparability) {
 	// Ahead of the agreement case on purpose. A reference that produced nothing
 	// is worth saying whether or not the clusters went on to disagree, and it is
 	// least obvious in the run that otherwise looks like a clean bill of health.
@@ -127,13 +127,12 @@ func printFleetDivergence(w io.Writer, divergence *fleet.FleetDivergence, compar
 	}
 
 	if len(divergence.Controls) == 0 {
-		// An empty divergence means two different things. With two clusters to
-		// compare it means they agreed. With fewer it means nothing was ever
-		// compared, and saying they agreed would turn a fleet that mostly
-		// failed to report into a clean bill of health.
-		if compared < 2 {
-			cautils.WarningDisplay(w, "%s produced results, so there was nothing to compare.\n\n",
-				comparedText(compared))
+		// An empty divergence means two different things. If some control was
+		// reported on by more than one cluster, they agreed. If none was, then
+		// nothing was ever compared, and saying they agreed would turn a fleet
+		// nobody could measure into a clean bill of health.
+		if compared.controls == 0 {
+			cautils.WarningDisplay(w, "%s\n\n", nothingComparedText(compared))
 			return
 		}
 		cautils.SuccessDisplay(w, "Every cluster agreed on every control it ran.\n\n")
@@ -180,27 +179,53 @@ func printFleetDivergence(w io.Writer, divergence *fleet.FleetDivergence, compar
 	cautils.SimpleDisplay(w, "\n")
 }
 
-// clustersCompared counts the clusters that contributed anything to the matrix,
-// which is the set the divergence was actually computed over. It is not the
-// same as the number scanned: a cluster whose scan produced no control results
-// contributes no cells and so cannot agree or disagree with anyone.
-func clustersCompared(matrix *fleet.FleetControlMatrix) int {
+// matrixComparability is how much of the matrix could actually be compared.
+type matrixComparability struct {
+	// clusters is how many clusters contributed anything at all.
+	clusters int
+	// controls is how many controls more than one cluster reported on. This is
+	// the number that decides whether agreement means anything, and it is a
+	// per-control count rather than a total: two clusters that scanned entirely
+	// different controls contribute two clusters and no comparison.
+	controls int
+}
+
+// comparability measures the matrix the divergence was computed over.
+//
+// It counts per control row rather than taking the union of cluster IDs across
+// rows. BuildDivergence works a row at a time and drops any control fewer than
+// two clusters reached an outcome on, so a fleet whose clusters scanned
+// disjoint control sets produces an empty divergence while still having several
+// clusters in it. Counting the union would read that as agreement.
+func comparability(matrix *fleet.FleetControlMatrix) matrixComparability {
 	seen := make(map[string]struct{})
+	measured := matrixComparability{}
+
 	for i := range matrix.Controls {
-		for clusterID := range matrix.Controls[i].ByCluster {
+		byCluster := matrix.Controls[i].ByCluster
+		if len(byCluster) > 1 {
+			measured.controls++
+		}
+		for clusterID := range byCluster {
 			seen[clusterID] = struct{}{}
 		}
 	}
-	return len(seen)
+
+	measured.clusters = len(seen)
+	return measured
 }
 
-// comparedText names how much of the fleet reported, for the case where that
-// was too little to compare.
-func comparedText(compared int) string {
-	if compared == 0 {
-		return "No cluster"
+// nothingComparedText says why there was nothing to compare, which is a
+// different fact depending on how much of the fleet reported at all.
+func nothingComparedText(compared matrixComparability) string {
+	switch compared.clusters {
+	case 0:
+		return "No cluster produced results, so there was nothing to compare."
+	case 1:
+		return "Only one cluster produced results, so there was nothing to compare."
+	default:
+		return "No control was reported on by more than one cluster, so there was nothing to compare."
 	}
-	return "Only one cluster"
 }
 
 // newFleetTable returns a table writer in the same style the rest of the

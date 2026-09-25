@@ -28,17 +28,25 @@ func renderFleet(report *fleet.FleetReport) string {
 // measurement apart from a zero one.
 func scorePtr(v float32) *float32 { return &v }
 
-// matrixOver builds a matrix in which each named cluster reached the same
-// outcome on one control, which is what a fleet that agrees looks like.
-func matrixOver(clusterIDs ...string) fleet.FleetControlMatrix {
+// matrixRow builds one control row on which each named cluster passed, so a
+// test can say which clusters reported on which control.
+func matrixRow(controlID string, clusterIDs ...string) fleet.FleetControlRow {
 	byCluster := make(map[string]fleet.ControlStatusCell, len(clusterIDs))
 	for _, clusterID := range clusterIDs {
 		byCluster[clusterID] = fleet.ControlStatusCell{Status: fleet.CellPassed}
 	}
-	return fleet.FleetControlMatrix{Controls: []fleet.FleetControlRow{{
-		ControlID: "C-0016", Name: "Allow privilege escalation",
+	return fleet.FleetControlRow{
+		ControlID: controlID, Name: "Allow privilege escalation",
 		Severity: "High", ByCluster: byCluster,
-	}}}
+	}
+}
+
+// matrixOver builds a matrix in which each named cluster reached the same
+// outcome on one shared control, which is what a fleet that agrees looks like.
+func matrixOver(clusterIDs ...string) fleet.FleetControlMatrix {
+	return fleet.FleetControlMatrix{Controls: []fleet.FleetControlRow{
+		matrixRow("C-0016", clusterIDs...),
+	}}
 }
 
 // TestPrintFleetReportListsEveryCluster pins that a cluster which could not be
@@ -315,6 +323,57 @@ func TestPrintFleetReportWillNotClaimAgreementNobodyReached(t *testing.T) {
 		assert.Contains(t, out, "Only one cluster produced results, so there was nothing to compare")
 		assert.NotContains(t, out, "agreed", "one cluster has nobody to agree with")
 	})
+}
+
+// TestPrintFleetReportWillNotClaimAgreementAcrossDisjointControls covers two
+// clusters that both reported, but never on the same control.
+//
+// The divergence comes out of BuildDivergence rather than being written by
+// hand, because the point is the interaction between the two: BuildDivergence
+// works a control at a time and drops any row fewer than two clusters reached
+// an outcome on, so disjoint control sets produce an empty divergence out of a
+// fleet that plainly has two clusters in it. Counting clusters across the whole
+// matrix reads that as agreement, which is the bug this pins.
+func TestPrintFleetReportWillNotClaimAgreementAcrossDisjointControls(t *testing.T) {
+	matrix := fleet.FleetControlMatrix{Controls: []fleet.FleetControlRow{
+		matrixRow("C-0016", "prod"),
+		matrixRow("C-0038", "staging"),
+	}}
+
+	out := renderFleet(&fleet.FleetReport{
+		Clusters: []fleet.ClusterResult{
+			{ClusterID: "prod", Status: fleet.ClusterScanned},
+			{ClusterID: "staging", Status: fleet.ClusterScanned},
+		},
+		ControlMatrix: matrix,
+		Divergence:    fleet.BuildDivergence(matrix, ""),
+	})
+
+	assert.Contains(t, out, "No control was reported on by more than one cluster")
+	assert.NotContains(t, out, "agreed",
+		"the clusters scanned different controls, so they never agreed on anything")
+}
+
+// TestPrintFleetReportStillReportsAgreementOnASharedControl is the other half
+// of the case above: once the clusters do share a control, agreement is a real
+// finding and has to survive the guard that suppresses the vacuous one.
+func TestPrintFleetReportStillReportsAgreementOnASharedControl(t *testing.T) {
+	matrix := fleet.FleetControlMatrix{Controls: []fleet.FleetControlRow{
+		matrixRow("C-0016", "prod", "staging"),
+		matrixRow("C-0038", "staging"),
+	}}
+
+	out := renderFleet(&fleet.FleetReport{
+		Clusters: []fleet.ClusterResult{
+			{ClusterID: "prod", Status: fleet.ClusterScanned},
+			{ClusterID: "staging", Status: fleet.ClusterScanned},
+		},
+		ControlMatrix: matrix,
+		Divergence:    fleet.BuildDivergence(matrix, ""),
+	})
+
+	assert.Contains(t, out, "Every cluster agreed on every control it ran",
+		"they shared C-0016 and agreed on it, which is worth saying")
 }
 
 // TestPrintFleetReportHandlesNothing covers the degenerate inputs, since a
