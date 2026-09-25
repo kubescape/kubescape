@@ -128,11 +128,11 @@ func recomputeSummaryDetails(sessionObj *cautils.OPASessionObj) {
 
 	summary.ResourcesSeverityCounters = reportsummary.SeverityCounters{}
 	for _, result := range sessionObj.ResourcesResult {
-		if !result.GetStatus(nil).IsFailed() {
+		if !cautils.ResourceStatus(summary, &result).IsFailed() {
 			continue
 		}
 		for _, ac := range result.AssociatedControls {
-			if !ac.GetStatus(nil).IsFailed() {
+			if !cautils.ControlStatus(summary, &ac).IsFailed() {
 				continue
 			}
 			if ctrl, ok := summary.Controls[ac.GetID()]; ok {

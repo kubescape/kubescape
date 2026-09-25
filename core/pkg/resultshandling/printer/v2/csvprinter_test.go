@@ -614,7 +614,7 @@ func TestCsvControlPaths(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			gotFailed, gotFix := csvControlPaths(tc.result, tc.controlID, tc.kind, false)
+			gotFailed, gotFix := csvControlPaths(tc.result, tc.controlID, tc.kind, false, nil)
 			assert.Equal(t, tc.wantFailed, gotFailed, "failed paths mismatch")
 			assert.Equal(t, tc.wantFix, gotFix, "fix paths mismatch")
 		})
