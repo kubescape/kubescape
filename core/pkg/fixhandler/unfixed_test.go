@@ -443,14 +443,14 @@ func TestPrepareResourcesToFix_ResetsBetweenCalls(t *testing.T) {
 
 // --- PrintUnfixedControls dedup ------------------------------------------
 
-func TestDedupUnfixedControls(t *testing.T) {
+func TestDedupUnfixedControlsForDisplay(t *testing.T) {
 	input := []UnfixedControl{
 		{ControlID: "C-0041", ControlName: "HostNetwork", ResourceKind: "Deployment", ResourceName: "x", FilePath: "/f.yaml", Reason: "no auto-fix"},
 		{ControlID: "C-0041", ControlName: "HostNetwork", ResourceKind: "Deployment", ResourceName: "x", FilePath: "/f.yaml", Reason: "no auto-fix"},
 		{ControlID: "C-0038", ControlName: "HostPID", ResourceKind: "Deployment", ResourceName: "x", FilePath: "/f.yaml", Reason: "no auto-fix"},
 	}
 
-	deduped := dedupUnfixedControls(input)
+	deduped := dedupUnfixedControlsForDisplay(input)
 
 	assert.Len(t, deduped, 2, "duplicate C-0041 entry must be collapsed")
 	assert.Equal(t, "C-0041", deduped[0].ControlID)
