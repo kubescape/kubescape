@@ -98,9 +98,6 @@ jobs:
       - name: Install Cosign
         uses: sigstore/cosign-installer@7e8b541eb2e61bf99390e1afd4be13a184e9ebc5 # v3.10.1
 
-      - name: Create Cosign Key
-        run: echo "${{ secrets.COSIGN_PRIVATE_KEY_V1 }}" > cosign.key
-
       - name: Set up QEMU
         uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
 
@@ -122,6 +119,27 @@ jobs:
         with:
           cluster_name: kubescape-e2e
 
+      # goreleaser's docker_signs block reads this file to sign the container
+      # images, and nothing else in the job needs it. Every step shares the
+      # same workspace, so the key is written owner-only immediately before
+      # goreleaser and removed again immediately after it; no other step runs
+      # while it exists.
+      #
+      # The secret goes through `env` rather than being interpolated into the
+      # script: `${{ }}` substitution happens before the shell runs, which puts
+      # the key material into the command line itself.
+      - name: Create Cosign Key
+        env:
+          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY_V1 }}
+        run: |
+          set -euo pipefail
+
+          # umask only applies to a file it creates, so remove any leftover
+          # first - otherwise a pre-existing file keeps its old mode.
+          rm -f cosign.key
+          umask 077
+          printf '%s\n' "$COSIGN_PRIVATE_KEY" > cosign.key
+
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
         with:
@@ -142,6 +160,12 @@ jobs:
           SECRET_KEY: ${{ secrets.SECRET_KEY_PROD }}
           REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
           REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
+
+      # Unconditional: a failed or cancelled release must not leave signing
+      # material behind for the steps that follow.
+      - name: Remove Cosign Key
+        if: always()
+        run: rm -f cosign.key
 
       - name: Attest build provenance
         if: (github.event_name != 'workflow_dispatch' || inputs.skip_publish != true) && hashFiles('dist/**/*.tar.gz') != ''
