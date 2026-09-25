@@ -130,6 +130,22 @@ func collectSkippedControls(opaSessionObj *cautils.OPASessionObj) []skippedContr
 					score = pCtrl.BaseScore
 				}
 			}
+			if (name == nec.ControlID || score == 0) && opaSessionObj.Report != nil {
+				if ctrl := opaSessionObj.Report.SummaryDetails.Controls.GetControl(reportsummary.EControlCriteriaID, nec.ControlID); ctrl != nil {
+					if name == nec.ControlID && ctrl.GetName() != "" {
+						name = ctrl.GetName()
+					}
+					if desc == "" {
+						desc = ctrl.GetDescription()
+					}
+					if rem == "" {
+						rem = ctrl.GetRemediation()
+					}
+					if score == 0 {
+						score = ctrl.GetScoreFactor()
+					}
+				}
+			}
 			skippedMap[nec.ControlID] = skippedControlInfo{
 				controlID:   nec.ControlID,
 				name:        name,

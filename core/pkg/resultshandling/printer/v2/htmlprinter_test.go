@@ -244,3 +244,104 @@ func TestHtmlPrinter_ActionPrint_CombinedPostureAndImageScan(t *testing.T) {
 	assert.Contains(t, htmlContent, "<h2>Images scanned:</h2>")
 	assert.Contains(t, htmlContent, "registry.example.com/combined-html:v1")
 }
+
+func TestHtmlPrinter_ActionPrint_CoverageSectionPresent(t *testing.T) {
+	ctx := context.Background()
+	out := filepath.Join(t.TempDir(), "report.html")
+
+	hp := NewHtmlPrinter(false)
+	hp.SetWriter(ctx, out)
+
+	session := cautils.NewOPASessionObjMock()
+	session.ScanCoverage = cautils.ScanCoverage{
+		CoverageScore:     85.0,
+		EvaluatedControls: 17,
+		TotalControls:     20,
+		Degraded:          true,
+		NotEvaluatedControls: []cautils.NotEvaluatedControl{
+			{
+				ControlID:   "C-0099",
+				MissingGVRs: []string{"apps/v1/daemonsets"},
+			},
+		},
+	}
+
+	assert.NoError(t, hp.ActionPrint(ctx, session, nil))
+	assert.NoError(t, hp.CloseWriter())
+
+	content, err := os.ReadFile(out)
+	assert.NoError(t, err)
+	htmlContent := string(content)
+
+	assert.Contains(t, htmlContent, "<h2>Scan Coverage</h2>")
+	assert.Contains(t, htmlContent, "Coverage Score:</strong> 85% ⚠️ Degraded")
+	assert.Contains(t, htmlContent, "Evaluated 17 of 20 controls")
+	assert.Contains(t, htmlContent, "<td>C-0099</td>")
+	assert.Contains(t, htmlContent, "<td>missing: apps/v1/daemonsets</td>")
+}
+
+func TestHtmlPrinter_ActionPrint_CoverageSectionOmittedWhenPerfect(t *testing.T) {
+	ctx := context.Background()
+	out := filepath.Join(t.TempDir(), "report.html")
+
+	hp := NewHtmlPrinter(false)
+	hp.SetWriter(ctx, out)
+
+	session := cautils.NewOPASessionObjMock()
+	session.ScanCoverage = cautils.ScanCoverage{
+		CoverageScore:     100.0,
+		EvaluatedControls: 20,
+		TotalControls:     20,
+		Degraded:          false,
+	}
+
+	assert.NoError(t, hp.ActionPrint(ctx, session, nil))
+	assert.NoError(t, hp.CloseWriter())
+
+	content, err := os.ReadFile(out)
+	assert.NoError(t, err)
+	htmlContent := string(content)
+
+	assert.NotContains(t, htmlContent, "<h2>Scan Coverage</h2>")
+}
+
+func TestHtmlPrinter_ActionPrint_CoverageSkippedControlTable(t *testing.T) {
+	ctx := context.Background()
+	out := filepath.Join(t.TempDir(), "report.html")
+
+	hp := NewHtmlPrinter(false)
+	hp.SetWriter(ctx, out)
+
+	session := cautils.NewOPASessionObjMock()
+	skippedStatus := &apis.StatusInfo{
+		InnerStatus: apis.StatusSkipped,
+		SubStatus:   apis.SubStatusIrrelevant,
+		InnerInfo:   "no matching resources in cluster",
+	}
+	session.Report.SummaryDetails.Controls = reportsummary.ControlSummaries{
+		"C-0070": reportsummary.ControlSummary{
+			ControlID:   "C-0070",
+			Name:        "Host IPC",
+			ScoreFactor: 6.0,
+			StatusInfo:  *skippedStatus,
+		},
+	}
+	session.ScanCoverage = cautils.ScanCoverage{
+		CoverageScore:     90.0,
+		EvaluatedControls: 9,
+		TotalControls:     10,
+		Degraded:          true,
+	}
+
+	assert.NoError(t, hp.ActionPrint(ctx, session, nil))
+	assert.NoError(t, hp.CloseWriter())
+
+	content, err := os.ReadFile(out)
+	assert.NoError(t, err)
+	htmlContent := string(content)
+
+	assert.Contains(t, htmlContent, "<h2>Scan Coverage</h2>")
+	assert.Contains(t, htmlContent, "<td>C-0070</td>")
+	assert.Contains(t, htmlContent, "<td>Host IPC</td>")
+	assert.Contains(t, htmlContent, "<td>irrelevant: no matching resources in cluster</td>")
+}

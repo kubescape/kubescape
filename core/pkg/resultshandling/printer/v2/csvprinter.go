@@ -12,6 +12,7 @@ import (
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer"
 	reporthandling "github.com/kubescape/opa-utils/reporthandling"
+	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 )
@@ -162,6 +163,56 @@ func (cp *CsvPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OP
 				logger.L().Ctx(ctx).Error("failed to write CSV row", helpers.Error(err))
 				return fmt.Errorf("failed to write CSV row: %w", err)
 			}
+		}
+	}
+
+	skippedControls := collectSkippedControls(opaSessionObj)
+	emittedSkipped := make(map[string]bool)
+	for _, sc := range skippedControls {
+		if emittedSkipped[sc.controlID] {
+			continue
+		}
+		emittedSkipped[sc.controlID] = true
+		name := sc.name
+		if name == "" || name == sc.controlID {
+			if ctrl := summaryControls.GetControl(reportsummary.EControlCriteriaID, sc.controlID); ctrl != nil && ctrl.GetName() != "" {
+				name = ctrl.GetName()
+			}
+		}
+		if name == "" {
+			name = sc.controlID
+		}
+		severity := apis.ControlSeverityToString(sc.scoreFactor)
+		if severity == "" || severity == "Unknown" {
+			if ctrl := summaryControls.GetControl(reportsummary.EControlCriteriaID, sc.controlID); ctrl != nil && ctrl.GetScoreFactor() > 0 {
+				severity = apis.ControlSeverityToString(ctrl.GetScoreFactor())
+			}
+		}
+		if severity == "" {
+			severity = "Unknown"
+		}
+		reason := sc.reason
+		if reason == "" {
+			reason = "not evaluated"
+		}
+		row := []string{
+			name,
+			sc.controlID,
+			severity,
+			"not evaluated",
+			"",
+			"",
+			"",
+			"",
+			"",
+			"",
+			reason,
+			cautils.GetControlLink(sc.controlID),
+			"",
+		}
+		if err := csvWriter.Write(row); err != nil {
+			logger.L().Ctx(ctx).Error("failed to write CSV row", helpers.Error(err))
+			return fmt.Errorf("failed to write CSV row: %w", err)
 		}
 	}
 
