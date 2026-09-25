@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -52,8 +53,7 @@ type componentInterfaces struct {
 }
 
 func (interfaces componentInterfaces) closePrinters() error {
-	printers := append([]printer.IPrinter{interfaces.uiPrinter}, interfaces.outputPrinters...)
-	return closePrinters(printers...)
+	return errors.Join(closePrinters(interfaces.uiPrinter), closePrinters(interfaces.outputPrinters...))
 }
 
 // closePrinters supports both printer close contracts while the migration to
@@ -616,7 +616,7 @@ func scanImages(scanType cautils.ScanTypes, scanData *cautils.OPASessionObj, ctx
 	// Deferred into the joined error so image results are still collected first.
 	staleDBErr := imagescan.EnforceDBAge(svc, shouldUpdate, failOnStale, maxDBAge)
 	defaultCreds := registryCredentialsFromScanInfo(scanInfo)
-	var jobs []ImageScanJob
+	jobs := make([]ImageScanJob, 0, imagesToScan.Cardinality())
 	for target := range imagesToScan.Iter() {
 		img := target.Image
 		credsList := []imagescan.RegistryCredentials{}
@@ -664,8 +664,7 @@ func scanImages(scanType cautils.ScanTypes, scanData *cautils.OPASessionObj, ctx
 }
 
 func scanImageJobsWithDiscoveryErrors(ctx context.Context, svc imageScanService, concurrency int, jobs []ImageScanJob, resultsHandling *resultshandling.ResultsHandler, discoveryErrors []error) error {
-	errs := append([]error{}, discoveryErrors...)
-	return errors.Join(append(errs, scanImageJobs(ctx, svc, concurrency, jobs, resultsHandling))...)
+	return errors.Join(errors.Join(discoveryErrors...), scanImageJobs(ctx, svc, concurrency, jobs, resultsHandling))
 }
 
 func scanImageJobs(ctx context.Context, svc imageScanService, concurrency int, jobs []ImageScanJob, resultsHandling *resultshandling.ResultsHandler) error {
@@ -746,14 +745,7 @@ func collectImageScanTargets(scanType cautils.ScanTypes, scanData *cautils.OPASe
 				})
 			}
 			if creds, ok := resolveRegistryCredentials(ctx, k8sApi, wl, image); ok {
-				found := false
-				for _, c := range imageToCreds[image] {
-					if c == creds {
-						found = true
-						break
-					}
-				}
-				if !found {
+				if !slices.Contains(imageToCreds[image], creds) {
 					imageToCreds[image] = append(imageToCreds[image], creds)
 				}
 			}
@@ -775,16 +767,15 @@ func collectImageScanTargets(scanType cautils.ScanTypes, scanData *cautils.OPASe
 }
 
 func addImageScanTarget(targets mapset.Set[ImageScanTarget], target ImageScanTarget) {
-	for _, existing := range targets.ToSlice() {
-		if existing.Image != target.Image || existing.Platform != target.Platform {
-			continue
-		}
-		if !existing.SkipUnavailable || target.SkipUnavailable {
-			return
-		}
-		targets.Remove(existing)
-		break
+	nonSkip := ImageScanTarget{Image: target.Image, Platform: target.Platform, SkipUnavailable: false}
+	if targets.Contains(nonSkip) {
+		return
 	}
+	if target.SkipUnavailable {
+		targets.Add(target)
+		return
+	}
+	targets.Remove(ImageScanTarget{Image: target.Image, Platform: target.Platform, SkipUnavailable: true})
 	targets.Add(target)
 }
 
