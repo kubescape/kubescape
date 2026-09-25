@@ -47,7 +47,11 @@ func verify(ctx context.Context, img string, key string) (bool, error) {
 	if err := ctx.Err(); err != nil {
 		return false, fmt.Errorf("context canceled before verification: %w", err)
 	}
-	co := &cosign.CheckOpts{}
+	co := &cosign.CheckOpts{
+		// Require the signed payload to name the digest being verified,
+		// matching the claim check `cosign verify` performs by default.
+		ClaimVerifier: cosign.SimpleClaimVerifier,
+	}
 	var ociremoteOpts []ociremote.Option
 	attachment := ""
 
