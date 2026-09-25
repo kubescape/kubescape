@@ -653,7 +653,7 @@ func TestLoadFile(t *testing.T) {
 	files, _ := listFiles(filepath.Join(onlineBoutiquePath(), "adservice.yaml"), nil)
 	assert.Equal(t, 1, len(files))
 
-	_, err := loadFile(files[0])
+	_, _, err := loadFile(files[0])
 	assert.NoError(t, err)
 }
 
