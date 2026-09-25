@@ -49,6 +49,20 @@ func logoDataURI() template.URL {
 
 var _ printer.IPrinter = &HtmlPrinter{}
 
+type HTMLSkippedControl struct {
+	ControlID string
+	Name      string
+	Reason    string
+}
+
+type HTMLCoverageData struct {
+	Score             int
+	EvaluatedControls int
+	TotalControls     int
+	Degraded          bool
+	SkippedControls   []HTMLSkippedControl
+}
+
 type HTMLReportingCtx struct {
 	OPASessionObj     *cautils.OPASessionObj
 	ResourceTableView ResourceTableView
@@ -57,7 +71,8 @@ type HTMLReportingCtx struct {
 	ImageScanSummary *imageprinter.ImageScanSummary
 	// LogoDataURI is the embedded Kubescape logo, inlined so the report
 	// renders correctly without network access.
-	LogoDataURI template.URL
+	LogoDataURI  template.URL
+	CoverageData *HTMLCoverageData
 }
 
 type HtmlPrinter struct {
@@ -155,14 +170,22 @@ func (hp *HtmlPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.O
 
 	var resourceTableView ResourceTableView
 	var imageScanSummary *imageprinter.ImageScanSummary
+	var coverageData *HTMLCoverageData
 	if opaSessionObj != nil {
 		resourceTableView = buildResourceTableView(opaSessionObj, hp.showSecrets)
+		coverageData = buildHTMLCoverageData(opaSessionObj)
 	}
 	if len(imageScanData) > 0 {
 		imageScanSummary = buildImageScanSummary(imageScanData)
 	}
 
-	reportingCtx := HTMLReportingCtx{opaSessionObj, resourceTableView, imageScanSummary, logoDataURI()}
+	reportingCtx := HTMLReportingCtx{
+		OPASessionObj:     opaSessionObj,
+		ResourceTableView: resourceTableView,
+		ImageScanSummary:  imageScanSummary,
+		LogoDataURI:       logoDataURI(),
+		CoverageData:      coverageData,
+	}
 	err := tpl.Execute(hp.writer, reportingCtx)
 	if err != nil {
 		logger.L().Ctx(ctx).Error("failed to render template", helpers.Error(err))
@@ -228,4 +251,38 @@ func (p *HtmlPrinter) CloseWriter() error {
 		return p.writer.Close()
 	}
 	return nil
+}
+
+func buildHTMLCoverageData(opaSessionObj *cautils.OPASessionObj) *HTMLCoverageData {
+	if opaSessionObj == nil {
+		return nil
+	}
+	coverage := opaSessionObj.ScanCoverage
+	skipped := collectSkippedControls(opaSessionObj)
+	if !coverage.Degraded && len(skipped) == 0 && (coverage.CoverageScore >= 100 || coverage.TotalControls == 0) {
+		return nil
+	}
+	skippedList := make([]HTMLSkippedControl, 0, len(skipped))
+	for _, sc := range skipped {
+		name := sc.name
+		if name == "" {
+			name = sc.controlID
+		}
+		reason := sc.reason
+		if reason == "" {
+			reason = "not evaluated"
+		}
+		skippedList = append(skippedList, HTMLSkippedControl{
+			ControlID: sc.controlID,
+			Name:      name,
+			Reason:    reason,
+		})
+	}
+	return &HTMLCoverageData{
+		Score:             cautils.ComplianceScoreToInt(coverage.CoverageScore),
+		EvaluatedControls: coverage.EvaluatedControls,
+		TotalControls:     coverage.TotalControls,
+		Degraded:          coverage.Degraded,
+		SkippedControls:   skippedList,
+	}
 }

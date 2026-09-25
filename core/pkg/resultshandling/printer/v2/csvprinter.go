@@ -23,6 +23,12 @@ const (
 
 var _ printer.IPrinter = &CsvPrinter{}
 
+type controlStatusReason struct {
+	controlID string
+	status    string
+	reason    string
+}
+
 type CsvPrinter struct {
 	writer *os.File
 	// showSecrets controls whether sensitive field values (Secret.data,
@@ -112,7 +118,7 @@ func (cp *CsvPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OP
 		}
 	}
 
-	emittedSkipReasons := make(map[string]map[string]struct{})
+	emittedSkipReasons := make(map[controlStatusReason]struct{})
 	for _, result := range reportWithSeverity.Results {
 		resID := result.ResourceID
 		var resName, resKind, resNamespace, resApiVersion string
@@ -160,10 +166,11 @@ func (cp *CsvPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OP
 				} else {
 					remediation = "reason unavailable"
 				}
-				if emittedSkipReasons[ctrlID] == nil {
-					emittedSkipReasons[ctrlID] = make(map[string]struct{})
-				}
-				emittedSkipReasons[ctrlID][remediation] = struct{}{}
+				emittedSkipReasons[controlStatusReason{
+					controlID: ctrlID,
+					status:    status,
+					reason:    remediation,
+				}] = struct{}{}
 			} else {
 				if ctrl := summaryControls.GetControl(reportsummary.EControlCriteriaID, ctrlID); ctrl != nil {
 					remediation = ctrl.GetRemediation()
@@ -194,10 +201,20 @@ func (cp *CsvPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OP
 
 	for _, sc := range skippedControls {
 		name := sc.name
+		if name == "" || name == sc.controlID {
+			if ctrl := summaryControls.GetControl(reportsummary.EControlCriteriaID, sc.controlID); ctrl != nil && ctrl.GetName() != "" {
+				name = ctrl.GetName()
+			}
+		}
 		if name == "" {
 			name = sc.controlID
 		}
 		severity := apis.ControlSeverityToString(sc.scoreFactor)
+		if severity == "" || severity == "Unknown" {
+			if ctrl := summaryControls.GetControl(reportsummary.EControlCriteriaID, sc.controlID); ctrl != nil && ctrl.GetScoreFactor() > 0 {
+				severity = apis.ControlSeverityToString(ctrl.GetScoreFactor())
+			}
+		}
 		if severity == "" {
 			severity = "Unknown"
 		}
@@ -205,20 +222,24 @@ func (cp *CsvPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OP
 		if reason == "" {
 			reason = "reason unavailable"
 		}
-		if reasons, ok := emittedSkipReasons[sc.controlID]; ok {
-			if _, alreadyEmitted := reasons[reason]; alreadyEmitted {
-				continue
-			}
+		status := sc.status
+		if status == "" {
+			status = string(apis.StatusSkipped)
 		}
-		if emittedSkipReasons[sc.controlID] == nil {
-			emittedSkipReasons[sc.controlID] = make(map[string]struct{})
+		key := controlStatusReason{
+			controlID: sc.controlID,
+			status:    status,
+			reason:    reason,
 		}
-		emittedSkipReasons[sc.controlID][reason] = struct{}{}
+		if _, alreadyEmitted := emittedSkipReasons[key]; alreadyEmitted {
+			continue
+		}
+		emittedSkipReasons[key] = struct{}{}
 		row := []string{
 			name,
 			sc.controlID,
 			severity,
-			string(apis.StatusSkipped),
+			status,
 			"N/A",
 			"N/A",
 			"N/A",
