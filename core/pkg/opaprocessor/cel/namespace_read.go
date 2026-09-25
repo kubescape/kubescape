@@ -14,8 +14,10 @@ import (
 // the evaluator's lazy variable semantics.
 func (e *Evaluator) ReadsNamespaceObjectInValidations(v *VAP) bool {
 	variables := make(map[string]string, len(v.Variables))
+	allVariableNames := make([]string, 0, len(v.Variables))
 	for _, variable := range v.Variables {
 		variables[variable.Name] = variable.Expression
+		allVariableNames = append(allVariableNames, variable.Name)
 	}
 
 	toVisit := make([]string, 0, len(v.Validations))
@@ -23,7 +25,7 @@ func (e *Evaluator) ReadsNamespaceObjectInValidations(v *VAP) bool {
 		if readsNamespaceObject(e.env, validation.Expression) {
 			return true
 		}
-		toVisit = append(toVisit, referencedVariables(e.env, validation.Expression)...)
+		toVisit = appendReferencedVariables(toVisit, referencedVariables(e.env, validation.Expression), allVariableNames)
 	}
 
 	visited := make(map[string]struct{}, len(toVisit))
@@ -41,9 +43,19 @@ func (e *Evaluator) ReadsNamespaceObjectInValidations(v *VAP) bool {
 		if readsNamespaceObject(e.env, expression) {
 			return true
 		}
-		toVisit = append(toVisit, referencedVariables(e.env, expression)...)
+		toVisit = appendReferencedVariables(toVisit, referencedVariables(e.env, expression), allVariableNames)
 	}
 	return false
+}
+
+func appendReferencedVariables(toVisit []string, references variableReferences, allVariableNames []string) []string {
+	toVisit = append(toVisit, references.names...)
+	if references.hasDynamicIndex {
+		// lazyVariables resolves dynamic keys at evaluation time. Until that key is
+		// known, every declared variable is a possible dependency.
+		toVisit = append(toVisit, allVariableNames...)
+	}
+	return toVisit
 }
 
 func readsNamespaceObject(env *cel.Env, expr string) bool {
@@ -63,20 +75,26 @@ func readsNamespaceObject(env *cel.Env, expr string) bool {
 	return false
 }
 
+type variableReferences struct {
+	names           []string
+	hasDynamicIndex bool
+}
+
 // referencedVariables returns names referenced through variables.<name> and
-// variables["name"]. Dynamic indexes are deliberately excluded because their
-// target cannot be known until evaluation. The compiler resolves these accesses
-// before this runs, so this follows the same dependency shape used by
-// lazyVariables at evaluation.
-func referencedVariables(env *cel.Env, expr string) []string {
+// variables["name"]. A dynamic index is recorded separately because the
+// runtime lazy map can resolve it to any declared variable. The compiler
+// resolves these accesses before this runs, so this follows the same dependency
+// shape used by lazyVariables at evaluation.
+func referencedVariables(env *cel.Env, expr string) variableReferences {
 	if expr == "" {
-		return nil
+		return variableReferences{}
 	}
 	compiled, issues := env.Compile(expr)
 	if issues != nil && issues.Err() != nil {
-		return nil
+		return variableReferences{}
 	}
 	seen := map[string]struct{}{}
+	hasDynamicIndex := false
 	root := celast.NavigateAST(compiled.NativeRep())
 	for _, node := range celast.MatchDescendants(root, celast.KindMatcher(celast.IdentKind)) {
 		if !globalIdentifier(node, "variables") {
@@ -93,17 +111,14 @@ func referencedVariables(env *cel.Env, expr string) []string {
 				seen[selection.FieldName()] = struct{}{}
 			}
 		case celast.CallKind:
-			call := parent.AsCall()
-			args := call.Args()
-			if call.FunctionName() != "_[_]" || len(args) != 2 || args[0].ID() != node.ID() {
+			name, dynamic, indexed := indexedVariableReference(node)
+			if !indexed {
 				continue
 			}
-			if args[1].Kind() != celast.LiteralKind {
-				continue
-			}
-			key, ok := args[1].AsLiteral().(types.String)
-			if ok {
-				seen[string(key)] = struct{}{}
+			if dynamic {
+				hasDynamicIndex = true
+			} else {
+				seen[name] = struct{}{}
 			}
 		}
 	}
@@ -111,7 +126,37 @@ func referencedVariables(env *cel.Env, expr string) []string {
 	for name := range seen {
 		result = append(result, name)
 	}
-	return result
+	return variableReferences{names: result, hasDynamicIndex: hasDynamicIndex}
+}
+
+// indexedVariableReference follows dyn(...) wrappers around variables. CEL
+// represents index operations as calls with the map and key as arguments,
+// rather than as a member call, so the identifier can be nested beneath a
+// dynamic cast before reaching the index operation.
+func indexedVariableReference(node celast.NavigableExpr) (name string, dynamic, indexed bool) {
+	receiver := node
+	parent, ok := receiver.Parent()
+	for ok && parent.Kind() == celast.CallKind {
+		call := parent.AsCall()
+		args := call.Args()
+		if call.FunctionName() == "dyn" && len(args) == 1 && args[0].ID() == receiver.ID() {
+			receiver = parent
+			parent, ok = receiver.Parent()
+			continue
+		}
+		if call.FunctionName() != "_[_]" || len(args) != 2 || args[0].ID() != receiver.ID() {
+			return "", false, false
+		}
+		if args[1].Kind() != celast.LiteralKind {
+			return "", true, true
+		}
+		key, ok := args[1].AsLiteral().(types.String)
+		if !ok {
+			return "", true, true
+		}
+		return string(key), false, true
+	}
+	return "", false, false
 }
 
 // globalIdentifier reports whether node names the activation binding instead
