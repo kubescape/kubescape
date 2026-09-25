@@ -26,7 +26,7 @@ type hostIdentitySensor struct {
 	hostsensorutils.HostSensorHandlerMock
 }
 
-func (hostIdentitySensor) CollectResources(context.Context) ([]hostsensor.HostSensorDataEnvelope, map[string]apis.StatusInfo, error) {
+func (hostIdentitySensor) CollectResources(context.Context) ([]hostsensor.HostSensorDataEnvelope, map[string]apis.StatusInfo, []cautils.PartialGVRPull, error) {
 	var resources []hostsensor.HostSensorDataEnvelope
 	for _, name := range []string{"node-a", "node-b"} {
 		var envelope hostsensor.HostSensorDataEnvelope
@@ -35,7 +35,7 @@ func (hostIdentitySensor) CollectResources(context.Context) ([]hostsensor.HostSe
 		envelope.SetName(name)
 		resources = append(resources, envelope)
 	}
-	return resources, nil, nil
+	return resources, nil, nil, nil
 }
 
 // This checks selection/indexing, not sensor decoding or Rego evaluation.
@@ -91,7 +91,7 @@ func TestHostDataIdentityAcrossDiscovery(t *testing.T) {
 			// the independent indexing mismatch rather than stopping early.
 			all := map[string]workloadinterface.IMetadata{}
 			handler := K8sResourceHandler{hostSensorHandler: &hostIdentitySensor{}}
-			if _, err := handler.collectHostResources(context.Background(), all, external); err != nil {
+			if _, _, err := handler.collectHostResources(context.Background(), all, external); err != nil {
 				t.Fatal(err)
 			}
 			const key = "hostdata.kubescape.cloud/v1beta0/KubeletInfo"

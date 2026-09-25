@@ -25,6 +25,7 @@ import (
 // gitlab-sast fixture.
 func ghSessionFixture(t *testing.T, controlID string, scoreFactor float32) *cautils.OPASessionObj {
 	t.Helper()
+	t.Setenv("GITHUB_STEP_SUMMARY", "")
 
 	manifestDir := t.TempDir()
 	manifestPath := filepath.Join(manifestDir, "deploy.yaml")
@@ -351,4 +352,438 @@ func TestGitHubActionsPrinter_NoEvidencePathsWhenNone(t *testing.T) {
 	output := ghOutputFor(t, session)
 	assert.NotContains(t, output, "Failed paths:",
 		"annotation message must not contain a paths header when there are no evidence paths")
+}
+
+func TestGitHubActionsPrinter_DegradedCoverageWarning(t *testing.T) {
+	origWD, err := os.Getwd()
+	require.NoError(t, err)
+	defer func() { _ = os.Chdir(origWD) }()
+	require.NoError(t, os.Chdir(t.TempDir()))
+
+	session := ghSessionFixture(t, "C-0057", 8.0)
+	session.ScanCoverage = cautils.ScanCoverage{
+		CoverageScore:     85.0,
+		EvaluatedControls: 17,
+		TotalControls:     20,
+		Degraded:          true,
+	}
+
+	output := ghOutputFor(t, session)
+
+	assert.Contains(t, output, "::warning title=Degraded Scan Coverage::Scan coverage is degraded (85.00%): 17 of 20 controls evaluated")
+}
+
+func TestGitHubActionsPrinter_SkippedControlWarnings(t *testing.T) {
+	origWD, err := os.Getwd()
+	require.NoError(t, err)
+	defer func() { _ = os.Chdir(origWD) }()
+	require.NoError(t, os.Chdir(t.TempDir()))
+
+	session := ghSessionFixture(t, "C-0057", 8.0)
+	session.ScanCoverage = cautils.ScanCoverage{
+		CoverageScore:     90.0,
+		EvaluatedControls: 9,
+		TotalControls:     10,
+		Degraded:          true,
+		NotEvaluatedControls: []cautils.NotEvaluatedControl{
+			{
+				ControlID: "C-0099",
+				Reason:    "missing: apps/v1/deployments",
+			},
+		},
+	}
+	ctrl98 := reportsummary.ControlSummary{
+		ControlID: "C-0098",
+		Name:      "Configuration control",
+	}
+	ctrl98.SetStatus(&apis.StatusInfo{
+		InnerStatus: apis.StatusSkipped,
+		SubStatus:   apis.SubStatusConfiguration,
+		InnerInfo:   "disabled in config",
+	})
+	session.Report.SummaryDetails.Controls["C-0098"] = ctrl98
+
+	output := ghOutputFor(t, session)
+
+	assert.Contains(t, output, "::warning title=Control C-0098 Skipped::Control C-0098 was not evaluated: configuration: disabled in config")
+	assert.Contains(t, output, "::warning title=Control C-0099 Skipped::Control C-0099 was not evaluated: missing: apps/v1/deployments")
+}
+
+func TestGitHubActionsPrinter_StepSummary(t *testing.T) {
+	origWD, err := os.Getwd()
+	require.NoError(t, err)
+	defer func() { _ = os.Chdir(origWD) }()
+	require.NoError(t, os.Chdir(t.TempDir()))
+
+	session := ghSessionFixture(t, "C-0057", 8.0)
+
+	summaryFile := filepath.Join(t.TempDir(), "step_summary.md")
+	t.Setenv("GITHUB_STEP_SUMMARY", summaryFile)
+	session.ScanCoverage = cautils.ScanCoverage{
+		CoverageScore:     85.5,
+		EvaluatedControls: 17,
+		TotalControls:     20,
+		Degraded:          true,
+		NotEvaluatedControls: []cautils.NotEvaluatedControl{
+			{
+				ControlID: "C-0099",
+				Reason:    "missing: apps/v1/deployments",
+			},
+		},
+		FailedGVRPulls: []cautils.FailedGVRPull{
+			{
+				GVR:   "apps/v1/deployments",
+				Error: "the server could not find the requested resource",
+			},
+		},
+	}
+
+	output := ghOutputFor(t, session)
+	require.NotEmpty(t, output)
+
+	summaryBytes, err := os.ReadFile(summaryFile)
+	require.NoError(t, err, "step summary file must exist when GITHUB_STEP_SUMMARY is set")
+	summary := string(summaryBytes)
+
+	assert.Contains(t, summary, "### Kubescape Scan Coverage Summary")
+	assert.Contains(t, summary, "| Coverage Score | 85.50% |")
+	assert.Contains(t, summary, "| Status | Degraded |")
+	assert.Contains(t, summary, "| Evaluated Controls | 17 / 20 |")
+	assert.Contains(t, summary, "#### Skipped Controls")
+	assert.Contains(t, summary, "| C-0099 |")
+	assert.Contains(t, summary, "missing: apps/v1/deployments")
+	assert.Contains(t, summary, "#### Failed Resource Queries")
+	assert.Contains(t, summary, "| apps/v1/deployments |")
+	assert.Contains(t, summary, "the server could not find the requested resource")
+}
+
+func TestGitHubActionsPrinter_StepSummaryUnset(t *testing.T) {
+	origWD, err := os.Getwd()
+	require.NoError(t, err)
+	defer func() { _ = os.Chdir(origWD) }()
+	require.NoError(t, os.Chdir(t.TempDir()))
+
+	session := ghSessionFixture(t, "C-0057", 8.0)
+	t.Setenv("GITHUB_STEP_SUMMARY", "")
+	session.ScanCoverage = cautils.ScanCoverage{
+		CoverageScore:     100.0,
+		EvaluatedControls: 20,
+		TotalControls:     20,
+		Degraded:          false,
+	}
+	ctrl98 := reportsummary.ControlSummary{
+		ControlID: "C-0098",
+		Name:      "Configuration control",
+	}
+	ctrl98.SetStatus(&apis.StatusInfo{
+		InnerStatus: apis.StatusSkipped,
+		SubStatus:   apis.SubStatusConfiguration,
+		InnerInfo:   "disabled in config",
+	})
+	session.Report.SummaryDetails.Controls["C-0098"] = ctrl98
+
+	output := ghOutputFor(t, session)
+	require.NotEmpty(t, output)
+	assert.NotContains(t, output, "::warning", "full coverage scans must emit zero warnings even when controls are skipped")
+}
+
+func TestGitHubActionsPrinter_StepSummaryWriteFailureNonFatal(t *testing.T) {
+	origWD, err := os.Getwd()
+	require.NoError(t, err)
+	defer func() { _ = os.Chdir(origWD) }()
+	require.NoError(t, os.Chdir(t.TempDir()))
+
+	session := ghSessionFixture(t, "C-0057", 8.0)
+
+	// Point GITHUB_STEP_SUMMARY to an invalid directory path
+	t.Setenv("GITHUB_STEP_SUMMARY", "/nonexistent/dir/step_summary.md")
+	session.ScanCoverage = cautils.ScanCoverage{
+		CoverageScore:     100.0,
+		EvaluatedControls: 20,
+		TotalControls:     20,
+		Degraded:          false,
+	}
+
+	tmp, err := os.CreateTemp("", "github-actions-*.txt")
+	require.NoError(t, err)
+	defer os.Remove(tmp.Name())
+
+	gp := NewGitHubActionsPrinter()
+	gp.writer = tmp
+	// ActionPrint should succeed despite step summary write failure
+	err = gp.ActionPrint(context.Background(), session, nil)
+	require.NoError(t, err, "step summary write failure must not fail ActionPrint")
+}
+
+func TestGitHubActionsPrinter_ZeroComplianceScore(t *testing.T) {
+	origWD, err := os.Getwd()
+	require.NoError(t, err)
+	defer func() { _ = os.Chdir(origWD) }()
+	require.NoError(t, os.Chdir(t.TempDir()))
+
+	session := ghSessionFixture(t, "C-0057", 8.0)
+
+	summaryFile := filepath.Join(t.TempDir(), "step_summary.md")
+	t.Setenv("GITHUB_STEP_SUMMARY", summaryFile)
+	session.Report.SummaryDetails.ComplianceScore = 0.0
+	session.ScanCoverage = cautils.ScanCoverage{
+		CoverageScore:     50.0,
+		EvaluatedControls: 5,
+		TotalControls:     10,
+		Degraded:          true,
+	}
+
+	output := ghOutputFor(t, session)
+	require.NotEmpty(t, output)
+
+	summaryBytes, err := os.ReadFile(summaryFile)
+	require.NoError(t, err)
+	summary := string(summaryBytes)
+	assert.Contains(t, summary, "| Compliance Score | 0.00% |", "genuine 0% compliance score must be displayed")
+}
+
+func TestGitHubActionsPrinter_CapsAtNineSkippedControlWarnings(t *testing.T) {
+	origWD, err := os.Getwd()
+	require.NoError(t, err)
+	defer func() { _ = os.Chdir(origWD) }()
+	require.NoError(t, os.Chdir(t.TempDir()))
+
+	session := ghSessionFixture(t, "C-0057", 8.0)
+	notEval := make([]cautils.NotEvaluatedControl, 0, 12)
+	for i := 1; i <= 12; i++ {
+		id := fmt.Sprintf("C-%04d", i)
+		notEval = append(notEval, cautils.NotEvaluatedControl{
+			ControlID: id,
+			Reason:    fmt.Sprintf("reason for %s", id),
+		})
+	}
+	session.ScanCoverage = cautils.ScanCoverage{
+		CoverageScore:        50.0,
+		EvaluatedControls:    12,
+		TotalControls:        24,
+		Degraded:             true,
+		NotEvaluatedControls: notEval,
+	}
+
+	output := ghOutputFor(t, session)
+
+	// Exactly 10 warnings: 1 scan-level warning + 9 skipped-control warnings.
+	assert.Equal(t, 10, strings.Count(output, "::warning "), "GitHub renders at most 10 warning annotations per step")
+	assert.Contains(t, output, "::warning title=Degraded Scan Coverage::Scan coverage is degraded (50.00%): 12 of 24 controls evaluated")
+
+	// First 9 skipped controls must be annotated.
+	for i := 1; i <= 9; i++ {
+		id := fmt.Sprintf("C-%04d", i)
+		assert.Contains(t, output, fmt.Sprintf("title=Control %s Skipped::", id))
+	}
+
+	// 10th through 12th must not be annotated as warnings.
+	for i := 10; i <= 12; i++ {
+		id := fmt.Sprintf("C-%04d", i)
+		assert.NotContains(t, output, fmt.Sprintf("title=Control %s Skipped::", id))
+	}
+
+	// Log must report the 3 omitted warnings.
+	assert.Contains(t, output, "Kubescape: 9 of 12 skipped control(s) annotated as warnings; 3 omitted due to GitHub's 10-warning step limit. See step summary for full list.")
+}
+
+func TestGitHubActionsPrinter_StepSummaryPrePopulatedExhausted(t *testing.T) {
+	origWD, err := os.Getwd()
+	require.NoError(t, err)
+	defer func() { _ = os.Chdir(origWD) }()
+	require.NoError(t, os.Chdir(t.TempDir()))
+
+	session := ghSessionFixture(t, "C-0057", 8.0)
+	session.ScanCoverage = cautils.ScanCoverage{
+		CoverageScore:     50.0,
+		EvaluatedControls: 5,
+		TotalControls:     10,
+		Degraded:          true,
+		NotEvaluatedControls: []cautils.NotEvaluatedControl{
+			{ControlID: "C-0001", Reason: "missing"},
+		},
+	}
+
+	summaryFile := filepath.Join(t.TempDir(), "step_summary.md")
+	// Pre-populate with exactly 1 MiB of dummy data
+	prePopulated := make([]byte, githubActionsMaxStepSummaryBytes)
+	for i := range prePopulated {
+		prePopulated[i] = 'x'
+	}
+	require.NoError(t, os.WriteFile(summaryFile, prePopulated, 0600))
+	t.Setenv("GITHUB_STEP_SUMMARY", summaryFile)
+
+	output := ghOutputFor(t, session)
+	require.NotEmpty(t, output)
+
+	info, err := os.Stat(summaryFile)
+	require.NoError(t, err)
+	assert.Equal(t, int64(githubActionsMaxStepSummaryBytes), info.Size(),
+		"must not append anything to step summary when existing content has already exhausted the 1 MiB limit")
+}
+
+func TestGitHubActionsPrinter_StepSummaryPrePopulatedNearLimit(t *testing.T) {
+	origWD, err := os.Getwd()
+	require.NoError(t, err)
+	defer func() { _ = os.Chdir(origWD) }()
+	require.NoError(t, os.Chdir(t.TempDir()))
+
+	session := ghSessionFixture(t, "C-0057", 8.0)
+	notEval := make([]cautils.NotEvaluatedControl, 0, 20)
+	for i := 1; i <= 20; i++ {
+		id := fmt.Sprintf("C-%04d", i)
+		notEval = append(notEval, cautils.NotEvaluatedControl{
+			ControlID: id,
+			Reason:    "some very long explanation for why this control was skipped during evaluation",
+		})
+	}
+	session.ScanCoverage = cautils.ScanCoverage{
+		CoverageScore:        50.0,
+		EvaluatedControls:    20,
+		TotalControls:        40,
+		Degraded:             true,
+		NotEvaluatedControls: notEval,
+	}
+
+	summaryFile := filepath.Join(t.TempDir(), "step_summary.md")
+	// Pre-populate with 1 MiB minus safety margin minus 600 bytes
+	remainingAllowance := 600
+	prePopulatedSize := githubActionsMaxStepSummaryBytes - githubActionsStepSummarySafetyMargin - remainingAllowance
+	prePopulated := make([]byte, prePopulatedSize)
+	for i := range prePopulated {
+		prePopulated[i] = 'a'
+	}
+	require.NoError(t, os.WriteFile(summaryFile, prePopulated, 0600))
+	t.Setenv("GITHUB_STEP_SUMMARY", summaryFile)
+
+	output := ghOutputFor(t, session)
+	require.NotEmpty(t, output)
+
+	info, err := os.Stat(summaryFile)
+	require.NoError(t, err)
+	assert.LessOrEqual(t, info.Size(), int64(githubActionsMaxStepSummaryBytes-githubActionsStepSummarySafetyMargin),
+		"accumulated step summary file must never exceed safe margin below 1 MiB")
+	assert.Greater(t, info.Size(), int64(prePopulatedSize),
+		"must append within the remaining byte capacity")
+
+	contentBytes, err := os.ReadFile(summaryFile)
+	require.NoError(t, err)
+	appended := string(contentBytes[prePopulatedSize:])
+	assert.Contains(t, appended, "Summary truncated to stay within GitHub's 1 MiB limit")
+	assert.Contains(t, appended, "entries omitted")
+}
+
+func TestGitHubActionsPrinter_StepSummaryPrePopulatedWithinSafetyMargin(t *testing.T) {
+	origWD, err := os.Getwd()
+	require.NoError(t, err)
+	defer func() { _ = os.Chdir(origWD) }()
+	require.NoError(t, os.Chdir(t.TempDir()))
+
+	session := ghSessionFixture(t, "C-0057", 8.0)
+	session.ScanCoverage = cautils.ScanCoverage{
+		CoverageScore:     50.0,
+		EvaluatedControls: 5,
+		TotalControls:     10,
+		Degraded:          true,
+		NotEvaluatedControls: []cautils.NotEvaluatedControl{
+			{ControlID: "C-0001", Reason: "missing"},
+		},
+	}
+
+	summaryFile := filepath.Join(t.TempDir(), "step_summary.md")
+	// Pre-populate so remaining space is within safety margin (e.g. 600 bytes below 1 MiB)
+	prePopulatedSize := githubActionsMaxStepSummaryBytes - 600
+	prePopulated := make([]byte, prePopulatedSize)
+	for i := range prePopulated {
+		prePopulated[i] = 's'
+	}
+	require.NoError(t, os.WriteFile(summaryFile, prePopulated, 0600))
+	t.Setenv("GITHUB_STEP_SUMMARY", summaryFile)
+
+	output := ghOutputFor(t, session)
+	require.NotEmpty(t, output)
+
+	info, err := os.Stat(summaryFile)
+	require.NoError(t, err)
+	assert.Equal(t, int64(prePopulatedSize), info.Size(),
+		"must not append anything when remaining capacity is within the safety margin")
+}
+
+func TestGitHubActionsPrinter_StepSummaryOversized(t *testing.T) {
+	origWD, err := os.Getwd()
+	require.NoError(t, err)
+	defer func() { _ = os.Chdir(origWD) }()
+	require.NoError(t, os.Chdir(t.TempDir()))
+
+	session := ghSessionFixture(t, "C-0057", 8.0)
+	// Create 15,000 skipped controls (~1.5 MB uncompressed markdown)
+	const count = 15000
+	notEval := make([]cautils.NotEvaluatedControl, 0, count)
+	for i := 1; i <= count; i++ {
+		id := fmt.Sprintf("C-%05d", i)
+		notEval = append(notEval, cautils.NotEvaluatedControl{
+			ControlID: id,
+			Reason:    "missing resource definition in target cluster or manifest",
+		})
+	}
+	session.ScanCoverage = cautils.ScanCoverage{
+		CoverageScore:        10.0,
+		EvaluatedControls:    100,
+		TotalControls:        count + 100,
+		Degraded:             true,
+		NotEvaluatedControls: notEval,
+	}
+
+	summaryFile := filepath.Join(t.TempDir(), "step_summary.md")
+	t.Setenv("GITHUB_STEP_SUMMARY", summaryFile)
+
+	output := ghOutputFor(t, session)
+	require.NotEmpty(t, output)
+
+	info, err := os.Stat(summaryFile)
+	require.NoError(t, err)
+	assert.LessOrEqual(t, info.Size(), int64(githubActionsMaxStepSummaryBytes),
+		"oversized step summary must be truncated to stay strictly within 1 MiB")
+
+	contentBytes, err := os.ReadFile(summaryFile)
+	require.NoError(t, err)
+	content := string(contentBytes)
+	assert.Contains(t, content, "### Kubescape Scan Coverage Summary")
+	assert.Contains(t, content, "#### Skipped Controls")
+	assert.Contains(t, content, "Summary truncated to stay within GitHub's 1 MiB limit")
+	assert.Contains(t, content, "entries omitted")
+}
+
+func TestGenerateStepSummaryWithBudget_Boundaries(t *testing.T) {
+	session := ghSessionFixture(t, "C-0057", 8.0)
+	longReason := strings.Repeat("detailed diagnostic reason explaining why control evaluation was skipped; ", 3)
+	session.ScanCoverage = cautils.ScanCoverage{
+		CoverageScore:     50.0,
+		EvaluatedControls: 5,
+		TotalControls:     10,
+		Degraded:          true,
+		NotEvaluatedControls: []cautils.NotEvaluatedControl{
+			{ControlID: "C-0001", Reason: "first: " + longReason},
+			{ControlID: "C-0002", Reason: "second: " + longReason},
+		},
+	}
+
+	// 1. Zero or negative budget returns empty string.
+	assert.Empty(t, generateStepSummaryWithBudget(session, 0))
+	assert.Empty(t, generateStepSummaryWithBudget(session, -10))
+
+	// 2. Full budget returns full summary without truncation notice.
+	full := generateStepSummaryWithBudget(session, 1024*1024)
+	assert.Contains(t, full, "C-0001")
+	assert.Contains(t, full, "C-0002")
+	assert.NotContains(t, full, "truncated")
+
+	// 3. Budget that can fit first row + notice but not second row must truncate and show "1 entry omitted".
+	// Since each row is ~250 bytes and the notice is ~87 bytes, len(full) - 50 accommodates row 1 + notice.
+	budget := len(full) - 50
+	truncated := generateStepSummaryWithBudget(session, budget)
+	assert.LessOrEqual(t, len(truncated), budget)
+	assert.Contains(t, truncated, "C-0001")
+	assert.Contains(t, truncated, "Summary truncated to stay within GitHub's 1 MiB limit (1 entry omitted).")
+	assert.NotContains(t, truncated, "C-0002")
 }

@@ -1728,7 +1728,7 @@ func TestConfigurationSARIFStreamingStructureAndOrdering(t *testing.T) {
 			}
 			for i, result := range run.Results {
 				require.NotNil(t, result.RuleIndex)
-				require.Less(t, int(*result.RuleIndex), len(run.Tool.Driver.Rules))
+				require.Less(t, *result.RuleIndex, uint(len(run.Tool.Driver.Rules)))
 				require.Equal(t, *result.RuleID, run.Tool.Driver.Rules[*result.RuleIndex].ID)
 				require.Equal(t, fmt.Sprintf("C-%04d", i%10), *result.RuleID)
 				require.NotEmpty(t, result.PartialFingerprints["kubescapeFindingFingerprint"])
@@ -1816,4 +1816,149 @@ func TestConfigurationSARIFStopsBeforeTransformingLaterResources(t *testing.T) {
 	require.ErrorIs(t, NewSARIFPrinter(false).writeConfigurationSARIF(context.Background(), w, s), errOutputTest)
 	require.Positive(t, reads[0])
 	require.Zero(t, reads[1])
+}
+
+func TestPrintConfigurationScan_DegradedCoverageInvocations(t *testing.T) {
+	s := configurationOutputFixture(t, 1)
+	s.ScanCoverage = cautils.ScanCoverage{
+		CoverageScore:     85.0,
+		EvaluatedControls: 17,
+		TotalControls:     20,
+		Degraded:          true,
+	}
+
+	sp := NewSARIFPrinter(false)
+	var output bytes.Buffer
+	require.NoError(t, sp.writeConfigurationSARIF(context.Background(), &output, s))
+
+	var report sarif.Report
+	require.NoError(t, json.Unmarshal(output.Bytes(), &report))
+	require.Len(t, report.Runs, 1)
+	run := report.Runs[0]
+	require.Len(t, run.Invocations, 1)
+	inv := run.Invocations[0]
+
+	// Properties
+	require.NotNil(t, inv.Properties)
+	assert.Equal(t, "85.00", inv.Properties["coverageScore"])
+	assert.Equal(t, "17", inv.Properties["evaluatedControls"])
+	assert.Equal(t, "20", inv.Properties["totalControls"])
+	assert.Equal(t, "true", inv.Properties["degraded"])
+
+	// ToolExecutionNotifications
+	require.NotEmpty(t, inv.ToolExecutionNotifications)
+	var foundDegradedWarning bool
+	for _, notif := range inv.ToolExecutionNotifications {
+		if notif.Message != nil && strings.Contains(*notif.Message.Text, "Scan coverage is degraded") {
+			foundDegradedWarning = true
+			assert.Equal(t, "warning", notif.Level)
+			assert.Contains(t, *notif.Message.Text, "85.00%")
+			assert.Contains(t, *notif.Message.Text, "17 of 20")
+		}
+	}
+	assert.True(t, foundDegradedWarning, "expected degraded scan coverage warning notification")
+}
+
+func TestPrintConfigurationScan_UnevaluatedControlsInNotifications(t *testing.T) {
+	s := configurationOutputFixture(t, 1)
+	s.ScanCoverage = cautils.ScanCoverage{
+		CoverageScore:     90.0,
+		EvaluatedControls: 9,
+		TotalControls:     10,
+		Degraded:          true,
+		NotEvaluatedControls: []cautils.NotEvaluatedControl{
+			{
+				ControlID: "C-0099",
+				Reason:    "missing: apps/v1/deployments",
+			},
+		},
+	}
+	// Also add a skipped control in SummaryDetails.Controls
+	ctrl98 := reportsummary.ControlSummary{
+		ControlID: "C-0098",
+		Name:      "Configuration control",
+	}
+	ctrl98.SetStatus(&apis.StatusInfo{
+		InnerStatus: apis.StatusSkipped,
+		SubStatus:   apis.SubStatusConfiguration,
+		InnerInfo:   "disabled in config",
+	})
+	s.Report.SummaryDetails.Controls["C-0098"] = ctrl98
+
+	sp := NewSARIFPrinter(false)
+	var output bytes.Buffer
+	require.NoError(t, sp.writeConfigurationSARIF(context.Background(), &output, s))
+
+	var report sarif.Report
+	require.NoError(t, json.Unmarshal(output.Bytes(), &report))
+	require.Len(t, report.Runs, 1)
+	run := report.Runs[0]
+
+	// Rules should include C-0098 and C-0099
+	ruleMap := make(map[string]*sarif.ReportingDescriptor)
+	for _, rule := range run.Tool.Driver.Rules {
+		ruleMap[rule.ID] = rule
+	}
+	assert.Contains(t, ruleMap, "C-0099", "rule descriptor for C-0099 must be registered")
+	assert.Contains(t, ruleMap, "C-0098", "rule descriptor for C-0098 must be registered")
+
+	require.Len(t, run.Invocations, 1)
+	inv := run.Invocations[0]
+
+	notificationsByRule := make(map[string]*sarif.Notification)
+	for _, notif := range inv.ToolExecutionNotifications {
+		if notif.AssociatedRule != nil && notif.AssociatedRule.Id != nil {
+			notificationsByRule[*notif.AssociatedRule.Id] = notif
+		}
+	}
+
+	require.Contains(t, notificationsByRule, "C-0099")
+	notif99 := notificationsByRule["C-0099"]
+	assert.Equal(t, "warning", notif99.Level)
+	require.NotNil(t, notif99.Message.Text)
+	assert.Contains(t, *notif99.Message.Text, "Control C-0099 was not evaluated")
+	assert.Contains(t, *notif99.Message.Text, "missing: apps/v1/deployments")
+
+	require.Contains(t, notificationsByRule, "C-0098")
+	notif98 := notificationsByRule["C-0098"]
+	assert.Equal(t, "warning", notif98.Level)
+	require.NotNil(t, notif98.Message.Text)
+	assert.Contains(t, *notif98.Message.Text, "Control C-0098 was not evaluated")
+	assert.Contains(t, *notif98.Message.Text, "configuration: disabled in config")
+}
+
+func TestPrintConfigurationScan_FullCoverageOmitsDegradedWarning(t *testing.T) {
+	s := configurationOutputFixture(t, 1)
+	s.ScanCoverage = cautils.ScanCoverage{
+		CoverageScore:     100.0,
+		EvaluatedControls: 10,
+		TotalControls:     10,
+		Degraded:          false,
+	}
+	ctrl98 := reportsummary.ControlSummary{
+		ControlID: "C-0098",
+		Name:      "Configuration control",
+	}
+	ctrl98.SetStatus(&apis.StatusInfo{
+		InnerStatus: apis.StatusSkipped,
+		SubStatus:   apis.SubStatusConfiguration,
+		InnerInfo:   "disabled in config",
+	})
+	s.Report.SummaryDetails.Controls["C-0098"] = ctrl98
+
+	sp := NewSARIFPrinter(false)
+	var output bytes.Buffer
+	require.NoError(t, sp.writeConfigurationSARIF(context.Background(), &output, s))
+
+	var report sarif.Report
+	require.NoError(t, json.Unmarshal(output.Bytes(), &report))
+	require.Len(t, report.Runs, 1)
+	run := report.Runs[0]
+	require.Len(t, run.Invocations, 1)
+	inv := run.Invocations[0]
+
+	assert.Equal(t, "100.00", inv.Properties["coverageScore"])
+	assert.Equal(t, "false", inv.Properties["degraded"])
+
+	assert.Empty(t, inv.ToolExecutionNotifications, "full coverage scans must omit notifications for skipped controls")
 }
