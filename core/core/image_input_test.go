@@ -424,18 +424,28 @@ type tarMember struct {
 	body []byte
 }
 
-// writeTarOrdered tars members in order with explicit blob directories,
-// like real buildah archives (the provider's extraction only creates
-// parents for listed directories).
+// writeTarOrdered tars members in order. With dirHeaders it adds explicit
+// blob directories like real buildah archives (the provider's extraction
+// only creates parents for listed directories); without them it models a
+// parentless archive, whose regular blob members the extractor cannot open.
 func writeTarOrdered(t *testing.T, path string, members []tarMember) {
+	t.Helper()
+	writeTarMembers(t, path, members, true)
+}
+
+// writeTarMembers tars members in order, optionally omitting explicit
+// directory headers.
+func writeTarMembers(t *testing.T, path string, members []tarMember, dirHeaders bool) {
 	t.Helper()
 	f, err := os.Create(path)
 	require.NoError(t, err)
 	defer func() { _ = f.Close() }()
 	tw := tar.NewWriter(f)
 	defer func() { _ = tw.Close() }()
-	for _, dirEntry := range []string{"blobs/", "blobs/sha256/"} {
-		require.NoError(t, tw.WriteHeader(&tar.Header{Name: dirEntry, Typeflag: tar.TypeDir, Mode: 0o755}))
+	if dirHeaders {
+		for _, dirEntry := range []string{"blobs/", "blobs/sha256/"} {
+			require.NoError(t, tw.WriteHeader(&tar.Header{Name: dirEntry, Typeflag: tar.TypeDir, Mode: 0o755}))
+		}
 	}
 	for _, m := range members {
 		require.NoError(t, tw.WriteHeader(&tar.Header{Name: m.name, Mode: 0o600, Size: int64(len(m.body))}))
@@ -677,6 +687,50 @@ func TestImageRemainderOCIDuplicateEntries(t *testing.T) {
 		requireArchiveProviderVerdict(t, path, accept)
 		assert.Equal(t, accept, isOCILayoutTarball(path), "classifier must agree with the provider on %q", path)
 	}
+}
+
+// TestImageRemainderOCIParentDirectories pins the extractor's parent rule:
+// regular members land only where a directory was materialized, because the
+// extractor opens them without creating parents. An otherwise valid archive
+// without blob directory headers is rejected by the provider and must be
+// rejected here — under both absolute and registry-parseable relative names,
+// since Syft falls through to the registry for such a local file.
+func TestImageRemainderOCIParentDirectories(t *testing.T) {
+	dir := t.TempDir()
+	index, _, _, manifestDigest, _, blobs := ociLayoutContentWithLayers()
+	members := []tarMember{
+		{name: "oci-layout", body: []byte(`{"imageLayoutVersion":"1.0.0"}`)},
+		{name: "index.json", body: index},
+	}
+	for digest, body := range blobs {
+		members = append(members, tarMember{name: blobEntry(digest), body: body})
+	}
+	_ = manifestDigest
+
+	withDirs := filepath.Join(dir, "withdirs.tar")
+	writeTarMembers(t, withDirs, members, true)
+	parentless := filepath.Join(dir, "parentless.tar")
+	writeTarMembers(t, parentless, members, false)
+
+	requireArchiveProviderVerdict(t, withDirs, true)
+	assert.True(t, isOCILayoutTarball(withDirs))
+	requireArchiveProviderVerdict(t, parentless, false)
+	assert.False(t, isOCILayoutTarball(parentless),
+		"parentless blob members fail extraction, so the classifier must fall through")
+
+	// Relative collision names: the parentless file resolves registry (the
+	// scan Syft actually performs), the headed one stays local.
+	relDir := t.TempDir()
+	writeTarMembers(t, filepath.Join(relDir, "headed"), members, true)
+	writeTarMembers(t, filepath.Join(relDir, "parentless"), members, false)
+	t.Chdir(relDir)
+
+	registry, _, err := classifyImageInput("image:headed", osStatExists)
+	assert.False(t, registry)
+	assert.NoError(t, err)
+	registry, _, err = classifyImageInput("image:parentless", osStatExists)
+	assert.True(t, registry, "parentless archive must fall through to registry")
+	assert.NoError(t, err)
 }
 
 // TestImageRemainderOCICorruptContent pins the content-validation direction:
