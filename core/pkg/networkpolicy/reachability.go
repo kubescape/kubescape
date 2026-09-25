@@ -220,8 +220,9 @@ func (idx *Index) reachesAnyPort(src, dst Endpoint) (Verdict, Decision, Decision
 }
 
 // samePod reports whether a and b identify the same Pod (same namespace and
-// name). Both must be non-empty: two Endpoints with an unset Name are not
-// "the same pod" just because both fields are blank.
+// name). Both must be non-empty: two Endpoints with an unset Namespace or Name
+// are not "the same pod" just because those fields are blank.
 func samePod(a, b Endpoint) bool {
-	return a.Name != "" && a.Namespace == b.Namespace && a.Name == b.Name
+	return a.Namespace != "" && a.Name != "" &&
+		a.Namespace == b.Namespace && a.Name == b.Name
 }

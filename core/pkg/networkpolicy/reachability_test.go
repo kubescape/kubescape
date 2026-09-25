@@ -435,5 +435,40 @@ func TestReaches_SamePodIsAlwaysAllowedDespiteDefaultDeny(t *testing.T) {
 	}
 }
 
+func TestReaches_IncompleteIdentityIsNotTreatedAsSamePod(t *testing.T) {
+	tests := []struct {
+		name     string
+		policyNS string
+		src, dst Endpoint
+	}{
+		{
+			name:     "missing namespace",
+			policyNS: "",
+			src:      Endpoint{Name: "server", IP: "10.0.0.1"},
+			dst:      Endpoint{Name: "server", IP: "10.0.0.2"},
+		},
+		{
+			name:     "missing name",
+			policyNS: "ns",
+			src:      Endpoint{Namespace: "ns", IP: "10.0.0.1"},
+			dst:      Endpoint{Namespace: "ns", IP: "10.0.0.2"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			denyAll := policy(tt.policyNS, "deny-all", metav1.LabelSelector{},
+				[]networkingv1.PolicyType{networkingv1.PolicyTypeIngress, networkingv1.PolicyTypeEgress}, nil, nil)
+			idx, _ := NewIndex([]*networkingv1.NetworkPolicy{denyAll}, nil)
+
+			if v, _, _ := idx.Reaches(tt.src, tt.dst, portSpec(80)); v != Denied {
+				t.Errorf("port 80: incomplete identities must go through normal policy evaluation: verdict = %v", v)
+			}
+			if v, _, _ := idx.Reaches(tt.src, tt.dst, nil); v != Denied {
+				t.Errorf("any port: incomplete identities must go through normal policy evaluation: verdict = %v", v)
+			}
+		})
+	}
+}
+
 func podSelectorPtr(s metav1.LabelSelector) *metav1.LabelSelector       { return &s }
 func namespaceSelectorPtr(s metav1.LabelSelector) *metav1.LabelSelector { return &s }
