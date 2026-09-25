@@ -21,6 +21,7 @@ import (
 	"github.com/kubescape/kubescape/v4/core/pkg/fleet"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer"
+	printerv2 "github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer/v2"
 	"github.com/spf13/cobra"
 )
 
@@ -498,6 +499,12 @@ func fleetScan(baseScanInfo cautils.ScanInfo, ks meta.IKubescape, policyIdentifi
 		} else {
 			logger.L().Error("fleet scan: fleet report not written", helpers.String("output", baseScanInfo.FleetReport), helpers.Error(fleetReportErr))
 		}
+
+		// Printed whether or not the file was written. A run that scanned every
+		// cluster and then failed to save the result should still tell the
+		// operator what it found, and the summary is the only place they would
+		// otherwise see it.
+		printerv2.PrintFleetReport(os.Stdout, &report)
 	}
 
 	// The fleet report is not a context, so its failure is reported beside the
