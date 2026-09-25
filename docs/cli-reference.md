@@ -592,7 +592,7 @@ kubescape scan workload Deployment/nginx --chart-path ./chart --file-path ./char
 
 ## kubescape scan image
 
-Scan one or more container images for vulnerabilities.
+Scan one or more container images for vulnerabilities. For a detailed overview, see the [Image Scanning guide](image-scanning.md).
 
 ### Synopsis
 
