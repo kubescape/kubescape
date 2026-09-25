@@ -748,7 +748,7 @@ func loadFiles(rootPath string, filePaths []string) (map[string][]workloadinterf
 	errs := []error{}
 	skips := []SkippedManifest{}
 	for i := range filePaths {
-		f, err := loadFile(filePaths[i])
+		f, mapped, err := loadFile(filePaths[i])
 		if err != nil {
 			// Oversized files are recorded as skipped manifests rather than aborting the
 			// entire scan - a single attacker-supplied huge file in a repo must not
@@ -770,9 +770,11 @@ func loadFiles(rootPath string, filePaths []string) (map[string][]workloadinterf
 		}
 
 		w, e := ReadFile(f, getFileFormat(filePaths[i]))
-		m := mmap.MMap(f)
-		if errUnmap := m.Unmap(); errUnmap != nil {
-			logger.L().Warning("failed to unmap file", helpers.String("path", filePaths[i]), helpers.Error(errUnmap))
+		if mapped {
+			m := mmap.MMap(f)
+			if errUnmap := m.Unmap(); errUnmap != nil {
+				logger.L().Warning("failed to unmap file", helpers.String("path", filePaths[i]), helpers.Error(errUnmap))
+			}
 		}
 
 		if e != nil {
@@ -849,11 +851,13 @@ func getMaxFileSize() int64 {
 	return DefaultMaxFileSize
 }
 
-func loadFile(filePath string) ([]byte, error) {
+// loadFile returns the contents of filePath. mapped reports whether data is a
+// memory mapping, which the caller must release with mmap.MMap(data).Unmap().
+func loadFile(filePath string) (data []byte, mapped bool, err error) {
 	cleaned := filepath.Clean(filePath)
 	f, err := os.Open(cleaned)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	defer f.Close()
 
@@ -861,24 +865,35 @@ func loadFile(filePath string) ([]byte, error) {
 
 	fi, statErr := f.Stat()
 	if statErr != nil {
-		return nil, statErr
+		return nil, false, statErr
 	}
 
 	if fi.Size() > limit {
-		return nil, fmt.Errorf("%w: %q size %d exceeds limit %d bytes", ErrFileTooLarge, filePath, fi.Size(), limit)
+		return nil, false, fmt.Errorf("%w: %q size %d exceeds limit %d bytes", ErrFileTooLarge, filePath, fi.Size(), limit)
 	}
 
-	if fi.Size() == 0 {
-		return []byte{}, nil
+	// Stat reports 0 for pipes, devices and /proc-style files whatever they
+	// hold, so only a regular file with a known size can be mapped. Read
+	// anything else through a LimitReader at limit+1, which still detects an
+	// oversized file; getMaxFileSize never returns math.MaxInt64.
+	if !fi.Mode().IsRegular() || fi.Size() == 0 {
+		data, err = io.ReadAll(io.LimitReader(f, limit+1))
+		if err != nil {
+			return nil, false, err
+		}
+		if int64(len(data)) > limit {
+			return nil, false, fmt.Errorf("%w: %q size exceeds limit %d bytes", ErrFileTooLarge, filePath, limit)
+		}
+		return data, false, nil
 	}
 
 	// Use mmap to map the file into memory
 	mmapData, err := mmap.Map(f, mmap.RDONLY, 0)
 	if err != nil {
-		return nil, fmt.Errorf("failed to mmap file %q: %w", filePath, err)
+		return nil, false, fmt.Errorf("failed to mmap file %q: %w", filePath, err)
 	}
 
-	return mmapData, nil
+	return mmapData, true, nil
 }
 func ReadFile(fileContent []byte, fileFormat FileFormat) ([]workloadinterface.IMetadata, error) {
 
