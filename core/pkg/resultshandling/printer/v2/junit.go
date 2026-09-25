@@ -44,6 +44,7 @@ type JUnitTestSuites struct {
 	Suites   []JUnitTestSuite `xml:"testsuite"`           // list of controls
 	Errors   int              `xml:"errors,attr"`         // total number of tests with error result from all testsuites
 	Failures int              `xml:"failures,attr"`       // total number of failed tests from all testsuites
+	Skipped  int              `xml:"skipped,attr"`        // total number of skipped tests from all testsuites
 	Tests    int              `xml:"tests,attr"`          // total number of tests from all testsuites. Some software may expect to only see the number of successful tests from all testsuites though
 	Time     string           `xml:"time,attr,omitempty"` // time in seconds to execute all test suites
 	Name     string           `xml:"name,attr,omitempty"` // ? Add framework names ?
@@ -137,7 +138,7 @@ func (jp *JunitPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.
 				imageResult.Suites[i].ID += suiteIDOffset
 			}
 			junitResult.Suites = append(junitResult.Suites, imageResult.Suites...)
-			junitResult.Tests, junitResult.Failures, junitResult.Errors = aggregateSuiteCounts(junitResult.Suites)
+			junitResult.Tests, junitResult.Failures, junitResult.Errors, junitResult.Skipped = aggregateSuiteCounts(junitResult.Suites)
 		}
 	} else if len(imageScanData) > 0 {
 		junitResult = imageTestsSuites(imageScanData)
@@ -171,26 +172,28 @@ func iso8601Timestamp(t time.Time) string {
 	return t.UTC().Format("2006-01-02T15:04:05Z")
 }
 
-// aggregateSuiteCounts sums the Tests/Failures/Errors counters across child
+// aggregateSuiteCounts sums the Tests/Failures/Errors/Skipped counters across child
 // testsuites. Extracted so the aggregation can be unit-tested directly,
 // independent of the production code path (which never populates child Errors).
-func aggregateSuiteCounts(suites []JUnitTestSuite) (tests, failures, errors int) {
+func aggregateSuiteCounts(suites []JUnitTestSuite) (tests, failures, errors, skipped int) {
 	for _, s := range suites {
 		tests += s.Tests
 		failures += s.Failures
 		errors += s.Errors
+		skipped += s.Skipped
 	}
 	return
 }
 
 func testsSuites(results *cautils.OPASessionObj) *JUnitTestSuites {
 	suites := listTestsSuite(results)
-	tests, failures, errs := aggregateSuiteCounts(suites)
+	tests, failures, errs, skipped := aggregateSuiteCounts(suites)
 	return &JUnitTestSuites{
 		Suites:   suites,
 		Tests:    tests,
 		Failures: failures,
 		Errors:   errs,
+		Skipped:  skipped,
 		Name:     "Kubescape Scanning",
 	}
 }
@@ -259,12 +262,13 @@ func imageTestsSuites(imageScanData []cautils.ImageScanData) *JUnitTestSuites {
 		suites = append(suites, suite)
 	}
 
-	tests, failures, errs := aggregateSuiteCounts(suites)
+	tests, failures, errs, skipped := aggregateSuiteCounts(suites)
 	return &JUnitTestSuites{
 		Suites:   suites,
 		Tests:    tests,
 		Failures: failures,
 		Errors:   errs,
+		Skipped:  skipped,
 		Name:     "Kubescape Image Scanning",
 	}
 }
