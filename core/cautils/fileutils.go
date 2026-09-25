@@ -17,6 +17,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 
 	"github.com/edsrzf/mmap-go"
 	"github.com/kubescape/go-logger"
@@ -42,6 +43,10 @@ var (
 
 	// ErrFileTooLarge is returned when a manifest file exceeds the configured per-file size limit.
 	ErrFileTooLarge = errors.New("file too large")
+
+	// ErrNotRegularFile is returned when a discovered manifest path is a FIFO,
+	// device or other non-regular file, which is skipped rather than read.
+	ErrNotRegularFile = errors.New("not a regular file")
 )
 
 type FileFormat string
@@ -855,7 +860,9 @@ func getMaxFileSize() int64 {
 // memory mapping, which the caller must release with mmap.MMap(data).Unmap().
 func loadFile(filePath string) (data []byte, mapped bool, err error) {
 	cleaned := filepath.Clean(filePath)
-	f, err := os.Open(cleaned)
+	// O_NONBLOCK so opening a FIFO does not wait for a writer to appear; it
+	// has no effect on reading a regular file, and Windows ignores it.
+	f, err := os.OpenFile(cleaned, os.O_RDONLY|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		return nil, false, err
 	}
@@ -868,15 +875,23 @@ func loadFile(filePath string) (data []byte, mapped bool, err error) {
 		return nil, false, statErr
 	}
 
+	// A FIFO or device reports no size and delivers its content on another
+	// process's schedule: reading one waits until the writer closes, however
+	// little it sent, and would stall the sequential scan behind it. Stat the
+	// opened descriptor so a path swapped after discovery cannot slip past.
+	if !fi.Mode().IsRegular() {
+		return nil, false, fmt.Errorf("%w: %q (%s)", ErrNotRegularFile, filePath, fi.Mode().Type())
+	}
+
 	if fi.Size() > limit {
 		return nil, false, fmt.Errorf("%w: %q size %d exceeds limit %d bytes", ErrFileTooLarge, filePath, fi.Size(), limit)
 	}
 
-	// Stat reports 0 for pipes, devices and /proc-style files whatever they
-	// hold, so only a regular file with a known size can be mapped. Read
-	// anything else through a LimitReader at limit+1, which still detects an
-	// oversized file; getMaxFileSize never returns math.MaxInt64.
-	if !fi.Mode().IsRegular() || fi.Size() == 0 {
+	// /proc-style files report 0 whatever they hold, so a regular file with no
+	// known size is read rather than mapped, through a LimitReader at limit+1
+	// that still detects an oversized file; getMaxFileSize never returns
+	// math.MaxInt64.
+	if fi.Size() == 0 {
 		data, err = io.ReadAll(io.LimitReader(f, limit+1))
 		if err != nil {
 			return nil, false, err
