@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"strconv"
 	"testing"
 
 	mapset "github.com/deckarep/golang-set/v2"
@@ -744,4 +745,18 @@ func TestPreferredAffinityDoesNotNarrowHardPlatformSet(t *testing.T) {
 		"amd": "linux/amd64",
 		"arm": "linux/arm64",
 	}))
+}
+
+func BenchmarkAddImageScanTarget(b *testing.B) {
+	for b.Loop() {
+		targets := mapset.NewSet[ImageScanTarget]()
+		for i := 0; i < 500; i++ {
+			img := "image-" + strconv.Itoa(i%100) + ":latest"
+			addImageScanTarget(targets, ImageScanTarget{
+				Image:           img,
+				Platform:        "linux/amd64",
+				SkipUnavailable: i%2 == 0,
+			})
+		}
+	}
 }
