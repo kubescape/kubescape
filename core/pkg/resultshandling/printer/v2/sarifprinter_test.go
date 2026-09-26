@@ -1962,3 +1962,47 @@ func TestPrintConfigurationScan_FullCoverageOmitsDegradedWarning(t *testing.T) {
 
 	assert.Empty(t, inv.ToolExecutionNotifications, "full coverage scans must omit notifications for skipped controls")
 }
+
+func TestSARIFActionPrint_CombinedScanAggregatesPostureAndImageRuns(t *testing.T) {
+	tmp, err := os.CreateTemp("", "sarif-combined-*.sarif")
+	require.NoError(t, err)
+	defer func() { _ = os.Remove(tmp.Name()) }()
+
+	sp := NewSARIFPrinter(false)
+	sp.writer = tmp
+
+	session := configurationOutputFixture(t, 1)
+	imageScan := buildSeverityExceptionImageScanData()
+
+	err = sp.ActionPrint(context.Background(), session, []cautils.ImageScanData{imageScan})
+	require.NoError(t, err)
+	require.NoError(t, tmp.Close())
+
+	raw, err := os.ReadFile(tmp.Name())
+	require.NoError(t, err)
+
+	require.NoError(t, checkJSONDocument(raw))
+
+	var report sarif.Report
+	require.NoError(t, json.Unmarshal(raw, &report))
+	require.Len(t, report.Runs, 2, "SARIF report must contain both posture run and image run in combined scan")
+
+	// Posture run
+	postureRun := report.Runs[0]
+	require.NotNil(t, postureRun.Tool.Driver)
+	assert.Equal(t, "kubescape", postureRun.Tool.Driver.Name)
+	assert.NotEmpty(t, postureRun.Results)
+
+	// Image run
+	imageRun := report.Runs[1]
+	require.NotNil(t, imageRun.Tool.Driver)
+	assert.Equal(t, "Kubescape", imageRun.Tool.Driver.Name)
+	assert.NotEmpty(t, imageRun.Results)
+}
+
+func TestSARIFActionPrint_NoDataReturnsError(t *testing.T) {
+	sp := NewSARIFPrinter(false)
+	err := sp.ActionPrint(context.Background(), nil, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no data provided")
+}
