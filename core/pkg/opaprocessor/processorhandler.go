@@ -1983,6 +1983,7 @@ func (opap *OPAProcessor) runCELOnK8s(ctx context.Context, rule *reporthandling.
 		return nil, celOutcome{}, fmt.Errorf("rule: '%s', policy %q is matched by %d live bindings; the offline engine does not yet select per-binding paramRefs, so refusing it to preserve scan/admission parity", rule.Name, vap.PolicyName, len(bindings))
 	}
 	findParam := opap.celParamObjectFinder()
+	readsNamespaceObject := evaluator.ReadsNamespaceObjectInValidations(vap)
 
 	var responses []reporthandling.RuleResponse
 	outcome := celOutcome{excluded: make(map[string]struct{})}
@@ -2018,26 +2019,26 @@ func (opap *OPAProcessor) runCELOnK8s(ctx context.Context, rule *reporthandling.
 			return nil, celOutcome{}, fmt.Errorf("rule: '%s', %w", rule.Name, err)
 		}
 
-		// namespaceObject is the resource's Namespace object when the scan
-		// collected it, and nil otherwise — the evaluator then binds null, so a
-		// policy reading namespaceObject.* sees an absent namespace (and a
-		// selection into it eval-errors and skips, never passes). File scans and
-		// scans whose frameworks never matched Namespaces stay on that safe path.
-		eval, err := evaluator.EvaluateVAP(ctx, vap, obj, opap.celNamespaceObjectFor(obj), params)
+		// Match conditions decide admission applicability before validations use
+		// namespaceObject. Preserve an exclusion even when the Namespace was not collected.
+		eval, err := evaluator.EvaluateVAPGate(ctx, vap, obj, params)
 		if err != nil {
 			return nil, celOutcome{}, fmt.Errorf("rule: '%s', %w", rule.Name, err)
 		}
-
 		if !eval.Applicable {
-			// Exclusions are silent in the results (the resource is out of scope,
-			// as at admission), but log one so a wrong GVR guess that quietly drops
-			// a resource the control should have seen stays diagnosable.
-			resID := celResourceID(obj)
-			logger.L().Debug("CEL control does not apply to resource, excluding it",
-				helpers.String("rule", rule.Name),
-				helpers.String("resource", resID))
-			outcome.excluded[resID] = struct{}{}
+			outcome.excluded[celResourceID(obj)] = struct{}{}
 			continue
+		}
+		if len(eval.Results) == 0 {
+			namespaceObject := opap.celNamespaceObjectFor(obj)
+			if missingNamespaceObject(readsNamespaceObject, celResourceNamespace(obj), namespaceObject) {
+				outcome.skipped = append(outcome.skipped, skippedCELResource{obj: obj, err: fmt.Errorf("namespace %q was not collected; cannot evaluate namespaceObject", celResourceNamespace(obj))})
+				continue
+			}
+			eval, err = evaluator.EvaluateVAPValidations(ctx, vap, obj, namespaceObject, params)
+			if err != nil {
+				return nil, celOutcome{}, fmt.Errorf("rule: '%s', %w", rule.Name, err)
+			}
 		}
 
 		violated := false
@@ -2087,6 +2088,12 @@ func (opap *OPAProcessor) runCELOnK8s(ctx context.Context, rule *reporthandling.
 	}
 
 	return responses, outcome, nil
+}
+
+// missingNamespaceObject distinguishes incomplete offline collection from the
+// legitimate null binding for a cluster-scoped object.
+func missingNamespaceObject(policyReadsNamespace bool, resourceNamespace string, namespaceObject map[string]any) bool {
+	return policyReadsNamespace && resourceNamespace != "" && namespaceObject == nil
 }
 
 // seedCELSkips records the CEL rule's unknown-verdict resources as StatusSkipped

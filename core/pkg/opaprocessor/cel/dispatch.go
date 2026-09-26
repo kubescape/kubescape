@@ -36,6 +36,18 @@ func (e *Evaluator) EvaluateControl(ctx context.Context, controlID string, obj, 
 // responsible for resolving params (e.g. from a per-binding paramRef), which
 // makes it the path for binding-specific parameter objects.
 func (e *Evaluator) EvaluateVAP(ctx context.Context, vap *VAP, obj, namespaceObject map[string]any, params any) (ControlEvaluation, error) {
+	gate, err := e.EvaluateVAPGate(ctx, vap, obj, params)
+	if err != nil || !gate.Applicable || len(gate.Results) > 0 {
+		return gate, err
+	}
+	return e.EvaluateVAPValidations(ctx, vap, obj, namespaceObject, params)
+}
+
+// EvaluateVAPGate evaluates match constraints and match conditions before a
+// caller resolves data that validations alone need. It lets an offline scanner
+// preserve an admission exclusion even when the optional Namespace object was
+// not collected.
+func (e *Evaluator) EvaluateVAPGate(ctx context.Context, vap *VAP, obj map[string]any, params any) (ControlEvaluation, error) {
 	if !vap.AppliesTo(obj) {
 		return ControlEvaluation{Applicable: false}, nil
 	}
@@ -49,6 +61,12 @@ func (e *Evaluator) EvaluateVAP(ctx context.Context, vap *VAP, obj, namespaceObj
 	if !matched {
 		return ControlEvaluation{Applicable: false}, nil
 	}
+	return ControlEvaluation{Applicable: true}, nil
+}
+
+// EvaluateVAPValidations runs the policy's validations after its admission
+// applicability gate has accepted the object.
+func (e *Evaluator) EvaluateVAPValidations(ctx context.Context, vap *VAP, obj, namespaceObject map[string]any, params any) (ControlEvaluation, error) {
 	results, err := e.EvaluateOnObject(ctx, obj, namespaceObject, params, vap.Variables, vap.Validations, &vap.failurePolicy)
 	if err != nil {
 		return ControlEvaluation{}, err
