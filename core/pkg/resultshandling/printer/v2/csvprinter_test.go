@@ -660,3 +660,223 @@ func TestCsvSourcePath(t *testing.T) {
 		})
 	}
 }
+
+func TestActionPrint_Csv_UnevaluatedControlsIncluded(t *testing.T) {
+	session := csvSessionFixture()
+	session.ScanCoverage = cautils.ScanCoverage{
+		CoverageScore:     66.0,
+		EvaluatedControls: 2,
+		TotalControls:     3,
+		Degraded:          true,
+		NotEvaluatedControls: []cautils.NotEvaluatedControl{
+			{
+				ControlID:   "C-0099",
+				MissingGVRs: []string{"apps/v1/daemonsets"},
+			},
+		},
+	}
+
+	tmpCsv, err := os.CreateTemp("", "csv-unevaluated-*.csv")
+	require.NoError(t, err)
+	defer os.Remove(tmpCsv.Name())
+
+	cp := NewCsvPrinter(false)
+	cp.writer = tmpCsv
+	err = cp.ActionPrint(context.TODO(), session, nil)
+	require.NoError(t, err)
+	require.NoError(t, cp.CloseWriter())
+
+	f, err := os.Open(tmpCsv.Name())
+	require.NoError(t, err)
+	defer f.Close()
+
+	r := csv.NewReader(f)
+	records, err := r.ReadAll()
+	require.NoError(t, err)
+
+	var foundUnevaluated bool
+	for _, row := range records[1:] {
+		require.Equal(t, 13, len(row), "every row must have 13 columns")
+		if row[1] == "C-0099" {
+			foundUnevaluated = true
+			assert.Equal(t, "C-0099", row[0], "name should fallback to control ID when not in summary")
+			assert.Equal(t, "not evaluated", row[3], "status must be 'not evaluated'")
+			assert.Equal(t, "", row[4], "resource name must be empty")
+			assert.Equal(t, "", row[5], "resource kind must be empty")
+			assert.Equal(t, "", row[6], "resource namespace must be empty")
+			assert.Equal(t, "", row[7], "api version must be empty")
+			assert.Equal(t, "", row[8], "failed paths must be empty")
+			assert.Equal(t, "", row[9], "fix paths must be empty")
+			assert.Equal(t, "missing: apps/v1/daemonsets", row[10], "remediation should contain skip reason")
+			assert.Contains(t, row[11], "c-0099", "control URL should link to control")
+			assert.Equal(t, "", row[12], "source path must be empty")
+		}
+	}
+	assert.True(t, foundUnevaluated, "expected unevaluated control C-0099 in CSV output")
+}
+
+func TestActionPrint_Csv_UnevaluatedControlsNotDuplicated(t *testing.T) {
+	session := csvSessionFixture()
+	session.ScanCoverage = cautils.ScanCoverage{
+		CoverageScore:     50.0,
+		EvaluatedControls: 1,
+		TotalControls:     2,
+		Degraded:          true,
+		NotEvaluatedControls: []cautils.NotEvaluatedControl{
+			{
+				ControlID: "C-0099",
+				Reason:    "evaluation timed out",
+			},
+			{
+				ControlID: "C-0099",
+				Reason:    "evaluation timed out",
+			},
+		},
+	}
+
+	tmpCsv, err := os.CreateTemp("", "csv-dup-*.csv")
+	require.NoError(t, err)
+	defer os.Remove(tmpCsv.Name())
+
+	cp := NewCsvPrinter(false)
+	cp.writer = tmpCsv
+	err = cp.ActionPrint(context.TODO(), session, nil)
+	require.NoError(t, err)
+	require.NoError(t, cp.CloseWriter())
+
+	f, err := os.Open(tmpCsv.Name())
+	require.NoError(t, err)
+	defer f.Close()
+
+	r := csv.NewReader(f)
+	records, err := r.ReadAll()
+	require.NoError(t, err)
+
+	unevaluatedCount := 0
+	for _, row := range records[1:] {
+		if row[1] == "C-0099" && row[3] == "not evaluated" {
+			unevaluatedCount++
+		}
+	}
+	assert.Equal(t, 1, unevaluatedCount, "unevaluated control should only be emitted once as not evaluated even if duplicated in input")
+}
+
+func TestActionPrint_Csv_PreserveUnevaluatedDiagnosticWhenResourceRowsExist(t *testing.T) {
+	session := csvSessionFixture()
+	session.ScanCoverage = cautils.ScanCoverage{
+		CoverageScore:     50.0,
+		EvaluatedControls: 1,
+		TotalControls:     2,
+		Degraded:          true,
+		NotEvaluatedControls: []cautils.NotEvaluatedControl{
+			{
+				ControlID: testControlID1,
+				Reason:    "evaluation timed out",
+			},
+		},
+	}
+
+	tmpCsv, err := os.CreateTemp("", "csv-preserve-diag-*.csv")
+	require.NoError(t, err)
+	defer os.Remove(tmpCsv.Name())
+
+	cp := NewCsvPrinter(false)
+	cp.writer = tmpCsv
+	err = cp.ActionPrint(context.TODO(), session, nil)
+	require.NoError(t, err)
+	require.NoError(t, cp.CloseWriter())
+
+	f, err := os.Open(tmpCsv.Name())
+	require.NoError(t, err)
+	defer f.Close()
+
+	r := csv.NewReader(f)
+	records, err := r.ReadAll()
+	require.NoError(t, err)
+
+	var resourceRows [][]string
+	var diagRows [][]string
+	for _, row := range records[1:] {
+		if row[1] == testControlID1 {
+			if row[3] == "not evaluated" {
+				diagRows = append(diagRows, row)
+			} else {
+				resourceRows = append(resourceRows, row)
+			}
+		}
+	}
+
+	// Resource rows from earlier scopes are retained
+	assert.Len(t, resourceRows, 2, "resource result rows should be retained")
+	var foundDemo bool
+	for _, row := range resourceRows {
+		assert.Equal(t, "failed", row[3])
+		if row[4] == "demo" {
+			foundDemo = true
+		}
+	}
+	assert.True(t, foundDemo, "resource demo should be present in resource rows")
+
+	// Diagnostic row for timeout is preserved alongside existing results
+	require.Len(t, diagRows, 1, "exactly one control-level not-evaluated diagnostic row should be emitted alongside results")
+	diag := diagRows[0]
+	assert.Equal(t, "Privileged container", diag[0], "control name should come from summary")
+	assert.Equal(t, testControlID1, diag[1])
+	assert.Equal(t, "Critical", diag[2], "severity should match control score factor")
+	assert.Equal(t, "not evaluated", diag[3])
+	assert.Empty(t, diag[4], "resource name should be empty on diagnostic row")
+	assert.Empty(t, diag[5], "resource kind should be empty on diagnostic row")
+	assert.Empty(t, diag[6], "resource namespace should be empty on diagnostic row")
+	assert.Empty(t, diag[7], "api version should be empty on diagnostic row")
+	assert.Empty(t, diag[8], "failed paths should be empty on diagnostic row")
+	assert.Empty(t, diag[9], "fix paths should be empty on diagnostic row")
+	assert.Equal(t, "evaluation timed out", diag[10], "remediation should contain timeout reason")
+	assert.Contains(t, diag[11], "c-0057")
+	assert.Empty(t, diag[12], "source path should be empty on diagnostic row")
+}
+
+func TestActionPrint_Csv_SkippedControlFromSummaryIncluded(t *testing.T) {
+	session := csvSessionFixture()
+	skippedStatus := &apis.StatusInfo{
+		InnerStatus: apis.StatusSkipped,
+		SubStatus:   apis.SubStatusIrrelevant,
+		InnerInfo:   "no matching resources",
+	}
+	ctrlSkipped := &reportsummary.ControlSummary{
+		ControlID:   "C-0070",
+		Name:        "Host IPC",
+		ScoreFactor: 6.0,
+		StatusInfo:  *skippedStatus,
+	}
+	session.Report.SummaryDetails.Controls["C-0070"] = *ctrlSkipped
+
+	tmpCsv, err := os.CreateTemp("", "csv-skipped-summary-*.csv")
+	require.NoError(t, err)
+	defer os.Remove(tmpCsv.Name())
+
+	cp := NewCsvPrinter(false)
+	cp.writer = tmpCsv
+	err = cp.ActionPrint(context.TODO(), session, nil)
+	require.NoError(t, err)
+	require.NoError(t, cp.CloseWriter())
+
+	f, err := os.Open(tmpCsv.Name())
+	require.NoError(t, err)
+	defer f.Close()
+
+	r := csv.NewReader(f)
+	records, err := r.ReadAll()
+	require.NoError(t, err)
+
+	var foundSkipped bool
+	for _, row := range records[1:] {
+		if row[1] == "C-0070" {
+			foundSkipped = true
+			assert.Equal(t, "Host IPC", row[0])
+			assert.Equal(t, "not evaluated", row[3])
+			assert.Equal(t, "Medium", row[2])
+			assert.Equal(t, "irrelevant: no matching resources", row[10])
+		}
+	}
+	assert.True(t, foundSkipped, "expected skipped control C-0070 in CSV output")
+}
