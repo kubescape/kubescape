@@ -446,17 +446,13 @@ func resolveReviewPathLocations(opaSessionObj *cautils.OPASessionObj, locationRe
 	return locations
 }
 
-func (sp *SARIFPrinter) printImageScan(scanResults []cautils.ImageScanData) error {
-	combinedReport, err := sarif.New(sarif.Version210)
-	if err != nil {
-		return err
-	}
-
+func (sp *SARIFPrinter) buildImageScanRuns(scanResults []cautils.ImageScanData) ([]*sarif.Run, error) {
+	var runs []*sarif.Run
 	for _, scan := range scanResults {
 		model, err := models.NewDocument(clio.Identification{}, scan.Packages, scan.Context,
 			scan.Matches, scan.IgnoredMatches, scan.VulnerabilityProvider, nil, nil, models.DefaultSortStrategy, false)
 		if err != nil {
-			return fmt.Errorf("failed to create document: %w", err)
+			return nil, fmt.Errorf("failed to create document: %w", err)
 		}
 
 		// Render into an in-memory buffer rather than sp.writer directly: when no
@@ -468,12 +464,12 @@ func (sp *SARIFPrinter) printImageScan(scanResults []cautils.ImageScanData) erro
 		var rendered bytes.Buffer
 		pres := grypesarif.NewPresenter(models.PresenterConfig{Document: model, SBOM: scan.SBOM})
 		if err := pres.Present(&rendered); err != nil {
-			return err
+			return nil, err
 		}
 
 		var sarifReport sarif.Report
 		if err := json.Unmarshal(rendered.Bytes(), &sarifReport); err != nil {
-			return err
+			return nil, err
 		}
 
 		// Inject VEX Statuses
@@ -521,8 +517,25 @@ func (sp *SARIFPrinter) printImageScan(scanResults []cautils.ImageScanData) erro
 				run.Tool.Driver.Name = "Kubescape"
 			}
 			addImageSARIFFingerprints(run)
-			combinedReport.AddRun(run)
+			runs = append(runs, run)
 		}
+	}
+	return runs, nil
+}
+
+func (sp *SARIFPrinter) printImageScan(scanResults []cautils.ImageScanData) error {
+	combinedReport, err := sarif.New(sarif.Version210)
+	if err != nil {
+		return err
+	}
+
+	runs, err := sp.buildImageScanRuns(scanResults)
+	if err != nil {
+		return err
+	}
+
+	for _, run := range runs {
+		combinedReport.AddRun(run)
 	}
 
 	updatedSarifReport, err := json.MarshalIndent(combinedReport, "", "  ")
@@ -553,22 +566,31 @@ func (sp *SARIFPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.
 			return fmt.Errorf("failed to write results in sarif format: %w", err)
 		}
 	} else {
-		// configuration scan
-		if err := sp.printConfigurationScan(ctx, opaSessionObj); err != nil {
+		// configuration scan, with image scan runs appended when present
+		var imageRuns []*sarif.Run
+		if len(imageScanData) > 0 {
+			var err error
+			imageRuns, err = sp.buildImageScanRuns(imageScanData)
+			if err != nil {
+				logger.L().Ctx(ctx).Error("failed to write results in sarif format", helpers.Error(err))
+				return fmt.Errorf("failed to write results in sarif format: %w", err)
+			}
+		}
+
+		if err := sp.printConfigurationScan(ctx, opaSessionObj, imageRuns...); err != nil {
 			logger.L().Ctx(ctx).Error("failed to write results in sarif format", helpers.Error(err))
 			return fmt.Errorf("failed to write results in sarif format: %w", err)
 		}
-
 	}
 	printer.LogOutputFile(sp.writer.Name())
 	return nil
 }
 
-func (sp *SARIFPrinter) printConfigurationScan(ctx context.Context, opaSessionObj *cautils.OPASessionObj) error {
-	return sp.writeConfigurationSARIF(ctx, sp.writer, opaSessionObj)
+func (sp *SARIFPrinter) printConfigurationScan(ctx context.Context, opaSessionObj *cautils.OPASessionObj, additionalRuns ...*sarif.Run) error {
+	return sp.writeConfigurationSARIF(ctx, sp.writer, opaSessionObj, additionalRuns...)
 }
 
-func (sp *SARIFPrinter) writeConfigurationSARIF(ctx context.Context, w io.Writer, opaSessionObj *cautils.OPASessionObj) error {
+func (sp *SARIFPrinter) writeConfigurationSARIF(ctx context.Context, w io.Writer, opaSessionObj *cautils.OPASessionObj, additionalRuns ...*sarif.Run) error {
 	startedAt := opaSessionObj.Report.ReportGenerationTime
 	if startedAt.IsZero() {
 		startedAt = time.Now().UTC()
@@ -753,7 +775,17 @@ func (sp *SARIFPrinter) writeConfigurationSARIF(ctx context.Context, w io.Writer
 	stream.raw("\n      ],\n      \"invocations\": ")
 	stream.encoder.SetIndent("      ", "  ")
 	stream.value(run.Invocations)
-	stream.raw("\n    }\n  ]\n}\n")
+	if len(additionalRuns) == 0 {
+		stream.raw("\n    }\n  ]\n}\n")
+	} else {
+		stream.raw("\n    }")
+		for _, additionalRun := range additionalRuns {
+			stream.raw(",\n    ")
+			stream.encoder.SetIndent("    ", "  ")
+			stream.value(additionalRun)
+		}
+		stream.raw("\n  ]\n}\n")
+	}
 	if stream.err != nil {
 		return fmt.Errorf("failed to write SARIF report: %w", stream.err)
 	}
