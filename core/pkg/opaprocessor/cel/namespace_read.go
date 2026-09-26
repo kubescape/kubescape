@@ -100,18 +100,18 @@ func referencedVariables(env *cel.Env, expr string) variableReferences {
 		if !globalIdentifier(node, "variables") {
 			continue
 		}
-		parent, ok := node.Parent()
+		receiver, parent, ok := unwrapDynamicVariableReceiver(node)
 		if !ok {
 			continue
 		}
 		switch parent.Kind() {
 		case celast.SelectKind:
 			selection := parent.AsSelect()
-			if selection.Operand().ID() == node.ID() {
+			if selection.Operand().ID() == receiver.ID() {
 				seen[selection.FieldName()] = struct{}{}
 			}
 		case celast.CallKind:
-			name, dynamic, indexed := indexedVariableReference(node)
+			name, dynamic, indexed := indexedVariableReference(receiver)
 			if !indexed {
 				continue
 			}
@@ -129,34 +129,43 @@ func referencedVariables(env *cel.Env, expr string) variableReferences {
 	return variableReferences{names: result, hasDynamicIndex: hasDynamicIndex}
 }
 
-// indexedVariableReference follows dyn(...) wrappers around variables. CEL
-// represents index operations as calls with the map and key as arguments,
-// rather than as a member call, so the identifier can be nested beneath a
-// dynamic cast before reaching the index operation.
-func indexedVariableReference(node celast.NavigableExpr) (name string, dynamic, indexed bool) {
+// unwrapDynamicVariableReceiver treats dyn(variables) as the same lazy map as
+// variables. The wrapper is valid before either a select or index operation.
+func unwrapDynamicVariableReceiver(node celast.NavigableExpr) (celast.NavigableExpr, celast.NavigableExpr, bool) {
 	receiver := node
 	parent, ok := receiver.Parent()
 	for ok && parent.Kind() == celast.CallKind {
 		call := parent.AsCall()
 		args := call.Args()
-		if call.FunctionName() == "dyn" && len(args) == 1 && args[0].ID() == receiver.ID() {
-			receiver = parent
-			parent, ok = receiver.Parent()
-			continue
+		if call.FunctionName() != "dyn" || len(args) != 1 || args[0].ID() != receiver.ID() {
+			break
 		}
-		if call.FunctionName() != "_[_]" || len(args) != 2 || args[0].ID() != receiver.ID() {
-			return "", false, false
-		}
-		if args[1].Kind() != celast.LiteralKind {
-			return "", true, true
-		}
-		key, ok := args[1].AsLiteral().(types.String)
-		if !ok {
-			return "", true, true
-		}
-		return string(key), false, true
+		receiver = parent
+		parent, ok = receiver.Parent()
 	}
-	return "", false, false
+	return receiver, parent, ok
+}
+
+// indexedVariableReference recognizes CEL's call-shaped index operation. It
+// assumes a dyn(...) wrapper, if any, was already removed from receiver.
+func indexedVariableReference(receiver celast.NavigableExpr) (name string, dynamic, indexed bool) {
+	parent, ok := receiver.Parent()
+	if !ok || parent.Kind() != celast.CallKind {
+		return "", false, false
+	}
+	call := parent.AsCall()
+	args := call.Args()
+	if call.FunctionName() != "_[_]" || len(args) != 2 || args[0].ID() != receiver.ID() {
+		return "", false, false
+	}
+	if args[1].Kind() != celast.LiteralKind {
+		return "", true, true
+	}
+	key, ok := args[1].AsLiteral().(types.String)
+	if !ok {
+		return "", true, true
+	}
+	return string(key), false, true
 }
 
 // globalIdentifier reports whether node names the activation binding instead
