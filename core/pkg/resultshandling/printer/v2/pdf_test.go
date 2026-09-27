@@ -182,6 +182,7 @@ func TestGenerateImagePdf_NoVulnerabilities(t *testing.T) {
 	}
 }
 
+// TestGeneratePdf_CombinedScanIncludesImageFindings checks that a combined PDF contains posture findings, image CVEs, and the clean-image placeholder.
 func TestGeneratePdf_CombinedScanIncludesImageFindings(t *testing.T) {
 	pp := NewPdfPrinter()
 	summary := postureSummaryForPDF()
@@ -210,8 +211,10 @@ func TestGeneratePdf_CombinedScanIncludesImageFindings(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, cleanCombined)
 	assert.NotEqual(t, postureOnly, cleanCombined, "a clean image still adds the image section")
+	assert.Contains(t, string(cleanCombined), "No vulnerabilities found")
 }
 
+// TestActionPrint_PdfCombinedWritesBothSections checks that ActionPrint writes posture and image findings into the PDF file.
 func TestActionPrint_PdfCombinedWritesBothSections(t *testing.T) {
 	pp := NewPdfPrinter()
 	outputPath := filepath.Join(t.TempDir(), "combined.pdf")
@@ -237,12 +240,14 @@ func TestActionPrint_PdfCombinedWritesBothSections(t *testing.T) {
 	assert.Contains(t, string(raw), "C-COMBINED")
 }
 
+// TestActionPrint_PdfMissingData checks that ActionPrint returns an error when neither posture nor image data is present.
 func TestActionPrint_PdfMissingData(t *testing.T) {
 	pp := NewPdfPrinter()
 	err := pp.ActionPrint(context.Background(), nil, nil)
 	require.EqualError(t, err, "failed to print results, missing data")
 }
 
+// postureSummaryForPDF returns a one-control posture summary for PDF printer tests.
 func postureSummaryForPDF() *reportsummary.SummaryDetails {
 	return &reportsummary.SummaryDetails{
 		Controls: reportsummary.ControlSummaries{
@@ -256,6 +261,7 @@ func postureSummaryForPDF() *reportsummary.SummaryDetails {
 	}
 }
 
+// pdfCVEMatch builds a Grype vulnerability match for a PDF image-scan fixture.
 func pdfCVEMatch(id, severity string) match.Match {
 	return match.Match{
 		Vulnerability: vulnerability.Vulnerability{

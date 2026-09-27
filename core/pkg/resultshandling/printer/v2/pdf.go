@@ -124,6 +124,8 @@ func collectImagePDFData(imageScanData []cautils.ImageScanData) (string, []image
 	return fmt.Sprintf("Image scan: %s", strings.Join(images, ", ")), allCVEs
 }
 
+// writeImageTable appends the CVE table to template.
+// An empty CVE list still writes the clean-image placeholder row.
 func (pp *PdfPrinter) writeImageTable(template *pdf.Template, allCVEs []imageprinter.CVE) error {
 	rows, fixableCVEs := pp.getImageTableObjects(allCVEs)
 	return template.GenerateImageTable(rows, len(allCVEs), fixableCVEs)
@@ -156,10 +158,12 @@ func (pp *PdfPrinter) getImageTableObjects(cves []imageprinter.CVE) (*[]pdf.Imag
 	return &rows, fixableCVEs
 }
 
+// generatePdf builds a posture PDF and, when imageScanData is non-empty, appends the image CVE section.
 func (pp *PdfPrinter) generatePdf(summaryDetails *reportsummary.SummaryDetails, imageScanData []cautils.ImageScanData) ([]byte, error) {
 	return pp.generatePdfAt(summaryDetails, imageScanData, time.Now())
 }
 
+// generatePdfAt builds the PDF with reportTime so tests can compare stable bytes.
 func (pp *PdfPrinter) generatePdfAt(summaryDetails *reportsummary.SummaryDetails, imageScanData []cautils.ImageScanData, reportTime time.Time) ([]byte, error) {
 	sortedControlIDs := getSortedControlsIDs(summaryDetails.Controls)
 	infoToPrintInfo := mapInfoToPrintInfo(summaryDetails.Controls)
