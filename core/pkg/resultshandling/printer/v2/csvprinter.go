@@ -100,6 +100,12 @@ func (cp *CsvPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OP
 		return fmt.Errorf("failed to write CSV header: %w", err)
 	}
 
+	// Controls that were skipped or not evaluated never associate with a
+	// resource in Results, so track what the resource rows already covered:
+	// every remaining control is appended below to keep the CSV a complete
+	// account of the scanned framework.
+	emittedControls := make(map[string]struct{})
+
 	for _, result := range reportWithSeverity.Results {
 		resID := result.ResourceID
 		var resName, resKind, resNamespace, resApiVersion string
@@ -121,6 +127,7 @@ func (cp *CsvPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OP
 		for _, assocCtrl := range result.AssociatedControls {
 			ctrlID := assocCtrl.GetID()
 			ctrlName := assocCtrl.GetName()
+			emittedControls[ctrlID] = struct{}{}
 
 			severity := assocCtrl.Severity
 			if severity == "" {
@@ -162,6 +169,36 @@ func (cp *CsvPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OP
 				logger.L().Ctx(ctx).Error("failed to write CSV row", helpers.Error(err))
 				return fmt.Errorf("failed to write CSV row: %w", err)
 			}
+		}
+	}
+
+	for _, sc := range collectSkippedControls(opaSessionObj) {
+		if _, exists := emittedControls[sc.controlID]; exists {
+			continue
+		}
+		remediation := sc.remediation
+		if sc.reason != "" {
+			remediation = sc.reason
+		}
+
+		row := []string{
+			sc.name,
+			sc.controlID,
+			"Unknown",
+			"skipped",
+			"N/A",
+			"N/A",
+			"N/A",
+			"N/A",
+			"",
+			"",
+			remediation,
+			cautils.GetControlLink(sc.controlID),
+			"",
+		}
+		if err := csvWriter.Write(row); err != nil {
+			logger.L().Ctx(ctx).Error("failed to write CSV row", helpers.Error(err))
+			return fmt.Errorf("failed to write CSV row: %w", err)
 		}
 	}
 

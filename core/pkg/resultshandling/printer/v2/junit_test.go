@@ -1039,16 +1039,19 @@ func TestJunitMultiFrameworkSharedControl(t *testing.T) {
 		"parent Tests must NOT be the deduplicated SummaryDetails count")
 }
 
-// TestAggregateSuiteCounts covers the Tests/Failures/Errors aggregator
+// TestAggregateSuiteCounts covers the Tests/Failures/Errors/Skipped aggregator
 // directly. The production code path in junit.go never populates child
 // Errors (the printer only emits <failure> and <skipped>), so the multi-
 // framework regression test above cannot exercise the errors branch via
 // testsSuites. This unit test pins the loop itself.
 func TestAggregateSuiteCounts(t *testing.T) {
 	cases := []struct {
-		name                                string
-		in                                  []JUnitTestSuite
-		wantTests, wantFailures, wantErrors int
+		name         string
+		in           []JUnitTestSuite
+		wantTests    int
+		wantFailures int
+		wantErrors   int
+		wantSkipped  int
 	}{
 		{
 			name: "empty slice yields zeros",
@@ -1070,14 +1073,23 @@ func TestAggregateSuiteCounts(t *testing.T) {
 			},
 			wantTests: 13, wantFailures: 2, wantErrors: 4,
 		},
+		{
+			name: "skipped counters aggregate across suites",
+			in: []JUnitTestSuite{
+				{Tests: 5, Skipped: 2},
+				{Tests: 3, Skipped: 1},
+			},
+			wantTests: 8, wantSkipped: 3,
+		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			gotTests, gotFailures, gotErrors := aggregateSuiteCounts(tc.in)
+			gotTests, gotFailures, gotErrors, gotSkipped := aggregateSuiteCounts(tc.in)
 			assert.Equal(t, tc.wantTests, gotTests, "tests")
 			assert.Equal(t, tc.wantFailures, gotFailures, "failures")
 			assert.Equal(t, tc.wantErrors, gotErrors, "errors")
+			assert.Equal(t, tc.wantSkipped, gotSkipped, "skipped")
 		})
 	}
 }

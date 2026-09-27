@@ -334,6 +334,63 @@ func TestActionPrint_Csv(t *testing.T) {
 	assert.True(t, failedAbsent, "expected failed control row for absent resource")
 }
 
+func TestActionPrint_Csv_AppendsSkippedControls(t *testing.T) {
+	session := csvSessionFixture()
+
+	// A control that was skipped cluster-wide and therefore never associated
+	// with any resource in Results.
+	ctrlSkipped := reportsummary.ControlSummary{
+		ControlID:   "C-0038",
+		Name:        "Ensure that the cluster has the CNCF certified conformant version",
+		ScoreFactor: 1.0,
+	}
+	ctrlSkipped.SetStatus(&apis.StatusInfo{
+		InnerStatus: apis.StatusSkipped,
+		SubStatus:   apis.SubStatusNotEvaluated,
+		InnerInfo:   "missing: apps/v1/deployments",
+	})
+	session.Report.SummaryDetails.Controls["C-0038"] = ctrlSkipped
+
+	tmpCsv, err := os.CreateTemp("", "csv-skipped-*.csv")
+	assert.NoError(t, err)
+	defer func() {
+		_ = os.Remove(tmpCsv.Name())
+	}()
+
+	cp := NewCsvPrinter(false)
+	cp.writer = tmpCsv
+	cp.ActionPrint(context.TODO(), session, nil)
+	cp.CloseWriter()
+
+	f, err := os.Open(tmpCsv.Name())
+	assert.NoError(t, err)
+	defer f.Close()
+
+	r := csv.NewReader(f)
+	records, err := r.ReadAll()
+	assert.NoError(t, err)
+
+	// Header + 3 evaluated rows + the skipped control appended once.
+	assert.Equal(t, 5, len(records))
+
+	foundSkipped := false
+	for _, row := range records[1:] {
+		require.Equal(t, 13, len(row), "every data row must have 13 columns")
+		if row[1] != "C-0038" {
+			continue
+		}
+		foundSkipped = true
+		assert.Equal(t, "Ensure that the cluster has the CNCF certified conformant version", row[0])
+		assert.Equal(t, "skipped", row[3])
+		assert.Equal(t, "N/A", row[4])
+		assert.Equal(t, "N/A", row[5])
+		assert.Equal(t, "N/A", row[6])
+		assert.Equal(t, "N/A", row[7])
+		assert.Equal(t, "missing: apps/v1/deployments", row[10])
+	}
+	assert.True(t, foundSkipped, "expected a row for the skipped control")
+}
+
 func TestActionPrint_Csv_WithPaths(t *testing.T) {
 	session := csvSessionFixtureWithPaths()
 
