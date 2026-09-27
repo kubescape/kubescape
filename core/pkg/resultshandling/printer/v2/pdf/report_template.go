@@ -100,6 +100,17 @@ func (t *Template) GenerateTable(tableRows *[]TableObject, totalFailed, total in
 	return nil
 }
 
+// GenerateSectionTitle adds a heading for a later section of the same document.
+func (t *Template) GenerateSectionTitle(title string) *Template {
+	t.maroto.AddRow(10, text.NewCol(12, title, props.Text{
+		Align:  align.Left,
+		Size:   8,
+		Family: fontfamily.Arial,
+		Style:  fontstyle.Bold,
+	}))
+	return t
+}
+
 // GenerateImageTable is responsible for adding CVE data in table format to the pdf for an image scan (#2782)
 func (t *Template) GenerateImageTable(tableRows *[]ImageTableObject, totalCVEs, fixableCVEs int) error {
 	rows, err := list.Build[ImageTableObject](*tableRows)
