@@ -4,7 +4,6 @@ import (
 	"context"
 	"testing"
 
-	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/stretchr/testify/assert"
@@ -539,17 +538,20 @@ func TestCollectImageScanTargetsDoesNotScanExcludedPlatform(t *testing.T) {
 }
 
 func TestAddImageScanTargetRequiredVariantWins(t *testing.T) {
-	targets := mapset.NewSet[ImageScanTarget]()
-	addImageScanTarget(targets, ImageScanTarget{
+	seen := make(map[imageScanTargetKey]ImageScanTarget)
+	addImageScanTarget(seen, ImageScanTarget{
 		Image: "example/app:latest", Platform: "linux/arm64", SkipUnavailable: true,
 	})
-	addImageScanTarget(targets, ImageScanTarget{
+	addImageScanTarget(seen, ImageScanTarget{
 		Image: "example/app:latest", Platform: "linux/arm64",
 	})
 
-	assert.Equal(t, targetSet(ImageScanTarget{
-		Image: "example/app:latest", Platform: "linux/arm64",
-	}), collectedTargetSet(targets))
+	require.Len(t, seen, 1)
+	for _, got := range seen {
+		assert.Equal(t, ImageScanTarget{
+			Image: "example/app:latest", Platform: "linux/arm64",
+		}, got)
+	}
 }
 
 func TestCollectImageScanTargetsPreservesProviderDefaultWithoutEvidence(t *testing.T) {

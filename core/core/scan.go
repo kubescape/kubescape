@@ -703,7 +703,7 @@ func scanImageJobs(ctx context.Context, svc imageScanService, concurrency int, j
 }
 
 func collectImageScanTargets(scanType cautils.ScanTypes, scanData *cautils.OPASessionObj, ctx context.Context, scanningContext cautils.ScanningContext, k8sApi *k8sinterface.KubernetesApi, platformOverride string) (mapset.Set[ImageScanTarget], map[string][]imagescan.RegistryCredentials, []error) {
-	imagesToScan := mapset.NewSet[ImageScanTarget]()
+	seenTargets := make(map[imageScanTargetKey]ImageScanTarget)
 	imageToCreds := make(map[string][]imagescan.RegistryCredentials)
 	var containerErrors []error
 	nodePlatforms := buildNodePlatformIndexFromCatalog(scanData.GetCatalog())
@@ -741,7 +741,7 @@ func collectImageScanTargets(scanType cautils.ScanTypes, scanData *cautils.OPASe
 					helpers.String("image", image), helpers.Int("platforms", len(platforms)))
 			}
 			for _, platform := range platforms {
-				addImageScanTarget(imagesToScan, ImageScanTarget{
+				addImageScanTarget(seenTargets, ImageScanTarget{
 					Image: image, Platform: platform, SkipUnavailable: skipUnavailable,
 				})
 			}
@@ -771,21 +771,35 @@ func collectImageScanTargets(scanType cautils.ScanTypes, scanData *cautils.OPASe
 		})
 	}
 
+	// Build the returned set once from the deduplicated map: collection via
+	// the map lookup is O(N) overall, instead of reallocating and rescanning
+	// a set slice for every container.
+	imagesToScan := mapset.NewSet[ImageScanTarget]()
+	for _, target := range seenTargets {
+		imagesToScan.Add(target)
+	}
+
 	return imagesToScan, imageToCreds, containerErrors
 }
 
-func addImageScanTarget(targets mapset.Set[ImageScanTarget], target ImageScanTarget) {
-	for _, existing := range targets.ToSlice() {
-		if existing.Image != target.Image || existing.Platform != target.Platform {
-			continue
-		}
-		if !existing.SkipUnavailable || target.SkipUnavailable {
-			return
-		}
-		targets.Remove(existing)
-		break
+// imageScanTargetKey identifies a scan target by image and platform. The key
+// deliberately ignores SkipUnavailable, which only decides which of two
+// colliding targets survives.
+type imageScanTargetKey struct {
+	Image    string
+	Platform string
+}
+
+// addImageScanTarget deduplicates scan targets by image and platform, keeping
+// the fail-closed (SkipUnavailable=false) target when an explicit and an
+// inferred fan-out target collide. The map lookup keeps collection O(N)
+// overall instead of rescanning the whole target set for every container.
+func addImageScanTarget(seen map[imageScanTargetKey]ImageScanTarget, target ImageScanTarget) {
+	key := imageScanTargetKey{Image: target.Image, Platform: target.Platform}
+	if existing, ok := seen[key]; ok && (!existing.SkipUnavailable || target.SkipUnavailable) {
+		return
 	}
-	targets.Add(target)
+	seen[key] = target
 }
 
 func registryCredentialsFromScanInfo(scanInfo *cautils.ScanInfo) imagescan.RegistryCredentials {
