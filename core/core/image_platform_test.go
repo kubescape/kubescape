@@ -755,7 +755,7 @@ func BenchmarkAddImageScanTarget(b *testing.B) {
 			addImageScanTarget(targets, ImageScanTarget{
 				Image:           img,
 				Platform:        "linux/amd64",
-				SkipUnavailable: i%2 == 0,
+				SkipUnavailable: (i/100)%2 == 0,
 			})
 		}
 	}
