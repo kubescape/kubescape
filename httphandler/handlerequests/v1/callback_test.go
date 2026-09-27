@@ -208,6 +208,49 @@ func TestScreenCallbackHost_PinsResolvedIP(t *testing.T) {
 	assert.Equal(t, "203.0.113.7", ip.String())
 }
 
+// TestPostScanCallback_ClosesConnection verifies that callback HTTP requests disable
+// keep-alives and close the underlying connection, preventing socket/goroutine leaks.
+func TestPostScanCallback_ClosesConnection(t *testing.T) {
+	t.Setenv(callbackAllowlistEnv, "127.0.0.1/32")
+
+	var (
+		reqClose atomic.Bool
+		closed   = make(chan struct{}, 1)
+		idle     atomic.Bool
+	)
+
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reqClose.Store(r.Close)
+		w.WriteHeader(http.StatusOK)
+	}))
+	srv.Config.ConnState = func(_ net.Conn, state http.ConnState) {
+		switch state {
+		case http.StateIdle:
+			idle.Store(true)
+		case http.StateClosed:
+			select {
+			case closed <- struct{}{}:
+			default:
+			}
+		}
+	}
+	srv.Start()
+	defer srv.Close()
+
+	err := postScanCallback(context.Background(), srv.URL, scanCallbackPayload{ID: "test-scan"})
+	require.NoError(t, err)
+
+	assert.True(t, reqClose.Load(), "request must have Close set (Connection: close) to disable keep-alives")
+
+	select {
+	case <-closed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("connection was not closed after callback delivery")
+	}
+
+	assert.False(t, idle.Load(), "connection must not transition to idle state (keep-alives must be disabled)")
+}
+
 // TestExecuteScan_CallbackOnPanic pins the #3825 contract: a panicking scan
 // with a callbackURL still delivers exactly one generic failed signal, and
 // waiters still get their error response. No t.Parallel: global scanImpl stub.
