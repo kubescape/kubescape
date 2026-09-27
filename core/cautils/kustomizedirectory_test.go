@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -308,6 +309,39 @@ func TestKustomizeBaseDirectory(t *testing.T) {
 
 	assert.Empty(t, errs, "should not have errors loading base directory")
 	assert.NotEmpty(t, workloads, "should have workloads from base directory")
+}
+
+// TestKustomizeGetWorkloads_PathIsNormalized covers the evidence pointer this
+// deliverable is about: since a Kustomize build composes a base plus its
+// overlays, no single source file matches the output document-for-document
+// the way a plain YAML file or a static Helm template does (see helmchart.go
+// isStaticTemplate), so the only line resolution can honestly point at is the
+// Kustomize directory itself, with no ":<index>" suffix.
+//
+// That pointer needs to be in the same absolute, symlink-resolved form every
+// other source uses (helmchart.go's absPath, fileutils.go's relative-or-
+// absolute path), rather than whatever relative string the caller happened to
+// pass GetWorkloads. This drives GetWorkloads with a relative path from a
+// different working directory and asserts both the map key and each
+// workload's GetPath() come back normalized, not echoing the relative input.
+func TestKustomizeGetWorkloads_PathIsNormalized(t *testing.T) {
+	testdataRoot := kustomizeTestdataPath()
+	t.Chdir(testdataRoot)
+
+	wantPath := normalizePath(filepath.Join(testdataRoot, "base"))
+
+	kd := NewKustomizeDirectory("base")
+	workloads, errs := kd.GetWorkloads("base")
+	require.Empty(t, errs)
+
+	wls, ok := workloads[wantPath]
+	require.True(t, ok, "workloads should be keyed by the normalized absolute path, not the relative input")
+	require.NotEmpty(t, wls)
+
+	for _, wl := range wls {
+		assert.Equal(t, wantPath, wl.(*localworkload.LocalWorkload).GetPath(),
+			"GetPath() must carry the same normalized path as the map key")
+	}
 }
 
 // fakeHelmVersionOutput is what the stub prints for `helm version -c --short`.

@@ -397,6 +397,16 @@ func selectedKustomizationFile(path string) string {
 // Get Workloads, creates the yaml files(K8s resources) using Kustomize and
 // renders the workloads from the yaml files (k8s resources)
 func (kd *KustomizeDirectory) GetWorkloads(kustomizeDirectoryPath string) (map[string][]workloadinterface.IMetadata, []error) {
+	// Kustomize's output is the composed result of a base plus its overlays, so
+	// no single source line exists for any given field - unlike a plain YAML
+	// file or a static Helm template, there is no raw file on disk whose
+	// document order matches this output, so no ":<index>" suffix is safe to
+	// attach here (see helmchart.go's isStaticTemplate for why that check
+	// matters). The path is normalized to an absolute, symlink-resolved form
+	// so the evidence pointer matches the convention every other source uses
+	// (helmchart.go's absPath, fileutils.go's relPath-or-absolute-path), not
+	// whatever relative form the caller happened to pass in.
+	kustomizeDirectoryPath = normalizePath(kustomizeDirectoryPath)
 
 	fSys := filesys.MakeFsOnDisk()
 	// Use LoadRestrictionsNone to allow loading resources from outside the kustomize directory.
