@@ -221,6 +221,8 @@ func convertCRDObjectToPosturePolicies(
 	return policies, nil
 }
 
+// buildResourceDesignators converts CRD resource and namespace selectors into
+// exception scopes, retaining explicitly empty API-group constraints.
 func buildResourceDesignators(
 	ctx context.Context,
 	obj *unstructured.Unstructured,

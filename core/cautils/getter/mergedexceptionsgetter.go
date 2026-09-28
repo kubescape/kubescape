@@ -117,9 +117,9 @@ func deduplicateExceptions(
 				if matcher.coveredBy(covered[designatorDedupKey(resource)], policy) {
 					continue
 				}
-				// Preserve primary precedence over a core-only CRD when the primary
-				// omits the group. The reverse would discard the CRD's named groups.
-				if apiGroup, hasAPIGroup := resource.Attributes[identifiers.AttributeApiGroup]; hasAPIGroup && apiGroup == "" {
+				// A primary that omits apiGroup covers both core and named groups.
+				// The reverse would discard resources outside the primary's group.
+				if _, hasAPIGroup := resource.Attributes[identifiers.AttributeApiGroup]; hasAPIGroup {
 					unscoped := resource
 					unscoped.Attributes = maps.Clone(resource.Attributes)
 					delete(unscoped.Attributes, identifiers.AttributeApiGroup)
@@ -222,6 +222,8 @@ func (m *scopeMatcher) covers(primary, crd string) bool {
 	return pattern != nil && pattern.MatchString(crd)
 }
 
+// designatorDedupKey identifies a resource scope while distinguishing an omitted
+// API group from an explicit core-group constraint.
 func designatorDedupKey(designator identifiers.PortalDesignator) string {
 	// Keep a core-only scope distinct from an omitted (unconstrained) API group.
 	apiGroup, hasAPIGroup := designator.Attributes[identifiers.AttributeApiGroup]
