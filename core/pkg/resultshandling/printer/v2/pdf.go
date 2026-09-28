@@ -69,16 +69,19 @@ func (pp *PdfPrinter) PrintNextSteps() {
 
 }
 
-// ActionPrint is responsible for generating a report in pdf format
+// ActionPrint is responsible for generating a report in pdf format.
+// A combined scan has both posture results and image CVEs. Both sections go
+// into one PDF. Image-only scans keep the image-scan header.
 func (pp *PdfPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
 	var outBuff []byte
 	var err error
 
-	if opaSessionObj != nil {
-		outBuff, err = pp.generatePdf(&opaSessionObj.Report.SummaryDetails)
-	} else if len(imageScanData) > 0 {
+	switch {
+	case opaSessionObj != nil:
+		outBuff, err = pp.generatePdf(&opaSessionObj.Report.SummaryDetails, imageScanData)
+	case len(imageScanData) > 0:
 		outBuff, err = pp.generateImagePdf(imageScanData)
-	} else {
+	default:
 		return fmt.Errorf("failed to print results, missing data")
 	}
 
@@ -97,23 +100,35 @@ func (pp *PdfPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OP
 
 // generateImagePdf builds a CVE-table PDF report for an image scan (#2782)
 func (pp *PdfPrinter) generateImagePdf(imageScanData []cautils.ImageScanData) ([]byte, error) {
+	title, allCVEs := collectImagePDFData(imageScanData)
+
+	template := pdf.NewReportTemplate()
+	template.GenerateHeader(title, time.Now().Format(time.DateTime))
+	if err := pp.writeImageTable(template, allCVEs); err != nil {
+		return nil, err
+	}
+
+	return template.GetPdf()
+}
+
+// collectImagePDFData gathers the image-scan title and CVE rows shared by the
+// image-only PDF and the image section of a combined PDF.
+func collectImagePDFData(imageScanData []cautils.ImageScanData) (string, []imageprinter.CVE) {
 	var allCVEs []imageprinter.CVE
-	var images []string
+	images := make([]string, 0, len(imageScanData))
 	for i := range imageScanData {
 		target := imageScanData[i].Target()
 		allCVEs = append(allCVEs, extractCVEs(imageScanData[i].Matches, target, imageScanData[i].VexStatuses)...)
 		images = append(images, target)
 	}
+	return fmt.Sprintf("Image scan: %s", strings.Join(images, ", ")), allCVEs
+}
 
-	template := pdf.NewReportTemplate()
-	template.GenerateHeader(fmt.Sprintf("Image scan: %s", strings.Join(images, ", ")), time.Now().Format(time.DateTime))
-
+// writeImageTable appends the CVE table to template.
+// An empty CVE list still writes the clean-image placeholder row.
+func (pp *PdfPrinter) writeImageTable(template *pdf.Template, allCVEs []imageprinter.CVE) error {
 	rows, fixableCVEs := pp.getImageTableObjects(allCVEs)
-	if err := template.GenerateImageTable(rows, len(allCVEs), fixableCVEs); err != nil {
-		return nil, err
-	}
-
-	return template.GetPdf()
+	return template.GenerateImageTable(rows, len(allCVEs), fixableCVEs)
 }
 
 // getImageTableObjects converts CVEs into PDF table rows, returning the rows and how many are fixable
@@ -143,12 +158,18 @@ func (pp *PdfPrinter) getImageTableObjects(cves []imageprinter.CVE) (*[]pdf.Imag
 	return &rows, fixableCVEs
 }
 
-func (pp *PdfPrinter) generatePdf(summaryDetails *reportsummary.SummaryDetails) ([]byte, error) {
+// generatePdf builds a posture PDF and, when imageScanData is non-empty, appends the image CVE section.
+func (pp *PdfPrinter) generatePdf(summaryDetails *reportsummary.SummaryDetails, imageScanData []cautils.ImageScanData) ([]byte, error) {
+	return pp.generatePdfAt(summaryDetails, imageScanData, time.Now())
+}
+
+// generatePdfAt builds the PDF with reportTime so tests can compare stable bytes.
+func (pp *PdfPrinter) generatePdfAt(summaryDetails *reportsummary.SummaryDetails, imageScanData []cautils.ImageScanData, reportTime time.Time) ([]byte, error) {
 	sortedControlIDs := getSortedControlsIDs(summaryDetails.Controls)
 	infoToPrintInfo := mapInfoToPrintInfo(summaryDetails.Controls)
 
 	template := pdf.NewReportTemplate()
-	template.GenerateHeader(utils.FrameworksScoresToString(summaryDetails.ListFrameworks()), time.Now().Format(time.DateTime))
+	template.GenerateHeader(utils.FrameworksScoresToString(summaryDetails.ListFrameworks()), reportTime.Format(time.DateTime))
 	err := template.GenerateTable(pp.getTableObjects(summaryDetails, sortedControlIDs, infoToPrintInfo),
 		summaryDetails.NumberOfResources().Failed(), summaryDetails.NumberOfResources().All(), summaryDetails.ComplianceScore)
 
@@ -156,6 +177,13 @@ func (pp *PdfPrinter) generatePdf(summaryDetails *reportsummary.SummaryDetails) 
 		return nil, err
 	}
 	template.GenerateInfoRows(pp.getFormattedInformation(infoToPrintInfo))
+	if len(imageScanData) > 0 {
+		title, allCVEs := collectImagePDFData(imageScanData)
+		template.GenerateSectionTitle(title)
+		if err := pp.writeImageTable(template, allCVEs); err != nil {
+			return nil, err
+		}
+	}
 	return template.GetPdf()
 }
 
