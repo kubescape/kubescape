@@ -82,6 +82,7 @@ func TestCRDExceptions_ApiGroup(t *testing.T) {
 	}
 }
 
+// TestCRDExceptions_ApiGroupRBACSubject checks subjects with a bare API group.
 func TestCRDExceptions_ApiGroupRBACSubject(t *testing.T) {
 	vector, err := objectsenvelopes.NewRegoResponseVectorObjectFromBytes([]byte(`{"apiGroup":"rbac.authorization.k8s.io","kind":"Group","name":"system:masters","relatedObjects":[{"apiVersion":"rbac.authorization.k8s.io/v1","kind":"ClusterRoleBinding","metadata":{"name":"cluster-admin"}}]}`))
 	require.NoError(t, err)
@@ -97,6 +98,8 @@ func TestCRDExceptions_ApiGroupRBACSubject(t *testing.T) {
 	}
 }
 
+// TestDeduplicateExceptions_ExplicitCoreApiGroup preserves broader CRD scopes
+// when the primary exception is restricted to the core group.
 func TestDeduplicateExceptions_ExplicitCoreApiGroup(t *testing.T) {
 	coreOnly := apiGroupCRDPolicies(t, "ClusterSecurityException", map[string]any{"resources": []any{map[string]any{"apiGroup": "", "name": "web"}}})
 	unscoped := apiGroupCRDPolicies(t, "ClusterSecurityException", map[string]any{"resources": []any{map[string]any{"name": "web"}}})
@@ -112,6 +115,43 @@ func TestDeduplicateExceptions_ExplicitCoreApiGroup(t *testing.T) {
 	require.Contains(t, coreOnly[0].Resources[0].Attributes, identifiers.AttributeApiGroup, "deduplication must not remove the original constraint")
 }
 
+// TestDeduplicateExceptions_ApiGroupPrimaryPrecedence keeps the primary action
+// authoritative when a CRD narrows an otherwise identical designator by API group.
+func TestDeduplicateExceptions_ApiGroupPrimaryPrecedence(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		apiGroup   string
+		apiVersion string
+		kind       string
+	}{
+		{name: "named group", apiGroup: "apps", apiVersion: "apps/v1", kind: "Deployment"},
+		{name: "core group", apiGroup: "", apiVersion: "v1", kind: "Pod"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			primary := apiGroupCRDPolicies(t, "ClusterSecurityException", map[string]any{"resources": []any{map[string]any{"name": "web"}}})
+			primary[0].Name = "primary"
+			primary[0].Actions = []armotypes.PostureExceptionPolicyActions{armotypes.AlertOnly}
+			crd := apiGroupCRDPolicies(t, "ClusterSecurityException", map[string]any{"resources": []any{map[string]any{"apiGroup": tc.apiGroup, "name": "web"}}})
+			crd[0].Name = "crd"
+			require.Equal(t, []armotypes.PostureExceptionPolicyActions{armotypes.Disable}, crd[0].Actions)
+
+			merged := deduplicateExceptions(primary, crd)
+			assert.Len(t, merged, 1, "the narrower CRD must not override the primary action")
+			workload := objectsenvelopes.NewObject(map[string]any{
+				"apiVersion": tc.apiVersion, "kind": tc.kind, "metadata": map[string]any{"name": "web"},
+			})
+			result := failingApiGroupResult()
+			result.SetExceptions(workload, merged, "cluster-a", map[string]reporthandling.Control{"C-0001": {ControlID: "C-0001"}})
+			assert.True(t, result.GetStatus(nil).IsFailed(), "AlertOnly must acknowledge the finding without suppressing it")
+			matched := result.AssociatedControls[0].ResourceAssociatedRules[0].Exception
+			require.Len(t, matched, 1, "only the primary should contribute an exception match")
+			assert.Equal(t, "primary", matched[0].Name)
+			assert.Equal(t, tc.apiGroup, crd[0].Resources[0].Attributes[identifiers.AttributeApiGroup], "deduplication must preserve the original designator")
+		})
+	}
+}
+
+// apiGroupCRDPolicies converts an ignore-action CRD with the supplied match scope.
 func apiGroupCRDPolicies(t *testing.T, kind string, match map[string]any) []armotypes.PostureExceptionPolicy {
 	t.Helper()
 	metadata := map[string]any{"name": "group-exception"}
@@ -127,6 +167,7 @@ func apiGroupCRDPolicies(t *testing.T, kind string, match map[string]any) []armo
 	return policies
 }
 
+// failingApiGroupResult supplies a failed finding for exception application tests.
 func failingApiGroupResult() resourcesresults.Result {
 	return resourcesresults.Result{AssociatedControls: []resourcesresults.ResourceAssociatedControl{{
 		ControlID:               "C-0001",
