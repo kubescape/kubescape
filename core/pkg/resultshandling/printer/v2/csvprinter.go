@@ -12,6 +12,7 @@ import (
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer"
 	reporthandling "github.com/kubescape/opa-utils/reporthandling"
+	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 )
@@ -56,6 +57,9 @@ func (cp *CsvPrinter) Score(score float32) {
 	fmt.Fprintf(os.Stderr, "\nOverall compliance-score (100- Excellent, 0- All failed): %d\n", cautils.ComplianceScoreToInt(score))
 }
 
+// ActionPrint outputs scan results in CSV format, including resource-level
+// control evaluations, skipped resource findings with diagnostic reasons, and
+// cluster-wide skipped or unevaluated controls.
 func (cp *CsvPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) (err error) {
 	if opaSessionObj == nil {
 		return fmt.Errorf("no data provided for CSV output")
@@ -100,6 +104,15 @@ func (cp *CsvPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OP
 		return fmt.Errorf("failed to write CSV header: %w", err)
 	}
 
+	skippedControls := collectSkippedControls(opaSessionObj)
+	skippedReasonByControl := make(map[string]string, len(skippedControls))
+	for _, sc := range skippedControls {
+		if sc.reason != "" {
+			skippedReasonByControl[sc.controlID] = sc.reason
+		}
+	}
+
+	emittedSkipReasons := make(map[string]map[string]struct{})
 	for _, result := range reportWithSeverity.Results {
 		resID := result.ResourceID
 		var resName, resKind, resNamespace, resApiVersion string
@@ -139,8 +152,22 @@ func (cp *CsvPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OP
 			}
 
 			remediation := ""
-			if ctrl := summaryControls.GetControl(reportsummary.EControlCriteriaID, ctrlID); ctrl != nil {
-				remediation = ctrl.GetRemediation()
+			if assocCtrl.GetStatus(nil).IsSkipped() {
+				if msg := buildSkipMessage(assocCtrl.GetStatus(nil)); msg != "" {
+					remediation = msg
+				} else if reason, ok := skippedReasonByControl[ctrlID]; ok && reason != "" {
+					remediation = reason
+				} else {
+					remediation = "reason unavailable"
+				}
+				if emittedSkipReasons[ctrlID] == nil {
+					emittedSkipReasons[ctrlID] = make(map[string]struct{})
+				}
+				emittedSkipReasons[ctrlID][remediation] = struct{}{}
+			} else {
+				if ctrl := summaryControls.GetControl(reportsummary.EControlCriteriaID, ctrlID); ctrl != nil {
+					remediation = ctrl.GetRemediation()
+				}
 			}
 
 			row := []string{
@@ -162,6 +189,49 @@ func (cp *CsvPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OP
 				logger.L().Ctx(ctx).Error("failed to write CSV row", helpers.Error(err))
 				return fmt.Errorf("failed to write CSV row: %w", err)
 			}
+		}
+	}
+
+	for _, sc := range skippedControls {
+		name := sc.name
+		if name == "" {
+			name = sc.controlID
+		}
+		severity := apis.ControlSeverityToString(sc.scoreFactor)
+		if severity == "" {
+			severity = "Unknown"
+		}
+		reason := sc.reason
+		if reason == "" {
+			reason = "reason unavailable"
+		}
+		if reasons, ok := emittedSkipReasons[sc.controlID]; ok {
+			if _, alreadyEmitted := reasons[reason]; alreadyEmitted {
+				continue
+			}
+		}
+		if emittedSkipReasons[sc.controlID] == nil {
+			emittedSkipReasons[sc.controlID] = make(map[string]struct{})
+		}
+		emittedSkipReasons[sc.controlID][reason] = struct{}{}
+		row := []string{
+			name,
+			sc.controlID,
+			severity,
+			string(apis.StatusSkipped),
+			"N/A",
+			"N/A",
+			"N/A",
+			"N/A",
+			"",
+			"",
+			reason,
+			cautils.GetControlLink(sc.controlID),
+			"",
+		}
+		if err := csvWriter.Write(row); err != nil {
+			logger.L().Ctx(ctx).Error("failed to write CSV row for skipped control", helpers.Error(err))
+			return fmt.Errorf("failed to write CSV row: %w", err)
 		}
 	}
 
