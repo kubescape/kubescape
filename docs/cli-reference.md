@@ -425,6 +425,17 @@ threshold — for example, a single silent failed GVR pull yields a score of 97.
 > meaning may now fail on scans that previously passed. Re-check your threshold
 > if you rely on this flag in CI.
 
+### Scan coverage reporting across output formats
+
+Scan coverage gaps (skipped or unevaluated controls, missing GVR permissions, partial query results, and degraded policy inputs) are consistently surfaced across output formats (#3884):
+
+- **Terminal (pretty-printer):** Displays the aggregate coverage score, evaluated vs. total control counts, and a degraded warning banner when gaps exist.
+- **JUnit (`--format junit`):** Records coverage metrics (`coverageScore`, `evaluatedControls`, `totalControls`, `degraded`) as testsuite properties and marks skipped controls with diagnostic skip reasons.
+- **SARIF (`--format sarif`):** Emits unevaluated controls and runtime gaps through tool execution notifications and invocation descriptor properties.
+- **GitHub Actions (`--format github-actions`):** Emits workflow warnings for degraded scan coverage and annotates skipped controls with their failure or skip reasons.
+- **PDF (`--format pdf`):** Displays scan coverage metrics alongside the resource summary and appends a `Skipped controls` section detailing severity, control reference, control name, and skip reasons (omitted on 100% clean scans).
+- **CSV (`--format csv`):** Emits unevaluated and skipped controls as rows with status `skipped`, populating remediation with the diagnostic reason.
+
 ### OpenTelemetry export
 
 `--otel-endpoint` sends the scan's traces and metrics to any OTLP collector.
