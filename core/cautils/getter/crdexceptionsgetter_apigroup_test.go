@@ -108,6 +108,8 @@ func TestDeduplicateExceptions_ExplicitCoreApiGroup(t *testing.T) {
 	result.SetExceptions(workload, merged, "cluster-a", map[string]reporthandling.Control{"C-0001": {ControlID: "C-0001"}})
 	assert.True(t, result.GetStatus(nil).IsPassed())
 	require.Len(t, deduplicateExceptions(coreOnly, coreOnly), 1, "identical core-group scopes still deduplicate")
+	require.Len(t, deduplicateExceptions(unscoped, coreOnly), 1, "an unconstrained primary still covers the core group")
+	require.Contains(t, coreOnly[0].Resources[0].Attributes, identifiers.AttributeApiGroup, "deduplication must not remove the original constraint")
 }
 
 func apiGroupCRDPolicies(t *testing.T, kind string, match map[string]any) []armotypes.PostureExceptionPolicy {
