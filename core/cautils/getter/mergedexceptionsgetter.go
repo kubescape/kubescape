@@ -2,6 +2,7 @@ package getter
 
 import (
 	"context"
+	"maps"
 	"regexp"
 	"slices"
 	"strconv"
@@ -113,9 +114,20 @@ func deduplicateExceptions(
 			}
 			filteredResources := make([]identifiers.PortalDesignator, 0, len(crd.Resources))
 			for _, resource := range crd.Resources {
-				if !matcher.coveredBy(covered[designatorDedupKey(resource)], policy) {
-					filteredResources = append(filteredResources, resource)
+				if matcher.coveredBy(covered[designatorDedupKey(resource)], policy) {
+					continue
 				}
+				// Preserve primary precedence over a core-only CRD when the primary
+				// omits the group. The reverse would discard the CRD's named groups.
+				if apiGroup, hasAPIGroup := resource.Attributes[identifiers.AttributeApiGroup]; hasAPIGroup && apiGroup == "" {
+					unscoped := resource
+					unscoped.Attributes = maps.Clone(resource.Attributes)
+					delete(unscoped.Attributes, identifiers.AttributeApiGroup)
+					if matcher.coveredBy(covered[designatorDedupKey(unscoped)], policy) {
+						continue
+					}
+				}
+				filteredResources = append(filteredResources, resource)
 			}
 			if len(filteredResources) == 0 {
 				continue
