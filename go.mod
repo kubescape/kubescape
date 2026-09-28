@@ -93,6 +93,7 @@ require (
 	go.opentelemetry.io/proto/otlp v1.11.0
 	golang.org/x/crypto v0.56.0
 	golang.org/x/mod v0.41.0
+	golang.org/x/net v0.58.0
 	golang.org/x/sync v0.22.0
 	golang.org/x/sys v0.47.0
 	golang.org/x/term v0.45.0
@@ -103,11 +104,11 @@ require (
 	gopkg.in/op/go-logging.v1 v1.0.0-20160211212156-b2cb9fa56473
 	gopkg.in/yaml.v3 v3.0.1
 	helm.sh/helm/v3 v3.21.4
-	k8s.io/api v0.37.0
-	k8s.io/apimachinery v0.37.0
-	k8s.io/apiserver v0.37.0
-	k8s.io/client-go v0.37.0
-	k8s.io/streaming v0.37.0
+	k8s.io/api v0.37.1
+	k8s.io/apimachinery v0.37.1
+	k8s.io/apiserver v0.37.1
+	k8s.io/client-go v0.37.1
+	k8s.io/streaming v0.37.1
 	k8s.io/utils v0.0.0-20260626114624-be93311217bd
 	sigs.k8s.io/controller-runtime v0.23.3
 	sigs.k8s.io/kustomize/api v0.21.1
@@ -596,7 +597,6 @@ require (
 	go4.org/netipx v0.0.0-20231129151722-fdeea329fbba // indirect
 	golang.org/x/exp v0.0.0-20260603202125-055de637280b // indirect
 	golang.org/x/image v0.44.0 // indirect
-	golang.org/x/net v0.58.0 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
 	golang.org/x/text v0.41.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
@@ -613,7 +613,7 @@ require (
 	gorm.io/gorm v1.31.1 // indirect
 	k8s.io/apiextensions-apiserver v0.36.2 // indirect
 	k8s.io/cli-runtime v0.36.2 // indirect
-	k8s.io/component-base v0.37.0 // indirect
+	k8s.io/component-base v0.37.1 // indirect
 	k8s.io/klog/v2 v2.140.0 // indirect
 	k8s.io/kube-openapi v0.0.0-20260721132016-d427ff9ee9ad // indirect
 	k8s.io/kubectl v0.36.2 // indirect
