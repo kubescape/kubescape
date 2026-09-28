@@ -10,6 +10,8 @@ import (
 	"sync"
 
 	"github.com/gofrs/flock"
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 )
@@ -117,6 +119,9 @@ func (s *Store) key(controlID, resourceID string) string {
 }
 
 func (s *Store) Get(controlID, resourceID, hash string) (resourcesresults.ResourceAssociatedControl, bool) {
+	if hash == "" {
+		return resourcesresults.ResourceAssociatedControl{}, false
+	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	e, ok := s.data[s.key(controlID, resourceID)]
@@ -127,6 +132,9 @@ func (s *Store) Get(controlID, resourceID, hash string) (resourcesresults.Resour
 }
 
 func (s *Store) Put(controlID, resourceID, hash string, verdict resourcesresults.ResourceAssociatedControl) {
+	if hash == "" {
+		return
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.data == nil {
@@ -209,7 +217,11 @@ func ResourceHash(obj map[string]any) string {
 
 	h := sha256.New()
 	enc := json.NewEncoder(h)
-	_ = enc.Encode(stripped)
+	if err := enc.Encode(stripped); err != nil {
+		logger.L().Warning("ResourceHash: failed to encode resource for hashing, skipping cache",
+			helpers.Error(err))
+		return ""
+	}
 	return hex.EncodeToString(h.Sum(nil))
 }
 
