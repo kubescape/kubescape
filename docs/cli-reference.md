@@ -322,6 +322,23 @@ fail the scan rather than defaulting, because a rule whose severity cannot be
 determined is treated as exceeding every `--severity-threshold`.
 
 
+### API group matching in SecurityExceptions
+
+In `SecurityException` and `ClusterSecurityException`, each
+`spec.match.resources[]` entry can constrain the Kubernetes API group:
+
+- `apiGroup: apps` matches the group in `apiVersion: apps/v1`.
+- `apiGroup: ""` matches only the core group, such as `apiVersion: v1` Pods.
+- Omitting `apiGroup` leaves the API group unconstrained.
+
+The group is matched as a regular expression, like other resource designator
+attributes. It is combined with the entry's `kind` and `name`, namespace scope,
+and any `objectSelector`; it is not a Kubernetes label. RBAC subject findings
+use their explicit `apiGroup` even when they have no `apiVersion`.
+
+The same presence rules apply to `resources[].attributes.apiGroup` in posture
+exception JSON files passed through `--exceptions`.
+
 ### Exception Audit
 
 Use `--audit-exceptions --format json` to include an `exceptionAudit` object in scan output. The audit contains:

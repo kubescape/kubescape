@@ -4,6 +4,7 @@ import (
 	"context"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/armosec/armoapi-go/armotypes"
@@ -210,14 +211,13 @@ func (m *scopeMatcher) covers(primary, crd string) bool {
 }
 
 func designatorDedupKey(designator identifiers.PortalDesignator) string {
-	apiGroup := ""
-	if designator.Attributes != nil {
-		apiGroup = designator.Attributes[identifiers.AttributeApiGroup]
-	}
+	// Keep a core-only scope distinct from an omitted (unconstrained) API group.
+	apiGroup, hasAPIGroup := designator.Attributes[identifiers.AttributeApiGroup]
 	return strings.Join([]string{
 		designator.GetNamespace(),
 		designator.GetName(),
 		designator.GetKind(),
 		apiGroup,
+		strconv.FormatBool(hasAPIGroup),
 	}, exceptionKeySeparator)
 }

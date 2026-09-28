@@ -298,7 +298,8 @@ func buildResourceDesignators(
 		if nameVal, ok := resource["name"].(string); ok && nameVal != "" {
 			attrs[identifiers.AttributeName] = nameVal
 		}
-		if apiGroup, ok := resource["apiGroup"].(string); ok && apiGroup != "" {
+		// Presence matters: an explicit empty group selects core Kubernetes resources.
+		if apiGroup, ok := resource["apiGroup"].(string); ok {
 			attrs[identifiers.AttributeApiGroup] = apiGroup
 		}
 		if len(attrs) > 0 {
