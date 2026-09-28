@@ -27,6 +27,8 @@ import (
 	"github.com/google/go-containerregistry/pkg/registry"
 	"github.com/google/go-containerregistry/pkg/v1/random"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
+	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/resources"
 	cbundle "github.com/sigstore/cosign/v3/pkg/cosign/bundle"
@@ -368,6 +370,28 @@ func signImageDigestWithoutBundle(t *testing.T, signer *ecdsa.PrivateKey, img na
 	return sig
 }
 
+// verifyImageSignatureRego is regolibrary's verify-image-signature rule, cut
+// down to bare Pods.
+const verifyImageSignatureRego = `package armo_builtins
+import rego.v1
+
+deny contains msga if {
+	pod := input[_]
+	pod.kind == "Pod"
+	container := pod.spec.containers[i]
+	verified_keys := [trusted_key | trusted_key = data.postureControlInputs.trustedCosignPublicKeys[_]; cosign.verify(container.image, trusted_key)]
+	count(verified_keys) == 0
+	msga := {
+		"alertMessage": sprintf("signature not verified for image: %v", [container.image]),
+		"packagename": "armo_builtins",
+		"alertScore": 7,
+		"failedPaths": [],
+		"fixPaths": [],
+		"alertObject": {"k8sApiObjects": [pod]}
+	}
+}
+`
+
 // TestRunOPAOnSingleRule_CosignTransparencyLogInput evaluates a rule shaped
 // like regolibrary's verify-image-signature, to show the control input
 // reaches cosign.verify through the rule's posture control inputs.
@@ -388,25 +412,7 @@ func TestRunOPAOnSingleRule_CosignTransparencyLogInput(t *testing.T) {
 	rule := &reporthandling.PolicyRule{
 		PortalBase:   armotypes.PortalBase{Name: "verify-image-signature"},
 		RuleLanguage: reporthandling.RegoLanguage,
-		Rule: `package armo_builtins
-import rego.v1
-
-deny contains msga if {
-	pod := input[_]
-	pod.kind == "Pod"
-	container := pod.spec.containers[i]
-	verified_keys := [trusted_key | trusted_key = data.postureControlInputs.trustedCosignPublicKeys[_]; cosign.verify(container.image, trusted_key)]
-	count(verified_keys) == 0
-	msga := {
-		"alertMessage": sprintf("signature not verified for image: %v", [container.image]),
-		"packagename": "armo_builtins",
-		"alertScore": 7,
-		"failedPaths": [],
-		"fixPaths": [],
-		"alertObject": {"k8sApiObjects": [pod]}
-	}
-}
-`,
+		Rule:         verifyImageSignatureRego,
 	}
 	pod := map[string]any{
 		"apiVersion": "v1",
@@ -431,4 +437,91 @@ deny contains msga if {
 		"trustedCosignPublicKeys":         {key},
 		cosignRequireTransparencyLogInput: {"false"},
 	}), "cosignRequireTransparencyLog=false must let the key-signed image pass")
+}
+
+// TestEvaluateRule_CosignTransparencyLogInputNeedsRuleMetadata runs the scan
+// path from rule metadata: makeRegoDeps passes a rule only the posture inputs
+// its controlConfigInputs declare, so cosignRequireTransparencyLog reaches
+// cosign.verify only once regolibrary's verify-image-signature declares it.
+func TestEvaluateRule_CosignTransparencyLogInputNeedsRuleMetadata(t *testing.T) {
+	signer, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	logKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	rekorPub := filepath.Join(t.TempDir(), "rekor.pub")
+	require.NoError(t, os.WriteFile(rekorPub, publicKeyPEM(t, &logKey.PublicKey), 0o600))
+	t.Setenv("SIGSTORE_REKOR_PUBLIC_KEY", rekorPub)
+
+	server := httptest.NewServer(registry.New(registry.Logger(log.New(io.Discard, "", 0))))
+	t.Cleanup(server.Close)
+	img := pushRandomImage(t, strings.TrimPrefix(server.URL, "http://")+"/test/signed")
+	attachSignature(t, img, signImageDigestWithoutBundle(t, signer, img))
+	key := string(publicKeyPEM(t, &signer.PublicKey))
+
+	const trustedKeysInput = `{
+		"path": "settings.postureControlInputs.trustedCosignPublicKeys",
+		"name": "Trusted Cosign public keys",
+		"description": "A list of trusted Cosign public keys that are used for validating container image signatures."
+	}`
+	const requireTlogInput = `{
+		"path": "settings.postureControlInputs.cosignRequireTransparencyLog",
+		"name": "Require Cosign transparency log entry",
+		"description": "Whether a valid signature must also have a transparency log (Rekor) entry."
+	}`
+	ruleFromMetadata := func(configInputs ...string) *reporthandling.PolicyRule {
+		var rule reporthandling.PolicyRule
+		require.NoError(t, json.Unmarshal([]byte(`{
+			"name": "verify-image-signature",
+			"ruleLanguage": "Rego",
+			"match": [{"apiGroups": [""], "apiVersions": ["v1"], "resources": ["Pod"]}],
+			"ruleQuery": "armo_builtins",
+			"controlConfigInputs": [`+strings.Join(configInputs, ",")+`]
+		}`), &rule))
+		rule.Rule = verifyImageSignatureRego
+		return &rule
+	}
+	// regolibrary v2.0.37 and earlier declare only the trusted keys.
+	releasedRule := ruleFromMetadata(trustedKeysInput)
+	companionRule := ruleFromMetadata(trustedKeysInput, requireTlogInput)
+
+	pod := workloadinterface.NewWorkloadObj(map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Pod",
+		"metadata":   map[string]any{"name": "p", "namespace": "default"},
+		"spec":       map[string]any{"containers": []any{map[string]any{"name": "c", "image": img.String()}}},
+	})
+
+	tests := []struct {
+		name       string
+		rule       *reporthandling.PolicyRule
+		tlogInput  []string
+		wantInput  bool
+		wantFailed bool
+	}{
+		{name: "released metadata filters out false", rule: releasedRule, tlogInput: []string{"false"}, wantInput: false, wantFailed: true},
+		{name: "declared input, unset", rule: companionRule, tlogInput: nil, wantInput: false, wantFailed: true},
+		{name: "declared input, default true", rule: companionRule, tlogInput: []string{"true"}, wantInput: true, wantFailed: true},
+		{name: "declared input, false", rule: companionRule, tlogInput: []string{"false"}, wantInput: true, wantFailed: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sessionObj := cautils.NewOPASessionObjMock()
+			sessionObj.RegoInputData.PostureControlInputs = map[string][]string{"trustedCosignPublicKeys": {key}}
+			if tt.tlogInput != nil {
+				sessionObj.RegoInputData.PostureControlInputs[cosignRequireTransparencyLogInput] = tt.tlogInput
+			}
+			proc := NewOPAProcessor(sessionObj, &resources.RegoDependenciesData{}, "", "", "", false, nil)
+
+			_, got := proc.makeRegoDeps(tt.rule.ControlConfigInputs, nil).PostureControlInputs[cosignRequireTransparencyLogInput]
+			assert.Equal(t, tt.wantInput, got, "input passed to the rule")
+
+			responses, err := proc.EvaluateRule(context.Background(), tt.rule, []workloadinterface.IMetadata{pod}, "C-0236")
+			require.NoError(t, err)
+			if tt.wantFailed {
+				assert.Len(t, responses, 1, "a signature with no tlog entry must fail")
+			} else {
+				assert.Empty(t, responses, "the key-signed image must pass")
+			}
+		})
+	}
 }
