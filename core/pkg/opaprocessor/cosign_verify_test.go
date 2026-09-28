@@ -21,11 +21,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/cyberphone/json-canonicalization/go/src/webpki.org/jsoncanonicalizer"
 	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/google/go-containerregistry/pkg/registry"
 	"github.com/google/go-containerregistry/pkg/v1/random"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
+	"github.com/kubescape/opa-utils/reporthandling"
+	"github.com/kubescape/opa-utils/resources"
 	cbundle "github.com/sigstore/cosign/v3/pkg/cosign/bundle"
 	"github.com/sigstore/cosign/v3/pkg/oci"
 	"github.com/sigstore/cosign/v3/pkg/oci/mutate"
@@ -239,4 +242,193 @@ func attachSignature(t *testing.T, img name.Digest, sig oci.Signature) {
 	se, err = mutate.AttachSignatureToEntity(se, sig)
 	require.NoError(t, err)
 	require.NoError(t, ociremote.WriteSignatures(img.Context(), se))
+}
+
+// TestVerify_TransparencyLogPolicy covers the cosignRequireTransparencyLog
+// control input. An image signed with `cosign sign --tlog-upload=false` has no
+// Rekor bundle; by default it must still be rejected, as `cosign verify --key`
+// does, and setting the input to "false" must accept it without loosening the
+// key or claim checks.
+func TestVerify_TransparencyLogPolicy(t *testing.T) {
+	signer, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	otherSigner, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	logKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+
+	// Trust a throwaway log key so the default path stays offline.
+	rekorPub := filepath.Join(t.TempDir(), "rekor.pub")
+	require.NoError(t, os.WriteFile(rekorPub, publicKeyPEM(t, &logKey.PublicKey), 0o600))
+	t.Setenv("SIGSTORE_REKOR_PUBLIC_KEY", rekorPub)
+
+	server := httptest.NewServer(registry.New(registry.Logger(log.New(io.Discard, "", 0))))
+	t.Cleanup(server.Close)
+	host := strings.TrimPrefix(server.URL, "http://")
+
+	signed := pushRandomImage(t, host+"/test/signed")
+	attachSignature(t, signed, signImageDigestWithoutBundle(t, signer, signed))
+
+	byOtherKey := pushRandomImage(t, host+"/test/other-key")
+	attachSignature(t, byOtherKey, signImageDigestWithoutBundle(t, otherSigner, byOtherKey))
+
+	otherImage := pushRandomImage(t, host+"/test/other-image")
+	attachSignature(t, otherImage, signImageDigestWithoutBundle(t, signer, signed))
+
+	key := string(publicKeyPEM(t, &signer.PublicKey))
+	withInput := func(v string) context.Context {
+		return withCosignPolicy(context.Background(), map[string][]string{cosignRequireTransparencyLogInput: {v}})
+	}
+
+	tests := []struct {
+		name    string
+		ctx     context.Context
+		img     name.Digest
+		want    bool
+		wantErr string
+	}{
+		{name: "no input requires a tlog entry", ctx: context.Background(), img: signed, wantErr: "rekor client not provided"},
+		{name: "true requires a tlog entry", ctx: withInput("true"), img: signed, wantErr: "rekor client not provided"},
+		{name: "false accepts a key-signed image without a tlog entry", ctx: withInput("false"), img: signed, want: true},
+		{name: "false still rejects a signature by another key", ctx: withInput("false"), img: byOtherKey, wantErr: "no matching signatures"},
+		{name: "false still checks the signed digest", ctx: withInput("false"), img: otherImage, wantErr: "invalid or missing digest in claim"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ok, err := verify(tt.ctx, tt.img.String(), key)
+			if tt.wantErr != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.wantErr)
+			} else {
+				require.NoError(t, err)
+			}
+			assert.Equal(t, tt.want, ok)
+		})
+	}
+}
+
+// TestVerify_IgnoreTlogDoesNotFetchRekorKeys: with the tlog check off,
+// verification must not depend on loading Rekor public keys, which is the
+// first thing to fail in an air-gapped cluster.
+func TestVerify_IgnoreTlogDoesNotFetchRekorKeys(t *testing.T) {
+	signer, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	t.Setenv("SIGSTORE_REKOR_PUBLIC_KEY", filepath.Join(t.TempDir(), "missing.pub"))
+
+	server := httptest.NewServer(registry.New(registry.Logger(log.New(io.Discard, "", 0))))
+	t.Cleanup(server.Close)
+	img := pushRandomImage(t, strings.TrimPrefix(server.URL, "http://")+"/test/signed")
+	attachSignature(t, img, signImageDigestWithoutBundle(t, signer, img))
+	key := string(publicKeyPEM(t, &signer.PublicKey))
+
+	_, err = verify(context.Background(), img.String(), key)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "getting Rekor public keys")
+
+	ctx := withCosignPolicy(context.Background(), map[string][]string{cosignRequireTransparencyLogInput: {"false"}})
+	ok, err := verify(ctx, img.String(), key)
+	require.NoError(t, err)
+	assert.True(t, ok)
+}
+
+func TestWithCosignPolicy(t *testing.T) {
+	tests := []struct {
+		name   string
+		inputs map[string][]string
+		want   bool
+	}{
+		{name: "no inputs", inputs: nil, want: false},
+		{name: "input absent", inputs: map[string][]string{"trustedCosignPublicKeys": {"k"}}, want: false},
+		{name: "empty value", inputs: map[string][]string{cosignRequireTransparencyLogInput: {}}, want: false},
+		{name: "true", inputs: map[string][]string{cosignRequireTransparencyLogInput: {"true"}}, want: false},
+		{name: "false", inputs: map[string][]string{cosignRequireTransparencyLogInput: {"false"}}, want: true},
+		{name: "false, any case and spacing", inputs: map[string][]string{cosignRequireTransparencyLogInput: {" False "}}, want: true},
+		{name: "unrecognised value keeps the check", inputs: map[string][]string{cosignRequireTransparencyLogInput: {"no"}}, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := withCosignPolicy(context.Background(), tt.inputs)
+			assert.Equal(t, tt.want, cosignPolicyFrom(ctx).ignoreTlog)
+		})
+	}
+}
+
+// signImageDigestWithoutBundle signs a cosign simple-signing payload naming
+// img, as `cosign sign --key --tlog-upload=false` stores it: no Rekor bundle.
+func signImageDigestWithoutBundle(t *testing.T, signer *ecdsa.PrivateKey, img name.Digest) oci.Signature {
+	t.Helper()
+	payload := []byte(fmt.Sprintf(
+		`{"critical":{"identity":{"docker-reference":%q},"image":{"docker-manifest-digest":%q},"type":"cosign container image signature"},"optional":null}`,
+		img.Context().String(), img.DigestStr()))
+	payloadHash := sha256.Sum256(payload)
+	rawSig, err := ecdsa.SignASN1(rand.Reader, signer, payloadHash[:])
+	require.NoError(t, err)
+	sig, err := static.NewSignature(payload, base64.StdEncoding.EncodeToString(rawSig))
+	require.NoError(t, err)
+	return sig
+}
+
+// TestRunOPAOnSingleRule_CosignTransparencyLogInput evaluates a rule shaped
+// like regolibrary's verify-image-signature, to show the control input
+// reaches cosign.verify through the rule's posture control inputs.
+func TestRunOPAOnSingleRule_CosignTransparencyLogInput(t *testing.T) {
+	signer, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	logKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	rekorPub := filepath.Join(t.TempDir(), "rekor.pub")
+	require.NoError(t, os.WriteFile(rekorPub, publicKeyPEM(t, &logKey.PublicKey), 0o600))
+	t.Setenv("SIGSTORE_REKOR_PUBLIC_KEY", rekorPub)
+
+	server := httptest.NewServer(registry.New(registry.Logger(log.New(io.Discard, "", 0))))
+	t.Cleanup(server.Close)
+	img := pushRandomImage(t, strings.TrimPrefix(server.URL, "http://")+"/test/signed")
+	attachSignature(t, img, signImageDigestWithoutBundle(t, signer, img))
+
+	rule := &reporthandling.PolicyRule{
+		PortalBase:   armotypes.PortalBase{Name: "verify-image-signature"},
+		RuleLanguage: reporthandling.RegoLanguage,
+		Rule: `package armo_builtins
+import rego.v1
+
+deny contains msga if {
+	pod := input[_]
+	pod.kind == "Pod"
+	container := pod.spec.containers[i]
+	verified_keys := [trusted_key | trusted_key = data.postureControlInputs.trustedCosignPublicKeys[_]; cosign.verify(container.image, trusted_key)]
+	count(verified_keys) == 0
+	msga := {
+		"alertMessage": sprintf("signature not verified for image: %v", [container.image]),
+		"packagename": "armo_builtins",
+		"alertScore": 7,
+		"failedPaths": [],
+		"fixPaths": [],
+		"alertObject": {"k8sApiObjects": [pod]}
+	}
+}
+`,
+	}
+	pod := map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Pod",
+		"metadata":   map[string]any{"name": "p", "namespace": "default"},
+		"spec":       map[string]any{"containers": []any{map[string]any{"name": "c", "image": img.String()}}},
+	}
+	getRuleData := func(r *reporthandling.PolicyRule) string { return r.Rule }
+	key := string(publicKeyPEM(t, &signer.PublicKey))
+
+	run := func(inputs map[string][]string) []reporthandling.RuleResponse {
+		opap := &OPAProcessor{compiledModules: make(map[string]compiledRule)}
+		responses, _, err := opap.runOPAOnSingleRule(context.Background(), rule, []map[string]any{pod}, getRuleData,
+			resources.RegoDependenciesData{PostureControlInputs: inputs}, "C-0236")
+		require.NoError(t, err)
+		return responses
+	}
+
+	assert.Len(t, run(map[string][]string{"trustedCosignPublicKeys": {key}}), 1,
+		"without the input a signature with no tlog entry must still fail")
+	assert.Empty(t, run(map[string][]string{
+		"trustedCosignPublicKeys":         {key},
+		cosignRequireTransparencyLogInput: {"false"},
+	}), "cosignRequireTransparencyLog=false must let the key-signed image pass")
 }
