@@ -5,7 +5,7 @@ go 1.26.3
 require (
 	cloud.google.com/go/containeranalysis v0.19.0
 	cloud.google.com/go/grafeas v0.5.0
-	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.21.1
+	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.23.1
 	github.com/Azure/azure-sdk-for-go/sdk/azidentity v1.13.1
 	github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/resourcegraph/armresourcegraph v0.10.0
 	github.com/adrg/xdg v0.5.3
