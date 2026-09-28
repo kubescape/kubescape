@@ -103,7 +103,16 @@ func (idx *Index) AllowsEgress(src, dst Endpoint, port *PortSpec) Decision {
 // caller can explain which side (or both) was responsible. With a nil port,
 // a Denied verdict can accompany two independently Allowed decisions when
 // the directions allow different ports/protocols; their reasons explain this.
+//
+// Exception: a Pod can always reach itself. The Kubernetes NetworkPolicy
+// docs list this as one of the ways a peer is identified -- "a pod cannot
+// block access to itself" -- regardless of any policy selecting it, so
+// same-Pod traffic is never evaluated against policy at all.
 func (idx *Index) Reaches(src, dst Endpoint, port *PortSpec) (Verdict, Decision, Decision) {
+	if samePod(src, dst) {
+		d := allow("source and destination are the same Pod; NetworkPolicy cannot block a Pod from reaching itself", "")
+		return Allowed, d, d
+	}
 	if port == nil {
 		return idx.reachesAnyPort(src, dst)
 	}
@@ -208,4 +217,12 @@ func (idx *Index) reachesAnyPort(src, dst Endpoint) (Verdict, Decision, Decision
 	egressSummary.Reason = "egress considered independently: " + egressSummary.Reason + noOverlap
 	ingressSummary.Reason = "ingress considered independently: " + ingressSummary.Reason + noOverlap
 	return Denied, egressSummary, ingressSummary
+}
+
+// samePod reports whether a and b identify the same Pod (same namespace and
+// name). Both must be non-empty: two Endpoints with an unset Namespace or Name
+// are not "the same pod" just because those fields are blank.
+func samePod(a, b Endpoint) bool {
+	return a.Namespace != "" && a.Name != "" &&
+		a.Namespace == b.Namespace && a.Name == b.Name
 }
