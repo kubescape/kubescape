@@ -259,3 +259,50 @@ func TestPostureScanFormat_StillEmitsPostureMetrics(t *testing.T) {
 	assert.Contains(t, output, "kubescape_cluster_complianceScore")
 	assert.Contains(t, output, "kubescape_cluster_coverage_score")
 }
+
+func TestPrometheusActionPrint_CombinedScanEmitsBothPostureAndImageMetrics(t *testing.T) {
+	session := cautils.NewOPASessionObjMock()
+	imageData := []cautils.ImageScanData{
+		{
+			Image:    "test-image:latest",
+			Platform: "linux/amd64",
+			Matches: match.NewMatches(match.Match{
+				Package: grypepkg.Package{ID: "pkg-1", Name: "openssl", Version: "3.0.0"},
+				Vulnerability: vulnerability.Vulnerability{
+					Metadata: &vulnerability.Metadata{ID: "CVE-2026-0001", Severity: "High"},
+					Fix:      vulnerability.Fix{Versions: []string{"3.0.1"}, State: "Fixed"},
+				},
+			}),
+		},
+	}
+
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+
+	promPrinter := NewPrometheusPrinter(false)
+	promPrinter.writer = w
+
+	err = promPrinter.ActionPrint(context.Background(), session, imageData)
+	require.NoError(t, err)
+
+	require.NoError(t, w.Close())
+	got, err := io.ReadAll(r)
+	require.NoError(t, err)
+	require.NoError(t, r.Close())
+	output := string(got)
+
+	// Posture metrics must be present.
+	assert.Contains(t, output, "kubescape_cluster_complianceScore")
+	assert.Contains(t, output, "kubescape_cluster_coverage_score")
+
+	// Container image vulnerability metrics must also be present in combined scans.
+	assert.Contains(t, output, "kubescape_image_count_cve")
+	assert.Contains(t, output, "kubescape_image_count_cve_fixable")
+	assert.Contains(t, output, `image="test-image:latest",platform="linux/amd64",severity="High"`)
+}
+
+func TestPrometheusActionPrint_MissingDataReturnsError(t *testing.T) {
+	promPrinter := NewPrometheusPrinter(false)
+	err := promPrinter.ActionPrint(context.Background(), nil, nil)
+	assert.Error(t, err)
+}
