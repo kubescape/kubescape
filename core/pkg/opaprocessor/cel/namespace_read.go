@@ -103,6 +103,9 @@ func referencedVariables(env *cel.Env, expr string) variableReferences {
 		}
 		receiver, parent, ok := unwrapDynamicVariableReceiver(node)
 		if !ok {
+			// A root variables or dyn(variables) expression can be returned by a
+			// declared variable and dereferenced by a later expression.
+			hasUnclassifiedUse = true
 			continue
 		}
 		switch parent.Kind() {
