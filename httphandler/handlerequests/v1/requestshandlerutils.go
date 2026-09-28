@@ -633,6 +633,7 @@ func postScanCallback(ctx context.Context, rawURL string, payload scanCallbackPa
 			return http.ErrUseLastResponse
 		},
 		Transport: &http.Transport{
+			DisableKeepAlives: true,
 			DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
 				return (&net.Dialer{Timeout: callbackRequestTimeout}).DialContext(ctx, network, pinnedAddr)
 			},
