@@ -208,6 +208,22 @@ kubescape scan --view resource --compliance-threshold 80
 kubescape scan --severity-threshold high
 ```
 
+#### Report Metadata Protection
+
+```bash
+# Hide sensitive metadata using deterministic pseudonymization
+kubescape scan --hide
+
+# Set exactly one master key before encrypting and decrypting (at least 16 characters)
+export KUBESCAPE_MASTER_KEY="your-secure-passphrase"
+
+# Encrypt sensitive metadata into a JSON report
+kubescape scan --encrypt --format json --output encrypted-report.json
+
+# Decrypt the encrypted report
+kubescape decrypt encrypted-report.json > decrypted-report.json
+```
+
 #### Output Formats
 
 ```bash
