@@ -2,10 +2,10 @@ package getter
 
 import (
 	"context"
+	stdjson "encoding/json"
 	"maps"
 	"regexp"
 	"slices"
-	"strconv"
 	"strings"
 
 	"github.com/armosec/armoapi-go/armotypes"
@@ -13,8 +13,6 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 )
-
-const exceptionKeySeparator = "/"
 
 var _ IExceptionsGetter = &MergedExceptionsGetter{}
 
@@ -78,7 +76,9 @@ func (g *MergedExceptionsGetter) ConsumedFileDigest() (path, digest string, ok b
 // deduplicateExceptions enforces the design review's precedence rule: cloud/file
 // (primary) exceptions are added first, and a CRD exception is appended only for the
 // control+workload designators not already covered by a primary exception. Partial
-// overlaps keep the non-overlapping designators of the CRD exception.
+// overlaps keep the non-overlapping designators of the CRD exception. Remaining
+// overlaps (including regex API groups) are resolved by FilterMatchedExceptions
+// after workload matching; a broader CRD must retain its non-overlapping scope.
 func deduplicateExceptions(
 	cloudExceptions []armotypes.PostureExceptionPolicy,
 	crdExceptions []armotypes.PostureExceptionPolicy,
@@ -88,7 +88,15 @@ func deduplicateExceptions(
 	}
 
 	merged := make([]armotypes.PostureExceptionPolicy, 0, len(cloudExceptions)+len(crdExceptions))
-	merged = append(merged, cloudExceptions...)
+	for _, primary := range cloudExceptions {
+		// A policy reloaded from a report is primary when supplied by the primary
+		// getter, even if it originally came from a CRD in an earlier scan.
+		if _, marked := primary.Attributes[secondaryExceptionSourceAttribute]; marked {
+			primary.Attributes = maps.Clone(primary.Attributes)
+			delete(primary.Attributes, secondaryExceptionSourceAttribute)
+		}
+		merged = append(merged, primary)
+	}
 	if len(crdExceptions) == 0 {
 		return merged
 	}
@@ -97,6 +105,13 @@ func deduplicateExceptions(
 	matcher := newScopeMatcher()
 
 	for _, crd := range crdExceptions {
+		// Preserve the source boundary for precedence after workload matching.
+		// Copy the map: callers may reuse their original policies on another scan.
+		crd.Attributes = maps.Clone(crd.Attributes)
+		if crd.Attributes == nil {
+			crd.Attributes = make(map[string]any)
+		}
+		crd.Attributes[secondaryExceptionSourceAttribute] = true
 		// Exceptions without resolvable control+workload keys can't be deduped; keep them.
 		if len(crd.Resources) == 0 || len(crd.PosturePolicies) == 0 {
 			merged = append(merged, crd)
@@ -153,6 +168,11 @@ func deduplicateExceptions(
 func coveredPostureScopes(exceptions []armotypes.PostureExceptionPolicy) (covered map[string][]armotypes.PosturePolicy, global []armotypes.PosturePolicy) {
 	covered = make(map[string][]armotypes.PosturePolicy, len(exceptions))
 	for _, exception := range exceptions {
+		// These constraints must be evaluated at scan time. Removing a CRD here
+		// could discard its scope outside the selector or after primary expiry.
+		if exception.ObjectSelector != nil || exception.ExpirationDate != nil {
+			continue
+		}
 		for _, policy := range exception.PosturePolicies {
 			if policy.ControlID == "" {
 				continue
@@ -222,16 +242,12 @@ func (m *scopeMatcher) covers(primary, crd string) bool {
 	return pattern != nil && pattern.MatchString(crd)
 }
 
-// designatorDedupKey identifies a resource scope while distinguishing an omitted
-// API group from an explicit core-group constraint.
+// designatorDedupKey identifies the entire resource constraint. JSON preserves
+// API-group presence and all other attributes (including labels and cluster),
+// so static deduplication cannot discard a CRD's broader workload scope.
 func designatorDedupKey(designator identifiers.PortalDesignator) string {
-	// Keep a core-only scope distinct from an omitted (unconstrained) API group.
-	apiGroup, hasAPIGroup := designator.Attributes[identifiers.AttributeApiGroup]
-	return strings.Join([]string{
-		designator.GetNamespace(),
-		designator.GetName(),
-		designator.GetKind(),
-		apiGroup,
-		strconv.FormatBool(hasAPIGroup),
-	}, exceptionKeySeparator)
+	// PortalDesignator contains only strings and a string map, so marshaling
+	// cannot fail and map keys are ordered deterministically.
+	key, _ := stdjson.Marshal(designator)
+	return string(key)
 }

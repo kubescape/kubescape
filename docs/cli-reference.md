@@ -361,6 +361,13 @@ use their explicit `apiGroup` even when they have no `apiVersion`.
 The same presence rules apply to `resources[].attributes.apiGroup` in posture
 exception JSON files passed through `--exceptions`.
 
+When primary (file/cloud) and CRD exceptions match the same finding with a
+covered control/framework/rule scope, the primary takes precedence, including
+when API groups overlap through an omitted group or regular expression. The
+CRD remains effective for resources outside the primary match. For example, a
+core-only primary with `AlertOnly` keeps a core Pod finding failed while an
+unscoped CRD with `Disable` can still suppress findings in named API groups.
+
 ### Exception Audit
 
 Use `--audit-exceptions --format json` to include an `exceptionAudit` object in scan output. The audit contains:
