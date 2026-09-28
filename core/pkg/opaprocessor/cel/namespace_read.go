@@ -50,9 +50,10 @@ func (e *Evaluator) ReadsNamespaceObjectInValidations(v *VAP) bool {
 
 func appendReferencedVariables(toVisit []string, references variableReferences, allVariableNames []string) []string {
 	toVisit = append(toVisit, references.names...)
-	if references.hasDynamicIndex {
-		// lazyVariables resolves dynamic keys at evaluation time. Until that key is
-		// known, every declared variable is a possible dependency.
+	if references.hasUnclassifiedUse {
+		// lazyVariables can be passed through CEL expressions before a later
+		// operation reads a value. Until that flow is known, every declaration is
+		// a possible dependency.
 		toVisit = append(toVisit, allVariableNames...)
 	}
 	return toVisit
@@ -76,15 +77,15 @@ func readsNamespaceObject(env *cel.Env, expr string) bool {
 }
 
 type variableReferences struct {
-	names           []string
-	hasDynamicIndex bool
+	names              []string
+	hasUnclassifiedUse bool
 }
 
 // referencedVariables returns names referenced through variables.<name> and
-// variables["name"]. A dynamic index is recorded separately because the
-// runtime lazy map can resolve it to any declared variable. The compiler
-// resolves these accesses before this runs, so this follows the same dependency
-// shape used by lazyVariables at evaluation.
+// variables["name"]. Other uses of the global lazy map are recorded
+// separately because they can flow through CEL expressions before reading any
+// declared variable. The compiler resolves these accesses before this runs, so
+// this follows the same dependency shape used by lazyVariables at evaluation.
 func referencedVariables(env *cel.Env, expr string) variableReferences {
 	if expr == "" {
 		return variableReferences{}
@@ -94,7 +95,7 @@ func referencedVariables(env *cel.Env, expr string) variableReferences {
 		return variableReferences{}
 	}
 	seen := map[string]struct{}{}
-	hasDynamicIndex := false
+	hasUnclassifiedUse := false
 	root := celast.NavigateAST(compiled.NativeRep())
 	for _, node := range celast.MatchDescendants(root, celast.KindMatcher(celast.IdentKind)) {
 		if !globalIdentifier(node, "variables") {
@@ -109,24 +110,29 @@ func referencedVariables(env *cel.Env, expr string) variableReferences {
 			selection := parent.AsSelect()
 			if selection.Operand().ID() == receiver.ID() {
 				seen[selection.FieldName()] = struct{}{}
+			} else {
+				hasUnclassifiedUse = true
 			}
 		case celast.CallKind:
 			name, dynamic, indexed := indexedVariableReference(receiver)
 			if !indexed {
+				hasUnclassifiedUse = true
 				continue
 			}
 			if dynamic {
-				hasDynamicIndex = true
+				hasUnclassifiedUse = true
 			} else {
 				seen[name] = struct{}{}
 			}
+		default:
+			hasUnclassifiedUse = true
 		}
 	}
 	result := make([]string, 0, len(seen))
 	for name := range seen {
 		result = append(result, name)
 	}
-	return variableReferences{names: result, hasDynamicIndex: hasDynamicIndex}
+	return variableReferences{names: result, hasUnclassifiedUse: hasUnclassifiedUse}
 }
 
 // unwrapDynamicVariableReceiver treats dyn(variables) as the same lazy map as
