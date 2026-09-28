@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	metav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/diff"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -372,4 +373,71 @@ func TestCloseDiffOutput_JoinsCloseError(t *testing.T) {
 	err := closeDiffOutput(failingCloser{err: closeErr}, writeErr)
 	require.ErrorIs(t, err, writeErr)
 	require.ErrorIs(t, err, closeErr)
+}
+
+const (
+	imageReportBase = `{"matches":[
+		{"vulnerability":{"id":"CVE-OLD","severity":"High","fix":{"versions":[]}},"artifact":{"name":"openssl","version":"3.0.1","type":"apk"}}
+	],"source":{"target":{"userInput":"app:1.0"}}}`
+	imageReportHead = `{"matches":[
+		{"vulnerability":{"id":"CVE-NEW-HIGH","severity":"High","fix":{"versions":["2.0"]}},"artifact":{"name":"curl","version":"1.0","type":"apk"}},
+		{"vulnerability":{"id":"CVE-NEW-LOW","severity":"Low","fix":{"versions":[]}},"artifact":{"name":"zlib","version":"1.2","type":"apk"}}
+	],"source":{"target":{"userInput":"app:1.1"}}}`
+	postureReport = `{"results":[],"summaryDetails":{"controls":{}}}`
+)
+
+func TestDiff_ImageReportsCompareVulnerabilities(t *testing.T) {
+	base := writeReport(t, imageReportBase)
+	head := writeReport(t, imageReportHead)
+	ks := NewKubescape(context.Background())
+
+	t.Run("counts every new vulnerability without a threshold", func(t *testing.T) {
+		output := filepath.Join(t.TempDir(), "diff.json")
+		count, err := ks.Diff(&metav1.DiffInfo{BaseFile: base, HeadFile: head, Format: "json", Output: output})
+		require.NoError(t, err)
+		assert.Equal(t, 2, count)
+
+		raw, err := os.ReadFile(output)
+		require.NoError(t, err)
+		assert.Contains(t, string(raw), `"id": "CVE-NEW-HIGH"`)
+		assert.Contains(t, string(raw), `"id": "CVE-OLD"`)
+	})
+
+	t.Run("honours the severity threshold", func(t *testing.T) {
+		count, err := ks.Diff(&metav1.DiffInfo{
+			BaseFile: base, HeadFile: head, Format: "json",
+			Output: filepath.Join(t.TempDir(), "diff.json"), SeverityThreshold: "high",
+		})
+		require.NoError(t, err)
+		assert.Equal(t, 1, count)
+	})
+
+	t.Run("rejects a format the vulnerability diff cannot write", func(t *testing.T) {
+		_, err := ks.Diff(&metav1.DiffInfo{BaseFile: base, HeadFile: head, Format: "sarif"})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), `format "sarif" is not supported for image vulnerability reports`)
+	})
+}
+
+func TestDiff_RejectsMixedReportKinds(t *testing.T) {
+	ks := NewKubescape(context.Background())
+	_, err := ks.Diff(&metav1.DiffInfo{
+		BaseFile: writeReport(t, postureReport),
+		HeadFile: writeReport(t, imageReportHead),
+		Format:   "json",
+	})
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, diff.ErrMixedReportKinds))
+}
+
+func TestDiff_UnreadableReportKeepsLoaderError(t *testing.T) {
+	ks := NewKubescape(context.Background())
+	_, err := ks.Diff(&metav1.DiffInfo{
+		BaseFile: filepath.Join(t.TempDir(), "missing.json"),
+		HeadFile: writeReport(t, imageReportHead),
+		Format:   "json",
+	})
+	require.Error(t, err)
+	assert.NotErrorIs(t, err, diff.ErrMixedReportKinds)
+	assert.Contains(t, err.Error(), "no such file or directory")
 }

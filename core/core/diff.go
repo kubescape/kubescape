@@ -14,6 +14,13 @@ import (
 
 // Diff writes the diff between the two scan reports and returns the number of new or incomparable failures at or above the severity threshold; the caller decides whether to exit 1.
 func (ks *Kubescape) Diff(diffInfo *metav1.DiffInfo) (newFailures int, err error) {
+	switch baseKind, headKind := diff.ReportKindOf(diffInfo.BaseFile), diff.ReportKindOf(diffInfo.HeadFile); {
+	case baseKind == diff.VulnerabilityReport && headKind == diff.VulnerabilityReport:
+		return diffVulnerabilities(diffInfo)
+	case baseKind != diff.UnreadableReport && headKind != diff.UnreadableReport && baseKind != headKind:
+		return 0, diff.ErrMixedReportKinds
+	}
+
 	cs, err := diff.ComputeWithOptions(diffInfo.BaseFile, diffInfo.HeadFile, diff.Options{
 		Granularity: diff.Granularity(diffInfo.Granularity),
 	})
@@ -78,6 +85,42 @@ func (ks *Kubescape) Diff(diffInfo *metav1.DiffInfo) (newFailures int, err error
 	}
 
 	return len(diff.FilterBySeverity(cs.New, diffInfo.SeverityThreshold)) + len(diff.FilterBySeverity(cs.Incomparable, diffInfo.SeverityThreshold)), nil
+}
+
+func diffVulnerabilities(diffInfo *metav1.DiffInfo) (newVulnerabilities int, err error) {
+	var write func(io.Writer, *diff.VulnerabilityChangeSet) error
+	switch diffInfo.Format {
+	case printer.PrettyFormat:
+		write = diff.PrintVulnerabilityPretty
+	case printer.JsonFormat:
+		write = diff.PrintVulnerabilityJSON
+	case printer.YamlFormat:
+		write = diff.PrintVulnerabilityYAML
+	default:
+		return 0, fmt.Errorf("format %q is not supported for image vulnerability reports, supported formats: %s, %s, %s",
+			diffInfo.Format, printer.PrettyFormat, printer.JsonFormat, printer.YamlFormat)
+	}
+
+	cs, err := diff.ComputeVulnerabilities(diffInfo.BaseFile, diffInfo.HeadFile)
+	if err != nil {
+		return 0, err
+	}
+
+	w := os.Stdout
+	if outputFile, explicit := diffOutputPath(diffInfo.Format, diffInfo.Output); explicit {
+		w, err = printer.GetWriterNoFallback(outputFile)
+		if err != nil {
+			return 0, fmt.Errorf("opening diff output: %w", err)
+		}
+		defer func() {
+			err = closeDiffOutput(w, err)
+		}()
+	}
+
+	if err := write(w, cs); err != nil {
+		return 0, fmt.Errorf("writing vulnerability diff: %w", err)
+	}
+	return diff.NewVulnerabilitiesAtOrAbove(cs, diffInfo.SeverityThreshold), nil
 }
 
 func closeDiffOutput(closer io.Closer, err error) error {
