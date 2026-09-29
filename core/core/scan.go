@@ -77,7 +77,7 @@ func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo, policyIdenti
 	var k8s *k8sinterface.KubernetesApi
 	var k8sClient kubernetes.Interface
 	if scanInfo.GetScanningContext() == cautils.ContextCluster {
-		k8s = getKubernetesApi()
+		k8s = kubernetesAPIFunc()
 		if k8s == nil {
 			// Return rather than terminate: Scan already propagates this to the
 			// caller, and the command layer still exits non-zero on it.
@@ -88,7 +88,11 @@ func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo, policyIdenti
 	}
 
 	// ================== setup tenant object ======================================
-	tenantConfig := cautils.GetTenantConfig(ctx, scanInfo.AccountID, scanInfo.AccessKey, scanInfo.GetClusterContextName(), scanInfo.CustomClusterName, getKubernetesApi())
+	k8sForTenant := k8s
+	if k8sForTenant == nil {
+		k8sForTenant = kubernetesAPIFunc()
+	}
+	tenantConfig := cautils.GetTenantConfig(ctx, scanInfo.AccountID, scanInfo.AccessKey, scanInfo.GetClusterContextName(), scanInfo.CustomClusterName, k8sForTenant)
 
 	// Set submit behavior AFTER loading tenant config
 	setSubmitBehavior(scanInfo, tenantConfig)
