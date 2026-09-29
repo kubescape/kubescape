@@ -417,4 +417,45 @@ func runStoreContractTests(t *testing.T, storeFactory func(t *testing.T) Store) 
 		assert.Equal(t, []string{crdObj.GetID()}, batch.K8SResources[longGVR])
 		assert.Equal(t, "crd-1", batch.AllResources[crdObj.GetID()].GetName())
 	})
+
+	t.Run("RejectNilMetadata", func(t *testing.T) {
+		s := storeFactory(t)
+		ctx := context.Background()
+
+		require.NoError(t, s.BeginGVR(ctx, "v1/pods"))
+
+		// Put with nil object must return ErrNilMetadata
+		assert.ErrorIs(t, s.Put(ctx, "ns-empty", nil), ErrNilMetadata)
+
+		// Put with object having nil payload map must also return ErrNilMetadata
+		assert.ErrorIs(t, s.Put(ctx, "ns-empty", nilPayloadMetadata{}), ErrNilMetadata)
+
+		// Valid object stored in the same transaction succeeds
+		pod := createTestObject("pod-1", "ns-valid", "Pod")
+		require.NoError(t, s.Put(ctx, "ns-valid", pod))
+
+		require.NoError(t, s.CommitGVR(ctx, "v1/pods"))
+		require.NoError(t, s.Seal(ctx))
+
+		// ns-empty has no committed records or counts
+		assert.Equal(t, []string{"ns-valid"}, s.Namespaces())
+		assert.Equal(t, map[string]int{"ns-valid": 1}, s.NamespaceCounts())
+		assert.Equal(t, 1, s.TotalResources())
+
+		// LoadBatch on rejected namespace must return ErrNamespaceNotFound rather than decode error
+		_, err := s.LoadBatch(ctx, "ns-empty")
+		assert.ErrorIs(t, err, ErrNamespaceNotFound)
+
+		batch, err := s.LoadBatch(ctx, "ns-valid")
+		require.NoError(t, err)
+		assert.Len(t, batch.AllResources, 1)
+		assert.Contains(t, batch.AllResources, pod.GetID())
+	})
 }
+
+type nilPayloadMetadata struct {
+	workloadinterface.IMetadata
+}
+
+func (nilPayloadMetadata) GetID() string             { return "nil-payload" }
+func (nilPayloadMetadata) GetObject() map[string]any { return nil }

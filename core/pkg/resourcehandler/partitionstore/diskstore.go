@@ -166,6 +166,9 @@ func (d *DiskStore) Put(ctx context.Context, namespace string, obj workloadinter
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	if obj == nil || obj.GetObject() == nil {
+		return ErrNilMetadata
+	}
 
 	rec := newRecordForMarshal(d.activeGVR, namespace, obj)
 	data, err := json.Marshal(rec)

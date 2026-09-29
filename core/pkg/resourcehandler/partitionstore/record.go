@@ -17,17 +17,11 @@ type record struct {
 }
 
 func newRecord(gvr string, namespace string, obj workloadinterface.IMetadata) record {
-	var objMap map[string]any
-	var id string
-	if obj != nil {
-		id = obj.GetID()
-		objMap = runtime.DeepCopyJSON(obj.GetObject())
-	}
 	return record{
-		ID:        id,
+		ID:        obj.GetID(),
 		GVR:       gvr,
 		Namespace: namespace,
-		Object:    objMap,
+		Object:    runtime.DeepCopyJSON(obj.GetObject()),
 	}
 }
 
@@ -35,17 +29,11 @@ func newRecord(gvr string, namespace string, obj workloadinterface.IMetadata) re
 // This is safe for immediate serialization (such as in DiskStore.Put) because
 // json.Marshal performs read-only operations and the record is not retained in memory.
 func newRecordForMarshal(gvr string, namespace string, obj workloadinterface.IMetadata) record {
-	var objMap map[string]any
-	var id string
-	if obj != nil {
-		id = obj.GetID()
-		objMap = obj.GetObject()
-	}
 	return record{
-		ID:        id,
+		ID:        obj.GetID(),
 		GVR:       gvr,
 		Namespace: namespace,
-		Object:    objMap,
+		Object:    obj.GetObject(),
 	}
 }
 

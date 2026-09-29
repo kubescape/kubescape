@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"reflect"
 	"testing"
-	"unsafe"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -60,22 +59,6 @@ func TestNewRecordForMarshal_SerializationParity(t *testing.T) {
 	assert.JSONEq(t, string(deepBytes), string(marshalBytes), "both record constructors must produce identical JSON serialization")
 }
 
-func TestRecord_NilObjectHandling(t *testing.T) {
-	rec1 := newRecord("v1/pods", "default", nil)
-	assert.Empty(t, rec1.ID)
-	assert.Nil(t, rec1.Object)
-
-	rec2 := newRecordForMarshal("v1/pods", "default", nil)
-	assert.Empty(t, rec2.ID)
-	assert.Nil(t, rec2.Object)
-
-	bytes1, err := json.Marshal(rec1)
-	require.NoError(t, err)
-	bytes2, err := json.Marshal(rec2)
-	require.NoError(t, err)
-	assert.Equal(t, bytes1, bytes2)
-}
-
 func TestRecord_DeepCopy(t *testing.T) {
 	obj := createTestObject("pod-dc", "kube-system", "Pod")
 	rec := newRecordForMarshal("v1/pods", "kube-system", obj)
@@ -90,6 +73,3 @@ func TestRecord_DeepCopy(t *testing.T) {
 	copiedPtr := reflect.ValueOf(copied.Object).Pointer()
 	assert.NotEqual(t, recPtr, copiedPtr, "deepCopy must create a new map instance")
 }
-
-// Suppress unused import warning for unsafe if not needed
-var _ = unsafe.Sizeof(0)

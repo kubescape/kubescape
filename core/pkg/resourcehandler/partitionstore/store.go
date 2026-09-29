@@ -35,6 +35,9 @@ var (
 
 	// ErrStoreCorrupted is returned when partition store operations are attempted on a store with unrecovered rollback failures.
 	ErrStoreCorrupted = errors.New("partition store is corrupted due to unrecovered rollback failure")
+
+	// ErrNilMetadata is returned when Put is called with a nil resource object or an object with nil payload.
+	ErrNilMetadata = errors.New("cannot store nil metadata")
 )
 
 // Store defines the lifecycle and storage interface for scan-scoped namespaced Kubernetes resources.
@@ -44,6 +47,7 @@ type Store interface {
 
 	// Put writes a namespaced object under the currently active GVR.
 	// Returns ErrNoActiveGVR if no transaction is active.
+	// Returns ErrNilMetadata if obj is nil or has a nil payload.
 	Put(ctx context.Context, namespace string, obj workloadinterface.IMetadata) error
 
 	// CommitGVR promotes all staged objects for the active GVR to their namespace partitions.
