@@ -96,6 +96,12 @@ var guardedFiles = append([]string{
 	// the build it removes nor the guard that would have caught the removal.
 	filepath.Join(".github", "workflows", prScannerWorkflowName),
 	filepath.Join("internal", "ghworkflows", "masterbuild_test.go"),
+
+	// govulncheck_test.go guards the vulnerability job in a-pr-scanner.yaml and
+	// the script it runs; both match the deny-list ("**.yaml", "**.sh").
+	filepath.Join(".github", "workflows", prScannerReusableWorkflowName),
+	filepath.Join(".github", "scripts", "govulncheck.sh"),
+	filepath.Join("internal", "ghworkflows", "govulncheck_test.go"),
 }, installScripts...)
 
 // goreleaserSign is the subset of a `signs` / `docker_signs` entry these tests

@@ -1,4 +1,4 @@
-.PHONY: test all build sync-vap sync-vap-digests
+.PHONY: test all build vulncheck sync-vap sync-vap-digests
 
 # default task invoked while running make
 all: build
@@ -10,6 +10,10 @@ build:
 
 test:
 	go test -v ./...
+
+# Known vulnerabilities reachable from kubescape's code, as CI reports them.
+vulncheck:
+	bash .github/scripts/govulncheck.sh
 
 # cel-admission-library bundle vendored under the cel package so //go:embed can
 # bake it into the binary. sync-vap refreshes that copy from a pinned release so

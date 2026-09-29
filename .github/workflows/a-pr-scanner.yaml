@@ -83,3 +83,24 @@ jobs:
           version: v2.12.2
           args: --timeout 10m
           only-new-issues: true
+
+  govulncheck:
+    if: ${{ github.actor != 'kubescape' }}
+    name: Check for reachable vulnerabilities
+    runs-on: ubuntu-large
+    timeout-minutes: 20
+    steps:
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # The Go line the release workflow builds with, not go.mod's minimum:
+      # govulncheck reports standard-library vulnerabilities against the
+      # toolchain it runs on, and only the release toolchain's are shipped.
+      # internal/ghworkflows/govulncheck_test.go keeps the two in step.
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        name: Installing go
+        with:
+          go-version: "1.26"
+
+      - name: govulncheck
+        run: bash .github/scripts/govulncheck.sh
