@@ -493,6 +493,24 @@ kubescape scan --format sarif --output results.sarif  # cluster scan
    kubescape scan --format json --output test.json
    ```
 
+### Incomplete scan or low scan coverage score
+
+**Symptom:** Scan reports degraded coverage or controls are listed as skipped or not evaluated.
+
+**Causes and Solutions:**
+
+1. **Missing RBAC permissions**: The scanning user or service account cannot read required Kubernetes API resources. Run with `--verbose` to see which Group/Version/Resources (GVRs) failed to pull:
+   ```bash
+   kubescape scan --verbose
+   ```
+   Ensure your kubeconfig or service account has `get` and `list` permissions for the required resources.
+
+2. **Cluster resources / CRDs not installed**: Certain controls evaluate optional cluster components (e.g., Ingress controllers, NetworkPolicies, or specific CRDs). If your cluster does not use these resources, the corresponding controls will be skipped.
+
+3. **Scanning static manifests**: When scanning local YAML files, controls that inspect live cluster configuration (e.g., API server flags or node settings) cannot be evaluated and are reported as skipped.
+
+For full details on scan coverage behavior, degraded scan indicators, and format-by-format coverage reporting, see the [Scan Coverage documentation](scan-coverage.md).
+
 ---
 
 ## Performance Issues
