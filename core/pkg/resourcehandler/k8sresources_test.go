@@ -623,7 +623,7 @@ func TestSetMapNamespaceToNumOfResources(t *testing.T) {
 func TestCloudResourceRequired(t *testing.T) {
 	// Assert on the behavior of mapKSResourceToApiGroup to verify the mapping
 	assert.ElementsMatch(t, []string{"container.googleapis.com/v1", "eks.amazonaws.com/v1", "management.azure.com/v1"}, mapKSResourceToApiGroup(ClusterDescribe))
-	assert.ElementsMatch(t, []string{"container.googleapis.com/v1", "eks.amazonaws.com/v1"}, mapKSResourceToApiGroup(DescribeRepositories))
+	assert.ElementsMatch(t, []string{"container.googleapis.com/v1", "eks.amazonaws.com/v1", "management.azure.com/v1"}, mapKSResourceToApiGroup(DescribeRepositories))
 	assert.ElementsMatch(t, []string{"container.googleapis.com/v1", "eks.amazonaws.com/v1", "management.azure.com/v1"}, mapKSResourceToApiGroup(ListEntitiesForPolicies))
 
 	// Test the cloudResourceRequired helper function
@@ -684,4 +684,20 @@ func Test_isMasterNodeTaints(t *testing.T) {
 			assert.Equal(t, tt.want, isMasterNodeTaints(tt.taints))
 		})
 	}
+}
+
+// TestDescribeRepositoriesCloudProviders verifies that DescribeRepositories
+// includes API groups for all three major cloud providers: GCP, AWS, and Azure.
+// This is a regression test for issue #3839 which added Azure ACR support.
+func TestDescribeRepositoriesCloudProviders(t *testing.T) {
+	acrAPIGroup := "management.azure.com/v1"
+	gcpAPIGroup := "container.googleapis.com/v1"
+	eksAPIGroup := "eks.amazonaws.com/v1"
+
+	groups, ok := MapResourceToApiGroupCloud[DescribeRepositories]
+	assert.True(t, ok, "DescribeRepositories should be present in MapResourceToApiGroupCloud")
+
+	assert.Contains(t, groups, gcpAPIGroup, "DescribeRepositories should support GCP (container.googleapis.com/v1)")
+	assert.Contains(t, groups, eksAPIGroup, "DescribeRepositories should support AWS EKS (eks.amazonaws.com/v1)")
+	assert.Contains(t, groups, acrAPIGroup, "DescribeRepositories should support Azure ACR (management.azure.com/v1)")
 }
