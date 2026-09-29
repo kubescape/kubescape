@@ -21,6 +21,7 @@ type skippedControlInfo struct {
 	remediation string
 	scoreFactor float32
 	reason      string
+	status      string
 }
 
 // buildSkipMessage constructs a human-readable skip reason from IStatus.
@@ -77,6 +78,7 @@ func collectSkippedControls(opaSessionObj *cautils.OPASessionObj) []skippedContr
 					remediation: ctl.GetRemediation(),
 					scoreFactor: ctl.GetScoreFactor(),
 					reason:      reason,
+					status:      string(apis.StatusSkipped),
 				}
 			}
 		}
@@ -98,6 +100,7 @@ func collectSkippedControls(opaSessionObj *cautils.OPASessionObj) []skippedContr
 								remediation: ctl.GetRemediation(),
 								scoreFactor: ctl.GetScoreFactor(),
 								reason:      reason,
+								status:      string(apis.StatusSkipped),
 							}
 						}
 					}
@@ -112,10 +115,11 @@ func collectSkippedControls(opaSessionObj *cautils.OPASessionObj) []skippedContr
 			reason = "not evaluated"
 		}
 		if existing, exists := skippedMap[nec.ControlID]; exists {
+			existing.status = "not evaluated"
 			if existing.reason == "" || existing.reason == "not evaluated" || existing.reason == "skipped" {
 				existing.reason = reason
-				skippedMap[nec.ControlID] = existing
 			}
+			skippedMap[nec.ControlID] = existing
 		} else {
 			name := nec.ControlID
 			var desc, rem string
@@ -130,6 +134,22 @@ func collectSkippedControls(opaSessionObj *cautils.OPASessionObj) []skippedContr
 					score = pCtrl.BaseScore
 				}
 			}
+			if (name == nec.ControlID || score == 0 || desc == "" || rem == "") && opaSessionObj.Report != nil {
+				if ctrl := opaSessionObj.Report.SummaryDetails.Controls.GetControl(reportsummary.EControlCriteriaID, nec.ControlID); ctrl != nil {
+					if name == nec.ControlID && ctrl.GetName() != "" {
+						name = ctrl.GetName()
+					}
+					if desc == "" {
+						desc = ctrl.GetDescription()
+					}
+					if rem == "" {
+						rem = ctrl.GetRemediation()
+					}
+					if score == 0 {
+						score = ctrl.GetScoreFactor()
+					}
+				}
+			}
 			skippedMap[nec.ControlID] = skippedControlInfo{
 				controlID:   nec.ControlID,
 				name:        name,
@@ -137,6 +157,7 @@ func collectSkippedControls(opaSessionObj *cautils.OPASessionObj) []skippedContr
 				remediation: rem,
 				scoreFactor: score,
 				reason:      reason,
+				status:      "not evaluated",
 			}
 		}
 	}
