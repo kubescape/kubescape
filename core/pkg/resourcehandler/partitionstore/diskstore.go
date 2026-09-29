@@ -166,7 +166,7 @@ func (d *DiskStore) Put(ctx context.Context, namespace string, obj workloadinter
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if obj == nil || obj.GetObject() == nil {
+	if isNilMetadata(obj) {
 		return ErrNilMetadata
 	}
 

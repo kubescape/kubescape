@@ -427,6 +427,10 @@ func runStoreContractTests(t *testing.T, storeFactory func(t *testing.T) Store) 
 		// Put with nil object must return ErrNilMetadata
 		assert.ErrorIs(t, s.Put(ctx, "ns-empty", nil), ErrNilMetadata)
 
+		// Put with typed-nil pointer must return ErrNilMetadata without panicking
+		var typedNil *panicOnNilMetadata
+		assert.ErrorIs(t, s.Put(ctx, "ns-empty", typedNil), ErrNilMetadata)
+
 		// Put with object having nil payload map must also return ErrNilMetadata
 		assert.ErrorIs(t, s.Put(ctx, "ns-empty", nilPayloadMetadata{}), ErrNilMetadata)
 
@@ -453,9 +457,42 @@ func runStoreContractTests(t *testing.T, storeFactory func(t *testing.T) Store) 
 	})
 }
 
+func TestIsNilMetadata(t *testing.T) {
+	// Untyped nil
+	assert.True(t, isNilMetadata(nil))
+
+	// Typed nil pointer that would panic if GetObject() was invoked
+	var typedNil *panicOnNilMetadata
+	assert.True(t, isNilMetadata(typedNil))
+
+	// Struct value whose GetObject() returns nil
+	assert.True(t, isNilMetadata(nilPayloadMetadata{}))
+
+	// Valid non-nil metadata
+	pod := createTestObject("pod-1", "default", "Pod")
+	assert.False(t, isNilMetadata(pod))
+}
+
 type nilPayloadMetadata struct {
 	workloadinterface.IMetadata
 }
 
 func (nilPayloadMetadata) GetID() string             { return "nil-payload" }
 func (nilPayloadMetadata) GetObject() map[string]any { return nil }
+
+type panicOnNilMetadata struct {
+	workloadinterface.IMetadata
+	field string
+}
+
+func (p *panicOnNilMetadata) GetID() string {
+	return p.field
+}
+
+func (p *panicOnNilMetadata) GetObject() map[string]any {
+	// Accessing p.field panics if p is nil
+	if p.field == "" {
+		return nil
+	}
+	return map[string]any{"field": p.field}
+}

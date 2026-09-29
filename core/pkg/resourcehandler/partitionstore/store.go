@@ -3,6 +3,7 @@ package partitionstore
 import (
 	"context"
 	"errors"
+	"reflect"
 
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils"
@@ -144,4 +145,22 @@ func defaultOptions() Options {
 		FileBufferSize: 64 * 1024, // 64 KB
 		PurgeOnLoad:    false,
 	}
+}
+
+// isNilMetadata reports whether obj is untyped nil, wraps a nil-able underlying
+// value that is nil (such as a typed nil pointer), or has a nil payload object.
+// Checking the underlying value before method dispatch prevents panics when
+// invoking GetObject on typed nil receivers.
+func isNilMetadata(obj workloadinterface.IMetadata) bool {
+	if obj == nil {
+		return true
+	}
+	val := reflect.ValueOf(obj)
+	switch val.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice, reflect.UnsafePointer:
+		if val.IsNil() {
+			return true
+		}
+	}
+	return obj.GetObject() == nil
 }

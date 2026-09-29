@@ -79,7 +79,7 @@ func (m *MemoryStore) Put(ctx context.Context, namespace string, obj workloadint
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if obj == nil || obj.GetObject() == nil {
+	if isNilMetadata(obj) {
 		return ErrNilMetadata
 	}
 
