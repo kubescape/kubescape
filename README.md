@@ -117,7 +117,6 @@ curl -s https://raw.githubusercontent.com/kubescape/kubescape/master/install.sh 
 | **Homebrew** | `brew install kubescape` |
 | **Krew** | `kubectl krew install kubescape` |
 | **Arch Linux** | `yay -S kubescape` |
-| **Ubuntu** | `sudo add-apt-repository ppa:kubescape/kubescape && sudo apt install kubescape` |
 | **NixOS** | `nix-shell -p kubescape` |
 | **Chocolatey** | `choco install kubescape` |
 | **Scoop** | `scoop install kubescape` |
