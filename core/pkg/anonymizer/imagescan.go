@@ -37,7 +37,9 @@ import (
 // cmd/scan/image.go rejects for --hide/--encrypt up front
 // (shared.ValidateImageScanAnonymization). cyclonedx-json and spdx-json also
 // emit it for a posture scan carrying --scan-images, which validateSBOMOutput
-// (core/core/scan.go) rejects for the same reason.
+// (core/core/scan.go) rejects for the same reason. sarif sanitizes image source
+// metadata before building runs, ensuring emitted findings reference the
+// pseudonymized/encrypted image rather than raw user input.
 func transformImageScanData(imageScanData []cautils.ImageScanData, transformer Transformer) error {
 	var err error
 
