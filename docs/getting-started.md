@@ -12,6 +12,7 @@ The best way to get started with Kubescape is to download it to the machine you 
   - [Misconfigurations Scanning](#misconfigurations-scanning)
     - [Output Formats](#output-formats)
     - [Compliance Score](#compliance-score)
+    - [Scan Coverage](#scan-coverage)
   - [Image Scanning](#image-scanning)
   - [Auto-Fix Misconfigurations](#auto-fix-misconfigurations)
   - [Image Patching](#image-patching)
@@ -278,6 +279,8 @@ the exit code to reflect the score.
 
 ### Output Formats
 
+Kubescape supports various output formats for human consumption and CI/CD integration. All formats include or reflect [scan coverage and diagnostic skip reasons](scan-coverage.md) when controls cannot be evaluated.
+
 #### JSON
 
 ```bash
@@ -289,6 +292,7 @@ kubescape scan --format json --output results.json
 ```bash
 kubescape scan --format junit --output results.xml
 ```
+
 #### SARIF
 
 SARIF is a standard format for the output of static analysis tools. It is supported by many tools, including GitHub Code Scanning and Azure DevOps. [Read more about SARIF](https://docs.github.com/en/code-security/secure-coding/sarif-support-for-code-scanning/about-sarif-support-for-code-scanning).
@@ -298,6 +302,12 @@ kubescape scan --format sarif --output results.sarif
 ```
 > **Note**
 > SARIF format is supported only when scanning local files or git repositories, but not when scanning a running cluster.
+
+#### Markdown
+
+```bash
+kubescape scan --format markdown --output report.md
+```
 
 #### HTML
 
@@ -310,6 +320,16 @@ kubescape scan --format html --output results.html
 ```bash
 kubescape scan --format pdf --output report.pdf
 ```
+
+#### CSV
+
+```bash
+kubescape scan --format csv --output report.csv
+```
+
+#### Scan Coverage
+
+When controls cannot be evaluated (e.g., due to missing API resources, lack of RBAC permissions, or configuration rules), Kubescape surfaces scan coverage information alongside the compliance score across all output formats. For full details on coverage metrics, degraded scan indicators, and how each format presents skipped controls, see the [Scan Coverage documentation](scan-coverage.md).
 
 ## Offline/air-gapped environment support
 
