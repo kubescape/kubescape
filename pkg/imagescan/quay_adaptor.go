@@ -1113,6 +1113,10 @@ func (a *QuayAdaptor) GetImagesScanStatus(ctx context.Context, imageIDs []Contai
 			return status, nil
 		}
 
+		if imageID.Hash == "" {
+			status.ImageID.Hash = manifestRef
+		}
+
 		path := quayManifestSecurityPath(org, repo, manifestRef, false)
 		data, err := client.DoRequest(ctx, http.MethodGet, path)
 		if err != nil {
@@ -1148,6 +1152,9 @@ func (a *QuayAdaptor) GetImagesScanStatus(ctx context.Context, imageIDs []Contai
 				}
 				if err := json.Unmarshal(retryData, &retryPayload); err != nil {
 					return status, fmt.Errorf("failed to parse scan status payload for child manifest %s/%s@%s: %w", org, repo, childDigest, err)
+				}
+				if imageID.Hash == "" {
+					status.ImageID.Hash = childDigest
 				}
 				switch strings.ToLower(retryPayload.Status) {
 				case "scanned":
@@ -1243,6 +1250,10 @@ func (a *QuayAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs []C
 			return report, nil
 		}
 
+		if imageID.Hash == "" {
+			report.ImageID.Hash = manifestRef
+		}
+
 		path := quayManifestSecurityPath(org, repo, manifestRef, true)
 		data, err := client.DoRequest(ctx, http.MethodGet, path)
 		if err != nil {
@@ -1276,6 +1287,9 @@ func (a *QuayAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs []C
 				var retryPayload quayVulnerabilityPayload
 				if err := json.Unmarshal(retryData, &retryPayload); err != nil {
 					return report, fmt.Errorf("failed to parse vulnerability payload for child manifest %s/%s@%s: %w", org, repo, childDigest, err)
+				}
+				if imageID.Hash == "" {
+					report.ImageID.Hash = childDigest
 				}
 				switch strings.ToLower(retryPayload.Status) {
 				case "scanned":

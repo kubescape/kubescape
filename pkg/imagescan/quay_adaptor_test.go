@@ -1633,6 +1633,7 @@ func TestQuayAdaptor_TagResolution(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, res, 1)
 		assert.True(t, res[0].IsScanAvailable)
+		assert.Equal(t, digest, res[0].ImageID.Hash)
 	})
 
 	t.Run("tag resolved to manifest digest in GetImagesVulnerabilities", func(t *testing.T) {
@@ -1643,6 +1644,7 @@ func TestQuayAdaptor_TagResolution(t *testing.T) {
 		require.Len(t, res, 1)
 		require.Len(t, res[0].Vulnerabilities, 1)
 		assert.Equal(t, "CVE-2023-1234", res[0].Vulnerabilities[0].ID)
+		assert.Equal(t, digest, res[0].ImageID.Hash)
 	})
 
 	t.Run("direct digest hash bypasses tag resolution", func(t *testing.T) {
@@ -1771,6 +1773,7 @@ func TestQuayAdaptor_TagResolution(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, statusRes, 1)
 		assert.True(t, statusRes[0].IsScanAvailable)
+		assert.Equal(t, childAmd64Digest, statusRes[0].ImageID.Hash)
 
 		vulnRes, err := adaptor.GetImagesVulnerabilities(context.Background(), []ContainerImageIdentifier{
 			{Registry: "quay.io", Repository: "myorg/multiarch", Tag: "latest"},
@@ -1779,6 +1782,7 @@ func TestQuayAdaptor_TagResolution(t *testing.T) {
 		require.Len(t, vulnRes, 1)
 		require.Len(t, vulnRes[0].Vulnerabilities, 1)
 		assert.Equal(t, "CVE-2023-0286", vulnRes[0].Vulnerabilities[0].ID)
+		assert.Equal(t, childAmd64Digest, vulnRes[0].ImageID.Hash)
 	})
 
 	t.Run("tag pointing to manifest list without amd64 falls back to available linux child", func(t *testing.T) {
@@ -1893,6 +1897,7 @@ func TestQuayAdaptor_TagResolution(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, statusRes, 1)
 		assert.True(t, statusRes[0].IsScanAvailable)
+		assert.Equal(t, listDigest, statusRes[0].ImageID.Hash)
 
 		vulnRes, err := adaptor.GetImagesVulnerabilities(context.Background(), []ContainerImageIdentifier{
 			{Registry: "quay.io", Repository: "myorg/hashmulti", Hash: listDigest},
@@ -1901,6 +1906,7 @@ func TestQuayAdaptor_TagResolution(t *testing.T) {
 		require.Len(t, vulnRes, 1)
 		require.Len(t, vulnRes[0].Vulnerabilities, 1)
 		assert.Equal(t, "CVE-2023-38545", vulnRes[0].Vulnerabilities[0].ID)
+		assert.Equal(t, listDigest, vulnRes[0].ImageID.Hash)
 	})
 
 	t.Run("comparing tag with pinned index digest yields identical results through both public methods", func(t *testing.T) {
@@ -1969,6 +1975,8 @@ func TestQuayAdaptor_TagResolution(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, tagStatus[0].IsScanAvailable, digestStatus[0].IsScanAvailable)
 		assert.Equal(t, tagStatus[0].LastScanDate, digestStatus[0].LastScanDate)
+		assert.Equal(t, childAmd64Digest, tagStatus[0].ImageID.Hash)
+		assert.Equal(t, listDigest, digestStatus[0].ImageID.Hash)
 
 		// Vulnerabilities by tag vs pinned digest
 		tagVulns, err := adaptor.GetImagesVulnerabilities(context.Background(), []ContainerImageIdentifier{
@@ -1980,6 +1988,8 @@ func TestQuayAdaptor_TagResolution(t *testing.T) {
 		})
 		require.NoError(t, err)
 		assert.Equal(t, tagVulns[0].Vulnerabilities, digestVulns[0].Vulnerabilities)
+		assert.Equal(t, childAmd64Digest, tagVulns[0].ImageID.Hash)
+		assert.Equal(t, listDigest, digestVulns[0].ImageID.Hash)
 
 		// Both Tag and Hash supplied: Hash has precedence
 		bothVulns, err := adaptor.GetImagesVulnerabilities(context.Background(), []ContainerImageIdentifier{
@@ -1987,6 +1997,7 @@ func TestQuayAdaptor_TagResolution(t *testing.T) {
 		})
 		require.NoError(t, err)
 		assert.Equal(t, tagVulns[0].Vulnerabilities, bothVulns[0].Vulnerabilities)
+		assert.Equal(t, listDigest, bothVulns[0].ImageID.Hash)
 	})
 
 	t.Run("direct single-image digest works without manifest list lookup", func(t *testing.T) {
