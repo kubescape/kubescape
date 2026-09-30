@@ -166,8 +166,11 @@ func (d *DiskStore) Put(ctx context.Context, namespace string, obj workloadinter
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	if isNilMetadata(obj) {
+		return ErrNilMetadata
+	}
 
-	rec := newRecord(d.activeGVR, namespace, obj)
+	rec := newRecordForMarshal(d.activeGVR, namespace, obj)
 	data, err := json.Marshal(rec)
 	if err != nil {
 		return fmt.Errorf("failed to serialize resource %s in namespace %s: %w", rec.ID, namespace, err)

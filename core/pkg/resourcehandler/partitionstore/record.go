@@ -25,6 +25,18 @@ func newRecord(gvr string, namespace string, obj workloadinterface.IMetadata) re
 	}
 }
 
+// newRecordForMarshal constructs a record referencing the object map directly.
+// This is safe for immediate serialization (such as in DiskStore.Put) because
+// json.Marshal performs read-only operations and the record is not retained in memory.
+func newRecordForMarshal(gvr string, namespace string, obj workloadinterface.IMetadata) record {
+	return record{
+		ID:        obj.GetID(),
+		GVR:       gvr,
+		Namespace: namespace,
+		Object:    obj.GetObject(),
+	}
+}
+
 func (r record) toMetadata() (workloadinterface.IMetadata, error) {
 	metaObj := objectsenvelopes.NewObject(r.Object)
 	if metaObj == nil {
