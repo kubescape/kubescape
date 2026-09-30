@@ -133,6 +133,66 @@ func TestReportV2ToV1_DoesNotMutateAllResources(t *testing.T) {
 	assert.NotContains(t, alertObjects[0], "spec")
 }
 
+// The OPA processor records a rule's paths as DeletePath / ReviewPath /
+// FixCommand entries and no longer sets FailedPath (#3598); the v1 rule
+// response has to carry them or every v1 finding loses its location.
+func TestReportV2ToV1_MapsDeleteReviewPathsAndFixCommand(t *testing.T) {
+	resourceID := "/v1/default/Pod/demo"
+	controlID := "C-0038"
+
+	controlSummary := reportsummary.ControlSummary{ControlID: controlID, Name: "host pid", ScoreFactor: 7}
+	controlSummary.Append(helpersv1.NewStatus(apis.StatusFailed), resourceID)
+
+	session := &OPASessionObj{
+		AllResources: map[string]workloadinterface.IMetadata{
+			resourceID: workloadinterface.NewWorkloadObj(map[string]any{
+				"apiVersion": "v1",
+				"kind":       "Pod",
+				"metadata":   map[string]any{"name": "demo", "namespace": "default"},
+			}),
+		},
+		ResourcesResult: map[string]resourcesresults.Result{
+			resourceID: {
+				ResourceID: resourceID,
+				AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+					{
+						ControlID: controlID,
+						ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{
+							{
+								Name:   "host-pid-ipc-privileges",
+								Status: apis.StatusFailed,
+								Paths: []armotypes.PosturePaths{
+									{ResourceID: resourceID, DeletePath: "spec.hostPID"},
+									{ResourceID: resourceID, ReviewPath: "spec.containers[0].image"},
+									{ResourceID: resourceID, FixPath: armotypes.FixPath{Path: "spec.hostIPC", Value: "false"}},
+									{ResourceID: resourceID, FixCommand: "kubectl delete pod demo"},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		Report: &reporthandlingv2.PostureReport{
+			SummaryDetails: reportsummary.SummaryDetails{
+				Controls: reportsummary.ControlSummaries{controlID: controlSummary},
+			},
+		},
+	}
+
+	got := ReportV2ToV1(session)
+
+	require.Len(t, got.FrameworkReports, 1)
+	require.Len(t, got.FrameworkReports[0].ControlReports, 1)
+	require.Len(t, got.FrameworkReports[0].ControlReports[0].RuleReports, 1)
+	require.Len(t, got.FrameworkReports[0].ControlReports[0].RuleReports[0].RuleResponses, 1)
+	response := got.FrameworkReports[0].ControlReports[0].RuleReports[0].RuleResponses[0]
+	assert.Equal(t, []string{"spec.hostPID"}, response.DeletePaths)
+	assert.Equal(t, []string{"spec.containers[0].image"}, response.ReviewPaths)
+	assert.Equal(t, []armotypes.FixPath{{Path: "spec.hostIPC", Value: "false"}}, response.FixPaths)
+	assert.Equal(t, "kubectl delete pod demo", response.FixCommand)
+}
+
 func TestReportV2ToV1_StatusCounters(t *testing.T) {
 	controlID := "C-001"
 	controlSummary := reportsummary.ControlSummary{

@@ -2,6 +2,8 @@ package cautils
 
 import (
 	"maps"
+	"slices"
+	"strings"
 
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/opa-utils/reporthandling"
@@ -123,14 +125,28 @@ func controlReportV2ToV1(opaSessionObj *OPASessionObj, frameworkName string, con
 						// rule response
 						ruleResponse := reporthandling.RuleResponse{}
 						ruleResponse.Rulename = rulev2.GetName()
+						// The processor records a rule's paths as DeletePath,
+						// ReviewPath, FixPath and FixCommand entries; FailedPath
+						// is only set by older data.
+						var fixCommands []string
 						for i := range rulev2.Paths {
 							if rulev2.Paths[i].FailedPath != "" {
 								ruleResponse.FailedPaths = append(ruleResponse.FailedPaths, rulev2.Paths[i].FailedPath)
 							}
+							if rulev2.Paths[i].DeletePath != "" {
+								ruleResponse.DeletePaths = append(ruleResponse.DeletePaths, rulev2.Paths[i].DeletePath)
+							}
+							if rulev2.Paths[i].ReviewPath != "" {
+								ruleResponse.ReviewPaths = append(ruleResponse.ReviewPaths, rulev2.Paths[i].ReviewPath)
+							}
 							if rulev2.Paths[i].FixPath.Path != "" {
 								ruleResponse.FixPaths = append(ruleResponse.FixPaths, rulev2.Paths[i].FixPath)
 							}
+							if cmd := rulev2.Paths[i].FixCommand; cmd != "" && !slices.Contains(fixCommands, cmd) {
+								fixCommands = append(fixCommands, cmd)
+							}
 						}
+						ruleResponse.FixCommand = strings.Join(fixCommands, "\n")
 						ruleResponse.RuleStatus = string(status.Status())
 						if len(rulev2.Exception) > 0 {
 							ruleResponse.Exception = &rulev2.Exception[0]
