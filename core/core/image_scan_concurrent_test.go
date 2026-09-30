@@ -565,3 +565,42 @@ func TestScanImageJobsReturnsDiscoveryAndWorkerErrorsWithPartialResults(t *testi
 	require.Len(t, results.ImageScanData, 1)
 	assert.Equal(t, "example/success:latest", results.ImageScanData[0].Image)
 }
+
+// TestScanWithRegistryMappingRespectsContextCancellation is a regression test
+// for the bug where a pre-cancelled context was not checked between credential
+// retries, causing scanWithRegistryMapping to launch further scans even after
+// the caller had cancelled the operation.
+func TestScanWithRegistryMappingRespectsContextCancellation(t *testing.T) {
+	mockSvc := newMockImageScanService(50 * time.Millisecond)
+	img := "registry.example.com/team/app:v1"
+	cred1 := imagescan.RegistryCredentials{Username: "mock-user-1"}
+	cred2 := imagescan.RegistryCredentials{Username: "mock-user-2"}
+	mockSvc.errByImage[img] = errors.New("unauthorized: authentication required")
+	mockSvc.dataByImage[img] = &cautils.ImageScanData{Image: img}
+
+	// Cancel the context before calling so the loop must exit immediately.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	data, err := scanWithRegistryMapping(
+		ctx,
+		mockSvc,
+		img,
+		[]imagescan.RegistryCredentials{cred1, cred2},
+		nil,
+		nil,
+		nil,
+		"",
+	)
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, context.Canceled)
+	assert.Nil(t, data)
+
+	// The mock must not have been invoked at all — the ctx.Done() guard fires
+	// before the first scanImageForPlatform call.
+	mockSvc.mu.Lock()
+	defer mockSvc.mu.Unlock()
+	assert.Zero(t, mockSvc.scanCalls,
+		"expected zero scan calls when context is already cancelled")
+}
