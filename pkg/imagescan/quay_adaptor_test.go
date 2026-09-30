@@ -946,6 +946,51 @@ func TestQuayAdaptor_RateLimitingAndRetries(t *testing.T) {
 	assert.Equal(t, int32(3), attempts.Load())
 }
 
+func TestQuayAdaptor_RateLimiting_ExponentialBackoffWithoutRetryAfter(t *testing.T) {
+	var requestTimes []time.Time
+	var mu sync.Mutex
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		mu.Lock()
+		requestTimes = append(requestTimes, time.Now())
+		count := len(requestTimes)
+		mu.Unlock()
+
+		if count <= 2 {
+			// 429 without Retry-After header
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = w.Write([]byte(`{"message": "Rate limited", "status": 429}`))
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"status": "scanned", "data": null}`))
+	}))
+	defer server.Close()
+
+	baseBackoff := 50 * time.Millisecond
+	wrapper := &quayAPIWrapper{
+		baseURL:         server.URL,
+		httpClient:      server.Client(),
+		maxResponseSize: maxRegistryAPIResponseBytes,
+		maxRetries:      3,
+		retryBackoff:    baseBackoff,
+	}
+
+	data, err := wrapper.DoRequest(context.Background(), http.MethodGet, "/test-backoff")
+	require.NoError(t, err)
+	assert.Contains(t, string(data), "scanned")
+
+	mu.Lock()
+	defer mu.Unlock()
+	require.Len(t, requestTimes, 3)
+
+	delay1 := requestTimes[1].Sub(requestTimes[0])
+	delay2 := requestTimes[2].Sub(requestTimes[1])
+
+	assert.GreaterOrEqual(t, delay1, 35*time.Millisecond)
+	assert.GreaterOrEqual(t, delay2, 70*time.Millisecond)
+}
+
 func TestQuayAdaptor_RateLimitingExhausted(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusTooManyRequests)
@@ -1565,6 +1610,69 @@ func TestParseRetryAfter(t *testing.T) {
 
 	t.Run("malformed header uses default", func(t *testing.T) {
 		assert.Equal(t, defaultBackoff, parseRetryAfter("not-a-number-or-date", defaultBackoff))
+	})
+
+	t.Run("empty header with large attempt exponential backoff does not overflow", func(t *testing.T) {
+		backoff := quayExponentialBackoff(defaultBackoff, 35)
+		assert.Equal(t, maxQuayRetryAfter, backoff)
+		assert.Equal(t, maxQuayRetryAfter, parseRetryAfter("", backoff))
+	})
+}
+
+func TestQuayExponentialBackoff(t *testing.T) {
+	base := 500 * time.Millisecond
+
+	t.Run("exponential growth before cap", func(t *testing.T) {
+		expected := []time.Duration{
+			500 * time.Millisecond,   // attempt 0: 500ms * 1
+			1000 * time.Millisecond,  // attempt 1: 500ms * 2
+			2000 * time.Millisecond,  // attempt 2: 500ms * 4
+			4000 * time.Millisecond,  // attempt 3: 500ms * 8
+			8000 * time.Millisecond,  // attempt 4: 500ms * 16
+			16000 * time.Millisecond, // attempt 5: 500ms * 32
+			32000 * time.Millisecond, // attempt 6: 500ms * 64
+		}
+		for attempt, want := range expected {
+			got := quayExponentialBackoff(base, attempt)
+			assert.Equal(t, want, got, "attempt %d", attempt)
+		}
+	})
+
+	t.Run("cap boundary", func(t *testing.T) {
+		// attempt 6 is 32s (< 60s); attempt 7 is 64s, capped to 60s (maxQuayRetryAfter)
+		assert.Equal(t, 32*time.Second, quayExponentialBackoff(base, 6))
+		assert.Equal(t, maxQuayRetryAfter, quayExponentialBackoff(base, 7))
+		assert.Equal(t, maxQuayRetryAfter, quayExponentialBackoff(base, 8))
+	})
+
+	t.Run("large attempt boundaries and overflow prevention", func(t *testing.T) {
+		// Specifically tests attempt 35 (where 500ms * (1<<35) would overflow signed int64 to negative)
+		// and adjacent boundaries up to and beyond 64-bit shift width.
+		largeAttempts := []int{34, 35, 36, 61, 62, 63, 64, 100, 1000}
+		for _, attempt := range largeAttempts {
+			got := quayExponentialBackoff(base, attempt)
+			assert.Equal(t, maxQuayRetryAfter, got, "attempt %d should be capped at maxQuayRetryAfter without overflow", attempt)
+		}
+	})
+
+	t.Run("edge cases for base and attempt", func(t *testing.T) {
+		assert.Equal(t, time.Duration(0), quayExponentialBackoff(0, 5))
+		assert.Equal(t, time.Duration(0), quayExponentialBackoff(-100*time.Millisecond, 5))
+		assert.Equal(t, base, quayExponentialBackoff(base, -1))
+		assert.Equal(t, maxQuayRetryAfter, quayExponentialBackoff(90*time.Second, 0))
+		assert.Equal(t, maxQuayRetryAfter, quayExponentialBackoff(maxQuayRetryAfter, 2))
+	})
+
+	t.Run("non-standard base values", func(t *testing.T) {
+		// Base of 25s: attempt 0 = 25s, attempt 1 = 50s, attempt 2 = 60s (capped)
+		assert.Equal(t, 25*time.Second, quayExponentialBackoff(25*time.Second, 0))
+		assert.Equal(t, 50*time.Second, quayExponentialBackoff(25*time.Second, 1))
+		assert.Equal(t, maxQuayRetryAfter, quayExponentialBackoff(25*time.Second, 2))
+
+		// 1ns base: requires 36 shifts to reach 68s > 60s
+		assert.Equal(t, time.Duration(1), quayExponentialBackoff(1, 0))
+		assert.Equal(t, time.Duration(1<<35), quayExponentialBackoff(1, 35))
+		assert.Equal(t, maxQuayRetryAfter, quayExponentialBackoff(1, 36))
 	})
 }
 
