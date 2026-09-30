@@ -142,6 +142,76 @@ func (t *Template) generateImageTableResult(totalCVEs, fixableCVEs int) {
 	)
 }
 
+// GenerateCoverageSummaryRow adds a scan coverage summary row below the resource summary,
+// and surfaces unexamined resource kind diagnostics when present (#3884, #3958).
+func (t *Template) GenerateCoverageSummaryRow(evaluated, total int, score float32, degraded bool, unexaminedKinds []cautils.UnexaminedKind) {
+	defaultProps := props.Text{
+		Align:  align.Left,
+		Size:   8,
+		Style:  fontstyle.Bold,
+		Family: fontfamily.Arial,
+	}
+
+	scoreText := cautils.ComplianceScoreToString(score, 2) + "%"
+	if degraded {
+		scoreText += " (Degraded)"
+	}
+
+	t.maroto.AddRow(10,
+		text.NewCol(5, "Scan coverage", defaultProps),
+		text.NewCol(2, fmt.Sprintf("%d evaluated", evaluated), defaultProps),
+		text.NewCol(2, fmt.Sprintf("%d total", total), defaultProps),
+		text.NewCol(3, scoreText, defaultProps),
+	)
+
+	if len(unexaminedKinds) > 0 {
+		var parts []string
+		for _, uk := range unexaminedKinds {
+			if uk.Kind != "" && uk.GroupVersionResource != "" {
+				parts = append(parts, fmt.Sprintf("%s (%s)", uk.Kind, uk.GroupVersionResource))
+			} else if uk.Kind != "" {
+				parts = append(parts, uk.Kind)
+			} else if uk.GroupVersionResource != "" {
+				parts = append(parts, uk.GroupVersionResource)
+			}
+		}
+		if len(parts) > 0 {
+			t.maroto.AddAutoRow(text.NewCol(12, "Unexamined resource kinds:", props.Text{
+				Style:  fontstyle.Italic,
+				Family: fontfamily.Arial,
+				Align:  align.Left,
+				Top:    1,
+				Size:   7,
+				Color:  &props.BlackColor,
+			}))
+			for _, part := range parts {
+				t.maroto.AddAutoRow(text.NewCol(12, fmt.Sprintf("  • %s", part), props.Text{
+					Style:  fontstyle.Italic,
+					Family: fontfamily.Arial,
+					Align:  align.Left,
+					Top:    0.5,
+					Size:   7,
+					Color:  &props.BlackColor,
+				}))
+			}
+		}
+	}
+}
+
+// GenerateSkippedControlsTable is responsible for adding skipped control data in table format to the pdf (#3884)
+func (t *Template) GenerateSkippedControlsTable(tableRows *[]SkippedControlTableObject) error {
+	rows, err := list.Build[SkippedControlTableObject](*tableRows)
+	if err != nil {
+		return err
+	}
+	t.maroto.AddRows(rows...)
+	t.maroto.AddRows(
+		line.NewAutoRow(props.Line{Thickness: 0.3, SizePercent: 100}),
+		row.New(2),
+	)
+	return nil
+}
+
 // GenerateInfoRows is responsible for adding the information in pdf
 func (t *Template) GenerateInfoRows(rows []string) *Template {
 	for _, row := range rows {
@@ -275,6 +345,60 @@ func (t ImageTableObject) GetContent(i int) core.Row {
 		text.NewCol(4, t.packageName, props.Text{Style: fontstyle.Normal, Family: fontfamily.Courier, Size: 6}),
 		text.NewCol(2, t.version, props.Text{Style: fontstyle.Normal, Family: fontfamily.Courier, Size: 6}),
 		text.NewCol(3, t.fixVersions, props.Text{VerticalPadding: 1, Style: fontstyle.Normal, Family: fontfamily.Courier, Size: 6}),
+	)
+
+	if i%2 == 0 {
+		r.WithStyle(&props.Cell{
+			BackgroundColor: &props.Color{
+				Red:   224,
+				Green: 224,
+				Blue:  224,
+			},
+		})
+	}
+
+	return r
+}
+
+// SkippedControlTableObject maps a single skipped or unevaluated control for the PDF report (#3884)
+type SkippedControlTableObject struct {
+	severity     string
+	ref          string
+	name         string
+	reason       string
+	getTextColor getTextColorFunc
+}
+
+// NewSkippedControlTableRow constructs a SkippedControlTableObject for rendering.
+func NewSkippedControlTableRow(severity, ref, name, reason string, getTextColor getTextColorFunc) *SkippedControlTableObject {
+	return &SkippedControlTableObject{
+		severity:     severity,
+		ref:          ref,
+		name:         name,
+		reason:       reason,
+		getTextColor: getTextColor,
+	}
+}
+
+func (s SkippedControlTableObject) GetHeader() core.Row {
+	return row.New(10).Add(
+		text.NewCol(1, "Severity", props.Text{Size: 6, Family: fontfamily.Arial, Style: fontstyle.Bold}),
+		text.NewCol(2, "Control reference", props.Text{Size: 6, Family: fontfamily.Arial, Style: fontstyle.Bold}),
+		text.NewCol(4, "Control name", props.Text{Size: 6, Family: fontfamily.Arial, Style: fontstyle.Bold}),
+		text.NewCol(5, "Skip reason", props.Text{Size: 6, Family: fontfamily.Arial, Style: fontstyle.Bold}),
+	)
+}
+
+func (s SkippedControlTableObject) GetContent(i int) core.Row {
+	severityColor := &props.BlackColor
+	if s.getTextColor != nil {
+		severityColor = s.getTextColor(s.severity)
+	}
+	r := row.New().Add(
+		text.NewCol(1, s.severity, props.Text{Style: fontstyle.Normal, Family: fontfamily.Courier, Size: 6, Color: severityColor}),
+		text.NewCol(2, s.ref, props.Text{Style: fontstyle.Normal, Family: fontfamily.Courier, Size: 6, Color: &props.Color{}}),
+		text.NewCol(4, s.name, props.Text{Style: fontstyle.Normal, Family: fontfamily.Courier, Size: 6}),
+		text.NewCol(5, s.reason, props.Text{VerticalPadding: 1, Style: fontstyle.Normal, Family: fontfamily.Courier, Size: 6}),
 	)
 
 	if i%2 == 0 {

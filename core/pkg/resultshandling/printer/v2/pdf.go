@@ -17,6 +17,7 @@ import (
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer/v2/pdf"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/utils"
+	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 )
 
@@ -78,7 +79,11 @@ func (pp *PdfPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OP
 
 	switch {
 	case opaSessionObj != nil:
-		outBuff, err = pp.generatePdf(&opaSessionObj.Report.SummaryDetails, imageScanData)
+		var summaryDetails *reportsummary.SummaryDetails
+		if opaSessionObj.Report != nil {
+			summaryDetails = &opaSessionObj.Report.SummaryDetails
+		}
+		outBuff, err = pp.generatePdf(summaryDetails, opaSessionObj, imageScanData)
 	case len(imageScanData) > 0:
 		outBuff, err = pp.generateImagePdf(imageScanData)
 	default:
@@ -159,12 +164,19 @@ func (pp *PdfPrinter) getImageTableObjects(cves []imageprinter.CVE) (*[]pdf.Imag
 }
 
 // generatePdf builds a posture PDF and, when imageScanData is non-empty, appends the image CVE section.
-func (pp *PdfPrinter) generatePdf(summaryDetails *reportsummary.SummaryDetails, imageScanData []cautils.ImageScanData) ([]byte, error) {
-	return pp.generatePdfAt(summaryDetails, imageScanData, time.Now())
+func (pp *PdfPrinter) generatePdf(summaryDetails *reportsummary.SummaryDetails, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) ([]byte, error) {
+	return pp.generatePdfAt(summaryDetails, opaSessionObj, imageScanData, time.Now())
 }
 
 // generatePdfAt builds the PDF with reportTime so tests can compare stable bytes.
-func (pp *PdfPrinter) generatePdfAt(summaryDetails *reportsummary.SummaryDetails, imageScanData []cautils.ImageScanData, reportTime time.Time) ([]byte, error) {
+func (pp *PdfPrinter) generatePdfAt(summaryDetails *reportsummary.SummaryDetails, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData, reportTime time.Time) ([]byte, error) {
+	if summaryDetails == nil && opaSessionObj != nil && opaSessionObj.Report != nil {
+		summaryDetails = &opaSessionObj.Report.SummaryDetails
+	}
+	if summaryDetails == nil {
+		return nil, fmt.Errorf("failed to print results, missing summary details")
+	}
+
 	sortedControlIDs := getSortedControlsIDs(summaryDetails.Controls)
 	infoToPrintInfo := mapInfoToPrintInfo(summaryDetails.Controls)
 
@@ -176,7 +188,24 @@ func (pp *PdfPrinter) generatePdfAt(summaryDetails *reportsummary.SummaryDetails
 	if err != nil {
 		return nil, err
 	}
+
+	var skippedControls []skippedControlInfo
+	if opaSessionObj != nil {
+		skippedControls = collectSkippedControls(opaSessionObj)
+		cov := opaSessionObj.ScanCoverage
+		if cov.Degraded || len(skippedControls) > 0 || len(cov.UnexaminedKinds) > 0 || (cov.TotalControls > 0 && cov.CoverageScore < 100) {
+			template.GenerateCoverageSummaryRow(cov.EvaluatedControls, cov.TotalControls, cov.CoverageScore, cov.Degraded, cov.UnexaminedKinds)
+		}
+	}
+
 	template.GenerateInfoRows(pp.getFormattedInformation(infoToPrintInfo))
+
+	if len(skippedControls) > 0 {
+		if err := pp.writeSkippedControlsTable(template, skippedControls); err != nil {
+			return nil, err
+		}
+	}
+
 	if len(imageScanData) > 0 {
 		title, allCVEs := collectImagePDFData(imageScanData)
 		template.GenerateSectionTitle(title)
@@ -185,6 +214,34 @@ func (pp *PdfPrinter) generatePdfAt(summaryDetails *reportsummary.SummaryDetails
 		}
 	}
 	return template.GetPdf()
+}
+
+// writeSkippedControlsTable appends the skipped controls table to template (#3884).
+func (pp *PdfPrinter) writeSkippedControlsTable(template *pdf.Template, skippedControls []skippedControlInfo) error {
+	if len(skippedControls) == 0 {
+		return nil
+	}
+	template.GenerateSectionTitle("Skipped controls")
+	rows := pp.getSkippedTableObjects(skippedControls)
+	return template.GenerateSkippedControlsTable(rows)
+}
+
+// getSkippedTableObjects converts skippedControlInfo into PDF table rows (#3884).
+func (pp *PdfPrinter) getSkippedTableObjects(skippedControls []skippedControlInfo) *[]pdf.SkippedControlTableObject {
+	rows := make([]pdf.SkippedControlTableObject, 0, len(skippedControls))
+	for _, sc := range skippedControls {
+		name := sc.name
+		if name == "" {
+			name = sc.controlID
+		}
+		reason := sc.reason
+		if reason == "" {
+			reason = "not evaluated"
+		}
+		severity := apis.ControlSeverityToString(sc.scoreFactor)
+		rows = append(rows, *pdf.NewSkippedControlTableRow(severity, sc.controlID, utils.TruncateName(name, controlNameMaxLength), reason, getSeverityColor))
+	}
+	return &rows
 }
 
 func (pp *PdfPrinter) getFormattedInformation(infoMap []infoStars) []string {
