@@ -708,6 +708,10 @@ func scanImageJobs(ctx context.Context, svc imageScanService, concurrency int, j
 
 func collectImageScanTargets(scanType cautils.ScanTypes, scanData *cautils.OPASessionObj, ctx context.Context, scanningContext cautils.ScanningContext, k8sApi *k8sinterface.KubernetesApi, platformOverride string) (mapset.Set[ImageScanTarget], map[string][]imagescan.RegistryCredentials, []error) {
 	imagesToScan := mapset.NewSet[ImageScanTarget]()
+	// imageScanSkipMap tracks the SkipUnavailable state for each (Image, Platform)
+	// pair, enabling O(1) dedup lookups in addImageScanTarget instead of O(n)
+	// ToSlice scans. It is the source of truth for which variant is in the Set.
+	imageScanSkipMap := make(map[imageScanTargetKey]bool)
 	imageToCreds := make(map[string][]imagescan.RegistryCredentials)
 	var containerErrors []error
 	nodePlatforms := buildNodePlatformIndexFromCatalog(scanData.GetCatalog())
@@ -745,7 +749,7 @@ func collectImageScanTargets(scanType cautils.ScanTypes, scanData *cautils.OPASe
 					helpers.String("image", image), helpers.Int("platforms", len(platforms)))
 			}
 			for _, platform := range platforms {
-				addImageScanTarget(imagesToScan, ImageScanTarget{
+				addImageScanTarget(imagesToScan, imageScanSkipMap, ImageScanTarget{
 					Image: image, Platform: platform, SkipUnavailable: skipUnavailable,
 				})
 			}
@@ -778,17 +782,24 @@ func collectImageScanTargets(scanType cautils.ScanTypes, scanData *cautils.OPASe
 	return imagesToScan, imageToCreds, containerErrors
 }
 
-func addImageScanTarget(targets mapset.Set[ImageScanTarget], target ImageScanTarget) {
-	for _, existing := range targets.ToSlice() {
-		if existing.Image != target.Image || existing.Platform != target.Platform {
-			continue
-		}
-		if !existing.SkipUnavailable || target.SkipUnavailable {
+// addImageScanTarget deduplicates scan targets by (Image, Platform) identity.
+// skipMap provides O(1) lookup so we never need targets.ToSlice(), reducing
+// overall complexity from O(n²) to O(n) across all insertions.
+//
+// Dedup rule: a target with SkipUnavailable=false (fail-closed) always wins
+// over one with SkipUnavailable=true (fan-out / best-effort).
+func addImageScanTarget(targets mapset.Set[ImageScanTarget], skipMap map[imageScanTargetKey]bool, target ImageScanTarget) {
+	key := imageScanTargetKey{Image: target.Image, Platform: target.Platform}
+	if existingSkip, exists := skipMap[key]; exists {
+		// existingSkip=false → already fail-closed, can't be improved; drop new target.
+		// target.SkipUnavailable=true → new target is weaker than existing; drop it.
+		if !existingSkip || target.SkipUnavailable {
 			return
 		}
-		targets.Remove(existing)
-		break
+		// Existing was best-effort (true), incoming is fail-closed (false) → upgrade.
+		targets.Remove(ImageScanTarget{Image: target.Image, Platform: target.Platform, SkipUnavailable: true})
 	}
+	skipMap[key] = target.SkipUnavailable
 	targets.Add(target)
 }
 

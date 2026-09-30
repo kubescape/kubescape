@@ -30,6 +30,14 @@ type ImageScanTarget struct {
 	SkipUnavailable bool
 }
 
+// imageScanTargetKey identifies a unique (Image, Platform) pair for O(1)
+// lookups when deduplicating scan targets. SkipUnavailable is intentionally
+// excluded because it is the value being compared, not part of the identity.
+type imageScanTargetKey struct {
+	Image    string
+	Platform string
+}
+
 func (t ImageScanTarget) String() string {
 	return imageScanTarget(t.Image, t.Platform)
 }

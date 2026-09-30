@@ -540,10 +540,11 @@ func TestCollectImageScanTargetsDoesNotScanExcludedPlatform(t *testing.T) {
 
 func TestAddImageScanTargetRequiredVariantWins(t *testing.T) {
 	targets := mapset.NewSet[ImageScanTarget]()
-	addImageScanTarget(targets, ImageScanTarget{
+	skipMap := make(map[imageScanTargetKey]bool)
+	addImageScanTarget(targets, skipMap, ImageScanTarget{
 		Image: "example/app:latest", Platform: "linux/arm64", SkipUnavailable: true,
 	})
-	addImageScanTarget(targets, ImageScanTarget{
+	addImageScanTarget(targets, skipMap, ImageScanTarget{
 		Image: "example/app:latest", Platform: "linux/arm64",
 	})
 
