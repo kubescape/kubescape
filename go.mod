@@ -628,10 +628,19 @@ require (
 	sigs.k8s.io/structured-merge-diff/v6 v6.4.2 // indirect
 )
 
+// Fork carrying the image-scanning changes kubescape needs (schema v1 support, ac6c5ca5).
 replace github.com/anchore/stereoscope => github.com/matthyx/stereoscope v0.0.0-20250916161743-dd57158479de
 
+// Fork carrying the image-scanning and cosign signature-check changes kubescape
+// needs (c357f12c, ac6c5ca5).
 replace github.com/google/go-containerregistry => github.com/matthyx/go-containerregistry v0.0.0-20250916162850-293c5b36a9f8
 
+// Personal fork: upstream release/1.7 plus one patch making oci.WithPidsLimit
+// compile against runtime-spec v1.3.0 (LinuxPids.Limit became *int64), which
+// upstream declined for 1.7 (containerd/containerd#13087). containerd v1 is only
+// in the graph through the stereoscope fork above; retiring this is #3940.
 replace github.com/containerd/containerd => github.com/Retr0-Xd/containerd v0.0.0-20260322054632-16583c73e9b8
 
+// Holds distribution/reference at v0.5.0; without it the graph selects v0.6.0.
+// Added in #3349 without a recorded reason.
 replace github.com/distribution/reference => github.com/distribution/reference v0.5.0
