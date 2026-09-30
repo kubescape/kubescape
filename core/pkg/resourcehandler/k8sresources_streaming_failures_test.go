@@ -2,7 +2,9 @@ package resourcehandler
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net"
 	"testing"
 
 	"github.com/kubescape/kubescape/v4/core/cautils"
@@ -78,6 +80,39 @@ func TestCollectAndStreamBatches_FailsWhenAllQueriesFail(t *testing.T) {
 	require.True(t, ok, "the failed GVR must be available to scan coverage")
 	assert.Equal(t, apis.StatusSkipped, info.InnerStatus)
 	assert.Equal(t, apis.SubStatusNotEvaluated, info.SubStatus)
+}
+
+func TestCollectAndStreamBatches_AllQueriesFailedKeepsEachQueryError(t *testing.T) {
+	ctx := context.Background()
+	refused := &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("connect: connection refused")}
+	handler := newHandlerWithReactor(t, func(action k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, refused
+	})
+	scanInfo, session := streamingTestSession(ctx)
+	namespaced := true
+	const podsGVR = "/v1/pods"
+	queryable := QueryableResources{
+		podsGVR: {
+			GroupVersionResourceTriplet: podsGVR,
+			Namespaced:                  &namespaced,
+		},
+	}
+
+	err := handler.collectAndStreamBatches(
+		ctx,
+		queryable,
+		&EmptySelector{},
+		session,
+		scanInfo,
+		cautils.ExternalResources{},
+		make(chan *cautils.ResourceBatch, 2),
+		nil,
+	)
+
+	require.ErrorIs(t, err, ErrNoResourcesCollected)
+	var opErr *net.OpError
+	require.ErrorAs(t, err, &opErr, "the network error behind each failed query must stay reachable")
+	assert.Same(t, refused, opErr)
 }
 
 func TestCollectAndStreamBatches_IgnoresMissingOptionalResource(t *testing.T) {

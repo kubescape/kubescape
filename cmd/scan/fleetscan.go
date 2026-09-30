@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"slices"
@@ -16,9 +17,9 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v4/core/cautils"
-	"github.com/kubescape/kubescape/v4/core/core"
 	"github.com/kubescape/kubescape/v4/core/meta"
 	"github.com/kubescape/kubescape/v4/core/pkg/fleet"
+	"github.com/kubescape/kubescape/v4/core/pkg/resourcehandler"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer"
 	printerv2 "github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer/v2"
@@ -537,8 +538,22 @@ func runFleetContext(kubeContext string, scanInfo *cautils.ScanInfo, ks meta.IKu
 
 	started := time.Now()
 	results, err = run(ctx, scanInfo, ks, policyIdentifiers)
+	if err != nil && ctx.Err() != nil {
+		err = interruptedError{err: err}
+	}
 	return results, time.Since(started), err
 }
+
+// interruptedError marks a context's error as coming from its run being
+// stopped, by a signal or by --scan-timeout. The error alone cannot say so: a
+// dial or response timeout matches context.DeadlineExceeded as well.
+type interruptedError struct {
+	err error
+}
+
+func (e interruptedError) Error() string { return e.err.Error() }
+
+func (e interruptedError) Unwrap() error { return e.err }
 
 // newClusterResult turns one context's outcome into the row the fleet report
 // carries for it.
@@ -550,12 +565,12 @@ func runFleetContext(kubeContext string, scanInfo *cautils.ScanInfo, ks meta.IKu
 // clusters an operator most needs to see, the ones that failed their gate,
 // from the matrix, and leave them with no report and no cells.
 //
-// Only a run that produced nothing is classified by its error. A cancelled or
-// expired context means the run was interrupted, so nothing was learned about
-// the cluster; a per-cluster --scan-timeout firing lands here for the same
-// reason, since the deadline says how long the operator was prepared to wait
-// rather than anything about the cluster. core.ErrClusterConnection means the
-// API server was never reached. Anything else is an error inside the scan.
+// Only a run that produced nothing is classified by its error. A run that was
+// interrupted, by a signal or a per-cluster --scan-timeout, learned nothing
+// about the cluster, since the deadline says how long the operator was prepared
+// to wait rather than anything about the cluster. A cluster whose API server
+// never answered is unreachable. Anything else is an error, including a
+// kubeconfig that could not be loaded and a server that answered and refused.
 //
 // The embedded report is the full one. --min-severity and --max-severity are
 // output-only by design: HandleResults applies them for the printers and then
@@ -578,10 +593,11 @@ func newClusterResult(kubeContext string, results *resultshandling.ResultsHandle
 	}
 
 	if results == nil {
+		var interrupted interruptedError
 		switch {
-		case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+		case errors.As(err, &interrupted):
 			cluster.Status = fleet.ClusterCancelled
-		case errors.Is(err, core.ErrClusterConnection):
+		case clusterUnreachable(err):
 			cluster.Status = fleet.ClusterUnreachable
 		default:
 			cluster.Status = fleet.ClusterError
@@ -603,6 +619,61 @@ func newClusterResult(kubeContext string, results *resultshandling.ResultsHandle
 	cluster.ComplianceScore = &score
 	cluster.Coverage = &coverage
 	return cluster
+}
+
+// clusterUnreachable reports whether err shows the API server never answered:
+// every resource query failed, and each one on the network. Network failures
+// elsewhere in a scan, such as downloading policies, say nothing about the
+// cluster. A single answer among the queries, even a refusal, means the cluster
+// was reached.
+func clusterUnreachable(err error) bool {
+	if !errors.Is(err, resourcehandler.ErrNoResourcesCollected) {
+		return false
+	}
+	failures := failureBranches(err)
+	for _, failure := range failures {
+		if !networkFailure(failure) {
+			return false
+		}
+	}
+	return len(failures) > 0
+}
+
+// failureBranches returns the separate failures inside err: the errors joined by
+// the first node that carries several, or err itself when none does.
+func failureBranches(err error) []error {
+	for node := err; node != nil; node = errors.Unwrap(node) {
+		joined, ok := node.(interface{ Unwrap() []error })
+		if !ok {
+			continue
+		}
+		var branches []error
+		for _, branch := range joined.Unwrap() {
+			branches = append(branches, failureBranches(branch)...)
+		}
+		return branches
+	}
+	if err == nil {
+		return nil
+	}
+	return []error{err}
+}
+
+// networkFailure reports whether a single failure got no answer from the API
+// server: the name did not resolve, the connection could not be opened, or the
+// server did not respond in time.
+func networkFailure(err error) bool {
+	for node := err; node != nil; node = errors.Unwrap(node) {
+		if opErr, ok := node.(*net.OpError); ok && opErr.Op == "dial" {
+			return true
+		}
+	}
+	var dnsErr *net.DNSError
+	if errors.As(err, &dnsErr) {
+		return true
+	}
+	var netErr net.Error
+	return errors.As(err, &netErr) && netErr.Timeout()
 }
 
 // writeFleetReport serialises the report to path as indented JSON. The

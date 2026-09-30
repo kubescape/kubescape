@@ -3,6 +3,7 @@ package resourcehandler
 import (
 	"context"
 	"errors"
+	"net"
 	"testing"
 	"time"
 
@@ -227,6 +228,57 @@ func TestGetResources_FailsWhenAllQueriesFail(t *testing.T) {
 	_, _, _, _, err := handler.GetResources(context.Background(), sessionObj, scanInfo)
 	assert.ErrorContains(t, err, "failed to pull any Kubernetes resources")
 	assert.ErrorContains(t, err, "simulated API failure")
+}
+
+func TestGetResources_AllQueriesFailedKeepsEachQueryError(t *testing.T) {
+	k8sinterface.InitializeMapResourcesMock()
+	handler := getResourceHandlerMock()
+
+	refused := &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("connect: connection refused")}
+	handler.k8s.DynamicClient = &mockDynamicClient{
+		listFunc: func(ctx context.Context, opts metav1.ListOptions) (*unstructured.UnstructuredList, error) {
+			return nil, refused
+		},
+	}
+
+	rule := mockRule("rule-a", nil, "")
+	rule.Match = append(rule.Match, mockMatch(4))
+	control := mockControl("control-1", nil)
+	control.Rules = append(control.Rules, rule)
+	framework := mockFramework("test", nil)
+	framework.Controls = append(framework.Controls, control)
+
+	scanInfo := &cautils.ScanInfo{}
+	sessionObj := cautils.NewOPASessionObj(context.Background(), nil, nil, scanInfo, nil)
+	sessionObj.Policies = append(sessionObj.Policies, *framework)
+
+	_, _, _, _, err := handler.GetResources(context.Background(), sessionObj, scanInfo)
+	require.ErrorIs(t, err, ErrNoResourcesCollected)
+	var opErr *net.OpError
+	require.ErrorAs(t, err, &opErr, "the network error behind each failed query must stay reachable")
+	assert.Same(t, refused, opErr)
+}
+
+func TestNewAllQueriesFailedError(t *testing.T) {
+	podsFailure := errors.New("pods failed")
+	single := newAllQueriesFailedError(map[string]queryFailure{
+		"/v1/pods": {gvr: "/v1/pods", err: podsFailure},
+	})
+	require.EqualError(t, single, "failed to pull any Kubernetes resources: /v1/pods: pods failed",
+		"the message must stay exactly as it was")
+	require.ErrorIs(t, single, podsFailure)
+	require.ErrorIs(t, single, ErrNoResourcesCollected)
+
+	secretsFailure := errors.New("secrets failed")
+	several := newAllQueriesFailedError(map[string]queryFailure{
+		"/v1/pods":    {gvr: "/v1/pods", err: podsFailure},
+		"/v1/secrets": {gvr: "/v1/secrets", err: secretsFailure},
+	})
+	require.ErrorIs(t, several, podsFailure)
+	require.ErrorIs(t, several, secretsFailure)
+	assert.Contains(t, several.Error(), "/v1/pods: pods failed")
+	assert.Contains(t, several.Error(), "/v1/secrets: secrets failed")
+	assert.Contains(t, several.Error(), "; ")
 }
 
 // TestGetResources_ScanAbortedOnContextCancellation verifies that when the

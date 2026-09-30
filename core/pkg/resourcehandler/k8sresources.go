@@ -174,12 +174,8 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 			cautils.StopSpinner()
 			return k8sResourcesMap, allResources, ksResourceMap, excludedRulesMap, fmt.Errorf("scan aborted: %w", ctxErr)
 		}
-		var combined []string
-		for _, f := range failedQueries {
-			combined = append(combined, fmt.Sprintf("%s: %s", f.gvr, f.err.Error()))
-		}
 		cautils.StopSpinner()
-		return k8sResourcesMap, allResources, ksResourceMap, excludedRulesMap, fmt.Errorf("failed to pull any Kubernetes resources: %s", strings.Join(combined, "; "))
+		return k8sResourcesMap, allResources, ksResourceMap, excludedRulesMap, newAllQueriesFailedError(failedQueries)
 	}
 	for _, f := range failedQueries {
 		logger.L().Ctx(ctx).Warning("failed to pull resource type",
@@ -536,11 +532,7 @@ func (k8sHandler *K8sResourceHandler) collectAndStreamBatches(ctx context.Contex
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return fmt.Errorf("scan aborted: %w", ctxErr)
 		}
-		var combined []string
-		for _, f := range failedQueries {
-			combined = append(combined, fmt.Sprintf("%s: %s", f.gvr, f.err.Error()))
-		}
-		return fmt.Errorf("failed to pull any Kubernetes resources: %s", strings.Join(combined, "; "))
+		return newAllQueriesFailedError(failedQueries)
 	}
 	for _, f := range failedQueries {
 		logger.L().Ctx(ctx).Warning("failed to pull resource type",
@@ -1005,6 +997,38 @@ type queryFailure struct {
 	selector string // the field selector that failed; empty for whole-GVR failures
 	err      error
 }
+
+// ErrNoResourcesCollected matches the error returned when every Kubernetes
+// resource query failed, so a caller can tell a failure to collect from the
+// cluster apart from any other scan error.
+var ErrNoResourcesCollected = errors.New("failed to pull any Kubernetes resources")
+
+// allQueriesFailedError keeps every query's error reachable through Unwrap, so
+// a caller can tell a cluster that could not be reached from one that answered
+// and refused.
+type allQueriesFailedError struct {
+	message  string
+	failures []error
+}
+
+func newAllQueriesFailedError(failedQueries map[string]queryFailure) error {
+	combined := make([]string, 0, len(failedQueries))
+	failures := make([]error, 0, len(failedQueries))
+	for _, f := range failedQueries {
+		combined = append(combined, fmt.Sprintf("%s: %s", f.gvr, f.err.Error()))
+		failures = append(failures, f.err)
+	}
+	return &allQueriesFailedError{
+		message:  ErrNoResourcesCollected.Error() + ": " + strings.Join(combined, "; "),
+		failures: failures,
+	}
+}
+
+func (e *allQueriesFailedError) Error() string { return e.message }
+
+func (e *allQueriesFailedError) Unwrap() []error { return e.failures }
+
+func (e *allQueriesFailedError) Is(target error) bool { return target == ErrNoResourcesCollected }
 
 // selectorFailure records a single per-field-selector LIST error inside pullSingleResource.
 type selectorFailure struct {
