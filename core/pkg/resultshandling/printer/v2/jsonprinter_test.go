@@ -25,6 +25,7 @@ import (
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	corev1 "k8s.io/api/core/v1"
 )
 
 func TestNewJsonPrinter(t *testing.T) {
@@ -537,6 +538,58 @@ func TestEnrichResultsWithSeverity_PopulatesEvidenceFromResources(t *testing.T) 
 	rawPaths := enrichedResults[0].AssociatedControls[0].ResourceAssociatedRules[0].Paths
 	require.Len(t, rawPaths, 3)
 	assert.Equal(t, "spec.hostPID", rawPaths[0].FailedPath)
+}
+
+// The OPA processor records a rule's paths as DeletePath / ReviewPath entries
+// and no longer sets FailedPath (#3598), so Evidence has to be resolved from
+// those fields or it is empty for every real scan.
+func TestEnrichResultsWithSeverity_PopulatesEvidenceFromDeleteAndReviewPaths(t *testing.T) {
+	controlSummaries := reportsummary.ControlSummaries{
+		"C-0038": reportsummary.ControlSummary{ControlID: "C-0038", ScoreFactor: 7.0},
+		"C-0078": reportsummary.ControlSummary{ControlID: "C-0078", ScoreFactor: 5.0},
+	}
+	results := []resourcesresults.Result{
+		{
+			ResourceID: "pod",
+			AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+				{
+					ControlID: "C-0038",
+					ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{
+						{Paths: []armotypes.PosturePaths{{ResourceID: "pod", DeletePath: "spec.hostPID"}}},
+					},
+				},
+				{
+					ControlID: "C-0078",
+					ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{
+						{Paths: []armotypes.PosturePaths{
+							{ResourceID: "pod", ReviewPath: "spec.containers[0].image"},
+							// the same path reported twice yields one evidence entry
+							{ResourceID: "pod", ReviewPath: "spec.containers[0].image"},
+						}},
+					},
+				},
+			},
+		},
+	}
+	allResources := map[string]workloadinterface.IMetadata{
+		"pod": &mockResource{
+			kind: "Pod",
+			obj: map[string]any{
+				"spec": map[string]any{
+					"hostPID": true,
+					// removePodData writes containers back as typed structs
+					"containers": []corev1.Container{{Name: "app", Image: "nginx:1.25"}},
+				},
+			},
+		},
+	}
+
+	enrichedResults := enrichResultsWithSeverity(results, controlSummaries, allResources)
+
+	require.Len(t, enrichedResults, 1)
+	require.Len(t, enrichedResults[0].AssociatedControls, 2)
+	assert.Equal(t, []PathValue{{Path: "spec.hostPID", Value: "true"}}, enrichedResults[0].AssociatedControls[0].Evidence)
+	assert.Equal(t, []PathValue{{Path: "spec.containers[0].image", Value: "nginx:1.25"}}, enrichedResults[0].AssociatedControls[1].Evidence)
 }
 
 func TestEnrichResultsWithSeverity_NoResourceMatchLeavesEvidenceNil(t *testing.T) {
