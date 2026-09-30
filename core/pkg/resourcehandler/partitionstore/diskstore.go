@@ -44,6 +44,7 @@ type DiskStore struct {
 	filePool             *fdPool
 	sealed               bool
 	closed               bool
+	cleanedUp            bool
 	unrestoredPartitions map[string]int64
 	rollbackErr          error
 }
@@ -625,9 +626,11 @@ func (d *DiskStore) Close() error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	if d.closed {
+	if d.cleanedUp {
 		return nil
 	}
+
+	d.closed = true
 
 	var closeErrs []error
 
@@ -647,6 +650,8 @@ func (d *DiskStore) Close() error {
 		d.stagingFile = nil
 		d.stagingWriter = nil
 	}
+	d.activeGVR = ""
+	d.stagingPath = ""
 
 	if d.filePool != nil {
 		if err := d.filePool.closeAllUnconditional(); err != nil {
@@ -661,7 +666,7 @@ func (d *DiskStore) Close() error {
 		}
 	}
 
-	d.closed = true
+	d.cleanedUp = true
 	d.stagingCounts = nil
 	d.committedCounts = nil
 	d.namespaces = nil

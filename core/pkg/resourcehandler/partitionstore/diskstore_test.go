@@ -439,6 +439,54 @@ func TestDiskStore_Close_FlushFailureClosesFD(t *testing.T) {
 	assert.NoError(t, store.Close())
 }
 
+func TestDiskStore_Close_TeardownFailureRejectsPutAndRetriesCleanup(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping fault injection test; directory permissions do not block removal on this platform")
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("skipping fault injection test; root bypasses directory permission checks")
+	}
+
+	store, err := NewDiskStore()
+	require.NoError(t, err)
+	defer func() {
+		_ = os.Chmod(store.RootDir(), 0o700)
+		_ = store.Close()
+	}()
+
+	ctx := context.Background()
+	pod := createTestObject("pod-1", "default", "Pod")
+
+	// Active staging file with an active GVR
+	require.NoError(t, store.BeginGVR(ctx, "v1/pods"))
+	require.NoError(t, store.Put(ctx, "default", pod))
+
+	// Chmod spill root to 0500 so os.RemoveAll fails
+	require.NoError(t, os.Chmod(store.RootDir(), 0o500))
+
+	// Close returns permission denied because directory removal fails
+	err = store.Close()
+	require.Error(t, err)
+
+	// A queued or subsequent Put during/after teardown failure must return ErrStoreClosed and NOT panic
+	pod2 := createTestObject("pod-2", "default", "Pod")
+	putErr := store.Put(ctx, "default", pod2)
+	assert.ErrorIs(t, putErr, ErrStoreClosed)
+
+	// Restore permissions
+	require.NoError(t, os.Chmod(store.RootDir(), 0o700))
+
+	// Retry Close() - must succeed and clean up directory
+	assert.NoError(t, store.Close())
+
+	// Directory must be removed
+	_, statErr := os.Stat(store.RootDir())
+	assert.True(t, os.IsNotExist(statErr), "temporary directory must be removed on successful retry of Close()")
+
+	// Repeated Close is idempotent and returns nil
+	assert.NoError(t, store.Close())
+}
+
 func TestDiskStore_Eviction_FlushFailureRetainsWriter(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("skipping /dev/full test on Windows")
