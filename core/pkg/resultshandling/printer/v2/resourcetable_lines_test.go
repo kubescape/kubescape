@@ -441,6 +441,12 @@ func TestResourceTable_WithoutShowEvidenceHasNoLines(t *testing.T) {
 // document-for-document with the render. See
 // TestGetWorkloadsWithOptions_StaticTemplateGetsIndex in helmchart_test.go
 // for both halves of that split.
+//
+// A Kustomize resource always takes this path: kustomizedirectory.go never
+// appends an index at all, since the composed build output has no single raw
+// source file whose documents line up with it the way a static Helm template
+// does. See TestKustomizeGetWorkloads_PathIsNormalized in
+// kustomizedirectory_test.go for that source's half of this contract.
 func TestResourceTable_MissingDocIndexDegrades(t *testing.T) {
 	out := renderResourceTable(t, resourceTableLineNumberSession(t, lineNumberManifest, ""), true)
 

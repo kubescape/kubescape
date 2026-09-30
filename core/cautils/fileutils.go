@@ -417,6 +417,24 @@ func normalizePath(path string) string {
 	return normalized
 }
 
+// lexicalAbsPath returns path made absolute and cleaned, deliberately without
+// resolving symlinks the way normalizePath/canonicalPath do. Callers that go on
+// to compute a repo-relative source path (filepath.Rel against repoRoot, as
+// filesloader.go does) need the path the caller actually selected, not its
+// physical target: resolving a repo-local symlink here would silently swap a
+// path inside the repository for whatever it points at outside it, which then
+// escapes filepath.Rel's containment and gets the resource dropped by printers
+// that refuse an out-of-repo location (e.g. GitLab SAST). Opening the file
+// still works either way - the OS follows the symlink itself - so nothing here
+// depends on the physical path being resolved up front.
+func lexicalAbsPath(path string) string {
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return filepath.Clean(path)
+	}
+	return filepath.Clean(absPath)
+}
+
 func canonicalPath(path string) (string, error) {
 	absPath, err := filepath.Abs(path)
 	if err != nil {
