@@ -25,6 +25,7 @@ import (
 	v1 "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/google/go-containerregistry/pkg/v1/layout"
 	"github.com/google/go-containerregistry/pkg/v1/tarball"
+	"github.com/klauspost/compress/zstd"
 	"github.com/sylabs/sif/v2/pkg/sif"
 
 	"github.com/kubescape/go-logger"
@@ -300,20 +301,29 @@ func isOCILayoutDir(path string) bool {
 // to EOF, and an entry escaping the layer root fails the read. Bodies stream
 // without buffering and never touch disk.
 func validateLayerStream(r io.Reader) error {
-	head := make([]byte, 2)
+	head := make([]byte, 4)
 	n, err := io.ReadFull(r, head)
 	if err != nil {
 		// Empty layers carry no content; anything else truncated is corrupt.
 		return err
 	}
 	body := io.MultiReader(bytes.NewReader(head[:n]), r)
-	if n == 2 && head[0] == 0x1f && head[1] == 0x8b {
+	if head[0] == 0x1f && head[1] == 0x8b {
 		gz, err := gzip.NewReader(body)
 		if err != nil {
 			return err
 		}
 		defer func() { _ = gz.Close() }()
 		body = gz
+	} else if bytes.Equal(head, []byte{0x28, 0xb5, 0x2f, 0xfd}) {
+		// Match go-containerregistry's compression sniffing: OCI layers
+		// may use Zstandard as well as gzip, regardless of their media type.
+		decoder, err := zstd.NewReader(body)
+		if err != nil {
+			return err
+		}
+		defer decoder.Close()
+		body = decoder
 	}
 	return walkLayerTar(body)
 }

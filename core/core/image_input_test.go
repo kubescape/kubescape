@@ -15,6 +15,7 @@ import (
 
 	stereoscopefile "github.com/anchore/stereoscope/pkg/file"
 	ociprovider "github.com/anchore/stereoscope/pkg/image/oci"
+	"github.com/klauspost/compress/zstd"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	ksmetav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
 	"github.com/stretchr/testify/assert"
@@ -1062,4 +1063,66 @@ func TestDaemonSelectorIgnoresCollidingLocalFile(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "nginx", attrs.ImageName)
 	assert.False(t, isNonRegistryForExceptions("docker:nginx", shadow))
+}
+
+// Zstandard layers are accepted by the real OCI providers. Relative names
+// also parse as registry references, so a classification miss would apply
+// registry exceptions to local content instead of rejecting the input.
+func TestImageRemainderOCIZstdLayers(t *testing.T) {
+	_, raw := tinyLayerTar(t)
+	encoder, err := zstd.NewWriter(nil)
+	require.NoError(t, err)
+	compressed := encoder.EncodeAll(raw, nil)
+	require.NoError(t, encoder.Close())
+
+	for _, tc := range []struct {
+		name     string
+		body     []byte
+		accepted bool
+	}{
+		{name: "valid", body: compressed, accepted: true},
+		{name: "truncated", body: compressed[:len(compressed)/2], accepted: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, manifest, _, oldDigest, _, blobs := ociLayoutContentWithLayers(tc.body)
+			manifest = bytes.ReplaceAll(manifest,
+				[]byte("application/vnd.oci.image.layer.v1.tar+gzip"),
+				[]byte("application/vnd.oci.image.layer.v1.tar+zstd"))
+			manifestDigest := sha256Digest(manifest)
+			delete(blobs, oldDigest)
+			blobs[manifestDigest] = manifest
+			index := []byte(fmt.Sprintf(`{"schemaVersion":2,"manifests":[{"mediaType":"application/vnd.oci.image.manifest.v1+json","digest":%q,"size":%d}]}`, manifestDigest, len(manifest)))
+			layout := []byte(`{"imageLayoutVersion":"1.0.0"}`)
+			root := t.TempDir()
+			layoutPath := filepath.Join(root, "nginx")
+			members := []tarMember{{name: "oci-layout", body: layout}, {name: "index.json", body: index}}
+			for digest, body := range blobs {
+				writeBlob(t, layoutPath, digest, body)
+				members = append(members, tarMember{name: blobEntry(digest), body: body})
+			}
+			require.NoError(t, os.WriteFile(filepath.Join(layoutPath, "index.json"), index, 0o600))
+			require.NoError(t, os.WriteFile(filepath.Join(layoutPath, "oci-layout"), layout, 0o600))
+			archivePath := filepath.Join(root, "bundle")
+			writeTarOrdered(t, archivePath, members)
+			requireDirectoryProviderVerdict(t, layoutPath, tc.accepted)
+			requireArchiveProviderVerdict(t, archivePath, tc.accepted)
+
+			t.Chdir(root)
+			for _, name := range []string{"nginx", "bundle"} {
+				t.Run(name, func(t *testing.T) {
+					input := "image:" + name
+					registry, _, err := classifyImageInput(input, osStatExists)
+					require.NoError(t, err)
+					assert.Equal(t, !tc.accepted, registry)
+					assert.Equal(t, tc.accepted, isNonRegistryForExceptions(input, osStatExists))
+					_, _, err = getUniqueVulnerabilitiesAndSeverities(nil, input, true)
+					if tc.accepted {
+						assert.ErrorContains(t, err, "non-registry input")
+					} else {
+						assert.NoError(t, err)
+					}
+				})
+			}
+		})
+	}
 }
