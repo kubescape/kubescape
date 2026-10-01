@@ -314,6 +314,8 @@ func scanImageForPlatform(
 	return platformSvc.ScanWithOptions(ctx, img, creds, vulnExceptions, sevExceptions, imagescan.ScanOptions{Platform: platform})
 }
 
+// scanWithRegistryMapping attempts to scan an image across a list of candidate registry credentials,
+// falling back to mapped registries if configured, and aborting promptly if ctx is cancelled.
 func scanWithRegistryMapping(
 	ctx context.Context,
 	svc imageScanService,
