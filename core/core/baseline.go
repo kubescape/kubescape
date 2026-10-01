@@ -88,6 +88,16 @@ func redactIfHidden(resourceID string, hide bool) string {
 	return resourceID
 }
 
+type baselineReportPrinter interface {
+	SetWriter(ctx context.Context, outputFile string) error
+	ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error
+	CloseWriter() error
+}
+
+var newBaselineReportPrinter = func() baselineReportPrinter {
+	return printerv2.NewJsonPrinter()
+}
+
 // writeBaselineHeadReport renders the fresh scan results to a private,
 // unfiltered temp JSON file so diff.ComputeWithOptions (disk-only) can
 // compare it against the baseline. The report is intentionally rendered
@@ -106,7 +116,7 @@ func writeBaselineHeadReport(ctx context.Context, results *resultshandling.Resul
 	}
 	cleanup = func() { _ = os.Remove(tmpPath) }
 
-	jsonPrinter := printerv2.NewJsonPrinter()
+	jsonPrinter := newBaselineReportPrinter()
 	if err := jsonPrinter.SetWriter(ctx, tmpPath); err != nil {
 		cleanup()
 		return "", func() {}, err
@@ -116,7 +126,10 @@ func writeBaselineHeadReport(ctx context.Context, results *resultshandling.Resul
 		cleanup()
 		return "", func() {}, err
 	}
-	jsonPrinter.CloseWriter()
+	if err := jsonPrinter.CloseWriter(); err != nil {
+		cleanup()
+		return "", func() {}, err
+	}
 
 	return tmpPath, cleanup, nil
 }
