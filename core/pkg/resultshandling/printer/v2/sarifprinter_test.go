@@ -19,6 +19,7 @@ import (
 	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
+	"github.com/kubescape/opa-utils/reporthandling/results/v1/prioritization"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
@@ -400,7 +401,7 @@ func TestAddResult_AnnotatesInitAndEphemeralContainerNames(t *testing.T) {
 	ac := makeControlWithPaths(privilegedInitAndEphemeralPaths(), nil)
 	ac.ControlID = "C-0057"
 
-	result := sp.createResult(control, "pod.yaml", locationresolver.Location{Line: 1, Column: 1}, ac, "apps/v1/Deployment/default/demo", privilegedInitAndEphemeralPod(), nil)
+	result := sp.createResult(control, "pod.yaml", locationresolver.Location{Line: 1, Column: 1}, ac, "apps/v1/Deployment/default/demo", privilegedInitAndEphemeralPod(), nil, nil)
 	require.NotNil(t, result.Message)
 	require.NotNil(t, result.Message.Text)
 	for _, path := range privilegedInitAndEphemeralNamedPaths() {
@@ -435,7 +436,7 @@ func TestAddResult_RedactsSecretFixPathValueUnlessShowSecrets(t *testing.T) {
 
 	t.Run("redacted by default", func(t *testing.T) {
 		sp := NewSARIFPrinter(false)
-		result := sp.createResult(control, "secret.yaml", locationresolver.Location{Line: 1, Column: 1}, ac, "v1/Secret/default/demo", resource, nil)
+		result := sp.createResult(control, "secret.yaml", locationresolver.Location{Line: 1, Column: 1}, ac, "v1/Secret/default/demo", resource, nil, nil)
 		require.NotNil(t, result.Message.Text)
 		assert.NotContains(t, *result.Message.Text, "s3cr3t-plaintext-password")
 		assert.Contains(t, *result.Message.Text, "[redacted]")
@@ -443,9 +444,66 @@ func TestAddResult_RedactsSecretFixPathValueUnlessShowSecrets(t *testing.T) {
 
 	t.Run("revealed with showSecrets", func(t *testing.T) {
 		sp := NewSARIFPrinter(true)
-		result := sp.createResult(control, "secret.yaml", locationresolver.Location{Line: 1, Column: 1}, ac, "v1/Secret/default/demo", resource, nil)
+		result := sp.createResult(control, "secret.yaml", locationresolver.Location{Line: 1, Column: 1}, ac, "v1/Secret/default/demo", resource, nil, nil)
 		require.NotNil(t, result.Message.Text)
 		assert.Contains(t, *result.Message.Text, "s3cr3t-plaintext-password")
+	})
+}
+
+func TestSARIFCreateResult_PrioritizedResourceProperties(t *testing.T) {
+	control := &reportsummary.ControlSummary{
+		ControlID:   "C-0012",
+		Name:        "Test Control",
+		Description: "Test Description",
+		ScoreFactor: 8.0,
+	}
+	resource := &mockResource{kind: "Deployment", obj: map[string]any{}}
+	ac := &resourcesresults.ResourceAssociatedControl{
+		ControlID: "C-0012",
+	}
+	sp := NewSARIFPrinter(false)
+
+	t.Run("populates priority properties when prioritized resource exists", func(t *testing.T) {
+		prioritized := &prioritization.PrioritizedResource{
+			ResourceID: "apps/v1/Deployment/default/demo",
+			Score:      8.5,
+			Severity:   apis.SeverityHigh,
+			PriorityVector: []prioritization.ControlsVector{
+				{Score: 8.5},
+			},
+		}
+
+		result := sp.createResult(control, "deploy.yaml", locationresolver.Location{Line: 1, Column: 1}, ac, prioritized.ResourceID, resource, nil, prioritized)
+		require.NotNil(t, result)
+		require.NotNil(t, result.Properties)
+		assert.Equal(t, "8.50", result.Properties["priority-score"])
+		assert.Equal(t, apis.SeverityNumberToString(apis.SeverityHigh), result.Properties["priority-severity"])
+		assert.Equal(t, "1", result.Properties["priority-vector-count"])
+	})
+
+	t.Run("omits priority properties when prioritized resource is nil", func(t *testing.T) {
+		result := sp.createResult(control, "deploy.yaml", locationresolver.Location{Line: 1, Column: 1}, ac, "apps/v1/Deployment/default/demo", resource, nil, nil)
+		require.NotNil(t, result)
+		if result.Properties != nil {
+			assert.Nil(t, result.Properties["priority-score"])
+			assert.Nil(t, result.Properties["priority-severity"])
+			assert.Nil(t, result.Properties["priority-vector-count"])
+		}
+	})
+
+	t.Run("handles prioritized resource without vectors", func(t *testing.T) {
+		prioritized := &prioritization.PrioritizedResource{
+			ResourceID: "apps/v1/Deployment/default/demo",
+			Score:      3.2,
+			Severity:   apis.SeverityLow,
+		}
+
+		result := sp.createResult(control, "deploy.yaml", locationresolver.Location{Line: 1, Column: 1}, ac, prioritized.ResourceID, resource, nil, prioritized)
+		require.NotNil(t, result)
+		require.NotNil(t, result.Properties)
+		assert.Equal(t, "3.20", result.Properties["priority-score"])
+		assert.Equal(t, apis.SeverityNumberToString(apis.SeverityLow), result.Properties["priority-severity"])
+		assert.Nil(t, result.Properties["priority-vector-count"])
 	})
 }
 

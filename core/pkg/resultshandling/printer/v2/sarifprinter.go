@@ -31,6 +31,8 @@ import (
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer"
 	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
 	"github.com/kubescape/opa-utils/reporthandling"
+	"github.com/kubescape/opa-utils/reporthandling/apis"
+	"github.com/kubescape/opa-utils/reporthandling/results/v1/prioritization"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	v2 "github.com/kubescape/opa-utils/reporthandling/v2"
@@ -125,7 +127,7 @@ func (sp *SARIFPrinter) addRule(scanRun *sarif.Run, control reportsummary.IContr
 // reviewPathLocations, when non-empty, adds one relatedLocation per resolved ReviewPath so each
 // field that actually caused the failure gets its own precise location in the manifest, distinct
 // from the single primary location (which points at the fix, not necessarily at every failed field).
-func (sp *SARIFPrinter) createResult(ctl reportsummary.IControlSummary, filepath string, location locationresolver.Location, ac *resourcesresults.ResourceAssociatedControl, resourceID string, resource workloadinterface.IMetadata, reviewPathLocations map[string]locationresolver.Location) *sarif.Result {
+func (sp *SARIFPrinter) createResult(ctl reportsummary.IControlSummary, filepath string, location locationresolver.Location, ac *resourcesresults.ResourceAssociatedControl, resourceID string, resource workloadinterface.IMetadata, reviewPathLocations map[string]locationresolver.Location, prioritized *prioritization.PrioritizedResource) *sarif.Result {
 	msg := ctl.GetDescription()
 	if resource != nil {
 		if paths := AssistedRemediationPathsWithCurrentValuesFiltered(ac, resource, sp.showSecrets); len(paths) > 0 {
@@ -148,6 +150,17 @@ func (sp *SARIFPrinter) createResult(ctl reportsummary.IControlSummary, filepath
 	result.WithPartialFingerPrints(map[string]interface{}{
 		"kubescapeFindingFingerprint": sarifFindingFingerprint(ctl.GetID(), resourceID, filepath, location, ac),
 	})
+
+	if prioritized != nil {
+		if result.Properties == nil {
+			result.Properties = make(sarif.Properties)
+		}
+		result.Properties["priority-score"] = fmt.Sprintf("%.2f", prioritized.Score)
+		result.Properties["priority-severity"] = apis.SeverityNumberToString(prioritized.Severity)
+		if len(prioritized.PriorityVector) > 0 {
+			result.Properties["priority-vector-count"] = strconv.Itoa(len(prioritized.PriorityVector))
+		}
+	}
 
 	// Sort for deterministic output - map iteration order is randomized and this feeds
 	// directly into the written SARIF file.
@@ -816,7 +829,13 @@ func (sp *SARIFPrinter) writeConfigurationSARIF(ctx context.Context, w io.Writer
 				location := resolveFixLocation(opaSessionObj, locationResolver, &ac, resource.resourceID)
 				reviewPathLocations := resolveReviewPathLocations(opaSessionObj, locationResolver, &ac, resource.resourceID)
 				rsrc, _ := opaSessionObj.GetResource(resource.resourceID)
-				r := sp.createResult(ctl, resource.relPath, location, &ac, resource.resourceID, rsrc, reviewPathLocations)
+				var prioritized *prioritization.PrioritizedResource
+				if opaSessionObj.ResourcesPrioritized != nil {
+					if pr, ok := opaSessionObj.ResourcesPrioritized[resource.resourceID]; ok {
+						prioritized = &pr
+					}
+				}
+				r := sp.createResult(ctl, resource.relPath, location, &ac, resource.resourceID, rsrc, reviewPathLocations, prioritized)
 				r.WithRuleIndex(ruleIndexes[ctl.GetID()])
 				// kind stays "" when rsrc is nil (the resource lookup missed) --
 				// collectFixes below treats an unresolved kind as sensitive,
