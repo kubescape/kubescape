@@ -14,6 +14,7 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/cautils/getter"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer"
 	utilsapisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	utilsmetav1 "github.com/kubescape/opa-utils/httpserver/meta/v1"
 )
@@ -95,7 +96,8 @@ func (handler *HTTPHandler) Metrics(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// read prometheus format results file
-	f, err := os.ReadFile(resultsFile)
+	resolvedFile, _ := printer.ResolveOutputFile(printer.PrometheusFormat, resultsFile, "")
+	f, err := os.ReadFile(resolvedFile)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		results.Type = utilsapisv1.ErrorScanResponseType
