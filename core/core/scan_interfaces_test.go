@@ -161,3 +161,27 @@ func TestGetInterfaces_OfflineScan_ClusterDisconnectedFallback(t *testing.T) {
 	assert.Nil(t, interfaces.k8s, "offline scan must not retain k8s interface")
 	assert.IsType(t, &cautils.LocalConfig{}, interfaces.tenantConfig, "offline scan without cluster must yield LocalConfig")
 }
+
+// TestGetInterfaces_NonClusterScanWithAccountIDSkipsKubernetesAPI verifies that when scanning non-cluster targets
+// (e.g. files/manifests) and AccountID is already set, kubernetesAPIFunc is never called.
+func TestGetInterfaces_NonClusterScanWithAccountIDSkipsKubernetesAPI(t *testing.T) {
+	var callCount atomic.Int32
+	originalKubernetesAPIFunc := kubernetesAPIFunc
+	kubernetesAPIFunc = func() *k8sinterface.KubernetesApi {
+		callCount.Add(1)
+		return nil
+	}
+	t.Cleanup(func() { kubernetesAPIFunc = originalKubernetesAPIFunc })
+
+	scanInfo := &cautils.ScanInfo{
+		AccountID:     "my-known-account-id",
+		InputPatterns: []string{"manifest.yaml"},
+		Local:         true,
+	}
+	require.NotEqual(t, cautils.ContextCluster, scanInfo.GetScanningContext())
+
+	interfaces, err := getInterfaces(context.Background(), scanInfo, nil)
+	require.NoError(t, err)
+	assert.Nil(t, interfaces.k8s)
+	assert.Equal(t, int32(0), callCount.Load(), "kubernetesAPIFunc must not be called when AccountID is already provided for non-cluster scan")
+}

@@ -69,6 +69,8 @@ func closePrinters(printers ...printer.IPrinter) error {
 	return closeErr
 }
 
+// getInterfaces initializes and returns the component interfaces required for scanning,
+// including Kubernetes API and tenant configuration.
 func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo, policyIdentifiers []cautils.PolicyIdentifier) (componentInterfaces, error) {
 	ctx, span := otel.Tracer("").Start(ctx, "setup interfaces")
 	defer span.End()
@@ -89,7 +91,9 @@ func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo, policyIdenti
 
 	// ================== setup tenant object ======================================
 	k8sForTenant := k8s
-	if k8sForTenant == nil {
+	if k8sForTenant == nil && scanInfo.AccountID == "" {
+		// Only needed when AccountID must be discovered from the cluster.
+		// If the caller already set it (flags / env), skip the connection cost.
 		k8sForTenant = kubernetesAPIFunc()
 	}
 	tenantConfig := cautils.GetTenantConfig(ctx, scanInfo.AccountID, scanInfo.AccessKey, scanInfo.GetClusterContextName(), scanInfo.CustomClusterName, k8sForTenant)
