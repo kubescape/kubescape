@@ -37,6 +37,17 @@ func (g *MergedExceptionsGetter) GetExceptions(ctx context.Context, clusterName 
 		return nil, err
 	}
 
+	// Reloaded policies belong to the primary source, even if a saved report
+	// marked them as secondary. Normalize before every secondary-source path,
+	// copying the slice and changed maps so reusable getter results stay intact.
+	exceptions = slices.Clone(exceptions)
+	for i := range exceptions {
+		if _, marked := exceptions[i].Attributes[secondaryExceptionSourceAttribute]; marked {
+			exceptions[i].Attributes = maps.Clone(exceptions[i].Attributes)
+			delete(exceptions[i].Attributes, secondaryExceptionSourceAttribute)
+		}
+	}
+
 	if g.secondary == nil {
 		return exceptions, nil
 	}
@@ -88,15 +99,7 @@ func deduplicateExceptions(
 	}
 
 	merged := make([]armotypes.PostureExceptionPolicy, 0, len(cloudExceptions)+len(crdExceptions))
-	for _, primary := range cloudExceptions {
-		// A policy reloaded from a report is primary when supplied by the primary
-		// getter, even if it originally came from a CRD in an earlier scan.
-		if _, marked := primary.Attributes[secondaryExceptionSourceAttribute]; marked {
-			primary.Attributes = maps.Clone(primary.Attributes)
-			delete(primary.Attributes, secondaryExceptionSourceAttribute)
-		}
-		merged = append(merged, primary)
-	}
+	merged = append(merged, cloudExceptions...)
 	if len(crdExceptions) == 0 {
 		return merged
 	}

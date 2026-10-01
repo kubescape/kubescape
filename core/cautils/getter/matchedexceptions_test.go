@@ -1,6 +1,7 @@
 package getter
 
 import (
+	"context"
 	stdjson "encoding/json"
 	"testing"
 
@@ -42,7 +43,11 @@ func TestFilterMatchedExceptionsScopes(t *testing.T) {
 	primary2.Actions = []armotypes.PostureExceptionPolicyActions{armotypes.Disable}
 	assert.Equal(t, []armotypes.PostureExceptionPolicy{primary, primary2}, FilterMatchedExceptions([]armotypes.PostureExceptionPolicy{primary, primary2}))
 	// A saved secondary becomes primary when loaded through the primary source.
-	merged := deduplicateExceptions([]armotypes.PostureExceptionPolicy{secondary}, []armotypes.PostureExceptionPolicy{secondary2})
+	merged, err := NewMergedExceptionsGetter(
+		&exceptionsGetterStub{exceptions: []armotypes.PostureExceptionPolicy{secondary}},
+		&exceptionsGetterStub{exceptions: []armotypes.PostureExceptionPolicy{secondary2}},
+	).GetExceptions(context.Background(), "cluster-a")
+	require.NoError(t, err)
 	require.Len(t, merged, 2) // scope-less policies are left for runtime matching
 	assert.NotContains(t, merged[0].Attributes, secondaryExceptionSourceAttribute)
 	assert.Contains(t, secondary.Attributes, secondaryExceptionSourceAttribute, "the caller's saved policy is unchanged")
