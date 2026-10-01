@@ -209,6 +209,76 @@ func TestMetrics_CleansUpResultsFile(t *testing.T) {
 	assert.Empty(t, entries)
 }
 
+func TestMetrics_CleansUpResultsFileWithConfiguredFormat(t *testing.T) {
+	withTempOutputDirs(t)
+	t.Setenv("KS_FORMAT", "json")
+
+	defer func(o scanner) { scanImpl = o }(scanImpl)
+	scanImpl = func(_ context.Context, scanInfo *cautils.ScanInfo, _ []cautils.PolicyIdentifier, _ string, _ bool) (*reporthandlingv2.PostureReport, error) {
+		resolved, _ := printer.ResolveOutputFile(scanInfo.Format, scanInfo.Output, "")
+		require.NoError(t, os.WriteFile(resolved, []byte("{}"), 0o600))
+		return nil, nil
+	}
+
+	h := NewHTTPHandler(false)
+	rq := httptest.NewRequest(http.MethodGet, "/v1/metrics", nil)
+	w := httptest.NewRecorder()
+
+	h.Metrics(w, rq)
+
+	entries, err := os.ReadDir(OutputDir)
+	require.NoError(t, err)
+	assert.Empty(t, entries)
+}
+
+func TestMetrics_CleansUpResultsFileOnDisconnect(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		withTempOutputDirs(t)
+
+		defer func(o scanner) { scanImpl = o }(scanImpl)
+		scanCtxErr := make(chan error, 1)
+
+		reqCtx, cancel := context.WithCancel(context.Background())
+		scanImpl = func(ctx context.Context, scanInfo *cautils.ScanInfo, _ []cautils.PolicyIdentifier, _ string, _ bool) (*reporthandlingv2.PostureReport, error) {
+			resolved, _ := printer.ResolveOutputFile(printer.PrometheusFormat, scanInfo.Output, "")
+			require.NoError(t, os.WriteFile(resolved, []byte("# metrics\n"), 0o600))
+			cancel() // simulate the scrape connection going away mid-scan
+			scanCtxErr <- ctx.Err()
+			return nil, nil
+		}
+
+		h := NewHTTPHandler(false)
+		rq := httptest.NewRequest(http.MethodGet, "/v1/metrics", nil).WithContext(reqCtx)
+		w := httptest.NewRecorder()
+
+		handlerDone := make(chan struct{})
+		go func() {
+			h.Metrics(w, rq)
+			close(handlerDone)
+		}()
+
+		select {
+		case err := <-scanCtxErr:
+			assert.NoError(t, err, "scan context must not be cancelled when the request context is")
+		case <-time.After(5 * time.Second):
+			t.Fatal("scan was not invoked")
+		}
+
+		select {
+		case <-handlerDone:
+		case <-time.After(5 * time.Second):
+			t.Fatal("handler did not complete")
+		}
+
+		assert.NoError(t, h.Shutdown(context.Background(), time.Second))
+		synctest.Wait() // join the disconnect cleanup goroutine before asserting
+
+		entries, err := os.ReadDir(OutputDir)
+		require.NoError(t, err)
+		assert.Empty(t, entries)
+	})
+}
+
 func TestMetrics_InvalidSkipPersistenceQueryParam(t *testing.T) {
 	defer func(o scanner) { scanImpl = o }(scanImpl)
 	scanCalled := make(chan struct{}, 1)
