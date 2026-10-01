@@ -19,6 +19,7 @@ import (
 	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
+	"github.com/kubescape/opa-utils/reporthandling/results/v1/prioritization"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
@@ -400,7 +401,7 @@ func TestAddResult_AnnotatesInitAndEphemeralContainerNames(t *testing.T) {
 	ac := makeControlWithPaths(privilegedInitAndEphemeralPaths(), nil)
 	ac.ControlID = "C-0057"
 
-	result := sp.createResult(control, "pod.yaml", locationresolver.Location{Line: 1, Column: 1}, ac, "apps/v1/Deployment/default/demo", privilegedInitAndEphemeralPod(), nil)
+	result := sp.createResult(control, "pod.yaml", locationresolver.Location{Line: 1, Column: 1}, ac, "apps/v1/Deployment/default/demo", privilegedInitAndEphemeralPod(), nil, nil)
 	require.NotNil(t, result.Message)
 	require.NotNil(t, result.Message.Text)
 	for _, path := range privilegedInitAndEphemeralNamedPaths() {
@@ -435,7 +436,7 @@ func TestAddResult_RedactsSecretFixPathValueUnlessShowSecrets(t *testing.T) {
 
 	t.Run("redacted by default", func(t *testing.T) {
 		sp := NewSARIFPrinter(false)
-		result := sp.createResult(control, "secret.yaml", locationresolver.Location{Line: 1, Column: 1}, ac, "v1/Secret/default/demo", resource, nil)
+		result := sp.createResult(control, "secret.yaml", locationresolver.Location{Line: 1, Column: 1}, ac, "v1/Secret/default/demo", resource, nil, nil)
 		require.NotNil(t, result.Message.Text)
 		assert.NotContains(t, *result.Message.Text, "s3cr3t-plaintext-password")
 		assert.Contains(t, *result.Message.Text, "[redacted]")
@@ -443,9 +444,66 @@ func TestAddResult_RedactsSecretFixPathValueUnlessShowSecrets(t *testing.T) {
 
 	t.Run("revealed with showSecrets", func(t *testing.T) {
 		sp := NewSARIFPrinter(true)
-		result := sp.createResult(control, "secret.yaml", locationresolver.Location{Line: 1, Column: 1}, ac, "v1/Secret/default/demo", resource, nil)
+		result := sp.createResult(control, "secret.yaml", locationresolver.Location{Line: 1, Column: 1}, ac, "v1/Secret/default/demo", resource, nil, nil)
 		require.NotNil(t, result.Message.Text)
 		assert.Contains(t, *result.Message.Text, "s3cr3t-plaintext-password")
+	})
+}
+
+func TestSARIFCreateResult_PrioritizedResourceProperties(t *testing.T) {
+	control := &reportsummary.ControlSummary{
+		ControlID:   "C-0012",
+		Name:        "Test Control",
+		Description: "Test Description",
+		ScoreFactor: 8.0,
+	}
+	resource := &mockResource{kind: "Deployment", obj: map[string]any{}}
+	ac := &resourcesresults.ResourceAssociatedControl{
+		ControlID: "C-0012",
+	}
+	sp := NewSARIFPrinter(false)
+
+	t.Run("populates priority properties when prioritized resource exists", func(t *testing.T) {
+		prioritized := &prioritization.PrioritizedResource{
+			ResourceID: "apps/v1/Deployment/default/demo",
+			Score:      8.5,
+			Severity:   apis.SeverityHigh,
+			PriorityVector: []prioritization.ControlsVector{
+				{Score: 8.5},
+			},
+		}
+
+		result := sp.createResult(control, "deploy.yaml", locationresolver.Location{Line: 1, Column: 1}, ac, prioritized.ResourceID, resource, nil, prioritized)
+		require.NotNil(t, result)
+		require.NotNil(t, result.Properties)
+		assert.Equal(t, "8.50", result.Properties["priority-score"])
+		assert.Equal(t, apis.SeverityNumberToString(apis.SeverityHigh), result.Properties["priority-severity"])
+		assert.Equal(t, "1", result.Properties["priority-vector-count"])
+	})
+
+	t.Run("omits priority properties when prioritized resource is nil", func(t *testing.T) {
+		result := sp.createResult(control, "deploy.yaml", locationresolver.Location{Line: 1, Column: 1}, ac, "apps/v1/Deployment/default/demo", resource, nil, nil)
+		require.NotNil(t, result)
+		if result.Properties != nil {
+			assert.Nil(t, result.Properties["priority-score"])
+			assert.Nil(t, result.Properties["priority-severity"])
+			assert.Nil(t, result.Properties["priority-vector-count"])
+		}
+	})
+
+	t.Run("handles prioritized resource without vectors", func(t *testing.T) {
+		prioritized := &prioritization.PrioritizedResource{
+			ResourceID: "apps/v1/Deployment/default/demo",
+			Score:      3.2,
+			Severity:   apis.SeverityLow,
+		}
+
+		result := sp.createResult(control, "deploy.yaml", locationresolver.Location{Line: 1, Column: 1}, ac, prioritized.ResourceID, resource, nil, prioritized)
+		require.NotNil(t, result)
+		require.NotNil(t, result.Properties)
+		assert.Equal(t, "3.20", result.Properties["priority-score"])
+		assert.Equal(t, apis.SeverityNumberToString(apis.SeverityLow), result.Properties["priority-severity"])
+		assert.Nil(t, result.Properties["priority-vector-count"])
 	})
 }
 
@@ -892,7 +950,7 @@ func TestPrintConfigurationScan_SkipsResourcesWithoutRelativePath(t *testing.T) 
 			}
 
 			// the base path is non-empty, so only the missing relative path can skip this finding
-			require.NotEmpty(t, getBasePathFromMetadata(*session))
+			require.NotEmpty(t, getBasePathFromMetadata(session))
 
 			tmp, err := os.CreateTemp("", "sarif-norelpath-*.sarif")
 			require.NoError(t, err)
@@ -1064,12 +1122,12 @@ func TestGetBasePathFromMetadata(t *testing.T) {
 
 	tests := []struct {
 		name    string
-		session cautils.OPASessionObj
+		session *cautils.OPASessionObj
 		want    string
 	}{
 		{
 			name: "GitLocal",
-			session: cautils.OPASessionObj{
+			session: &cautils.OPASessionObj{
 				Metadata: &reporthandlingv2.Metadata{
 					ScanMetadata: reporthandlingv2.ScanMetadata{
 						ScanningTarget: reporthandlingv2.GitLocal,
@@ -1085,7 +1143,7 @@ func TestGetBasePathFromMetadata(t *testing.T) {
 		},
 		{
 			name: "GitLocal without repository metadata",
-			session: cautils.OPASessionObj{
+			session: &cautils.OPASessionObj{
 				Metadata: &reporthandlingv2.Metadata{
 					ScanMetadata: reporthandlingv2.ScanMetadata{
 						ScanningTarget: reporthandlingv2.GitLocal,
@@ -1096,12 +1154,12 @@ func TestGetBasePathFromMetadata(t *testing.T) {
 		},
 		{
 			name:    "missing metadata",
-			session: cautils.OPASessionObj{},
+			session: &cautils.OPASessionObj{},
 			want:    "",
 		},
 		{
 			name: "Directory",
-			session: cautils.OPASessionObj{
+			session: &cautils.OPASessionObj{
 				Metadata: &reporthandlingv2.Metadata{
 					ScanMetadata: reporthandlingv2.ScanMetadata{
 						ScanningTarget: reporthandlingv2.Directory,
@@ -1117,7 +1175,7 @@ func TestGetBasePathFromMetadata(t *testing.T) {
 		},
 		{
 			name: "File",
-			session: cautils.OPASessionObj{
+			session: &cautils.OPASessionObj{
 				Metadata: &reporthandlingv2.Metadata{
 					ScanMetadata: reporthandlingv2.ScanMetadata{
 						ScanningTarget: reporthandlingv2.File,
@@ -1133,7 +1191,7 @@ func TestGetBasePathFromMetadata(t *testing.T) {
 		},
 		{
 			name: "File without metadata",
-			session: cautils.OPASessionObj{
+			session: &cautils.OPASessionObj{
 				Metadata: &reporthandlingv2.Metadata{
 					ScanMetadata: reporthandlingv2.ScanMetadata{
 						ScanningTarget: reporthandlingv2.File,
@@ -1144,7 +1202,7 @@ func TestGetBasePathFromMetadata(t *testing.T) {
 		},
 		{
 			name: "Cluster",
-			session: cautils.OPASessionObj{
+			session: &cautils.OPASessionObj{
 				Metadata: &reporthandlingv2.Metadata{
 					ScanMetadata: reporthandlingv2.ScanMetadata{
 						ScanningTarget: reporthandlingv2.Cluster,
@@ -1728,7 +1786,7 @@ func TestConfigurationSARIFStreamingStructureAndOrdering(t *testing.T) {
 			}
 			for i, result := range run.Results {
 				require.NotNil(t, result.RuleIndex)
-				require.Less(t, int(*result.RuleIndex), len(run.Tool.Driver.Rules))
+				require.Less(t, *result.RuleIndex, uint(len(run.Tool.Driver.Rules)))
 				require.Equal(t, *result.RuleID, run.Tool.Driver.Rules[*result.RuleIndex].ID)
 				require.Equal(t, fmt.Sprintf("C-%04d", i%10), *result.RuleID)
 				require.NotEmpty(t, result.PartialFingerprints["kubescapeFindingFingerprint"])
@@ -1816,4 +1874,198 @@ func TestConfigurationSARIFStopsBeforeTransformingLaterResources(t *testing.T) {
 	require.ErrorIs(t, NewSARIFPrinter(false).writeConfigurationSARIF(context.Background(), w, s), errOutputTest)
 	require.Positive(t, reads[0])
 	require.Zero(t, reads[1])
+}
+
+func TestPrintConfigurationScan_DegradedCoverageInvocations(t *testing.T) {
+	s := configurationOutputFixture(t, 1)
+	s.ScanCoverage = cautils.ScanCoverage{
+		CoverageScore:     85.0,
+		EvaluatedControls: 17,
+		TotalControls:     20,
+		Degraded:          true,
+	}
+
+	sp := NewSARIFPrinter(false)
+	var output bytes.Buffer
+	require.NoError(t, sp.writeConfigurationSARIF(context.Background(), &output, s))
+
+	var report sarif.Report
+	require.NoError(t, json.Unmarshal(output.Bytes(), &report))
+	require.Len(t, report.Runs, 1)
+	run := report.Runs[0]
+	require.Len(t, run.Invocations, 1)
+	inv := run.Invocations[0]
+
+	// Properties
+	require.NotNil(t, inv.Properties)
+	assert.Equal(t, "85.00", inv.Properties["coverageScore"])
+	assert.Equal(t, "17", inv.Properties["evaluatedControls"])
+	assert.Equal(t, "20", inv.Properties["totalControls"])
+	assert.Equal(t, "true", inv.Properties["degraded"])
+
+	// ToolExecutionNotifications
+	require.NotEmpty(t, inv.ToolExecutionNotifications)
+	var foundDegradedWarning bool
+	for _, notif := range inv.ToolExecutionNotifications {
+		if notif.Message != nil && strings.Contains(*notif.Message.Text, "Scan coverage is degraded") {
+			foundDegradedWarning = true
+			assert.Equal(t, "warning", notif.Level)
+			assert.Contains(t, *notif.Message.Text, "85.00%")
+			assert.Contains(t, *notif.Message.Text, "17 of 20")
+		}
+	}
+	assert.True(t, foundDegradedWarning, "expected degraded scan coverage warning notification")
+}
+
+func TestPrintConfigurationScan_UnevaluatedControlsInNotifications(t *testing.T) {
+	s := configurationOutputFixture(t, 1)
+	s.ScanCoverage = cautils.ScanCoverage{
+		CoverageScore:     90.0,
+		EvaluatedControls: 9,
+		TotalControls:     10,
+		Degraded:          true,
+		NotEvaluatedControls: []cautils.NotEvaluatedControl{
+			{
+				ControlID: "C-0099",
+				Reason:    "missing: apps/v1/deployments",
+			},
+		},
+	}
+	// Also add a skipped control in SummaryDetails.Controls
+	ctrl98 := reportsummary.ControlSummary{
+		ControlID: "C-0098",
+		Name:      "Configuration control",
+	}
+	ctrl98.SetStatus(&apis.StatusInfo{
+		InnerStatus: apis.StatusSkipped,
+		SubStatus:   apis.SubStatusConfiguration,
+		InnerInfo:   "disabled in config",
+	})
+	s.Report.SummaryDetails.Controls["C-0098"] = ctrl98
+
+	sp := NewSARIFPrinter(false)
+	var output bytes.Buffer
+	require.NoError(t, sp.writeConfigurationSARIF(context.Background(), &output, s))
+
+	var report sarif.Report
+	require.NoError(t, json.Unmarshal(output.Bytes(), &report))
+	require.Len(t, report.Runs, 1)
+	run := report.Runs[0]
+
+	// Rules should include C-0098 and C-0099
+	ruleMap := make(map[string]*sarif.ReportingDescriptor)
+	for _, rule := range run.Tool.Driver.Rules {
+		ruleMap[rule.ID] = rule
+	}
+	assert.Contains(t, ruleMap, "C-0099", "rule descriptor for C-0099 must be registered")
+	assert.Contains(t, ruleMap, "C-0098", "rule descriptor for C-0098 must be registered")
+
+	require.Len(t, run.Invocations, 1)
+	inv := run.Invocations[0]
+
+	notificationsByRule := make(map[string]*sarif.Notification)
+	for _, notif := range inv.ToolExecutionNotifications {
+		if notif.AssociatedRule != nil && notif.AssociatedRule.Id != nil {
+			notificationsByRule[*notif.AssociatedRule.Id] = notif
+		}
+	}
+
+	require.Contains(t, notificationsByRule, "C-0099")
+	notif99 := notificationsByRule["C-0099"]
+	assert.Equal(t, "warning", notif99.Level)
+	require.NotNil(t, notif99.Message.Text)
+	assert.Contains(t, *notif99.Message.Text, "Control C-0099 was not evaluated")
+	assert.Contains(t, *notif99.Message.Text, "missing: apps/v1/deployments")
+
+	require.Contains(t, notificationsByRule, "C-0098")
+	notif98 := notificationsByRule["C-0098"]
+	assert.Equal(t, "warning", notif98.Level)
+	require.NotNil(t, notif98.Message.Text)
+	assert.Contains(t, *notif98.Message.Text, "Control C-0098 was not evaluated")
+	assert.Contains(t, *notif98.Message.Text, "configuration: disabled in config")
+}
+
+func TestPrintConfigurationScan_FullCoverageOmitsDegradedWarning(t *testing.T) {
+	s := configurationOutputFixture(t, 1)
+	s.ScanCoverage = cautils.ScanCoverage{
+		CoverageScore:     100.0,
+		EvaluatedControls: 10,
+		TotalControls:     10,
+		Degraded:          false,
+	}
+	ctrl98 := reportsummary.ControlSummary{
+		ControlID: "C-0098",
+		Name:      "Configuration control",
+	}
+	ctrl98.SetStatus(&apis.StatusInfo{
+		InnerStatus: apis.StatusSkipped,
+		SubStatus:   apis.SubStatusConfiguration,
+		InnerInfo:   "disabled in config",
+	})
+	s.Report.SummaryDetails.Controls["C-0098"] = ctrl98
+
+	sp := NewSARIFPrinter(false)
+	var output bytes.Buffer
+	require.NoError(t, sp.writeConfigurationSARIF(context.Background(), &output, s))
+
+	var report sarif.Report
+	require.NoError(t, json.Unmarshal(output.Bytes(), &report))
+	require.Len(t, report.Runs, 1)
+	run := report.Runs[0]
+	require.Len(t, run.Invocations, 1)
+	inv := run.Invocations[0]
+
+	assert.Equal(t, "100.00", inv.Properties["coverageScore"])
+	assert.Equal(t, "false", inv.Properties["degraded"])
+
+	assert.Empty(t, inv.ToolExecutionNotifications, "full coverage scans must omit notifications for skipped controls")
+}
+
+// TestSARIFActionPrint_CombinedScanAggregatesPostureAndImageRuns tests that ActionPrint
+// aggregates both posture evaluation results and container image vulnerability runs
+// into the top-level runs array when both scan types are present.
+func TestSARIFActionPrint_CombinedScanAggregatesPostureAndImageRuns(t *testing.T) {
+	tmp, err := os.CreateTemp("", "sarif-combined-*.sarif")
+	require.NoError(t, err)
+	defer func() { _ = os.Remove(tmp.Name()) }()
+
+	sp := NewSARIFPrinter(false)
+	sp.writer = tmp
+
+	session := configurationOutputFixture(t, 1)
+	imageScan := buildSeverityExceptionImageScanData()
+
+	err = sp.ActionPrint(context.Background(), session, []cautils.ImageScanData{imageScan})
+	require.NoError(t, err)
+	require.NoError(t, tmp.Close())
+
+	raw, err := os.ReadFile(tmp.Name())
+	require.NoError(t, err)
+
+	require.NoError(t, checkJSONDocument(raw))
+
+	var report sarif.Report
+	require.NoError(t, json.Unmarshal(raw, &report))
+	require.Len(t, report.Runs, 2, "SARIF report must contain both posture run and image run in combined scan")
+
+	// Posture run
+	postureRun := report.Runs[0]
+	require.NotNil(t, postureRun.Tool.Driver)
+	assert.Equal(t, "kubescape", postureRun.Tool.Driver.Name)
+	assert.NotEmpty(t, postureRun.Results)
+
+	// Image run
+	imageRun := report.Runs[1]
+	require.NotNil(t, imageRun.Tool.Driver)
+	assert.Equal(t, "Kubescape", imageRun.Tool.Driver.Name)
+	assert.NotEmpty(t, imageRun.Results)
+}
+
+// TestSARIFActionPrint_NoDataReturnsError asserts that ActionPrint returns a clear error
+// when neither an OPA session object nor image scan data is provided.
+func TestSARIFActionPrint_NoDataReturnsError(t *testing.T) {
+	sp := NewSARIFPrinter(false)
+	err := sp.ActionPrint(context.Background(), nil, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no data provided")
 }

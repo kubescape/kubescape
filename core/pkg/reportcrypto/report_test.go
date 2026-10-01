@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -988,4 +989,32 @@ func mustMarshalTestJSON(t *testing.T, value any) []byte {
 func deepCopyTestObject(t *testing.T, object map[string]any) map[string]any {
 	t.Helper()
 	return decodeTestObject(t, mustMarshalTestJSON(t, object))
+}
+
+func TestDecryptReportRestoresNamespaceSummaries(t *testing.T) {
+	fixture := newEncryptedReportFixture(t, true, true)
+
+	report := decodeTestObject(t, fixture.data)
+	report["namespaceSummaries"] = []any{
+		map[string]any{"namespace": fixture.encryptedNamespace, "complianceScore": 42},
+		map[string]any{"namespace": cautils.ClusterScopedNamespace, "complianceScore": 100},
+	}
+
+	decrypted, err := DecryptReport(mustMarshalTestJSON(t, report), []byte(testMasterKey))
+	require.NoError(t, err)
+
+	restored := decodeTestObject(t, decrypted)
+	summaries, ok := restored["namespaceSummaries"].([]any)
+	require.True(t, ok, "namespaceSummaries must survive decryption")
+	require.Len(t, summaries, 2)
+
+	namespaced, ok := summaries[0].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "production", namespaced["namespace"])
+	assert.EqualValues(t, 42, namespaced["complianceScore"])
+
+	clusterScoped, ok := summaries[1].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, cautils.ClusterScopedNamespace, clusterScoped["namespace"],
+		"the cluster-scoped entry is never encrypted and must pass through unchanged")
 }

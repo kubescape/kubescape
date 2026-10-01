@@ -283,3 +283,129 @@ func TestBuildControlMatrixReadsComplianceScore(t *testing.T) {
 	assert.InDelta(t, -1, row.ByCluster["staging"].ComplianceScore, 0,
 		"an unscored control must not be reported as scoring zero")
 }
+
+// TestBuildControlMatrixResolvesDuplicateCellsOnEveryField covers duplicates
+// whose outcomes match. The status alone does not settle them, so a tie has to
+// fall through to the rest of the cell or reversing the results would still
+// change the matrix. More failed resources is worse, a lower compliance score
+// is worse, and a cell carrying no score loses to one carrying a real
+// measurement.
+func TestBuildControlMatrixResolvesDuplicateCellsOnEveryField(t *testing.T) {
+	scored := func(status apis.ScanningStatus, failedResources int, complianceScore *float32) controlSpec {
+		return controlSpec{
+			id: "C-0016", name: "Allow privilege escalation", status: status,
+			failed: failedResources, scoreFactor: 8, complianceScore: complianceScore,
+		}
+	}
+
+	tests := []struct {
+		name                string
+		first, second       controlSpec
+		wantFailedResources int
+		wantComplianceScore float32
+	}{
+		{
+			name:                "more failed resources wins",
+			first:               scored(apis.StatusFailed, 2, score(0)),
+			second:              scored(apis.StatusFailed, 9, score(0)),
+			wantFailedResources: 9,
+		},
+		{
+			name:                "a lower compliance score wins",
+			first:               scored(apis.StatusPassed, 0, score(80)),
+			second:              scored(apis.StatusPassed, 0, score(20)),
+			wantComplianceScore: 20,
+		},
+		{
+			name:                "a real score beats a missing one",
+			first:               scored(apis.StatusPassed, 0, nil),
+			second:              scored(apis.StatusPassed, 0, score(70)),
+			wantComplianceScore: 70,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			forward := BuildControlMatrix([]ClusterResult{
+				scannedCluster("dup", tt.first), scannedCluster("dup", tt.second),
+			})
+			reversed := BuildControlMatrix([]ClusterResult{
+				scannedCluster("dup", tt.second), scannedCluster("dup", tt.first),
+			})
+
+			assert.Equal(t, forward, reversed, "the matrix changed with the order of its input")
+			require.Len(t, forward.Controls, 1)
+			cell := forward.Controls[0].ByCluster["dup"]
+			assert.Equal(t, tt.wantFailedResources, cell.FailedResources)
+			assert.InDelta(t, tt.wantComplianceScore, cell.ComplianceScore, 0.001)
+		})
+	}
+}
+
+// TestBuildControlMatrixResolvesDuplicateClusterIDsByOutcome covers two results
+// carrying the same cluster ID. They describe one cluster, so the cell has to
+// resolve to one of them by value rather than by whichever happened to be read
+// last, or permuting the results would change the matrix. The worse outcome
+// wins, because a cell reading passed while one result said failed would hide
+// the finding.
+func TestBuildControlMatrixResolvesDuplicateClusterIDsByOutcome(t *testing.T) {
+	tests := []struct {
+		name  string
+		specs []controlSpec
+		want  CellStatus
+	}{
+		{"failed beats passed", []controlSpec{passed("C-0016", "Allow privilege escalation"), failed("C-0016", "Allow privilege escalation", 2)}, CellFailed},
+		{"failed beats not evaluated", []controlSpec{notEvaluated("C-0016", "Allow privilege escalation"), failed("C-0016", "Allow privilege escalation", 2)}, CellFailed},
+		{"not evaluated beats skipped", []controlSpec{skipped("C-0016", "Allow privilege escalation"), notEvaluated("C-0016", "Allow privilege escalation")}, CellNotEvaluated},
+		{"skipped beats passed", []controlSpec{passed("C-0016", "Allow privilege escalation"), skipped("C-0016", "Allow privilege escalation")}, CellSkipped},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			forward := BuildControlMatrix([]ClusterResult{
+				scannedCluster("dup", tt.specs[0]), scannedCluster("dup", tt.specs[1]),
+			})
+			reversed := BuildControlMatrix([]ClusterResult{
+				scannedCluster("dup", tt.specs[1]), scannedCluster("dup", tt.specs[0]),
+			})
+
+			assert.Equal(t, forward, reversed, "the matrix changed with the order of its input")
+			require.Len(t, forward.Controls, 1)
+			requireCell(t, forward.Controls[0], "dup", tt.want)
+		})
+	}
+}
+
+// TestBuildControlMatrixSettlesControlDescriptionByValue covers two clusters
+// describing the same control differently, which happens when they were scanned
+// against different control library versions. Taking whichever was read first
+// would make the row depend on scan order, so it is settled on the score factor
+// and then on the name, and a row never reports a control as milder than some
+// cluster rated it.
+func TestBuildControlMatrixSettlesControlDescriptionByValue(t *testing.T) {
+	describe := func(name string, scoreFactor float32) controlSpec {
+		return controlSpec{
+			id: "C-0016", name: name, status: apis.StatusFailed,
+			scoreFactor: scoreFactor, complianceScore: score(0),
+		}
+	}
+	severe := scannedCluster("a", describe("Allow privilege escalation", 8))
+	mild := scannedCluster("b", describe("Privilege escalation allowed", 4))
+
+	forward := BuildControlMatrix([]ClusterResult{severe, mild})
+	reversed := BuildControlMatrix([]ClusterResult{mild, severe})
+
+	assert.Equal(t, forward, reversed, "the matrix changed with the order of its input")
+	require.Len(t, forward.Controls, 1)
+	assert.Equal(t, apis.SeverityHighString, forward.Controls[0].Severity,
+		"a row must not report a control as milder than some cluster rated it")
+	assert.Equal(t, "Allow privilege escalation", forward.Controls[0].Name,
+		"the name comes from the same description as the severity")
+
+	// An equal score factor is settled on the name, so this is stable too.
+	first := scannedCluster("a", describe("Allow privilege escalation", 8))
+	second := scannedCluster("b", describe("Privilege escalation allowed", 8))
+	assert.Equal(t,
+		BuildControlMatrix([]ClusterResult{first, second}),
+		BuildControlMatrix([]ClusterResult{second, first}))
+}

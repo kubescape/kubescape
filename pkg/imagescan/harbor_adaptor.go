@@ -117,6 +117,17 @@ func extractProjectAndRepo(repo string) (string, string, error) {
 	return parts[0], parts[1], nil
 }
 
+// harborRepositoryPathSegment encodes a repository name for Harbor's v2 API.
+// Harbor repository names may contain slashes below the project, but the API
+// models the entire name as one path parameter. Those slashes must therefore
+// survive the HTTP stack as an encoded value. Escaping the percent sign in
+// %2F once more keeps a nested repository from being interpreted as extra URL
+// path segments before Harbor's repository handler receives it.
+func harborRepositoryPathSegment(repository string) string {
+	escaped := url.PathEscape(repository)
+	return strings.ReplaceAll(escaped, "%2F", "%252F")
+}
+
 // GetImagesScanStatus retrieves the scan status for a list of image identifiers.
 func (a *HarborAdaptor) GetImagesScanStatus(ctx context.Context, imageIDs []ContainerImageIdentifier) ([]ContainerImageScanStatus, error) {
 	if a.client == nil {
@@ -145,7 +156,7 @@ func (a *HarborAdaptor) GetImagesScanStatus(ctx context.Context, imageIDs []Cont
 
 		path := fmt.Sprintf("/api/v2.0/projects/%s/repositories/%s/artifacts/%s?with_scan_overview=true",
 			url.PathEscape(project),
-			url.PathEscape(repo),
+			harborRepositoryPathSegment(repo),
 			url.PathEscape(ref))
 
 		data, err := a.client.DoRequest(ctx, http.MethodGet, path)
@@ -207,7 +218,7 @@ func (a *HarborAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs [
 
 		path := fmt.Sprintf("/api/v2.0/projects/%s/repositories/%s/artifacts/%s/additions/vulnerabilities",
 			url.PathEscape(project),
-			url.PathEscape(repo),
+			harborRepositoryPathSegment(repo),
 			url.PathEscape(ref))
 
 		data, err := a.client.DoRequest(ctx, http.MethodGet, path)

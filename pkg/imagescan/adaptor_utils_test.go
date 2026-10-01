@@ -123,3 +123,11 @@ func TestProcessImages(t *testing.T) {
 		assert.Equal(t, []string{"empty-repo1", "processed-repo2"}, results)
 	})
 }
+
+func vulnerabilityIDs(report ContainerImageVulnerabilityReport) []string {
+	ids := make([]string, 0, len(report.Vulnerabilities))
+	for _, vulnerability := range report.Vulnerabilities {
+		ids = append(ids, vulnerability.ID)
+	}
+	return ids
+}

@@ -130,6 +130,7 @@ func TestProcess_ControlTimeout(t *testing.T) {
 	ctrl := opaSessionObj.Report.SummaryDetails.Controls[controlID]
 	assert.NotEqual(t, apis.StatusPassed, ctrl.GetStatus().Status(), "timed-out control must not show as Passed in SummaryDetails")
 	assert.Equal(t, apis.StatusSkipped, ctrl.GetStatus().Status(), "timed-out control must be Skipped in SummaryDetails")
+	assert.Contains(t, ctrl.GetStatus().Info(), "timed out", "timed-out control must include reason in StatusInfo.InnerInfo")
 
 	scorewrapper := score.NewScoreWrapper(opaSessionObj)
 	require.NoError(t, scorewrapper.Calculate(score.EPostureReportV2))
@@ -167,4 +168,71 @@ func TestReweightComplianceScores_TimedOutControlCountsAsFailed(t *testing.T) {
 	// strictly below the 100 produced by excluding it from the denominator.
 	assert.Equal(t, float32(50), opaSessionObj.Report.SummaryDetails.ComplianceScore)
 	assert.Less(t, opaSessionObj.Report.SummaryDetails.ComplianceScore, float32(100))
+}
+
+func TestVerifyWholeClusterControl_ControlTimeout(t *testing.T) {
+	deployment := mocks.MockDevelopmentWithHostpath()
+
+	k8sResources := make(cautils.K8SResources)
+	k8sResources["apps/v1/deployments"] = workloadinterface.ListMetaIDs([]workloadinterface.IMetadata{deployment})
+
+	opaSessionObj := cautils.NewOPASessionObjMock()
+	opaSessionObj.K8SResources = k8sResources
+	opaSessionObj.AllResources[deployment.GetID()] = deployment
+	opaSessionObj.InfoMap = make(map[string]apis.StatusInfo)
+
+	const controlID = "C-TEST-TIMEOUT-VERIFY"
+	policies := &cautils.Policies{
+		Controls: map[string]reporthandling.Control{
+			controlID: {
+				PortalBase: armotypes.PortalBase{
+					Name: "blocking whole-cluster control",
+					Attributes: map[string]any{
+						ControlAttributeRequiresWholeClusterInput: true,
+					},
+				},
+				ControlID: controlID,
+				Rules: []reporthandling.PolicyRule{
+					{
+						PortalBase: armotypes.PortalBase{
+							Name:       "blocking-rule",
+							Attributes: map[string]any{},
+						},
+						Rule: blockingRule,
+						Match: []reporthandling.RuleMatchObjects{
+							{
+								APIGroups:   []string{"apps"},
+								APIVersions: []string{"v1"},
+								Resources:   []string{"Deployment"},
+							},
+						},
+						RuleQuery:    "armo_builtins",
+						RuleLanguage: reporthandling.RegoLanguage,
+					},
+				},
+			},
+		},
+	}
+
+	opap := NewOPAProcessor(opaSessionObj, resources.NewRegoDependenciesDataMock(), "test", "", "", false, nil)
+	opap.AllPolicies = policies
+	opap.ControlTimeout = 100 * time.Millisecond
+	opap.SetWholeClusterPolicy(cautils.WholeClusterPolicyVerify)
+
+	done := make(chan error, 1)
+	go func() {
+		done <- opap.Process(context.Background(), policies, nil)
+	}()
+
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(10 * time.Second):
+		t.Fatal("Process did not return in verify mode: per-control timeout did not interrupt the blocking rule")
+	}
+
+	reason, ok := opap.TimedOutControls[controlID]
+	require.True(t, ok, "expected timed-out control to be recorded in TimedOutControls in verify mode")
+	assert.Contains(t, reason, "timed out")
+	assert.Empty(t, opap.ResourcesResult, "timed-out control must not contribute resources to ResourcesResult in verify mode")
 }

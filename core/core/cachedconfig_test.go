@@ -3,20 +3,52 @@ package core
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"os"
 	"testing"
 
 	"github.com/kubescape/k8s-interface/k8sinterface"
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/cautils/getter"
 	metav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func TestViewCachedConfig_KeyedLookup(t *testing.T) {
-	// Setup temporary config store
+func isolateCachedConfigTest(t *testing.T) {
+	t.Helper()
+
 	originalStore := getter.DefaultLocalStore
 	getter.DefaultLocalStore = t.TempDir()
 	t.Cleanup(func() { getter.DefaultLocalStore = originalStore })
+
+	originalConnector := getter.GetKSCloudAPIConnector()
+	getter.SetKSCloudAPIConnector(nil)
+	t.Cleanup(func() { getter.SetKSCloudAPIConnector(originalConnector) })
+
+	for _, envVar := range []string{
+		"KS_ACCOUNT_ID",
+		"KS_ACCESS_KEY",
+		"KS_CLOUD_API_URL",
+		"KS_CLOUD_REPORT_URL",
+	} {
+		t.Setenv(envVar, "")
+	}
+}
+
+func readPersistedConfig(t *testing.T) cautils.ConfigObj {
+	t.Helper()
+
+	data, err := os.ReadFile(cautils.ConfigFileFullPath())
+	require.NoError(t, err)
+
+	var config cautils.ConfigObj
+	require.NoError(t, json.Unmarshal(data, &config))
+	return config
+}
+
+func TestViewCachedConfig_KeyedLookup(t *testing.T) {
+	isolateCachedConfigTest(t)
 
 	// Force the LocalConfig path so the test never reads the host's cluster
 	// ConfigMap/Secret/kube-context.
@@ -108,4 +140,102 @@ func TestViewCachedConfig_KeyedLookup(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestSetCachedConfig_AllFieldsPersisted(t *testing.T) {
+	isolateCachedConfigTest(t)
+
+	ks := NewKubescape(context.Background())
+	setConfig := &metav1.SetConfig{
+		Account:        "test-account",
+		AccessKey:      "test-access-key",
+		CloudAPIURL:    "https://api.example.test",
+		CloudReportURL: "https://report.example.test",
+	}
+
+	require.NoError(t, ks.SetCachedConfig(setConfig))
+
+	persisted := readPersistedConfig(t)
+	assert.Equal(t, setConfig.Account, persisted.AccountID)
+	assert.Equal(t, setConfig.AccessKey, persisted.AccessKey)
+	assert.Equal(t, setConfig.CloudAPIURL, persisted.CloudAPIURL)
+	assert.Equal(t, setConfig.CloudReportURL, persisted.CloudReportURL)
+}
+
+func TestSetCachedConfig_EmptyFieldsDoNotOverride(t *testing.T) {
+	isolateCachedConfigTest(t)
+
+	ks := NewKubescape(context.Background())
+	require.NoError(t, ks.SetCachedConfig(&metav1.SetConfig{
+		Account:        "original-account",
+		AccessKey:      "original-access-key",
+		CloudAPIURL:    "https://original-api.example.test",
+		CloudReportURL: "https://original-report.example.test",
+	}))
+
+	before := readPersistedConfig(t)
+	require.NoError(t, ks.SetCachedConfig(&metav1.SetConfig{}))
+	after := readPersistedConfig(t)
+
+	assert.Equal(t, before, after)
+}
+
+func TestViewCachedConfig_FullJSON(t *testing.T) {
+	isolateCachedConfigTest(t)
+
+	// Force the LocalConfig path so the test never reads the host's cluster
+	// ConfigMap, Secret, or kube-context.
+	originalConnected := k8sinterface.IsConnectedToCluster()
+	k8sinterface.SetConnectedToCluster(false)
+	t.Cleanup(func() { k8sinterface.SetConnectedToCluster(originalConnected) })
+
+	originalKubernetesAPIFunc := kubernetesAPIFunc
+	kubernetesAPIFunc = func() *k8sinterface.KubernetesApi { return nil }
+	t.Cleanup(func() { kubernetesAPIFunc = originalKubernetesAPIFunc })
+
+	ks := NewKubescape(context.Background())
+	const accessKey = "test-access-key-123"
+	require.NoError(t, ks.SetCachedConfig(&metav1.SetConfig{
+		Account:        "test-account",
+		AccessKey:      accessKey,
+		CloudAPIURL:    "https://api.example.test",
+		CloudReportURL: "https://report.example.test",
+	}))
+
+	var output bytes.Buffer
+	require.NoError(t, ks.ViewCachedConfig(&metav1.ViewConfig{
+		OutputFormat: "json",
+		Writer:       &output,
+	}))
+
+	var rendered map[string]string
+	require.NoError(t, json.Unmarshal(output.Bytes(), &rendered))
+	assert.Equal(t, "test-account", rendered["accountID"])
+	assert.Equal(t, "https://api.example.test", rendered["cloudAPIURL"])
+	assert.Equal(t, "https://report.example.test", rendered["cloudReportURL"])
+	assert.Equal(t, "****-123", rendered["accessKey"])
+	assert.NotContains(t, output.String(), accessKey)
+}
+
+func TestDeleteCachedConfig_RemovesCachedConfig(t *testing.T) {
+	isolateCachedConfigTest(t)
+
+	ks := NewKubescape(context.Background())
+	require.NoError(t, ks.SetCachedConfig(&metav1.SetConfig{Account: "test-account"}))
+	_, err := os.Stat(cautils.ConfigFileFullPath())
+	require.NoError(t, err)
+
+	require.NoError(t, ks.DeleteCachedConfig(&metav1.DeleteConfig{}))
+	_, err = os.Stat(cautils.ConfigFileFullPath())
+	require.ErrorIs(t, err, os.ErrNotExist)
+}
+
+func TestDeleteCachedConfig_MissingFileIsNonFatal(t *testing.T) {
+	isolateCachedConfigTest(t)
+
+	_, err := os.Stat(cautils.ConfigFileFullPath())
+	require.ErrorIs(t, err, os.ErrNotExist)
+
+	ks := NewKubescape(context.Background())
+	require.NoError(t, ks.DeleteCachedConfig(&metav1.DeleteConfig{}))
 }

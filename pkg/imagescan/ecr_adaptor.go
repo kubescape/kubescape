@@ -20,6 +20,8 @@ type ECRAPI interface {
 type awsConfigProvider func(ctx context.Context, optFns ...func(*config.LoadOptions) error) (aws.Config, error)
 type ecrClientFactory func(cfg aws.Config) ECRAPI
 
+const maxECRVulnerabilityPages = 1000
+
 // AWSECRAdaptor implements IContainerImageVulnerabilityAdaptor for AWS ECR.
 type AWSECRAdaptor struct {
 	client         ECRAPI
@@ -145,9 +147,9 @@ func (a *AWSECRAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs [
 			}
 
 			var fetchErr error
-			const maxPages = 1000
+			seenTokens := make(map[string]struct{})
 
-			for page := 0; ; page++ {
+			for pagesFetched := 0; ; pagesFetched++ {
 				out, err := a.client.DescribeImageScanFindings(ctx, input)
 				if err != nil {
 					fetchErr = err
@@ -184,14 +186,19 @@ func (a *AWSECRAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs [
 					}
 				}
 
-				if out.NextToken == nil {
+				nextToken, hasNextPage, cursorErr := nextECRVulnerabilityToken(
+					out.NextToken,
+					seenTokens,
+					pagesFetched+1,
+				)
+				if cursorErr != nil {
+					fetchErr = cursorErr
 					break
 				}
-				if page >= maxPages {
-					fetchErr = fmt.Errorf("exceeded max pages (%d) fetching vulnerabilities for image %s", maxPages, imageID.Repository)
+				if !hasNextPage {
 					break
 				}
-				input.NextToken = out.NextToken
+				input.NextToken = aws.String(nextToken)
 			}
 
 			if fetchErr != nil {
@@ -201,6 +208,31 @@ func (a *AWSECRAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs [
 			return report, nil
 		},
 	)
+}
+
+// nextECRVulnerabilityToken validates the continuation token before another
+// request is made. ECR normally returns nil on the final page. A non-nil empty
+// token, a token already observed earlier in the chain, or a continuation
+// after the page budget has been exhausted cannot make forward progress and
+// must fail instead of repeatedly downloading and appending the same page.
+func nextECRVulnerabilityToken(nextToken *string, seen map[string]struct{}, pagesFetched int) (string, bool, error) {
+	if nextToken == nil {
+		return "", false, nil
+	}
+
+	token := aws.ToString(nextToken)
+	if strings.TrimSpace(token) == "" {
+		return "", false, fmt.Errorf("ecr vulnerability pagination returned an empty continuation token")
+	}
+	if _, exists := seen[token]; exists {
+		return "", false, fmt.Errorf("ecr vulnerability pagination repeated continuation token %q", token)
+	}
+	if pagesFetched >= maxECRVulnerabilityPages {
+		return "", false, fmt.Errorf("exceeded max pages (%d) fetching ecr vulnerabilities", maxECRVulnerabilityPages)
+	}
+
+	seen[token] = struct{}{}
+	return token, true, nil
 }
 
 // GetImagesInformation retrieves the BOM and manifest information for a list of image identifiers.

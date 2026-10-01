@@ -699,3 +699,72 @@ func TestMarkdownPrinter_ActionPrint_CombinedPostureAndImageScan(t *testing.T) {
 	assert.Contains(t, text, "# Kubescape Image Scan Report", "must contain image scan report heading")
 	assert.Contains(t, text, "`registry.example.com/combined:v1`", "must contain scanned image name")
 }
+
+func TestMarkdownPrinter_ActionPrint_CoverageSectionPresent(t *testing.T) {
+	session := mdSessionFixture()
+	session.ScanCoverage = cautils.ScanCoverage{
+		CoverageScore:     85.0,
+		EvaluatedControls: 17,
+		TotalControls:     20,
+		Degraded:          true,
+		NotEvaluatedControls: []cautils.NotEvaluatedControl{
+			{
+				ControlID:   "C-0099",
+				MissingGVRs: []string{"apps/v1/daemonsets"},
+			},
+		},
+	}
+
+	out := mdRunActionPrint(t, session)
+
+	assert.Contains(t, out, "## Scan Coverage")
+	assert.Contains(t, out, "**Coverage Score:** 85% ⚠️ Degraded")
+	assert.Contains(t, out, "Evaluated 17 of 20 controls")
+	assert.Contains(t, out, "| Control ID | Name | Reason |")
+	assert.Contains(t, out, "| C-0099 | C-0099 | missing: apps/v1/daemonsets |")
+}
+
+func TestMarkdownPrinter_ActionPrint_CoverageSectionOmittedWhenPerfect(t *testing.T) {
+	session := mdSessionFixture()
+	session.ScanCoverage = cautils.ScanCoverage{
+		CoverageScore:     100.0,
+		EvaluatedControls: 20,
+		TotalControls:     20,
+		Degraded:          false,
+	}
+
+	out := mdRunActionPrint(t, session)
+
+	assert.NotContains(t, out, "## Scan Coverage")
+}
+
+func TestMarkdownPrinter_ActionPrint_CoverageSkippedControlsWithReasons(t *testing.T) {
+	session := mdSessionFixture()
+	skippedStatus := &apis.StatusInfo{
+		InnerStatus: apis.StatusSkipped,
+		SubStatus:   apis.SubStatusIrrelevant,
+		InnerInfo:   "no matching resources in cluster",
+	}
+	ctrlSkipped := &reportsummary.ControlSummary{
+		ControlID:   "C-0070",
+		Name:        "Host IPC",
+		ScoreFactor: 6.0,
+		StatusInfo:  *skippedStatus,
+	}
+	ctrlSkipped.Append(skippedStatus, mdResourceID1)
+	session.Report.SummaryDetails.Controls["C-0070"] = *ctrlSkipped
+
+	session.ScanCoverage = cautils.ScanCoverage{
+		CoverageScore:     90.0,
+		EvaluatedControls: 9,
+		TotalControls:     10,
+		Degraded:          true,
+	}
+
+	out := mdRunActionPrint(t, session)
+
+	assert.Contains(t, out, "## Scan Coverage")
+	assert.Contains(t, out, "C-0070")
+	assert.Contains(t, out, "Host IPC")
+	assert.Contains(t, out, "irrelevant: no matching resources in cluster")
+}

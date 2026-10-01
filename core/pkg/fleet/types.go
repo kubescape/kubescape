@@ -10,9 +10,16 @@ import (
 // FleetReport is the top-level aggregate: one entry per scanned context plus
 // the cross-cluster views derived from them.
 type FleetReport struct {
-	Metadata      FleetMetadata      `json:"metadata"`
-	Clusters      []ClusterResult    `json:"clusters"`
+	Metadata FleetMetadata   `json:"metadata"`
+	Clusters []ClusterResult `json:"clusters"`
+	// Compliance is the fleet-wide score and the account of which clusters
+	// produced it. It is derived from Clusters, so the two cannot disagree.
+	Compliance    ComplianceRollup   `json:"compliance"`
 	ControlMatrix FleetControlMatrix `json:"controlMatrix"`
+	// Divergence is the controls the clusters do not agree on. It is derived
+	// from ControlMatrix, so it cannot report a disagreement the matrix does
+	// not show.
+	Divergence FleetDivergence `json:"divergence"`
 }
 
 // FleetMetadata describes the run that produced the report.

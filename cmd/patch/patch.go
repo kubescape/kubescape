@@ -63,6 +63,10 @@ func GetPatchCmd(ks meta.IKubescape) *cobra.Command {
 			// Set the UseDefaultMatchers field in scanInfo
 			scanInfo.UseDefaultMatchers = useDefaultMatchers
 
+			// The invocation is valid from this point on. Runtime and result-gate
+			// failures should not print command usage.
+			cmd.SilenceUsage = true
+
 			exceedsSeverityThreshold, err := ks.Patch(&patchInfo, &scanInfo)
 			if err != nil {
 				return err

@@ -137,18 +137,8 @@ func printClusterFixes(w io.Writer, rendered []fixhandler.RenderedFix) error {
 // writeClusterFixes writes one manifest per resource into dir, returning the
 // paths written.
 func writeClusterFixes(dir string, rendered []fixhandler.RenderedFix, noConfirm bool) ([]string, error) {
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return nil, fmt.Errorf("failed to create output directory %q: %w", dir, err)
-	}
-
-	if !noConfirm {
-		entries, err := os.ReadDir(dir)
-		if err != nil {
-			return nil, fmt.Errorf("failed to read output directory %q: %w", dir, err)
-		}
-		if len(entries) > 0 {
-			return nil, fmt.Errorf(outputDirNotEmpty, dir)
-		}
+	if err := prepareOutputDir(dir, noConfirm); err != nil {
+		return nil, err
 	}
 
 	cleanDir := filepath.Clean(dir)
@@ -171,6 +161,29 @@ func writeClusterFixes(dir string, rendered []fixhandler.RenderedFix, noConfirm 
 		written = append(written, path)
 	}
 	return written, nil
+}
+
+// prepareOutputDir creates the --output-dir directory and, unless noConfirm is
+// set, refuses one that already has entries. Both users of the flag share it:
+// the manifests rendered for a cluster report and the fixed copies written for
+// a file-based one.
+func prepareOutputDir(dir string, noConfirm bool) error {
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("failed to create output directory %q: %w", dir, err)
+	}
+
+	if noConfirm {
+		return nil
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return fmt.Errorf("failed to read output directory %q: %w", dir, err)
+	}
+	if len(entries) > 0 {
+		return fmt.Errorf(outputDirNotEmpty, dir)
+	}
+	return nil
 }
 
 // emitClusterFixes renders the patched manifests for a cluster scan and either

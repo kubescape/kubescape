@@ -4,12 +4,15 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/locationresolver"
 	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -160,7 +163,12 @@ func (s *HelmChartTestSuite) TestGetWorkloadsWithOverride() {
 
 		for i := range fileToWorkloads[expectedFile] {
 			pathInWorkload := fileToWorkloads[expectedFile][i].(*localworkload.LocalWorkload).GetPath()
-			s.Equal(pathInWorkload, expectedFile, "Expected GetPath() to return a valid path on workload")
+			// Every template in this chart uses "{{ include ... }}", so none of
+			// them is static (see isStaticTemplate) and GetPath() must stay
+			// index-free - the safe degradation, not a resolvable-but-possibly-
+			// wrong line. TestGetWorkloadsWithOptions_StaticTemplateGetsIndex
+			// covers the templated-and-static split this chart cannot exercise.
+			s.Equal(expectedFile, pathInWorkload, "Expected GetPath() to return the bare path: every template here contains \"{{\", so none is provably safe to index")
 		}
 
 		if strings.Contains(expectedFile, "cronjob.yaml") {
@@ -203,6 +211,180 @@ func (s *HelmChartTestSuite) TestGetWorkloadsWithOptions_ReleaseName() {
 
 	jsonBytes, _ := json.Marshal(wls[0].GetObject())
 	s.Contains(string(jsonBytes), `"namespace":"my-ns"`, "release namespace should propagate to subject namespace")
+}
+
+// TestGetWorkloadsWithOptions_StaticTemplateGetsIndex is the regression matthyx's
+// review asked for: a real chart render, not a hand-built session, proving the
+// document index is only ever attached to a template proven static.
+// testdata/helm_chart_layout/mychart carries all three shapes at once -
+// templates/serviceaccount.yaml has no "{{" anywhere and must resolve to a
+// line; templates/deployment.yaml uses ".Release.Name" and ".Values.*" and
+// must not; its subchart's charts/mysubchart/templates/service.yaml templates
+// too and must not, proving the check applies at every nesting depth, not
+// just the parent chart's own templates/.
+func (s *HelmChartTestSuite) TestGetWorkloadsWithOptions_StaticTemplateGetsIndex() {
+	o, _ := os.Getwd()
+	chartPath := filepath.Join(o, "testdata", "helm_chart_layout", "mychart")
+	chart, err := NewHelmChart(chartPath)
+	s.Require().NoError(err)
+
+	fileToWorkloads, errs := chart.GetWorkloadsWithDefaultValues()
+	s.Require().Len(errs, 0)
+
+	staticPath := filepath.Join(chartPath, "templates", "serviceaccount.yaml")
+	staticWls, ok := fileToWorkloads[staticPath]
+	s.Require().True(ok, "static template should be rendered")
+	s.Require().Len(staticWls, 1)
+	s.Equal(staticPath+":0", staticWls[0].(*localworkload.LocalWorkload).GetPath(),
+		"a template with no \"{{\" anywhere is unchanged by rendering, so its document index is safe to claim")
+
+	templatedPath := filepath.Join(chartPath, "templates", "deployment.yaml")
+	templatedWls, ok := fileToWorkloads[templatedPath]
+	s.Require().True(ok, "templated file should still be rendered")
+	s.Require().Len(templatedWls, 1)
+	s.Equal(templatedPath, templatedWls[0].(*localworkload.LocalWorkload).GetPath(),
+		"a template using \"{{ .Values }}\"/\"{{ .Release }}\" must keep the bare path: "+
+			"the resolver would read the unrendered source, which is not valid YAML and "+
+			"in general is not even the same document by the time it templates")
+
+	subchartPath := filepath.Join(chartPath, "charts", "mysubchart", "templates", "service.yaml")
+	subchartWls, ok := fileToWorkloads[subchartPath]
+	s.Require().True(ok, "subchart template should still be rendered")
+	s.Require().Len(subchartWls, 1)
+	s.Equal(subchartPath, subchartWls[0].(*localworkload.LocalWorkload).GetPath(),
+		"the static/templated check must apply to a subchart's templates too, not just the parent's")
+}
+
+// findWorkloadByName returns the workload named name from wls, failing the
+// test if it is not present exactly once - the tests below rely on picking
+// out a specific document's workload rather than assuming render order.
+func findWorkloadByName(t *testing.T, wls []workloadinterface.IMetadata, name string) workloadinterface.IMetadata {
+	t.Helper()
+	var found workloadinterface.IMetadata
+	for _, wl := range wls {
+		if wl.GetName() == name {
+			require.Nil(t, found, "expected exactly one workload named %q", name)
+			found = wl
+		}
+	}
+	require.NotNil(t, found, "expected a workload named %q", name)
+	return found
+}
+
+// renderedChartWorkloads renders the layout fixture chart and returns the
+// workloads for one of its templates.
+func (s *HelmChartTestSuite) renderedChartWorkloads(template string) (string, []workloadinterface.IMetadata) {
+	o, _ := os.Getwd()
+	chartPath := filepath.Join(o, "testdata", "helm_chart_layout", "mychart")
+	chart, err := NewHelmChart(chartPath)
+	s.Require().NoError(err)
+
+	fileToWorkloads, errs := chart.GetWorkloadsWithDefaultValues()
+	s.Require().Len(errs, 0)
+
+	path := filepath.Join(chartPath, "templates", template)
+	wls, ok := fileToWorkloads[path]
+	s.Require().Truef(ok, "%s should be rendered", template)
+	return path, wls
+}
+
+// TestGetWorkloadsWithOptions_AlignedDocumentsGetOrdinalIndex is the positive
+// case the two rules below carve exceptions out of: a static template whose
+// documents are all plain single workloads, so each workload's raw document
+// index and its workload ordinal are the same number and the suffix is
+// correct however a consumer reads it. Resolving each one through
+// locationresolver proves the index reaches that document and no other.
+func (s *HelmChartTestSuite) TestGetWorkloadsWithOptions_AlignedDocumentsGetOrdinalIndex() {
+	path, wls := s.renderedChartWorkloads("aligned-multidoc.yaml")
+	s.Require().Len(wls, 3)
+
+	resolver, err := locationresolver.NewPathLocationResolver(path)
+	s.Require().NoError(err)
+
+	// marker labels sit on lines 6, 13 and 20 of the fixture.
+	for _, tc := range []struct {
+		name  string
+		index int
+		line  int
+	}{
+		{"mychart-aligned-first", 0, 6},
+		{"mychart-aligned-second", 1, 13},
+		{"mychart-aligned-third", 2, 20},
+	} {
+		wl := findWorkloadByName(s.T(), wls, tc.name)
+		s.Equal(fmt.Sprintf("%s:%d", path, tc.index), wl.(*localworkload.LocalWorkload).GetPath())
+
+		location, err := resolver.ResolveLocation(".metadata.labels.marker", tc.index)
+		s.Require().NoError(err)
+		s.Equalf(tc.line, location.Line, "%s's marker label is on line %d", tc.name, tc.line)
+	}
+}
+
+// TestGetWorkloadsWithOptions_SkippedDocumentLeavesPathsBare covers a static
+// template whose first YAML document is empty (two consecutive "---"
+// markers). readYamlFile drops that document, so both ConfigMaps sit one
+// ordinal below their raw document index: mychart-static-a is raw document 1
+// but workload 0, and mychart-static-b is raw document 2 but workload 1.
+//
+// There is no suffix that is right for both consumers here, which is why both
+// paths stay bare. Emitting the raw index (this PR's second revision) makes
+// SARIF remediation edit the wrong ConfigMap and puts the second one out of
+// range of the compacted workload list; emitting the ordinal makes line
+// resolution cite the preceding document. The assertions below resolve the
+// raw indexes directly to pin that the two numberings really do disagree for
+// this file, so the bare paths are a deliberate refusal rather than an
+// accident of the fixture.
+func (s *HelmChartTestSuite) TestGetWorkloadsWithOptions_SkippedDocumentLeavesPathsBare() {
+	path, wls := s.renderedChartWorkloads("skipped-document.yaml")
+	s.Require().Len(wls, 2, "the leading empty document must not become a phantom workload")
+
+	for _, name := range []string{"mychart-static-a", "mychart-static-b"} {
+		wl := findWorkloadByName(s.T(), wls, name)
+		s.Equal(path, wl.(*localworkload.LocalWorkload).GetPath(),
+			"a document dropped earlier in the file pushes raw index and workload ordinal apart, so neither is safe to write down")
+	}
+
+	resolver, err := locationresolver.NewPathLocationResolver(path)
+	s.Require().NoError(err)
+
+	locA, err := resolver.ResolveLocation(".metadata.labels.marker", 1)
+	s.Require().NoError(err)
+	s.Equal(8, locA.Line, "workload ordinal 0 is raw document 1, on line 8")
+
+	locB, err := resolver.ResolveLocation(".metadata.labels.marker", 2)
+	s.Require().NoError(err)
+	s.Equal(15, locB.Line, "workload ordinal 1 is raw document 2, on line 15")
+}
+
+// TestGetWorkloadsWithOptions_ListEnvelopesStayUnindexed covers List
+// envelopes, including the singleton ones matthyx's third review caught. A
+// list's workloads are the objects under items[], while both consumers of the
+// suffix address the document root - so the resolver would evaluate a
+// resource's path against the wrapper (here the wrapper carries a deliberately
+// conflicting "marker: wrapper" label, so a wrong answer would be visible
+// rather than empty) and YAMLTreeEditor refuses a List wrapper outright.
+//
+// A one-item list is the interesting case: it produces exactly one workload,
+// at an ordinal that does equal its raw document index, so it passes every
+// other test and is only caught by classifying the document structurally.
+func (s *HelmChartTestSuite) TestGetWorkloadsWithOptions_ListEnvelopesStayUnindexed() {
+	for _, tc := range []struct {
+		template string
+		items    []string
+	}{
+		{"list-envelope.yaml", []string{"mychart-list-item-a", "mychart-list-item-b"}},
+		{"singleton-list.yaml", []string{"mychart-singleton-list-item"}},
+		{"singleton-podlist.yaml", []string{"mychart-singleton-podlist-item"}},
+	} {
+		path, wls := s.renderedChartWorkloads(tc.template)
+		s.Require().Len(wls, len(tc.items))
+
+		for _, name := range tc.items {
+			wl := findWorkloadByName(s.T(), wls, name)
+			s.Equalf(path, wl.(*localworkload.LocalWorkload).GetPath(),
+				"%s: a List item lives under items[], not at the document root, so it may not claim the document's index", tc.template)
+		}
+	}
 }
 
 // TestHelmValueOptions_MergeValues exercises the helm-style value merger so we can be sure

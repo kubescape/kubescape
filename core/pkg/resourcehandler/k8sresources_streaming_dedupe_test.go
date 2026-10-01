@@ -6,8 +6,12 @@ import (
 
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/metrics"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -23,6 +27,16 @@ import (
 // under two API versions is collected and reported twice on large/streaming
 // scans.
 func TestCollectAndStreamBatches_DeduplicatesResourceServedAtSeveralVersions(t *testing.T) {
+	metrics.ResetForTest(t)
+	previousProvider := otel.GetMeterProvider()
+	reader := sdkmetric.NewManualReader()
+	provider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+	otel.SetMeterProvider(provider)
+	metrics.Init()
+	t.Cleanup(func() {
+		otel.SetMeterProvider(previousProvider)
+		require.NoError(t, provider.Shutdown(context.Background()))
+	})
 	const uid = "11111111-1111-1111-1111-111111111111"
 	alpha := schema.GroupVersionResource{Group: "agents.x-k8s.io", Version: "v1alpha1", Resource: "sandboxes"}
 	beta := schema.GroupVersionResource{Group: "agents.x-k8s.io", Version: "v1beta1", Resource: "sandboxes"}
@@ -79,4 +93,21 @@ func TestCollectAndStreamBatches_DeduplicatesResourceServedAtSeveralVersions(t *
 	}
 
 	assert.Equal(t, 1, total, "one Sandbox served at two API versions must be streamed once, not once per served version")
+	assert.Equal(t, map[string]int{"agents": 1}, session.Metadata.ContextMetadata.ClusterContextMetadata.MapNamespaceToNumberOfResources, "one Sandbox served at two API versions must be counted once in namespace metadata")
+
+	var resourceMetrics metricdata.ResourceMetrics
+	require.NoError(t, reader.Collect(ctx, &resourceMetrics))
+	for _, scopeMetrics := range resourceMetrics.ScopeMetrics {
+		for _, metric := range scopeMetrics.Metrics {
+			if metric.Name != "kubescape_kubernetes_resources_count" {
+				continue
+			}
+			sum, ok := metric.Data.(metricdata.Sum[int64])
+			require.True(t, ok)
+			require.Len(t, sum.DataPoints, 1)
+			assert.Equal(t, int64(1), sum.DataPoints[0].Value, "kubescape_kubernetes_resources_count must count the deduplicated resource once")
+			return
+		}
+	}
+	t.Fatal("kubescape_kubernetes_resources_count was not recorded")
 }

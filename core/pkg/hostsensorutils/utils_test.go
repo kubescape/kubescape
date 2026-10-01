@@ -23,12 +23,17 @@ import (
 // kinds the same way they do against a real cluster.
 type fakeHostSensorDiscovery struct {
 	*fakediscovery.FakeDiscovery
+	version string
 }
 
 func (f *fakeHostSensorDiscovery) ServerPreferredResources() ([]*metav1.APIResourceList, error) {
+	version := f.version
+	if version == "" {
+		version = "v1beta0"
+	}
 	return []*metav1.APIResourceList{
 		{
-			GroupVersion: "hostdata.kubescape.cloud/v1beta0",
+			GroupVersion: "hostdata.kubescape.cloud/" + version,
 			APIResources: []metav1.APIResource{
 				{Name: "kubeletinfos", Kind: "KubeletInfo", Namespaced: false, Verbs: metav1.Verbs{"get", "list"}},
 				{Name: "cniinfos", Kind: "CNIInfo", Namespaced: false, Verbs: metav1.Verbs{"get", "list"}},
@@ -66,8 +71,7 @@ func TestAddInfoToMap(t *testing.T) {
 		Expected map[string]apis.StatusInfo
 	}{
 		{
-			// KubeletConfiguration is not a registered CRD kind, so
-			// ResourceGroupToString falls back to the raw group/version/kind triplet.
+			// Virtual resource identities also work without a registered CRD.
 			Resource: hostsensor.KubeletConfiguration,
 			Err:      testErr,
 			Expected: map[string]apis.StatusInfo{
@@ -78,24 +82,22 @@ func TestAddInfoToMap(t *testing.T) {
 			},
 		},
 		{
-			// CNIInfo is registered as the "cniinfos" CRD (see TestMain), so
-			// ResourceGroupToString normalizes the key to its plural lowercase form.
+			// Discovery knows cniinfos, but errors use the virtual CNIInfo key.
 			Resource: hostsensor.CNIInfo,
 			Err:      testErr,
 			Expected: map[string]apis.StatusInfo{
-				"hostdata.kubescape.cloud/v1beta0/cniinfos": {
+				"hostdata.kubescape.cloud/v1beta0/CNIInfo": {
 					InnerStatus: apis.StatusSkipped,
 					InnerInfo:   testErr.Error(),
 				},
 			},
 		},
 		{
-			// KubeletInfo is registered as the "kubeletinfos" CRD (see TestMain), so
-			// ResourceGroupToString normalizes the key to its plural lowercase form.
+			// Discovery knows kubeletinfos, but errors use the virtual KubeletInfo key.
 			Resource: hostsensor.KubeletInfo,
 			Err:      testErr,
 			Expected: map[string]apis.StatusInfo{
-				"hostdata.kubescape.cloud/v1beta0/kubeletinfos": {
+				"hostdata.kubescape.cloud/v1beta0/KubeletInfo": {
 					InnerStatus: apis.StatusSkipped,
 					InnerInfo:   testErr.Error(),
 				},
@@ -123,32 +125,40 @@ func TestAddInfoToMap(t *testing.T) {
 	}
 }
 
-// TestAddInfoToMap_BuildScanCoverageRecognizesHostSensorFailure is a regression
-// test for the bug where addInfoToMap used JoinResourceTriplets while
-// collectHostResources used ResourceGroupToString, producing different keys
-// for the same CRD ("KubeletInfo" vs "kubeletinfos"). BuildScanCoverage only
-// surfaces an InfoMap entry as a FailedGVRPull/NotEvaluatedControl when its
-// key matches ResourceToControlsMap, so the mismatch silently dropped
-// host-sensor pull failures from scan coverage.
+// Collection failures must use the same virtual key as control dependencies
+// so BuildScanCoverage reports the affected control as not evaluated.
 func TestAddInfoToMap_BuildScanCoverageRecognizesHostSensorFailure(t *testing.T) {
-	testErr := errors.New("failed to list CRDs")
+	t.Cleanup(func() {
+		k8sinterface.InitializeMapResources(&fakeHostSensorDiscovery{
+			FakeDiscovery: &fakediscovery.FakeDiscovery{Fake: &k8stesting.Fake{}},
+		})
+	})
+	for _, version := range []string{"v1beta0", "v1beta1"} {
+		t.Run(version, func(t *testing.T) {
+			k8sinterface.InitializeMapResources(&fakeHostSensorDiscovery{
+				FakeDiscovery: &fakediscovery.FakeDiscovery{Fake: &k8stesting.Fake{}},
+				version:       version,
+			})
+			testErr := errors.New("failed to list CRDs")
 
-	infoMap := make(map[string]apis.StatusInfo)
-	addInfoToMap(hostsensor.KubeletInfo, infoMap, testErr)
+			infoMap := make(map[string]apis.StatusInfo)
+			addInfoToMap(hostsensor.KubeletInfo, infoMap, testErr)
 
-	const expectedKey = "hostdata.kubescape.cloud/v1beta0/kubeletinfos"
-	resourceToControlsMap := map[string][]string{
-		expectedKey: {"C-0001"},
+			const expectedKey = "hostdata.kubescape.cloud/v1beta0/KubeletInfo"
+			resourceToControlsMap := map[string][]string{
+				expectedKey: {"C-0001"},
+			}
+
+			coverage := cautils.BuildScanCoverage(infoMap, resourceToControlsMap, nil, nil, nil, nil)
+
+			require.Len(t, coverage.FailedGVRPulls, 1)
+			assert.Equal(t, expectedKey, coverage.FailedGVRPulls[0].GVR)
+			assert.Equal(t, testErr.Error(), coverage.FailedGVRPulls[0].Error)
+
+			require.Len(t, coverage.NotEvaluatedControls, 1)
+			assert.Equal(t, "C-0001", coverage.NotEvaluatedControls[0].ControlID)
+		})
 	}
-
-	coverage := cautils.BuildScanCoverage(infoMap, resourceToControlsMap, nil, nil, nil, nil)
-
-	require.Len(t, coverage.FailedGVRPulls, 1)
-	assert.Equal(t, expectedKey, coverage.FailedGVRPulls[0].GVR)
-	assert.Equal(t, testErr.Error(), coverage.FailedGVRPulls[0].Error)
-
-	require.Len(t, coverage.NotEvaluatedControls, 1)
-	assert.Equal(t, "C-0001", coverage.NotEvaluatedControls[0].ControlID)
 }
 
 func TestMapHostSensorResourceToApiGroup(t *testing.T) {

@@ -139,9 +139,17 @@ func TestUserConfirmed_InteractiveReadsStdin(t *testing.T) {
 // flips privileged to false. Returns the report file path.
 func buildFixableReport(t *testing.T, dir string) string {
 	t.Helper()
+	return buildFixableReportAt(t, dir, "deploy.yaml")
+}
 
-	manifestName := "deploy.yaml"
-	manifestPath := filepath.Join(dir, manifestName)
+// buildFixableReportAt is buildFixableReport with the manifest at manifestName,
+// a slash-separated path relative to dir, so a test can place it in a nested
+// directory.
+func buildFixableReportAt(t *testing.T, dir, manifestName string) string {
+	t.Helper()
+
+	manifestPath := filepath.Join(dir, filepath.FromSlash(manifestName))
+	require.NoError(t, os.MkdirAll(filepath.Dir(manifestPath), 0750))
 	require.NoError(t, os.WriteFile(manifestPath, []byte(
 		"apiVersion: apps/v1\n"+
 			"kind: Deployment\n"+
@@ -358,82 +366,103 @@ func captureLoggerOutput(t *testing.T) func() string {
 	}
 }
 
-// TestFix_OutputDirIsIgnoredWithAWarningForFileReports covers #3733.
-// --output-dir applies only to cluster reports, whose fixes are emitted rather
-// than applied. Passing it to a file-based fix used to be accepted in silence:
-// the directory stayed empty, the manifests were rewritten in place, and
-// nothing told the user the flag had done nothing — so an empty ./patches read
-// as "the fix failed" rather than "that flag doesn't apply here".
-func TestFix_OutputDirIsIgnoredWithAWarningForFileReports(t *testing.T) {
-	dir := t.TempDir()
-	reportPath := buildFixableReport(t, dir)
-	outputDir := filepath.Join(dir, "patches")
-	require.NoError(t, os.MkdirAll(outputDir, 0o750))
-
-	readLog := captureLoggerOutput(t)
-
-	fixInfo := &metav1.FixInfo{ReportFile: reportPath, NoConfirm: true, OutputDir: outputDir}
-	ks := &Kubescape{Ctx: context.Background()}
-	require.NoError(t, ks.Fix(fixInfo))
-
-	assert.Contains(t, readLog(), "--output-dir has no effect when fixing manifest files",
-		"the user must be told the flag was ignored rather than left to guess from an empty directory")
-
-	entries, err := os.ReadDir(outputDir)
+// fileContent reads one file of a test's tree.
+func fileContent(t *testing.T, path string) string {
+	t.Helper()
+	b, err := os.ReadFile(path)
 	require.NoError(t, err)
-	assert.Empty(t, entries, "a file-based fix writes no manifests into --output-dir")
-
-	assert.Contains(t, manifestContent(t, dir), "privileged: false",
-		"the warning must not stop the in-place fix from being applied")
-
-	assert.Empty(t, fixInfo.OutputDir,
-		"the ignored --output-dir must be cleared, so no later code can act on a value the user was told is inert")
+	return string(b)
 }
 
-// TestFix_OutputDirWarnsBeforeDryRunReturns pins the placement of the warning:
-// it is about whether the flag applies at all, so it has to fire on every path
-// through Fix — including --dry-run, which returns long before any fix is
-// applied.
-func TestFix_OutputDirWarnsBeforeDryRunReturns(t *testing.T) {
+// TestFix_OutputDirWritesFixedCopiesAndLeavesTheOriginals covers #3847. With
+// --output-dir a file-based report is fixed into the directory rather than in
+// place: the copy keeps the manifest's path relative to the scanned directory,
+// nested directories included, and the manifest the scan read is not touched.
+//
+// NoConfirm is left false on a non-interactive stdin, which declines the
+// confirmation prompt. The copy being written anyway pins that this path never
+// reaches the prompt: it guards in-place edits, and none are made.
+func TestFix_OutputDirWritesFixedCopiesAndLeavesTheOriginals(t *testing.T) {
+	prevIsTerminal, prevIsCygwinTerminal := isTerminal, isCygwinTerminal
+	t.Cleanup(func() { isTerminal, isCygwinTerminal = prevIsTerminal, prevIsCygwinTerminal })
+	isTerminal = func(uintptr) bool { return false }
+	isCygwinTerminal = func(uintptr) bool { return false }
+
+	dir := t.TempDir()
+	reportPath := buildFixableReportAt(t, dir, "k8s/prod/deploy.yaml")
+	original := filepath.Join(dir, "k8s", "prod", "deploy.yaml")
+	before := fileContent(t, original)
+	outputDir := filepath.Join(t.TempDir(), "fixed")
+
+	readLog := captureLoggerOutput(t)
+
+	ks := &Kubescape{Ctx: context.Background()}
+	require.NoError(t, ks.Fix(&metav1.FixInfo{ReportFile: reportPath, OutputDir: outputDir}))
+
+	fixedCopy := filepath.Join(outputDir, "k8s", "prod", "deploy.yaml")
+	require.FileExists(t, fixedCopy, "the copy must mirror the manifest's path under the scanned directory")
+	assert.Contains(t, fileContent(t, fixedCopy), "privileged: false", "the copy must carry the fix")
+	assert.Equal(t, before, fileContent(t, original), "the scanned manifest must not be modified")
+	assert.Contains(t, readLog(), "The original files were not modified",
+		"the summary must say the originals are untouched, or the copies read as an in-place fix that also left files behind")
+}
+
+// TestFix_OutputDirRefusesANonEmptyDirectory pins the guard the cluster path
+// already applies: a stray --output-dir must not scatter manifests over a
+// directory that has content, unless --no-confirm says that is intended.
+func TestFix_OutputDirRefusesANonEmptyDirectory(t *testing.T) {
 	dir := t.TempDir()
 	reportPath := buildFixableReport(t, dir)
-
-	readLog := captureLoggerOutput(t)
+	before := manifestContent(t, dir)
+	outputDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(outputDir, "unrelated.txt"), []byte("keep me"), 0600))
 
 	ks := &Kubescape{Ctx: context.Background()}
-	require.NoError(t, ks.Fix(&metav1.FixInfo{
-		ReportFile: reportPath,
-		DryRun:     true,
-		OutputDir:  filepath.Join(dir, "patches"),
-	}))
+	err := ks.Fix(&metav1.FixInfo{ReportFile: reportPath, OutputDir: outputDir})
 
-	assert.Contains(t, readLog(), "--output-dir has no effect when fixing manifest files")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "is not empty")
+	assert.NoFileExists(t, filepath.Join(outputDir, "deploy.yaml"))
+	assert.Equal(t, before, manifestContent(t, dir))
+
+	require.NoError(t, ks.Fix(&metav1.FixInfo{ReportFile: reportPath, OutputDir: outputDir, NoConfirm: true}),
+		"--no-confirm must allow writing into a directory that has content")
+	assert.Contains(t, fileContent(t, filepath.Join(outputDir, "deploy.yaml")), "privileged: false")
+	assert.Equal(t, "keep me", fileContent(t, filepath.Join(outputDir, "unrelated.txt")))
 }
 
-// TestFix_OutputDirIsKeptForClusterReports is the other half of #3733: the
-// warning must be scoped to file-based reports. A cluster report is exactly
-// what --output-dir exists for, so warning there — or clearing the field, which
-// would silently redirect the manifests to stdout — would be a regression.
-func TestFix_OutputDirIsKeptForClusterReports(t *testing.T) {
+// TestFix_OutputDirRefusesTheScannedDirectory: an output directory that is the
+// scanned one maps every copy onto its own source, which is an in-place fix
+// under another name — the one outcome the flag exists to avoid. It has to be
+// refused even with --no-confirm, and for that reason rather than as "not
+// empty; pass --no-confirm", advice that would lead straight to the overwrite.
+func TestFix_OutputDirRefusesTheScannedDirectory(t *testing.T) {
 	dir := t.TempDir()
-	report := &reporthandlingv2.PostureReport{
-		Metadata: reporthandlingv2.Metadata{
-			ScanMetadata: reporthandlingv2.ScanMetadata{ScanningTarget: reporthandlingv2.Cluster},
-			ContextMetadata: reporthandlingv2.ContextMetadata{
-				ClusterContextMetadata: &reporthandlingv2.ClusterMetadata{ContextName: "dev"},
-			},
-		},
-	}
-	reportPath := writeReportFile(t, dir, report)
-	outputDir := filepath.Join(dir, "fixes")
+	reportPath := buildFixableReport(t, dir)
+	before := manifestContent(t, dir)
 
-	readLog := captureLoggerOutput(t)
-
-	fixInfo := &metav1.FixInfo{ReportFile: reportPath, NoConfirm: true, OutputDir: outputDir}
 	ks := &Kubescape{Ctx: context.Background()}
-	require.NoError(t, ks.Fix(fixInfo))
+	for _, noConfirm := range []bool{false, true} {
+		err := ks.Fix(&metav1.FixInfo{ReportFile: reportPath, OutputDir: dir, NoConfirm: noConfirm})
 
-	assert.NotContains(t, readLog(), "--output-dir has no effect",
-		"--output-dir is meaningful for a cluster report and must not be warned about")
-	assert.Equal(t, outputDir, fixInfo.OutputDir, "a cluster report must keep its --output-dir")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "would overwrite")
+		assert.NotContains(t, err.Error(), "--no-confirm")
+		assert.Equal(t, before, manifestContent(t, dir), "the scanned manifest must not be modified")
+	}
+}
+
+// TestFix_OutputDirDryRunWritesNothing: --dry-run promises no changes anywhere,
+// and creating the output directory is a change.
+func TestFix_OutputDirDryRunWritesNothing(t *testing.T) {
+	dir := t.TempDir()
+	reportPath := buildFixableReport(t, dir)
+	before := manifestContent(t, dir)
+	outputDir := filepath.Join(t.TempDir(), "fixed")
+
+	ks := &Kubescape{Ctx: context.Background()}
+	require.NoError(t, ks.Fix(&metav1.FixInfo{ReportFile: reportPath, OutputDir: outputDir, DryRun: true}))
+
+	assert.NoDirExists(t, outputDir)
+	assert.Equal(t, before, manifestContent(t, dir))
 }

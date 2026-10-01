@@ -1,6 +1,7 @@
 package scancache
 
 import (
+	"math"
 	"os"
 	"path/filepath"
 	"testing"
@@ -151,10 +152,62 @@ func TestResourceHash(t *testing.T) {
 	assert.NotEqual(t, h1, h3)
 }
 
+func TestResourceHashIncludesPolicyVisibleMetadata(t *testing.T) {
+	obj := map[string]any{
+		"metadata": map[string]any{
+			"name":            "pod",
+			"resourceVersion": "123",
+			"managedFields":   []any{map[string]any{"manager": "first"}},
+		},
+	}
+	initial := ResourceHash(obj)
+	metadata := obj["metadata"].(map[string]any)
+	metadata["resourceVersion"] = "124"
+	assert.NotEqual(t, initial, ResourceHash(obj), "a rule may inspect resourceVersion")
+	metadata["resourceVersion"] = "123"
+	metadata["managedFields"] = []any{map[string]any{"manager": "second"}}
+	assert.NotEqual(t, initial, ResourceHash(obj), "a rule may inspect managedFields")
+}
+
 func TestVersionKey(t *testing.T) {
 	k1 := VersionKey([]byte("a"), []byte("b"))
 	k2 := VersionKey([]byte("a"), []byte("b"))
 	k3 := VersionKey([]byte("a"), []byte("c"))
 	assert.Equal(t, k1, k2)
 	assert.NotEqual(t, k1, k3)
+}
+
+func TestResourceHashReturnsEmptyOnEncodeError(t *testing.T) {
+	// math.NaN() cannot be encoded to JSON.
+	// ResourceHash should return "" instead of hashing empty bytes.
+	obj := map[string]any{
+		"bad": math.NaN(),
+	}
+	h := ResourceHash(obj)
+	assert.Equal(t, "", h, "unencodable resource should return empty hash")
+}
+
+func TestGetRejectsEmptyHash(t *testing.T) {
+	dir := t.TempDir()
+	s, err := Load(dir, "v1")
+	require.NoError(t, err)
+
+	// Manually store an entry with an empty hash to simulate a stale entry
+	s.mu.Lock()
+	s.data[s.key("ctrl", "res")] = Entry{Hash: "", Verdict: resourcesresults.ResourceAssociatedControl{ControlID: "stale"}}
+	s.mu.Unlock()
+
+	// Get with empty hash must return false, never matching the stale entry
+	_, ok := s.Get("ctrl", "res", "")
+	assert.False(t, ok, "Get must reject an empty hash")
+}
+
+func TestPutSkipsEmptyHash(t *testing.T) {
+	dir := t.TempDir()
+	s, err := Load(dir, "v1")
+	require.NoError(t, err)
+
+	s.Put("ctrl", "res", "", resourcesresults.ResourceAssociatedControl{ControlID: "should-not-store"})
+	assert.False(t, s.dirty, "Put with empty hash should not mark store dirty")
+	assert.Empty(t, s.data, "Put with empty hash should not store an entry")
 }

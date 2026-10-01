@@ -397,6 +397,26 @@ func selectedKustomizationFile(path string) string {
 // Get Workloads, creates the yaml files(K8s resources) using Kustomize and
 // renders the workloads from the yaml files (k8s resources)
 func (kd *KustomizeDirectory) GetWorkloads(kustomizeDirectoryPath string) (map[string][]workloadinterface.IMetadata, []error) {
+	// Kustomize's output is the composed result of a base plus its overlays, so
+	// no single source line exists for any given field - unlike a plain YAML
+	// file or a static Helm template, there is no raw file on disk whose
+	// document order matches this output, so no ":<index>" suffix is safe to
+	// attach here (see helmchart.go's isStaticTemplate for why that check
+	// matters). The path is made absolute so the evidence pointer matches the
+	// convention every other source uses (helmchart.go's absPath, fileutils.go's
+	// relPath-or-absolute-path), not whatever relative form the caller happened
+	// to pass in.
+	//
+	// Deliberately lexicalAbsPath, not normalizePath: this same string becomes
+	// both the workload map key and, in filesloader.go, the input to
+	// filepath.Rel(repoRoot, ...) that produces Source.RelativePath. Resolving
+	// symlinks here would replace a repository-local Kustomize directory that is
+	// a symlink with its external target, so the "relative path" computed
+	// against repoRoot would escape the repository - and printers that refuse
+	// an out-of-repo location (GitLab SAST) would silently drop the finding.
+	// Keep the path the caller selected; kustomizer.Run below still opens the
+	// right files either way, since the OS follows the symlink itself.
+	kustomizeDirectoryPath = lexicalAbsPath(kustomizeDirectoryPath)
 
 	fSys := filesys.MakeFsOnDisk()
 	// Use LoadRestrictionsNone to allow loading resources from outside the kustomize directory.

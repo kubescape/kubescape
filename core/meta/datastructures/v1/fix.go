@@ -19,9 +19,11 @@ type FixInfo struct {
 	// --include-controls/--skip-controls pair.
 	IncludeControls []string
 	SkipControls    []string
-	// OutputDir applies only to cluster scan reports, which have no manifests
-	// to rewrite. When set, one patched manifest per resource is written there;
-	// when empty, the manifests are printed to stdout. It is ignored for
-	// file-based reports, which are fixed in place.
+	// OutputDir, when set, receives the fixes instead of their default
+	// destination. For a file-based report that default is the manifests
+	// themselves: with OutputDir the fixed copies are written there, mirroring
+	// the scanned tree, and the originals are left untouched. For a cluster scan
+	// report, which has no manifests to rewrite, one patched manifest per
+	// resource is written there instead of being printed to stdout.
 	OutputDir string
 }

@@ -425,6 +425,118 @@ func TestCollectNamespaceLabels_OnlyNamespaceKind(t *testing.T) {
 	assert.Len(t, nsLabels, 1, "only the Namespace object should contribute, not the Pod")
 }
 
+type trackingCatalog struct {
+	resources map[string]workloadinterface.IMetadata
+	getCalls  map[string]int
+}
+
+func (tc *trackingCatalog) Get(id string) (workloadinterface.IMetadata, bool) {
+	if tc.getCalls == nil {
+		tc.getCalls = make(map[string]int)
+	}
+	tc.getCalls[id]++
+	res, ok := tc.resources[id]
+	return res, ok
+}
+
+func (tc *trackingCatalog) ForEach(fn func(id string, res workloadinterface.IMetadata) bool) {
+	for k, v := range tc.resources {
+		if !fn(k, v) {
+			break
+		}
+	}
+}
+
+func TestCollectFailingResourcesByControlFromCatalog_OnDemandLookup(t *testing.T) {
+	failingWL := workloadinterface.NewWorkloadObj(map[string]any{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata": map[string]any{
+			"name":      "fail-app",
+			"namespace": "default",
+			"labels":    map[string]any{"tier": "critical"},
+		},
+	})
+	passingWL := workloadinterface.NewWorkloadObj(map[string]any{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata": map[string]any{
+			"name":      "pass-app",
+			"namespace": "default",
+		},
+	})
+
+	tc := &trackingCatalog{
+		resources: map[string]workloadinterface.IMetadata{
+			failingWL.GetID(): failingWL,
+			passingWL.GetID(): passingWL,
+		},
+	}
+
+	resourcesResult := map[string]resourcesresults.Result{
+		failingWL.GetID(): {
+			ResourceID: failingWL.GetID(),
+			AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+				{
+					ControlID: "C-0001",
+					Status:    apis.StatusInfo{InnerStatus: apis.StatusFailed},
+				},
+			},
+		},
+		passingWL.GetID(): {
+			ResourceID: passingWL.GetID(),
+			AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+				{
+					ControlID: "C-0002",
+					Status:    apis.StatusInfo{InnerStatus: apis.StatusPassed},
+				},
+			},
+		},
+	}
+
+	byControl := CollectFailingResourcesByControlFromCatalog(resourcesResult, tc)
+	require.Contains(t, byControl, "C-0001")
+	assert.Equal(t, 1, tc.getCalls[failingWL.GetID()], "failing workload should be retrieved on demand")
+	assert.Equal(t, 0, tc.getCalls[passingWL.GetID()], "passing workload without failures should never be retrieved from catalog")
+
+	// Nil catalog handling
+	assert.Empty(t, CollectFailingResourcesByControlFromCatalog(resourcesResult, nil))
+}
+
+func TestCollectNamespaceLabelsFromCatalog_IteratesNamespaces(t *testing.T) {
+	ns := workloadinterface.NewWorkloadObj(map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Namespace",
+		"metadata": map[string]any{
+			"name":   "stage",
+			"labels": map[string]any{"env": "staging"},
+		},
+	})
+	pod := workloadinterface.NewWorkloadObj(map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Pod",
+		"metadata": map[string]any{
+			"name":      "app",
+			"namespace": "stage",
+		},
+	})
+
+	tc := &trackingCatalog{
+		resources: map[string]workloadinterface.IMetadata{
+			ns.GetID():  ns,
+			pod.GetID(): pod,
+		},
+	}
+
+	nsLabels := CollectNamespaceLabelsFromCatalog(tc)
+	require.Contains(t, nsLabels, "stage")
+	assert.Equal(t, map[string]string{"env": "staging"}, nsLabels["stage"])
+	assert.Len(t, nsLabels, 1)
+
+	// Nil catalog handling
+	assert.Empty(t, CollectNamespaceLabelsFromCatalog(nil))
+}
+
 func TestParseSelector_AbsentSelectorMatchesEverything(t *testing.T) {
 	sel, err := parseSelector(nil)
 	require.NoError(t, err)

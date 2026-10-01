@@ -52,10 +52,60 @@
               "score": 0,
               "complianceScore": 0,
               "scoreFactor": 8
+            },
+            "C-0260": {
+              "statusInfo": {
+                "status": "skipped",
+                "subStatus": "irrelevant"
+              },
+              "controlID": "C-0260",
+              "name": "Missing network policy",
+              "status": "skipped",
+              "resourceIDs": {},
+              "ResourceCounters": {
+                "passedResources": 0,
+                "failedResources": 0,
+                "skippedResources": 0,
+                "excludedResources": 0
+              },
+              "subStatusCounters": {
+                "ignoredResources": 0,
+                "acknowledgedResources": 0
+              },
+              "score": 0,
+              "complianceScore": 100,
+              "scoreFactor": 8
             }
           },
           "status": "",
-          "frameworks": null,
+          "frameworks": [
+            {
+              "name": "MITRE",
+              "status": "",
+              "version": "v2",
+              "ResourceCounters": {
+                "passedResources": 0,
+                "failedResources": 0,
+                "skippedResources": 0,
+                "excludedResources": 0
+              },
+              "score": 0,
+              "complianceScore": 64
+            },
+            {
+              "name": "NSA",
+              "status": "",
+              "version": "v2",
+              "ResourceCounters": {
+                "passedResources": 0,
+                "failedResources": 0,
+                "skippedResources": 0,
+                "excludedResources": 0
+              },
+              "score": 0,
+              "complianceScore": 72
+            }
+          ],
           "resourcesSeverityCounters": {
             "criticalSeverity": 0,
             "highSeverity": 0,
@@ -105,7 +155,10 @@
         "coverageScore": 100,
         "evaluatedControls": 0,
         "totalControls": 0,
-        "degraded": false
+        "degraded": false,
+        "vacuousFrameworks": [
+          "MITRE"
+        ]
       },
       "duration": "2m05s",
       "report": {
@@ -139,10 +192,59 @@
               "score": 0,
               "complianceScore": 100,
               "scoreFactor": 8
+            },
+            "C-0260": {
+              "statusInfo": {
+                "status": "skipped",
+                "subStatus": "notEvaluated"
+              },
+              "controlID": "C-0260",
+              "name": "Missing network policy",
+              "status": "skipped",
+              "resourceIDs": {},
+              "ResourceCounters": {
+                "passedResources": 0,
+                "failedResources": 0,
+                "skippedResources": 0,
+                "excludedResources": 0
+              },
+              "subStatusCounters": {
+                "ignoredResources": 0,
+                "acknowledgedResources": 0
+              },
+              "score": 0,
+              "scoreFactor": 8
             }
           },
           "status": "",
-          "frameworks": null,
+          "frameworks": [
+            {
+              "name": "MITRE",
+              "status": "",
+              "version": "v2",
+              "ResourceCounters": {
+                "passedResources": 0,
+                "failedResources": 0,
+                "skippedResources": 0,
+                "excludedResources": 0
+              },
+              "score": 0,
+              "complianceScore": 100
+            },
+            {
+              "name": "NSA",
+              "status": "",
+              "version": "v2",
+              "ResourceCounters": {
+                "passedResources": 0,
+                "failedResources": 0,
+                "skippedResources": 0,
+                "excludedResources": 0
+              },
+              "score": 0,
+              "complianceScore": 100
+            }
+          ],
           "resourcesSeverityCounters": {
             "criticalSeverity": 0,
             "highSeverity": 0,
@@ -190,6 +292,40 @@
       "error": "context deadline exceeded"
     }
   ],
+  "compliance": {
+    "complianceScore": 100,
+    "clustersScored": 1,
+    "clustersTotal": 3,
+    "minCoverage": 90,
+    "frameworks": [
+      {
+        "name": "MITRE",
+        "clustersScored": 0,
+        "clustersReporting": 1,
+        "vacuousIn": [
+          "staging"
+        ]
+      },
+      {
+        "name": "NSA",
+        "complianceScore": 100,
+        "clustersScored": 1,
+        "clustersReporting": 1
+      }
+    ],
+    "excluded": [
+      {
+        "clusterID": "dr",
+        "reason": "notScanned"
+      },
+      {
+        "clusterID": "prod",
+        "reason": "lowCoverage",
+        "coverage": 88,
+        "complianceScore": 72
+      }
+    ]
+  },
   "controlMatrix": {
     "controls": [
       {
@@ -208,6 +344,56 @@
             "complianceScore": 100
           }
         }
+      },
+      {
+        "controlID": "C-0260",
+        "name": "Missing network policy",
+        "severity": "High",
+        "byCluster": {
+          "prod": {
+            "status": "skipped",
+            "failedResources": 0,
+            "complianceScore": 100
+          },
+          "staging": {
+            "status": "notEvaluated",
+            "failedResources": 0,
+            "complianceScore": -1
+          }
+        }
+      }
+    ]
+  },
+  "divergence": {
+    "referenceCluster": "prod",
+    "controls": [
+      {
+        "controlID": "C-0016",
+        "name": "Allow privilege escalation",
+        "severity": "High",
+        "postureDiverges": true,
+        "coverageGap": false,
+        "referenceStatus": "failed",
+        "passed": [
+          "staging"
+        ],
+        "failed": [
+          "prod"
+        ]
+      },
+      {
+        "controlID": "C-0260",
+        "name": "Missing network policy",
+        "severity": "High",
+        "postureDiverges": false,
+        "coverageGap": true,
+        "referenceStatus": "skipped",
+        "skipped": [
+          "prod"
+        ],
+        "notEvaluated": [
+          "staging"
+        ]
       }
     ]
   }

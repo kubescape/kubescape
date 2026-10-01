@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: List
+metadata:
+  labels:
+    marker: wrapper
+items:
+  - apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: mychart-singleton-list-item
+      labels:
+        marker: item

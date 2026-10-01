@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -297,4 +298,163 @@ func sortedNames(m map[string]string) []string {
 	}
 	slices.Sort(names)
 	return names
+}
+
+// runtimeReachableVAPs returns every policy loadVAP can reach, deduplicated by
+// policy.
+//
+// byName and byControl are poisoned independently (see catalog.go): a name
+// claimed by two policies is dropped from byName, while each of their distinct
+// control IDs stays resolvable through byControl, which is the index loadVAP
+// uses. Walking byName alone would let exactly those policies read
+// namespaceObject unguarded.
+func runtimeReachableVAPs(catalog *vapCatalog) []*VAP {
+	seen := make(map[*VAP]struct{}, len(catalog.byName)+len(catalog.byControl))
+	out := make([]*VAP, 0, len(seen))
+	for _, index := range []map[string]*VAP{catalog.byName, catalog.byControl} {
+		for _, vap := range index {
+			if _, done := seen[vap]; done {
+				continue
+			}
+			seen[vap] = struct{}{}
+			out = append(out, vap)
+		}
+	}
+	return out
+}
+
+// bundleExpression is one CEL expression from a policy, with where it came from
+// so a failure names the field rather than just the policy.
+type bundleExpression struct {
+	source string
+	where  string
+}
+
+// bundleExpressions returns every CEL expression a policy evaluates. All of them
+// compile against the same env, so any of them can read namespaceObject.
+func bundleExpressions(vap *VAP) []bundleExpression {
+	var out []bundleExpression
+	for _, v := range vap.Variables {
+		out = append(out, bundleExpression{v.Expression, "variable " + v.Name})
+	}
+	for i, v := range vap.Validations {
+		out = append(out, bundleExpression{v.Expression, "validation " + strconv.Itoa(i)})
+		if v.MessageExpression != "" {
+			out = append(out, bundleExpression{v.MessageExpression, "messageExpression " + strconv.Itoa(i)})
+		}
+	}
+	for _, c := range vap.matchConditions {
+		out = append(out, bundleExpression{c.Expression, "matchCondition " + c.Name})
+	}
+	return out
+}
+
+// TestReadsNamespaceObjectScoping covers the two ways a plain name comparison
+// gets the answer wrong: a comprehension local that never touches the
+// activation, and a real global read that shadowing rewrites to its absolute
+// name.
+func TestReadsNamespaceObjectScoping(t *testing.T) {
+	e, err := NewEvaluator()
+	require.NoError(t, err)
+
+	for _, tc := range []struct {
+		name  string
+		expr  string
+		reads bool
+	}{
+		{"plain global read", "namespaceObject.metadata.name == 'x'", true},
+		{"shadowed global kept as an absolute name", "[true].all(namespaceObject, .namespaceObject.metadata.name == 'allowed')", true},
+		{"comprehension local of the same name", "[true].all(namespaceObject, namespaceObject)", false},
+		{"an iteration range is the outer scope", "namespaceObject.metadata.labels.all(namespaceObject, namespaceObject != '')", true},
+		{"a mention inside a string", "'see the namespaceObject docs'", false},
+		{"unrelated expression", "has(object.spec)", false},
+		{"does not compile", "namespaceObject.(((", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.reads, readsNamespaceObject(e.env, tc.expr))
+		})
+	}
+}
+
+func TestPolicyDetectsNamespaceObjectOnlyWhenValidationCanReachIt(t *testing.T) {
+	e, err := NewEvaluator()
+	require.NoError(t, err)
+
+	for _, tc := range []struct {
+		name string
+		vap  *VAP
+		want bool
+	}{
+		{"validation reads namespace", &VAP{Validations: []Validation{{Expression: "namespaceObject.metadata.name == 'prod'"}}}, true},
+		{"validation reaches variable", &VAP{Variables: []Variable{{Name: "namespace", Expression: "namespaceObject.metadata.name"}}, Validations: []Validation{{Expression: "variables.namespace == 'prod'"}}}, true},
+		{"validation reaches nested variable", &VAP{Variables: []Variable{{Name: "namespace", Expression: "namespaceObject.metadata.name"}, {Name: "allowed", Expression: "variables.namespace == 'prod'"}}, Validations: []Validation{{Expression: "variables.allowed"}}}, true},
+		{"absolute global variable inside a shadowing comprehension", &VAP{Variables: []Variable{{Name: "allowed", Expression: "namespaceObject.metadata.name == 'prod'"}}, Validations: []Validation{{Expression: "[true].all(variables, .variables.allowed)"}}}, true},
+		{"comprehension-local variable does not reach global declaration", &VAP{Variables: []Variable{{Name: "allowed", Expression: "namespaceObject.metadata.name == 'prod'"}}, Validations: []Validation{{Expression: "[{'allowed': false}].all(variables, variables.allowed)"}}}, false},
+		{"literal-key variable access reaches global declaration", &VAP{Variables: []Variable{{Name: "allowed", Expression: "namespaceObject.metadata.name == 'prod'"}}, Validations: []Validation{{Expression: "variables['allowed']"}}}, true},
+		{"absolute literal-key variable access inside a shadowing comprehension", &VAP{Variables: []Variable{{Name: "allowed", Expression: "namespaceObject.metadata.name == 'prod'"}}, Validations: []Validation{{Expression: "[true].all(variables, .variables['allowed'])"}}}, true},
+		{"literal-key comprehension-local variable does not reach global declaration", &VAP{Variables: []Variable{{Name: "allowed", Expression: "namespaceObject.metadata.name == 'prod'"}}, Validations: []Validation{{Expression: "[{'allowed': false}].all(variables, variables['allowed'])"}}}, false},
+		{"dynamic key can reach namespace-dependent variable", &VAP{Variables: []Variable{{Name: "allowed", Expression: "namespaceObject.metadata.name == 'prod'"}}, Validations: []Validation{{Expression: "dyn(variables)[object.metadata.name]"}}}, true},
+		{"dynamic key through a referenced variable can reach namespace-dependent variable", &VAP{Variables: []Variable{{Name: "allowed", Expression: "namespaceObject.metadata.name == 'prod'"}, {Name: "selected", Expression: "dyn(variables)[object.metadata.name]"}}, Validations: []Validation{{Expression: "variables.selected"}}}, true},
+		{"dynamic comprehension-local variable does not reach global declaration", &VAP{Variables: []Variable{{Name: "allowed", Expression: "namespaceObject.metadata.name == 'prod'"}}, Validations: []Validation{{Expression: "[{'allowed': false}].all(variables, dyn(variables)[object.metadata.name])"}}}, false},
+		{"dynamic field access reaches global declaration", &VAP{Variables: []Variable{{Name: "allowed", Expression: "namespaceObject.metadata.name == 'prod'"}}, Validations: []Validation{{Expression: "dyn(variables).allowed"}}}, true},
+		{"dynamic field access to a comprehension-local variable does not reach global declaration", &VAP{Variables: []Variable{{Name: "allowed", Expression: "namespaceObject.metadata.name == 'prod'"}}, Validations: []Validation{{Expression: "[{'allowed': false}].all(variables, dyn(variables).allowed)"}}}, false},
+		{"lazy map alias can reach namespace-dependent variable", &VAP{Variables: []Variable{{Name: "allowed", Expression: "namespaceObject.metadata.name == 'prod'"}}, Validations: []Validation{{Expression: "[variables].all(v, v.allowed)"}}}, true},
+		{"comprehension-local map alias does not reach global declaration", &VAP{Variables: []Variable{{Name: "allowed", Expression: "namespaceObject.metadata.name == 'prod'"}}, Validations: []Validation{{Expression: "[{'allowed': false}].all(variables, [variables].all(v, v.allowed))"}}}, false},
+		{"declared variable returning lazy map can reach namespace-dependent variable", &VAP{Variables: []Variable{{Name: "allowed", Expression: "namespaceObject.metadata.name == 'prod'"}, {Name: "alias", Expression: "variables"}}, Validations: []Validation{{Expression: "variables.alias.allowed"}}}, true},
+		{"declared variable returning dynamic lazy map can reach namespace-dependent variable", &VAP{Variables: []Variable{{Name: "allowed", Expression: "namespaceObject.metadata.name == 'prod'"}, {Name: "alias", Expression: "dyn(variables)"}}, Validations: []Validation{{Expression: "variables.alias.allowed"}}}, true},
+		{"unused lazy variable", &VAP{Variables: []Variable{{Name: "namespace", Expression: "namespaceObject.metadata.name"}}, Validations: []Validation{{Expression: "object.metadata.name == 'pod'"}}}, false},
+		{"message expression", &VAP{Validations: []Validation{{Expression: "true", MessageExpression: "namespaceObject.metadata.name"}}}, false},
+		{"match condition", &VAP{matchConditions: []MatchCondition{{Name: "gate", Expression: "namespaceObject.metadata.name == 'prod'"}}, Validations: []Validation{{Expression: "true"}}}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, e.ReadsNamespaceObjectInValidations(tc.vap))
+		})
+	}
+}
+
+// TestBundleGuardCoversDuplicateNamePolicies covers the catalog shape where the
+// two indexes disagree. A name claimed twice is poisoned out of byName, but each
+// distinct control ID stays resolvable through byControl, which is what loadVAP
+// uses, so a guard walking byName alone would see nothing at all here.
+func TestBundleGuardCoversDuplicateNamePolicies(t *testing.T) {
+	catalog, err := parseVAPBundle([]byte(`apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: policy-a
+  labels:
+    controlId: C-0001
+spec:
+  validations:
+    - expression: "namespaceObject.metadata.name == 'allowed'"
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: policy-a
+  labels:
+    controlId: C-0002
+spec:
+  validations:
+    - expression: "true"
+`))
+	require.NoError(t, err)
+	require.Empty(t, catalog.byName, "a name claimed twice is poisoned out of byName")
+	require.Len(t, catalog.byControl, 2, "each control ID stays resolvable")
+
+	vaps := runtimeReachableVAPs(catalog)
+	require.Len(t, vaps, 2, "both policies are still reachable through loadVAP")
+
+	e, err := NewEvaluator()
+	require.NoError(t, err)
+
+	var found []string
+	for _, vap := range vaps {
+		for _, expr := range bundleExpressions(vap) {
+			if readsNamespaceObject(e.env, expr.source) {
+				found = append(found, vap.ControlID)
+			}
+		}
+	}
+	assert.Equal(t, []string{"C-0001"}, found,
+		"a read reachable only through byControl must still be caught")
 }

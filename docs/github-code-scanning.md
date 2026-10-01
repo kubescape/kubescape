@@ -224,6 +224,18 @@ With this rule in place, the Kubescape workflow check must pass before a pull re
 
 > **Note:** The Basic Example and the official-action example both use `continue-on-error: true` on the scan step, which marks the step as failed but lets the overall job succeed. Branch protection gates on the job conclusion, so those workflows will always pass the check regardless of findings. To block merges on security findings, use the **Setting a Compliance Threshold** pattern above, where the dedicated `Enforce compliance threshold` step has no `continue-on-error` and fails the job when the threshold is not met. Alternatively, configure a failure severity under **Settings → Code security → Code scanning** to have GitHub itself block the merge.
 
+## Scan Coverage and SARIF Invocations
+
+When evaluating static manifests, some controls may be skipped (for example, controls that require querying live cluster state or the Kubernetes API server).
+
+In SARIF output:
+- Kubescape populates aggregate coverage metrics (`coverageScore`, `evaluatedControls`, `totalControls`, and `degraded`) in `runs[].invocations[].properties` whenever controls are evaluated (`totalControls > 0`).
+- When a scan is degraded (`degraded == true`), Kubescape populates `runs[].invocations[].toolExecutionNotifications` with structured warning notifications describing the degraded coverage and identifying each unevaluated control with its diagnostic skip reason and associated rule reference. If the scan is not degraded, these notifications are omitted.
+- Note that GitHub Code Scanning processes security result alerts and ignores invocation metadata. To surface coverage warnings and summaries directly in GitHub Actions pull request checks and run summaries, use the GitHub Actions output format (`--format github-actions`).
+
+For full details on scan coverage behavior and diagnostics, see the [Scan Coverage documentation](scan-coverage.md).
+
+
 ## Troubleshooting
 
 ### No alerts appear in the Security tab
@@ -261,6 +273,7 @@ kubescape version
 
 ## Further Reading
 
+- [Scan coverage reporting](scan-coverage.md)
 - [Kubescape GitHub Action](https://github.com/kubescape/github-action)
 - [GitHub Code Scanning documentation](https://docs.github.com/en/code-security/code-scanning)
 - [SARIF support for Code Scanning](https://docs.github.com/en/code-security/code-scanning/integrating-with-code-scanning/sarif-support-for-code-scanning)

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -52,8 +53,7 @@ type componentInterfaces struct {
 }
 
 func (interfaces componentInterfaces) closePrinters() error {
-	printers := append([]printer.IPrinter{interfaces.uiPrinter}, interfaces.outputPrinters...)
-	return closePrinters(printers...)
+	return errors.Join(closePrinters(interfaces.uiPrinter), closePrinters(interfaces.outputPrinters...))
 }
 
 // closePrinters supports both printer close contracts while the migration to
@@ -77,7 +77,7 @@ func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo, policyIdenti
 	var k8s *k8sinterface.KubernetesApi
 	var k8sClient kubernetes.Interface
 	if scanInfo.GetScanningContext() == cautils.ContextCluster {
-		k8s = getKubernetesApi()
+		k8s = kubernetesAPIFunc()
 		if k8s == nil {
 			// Return rather than terminate: Scan already propagates this to the
 			// caller, and the command layer still exits non-zero on it.
@@ -88,7 +88,11 @@ func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo, policyIdenti
 	}
 
 	// ================== setup tenant object ======================================
-	tenantConfig := cautils.GetTenantConfig(ctx, scanInfo.AccountID, scanInfo.AccessKey, scanInfo.GetClusterContextName(), scanInfo.CustomClusterName, getKubernetesApi())
+	k8sForTenant := k8s
+	if k8sForTenant == nil {
+		k8sForTenant = kubernetesAPIFunc()
+	}
+	tenantConfig := cautils.GetTenantConfig(ctx, scanInfo.AccountID, scanInfo.AccessKey, scanInfo.GetClusterContextName(), scanInfo.CustomClusterName, k8sForTenant)
 
 	// Set submit behavior AFTER loading tenant config
 	setSubmitBehavior(scanInfo, tenantConfig)
@@ -98,6 +102,13 @@ func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo, policyIdenti
 		if scanInfo.OmitRawResources {
 			logger.L().Ctx(ctx).Warning("omit-raw-resources flag will be ignored in submit mode")
 		}
+	}
+
+	// Said before the scan runs rather than alongside the results: what these
+	// combinations cost is a gap in the evidence column, and a gap is only
+	// noticeable if the user was told to expect it.
+	for _, warning := range scanInfo.EvidenceFlagWarnings() {
+		logger.L().Ctx(ctx).Warning(warning)
 	}
 
 	// ================== version testing ======================================
@@ -469,6 +480,7 @@ func (ks *Kubescape) ScanContext(ctx context.Context, scanInfo *cautils.ScanInfo
 		}
 		reportResults := opaprocessor.NewOPAProcessor(scanData, deps, interfaces.tenantConfig.GetContextName(), scanInfo.ExcludedNamespaces, scanInfo.IncludeNamespaces, scanInfo.EnableRegoPrint, exceptionRecorder)
 		reportResults.ControlTimeout = scanInfo.ControlTimeout
+		reportResults.SetWholeClusterPolicy(scanInfo.GetWholeClusterPolicy())
 		if cacheStore := loadIncrementalCacheIfEnabled(ctxOpa, scanInfo, scanData); cacheStore != nil {
 			reportResults.SetIncrementalCache(cacheStore)
 			defer func() {
@@ -608,7 +620,7 @@ func scanImages(scanType cautils.ScanTypes, scanData *cautils.OPASessionObj, ctx
 	// Deferred into the joined error so image results are still collected first.
 	staleDBErr := imagescan.EnforceDBAge(svc, shouldUpdate, failOnStale, maxDBAge)
 	defaultCreds := registryCredentialsFromScanInfo(scanInfo)
-	var jobs []ImageScanJob
+	jobs := make([]ImageScanJob, 0, imagesToScan.Cardinality())
 	for target := range imagesToScan.Iter() {
 		img := target.Image
 		credsList := []imagescan.RegistryCredentials{}
@@ -656,8 +668,7 @@ func scanImages(scanType cautils.ScanTypes, scanData *cautils.OPASessionObj, ctx
 }
 
 func scanImageJobsWithDiscoveryErrors(ctx context.Context, svc imageScanService, concurrency int, jobs []ImageScanJob, resultsHandling *resultshandling.ResultsHandler, discoveryErrors []error) error {
-	errs := append([]error{}, discoveryErrors...)
-	return errors.Join(append(errs, scanImageJobs(ctx, svc, concurrency, jobs, resultsHandling))...)
+	return errors.Join(errors.Join(discoveryErrors...), scanImageJobs(ctx, svc, concurrency, jobs, resultsHandling))
 }
 
 func scanImageJobs(ctx context.Context, svc imageScanService, concurrency int, jobs []ImageScanJob, resultsHandling *resultshandling.ResultsHandler) error {
@@ -698,7 +709,7 @@ func collectImageScanTargets(scanType cautils.ScanTypes, scanData *cautils.OPASe
 	imagesToScan := mapset.NewSet[ImageScanTarget]()
 	imageToCreds := make(map[string][]imagescan.RegistryCredentials)
 	var containerErrors []error
-	nodePlatforms := buildNodePlatformIndex(scanData.AllResources)
+	nodePlatforms := buildNodePlatformIndexFromCatalog(scanData.GetCatalog())
 	if scanningContext != cautils.ContextCluster {
 		// imagePullSecrets belong to a live cluster target. A manifest or repository
 		// may contain the same Secret name as the current kube context, but that must
@@ -738,14 +749,7 @@ func collectImageScanTargets(scanType cautils.ScanTypes, scanData *cautils.OPASe
 				})
 			}
 			if creds, ok := resolveRegistryCredentials(ctx, k8sApi, wl, image); ok {
-				found := false
-				for _, c := range imageToCreds[image] {
-					if c == creds {
-						found = true
-						break
-					}
-				}
-				if !found {
+				if !slices.Contains(imageToCreds[image], creds) {
 					imageToCreds[image] = append(imageToCreds[image], creds)
 				}
 			}
@@ -754,26 +758,28 @@ func collectImageScanTargets(scanType cautils.ScanTypes, scanData *cautils.OPASe
 
 	if scanType == cautils.ScanTypeWorkload {
 		collectWorkload(workloadinterface.NewWorkloadObj(scanData.SingleResourceScan.GetObject()))
-	} else {
-		for _, workload := range scanData.AllResources {
-			collectWorkload(workloadinterface.NewWorkloadObj(workload.GetObject()))
-		}
+	} else if catalog := scanData.GetCatalog(); catalog != nil {
+		catalog.ForEach(func(_ string, workload workloadinterface.IMetadata) bool {
+			if workload != nil {
+				collectWorkload(workloadinterface.NewWorkloadObj(workload.GetObject()))
+			}
+			return true
+		})
 	}
 
 	return imagesToScan, imageToCreds, containerErrors
 }
 
 func addImageScanTarget(targets mapset.Set[ImageScanTarget], target ImageScanTarget) {
-	for _, existing := range targets.ToSlice() {
-		if existing.Image != target.Image || existing.Platform != target.Platform {
-			continue
-		}
-		if !existing.SkipUnavailable || target.SkipUnavailable {
-			return
-		}
-		targets.Remove(existing)
-		break
+	nonSkip := ImageScanTarget{Image: target.Image, Platform: target.Platform, SkipUnavailable: false}
+	if targets.Contains(nonSkip) {
+		return
 	}
+	if target.SkipUnavailable {
+		targets.Add(target)
+		return
+	}
+	targets.Remove(ImageScanTarget{Image: target.Image, Platform: target.Platform, SkipUnavailable: true})
 	targets.Add(target)
 }
 
@@ -840,37 +846,92 @@ func estimateClusterSize(resourceHandler resourcehandler.IResourceHandler, ctx c
 // decision was made from; the OPA processor uses it as its frozen resource
 // count because sessionObj.AllResources is populated asynchronously by the
 // producer goroutine.
-// loadIncrementalCacheIfEnabled builds the version key from scanData's
-// resolved policies (plus local controls-config bytes when set) and loads
-// the incremental scan cache. Returns (nil, nil) when --incremental is off,
-// so callers can call SetIncrementalCache unconditionally with the result
-// only when non-nil.
+const incrementalCacheSchemaVersion = "2"
+
+// incrementalCacheContext contains every scan-wide value that can affect a
+// cache-eligible rule. ResourceHash covers the resource itself; this context
+// covers the inputs shared by every resource evaluation.
+//
+// Keep this as a named, versioned wire format. Adding a policy input without
+// including it here could make an old verdict look valid for a different scan.
+type incrementalCacheContext struct {
+	SchemaVersion  string `json:"schemaVersion"`
+	RuntimeVersion string `json:"runtimeVersion"`
+	CloudProvider  string `json:"cloudProvider"`
+}
+
+// incrementalCacheVersion derives the cache namespace from both policy
+// content and scan-wide evaluation inputs. In particular, cloudProvider is
+// exposed to Rego as data.dataControlInputs.cloudProvider, so two otherwise
+// identical resources from different providers must never share a verdict.
+func incrementalCacheVersion(scanInfo *cautils.ScanInfo, scanData *cautils.OPASessionObj, runtimeVersion string) (string, error) {
+	// Development builds intentionally do not have a stable build identity.
+	// Reusing a persistent verdict cache for them is unsafe: source changes can
+	// alter evaluator behavior while the binary continues to report "dev".
+	// Returning an error makes the caller run without the persistent cache.
+	if runtimeVersion == "" || runtimeVersion == "dev" {
+		return "", errors.New("incremental cache requires a release build identity")
+	}
+	if scanInfo == nil {
+		return "", errors.New("scan info is required")
+	}
+	if scanData == nil {
+		return "", errors.New("scan data is required")
+	}
+	if scanData.Report == nil {
+		return "", errors.New("scan report is required")
+	}
+
+	contextBytes, err := json.Marshal(incrementalCacheContext{
+		SchemaVersion:  incrementalCacheSchemaVersion,
+		RuntimeVersion: runtimeVersion,
+		CloudProvider:  scanData.Report.ClusterCloudProvider,
+	})
+	if err != nil {
+		return "", fmt.Errorf("marshal incremental cache context: %w", err)
+	}
+	policyBytes, err := json.Marshal(scanData.Policies)
+	if err != nil {
+		return "", fmt.Errorf("marshal resolved policies: %w", err)
+	}
+	allPoliciesBytes, err := json.Marshal(scanData.AllPolicies)
+	if err != nil {
+		return "", fmt.Errorf("marshal resolved policy rules: %w", err)
+	}
+	regoInputBytes, err := json.Marshal(scanData.RegoInputData)
+	if err != nil {
+		return "", fmt.Errorf("marshal Rego input data: %w", err)
+	}
+
+	versionParts := [][]byte{
+		contextBytes,
+		[]byte(scanInfo.ControlsVersion),
+		policyBytes,
+		allPoliciesBytes,
+		regoInputBytes,
+	}
+	if scanInfo.ControlsInputs != "" {
+		localConfig, readErr := os.ReadFile(scanInfo.ControlsInputs)
+		if readErr != nil {
+			return "", fmt.Errorf("read controls inputs for cache version: %w", readErr)
+		}
+		versionParts = append(versionParts, localConfig)
+	}
+	return scancache.VersionKey(versionParts...), nil
+}
+
+// loadIncrementalCacheIfEnabled builds the version key from the complete
+// evaluation context and loads the incremental scan cache. It returns nil
+// when incremental mode is off or a safe version cannot be derived.
 func loadIncrementalCacheIfEnabled(ctx context.Context, scanInfo *cautils.ScanInfo, scanData *cautils.OPASessionObj) *scancache.Store {
 	if !scanInfo.Incremental {
 		return nil
 	}
-	policyBytes, marshalErr := json.Marshal(scanData.Policies)
-	if marshalErr != nil {
-		logger.L().Ctx(ctx).Warning("failed to derive incremental scan cache version, proceeding without cache", helpers.Error(marshalErr))
+	cacheVersion, versionErr := incrementalCacheVersion(scanInfo, scanData, versioncheck.BuildNumber)
+	if versionErr != nil {
+		logger.L().Ctx(ctx).Warning("failed to derive incremental scan cache version, proceeding without cache", helpers.Error(versionErr))
 		return nil
 	}
-	allPoliciesBytes, marshalErr := json.Marshal(scanData.AllPolicies)
-	if marshalErr != nil {
-		logger.L().Ctx(ctx).Warning("failed to derive incremental scan cache version, proceeding without cache", helpers.Error(marshalErr))
-		return nil
-	}
-	regoInputBytes, marshalErr := json.Marshal(scanData.RegoInputData)
-	if marshalErr != nil {
-		logger.L().Ctx(ctx).Warning("failed to derive incremental scan cache version, proceeding without cache", helpers.Error(marshalErr))
-		return nil
-	}
-	versionParts := [][]byte{[]byte(scanInfo.ControlsVersion), policyBytes, allPoliciesBytes, regoInputBytes}
-	if scanInfo.ControlsInputs != "" {
-		if localConfig, readErr := os.ReadFile(scanInfo.ControlsInputs); readErr == nil {
-			versionParts = append(versionParts, localConfig)
-		}
-	}
-	cacheVersion := scancache.VersionKey(versionParts...)
 	cacheStore, cacheErr := scancache.Load(getter.DefaultLocalStore, cacheVersion)
 	if cacheErr != nil {
 		logger.L().Ctx(ctx).Warning("failed to load incremental scan cache, proceeding without it", helpers.Error(cacheErr))
@@ -898,6 +959,7 @@ func collectAndProcessResourcesWithStreaming(ctx context.Context, resourceHandle
 	}
 	reportResults := opaprocessor.NewOPAProcessor(scanData, deps, clusterName, excludedNamespaces, includeNamespaces, enableRegoPrint, exceptionRecorder)
 	reportResults.ControlTimeout = controlTimeout
+	reportResults.SetWholeClusterPolicy(scanInfo.GetWholeClusterPolicy())
 	if cacheStore := loadIncrementalCacheIfEnabled(ctx, scanInfo, scanData); cacheStore != nil {
 		reportResults.SetIncrementalCache(cacheStore)
 		defer func() {

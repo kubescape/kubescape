@@ -28,8 +28,10 @@ type mockImageScanService struct {
 	inFlight    int
 	maxInFlight int
 	platforms   map[string][]string
+	onScan      func(string)
 }
 
+// newMockImageScanService creates an initialized mockImageScanService with the given simulated delay.
 func newMockImageScanService(delay time.Duration) *mockImageScanService {
 	return &mockImageScanService{
 		delay:       delay,
@@ -40,6 +42,7 @@ func newMockImageScanService(delay time.Duration) *mockImageScanService {
 	}
 }
 
+// ScanWithOptions simulates scanning an image with platform scan options recorded.
 func (m *mockImageScanService) ScanWithOptions(ctx context.Context, img string, creds imagescan.RegistryCredentials, vulnExceptions, sevExceptions []string, options imagescan.ScanOptions) (*cautils.ImageScanData, error) {
 	m.mu.Lock()
 	m.platforms[img] = append(m.platforms[img], options.Platform)
@@ -54,12 +57,15 @@ func (m *mockImageScanService) ScanWithOptions(ctx context.Context, img string, 
 	return &copy, nil
 }
 
+// Scan simulates scanning an image, recording the call at entry and applying any configured delay or error.
 func (m *mockImageScanService) Scan(ctx context.Context, img string, creds imagescan.RegistryCredentials, vulnExceptions, sevExceptions []string) (*cautils.ImageScanData, error) {
 	m.mu.Lock()
+	m.scanCalls++
 	m.inFlight++
 	if m.inFlight > m.maxInFlight {
 		m.maxInFlight = m.inFlight
 	}
+	onScan := m.onScan
 	m.mu.Unlock()
 
 	defer func() {
@@ -67,6 +73,10 @@ func (m *mockImageScanService) Scan(ctx context.Context, img string, creds image
 		m.inFlight--
 		m.mu.Unlock()
 	}()
+
+	if onScan != nil {
+		onScan(img)
+	}
 
 	if m.delay > 0 {
 		select {
@@ -77,7 +87,6 @@ func (m *mockImageScanService) Scan(ctx context.Context, img string, creds image
 	}
 
 	m.mu.Lock()
-	m.scanCalls++
 	err, hasErr := m.errByImage[img]
 	data, hasData := m.dataByImage[img]
 	m.mu.Unlock()
@@ -564,4 +573,81 @@ func TestScanImageJobsReturnsDiscoveryAndWorkerErrorsWithPartialResults(t *testi
 	assert.Contains(t, err.Error(), workerErr.Error())
 	require.Len(t, results.ImageScanData, 1)
 	assert.Equal(t, "example/success:latest", results.ImageScanData[0].Image)
+}
+
+// TestScanWithRegistryMappingRespectsContextCancellation is a regression test
+// for the bug where a pre-cancelled context was not checked between credential
+// retries, causing scanWithRegistryMapping to launch further scans even after
+// the caller had cancelled the operation.
+func TestScanWithRegistryMappingRespectsContextCancellation(t *testing.T) {
+	mockSvc := newMockImageScanService(0)
+	img := "registry.example.com/team/app:v1"
+	cred1 := imagescan.RegistryCredentials{Username: "mock-user-1"}
+	cred2 := imagescan.RegistryCredentials{Username: "mock-user-2"}
+	mockSvc.errByImage[img] = errors.New("unauthorized: authentication required")
+	mockSvc.dataByImage[img] = &cautils.ImageScanData{Image: img}
+
+	// Cancel the context before calling so the loop must exit immediately.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	data, err := scanWithRegistryMapping(
+		ctx,
+		mockSvc,
+		img,
+		[]imagescan.RegistryCredentials{cred1, cred2},
+		nil,
+		nil,
+		nil,
+		"",
+	)
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, context.Canceled)
+	assert.Nil(t, data)
+
+	// The mock must not have been invoked at all — the ctx.Done() guard fires
+	// before the first scanImageForPlatform call.
+	mockSvc.mu.Lock()
+	defer mockSvc.mu.Unlock()
+	assert.Zero(t, mockSvc.scanCalls,
+		"expected zero scan calls when context is already cancelled")
+}
+
+// TestScanWithRegistryMappingStopsAfterBetweenAttemptCancellation verifies that
+// when a context cancellation occurs during or after the first credential attempt,
+// scanWithRegistryMapping does not launch subsequent credential attempts.
+func TestScanWithRegistryMappingStopsAfterBetweenAttemptCancellation(t *testing.T) {
+	mockSvc := newMockImageScanService(0)
+	img := "registry.example.com/team/app:v1"
+	cred1 := imagescan.RegistryCredentials{Username: "mock-user-1"}
+	cred2 := imagescan.RegistryCredentials{Username: "mock-user-2"}
+	mockSvc.errByImage[img] = errors.New("unauthorized: authentication required")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	mockSvc.onScan = func(string) {
+		cancel()
+	}
+
+	data, err := scanWithRegistryMapping(
+		ctx,
+		mockSvc,
+		img,
+		[]imagescan.RegistryCredentials{cred1, cred2},
+		nil,
+		nil,
+		nil,
+		"",
+	)
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, context.Canceled)
+	assert.Nil(t, data)
+
+	mockSvc.mu.Lock()
+	defer mockSvc.mu.Unlock()
+	assert.Equal(t, 1, mockSvc.scanCalls,
+		"expected exactly one scan call; second credential must not be attempted after cancellation")
 }

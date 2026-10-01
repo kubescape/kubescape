@@ -10,6 +10,7 @@ import (
 	"github.com/jedib0t/go-pretty/v6/table"
 	"github.com/jwalton/gchalk"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
+	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -433,4 +434,65 @@ func TestCheckShortTerminalWidth(t *testing.T) {
 			_ = CheckShortTerminalWidth(tt.rows, tt.headers)
 		})
 	}
+}
+
+func skippedControlWithInfo(id, name, info string) reportsummary.ControlSummary {
+	return reportsummary.ControlSummary{
+		ControlID: id,
+		Name:      name,
+		Status:    apis.StatusSkipped,
+		StatusInfo: apis.StatusInfo{
+			InnerStatus: apis.StatusSkipped,
+			InnerInfo:   info,
+		},
+	}
+}
+
+func TestMapInfoToPrintInfo_StableAcrossRuns(t *testing.T) {
+	controls := reportsummary.ControlSummaries{
+		"C-0001": skippedControlWithInfo("C-0001", "delta", "configurations are empty"),
+		"C-0002": skippedControlWithInfo("C-0002", "alpha", "control type is manual-review"),
+		"C-0003": skippedControlWithInfo("C-0003", "charlie", "requires host scanner"),
+		"C-0004": skippedControlWithInfo("C-0004", "bravo", "configurations are empty"),
+	}
+
+	want := MapInfoToPrintInfo(controls)
+	require.Len(t, want, 3, "one entry per distinct info message")
+	assert.Equal(t, []string{"*", "**", "***"}, []string{want[0].Stars, want[1].Stars, want[2].Stars})
+	assert.Equal(t, "control type is manual-review", want[0].Info, "stars follow control name order, matching the rendered rows")
+
+	for i := 0; i < 50; i++ {
+		assert.Equal(t, want, MapInfoToPrintInfo(controls), "map iteration order must not change the star assignment")
+	}
+}
+
+func TestMapInfoToPrintInfoFromIface_StableAcrossRuns(t *testing.T) {
+	first := skippedControlWithInfo("C-0002", "alpha", "control type is manual-review")
+	second := skippedControlWithInfo("C-0001", "delta", "configurations are empty")
+
+	forward := []reportsummary.IControlSummary{&first, &second}
+	reversed := []reportsummary.IControlSummary{&second, &first}
+
+	want := []InfoStars{
+		{Stars: "*", Info: "control type is manual-review"},
+		{Stars: "**", Info: "configurations are empty"},
+	}
+
+	assert.Equal(t, want, MapInfoToPrintInfoFromIface(forward))
+	assert.Equal(t, want, MapInfoToPrintInfoFromIface(reversed), "caller slice order must not change the star assignment")
+	assert.Equal(t, "C-0002", forward[0].GetID(), "the caller's slice must not be reordered")
+}
+
+func TestMapInfoToPrintInfo_IgnoresNonSkippedAndEmptyInfo(t *testing.T) {
+	passed := skippedControlWithInfo("C-0001", "alpha", "ignored: not skipped")
+	passed.Status = apis.StatusPassed
+	passed.StatusInfo.InnerStatus = apis.StatusPassed
+
+	controls := reportsummary.ControlSummaries{
+		"C-0001": passed,
+		"C-0002": skippedControlWithInfo("C-0002", "bravo", ""),
+		"C-0003": skippedControlWithInfo("C-0003", "charlie", "requires host scanner"),
+	}
+
+	assert.Equal(t, []InfoStars{{Stars: "*", Info: "requires host scanner"}}, MapInfoToPrintInfo(controls))
 }

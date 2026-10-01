@@ -314,6 +314,8 @@ func scanImageForPlatform(
 	return platformSvc.ScanWithOptions(ctx, img, creds, vulnExceptions, sevExceptions, imagescan.ScanOptions{Platform: platform})
 }
 
+// scanWithRegistryMapping attempts to scan an image across a list of candidate registry credentials,
+// falling back to mapped registries if configured, and aborting promptly if ctx is cancelled.
 func scanWithRegistryMapping(
 	ctx context.Context,
 	svc imageScanService,
@@ -331,6 +333,14 @@ func scanWithRegistryMapping(
 	var scanData *cautils.ImageScanData
 
 	for _, creds := range credsList {
+		// Respect context cancellation between credential retries so that a
+		// cancelled scan does not continue launching new attempts.
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+
 		scanData, lastErr = scanImageForPlatform(ctx, svc, img, creds, vulnExceptions, sevExceptions, platform)
 		if lastErr == nil {
 			return scanData, nil

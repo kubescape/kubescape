@@ -12,7 +12,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// TODO(vladklokun): document image scanning on the Kubescape Docs Hub?
 var (
 	imageExample = fmt.Sprintf(`
   Scan one or more images for vulnerabilities. 

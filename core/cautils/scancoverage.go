@@ -155,6 +155,18 @@ type NotEvaluatedControl struct {
 	Reason      string   `json:"reason,omitempty"`
 }
 
+// ReasonString returns the diagnostic reason why this control was not evaluated.
+// It returns Reason if set, or "missing: <missingGVRs>" if GVRs failed to pull.
+func (nec NotEvaluatedControl) ReasonString() string {
+	if nec.Reason != "" {
+		return nec.Reason
+	}
+	if len(nec.MissingGVRs) > 0 {
+		return "missing: " + strings.Join(nec.MissingGVRs, ", ")
+	}
+	return ""
+}
+
 // BuildScanCoverage derives a ScanCoverage from the InfoMap,
 // ResourceToControlsMap, timedOutControls, and any partial GVR pull failures
 // on the session.
@@ -182,11 +194,83 @@ type NotEvaluatedControl struct {
 // exceptions) that were served from a fallback; they are included as-is in
 // ScanCoverage.PolicyDegradations.
 //
+// FilterResourceToControlsMap returns a copy of resourceToControlsMap scoped
+// to the specified inScopeControls set. GVRs with no remaining dependent
+// controls in scope are omitted. If inScopeControls is nil or empty, or
+// resourceToControlsMap is nil, it returns resourceToControlsMap as-is.
+func FilterResourceToControlsMap(resourceToControlsMap map[string][]string, inScopeControls map[string]struct{}) map[string][]string {
+	if len(resourceToControlsMap) == 0 || len(inScopeControls) == 0 {
+		return resourceToControlsMap
+	}
+	filtered := make(map[string][]string, len(resourceToControlsMap))
+	for gvr, controls := range resourceToControlsMap {
+		var activeControls []string
+		for _, ctrl := range controls {
+			if _, ok := inScopeControls[ctrl]; ok {
+				activeControls = append(activeControls, ctrl)
+			}
+		}
+		if len(activeControls) > 0 {
+			filtered[gvr] = activeControls
+		}
+	}
+	return filtered
+}
+
+// BuildScanCoverage derives a ScanCoverage from the InfoMap,
+// ResourceToControlsMap, timedOutControls, and any partial GVR pull failures
+// on the session. An optional inScopeControls set restricts coverage accounting
+// to only those controls that are part of the active scan scope (e.g. filtered
+// via --use-controls or --skip-controls).
+//
+// A control is considered NotEvaluated when every dependency listed in
+// ResourceToControlsMap for that control either appears in InfoMap as a pull
+// failure or is a mapped discovery failure in partialPulls, or when it appears
+// in timedOutControls because its evaluation was aborted (e.g. by exceeding
+// --control-timeout).
+// Controls with at least one successfully fetched GVR are not included.
+//
+// InfoMap is mixed-purpose: it holds whole-GVR pull failures (keyed by GVR
+// string) AND resource-level OPA evaluation skips (keyed by resource ID). To
+// avoid surfacing per-resource eval skips as GVR pull failures, only InfoMap
+// entries whose key is also a key in ResourceToControlsMap are considered.
+//
+// partialPulls carries per-selector LIST failures for GVRs that were partially
+// collected; they are included in canonical order in
+// ScanCoverage.PartialGVRPulls. A
+// discovery-stage failure that has a synthetic ResourceToControlsMap edge also
+// participates in the all-dependencies-failed check without being duplicated
+// in FailedGVRPulls.
+//
+// policyDegradations carries policy inputs (control configurations,
+// exceptions) that were served from a fallback; they are included as-is in
+// ScanCoverage.PolicyDegradations.
+//
 // skippedManifests carries manifest files that were discovered but could not
 // be loaded or parsed; they are included as-is in ScanCoverage.SkippedManifests
 // and discounted from CoverageScore like PartialGVRPulls.
-func BuildScanCoverage(infoMap map[string]apis.StatusInfo, resourceToControlsMap map[string][]string, timedOutControls map[string]string, partialPulls []PartialGVRPull, policyDegradations []PolicyDegradation, skippedManifests []SkippedManifest) ScanCoverage {
-	sortedPartialPulls := append([]PartialGVRPull(nil), partialPulls...)
+func BuildScanCoverage(infoMap map[string]apis.StatusInfo, resourceToControlsMap map[string][]string, timedOutControls map[string]string, partialPulls []PartialGVRPull, policyDegradations []PolicyDegradation, skippedManifests []SkippedManifest, inScopeControls ...map[string]struct{}) ScanCoverage {
+	var activeScope map[string]struct{}
+	rawResourceToControlsMap := resourceToControlsMap
+	if len(inScopeControls) > 0 && len(inScopeControls[0]) > 0 {
+		activeScope = inScopeControls[0]
+		resourceToControlsMap = FilterResourceToControlsMap(resourceToControlsMap, activeScope)
+	}
+
+	filteredPartialPulls := partialPulls
+	if activeScope != nil {
+		filteredPartialPulls = make([]PartialGVRPull, 0, len(partialPulls))
+		for _, p := range partialPulls {
+			if controls, wasMapped := rawResourceToControlsMap[p.GVR]; wasMapped && len(controls) > 0 {
+				if _, hasInScope := resourceToControlsMap[p.GVR]; !hasInScope {
+					continue
+				}
+			}
+			filteredPartialPulls = append(filteredPartialPulls, p)
+		}
+	}
+
+	sortedPartialPulls := append([]PartialGVRPull(nil), filteredPartialPulls...)
 	sort.Slice(sortedPartialPulls, func(i, j int) bool {
 		if sortedPartialPulls[i].GVR != sortedPartialPulls[j].GVR {
 			return sortedPartialPulls[i].GVR < sortedPartialPulls[j].GVR
@@ -212,7 +296,7 @@ func BuildScanCoverage(infoMap map[string]apis.StatusInfo, resourceToControlsMap
 	notEvaluated := make(map[string]NotEvaluatedControl, len(timedOutControls))
 	discoveryFailureKeys := make(map[string]struct{})
 	failedDependencyKeys := make(map[string]struct{})
-	for _, partialPull := range partialPulls {
+	for _, partialPull := range filteredPartialPulls {
 		if partialPull.Selector != "discovery" || !strings.HasPrefix(partialPull.GVR, "discovery:") {
 			continue
 		}
@@ -223,6 +307,11 @@ func BuildScanCoverage(infoMap map[string]apis.StatusInfo, resourceToControlsMap
 	}
 
 	for controlID, reason := range timedOutControls {
+		if activeScope != nil {
+			if _, inScope := activeScope[controlID]; !inScope {
+				continue
+			}
+		}
 		notEvaluated[controlID] = NotEvaluatedControl{
 			ControlID: controlID,
 			Reason:    reason,

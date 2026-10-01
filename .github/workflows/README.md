@@ -26,7 +26,11 @@ Once a maintainer approves and the required checks are green, the PR can be merg
 
 ### Merging a PR
 
-The code is merged, no other actions are needed
+The code is merged, no other actions are needed.
+
+`00-pr-scanner.yaml` then runs again on the push to `master`, under the same `paths-ignore` filter, so the merge commit gets the same build, tests and lint the PR got. This matters because a PR run only proves the branch was green against the base *as it stood when that run started*: two PRs can each pass, merge, and still break `master` between them. Without the push run the failure first surfaces on the next contributor's PR, pointing at files they never touched.
+
+The E2E system tests do **not** run on merge — `run-system-tests` is gated on `github.event_name != 'push'`. Each push run gets a concurrency group of its own (`github.run_id`) and is never cancelled, so a burst of merges cannot cancel or replace another merge's run; pull request runs are still grouped by ref and superseded by the next push to the PR. `internal/ghworkflows/masterbuild_test.go` asserts all of this.
 
 
 ## Release process
@@ -55,7 +59,7 @@ The workflow can also be started manually via `workflow_dispatch`, which exposes
 
 ## Additional Information
 
-Reusable workflows — the ones invoked by another workflow through `on: workflow_call` — carry an alphabetic prefix (`a-pr-scanner.yaml`). A workflow that invokes one carries a numeric prefix (`00-pr-scanner.yaml`). `02-release.yaml` also carries a numeric prefix, but it invokes nothing: it is an event-triggered entrypoint that does its work inline. Workflows that are neither reusable nor callers, such as `scorecard.yml` and `comments.yaml`, sit outside the convention.
+Reusable workflows — the ones invoked by another workflow through `on: workflow_call` — carry an alphabetic prefix (`a-pr-scanner.yaml`). A workflow that invokes one carries a numeric prefix (`00-pr-scanner.yaml`). `02-release.yaml` also carries a numeric prefix, but it invokes nothing: it is an event-triggered entrypoint that does its work inline. Workflows that are neither reusable nor callers, such as `scorecard.yml`, sit outside the convention.
 
 ## Screenshot
 

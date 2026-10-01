@@ -48,14 +48,27 @@ type NamespaceSummaries []NamespaceSummary
 // zero-resource too but scores 0, and namespaces must inherit that same 0,
 // not a free 100, to stay comparable to the cluster number sitting next to
 // them in the same report.
+// BuildNamespaceSummaries computes a per-namespace compliance rollup from the
+// finalized control summaries and resource map. Provided for backward compatibility.
 func BuildNamespaceSummaries(controls reportsummary.ControlSummaries, allResources map[string]workloadinterface.IMetadata) NamespaceSummaries {
+	if allResources == nil {
+		return BuildNamespaceSummariesFromCatalog(controls, nil)
+	}
+	return BuildNamespaceSummariesFromCatalog(controls, NewMapResourceCatalog(allResources))
+}
+
+// BuildNamespaceSummariesFromCatalog computes a per-namespace compliance rollup from the
+// finalized control summaries and resource catalog.
+func BuildNamespaceSummariesFromCatalog(controls reportsummary.ControlSummaries, catalog ResourceCatalog) NamespaceSummaries {
 	if len(controls) == 0 {
 		return nil
 	}
 
 	namespaceOf := func(resourceID string) string {
-		if resource, ok := allResources[resourceID]; ok && resource.GetNamespace() != "" {
-			return resource.GetNamespace()
+		if catalog != nil {
+			if resource, ok := catalog.Get(resourceID); ok && resource != nil && resource.GetNamespace() != "" {
+				return resource.GetNamespace()
+			}
 		}
 		return ClusterScopedNamespace
 	}
@@ -65,12 +78,18 @@ func BuildNamespaceSummaries(controls reportsummary.ControlSummaries, allResourc
 	// control examines still gets a summary instead of being silently absent
 	// from the rollup.
 	resourcesByNamespace := make(map[string]map[string]struct{})
-	for resourceID := range allResources {
-		namespace := namespaceOf(resourceID)
-		if resourcesByNamespace[namespace] == nil {
-			resourcesByNamespace[namespace] = make(map[string]struct{})
-		}
-		resourcesByNamespace[namespace][resourceID] = struct{}{}
+	if catalog != nil {
+		catalog.ForEach(func(resourceID string, resource workloadinterface.IMetadata) bool {
+			namespace := ClusterScopedNamespace
+			if resource != nil && resource.GetNamespace() != "" {
+				namespace = resource.GetNamespace()
+			}
+			if resourcesByNamespace[namespace] == nil {
+				resourcesByNamespace[namespace] = make(map[string]struct{})
+			}
+			resourcesByNamespace[namespace][resourceID] = struct{}{}
+			return true
+		})
 	}
 
 	// controlIDs is sorted once and reused for every namespace below, so

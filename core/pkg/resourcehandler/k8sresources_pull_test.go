@@ -275,13 +275,14 @@ func TestGetResources_ScanAbortedOnContextCancellation(t *testing.T) {
 }
 
 type stubHostSensor struct {
-	infoMap map[string]apis.StatusInfo
+	infoMap  map[string]apis.StatusInfo
+	partials []cautils.PartialGVRPull
 }
 
 func (s *stubHostSensor) Init(_ context.Context) error { return nil }
 func (s *stubHostSensor) TearDown() error              { return nil }
-func (s *stubHostSensor) CollectResources(_ context.Context) ([]hostsensor.HostSensorDataEnvelope, map[string]apis.StatusInfo, error) {
-	return nil, s.infoMap, nil
+func (s *stubHostSensor) CollectResources(_ context.Context) ([]hostsensor.HostSensorDataEnvelope, map[string]apis.StatusInfo, []cautils.PartialGVRPull, error) {
+	return nil, s.infoMap, s.partials, nil
 }
 
 func (s *stubHostSensor) StreamTelemetry(_ context.Context) (<-chan hostsensorutils.SyscallEvent, error) {
@@ -305,6 +306,9 @@ func TestGetResources_HostSensorInfoMapMerged(t *testing.T) {
 	handler.hostSensorHandler = &stubHostSensor{
 		infoMap: map[string]apis.StatusInfo{
 			"KubeletInfo": {InnerStatus: apis.StatusSkipped, InnerInfo: "node-1: connection refused"},
+		},
+		partials: []cautils.PartialGVRPull{
+			{GVR: "hostdata.kubescape.cloud/v1beta0/KubeletInfo", Selector: "conversion", Error: "node-agent reported 2 KubeletInfo but only 1 could be read"},
 		},
 	}
 
@@ -338,4 +342,8 @@ func TestGetResources_HostSensorInfoMapMerged(t *testing.T) {
 
 	_, ok = sessionObj.InfoMap["KubeletInfo"]
 	assert.True(t, ok, "host-sensor infoMap entries must be present in sessionObj.InfoMap after merge")
+
+	require.Len(t, sessionObj.PartialGVRFailures, 1, "host-sensor partial gaps must reach the session")
+	assert.Equal(t, "hostdata.kubescape.cloud/v1beta0/KubeletInfo", sessionObj.PartialGVRFailures[0].GVR)
+	assert.Equal(t, "conversion", sessionObj.PartialGVRFailures[0].Selector)
 }

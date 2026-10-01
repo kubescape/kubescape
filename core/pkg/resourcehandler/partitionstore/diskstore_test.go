@@ -395,6 +395,190 @@ func TestDiskStore_PurgeNamespace_WriterDetached(t *testing.T) {
 	assert.Equal(t, "pod-2", batch.AllResources[pod2.GetID()].GetName())
 }
 
+func TestDiskStore_Close_FlushFailureClosesFD(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping /dev/full test on Windows")
+	}
+	if _, err := os.Stat("/dev/full"); err != nil {
+		t.Skip("skipping /dev/full test; device not available")
+	}
+	devFull, err := os.OpenFile("/dev/full", os.O_WRONLY, 0)
+	if err != nil {
+		t.Skip("skipping /dev/full test; cannot open /dev/full")
+	}
+	fd := devFull.Fd()
+
+	store, err := NewDiskStore()
+	require.NoError(t, err)
+
+	badPw := &pooledWriter{
+		file:   devFull,
+		writer: bufio.NewWriterSize(devFull, 1024),
+		name:   "bad-pw",
+	}
+	_, _ = badPw.writer.WriteString("flush will fail on Close")
+	elem := store.filePool.lru.PushBack(badPw)
+	store.filePool.pool["bad-pw"] = elem
+
+	// Close returns error because Flush failed
+	err = store.Close()
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrDiskFull)
+
+	// Entry must be removed from pool
+	assert.Empty(t, store.filePool.pool)
+	assert.Equal(t, 0, store.filePool.lru.Len())
+
+	// Assert no FD left open for devFull on Linux
+	if runtime.GOOS == "linux" {
+		_, statErr := os.Stat(fmt.Sprintf("/proc/self/fd/%d", fd))
+		assert.True(t, errors.Is(statErr, os.ErrNotExist), "fd %d must be closed even when flush fails on Close", fd)
+	}
+
+	// Close called twice is safe
+	assert.NoError(t, store.Close())
+}
+
+func TestDiskStore_Close_TeardownFailureRejectsPutAndRetriesCleanup(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping fault injection test; directory permissions do not block removal on this platform")
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("skipping fault injection test; root bypasses directory permission checks")
+	}
+
+	store, err := NewDiskStore()
+	require.NoError(t, err)
+	defer func() {
+		_ = os.Chmod(store.RootDir(), 0o700)
+		_ = store.Close()
+	}()
+
+	ctx := context.Background()
+	pod := createTestObject("pod-1", "default", "Pod")
+
+	// Active staging file with an active GVR
+	require.NoError(t, store.BeginGVR(ctx, "v1/pods"))
+	require.NoError(t, store.Put(ctx, "default", pod))
+
+	// Chmod spill root to 0500 so os.RemoveAll fails
+	require.NoError(t, os.Chmod(store.RootDir(), 0o500))
+
+	// Close returns permission denied because directory removal fails
+	err = store.Close()
+	require.Error(t, err)
+
+	// A queued or subsequent Put during/after teardown failure must return ErrStoreClosed and NOT panic
+	pod2 := createTestObject("pod-2", "default", "Pod")
+	putErr := store.Put(ctx, "default", pod2)
+	assert.ErrorIs(t, putErr, ErrStoreClosed)
+
+	// Restore permissions
+	require.NoError(t, os.Chmod(store.RootDir(), 0o700))
+
+	// Retry Close() - must succeed and clean up directory
+	assert.NoError(t, store.Close())
+
+	// Directory must be removed
+	_, statErr := os.Stat(store.RootDir())
+	assert.True(t, os.IsNotExist(statErr), "temporary directory must be removed on successful retry of Close()")
+
+	// Repeated Close is idempotent and returns nil
+	assert.NoError(t, store.Close())
+}
+
+func TestDiskStore_Eviction_FlushFailureRetainsWriter(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping /dev/full test on Windows")
+	}
+	if _, err := os.Stat("/dev/full"); err != nil {
+		t.Skip("skipping /dev/full test; device not available")
+	}
+	devFull, err := os.OpenFile("/dev/full", os.O_WRONLY, 0)
+	if err != nil {
+		t.Skip("skipping /dev/full test; cannot open /dev/full")
+	}
+	defer devFull.Close()
+
+	store, err := NewDiskStore()
+	require.NoError(t, err)
+	defer store.Close()
+
+	// Inject a pooledWriter pointing to /dev/full with buffered bytes at the back of LRU (oldest)
+	badPw := &pooledWriter{
+		file:   devFull,
+		writer: bufio.NewWriterSize(devFull, 1024),
+		name:   "bad-pw",
+	}
+	_, _ = badPw.writer.WriteString("fail to flush to dev full")
+	elem := store.filePool.lru.PushBack(badPw)
+	store.filePool.pool["bad-pw"] = elem
+
+	// Eviction fails due to /dev/full flush failure
+	err = store.filePool.evictOldest()
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrDiskFull)
+	assert.Contains(t, store.filePool.pool, "bad-pw", "writer that failed eviction flush should be retained in pool for retry")
+
+	// Fix the writer: replace its file and writer with a valid temporary file
+	tempFile, err := os.CreateTemp("", "retry-test-*")
+	require.NoError(t, err)
+	defer os.Remove(tempFile.Name())
+
+	badPw.file = tempFile
+	badPw.writer = bufio.NewWriter(tempFile)
+	err = store.filePool.evictOldest()
+	assert.NoError(t, err)
+	assert.NotContains(t, store.filePool.pool, "bad-pw")
+}
+
+func TestDiskStore_Seal_FlushFailurePreservesWriters_AndCloseCleansUp(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping /dev/full test on Windows")
+	}
+	if _, err := os.Stat("/dev/full"); err != nil {
+		t.Skip("skipping /dev/full test; device not available")
+	}
+	devFull, err := os.OpenFile("/dev/full", os.O_WRONLY, 0)
+	if err != nil {
+		t.Skip("skipping /dev/full test; cannot open /dev/full")
+	}
+	fd := devFull.Fd()
+
+	store, err := NewDiskStore()
+	require.NoError(t, err)
+
+	badPw := &pooledWriter{
+		file:   devFull,
+		writer: bufio.NewWriterSize(devFull, 1024),
+		name:   "bad-pw",
+	}
+	_, _ = badPw.writer.WriteString("data that fails to flush on Seal")
+	elem := store.filePool.lru.PushBack(badPw)
+	store.filePool.pool["bad-pw"] = elem
+
+	ctx := context.Background()
+	// Seal fails because Flush failed
+	sealErr := store.Seal(ctx)
+	require.Error(t, sealErr)
+	assert.ErrorIs(t, sealErr, ErrDiskFull)
+
+	// Writer should be preserved in pool so data is not discarded and Seal can be retried
+	assert.Contains(t, store.filePool.pool, "bad-pw")
+	assert.False(t, store.sealed)
+
+	// Now call Close: Close must unconditionally close the file and empty the pool
+	closeErr := store.Close()
+	require.Error(t, closeErr)
+	assert.ErrorIs(t, closeErr, ErrDiskFull)
+
+	assert.Empty(t, store.filePool.pool)
+	if runtime.GOOS == "linux" {
+		_, statErr := os.Stat(fmt.Sprintf("/proc/self/fd/%d", fd))
+		assert.True(t, errors.Is(statErr, os.ErrNotExist), "fd %d must be closed on Close() after failed Seal", fd)
+	}
+}
+
 func TestDiskStore_CloseAll_Retry(t *testing.T) {
 	if _, err := os.Stat("/dev/full"); err != nil {
 		t.Skip("skipping /dev/full test; device not available")
@@ -415,7 +599,6 @@ func TestDiskStore_CloseAll_Retry(t *testing.T) {
 	require.NoError(t, store.Put(ctx, "ns-a", pod))
 	require.NoError(t, store.CommitGVR(ctx, "v1/pods"))
 
-	// Manually inject a pooledWriter pointing to /dev/full with buffered bytes
 	badPw := &pooledWriter{
 		file:   devFull,
 		writer: bufio.NewWriterSize(devFull, 1024),

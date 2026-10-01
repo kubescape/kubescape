@@ -171,8 +171,9 @@ func (idx *Index) IsIsolated(ep Endpoint, dir Direction) bool {
 }
 
 // PortSpec is a protocol+port pair to check reachability for. A nil
-// *PortSpec passed to a query means "is there any port at all this
-// connection could use," i.e. match a rule regardless of its ports.
+// *PortSpec passed to Reaches asks whether any port/protocol pair is allowed
+// by both directions. AllowsIngress and AllowsEgress with a nil PortSpec
+// evaluate peer matching independently, without applying port restrictions.
 type PortSpec struct {
 	// Protocol defaults to TCP if empty, matching the Kubernetes API's own
 	// default for NetworkPolicyPort.Protocol.

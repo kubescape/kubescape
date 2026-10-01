@@ -14,7 +14,6 @@ import (
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/kubescape/v4/core/pkg/securityexception"
 	corev1 "k8s.io/api/core/v1"
-	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
@@ -122,57 +121,19 @@ func (g *CRDExceptionsGetter) GetExceptions(ctx context.Context, _ string) ([]ar
 }
 
 func listCRDsWithPagination(ctx context.Context, gvr schema.GroupVersionResource, dynamicClient dynamic.Interface, processFunc func(*unstructured.UnstructuredList) error) error {
-	limit := int64(100)
-	continueToken := ""
-
-	for {
-		listOptions := metav1.ListOptions{Limit: limit, Continue: continueToken}
-		var list *unstructured.UnstructuredList
-		var err error
-
-		retries := 5
-		backoff := 1 * time.Second
-		for i := 0; i < retries; i++ {
-			list, err = dynamicClient.Resource(gvr).List(ctx, listOptions)
-			if err != nil {
-				if k8serrors.IsTooManyRequests(err) {
-					logger.L().Warning("Rate limited (429) when listing CRDs, retrying",
-						helpers.String("gvr", gvr.String()),
-						helpers.Int("retry", i+1))
-
-					if i == retries-1 {
-						break
-					}
-
-					timer := time.NewTimer(backoff)
-					select {
-					case <-ctx.Done():
-						timer.Stop()
-						return ctx.Err()
-					case <-timer.C:
-						backoff *= 2
-						continue
-					}
-				}
-				break
-			}
-			break
-		}
-
+	err := ListWithPagination(ctx, func(opts metav1.ListOptions) (string, error) {
+		list, err := dynamicClient.Resource(gvr).List(ctx, opts)
 		if err != nil {
-			return fmt.Errorf("failed to list %s CRDs: %w", gvr.Resource, err)
+			return "", err
 		}
-
 		if err := processFunc(list); err != nil {
-			return err
+			return "", err
 		}
-
-		continueToken = list.GetContinue()
-		if continueToken == "" {
-			break
-		}
+		return list.GetContinue(), nil
+	})
+	if err != nil {
+		return fmt.Errorf("failed to list %s CRDs: %w", gvr.Resource, err)
 	}
-
 	return nil
 }
 

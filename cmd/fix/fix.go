@@ -13,11 +13,21 @@ import (
 
 var fixCmdExamples = fmt.Sprintf(`
   Fix command is for fixing kubernetes manifest files based on a scan command output.
-  Use with caution, this command will change your files in-place.
+  Use with caution, this command will change your files in-place unless
+  --output-dir is given.
 
   # Fix kubernetes YAML manifest files based on a scan command output (output.json)
   1) %[1]s scan . --format json --output output.json
   2) %[1]s fix output.json
+
+  # Leave the manifests untouched and write the fixed copies to a directory instead
+  %[1]s fix output.json --output-dir ./fixed
+
+  The copies mirror the scanned directory: with the scan above,
+  ./k8s/prod/deploy.yaml is written to ./fixed/k8s/prod/deploy.yaml and a
+  multi-document file stays one file. Nothing is edited in place, so there is no
+  confirmation prompt; a directory that is not empty is refused unless
+  --no-confirm is passed.
 
   The report file's own recorded scan location is trusted by default. If the
   report comes from a source you don't fully trust (e.g. a shared CI
@@ -78,7 +88,7 @@ func GetFixCmd(ks meta.IKubescape) *cobra.Command {
 	fixCmd.PersistentFlags().StringVar(&fixInfo.ContainerProfilePath, "container-profile", "", "Path to a JSON file containing a ContainerProfile to use for drift detection")
 	fixCmd.PersistentFlags().StringSliceVar(&fixInfo.IncludeControls, "include-controls", nil, "Remediate only these control IDs (comma-separated, case-insensitive). Controls outside the list are left untouched and are not reported as unfixed; disables --container-profile drift remediation")
 	fixCmd.PersistentFlags().StringSliceVar(&fixInfo.SkipControls, "skip-controls", nil, "Leave these control IDs untouched (comma-separated, case-insensitive). Takes precedence over --include-controls; disables --container-profile drift remediation")
-	fixCmd.PersistentFlags().StringVar(&fixInfo.OutputDir, "output-dir", "", "Cluster scans only: write one patched manifest per resource into this directory instead of printing them to stdout. Ignored for file-based reports, which are fixed in place")
+	fixCmd.PersistentFlags().StringVar(&fixInfo.OutputDir, "output-dir", "", "Write the fixes into this directory instead of their default destination. For manifest files: fixed copies that mirror the scanned tree, leaving the originals untouched instead of fixing them in place. For cluster scans: one patched manifest per resource, instead of printing them to stdout. A non-empty directory is refused unless --no-confirm is passed")
 
 	return fixCmd
 }
