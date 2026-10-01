@@ -285,6 +285,11 @@ func TestJunitActionPrintCombinedScanIncludesPostureAndImages(t *testing.T) {
 	assert.Equal(t, 1, got.Suites[0].Failures)
 	assert.Equal(t, 3, got.Tests)
 	assert.Equal(t, 3, got.Failures)
+	var sumSkipped int
+	for _, suite := range got.Suites {
+		sumSkipped += suite.Skipped
+	}
+	assert.Equal(t, sumSkipped, got.Skipped)
 	assert.Zero(t, got.Errors)
 	assert.Contains(t, string(raw), "Combined posture control")
 	assert.Contains(t, string(raw), "CVE-COMBINED")
@@ -407,6 +412,11 @@ func TestJunitActionPrintImageScanKeepsMultiArchSuitesDistinct(t *testing.T) {
 	assert.Equal(t, "Kubescape Image Scanning", got.Name)
 	assert.Equal(t, 2, got.Tests)
 	assert.Equal(t, 2, got.Failures)
+	var sumSkipped int
+	for _, suite := range got.Suites {
+		sumSkipped += suite.Skipped
+	}
+	assert.Equal(t, sumSkipped, got.Skipped)
 	assert.Equal(t, "registry.example.com/app:v1 [linux/amd64]", got.Suites[0].Name)
 	assert.Equal(t, "registry.example.com/app:v1 [linux/arm64]", got.Suites[1].Name)
 	assert.NotEqual(t, got.Suites[0].Name, got.Suites[1].Name)
@@ -569,6 +579,18 @@ func TestTestCases_SkipMessage(t *testing.T) {
 			wantMsg:   "notEvaluated: " + string(apis.SubStatusNotEvaluatedInfo),
 		},
 		{
+			name:      "not evaluated with missing GVRs reason",
+			subStatus: apis.SubStatusNotEvaluated,
+			innerInfo: "missing: apps/v1/deployments",
+			wantMsg:   "notEvaluated: missing: apps/v1/deployments",
+		},
+		{
+			name:      "not evaluated with policy skip reason",
+			subStatus: apis.SubStatusNotEvaluated,
+			innerInfo: "whole-cluster control C-0261 skipped by execution policy (policy: skip)",
+			wantMsg:   "notEvaluated: whole-cluster control C-0261 skipped by execution policy (policy: skip)",
+		},
+		{
 			name:      "configuration",
 			subStatus: apis.SubStatusConfiguration,
 			innerInfo: string(apis.SubStatusConfigurationInfo),
@@ -694,6 +716,16 @@ func TestBuildSkipMessage(t *testing.T) {
 			expected: "notEvaluated: not evaluated",
 		},
 		{
+			name:     "notEvaluated substatus with missing GVRs",
+			status:   &apis.StatusInfo{InnerStatus: apis.StatusSkipped, SubStatus: apis.SubStatusNotEvaluated, InnerInfo: "missing: apps/v1/deployments"},
+			expected: "notEvaluated: missing: apps/v1/deployments",
+		},
+		{
+			name:     "notEvaluated substatus with policy skip reason",
+			status:   &apis.StatusInfo{InnerStatus: apis.StatusSkipped, SubStatus: apis.SubStatusNotEvaluated, InnerInfo: "whole-cluster control C-0261 skipped by execution policy (policy: skip)"},
+			expected: "notEvaluated: whole-cluster control C-0261 skipped by execution policy (policy: skip)",
+		},
+		{
 			name:     "requires review substatus no InnerInfo",
 			status:   &apis.StatusInfo{InnerStatus: apis.StatusSkipped, SubStatus: apis.SubStatusRequiresReview},
 			expected: "requires review",
@@ -711,6 +743,82 @@ func TestBuildSkipMessage(t *testing.T) {
 			assert.Equal(t, tt.expected, got)
 		})
 	}
+}
+
+func TestCoverageProperties(t *testing.T) {
+	tests := []struct {
+		name     string
+		coverage cautils.ScanCoverage
+		expected []JUnitProperty
+	}{
+		{
+			name:     "Zero total controls returns nil",
+			coverage: cautils.ScanCoverage{TotalControls: 0},
+			expected: nil,
+		},
+		{
+			name: "Full coverage not degraded",
+			coverage: cautils.ScanCoverage{
+				CoverageScore:     100.0,
+				EvaluatedControls: 10,
+				TotalControls:     10,
+				Degraded:          false,
+			},
+			expected: []JUnitProperty{
+				{Name: "coverageScore", Value: "100.00"},
+				{Name: "evaluatedControls", Value: "10"},
+				{Name: "totalControls", Value: "10"},
+				{Name: "degraded", Value: "false"},
+			},
+		},
+		{
+			name: "Degraded coverage with skipped controls",
+			coverage: cautils.ScanCoverage{
+				CoverageScore:     85.5,
+				EvaluatedControls: 17,
+				TotalControls:     20,
+				Degraded:          true,
+			},
+			expected: []JUnitProperty{
+				{Name: "coverageScore", Value: "85.50"},
+				{Name: "evaluatedControls", Value: "17"},
+				{Name: "totalControls", Value: "20"},
+				{Name: "degraded", Value: "true"},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := coverageProperties(tt.coverage)
+			assert.Equal(t, tt.expected, got)
+		})
+	}
+}
+
+func TestListTestsSuite_IncludesCoverageProperties(t *testing.T) {
+	results := cautils.NewOPASessionObjMock()
+	results.ScanCoverage = cautils.ScanCoverage{
+		CoverageScore:     85.0,
+		EvaluatedControls: 17,
+		TotalControls:     20,
+		Degraded:          true,
+	}
+
+	suites := listTestsSuite(results)
+	require.NotEmpty(t, suites)
+	suite := suites[0]
+
+	propertyMap := make(map[string]string)
+	for _, prop := range suite.Properties {
+		propertyMap[prop.Name] = prop.Value
+	}
+
+	assert.Equal(t, "85.00", propertyMap["coverageScore"])
+	assert.Equal(t, "17", propertyMap["evaluatedControls"])
+	assert.Equal(t, "20", propertyMap["totalControls"])
+	assert.Equal(t, "true", propertyMap["degraded"])
+	assert.Contains(t, propertyMap, "complianceScore")
 }
 
 // TestJunitOutputInvariants is a regression test for the bugs reported in
@@ -842,16 +950,18 @@ func TestJunitGoldenFile(t *testing.T) {
 	var doc JUnitXML
 	require.NoError(t, xml.NewDecoder(bytes.NewReader(want)).Decode(&doc.TestSuites))
 	require.True(t, bytes.HasPrefix(want, []byte("<?xml")), "golden must include XML prolog")
-	var sumTests, sumFailures, sumErrors int
+	var sumTests, sumFailures, sumErrors, sumSkipped int
 	for _, s := range doc.TestSuites.Suites {
 		sumTests += s.Tests
 		sumFailures += s.Failures
 		sumErrors += s.Errors
+		sumSkipped += s.Skipped
 		assert.NotContains(t, s.Timestamp, "0001-01-01", "golden timestamp must not be Go zero time")
 	}
 	assert.Equal(t, sumTests, doc.TestSuites.Tests, "golden: Σ child tests must equal parent")
 	assert.Equal(t, sumFailures, doc.TestSuites.Failures, "golden: Σ child failures must equal parent")
 	assert.Equal(t, sumErrors, doc.TestSuites.Errors, "golden: Σ child errors must equal parent")
+	assert.Equal(t, sumSkipped, doc.TestSuites.Skipped, "golden: Σ child skipped must equal parent")
 }
 
 // TestIso8601Timestamp covers the small helper that powers the timestamp fix
@@ -923,13 +1033,15 @@ func TestJunitMultiFrameworkSharedControl(t *testing.T) {
 
 	// Σ(children) must equal 2 — each framework yields a <testsuite> with one
 	// <testcase>. This is the value parsers will see when summing children.
-	var sumTests, sumFailures int
+	var sumTests, sumFailures, sumSkipped int
 	for _, s := range suites.Suites {
 		sumTests += s.Tests
 		sumFailures += s.Failures
+		sumSkipped += s.Skipped
 	}
 	require.Equal(t, 2, sumTests, "Σ child tests should be 2 across the two frameworks")
 	require.Equal(t, 2, sumFailures, "Σ child failures should be 2 across the two frameworks")
+	require.Equal(t, 0, sumSkipped, "Σ child skipped should be 0 across the two frameworks")
 
 	// The fix: parent equals Σ(children). The regression: parent would equal
 	// SummaryDetails.NumberOfControls().All() == 1.
@@ -937,49 +1049,53 @@ func TestJunitMultiFrameworkSharedControl(t *testing.T) {
 		"parent Tests must equal Σ child Tests (regressed code returns 1)")
 	assert.Equal(t, sumFailures, suites.Failures,
 		"parent Failures must equal Σ child Failures (regressed code returns 1)")
+	assert.Equal(t, sumSkipped, suites.Skipped,
+		"parent Skipped must equal Σ child Skipped")
 	assert.NotEqual(t, session.Report.SummaryDetails.NumberOfControls().All(), suites.Tests,
 		"parent Tests must NOT be the deduplicated SummaryDetails count")
 }
 
-// TestAggregateSuiteCounts covers the Tests/Failures/Errors aggregator
+// TestAggregateSuiteCounts covers the Tests/Failures/Errors/Skipped aggregator
 // directly. The production code path in junit.go never populates child
 // Errors (the printer only emits <failure> and <skipped>), so the multi-
 // framework regression test above cannot exercise the errors branch via
 // testsSuites. This unit test pins the loop itself.
 func TestAggregateSuiteCounts(t *testing.T) {
 	cases := []struct {
-		name                                string
-		in                                  []JUnitTestSuite
-		wantTests, wantFailures, wantErrors int
+		name                                             string
+		in                                               []JUnitTestSuite
+		wantTests, wantFailures, wantErrors, wantSkipped int
 	}{
 		{
 			name: "empty slice yields zeros",
 		},
 		{
-			name: "errors aggregate across suites independently of failures",
+			name: "errors and skipped aggregate across suites independently of failures",
 			in: []JUnitTestSuite{
-				{Tests: 5, Failures: 1, Errors: 2},
-				{Tests: 3, Failures: 0, Errors: 4},
+				{Tests: 5, Failures: 1, Errors: 2, Skipped: 1},
+				{Tests: 3, Failures: 0, Errors: 4, Skipped: 2},
 			},
-			wantTests: 8, wantFailures: 1, wantErrors: 6,
+			wantTests: 8, wantFailures: 1, wantErrors: 6, wantSkipped: 3,
 		},
 		{
-			name: "mixed: errors-only, failures-only, and a clean suite",
+			name: "mixed: errors-only, failures-only, skipped-only, and a clean suite",
 			in: []JUnitTestSuite{
 				{Tests: 4, Errors: 4},
 				{Tests: 2, Failures: 2},
+				{Tests: 3, Skipped: 3},
 				{Tests: 7},
 			},
-			wantTests: 13, wantFailures: 2, wantErrors: 4,
+			wantTests: 16, wantFailures: 2, wantErrors: 4, wantSkipped: 3,
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			gotTests, gotFailures, gotErrors := aggregateSuiteCounts(tc.in)
+			gotTests, gotFailures, gotErrors, gotSkipped := aggregateSuiteCounts(tc.in)
 			assert.Equal(t, tc.wantTests, gotTests, "tests")
 			assert.Equal(t, tc.wantFailures, gotFailures, "failures")
 			assert.Equal(t, tc.wantErrors, gotErrors, "errors")
+			assert.Equal(t, tc.wantSkipped, gotSkipped, "skipped")
 		})
 	}
 }

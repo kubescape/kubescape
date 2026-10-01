@@ -52,7 +52,7 @@ func TestBuildExceptionAudit(t *testing.T) {
 				},
 			},
 		},
-		map[string]workloadinterface.IMetadata{resource.GetID(): resource},
+		cautils.NewMapResourceCatalog(map[string]workloadinterface.IMetadata{resource.GetID(): resource}),
 		&cautils.Policies{
 			Controls: map[string]reporthandling.Control{
 				"C-0001": {ControlID: "C-0001"},

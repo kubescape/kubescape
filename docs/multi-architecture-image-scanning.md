@@ -1,5 +1,7 @@
 # Multi-architecture image scanning
 
+For a general overview of image scanning, see the [Image Scanning guide](image-scanning.md).
+
 Container tags can point to an OCI image index instead of one image manifest. The index may contain different filesystems for `linux/amd64`, `linux/arm64`, Windows, and other platforms. Those variants often contain different operating system packages and therefore have different vulnerabilities.
 
 Kubescape keeps the target platform attached to each image scan. This prevents a scan performed on a developer laptop or CI runner from silently selecting that machine's architecture when the workload will run somewhere else.

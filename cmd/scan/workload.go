@@ -105,6 +105,10 @@ func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comma
 
 			if apiVersion == "" {
 				apiVersion = workloadAPIVersion
+			} else if apiVersion != workloadAPIVersion {
+				if err := cautils.ValidateWorkloadName(name, kind, apiVersion); err != nil {
+					return fmt.Errorf("invalid input: %w", err)
+				}
 			}
 
 			policyIdentifiers := setWorkloadScanInfo(scanInfo, kind, name, apiVersion)

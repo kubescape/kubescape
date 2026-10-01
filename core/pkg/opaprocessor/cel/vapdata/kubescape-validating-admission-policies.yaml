@@ -106,6 +106,7 @@ spec:
       - UPDATE
       resources:
       - pods
+      - pods/ephemeralcontainers
     - apiGroups:
       - apps
       apiVersions:
@@ -133,17 +134,19 @@ spec:
     kind: ControlConfiguration
   validations:
   - expression: |
-      object.kind != 'Pod' || object.spec.containers.all(container, !has(container.securityContext) || !has(container.securityContext.capabilities) || !has(container.securityContext.capabilities.add) || (container.securityContext.capabilities.add.all(capability, capability.upperAscii() != 'ALL') && params.settings.insecureCapabilities.all(insecureCapability, container.securityContext.capabilities.add.all(capability, capability.upperAscii() != insecureCapability.upperAscii()))) )
-    message: Pod has one or more containers with insecure capabilities! (see more
-      at https://kubescape.io/docs/controls/c-0046/)
+      variables.containers.all(container, !has(container.securityContext) || !has(container.securityContext.capabilities) || !has(container.securityContext.capabilities.add) || (container.securityContext.capabilities.add.all(capability, capability.upperAscii() != 'ALL') && params.settings.insecureCapabilities.all(insecureCapability, container.securityContext.capabilities.add.all(capability, capability.upperAscii() != insecureCapability.upperAscii()))) )
+    messageExpression: |
+      object.kind + '/' + object.metadata.name + ' has a container with an insecure capability. (see more at https://kubescape.io/docs/controls/c-0046/)'
+  variables:
   - expression: |
-      ['Deployment','ReplicaSet','DaemonSet','StatefulSet','Job'].all(kind, object.kind != kind) || object.spec.template.spec.containers.all(container, !has(container.securityContext) || !has(container.securityContext.capabilities) || !has(container.securityContext.capabilities.add) || (container.securityContext.capabilities.add.all(capability, capability.upperAscii() != 'ALL') && params.settings.insecureCapabilities.all(insecureCapability, container.securityContext.capabilities.add.all(capability, capability.upperAscii() != insecureCapability.upperAscii()))) )
-    message: Workload has one or more containers with insecure capabilities! (see
-      more at https://kubescape.io/docs/controls/c-0046/)
-  - expression: |
-      object.kind != 'CronJob' || object.spec.jobTemplate.spec.template.spec.containers.all(container, !has(container.securityContext) || !has(container.securityContext.capabilities) || !has(container.securityContext.capabilities.add) || (container.securityContext.capabilities.add.all(capability, capability.upperAscii() != 'ALL') && params.settings.insecureCapabilities.all(insecureCapability, container.securityContext.capabilities.add.all(capability, capability.upperAscii() != insecureCapability.upperAscii()))) )
-    message: CronJob has one or more containers with insecure capabilities! (see more
-      at https://kubescape.io/docs/controls/c-0046/)
+      object.kind == 'Pod'
+        ? object.spec.containers + (has(object.spec.initContainers) ? object.spec.initContainers : []) + (has(object.spec.ephemeralContainers) ? object.spec.ephemeralContainers : [])
+        : object.kind in ['Deployment','ReplicaSet','DaemonSet','StatefulSet','Job']
+          ? object.spec.template.spec.containers + (has(object.spec.template.spec.initContainers) ? object.spec.template.spec.initContainers : []) + (has(object.spec.template.spec.ephemeralContainers) ? object.spec.template.spec.ephemeralContainers : [])
+          : object.kind == 'CronJob'
+            ? object.spec.jobTemplate.spec.template.spec.containers + (has(object.spec.jobTemplate.spec.template.spec.initContainers) ? object.spec.jobTemplate.spec.template.spec.initContainers : []) + (has(object.spec.jobTemplate.spec.template.spec.ephemeralContainers) ? object.spec.jobTemplate.spec.template.spec.ephemeralContainers : [])
+            : []
+    name: containers
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
@@ -1434,6 +1437,7 @@ spec:
       - UPDATE
       resources:
       - pods
+      - pods/ephemeralcontainers
     - apiGroups:
       - apps
       apiVersions:
@@ -1461,17 +1465,19 @@ spec:
     kind: ControlConfiguration
   validations:
   - expression: |
-      object.kind != 'Pod' || object.spec.containers.all(container, !has(container.securityContext) || !has(container.securityContext.capabilities) || !has(container.securityContext.capabilities.add) || (container.securityContext.capabilities.add.all(capability, capability.upperAscii() != 'ALL') && params.settings.insecureCapabilities.all(insecureCapability, container.securityContext.capabilities.add.all(capability, capability.upperAscii() != insecureCapability.upperAscii()))) )
-    message: Pod has one or more containers with insecure capabilities! (see more
-      at https://kubescape.io/docs/controls/c-0046/)
+      variables.containers.all(container, !has(container.securityContext) || !has(container.securityContext.capabilities) || !has(container.securityContext.capabilities.add) || (container.securityContext.capabilities.add.all(capability, capability.upperAscii() != 'ALL') && params.settings.insecureCapabilities.all(insecureCapability, container.securityContext.capabilities.add.all(capability, capability.upperAscii() != insecureCapability.upperAscii()))) )
+    messageExpression: |
+      object.kind + '/' + object.metadata.name + ' has a container with an insecure capability. (see more at https://kubescape.io/docs/controls/c-0046/)'
+  variables:
   - expression: |
-      ['Deployment','ReplicaSet','DaemonSet','StatefulSet','Job'].all(kind, object.kind != kind) || object.spec.template.spec.containers.all(container, !has(container.securityContext) || !has(container.securityContext.capabilities) || !has(container.securityContext.capabilities.add) || (container.securityContext.capabilities.add.all(capability, capability.upperAscii() != 'ALL') && params.settings.insecureCapabilities.all(insecureCapability, container.securityContext.capabilities.add.all(capability, capability.upperAscii() != insecureCapability.upperAscii()))) )
-    message: Workload has one or more containers with insecure capabilities! (see
-      more at https://kubescape.io/docs/controls/c-0046/)
-  - expression: |
-      object.kind != 'CronJob' || object.spec.jobTemplate.spec.template.spec.containers.all(container, !has(container.securityContext) || !has(container.securityContext.capabilities) || !has(container.securityContext.capabilities.add) || (container.securityContext.capabilities.add.all(capability, capability.upperAscii() != 'ALL') && params.settings.insecureCapabilities.all(insecureCapability, container.securityContext.capabilities.add.all(capability, capability.upperAscii() != insecureCapability.upperAscii()))) )
-    message: CronJob has one or more containers with insecure capabilities! (see more
-      at https://kubescape.io/docs/controls/c-0046/)
+      object.kind == 'Pod'
+        ? object.spec.containers + (has(object.spec.initContainers) ? object.spec.initContainers : []) + (has(object.spec.ephemeralContainers) ? object.spec.ephemeralContainers : [])
+        : object.kind in ['Deployment','ReplicaSet','DaemonSet','StatefulSet','Job']
+          ? object.spec.template.spec.containers + (has(object.spec.template.spec.initContainers) ? object.spec.template.spec.initContainers : []) + (has(object.spec.template.spec.ephemeralContainers) ? object.spec.template.spec.ephemeralContainers : [])
+          : object.kind == 'CronJob'
+            ? object.spec.jobTemplate.spec.template.spec.containers + (has(object.spec.jobTemplate.spec.template.spec.initContainers) ? object.spec.jobTemplate.spec.template.spec.initContainers : []) + (has(object.spec.jobTemplate.spec.template.spec.ephemeralContainers) ? object.spec.jobTemplate.spec.template.spec.ephemeralContainers : [])
+            : []
+    name: containers
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
@@ -3344,6 +3350,10 @@ metadata:
   name: kubescape-c-0225-deny-default-service-account-rbac-and-automount
 spec:
   failurePolicy: Fail
+  matchConditions:
+  - expression: object.kind != 'ServiceAccount' || (has(object.metadata.name) && object.metadata.name
+      == 'default')
+    name: default-serviceaccount-or-any-binding
   matchConstraints:
     resourceRules:
     - apiGroups:
@@ -3393,6 +3403,9 @@ metadata:
   name: kubescape-c-0231-deny-loadbalancers-without-tls-certificate
 spec:
   failurePolicy: Fail
+  matchConditions:
+  - expression: has(object.spec.type) && object.spec.type == 'LoadBalancer'
+    name: only-loadbalancers
   matchConstraints:
     resourceRules:
     - apiGroups:
@@ -4148,3 +4161,269 @@ spec:
       has(object.spec.jobTemplate.spec.template.metadata.labels)
         ? object.spec.jobTemplate.spec.template.metadata.labels : {}
     name: jobTemplateLabels
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  annotations:
+    controlUrl: https://kubescape.io/docs/controls/c-0297/
+  labels:
+    controlId: C-0297
+  name: kubescape-c-0297-agent-sandbox-runtime-isolation
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+    - apiGroups:
+      - agents.x-k8s.io
+      apiVersions:
+      - v1beta1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - sandboxes
+    - apiGroups:
+      - extensions.agents.x-k8s.io
+      apiVersions:
+      - v1beta1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - sandboxtemplates
+  paramKind:
+    apiVersion: kubescape.io/v1
+    kind: ControlConfiguration
+  validations:
+  - expression: params == null || !has(params.settings) || !has(params.settings.hardenedSandboxRuntimeClasses)
+      || size(params.settings.hardenedSandboxRuntimeClasses) == 0 || (has(object.spec.podTemplate)
+      && has(object.spec.podTemplate.spec) && has(object.spec.podTemplate.spec.runtimeClassName)
+      && object.spec.podTemplate.spec.runtimeClassName in params.settings.hardenedSandboxRuntimeClasses)
+    message: Agent Sandbox must select a RuntimeClass from hardenedSandboxRuntimeClasses.
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  annotations:
+    controlUrl: https://kubescape.io/docs/controls/c-0309/
+  labels:
+    controlId: C-0309
+  name: kubescape-c-0309-agent-sandbox-token-automount
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+    - apiGroups:
+      - agents.x-k8s.io
+      apiVersions:
+      - v1beta1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - sandboxes
+    - apiGroups:
+      - extensions.agents.x-k8s.io
+      apiVersions:
+      - v1beta1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - sandboxtemplates
+  validations:
+  - expression: |-
+      object.kind == 'SandboxTemplate' ?
+
+        (!has(object.spec.podTemplate) || !has(object.spec.podTemplate.spec) ||
+         !has(object.spec.podTemplate.spec.automountServiceAccountToken) ||
+         object.spec.podTemplate.spec.automountServiceAccountToken == false) :
+        (has(object.spec.podTemplate) && has(object.spec.podTemplate.spec) &&
+         has(object.spec.podTemplate.spec.automountServiceAccountToken) &&
+         object.spec.podTemplate.spec.automountServiceAccountToken == false)
+    message: Sandbox must explicitly set automountServiceAccountToken to false; SandboxTemplate
+      may omit it to retain its secure default, but must not set it to true.
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  annotations:
+    controlUrl: https://kubescape.io/docs/controls/c-0311/
+  labels:
+    controlId: C-0311
+  name: kubescape-c-0311-agent-sandbox-container-limits
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+    - apiGroups:
+      - agents.x-k8s.io
+      apiVersions:
+      - v1beta1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - sandboxes
+    - apiGroups:
+      - extensions.agents.x-k8s.io
+      apiVersions:
+      - v1beta1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - sandboxtemplates
+  validations:
+  - expression: |-
+      has(object.spec.podTemplate) && has(object.spec.podTemplate.spec) && has(object.spec.podTemplate.spec.containers) && object.spec.podTemplate.spec.containers.all(c,
+
+        has(c.resources) && has(c.resources.limits) &&
+        'cpu' in c.resources.limits && 'memory' in c.resources.limits) &&
+      (!has(object.spec.podTemplate.spec.initContainers) ||
+
+        object.spec.podTemplate.spec.initContainers.all(c,
+          has(c.resources) && has(c.resources.limits) &&
+          'cpu' in c.resources.limits && 'memory' in c.resources.limits))
+    message: Every Agent Sandbox container and init container must set CPU and memory
+      limits.
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  annotations:
+    controlUrl: https://kubescape.io/docs/controls/c-0312/
+  labels:
+    controlId: C-0312
+  name: kubescape-c-0312-agent-sandbox-image-digests
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+    - apiGroups:
+      - agents.x-k8s.io
+      apiVersions:
+      - v1beta1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - sandboxes
+    - apiGroups:
+      - extensions.agents.x-k8s.io
+      apiVersions:
+      - v1beta1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - sandboxtemplates
+    - apiGroups:
+      - ate.dev
+      apiVersions:
+      - v1alpha1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - workerpools
+  validations:
+  - expression: |-
+      !['Sandbox', 'SandboxTemplate'].exists(k, object.kind == k) || (has(object.spec.podTemplate) && has(object.spec.podTemplate.spec) && has(object.spec.podTemplate.spec.containers) && object.spec.podTemplate.spec.containers.all(c,
+
+        c.image.matches('^.+@sha256:[a-f0-9]{64}$')) &&
+      (!has(object.spec.podTemplate.spec.initContainers) ||
+
+        object.spec.podTemplate.spec.initContainers.all(c,
+          c.image.matches('^.+@sha256:[a-f0-9]{64}$'))))
+    message: Every Agent Sandbox image must be pinned to an exact SHA-256 digest.
+  - expression: object.kind != 'WorkerPool' || (has(object.spec.workerImage) && object.spec.workerImage.matches('^.+@sha256:[a-f0-9]{64}$'))
+    message: WorkerPool workerImage must be pinned to an exact SHA-256 digest.
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  annotations:
+    controlUrl: https://kubescape.io/docs/controls/c-0313/
+  labels:
+    controlId: C-0313
+  name: kubescape-c-0313-agent-sandbox-image-registries
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+    - apiGroups:
+      - agents.x-k8s.io
+      apiVersions:
+      - v1beta1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - sandboxes
+    - apiGroups:
+      - extensions.agents.x-k8s.io
+      apiVersions:
+      - v1beta1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - sandboxtemplates
+    - apiGroups:
+      - ate.dev
+      apiVersions:
+      - v1alpha1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - workerpools
+  paramKind:
+    apiVersion: kubescape.io/v1
+    kind: ControlConfiguration
+  validations:
+  - expression: |-
+      params == null || !has(params.settings) || !has(params.settings.imageRepositoryAllowList) || size(params.settings.imageRepositoryAllowList) == 0 || (!['Sandbox', 'SandboxTemplate'].exists(k, object.kind == k) || (has(object.spec.podTemplate) && has(object.spec.podTemplate.spec) && has(object.spec.podTemplate.spec.containers) && object.spec.podTemplate.spec.containers.all(c,
+
+        params.settings.imageRepositoryAllowList.exists(r, (c.image.startsWith(r + '/') || (r == 'docker.io'
+      && (!c.image.contains('/') || (!c.image.matches('^[^/]*[.:][^/]*/') && !c.image.startsWith('localhost/'))))))) && (!has(object.spec.podTemplate.spec.initContainers) ||
+
+        object.spec.podTemplate.spec.initContainers.all(c,
+          params.settings.imageRepositoryAllowList.exists(r, (c.image.startsWith(r + '/') || (r == 'docker.io'
+      && (!c.image.contains('/') || (!c.image.matches('^[^/]*[.:][^/]*/') && !c.image.startsWith('localhost/'))))))))))
+    message: Every Agent Sandbox image must use a registry in imageRepositoryAllowList.
+  - expression: |-
+      params == null || !has(params.settings) || !has(params.settings.imageRepositoryAllowList) || size(params.settings.imageRepositoryAllowList) == 0 || (object.kind != 'WorkerPool' || (has(object.spec.workerImage) && params.settings.imageRepositoryAllowList.exists(r,
+
+        (object.spec.workerImage.startsWith(r + '/') || (r == 'docker.io' && (!object.spec.workerImage.contains('/')
+      || (!object.spec.workerImage.matches('^[^/]*[.:][^/]*/') && !object.spec.workerImage.startsWith('localhost/'))))))))
+    message: WorkerPool workerImage must use a registry in imageRepositoryAllowList.
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  annotations:
+    controlUrl: https://kubescape.io/docs/controls/c-0314/
+  labels:
+    controlId: C-0314
+  name: kubescape-c-0314-agent-sandbox-managed-networking
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+    - apiGroups:
+      - extensions.agents.x-k8s.io
+      apiVersions:
+      - v1beta1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - sandboxtemplates
+  validations:
+  - expression: '!has(object.spec.networkPolicyManagement) || object.spec.networkPolicyManagement
+      == null || object.spec.networkPolicyManagement == ''Managed'''
+    message: SandboxTemplate must use managed networking. The managed default blocks
+      private and internal destinations but still permits public internet.

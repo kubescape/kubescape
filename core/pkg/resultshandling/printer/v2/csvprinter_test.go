@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/armosec/armoapi-go/armotypes"
@@ -659,4 +660,563 @@ func TestCsvSourcePath(t *testing.T) {
 			assert.Equal(t, tc.want, csvSourcePath(tc.src))
 		})
 	}
+}
+
+// TestCsvPrinter_IncludesSkippedAndUnevaluatedControls tests that skipped and unevaluated controls,
+// missing GVRs, and scope-level timeouts are emitted in CSV output with proper diagnostic reasons,
+// while avoiding redundant summary rows when an existing resource row already represents the skip.
+func TestCsvPrinter_IncludesSkippedAndUnevaluatedControls(t *testing.T) {
+	session := csvSessionFixture()
+
+	// 1. Add a skipped control from SummaryDetails.Controls (e.g. configuration skip)
+	const skippedControlID = "C-0099"
+	skippedStatus := &apis.StatusInfo{
+		InnerStatus: apis.StatusSkipped,
+		SubStatus:   apis.SubStatusConfiguration,
+		InnerInfo:   "missing required cluster role permissions",
+	}
+	session.Report.SummaryDetails.Controls[skippedControlID] = reportsummary.ControlSummary{
+		ControlID:   skippedControlID,
+		Name:        "RBAC least privilege",
+		ScoreFactor: 7.0,
+		StatusInfo:  *skippedStatus,
+	}
+
+	// 2. Add an unevaluated control via ScanCoverage.NotEvaluatedControls (e.g. missing GVR)
+	const notEvalControlID = "C-0100"
+	session.ScanCoverage.NotEvaluatedControls = []cautils.NotEvaluatedControl{
+		{
+			ControlID: notEvalControlID,
+			Reason:    "missing: batch/v1/cronjobs",
+		},
+	}
+	session.AllPolicies = &cautils.Policies{
+		Controls: map[string]reporthandling.Control{
+			notEvalControlID: {
+				PortalBase: armotypes.PortalBase{
+					Name: "CronJob security",
+				},
+				Control_ID: notEvalControlID,
+				BaseScore:  5.0,
+			},
+		},
+	}
+
+	// 3. Add a skipped control with empty reason/substatus/info but having policy remediation
+	const emptyReasonControlID = "C-0101"
+	session.Report.SummaryDetails.Controls[emptyReasonControlID] = reportsummary.ControlSummary{
+		ControlID:   emptyReasonControlID,
+		Name:        "No reason control",
+		ScoreFactor: 3.0,
+		StatusInfo:  apis.StatusInfo{InnerStatus: apis.StatusSkipped},
+		Description: "A control with no skip reason",
+	}
+	if session.AllPolicies == nil {
+		session.AllPolicies = &cautils.Policies{Controls: make(map[string]reporthandling.Control)}
+	}
+	session.AllPolicies.Controls[emptyReasonControlID] = reporthandling.Control{
+		PortalBase:  armotypes.PortalBase{Name: "No reason control"},
+		Control_ID:  emptyReasonControlID,
+		BaseScore:   3.0,
+		Remediation: "policy fix instruction",
+	}
+
+	// 4. Add an emitted resource row whose associated control is skipped with a diagnostic reason
+	const resourceSkippedControlID = "C-0102"
+	session.Report.SummaryDetails.Controls[resourceSkippedControlID] = reportsummary.ControlSummary{
+		ControlID:   resourceSkippedControlID,
+		Name:        "Resource level skipped control",
+		ScoreFactor: 8.0,
+		StatusInfo: apis.StatusInfo{
+			InnerStatus: apis.StatusSkipped,
+			SubStatus:   apis.SubStatusIrrelevant,
+			InnerInfo:   "not applicable to this workload type",
+		},
+	}
+	resID := testResourceID1
+	res := session.ResourcesResult[resID]
+	res.AssociatedControls = append(res.AssociatedControls, resourcesresults.ResourceAssociatedControl{
+		ControlID: resourceSkippedControlID,
+		Name:      "Resource level skipped control",
+		Status: apis.StatusInfo{
+			InnerStatus: apis.StatusSkipped,
+			SubStatus:   apis.SubStatusIrrelevant,
+			InnerInfo:   "not applicable to this workload type",
+		},
+	})
+	session.ResourcesResult[resID] = res
+
+	// 5. Add a control with an earlier resource row (passed) but summary-level skipped (e.g. timeout in later scope)
+	const timedOutControlID = "C-0103"
+	session.Report.SummaryDetails.Controls[timedOutControlID] = reportsummary.ControlSummary{
+		ControlID:   timedOutControlID,
+		Name:        "Timed out in second scope",
+		ScoreFactor: 6.0,
+		StatusInfo: apis.StatusInfo{
+			InnerStatus: apis.StatusSkipped,
+			SubStatus:   apis.SubStatusConfiguration,
+			InnerInfo:   "context deadline exceeded in cluster scope",
+		},
+	}
+	res = session.ResourcesResult[resID]
+	res.AssociatedControls = append(res.AssociatedControls, resourcesresults.ResourceAssociatedControl{
+		ControlID: timedOutControlID,
+		Name:      "Timed out in second scope",
+		Status:    apis.StatusInfo{InnerStatus: apis.StatusPassed},
+	})
+	session.ResourcesResult[resID] = res
+
+	// 6. Add a control with both a resource-level skip AND a distinct summary-level skip (e.g. timeout in another scope)
+	const distinctSkipControlID = "C-0104"
+	session.Report.SummaryDetails.Controls[distinctSkipControlID] = reportsummary.ControlSummary{
+		ControlID:   distinctSkipControlID,
+		Name:        "Multi-scope skip control",
+		ScoreFactor: 7.0,
+		StatusInfo: apis.StatusInfo{
+			InnerStatus: apis.StatusSkipped,
+			SubStatus:   apis.SubStatusConfiguration,
+			InnerInfo:   "control evaluation timed out after 30s in cluster scope",
+		},
+	}
+	res = session.ResourcesResult[resID]
+	res.AssociatedControls = append(res.AssociatedControls, resourcesresults.ResourceAssociatedControl{
+		ControlID: distinctSkipControlID,
+		Name:      "Multi-scope skip control",
+		Status: apis.StatusInfo{
+			InnerStatus: apis.StatusSkipped,
+			SubStatus:   apis.SubStatusIrrelevant,
+			InnerInfo:   "not applicable to this workload type",
+		},
+	})
+	session.ResourcesResult[resID] = res
+
+	// 7. Add a control with earlier resource row skipped (no skip detail, inheriting coverage reason) AND not evaluated status from coverage
+	const overlapControlID = "C-0105"
+	session.ScanCoverage.NotEvaluatedControls = append(session.ScanCoverage.NotEvaluatedControls, cautils.NotEvaluatedControl{
+		ControlID: overlapControlID,
+		Reason:    "cluster scope evaluation timed out after 30s",
+	})
+	session.Report.SummaryDetails.Controls[overlapControlID] = reportsummary.ControlSummary{
+		ControlID:   overlapControlID,
+		Name:        "Scope overlap timeout control",
+		ScoreFactor: 7.0,
+	}
+	res = session.ResourcesResult[resID]
+	res.AssociatedControls = append(res.AssociatedControls, resourcesresults.ResourceAssociatedControl{
+		ControlID: overlapControlID,
+		Name:      "Scope overlap timeout control",
+		Status: apis.StatusInfo{
+			InnerStatus: apis.StatusSkipped,
+		},
+	})
+	session.ResourcesResult[resID] = res
+
+	tmpFile, err := os.CreateTemp("", "test-skipped-*.csv")
+	require.NoError(t, err)
+	defer os.Remove(tmpFile.Name())
+
+	cp := NewCsvPrinter(false)
+	cp.writer = tmpFile
+
+	err = cp.ActionPrint(context.Background(), session, nil)
+	require.NoError(t, err)
+	require.NoError(t, cp.CloseWriter())
+
+	content, err := os.ReadFile(tmpFile.Name())
+	require.NoError(t, err)
+
+	reader := csv.NewReader(strings.NewReader(string(content)))
+	records, err := reader.ReadAll()
+	require.NoError(t, err)
+
+	require.GreaterOrEqual(t, len(records), 7)
+
+	var foundSkipped, foundNotEval, foundEmptyReason, foundResourceSkipped bool
+	var foundTimedOutPassed, foundTimedOutSummary, foundResourceSkippedSummary bool
+	var foundDistinctResourceSkipped, foundDistinctSummarySkipped bool
+	var foundOverlapResourceSkipped, foundOverlapSummaryNotEval bool
+	for _, row := range records {
+		if row[1] == skippedControlID {
+			foundSkipped = true
+			assert.Equal(t, "RBAC least privilege", row[0])
+			assert.Equal(t, "High", row[2])
+			assert.Equal(t, "skipped", row[3])
+			assert.Equal(t, "N/A", row[4])
+			assert.Equal(t, "N/A", row[5])
+			assert.Equal(t, "N/A", row[6])
+			assert.Equal(t, "N/A", row[7])
+			assert.Empty(t, row[8])
+			assert.Empty(t, row[9])
+			assert.Contains(t, row[10], "missing required cluster role permissions")
+			assert.Equal(t, cautils.GetControlLink(skippedControlID), row[11])
+			assert.Empty(t, row[12])
+		}
+		if row[1] == notEvalControlID {
+			foundNotEval = true
+			assert.Equal(t, "CronJob security", row[0])
+			assert.Equal(t, "Medium", row[2])
+			assert.Equal(t, "not evaluated", row[3])
+			assert.Equal(t, "N/A", row[4])
+			assert.Equal(t, "N/A", row[5])
+			assert.Equal(t, "N/A", row[6])
+			assert.Equal(t, "N/A", row[7])
+			assert.Empty(t, row[8])
+			assert.Empty(t, row[9])
+			assert.Contains(t, row[10], "missing: batch/v1/cronjobs")
+			assert.Equal(t, cautils.GetControlLink(notEvalControlID), row[11])
+			assert.Empty(t, row[12])
+		}
+		if row[1] == emptyReasonControlID {
+			foundEmptyReason = true
+			assert.Equal(t, "No reason control", row[0])
+			assert.Equal(t, "skipped", row[3])
+			assert.Equal(t, "reason unavailable", row[10])
+		}
+		if row[1] == resourceSkippedControlID {
+			if row[4] != "N/A" {
+				foundResourceSkipped = true
+				assert.Equal(t, "skipped", row[3])
+				assert.Contains(t, row[10], "not applicable to this workload type")
+			} else {
+				foundResourceSkippedSummary = true
+			}
+		}
+		if row[1] == timedOutControlID {
+			if row[4] != "N/A" {
+				foundTimedOutPassed = true
+				assert.Equal(t, "passed", row[3])
+			} else {
+				foundTimedOutSummary = true
+				assert.Equal(t, "skipped", row[3])
+				assert.Contains(t, row[10], "context deadline exceeded in cluster scope")
+			}
+		}
+		if row[1] == distinctSkipControlID {
+			if row[4] != "N/A" {
+				foundDistinctResourceSkipped = true
+				assert.Equal(t, "skipped", row[3])
+				assert.Contains(t, row[10], "not applicable to this workload type")
+			} else {
+				foundDistinctSummarySkipped = true
+				assert.Equal(t, "skipped", row[3])
+				assert.Contains(t, row[10], "control evaluation timed out after 30s in cluster scope")
+			}
+		}
+		if row[1] == overlapControlID {
+			if row[4] != "N/A" {
+				foundOverlapResourceSkipped = true
+				assert.Equal(t, "skipped", row[3])
+				assert.Equal(t, "cluster scope evaluation timed out after 30s", row[10])
+			} else {
+				foundOverlapSummaryNotEval = true
+				assert.Equal(t, "not evaluated", row[3])
+				assert.Equal(t, "cluster scope evaluation timed out after 30s", row[10])
+			}
+		}
+	}
+	assert.True(t, foundSkipped, "skipped control row should be present in CSV output")
+	assert.True(t, foundNotEval, "coverage-only unevaluated control row should be present in CSV output")
+	assert.True(t, foundEmptyReason, "empty reason skipped control should use 'reason unavailable'")
+	assert.True(t, foundResourceSkipped, "emitted resource row for skipped control should preserve skip reason")
+	assert.False(t, foundResourceSkippedSummary, "redundant N/A summary row should be suppressed when resource row already represented the skip")
+	assert.True(t, foundTimedOutPassed, "earlier resource row with passed status should be preserved")
+	assert.True(t, foundTimedOutSummary, "summary-level skip should be emitted when no resource row represents the skip")
+	assert.True(t, foundDistinctResourceSkipped, "resource-level skip row should be emitted with workload diagnostic")
+	assert.True(t, foundDistinctSummarySkipped, "distinct summary-level skip row should also be emitted when its diagnostic is not represented by resource rows")
+	assert.True(t, foundOverlapResourceSkipped, "resource-level skipped row with inherited coverage reason should be emitted")
+	assert.True(t, foundOverlapSummaryNotEval, "not evaluated control row should be preserved and not suppressed by earlier resource skip")
+}
+
+func TestActionPrint_Csv_UnevaluatedControlsIncluded(t *testing.T) {
+	session := csvSessionFixture()
+	session.ScanCoverage = cautils.ScanCoverage{
+		CoverageScore:     66.0,
+		EvaluatedControls: 2,
+		TotalControls:     3,
+		Degraded:          true,
+		NotEvaluatedControls: []cautils.NotEvaluatedControl{
+			{
+				ControlID:   "C-0099",
+				MissingGVRs: []string{"apps/v1/daemonsets"},
+			},
+		},
+	}
+
+	tmpCsv, err := os.CreateTemp("", "csv-unevaluated-*.csv")
+	require.NoError(t, err)
+	defer os.Remove(tmpCsv.Name())
+
+	cp := NewCsvPrinter(false)
+	cp.writer = tmpCsv
+	err = cp.ActionPrint(context.TODO(), session, nil)
+	require.NoError(t, err)
+	require.NoError(t, cp.CloseWriter())
+
+	f, err := os.Open(tmpCsv.Name())
+	require.NoError(t, err)
+	defer f.Close()
+
+	r := csv.NewReader(f)
+	records, err := r.ReadAll()
+	require.NoError(t, err)
+
+	var foundUnevaluated bool
+	for _, row := range records[1:] {
+		require.Equal(t, 13, len(row), "every row must have 13 columns")
+		if row[1] == "C-0099" {
+			foundUnevaluated = true
+			assert.Equal(t, "C-0099", row[0], "name should fallback to control ID when not in summary")
+			assert.Equal(t, "not evaluated", row[3], "status must be 'not evaluated'")
+			assert.Equal(t, "N/A", row[4], "resource name must be 'N/A'")
+			assert.Equal(t, "N/A", row[5], "resource kind must be 'N/A'")
+			assert.Equal(t, "N/A", row[6], "resource namespace must be 'N/A'")
+			assert.Equal(t, "N/A", row[7], "api version must be 'N/A'")
+			assert.Equal(t, "", row[8], "failed paths must be empty")
+			assert.Equal(t, "", row[9], "fix paths must be empty")
+			assert.Equal(t, "missing: apps/v1/daemonsets", row[10], "remediation should contain skip reason")
+			assert.Contains(t, row[11], "c-0099", "control URL should link to control")
+			assert.Equal(t, "", row[12], "source path must be empty")
+		}
+	}
+	assert.True(t, foundUnevaluated, "expected unevaluated control C-0099 in CSV output")
+}
+
+func TestActionPrint_Csv_UnevaluatedControlsNotDuplicated(t *testing.T) {
+	session := csvSessionFixture()
+	session.ScanCoverage = cautils.ScanCoverage{
+		CoverageScore:     50.0,
+		EvaluatedControls: 1,
+		TotalControls:     2,
+		Degraded:          true,
+		NotEvaluatedControls: []cautils.NotEvaluatedControl{
+			{
+				ControlID: "C-0099",
+				Reason:    "evaluation timed out",
+			},
+			{
+				ControlID: "C-0099",
+				Reason:    "evaluation timed out",
+			},
+		},
+	}
+
+	tmpCsv, err := os.CreateTemp("", "csv-dup-*.csv")
+	require.NoError(t, err)
+	defer os.Remove(tmpCsv.Name())
+
+	cp := NewCsvPrinter(false)
+	cp.writer = tmpCsv
+	err = cp.ActionPrint(context.TODO(), session, nil)
+	require.NoError(t, err)
+	require.NoError(t, cp.CloseWriter())
+
+	f, err := os.Open(tmpCsv.Name())
+	require.NoError(t, err)
+	defer f.Close()
+
+	r := csv.NewReader(f)
+	records, err := r.ReadAll()
+	require.NoError(t, err)
+
+	unevaluatedCount := 0
+	for _, row := range records[1:] {
+		if row[1] == "C-0099" && row[3] == "not evaluated" {
+			unevaluatedCount++
+		}
+	}
+	assert.Equal(t, 1, unevaluatedCount, "unevaluated control should only be emitted once as not evaluated even if duplicated in input")
+}
+
+func TestActionPrint_Csv_PreserveUnevaluatedDiagnosticWhenResourceRowsExist(t *testing.T) {
+	session := csvSessionFixture()
+	session.ScanCoverage = cautils.ScanCoverage{
+		CoverageScore:     50.0,
+		EvaluatedControls: 1,
+		TotalControls:     2,
+		Degraded:          true,
+		NotEvaluatedControls: []cautils.NotEvaluatedControl{
+			{
+				ControlID: testControlID1,
+				Reason:    "evaluation timed out",
+			},
+		},
+	}
+
+	tmpCsv, err := os.CreateTemp("", "csv-preserve-diag-*.csv")
+	require.NoError(t, err)
+	defer os.Remove(tmpCsv.Name())
+
+	cp := NewCsvPrinter(false)
+	cp.writer = tmpCsv
+	err = cp.ActionPrint(context.TODO(), session, nil)
+	require.NoError(t, err)
+	require.NoError(t, cp.CloseWriter())
+
+	f, err := os.Open(tmpCsv.Name())
+	require.NoError(t, err)
+	defer f.Close()
+
+	r := csv.NewReader(f)
+	records, err := r.ReadAll()
+	require.NoError(t, err)
+
+	var resourceRows [][]string
+	var diagRows [][]string
+	for _, row := range records[1:] {
+		if row[1] == testControlID1 {
+			if row[3] == "not evaluated" {
+				diagRows = append(diagRows, row)
+			} else {
+				resourceRows = append(resourceRows, row)
+			}
+		}
+	}
+
+	// Resource rows from earlier scopes are retained
+	assert.Len(t, resourceRows, 2, "resource result rows should be retained")
+	var foundDemo bool
+	for _, row := range resourceRows {
+		assert.Equal(t, "failed", row[3])
+		if row[4] == "demo" {
+			foundDemo = true
+		}
+	}
+	assert.True(t, foundDemo, "resource demo should be present in resource rows")
+
+	// Diagnostic row for timeout is preserved alongside existing results
+	require.Len(t, diagRows, 1, "exactly one control-level not-evaluated diagnostic row should be emitted alongside results")
+	diag := diagRows[0]
+	assert.Equal(t, "Privileged container", diag[0], "control name should come from summary")
+	assert.Equal(t, testControlID1, diag[1])
+	assert.Equal(t, "Critical", diag[2], "severity should match control score factor")
+	assert.Equal(t, "not evaluated", diag[3])
+	assert.Equal(t, "N/A", diag[4], "resource name should be 'N/A' on diagnostic row")
+	assert.Equal(t, "N/A", diag[5], "resource kind should be 'N/A' on diagnostic row")
+	assert.Equal(t, "N/A", diag[6], "resource namespace should be 'N/A' on diagnostic row")
+	assert.Equal(t, "N/A", diag[7], "api version should be 'N/A' on diagnostic row")
+	assert.Empty(t, diag[8], "failed paths should be empty on diagnostic row")
+	assert.Empty(t, diag[9], "fix paths should be empty on diagnostic row")
+	assert.Equal(t, "evaluation timed out", diag[10], "remediation should contain timeout reason")
+	assert.Contains(t, diag[11], "c-0057")
+	assert.Empty(t, diag[12], "source path should be empty on diagnostic row")
+}
+
+func TestActionPrint_Csv_SkippedControlFromSummaryIncluded(t *testing.T) {
+	session := csvSessionFixture()
+	skippedStatus := &apis.StatusInfo{
+		InnerStatus: apis.StatusSkipped,
+		SubStatus:   apis.SubStatusIrrelevant,
+		InnerInfo:   "no matching resources",
+	}
+	ctrlSkipped := &reportsummary.ControlSummary{
+		ControlID:   "C-0070",
+		Name:        "Host IPC",
+		ScoreFactor: 6.0,
+		StatusInfo:  *skippedStatus,
+	}
+	session.Report.SummaryDetails.Controls["C-0070"] = *ctrlSkipped
+
+	tmpCsv, err := os.CreateTemp("", "csv-skipped-summary-*.csv")
+	require.NoError(t, err)
+	defer os.Remove(tmpCsv.Name())
+
+	cp := NewCsvPrinter(false)
+	cp.writer = tmpCsv
+	err = cp.ActionPrint(context.TODO(), session, nil)
+	require.NoError(t, err)
+	require.NoError(t, cp.CloseWriter())
+
+	f, err := os.Open(tmpCsv.Name())
+	require.NoError(t, err)
+	defer f.Close()
+
+	r := csv.NewReader(f)
+	records, err := r.ReadAll()
+	require.NoError(t, err)
+
+	var foundSkipped bool
+	for _, row := range records[1:] {
+		if row[1] == "C-0070" {
+			foundSkipped = true
+			assert.Equal(t, "Host IPC", row[0])
+			assert.Equal(t, "skipped", row[3])
+			assert.Equal(t, "Medium", row[2])
+			assert.Equal(t, "irrelevant: no matching resources", row[10])
+		}
+	}
+	assert.True(t, foundSkipped, "expected skipped control C-0070 in CSV output")
+}
+
+func TestActionPrint_Csv_PreserveNotEvaluatedWhenResourceRowSkippedWithInheritedReason(t *testing.T) {
+	// Tests regression where an earlier scope leaves a resource-level skipped row
+	// without skip detail, inheriting the coverage reason at lines 155-166.
+	// When a later scope times out, the control is recorded in ScanCoverage.NotEvaluatedControls.
+	// CSV output must preserve BOTH:
+	// - The resource-level skipped finding (status "skipped")
+	// - The control-level not evaluated diagnostic row (status "not evaluated")
+	session := csvSessionFixture()
+	const overlapControlID = "C-0105"
+	session.ScanCoverage = cautils.ScanCoverage{
+		CoverageScore:     50.0,
+		EvaluatedControls: 1,
+		TotalControls:     2,
+		Degraded:          true,
+		NotEvaluatedControls: []cautils.NotEvaluatedControl{
+			{
+				ControlID: overlapControlID,
+				Reason:    "control evaluation timed out in cluster scope",
+			},
+		},
+	}
+	session.Report.SummaryDetails.Controls[overlapControlID] = reportsummary.ControlSummary{
+		ControlID:   overlapControlID,
+		Name:        "Overlap timeout control",
+		ScoreFactor: 8.0,
+	}
+
+	resID := testResourceID1
+	res := session.ResourcesResult[resID]
+	res.AssociatedControls = append(res.AssociatedControls, resourcesresults.ResourceAssociatedControl{
+		ControlID: overlapControlID,
+		Name:      "Overlap timeout control",
+		Status: apis.StatusInfo{
+			InnerStatus: apis.StatusSkipped,
+		},
+	})
+	session.ResourcesResult[resID] = res
+
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+
+	cp := NewCsvPrinter(false)
+	cp.writer = w
+
+	err = cp.ActionPrint(context.Background(), session, nil)
+	require.NoError(t, err)
+	require.NoError(t, cp.CloseWriter())
+
+	reader := csv.NewReader(r)
+	records, err := reader.ReadAll()
+	require.NoError(t, err)
+	_ = r.Close()
+
+	var resourceSkippedCount, notEvaluatedCount int
+	for _, row := range records[1:] {
+		if row[1] == overlapControlID {
+			switch row[3] {
+			case "skipped":
+				resourceSkippedCount++
+				assert.Equal(t, "demo", row[4], "resource row must have resource name")
+				assert.Equal(t, "control evaluation timed out in cluster scope", row[10], "resource row inherits coverage reason")
+			case "not evaluated":
+				notEvaluatedCount++
+				assert.Equal(t, "N/A", row[4], "control-level row must have N/A for resource")
+				assert.Equal(t, "control evaluation timed out in cluster scope", row[10])
+				assert.Equal(t, "High", row[2], "severity should match score factor")
+			}
+		}
+	}
+
+	assert.Equal(t, 1, resourceSkippedCount, "expected exactly one resource-level skipped row")
+	assert.Equal(t, 1, notEvaluatedCount, "expected exactly one control-level not evaluated row")
 }

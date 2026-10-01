@@ -137,6 +137,7 @@ func TestProviderConfigCarriesPlatform(t *testing.T) {
 		RegistryCredentials{Authority: "registry.example.com", Token: "token"},
 		[]string{"registry"},
 		ScanOptions{Platform: "linux/arm64"},
+		nil,
 	)
 
 	assert.Equal(t, "linux/arm64", config.Platform)
@@ -147,7 +148,7 @@ func TestProviderConfigCarriesPlatform(t *testing.T) {
 }
 
 func TestProviderConfigKeepsEmptyPlatformForCompatibility(t *testing.T) {
-	config := getProviderConfig(RegistryCredentials{}, nil, ScanOptions{})
+	config := getProviderConfig(RegistryCredentials{}, nil, ScanOptions{}, nil)
 
 	assert.Empty(t, config.Platform)
 	assert.Nil(t, config.Sources)

@@ -35,7 +35,9 @@ func addSingleResourceToResourceMaps(k8sResources cautils.K8SResources, allResou
 			continue
 		}
 		seen[resourceGroup] = struct{}{}
-		k8sResources[resourceGroup] = append(k8sResources[resourceGroup], wl.GetID())
+		if !slices.Contains(k8sResources[resourceGroup], wl.GetID()) {
+			k8sResources[resourceGroup] = append(k8sResources[resourceGroup], wl.GetID())
+		}
 	}
 	allResources[wl.GetID()] = wl
 }

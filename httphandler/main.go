@@ -63,6 +63,10 @@ func run(ctx context.Context) error {
 		helpers.String("commit", commit),
 		helpers.String("date", date))
 
+	if err := config.ConfigureNamespaceFilters(os.Getenv(config.NamespaceFiltersFileEnv)); err != nil {
+		return err
+	}
+
 	cfg, err := config.LoadConfig("/etc/config")
 	if err != nil {
 		logger.L().Ctx(ctx).Error("load config error", helpers.Error(err))

@@ -64,10 +64,18 @@ func (pp *PrometheusPrinter) generatePrometheusFormat(
 	results map[string]resourcesresults.Result,
 	summaryDetails *reportsummary.SummaryDetails,
 	coverage cautils.ScanCoverage) *Metrics {
+	return pp.generatePrometheusFormatFromCatalog(cautils.NewMapResourceCatalog(resources), results, summaryDetails, coverage)
+}
+
+func (pp *PrometheusPrinter) generatePrometheusFormatFromCatalog(
+	catalog cautils.ResourceCatalog,
+	results map[string]resourcesresults.Result,
+	summaryDetails *reportsummary.SummaryDetails,
+	coverage cautils.ScanCoverage) *Metrics {
 
 	m := &Metrics{}
 	m.setComplianceScores(summaryDetails)
-	m.setResourcesCounters(resources, results)
+	m.setResourcesCountersFromCatalog(catalog, results)
 	m.setCoverageScore(coverage)
 
 	return m
@@ -80,11 +88,15 @@ func (pp *PrometheusPrinter) generateImagePrometheusFormat(imageScanData []cauti
 	return m
 }
 
+// ActionPrint writes posture scan results and container image vulnerability metrics in Prometheus format.
 func (pp *PrometheusPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
 	var metrics *Metrics
 
 	if opaSessionObj != nil {
-		metrics = pp.generatePrometheusFormat(opaSessionObj.AllResources, opaSessionObj.ResourcesResult, &opaSessionObj.Report.SummaryDetails, opaSessionObj.ScanCoverage)
+		metrics = pp.generatePrometheusFormatFromCatalog(opaSessionObj.GetCatalog(), opaSessionObj.ResourcesResult, &opaSessionObj.Report.SummaryDetails, opaSessionObj.ScanCoverage)
+		if len(imageScanData) > 0 {
+			metrics.setImageVulnerabilities(imageScanData)
+		}
 	} else if len(imageScanData) > 0 {
 		metrics = pp.generateImagePrometheusFormat(imageScanData)
 	} else {

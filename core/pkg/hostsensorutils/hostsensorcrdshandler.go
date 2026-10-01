@@ -4,12 +4,10 @@ import (
 	"context"
 	"fmt"
 
-	"time"
-
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
-	k8serrors "k8s.io/apimachinery/pkg/api/errors"
+	"github.com/kubescape/kubescape/v4/core/cautils/getter"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -118,57 +116,20 @@ func (hsh *HostSensorHandler) listCRDResources(ctx context.Context, resourceName
 		helpers.String("resource", resourceName),
 		helpers.String("kind", kind))
 
-	limit := int64(50)
-	continueToken := ""
 	totalCount := 0
-
-	for {
-		listOptions := metav1.ListOptions{Limit: limit, Continue: continueToken}
-		var list *unstructured.UnstructuredList
-		var err error
-
-		retries := 5
-		backoff := 1 * time.Second
-		for i := 0; i < retries; i++ {
-			list, err = hsh.dynamicClient.Resource(gvr).List(ctx, listOptions)
-			if err != nil {
-				if k8serrors.IsTooManyRequests(err) {
-					logger.L().Warning("Rate limited (429) when listing CRDs, retrying",
-						helpers.String("kind", kind),
-						helpers.Int("retry", i+1))
-
-					if i == retries-1 {
-						break
-					}
-
-					timer := time.NewTimer(backoff)
-					select {
-					case <-ctx.Done():
-						timer.Stop()
-						return ctx.Err()
-					case <-timer.C:
-						backoff *= 2
-						continue
-					}
-				}
-				break
-			}
-			break
-		}
-
+	err := getter.ListWithPagination(ctx, func(listOptions metav1.ListOptions) (string, error) {
+		list, err := hsh.dynamicClient.Resource(gvr).List(ctx, listOptions)
 		if err != nil {
-			return fmt.Errorf("failed to list %s CRDs: %w", kind, err)
+			return "", err
 		}
-
 		totalCount += len(list.Items)
 		if err := process(list.Items); err != nil {
-			return fmt.Errorf("failed to process %s CRDs page: %w", kind, err)
+			return "", fmt.Errorf("failed to process %s CRDs page: %w", kind, err)
 		}
-
-		continueToken = list.GetContinue()
-		if continueToken == "" {
-			break
-		}
+		return list.GetContinue(), nil
+	})
+	if err != nil {
+		return fmt.Errorf("failed to list %s CRDs: %w", kind, err)
 	}
 
 	logger.L().Debug("Retrieved CRD resources",

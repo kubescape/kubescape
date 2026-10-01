@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/pkg/imagescan"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -38,15 +39,25 @@ func (t ImageScanTarget) String() string {
 // request is needed, and scheduled Pods can be tied to the same image variant
 // the kubelet actually selected.
 func buildNodePlatformIndex(resources map[string]workloadinterface.IMetadata) map[string]string {
+	return buildNodePlatformIndexFromCatalog(cautils.NewMapResourceCatalog(resources))
+}
+
+// buildNodePlatformIndexFromCatalog records the concrete platform of Node resources
+// by iterating over the ResourceCatalog.
+func buildNodePlatformIndexFromCatalog(catalog cautils.ResourceCatalog) map[string]string {
 	index := make(map[string]string)
-	for _, resource := range resources {
+	if catalog == nil {
+		return index
+	}
+	catalog.ForEach(func(_ string, resource workloadinterface.IMetadata) bool {
 		if resource == nil || !strings.EqualFold(resource.GetKind(), "Node") {
-			continue
+			return true
 		}
 		if platform := platformFromNode(resource); platform != "" {
 			index[resource.GetName()] = platform
 		}
-	}
+		return true
+	})
 	return index
 }
 

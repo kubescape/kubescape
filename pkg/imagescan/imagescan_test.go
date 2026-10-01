@@ -268,7 +268,7 @@ func TestGetProviderConfig(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			providerConfig := getProviderConfig(tt.creds, nil, ScanOptions{})
+			providerConfig := getProviderConfig(tt.creds, nil, ScanOptions{}, nil)
 			assert.NotNil(t, providerConfig)
 			assert.Equal(t, true, providerConfig.GenerateMissingCPEs)
 			assert.Equal(t, tt.wantCreds, providerConfig.RegistryOptions.Credentials)
@@ -322,6 +322,10 @@ func TestNewScanServiceWithMatchersIntegration(t *testing.T) {
 	require.NoError(t, err)
 	defer svcWithDefault.Close()
 	assert.True(t, svcWithDefault.useDefaultMatchers)
+	// The registry keychain fallback (docker config, then any cloud-provider
+	// keychains such as Azure's) must be wired in for every Service the
+	// constructor produces, or image pulls silently lose that fallback.
+	assert.NotNil(t, svcWithDefault.keychain)
 
 	// Test with default matchers disabled
 	svcWithoutDefault, err := NewScanServiceWithMatchers(distCfg, installCfg, false)

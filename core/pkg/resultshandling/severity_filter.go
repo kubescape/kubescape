@@ -72,7 +72,7 @@ func ApplySeverityFilters(sessionObj *cautils.OPASessionObj, minSeverity, maxSev
 	// table no longer counts controls the filtered report no longer contains.
 	// The rebuild inherits each control's final cluster-computed score as-is,
 	// keeping the timed-out-control semantics agreed in #2424 unchanged.
-	sessionObj.NamespaceSummaries = cautils.BuildNamespaceSummaries(sessionObj.Report.SummaryDetails.Controls, sessionObj.AllResources)
+	sessionObj.NamespaceSummaries = cautils.BuildNamespaceSummariesFromCatalog(sessionObj.Report.SummaryDetails.Controls, sessionObj.GetCatalog())
 }
 
 // recomputeSummaryDetails refreshes every derived summary field that was

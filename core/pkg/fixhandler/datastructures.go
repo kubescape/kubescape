@@ -32,6 +32,10 @@ type ResourceFixInfo struct {
 	FilePath        string
 	DocumentIndex   int
 
+	// relativePath is FilePath as the report recorded it, relative to the
+	// resource's own base path. OutputPaths mirrors it under --output-dir.
+	relativePath string
+
 	// failedControls and fixedCount let a resource be withdrawn after its
 	// controls have already been tallied: the entries are re-reported as
 	// unfixed and the count of fully fixed controls is given back.

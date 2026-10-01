@@ -118,6 +118,32 @@
       <tbody>
     </table>
     {{ end }}
+    {{ if .CoverageData }}
+    </br>
+    <h2>Scan Coverage</h2>
+    <p><strong>Coverage Score:</strong> {{ .CoverageData.Score }}%{{ if .CoverageData.Degraded }} ⚠️ Degraded{{ end }}</p>
+    <p>Evaluated {{ .CoverageData.EvaluatedControls }} of {{ .CoverageData.TotalControls }} controls</p>
+    {{ if .CoverageData.SkippedControls }}
+    <table>
+      <thead>
+        <tr>
+          <th>Control ID</th>
+          <th>Name</th>
+          <th>Reason</th>
+        </tr>
+      </thead>
+      <tbody>
+      {{ range .CoverageData.SkippedControls }}
+        <tr>
+          <td>{{ .ControlID }}</td>
+          <td>{{ .Name }}</td>
+          <td>{{ .Reason }}</td>
+        </tr>
+      {{ end }}
+      </tbody>
+    </table>
+    {{ end }}
+    {{ end }}
     </br>
     <h2>Failed Resources:</h2>
     </br>

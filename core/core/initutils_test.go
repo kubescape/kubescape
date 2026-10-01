@@ -484,6 +484,22 @@ func TestGetSensorHandler(t *testing.T) {
 		require.True(t, isMock)
 	})
 
+	t.Run("should return mock sensor if the default sensor is not enabled", func(t *testing.T) {
+		t.Parallel()
+
+		falseVal := false
+		scanInfo := &cautils.ScanInfo{
+			HostSensorEnabledDefault: &falseVal,
+		}
+		k8s := &k8sinterface.KubernetesApi{}
+
+		sensor := getHostSensorHandler(ctx, scanInfo, k8s)
+		require.NotNil(t, sensor)
+
+		_, isMock := sensor.(*hostsensorutils.HostSensorHandlerMock)
+		require.True(t, isMock)
+	})
+
 	t.Run("should return mock sensor if the sensor is disabled", func(t *testing.T) {
 		t.Parallel()
 

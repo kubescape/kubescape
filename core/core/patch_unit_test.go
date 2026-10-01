@@ -98,11 +98,11 @@ func TestTryParseScanReport(t *testing.T) {
 	assert.Equal(t, "ubuntu", manifest.Metadata.OS.Type)
 	assert.Equal(t, "24.04", manifest.Metadata.OS.Version)
 	assert.Equal(t, "amd64", manifest.Metadata.Config.Arch)
-	require.Len(t, manifest.Updates, 1)
-	assert.Equal(t, "openssl", manifest.Updates[0].Name)
-	assert.Equal(t, "3.0.0", manifest.Updates[0].InstalledVersion)
-	assert.Equal(t, "3.0.1", manifest.Updates[0].FixedVersion)
-	assert.Equal(t, "CVE-2026-0001", manifest.Updates[0].VulnerabilityID)
+	require.Len(t, manifest.OSUpdates, 1)
+	assert.Equal(t, "openssl", manifest.OSUpdates[0].Name)
+	assert.Equal(t, "3.0.0", manifest.OSUpdates[0].InstalledVersion)
+	assert.Equal(t, "3.0.1", manifest.OSUpdates[0].FixedVersion)
+	assert.Equal(t, "CVE-2026-0001", manifest.OSUpdates[0].VulnerabilityID)
 }
 
 // TestResolveBuildkitOpts guards against a regression where bkOpts.Addr was

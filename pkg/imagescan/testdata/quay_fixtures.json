@@ -1,0 +1,289 @@
+{
+  "scanned_single_vuln": {
+    "status": "scanned",
+    "data": {
+      "Layer": {
+        "Name": "sha256:d123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "ParentName": "",
+        "NamespaceName": "debian:11",
+        "IndexedByVersion": 4,
+        "Features": [
+          {
+            "Name": "openssl",
+            "Version": "1.1.1n-0+deb11u3",
+            "Vulnerabilities": [
+              {
+                "Name": "CVE-2023-0286",
+                "Severity": "High",
+                "Description": "There is a type confusion vulnerability relating to X.400 address processing inside an X.509 GeneralName.",
+                "Link": "https://access.redhat.com/security/cve/CVE-2023-0286",
+                "FixedBy": "1.1.1n-0+deb11u4",
+                "Metadata": {
+                  "UpdatedBy": "NVD",
+                  "RepoName": "debian:11",
+                  "RepoLink": "https://security-tracker.debian.org/tracker/CVE-2023-0286",
+                  "DistroName": "Debian",
+                  "DistroVersion": "11",
+                  "NVD": {
+                    "CVSSv3": {
+                      "Score": 7.4,
+                      "Vectors": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:N/A:H"
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "scanned_multi_vuln": {
+    "status": "scanned",
+    "data": {
+      "Layer": {
+        "Name": "sha256:e987654321fedcba987654321fedcba987654321fedcba987654321fedcba",
+        "ParentName": "sha256:parent123",
+        "NamespaceName": "alpine:3.18",
+        "IndexedByVersion": 4,
+        "Features": [
+          {
+            "Name": "curl",
+            "Version": "8.0.1-r0",
+            "Vulnerabilities": [
+              {
+                "Name": "CVE-2023-38545",
+                "Severity": "Critical",
+                "Description": "SOCKS5 heap buffer overflow vulnerability in curl.",
+                "Link": "https://curl.se/docs/CVE-2023-38545.html",
+                "FixedBy": "8.4.0-r0",
+                "Metadata": {
+                  "DistroName": "Alpine",
+                  "DistroVersion": "3.18"
+                }
+              },
+              {
+                "Name": "CVE-2023-38546",
+                "Severity": "Low",
+                "Description": "Cookie injection with none file in curl.",
+                "Link": "https://curl.se/docs/CVE-2023-38546.html",
+                "FixedBy": "8.4.0-r0"
+              }
+            ]
+          },
+          {
+            "Name": "libcurl",
+            "Version": "8.0.1-r0",
+            "Vulnerabilities": [
+              {
+                "Name": "CVE-2023-38545",
+                "Severity": "Critical",
+                "Description": "Duplicate report of SOCKS5 heap buffer overflow.",
+                "Link": "https://curl.se/docs/CVE-2023-38545.html",
+                "FixedBy": "8.4.0-r0"
+              },
+              {
+                "Name": "CVE-2023-0001",
+                "Severity": "Defcon1",
+                "Description": "Hypothetical catastrophic vulnerability.",
+                "Link": "https://example.com/cve-2023-0001"
+              },
+              {
+                "Name": "CVE-2023-0002",
+                "Severity": "Medium",
+                "Description": "Moderate information leak.",
+                "Link": "https://example.com/cve-2023-0002"
+              },
+              {
+                "Name": "CVE-2023-0003",
+                "Severity": "Negligible",
+                "Description": "Minor informational issue.",
+                "Link": "https://example.com/cve-2023-0003"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "queued_scan": {
+    "status": "queued",
+    "data": null
+  },
+  "unsupported_scan": {
+    "status": "unsupported",
+    "data": null
+  },
+  "failed_scan": {
+    "status": "failed",
+    "data": null
+  },
+  "empty_vuln_scan": {
+    "status": "scanned",
+    "data": {
+      "Layer": {
+        "Name": "sha256:clean1234567890abcdef",
+        "Features": []
+      }
+    }
+  },
+  "discovery_enabled": {
+    "status": "ok",
+    "features": {
+      "SECURITY_SCANNER": true,
+      "SIGNING": true,
+      "IMAGE_REPLICATION": false
+    }
+  },
+  "discovery_disabled": {
+    "status": "ok",
+    "features": {
+      "SECURITY_SCANNER": false,
+      "SIGNING": false
+    }
+  },
+  "enterprise_multirepo_scan": {
+    "status": "scanned",
+    "data": {
+      "Layer": {
+        "Name": "sha256:enterprise1234567890abcdef",
+        "Features": [
+          {
+            "Name": "openssl",
+            "Version": "1.1.1k-1.el8",
+            "Vulnerabilities": [
+              {
+                "Name": "CVE-2023-3817",
+                "Severity": "Defcon1",
+                "Description": "Excessive time spent checking DH keys.",
+                "Link": "https://nvd.nist.gov/vuln/detail/CVE-2023-3817",
+                "FixedBy": "1.1.1k-2.el8",
+                "Metadata": {
+                  "NVD": {
+                    "CVSSv3": {
+                      "Score": 7.5,
+                      "Vectors": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H"
+                    }
+                  }
+                }
+              },
+              {
+                "Name": "CVE-2023-3446",
+                "Severity": "Medium",
+                "Description": "Excessive time spent checking DH keys with large parameters.",
+                "Link": "https://nvd.nist.gov/vuln/detail/CVE-2023-3446",
+                "FixedBy": "1.1.1k-2.el8",
+                "Metadata": {
+                  "NVD": {
+                    "CVSSv3": {
+                      "Score": 5.3,
+                      "Vectors": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:L"
+                    }
+                  }
+                }
+              }
+            ]
+          },
+          {
+            "Name": "glibc",
+            "Version": "2.28-151.el8",
+            "Vulnerabilities": [
+              {
+                "Name": "CVE-2023-4911",
+                "Severity": "High",
+                "Description": "GLibc ld.so buffer overflow in GLIBC_TUNABLES environment variable.",
+                "Link": "https://nvd.nist.gov/vuln/detail/CVE-2023-4911",
+                "FixedBy": "2.28-151.el8_8.4",
+                "Metadata": {
+                  "NVD": {
+                    "CVSSv3": {
+                      "Score": 7.8,
+                      "Vectors": "CVSS:3.1/AV:L/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:H"
+                    }
+                  }
+                }
+              }
+            ]
+          },
+          {
+            "Name": "curl",
+            "Version": "7.61.1-22.el8",
+            "Vulnerabilities": [
+              {
+                "Name": "CVE-2023-38545",
+                "Severity": "Critical",
+                "Description": "SOCKS5 heap buffer overflow in curl library.",
+                "Link": "https://nvd.nist.gov/vuln/detail/CVE-2023-38545",
+                "FixedBy": "7.61.1-22.el8_9",
+                "Metadata": {
+                  "NVD": {
+                    "CVSSv3": {
+                      "Score": 9.8,
+                      "Vectors": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
+                    }
+                  }
+                }
+              },
+              {
+                "Name": "CVE-2023-38546",
+                "Severity": "Low",
+                "Description": "Cookie injection with none cookie domain.",
+                "Link": "",
+                "FixedBy": "7.61.1-22.el8_9",
+                "Metadata": {
+                  "NVD": {
+                    "CVSSv3": {
+                      "Score": 3.7,
+                      "Vectors": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:N/A:N"
+                    }
+                  }
+                }
+              }
+            ]
+          },
+          {
+            "Name": "zlib",
+            "Version": "1.2.11-17.el8",
+            "Vulnerabilities": [
+              {
+                "Name": "CVE-2022-37434",
+                "Severity": "High",
+                "Description": "",
+                "Link": "",
+                "FixedBy": "1.2.11-18.el8",
+                "Metadata": {
+                  "NVD": {
+                    "CVSSv3": {
+                      "Score": 8.1,
+                      "Vectors": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:H"
+                    }
+                  }
+                }
+              }
+            ]
+          },
+          {
+            "Name": "python3",
+            "Version": "3.6.8-45.el8",
+            "Vulnerabilities": [
+              {
+                "Name": "CVE-2023-24329",
+                "Severity": "Medium",
+                "Description": "Bypass urllib.parse.urlsplit blocklisting.",
+                "Link": "https://nvd.nist.gov/vuln/detail/CVE-2023-24329",
+                "FixedBy": "3.6.8-46.el8"
+              },
+              {
+                "Name": "CVE-2023-4911",
+                "Severity": "High",
+                "Description": "Duplicate glibc reference in bundled runtime.",
+                "Link": "https://nvd.nist.gov/vuln/detail/CVE-2023-4911",
+                "FixedBy": ""
+              }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

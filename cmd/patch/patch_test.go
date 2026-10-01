@@ -7,6 +7,7 @@ import (
 	metav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
 
 	"github.com/kubescape/kubescape/v4/cmd/shared"
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/mocks"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
@@ -385,4 +386,38 @@ func Test_validateImagePatchInfo_OutputModeValidation(t *testing.T) {
 	err = validateImagePatchInfo(patchInfoPushConflict)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "mutually exclusive")
+}
+
+type thresholdExceededKubescape struct {
+	mocks.MockIKubescape
+}
+
+func (thresholdExceededKubescape) Patch(_ *metav1.PatchInfo, _ *cautils.ScanInfo) (bool, error) {
+	return true, nil
+}
+
+func TestGetPatchCmd_SeverityThresholdDoesNotPrintUsage(t *testing.T) {
+	cmd := GetPatchCmd(&thresholdExceededKubescape{})
+	var buf strings.Builder
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+	cmd.SetArgs([]string{"--image", "docker.io/library/nginx:1.22", "--severity-threshold", "high"})
+
+	err := cmd.Execute()
+
+	assert.ErrorContains(t, err, "result exceeds severity threshold: high")
+	assert.NotContains(t, buf.String(), "Usage:", "threshold failure must not dump command usage")
+}
+
+func TestGetPatchCmd_ValidationErrorStillPrintsUsage(t *testing.T) {
+	cmd := GetPatchCmd(&thresholdExceededKubescape{})
+	var buf strings.Builder
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+	cmd.SetArgs([]string{"--image", "docker.io/library/nginx:1.22", "--output-mode", "invalid"})
+
+	err := cmd.Execute()
+
+	assert.ErrorContains(t, err, "invalid output mode")
+	assert.Contains(t, buf.String(), "Usage:", "input validation errors must print command usage")
 }

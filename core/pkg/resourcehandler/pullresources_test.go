@@ -111,8 +111,19 @@ func TestPullSingleResource_FieldSelectorDoesNotLeakAcrossIterations(t *testing.
 // gvrToListKind registers the GVRs used in these tests so the fake dynamic
 // client doesn't panic when List is called on them.
 var testGVRToListKind = map[schema.GroupVersionResource]string{
+	{Group: "rbac.authorization.k8s.io", Version: "v1", Resource: "clusterroles"}:        "ClusterRoleList",
 	{Group: "rbac.authorization.k8s.io", Version: "v1", Resource: "clusterrolebindings"}: "ClusterRoleBindingList",
+	{Group: "rbac.authorization.k8s.io", Version: "v1", Resource: "roles"}:               "RoleList",
+	{Group: "rbac.authorization.k8s.io", Version: "v1", Resource: "rolebindings"}:        "RoleBindingList",
+	{Group: "apps", Version: "v1", Resource: "deployments"}:                              "DeploymentList",
+	{Group: "apps", Version: "v1", Resource: "replicasets"}:                              "ReplicaSetList",
+	{Group: "apps", Version: "v1", Resource: "daemonsets"}:                               "DaemonSetList",
+	{Group: "apps", Version: "v1", Resource: "statefulsets"}:                             "StatefulSetList",
+	{Group: "batch", Version: "v1", Resource: "jobs"}:                                    "JobList",
+	{Group: "batch", Version: "v1", Resource: "cronjobs"}:                                "CronJobList",
+	{Group: "", Version: "v1", Resource: "serviceaccounts"}:                              "ServiceAccountList",
 	{Group: "", Version: "v1", Resource: "pods"}:                                         "PodList",
+	{Group: "", Version: "v1", Resource: "services"}:                                     "ServiceList",
 	{Group: "", Version: "v1", Resource: "somecrd"}:                                      "SomeCRDList",
 }
 

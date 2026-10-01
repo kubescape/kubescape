@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -20,6 +21,7 @@ import (
 	"github.com/kubescape/kubescape/v4/core/pkg/fleet"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer"
+	printerv2 "github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer/v2"
 	"github.com/spf13/cobra"
 )
 
@@ -48,6 +50,9 @@ func validateKubeContextsSupported(cmd *cobra.Command, scanInfo *cautils.ScanInf
 		if len(scanInfo.KubeContexts) == 0 {
 			return fmt.Errorf("--fleet-report requires --kube-contexts: it aggregates the reports of a multi-context scan, so with a single context there is nothing to combine")
 		}
+	}
+	if err := validateReferenceCluster(scanInfo); err != nil {
+		return err
 	}
 	if len(scanInfo.KubeContexts) == 0 {
 		return nil
@@ -164,6 +169,32 @@ func validateFleetReportPrivacyModes(scanInfo *cautils.ScanInfo) error {
 	return nil
 }
 
+// validateReferenceCluster rejects a --reference-cluster that cannot mean
+// anything.
+//
+// It only has an effect inside the combined report, so asking for one without
+// --fleet-report would silently do nothing. Naming a context that is not being
+// scanned is almost always a typo, and left alone it would produce a report
+// saying the reference was unavailable, which reads as an infrastructure
+// problem rather than a misspelling. Both are worth catching before a scan
+// starts rather than after every cluster has been visited.
+func validateReferenceCluster(scanInfo *cautils.ScanInfo) error {
+	reference := strings.TrimSpace(scanInfo.ReferenceCluster)
+	if scanInfo.ReferenceCluster != "" && reference == "" {
+		return fmt.Errorf("--reference-cluster %q is blank: it needs the name of a kube context", scanInfo.ReferenceCluster)
+	}
+	if reference == "" {
+		return nil
+	}
+	if !fleetReportRequested(scanInfo.FleetReport) {
+		return fmt.Errorf("--reference-cluster requires --fleet-report: it only changes the combined report, which is not being written")
+	}
+	if !slices.Contains(scanInfo.KubeContexts, reference) {
+		return fmt.Errorf("--reference-cluster %q is not one of --kube-contexts (%s): the reference has to be a cluster the run is scanning", reference, strings.Join(scanInfo.KubeContexts, ", "))
+	}
+	return nil
+}
+
 // printerDestinations returns every file the printers will actually write for
 // one context's --output path, one per requested format.
 //
@@ -212,6 +243,9 @@ func validateFleetScanInvocation(scanInfo *cautils.ScanInfo) (map[string]string,
 			return nil, err
 		}
 	}
+	if err := validateReferenceCluster(scanInfo); err != nil {
+		return nil, err
+	}
 
 	formats := scanInfo.Formats()
 	outputPaths, err := perContextOutputPaths(scanInfo.Output, scanInfo.KubeContexts, formats)
@@ -239,11 +273,10 @@ func validateFleetReportPath(fleetReport string, outputPaths map[string]string, 
 	return fleetReportAliasesPerContextReport(fleetReport, outputPaths, formats)
 }
 
-// fleetReportAliasesPerContextReport catches what the string comparison cannot:
-// a --fleet-report path that reaches one of the per-context reports through a
-// symlink. os.Create follows symlinks, so writing the fleet report through one
-// would put fleet JSON at a cluster's own report path, truncating the report if
-// that context wrote one and leaving a misleading file there if it did not.
+// fleetReportAliasesPerContextReport catches aliases that string comparison
+// cannot. Atomic publication replaces a symlink in the final path component,
+// but a symlinked parent directory can still route the write onto a
+// per-context report. Existing files may also alias through hard links.
 //
 // Both sides are reduced to the same canonical form before comparing, see
 // resolvePath, so it does not matter whether the link is the final component,
@@ -424,13 +457,7 @@ func fleetScan(baseScanInfo cautils.ScanInfo, ks meta.IKubescape, policyIdentifi
 
 		logger.L().Info("fleet scan: scanning context", helpers.String("context", kubeContext), helpers.String("output", outputPath))
 
-		leave := cautils.EnterClusterContext(kubeContext)
-		ctx, cancel := deriveTimeoutContext(contextScanInfo, ks)
-		started := time.Now()
-		results, err := run(ctx, contextScanInfo, ks, policyIdentifiers)
-		elapsed := time.Since(started)
-		cancel()
-		leave()
+		results, elapsed, err := runFleetContext(kubeContext, contextScanInfo, ks, policyIdentifiers, run)
 
 		if wantFleetReport {
 			clusters = append(clusters, newClusterResult(kubeContext, results, err, elapsed))
@@ -452,12 +479,17 @@ func fleetScan(baseScanInfo cautils.ScanInfo, ks meta.IKubescape, policyIdentifi
 				KubescapeVersion: versioncheck.BuildNumber,
 				Contexts:         baseScanInfo.KubeContexts,
 			},
-			Clusters:      clusters,
+			Clusters: clusters,
+			// --fail-coverage-below is the operator's own statement of the
+			// coverage they are prepared to stand behind, so the rollup reuses
+			// it rather than introducing a second, separate threshold that
+			// could contradict it. Unset means no floor.
+			Compliance:    fleet.BuildComplianceRollup(clusters, baseScanInfo.FailCoverageThreshold),
 			ControlMatrix: fleet.BuildControlMatrix(clusters),
 		}
-		// Re-checked here, not only up front: the per-context files exist now,
-		// so a symlink that pointed at nothing before the scan can resolve to
-		// one of them at this point.
+		report.Divergence = fleet.BuildDivergence(report.ControlMatrix, baseScanInfo.ReferenceCluster)
+		// Re-check after the per-context files exist so os.SameFile can detect
+		// hard-link aliases that were not observable before the scans ran.
 		fleetReportErr = fleetReportAliasesPerContextReport(baseScanInfo.FleetReport, outputPaths, baseScanInfo.Formats())
 		if fleetReportErr == nil {
 			fleetReportErr = writeFleetReport(baseScanInfo.FleetReport, &report)
@@ -467,6 +499,12 @@ func fleetScan(baseScanInfo cautils.ScanInfo, ks meta.IKubescape, policyIdentifi
 		} else {
 			logger.L().Error("fleet scan: fleet report not written", helpers.String("output", baseScanInfo.FleetReport), helpers.Error(fleetReportErr))
 		}
+
+		// Printed whether or not the file was written. A run that scanned every
+		// cluster and then failed to save the result should still tell the
+		// operator what it found, and the summary is the only place they would
+		// otherwise see it.
+		printerv2.PrintFleetReport(os.Stdout, &report)
 	}
 
 	// The fleet report is not a context, so its failure is reported beside the
@@ -482,6 +520,21 @@ func fleetScan(baseScanInfo cautils.ScanInfo, ks meta.IKubescape, policyIdentifi
 		return fmt.Errorf("fleet scan: every context was scanned but the fleet report was not written: %w", fleetReportErr)
 	}
 	return nil
+}
+
+// runFleetContext scopes the Kubernetes context and timeout to one fleet
+// iteration. The deferred cleanup satisfies EnterClusterContext's contract on
+// normal returns, errors and panics without deferring across the whole loop.
+func runFleetContext(kubeContext string, scanInfo *cautils.ScanInfo, ks meta.IKubescape, policyIdentifiers []cautils.PolicyIdentifier, run fleetRunner) (results *resultshandling.ResultsHandler, elapsed time.Duration, err error) {
+	leave := cautils.EnterClusterContext(kubeContext)
+	defer leave()
+
+	ctx, cancel := deriveTimeoutContext(scanInfo, ks)
+	defer cancel()
+
+	started := time.Now()
+	results, err = run(ctx, scanInfo, ks, policyIdentifiers)
+	return results, time.Since(started), err
 }
 
 // newClusterResult turns one context's outcome into the row the fleet report
@@ -549,22 +602,17 @@ func newClusterResult(kubeContext string, results *resultshandling.ResultsHandle
 	return cluster
 }
 
-// writeFleetReport serialises the report to path as indented JSON. The path is
-// opened without any stdout fallback: the operator asked for a file, and a
-// report that quietly went somewhere else is worse than an error.
+// writeFleetReport serialises the report to path as indented JSON. The
+// destination is replaced atomically only after the complete report has been
+// encoded and flushed, so a failed write cannot destroy a previous good
+// report or leave a truncated report that still looks like the latest run.
 func writeFleetReport(path string, report *fleet.FleetReport) error {
-	f, err := printer.GetWriterNoFallback(path)
+	data, err := json.MarshalIndent(report, "", "  ")
 	if err != nil {
-		return err
+		return fmt.Errorf("encode fleet report %q: %w", path, err)
 	}
-
-	encoder := json.NewEncoder(f)
-	encoder.SetIndent("", "  ")
-	if err := encoder.Encode(report); err != nil {
-		_ = f.Close()
-		return fmt.Errorf("write fleet report %q: %w", path, err)
-	}
-	if err := f.Close(); err != nil {
+	data = append(data, '\n')
+	if err := cautils.WriteFileAtomically(path, data, 0o644); err != nil {
 		return fmt.Errorf("write fleet report %q: %w", path, err)
 	}
 	return nil

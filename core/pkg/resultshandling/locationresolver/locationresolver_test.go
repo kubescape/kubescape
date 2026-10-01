@@ -44,6 +44,13 @@ func TestResolveLocation(t *testing.T) {
 		assert.Empty(t, location)
 	}
 
+	// Negative node indices must be rejected, not passed to the slice.
+	for fixPath := range fixPathToExpectedLineAndColumn {
+		location, err := resolver.ResolveLocation(fixPath, -1)
+		assert.Contains(t, err.Error(), "node index [-1] out of range ")
+		assert.Empty(t, location)
+	}
+
 	for fixPath, expected := range fixPathToExpectedLineAndColumn {
 		location, err := resolver.ResolveLocation(fixPath, 0)
 		assert.NoError(t, err)

@@ -159,6 +159,11 @@ func defaultResourceResolver(group, version, resource string) []resolvedResource
 	if version == "" || resource == "" {
 		return nil
 	}
+	// Host envelopes use policy Kind names even when discovery knows their CRDs.
+	if MapResourceToApiGroup[resource] == group+"/"+version {
+		return []resolvedResource{{groupVersionResourceTriplet: k8sinterface.JoinResourceTriplets(group, version, resource)}}
+	}
+
 	// Resolve the alias before the triplet is built: "core/v1/pods" names an
 	// API group no cluster serves, so the query it produces can only fail.
 	group = normalizeAPIGroup(group)
@@ -233,6 +238,12 @@ func newDiscoveryResourceResolverWithKinds(client discovery.DiscoveryInterface) 
 	return func(group, version, resource string) []resolvedResource {
 		if version == "" || resource == "" {
 			return nil
+		}
+
+		// Host-data CRDs transport virtual resources. Keep their policy Kind
+		// identities instead of discovery's plural REST resource names.
+		if MapResourceToApiGroup[resource] == group+"/"+version {
+			return defaultResourceResolver(group, version, resource)
 		}
 
 		var resolved []resolvedResource

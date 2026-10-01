@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/enescakir/emoji"
@@ -21,39 +22,49 @@ type InfoStars struct {
 }
 
 func MapInfoToPrintInfoFromIface(ctrls []reportsummary.IControlSummary) []InfoStars {
+	ordered := make([]reportsummary.IControlSummary, len(ctrls))
+	copy(ordered, ctrls)
+	return collectInfoStars(ordered)
+}
+
+func MapInfoToPrintInfo(controls reportsummary.ControlSummaries) []InfoStars {
+	ordered := make([]reportsummary.IControlSummary, 0, len(controls))
+	for id := range controls {
+		ctrl := controls[id]
+		ordered = append(ordered, &ctrl)
+	}
+	return collectInfoStars(ordered)
+}
+
+// collectInfoStars assigns a star marker to each distinct info message. Every
+// caller reaches it from a map or from a slice built by iterating one, so the
+// controls are put in a fixed order first: without it the same scan hands a
+// different star to each message on every run.
+func collectInfoStars(ctrls []reportsummary.IControlSummary) []InfoStars {
+	sort.Slice(ctrls, func(i, j int) bool {
+		if ctrls[i].GetName() != ctrls[j].GetName() {
+			return ctrls[i].GetName() < ctrls[j].GetName()
+		}
+		return ctrls[i].GetID() < ctrls[j].GetID()
+	})
+
 	infoToPrintInfo := []InfoStars{}
 	infoToPrintInfoMap := map[string]any{}
 	starCount := "*"
 	for _, ctrl := range ctrls {
-		if ctrl.GetStatus().IsSkipped() && ctrl.GetStatus().Info() != "" {
-			if _, ok := infoToPrintInfoMap[ctrl.GetStatus().Info()]; !ok {
-				infoToPrintInfo = append(infoToPrintInfo, InfoStars{
-					Info:  ctrl.GetStatus().Info(),
-					Stars: starCount,
-				})
-				starCount += "*"
-				infoToPrintInfoMap[ctrl.GetStatus().Info()] = nil
-			}
+		status := ctrl.GetStatus()
+		if !status.IsSkipped() || status.Info() == "" {
+			continue
 		}
-	}
-	return infoToPrintInfo
-}
-
-func MapInfoToPrintInfo(controls reportsummary.ControlSummaries) []InfoStars {
-	infoToPrintInfo := []InfoStars{}
-	infoToPrintInfoMap := map[string]any{}
-	starCount := "*"
-	for _, control := range controls {
-		if control.GetStatus().IsSkipped() && control.GetStatus().Info() != "" {
-			if _, ok := infoToPrintInfoMap[control.GetStatus().Info()]; !ok {
-				infoToPrintInfo = append(infoToPrintInfo, InfoStars{
-					Info:  control.GetStatus().Info(),
-					Stars: starCount,
-				})
-				starCount += "*"
-				infoToPrintInfoMap[control.GetStatus().Info()] = nil
-			}
+		if _, ok := infoToPrintInfoMap[status.Info()]; ok {
+			continue
 		}
+		infoToPrintInfo = append(infoToPrintInfo, InfoStars{
+			Info:  status.Info(),
+			Stars: starCount,
+		})
+		starCount += "*"
+		infoToPrintInfoMap[status.Info()] = nil
 	}
 	return infoToPrintInfo
 }

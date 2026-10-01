@@ -86,10 +86,10 @@ func (rh *ResultsHandler) GetReporter() reporter.IReport {
 // WriteJson streams the results in JSON format directly to the given writer
 func (rh *ResultsHandler) WriteJson(w io.Writer) error {
 	finalizedReport := printerv2.FinalizeResults(rh.ScanData)
-	enrichedReport := printerv2.ConvertToPostureReportWithSeverityLabelsAndCoverage(
+	enrichedReport := printerv2.ConvertToPostureReportWithSeverityLabelsAndCoverageFromCatalog(
 		finalizedReport,
 		rh.ScanData.LabelsToCopy,
-		rh.ScanData.AllResources,
+		rh.ScanData.GetCatalog(),
 		&rh.ScanData.ScanCoverage,
 	)
 
@@ -289,8 +289,8 @@ func (rh *ResultsHandler) HandleResults(ctx context.Context, scanInfo *cautils.S
 		// Refine that coarse per-control Bound signal with per-resource
 		// binding-scope matching, before ApplySeverityFilters below narrows
 		// which resources/controls are considered.
-		failing := vapreconcile.CollectFailingResourcesByControl(rh.ScanData.ResourcesResult, rh.ScanData.AllResources)
-		namespaceLabels := vapreconcile.CollectNamespaceLabels(rh.ScanData.AllResources)
+		failing := vapreconcile.CollectFailingResourcesByControlFromCatalog(rh.ScanData.ResourcesResult, rh.ScanData.GetCatalog())
+		namespaceLabels := vapreconcile.CollectNamespaceLabelsFromCatalog(rh.ScanData.GetCatalog())
 		rh.ScanData.VAPCoverage = vapreconcile.BuildCoverage(rh.ScanData.VAPPolicies, rh.ScanData.VAPBindings, failing, namespaceLabels)
 	}
 

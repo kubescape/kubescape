@@ -1738,3 +1738,20 @@ func TestTransformSession_ClusterNamespaceCountsJoinAfterDecryption(t *testing.T
 		require.Contains(t, decryptedCounts, decrypted.GetNamespace())
 	}
 }
+
+// TestTransformSession_MarksSourcePathsAnonymized pins the flag readers rely on
+// to know a source path can no longer be opened.
+func TestTransformSession_MarksSourcePathsAnonymized(t *testing.T) {
+	session := cautils.NewOPASessionObjMock()
+	session.ResourceSource = map[string]reporthandling.Source{
+		"apps/v1/default/Deployment/demo": {RelativePath: "deploy.yaml", Path: "/repo"},
+	}
+	require.False(t, session.SourcePathsAnonymized)
+
+	require.NoError(t, transformSession(session, NewMapping(), NewMappingTransformer()))
+
+	assert.True(t, session.SourcePathsAnonymized)
+	for _, source := range session.ResourceSource {
+		assert.NotEqual(t, "deploy.yaml", source.RelativePath, "path should be a pseudonym")
+	}
+}

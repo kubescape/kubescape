@@ -79,6 +79,9 @@ func (m *MemoryStore) Put(ctx context.Context, namespace string, obj workloadint
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	if isNilMetadata(obj) {
+		return ErrNilMetadata
+	}
 
 	rec := newRecord(m.activeGVR, namespace, obj)
 	m.staged[m.activeGVR][namespace] = append(m.staged[m.activeGVR][namespace], rec)
@@ -230,7 +233,7 @@ func (m *MemoryStore) LoadBatch(ctx context.Context, namespace string) (*cautils
 	}
 
 	if m.opts.PurgeOnLoad {
-		delete(m.committed, namespace)
+		m.purgeNamespaceLocked(namespace)
 	}
 
 	return batch, nil
@@ -244,8 +247,18 @@ func (m *MemoryStore) PurgeNamespace(namespace string) error {
 		return ErrStoreClosed
 	}
 
-	delete(m.committed, namespace)
+	m.purgeNamespaceLocked(namespace)
 	return nil
+}
+
+func (m *MemoryStore) purgeNamespaceLocked(namespace string) {
+	count, exists := m.namespaceCounts[namespace]
+	if !exists {
+		return
+	}
+	delete(m.committed, namespace)
+	delete(m.namespaceCounts, namespace)
+	m.totalResources -= count
 }
 
 func (m *MemoryStore) Close() error {

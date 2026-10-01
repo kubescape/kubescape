@@ -206,7 +206,7 @@ func TestWorkflowPrefixConventionHolds(t *testing.T) {
 				assert.Truef(t, numericPrefix.MatchString(name),
 					"%s calls another workflow so it should carry a numeric prefix", name)
 			default:
-				// Standalone workflows (scorecard, comments) are outside the
+				// Standalone workflows (scorecard, etc.) are outside the
 				// caller/reusable convention and are intentionally unconstrained.
 				t.Skipf("%s is standalone: neither reusable nor a caller", name)
 			}

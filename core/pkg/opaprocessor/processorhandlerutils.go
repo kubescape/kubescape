@@ -2,9 +2,7 @@ package opaprocessor
 
 import (
 	"context"
-	"errors"
 	"regexp"
-	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -42,14 +40,15 @@ func (opap *OPAProcessor) updateResults(ctx context.Context) {
 	defer cautils.StopSpinner()
 
 	// remove data from all objects
-	for i := range opap.AllResources {
-		if refsByContainer := removeData(opap.AllResources[i]); len(refsByContainer) > 0 {
+	opap.GetCatalog().ForEach(func(i string, res workloadinterface.IMetadata) bool {
+		if refsByContainer := removeData(res); len(refsByContainer) > 0 {
 			if opap.EnvVarSecretRefs == nil {
 				opap.EnvVarSecretRefs = make(map[string]map[string]map[string]struct{})
 			}
 			opap.EnvVarSecretRefs[i] = refsByContainer
 		}
-	}
+		return true
+	})
 
 	processor := exceptions.NewProcessor()
 
@@ -68,7 +67,7 @@ func (opap *OPAProcessor) updateResults(ctx context.Context) {
 		t := opap.ResourcesResult[i]
 
 		// first set exceptions (reuse the same exceptions processor)
-		if resource, ok := opap.AllResources[i]; ok {
+		if resource, ok := opap.GetResource(i); ok {
 			t.SetExceptions(
 				resource,
 				resourceScopedExceptions(opap.Exceptions, i),
@@ -95,7 +94,7 @@ func (opap *OPAProcessor) updateResults(ctx context.Context) {
 	opap.Report.SummaryDetails.InitResourcesSummary(controlToInfoMap)
 
 	if opap.AuditExceptions {
-		opap.ExceptionAudit = buildExceptionAudit(loadedExceptions, opap.Exceptions, opap.ResourcesResult, opap.AllResources, opap.AllPolicies, processor, manualControlMatches)
+		opap.ExceptionAudit = buildExceptionAudit(loadedExceptions, opap.Exceptions, opap.ResourcesResult, opap.GetCatalog(), opap.AllPolicies, processor, manualControlMatches)
 	}
 }
 
@@ -318,12 +317,12 @@ func inlineExceptionFromResource(obj workloadinterface.IMetadata, clusterName st
 // policies synthesised from their kubescape.io/skip-* annotations.
 func (opap *OPAProcessor) gatherInlineExceptions() []armotypes.PostureExceptionPolicy {
 	var exceptions []armotypes.PostureExceptionPolicy
-	for _, resource := range opap.AllResources {
-		if resource == nil {
-			continue
+	opap.GetCatalog().ForEach(func(_ string, resource workloadinterface.IMetadata) bool {
+		if resource != nil {
+			exceptions = append(exceptions, inlineExceptionFromResource(resource, opap.clusterName)...)
 		}
-		exceptions = append(exceptions, inlineExceptionFromResource(resource, opap.clusterName)...)
-	}
+		return true
+	})
 	return exceptions
 }
 
@@ -560,6 +559,135 @@ func matchesKubernetesObjectValue(policyValue, objectValue string) bool {
 	}
 	return policyValue == "core" && objectValue == ""
 }
+
+// matchesRuleObjects reports whether a resource identified by group, version, resource, and kind
+// matches any RuleMatchObjects block.
+func matchesRuleObjects(group, version, resource, kind string, matchers []reporthandling.RuleMatchObjects) bool {
+	for m := range matchers {
+		mt := &matchers[m]
+		groupMatch := false
+		for _, g := range mt.APIGroups {
+			if matchesKubernetesObjectValue(g, group) {
+				groupMatch = true
+				break
+			}
+		}
+		if !groupMatch {
+			continue
+		}
+
+		versionMatch := false
+		for _, v := range mt.APIVersions {
+			if matchesKubernetesObjectValue(v, version) {
+				versionMatch = true
+				break
+			}
+		}
+		if !versionMatch {
+			continue
+		}
+
+		for _, r := range mt.Resources {
+			if r == "*" || strings.EqualFold(r, resource) || strings.EqualFold(r, kind) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// controlHasMatcherEvidence reports whether control declares at least one rule and
+// every rule declares at least one Match or DynamicMatch object with non-empty
+// APIGroups, APIVersions, and Resources fields.
+func controlHasMatcherEvidence(control *reporthandling.Control) bool {
+	if control == nil || len(control.Rules) == 0 {
+		return false
+	}
+	for i := range control.Rules {
+		hasMatch := false
+		for _, m := range control.Rules[i].Match {
+			if len(m.APIGroups) > 0 && len(m.APIVersions) > 0 && len(m.Resources) > 0 {
+				hasMatch = true
+				break
+			}
+		}
+		if !hasMatch {
+			for _, m := range control.Rules[i].DynamicMatch {
+				if len(m.APIGroups) > 0 && len(m.APIVersions) > 0 && len(m.Resources) > 0 {
+					hasMatch = true
+					break
+				}
+			}
+		}
+		if !hasMatch {
+			return false
+		}
+	}
+	return true
+}
+
+// compileWholeClusterMatchers extracts the union of RuleMatchObjects across all
+// rules and dynamic rules of wholeClusterControlIDs.
+func compileWholeClusterMatchers(policies *cautils.Policies, wholeClusterControlIDs []string) []reporthandling.RuleMatchObjects {
+	if policies == nil || len(wholeClusterControlIDs) == 0 {
+		return nil
+	}
+	var matchers []reporthandling.RuleMatchObjects
+	for _, id := range wholeClusterControlIDs {
+		ctrl, ok := policies.Controls[id]
+		if !ok {
+			continue
+		}
+		for i := range ctrl.Rules {
+			matchers = append(matchers, ctrl.Rules[i].Match...)
+			matchers = append(matchers, ctrl.Rules[i].DynamicMatch...)
+		}
+	}
+	return matchers
+}
+
+// filterProjectedBatch creates a new ResourceBatch containing only the resources
+// matching matchers from sourceK8s, sourceExternal, and sourceAll.
+func filterProjectedBatch(sourceK8s cautils.K8SResources, sourceExternal cautils.ExternalResources, sourceAll map[string]workloadinterface.IMetadata, matchers []reporthandling.RuleMatchObjects) *cautils.ResourceBatch {
+	batch := cautils.NewResourceBatch(cautils.ClusterScope)
+	appendProjectedResources(sourceK8s, sourceExternal, sourceAll, matchers, batch)
+	return batch
+}
+
+// appendProjectedResources filters resources from sourceK8s and sourceExternal against matchers
+// and appends matching entries to target batch.
+func appendProjectedResources(sourceK8s cautils.K8SResources, sourceExternal cautils.ExternalResources, sourceAll map[string]workloadinterface.IMetadata, matchers []reporthandling.RuleMatchObjects, target *cautils.ResourceBatch) {
+	if target == nil || len(matchers) == 0 {
+		return
+	}
+	for key, ids := range sourceK8s {
+		group, version, resource := k8sinterface.StringToResourceGroup(key)
+		for _, id := range ids {
+			obj, ok := sourceAll[id]
+			if !ok || obj == nil {
+				continue
+			}
+			if matchesRuleObjects(group, version, resource, obj.GetKind(), matchers) {
+				target.K8SResources[key] = append(target.K8SResources[key], id)
+				target.AllResources[id] = obj
+			}
+		}
+	}
+	for key, ids := range sourceExternal {
+		group, version, resource := k8sinterface.StringToResourceGroup(key)
+		for _, id := range ids {
+			obj, ok := sourceAll[id]
+			if !ok || obj == nil {
+				continue
+			}
+			if matchesRuleObjects(group, version, resource, obj.GetKind(), matchers) {
+				target.ExternalResources[key] = append(target.ExternalResources[key], id)
+				target.AllResources[id] = obj
+			}
+		}
+	}
+}
+
 func getRuleDependencies(ctx context.Context) (map[string]string, error) {
 	modules := resources.LoadRegoModules()
 	if len(modules) == 0 {
@@ -759,152 +887,20 @@ func inEnumeratedScope(enumeratedIDs map[string]struct{}, failedResource workloa
 	return inScope
 }
 
-// errIncludeControlsNoMatch is returned when --include-controls is set but
-// none of the requested IDs exist in the loaded frameworks. Returning a hard
-// error (instead of silently excluding every control and yielding 0 results
-// with exit 0) preserves CI-gate integrity: a typo like --include-controls
-// C-9999 must fail the scan, not pass it.
-var errIncludeControlsNoMatch = errors.New("--include-controls matched no known control")
+// Control filtering (--skip-controls/--include-controls) lives in cautils so
+// both the evaluation phase (here) and the collection phase (resourcehandler,
+// which scopes host-gap coverage to effective selected-control dependencies)
+// share one implementation. The unexported names below delegate to it so
+// existing callers and tests keep working unchanged.
+var (
+	errIncludeControlsNoMatch = cautils.ErrIncludeControlsNoMatch
+	errNoControlsAfterFilter  = cautils.ErrNoControlsAfterFilter
+)
 
-// errNoControlsAfterFilter is returned when --include-controls/--skip-controls
-// together filter out every control, mirroring policyhandler.excludeControls'
-// errAllControlsExcluded guard for --exclude-controls.
-var errNoControlsAfterFilter = errors.New("--include-controls/--skip-controls left no controls to scan")
-
-// controlIdentifiers returns the normalized identifiers a control can be named
-// by on the command line: its Kubescape control ID (ControlID, e.g. "C-0286")
-// and, where the control carries one, its framework section number (Control_ID,
-// e.g. "CIS-3.1.1"). Both are lowercased so lookups are case-insensitive.
-// This is the same identifier pair policyhandler.markControlMatches uses, so
-// --skip-controls and --include-controls accept exactly what --exclude-controls
-// accepts.
 func controlIdentifiers(control *reporthandling.Control) []string {
-	identifiers := make([]string, 0, 2)
-	for _, identifier := range [2]string{control.ControlID, control.Control_ID} {
-		token := strings.ToLower(strings.TrimSpace(identifier))
-		if token == "" || slices.Contains(identifiers, token) {
-			continue
-		}
-		identifiers = append(identifiers, token)
-	}
-	return identifiers
+	return cautils.ControlIdentifiers(control)
 }
 
-// controlMatchesAny reports whether any identifier the control can be named by
-// appears in set. set is expected to hold normalized (lowercased, trimmed)
-// tokens.
-func controlMatchesAny(control *reporthandling.Control, set map[string]struct{}) bool {
-	for _, identifier := range controlIdentifiers(control) {
-		if _, ok := set[identifier]; ok {
-			return true
-		}
-	}
-	return false
-}
-
-// filterFrameworkControls applies the --skip-controls and --include-controls
-// filters to frameworks and returns copies with the deselected controls
-// removed. Include is a whitelist; skip is a blacklist and wins over include.
-//
-// The filter operates on whole controls, never on their rules. Rules are
-// shared across controls in the policy library (for example
-// non-root-containers backs both C-0013 and C-0211), so expressing "skip
-// C-0211" as "exclude every rule C-0211 uses" would silently drop every other
-// control built on those rules too, and "include C-0013" would strip C-0013's
-// own rule while excluding its siblings. This mirrors
-// policyhandler.excludeControls, which --exclude-controls uses.
-//
-// Matching is case-insensitive and accepts either identifier a control can be
-// named by, mirroring --exclude-controls (see policyhandler/controlfilter.go's
-// normalizeExclusions/markControlMatches): without this, a lowercase control ID
-// or a CIS section number silently matches nothing, and since
-// --include-controls treats "not in the include set" as "exclude", a single
-// mistyped case produces a silently empty scan instead of the requested
-// control.
-//
-// The returned frameworks share their Control values with the input but never
-// its Controls backing arrays, so the caller's slice (which may be a cached
-// policy set reused across scans) is left untouched.
 func filterFrameworkControls(frameworks []reporthandling.Framework, skip, include []string) ([]reporthandling.Framework, error) {
-	if len(skip) == 0 && len(include) == 0 {
-		return frameworks, nil
-	}
-
-	skipSet := make(map[string]struct{}, len(skip))
-	for _, id := range skip {
-		id = strings.ToLower(strings.TrimSpace(id))
-		if id != "" {
-			skipSet[id] = struct{}{}
-		}
-	}
-
-	includeSet := make(map[string]struct{}, len(include))
-	for _, id := range include {
-		id = strings.ToLower(strings.TrimSpace(id))
-		if id != "" {
-			includeSet[id] = struct{}{}
-		}
-	}
-
-	knownIDs := make(map[string]struct{})
-	for _, fw := range frameworks {
-		for i := range fw.Controls {
-			for _, identifier := range controlIdentifiers(&fw.Controls[i]) {
-				knownIDs[identifier] = struct{}{}
-			}
-		}
-	}
-
-	for id := range skipSet {
-		if _, ok := knownIDs[id]; !ok {
-			logger.L().Warning("skip control not found in loaded policies", helpers.String("control", id))
-		}
-	}
-	// include-controls is a whitelist: if the caller asked for specific
-	// controls but none of them exist, failing open with 0 controls and
-	// exit 0 breaks CI gates. Treat "no include matched" as a hard error,
-	// mirroring policyhandler.excludeControls' errAllControlsExcluded.
-	if len(includeSet) > 0 {
-		matchedInclude := 0
-		for id := range includeSet {
-			if _, ok := knownIDs[id]; ok {
-				matchedInclude++
-			} else {
-				logger.L().Warning("include control not found in loaded policies", helpers.String("control", id))
-			}
-		}
-		if matchedInclude == 0 {
-			return nil, errIncludeControlsNoMatch
-		}
-	}
-
-	filtered := make([]reporthandling.Framework, 0, len(frameworks))
-	remaining := 0
-	for _, fw := range frameworks {
-		kept := make([]reporthandling.Control, 0, len(fw.Controls))
-		for i := range fw.Controls {
-			control := &fw.Controls[i]
-			if len(includeSet) > 0 && !controlMatchesAny(control, includeSet) {
-				continue
-			}
-			if controlMatchesAny(control, skipSet) {
-				continue
-			}
-			kept = append(kept, *control)
-		}
-		fw.Controls = kept
-		remaining += len(kept)
-		filtered = append(filtered, fw)
-	}
-
-	// Guard against a filter that leaves nothing to scan. This can happen
-	// when --include-controls names only controls that are then removed by
-	// --skip-controls, or when --skip-controls alone excludes every loaded
-	// control. Mirroring excludeControls' remaining==0 check prevents a
-	// 0-control, 0-failure, exit-0 scan that silently passes a CI gate.
-	if remaining == 0 {
-		return nil, errNoControlsAfterFilter
-	}
-
-	return filtered, nil
+	return cautils.FilterFrameworkControls(frameworks, skip, include)
 }

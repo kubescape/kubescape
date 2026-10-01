@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -19,6 +20,17 @@ import (
 	"github.com/kubescape/kubescape/v4/httphandler/config"
 	"github.com/kubescape/kubescape/v4/httphandler/storage"
 )
+
+func TestRunRejectsInvalidNamespaceFiltersBeforeStartingServer(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "namespaceFilters.json")
+	if err := os.WriteFile(path, []byte(`{"includeNamespaces":[]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(config.NamespaceFiltersFileEnv, path)
+	if err := run(context.Background()); err == nil || !strings.Contains(err.Error(), "load namespace filters") {
+		t.Fatalf("expected namespace filter startup error, got %v", err)
+	}
+}
 
 // validServicesV3JSON is a minimal well-formed service-discovery v3 payload.
 const validServicesV3JSON = `{"version":"v3","response":{"api-server":"https://api.test.io","event-receiver-http":"https://report.test.io"}}`

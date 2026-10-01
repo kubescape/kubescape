@@ -256,6 +256,13 @@ func decryptTypedEnv(envVars []corev1.EnvVar, dek *ReportKey) error {
 	for i := range envVars {
 		envVar := &envVars[i]
 
+		if envVar.Name != "" {
+			envVar.Name, err = decryptIfEncrypted(envVar.Name, dek)
+			if err != nil {
+				return err
+			}
+		}
+
 		if envVar.Value != "" {
 			envVar.Value, err = decryptIfEncrypted(envVar.Value, dek)
 			if err != nil {
@@ -315,6 +322,15 @@ func decryptUnstructuredEnv(container map[string]any, dek *ReportKey) error {
 		envVar, ok := item.(map[string]any)
 		if !ok {
 			continue
+		}
+
+		if name, ok := envVar["name"].(string); ok && name != "" {
+			name, err = decryptIfEncrypted(name, dek)
+			if err != nil {
+				return err
+			}
+
+			envVar["name"] = name
 		}
 
 		if value, ok := envVar["value"].(string); ok && value != "" {

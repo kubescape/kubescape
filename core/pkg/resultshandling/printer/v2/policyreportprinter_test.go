@@ -5,10 +5,18 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
+	"github.com/kubescape/opa-utils/reporthandling/apis"
+	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
+	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
+	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"k8s.io/apimachinery/pkg/util/validation"
+	"sigs.k8s.io/yaml"
 )
 
 // TestNewPolicyReportPrinter tests that NewPolicyReportPrinter constructs a valid instance.
@@ -233,4 +241,58 @@ func TestPolicyReportClusterScope_PreservesRawContextName(t *testing.T) {
 	assert.Equal(t, arn, scope.Name)
 
 	assert.Nil(t, policyReportClusterScope(""))
+}
+
+func TestBuildPolicyReports_TimestampMatchesCRDSchema(t *testing.T) {
+	const resourceID = "path=1/api/v1/default/Pod/demo"
+	const controlID = "C-0012"
+
+	lw := localworkload.NewLocalWorkload(map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "Pod",
+		"metadata":   map[string]interface{}{"name": "demo", "namespace": "default"},
+		"spec":       map[string]interface{}{},
+	})
+
+	session := cautils.NewOPASessionObjMock()
+	session.AllResources[resourceID] = lw
+	session.ResourcesResult[resourceID] = resourcesresults.Result{
+		ResourceID: resourceID,
+		AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+			{ControlID: controlID, Name: "Applications credentials in configuration files", Status: apis.StatusInfo{InnerStatus: apis.StatusFailed}},
+		},
+	}
+
+	built := time.Date(2026, 9, 21, 8, 26, 56, 0, time.UTC)
+	session.Report = &reporthandlingv2.PostureReport{
+		ReportGenerationTime: built,
+		SummaryDetails: reportsummary.SummaryDetails{
+			Controls: reportsummary.ControlSummaries{
+				controlID: reportsummary.ControlSummary{ControlID: controlID, Name: "Applications credentials in configuration files", ScoreFactor: 7.0},
+			},
+		},
+	}
+
+	reports := buildPolicyReports(session)
+	require.Len(t, reports, 1)
+	require.NotEmpty(t, reports[0].Results)
+
+	encoded, err := yaml.Marshal(reports[0])
+	require.NoError(t, err)
+
+	var decoded struct {
+		Results []struct {
+			Timestamp struct {
+				Seconds *int64 `json:"seconds"`
+				Nanos   *int32 `json:"nanos"`
+			} `json:"timestamp"`
+		} `json:"results"`
+	}
+	require.NoError(t, yaml.Unmarshal(encoded, &decoded), "wgpolicyk8s types results[].timestamp as an object with seconds and nanos")
+	require.NotEmpty(t, decoded.Results)
+
+	require.NotNil(t, decoded.Results[0].Timestamp.Seconds, "the CRD requires results[].timestamp.seconds")
+	require.NotNil(t, decoded.Results[0].Timestamp.Nanos, "the CRD requires results[].timestamp.nanos")
+	assert.Equal(t, built.Unix(), *decoded.Results[0].Timestamp.Seconds)
+	assert.NotContains(t, string(encoded), built.Format(time.RFC3339), "an RFC 3339 string is rejected by the PolicyReport CRD")
 }

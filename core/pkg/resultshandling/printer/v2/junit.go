@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -43,6 +44,7 @@ type JUnitTestSuites struct {
 	Suites   []JUnitTestSuite `xml:"testsuite"`           // list of controls
 	Errors   int              `xml:"errors,attr"`         // total number of tests with error result from all testsuites
 	Failures int              `xml:"failures,attr"`       // total number of failed tests from all testsuites
+	Skipped  int              `xml:"skipped,attr"`        // total number of skipped tests from all testsuites
 	Tests    int              `xml:"tests,attr"`          // total number of tests from all testsuites. Some software may expect to only see the number of successful tests from all testsuites though
 	Time     string           `xml:"time,attr,omitempty"` // time in seconds to execute all test suites
 	Name     string           `xml:"name,attr,omitempty"` // ? Add framework names ?
@@ -136,7 +138,7 @@ func (jp *JunitPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.
 				imageResult.Suites[i].ID += suiteIDOffset
 			}
 			junitResult.Suites = append(junitResult.Suites, imageResult.Suites...)
-			junitResult.Tests, junitResult.Failures, junitResult.Errors = aggregateSuiteCounts(junitResult.Suites)
+			junitResult.Tests, junitResult.Failures, junitResult.Errors, junitResult.Skipped = aggregateSuiteCounts(junitResult.Suites)
 		}
 	} else if len(imageScanData) > 0 {
 		junitResult = imageTestsSuites(imageScanData)
@@ -170,26 +172,28 @@ func iso8601Timestamp(t time.Time) string {
 	return t.UTC().Format("2006-01-02T15:04:05Z")
 }
 
-// aggregateSuiteCounts sums the Tests/Failures/Errors counters across child
+// aggregateSuiteCounts sums the Tests/Failures/Errors/Skipped counters across child
 // testsuites. Extracted so the aggregation can be unit-tested directly,
 // independent of the production code path (which never populates child Errors).
-func aggregateSuiteCounts(suites []JUnitTestSuite) (tests, failures, errors int) {
+func aggregateSuiteCounts(suites []JUnitTestSuite) (tests, failures, errors, skipped int) {
 	for _, s := range suites {
 		tests += s.Tests
 		failures += s.Failures
 		errors += s.Errors
+		skipped += s.Skipped
 	}
 	return
 }
 
 func testsSuites(results *cautils.OPASessionObj) *JUnitTestSuites {
 	suites := listTestsSuite(results)
-	tests, failures, errs := aggregateSuiteCounts(suites)
+	tests, failures, errs, skipped := aggregateSuiteCounts(suites)
 	return &JUnitTestSuites{
 		Suites:   suites,
 		Tests:    tests,
 		Failures: failures,
 		Errors:   errs,
+		Skipped:  skipped,
 		Name:     "Kubescape Scanning",
 	}
 }
@@ -206,7 +210,9 @@ func listTestsSuite(results *cautils.OPASessionObj) []JUnitTestSuite {
 		testSuite.Timestamp = timestamp
 		testSuite.ID = 0
 		testSuite.Name = "kubescape"
-		testSuite.Properties = properties(results.Report.SummaryDetails.ComplianceScore)
+		props := properties(results.Report.SummaryDetails.ComplianceScore)
+		props = append(props, coverageProperties(results.ScanCoverage)...)
+		testSuite.Properties = props
 		testSuite.TestCases = testsCases(results, &results.Report.SummaryDetails.Controls, "Kubescape")
 		testSuites = append(testSuites, testSuite)
 		return testSuites
@@ -220,7 +226,9 @@ func listTestsSuite(results *cautils.OPASessionObj) []JUnitTestSuite {
 		testSuite.Timestamp = timestamp
 		testSuite.ID = i
 		testSuite.Name = f.Name
-		testSuite.Properties = properties(f.GetComplianceScore())
+		props := properties(f.GetComplianceScore())
+		props = append(props, coverageProperties(results.ScanCoverage)...)
+		testSuite.Properties = props
 		testSuite.TestCases = testsCases(results, f.GetControls(), f.GetName())
 		testSuites = append(testSuites, testSuite)
 	}
@@ -254,12 +262,13 @@ func imageTestsSuites(imageScanData []cautils.ImageScanData) *JUnitTestSuites {
 		suites = append(suites, suite)
 	}
 
-	tests, failures, errs := aggregateSuiteCounts(suites)
+	tests, failures, errs, skipped := aggregateSuiteCounts(suites)
 	return &JUnitTestSuites{
 		Suites:   suites,
 		Tests:    tests,
 		Failures: failures,
 		Errors:   errs,
+		Skipped:  skipped,
 		Name:     "Kubescape Image Scanning",
 	}
 }
@@ -325,8 +334,8 @@ func testsCases(results *cautils.OPASessionObj, controls reportsummary.IControls
 					continue
 				}
 
-				resource, ok := results.AllResources[rId]
-				if !ok {
+				resource, ok := results.GetResource(rId)
+				if !ok || resource == nil {
 					logger.L().Debug("resource missing from AllResources, reporting by ID",
 						helpers.String("resourceID", rId))
 					resources[fmt.Sprintf("resourceID: %s", rId)] = nil
@@ -357,25 +366,6 @@ func testsCases(results *cautils.OPASessionObj, controls reportsummary.IControls
 	return testCases
 }
 
-// buildSkipMessage constructs a human-readable skip reason from StatusInfo.
-// It uses SubStatus (e.g. "configuration", "irrelevant") and appends InnerInfo when available.
-func buildSkipMessage(status apis.IStatus) string {
-	if status == nil {
-		return ""
-	}
-	subStatus := strings.TrimSpace(string(status.GetSubStatus()))
-	if si, ok := status.(*apis.StatusInfo); ok {
-		info := strings.TrimSpace(si.InnerInfo)
-		if subStatus != "" && info != "" {
-			return fmt.Sprintf("%s: %s", subStatus, info)
-		}
-		if info != "" {
-			return info
-		}
-	}
-	return subStatus
-}
-
 func resourceToString(resource workloadinterface.IMetadata, sourcePath string) string {
 	sep := "; "
 	s := ""
@@ -396,6 +386,30 @@ func properties(complianceScore float32) []JUnitProperty {
 		{
 			Name:  "complianceScore",
 			Value: cautils.ComplianceScoreToString(complianceScore, 2),
+		},
+	}
+}
+
+func coverageProperties(coverage cautils.ScanCoverage) []JUnitProperty {
+	if coverage.TotalControls == 0 {
+		return nil
+	}
+	return []JUnitProperty{
+		{
+			Name:  "coverageScore",
+			Value: cautils.ComplianceScoreToString(coverage.CoverageScore, 2),
+		},
+		{
+			Name:  "evaluatedControls",
+			Value: strconv.Itoa(coverage.EvaluatedControls),
+		},
+		{
+			Name:  "totalControls",
+			Value: strconv.Itoa(coverage.TotalControls),
+		},
+		{
+			Name:  "degraded",
+			Value: strconv.FormatBool(coverage.Degraded),
 		},
 	}
 }

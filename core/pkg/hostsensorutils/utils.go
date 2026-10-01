@@ -8,10 +8,11 @@ import (
 
 func addInfoToMap(resource hostsensor.HostSensorResource, infoMap map[string]apis.StatusInfo, err error) {
 	group, version := k8sinterface.SplitApiVersion(hostsensor.MapHostSensorResourceToApiGroup(resource))
-	for _, r := range k8sinterface.ResourceGroupToString(group, version, resource.String()) {
-		infoMap[r] = apis.StatusInfo{
-			InnerStatus: apis.StatusSkipped,
-			InnerInfo:   err.Error(),
-		}
+	// Host envelopes use virtual v1beta0 keys even when discovery serves
+	// only the v1beta1 transport CRDs. Match ResourceToControlsMap exactly.
+	r := k8sinterface.JoinResourceTriplets(group, version, resource.String())
+	infoMap[r] = apis.StatusInfo{
+		InnerStatus: apis.StatusSkipped,
+		InnerInfo:   err.Error(),
 	}
 }

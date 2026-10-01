@@ -22,7 +22,7 @@ func buildExceptionAudit(
 	loadedExceptions []armotypes.PostureExceptionPolicy,
 	activeExceptions []armotypes.PostureExceptionPolicy,
 	results map[string]resourcesresults.Result,
-	allResources map[string]workloadinterface.IMetadata,
+	catalog cautils.ResourceCatalog,
 	policies *cautils.Policies,
 	processor *exceptions.Processor,
 	manualControlMatches []manualControlExceptionMatch,
@@ -41,7 +41,10 @@ func buildExceptionAudit(
 	}
 
 	for resourceID, result := range results {
-		resource := allResources[resourceID]
+		var resource workloadinterface.IMetadata
+		if catalog != nil {
+			resource, _ = catalog.Get(resourceID)
+		}
 		for _, control := range result.AssociatedControls {
 			controlID := control.GetID()
 			for _, rule := range control.ResourceAssociatedRules {

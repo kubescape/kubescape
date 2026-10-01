@@ -143,11 +143,13 @@ func (report *ReportEventReceiver) sendResources(ctx context.Context, opaSession
 	counter := 0
 	reportCounter := 0
 
-	if err := report.setResources(ctx, splittedPostureReport, opaSessionObj.AllResources, opaSessionObj.ResourceSource, opaSessionObj.ResourcesResult, &counter, &reportCounter); err != nil {
+	catalog := opaSessionObj.GetCatalog()
+
+	if err := report.setResourcesFromCatalog(ctx, splittedPostureReport, catalog, opaSessionObj.ResourceSource, opaSessionObj.ResourcesResult, &counter, &reportCounter); err != nil {
 		return err
 	}
 
-	if err := report.setResults(ctx, splittedPostureReport, opaSessionObj.ResourcesResult, opaSessionObj.AllResources, opaSessionObj.ResourceSource, opaSessionObj.ResourcesPrioritized, &counter, &reportCounter); err != nil {
+	if err := report.setResultsFromCatalog(ctx, splittedPostureReport, opaSessionObj.ResourcesResult, catalog, opaSessionObj.ResourceSource, opaSessionObj.ResourcesPrioritized, &counter, &reportCounter); err != nil {
 		return err
 	}
 
@@ -155,6 +157,10 @@ func (report *ReportEventReceiver) sendResources(ctx context.Context, opaSession
 }
 
 func (report *ReportEventReceiver) setResults(ctx context.Context, reportObj *reporthandlingv2.PostureReport, results map[string]resourcesresults.Result, allResources map[string]workloadinterface.IMetadata, resourcesSource map[string]reporthandling.Source, prioritizedResources map[string]prioritization.PrioritizedResource, counter, reportCounter *int) error {
+	return report.setResultsFromCatalog(ctx, reportObj, results, cautils.NewMapResourceCatalog(allResources), resourcesSource, prioritizedResources, counter, reportCounter)
+}
+
+func (report *ReportEventReceiver) setResultsFromCatalog(ctx context.Context, reportObj *reporthandlingv2.PostureReport, results map[string]resourcesresults.Result, catalog cautils.ResourceCatalog, resourcesSource map[string]reporthandling.Source, prioritizedResources map[string]prioritization.PrioritizedResource, counter, reportCounter *int) error {
 	// Chunk boundaries depend on iteration order, so keep the input order stable.
 	resourceIDs := make([]string, 0, len(results))
 	for resourceID := range results {
@@ -166,10 +172,14 @@ func (report *ReportEventReceiver) setResults(ctx context.Context, reportObj *re
 		v := results[resultID]
 		// set result.RawResource
 		resourceID := v.GetResourceID()
-		if _, ok := allResources[resourceID]; !ok {
+		var resMeta workloadinterface.IMetadata
+		if catalog != nil {
+			resMeta, _ = catalog.Get(resourceID)
+		}
+		if resMeta == nil {
 			continue
 		}
-		resource := reporthandling.NewResourceIMetadata(allResources[resourceID])
+		resource := reporthandling.NewResourceIMetadata(resMeta)
 		if r, ok := resourcesSource[resourceID]; ok {
 			resource.SetSource(&r)
 		}
@@ -216,15 +226,22 @@ func (report *ReportEventReceiver) setResults(ctx context.Context, reportObj *re
 }
 
 func (report *ReportEventReceiver) setResources(ctx context.Context, reportObj *reporthandlingv2.PostureReport, allResources map[string]workloadinterface.IMetadata, resourcesSource map[string]reporthandling.Source, results map[string]resourcesresults.Result, counter, reportCounter *int) error {
-	// Chunk boundaries depend on iteration order, so keep the input order stable.
-	resourceIDs := make([]string, 0, len(allResources))
-	for resourceID := range allResources {
-		resourceIDs = append(resourceIDs, resourceID)
+	return report.setResourcesFromCatalog(ctx, reportObj, cautils.NewMapResourceCatalog(allResources), resourcesSource, results, counter, reportCounter)
+}
+
+func (report *ReportEventReceiver) setResourcesFromCatalog(ctx context.Context, reportObj *reporthandlingv2.PostureReport, catalog cautils.ResourceCatalog, resourcesSource map[string]reporthandling.Source, results map[string]resourcesresults.Result, counter, reportCounter *int) error {
+	if catalog == nil {
+		return nil
 	}
+	// Chunk boundaries depend on iteration order, so keep the input order stable.
+	resourceIDs := catalog.ListIDs()
 	sort.Strings(resourceIDs)
 
 	for _, resourceID := range resourceIDs {
-		v := allResources[resourceID]
+		v, ok := catalog.Get(resourceID)
+		if !ok || v == nil {
+			continue
+		}
 		/*
 
 			// process only resources which have no result because these resources will be sent on the result object

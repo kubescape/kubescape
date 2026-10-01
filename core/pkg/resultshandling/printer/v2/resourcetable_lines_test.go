@@ -432,14 +432,43 @@ func TestResourceTable_WithoutShowEvidenceHasNoLines(t *testing.T) {
 	assert.NotContains(t, out, "privileged=false")
 }
 
-// TestResourceTable_MissingDocIndexDegrades covers Helm-rendered resources,
-// whose path carries no ":<index>" suffix, so getDocIndex reports nothing and
-// the resolver is never reached.
+// TestResourceTable_MissingDocIndexDegrades covers any resource whose path
+// carries no ":<index>" suffix at all, so getDocIndex reports nothing and the
+// resolver is never reached. This is still most Helm-rendered resources:
+// helmchart.go only appends the index for a template proven static (no
+// "{{" anywhere), since the resolver reads the raw template file, and a
+// templated one is either not valid YAML on its own or does not line up
+// document-for-document with the render. See
+// TestGetWorkloadsWithOptions_StaticTemplateGetsIndex in helmchart_test.go
+// for both halves of that split.
+//
+// A Kustomize resource always takes this path: kustomizedirectory.go never
+// appends an index at all, since the composed build output has no single raw
+// source file whose documents line up with it the way a static Helm template
+// does. See TestKustomizeGetWorkloads_PathIsNormalized in
+// kustomizedirectory_test.go for that source's half of this contract.
 func TestResourceTable_MissingDocIndexDegrades(t *testing.T) {
 	out := renderResourceTable(t, resourceTableLineNumberSession(t, lineNumberManifest, ""), true)
 
 	assert.Contains(t, out, "privileged=false")
 	assert.NotContains(t, out, "(line ")
+}
+
+// TestResourceTable_IndexedPathResolvesRegardlessOfSource checks the resolver
+// side only: a "<path>:<index>" path reaches a line, whatever put the index
+// there. It is not a Helm test - it hand-builds the path the same way
+// TestResourceTable_FixPathResolvesToLine does, so it proves nothing about
+// whether a real Helm render is safe to index. That question - whether a
+// template's raw source and its rendered output are the same document, so
+// the index means the same thing on both sides - is answered in
+// helmchart.go's isStaticTemplate and pinned by
+// TestGetWorkloadsWithOptions_StaticTemplateGetsIndex in helmchart_test.go,
+// which renders a real chart with both a static and a templated file.
+func TestResourceTable_IndexedPathResolvesRegardlessOfSource(t *testing.T) {
+	out := renderResourceTable(t, resourceTableLineNumberSession(t, lineNumberManifest, ":0"), true)
+
+	assert.Contains(t, out, "(line 12)", "the resolver does not care what produced the \":<index>\" "+
+		"suffix - only whether the file at that path parses and the index is in range")
 }
 
 // TestResourceTable_SecondDocumentResolvesAgainstItsOwnDocument checks the doc
@@ -649,4 +678,40 @@ func TestResourceTable_ManyControlsKeepOneLinePerPath(t *testing.T) {
 	for _, line := range strings.Split(out, "\n") {
 		assert.LessOrEqual(t, strings.Count(line, "(line "), 1, "no path annotated twice: %q", line)
 	}
+}
+
+// TestResourceTable_AnonymizedSourcePathsHaveNoLines covers --hide and
+// --encrypt. Both replace every source path with a pseudonym before the report
+// prints, so the manifest a finding came from cannot be opened. Paths still
+// print; only the line is missing, and the scan warns about that up front.
+func TestResourceTable_AnonymizedSourcePathsHaveNoLines(t *testing.T) {
+	session := resourceTableLineNumberSession(t, allPathTypesManifest, ":0")
+	withControlPaths(session,
+		armotypes.PosturePaths{FixPath: armotypes.FixPath{Path: "spec.template.spec.containers[0].securityContext.privileged", Value: "false"}},
+		armotypes.PosturePaths{DeletePath: "spec.template.spec.hostNetwork"},
+		armotypes.PosturePaths{ReviewPath: "spec.template.spec.automountServiceAccountToken"},
+	)
+	session.SourcePathsAnonymized = true
+
+	out := renderResourceTable(t, session, true)
+
+	assert.Contains(t, out, "privileged=false", "paths are still printed")
+	assert.Contains(t, out, "spec.template.spec.hostNetwork")
+	assert.NotContains(t, out, "(line ", "no line can be resolved from a pseudonymized path")
+}
+
+// TestResourceTable_OmitRawResourcesStillShowsEvidence pins that the flag does
+// not quietly change what --show-evidence prints: it keeps resources out of the
+// report, while the evidence column is terminal output the user asked for. The
+// scan warns that the two overlap.
+func TestResourceTable_OmitRawResourcesStillShowsEvidence(t *testing.T) {
+	session := resourceTableLineNumberSession(t, allPathTypesManifest, ":0")
+	withControlPaths(session,
+		armotypes.PosturePaths{FixPath: armotypes.FixPath{Path: "spec.template.spec.containers[0].securityContext.privileged", Value: "false"}},
+	)
+	session.OmitRawResources = true
+
+	out := renderResourceTable(t, session, true)
+
+	assert.Contains(t, outputLineWith(t, out, "privileged=false"), "(line 14)")
 }

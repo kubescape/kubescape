@@ -12,6 +12,7 @@ import (
 	"maps"
 	"runtime"
 	"slices"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -131,6 +132,10 @@ type OPAProcessor struct {
 	// incrementalCache holds cached per-resource-per-control verdicts when
 	// --incremental is enabled. nil when the flag is off.
 	incrementalCache *scancache.Store
+	// wholeClusterPolicy defines how controls requiring whole-cluster input are evaluated
+	wholeClusterPolicy cautils.WholeClusterExecutionPolicy
+	// skippedWholeClusterControls tracks whole-cluster controls skipped by policy
+	skippedWholeClusterControls map[string]string
 }
 
 // NewOPAProcessor snapshots len(sessionObj.AllResources) at construction for
@@ -146,7 +151,7 @@ func NewOPAProcessor(sessionObj *cautils.OPASessionObj, regoDependenciesData *re
 
 	initialResourceCount := 0
 	if sessionObj != nil {
-		initialResourceCount = len(sessionObj.AllResources)
+		initialResourceCount = sessionObj.ResourceCount()
 	}
 
 	largeClusterSizeThreshold, _ := cautils.ParseIntEnvVar("LARGE_CLUSTER_SIZE", cautils.DefaultLargeClusterSize)
@@ -155,18 +160,20 @@ func NewOPAProcessor(sessionObj *cautils.OPASessionObj, regoDependenciesData *re
 	}
 
 	return &OPAProcessor{
-		OPASessionObj:             sessionObj,
-		regoDependenciesData:      regoDependenciesData,
-		clusterName:               clusterName,
-		exceptionEventRecorder:    exceptionEventRecorder,
-		excludeNamespaces:         split(excludeNamespaces),
-		includeNamespaces:         split(includeNamespaces),
-		printEnabled:              enableRegoPrint,
-		compiledModules:           make(map[string]compiledRule),
-		TimedOutControls:          make(map[string]string),
-		initialResourceCount:      initialResourceCount,
-		celNamespaceIndex:         indexNamespaces(sessionObj),
-		largeClusterSizeThreshold: largeClusterSizeThreshold,
+		OPASessionObj:               sessionObj,
+		regoDependenciesData:        regoDependenciesData,
+		clusterName:                 clusterName,
+		exceptionEventRecorder:      exceptionEventRecorder,
+		excludeNamespaces:           split(excludeNamespaces),
+		includeNamespaces:           split(includeNamespaces),
+		printEnabled:                enableRegoPrint,
+		compiledModules:             make(map[string]compiledRule),
+		TimedOutControls:            make(map[string]string),
+		initialResourceCount:        initialResourceCount,
+		celNamespaceIndex:           indexNamespaces(sessionObj),
+		largeClusterSizeThreshold:   largeClusterSizeThreshold,
+		wholeClusterPolicy:          cautils.WholeClusterPolicyProjected,
+		skippedWholeClusterControls: make(map[string]string),
 	}
 }
 
@@ -184,7 +191,12 @@ func indexNamespaces(sessionObj *cautils.OPASessionObj) map[string]map[string]an
 		return nil
 	}
 	index := make(map[string]map[string]any)
-	addNamespacesToIndex(index, sessionObj.AllResources)
+	sessionObj.GetCatalog().ForEach(func(_ string, res workloadinterface.IMetadata) bool {
+		if res != nil && res.GetKind() == "Namespace" && res.GetApiVersion() == "v1" && res.GetName() != "" {
+			index[res.GetName()] = res.GetObject()
+		}
+		return true
+	})
 	return index
 }
 
@@ -267,7 +279,8 @@ func (opap *OPAProcessor) ProcessRulesListener(ctx context.Context, progressList
 	// rebuild ScanCoverage so controls that timed out during evaluation
 	// (recorded in TimedOutControls by markControlTimedOut) are reflected in
 	// NotEvaluatedControls alongside any collection-phase failures
-	opap.ScanCoverage = cautils.BuildScanCoverage(opap.InfoMap, opap.ResourceToControlsMap, opap.TimedOutControls, opap.PartialGVRFailures, opap.PolicyDegradations, opap.SkippedManifests)
+	opap.ScanCoverage = cautils.BuildScanCoverage(opap.InfoMap, opap.ResourceToControlsMap, opap.TimedOutControls, opap.PartialGVRFailures, opap.PolicyDegradations, opap.SkippedManifests, opap.inScopeControlIDs())
+	opap.appendSkippedWholeClusterControlsToCoverage()
 	opap.ScanCoverage.ComputeCoverageScore(len(opap.Report.SummaryDetails.Controls))
 
 	// edit results
@@ -285,7 +298,7 @@ func (opap *OPAProcessor) ProcessRulesListener(ctx context.Context, progressList
 	// BuildNamespaceSummaries relies on ControlSummary.ComplianceScore for
 	// controls it has no resource for in a given namespace, so it must run
 	// after scorewrapper.Calculate has populated that field.
-	opap.NamespaceSummaries = cautils.BuildNamespaceSummaries(opap.Report.SummaryDetails.Controls, opap.AllResources)
+	opap.NamespaceSummaries = cautils.BuildNamespaceSummariesFromCatalog(opap.Report.SummaryDetails.Controls, opap.GetCatalog())
 
 	opap.reweightComplianceScores()
 
@@ -382,10 +395,7 @@ haveResident:
 		opap.K8SResources[k] = v
 	}
 	opap.ExternalResources = residentBatch.ExternalResources
-	opap.AllResources = make(map[string]workloadinterface.IMetadata)
-	for k, v := range residentBatch.AllResources {
-		opap.AllResources[k] = v
-	}
+	opap.GetCatalog().AddAll(residentBatch.AllResources)
 
 	// Index any Namespace objects the resident batch carries before evaluating,
 	// so CEL's namespaceObject binding is populated for this scope's objects.
@@ -394,6 +404,17 @@ haveResident:
 	// Index the resident batch once: every namespace scope below is evaluated
 	// together with it and reads the same index.
 	residentGroups := newResidentIndex(residentBatch)
+
+	var wholeClusterMatchers []reporthandling.RuleMatchObjects
+	var projectedBatch *cautils.ResourceBatch
+	policy := opap.GetWholeClusterPolicy()
+	if len(wholeClusterControlIDs) > 0 && (policy == cautils.WholeClusterPolicyProjected || policy == cautils.WholeClusterPolicyVerify) {
+		wholeClusterMatchers = compileWholeClusterMatchers(opap.AllPolicies, wholeClusterControlIDs)
+		projectedBatch = cautils.NewResourceBatch(cautils.ClusterScope)
+		if len(wholeClusterMatchers) > 0 {
+			appendProjectedResources(residentBatch.K8SResources, residentBatch.ExternalResources, residentBatch.AllResources, wholeClusterMatchers, projectedBatch)
+		}
+	}
 
 	// Process resident batch first
 	residentScope := newEvaluationScope(residentBatch.Scope, nil, residentGroups)
@@ -423,14 +444,15 @@ haveResident:
 				return err
 			}
 
-			// Merge namespace batch resources into the session-wide map so
+			// Merge namespace batch resources into the session-wide catalog so
 			// downstream stages (exception matching, printers, image scanning,
 			// prioritisation) can access them.
-			for resourceID, resource := range batch.AllResources {
-				opap.AllResources[resourceID] = resource
-			}
+			opap.GetCatalog().AddAll(batch.AllResources)
 			for gvr, ids := range batch.K8SResources {
 				opap.K8SResources[gvr] = append(opap.K8SResources[gvr], ids...)
+			}
+			if len(wholeClusterMatchers) > 0 && projectedBatch != nil {
+				appendProjectedResources(batch.K8SResources, nil, batch.AllResources, wholeClusterMatchers, projectedBatch)
 			}
 
 		case err, ok := <-errChan:
@@ -462,13 +484,14 @@ done:
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if err := opap.processScope(ctx, opap.AllPolicies, wholeClusterControlIDs, opap.wholeClusterScope(), progressListener); err != nil {
+		if err := opap.evaluateWholeClusterControls(ctx, opap.AllPolicies, wholeClusterControlIDs, projectedBatch, progressListener); err != nil {
 			return err
 		}
 	}
 
 	// Rebuild scan coverage
-	opap.ScanCoverage = cautils.BuildScanCoverage(opap.InfoMap, opap.ResourceToControlsMap, opap.TimedOutControls, opap.PartialGVRFailures, opap.PolicyDegradations, opap.SkippedManifests)
+	opap.ScanCoverage = cautils.BuildScanCoverage(opap.InfoMap, opap.ResourceToControlsMap, opap.TimedOutControls, opap.PartialGVRFailures, opap.PolicyDegradations, opap.SkippedManifests, opap.inScopeControlIDs())
+	opap.appendSkippedWholeClusterControlsToCoverage()
 	opap.ScanCoverage.ComputeCoverageScore(len(opap.Report.SummaryDetails.Controls))
 
 	// Update results
@@ -485,7 +508,7 @@ done:
 	// BuildNamespaceSummaries relies on ControlSummary.ComplianceScore for
 	// controls it has no resource for in a given namespace, so it must run
 	// after scorewrapper.Calculate has populated that field.
-	opap.NamespaceSummaries = cautils.BuildNamespaceSummaries(opap.Report.SummaryDetails.Controls, opap.AllResources)
+	opap.NamespaceSummaries = cautils.BuildNamespaceSummariesFromCatalog(opap.Report.SummaryDetails.Controls, opap.GetCatalog())
 
 	opap.reweightComplianceScores()
 
@@ -633,8 +656,16 @@ func (opap *OPAProcessor) Process(ctx context.Context, policies *cautils.Policie
 	if len(wholeClusterControlIDs) > 0 {
 		if err := ctx.Err(); err != nil {
 			processErrs = append(processErrs, err)
-		} else if err := opap.processScope(ctx, policies, wholeClusterControlIDs, opap.wholeClusterScope(), progressListener); err != nil {
-			processErrs = append(processErrs, err)
+		} else {
+			var projectedBatch *cautils.ResourceBatch
+			policy := opap.GetWholeClusterPolicy()
+			if policy == cautils.WholeClusterPolicyProjected || policy == cautils.WholeClusterPolicyVerify {
+				matchers := compileWholeClusterMatchers(policies, wholeClusterControlIDs)
+				projectedBatch = filterProjectedBatch(opap.K8SResources, opap.ExternalResources, opap.snapshotAllResources(), matchers)
+			}
+			if err := opap.evaluateWholeClusterControls(ctx, policies, wholeClusterControlIDs, projectedBatch, progressListener); err != nil {
+				processErrs = append(processErrs, err)
+			}
 		}
 	}
 
@@ -751,19 +782,314 @@ func (opap *OPAProcessor) wholeClusterScope() evaluationScope {
 	return newEvaluationScope(cautils.ClusterScope, nil, newResidentIndex(batch))
 }
 
-// snapshotAllResources returns a shallow copy of opap.AllResources, taken
-// under opap.mu. AllResources is grown concurrently mid-scan by aggregator
-// write-back (processRuleOnScope), so any caller that hands the map to code
-// outside opap.mu's protection — rather than doing a single guarded map
-// lookup itself — must work from a private copy, not the live map.
+// snapshotAllResources returns a shallow copy of the catalog's resources.
+// The catalog's internal RWMutex decouples scope reads from concurrent aggregator write-backs.
 func (opap *OPAProcessor) snapshotAllResources() map[string]workloadinterface.IMetadata {
-	opap.mu.Lock()
-	defer opap.mu.Unlock()
-	snapshot := make(map[string]workloadinterface.IMetadata, len(opap.AllResources))
-	for k, v := range opap.AllResources {
-		snapshot[k] = v
+	return opap.GetCatalog().All()
+}
+
+// SetWholeClusterPolicy configures the execution policy for whole-cluster controls.
+func (opap *OPAProcessor) SetWholeClusterPolicy(policy cautils.WholeClusterExecutionPolicy) {
+	opap.wholeClusterPolicy = policy
+}
+
+// GetWholeClusterPolicy returns the configured WholeClusterExecutionPolicy,
+// resolving from environment or default if not set.
+func (opap *OPAProcessor) GetWholeClusterPolicy() cautils.WholeClusterExecutionPolicy {
+	if opap.wholeClusterPolicy == "" {
+		p, _ := cautils.ResolveWholeClusterPolicy("")
+		return p
 	}
-	return snapshot
+	return opap.wholeClusterPolicy
+}
+
+// inScopeControlIDs returns a set of control IDs that are in scope for this scan,
+// derived from SummaryDetails.Controls (or AllPolicies.Controls as fallback).
+// Returns nil if no controls are tracked, leaving coverage unconstrained.
+func (opap *OPAProcessor) inScopeControlIDs() map[string]struct{} {
+	if opap == nil {
+		return nil
+	}
+	if len(opap.Report.SummaryDetails.Controls) > 0 {
+		ids := make(map[string]struct{}, len(opap.Report.SummaryDetails.Controls))
+		for id := range opap.Report.SummaryDetails.Controls {
+			ids[id] = struct{}{}
+		}
+		return ids
+	}
+	if opap.AllPolicies != nil && len(opap.AllPolicies.Controls) > 0 {
+		ids := make(map[string]struct{}, len(opap.AllPolicies.Controls))
+		for id := range opap.AllPolicies.Controls {
+			ids[id] = struct{}{}
+		}
+		return ids
+	}
+	return nil
+}
+
+// appendSkippedWholeClusterControlsToCoverage appends skipped whole-cluster controls
+// to opap.ScanCoverage.NotEvaluatedControls in deterministic, sorted order by ControlID.
+func (opap *OPAProcessor) appendSkippedWholeClusterControlsToCoverage() {
+	if opap.OPASessionObj == nil || len(opap.skippedWholeClusterControls) == 0 {
+		return
+	}
+	inScope := opap.inScopeControlIDs()
+	sortedIDs := make([]string, 0, len(opap.skippedWholeClusterControls))
+	for id := range opap.skippedWholeClusterControls {
+		if inScope != nil {
+			if _, ok := inScope[id]; !ok {
+				continue
+			}
+		}
+		sortedIDs = append(sortedIDs, id)
+	}
+	sort.Strings(sortedIDs)
+	for _, controlID := range sortedIDs {
+		opap.ScanCoverage.NotEvaluatedControls = append(opap.ScanCoverage.NotEvaluatedControls, cautils.NotEvaluatedControl{
+			ControlID: controlID,
+			Reason:    opap.skippedWholeClusterControls[controlID],
+		})
+	}
+	sort.Slice(opap.ScanCoverage.NotEvaluatedControls, func(i, j int) bool {
+		return opap.ScanCoverage.NotEvaluatedControls[i].ControlID < opap.ScanCoverage.NotEvaluatedControls[j].ControlID
+	})
+}
+
+// filterControlsWithMatcherEvidence filters out whole-cluster controls that do not declare
+// any Match or DynamicMatch objects across their rules. Under projected or verify execution
+// policies, evaluating such controls against a projected batch risks false-pass results.
+// Controls lacking matcher evidence are marked skipped and recorded in skippedWholeClusterControls (fail closed).
+func (opap *OPAProcessor) filterControlsWithMatcherEvidence(
+	ctx context.Context,
+	policies *cautils.Policies,
+	controlIDs []string,
+	policy cautils.WholeClusterExecutionPolicy,
+	progressListener IJobProgressNotificationClient,
+) []string {
+	var evalIDs []string
+	var unmatchableIDs []string
+
+	for _, id := range controlIDs {
+		var ctrl *reporthandling.Control
+		if policies != nil {
+			if c, ok := policies.Controls[id]; ok {
+				ctrl = &c
+			}
+		}
+		if controlHasMatcherEvidence(ctrl) {
+			evalIDs = append(evalIDs, id)
+		} else {
+			unmatchableIDs = append(unmatchableIDs, id)
+		}
+	}
+
+	if len(unmatchableIDs) > 0 {
+		logger.L().Ctx(ctx).Warning("Skipping whole-cluster controls without matcher evidence under projected evaluation",
+			helpers.String("controls", strings.Join(unmatchableIDs, ",")),
+			helpers.String("policy", string(policy)))
+
+		if opap.skippedWholeClusterControls == nil {
+			opap.skippedWholeClusterControls = make(map[string]string)
+		}
+		for _, id := range unmatchableIDs {
+			if progressListener != nil {
+				progressListener.ProgressJob(1, fmt.Sprintf("Control: %s (skipped)", id))
+			}
+			reason := fmt.Sprintf("whole-cluster control %s skipped: no Match or DynamicMatch declared for projected evaluation (policy: %s)", id, policy)
+			opap.skippedWholeClusterControls[id] = reason
+			opap.setControlStatus(id, &apis.StatusInfo{
+				InnerStatus: apis.StatusSkipped,
+				SubStatus:   apis.SubStatusNotEvaluated,
+				InnerInfo:   reason,
+			})
+		}
+	}
+
+	return evalIDs
+}
+
+// evaluateWholeClusterControls dispatches whole-cluster control evaluation according to
+// the configured WholeClusterExecutionPolicy (projected, fallback, skip, or verify).
+func (opap *OPAProcessor) evaluateWholeClusterControls(
+	ctx context.Context,
+	policies *cautils.Policies,
+	wholeClusterControlIDs []string,
+	projectedBatch *cautils.ResourceBatch,
+	progressListener IJobProgressNotificationClient,
+) error {
+	if len(wholeClusterControlIDs) == 0 {
+		return nil
+	}
+
+	policy := opap.GetWholeClusterPolicy()
+	switch policy {
+	case cautils.WholeClusterPolicySkip:
+		logger.L().Ctx(ctx).Warning("Skipping whole-cluster controls due to execution policy",
+			helpers.String("controls", strings.Join(wholeClusterControlIDs, ",")))
+		for _, id := range wholeClusterControlIDs {
+			if progressListener != nil {
+				progressListener.ProgressJob(1, fmt.Sprintf("Control: %s (skipped)", id))
+			}
+			reason := fmt.Sprintf("whole-cluster control %s skipped by execution policy (policy: %s)", id, policy)
+			if opap.skippedWholeClusterControls == nil {
+				opap.skippedWholeClusterControls = make(map[string]string)
+			}
+			opap.skippedWholeClusterControls[id] = reason
+			opap.setControlStatus(id, &apis.StatusInfo{
+				InnerStatus: apis.StatusSkipped,
+				SubStatus:   apis.SubStatusNotEvaluated,
+				InnerInfo:   reason,
+			})
+		}
+		return nil
+
+	case cautils.WholeClusterPolicyFallback:
+		logger.L().Ctx(ctx).Info("Evaluating whole-cluster controls with full-memory fallback",
+			helpers.Int("controls", len(wholeClusterControlIDs)),
+			helpers.Int("resources", opap.ResourceCount()))
+		return opap.processScope(ctx, policies, wholeClusterControlIDs, opap.wholeClusterScope(), progressListener)
+
+	case cautils.WholeClusterPolicyVerify:
+		logger.L().Ctx(ctx).Info("Evaluating whole-cluster controls in debug parity verification mode")
+		evalIDs := opap.filterControlsWithMatcherEvidence(ctx, policies, wholeClusterControlIDs, policy, progressListener)
+		if len(evalIDs) == 0 {
+			return nil
+		}
+		fallbackScope := opap.wholeClusterScope()
+		if projectedBatch == nil {
+			matchers := compileWholeClusterMatchers(policies, evalIDs)
+			projectedBatch = filterProjectedBatch(opap.K8SResources, opap.ExternalResources, opap.snapshotAllResources(), matchers)
+		}
+		projectedScope := newEvaluationScope(cautils.ClusterScope, nil, newResidentIndex(projectedBatch))
+		return opap.verifyAndProcessWholeCluster(ctx, policies, evalIDs, projectedScope, fallbackScope, progressListener)
+
+	case cautils.WholeClusterPolicyProjected:
+		fallthrough
+	default:
+		evalIDs := opap.filterControlsWithMatcherEvidence(ctx, policies, wholeClusterControlIDs, policy, progressListener)
+		if len(evalIDs) == 0 {
+			return nil
+		}
+		if projectedBatch == nil {
+			matchers := compileWholeClusterMatchers(policies, evalIDs)
+			projectedBatch = filterProjectedBatch(opap.K8SResources, opap.ExternalResources, opap.snapshotAllResources(), matchers)
+		}
+		projectedScope := newEvaluationScope(cautils.ClusterScope, nil, newResidentIndex(projectedBatch))
+		return opap.processScope(ctx, policies, evalIDs, projectedScope, progressListener)
+	}
+}
+
+// verifyAndProcessWholeCluster runs whole-cluster controls against both projectedScope and fallbackScope,
+// diffs verdicts across all evaluated resources to detect any parity regressions, and merges the results.
+func (opap *OPAProcessor) verifyAndProcessWholeCluster(
+	ctx context.Context,
+	policies *cautils.Policies,
+	wholeClusterControlIDs []string,
+	projectedScope evaluationScope,
+	fallbackScope evaluationScope,
+	progressListener IJobProgressNotificationClient,
+) error {
+	var verifyErrs []error
+	for _, controlID := range wholeClusterControlIDs {
+		if err := ctx.Err(); err != nil {
+			return errors.Join(append(verifyErrs, err)...)
+		}
+		if progressListener != nil {
+			opap.mu.Lock()
+			progressListener.ProgressJob(1, fmt.Sprintf("Control: %s", controlID))
+			opap.mu.Unlock()
+		}
+		control := policies.Controls[controlID]
+
+		evalScope := func(scope evaluationScope) (map[string]resourcesresults.ResourceAssociatedControl, error) {
+			if opap.ControlTimeout > 0 {
+				cctx, cancel := context.WithTimeout(ctx, opap.ControlTimeout)
+				defer cancel()
+				res, err := opap.processControl(cctx, &control, scope)
+				if cctx.Err() == context.DeadlineExceeded && ctx.Err() == nil {
+					opap.markControlTimedOut(&control, opap.ControlTimeout)
+					return nil, nil
+				}
+				return res, err
+			}
+			return opap.processControl(ctx, &control, scope)
+		}
+
+		resProjected, errP := evalScope(projectedScope)
+		resFallback, errF := evalScope(fallbackScope)
+
+		if errP != nil || errF != nil {
+			logger.L().Ctx(ctx).Warning("Whole-cluster evaluation error during verification",
+				helpers.String("controlID", controlID),
+				helpers.Error(errors.Join(errP, errF)))
+			return errors.Join(append(verifyErrs, errors.Join(errP, errF))...)
+		}
+
+		opap.mu.Lock()
+		_, timedOut := opap.TimedOutControls[control.ControlID]
+		opap.mu.Unlock()
+		if timedOut {
+			continue
+		}
+
+		allResIDs := make(map[string]struct{})
+		for id := range resProjected {
+			allResIDs[id] = struct{}{}
+		}
+		for id := range resFallback {
+			allResIDs[id] = struct{}{}
+		}
+
+		var diffErrors []string
+		for resID := range allResIDs {
+			ctrlP, okP := resProjected[resID]
+			ctrlF, okF := resFallback[resID]
+			statusP := ""
+			if okP {
+				statusP = string(ctrlP.GetStatus(nil).Status())
+			}
+			statusF := ""
+			if okF {
+				statusF = string(ctrlF.GetStatus(nil).Status())
+			}
+			if statusP != statusF {
+				diffMsg := fmt.Sprintf("control %s on resource %s: projected status %q != fallback status %q", controlID, resID, statusP, statusF)
+				diffErrors = append(diffErrors, diffMsg)
+				logger.L().Ctx(ctx).Error("Whole-cluster parity mismatch detected",
+					helpers.String("controlID", controlID),
+					helpers.String("resourceID", resID),
+					helpers.String("projectedStatus", statusP),
+					helpers.String("fallbackStatus", statusF))
+			}
+		}
+
+		// Fail closed: a parity mismatch means the projection is untrusted for
+		// this control. Record it as an error (non-zero exit via Process →
+		// ScanContext → RunE) and merge the fallback verdicts, which observed
+		// the full cluster, so even callers that inspect ResourcesResult
+		// despite the error see the authoritative statuses.
+		merged := resProjected
+		if len(diffErrors) > 0 {
+			logger.L().Ctx(ctx).Error(fmt.Sprintf("Whole-cluster parity verification failed with %d mismatches for control %s", len(diffErrors), controlID))
+			verifyErrs = append(verifyErrs, fmt.Errorf("whole-cluster parity verification failed for control %s: %d mismatch(es): %s", controlID, len(diffErrors), strings.Join(diffErrors, "; ")))
+			merged = resFallback
+		}
+
+		if len(merged) > 0 {
+			opap.mu.Lock()
+			for resourceID, controlResult := range merged {
+				t, ok := opap.ResourcesResult[resourceID]
+				if !ok {
+					t = resourcesresults.Result{ResourceID: resourceID}
+				}
+				t.AssociatedControls = mergeAssociatedControls(t.AssociatedControls, controlResult, opap.AllPolicies)
+				opap.ResourcesResult[resourceID] = t
+			}
+			opap.mu.Unlock()
+		}
+	}
+	sortAssociatedControls(opap.ResourcesResult)
+	return errors.Join(verifyErrs...)
 }
 
 type policyControl struct {
@@ -971,11 +1297,33 @@ func moduleReadsStatus(module *ast.Module) bool {
 	}
 
 	reads := false
+	// A call used as a standalone body expression is held in Expr.Terms, not
+	// as an ast.Call term. Inspect it separately so object.get(obj, "status",
+	// ...) cannot leave a status-reading rule eligible for the cache.
+	ast.WalkExprs(module, func(expr *ast.Expr) bool {
+		if !expr.IsCall() || expr.Operator().String() != "object.get" {
+			return false
+		}
+		operands := expr.Operands()
+		if len(operands) >= 2 && isStatus(operands[1]) {
+			reads = true
+		}
+		return reads
+	})
+	if reads {
+		return true
+	}
 	ast.WalkTerms(module, func(term *ast.Term) bool {
 		if reads {
 			return true
 		}
 		switch value := term.Value.(type) {
+		case ast.Call:
+			// Calls nested in assignments/comparisons are terms rather than
+			// expressions. object.get's second argument is a direct key here.
+			if len(value) >= 3 && value[0].String() == "object.get" && isStatus(value[2]) {
+				reads = true
+			}
 		case ast.Ref:
 			for _, part := range value {
 				if isStatus(part) {
@@ -1067,9 +1415,7 @@ func (opap *OPAProcessor) processControl(ctx context.Context, control *reporthan
 
 	if len(ruleErrs) == 0 && opap.incrementalCache != nil && controlCacheEligible(control) {
 		for resourceID, result := range resourcesAssociatedControl {
-			opap.mu.Lock()
-			resource, ok := opap.AllResources[resourceID]
-			opap.mu.Unlock()
+			resource, ok := opap.GetResource(resourceID)
 			if !ok {
 				continue
 			}
@@ -1134,6 +1480,21 @@ func (opap *OPAProcessor) processRuleOnScope(ctx context.Context, rule *reportha
 				for _, cr := range cached.ResourceAssociatedRules {
 					if cr.Name == rule.Name {
 						rr := cr
+						// A restored verdict predates the current scan's
+						// coverage state: recompute the incomplete-coverage
+						// marker instead of replaying it. A pass stored while
+						// a dependency was partially missing must not survive
+						// collection recovery as IncompleteCoverage, and a
+						// pass stored while complete must gain the marker when
+						// the current scan has gaps. Failures and skips are
+						// left exactly as stored.
+						if rr.Status == apis.StatusPassed {
+							if opap.hasUnreachableDependency(controlID) {
+								rr.SubStatus = apis.SubStatusIncompleteCoverage
+							} else if rr.SubStatus == apis.SubStatusIncompleteCoverage {
+								rr.SubStatus = ""
+							}
+						}
 						resources[r.GetID()] = &rr
 					}
 				}
@@ -1227,15 +1588,14 @@ func (opap *OPAProcessor) processRuleOnScope(ctx context.Context, rule *reportha
 	}
 
 	if len(addedResources) > 0 {
-		opap.mu.Lock()
 		for _, inputResource := range addedResources {
 			// AllResources is also the partitioning input (evaluationScopes →
-			// PartitionResources), so this aggregator write-back grows the map
-			// mid-scan. Bucketing must keep using the frozen initialResourceCount,
-			// not the live length, or later rules could see per-namespace scopes.
-			opap.AllResources[inputResource.GetID()] = inputResource
+			// PartitionResources), so this aggregator write-back grows the catalog
+			// mid-scan (synchronized via the catalog's RWMutex). Bucketing must keep
+			// using the frozen initialResourceCount, not the live length, or later
+			// rules could see per-namespace scopes.
+			opap.SetResource(inputResource)
 		}
-		opap.mu.Unlock()
 	}
 
 	ruleResponses, celOut, err := opap.runOPAOnSingleRule(ctx, rule, inputRawResources, ruleData, ruleRegoDependenciesData, controlID)
@@ -1348,17 +1708,22 @@ func (opap *OPAProcessor) processRuleOnScope(ctx context.Context, rule *reportha
 // hasUnreachableDependency reports whether controlID depends (per
 // ResourceToControlsMap, built from the control's declared rule.Match/
 // DynamicMatch resources) on at least one GVR that failed to collect this
-// scan. opap.InfoMap is mixed-purpose (whole-GVR pull failures keyed by GVR
+// scan — totally (InfoMap pull failure) or partially (a PartialGVRFailures
+// entry, e.g. host-sensor envelopes that converted for some nodes but not
+// all). opap.InfoMap is mixed-purpose (whole-GVR pull failures keyed by GVR
 // string, plus per-resource eval skips keyed by resource ID); checking that
 // the key is also present in ResourceToControlsMap, the same guard
 // cautils.BuildScanCoverage uses, is what keeps this from matching a
-// per-resource skip as if it were a GVR pull failure.
+// per-resource skip as if it were a GVR pull failure. Partial entries carry
+// their own GVR strings, so the same guard applies to them directly.
 //
 // This runs once per rule-scope evaluation (not once per resource), so its
 // O(len(ResourceToControlsMap)) cost is paid a small, bounded number of times
 // per scan rather than once per resource. It runs on processScope's worker
 // goroutines concurrently with markResourcesSkipped/seedCELSkips, which write
-// InfoMap under mu, so the read must hold mu as well.
+// InfoMap under mu, so the read must hold mu as well. PartialGVRFailures is
+// only appended during resource collection (before evaluation starts), so
+// reading it under the same lock is consistent.
 func (opap *OPAProcessor) hasUnreachableDependency(controlID string) bool {
 	opap.mu.Lock()
 	defer opap.mu.Unlock()
@@ -1368,6 +1733,11 @@ func (opap *OPAProcessor) hasUnreachableDependency(controlID string) bool {
 		}
 		if info, ok := opap.InfoMap[gvr]; ok && info.InnerStatus == apis.StatusSkipped {
 			return true
+		}
+		for _, partial := range opap.PartialGVRFailures {
+			if partial.GVR == gvr {
+				return true
+			}
 		}
 	}
 	return false
@@ -1406,15 +1776,56 @@ func (opap *OPAProcessor) markResourcesSkipped(out map[string]*resourcesresults.
 	}
 }
 
+func (opap *OPAProcessor) setControlStatus(controlID string, status *apis.StatusInfo) {
+	if opap.AllPolicies != nil {
+		if _, inPolicies := opap.AllPolicies.Controls[controlID]; !inPolicies {
+			return
+		}
+	}
+	if opap.Report.SummaryDetails.Controls == nil {
+		opap.Report.SummaryDetails.Controls = make(reportsummary.ControlSummaries)
+	}
+	ctrl, ok := opap.Report.SummaryDetails.Controls[controlID]
+	if !ok {
+		if opap.AllPolicies == nil {
+			return
+		}
+		policyCtrl, inPolicies := opap.AllPolicies.Controls[controlID]
+		if !inPolicies {
+			return
+		}
+		ctrl = reportsummary.ControlSummary{
+			Name:        policyCtrl.Name,
+			ControlID:   controlID,
+			ScoreFactor: policyCtrl.BaseScore,
+			Description: policyCtrl.Description,
+			Remediation: policyCtrl.Remediation,
+			Category:    policyCtrl.Category,
+		}
+	}
+	ctrl.SetStatus(status)
+	opap.Report.SummaryDetails.Controls[controlID] = ctrl
+
+	for i := range opap.Report.SummaryDetails.Frameworks {
+		if ctrl, ok := opap.Report.SummaryDetails.Frameworks[i].Controls[controlID]; ok {
+			ctrl.SetStatus(status)
+			opap.Report.SummaryDetails.Frameworks[i].Controls[controlID] = ctrl
+		}
+	}
+}
+
 func (opap *OPAProcessor) markNotEvaluatedControlsSkipped() {
 	if len(opap.ScanCoverage.NotEvaluatedControls) == 0 {
 		return
 	}
-	controlIDs := make([]string, 0, len(opap.ScanCoverage.NotEvaluatedControls))
 	for _, notEvaluated := range opap.ScanCoverage.NotEvaluatedControls {
-		controlIDs = append(controlIDs, notEvaluated.ControlID)
+		status := &apis.StatusInfo{
+			InnerStatus: apis.StatusSkipped,
+			SubStatus:   apis.SubStatusNotEvaluated,
+			InnerInfo:   notEvaluated.ReasonString(),
+		}
+		opap.setControlStatus(notEvaluated.ControlID, status)
 	}
-	opap.markControlsSkipped(controlIDs)
 }
 
 // markTimedOutControlsSkipped is retained for callers and focused tests that
@@ -1425,29 +1836,13 @@ func (opap *OPAProcessor) markTimedOutControlsSkipped() {
 	if len(opap.TimedOutControls) == 0 {
 		return
 	}
-	controlIDs := make([]string, 0, len(opap.TimedOutControls))
-	for controlID := range opap.TimedOutControls {
-		controlIDs = append(controlIDs, controlID)
-	}
-	opap.markControlsSkipped(controlIDs)
-}
-
-func (opap *OPAProcessor) markControlsSkipped(controlIDs []string) {
-	status := &apis.StatusInfo{
-		InnerStatus: apis.StatusSkipped,
-		SubStatus:   apis.SubStatusNotEvaluated,
-	}
-	for _, controlID := range controlIDs {
-		if ctrl, ok := opap.Report.SummaryDetails.Controls[controlID]; ok {
-			ctrl.SetStatus(status)
-			opap.Report.SummaryDetails.Controls[controlID] = ctrl
+	for controlID, reason := range opap.TimedOutControls {
+		status := &apis.StatusInfo{
+			InnerStatus: apis.StatusSkipped,
+			SubStatus:   apis.SubStatusNotEvaluated,
+			InnerInfo:   reason,
 		}
-		for i := range opap.Report.SummaryDetails.Frameworks {
-			if ctrl, ok := opap.Report.SummaryDetails.Frameworks[i].Controls[controlID]; ok {
-				ctrl.SetStatus(status)
-				opap.Report.SummaryDetails.Frameworks[i].Controls[controlID] = ctrl
-			}
-		}
+		opap.setControlStatus(controlID, status)
 	}
 }
 
@@ -1597,6 +1992,7 @@ func (opap *OPAProcessor) runCELOnK8s(ctx context.Context, rule *reporthandling.
 		return nil, celOutcome{}, fmt.Errorf("rule: '%s', policy %q is matched by %d live bindings; the offline engine does not yet select per-binding paramRefs, so refusing it to preserve scan/admission parity", rule.Name, vap.PolicyName, len(bindings))
 	}
 	findParam := opap.celParamObjectFinder()
+	readsNamespaceObject := evaluator.ReadsNamespaceObjectInValidations(vap)
 
 	var responses []reporthandling.RuleResponse
 	outcome := celOutcome{excluded: make(map[string]struct{})}
@@ -1632,26 +2028,26 @@ func (opap *OPAProcessor) runCELOnK8s(ctx context.Context, rule *reporthandling.
 			return nil, celOutcome{}, fmt.Errorf("rule: '%s', %w", rule.Name, err)
 		}
 
-		// namespaceObject is the resource's Namespace object when the scan
-		// collected it, and nil otherwise — the evaluator then binds null, so a
-		// policy reading namespaceObject.* sees an absent namespace (and a
-		// selection into it eval-errors and skips, never passes). File scans and
-		// scans whose frameworks never matched Namespaces stay on that safe path.
-		eval, err := evaluator.EvaluateVAP(ctx, vap, obj, opap.celNamespaceObjectFor(obj), params)
+		// Match conditions decide admission applicability before validations use
+		// namespaceObject. Preserve an exclusion even when the Namespace was not collected.
+		eval, err := evaluator.EvaluateVAPGate(ctx, vap, obj, params)
 		if err != nil {
 			return nil, celOutcome{}, fmt.Errorf("rule: '%s', %w", rule.Name, err)
 		}
-
 		if !eval.Applicable {
-			// Exclusions are silent in the results (the resource is out of scope,
-			// as at admission), but log one so a wrong GVR guess that quietly drops
-			// a resource the control should have seen stays diagnosable.
-			resID := celResourceID(obj)
-			logger.L().Debug("CEL control does not apply to resource, excluding it",
-				helpers.String("rule", rule.Name),
-				helpers.String("resource", resID))
-			outcome.excluded[resID] = struct{}{}
+			outcome.excluded[celResourceID(obj)] = struct{}{}
 			continue
+		}
+		if len(eval.Results) == 0 {
+			namespaceObject := opap.celNamespaceObjectFor(obj)
+			if missingNamespaceObject(readsNamespaceObject, celResourceNamespace(obj), namespaceObject) {
+				outcome.skipped = append(outcome.skipped, skippedCELResource{obj: obj, err: fmt.Errorf("namespace %q was not collected; cannot evaluate namespaceObject", celResourceNamespace(obj))})
+				continue
+			}
+			eval, err = evaluator.EvaluateVAPValidations(ctx, vap, obj, namespaceObject, params)
+			if err != nil {
+				return nil, celOutcome{}, fmt.Errorf("rule: '%s', %w", rule.Name, err)
+			}
 		}
 
 		violated := false
@@ -1701,6 +2097,12 @@ func (opap *OPAProcessor) runCELOnK8s(ctx context.Context, rule *reporthandling.
 	}
 
 	return responses, outcome, nil
+}
+
+// missingNamespaceObject distinguishes incomplete offline collection from the
+// legitimate null binding for a cluster-scoped object.
+func missingNamespaceObject(policyReadsNamespace bool, resourceNamespace string, namespaceObject map[string]any) bool {
+	return policyReadsNamespace && resourceNamespace != "" && namespaceObject == nil
 }
 
 // seedCELSkips records the CEL rule's unknown-verdict resources as StatusSkipped
@@ -1937,18 +2339,20 @@ func (opap *OPAProcessor) celParamObjectFinder() func(apiVersion, kind, namespac
 	}
 
 	// AllResources is grown concurrently mid-scan by other rules' aggregator
-	// write-back (processRuleOnScope, guarded by opap.mu) while this rule's CEL
-	// evaluation snapshots it here. Without the same lock this is an
+	// write-back (processRuleOnScope, guarded by the catalog's RWMutex) while this rule's CEL
+	// evaluation snapshots it here. Without catalog synchronization this would be an
 	// unsynchronized concurrent map read/write, which Go's runtime can turn
 	// into a process-wide crash (fatal error: concurrent map iteration and map
 	// write), not just a race-detector warning.
-	opap.mu.Lock()
-	idx := make(map[string]map[string]any, len(opap.AllResources))
-	for _, res := range opap.AllResources {
-		key := res.GetApiVersion() + "/" + res.GetKind() + "/" + res.GetNamespace() + "/" + res.GetName()
-		idx[key] = res.GetObject()
-	}
-	opap.mu.Unlock()
+	catalog := opap.GetCatalog()
+	idx := make(map[string]map[string]any, catalog.Len())
+	catalog.ForEach(func(_ string, res workloadinterface.IMetadata) bool {
+		if res != nil {
+			key := res.GetApiVersion() + "/" + res.GetKind() + "/" + res.GetNamespace() + "/" + res.GetName()
+			idx[key] = res.GetObject()
+		}
+		return true
+	})
 
 	return func(apiVersion, kind, namespace, name string) (map[string]any, bool) {
 		obj, ok := idx[apiVersion+"/"+kind+"/"+namespace+"/"+name]
@@ -2016,6 +2420,7 @@ func (opap *OPAProcessor) runRegoOnK8s(ctx context.Context, rule *reporthandling
 		return nil, fmt.Errorf("rule '%s': failed to prepare query: %w", rule.Name, err)
 	}
 
+	ctx = withCosignPolicy(ctx, ruleRegoDependenciesData.PostureControlInputs)
 	results, err := opap.regoEval(ctx, k8sObjects, pq)
 	if err != nil {
 		return nil, fmt.Errorf("rule '%s': rego eval failed: %w", rule.Name, err)

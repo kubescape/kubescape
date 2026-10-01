@@ -12,6 +12,19 @@ import (
 func ReportV2ToV1(opaSessionObj *OPASessionObj) *reporthandling.PostureReport {
 	report := &reporthandling.PostureReport{}
 
+	if opaSessionObj == nil || opaSessionObj.Report == nil {
+		return report
+	}
+
+	report.CustomerGUID = opaSessionObj.Report.CustomerGUID
+	report.ClusterName = opaSessionObj.Report.ClusterName
+	report.ClusterAPIServerInfo = opaSessionObj.Report.ClusterAPIServerInfo
+	report.ClusterCloudProvider = opaSessionObj.Report.ClusterCloudProvider
+	report.ReportID = opaSessionObj.Report.ReportID
+	report.JobID = opaSessionObj.Report.JobID
+	report.ReportGenerationTime = opaSessionObj.Report.ReportGenerationTime
+	report.Resources = opaSessionObj.Report.Resources
+
 	frameworks := []reporthandling.FrameworkReport{}
 
 	if len(opaSessionObj.Report.SummaryDetails.Frameworks) > 0 {
@@ -36,6 +49,35 @@ func ReportV2ToV1(opaSessionObj *OPASessionObj) *reporthandling.PostureReport {
 	for f := range frameworks {
 		// set counters
 		reporthandling.SetUniqueResourcesCounter(&frameworks[f])
+
+		// apply the summary-derived control counters after the helper recomputation
+		var controls map[string]reportsummary.ControlSummary
+		var statusCounters reportsummary.StatusCounters
+		if len(opaSessionObj.Report.SummaryDetails.Frameworks) > 0 {
+			controls = opaSessionObj.Report.SummaryDetails.Frameworks[f].Controls
+			statusCounters = opaSessionObj.Report.SummaryDetails.Frameworks[f].StatusCounters
+		} else {
+			controls = opaSessionObj.Report.SummaryDetails.Controls
+			statusCounters = opaSessionObj.Report.SummaryDetails.StatusCounters
+		}
+
+		for c := range frameworks[f].ControlReports {
+			if crv2, ok := controls[frameworks[f].ControlReports[c].ControlID]; ok {
+				frameworks[f].ControlReports[c].TotalResources = crv2.StatusCounters.PassedResources + crv2.StatusCounters.FailedResources + crv2.StatusCounters.SkippedResources + crv2.StatusCounters.ExcludedResources
+				frameworks[f].ControlReports[c].FailedResources = crv2.StatusCounters.FailedResources
+				frameworks[f].ControlReports[c].WarningResources = crv2.StatusCounters.SkippedResources + crv2.StatusCounters.ExcludedResources
+			}
+		}
+
+		if statusCounters.PassedResources+statusCounters.FailedResources+statusCounters.SkippedResources+statusCounters.ExcludedResources > 0 {
+			frameworks[f].TotalResources = statusCounters.PassedResources + statusCounters.FailedResources + statusCounters.SkippedResources + statusCounters.ExcludedResources
+			frameworks[f].FailedResources = statusCounters.FailedResources
+			frameworks[f].WarningResources = statusCounters.SkippedResources + statusCounters.ExcludedResources
+		} else if len(frameworks[f].ControlReports) == 1 {
+			frameworks[f].TotalResources = frameworks[f].ControlReports[0].TotalResources
+			frameworks[f].FailedResources = frameworks[f].ControlReports[0].FailedResources
+			frameworks[f].WarningResources = frameworks[f].ControlReports[0].WarningResources
+		}
 	}
 
 	report.FrameworkReports = frameworks
@@ -52,10 +94,12 @@ func controlReportV2ToV1(opaSessionObj *OPASessionObj, frameworkName string, con
 		crv1.Score = crv2.GetScore()
 		crv1.Control_ID = controlID
 
-		// TODO - add fields
-		crv1.Description = crv2.Description
-		crv1.Remediation = crv2.Remediation
+		crv1.Description = crv2.GetDescription()
+		crv1.Remediation = crv2.GetRemediation()
 
+		crv1.TotalResources = crv2.StatusCounters.PassedResources + crv2.StatusCounters.FailedResources + crv2.StatusCounters.SkippedResources + crv2.StatusCounters.ExcludedResources
+		crv1.FailedResources = crv2.StatusCounters.FailedResources
+		crv1.WarningResources = crv2.StatusCounters.SkippedResources + crv2.StatusCounters.ExcludedResources
 		rulesv1 := map[string]reporthandling.RuleReport{}
 		l := helpersv1.GetAllListsFromPool()
 		for resourceID := range crv2.ListResourcesIDs(l).All() {
@@ -92,7 +136,7 @@ func controlReportV2ToV1(opaSessionObj *OPASessionObj, frameworkName string, con
 							ruleResponse.Exception = &rulev2.Exception[0]
 						}
 
-						if fullResource, ok := opaSessionObj.AllResources[resourceID]; ok {
+						if fullResource, ok := opaSessionObj.GetResource(resourceID); ok {
 							tmp := maps.Clone(fullResource.GetObject())
 							workloadinterface.RemoveFromMap(tmp, "spec")
 							ruleResponse.AlertObject.K8SApiObjects = append(ruleResponse.AlertObject.K8SApiObjects, tmp)

@@ -243,10 +243,23 @@ func (a *APIServerStore) BuildWorkloadConfigurationScan(ctx context.Context, rep
 		Spec: v1beta1.WorkloadConfigurationScanSpec{
 			Controls:       getControlsMapFromResult(ctx, result, report.SummaryDetails.Controls),
 			RelatedObjects: parseWorkloadScanRelatedObjectList(relatedObjects),
+			Metadata:       workloadConfigurationScanMetadata(report),
 		},
 	}
 
 	return &manifest, nil
+}
+
+func workloadConfigurationScanMetadata(report *v2.PostureReport) *v1beta1.WorkloadConfigurationScanMeta {
+	if report == nil || report.ReportGenerationTime.IsZero() {
+		return nil
+	}
+
+	return &v1beta1.WorkloadConfigurationScanMeta{
+		Report: v1beta1.ReportMeta{
+			CreatedAt: metav1.NewTime(report.ReportGenerationTime),
+		},
+	}
 }
 
 // StoreWorkloadConfigurationScanResult stores a WorkloadConfigurationScan manifest
@@ -342,6 +355,9 @@ func mergeWorkloadConfigurationScanSpec(existingSpec v1beta1.WorkloadConfigurati
 		}
 	}
 
+	if newSpec.Metadata != nil {
+		existingSpec.Metadata = newSpec.Metadata.DeepCopy()
+	}
 	existingSpec.RelatedObjects = newSpec.RelatedObjects
 	return existingSpec
 }

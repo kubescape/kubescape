@@ -1,16 +1,22 @@
 package scan
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
+	"sort"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/core"
 	"github.com/kubescape/kubescape/v4/core/meta"
@@ -23,6 +29,93 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestWriteFleetReport_ReplacesExistingReportAtomically(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "fleet.json")
+	require.NoError(t, os.WriteFile(path, []byte("{\"generation\":\"old\"}"), 0o600))
+
+	report := &fleet.FleetReport{
+		Metadata: fleet.FleetMetadata{
+			GeneratedAt: time.Date(2026, time.January, 2, 3, 4, 5, 0, time.UTC),
+			Contexts:    []string{"prod"},
+		},
+		Clusters: []fleet.ClusterResult{{ClusterID: "prod", Context: "prod", Status: fleet.ClusterScanned}},
+	}
+	require.NoError(t, writeFleetReport(path, report))
+
+	raw, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.True(t, json.Valid(raw))
+	assert.True(t, bytes.HasSuffix(raw, []byte("\n")))
+	got := fleetReportFromFile(t, path)
+	assert.Equal(t, []string{"prod"}, got.Metadata.Contexts)
+	require.Len(t, got.Clusters, 1)
+	assert.Equal(t, "prod", got.Clusters[0].ClusterID)
+	if runtime.GOOS != "windows" {
+		info, err := os.Stat(path)
+		require.NoError(t, err)
+		assert.Equal(t, os.FileMode(0o600), info.Mode().Perm(), "replacing a report must preserve its existing mode")
+	}
+}
+
+func TestWriteFleetReport_DoesNotFollowExistingSymlink(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation is not generally available to unprivileged Windows tests")
+	}
+
+	dir := t.TempDir()
+	victim := filepath.Join(dir, "per-context.json")
+	path := filepath.Join(dir, "fleet.json")
+	require.NoError(t, os.WriteFile(victim, []byte("per-context result"), 0o600))
+	require.NoError(t, os.Symlink(victim, path))
+
+	report := &fleet.FleetReport{Metadata: fleet.FleetMetadata{Contexts: []string{"prod"}}}
+	require.NoError(t, writeFleetReport(path, report))
+
+	victimData, err := os.ReadFile(victim)
+	require.NoError(t, err)
+	assert.Equal(t, "per-context result", string(victimData))
+	reportData, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.True(t, json.Valid(reportData))
+	info, err := os.Lstat(path)
+	require.NoError(t, err)
+	assert.Zero(t, info.Mode()&os.ModeSymlink)
+}
+
+func TestWriteFleetReport_PreservesExistingDestinationWhenCommitFails(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("directory replacement errors differ on Windows")
+	}
+
+	path := filepath.Join(t.TempDir(), "fleet.json")
+	require.NoError(t, os.Mkdir(path, 0o750))
+	marker := filepath.Join(path, "previous-report")
+	require.NoError(t, os.WriteFile(marker, []byte("keep"), 0o600))
+
+	err := writeFleetReport(path, &fleet.FleetReport{})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "write fleet report")
+	got, readErr := os.ReadFile(marker)
+	require.NoError(t, readErr)
+	assert.Equal(t, "keep", string(got))
+}
+
+func TestWriteFleetReport_CreatesNestedDestinationPrivately(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "reports", "fleet", "result.json")
+	report := &fleet.FleetReport{Metadata: fleet.FleetMetadata{Contexts: []string{"prod", "dr"}}}
+
+	require.NoError(t, writeFleetReport(path, report))
+
+	got := fleetReportFromFile(t, path)
+	assert.Equal(t, []string{"prod", "dr"}, got.Metadata.Contexts)
+	if runtime.GOOS != "windows" {
+		info, err := os.Stat(path)
+		require.NoError(t, err)
+		assert.Equal(t, os.FileMode(0o644), info.Mode().Perm())
+	}
+}
 
 func TestPerContextOutputPath(t *testing.T) {
 	tests := []struct {
@@ -474,6 +567,105 @@ func TestFleetScan_WritesFleetReportAcrossEveryOutcome(t *testing.T) {
 	assert.Equal(t, fleet.CellFailed, row.ByCluster["prod"].Status)
 	assert.Equal(t, fleet.CellPassed, row.ByCluster["staging"].Status)
 	assert.NotContains(t, row.ByCluster, "dr", "an unreachable cluster has no opinion about any control")
+}
+
+// resultsWithCoverage is resultsWithControl with a chosen coverage score, so a
+// test can drive the rollup's coverage floor.
+func resultsWithCoverage(status apis.ScanningStatus, complianceScore, coverageScore float32) *resultshandling.ResultsHandler {
+	results := resultsWithControl(status, complianceScore)
+	results.GetData().ScanCoverage.CoverageScore = coverageScore
+	results.GetData().ScanCoverage.Degraded = coverageScore < 100
+	return results
+}
+
+func TestFleetScan_FleetReportCarriesTheComplianceRollup(t *testing.T) {
+	dir := t.TempDir()
+	fleetReport := filepath.Join(dir, "fleet.json")
+	ks := &fleetOutcomeKubescape{outcomes: map[string]func() (*resultshandling.ResultsHandler, error){
+		"prod": func() (*resultshandling.ResultsHandler, error) { return resultsWithControl(apis.StatusFailed, 60), nil },
+		"staging": func() (*resultshandling.ResultsHandler, error) {
+			return resultsWithControl(apis.StatusPassed, 100), nil
+		},
+		"dr": func() (*resultshandling.ResultsHandler, error) {
+			return nil, fmt.Errorf("dr: %w", core.ErrClusterConnection)
+		},
+	}}
+	scanInfo := cautils.ScanInfo{
+		KubeContexts: []string{"prod", "staging", "dr"},
+		Output:       filepath.Join(dir, "report.json"),
+		FleetReport:  fleetReport,
+		ScanType:     cautils.ScanTypeCluster,
+	}
+
+	require.Error(t, fleetScan(scanInfo, ks, nil, scanContextOnlyRunner), "dr was unreachable")
+
+	report := fleetReportFromFile(t, fleetReport)
+	require.NotNil(t, report.Compliance.ComplianceScore)
+	assert.InDelta(t, 80, *report.Compliance.ComplianceScore, 0.001, "the mean of prod's 60 and staging's 100")
+	assert.Equal(t, 2, report.Compliance.ClustersScored)
+	assert.Equal(t, 3, report.Compliance.ClustersTotal)
+
+	require.Len(t, report.Compliance.Excluded, 1)
+	assert.Equal(t, "dr", report.Compliance.Excluded[0].ClusterID)
+	assert.Equal(t, fleet.ExcludedNotScanned, report.Compliance.Excluded[0].Reason,
+		"a cluster nobody could reach has no opinion about compliance")
+}
+
+func TestFleetScan_RollupFloorComesFromFailCoverageBelow(t *testing.T) {
+	newScanInfo := func(dir string, threshold float32) cautils.ScanInfo {
+		return cautils.ScanInfo{
+			KubeContexts:          []string{"prod", "dr"},
+			Output:                filepath.Join(dir, "report.json"),
+			FleetReport:           filepath.Join(dir, "fleet.json"),
+			ScanType:              cautils.ScanTypeCluster,
+			FailCoverageThreshold: threshold,
+		}
+	}
+	// dr scanned almost nothing and passed what little it ran. Whether its 100
+	// counts is exactly what --fail-coverage-below decides.
+	outcomes := func() map[string]func() (*resultshandling.ResultsHandler, error) {
+		return map[string]func() (*resultshandling.ResultsHandler, error){
+			"prod": func() (*resultshandling.ResultsHandler, error) {
+				return resultsWithCoverage(apis.StatusFailed, 50, 100), nil
+			},
+			"dr": func() (*resultshandling.ResultsHandler, error) {
+				return resultsWithCoverage(apis.StatusPassed, 100, 5), nil
+			},
+		}
+	}
+
+	t.Run("no threshold means no floor", func(t *testing.T) {
+		dir := t.TempDir()
+		scanInfo := newScanInfo(dir, 0)
+		require.NoError(t, fleetScan(scanInfo, &fleetOutcomeKubescape{outcomes: outcomes()}, nil, scanContextOnlyRunner))
+
+		report := fleetReportFromFile(t, scanInfo.FleetReport)
+		require.NotNil(t, report.Compliance.ComplianceScore)
+		assert.InDelta(t, 75, *report.Compliance.ComplianceScore, 0.001,
+			"an operator who set no threshold asked for nothing to be dropped")
+		assert.Empty(t, report.Compliance.Excluded)
+		assert.InDelta(t, 0, report.Compliance.MinCoverage, 0)
+	})
+
+	t.Run("a threshold holds the barely scanned cluster back", func(t *testing.T) {
+		dir := t.TempDir()
+		scanInfo := newScanInfo(dir, 50)
+		// prod fails its own coverage gate in a real run, but this runner does
+		// not enforce gates, so the scan itself succeeds.
+		require.NoError(t, fleetScan(scanInfo, &fleetOutcomeKubescape{outcomes: outcomes()}, nil, scanContextOnlyRunner))
+
+		report := fleetReportFromFile(t, scanInfo.FleetReport)
+		require.NotNil(t, report.Compliance.ComplianceScore)
+		assert.InDelta(t, 50, *report.Compliance.ComplianceScore, 0.001,
+			"dr's 100 came from a scan that barely ran and must not lift the fleet")
+		assert.InDelta(t, 50, report.Compliance.MinCoverage, 0)
+		require.Len(t, report.Compliance.Excluded, 1)
+		assert.Equal(t, "dr", report.Compliance.Excluded[0].ClusterID)
+		assert.Equal(t, fleet.ExcludedLowCoverage, report.Compliance.Excluded[0].Reason)
+		require.NotNil(t, report.Compliance.Excluded[0].ComplianceScore)
+		assert.InDelta(t, 100, *report.Compliance.Excluded[0].ComplianceScore, 0.001,
+			"the uncounted score stays visible so the exclusion can be checked")
+	})
 }
 
 func TestFleetScan_WithoutFleetReportWritesNothingExtra(t *testing.T) {
@@ -1125,4 +1317,362 @@ func TestValidateKubeContextsSupported_FleetReportRequiresKubeContexts(t *testin
 	require.ErrorContains(t, err, "--fleet-report requires --kube-contexts")
 
 	assert.NoError(t, validateKubeContextsSupported(cmd, &cautils.ScanInfo{}), "neither flag set is the ordinary single-cluster scan")
+}
+
+func TestFleetScan_FleetReportCarriesTheDivergence(t *testing.T) {
+	dir := t.TempDir()
+	fleetReport := filepath.Join(dir, "fleet.json")
+	ks := &fleetOutcomeKubescape{outcomes: map[string]func() (*resultshandling.ResultsHandler, error){
+		"prod": func() (*resultshandling.ResultsHandler, error) {
+			return resultsWithControl(apis.StatusPassed, 100), nil
+		},
+		"staging": func() (*resultshandling.ResultsHandler, error) { return resultsWithControl(apis.StatusFailed, 40), nil },
+	}}
+	scanInfo := cautils.ScanInfo{
+		KubeContexts: []string{"prod", "staging"},
+		Output:       filepath.Join(dir, "report.json"),
+		FleetReport:  fleetReport,
+		ScanType:     cautils.ScanTypeCluster,
+	}
+
+	require.NoError(t, fleetScan(scanInfo, ks, nil, scanContextOnlyRunner))
+
+	report := fleetReportFromFile(t, fleetReport)
+	require.Len(t, report.Divergence.Controls, 1)
+	control := report.Divergence.Controls[0]
+	assert.Equal(t, "C-0016", control.ControlID)
+	assert.True(t, control.PostureDiverges)
+	assert.Equal(t, []string{"prod"}, control.Passed)
+	assert.Equal(t, []string{"staging"}, control.Failed)
+	assert.Empty(t, report.Divergence.ReferenceCluster, "none was asked for")
+}
+
+func TestFleetScan_DivergenceUsesTheReferenceCluster(t *testing.T) {
+	dir := t.TempDir()
+	fleetReport := filepath.Join(dir, "fleet.json")
+	ks := &fleetOutcomeKubescape{outcomes: map[string]func() (*resultshandling.ResultsHandler, error){
+		"prod": func() (*resultshandling.ResultsHandler, error) {
+			return resultsWithControl(apis.StatusPassed, 100), nil
+		},
+		"staging": func() (*resultshandling.ResultsHandler, error) { return resultsWithControl(apis.StatusFailed, 40), nil },
+	}}
+	scanInfo := cautils.ScanInfo{
+		KubeContexts:     []string{"prod", "staging"},
+		Output:           filepath.Join(dir, "report.json"),
+		FleetReport:      fleetReport,
+		ReferenceCluster: "prod",
+		ScanType:         cautils.ScanTypeCluster,
+	}
+
+	require.NoError(t, fleetScan(scanInfo, ks, nil, scanContextOnlyRunner))
+
+	report := fleetReportFromFile(t, fleetReport)
+	assert.Equal(t, "prod", report.Divergence.ReferenceCluster)
+	assert.False(t, report.Divergence.ReferenceUnavailable)
+	require.Len(t, report.Divergence.Controls, 1)
+	assert.Equal(t, fleet.CellPassed, report.Divergence.Controls[0].ReferenceStatus,
+		"the reference's own verdict is what the others are read against")
+}
+
+func TestFleetScan_ReferenceClusterThatCouldNotBeScanned(t *testing.T) {
+	dir := t.TempDir()
+	fleetReport := filepath.Join(dir, "fleet.json")
+	ks := &fleetOutcomeKubescape{outcomes: map[string]func() (*resultshandling.ResultsHandler, error){
+		"golden": func() (*resultshandling.ResultsHandler, error) {
+			return nil, fmt.Errorf("golden: %w", core.ErrClusterConnection)
+		},
+		"prod": func() (*resultshandling.ResultsHandler, error) {
+			return resultsWithControl(apis.StatusPassed, 100), nil
+		},
+		"staging": func() (*resultshandling.ResultsHandler, error) { return resultsWithControl(apis.StatusFailed, 40), nil },
+	}}
+	scanInfo := cautils.ScanInfo{
+		KubeContexts:     []string{"golden", "prod", "staging"},
+		Output:           filepath.Join(dir, "report.json"),
+		FleetReport:      fleetReport,
+		ReferenceCluster: "golden",
+		ScanType:         cautils.ScanTypeCluster,
+	}
+
+	require.Error(t, fleetScan(scanInfo, ks, nil, scanContextOnlyRunner), "golden was unreachable")
+
+	report := fleetReportFromFile(t, fleetReport)
+	assert.True(t, report.Divergence.ReferenceUnavailable,
+		"a reference nobody could reach has to be called out, not quietly ignored")
+	require.Len(t, report.Divergence.Controls, 1, "the other clusters still disagree")
+	assert.Empty(t, report.Divergence.Controls[0].ReferenceStatus)
+}
+
+func TestValidateReferenceCluster(t *testing.T) {
+	tests := []struct {
+		name     string
+		scanInfo cautils.ScanInfo
+		wantErr  string
+	}{
+		{
+			name:     "not asked for",
+			scanInfo: cautils.ScanInfo{KubeContexts: []string{"prod"}, FleetReport: "fleet.json"},
+		},
+		{
+			name:     "names a scanned context",
+			scanInfo: cautils.ScanInfo{KubeContexts: []string{"prod", "staging"}, FleetReport: "fleet.json", ReferenceCluster: "prod"},
+		},
+		{
+			name:     "without a fleet report it would change nothing",
+			scanInfo: cautils.ScanInfo{KubeContexts: []string{"prod"}, ReferenceCluster: "prod"},
+			wantErr:  "requires --fleet-report",
+		},
+		{
+			name:     "a context the run is not scanning is almost always a typo",
+			scanInfo: cautils.ScanInfo{KubeContexts: []string{"prod", "staging"}, FleetReport: "fleet.json", ReferenceCluster: "prodd"},
+			wantErr:  "is not one of --kube-contexts",
+		},
+		{
+			name:     "blank",
+			scanInfo: cautils.ScanInfo{KubeContexts: []string{"prod"}, FleetReport: "fleet.json", ReferenceCluster: "  "},
+			wantErr:  "is blank",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateReferenceCluster(&tt.scanInfo)
+			if tt.wantErr == "" {
+				assert.NoError(t, err)
+				return
+			}
+			require.ErrorContains(t, err, tt.wantErr)
+		})
+	}
+}
+
+func TestFleetScan_RejectsBadReferenceClusterBeforeScanning(t *testing.T) {
+	dir := t.TempDir()
+	ks := &fleetTrackingKubescape{}
+	scanInfo := cautils.ScanInfo{
+		KubeContexts:     []string{"prod", "staging"},
+		Output:           filepath.Join(dir, "report.json"),
+		FleetReport:      filepath.Join(dir, "fleet.json"),
+		ReferenceCluster: "prodd",
+		ScanType:         cautils.ScanTypeCluster,
+	}
+
+	err := fleetScan(scanInfo, ks, nil, scanContextOnlyRunner)
+
+	require.ErrorContains(t, err, "is not one of --kube-contexts")
+	assert.Empty(t, ks.callsOutputs, "a typo is a configuration error and must be caught before any cluster is touched")
+}
+
+// captureStdout runs fn with os.Stdout redirected and returns what it wrote,
+// with the escape sequences stripped so assertions read as words.
+func captureStdout(t *testing.T, fn func()) string {
+	t.Helper()
+
+	read, write, err := os.Pipe()
+	require.NoError(t, err)
+	original := os.Stdout
+	os.Stdout = write
+	defer func() { os.Stdout = original }()
+
+	done := make(chan string, 1)
+	go func() {
+		var buf bytes.Buffer
+		_, _ = io.Copy(&buf, read)
+		done <- buf.String()
+	}()
+
+	fn()
+	require.NoError(t, write.Close())
+	out := <-done
+	require.NoError(t, read.Close())
+
+	return regexp.MustCompile(`\x1b\[[0-9;]*m`).ReplaceAllString(out, "")
+}
+
+// TestFleetScan_AlwaysPrintsTheSummary covers the case the summary exists for:
+// a run where part of the fleet could not be reached. The scan returns an
+// error, and the operator still gets what was found on the clusters that did
+// answer, including the fact that one of them did not.
+func TestFleetScan_AlwaysPrintsTheSummary(t *testing.T) {
+	dir := t.TempDir()
+	ks := &fleetOutcomeKubescape{outcomes: map[string]func() (*resultshandling.ResultsHandler, error){
+		"prod": func() (*resultshandling.ResultsHandler, error) {
+			return resultsWithControl(apis.StatusPassed, 100), nil
+		},
+		"staging": func() (*resultshandling.ResultsHandler, error) { return resultsWithControl(apis.StatusFailed, 40), nil },
+		"dr": func() (*resultshandling.ResultsHandler, error) {
+			return nil, fmt.Errorf("dr: %w", core.ErrClusterConnection)
+		},
+	}}
+	scanInfo := cautils.ScanInfo{
+		KubeContexts: []string{"prod", "staging", "dr"},
+		Output:       filepath.Join(dir, "report.json"),
+		FleetReport:  filepath.Join(dir, "fleet.json"),
+		ScanType:     cautils.ScanTypeCluster,
+	}
+
+	out := captureStdout(t, func() {
+		require.Error(t, fleetScan(scanInfo, ks, nil, scanContextOnlyRunner), "dr was unreachable")
+	})
+
+	assert.Contains(t, out, "Fleet summary")
+	assert.Contains(t, out, "prod")
+	assert.Contains(t, out, "staging")
+	assert.Contains(t, out, "dr", "a cluster nobody could reach still belongs in the summary")
+	assert.Contains(t, out, "unreachable")
+	assert.Contains(t, out, "Fleet compliance")
+	assert.Contains(t, out, "C-0016", "the clusters disagree on it, so it is worth showing")
+}
+
+// TestFleetScan_PrintsTheSummaryEvenWhenTheFileCannotBeWritten pins that a run
+// which scanned every cluster still tells the operator what it found. The
+// summary is the only place they would otherwise see it.
+func TestFleetScan_PrintsTheSummaryEvenWhenTheFileCannotBeWritten(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "report.json"), []byte("{}"), 0o600))
+	ks := &fleetTrackingKubescape{}
+	scanInfo := cautils.ScanInfo{
+		KubeContexts: []string{"ctx-a"},
+		Output:       filepath.Join(dir, "report.json"),
+		FleetReport:  filepath.Join(dir, "report.json", "fleet.json"),
+		ScanType:     cautils.ScanTypeCluster,
+	}
+
+	out := captureStdout(t, func() {
+		require.ErrorContains(t, fleetScan(scanInfo, ks, nil, scanContextOnlyRunner), "fleet report")
+	})
+
+	assert.Contains(t, out, "Fleet summary")
+	assert.Contains(t, out, "ctx-a")
+}
+
+// TestFleetScan_NoSummaryWithoutAFleetReport pins that a plain --kube-contexts
+// run prints nothing extra. Without --fleet-report no aggregate is built at
+// all, which is what keeps that run's memory flat, so there is nothing to show.
+func TestFleetScan_NoSummaryWithoutAFleetReport(t *testing.T) {
+	dir := t.TempDir()
+	ks := &fleetTrackingKubescape{}
+	scanInfo := cautils.ScanInfo{
+		KubeContexts: []string{"ctx-a", "ctx-b"},
+		Output:       filepath.Join(dir, "report.json"),
+		ScanType:     cautils.ScanTypeCluster,
+	}
+
+	out := captureStdout(t, func() {
+		require.NoError(t, fleetScan(scanInfo, ks, nil, scanContextOnlyRunner))
+	})
+
+	assert.NotContains(t, out, "Fleet summary")
+}
+
+// contextWindow is when one context was being scanned, and which kube context
+// was actually active while it was.
+type contextWindow struct {
+	kubeContext string
+	activeAs    string
+	start, end  time.Time
+}
+
+// windowRecorder collects one contextWindow per scanned context.
+//
+// The mutex is not decoration. The point of the assertions below is to fail if
+// contexts are ever scanned concurrently, so the recorder has to stay correct
+// under exactly the change it is meant to catch. Without it a concurrent
+// implementation would trip the race detector inside this helper instead of
+// reporting the invariant that actually broke.
+type windowRecorder struct {
+	mu      sync.Mutex
+	windows []contextWindow
+}
+
+// runner returns a fleetRunner that records the window each scan ran in and the
+// kube context that was active inside it.
+func (r *windowRecorder) runner() fleetRunner {
+	return func(ctx context.Context, scanInfo *cautils.ScanInfo, ks meta.IKubescape, policyIdentifiers []cautils.PolicyIdentifier) (*resultshandling.ResultsHandler, error) {
+		window := contextWindow{
+			kubeContext: scanInfo.GetClusterContextName(),
+			activeAs:    k8sinterface.GetContextName(),
+			start:       time.Now(),
+		}
+		results, err := ks.ScanContext(ctx, scanInfo, policyIdentifiers)
+
+		// A real scan takes time; this fake one returns instantly. Without a
+		// dwell the windows are so narrow that concurrent scans would still not
+		// overlap in wall-clock time, and the overlap assertion below could
+		// never fail however the loop was rewritten.
+		time.Sleep(2 * time.Millisecond)
+		window.end = time.Now()
+
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		r.windows = append(r.windows, window)
+		return results, err
+	}
+}
+
+// byStart returns the recorded windows ordered by the time each scan began,
+// which is the order the scans actually happened in rather than the order they
+// finished reporting themselves.
+func (r *windowRecorder) byStart() []contextWindow {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	ordered := append([]contextWindow(nil), r.windows...)
+	sort.Slice(ordered, func(i, j int) bool { return ordered[i].start.Before(ordered[j].start) })
+	return ordered
+}
+
+// TestFleetScan_ContextWindowsDoNotOverlap pins that one context is scanned at
+// a time and that the process is pointed at that context while it is.
+//
+// Both properties are structural today, since the loop is sequential and
+// EnterClusterContext brackets each iteration. The assertions exist so they
+// cannot stop being true quietly. The active context lives in k8sinterface as
+// process-global state with no locking around it, so two contexts being live at
+// once means a scan can read the wrong cluster. A change that scans contexts
+// concurrently has to face that here, and delete this test deliberately, rather
+// than discover it later in a report that describes a cluster it never read.
+func TestFleetScan_ContextWindowsDoNotOverlap(t *testing.T) {
+	// The kube context name is process-global, so this test must not run in
+	// parallel with anything else that touches it.
+	previousContext := k8sinterface.GetContextName()
+	t.Cleanup(func() { k8sinterface.SetClusterContextName(previousContext) })
+
+	var recorder windowRecorder
+	dir := t.TempDir()
+	scanInfo := cautils.ScanInfo{
+		KubeContexts: []string{"prod", "staging", "dr"},
+		Output:       filepath.Join(dir, "report.json"),
+		ScanType:     cautils.ScanTypeCluster,
+	}
+
+	require.NoError(t, fleetScan(scanInfo, &fleetTrackingKubescape{}, nil, recorder.runner()))
+
+	windows := recorder.byStart()
+	require.Len(t, windows, len(scanInfo.KubeContexts), "every context has to be scanned exactly once")
+
+	// Sorted by start time, any two windows overlap if and only if one begins
+	// before the one before it ended, so neighbours are the only pairs worth
+	// comparing.
+	for i, window := range windows {
+		if i == 0 {
+			continue
+		}
+
+		previous := windows[i-1]
+		assert.Falsef(t, window.start.Before(previous.end),
+			"context %q began at %s, before %q ended at %s, so two contexts were live at once",
+			window.kubeContext, window.start, previous.kubeContext, previous.end)
+	}
+
+	for i, window := range windows {
+		assert.Equalf(t, scanInfo.KubeContexts[i], window.kubeContext,
+			"contexts must be scanned in the order they were given")
+		assert.Equalf(t, window.kubeContext, window.activeAs,
+			"the process must be pointed at %q while %q is being scanned, or the scan reads another cluster",
+			window.kubeContext, window.kubeContext)
+	}
+
+	assert.Equal(t, previousContext, k8sinterface.GetContextName(),
+		"the run must leave the process on the context it found it on")
 }
