@@ -239,11 +239,13 @@ func TestMetrics_CleansUpResultsFileOnDisconnect(t *testing.T) {
 		scanCtxErr := make(chan error, 1)
 
 		reqCtx, cancel := context.WithCancel(context.Background())
+		handlerDone := make(chan struct{})
 		scanImpl = func(ctx context.Context, scanInfo *cautils.ScanInfo, _ []cautils.PolicyIdentifier, _ string, _ bool) (*reporthandlingv2.PostureReport, error) {
-			resolved, _ := printer.ResolveOutputFile(printer.PrometheusFormat, scanInfo.Output, "")
-			require.NoError(t, os.WriteFile(resolved, []byte("# metrics\n"), 0o600))
 			cancel() // simulate the scrape connection going away mid-scan
 			scanCtxErr <- ctx.Err()
+			<-handlerDone // wait for the handler to return on the disconnect path before writing
+			resolved, _ := printer.ResolveOutputFile(printer.PrometheusFormat, scanInfo.Output, "")
+			require.NoError(t, os.WriteFile(resolved, []byte("# metrics\n"), 0o600))
 			return nil, nil
 		}
 
@@ -251,7 +253,6 @@ func TestMetrics_CleansUpResultsFileOnDisconnect(t *testing.T) {
 		rq := httptest.NewRequest(http.MethodGet, "/v1/metrics", nil).WithContext(reqCtx)
 		w := httptest.NewRecorder()
 
-		handlerDone := make(chan struct{})
 		go func() {
 			h.Metrics(w, rq)
 			close(handlerDone)
