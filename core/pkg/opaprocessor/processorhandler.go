@@ -989,9 +989,10 @@ func (opap *OPAProcessor) verifyAndProcessWholeCluster(
 	fallbackScope evaluationScope,
 	progressListener IJobProgressNotificationClient,
 ) error {
+	var verifyErrs []error
 	for _, controlID := range wholeClusterControlIDs {
 		if err := ctx.Err(); err != nil {
-			return err
+			return errors.Join(append(verifyErrs, err)...)
 		}
 		if progressListener != nil {
 			opap.mu.Lock()
@@ -1021,7 +1022,7 @@ func (opap *OPAProcessor) verifyAndProcessWholeCluster(
 			logger.L().Ctx(ctx).Warning("Whole-cluster evaluation error during verification",
 				helpers.String("controlID", controlID),
 				helpers.Error(errors.Join(errP, errF)))
-			return errors.Join(errP, errF)
+			return errors.Join(append(verifyErrs, errors.Join(errP, errF))...)
 		}
 
 		opap.mu.Lock()
@@ -1062,13 +1063,21 @@ func (opap *OPAProcessor) verifyAndProcessWholeCluster(
 			}
 		}
 
+		// Fail closed: a parity mismatch means the projection is untrusted for
+		// this control. Record it as an error (non-zero exit via Process →
+		// ScanContext → RunE) and merge the fallback verdicts, which observed
+		// the full cluster, so even callers that inspect ResourcesResult
+		// despite the error see the authoritative statuses.
+		merged := resProjected
 		if len(diffErrors) > 0 {
 			logger.L().Ctx(ctx).Error(fmt.Sprintf("Whole-cluster parity verification failed with %d mismatches for control %s", len(diffErrors), controlID))
+			verifyErrs = append(verifyErrs, fmt.Errorf("whole-cluster parity verification failed for control %s: %d mismatch(es): %s", controlID, len(diffErrors), strings.Join(diffErrors, "; ")))
+			merged = resFallback
 		}
 
-		if len(resProjected) > 0 {
+		if len(merged) > 0 {
 			opap.mu.Lock()
-			for resourceID, controlResult := range resProjected {
+			for resourceID, controlResult := range merged {
 				t, ok := opap.ResourcesResult[resourceID]
 				if !ok {
 					t = resourcesresults.Result{ResourceID: resourceID}
@@ -1080,7 +1089,7 @@ func (opap *OPAProcessor) verifyAndProcessWholeCluster(
 		}
 	}
 	sortAssociatedControls(opap.ResourcesResult)
-	return nil
+	return errors.Join(verifyErrs...)
 }
 
 type policyControl struct {
