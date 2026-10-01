@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"runtime"
 	"sort"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -1702,4 +1703,33 @@ func TestFleetScan_ContextWindowsDoNotOverlap(t *testing.T) {
 
 	assert.Equal(t, previousContext, k8sinterface.GetContextName(),
 		"the run must leave the process on the context it found it on")
+}
+
+func TestFleetScan_DevNullForContextAndFleetReports(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		formats []string
+	}{
+		{name: "no format"},
+		{name: "json", formats: []string{"json"}},
+		{name: "multiple formats", formats: []string{"json", "sarif"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Empty(t, printerDestinations(os.DevNull, tc.formats), "discarded reports cannot collide")
+			paths, err := perContextOutputPaths(os.DevNull, []string{"prod", "staging"}, tc.formats)
+			require.NoError(t, err)
+			require.NoError(t, validateFleetReportPath(os.DevNull, paths, tc.formats))
+
+			ks := &fleetTrackingKubescape{}
+			info := cautils.ScanInfo{
+				KubeContexts: []string{"prod", "staging"},
+				Output:       os.DevNull,
+				FleetReport:  os.DevNull,
+				Format:       strings.Join(tc.formats, ","),
+				ScanType:     cautils.ScanTypeCluster,
+			}
+			require.NoError(t, fleetScan(info, ks, nil, scanContextOnlyRunner))
+			assert.Equal(t, []string{os.DevNull, os.DevNull}, ks.callsOutputs)
+		})
+	}
 }

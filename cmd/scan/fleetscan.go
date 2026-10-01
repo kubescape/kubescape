@@ -204,8 +204,11 @@ func validateReferenceCluster(scanInfo *cautils.ScanInfo) error {
 // Comparing the unresolved path would let two contexts, or a context and the
 // fleet report, agree on a real destination while looking distinct.
 //
-// Formats that print to stdout contribute no destination.
+// Formats that print to stdout and the discard sink contribute no destination.
 func printerDestinations(outputPath string, formats []string) []string {
+	if strings.TrimSpace(outputPath) == os.DevNull {
+		return nil
+	}
 	if len(formats) == 0 {
 		return []string{outputPath}
 	}
@@ -607,6 +610,11 @@ func newClusterResult(kubeContext string, results *resultshandling.ResultsHandle
 // encoded and flushed, so a failed write cannot destroy a previous good
 // report or leave a truncated report that still looks like the latest run.
 func writeFleetReport(path string, report *fleet.FleetReport) error {
+	// A discard sink has no report to publish. In particular, do not pass
+	// it to the atomic writer, which would try to replace the device.
+	if strings.TrimSpace(path) == os.DevNull {
+		return nil
+	}
 	data, err := json.MarshalIndent(report, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encode fleet report %q: %w", path, err)
