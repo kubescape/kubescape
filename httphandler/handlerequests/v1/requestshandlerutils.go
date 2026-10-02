@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -488,12 +489,24 @@ func envToString(env string, defaultValue string) string {
 	return defaultValue
 }
 
+// absPathRe matches absolute filesystem paths (e.g. kubeconfig locations) in error text.
+var absPathRe = regexp.MustCompile(`/[^\s:'"]+(?:/[^\s:'"]+)*`)
+
+// redactScanError hides filesystem paths so the stored message is safe to serve.
+func redactScanError(err error) string {
+	return absPathRe.ReplaceAllString(err.Error(), "<path>")
+}
+
 func writeScanErrorToFile(err error, scanID string) (e error) {
+	if _, e = uuid.Parse(scanID); e != nil {
+		return fmt.Errorf("failed to scan. reason: '%s'. failed to save error in file - invalid scan ID. reason: %s", err.Error(), e.Error())
+	}
 	if e = os.MkdirAll(FailedOutputDir, outputDirPerm); e != nil {
 		return fmt.Errorf("failed to scan. reason: '%s'. failed to save error in file - failed to create directory. reason: %s", err.Error(), e.Error())
 	}
 	var f *os.File
-	f, e = os.Create(filepath.Join(FailedOutputDir, scanID))
+	path := filepath.Join(FailedOutputDir, scanID)
+	f, e = os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if e != nil {
 		return fmt.Errorf("failed to scan. reason: '%s'. failed to save error in file - failed to open file for writing. reason: %s", err.Error(), e.Error())
 	}
@@ -502,8 +515,11 @@ func writeScanErrorToFile(err error, scanID string) (e error) {
 			e = fmt.Errorf("%w; failed to close scan error file: %w", e, cerr)
 		}
 	}()
+	// tighten a pre-existing file that was created with looser permissions
+	_ = f.Chmod(0o600)
 
-	if _, e = f.Write([]byte(err.Error())); e != nil {
+	if _, e = f.Write([]byte(redactScanError(err))); e != nil {
+		_ = os.Remove(path)
 		return fmt.Errorf("failed to scan. reason: '%s'. failed to save error in file - failed to write. reason: %s", err.Error(), e.Error())
 	}
 	return fmt.Errorf("failed to scan. reason: %w", err)

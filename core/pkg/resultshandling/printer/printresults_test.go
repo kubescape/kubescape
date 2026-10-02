@@ -94,6 +94,12 @@ func TestGetWriter_ValidFileName(t *testing.T) {
 
 	assert.Equal(t, target, f.Name())
 	assertDirNotMorePermissiveThan0750(t, filepath.Dir(target))
+
+	if runtime.GOOS != "windows" {
+		info, err := os.Stat(target)
+		require.NoError(t, err)
+		assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+	}
 }
 
 // assertDirNotMorePermissiveThan0750 fails the test if dir's permission bits
@@ -168,6 +174,12 @@ func TestGetWriterNoStdoutFallback_ValidFileName(t *testing.T) {
 	assert.Equal(t, target, f.Name())
 	assert.NotEqual(t, os.Stdout.Name(), f.Name())
 	assertDirNotMorePermissiveThan0750(t, filepath.Dir(target))
+
+	if runtime.GOOS != "windows" {
+		info, err := os.Stat(target)
+		require.NoError(t, err)
+		assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+	}
 }
 
 // MkdirAll fails when a path component that should be a directory is actually

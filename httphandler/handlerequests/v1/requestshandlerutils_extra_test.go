@@ -66,19 +66,50 @@ func TestResponseToBytes(t *testing.T) {
 	})
 }
 
+const testScanErrID = "11111111-1111-1111-1111-111111111111"
+
+func TestWriteScanErrorToFile_RedactsPathsAndRejectsBadID(t *testing.T) {
+	tmpDir := t.TempDir()
+	oldFailedOutputDir := FailedOutputDir
+	FailedOutputDir = filepath.Join(tmpDir, "failed")
+	defer func() { FailedOutputDir = oldFailedOutputDir }()
+
+	err := writeScanErrorToFile(errors.New("cannot read /home/user/.kube/config: denied"), testScanErrID)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "/home/user/.kube/config")
+	got, readErr := os.ReadFile(filepath.Join(FailedOutputDir, testScanErrID))
+	require.NoError(t, readErr)
+	assert.Equal(t, "cannot read <path>: denied", string(got))
+
+	require.Error(t, writeScanErrorToFile(errors.New("x"), "../escape"))
+	_, statErr := os.Stat(filepath.Join(tmpDir, "escape"))
+	assert.True(t, os.IsNotExist(statErr))
+}
+
 func TestWriteScanErrorToFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	oldFailedOutputDir := FailedOutputDir
 	FailedOutputDir = tmpDir
 	defer func() { FailedOutputDir = oldFailedOutputDir }()
 
-	err := writeScanErrorToFile(errors.New("scan failed"), "scan-id")
+	target := filepath.Join(tmpDir, testScanErrID)
+	// a pre-existing world-readable file must be tightened to 0600
+	require.NoError(t, os.WriteFile(target, []byte("old"), 0o600))
+	require.NoError(t, os.Chmod(target, 0o644))
+
+	err := writeScanErrorToFile(errors.New("scan failed"), testScanErrID)
 
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "failed to scan. reason: scan failed")
-	got, readErr := os.ReadFile(filepath.Join(tmpDir, "scan-id"))
+	got, readErr := os.ReadFile(target)
 	require.NoError(t, readErr)
 	assert.Equal(t, "scan failed", string(got))
+
+	if runtime.GOOS != "windows" {
+		info, statErr := os.Stat(target)
+		require.NoError(t, statErr)
+		assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+	}
 }
 
 // TestWriteScanErrorToFile_CreatesDirectoryWithRestrictivePermissions guards
@@ -95,7 +126,7 @@ func TestWriteScanErrorToFile_CreatesDirectoryWithRestrictivePermissions(t *test
 	FailedOutputDir = nested
 	defer func() { FailedOutputDir = oldFailedOutputDir }()
 
-	require.Error(t, writeScanErrorToFile(errors.New("scan failed"), "scan-id"))
+	require.Error(t, writeScanErrorToFile(errors.New("scan failed"), testScanErrID))
 
 	info, err := os.Stat(nested)
 	require.NoError(t, err)
