@@ -151,10 +151,16 @@ func TestResourceMetricsEmitted(t *testing.T) {
 	skippedCtrl := resourcesresults.ResourceAssociatedControl{}
 	skippedCtrl.ResourceAssociatedRules = []resourcesresults.ResourceAssociatedRule{skippedRule}
 
+	passedRule := resourcesresults.ResourceAssociatedRule{}
+	passedRule.SetStatus(apis.StatusPassed, nil)
+
+	passedCtrl := resourcesresults.ResourceAssociatedControl{}
+	passedCtrl.ResourceAssociatedRules = []resourcesresults.ResourceAssociatedRule{passedRule}
+
 	result := resourcesresults.Result{}
 	result.ResourceID = resourceID
 	result.AssociatedControls = []resourcesresults.ResourceAssociatedControl{
-		failedCtrl1, failedCtrl2, skippedCtrl,
+		failedCtrl1, failedCtrl2, skippedCtrl, passedCtrl,
 	}
 
 	pp := NewPrometheusPrinter(false)
@@ -170,6 +176,8 @@ func TestResourceMetricsEmitted(t *testing.T) {
 		"missing kubescape_resource_count_controls_failed — setResourcesCounters may be commented out")
 	assert.Contains(t, output, "kubescape_resource_count_controls_skipped",
 		"missing kubescape_resource_count_controls_skipped — setResourcesCounters may be commented out")
+	assert.Contains(t, output, "kubescape_resource_count_controls_passed",
+		"missing kubescape_resource_count_controls_passed")
 }
 
 func TestCoverageScoreMetricEmitted(t *testing.T) {

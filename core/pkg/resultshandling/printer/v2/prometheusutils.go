@@ -186,6 +186,7 @@ func (mrc *mResources) metrics() []string {
 		#### Resources metrics
 		kubescape_resource_count_controls_failed{apiVersion="<>",kind="<>",namespace="<>",name="<>"} <counter>
 		kubescape_resource_count_controls_skipped{apiVersion="<>",kind="<>",namespace="<>",name="<>"} <counter>
+		kubescape_resource_count_controls_passed{apiVersion="<>",kind="<>",namespace="<>",name="<>"} <counter>
 	*/
 
 	m := []string{}
@@ -193,6 +194,7 @@ func (mrc *mResources) metrics() []string {
 	// controls
 	m = append(m, toRowInMetrics(fmt.Sprintf("%s_%s_%s_%s", mrc.prefix(), metricsCount, metricsControls, metricsFailed), mrc.labels(), mrc.controlsCountFailed))
 	m = append(m, toRowInMetrics(fmt.Sprintf("%s_%s_%s_%s", mrc.prefix(), metricsCount, metricsControls, metricsSkipped), mrc.labels(), mrc.controlsCountSkipped))
+	m = append(m, toRowInMetrics(fmt.Sprintf("%s_%s_%s_%s", mrc.prefix(), metricsCount, metricsControls, metricsPassed), mrc.labels(), mrc.controlsCountPassed))
 	return m
 }
 
