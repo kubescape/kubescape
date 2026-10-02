@@ -59,7 +59,7 @@ The workflow can also be started manually via `workflow_dispatch`, which exposes
 
 ## Additional Information
 
-Reusable workflows — the ones invoked by another workflow through `on: workflow_call` — carry an alphabetic prefix (`a-pr-scanner.yaml`). A workflow that invokes one carries a numeric prefix (`00-pr-scanner.yaml`). `02-release.yaml` also carries a numeric prefix, but it invokes nothing: it is an event-triggered entrypoint that does its work inline. Workflows that are neither reusable nor callers, such as `scorecard.yml` and `comments.yaml`, sit outside the convention.
+Reusable workflows — the ones invoked by another workflow through `on: workflow_call` — carry an alphabetic prefix (`a-pr-scanner.yaml`). A workflow that invokes one carries a numeric prefix (`00-pr-scanner.yaml`). `02-release.yaml` also carries a numeric prefix, but it invokes nothing: it is an event-triggered entrypoint that does its work inline. Workflows that are neither reusable nor callers, such as `scorecard.yml`, sit outside the convention.
 
 ## Screenshot
 

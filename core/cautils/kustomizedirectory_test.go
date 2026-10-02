@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -308,6 +309,89 @@ func TestKustomizeBaseDirectory(t *testing.T) {
 
 	assert.Empty(t, errs, "should not have errors loading base directory")
 	assert.NotEmpty(t, workloads, "should have workloads from base directory")
+}
+
+// TestKustomizeGetWorkloads_PathIsNormalized covers the evidence pointer this
+// deliverable is about: since a Kustomize build composes a base plus its
+// overlays, no single source file matches the output document-for-document
+// the way a plain YAML file or a static Helm template does (see helmchart.go
+// isStaticTemplate), so the only line resolution can honestly point at is the
+// Kustomize directory itself, with no ":<index>" suffix.
+//
+// That pointer needs to be in the same absolute, lexical form every other
+// source uses (helmchart.go's absPath, fileutils.go's relative-or-absolute
+// path) - absolute so it does not depend on the caller's working directory,
+// but not symlink-resolved (see TestKustomizeGetWorkloads_PreservesSymlinkedDirectory
+// for why). This drives GetWorkloads with a relative path from a different
+// working directory and asserts both the map key and each workload's
+// GetPath() come back as an absolute form of that same input, not echoing
+// the relative string unchanged.
+func TestKustomizeGetWorkloads_PathIsNormalized(t *testing.T) {
+	testdataRoot := kustomizeTestdataPath()
+	t.Chdir(testdataRoot)
+
+	wantPath := lexicalAbsPath(filepath.Join(testdataRoot, "base"))
+
+	kd := NewKustomizeDirectory("base")
+	workloads, errs := kd.GetWorkloads("base")
+	require.Empty(t, errs)
+
+	wls, ok := workloads[wantPath]
+	require.True(t, ok, "workloads should be keyed by the normalized absolute path, not the relative input")
+	require.NotEmpty(t, wls)
+
+	for _, wl := range wls {
+		assert.Equal(t, wantPath, wl.(*localworkload.LocalWorkload).GetPath(),
+			"GetPath() must carry the same normalized path as the map key")
+	}
+}
+
+// TestKustomizeGetWorkloads_PreservesSymlinkedDirectory pins the regression
+// caught in review: GetWorkloads must not resolve symlinks in the path it is
+// given. The same string it returns is later fed by filesloader.go into
+// filepath.Rel(repoRoot, source) to produce Source.RelativePath. If a
+// repository-local symlink (e.g. "deploy" -> a shared Kustomize base kept
+// outside the repo) were resolved to its external target here, that
+// filepath.Rel call would compute a path escaping repoRoot - something like
+// "../../shared/base" - and printers that refuse an out-of-repo location
+// (GitLab SAST) would silently drop the finding, even though the scan input
+// was entirely inside the repository.
+func TestKustomizeGetWorkloads_PreservesSymlinkedDirectory(t *testing.T) {
+	repoRoot := resolvedTempDir(t)
+	externalRoot := resolvedTempDir(t)
+
+	require.NoError(t, os.WriteFile(filepath.Join(externalRoot, "kustomization.yaml"), []byte(
+		"apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nresources:\n  - deployment.yaml\n"),
+		0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(externalRoot, "deployment.yaml"), []byte(
+		"apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: test-app\nspec:\n  selector:\n    matchLabels:\n"+
+			"      app: test-app\n  template:\n    metadata:\n      labels:\n        app: test-app\n    spec:\n"+
+			"      containers:\n        - name: test-container\n          image: nginx:1.19\n"),
+		0o600))
+
+	symlinkedDir := filepath.Join(repoRoot, "deploy")
+	if err := os.Symlink(externalRoot, symlinkedDir); err != nil {
+		t.Skipf("symlinks are unavailable: %v", err)
+	}
+
+	kd := NewKustomizeDirectory(symlinkedDir)
+	workloads, errs := kd.GetWorkloads(symlinkedDir)
+	require.Empty(t, errs)
+
+	wantPath := lexicalAbsPath(symlinkedDir)
+	wls, ok := workloads[wantPath]
+	require.True(t, ok, "workloads should be keyed by the repository-local symlink path, not its resolved target")
+	require.NotEmpty(t, wls)
+
+	relPath, err := filepath.Rel(repoRoot, wantPath)
+	require.NoError(t, err)
+	assert.False(t, strings.HasPrefix(relPath, ".."),
+		"the path GetWorkloads returns must stay inside repoRoot when computed with filepath.Rel, matching how filesloader.go derives Source.RelativePath")
+
+	for _, wl := range wls {
+		assert.Equal(t, wantPath, wl.(*localworkload.LocalWorkload).GetPath(),
+			"GetPath() must carry the same lexical, unresolved path as the map key")
+	}
 }
 
 // fakeHelmVersionOutput is what the stub prints for `helm version -c --short`.

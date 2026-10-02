@@ -27,5 +27,10 @@ FETCH_HEAD
 tallation.md
 nginx:latest.json
 results.json
+results.sarif
+results.xml
+results.txt
+results.html
+results.pdf
 customFilename.txt
 *_dump.txt

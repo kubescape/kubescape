@@ -285,6 +285,11 @@ func TestJunitActionPrintCombinedScanIncludesPostureAndImages(t *testing.T) {
 	assert.Equal(t, 1, got.Suites[0].Failures)
 	assert.Equal(t, 3, got.Tests)
 	assert.Equal(t, 3, got.Failures)
+	var sumSkipped int
+	for _, suite := range got.Suites {
+		sumSkipped += suite.Skipped
+	}
+	assert.Equal(t, sumSkipped, got.Skipped)
 	assert.Zero(t, got.Errors)
 	assert.Contains(t, string(raw), "Combined posture control")
 	assert.Contains(t, string(raw), "CVE-COMBINED")
@@ -407,6 +412,11 @@ func TestJunitActionPrintImageScanKeepsMultiArchSuitesDistinct(t *testing.T) {
 	assert.Equal(t, "Kubescape Image Scanning", got.Name)
 	assert.Equal(t, 2, got.Tests)
 	assert.Equal(t, 2, got.Failures)
+	var sumSkipped int
+	for _, suite := range got.Suites {
+		sumSkipped += suite.Skipped
+	}
+	assert.Equal(t, sumSkipped, got.Skipped)
 	assert.Equal(t, "registry.example.com/app:v1 [linux/amd64]", got.Suites[0].Name)
 	assert.Equal(t, "registry.example.com/app:v1 [linux/arm64]", got.Suites[1].Name)
 	assert.NotEqual(t, got.Suites[0].Name, got.Suites[1].Name)
@@ -940,16 +950,18 @@ func TestJunitGoldenFile(t *testing.T) {
 	var doc JUnitXML
 	require.NoError(t, xml.NewDecoder(bytes.NewReader(want)).Decode(&doc.TestSuites))
 	require.True(t, bytes.HasPrefix(want, []byte("<?xml")), "golden must include XML prolog")
-	var sumTests, sumFailures, sumErrors int
+	var sumTests, sumFailures, sumErrors, sumSkipped int
 	for _, s := range doc.TestSuites.Suites {
 		sumTests += s.Tests
 		sumFailures += s.Failures
 		sumErrors += s.Errors
+		sumSkipped += s.Skipped
 		assert.NotContains(t, s.Timestamp, "0001-01-01", "golden timestamp must not be Go zero time")
 	}
 	assert.Equal(t, sumTests, doc.TestSuites.Tests, "golden: Σ child tests must equal parent")
 	assert.Equal(t, sumFailures, doc.TestSuites.Failures, "golden: Σ child failures must equal parent")
 	assert.Equal(t, sumErrors, doc.TestSuites.Errors, "golden: Σ child errors must equal parent")
+	assert.Equal(t, sumSkipped, doc.TestSuites.Skipped, "golden: Σ child skipped must equal parent")
 }
 
 // TestIso8601Timestamp covers the small helper that powers the timestamp fix
@@ -1021,13 +1033,15 @@ func TestJunitMultiFrameworkSharedControl(t *testing.T) {
 
 	// Σ(children) must equal 2 — each framework yields a <testsuite> with one
 	// <testcase>. This is the value parsers will see when summing children.
-	var sumTests, sumFailures int
+	var sumTests, sumFailures, sumSkipped int
 	for _, s := range suites.Suites {
 		sumTests += s.Tests
 		sumFailures += s.Failures
+		sumSkipped += s.Skipped
 	}
 	require.Equal(t, 2, sumTests, "Σ child tests should be 2 across the two frameworks")
 	require.Equal(t, 2, sumFailures, "Σ child failures should be 2 across the two frameworks")
+	require.Equal(t, 0, sumSkipped, "Σ child skipped should be 0 across the two frameworks")
 
 	// The fix: parent equals Σ(children). The regression: parent would equal
 	// SummaryDetails.NumberOfControls().All() == 1.
@@ -1035,49 +1049,53 @@ func TestJunitMultiFrameworkSharedControl(t *testing.T) {
 		"parent Tests must equal Σ child Tests (regressed code returns 1)")
 	assert.Equal(t, sumFailures, suites.Failures,
 		"parent Failures must equal Σ child Failures (regressed code returns 1)")
+	assert.Equal(t, sumSkipped, suites.Skipped,
+		"parent Skipped must equal Σ child Skipped")
 	assert.NotEqual(t, session.Report.SummaryDetails.NumberOfControls().All(), suites.Tests,
 		"parent Tests must NOT be the deduplicated SummaryDetails count")
 }
 
-// TestAggregateSuiteCounts covers the Tests/Failures/Errors aggregator
+// TestAggregateSuiteCounts covers the Tests/Failures/Errors/Skipped aggregator
 // directly. The production code path in junit.go never populates child
 // Errors (the printer only emits <failure> and <skipped>), so the multi-
 // framework regression test above cannot exercise the errors branch via
 // testsSuites. This unit test pins the loop itself.
 func TestAggregateSuiteCounts(t *testing.T) {
 	cases := []struct {
-		name                                string
-		in                                  []JUnitTestSuite
-		wantTests, wantFailures, wantErrors int
+		name                                             string
+		in                                               []JUnitTestSuite
+		wantTests, wantFailures, wantErrors, wantSkipped int
 	}{
 		{
 			name: "empty slice yields zeros",
 		},
 		{
-			name: "errors aggregate across suites independently of failures",
+			name: "errors and skipped aggregate across suites independently of failures",
 			in: []JUnitTestSuite{
-				{Tests: 5, Failures: 1, Errors: 2},
-				{Tests: 3, Failures: 0, Errors: 4},
+				{Tests: 5, Failures: 1, Errors: 2, Skipped: 1},
+				{Tests: 3, Failures: 0, Errors: 4, Skipped: 2},
 			},
-			wantTests: 8, wantFailures: 1, wantErrors: 6,
+			wantTests: 8, wantFailures: 1, wantErrors: 6, wantSkipped: 3,
 		},
 		{
-			name: "mixed: errors-only, failures-only, and a clean suite",
+			name: "mixed: errors-only, failures-only, skipped-only, and a clean suite",
 			in: []JUnitTestSuite{
 				{Tests: 4, Errors: 4},
 				{Tests: 2, Failures: 2},
+				{Tests: 3, Skipped: 3},
 				{Tests: 7},
 			},
-			wantTests: 13, wantFailures: 2, wantErrors: 4,
+			wantTests: 16, wantFailures: 2, wantErrors: 4, wantSkipped: 3,
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			gotTests, gotFailures, gotErrors := aggregateSuiteCounts(tc.in)
+			gotTests, gotFailures, gotErrors, gotSkipped := aggregateSuiteCounts(tc.in)
 			assert.Equal(t, tc.wantTests, gotTests, "tests")
 			assert.Equal(t, tc.wantFailures, gotFailures, "failures")
 			assert.Equal(t, tc.wantErrors, gotErrors, "errors")
+			assert.Equal(t, tc.wantSkipped, gotSkipped, "skipped")
 		})
 	}
 }

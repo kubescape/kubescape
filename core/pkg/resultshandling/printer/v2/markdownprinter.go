@@ -90,6 +90,9 @@ func (mp *MarkdownPrinter) ActionPrint(ctx context.Context, opaSessionObj *cauti
 	if err := mdWriteFailedSection(ctx, w, sorted, opaSessionObj); err != nil {
 		return err
 	}
+	if err := mdWriteCoverageSection(w, opaSessionObj); err != nil {
+		return err
+	}
 	if len(imageScanData) > 0 {
 		if err := mdWriteImageScanReport(w, imageScanData); err != nil {
 			return err
@@ -445,4 +448,59 @@ func mdEscapeCell(s string) string {
 
 func mdEscapeInline(s string) string {
 	return strings.ReplaceAll(s, "`", "\\`")
+}
+
+func mdWriteCoverageSection(w io.Writer, opaSessionObj *cautils.OPASessionObj) error {
+	if opaSessionObj == nil {
+		return nil
+	}
+
+	skippedControls := collectSkippedControls(opaSessionObj)
+	coverage := opaSessionObj.ScanCoverage
+
+	if !coverage.Degraded && len(skippedControls) == 0 && (coverage.CoverageScore >= 100 || coverage.TotalControls == 0) {
+		return nil
+	}
+
+	ew := &mdErrWriter{w: w}
+	ew.printf("## Scan Coverage\n\n")
+
+	score := cautils.ComplianceScoreToInt(coverage.CoverageScore)
+	degradedBadge := ""
+	if coverage.Degraded {
+		degradedBadge = " ⚠️ Degraded"
+	}
+	ew.printf("**Coverage Score:** %d%%%s\n\n", score, degradedBadge)
+	ew.printf("Evaluated %d of %d controls\n\n", coverage.EvaluatedControls, coverage.TotalControls)
+
+	if len(skippedControls) > 0 {
+		ew.printf("| Control ID | Name | Reason |\n")
+		ew.printf("|---|---|---|\n")
+		for _, sc := range skippedControls {
+			name := sc.name
+			if name == "" {
+				name = sc.controlID
+			}
+			reason := sc.reason
+			if reason == "" {
+				reason = "not evaluated"
+			}
+			ew.printf("| %s | %s | %s |\n",
+				sc.controlID,
+				mdEscapeTableCell(name),
+				mdEscapeTableCell(reason),
+			)
+		}
+		ew.printf("\n")
+	}
+
+	return ew.err
+}
+
+func mdEscapeTableCell(s string) string {
+	s = mdEscapeCell(s)
+	s = strings.ReplaceAll(s, "\r\n", " ")
+	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.ReplaceAll(s, "\r", " ")
+	return strings.TrimSpace(s)
 }

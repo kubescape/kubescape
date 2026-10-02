@@ -989,9 +989,10 @@ func (opap *OPAProcessor) verifyAndProcessWholeCluster(
 	fallbackScope evaluationScope,
 	progressListener IJobProgressNotificationClient,
 ) error {
+	var verifyErrs []error
 	for _, controlID := range wholeClusterControlIDs {
 		if err := ctx.Err(); err != nil {
-			return err
+			return errors.Join(append(verifyErrs, err)...)
 		}
 		if progressListener != nil {
 			opap.mu.Lock()
@@ -1021,7 +1022,7 @@ func (opap *OPAProcessor) verifyAndProcessWholeCluster(
 			logger.L().Ctx(ctx).Warning("Whole-cluster evaluation error during verification",
 				helpers.String("controlID", controlID),
 				helpers.Error(errors.Join(errP, errF)))
-			return errors.Join(errP, errF)
+			return errors.Join(append(verifyErrs, errors.Join(errP, errF))...)
 		}
 
 		opap.mu.Lock()
@@ -1062,13 +1063,21 @@ func (opap *OPAProcessor) verifyAndProcessWholeCluster(
 			}
 		}
 
+		// Fail closed: a parity mismatch means the projection is untrusted for
+		// this control. Record it as an error (non-zero exit via Process →
+		// ScanContext → RunE) and merge the fallback verdicts, which observed
+		// the full cluster, so even callers that inspect ResourcesResult
+		// despite the error see the authoritative statuses.
+		merged := resProjected
 		if len(diffErrors) > 0 {
 			logger.L().Ctx(ctx).Error(fmt.Sprintf("Whole-cluster parity verification failed with %d mismatches for control %s", len(diffErrors), controlID))
+			verifyErrs = append(verifyErrs, fmt.Errorf("whole-cluster parity verification failed for control %s: %d mismatch(es): %s", controlID, len(diffErrors), strings.Join(diffErrors, "; ")))
+			merged = resFallback
 		}
 
-		if len(resProjected) > 0 {
+		if len(merged) > 0 {
 			opap.mu.Lock()
-			for resourceID, controlResult := range resProjected {
+			for resourceID, controlResult := range merged {
 				t, ok := opap.ResourcesResult[resourceID]
 				if !ok {
 					t = resourcesresults.Result{ResourceID: resourceID}
@@ -1080,7 +1089,7 @@ func (opap *OPAProcessor) verifyAndProcessWholeCluster(
 		}
 	}
 	sortAssociatedControls(opap.ResourcesResult)
-	return nil
+	return errors.Join(verifyErrs...)
 }
 
 type policyControl struct {
@@ -1471,6 +1480,21 @@ func (opap *OPAProcessor) processRuleOnScope(ctx context.Context, rule *reportha
 				for _, cr := range cached.ResourceAssociatedRules {
 					if cr.Name == rule.Name {
 						rr := cr
+						// A restored verdict predates the current scan's
+						// coverage state: recompute the incomplete-coverage
+						// marker instead of replaying it. A pass stored while
+						// a dependency was partially missing must not survive
+						// collection recovery as IncompleteCoverage, and a
+						// pass stored while complete must gain the marker when
+						// the current scan has gaps. Failures and skips are
+						// left exactly as stored.
+						if rr.Status == apis.StatusPassed {
+							if opap.hasUnreachableDependency(controlID) {
+								rr.SubStatus = apis.SubStatusIncompleteCoverage
+							} else if rr.SubStatus == apis.SubStatusIncompleteCoverage {
+								rr.SubStatus = ""
+							}
+						}
 						resources[r.GetID()] = &rr
 					}
 				}
@@ -1684,17 +1708,22 @@ func (opap *OPAProcessor) processRuleOnScope(ctx context.Context, rule *reportha
 // hasUnreachableDependency reports whether controlID depends (per
 // ResourceToControlsMap, built from the control's declared rule.Match/
 // DynamicMatch resources) on at least one GVR that failed to collect this
-// scan. opap.InfoMap is mixed-purpose (whole-GVR pull failures keyed by GVR
+// scan — totally (InfoMap pull failure) or partially (a PartialGVRFailures
+// entry, e.g. host-sensor envelopes that converted for some nodes but not
+// all). opap.InfoMap is mixed-purpose (whole-GVR pull failures keyed by GVR
 // string, plus per-resource eval skips keyed by resource ID); checking that
 // the key is also present in ResourceToControlsMap, the same guard
 // cautils.BuildScanCoverage uses, is what keeps this from matching a
-// per-resource skip as if it were a GVR pull failure.
+// per-resource skip as if it were a GVR pull failure. Partial entries carry
+// their own GVR strings, so the same guard applies to them directly.
 //
 // This runs once per rule-scope evaluation (not once per resource), so its
 // O(len(ResourceToControlsMap)) cost is paid a small, bounded number of times
 // per scan rather than once per resource. It runs on processScope's worker
 // goroutines concurrently with markResourcesSkipped/seedCELSkips, which write
-// InfoMap under mu, so the read must hold mu as well.
+// InfoMap under mu, so the read must hold mu as well. PartialGVRFailures is
+// only appended during resource collection (before evaluation starts), so
+// reading it under the same lock is consistent.
 func (opap *OPAProcessor) hasUnreachableDependency(controlID string) bool {
 	opap.mu.Lock()
 	defer opap.mu.Unlock()
@@ -1704,6 +1733,11 @@ func (opap *OPAProcessor) hasUnreachableDependency(controlID string) bool {
 		}
 		if info, ok := opap.InfoMap[gvr]; ok && info.InnerStatus == apis.StatusSkipped {
 			return true
+		}
+		for _, partial := range opap.PartialGVRFailures {
+			if partial.GVR == gvr {
+				return true
+			}
 		}
 	}
 	return false
@@ -1958,6 +1992,7 @@ func (opap *OPAProcessor) runCELOnK8s(ctx context.Context, rule *reporthandling.
 		return nil, celOutcome{}, fmt.Errorf("rule: '%s', policy %q is matched by %d live bindings; the offline engine does not yet select per-binding paramRefs, so refusing it to preserve scan/admission parity", rule.Name, vap.PolicyName, len(bindings))
 	}
 	findParam := opap.celParamObjectFinder()
+	readsNamespaceObject := evaluator.ReadsNamespaceObjectInValidations(vap)
 
 	var responses []reporthandling.RuleResponse
 	outcome := celOutcome{excluded: make(map[string]struct{})}
@@ -1993,26 +2028,26 @@ func (opap *OPAProcessor) runCELOnK8s(ctx context.Context, rule *reporthandling.
 			return nil, celOutcome{}, fmt.Errorf("rule: '%s', %w", rule.Name, err)
 		}
 
-		// namespaceObject is the resource's Namespace object when the scan
-		// collected it, and nil otherwise — the evaluator then binds null, so a
-		// policy reading namespaceObject.* sees an absent namespace (and a
-		// selection into it eval-errors and skips, never passes). File scans and
-		// scans whose frameworks never matched Namespaces stay on that safe path.
-		eval, err := evaluator.EvaluateVAP(ctx, vap, obj, opap.celNamespaceObjectFor(obj), params)
+		// Match conditions decide admission applicability before validations use
+		// namespaceObject. Preserve an exclusion even when the Namespace was not collected.
+		eval, err := evaluator.EvaluateVAPGate(ctx, vap, obj, params)
 		if err != nil {
 			return nil, celOutcome{}, fmt.Errorf("rule: '%s', %w", rule.Name, err)
 		}
-
 		if !eval.Applicable {
-			// Exclusions are silent in the results (the resource is out of scope,
-			// as at admission), but log one so a wrong GVR guess that quietly drops
-			// a resource the control should have seen stays diagnosable.
-			resID := celResourceID(obj)
-			logger.L().Debug("CEL control does not apply to resource, excluding it",
-				helpers.String("rule", rule.Name),
-				helpers.String("resource", resID))
-			outcome.excluded[resID] = struct{}{}
+			outcome.excluded[celResourceID(obj)] = struct{}{}
 			continue
+		}
+		if len(eval.Results) == 0 {
+			namespaceObject := opap.celNamespaceObjectFor(obj)
+			if missingNamespaceObject(readsNamespaceObject, celResourceNamespace(obj), namespaceObject) {
+				outcome.skipped = append(outcome.skipped, skippedCELResource{obj: obj, err: fmt.Errorf("namespace %q was not collected; cannot evaluate namespaceObject", celResourceNamespace(obj))})
+				continue
+			}
+			eval, err = evaluator.EvaluateVAPValidations(ctx, vap, obj, namespaceObject, params)
+			if err != nil {
+				return nil, celOutcome{}, fmt.Errorf("rule: '%s', %w", rule.Name, err)
+			}
 		}
 
 		violated := false
@@ -2062,6 +2097,12 @@ func (opap *OPAProcessor) runCELOnK8s(ctx context.Context, rule *reporthandling.
 	}
 
 	return responses, outcome, nil
+}
+
+// missingNamespaceObject distinguishes incomplete offline collection from the
+// legitimate null binding for a cluster-scoped object.
+func missingNamespaceObject(policyReadsNamespace bool, resourceNamespace string, namespaceObject map[string]any) bool {
+	return policyReadsNamespace && resourceNamespace != "" && namespaceObject == nil
 }
 
 // seedCELSkips records the CEL rule's unknown-verdict resources as StatusSkipped
@@ -2379,6 +2420,7 @@ func (opap *OPAProcessor) runRegoOnK8s(ctx context.Context, rule *reporthandling
 		return nil, fmt.Errorf("rule '%s': failed to prepare query: %w", rule.Name, err)
 	}
 
+	ctx = withCosignPolicy(ctx, ruleRegoDependenciesData.PostureControlInputs)
 	results, err := opap.regoEval(ctx, k8sObjects, pq)
 	if err != nil {
 		return nil, fmt.Errorf("rule '%s': rego eval failed: %w", rule.Name, err)

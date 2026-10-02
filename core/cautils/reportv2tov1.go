@@ -12,6 +12,19 @@ import (
 func ReportV2ToV1(opaSessionObj *OPASessionObj) *reporthandling.PostureReport {
 	report := &reporthandling.PostureReport{}
 
+	if opaSessionObj == nil || opaSessionObj.Report == nil {
+		return report
+	}
+
+	report.CustomerGUID = opaSessionObj.Report.CustomerGUID
+	report.ClusterName = opaSessionObj.Report.ClusterName
+	report.ClusterAPIServerInfo = opaSessionObj.Report.ClusterAPIServerInfo
+	report.ClusterCloudProvider = opaSessionObj.Report.ClusterCloudProvider
+	report.ReportID = opaSessionObj.Report.ReportID
+	report.JobID = opaSessionObj.Report.JobID
+	report.ReportGenerationTime = opaSessionObj.Report.ReportGenerationTime
+	report.Resources = opaSessionObj.Report.Resources
+
 	frameworks := []reporthandling.FrameworkReport{}
 
 	if len(opaSessionObj.Report.SummaryDetails.Frameworks) > 0 {
@@ -39,10 +52,13 @@ func ReportV2ToV1(opaSessionObj *OPASessionObj) *reporthandling.PostureReport {
 
 		// apply the summary-derived control counters after the helper recomputation
 		var controls map[string]reportsummary.ControlSummary
+		var statusCounters reportsummary.StatusCounters
 		if len(opaSessionObj.Report.SummaryDetails.Frameworks) > 0 {
 			controls = opaSessionObj.Report.SummaryDetails.Frameworks[f].Controls
+			statusCounters = opaSessionObj.Report.SummaryDetails.Frameworks[f].StatusCounters
 		} else {
 			controls = opaSessionObj.Report.SummaryDetails.Controls
+			statusCounters = opaSessionObj.Report.SummaryDetails.StatusCounters
 		}
 
 		for c := range frameworks[f].ControlReports {
@@ -51,6 +67,16 @@ func ReportV2ToV1(opaSessionObj *OPASessionObj) *reporthandling.PostureReport {
 				frameworks[f].ControlReports[c].FailedResources = crv2.StatusCounters.FailedResources
 				frameworks[f].ControlReports[c].WarningResources = crv2.StatusCounters.SkippedResources + crv2.StatusCounters.ExcludedResources
 			}
+		}
+
+		if statusCounters.PassedResources+statusCounters.FailedResources+statusCounters.SkippedResources+statusCounters.ExcludedResources > 0 {
+			frameworks[f].TotalResources = statusCounters.PassedResources + statusCounters.FailedResources + statusCounters.SkippedResources + statusCounters.ExcludedResources
+			frameworks[f].FailedResources = statusCounters.FailedResources
+			frameworks[f].WarningResources = statusCounters.SkippedResources + statusCounters.ExcludedResources
+		} else if len(frameworks[f].ControlReports) == 1 {
+			frameworks[f].TotalResources = frameworks[f].ControlReports[0].TotalResources
+			frameworks[f].FailedResources = frameworks[f].ControlReports[0].FailedResources
+			frameworks[f].WarningResources = frameworks[f].ControlReports[0].WarningResources
 		}
 	}
 

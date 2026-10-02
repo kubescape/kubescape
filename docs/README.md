@@ -29,6 +29,7 @@ Welcome to the Kubescape documentation. This directory contains detailed guides 
 |----------|-------------|
 | [MCP Server](mcp-server.md) | AI assistant integration via Model Context Protocol |
 | [Providers](providers.md) | Backend services compatible with Kubescape |
+| [Image Scanning](image-scanning.md) | Scan container images for vulnerabilities |
 
 ### Support
 
@@ -85,6 +86,7 @@ We welcome contributions to improve our documentation! Please see the [Contribut
 | [environment-dependencies-policy.md](environment-dependencies-policy.md) | ✅ Current | Dependency policies |
 | [ics-ot-workloads.md](ics-ot-workloads.md) | ✅ Current | Scanning ICS/OT workloads on Kubernetes |
 | [cel-engine.md](cel-engine.md) | ✅ Current | CEL rule engine: offline VAP evaluation and scan/admission equivalence |
+| [image-scanning.md](image-scanning.md) | ✅ Current | Scanning container images for vulnerabilities |
 
 ---
 

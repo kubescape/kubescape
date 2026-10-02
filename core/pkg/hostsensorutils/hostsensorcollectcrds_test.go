@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"testing"
 
 	k8shostsensor "github.com/kubescape/k8s-interface/hostsensor"
@@ -174,12 +175,11 @@ func TestCollectResources_SkipsControlPlaneInfoWhenCloudProviderPresent(t *testi
 		dynamicClient: newCRDDynamicClient(t, items...),
 	}
 
-	res, infoMap, err := hsh.CollectResources(context.Background())
+	res, infoMap, partials, err := hsh.CollectResources(context.Background())
 
 	require.NoError(t, err)
 	assert.Empty(t, infoMap)
-	assert.False(t, hasKind(res, k8shostsensor.ControlPlaneInfo),
-		"ControlPlaneInfo should be skipped when a cloud provider is detected")
+	assert.Empty(t, partials)
 	assert.True(t, hasKind(res, k8shostsensor.CloudProviderInfo))
 	assert.True(t, hasKind(res, k8shostsensor.OsReleaseFile))
 }
@@ -193,10 +193,11 @@ func TestCollectResources_IncludesControlPlaneInfoWithoutCloudProvider(t *testin
 		dynamicClient: newCRDDynamicClient(t, items...),
 	}
 
-	res, infoMap, err := hsh.CollectResources(context.Background())
+	res, infoMap, partials, err := hsh.CollectResources(context.Background())
 
 	require.NoError(t, err)
 	assert.Empty(t, infoMap)
+	assert.Empty(t, partials)
 	assert.True(t, hasKind(res, k8shostsensor.ControlPlaneInfo))
 }
 
@@ -214,10 +215,11 @@ func TestCollectResources_RecordsQueryErrors(t *testing.T) {
 	})
 	hsh := &HostSensorHandler{dynamicClient: client}
 
-	res, infoMap, err := hsh.CollectResources(context.Background())
+	res, infoMap, partials, err := hsh.CollectResources(context.Background())
 
 	require.NoError(t, err)
 	assert.Empty(t, res)
+	assert.Empty(t, partials)
 	assert.Len(t, infoMap, 2)
 	const key = "hostdata.kubescape.cloud/v1beta0/KubeletInfo"
 	require.Contains(t, infoMap, key)
@@ -232,10 +234,11 @@ func TestCollectResources_RecordsZeroItemsErrors(t *testing.T) {
 	// Empty client with no CRD items created, but simulate 1 node existing
 	hsh := &HostSensorHandler{dynamicClient: client, nodeCount: 1}
 
-	res, infoMap, err := hsh.CollectResources(context.Background())
+	res, infoMap, partials, err := hsh.CollectResources(context.Background())
 
 	require.NoError(t, err)
 	assert.Empty(t, res)
+	assert.Empty(t, partials, "zero-item arms record infoMap entries, never partials")
 	assert.Len(t, infoMap, 9)
 	for _, resource := range []k8shostsensor.HostSensorResource{
 		k8shostsensor.OsReleaseFile,
@@ -289,10 +292,11 @@ func TestCollectResources_RecordsUnreadableItems(t *testing.T) {
 		nodeCount:     1,
 	}
 
-	res, infoMap, err := hsh.CollectResources(context.Background())
+	res, infoMap, partials, err := hsh.CollectResources(context.Background())
 
 	require.NoError(t, err)
 	assert.False(t, hasKind(res, k8shostsensor.KubeletInfo))
+	assert.Empty(t, partials, "total loss stays on infoMap, never on partials")
 	assertInfoMapContains(t, infoMap, k8shostsensor.KubeletInfo,
 		"node-agent reported 1 KubeletInfo but none of them could be read")
 }
@@ -304,16 +308,19 @@ func TestCollectResources_RecordsUnreadableItemsWithoutNodeCount(t *testing.T) {
 		dynamicClient: newCRDDynamicClient(t, newCRDShell("CNIInfo", "node-1")),
 	}
 
-	res, infoMap, err := hsh.CollectResources(context.Background())
+	res, infoMap, partials, err := hsh.CollectResources(context.Background())
 
 	require.NoError(t, err)
 	assert.Empty(t, res)
+	assert.Empty(t, partials, "total loss stays on infoMap, never on partials")
 	assertInfoMapContains(t, infoMap, k8shostsensor.CNIInfo,
 		"node-agent reported 1 CNIInfo but none of them could be read")
 }
 
 // A resource that lost only some of its items keeps the ones it read, so it
-// must not be marked skipped over the nodes it is missing.
+// must not be marked skipped over the nodes it is missing. The gap is
+// recorded as a partial instead: same GVR keys infoMap would use, carrying
+// both counts, while infoMap itself stays clean.
 func TestCollectResources_KeepsPartiallyReadableItems(t *testing.T) {
 	items := []*unstructured.Unstructured{
 		newCRDItem("KubeProxyInfo", "node-1", map[string]any{"mode": "iptables"}),
@@ -324,13 +331,63 @@ func TestCollectResources_KeepsPartiallyReadableItems(t *testing.T) {
 		nodeCount:     2,
 	}
 
-	res, infoMap, err := hsh.CollectResources(context.Background())
+	res, infoMap, partials, err := hsh.CollectResources(context.Background())
 
 	require.NoError(t, err)
 	assert.True(t, hasKind(res, k8shostsensor.KubeProxyInfo))
 	group, version := k8sinterface.SplitApiVersion(k8shostsensor.MapHostSensorResourceToApiGroup(k8shostsensor.KubeProxyInfo))
-	r := k8sinterface.JoinResourceTriplets(group, version, k8shostsensor.KubeProxyInfo.String())
-	assert.NotContains(t, infoMap, r)
+	for _, r := range k8sinterface.ResourceGroupToString(group, version, k8shostsensor.KubeProxyInfo.String()) {
+		assert.NotContains(t, infoMap, r)
+	}
+	assertPartialContains(t, partials, k8shostsensor.KubeProxyInfo, 1, 2)
+}
+
+// assertPartialContains checks that a partially converted resource produced
+// the partial record under its virtual policy-Kind identity — the key the
+// scan looks up in ResourceToControlsMap — carrying the conversion scope
+// and both counts.
+func assertPartialContains(t *testing.T, partials []cautils.PartialGVRPull, resource k8shostsensor.HostSensorResource, read, reported int) {
+	t.Helper()
+
+	group, version := k8sinterface.SplitApiVersion(k8shostsensor.MapHostSensorResourceToApiGroup(resource))
+	wantGVR := k8sinterface.JoinResourceTriplets(group, version, resource.String())
+	require.Len(t, partials, 1)
+	assert.Equal(t, wantGVR, partials[0].GVR)
+	assert.Equal(t, "conversion", partials[0].Selector)
+	assert.Contains(t, partials[0].Error, fmt.Sprintf("%d", reported))
+	assert.Contains(t, partials[0].Error, fmt.Sprintf("%d", read))
+}
+
+// A partially converted collection must never be cached: the cache stores
+// converted envelopes only and reconstructs listed == converted on a hit, so
+// a later scan would otherwise be served the subset as apparently complete.
+func TestGetCRDResources_SkipsCacheWriteOnPartialConversion(t *testing.T) {
+	withTempCacheDir(t)
+	t.Setenv(HostSensorCacheTtlEnvVar, "1h")
+	withK8sHost(t, "https://cluster-a.example.com")
+
+	items := []*unstructured.Unstructured{
+		newCRDItem("KubeletInfo", "node-1", map[string]any{"KubeletInfo": map[string]any{"version": "v1.30.0"}}),
+		newCRDShell("KubeletInfo", "node-2"),
+	}
+	hsh := &HostSensorHandler{
+		dynamicClient: newCRDDynamicClient(t, items...),
+		nodeCount:     2,
+	}
+
+	res, collected, err := hsh.getCRDResources(context.Background(), k8shostsensor.KubeletInfo)
+	require.NoError(t, err)
+	require.Len(t, res, 1)
+	assert.Equal(t, 1, collected.dropped())
+
+	path, err := getCacheFilePath(k8sinterface.GetContextName(), k8shostsensor.KubeletInfo.String())
+	require.NoError(t, err)
+	_, statErr := os.Stat(path)
+	assert.ErrorIs(t, statErr, os.ErrNotExist, "partial collection must not be cached")
+
+	// Nothing servable from cache either: the next scan re-fetches live.
+	_, err = loadFromCache(k8sinterface.GetContextName(), k8shostsensor.KubeletInfo.String())
+	assert.Error(t, err)
 }
 
 // dropped is what tells a partial loss from a total one, so it is pinned
@@ -361,10 +418,11 @@ func TestCollectResources_RecordsUnreadableCloudProviderItems(t *testing.T) {
 		nodeCount:     1,
 	}
 
-	res, infoMap, err := hsh.CollectResources(context.Background())
+	res, infoMap, partials, err := hsh.CollectResources(context.Background())
 
 	require.NoError(t, err)
 	assert.False(t, hasKind(res, k8shostsensor.CloudProviderInfo))
+	assert.Empty(t, partials, "total loss stays on infoMap, never on partials")
 	assertInfoMapContains(t, infoMap, k8shostsensor.CloudProviderInfo,
 		"node-agent reported 1 CloudProviderInfo but none of them could be read")
 }
@@ -376,9 +434,10 @@ func TestCollectResources_IgnoresAbsentCloudProviderInfo(t *testing.T) {
 		dynamicClient: newCRDDynamicClient(t, newCRDItem("OsReleaseFile", "node-1", map[string]any{"pretty": "Ubuntu"})),
 	}
 
-	_, infoMap, err := hsh.CollectResources(context.Background())
+	_, infoMap, partials, err := hsh.CollectResources(context.Background())
 
 	require.NoError(t, err)
+	assert.Empty(t, partials)
 	group, version := k8sinterface.SplitApiVersion(k8shostsensor.MapHostSensorResourceToApiGroup(k8shostsensor.CloudProviderInfo))
 	r := k8sinterface.JoinResourceTriplets(group, version, k8shostsensor.CloudProviderInfo.String())
 	assert.NotContains(t, infoMap, r)

@@ -40,15 +40,22 @@ var diffCmdExamples = fmt.Sprintf(`
 
   # Output aggregate diff counts as CSV for spreadsheet-friendly artifacts
   %[1]s diff base.json head.json --format summary-csv --output diff-summary.csv
+
+  # Compare two image scans and fail when an upgrade introduces high or critical CVEs
+  1) %[1]s scan image nginx:1.26 --format json --output base-image.json
+  2) %[1]s scan image nginx:1.27 --format json --output head-image.json
+  3) %[1]s diff base-image.json head-image.json --fail-on-new --severity-threshold high
 `, cautils.ExecName())
 
 func GetDiffCmd(ks meta.IKubescape) *cobra.Command {
 	var diffInfo metav1.DiffInfo
 
 	diffCmd := &cobra.Command{
-		Use:     "diff <base-report.json> <head-report.json>",
-		Short:   "Compare two Kubescape scan JSON reports and show what changed",
-		Long:    `Compare a base scan report against a head scan report to surface new failures, resolved issues, unchanged evidence, and results that cannot be compared safely. By default, failed rules and paths are compared so regressions inside an already-failing control are detected.`,
+		Use:   "diff <base-report.json> <head-report.json>",
+		Short: "Compare two Kubescape scan JSON reports and show what changed",
+		Long: `Compare a base scan report against a head scan report to surface new failures, resolved issues, unchanged evidence, and results that cannot be compared safely. By default, failed rules and paths are compared so regressions inside an already-failing control are detected.
+
+Image scan reports ("scan image --format json") are compared by vulnerability instead: a CVE is identified by its ID, package and package type, so upgrading a package that still carries the same CVE counts as unchanged. Findings from a multi-image report are pooled across all its images, so --fail-on-new does not flag a CVE that spreads to another image when any base image already had it. Image reports support the pretty-printer, json and yaml formats, and both reports must be of the same kind.`,
 		Example: diffCmdExamples,
 		Args:    cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {

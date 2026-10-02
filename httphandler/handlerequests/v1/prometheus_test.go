@@ -15,6 +15,7 @@ import (
 
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/cautils/getter"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer"
 	utilsapisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/stretchr/testify/assert"
@@ -139,7 +140,8 @@ func TestMetrics_UsesDecodedSkipPersistenceQueryParam(t *testing.T) {
 			gotSkipPersistence := make(chan bool, 1)
 			scanImpl = func(_ context.Context, scanInfo *cautils.ScanInfo, _ []cautils.PolicyIdentifier, _ string, skipPersistence bool) (*reporthandlingv2.PostureReport, error) {
 				gotSkipPersistence <- skipPersistence
-				require.NoError(t, os.WriteFile(scanInfo.Output, []byte("# metrics\n"), 0o600))
+				resolved, _ := printer.ResolveOutputFile(printer.PrometheusFormat, scanInfo.Output, "")
+				require.NoError(t, os.WriteFile(resolved, []byte("# metrics\n"), 0o600))
 				return nil, nil
 			}
 
@@ -162,6 +164,120 @@ func TestMetrics_UsesDecodedSkipPersistenceQueryParam(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestMetrics_ReadsResultsFileWithPrometheusExtension(t *testing.T) {
+	withTempOutputDirs(t)
+
+	defer func(o scanner) { scanImpl = o }(scanImpl)
+	scanImpl = func(_ context.Context, scanInfo *cautils.ScanInfo, _ []cautils.PolicyIdentifier, _ string, _ bool) (*reporthandlingv2.PostureReport, error) {
+		// resolve the path the prometheus printer writes to, then write there
+		resolved, _ := printer.ResolveOutputFile(printer.PrometheusFormat, scanInfo.Output, "")
+		require.NoError(t, os.WriteFile(resolved, []byte("# metrics\n"), 0o600))
+		return nil, nil
+	}
+
+	h := NewHTTPHandler(false)
+	rq := httptest.NewRequest(http.MethodGet, "/v1/metrics?skipPersistence=true", nil)
+	w := httptest.NewRecorder()
+
+	h.Metrics(w, rq)
+
+	require.Equal(t, http.StatusOK, w.Result().StatusCode)
+	assert.Equal(t, "# metrics\n", w.Body.String())
+}
+
+func TestMetrics_CleansUpResultsFile(t *testing.T) {
+	withTempOutputDirs(t)
+
+	defer func(o scanner) { scanImpl = o }(scanImpl)
+	scanImpl = func(_ context.Context, scanInfo *cautils.ScanInfo, _ []cautils.PolicyIdentifier, _ string, _ bool) (*reporthandlingv2.PostureReport, error) {
+		resolved, _ := printer.ResolveOutputFile(printer.PrometheusFormat, scanInfo.Output, "")
+		require.NoError(t, os.WriteFile(resolved, []byte("# metrics\n"), 0o600))
+		return nil, nil
+	}
+
+	h := NewHTTPHandler(false)
+	rq := httptest.NewRequest(http.MethodGet, "/v1/metrics", nil)
+	w := httptest.NewRecorder()
+
+	h.Metrics(w, rq)
+
+	require.Equal(t, http.StatusOK, w.Result().StatusCode)
+	entries, err := os.ReadDir(OutputDir)
+	require.NoError(t, err)
+	assert.Empty(t, entries)
+}
+
+func TestMetrics_CleansUpResultsFileWithConfiguredFormat(t *testing.T) {
+	withTempOutputDirs(t)
+	t.Setenv("KS_FORMAT", "json")
+
+	defer func(o scanner) { scanImpl = o }(scanImpl)
+	scanImpl = func(_ context.Context, scanInfo *cautils.ScanInfo, _ []cautils.PolicyIdentifier, _ string, _ bool) (*reporthandlingv2.PostureReport, error) {
+		resolved, _ := printer.ResolveOutputFile(scanInfo.Format, scanInfo.Output, "")
+		require.NoError(t, os.WriteFile(resolved, []byte("{}"), 0o600))
+		return nil, nil
+	}
+
+	h := NewHTTPHandler(false)
+	rq := httptest.NewRequest(http.MethodGet, "/v1/metrics", nil)
+	w := httptest.NewRecorder()
+
+	h.Metrics(w, rq)
+
+	entries, err := os.ReadDir(OutputDir)
+	require.NoError(t, err)
+	assert.Empty(t, entries)
+}
+
+func TestMetrics_CleansUpResultsFileOnDisconnect(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		withTempOutputDirs(t)
+
+		defer func(o scanner) { scanImpl = o }(scanImpl)
+		scanCtxErr := make(chan error, 1)
+
+		reqCtx, cancel := context.WithCancel(context.Background())
+		handlerDone := make(chan struct{})
+		scanImpl = func(ctx context.Context, scanInfo *cautils.ScanInfo, _ []cautils.PolicyIdentifier, _ string, _ bool) (*reporthandlingv2.PostureReport, error) {
+			cancel() // simulate the scrape connection going away mid-scan
+			scanCtxErr <- ctx.Err()
+			<-handlerDone // wait for the handler to return on the disconnect path before writing
+			resolved, _ := printer.ResolveOutputFile(printer.PrometheusFormat, scanInfo.Output, "")
+			require.NoError(t, os.WriteFile(resolved, []byte("# metrics\n"), 0o600))
+			return nil, nil
+		}
+
+		h := NewHTTPHandler(false)
+		rq := httptest.NewRequest(http.MethodGet, "/v1/metrics", nil).WithContext(reqCtx)
+		w := httptest.NewRecorder()
+
+		go func() {
+			h.Metrics(w, rq)
+			close(handlerDone)
+		}()
+
+		select {
+		case err := <-scanCtxErr:
+			assert.NoError(t, err, "scan context must not be cancelled when the request context is")
+		case <-time.After(5 * time.Second):
+			t.Fatal("scan was not invoked")
+		}
+
+		select {
+		case <-handlerDone:
+		case <-time.After(5 * time.Second):
+			t.Fatal("handler did not complete")
+		}
+
+		assert.NoError(t, h.Shutdown(context.Background(), time.Second))
+		synctest.Wait() // join the disconnect cleanup goroutine before asserting
+
+		entries, err := os.ReadDir(OutputDir)
+		require.NoError(t, err)
+		assert.Empty(t, entries)
+	})
 }
 
 func TestMetrics_InvalidSkipPersistenceQueryParam(t *testing.T) {
@@ -226,7 +342,8 @@ func TestMetricsQueueRejectsRequestsWhenCapacityIsExhausted(t *testing.T) {
 	scanImpl = func(_ context.Context, scanInfo *cautils.ScanInfo, _ []cautils.PolicyIdentifier, _ string, _ bool) (*reporthandlingv2.PostureReport, error) {
 		once.Do(func() { close(started) })
 		<-release
-		require.NoError(t, os.WriteFile(scanInfo.Output, []byte("# metrics\n"), 0o600))
+		resolved, _ := printer.ResolveOutputFile(printer.PrometheusFormat, scanInfo.Output, "")
+		require.NoError(t, os.WriteFile(resolved, []byte("# metrics\n"), 0o600))
 		return nil, nil
 	}
 	handler := newHTTPHandler(false, 1, defaultMaxScanRequestBodyBytes)

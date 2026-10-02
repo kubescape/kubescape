@@ -151,7 +151,7 @@ Six variables are declared:
 | `params` | from `basic-control-configuration.yaml` | from the binding's `paramRef` |
 | `oldObject` | `null` | previous state |
 | `request` | stubbed, `operation=CREATE`, empty `userInfo` | the full admission request |
-| `namespaceObject` | the resource's Namespace when the scan collected it, else `null` | the resource's Namespace, `null` when cluster-scoped |
+| `namespaceObject` | the resource's Namespace when collected; policies reading it skip a namespaced resource if that Namespace is missing | the resource's Namespace, `null` when cluster-scoped |
 | `variables` | the policy's own `variables:` block | same |
 
 `authorizer` is deliberately **not** declared. It cannot be resolved offline, so a
@@ -324,21 +324,13 @@ skips a whole control.
 exist in a file scan.
 
 **`namespaceObject` is conditional.** It binds to a real Namespace only when the
-scan happened to collect Namespace objects, and namespace collection is driven by
-the framework's own policy matches rather than by what the CEL policies need. The
-same control can therefore see a real Namespace under one framework and null under
-another. A policy that null-guards its access reaches a verdict that may not be the
-one admission would reach. One that selects into `namespaceObject` unguarded gets
-an evaluation error, and under `failurePolicy: Fail` that is reported as a failure,
-so an uncollected Namespace can produce a finding a cluster would not. This is the
-one gap here that is not a safe skip. It stays latent only because nothing in the
-bundle reads `namespaceObject`, and `TestBundleDoesNotReadNamespaceObject` enforces
-that rather than assuming it: a pin bump that introduces a read fails the build
-instead of quietly changing scan results. Closing it properly takes two parts,
-because they cover different scans. A cluster scan can guarantee Namespace
-collection when a loaded policy needs one. A file scan cannot, since the manifest
-may simply not be there, so an uncollected Namespace has to be classified as an
-offline-only failure that skips rather than reports.
+scan collected that object. Collection is driven by the framework's policy matches,
+not every CEL dependency. When a policy reads `namespaceObject` but the Namespace
+is missing for a namespaced resource, Kubescape marks that resource skipped with an
+unknown verdict. It does not treat the missing offline input as an admission denial
+under `failurePolicy: Fail`. Cluster-scoped resources still receive the apiserver's
+normal null binding. A future collector improvement could gather Namespaces whenever
+a loaded policy needs them, reducing these skips in live cluster scans.
 
 **Only CREATE is modelled.** A policy whose resource rules exclude CREATE is never
 matched offline.

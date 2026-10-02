@@ -49,8 +49,9 @@ type ControlDivergence struct {
 	// failed it. That is a real difference between the clusters.
 	PostureDiverges bool `json:"postureDiverges"`
 	// CoverageGap is set when a cluster could not evaluate the control while
-	// another reached a verdict on it. However the rest of the row looks, part
-	// of the fleet was not measured here.
+	// another cluster produced some outcome for it, whether that was a verdict
+	// or a decision to skip it. However the rest of the row looks, part of the
+	// fleet was not measured here.
 	CoverageGap bool `json:"coverageGap"`
 	// ReferenceStatus is what the reference cluster found. Omitted when no
 	// reference was asked for, and when the reference has no cell for this

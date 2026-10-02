@@ -12,7 +12,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// TODO(vladklokun): document image scanning on the Kubescape Docs Hub?
 var (
 	imageExample = fmt.Sprintf(`
   Scan one or more images for vulnerabilities. 
@@ -30,6 +29,9 @@ var (
   %[1]s scan image "nginx" -v
 
   # Scan the 'nginx' image and use exceptions
+  # (exceptions require registry references; archive, directory, and SBOM
+  # inputs combined with --exceptions fail per image with
+  # "Image Exceptions/Unsupported Input")
   %[1]s scan image "nginx" --exceptions exceptions.json
 
   # Scan the linux/amd64 variant from a multi-architecture image index

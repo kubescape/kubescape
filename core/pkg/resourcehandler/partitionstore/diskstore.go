@@ -44,6 +44,7 @@ type DiskStore struct {
 	filePool             *fdPool
 	sealed               bool
 	closed               bool
+	cleanedUp            bool
 	unrestoredPartitions map[string]int64
 	rollbackErr          error
 }
@@ -166,8 +167,11 @@ func (d *DiskStore) Put(ctx context.Context, namespace string, obj workloadinter
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	if isNilMetadata(obj) {
+		return ErrNilMetadata
+	}
 
-	rec := newRecord(d.activeGVR, namespace, obj)
+	rec := newRecordForMarshal(d.activeGVR, namespace, obj)
 	data, err := json.Marshal(rec)
 	if err != nil {
 		return fmt.Errorf("failed to serialize resource %s in namespace %s: %w", rec.ID, namespace, err)
@@ -622,45 +626,53 @@ func (d *DiskStore) Close() error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	if d.closed {
+	if d.cleanedUp {
 		return nil
 	}
 
-	var firstErr error
+	d.closed = true
+
+	var closeErrs []error
 
 	if d.stagingWriter != nil {
-		if err := d.stagingWriter.Flush(); err != nil && firstErr == nil {
-			firstErr = err
+		if err := d.stagingWriter.Flush(); err != nil {
+			if isDiskFull(err) {
+				closeErrs = append(closeErrs, fmt.Errorf("%w: %v", ErrDiskFull, err))
+			} else {
+				closeErrs = append(closeErrs, err)
+			}
 		}
 	}
 	if d.stagingFile != nil {
-		if err := d.stagingFile.Close(); err != nil && firstErr == nil {
-			firstErr = err
+		if err := d.stagingFile.Close(); err != nil && !errors.Is(err, os.ErrClosed) {
+			closeErrs = append(closeErrs, err)
 		}
+		d.stagingFile = nil
+		d.stagingWriter = nil
 	}
+	d.activeGVR = ""
+	d.stagingPath = ""
 
 	if d.filePool != nil {
-		if err := d.filePool.closeAll(); err != nil && firstErr == nil {
-			firstErr = err
+		if err := d.filePool.closeAllUnconditional(); err != nil {
+			closeErrs = append(closeErrs, err)
 		}
 	}
 
 	if d.rootDir != "" {
 		if err := os.RemoveAll(d.rootDir); err != nil {
-			if firstErr == nil {
-				firstErr = fmt.Errorf("failed to remove spill root directory %s: %w", d.rootDir, err)
-			}
-			return firstErr
+			closeErrs = append(closeErrs, fmt.Errorf("failed to remove spill root directory %s: %w", d.rootDir, err))
+			return errors.Join(closeErrs...)
 		}
 	}
 
-	d.closed = true
+	d.cleanedUp = true
 	d.stagingCounts = nil
 	d.committedCounts = nil
 	d.namespaces = nil
 	d.unrestoredPartitions = nil
 	d.rollbackErr = nil
-	return firstErr
+	return errors.Join(closeErrs...)
 }
 
 // safeNamespaceFilename generates a safe, collision-free filename from a namespace name.
@@ -856,41 +868,50 @@ func (p *fdPool) evictOldest() error {
 }
 
 func (p *fdPool) closeAll() error {
-	var firstErr error
+	return p.closeAllInternal(true)
+}
+
+func (p *fdPool) closeAllUnconditional() error {
+	return p.closeAllInternal(false)
+}
+
+func (p *fdPool) closeAllInternal(preserveFailed bool) error {
+	var errs []error
 	var failedWriters []*pooledWriter
 
 	for elem := p.lru.Front(); elem != nil; elem = elem.Next() {
 		pw := elem.Value.(*pooledWriter)
-		if err := pw.writer.Flush(); err != nil {
-			if firstErr == nil {
+		if pw.writer != nil {
+			if err := pw.writer.Flush(); err != nil {
 				if isDiskFull(err) {
-					firstErr = fmt.Errorf("%w: %v", ErrDiskFull, err)
+					errs = append(errs, fmt.Errorf("%w: %v", ErrDiskFull, err))
 				} else {
-					firstErr = err
+					errs = append(errs, err)
+				}
+				if preserveFailed {
+					failedWriters = append(failedWriters, pw)
+					continue
 				}
 			}
-			failedWriters = append(failedWriters, pw)
-			continue
 		}
 		if pw.file != nil {
-			if err := pw.file.Close(); err != nil && firstErr == nil {
-				firstErr = err
+			if err := pw.file.Close(); err != nil && !errors.Is(err, os.ErrClosed) {
+				errs = append(errs, err)
 			}
 		}
 	}
 
-	if len(failedWriters) == 0 {
-		p.pool = make(map[string]*list.Element)
-		p.lru.Init()
-	} else {
-		// Retain failed writers in the pool so Seal/Close can be retried
-		p.pool = make(map[string]*list.Element)
+	if preserveFailed && len(failedWriters) > 0 {
+		p.pool = make(map[string]*list.Element, len(failedWriters))
 		p.lru.Init()
 		for _, pw := range failedWriters {
 			elem := p.lru.PushBack(pw)
 			p.pool[pw.name] = elem
 		}
+	} else {
+		p.pool = make(map[string]*list.Element)
+		p.lru.Init()
 	}
 
-	return firstErr
+	return errors.Join(errs...)
 }

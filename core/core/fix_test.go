@@ -1,10 +1,12 @@
 package core
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -311,6 +313,34 @@ func TestFix_DeclineViaStdinDoesNotModifyFile(t *testing.T) {
 	assert.Equal(t, before, manifestContent(t, dir), "declining the confirmation prompt must not modify the file")
 }
 
+func TestFix_InteractiveNoConfirmSkipsPrompt(t *testing.T) {
+	dir := t.TempDir()
+	reportPath := buildFixableReport(t, dir)
+	before := manifestContent(t, dir)
+
+	ks := &Kubescape{Ctx: context.Background()}
+	// No stdin provided! If it prompts, it will fail or block or use non-interactive short-circuit.
+	// But NoConfirm should skip the prompt entirely and apply changes.
+	err := ks.Fix(&metav1.FixInfo{ReportFile: reportPath, Interactive: true, NoConfirm: true})
+	assert.NoError(t, err)
+
+	assert.NotEqual(t, before, manifestContent(t, dir), "NoConfirm should bypass interactive prompts and apply the fix")
+}
+
+func TestFix_InteractiveDecline(t *testing.T) {
+	dir := t.TempDir()
+	reportPath := buildFixableReport(t, dir)
+	before := manifestContent(t, dir)
+
+	ks := &Kubescape{Ctx: context.Background()}
+	withStdin(t, "n\n", func() {
+		err := ks.Fix(&metav1.FixInfo{ReportFile: reportPath, Interactive: true})
+		assert.NoError(t, err)
+	})
+
+	assert.Equal(t, before, manifestContent(t, dir), "declining the interactive prompt must not modify the file")
+}
+
 func TestFix_NoConfirmAppliesChanges(t *testing.T) {
 	dir := t.TempDir()
 	reportPath := buildFixableReport(t, dir)
@@ -465,4 +495,232 @@ func TestFix_OutputDirDryRunWritesNothing(t *testing.T) {
 
 	assert.NoDirExists(t, outputDir)
 	assert.Equal(t, before, manifestContent(t, dir))
+}
+func buildMixedFixableReport(t *testing.T, dir string) string {
+	t.Helper()
+
+	manifestPath := filepath.Join(dir, "deploy.yaml")
+	require.NoError(t, os.WriteFile(manifestPath, []byte(
+		"apiVersion: apps/v1\n"+
+			"kind: Deployment\n"+
+			"metadata:\n"+
+			"  name: demo\n"+
+			"  namespace: ns1\n"+
+			"spec:\n"+
+			"  template:\n"+
+			"    spec:\n"+
+			"      containers:\n"+
+			"      - name: demo1\n"+
+			"        securityContext:\n"+
+			"          privileged: true\n"+
+			"---\n"+
+			"apiVersion: apps/v1\n"+
+			"kind: Deployment\n"+
+			"metadata:\n"+
+			"  name: demo\n"+
+			"  namespace: ns2\n"+
+			"spec:\n"+
+			"  template:\n"+
+			"    spec:\n"+
+			"      containers:\n"+
+			"      - name: demo2\n"+
+			"        securityContext:\n"+
+			"          privileged: true\n"+
+			"---\n"+
+			"apiVersion: apps/v1\n"+
+			"kind: Deployment\n"+
+			"metadata:\n"+
+			"  name: demo\n"+
+			"  namespace: ns3\n"+
+			"spec:\n"+
+			"  template:\n"+
+			"    spec:\n"+
+			"      containers:\n"+
+			"      - name: demo3\n"+
+			"        securityContext:\n"+
+			"          privileged: true\n"), 0600))
+
+	obj1 := map[string]any{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata":   map[string]any{"name": "demo", "namespace": "ns1"},
+	}
+	lw1 := localworkload.NewLocalWorkload(obj1)
+	lw1.SetPath("deploy.yaml:0")
+
+	resource1 := reporthandling.Resource{
+		ResourceID: lw1.GetID(),
+		Object:     lw1.GetObject(),
+		Source:     &reporthandling.Source{FileType: reporthandling.SourceTypeYaml, Path: dir},
+	}
+
+	result1 := resourcesresults.Result{
+		ResourceID: resource1.ResourceID,
+		AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+			{
+				ControlID: "C-0057",
+				Name:      "Privileged container",
+				Status:    apis.StatusInfo{InnerStatus: apis.StatusFailed},
+				ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{
+					{
+						Name:   "rule-privileged",
+						Status: apis.StatusFailed,
+						Paths: []armotypes.PosturePaths{
+							{FixPath: armotypes.FixPath{Path: "spec.template.spec.containers[0].securityContext.privileged", Value: "false"}},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	obj2 := map[string]any{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata":   map[string]any{"name": "demo", "namespace": "ns2"},
+	}
+	lw2 := localworkload.NewLocalWorkload(obj2)
+	lw2.SetPath("deploy.yaml:1")
+
+	resource2 := reporthandling.Resource{
+		ResourceID: lw2.GetID(),
+		Object:     lw2.GetObject(),
+		Source:     &reporthandling.Source{FileType: reporthandling.SourceTypeYaml, Path: dir},
+	}
+
+	result2 := resourcesresults.Result{
+		ResourceID: resource2.ResourceID,
+		AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+			{ // Fixable
+				ControlID: "C-0057",
+				Name:      "Privileged container",
+				Status:    apis.StatusInfo{InnerStatus: apis.StatusFailed},
+				ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{
+					{
+						Name:   "rule-privileged",
+						Status: apis.StatusFailed,
+						Paths: []armotypes.PosturePaths{
+							{FixPath: armotypes.FixPath{Path: "spec.template.spec.containers[0].securityContext.privileged", Value: "false"}},
+						},
+					},
+				},
+			},
+			{ // Unfixable
+				ControlID: "C-0001",
+				Name:      "Unfixable control",
+				Status:    apis.StatusInfo{InnerStatus: apis.StatusFailed},
+				ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{
+					{
+						Name:   "rule-unfixable",
+						Status: apis.StatusFailed,
+					},
+				},
+			},
+		},
+	}
+
+	obj3 := map[string]any{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata":   map[string]any{"name": "demo", "namespace": "ns3"},
+	}
+	lw3 := localworkload.NewLocalWorkload(obj3)
+	lw3.SetPath("deploy.yaml:2")
+
+	resource3 := reporthandling.Resource{
+		ResourceID: lw3.GetID(),
+		Object:     lw3.GetObject(),
+		Source:     &reporthandling.Source{FileType: reporthandling.SourceTypeYaml, Path: dir},
+	}
+
+	result3 := resourcesresults.Result{
+		ResourceID: resource3.ResourceID,
+		AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+			{ // Fixable
+				ControlID: "C-0057",
+				Name:      "Privileged container",
+				Status:    apis.StatusInfo{InnerStatus: apis.StatusFailed},
+				ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{
+					{
+						Name:   "rule-privileged",
+						Status: apis.StatusFailed,
+						Paths: []armotypes.PosturePaths{
+							{FixPath: armotypes.FixPath{Path: "spec.template.spec.containers[0].securityContext.privileged", Value: "false"}},
+						},
+					},
+				},
+			},
+			{ // Unfixable
+				ControlID: "C-0001",
+				Name:      "Unfixable control",
+				Status:    apis.StatusInfo{InnerStatus: apis.StatusFailed},
+				ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{
+					{
+						Name:   "rule-unfixable",
+						Status: apis.StatusFailed,
+					},
+				},
+			},
+		},
+	}
+
+	report := &reporthandlingv2.PostureReport{
+		Metadata: reporthandlingv2.Metadata{
+			ScanMetadata: reporthandlingv2.ScanMetadata{ScanningTarget: reporthandlingv2.Directory},
+			ContextMetadata: reporthandlingv2.ContextMetadata{
+				DirectoryContextMetadata: &reporthandlingv2.DirectoryContextMetadata{BasePath: dir},
+			},
+		},
+		Results:   []resourcesresults.Result{result1, result2, result3},
+		Resources: []reporthandling.Resource{resource1, resource2, resource3},
+	}
+
+	return writeReportFile(t, dir, report)
+}
+
+func TestFix_InteractiveMixedAcceptDecline(t *testing.T) {
+	dir := t.TempDir()
+	reportPath := buildMixedFixableReport(t, dir)
+
+	b, _ := os.ReadFile(filepath.Join(dir, "deploy.yaml"))
+	before := string(b)
+
+	ks := &Kubescape{Ctx: context.Background()}
+
+	rPipe, wPipe, _ := os.Pipe()
+	oldWriter := logger.L().GetWriter()
+	logger.L().SetWriter(wPipe)
+	defer logger.L().SetWriter(oldWriter)
+
+	// we supply "y" for the first resource (ns1), "n" for the second (ns2), "n" for the third (ns3).
+	withStdin(t, "y\nn\nn\n", func() {
+		err := ks.Fix(&metav1.FixInfo{ReportFile: reportPath, Interactive: true})
+		assert.NoError(t, err)
+	})
+
+	wPipe.Close()
+	var outBuf bytes.Buffer
+	io.Copy(&outBuf, rPipe)
+	out := outBuf.String()
+
+	a, _ := os.ReadFile(filepath.Join(dir, "deploy.yaml"))
+	after := string(a)
+
+	assert.NotEqual(t, before, after, "File should have been modified")
+	// Verify that ONLY ns1 was modified
+	assert.Contains(t, after, "namespace: ns1\nspec:\n  template:\n    spec:\n      containers:\n      - name: demo1\n        securityContext:\n          privileged: false")
+	assert.Contains(t, after, "namespace: ns2\nspec:\n  template:\n    spec:\n      containers:\n      - name: demo2\n        securityContext:\n          privileged: true")
+	assert.Contains(t, after, "namespace: ns3\nspec:\n  template:\n    spec:\n      containers:\n      - name: demo3\n        securityContext:\n          privileged: true")
+
+	// Assert the correct total: ns1 accepted (1), ns2 declined (1 fixable + 1 unfixable = 2), ns3 declined (1 fixable + 1 unfixable = 2). Total = 5.
+	// But wait! Does it double-count the identical failure across ns2 and ns3 if it uses dedupUnfixedControlsForAccounting?
+	// It shouldn't double count if they are the SAME resource, but here they are DIFFERENT resources (different ResourceID).
+	// So 2 + 2 = 4 unfixed controls. Plus 1 fixed = 5 total.
+	assert.Contains(t, out, "Auto-fixed 1 of 5 flagged control instances.")
+	assert.Contains(t, out, "skipped: user declined the interactive prompt")
+
+	// Assert distinct prompt headers for multi-resource interactive fix
+	assert.Contains(t, out, "Namespace: ns1\nDocument index: 0")
+	assert.Contains(t, out, "Namespace: ns2\nDocument index: 1")
+	assert.Contains(t, out, "Namespace: ns3\nDocument index: 2")
 }

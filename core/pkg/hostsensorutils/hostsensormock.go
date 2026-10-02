@@ -3,6 +3,7 @@ package hostsensorutils
 import (
 	"context"
 
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/opa-utils/objectsenvelopes/hostsensor"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 )
@@ -24,8 +25,8 @@ func (hshm *HostSensorHandlerMock) TearDown() error {
 	return nil
 }
 
-func (hshm *HostSensorHandlerMock) CollectResources(_ context.Context) ([]hostsensor.HostSensorDataEnvelope, map[string]apis.StatusInfo, error) {
-	return []hostsensor.HostSensorDataEnvelope{}, nil, nil
+func (hshm *HostSensorHandlerMock) CollectResources(_ context.Context) ([]hostsensor.HostSensorDataEnvelope, map[string]apis.StatusInfo, []cautils.PartialGVRPull, error) {
+	return []hostsensor.HostSensorDataEnvelope{}, nil, nil, nil
 }
 
 func (hshm *HostSensorHandlerMock) StreamTelemetry(_ context.Context) (<-chan SyscallEvent, error) {
