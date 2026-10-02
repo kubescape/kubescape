@@ -138,6 +138,10 @@ func NewLocalConfig(accountID, accessKey, clusterName, customClusterName string)
 		}
 	}
 
+	if err := loadUrlsFromFile(lc.configObj); err != nil {
+		logger.L().Debug("failed to load urls from config file", helpers.Error(err))
+	}
+
 	updateCredentials(lc.configObj, accountID, accessKey)
 	updateCloudURLs(lc.configObj)
 
@@ -479,6 +483,15 @@ func readConfig(dat []byte, configObj *ConfigObj) error {
 // servicesConfigPath is the path to the services discovery config file mounted
 // in-cluster. It is a var (not a const) so tests can point it at a temp file.
 var servicesConfigPath = "/etc/config/services.json"
+
+// SetServicesConfigPath overrides the services discovery config file path and returns a restore function.
+func SetServicesConfigPath(path string) func() {
+	original := servicesConfigPath
+	servicesConfigPath = path
+	return func() {
+		servicesConfigPath = original
+	}
+}
 
 func loadUrlsFromFile(obj *ConfigObj) error {
 	dat, err := os.ReadFile(servicesConfigPath)

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sync/atomic"
 	"testing"
 
@@ -387,19 +388,24 @@ func TestGetInterfaces_NonClusterScan_CachedAccountMismatchPreservesClusterFallb
 	assert.Equal(t, clusterKey, interfaces.tenantConfig.GetAccessKey(), "must use cluster secret key, not mismatched cached key")
 }
 
-// TestGetInterfaces_NonClusterScan_NoFlagsUsesPairedCachedConfigAndSkipsKubernetesAPI verifies that
-// when no account or access key flags/env vars are provided and local cache contains all required
-// paired settings, kubernetesAPIFunc is skipped.
-func TestGetInterfaces_NonClusterScan_NoFlagsUsesPairedCachedConfigAndSkipsKubernetesAPI(t *testing.T) {
+// TestGetInterfaces_NonClusterScan_ConflictingCacheAndClusterSecretPreservesClusterPrecedence verifies that
+// when no credential flags/env overrides are provided and the local cache contains credentials for Account A,
+// but a connected cluster Secret contains credentials for Account B, getInterfaces does not accept cache A,
+// but queries the cluster to preserve cluster Secret precedence over local cache.
+func TestGetInterfaces_NonClusterScan_ConflictingCacheAndClusterSecretPreservesClusterPrecedence(t *testing.T) {
 	isolateCachedConfigTest(t)
 
 	const (
-		cachedAccountID = "aaaa1111-2222-3333-4444-555555555555"
-		cachedAccessKey = "cached-access-key-A"
-		reportURL       = "https://report.kubescape.cloud"
-		apiURL          = "https://api.kubescape.cloud"
+		cachedAccountID  = "aaaa1111-2222-3333-4444-555555555555"
+		cachedAccessKey  = "cached-access-key-A"
+		clusterAccountID = "bbbb1111-2222-3333-4444-555555555555"
+		clusterAccessKey = "cluster-access-key-B"
+		reportURL        = "https://report.kubescape.cloud"
+		apiURL           = "https://api.kubescape.cloud"
+		ksNamespace      = "kubescape"
 	)
 
+	// Populate the local cache file with Account A and its key
 	cachedData, err := json.Marshal(&cautils.ConfigObj{ // #nosec G117 -- test fixture; marshals a mock config object
 		AccountID:      cachedAccountID,
 		AccessKey:      cachedAccessKey,
@@ -408,6 +414,99 @@ func TestGetInterfaces_NonClusterScan_NoFlagsUsesPairedCachedConfigAndSkipsKuber
 	})
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(cautils.ConfigFileFullPath(), cachedData, 0o600))
+
+	// Cluster has Secret and ConfigMap for Account B
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "kubescape-credentials",
+			Namespace: ksNamespace,
+			Labels: map[string]string{
+				"kubescape.io/infra": "credentials",
+			},
+		},
+		Data: map[string][]byte{
+			"account":   []byte(clusterAccountID),
+			"accessKey": []byte(clusterAccessKey),
+		},
+	}
+	configMap := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "kubescape-config",
+			Namespace: ksNamespace,
+			Labels: map[string]string{
+				"kubescape.io/infra": "config",
+			},
+		},
+		Data: map[string]string{
+			"clusterData": fmt.Sprintf(`{"cloudReportURL":%q,"cloudAPIURL":%q}`, reportURL, apiURL),
+		},
+	}
+
+	fakeClient := fake.NewSimpleClientset(secret, configMap)
+	fakeK8s := &k8sinterface.KubernetesApi{
+		KubernetesClient: fakeClient,
+	}
+
+	var callCount atomic.Int32
+	originalKubernetesAPIFunc := kubernetesAPIFunc
+	kubernetesAPIFunc = func() *k8sinterface.KubernetesApi {
+		callCount.Add(1)
+		return fakeK8s
+	}
+	t.Cleanup(func() { kubernetesAPIFunc = originalKubernetesAPIFunc })
+
+	originalK8SConfig := k8sinterface.K8SConfig
+	t.Cleanup(func() { k8sinterface.K8SConfig = originalK8SConfig })
+	k8sinterface.K8SConfig = &restclient.Config{}
+
+	originalConnected := k8sinterface.IsConnectedToCluster()
+	t.Cleanup(func() { k8sinterface.SetConnectedToCluster(originalConnected) })
+	k8sinterface.SetConnectedToCluster(true)
+
+	// No flags provided; local cache has paired credentials A, but connected cluster Secret has B.
+	scanInfo := &cautils.ScanInfo{
+		InputPatterns: []string{"manifest.yaml"},
+		Local:         true,
+	}
+
+	interfaces, err := getInterfaces(context.Background(), scanInfo, nil)
+	require.NoError(t, err)
+
+	assert.Equal(t, int32(1), callCount.Load(), "kubernetesAPIFunc must be called when credentials are cache-derived and cluster Secret may exist")
+	assert.IsType(t, &cautils.ClusterConfig{}, interfaces.tenantConfig)
+	assert.Equal(t, clusterAccountID, interfaces.tenantConfig.GetAccountID(), "cluster Secret Account B must outrank cached Account A")
+	assert.Equal(t, clusterAccessKey, interfaces.tenantConfig.GetAccessKey(), "cluster Secret Key B must outrank cached Key A")
+}
+
+// TestGetInterfaces_NonClusterScan_ServicesJsonTakesPrecedenceOverCachedUrls verifies that
+// when services.json is present, its URLs override cached URLs in tenant config.
+func TestGetInterfaces_NonClusterScan_ServicesJsonTakesPrecedenceOverCachedUrls(t *testing.T) {
+	isolateCachedConfigTest(t)
+
+	const (
+		accountID      = "11111111-2222-3333-4444-555555555555"
+		accessKey      = "my-access-key"
+		cachedReport   = "https://cached-report.kubescape.cloud"
+		cachedAPI      = "https://cached-api.kubescape.cloud"
+		servicesReport = "https://services-report.kubescape.cloud"
+		servicesAPI    = "https://services-api.kubescape.cloud"
+	)
+
+	// Local cache has cachedReport and cachedAPI
+	cachedData, err := json.Marshal(&cautils.ConfigObj{ // #nosec G117 -- test fixture
+		AccountID:      accountID,
+		AccessKey:      accessKey,
+		CloudReportURL: cachedReport,
+		CloudAPIURL:    cachedAPI,
+	})
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(cautils.ConfigFileFullPath(), cachedData, 0o600))
+
+	// services.json has servicesReport and servicesAPI
+	servicesFile := filepath.Join(t.TempDir(), "services.json")
+	servicesPayload := fmt.Sprintf(`{"version":"v2","response":{"api-server":%q,"event-receiver-http":%q}}`, servicesAPI, servicesReport)
+	require.NoError(t, os.WriteFile(servicesFile, []byte(servicesPayload), 0o600))
+	t.Cleanup(cautils.SetServicesConfigPath(servicesFile))
 
 	var callCount atomic.Int32
 	originalKubernetesAPIFunc := kubernetesAPIFunc
@@ -421,8 +520,10 @@ func TestGetInterfaces_NonClusterScan_NoFlagsUsesPairedCachedConfigAndSkipsKuber
 	t.Cleanup(func() { k8sinterface.SetConnectedToCluster(originalConnected) })
 	k8sinterface.SetConnectedToCluster(true)
 
-	// No flags provided
+	// ScanInfo provides explicit account and key
 	scanInfo := &cautils.ScanInfo{
+		AccountID:     accountID,
+		AccessKey:     accessKey,
 		InputPatterns: []string{"manifest.yaml"},
 		Local:         true,
 	}
@@ -430,8 +531,7 @@ func TestGetInterfaces_NonClusterScan_NoFlagsUsesPairedCachedConfigAndSkipsKuber
 	interfaces, err := getInterfaces(context.Background(), scanInfo, nil)
 	require.NoError(t, err)
 
-	assert.Equal(t, int32(0), callCount.Load(), "kubernetesAPIFunc must not be called when cached config is complete and paired")
-	assert.IsType(t, &cautils.LocalConfig{}, interfaces.tenantConfig)
-	assert.Equal(t, cachedAccountID, interfaces.tenantConfig.GetAccountID())
-	assert.Equal(t, cachedAccessKey, interfaces.tenantConfig.GetAccessKey())
+	assert.Equal(t, int32(0), callCount.Load(), "kubernetesAPIFunc should not be called when explicit credentials are provided")
+	assert.Equal(t, servicesAPI, interfaces.tenantConfig.GetCloudAPIURL(), "services.json API URL must outrank cached URL")
+	assert.Equal(t, servicesReport, interfaces.tenantConfig.GetCloudReportURL(), "services.json Report URL must outrank cached URL")
 }

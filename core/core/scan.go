@@ -169,7 +169,8 @@ func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo, policyIdenti
 
 // hasResolvedTenantConfig reports whether all required tenant configuration fields
 // (AccountID, AccessKey, CloudReportURL, and CloudAPIURL) are already resolved locally
-// and properly paired, eliminating the need to query in-cluster ConfigMap and Secret fixtures.
+// and supported by explicit credential overrides, eliminating the need to query in-cluster
+// ConfigMap and Secret fixtures.
 func hasResolvedTenantConfig(scanInfo *cautils.ScanInfo, tc cautils.ITenantConfig) bool {
 	if tc == nil {
 		return false
@@ -181,16 +182,16 @@ func hasResolvedTenantConfig(scanInfo *cautils.ScanInfo, tc cautils.ITenantConfi
 		return false
 	}
 
-	// Verify credential provenance and pairing:
-	// If an explicit account override is supplied (via flag or environment),
-	// ensure a matching access key was also supplied. If an account override
-	// has no matching key, do not accept localTenantConfig as fully resolved,
-	// so that cluster Secret lookup is preserved and mismatched cached credentials
-	// are never selected.
+	// Verify credential provenance:
+	// In-cluster Secret credentials have higher precedence than the local cache.
+	// Only accept localTenantConfig as fully resolved when credentials are
+	// explicitly provided by the caller (via CLI flags or environment variables),
+	// which outrank in-cluster Secret. Cache-derived credentials must not bypass
+	// cluster Secret lookup.
 	hasAccountOverride := (scanInfo != nil && scanInfo.AccountID != "") || os.Getenv(cautils.AccountIdEnvVar) != ""
 	hasAccessKeyOverride := (scanInfo != nil && scanInfo.AccessKey != "") || os.Getenv(cautils.AccessKeyEnvVar) != ""
 
-	return hasAccountOverride == hasAccessKeyOverride
+	return hasAccountOverride && hasAccessKeyOverride
 }
 
 func validateSBOMOutput(scanInfo *cautils.ScanInfo, format string) error {
