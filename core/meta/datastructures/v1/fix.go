@@ -5,6 +5,7 @@ type FixInfo struct {
 	NoConfirm      bool   // if true, no confirmation will be given to the user before applying the fix
 	SkipUserValues bool   // if true, user values will not be changed
 	DryRun         bool   // if true, no changes will be applied
+	Interactive    bool   // if true, ask for confirmation before applying fixes to each individual resource
 	// BasePath, if set, restricts fixes to this directory: the report's own
 	// recorded scan location (which the report itself controls) must resolve
 	// inside it, or NewFixHandler refuses to proceed. Use this when the

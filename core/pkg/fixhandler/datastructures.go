@@ -71,8 +71,10 @@ type UnfixedControl struct {
 	ControlID    string
 	ControlName  string
 	ResourceName string
-	ResourceKind string
-	FilePath     string
+	ResourceKind  string
+	FilePath      string
+	ResourceID    string
+	DocumentIndex int
 	// Reason is a short, user-facing explanation of why this control was not auto-fixed
 	// (e.g. "no auto-fix available", "skipped: file not found", "skipped: not a YAML source").
 	Reason string

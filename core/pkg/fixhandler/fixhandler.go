@@ -664,6 +664,7 @@ func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInf
 					ControlID:    ac.GetID(),
 					ControlName:  ac.GetName(),
 					ResourceName: resourceID,
+					ResourceID:   resourceID,
 					Reason:       "skipped: resource data missing from report",
 				})
 			}
@@ -678,12 +679,14 @@ func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInf
 					continue
 				}
 				h.unfixedControls = append(h.unfixedControls, UnfixedControl{
-					ControlID:    ac.GetID(),
-					ControlName:  ac.GetName(),
-					ResourceName: resourceObj.GetName(),
-					ResourceKind: resourceObj.GetKind(),
-					FilePath:     sanitizeForLog(src.reportedPath),
-					Reason:       src.skipReason,
+					ControlID:     ac.GetID(),
+					ControlName:   ac.GetName(),
+					ResourceName:  resourceObj.GetName(),
+					ResourceKind:  resourceObj.GetKind(),
+					FilePath:      sanitizeForLog(src.reportedPath),
+					ResourceID:    resourceID,
+					DocumentIndex: src.documentIndex,
+					Reason:        src.skipReason,
 				})
 			}
 			continue
@@ -726,11 +729,13 @@ func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInf
 			added, skipped := rfi.addYamlExpressionsFromResourceAssociatedControl(src.documentIndex, ac, h.fixInfo.SkipUserValues)
 
 			rfi.failedControls = append(rfi.failedControls, UnfixedControl{
-				ControlID:    ac.GetID(),
-				ControlName:  ac.GetName(),
-				ResourceName: resourceObj.GetName(),
-				ResourceKind: resourceObj.GetKind(),
-				FilePath:     location,
+				ControlID:     ac.GetID(),
+				ControlName:   ac.GetName(),
+				ResourceName:  resourceObj.GetName(),
+				ResourceKind:  resourceObj.GetKind(),
+				FilePath:      location,
+				ResourceID:    resourceID,
+				DocumentIndex: src.documentIndex,
 			})
 
 			// Fully auto-remediated: every failed path produced an expression.
@@ -753,12 +758,14 @@ func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInf
 			}
 			tentativeUnfixed = append(tentativeUnfixed, pendingUnfixed{
 				entry: UnfixedControl{
-					ControlID:    ac.GetID(),
-					ControlName:  ac.GetName(),
-					ResourceName: resourceObj.GetName(),
-					ResourceKind: resourceObj.GetKind(),
-					FilePath:     location,
-					Reason:       reason,
+					ControlID:     ac.GetID(),
+					ControlName:   ac.GetName(),
+					ResourceName:  resourceObj.GetName(),
+					ResourceKind:  resourceObj.GetKind(),
+					FilePath:      location,
+					ResourceID:    resourceID,
+					DocumentIndex: src.documentIndex,
+					Reason:        reason,
 				},
 				ac: ac,
 			})
@@ -978,9 +985,7 @@ func (h *FixHandler) PrintHelmSuggestions(suggestions []HelmFixSuggestion) {
 // UnfixedControls returns the failed (resource, control) tuples discovered during
 // the most recent call to PrepareResourcesToFix that the fixer did not auto-remediate.
 func (h *FixHandler) UnfixedControls() []UnfixedControl {
-	out := make([]UnfixedControl, len(h.unfixedControls))
-	copy(out, h.unfixedControls)
-	return out
+	return dedupUnfixedControlsForAccounting(h.unfixedControls)
 }
 
 // FixedControlsCount returns the number of failed (resource, control) tuples that
@@ -1003,13 +1008,31 @@ const (
 	PhaseApplied
 )
 
-// dedupUnfixedControls returns a deduplicated copy of the unfixed controls
-// slice, using ControlID|Kind/Name|FilePath as the dedup key.
-func dedupUnfixedControls(controls []UnfixedControl) []UnfixedControl {
+// dedupUnfixedControlsForDisplay returns a deduplicated copy of the unfixed controls
+// slice, using ControlID|Kind/Name|FilePath as the dedup key. This intentionally
+// collapses same-named resources across namespaces to match the printer's display limitations.
+func dedupUnfixedControlsForDisplay(controls []UnfixedControl) []UnfixedControl {
 	seen := make(map[string]bool, len(controls))
 	out := make([]UnfixedControl, 0, len(controls))
 	for _, u := range controls {
 		key := u.ControlID + "|" + u.ResourceKind + "/" + u.ResourceName + "|" + u.FilePath
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, u)
+	}
+	return out
+}
+
+// dedupUnfixedControlsForAccounting returns a deduplicated copy of the unfixed controls
+// slice, using a strict identity key. This deduplicates identical failures for the exact
+// same resource instance without collapsing visually similar resources.
+func dedupUnfixedControlsForAccounting(controls []UnfixedControl) []UnfixedControl {
+	seen := make(map[string]bool, len(controls))
+	out := make([]UnfixedControl, 0, len(controls))
+	for _, u := range controls {
+		key := u.ControlID + "|" + u.ResourceID + "|" + fmt.Sprint(u.DocumentIndex) + "|" + u.FilePath
 		if seen[key] {
 			continue
 		}
@@ -1028,9 +1051,11 @@ func (h *FixHandler) PrintUnfixedControls(phase Phase) {
 		return
 	}
 
-	deduped := dedupUnfixedControls(h.unfixedControls)
+	accountingRecords := dedupUnfixedControlsForAccounting(h.unfixedControls)
+	totalFailed := h.fixedControlsCount + len(accountingRecords)
+
+	deduped := dedupUnfixedControlsForDisplay(h.unfixedControls)
 	var sb strings.Builder
-	totalFailed := h.fixedControlsCount + len(deduped)
 	verb := "Would auto-fix"
 	if phase == PhaseApplied {
 		verb = "Auto-fixed"
@@ -1064,6 +1089,10 @@ func (h *FixHandler) PrintExpectedChanges(resourcesToFix []ResourceFixInfo) {
 			sb.WriteString("Source: cluster\n")
 		default:
 			fmt.Fprintf(&sb, "File: %s\n", resourceFixInfo.FilePath)
+			if ns := resourceFixInfo.Resource.GetNamespace(); ns != "" {
+				fmt.Fprintf(&sb, "Namespace: %s\n", ns)
+			}
+			fmt.Fprintf(&sb, "Document index: %d\n", resourceFixInfo.DocumentIndex)
 		}
 		fmt.Fprintf(&sb, "Resource: %s\n", resourceFixInfo.Resource.GetName())
 		fmt.Fprintf(&sb, "Kind: %s\n", resourceFixInfo.Resource.GetKind())
@@ -1762,5 +1791,16 @@ func determineNewlineSeparator(contents string) string {
 		return windowsNewline
 	default:
 		return unixNewline
+	}
+}
+
+// DeclineResources moves the given resources from fixed to unfixed controls.
+func (h *FixHandler) DeclineResources(declined []ResourceFixInfo) {
+	for _, r := range declined {
+		h.fixedControlsCount -= r.fixedCount
+		for _, unfixed := range r.failedControls {
+			unfixed.Reason = "skipped: user declined the interactive prompt"
+			h.unfixedControls = append(h.unfixedControls, unfixed)
+		}
 	}
 }
