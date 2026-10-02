@@ -68,9 +68,9 @@ type HelmFixSuggestion struct {
 // UnfixedControl describes a failed (resource, control) tuple for which `kubescape fix`
 // did not produce an automatic remediation. The user must address these manually.
 type UnfixedControl struct {
-	ControlID    string
-	ControlName  string
-	ResourceName string
+	ControlID     string
+	ControlName   string
+	ResourceName  string
 	ResourceKind  string
 	FilePath      string
 	ResourceID    string
