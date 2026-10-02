@@ -20,11 +20,8 @@ import (
 	helmchartutil "helm.sh/helm/v3/pkg/chartutil"
 	"helm.sh/helm/v3/pkg/cli"
 	helmvalues "helm.sh/helm/v3/pkg/cli/values"
-	helmdownloader "helm.sh/helm/v3/pkg/downloader"
 	helmengine "helm.sh/helm/v3/pkg/engine"
 	helmgetter "helm.sh/helm/v3/pkg/getter"
-	helmregistry "helm.sh/helm/v3/pkg/registry"
-	"k8s.io/client-go/util/homedir"
 )
 
 type HelmChart struct {
@@ -36,68 +33,16 @@ func IsHelmDirectory(path string) (bool, error) {
 	return helmchartutil.IsChartDir(path)
 }
 
-// newRegistryClient creates a Helm registry client for chart authentication.
-//
-// Only plainHTTP and basic-auth credentials are exposed here, because those
-// are the only options the sole call site (buildDependencies, below) ever
-// varies - it currently always passes plainHTTP=false and empty credentials.
-// An earlier version of this function also accepted certFile, keyFile,
-// caFile, and insecureSkipTLS, but those were broken rather than merely
-// unused: certFile/keyFile/caFile were passed to
-// helmregistry.ClientOptCredentialsFile, which sets the client's
-// *credentials store* path (e.g. ~/.docker/config.json), not TLS material -
-// caFile silently clobbered whatever certFile/keyFile had set (same
-// underlying field), and any of the three made helmregistry.NewClient fail
-// outright on a real PEM path ("invalid config format"). insecureSkipTLS was
-// left unwired entirely. Wiring TLS material correctly requires either
-// building a *tls.Config locally and passing it via
-// helmregistry.ClientOptHTTPClient, or using helm's own
-// registry.NewRegistryClientWithTLS(...) (helm.sh/helm/v3/pkg/registry/util.go)
-// for the whole client construction. Add that machinery back if a caller
-// ever needs cert/key/CA/insecureSkipTLS again, rather than reintroducing
-// unwired or miswired parameters.
-func newRegistryClient(plainHTTP bool, username, password string) (*helmregistry.Client, error) {
-	// Basic client options with debug disabled
-	opts := []helmregistry.ClientOption{
-		helmregistry.ClientOptDebug(false),
-		helmregistry.ClientOptWriter(io.Discard),
-	}
-
-	if plainHTTP {
-		opts = append(opts, helmregistry.ClientOptPlainHTTP())
-	}
-
-	// Add basic auth credentials if provided
-	if username != "" && password != "" {
-		opts = append(opts, helmregistry.ClientOptBasicAuth(username, password))
-	}
-
-	registryClient, err := helmregistry.NewClient(opts...)
-	if err != nil {
-		return nil, err
-	}
-
-	return registryClient, nil
-}
-
-// defaultKeyring returns the default GPG keyring path for chart verification
-func defaultKeyring() string {
-	if v, ok := os.LookupEnv("GNUPGHOME"); ok {
-		return filepath.Join(v, "pubring.gpg")
-	}
-	return filepath.Join(homedir.HomeDir(), ".gnupg", "pubring.gpg")
-}
-
+// NewHelmChart loads only the chart and dependencies already present on disk.
+// Dependency resolution belongs to an explicit Helm operation, never a scan:
+// downloader.Manager.Build can fetch remote content and write into the chart.
 func NewHelmChart(path string) (*HelmChart, error) {
-	// Build chart dependencies before loading if Chart.lock exists
-	if err := buildDependencies(path); err != nil {
-		logger.L().Warning("Failed to build chart dependencies", helpers.String("path", path), helpers.Error(err))
-	}
-
 	chart, err := helmloader.Load(path)
 	if err != nil {
 		return nil, err
 	}
+
+	warnMissingHelmDependencies(chart, path)
 
 	return &HelmChart{
 		chart: chart,
@@ -105,33 +50,24 @@ func NewHelmChart(path string) (*HelmChart, error) {
 	}, nil
 }
 
-// buildDependencies builds chart dependencies using the downloader manager
-func buildDependencies(chartPath string) error {
-	// Create registry client for authentication
-	registryClient, err := newRegistryClient(false, "", "")
-	if err != nil {
-		return fmt.Errorf("failed to create registry client: %w", err)
+// Warn for missing dependencies, including those of vendored subcharts, while
+// allowing the available templates to render. No repository reference is resolved.
+func warnMissingHelmDependencies(chart *helmchart.Chart, path string) {
+	vendored := make(map[string]bool, len(chart.Dependencies()))
+	for _, dependency := range chart.Dependencies() {
+		vendored[dependency.Name()] = true
+		warnMissingHelmDependencies(dependency, path)
 	}
-
-	// Create downloader manager with required configuration
-	settings := cli.New()
-	manager := &helmdownloader.Manager{
-		Out:            io.Discard, // Suppress output during scanning
-		ChartPath:      chartPath,
-		Keyring:        defaultKeyring(),
-		SkipUpdate:     false, // Allow updates to get latest dependencies
-		Getters:        helmgetter.All(settings),
-		RegistryClient: registryClient,
-		Debug:          false,
+	var missing []string
+	for _, dependency := range chart.Metadata.Dependencies {
+		if !vendored[dependency.Name] {
+			missing = append(missing, dependency.Name)
+		}
 	}
-
-	// Build dependencies from Chart.lock file
-	err = manager.Build()
-	if e, ok := err.(helmdownloader.ErrRepoNotFound); ok {
-		return fmt.Errorf("%s. Please add missing repos via 'helm repo add'", e.Error())
+	if len(missing) > 0 {
+		logger.L().Warning("Helm dependencies are missing from charts/; scanning only vendored content. Prepare dependencies explicitly with Helm before scanning to include them",
+			helpers.String("path", path), helpers.String("chart", chart.Name()), helpers.String("dependencies", strings.Join(missing, ", ")))
 	}
-
-	return err
 }
 
 func (hc *HelmChart) GetName() string {
