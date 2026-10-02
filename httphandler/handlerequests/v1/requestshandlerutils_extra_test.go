@@ -3,6 +3,8 @@ package v1
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -74,16 +76,85 @@ func TestWriteScanErrorToFile_RedactsPathsAndRejectsBadID(t *testing.T) {
 	FailedOutputDir = filepath.Join(tmpDir, "failed")
 	defer func() { FailedOutputDir = oldFailedOutputDir }()
 
-	err := writeScanErrorToFile(errors.New("cannot read /home/user/.kube/config: denied"), testScanErrID)
+	scanErr := errors.New("cannot read /home/user/.kube/config: denied")
+	err := writeScanErrorToFile(scanErr, testScanErrID)
 	require.Error(t, err)
-	assert.ErrorContains(t, err, "/home/user/.kube/config")
+	// the returned error is copied into the HTTP response, so it must be redacted too
+	assert.NotContains(t, err.Error(), "/home/user")
+	assert.Equal(t, "failed to scan. reason: cannot read <path>: denied", err.Error())
+	assert.ErrorIs(t, err, scanErr)
 	got, readErr := os.ReadFile(filepath.Join(FailedOutputDir, testScanErrID))
 	require.NoError(t, readErr)
 	assert.Equal(t, "cannot read <path>: denied", string(got))
 
-	require.Error(t, writeScanErrorToFile(errors.New("x"), "../escape"))
+	badIDErr := writeScanErrorToFile(scanErr, "../escape")
+	require.Error(t, badIDErr)
+	assert.NotContains(t, badIDErr.Error(), "/home/user")
 	_, statErr := os.Stat(filepath.Join(tmpDir, "escape"))
 	assert.True(t, os.IsNotExist(statErr))
+}
+
+func TestRedactScanError(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{"unix path", errors.New("cannot read /home/alice/.kube/config: denied"), "cannot read <path>: denied"},
+		{"unix path with spaces", errors.New("open /home/alice/Team Secrets/config: denied"), "open <path>: denied"},
+		{"words after path are kept", errors.New("open /a/b in dir /c/d"), "open <path> in dir <path>"},
+		{"windows drive path", errors.New(`open C:\Users\alice\.kube\config: denied`), "open <path>: denied"},
+		{"windows drive path with spaces", errors.New(`open C:\Users\alice\Team Secrets\config: denied`), "open <path>: denied"},
+		{"windows forward slashes", errors.New("open C:/Users/alice/config: denied"), "open <path>: denied"},
+		{"unc path", errors.New(`open \\fileserver\share\alice\config: denied`), "open <path>: denied"},
+		{
+			"structured path error with spaces in last component",
+			fmt.Errorf("load kubeconfig: %w", &fs.PathError{Op: "open", Path: "/home/alice/my config", Err: fs.ErrPermission}),
+			"load kubeconfig: open <path>: permission denied",
+		},
+		{
+			"structured windows path error",
+			&fs.PathError{Op: "open", Path: `C:\Users\alice\my config`, Err: fs.ErrNotExist},
+			"open <path>: file does not exist",
+		},
+		{"no path", errors.New("scan failed"), "scan failed"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, redactScanError(tt.err))
+		})
+	}
+}
+
+func TestWriteScanErrorToFile_RedactsPersistedWindowsPaths(t *testing.T) {
+	tmpDir := t.TempDir()
+	oldFailedOutputDir := FailedOutputDir
+	FailedOutputDir = tmpDir
+	defer func() { FailedOutputDir = oldFailedOutputDir }()
+
+	err := writeScanErrorToFile(errors.New(`open \\srv\share\Team Secrets\config: denied`), testScanErrID)
+	require.Error(t, err)
+	assert.NotContains(t, err.Error(), "Secrets")
+	got, readErr := os.ReadFile(filepath.Join(tmpDir, testScanErrID))
+	require.NoError(t, readErr)
+	assert.Equal(t, "open <path>: denied", string(got))
+}
+
+func TestWriteScanErrorToFile_ChmodFailureWritesNothing(t *testing.T) {
+	tmpDir := t.TempDir()
+	oldFailedOutputDir := FailedOutputDir
+	FailedOutputDir = tmpDir
+	defer func() { FailedOutputDir = oldFailedOutputDir }()
+	oldChmod := chmodScanErrorFile
+	chmodScanErrorFile = func(*os.File, os.FileMode) error { return fs.ErrPermission }
+	defer func() { chmodScanErrorFile = oldChmod }()
+
+	err := writeScanErrorToFile(errors.New("secret details"), testScanErrID)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "failed to restrict file permissions")
+	got, readErr := os.ReadFile(filepath.Join(tmpDir, testScanErrID))
+	require.NoError(t, readErr)
+	assert.Empty(t, got)
 }
 
 func TestWriteScanErrorToFile(t *testing.T) {

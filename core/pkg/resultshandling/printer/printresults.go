@@ -159,15 +159,27 @@ type IPrinter interface {
 // directories have no reason to be.
 const outputDirPerm = 0o750
 
+// chmodFile is a test hook for permission-tightening failures.
+var chmodFile = (*os.File).Chmod
+
 // openFileForWrite opens path for writing with owner-only permissions, since
-// scan reports can contain secrets. A pre-existing file is tightened to 0600.
+// scan reports can contain secrets. A pre-existing regular file is tightened
+// to 0600; if that is not possible, no report is written into it.
 func openFileForWrite(path string) (*os.File, error) {
 	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
 		return nil, err
 	}
-	if info, statErr := f.Stat(); statErr == nil && info.Mode().IsRegular() {
-		_ = f.Chmod(0o600)
+	info, err := f.Stat()
+	if err != nil {
+		_ = f.Close()
+		return nil, fmt.Errorf("stat output file: %w", err)
+	}
+	if info.Mode().IsRegular() {
+		if err := chmodFile(f, 0o600); err != nil {
+			_ = f.Close()
+			return nil, fmt.Errorf("restrict output file permissions: %w", err)
+		}
 	}
 	return f, nil
 }

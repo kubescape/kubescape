@@ -149,6 +149,24 @@ func TestGetWriter_CreateFailsFallsBackToStdout(t *testing.T) {
 	assert.Same(t, os.Stdout, f)
 }
 
+// If a pre-existing file cannot be tightened to 0600 (e.g. it is owned by
+// another user), no report may be written into it.
+func TestGetWriterNoFallback_ChmodFailureReturnsError(t *testing.T) {
+	target := filepath.Join(t.TempDir(), "report.json")
+	require.NoError(t, os.WriteFile(target, []byte("old"), 0o600))
+	oldChmod := chmodFile
+	chmodFile = func(*os.File, os.FileMode) error { return os.ErrPermission }
+	t.Cleanup(func() { chmodFile = oldChmod })
+
+	f, err := GetWriterNoFallback(target)
+
+	require.Error(t, err)
+	assert.Nil(t, f)
+	assert.ErrorIs(t, err, os.ErrPermission)
+
+	assert.Same(t, os.Stdout, GetWriter(context.Background(), target))
+}
+
 func TestGetWriterNoFallback_ReturnsExplicitSetupError(t *testing.T) {
 	dir := t.TempDir()
 	blocker := filepath.Join(dir, "not-a-directory")

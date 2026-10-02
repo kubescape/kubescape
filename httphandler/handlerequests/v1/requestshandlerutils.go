@@ -7,12 +7,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -489,40 +491,103 @@ func envToString(env string, defaultValue string) string {
 	return defaultValue
 }
 
-// absPathRe matches absolute filesystem paths (e.g. kubeconfig locations) in error text.
-var absPathRe = regexp.MustCompile(`/[^\s:'"]+(?:/[^\s:'"]+)*`)
+// absPathRe matches absolute filesystem paths in error text: Unix paths,
+// Windows drive paths (C:\...) and UNC paths (\\server\share\...). Inner
+// path components may contain spaces; the last one may not, so trailing
+// words after a path are kept.
+var absPathRe = regexp.MustCompile(`(?:\b[A-Za-z]:)?[/\\]{1,2}(?:[^/\\\s:'"]+(?: [^/\\\s:'"]+)*[/\\])*[^/\\\s:'"]+`)
 
-// redactScanError hides filesystem paths so the stored message is safe to serve.
+// redactScanError hides filesystem paths so the message is safe to serve.
+// Paths known from filesystem errors are replaced exactly (this also covers
+// paths with spaces); the regexp catches paths only present as text.
 func redactScanError(err error) string {
-	return absPathRe.ReplaceAllString(err.Error(), "<path>")
+	msg := err.Error()
+	var paths []string
+	for _, e := range unwrapAll(err) {
+		switch t := e.(type) {
+		case *fs.PathError:
+			paths = append(paths, t.Path)
+		case *os.LinkError:
+			paths = append(paths, t.Old, t.New)
+		}
+	}
+	// replace longer paths first so a prefix does not leave a partial path
+	sort.Slice(paths, func(i, j int) bool { return len(paths[i]) > len(paths[j]) })
+	for _, p := range paths {
+		if p != "" {
+			msg = strings.ReplaceAll(msg, p, "<path>")
+		}
+	}
+	return absPathRe.ReplaceAllString(msg, "<path>")
 }
 
+// unwrapAll returns err and every error it wraps.
+func unwrapAll(err error) []error {
+	var out []error
+	queue := []error{err}
+	for len(queue) > 0 {
+		e := queue[0]
+		queue = queue[1:]
+		if e == nil {
+			continue
+		}
+		out = append(out, e)
+		switch u := e.(type) {
+		case interface{ Unwrap() error }:
+			queue = append(queue, u.Unwrap())
+		case interface{ Unwrap() []error }:
+			queue = append(queue, u.Unwrap()...)
+		}
+	}
+	return out
+}
+
+// redactedError keeps the original error for errors.Is/As but only exposes
+// the redacted message, because executeScan copies it into the HTTP response.
+type redactedError struct {
+	msg string
+	err error
+}
+
+func (r *redactedError) Error() string { return r.msg }
+func (r *redactedError) Unwrap() error { return r.err }
+
+// chmodScanErrorFile is a test hook for permission-tightening failures.
+var chmodScanErrorFile = (*os.File).Chmod
+
 func writeScanErrorToFile(err error, scanID string) (e error) {
+	// the full error, paths included, stays in the server log; only the
+	// redacted message is stored and returned to the client
+	logger.L().Error("scan failed", helpers.String("ID", scanID), helpers.Error(err))
+	reason := redactScanError(err)
 	if _, e = uuid.Parse(scanID); e != nil {
-		return fmt.Errorf("failed to scan. reason: '%s'. failed to save error in file - invalid scan ID. reason: %s", err.Error(), e.Error())
+		return fmt.Errorf("failed to scan. reason: '%s'. failed to save error in file - invalid scan ID. reason: %s", reason, redactScanError(e))
 	}
 	if e = os.MkdirAll(FailedOutputDir, outputDirPerm); e != nil {
-		return fmt.Errorf("failed to scan. reason: '%s'. failed to save error in file - failed to create directory. reason: %s", err.Error(), e.Error())
+		return fmt.Errorf("failed to scan. reason: '%s'. failed to save error in file - failed to create directory. reason: %s", reason, redactScanError(e))
 	}
 	var f *os.File
 	path := filepath.Join(FailedOutputDir, scanID)
 	f, e = os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if e != nil {
-		return fmt.Errorf("failed to scan. reason: '%s'. failed to save error in file - failed to open file for writing. reason: %s", err.Error(), e.Error())
+		return fmt.Errorf("failed to scan. reason: '%s'. failed to save error in file - failed to open file for writing. reason: %s", reason, redactScanError(e))
 	}
 	defer func() {
 		if cerr := f.Close(); cerr != nil {
-			e = fmt.Errorf("%w; failed to close scan error file: %w", e, cerr)
+			e = fmt.Errorf("%w; failed to close scan error file: %s", e, redactScanError(cerr))
 		}
 	}()
-	// tighten a pre-existing file that was created with looser permissions
-	_ = f.Chmod(0o600)
-
-	if _, e = f.Write([]byte(redactScanError(err))); e != nil {
-		_ = os.Remove(path)
-		return fmt.Errorf("failed to scan. reason: '%s'. failed to save error in file - failed to write. reason: %s", err.Error(), e.Error())
+	// tighten a pre-existing file that was created with looser permissions;
+	// if that fails, do not write into a file others may read
+	if e = chmodScanErrorFile(f, 0o600); e != nil {
+		return fmt.Errorf("failed to scan. reason: '%s'. failed to save error in file - failed to restrict file permissions. reason: %s", reason, redactScanError(e))
 	}
-	return fmt.Errorf("failed to scan. reason: %w", err)
+
+	if _, e = f.Write([]byte(reason)); e != nil {
+		_ = os.Remove(path)
+		return fmt.Errorf("failed to scan. reason: '%s'. failed to save error in file - failed to write. reason: %s", reason, redactScanError(e))
+	}
+	return &redactedError{msg: "failed to scan. reason: " + reason, err: err}
 }
 
 // responseToBytes convert response object to bytes
