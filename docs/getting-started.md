@@ -231,6 +231,17 @@ presence of a `Chart.yaml` file.
     kubescape scan /path/to/helm/chart/directory --values my-values.yaml --set image.tag=1.2.3
  ```
 
+Helm scans render only dependencies already vendored in `charts/` (unpacked
+charts or `.tgz` archives). Kubescape does not fetch or update Helm dependencies,
+resolve repository aliases or `file://` sources, or write `Chart.lock` or chart
+files. This also applies when a lockfile is absent. Missing dependencies produce
+a warning; available templates are still rendered, but templates requiring a
+missing dependency may fail to render, leaving the chart scan incomplete.
+
+To include dependencies, review their sources and explicitly prepare the chart
+with Helm before scanning, for example `helm dependency build /path/to/chart/`.
+That Helm command can access the network and modify the chart directory.
+
 #### Scan a Kustomize directory
 
 Kubescape automatically detects a Kustomize directory by the 
