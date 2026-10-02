@@ -95,7 +95,7 @@ func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo, policyIdenti
 		tenantConfig = cautils.GetTenantConfig(ctx, scanInfo.AccountID, scanInfo.AccessKey, scanInfo.GetClusterContextName(), scanInfo.CustomClusterName, k8s)
 	} else {
 		localTenantConfig := cautils.NewLocalConfig(scanInfo.AccountID, scanInfo.AccessKey, scanInfo.GetClusterContextName(), scanInfo.CustomClusterName)
-		if hasResolvedTenantConfig(localTenantConfig) {
+		if hasResolvedTenantConfig(scanInfo, localTenantConfig) {
 			tenantConfig = localTenantConfig
 		} else {
 			k8sForTenant := kubernetesAPIFunc()
@@ -168,16 +168,29 @@ func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo, policyIdenti
 }
 
 // hasResolvedTenantConfig reports whether all required tenant configuration fields
-// (AccountID, AccessKey, CloudReportURL, and CloudAPIURL) are already resolved locally,
-// eliminating the need to query in-cluster ConfigMap and Secret fixtures.
-func hasResolvedTenantConfig(tc cautils.ITenantConfig) bool {
+// (AccountID, AccessKey, CloudReportURL, and CloudAPIURL) are already resolved locally
+// and properly paired, eliminating the need to query in-cluster ConfigMap and Secret fixtures.
+func hasResolvedTenantConfig(scanInfo *cautils.ScanInfo, tc cautils.ITenantConfig) bool {
 	if tc == nil {
 		return false
 	}
-	return tc.GetAccountID() != "" &&
-		tc.GetAccessKey() != "" &&
-		tc.GetCloudReportURL() != "" &&
-		tc.GetCloudAPIURL() != ""
+	if tc.GetAccountID() == "" ||
+		tc.GetAccessKey() == "" ||
+		tc.GetCloudReportURL() == "" ||
+		tc.GetCloudAPIURL() == "" {
+		return false
+	}
+
+	// Verify credential provenance and pairing:
+	// If an explicit account override is supplied (via flag or environment),
+	// ensure a matching access key was also supplied. If an account override
+	// has no matching key, do not accept localTenantConfig as fully resolved,
+	// so that cluster Secret lookup is preserved and mismatched cached credentials
+	// are never selected.
+	hasAccountOverride := (scanInfo != nil && scanInfo.AccountID != "") || os.Getenv(cautils.AccountIdEnvVar) != ""
+	hasAccessKeyOverride := (scanInfo != nil && scanInfo.AccessKey != "") || os.Getenv(cautils.AccessKeyEnvVar) != ""
+
+	return hasAccountOverride == hasAccessKeyOverride
 }
 
 func validateSBOMOutput(scanInfo *cautils.ScanInfo, format string) error {

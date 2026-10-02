@@ -37,11 +37,17 @@ const (
 	credsLabelSelectors string = "kubescape.io/infra=credentials" //nolint:gosec
 
 	// env vars
-	defaultConfigMapNamespaceEnvVar string = "KS_DEFAULT_CONFIGMAP_NAMESPACE"
-	accountIdEnvVar                 string = "KS_ACCOUNT_ID"
-	accessKeyEnvVar                 string = "KS_ACCESS_KEY"
-	cloudApiUrlEnvVar               string = "KS_CLOUD_API_URL"
-	cloudReportUrlEnvVar            string = "KS_CLOUD_REPORT_URL"
+	DefaultConfigMapNamespaceEnvVar string = "KS_DEFAULT_CONFIGMAP_NAMESPACE"
+	AccountIdEnvVar                 string = "KS_ACCOUNT_ID"
+	AccessKeyEnvVar                 string = "KS_ACCESS_KEY"
+	CloudApiUrlEnvVar               string = "KS_CLOUD_API_URL"
+	CloudReportUrlEnvVar            string = "KS_CLOUD_REPORT_URL"
+
+	defaultConfigMapNamespaceEnvVar string = DefaultConfigMapNamespaceEnvVar
+	accountIdEnvVar                 string = AccountIdEnvVar
+	accessKeyEnvVar                 string = AccessKeyEnvVar
+	cloudApiUrlEnvVar               string = CloudApiUrlEnvVar
+	cloudReportUrlEnvVar            string = CloudReportUrlEnvVar
 )
 
 func ConfigFileFullPath() string { return getter.GetDefaultPath(configFileName + ".json") }
@@ -522,16 +528,27 @@ func GetConfigMapNamespace() string {
 
 func updateCredentials(configObj *ConfigObj, accountID, accessKey string) {
 	// Explicit flags take precedence over env vars; env vars are only applied as fallback.
-	if accessKey != "" {
-		configObj.AccessKey = accessKey
-	} else if envAccessKey := os.Getenv(accessKeyEnvVar); envAccessKey != "" {
-		configObj.AccessKey = envAccessKey
+	newAccessKey := accessKey
+	if newAccessKey == "" {
+		newAccessKey = os.Getenv(accessKeyEnvVar)
 	}
 
-	if accountID != "" {
-		configObj.AccountID = accountID
-	} else if envAccountID := os.Getenv(accountIdEnvVar); envAccountID != "" {
-		configObj.AccountID = envAccountID
+	newAccountID := accountID
+	if newAccountID == "" {
+		newAccountID = os.Getenv(accountIdEnvVar)
+	}
+
+	if newAccountID != "" && configObj.AccountID != "" && newAccountID != configObj.AccountID && newAccessKey == "" {
+		// When the account ID is explicitly changed to a different account
+		// and no matching access key is provided, the previous account's
+		// access key must not be retained.
+		configObj.AccessKey = ""
+	} else if newAccessKey != "" {
+		configObj.AccessKey = newAccessKey
+	}
+
+	if newAccountID != "" {
+		configObj.AccountID = newAccountID
 	}
 }
 
