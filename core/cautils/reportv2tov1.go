@@ -4,6 +4,7 @@ import (
 	"maps"
 
 	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/opa-utils/exceptions"
 	"github.com/kubescape/opa-utils/reporthandling"
 	helpersv1 "github.com/kubescape/opa-utils/reporthandling/helpers/v1"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
@@ -133,8 +134,9 @@ func controlReportV2ToV1(opaSessionObj *OPASessionObj, frameworkName string, con
 							}
 						}
 						ruleResponse.RuleStatus = string(status.Status())
-						if len(rulev2.Exception) > 0 {
-							ruleResponse.Exception = &rulev2.Exception[0]
+						applicableExceptions := exceptions.FilterExceptionsByFrameworks(rulev2.Exception, ControlFilters(&view, controlID).FrameworkNames, controlID, rulev2.GetName())
+						if len(applicableExceptions) > 0 {
+							ruleResponse.Exception = &applicableExceptions[0]
 						}
 
 						if fullResource, ok := opaSessionObj.GetResource(resourceID); ok {

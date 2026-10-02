@@ -1,6 +1,7 @@
 package cautils
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -343,5 +344,57 @@ func TestFrameworkScopedReportV2ToV1(t *testing.T) {
 		require.Len(t, reports, 1)
 		require.Len(t, reports[0].RuleReports, 1)
 		assert.Equal(t, framework == "MITRE", len(reports[0].RuleReports[0].RuleResponses) > 0, framework)
+	}
+}
+
+func TestReportV2ToV1_FrameworkExceptionMetadata(t *testing.T) {
+	nsa := armotypes.PostureExceptionPolicy{
+		PortalBase:      armotypes.PortalBase{Name: "nsa-only"},
+		Actions:         []armotypes.PostureExceptionPolicyActions{armotypes.Disable},
+		PosturePolicies: []armotypes.PosturePolicy{{FrameworkName: "NSA", ControlID: "C-0034", RuleName: "R1"}},
+	}
+	mitre := armotypes.PostureExceptionPolicy{
+		PortalBase:      armotypes.PortalBase{Name: "mitre-alert"},
+		Actions:         []armotypes.PostureExceptionPolicyActions{armotypes.AlertOnly},
+		PosturePolicies: []armotypes.PosturePolicy{{FrameworkName: "MITRE", ControlID: "C-0034", RuleName: "R1"}},
+	}
+	for _, tt := range []struct {
+		name     string
+		policies []armotypes.PostureExceptionPolicy
+		want     *armotypes.PostureExceptionPolicy
+	}{
+		{name: "unselected exception", policies: []armotypes.PostureExceptionPolicy{nsa}},
+		{name: "applicable exception follows unselected", policies: []armotypes.PostureExceptionPolicy{nsa, mitre}, want: &mitre},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			control := reportsummary.ControlSummary{ControlID: "C-0034"}
+			control.Append(helpersv1.NewStatus(apis.StatusFailed), "resource")
+			session := &OPASessionObj{
+				Report: &reporthandlingv2.PostureReport{SummaryDetails: reportsummary.SummaryDetails{
+					Frameworks: []reportsummary.FrameworkSummary{{Name: "MITRE", Controls: reportsummary.ControlSummaries{"C-0034": control}}},
+				}},
+				ResourcesResult: map[string]resourcesresults.Result{"resource": {
+					ResourceID: "resource",
+					AssociatedControls: []resourcesresults.ResourceAssociatedControl{{
+						ControlID:               "C-0034",
+						ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{{Name: "R1", Status: apis.StatusFailed, Exception: tt.policies}},
+					}},
+				}},
+			}
+			before, err := json.Marshal(session.ResourcesResult)
+			require.NoError(t, err)
+			report := ReportV2ToV1(session)
+			require.Len(t, report.FrameworkReports, 1)
+			require.Len(t, report.FrameworkReports[0].ControlReports, 1)
+			rules := report.FrameworkReports[0].ControlReports[0].RuleReports
+			require.Len(t, rules, 1)
+			require.Len(t, rules[0].RuleResponses, 1)
+			response := rules[0].RuleResponses[0]
+			assert.Equal(t, string(apis.StatusFailed), response.RuleStatus)
+			assert.Equal(t, tt.want, response.Exception)
+			after, err := json.Marshal(session.ResourcesResult)
+			require.NoError(t, err)
+			assert.JSONEq(t, string(before), string(after), "conversion must preserve raw exceptions and status")
+		})
 	}
 }
