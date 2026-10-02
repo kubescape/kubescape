@@ -93,7 +93,11 @@ func (pp *PrometheusPrinter) ActionPrint(ctx context.Context, opaSessionObj *cau
 	var metrics *Metrics
 
 	if opaSessionObj != nil {
-		metrics = pp.generatePrometheusFormatFromCatalog(opaSessionObj.GetCatalog(), opaSessionObj.ResourcesResult, &opaSessionObj.Report.SummaryDetails, opaSessionObj.ScanCoverage)
+		var summaryDetails *reportsummary.SummaryDetails
+		if opaSessionObj.Report != nil {
+			summaryDetails = &opaSessionObj.Report.SummaryDetails
+		}
+		metrics = pp.generatePrometheusFormatFromCatalog(opaSessionObj.GetCatalog(), opaSessionObj.ResourcesResult, summaryDetails, opaSessionObj.ScanCoverage)
 		if len(imageScanData) > 0 {
 			metrics.setImageVulnerabilities(imageScanData)
 		}
