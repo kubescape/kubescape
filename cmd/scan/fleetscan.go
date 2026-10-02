@@ -204,8 +204,11 @@ func validateReferenceCluster(scanInfo *cautils.ScanInfo) error {
 // Comparing the unresolved path would let two contexts, or a context and the
 // fleet report, agree on a real destination while looking distinct.
 //
-// Formats that print to stdout contribute no destination.
+// Formats that print to stdout and the discard sink contribute no destination.
 func printerDestinations(outputPath string, formats []string) []string {
+	if strings.TrimSpace(outputPath) == os.DevNull {
+		return nil
+	}
 	if len(formats) == 0 {
 		return []string{outputPath}
 	}
@@ -607,6 +610,11 @@ func newClusterResult(kubeContext string, results *resultshandling.ResultsHandle
 // encoded and flushed, so a failed write cannot destroy a previous good
 // report or leave a truncated report that still looks like the latest run.
 func writeFleetReport(path string, report *fleet.FleetReport) error {
+	// A discard sink has no report to publish. In particular, do not pass
+	// it to the atomic writer, which would try to replace the device.
+	if strings.TrimSpace(path) == os.DevNull {
+		return nil
+	}
 	data, err := json.MarshalIndent(report, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encode fleet report %q: %w", path, err)
@@ -638,6 +646,11 @@ func perContextOutputPaths(output string, kubeContexts, formats []string) (map[s
 			return nil, fmt.Errorf("%s: %w", kubeContext, err)
 		}
 		paths[kubeContext] = path
+		if path == os.DevNull {
+			// Every context discarding to the same sink is what was asked
+			// for, not the silent overwrite this check exists to catch.
+			continue
+		}
 		// Keyed on what the printers actually write, so two contexts whose
 		// --output paths differ only by an extension a format then appends,
 		// such as "report.prod" and "report.prod.json" under --format json,
@@ -677,6 +690,15 @@ func perContextOutputPath(output, kubeContext string) (string, error) {
 	sanitized = strings.TrimSpace(sanitized)
 	if sanitized == "" {
 		return "", fmt.Errorf("empty kube context name")
+	}
+
+	// The discard sink carries no per-context identity to insert: it is not a
+	// report the user will come back and read, it is a request to throw every
+	// context's report away. printer.ResolveOutputFile hands os.DevNull back
+	// untouched for exactly that reason, so deriving "/dev/null.<context>"
+	// here turns a working single-context invocation into a write into /dev.
+	if strings.TrimSpace(output) == os.DevNull {
+		return os.DevNull, nil
 	}
 
 	dir, base := filepath.Split(output)
