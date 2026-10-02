@@ -140,6 +140,7 @@ func TestFrameworkScopedResourceExceptions(t *testing.T) {
 		{"NSA", "NSA", []string{"NSA", "MITRE"}, map[string]apis.ScanningStatus{"NSA": apis.StatusPassed, "MITRE": apis.StatusFailed}, apis.StatusFailed},
 		{"global", "", []string{"NSA", "MITRE"}, map[string]apis.ScanningStatus{"NSA": apis.StatusPassed, "MITRE": apis.StatusPassed}, apis.StatusPassed},
 		{"unselected", "NSA", []string{"MITRE"}, map[string]apis.ScanningStatus{"MITRE": apis.StatusFailed}, apis.StatusFailed},
+		{"unrelated framework", "NSA", []string{"NSA", "MITRE"}, map[string]apis.ScanningStatus{"MITRE": apis.StatusFailed}, apis.StatusFailed},
 		{"unselected tuples", "NSA", []string{"MITRE"}, map[string]apis.ScanningStatus{"MITRE": apis.StatusFailed}, apis.StatusFailed},
 		{"missing framework scoped", "NSA", nil, nil, apis.StatusFailed},
 		{"missing framework global", "", nil, nil, apis.StatusPassed},
@@ -160,7 +161,13 @@ func TestFrameworkScopedResourceExceptions(t *testing.T) {
 					if reverse {
 						i = len(tc.frameworks) - 1 - i
 					}
-					session.Report.SummaryDetails.Frameworks = append(session.Report.SummaryDetails.Frameworks, reportsummary.FrameworkSummary{Name: tc.frameworks[i], Controls: reportsummary.ControlSummaries{"C-0034": {ControlID: "C-0034"}}})
+					controls := reportsummary.ControlSummaries{"C-0034": {ControlID: "C-0034"}}
+					if tc.name == "unrelated framework" && tc.frameworks[i] == "NSA" {
+						// Selecting NSA does not make its exception applicable to a
+						// control evaluated only in MITRE.
+						controls = reportsummary.ControlSummaries{}
+					}
+					session.Report.SummaryDetails.Frameworks = append(session.Report.SummaryDetails.Frameworks, reportsummary.FrameworkSummary{Name: tc.frameworks[i], Controls: controls})
 				}
 				if tc.scope != "none" {
 					session.Exceptions = []armotypes.PostureExceptionPolicy{{PosturePolicies: []armotypes.PosturePolicy{{FrameworkName: tc.scope, ControlID: "C-0034", RuleName: "R1"}}}}
@@ -173,7 +180,7 @@ func TestFrameworkScopedResourceExceptions(t *testing.T) {
 				opap := &OPAProcessor{OPASessionObj: session, exceptionEventRecorder: recorder}
 				opap.updateResults(context.Background())
 				wantMatches := 0
-				if tc.name != "none" && tc.name != "unselected" && tc.name != "unselected tuples" && tc.name != "missing framework scoped" {
+				if tc.name != "none" && tc.name != "unselected" && tc.name != "unrelated framework" && tc.name != "unselected tuples" && tc.name != "missing framework scoped" {
 					wantMatches = 1
 				}
 				assert.Len(t, recorder.events, wantMatches)
@@ -195,6 +202,9 @@ func TestFrameworkScopedResourceExceptions(t *testing.T) {
 					assert.Equal(t, tc.aggregate, ctrl.GetStatus().Status())
 					assert.Equal(t, tc.aggregate, sd.GetStatus().Status())
 					for _, fw := range sd.Frameworks {
+						if _, ok := fw.Controls["C-0034"]; !ok {
+							continue
+						}
 						c := fw.Controls["C-0034"]
 						assert.Equal(t, tc.want[fw.Name], c.GetStatus().Status(), fw.Name)
 						wantSub := apis.SubStatusUnknown
