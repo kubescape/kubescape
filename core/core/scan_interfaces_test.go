@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"fmt"
 	"sync/atomic"
 	"testing"
 
@@ -9,7 +10,10 @@ import (
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
+	restclient "k8s.io/client-go/rest"
 )
 
 // getInterfaces returns (componentInterfaces, error) and Kubescape.Scan already
@@ -162,9 +166,16 @@ func TestGetInterfaces_OfflineScan_ClusterDisconnectedFallback(t *testing.T) {
 	assert.IsType(t, &cautils.LocalConfig{}, interfaces.tenantConfig, "offline scan without cluster must yield LocalConfig")
 }
 
-// TestGetInterfaces_NonClusterScanWithAccountIDSkipsKubernetesAPI verifies that when scanning non-cluster targets
-// (e.g. files/manifests) and AccountID is already set, kubernetesAPIFunc is never called.
-func TestGetInterfaces_NonClusterScanWithAccountIDSkipsKubernetesAPI(t *testing.T) {
+// TestGetInterfaces_NonClusterScanWithResolvedTenantConfigSkipsKubernetesAPI verifies that when scanning non-cluster
+// targets (e.g. files/manifests) and all required tenant settings (AccountID, AccessKey, CloudReportURL, CloudAPIURL)
+// are already resolved locally, kubernetesAPIFunc is never called.
+func TestGetInterfaces_NonClusterScanWithResolvedTenantConfigSkipsKubernetesAPI(t *testing.T) {
+	isolateCachedConfigTest(t)
+
+	// Set backend URLs in env so local resolution succeeds
+	t.Setenv("KS_CLOUD_API_URL", "https://api.kubescape.cloud")
+	t.Setenv("KS_CLOUD_REPORT_URL", "https://report.kubescape.cloud")
+
 	var callCount atomic.Int32
 	originalKubernetesAPIFunc := kubernetesAPIFunc
 	kubernetesAPIFunc = func() *k8sinterface.KubernetesApi {
@@ -173,8 +184,13 @@ func TestGetInterfaces_NonClusterScanWithAccountIDSkipsKubernetesAPI(t *testing.
 	}
 	t.Cleanup(func() { kubernetesAPIFunc = originalKubernetesAPIFunc })
 
+	originalConnected := k8sinterface.IsConnectedToCluster()
+	t.Cleanup(func() { k8sinterface.SetConnectedToCluster(originalConnected) })
+	k8sinterface.SetConnectedToCluster(true)
+
 	scanInfo := &cautils.ScanInfo{
-		AccountID:     "my-known-account-id",
+		AccountID:     "11111111-2222-3333-4444-555555555555",
+		AccessKey:     "my-access-key",
 		InputPatterns: []string{"manifest.yaml"},
 		Local:         true,
 	}
@@ -183,5 +199,97 @@ func TestGetInterfaces_NonClusterScanWithAccountIDSkipsKubernetesAPI(t *testing.
 	interfaces, err := getInterfaces(context.Background(), scanInfo, nil)
 	require.NoError(t, err)
 	assert.Nil(t, interfaces.k8s)
-	assert.Equal(t, int32(0), callCount.Load(), "kubernetesAPIFunc must not be called when AccountID is already provided for non-cluster scan")
+	assert.Equal(t, int32(0), callCount.Load(), "kubernetesAPIFunc must not be called when all tenant settings are already resolved locally")
+	assert.IsType(t, &cautils.LocalConfig{}, interfaces.tenantConfig, "fully resolved local tenant config must yield LocalConfig")
+	assert.Equal(t, "11111111-2222-3333-4444-555555555555", interfaces.tenantConfig.GetAccountID())
+	assert.Equal(t, "my-access-key", interfaces.tenantConfig.GetAccessKey())
+	assert.Equal(t, "https://report.kubescape.cloud", interfaces.tenantConfig.GetCloudReportURL())
+	assert.Equal(t, "https://api.kubescape.cloud", interfaces.tenantConfig.GetCloudAPIURL())
+}
+
+// TestGetInterfaces_NonClusterScan_AccountOnlyPreservesClusterFallback verifies that
+// when scanning non-cluster targets with only an AccountID supplied (incomplete configuration),
+// the cluster fallback is preserved to retrieve the access key and backend URLs from
+// the cluster's Secret and ConfigMap fixtures.
+func TestGetInterfaces_NonClusterScan_AccountOnlyPreservesClusterFallback(t *testing.T) {
+	isolateCachedConfigTest(t)
+
+	const (
+		expectedAccountID = "11111111-2222-3333-4444-555555555555"
+		expectedAccessKey = "secret-access-key-123"
+		expectedReportURL = "https://report.kubescape.cloud"
+		expectedAPIURL    = "https://api.kubescape.cloud"
+		ksNamespace       = "kubescape"
+	)
+
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "kubescape-credentials",
+			Namespace: ksNamespace,
+			Labels: map[string]string{
+				"kubescape.io/infra": "credentials",
+			},
+		},
+		Data: map[string][]byte{
+			"account":   []byte(expectedAccountID),
+			"accessKey": []byte(expectedAccessKey),
+		},
+	}
+
+	configMap := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "kubescape-config",
+			Namespace: ksNamespace,
+			Labels: map[string]string{
+				"kubescape.io/infra": "config",
+			},
+		},
+		Data: map[string]string{
+			"clusterData": fmt.Sprintf(`{"cloudReportURL":%q,"cloudAPIURL":%q}`, expectedReportURL, expectedAPIURL),
+		},
+	}
+
+	fakeClient := fake.NewSimpleClientset(secret, configMap)
+	fakeK8s := &k8sinterface.KubernetesApi{
+		KubernetesClient: fakeClient,
+	}
+
+	var callCount atomic.Int32
+	originalKubernetesAPIFunc := kubernetesAPIFunc
+	kubernetesAPIFunc = func() *k8sinterface.KubernetesApi {
+		callCount.Add(1)
+		return fakeK8s
+	}
+	t.Cleanup(func() { kubernetesAPIFunc = originalKubernetesAPIFunc })
+
+	originalK8SConfig := k8sinterface.K8SConfig
+	t.Cleanup(func() { k8sinterface.K8SConfig = originalK8SConfig })
+	k8sinterface.K8SConfig = &restclient.Config{}
+
+	originalConnected := k8sinterface.IsConnectedToCluster()
+	t.Cleanup(func() { k8sinterface.SetConnectedToCluster(originalConnected) })
+	k8sinterface.SetConnectedToCluster(true)
+
+	// Scan supplied a valid account UUID but no access key or URLs. Local: true avoids version-check traffic.
+	scanInfo := &cautils.ScanInfo{
+		AccountID:     expectedAccountID,
+		InputPatterns: []string{"manifest.yaml"},
+		Local:         true,
+	}
+	require.NotEqual(t, cautils.ContextCluster, scanInfo.GetScanningContext())
+
+	interfaces, err := getInterfaces(context.Background(), scanInfo, nil)
+	require.NoError(t, err)
+
+	assert.Equal(t, int32(1), callCount.Load(), "kubernetesAPIFunc must be called when tenant settings are incomplete")
+	assert.IsType(t, &cautils.ClusterConfig{}, interfaces.tenantConfig, "tenant config must fall back to ClusterConfig")
+	assert.Equal(t, expectedAccessKey, interfaces.tenantConfig.GetAccessKey(), "access key must be loaded from cluster Secret")
+	assert.Equal(t, expectedReportURL, interfaces.tenantConfig.GetCloudReportURL(), "report URL must be loaded from cluster ConfigMap")
+	assert.Equal(t, expectedAPIURL, interfaces.tenantConfig.GetCloudAPIURL(), "API URL must be loaded from cluster ConfigMap")
+
+	// Normal submission decision checked separately with fresh non-local ScanInfo and explicit submission enabled
+	submitScanInfo := &cautils.ScanInfo{}
+	submitScanInfo.Submit.SetBool(true)
+	setSubmitBehavior(submitScanInfo, interfaces.tenantConfig)
+	assert.True(t, submitScanInfo.Submit.GetBool(), "explicit submission must remain enabled when credentials and report URL are loaded from cluster")
 }

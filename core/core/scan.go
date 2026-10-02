@@ -90,13 +90,18 @@ func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo, policyIdenti
 	}
 
 	// ================== setup tenant object ======================================
-	k8sForTenant := k8s
-	if k8sForTenant == nil && scanInfo.AccountID == "" {
-		// Only needed when AccountID must be discovered from the cluster.
-		// If the caller already set it (flags / env), skip the connection cost.
-		k8sForTenant = kubernetesAPIFunc()
+	var tenantConfig cautils.ITenantConfig
+	if k8s != nil {
+		tenantConfig = cautils.GetTenantConfig(ctx, scanInfo.AccountID, scanInfo.AccessKey, scanInfo.GetClusterContextName(), scanInfo.CustomClusterName, k8s)
+	} else {
+		localTenantConfig := cautils.NewLocalConfig(scanInfo.AccountID, scanInfo.AccessKey, scanInfo.GetClusterContextName(), scanInfo.CustomClusterName)
+		if hasResolvedTenantConfig(localTenantConfig) {
+			tenantConfig = localTenantConfig
+		} else {
+			k8sForTenant := kubernetesAPIFunc()
+			tenantConfig = cautils.GetTenantConfig(ctx, scanInfo.AccountID, scanInfo.AccessKey, scanInfo.GetClusterContextName(), scanInfo.CustomClusterName, k8sForTenant)
+		}
 	}
-	tenantConfig := cautils.GetTenantConfig(ctx, scanInfo.AccountID, scanInfo.AccessKey, scanInfo.GetClusterContextName(), scanInfo.CustomClusterName, k8sForTenant)
 
 	// Set submit behavior AFTER loading tenant config
 	setSubmitBehavior(scanInfo, tenantConfig)
@@ -160,6 +165,19 @@ func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo, policyIdenti
 		hostSensorHandler: hostSensorHandler,
 		k8s:               k8s,
 	}, nil
+}
+
+// hasResolvedTenantConfig reports whether all required tenant configuration fields
+// (AccountID, AccessKey, CloudReportURL, and CloudAPIURL) are already resolved locally,
+// eliminating the need to query in-cluster ConfigMap and Secret fixtures.
+func hasResolvedTenantConfig(tc cautils.ITenantConfig) bool {
+	if tc == nil {
+		return false
+	}
+	return tc.GetAccountID() != "" &&
+		tc.GetAccessKey() != "" &&
+		tc.GetCloudReportURL() != "" &&
+		tc.GetCloudAPIURL() != ""
 }
 
 func validateSBOMOutput(scanInfo *cautils.ScanInfo, format string) error {
