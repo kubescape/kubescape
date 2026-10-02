@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: child-pod
+  namespace: test-pss
+  ownerReferences:
+  - apiVersion: apps/v1
+    kind: ReplicaSet
+    name: some-rs
+    uid: 12345
+    controller: true
+spec:
+  containers:
+  - name: child
+    image: nginx:latest
