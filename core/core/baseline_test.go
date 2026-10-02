@@ -2,6 +2,8 @@ package core
 
 import (
 	"context"
+	"errors"
+	"os"
 	"testing"
 
 	"github.com/kubescape/kubescape/v4/core/cautils"
@@ -39,4 +41,75 @@ func TestScratchRepro_SetWriterErrorIsNoLongerDiscarded(t *testing.T) {
 	require.Error(t, setWriterErr, "SetWriter must fail for this repro to be meaningful")
 	assert.Contains(t, setWriterErr.Error(), "open output file",
 		"SetWriter's own error names the path it tried to open - exactly the context writeBaselineHeadReport now preserves by checking this return value instead of discarding it")
+}
+
+func TestWriteBaselineHeadReport_Success(t *testing.T) {
+	results := &resultshandling.ResultsHandler{ScanData: cautils.NewOPASessionObjMock()}
+	tmpPath, cleanup, err := writeBaselineHeadReport(context.Background(), results)
+	require.NoError(t, err)
+	defer cleanup()
+	assert.FileExists(t, tmpPath)
+}
+
+func TestCloseWriter_ErrorReturnedOnFailedClose(t *testing.T) {
+	tmp, err := os.CreateTemp("", "test-close-writer-*.json")
+	require.NoError(t, err)
+	tmpPath := tmp.Name()
+	require.NoError(t, tmp.Close())
+	defer os.Remove(tmpPath)
+
+	jsonPrinter := printerv2.NewJsonPrinter()
+	err = jsonPrinter.SetWriter(context.Background(), tmpPath)
+	require.NoError(t, err)
+
+	// Close the writer once successfully
+	err = jsonPrinter.CloseWriter()
+	require.NoError(t, err)
+
+	// An explicit subsequent close on the underlying file descriptor returns an error,
+	// verifying that CloseWriter preserves and returns errors from the underlying Close call.
+	err = jsonPrinter.CloseWriter()
+	require.Error(t, err)
+}
+
+type failingCloseBaselinePrinter struct {
+	baselineReportPrinter
+	closeErr    error
+	createdFile string
+}
+
+func (f *failingCloseBaselinePrinter) SetWriter(ctx context.Context, outputFile string) error {
+	f.createdFile = outputFile
+	return f.baselineReportPrinter.SetWriter(ctx, outputFile)
+}
+
+func (f *failingCloseBaselinePrinter) CloseWriter() error {
+	_ = f.baselineReportPrinter.CloseWriter()
+	return f.closeErr
+}
+
+func TestWriteBaselineHeadReport_CloseWriterError(t *testing.T) {
+	expectedErr := errors.New("simulated close failure")
+	var injected *failingCloseBaselinePrinter
+
+	origNewPrinter := newBaselineReportPrinter
+	defer func() { newBaselineReportPrinter = origNewPrinter }()
+
+	newBaselineReportPrinter = func() baselineReportPrinter {
+		injected = &failingCloseBaselinePrinter{
+			baselineReportPrinter: printerv2.NewJsonPrinter(),
+			closeErr:              expectedErr,
+		}
+		return injected
+	}
+
+	results := &resultshandling.ResultsHandler{ScanData: cautils.NewOPASessionObjMock()}
+	path, cleanup, err := writeBaselineHeadReport(context.Background(), results)
+	defer cleanup()
+
+	require.ErrorIs(t, err, expectedErr)
+	assert.Empty(t, path)
+	require.NotNil(t, injected)
+	assert.NotEmpty(t, injected.createdFile)
+	assert.NoFileExists(t, injected.createdFile)
 }
