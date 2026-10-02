@@ -568,7 +568,7 @@ func writeScanErrorToFile(err error, scanID string) (e error) {
 	}
 	var f *os.File
 	path := filepath.Join(FailedOutputDir, scanID)
-	f, e = os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	f, e = os.OpenFile(path, os.O_WRONLY|os.O_CREATE, 0o600)
 	if e != nil {
 		return fmt.Errorf("failed to scan. reason: '%s'. failed to save error in file - failed to open file for writing. reason: %s", reason, redactScanError(e))
 	}
@@ -578,9 +578,13 @@ func writeScanErrorToFile(err error, scanID string) (e error) {
 		}
 	}()
 	// tighten a pre-existing file that was created with looser permissions;
-	// if that fails, do not write into a file others may read
+	// if that fails, leave it as it was and do not write into a file others
+	// may read. Only a tightened file is truncated.
 	if e = chmodScanErrorFile(f, 0o600); e != nil {
 		return fmt.Errorf("failed to scan. reason: '%s'. failed to save error in file - failed to restrict file permissions. reason: %s", reason, redactScanError(e))
+	}
+	if e = f.Truncate(0); e != nil {
+		return fmt.Errorf("failed to scan. reason: '%s'. failed to save error in file - failed to truncate. reason: %s", reason, redactScanError(e))
 	}
 
 	if _, e = f.Write([]byte(reason)); e != nil {

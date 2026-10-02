@@ -165,6 +165,9 @@ func TestGetWriterNoFallback_ChmodFailureReturnsError(t *testing.T) {
 	assert.ErrorIs(t, err, os.ErrPermission)
 
 	assert.Same(t, os.Stdout, GetWriter(context.Background(), target))
+	got, readErr := os.ReadFile(target)
+	require.NoError(t, readErr)
+	assert.Equal(t, "old", string(got), "the previous report must not be truncated when tightening fails")
 }
 
 func TestGetWriterNoFallback_ReturnsExplicitSetupError(t *testing.T) {

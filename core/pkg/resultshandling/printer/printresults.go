@@ -164,9 +164,10 @@ var chmodFile = (*os.File).Chmod
 
 // openFileForWrite opens path for writing with owner-only permissions, since
 // scan reports can contain secrets. A pre-existing regular file is tightened
-// to 0600; if that is not possible, no report is written into it.
+// to 0600 and only then truncated; if tightening is not possible, the file is
+// left as it was and no report is written into it.
 func openFileForWrite(path string) (*os.File, error) {
-	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o600)
+	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o600)
 	if err != nil {
 		return nil, err
 	}
@@ -179,6 +180,10 @@ func openFileForWrite(path string) (*os.File, error) {
 		if err := chmodFile(f, 0o600); err != nil {
 			_ = f.Close()
 			return nil, fmt.Errorf("restrict output file permissions: %w", err)
+		}
+		if err := f.Truncate(0); err != nil {
+			_ = f.Close()
+			return nil, fmt.Errorf("truncate output file: %w", err)
 		}
 	}
 	return f, nil

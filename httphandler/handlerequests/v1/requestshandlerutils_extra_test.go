@@ -148,13 +148,15 @@ func TestWriteScanErrorToFile_ChmodFailureWritesNothing(t *testing.T) {
 	oldChmod := chmodScanErrorFile
 	chmodScanErrorFile = func(*os.File, os.FileMode) error { return fs.ErrPermission }
 	defer func() { chmodScanErrorFile = oldChmod }()
+	target := filepath.Join(tmpDir, testScanErrID)
+	require.NoError(t, os.WriteFile(target, []byte("previous error"), 0o600))
 
 	err := writeScanErrorToFile(errors.New("secret details"), testScanErrID)
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "failed to restrict file permissions")
-	got, readErr := os.ReadFile(filepath.Join(tmpDir, testScanErrID))
+	got, readErr := os.ReadFile(target)
 	require.NoError(t, readErr)
-	assert.Empty(t, got)
+	assert.Equal(t, "previous error", string(got), "the previous file must not be truncated when tightening fails")
 }
 
 func TestWriteScanErrorToFile(t *testing.T) {
