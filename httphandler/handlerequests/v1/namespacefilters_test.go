@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer"
 	"github.com/kubescape/kubescape/v4/httphandler/config"
 	utilsmetav1 "github.com/kubescape/opa-utils/httpserver/meta/v1"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
@@ -30,7 +31,8 @@ func TestLiveNamespaceDefaultsForScanAndMetrics(t *testing.T) {
 	captured := make(chan config.NamespaceFilters, 1)
 	scanImpl = func(_ context.Context, info *cautils.ScanInfo, _ []cautils.PolicyIdentifier, _ string, _ bool) (*reporthandlingv2.PostureReport, error) {
 		captured <- config.NamespaceFilters{Include: info.IncludeNamespaces, Exclude: info.ExcludedNamespaces}
-		return nil, os.WriteFile(info.Output, []byte("{}"), 0o600)
+		resolved, _ := printer.ResolveOutputFile(info.Format, info.Output, "")
+		return nil, os.WriteFile(resolved, []byte("{}"), 0o600)
 	}
 	handler := NewHTTPHandler(false)
 	t.Cleanup(func() { require.NoError(t, handler.Shutdown(context.Background(), time.Second)) })
