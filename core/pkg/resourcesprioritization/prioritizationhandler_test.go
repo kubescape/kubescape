@@ -535,3 +535,36 @@ func TestResourcesPrioritizationHandler_copyAttackTrack(t *testing.T) {
 		})
 	}
 }
+
+func TestFrameworkScopedPrioritization(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		mitreControl string
+		want         bool
+	}{
+		{name: "NSA only"},
+		{name: "partial coverage", mitreControl: "C-0034", want: true},
+		{name: "unrelated framework", mitreControl: "C-0286"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			control := ResourceAssociatedControlMock("C-0034", apis.StatusFailed)
+			control.ResourceAssociatedRules[0].Exception = []armotypes.PostureExceptionPolicy{{PosturePolicies: []armotypes.PosturePolicy{{FrameworkName: "NSA", ControlID: "C-0034", RuleName: "Test"}}}}
+			summary := reportsummary.ControlSummaries{"C-0034": {ControlID: "C-0034", ScoreFactor: 10}}
+			session := OPASessionObjMock(map[string]reporthandling.Control{"C-0034": ControlMock("C-0034", 10, []string{"security"}, []string{"E"})}, map[string]resourcesresults.Result{"resource": {AssociatedControls: []resourcesresults.ResourceAssociatedControl{control}}}, summary, map[string]workloadinterface.IMetadata{"resource": DeploymentWorkloadMock(1)})
+			session.Report.SummaryDetails.Frameworks = []reportsummary.FrameworkSummary{{Name: "NSA", Controls: summary}}
+			if tc.mitreControl != "" {
+				session.Report.SummaryDetails.Frameworks = append(session.Report.SummaryDetails.Frameworks, reportsummary.FrameworkSummary{Name: "MITRE", Controls: reportsummary.ControlSummaries{tc.mitreControl: {ControlID: tc.mitreControl}}})
+			}
+			handler := &ResourcesPrioritizationHandler{attackTracks: []v1alpha1.IAttackTrack{v1alpha1.GetAttackTrackMock(v1alpha1.AttackTrackStep{Name: "E"})}, resourceToAttackTracks: make(map[string][]v1alpha1.IAttackTrack), buildResourcesMap: true}
+			assert.NoError(t, handler.PrioritizeResources(session))
+			if tc.want {
+				assert.NotEmpty(t, session.ResourcesPrioritized)
+				assert.NotEmpty(t, session.ResourceAttackTracks)
+			} else {
+				assert.Empty(t, session.ResourcesPrioritized)
+				assert.Empty(t, session.ResourceAttackTracks)
+			}
+			assert.Equal(t, apis.StatusFailed, session.ResourcesResult["resource"].AssociatedControls[0].ResourceAssociatedRules[0].Status)
+		})
+	}
+}
