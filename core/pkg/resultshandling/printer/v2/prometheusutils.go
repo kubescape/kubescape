@@ -52,7 +52,10 @@ func (mrs *mComplianceScore) metrics() []string {
 
 	m := []string{}
 	// overall
-	m = append(m, toRowInMetrics(fmt.Sprintf("%s_%s", mrs.prefix(), metricsScore), mrs.labels(), mrs.complianceScore))
+	// ComplianceScore is -1 when cluster compliance score has no calculated score.
+	if mrs.complianceScore >= 0 {
+		m = append(m, toRowInMetrics(fmt.Sprintf("%s_%s", mrs.prefix(), metricsScore), mrs.labels(), mrs.complianceScore))
+	}
 
 	// resources
 	m = append(m, toRowInMetrics(fmt.Sprintf("%s_%s_%s_%s", mrs.prefix(), metricsCount, metricsResources, metricsFailed), mrs.labels(), mrs.resourcesCountFailed))
@@ -151,7 +154,10 @@ func (mfrs *mFrameworkComplianceScore) metrics() []string {
 
 	m := []string{}
 	// overall
-	m = append(m, toRowInMetrics(fmt.Sprintf("%s_%s", mfrs.prefix(), metricsScore), mfrs.labels(), mfrs.complianceScore))
+	// GetComplianceScore returns -1 when a framework has no calculated score.
+	if mfrs.complianceScore >= 0 {
+		m = append(m, toRowInMetrics(fmt.Sprintf("%s_%s", mfrs.prefix(), metricsScore), mfrs.labels(), mfrs.complianceScore))
+	}
 
 	// resources
 	m = append(m, toRowInMetrics(fmt.Sprintf("%s_%s_%s_%s", mfrs.prefix(), metricsCount, metricsResources, metricsFailed), mfrs.labels(), mfrs.resourcesCountFailed))
@@ -400,6 +406,10 @@ func (mcrs *mControlComplianceScore) set(resources reportsummary.ICounters) {
 	mcrs.resourcesCountPassed = resources.Passed()
 }
 func (m *Metrics) setComplianceScores(summaryDetails *reportsummary.SummaryDetails) {
+	if summaryDetails == nil {
+		m.rs.complianceScore = -1
+		return
+	}
 	m.rs.set(summaryDetails.NumberOfResources(), summaryDetails.NumberOfControls())
 	// GetScore() returns the risk score; the metric is the compliance score.
 	m.rs.complianceScore = cautils.ComplianceScoreToInt(summaryDetails.ComplianceScore)

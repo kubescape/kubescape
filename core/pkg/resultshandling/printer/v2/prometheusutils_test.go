@@ -49,6 +49,26 @@ func TestComplianceScore_MetricsLabelsAndPrefix(t *testing.T) {
 			},
 			expectedMetrics: []string{"kubescape_cluster_complianceScore{} 67", "kubescape_cluster_count_resources_failed{} 27", "kubescape_cluster_count_resources_skipped{} 17", "kubescape_cluster_count_resources_passed{} 7", "kubescape_cluster_count_control_failed{} 57", "kubescape_cluster_count_control_skipped{} 47", "kubescape_cluster_count_control_passed{} 37"},
 		},
+		{
+			name: "Unset compliance score omits only the score metric",
+			mrs: mComplianceScore{
+				resourcesCountPassed:  7,
+				resourcesCountSkipped: 17,
+				resourcesCountFailed:  27,
+				controlsCountPassed:   37,
+				controlsCountSkipped:  47,
+				controlsCountFailed:   57,
+				complianceScore:       -1,
+			},
+			expectedMetrics: []string{
+				"kubescape_cluster_count_resources_failed{} 27",
+				"kubescape_cluster_count_resources_skipped{} 17",
+				"kubescape_cluster_count_resources_passed{} 7",
+				"kubescape_cluster_count_control_failed{} 57",
+				"kubescape_cluster_count_control_skipped{} 47",
+				"kubescape_cluster_count_control_passed{} 37",
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -246,6 +266,28 @@ func TestFrameworkComplianceScore_MetricsLabelsAndPrefix(t *testing.T) {
 			},
 			expectedMetrics: []string{"kubescape_framework_complianceScore{name=\"Test Framework 3\"} 67", "kubescape_framework_count_resources_failed{name=\"Test Framework 3\"} 47", "kubescape_framework_count_resources_skipped{name=\"Test Framework 3\"} 57", "kubescape_framework_count_resources_passed{name=\"Test Framework 3\"} 37", "kubescape_framework_count_control_failed{name=\"Test Framework 3\"} 17", "kubescape_framework_count_control_skipped{name=\"Test Framework 3\"} 27", "kubescape_framework_count_control_passed{name=\"Test Framework 3\"} 7"},
 			expectedLabels:  "name=\"Test Framework 3\"",
+		},
+		{
+			name: "Unset compliance score omits only the score metric",
+			mfrs: mFrameworkComplianceScore{
+				frameworkName:         "Unset Framework",
+				controlsCountPassed:   7,
+				controlsCountFailed:   17,
+				controlsCountSkipped:  27,
+				resourcesCountPassed:  37,
+				resourcesCountFailed:  47,
+				resourcesCountSkipped: 57,
+				complianceScore:       -1,
+			},
+			expectedMetrics: []string{
+				"kubescape_framework_count_resources_failed{name=\"Unset Framework\"} 47",
+				"kubescape_framework_count_resources_skipped{name=\"Unset Framework\"} 57",
+				"kubescape_framework_count_resources_passed{name=\"Unset Framework\"} 37",
+				"kubescape_framework_count_control_failed{name=\"Unset Framework\"} 17",
+				"kubescape_framework_count_control_skipped{name=\"Unset Framework\"} 27",
+				"kubescape_framework_count_control_passed{name=\"Unset Framework\"} 7",
+			},
+			expectedLabels: "name=\"Unset Framework\"",
 		},
 	}
 
@@ -586,4 +628,41 @@ func TestSetComplianceScoresDoNotRoundFractionalScoresToPerfect(t *testing.T) {
 	assert.Contains(t, output, "kubescape_framework_complianceScore{name=\"Almost Perfect\"} 99")
 	assert.Regexp(t, regexp.MustCompile(`(?m)^kubescape_control_complianceScore\{name="Almost Perfect Control".*\} 99$`), output)
 	assert.NotContains(t, output, "complianceScore{} 100")
+}
+
+func TestSetComplianceScores_UnsetFrameworkAndClusterScoresOmitted(t *testing.T) {
+	summaryDetails := &reportsummary.SummaryDetails{
+		Score:           20,
+		ComplianceScore: -1,
+		Frameworks: []reportsummary.FrameworkSummary{
+			{
+				Name:            "Unset Framework",
+				ComplianceScore: -1,
+			},
+			{
+				Name:            "Set Framework",
+				ComplianceScore: 85,
+			},
+		},
+	}
+
+	m := &Metrics{}
+	m.setComplianceScores(summaryDetails)
+	output := m.String()
+
+	assert.NotContains(t, output, "kubescape_cluster_complianceScore")
+	assert.Contains(t, output, "kubescape_cluster_count_resources_failed{} 0")
+	assert.NotContains(t, output, "kubescape_framework_complianceScore{name=\"Unset Framework\"")
+	assert.Contains(t, output, "kubescape_framework_count_resources_failed{name=\"Unset Framework\"} 0")
+	assert.Contains(t, output, "kubescape_framework_complianceScore{name=\"Set Framework\"} 85")
+}
+
+func TestSetComplianceScores_NilSummaryDetails(t *testing.T) {
+	m := &Metrics{}
+	assert.NotPanics(t, func() {
+		m.setComplianceScores(nil)
+	})
+	assert.NotContains(t, m.String(), "kubescape_cluster_complianceScore")
+	assert.Empty(t, m.listFrameworks)
+	assert.Empty(t, m.listControls)
 }
