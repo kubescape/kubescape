@@ -8,11 +8,11 @@ import corev1 "k8s.io/api/core/v1"
 // automountServiceAccountToken field maps to a nil pointer, which
 // ResolveServiceAccountBindings treats as the Kubernetes default (true).
 func ServiceAccountAutomountIndex(sas []corev1.ServiceAccount) map[string]*bool {
-    out := make(map[string]*bool, len(sas))
-    for i := range sas {
-        sa := &sas[i]
-        key := sa.Namespace + "/" + sa.Name
-        out[key] = sa.AutomountServiceAccountToken
-    }
-    return out
+	out := make(map[string]*bool, len(sas))
+	for i := range sas {
+		sa := &sas[i]
+		key := sa.Namespace + "/" + sa.Name
+		out[key] = sa.AutomountServiceAccountToken
+	}
+	return out
 }

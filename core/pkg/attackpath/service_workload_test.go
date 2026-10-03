@@ -8,21 +8,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// svcResource builds a Service IMetadata object with the given selector.
-// A nil selector means selector-less/headless.
-func svcResource(namespace, name string, selector map[string]any) workloadinterface.IMetadata {
-	spec := map[string]any{}
-	if selector != nil {
-		spec["selector"] = selector
-	}
-	return resource(map[string]any{
-		"apiVersion": "v1",
-		"kind":       "Service",
-		"metadata":   map[string]any{"name": name, "namespace": namespace},
-		"spec":       spec,
-	})
-}
-
 // typedSvc builds a typed corev1.Service with the given selector, for
 // passing directly to ResolveServiceBackends.
 func typedSvc(namespace, name string, selector map[string]string) corev1.Service {
