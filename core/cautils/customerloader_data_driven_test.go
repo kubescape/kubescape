@@ -139,6 +139,31 @@ func TestNewLocalConfigPrecedenceDataDriven(t *testing.T) {
 	}
 }
 
+func TestNewLocalConfig_ServicesJsonPrecedenceOverCachedUrls(t *testing.T) {
+	useTemporaryConfigStore(t)
+	getter.SetKSCloudAPIConnector(nil)
+	t.Cleanup(func() { getter.SetKSCloudAPIConnector(nil) })
+
+	// Cached config has cache URLs
+	cfg := ConfigObj{
+		AccountID:      "cached-account",
+		AccessKey:      "cached-key",
+		CloudAPIURL:    "https://cached-api.example.com",
+		CloudReportURL: "https://cached-report.example.com",
+	}
+	require.NoError(t, updateConfigFile(&cfg))
+
+	// services.json has different URLs
+	servicesPath := filepath.Join(t.TempDir(), "services.json")
+	payload := `{"version":"v2","response":{"api-server":"https://services-api.example.com","event-receiver-http":"https://services-report.example.com"}}`
+	require.NoError(t, os.WriteFile(servicesPath, []byte(payload), 0o600))
+	useTemporaryServicesConfigPath(t, servicesPath)
+
+	config := NewLocalConfig("", "", "", "")
+	assert.Equal(t, "https://services-api.example.com", config.GetCloudAPIURL(), "services.json API URL must take precedence over cache in LocalConfig")
+	assert.Equal(t, "https://services-report.example.com", config.GetCloudReportURL(), "services.json Report URL must take precedence over cache in LocalConfig")
+}
+
 func TestClusterConfigLoadsKubernetesSourcesDataDriven(t *testing.T) {
 	tests := []struct {
 		name       string

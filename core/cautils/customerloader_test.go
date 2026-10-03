@@ -440,6 +440,39 @@ func TestUpdateCredentials_EnvAppliedWhenNoFlag(t *testing.T) {
 	}
 }
 
+func TestUpdateCredentials_AccountChangeWithoutKeyClearsOldAccessKey(t *testing.T) {
+	// When cached config has an account and key, switching the account
+	// without providing a new access key must clear the old key to prevent
+	// mismatched credentials.
+	configObj := &ConfigObj{
+		AccountID: "account-A",
+		AccessKey: "key-A",
+	}
+
+	// Change to account-B with no access key
+	updateCredentials(configObj, "account-B", "")
+	assert.Equal(t, "account-B", configObj.AccountID)
+	assert.Empty(t, configObj.AccessKey, "cached access key from account-A must not be retained for account-B")
+
+	// Same account retains the existing key
+	configObj = &ConfigObj{
+		AccountID: "account-A",
+		AccessKey: "key-A",
+	}
+	updateCredentials(configObj, "account-A", "")
+	assert.Equal(t, "account-A", configObj.AccountID)
+	assert.Equal(t, "key-A", configObj.AccessKey, "same account should preserve existing access key")
+
+	// Changing account with explicit key updates both
+	configObj = &ConfigObj{
+		AccountID: "account-A",
+		AccessKey: "key-A",
+	}
+	updateCredentials(configObj, "account-B", "key-B")
+	assert.Equal(t, "account-B", configObj.AccountID)
+	assert.Equal(t, "key-B", configObj.AccessKey)
+}
+
 func TestUpdateConfigFile_RoundTrip(t *testing.T) {
 	// Basic smoke test: writing twice (first write creates the directory/file,
 	// second write exercises the "pre-existing directory" chmod path) must
