@@ -2,11 +2,9 @@ package attackpath
 
 import (
     "fmt"
-    "maps"
     "slices"
 
     "github.com/kubescape/k8s-interface/workloadinterface"
-    corev1 "k8s.io/api/core/v1"
     "k8s.io/apimachinery/pkg/runtime/schema"
     "k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
     "github.com/kubescape/kubescape/v4/core/pkg/networkpolicy"
@@ -98,7 +96,6 @@ func ResolveEndpointsFromResources(
         if a.Name > b.Name { return 1 }
         return 0
     })
-    _ = maps.Keys // keep import used
 
     results := make([]WorkloadEndpointResult, 0, len(sorted))
     for _, ref := range sorted {
