@@ -85,7 +85,9 @@ func ResolveEndpointsFromResources(
     }
 
     // Sort refs for deterministic output.
-    sorted := slices.SortedFunc(slices.Values(refs), func(a, b WorkloadRef) int {
+    sorted := make([]WorkloadRef, len(refs))
+copy(sorted, refs)
+slices.SortFunc(sorted, func(a, b WorkloadRef) int {
         if a.Namespace != b.Namespace {
             if a.Namespace < b.Namespace { return -1 }
             return 1
