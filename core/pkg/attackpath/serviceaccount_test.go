@@ -3,6 +3,7 @@ package attackpath
 import (
 	"testing"
 
+	"github.com/kubescape/k8s-interface/workloadinterface"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -48,7 +49,7 @@ func projectedSATokenVolume() map[string]any {
 			"sources": []any{
 				map[string]any{
 					"serviceAccountToken": map[string]any{
-						"expirationSeconds": 3607,
+						"expirationSeconds": int64(3607),
 						"path":              "token",
 					},
 				},
@@ -243,5 +244,93 @@ func TestResolveServiceAccountBindings_EmptyResourcesReturnsEmpty(t *testing.T) 
 	results := ResolveServiceAccountBindings(map[string]workloadinterface.IMetadata{}, saIndex())
 	if len(results) != 0 {
 		t.Errorf("expected empty result for empty resources, got %+v", results)
+	}
+}
+
+func TestResolveServiceAccountBindings_ProjectedVolumeNotMountedByContainer(t *testing.T) {
+	vol := map[string]any{
+		"name": "kube-api-access",
+		"projected": map[string]any{
+			"sources": []any{
+				map[string]any{
+					"serviceAccountToken": map[string]any{
+						"expirationSeconds": int64(3607),
+						"path":              "token",
+					},
+				},
+			},
+		},
+	}
+	w := resource(map[string]any{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata":   map[string]any{"name": "no-mount", "namespace": "prod"},
+		"spec": map[string]any{
+			"template": map[string]any{
+				"metadata": map[string]any{"labels": map[string]any{"app": "no-mount"}},
+				"spec": map[string]any{
+					"automountServiceAccountToken": false,
+					"volumes":                      []any{vol},
+					"containers": []any{
+						map[string]any{
+							"name":  "app",
+							"image": "nginx",
+						},
+					},
+				},
+			},
+		},
+	})
+	results := ResolveServiceAccountBindings(makeResources(w), saIndex())
+	r := resultFor(t, results, "no-mount")
+	if r.TokenMounted {
+		t.Error("expected TokenMounted=false: projected volume declared but not mounted by any container")
+	}
+}
+
+func TestResolveServiceAccountBindings_ProjectedVolumeMountedByContainer(t *testing.T) {
+	vol := map[string]any{
+		"name": "kube-api-access",
+		"projected": map[string]any{
+			"sources": []any{
+				map[string]any{
+					"serviceAccountToken": map[string]any{
+						"expirationSeconds": int64(3607),
+						"path":              "token",
+					},
+				},
+			},
+		},
+	}
+	w := resource(map[string]any{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata":   map[string]any{"name": "with-mount", "namespace": "prod"},
+		"spec": map[string]any{
+			"template": map[string]any{
+				"metadata": map[string]any{"labels": map[string]any{"app": "with-mount"}},
+				"spec": map[string]any{
+					"automountServiceAccountToken": false,
+					"volumes":                      []any{vol},
+					"containers": []any{
+						map[string]any{
+							"name":  "app",
+							"image": "nginx",
+							"volumeMounts": []any{
+								map[string]any{
+									"name":      "kube-api-access",
+									"mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	})
+	results := ResolveServiceAccountBindings(makeResources(w), saIndex())
+	r := resultFor(t, results, "with-mount")
+	if !r.TokenMounted {
+		t.Error("expected TokenMounted=true: projected volume mounted by container")
 	}
 }
