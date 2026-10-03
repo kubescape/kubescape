@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 
 	"github.com/google/uuid"
@@ -32,6 +33,16 @@ func getKubernetesApi() *k8sinterface.KubernetesApi {
 		return nil
 	}
 	return k8sinterface.NewKubernetesApi()
+}
+
+// clusterConnectionError explains why getKubernetesApi returned nil. The cached
+// connection state only records that loading the kubeconfig failed, so the load
+// is repeated to recover the reason.
+func clusterConnectionError() error {
+	if err := k8sinterface.LoadK8sConfig(); err != nil {
+		return fmt.Errorf("%w: %w", ErrClusterConnection, err)
+	}
+	return ErrClusterConnection
 }
 
 func getExceptionsK8sClient(ctx context.Context, target *k8sinterface.KubernetesApi) client.Client {

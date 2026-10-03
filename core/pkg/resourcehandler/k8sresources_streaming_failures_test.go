@@ -2,7 +2,9 @@ package resourcehandler
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net"
 	"testing"
 
 	"github.com/kubescape/kubescape/v4/core/cautils"
@@ -78,6 +80,108 @@ func TestCollectAndStreamBatches_FailsWhenAllQueriesFail(t *testing.T) {
 	require.True(t, ok, "the failed GVR must be available to scan coverage")
 	assert.Equal(t, apis.StatusSkipped, info.InnerStatus)
 	assert.Equal(t, apis.SubStatusNotEvaluated, info.SubStatus)
+}
+
+func TestCollectAndStreamBatches_AllQueriesFailedKeepsEachQueryError(t *testing.T) {
+	ctx := context.Background()
+	refused := &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("connect: connection refused")}
+	handler := newHandlerWithReactor(t, func(action k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, refused
+	})
+	scanInfo, session := streamingTestSession(ctx)
+	namespaced := true
+	const podsGVR = "/v1/pods"
+	queryable := QueryableResources{
+		podsGVR: {
+			GroupVersionResourceTriplet: podsGVR,
+			Namespaced:                  &namespaced,
+		},
+	}
+
+	err := handler.collectAndStreamBatches(
+		ctx,
+		queryable,
+		&EmptySelector{},
+		session,
+		scanInfo,
+		cautils.ExternalResources{},
+		make(chan *cautils.ResourceBatch, 2),
+		nil,
+	)
+
+	require.ErrorIs(t, err, ErrNoResourcesCollected)
+	var opErr *net.OpError
+	require.ErrorAs(t, err, &opErr, "the network error behind each failed query must stay reachable")
+	assert.Same(t, refused, opErr)
+	assert.False(t, apiServerAnswered(t, err), "no query got a response")
+}
+
+func TestCollectAndStreamBatches_AnswerEvidenceDoesNotCarryAcrossCollections(t *testing.T) {
+	ctx := context.Background()
+	refuseAll := false
+	handler := newHandlerWithReactor(t, func(action k8stesting.Action) (bool, runtime.Object, error) {
+		if !refuseAll && action.GetResource().Resource == "pods" {
+			return true, &unstructured.UnstructuredList{}, nil
+		}
+		return true, nil, &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("connect: connection refused")}
+	})
+	namespaced := true
+	queryable := QueryableResources{
+		"/v1/pods":            {GroupVersionResourceTriplet: "/v1/pods", Namespaced: &namespaced},
+		"apps/v1/deployments": {GroupVersionResourceTriplet: "apps/v1/deployments", Namespaced: &namespaced},
+	}
+	collect := func() error {
+		scanInfo, session := streamingTestSession(ctx)
+		return handler.collectAndStreamBatches(ctx, queryable, &EmptySelector{}, session, scanInfo,
+			cautils.ExternalResources{}, make(chan *cautils.ResourceBatch, 2), nil)
+	}
+
+	require.True(t, apiServerAnswered(t, collect()), "the first collection got a response")
+
+	refuseAll = true
+	assert.False(t, apiServerAnswered(t, collect()), "an answer from an earlier collection says nothing about this one")
+}
+
+func TestCollectAndStreamBatches_AnsweredQueryIsNotLostAmongNetworkFailures(t *testing.T) {
+	answers := map[string]func() (runtime.Object, error){
+		"empty list": func() (runtime.Object, error) { return &unstructured.UnstructuredList{}, nil },
+		"not found": func() (runtime.Object, error) {
+			return nil, apierrors.NewNotFound(schema.GroupResource{Resource: "pods"}, "")
+		},
+	}
+
+	for name, answer := range answers {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			handler := newHandlerWithReactor(t, func(action k8stesting.Action) (bool, runtime.Object, error) {
+				if action.GetResource().Resource == "pods" {
+					obj, err := answer()
+					return true, obj, err
+				}
+				return true, nil, &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("connect: connection refused")}
+			})
+			scanInfo, session := streamingTestSession(ctx)
+			namespaced := true
+			queryable := QueryableResources{
+				"/v1/pods":            {GroupVersionResourceTriplet: "/v1/pods", Namespaced: &namespaced},
+				"apps/v1/deployments": {GroupVersionResourceTriplet: "apps/v1/deployments", Namespaced: &namespaced},
+			}
+
+			err := handler.collectAndStreamBatches(
+				ctx,
+				queryable,
+				&EmptySelector{},
+				session,
+				scanInfo,
+				cautils.ExternalResources{},
+				make(chan *cautils.ResourceBatch, 2),
+				nil,
+			)
+
+			require.ErrorIs(t, err, ErrNoResourcesCollected)
+			assert.True(t, apiServerAnswered(t, err), "the pods query got a response, so the API server answered")
+		})
+	}
 }
 
 func TestCollectAndStreamBatches_IgnoresMissingOptionalResource(t *testing.T) {
