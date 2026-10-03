@@ -50,6 +50,8 @@ type attackPathsFlags struct {
 	maxPaths    int
 	failOnPath  bool
 	withVulns   bool
+	exceptions  string
+	showFixes   int
 }
 
 func getAttackPathsCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Command {
@@ -78,6 +80,10 @@ func getAttackPathsCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Co
 		`Exit with code 1 when at least one path is found (for CI gates)`)
 	cmd.Flags().BoolVar(&flags.withVulns, "with-vulns", false,
 		`Include VulnerabilityManifest CVE data when available in the cluster`)
+	cmd.Flags().StringVar(&flags.exceptions, "exceptions", "",
+		`Path to an exceptions JSON file. Paths whose fingerprint matches an entry are suppressed.`)
+	cmd.Flags().IntVar(&flags.showFixes, "show-fixes", 1,
+		`Number of highest-leverage fix suggestions to show (0 to disable)`)
 
 	return cmd
 }
@@ -146,9 +152,35 @@ func runAttackPaths(
 		warnings = append(warnings, "output anonymized: sensitive identifiers replaced with pseudonyms")
 	}
 
+	// Load and apply exceptions.
+	if flags.exceptions != "" {
+		rawExc, excErr := attackpath.LoadExceptions(flags.exceptions)
+		if excErr != nil {
+			return excErr
+		}
+		active := attackpath.ActiveExceptions(rawExc)
+		idx := attackpath.NewExceptionIndex(active)
+		var suppressed []attackpath.SuppressedPath
+		result, suppressed = attackpath.ApplyExceptions(result, idx)
+		for _, s := range suppressed {
+			warnings = append(warnings,
+				fmt.Sprintf("suppressed (exception): fingerprint=%s reason=%q", s.Fingerprint, s.Exception.Reason))
+		}
+	}
+
 	// Print output.
 	if err := attackpath.PrintResult(os.Stdout, result, format, warnings); err != nil {
 		return err
+	}
+
+	// Print fix suggestions.
+	if flags.showFixes > 0 && len(result.Paths) > 0 {
+		fixes := attackpath.TopFixes(result, flags.showFixes)
+		fmt.Fprintf(os.Stdout, "\nHighest-leverage fix suggestion(s):\n")
+		for i, f := range fixes {
+			fmt.Fprintf(os.Stdout, "  %d. Remove or restrict [%s] %s/%s — breaks %d path(s)\n",
+				i+1, f.Node.Kind, f.Node.Namespace, f.Node.Name, f.PathsBlocked)
+		}
 	}
 
 	// CI gate.
