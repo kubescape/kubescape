@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/meta"
@@ -52,6 +53,9 @@ type attackPathsFlags struct {
 	withVulns   bool
 	exceptions  string
 	showFixes   int
+	fleetReport string
+	cacheDir    string
+	cacheTTL    int64
 }
 
 func getAttackPathsCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Command {
@@ -84,6 +88,12 @@ func getAttackPathsCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Co
 		`Path to an exceptions JSON file. Paths whose fingerprint matches an entry are suppressed.`)
 	cmd.Flags().IntVar(&flags.showFixes, "show-fixes", 1,
 		`Number of highest-leverage fix suggestions to show (0 to disable)`)
+	cmd.Flags().StringVar(&flags.fleetReport, "fleet-report", "",
+		`Path to write a combined fleet attack-path report when scanning multiple contexts via --kube-contexts`)
+	cmd.Flags().StringVar(&flags.cacheDir, "cache-dir", "",
+		`Directory for incremental result caching. When set, results are reused when the resource snapshot is unchanged.`)
+	cmd.Flags().Int64Var(&flags.cacheTTL, "cache-ttl", 3600,
+		`Cache entry TTL in seconds (0 = no expiry). Only used when --cache-dir is set.`)
 
 	return cmd
 }
@@ -197,13 +207,48 @@ func collectResources(
 	scanInfo *cautils.ScanInfo,
 	ks meta.IKubescape,
 ) (map[string]interface{}, []string, error) {
-	// TODO Phase 3: wire to ks.CollectResources() once that method is
-	// confirmed stable. For now return an empty map so the command
-	// compiles and the engines return zero results rather than panicking.
+	// TODO: wire to ks.CollectResources() once that method is confirmed stable.
+	// For now return an empty map so the command compiles and the engines
+	// return zero results rather than panicking.
 	_ = ctx
 	_ = scanInfo
 	_ = ks
 	return map[string]interface{}{}, nil, nil
+}
+
+// tryLoadCache attempts to load a valid cache entry for the given context
+// and snapshot hash. Returns nil when no valid entry exists.
+func tryLoadCache(cacheDir, context, snapshotHash string, ttl int64) *attackpath.CacheEntry {
+	if cacheDir == "" {
+		return nil
+	}
+	c, err := attackpath.NewCache(cacheDir)
+	if err != nil {
+		return nil
+	}
+	entry := c.Get(context)
+	if entry == nil || !entry.IsValid(snapshotHash) {
+		return nil
+	}
+	return entry
+}
+
+// trySaveCache writes a cache entry for context. Errors are non-fatal.
+func trySaveCache(cacheDir, context, snapshotHash string, ttl int64, result attackpath.SearchResult, warnings []string) {
+	if cacheDir == "" {
+		return
+	}
+	c, err := attackpath.NewCache(cacheDir)
+	if err != nil {
+		return
+	}
+	_ = c.Put(context, attackpath.CacheEntry{
+		SnapshotHash: snapshotHash,
+		CreatedAt:    time.Now(),
+		TTLSeconds:   ttl,
+		Result:       result,
+		Warnings:     warnings,
+	})
 }
 
 // buildAnonSalt returns a per-invocation salt for the anonymizer.
