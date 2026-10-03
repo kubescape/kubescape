@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -69,6 +70,10 @@ type K8sResourceHandler struct {
 	hostSensorHandler hostsensorutils.IHostSensor
 	rbacObjectsAPI    *cautils.RBACObjects
 	storeFactory      func() (partitionstore.Store, error)
+	// apiAnswered records whether the API server responded to any List call in
+	// the current collection. A query that succeeded with nothing to collect, or
+	// that returned NotFound, leaves no other trace.
+	apiAnswered atomic.Bool
 }
 
 // SetStoreFactory overrides the default DiskStore factory for testing or memory-only environments.
@@ -156,6 +161,7 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 	sessionObj.ResourceToControlsMap = resourceToControl
 
 	// pull k8s resources
+	k8sHandler.apiAnswered.Store(false)
 	k8sResourcesMap, allResources, failedQueries := k8sHandler.pullResources(ctx, queryableResources, globalFieldSelectors, scanInfo.LabelSelector)
 
 	// Record failed GVR statuses before any early return so BuildScanCoverage
@@ -175,7 +181,7 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 			return k8sResourcesMap, allResources, ksResourceMap, excludedRulesMap, fmt.Errorf("scan aborted: %w", ctxErr)
 		}
 		cautils.StopSpinner()
-		return k8sResourcesMap, allResources, ksResourceMap, excludedRulesMap, newAllQueriesFailedError(failedQueries)
+		return k8sResourcesMap, allResources, ksResourceMap, excludedRulesMap, newAllQueriesFailedError(failedQueries, k8sHandler.apiAnswered.Load())
 	}
 	for _, f := range failedQueries {
 		logger.L().Ctx(ctx).Warning("failed to pull resource type",
@@ -406,6 +412,7 @@ func (k8sHandler *K8sResourceHandler) collectAndStreamBatches(ctx context.Contex
 	collectedK8sResources := queryableResources.ToK8sResourceMap()
 	failedQueries := make(map[string]queryFailure)
 	collectedAnyResource := false
+	k8sHandler.apiAnswered.Store(false)
 
 	// Single pass: pull each GVR once, partition by scope.
 	for key := range queryableResources {
@@ -532,7 +539,7 @@ func (k8sHandler *K8sResourceHandler) collectAndStreamBatches(ctx context.Contex
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return fmt.Errorf("scan aborted: %w", ctxErr)
 		}
-		return newAllQueriesFailedError(failedQueries)
+		return newAllQueriesFailedError(failedQueries, k8sHandler.apiAnswered.Load())
 	}
 	for _, f := range failedQueries {
 		logger.L().Ctx(ctx).Warning("failed to pull resource type",
@@ -1009,9 +1016,10 @@ var ErrNoResourcesCollected = errors.New("failed to pull any Kubernetes resource
 type allQueriesFailedError struct {
 	message  string
 	failures []error
+	answered bool
 }
 
-func newAllQueriesFailedError(failedQueries map[string]queryFailure) error {
+func newAllQueriesFailedError(failedQueries map[string]queryFailure, answered bool) error {
 	combined := make([]string, 0, len(failedQueries))
 	failures := make([]error, 0, len(failedQueries))
 	for _, f := range failedQueries {
@@ -1021,6 +1029,7 @@ func newAllQueriesFailedError(failedQueries map[string]queryFailure) error {
 	return &allQueriesFailedError{
 		message:  ErrNoResourcesCollected.Error() + ": " + strings.Join(combined, "; "),
 		failures: failures,
+		answered: answered,
 	}
 }
 
@@ -1029,6 +1038,17 @@ func (e *allQueriesFailedError) Error() string { return e.message }
 func (e *allQueriesFailedError) Unwrap() []error { return e.failures }
 
 func (e *allQueriesFailedError) Is(target error) bool { return target == ErrNoResourcesCollected }
+
+// APIServerAnswered reports whether the API server responded to any query in
+// the collection, which the failures alone cannot show.
+func (e *allQueriesFailedError) APIServerAnswered() bool { return e.answered }
+
+// apiServerResponded reports whether a List call got a response from the API
+// server: a result, or an error status such as NotFound or Forbidden.
+func apiServerResponded(err error) bool {
+	var status apierrors.APIStatus
+	return err == nil || errors.As(err, &status)
+}
 
 // selectorFailure records a single per-field-selector LIST error inside pullSingleResource.
 type selectorFailure struct {
@@ -1329,7 +1349,11 @@ func (k8sHandler *K8sResourceHandler) pullSingleResourceInto(ctx context.Context
 		var sinkErr error
 
 		if err := pager.New(func(pCtx context.Context, opts metav1.ListOptions) (runtime.Object, error) {
-			return clientResource.List(pCtx, opts)
+			list, err := clientResource.List(pCtx, opts)
+			if apiServerResponded(err) {
+				k8sHandler.apiAnswered.Store(true)
+			}
+			return list, err
 		}).EachListItem(ctx, listOptions, func(obj runtime.Object) error {
 
 			uObject := obj.(*unstructured.Unstructured)

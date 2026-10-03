@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -624,10 +625,14 @@ func newClusterResult(kubeContext string, results *resultshandling.ResultsHandle
 // clusterUnreachable reports whether err shows the API server never answered:
 // every resource query failed, and each one on the network. Network failures
 // elsewhere in a scan, such as downloading policies, say nothing about the
-// cluster. A single answer among the queries, even a refusal, means the cluster
-// was reached.
+// cluster. A single answer to any query, even an empty list, a NotFound or a
+// refusal, means the cluster was reached.
 func clusterUnreachable(err error) bool {
 	if !errors.Is(err, resourcehandler.ErrNoResourcesCollected) {
+		return false
+	}
+	var answers interface{ APIServerAnswered() bool }
+	if errors.As(err, &answers) && answers.APIServerAnswered() {
 		return false
 	}
 	failures := failureBranches(err)
@@ -661,7 +666,9 @@ func failureBranches(err error) []error {
 
 // networkFailure reports whether a single failure got no answer from the API
 // server: the name did not resolve, the connection could not be opened, or the
-// server did not respond in time.
+// request timed out before a response arrived. A timeout while reading a
+// response body does not count, since the server had already answered; the
+// HTTP client wraps only failures that happen before a response in url.Error.
 func networkFailure(err error) bool {
 	for node := err; node != nil; node = errors.Unwrap(node) {
 		if opErr, ok := node.(*net.OpError); ok && opErr.Op == "dial" {
@@ -672,8 +679,8 @@ func networkFailure(err error) bool {
 	if errors.As(err, &dnsErr) {
 		return true
 	}
-	var netErr net.Error
-	return errors.As(err, &netErr) && netErr.Timeout()
+	var urlErr *url.Error
+	return errors.As(err, &urlErr) && urlErr.Timeout()
 }
 
 // writeFleetReport serialises the report to path as indented JSON. The

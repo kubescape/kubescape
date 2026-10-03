@@ -3,7 +3,9 @@ package resourcehandler
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -257,28 +259,137 @@ func TestGetResources_AllQueriesFailedKeepsEachQueryError(t *testing.T) {
 	var opErr *net.OpError
 	require.ErrorAs(t, err, &opErr, "the network error behind each failed query must stay reachable")
 	assert.Same(t, refused, opErr)
+	assert.False(t, apiServerAnswered(t, err), "no query got a response")
+}
+
+// apiServerAnswered reads the answer evidence the fleet classifier relies on,
+// through the same method it uses.
+func apiServerAnswered(t *testing.T, err error) bool {
+	t.Helper()
+	var answers interface{ APIServerAnswered() bool }
+	require.ErrorAs(t, err, &answers)
+	return answers.APIServerAnswered()
+}
+
+// answerFirstRefuseRest answers the first List call with answer and refuses
+// every later one, so a collection sees one response among network failures
+// whatever order its queries run in.
+func answerFirstRefuseRest(calls *atomic.Int32, answer func() (*unstructured.UnstructuredList, error)) func(context.Context, metav1.ListOptions) (*unstructured.UnstructuredList, error) {
+	return func(context.Context, metav1.ListOptions) (*unstructured.UnstructuredList, error) {
+		if calls.Add(1) == 1 {
+			return answer()
+		}
+		return nil, &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("connect: connection refused")}
+	}
+}
+
+func TestGetResources_AnsweredQueryIsNotLostAmongNetworkFailures(t *testing.T) {
+	answers := map[string]func() (*unstructured.UnstructuredList, error){
+		"empty list": func() (*unstructured.UnstructuredList, error) { return &unstructured.UnstructuredList{}, nil },
+		"not found": func() (*unstructured.UnstructuredList, error) {
+			return nil, apierrors.NewNotFound(schema.GroupResource{Resource: "deployments"}, "")
+		},
+	}
+
+	for name, answer := range answers {
+		t.Run(name, func(t *testing.T) {
+			k8sinterface.InitializeMapResourcesMock()
+			handler := getResourceHandlerMock()
+			var calls atomic.Int32
+			handler.k8s.DynamicClient = &mockDynamicClient{listFunc: answerFirstRefuseRest(&calls, answer)}
+
+			rule := mockRule("rule-a", nil, "")
+			rule.Match = append(rule.Match, mockMatch(2))
+			control := mockControl("control-1", nil)
+			control.Rules = append(control.Rules, rule)
+			framework := mockFramework("test", nil)
+			framework.Controls = append(framework.Controls, control)
+			scanInfo := &cautils.ScanInfo{}
+			sessionObj := cautils.NewOPASessionObj(context.Background(), nil, nil, scanInfo, nil)
+			sessionObj.Policies = append(sessionObj.Policies, *framework)
+
+			_, _, _, _, err := handler.GetResources(context.Background(), sessionObj, scanInfo)
+			require.GreaterOrEqual(t, calls.Load(), int32(2), "the collection must make more than one query for this to mean anything")
+			require.ErrorIs(t, err, ErrNoResourcesCollected)
+			assert.True(t, apiServerAnswered(t, err), "a query got a response, so the API server answered")
+		})
+	}
+}
+
+func TestGetResources_AnswerEvidenceDoesNotCarryAcrossCollections(t *testing.T) {
+	k8sinterface.InitializeMapResourcesMock()
+	handler := getResourceHandlerMock()
+	refuseAll := false
+	handler.k8s.DynamicClient = &mockDynamicClient{
+		listFunc: func(context.Context, metav1.ListOptions) (*unstructured.UnstructuredList, error) {
+			if refuseAll {
+				return nil, &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("connect: connection refused")}
+			}
+			return &unstructured.UnstructuredList{}, nil
+		},
+	}
+
+	rule := mockRule("rule-a", nil, "")
+	rule.Match = append(rule.Match, mockMatch(4))
+	control := mockControl("control-1", nil)
+	control.Rules = append(control.Rules, rule)
+	framework := mockFramework("test", nil)
+	framework.Controls = append(framework.Controls, control)
+	scanInfo := &cautils.ScanInfo{}
+	sessionObj := cautils.NewOPASessionObj(context.Background(), nil, nil, scanInfo, nil)
+	sessionObj.Policies = append(sessionObj.Policies, *framework)
+
+	_, _, _, _, _ = handler.GetResources(context.Background(), sessionObj, scanInfo)
+
+	refuseAll = true
+	_, _, _, _, err := handler.GetResources(context.Background(), sessionObj, scanInfo)
+	require.ErrorIs(t, err, ErrNoResourcesCollected)
+	assert.False(t, apiServerAnswered(t, err), "an answer from an earlier collection says nothing about this one")
+}
+
+func TestAPIServerResponded(t *testing.T) {
+	notFound := apierrors.NewNotFound(schema.GroupResource{Resource: "pods"}, "")
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "result", err: nil, want: true},
+		{name: "not found", err: notFound, want: true},
+		{name: "forbidden", err: apierrors.NewForbidden(schema.GroupResource{Resource: "pods"}, "", errors.New("rbac")), want: true},
+		{name: "wrapped status", err: fmt.Errorf("list: %w", notFound), want: true},
+		{name: "connection refused", err: &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("connect: connection refused")}, want: false},
+		{name: "plain error", err: errors.New("boom"), want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, apiServerResponded(tt.err))
+		})
+	}
 }
 
 func TestNewAllQueriesFailedError(t *testing.T) {
 	podsFailure := errors.New("pods failed")
 	single := newAllQueriesFailedError(map[string]queryFailure{
 		"/v1/pods": {gvr: "/v1/pods", err: podsFailure},
-	})
+	}, false)
 	require.EqualError(t, single, "failed to pull any Kubernetes resources: /v1/pods: pods failed",
 		"the message must stay exactly as it was")
 	require.ErrorIs(t, single, podsFailure)
 	require.ErrorIs(t, single, ErrNoResourcesCollected)
+	assert.False(t, apiServerAnswered(t, single))
 
 	secretsFailure := errors.New("secrets failed")
 	several := newAllQueriesFailedError(map[string]queryFailure{
 		"/v1/pods":    {gvr: "/v1/pods", err: podsFailure},
 		"/v1/secrets": {gvr: "/v1/secrets", err: secretsFailure},
-	})
+	}, true)
 	require.ErrorIs(t, several, podsFailure)
 	require.ErrorIs(t, several, secretsFailure)
 	assert.Contains(t, several.Error(), "/v1/pods: pods failed")
 	assert.Contains(t, several.Error(), "/v1/secrets: secrets failed")
 	assert.Contains(t, several.Error(), "; ")
+	assert.True(t, apiServerAnswered(t, several))
 }
 
 // TestGetResources_ScanAbortedOnContextCancellation verifies that when the

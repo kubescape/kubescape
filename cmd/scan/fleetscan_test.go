@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -33,7 +35,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/rest"
 )
 
 func TestWriteFleetReport_ReplacesExistingReportAtomically(t *testing.T) {
@@ -458,6 +463,14 @@ func (f collectionFailure) Is(target error) bool {
 	return target == resourcehandler.ErrNoResourcesCollected
 }
 
+// answeredCollection is a collectionFailure in which some other query got a
+// response from the API server, the way resourcehandler reports it.
+type answeredCollection struct {
+	collectionFailure
+}
+
+func (answeredCollection) APIServerAnswered() bool { return true }
+
 // connectionRefused is what one resource query returns when nothing answers at
 // the cluster's API server address.
 func connectionRefused(name string) error {
@@ -513,6 +526,8 @@ func TestClusterUnreachable(t *testing.T) {
 		{name: "server answered and refused", err: collectionFailure{forbidden}, want: false},
 		{name: "certificate rejected", err: collectionFailure{&url.Error{Op: "Get", URL: "https://prod:6443/api", Err: errors.New("x509: certificate signed by unknown authority")}}, want: false},
 		{name: "connection reset after it was opened", err: collectionFailure{&net.OpError{Op: "read", Net: "tcp", Err: errors.New("connection reset by peer")}}, want: false},
+		{name: "response body timed out", err: collectionFailure{fmt.Errorf("unexpected error when reading response body: %w", dialErr.Err)}, want: false},
+		{name: "another query was answered", err: answeredCollection{collectionFailure{refused}}, want: false},
 		{name: "network failure outside resource collection", err: fmt.Errorf("failed to download policies: %w", refused), want: false},
 		{name: "kubeconfig could not be loaded", err: core.ErrClusterConnection, want: false},
 		{name: "no queries", err: collectionFailure{}, want: false},
@@ -538,6 +553,46 @@ func TestClusterUnreachable_RealRefusedConnection(t *testing.T) {
 	require.Error(t, err)
 
 	assert.True(t, clusterUnreachable(collectionFailure{err}))
+}
+
+// TestClusterUnreachable_RealResponseTimeouts checks both kinds of timeout the
+// Kubernetes client actually produces: one before any response arrives, and one
+// reading the body after the server has already answered.
+func TestClusterUnreachable_RealResponseTimeouts(t *testing.T) {
+	release := make(chan struct{})
+	stall := func(r *http.Request) {
+		select {
+		case <-release:
+		case <-r.Context().Done():
+		}
+	}
+	silent := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { stall(r) }))
+	answered := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
+		stall(r)
+	}))
+	t.Cleanup(func() {
+		silent.Close()
+		answered.Close()
+	})
+	t.Cleanup(func() { close(release) })
+
+	list := func(host string) error {
+		client, err := dynamic.NewForConfig(&rest.Config{Host: host, Timeout: 200 * time.Millisecond})
+		require.NoError(t, err)
+		_, err = client.Resource(schema.GroupVersionResource{Version: "v1", Resource: "pods"}).List(context.Background(), metav1.ListOptions{})
+		require.Error(t, err)
+		return err
+	}
+
+	assert.True(t, clusterUnreachable(collectionFailure{list(silent.URL)}),
+		"no response arrived before the timeout")
+	assert.False(t, clusterUnreachable(collectionFailure{list(answered.URL)}),
+		"the server sent a response before the body read timed out")
 }
 
 func TestNewClusterResult_ClassifiesByResultsFirstThenError(t *testing.T) {
