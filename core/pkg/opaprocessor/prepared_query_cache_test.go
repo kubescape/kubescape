@@ -53,6 +53,7 @@ deny contains msga if {
 }
 `
 
+// testMakeRule constructs a reporthandling.PolicyRule helper object for testing.
 func testMakeRule(name, regoText string) *reporthandling.PolicyRule {
 	return &reporthandling.PolicyRule{
 		PortalBase:   armotypes.PortalBase{Name: name},
@@ -299,4 +300,58 @@ func BenchmarkRunRegoAcrossScopes_Cached(b *testing.B) {
 			}
 		}
 	}
+}
+
+// TestCanonicalDepsKey_UnambiguousEncoding verifies that different dependency input sets
+// (such as single element with comma vs multiple elements, or values with delimiters)
+// produce distinct canonical keys.
+func TestCanonicalDepsKey_UnambiguousEncoding(t *testing.T) {
+	deps1 := resources.RegoDependenciesData{
+		PostureControlInputs: map[string][]string{"allowedNames": {"a,b"}},
+	}
+	deps2 := resources.RegoDependenciesData{
+		PostureControlInputs: map[string][]string{"allowedNames": {"a", "b"}},
+	}
+
+	key1, err1 := canonicalDepsKey(deps1)
+	require.NoError(t, err1)
+
+	key2, err2 := canonicalDepsKey(deps2)
+	require.NoError(t, err2)
+
+	assert.NotEqual(t, key1, key2, "key1 and key2 must be distinct")
+
+	dataDeps1 := resources.RegoDependenciesData{
+		DataControlInputs: map[string]string{"foo": "a;b=c"},
+	}
+	dataDeps2 := resources.RegoDependenciesData{
+		DataControlInputs: map[string]string{"foo": "a", "b": "c"},
+	}
+
+	dkey1, err1 := canonicalDepsKey(dataDeps1)
+	require.NoError(t, err1)
+
+	dkey2, err2 := canonicalDepsKey(dataDeps2)
+	require.NoError(t, err2)
+
+	assert.NotEqual(t, dkey1, dkey2, "data key1 and data key2 must be distinct")
+}
+
+// TestCanonicalDepsKey_PreservesSliceOrder verifies that posture control input lists with different
+// element order produce distinct cache keys, preserving evaluation semantics.
+func TestCanonicalDepsKey_PreservesSliceOrder(t *testing.T) {
+	deps1 := resources.RegoDependenciesData{
+		PostureControlInputs: map[string][]string{"allowedNames": {"first", "second"}},
+	}
+	deps2 := resources.RegoDependenciesData{
+		PostureControlInputs: map[string][]string{"allowedNames": {"second", "first"}},
+	}
+
+	key1, err1 := canonicalDepsKey(deps1)
+	require.NoError(t, err1)
+
+	key2, err2 := canonicalDepsKey(deps2)
+	require.NoError(t, err2)
+
+	assert.NotEqual(t, key1, key2, "keys for different slice ordering must be distinct")
 }

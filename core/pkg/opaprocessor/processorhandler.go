@@ -7,6 +7,7 @@ package opaprocessor
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
@@ -2579,59 +2580,44 @@ func (opap *OPAProcessor) getCompiledRule(ctx context.Context, ruleName, ruleDat
 	return compiled, version, nil
 }
 
-func canonicalDepsKey(deps resources.RegoDependenciesData) string {
-	var sb strings.Builder
-	if len(deps.DataControlInputs) > 0 {
-		keys := make([]string, 0, len(deps.DataControlInputs))
-		for k := range deps.DataControlInputs {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-		sb.WriteString("d:")
-		for _, k := range keys {
-			sb.WriteString(k)
-			sb.WriteByte('=')
-			sb.WriteString(deps.DataControlInputs[k])
-			sb.WriteByte(';')
-		}
+// canonicalDepsKey returns a deterministic, unambiguous JSON representation of RegoDependenciesData.
+// json.Marshal automatically sorts map keys and safely encodes delimiters while preserving posture
+// value list order, which is required because stored data preserves slice order.
+func canonicalDepsKey(deps resources.RegoDependenciesData) (string, error) {
+	if len(deps.DataControlInputs) == 0 && len(deps.PostureControlInputs) == 0 {
+		return "", nil
 	}
-	if len(deps.PostureControlInputs) > 0 {
-		keys := make([]string, 0, len(deps.PostureControlInputs))
-		for k := range deps.PostureControlInputs {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-		sb.WriteString("p:")
-		for _, k := range keys {
-			sb.WriteString(k)
-			sb.WriteByte('=')
-			vals := slices.Clone(deps.PostureControlInputs[k])
-			sort.Strings(vals)
-			for vi, v := range vals {
-				if vi > 0 {
-					sb.WriteByte(',')
-				}
-				sb.WriteString(v)
-			}
-			sb.WriteByte(';')
-		}
+	b, err := json.Marshal(struct {
+		D map[string]string   `json:"d,omitempty"`
+		P map[string][]string `json:"p,omitempty"`
+	}{
+		D: deps.DataControlInputs,
+		P: deps.PostureControlInputs,
+	})
+	if err != nil {
+		return "", err
 	}
-	return sb.String()
+	return string(b), nil
 }
 
 // getPreparedQuery returns a cached rego.PreparedEvalQuery for the rule and dependencies,
 // or compiles and prepares one on demand.
 func (opap *OPAProcessor) getPreparedQuery(ctx context.Context, ruleName, ruleData string, ruleRegoDependenciesData resources.RegoDependenciesData) (rego.PreparedEvalQuery, error) {
-	cacheKey := ruleName + "|" + ruleData + "|" + canonicalDepsKey(ruleRegoDependenciesData)
+	depsKey, depsErr := canonicalDepsKey(ruleRegoDependenciesData)
+	canCache := (depsErr == nil)
+	var cacheKey string
+	if canCache {
+		cacheKey = ruleName + "|" + ruleData + "|" + depsKey
 
-	opap.preparedMu.RLock()
-	if opap.preparedQueries != nil {
-		if pq, ok := opap.preparedQueries[cacheKey]; ok {
-			opap.preparedMu.RUnlock()
-			return pq, nil
+		opap.preparedMu.RLock()
+		if opap.preparedQueries != nil {
+			if pq, ok := opap.preparedQueries[cacheKey]; ok {
+				opap.preparedMu.RUnlock()
+				return pq, nil
+			}
 		}
+		opap.preparedMu.RUnlock()
 	}
-	opap.preparedMu.RUnlock()
 
 	if err := ctx.Err(); err != nil {
 		return rego.PreparedEvalQuery{}, err
@@ -2661,16 +2647,18 @@ func (opap *OPAProcessor) getPreparedQuery(ctx context.Context, ruleName, ruleDa
 		return rego.PreparedEvalQuery{}, fmt.Errorf("rule '%s': failed to prepare query: %w", ruleName, err)
 	}
 
-	opap.preparedMu.Lock()
-	if opap.preparedQueries == nil {
-		opap.preparedQueries = make(map[string]rego.PreparedEvalQuery)
-	}
-	if existing, ok := opap.preparedQueries[cacheKey]; ok {
+	if canCache {
+		opap.preparedMu.Lock()
+		if opap.preparedQueries == nil {
+			opap.preparedQueries = make(map[string]rego.PreparedEvalQuery)
+		}
+		if existing, ok := opap.preparedQueries[cacheKey]; ok {
+			opap.preparedMu.Unlock()
+			return existing, nil
+		}
+		opap.preparedQueries[cacheKey] = pq
 		opap.preparedMu.Unlock()
-		return existing, nil
 	}
-	opap.preparedQueries[cacheKey] = pq
-	opap.preparedMu.Unlock()
 
 	return pq, nil
 }
