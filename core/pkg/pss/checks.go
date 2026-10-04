@@ -8,7 +8,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
-// Baseline allowed capabilities per Kubernetes v1.31 PSS specification.
+// Baseline allowed capabilities per Kubernetes v1.37 PSS specification.
 var baselineAllowedCapabilities = map[string]bool{
 	"AUDIT_WRITE":      true,
 	"CHOWN":            true,
@@ -25,21 +25,24 @@ var baselineAllowedCapabilities = map[string]bool{
 	"SYS_CHROOT":       true,
 }
 
-// Restricted allowed volume types per Kubernetes v1.31 PSS specification.
+// Restricted allowed volume types per Kubernetes v1.37 PSS specification.
 var restrictedAllowedVolumeTypes = map[string]bool{
 	"configMap":             true,
 	"csi":                   true,
 	"downwardAPI":           true,
 	"emptyDir":              true,
 	"ephemeral":             true,
+	"image":                 true,
 	"persistentVolumeClaim": true,
 	"projected":             true,
 	"secret":                true,
 }
 
-const restrictedVolumeTypesList = "configMap, csi, downwardAPI, emptyDir, ephemeral, persistentVolumeClaim, projected, secret"
+const restrictedVolumeTypesList = "configMap, csi, downwardAPI, emptyDir, ephemeral, image, persistentVolumeClaim, projected, secret"
 
-// Safe sysctls allowed under Baseline per Kubernetes v1.31 PSS specification.
+// Safe sysctls allowed under Baseline per Kubernetes v1.37 PSS specification.
+// tcp_rmem and tcp_wmem joined the set in v1.32, tcp_slow_start_after_idle
+// and tcp_notsent_lowat in v1.37.
 var allowedSysctls = map[string]bool{
 	"kernel.shm_rmid_forced":              true,
 	"net.ipv4.ip_local_port_range":        true,
@@ -51,6 +54,10 @@ var allowedSysctls = map[string]bool{
 	"net.ipv4.tcp_fin_timeout":            true,
 	"net.ipv4.tcp_keepalive_intvl":        true,
 	"net.ipv4.tcp_keepalive_probes":       true,
+	"net.ipv4.tcp_rmem":                   true,
+	"net.ipv4.tcp_wmem":                   true,
+	"net.ipv4.tcp_slow_start_after_idle":  true,
+	"net.ipv4.tcp_notsent_lowat":          true,
 }
 
 // Allowed SELinux type values under Baseline.
@@ -280,14 +287,19 @@ func checkCapabilities(c corev1.Container, containerType string) []Violation {
 	return violations
 }
 
-// checkProcMount implements PSS Baseline §ProcMount.
-// procMount must be Default or unset.
-func checkProcMount(c corev1.Container, containerType string) []Violation {
+// checkProcMount implements PSS Baseline & Restricted §ProcMount.
+// procMount must be Default or unset. Since v1.35 Baseline allows any value
+// for a pod in a user namespace; Restricted keeps the requirement.
+func checkProcMount(podSpec corev1.PodSpec, c corev1.Container, containerType string) []Violation {
 	if c.SecurityContext != nil && c.SecurityContext.ProcMount != nil && *c.SecurityContext.ProcMount != corev1.DefaultProcMount {
+		level := Baseline
+		if usesUserNamespace(podSpec) {
+			level = Restricted
+		}
 		return []Violation{
 			{
 				Check:         "ProcMount",
-				Level:         Baseline,
+				Level:         level,
 				Container:     c.Name,
 				ContainerType: containerType,
 				Description:   fmt.Sprintf("%s %q sets procMount %q; must be Default or unset", containerType, c.Name, *c.SecurityContext.ProcMount),
@@ -372,9 +384,7 @@ func checkPodSeccompProfile(podSpec corev1.PodSpec) []Violation {
 		return nil
 	}
 
-	profileType := podSpec.SecurityContext.SeccompProfile.Type
-	if profileType == corev1.SeccompProfileTypeRuntimeDefault ||
-		profileType == corev1.SeccompProfileTypeLocalhost {
+	if isAllowedSeccompProfileType(podSpec.SecurityContext.SeccompProfile.Type) {
 		return nil
 	}
 
@@ -388,8 +398,9 @@ func checkPodSeccompProfile(podSpec corev1.PodSpec) []Violation {
 }
 
 // checkSeccompProfile implements PSS Baseline & Restricted §Seccomp.
-// Baseline: profile must not be Unconfined.
-// Restricted: profile must be RuntimeDefault or Localhost.
+// Baseline: a profile the container sets, or inherits from the pod, must be
+// RuntimeDefault or Localhost.
+// Restricted: profile must be set, to RuntimeDefault or Localhost.
 func checkSeccompProfile(podSpec corev1.PodSpec, c corev1.Container, containerType string) []Violation {
 	var effectiveProfile *corev1.SeccompProfile
 	if c.SecurityContext != nil && c.SecurityContext.SeccompProfile != nil {
@@ -400,19 +411,17 @@ func checkSeccompProfile(podSpec corev1.PodSpec, c corev1.Container, containerTy
 
 	var violations []Violation
 
-	if effectiveProfile != nil && effectiveProfile.Type == corev1.SeccompProfileTypeUnconfined {
+	if effectiveProfile != nil && !isAllowedSeccompProfileType(effectiveProfile.Type) {
 		violations = append(violations, Violation{
 			Check:         "SeccompProfile",
 			Level:         Baseline,
 			Container:     c.Name,
 			ContainerType: containerType,
-			Description:   fmt.Sprintf("%s %q has seccomp profile Unconfined", containerType, c.Name),
+			Description:   fmt.Sprintf("%s %q has seccomp profile %q", containerType, c.Name, effectiveProfile.Type),
 		})
 	}
 
-	if effectiveProfile == nil ||
-		(effectiveProfile.Type != corev1.SeccompProfileTypeRuntimeDefault &&
-			effectiveProfile.Type != corev1.SeccompProfileTypeLocalhost) {
+	if effectiveProfile == nil || !isAllowedSeccompProfileType(effectiveProfile.Type) {
 		violations = append(violations, Violation{
 			Check:         "SeccompProfile",
 			Level:         Restricted,
@@ -426,24 +435,25 @@ func checkSeccompProfile(podSpec corev1.PodSpec, c corev1.Container, containerTy
 }
 
 // checkPodAppArmorProfile implements PSS Baseline §AppArmor at the pod level.
-// AppArmor profile must not be Unconfined.
+// AppArmor profile type must be RuntimeDefault, Localhost, or unset.
 func checkPodAppArmorProfile(podSpec corev1.PodSpec) []Violation {
 	if podSpec.SecurityContext == nil ||
 		podSpec.SecurityContext.AppArmorProfile == nil ||
-		podSpec.SecurityContext.AppArmorProfile.Type != corev1.AppArmorProfileTypeUnconfined {
+		isAllowedAppArmorProfileType(podSpec.SecurityContext.AppArmorProfile.Type) {
 		return nil
 	}
 	return []Violation{
 		{
 			Check:       "AppArmorProfile",
 			Level:       Baseline,
-			Description: "pod has AppArmor profile Unconfined",
+			Description: fmt.Sprintf("pod has AppArmor profile %q", podSpec.SecurityContext.AppArmorProfile.Type),
 		},
 	}
 }
 
 // checkAppArmorProfile implements PSS Baseline §AppArmor.
-// Profile must not be Unconfined.
+// A profile the container sets, or inherits from the pod, must be
+// RuntimeDefault or Localhost.
 func checkAppArmorProfile(podSpec corev1.PodSpec, c corev1.Container, containerType string) []Violation {
 	var effectiveProfile *corev1.AppArmorProfile
 	if c.SecurityContext != nil && c.SecurityContext.AppArmorProfile != nil {
@@ -453,14 +463,84 @@ func checkAppArmorProfile(podSpec corev1.PodSpec, c corev1.Container, containerT
 	}
 
 	var violations []Violation
-	if effectiveProfile != nil && effectiveProfile.Type == corev1.AppArmorProfileTypeUnconfined {
+	if effectiveProfile != nil && !isAllowedAppArmorProfileType(effectiveProfile.Type) {
 		violations = append(violations, Violation{
 			Check:         "AppArmorProfile",
 			Level:         Baseline,
 			Container:     c.Name,
 			ContainerType: containerType,
-			Description:   fmt.Sprintf("%s %q has AppArmor profile Unconfined", containerType, c.Name),
+			Description:   fmt.Sprintf("%s %q has AppArmor profile %q", containerType, c.Name, effectiveProfile.Type),
 		})
+	}
+	return violations
+}
+
+// isAllowedSeccompProfileType reports whether t is a seccomp profile type the
+// standards accept. Anything else is forbidden, not only Unconfined.
+func isAllowedSeccompProfileType(t corev1.SeccompProfileType) bool {
+	return t == corev1.SeccompProfileTypeRuntimeDefault || t == corev1.SeccompProfileTypeLocalhost
+}
+
+// isAllowedAppArmorProfileType reports whether t is an AppArmor profile type
+// the standards accept. Anything else is forbidden, not only Unconfined.
+func isAllowedAppArmorProfileType(t corev1.AppArmorProfileType) bool {
+	return t == corev1.AppArmorProfileTypeRuntimeDefault || t == corev1.AppArmorProfileTypeLocalhost
+}
+
+// usesUserNamespace reports whether the pod runs in its own user namespace
+// (hostUsers: false). Root inside such a pod maps to an unprivileged user on
+// the host, so since v1.35 the standards relax the runAsNonRoot, runAsUser
+// and Baseline procMount restrictions for it.
+func usesUserNamespace(podSpec corev1.PodSpec) bool {
+	return podSpec.HostUsers != nil && !*podSpec.HostUsers
+}
+
+// checkHostProbesAndLifecycle implements PSS Baseline §Host Probes / Lifecycle
+// Hooks (v1.34+). The kubelet runs probes and lifecycle hooks from the node's
+// network namespace, so a host field lets a pod make the node connect to an
+// address of its choosing. The host must be unset in every httpGet and
+// tcpSocket handler.
+func checkHostProbesAndLifecycle(c corev1.Container, containerType string) []Violation {
+	type handler struct {
+		field     string
+		httpGet   *corev1.HTTPGetAction
+		tcpSocket *corev1.TCPSocketAction
+	}
+	var handlers []handler
+	addProbe := func(field string, p *corev1.Probe) {
+		if p != nil {
+			handlers = append(handlers, handler{field, p.HTTPGet, p.TCPSocket})
+		}
+	}
+	addProbe("livenessProbe", c.LivenessProbe)
+	addProbe("readinessProbe", c.ReadinessProbe)
+	addProbe("startupProbe", c.StartupProbe)
+	if c.Lifecycle != nil {
+		if h := c.Lifecycle.PostStart; h != nil {
+			handlers = append(handlers, handler{"lifecycle.postStart", h.HTTPGet, h.TCPSocket})
+		}
+		if h := c.Lifecycle.PreStop; h != nil {
+			handlers = append(handlers, handler{"lifecycle.preStop", h.HTTPGet, h.TCPSocket})
+		}
+	}
+
+	var violations []Violation
+	report := func(field, host string) {
+		violations = append(violations, Violation{
+			Check:         "HostProbesAndLifecycle",
+			Level:         Baseline,
+			Container:     c.Name,
+			ContainerType: containerType,
+			Description:   fmt.Sprintf("%s %q sets %s.host to %q; must be unset", containerType, c.Name, field, host),
+		})
+	}
+	for _, h := range handlers {
+		if h.httpGet != nil && h.httpGet.Host != "" {
+			report(h.field+".httpGet", h.httpGet.Host)
+		}
+		if h.tcpSocket != nil && h.tcpSocket.Host != "" {
+			report(h.field+".tcpSocket", h.tcpSocket.Host)
+		}
 	}
 	return violations
 }
@@ -484,7 +564,11 @@ func checkAllowPrivilegeEscalation(c corev1.Container, containerType string) []V
 
 // checkRunAsNonRoot implements PSS Restricted §RunAsNonRoot.
 // runAsNonRoot must be true at container or pod level, and explicit pod-level false is rejected.
+// Any value is allowed for a pod in a user namespace (v1.35+).
 func checkRunAsNonRoot(podSpec corev1.PodSpec, c corev1.Container, containerType string) []Violation {
+	if usesUserNamespace(podSpec) {
+		return nil
+	}
 	var runAsNonRoot *bool
 	if podSpec.SecurityContext != nil &&
 		podSpec.SecurityContext.RunAsNonRoot != nil &&
@@ -512,7 +596,11 @@ func checkRunAsNonRoot(podSpec corev1.PodSpec, c corev1.Container, containerType
 
 // checkRunAsUser implements PSS Restricted §RunAsUser.
 // runAsUser must not be 0 (root). Pod-level 0 is rejected regardless of container overrides.
+// Any value is allowed for a pod in a user namespace (v1.35+).
 func checkRunAsUser(podSpec corev1.PodSpec, c corev1.Container, containerType string) []Violation {
+	if usesUserNamespace(podSpec) {
+		return nil
+	}
 	var runAsUser *int64
 	if podSpec.SecurityContext != nil &&
 		podSpec.SecurityContext.RunAsUser != nil &&
@@ -541,7 +629,7 @@ func checkRunAsUser(podSpec corev1.PodSpec, c corev1.Container, containerType st
 const appArmorAnnotationPrefix = "container.apparmor.security.beta.kubernetes.io/"
 
 // checkLegacyAppArmor implements PSS Baseline §AppArmor for legacy container annotations (pre-v1.30).
-// In Kubernetes v1.31, all annotations matching the container.apparmor.security.beta.kubernetes.io/
+// All annotations matching the container.apparmor.security.beta.kubernetes.io/
 // prefix are validated independently at pod scope against an allowlist: empty, "runtime/default",
 // or profiles starting with "localhost/". Any other value is forbidden under Baseline.
 func checkLegacyAppArmor(annotations map[string]string) []Violation {

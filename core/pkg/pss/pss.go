@@ -8,7 +8,10 @@
 // The PSS specification is defined at:
 // https://kubernetes.io/docs/concepts/security/pod-security-standards/
 //
-// This implementation targets the Kubernetes v1.31 PSS specification.
+// This implementation targets the Kubernetes v1.37 PSS specification, the
+// latest policy version of k8s.io/pod-security-admission at the Kubernetes
+// version go.mod pins. upstream_parity_test.go compares the two, so a change
+// in the upstream policy shows up as a test failure rather than as drift.
 // Each check function in checks.go documents which spec section it
 // implements and which Kubernetes version introduced or changed it.
 package pss
@@ -61,13 +64,14 @@ func EvaluateWithAnnotations(podSpec corev1.PodSpec, annotations map[string]stri
 			violations = append(violations, checkHostProcess(c, group.kind)...)
 			violations = append(violations, checkPrivileged(c, group.kind)...)
 			violations = append(violations, checkCapabilities(c, group.kind)...)
-			violations = append(violations, checkProcMount(c, group.kind)...)
+			violations = append(violations, checkProcMount(podSpec, c, group.kind)...)
 			violations = append(violations, checkSELinux(c, group.kind)...)
 			violations = append(violations, checkSeccompProfile(podSpec, c, group.kind)...)
 			violations = append(violations, checkAllowPrivilegeEscalation(c, group.kind)...)
 			violations = append(violations, checkRunAsNonRoot(podSpec, c, group.kind)...)
 			violations = append(violations, checkRunAsUser(podSpec, c, group.kind)...)
 			violations = append(violations, checkAppArmorProfile(podSpec, c, group.kind)...)
+			violations = append(violations, checkHostProbesAndLifecycle(c, group.kind)...)
 		}
 	}
 
@@ -78,13 +82,14 @@ func EvaluateWithAnnotations(podSpec corev1.PodSpec, annotations map[string]stri
 		violations = append(violations, checkHostProcess(c, kind)...)
 		violations = append(violations, checkPrivileged(c, kind)...)
 		violations = append(violations, checkCapabilities(c, kind)...)
-		violations = append(violations, checkProcMount(c, kind)...)
+		violations = append(violations, checkProcMount(podSpec, c, kind)...)
 		violations = append(violations, checkSELinux(c, kind)...)
 		violations = append(violations, checkSeccompProfile(podSpec, c, kind)...)
 		violations = append(violations, checkAllowPrivilegeEscalation(c, kind)...)
 		violations = append(violations, checkRunAsNonRoot(podSpec, c, kind)...)
 		violations = append(violations, checkRunAsUser(podSpec, c, kind)...)
 		violations = append(violations, checkAppArmorProfile(podSpec, c, kind)...)
+		violations = append(violations, checkHostProbesAndLifecycle(c, kind)...)
 	}
 
 	isWindows := podSpec.OS != nil && podSpec.OS.Name == corev1.Windows
