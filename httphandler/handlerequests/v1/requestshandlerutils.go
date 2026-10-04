@@ -497,9 +497,26 @@ func envToString(env string, defaultValue string) string {
 // words after a path are kept.
 var absPathRe = regexp.MustCompile(`(?:\b[A-Za-z]:)?[/\\]{1,2}(?:[^/\\\s:'"]+(?: [^/\\\s:'"]+)*[/\\])*[^/\\\s:'"]+`)
 
+// quotedRe matches double-quoted Go strings, as written by %q.
+var quotedRe = regexp.MustCompile(`"(?:[^"\\]|\\.)*"`)
+
+// redactQuotedPaths replaces quoted strings that hold a path, such as the
+// file names the manifest loader writes with %q. The whole quoted value is
+// replaced, so spaces and apostrophes in a file name are covered too.
+func redactQuotedPaths(msg string) string {
+	return quotedRe.ReplaceAllStringFunc(msg, func(quoted string) string {
+		s, err := strconv.Unquote(quoted)
+		if err != nil || !strings.ContainsAny(s, `/\`) || strings.Contains(s, "://") {
+			return quoted
+		}
+		return `"<path>"`
+	})
+}
+
 // redactScanError hides filesystem paths so the message is safe to serve.
 // Paths known from filesystem errors are replaced exactly (this also covers
-// paths with spaces); the regexp catches paths only present as text.
+// paths with spaces), then quoted paths; the regexp catches paths only
+// present as plain text.
 func redactScanError(err error) string {
 	msg := err.Error()
 	var paths []string
@@ -518,7 +535,7 @@ func redactScanError(err error) string {
 			msg = strings.ReplaceAll(msg, p, "<path>")
 		}
 	}
-	return absPathRe.ReplaceAllString(msg, "<path>")
+	return absPathRe.ReplaceAllString(redactQuotedPaths(msg), "<path>")
 }
 
 // unwrapAll returns err and every error it wraps.

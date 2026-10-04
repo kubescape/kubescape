@@ -1,6 +1,7 @@
 package v1
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"runtime"
 	"testing"
 
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	utilsmetav1 "github.com/kubescape/opa-utils/httpserver/meta/v1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -117,11 +119,42 @@ func TestRedactScanError(t *testing.T) {
 			&fs.PathError{Op: "open", Path: `C:\Users\alice\my config`, Err: fs.ErrNotExist},
 			"open <path>: file does not exist",
 		},
+		{"quoted path with spaces", errors.New(`failed to parse "/data/Team Secrets.yaml": bad`), `failed to parse "<path>": bad`},
+		{"quoted path with apostrophe", errors.New(`failed to parse "/data/O'Brien.yaml": bad`), `failed to parse "<path>": bad`},
+		{"quoted escaped windows path", fmt.Errorf("failed to parse %q: bad", `C:\data\Team Secrets.yaml`), `failed to parse "<path>": bad`},
+		{"quoted value without a path is kept", errors.New(`unknown kind "Deployment"`), `unknown kind "Deployment"`},
 		{"no path", errors.New("scan failed"), "scan failed"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			assert.Equal(t, tt.want, redactScanError(tt.err))
+		})
+	}
+}
+
+func TestWriteScanErrorToFile_RedactsManifestParseErrors(t *testing.T) {
+	for _, name := range []string{"Team Secrets.yaml", "O'Brien.yaml"} {
+		t.Run(name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			oldFailedOutputDir := FailedOutputDir
+			FailedOutputDir = filepath.Join(tmpDir, "failed")
+			defer func() { FailedOutputDir = oldFailedOutputDir }()
+
+			manifests := filepath.Join(tmpDir, "manifests")
+			require.NoError(t, os.MkdirAll(manifests, 0o700))
+			require.NoError(t, os.WriteFile(filepath.Join(manifests, name), []byte("kind: [unclosed\n"), 0o600))
+			_, _, loadErr := cautils.LoadResourcesFromFiles(context.Background(), manifests, manifests, nil)
+			require.Error(t, loadErr)
+
+			err := writeScanErrorToFile(loadErr, testScanErrID)
+			require.Error(t, err)
+			got, readErr := os.ReadFile(filepath.Join(FailedOutputDir, testScanErrID))
+			require.NoError(t, readErr)
+			for _, msg := range []string{err.Error(), string(got)} {
+				assert.NotContains(t, msg, tmpDir)
+				assert.NotContains(t, msg, "Secrets")
+				assert.NotContains(t, msg, "Brien")
+			}
 		})
 	}
 }
