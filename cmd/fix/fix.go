@@ -51,6 +51,15 @@ var fixCmdExamples = fmt.Sprintf(`
   # For a cluster with many findings, write one manifest per resource instead
   %[1]s fix cluster.json --output-dir ./fixes
 
+  # Generate Kustomize JSON 6902 patches for Helm-rendered resources
+  # (use when the Helm chart is third-party or managed via GitOps and you
+  # cannot modify the original chart)
+  1) %[1]s scan ./my-chart --format json --output output.json
+  2) %[1]s fix output.json --output-kustomize ./patches
+  Apply: kustomize build ./patches | kubectl apply -f -
+  Or as a Helm post-renderer:
+  helm install my-release ./chart --post-renderer kustomize
+
   The manifests reflect the cluster as it was scanned, not a live read: a
   resource that changed since the scan should be re-scanned before applying.
 
@@ -93,6 +102,7 @@ func GetFixCmd(ks meta.IKubescape) *cobra.Command {
 	fixCmd.PersistentFlags().StringSliceVar(&fixInfo.IncludeControls, "include-controls", nil, "Remediate only these control IDs (comma-separated, case-insensitive). Controls outside the list are left untouched and are not reported as unfixed; disables --container-profile drift remediation")
 	fixCmd.PersistentFlags().StringSliceVar(&fixInfo.SkipControls, "skip-controls", nil, "Leave these control IDs untouched (comma-separated, case-insensitive). Takes precedence over --include-controls; disables --container-profile drift remediation")
 	fixCmd.PersistentFlags().StringVar(&fixInfo.OutputDir, "output-dir", "", "Write the fixes into this directory instead of their default destination. For manifest files: fixed copies that mirror the scanned tree, leaving the originals untouched instead of fixing them in place. For cluster scans: one patched manifest per resource, instead of printing them to stdout. A non-empty directory is refused unless --no-confirm is passed")
+	fixCmd.PersistentFlags().StringVar(&fixInfo.KustomizeDir, "output-kustomize", "", "Write a kustomization.yaml and JSON 6902 patch files for Helm-rendered resources into this directory. Apply with: kustomize build <dir> | kubectl apply -f - or use as a Helm post-renderer: helm install my-release ./chart --post-renderer kustomize")
 
 	return fixCmd
 }

@@ -60,6 +60,21 @@ func (ks *Kubescape) Fix(fixInfo *metav1.FixInfo) error {
 	// path below, since we do not auto-edit chart templates or values.yaml.
 	handler.PrintHelmSuggestions(helmSuggestions)
 
+	// Emit Kustomize JSON 6902 patches when --output-kustomize is given.
+	// This is a machine-applicable companion to PrintHelmSuggestions: the
+	// generated patches can be applied via kustomize build <dir> | kubectl
+	// apply -f - or used as a Helm --post-renderer without touching the chart.
+	if fixInfo.KustomizeDir != "" {
+		if err := fixhandler.EmitKustomizePatch(helmSuggestions, fixInfo.KustomizeDir); err != nil {
+			logger.L().Error("failed to write Kustomize patches", helpers.Error(err))
+		} else if len(helmSuggestions) > 0 {
+			logger.L().Info(fmt.Sprintf(
+				"Kustomize patches written to %q\n  Apply with: kustomize build %s | kubectl apply -f -\n  Or as Helm post-renderer: helm install <release> <chart> --post-renderer kustomize",
+				fixInfo.KustomizeDir, fixInfo.KustomizeDir,
+			))
+		}
+	}
+
 	if len(resourcesToFix) == 0 {
 		logger.L().Info(noResourcesToFix)
 		// Even with nothing to auto-fix, surface controls that still need manual remediation.

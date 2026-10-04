@@ -27,4 +27,16 @@ type FixInfo struct {
 	// report, which has no manifests to rewrite, one patched manifest per
 	// resource is written there instead of being printed to stdout.
 	OutputDir string
+	// KustomizeDir, when set, writes a kustomization.yaml and JSON 6902
+	// patch files for Helm-rendered resources into this directory.
+	// The patches can be applied via:
+	//
+	//   kustomize build <dir> | kubectl apply -f -
+	//
+	// or used with Helm's --post-renderer flag:
+	//
+	//   helm install my-release ./chart --post-renderer kustomize
+	//
+	// This is opt-in and does not affect the normal fix pipeline.
+	KustomizeDir string
 }
