@@ -185,6 +185,7 @@ func aggregateSuiteCounts(suites []JUnitTestSuite) (tests, failures, errors, ski
 	return
 }
 
+// testsSuites builds the root JUnitTestSuites document aggregating child suites.
 func testsSuites(results *cautils.OPASessionObj) *JUnitTestSuites {
 	suites := listTestsSuite(results)
 	tests, failures, errs, skipped := aggregateSuiteCounts(suites)
@@ -197,43 +198,171 @@ func testsSuites(results *cautils.OPASessionObj) *JUnitTestSuites {
 		Name:     "Kubescape Scanning",
 	}
 }
+
+// listTestsSuite generates JUnit test suites for framework or control scans.
 func listTestsSuite(results *cautils.OPASessionObj) []JUnitTestSuite {
 	var testSuites []JUnitTestSuite
 	timestamp := iso8601Timestamp(results.Report.ReportGenerationTime)
+	skippedControls := collectSkippedControls(results)
 
 	// control scan
 	if len(results.Report.SummaryDetails.ListFrameworks()) == 0 {
 		testSuite := JUnitTestSuite{}
-		testSuite.Tests = results.Report.SummaryDetails.NumberOfControls().All()
-		testSuite.Failures = results.Report.SummaryDetails.NumberOfControls().Failed()
-		testSuite.Skipped = results.Report.SummaryDetails.NumberOfControls().Skipped()
 		testSuite.Timestamp = timestamp
 		testSuite.ID = 0
 		testSuite.Name = "kubescape"
 		props := properties(results.Report.SummaryDetails.ComplianceScore)
 		props = append(props, coverageProperties(results.ScanCoverage)...)
 		testSuite.Properties = props
-		testSuite.TestCases = testsCases(results, &results.Report.SummaryDetails.Controls, "Kubescape")
+		cases := testsCases(results, &results.Report.SummaryDetails.Controls, "Kubescape")
+		testSuite.TestCases = appendSkippedControls(results, cases, skippedControls, "Kubescape", nil)
+		updateSuiteCounts(&testSuite)
 		testSuites = append(testSuites, testSuite)
 		return testSuites
 	}
 
+	assigned := make(map[string]struct{})
 	for i, f := range results.Report.SummaryDetails.Frameworks {
 		testSuite := JUnitTestSuite{}
-		testSuite.Tests = f.NumberOfControls().All()
-		testSuite.Failures = f.NumberOfControls().Failed()
-		testSuite.Skipped = f.NumberOfControls().Skipped()
 		testSuite.Timestamp = timestamp
 		testSuite.ID = i
 		testSuite.Name = f.Name
 		props := properties(f.GetComplianceScore())
 		props = append(props, coverageProperties(results.ScanCoverage)...)
 		testSuite.Properties = props
-		testSuite.TestCases = testsCases(results, f.GetControls(), f.GetName())
+		cases := testsCases(results, f.GetControls(), f.GetName())
+		for _, tc := range cases {
+			if parts := strings.Split(tc.Classname, "/"); len(parts) >= 2 {
+				assigned[parts[len(parts)-1]] = struct{}{}
+			}
+		}
+		testSuite.TestCases = appendSkippedControls(results, cases, skippedControls, f.GetName(), func(controlID string) bool {
+			matches := frameworkContainsControl(results, f.GetName(), controlID)
+			if matches {
+				assigned[controlID] = struct{}{}
+			}
+			return matches
+		})
+		updateSuiteCounts(&testSuite)
 		testSuites = append(testSuites, testSuite)
 	}
 
+	// If there are skipped/unevaluated controls that were not matched to any framework
+	// in multi-framework scans (e.g. Policies metadata was not populated), assign them
+	// to the first suite so no unevaluated control is dropped from the report.
+	if len(testSuites) > 0 {
+		var unassigned []skippedControlInfo
+		for _, sc := range skippedControls {
+			if _, ok := assigned[sc.controlID]; !ok {
+				unassigned = append(unassigned, sc)
+			}
+		}
+		if len(unassigned) > 0 {
+			testSuites[0].TestCases = appendSkippedControls(results, testSuites[0].TestCases, unassigned, testSuites[0].Name, nil)
+			updateSuiteCounts(&testSuites[0])
+		}
+	}
+
 	return testSuites
+}
+
+// appendSkippedControls appends any skipped or unevaluated controls from skippedControls
+// that have not already been emitted in existingCases.
+func appendSkippedControls(results *cautils.OPASessionObj, existingCases []JUnitTestCase, skippedControls []skippedControlInfo, classname string, shouldInclude func(controlID string) bool) []JUnitTestCase {
+	emitted := make(map[string]struct{}, len(existingCases))
+	for _, tc := range existingCases {
+		parts := strings.Split(tc.Classname, "/")
+		if len(parts) >= 2 {
+			emitted[parts[len(parts)-1]] = struct{}{}
+		}
+	}
+
+	for _, sc := range skippedControls {
+		if shouldInclude != nil && !shouldInclude(sc.controlID) {
+			continue
+		}
+		if _, ok := emitted[sc.controlID]; ok {
+			continue
+		}
+		reason := sc.reason
+		if reason == "" {
+			reason = "not evaluated"
+		}
+		name := sc.name
+		if (name == "" || name == sc.controlID) && results != nil {
+			if ctrlName := controlNameFromPolicies(results, sc.controlID); ctrlName != "" {
+				name = ctrlName
+			}
+		}
+		if name == "" {
+			name = sc.controlID
+		}
+		existingCases = append(existingCases, JUnitTestCase{
+			Classname: classname + "/" + sc.controlID,
+			Name:      name,
+			SkipMessage: &JUnitSkipMessage{
+				Message: reason,
+			},
+		})
+		emitted[sc.controlID] = struct{}{}
+	}
+
+	return existingCases
+}
+
+// controlNameFromPolicies resolves a human-readable control name from session policies if available.
+func controlNameFromPolicies(results *cautils.OPASessionObj, controlID string) string {
+	if results == nil {
+		return ""
+	}
+	for _, p := range results.Policies {
+		for _, c := range p.Controls {
+			if c.ControlID == controlID && c.Name != "" {
+				return c.Name
+			}
+		}
+	}
+	if results.AllPolicies != nil {
+		if c, ok := results.AllPolicies.Controls[controlID]; ok && c.Name != "" {
+			return c.Name
+		}
+	}
+	return ""
+}
+
+// updateSuiteCounts syncs the suite Tests, Failures, and Skipped counters with its TestCases.
+func updateSuiteCounts(suite *JUnitTestSuite) {
+	suite.Tests = len(suite.TestCases)
+	var failures, skipped int
+	for _, tc := range suite.TestCases {
+		if tc.Failure != nil {
+			failures++
+		} else if tc.SkipMessage != nil {
+			skipped++
+		}
+	}
+	suite.Failures = failures
+	suite.Skipped = skipped
+}
+
+// frameworkContainsControl checks if a framework policy includes the given control ID.
+func frameworkContainsControl(results *cautils.OPASessionObj, fwName, controlID string) bool {
+	if results == nil {
+		return false
+	}
+	if len(results.Report.SummaryDetails.Frameworks) == 1 {
+		return true
+	}
+	for _, p := range results.Policies {
+		if strings.EqualFold(p.Name, fwName) {
+			for _, c := range p.Controls {
+				if c.ControlID == controlID {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 // imageTestsSuites builds a JUnitTestSuites document for an image scan, one testsuite
