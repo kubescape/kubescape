@@ -3,6 +3,8 @@ package core
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -856,4 +858,22 @@ func TestPinnedVersionGettersReturnHardError(t *testing.T) {
 		require.Error(t, err)
 		require.Nil(t, g)
 	})
+}
+
+func TestClusterConnectionError_CarriesTheReason(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config")
+	kubeconfig := "apiVersion: v1\nkind: Config\ncontexts:\n- name: orphan\n  context:\n    cluster: no-such-cluster\n    user: u\ncurrent-context: orphan\nusers:\n- name: u\n  user:\n    token: t\n"
+	require.NoError(t, os.WriteFile(path, []byte(kubeconfig), 0o600))
+	t.Setenv("KUBECONFIG", path)
+	k8sinterface.SetClusterContextName("orphan")
+	t.Cleanup(func() { k8sinterface.SetClusterContextName("") })
+
+	require.Nil(t, getKubernetesApi(), "a context whose cluster entry is missing cannot produce a client")
+
+	loadErr := k8sinterface.LoadK8sConfig()
+	require.Error(t, loadErr)
+
+	err := clusterConnectionError()
+	require.ErrorIs(t, err, ErrClusterConnection)
+	assert.Contains(t, err.Error(), loadErr.Error(), "the reason the kubeconfig could not be loaded has to reach the operator")
 }
