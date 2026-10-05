@@ -320,7 +320,7 @@ func (h *FixHandler) resourceBasePath(resourceObj *reporthandling.Resource) stri
 }
 
 // countResourcesPerFile tallies every resource the scan read from each manifest,
-// keyed by the file the report recorded it against.
+// keyed by the manifest's resolved path (see resourceFileKey).
 func (h *FixHandler) countResourcesPerFile(resources map[string]*reporthandling.Resource) map[string]int {
 	perFile := make(map[string]int, len(resources))
 	for _, resource := range resources {
@@ -332,16 +332,88 @@ func (h *FixHandler) countResourcesPerFile(resources map[string]*reporthandling.
 }
 
 // resourceFileKey is the manifest a resource was read from, without the
-// document index the report appends to it.
+// document index the report appends to it, resolved against the resource's own
+// root. The path the report records is relative to that root, and outside a git
+// repository each input of a multi-input scan is its own root: keyed by the
+// recorded path alone, apps/web/deploy.yaml and infra/db/deploy.yaml both read
+// as "deploy.yaml", one file holding two resources, and dropWrappedResources
+// skipped both as a kind: List wrapper (#4042).
 func (h *FixHandler) resourceFileKey(resource *reporthandling.Resource) string {
+	root, relativePath, ok := h.localManifest(resource)
+	if !ok {
+		return ""
+	}
+	return filepath.Join(root, relativePath)
+}
+
+// localManifest returns the root a resource's manifest resolves against and the
+// manifest's path relative to it, or ok=false for a resource with no manifest
+// on disk. The root is resourceBasePath's, the one resolveResourceSource
+// resolves the file against, so everything keyed on it agrees with where the
+// file is actually read from and written to.
+func (h *FixHandler) localManifest(resource *reporthandling.Resource) (root, relativePath string, ok bool) {
 	if resource == nil {
-		return ""
+		return "", "", false
 	}
-	filePath, _, err := h.getFilePathAndIndex(h.getPathFromRawResource(resource.GetObject()))
+	relativePath, _, err := h.getFilePathAndIndex(h.getPathFromRawResource(resource.GetObject()))
 	if err != nil {
-		return ""
+		return "", "", false
 	}
-	return filePath
+	return filepath.Clean(h.resourceBasePath(resource)), relativePath, true
+}
+
+// scanRoots returns the distinct roots the report's manifests were read from,
+// sorted. A scan inside a git repository has one, the repository root, however
+// many inputs it had; so does a scan of a single input. A multi-input scan
+// outside git has one per input.
+//
+// It covers every manifest the scan read, not only the ones being fixed, so
+// that anything derived from it depends on what was scanned rather than on
+// which files happened to fail or which controls were selected.
+func (h *FixHandler) scanRoots() []string {
+	seen := make(map[string]bool)
+	roots := make([]string, 0, 1)
+	for _, resource := range h.buildResourcesMap() {
+		root, _, ok := h.localManifest(resource)
+		if !ok || root == "" || root == "." || seen[root] {
+			continue
+		}
+		seen[root] = true
+		roots = append(roots, root)
+	}
+	sort.Strings(roots)
+	return roots
+}
+
+// sharedScanRoot returns the deepest directory containing every scan root, or ""
+// when the scan has a single root, whose recorded relative paths are already a
+// tree. It fails when the roots share no directory at all, as inputs on two
+// Windows volumes do.
+func (h *FixHandler) sharedScanRoot() (string, error) {
+	roots := h.scanRoots()
+	if len(roots) < 2 {
+		return "", nil
+	}
+
+	shared := roots[0]
+	for _, root := range roots[1:] {
+		for !isLexicallyWithin(shared, root) {
+			parent := filepath.Dir(shared)
+			if parent == shared {
+				return "", fmt.Errorf("the scanned inputs %q and %q share no common directory to lay out --output-dir under; fix them in separate runs", roots[0], root)
+			}
+			shared = parent
+		}
+	}
+	return shared, nil
+}
+
+// isLexicallyWithin reports whether target is base or lies below it, comparing
+// the paths as written. Both come from resourceBasePath, which has already
+// decided which root each manifest is read from.
+func isLexicallyWithin(base, target string) bool {
+	rel, err := filepath.Rel(base, target)
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 func (h *FixHandler) buildResourcesMap() map[string]*reporthandling.Resource {
@@ -1166,9 +1238,19 @@ func (h *FixHandler) ApplyChanges(ctx context.Context, resourcesToFix []Resource
 }
 
 // OutputPaths maps every manifest ApplyChanges would rewrite to the path its
-// fixed copy is written to under FixInfo.OutputDir. The output tree mirrors the
-// scanned one: a manifest keeps the relative path the report recorded for it,
-// so nested directories survive and a multi-document file stays one file.
+// fixed copy is written to under FixInfo.OutputDir. The output tree recreates
+// the scanned one, so nested directories survive and a multi-document file
+// stays one file:
+//   - with a single scan root (a git repository, or a single input) a manifest
+//     keeps the path the report recorded for it, relative to that root.
+//   - with several roots (a multi-input scan outside git) it keeps its path
+//     below the directory the roots share. Each root's recorded paths start
+//     afresh, so two inputs that both hold a deploy.yaml would otherwise both
+//     claim fixed/deploy.yaml (#4042).
+//
+// The layout is decided by the scan, through scanRoots, and not by the files
+// being written: a later run of the same scan that fixes fewer files, or
+// selects fewer controls, writes into the same tree.
 //
 // It refuses, before anything is written, a plan that could not do what the
 // flag promises:
@@ -1187,6 +1269,11 @@ func (h *FixHandler) OutputPaths(resourcesToFix []ResourceFixInfo) (map[string]s
 	}
 	outputDir := filepath.Clean(h.fixInfo.OutputDir)
 
+	sharedRoot, err := h.sharedScanRoot()
+	if err != nil {
+		return nil, err
+	}
+
 	destinations := make(map[string]string)
 	claimedBy := make(map[string]string)
 	for i := range resourcesToFix {
@@ -1200,7 +1287,13 @@ func (h *FixHandler) OutputPaths(resourcesToFix []ResourceFixInfo) (map[string]s
 		}
 
 		relativePath := resource.relativePath
-		if relativePath == "" {
+		if sharedRoot != "" {
+			rel, err := filepath.Rel(sharedRoot, source)
+			if err != nil || !isLexicallyWithin(sharedRoot, source) {
+				return nil, fmt.Errorf("cannot place %q below the scanned inputs' shared directory %q", sanitizeForLog(source), sharedRoot)
+			}
+			relativePath = rel
+		} else if relativePath == "" {
 			relativePath = filepath.Base(source)
 		}
 		destination := filepath.Join(outputDir, relativePath)

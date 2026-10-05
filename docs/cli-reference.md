@@ -823,11 +823,20 @@ kubescape fix results.json --no-confirm
 kubescape fix results.json --output-dir ./fixed
 ```
 
-With `--output-dir` the copies mirror the scanned directory —
-`/path/to/manifests/k8s/prod/deploy.yaml` is written to
-`./fixed/k8s/prod/deploy.yaml` — and a multi-document file stays one file. Review them with `diff -r`, then copy them over the originals or apply
-them as they are. A directory that is the scanned one is refused: writing there
-would be an in-place fix under another name.
+With `--output-dir` the copies recreate the scanned tree, and a multi-document
+file stays one file. Where the tree starts depends on the scan:
+
+| Scan | Copies are laid out from | `scan` input → copy |
+|------|--------------------------|---------------------|
+| Inside a git repository | the repository root | `k8s/prod` → `./fixed/k8s/prod/deploy.yaml` |
+| One directory, outside git | that directory | `/path/to/manifests` → `./fixed/k8s/prod/deploy.yaml` |
+| Several directories, outside git | the directory they share | `apps/web/k8s infra/db/k8s` → `./fixed/apps/web/k8s/deploy.yaml` and `./fixed/infra/db/k8s/deploy.yaml` |
+
+The layout depends only on what was scanned, so a later run of the same scan
+writes into the same tree even if it fixes fewer files or selects fewer
+controls. Review the copies against the originals, then copy them over the
+originals or apply them as they are. A directory that is the scanned one is
+refused: writing there would be an in-place fix under another name.
 
 Fixing a cluster scan:
 
