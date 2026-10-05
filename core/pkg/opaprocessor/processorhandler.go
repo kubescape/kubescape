@@ -1361,10 +1361,15 @@ var inputCorrelators sync.Map
 // so only rules that judge each object on its own can be cached.
 //
 // A rule is cleared only when every rule body binds at most one element of
-// input, through input[x] or some x in input, and input appears nowhere else:
+// input, through input[_] or some x in input, and input appears nowhere else:
 // not in a comprehension or every block, not in a rule head, not in a function
 // and not as a whole value (count(input), x in input, input[0]). Anything
 // else, including a rule that fails to parse, is reported as correlating.
+//
+// The element's position counts as another object's data. Leaving a cache hit
+// out of the input moves every later object down, so a rule that can see an
+// index (input[i], some i, x in input) would select or report a different
+// object than it does on a full input. Only the anonymous input[_] is cleared.
 func ruleCorrelatesInput(rego string) bool {
 	if memoised, ok := inputCorrelators.Load(rego); ok {
 		return memoised.(bool)
@@ -1380,6 +1385,14 @@ func ruleCorrelatesInput(rego string) bool {
 }
 
 func moduleCorrelatesInput(module *ast.Module) bool {
+	for _, imported := range module.Imports {
+		// import input as pods, or import input.x, gives input another name
+		// that the walk below would not recognise. Such a rule is not cleared
+		// rather than tracking the name through every scope that may shadow it.
+		if importsInput(imported) {
+			return true
+		}
+	}
 	for _, rule := range module.Rules {
 		for r := rule; r != nil; r = r.Else {
 			if r.Head != nil && referencesInput(r.Head) {
@@ -1409,6 +1422,21 @@ func moduleCorrelatesInput(module *ast.Module) bool {
 	return false
 }
 
+// importsInput reports whether imported brings input, or a part of it, into
+// the module. An import this cannot read is reported as importing input.
+func importsInput(imported *ast.Import) bool {
+	if imported == nil || imported.Path == nil {
+		return true
+	}
+	switch path := imported.Path.Value.(type) {
+	case ast.Ref:
+		return len(path) == 0 || isInputVar(path[0])
+	case ast.Var:
+		return isInputVar(imported.Path)
+	}
+	return true
+}
+
 // isDenyRule reports whether r is a body of the deny rule, which produces the
 // verdicts; every other rule only feeds it.
 func isDenyRule(r *ast.Rule) bool {
@@ -1420,7 +1448,7 @@ func isDenyRule(r *ast.Rule) bool {
 }
 
 // bodyCorrelatesInput reports whether body can bind more than one element of
-// input, or reads input other than through a single input[x] iteration.
+// input, or reads input other than through a single anonymous iteration.
 func bodyCorrelatesInput(body ast.Body) bool {
 	iterations := 0
 	correlates := false
@@ -1430,17 +1458,17 @@ func bodyCorrelatesInput(body ast.Body) bool {
 		}
 		switch v := x.(type) {
 		case *ast.SomeDecl:
-			// some x in input (or some i, x in input) binds one element per
-			// solution, the same as x := input[_].
+			// some x in input binds one element per solution, the same as
+			// x := input[_]. some i, x in input also binds its position, so it
+			// is left to the walk below, which reports input as a whole value.
 			if len(v.Symbols) != 1 {
 				return false
 			}
 			call, isCall := v.Symbols[0].Value.(ast.Call)
-			if !isCall || len(call) < 3 || !isInputVar(call[len(call)-1]) {
+			if !isCall || len(call) != 3 || !isInputVar(call[len(call)-1]) {
 				return false
 			}
-			operator := call[0].Value
-			if operator.Compare(ast.Member.Ref()) != 0 && operator.Compare(ast.MemberWithKey.Ref()) != 0 {
+			if call[0].Value.Compare(ast.Member.Ref()) != 0 {
 				return false
 			}
 			iterations++
@@ -1459,8 +1487,12 @@ func bodyCorrelatesInput(body ast.Body) bool {
 				correlates = true // input as a whole value
 				return true
 			}
-			if _, isVar := v[1].Value.(ast.Var); !isVar {
-				correlates = true // a fixed position, such as input[0]
+			if index, isVar := v[1].Value.(ast.Var); !isVar || !index.IsWildcard() {
+				// A fixed position, such as input[0], or a named index, such
+				// as input[i]. A named index can be bound, compared or
+				// reported elsewhere in the rule, and every such use makes the
+				// verdict depend on where the object sits in input.
+				correlates = true
 				return true
 			}
 			correlates = referencesInput(v[1:])

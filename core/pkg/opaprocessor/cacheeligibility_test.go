@@ -174,8 +174,83 @@ func TestRuleCacheEligibleCorrelatedInputRule(t *testing.T) {
 			want: true,
 		},
 		{
-			name: "some i, x in input binds one element and stays cacheable",
+			name: "some i, x in input exposes the element's position",
 			rego: "deny contains msga if {\n\tsome i, pod in input\n\tpod.spec.hostPID == true\n}",
+			want: false,
+		},
+		{
+			name: "some i, x in input with the index constrained",
+			rego: "deny contains msga if {\n\tsome i, pod in input\n\ti == 1\n\tpod.spec.hostPID == true\n}",
+			want: false,
+		},
+		{
+			name: "some _, x in input is not cleared either",
+			rego: "deny contains msga if {\n\tsome _, pod in input\n\tpod.spec.hostPID == true\n}",
+			want: false,
+		},
+		{
+			name: "named index into input",
+			rego: "deny contains msga if {\n\tpod := input[i]\n\tpod.spec.hostPID == true\n}",
+			want: false,
+		},
+		{
+			name: "index bound to a constant",
+			rego: "deny contains msga if {\n\ti := 1\n\tpod := input[i]\n\tpod.spec.hostPID == true\n}",
+			want: false,
+		},
+		{
+			name: "declared index compared after the lookup",
+			rego: "deny contains msga if {\n\tsome i\n\tpod := input[i]\n\ti > 0\n\tpod.spec.hostPID == true\n}",
+			want: false,
+		},
+		{
+			name: "arithmetic on the index",
+			rego: "deny contains msga if {\n\tpod := input[i]\n\tnext := input[i + 1]\n\tpod.spec.nodeName == next.spec.nodeName\n}",
+			want: false,
+		},
+		{
+			name: "index reported in the verdict",
+			rego: "deny contains msga if {\n\tpod := input[i]\n\tpod.spec.hostPID == true\n\tmsga := {\"alertMessage\": sprintf(\"pod %d\", [i])}\n}",
+			want: false,
+		},
+		{
+			name: "computed index into input",
+			rego: "deny contains msga if {\n\tpod := input[count(input) - 1]\n\tpod.spec.hostPID == true\n}",
+			want: false,
+		},
+		{
+			name: "index observed inside a comprehension",
+			rego: "deny contains msga if {\n\tpod := input[i]\n\tcount([j | j := i; j > 0]) > 0\n}",
+			want: false,
+		},
+		{
+			name: "input imported under an alias",
+			rego: "import input as pods\n\ndeny contains msga if {\n\tpod := pods[_]\n\tpod.spec.hostPID == true\n}",
+			want: false,
+		},
+		{
+			name: "aliased input compared across objects",
+			rego: "import input as pods\n\ndeny contains msga if {\n\tetcd := [p | p := pods[_]; p.metadata.name == \"etcd\"]\n\tcount(etcd) > 0\n}",
+			want: false,
+		},
+		{
+			name: "input imported under its own name",
+			rego: "import input\n\ndeny contains msga if {\n\tpod := input[_]\n\tpod.spec.hostPID == true\n}",
+			want: false,
+		},
+		{
+			name: "part of input imported",
+			rego: "import input.items\n\ndeny contains msga if {\n\tpod := items[_]\n\tpod.spec.hostPID == true\n}",
+			want: false,
+		},
+		{
+			name: "part of input imported under an alias",
+			rego: "import input.items as pods\n\ndeny contains msga if {\n\tpod := pods[_]\n\tpod.spec.hostPID == true\n}",
+			want: false,
+		},
+		{
+			name: "imports outside input leave the rule cacheable",
+			rego: "import data.settings as settings\nimport future.keywords.in\n\ndeny contains msga if {\n\tpod := input[_]\n\tpod.spec.hostPID == settings.hostPID\n}",
 			want: true,
 		},
 		{

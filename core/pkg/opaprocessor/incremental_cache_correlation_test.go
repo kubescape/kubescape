@@ -203,3 +203,131 @@ func TestIncrementalCache_PerObjectRuleIsStillServedFromCache(t *testing.T) {
 	got := sharedCAVerdicts(t, denyEveryInputRule, warm, pods...)
 	require.Equal(t, first, got, "an unchanged resource must be served from the cache")
 }
+
+// positionalRule builds a rule that judges the Pod at index 1 of input. Its
+// selection is the only thing that varies, so each way of observing an
+// element's position can be run through the same warm and cold scans.
+func positionalRule(selection string) string {
+	return `package armo_builtins
+import rego.v1
+
+deny contains msga if {
+` + selection + `
+	pod.metadata.annotations.ca == "/pki/shared.crt"
+	msga := {
+		"alertMessage": "the second pod uses the shared CA",
+		"packagename":  "armo_builtins",
+		"alertScore":   1,
+		"failedPaths":  [],
+		"fixPaths":     [],
+		"alertObject":  {"k8sApiObjects": [pod]},
+	}
+}
+`
+}
+
+// TestIncrementalCache_PositionalRuleMatchesUncachedScan covers rules that
+// pick an element of input by its position. A cache hit is left out of the
+// input, which moves every later object down: with the first Pod served from
+// the cache, the changed second Pod sits at index 0 and a rule looking at
+// index 1 no longer sees it. Such a rule must not be cached.
+func TestIncrementalCache_PositionalRuleMatchesUncachedScan(t *testing.T) {
+	const ownCA, sharedCA = "/pki/own.crt", "/pki/shared.crt"
+	first := controlPlanePod("first", ownCA)
+	second := controlPlanePod("second", ownCA)
+	changed := controlPlanePod("second", sharedCA)
+
+	tests := []struct {
+		name      string
+		selection string
+	}{
+		{
+			name:      "index bound to a constant",
+			selection: "\ti := 1\n\tpod := input[i]",
+		},
+		{
+			name:      "indexed membership with a constrained index",
+			selection: "\tsome i, pod in input\n\ti == 1",
+		},
+		{
+			name:      "declared index compared after the lookup",
+			selection: "\tsome i\n\tpod := input[i]\n\ti > 0",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			rego := positionalRule(tc.selection)
+			require.True(t, ruleCorrelatesInput(rego))
+
+			want := sharedCAVerdicts(t, rego, nil, first, changed)
+			require.Equal(t, apis.StatusPassed, want[first.GetID()])
+			require.Equal(t, apis.StatusFailed, want[changed.GetID()], "the rule must judge the Pod at index 1")
+
+			dir := t.TempDir()
+			primed, err := scancache.Load(dir, "v1")
+			require.NoError(t, err)
+			for id, status := range sharedCAVerdicts(t, rego, primed, first, second) {
+				require.Equal(t, apis.StatusPassed, status, id)
+			}
+			require.NoError(t, primed.Flush())
+
+			warm, err := scancache.Load(dir, "v1")
+			require.NoError(t, err)
+			got := sharedCAVerdicts(t, rego, warm, first, changed)
+
+			require.Equal(t, want, got, "a warm scan must reach the same verdicts as a cold one")
+		})
+	}
+}
+
+// aliasedSharedCARule is sharedCARule reading input through an import alias,
+// which hides every read of input behind another name.
+const aliasedSharedCARule = `package armo_builtins
+import rego.v1
+import input as pods
+
+deny contains msga if {
+	etcd := [p | p := pods[_]; p.metadata.labels.component == "etcd"][0]
+	api := [p | p := pods[_]; p.metadata.labels.component == "kube-apiserver"][0]
+	etcd.metadata.annotations.ca == api.metadata.annotations.ca
+	msga := {
+		"alertMessage": "etcd and the API server share a CA",
+		"packagename":  "armo_builtins",
+		"alertScore":   8,
+		"failedPaths":  [],
+		"fixPaths":     [],
+		"alertObject":  {"k8sApiObjects": [etcd, api]},
+	}
+}
+`
+
+// TestIncrementalCache_AliasedInputRuleMatchesUncachedScan repeats the shared
+// CA scenario for a rule that reaches input through an import alias. The etcd
+// Pod is unchanged between the scans, so a cached pass would be served for it
+// although the API server now shares its CA.
+func TestIncrementalCache_AliasedInputRuleMatchesUncachedScan(t *testing.T) {
+	const etcdCA, clusterCA = "/pki/etcd/ca.crt", "/pki/ca.crt"
+	require.True(t, ruleCorrelatesInput(aliasedSharedCARule))
+
+	etcd := controlPlanePod("etcd", etcdCA)
+	api := controlPlanePod("kube-apiserver", clusterCA)
+	changed := controlPlanePod("kube-apiserver", etcdCA)
+
+	want := sharedCAVerdicts(t, aliasedSharedCARule, nil, etcd, changed)
+	require.Equal(t, apis.StatusFailed, want[etcd.GetID()])
+	require.Equal(t, apis.StatusFailed, want[changed.GetID()])
+
+	dir := t.TempDir()
+	primed, err := scancache.Load(dir, "v1")
+	require.NoError(t, err)
+	for id, status := range sharedCAVerdicts(t, aliasedSharedCARule, primed, etcd, api) {
+		require.Equal(t, apis.StatusPassed, status, id)
+	}
+	require.NoError(t, primed.Flush())
+
+	warm, err := scancache.Load(dir, "v1")
+	require.NoError(t, err)
+	got := sharedCAVerdicts(t, aliasedSharedCARule, warm, etcd, changed)
+
+	require.Equal(t, want, got, "a warm scan must reach the same verdicts as a cold one")
+}
