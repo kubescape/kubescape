@@ -69,6 +69,13 @@ func TestDiffReports_PostureComparison(t *testing.T) {
 	require.NotNil(t, parsed.Posture)
 	require.Len(t, parsed.Posture.New, 1)
 	assert.Equal(t, "C-HIGH", parsed.Posture.New[0].ControlID)
+
+	require.NotNil(t, result.StructuredContent)
+	structured, ok := result.StructuredContent.(diffReportsResult)
+	require.True(t, ok, "StructuredContent must be a diffReportsResult, got %T", result.StructuredContent)
+	assert.Equal(t, "posture", structured.Kind)
+	require.NotNil(t, structured.Posture)
+	assert.Equal(t, parsed.Posture, structured.Posture)
 }
 
 func TestDiffReports_VulnerabilityComparison(t *testing.T) {
@@ -92,6 +99,16 @@ func TestDiffReports_VulnerabilityComparison(t *testing.T) {
 	assert.Equal(t, "CVE-NEW-HIGH", parsed.Vulnerability.New[0].ID)
 	require.Len(t, parsed.Vulnerability.Resolved, 1)
 	assert.Equal(t, "CVE-OLD", parsed.Vulnerability.Resolved[0].ID)
+
+	require.NotNil(t, result.StructuredContent)
+	structured, ok := result.StructuredContent.(diffReportsResult)
+	require.True(t, ok, "StructuredContent must be a diffReportsResult, got %T", result.StructuredContent)
+	assert.Equal(t, "vulnerability", structured.Kind)
+	require.NotNil(t, structured.Vulnerability)
+	require.Len(t, structured.Vulnerability.New, 1)
+	assert.Equal(t, "CVE-NEW-HIGH", structured.Vulnerability.New[0].ID)
+	require.Len(t, structured.Vulnerability.Resolved, 1)
+	assert.Equal(t, "CVE-OLD", structured.Vulnerability.Resolved[0].ID)
 }
 
 func TestDiffReports_MissingReportPathReturnsInvalidArgument(t *testing.T) {

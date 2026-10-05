@@ -84,6 +84,6 @@ func createDiffReportsTools(ksServer *KubescapeMcpserver) {
 		if err != nil {
 			return mcpToolError(ErrCodeMarshalError, fmt.Sprintf("failed to marshal result: %v", err), nil), nil
 		}
-		return mcp.NewToolResultText(string(resBytes)), nil
+		return mcp.NewToolResultStructured(result, string(resBytes)), nil
 	})
 }
