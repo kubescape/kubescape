@@ -423,7 +423,14 @@ func (kd *KustomizeDirectory) GetWorkloads(kustomizeDirectoryPath string) (map[s
 	// This is necessary for overlays that reference base configurations in parent directories.
 	opts := krusty.MakeDefaultOptions()
 	opts.LoadRestrictions = types.LoadRestrictionsNone
-	opts.PluginConfig = types.EnabledPluginConfig(types.BploUseStaticallyLinked)
+	// Builtin plugins only, plus Helm: the equivalent of `kustomize build
+	// --enable-helm`. The Kustomization being rendered comes from the scanned
+	// repository, so allowing other plugins (EnabledPluginConfig, i.e.
+	// --enable-alpha-plugins) would let it start any container image it names
+	// in a config.kubernetes.io/function annotation. The Helm chart inflator is
+	// itself a builtin plugin and keeps working.
+	opts.PluginConfig = types.DisabledPluginConfig()
+	opts.PluginConfig.HelmConfig.Enabled = true
 	helmCommand := "helm"
 	if kd.helmCommand != "" {
 		helmCommand = kd.helmCommand

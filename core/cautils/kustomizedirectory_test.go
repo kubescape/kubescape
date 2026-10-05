@@ -503,3 +503,66 @@ func resolvedTempDir(t *testing.T) string {
 	require.NoError(t, err)
 	return dir
 }
+
+// TestKustomizeDirectoryDoesNotRunKRMFunctions guards against rendering a
+// scanned Kustomization running code it declares. A transformer annotated with
+// config.kubernetes.io/function names a container image that kustomize starts
+// with `docker run` when non-builtin plugins are allowed, so scanning a
+// repository would run whatever image that repository chose. Only kustomize's
+// builtin plugins (which include the Helm chart inflator) may run.
+func TestKustomizeDirectoryDoesNotRunKRMFunctions(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the fake docker below is a shell script")
+	}
+
+	// A docker that only records that it was started.
+	binDir := t.TempDir()
+	invoked := filepath.Join(t.TempDir(), "docker-invoked")
+	script := "#!/bin/sh\necho \"$@\" >> '" + invoked + "'\nexit 1\n"
+	require.NoError(t, os.WriteFile(filepath.Join(binDir, "docker"), []byte(script), 0o600))
+	require.NoError(t, os.Chmod(filepath.Join(binDir, "docker"), 0o700))
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	root := resolvedTempDir(t)
+	files := map[string]string{
+		"kustomization.yaml": "resources:\n- deployment.yaml\ntransformers:\n- function.yaml\n",
+		"deployment.yaml": `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+spec:
+  selector:
+    matchLabels: {app: web}
+  template:
+    metadata:
+      labels: {app: web}
+    spec:
+      containers:
+      - name: web
+        image: nginx
+`,
+		"function.yaml": `apiVersion: example.com/v1
+kind: SetLabels
+metadata:
+  name: set-labels
+  annotations:
+    config.kubernetes.io/function: |
+      container:
+        image: registry.example.com/set-labels:latest
+`,
+	}
+	for name, content := range files {
+		require.NoError(t, os.WriteFile(filepath.Join(root, name), []byte(content), 0o600))
+	}
+
+	kd := NewKustomizeDirectory(root)
+	_, errs := kd.GetWorkloads(root)
+
+	_, statErr := os.Stat(invoked)
+	if statErr == nil {
+		calls, _ := os.ReadFile(invoked)
+		t.Fatalf("rendering the Kustomization started a container: docker %s", strings.TrimSpace(string(calls)))
+	}
+	require.True(t, os.IsNotExist(statErr), statErr)
+	require.NotEmpty(t, errs, "a Kustomization that needs a non-builtin plugin cannot be rendered and must report why")
+}
