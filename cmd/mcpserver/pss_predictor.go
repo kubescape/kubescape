@@ -2,16 +2,14 @@ package mcpserver
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"sort"
 	"strings"
 
 	"github.com/kubescape/kubescape/v4/core/pkg/pss"
 	"github.com/mark3labs/mcp-go/mcp"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/dynamic"
 )
 
@@ -135,81 +133,8 @@ func createPSSPredictorTools(ksServer *KubescapeMcpserver) {
 			selected = deduplicateWorkloads(workloads)
 		}
 
-		sort.Slice(selected, func(i, j int) bool {
-			if selected[i].GetKind() != selected[j].GetKind() {
-				return selected[i].GetKind() < selected[j].GetKind()
-			}
-			return selected[i].GetName() < selected[j].GetName()
-		})
-
-		var (
-			totalCount            = len(selected)
-			passingCount          = 0
-			failingCount          = 0
-			unevaluatedCount      = 0
-			currentEffectiveLevel = pss.Restricted
-			failingWorkloads      = make([]map[string]any, 0)
-			decodeWarnings        []string
-		)
-
-		for _, item := range selected {
-			kind := item.GetKind()
-			name := item.GetName()
-
-			res, err := pss.WorkloadResultFromUnstructured(kind, name, namespace, item.Object, targetLevel)
-			if err != nil {
-				decodeWarnings = append(decodeWarnings, fmt.Sprintf("%s/%s: %v", kind, name, err))
-				unevaluatedCount++
-				continue
-			}
-
-			if res.PassesAt < currentEffectiveLevel {
-				currentEffectiveLevel = res.PassesAt
-			}
-
-			if len(res.Violations) > 0 {
-				failingCount++
-				vSummaries := make([]map[string]any, 0, len(res.Violations))
-				for _, v := range res.Violations {
-					vSummaries = append(vSummaries, map[string]any{
-						"check":       v.Check,
-						"container":   v.Container,
-						"level":       v.Level.String(),
-						"description": v.Description,
-					})
-				}
-				failingWorkloads = append(failingWorkloads, map[string]any{
-					"kind":       res.Kind,
-					"name":       res.Name,
-					"violations": vSummaries,
-					"passes_at":  res.PassesAt.String(),
-				})
-			} else {
-				passingCount++
-			}
-		}
-
-		summary := map[string]any{
-			"total_workloads":         totalCount,
-			"passing":                 passingCount,
-			"failing":                 failingCount,
-			"current_effective_level": currentEffectiveLevel.String(),
-		}
-		if unevaluatedCount > 0 {
-			summary["unevaluated"] = unevaluatedCount
-			summary["current_effective_level_complete"] = false
-		}
-
-		result := map[string]any{
-			"namespace":         namespace,
-			"target_level":      targetLevel.String(),
-			"summary":           summary,
-			"failing_workloads": failingWorkloads,
-		}
-
-		if len(decodeWarnings) > 0 {
-			result["decode_warnings"] = decodeWarnings
-		}
+		nsResult := pss.Aggregate(namespace, selected, targetLevel)
+		result := nsResult.ToMap()
 
 		resBytes, err := jsonMarshal(result)
 		if err != nil {
@@ -220,115 +145,23 @@ func createPSSPredictorTools(ksServer *KubescapeMcpserver) {
 }
 
 func listPSSWorkloads(ctx context.Context, dynClient dynamic.Interface, namespace string, targets []pssWorkloadTarget) ([]unstructured.Unstructured, *mcp.CallToolResult) {
-	var all []unstructured.Unstructured
-	for _, target := range targets {
-		list, err := dynClient.Resource(target.gvr).Namespace(namespace).List(ctx, metav1.ListOptions{})
-		if err != nil {
-			return nil, mcpToolError(classifyScanError(err),
-				fmt.Sprintf("failed to list %s objects: %v", target.kind, err),
-				map[string]any{"resource_type": target.kind, "namespace": namespace})
-		}
-		for i := range list.Items {
-			if list.Items[i].GetKind() == "" {
-				list.Items[i].SetKind(target.kind)
-			}
-			all = append(all, list.Items[i])
-		}
+	pssTargets := make([]pss.WorkloadTarget, len(targets))
+	for i, t := range targets {
+		pssTargets[i] = pss.WorkloadTarget{GVR: t.gvr, Kind: t.kind}
 	}
-	return all, nil
+	workloads, err := pss.FetchNamespaceWorkloads(ctx, dynClient, namespace, pssTargets)
+	if err != nil {
+		var listErr *pss.ListResourceError
+		if errors.As(err, &listErr) {
+			return nil, mcpToolError(classifyScanError(listErr.Err),
+				fmt.Sprintf("failed to list %s objects: %v", listErr.Kind, listErr.Err),
+				map[string]any{"resource_type": listErr.Kind, "namespace": namespace})
+		}
+		return nil, mcpToolError(classifyScanError(err), fmt.Sprintf("failed to list workloads: %v", err), nil)
+	}
+	return workloads, nil
 }
 
-// deduplicateWorkloads filters workloads for namespace-wide scans, deduplicating child
-// workloads (e.g., ReplicaSets and Pods) only when an evaluated supported ancestor
-// actually represents the workload. Custom-owned workloads (e.g., Deployments or Pods
-// managed by CRD operators) and workloads whose controller owners are absent from the
-// scan are retained as roots.
 func deduplicateWorkloads(workloads []unstructured.Unstructured) []unstructured.Unstructured {
-	byUID := make(map[types.UID]int, len(workloads))
-	byKindName := make(map[string]int, len(workloads))
-
-	for i, w := range workloads {
-		if uid := w.GetUID(); uid != "" {
-			byUID[uid] = i
-		}
-		key := fmt.Sprintf("%s/%s", strings.ToLower(w.GetKind()), w.GetName())
-		byKindName[key] = i
-	}
-
-	var selected []unstructured.Unstructured
-	for i, w := range workloads {
-		if hasEvaluatedAncestor(i, workloads, byUID, byKindName) {
-			continue
-		}
-		selected = append(selected, w)
-	}
-	return selected
-}
-
-func getControllerRef(obj unstructured.Unstructured) *metav1.OwnerReference {
-	for _, ref := range obj.GetOwnerReferences() {
-		if ref.Controller != nil && *ref.Controller {
-			r := ref
-			return &r
-		}
-	}
-	return nil
-}
-
-func findParentInWorkloads(ref metav1.OwnerReference, workloads []unstructured.Unstructured, byUID map[types.UID]int, byKindName map[string]int) (int, bool) {
-	if ref.UID != "" {
-		if idx, ok := byUID[ref.UID]; ok {
-			if strings.EqualFold(workloads[idx].GetKind(), ref.Kind) {
-				return idx, true
-			}
-		}
-	}
-	key := fmt.Sprintf("%s/%s", strings.ToLower(ref.Kind), ref.Name)
-	if idx, ok := byKindName[key]; ok {
-		parent := workloads[idx]
-		if ref.UID != "" && parent.GetUID() != "" && ref.UID != parent.GetUID() {
-			return -1, false
-		}
-		return idx, true
-	}
-	return -1, false
-}
-
-func hasEvaluatedAncestor(idx int, workloads []unstructured.Unstructured, byUID map[types.UID]int, byKindName map[string]int) bool {
-	visited := make(map[int]int) // workload index -> step in traversal path
-	var path []int
-
-	curr := idx
-	for {
-		if step, seen := visited[curr]; seen {
-			// Cycle detected in ancestor chain. Designate the lowest index in the cycle
-			// as the evaluated root so that cyclic workloads are not dropped entirely.
-			cycle := path[step:]
-			minIdx := cycle[0]
-			for _, c := range cycle[1:] {
-				if c < minIdx {
-					minIdx = c
-				}
-			}
-			return idx != minIdx
-		}
-
-		visited[curr] = len(path)
-		path = append(path, curr)
-
-		ref := getControllerRef(workloads[curr])
-		if ref == nil {
-			// No controller parent. If curr != idx, curr is the evaluated root ancestor.
-			return curr != idx
-		}
-
-		parentIdx, found := findParentInWorkloads(*ref, workloads, byUID, byKindName)
-		if !found {
-			// Controller parent is an unsupported kind (custom resource) or absent from the scan.
-			// If curr != idx, curr is the evaluated root ancestor.
-			return curr != idx
-		}
-
-		curr = parentIdx
-	}
+	return pss.DeduplicateWorkloads(workloads)
 }

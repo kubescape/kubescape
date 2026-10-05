@@ -1349,6 +1349,65 @@ kubescape mcpserver
 
 ---
 
+## kubescape predict pss
+
+Predict Kubernetes Pod Security Standards (PSS) compliance for workloads in a live cluster namespace or local manifest files without modifying cluster admission configurations.
+
+### Synopsis
+
+```bash
+kubescape predict pss [<path>...] [flags]
+```
+
+### Description
+
+Evaluates workloads against the official Kubernetes Pod Security Standards (Privileged, Baseline, Restricted) according to PSS v1.37 specifications. When invoked without path arguments, it connects to the cluster and evaluates all workloads in the specified namespace, automatically deduplicating child resources (e.g., ReplicaSets and Pods managed by Deployments). When given file paths or directories, it parses local YAML/JSON manifests and evaluates them directly.
+
+This answers the critical hardening question: *"What would break if I enforced Baseline or Restricted on this namespace?"*
+
+### Flags
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `-n, --namespace <string>` | Namespace to evaluate (required in cluster mode; filters by namespace if specified in local mode) | - |
+| `--level <string>` | Target PSS level to evaluate against: `Privileged`, `Baseline`, `Restricted` | `Restricted` |
+| `--workload <string>` | Filter evaluation to a specific workload (`Kind/Name` or bare `Name`) | - |
+| `-f, --format <string>` | Output format: `pretty-printer`, `json`, `table`, `sarif`, `junit` | `pretty-printer` |
+| `-o, --output <path>` | Write output to file instead of stdout | stdout |
+| `-v, --verbose` | Show passing workloads in addition to failing ones | `false` |
+
+### Examples
+
+```bash
+# Predict Restricted compliance for all workloads in production namespace
+kubescape predict pss -n production
+
+# Check if a namespace is ready for Baseline enforcement
+kubescape predict pss -n staging --level Baseline
+
+# Check a specific workload before applying hardening changes
+kubescape predict pss -n production --workload Deployment/web-api
+
+# Predict compliance for local YAML manifest files
+kubescape predict pss ./manifests/
+
+# Output machine-readable JSON report
+kubescape predict pss -n production -f json -o pss-report.json
+
+# Generate JUnit XML report for CI/CD pipeline gating
+kubescape predict pss ./deploy/ -f junit -o pss-results.xml
+
+# Generate SARIF report for GitHub Code Scanning integration
+kubescape predict pss ./k8s/ -f sarif -o pss.sarif
+```
+
+### Exit Codes
+
+- `0`: All evaluated workloads pass at the target PSS level.
+- `1`: One or more workloads fail the target PSS level, or an error occurred.
+
+---
+
 ## kubescape version
 
 Display version information.
@@ -1452,3 +1511,4 @@ Kubescape respects the following environment variables:
 - [Architecture](architecture.md)
 - [Troubleshooting](troubleshooting.md)
 - [MCP Server Documentation](mcp-server.md)
+- [Pod Security Standards Predictor](pss-predictor.md)
