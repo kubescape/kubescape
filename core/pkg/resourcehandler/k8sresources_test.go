@@ -9,6 +9,7 @@ import (
 
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/stretchr/testify/assert"
 	v1 "k8s.io/api/core/v1"
 )
@@ -684,4 +685,78 @@ func Test_isMasterNodeTaints(t *testing.T) {
 			assert.Equal(t, tt.want, isMasterNodeTaints(tt.taints))
 		})
 	}
+}
+
+// TestDescribeRepositoriesAzureRequiresRegoSupport is a regression guard for
+// issue #3839. Adding "management.azure.com/v1" to DescribeRepositories before
+// the ensure-image-scanning-enabled-cloud Rego rule supports AKS/ACR causes a
+// coverage accounting bug: insertControls registers a third GVR dependency for
+// the control that rule-driven collection never fetches, so BuildScanCoverage
+// never sees it fail, breaking the "all deps must fail" check.
+//
+// Remove this guard and add Azure to the mapping once:
+//  1. The regolibrary's ensure-image-scanning-enabled-cloud rule.metadata.json
+//     includes "management.azure.com" in dynamicMatch.apiGroups and "AKS" in
+//     relevantCloudProviders, AND
+//  2. raw.rego contains a deny rule for AKS/ACR with test fixtures.
+func TestDescribeRepositoriesAzureRequiresRegoSupport(t *testing.T) {
+	azureAPIGroup := "management.azure.com/v1"
+
+	groups, ok := MapResourceToApiGroupCloud[DescribeRepositories]
+	assert.True(t, ok, "DescribeRepositories should be present in MapResourceToApiGroupCloud")
+
+	// Azure must NOT be present until the Rego rule supports it.
+	assert.NotContains(t, groups, azureAPIGroup,
+		"DescribeRepositories must not include Azure (management.azure.com/v1) until "+
+			"the ensure-image-scanning-enabled-cloud Rego rule supports AKS/ACR; "+
+			"see issue #3839 and the TODO in the mapping")
+
+	// GCP and EKS must still be present.
+	assert.Contains(t, groups, "container.googleapis.com/v1",
+		"DescribeRepositories should support GCP")
+	assert.Contains(t, groups, "eks.amazonaws.com/v1",
+		"DescribeRepositories should support AWS EKS")
+
+	// Demonstrate the coverage bug: if Azure were added, a control depending
+	// on DescribeRepositories would have 3 GVR dependencies. When only 2 fail
+	// (EKS and GCP — the ones actually fetched), the Azure GVR is never in
+	// the failed set because it was never attempted. BuildScanCoverage requires
+	// ALL deps to fail, so the control incorrectly stays "evaluated".
+	fakeControlID := "C-0221"
+	resourceToControlsMap := map[string][]string{
+		"eks.amazonaws.com/v1/DescribeRepositories":        {fakeControlID},
+		"container.googleapis.com/v1/DescribeRepositories": {fakeControlID},
+		// If Azure were added, this third entry would exist:
+		// "management.azure.com/v1/DescribeRepositories":  {fakeControlID},
+	}
+	infoMap := map[string]apis.StatusInfo{
+		"eks.amazonaws.com/v1/DescribeRepositories":        {InnerStatus: apis.StatusSkipped, InnerInfo: "cloud fetch failed"},
+		"container.googleapis.com/v1/DescribeRepositories": {InnerStatus: apis.StatusSkipped, InnerInfo: "cloud fetch failed"},
+	}
+	coverage := cautils.BuildScanCoverage(infoMap, resourceToControlsMap, nil, nil, nil, nil)
+
+	// With only 2 GVRs (correct state): both fail → control is NotEvaluated. ✓
+	controlIDs := make(map[string]struct{})
+	for _, ne := range coverage.NotEvaluatedControls {
+		controlIDs[ne.ControlID] = struct{}{}
+	}
+	assert.Contains(t, controlIDs, fakeControlID,
+		"when all DescribeRepositories GVRs fail, the control should be NotEvaluated")
+
+	// Now simulate what happens if Azure is added but never fetched:
+	resourceToControlsMapWithAzure := map[string][]string{
+		"eks.amazonaws.com/v1/DescribeRepositories":        {fakeControlID},
+		"container.googleapis.com/v1/DescribeRepositories": {fakeControlID},
+		"management.azure.com/v1/DescribeRepositories":     {fakeControlID}, // premature
+	}
+	coverageWithAzure := cautils.BuildScanCoverage(infoMap, resourceToControlsMapWithAzure, nil, nil, nil, nil)
+
+	// With 3 GVRs but only 2 failed: Azure never failed → control stays evaluated. ✗
+	azureControlIDs := make(map[string]struct{})
+	for _, ne := range coverageWithAzure.NotEvaluatedControls {
+		azureControlIDs[ne.ControlID] = struct{}{}
+	}
+	assert.NotContains(t, azureControlIDs, fakeControlID,
+		"BUG DEMONSTRATION: with Azure GVR added but never fetched, "+
+			"the control incorrectly stays evaluated — this is why the TODO exists")
 }
