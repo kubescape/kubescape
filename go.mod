@@ -30,7 +30,7 @@ require (
 	github.com/deckarep/golang-set/v2 v2.9.0
 	github.com/distribution/reference v0.6.0
 	github.com/docker/buildx v0.33.0
-	github.com/docker/cli v29.7.2+incompatible
+	github.com/docker/cli v29.8.2+incompatible
 	github.com/docker/distribution v2.8.3+incompatible
 	github.com/edsrzf/mmap-go v1.2.0
 	github.com/enescakir/emoji v1.0.0
