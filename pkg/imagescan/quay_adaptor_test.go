@@ -762,6 +762,27 @@ func TestQuayAdaptor_GetImagesVulnerabilities(t *testing.T) {
 			{"none", "Negligible"},
 			{"unknown", "Unknown"},
 			{"unrecognized_severity_xyz", "Unknown"},
+			// Defensive RHSA vendor labels
+			{"important", "High"},
+			{"Important", "High"},
+			{"moderate", "Medium"},
+			{"Moderate", "Medium"},
+			// Mixed-case edge cases
+			{"dEfCoN1", "Critical"},
+			{"iMpOrTaNt", "High"},
+			{"cRiTiCaL", "Critical"},
+			{"mEdIuM", "Medium"},
+			// Whitespace handling
+			{"  High  ", "High"},
+			{"\tLow\t", "Low"},
+			{"  Critical  ", "Critical"},
+			// Empty and whitespace-only strings
+			{"", "Unknown"},
+			{"   ", "Unknown"},
+			// Made-up labels -> graceful fallback
+			{"Catastrophic", "Unknown"},
+			{"SuperBad", "Unknown"},
+			{"level9000", "Unknown"},
 		}
 
 		for _, s := range severities {
