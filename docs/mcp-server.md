@@ -297,6 +297,52 @@ Run an on-demand container image vulnerability scan and return structured JSON c
 }
 ```
 
+### Report Comparison Tools
+
+#### `diff_reports`
+
+Compare two already-produced Kubescape scan report files (JSON) and return what changed, reusing the same comparison engine as `kubescape diff`/`--baseline`. Works for posture reports (`kubescape scan --format json`), reporting new, resolved, unchanged, and incomparable control failures, and for image vulnerability reports (`kubescape scan image --format json`), reporting new, resolved, and unchanged CVEs. Both reports must be the same kind; comparing a posture report against a vulnerability report is rejected rather than silently treated as comparable.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `base_report` | string | Yes | Path to the baseline/base Kubescape scan report JSON file |
+| `head_report` | string | Yes | Path to the current/head Kubescape scan report JSON file |
+
+**Example use case:** "What changed between these two Kubescape reports?"
+
+**Example Response (posture reports):**
+```json
+{
+  "kind": "posture",
+  "base_report": "base.json",
+  "head_report": "head.json",
+  "posture": {
+    "new": [{"resourceID": "...", "controlID": "C-0001", "severity": "High", "baseStatus": "passed", "headStatus": "failed"}],
+    "resolved": [],
+    "unchanged": [],
+    "incomparable": []
+  }
+}
+```
+
+**Example Response (image vulnerability reports):**
+```json
+{
+  "kind": "vulnerability",
+  "base_report": "base-image.json",
+  "head_report": "head-image.json",
+  "vulnerability": {
+    "baseImages": ["app:1.0"],
+    "headImages": ["app:1.1"],
+    "new": [{"id": "CVE-NEW-HIGH", "severity": "High", "package": "curl", "version": "1.0"}],
+    "resolved": [{"id": "CVE-OLD", "severity": "High", "package": "openssl", "version": "3.0.1"}],
+    "unchanged": []
+  }
+}
+```
+
 ## Resource Templates
 
 The MCP server also exposes resource templates for direct access to data:
@@ -353,6 +399,7 @@ Once connected, you can ask your AI assistant questions like:
 - "What configuration issues does my cluster have?"
 - "Which workloads have the most security issues?"
 - "Give me details about CVE-2023-12345 in my cluster"
+- "What changed between these two Kubescape reports?"
 
 ## Troubleshooting
 
