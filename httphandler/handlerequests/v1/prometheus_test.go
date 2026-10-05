@@ -8,7 +8,9 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -74,10 +76,11 @@ func TestGetPrometheusDefaultScanCommand(t *testing.T) {
 	}
 }
 
-// TestMetrics_ScanContextDecoupledFromRequest ensures the metrics scan is not
-// aborted when the scrape request context is cancelled (e.g. a Prometheus
-// scrape timeout): the scan must keep running to completion.
-func TestMetrics_ScanContextDecoupledFromRequest(t *testing.T) {
+// TestMetrics_ClientDisconnectCancelsScan ensures the metrics scan is aborted
+// when the scrape request context is cancelled (e.g. a Prometheus scrape timeout)
+// so abandoned scrapes do not continue consuming scan worker resources.
+func TestMetrics_ClientDisconnectCancelsScan(t *testing.T) {
+	withTempOutputDirs(t)
 	synctest.Test(t, func(t *testing.T) {
 		defer func(o scanner) { scanImpl = o }(scanImpl)
 		scanCtxErr := make(chan error, 1)
@@ -85,8 +88,9 @@ func TestMetrics_ScanContextDecoupledFromRequest(t *testing.T) {
 		reqCtx, cancel := context.WithCancel(context.Background())
 		scanImpl = func(ctx context.Context, _ *cautils.ScanInfo, _ []cautils.PolicyIdentifier, _ string, _ bool) (*reporthandlingv2.PostureReport, error) {
 			cancel() // simulate the scrape connection going away mid-scan
+			<-ctx.Done()
 			scanCtxErr <- ctx.Err()
-			return nil, nil
+			return nil, ctx.Err()
 		}
 
 		h := NewHTTPHandler(false)
@@ -101,7 +105,7 @@ func TestMetrics_ScanContextDecoupledFromRequest(t *testing.T) {
 
 		select {
 		case err := <-scanCtxErr:
-			assert.NoError(t, err, "scan context must not be cancelled when the request context is")
+			assert.ErrorIs(t, err, context.Canceled, "scan context must be cancelled when the request context is")
 		case <-time.After(5 * time.Second):
 			t.Fatal("scan was not invoked")
 		}
@@ -114,6 +118,72 @@ func TestMetrics_ScanContextDecoupledFromRequest(t *testing.T) {
 		assert.NoError(t, h.Shutdown(context.Background(), time.Second))
 		// Join response cleanup before the next test changes the output directories.
 		synctest.Wait()
+	})
+}
+
+// TestMetrics_ClientDisconnectSkipsQueuedScan ensures that a queued metrics scan
+// is skipped if the client disconnects before the worker picks it up.
+func TestMetrics_ClientDisconnectSkipsQueuedScan(t *testing.T) {
+	withTempOutputDirs(t)
+	synctest.Test(t, func(t *testing.T) {
+		defer func(o scanner) { scanImpl = o }(scanImpl)
+
+		var once sync.Once
+		firstScanStarted := make(chan struct{})
+		firstScanRelease := make(chan struct{})
+		var secondScanInvoked atomic.Bool
+
+		scanImpl = func(ctx context.Context, _ *cautils.ScanInfo, _ []cautils.PolicyIdentifier, _ string, _ bool) (*reporthandlingv2.PostureReport, error) {
+			var wasFirst bool
+			once.Do(func() {
+				wasFirst = true
+				close(firstScanStarted)
+			})
+			if wasFirst {
+				<-firstScanRelease
+				return nil, nil
+			}
+			secondScanInvoked.Store(true)
+			return nil, nil
+		}
+
+		h := NewHTTPHandler(false)
+
+		// Start first scan to keep worker busy
+		go func() {
+			w := httptest.NewRecorder()
+			rq := httptest.NewRequest(http.MethodPost, "/v1/scan?wait=true", strings.NewReader(`{}`))
+			h.Scan(w, rq)
+		}()
+
+		<-firstScanStarted
+
+		// Second request arrives for /v1/metrics and gets queued
+		reqCtx, cancel := context.WithCancel(context.Background())
+		metricsDone := make(chan struct{})
+		go func() {
+			w := httptest.NewRecorder()
+			rq := httptest.NewRequest(http.MethodGet, "/v1/metrics", nil).WithContext(reqCtx)
+			h.Metrics(w, rq)
+			close(metricsDone)
+		}()
+
+		// Client disconnects while queued
+		cancel()
+
+		select {
+		case <-metricsDone:
+		case <-time.After(5 * time.Second):
+			t.Fatal("metrics handler did not unblock on cancellation")
+		}
+
+		// Release first scan so worker can dequeue second scan
+		close(firstScanRelease)
+
+		assert.NoError(t, h.Shutdown(context.Background(), time.Second))
+		synctest.Wait()
+
+		assert.False(t, secondScanInvoked.Load(), "queued metrics scan must be skipped when client disconnected")
 	})
 }
 
