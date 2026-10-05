@@ -81,8 +81,9 @@ func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo, policyIdenti
 		if k8s == nil {
 			// Return rather than terminate: Scan already propagates this to the
 			// caller, and the command layer still exits non-zero on it.
-			span.RecordError(ErrClusterConnection)
-			return componentInterfaces{}, ErrClusterConnection
+			err := clusterConnectionError()
+			span.RecordError(err)
+			return componentInterfaces{}, err
 		}
 		k8sClient = k8s.KubernetesClient
 	}

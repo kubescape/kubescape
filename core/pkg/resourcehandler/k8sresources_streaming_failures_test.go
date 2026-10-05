@@ -1,10 +1,15 @@
 package resourcehandler
 
 import (
+	"bufio"
 	"context"
+	"errors"
 	"fmt"
+	"net"
+	"net/http"
 	"testing"
 
+	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/metrics"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
@@ -17,7 +22,9 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/dynamic"
 	fakeclientset "k8s.io/client-go/kubernetes/fake"
+	"k8s.io/client-go/rest"
 	k8stesting "k8s.io/client-go/testing"
 )
 
@@ -78,6 +85,171 @@ func TestCollectAndStreamBatches_FailsWhenAllQueriesFail(t *testing.T) {
 	require.True(t, ok, "the failed GVR must be available to scan coverage")
 	assert.Equal(t, apis.StatusSkipped, info.InnerStatus)
 	assert.Equal(t, apis.SubStatusNotEvaluated, info.SubStatus)
+}
+
+func TestCollectAndStreamBatches_AllQueriesFailedKeepsEachQueryError(t *testing.T) {
+	ctx := context.Background()
+	refused := &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("connect: connection refused")}
+	handler := newHandlerWithReactor(t, func(action k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, refused
+	})
+	scanInfo, session := streamingTestSession(ctx)
+	namespaced := true
+	const podsGVR = "/v1/pods"
+	queryable := QueryableResources{
+		podsGVR: {
+			GroupVersionResourceTriplet: podsGVR,
+			Namespaced:                  &namespaced,
+		},
+	}
+
+	err := handler.collectAndStreamBatches(
+		ctx,
+		queryable,
+		&EmptySelector{},
+		session,
+		scanInfo,
+		cautils.ExternalResources{},
+		make(chan *cautils.ResourceBatch, 2),
+		nil,
+	)
+
+	require.ErrorIs(t, err, ErrNoResourcesCollected)
+	var opErr *net.OpError
+	require.ErrorAs(t, err, &opErr, "the network error behind each failed query must stay reachable")
+	assert.Same(t, refused, opErr)
+	assert.False(t, apiServerAnswered(t, err), "no query got a response")
+}
+
+func TestCollectAndStreamBatches_AnswerEvidenceDoesNotCarryAcrossCollections(t *testing.T) {
+	ctx := context.Background()
+	refuseAll := false
+	handler := newHandlerWithReactor(t, func(action k8stesting.Action) (bool, runtime.Object, error) {
+		if !refuseAll && action.GetResource().Resource == "pods" {
+			return true, &unstructured.UnstructuredList{}, nil
+		}
+		return true, nil, &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("connect: connection refused")}
+	})
+	namespaced := true
+	queryable := QueryableResources{
+		"/v1/pods":            {GroupVersionResourceTriplet: "/v1/pods", Namespaced: &namespaced},
+		"apps/v1/deployments": {GroupVersionResourceTriplet: "apps/v1/deployments", Namespaced: &namespaced},
+	}
+	collect := func() error {
+		scanInfo, session := streamingTestSession(ctx)
+		return handler.collectAndStreamBatches(ctx, queryable, &EmptySelector{}, session, scanInfo,
+			cautils.ExternalResources{}, make(chan *cautils.ResourceBatch, 2), nil)
+	}
+
+	require.True(t, apiServerAnswered(t, collect()), "the first collection got a response")
+
+	refuseAll = true
+	assert.False(t, apiServerAnswered(t, collect()), "an answer from an earlier collection says nothing about this one")
+}
+
+// answerOnceThenGoAway serves a single response with the given status and an
+// immediate Retry-After, then stops listening, so client-go's retry of that
+// response is refused and the List call returns only the dial error.
+func answerOnceThenGoAway(t *testing.T, status int) string {
+	t.Helper()
+	listener, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = listener.Close() })
+
+	go func() {
+		defer listener.Close()
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		if _, err := http.ReadRequest(bufio.NewReader(conn)); err != nil {
+			return
+		}
+		fmt.Fprintf(conn, "HTTP/1.1 %d %s\r\nRetry-After: 0\r\nContent-Length: 0\r\nConnection: close\r\n\r\n", status, http.StatusText(status))
+	}()
+
+	return "http://" + listener.Addr().String()
+}
+
+// newHandlerForHost builds a handler whose dynamic client talks to host over
+// real HTTP, so client-go's own retry behaviour is part of the test.
+func newHandlerForHost(t *testing.T, host string) *K8sResourceHandler {
+	t.Helper()
+	dynamicClient, err := dynamic.NewForConfig(&rest.Config{Host: host})
+	require.NoError(t, err)
+	client := fakeclientset.NewClientset()
+	return NewK8sResourceHandler(context.Background(), &k8sinterface.KubernetesApi{
+		KubernetesClient: client,
+		DynamicClient:    dynamicClient,
+		DiscoveryClient:  client.Discovery(),
+		Context:          context.Background(),
+	}, nil, nil, "test-cluster")
+}
+
+func TestCollectAndStreamBatches_AnswerSurvivesClientGoRetry(t *testing.T) {
+	for _, status := range []int{http.StatusServiceUnavailable, http.StatusTooManyRequests} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			ctx := context.Background()
+			handler := newHandlerForHost(t, answerOnceThenGoAway(t, status))
+			scanInfo, session := streamingTestSession(ctx)
+			namespaced := true
+			queryable := QueryableResources{
+				"/v1/pods": {GroupVersionResourceTriplet: "/v1/pods", Namespaced: &namespaced},
+			}
+
+			err := handler.collectAndStreamBatches(ctx, queryable, &EmptySelector{}, session, scanInfo,
+				cautils.ExternalResources{}, make(chan *cautils.ResourceBatch, 2), nil)
+
+			require.ErrorIs(t, err, ErrNoResourcesCollected)
+			var opErr *net.OpError
+			require.ErrorAs(t, err, &opErr, "the retry's refused dial is all the error itself carries")
+			assert.Equal(t, "dial", opErr.Op)
+			assert.True(t, apiServerAnswered(t, err), "the server answered before client-go retried")
+		})
+	}
+}
+
+func TestCollectAndStreamBatches_AnsweredQueryIsNotLostAmongNetworkFailures(t *testing.T) {
+	answers := map[string]func() (runtime.Object, error){
+		"empty list": func() (runtime.Object, error) { return &unstructured.UnstructuredList{}, nil },
+		"not found": func() (runtime.Object, error) {
+			return nil, apierrors.NewNotFound(schema.GroupResource{Resource: "pods"}, "")
+		},
+	}
+
+	for name, answer := range answers {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			handler := newHandlerWithReactor(t, func(action k8stesting.Action) (bool, runtime.Object, error) {
+				if action.GetResource().Resource == "pods" {
+					obj, err := answer()
+					return true, obj, err
+				}
+				return true, nil, &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("connect: connection refused")}
+			})
+			scanInfo, session := streamingTestSession(ctx)
+			namespaced := true
+			queryable := QueryableResources{
+				"/v1/pods":            {GroupVersionResourceTriplet: "/v1/pods", Namespaced: &namespaced},
+				"apps/v1/deployments": {GroupVersionResourceTriplet: "apps/v1/deployments", Namespaced: &namespaced},
+			}
+
+			err := handler.collectAndStreamBatches(
+				ctx,
+				queryable,
+				&EmptySelector{},
+				session,
+				scanInfo,
+				cautils.ExternalResources{},
+				make(chan *cautils.ResourceBatch, 2),
+				nil,
+			)
+
+			require.ErrorIs(t, err, ErrNoResourcesCollected)
+			assert.True(t, apiServerAnswered(t, err), "the pods query got a response, so the API server answered")
+		})
+	}
 }
 
 func TestCollectAndStreamBatches_IgnoresMissingOptionalResource(t *testing.T) {

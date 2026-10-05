@@ -16,6 +16,7 @@ import (
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/meta"
+	"github.com/kubescape/kubescape/v4/core/pkg/fleet"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling"
 )
 
@@ -297,6 +298,69 @@ func TestRunFleetContext_HonorsPerClusterTimeoutAndRestoresContext(t *testing.T)
 	assert.Equal(t, "ambient", k8sinterface.GetContextName())
 	require.NotNil(t, runnerContext)
 	assert.ErrorIs(t, runnerContext.Err(), context.DeadlineExceeded)
+}
+
+// TestRunFleetContext_MarksOnlyInterruptedRuns pins that a cluster is reported
+// cancelled because its run was stopped, not because its error looks like a
+// deadline: a dial that times out matches context.DeadlineExceeded too.
+func TestRunFleetContext_MarksOnlyInterruptedRuns(t *testing.T) {
+	installLifecycleKubeconfig(t, "ambient", "target")
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	timedOut := dialTimeout(t)
+
+	tests := []struct {
+		name       string
+		parent     context.Context
+		timeout    time.Duration
+		runErr     func(ctx context.Context) error
+		wantStatus fleet.ClusterScanStatus
+	}{
+		{
+			name:    "scan timeout fired",
+			parent:  context.Background(),
+			timeout: 25 * time.Millisecond,
+			runErr: func(ctx context.Context) error {
+				<-ctx.Done()
+				return fmt.Errorf("scan aborted: %w", ctx.Err())
+			},
+			wantStatus: fleet.ClusterCancelled,
+		},
+		{
+			name:       "run stopped by a signal",
+			parent:     cancelled,
+			timeout:    time.Minute,
+			runErr:     func(ctx context.Context) error { return fmt.Errorf("scan aborted: %w", ctx.Err()) },
+			wantStatus: fleet.ClusterCancelled,
+		},
+		{
+			name:    "dial timed out while the run was live",
+			parent:  context.Background(),
+			timeout: time.Minute,
+			runErr: func(context.Context) error {
+				return collectionFailure{timedOut}
+			},
+			wantStatus: fleet.ClusterUnreachable,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			info := lifecycleScanInfo(t, "target")
+			info.ScanTimeout = tt.timeout
+			ks := &lifecycleContextKubescape{ctx: tt.parent}
+
+			results, elapsed, err := runFleetContext("target", info, ks, nil,
+				func(ctx context.Context, _ *cautils.ScanInfo, _ meta.IKubescape, _ []cautils.PolicyIdentifier) (*resultshandling.ResultsHandler, error) {
+					return nil, tt.runErr(ctx)
+				})
+
+			require.Error(t, err)
+			got := newClusterResult("target", results, err, elapsed)
+			assert.Equal(t, tt.wantStatus, got.Status)
+			assert.Equal(t, err.Error(), got.Error, "marking the run as interrupted must not change its message")
+		})
+	}
 }
 
 func TestRunFleetContext_PropagatesCancelledParentContext(t *testing.T) {
