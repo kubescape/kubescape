@@ -217,3 +217,39 @@ func TestAnalyzeRBACEscalationPaths_UserSubjectNeedsNoNamespace(t *testing.T) {
 	require.Equal(t, "User alice", parsed["subject"])
 	require.Len(t, parsed["reached"].([]any), 1)
 }
+
+// A RoleBinding subject that names a ServiceAccount without a namespace is
+// resolved by the API server in the RoleBinding's namespace. The tool has to
+// follow such a binding, or it reports no escalation for an account that has one.
+func TestAnalyzeRBACEscalationPaths_UnqualifiedServiceAccountSubjectIsFollowed(t *testing.T) {
+	attackerSA := unstructuredServiceAccount("payments", "worker")
+	targetSA := unstructuredServiceAccount("payments", "target")
+	impersonator := unstructuredClusterRole("impersonator", unstructuredPolicyRule([]string{""}, []string{"serviceaccounts"}, []string{"impersonate"}, []string{"target"}))
+	rb := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "rbac.authorization.k8s.io/v1",
+		"kind":       "RoleBinding",
+		"metadata":   map[string]any{"name": "rb", "namespace": "payments"},
+		"roleRef": map[string]any{
+			"apiGroup": "rbac.authorization.k8s.io",
+			"kind":     "ClusterRole",
+			"name":     "impersonator",
+		},
+		"subjects": []any{
+			map[string]any{"kind": "ServiceAccount", "name": "worker"},
+		},
+	}}
+	ksServer := newRBACEscalationTestServer(t, attackerSA, targetSA, impersonator, rb)
+
+	result := registeredToolResult(t, dispatchRegisteredTool(t, ksServer, "analyze_rbac_escalation_paths", map[string]any{
+		"subject_kind": "ServiceAccount",
+		"namespace":    "payments",
+		"name":         "worker",
+	}))
+	require.False(t, result.IsError)
+
+	var parsed map[string]any
+	require.NoError(t, json.Unmarshal([]byte(toolResultText(t, result)), &parsed))
+	reached := parsed["reached"].([]any)
+	require.Len(t, reached, 1)
+	require.Equal(t, "ServiceAccount payments/target", reached[0].(map[string]any)["subject"])
+}

@@ -67,7 +67,7 @@ func roleKey(namespace, name string) string {
 func (idx *Index) DirectRules(subject Subject) []ScopedRule {
 	var out []ScopedRule
 	for _, crb := range idx.clusterRoleBindings {
-		if !bindingNamesSubject(crb.Subjects, subject) {
+		if !bindingNamesSubject(crb.Subjects, "", subject) {
 			continue
 		}
 		if cr, ok := idx.clusterRoles[crb.RoleRef.Name]; ok {
@@ -77,7 +77,7 @@ func (idx *Index) DirectRules(subject Subject) []ScopedRule {
 		}
 	}
 	for _, rb := range idx.roleBindings {
-		if !bindingNamesSubject(rb.Subjects, subject) {
+		if !bindingNamesSubject(rb.Subjects, rb.Namespace, subject) {
 			continue
 		}
 		switch rb.RoleRef.Kind {
@@ -110,12 +110,25 @@ func (idx *Index) DirectRules(subject Subject) []ScopedRule {
 // Missing this is a real, well-known misconfiguration source: binding a
 // privileged ClusterRole to system:serviceaccounts grants it to every
 // ServiceAccount in the cluster.
-func bindingNamesSubject(subjects []rbacv1.Subject, subject Subject) bool {
+//
+// bindingNamespace is the namespace of the RoleBinding the subjects belong
+// to, or "" for a ClusterRoleBinding. A ServiceAccount subject may leave its
+// namespace out, and the API server then resolves it in the RoleBinding's
+// namespace; a ClusterRoleBinding has none to resolve it in, so there such a
+// subject matches nobody. This follows appliesToUser in Kubernetes'
+// pkg/registry/rbac/validation.
+func bindingNamesSubject(subjects []rbacv1.Subject, bindingNamespace string, subject Subject) bool {
 	for _, s := range subjects {
 		switch subject.Kind {
 		case KindServiceAccount:
-			if s.Kind == "ServiceAccount" && s.Name == subject.Name && s.Namespace == subject.Namespace {
-				return true
+			if s.Kind == "ServiceAccount" && s.Name == subject.Name {
+				saNamespace := s.Namespace
+				if saNamespace == "" {
+					saNamespace = bindingNamespace
+				}
+				if saNamespace != "" && saNamespace == subject.Namespace {
+					return true
+				}
 			}
 			if s.Kind == "Group" && (s.Name == "system:serviceaccounts" ||
 				s.Name == "system:serviceaccounts:"+subject.Namespace ||
