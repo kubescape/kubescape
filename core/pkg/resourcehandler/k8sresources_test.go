@@ -724,13 +724,13 @@ func TestDescribeRepositoriesAzureRequiresRegoSupport(t *testing.T) {
 	// ALL deps to fail, so the control incorrectly stays "evaluated".
 	fakeControlID := "C-0221"
 	resourceToControlsMap := map[string][]string{
-		"eks.amazonaws.com/v1/DescribeRepositories":       {fakeControlID},
+		"eks.amazonaws.com/v1/DescribeRepositories":        {fakeControlID},
 		"container.googleapis.com/v1/DescribeRepositories": {fakeControlID},
 		// If Azure were added, this third entry would exist:
 		// "management.azure.com/v1/DescribeRepositories":  {fakeControlID},
 	}
 	infoMap := map[string]apis.StatusInfo{
-		"eks.amazonaws.com/v1/DescribeRepositories":       {InnerStatus: apis.StatusSkipped, InnerInfo: "cloud fetch failed"},
+		"eks.amazonaws.com/v1/DescribeRepositories":        {InnerStatus: apis.StatusSkipped, InnerInfo: "cloud fetch failed"},
 		"container.googleapis.com/v1/DescribeRepositories": {InnerStatus: apis.StatusSkipped, InnerInfo: "cloud fetch failed"},
 	}
 	coverage := cautils.BuildScanCoverage(infoMap, resourceToControlsMap, nil, nil, nil, nil)
@@ -745,9 +745,9 @@ func TestDescribeRepositoriesAzureRequiresRegoSupport(t *testing.T) {
 
 	// Now simulate what happens if Azure is added but never fetched:
 	resourceToControlsMapWithAzure := map[string][]string{
-		"eks.amazonaws.com/v1/DescribeRepositories":       {fakeControlID},
+		"eks.amazonaws.com/v1/DescribeRepositories":        {fakeControlID},
 		"container.googleapis.com/v1/DescribeRepositories": {fakeControlID},
-		"management.azure.com/v1/DescribeRepositories":    {fakeControlID}, // premature
+		"management.azure.com/v1/DescribeRepositories":     {fakeControlID}, // premature
 	}
 	coverageWithAzure := cautils.BuildScanCoverage(infoMap, resourceToControlsMapWithAzure, nil, nil, nil, nil)
 
