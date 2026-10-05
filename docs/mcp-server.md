@@ -392,6 +392,7 @@ kubescape version
 - It provides read-only access to vulnerability and configuration data
 - No cluster modifications are made through the MCP server
 - Consider running with a service account that has limited permissions in production
+- **SSE Transport**: `kubescape mcpserver -t sse` listens on `127.0.0.1` only and answers `403 Forbidden` to any request whose `Origin` header names a site other than this machine, so web pages open in your browser cannot reach the server. MCP clients that are not browsers send no `Origin` header and are not affected; browser-based clients must be served from `localhost` or a loopback address.
 - **Credential Handling**: The `scan_container_image` tool accepts optional registry credentials (`username` and `password`). Be aware that parameters supplied to MCP tools may be retained in client conversation logs or model contexts depending on your client environment.
 - **Image Reference Validation**: The `scan_container_image` tool validates image names as remote image references and rejects local file paths and scheme prefixes (such as `dir:`, `file:`, `sbom:`) to prevent unauthorized local filesystem access.
 - **Air-Gapped Environments**: In air-gapped environments, set the `KS_GRYPE_LISTING_URL` environment variable to point to your internal Grype vulnerability database mirror listing URL.

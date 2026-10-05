@@ -1,0 +1,28 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: compliant-deployment
+  namespace: test-pss
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: compliant
+  template:
+    metadata:
+      labels:
+        app: compliant
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: main
+        image: nginx:latest
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL

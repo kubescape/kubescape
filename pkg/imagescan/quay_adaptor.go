@@ -14,6 +14,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 )
 
 var _ IContainerImageVulnerabilityAdaptor = (*QuayAdaptor)(nil)
@@ -1402,7 +1405,12 @@ func normalizeQuaySeverity(severity string) string {
 	case "defcon1":
 		return "Critical"
 	default:
-		return NormalizeSeverity(s)
+		normalized := NormalizeSeverity(s)
+		if normalized == "Unknown" && s != "" {
+			logger.L().Debug("unrecognized Quay severity label, defaulting to Unknown",
+				helpers.String("rawSeverity", severity))
+		}
+		return normalized
 	}
 }
 
