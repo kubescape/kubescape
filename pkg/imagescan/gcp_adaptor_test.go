@@ -20,6 +20,7 @@ import (
 type mockGCPClient struct {
 	occurrences  []*grafeaspb.Occurrence
 	mockErr      error
+	errorAfter   int
 	lastReq      *grafeaspb.ListOccurrencesRequest
 	lastIterator *mockGrafeasIterator
 }
@@ -29,6 +30,7 @@ func (m *mockGCPClient) ListOccurrences(ctx context.Context, req *grafeaspb.List
 	it := &mockGrafeasIterator{
 		occurrences: m.occurrences,
 		err:         m.mockErr,
+		errorAfter:  m.errorAfter,
 		index:       0,
 	}
 	m.lastIterator = it
@@ -38,11 +40,12 @@ func (m *mockGCPClient) ListOccurrences(ctx context.Context, req *grafeaspb.List
 type mockGrafeasIterator struct {
 	occurrences []*grafeaspb.Occurrence
 	err         error
+	errorAfter  int
 	index       int
 }
 
 func (m *mockGrafeasIterator) Next() (*grafeaspb.Occurrence, error) {
-	if m.err != nil {
+	if m.err != nil && (m.errorAfter == 0 || m.index >= m.errorAfter) {
 		return nil, m.err
 	}
 	if m.index >= len(m.occurrences) {
@@ -51,6 +54,18 @@ func (m *mockGrafeasIterator) Next() (*grafeaspb.Occurrence, error) {
 	occ := m.occurrences[m.index]
 	m.index++
 	return occ, nil
+}
+
+func discoveryOccurrence(scanStatus grafeaspb.DiscoveryOccurrence_AnalysisStatus, updatedAt time.Time) *grafeaspb.Occurrence {
+	occurrence := &grafeaspb.Occurrence{
+		Details: &grafeaspb.Occurrence_Discovery{
+			Discovery: &grafeaspb.DiscoveryOccurrence{AnalysisStatus: scanStatus},
+		},
+	}
+	if !updatedAt.IsZero() {
+		occurrence.UpdateTime = timestamppb.New(updatedAt)
+	}
+	return occurrence
 }
 
 func TestGCPAdaptor_GetImagesScanStatus(t *testing.T) {
@@ -162,6 +177,158 @@ func TestGCPAdaptor_GetImagesScanStatus_Bounded(t *testing.T) {
 	// its own cap rather than draining the whole (simulated) response.
 	require.NotNil(t, client.lastIterator)
 	assert.Less(t, client.lastIterator.index, len(mockOccurrences), "GetImagesScanStatus consumed the entire unbounded response instead of stopping at a cap")
+}
+
+func TestMergeSuccessfulGCPScan(t *testing.T) {
+	oldScan := time.Date(2023, time.March, 2, 10, 0, 0, 0, time.UTC)
+	newScan := time.Date(2025, time.July, 4, 12, 30, 0, 0, time.UTC)
+
+	tests := []struct {
+		name          string
+		initial       ContainerImageScanStatus
+		occurrence    *grafeaspb.Occurrence
+		wantAvailable bool
+		wantTime      time.Time
+	}{
+		{
+			name:          "nil occurrence",
+			occurrence:    nil,
+			wantAvailable: false,
+		},
+		{
+			name:          "pending occurrence",
+			occurrence:    discoveryOccurrence(grafeaspb.DiscoveryOccurrence_PENDING, newScan),
+			wantAvailable: false,
+		},
+		{
+			name: "non discovery occurrence",
+			occurrence: &grafeaspb.Occurrence{
+				Details: &grafeaspb.Occurrence_Vulnerability{
+					Vulnerability: &grafeaspb.VulnerabilityOccurrence{},
+				},
+			},
+			wantAvailable: false,
+		},
+		{
+			name:          "successful occurrence without timestamp",
+			occurrence:    discoveryOccurrence(grafeaspb.DiscoveryOccurrence_FINISHED_SUCCESS, time.Time{}),
+			wantAvailable: true,
+		},
+		{
+			name:          "successful occurrence sets timestamp",
+			occurrence:    discoveryOccurrence(grafeaspb.DiscoveryOccurrence_FINISHED_SUCCESS, newScan),
+			wantAvailable: true,
+			wantTime:      newScan,
+		},
+		{
+			name: "older success cannot move timestamp backwards",
+			initial: ContainerImageScanStatus{
+				IsScanAvailable: true,
+				LastScanDate:    newScan,
+			},
+			occurrence:    discoveryOccurrence(grafeaspb.DiscoveryOccurrence_FINISHED_SUCCESS, oldScan),
+			wantAvailable: true,
+			wantTime:      newScan,
+		},
+		{
+			name: "newer success replaces prior timestamp",
+			initial: ContainerImageScanStatus{
+				IsScanAvailable: true,
+				LastScanDate:    oldScan,
+			},
+			occurrence:    discoveryOccurrence(grafeaspb.DiscoveryOccurrence_FINISHED_SUCCESS, newScan),
+			wantAvailable: true,
+			wantTime:      newScan,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			status := tt.initial
+			mergeSuccessfulGCPScan(&status, tt.occurrence)
+			assert.Equal(t, tt.wantAvailable, status.IsScanAvailable)
+			assert.Equal(t, tt.wantTime, status.LastScanDate)
+		})
+	}
+}
+
+func TestGCPAdaptor_GetImagesScanStatusChoosesNewestSuccessfulOccurrence(t *testing.T) {
+	oldScan := time.Date(2022, time.January, 1, 9, 0, 0, 0, time.UTC)
+	newScan := time.Date(2025, time.August, 9, 15, 30, 0, 0, time.UTC)
+	client := &mockGCPClient{occurrences: []*grafeaspb.Occurrence{
+		discoveryOccurrence(grafeaspb.DiscoveryOccurrence_FINISHED_SUCCESS, oldScan),
+		discoveryOccurrence(grafeaspb.DiscoveryOccurrence_PENDING, time.Time{}),
+		discoveryOccurrence(grafeaspb.DiscoveryOccurrence_FINISHED_SUCCESS, newScan),
+	}}
+	adaptor := NewGCPAdaptor()
+	adaptor.client = client
+
+	statuses, err := adaptor.GetImagesScanStatus(context.Background(), []ContainerImageIdentifier{{
+		Registry:   "us-docker.pkg.dev",
+		Repository: "my-project/my-repo/my-image",
+		Hash:       "sha256:1234",
+	}})
+
+	require.NoError(t, err)
+	require.Len(t, statuses, 1)
+	assert.True(t, statuses[0].IsScanAvailable)
+	assert.Equal(t, newScan, statuses[0].LastScanDate)
+	require.NotNil(t, client.lastIterator)
+	assert.Equal(t, 3, client.lastIterator.index, "all returned occurrences must be considered")
+}
+
+func TestGCPAdaptor_GetImagesScanStatusDoesNotHideLaterIteratorError(t *testing.T) {
+	completedAt := time.Date(2025, time.August, 9, 15, 30, 0, 0, time.UTC)
+	client := &mockGCPClient{
+		occurrences: []*grafeaspb.Occurrence{
+			discoveryOccurrence(grafeaspb.DiscoveryOccurrence_FINISHED_SUCCESS, completedAt),
+		},
+		mockErr:    fmt.Errorf("provider page failed"),
+		errorAfter: 1,
+	}
+	adaptor := NewGCPAdaptor()
+	adaptor.client = client
+
+	statuses, err := adaptor.GetImagesScanStatus(context.Background(), []ContainerImageIdentifier{{
+		Registry:   "us-docker.pkg.dev",
+		Repository: "my-project/my-repo/my-image",
+		Hash:       "sha256:1234",
+	}})
+
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "provider page failed")
+	require.Len(t, statuses, 1)
+	assert.True(t, statuses[0].IsScanAvailable, "the partial status should be retained alongside the error")
+	assert.Equal(t, completedAt, statuses[0].LastScanDate)
+}
+
+func TestGCPAdaptor_GetImagesScanStatusIgnoresInvalidSuccessfulTimestamp(t *testing.T) {
+	invalidTime := &timestamppb.Timestamp{Seconds: 253402300800}
+	validTime := time.Date(2024, time.November, 5, 6, 7, 8, 0, time.UTC)
+	client := &mockGCPClient{occurrences: []*grafeaspb.Occurrence{
+		{
+			UpdateTime: invalidTime,
+			Details: &grafeaspb.Occurrence_Discovery{
+				Discovery: &grafeaspb.DiscoveryOccurrence{
+					AnalysisStatus: grafeaspb.DiscoveryOccurrence_FINISHED_SUCCESS,
+				},
+			},
+		},
+		discoveryOccurrence(grafeaspb.DiscoveryOccurrence_FINISHED_SUCCESS, validTime),
+	}}
+	adaptor := NewGCPAdaptor()
+	adaptor.client = client
+
+	statuses, err := adaptor.GetImagesScanStatus(context.Background(), []ContainerImageIdentifier{{
+		Registry:   "us-docker.pkg.dev",
+		Repository: "my-project/my-repo/my-image",
+		Hash:       "sha256:1234",
+	}})
+
+	require.NoError(t, err)
+	require.Len(t, statuses, 1)
+	assert.True(t, statuses[0].IsScanAvailable)
+	assert.Equal(t, validTime, statuses[0].LastScanDate)
 }
 
 func TestGCPAdaptor_GetImagesVulnerabilities(t *testing.T) {
