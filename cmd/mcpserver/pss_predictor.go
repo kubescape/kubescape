@@ -42,11 +42,12 @@ var pssWorkloadTargets = []pssWorkloadTarget{
 // createPSSPredictorTools registers predict_pss_compliance, which evaluates
 // workloads in a namespace against Kubernetes Pod Security Standards (Privileged,
 // Baseline, Restricted) and reports which workloads would fail, what specifically
-// violates, and overall namespace readiness.
+// violates, and overall namespace readiness. The description names the policy
+// version through pss.PolicyVersion, since the verdicts come from that package.
 func createPSSPredictorTools(ksServer *KubescapeMcpserver) {
 	tool := mcp.NewTool(
 		"predict_pss_compliance",
-		mcp.WithDescription("Predict which workloads in a namespace would fail Pod Security Standards (PSS v1.31) enforcement at a given level (Privileged, Baseline, or Restricted) and report exactly what violates per container. Use this to assess the blast radius before enabling PSS enforcement — answers 'what would break if I enforced Baseline/Restricted on this namespace?' without touching the cluster's admission configuration. Reports namespace-level summary (total/passing/failing/current effective level) and per-workload violation details. Evaluates Deployments, DaemonSets, StatefulSets, ReplicaSets, Jobs, CronJobs, and standalone Pods."),
+		mcp.WithDescription("Predict which workloads in a namespace would fail Pod Security Standards (PSS "+pss.PolicyVersion+") enforcement at a given level (Privileged, Baseline, or Restricted) and report exactly what violates per container. Use this to assess the blast radius before enabling PSS enforcement — answers 'what would break if I enforced Baseline/Restricted on this namespace?' without touching the cluster's admission configuration. Reports namespace-level summary (total/passing/failing/current effective level) and per-workload violation details. Evaluates Deployments, DaemonSets, StatefulSets, ReplicaSets, Jobs, CronJobs, and standalone Pods."),
 		mcp.WithString("namespace", mcp.Required(), mcp.Description("Namespace to analyze")),
 		mcp.WithString("level", mcp.Description("Target PSS level: Privileged, Baseline, or Restricted (optional; defaults to Restricted)")),
 		mcp.WithString("workload_name", mcp.Description("Name of a specific workload to check (optional; omit to report on every workload in the namespace)")),

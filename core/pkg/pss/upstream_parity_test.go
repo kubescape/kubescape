@@ -423,3 +423,22 @@ func TestParityWithPodSecurityAdmission(t *testing.T) {
 		})
 	}
 }
+
+// TestPolicyVersionMatchesPodSecurityAdmission keeps PolicyVersion equal to
+// the newest policy revision the pinned pod-security-admission defines, which
+// is what "latest" evaluates in the parity test above. Bumping the module to a
+// release that revises a check fails here until PolicyVersion follows.
+func TestPolicyVersionMatchesPodSecurityAdmission(t *testing.T) {
+	var newest psaapi.Version
+	for _, check := range policy.DefaultChecks() {
+		for _, revision := range check.Versions {
+			if newest.Older(revision.MinimumVersion) {
+				newest = revision.MinimumVersion
+			}
+		}
+	}
+
+	if got := newest.String(); got != PolicyVersion {
+		t.Errorf("PolicyVersion = %s, pod-security-admission's newest policy revision is %s", PolicyVersion, got)
+	}
+}

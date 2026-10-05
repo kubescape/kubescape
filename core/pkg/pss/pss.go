@@ -20,6 +20,12 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
+// PolicyVersion is the Kubernetes Pod Security Standards version this package
+// implements. Anything that reports a verdict from this package to a user
+// names the policy through it, so the version shown cannot fall behind the
+// one evaluated. upstream_parity_test.go holds it to pod-security-admission.
+const PolicyVersion = "v1.37"
+
 // Evaluate checks podSpec against the given level and returns every
 // Violation. An empty slice means the PodSpec fully complies at that
 // level. Evaluating against Privileged always returns nil (the
