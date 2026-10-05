@@ -1449,3 +1449,58 @@ func TestMergeWorkloadConfigurationScanSummarySpec(t *testing.T) {
 		})
 	}
 }
+
+func TestStorePostureReportResults_ContinuesAfterNonRBACRelatedObject(t *testing.T) {
+	store := NewFakeAPIServerStorage("kubescape")
+	ctx := context.Background()
+
+	// RegoResponseVector whose related objects are Services, as produced by C-0021.
+	svcObj := map[string]any{
+		"kind":      "Deployment",
+		"name":      "unifi-deployment",
+		"namespace": "default",
+		"relatedObjects": []any{
+			map[string]any{
+				"kind":       "Service",
+				"name":       "unifi",
+				"namespace":  "default",
+				"apiVersion": "v1",
+			},
+			map[string]any{
+				"kind":       "Service",
+				"name":       "unifi-admin",
+				"namespace":  "default",
+				"apiVersion": "v1",
+			},
+		},
+	}
+	podObj := map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Pod",
+		"metadata": map[string]any{
+			"name":      "test-pod",
+			"namespace": "default",
+		},
+	}
+
+	pr := &v2.PostureReport{
+		Resources: []reporthandling.Resource{
+			{ResourceID: "svc-resource-id", Object: svcObj},
+			{ResourceID: "pod-resource-id", Object: podObj},
+		},
+		Results: []resourcesresults.Result{
+			{ResourceID: "svc-resource-id"},
+			{ResourceID: "pod-resource-id"},
+		},
+	}
+
+	assert.NoError(t, store.StorePostureReportResults(ctx, pr))
+
+	summaries, listErr := store.StorageClient.WorkloadConfigurationScanSummaries("default").List(ctx, metav1.ListOptions{})
+	assert.NoError(t, listErr)
+	names := []string{}
+	for _, s := range summaries.Items {
+		names = append(names, s.Name)
+	}
+	assert.Contains(t, names, "pod-test-pod")
+}
