@@ -7,6 +7,7 @@ package opaprocessor
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
@@ -95,6 +96,8 @@ type OPAProcessor struct {
 	printEnabled           bool
 	compiledModules        map[string]compiledRule
 	compiledMu             sync.RWMutex
+	preparedQueries        map[string]rego.PreparedEvalQuery
+	preparedMu             sync.RWMutex
 	mu                     sync.Mutex
 	// ControlTimeout, when non-zero, bounds the evaluation time of a single
 	// control. If exceeded, the control is recorded as not evaluated instead
@@ -168,6 +171,7 @@ func NewOPAProcessor(sessionObj *cautils.OPASessionObj, regoDependenciesData *re
 		includeNamespaces:           split(includeNamespaces),
 		printEnabled:                enableRegoPrint,
 		compiledModules:             make(map[string]compiledRule),
+		preparedQueries:             make(map[string]rego.PreparedEvalQuery),
 		TimedOutControls:            make(map[string]string),
 		initialResourceCount:        initialResourceCount,
 		celNamespaceIndex:           indexNamespaces(sessionObj),
@@ -2396,28 +2400,9 @@ func (opap *OPAProcessor) runRegoOnK8s(ctx context.Context, rule *reporthandling
 	registerOPABuiltins()
 
 	ruleData := getRuleData(rule)
-	compiled, regoVersion, err := opap.getCompiledRule(ctx, rule.Name, ruleData, opap.printEnabled)
-	if err != nil {
-		return nil, fmt.Errorf("rule: '%s', %w", rule.Name, err)
-	}
-
-	store, err := ruleRegoDependenciesData.TOStorage()
+	pq, err := opap.getPreparedQuery(ctx, rule.Name, ruleData, ruleRegoDependenciesData)
 	if err != nil {
 		return nil, err
-	}
-
-	regoInst := rego.New(
-		rego.SetRegoVersion(regoVersion),
-		rego.Query("data.armo_builtins"),
-		rego.Compiler(compiled),
-		rego.Store(store),
-		rego.EnablePrintStatements(opap.printEnabled),
-		rego.PrintHook(opap),
-	)
-
-	pq, err := regoInst.PrepareForEval(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("rule '%s': failed to prepare query: %w", rule.Name, err)
 	}
 
 	ctx = withCosignPolicy(ctx, ruleRegoDependenciesData.PostureControlInputs)
@@ -2593,6 +2578,89 @@ func (opap *OPAProcessor) getCompiledRule(ctx context.Context, ruleName, ruleDat
 
 	opap.compiledModules[cacheKey] = compiledRule{compiler: compiled, version: version}
 	return compiled, version, nil
+}
+
+// canonicalDepsKey returns a deterministic, unambiguous JSON representation of RegoDependenciesData.
+// json.Marshal automatically sorts map keys and safely encodes delimiters while preserving posture
+// value list order, which is required because stored data preserves slice order.
+func canonicalDepsKey(deps resources.RegoDependenciesData) (string, error) {
+	if len(deps.DataControlInputs) == 0 && len(deps.PostureControlInputs) == 0 {
+		return "", nil
+	}
+	b, err := json.Marshal(struct {
+		D map[string]string   `json:"d,omitempty"`
+		P map[string][]string `json:"p,omitempty"`
+	}{
+		D: deps.DataControlInputs,
+		P: deps.PostureControlInputs,
+	})
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
+// getPreparedQuery returns a cached rego.PreparedEvalQuery for the rule and dependencies,
+// or compiles and prepares one on demand.
+func (opap *OPAProcessor) getPreparedQuery(ctx context.Context, ruleName, ruleData string, ruleRegoDependenciesData resources.RegoDependenciesData) (rego.PreparedEvalQuery, error) {
+	depsKey, depsErr := canonicalDepsKey(ruleRegoDependenciesData)
+	canCache := (depsErr == nil)
+	var cacheKey string
+	if canCache {
+		cacheKey = ruleName + "|" + ruleData + "|" + depsKey
+
+		opap.preparedMu.RLock()
+		if opap.preparedQueries != nil {
+			if pq, ok := opap.preparedQueries[cacheKey]; ok {
+				opap.preparedMu.RUnlock()
+				return pq, nil
+			}
+		}
+		opap.preparedMu.RUnlock()
+	}
+
+	if err := ctx.Err(); err != nil {
+		return rego.PreparedEvalQuery{}, err
+	}
+
+	compiled, regoVersion, err := opap.getCompiledRule(ctx, ruleName, ruleData, opap.printEnabled)
+	if err != nil {
+		return rego.PreparedEvalQuery{}, fmt.Errorf("rule: '%s', %w", ruleName, err)
+	}
+
+	store, err := ruleRegoDependenciesData.TOStorage()
+	if err != nil {
+		return rego.PreparedEvalQuery{}, err
+	}
+
+	regoInst := rego.New(
+		rego.SetRegoVersion(regoVersion),
+		rego.Query("data.armo_builtins"),
+		rego.Compiler(compiled),
+		rego.Store(store),
+		rego.EnablePrintStatements(opap.printEnabled),
+		rego.PrintHook(opap),
+	)
+
+	pq, err := regoInst.PrepareForEval(ctx)
+	if err != nil {
+		return rego.PreparedEvalQuery{}, fmt.Errorf("rule '%s': failed to prepare query: %w", ruleName, err)
+	}
+
+	if canCache {
+		opap.preparedMu.Lock()
+		if opap.preparedQueries == nil {
+			opap.preparedQueries = make(map[string]rego.PreparedEvalQuery)
+		}
+		if existing, ok := opap.preparedQueries[cacheKey]; ok {
+			opap.preparedMu.Unlock()
+			return existing, nil
+		}
+		opap.preparedQueries[cacheKey] = pq
+		opap.preparedMu.Unlock()
+	}
+
+	return pq, nil
 }
 
 // createLightweightResource is intentionally removed. Stripping spec/status/data
