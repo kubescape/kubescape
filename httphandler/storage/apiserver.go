@@ -6,6 +6,7 @@ import (
 	stderrors "errors"
 	"fmt"
 	"maps"
+	"time"
 
 	"github.com/armosec/utils-k8s-go/wlid"
 	"github.com/kubescape/go-logger"
@@ -29,6 +30,38 @@ import (
 )
 
 var storageInstance *APIServerStore
+
+const reportCreatedAtAnnotation = "kubescape.io/report-created-at"
+
+// compareReportTimes returns 0 for the same report (or legacy reports with
+// no timestamp), 1 for a newer report, and -1 for an older delayed result.
+func compareReportTimes(existing, incoming time.Time) int {
+	if existing.IsZero() || incoming.IsZero() {
+		return 0
+	}
+	if incoming.After(existing) {
+		return 1
+	}
+	if incoming.Before(existing) {
+		return -1
+	}
+	return 0
+}
+
+func scanReportTime(spec v1beta1.WorkloadConfigurationScanSpec) time.Time {
+	if spec.Metadata == nil {
+		return time.Time{}
+	}
+	return spec.Metadata.Report.CreatedAt.Time
+}
+
+func summaryReportTime(annotations map[string]string) time.Time {
+	parsed, err := time.Parse(time.RFC3339Nano, annotations[reportCreatedAtAnnotation])
+	if err != nil {
+		return time.Time{}
+	}
+	return parsed
+}
 
 // ErrIncompleteRelatedObjects is returned when a RegoResponseVector lacks the expected Role+RoleBinding pair (e.g. orphaned binding).
 var ErrIncompleteRelatedObjects = stderrors.New("incomplete related objects")
@@ -275,6 +308,10 @@ func (a *APIServerStore) StoreWorkloadConfigurationScanResult(ctx context.Contex
 			if getErr != nil {
 				return getErr
 			}
+			if compareReportTimes(scanReportTime(result.Spec), scanReportTime(manifest.Spec)) < 0 {
+				// Leave status and object metadata untouched for a delayed scan.
+				return nil
+			}
 			// update the workload configuration scan manifest
 			result.Annotations = mergeMaps(result.Annotations, manifest.Annotations)
 			result.Labels = mergeMaps(result.Labels, manifest.Labels)
@@ -300,6 +337,12 @@ func (a *APIServerStore) StoreWorkloadConfigurationScanResult(ctx context.Contex
 }
 
 func mergeWorkloadConfigurationScanSpec(existingSpec v1beta1.WorkloadConfigurationScanSpec, newSpec v1beta1.WorkloadConfigurationScanSpec) v1beta1.WorkloadConfigurationScanSpec {
+	switch compareReportTimes(scanReportTime(existingSpec), scanReportTime(newSpec)) {
+	case 1:
+		return newSpec
+	case -1:
+		return existingSpec
+	}
 	if existingSpec.Controls == nil {
 		existingSpec.Controls = make(map[string]v1beta1.ScannedControl)
 	}
@@ -426,13 +469,18 @@ func (a *APIServerStore) StoreWorkloadConfigurationScanResultSummary(ctx context
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        workloadScan.Name,
 			Namespace:   namespace,
-			Annotations: workloadScan.Annotations,
+			Annotations: maps.Clone(workloadScan.Annotations),
 			Labels:      workloadScan.Labels,
 		},
 		Spec: v1beta1.WorkloadConfigurationScanSummarySpec{
 			Severities: severities,
 			Controls:   controlsSummary,
 		},
+	}
+	if reportTime := scanReportTime(workloadScan.Spec); !reportTime.IsZero() {
+		manifest.Annotations = mergeMaps(manifest.Annotations, map[string]string{
+			reportCreatedAtAnnotation: reportTime.Format(time.RFC3339Nano),
+		})
 	}
 
 	_, err := a.StorageClient.WorkloadConfigurationScanSummaries(namespace).Create(ctx, &manifest, metav1.CreateOptions{})
@@ -446,9 +494,17 @@ func (a *APIServerStore) StoreWorkloadConfigurationScanResultSummary(ctx context
 				return getErr
 			}
 			// update the manifest
+			switch compareReportTimes(summaryReportTime(result.Annotations), summaryReportTime(manifest.Annotations)) {
+			case 1:
+				result.Spec = manifest.Spec
+			case -1:
+				// A delayed older result must not roll a remediated scan back.
+				return nil
+			default:
+				result.Spec = mergeWorkloadConfigurationScanSummarySpec(result.Spec, manifest.Spec)
+			}
 			result.Annotations = mergeMaps(result.Annotations, manifest.Annotations)
 			result.Labels = mergeMaps(result.Labels, manifest.Labels)
-			result.Spec = mergeWorkloadConfigurationScanSummarySpec(result.Spec, manifest.Spec)
 			// try to send the updated manifest
 			_, updateErr := a.StorageClient.WorkloadConfigurationScanSummaries(namespace).Update(ctx, result, metav1.UpdateOptions{})
 			return updateErr
