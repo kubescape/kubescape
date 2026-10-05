@@ -159,13 +159,43 @@ type IPrinter interface {
 // directories have no reason to be.
 const outputDirPerm = 0o750
 
+// chmodFile is a test hook for permission-tightening failures.
+var chmodFile = (*os.File).Chmod
+
+// openFileForWrite opens path for writing with owner-only permissions, since
+// scan reports can contain secrets. A pre-existing regular file is tightened
+// to 0600 and only then truncated; if tightening is not possible, the file is
+// left as it was and no report is written into it.
+func openFileForWrite(path string) (*os.File, error) {
+	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	info, err := f.Stat()
+	if err != nil {
+		_ = f.Close()
+		return nil, fmt.Errorf("stat output file: %w", err)
+	}
+	if info.Mode().IsRegular() {
+		if err := chmodFile(f, 0o600); err != nil {
+			_ = f.Close()
+			return nil, fmt.Errorf("restrict output file permissions: %w", err)
+		}
+		if err := f.Truncate(0); err != nil {
+			_ = f.Close()
+			return nil, fmt.Errorf("truncate output file: %w", err)
+		}
+	}
+	return f, nil
+}
+
 func GetWriter(ctx context.Context, outputFile string) *os.File {
 	if outputFile != "" {
 		if err := os.MkdirAll(filepath.Dir(outputFile), outputDirPerm); err != nil {
 			logger.L().Ctx(ctx).Warning(fmt.Sprintf("failed to create directory, reason: %s", err.Error()))
 			return os.Stdout
 		}
-		f, err := os.Create(filepath.Clean(outputFile))
+		f, err := openFileForWrite(filepath.Clean(outputFile))
 		if err != nil {
 			logger.L().Ctx(ctx).Warning(fmt.Sprintf("failed to open file for writing, reason: %s", err.Error()))
 			return os.Stdout
@@ -183,7 +213,7 @@ func GetWriterNoFallback(outputFile string) (*os.File, error) {
 	if err := os.MkdirAll(filepath.Dir(outputFile), outputDirPerm); err != nil {
 		return nil, fmt.Errorf("create output directory for %q: %w", outputFile, err)
 	}
-	f, err := os.Create(outputFile)
+	f, err := openFileForWrite(outputFile)
 	if err != nil {
 		return nil, fmt.Errorf("open output file %q: %w", outputFile, err)
 	}
@@ -199,7 +229,7 @@ func GetWriterNoFallback(outputFile string) (*os.File, error) {
 func GetWriterNoStdoutFallback(ctx context.Context, outputFile, tempPattern string) *os.File {
 	if outputFile != "" {
 		if err := os.MkdirAll(filepath.Dir(outputFile), outputDirPerm); err == nil {
-			if f, err := os.Create(filepath.Clean(outputFile)); err == nil {
+			if f, err := openFileForWrite(filepath.Clean(outputFile)); err == nil {
 				return f
 			} else {
 				logger.L().Ctx(ctx).Warning(fmt.Sprintf("failed to open file for writing, reason: %s", err.Error()))
@@ -219,7 +249,7 @@ func GetWriterNoStdoutFallback(ctx context.Context, outputFile, tempPattern stri
 	if err != nil {
 		// os.DevNull should always be openable; if not, fall back to a temp file
 		// so we still return a writable, closable handle.
-		if tmp, tmpErr := os.CreateTemp(".", tempPattern); tmpErr == nil {
+		if tmp, tmpErr := os.CreateTemp("", tempPattern); tmpErr == nil {
 			logger.L().Ctx(ctx).Warning("failed to open os.DevNull; falling back to temp file",
 				helpers.String("filename", tmp.Name()))
 			return tmp
