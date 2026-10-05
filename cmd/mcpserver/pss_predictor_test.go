@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/kubescape/k8s-interface/k8sinterface"
+	"github.com/kubescape/kubescape/v4/core/pkg/pss"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/stretchr/testify/assert"
@@ -856,4 +857,83 @@ func TestPredictPSSCompliance_KindQualifiedWorkloadIgnoresUnrelatedListErrors(t 
 	}))
 	te := parsePSSToolError(t, resultAll)
 	assert.Equal(t, ErrCodeRBACDenied, te.Code)
+}
+
+// pssPredictorDescription returns the description predict_pss_compliance is
+// listed with, which is where an MCP client learns the policy it evaluates.
+func pssPredictorDescription(t *testing.T, ksServer *KubescapeMcpserver) string {
+	t.Helper()
+	message, err := json.Marshal(map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "tools/list",
+	})
+	require.NoError(t, err)
+	raw, err := json.Marshal(ksServer.s.HandleMessage(context.Background(), message))
+	require.NoError(t, err)
+
+	var listed struct {
+		Result struct {
+			Tools []struct {
+				Name        string `json:"name"`
+				Description string `json:"description"`
+			} `json:"tools"`
+		} `json:"result"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &listed))
+
+	for _, tool := range listed.Result.Tools {
+		if tool.Name == "predict_pss_compliance" {
+			return tool.Description
+		}
+	}
+	require.Fail(t, "predict_pss_compliance was not registered")
+	return ""
+}
+
+// The predictor names the policy version it evaluates in its description, and
+// its verdicts come from core/pkg/pss. The two moved apart once: the tool said
+// v1.31 while the evaluator had moved to v1.37, so it reported verdicts for a
+// policy other than the one it told users about. A root Pod in a user
+// namespace is where those versions disagree: v1.35 relaxed runAsNonRoot and
+// runAsUser for hostUsers: false, so Restricted rejects the Pod at v1.31 and
+// admits it at v1.37.
+func TestPredictPSSCompliance_UserNamespaceRootPodMatchesDeclaredPolicyVersion(t *testing.T) {
+	rootPod := func(name string, hostUsers bool) *unstructured.Unstructured {
+		pod := loadYAMLFixture(t, "testdata/pss/standalone-pod.yaml")
+		pod.SetName(name)
+		require.NoError(t, unstructured.SetNestedField(pod.Object, hostUsers, "spec", "hostUsers"))
+		require.NoError(t, unstructured.SetNestedField(pod.Object, false, "spec", "securityContext", "runAsNonRoot"))
+		require.NoError(t, unstructured.SetNestedField(pod.Object, int64(0), "spec", "securityContext", "runAsUser"))
+		return pod
+	}
+	ksServer := newPSSPredictorTestServer(t, rootPod("userns-root", false), rootPod("host-root", true))
+
+	description := pssPredictorDescription(t, ksServer)
+	assert.Contains(t, description, "PSS "+pss.PolicyVersion,
+		"the tool must name the policy version core/pkg/pss evaluates")
+	assert.NotContains(t, description, "v1.31")
+
+	result := registeredToolResult(t, dispatchRegisteredTool(t, ksServer, "predict_pss_compliance", map[string]any{
+		"namespace": "test-pss",
+		"level":     "Restricted",
+	}))
+	parsed := parsePSSResult(t, result)
+	summary := getSummary(t, parsed)
+	assert.Equal(t, float64(2), summary["total_workloads"])
+	assert.Equal(t, float64(1), summary["passing"], "root in a user namespace passes Restricted since v1.35")
+	assert.Equal(t, float64(1), summary["failing"])
+
+	// The same Pod on the host's user namespace still fails, so the pass
+	// above comes from hostUsers: false and not from a lost check.
+	fws := getFailingWorkloads(t, parsed)
+	require.Len(t, fws, 1)
+	failing := fws[0].(map[string]any)
+	assert.Equal(t, "host-root", failing["name"])
+	checks := make([]any, 0)
+	for _, v := range failing["violations"].([]any) {
+		checks = append(checks, v.(map[string]any)["check"])
+	}
+	assert.Contains(t, checks, "RunAsNonRoot")
+	assert.Contains(t, checks, "RunAsUser")
 }

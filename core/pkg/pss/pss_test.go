@@ -501,13 +501,6 @@ func TestEvaluate_RestrictedChecks(t *testing.T) {
 			wantChecks: []string{"Volumes"},
 		},
 		{
-			name: "rejects non-allowed volume type (Image)",
-			podSpec: podSpec(withVolume("img-vol", corev1.VolumeSource{
-				Image: &corev1.ImageVolumeSource{Reference: "repo/img:v1"},
-			})),
-			wantChecks: []string{"Volumes"},
-		},
-		{
 			name:       "rejects missing allowPrivilegeEscalation",
 			podSpec:    podSpec(),
 			wantChecks: []string{"AllowPrivilegeEscalation"},
@@ -877,7 +870,7 @@ func TestPassesAt(t *testing.T) {
 			wantPass: Restricted,
 		},
 		{
-			name: "compliant restricted pod with image volume -> passes at Baseline",
+			name: "compliant restricted pod with image volume -> passes at Restricted",
 			podSpec: func() corev1.PodSpec {
 				ps := compliantRestrictedPod()
 				ps.Volumes = append(ps.Volumes, corev1.Volume{
@@ -888,7 +881,7 @@ func TestPassesAt(t *testing.T) {
 				})
 				return ps
 			}(),
-			wantPass: Baseline,
+			wantPass: Restricted,
 		},
 	}
 
@@ -1031,4 +1024,96 @@ func TestEvaluateWithAnnotations_LegacyAppArmor(t *testing.T) {
 			t.Errorf("expected localhost/* legacy annotation not to trigger violation, got: %+v", violations)
 		}
 	})
+}
+
+func TestEvaluate_HostProbesAndLifecycle(t *testing.T) {
+	ps := compliantRestrictedPod()
+	ps.Containers[0].LivenessProbe = &corev1.Probe{ProbeHandler: corev1.ProbeHandler{
+		HTTPGet: &corev1.HTTPGetAction{Host: "169.254.169.254"},
+	}}
+	ps.Containers[0].Lifecycle = &corev1.Lifecycle{PreStop: &corev1.LifecycleHandler{
+		TCPSocket: &corev1.TCPSocketAction{Host: "10.0.0.1"},
+	}}
+	ps.EphemeralContainers = []corev1.EphemeralContainer{{EphemeralContainerCommon: corev1.EphemeralContainerCommon{
+		Name:            "debug",
+		SecurityContext: ps.Containers[0].SecurityContext,
+		ReadinessProbe: &corev1.Probe{ProbeHandler: corev1.ProbeHandler{
+			TCPSocket: &corev1.TCPSocketAction{Host: "10.0.0.2"},
+		}},
+	}}}
+
+	want := []Violation{
+		{
+			Check: "HostProbesAndLifecycle", Level: Baseline,
+			Container: ps.Containers[0].Name, ContainerType: "container",
+			Description: `container "` + ps.Containers[0].Name + `" sets livenessProbe.httpGet.host to "169.254.169.254"; must be unset`,
+		},
+		{
+			Check: "HostProbesAndLifecycle", Level: Baseline,
+			Container: ps.Containers[0].Name, ContainerType: "container",
+			Description: `container "` + ps.Containers[0].Name + `" sets lifecycle.preStop.tcpSocket.host to "10.0.0.1"; must be unset`,
+		},
+		{
+			Check: "HostProbesAndLifecycle", Level: Baseline,
+			Container: "debug", ContainerType: "ephemeralContainer",
+			Description: `ephemeralContainer "debug" sets readinessProbe.tcpSocket.host to "10.0.0.2"; must be unset`,
+		},
+	}
+
+	got := Evaluate(ps, Baseline)
+	if len(got) != len(want) {
+		t.Fatalf("Evaluate(Baseline) = %+v, want %+v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("violation %d = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+	if level := PassesAt(ps); level != Privileged {
+		t.Errorf("PassesAt() = %v, want Privileged", level)
+	}
+
+	// A probe or hook that leaves host unset targets the pod itself.
+	ps = compliantRestrictedPod()
+	ps.Containers[0].LivenessProbe = &corev1.Probe{ProbeHandler: corev1.ProbeHandler{
+		HTTPGet: &corev1.HTTPGetAction{Path: "/healthz"},
+	}}
+	if got := Evaluate(ps, Restricted); len(got) != 0 {
+		t.Errorf("probe without a host: Evaluate(Restricted) = %+v, want none", got)
+	}
+}
+
+func TestEvaluate_UserNamespace(t *testing.T) {
+	hostUsers := false
+	unmasked := corev1.UnmaskedProcMount
+	root := int64(0)
+
+	// Root in a user namespace is unprivileged on the host: Restricted allows it.
+	ps := compliantRestrictedPod()
+	ps.HostUsers = &hostUsers
+	ps.SecurityContext.RunAsNonRoot = nil
+	ps.SecurityContext.RunAsUser = &root
+	if got := Evaluate(ps, Restricted); len(got) != 0 {
+		t.Errorf("root in a user namespace: Evaluate(Restricted) = %+v, want none", got)
+	}
+
+	// An unmasked /proc is allowed at Baseline in a user namespace, but
+	// Restricted still forbids it.
+	ps = compliantRestrictedPod()
+	ps.HostUsers = &hostUsers
+	ps.Containers[0].SecurityContext.ProcMount = &unmasked
+	if got := Evaluate(ps, Baseline); len(got) != 0 {
+		t.Errorf("unmasked procMount in a user namespace: Evaluate(Baseline) = %+v, want none", got)
+	}
+	got := Evaluate(ps, Restricted)
+	if len(got) != 1 || got[0].Check != "ProcMount" || got[0].Level != Restricted {
+		t.Errorf("unmasked procMount in a user namespace: Evaluate(Restricted) = %+v, want one Restricted ProcMount violation", got)
+	}
+
+	// Without a user namespace it stays a Baseline violation.
+	ps.HostUsers = nil
+	got = Evaluate(ps, Baseline)
+	if len(got) != 1 || got[0].Check != "ProcMount" || got[0].Level != Baseline {
+		t.Errorf("unmasked procMount: Evaluate(Baseline) = %+v, want one Baseline ProcMount violation", got)
+	}
 }
