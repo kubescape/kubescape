@@ -218,6 +218,77 @@ func buildFixableReportAt(t *testing.T, dir, manifestName string) string {
 	return writeReportFile(t, dir, report)
 }
 
+// buildTwoInputReport writes a privileged Deployment to apps/web/k8s/deploy.yaml
+// and infra/db/k8s/deploy.yaml under dir and a report shaped like the scanner's
+// for `kubescape scan apps/web/k8s infra/db/k8s` outside a git repository: each
+// input is its own root, so both files are recorded as "deploy.yaml", and the
+// report-wide base path is the first input only.
+func buildTwoInputReport(t *testing.T, dir string) string {
+	t.Helper()
+
+	var resources []reporthandling.Resource
+	var results []resourcesresults.Result
+	var firstRoot string
+	for _, input := range []struct{ dir, name string }{{"apps/web/k8s", "web"}, {"infra/db/k8s", "db"}} {
+		root := filepath.Join(dir, filepath.FromSlash(input.dir))
+		require.NoError(t, os.MkdirAll(root, 0750))
+		require.NoError(t, os.WriteFile(filepath.Join(root, "deploy.yaml"), []byte(
+			"apiVersion: apps/v1\n"+
+				"kind: Deployment\n"+
+				"metadata:\n"+
+				"  name: "+input.name+"\n"+
+				"spec:\n"+
+				"  template:\n"+
+				"    spec:\n"+
+				"      containers:\n"+
+				"      - name: demo\n"+
+				"        securityContext:\n"+
+				"          privileged: true\n"), 0600))
+		if firstRoot == "" {
+			firstRoot = root
+		}
+
+		lw := localworkload.NewLocalWorkload(map[string]any{
+			"apiVersion": "apps/v1",
+			"kind":       "Deployment",
+			"metadata":   map[string]any{"name": input.name, "namespace": "default"},
+			"spec":       map[string]any{"template": map[string]any{"spec": map[string]any{}}},
+		})
+		lw.SetPath("deploy.yaml:0")
+		resources = append(resources, reporthandling.Resource{
+			ResourceID: lw.GetID(),
+			Object:     lw.GetObject(),
+			Source:     &reporthandling.Source{FileType: reporthandling.SourceTypeYaml, Path: root},
+		})
+		results = append(results, resourcesresults.Result{
+			ResourceID: lw.GetID(),
+			AssociatedControls: []resourcesresults.ResourceAssociatedControl{{
+				ControlID: "C-0057",
+				Name:      "Privileged container",
+				Status:    apis.StatusInfo{InnerStatus: apis.StatusFailed},
+				ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{{
+					Name:   "rule-privileged",
+					Status: apis.StatusFailed,
+					Paths: []armotypes.PosturePaths{
+						{FixPath: armotypes.FixPath{Path: "spec.template.spec.containers[0].securityContext.privileged", Value: "false"}},
+					},
+				}},
+			}},
+		})
+	}
+
+	return writeReportFile(t, dir, &reporthandlingv2.PostureReport{
+		Metadata: reporthandlingv2.Metadata{
+			ScanMetadata: reporthandlingv2.ScanMetadata{ScanningTarget: reporthandlingv2.Directory},
+			ContextMetadata: reporthandlingv2.ContextMetadata{
+				DirectoryContextMetadata: &reporthandlingv2.DirectoryContextMetadata{BasePath: firstRoot},
+			},
+		},
+		Results:   results,
+		Resources: resources,
+	})
+}
+
 func writeReportFile(t *testing.T, dir string, report *reporthandlingv2.PostureReport) string {
 	t.Helper()
 
@@ -723,4 +794,38 @@ func TestFix_InteractiveMixedAcceptDecline(t *testing.T) {
 	assert.Contains(t, out, "Namespace: ns1\nDocument index: 0")
 	assert.Contains(t, out, "Namespace: ns2\nDocument index: 1")
 	assert.Contains(t, out, "Namespace: ns3\nDocument index: 2")
+}
+
+// TestFix_MultiInputScanOutsideGit covers #4042 end to end. Both inputs hold a
+// deploy.yaml recorded under the same relative path. Fixed in place, both files
+// must be fixed; with --output-dir, the copies must recreate the tree below the
+// directory the inputs share instead of both claiming fixed/deploy.yaml.
+func TestFix_MultiInputScanOutsideGit(t *testing.T) {
+	inputs := []string{"apps/web/k8s/deploy.yaml", "infra/db/k8s/deploy.yaml"}
+
+	t.Run("in place", func(t *testing.T) {
+		dir := t.TempDir()
+		reportPath := buildTwoInputReport(t, dir)
+
+		ks := &Kubescape{Ctx: context.Background()}
+		require.NoError(t, ks.Fix(&metav1.FixInfo{ReportFile: reportPath, NoConfirm: true}))
+
+		for _, input := range inputs {
+			assert.Contains(t, fileContent(t, filepath.Join(dir, filepath.FromSlash(input))), "privileged: false", input)
+		}
+	})
+
+	t.Run("output dir", func(t *testing.T) {
+		dir := t.TempDir()
+		reportPath := buildTwoInputReport(t, dir)
+		outputDir := filepath.Join(t.TempDir(), "fixed")
+
+		ks := &Kubescape{Ctx: context.Background()}
+		require.NoError(t, ks.Fix(&metav1.FixInfo{ReportFile: reportPath, OutputDir: outputDir}))
+
+		for _, input := range inputs {
+			assert.Contains(t, fileContent(t, filepath.Join(outputDir, filepath.FromSlash(input))), "privileged: false", input)
+			assert.Contains(t, fileContent(t, filepath.Join(dir, filepath.FromSlash(input))), "privileged: true", "the source must not be modified")
+		}
+	})
 }

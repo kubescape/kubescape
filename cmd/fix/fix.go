@@ -23,9 +23,12 @@ var fixCmdExamples = fmt.Sprintf(`
   # Leave the manifests untouched and write the fixed copies to a directory instead
   %[1]s fix output.json --output-dir ./fixed
 
-  The copies mirror the scanned directory: with the scan above,
-  ./k8s/prod/deploy.yaml is written to ./fixed/k8s/prod/deploy.yaml and a
-  multi-document file stays one file. Nothing is edited in place, so there is no
+  The copies recreate the scanned tree, and a multi-document file stays one
+  file. Inside a git repository the tree starts at the repository root, so
+  ./k8s/prod/deploy.yaml is written to ./fixed/k8s/prod/deploy.yaml. Outside
+  one it starts at the scanned directory, or for several scanned directories
+  at the directory they share, so two inputs that both hold a deploy.yaml each
+  keep their own copy. Nothing is edited in place, so there is no
   confirmation prompt; a directory that is not empty is refused unless
   --no-confirm is passed.
 
