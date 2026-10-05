@@ -480,3 +480,127 @@ func mapValues(m map[string]string) []string {
 	}
 	return values
 }
+
+// TestOutputPaths_RefusesOverwritingAnotherScannedManifest: rebasing copies on
+// the inputs' shared directory can land one input's copy on another input's
+// manifest when the output directory overlaps a scanned root. With roots
+// w/apps/service and w/fixed/apps and --output-dir w/fixed, the copy of
+// w/apps/service/deploy.yaml maps to w/fixed/apps/service/deploy.yaml, the
+// second input's original. Comparing a destination only to its own source and
+// to the other destinations passed that plan, and the run replaced the second
+// original while reporting success.
+func TestOutputPaths_RefusesOverwritingAnotherScannedManifest(t *testing.T) {
+	w := t.TempDir()
+	first := filepath.Join(w, "apps", "service")
+	second := filepath.Join(w, "fixed", "apps")
+	require.NoError(t, os.MkdirAll(first, 0750))
+	require.NoError(t, os.MkdirAll(filepath.Join(second, "service"), 0750))
+	firstSource := writeManifest(t, first, "deploy.yaml", podManifest("web"))
+	secondSource := writeManifest(t, filepath.Join(second, "service"), "deploy.yaml", podManifest("db"))
+
+	h := reportOf(t, []manifestInput{
+		{root: first, relativePath: "deploy.yaml", name: "web"},
+		{root: second, relativePath: "service/deploy.yaml", name: "db"},
+	})
+	h.fixInfo.OutputDir = filepath.Join(w, "fixed")
+	h.fixInfo.NoConfirm = true
+
+	planned := h.PrepareResourcesToFix(context.Background())
+	require.Len(t, planned, 2)
+
+	_, err := h.OutputPaths(planned)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "would overwrite")
+
+	count, errs := h.ApplyChanges(context.Background(), planned)
+	assert.Equal(t, 0, count)
+	require.NotEmpty(t, errs)
+	assert.Equal(t, podManifest("web"), fileContentOf(t, firstSource))
+	assert.Equal(t, podManifest("db"), fileContentOf(t, secondSource), "another input's original must survive")
+}
+
+// TestOutputPaths_RefusesAnAliasOfAScannedManifest: the comparison has to be by
+// file, not by path, and has to cover every manifest the scan read, including
+// ones with nothing to fix. A destination already present in the output
+// directory as a hard link to a passing scanned manifest has a different path
+// from every source, but writing it would truncate that manifest.
+func TestOutputPaths_RefusesAnAliasOfAScannedManifest(t *testing.T) {
+	scanned := t.TempDir()
+	fixable := writeManifest(t, scanned, "deploy.yaml", podManifest("web"))
+	passing := writeManifest(t, scanned, "passing.yaml", podManifest("ok"))
+	outputDir := t.TempDir()
+	if err := os.Link(passing, filepath.Join(outputDir, "deploy.yaml")); err != nil {
+		t.Skipf("cannot create a hard link here: %v", err)
+	}
+
+	h := reportOf(t, []manifestInput{{root: scanned, relativePath: "deploy.yaml", name: "web"}})
+	passingResource := buildResource(t, scanned, "passing.yaml", "Pod", "ok", 0)
+	h.reportObj.Resources = append(h.reportObj.Resources, *passingResource) // scanned, nothing failed
+	h.fixInfo.OutputDir = outputDir
+	h.fixInfo.NoConfirm = true
+
+	planned := h.PrepareResourcesToFix(context.Background())
+	require.Len(t, planned, 1)
+	require.Equal(t, fixable, planned[0].FilePath)
+
+	_, err := h.OutputPaths(planned)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "would overwrite")
+	assert.Equal(t, podManifest("ok"), fileContentOf(t, passing), "a passing scanned manifest must survive")
+}
+
+// TestMultiInputScan_OverlappingInputsAreNotAList: outside git, `scan w w/apps`
+// reads w/apps/deploy.yaml through both roots and records it twice, as
+// apps/deploy.yaml:0 and deploy.yaml:0. The recorded paths differ, so both
+// observations survive as separate resources. Counted per resolved file they
+// read as one document declaring two resources, the signature of a kind: List,
+// and the only manifest in the scan was skipped.
+func TestMultiInputScan_OverlappingInputsAreNotAList(t *testing.T) {
+	w := t.TempDir()
+	apps := filepath.Join(w, "apps")
+	require.NoError(t, os.MkdirAll(apps, 0750))
+	source := writeManifest(t, apps, "deploy.yaml", podManifest("web"))
+
+	h := reportOf(t, []manifestInput{
+		{root: w, relativePath: "apps/deploy.yaml", name: "web"},
+		{root: apps, relativePath: "deploy.yaml", name: "web"},
+	})
+
+	planned := h.PrepareResourcesToFix(context.Background())
+	require.NotEmpty(t, planned, "one manifest seen through two roots is still one resource: %+v", h.UnfixedControls())
+	for _, unfixed := range h.UnfixedControls() {
+		assert.NotContains(t, unfixed.Reason, "several resources in one document")
+	}
+
+	_, errs := h.ApplyChanges(context.Background(), planned)
+	require.Empty(t, errs)
+	assert.Contains(t, fileContentOf(t, source), "image: nginx:1.25")
+}
+
+// TestMultiInputScan_OverlappingInputsKeepTheListGuard: deduplicating repeated
+// observations must not undercount a genuine kind: List. Seen through two
+// overlapping roots, each root still observes both members.
+func TestMultiInputScan_OverlappingInputsKeepTheListGuard(t *testing.T) {
+	w := t.TempDir()
+	apps := filepath.Join(w, "apps")
+	require.NoError(t, os.MkdirAll(apps, 0750))
+	list := writeManifest(t, apps, "deploy.yaml", "apiVersion: v1\nkind: List\nitems:\n- kind: Pod\n- kind: Pod\n")
+
+	h := reportOf(t, []manifestInput{
+		{root: w, relativePath: "apps/deploy.yaml", name: "web", resources: 2},
+		{root: apps, relativePath: "deploy.yaml", name: "web", resources: 2},
+	})
+
+	assert.Empty(t, h.PrepareResourcesToFix(context.Background()))
+	for _, unfixed := range h.UnfixedControls() {
+		assert.Contains(t, unfixed.Reason, "several resources in one document")
+	}
+	assert.NotContains(t, fileContentOf(t, list), "nginx:1.25")
+}
+
+func fileContentOf(t *testing.T, path string) string {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	require.NoError(t, err)
+	return string(b)
+}

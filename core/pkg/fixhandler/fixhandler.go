@@ -319,13 +319,32 @@ func (h *FixHandler) resourceBasePath(resourceObj *reporthandling.Resource) stri
 	return sourcePath
 }
 
-// countResourcesPerFile tallies every resource the scan read from each manifest,
+// countResourcesPerFile tallies the resources the scan read from each manifest,
 // keyed by the manifest's resolved path (see resourceFileKey).
+//
+// Overlapping inputs read one manifest more than once: outside git,
+// `scan w w/apps` reads w/apps/deploy.yaml through both roots and records it as
+// apps/deploy.yaml and as deploy.yaml. The recorded paths differ, so both
+// observations survive as separate resources, and summed per file they would
+// read as one document declaring two resources — a kind: List — skipping a
+// plain manifest. So the resources are counted per root the file was read
+// through, and the file's count is the largest of those: a root sees each
+// resource of the file once, every member of a List included.
 func (h *FixHandler) countResourcesPerFile(resources map[string]*reporthandling.Resource) map[string]int {
-	perFile := make(map[string]int, len(resources))
+	type observation struct{ file, root string }
+	perObservation := make(map[observation]int, len(resources))
 	for _, resource := range resources {
-		if key := h.resourceFileKey(resource); key != "" {
-			perFile[key]++
+		root, relativePath, ok := h.localManifest(resource)
+		if !ok {
+			continue
+		}
+		perObservation[observation{filepath.Join(root, relativePath), root}]++
+	}
+
+	perFile := make(map[string]int, len(perObservation))
+	for seen, count := range perObservation {
+		if count > perFile[seen.file] {
+			perFile[seen.file] = count
 		}
 	}
 	return perFile
@@ -371,18 +390,87 @@ func (h *FixHandler) localManifest(resource *reporthandling.Resource) (root, rel
 // that anything derived from it depends on what was scanned rather than on
 // which files happened to fail or which controls were selected.
 func (h *FixHandler) scanRoots() []string {
-	seen := make(map[string]bool)
-	roots := make([]string, 0, 1)
+	_, roots := h.scannedManifests()
+	return roots
+}
+
+// scannedManifests returns every manifest the report's resources were read
+// from, resolved the way resolveResourceSource resolves them, and the distinct
+// roots they were read through. Both are sorted. Passing manifests and ones
+// outside the current control selection are included: they were scanned all
+// the same.
+func (h *FixHandler) scannedManifests() (files, roots []string) {
+	seenFiles := make(map[string]bool)
+	seenRoots := make(map[string]bool)
 	for _, resource := range h.buildResourcesMap() {
-		root, _, ok := h.localManifest(resource)
-		if !ok || root == "" || root == "." || seen[root] {
+		root, relativePath, ok := h.localManifest(resource)
+		if !ok || root == "" || root == "." {
 			continue
 		}
-		seen[root] = true
-		roots = append(roots, root)
+		if file := filepath.Join(root, relativePath); !seenFiles[file] {
+			seenFiles[file] = true
+			files = append(files, file)
+		}
+		if !seenRoots[root] {
+			seenRoots[root] = true
+			roots = append(roots, root)
+		}
 	}
+	sort.Strings(files)
 	sort.Strings(roots)
-	return roots
+	return files, roots
+}
+
+// scannedFileSet indexes the scanned manifests for overwritesScannedManifest:
+// by absolute path, and by identity for the ones still on disk.
+type scannedFileSet struct {
+	paths map[string]string // absolute path -> scanned path
+	infos []scannedFileInfo
+}
+
+type scannedFileInfo struct {
+	path string
+	info os.FileInfo
+}
+
+func (h *FixHandler) scannedFiles(extra ...string) scannedFileSet {
+	files, _ := h.scannedManifests()
+	set := scannedFileSet{paths: make(map[string]string, len(files)+len(extra))}
+	for _, file := range append(files, extra...) {
+		abs, err := filepath.Abs(file)
+		if err != nil {
+			abs = filepath.Clean(file)
+		}
+		if _, seen := set.paths[abs]; seen {
+			continue
+		}
+		set.paths[abs] = file
+		if info, err := os.Stat(file); err == nil {
+			set.infos = append(set.infos, scannedFileInfo{path: file, info: info})
+		}
+	}
+	return set
+}
+
+// overwritesScannedManifest returns the scanned manifest destination would
+// overwrite, if any: one at the same path, or one the destination already
+// names under another, through a hard link or a symlink.
+func (set scannedFileSet) overwritesScannedManifest(destination string) (string, bool) {
+	if abs, err := filepath.Abs(destination); err == nil {
+		if scanned, ok := set.paths[abs]; ok {
+			return scanned, true
+		}
+	}
+	existing, err := os.Stat(destination)
+	if err != nil {
+		return "", false
+	}
+	for _, scanned := range set.infos {
+		if os.SameFile(existing, scanned.info) {
+			return scanned.path, true
+		}
+	}
+	return "", false
 }
 
 // sharedScanRoot returns the deepest directory containing every scan root, or ""
@@ -1257,9 +1345,12 @@ func (h *FixHandler) ApplyChanges(ctx context.Context, resourcesToFix []Resource
 //   - a destination outside the output directory. The relative path is report
 //     input, the same field resolveResourceSource containment-checks on the
 //     source side.
-//   - a destination that is the source itself, which happens when the output
-//     directory is the scanned directory. Writing there is an in-place fix
-//     under another name, the one outcome --output-dir exists to avoid.
+//   - a destination that is a scanned manifest: its own source, when the
+//     output directory is the scanned directory, or any other manifest the
+//     scan read, when the output directory overlaps a scanned root. Writing
+//     there replaces a manifest, the one outcome --output-dir exists to avoid.
+//     The comparison is by file as well as by path, and covers manifests with
+//     nothing to fix.
 //   - two manifests that map to the same destination, as the inputs of a
 //     multi-input scan can when they share file names. One copy would silently
 //     replace the other.
@@ -1273,6 +1364,18 @@ func (h *FixHandler) OutputPaths(resourcesToFix []ResourceFixInfo) (map[string]s
 	if err != nil {
 		return nil, err
 	}
+
+	// Every manifest the scan read, not only the ones being fixed: an output
+	// directory that overlaps a scanned root can map one manifest's copy onto
+	// another manifest, which may have nothing to fix. The sources being fixed
+	// are added in case the report does not list them as resources.
+	sources := make([]string, 0, len(resourcesToFix))
+	for i := range resourcesToFix {
+		if !resourcesToFix[i].inMemory {
+			sources = append(sources, resourcesToFix[i].FilePath)
+		}
+	}
+	scanned := h.scannedFiles(sources...)
 
 	destinations := make(map[string]string)
 	claimedBy := make(map[string]string)
@@ -1301,8 +1404,8 @@ func (h *FixHandler) OutputPaths(resourcesToFix []ResourceFixInfo) (map[string]s
 		if rel, err := filepath.Rel(outputDir, destination); err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 			return nil, fmt.Errorf("refusing to write %q outside the output directory %q", sanitizeForLog(relativePath), outputDir)
 		}
-		if isSameFile(source, destination) {
-			return nil, fmt.Errorf("output directory %q is where the scanned manifests are: writing there would overwrite %q. Choose another directory, or omit --output-dir to fix the manifests in place", outputDir, sanitizeForLog(source))
+		if overwritten, ok := scanned.overwritesScannedManifest(destination); ok {
+			return nil, fmt.Errorf("output directory %q holds scanned manifests: writing the fixed copy of %q there would overwrite %q. Choose a directory outside the scanned ones, or omit --output-dir to fix the manifests in place", outputDir, sanitizeForLog(source), sanitizeForLog(overwritten))
 		}
 		if other, claimed := claimedBy[destination]; claimed {
 			return nil, fmt.Errorf("%q and %q would both be written to %q; fix them in separate runs", sanitizeForLog(other), sanitizeForLog(source), destination)
@@ -1312,20 +1415,6 @@ func (h *FixHandler) OutputPaths(resourcesToFix []ResourceFixInfo) (map[string]s
 		claimedBy[destination] = source
 	}
 	return destinations, nil
-}
-
-// isSameFile reports whether two paths name the same file, either because they
-// are the same path or because the filesystem resolves them to the same file
-// (a symlinked output directory, for one).
-func isSameFile(a, b string) bool {
-	absA, errA := filepath.Abs(a)
-	absB, errB := filepath.Abs(b)
-	if errA == nil && errB == nil && absA == absB {
-		return true
-	}
-	infoA, errA := os.Stat(a)
-	infoB, errB := os.Stat(b)
-	return errA == nil && errB == nil && os.SameFile(infoA, infoB)
 }
 
 // isPathContained reports whether target resolves to a path inside base,
