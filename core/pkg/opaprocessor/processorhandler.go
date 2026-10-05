@@ -1209,6 +1209,12 @@ func splitWholeClusterControls(policies *cautils.Policies, controlIDs []string) 
 // Rules reading a resource's status are excluded too, because ResourceHash
 // leaves status out of the cache key: a node upgrade changes only
 // status.nodeInfo, which would otherwise keep serving the pre-upgrade verdict.
+//
+// Counting kinds is not enough on its own: a single-kind rule can still
+// compare two objects of that kind (etcd-unique-ca pairs the etcd Pod with
+// the kube-apiserver Pod). Cache hits are removed from the rule's input, so
+// such a rule would be evaluated without the peer it compares against.
+// ruleCorrelatesInput keeps those rules out of the cache.
 func ruleCacheEligible(control *reporthandling.Control, rule *reporthandling.PolicyRule) bool {
 	if controlRequiresWholeClusterInput(control) {
 		return false
@@ -1220,6 +1226,9 @@ func ruleCacheEligible(control *reporthandling.Control, rule *reporthandling.Pol
 		return false
 	}
 	if ruleReadsStatus(rule.Rule) {
+		return false
+	}
+	if ruleCorrelatesInput(rule.Rule) {
 		return false
 	}
 	kinds := make(map[string]struct{})
@@ -1344,6 +1353,186 @@ func moduleReadsStatus(module *ast.Module) bool {
 		return false
 	})
 	return reads
+}
+
+// inputCorrelators memoises ruleCorrelatesInput for the same reason
+// statusReaders memoises ruleReadsStatus.
+var inputCorrelators sync.Map
+
+// ruleCorrelatesInput reports whether a resource's verdict under rego can
+// depend on any other object in the rule's input. The incremental cache keys a
+// verdict on the resource's own hash and leaves cache hits out of the input,
+// so only rules that judge each object on its own can be cached.
+//
+// A rule is cleared only when every rule body binds at most one element of
+// input, through input[_] or some x in input, and input appears nowhere else:
+// not in a comprehension or every block, not in a rule head, not in a function
+// and not as a whole value (count(input), x in input, input[0]). Anything
+// else, including a rule that fails to parse, is reported as correlating.
+//
+// The element's position counts as another object's data. Leaving a cache hit
+// out of the input moves every later object down, so a rule that can see an
+// index (input[i], some i, x in input) would select or report a different
+// object than it does on a full input. Only the anonymous input[_] is cleared.
+func ruleCorrelatesInput(rego string) bool {
+	if memoised, ok := inputCorrelators.Load(rego); ok {
+		return memoised.(bool)
+	}
+
+	correlates := true
+	if module, err := ast.ParseModule("", rego); err == nil {
+		correlates = moduleCorrelatesInput(module)
+	}
+
+	inputCorrelators.Store(rego, correlates)
+	return correlates
+}
+
+func moduleCorrelatesInput(module *ast.Module) bool {
+	for _, imported := range module.Imports {
+		// import input as pods, or import input.x, gives input another name
+		// that the walk below would not recognise. Such a rule is not cleared
+		// rather than tracking the name through every scope that may shadow it.
+		if importsInput(imported) {
+			return true
+		}
+	}
+	for _, rule := range module.Rules {
+		for r := rule; r != nil; r = r.Else {
+			if r.Head != nil && referencesInput(r.Head) {
+				return true
+			}
+			if r.Head != nil && len(r.Head.Args) > 0 {
+				// A function sees input regardless of its arguments, so one
+				// that reads input cannot be tied to the caller's element.
+				if referencesInput(r.Body) {
+					return true
+				}
+				continue
+			}
+			if !isDenyRule(r) {
+				// A helper rule such as has_x if { input[_].kind == "X" } is
+				// evaluated over the whole input, whichever element deny bound.
+				if referencesInput(r.Body) {
+					return true
+				}
+				continue
+			}
+			if bodyCorrelatesInput(r.Body) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// importsInput reports whether imported brings input, or a part of it, into
+// the module. An import this cannot read is reported as importing input.
+func importsInput(imported *ast.Import) bool {
+	if imported == nil || imported.Path == nil {
+		return true
+	}
+	switch path := imported.Path.Value.(type) {
+	case ast.Ref:
+		return len(path) == 0 || isInputVar(path[0])
+	case ast.Var:
+		return isInputVar(imported.Path)
+	}
+	return true
+}
+
+// isDenyRule reports whether r is a body of the deny rule, which produces the
+// verdicts; every other rule only feeds it.
+func isDenyRule(r *ast.Rule) bool {
+	if r.Head == nil {
+		return false
+	}
+	ref := r.Head.Ref()
+	return len(ref) == 1 && ref[0].Value.Compare(ast.Var("deny")) == 0
+}
+
+// bodyCorrelatesInput reports whether body can bind more than one element of
+// input, or reads input other than through a single anonymous iteration.
+func bodyCorrelatesInput(body ast.Body) bool {
+	iterations := 0
+	correlates := false
+	ast.NewGenericVisitor(func(x any) bool {
+		if correlates {
+			return true
+		}
+		switch v := x.(type) {
+		case *ast.SomeDecl:
+			// some x in input binds one element per solution, the same as
+			// x := input[_]. some i, x in input also binds its position, so it
+			// is left to the walk below, which reports input as a whole value.
+			if len(v.Symbols) != 1 {
+				return false
+			}
+			call, isCall := v.Symbols[0].Value.(ast.Call)
+			if !isCall || len(call) != 3 || !isInputVar(call[len(call)-1]) {
+				return false
+			}
+			if call[0].Value.Compare(ast.Member.Ref()) != 0 {
+				return false
+			}
+			iterations++
+			correlates = referencesInput(call[1 : len(call)-1])
+			return true
+		case *ast.ArrayComprehension, *ast.SetComprehension, *ast.ObjectComprehension, *ast.Every:
+			// Each of these can gather several elements of input at once.
+			correlates = referencesInput(v)
+			return true
+		case ast.Ref:
+			if !isInputVar(v[0]) {
+				return false
+			}
+			iterations++
+			if len(v) < 2 {
+				correlates = true // input as a whole value
+				return true
+			}
+			if index, isVar := v[1].Value.(ast.Var); !isVar || !index.IsWildcard() {
+				// A fixed position, such as input[0], or a named index, such
+				// as input[i]. A named index can be bound, compared or
+				// reported elsewhere in the rule, and every such use makes the
+				// verdict depend on where the object sits in input.
+				correlates = true
+				return true
+			}
+			correlates = referencesInput(v[1:])
+			return true
+		case ast.Var:
+			correlates = v.Equal(ast.InputRootDocument.Value)
+		}
+		return false
+	}).Walk(body)
+	return correlates || iterations > 1
+}
+
+func referencesInput(x any) bool {
+	found := false
+	ast.NewGenericVisitor(func(node any) bool {
+		if found {
+			return true
+		}
+		if term, ok := node.(*ast.Term); ok && isInputVar(term) {
+			found = true
+		}
+		return found
+	}).Walk(x)
+	return found
+}
+
+// isInputVar reports whether term is input itself, as a variable or as the
+// single-element reference the parser produces for a bare input operand.
+func isInputVar(term *ast.Term) bool {
+	if term == nil {
+		return false
+	}
+	if ref, ok := term.Value.(ast.Ref); ok && len(ref) == 1 {
+		term = ref[0]
+	}
+	return term.Equal(ast.InputRootDocument)
 }
 
 // controlCacheEligible reports whether every rule in control is safe to cache.
