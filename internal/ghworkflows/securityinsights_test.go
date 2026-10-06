@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"testing"
 	"time"
 
@@ -12,9 +13,10 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// These tests guard SECURITY-INSIGHTS.yml at the repository root, the OpenSSF
-// Security Insights document that supply-chain consumers (OpenSSF Scorecard,
-// CNCF project reviews) read to learn how this repository secures itself.
+// These tests guard security-insights.yml at the repository root, the OpenSSF
+// Security Insights document that supply-chain consumers (the OSPS Baseline
+// scanner, CLOMonitor, CNCF project reviews) read to learn how this repository
+// secures itself.
 //
 // Nothing linked the document to reality, so it rotted for years: the
 // expiration date passed in October 2024, the attested release ("1.0.0") was
@@ -23,11 +25,37 @@ import (
 // automated pull requests while dependabot[bot] merges sat in the git
 // history. Each of those was a false attestation no consumer could detect.
 //
+// It also stayed on schema 1.0.0 after the spec moved to v2. The OSPS Baseline
+// scanner parses the file strictly, so it rejected it ("unknown field") and
+// reported the repository as having no Security Insights at all. The schema is
+// now checked by the security-insights action in repo-hygiene.yaml; these
+// tests cover freshness, the contact lists, and that only one copy exists.
+//
 // The date assertions are the part review cannot catch: an insights document
 // goes stale while nobody touches it, so expiry is a property of time, not of
 // change. repo-hygiene.yaml therefore runs this package on a monthly schedule
 // in addition to pull requests.
-const securityInsightsName = "SECURITY-INSIGHTS.yml"
+const (
+	securityInsightsName = "security-insights.yml"
+
+	// securityInsightsURL is the raw file on master. Other Kubescape
+	// repositories inherit the project section by pointing
+	// header.project-si-source at it, and that needs raw YAML, not the page.
+	securityInsightsURL = "https://raw.githubusercontent.com/kubescape/kubescape/master/" + securityInsightsName
+
+	// securityInsightsMaxReviewMonths bounds the age of last-reviewed. v2 has
+	// no expiration-date; six months is the expiry window the v1 file used.
+	securityInsightsMaxReviewMonths = 6
+
+	// securityInsightsDateLayout is the only date form v2 allows.
+	securityInsightsDateLayout = "2006-01-02"
+)
+
+type securityInsightsContact struct {
+	Name    string `yaml:"name"`
+	Primary bool   `yaml:"primary"`
+	Social  string `yaml:"social"`
+}
 
 // securityInsights is the subset of the Security Insights schema these tests
 // assert on. Unknown keys are tolerated on purpose, like the Dependabot
@@ -35,21 +63,21 @@ const securityInsightsName = "SECURITY-INSIGHTS.yml"
 // strict decoder would turn adopting one into a spurious failure here.
 type securityInsights struct {
 	Header struct {
-		SchemaVersion  string `yaml:"schema-version"`
-		LastUpdated    string `yaml:"last-updated"`
-		ExpirationDate string `yaml:"expiration-date"`
-		ProjectURL     string `yaml:"project-url"`
-		ProjectRelease string `yaml:"project-release"`
+		SchemaVersion string `yaml:"schema-version"`
+		LastUpdated   string `yaml:"last-updated"`
+		LastReviewed  string `yaml:"last-reviewed"`
+		URL           string `yaml:"url"`
 	} `yaml:"header"`
-	ProjectLifecycle struct {
-		Status          string   `yaml:"status"`
-		CoreMaintainers []string `yaml:"core-maintainers"`
-	} `yaml:"project-lifecycle"`
+	Project struct {
+		Name           string                    `yaml:"name"`
+		Administrators []securityInsightsContact `yaml:"administrators"`
+	} `yaml:"project"`
+	Repository struct {
+		URL      string                    `yaml:"url"`
+		Status   string                    `yaml:"status"`
+		CoreTeam []securityInsightsContact `yaml:"core-team"`
+	} `yaml:"repository"`
 }
-
-// securityInsightsDateLayouts are the date forms the spec permits: a calendar
-// date, or a full RFC3339 timestamp.
-var securityInsightsDateLayouts = []string{time.RFC3339, "2006-01-02"}
 
 func securityInsightsPath(t *testing.T) string {
 	t.Helper()
@@ -71,108 +99,137 @@ func loadSecurityInsights(t *testing.T) securityInsights {
 	return insights
 }
 
-// parseSecurityInsightsDate accepts both spec-permitted date forms and fails
-// listing the layouts it tried. It also reports whether the value carried
-// day granularity, because a date-only value means "sometime during that
-// day", not midnight UTC: comparing it to the instant clock would flag every
-// same-day update as future-dated while UTC is still on the previous day.
-func parseSecurityInsightsDate(t *testing.T, field, value string) (time.Time, bool) {
+func parseSecurityInsightsDate(t *testing.T, field, value string) time.Time {
 	t.Helper()
 
-	for _, layout := range securityInsightsDateLayouts {
-		if parsed, err := time.Parse(layout, value); err == nil {
-			return parsed, layout == securityInsightsDateLayouts[1]
-		}
+	parsed, err := time.Parse(securityInsightsDateLayout, value)
+	if err != nil {
+		t.Fatalf("%s in %s must be a date (YYYY-MM-DD), got %q", field, securityInsightsName, value)
 	}
-
-	t.Fatalf("%s in %s must be a date (YYYY-MM-DD) or an RFC3339 timestamp, got %q",
-		field, securityInsightsName, value)
-	return time.Time{}, false
+	return parsed
 }
 
-// isFutureReference reports whether a parsed date reference lies in the
-// future, at the granularity the source value carried.
+// isFutureDate reports whether a date lies in the future.
 //
-// A date-only value may legitimately name tomorrow's UTC date: it is written
-// by a contributor in their local calendar, and every inhabited timezone is
-// ahead of UTC by less than a day. The check exists to catch documents that
-// sit years in the past or typo a far-off year, so one day of skew is
-// tolerated and anything beyond it fails.
-func isFutureReference(parsed time.Time, dateOnly bool) bool {
-	now := time.Now().UTC()
-	if dateOnly {
-		// ISO dates order identically as strings, so this is a calendar-day
-		// comparison against the latest local date any timezone can be on.
-		return parsed.Format("2006-01-02") > now.AddDate(0, 0, 1).Format("2006-01-02")
-	}
-	return parsed.After(now)
+// A date may legitimately name tomorrow's UTC date: it is written by a
+// contributor in their local calendar, and every inhabited timezone is ahead
+// of UTC by less than a day. The check exists to catch documents that typo a
+// far-off year, so one day of skew is tolerated and anything beyond it fails.
+func isFutureDate(parsed time.Time) bool {
+	// ISO dates order identically as strings, so this is a calendar-day
+	// comparison against the latest local date any timezone can be on.
+	latest := time.Now().UTC().AddDate(0, 0, 1).Format(securityInsightsDateLayout)
+	return parsed.Format(securityInsightsDateLayout) > latest
 }
+
+// schemaV2Re matches the schema versions the struct above can read. v1 to v2
+// changed the layout of the whole document, so another major version should
+// fail here instead of being half-read.
+var schemaV2Re = regexp.MustCompile(`^2\.[0-9]+\.[0-9]+$`)
 
 // TestSecurityInsightsHeaderIsPopulated keeps the fields consumers key off
-// present and non-empty; the document named release "1.0.0" for years after
-// the project had moved on to v4.
+// present and pointing at this repository.
 func TestSecurityInsightsHeaderIsPopulated(t *testing.T) {
 	insights := loadSecurityInsights(t)
 
-	assert.NotEmpty(t, insights.Header.SchemaVersion, "schema-version is required")
-	assert.NotEmpty(t, insights.Header.ProjectURL, "project-url is required")
-	assert.NotEmptyf(t, insights.Header.ProjectRelease,
-		"project-release is required; an insights document that names no release describes no release")
-	assert.Equal(t, "active", insights.ProjectLifecycle.Status)
+	assert.Regexp(t, schemaV2Re, insights.Header.SchemaVersion,
+		"schema-version must be a 2.x.y release of the Security Insights spec")
+	assert.Equal(t, securityInsightsURL, insights.Header.URL,
+		"header.url must be the raw file on master; other repositories inherit the project section from there")
+	assert.NotEmpty(t, insights.Header.LastUpdated, "last-updated is required")
+	assert.NotEmpty(t, insights.Header.LastReviewed, "last-reviewed is required")
+	assert.NotEmpty(t, insights.Project.Name, "project.name is required")
+	assert.Equal(t, "https://github.com/kubescape/kubescape", insights.Repository.URL)
+	assert.Equal(t, "active", insights.Repository.Status)
 }
 
-// TestSecurityInsightsIsNotExpired is the direct regression test for the
-// expired document: the expiration date had passed almost two years earlier
-// and nothing failed, because nothing was checking.
-func TestSecurityInsightsIsNotExpired(t *testing.T) {
+// TestSecurityInsightsIsFresh replaces the v1 expiry check, which was added
+// after the expiration date had passed almost two years earlier and nothing
+// failed. v2 has no expiration-date, so the check moves to last-reviewed.
+func TestSecurityInsightsIsFresh(t *testing.T) {
 	insights := loadSecurityInsights(t)
 
-	require.NotEmpty(t, insights.Header.ExpirationDate, "expiration-date is required")
+	require.NotEmpty(t, insights.Header.LastReviewed, "last-reviewed is required")
 
-	// Strict instant comparison, even for date-only values: for an expiry
-	// check, failing near the boundary is the safe direction.
-	expiration, _ := parseSecurityInsightsDate(t, "expiration-date", insights.Header.ExpirationDate)
-	assert.Truef(t, expiration.After(time.Now().UTC()),
-		"%s expired on %s; an expired document attests nothing and must be reviewed and refreshed",
-		securityInsightsName, expiration.Format(time.RFC3339))
+	// Strict comparison: for an expiry check, failing near the boundary is the
+	// safe direction.
+	lastReviewed := parseSecurityInsightsDate(t, "last-reviewed", insights.Header.LastReviewed)
+	reviewBy := lastReviewed.AddDate(0, securityInsightsMaxReviewMonths, 0)
+	assert.Truef(t, reviewBy.After(time.Now().UTC()),
+		"%s was last reviewed on %s and was due for review by %s; check it against the repository and update last-reviewed",
+		securityInsightsName, insights.Header.LastReviewed, reviewBy.Format(securityInsightsDateLayout))
 }
 
-// TestSecurityInsightsDatesAreCoherent keeps the header internally consistent:
-// no future-dated updates, and no document that expires before it was written.
+// TestSecurityInsightsDatesAreCoherent keeps the header dates out of the
+// future.
 func TestSecurityInsightsDatesAreCoherent(t *testing.T) {
 	insights := loadSecurityInsights(t)
 
-	require.NotEmpty(t, insights.Header.LastUpdated, "last-updated is required")
-
-	lastUpdated, dateOnly := parseSecurityInsightsDate(t, "last-updated", insights.Header.LastUpdated)
-	assert.Falsef(t, isFutureReference(lastUpdated, dateOnly),
-		"last-updated %s is in the future", insights.Header.LastUpdated)
-
-	if insights.Header.ExpirationDate != "" {
-		expiration, _ := parseSecurityInsightsDate(t, "expiration-date", insights.Header.ExpirationDate)
-		assert.Truef(t, expiration.After(lastUpdated),
-			"expiration-date %s is not after last-updated %s",
-			insights.Header.ExpirationDate, insights.Header.LastUpdated)
+	for field, value := range map[string]string{
+		"last-updated":  insights.Header.LastUpdated,
+		"last-reviewed": insights.Header.LastReviewed,
+	} {
+		t.Run(field, func(t *testing.T) {
+			require.NotEmptyf(t, value, "%s is required", field)
+			assert.Falsef(t, isFutureDate(parseSecurityInsightsDate(t, field, value)),
+				"%s %s is in the future", field, value)
+		})
 	}
 }
 
-// coreMaintainerRe matches the `github:<handle>` form the document uses for
-// every core-maintainer entry.
-var coreMaintainerRe = regexp.MustCompile(`^github:[A-Za-z0-9][A-Za-z0-9-]*$`)
+// TestSecurityInsightsIsTheOnlyCopy fails on a second insights file in the
+// root or .github. The OSPS Baseline scanner matches the name
+// case-insensitively and takes the first hit in GitHub's byte-ordered listing,
+// so an old SECURITY-INSIGHTS.yml next to this file would be read instead of
+// it. CLOMonitor picks between copies in a different order, so one copy is
+// the only safe number.
+func TestSecurityInsightsIsTheOnlyCopy(t *testing.T) {
+	root := repoRoot(t)
 
-// TestSecurityInsightsListsCoreMaintainers keeps the maintainer entries
-// well-formed and resolvable: the list had grown two Emeritus maintainers
-// because retirements recorded in project-governance never propagated here.
-func TestSecurityInsightsListsCoreMaintainers(t *testing.T) {
+	for _, dir := range []string{root, filepath.Join(root, ".github")} {
+		entries, err := os.ReadDir(dir)
+		require.NoErrorf(t, err, "cannot list %s", dir)
+
+		for _, entry := range entries {
+			if !strings.EqualFold(entry.Name(), securityInsightsName) {
+				continue
+			}
+			path := filepath.Join(dir, entry.Name())
+			assert.Equalf(t, securityInsightsPath(t), path,
+				"%s is a second copy of %s; keep only the one at the repository root",
+				path, securityInsightsName)
+		}
+	}
+}
+
+// githubProfileRe matches the `social` value used for every contact, so each
+// one resolves to a GitHub account.
+var githubProfileRe = regexp.MustCompile(`^https://github\.com/[A-Za-z0-9][A-Za-z0-9-]*$`)
+
+// TestSecurityInsightsContactsAreResolvable keeps both contact lists
+// well-formed. The spec says only one contact should be marked primary; this
+// also requires one, so each list has a first point of contact.
+func TestSecurityInsightsContactsAreResolvable(t *testing.T) {
 	insights := loadSecurityInsights(t)
 
-	require.NotEmpty(t, insights.ProjectLifecycle.CoreMaintainers,
-		"core-maintainers is required; a security document with no accountable humans attests nothing")
+	for list, contacts := range map[string][]securityInsightsContact{
+		"project.administrators": insights.Project.Administrators,
+		"repository.core-team":   insights.Repository.CoreTeam,
+	} {
+		t.Run(list, func(t *testing.T) {
+			require.NotEmptyf(t, contacts,
+				"%s is required; a security document with no accountable humans attests nothing", list)
 
-	for _, maintainer := range insights.ProjectLifecycle.CoreMaintainers {
-		t.Run(maintainer, func(t *testing.T) {
-			assert.Regexp(t, coreMaintainerRe, maintainer,
-				"core-maintainer entries must be `github:<handle>` so consumers can resolve them")
+			primaries := 0
+			for _, contact := range contacts {
+				assert.NotEmptyf(t, contact.Name, "every %s entry needs a name", list)
+				assert.Regexpf(t, githubProfileRe, contact.Social,
+					"%s entry %q must set social to a GitHub profile URL", list, contact.Name)
+				if contact.Primary {
+					primaries++
+				}
+			}
+			assert.Equalf(t, 1, primaries, "%s must mark exactly one contact as primary", list)
 		})
 	}
 }

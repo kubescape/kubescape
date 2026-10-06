@@ -4,7 +4,7 @@ permissions:
 on:
   workflow_dispatch: {}
   schedule:
-    # Expiry is a property of time, not of change: SECURITY-INSIGHTS.yml goes
+    # Expiry is a property of time, not of change: security-insights.yml goes
     # stale while nobody touches it, so the freshness assertions in
     # internal/ghworkflows must also run while the repository is idle.
     - cron: '0 0 1 * *'
@@ -16,7 +16,7 @@ on:
     # at all, which is how an invalid config disabled Dependabot for three
     # months. This workflow uses `paths` - an allow-list - to cover exactly the
     # blind spot the other workflow's deny-list leaves open.
-    # SECURITY-INSIGHTS.yml sits at the repository root and matches the
+    # security-insights.yml sits at the repository root and matches the
     # deny-list's "**.yml" the same way, so it is covered here too.
     #
     # .goreleaser.yaml and the install scripts sit in the same blind spot and
@@ -34,7 +34,7 @@ on:
     paths:
       - ".github/**"
       - "internal/ghworkflows/**"
-      - "SECURITY-INSIGHTS.yml"
+      - "security-insights.yml"
       - ".goreleaser.yaml"
       - "install.sh"
       - "install.ps1"
@@ -59,3 +59,15 @@ jobs:
 
       - name: Validate workflow, Dependabot and security-insights configuration
         run: go test -v ./internal/ghworkflows/...
+
+      # Runs cue vet on security-insights.yml with the schema for its
+      # schema-version. Pinned to a commit after v1.0.0 because v1.0.0 calls
+      # cue vet without -d '#SecurityInsights', and then every file on schema
+      # 2.1.0 or later passes (revanite-io/security-insights-action#2). The
+      # fix has not been released yet, so do not take a Dependabot update back
+      # to v1.0.0. `file` is set because the action looks in .github/ by
+      # default.
+      - name: Validate security-insights.yml against its schema
+        uses: revanite-io/security-insights-action@13244c96662ef295385925489ea9e8e56376ce7d # main, 2026-06-18
+        with:
+          file: security-insights.yml
