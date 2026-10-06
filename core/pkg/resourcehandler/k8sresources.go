@@ -203,12 +203,13 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 		cautils.StopSpinner()
 		return nil, nil, nil, nil, err
 	}
-	// Count scan targets before adding Namespace objects used only as CEL context.
 	metrics.UpdateKubernetesResourcesCount(ctx, int64(len(allResources)))
 	if needsSupplementalCELNamespaces(scanInfo, sessionObj.Policies) {
-		if err := k8sHandler.collectSupplementalCELNamespaces(ctx, globalFieldSelectors, sessionObj.SingleResourceScan, resolver, allResources); err != nil {
+		context, err := k8sHandler.collectSupplementalCELNamespaces(ctx, globalFieldSelectors, sessionObj.SingleResourceScan, resolver)
+		if err != nil {
 			return k8sResourcesMap, allResources, ksResourceMap, excludedRulesMap, err
 		}
+		sessionObj.CELNamespaceContext = context
 	}
 
 	numberOfWorkerNodes, err := k8sHandler.pullWorkerNodesNumber(ctx)
@@ -584,9 +585,11 @@ func (k8sHandler *K8sResourceHandler) collectAndStreamBatches(ctx context.Contex
 		}
 	}
 	if needsSupplementalCELNamespaces(scanInfo, sessionObj.Policies) {
-		if err := k8sHandler.collectSupplementalCELNamespaces(ctx, globalFieldSelectors, sessionObj.SingleResourceScan, resolver, resident.AllResources); err != nil {
+		context, err := k8sHandler.collectSupplementalCELNamespaces(ctx, globalFieldSelectors, sessionObj.SingleResourceScan, resolver)
+		if err != nil {
 			return err
 		}
+		resident.CELNamespaceContext = context
 	}
 
 	if k8sHandler.k8s != nil {

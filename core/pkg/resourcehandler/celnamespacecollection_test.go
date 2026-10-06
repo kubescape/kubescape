@@ -77,8 +77,9 @@ func TestGetResourcesCollectsNamespaceContextOutsideWorkloadFilters(t *testing.T
 			require.NoError(t, err)
 			assert.NotEmpty(t, resources["apps/v1/deployments"], "the requested workload stays a scan target")
 			assert.Empty(t, resources["/v1/namespaces"], "support context is not another scan target")
+			assert.Len(t, allResources, 1, "support context is not a report resource")
 			var foundNamespace bool
-			for _, resource := range allResources {
+			for _, resource := range session.CELNamespaceContext {
 				if resource.GetKind() == "Namespace" && resource.GetName() == "team-a" {
 					foundNamespace = true
 					assert.Equal(t, "prod", resource.GetObject()["metadata"].(map[string]any)["labels"].(map[string]any)["tier"])
@@ -110,12 +111,28 @@ func TestStreamingCollectionCarriesSupplementalNamespaceContext(t *testing.T) {
 	assert.Contains(t, namespaceLabels, "")
 	assert.Empty(t, resident.K8SResources["/v1/namespaces"], "Namespace context must not become a policy target")
 	var foundNamespace bool
-	for _, resource := range resident.AllResources {
+	assert.Empty(t, resident.AllResources, "the resident report catalog must not contain support-only Namespaces")
+	for _, resource := range resident.CELNamespaceContext {
 		if resource.GetKind() == "Namespace" && resource.GetName() == "team-a" {
 			foundNamespace = true
 		}
 	}
 	assert.True(t, foundNamespace, "the first batch must carry Namespace context before workload evaluation")
+}
+
+func TestCollectResourcesRejectsEmptyLabelFilteredCELScan(t *testing.T) {
+	k8sinterface.InitializeMapResourcesMock()
+	var mu sync.Mutex
+	var namespaceLabels []string
+	handler := newHandlerWithReactor(t, namespaceContextReactor(t, &namespaceLabels, &mu))
+	scanInfo := &cautils.ScanInfo{LabelSelector: "app=missing"}
+	session := cautils.NewOPASessionObj(context.Background(), nil, nil, scanInfo, nil)
+	session.Policies = []reporthandling.Framework{celNamespaceTestFramework()}
+
+	err := CollectResources(context.Background(), handler, session, scanInfo)
+	require.ErrorContains(t, err, "no resources found to scan")
+	assert.Empty(t, session.AllResources)
+	assert.NotEmpty(t, session.CELNamespaceContext, "Namespace context was available but is not a scan target")
 }
 
 func TestSupplementalNamespaceContextRequiresCELAndNarrowing(t *testing.T) {

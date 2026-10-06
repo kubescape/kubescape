@@ -33,26 +33,23 @@ func needsSupplementalCELNamespaces(scanInfo *cautils.ScanInfo, policies []repor
 }
 
 // collectSupplementalCELNamespaces retrieves Namespace objects only as CEL
-// input. They enter AllResources so the processor can resolve namespaceObject,
-// but not K8SResources, so a label or kind filter does not start scanning
-// Namespace objects as additional policy targets. This works for both eager
-// and streaming collection after their normal kind filters have run.
+// input. The caller keeps them separate from the scan's resource catalog and
+// target indexes, so they cannot affect reporting or empty-scan detection.
 func (k8sHandler *K8sResourceHandler) collectSupplementalCELNamespaces(
 	ctx context.Context,
 	selector IFieldSelector,
 	singleScan workloadinterface.IWorkload,
 	resolver resourceResolver,
-	allResources map[string]workloadinterface.IMetadata,
-) error {
+) (map[string]workloadinterface.IMetadata, error) {
 	var namespace string
 	if singleScan != nil {
 		if singleScan.GetKind() == "Namespace" {
-			return nil
+			return nil, nil
 		}
 		namespace = getScannedResourceNamespace(singleScan, resolver)
 	}
 	if singleScan != nil && namespace == "" {
-		return nil
+		return nil, nil
 	}
 
 	fields := ""
@@ -63,17 +60,18 @@ func (k8sHandler *K8sResourceHandler) collectSupplementalCELNamespaces(
 	clusterScoped := false
 	objects, failures := k8sHandler.pullSingleResource(ctx, &gvr, "", fields, selector, &clusterScoped)
 	if err := ctx.Err(); err != nil {
-		return err
+		return nil, err
 	}
 	for _, failure := range failures {
 		logger.L().Ctx(ctx).Warning("could not collect Namespace context for CEL validation",
 			helpers.String("selector", failure.selector), helpers.Error(failure.err))
 	}
+	context := make(map[string]workloadinterface.IMetadata, len(objects))
 	for i := range objects {
 		meta := workloadinterface.NewWorkloadObj(objects[i].Object)
 		if meta.GetKind() == "Namespace" && meta.GetApiVersion() == "v1" && meta.GetName() != "" {
-			allResources[meta.GetID()] = meta
+			context[meta.GetID()] = meta
 		}
 	}
-	return nil
+	return context, nil
 }

@@ -98,6 +98,7 @@ type OPASessionObj struct {
 	catalogMu             sync.RWMutex                                  // guards lazy initialization and catalog swaps
 	catalog               ResourceCatalog                               // accessor abstraction over scan resources; access via GetCatalog/SetCatalog
 	AllResources          map[string]workloadinterface.IMetadata        // all scanned resources, map[<resource ID>]<resource>
+	CELNamespaceContext   map[string]workloadinterface.IMetadata        // supplemental Namespaces for CEL; not scanned resources
 	ResourcesResult       map[string]resourcesresults.Result            // resources scan results, map[<resource ID>]<resource result>
 	ResourceSource        map[string]reporthandling.Source              // resources sources, map[<resource ID>]<resource result>
 	ResourcesPrioritized  map[string]prioritization.PrioritizedResource // resources prioritization information, map[<resource ID>]<prioritized resource>

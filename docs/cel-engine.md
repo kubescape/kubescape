@@ -326,7 +326,8 @@ exist in a file scan.
 **`namespaceObject` is conditional.** It binds to a real Namespace only when the
 scan collected that object. Live scans request Namespaces for CEL rules; workload
 label and kind filters do not suppress the supplemental Namespace lookup needed as
-evaluation context. Those Namespace objects are not added as scan targets. If RBAC
+evaluation context. Those Namespace objects are kept outside both scan targets and
+the report resource catalog, so they do not change resource counts. If RBAC
 prevents collection, or an offline input lacks the Namespace manifest, a policy
 reading `namespaceObject` marks the namespaced resource skipped with an unknown
 verdict. It does not treat missing input as an admission denial under
