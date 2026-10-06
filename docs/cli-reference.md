@@ -68,6 +68,28 @@ kubescape scan [target] [flags]
 | `-v, --verbose` | Display all resources, not just failed ones | `false` |
 | `--view <type>` | View type: `security`, `control`, `resource` | `security` |
 
+### Framework-scoped exceptions
+
+Exceptions scoped to a framework apply only when that framework is selected and
+contains the matching control. For a failed control shared by NSA and MITRE, an
+NSA-only exception makes the NSA view passed with an exception, while the MITRE
+view and the aggregate result remain failed. The aggregate can still carry the
+`w/exceptions` substatus. Audit counts (`--audit-exceptions`) and
+`ExceptionMatched` events include only exceptions applicable to the selected
+frameworks; a partially excepted aggregate can still have a matched exception.
+
+Compatibility note: raw `results[].controls[].status` values in JSON and posture
+reports preserve the evaluation status, which can be failed even when a
+framework-scoped exception makes a single-framework scan pass. The same applies
+to raw results embedded in MCP `failedResources`. Consumers should use
+`summaryDetails` for effective statuses, or `cautils.ControlStatus` with the
+report summary when processing Go result objects. Reports written by older
+versions remain readable, but failures discarded by older serializers cannot be
+reconstructed.
+
+A `scan control` invocation has no framework context, so framework-scoped
+exceptions do not apply. Unscoped exceptions continue to apply.
+
 ### Webhook notifications
 
 Use `--notify` to send a compact summary after a posture scan. Official Slack and GovSlack incoming webhook URLs receive a Block Kit message, Microsoft Teams incoming webhooks (`*.webhook.office.com`, `outlook.office.com`, `outlook.office365.com`) receive an Adaptive Card, and every other URL receives the existing JSON `summaryDetails` object:
@@ -321,6 +343,30 @@ outside `1-10`, a malformed value, or duplicate annotations in the same file
 fail the scan rather than defaulting, because a rule whose severity cannot be
 determined is treated as exceeding every `--severity-threshold`.
 
+
+### API group matching in SecurityExceptions
+
+In `SecurityException` and `ClusterSecurityException`, each
+`spec.match.resources[]` entry can constrain the Kubernetes API group:
+
+- `apiGroup: apps` matches the group in `apiVersion: apps/v1`.
+- `apiGroup: ""` matches only the core group, such as `apiVersion: v1` Pods.
+- Omitting `apiGroup` leaves the API group unconstrained.
+
+The group is matched as a regular expression, like other resource designator
+attributes. It is combined with the entry's `kind` and `name`, namespace scope,
+and any `objectSelector`; it is not a Kubernetes label. RBAC subject findings
+use their explicit `apiGroup` even when they have no `apiVersion`.
+
+The same presence rules apply to `resources[].attributes.apiGroup` in posture
+exception JSON files passed through `--exceptions`.
+
+When primary (file/cloud) and CRD exceptions match the same finding with a
+covered control/framework/rule scope, the primary takes precedence, including
+when API groups overlap through an omitted group or regular expression. The
+CRD remains effective for resources outside the primary match. For example, a
+core-only primary with `AlertOnly` keeps a core Pod finding failed while an
+unscoped CRD with `Disable` can still suppress findings in named API groups.
 
 ### Exception Audit
 

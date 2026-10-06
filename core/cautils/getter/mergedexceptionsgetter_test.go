@@ -323,6 +323,11 @@ func TestMergedExceptionsGetter_Deduplication(t *testing.T) {
 			)
 			got, err := getter.GetExceptions(context.TODO(), "cluster-a")
 			require.NoError(t, err)
+			for i := range tc.want {
+				if tc.want[i].PolicyType == "crd" {
+					tc.want[i].Attributes = map[string]any{secondaryExceptionSourceAttribute: true}
+				}
+			}
 			assert.Equal(t, tc.want, got)
 		})
 	}

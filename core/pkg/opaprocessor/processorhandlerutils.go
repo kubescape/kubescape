@@ -14,6 +14,7 @@ import (
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/cautils/getter"
 	"github.com/kubescape/opa-utils/exceptions"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/reporthandling"
@@ -75,6 +76,21 @@ func (opap *OPAProcessor) updateResults(ctx context.Context) {
 				opap.AllPolicies.Controls, // update status depending on action required
 				resourcesresults.WithExceptionsProcessor(processor),
 			)
+			// Resolve source precedence only after the full workload matcher has
+			// identified the overlap. This leaves broader CRDs effective on other
+			// resources and prevents shadowed matches reaching summaries/audit/events.
+			for ci := range t.AssociatedControls {
+				control := &t.AssociatedControls[ci]
+				hasMatches := false
+				for ri := range control.ResourceAssociatedRules {
+					rule := &control.ResourceAssociatedRules[ri]
+					hasMatches = hasMatches || len(rule.Exception) > 0
+					rule.Exception = getter.FilterMatchedExceptions(rule.Exception)
+				}
+				if hasMatches {
+					control.SetStatus(opap.AllPolicies.Controls[control.GetID()])
+				}
+			}
 			opap.emitExceptionMatchEvents(resource, t)
 		}
 
@@ -94,7 +110,7 @@ func (opap *OPAProcessor) updateResults(ctx context.Context) {
 	opap.Report.SummaryDetails.InitResourcesSummary(controlToInfoMap)
 
 	if opap.AuditExceptions {
-		opap.ExceptionAudit = buildExceptionAudit(loadedExceptions, opap.Exceptions, opap.ResourcesResult, opap.GetCatalog(), opap.AllPolicies, processor, manualControlMatches)
+		opap.ExceptionAudit = buildExceptionAudit(loadedExceptions, opap.Exceptions, opap.ResourcesResult, opap.GetCatalog(), opap.AllPolicies, processor, manualControlMatches, &opap.Report.SummaryDetails)
 	}
 }
 
@@ -122,16 +138,50 @@ func applyExceptionsToManualControls(
 		return nil
 	}
 
-	matches := applyExceptionsToControlSummaries(summaryDetails.Controls, exceptionPolicies, clusterName, processor)
-
+	var matches []manualControlExceptionMatch
 	for i := range summaryDetails.Frameworks {
-		// Top-level and per-framework Controls mirror the same controlIDs, so the
-		// matches collected from the top-level pass above already cover this one;
-		// collecting them again here would only duplicate audit bookkeeping.
-		applyExceptionsToControlSummaries(summaryDetails.Frameworks[i].Controls, exceptionPolicies, clusterName, processor)
+		framework := &summaryDetails.Frameworks[i]
+		var names []string
+		if framework.GetName() != "" {
+			names = []string{framework.GetName()}
+		}
+		matches = append(matches, applyExceptionsToControlSummaries(framework.Controls, exceptionPolicies, clusterName, processor, names)...)
 	}
 
-	return matches
+	for controlID, ctrl := range summaryDetails.Controls {
+		if ctrl.GetSubStatus() != apis.SubStatusManualReview {
+			continue
+		}
+		found, allExcepted := false, true
+		for _, framework := range summaryDetails.Frameworks {
+			if occurrence, ok := framework.Controls[controlID]; ok {
+				found = true
+				allExcepted = allExcepted && occurrence.GetStatus().IsPassed() && occurrence.GetSubStatus() == apis.SubStatusException
+			}
+		}
+		if !found {
+			// Without framework context only framework-agnostic exceptions apply.
+			controls := reportsummary.ControlSummaries{controlID: ctrl}
+			matches = append(matches, applyExceptionsToControlSummaries(controls, exceptionPolicies, clusterName, processor, nil)...)
+			summaryDetails.Controls[controlID] = controls[controlID]
+		} else if allExcepted {
+			ctrl.SetStatus(&apis.StatusInfo{InnerStatus: apis.StatusPassed, SubStatus: apis.SubStatusException})
+			summaryDetails.Controls[controlID] = ctrl
+		}
+	}
+
+	// A partial framework match is still an audit match, but the same exception
+	// applied through multiple frameworks counts only once for each control.
+	seen := make(map[struct{ exception, control string }]bool)
+	unique := matches[:0]
+	for _, match := range matches {
+		key := struct{ exception, control string }{exceptionAuditKey(match.exception), match.controlID}
+		if !seen[key] {
+			seen[key] = true
+			unique = append(unique, match)
+		}
+	}
+	return unique
 }
 
 // applyExceptionsToControlSummaries updates manual controls in a single ControlSummaries map.
@@ -141,6 +191,7 @@ func applyExceptionsToControlSummaries(
 	exceptionPolicies []armotypes.PostureExceptionPolicy,
 	clusterName string,
 	processor *exceptions.Processor,
+	frameworkNames []string,
 ) []manualControlExceptionMatch {
 	var matches []manualControlExceptionMatch
 	for controlID, ctrl := range controlSummaries {
@@ -148,7 +199,7 @@ func applyExceptionsToControlSummaries(
 			continue
 		}
 
-		matchingExceptions := matchingControlExceptions(exceptionPolicies, controlID, clusterName, processor)
+		matchingExceptions := matchingControlExceptions(exceptionPolicies, controlID, clusterName, processor, frameworkNames)
 		if len(matchingExceptions) == 0 {
 			continue
 		}
@@ -372,11 +423,17 @@ func resourceScopedExceptions(exceptionPolicies []armotypes.PostureExceptionPoli
 // matchingControlExceptions returns the exception policies that explicitly target
 // controlID with a cluster-or-global-only designator matching clusterName. An exception
 // object is returned at most once even if more than one of its PosturePolicies matches.
-func matchingControlExceptions(exceptionPolicies []armotypes.PostureExceptionPolicy, controlID, clusterName string, processor *exceptions.Processor) []armotypes.PostureExceptionPolicy {
+func matchingControlExceptions(exceptionPolicies []armotypes.PostureExceptionPolicy, controlID, clusterName string, processor *exceptions.Processor, frameworkNames []string) []armotypes.PostureExceptionPolicy {
 	var matches []armotypes.PostureExceptionPolicy
 policyLoop:
 	for _, policy := range exceptionPolicies {
-		for _, pp := range policy.PosturePolicies {
+		// Filter tuples together, but return the original policy so audit identity
+		// and metadata do not depend on which framework matched it.
+		filtered := exceptions.FilterExceptionsByFrameworks([]armotypes.PostureExceptionPolicy{policy}, frameworkNames, controlID, "")
+		if len(filtered) == 0 {
+			continue
+		}
+		for _, pp := range filtered[0].PosturePolicies {
 			if !processor.RegexCompareControlID(pp.ControlID, controlID) {
 				continue
 			}
