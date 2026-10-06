@@ -275,6 +275,46 @@ func TestMarkdownPrinter_ActionPrint_FailedSection(t *testing.T) {
 	assert.Contains(t, out, "hub.armosec.io/docs/c-0057", "control URL must include lowercase ID")
 }
 
+func TestMarkdownPrinter_ActionPrint_MultilineRemediationStaysQuoted(t *testing.T) {
+	session := mdSessionFixture()
+	ctrl := session.Report.SummaryDetails.Controls[mdControlID1]
+	ctrl.Remediation = "Run the following command\n\n \n```\nchmod 600 /var/lib/kubelet/config.yaml\n\n```"
+	session.Report.SummaryDetails.Controls[mdControlID1] = ctrl
+
+	out := mdRunActionPrint(t, session)
+
+	assert.Contains(t, out, "> **Remediation:** Run the following command\n>\n>\n> ```\n> chmod 600 /var/lib/kubelet/config.yaml\n>\n> ```\n\n[View documentation]")
+}
+
+func TestMarkdownPrinter_ActionPrint_BlankRemediationOmitted(t *testing.T) {
+	session := mdSessionFixture()
+	ctrl := session.Report.SummaryDetails.Controls[mdControlID1]
+	ctrl.Remediation = " \n\t"
+	session.Report.SummaryDetails.Controls[mdControlID1] = ctrl
+
+	assert.NotContains(t, mdRunActionPrint(t, session), "**Remediation:**")
+}
+
+func TestMdBlockquote(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"single line", "fix it", "> fix it"},
+		{"paragraphs", "first\n\nsecond", "> first\n>\n> second"},
+		{"crlf", "first\r\nsecond\r\n", "> first\n> second"},
+		{"whitespace-only line", "first\n\t \nsecond", "> first\n>\n> second"},
+		{"hard line break", "First step  \nSecond step", "> First step  \n> Second step"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, mdBlockquote(tc.input))
+		})
+	}
+}
+
 func TestMarkdownPrinter_ActionPrint_ResourceTable(t *testing.T) {
 	out := mdRunActionPrint(t, mdSessionFixture())
 

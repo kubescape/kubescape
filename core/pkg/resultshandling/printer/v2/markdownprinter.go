@@ -189,8 +189,8 @@ func mdWriteFailedSection(ctx context.Context, w io.Writer, controls []reportsum
 		severity := apis.ControlSeverityToString(ctrl.GetScoreFactor())
 		ew.printf("### %s — %s (`%s`)\n\n", ctrl.GetName(), severity, ctrl.GetID())
 
-		if rem := ctrl.GetRemediation(); rem != "" {
-			ew.printf("> **Remediation:** %s\n\n", rem)
+		if rem := strings.TrimSpace(ctrl.GetRemediation()); rem != "" {
+			ew.printf("%s\n\n", mdBlockquote("**Remediation:** "+rem))
 		}
 
 		ew.printf("[View documentation](%s)\n\n", cautils.GetControlLink(ctrl.GetID()))
@@ -444,6 +444,19 @@ func mdStatusLabel(status apis.IStatus) string {
 
 func mdEscapeCell(s string) string {
 	return strings.ReplaceAll(s, "|", "\\|")
+}
+
+func mdBlockquote(s string) string {
+	s = strings.ReplaceAll(strings.ReplaceAll(s, "\r\n", "\n"), "\r", "\n")
+	lines := strings.Split(strings.TrimSpace(s), "\n")
+	for i, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			lines[i] = ">"
+		} else {
+			lines[i] = "> " + line
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 func mdEscapeInline(s string) string {
