@@ -311,9 +311,9 @@ func TestMetrics_CleansUpResultsFileOnDisconnect(t *testing.T) {
 		reqCtx, cancel := context.WithCancel(context.Background())
 		handlerDone := make(chan struct{})
 		scanImpl = func(ctx context.Context, scanInfo *cautils.ScanInfo, _ []cautils.PolicyIdentifier, _ string, _ bool) (*reporthandlingv2.PostureReport, error) {
-			cancel() // simulate the scrape connection going away mid-scan
-			scanCtxErr <- ctx.Err()
+			cancel()      // simulate the scrape connection going away mid-scan
 			<-handlerDone // wait for the handler to return on the disconnect path before writing
+			scanCtxErr <- ctx.Err()
 			resolved, _ := printer.ResolveOutputFile(printer.PrometheusFormat, scanInfo.Output, "")
 			require.NoError(t, os.WriteFile(resolved, []byte("# metrics\n"), 0o600))
 			return nil, nil
@@ -330,7 +330,7 @@ func TestMetrics_CleansUpResultsFileOnDisconnect(t *testing.T) {
 
 		select {
 		case err := <-scanCtxErr:
-			assert.NoError(t, err, "scan context must not be cancelled when the request context is")
+			assert.ErrorIs(t, err, context.Canceled, "scan context must be cancelled when the request context is")
 		case <-time.After(5 * time.Second):
 			t.Fatal("scan was not invoked")
 		}
