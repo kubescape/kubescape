@@ -17,7 +17,10 @@ on:
     # months. This workflow uses `paths` - an allow-list - to cover exactly the
     # blind spot the other workflow's deny-list leaves open.
     # security-insights.yml sits at the repository root and matches the
-    # deny-list's "**.yml" the same way, so it is covered here too.
+    # deny-list's "**.yml" the same way, so it is covered here too. So is its
+    # old name, SECURITY-INSIGHTS.yml: a copy brought back under that name
+    # would shadow the real file for the OSPS Baseline scanner, and
+    # TestSecurityInsightsIsTheOnlyCopy only runs if this workflow does.
     #
     # .goreleaser.yaml and the install scripts sit in the same blind spot and
     # are worse placed to be in it: they define what a release publishes and
@@ -35,6 +38,7 @@ on:
       - ".github/**"
       - "internal/ghworkflows/**"
       - "security-insights.yml"
+      - "SECURITY-INSIGHTS.yml"
       - ".goreleaser.yaml"
       - "install.sh"
       - "install.ps1"
