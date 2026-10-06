@@ -1392,6 +1392,88 @@ func TestStoreWorkloadScans_MergePartialResultsWithinOneReport(t *testing.T) {
 	assert.Equal(t, string(apis.StatusFailed), summary.Spec.Controls["C-0016"].Status.Status)
 }
 
+func TestStoreWorkloadScans_PreservesReportIdentityAcrossJSONRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	store := NewFakeAPIServerStorage("kubescape")
+	reportTime := time.Date(2026, time.October, 1, 10, 0, 0, 123456789, time.UTC)
+	makeScan := func(status apis.ScanningStatus) *v1beta1.WorkloadConfigurationScan {
+		return &v1beta1.WorkloadConfigurationScan{
+			ObjectMeta: metav1.ObjectMeta{Name: "deployment-web", Namespace: "default"},
+			Spec: v1beta1.WorkloadConfigurationScanSpec{
+				Metadata: &v1beta1.WorkloadConfigurationScanMeta{Report: v1beta1.ReportMeta{CreatedAt: metav1.NewTime(reportTime)}},
+				Controls: map[string]v1beta1.ScannedControl{
+					"C-0016": {ControlID: "C-0016", Status: v1beta1.ScannedControlStatus{Status: string(status)}},
+				},
+			},
+		}
+	}
+
+	failed := makeScan(apis.StatusFailed)
+	assert.NoError(t, store.StoreWorkloadConfigurationScanResult(ctx, failed))
+	_, err := store.StoreWorkloadConfigurationScanResultSummary(ctx, failed)
+	assert.NoError(t, err)
+
+	stored, err := store.StorageClient.WorkloadConfigurationScans("default").Get(ctx, failed.Name, metav1.GetOptions{})
+	assert.NoError(t, err)
+	assert.Equal(t, reportTime, workloadScanReportTime(stored))
+
+	// The Kubernetes API representation of metav1.Time has only second
+	// precision. Simulate that boundary while retaining the exact annotation.
+	raw, err := json.Marshal(stored)
+	assert.NoError(t, err)
+	roundTripped := &v1beta1.WorkloadConfigurationScan{}
+	assert.NoError(t, json.Unmarshal(raw, roundTripped))
+	assert.True(t, reportTime.Truncate(time.Second).Equal(scanReportTime(roundTripped.Spec)))
+	assert.Equal(t, reportTime, workloadScanReportTime(roundTripped))
+	_, err = store.StorageClient.WorkloadConfigurationScans("default").Update(ctx, roundTripped, metav1.UpdateOptions{})
+	assert.NoError(t, err)
+
+	passedPartial := makeScan(apis.StatusPassed)
+	assert.NoError(t, store.StoreWorkloadConfigurationScanResult(ctx, passedPartial))
+	_, err = store.StoreWorkloadConfigurationScanResultSummary(ctx, passedPartial)
+	assert.NoError(t, err)
+
+	stored, err = store.StorageClient.WorkloadConfigurationScans("default").Get(ctx, failed.Name, metav1.GetOptions{})
+	assert.NoError(t, err)
+	assert.Equal(t, string(apis.StatusFailed), stored.Spec.Controls["C-0016"].Status.Status,
+		"partial results from one report must keep worst-status merging after serialization")
+	storedSummary, err := store.StorageClient.WorkloadConfigurationScanSummaries("default").Get(ctx, failed.Name, metav1.GetOptions{})
+	assert.NoError(t, err)
+	assert.Equal(t, string(apis.StatusFailed), storedSummary.Spec.Controls["C-0016"].Status.Status)
+}
+
+func TestStoreWorkloadScanSummary_FirstTimestampedReportReplacesLegacyFailure(t *testing.T) {
+	ctx := context.Background()
+	legacy := &v1beta1.WorkloadConfigurationScanSummary{
+		ObjectMeta: metav1.ObjectMeta{Name: "deployment-web", Namespace: "default"},
+		Spec: v1beta1.WorkloadConfigurationScanSummarySpec{
+			Controls: map[string]v1beta1.ScannedControlSummary{
+				"C-0016": {ControlID: "C-0016", Status: v1beta1.ScannedControlStatus{Status: string(apis.StatusFailed)}},
+			},
+		},
+	}
+	//nolint:staticcheck // The pinned storage client lacks the summary apply schema required by NewClientset.
+	client := fake.NewSimpleClientset(legacy)
+	store := &APIServerStore{StorageClient: client.SpdxV1beta1()}
+	reportTime := time.Date(2026, time.October, 1, 11, 0, 0, 123456789, time.UTC)
+	passed := &v1beta1.WorkloadConfigurationScan{
+		ObjectMeta: metav1.ObjectMeta{Name: legacy.Name, Namespace: legacy.Namespace},
+		Spec: v1beta1.WorkloadConfigurationScanSpec{
+			Metadata: &v1beta1.WorkloadConfigurationScanMeta{Report: v1beta1.ReportMeta{CreatedAt: metav1.NewTime(reportTime)}},
+			Controls: map[string]v1beta1.ScannedControl{
+				"C-0016": {ControlID: "C-0016", Status: v1beta1.ScannedControlStatus{Status: string(apis.StatusPassed)}},
+			},
+		},
+	}
+
+	_, err := store.StoreWorkloadConfigurationScanResultSummary(ctx, passed)
+	assert.NoError(t, err)
+	stored, err := store.StorageClient.WorkloadConfigurationScanSummaries("default").Get(ctx, legacy.Name, metav1.GetOptions{})
+	assert.NoError(t, err)
+	assert.Equal(t, string(apis.StatusPassed), stored.Spec.Controls["C-0016"].Status.Status)
+	assert.Equal(t, reportTime, summaryReportTime(stored.Annotations))
+}
+
 func TestMergeWorkloadConfigurationScanSpec_ReportBoundaries(t *testing.T) {
 	first := time.Date(2026, time.October, 1, 10, 0, 0, 0, time.UTC)
 	second := first.Add(time.Minute)
@@ -1430,7 +1512,7 @@ func TestSummaryReportTime_HandlesLegacyAndMalformedAnnotations(t *testing.T) {
 	stamp := time.Date(2026, time.October, 1, 10, 0, 0, 123456789, time.UTC)
 	encoded := stamp.Format(time.RFC3339Nano)
 	assert.Equal(t, stamp, summaryReportTime(map[string]string{reportCreatedAtAnnotation: encoded}))
-	assert.Equal(t, 0, compareReportTimes(time.Time{}, stamp), "legacy scans keep existing merge semantics")
+	assert.Equal(t, 1, compareReportTimes(time.Time{}, stamp), "the first timestamped scan supersedes legacy state")
 	assert.Equal(t, 0, compareReportTimes(stamp, time.Time{}))
 	assert.Equal(t, 0, compareReportTimes(stamp, stamp))
 	assert.Equal(t, 1, compareReportTimes(stamp, stamp.Add(time.Nanosecond)))

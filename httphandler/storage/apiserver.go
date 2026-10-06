@@ -33,11 +33,16 @@ var storageInstance *APIServerStore
 
 const reportCreatedAtAnnotation = "kubescape.io/report-created-at"
 
-// compareReportTimes returns 0 for the same report (or legacy reports with
-// no timestamp), 1 for a newer report, and -1 for an older delayed result.
+// compareReportTimes returns 0 for the same report (or an incoming report
+// without an identity), 1 for a newer report, and -1 for an older delayed
+// result. A timestamped report supersedes a legacy stored object: otherwise a
+// failure written before report identities existed could never be remediated.
 func compareReportTimes(existing, incoming time.Time) int {
-	if existing.IsZero() || incoming.IsZero() {
+	if incoming.IsZero() {
 		return 0
+	}
+	if existing.IsZero() {
+		return 1
 	}
 	if incoming.After(existing) {
 		return 1
@@ -61,6 +66,22 @@ func summaryReportTime(annotations map[string]string) time.Time {
 		return time.Time{}
 	}
 	return parsed
+}
+
+func workloadScanReportTime(scan *v1beta1.WorkloadConfigurationScan) time.Time {
+	if annotated := summaryReportTime(scan.Annotations); !annotated.IsZero() {
+		return annotated
+	}
+	return scanReportTime(scan.Spec)
+}
+
+func annotateReportTime(annotations map[string]string, reportTime time.Time) map[string]string {
+	if reportTime.IsZero() {
+		return annotations
+	}
+	return mergeMaps(annotations, map[string]string{
+		reportCreatedAtAnnotation: reportTime.Format(time.RFC3339Nano),
+	})
 }
 
 // ErrIncompleteRelatedObjects is returned when a RegoResponseVector lacks the expected Role+RoleBinding pair (e.g. orphaned binding).
@@ -297,6 +318,11 @@ func workloadConfigurationScanMetadata(report *v2.PostureReport) *v1beta1.Worklo
 
 // StoreWorkloadConfigurationScanResult stores a WorkloadConfigurationScan manifest
 func (a *APIServerStore) StoreWorkloadConfigurationScanResult(ctx context.Context, manifest *v1beta1.WorkloadConfigurationScan) error {
+	// metav1.Time is serialized with second precision. Keep the exact report
+	// identity in an annotation so partial results from one report are not
+	// mistaken for a newer generation after an API-server round trip.
+	manifest = manifest.DeepCopy()
+	manifest.Annotations = annotateReportTime(manifest.Annotations, scanReportTime(manifest.Spec))
 	namespace := manifest.GetNamespace()
 	_, err := a.StorageClient.WorkloadConfigurationScans(namespace).Create(ctx, manifest, metav1.CreateOptions{})
 	switch {
@@ -308,14 +334,18 @@ func (a *APIServerStore) StoreWorkloadConfigurationScanResult(ctx context.Contex
 			if getErr != nil {
 				return getErr
 			}
-			if compareReportTimes(scanReportTime(result.Spec), scanReportTime(manifest.Spec)) < 0 {
+			switch compareReportTimes(workloadScanReportTime(result), workloadScanReportTime(manifest)) {
+			case 1:
+				result.Spec = manifest.Spec
+			case -1:
 				// Leave status and object metadata untouched for a delayed scan.
 				return nil
+			default:
+				result.Spec = mergeSameReportWorkloadConfigurationScanSpec(result.Spec, manifest.Spec)
 			}
 			// update the workload configuration scan manifest
 			result.Annotations = mergeMaps(result.Annotations, manifest.Annotations)
 			result.Labels = mergeMaps(result.Labels, manifest.Labels)
-			result.Spec = mergeWorkloadConfigurationScanSpec(result.Spec, manifest.Spec)
 			// try to send the updated workload configuration scan manifest
 			_, updateErr := a.StorageClient.WorkloadConfigurationScans(namespace).Update(ctx, result, metav1.UpdateOptions{})
 			return updateErr
@@ -343,6 +373,10 @@ func mergeWorkloadConfigurationScanSpec(existingSpec v1beta1.WorkloadConfigurati
 	case -1:
 		return existingSpec
 	}
+	return mergeSameReportWorkloadConfigurationScanSpec(existingSpec, newSpec)
+}
+
+func mergeSameReportWorkloadConfigurationScanSpec(existingSpec v1beta1.WorkloadConfigurationScanSpec, newSpec v1beta1.WorkloadConfigurationScanSpec) v1beta1.WorkloadConfigurationScanSpec {
 	if existingSpec.Controls == nil {
 		existingSpec.Controls = make(map[string]v1beta1.ScannedControl)
 	}
@@ -477,11 +511,7 @@ func (a *APIServerStore) StoreWorkloadConfigurationScanResultSummary(ctx context
 			Controls:   controlsSummary,
 		},
 	}
-	if reportTime := scanReportTime(workloadScan.Spec); !reportTime.IsZero() {
-		manifest.Annotations = mergeMaps(manifest.Annotations, map[string]string{
-			reportCreatedAtAnnotation: reportTime.Format(time.RFC3339Nano),
-		})
-	}
+	manifest.Annotations = annotateReportTime(manifest.Annotations, scanReportTime(workloadScan.Spec))
 
 	_, err := a.StorageClient.WorkloadConfigurationScanSummaries(namespace).Create(ctx, &manifest, metav1.CreateOptions{})
 	switch {
