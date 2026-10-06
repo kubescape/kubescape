@@ -185,21 +185,37 @@ func (a *GCPAdaptor) GetImagesScanStatus(ctx context.Context, imageIDs []Contain
 				}
 				seen++
 
-				if occurrence != nil && occurrence.GetDiscovery() != nil {
-					discovery := occurrence.GetDiscovery()
-					if discovery != nil && discovery.GetAnalysisStatus() == grafeaspb.DiscoveryOccurrence_FINISHED_SUCCESS {
-						status.IsScanAvailable = true
-						if occurrence.UpdateTime != nil {
-							status.LastScanDate = occurrence.UpdateTime.AsTime()
-						}
-						break
-					}
-				}
+				mergeSuccessfulGCPScan(&status, occurrence)
 			}
 
 			return status, nil
 		},
 	)
+}
+
+// mergeSuccessfulGCPScan records a completed discovery occurrence without
+// assuming that Grafeas returns occurrences in chronological order. An image
+// may retain multiple discovery occurrences after rescans, so callers must
+// inspect the complete bounded result set and keep the newest completion.
+func mergeSuccessfulGCPScan(status *ContainerImageScanStatus, occurrence *grafeaspb.Occurrence) {
+	if status == nil || occurrence == nil {
+		return
+	}
+
+	discovery := occurrence.GetDiscovery()
+	if discovery == nil || discovery.GetAnalysisStatus() != grafeaspb.DiscoveryOccurrence_FINISHED_SUCCESS {
+		return
+	}
+
+	status.IsScanAvailable = true
+	if occurrence.UpdateTime == nil || occurrence.UpdateTime.CheckValid() != nil {
+		return
+	}
+
+	completedAt := occurrence.UpdateTime.AsTime()
+	if completedAt.After(status.LastScanDate) {
+		status.LastScanDate = completedAt
+	}
 }
 
 func buildGrafeasFilter(kind string, imageID ContainerImageIdentifier) string {
