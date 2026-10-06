@@ -829,3 +829,16 @@ func TestFix_MultiInputScanOutsideGit(t *testing.T) {
 		}
 	})
 }
+
+func TestFix_DryRunOutputKustomizeWritesNothing(t *testing.T) {
+	dir := t.TempDir()
+	reportPath := buildFixableReport(t, dir)
+	kustDir := filepath.Join(t.TempDir(), "kust-output")
+
+	ks := &Kubescape{Ctx: context.Background()}
+	err := ks.Fix(&metav1.FixInfo{ReportFile: reportPath, KustomizeDir: kustDir, DryRun: true})
+	assert.NoError(t, err)
+
+	assert.NoDirExists(t, kustDir, "DryRun must not create KustomizeDir output")
+}
+

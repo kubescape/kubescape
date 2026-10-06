@@ -64,7 +64,7 @@ func (ks *Kubescape) Fix(fixInfo *metav1.FixInfo) error {
 	// This is a machine-applicable companion to PrintHelmSuggestions: the
 	// generated patches can be applied via kustomize build <dir> | kubectl
 	// apply -f - or used as a Helm --post-renderer without touching the chart.
-	if fixInfo.KustomizeDir != "" {
+	if fixInfo.KustomizeDir != "" && !fixInfo.DryRun {
 		if err := fixhandler.EmitKustomizePatch(helmSuggestions, fixInfo.KustomizeDir); err != nil {
 			logger.L().Error("failed to write Kustomize patches", helpers.Error(err))
 		} else if len(helmSuggestions) > 0 {
