@@ -1,6 +1,7 @@
 package fixhandler
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -61,21 +62,71 @@ type resourceGroup struct {
 	fixPaths []armotypes.FixPath
 }
 
-// fixPathToJSONPointer converts a dot-notation fix path such as
-// "spec.containers[0].securityContext.privileged" to a JSON Pointer
-// "/spec/containers/0/securityContext/privileged" per RFC 6901, suitable
-// for use as the "path" field in a JSON 6902 patch operation.
-func fixPathToJSONPointer(path string) string {
-	path = strings.TrimPrefix(path, ".")
-	// Replace array notation [N] or [*] with /N or /*
-	re := regexp.MustCompile(`\[(\d+|\*)\]`)
-	path = re.ReplaceAllString(path, "/$1")
-	// Replace dot separators with slashes
-	path = strings.ReplaceAll(path, ".", "/")
-	if !strings.HasPrefix(path, "/") {
-		path = "/" + path
+// escapeJSONPointerToken escapes '~' to '~0' and '/' to '~1' per RFC 6901.
+func escapeJSONPointerToken(token string) string {
+	token = strings.ReplaceAll(token, "~", "~0")
+	token = strings.ReplaceAll(token, "/", "~1")
+	return token
+}
+
+// fixPathToJSONPointer converts a dot-notation or quoted-key fix path such as
+// "spec.containers[0].securityContext.privileged" or
+// "metadata.labels.\"app.kubernetes.io/name\""
+// to an RFC 6901 compliant JSON Pointer suitable for JSON 6902 patch operations.
+// Wildcards are not valid in RFC 6901 JSON Pointers and will return an error.
+func fixPathToJSONPointer(path string) (string, error) {
+	parts, err := parseYAMLPath(path)
+	if err != nil {
+		return "", fmt.Errorf("invalid fix path %q: %w", path, err)
 	}
-	return path
+	if len(parts) == 0 {
+		return "", fmt.Errorf("empty fix path %q", path)
+	}
+
+	var tokens []string
+	for _, part := range parts {
+		if part.sequence {
+			if part.wildcard {
+				return "", fmt.Errorf("wildcard in path %q cannot be represented as JSON Pointer without concrete index", path)
+			}
+			tokens = append(tokens, strconv.Itoa(part.index))
+		} else {
+			tokens = append(tokens, escapeJSONPointerToken(part.key))
+		}
+	}
+
+	return "/" + strings.Join(tokens, "/"), nil
+}
+
+// computeResourceHash returns a deterministic short hex hash representing the full resource identity.
+func computeResourceHash(key resourceKey) string {
+	h := sha256.New()
+	h.Write([]byte(key.Group))
+	h.Write([]byte{0})
+	h.Write([]byte(key.Version))
+	h.Write([]byte{0})
+	h.Write([]byte(key.Kind))
+	h.Write([]byte{0})
+	h.Write([]byte(key.Namespace))
+	h.Write([]byte{0})
+	h.Write([]byte(key.Name))
+	return fmt.Sprintf("%x", h.Sum(nil))[:8]
+}
+
+// resourcePatchFilename generates an unambiguous patch filename encoding the full resource identity.
+func resourcePatchFilename(key resourceKey) string {
+	hash := computeResourceHash(key)
+	var parts []string
+	if key.Group != "" {
+		parts = append(parts, sanitizeFilenamePart(key.Group))
+	}
+	parts = append(parts, sanitizeFilenamePart(key.Kind))
+	if key.Namespace != "" {
+		parts = append(parts, sanitizeFilenamePart(key.Namespace))
+	}
+	parts = append(parts, sanitizeFilenamePart(key.Name))
+	parts = append(parts, hash)
+	return fmt.Sprintf("%s.yaml", strings.Join(parts, "-"))
 }
 
 // sanitizeFilenamePart strips path separators and replaces unsafe characters with underscores.
@@ -141,147 +192,197 @@ func parseGroupVersion(apiVersion string) (group, version string) {
 	return "", apiVersion
 }
 
-// checkPathInfo returns whether fixPath exists in obj, whether its parent exists, and how many levels are missing.
-func checkPathInfo(obj map[string]interface{}, fixPath string) (exists bool, parentExists bool, missingDepth int) {
-	if obj == nil {
-		return false, false, 99
+// deepCopyMap creates an isolated deep copy of a resource map object.
+func deepCopyMap(m map[string]interface{}) map[string]interface{} {
+	if m == nil {
+		return nil
 	}
-
-	parts, err := parseYAMLPath(fixPath)
-	if err != nil || len(parts) == 0 {
-		return false, false, 99
+	b, err := json.Marshal(m)
+	if err != nil {
+		return nil
 	}
-
-	var current interface{} = obj
-	for i, part := range parts {
-		if current == nil {
-			return false, i == len(parts)-1, len(parts) - i
-		}
-
-		if part.sequence {
-			slice, ok := current.([]interface{})
-			if !ok {
-				return false, i == len(parts)-1, len(parts) - i
-			}
-			if part.wildcard {
-				if len(slice) == 0 {
-					return false, i == len(parts)-1, len(parts) - i
-				}
-				current = slice[0]
-			} else {
-				if part.index < 0 || part.index >= len(slice) {
-					return false, i == len(parts)-1, len(parts) - i
-				}
-				current = slice[part.index]
-			}
-		} else {
-			m, ok := current.(map[string]interface{})
-			if !ok {
-				return false, i == len(parts)-1, len(parts) - i
-			}
-			val, found := m[part.key]
-			if !found {
-				return false, i == len(parts)-1, len(parts) - i
-			}
-			current = val
-		}
+	var res map[string]interface{}
+	if err := json.Unmarshal(b, &res); err != nil {
+		return nil
 	}
-
-	return true, true, 0
+	return res
 }
 
-// buildMissingParentValue handles cases where parent objects do not exist (e.g. securityContext missing on container 0).
-func buildMissingParentValue(obj map[string]interface{}, fixPath string, val interface{}) (ancestorPointer string, nestedVal interface{}, ok bool) {
-	if obj == nil {
-		return "", nil, false
-	}
-	parts, err := parseYAMLPath(fixPath)
+// expandWildcardFixPaths expands wildcard fix paths such as
+// "spec.template.spec.containers[*].securityContext.privileged" into concrete index paths
+// using the rendered resource object.
+func expandWildcardFixPaths(obj map[string]interface{}, fp armotypes.FixPath) []armotypes.FixPath {
+	parts, err := parseYAMLPath(fp.Path)
 	if err != nil || len(parts) == 0 {
-		return "", nil, false
+		return []armotypes.FixPath{fp}
 	}
 
-	var current interface{} = obj
-	lastExistingIdx := -1
-
+	wildcardIdx := -1
 	for i, part := range parts {
-		if current == nil {
+		if part.sequence && part.wildcard {
+			wildcardIdx = i
 			break
 		}
-		if part.sequence {
+	}
+	if wildcardIdx == -1 {
+		return []armotypes.FixPath{fp}
+	}
+
+	var current interface{} = obj
+	for i := 0; i < wildcardIdx; i++ {
+		if current == nil {
+			return nil
+		}
+		p := parts[i]
+		if p.sequence {
 			slice, ok := current.([]interface{})
-			if !ok || part.index < 0 || part.index >= len(slice) {
-				break
+			if !ok || p.index < 0 || p.index >= len(slice) {
+				return nil
 			}
-			current = slice[part.index]
-			lastExistingIdx = i
+			current = slice[p.index]
 		} else {
 			m, ok := current.(map[string]interface{})
 			if !ok {
-				break
+				return nil
 			}
-			v, found := m[part.key]
-			if !found {
-				break
-			}
-			current = v
-			lastExistingIdx = i
+			current = m[p.key]
 		}
 	}
 
-	if lastExistingIdx < 0 || lastExistingIdx >= len(parts)-1 {
-		return "", nil, false
+	slice, ok := current.([]interface{})
+	if !ok || len(slice) == 0 {
+		return nil
 	}
 
-	missingStartIdx := lastExistingIdx + 1
-
-	var ancestorPathParts []string
-	for k := 0; k <= missingStartIdx; k++ {
-		p := parts[k]
-		if p.sequence {
-			ancestorPathParts = append(ancestorPathParts, fmt.Sprintf("%d", p.index))
-		} else {
-			ancestorPathParts = append(ancestorPathParts, p.key)
-		}
-	}
-	ancestorPointer = "/" + strings.Join(ancestorPathParts, "/")
-
-	currVal := val
-	for k := len(parts) - 1; k > missingStartIdx; k-- {
-		p := parts[k]
-		if p.sequence {
-			currVal = []interface{}{currVal}
-		} else {
-			currVal = map[string]interface{}{
-				p.key: currVal,
+	var expanded []armotypes.FixPath
+	for idx := range slice {
+		var newParts []string
+		for i, p := range parts {
+			if i == wildcardIdx {
+				newParts = append(newParts, fmt.Sprintf("[%d]", idx))
+			} else if p.sequence {
+				if p.wildcard {
+					newParts = append(newParts, "[*]")
+				} else {
+					newParts = append(newParts, fmt.Sprintf("[%d]", p.index))
+				}
+			} else {
+				if strings.ContainsAny(p.key, "./\"[]") {
+					newParts = append(newParts, fmt.Sprintf("%q", p.key))
+				} else {
+					newParts = append(newParts, p.key)
+				}
 			}
 		}
+		var b strings.Builder
+		for j, np := range newParts {
+			if strings.HasPrefix(np, "[") {
+				b.WriteString(np)
+			} else {
+				if j > 0 {
+					b.WriteByte('.')
+				}
+				b.WriteString(np)
+			}
+		}
+		childFP := armotypes.FixPath{
+			Path:  b.String(),
+			Value: fp.Value,
+		}
+		expanded = append(expanded, expandWildcardFixPaths(obj, childFP)...)
 	}
 
-	return ancestorPointer, currVal, true
+	return expanded
 }
 
-// resolvePatchOp determines whether to use "replace" or "add" for a given fixPath based on base object contents.
-func resolvePatchOp(obj map[string]interface{}, fixPath string, val interface{}) (op string, pointer string, finalVal interface{}) {
-	pointer = fixPathToJSONPointer(fixPath)
-	finalVal = val
-
-	isArrayElementTarget := regexp.MustCompile(`\[\d+\]$`).MatchString(fixPath)
-	exists, parentExists, missingDepth := checkPathInfo(obj, fixPath)
-
-	if exists || isArrayElementTarget {
-		return "replace", pointer, finalVal
+// resolveFixPathOps resolves a concrete FixPath against an evolving working copy of the resource.
+// If intermediate ancestor maps are missing, it emits an "add" op creating the ancestor as {}
+// once, updates the evolving copy, and resolves child fields so sibling fixes sharing a missing
+// parent are both preserved.
+func resolveFixPathOps(workingObj map[string]interface{}, fp armotypes.FixPath) []kustomizePatchOp {
+	parts, err := parseYAMLPath(fp.Path)
+	if err != nil || len(parts) == 0 {
+		return nil
 	}
 
-	if parentExists || missingDepth <= 1 {
-		return "add", pointer, finalVal
+	parsedVal := parseFixValue(fp.Value)
+	var ops []kustomizePatchOp
+	var pointerTokens []string
+	var current interface{} = workingObj
+
+	for i, part := range parts {
+		isLast := i == len(parts)-1
+
+		if !isLast {
+			if part.sequence {
+				pointerTokens = append(pointerTokens, strconv.Itoa(part.index))
+				slice, ok := current.([]interface{})
+				if !ok || part.index < 0 || part.index >= len(slice) {
+					return nil
+				}
+				current = slice[part.index]
+			} else {
+				pointerTokens = append(pointerTokens, escapeJSONPointerToken(part.key))
+				m, ok := current.(map[string]interface{})
+				if !ok {
+					return nil
+				}
+				nextVal, exists := m[part.key]
+				if !exists || nextVal == nil {
+					newMap := make(map[string]interface{})
+					ancestorPtr := "/" + strings.Join(pointerTokens, "/")
+					ops = append(ops, kustomizePatchOp{
+						Op:    "add",
+						Path:  ancestorPtr,
+						Value: newMap,
+					})
+					m[part.key] = newMap
+					current = newMap
+				} else {
+					current = nextVal
+				}
+			}
+		} else {
+			if part.sequence {
+				pointerTokens = append(pointerTokens, strconv.Itoa(part.index))
+				targetPtr := "/" + strings.Join(pointerTokens, "/")
+				slice, ok := current.([]interface{})
+				if ok && part.index >= 0 && part.index < len(slice) {
+					ops = append(ops, kustomizePatchOp{
+						Op:    "replace",
+						Path:  targetPtr,
+						Value: parsedVal,
+					})
+					slice[part.index] = parsedVal
+				} else {
+					ops = append(ops, kustomizePatchOp{
+						Op:    "add",
+						Path:  targetPtr,
+						Value: parsedVal,
+					})
+				}
+			} else {
+				pointerTokens = append(pointerTokens, escapeJSONPointerToken(part.key))
+				targetPtr := "/" + strings.Join(pointerTokens, "/")
+				m, ok := current.(map[string]interface{})
+				if !ok {
+					return nil
+				}
+				op := "add"
+				if _, exists := m[part.key]; exists {
+					op = "replace"
+				}
+				ops = append(ops, kustomizePatchOp{
+					Op:    op,
+					Path:  targetPtr,
+					Value: parsedVal,
+				})
+				m[part.key] = parsedVal
+			}
+		}
 	}
 
-	ancestorPointer, nestedVal, ok := buildMissingParentValue(obj, fixPath, val)
-	if ok {
-		return "add", ancestorPointer, nestedVal
-	}
-
-	return "add", pointer, finalVal
+	return ops
 }
 
 // EmitKustomizePatch writes a kustomization.yaml, base.yaml, and one JSON 6902 patch
@@ -293,11 +394,11 @@ func resolvePatchOp(obj map[string]interface{}, fixPath string, val interface{})
 // Usage after generation:
 //
 //	kustomize build <dir> | kubectl apply -f -
-//	helm install my-release ./chart --post-renderer kustomize
 //
-// Patch files are named <Kind>-[<Namespace>-]<Name>.yaml. The kustomization.yaml lists all
-// of them with their kind/name/namespace target selectors and base resources. Nothing is written when
-// suggestions is empty.
+// Patch files are named unambiguously to encode the full resource identity and prevent
+// collisions. The saved base.yaml acts as a snapshot of rendered resources with suggestions.
+// Output directory and files are written with restricted permissions (0700/0600) to protect
+// rendered manifests that may contain sensitive data.
 func EmitKustomizePatch(suggestions []HelmFixSuggestion, dir string) error {
 	if len(suggestions) == 0 {
 		return nil
@@ -339,7 +440,8 @@ func EmitKustomizePatch(suggestions []HelmFixSuggestion, dir string) error {
 		return nil
 	}
 
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	// Restrict permissions on the output directory containing rendered manifests.
+	if err := os.MkdirAll(dir, 0700); err != nil {
 		return fmt.Errorf("failed to create kustomize output dir %q: %w", dir, err)
 	}
 
@@ -372,44 +474,51 @@ func EmitKustomizePatch(suggestions []HelmFixSuggestion, dir string) error {
 			}
 			baseContent = append(baseContent, part...)
 		}
-		if err := os.WriteFile(baseFilePath, baseContent, 0644); err != nil {
+		// Write base.yaml with mode 0600 to protect potentially sensitive rendered resources.
+		if err := os.WriteFile(baseFilePath, baseContent, 0600); err != nil {
 			return fmt.Errorf("failed to write base.yaml: %w", err)
 		}
 		kust.Resources = append(kust.Resources, "base.yaml")
 	}
 
 	// 3. Generate one patch file per unique resource
+	writtenFiles := make(map[string]resourceKey)
+
 	for _, key := range keysInOrder {
 		rg := groups[key]
 
-		var ops []kustomizePatchOp
+		var baseObj map[string]interface{}
+		if rg.resource != nil {
+			baseObj = rg.resource.GetObject()
+		}
+		workingObj := deepCopyMap(baseObj)
+
+		// Expand any wildcard paths into concrete indices
+		var concreteFixPaths []armotypes.FixPath
 		for _, fp := range rg.fixPaths {
 			if fp.Path == "" {
 				continue
 			}
-			val := parseFixValue(fp.Value)
-			var baseObj map[string]interface{}
-			if rg.resource != nil {
-				baseObj = rg.resource.GetObject()
-			}
-			op, pointer, adjustedVal := resolvePatchOp(baseObj, fp.Path, val)
-			ops = append(ops, kustomizePatchOp{Op: op, Path: pointer, Value: adjustedVal})
+			expanded := expandWildcardFixPaths(workingObj, fp)
+			concreteFixPaths = append(concreteFixPaths, expanded...)
+		}
+
+		var ops []kustomizePatchOp
+		for _, fp := range concreteFixPaths {
+			patchOps := resolveFixPathOps(workingObj, fp)
+			ops = append(ops, patchOps...)
 		}
 
 		if len(ops) == 0 {
 			continue
 		}
 
-		sanitizedKind := sanitizeFilenamePart(rg.key.Kind)
-		sanitizedName := sanitizeFilenamePart(rg.key.Name)
-
-		var patchFileName string
-		if rg.key.Namespace != "" {
-			sanitizedNs := sanitizeFilenamePart(rg.key.Namespace)
-			patchFileName = fmt.Sprintf("%s-%s-%s.yaml", sanitizedKind, sanitizedNs, sanitizedName)
-		} else {
-			patchFileName = fmt.Sprintf("%s-%s.yaml", sanitizedKind, sanitizedName)
+		patchFileName := resourcePatchFilename(rg.key)
+		if existingKey, exists := writtenFiles[patchFileName]; exists {
+			return fmt.Errorf("filename collision detected: patch file %q for resource %s/%s collides with %s/%s",
+				patchFileName, rg.key.Kind, rg.key.Name, existingKey.Kind, existingKey.Name)
 		}
+		writtenFiles[patchFileName] = rg.key
 
 		patchFilePath, err := ensureSubpath(dir, patchFileName)
 		if err != nil {
@@ -420,7 +529,7 @@ func EmitKustomizePatch(suggestions []HelmFixSuggestion, dir string) error {
 		if err != nil {
 			return fmt.Errorf("failed to marshal patch for %s/%s: %w", rg.key.Kind, rg.key.Name, err)
 		}
-		if err := os.WriteFile(patchFilePath, patchBytes, 0644); err != nil {
+		if err := os.WriteFile(patchFilePath, patchBytes, 0600); err != nil {
 			return fmt.Errorf("failed to write patch file %q: %w", patchFileName, err)
 		}
 
@@ -449,5 +558,5 @@ func EmitKustomizePatch(suggestions []HelmFixSuggestion, dir string) error {
 	if err != nil {
 		return fmt.Errorf("failed to marshal kustomization.yaml: %w", err)
 	}
-	return os.WriteFile(kustFilePath, kustBytes, 0644)
+	return os.WriteFile(kustFilePath, kustBytes, 0600)
 }

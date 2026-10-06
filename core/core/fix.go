@@ -62,14 +62,15 @@ func (ks *Kubescape) Fix(fixInfo *metav1.FixInfo) error {
 
 	// Emit Kustomize JSON 6902 patches when --output-kustomize is given.
 	// This is a machine-applicable companion to PrintHelmSuggestions: the
-	// generated patches can be applied via kustomize build <dir> | kubectl
-	// apply -f - or used as a Helm --post-renderer without touching the chart.
+	// generated patches can be applied via:
+	//   kustomize build <dir> | kubectl apply -f -
 	if fixInfo.KustomizeDir != "" && !fixInfo.DryRun {
 		if err := fixhandler.EmitKustomizePatch(helmSuggestions, fixInfo.KustomizeDir); err != nil {
 			logger.L().Error("failed to write Kustomize patches", helpers.Error(err))
+			return fmt.Errorf("failed to write Kustomize patches: %w", err)
 		} else if len(helmSuggestions) > 0 {
 			logger.L().Info(fmt.Sprintf(
-				"Kustomize patches written to %q\n  Apply with: kustomize build %s | kubectl apply -f -\n  Or as Helm post-renderer: helm install <release> <chart> --post-renderer kustomize",
+				"Kustomize patches written to %q\n  Apply with: kustomize build %s | kubectl apply -f -",
 				fixInfo.KustomizeDir, fixInfo.KustomizeDir,
 			))
 		}

@@ -33,10 +33,6 @@ type FixInfo struct {
 	//
 	//   kustomize build <dir> | kubectl apply -f -
 	//
-	// or used with Helm's --post-renderer flag:
-	//
-	//   helm install my-release ./chart --post-renderer kustomize
-	//
 	// This is opt-in and does not affect the normal fix pipeline.
 	KustomizeDir string
 }

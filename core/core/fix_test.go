@@ -830,9 +830,78 @@ func TestFix_MultiInputScanOutsideGit(t *testing.T) {
 	})
 }
 
+func buildFixableHelmReport(t *testing.T, dir string) string {
+	t.Helper()
+
+	helmObj := map[string]any{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata":   map[string]any{"name": "demo-helm", "namespace": "default"},
+		"spec": map[string]any{
+			"template": map[string]any{
+				"spec": map[string]any{
+					"containers": []any{
+						map[string]any{
+							"name": "demo",
+							"securityContext": map[string]any{
+								"privileged": true,
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	helmRes := reporthandling.Resource{
+		Object: helmObj,
+		Source: &reporthandling.Source{
+			FileType:         reporthandling.SourceTypeHelmChart,
+			HelmPath:         dir,
+			HelmChartName:    "demo-chart",
+			HelmTemplateFile: "templates/deployment.yaml",
+			HelmValuesPaths:  []string{"image.tag"},
+		},
+	}
+	helmRes.ResourceID = helmRes.GetID()
+
+	report := &reporthandlingv2.PostureReport{
+		Metadata: reporthandlingv2.Metadata{
+			ScanMetadata: reporthandlingv2.ScanMetadata{ScanningTarget: reporthandlingv2.Directory},
+			ContextMetadata: reporthandlingv2.ContextMetadata{
+				DirectoryContextMetadata: &reporthandlingv2.DirectoryContextMetadata{BasePath: dir},
+			},
+		},
+		Resources: []reporthandling.Resource{helmRes},
+		Results: []resourcesresults.Result{
+			{
+				ResourceID: helmRes.ResourceID,
+				AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+					{
+						ControlID: "C-0057",
+						Name:      "Privileged container",
+						Status:    apis.StatusInfo{InnerStatus: apis.StatusFailed},
+						ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{
+							{
+								Name:   "rule-privileged",
+								Status: apis.StatusFailed,
+								Paths: []armotypes.PosturePaths{
+									{FixPath: armotypes.FixPath{Path: "spec.template.spec.containers[0].securityContext.privileged", Value: "false"}},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	return writeReportFile(t, dir, report)
+}
+
 func TestFix_DryRunOutputKustomizeWritesNothing(t *testing.T) {
 	dir := t.TempDir()
-	reportPath := buildFixableReport(t, dir)
+	reportPath := buildFixableHelmReport(t, dir)
 	kustDir := filepath.Join(t.TempDir(), "kust-output")
 
 	ks := &Kubescape{Ctx: context.Background()}
@@ -842,3 +911,30 @@ func TestFix_DryRunOutputKustomizeWritesNothing(t *testing.T) {
 	assert.NoDirExists(t, kustDir, "DryRun must not create KustomizeDir output")
 }
 
+func TestFix_OutputKustomizeErrorPropagated(t *testing.T) {
+	dir := t.TempDir()
+	reportPath := buildFixableHelmReport(t, dir)
+
+	// An invalid destination (e.g. creating a directory inside a regular file) will fail MkdirAll
+	filePath := filepath.Join(t.TempDir(), "a-regular-file")
+	require.NoError(t, os.WriteFile(filePath, []byte("data"), 0600))
+	invalidDir := filepath.Join(filePath, "cannot-create-dir-here")
+
+	ks := &Kubescape{Ctx: context.Background()}
+	err := ks.Fix(&metav1.FixInfo{ReportFile: reportPath, KustomizeDir: invalidDir})
+	assert.Error(t, err, "Fix must return an error when Kustomize patch emission fails")
+}
+
+func TestFix_OutputKustomizeSuccess(t *testing.T) {
+	dir := t.TempDir()
+	reportPath := buildFixableHelmReport(t, dir)
+	kustDir := filepath.Join(t.TempDir(), "kust-output")
+
+	ks := &Kubescape{Ctx: context.Background()}
+	err := ks.Fix(&metav1.FixInfo{ReportFile: reportPath, KustomizeDir: kustDir})
+	require.NoError(t, err)
+
+	assert.DirExists(t, kustDir)
+	assert.FileExists(t, filepath.Join(kustDir, "kustomization.yaml"))
+	assert.FileExists(t, filepath.Join(kustDir, "base.yaml"))
+}
