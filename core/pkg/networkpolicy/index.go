@@ -32,6 +32,16 @@ type Endpoint struct {
 	// manifests (no runtime status) leaves it empty, and any ipBlock peer
 	// then reports Unknown rather than a guessed answer.
 	IP string
+
+	// HostNetwork is true for a pod that runs in its node's network
+	// namespace (spec.hostNetwork). The Kubernetes NetworkPolicy docs leave
+	// the behaviour for such pods undefined: a network plugin either applies
+	// policy to them like any other pod or -- the most common
+	// implementation -- cannot tell their traffic from the node's own, so it
+	// neither enforces the policies that select them nor matches them
+	// against a podSelector or namespaceSelector peer. A verdict that would
+	// differ between those two behaviours is reported as Unknown.
+	HostNetwork bool
 }
 
 // NamespaceInfo carries a namespace's own labels, needed for

@@ -79,6 +79,12 @@ func (idx *Index) IngressExposure(ep Endpoint) Exposure {
 	if !idx.IsIsolated(ep, Ingress) {
 		return Exposure{Level: ExposureOpen, Reason: "no NetworkPolicy selects this endpoint for ingress; default allow"}
 	}
+	if ep.HostNetwork {
+		// The policies that select a hostNetwork pod cannot be counted on
+		// to restrict it (see Endpoint.HostNetwork), and it listens on its
+		// node's own addresses, so it is classified by the worst case.
+		return Exposure{Level: ExposureOpen, Reason: "endpoint uses the host network (hostNetwork: true); NetworkPolicy behaviour is undefined for it and most network plugins do not enforce the policies that select it"}
+	}
 
 	// haveBest tracks whether best has ever been assigned from a real
 	// matching policy, since ExposureRestricted is also ExposureLevel's zero

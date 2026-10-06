@@ -143,16 +143,26 @@ func (idx *Index) peerListVerdict(peers []networkingv1.NetworkPolicyPeer, policy
 		return Allowed, "rule has no source/destination restriction"
 	}
 
-	sawUnknown := false
+	sawUnknown, sawHostNetwork := false, false
 	for _, peer := range peers {
 		matched, determinable := idx.peerMatches(peer, policyNamespace, candidate)
 		if !determinable {
 			sawUnknown = true
 			continue
 		}
+		if matched && candidate.HostNetwork && peer.IPBlock == nil {
+			// The labels match, but a plugin that cannot tell a hostNetwork
+			// pod's traffic from its node's ignores the pod when matching
+			// selectors (see Endpoint.HostNetwork).
+			sawHostNetwork = true
+			continue
+		}
 		if matched {
 			return Allowed, "matched a peer in this rule"
 		}
+	}
+	if sawHostNetwork {
+		return Unknown, "a peer in this rule selects the pod by its labels, but the pod uses the host network"
 	}
 	if sawUnknown {
 		return Unknown, "a peer in this rule could not be resolved (unknown IP or namespace labels)"
