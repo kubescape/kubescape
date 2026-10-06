@@ -90,6 +90,35 @@ func ValidateGranularity(value string) error {
 	return err
 }
 
+// CompareReports detects the kind of each report and dispatches to the
+// matching comparison routine, exactly as the CLI "diff" command does: image
+// vulnerability reports are compared with ComputeVulnerabilities, posture
+// reports with ComputeWithOptions. Comparing a posture report against a
+// vulnerability report returns ErrMixedReportKinds instead of silently
+// treating them as comparable; an unreadable report is left for the
+// underlying loader to describe. Exactly one of the two returned change sets
+// is non-nil, matching the returned ReportKind, so callers (CLI formatting,
+// the MCP diff tool, ...) share this one dispatch instead of reimplementing
+// it.
+func CompareReports(basePath, headPath string, options Options) (ReportKind, *ChangeSet, *VulnerabilityChangeSet, error) {
+	switch baseKind, headKind := ReportKindOf(basePath), ReportKindOf(headPath); {
+	case baseKind == VulnerabilityReport && headKind == VulnerabilityReport:
+		cs, err := ComputeVulnerabilities(basePath, headPath)
+		if err != nil {
+			return VulnerabilityReport, nil, nil, err
+		}
+		return VulnerabilityReport, nil, cs, nil
+	case baseKind != UnreadableReport && headKind != UnreadableReport && baseKind != headKind:
+		return UnreadableReport, nil, nil, ErrMixedReportKinds
+	}
+
+	cs, err := ComputeWithOptions(basePath, headPath, options)
+	if err != nil {
+		return PostureReport, nil, nil, err
+	}
+	return PostureReport, cs, nil, nil
+}
+
 func normalizeGranularity(value Granularity) (Granularity, error) {
 	if value == "" {
 		return GranularityEvidence, nil
