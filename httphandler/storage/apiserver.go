@@ -629,7 +629,7 @@ func getRoleAndRoleBindingFromRelatedObjects(relatedObjects []workloadinterface.
 		case "RoleBinding", "ClusterRoleBinding":
 			roleBinding = relatedObjects[i]
 		default:
-			return nil, nil, fmt.Errorf("unknown related object kind %s", relatedObjects[i].GetKind())
+			return nil, nil, fmt.Errorf("%w: unknown related object kind %s", ErrIncompleteRelatedObjects, relatedObjects[i].GetKind())
 		}
 	}
 	if role == nil || roleBinding == nil {
