@@ -125,6 +125,50 @@ func TestAnalyzeNetworkReachability_HostNetworkDestinationIsUnknownNotDenied(t *
 	assert.Contains(t, ingress["reason"], "host network")
 }
 
+func TestAnalyzeNetworkReachability_SelectedPeerBetweenHostNetworkPodsIsAllowed(t *testing.T) {
+	allowClient := unstructuredNetworkPolicy("prod", "allow-client", map[string]any{
+		"podSelector": map[string]any{"matchLabels": map[string]any{"app": "server"}},
+		"policyTypes": []any{"Ingress"},
+		"ingress": []any{
+			map[string]any{
+				"from": []any{
+					map[string]any{"podSelector": map[string]any{"matchLabels": map[string]any{"app": "client"}}},
+				},
+			},
+		},
+	})
+	server := unstructuredPod("prod", "server", map[string]any{"app": "server"})
+	server.Object["spec"] = map[string]any{"hostNetwork": true}
+	client := unstructuredPod("prod", "client", map[string]any{"app": "client"})
+	client.Object["spec"] = map[string]any{"hostNetwork": true}
+
+	ksServer := newReachabilityTestServer(allowClient, server, client)
+
+	for name, port := range map[string]any{"TCP port 80": float64(80), "omitted port": nil} {
+		args := map[string]any{
+			"source_namespace":      "prod",
+			"source_pod":            "client",
+			"destination_namespace": "prod",
+			"destination_pod":       "server",
+		}
+		if port != nil {
+			args["port"] = port
+		}
+		result := registeredToolResult(t, dispatchRegisteredTool(t, ksServer, "analyze_network_reachability", args))
+		require.False(t, result.IsError, name)
+
+		var parsed map[string]any
+		require.NoError(t, json.Unmarshal([]byte(toolResultText(t, result)), &parsed), name)
+
+		// Enforced, the policy admits the client; ignored for hostNetwork
+		// Pods, it does not isolate the server. Both agree on allowed.
+		require.Equal(t, "allowed", parsed["verdict"], name)
+		ingress := parsed["ingress"].(map[string]any)
+		require.Equal(t, "allowed", ingress["verdict"], name)
+		require.Equal(t, "prod/allow-client", ingress["matched_policy"], name)
+	}
+}
+
 func TestAnalyzeNetworkReachability_AllowsSelectedPeer(t *testing.T) {
 	allow := unstructuredNetworkPolicy("prod", "allow-client", map[string]any{
 		"podSelector": map[string]any{"matchLabels": map[string]any{"app": "server"}},

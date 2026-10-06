@@ -13,9 +13,11 @@ import (
 // allow for the rule as a whole to allow (a rule's ports and peers are an
 // AND, matching the Kubernetes API: a rule matches a connection only if the
 // connection's peer is in the rule's from/to list AND its port is in the
-// rule's ports list).
-func (idx *Index) ruleVerdict(policyNamespace string, peers []networkingv1.NetworkPolicyPeer, ports []networkingv1.NetworkPolicyPort, counterpart Endpoint, port *PortSpec) (Verdict, string) {
-	peerV, peerReason := idx.peerListVerdict(peers, policyNamespace, counterpart)
+// rule's ports list). selected is the endpoint the rule's policy selects (the
+// destination of an ingress rule, the source of an egress rule) and
+// counterpart is the endpoint its peers are matched against.
+func (idx *Index) ruleVerdict(policyNamespace string, peers []networkingv1.NetworkPolicyPeer, ports []networkingv1.NetworkPolicyPort, selected, counterpart Endpoint, port *PortSpec) (Verdict, string) {
+	peerV, peerReason := idx.peerListVerdict(peers, policyNamespace, selected, counterpart)
 	if peerV == Denied {
 		return Denied, peerReason
 	}
@@ -51,7 +53,7 @@ func (idx *Index) AllowsIngress(src, dst Endpoint, port *PortSpec) Decision {
 			continue
 		}
 		for _, rule := range cp.policy.Spec.Ingress {
-			v, reason := idx.ruleVerdict(cp.policy.Namespace, rule.From, rule.Ports, src, port)
+			v, reason := idx.ruleVerdict(cp.policy.Namespace, rule.From, rule.Ports, dst, src, port)
 			if v == Allowed {
 				return allow(reason, cp.policy.Namespace+"/"+cp.policy.Name)
 			}
@@ -79,7 +81,7 @@ func (idx *Index) AllowsEgress(src, dst Endpoint, port *PortSpec) Decision {
 			continue
 		}
 		for _, rule := range cp.policy.Spec.Egress {
-			v, reason := idx.ruleVerdict(cp.policy.Namespace, rule.To, rule.Ports, dst, port)
+			v, reason := idx.ruleVerdict(cp.policy.Namespace, rule.To, rule.Ports, src, dst, port)
 			if v == Allowed {
 				return allow(reason, cp.policy.Namespace+"/"+cp.policy.Name)
 			}
