@@ -10,7 +10,11 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/armosec/armoapi-go/armotypes"
+	"github.com/kubescape/opa-utils/exceptions"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
+	helpersv1 "github.com/kubescape/opa-utils/reporthandling/helpers/v1"
+	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 )
 
 // These intentionally small report types parse only fields that affect diff
@@ -41,11 +45,13 @@ type statusInfo struct {
 }
 
 type ruleEntry struct {
-	Name                string         `json:"name"`
-	Status              string         `json:"status"`
-	SubStatus           string         `json:"subStatus,omitempty"`
-	Paths               []evidencePath `json:"paths,omitempty"`
-	RelatedResourcesIDs []string       `json:"relatedResourcesIDs,omitempty"`
+	Exception             []armotypes.PostureExceptionPolicy `json:"exception,omitempty"`
+	ControlConfigurations map[string][]string                `json:"controlConfigurations,omitempty"`
+	Name                  string                             `json:"name"`
+	Status                string                             `json:"status"`
+	SubStatus             string                             `json:"subStatus,omitempty"`
+	Paths                 []evidencePath                     `json:"paths,omitempty"`
+	RelatedResourcesIDs   []string                           `json:"relatedResourcesIDs,omitempty"`
 }
 
 type evidencePath struct {
@@ -62,8 +68,14 @@ type fixPath struct {
 	Value json.RawMessage `json:"value,omitempty"`
 }
 
-type summaryDetails struct {
+type frameworkSummary struct {
+	Name     string                    `json:"name"`
 	Controls map[string]controlSummary `json:"controls"`
+}
+
+type summaryDetails struct {
+	Frameworks []frameworkSummary        `json:"frameworks,omitempty"`
+	Controls   map[string]controlSummary `json:"controls"`
 }
 
 type controlSummary struct {
@@ -200,6 +212,11 @@ func validateSummary(report *scanReport, summaryJSON json.RawMessage) error {
 		return fmt.Errorf("invalid report summaryDetails.controls: %w", err)
 	}
 	report.SummaryDetails.Controls = controls
+	if frameworksJSON, exists := fields["frameworks"]; exists {
+		if err := json.Unmarshal(frameworksJSON, &report.SummaryDetails.Frameworks); err != nil {
+			return fmt.Errorf("invalid report summaryDetails.frameworks: %w", err)
+		}
+	}
 	return nil
 }
 
@@ -238,10 +255,57 @@ func buildMap(report *scanReport) map[key]controlEntry {
 	controls := make(map[key]controlEntry)
 	for _, result := range report.Results {
 		for _, control := range result.AssociatedControls {
-			controls[key{resourceID: result.ResourceID, controlID: control.ControlID}] = control
+			controls[key{resourceID: result.ResourceID, controlID: control.ControlID}] = effectiveControl(report, control)
 		}
 	}
 	return controls
+}
+
+// effectiveControl derives a comparison view without rewriting the parsed report.
+// Reports without rule details retain their cached status. Older reports that
+// discarded a raw failure cannot reconstruct that failure from exception data.
+func effectiveControl(report *scanReport, control controlEntry) controlEntry {
+	hasExceptions := false
+	for _, rule := range control.Rules {
+		hasExceptions = hasExceptions || len(rule.Exception) > 0
+	}
+	// Cached evaluation-completeness markers cannot be reconstructed from rules.
+	// Preserve legacy outcomes when no exception needs an effective view.
+	if !hasExceptions || control.Status.SubStatus == string(apis.SubStatusNotEvaluated) {
+		return control
+	}
+	if control.Status.InnerStatus != string(apis.StatusFailed) && control.Status.InnerStatus != string(apis.StatusPassed) {
+		switch apis.ScanningSubStatus(control.Status.SubStatus) {
+		case apis.SubStatusManualReview, apis.SubStatusRequiresReview, apis.SubStatusConfiguration:
+		default:
+			return control
+		}
+	}
+	filters := &helpersv1.Filters{}
+	for _, framework := range report.SummaryDetails.Frameworks {
+		if _, exists := framework.Controls[control.ControlID]; exists && framework.Name != "" {
+			filters.FrameworkNames = append(filters.FrameworkNames, framework.Name)
+		}
+	}
+	evaluation := resourcesresults.ResourceAssociatedControl{
+		ControlID: control.ControlID,
+		Status:    apis.StatusInfo{InnerStatus: apis.ScanningStatus(control.Status.InnerStatus), SubStatus: apis.ScanningSubStatus(control.Status.SubStatus)},
+	}
+	control.Rules = append([]ruleEntry(nil), control.Rules...)
+	for i, rule := range control.Rules {
+		evaluatedRule := resourcesresults.ResourceAssociatedRule{
+			Name: rule.Name, Status: apis.ScanningStatus(rule.Status), SubStatus: apis.ScanningSubStatus(rule.SubStatus),
+			ControlConfigurations: rule.ControlConfigurations,
+			Exception:             exceptions.FilterExceptionsByFrameworks(rule.Exception, filters.FrameworkNames, control.ControlID, rule.Name),
+		}
+		evaluation.ResourceAssociatedRules = append(evaluation.ResourceAssociatedRules, evaluatedRule)
+		status := evaluatedRule.GetStatus(filters)
+		control.Rules[i].Status = string(status.Status())
+		control.Rules[i].SubStatus = string(status.GetSubStatus())
+	}
+	status := evaluation.GetStatus(filters)
+	control.Status = statusInfo{InnerStatus: string(status.Status()), SubStatus: string(status.GetSubStatus())}
+	return control
 }
 
 func buildSeverityMap(report *scanReport) map[string]string {

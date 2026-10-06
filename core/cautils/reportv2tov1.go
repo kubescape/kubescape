@@ -4,6 +4,7 @@ import (
 	"maps"
 
 	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/opa-utils/exceptions"
 	"github.com/kubescape/opa-utils/reporthandling"
 	helpersv1 "github.com/kubescape/opa-utils/reporthandling/helpers/v1"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
@@ -85,6 +86,7 @@ func ReportV2ToV1(opaSessionObj *OPASessionObj) *reporthandling.PostureReport {
 }
 
 func controlReportV2ToV1(opaSessionObj *OPASessionObj, frameworkName string, controls map[string]reportsummary.ControlSummary) []reporthandling.ControlReport {
+	view := reportsummary.SummaryDetails{Frameworks: []reportsummary.FrameworkSummary{{Name: frameworkName, Controls: controls}}}
 	controlReports := []reporthandling.ControlReport{}
 	for controlID, crv2 := range controls {
 		crv1 := reporthandling.ControlReport{}
@@ -116,7 +118,7 @@ func controlReportV2ToV1(opaSessionObj *OPASessionObj, frameworkName string, con
 					}
 
 					rulev1 := rulesv1[rulev2.GetName()]
-					status := rulev2.GetStatus(nil)
+					status := RuleStatus(&view, controlID, &rulev2)
 
 					if status.IsFailed() {
 
@@ -132,8 +134,9 @@ func controlReportV2ToV1(opaSessionObj *OPASessionObj, frameworkName string, con
 							}
 						}
 						ruleResponse.RuleStatus = string(status.Status())
-						if len(rulev2.Exception) > 0 {
-							ruleResponse.Exception = &rulev2.Exception[0]
+						applicableExceptions := exceptions.FilterExceptionsByFrameworks(rulev2.Exception, ControlFilters(&view, controlID).FrameworkNames, controlID, rulev2.GetName())
+						if len(applicableExceptions) > 0 {
+							ruleResponse.Exception = &applicableExceptions[0]
 						}
 
 						if fullResource, ok := opaSessionObj.GetResource(resourceID); ok {
