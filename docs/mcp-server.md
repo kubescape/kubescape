@@ -343,6 +343,56 @@ Compare two already-produced Kubescape scan report files (JSON) and return what 
 }
 ```
 
+### Compliance & Hardening Tools
+
+#### `predict_pss_compliance`
+
+Predict which workloads in a namespace would fail Pod Security Standards (PSS v1.37) enforcement at a given level (`Privileged`, `Baseline`, or `Restricted`) and report exactly what violates per container. Use this to assess blast radius before enabling PSS admission enforcement — answers *"what would break if I enforced Baseline/Restricted on this namespace?"* without touching the cluster's admission configuration.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `namespace` | string | Yes | Namespace to analyze |
+| `level` | string | No | Target PSS level: `Privileged`, `Baseline`, or `Restricted` (default: `Restricted`) |
+| `workload_name` | string | No | Specific workload to check (`Kind/Name` or bare `Name`). Omit to evaluate all workloads in the namespace |
+
+**Example Response:**
+
+```json
+{
+  "namespace": "production",
+  "target_level": "Restricted",
+  "summary": {
+    "total_workloads": 12,
+    "passing": 11,
+    "failing": 1,
+    "current_effective_level": "Baseline"
+  },
+  "failing_workloads": [
+    {
+      "kind": "Deployment",
+      "name": "legacy-api",
+      "passes_at": "Baseline",
+      "violations": [
+        {
+          "check": "Capabilities",
+          "container": "main",
+          "level": "Restricted",
+          "description": "container 'main' must drop ALL capabilities; securityContext.capabilities is unset"
+        },
+        {
+          "check": "RunAsNonRoot",
+          "container": "main",
+          "level": "Restricted",
+          "description": "container 'main' must set runAsNonRoot to true"
+        }
+      ]
+    }
+  ]
+}
+```
+
 ## Resource Templates
 
 The MCP server also exposes resource templates for direct access to data:

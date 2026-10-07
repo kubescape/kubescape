@@ -17,6 +17,7 @@ The best way to get started with Kubescape is to download it to the machine you 
   - [Auto-Fix Misconfigurations](#auto-fix-misconfigurations)
   - [Image Patching](#image-patching)
   - [Validating Admission Policies (VAP)](#validating-admission-policies-vap)
+  - [Pod Security Standards (PSS) Prediction](#pod-security-standards-pss-prediction)
   - [MCP Server (AI Integration)](#mcp-server-ai-integration)
   - [Configuration Management](#configuration-management)
 - [Offline/Air-gapped Support](#offlineair-gapped-environment-support)
@@ -574,6 +575,26 @@ kubescape vap create-policy-binding \
   --action Deny | kubectl apply -f -
 ```
 
+## Pod Security Standards (PSS) Prediction
+
+Predict which workloads would fail or break under Kubernetes Pod Security Standards (Privileged, Baseline, Restricted) enforcement without modifying admission control:
+
+```bash
+# Predict Restricted compliance for a namespace
+kubescape predict pss -n production
+
+# Check if a namespace is ready for Baseline enforcement
+kubescape predict pss -n staging --level Baseline
+
+# Scan local YAML manifests
+kubescape predict pss ./manifests/
+
+# Output machine-readable JSON or JUnit XML for CI/CD
+kubescape predict pss ./manifests/ -f junit -o pss-results.xml
+```
+
+For more details, see the [PSS Predictor Guide](pss-predictor.md).
+
 ## MCP Server (AI Integration)
 
 Kubescape provides an MCP (Model Context Protocol) server for AI assistant integration, allowing natural language queries about your cluster's security posture.
@@ -600,6 +621,7 @@ The MCP server exposes these tools to AI assistants:
 | `list_vulnerability_matches_for_cve` | Get details for a specific CVE |
 | `list_configuration_security_scan_manifests` | List configuration scan results |
 | `get_configuration_security_scan_manifest` | Get configuration scan details |
+| `predict_pss_compliance` | Predict Pod Security Standards compliance |
 
 ### Integration with Claude Desktop
 

@@ -19,6 +19,7 @@ import (
 	"github.com/kubescape/kubescape/v4/cmd/operator"
 	"github.com/kubescape/kubescape/v4/cmd/patch"
 	"github.com/kubescape/kubescape/v4/cmd/policy"
+	"github.com/kubescape/kubescape/v4/cmd/predict"
 	"github.com/kubescape/kubescape/v4/cmd/prerequisites"
 	"github.com/kubescape/kubescape/v4/cmd/scan"
 	"github.com/kubescape/kubescape/v4/cmd/update"
@@ -124,6 +125,7 @@ func getRootCmd(ks meta.IKubescape, ksVersion, ksCommit, ksDate string) *cobra.C
 	rootCmd.AddCommand(operator.GetOperatorCmd(ks))
 	rootCmd.AddCommand(prerequisites.GetPreReqCmd(ks))
 	rootCmd.AddCommand(mcpserver.GetMCPServerCmd())
+	rootCmd.AddCommand(predict.GetPredictCmd())
 
 	// deprecated commands
 	rootCmd.AddCommand(&cobra.Command{
@@ -140,5 +142,5 @@ func getRootCmd(ks meta.IKubescape, ksVersion, ksCommit, ksDate string) *cobra.C
 
 func Execute(ctx context.Context, ksVersion, ksCommit, ksDate string) error {
 	ks := NewDefaultKubescapeCommand(ctx, ksVersion, ksCommit, ksDate)
-	return ks.Execute()
+	return ks.ExecuteContext(ctx)
 }
