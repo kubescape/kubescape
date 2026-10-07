@@ -3,6 +3,7 @@ package imagescan
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -20,6 +21,7 @@ import (
 type mockGCPClient struct {
 	occurrences  []*grafeaspb.Occurrence
 	mockErr      error
+	vulnErr      error
 	errorAfter   int
 	lastReq      *grafeaspb.ListOccurrencesRequest
 	lastIterator *mockGrafeasIterator
@@ -27,9 +29,31 @@ type mockGCPClient struct {
 
 func (m *mockGCPClient) ListOccurrences(ctx context.Context, req *grafeaspb.ListOccurrencesRequest, opts ...interface{}) GrafeasIterator {
 	m.lastReq = req
+	occurrences := m.occurrences
+	itErr := m.mockErr
+	if req != nil && strings.Contains(req.Filter, `kind="DISCOVERY"`) {
+		filtered := make([]*grafeaspb.Occurrence, 0)
+		for _, occ := range m.occurrences {
+			if occ.GetDiscovery() != nil {
+				filtered = append(filtered, occ)
+			}
+		}
+		occurrences = filtered
+	} else if req != nil && strings.Contains(req.Filter, `kind="VULNERABILITY"`) {
+		if m.vulnErr != nil {
+			itErr = m.vulnErr
+		}
+		filtered := make([]*grafeaspb.Occurrence, 0)
+		for _, occ := range m.occurrences {
+			if occ.GetVulnerability() != nil {
+				filtered = append(filtered, occ)
+			}
+		}
+		occurrences = filtered
+	}
 	it := &mockGrafeasIterator{
-		occurrences: m.occurrences,
-		err:         m.mockErr,
+		occurrences: occurrences,
+		err:         itErr,
 		errorAfter:  m.errorAfter,
 		index:       0,
 	}
@@ -359,6 +383,7 @@ func TestGCPAdaptor_GetImagesVulnerabilities(t *testing.T) {
 	reports, err := adaptor.GetImagesVulnerabilities(context.Background(), images)
 	assert.NoError(t, err)
 	assert.Len(t, reports, 1)
+	assert.Empty(t, reports[0].Status, "status must remain unset when discovery completion cannot be established")
 	assert.Len(t, reports[0].Vulnerabilities, 1)
 
 	vuln := reports[0].Vulnerabilities[0]
@@ -366,6 +391,108 @@ func TestGCPAdaptor_GetImagesVulnerabilities(t *testing.T) {
 	assert.Equal(t, "High", vuln.Severity)
 	assert.Equal(t, "Test vulnerability", vuln.Description)
 	assert.Equal(t, []string{"https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2023-1234"}, vuln.Links)
+}
+
+func TestGCPAdaptor_GetImagesVulnerabilities_WithSuccessfulDiscovery(t *testing.T) {
+	now := time.Now()
+	mockOccurrences := []*grafeaspb.Occurrence{
+		discoveryOccurrence(grafeaspb.DiscoveryOccurrence_FINISHED_SUCCESS, now),
+		{
+			Details: &grafeaspb.Occurrence_Vulnerability{
+				Vulnerability: &grafeaspb.VulnerabilityOccurrence{
+					ShortDescription:  "CVE-2023-1234",
+					EffectiveSeverity: grafeaspb.Severity_HIGH,
+					LongDescription:   "Test vulnerability",
+					RelatedUrls: []*grafeaspb.RelatedUrl{
+						{Url: "https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2023-1234"},
+					},
+				},
+			},
+		},
+	}
+
+	adaptor := NewGCPAdaptor()
+	adaptor.client = &mockGCPClient{
+		occurrences: mockOccurrences,
+	}
+
+	images := []ContainerImageIdentifier{
+		{Registry: "us-docker.pkg.dev", Repository: "my-project/my-repo/my-image", Hash: "sha256:1234"},
+	}
+
+	reports, err := adaptor.GetImagesVulnerabilities(context.Background(), images)
+	assert.NoError(t, err)
+	require.Len(t, reports, 1)
+	assert.Equal(t, ScanStatusScanned, reports[0].Status)
+	assert.Len(t, reports[0].Vulnerabilities, 1)
+	assert.Equal(t, "CVE-2023-1234", reports[0].Vulnerabilities[0].ID)
+}
+
+func TestGCPAdaptor_GetImagesVulnerabilities_PendingDiscoveryLeavesStatusUnset(t *testing.T) {
+	mockOccurrences := []*grafeaspb.Occurrence{
+		discoveryOccurrence(grafeaspb.DiscoveryOccurrence_PENDING, time.Time{}),
+	}
+
+	adaptor := NewGCPAdaptor()
+	adaptor.client = &mockGCPClient{
+		occurrences: mockOccurrences,
+	}
+
+	images := []ContainerImageIdentifier{
+		{Registry: "us-docker.pkg.dev", Repository: "my-project/my-repo/my-image", Hash: "sha256:1234"},
+	}
+
+	reports, err := adaptor.GetImagesVulnerabilities(context.Background(), images)
+	assert.NoError(t, err)
+	require.Len(t, reports, 1)
+	assert.Empty(t, reports[0].Status, "pending scan must not be reported as scanned")
+	assert.Empty(t, reports[0].Vulnerabilities)
+}
+
+func TestGCPAdaptor_GetImagesVulnerabilities_CleanImageWithSuccessfulDiscovery(t *testing.T) {
+	now := time.Now()
+	mockOccurrences := []*grafeaspb.Occurrence{
+		discoveryOccurrence(grafeaspb.DiscoveryOccurrence_FINISHED_SUCCESS, now),
+	}
+
+	adaptor := NewGCPAdaptor()
+	adaptor.client = &mockGCPClient{
+		occurrences: mockOccurrences,
+	}
+
+	images := []ContainerImageIdentifier{
+		{Registry: "us-docker.pkg.dev", Repository: "my-project/my-repo/my-image", Hash: "sha256:1234"},
+	}
+
+	reports, err := adaptor.GetImagesVulnerabilities(context.Background(), images)
+	assert.NoError(t, err)
+	require.Len(t, reports, 1)
+	assert.Equal(t, ScanStatusScanned, reports[0].Status)
+	assert.Empty(t, reports[0].Vulnerabilities)
+}
+
+func TestGCPAdaptor_GetImagesVulnerabilities_PreservesScanStatusOnVulnerabilityError(t *testing.T) {
+	now := time.Now()
+	mockOccurrences := []*grafeaspb.Occurrence{
+		discoveryOccurrence(grafeaspb.DiscoveryOccurrence_FINISHED_SUCCESS, now),
+	}
+
+	adaptor := NewGCPAdaptor()
+	adaptor.client = &mockGCPClient{
+		occurrences: mockOccurrences,
+		vulnErr:     fmt.Errorf("vulnerability iterator failed"),
+	}
+
+	images := []ContainerImageIdentifier{
+		{Registry: "us-docker.pkg.dev", Repository: "my-project/my-repo/my-image", Hash: "sha256:1234"},
+	}
+
+	reports, err := adaptor.GetImagesVulnerabilities(context.Background(), images)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "vulnerability iterator failed")
+	require.Len(t, reports, 1)
+	assert.Equal(t, ScanStatusScanned, reports[0].Status, "scan status established from discovery must be preserved even when vulnerability query fails")
+	assert.Empty(t, reports[0].Vulnerabilities)
 }
 
 func TestGCPAdaptor_GetImagesVulnerabilities_Cap(t *testing.T) {

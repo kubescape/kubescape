@@ -43,6 +43,7 @@ func TestContainerImageScanStatusJSON(t *testing.T) {
 		IsScanAvailable: true,
 		IsBomAvailable:  false,
 		LastScanDate:    now,
+		Status:          ScanStatusScanned,
 	}
 
 	b, err := json.Marshal(status)
@@ -55,7 +56,7 @@ func TestContainerImageScanStatusJSON(t *testing.T) {
 		t.Fatalf("Failed to unmarshal ContainerImageScanStatus: %v", err)
 	}
 
-	if parsed.IsScanAvailable != status.IsScanAvailable || !parsed.LastScanDate.Equal(status.LastScanDate) {
+	if parsed.IsScanAvailable != status.IsScanAvailable || !parsed.LastScanDate.Equal(status.LastScanDate) || parsed.Status != status.Status {
 		t.Errorf("Unmarshalled object %v does not match original %v", parsed, status)
 	}
 }
@@ -70,6 +71,7 @@ func TestContainerImageVulnerabilityReportJSON(t *testing.T) {
 		Vulnerabilities: []Vulnerability{
 			{ID: "CVE-2023-1234", Severity: "HIGH"},
 		},
+		Status: ScanStatusScanned,
 	}
 
 	b, err := json.Marshal(report)
@@ -84,6 +86,41 @@ func TestContainerImageVulnerabilityReportJSON(t *testing.T) {
 
 	if len(parsed.Vulnerabilities) != 1 {
 		t.Errorf("Expected 1 vulnerability, got %d", len(parsed.Vulnerabilities))
+	}
+	if parsed.Status != report.Status {
+		t.Errorf("Expected status %q, got %q", report.Status, parsed.Status)
+	}
+}
+
+func TestContainerImageVulnerabilityReportBackwardCompat(t *testing.T) {
+	// Older JSON without the status field should unmarshal with an empty Status
+	raw := []byte(`{"imageID":{"registry":"docker.io","repository":"nginx","tag":"latest"},"vulnerabilities":[]}`)
+	var parsed ContainerImageVulnerabilityReport
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		t.Fatalf("Failed to unmarshal legacy report: %v", err)
+	}
+	if parsed.Status != "" {
+		t.Errorf("Expected empty status for backward compatibility, got %q", parsed.Status)
+	}
+}
+
+func TestScanStatusIsTerminal(t *testing.T) {
+	tests := []struct {
+		status   ScanStatus
+		terminal bool
+	}{
+		{ScanStatusScanned, true},
+		{ScanStatusUnsupported, true},
+		{ScanStatusFailed, true},
+		{ScanStatusQueued, false},
+		{ScanStatusUnknown, false},
+		{ScanStatus(""), false},
+	}
+
+	for _, tt := range tests {
+		if got := tt.status.IsTerminal(); got != tt.terminal {
+			t.Errorf("ScanStatus(%q).IsTerminal() = %v, want %v", tt.status, got, tt.terminal)
+		}
 	}
 }
 

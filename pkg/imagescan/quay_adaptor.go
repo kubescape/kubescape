@@ -1165,6 +1165,7 @@ func (a *QuayAdaptor) GetImagesScanStatus(ctx context.Context, imageIDs []Contai
 		switch strings.ToLower(payload.Status) {
 		case "scanned":
 			status.IsScanAvailable = true
+			status.Status = ScanStatusScanned
 		case "unsupported":
 			// If unsupported, target digest might be a manifest list / OCI index that was not resolved upfront.
 			// Try resolving to platform child and retrying the security query.
@@ -1190,20 +1191,37 @@ func (a *QuayAdaptor) GetImagesScanStatus(ctx context.Context, imageIDs []Contai
 				switch strings.ToLower(retryPayload.Status) {
 				case "scanned":
 					status.IsScanAvailable = true
+					status.Status = ScanStatusScanned
 					return status, nil
-				case "queued", "failed", "unsupported":
+				case "queued":
 					status.IsScanAvailable = false
+					status.Status = ScanStatusQueued
+					return status, nil
+				case "failed":
+					status.IsScanAvailable = false
+					status.Status = ScanStatusFailed
+					return status, nil
+				case "unsupported":
+					status.IsScanAvailable = false
+					status.Status = ScanStatusUnsupported
 					return status, nil
 				default:
 					status.IsScanAvailable = false
+					status.Status = ScanStatusUnknown
 					return status, nil
 				}
 			}
 			status.IsScanAvailable = false
-		case "queued", "failed":
+			status.Status = ScanStatusUnsupported
+		case "queued":
 			status.IsScanAvailable = false
+			status.Status = ScanStatusQueued
+		case "failed":
+			status.IsScanAvailable = false
+			status.Status = ScanStatusFailed
 		default:
 			status.IsScanAvailable = false
+			status.Status = ScanStatusUnknown
 		}
 
 		return status, nil
@@ -1299,6 +1317,7 @@ func (a *QuayAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs []C
 	scanStatusSwitch:
 		switch strings.ToLower(payload.Status) {
 		case "scanned":
+			report.Status = ScanStatusScanned
 			if payload.Data == nil || payload.Data.Layer == nil {
 				return report, nil
 			}
@@ -1324,27 +1343,36 @@ func (a *QuayAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs []C
 				}
 				switch strings.ToLower(retryPayload.Status) {
 				case "scanned":
+					report.Status = ScanStatusScanned
 					if retryPayload.Data == nil || retryPayload.Data.Layer == nil {
 						return report, nil
 					}
 					payload = retryPayload
 					break scanStatusSwitch
 				case "failed":
+					report.Status = ScanStatusFailed
 					return report, fmt.Errorf("quay security scan failed for child manifest %s/%s@%s", org, repo, childDigest)
 				case "queued":
+					report.Status = ScanStatusQueued
 					return report, fmt.Errorf("quay security scan is queued for child manifest %s/%s@%s", org, repo, childDigest)
 				case "unsupported":
-					return report, fmt.Errorf("quay security scan unsupported for child manifest %s/%s@%s", org, repo, childDigest)
+					report.Status = ScanStatusUnsupported
+					return report, nil
 				default:
+					report.Status = ScanStatusUnknown
 					return report, fmt.Errorf("unknown scan status %q for child manifest %s/%s@%s", retryPayload.Status, org, repo, childDigest)
 				}
 			}
-			return report, fmt.Errorf("quay security scan unsupported for %s/%s@%s", org, repo, manifestRef)
+			report.Status = ScanStatusUnsupported
+			return report, nil
 		case "failed":
+			report.Status = ScanStatusFailed
 			return report, fmt.Errorf("quay security scan failed for %s/%s@%s", org, repo, manifestRef)
 		case "queued":
+			report.Status = ScanStatusQueued
 			return report, fmt.Errorf("quay security scan is queued for %s/%s@%s", org, repo, manifestRef)
 		default:
+			report.Status = ScanStatusUnknown
 			return report, fmt.Errorf("quay security scan unavailable for %s/%s@%s (status: %s)", org, repo, manifestRef, payload.Status)
 		}
 

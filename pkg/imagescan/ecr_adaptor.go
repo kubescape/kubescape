@@ -105,16 +105,37 @@ func (a *AWSECRAdaptor) GetImagesScanStatus(ctx context.Context, imageIDs []Cont
 				return status, fmt.Errorf("failed to describe image scan findings for repository %s: %w", imageID.Repository, err)
 			}
 
-			if out.ImageScanStatus != nil && (out.ImageScanStatus.Status == types.ScanStatusComplete || out.ImageScanStatus.Status == types.ScanStatusActive) {
-				status.IsScanAvailable = true
-				if out.ImageScanFindings != nil && out.ImageScanFindings.ImageScanCompletedAt != nil {
-					status.LastScanDate = *out.ImageScanFindings.ImageScanCompletedAt
+			if out.ImageScanStatus != nil {
+				status.Status = mapECRScanStatus(out.ImageScanStatus)
+				if status.Status == ScanStatusScanned {
+					status.IsScanAvailable = true
+					if out.ImageScanFindings != nil && out.ImageScanFindings.ImageScanCompletedAt != nil {
+						status.LastScanDate = *out.ImageScanFindings.ImageScanCompletedAt
+					}
 				}
 			}
 
 			return status, nil
 		},
 	)
+}
+
+func mapECRScanStatus(scanStatus *types.ImageScanStatus) ScanStatus {
+	if scanStatus == nil || scanStatus.Status == "" {
+		return ""
+	}
+	switch scanStatus.Status {
+	case types.ScanStatusComplete, types.ScanStatusActive:
+		return ScanStatusScanned
+	case types.ScanStatusInProgress, types.ScanStatusPending:
+		return ScanStatusQueued
+	case types.ScanStatusUnsupportedImage:
+		return ScanStatusUnsupported
+	case types.ScanStatusFailed:
+		return ScanStatusFailed
+	default:
+		return ScanStatusUnknown
+	}
 }
 
 // GetImagesVulnerabilities retrieves the vulnerability reports for a list of image identifiers.
@@ -147,6 +168,7 @@ func (a *AWSECRAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs [
 			}
 
 			var fetchErr error
+			var providerStatus ScanStatus
 			seenTokens := make(map[string]struct{})
 
 			for pagesFetched := 0; ; pagesFetched++ {
@@ -154,6 +176,9 @@ func (a *AWSECRAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs [
 				if err != nil {
 					fetchErr = err
 					break
+				}
+				if providerStatus == "" && out.ImageScanStatus != nil {
+					providerStatus = mapECRScanStatus(out.ImageScanStatus)
 				}
 				if out.ImageScanFindings != nil {
 					for _, finding := range out.ImageScanFindings.Findings {
@@ -200,6 +225,8 @@ func (a *AWSECRAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs [
 				}
 				input.NextToken = aws.String(nextToken)
 			}
+
+			report.Status = providerStatus
 
 			if fetchErr != nil {
 				return report, fmt.Errorf("failed to fetch vulnerabilities for repository %s: %w", imageID.Repository, fetchErr)

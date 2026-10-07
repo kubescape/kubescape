@@ -276,6 +276,100 @@ func TestAzureAdaptor_GetImagesVulnerabilities_ValidationErrors(t *testing.T) {
 	assert.Equal(t, "vuln1", reports[1].Vulnerabilities[0].ID)
 }
 
+func TestAzureAdaptor_GetImagesVulnerabilities_EmptyFindingsEvidence(t *testing.T) {
+	t.Run("empty findings with positive completion evidence", func(t *testing.T) {
+		assessmentQueried := false
+		adaptor := NewAzureAdaptor()
+		adaptor.registryHost = "test.azurecr.io"
+		adaptor.client = &mockAzureClient{
+			resourcesOut: func(req armresourcegraph.QueryRequest) (armresourcegraph.ClientResourcesResponse, error) {
+				if strings.Contains(*req.Query, "subassessments") {
+					return armresourcegraph.ClientResourcesResponse{
+						QueryResponse: armresourcegraph.QueryResponse{Data: []interface{}{}},
+					}, nil
+				}
+				assessmentQueried = true
+				return armresourcegraph.ClientResourcesResponse{
+					QueryResponse: armresourcegraph.QueryResponse{
+						TotalRecords: to.Ptr[int64](1),
+						Data: []interface{}{
+							map[string]interface{}{"timeGenerated": "2023-01-01T12:00:00Z"},
+						},
+					},
+				}, nil
+			},
+		}
+
+		images := []ContainerImageIdentifier{
+			{Registry: "test.azurecr.io", Repository: "test-repo", Hash: "sha256:1234"},
+		}
+
+		reports, err := adaptor.GetImagesVulnerabilities(context.Background(), images)
+		require.NoError(t, err)
+		require.Len(t, reports, 1)
+		assert.True(t, assessmentQueried)
+		assert.Equal(t, ScanStatusScanned, reports[0].Status)
+		assert.Empty(t, reports[0].Vulnerabilities)
+	})
+
+	t.Run("empty findings without completion evidence leaves status unset", func(t *testing.T) {
+		assessmentQueried := false
+		adaptor := NewAzureAdaptor()
+		adaptor.registryHost = "test.azurecr.io"
+		adaptor.client = &mockAzureClient{
+			resourcesOut: func(req armresourcegraph.QueryRequest) (armresourcegraph.ClientResourcesResponse, error) {
+				if strings.Contains(*req.Query, "subassessments") {
+					return armresourcegraph.ClientResourcesResponse{
+						QueryResponse: armresourcegraph.QueryResponse{Data: []interface{}{}},
+					}, nil
+				}
+				assessmentQueried = true
+				return armresourcegraph.ClientResourcesResponse{
+					QueryResponse: armresourcegraph.QueryResponse{
+						TotalRecords: to.Ptr[int64](0),
+					},
+				}, nil
+			},
+		}
+
+		images := []ContainerImageIdentifier{
+			{Registry: "test.azurecr.io", Repository: "test-repo", Hash: "sha256:1234"},
+		}
+
+		reports, err := adaptor.GetImagesVulnerabilities(context.Background(), images)
+		require.NoError(t, err)
+		require.Len(t, reports, 1)
+		assert.True(t, assessmentQueried)
+		assert.Empty(t, reports[0].Status, "never assessed image must not be marked scanned")
+		assert.Empty(t, reports[0].Vulnerabilities)
+	})
+
+	t.Run("empty findings with parent assessment error propagates error", func(t *testing.T) {
+		adaptor := NewAzureAdaptor()
+		adaptor.registryHost = "test.azurecr.io"
+		adaptor.client = &mockAzureClient{
+			resourcesOut: func(req armresourcegraph.QueryRequest) (armresourcegraph.ClientResourcesResponse, error) {
+				if strings.Contains(*req.Query, "subassessments") {
+					return armresourcegraph.ClientResourcesResponse{
+						QueryResponse: armresourcegraph.QueryResponse{Data: []interface{}{}},
+					}, nil
+				}
+				return armresourcegraph.ClientResourcesResponse{}, errors.New("parent query error")
+			},
+		}
+
+		images := []ContainerImageIdentifier{
+			{Registry: "test.azurecr.io", Repository: "test-repo", Hash: "sha256:1234"},
+		}
+
+		reports, err := adaptor.GetImagesVulnerabilities(context.Background(), images)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "parent query error")
+		require.Len(t, reports, 1)
+		assert.Empty(t, reports[0].Status)
+	})
+}
+
 func TestAzureAdaptor_GetImagesVulnerabilities_PaginationAndCVE(t *testing.T) {
 	callCount := 0
 

@@ -34,11 +34,12 @@ func TestAWSECRAdaptor_GetImagesScanStatus(t *testing.T) {
 	now := time.Now()
 
 	tests := []struct {
-		name          string
-		mockOut       *ecr.DescribeImageScanFindingsOutput
-		mockErr       error
-		expectedScan  bool
-		expectedError bool
+		name           string
+		mockOut        *ecr.DescribeImageScanFindingsOutput
+		mockErr        error
+		expectedScan   bool
+		expectedStatus ScanStatus
+		expectedError  bool
 	}{
 		{
 			name: "scan complete with findings",
@@ -50,7 +51,8 @@ func TestAWSECRAdaptor_GetImagesScanStatus(t *testing.T) {
 					ImageScanCompletedAt: &now,
 				},
 			},
-			expectedScan: true,
+			expectedScan:   true,
+			expectedStatus: ScanStatusScanned,
 		},
 		{
 			name: "enhanced continuous scan active with findings",
@@ -67,7 +69,8 @@ func TestAWSECRAdaptor_GetImagesScanStatus(t *testing.T) {
 					},
 				},
 			},
-			expectedScan: true,
+			expectedScan:   true,
+			expectedStatus: ScanStatusScanned,
 		},
 		{
 			name: "scan in progress",
@@ -76,14 +79,46 @@ func TestAWSECRAdaptor_GetImagesScanStatus(t *testing.T) {
 					Status: types.ScanStatusInProgress,
 				},
 			},
-			expectedScan: false,
+			expectedScan:   false,
+			expectedStatus: ScanStatusQueued,
+		},
+		{
+			name: "scan pending",
+			mockOut: &ecr.DescribeImageScanFindingsOutput{
+				ImageScanStatus: &types.ImageScanStatus{
+					Status: types.ScanStatusPending,
+				},
+			},
+			expectedScan:   false,
+			expectedStatus: ScanStatusQueued,
+		},
+		{
+			name: "scan failed",
+			mockOut: &ecr.DescribeImageScanFindingsOutput{
+				ImageScanStatus: &types.ImageScanStatus{
+					Status: types.ScanStatusFailed,
+				},
+			},
+			expectedScan:   false,
+			expectedStatus: ScanStatusFailed,
+		},
+		{
+			name: "scan unsupported image",
+			mockOut: &ecr.DescribeImageScanFindingsOutput{
+				ImageScanStatus: &types.ImageScanStatus{
+					Status: types.ScanStatusUnsupportedImage,
+				},
+			},
+			expectedScan:   false,
+			expectedStatus: ScanStatusUnsupported,
 		},
 		{
 			name:    "empty hash and tag should not panic",
 			mockOut: &ecr.DescribeImageScanFindingsOutput{
 				// the mock client will panic if it reaches DescribeImageScanFindings
 			},
-			expectedScan: false,
+			expectedScan:   false,
+			expectedStatus: "",
 		},
 	}
 
@@ -110,10 +145,141 @@ func TestAWSECRAdaptor_GetImagesScanStatus(t *testing.T) {
 				assert.NoError(t, err)
 				assert.Len(t, statuses, 1)
 				assert.Equal(t, tt.expectedScan, statuses[0].IsScanAvailable)
+				assert.Equal(t, tt.expectedStatus, statuses[0].Status)
 				if tt.expectedScan {
 					assert.Equal(t, now, statuses[0].LastScanDate)
 				}
 			}
+		})
+	}
+}
+
+func TestAWSECRAdaptor_GetImagesVulnerabilities_ScanStatus(t *testing.T) {
+	tests := []struct {
+		name           string
+		mockOut        *ecr.DescribeImageScanFindingsOutput
+		expectedStatus ScanStatus
+		expectedVulns  int
+	}{
+		{
+			name: "completed zero findings",
+			mockOut: &ecr.DescribeImageScanFindingsOutput{
+				ImageScanStatus: &types.ImageScanStatus{
+					Status: types.ScanStatusComplete,
+				},
+				ImageScanFindings: &types.ImageScanFindings{
+					Findings: []types.ImageScanFinding{},
+				},
+			},
+			expectedStatus: ScanStatusScanned,
+			expectedVulns:  0,
+		},
+		{
+			name: "completed with findings",
+			mockOut: &ecr.DescribeImageScanFindingsOutput{
+				ImageScanStatus: &types.ImageScanStatus{
+					Status: types.ScanStatusComplete,
+				},
+				ImageScanFindings: &types.ImageScanFindings{
+					Findings: []types.ImageScanFinding{
+						{Name: aws.String("CVE-2023-1111"), Severity: types.FindingSeverityHigh},
+					},
+				},
+			},
+			expectedStatus: ScanStatusScanned,
+			expectedVulns:  1,
+		},
+		{
+			name: "active continuous scan with findings",
+			mockOut: &ecr.DescribeImageScanFindingsOutput{
+				ImageScanStatus: &types.ImageScanStatus{
+					Status: types.ScanStatusActive,
+				},
+				ImageScanFindings: &types.ImageScanFindings{
+					EnhancedFindings: []types.EnhancedImageScanFinding{
+						{Severity: aws.String("HIGH")},
+					},
+				},
+			},
+			expectedStatus: ScanStatusScanned,
+			expectedVulns:  1,
+		},
+		{
+			name: "in progress scan returns queued without findings",
+			mockOut: &ecr.DescribeImageScanFindingsOutput{
+				ImageScanStatus: &types.ImageScanStatus{
+					Status: types.ScanStatusInProgress,
+				},
+			},
+			expectedStatus: ScanStatusQueued,
+			expectedVulns:  0,
+		},
+		{
+			name: "pending scan returns queued",
+			mockOut: &ecr.DescribeImageScanFindingsOutput{
+				ImageScanStatus: &types.ImageScanStatus{
+					Status: types.ScanStatusPending,
+				},
+			},
+			expectedStatus: ScanStatusQueued,
+			expectedVulns:  0,
+		},
+		{
+			name: "failed scan returns failed",
+			mockOut: &ecr.DescribeImageScanFindingsOutput{
+				ImageScanStatus: &types.ImageScanStatus{
+					Status: types.ScanStatusFailed,
+				},
+			},
+			expectedStatus: ScanStatusFailed,
+			expectedVulns:  0,
+		},
+		{
+			name: "unsupported image returns unsupported",
+			mockOut: &ecr.DescribeImageScanFindingsOutput{
+				ImageScanStatus: &types.ImageScanStatus{
+					Status: types.ScanStatusUnsupportedImage,
+				},
+			},
+			expectedStatus: ScanStatusUnsupported,
+			expectedVulns:  0,
+		},
+		{
+			name: "absent image scan status leaves status unset",
+			mockOut: &ecr.DescribeImageScanFindingsOutput{
+				ImageScanStatus: nil,
+			},
+			expectedStatus: "",
+			expectedVulns:  0,
+		},
+		{
+			name: "unknown provider status returns unknown",
+			mockOut: &ecr.DescribeImageScanFindingsOutput{
+				ImageScanStatus: &types.ImageScanStatus{
+					Status: "SOMETHING_NEW",
+				},
+			},
+			expectedStatus: ScanStatusUnknown,
+			expectedVulns:  0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			adaptor := NewAWSECRAdaptor()
+			adaptor.client = &mockECRClient{
+				describeFindingsOut: tt.mockOut,
+			}
+
+			images := []ContainerImageIdentifier{
+				{Registry: "123456789012.dkr.ecr.us-east-1.amazonaws.com", Repository: "test-repo", Tag: "latest"},
+			}
+
+			reports, err := adaptor.GetImagesVulnerabilities(context.Background(), images)
+			require.NoError(t, err)
+			require.Len(t, reports, 1)
+			assert.Equal(t, tt.expectedStatus, reports[0].Status)
+			assert.Len(t, reports[0].Vulnerabilities, tt.expectedVulns)
 		})
 	}
 }

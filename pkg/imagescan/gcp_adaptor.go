@@ -152,45 +152,49 @@ func (a *GCPAdaptor) GetImagesScanStatus(ctx context.Context, imageIDs []Contain
 
 	return ProcessImages(imageIDs,
 		func(imageID ContainerImageIdentifier) (ContainerImageScanStatus, error) {
-			status := ContainerImageScanStatus{
-				ImageID:         imageID,
-				IsScanAvailable: false,
-				IsBomAvailable:  false,
-			}
-
-			if imageID.Hash == "" {
-				return status, nil
-			}
-
-			req := &grafeaspb.ListOccurrencesRequest{
-				Parent: fmt.Sprintf("projects/%s", a.projectID),
-				Filter: buildGrafeasFilter("DISCOVERY", imageID),
-			}
-
-			it := a.client.ListOccurrences(ctx, req)
-			const maxScanStatusOccurrences = 1000
-			seen := 0
-			for {
-				if seen >= maxScanStatusOccurrences {
-					logger.L().Warning("truncated scan status occurrences", helpers.String("repository", imageID.Repository), helpers.Int("limit", maxScanStatusOccurrences))
-					break
-				}
-
-				occurrence, err := it.Next()
-				if err == iterator.Done {
-					break
-				}
-				if err != nil {
-					return status, fmt.Errorf("failed to query scan status for repository %s: %w", imageID.Repository, err)
-				}
-				seen++
-
-				mergeSuccessfulGCPScan(&status, occurrence)
-			}
-
-			return status, nil
+			return a.getImageScanStatus(ctx, imageID)
 		},
 	)
+}
+
+func (a *GCPAdaptor) getImageScanStatus(ctx context.Context, imageID ContainerImageIdentifier) (ContainerImageScanStatus, error) {
+	status := ContainerImageScanStatus{
+		ImageID:         imageID,
+		IsScanAvailable: false,
+		IsBomAvailable:  false,
+	}
+
+	if imageID.Hash == "" {
+		return status, nil
+	}
+
+	req := &grafeaspb.ListOccurrencesRequest{
+		Parent: fmt.Sprintf("projects/%s", a.projectID),
+		Filter: buildGrafeasFilter("DISCOVERY", imageID),
+	}
+
+	it := a.client.ListOccurrences(ctx, req)
+	const maxScanStatusOccurrences = 1000
+	seen := 0
+	for {
+		if seen >= maxScanStatusOccurrences {
+			logger.L().Warning("truncated scan status occurrences", helpers.String("repository", imageID.Repository), helpers.Int("limit", maxScanStatusOccurrences))
+			break
+		}
+
+		occurrence, err := it.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			return status, fmt.Errorf("failed to query scan status for repository %s: %w", imageID.Repository, err)
+		}
+		seen++
+
+		mergeSuccessfulGCPScan(&status, occurrence)
+	}
+
+	return status, nil
 }
 
 // mergeSuccessfulGCPScan records a completed discovery occurrence without
@@ -208,6 +212,7 @@ func mergeSuccessfulGCPScan(status *ContainerImageScanStatus, occurrence *grafea
 	}
 
 	status.IsScanAvailable = true
+	status.Status = ScanStatusScanned
 	if occurrence.UpdateTime == nil || occurrence.UpdateTime.CheckValid() != nil {
 		return
 	}
@@ -238,6 +243,15 @@ func (a *GCPAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs []Co
 
 			if imageID.Hash == "" {
 				return report, nil
+			}
+
+			scanStatus, err := a.getImageScanStatus(ctx, imageID)
+			if err != nil {
+				return report, err
+			}
+
+			if scanStatus.Status == ScanStatusScanned {
+				report.Status = ScanStatusScanned
 			}
 
 			req := &grafeaspb.ListOccurrencesRequest{
