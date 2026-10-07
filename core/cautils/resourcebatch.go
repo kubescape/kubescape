@@ -61,6 +61,9 @@ type ResourceBatch struct {
 	ExternalResources ExternalResources
 	// AllResources holds the batch's objects by resource ID.
 	AllResources map[string]workloadinterface.IMetadata
+	// CELNamespaceContext supplies Namespace objects for CEL evaluation without
+	// adding them to the scan targets or report catalog.
+	CELNamespaceContext map[string]workloadinterface.IMetadata
 }
 
 // NewResourceBatch returns an empty batch for the given scope.

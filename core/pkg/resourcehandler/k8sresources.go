@@ -203,8 +203,15 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 		cautils.StopSpinner()
 		return nil, nil, nil, nil, err
 	}
-
 	metrics.UpdateKubernetesResourcesCount(ctx, int64(len(allResources)))
+	if needsSupplementalCELNamespaces(scanInfo, sessionObj.Policies) {
+		context, err := k8sHandler.collectSupplementalCELNamespaces(ctx, globalFieldSelectors, namespaceContextTargets(allResources))
+		if err != nil {
+			return k8sResourcesMap, allResources, ksResourceMap, excludedRulesMap, err
+		}
+		sessionObj.CELNamespaceContext = context
+	}
+
 	numberOfWorkerNodes, err := k8sHandler.pullWorkerNodesNumber(ctx)
 
 	if err != nil {
@@ -571,12 +578,24 @@ func (k8sHandler *K8sResourceHandler) collectAndStreamBatches(ctx context.Contex
 	if err := applyKindFilter(resident.K8SResources, resident.AllResources, scanInfo, sessionObj.SingleResourceScan); err != nil {
 		return err
 	}
-
 	residentK8sCount := len(resident.AllResources)
 	if committedSingleResourceInStore && sessionObj.SingleResourceScan != nil {
 		if _, inResident := resident.AllResources[sessionObj.SingleResourceScan.GetID()]; inResident {
 			residentK8sCount--
 		}
+	}
+	if needsSupplementalCELNamespaces(scanInfo, sessionObj.Policies) {
+		needed := namespaceContextTargets(resident.AllResources)
+		for _, namespace := range store.Namespaces() {
+			if namespace != cautils.ClusterScope {
+				needed[namespace] = struct{}{}
+			}
+		}
+		context, err := k8sHandler.collectSupplementalCELNamespaces(ctx, globalFieldSelectors, needed)
+		if err != nil {
+			return err
+		}
+		resident.CELNamespaceContext = context
 	}
 
 	if k8sHandler.k8s != nil {

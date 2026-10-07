@@ -324,13 +324,19 @@ skips a whole control.
 exist in a file scan.
 
 **`namespaceObject` is conditional.** It binds to a real Namespace only when the
-scan collected that object. Collection is driven by the framework's policy matches,
-not every CEL dependency. When a policy reads `namespaceObject` but the Namespace
-is missing for a namespaced resource, Kubescape marks that resource skipped with an
-unknown verdict. It does not treat the missing offline input as an admission denial
-under `failurePolicy: Fail`. Cluster-scoped resources still receive the apiserver's
-normal null binding. A future collector improvement could gather Namespaces whenever
-a loaded policy needs them, reducing these skips in live cluster scans.
+scan collected that object. Live scans request Namespaces for CEL rules; workload
+label and kind filters do not suppress the supplemental Namespace lookup needed as
+evaluation context. The lookup retains only Namespace objects for namespaces
+represented by selected scan targets, even if a broader namespace scope is
+allowed. Memory for this context therefore scales with selected workload
+namespaces rather than every Namespace in the scope; a broad scan can still retain
+many. These objects stay outside both scan targets and the report resource
+catalog, so they do not change resource counts. If RBAC
+prevents collection, or an offline input lacks the Namespace manifest, a policy
+reading `namespaceObject` marks the namespaced resource skipped with an unknown
+verdict. It does not treat missing input as an admission denial under
+`failurePolicy: Fail`. Cluster-scoped resources still receive the apiserver's
+normal null binding.
 
 **Only CREATE is modelled.** A policy whose resource rules exclude CREATE is never
 matched offline.

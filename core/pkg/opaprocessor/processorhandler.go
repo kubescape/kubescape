@@ -201,6 +201,7 @@ func indexNamespaces(sessionObj *cautils.OPASessionObj) map[string]map[string]an
 		}
 		return true
 	})
+	addNamespacesToIndex(index, sessionObj.CELNamespaceContext)
 	return index
 }
 
@@ -401,9 +402,10 @@ haveResident:
 	opap.ExternalResources = residentBatch.ExternalResources
 	opap.GetCatalog().AddAll(residentBatch.AllResources)
 
-	// Index any Namespace objects the resident batch carries before evaluating,
-	// so CEL's namespaceObject binding is populated for this scope's objects.
+	// Index scanned and supplemental Namespace objects before evaluating, while
+	// keeping the supplemental objects out of the report catalog.
 	opap.indexNamespacesFrom(residentBatch.AllResources)
+	opap.indexNamespacesFrom(residentBatch.CELNamespaceContext)
 
 	// Index the resident batch once: every namespace scope below is evaluated
 	// together with it and reads the same index.
