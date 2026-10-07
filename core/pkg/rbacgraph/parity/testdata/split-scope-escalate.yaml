@@ -1,0 +1,106 @@
+name: split-scope-escalate
+description: |
+  Rewriting a Role with rules the caller does not hold takes two
+  independent authorizations in the Role's namespace: update or patch on
+  the Role, and escalate on it. Kubernetes checks each one on its own, so
+  one may come from a ClusterRoleBinding and the other from a RoleBinding.
+objects:
+  - {apiVersion: v1, kind: Namespace, metadata: {name: lab}}
+  - {apiVersion: v1, kind: Namespace, metadata: {name: lab2}}
+  - {apiVersion: v1, kind: ServiceAccount, metadata: {name: escalate-cluster-update-namespace, namespace: lab}}
+  - {apiVersion: v1, kind: ServiceAccount, metadata: {name: escalate-namespace-update-cluster, namespace: lab}}
+  - {apiVersion: v1, kind: ServiceAccount, metadata: {name: same-scope, namespace: lab}}
+  - {apiVersion: v1, kind: ServiceAccount, metadata: {name: update-only, namespace: lab}}
+  - {apiVersion: v1, kind: ServiceAccount, metadata: {name: escalate-cluster-patch-namespace, namespace: lab}}
+  - {apiVersion: v1, kind: ServiceAccount, metadata: {name: update-in-other-namespace, namespace: lab}}
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: Role
+    metadata: {name: editable, namespace: lab}
+    rules:
+      - {apiGroups: [""], resources: ["configmaps"], verbs: [get]}
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: ClusterRole
+    metadata: {name: escalate-roles}
+    rules:
+      - {apiGroups: ["rbac.authorization.k8s.io"], resources: ["roles"], verbs: [escalate]}
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: ClusterRole
+    metadata: {name: update-roles}
+    rules:
+      - {apiGroups: ["rbac.authorization.k8s.io"], resources: ["roles"], verbs: [get, update]}
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: ClusterRole
+    metadata: {name: patch-roles}
+    rules:
+      - {apiGroups: ["rbac.authorization.k8s.io"], resources: ["roles"], verbs: [get, patch]}
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: ClusterRoleBinding
+    metadata: {name: escalate-cluster-wide}
+    roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: escalate-roles}
+    subjects:
+      - {kind: ServiceAccount, name: escalate-cluster-update-namespace, namespace: lab}
+      - {kind: ServiceAccount, name: escalate-cluster-patch-namespace, namespace: lab}
+      - {kind: ServiceAccount, name: update-in-other-namespace, namespace: lab}
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: RoleBinding
+    metadata: {name: update-in-lab, namespace: lab}
+    roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: update-roles}
+    subjects:
+      - {kind: ServiceAccount, name: escalate-cluster-update-namespace, namespace: lab}
+      - {kind: ServiceAccount, name: same-scope, namespace: lab}
+      - {kind: ServiceAccount, name: update-only, namespace: lab}
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: RoleBinding
+    metadata: {name: escalate-in-lab, namespace: lab}
+    roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: escalate-roles}
+    subjects:
+      - {kind: ServiceAccount, name: escalate-namespace-update-cluster, namespace: lab}
+      - {kind: ServiceAccount, name: same-scope, namespace: lab}
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: ClusterRoleBinding
+    metadata: {name: update-cluster-wide}
+    roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: update-roles}
+    subjects:
+      - {kind: ServiceAccount, name: escalate-namespace-update-cluster, namespace: lab}
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: RoleBinding
+    metadata: {name: patch-in-lab, namespace: lab}
+    roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: patch-roles}
+    subjects:
+      - {kind: ServiceAccount, name: escalate-cluster-patch-namespace, namespace: lab}
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: RoleBinding
+    metadata: {name: update-in-lab2, namespace: lab2}
+    roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: update-roles}
+    subjects:
+      - {kind: ServiceAccount, name: update-in-other-namespace, namespace: lab}
+questions:
+  - id: escalate-cluster-wide-update-namespaced
+    serviceAccount: {namespace: lab, name: escalate-cluster-update-namespace}
+    rewriteRole: {namespace: lab, name: editable, verb: update}
+    kubernetes: allowed
+  - id: escalate-namespaced-update-cluster-wide
+    serviceAccount: {namespace: lab, name: escalate-namespace-update-cluster}
+    rewriteRole: {namespace: lab, name: editable, verb: update}
+    kubernetes: allowed
+  # The same split with patch as the only mutating verb; asked with a PATCH.
+  - id: escalate-cluster-wide-patch-namespaced
+    serviceAccount: {namespace: lab, name: escalate-cluster-patch-namespace}
+    rewriteRole: {namespace: lab, name: editable, verb: patch}
+    kubernetes: allowed
+  # Control: both halves granted in the Role's namespace.
+  - id: escalate-and-update-in-the-same-namespace
+    serviceAccount: {namespace: lab, name: same-scope}
+    rewriteRole: {namespace: lab, name: editable, verb: update}
+    kubernetes: allowed
+  # Control: update alone cannot add rules the caller does not hold.
+  - id: update-without-escalate
+    serviceAccount: {namespace: lab, name: update-only}
+    rewriteRole: {namespace: lab, name: editable, verb: update}
+    kubernetes: denied
+  # Control: a cluster-wide escalate does not combine with update granted in a
+  # different namespace than the Role's.
+  - id: update-granted-in-another-namespace
+    serviceAccount: {namespace: lab, name: update-in-other-namespace}
+    rewriteRole: {namespace: lab, name: editable, verb: update}
+    kubernetes: denied
