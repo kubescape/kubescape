@@ -179,9 +179,14 @@ jobs:
                   fi
 
                   # Re-run: the dispatch step is skipped, so find the run the first attempt started.
-                  # It is minutes old by now, so the run list already shows it.
-                  run_id=$(gh api "repos/armosec/shared-workflows/actions/workflows/helm-e2e-receiver.yaml/runs?per_page=100" \
-                    --jq '.workflow_runs | map(select(.name | contains("'"$CORRELATION_ID"'"))) | first | .id // empty')
+                  # The App token can see a new run minutes late, so retry for a while.
+                  for i in {1..15}; do
+                    run_id=$(gh api "repos/armosec/shared-workflows/actions/workflows/helm-e2e-receiver.yaml/runs?per_page=100" \
+                      --jq '.workflow_runs | map(select(.name | contains("'"$CORRELATION_ID"'"))) | first | .id // empty')
+                    [ -n "$run_id" ] && break
+                    echo "Attempt $i: waiting for the first attempt's run to show up..."
+                    sleep 30
+                  done
                   if [ -z "$run_id" ]; then
                     echo "::error::Could not find the E2E run started by the first attempt (${CORRELATION_ID})"
                     exit 1
