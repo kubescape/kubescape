@@ -65,14 +65,23 @@ func (ks *Kubescape) Fix(fixInfo *metav1.FixInfo) error {
 	// generated patches can be applied via:
 	//   kustomize build <dir> | kubectl apply -f -
 	if fixInfo.KustomizeDir != "" && !fixInfo.DryRun {
-		if err := fixhandler.EmitKustomizePatch(helmSuggestions, fixInfo.KustomizeDir); err != nil {
+		emitRes, err := fixhandler.EmitKustomizePatch(helmSuggestions, fixInfo.KustomizeDir)
+		if err != nil {
 			logger.L().Error("failed to write Kustomize patches", helpers.Error(err))
 			return fmt.Errorf("failed to write Kustomize patches: %w", err)
-		} else if entries, err := os.ReadDir(fixInfo.KustomizeDir); err == nil && len(entries) > 0 {
-			logger.L().Info(fmt.Sprintf(
-				"Kustomize patches written to %q\n  Apply with: kustomize build %s | kubectl apply -f -",
-				fixInfo.KustomizeDir, fixInfo.KustomizeDir,
-			))
+		}
+		if emitRes != nil {
+			for _, skipped := range emitRes.SkippedResources {
+				logger.L().Warning(fmt.Sprintf("skipped Kustomize patch generation for %s: %s", skipped.ResourceKey, skipped.Reason))
+			}
+			if len(emitRes.EmittedResources) > 0 {
+				logger.L().Info(fmt.Sprintf(
+					"Kustomize patches written to %q\n  Apply with: kustomize build %s | kubectl apply -f -",
+					fixInfo.KustomizeDir, fixInfo.KustomizeDir,
+				))
+			} else if len(emitRes.SkippedResources) > 0 {
+				logger.L().Info("No Kustomize patches were emitted (all resources were declined or skipped).")
+			}
 		}
 	}
 

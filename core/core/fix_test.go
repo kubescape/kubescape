@@ -833,6 +833,25 @@ func TestFix_MultiInputScanOutsideGit(t *testing.T) {
 func buildFixableHelmReport(t *testing.T, dir string) string {
 	t.Helper()
 
+	chartYaml := "apiVersion: v2\nname: demo-chart\nversion: 0.1.0\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "Chart.yaml"), []byte(chartYaml), 0600))
+	templatesDir := filepath.Join(dir, "templates")
+	require.NoError(t, os.MkdirAll(templatesDir, 0750))
+	deploymentYaml := `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo-helm
+  namespace: default
+spec:
+  template:
+    spec:
+      containers:
+      - name: demo
+        securityContext:
+          privileged: true
+`
+	require.NoError(t, os.WriteFile(filepath.Join(templatesDir, "deployment.yaml"), []byte(deploymentYaml), 0600))
+
 	helmObj := map[string]any{
 		"apiVersion": "apps/v1",
 		"kind":       "Deployment",
@@ -937,4 +956,85 @@ func TestFix_OutputKustomizeSuccess(t *testing.T) {
 	assert.DirExists(t, kustDir)
 	assert.FileExists(t, filepath.Join(kustDir, "kustomization.yaml"))
 	assert.FileExists(t, filepath.Join(kustDir, "base.yaml"))
+}
+
+func TestFix_OutputKustomizeDoesNotAdvertiseStaleOverlay(t *testing.T) {
+	// P2 blocker: When generation is declined because fidelity cannot be proven
+	// or placeholders are present, fix must not advertise an existing non-empty
+	// directory as current or print apply instructions.
+	dir := t.TempDir()
+	// Build report where resource contains placeholder "XXXXXX" and chart cannot be loaded
+	redactedObj := map[string]any{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata":   map[string]any{"name": "demo-helm", "namespace": "default"},
+		"spec": map[string]any{
+			"template": map[string]any{
+				"spec": map[string]any{
+					"containers": []any{
+						map[string]any{
+							"name":  "demo",
+							"image": "XXXXXX",
+						},
+					},
+				},
+			},
+		},
+	}
+	helmRes := reporthandling.Resource{
+		Object: redactedObj,
+		Source: &reporthandling.Source{
+			FileType: reporthandling.SourceTypeHelmChart,
+			HelmPath: filepath.Join(dir, "nonexistent-chart"),
+		},
+	}
+	helmRes.ResourceID = helmRes.GetID()
+	report := &reporthandlingv2.PostureReport{
+		Metadata: reporthandlingv2.Metadata{
+			ScanMetadata: reporthandlingv2.ScanMetadata{ScanningTarget: reporthandlingv2.Directory},
+			ContextMetadata: reporthandlingv2.ContextMetadata{
+				DirectoryContextMetadata: &reporthandlingv2.DirectoryContextMetadata{BasePath: dir},
+			},
+		},
+		Resources: []reporthandling.Resource{helmRes},
+		Results: []resourcesresults.Result{
+			{
+				ResourceID: helmRes.ResourceID,
+				AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+					{
+						ControlID: "C-0057",
+						Name:      "Privileged container",
+						Status:    apis.StatusInfo{InnerStatus: apis.StatusFailed},
+						ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{
+							{
+								Name:   "rule-privileged",
+								Status: apis.StatusFailed,
+								Paths: []armotypes.PosturePaths{
+									{FixPath: armotypes.FixPath{Path: "spec.template.spec.containers[0].securityContext.privileged", Value: "false"}},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	reportPath := writeReportFile(t, dir, report)
+
+	kustDir := filepath.Join(t.TempDir(), "stale-overlay")
+	require.NoError(t, os.MkdirAll(kustDir, 0700))
+	staleContent := "resources:\n  - base.yaml\n"
+	require.NoError(t, os.WriteFile(filepath.Join(kustDir, "kustomization.yaml"), []byte(staleContent), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(kustDir, "base.yaml"), []byte("apiVersion: apps/v1\nkind: Deployment\n"), 0600))
+
+	readLog := captureLoggerOutput(t)
+
+	ks := &Kubescape{Ctx: context.Background()}
+	err := ks.Fix(&metav1.FixInfo{ReportFile: reportPath, KustomizeDir: kustDir})
+	require.NoError(t, err)
+
+	logs := readLog()
+	assert.Contains(t, logs, "skipped Kustomize patch generation")
+	assert.Contains(t, logs, "No Kustomize patches were emitted")
+	assert.NotContains(t, logs, "Apply with: kustomize build")
 }

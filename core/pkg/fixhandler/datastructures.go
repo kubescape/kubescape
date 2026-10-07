@@ -63,6 +63,12 @@ type HelmFixSuggestion struct {
 	TemplateFile string              // chart-relative, e.g. "templates/deployment.yaml"
 	ValuesPaths  []string            // candidate dotted .Values.* keys referenced by the template; may be empty
 	FixPaths     []armotypes.FixPath // rule-suggested rendered-YAML edits, for the user to translate into values.yaml
+
+	// FidelityProvenance establishes that Resource.Object is a complete, unredacted
+	// representation (e.g. from an unredacted rendered source).
+	FidelityProvenance bool
+	// UnredactedBase provides a verified unredacted base object, when available.
+	UnredactedBase map[string]interface{}
 }
 
 // UnfixedControl describes a failed (resource, control) tuple for which `kubescape fix`

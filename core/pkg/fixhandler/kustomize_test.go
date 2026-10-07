@@ -1,6 +1,7 @@
 package fixhandler
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -10,9 +11,26 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
+	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/kustomize/api/krusty"
 	"sigs.k8s.io/kustomize/kyaml/filesys"
 )
+
+// copy of scanner container-redaction function from processorhandlerutils.go:811
+func removeContainersData(containers []corev1.Container) {
+	for i := range containers {
+		container := &containers[i]
+		for j := range container.Env {
+			container.Env[j].Value = "XXXXXX"
+			container.Env[j].ValueFrom = nil
+		}
+		container.EnvFrom = nil
+	}
+}
+
+func ptrBool(b bool) *bool {
+	return &b
+}
 
 // makeResource builds a minimal reporthandling.Resource with the given kind and name.
 func makeResource(kind, name string) *reporthandling.Resource {
@@ -112,8 +130,9 @@ func TestEmitKustomizePatch_WritesCorrectFiles(t *testing.T) {
 
 	suggestions := []HelmFixSuggestion{
 		{
-			Resource:  res,
-			ChartName: "my-chart",
+			Resource:           res,
+			ChartName:          "my-chart",
+			FidelityProvenance: true,
 			FixPaths: []armotypes.FixPath{
 				{Path: "spec.template.spec.containers[0].securityContext.privileged", Value: "false"},
 				{Path: "spec.template.spec.securityContext.runAsNonRoot", Value: "true"},
@@ -121,8 +140,10 @@ func TestEmitKustomizePatch_WritesCorrectFiles(t *testing.T) {
 		},
 	}
 
-	err := EmitKustomizePatch(suggestions, dir)
+	emitRes, err := EmitKustomizePatch(suggestions, dir)
 	require.NoError(t, err)
+	require.NotNil(t, emitRes)
+	require.Len(t, emitRes.EmittedResources, 1)
 
 	// kustomization.yaml must exist and reference base.yaml + patch file + target
 	kustPath := filepath.Join(dir, "kustomization.yaml")
@@ -177,18 +198,21 @@ func TestEmitKustomizePatch_CombinesMultipleSuggestionsForSameResource(t *testin
 
 	suggestions := []HelmFixSuggestion{
 		{
-			Resource:  res,
-			ChartName: "my-chart",
-			FixPaths:  []armotypes.FixPath{{Path: "spec.template.spec.securityContext.runAsNonRoot", Value: "true"}},
+			Resource:           res,
+			ChartName:          "my-chart",
+			FidelityProvenance: true,
+			FixPaths:           []armotypes.FixPath{{Path: "spec.template.spec.securityContext.runAsNonRoot", Value: "true"}},
 		},
 		{
-			Resource:  res,
-			ChartName: "my-chart",
-			FixPaths:  []armotypes.FixPath{{Path: "spec.template.spec.containers[0].securityContext.privileged", Value: "false"}},
+			Resource:           res,
+			ChartName:          "my-chart",
+			FidelityProvenance: true,
+			FixPaths:           []armotypes.FixPath{{Path: "spec.template.spec.containers[0].securityContext.privileged", Value: "false"}},
 		},
 	}
 
-	require.NoError(t, EmitKustomizePatch(suggestions, dir))
+	_, err := EmitKustomizePatch(suggestions, dir)
+	require.NoError(t, err)
 
 	patchFileName := resourcePatchFilename(resourceKey{
 		Group:     "apps",
@@ -214,18 +238,21 @@ func TestEmitKustomizePatch_MultipleResources(t *testing.T) {
 
 	suggestions := []HelmFixSuggestion{
 		{
-			Resource:  makeResourceWithNS("Deployment", "blue", "nginx"),
-			ChartName: "my-chart",
-			FixPaths:  []armotypes.FixPath{{Path: "spec.template.spec.securityContext.runAsNonRoot", Value: "true"}},
+			Resource:           makeResourceWithNS("Deployment", "blue", "nginx"),
+			ChartName:          "my-chart",
+			FidelityProvenance: true,
+			FixPaths:           []armotypes.FixPath{{Path: "spec.template.spec.securityContext.runAsNonRoot", Value: "true"}},
 		},
 		{
-			Resource:  makeResourceWithNS("Deployment", "green", "nginx"),
-			ChartName: "my-chart",
-			FixPaths:  []armotypes.FixPath{{Path: "spec.template.spec.securityContext.runAsNonRoot", Value: "true"}},
+			Resource:           makeResourceWithNS("Deployment", "green", "nginx"),
+			ChartName:          "my-chart",
+			FidelityProvenance: true,
+			FixPaths:           []armotypes.FixPath{{Path: "spec.template.spec.securityContext.runAsNonRoot", Value: "true"}},
 		},
 	}
 
-	require.NoError(t, EmitKustomizePatch(suggestions, dir))
+	_, err := EmitKustomizePatch(suggestions, dir)
+	require.NoError(t, err)
 
 	assert.FileExists(t, filepath.Join(dir, "kustomization.yaml"))
 	kustContent, _ := os.ReadFile(filepath.Join(dir, "kustomization.yaml"))
@@ -237,7 +264,8 @@ func TestEmitKustomizePatch_MultipleResources(t *testing.T) {
 // TestEmitKustomizePatch_EmptyInput verifies nothing is written for empty suggestions.
 func TestEmitKustomizePatch_EmptyInput(t *testing.T) {
 	dir := t.TempDir()
-	require.NoError(t, EmitKustomizePatch(nil, dir))
+	_, err := EmitKustomizePatch(nil, dir)
+	require.NoError(t, err)
 	entries, _ := os.ReadDir(dir)
 	assert.Empty(t, entries, "no files should be written for empty suggestions")
 }
@@ -248,12 +276,14 @@ func TestEmitKustomizePatch_SkipsEmptyFixPaths(t *testing.T) {
 	dir := t.TempDir()
 	suggestions := []HelmFixSuggestion{
 		{
-			Resource:  makeResource("Deployment", "empty-app"),
-			ChartName: "my-chart",
-			FixPaths:  []armotypes.FixPath{},
+			Resource:           makeResource("Deployment", "empty-app"),
+			ChartName:          "my-chart",
+			FidelityProvenance: true,
+			FixPaths:           []armotypes.FixPath{},
 		},
 	}
-	require.NoError(t, EmitKustomizePatch(suggestions, dir))
+	_, err := EmitKustomizePatch(suggestions, dir)
+	require.NoError(t, err)
 	entries, _ := os.ReadDir(dir)
 	assert.Empty(t, entries, "no files should be written when fix paths are empty")
 }
@@ -264,12 +294,14 @@ func TestEmitKustomizePatch_EmptyValueIsAssignment(t *testing.T) {
 	dir := t.TempDir()
 	suggestions := []HelmFixSuggestion{
 		{
-			Resource:  makeResource("Deployment", "my-app"),
-			ChartName: "my-chart",
-			FixPaths:  []armotypes.FixPath{{Path: "spec.storageClassName", Value: ""}},
+			Resource:           makeResource("Deployment", "my-app"),
+			ChartName:          "my-chart",
+			FidelityProvenance: true,
+			FixPaths:           []armotypes.FixPath{{Path: "spec.storageClassName", Value: ""}},
 		},
 	}
-	require.NoError(t, EmitKustomizePatch(suggestions, dir))
+	_, err := EmitKustomizePatch(suggestions, dir)
+	require.NoError(t, err)
 	patchFileName := resourcePatchFilename(resourceKey{
 		Group:     "apps",
 		Version:   "v1",
@@ -300,12 +332,14 @@ func TestEmitKustomizePatch_ArrayAndComplexTypes(t *testing.T) {
 	}
 	suggestions := []HelmFixSuggestion{
 		{
-			Resource:  res,
-			ChartName: "my-chart",
-			FixPaths:  []armotypes.FixPath{{Path: "spec.template.spec.containers[0].securityContext.capabilities.drop", Value: `["ALL"]`}},
+			Resource:           res,
+			ChartName:          "my-chart",
+			FidelityProvenance: true,
+			FixPaths:           []armotypes.FixPath{{Path: "spec.template.spec.containers[0].securityContext.capabilities.drop", Value: `["ALL"]`}},
 		},
 	}
-	require.NoError(t, EmitKustomizePatch(suggestions, dir))
+	_, err := EmitKustomizePatch(suggestions, dir)
+	require.NoError(t, err)
 	patchFileName := resourcePatchFilename(resourceKey{
 		Group:     "apps",
 		Version:   "v1",
@@ -325,12 +359,14 @@ func TestEmitKustomizePatch_PathTraversalProtection(t *testing.T) {
 	dir := t.TempDir()
 	suggestions := []HelmFixSuggestion{
 		{
-			Resource:  makeResource("../escaped", "../../badname"),
-			ChartName: "my-chart",
-			FixPaths:  []armotypes.FixPath{{Path: "spec.securityContext.runAsNonRoot", Value: "true"}},
+			Resource:           makeResource("../escaped", "../../badname"),
+			ChartName:          "my-chart",
+			FidelityProvenance: true,
+			FixPaths:           []armotypes.FixPath{{Path: "spec.securityContext.runAsNonRoot", Value: "true"}},
 		},
 	}
-	require.NoError(t, EmitKustomizePatch(suggestions, dir))
+	_, err := EmitKustomizePatch(suggestions, dir)
+	require.NoError(t, err)
 
 	escapedOutside := filepath.Join(dir, "..", "escaped-default-badname.yaml")
 	assert.NoFileExists(t, escapedOutside)
@@ -348,12 +384,14 @@ func TestEmitKustomizePatch_NullValueEmitsValueNull(t *testing.T) {
 	dir := t.TempDir()
 	suggestions := []HelmFixSuggestion{
 		{
-			Resource:  makeResource("Deployment", "my-app"),
-			ChartName: "my-chart",
-			FixPaths:  []armotypes.FixPath{{Path: "spec.storageClassName", Value: "null"}},
+			Resource:           makeResource("Deployment", "my-app"),
+			ChartName:          "my-chart",
+			FidelityProvenance: true,
+			FixPaths:           []armotypes.FixPath{{Path: "spec.storageClassName", Value: "null"}},
 		},
 	}
-	require.NoError(t, EmitKustomizePatch(suggestions, dir))
+	_, err := EmitKustomizePatch(suggestions, dir)
+	require.NoError(t, err)
 	patchFileName := resourcePatchFilename(resourceKey{
 		Group:     "apps",
 		Version:   "v1",
@@ -384,12 +422,14 @@ func TestEmitKustomizePatch_ArrayElementTargetUsesReplace(t *testing.T) {
 	}
 	suggestions := []HelmFixSuggestion{
 		{
-			Resource:  res,
-			ChartName: "my-chart",
-			FixPaths:  []armotypes.FixPath{{Path: "spec.template.spec.containers[0]", Value: `{"name":"demo","image":"nginx:1.28"}`}},
+			Resource:           res,
+			ChartName:          "my-chart",
+			FidelityProvenance: true,
+			FixPaths:           []armotypes.FixPath{{Path: "spec.template.spec.containers[0]", Value: `{"name":"demo","image":"nginx:1.28"}`}},
 		},
 	}
-	require.NoError(t, EmitKustomizePatch(suggestions, dir))
+	_, err := EmitKustomizePatch(suggestions, dir)
+	require.NoError(t, err)
 	patchFileName := resourcePatchFilename(resourceKey{
 		Group:     "apps",
 		Version:   "v1",
@@ -421,15 +461,17 @@ func TestEmitKustomizePatch_ExpandsWildcard(t *testing.T) {
 
 	suggestions := []HelmFixSuggestion{
 		{
-			Resource:  res,
-			ChartName: "my-chart",
+			Resource:           res,
+			ChartName:          "my-chart",
+			FidelityProvenance: true,
 			FixPaths: []armotypes.FixPath{
 				{Path: "spec.template.spec.containers[*].securityContext.privileged", Value: "false"},
 			},
 		},
 	}
 
-	require.NoError(t, EmitKustomizePatch(suggestions, dir))
+	_, err := EmitKustomizePatch(suggestions, dir)
+	require.NoError(t, err)
 
 	patchFileName := resourcePatchFilename(resourceKey{
 		Group:     "apps",
@@ -474,8 +516,9 @@ func TestEmitKustomizePatch_SiblingFixesSharingMissingParent_KustomizeBuild(t *t
 
 	suggestions := []HelmFixSuggestion{
 		{
-			Resource:  pod,
-			ChartName: "test-chart",
+			Resource:           pod,
+			ChartName:          "test-chart",
+			FidelityProvenance: true,
 			FixPaths: []armotypes.FixPath{
 				{Path: "spec.containers[0].securityContext.privileged", Value: "false"},
 				{Path: "spec.containers[0].securityContext.runAsNonRoot", Value: "true"},
@@ -483,7 +526,8 @@ func TestEmitKustomizePatch_SiblingFixesSharingMissingParent_KustomizeBuild(t *t
 		},
 	}
 
-	require.NoError(t, EmitKustomizePatch(suggestions, dir))
+	_, err := EmitKustomizePatch(suggestions, dir)
+	require.NoError(t, err)
 
 	// Verify patch file content
 	patchFileName := resourcePatchFilename(resourceKey{
@@ -581,18 +625,21 @@ func TestEmitKustomizePatch_CollidingNamespaceName_KustomizeBuild(t *testing.T) 
 
 	suggestions := []HelmFixSuggestion{
 		{
-			Resource:  dep1,
-			ChartName: "chart-1",
-			FixPaths:  []armotypes.FixPath{{Path: "spec.replicas", Value: "2"}},
+			Resource:           dep1,
+			ChartName:          "chart-1",
+			FidelityProvenance: true,
+			FixPaths:           []armotypes.FixPath{{Path: "spec.replicas", Value: "2"}},
 		},
 		{
-			Resource:  dep2,
-			ChartName: "chart-2",
-			FixPaths:  []armotypes.FixPath{{Path: "spec.replicas", Value: "3"}},
+			Resource:           dep2,
+			ChartName:          "chart-2",
+			FidelityProvenance: true,
+			FixPaths:           []armotypes.FixPath{{Path: "spec.replicas", Value: "3"}},
 		},
 	}
 
-	require.NoError(t, EmitKustomizePatch(suggestions, dir))
+	_, err := EmitKustomizePatch(suggestions, dir)
+	require.NoError(t, err)
 
 	// Verify two distinct patch files exist
 	key1 := resourceKey{Group: "apps", Version: "v1", Kind: "Deployment", Namespace: "a-b", Name: "c"}
@@ -709,13 +756,15 @@ func TestEmitKustomizePatch_Permissions(t *testing.T) {
 
 	suggestions := []HelmFixSuggestion{
 		{
-			Resource:  makeResource("Deployment", "perm-app"),
-			ChartName: "my-chart",
-			FixPaths:  []armotypes.FixPath{{Path: "spec.replicas", Value: "2"}},
+			Resource:           makeResource("Deployment", "perm-app"),
+			ChartName:          "my-chart",
+			FidelityProvenance: true,
+			FixPaths:           []armotypes.FixPath{{Path: "spec.replicas", Value: "2"}},
 		},
 	}
 
-	require.NoError(t, EmitKustomizePatch(suggestions, outDir))
+	_, err := EmitKustomizePatch(suggestions, outDir)
+	require.NoError(t, err)
 
 	info, err := os.Stat(outDir)
 	require.NoError(t, err)
@@ -759,18 +808,21 @@ func TestReview4034LiteralResourceNames(t *testing.T) {
 
 	suggestions := []HelmFixSuggestion{
 		{
-			Resource:  makeDep("api-svc"),
-			ChartName: "api-chart",
-			FixPaths:  []armotypes.FixPath{{Path: "spec.replicas", Value: "2"}},
+			Resource:           makeDep("api-svc"),
+			ChartName:          "api-chart",
+			FidelityProvenance: true,
+			FixPaths:           []armotypes.FixPath{{Path: "spec.replicas", Value: "2"}},
 		},
 		{
-			Resource:  makeDep("api.svc"),
-			ChartName: "api-chart",
-			FixPaths:  []armotypes.FixPath{{Path: "spec.replicas", Value: "3"}},
+			Resource:           makeDep("api.svc"),
+			ChartName:          "api-chart",
+			FidelityProvenance: true,
+			FixPaths:           []armotypes.FixPath{{Path: "spec.replicas", Value: "3"}},
 		},
 	}
 
-	require.NoError(t, EmitKustomizePatch(suggestions, dir))
+	_, err := EmitKustomizePatch(suggestions, dir)
+	require.NoError(t, err)
 
 	k := krusty.MakeKustomizer(krusty.MakeDefaultOptions())
 	resMap, err := k.Run(filesys.MakeFsOnDisk(), dir)
@@ -819,13 +871,15 @@ func TestReview4034ExistingOutputPermissions(t *testing.T) {
 
 	suggestions := []HelmFixSuggestion{
 		{
-			Resource:  makeResource("Deployment", "perm-app"),
-			ChartName: "my-chart",
-			FixPaths:  []armotypes.FixPath{{Path: "spec.replicas", Value: "2"}},
+			Resource:           makeResource("Deployment", "perm-app"),
+			ChartName:          "my-chart",
+			FidelityProvenance: true,
+			FixPaths:           []armotypes.FixPath{{Path: "spec.replicas", Value: "2"}},
 		},
 	}
 
-	require.NoError(t, EmitKustomizePatch(suggestions, outDir))
+	_, err := EmitKustomizePatch(suggestions, outDir)
+	require.NoError(t, err)
 
 	dirInfo, err := os.Stat(outDir)
 	require.NoError(t, err)
@@ -839,7 +893,9 @@ func TestReview4034ExistingOutputPermissions(t *testing.T) {
 // TestReview4034HelmOverlayPreservesEnvironment verifies that:
 //  1. Redacted report objects (e.g. from scanner's removeData replacing container environment values with XXXXXX)
 //     are declined and not built into an applyable base that would overwrite live application configuration.
-//  2. An unredacted rendered source preserves its real container environment values across EmitKustomizePatch
+//  2. Redacted objects where the scanner cleared envFrom without leaving a placeholder (processorhandlerutils.go:826)
+//     are visibly declined when fidelity provenance is unproven, rather than exported with missing configuration.
+//  3. An unredacted rendered source preserves its real container environment values across EmitKustomizePatch
 //     and a Kustomize build.
 func TestReview4034HelmOverlayPreservesEnvironment(t *testing.T) {
 	t.Run("declines redacted report object", func(t *testing.T) {
@@ -881,10 +937,81 @@ func TestReview4034HelmOverlayPreservesEnvironment(t *testing.T) {
 		}
 
 		// Should decline redacted resource, producing no patch files or base.yaml
-		require.NoError(t, EmitKustomizePatch(suggestions, dir))
+		res, err := EmitKustomizePatch(suggestions, dir)
+		require.NoError(t, err)
+		assert.Empty(t, res.EmittedResources)
+		require.Len(t, res.SkippedResources, 1)
 
-		_, err := os.Stat(filepath.Join(dir, "base.yaml"))
+		_, err = os.Stat(filepath.Join(dir, "base.yaml"))
 		assert.True(t, os.IsNotExist(err), "redacted report object must not be emitted to base.yaml")
+	})
+
+	t.Run("declines scanner-cleared envFrom without placeholder", func(t *testing.T) {
+		dir := t.TempDir()
+
+		// A chart Deployment starting with envFrom and no explicit env
+		containers := []corev1.Container{
+			{
+				Name: "app",
+				EnvFrom: []corev1.EnvFromSource{
+					{
+						ConfigMapRef: &corev1.ConfigMapEnvSource{
+							LocalObjectReference: corev1.LocalObjectReference{Name: "app-config"},
+						},
+					},
+				},
+				SecurityContext: &corev1.SecurityContext{
+					Privileged: ptrBool(true),
+				},
+			},
+		}
+
+		// Run the actual scanner container-redaction function (processorhandlerutils.go:826)
+		removeContainersData(containers)
+		require.Nil(t, containers[0].EnvFrom, "actual scanner redactor must have cleared EnvFrom")
+		require.Empty(t, containers[0].Env, "Env must remain empty")
+
+		// Marshal containers via JSON round-trip to simulate report serialization
+		containerBytes, err := json.Marshal(containers)
+		require.NoError(t, err)
+		var unmarshaledContainers []interface{}
+		require.NoError(t, json.Unmarshal(containerBytes, &unmarshaledContainers))
+
+		redactedDep := &reporthandling.Resource{
+			Object: map[string]interface{}{
+				"apiVersion": "apps/v1",
+				"kind":       "Deployment",
+				"metadata": map[string]interface{}{
+					"name": "envfrom-app",
+				},
+				"spec": map[string]interface{}{
+					"template": map[string]interface{}{
+						"spec": map[string]interface{}{
+							"containers": unmarshaledContainers,
+						},
+					},
+				},
+			},
+		}
+
+		// Without verified unredacted base or explicit fidelity provenance, this must be declined visibly
+		suggestions := []HelmFixSuggestion{
+			{
+				Resource:  redactedDep,
+				ChartName: "my-chart",
+				FixPaths:  []armotypes.FixPath{{Path: "spec.template.spec.containers[0].securityContext.privileged", Value: "false"}},
+			},
+		}
+
+		res, err := EmitKustomizePatch(suggestions, dir)
+		require.NoError(t, err)
+		require.NotNil(t, res)
+		assert.Empty(t, res.EmittedResources, "must not emit unproven/redacted resource")
+		require.Len(t, res.SkippedResources, 1, "must record declined resource")
+		assert.Contains(t, res.SkippedResources[0].Reason, "unproven report fidelity")
+
+		_, err = os.Stat(filepath.Join(dir, "base.yaml"))
+		assert.True(t, os.IsNotExist(err), "base.yaml must not be written for declined resource")
 	})
 
 	t.Run("preserves environment from unredacted rendered source", func(t *testing.T) {
@@ -919,13 +1046,16 @@ func TestReview4034HelmOverlayPreservesEnvironment(t *testing.T) {
 
 		suggestions := []HelmFixSuggestion{
 			{
-				Resource:  unredactedDep,
-				ChartName: "my-chart",
-				FixPaths:  []armotypes.FixPath{{Path: "spec.template.spec.containers[0].securityContext.privileged", Value: "false"}},
+				Resource:           unredactedDep,
+				ChartName:          "my-chart",
+				FidelityProvenance: true,
+				FixPaths:           []armotypes.FixPath{{Path: "spec.template.spec.containers[0].securityContext.privileged", Value: "false"}},
 			},
 		}
 
-		require.NoError(t, EmitKustomizePatch(suggestions, dir))
+		res, err := EmitKustomizePatch(suggestions, dir)
+		require.NoError(t, err)
+		require.Len(t, res.EmittedResources, 1)
 
 		k := krusty.MakeKustomizer(krusty.MakeDefaultOptions())
 		resMap, err := k.Run(filesys.MakeFsOnDisk(), dir)
@@ -961,4 +1091,81 @@ func TestReview4034HelmOverlayPreservesEnvironment(t *testing.T) {
 		require.NotNil(t, c.SecurityContext.Privileged)
 		assert.False(t, *c.SecurityContext.Privileged, "privileged must be patched to false")
 	})
+}
+
+// TestReview4034StaleOutputDirectoryNotAdvertised verifies that running patch emission into a
+// directory containing an older generated overlay does not advertise the old overlay when all
+// suggestions in the current invocation are declined.
+func TestReview4034StaleOutputDirectoryNotAdvertised(t *testing.T) {
+	dir := t.TempDir()
+
+	// 1. First invocation emits valid overlay for v1
+	v1Dep := &reporthandling.Resource{
+		Object: map[string]interface{}{
+			"apiVersion": "apps/v1",
+			"kind":       "Deployment",
+			"metadata": map[string]interface{}{
+				"name": "v1-app",
+			},
+			"spec": map[string]interface{}{
+				"replicas": 1,
+			},
+		},
+	}
+	v1Suggestions := []HelmFixSuggestion{
+		{
+			Resource:           v1Dep,
+			ChartName:          "v1-chart",
+			FidelityProvenance: true,
+			FixPaths:           []armotypes.FixPath{{Path: "spec.replicas", Value: "2"}},
+		},
+	}
+	res1, err := EmitKustomizePatch(v1Suggestions, dir)
+	require.NoError(t, err)
+	require.Len(t, res1.EmittedResources, 1)
+	require.FileExists(t, filepath.Join(dir, "base.yaml"))
+
+	// 2. Second invocation into the same output directory with an unproven/redacted resource
+	v2Dep := &reporthandling.Resource{
+		Object: map[string]interface{}{
+			"apiVersion": "apps/v1",
+			"kind":       "Deployment",
+			"metadata": map[string]interface{}{
+				"name": "v2-app",
+			},
+			"spec": map[string]interface{}{
+				"template": map[string]interface{}{
+					"spec": map[string]interface{}{
+						"containers": []interface{}{
+							map[string]interface{}{
+								"name": "app",
+								"env":  []interface{}{map[string]interface{}{"name": "SECRET", "value": "XXXXXX"}},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	// Case 2a: Unproven fidelity from scan report
+	v2Suggestions := []HelmFixSuggestion{
+		{
+			Resource:  v2Dep,
+			ChartName: "v2-chart",
+			FixPaths:  []armotypes.FixPath{{Path: "spec.template.spec.containers[0].securityContext.privileged", Value: "false"}},
+		},
+	}
+	res2, err := EmitKustomizePatch(v2Suggestions, dir)
+	require.NoError(t, err)
+	assert.Empty(t, res2.EmittedResources, "declined generation must report 0 emitted resources for this invocation")
+	require.Len(t, res2.SkippedResources, 1, "declined resource must be recorded in SkippedResources")
+	assert.Contains(t, res2.SkippedResources[0].Reason, "unproven report fidelity")
+
+	// Case 2b: Provenance asserted, but resource contains placeholder "XXXXXX"
+	v2Suggestions[0].FidelityProvenance = true
+	res3, err := EmitKustomizePatch(v2Suggestions, dir)
+	require.NoError(t, err)
+	assert.Empty(t, res3.EmittedResources, "declined generation with placeholder must report 0 emitted resources")
+	require.Len(t, res3.SkippedResources, 1)
+	assert.Contains(t, res3.SkippedResources[0].Reason, "XXXXXX")
 }

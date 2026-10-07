@@ -1,8 +1,10 @@
 package fixhandler
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,9 +13,24 @@ import (
 	"strings"
 
 	"github.com/armosec/armoapi-go/armotypes"
+	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"gopkg.in/yaml.v3"
 )
+
+// KustomizeEmitResult records the outcome of generating Kustomize patches for Helm resources.
+type KustomizeEmitResult struct {
+	EmittedResources []string
+	SkippedResources []KustomizeSkippedResource
+}
+
+// KustomizeSkippedResource records a resource that was declined/skipped during patch generation.
+type KustomizeSkippedResource struct {
+	ResourceKey string
+	Reason      string
+}
 
 // kustomizePatchOp is one JSON 6902 operation in a patch file.
 // See https://datatracker.ietf.org/doc/html/rfc6902
@@ -59,6 +76,7 @@ type resourceKey struct {
 type resourceGroup struct {
 	key      resourceKey
 	resource *reporthandling.Resource
+	baseObj  map[string]interface{}
 	fixPaths []armotypes.FixPath
 }
 
@@ -423,23 +441,93 @@ func hasRedactedPlaceholder(data interface{}) bool {
 	return false
 }
 
-// isRedactedOrUnfaithfulResource checks whether a resource cannot be reproduced faithfully
-// from recorded scan report data (e.g. scanner's removeData replaced container environment
-// values with XXXXXX or removed references), as the cluster fix path already does.
-func isRedactedOrUnfaithfulResource(obj map[string]interface{}) bool {
-	if obj == nil {
-		return false
-	}
-	if hasRedactedPlaceholder(obj) {
-		return true
-	}
-	switch kind, _ := obj["kind"].(string); kind {
-	case "Secret", "ConfigMap":
-		if reason := redactedContentReason(obj); reason != "" {
-			return true
+// resolveBaseObject determines the verified unredacted base Kubernetes object for a suggestion.
+// Because the scan redactor (removeData / processorhandlerutils.go:826) replaces container environment
+// variables with XXXXXX and deletes envFrom outright without leaving a placeholder, report objects
+// cannot be assumed complete from placeholder absence alone. A faithful base must either:
+//  1. Be explicitly provided via s.UnredactedBase,
+//  2. Come with explicit fidelity provenance (s.FidelityProvenance), or
+//  3. Be verified and loaded directly from the local Helm chart on disk (s.ChartPath).
+//
+// If none of these conditions is met, or if the candidate contains redaction placeholders, the resource
+// is visibly declined with an explanatory reason.
+func resolveBaseObject(s HelmFixSuggestion, chartCache map[string]map[string][]workloadinterface.IMetadata) (map[string]interface{}, string) {
+	var candidate map[string]interface{}
+
+	if s.UnredactedBase != nil {
+		candidate = s.UnredactedBase
+	} else if s.FidelityProvenance && s.Resource != nil && s.Resource.GetObject() != nil {
+		candidate = s.Resource.GetObject()
+	} else if s.ChartPath != "" {
+		if unredacted, err := loadUnredactedFromChart(s, chartCache); err == nil && unredacted != nil {
+			candidate = unredacted
 		}
 	}
-	return false
+
+	if candidate == nil {
+		return nil, "unproven report fidelity: scan reports redact container environment variables and remove envFrom without leaving placeholders; provide a verified unredacted rendered base or explicit fidelity provenance"
+	}
+
+	if hasRedactedPlaceholder(candidate) {
+		return nil, "declined: resource contains scan report redaction placeholders (XXXXXX)"
+	}
+
+	switch kind, _ := candidate["kind"].(string); kind {
+	case "Secret", "ConfigMap":
+		if reason := redactedContentReason(candidate); reason != "" {
+			return nil, reason
+		}
+	}
+
+	return candidate, ""
+}
+
+// loadUnredactedFromChart renders the chart at chartPath using Helm defaults and returns the unredacted
+// workload object matching s.Resource's Kind, Name, and Namespace.
+func loadUnredactedFromChart(s HelmFixSuggestion, chartCache map[string]map[string][]workloadinterface.IMetadata) (map[string]interface{}, error) {
+	if s.ChartPath == "" {
+		return nil, errors.New("empty chart path")
+	}
+	chartYaml := filepath.Join(s.ChartPath, "Chart.yaml")
+	if _, err := os.Stat(chartYaml); err != nil {
+		return nil, err
+	}
+
+	sourceToWorkloads, ok := chartCache[s.ChartPath]
+	if !ok {
+		var err error
+		sourceToWorkloads, _, _, err = cautils.LoadResourcesFromHelmCharts(context.Background(), s.ChartPath, cautils.HelmValueOptions{})
+		if err != nil {
+			return nil, err
+		}
+		if chartCache != nil {
+			chartCache[s.ChartPath] = sourceToWorkloads
+		}
+	}
+
+	if s.Resource == nil {
+		return nil, errors.New("nil resource")
+	}
+	targetKind := s.Resource.GetKind()
+	targetName := s.Resource.GetName()
+	targetNamespace := s.Resource.GetNamespace()
+
+	for _, workloads := range sourceToWorkloads {
+		for _, w := range workloads {
+			if w.GetKind() == targetKind && w.GetName() == targetName {
+				if targetNamespace == "" || w.GetNamespace() == "" || w.GetNamespace() == targetNamespace {
+					obj := w.GetObject()
+					if localworkload.IsTypeLocalWorkload(obj) {
+						lw := localworkload.NewLocalWorkload(obj)
+						lw.DeletePathEntry()
+						return lw.GetObject(), nil
+					}
+					return obj, nil
+				}
+			}
+		}
+	}
+	return nil, fmt.Errorf("resource %s/%s not found in rendered chart", targetKind, targetName)
 }
 
 // writeRestrictedFile writes data to path with mode 0600 and explicitly chmods an existing file to 0600.
@@ -468,11 +556,15 @@ func writeRestrictedFile(path string, data []byte) error {
 //
 // To avoid corrupting live application configuration, resources whose recorded content cannot
 // be reproduced faithfully (such as objects from scan reports where removeData replaced container
-// environment variables or secret data with "XXXXXX") are declined, as the cluster fix path already does.
-func EmitKustomizePatch(suggestions []HelmFixSuggestion, dir string) error {
+// environment variables or secret data with "XXXXXX", or cleared envFrom) are visibly declined.
+// EmitKustomizePatch returns an explicit KustomizeEmitResult listing all emitted and skipped resources.
+func EmitKustomizePatch(suggestions []HelmFixSuggestion, dir string) (*KustomizeEmitResult, error) {
+	result := &KustomizeEmitResult{}
 	if len(suggestions) == 0 {
-		return nil
+		return result, nil
 	}
+
+	chartCache := make(map[string]map[string][]workloadinterface.IMetadata)
 
 	// 1. Group suggestions by unique resourceKey to merge multiple suggestions for the same workload,
 	// and prevent overwriting between resources with same kind/name in different namespaces.
@@ -484,8 +576,14 @@ func EmitKustomizePatch(suggestions []HelmFixSuggestion, dir string) error {
 			continue
 		}
 
-		// Decline resources whose recorded content cannot be reproduced faithfully (e.g. redacted by scanner).
-		if s.Resource.GetObject() != nil && isRedactedOrUnfaithfulResource(s.Resource.GetObject()) {
+		resKeyStr := fmt.Sprintf("%s/%s", s.Resource.GetKind(), s.Resource.GetName())
+
+		baseObj, reason := resolveBaseObject(s, chartCache)
+		if reason != "" {
+			result.SkippedResources = append(result.SkippedResources, KustomizeSkippedResource{
+				ResourceKey: resKeyStr,
+				Reason:      reason,
+			})
 			continue
 		}
 
@@ -503,6 +601,7 @@ func EmitKustomizePatch(suggestions []HelmFixSuggestion, dir string) error {
 			rg = &resourceGroup{
 				key:      key,
 				resource: s.Resource,
+				baseObj:  baseObj,
 			}
 			groups[key] = rg
 			keysInOrder = append(keysInOrder, key)
@@ -512,15 +611,15 @@ func EmitKustomizePatch(suggestions []HelmFixSuggestion, dir string) error {
 	}
 
 	if len(groups) == 0 {
-		return nil
+		return result, nil
 	}
 
 	// Restrict permissions on the output directory containing rendered manifests, enforcing 0700 on existing dirs too.
 	if err := os.MkdirAll(dir, 0700); err != nil {
-		return fmt.Errorf("failed to create kustomize output dir %q: %w", dir, err)
+		return nil, fmt.Errorf("failed to create kustomize output dir %q: %w", dir, err)
 	}
 	if err := os.Chmod(dir, 0700); err != nil {
-		return fmt.Errorf("failed to restrict permissions on kustomize output dir %q: %w", dir, err)
+		return nil, fmt.Errorf("failed to restrict permissions on kustomize output dir %q: %w", dir, err)
 	}
 
 	kust := kustomizationDoc{
@@ -532,8 +631,8 @@ func EmitKustomizePatch(suggestions []HelmFixSuggestion, dir string) error {
 	var baseYamlParts [][]byte
 	for _, key := range keysInOrder {
 		rg := groups[key]
-		if rg.resource != nil && rg.resource.GetObject() != nil {
-			cleanObj := stripServerManagedFields(rg.resource.GetObject())
+		if rg.baseObj != nil {
+			cleanObj := stripServerManagedFields(rg.baseObj)
 			objBytes, err := yaml.Marshal(cleanObj)
 			if err == nil && len(objBytes) > 0 {
 				baseYamlParts = append(baseYamlParts, objBytes)
@@ -544,7 +643,7 @@ func EmitKustomizePatch(suggestions []HelmFixSuggestion, dir string) error {
 	if len(baseYamlParts) > 0 {
 		baseFilePath, err := ensureSubpath(dir, "base.yaml")
 		if err != nil {
-			return err
+			return nil, err
 		}
 		var baseContent []byte
 		for i, part := range baseYamlParts {
@@ -555,7 +654,7 @@ func EmitKustomizePatch(suggestions []HelmFixSuggestion, dir string) error {
 		}
 		// Write base.yaml with restricted mode 0600, updating existing file mode if already present.
 		if err := writeRestrictedFile(baseFilePath, baseContent); err != nil {
-			return fmt.Errorf("failed to write base.yaml: %w", err)
+			return nil, fmt.Errorf("failed to write base.yaml: %w", err)
 		}
 		kust.Resources = append(kust.Resources, "base.yaml")
 	}
@@ -566,10 +665,7 @@ func EmitKustomizePatch(suggestions []HelmFixSuggestion, dir string) error {
 	for _, key := range keysInOrder {
 		rg := groups[key]
 
-		var baseObj map[string]interface{}
-		if rg.resource != nil {
-			baseObj = rg.resource.GetObject()
-		}
+		baseObj := rg.baseObj
 		workingObj := deepCopyMap(baseObj)
 
 		// Expand any wildcard paths into concrete indices
@@ -594,22 +690,22 @@ func EmitKustomizePatch(suggestions []HelmFixSuggestion, dir string) error {
 
 		patchFileName := resourcePatchFilename(rg.key)
 		if existingKey, exists := writtenFiles[patchFileName]; exists {
-			return fmt.Errorf("filename collision detected: patch file %q for resource %s/%s collides with %s/%s",
+			return nil, fmt.Errorf("filename collision detected: patch file %q for resource %s/%s collides with %s/%s",
 				patchFileName, rg.key.Kind, rg.key.Name, existingKey.Kind, existingKey.Name)
 		}
 		writtenFiles[patchFileName] = rg.key
 
 		patchFilePath, err := ensureSubpath(dir, patchFileName)
 		if err != nil {
-			return err
+			return nil, err
 		}
 
 		patchBytes, err := yaml.Marshal(ops)
 		if err != nil {
-			return fmt.Errorf("failed to marshal patch for %s/%s: %w", rg.key.Kind, rg.key.Name, err)
+			return nil, fmt.Errorf("failed to marshal patch for %s/%s: %w", rg.key.Kind, rg.key.Name, err)
 		}
 		if err := writeRestrictedFile(patchFilePath, patchBytes); err != nil {
-			return fmt.Errorf("failed to write patch file %q: %w", patchFileName, err)
+			return nil, fmt.Errorf("failed to write patch file %q: %w", patchFileName, err)
 		}
 
 		target := kustomizeTarget{
@@ -626,20 +722,29 @@ func EmitKustomizePatch(suggestions []HelmFixSuggestion, dir string) error {
 			Path:   patchFileName,
 			Target: target,
 		})
+
+		resIdent := fmt.Sprintf("%s/%s", rg.key.Kind, rg.key.Name)
+		if rg.key.Namespace != "" {
+			resIdent = fmt.Sprintf("%s/%s/%s", rg.key.Kind, rg.key.Namespace, rg.key.Name)
+		}
+		result.EmittedResources = append(result.EmittedResources, resIdent)
 	}
 
 	if len(kust.Patches) == 0 {
-		return nil
+		return result, nil
 	}
 
 	kustFilePath, err := ensureSubpath(dir, "kustomization.yaml")
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	kustBytes, err := yaml.Marshal(kust)
 	if err != nil {
-		return fmt.Errorf("failed to marshal kustomization.yaml: %w", err)
+		return nil, fmt.Errorf("failed to marshal kustomization.yaml: %w", err)
 	}
-	return writeRestrictedFile(kustFilePath, kustBytes)
+	if err := writeRestrictedFile(kustFilePath, kustBytes); err != nil {
+		return nil, err
+	}
+	return result, nil
 }
