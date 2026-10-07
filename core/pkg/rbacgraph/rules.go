@@ -11,6 +11,26 @@ func ruleGrants(rule rbacv1.PolicyRule, apiGroup, resource, verb string) bool {
 		containsOrWildcard(rule.Verbs, verb)
 }
 
+// ruleGrantsSubresource is ruleGrants for a request on a subresource. A rule
+// can name one three ways: "*" for every resource, the exact
+// "resource/subresource", or "*/subresource" for that subresource of every
+// resource. This follows ResourceMatches in Kubernetes'
+// pkg/apis/rbac/v1/evaluation_helpers.go.
+func ruleGrantsSubresource(rule rbacv1.PolicyRule, apiGroup, resource, subresource, verb string) bool {
+	return containsOrWildcard(rule.APIGroups, apiGroup) &&
+		subresourceMatches(rule.Resources, resource, subresource) &&
+		containsOrWildcard(rule.Verbs, verb)
+}
+
+func subresourceMatches(ruleResources []string, resource, subresource string) bool {
+	for _, r := range ruleResources {
+		if r == "*" || r == resource+"/"+subresource || r == "*/"+subresource {
+			return true
+		}
+	}
+	return false
+}
+
 func containsOrWildcard(list []string, want string) bool {
 	for _, v := range list {
 		if v == "*" || v == want {
@@ -40,7 +60,7 @@ func namedResources(rule rbacv1.PolicyRule) (names []string, restricted bool) {
 // Only used for top-level collection creates (pods, rolebindings,
 // clusterrolebindings); a subresource create on an already-named parent
 // object (e.g. serviceaccounts/token) does have a real object name to
-// match against and should use ruleGrants directly instead.
+// match against and should use ruleGrantsSubresource directly instead.
 func ruleGrantsUnnamedCreate(rule rbacv1.PolicyRule, apiGroup, resource string) bool {
 	return ruleGrants(rule, apiGroup, resource, "create") && len(rule.ResourceNames) == 0
 }
