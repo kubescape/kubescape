@@ -609,6 +609,52 @@ func Test_waitForPortForwardReadiness_Error(t *testing.T) {
 	assert.Contains(t, err.Error(), "connection refused")
 }
 
+func Test_waitForPortForwardReadiness_ContextCanceled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	p := &portForward{
+		stopChan:     make(chan struct{}),
+		readyChan:    make(chan struct{}),
+		errChan:      make(chan error, 1),
+		out:          new(bytes.Buffer),
+		errOut:       new(bytes.Buffer),
+		readyTimeout: 5 * time.Second,
+	}
+
+	err := p.waitForPortForwardReadiness(ctx)
+	require.ErrorIs(t, err, context.Canceled)
+
+	select {
+	case <-p.stopChan:
+	default:
+		t.Fatal("expected stopChan to be closed on context cancellation")
+	}
+}
+
+func Test_StartPortForwarderContext_AlreadyCanceled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	p := &portForward{
+		stopChan:     make(chan struct{}),
+		readyChan:    make(chan struct{}),
+		errChan:      make(chan error, 1),
+		out:          new(bytes.Buffer),
+		errOut:       new(bytes.Buffer),
+		readyTimeout: 5 * time.Second,
+	}
+
+	err := p.StartPortForwarderContext(ctx)
+	require.ErrorIs(t, err, context.Canceled)
+
+	select {
+	case <-p.stopChan:
+	default:
+		t.Fatal("expected stopChan to be closed when starting with canceled context")
+	}
+}
+
 func TestStartPortForwarder_WithheldUpgradeTerminatesSocketNotJustCaller(t *testing.T) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)

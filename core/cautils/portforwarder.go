@@ -397,12 +397,20 @@ func CreatePortForwarder(k8sClient *k8sinterface.KubernetesApi, pod *v1.Pod, for
 	}, nil
 }
 
-// waitForPortForwardReadiness waits for the port-forward to become ready or fail, bounded by readyTimeout.
-func (p *portForward) waitForPortForwardReadiness() error {
+// waitForPortForwardReadiness waits for the port-forward to become ready or fail, bounded by readyTimeout and ctx cancellation.
+func (p *portForward) waitForPortForwardReadiness(ctx ...context.Context) error {
+	c := context.Background()
+	if len(ctx) > 0 && ctx[0] != nil {
+		c = ctx[0]
+	}
+
 	timer := time.NewTimer(p.readyTimeout)
 	defer timer.Stop()
 
 	select {
+	case <-c.Done():
+		p.StopPortForwarder()
+		return c.Err()
 	case <-p.readyChan:
 		if p.handshakeConn != nil {
 			p.handshakeConn.clearDeadline()
@@ -444,10 +452,22 @@ func (p *portForward) StopPortForwarder() {
 	})
 }
 
-// StartPortForwarder starts port forwarding in a background goroutine and waits for readiness.
-func (p *portForward) StartPortForwarder() error {
+// StartPortForwarderContext starts port forwarding in a background goroutine and waits for readiness with context.
+func (p *portForward) StartPortForwarderContext(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		p.StopPortForwarder()
+		return err
+	}
 	go func() {
 		p.errChan <- p.ForwardPorts()
 	}()
-	return p.waitForPortForwardReadiness()
+	return p.waitForPortForwardReadiness(ctx)
+}
+
+// StartPortForwarder starts port forwarding in a background goroutine and waits for readiness.
+func (p *portForward) StartPortForwarder() error {
+	return p.StartPortForwarderContext(context.Background())
 }

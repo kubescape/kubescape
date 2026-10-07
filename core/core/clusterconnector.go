@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -98,18 +99,38 @@ func NewOperatorAdapter(scanInfo cautils.OperatorScanInfo, ns string) (*Operator
 	}, nil
 }
 
-func (a *OperatorAdapter) httpPostOperatorScanRequest(body apis.Commands) (string, error) {
+func (a *OperatorAdapter) StartPortForwarderContext(ctx context.Context) error {
+	if a.OperatorConnector == nil {
+		return errors.New("operator connector is not initialised")
+	}
+	if ctxConn, ok := a.OperatorConnector.(interface{ StartPortForwarderContext(context.Context) error }); ok {
+		return ctxConn.StartPortForwarderContext(ctx)
+	}
+	return a.StartPortForwarder()
+}
+
+func (a *OperatorAdapter) httpPostOperatorScanRequest(ctx context.Context, body apis.Commands) (string, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	reqBody, err := json.Marshal(body)
 	if err != nil {
 		return "", fmt.Errorf("in 'httpPostOperatorScanRequest' failed to json.Marshal, reason: %w", err)
 	}
 
-	err = a.StartPortForwarder()
+	err = a.StartPortForwarderContext(ctx)
 	if err != nil {
 		a.StopPortForwarder()
 		return "", err
 	}
 	defer a.StopPortForwarder()
+
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 
 	urlQuery := url.URL{
 		Scheme: "http",
@@ -131,14 +152,22 @@ func (a *OperatorAdapter) httpPostOperatorScanRequest(body apis.Commands) (strin
 	return "success", nil
 }
 
-func (a *OperatorAdapter) OperatorScan() (string, error) {
+func (a *OperatorAdapter) OperatorScan(ctx ...context.Context) (string, error) {
+	c := context.Background()
+	if len(ctx) > 0 && ctx[0] != nil {
+		c = ctx[0]
+	}
 	payload := a.GetRequestPayload()
 	if err := a.ValidatePayload(payload); err != nil {
 		return "", err
 	}
-	res, err := a.httpPostOperatorScanRequest(*payload)
+	res, err := a.httpPostOperatorScanRequest(c, *payload)
 	if err != nil {
 		return "", err
 	}
 	return res, nil
+}
+
+func (a *OperatorAdapter) OperatorScanContext(ctx context.Context) (string, error) {
+	return a.OperatorScan(ctx)
 }

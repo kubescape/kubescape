@@ -1,6 +1,7 @@
 package cautils
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -41,6 +42,7 @@ type OperatorInfo struct {
 
 type OperatorConnector interface {
 	StartPortForwarder() error
+	StartPortForwarderContext(ctx context.Context) error
 	StopPortForwarder()
 	GetPortForwardLocalhost() string
 }

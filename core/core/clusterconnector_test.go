@@ -211,6 +211,14 @@ func (f *fakeOperatorConnector) StartPortForwarder() error {
 	return f.startErr
 }
 
+func (f *fakeOperatorConnector) StartPortForwarderContext(ctx context.Context) error {
+	f.startCalls++
+	if ctx != nil && ctx.Err() != nil {
+		return ctx.Err()
+	}
+	return f.startErr
+}
+
 func (f *fakeOperatorConnector) StopPortForwarder() {
 	f.stopCalls++
 }
@@ -304,7 +312,7 @@ func TestOperatorAdapter_httpPostOperatorScanRequest(t *testing.T) {
 				OperatorConnector: connector,
 			}
 
-			got, err := adapter.httpPostOperatorScanRequest(payload)
+			got, err := adapter.httpPostOperatorScanRequest(context.Background(), payload)
 
 			if tc.expectErr != "" {
 				require.Error(t, err)
@@ -387,6 +395,25 @@ func TestOperatorAdapter_OperatorScan(t *testing.T) {
 		httpClient, ok := recorder.client.(*http.Client)
 		require.True(t, ok, "expected client to be of type *http.Client")
 		assert.Equal(t, 30*time.Second, httpClient.Timeout, "the HTTP client must have a 30 second timeout to prevent hanging")
+	})
+
+	t.Run("returns early on context cancellation", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		connector := &fakeOperatorConnector{}
+		recorder := &httpPostRecorder{}
+		scanInfo := &fakeOperatorScanInfo{payload: &apis.Commands{}}
+		adapter := &OperatorAdapter{
+			httpPostFunc:      recorder.fakeHTTPPost(http.StatusOK, nil), //nolint:bodyclose // fakeHTTPPost returns a func value, not a response; the response's Body is http.NoBody (Close is a no-op) and is closed by httpPostOperatorScanRequest's own defer
+			OperatorScanInfo:  scanInfo,
+			OperatorConnector: connector,
+		}
+
+		got, opErr := adapter.OperatorScan(ctx)
+		require.ErrorIs(t, opErr, context.Canceled)
+		assert.Empty(t, got)
+		assert.Equal(t, 0, recorder.calls, "httpPostFunc must not be invoked when context is cancelled")
 	})
 }
 
