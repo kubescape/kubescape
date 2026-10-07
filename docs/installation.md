@@ -140,7 +140,7 @@ sudo mv kubescape /usr/local/bin/
 
 Requirements:
 
-- [Go](https://go.dev/doc/install) at the version in the `go` line of [`go.mod`](../go.mod). Go 1.21 and later download that toolchain automatically unless `GOTOOLCHAIN=local` is set.
+- [Go](https://go.dev/doc/install) at the version in the `go` line of [`go.mod`](../go.mod). Go 1.21 and later download that toolchain automatically when `GOTOOLCHAIN` is `auto`, the default in the standard Go distribution. With `local`, `path` or a `+path` suffix, Go does not download it, so install that version yourself.
 - Git
 - Make (optional: `make build` runs `go build -v .`)
 
