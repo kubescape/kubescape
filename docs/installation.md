@@ -138,10 +138,19 @@ sudo mv kubescape /usr/local/bin/
 
 ### Build from Source
 
+Requirements:
+
+- [Go](https://go.dev/doc/install) at the version in the `go` line of [`go.mod`](../go.mod) (currently 1.26.3). Go 1.21 and later download that toolchain automatically unless `GOTOOLCHAIN=local` is set.
+- Git
+- Make (optional: `make build` runs `go build -v .`)
+
+The Makefile builds with `CGO_ENABLED=0`, so no C compiler is needed. Go downloads the module dependencies listed in `go.mod` on the first build and checks them against `go.sum`.
+
 ```bash
 git clone https://github.com/kubescape/kubescape.git
 cd kubescape
 make build
+make test     # optional: runs the unit tests
 ```
 
 ---
