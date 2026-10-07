@@ -1038,3 +1038,92 @@ func TestFix_OutputKustomizeDoesNotAdvertiseStaleOverlay(t *testing.T) {
 	assert.Contains(t, logs, "No Kustomize patches were emitted")
 	assert.NotContains(t, logs, "Apply with: kustomize build")
 }
+
+// TestRereview4034HelmReadHonorsBasePath verifies that Kubescape.Fix enforces --base-path
+// on report-controlled Source.HelmPath, refusing to read or copy an outside chart's content
+// into base.yaml even when the scan directory claim is inside the allowed root.
+func TestRereview4034HelmReadHonorsBasePath(t *testing.T) {
+	allowedRoot := t.TempDir()
+	outsideRoot := t.TempDir()
+
+	// External chart outside allowed root with a synthetic sentinel value
+	require.NoError(t, os.WriteFile(filepath.Join(outsideRoot, "Chart.yaml"), []byte("apiVersion: v2\nname: sentinelchart\nversion: 0.1.0\n"), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(outsideRoot, "values.yaml"), []byte("\n"), 0600))
+	require.NoError(t, os.MkdirAll(filepath.Join(outsideRoot, "templates"), 0700))
+	require.NoError(t, os.WriteFile(filepath.Join(outsideRoot, "templates", "secret.yaml"), []byte(`apiVersion: v1
+kind: Secret
+metadata:
+  name: outside-secret
+stringData:
+  SENTINEL: outside-sentinel-value-xyz
+`), 0600))
+
+	// Scanned report inside allowed root claiming Source.HelmPath is in outsideRoot
+	helmRes := reporthandling.Resource{
+		Object: map[string]any{
+			"apiVersion": "v1",
+			"kind":       "Secret",
+			"metadata":   map[string]any{"name": "outside-secret"},
+			"stringData": map[string]any{"SENTINEL": "outside-sentinel-value-xyz"},
+		},
+		Source: &reporthandling.Source{
+			FileType: reporthandling.SourceTypeHelmChart,
+			HelmPath: outsideRoot,
+		},
+	}
+	helmRes.ResourceID = helmRes.GetID()
+
+	report := &reporthandlingv2.PostureReport{
+		Metadata: reporthandlingv2.Metadata{
+			ScanMetadata: reporthandlingv2.ScanMetadata{ScanningTarget: reporthandlingv2.Directory},
+			ContextMetadata: reporthandlingv2.ContextMetadata{
+				DirectoryContextMetadata: &reporthandlingv2.DirectoryContextMetadata{BasePath: allowedRoot},
+			},
+		},
+		Resources: []reporthandling.Resource{helmRes},
+		Results: []resourcesresults.Result{
+			{
+				ResourceID: helmRes.ResourceID,
+				AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+					{
+						ControlID: "C-0001",
+						Status:    apis.StatusInfo{InnerStatus: apis.StatusFailed},
+						ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{
+							{
+								Name:   "rule-1",
+								Status: apis.StatusFailed,
+								Paths: []armotypes.PosturePaths{
+									{FixPath: armotypes.FixPath{Path: "metadata.labels.remediated", Value: "true"}},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	reportPath := writeReportFile(t, allowedRoot, report)
+
+	kustDir := filepath.Join(t.TempDir(), "kust-output")
+	readLog := captureLoggerOutput(t)
+
+	ks := &Kubescape{Ctx: context.Background()}
+	err := ks.Fix(&metav1.FixInfo{
+		ReportFile:   reportPath,
+		KustomizeDir: kustDir,
+		BasePath:     allowedRoot,
+	})
+	require.NoError(t, err)
+
+	logs := readLog()
+	assert.Contains(t, logs, "skipped Kustomize patch generation")
+	assert.Contains(t, logs, "outside allowed base path")
+	assert.Contains(t, logs, "No Kustomize patches were emitted")
+	assert.NotContains(t, logs, "Apply with: kustomize build")
+
+	// Ensure outside sentinel was not copied into base.yaml
+	basePath := filepath.Join(kustDir, "base.yaml")
+	if data, err := os.ReadFile(basePath); err == nil {
+		assert.NotContains(t, string(data), "outside-sentinel-value-xyz", "outside chart content must not be copied into base.yaml")
+	}
+}

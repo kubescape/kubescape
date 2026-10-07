@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/armosec/armoapi-go/armotypes"
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -1168,4 +1169,258 @@ func TestReview4034StaleOutputDirectoryNotAdvertised(t *testing.T) {
 	assert.Empty(t, res3.EmittedResources, "declined generation with placeholder must report 0 emitted resources")
 	require.Len(t, res3.SkippedResources, 1)
 	assert.Contains(t, res3.SkippedResources[0].Reason, "XXXXXX")
+}
+
+// TestRereview4034PreservesHelmOverrides verifies that non-default Helm render overrides
+// (replicas, image, envFrom) are preserved through to the Kustomize overlay when provided via
+// HelmValueOptions, and that suggestions lacking matching value overrides are visibly declined
+// rather than overwriting live application configuration with chart defaults.
+func TestRereview4034PreservesHelmOverrides(t *testing.T) {
+	chartDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "Chart.yaml"), []byte("apiVersion: v2\nname: testchart\nversion: 0.1.0\n"), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "values.yaml"), []byte("replicas: 1\nimage: example:v1\nenvFrom: dev-config\n"), 0600))
+	require.NoError(t, os.MkdirAll(filepath.Join(chartDir, "templates"), 0700))
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "templates", "deployment.yaml"), []byte(`apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-app
+spec:
+  replicas: {{ .Values.replicas }}
+  template:
+    spec:
+      containers:
+      - name: app
+        image: {{ .Values.image }}
+        envFrom:
+        - configMapRef:
+            name: {{ .Values.envFrom }}
+        securityContext:
+          privileged: true
+`), 0600))
+
+	// Scanned resource recorded at scan time with non-default overrides
+	scannedResource := &reporthandling.Resource{
+		Object: map[string]interface{}{
+			"apiVersion": "apps/v1",
+			"kind":       "Deployment",
+			"metadata": map[string]interface{}{
+				"name": "my-app",
+			},
+			"spec": map[string]interface{}{
+				"replicas": 5,
+				"template": map[string]interface{}{
+					"spec": map[string]interface{}{
+						"containers": []interface{}{
+							map[string]interface{}{
+								"name":  "app",
+								"image": "example:v2",
+								"envFrom": []interface{}{
+									map[string]interface{}{
+										"configMapRef": map[string]interface{}{"name": "prod-config"},
+									},
+								},
+								"securityContext": map[string]interface{}{
+									"privileged": true,
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	t.Run("declines when overrides are omitted or mismatched", func(t *testing.T) {
+		outDir := t.TempDir()
+		// Missing HelmValueOptions: chart would render with default replicas=1, image=example:v1
+		// which conflicts with scanned resource (replicas=5, image=example:v2)
+		suggs := []HelmFixSuggestion{
+			{
+				Resource:  scannedResource,
+				ChartPath: chartDir,
+				FixPaths:  []armotypes.FixPath{{Path: "spec.template.spec.containers[0].securityContext.privileged", Value: "false"}},
+			},
+		}
+
+		res, err := EmitKustomizePatch(suggs, outDir)
+		require.NoError(t, err)
+		assert.Empty(t, res.EmittedResources)
+		require.Len(t, res.SkippedResources, 1)
+		assert.Contains(t, res.SkippedResources[0].Reason, "does not match scan-time resource configuration")
+
+		_, err = os.Stat(filepath.Join(outDir, "base.yaml"))
+		assert.True(t, os.IsNotExist(err), "base.yaml must not be written when overrides mismatch")
+	})
+
+	t.Run("preserves non-default overrides with HelmValueOptions", func(t *testing.T) {
+		outDir := t.TempDir()
+		suggs := []HelmFixSuggestion{
+			{
+				Resource:  scannedResource,
+				ChartPath: chartDir,
+				HelmValueOptions: cautils.HelmValueOptions{
+					Values: []string{"replicas=5", "image=example:v2", "envFrom=prod-config"},
+				},
+				FixPaths: []armotypes.FixPath{{Path: "spec.template.spec.containers[0].securityContext.privileged", Value: "false"}},
+			},
+		}
+
+		res, err := EmitKustomizePatch(suggs, outDir)
+		require.NoError(t, err)
+		require.Len(t, res.EmittedResources, 1)
+
+		k := krusty.MakeKustomizer(krusty.MakeDefaultOptions())
+		resMap, err := k.Run(filesys.MakeFsOnDisk(), outDir)
+		require.NoError(t, err)
+		outYaml, err := resMap.AsYaml()
+		require.NoError(t, err)
+
+		var built struct {
+			Spec struct {
+				Replicas int `yaml:"replicas"`
+				Template struct {
+					Spec struct {
+						Containers []struct {
+							Name    string `yaml:"name"`
+							Image   string `yaml:"image"`
+							EnvFrom []struct {
+								ConfigMapRef struct {
+									Name string `yaml:"name"`
+								} `yaml:"configMapRef"`
+							} `yaml:"envFrom"`
+							SecurityContext struct {
+								Privileged *bool `yaml:"privileged"`
+							} `yaml:"securityContext"`
+						} `yaml:"containers"`
+					} `yaml:"spec"`
+				} `yaml:"template"`
+			} `yaml:"spec"`
+		}
+		require.NoError(t, yaml.Unmarshal(outYaml, &built))
+		assert.Equal(t, 5, built.Spec.Replicas, "replicas must be preserved as 5")
+		require.Len(t, built.Spec.Template.Spec.Containers, 1)
+		c := built.Spec.Template.Spec.Containers[0]
+		assert.Equal(t, "example:v2", c.Image, "image must be preserved as example:v2")
+		require.Len(t, c.EnvFrom, 1)
+		assert.Equal(t, "prod-config", c.EnvFrom[0].ConfigMapRef.Name, "envFrom must be preserved as prod-config")
+		require.NotNil(t, c.SecurityContext.Privileged)
+		assert.False(t, *c.SecurityContext.Privileged, "privileged must be patched to false")
+	})
+}
+
+// TestRereview4034MatchesFullAPIIdentity verifies that selecting a rendered base workload compares
+// the complete API identity (group, version, kind, name, and resolved namespace), ensuring that
+// resources of identical kind/name across different API groups are distinguished.
+func TestRereview4034MatchesFullAPIIdentity(t *testing.T) {
+	chartDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "Chart.yaml"), []byte("apiVersion: v2\nname: widgetchart\nversion: 0.1.0\n"), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "values.yaml"), []byte("\n"), 0600))
+	require.NoError(t, os.MkdirAll(filepath.Join(chartDir, "templates"), 0700))
+	// Two Widget resources with identical names in different API groups
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "templates", "widgets.yaml"), []byte(`apiVersion: alpha.example.com/v1
+kind: Widget
+metadata:
+  name: my-widget
+spec:
+  secure: false
+---
+apiVersion: beta.example.com/v1
+kind: Widget
+metadata:
+  name: my-widget
+spec:
+  secure: false
+`), 0600))
+
+	outDir := t.TempDir()
+
+	betaWidget := &reporthandling.Resource{
+		Object: map[string]interface{}{
+			"apiVersion": "beta.example.com/v1",
+			"kind":       "Widget",
+			"metadata": map[string]interface{}{
+				"name": "my-widget",
+			},
+			"spec": map[string]interface{}{
+				"secure": false,
+			},
+		},
+	}
+
+	suggs := []HelmFixSuggestion{
+		{
+			Resource:  betaWidget,
+			ChartPath: chartDir,
+			FixPaths:  []armotypes.FixPath{{Path: "spec.secure", Value: "true"}},
+		},
+	}
+
+	res, err := EmitKustomizePatch(suggs, outDir)
+	require.NoError(t, err)
+	require.Len(t, res.EmittedResources, 1)
+
+	k := krusty.MakeKustomizer(krusty.MakeDefaultOptions())
+	resMap, err := k.Run(filesys.MakeFsOnDisk(), outDir)
+	require.NoError(t, err)
+	outYaml, err := resMap.AsYaml()
+	require.NoError(t, err)
+
+	var built struct {
+		APIVersion string `yaml:"apiVersion"`
+		Kind       string `yaml:"kind"`
+		Metadata   struct {
+			Name string `yaml:"name"`
+		} `yaml:"metadata"`
+		Spec struct {
+			Secure bool `yaml:"secure"`
+		} `yaml:"spec"`
+	}
+	require.NoError(t, yaml.Unmarshal(outYaml, &built))
+	assert.Equal(t, "beta.example.com/v1", built.APIVersion, "built widget must be beta.example.com/v1")
+	assert.Equal(t, "Widget", built.Kind)
+	assert.Equal(t, "my-widget", built.Metadata.Name)
+	assert.True(t, built.Spec.Secure, "secure must be patched to true on beta widget")
+}
+
+// TestRereview4034HelmReadHonorsBasePath verifies that EmitKustomizePatch refuses to load
+// a chart path outside AllowedBasePath.
+func TestRereview4034HelmReadHonorsBasePath(t *testing.T) {
+	allowedBase := t.TempDir()
+	outsideDir := t.TempDir()
+
+	require.NoError(t, os.WriteFile(filepath.Join(outsideDir, "Chart.yaml"), []byte("apiVersion: v2\nname: evilchart\nversion: 0.1.0\n"), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(outsideDir, "values.yaml"), []byte("\n"), 0600))
+	require.NoError(t, os.MkdirAll(filepath.Join(outsideDir, "templates"), 0700))
+	require.NoError(t, os.WriteFile(filepath.Join(outsideDir, "templates", "secret.yaml"), []byte(`apiVersion: v1
+kind: Secret
+metadata:
+  name: outside-secret
+stringData:
+  SENTINEL: outside-secret-12345
+`), 0600))
+
+	outDir := t.TempDir()
+
+	sugg := HelmFixSuggestion{
+		Resource: &reporthandling.Resource{
+			Object: map[string]interface{}{
+				"apiVersion": "v1",
+				"kind":       "Secret",
+				"metadata":   map[string]interface{}{"name": "outside-secret"},
+				"stringData": map[string]interface{}{"SENTINEL": "outside-secret-12345"},
+			},
+		},
+		ChartPath:       outsideDir,
+		AllowedBasePath: allowedBase,
+		FixPaths:        []armotypes.FixPath{{Path: "metadata.labels.patched", Value: "true"}},
+	}
+
+	res, err := EmitKustomizePatch([]HelmFixSuggestion{sugg}, outDir)
+	require.NoError(t, err)
+	assert.Empty(t, res.EmittedResources)
+	require.Len(t, res.SkippedResources, 1)
+	assert.Contains(t, res.SkippedResources[0].Reason, "outside allowed base path")
+
+	_, err = os.Stat(filepath.Join(outDir, "base.yaml"))
+	assert.True(t, os.IsNotExist(err), "base.yaml must not exist for outside chart")
 }

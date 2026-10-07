@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/armosec/armoapi-go/armotypes"
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	metav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
 	"github.com/kubescape/opa-utils/reporthandling"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
@@ -69,6 +70,12 @@ type HelmFixSuggestion struct {
 	FidelityProvenance bool
 	// UnredactedBase provides a verified unredacted base object, when available.
 	UnredactedBase map[string]interface{}
+
+	// HelmValueOptions carries the render inputs (values files, set overrides, release identity)
+	// used to reproduce the scanned resource.
+	HelmValueOptions cautils.HelmValueOptions
+	// AllowedBasePath restricts on-disk chart reading to the allowed base directory boundary.
+	AllowedBasePath string
 }
 
 // UnfixedControl describes a failed (resource, control) tuple for which `kubescape fix`

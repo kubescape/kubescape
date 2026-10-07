@@ -451,21 +451,160 @@ func hasRedactedPlaceholder(data interface{}) bool {
 //
 // If none of these conditions is met, or if the candidate contains redaction placeholders, the resource
 // is visibly declined with an explanatory reason.
+// chartCacheKey builds an unambiguous cache key encoding the chart path and all Helm value options.
+func chartCacheKey(chartPath string, opts cautils.HelmValueOptions) string {
+	return fmt.Sprintf("%s|%s|%s|%s|%s|%s|%s",
+		chartPath,
+		strings.Join(opts.ValueFiles, ","),
+		strings.Join(opts.Values, ","),
+		strings.Join(opts.StringValues, ","),
+		strings.Join(opts.FileValues, ","),
+		opts.ReleaseName,
+		opts.ReleaseNamespace,
+	)
+}
+
+func toFloat64(v interface{}) (float64, bool) {
+	switch n := v.(type) {
+	case int:
+		return float64(n), true
+	case int8:
+		return float64(n), true
+	case int16:
+		return float64(n), true
+	case int32:
+		return float64(n), true
+	case int64:
+		return float64(n), true
+	case uint:
+		return float64(n), true
+	case uint8:
+		return float64(n), true
+	case uint16:
+		return float64(n), true
+	case uint32:
+		return float64(n), true
+	case uint64:
+		return float64(n), true
+	case float32:
+		return float64(n), true
+	case float64:
+		return n, true
+	default:
+		return 0, false
+	}
+}
+
+func joinPath(parent, child string) string {
+	if parent == "" {
+		return child
+	}
+	return parent + "." + child
+}
+
+// verifyScannedFieldsMatch recursively checks that every non-redacted field present in scannedVal
+// matches the corresponding field in candVal. Any field with placeholder "XXXXXX" or omitted in
+// scannedVal is ignored. Returns an error if any concrete non-redacted value conflicts.
+func verifyScannedFieldsMatch(scannedVal, candVal interface{}, path string) error {
+	if scannedVal == nil {
+		return nil
+	}
+
+	if s, ok := scannedVal.(string); ok && s == "XXXXXX" {
+		return nil
+	}
+
+	switch sTyped := scannedVal.(type) {
+	case map[string]interface{}:
+		cMap, ok := candVal.(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("type mismatch at %s: expected map, got %T", path, candVal)
+		}
+		for k, v := range sTyped {
+			if path == "" && k == "path" {
+				continue
+			}
+			if s, isStr := v.(string); isStr && s == "XXXXXX" {
+				continue
+			}
+			candChild, exists := cMap[k]
+			if !exists {
+				return fmt.Errorf("field %s present in scanned resource is missing in rendered base", joinPath(path, k))
+			}
+			if err := verifyScannedFieldsMatch(v, candChild, joinPath(path, k)); err != nil {
+				return err
+			}
+		}
+		return nil
+
+	case []interface{}:
+		cSlice, ok := candVal.([]interface{})
+		if !ok {
+			return fmt.Errorf("type mismatch at %s: expected list, got %T", path, candVal)
+		}
+		if len(sTyped) != len(cSlice) {
+			return fmt.Errorf("list length mismatch at %s: scanned %d, rendered %d", path, len(sTyped), len(cSlice))
+		}
+		for i := range sTyped {
+			elemPath := fmt.Sprintf("%s[%d]", path, i)
+			if err := verifyScannedFieldsMatch(sTyped[i], cSlice[i], elemPath); err != nil {
+				return err
+			}
+		}
+		return nil
+
+	default:
+		if sf, isSNumeric := toFloat64(scannedVal); isSNumeric {
+			if cf, isCNumeric := toFloat64(candVal); isCNumeric {
+				if sf != cf {
+					return fmt.Errorf("value mismatch at %s: scanned %v, rendered %v", path, scannedVal, candVal)
+				}
+				return nil
+			}
+			return fmt.Errorf("type mismatch at %s: scanned numeric %v, rendered %T", path, scannedVal, candVal)
+		}
+
+		if fmt.Sprintf("%v", scannedVal) != fmt.Sprintf("%v", candVal) {
+			return fmt.Errorf("value mismatch at %s: scanned %v, rendered %v", path, scannedVal, candVal)
+		}
+		return nil
+	}
+}
+
+// resolveBaseObject determines the verified unredacted base Kubernetes object for a suggestion.
+// Because the scan redactor (removeData / processorhandlerutils.go:826) replaces container environment
+// variables with XXXXXX and deletes envFrom outright without leaving a placeholder, report objects
+// cannot be assumed complete from placeholder absence alone. A faithful base must either:
+//  1. Be explicitly provided via s.UnredactedBase,
+//  2. Come with explicit fidelity provenance (s.FidelityProvenance), or
+//  3. Be verified and loaded directly from the local Helm chart on disk (s.ChartPath).
+//
+// In all cases, the candidate base is verified against the non-redacted fields of the scanned resource.
+// If none of these conditions is met, or if the candidate contains redaction placeholders, the resource
+// is visibly declined with an explanatory reason.
 func resolveBaseObject(s HelmFixSuggestion, chartCache map[string]map[string][]workloadinterface.IMetadata) (map[string]interface{}, string) {
 	var candidate map[string]interface{}
+	var loadErr error
 
 	if s.UnredactedBase != nil {
 		candidate = s.UnredactedBase
 	} else if s.FidelityProvenance && s.Resource != nil && s.Resource.GetObject() != nil {
 		candidate = s.Resource.GetObject()
 	} else if s.ChartPath != "" {
-		if unredacted, err := loadUnredactedFromChart(s, chartCache); err == nil && unredacted != nil {
-			candidate = unredacted
-		}
+		candidate, loadErr = loadUnredactedFromChart(s, chartCache)
 	}
 
 	if candidate == nil {
+		if loadErr != nil {
+			return nil, fmt.Sprintf("declined: %s", loadErr.Error())
+		}
 		return nil, "unproven report fidelity: scan reports redact container environment variables and remove envFrom without leaving placeholders; provide a verified unredacted rendered base or explicit fidelity provenance"
+	}
+
+	if s.Resource != nil && s.Resource.GetObject() != nil {
+		if err := verifyScannedFieldsMatch(s.Resource.GetObject(), candidate, ""); err != nil {
+			return nil, fmt.Sprintf("declined: rendered chart base does not match scan-time resource configuration (%s)", err.Error())
+		}
 	}
 
 	if hasRedactedPlaceholder(candidate) {
@@ -482,52 +621,78 @@ func resolveBaseObject(s HelmFixSuggestion, chartCache map[string]map[string][]w
 	return candidate, ""
 }
 
-// loadUnredactedFromChart renders the chart at chartPath using Helm defaults and returns the unredacted
-// workload object matching s.Resource's Kind, Name, and Namespace.
+// loadUnredactedFromChart renders the chart at chartPath using s.HelmValueOptions and returns the unredacted
+// workload object matching s.Resource's full API identity (group, version, kind, name, namespace).
+// It verifies that s.ChartPath is contained within s.AllowedBasePath (if specified) before reading.
 func loadUnredactedFromChart(s HelmFixSuggestion, chartCache map[string]map[string][]workloadinterface.IMetadata) (map[string]interface{}, error) {
 	if s.ChartPath == "" {
 		return nil, errors.New("empty chart path")
 	}
+
+	if s.AllowedBasePath != "" && !isPathContained(s.AllowedBasePath, s.ChartPath) {
+		return nil, fmt.Errorf("chart path %q is outside allowed base path %q", s.ChartPath, s.AllowedBasePath)
+	}
+
 	chartYaml := filepath.Join(s.ChartPath, "Chart.yaml")
 	if _, err := os.Stat(chartYaml); err != nil {
 		return nil, err
 	}
 
-	sourceToWorkloads, ok := chartCache[s.ChartPath]
+	cacheKey := chartCacheKey(s.ChartPath, s.HelmValueOptions)
+	sourceToWorkloads, ok := chartCache[cacheKey]
 	if !ok {
 		var err error
-		sourceToWorkloads, _, _, err = cautils.LoadResourcesFromHelmCharts(context.Background(), s.ChartPath, cautils.HelmValueOptions{})
+		sourceToWorkloads, _, _, err = cautils.LoadResourcesFromHelmCharts(context.Background(), s.ChartPath, s.HelmValueOptions)
 		if err != nil {
 			return nil, err
 		}
 		if chartCache != nil {
-			chartCache[s.ChartPath] = sourceToWorkloads
+			chartCache[cacheKey] = sourceToWorkloads
 		}
 	}
 
 	if s.Resource == nil {
 		return nil, errors.New("nil resource")
 	}
+
+	targetGroup, targetVersion := parseGroupVersion(s.Resource.GetApiVersion())
 	targetKind := s.Resource.GetKind()
 	targetName := s.Resource.GetName()
 	targetNamespace := s.Resource.GetNamespace()
 
+	var matches []map[string]interface{}
 	for _, workloads := range sourceToWorkloads {
 		for _, w := range workloads {
-			if w.GetKind() == targetKind && w.GetName() == targetName {
-				if targetNamespace == "" || w.GetNamespace() == "" || w.GetNamespace() == targetNamespace {
-					obj := w.GetObject()
-					if localworkload.IsTypeLocalWorkload(obj) {
-						lw := localworkload.NewLocalWorkload(obj)
-						lw.DeletePathEntry()
-						return lw.GetObject(), nil
-					}
-					return obj, nil
+			candGroup, candVersion := parseGroupVersion(w.GetApiVersion())
+			candKind := w.GetKind()
+			candName := w.GetName()
+			candNamespace := w.GetNamespace()
+			if candNamespace == "" && s.HelmValueOptions.ReleaseNamespace != "" {
+				candNamespace = s.HelmValueOptions.ReleaseNamespace
+			}
+
+			if candGroup == targetGroup && candVersion == targetVersion &&
+				candKind == targetKind && candName == targetName &&
+				candNamespace == targetNamespace {
+				obj := w.GetObject()
+				if localworkload.IsTypeLocalWorkload(obj) {
+					lw := localworkload.NewLocalWorkload(obj)
+					lw.DeletePathEntry()
+					obj = lw.GetObject()
 				}
+				matches = append(matches, deepCopyMap(obj))
 			}
 		}
 	}
-	return nil, fmt.Errorf("resource %s/%s not found in rendered chart", targetKind, targetName)
+
+	if len(matches) == 0 {
+		return nil, fmt.Errorf("resource %s/%s %s/%s not found in rendered chart", targetGroup, targetVersion, targetKind, targetName)
+	}
+	if len(matches) > 1 {
+		return nil, fmt.Errorf("ambiguous match: found %d resources matching %s/%s %s/%s in rendered chart", len(matches), targetGroup, targetVersion, targetKind, targetName)
+	}
+
+	return matches[0], nil
 }
 
 // writeRestrictedFile writes data to path with mode 0600 and explicitly chmods an existing file to 0600.

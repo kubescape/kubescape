@@ -65,6 +65,13 @@ func (ks *Kubescape) Fix(fixInfo *metav1.FixInfo) error {
 	// generated patches can be applied via:
 	//   kustomize build <dir> | kubectl apply -f -
 	if fixInfo.KustomizeDir != "" && !fixInfo.DryRun {
+		if fixInfo.BasePath != "" {
+			for i := range helmSuggestions {
+				if helmSuggestions[i].AllowedBasePath == "" {
+					helmSuggestions[i].AllowedBasePath = fixInfo.BasePath
+				}
+			}
+		}
 		emitRes, err := fixhandler.EmitKustomizePatch(helmSuggestions, fixInfo.KustomizeDir)
 		if err != nil {
 			logger.L().Error("failed to write Kustomize patches", helpers.Error(err))
