@@ -37,10 +37,16 @@ func namespaceContextReactor(t *testing.T, namespaceLabels *[]string, mu *sync.M
 			if labels != "" {
 				return true, &unstructured.UnstructuredList{}, nil
 			}
-			return true, &unstructured.UnstructuredList{Items: []unstructured.Unstructured{{Object: map[string]any{
-				"apiVersion": "v1", "kind": "Namespace",
-				"metadata": map[string]any{"name": "team-a", "labels": map[string]any{"tier": "prod"}},
-			}}}}, nil
+			return true, &unstructured.UnstructuredList{Items: []unstructured.Unstructured{
+				{Object: map[string]any{
+					"apiVersion": "v1", "kind": "Namespace",
+					"metadata": map[string]any{"name": "team-a", "labels": map[string]any{"tier": "prod"}},
+				}},
+				{Object: map[string]any{
+					"apiVersion": "v1", "kind": "Namespace",
+					"metadata": map[string]any{"name": "unrelated", "labels": map[string]any{"tier": "dev"}},
+				}},
+			}}, nil
 		case "deployments":
 			if labels != "" && labels != "app=web" {
 				return true, &unstructured.UnstructuredList{}, nil
@@ -78,6 +84,7 @@ func TestGetResourcesCollectsNamespaceContextOutsideWorkloadFilters(t *testing.T
 			assert.NotEmpty(t, resources["apps/v1/deployments"], "the requested workload stays a scan target")
 			assert.Empty(t, resources["/v1/namespaces"], "support context is not another scan target")
 			assert.Len(t, allResources, 1, "support context is not a report resource")
+			assert.Len(t, session.CELNamespaceContext, 1, "unrelated Namespaces must not remain in the eager context")
 			var foundNamespace bool
 			for _, resource := range session.CELNamespaceContext {
 				if resource.GetKind() == "Namespace" && resource.GetName() == "team-a" {
@@ -112,6 +119,7 @@ func TestStreamingCollectionCarriesSupplementalNamespaceContext(t *testing.T) {
 	assert.Empty(t, resident.K8SResources["/v1/namespaces"], "Namespace context must not become a policy target")
 	var foundNamespace bool
 	assert.Empty(t, resident.AllResources, "the resident report catalog must not contain support-only Namespaces")
+	assert.Len(t, resident.CELNamespaceContext, 1, "unrelated Namespaces must not remain in streaming context")
 	for _, resource := range resident.CELNamespaceContext {
 		if resource.GetKind() == "Namespace" && resource.GetName() == "team-a" {
 			foundNamespace = true
@@ -132,7 +140,7 @@ func TestCollectResourcesRejectsEmptyLabelFilteredCELScan(t *testing.T) {
 	err := CollectResources(context.Background(), handler, session, scanInfo)
 	require.ErrorContains(t, err, "no resources found to scan")
 	assert.Empty(t, session.AllResources)
-	assert.NotEmpty(t, session.CELNamespaceContext, "Namespace context was available but is not a scan target")
+	assert.Empty(t, session.CELNamespaceContext, "an empty scan must not retain Namespace context")
 }
 
 func TestSupplementalNamespaceContextRequiresCELAndNarrowing(t *testing.T) {

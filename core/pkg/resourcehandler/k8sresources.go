@@ -205,7 +205,7 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 	}
 	metrics.UpdateKubernetesResourcesCount(ctx, int64(len(allResources)))
 	if needsSupplementalCELNamespaces(scanInfo, sessionObj.Policies) {
-		context, err := k8sHandler.collectSupplementalCELNamespaces(ctx, globalFieldSelectors, sessionObj.SingleResourceScan, resolver)
+		context, err := k8sHandler.collectSupplementalCELNamespaces(ctx, globalFieldSelectors, namespaceContextTargets(allResources))
 		if err != nil {
 			return k8sResourcesMap, allResources, ksResourceMap, excludedRulesMap, err
 		}
@@ -585,7 +585,13 @@ func (k8sHandler *K8sResourceHandler) collectAndStreamBatches(ctx context.Contex
 		}
 	}
 	if needsSupplementalCELNamespaces(scanInfo, sessionObj.Policies) {
-		context, err := k8sHandler.collectSupplementalCELNamespaces(ctx, globalFieldSelectors, sessionObj.SingleResourceScan, resolver)
+		needed := namespaceContextTargets(resident.AllResources)
+		for _, namespace := range store.Namespaces() {
+			if namespace != cautils.ClusterScope {
+				needed[namespace] = struct{}{}
+			}
+		}
+		context, err := k8sHandler.collectSupplementalCELNamespaces(ctx, globalFieldSelectors, needed)
 		if err != nil {
 			return err
 		}
