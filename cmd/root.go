@@ -140,5 +140,5 @@ func getRootCmd(ks meta.IKubescape, ksVersion, ksCommit, ksDate string) *cobra.C
 
 func Execute(ctx context.Context, ksVersion, ksCommit, ksDate string) error {
 	ks := NewDefaultKubescapeCommand(ctx, ksVersion, ksCommit, ksDate)
-	return ks.Execute()
+	return ks.ExecuteContext(ctx)
 }
