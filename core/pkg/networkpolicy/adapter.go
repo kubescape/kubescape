@@ -70,8 +70,23 @@ func EndpointFromResource(resource workloadinterface.IMetadata) Endpoint {
 		return Endpoint{}
 	}
 	return Endpoint{
-		Namespace: resource.GetNamespace(),
-		Name:      resource.GetName(),
-		Labels:    resourceLabels(resource),
+		Namespace:   resource.GetNamespace(),
+		Name:        resource.GetName(),
+		Labels:      resourceLabels(resource),
+		HostNetwork: resourceHostNetwork(resource),
 	}
+}
+
+// resourceHostNetwork reports whether a Pod-shaped resource sets
+// spec.hostNetwork. IMetadata does not carry a pod spec; IWorkload does.
+func resourceHostNetwork(resource workloadinterface.IMetadata) bool {
+	w, ok := resource.(workloadinterface.IWorkload)
+	if !ok {
+		return false
+	}
+	podSpec, err := w.GetPodSpec()
+	if err != nil || podSpec == nil {
+		return false
+	}
+	return podSpec.HostNetwork
 }

@@ -13,9 +13,11 @@ import (
 // allow for the rule as a whole to allow (a rule's ports and peers are an
 // AND, matching the Kubernetes API: a rule matches a connection only if the
 // connection's peer is in the rule's from/to list AND its port is in the
-// rule's ports list).
-func (idx *Index) ruleVerdict(policyNamespace string, peers []networkingv1.NetworkPolicyPeer, ports []networkingv1.NetworkPolicyPort, counterpart Endpoint, port *PortSpec) (Verdict, string) {
-	peerV, peerReason := idx.peerListVerdict(peers, policyNamespace, counterpart)
+// rule's ports list). selected is the endpoint the rule's policy selects (the
+// destination of an ingress rule, the source of an egress rule) and
+// counterpart is the endpoint its peers are matched against.
+func (idx *Index) ruleVerdict(policyNamespace string, peers []networkingv1.NetworkPolicyPeer, ports []networkingv1.NetworkPolicyPort, selected, counterpart Endpoint, port *PortSpec) (Verdict, string) {
+	peerV, peerReason := idx.peerListVerdict(peers, policyNamespace, selected, counterpart)
 	if peerV == Denied {
 		return Denied, peerReason
 	}
@@ -51,7 +53,7 @@ func (idx *Index) AllowsIngress(src, dst Endpoint, port *PortSpec) Decision {
 			continue
 		}
 		for _, rule := range cp.policy.Spec.Ingress {
-			v, reason := idx.ruleVerdict(cp.policy.Namespace, rule.From, rule.Ports, src, port)
+			v, reason := idx.ruleVerdict(cp.policy.Namespace, rule.From, rule.Ports, dst, src, port)
 			if v == Allowed {
 				return allow(reason, cp.policy.Namespace+"/"+cp.policy.Name)
 			}
@@ -62,9 +64,9 @@ func (idx *Index) AllowsIngress(src, dst Endpoint, port *PortSpec) Decision {
 	}
 
 	if sawUnknown {
-		return unknown("destination is ingress-isolated; no rule was confirmed to allow this traffic, but at least one rule could not be fully resolved")
+		return unknown("destination is ingress-isolated; no rule was confirmed to allow this traffic, but at least one rule could not be fully resolved" + hostNetworkNote(src, dst))
 	}
-	return deny("destination is ingress-isolated and no matching policy rule allows this traffic")
+	return denyUnlessHostNetwork(src, dst, "destination is ingress-isolated and no matching policy rule allows this traffic")
 }
 
 // AllowsEgress mirrors AllowsIngress for the source's egress policies.
@@ -79,7 +81,7 @@ func (idx *Index) AllowsEgress(src, dst Endpoint, port *PortSpec) Decision {
 			continue
 		}
 		for _, rule := range cp.policy.Spec.Egress {
-			v, reason := idx.ruleVerdict(cp.policy.Namespace, rule.To, rule.Ports, dst, port)
+			v, reason := idx.ruleVerdict(cp.policy.Namespace, rule.To, rule.Ports, src, dst, port)
 			if v == Allowed {
 				return allow(reason, cp.policy.Namespace+"/"+cp.policy.Name)
 			}
@@ -90,9 +92,39 @@ func (idx *Index) AllowsEgress(src, dst Endpoint, port *PortSpec) Decision {
 	}
 
 	if sawUnknown {
-		return unknown("source is egress-isolated; no rule was confirmed to allow this traffic, but at least one rule could not be fully resolved")
+		return unknown("source is egress-isolated; no rule was confirmed to allow this traffic, but at least one rule could not be fully resolved" + hostNetworkNote(src, dst))
 	}
-	return deny("source is egress-isolated and no matching policy rule allows this traffic")
+	return denyUnlessHostNetwork(src, dst, "source is egress-isolated and no matching policy rule allows this traffic")
+}
+
+// denyUnlessHostNetwork is deny, except when either end of the connection is
+// a hostNetwork pod, where a denial cannot be confirmed (see
+// Endpoint.HostNetwork): if the isolated pod is the hostNetwork one, most
+// network plugins do not enforce the policy that isolates it; if the other
+// pod is, its traffic is the node's, which a plugin always allows to and
+// from the pods on that same node whatever their policies say.
+func denyUnlessHostNetwork(src, dst Endpoint, reason string) Decision {
+	if note := hostNetworkNote(src, dst); note != "" {
+		return unknown(reason + note)
+	}
+	return deny(reason)
+}
+
+// hostNetworkNote is the suffix that explains an Unknown decision involving
+// a hostNetwork pod, or "" when neither src nor dst is one.
+func hostNetworkNote(src, dst Endpoint) string {
+	var who string
+	switch {
+	case src.HostNetwork && dst.HostNetwork:
+		who = "source and destination use"
+	case src.HostNetwork:
+		who = "source uses"
+	case dst.HostNetwork:
+		who = "destination uses"
+	default:
+		return ""
+	}
+	return "; the " + who + " the host network (hostNetwork: true), where NetworkPolicy behaviour is undefined and most network plugins treat the traffic as the node's own instead of applying pod policies to it"
 }
 
 // Reaches reports whether src can reach dst on port: real NetworkPolicy

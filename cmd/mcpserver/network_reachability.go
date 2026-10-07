@@ -26,7 +26,7 @@ var podGVR = schema.GroupVersionResource{Group: "", Version: "v1", Resource: "po
 func createNetworkReachabilityTools(ksServer *KubescapeMcpserver) {
 	tool := mcp.NewTool(
 		"analyze_network_reachability",
-		mcp.WithDescription("Determine whether a specific source pod can reach a specific destination pod (optionally on a given port/protocol), by evaluating every NetworkPolicy in the cluster together -- not just whether a blocking policy exists. Reports allowed, denied, or unknown (when a rule cannot be resolved statically, e.g. a named container port or an IP-block peer) with the specific policy responsible."),
+		mcp.WithDescription("Determine whether a specific source pod can reach a specific destination pod (optionally on a given port/protocol), by evaluating every NetworkPolicy in the cluster together -- not just whether a blocking policy exists. Reports allowed, denied, or unknown (when a rule cannot be resolved statically, e.g. a named container port or an IP-block peer, or when a pod on the host network is involved, which most network plugins do not apply NetworkPolicy to) with the specific policy responsible."),
 		mcp.WithString("source_namespace", mcp.Required(), mcp.Description("Namespace of the source pod")),
 		mcp.WithString("source_pod", mcp.Required(), mcp.Description("Name of the source pod")),
 		mcp.WithString("destination_namespace", mcp.Required(), mcp.Description("Namespace of the destination pod")),

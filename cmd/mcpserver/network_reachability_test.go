@@ -88,6 +88,87 @@ func TestAnalyzeNetworkReachability_DefaultDenyBlocksUnrelatedSource(t *testing.
 	require.Equal(t, "denied", ingress["verdict"])
 }
 
+func TestAnalyzeNetworkReachability_HostNetworkDestinationIsUnknownNotDenied(t *testing.T) {
+	deny := unstructuredNetworkPolicy("prod", "deny-all", map[string]any{
+		"podSelector": map[string]any{},
+		"policyTypes": []any{"Ingress"},
+	})
+	server := unstructuredPod("prod", "server", map[string]any{"app": "server"})
+	hostServer := unstructuredPod("prod", "host-server", map[string]any{"app": "server"})
+	hostServer.Object["spec"] = map[string]any{"hostNetwork": true}
+	client := unstructuredPod("other", "client", map[string]any{"app": "client"})
+
+	ksServer := newReachabilityTestServer(deny, server, hostServer, client)
+
+	verdictFor := func(destination string) map[string]any {
+		result := registeredToolResult(t, dispatchRegisteredTool(t, ksServer, "analyze_network_reachability", map[string]any{
+			"source_namespace":      "other",
+			"source_pod":            "client",
+			"destination_namespace": "prod",
+			"destination_pod":       destination,
+		}))
+		require.False(t, result.IsError)
+
+		var parsed map[string]any
+		require.NoError(t, json.Unmarshal([]byte(toolResultText(t, result)), &parsed))
+		return parsed
+	}
+
+	require.Equal(t, "denied", verdictFor("server")["verdict"])
+
+	// Most network plugins do not enforce the policy on the hostNetwork Pod,
+	// so the same default-deny is not a confirmed denial for it.
+	parsed := verdictFor("host-server")
+	require.Equal(t, "unknown", parsed["verdict"])
+	ingress := parsed["ingress"].(map[string]any)
+	require.Equal(t, "unknown", ingress["verdict"])
+	assert.Contains(t, ingress["reason"], "host network")
+}
+
+func TestAnalyzeNetworkReachability_SelectedPeerBetweenHostNetworkPodsIsAllowed(t *testing.T) {
+	allowClient := unstructuredNetworkPolicy("prod", "allow-client", map[string]any{
+		"podSelector": map[string]any{"matchLabels": map[string]any{"app": "server"}},
+		"policyTypes": []any{"Ingress"},
+		"ingress": []any{
+			map[string]any{
+				"from": []any{
+					map[string]any{"podSelector": map[string]any{"matchLabels": map[string]any{"app": "client"}}},
+				},
+			},
+		},
+	})
+	server := unstructuredPod("prod", "server", map[string]any{"app": "server"})
+	server.Object["spec"] = map[string]any{"hostNetwork": true}
+	client := unstructuredPod("prod", "client", map[string]any{"app": "client"})
+	client.Object["spec"] = map[string]any{"hostNetwork": true}
+
+	ksServer := newReachabilityTestServer(allowClient, server, client)
+
+	for name, port := range map[string]any{"TCP port 80": float64(80), "omitted port": nil} {
+		args := map[string]any{
+			"source_namespace":      "prod",
+			"source_pod":            "client",
+			"destination_namespace": "prod",
+			"destination_pod":       "server",
+		}
+		if port != nil {
+			args["port"] = port
+		}
+		result := registeredToolResult(t, dispatchRegisteredTool(t, ksServer, "analyze_network_reachability", args))
+		require.False(t, result.IsError, name)
+
+		var parsed map[string]any
+		require.NoError(t, json.Unmarshal([]byte(toolResultText(t, result)), &parsed), name)
+
+		// Enforced, the policy admits the client; ignored for hostNetwork
+		// Pods, it does not isolate the server. Both agree on allowed.
+		require.Equal(t, "allowed", parsed["verdict"], name)
+		ingress := parsed["ingress"].(map[string]any)
+		require.Equal(t, "allowed", ingress["verdict"], name)
+		require.Equal(t, "prod/allow-client", ingress["matched_policy"], name)
+	}
+}
+
 func TestAnalyzeNetworkReachability_AllowsSelectedPeer(t *testing.T) {
 	allow := unstructuredNetworkPolicy("prod", "allow-client", map[string]any{
 		"podSelector": map[string]any{"matchLabels": map[string]any{"app": "server"}},
