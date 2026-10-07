@@ -68,7 +68,7 @@ func (ks *Kubescape) Fix(fixInfo *metav1.FixInfo) error {
 		if err := fixhandler.EmitKustomizePatch(helmSuggestions, fixInfo.KustomizeDir); err != nil {
 			logger.L().Error("failed to write Kustomize patches", helpers.Error(err))
 			return fmt.Errorf("failed to write Kustomize patches: %w", err)
-		} else if len(helmSuggestions) > 0 {
+		} else if entries, err := os.ReadDir(fixInfo.KustomizeDir); err == nil && len(entries) > 0 {
 			logger.L().Info(fmt.Sprintf(
 				"Kustomize patches written to %q\n  Apply with: kustomize build %s | kubectl apply -f -",
 				fixInfo.KustomizeDir, fixInfo.KustomizeDir,

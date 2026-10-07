@@ -729,3 +729,236 @@ func TestEmitKustomizePatch_Permissions(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, os.FileMode(0600), kustInfo.Mode().Perm(), "kustomization.yaml must have 0600 permissions")
 }
+
+// TestReview4034LiteralResourceNames verifies that regex special characters (like '.') in resource names
+// are quoted in patch selectors so they do not inadvertently match other resources (e.g. api.svc matching api-svc).
+func TestReview4034LiteralResourceNames(t *testing.T) {
+	dir := t.TempDir()
+
+	makeDep := func(name string) *reporthandling.Resource {
+		return &reporthandling.Resource{
+			Object: map[string]interface{}{
+				"apiVersion": "apps/v1",
+				"kind":       "Deployment",
+				"metadata": map[string]interface{}{
+					"name": name,
+				},
+				"spec": map[string]interface{}{
+					"replicas": 1,
+					"template": map[string]interface{}{
+						"spec": map[string]interface{}{
+							"containers": []interface{}{
+								map[string]interface{}{"name": "app", "image": "nginx"},
+							},
+						},
+					},
+				},
+			},
+		}
+	}
+
+	suggestions := []HelmFixSuggestion{
+		{
+			Resource:  makeDep("api-svc"),
+			ChartName: "api-chart",
+			FixPaths:  []armotypes.FixPath{{Path: "spec.replicas", Value: "2"}},
+		},
+		{
+			Resource:  makeDep("api.svc"),
+			ChartName: "api-chart",
+			FixPaths:  []armotypes.FixPath{{Path: "spec.replicas", Value: "3"}},
+		},
+	}
+
+	require.NoError(t, EmitKustomizePatch(suggestions, dir))
+
+	k := krusty.MakeKustomizer(krusty.MakeDefaultOptions())
+	resMap, err := k.Run(filesys.MakeFsOnDisk(), dir)
+	require.NoError(t, err)
+
+	outYaml, err := resMap.AsYaml()
+	require.NoError(t, err)
+
+	actualReplicas := make(map[string]int)
+	for _, docBytes := range splitYamlDocs(outYaml) {
+		var doc struct {
+			Metadata struct {
+				Name string `yaml:"name"`
+			} `yaml:"metadata"`
+			Spec struct {
+				Replicas int `yaml:"replicas"`
+			} `yaml:"spec"`
+		}
+		if err := yaml.Unmarshal(docBytes, &doc); err == nil && doc.Metadata.Name != "" {
+			actualReplicas[doc.Metadata.Name] = doc.Spec.Replicas
+		}
+	}
+
+	expectedReplicas := map[string]int{
+		"api-svc": 2,
+		"api.svc": 3,
+	}
+	assert.Equal(t, expectedReplicas, actualReplicas, "patch target for api.svc must not overwrite api-svc")
+}
+
+// TestReview4034ExistingOutputPermissions verifies that regenerating output into a directory
+// and files with pre-existing open permissions restricts both directory and files to 0700/0600.
+func TestReview4034ExistingOutputPermissions(t *testing.T) {
+	parentDir := t.TempDir()
+	outDir := filepath.Join(parentDir, "existing-kust")
+
+	// Pre-create directory with mode 0755
+	require.NoError(t, os.MkdirAll(outDir, 0755))
+	require.NoError(t, os.Chmod(outDir, 0755))
+
+	// Pre-create base.yaml with mode 0644
+	basePath := filepath.Join(outDir, "base.yaml")
+	//nolint:gosec // G306: intentionally testing restriction of pre-existing 0644 file
+	require.NoError(t, os.WriteFile(basePath, []byte("pre-existing: true\n"), 0644))
+	require.NoError(t, os.Chmod(basePath, 0644))
+
+	suggestions := []HelmFixSuggestion{
+		{
+			Resource:  makeResource("Deployment", "perm-app"),
+			ChartName: "my-chart",
+			FixPaths:  []armotypes.FixPath{{Path: "spec.replicas", Value: "2"}},
+		},
+	}
+
+	require.NoError(t, EmitKustomizePatch(suggestions, outDir))
+
+	dirInfo, err := os.Stat(outDir)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0700), dirInfo.Mode().Perm(), "existing directory must be restricted to 0700")
+
+	baseInfo, err := os.Stat(basePath)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0600), baseInfo.Mode().Perm(), "existing base.yaml must be restricted to 0600")
+}
+
+// TestReview4034HelmOverlayPreservesEnvironment verifies that:
+//  1. Redacted report objects (e.g. from scanner's removeData replacing container environment values with XXXXXX)
+//     are declined and not built into an applyable base that would overwrite live application configuration.
+//  2. An unredacted rendered source preserves its real container environment values across EmitKustomizePatch
+//     and a Kustomize build.
+func TestReview4034HelmOverlayPreservesEnvironment(t *testing.T) {
+	t.Run("declines redacted report object", func(t *testing.T) {
+		dir := t.TempDir()
+
+		redactedDep := &reporthandling.Resource{
+			Object: map[string]interface{}{
+				"apiVersion": "apps/v1",
+				"kind":       "Deployment",
+				"metadata": map[string]interface{}{
+					"name": "redacted-app",
+				},
+				"spec": map[string]interface{}{
+					"template": map[string]interface{}{
+						"spec": map[string]interface{}{
+							"containers": []interface{}{
+								map[string]interface{}{
+									"name": "app",
+									"env": []interface{}{
+										map[string]interface{}{"name": "APP_MODE", "value": "XXXXXX"},
+									},
+									"securityContext": map[string]interface{}{
+										"privileged": true,
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		suggestions := []HelmFixSuggestion{
+			{
+				Resource:  redactedDep,
+				ChartName: "my-chart",
+				FixPaths:  []armotypes.FixPath{{Path: "spec.template.spec.containers[0].securityContext.privileged", Value: "false"}},
+			},
+		}
+
+		// Should decline redacted resource, producing no patch files or base.yaml
+		require.NoError(t, EmitKustomizePatch(suggestions, dir))
+
+		_, err := os.Stat(filepath.Join(dir, "base.yaml"))
+		assert.True(t, os.IsNotExist(err), "redacted report object must not be emitted to base.yaml")
+	})
+
+	t.Run("preserves environment from unredacted rendered source", func(t *testing.T) {
+		dir := t.TempDir()
+
+		unredactedDep := &reporthandling.Resource{
+			Object: map[string]interface{}{
+				"apiVersion": "apps/v1",
+				"kind":       "Deployment",
+				"metadata": map[string]interface{}{
+					"name": "prod-app",
+				},
+				"spec": map[string]interface{}{
+					"template": map[string]interface{}{
+						"spec": map[string]interface{}{
+							"containers": []interface{}{
+								map[string]interface{}{
+									"name": "app",
+									"env": []interface{}{
+										map[string]interface{}{"name": "APP_MODE", "value": "production"},
+									},
+									"securityContext": map[string]interface{}{
+										"privileged": true,
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		suggestions := []HelmFixSuggestion{
+			{
+				Resource:  unredactedDep,
+				ChartName: "my-chart",
+				FixPaths:  []armotypes.FixPath{{Path: "spec.template.spec.containers[0].securityContext.privileged", Value: "false"}},
+			},
+		}
+
+		require.NoError(t, EmitKustomizePatch(suggestions, dir))
+
+		k := krusty.MakeKustomizer(krusty.MakeDefaultOptions())
+		resMap, err := k.Run(filesys.MakeFsOnDisk(), dir)
+		require.NoError(t, err)
+
+		outYaml, err := resMap.AsYaml()
+		require.NoError(t, err)
+
+		var builtPod struct {
+			Spec struct {
+				Template struct {
+					Spec struct {
+						Containers []struct {
+							Name string `yaml:"name"`
+							Env  []struct {
+								Name  string `yaml:"name"`
+								Value string `yaml:"value"`
+							} `yaml:"env"`
+							SecurityContext struct {
+								Privileged *bool `yaml:"privileged"`
+							} `yaml:"securityContext"`
+						} `yaml:"containers"`
+					} `yaml:"spec"`
+				} `yaml:"template"`
+			} `yaml:"spec"`
+		}
+
+		require.NoError(t, yaml.Unmarshal(outYaml, &builtPod))
+		require.Len(t, builtPod.Spec.Template.Spec.Containers, 1)
+		c := builtPod.Spec.Template.Spec.Containers[0]
+		require.Len(t, c.Env, 1)
+		assert.Equal(t, "production", c.Env[0].Value, "environment value must be preserved as production")
+		require.NotNil(t, c.SecurityContext.Privileged)
+		assert.False(t, *c.SecurityContext.Privileged, "privileged must be patched to false")
+	})
+}

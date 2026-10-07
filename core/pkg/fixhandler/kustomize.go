@@ -385,6 +385,71 @@ func resolveFixPathOps(workingObj map[string]interface{}, fp armotypes.FixPath) 
 	return ops
 }
 
+// hasRedactedPlaceholder checks if the object contains the scan redactor's "XXXXXX" placeholder
+// in container environment variables, secret data, or configmap data.
+func hasRedactedPlaceholder(data interface{}) bool {
+	switch v := data.(type) {
+	case map[string]interface{}:
+		for _, field := range []string{"data", "stringData", "binaryData"} {
+			if m, ok := v[field].(map[string]interface{}); ok {
+				for _, val := range m {
+					if s, ok := val.(string); ok && s == "XXXXXX" {
+						return true
+					}
+				}
+			}
+		}
+		if envList, ok := v["env"].([]interface{}); ok {
+			for _, item := range envList {
+				if envMap, ok := item.(map[string]interface{}); ok {
+					if val, ok := envMap["value"].(string); ok && val == "XXXXXX" {
+						return true
+					}
+				}
+			}
+		}
+		for _, child := range v {
+			if hasRedactedPlaceholder(child) {
+				return true
+			}
+		}
+	case []interface{}:
+		for _, child := range v {
+			if hasRedactedPlaceholder(child) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// isRedactedOrUnfaithfulResource checks whether a resource cannot be reproduced faithfully
+// from recorded scan report data (e.g. scanner's removeData replaced container environment
+// values with XXXXXX or removed references), as the cluster fix path already does.
+func isRedactedOrUnfaithfulResource(obj map[string]interface{}) bool {
+	if obj == nil {
+		return false
+	}
+	if hasRedactedPlaceholder(obj) {
+		return true
+	}
+	switch kind, _ := obj["kind"].(string); kind {
+	case "Secret", "ConfigMap":
+		if reason := redactedContentReason(obj); reason != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// writeRestrictedFile writes data to path with mode 0600 and explicitly chmods an existing file to 0600.
+func writeRestrictedFile(path string, data []byte) error {
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		return err
+	}
+	return os.Chmod(path, 0600)
+}
+
 // EmitKustomizePatch writes a kustomization.yaml, base.yaml, and one JSON 6902 patch
 // file per Helm resource into dir. It is a machine-applicable companion to
 // PrintHelmSuggestions: where that function prints human guidance for editing
@@ -398,7 +463,12 @@ func resolveFixPathOps(workingObj map[string]interface{}, fp armotypes.FixPath) 
 // Patch files are named unambiguously to encode the full resource identity and prevent
 // collisions. The saved base.yaml acts as a snapshot of rendered resources with suggestions.
 // Output directory and files are written with restricted permissions (0700/0600) to protect
-// rendered manifests that may contain sensitive data.
+// rendered manifests that may contain sensitive data, explicitly enforcing permissions even
+// when regenerating into existing directories or files.
+//
+// To avoid corrupting live application configuration, resources whose recorded content cannot
+// be reproduced faithfully (such as objects from scan reports where removeData replaced container
+// environment variables or secret data with "XXXXXX") are declined, as the cluster fix path already does.
 func EmitKustomizePatch(suggestions []HelmFixSuggestion, dir string) error {
 	if len(suggestions) == 0 {
 		return nil
@@ -411,6 +481,11 @@ func EmitKustomizePatch(suggestions []HelmFixSuggestion, dir string) error {
 
 	for _, s := range suggestions {
 		if s.Resource == nil || len(s.FixPaths) == 0 {
+			continue
+		}
+
+		// Decline resources whose recorded content cannot be reproduced faithfully (e.g. redacted by scanner).
+		if s.Resource.GetObject() != nil && isRedactedOrUnfaithfulResource(s.Resource.GetObject()) {
 			continue
 		}
 
@@ -440,9 +515,12 @@ func EmitKustomizePatch(suggestions []HelmFixSuggestion, dir string) error {
 		return nil
 	}
 
-	// Restrict permissions on the output directory containing rendered manifests.
+	// Restrict permissions on the output directory containing rendered manifests, enforcing 0700 on existing dirs too.
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return fmt.Errorf("failed to create kustomize output dir %q: %w", dir, err)
+	}
+	if err := os.Chmod(dir, 0700); err != nil {
+		return fmt.Errorf("failed to restrict permissions on kustomize output dir %q: %w", dir, err)
 	}
 
 	kust := kustomizationDoc{
@@ -455,7 +533,8 @@ func EmitKustomizePatch(suggestions []HelmFixSuggestion, dir string) error {
 	for _, key := range keysInOrder {
 		rg := groups[key]
 		if rg.resource != nil && rg.resource.GetObject() != nil {
-			objBytes, err := yaml.Marshal(rg.resource.GetObject())
+			cleanObj := stripServerManagedFields(rg.resource.GetObject())
+			objBytes, err := yaml.Marshal(cleanObj)
 			if err == nil && len(objBytes) > 0 {
 				baseYamlParts = append(baseYamlParts, objBytes)
 			}
@@ -474,8 +553,8 @@ func EmitKustomizePatch(suggestions []HelmFixSuggestion, dir string) error {
 			}
 			baseContent = append(baseContent, part...)
 		}
-		// Write base.yaml with mode 0600 to protect potentially sensitive rendered resources.
-		if err := os.WriteFile(baseFilePath, baseContent, 0600); err != nil {
+		// Write base.yaml with restricted mode 0600, updating existing file mode if already present.
+		if err := writeRestrictedFile(baseFilePath, baseContent); err != nil {
 			return fmt.Errorf("failed to write base.yaml: %w", err)
 		}
 		kust.Resources = append(kust.Resources, "base.yaml")
@@ -529,19 +608,23 @@ func EmitKustomizePatch(suggestions []HelmFixSuggestion, dir string) error {
 		if err != nil {
 			return fmt.Errorf("failed to marshal patch for %s/%s: %w", rg.key.Kind, rg.key.Name, err)
 		}
-		if err := os.WriteFile(patchFilePath, patchBytes, 0600); err != nil {
+		if err := writeRestrictedFile(patchFilePath, patchBytes); err != nil {
 			return fmt.Errorf("failed to write patch file %q: %w", patchFileName, err)
 		}
 
+		target := kustomizeTarget{
+			Group:   rg.key.Group,
+			Version: rg.key.Version,
+			Kind:    rg.key.Kind,
+			Name:    regexp.QuoteMeta(rg.key.Name),
+		}
+		if rg.key.Namespace != "" {
+			target.Namespace = regexp.QuoteMeta(rg.key.Namespace)
+		}
+
 		kust.Patches = append(kust.Patches, kustomizePatchEntry{
-			Path: patchFileName,
-			Target: kustomizeTarget{
-				Group:     rg.key.Group,
-				Version:   rg.key.Version,
-				Kind:      rg.key.Kind,
-				Name:      rg.key.Name,
-				Namespace: rg.key.Namespace,
-			},
+			Path:   patchFileName,
+			Target: target,
 		})
 	}
 
@@ -558,5 +641,5 @@ func EmitKustomizePatch(suggestions []HelmFixSuggestion, dir string) error {
 	if err != nil {
 		return fmt.Errorf("failed to marshal kustomization.yaml: %w", err)
 	}
-	return os.WriteFile(kustFilePath, kustBytes, 0600)
+	return writeRestrictedFile(kustFilePath, kustBytes)
 }
