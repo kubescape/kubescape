@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -1248,6 +1249,12 @@ type quayVulnerabilityPayload struct {
 	} `json:"data"`
 }
 
+// quayPackageIdentity represents the package name and version for tracking affected packages.
+type quayPackageIdentity struct {
+	name    string
+	version string
+}
+
 // GetImagesVulnerabilities retrieves vulnerability reports for a list of image identifiers.
 func (a *QuayAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs []ContainerImageIdentifier) ([]ContainerImageVulnerabilityReport, error) {
 	a.mu.RLock()
@@ -1349,6 +1356,7 @@ func (a *QuayAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs []C
 		}
 
 		seenVulns := make(map[string]int)
+		seenVulnPkgs := make(map[string]map[quayPackageIdentity]struct{})
 
 		for _, feature := range payload.Data.Layer.Features {
 			for _, v := range feature.Vulnerabilities {
@@ -1357,14 +1365,59 @@ func (a *QuayAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs []C
 				}
 
 				// Deduplicate findings if reported across multiple layers or feature packages,
-				// retaining the highest reported severity across occurrences.
+				// retaining the highest reported severity across occurrences, merging links,
+				// and appending secondary affected package context.
 				if idx, seen := seenVulns[v.Name]; seen {
 					if sev := normalizeQuaySeverity(v.Severity); quaySeverityRank(sev) > quaySeverityRank(report.Vulnerabilities[idx].Severity) {
 						report.Vulnerabilities[idx].Severity = sev
 					}
+
+					// Merge links from the duplicate occurrence.
+					var dupLinks []string
+					if links := strings.Fields(v.Link); len(links) > 0 {
+						dupLinks = links
+					} else if strings.HasPrefix(strings.ToUpper(v.Name), "CVE-") {
+						dupLinks = []string{fmt.Sprintf("https://nvd.nist.gov/vuln/detail/%s", v.Name)}
+					}
+					for _, link := range dupLinks {
+						if !slices.Contains(report.Vulnerabilities[idx].Links, link) {
+							report.Vulnerabilities[idx].Links = append(report.Vulnerabilities[idx].Links, link)
+						}
+					}
+
+					// Append secondary affected package context to description.
+					if feature.Name != "" {
+						pkgs := seenVulnPkgs[v.Name]
+						if pkgs == nil {
+							pkgs = make(map[quayPackageIdentity]struct{})
+							seenVulnPkgs[v.Name] = pkgs
+						}
+						pkgKey := quayPackageIdentity{name: feature.Name, version: feature.Version}
+						if _, alreadySeen := pkgs[pkgKey]; !alreadySeen {
+							pkgs[pkgKey] = struct{}{}
+							pkgInfo := feature.Name
+							if feature.Version != "" {
+								pkgInfo += " (" + feature.Version + ")"
+							}
+							if v.FixedBy != "" {
+								pkgInfo += " [fixed in " + v.FixedBy + "]"
+							}
+							existing := report.Vulnerabilities[idx].Description
+							if existing != "" {
+								report.Vulnerabilities[idx].Description = existing + "; also affects: " + pkgInfo
+							} else {
+								report.Vulnerabilities[idx].Description = "Vulnerability in package " + pkgInfo
+							}
+						}
+					}
 					continue
 				}
 				seenVulns[v.Name] = len(report.Vulnerabilities)
+				pkgs := make(map[quayPackageIdentity]struct{})
+				if feature.Name != "" {
+					pkgs[quayPackageIdentity{name: feature.Name, version: feature.Version}] = struct{}{}
+				}
+				seenVulnPkgs[v.Name] = pkgs
 
 				desc := v.Description
 				if desc == "" && feature.Name != "" {
