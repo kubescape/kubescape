@@ -100,11 +100,16 @@ const defaultTokenPath = "/var/run/secrets/kubernetes.io/serviceaccount"
 func isMountPathOccupied(u *unstructured.Unstructured, kind string) bool {
 	regular, _, _ := unstructured.NestedSlice(u.Object, containersFieldPath(kind)...)
 	init_, _, _ := unstructured.NestedSlice(u.Object, initContainersFieldPath(kind)...)
-	for _, c := range append(regular, init_...) {
+	all := append(regular, init_...)
+	if len(all) == 0 {
+		return false
+	}
+	for _, c := range all {
 		container, ok := c.(map[string]any)
 		if !ok {
-			continue
+			return false
 		}
+		occupied := false
 		mounts, _, _ := unstructured.NestedSlice(container, "volumeMounts")
 		for _, m := range mounts {
 			mount, ok := m.(map[string]any)
@@ -112,11 +117,15 @@ func isMountPathOccupied(u *unstructured.Unstructured, kind string) bool {
 				continue
 			}
 			if mp, _ := mount["mountPath"].(string); mp == defaultTokenPath {
-				return true
+				occupied = true
+				break
 			}
 		}
+		if !occupied {
+			return false
+		}
 	}
-	return false
+	return true
 }
 
 // hasProjectedServiceAccountToken reports whether the pod spec contains
