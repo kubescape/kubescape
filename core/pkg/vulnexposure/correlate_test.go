@@ -3,6 +3,7 @@ package vulnexposure
 import (
 	"testing"
 
+	"github.com/kubescape/kubescape/v4/core/pkg/exposure"
 	"github.com/kubescape/kubescape/v4/core/pkg/networkpolicy"
 	storagev1beta1 "github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	networkingv1 "k8s.io/api/networking/v1"
@@ -61,7 +62,7 @@ func TestCorrelate_SkipsWorkloadWithoutResolvedEndpoint(t *testing.T) {
 
 	findings, skipped := Correlate(idx, nil, map[Workload][]storagev1beta1.Vulnerability{
 		w: {vuln("CVE-1", "Critical", true)},
-	}, SeverityLow)
+	}, SeverityLow, nil)
 
 	if len(findings) != 0 {
 		t.Errorf("expected no findings for an unresolved workload, got %d", len(findings))
@@ -80,7 +81,7 @@ func TestCorrelate_FiltersBelowMinSeverity(t *testing.T) {
 
 	findings, _ := Correlate(idx, endpoints, map[Workload][]storagev1beta1.Vulnerability{
 		w: {vuln("CVE-LOW", "Low", false), vuln("CVE-CRIT", "Critical", true)},
-	}, SeverityHigh)
+	}, SeverityHigh, nil)
 
 	if len(findings) != 1 || findings[0].Vulnerability.ID != "CVE-CRIT" {
 		t.Errorf("expected only CVE-CRIT to survive the High threshold, got %+v", findings)
@@ -96,7 +97,7 @@ func TestCorrelate_CarriesFixAvailable(t *testing.T) {
 
 	findings, _ := Correlate(idx, endpoints, map[Workload][]storagev1beta1.Vulnerability{
 		w: {vuln("CVE-FIXED", "Critical", true), vuln("CVE-UNFIXED", "Critical", false)},
-	}, SeverityLow)
+	}, SeverityLow, nil)
 
 	byID := map[string]bool{}
 	for _, f := range findings {
@@ -122,7 +123,7 @@ func TestCorrelate_ExposureIsAttachedFromTheIndex(t *testing.T) {
 
 	findings, _ := Correlate(idx, endpoints, map[Workload][]storagev1beta1.Vulnerability{
 		w: {vuln("CVE-1", "Critical", true)},
-	}, SeverityLow)
+	}, SeverityLow, nil)
 
 	if len(findings) != 1 || findings[0].Exposure.Level != networkpolicy.ExposureOpen {
 		t.Errorf("expected ExposureOpen (no policy selects this workload), got %+v", findings)
@@ -156,12 +157,133 @@ func TestCorrelate_SortsWidestExposureAndHighestSeverityFirst(t *testing.T) {
 	findings, _ := Correlate(idx, endpoints, map[Workload][]storagev1beta1.Vulnerability{
 		openWorkload:       {vuln("CVE-OPEN", "Critical", true)},
 		restrictedWorkload: {vuln("CVE-RESTRICTED", "Critical", true)},
-	}, SeverityLow)
+	}, SeverityLow, nil)
 
 	if len(findings) != 2 {
 		t.Fatalf("expected 2 findings, got %d", len(findings))
 	}
 	if findings[0].Vulnerability.ID != "CVE-OPEN" {
 		t.Errorf("expected the ExposureOpen workload's finding first, got %+v", findings[0])
+	}
+}
+
+func TestCorrelate_ExternalExposureIsAttachedFromTheMap(t *testing.T) {
+	idx := openIndex(t)
+	w := Workload{Namespace: "prod", Kind: "Deployment", Name: "web"}
+	endpoints := map[Workload]networkpolicy.Endpoint{
+		w: {Namespace: "prod", Name: "web", Labels: map[string]string{"app": "web"}},
+	}
+	paths := []exposure.ExposurePath{
+		{Kind: exposure.ExposureLoadBalancer, Source: "prod/web"},
+		{Kind: exposure.ExposureIngress, Source: "prod/web-ingress", Host: "web.example.com"},
+	}
+
+	findings, _ := Correlate(idx, endpoints, map[Workload][]storagev1beta1.Vulnerability{
+		w: {vuln("CVE-1", "Critical", true)},
+	}, SeverityLow, map[Workload][]exposure.ExposurePath{w: paths})
+
+	if len(findings) != 1 {
+		t.Fatalf("expected 1 finding, got %d", len(findings))
+	}
+	if len(findings[0].ExternalExposure) != 2 {
+		t.Errorf("expected both external exposure paths to be carried onto the finding, got %+v", findings[0].ExternalExposure)
+	}
+}
+
+func TestCorrelate_NilExternalExposureMapIsBackwardCompatible(t *testing.T) {
+	idx := openIndex(t)
+	w := Workload{Namespace: "prod", Kind: "Deployment", Name: "web"}
+	endpoints := map[Workload]networkpolicy.Endpoint{
+		w: {Namespace: "prod", Name: "web", Labels: map[string]string{"app": "web"}},
+	}
+
+	findings, skipped := Correlate(idx, endpoints, map[Workload][]storagev1beta1.Vulnerability{
+		w: {vuln("CVE-1", "Critical", true)},
+	}, SeverityLow, nil)
+
+	if len(findings) != 1 || len(skipped) != 0 {
+		t.Fatalf("expected 1 finding and 0 skipped, got findings=%+v skipped=%+v", findings, skipped)
+	}
+	if len(findings[0].ExternalExposure) != 0 {
+		t.Errorf("expected no external exposure with a nil map, got %+v", findings[0].ExternalExposure)
+	}
+	if findings[0].Exposure.Level != networkpolicy.ExposureOpen {
+		t.Errorf("NetworkPolicy exposure must be computed exactly as before a nil externalExposure map, got %+v", findings[0].Exposure)
+	}
+}
+
+func TestCorrelate_ExternalExposureOutranksNetworkPolicyExposureAlone(t *testing.T) {
+	// restrictedButExternal is locked down by NetworkPolicy (so its own
+	// in-cluster exposure is the least-exposed level) but is reachable from
+	// outside the cluster via a Service -- that must still outrank a
+	// workload that is wide open inside the cluster but has no external
+	// exposure path at all, since reachability from outside the cluster
+	// does not require any NetworkPolicy rule to exist.
+	restrictiveSel := metav1.LabelSelector{MatchLabels: map[string]string{"app": "restricted"}}
+	restrictivePolicy := &networkingv1.NetworkPolicy{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "prod", Name: "restrict"},
+		Spec: networkingv1.NetworkPolicySpec{
+			PodSelector: restrictiveSel,
+			PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeIngress},
+			Ingress: []networkingv1.NetworkPolicyIngressRule{{
+				From: []networkingv1.NetworkPolicyPeer{{PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "client"}}}},
+			}},
+		},
+	}
+	idx, errs := networkpolicy.NewIndex([]*networkingv1.NetworkPolicy{restrictivePolicy}, nil)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+
+	restrictedButExternal := Workload{Namespace: "prod", Kind: "Deployment", Name: "restricted-but-external"}
+	openInClusterOnly := Workload{Namespace: "prod", Kind: "Deployment", Name: "open-in-cluster-only"}
+	endpoints := map[Workload]networkpolicy.Endpoint{
+		restrictedButExternal: {Namespace: "prod", Name: "restricted-but-external", Labels: map[string]string{"app": "restricted"}},
+		openInClusterOnly:     {Namespace: "prod", Name: "open-in-cluster-only", Labels: map[string]string{"app": "open"}},
+	}
+	externalExposure := map[Workload][]exposure.ExposurePath{
+		restrictedButExternal: {{Kind: exposure.ExposureLoadBalancer, Source: "prod/restricted-but-external"}},
+	}
+
+	findings, _ := Correlate(idx, endpoints, map[Workload][]storagev1beta1.Vulnerability{
+		restrictedButExternal: {vuln("CVE-EXTERNAL", "Critical", true)},
+		openInClusterOnly:     {vuln("CVE-INTERNAL", "Critical", true)},
+	}, SeverityLow, externalExposure)
+
+	if len(findings) != 2 {
+		t.Fatalf("expected 2 findings, got %d", len(findings))
+	}
+	if findings[0].Vulnerability.ID != "CVE-EXTERNAL" {
+		t.Errorf("expected the externally exposed workload's finding first despite its restrictive NetworkPolicy, got %+v", findings[0])
+	}
+}
+
+func TestCorrelate_MultipleExternalExposureSourcesDoNotOverwriteEachOther(t *testing.T) {
+	idx := openIndex(t)
+	a := Workload{Namespace: "prod", Kind: "Deployment", Name: "a"}
+	b := Workload{Namespace: "prod", Kind: "Deployment", Name: "b"}
+	endpoints := map[Workload]networkpolicy.Endpoint{
+		a: {Namespace: "prod", Name: "a", Labels: map[string]string{"app": "a"}},
+		b: {Namespace: "prod", Name: "b", Labels: map[string]string{"app": "b"}},
+	}
+	externalExposure := map[Workload][]exposure.ExposurePath{
+		a: {{Kind: exposure.ExposureLoadBalancer, Source: "prod/a"}},
+		b: {{Kind: exposure.ExposureIngress, Source: "prod/b-ingress", Host: "b.example.com"}},
+	}
+
+	findings, _ := Correlate(idx, endpoints, map[Workload][]storagev1beta1.Vulnerability{
+		a: {vuln("CVE-A", "Critical", true)},
+		b: {vuln("CVE-B", "Critical", true)},
+	}, SeverityLow, externalExposure)
+
+	byWorkload := map[string][]exposure.ExposurePath{}
+	for _, f := range findings {
+		byWorkload[f.Workload.Name] = f.ExternalExposure
+	}
+	if len(byWorkload["a"]) != 1 || byWorkload["a"][0].Kind != exposure.ExposureLoadBalancer {
+		t.Errorf("expected workload a to keep its own LoadBalancer exposure, got %+v", byWorkload["a"])
+	}
+	if len(byWorkload["b"]) != 1 || byWorkload["b"][0].Kind != exposure.ExposureIngress {
+		t.Errorf("expected workload b to keep its own Ingress exposure, got %+v", byWorkload["b"])
 	}
 }
