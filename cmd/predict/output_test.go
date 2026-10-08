@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"encoding/xml"
 	"errors"
+	"os"
+	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/kubescape/kubescape/v4/core/pkg/pss"
@@ -338,5 +341,113 @@ func TestWriteJUnit_FailingWriter(t *testing.T) {
 		err := writeJUnit(fw, res)
 		assert.Error(t, err)
 		assert.Equal(t, "disk full", err.Error())
+	})
+}
+
+func TestWriteOutput_NestedDirectoryAndPermissions(t *testing.T) {
+	res := sampleResult()
+	tmpDir := t.TempDir()
+
+	t.Run("creates nested directories and writes json output", func(t *testing.T) {
+		nestedOutput := filepath.Join(tmpDir, "nested", "sub", "report.json")
+		err := writeOutput(res, "json", nestedOutput, false)
+		require.NoError(t, err)
+
+		info, err := os.Stat(nestedOutput)
+		require.NoError(t, err)
+		assert.True(t, info.Mode().IsRegular())
+
+		// On Unix systems, verify permissions are 0600
+		if runtime.GOOS != "windows" {
+			assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+		}
+
+		data, err := os.ReadFile(nestedOutput)
+		require.NoError(t, err)
+		assert.Contains(t, string(data), `"namespace": "test-ns"`)
+	})
+
+	t.Run("supports all valid formats when writing to file", func(t *testing.T) {
+		formats := []string{"json", "table", "sarif", "junit", "pretty-printer"}
+		for _, fmtName := range formats {
+			outPath := filepath.Join(tmpDir, fmtName+"-report.out")
+			err := writeOutput(res, fmtName, outPath, true)
+			require.NoError(t, err, "format %s should succeed", fmtName)
+
+			info, err := os.Stat(outPath)
+			require.NoError(t, err)
+			assert.Greater(t, info.Size(), int64(0))
+		}
+	})
+
+	t.Run("tightens permissions on pre-existing file", func(t *testing.T) {
+		existingFile := filepath.Join(tmpDir, "existing.json")
+		require.NoError(t, os.WriteFile(existingFile, []byte("old content"), 0o600))
+		if runtime.GOOS != "windows" {
+			require.NoError(t, os.Chmod(existingFile, 0o644))
+			initialInfo, err := os.Stat(existingFile)
+			require.NoError(t, err)
+			require.Equal(t, os.FileMode(0o644), initialInfo.Mode().Perm())
+		}
+
+		err := writeOutput(res, "json", existingFile, false)
+		require.NoError(t, err)
+
+		info, err := os.Stat(existingFile)
+		require.NoError(t, err)
+		if runtime.GOOS != "windows" {
+			assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+		}
+	})
+
+	t.Run("returns error on unsupported format", func(t *testing.T) {
+		outPath := filepath.Join(tmpDir, "invalid.out")
+		err := writeOutput(res, "unknown-format", outPath, false)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "unsupported format")
+	})
+
+	t.Run("preserves symlink target resolution without overwriting lexical sentinel", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("skipping symlink test on windows")
+		}
+		baseDir := t.TempDir()
+		sentinel := filepath.Join(baseDir, "report.json")
+		require.NoError(t, os.WriteFile(sentinel, []byte("sentinel content"), 0o600))
+
+		physicalDir := filepath.Join(baseDir, "physical", "child")
+		require.NoError(t, os.MkdirAll(physicalDir, 0o750))
+
+		linkPath := filepath.Join(baseDir, "link")
+		require.NoError(t, os.Symlink(physicalDir, linkPath))
+
+		outputPath := linkPath + string(filepath.Separator) + ".." + string(filepath.Separator) + "report.json"
+		err := writeOutput(res, "json", outputPath, false)
+		require.NoError(t, err)
+
+		// Sentinel in baseDir must remain untouched
+		sentinelContent, err := os.ReadFile(sentinel)
+		require.NoError(t, err)
+		assert.Equal(t, "sentinel content", string(sentinelContent))
+
+		// Actual target in physical directory must be written
+		targetFile := filepath.Join(baseDir, "physical", "report.json")
+		targetContent, err := os.ReadFile(targetFile)
+		require.NoError(t, err)
+		assert.Contains(t, string(targetContent), `"namespace": "test-ns"`)
+	})
+
+	t.Run("fails when output path has trailing slash and leaves sentinel untouched", func(t *testing.T) {
+		baseDir := t.TempDir()
+		sentinelFile := filepath.Join(baseDir, "report.json")
+		require.NoError(t, os.WriteFile(sentinelFile, []byte("sentinel content"), 0o600))
+
+		trailingSlashPath := sentinelFile + string(filepath.Separator)
+		err := writeOutput(res, "json", trailingSlashPath, false)
+		assert.Error(t, err)
+
+		sentinelContent, err := os.ReadFile(sentinelFile)
+		require.NoError(t, err)
+		assert.Equal(t, "sentinel content", string(sentinelContent))
 	})
 }
