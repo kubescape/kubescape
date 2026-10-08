@@ -35,14 +35,11 @@ The E2E system tests do **not** run on merge — `run-system-tests` is gated on 
 
 ## Release process
 
-Every two weeks, we will create a new tag by bumping the minor version, this will create the release and publish the artifacts.
-If we are introducing breaking changes, we will update the `major` version instead.
-
-When we wish to push a hot-fix/feature within the two weeks, we will bump the `patch`.
+Releases are cut from `master` when the maintainers decide to ship, not on a fixed schedule. A release normally bumps the `patch` version; breaking changes bump the `major` version instead.
 
 ### Creating a new tag
 
-Every two weeks or upon the decision of the maintainers, a maintainer can create a tag.
+When the maintainers decide to release, a maintainer creates a tag.
 
 The tag should look as follows: `v<A>.<B>.<C>`. Pushing it triggers `02-release.yaml`, whose tag filter matches release tags only — a pre-release suffix such as `-rc.0` will not start a release.
 
