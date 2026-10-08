@@ -15,8 +15,8 @@ type EscalationResult struct {
 	// Unbounded lists every distinct escalation edge encountered anywhere
 	// in the closure that grants everything within some scope rather than
 	// a specific enumerable rule set, together with the subject that holds
-	// it -- deduplicated by (subject, primitive, detail), since the same
-	// grant can otherwise be rediscovered on more than one BFS pass over
+	// it -- deduplicated by (subject, primitive, scope, detail), since the
+	// same grant can otherwise be rediscovered on more than one BFS pass over
 	// the same subject. This is a report of *why*, not a dead end: a
 	// namespace-scoped finding is also materialized into that subject's own
 	// rule set (as a wildcard rule confined to the finding's Scope) and the
@@ -63,6 +63,27 @@ type UnboundedFinding struct {
 	Edge    EscalationEdge
 }
 
+// grantKey identifies one grant an escalate-verb or bind-verb edge gives a
+// subject. Scope is part of the identity and is not left to Detail to carry:
+// Detail is prose for a reader, and two edges that differ only in the
+// namespace they apply to (the same unrestricted grant reaching two
+// namespaces) share it word for word.
+type grantKey struct {
+	primitive EscalationPrimitive
+	scope     string
+	detail    string
+}
+
+func grantKeyOf(e EscalationEdge) grantKey {
+	return grantKey{primitive: e.Primitive, scope: e.Scope, detail: e.Detail}
+}
+
+// unboundedKey identifies one UnboundedFinding: a grant and who holds it.
+type unboundedKey struct {
+	subject Subject
+	grant   grantKey
+}
+
 // maxEscalationHops bounds the BFS worklist: subjects dequeued and
 // processed, not raw hop-count. Deliberately generous -- a single
 // cluster-wide "create pods" grant alone enqueues every ServiceAccount in
@@ -82,17 +103,16 @@ var maxEscalationHops = 20000 // var, not const: tests override this to exercise
 // that way which itself unlocks further escalation (e.g. a bound
 // ClusterRole that grants impersonate) is chased, not just recorded.
 // Reprocessing a subject happens only when a bind/escalate edge actually
-// grants something new (tracked per-subject, keyed by the edge's Detail
-// string, which is unique per distinct Role/ClusterRole+scope grant), so
-// this always terminates even though maxEscalationHops bounds it too.
+// grants something new (tracked per-subject by grantKey, which is unique per
+// distinct Role/ClusterRole+scope grant), so this always terminates even though maxEscalationHops bounds it too.
 // Reaching a hardcoded superuser identity (system:masters) via
 // impersonation, or confirming cluster-admin-equivalent power any other
 // way, stops the search early -- see EscalationResult.ClusterAdmin and
 // EscalationResult.Truncated for what that does and doesn't mean.
 func (idx *Index) AnalyzeEscalation(start Subject) EscalationResult {
 	subjectRules := map[Subject][]ScopedRule{start: idx.DirectRules(start)}
-	grantedSeen := map[Subject]map[string]bool{start: {}}
-	unboundedSeen := map[string]bool{}
+	grantedSeen := map[Subject]map[grantKey]bool{start: {}}
+	unboundedSeen := map[unboundedKey]bool{}
 	pathTo := map[Subject][]EscalationEdge{}
 	visited := map[Subject]bool{start: true}
 	var order []Subject
@@ -131,10 +151,10 @@ func (idx *Index) AnalyzeEscalation(start Subject) EscalationResult {
 				order = append(order, t)
 				pathTo[t] = append(append([]EscalationEdge{}, pathTo[s]...), e)
 				subjectRules[t] = idx.DirectRules(t)
-				grantedSeen[t] = map[string]bool{}
+				grantedSeen[t] = map[grantKey]bool{}
 				worklist = append(worklist, t)
 			case e.Unbounded:
-				key := string(s.Kind) + "/" + s.Namespace + "/" + s.Name + "|" + string(e.Primitive) + "|" + e.Detail
+				key := unboundedKey{subject: s, grant: grantKeyOf(e)}
 				if !unboundedSeen[key] {
 					unboundedSeen[key] = true
 					unbounded = append(unbounded, UnboundedFinding{Subject: s, Edge: e})
@@ -155,8 +175,8 @@ func (idx *Index) AnalyzeEscalation(start Subject) EscalationResult {
 				// end. Without this, a scoped Unbounded finding was recorded
 				// but never fed back into the traversal, silently missing
 				// real multi-hop paths.
-				if !grantedSeen[s][e.Detail] {
-					grantedSeen[s][e.Detail] = true
+				if !grantedSeen[s][key.grant] {
+					grantedSeen[s][key.grant] = true
 					subjectRules[s] = append(subjectRules[s], ScopedRule{
 						Rule:      rbacv1.PolicyRule{APIGroups: []string{"*"}, Resources: []string{"*"}, Verbs: []string{"*"}},
 						Namespace: e.Scope,
@@ -164,10 +184,11 @@ func (idx *Index) AnalyzeEscalation(start Subject) EscalationResult {
 					grew = true
 				}
 			default:
-				if grantedSeen[s][e.Detail] {
+				grant := grantKeyOf(e)
+				if grantedSeen[s][grant] {
 					continue
 				}
-				grantedSeen[s][e.Detail] = true
+				grantedSeen[s][grant] = true
 				subjectRules[s] = append(subjectRules[s], e.GrantedRules...)
 				grew = true
 			}

@@ -274,13 +274,20 @@ func (idx *Index) escalateVerbEdges(rules []ScopedRule) []EscalationEdge {
 					// scope-level Unbounded here, and dropping that
 					// silently would be a regression in exactly the
 					// direction this package exists to avoid.
-					edges = append(edges, EscalationEdge{
-						Primitive: PrimitiveEscalateVerb,
-						Detail:    fmt.Sprintf("holds escalate + update/patch on ClusterRole(s) %v, not found in the collected snapshot -- may be a partial collection, not a confirmed absence", targetNames),
-						Unbounded: true,
-						Scope:     "",
-						Target:    &RoleTarget{Kind: "ClusterRole"},
-					})
+					//
+					// One edge per name, each still naming its object: the
+					// finding is about scope-level risk, but the grant itself
+					// reaches no further than these names, and a Target left
+					// unnamed would say it covers every ClusterRole.
+					for _, name := range targetNames {
+						edges = append(edges, EscalationEdge{
+							Primitive: PrimitiveEscalateVerb,
+							Detail:    fmt.Sprintf("holds escalate + update/patch on ClusterRole %q, not found in the collected snapshot -- may be a partial collection, not a confirmed absence", name),
+							Unbounded: true,
+							Scope:     "",
+							Target:    &RoleTarget{Kind: "ClusterRole", Name: name},
+						})
+					}
 				}
 				for _, cr := range matched {
 					edges = append(edges, EscalationEdge{
@@ -302,14 +309,16 @@ func (idx *Index) escalateVerbEdges(rules []ScopedRule) []EscalationEdge {
 			}
 			if len(roles) == 0 {
 				// Same partial-collection fallback as the clusterroles case
-				// above.
-				edges = append(edges, EscalationEdge{
-					Primitive: PrimitiveEscalateVerb,
-					Detail:    fmt.Sprintf("holds escalate + update/patch on Role(s) %v in namespace scope %q, not found in the collected snapshot -- may be a partial collection, not a confirmed absence", targetNames, scope),
-					Unbounded: true,
-					Scope:     scope,
-					Target:    &RoleTarget{Kind: "Role", Namespace: scope},
-				})
+				// above, one edge per name for the same reason.
+				for _, name := range targetNames {
+					edges = append(edges, EscalationEdge{
+						Primitive: PrimitiveEscalateVerb,
+						Detail:    fmt.Sprintf("holds escalate + update/patch on Role %q in namespace scope %q, not found in the collected snapshot -- may be a partial collection, not a confirmed absence", name, scope),
+						Unbounded: true,
+						Scope:     scope,
+						Target:    &RoleTarget{Kind: "Role", Namespace: scope, Name: name},
+					})
+				}
 			}
 			for _, r := range roles {
 				edges = append(edges, EscalationEdge{

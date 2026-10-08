@@ -1009,6 +1009,100 @@ func TestAnalyzeEscalation_SplitScopeEscalateAndUpdateStillCorrelateByRoleName(t
 	}
 }
 
+func TestAnalyzeEscalation_SplitScopeEscalateIsChasedInEveryNamespace(t *testing.T) {
+	// Cluster-wide escalate + update in both a and z is one escalate-verb edge
+	// per namespace, and the two differ in nothing but Scope: their Detail is
+	// the same text. The closure has to keep them apart. The only privileged
+	// identity here is z/admin, so a closure that takes the z edge for a
+	// repeat of the a edge never materializes the grant in z and reports a
+	// clean negative.
+	escalate := clusterRole("escalator", rule([]string{"rbac.authorization.k8s.io"}, []string{"roles"}, []string{"escalate"}, nil))
+	update := clusterRole("updater", rule([]string{"rbac.authorization.k8s.io"}, []string{"roles"}, []string{"update"}, nil))
+	admin := clusterRole("cluster-admin-ish", rule([]string{"*"}, []string{"*"}, []string{"*"}, nil))
+	owned := rule([]string{""}, []string{"configmaps"}, []string{"get"}, nil)
+	idx := NewIndex(
+		[]rbacv1.Role{role("a", "owned", owned), role("z", "owned", owned)},
+		[]rbacv1.ClusterRole{escalate, update, admin},
+		[]rbacv1.RoleBinding{
+			roleBinding("a", "update", "ClusterRole", "updater", saSubject("a", "attacker")),
+			roleBinding("z", "update", "ClusterRole", "updater", saSubject("a", "attacker")),
+			roleBinding("a", "owned", "Role", "owned", saSubject("a", "attacker")),
+			roleBinding("z", "owned", "Role", "owned", saSubject("a", "attacker")),
+		},
+		[]rbacv1.ClusterRoleBinding{
+			clusterRoleBinding("escalate", "escalator", saSubject("a", "attacker")),
+			clusterRoleBinding("admin", "cluster-admin-ish", saSubject("z", "admin")),
+		},
+		[]corev1.ServiceAccount{saObj("a", "attacker"), saObj("z", "admin")},
+	)
+
+	result := idx.AnalyzeEscalation(sa("a", "attacker"))
+	if got := roleEscalationFindings(result); !slices.Equal(got, []string{"a", "z"}) {
+		t.Errorf("escalate-verb findings on Roles have scopes %v, want [a z]: one finding per namespace the grant reaches", got)
+	}
+	reachedAdmin := false
+	for _, p := range result.Reached {
+		if last := p.Edges[len(p.Edges)-1]; last.ToSubject != nil && *last.ToSubject == sa("z", "admin") {
+			reachedAdmin = true
+		}
+	}
+	if !reachedAdmin {
+		t.Errorf("Reached = %+v, want a path to ServiceAccount z/admin: rewriting a Role in z unlocks create-pods there", result.Reached)
+	}
+	if !result.ClusterAdmin {
+		t.Error("ClusterAdmin = false, want true: z/admin is bound to a cluster-wide */*/* rule")
+	}
+}
+
+func TestDirectEscalationEdges_UnfoundEscalateTargetKeepsItsResourceNames(t *testing.T) {
+	// escalate + update restricted to a name that resolves to nothing in the
+	// snapshot is still reported, as an Unbounded finding: the object may only
+	// be missing from a partial collection. But the grant is no wider for
+	// that. Its Target has to go on naming the object, or a caller asking
+	// about an unrelated one that does exist is told it is covered.
+	names := []string{"missing"}
+	rbacRule := func(resource string) rbacv1.PolicyRule {
+		return rule([]string{"rbac.authorization.k8s.io"}, []string{resource}, []string{"escalate", "update"}, names)
+	}
+	idx := NewIndex(
+		[]rbacv1.Role{role("dev", "editable"), role("dev", "namespaced", rbacRule("roles"))},
+		[]rbacv1.ClusterRole{clusterRole("existing"), clusterRole("cluster-wide", rbacRule("roles"), rbacRule("clusterroles"))},
+		[]rbacv1.RoleBinding{roleBinding("dev", "rb", "Role", "namespaced", saSubject("dev", "attacker"))},
+		[]rbacv1.ClusterRoleBinding{clusterRoleBinding("crb", "cluster-wide", saSubject("dev", "attacker"))},
+		nil)
+
+	type key struct {
+		target RoleTarget
+		scope  string
+	}
+	got := map[key]bool{}
+	for _, e := range idx.DirectEscalationEdges(sa("dev", "attacker"), idx.DirectRules(sa("dev", "attacker"))) {
+		if e.Primitive != PrimitiveEscalateVerb {
+			continue
+		}
+		if !e.Unbounded {
+			t.Errorf("edge %q is not Unbounded: the fallback has to stay a risk finding", e.Detail)
+		}
+		if e.Target == nil {
+			t.Fatalf("edge %q has no Target", e.Detail)
+		}
+		got[key{*e.Target, e.Scope}] = true
+		if e.Target.Covers("Role", "dev", "editable") || e.Target.Covers("ClusterRole", "", "existing") {
+			t.Errorf("edge %q has Target %+v, which covers an object the grant does not name", e.Detail, *e.Target)
+		}
+	}
+	for _, want := range []key{
+		// The Role grant held in dev, and the one held cluster-wide.
+		{RoleTarget{Kind: "Role", Namespace: "dev", Name: "missing"}, "dev"},
+		{RoleTarget{Kind: "Role", Name: "missing"}, ""},
+		{RoleTarget{Kind: "ClusterRole", Name: "missing"}, ""},
+	} {
+		if !got[want] {
+			t.Errorf("no escalate-verb edge with Target %+v and Scope %q; got %+v", want.target, want.scope, got)
+		}
+	}
+}
+
 func TestAnalyzeEscalation_NamespacedBindDoesNotAllowAClusterRoleBinding(t *testing.T) {
 	// bind is checked in the namespace of the binding being created, and a
 	// ClusterRoleBinding has none: a bind grant from a RoleBinding cannot

@@ -124,6 +124,13 @@ objects:
 			"name: f" + objects + "questions:\n  - {id: q, " + subject + ", rewriteRole: {namespace: ns, name: r, verb: delete}, kubernetes: allowed}\n",
 			"must be update or patch",
 		},
+		// Kubernetes allows this request when the grant covers it, and rbacgraph
+		// has no edge for it, so it must be refused here and not left to fail
+		// as a difference somebody then records as intentional.
+		"mintToken for the subject itself": {
+			"name: f" + objects + "questions:\n  - {id: q, " + subject + ", mintToken: {namespace: ns, name: subject}, kubernetes: allowed}\n",
+			"mintToken must name a ServiceAccount other than the subject",
+		},
 		"no questions": {
 			"name: f" + objects,
 			"has no questions",

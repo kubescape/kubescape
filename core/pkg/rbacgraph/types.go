@@ -199,8 +199,9 @@ type RoleTarget struct {
 	// for a Role when the edge covers Roles in every namespace.
 	Namespace string
 	// Name is the object's name, or "" when the edge covers every object of
-	// Kind in Namespace (an unrestricted grant, or one whose named objects
-	// were not found in the collected snapshot).
+	// Kind in Namespace (an unrestricted grant). A grant restricted by
+	// resourceNames always carries the name, whether or not an object of that
+	// name was found in the collected snapshot.
 	Name string
 }
 

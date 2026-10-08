@@ -80,6 +80,12 @@ Things to keep in mind when writing one:
   User are not supported: the reference would need a second way to
   authenticate. rbacgraph's handling of a User that carries a ServiceAccount's
   username is covered by its unit tests.
+- `mintToken` must name a ServiceAccount other than the one asking. Kubernetes
+  allows a ServiceAccount to mint a token for itself when a rule covers it,
+  but that is not an escalation, and rbacgraph deliberately has no edge from a
+  subject to itself. The question would compare an authorization with an
+  escalation, so loading the fixture fails. It is not something to record as
+  an `intentionalDifference`.
 - rbacgraph does not distinguish `update` from `patch`. Use the `verb` the
   fixture's grants actually hold.
 - Kubernetes lets anyone bind a role whose permissions they already hold. For

@@ -32,6 +32,12 @@ func NewKubescape(f Fixture) (*Kubescape, error) {
 // corresponds to q. It reads the subject's direct edges rather than the
 // transitive closure: a Question is a single request to the API server, and
 // a multi-hop verdict has no single request to compare with.
+//
+// An edge is an escalation, which is narrower than an authorization: rbacgraph
+// drops an edge that leads back to the subject, so a ServiceAccount minting a
+// token for itself is a request Kubernetes allows and no edge describes.
+// Fixture validation refuses that question rather than let it be answered
+// "denied" here.
 func (k *Kubescape) Answer(q Question) Answer {
 	subject := rbacgraph.Subject{Kind: rbacgraph.KindServiceAccount, Namespace: q.ServiceAccount.Namespace, Name: q.ServiceAccount.Name}
 	for _, edge := range k.idx.DirectEscalationEdges(subject, k.idx.DirectRules(subject)) {

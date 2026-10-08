@@ -61,6 +61,17 @@ type Question struct {
 	ID             string            `json:"id"`
 	ServiceAccount ServiceAccountRef `json:"serviceAccount"`
 
+	// MintToken asks whether the subject can create a token for another
+	// ServiceAccount.
+	//
+	// Kubernetes: a POST to that ServiceAccount's token subresource.
+	// rbacgraph: a mint-serviceaccount-token edge to it.
+	//
+	// It must not name the subject itself. Kubernetes authorizes that request
+	// like any other, but a ServiceAccount gains nothing from a token for
+	// itself, so rbacgraph, which reports escalation and not authorization,
+	// has no edge for it. The two sides would be answering different
+	// questions, and validate rejects the fixture.
 	MintToken       *ServiceAccountRef `json:"mintToken,omitempty"`
 	RewriteRole     *RewriteRole       `json:"rewriteRole,omitempty"`
 	BindClusterRole *BindClusterRole   `json:"bindClusterRole,omitempty"`
@@ -220,6 +231,9 @@ func (f Fixture) validate() error {
 		kinds := 0
 		if q.MintToken != nil {
 			kinds++
+			if *q.MintToken == q.ServiceAccount {
+				return fmt.Errorf("fixture %q, question %q: mintToken must name a ServiceAccount other than the subject: rbacgraph reports escalation, and a token for the subject itself is none, so this request has no edge to compare with", f.Name, q.ID)
+			}
 		}
 		if q.RewriteRole != nil {
 			kinds++
