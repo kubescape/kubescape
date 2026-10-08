@@ -52,6 +52,26 @@ func PodTemplateLabels(kind string, obj map[string]any) map[string]string {
 	return raw
 }
 
+// PodTemplateHostNetwork extracts the hostNetwork field from a workload's
+// pod spec. A Pod running with hostNetwork: true uses the node's network
+// namespace and gets ExposureOpen regardless of NetworkPolicy rules.
+// Exported so cmd/mcpserver can call it alongside PodTemplateLabels.
+func PodTemplateHostNetwork(kind string, obj map[string]any) bool {
+	u := &unstructured.Unstructured{Object: obj}
+	path := []string{"spec", "template", "spec", "hostNetwork"}
+	if kind == "Pod" {
+		path = []string{"spec", "hostNetwork"}
+	}
+	if kind == "CronJob" {
+		path = []string{"spec", "jobTemplate", "spec", "template", "spec", "hostNetwork"}
+	}
+	val, found, err := unstructured.NestedBool(u.Object, path...)
+	if err != nil || !found {
+		return false
+	}
+	return val
+}
+
 // WorkloadEndpointResult is the outcome of resolving one workload to its
 // network identity from the static resource map.
 type WorkloadEndpointResult struct {
