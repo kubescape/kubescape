@@ -55,7 +55,9 @@ type PathValue struct {
 // failedPathValues resolves each path that caused control to fail (its
 // DeletePaths and ReviewPaths, plus any legacy FailedPath) against
 // resource's captured object, skipping paths whose value is sensitive (see
-// isSensitivePath) or that can't be resolved. The OPA processor no longer
+// isSensitivePath) or that can't be resolved. A path that selects an object
+// or list has its credential-shaped descendants redacted before it is
+// serialized (see extractRedactedValueAtPath). The OPA processor no longer
 // records FailedPath, so reading only that field would leave Evidence empty.
 // An unresolved path is not treated as an error: a rule's path can
 // legitimately not match this particular resource variant (e.g. a field
@@ -75,7 +77,7 @@ func failedPathValues(control *resourcesresults.ResourceAssociatedControl, resou
 		for k := range control.ResourceAssociatedRules[j].Paths {
 			entry := control.ResourceAssociatedRules[j].Paths[k]
 			for _, p := range []string{entry.FailedPath, entry.DeletePath, entry.ReviewPath} {
-				if p == "" || isSensitivePath(kind, p) {
+				if p == "" {
 					continue
 				}
 				if _, dup := seen[p]; dup {
@@ -84,7 +86,7 @@ func failedPathValues(control *resourcesresults.ResourceAssociatedControl, resou
 				if obj == nil {
 					obj = normalizeForPathExtraction(resource.GetObject())
 				}
-				if val, ok := extractValueAtPath(obj, p); ok {
+				if val, ok := extractRedactedValueAtPath(kind, obj, p); ok {
 					seen[p] = struct{}{}
 					out = append(out, PathValue{Path: p, Value: val})
 				}

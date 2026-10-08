@@ -769,3 +769,126 @@ func TestFailedPathValuesObjectShapedSafeFields(t *testing.T) {
 		assert.Equal(t, onSchemaValue, got[0].Value)
 	})
 }
+
+// Evidence must report an integer exactly as the captured object holds it.
+// Normalizing the object through encoding/json's default decoding turns every
+// number into a float64, which cannot represent integers above 2^53.
+func TestFailedPathValuesPreservesLargeIntegers(t *testing.T) {
+	const generation = int64(9007199254740993) // 2^53 + 1
+	newResource := func() *mockResource {
+		return &mockResource{kind: "Deployment", obj: map[string]any{
+			"metadata": map[string]any{"generation": generation},
+		}}
+	}
+	for name, entry := range map[string]armotypes.PosturePaths{
+		"FailedPath": {FailedPath: "metadata.generation"},
+		"DeletePath": {DeletePath: "metadata.generation"},
+		"ReviewPath": {ReviewPath: "metadata.generation"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			control := &resourcesresults.ResourceAssociatedControl{
+				ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{
+					{Paths: []armotypes.PosturePaths{entry}},
+				},
+			}
+			got := failedPathValues(control, newResource())
+			assert.Equal(t, []PathValue{{Path: "metadata.generation", Value: "9007199254740993"}}, got)
+		})
+	}
+
+	t.Run("inside an aggregate", func(t *testing.T) {
+		control := &resourcesresults.ResourceAssociatedControl{
+			ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{
+				{Paths: []armotypes.PosturePaths{{ReviewPath: "metadata"}}},
+			},
+		}
+		got := failedPathValues(control, newResource())
+		assert.Equal(t, []PathValue{{Path: "metadata", Value: `{"generation":9007199254740993}`}}, got)
+	})
+}
+
+// A rule can point at a whole object or list (regolibrary's
+// alert-any-hostpath reports the whole volume, spec.volumes[N]). Evidence then
+// serializes everything below that path, so a credential-shaped descendant
+// must be redacted even though the path the rule named is not itself
+// sensitive.
+func TestFailedPathValuesRedactsSensitiveDescendants(t *testing.T) {
+	const placeholder = "review-placeholder"
+
+	controlWith := func(entry armotypes.PosturePaths) *resourcesresults.ResourceAssociatedControl {
+		return &resourcesresults.ResourceAssociatedControl{
+			ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{
+				{Paths: []armotypes.PosturePaths{entry}},
+			},
+		}
+	}
+	podWithVolume := func() *mockResource {
+		return &mockResource{kind: "Pod", obj: map[string]any{
+			"spec": map[string]any{
+				"volumes": []any{
+					map[string]any{
+						"name":     "host",
+						"hostPath": map[string]any{"path": "/tmp"},
+						"apiKey":   placeholder,
+					},
+				},
+			},
+		}}
+	}
+
+	for name, entry := range map[string]armotypes.PosturePaths{
+		"DeletePath": {DeletePath: "spec.volumes[0]"},
+		"ReviewPath": {ReviewPath: "spec.volumes[0]"},
+		"FailedPath": {FailedPath: "spec.volumes[0]"},
+		"unindexed":  {DeletePath: "spec.volumes"},
+		"ancestor":   {DeletePath: "spec"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got := failedPathValues(controlWith(entry), podWithVolume())
+			require.Len(t, got, 1)
+			assert.NotContains(t, got[0].Value, placeholder)
+			assert.Contains(t, got[0].Value, `"apiKey":"[redacted]"`)
+			// the rest of the volume is still reported
+			assert.Contains(t, got[0].Value, `"hostPath":{"path":"/tmp"}`)
+		})
+	}
+
+	t.Run("container env value under a container path", func(t *testing.T) {
+		resource := &mockResource{kind: "Deployment", obj: map[string]any{
+			"spec": map[string]any{"template": map[string]any{"spec": map[string]any{
+				"containers": []any{map[string]any{
+					"name": "app",
+					"env":  []any{map[string]any{"name": "PLAIN", "value": placeholder}},
+				}},
+			}}},
+		}}
+		got := failedPathValues(controlWith(armotypes.PosturePaths{ReviewPath: "spec.template.spec.containers[0]"}), resource)
+		require.Len(t, got, 1)
+		assert.NotContains(t, got[0].Value, placeholder)
+		assert.Contains(t, got[0].Value, `"name":"PLAIN"`)
+	})
+
+	t.Run("Secret data under the object root", func(t *testing.T) {
+		resource := &mockResource{kind: "Secret", obj: map[string]any{
+			"data":     map[string]any{"username": placeholder},
+			"metadata": map[string]any{"name": "s"},
+		}}
+		got := failedPathValues(controlWith(armotypes.PosturePaths{ReviewPath: "data"}), resource)
+		assert.Empty(t, got, "the data path itself is sensitive")
+	})
+
+	// A descendant is classified exactly as the same path named directly
+	// would be, so the safe-field exceptions still apply below an aggregate.
+	t.Run("safe-field exception still applies below an aggregate", func(t *testing.T) {
+		resource := &mockResource{kind: "Pod", obj: map[string]any{
+			"spec": map[string]any{
+				"automountServiceAccountToken": true,
+				"hostPID":                      true,
+			},
+		}}
+		require.False(t, isSensitivePath("Pod", "spec.automountServiceAccountToken"))
+		got := failedPathValues(controlWith(armotypes.PosturePaths{ReviewPath: "spec"}), resource)
+		require.Len(t, got, 1)
+		assert.Equal(t, `{"automountServiceAccountToken":true,"hostPID":true}`, got[0].Value)
+	})
+}
