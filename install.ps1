@@ -4,8 +4,9 @@ $BASE_DIR = "$env:USERPROFILE\.kubescape"
 $KUBESCAPE_EXEC = "kubescape.exe"
 
 # Determine architecture
+$procArch = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE }
 $arch = if ([Environment]::Is64BitOperatingSystem) {
-    if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "arm64" } else { "amd64" }
+    if ($procArch -eq "ARM64") { "arm64" } else { "amd64" }
 } else {
     Write-Host "Error: 32-bit systems are not supported" -ForegroundColor Red
     exit 1
@@ -22,12 +23,43 @@ function Get-LatestVersion {
     }
 }
 
-# Parse command line arguments for version
+# Parse command line arguments
 $version = $null
+$autoConfirmPath = $false
+$skipPathPrompt = $false
+
 for ($i = 0; $i -lt $args.Count; $i++) {
-    if ($args[$i] -eq "-v" -and $i + 1 -lt $args.Count) {
-        $version = $args[$i + 1]
+    switch -Exact ($args[$i]) {
+        "-v" {
+            if ($i + 1 -lt $args.Count -and -not $args[$i + 1].StartsWith("-")) {
+                $version = $args[++$i]
+            } else {
+                Write-Host "Error: -v requires a version argument" -ForegroundColor Red
+                exit 1
+            }
+        }
+        "--version" {
+            if ($i + 1 -lt $args.Count -and -not $args[$i + 1].StartsWith("-")) {
+                $version = $args[++$i]
+            } else {
+                Write-Host "Error: --version requires a version argument" -ForegroundColor Red
+                exit 1
+            }
+        }
+        "-y" { $autoConfirmPath = $true }
+        "-Yes" { $autoConfirmPath = $true }
+        "--yes" { $autoConfirmPath = $true }
+        "-NonInteractive" { $autoConfirmPath = $true }
+        "--non-interactive" { $autoConfirmPath = $true }
+        "-n" { $skipPathPrompt = $true }
+        "-No" { $skipPathPrompt = $true }
+        "--no" { $skipPathPrompt = $true }
     }
+}
+
+if ($autoConfirmPath -and $skipPathPrompt) {
+    Write-Host "Error: Conflicting options provided. Cannot specify both affirmative (-y/-Yes/-NonInteractive) and negative (-n/-No) PATH flags." -ForegroundColor Red
+    exit 1
 }
 
 # Get version (use provided or fetch latest)
@@ -159,13 +191,43 @@ Write-Host "Checksum verified." -ForegroundColor Green
 
 # Update user PATH if needed
 $currentPath = [Environment]::GetEnvironmentVariable("Path", "User")
-if (-not $currentPath.Contains($BASE_DIR)) {
-    $confirmation = Read-Host "Add kubescape to user PATH? (y/n)"
-    if ($confirmation -eq 'y') {
-        $newPath = $currentPath + ";$BASE_DIR"
+$normalizedBaseDir = $BASE_DIR.TrimEnd('\')
+$pathList = if ([string]::IsNullOrEmpty($currentPath)) { @() } else {
+    $currentPath -split ';' | Where-Object { $_ } | ForEach-Object { $_.Trim().TrimEnd('\') }
+}
+
+if ($normalizedBaseDir -notin $pathList) {
+    $addToPath = $autoConfirmPath
+    if (-not $addToPath -and -not $skipPathPrompt) {
+        try {
+            if ([Environment]::UserInteractive -and -not [Console]::IsInputRedirected) {
+                $confirmation = Read-Host "Add kubescape to user PATH? (y/n)"
+                if ($confirmation -eq 'y' -or $confirmation -eq 'Y') {
+                    $addToPath = $true
+                }
+            }
+        } catch {
+            # In non-interactive or redirected input environments, Read-Host can fail
+            $addToPath = $false
+        }
+    }
+
+    if ($addToPath) {
+        $newPath = if ([string]::IsNullOrEmpty($currentPath)) {
+            $BASE_DIR
+        } else {
+            "$currentPath;$BASE_DIR"
+        }
         [Environment]::SetEnvironmentVariable("Path", $newPath, "User")
-        $env:Path = $env:Path + ";$BASE_DIR"
+        $env:Path = if ([string]::IsNullOrEmpty($env:Path)) {
+            $BASE_DIR
+        } else {
+            "$env:Path;$BASE_DIR"
+        }
         Write-Host "Added $BASE_DIR to PATH" -ForegroundColor Green
+    } else {
+        Write-Host "Skipped adding $BASE_DIR to user PATH." -ForegroundColor Yellow
+        Write-Host "Remember to add $BASE_DIR to your PATH manually or rerun with -y" -ForegroundColor Yellow
     }
 }
 
