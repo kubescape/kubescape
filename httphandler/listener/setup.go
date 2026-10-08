@@ -11,6 +11,7 @@ import (
 	"net/http/pprof"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/kubescape/backend/pkg/versioncheck"
@@ -46,7 +47,7 @@ const (
 // SetupHTTPListener serves requests until ctx is cancelled or serving fails.
 // Successful shutdown drains HTTP requests and joins the scan worker.
 func SetupHTTPListener(ctx context.Context) error {
-	keyPair, err := loadTLSKey(getCertFile(), getKeyFile())
+	tlsReloader, err := newTLSReloader(getCertFile(), getKeyFile())
 	if err != nil {
 		return err
 	}
@@ -65,8 +66,10 @@ func SetupHTTPListener(ctx context.Context) error {
 		IdleTimeout:       120 * time.Second,
 		MaxHeaderBytes:    1 << 20, // 1 MiB
 	}
-	if keyPair != nil {
-		server.TLSConfig = &tls.Config{Certificates: []tls.Certificate{*keyPair}}
+	if tlsReloader != nil {
+		server.TLSConfig = &tls.Config{
+			GetCertificate: tlsReloader.GetCertificate,
+		}
 	}
 
 	httpHandler := handlerequestsv1.NewHTTPHandler(getOffline())
@@ -194,6 +197,146 @@ func loadTLSKey(certFile, keyFile string) (*tls.Certificate, error) {
 		return nil, fmt.Errorf("failed to load key pair: %w", err)
 	}
 	return &pair, nil
+}
+
+// tlsReloader dynamically reloads TLS certificates and private keys from disk
+// when the underlying files are rotated (e.g. by cert-manager or Secret remounts).
+type tlsReloader struct {
+	certFile string
+	keyFile  string
+
+	mu          sync.RWMutex
+	cert        *tls.Certificate
+	certModTime time.Time
+	certSize    int64
+	keyModTime  time.Time
+	keySize     int64
+}
+
+// newTLSReloader creates and initializes a tlsReloader.
+// It performs an initial load of the key pair to validate them at startup.
+// If both paths are empty, it returns nil, nil (TLS disabled).
+// If only one path is set, it returns a validation error.
+func newTLSReloader(certFile, keyFile string) (*tlsReloader, error) {
+	switch {
+	case certFile == "" && keyFile == "":
+		return nil, nil
+	case certFile == "" || keyFile == "":
+		return nil, fmt.Errorf("both KS_CERT_FILE and KS_KEY_FILE must be set to enable TLS (got certFile=%q, keyFile=%q)", certFile, keyFile)
+	}
+
+	reloader := &tlsReloader{
+		certFile: certFile,
+		keyFile:  keyFile,
+	}
+
+	if err := reloader.reload(); err != nil {
+		return nil, fmt.Errorf("failed to load key pair: %w", err)
+	}
+
+	return reloader, nil
+}
+
+// GetCertificate returns the current active certificate for incoming TLS handshakes.
+// If the certificate or key file has changed on disk, it attempts to reload them.
+// If reloading fails, it logs a warning and returns the last known good certificate.
+func (r *tlsReloader) GetCertificate(_ *tls.ClientHelloInfo) (*tls.Certificate, error) {
+	if r == nil {
+		return nil, errors.New("tls reloader is nil")
+	}
+
+	if err := r.maybeReload(); err != nil {
+		logger.L().Warning("failed to reload TLS key pair, serving existing certificate", helpers.Error(err))
+	}
+
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if r.cert == nil {
+		return nil, errors.New("no TLS certificate available")
+	}
+	return r.cert, nil
+}
+
+// reload reads and parses the certificate and private key files unconditionally,
+// recording file metadata.
+func (r *tlsReloader) reload() error {
+	certStat, err := os.Stat(r.certFile)
+	if err != nil {
+		return fmt.Errorf("failed to stat cert file %q: %w", r.certFile, err)
+	}
+
+	keyStat, err := os.Stat(r.keyFile)
+	if err != nil {
+		return fmt.Errorf("failed to stat key file %q: %w", r.keyFile, err)
+	}
+
+	pair, err := tls.LoadX509KeyPair(r.certFile, r.keyFile)
+	if err != nil {
+		return fmt.Errorf("failed to load key pair: %w", err)
+	}
+
+	r.mu.Lock()
+	r.cert = &pair
+	r.certModTime = certStat.ModTime()
+	r.certSize = certStat.Size()
+	r.keyModTime = keyStat.ModTime()
+	r.keySize = keyStat.Size()
+	r.mu.Unlock()
+
+	return nil
+}
+
+// maybeReload inspects file modification times and sizes. If changed,
+// it re-reads the key pair and updates the active certificate.
+func (r *tlsReloader) maybeReload() error {
+	certStat, err := os.Stat(r.certFile)
+	if err != nil {
+		return fmt.Errorf("failed to stat cert file: %w", err)
+	}
+
+	keyStat, err := os.Stat(r.keyFile)
+	if err != nil {
+		return fmt.Errorf("failed to stat key file: %w", err)
+	}
+
+	r.mu.RLock()
+	unchanged := certStat.ModTime().Equal(r.certModTime) &&
+		certStat.Size() == r.certSize &&
+		keyStat.ModTime().Equal(r.keyModTime) &&
+		keyStat.Size() == r.keySize
+	r.mu.RUnlock()
+
+	if unchanged {
+		return nil
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	// Double check under write lock to avoid redundant loads from concurrent handshakes.
+	if certStat.ModTime().Equal(r.certModTime) &&
+		certStat.Size() == r.certSize &&
+		keyStat.ModTime().Equal(r.keyModTime) &&
+		keyStat.Size() == r.keySize {
+		return nil
+	}
+
+	pair, err := tls.LoadX509KeyPair(r.certFile, r.keyFile)
+	if err != nil {
+		return fmt.Errorf("failed to load rotated key pair: %w", err)
+	}
+
+	r.cert = &pair
+	r.certModTime = certStat.ModTime()
+	r.certSize = certStat.Size()
+	r.keyModTime = keyStat.ModTime()
+	r.keySize = keyStat.Size()
+
+	logger.L().Info("reloaded TLS certificate and key pair",
+		helpers.String("certFile", r.certFile),
+		helpers.String("keyFile", r.keyFile))
+
+	return nil
 }
 
 func getOffline() bool {
