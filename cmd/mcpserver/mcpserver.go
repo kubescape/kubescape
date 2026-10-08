@@ -1394,7 +1394,9 @@ func mcpServerEntrypoint(transport string, port int) error {
 	createMutatingAdmissionPolicyTools(ksServer)
 	createVulnerabilityExposureTools(ksServer)
 	createServiceExposureTools(ksServer)
+	createPSSPredictorTools(ksServer)
 	createRBACEscalationTools(ksServer)
+	createDiffReportsTools(ksServer)
 	createFrameworkScanningTools(ksServer)
 	createIaCScanningTools(ksServer)
 	createIaCControlScanningTool(ksServer)
@@ -1407,8 +1409,8 @@ func mcpServerEntrypoint(transport string, port int) error {
 	// Start the server
 	switch transport {
 	case "sse":
-		sseServer := server.NewSSEServer(s)
 		addr := fmt.Sprintf("127.0.0.1:%d", port)
+		sseServer, _ := newSSEServer(s, addr)
 		logger.L().Info("Starting SSE server", helpers.String("addr", addr))
 		if err := sseServer.Start(addr); err != nil {
 			return fmt.Errorf("sse server error: %w", err)

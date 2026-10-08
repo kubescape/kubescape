@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -16,9 +18,9 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v4/core/cautils"
-	"github.com/kubescape/kubescape/v4/core/core"
 	"github.com/kubescape/kubescape/v4/core/meta"
 	"github.com/kubescape/kubescape/v4/core/pkg/fleet"
+	"github.com/kubescape/kubescape/v4/core/pkg/resourcehandler"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer"
 	printerv2 "github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer/v2"
@@ -204,8 +206,11 @@ func validateReferenceCluster(scanInfo *cautils.ScanInfo) error {
 // Comparing the unresolved path would let two contexts, or a context and the
 // fleet report, agree on a real destination while looking distinct.
 //
-// Formats that print to stdout contribute no destination.
+// Formats that print to stdout and the discard sink contribute no destination.
 func printerDestinations(outputPath string, formats []string) []string {
+	if strings.TrimSpace(outputPath) == os.DevNull {
+		return nil
+	}
 	if len(formats) == 0 {
 		return []string{outputPath}
 	}
@@ -534,8 +539,22 @@ func runFleetContext(kubeContext string, scanInfo *cautils.ScanInfo, ks meta.IKu
 
 	started := time.Now()
 	results, err = run(ctx, scanInfo, ks, policyIdentifiers)
+	if err != nil && ctx.Err() != nil {
+		err = interruptedError{err: err}
+	}
 	return results, time.Since(started), err
 }
+
+// interruptedError marks a context's error as coming from its run being
+// stopped, by a signal or by --scan-timeout. The error alone cannot say so: a
+// dial or response timeout matches context.DeadlineExceeded as well.
+type interruptedError struct {
+	err error
+}
+
+func (e interruptedError) Error() string { return e.err.Error() }
+
+func (e interruptedError) Unwrap() error { return e.err }
 
 // newClusterResult turns one context's outcome into the row the fleet report
 // carries for it.
@@ -547,12 +566,12 @@ func runFleetContext(kubeContext string, scanInfo *cautils.ScanInfo, ks meta.IKu
 // clusters an operator most needs to see, the ones that failed their gate,
 // from the matrix, and leave them with no report and no cells.
 //
-// Only a run that produced nothing is classified by its error. A cancelled or
-// expired context means the run was interrupted, so nothing was learned about
-// the cluster; a per-cluster --scan-timeout firing lands here for the same
-// reason, since the deadline says how long the operator was prepared to wait
-// rather than anything about the cluster. core.ErrClusterConnection means the
-// API server was never reached. Anything else is an error inside the scan.
+// Only a run that produced nothing is classified by its error. A run that was
+// interrupted, by a signal or a per-cluster --scan-timeout, learned nothing
+// about the cluster, since the deadline says how long the operator was prepared
+// to wait rather than anything about the cluster. A cluster whose API server
+// never answered is unreachable. Anything else is an error, including a
+// kubeconfig that could not be loaded and a server that answered and refused.
 //
 // The embedded report is the full one. --min-severity and --max-severity are
 // output-only by design: HandleResults applies them for the printers and then
@@ -575,10 +594,11 @@ func newClusterResult(kubeContext string, results *resultshandling.ResultsHandle
 	}
 
 	if results == nil {
+		var interrupted interruptedError
 		switch {
-		case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+		case errors.As(err, &interrupted):
 			cluster.Status = fleet.ClusterCancelled
-		case errors.Is(err, core.ErrClusterConnection):
+		case clusterUnreachable(err):
 			cluster.Status = fleet.ClusterUnreachable
 		default:
 			cluster.Status = fleet.ClusterError
@@ -602,11 +622,77 @@ func newClusterResult(kubeContext string, results *resultshandling.ResultsHandle
 	return cluster
 }
 
+// clusterUnreachable reports whether err shows the API server never answered:
+// every resource query failed, and each one on the network. Network failures
+// elsewhere in a scan, such as downloading policies, say nothing about the
+// cluster. A single answer to any query, even an empty list, a NotFound or a
+// refusal, means the cluster was reached.
+func clusterUnreachable(err error) bool {
+	if !errors.Is(err, resourcehandler.ErrNoResourcesCollected) {
+		return false
+	}
+	var answers interface{ APIServerAnswered() bool }
+	if errors.As(err, &answers) && answers.APIServerAnswered() {
+		return false
+	}
+	failures := failureBranches(err)
+	for _, failure := range failures {
+		if !networkFailure(failure) {
+			return false
+		}
+	}
+	return len(failures) > 0
+}
+
+// failureBranches returns the separate failures inside err: the errors joined by
+// the first node that carries several, or err itself when none does.
+func failureBranches(err error) []error {
+	for node := err; node != nil; node = errors.Unwrap(node) {
+		joined, ok := node.(interface{ Unwrap() []error })
+		if !ok {
+			continue
+		}
+		var branches []error
+		for _, branch := range joined.Unwrap() {
+			branches = append(branches, failureBranches(branch)...)
+		}
+		return branches
+	}
+	if err == nil {
+		return nil
+	}
+	return []error{err}
+}
+
+// networkFailure reports whether a single failure got no answer from the API
+// server: the name did not resolve, the connection could not be opened, or the
+// request timed out before a response arrived. A timeout while reading a
+// response body does not count, since the server had already answered; the
+// HTTP client wraps only failures that happen before a response in url.Error.
+func networkFailure(err error) bool {
+	for node := err; node != nil; node = errors.Unwrap(node) {
+		if opErr, ok := node.(*net.OpError); ok && opErr.Op == "dial" {
+			return true
+		}
+	}
+	var dnsErr *net.DNSError
+	if errors.As(err, &dnsErr) {
+		return true
+	}
+	var urlErr *url.Error
+	return errors.As(err, &urlErr) && urlErr.Timeout()
+}
+
 // writeFleetReport serialises the report to path as indented JSON. The
 // destination is replaced atomically only after the complete report has been
 // encoded and flushed, so a failed write cannot destroy a previous good
 // report or leave a truncated report that still looks like the latest run.
 func writeFleetReport(path string, report *fleet.FleetReport) error {
+	// A discard sink has no report to publish. In particular, do not pass
+	// it to the atomic writer, which would try to replace the device.
+	if strings.TrimSpace(path) == os.DevNull {
+		return nil
+	}
 	data, err := json.MarshalIndent(report, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encode fleet report %q: %w", path, err)
@@ -638,6 +724,11 @@ func perContextOutputPaths(output string, kubeContexts, formats []string) (map[s
 			return nil, fmt.Errorf("%s: %w", kubeContext, err)
 		}
 		paths[kubeContext] = path
+		if path == os.DevNull {
+			// Every context discarding to the same sink is what was asked
+			// for, not the silent overwrite this check exists to catch.
+			continue
+		}
 		// Keyed on what the printers actually write, so two contexts whose
 		// --output paths differ only by an extension a format then appends,
 		// such as "report.prod" and "report.prod.json" under --format json,
@@ -677,6 +768,15 @@ func perContextOutputPath(output, kubeContext string) (string, error) {
 	sanitized = strings.TrimSpace(sanitized)
 	if sanitized == "" {
 		return "", fmt.Errorf("empty kube context name")
+	}
+
+	// The discard sink carries no per-context identity to insert: it is not a
+	// report the user will come back and read, it is a request to throw every
+	// context's report away. printer.ResolveOutputFile hands os.DevNull back
+	// untouched for exactly that reason, so deriving "/dev/null.<context>"
+	// here turns a working single-context invocation into a write into /dev.
+	if strings.TrimSpace(output) == os.DevNull {
+		return os.DevNull, nil
 	}
 
 	dir, base := filepath.Split(output)

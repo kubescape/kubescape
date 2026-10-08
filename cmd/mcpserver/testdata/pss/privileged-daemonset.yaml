@@ -1,0 +1,23 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: privileged-daemonset
+  namespace: test-pss
+spec:
+  selector:
+    matchLabels:
+      app: privileged
+  template:
+    metadata:
+      labels:
+        app: privileged
+    spec:
+      volumes:
+      - name: varlog
+        hostPath:
+          path: /var/log
+      containers:
+      - name: collector
+        image: fluentd:latest
+        securityContext:
+          privileged: true

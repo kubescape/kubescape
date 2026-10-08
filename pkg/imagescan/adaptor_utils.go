@@ -44,9 +44,9 @@ func NormalizeSeverity(severity string) string {
 	switch strings.ToLower(severity) {
 	case "critical":
 		return "Critical"
-	case "high":
+	case "high", "important":
 		return "High"
-	case "medium":
+	case "medium", "moderate":
 		return "Medium"
 	case "low":
 		return "Low"

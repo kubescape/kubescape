@@ -138,21 +138,38 @@ func ipBlockMatches(block *networkingv1.IPBlock, ip string) bool {
 // peerListVerdict OR-combines every peer in peers against candidate: an
 // empty/nil peer list matches everything (a rule with no from/to
 // restriction), matching Kubernetes' own semantics for an absent peer list.
-func (idx *Index) peerListVerdict(peers []networkingv1.NetworkPolicyPeer, policyNamespace string, candidate Endpoint) (Verdict, string) {
+// selected is the endpoint the owning policy selects; it only matters for
+// how far a selector match on a hostNetwork candidate can be trusted.
+func (idx *Index) peerListVerdict(peers []networkingv1.NetworkPolicyPeer, policyNamespace string, selected, candidate Endpoint) (Verdict, string) {
 	if len(peers) == 0 {
 		return Allowed, "rule has no source/destination restriction"
 	}
 
-	sawUnknown := false
+	sawUnknown, sawHostNetwork := false, false
 	for _, peer := range peers {
 		matched, determinable := idx.peerMatches(peer, policyNamespace, candidate)
 		if !determinable {
 			sawUnknown = true
 			continue
 		}
+		if matched && candidate.HostNetwork && !selected.HostNetwork && peer.IPBlock == nil {
+			// The labels match, but a plugin that cannot tell a hostNetwork
+			// pod's traffic from its node's ignores the pod when matching
+			// selectors (see Endpoint.HostNetwork). That only leaves the
+			// match in doubt while the policy itself is enforced: when the
+			// selected pod is on the host network too, such a plugin does
+			// not enforce the policy on it at all, so the connection is
+			// allowed whether the plugin honours this match or ignores both
+			// pods.
+			sawHostNetwork = true
+			continue
+		}
 		if matched {
 			return Allowed, "matched a peer in this rule"
 		}
+	}
+	if sawHostNetwork {
+		return Unknown, "a peer in this rule selects the pod by its labels, but the pod uses the host network"
 	}
 	if sawUnknown {
 		return Unknown, "a peer in this rule could not be resolved (unknown IP or namespace labels)"

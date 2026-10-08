@@ -123,6 +123,7 @@ var testGVRToListKind = map[schema.GroupVersionResource]string{
 	{Group: "batch", Version: "v1", Resource: "cronjobs"}:                                "CronJobList",
 	{Group: "", Version: "v1", Resource: "serviceaccounts"}:                              "ServiceAccountList",
 	{Group: "", Version: "v1", Resource: "pods"}:                                         "PodList",
+	{Group: "", Version: "v1", Resource: "namespaces"}:                                   "NamespaceList",
 	{Group: "", Version: "v1", Resource: "services"}:                                     "ServiceList",
 	{Group: "", Version: "v1", Resource: "somecrd"}:                                      "SomeCRDList",
 }

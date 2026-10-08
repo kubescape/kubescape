@@ -768,3 +768,70 @@ func TestFromResources_ConvertsInResourceIDOrder(t *testing.T) {
 		}
 	}
 }
+
+// --- ServiceAccount subjects without a namespace ---
+
+// A RoleBinding may name a ServiceAccount without a namespace; the API server
+// admits it and resolves the subject in the RoleBinding's own namespace
+// (appliesToUser in pkg/registry/rbac/validation). It is a common way to
+// write a binding for a ServiceAccount that lives next to it.
+func TestDirectRules_UnqualifiedServiceAccountSubjectIsInTheRoleBindingNamespace(t *testing.T) {
+	cr := clusterRole("secrets-admin", rule([]string{""}, []string{"secrets"}, []string{"*"}, nil))
+	rb := roleBinding("payments", "rb", "ClusterRole", "secrets-admin", saSubject("", "worker"))
+	idx := NewIndex(nil, []rbacv1.ClusterRole{cr}, []rbacv1.RoleBinding{rb}, nil, nil)
+
+	rules := idx.DirectRules(sa("payments", "worker"))
+	if len(rules) != 1 || rules[0].Namespace != "payments" {
+		t.Fatalf("rules = %+v, want the secrets rule scoped to payments", rules)
+	}
+	if rules := idx.DirectRules(sa("billing", "worker")); len(rules) != 0 {
+		t.Errorf("rules = %+v, want none for a same-named ServiceAccount in another namespace", rules)
+	}
+}
+
+func TestDirectRules_QualifiedServiceAccountSubjectIsNotMovedToTheRoleBindingNamespace(t *testing.T) {
+	r := role("payments", "secrets-admin", rule([]string{""}, []string{"secrets"}, []string{"*"}, nil))
+	rb := roleBinding("payments", "rb", "Role", "secrets-admin", saSubject("billing", "worker"))
+	idx := NewIndex([]rbacv1.Role{r}, nil, []rbacv1.RoleBinding{rb}, nil, nil)
+
+	if rules := idx.DirectRules(sa("billing", "worker")); len(rules) != 1 {
+		t.Errorf("rules = %+v, want the rule for the ServiceAccount the subject names", rules)
+	}
+	if rules := idx.DirectRules(sa("payments", "worker")); len(rules) != 0 {
+		t.Errorf("rules = %+v, want none: the subject names billing/worker", rules)
+	}
+}
+
+// A ClusterRoleBinding has no namespace to resolve the subject in. The API
+// server rejects such a subject on write and never matches one, so a manifest
+// carrying it grants nothing.
+func TestDirectRules_UnqualifiedServiceAccountSubjectInClusterRoleBindingGrantsNothing(t *testing.T) {
+	cr := clusterRole("secrets-admin", rule([]string{""}, []string{"secrets"}, []string{"*"}, nil))
+	crb := clusterRoleBinding("crb", "secrets-admin", saSubject("", "worker"))
+	idx := NewIndex(nil, []rbacv1.ClusterRole{cr}, nil, []rbacv1.ClusterRoleBinding{crb}, nil)
+
+	for _, subject := range []Subject{sa("payments", "worker"), sa("", "worker")} {
+		if rules := idx.DirectRules(subject); len(rules) != 0 {
+			t.Errorf("DirectRules(%s) = %+v, want none", subject, rules)
+		}
+	}
+}
+
+func TestAnalyzeEscalation_UnqualifiedServiceAccountSubjectStartsAPath(t *testing.T) {
+	r := role("payments", "pod-creator", rule([]string{""}, []string{"pods"}, []string{"create"}, nil))
+	rb := roleBinding("payments", "rb", "Role", "pod-creator", saSubject("", "worker"))
+	idx := NewIndex([]rbacv1.Role{r}, nil, []rbacv1.RoleBinding{rb}, nil,
+		[]corev1.ServiceAccount{saObj("payments", "worker"), saObj("payments", "privileged")})
+
+	result := idx.AnalyzeEscalation(sa("payments", "worker"))
+	found := false
+	for _, path := range result.Reached {
+		last := path.Edges[len(path.Edges)-1]
+		if last.ToSubject != nil && *last.ToSubject == sa("payments", "privileged") && last.Primitive == PrimitiveAssignServiceAccount {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("Reached = %+v, want a path to payments/privileged via assign-serviceaccount", result.Reached)
+	}
+}

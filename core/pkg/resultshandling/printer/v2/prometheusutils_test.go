@@ -49,6 +49,26 @@ func TestComplianceScore_MetricsLabelsAndPrefix(t *testing.T) {
 			},
 			expectedMetrics: []string{"kubescape_cluster_complianceScore{} 67", "kubescape_cluster_count_resources_failed{} 27", "kubescape_cluster_count_resources_skipped{} 17", "kubescape_cluster_count_resources_passed{} 7", "kubescape_cluster_count_control_failed{} 57", "kubescape_cluster_count_control_skipped{} 47", "kubescape_cluster_count_control_passed{} 37"},
 		},
+		{
+			name: "Unset compliance score omits only the score metric",
+			mrs: mComplianceScore{
+				resourcesCountPassed:  7,
+				resourcesCountSkipped: 17,
+				resourcesCountFailed:  27,
+				controlsCountPassed:   37,
+				controlsCountSkipped:  47,
+				controlsCountFailed:   57,
+				complianceScore:       -1,
+			},
+			expectedMetrics: []string{
+				"kubescape_cluster_count_resources_failed{} 27",
+				"kubescape_cluster_count_resources_skipped{} 17",
+				"kubescape_cluster_count_resources_passed{} 7",
+				"kubescape_cluster_count_control_failed{} 57",
+				"kubescape_cluster_count_control_skipped{} 47",
+				"kubescape_cluster_count_control_passed{} 37",
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -247,6 +267,28 @@ func TestFrameworkComplianceScore_MetricsLabelsAndPrefix(t *testing.T) {
 			expectedMetrics: []string{"kubescape_framework_complianceScore{name=\"Test Framework 3\"} 67", "kubescape_framework_count_resources_failed{name=\"Test Framework 3\"} 47", "kubescape_framework_count_resources_skipped{name=\"Test Framework 3\"} 57", "kubescape_framework_count_resources_passed{name=\"Test Framework 3\"} 37", "kubescape_framework_count_control_failed{name=\"Test Framework 3\"} 17", "kubescape_framework_count_control_skipped{name=\"Test Framework 3\"} 27", "kubescape_framework_count_control_passed{name=\"Test Framework 3\"} 7"},
 			expectedLabels:  "name=\"Test Framework 3\"",
 		},
+		{
+			name: "Unset compliance score omits only the score metric",
+			mfrs: mFrameworkComplianceScore{
+				frameworkName:         "Unset Framework",
+				controlsCountPassed:   7,
+				controlsCountFailed:   17,
+				controlsCountSkipped:  27,
+				resourcesCountPassed:  37,
+				resourcesCountFailed:  47,
+				resourcesCountSkipped: 57,
+				complianceScore:       -1,
+			},
+			expectedMetrics: []string{
+				"kubescape_framework_count_resources_failed{name=\"Unset Framework\"} 47",
+				"kubescape_framework_count_resources_skipped{name=\"Unset Framework\"} 57",
+				"kubescape_framework_count_resources_passed{name=\"Unset Framework\"} 37",
+				"kubescape_framework_count_control_failed{name=\"Unset Framework\"} 17",
+				"kubescape_framework_count_control_skipped{name=\"Unset Framework\"} 27",
+				"kubescape_framework_count_control_passed{name=\"Unset Framework\"} 7",
+			},
+			expectedLabels: "name=\"Unset Framework\"",
+		},
 	}
 
 	for _, tt := range tests {
@@ -269,7 +311,7 @@ func TestResources_MetricsLabelsAndPrefix(t *testing.T) {
 		{
 			name:            "Empty Resource",
 			mrc:             mResources{},
-			expectedMetrics: []string{"kubescape_resource_count_controls_failed{apiVersion=\"\",kind=\"\",namespace=\"\",name=\"\"} 0", "kubescape_resource_count_controls_skipped{apiVersion=\"\",kind=\"\",namespace=\"\",name=\"\"} 0"},
+			expectedMetrics: []string{"kubescape_resource_count_controls_failed{apiVersion=\"\",kind=\"\",namespace=\"\",name=\"\"} 0", "kubescape_resource_count_controls_skipped{apiVersion=\"\",kind=\"\",namespace=\"\",name=\"\"} 0", "kubescape_resource_count_controls_passed{apiVersion=\"\",kind=\"\",namespace=\"\",name=\"\"} 0"},
 			expectedLabels:  "apiVersion=\"\",kind=\"\",namespace=\"\",name=\"\"",
 		},
 		{
@@ -279,10 +321,11 @@ func TestResources_MetricsLabelsAndPrefix(t *testing.T) {
 				namespace:            "Test",
 				apiVersion:           "v1",
 				kind:                 "Test",
+				controlsCountPassed:  7,
 				controlsCountFailed:  7,
 				controlsCountSkipped: 7,
 			},
-			expectedMetrics: []string{"kubescape_resource_count_controls_failed{apiVersion=\"v1\",kind=\"Test\",namespace=\"Test\",name=\"Test Resource\"} 7", "kubescape_resource_count_controls_skipped{apiVersion=\"v1\",kind=\"Test\",namespace=\"Test\",name=\"Test Resource\"} 7"},
+			expectedMetrics: []string{"kubescape_resource_count_controls_failed{apiVersion=\"v1\",kind=\"Test\",namespace=\"Test\",name=\"Test Resource\"} 7", "kubescape_resource_count_controls_skipped{apiVersion=\"v1\",kind=\"Test\",namespace=\"Test\",name=\"Test Resource\"} 7", "kubescape_resource_count_controls_passed{apiVersion=\"v1\",kind=\"Test\",namespace=\"Test\",name=\"Test Resource\"} 7"},
 			expectedLabels:  "apiVersion=\"v1\",kind=\"Test\",namespace=\"Test\",name=\"Test Resource\"",
 		},
 		{
@@ -292,10 +335,11 @@ func TestResources_MetricsLabelsAndPrefix(t *testing.T) {
 				namespace:            "Test",
 				apiVersion:           "v2",
 				kind:                 "Test",
+				controlsCountPassed:  27,
 				controlsCountFailed:  7,
 				controlsCountSkipped: 17,
 			},
-			expectedMetrics: []string{"kubescape_resource_count_controls_failed{apiVersion=\"v2\",kind=\"Test\",namespace=\"Test\",name=\"Test Resource 2\"} 7", "kubescape_resource_count_controls_skipped{apiVersion=\"v2\",kind=\"Test\",namespace=\"Test\",name=\"Test Resource 2\"} 17"},
+			expectedMetrics: []string{"kubescape_resource_count_controls_failed{apiVersion=\"v2\",kind=\"Test\",namespace=\"Test\",name=\"Test Resource 2\"} 7", "kubescape_resource_count_controls_skipped{apiVersion=\"v2\",kind=\"Test\",namespace=\"Test\",name=\"Test Resource 2\"} 17", "kubescape_resource_count_controls_passed{apiVersion=\"v2\",kind=\"Test\",namespace=\"Test\",name=\"Test Resource 2\"} 27"},
 			expectedLabels:  "apiVersion=\"v2\",kind=\"Test\",namespace=\"Test\",name=\"Test Resource 2\"",
 		},
 	}
@@ -401,7 +445,7 @@ func TestMetrics_String(t *testing.T) {
 					},
 				},
 			},
-			expectedMetrics: "# HELP kubescape_cluster_complianceScore kubescape_cluster_complianceScore\n# TYPE kubescape_cluster_complianceScore gauge\nkubescape_cluster_complianceScore{} 0\n# HELP kubescape_cluster_count_resources_failed kubescape_cluster_count_resources_failed\n# TYPE kubescape_cluster_count_resources_failed gauge\nkubescape_cluster_count_resources_failed{} 0\n# HELP kubescape_cluster_count_resources_skipped kubescape_cluster_count_resources_skipped\n# TYPE kubescape_cluster_count_resources_skipped gauge\nkubescape_cluster_count_resources_skipped{} 0\n# HELP kubescape_cluster_count_resources_passed kubescape_cluster_count_resources_passed\n# TYPE kubescape_cluster_count_resources_passed gauge\nkubescape_cluster_count_resources_passed{} 0\n# HELP kubescape_cluster_count_control_failed kubescape_cluster_count_control_failed\n# TYPE kubescape_cluster_count_control_failed gauge\nkubescape_cluster_count_control_failed{} 0\n# HELP kubescape_cluster_count_control_skipped kubescape_cluster_count_control_skipped\n# TYPE kubescape_cluster_count_control_skipped gauge\nkubescape_cluster_count_control_skipped{} 0\n# HELP kubescape_cluster_count_control_passed kubescape_cluster_count_control_passed\n# TYPE kubescape_cluster_count_control_passed gauge\nkubescape_cluster_count_control_passed{} 0\n# HELP kubescape_cluster_coverage_score kubescape_cluster_coverage_score\n# TYPE kubescape_cluster_coverage_score gauge\nkubescape_cluster_coverage_score{} 0\n# HELP kubescape_framework_complianceScore kubescape_framework_complianceScore\n# TYPE kubescape_framework_complianceScore gauge\nkubescape_framework_complianceScore{name=\"Test Framework 3\"} 67\n# HELP kubescape_framework_count_resources_failed kubescape_framework_count_resources_failed\n# TYPE kubescape_framework_count_resources_failed gauge\nkubescape_framework_count_resources_failed{name=\"Test Framework 3\"} 47\n# HELP kubescape_framework_count_resources_skipped kubescape_framework_count_resources_skipped\n# TYPE kubescape_framework_count_resources_skipped gauge\nkubescape_framework_count_resources_skipped{name=\"Test Framework 3\"} 57\n# HELP kubescape_framework_count_resources_passed kubescape_framework_count_resources_passed\n# TYPE kubescape_framework_count_resources_passed gauge\nkubescape_framework_count_resources_passed{name=\"Test Framework 3\"} 37\n# HELP kubescape_framework_count_control_failed kubescape_framework_count_control_failed\n# TYPE kubescape_framework_count_control_failed gauge\nkubescape_framework_count_control_failed{name=\"Test Framework 3\"} 17\n# HELP kubescape_framework_count_control_skipped kubescape_framework_count_control_skipped\n# TYPE kubescape_framework_count_control_skipped gauge\nkubescape_framework_count_control_skipped{name=\"Test Framework 3\"} 27\n# HELP kubescape_framework_count_control_passed kubescape_framework_count_control_passed\n# TYPE kubescape_framework_count_control_passed gauge\nkubescape_framework_count_control_passed{name=\"Test Framework 3\"} 7\n# HELP kubescape_control_complianceScore kubescape_control_complianceScore\n# TYPE kubescape_control_complianceScore gauge\nkubescape_control_complianceScore{name=\"Test Control\",severity=\"high\",link=\"https://test-link.com\"} 7\n# HELP kubescape_control_count_resources_failed kubescape_control_count_resources_failed\n# TYPE kubescape_control_count_resources_failed gauge\nkubescape_control_count_resources_failed{name=\"Test Control\",severity=\"high\",link=\"https://test-link.com\"} 7\n# HELP kubescape_control_count_resources_skipped kubescape_control_count_resources_skipped\n# TYPE kubescape_control_count_resources_skipped gauge\nkubescape_control_count_resources_skipped{name=\"Test Control\",severity=\"high\",link=\"https://test-link.com\"} 7\n# HELP kubescape_control_count_resources_passed kubescape_control_count_resources_passed\n# TYPE kubescape_control_count_resources_passed gauge\nkubescape_control_count_resources_passed{name=\"Test Control\",severity=\"high\",link=\"https://test-link.com\"} 7\n# HELP kubescape_resource_count_controls_failed kubescape_resource_count_controls_failed\n# TYPE kubescape_resource_count_controls_failed gauge\nkubescape_resource_count_controls_failed{apiVersion=\"v2\",kind=\"Test\",namespace=\"Test\",name=\"Test Resource 2\"} 7\n# HELP kubescape_resource_count_controls_skipped kubescape_resource_count_controls_skipped\n# TYPE kubescape_resource_count_controls_skipped gauge\nkubescape_resource_count_controls_skipped{apiVersion=\"v2\",kind=\"Test\",namespace=\"Test\",name=\"Test Resource 2\"} 17\n",
+			expectedMetrics: "# HELP kubescape_cluster_complianceScore kubescape_cluster_complianceScore\n# TYPE kubescape_cluster_complianceScore gauge\nkubescape_cluster_complianceScore{} 0\n# HELP kubescape_cluster_count_resources_failed kubescape_cluster_count_resources_failed\n# TYPE kubescape_cluster_count_resources_failed gauge\nkubescape_cluster_count_resources_failed{} 0\n# HELP kubescape_cluster_count_resources_skipped kubescape_cluster_count_resources_skipped\n# TYPE kubescape_cluster_count_resources_skipped gauge\nkubescape_cluster_count_resources_skipped{} 0\n# HELP kubescape_cluster_count_resources_passed kubescape_cluster_count_resources_passed\n# TYPE kubescape_cluster_count_resources_passed gauge\nkubescape_cluster_count_resources_passed{} 0\n# HELP kubescape_cluster_count_control_failed kubescape_cluster_count_control_failed\n# TYPE kubescape_cluster_count_control_failed gauge\nkubescape_cluster_count_control_failed{} 0\n# HELP kubescape_cluster_count_control_skipped kubescape_cluster_count_control_skipped\n# TYPE kubescape_cluster_count_control_skipped gauge\nkubescape_cluster_count_control_skipped{} 0\n# HELP kubescape_cluster_count_control_passed kubescape_cluster_count_control_passed\n# TYPE kubescape_cluster_count_control_passed gauge\nkubescape_cluster_count_control_passed{} 0\n# HELP kubescape_cluster_coverage_score kubescape_cluster_coverage_score\n# TYPE kubescape_cluster_coverage_score gauge\nkubescape_cluster_coverage_score{} 0\n# HELP kubescape_framework_complianceScore kubescape_framework_complianceScore\n# TYPE kubescape_framework_complianceScore gauge\nkubescape_framework_complianceScore{name=\"Test Framework 3\"} 67\n# HELP kubescape_framework_count_resources_failed kubescape_framework_count_resources_failed\n# TYPE kubescape_framework_count_resources_failed gauge\nkubescape_framework_count_resources_failed{name=\"Test Framework 3\"} 47\n# HELP kubescape_framework_count_resources_skipped kubescape_framework_count_resources_skipped\n# TYPE kubescape_framework_count_resources_skipped gauge\nkubescape_framework_count_resources_skipped{name=\"Test Framework 3\"} 57\n# HELP kubescape_framework_count_resources_passed kubescape_framework_count_resources_passed\n# TYPE kubescape_framework_count_resources_passed gauge\nkubescape_framework_count_resources_passed{name=\"Test Framework 3\"} 37\n# HELP kubescape_framework_count_control_failed kubescape_framework_count_control_failed\n# TYPE kubescape_framework_count_control_failed gauge\nkubescape_framework_count_control_failed{name=\"Test Framework 3\"} 17\n# HELP kubescape_framework_count_control_skipped kubescape_framework_count_control_skipped\n# TYPE kubescape_framework_count_control_skipped gauge\nkubescape_framework_count_control_skipped{name=\"Test Framework 3\"} 27\n# HELP kubescape_framework_count_control_passed kubescape_framework_count_control_passed\n# TYPE kubescape_framework_count_control_passed gauge\nkubescape_framework_count_control_passed{name=\"Test Framework 3\"} 7\n# HELP kubescape_control_complianceScore kubescape_control_complianceScore\n# TYPE kubescape_control_complianceScore gauge\nkubescape_control_complianceScore{name=\"Test Control\",severity=\"high\",link=\"https://test-link.com\"} 7\n# HELP kubescape_control_count_resources_failed kubescape_control_count_resources_failed\n# TYPE kubescape_control_count_resources_failed gauge\nkubescape_control_count_resources_failed{name=\"Test Control\",severity=\"high\",link=\"https://test-link.com\"} 7\n# HELP kubescape_control_count_resources_skipped kubescape_control_count_resources_skipped\n# TYPE kubescape_control_count_resources_skipped gauge\nkubescape_control_count_resources_skipped{name=\"Test Control\",severity=\"high\",link=\"https://test-link.com\"} 7\n# HELP kubescape_control_count_resources_passed kubescape_control_count_resources_passed\n# TYPE kubescape_control_count_resources_passed gauge\nkubescape_control_count_resources_passed{name=\"Test Control\",severity=\"high\",link=\"https://test-link.com\"} 7\n# HELP kubescape_resource_count_controls_failed kubescape_resource_count_controls_failed\n# TYPE kubescape_resource_count_controls_failed gauge\nkubescape_resource_count_controls_failed{apiVersion=\"v2\",kind=\"Test\",namespace=\"Test\",name=\"Test Resource 2\"} 7\n# HELP kubescape_resource_count_controls_skipped kubescape_resource_count_controls_skipped\n# TYPE kubescape_resource_count_controls_skipped gauge\nkubescape_resource_count_controls_skipped{apiVersion=\"v2\",kind=\"Test\",namespace=\"Test\",name=\"Test Resource 2\"} 17\n# HELP kubescape_resource_count_controls_passed kubescape_resource_count_controls_passed\n# TYPE kubescape_resource_count_controls_passed gauge\nkubescape_resource_count_controls_passed{apiVersion=\"v2\",kind=\"Test\",namespace=\"Test\",name=\"Test Resource 2\"} 0\n",
 		},
 	}
 
@@ -511,6 +555,7 @@ func TestMetrics_String_MultiItem_SamplesGroupedPerFamily(t *testing.T) {
 		"kubescape_framework_complianceScore",
 		"kubescape_control_complianceScore",
 		"kubescape_resource_count_controls_failed",
+		"kubescape_resource_count_controls_passed",
 		"kubescape_image_count_cve",
 		"kubescape_image_count_cve_fixable",
 	} {
@@ -586,4 +631,41 @@ func TestSetComplianceScoresDoNotRoundFractionalScoresToPerfect(t *testing.T) {
 	assert.Contains(t, output, "kubescape_framework_complianceScore{name=\"Almost Perfect\"} 99")
 	assert.Regexp(t, regexp.MustCompile(`(?m)^kubescape_control_complianceScore\{name="Almost Perfect Control".*\} 99$`), output)
 	assert.NotContains(t, output, "complianceScore{} 100")
+}
+
+func TestSetComplianceScores_UnsetFrameworkAndClusterScoresOmitted(t *testing.T) {
+	summaryDetails := &reportsummary.SummaryDetails{
+		Score:           20,
+		ComplianceScore: -1,
+		Frameworks: []reportsummary.FrameworkSummary{
+			{
+				Name:            "Unset Framework",
+				ComplianceScore: -1,
+			},
+			{
+				Name:            "Set Framework",
+				ComplianceScore: 85,
+			},
+		},
+	}
+
+	m := &Metrics{}
+	m.setComplianceScores(summaryDetails)
+	output := m.String()
+
+	assert.NotContains(t, output, "kubescape_cluster_complianceScore")
+	assert.Contains(t, output, "kubescape_cluster_count_resources_failed{} 0")
+	assert.NotContains(t, output, "kubescape_framework_complianceScore{name=\"Unset Framework\"")
+	assert.Contains(t, output, "kubescape_framework_count_resources_failed{name=\"Unset Framework\"} 0")
+	assert.Contains(t, output, "kubescape_framework_complianceScore{name=\"Set Framework\"} 85")
+}
+
+func TestSetComplianceScores_NilSummaryDetails(t *testing.T) {
+	m := &Metrics{}
+	assert.NotPanics(t, func() {
+		m.setComplianceScores(nil)
+	})
+	assert.NotContains(t, m.String(), "kubescape_cluster_complianceScore")
+	assert.Empty(t, m.listFrameworks)
+	assert.Empty(t, m.listControls)
 }

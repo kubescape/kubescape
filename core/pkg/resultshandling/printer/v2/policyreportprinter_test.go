@@ -243,6 +243,8 @@ func TestPolicyReportClusterScope_PreservesRawContextName(t *testing.T) {
 	assert.Nil(t, policyReportClusterScope(""))
 }
 
+// TestBuildPolicyReports_TimestampMatchesCRDSchema asserts that the generated result and report timestamps
+// adhere to RFC3339 format as expected by Kubernetes PolicyReport CRDs.
 func TestBuildPolicyReports_TimestampMatchesCRDSchema(t *testing.T) {
 	const resourceID = "path=1/api/v1/default/Pod/demo"
 	const controlID = "C-0012"
@@ -295,4 +297,260 @@ func TestBuildPolicyReports_TimestampMatchesCRDSchema(t *testing.T) {
 	require.NotNil(t, decoded.Results[0].Timestamp.Nanos, "the CRD requires results[].timestamp.nanos")
 	assert.Equal(t, built.Unix(), *decoded.Results[0].Timestamp.Seconds)
 	assert.NotContains(t, string(encoded), built.Format(time.RFC3339), "an RFC 3339 string is rejected by the PolicyReport CRD")
+}
+
+// TestBuildPolicyReports_SurfacesClusterSkippedControls asserts that cluster-wide skipped controls
+// are collected and emitted as results in ClusterPolicyReport with result: skip, diagnostic skip reasons,
+// and accurate summary counters (#3989).
+func TestBuildPolicyReports_SurfacesClusterSkippedControls(t *testing.T) {
+	session := cautils.NewOPASessionObjMock()
+	built := time.Date(2026, 9, 30, 10, 0, 0, 0, time.UTC)
+	session.Report = &reporthandlingv2.PostureReport{
+		ReportGenerationTime: built,
+		SummaryDetails: reportsummary.SummaryDetails{
+			Controls: reportsummary.ControlSummaries{
+				"C-0001": reportsummary.ControlSummary{
+					ControlID:   "C-0001",
+					Name:        "Cluster audit logs",
+					ScoreFactor: 8.0,
+					StatusInfo:  apis.StatusInfo{InnerStatus: apis.StatusSkipped, InnerInfo: "missing audit GVR"},
+				},
+				"C-0002": reportsummary.ControlSummary{
+					ControlID:   "C-0002",
+					Name:        "API Server encryption",
+					ScoreFactor: 9.0,
+					StatusInfo:  apis.StatusInfo{InnerStatus: apis.StatusSkipped, SubStatus: apis.SubStatusNotEvaluated, InnerInfo: "unsupported provider"},
+				},
+			},
+		},
+	}
+
+	reports := buildPolicyReports(session)
+	require.Len(t, reports, 1, "must emit ClusterPolicyReport even without evaluated resources")
+	clusterReport := reports[0]
+	assert.Equal(t, clusterPolicyReportKind, clusterReport.Kind)
+	assert.Equal(t, 2, clusterReport.Summary.Skip)
+	require.Len(t, clusterReport.Results, 2)
+
+	// Results are sorted deterministically by control ID from collectSkippedControls
+	res1 := clusterReport.Results[0]
+	assert.Equal(t, "C-0001", res1.Policy)
+	assert.Equal(t, "Cluster audit logs", res1.Rule)
+	assert.Equal(t, policyReportResultSkip, res1.Result)
+	assert.Contains(t, res1.Message, "missing audit GVR")
+	assert.Equal(t, "missing audit GVR", res1.Properties["skipReason"])
+	assert.NotEmpty(t, res1.Properties["controlURL"])
+	assert.Equal(t, "high", res1.Severity)
+
+	res2 := clusterReport.Results[1]
+	assert.Equal(t, "C-0002", res2.Policy)
+	assert.Equal(t, "API Server encryption", res2.Rule)
+	assert.Equal(t, policyReportResultSkip, res2.Result)
+	assert.Contains(t, res2.Message, "unsupported provider")
+	assert.Equal(t, "unsupported provider", res2.Properties["skipReason"])
+	assert.Equal(t, "critical", res2.Severity)
+}
+
+// TestBuildPolicyReports_NamespaceOnlyScanEmitsClusterReportForSkippedControls verifies that
+// when all evaluated resources belong to a namespace (e.g. default), ClusterPolicyReport is still
+// emitted to hold cluster-wide skipped controls alongside the namespaced PolicyReport (#3989).
+func TestBuildPolicyReports_NamespaceOnlyScanEmitsClusterReportForSkippedControls(t *testing.T) {
+	const resourceID = "apps/v1/default/Deployment/demo"
+	const passedControlID = "C-0050"
+	const skippedControlID = "C-0001"
+
+	lw := localworkload.NewLocalWorkload(map[string]interface{}{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata":   map[string]interface{}{"name": "demo", "namespace": "default"},
+		"spec":       map[string]interface{}{},
+	})
+
+	session := cautils.NewOPASessionObjMock()
+	session.AllResources[resourceID] = lw
+	session.ResourcesResult[resourceID] = resourcesresults.Result{
+		ResourceID: resourceID,
+		AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+			{ControlID: passedControlID, Name: "Privilege escalation", Status: apis.StatusInfo{InnerStatus: apis.StatusPassed}},
+		},
+	}
+
+	built := time.Date(2026, 9, 30, 10, 0, 0, 0, time.UTC)
+	session.Report = &reporthandlingv2.PostureReport{
+		ReportGenerationTime: built,
+		SummaryDetails: reportsummary.SummaryDetails{
+			Controls: reportsummary.ControlSummaries{
+				passedControlID: reportsummary.ControlSummary{
+					ControlID:   passedControlID,
+					Name:        "Privilege escalation",
+					ScoreFactor: 5.0,
+					StatusInfo:  apis.StatusInfo{InnerStatus: apis.StatusPassed},
+				},
+				skippedControlID: reportsummary.ControlSummary{
+					ControlID:   skippedControlID,
+					Name:        "Cluster audit logs",
+					ScoreFactor: 8.0,
+					StatusInfo:  apis.StatusInfo{InnerStatus: apis.StatusSkipped, InnerInfo: "missing audit GVR"},
+				},
+			},
+		},
+	}
+
+	reports := buildPolicyReports(session)
+	require.Len(t, reports, 2, "must emit ClusterPolicyReport (for cluster skipped control) and PolicyReport (for default namespace)")
+
+	// ClusterPolicyReport has namespace == "" which sorts before "default"
+	clusterReport := reports[0]
+	assert.Equal(t, clusterPolicyReportKind, clusterReport.Kind)
+	assert.Equal(t, 1, clusterReport.Summary.Skip)
+	require.Len(t, clusterReport.Results, 1)
+	assert.Equal(t, skippedControlID, clusterReport.Results[0].Policy)
+	assert.Equal(t, policyReportResultSkip, clusterReport.Results[0].Result)
+
+	namespacedReport := reports[1]
+	assert.Equal(t, policyReportKind, namespacedReport.Kind)
+	assert.Equal(t, "default", namespacedReport.Metadata.Namespace)
+	assert.Equal(t, 1, namespacedReport.Summary.Pass)
+	assert.Equal(t, 0, namespacedReport.Summary.Skip)
+	require.Len(t, namespacedReport.Results, 1)
+	assert.Equal(t, passedControlID, namespacedReport.Results[0].Policy)
+	assert.Equal(t, policyReportResultPass, namespacedReport.Results[0].Result)
+}
+
+// TestBuildPolicyReports_DoesNotDuplicateEmittedClusterResourceControls verifies that
+// a skipped control already evaluated on a cluster-scoped resource is not duplicated (#3989).
+func TestBuildPolicyReports_DoesNotDuplicateEmittedClusterResourceControls(t *testing.T) {
+	const clusterResourceID = "rbac.authorization.k8s.io/v1//ClusterRole/demo-role"
+	const controlID = "C-0001"
+
+	lw := localworkload.NewLocalWorkload(map[string]interface{}{
+		"apiVersion": "rbac.authorization.k8s.io/v1",
+		"kind":       "ClusterRole",
+		"metadata":   map[string]interface{}{"name": "demo-role"},
+		"spec":       map[string]interface{}{},
+	})
+
+	session := cautils.NewOPASessionObjMock()
+	session.AllResources[clusterResourceID] = lw
+	session.ResourcesResult[clusterResourceID] = resourcesresults.Result{
+		ResourceID: clusterResourceID,
+		AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+			{ControlID: controlID, Name: "Cluster audit logs", Status: apis.StatusInfo{InnerStatus: apis.StatusSkipped, InnerInfo: "role not applicable"}},
+		},
+	}
+
+	built := time.Date(2026, 9, 30, 10, 0, 0, 0, time.UTC)
+	session.Report = &reporthandlingv2.PostureReport{
+		ReportGenerationTime: built,
+		SummaryDetails: reportsummary.SummaryDetails{
+			Controls: reportsummary.ControlSummaries{
+				controlID: reportsummary.ControlSummary{
+					ControlID:   controlID,
+					Name:        "Cluster audit logs",
+					ScoreFactor: 8.0,
+					StatusInfo:  apis.StatusInfo{InnerStatus: apis.StatusSkipped, InnerInfo: "role not applicable"},
+				},
+			},
+		},
+	}
+
+	reports := buildPolicyReports(session)
+	require.Len(t, reports, 1)
+	clusterReport := reports[0]
+	assert.Equal(t, clusterPolicyReportKind, clusterReport.Kind)
+	assert.Equal(t, 1, clusterReport.Summary.Skip, "must not double count skipped control")
+	require.Len(t, clusterReport.Results, 1, "must not emit duplicate results for same cluster control")
+	assert.Equal(t, controlID, clusterReport.Results[0].Policy)
+	assert.NotEmpty(t, clusterReport.Results[0].Resources, "resource-level finding must keep resource reference")
+	assert.Equal(t, "Cluster audit logs: role not applicable", clusterReport.Results[0].Message)
+	assert.Equal(t, "role not applicable", clusterReport.Results[0].Properties["skipReason"])
+}
+
+// TestBuildPolicyReports_RetainsClusterVerdictAndEmitsSkippedControlOnTimeout asserts that
+// when an earlier-scope cluster resource verdict (Pass or Fail) is retained, but the control summary
+// is marked skipped/not-evaluated due to a later scope timeout, the cluster verdict is preserved AND
+// the control-level skip with diagnostic reason is emitted, with Summary counters and results accurately tracking both (#3989, #3990).
+func TestBuildPolicyReports_RetainsClusterVerdictAndEmitsSkippedControlOnTimeout(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		resourceStatus apis.StatusInfo
+		expectedResult string
+	}{
+		{
+			name:           "retained pass with timeout skip",
+			resourceStatus: apis.StatusInfo{InnerStatus: apis.StatusPassed},
+			expectedResult: policyReportResultPass,
+		},
+		{
+			name:           "retained fail with timeout skip",
+			resourceStatus: apis.StatusInfo{InnerStatus: apis.StatusFailed},
+			expectedResult: policyReportResultFail,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			const clusterResourceID = "rbac.authorization.k8s.io/v1//ClusterRole/demo-role"
+			const controlID = "C-0001"
+
+			lw := localworkload.NewLocalWorkload(map[string]interface{}{
+				"apiVersion": "rbac.authorization.k8s.io/v1",
+				"kind":       "ClusterRole",
+				"metadata":   map[string]interface{}{"name": "demo-role"},
+				"spec":       map[string]interface{}{},
+			})
+
+			session := cautils.NewOPASessionObjMock()
+			session.AllResources[clusterResourceID] = lw
+			session.ResourcesResult[clusterResourceID] = resourcesresults.Result{
+				ResourceID: clusterResourceID,
+				AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+					{ControlID: controlID, Name: "Cluster audit logs", Status: tc.resourceStatus},
+				},
+			}
+
+			built := time.Date(2026, 9, 30, 10, 0, 0, 0, time.UTC)
+			session.Report = &reporthandlingv2.PostureReport{
+				ReportGenerationTime: built,
+				SummaryDetails: reportsummary.SummaryDetails{
+					Controls: reportsummary.ControlSummaries{
+						controlID: reportsummary.ControlSummary{
+							ControlID:   controlID,
+							Name:        "Cluster audit logs",
+							ScoreFactor: 8.0,
+							StatusInfo: apis.StatusInfo{
+								InnerStatus: apis.StatusSkipped,
+								SubStatus:   apis.SubStatusNotEvaluated,
+								InnerInfo:   "timeout evaluating remaining resources",
+							},
+						},
+					},
+				},
+			}
+
+			reports := buildPolicyReports(session)
+			require.Len(t, reports, 1)
+			clusterReport := reports[0]
+			assert.Equal(t, clusterPolicyReportKind, clusterReport.Kind)
+			if tc.expectedResult == policyReportResultPass {
+				assert.Equal(t, 1, clusterReport.Summary.Pass, "retained cluster pass must be counted")
+				assert.Equal(t, 0, clusterReport.Summary.Fail)
+			} else {
+				assert.Equal(t, 1, clusterReport.Summary.Fail, "retained cluster fail must be counted")
+				assert.Equal(t, 0, clusterReport.Summary.Pass)
+			}
+			assert.Equal(t, 1, clusterReport.Summary.Skip, "timeout-skipped control must be counted in skip")
+			require.Len(t, clusterReport.Results, 2, "must emit both retained verdict and control-level skip")
+
+			verdictResult := clusterReport.Results[0]
+			assert.Equal(t, controlID, verdictResult.Policy)
+			assert.Equal(t, tc.expectedResult, verdictResult.Result)
+			assert.NotEmpty(t, verdictResult.Resources)
+
+			skipResult := clusterReport.Results[1]
+			assert.Equal(t, controlID, skipResult.Policy)
+			assert.Equal(t, policyReportResultSkip, skipResult.Result)
+			assert.Contains(t, skipResult.Message, "timeout evaluating remaining resources")
+			assert.Equal(t, "timeout evaluating remaining resources", skipResult.Properties["skipReason"])
+			assert.Empty(t, skipResult.Resources)
+		})
+	}
 }

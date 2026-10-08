@@ -35,14 +35,11 @@ The E2E system tests do **not** run on merge — `run-system-tests` is gated on 
 
 ## Release process
 
-Every two weeks, we will create a new tag by bumping the minor version, this will create the release and publish the artifacts.
-If we are introducing breaking changes, we will update the `major` version instead.
-
-When we wish to push a hot-fix/feature within the two weeks, we will bump the `patch`.
+Releases are cut from `master` when the maintainers decide to ship, not on a fixed schedule. A release normally bumps the `patch` version; breaking changes bump the `major` version instead.
 
 ### Creating a new tag
 
-Every two weeks or upon the decision of the maintainers, a maintainer can create a tag.
+When the maintainers decide to release, a maintainer creates a tag.
 
 The tag should look as follows: `v<A>.<B>.<C>`. Pushing it triggers `02-release.yaml`, whose tag filter matches release tags only — a pre-release suffix such as `-rc.0` will not start a release.
 
@@ -59,7 +56,7 @@ The workflow can also be started manually via `workflow_dispatch`, which exposes
 
 ## Additional Information
 
-Reusable workflows — the ones invoked by another workflow through `on: workflow_call` — carry an alphabetic prefix (`a-pr-scanner.yaml`). A workflow that invokes one carries a numeric prefix (`00-pr-scanner.yaml`). `02-release.yaml` also carries a numeric prefix, but it invokes nothing: it is an event-triggered entrypoint that does its work inline. Workflows that are neither reusable nor callers, such as `scorecard.yml` and `comments.yaml`, sit outside the convention.
+Reusable workflows — the ones invoked by another workflow through `on: workflow_call` — carry an alphabetic prefix (`a-pr-scanner.yaml`). A workflow that invokes one carries a numeric prefix (`00-pr-scanner.yaml`). `02-release.yaml` also carries a numeric prefix, but it invokes nothing: it is an event-triggered entrypoint that does its work inline. Workflows that are neither reusable nor callers, such as `scorecard.yml`, sit outside the convention.
 
 ## Screenshot
 

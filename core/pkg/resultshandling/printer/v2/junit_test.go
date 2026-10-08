@@ -285,6 +285,11 @@ func TestJunitActionPrintCombinedScanIncludesPostureAndImages(t *testing.T) {
 	assert.Equal(t, 1, got.Suites[0].Failures)
 	assert.Equal(t, 3, got.Tests)
 	assert.Equal(t, 3, got.Failures)
+	var sumSkipped int
+	for _, suite := range got.Suites {
+		sumSkipped += suite.Skipped
+	}
+	assert.Equal(t, sumSkipped, got.Skipped)
 	assert.Zero(t, got.Errors)
 	assert.Contains(t, string(raw), "Combined posture control")
 	assert.Contains(t, string(raw), "CVE-COMBINED")
@@ -407,6 +412,11 @@ func TestJunitActionPrintImageScanKeepsMultiArchSuitesDistinct(t *testing.T) {
 	assert.Equal(t, "Kubescape Image Scanning", got.Name)
 	assert.Equal(t, 2, got.Tests)
 	assert.Equal(t, 2, got.Failures)
+	var sumSkipped int
+	for _, suite := range got.Suites {
+		sumSkipped += suite.Skipped
+	}
+	assert.Equal(t, sumSkipped, got.Skipped)
 	assert.Equal(t, "registry.example.com/app:v1 [linux/amd64]", got.Suites[0].Name)
 	assert.Equal(t, "registry.example.com/app:v1 [linux/arm64]", got.Suites[1].Name)
 	assert.NotEqual(t, got.Suites[0].Name, got.Suites[1].Name)
@@ -811,6 +821,244 @@ func TestListTestsSuite_IncludesCoverageProperties(t *testing.T) {
 	assert.Contains(t, propertyMap, "complianceScore")
 }
 
+// TestListTestsSuite_IncludesNotEvaluatedControls verifies that unevaluated controls
+// from ScanCoverage.NotEvaluatedControls are emitted as skipped testcases in control scans.
+func TestListTestsSuite_IncludesNotEvaluatedControls(t *testing.T) {
+	results := cautils.NewOPASessionObjMock()
+	results.ScanCoverage = cautils.ScanCoverage{
+		CoverageScore:     85.0,
+		EvaluatedControls: 17,
+		TotalControls:     20,
+		Degraded:          true,
+		NotEvaluatedControls: []cautils.NotEvaluatedControl{
+			{
+				ControlID: "C-0172",
+				Reason:    "missing: rbac.authorization.k8s.io/clusterroles",
+			},
+		},
+	}
+
+	suites := listTestsSuite(results)
+	require.NotEmpty(t, suites)
+	suite := suites[0]
+
+	// Find the testcase for C-0172
+	var found bool
+	for _, tc := range suite.TestCases {
+		if tc.Classname == "Kubescape/C-0172" {
+			found = true
+			require.NotNil(t, tc.SkipMessage)
+			assert.Equal(t, "missing: rbac.authorization.k8s.io/clusterroles", tc.SkipMessage.Message)
+		}
+	}
+	assert.True(t, found, "unevaluated control C-0172 must be emitted as a skipped testcase")
+	assert.Equal(t, len(suite.TestCases), suite.Tests, "suite.Tests must equal len(suite.TestCases)")
+
+	var skippedCount int
+	for _, tc := range suite.TestCases {
+		if tc.SkipMessage != nil {
+			skippedCount++
+		}
+	}
+	assert.Equal(t, skippedCount, suite.Skipped, "suite.Skipped must match testcases with SkipMessage")
+}
+
+// TestListTestsSuite_FrameworkScanWithNotEvaluatedControls verifies that unevaluated
+// controls are associated with their framework and emitted with their diagnostic reason.
+func TestListTestsSuite_FrameworkScanWithNotEvaluatedControls(t *testing.T) {
+	session := cautils.NewOPASessionObjMock()
+	session.Policies = []reporthandling.Framework{
+		{
+			PortalBase: armotypes.PortalBase{Name: "NSA"},
+			Controls: []reporthandling.Control{
+				{
+					PortalBase: armotypes.PortalBase{Name: "Anonymous auth"},
+					ControlID:  "C-0001",
+				},
+				{
+					PortalBase: armotypes.PortalBase{Name: "Cluster roles binding"},
+					ControlID:  "C-0172",
+				},
+			},
+		},
+	}
+	session.Report = &reporthandlingv2.PostureReport{
+		SummaryDetails: reportsummary.SummaryDetails{
+			Frameworks: []reportsummary.FrameworkSummary{
+				{
+					Name: "NSA",
+					Controls: reportsummary.ControlSummaries{
+						"C-0001": reportsummary.ControlSummary{
+							ControlID: "C-0001",
+							Name:      "Anonymous auth",
+							Status:    apis.StatusPassed,
+						},
+					},
+				},
+			},
+		},
+	}
+	session.ScanCoverage = cautils.ScanCoverage{
+		CoverageScore:     50.0,
+		EvaluatedControls: 1,
+		TotalControls:     2,
+		Degraded:          true,
+		NotEvaluatedControls: []cautils.NotEvaluatedControl{
+			{
+				ControlID: "C-0172",
+				Reason:    "missing: rbac.authorization.k8s.io/clusterroles",
+			},
+		},
+	}
+
+	suites := listTestsSuite(session)
+	require.Len(t, suites, 1)
+	suite := suites[0]
+	assert.Equal(t, "NSA", suite.Name)
+	assert.Equal(t, 2, suite.Tests)
+	assert.Equal(t, 1, suite.Skipped)
+	assert.Equal(t, 0, suite.Failures)
+
+	var foundSkipped bool
+	for _, tc := range suite.TestCases {
+		if tc.Classname == "NSA/C-0172" {
+			foundSkipped = true
+			assert.Equal(t, "Cluster roles binding", tc.Name)
+			require.NotNil(t, tc.SkipMessage)
+			assert.Equal(t, "missing: rbac.authorization.k8s.io/clusterroles", tc.SkipMessage.Message)
+		}
+	}
+	assert.True(t, foundSkipped, "C-0172 must be emitted in NSA suite with skip reason")
+}
+
+// TestListTestsSuite_MultiFrameworkWithoutPoliciesNoDuplicateFallback verifies that
+// in multi-framework scans where Policies metadata is absent, controls already present
+// in framework cases (e.g. passed in Framework A, skipped in Framework B) are marked
+// as assigned so the suite-0 unassigned fallback does not duplicate them into Framework A.
+func TestListTestsSuite_MultiFrameworkWithoutPoliciesNoDuplicateFallback(t *testing.T) {
+	session := cautils.NewOPASessionObjMock()
+	session.Policies = nil
+	session.Report = &reporthandlingv2.PostureReport{
+		SummaryDetails: reportsummary.SummaryDetails{
+			Frameworks: []reportsummary.FrameworkSummary{
+				{
+					Name: "Framework-A",
+					Controls: reportsummary.ControlSummaries{
+						"C-0001": reportsummary.ControlSummary{
+							ControlID: "C-0001",
+							Name:      "Control 1",
+							Status:    apis.StatusPassed,
+						},
+					},
+				},
+				{
+					Name: "Framework-B",
+					Controls: reportsummary.ControlSummaries{
+						"C-0002": reportsummary.ControlSummary{
+							ControlID: "C-0002",
+							Name:      "Control 2",
+							Status:    apis.StatusSkipped,
+							StatusInfo: apis.StatusInfo{
+								InnerStatus: apis.StatusSkipped,
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	root := testsSuites(session)
+	require.Len(t, root.Suites, 2)
+	assert.Equal(t, 2, root.Tests, "total root tests must be 2, without duplicating C-0002 into Framework-A")
+	assert.Equal(t, 1, root.Skipped, "total root skipped must be 1")
+	assert.Equal(t, 0, root.Failures)
+
+	suiteA := root.Suites[0]
+	assert.Equal(t, "Framework-A", suiteA.Name)
+	assert.Equal(t, 1, suiteA.Tests)
+	assert.Equal(t, 0, suiteA.Skipped)
+	require.Len(t, suiteA.TestCases, 1)
+	assert.Equal(t, "Framework-A/C-0001", suiteA.TestCases[0].Classname)
+
+	suiteB := root.Suites[1]
+	assert.Equal(t, "Framework-B", suiteB.Name)
+	assert.Equal(t, 1, suiteB.Tests)
+	assert.Equal(t, 1, suiteB.Skipped)
+	require.Len(t, suiteB.TestCases, 1)
+	assert.Equal(t, "Framework-B/C-0002", suiteB.TestCases[0].Classname)
+}
+
+// TestListTestsSuite_MultiFrameworkPassedControlsWithUnmatchedCoverageControl verifies that
+// when frameworks contain passed controls and ScanCoverage contains an unmatched unevaluated
+// control (with absent Policies metadata), the unevaluated control is still retained by the
+// suite-0 fallback rather than dropped due to map-size comparisons.
+func TestListTestsSuite_MultiFrameworkPassedControlsWithUnmatchedCoverageControl(t *testing.T) {
+	session := cautils.NewOPASessionObjMock()
+	session.Policies = nil
+	session.Report = &reporthandlingv2.PostureReport{
+		SummaryDetails: reportsummary.SummaryDetails{
+			Frameworks: []reportsummary.FrameworkSummary{
+				{
+					Name: "Framework-A",
+					Controls: reportsummary.ControlSummaries{
+						"C-0001": reportsummary.ControlSummary{
+							ControlID: "C-0001",
+							Name:      "Control 1",
+							Status:    apis.StatusPassed,
+						},
+					},
+				},
+				{
+					Name: "Framework-B",
+					Controls: reportsummary.ControlSummaries{
+						"C-0002": reportsummary.ControlSummary{
+							ControlID: "C-0002",
+							Name:      "Control 2",
+							Status:    apis.StatusPassed,
+						},
+					},
+				},
+			},
+		},
+	}
+	session.ScanCoverage = cautils.ScanCoverage{
+		CoverageScore:     66.7,
+		EvaluatedControls: 2,
+		TotalControls:     3,
+		Degraded:          true,
+		NotEvaluatedControls: []cautils.NotEvaluatedControl{
+			{
+				ControlID: "C-0172",
+				Reason:    "missing: rbac.authorization.k8s.io/clusterroles",
+			},
+		},
+	}
+
+	root := testsSuites(session)
+	require.Len(t, root.Suites, 2)
+	assert.Equal(t, 3, root.Tests, "total root tests must be 3 (2 passed + 1 unevaluated)")
+	assert.Equal(t, 1, root.Skipped, "total root skipped must be 1")
+	assert.Equal(t, 0, root.Failures)
+
+	suiteA := root.Suites[0]
+	assert.Equal(t, "Framework-A", suiteA.Name)
+	assert.Equal(t, 2, suiteA.Tests)
+	assert.Equal(t, 1, suiteA.Skipped)
+	require.Len(t, suiteA.TestCases, 2)
+	assert.Equal(t, "Framework-A/C-0001", suiteA.TestCases[0].Classname)
+	assert.Equal(t, "Framework-A/C-0172", suiteA.TestCases[1].Classname)
+	require.NotNil(t, suiteA.TestCases[1].SkipMessage)
+	assert.Equal(t, "missing: rbac.authorization.k8s.io/clusterroles", suiteA.TestCases[1].SkipMessage.Message)
+
+	suiteB := root.Suites[1]
+	assert.Equal(t, "Framework-B", suiteB.Name)
+	assert.Equal(t, 1, suiteB.Tests)
+	assert.Equal(t, 0, suiteB.Skipped)
+	require.Len(t, suiteB.TestCases, 1)
+	assert.Equal(t, "Framework-B/C-0002", suiteB.TestCases[0].Classname)
+}
+
 // TestJunitOutputInvariants is a regression test for the bugs reported in
 // issue #2099: counts mismatch, zero-time timestamps, missing XML prolog,
 // string-typed Skipped attribute, multi-line failure messages, and empty
@@ -940,16 +1188,18 @@ func TestJunitGoldenFile(t *testing.T) {
 	var doc JUnitXML
 	require.NoError(t, xml.NewDecoder(bytes.NewReader(want)).Decode(&doc.TestSuites))
 	require.True(t, bytes.HasPrefix(want, []byte("<?xml")), "golden must include XML prolog")
-	var sumTests, sumFailures, sumErrors int
+	var sumTests, sumFailures, sumErrors, sumSkipped int
 	for _, s := range doc.TestSuites.Suites {
 		sumTests += s.Tests
 		sumFailures += s.Failures
 		sumErrors += s.Errors
+		sumSkipped += s.Skipped
 		assert.NotContains(t, s.Timestamp, "0001-01-01", "golden timestamp must not be Go zero time")
 	}
 	assert.Equal(t, sumTests, doc.TestSuites.Tests, "golden: Σ child tests must equal parent")
 	assert.Equal(t, sumFailures, doc.TestSuites.Failures, "golden: Σ child failures must equal parent")
 	assert.Equal(t, sumErrors, doc.TestSuites.Errors, "golden: Σ child errors must equal parent")
+	assert.Equal(t, sumSkipped, doc.TestSuites.Skipped, "golden: Σ child skipped must equal parent")
 }
 
 // TestIso8601Timestamp covers the small helper that powers the timestamp fix
@@ -1021,13 +1271,15 @@ func TestJunitMultiFrameworkSharedControl(t *testing.T) {
 
 	// Σ(children) must equal 2 — each framework yields a <testsuite> with one
 	// <testcase>. This is the value parsers will see when summing children.
-	var sumTests, sumFailures int
+	var sumTests, sumFailures, sumSkipped int
 	for _, s := range suites.Suites {
 		sumTests += s.Tests
 		sumFailures += s.Failures
+		sumSkipped += s.Skipped
 	}
 	require.Equal(t, 2, sumTests, "Σ child tests should be 2 across the two frameworks")
 	require.Equal(t, 2, sumFailures, "Σ child failures should be 2 across the two frameworks")
+	require.Equal(t, 0, sumSkipped, "Σ child skipped should be 0 across the two frameworks")
 
 	// The fix: parent equals Σ(children). The regression: parent would equal
 	// SummaryDetails.NumberOfControls().All() == 1.
@@ -1035,49 +1287,53 @@ func TestJunitMultiFrameworkSharedControl(t *testing.T) {
 		"parent Tests must equal Σ child Tests (regressed code returns 1)")
 	assert.Equal(t, sumFailures, suites.Failures,
 		"parent Failures must equal Σ child Failures (regressed code returns 1)")
+	assert.Equal(t, sumSkipped, suites.Skipped,
+		"parent Skipped must equal Σ child Skipped")
 	assert.NotEqual(t, session.Report.SummaryDetails.NumberOfControls().All(), suites.Tests,
 		"parent Tests must NOT be the deduplicated SummaryDetails count")
 }
 
-// TestAggregateSuiteCounts covers the Tests/Failures/Errors aggregator
+// TestAggregateSuiteCounts covers the Tests/Failures/Errors/Skipped aggregator
 // directly. The production code path in junit.go never populates child
 // Errors (the printer only emits <failure> and <skipped>), so the multi-
 // framework regression test above cannot exercise the errors branch via
 // testsSuites. This unit test pins the loop itself.
 func TestAggregateSuiteCounts(t *testing.T) {
 	cases := []struct {
-		name                                string
-		in                                  []JUnitTestSuite
-		wantTests, wantFailures, wantErrors int
+		name                                             string
+		in                                               []JUnitTestSuite
+		wantTests, wantFailures, wantErrors, wantSkipped int
 	}{
 		{
 			name: "empty slice yields zeros",
 		},
 		{
-			name: "errors aggregate across suites independently of failures",
+			name: "errors and skipped aggregate across suites independently of failures",
 			in: []JUnitTestSuite{
-				{Tests: 5, Failures: 1, Errors: 2},
-				{Tests: 3, Failures: 0, Errors: 4},
+				{Tests: 5, Failures: 1, Errors: 2, Skipped: 1},
+				{Tests: 3, Failures: 0, Errors: 4, Skipped: 2},
 			},
-			wantTests: 8, wantFailures: 1, wantErrors: 6,
+			wantTests: 8, wantFailures: 1, wantErrors: 6, wantSkipped: 3,
 		},
 		{
-			name: "mixed: errors-only, failures-only, and a clean suite",
+			name: "mixed: errors-only, failures-only, skipped-only, and a clean suite",
 			in: []JUnitTestSuite{
 				{Tests: 4, Errors: 4},
 				{Tests: 2, Failures: 2},
+				{Tests: 3, Skipped: 3},
 				{Tests: 7},
 			},
-			wantTests: 13, wantFailures: 2, wantErrors: 4,
+			wantTests: 16, wantFailures: 2, wantErrors: 4, wantSkipped: 3,
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			gotTests, gotFailures, gotErrors := aggregateSuiteCounts(tc.in)
+			gotTests, gotFailures, gotErrors, gotSkipped := aggregateSuiteCounts(tc.in)
 			assert.Equal(t, tc.wantTests, gotTests, "tests")
 			assert.Equal(t, tc.wantFailures, gotFailures, "failures")
 			assert.Equal(t, tc.wantErrors, gotErrors, "errors")
+			assert.Equal(t, tc.wantSkipped, gotSkipped, "skipped")
 		})
 	}
 }

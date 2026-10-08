@@ -193,3 +193,30 @@ func TestParseSetArgs_CloudReportURL_EmptyHost(t *testing.T) {
 	assert.ErrorContains(t, err, "invalid cloudReportURL")
 	assert.ErrorContains(t, err, "URL host must not be empty")
 }
+
+func TestParseSetArgs_EmptyValue(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		key  string
+	}{
+		{"empty after equals", []string{"accountID="}, "accountID"},
+		{"empty second argument", []string{"accessKey", ""}, "accessKey"},
+		{"whitespace only", []string{"accessKey", "   "}, "accessKey"},
+		{"whitespace url", []string{"cloud-api-url=  "}, "cloud-api-url"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			setConfig, err := parseSetArgs(tt.args)
+			assert.Nil(t, setConfig)
+			assert.ErrorContains(t, err, fmt.Sprintf("value for key %q cannot be empty", tt.key))
+			assert.ErrorContains(t, err, "config delete "+tt.key)
+		})
+	}
+}
+
+func TestParseSetArgs_TrimsValue(t *testing.T) {
+	setConfig, err := parseSetArgs([]string{"accessKey", " value1\n"})
+	assert.NoError(t, err)
+	assert.Equal(t, "value1", setConfig.AccessKey)
+}

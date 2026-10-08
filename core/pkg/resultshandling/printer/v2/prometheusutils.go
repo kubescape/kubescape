@@ -52,7 +52,10 @@ func (mrs *mComplianceScore) metrics() []string {
 
 	m := []string{}
 	// overall
-	m = append(m, toRowInMetrics(fmt.Sprintf("%s_%s", mrs.prefix(), metricsScore), mrs.labels(), mrs.complianceScore))
+	// ComplianceScore is -1 when cluster compliance score has no calculated score.
+	if mrs.complianceScore >= 0 {
+		m = append(m, toRowInMetrics(fmt.Sprintf("%s_%s", mrs.prefix(), metricsScore), mrs.labels(), mrs.complianceScore))
+	}
 
 	// resources
 	m = append(m, toRowInMetrics(fmt.Sprintf("%s_%s_%s_%s", mrs.prefix(), metricsCount, metricsResources, metricsFailed), mrs.labels(), mrs.resourcesCountFailed))
@@ -151,7 +154,10 @@ func (mfrs *mFrameworkComplianceScore) metrics() []string {
 
 	m := []string{}
 	// overall
-	m = append(m, toRowInMetrics(fmt.Sprintf("%s_%s", mfrs.prefix(), metricsScore), mfrs.labels(), mfrs.complianceScore))
+	// GetComplianceScore returns -1 when a framework has no calculated score.
+	if mfrs.complianceScore >= 0 {
+		m = append(m, toRowInMetrics(fmt.Sprintf("%s_%s", mfrs.prefix(), metricsScore), mfrs.labels(), mfrs.complianceScore))
+	}
 
 	// resources
 	m = append(m, toRowInMetrics(fmt.Sprintf("%s_%s_%s_%s", mfrs.prefix(), metricsCount, metricsResources, metricsFailed), mfrs.labels(), mfrs.resourcesCountFailed))
@@ -180,6 +186,7 @@ func (mrc *mResources) metrics() []string {
 		#### Resources metrics
 		kubescape_resource_count_controls_failed{apiVersion="<>",kind="<>",namespace="<>",name="<>"} <counter>
 		kubescape_resource_count_controls_skipped{apiVersion="<>",kind="<>",namespace="<>",name="<>"} <counter>
+		kubescape_resource_count_controls_passed{apiVersion="<>",kind="<>",namespace="<>",name="<>"} <counter>
 	*/
 
 	m := []string{}
@@ -187,6 +194,7 @@ func (mrc *mResources) metrics() []string {
 	// controls
 	m = append(m, toRowInMetrics(fmt.Sprintf("%s_%s_%s_%s", mrc.prefix(), metricsCount, metricsControls, metricsFailed), mrc.labels(), mrc.controlsCountFailed))
 	m = append(m, toRowInMetrics(fmt.Sprintf("%s_%s_%s_%s", mrc.prefix(), metricsCount, metricsControls, metricsSkipped), mrc.labels(), mrc.controlsCountSkipped))
+	m = append(m, toRowInMetrics(fmt.Sprintf("%s_%s_%s_%s", mrc.prefix(), metricsCount, metricsControls, metricsPassed), mrc.labels(), mrc.controlsCountPassed))
 	return m
 }
 
@@ -400,6 +408,10 @@ func (mcrs *mControlComplianceScore) set(resources reportsummary.ICounters) {
 	mcrs.resourcesCountPassed = resources.Passed()
 }
 func (m *Metrics) setComplianceScores(summaryDetails *reportsummary.SummaryDetails) {
+	if summaryDetails == nil {
+		m.rs.complianceScore = -1
+		return
+	}
 	m.rs.set(summaryDetails.NumberOfResources(), summaryDetails.NumberOfControls())
 	// GetScore() returns the risk score; the metric is the compliance score.
 	m.rs.complianceScore = cautils.ComplianceScoreToInt(summaryDetails.ComplianceScore)

@@ -79,6 +79,9 @@ func (m *MemoryStore) Put(ctx context.Context, namespace string, obj workloadint
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	if isNilMetadata(obj) {
+		return ErrNilMetadata
+	}
 
 	rec := newRecord(m.activeGVR, namespace, obj)
 	m.staged[m.activeGVR][namespace] = append(m.staged[m.activeGVR][namespace], rec)

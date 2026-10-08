@@ -7,8 +7,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 type mockHarborAPI struct {
@@ -238,6 +240,165 @@ func TestHarborAdaptor_GetImagesScanStatus(t *testing.T) {
 	assert.False(t, statuses[4].IsScanAvailable) // invalidformat
 	assert.False(t, statuses[5].IsScanAvailable) // malformedrepo
 	assert.True(t, statuses[6].IsScanAvailable)  // nested Harbor repository
+}
+
+func TestLatestSuccessfulHarborScan(t *testing.T) {
+	tests := []struct {
+		name          string
+		overviews     map[string]harborScanOverview
+		wantAvailable bool
+		wantTime      string
+	}{
+		{
+			name:          "no scan overview",
+			overviews:     nil,
+			wantAvailable: false,
+		},
+		{
+			name: "only unfinished scans",
+			overviews: map[string]harborScanOverview{
+				"scanner-a": {ScanStatus: "Pending", EndTime: "2025-04-05T10:00:00Z"},
+				"scanner-b": {ScanStatus: "Running", EndTime: "2025-04-05T11:00:00Z"},
+			},
+			wantAvailable: false,
+		},
+		{
+			name: "single successful scan",
+			overviews: map[string]harborScanOverview{
+				"scanner-a": {ScanStatus: "Success", EndTime: "2025-04-05T10:00:00Z"},
+			},
+			wantAvailable: true,
+			wantTime:      "2025-04-05T10:00:00Z",
+		},
+		{
+			name: "status matching is case insensitive",
+			overviews: map[string]harborScanOverview{
+				"scanner-a": {ScanStatus: "SUCCESS", EndTime: "2025-04-05T10:00:00Z"},
+			},
+			wantAvailable: true,
+			wantTime:      "2025-04-05T10:00:00Z",
+		},
+		{
+			name: "latest successful report wins",
+			overviews: map[string]harborScanOverview{
+				"application/vnd.scanner.old": {
+					ScanStatus: "Success",
+					EndTime:    "2024-01-02T03:04:05Z",
+				},
+				"application/vnd.scanner.new": {
+					ScanStatus: "Success",
+					EndTime:    "2025-06-07T08:09:10Z",
+				},
+				"application/vnd.scanner.pending": {
+					ScanStatus: "Pending",
+					EndTime:    "2026-07-08T09:10:11Z",
+				},
+			},
+			wantAvailable: true,
+			wantTime:      "2025-06-07T08:09:10Z",
+		},
+		{
+			name: "malformed successful timestamp does not hide a valid one",
+			overviews: map[string]harborScanOverview{
+				"scanner-malformed": {ScanStatus: "Success", EndTime: "not-a-time"},
+				"scanner-valid":     {ScanStatus: "Success", EndTime: "2025-06-07T08:09:10.123Z"},
+			},
+			wantAvailable: true,
+			wantTime:      "2025-06-07T08:09:10.123Z",
+		},
+		{
+			name: "newer failed report does not replace last successful scan",
+			overviews: map[string]harborScanOverview{
+				"scanner-success": {
+					ScanStatus: "Success",
+					EndTime:    "2025-06-07T08:09:10Z",
+				},
+				"scanner-failed": {
+					ScanStatus: "Error",
+					EndTime:    "2026-07-08T09:10:11Z",
+				},
+			},
+			wantAvailable: true,
+			wantTime:      "2025-06-07T08:09:10Z",
+		},
+		{
+			name: "successful report without a usable time is still available",
+			overviews: map[string]harborScanOverview{
+				"scanner-a": {ScanStatus: "Success", EndTime: ""},
+			},
+			wantAvailable: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			available, completedAt := latestSuccessfulHarborScan(tt.overviews)
+			assert.Equal(t, tt.wantAvailable, available)
+
+			if tt.wantTime == "" {
+				assert.True(t, completedAt.IsZero())
+				return
+			}
+
+			want, err := time.Parse(time.RFC3339, tt.wantTime)
+			require.NoError(t, err)
+			assert.Equal(t, want, completedAt)
+		})
+	}
+}
+
+func TestHarborAdaptor_GetImagesScanStatusUsesLatestSuccessfulReport(t *testing.T) {
+	const statusPath = "/api/v2.0/projects/platform/repositories/service/artifacts/sha256:abc?with_scan_overview=true"
+	client := &mockHarborAPI{
+		responses: map[string][]byte{
+			statusPath: []byte(`{
+				"scan_overview": {
+					"application/vnd.scanner.v1": {
+						"scan_status": "Success",
+						"end_time": "2023-03-01T12:00:00Z"
+					},
+					"application/vnd.scanner.v2": {
+						"scan_status": "Success",
+						"end_time": "2025-09-03T14:30:00Z"
+					},
+					"application/vnd.scanner.v3": {
+						"scan_status": "Pending",
+						"end_time": "2026-01-01T00:00:00Z"
+					}
+				}
+			}`),
+		},
+		errors: map[string]error{},
+	}
+	adaptor := NewHarborAdaptor()
+	adaptor.client = client
+
+	statuses, err := adaptor.GetImagesScanStatus(context.Background(), []ContainerImageIdentifier{{
+		Repository: "platform/service",
+		Hash:       "sha256:abc",
+	}})
+
+	require.NoError(t, err)
+	require.Len(t, statuses, 1)
+	assert.True(t, statuses[0].IsScanAvailable)
+	assert.Equal(t, "2025-09-03T14:30:00Z", statuses[0].LastScanDate.Format(time.RFC3339))
+}
+
+func TestHarborAdaptor_GetImagesScanStatusIsStableAcrossMapIterations(t *testing.T) {
+	overviews := map[string]harborScanOverview{
+		"scanner-2019": {ScanStatus: "Success", EndTime: "2019-01-01T00:00:00Z"},
+		"scanner-2021": {ScanStatus: "Success", EndTime: "2021-01-01T00:00:00Z"},
+		"scanner-2023": {ScanStatus: "Success", EndTime: "2023-01-01T00:00:00Z"},
+		"scanner-2025": {ScanStatus: "Success", EndTime: "2025-01-01T00:00:00Z"},
+	}
+	want, err := time.Parse(time.RFC3339, "2025-01-01T00:00:00Z")
+	require.NoError(t, err)
+
+	for i := 0; i < 100; i++ {
+		available, completedAt := latestSuccessfulHarborScan(overviews)
+		assert.True(t, available)
+		assert.Equal(t, want, completedAt)
+	}
 }
 
 func TestHarborAdaptor_GetImagesVulnerabilities(t *testing.T) {

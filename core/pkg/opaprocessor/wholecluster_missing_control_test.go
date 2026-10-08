@@ -418,12 +418,13 @@ func TestVerifyWholeCluster_MismatchDetection(t *testing.T) {
 	projectedScope := newEvaluationScope(cautils.ClusterScope, nil, newResidentIndex(incompleteBatch))
 
 	err := opap.verifyAndProcessWholeCluster(context.Background(), policies, []string{"C-0261"}, projectedScope, fallbackScope, nil)
-	require.NoError(t, err, "verify mode logs parity mismatches at error level but does not return an error (exit code 0)")
+	require.Error(t, err, "verify mode must fail closed on parity mismatch instead of shipping the projected verdict with exit 0")
+	assert.Contains(t, err.Error(), "C-0261")
 
-	// Parity verification records results from projectedScope
+	// Parity verification merges the fallback (authoritative) verdicts on mismatch
 	require.Contains(t, opap.ResourcesResult, podID)
 	res := opap.ResourcesResult[podID]
-	assert.True(t, res.GetStatus(nil).IsPassed(), "projected scope without RoleBinding evaluates to passed")
+	assert.True(t, res.GetStatus(nil).IsFailed(), "fallback scope with RoleBinding evaluates to failed")
 }
 
 func TestProcess_WholeClusterControl_NoMatchers_FailsClosed(t *testing.T) {

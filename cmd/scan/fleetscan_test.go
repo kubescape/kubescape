@@ -7,11 +7,16 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
 	"runtime"
 	"sort"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -22,12 +27,18 @@ import (
 	"github.com/kubescape/kubescape/v4/core/meta"
 	"github.com/kubescape/kubescape/v4/core/mocks"
 	"github.com/kubescape/kubescape/v4/core/pkg/fleet"
+	"github.com/kubescape/kubescape/v4/core/pkg/resourcehandler"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/rest"
 )
 
 func TestWriteFleetReport_ReplacesExistingReportAtomically(t *testing.T) {
@@ -433,6 +444,157 @@ func (m *fleetOutcomeKubescape) ScanContext(_ context.Context, scanInfo *cautils
 	return resultsWithControl(apis.StatusPassed, 100), nil
 }
 
+// collectionFailure stands in for the error resourcehandler returns when every
+// resource query failed: it carries each query's error and matches
+// ErrNoResourcesCollected.
+type collectionFailure []error
+
+func (f collectionFailure) Error() string {
+	messages := make([]string, 0, len(f))
+	for _, err := range f {
+		messages = append(messages, err.Error())
+	}
+	return resourcehandler.ErrNoResourcesCollected.Error() + ": " + strings.Join(messages, "; ")
+}
+
+func (f collectionFailure) Unwrap() []error { return f }
+
+func (f collectionFailure) Is(target error) bool {
+	return target == resourcehandler.ErrNoResourcesCollected
+}
+
+// answeredCollection is a collectionFailure in which some other query got a
+// response from the API server, the way resourcehandler reports it.
+type answeredCollection struct {
+	collectionFailure
+}
+
+func (answeredCollection) APIServerAnswered() bool { return true }
+
+// connectionRefused is what one resource query returns when nothing answers at
+// the cluster's API server address.
+func connectionRefused(name string) error {
+	return &url.Error{
+		Op:  "Get",
+		URL: "https://" + name + ":6443/api/v1/pods",
+		Err: &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("connect: connection refused")},
+	}
+}
+
+// refusedConnection is what a context's scan returns when nothing answers at
+// its API server address.
+func refusedConnection(name string) error {
+	return collectionFailure{connectionRefused(name), connectionRefused(name)}
+}
+
+// dialTimeout returns the error a dial produces when the API server never
+// answers the connection attempt. It matches context.DeadlineExceeded, which is
+// exactly why interruption cannot be read from the error.
+func dialTimeout(t *testing.T) error {
+	t.Helper()
+	expired, cancel := context.WithDeadline(context.Background(), time.Unix(0, 0))
+	defer cancel()
+	_, err := (&net.Dialer{}).DialContext(expired, "tcp", "127.0.0.1:1")
+	var opErr *net.OpError
+	require.ErrorAs(t, err, &opErr)
+	require.Equal(t, "dial", opErr.Op)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	return err
+}
+
+func TestClusterUnreachable(t *testing.T) {
+	refused := connectionRefused("prod")
+	timedOut := dialTimeout(t)
+	var dialErr *net.OpError
+	require.ErrorAs(t, timedOut, &dialErr)
+	forbidden := apierrors.NewForbidden(schema.GroupResource{Resource: "pods"}, "", errors.New("rbac"))
+	noSuchHost := &url.Error{Op: "Get", URL: "https://prod:6443/api", Err: &net.OpError{Op: "dial", Net: "tcp", Err: &net.DNSError{Err: "no such host", Name: "prod", IsNotFound: true}}}
+	proxyDown := &url.Error{Op: "Get", URL: "https://prod:6443/api", Err: &net.OpError{Op: "proxyconnect", Net: "tcp", Err: &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("connect: connection refused")}}}
+
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "connection refused", err: collectionFailure{refused}, want: true},
+		{name: "name did not resolve", err: collectionFailure{noSuchHost}, want: true},
+		{name: "proxy could not be reached", err: collectionFailure{proxyDown}, want: true},
+		{name: "connection timed out", err: collectionFailure{timedOut}, want: true},
+		{name: "no response in time", err: collectionFailure{&url.Error{Op: "Get", URL: "https://prod:6443/api", Err: dialErr.Err}}, want: true},
+		{name: "every query failed to connect", err: fmt.Errorf("scan: %w", collectionFailure{refused, noSuchHost}), want: true},
+		{name: "one query was answered with a refusal", err: collectionFailure{refused, forbidden}, want: false},
+		{name: "server answered and refused", err: collectionFailure{forbidden}, want: false},
+		{name: "certificate rejected", err: collectionFailure{&url.Error{Op: "Get", URL: "https://prod:6443/api", Err: errors.New("x509: certificate signed by unknown authority")}}, want: false},
+		{name: "connection reset after it was opened", err: collectionFailure{&net.OpError{Op: "read", Net: "tcp", Err: errors.New("connection reset by peer")}}, want: false},
+		{name: "response body timed out", err: collectionFailure{fmt.Errorf("unexpected error when reading response body: %w", dialErr.Err)}, want: false},
+		{name: "another query was answered", err: answeredCollection{collectionFailure{refused}}, want: false},
+		{name: "network failure outside resource collection", err: fmt.Errorf("failed to download policies: %w", refused), want: false},
+		{name: "kubeconfig could not be loaded", err: core.ErrClusterConnection, want: false},
+		{name: "no queries", err: collectionFailure{}, want: false},
+		{name: "no error", err: nil, want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, clusterUnreachable(tt.err))
+		})
+	}
+}
+
+// TestClusterUnreachable_RealRefusedConnection checks the classifier against
+// the error the network stack actually produces, not only hand-built ones.
+func TestClusterUnreachable_RealRefusedConnection(t *testing.T) {
+	listener, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	address := listener.Addr().String()
+	require.NoError(t, listener.Close())
+
+	_, err = (&net.Dialer{Timeout: time.Second}).Dial("tcp", address)
+	require.Error(t, err)
+
+	assert.True(t, clusterUnreachable(collectionFailure{err}))
+}
+
+// TestClusterUnreachable_RealResponseTimeouts checks both kinds of timeout the
+// Kubernetes client actually produces: one before any response arrives, and one
+// reading the body after the server has already answered.
+func TestClusterUnreachable_RealResponseTimeouts(t *testing.T) {
+	release := make(chan struct{})
+	stall := func(r *http.Request) {
+		select {
+		case <-release:
+		case <-r.Context().Done():
+		}
+	}
+	silent := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { stall(r) }))
+	answered := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
+		stall(r)
+	}))
+	t.Cleanup(func() {
+		silent.Close()
+		answered.Close()
+	})
+	t.Cleanup(func() { close(release) })
+
+	list := func(host string) error {
+		client, err := dynamic.NewForConfig(&rest.Config{Host: host, Timeout: 200 * time.Millisecond})
+		require.NoError(t, err)
+		_, err = client.Resource(schema.GroupVersionResource{Version: "v1", Resource: "pods"}).List(context.Background(), metav1.ListOptions{})
+		require.Error(t, err)
+		return err
+	}
+
+	assert.True(t, clusterUnreachable(collectionFailure{list(silent.URL)}),
+		"no response arrived before the timeout")
+	assert.False(t, clusterUnreachable(collectionFailure{list(answered.URL)}),
+		"the server sent a response before the body read timed out")
+}
+
 func TestNewClusterResult_ClassifiesByResultsFirstThenError(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -460,17 +622,34 @@ func TestNewClusterResult_ClassifiesByResultsFirstThenError(t *testing.T) {
 		},
 		{
 			name:       "api server never reached",
-			err:        fmt.Errorf("prod: %w", core.ErrClusterConnection),
+			err:        refusedConnection("prod"),
 			wantStatus: fleet.ClusterUnreachable,
 		},
 		{
+			// A dial timeout matches context.DeadlineExceeded, but the run's
+			// own context was still live, so the cluster did not answer.
+			name:       "api server never answered while the run was live",
+			err:        collectionFailure{dialTimeout(t)},
+			wantStatus: fleet.ClusterUnreachable,
+		},
+		{
+			name:       "api server answered and refused",
+			err:        apierrors.NewForbidden(schema.GroupResource{Resource: "pods"}, "", errors.New("rbac")),
+			wantStatus: fleet.ClusterError,
+		},
+		{
+			name:       "kubeconfig could not be loaded",
+			err:        fmt.Errorf("%w: %w", core.ErrClusterConnection, errors.New(`cluster "no-such-cluster" not found`)),
+			wantStatus: fleet.ClusterError,
+		},
+		{
 			name:       "run interrupted",
-			err:        context.Canceled,
+			err:        interruptedError{err: context.Canceled},
 			wantStatus: fleet.ClusterCancelled,
 		},
 		{
 			name:       "per-cluster scan timeout expired",
-			err:        fmt.Errorf("scan: %w", context.DeadlineExceeded),
+			err:        interruptedError{err: fmt.Errorf("scan aborted: %w", context.DeadlineExceeded)},
 			wantStatus: fleet.ClusterCancelled,
 		},
 		{
@@ -528,7 +707,7 @@ func TestFleetScan_WritesFleetReportAcrossEveryOutcome(t *testing.T) {
 			return resultsWithControl(apis.StatusPassed, 100), nil
 		},
 		"dr": func() (*resultshandling.ResultsHandler, error) {
-			return nil, fmt.Errorf("dr: %w", core.ErrClusterConnection)
+			return nil, refusedConnection("dr")
 		},
 	}}
 	scanInfo := cautils.ScanInfo{
@@ -558,7 +737,7 @@ func TestFleetScan_WritesFleetReportAcrossEveryOutcome(t *testing.T) {
 	assert.True(t, prod.Scanned())
 	assert.Equal(t, fleet.ClusterScanned, byID["staging"].Status)
 	assert.Equal(t, fleet.ClusterUnreachable, byID["dr"].Status)
-	assert.Contains(t, byID["dr"].Error, "failed connecting to Kubernetes cluster")
+	assert.Contains(t, byID["dr"].Error, "connection refused")
 	assert.Nil(t, byID["dr"].ComplianceScore)
 
 	require.Len(t, report.ControlMatrix.Controls, 1)
@@ -587,7 +766,7 @@ func TestFleetScan_FleetReportCarriesTheComplianceRollup(t *testing.T) {
 			return resultsWithControl(apis.StatusPassed, 100), nil
 		},
 		"dr": func() (*resultshandling.ResultsHandler, error) {
-			return nil, fmt.Errorf("dr: %w", core.ErrClusterConnection)
+			return nil, refusedConnection("dr")
 		},
 	}}
 	scanInfo := cautils.ScanInfo{
@@ -1319,6 +1498,33 @@ func TestValidateKubeContextsSupported_FleetReportRequiresKubeContexts(t *testin
 	assert.NoError(t, validateKubeContextsSupported(cmd, &cautils.ScanInfo{}), "neither flag set is the ordinary single-cluster scan")
 }
 
+// TestPerContextOutputPath_DevNullStaysDevNull pins the discard sink through
+// the per-context derivation. printer.ResolveOutputFile treats os.DevNull as a
+// well-known sink and hands it back untouched, so a single-context scan with
+// --output /dev/null throws its report away. Deriving "/dev/null.<context>"
+// from it turns that same request into a real path in /dev: a write that fails
+// with "permission denied" for an ordinary user, and that litters /dev with
+// report files for the root user a scanner container usually runs as.
+func TestPerContextOutputPath_DevNullStaysDevNull(t *testing.T) {
+	got, err := perContextOutputPath(os.DevNull, "prod")
+
+	require.NoError(t, err)
+	assert.Equal(t, os.DevNull, got)
+}
+
+// TestPerContextOutputPaths_DevNullIsNotACollision covers the batch path: every
+// context legitimately discards to the same sink, so sharing it is not the
+// silent overwrite the collision check exists to catch.
+func TestPerContextOutputPaths_DevNullIsNotACollision(t *testing.T) {
+	paths, err := perContextOutputPaths(os.DevNull, []string{"prod", "staging"}, []string{"json"})
+
+	require.NoError(t, err)
+	assert.Equal(t, map[string]string{
+		"prod":    os.DevNull,
+		"staging": os.DevNull,
+	}, paths)
+}
+
 func TestFleetScan_FleetReportCarriesTheDivergence(t *testing.T) {
 	dir := t.TempDir()
 	fleetReport := filepath.Join(dir, "fleet.json")
@@ -1379,7 +1585,7 @@ func TestFleetScan_ReferenceClusterThatCouldNotBeScanned(t *testing.T) {
 	fleetReport := filepath.Join(dir, "fleet.json")
 	ks := &fleetOutcomeKubescape{outcomes: map[string]func() (*resultshandling.ResultsHandler, error){
 		"golden": func() (*resultshandling.ResultsHandler, error) {
-			return nil, fmt.Errorf("golden: %w", core.ErrClusterConnection)
+			return nil, refusedConnection("golden")
 		},
 		"prod": func() (*resultshandling.ResultsHandler, error) {
 			return resultsWithControl(apis.StatusPassed, 100), nil
@@ -1501,7 +1707,7 @@ func TestFleetScan_AlwaysPrintsTheSummary(t *testing.T) {
 		},
 		"staging": func() (*resultshandling.ResultsHandler, error) { return resultsWithControl(apis.StatusFailed, 40), nil },
 		"dr": func() (*resultshandling.ResultsHandler, error) {
-			return nil, fmt.Errorf("dr: %w", core.ErrClusterConnection)
+			return nil, refusedConnection("dr")
 		},
 	}}
 	scanInfo := cautils.ScanInfo{
@@ -1675,4 +1881,33 @@ func TestFleetScan_ContextWindowsDoNotOverlap(t *testing.T) {
 
 	assert.Equal(t, previousContext, k8sinterface.GetContextName(),
 		"the run must leave the process on the context it found it on")
+}
+
+func TestFleetScan_DevNullForContextAndFleetReports(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		formats []string
+	}{
+		{name: "no format"},
+		{name: "json", formats: []string{"json"}},
+		{name: "multiple formats", formats: []string{"json", "sarif"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Empty(t, printerDestinations(os.DevNull, tc.formats), "discarded reports cannot collide")
+			paths, err := perContextOutputPaths(os.DevNull, []string{"prod", "staging"}, tc.formats)
+			require.NoError(t, err)
+			require.NoError(t, validateFleetReportPath(os.DevNull, paths, tc.formats))
+
+			ks := &fleetTrackingKubescape{}
+			info := cautils.ScanInfo{
+				KubeContexts: []string{"prod", "staging"},
+				Output:       os.DevNull,
+				FleetReport:  os.DevNull,
+				Format:       strings.Join(tc.formats, ","),
+				ScanType:     cautils.ScanTypeCluster,
+			}
+			require.NoError(t, fleetScan(info, ks, nil, scanContextOnlyRunner))
+			assert.Equal(t, []string{os.DevNull, os.DevNull}, ks.callsOutputs)
+		})
+	}
 }

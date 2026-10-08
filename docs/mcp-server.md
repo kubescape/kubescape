@@ -297,6 +297,102 @@ Run an on-demand container image vulnerability scan and return structured JSON c
 }
 ```
 
+### Report Comparison Tools
+
+#### `diff_reports`
+
+Compare two already-produced Kubescape scan report files (JSON) and return what changed, reusing the same comparison engine as `kubescape diff`/`--baseline`. Works for posture reports (`kubescape scan --format json`), reporting new, resolved, unchanged, and incomparable control failures, and for image vulnerability reports (`kubescape scan image --format json`), reporting new, resolved, and unchanged CVEs. Both reports must be the same kind; comparing a posture report against a vulnerability report is rejected rather than silently treated as comparable.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `base_report` | string | Yes | Path to the baseline/base Kubescape scan report JSON file |
+| `head_report` | string | Yes | Path to the current/head Kubescape scan report JSON file |
+
+**Example use case:** "What changed between these two Kubescape reports?"
+
+**Example Response (posture reports):**
+```json
+{
+  "kind": "posture",
+  "base_report": "base.json",
+  "head_report": "head.json",
+  "posture": {
+    "new": [{"resourceID": "...", "controlID": "C-0001", "severity": "High", "baseStatus": "passed", "headStatus": "failed"}],
+    "resolved": [],
+    "unchanged": [],
+    "incomparable": []
+  }
+}
+```
+
+**Example Response (image vulnerability reports):**
+```json
+{
+  "kind": "vulnerability",
+  "base_report": "base-image.json",
+  "head_report": "head-image.json",
+  "vulnerability": {
+    "baseImages": ["app:1.0"],
+    "headImages": ["app:1.1"],
+    "new": [{"id": "CVE-NEW-HIGH", "severity": "High", "package": "curl", "version": "1.0"}],
+    "resolved": [{"id": "CVE-OLD", "severity": "High", "package": "openssl", "version": "3.0.1"}],
+    "unchanged": []
+  }
+}
+```
+
+### Compliance & Hardening Tools
+
+#### `predict_pss_compliance`
+
+Predict which workloads in a namespace would fail Pod Security Standards (PSS v1.37) enforcement at a given level (`Privileged`, `Baseline`, or `Restricted`) and report exactly what violates per container. Use this to assess blast radius before enabling PSS admission enforcement — answers *"what would break if I enforced Baseline/Restricted on this namespace?"* without touching the cluster's admission configuration.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `namespace` | string | Yes | Namespace to analyze |
+| `level` | string | No | Target PSS level: `Privileged`, `Baseline`, or `Restricted` (default: `Restricted`) |
+| `workload_name` | string | No | Specific workload to check (`Kind/Name` or bare `Name`). Omit to evaluate all workloads in the namespace |
+
+**Example Response:**
+
+```json
+{
+  "namespace": "production",
+  "target_level": "Restricted",
+  "summary": {
+    "total_workloads": 12,
+    "passing": 11,
+    "failing": 1,
+    "current_effective_level": "Baseline"
+  },
+  "failing_workloads": [
+    {
+      "kind": "Deployment",
+      "name": "legacy-api",
+      "passes_at": "Baseline",
+      "violations": [
+        {
+          "check": "Capabilities",
+          "container": "main",
+          "level": "Restricted",
+          "description": "container 'main' must drop ALL capabilities; securityContext.capabilities is unset"
+        },
+        {
+          "check": "RunAsNonRoot",
+          "container": "main",
+          "level": "Restricted",
+          "description": "container 'main' must set runAsNonRoot to true"
+        }
+      ]
+    }
+  ]
+}
+```
+
 ## Resource Templates
 
 The MCP server also exposes resource templates for direct access to data:
@@ -353,6 +449,7 @@ Once connected, you can ask your AI assistant questions like:
 - "What configuration issues does my cluster have?"
 - "Which workloads have the most security issues?"
 - "Give me details about CVE-2023-12345 in my cluster"
+- "What changed between these two Kubescape reports?"
 
 ## Troubleshooting
 
@@ -392,6 +489,7 @@ kubescape version
 - It provides read-only access to vulnerability and configuration data
 - No cluster modifications are made through the MCP server
 - Consider running with a service account that has limited permissions in production
+- **SSE Transport**: `kubescape mcpserver -t sse` listens on `127.0.0.1` only and answers `403 Forbidden` to any request whose `Origin` header names a site other than this machine, so web pages open in your browser cannot reach the server. MCP clients that are not browsers send no `Origin` header and are not affected; browser-based clients must be served from `localhost` or a loopback address.
 - **Credential Handling**: The `scan_container_image` tool accepts optional registry credentials (`username` and `password`). Be aware that parameters supplied to MCP tools may be retained in client conversation logs or model contexts depending on your client environment.
 - **Image Reference Validation**: The `scan_container_image` tool validates image names as remote image references and rejects local file paths and scheme prefixes (such as `dir:`, `file:`, `sbom:`) to prevent unauthorized local filesystem access.
 - **Air-Gapped Environments**: In air-gapped environments, set the `KS_GRYPE_LISTING_URL` environment variable to point to your internal Grype vulnerability database mirror listing URL.

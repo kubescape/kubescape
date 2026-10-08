@@ -145,18 +145,27 @@ func (pp *PolicyReportPrinter) ActionPrint(ctx context.Context, opaSessionObj *c
 	return nil
 }
 
+// buildPolicyReports constructs PolicyReport and ClusterPolicyReport objects from an OPA session,
+// including cluster-wide skipped controls and diagnostics (#3989).
 func buildPolicyReports(opaSessionObj *cautils.OPASessionObj) []policyReport {
-	timestamp := opaSessionObj.Report.ReportGenerationTime
+	var timestamp time.Time
+	if opaSessionObj.Report != nil {
+		timestamp = opaSessionObj.Report.ReportGenerationTime
+	}
 	if timestamp.IsZero() {
 		timestamp = time.Now().UTC()
 	}
 	reportTime := metav1.NewTime(timestamp)
 	resultTimestamp := *reportTime.ProtoTime()
 
-	summaryControls := opaSessionObj.Report.SummaryDetails.Controls
+	var summaryControls reportsummary.ControlSummaries
+	if opaSessionObj.Report != nil {
+		summaryControls = opaSessionObj.Report.SummaryDetails.Controls
+	}
 
 	byNamespace := map[string][]policyReportResult{}
 	summaries := map[string]policyReportSummary{}
+	emittedClusterControls := make(map[string]struct{})
 
 	resourceIDs := make([]string, 0, len(opaSessionObj.ResourcesResult))
 	for resourceID := range opaSessionObj.ResourcesResult {
@@ -216,6 +225,10 @@ func buildPolicyReports(opaSessionObj *cautils.OPASessionObj) []policyReport {
 				},
 			})
 
+			if namespace == "" {
+				emittedClusterControls[ac.GetID()] = struct{}{}
+			}
+
 			s := summaries[namespace]
 			switch policyResult {
 			case policyReportResultPass:
@@ -227,6 +240,69 @@ func buildPolicyReports(opaSessionObj *cautils.OPASessionObj) []policyReport {
 			}
 			summaries[namespace] = s
 		}
+	}
+
+	// Surface cluster-wide skipped and unevaluated controls in ClusterPolicyReport (#3884 parity)
+	skippedControls := collectSkippedControls(opaSessionObj)
+	for _, sc := range skippedControls {
+		reason := sc.reason
+		if reason == "" {
+			reason = "reason unavailable"
+		}
+
+		message := reason
+		if sc.name != "" && reason != "" {
+			message = fmt.Sprintf("%s: %s", sc.name, reason)
+		}
+
+		enrichedExistingSkip := false
+		if _, alreadyEmitted := emittedClusterControls[sc.controlID]; alreadyEmitted {
+			for i := range byNamespace[""] {
+				result := &byNamespace[""][i]
+				if result.Policy != sc.controlID || result.Result != policyReportResultSkip {
+					continue
+				}
+				result.Message = message
+				if result.Properties == nil {
+					result.Properties = map[string]string{}
+				}
+				result.Properties["skipReason"] = reason
+				enrichedExistingSkip = true
+			}
+			if enrichedExistingSkip {
+				continue
+			}
+		}
+
+		severity := apis.ControlSeverityToString(sc.scoreFactor)
+		if severity == "" || severity == "Unknown" {
+			if ctrl := summaryControls.GetControl(reportsummary.EControlCriteriaID, sc.controlID); ctrl != nil && ctrl.GetScoreFactor() > 0 {
+				severity = apis.ControlSeverityToString(ctrl.GetScoreFactor())
+			}
+		}
+		if severity == "" {
+			severity = "Unknown"
+		}
+
+		byNamespace[""] = append(byNamespace[""], policyReportResult{
+			Source:    policyReportSource,
+			Policy:    sc.controlID,
+			Rule:      sc.name,
+			Severity:  mapPolicyReportSeverity(severity),
+			Result:    policyReportResultSkip,
+			Message:   message,
+			Timestamp: resultTimestamp,
+			Properties: map[string]string{
+				"controlURL": cautils.GetControlLink(sc.controlID),
+				"skipReason": reason,
+			},
+		})
+
+		emittedClusterControls[sc.controlID] = struct{}{}
+
+		s := summaries[""]
+		s.Skip++
+		summaries[""] = s
 	}
 
 	clusterName := scanContextName(opaSessionObj)

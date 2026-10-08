@@ -38,7 +38,10 @@ const (
 	// ExposureOpen means the endpoint is not ingress-isolated by any
 	// NetworkPolicy at all (default allow), or some rule has no From
 	// restriction whatsoever -- either way, reachable from literally
-	// anywhere.
+	// anywhere. It is also the worst-case classification of an isolated
+	// hostNetwork endpoint, whose policies may not be enforced (see
+	// Endpoint.HostNetwork): there Open is not a confirmed admission, and
+	// Reason says so.
 	ExposureOpen
 )
 
@@ -78,6 +81,12 @@ type Exposure struct {
 func (idx *Index) IngressExposure(ep Endpoint) Exposure {
 	if !idx.IsIsolated(ep, Ingress) {
 		return Exposure{Level: ExposureOpen, Reason: "no NetworkPolicy selects this endpoint for ingress; default allow"}
+	}
+	if ep.HostNetwork {
+		// The policies that select a hostNetwork pod cannot be counted on
+		// to restrict it (see Endpoint.HostNetwork), and it listens on its
+		// node's own addresses, so it is classified by the worst case.
+		return Exposure{Level: ExposureOpen, Reason: "worst case, not a confirmed policy admission: endpoint uses the host network (hostNetwork: true), where NetworkPolicy behaviour is undefined and most network plugins do not enforce the policies that select it"}
 	}
 
 	// haveBest tracks whether best has ever been assigned from a real

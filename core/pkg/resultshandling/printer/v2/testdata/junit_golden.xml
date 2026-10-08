@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuites errors="0" failures="16" tests="24" name="Kubescape Scanning">
+<testsuites errors="0" failures="16" skipped="3" tests="24" name="Kubescape Scanning">
   <testsuite tests="24" name="NSA" errors="0" failures="16" id="0" skipped="3" timestamp="2024-03-14T09:15:26Z">
     <properties>
       <property name="complianceScore" value="73.25"></property>

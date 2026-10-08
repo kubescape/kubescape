@@ -57,6 +57,11 @@ type HarborAdaptor struct {
 	host   string
 }
 
+type harborScanOverview struct {
+	ScanStatus string `json:"scan_status"`
+	EndTime    string `json:"end_time"`
+}
+
 // NewHarborAdaptor creates a new Harbor adaptor instance.
 func NewHarborAdaptor() *HarborAdaptor {
 	return &HarborAdaptor{}
@@ -165,30 +170,41 @@ func (a *HarborAdaptor) GetImagesScanStatus(ctx context.Context, imageIDs []Cont
 		}
 
 		var artifact struct {
-			ScanOverview map[string]struct {
-				ScanStatus string `json:"scan_status"`
-				EndTime    string `json:"end_time"`
-			} `json:"scan_overview"`
+			ScanOverview map[string]harborScanOverview `json:"scan_overview"`
 		}
 
 		if err := json.Unmarshal(data, &artifact); err != nil {
 			return status, fmt.Errorf("failed to parse scan status payload for repository %s: %w", repo, err)
 		}
 
-		if artifact.ScanOverview != nil {
-			for _, overview := range artifact.ScanOverview {
-				if overview.ScanStatus == "Success" {
-					status.IsScanAvailable = true
-					if t, err := time.Parse(time.RFC3339, overview.EndTime); err == nil {
-						status.LastScanDate = t
-					}
-					break
-				}
-			}
-		}
+		status.IsScanAvailable, status.LastScanDate = latestSuccessfulHarborScan(artifact.ScanOverview)
 
 		return status, nil
 	})
+}
+
+// latestSuccessfulHarborScan reduces all scanner reports attached to an
+// artifact. Harbor keys scan_overview by report media type, so iteration order
+// is deliberately unspecified. Selecting the first successful entry can make
+// LastScanDate move backwards between identical requests when an artifact has
+// reports from more than one scanner or report schema.
+func latestSuccessfulHarborScan(overviews map[string]harborScanOverview) (bool, time.Time) {
+	available := false
+	var latest time.Time
+
+	for _, overview := range overviews {
+		if !strings.EqualFold(overview.ScanStatus, "Success") {
+			continue
+		}
+
+		available = true
+		completedAt, err := time.Parse(time.RFC3339, overview.EndTime)
+		if err == nil && completedAt.After(latest) {
+			latest = completedAt
+		}
+	}
+
+	return available, latest
 }
 
 // GetImagesVulnerabilities retrieves the vulnerability reports for a list of image identifiers.

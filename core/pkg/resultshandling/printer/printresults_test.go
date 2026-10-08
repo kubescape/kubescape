@@ -94,6 +94,12 @@ func TestGetWriter_ValidFileName(t *testing.T) {
 
 	assert.Equal(t, target, f.Name())
 	assertDirNotMorePermissiveThan0750(t, filepath.Dir(target))
+
+	if runtime.GOOS != "windows" {
+		info, err := os.Stat(target)
+		require.NoError(t, err)
+		assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+	}
 }
 
 // assertDirNotMorePermissiveThan0750 fails the test if dir's permission bits
@@ -143,6 +149,27 @@ func TestGetWriter_CreateFailsFallsBackToStdout(t *testing.T) {
 	assert.Same(t, os.Stdout, f)
 }
 
+// If a pre-existing file cannot be tightened to 0600 (e.g. it is owned by
+// another user), no report may be written into it.
+func TestGetWriterNoFallback_ChmodFailureReturnsError(t *testing.T) {
+	target := filepath.Join(t.TempDir(), "report.json")
+	require.NoError(t, os.WriteFile(target, []byte("old"), 0o600))
+	oldChmod := chmodFile
+	chmodFile = func(*os.File, os.FileMode) error { return os.ErrPermission }
+	t.Cleanup(func() { chmodFile = oldChmod })
+
+	f, err := GetWriterNoFallback(target)
+
+	require.Error(t, err)
+	assert.Nil(t, f)
+	assert.ErrorIs(t, err, os.ErrPermission)
+
+	assert.Same(t, os.Stdout, GetWriter(context.Background(), target))
+	got, readErr := os.ReadFile(target)
+	require.NoError(t, readErr)
+	assert.Equal(t, "old", string(got), "the previous report must not be truncated when tightening fails")
+}
+
 func TestGetWriterNoFallback_ReturnsExplicitSetupError(t *testing.T) {
 	dir := t.TempDir()
 	blocker := filepath.Join(dir, "not-a-directory")
@@ -168,6 +195,12 @@ func TestGetWriterNoStdoutFallback_ValidFileName(t *testing.T) {
 	assert.Equal(t, target, f.Name())
 	assert.NotEqual(t, os.Stdout.Name(), f.Name())
 	assertDirNotMorePermissiveThan0750(t, filepath.Dir(target))
+
+	if runtime.GOOS != "windows" {
+		info, err := os.Stat(target)
+		require.NoError(t, err)
+		assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+	}
 }
 
 // MkdirAll fails when a path component that should be a directory is actually

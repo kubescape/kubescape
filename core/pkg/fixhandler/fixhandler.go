@@ -319,29 +319,189 @@ func (h *FixHandler) resourceBasePath(resourceObj *reporthandling.Resource) stri
 	return sourcePath
 }
 
-// countResourcesPerFile tallies every resource the scan read from each manifest,
-// keyed by the file the report recorded it against.
+// countResourcesPerFile tallies the resources the scan read from each manifest,
+// keyed by the manifest's resolved path (see resourceFileKey).
+//
+// Overlapping inputs read one manifest more than once: outside git,
+// `scan w w/apps` reads w/apps/deploy.yaml through both roots and records it as
+// apps/deploy.yaml and as deploy.yaml. The recorded paths differ, so both
+// observations survive as separate resources, and summed per file they would
+// read as one document declaring two resources — a kind: List — skipping a
+// plain manifest. So the resources are counted per root the file was read
+// through, and the file's count is the largest of those: a root sees each
+// resource of the file once, every member of a List included.
 func (h *FixHandler) countResourcesPerFile(resources map[string]*reporthandling.Resource) map[string]int {
-	perFile := make(map[string]int, len(resources))
+	type observation struct{ file, root string }
+	perObservation := make(map[observation]int, len(resources))
 	for _, resource := range resources {
-		if key := h.resourceFileKey(resource); key != "" {
-			perFile[key]++
+		root, relativePath, ok := h.localManifest(resource)
+		if !ok {
+			continue
+		}
+		perObservation[observation{filepath.Join(root, relativePath), root}]++
+	}
+
+	perFile := make(map[string]int, len(perObservation))
+	for seen, count := range perObservation {
+		if count > perFile[seen.file] {
+			perFile[seen.file] = count
 		}
 	}
 	return perFile
 }
 
 // resourceFileKey is the manifest a resource was read from, without the
-// document index the report appends to it.
+// document index the report appends to it, resolved against the resource's own
+// root. The path the report records is relative to that root, and outside a git
+// repository each input of a multi-input scan is its own root: keyed by the
+// recorded path alone, apps/web/deploy.yaml and infra/db/deploy.yaml both read
+// as "deploy.yaml", one file holding two resources, and dropWrappedResources
+// skipped both as a kind: List wrapper (#4042).
 func (h *FixHandler) resourceFileKey(resource *reporthandling.Resource) string {
+	root, relativePath, ok := h.localManifest(resource)
+	if !ok {
+		return ""
+	}
+	return filepath.Join(root, relativePath)
+}
+
+// localManifest returns the root a resource's manifest resolves against and the
+// manifest's path relative to it, or ok=false for a resource with no manifest
+// on disk. The root is resourceBasePath's, the one resolveResourceSource
+// resolves the file against, so everything keyed on it agrees with where the
+// file is actually read from and written to.
+func (h *FixHandler) localManifest(resource *reporthandling.Resource) (root, relativePath string, ok bool) {
 	if resource == nil {
-		return ""
+		return "", "", false
 	}
-	filePath, _, err := h.getFilePathAndIndex(h.getPathFromRawResource(resource.GetObject()))
+	relativePath, _, err := h.getFilePathAndIndex(h.getPathFromRawResource(resource.GetObject()))
 	if err != nil {
-		return ""
+		return "", "", false
 	}
-	return filePath
+	return filepath.Clean(h.resourceBasePath(resource)), relativePath, true
+}
+
+// scanRoots returns the distinct roots the report's manifests were read from,
+// sorted. A scan inside a git repository has one, the repository root, however
+// many inputs it had; so does a scan of a single input. A multi-input scan
+// outside git has one per input.
+//
+// It covers every manifest the scan read, not only the ones being fixed, so
+// that anything derived from it depends on what was scanned rather than on
+// which files happened to fail or which controls were selected.
+func (h *FixHandler) scanRoots() []string {
+	_, roots := h.scannedManifests()
+	return roots
+}
+
+// scannedManifests returns every manifest the report's resources were read
+// from, resolved the way resolveResourceSource resolves them, and the distinct
+// roots they were read through. Both are sorted. Passing manifests and ones
+// outside the current control selection are included: they were scanned all
+// the same.
+func (h *FixHandler) scannedManifests() (files, roots []string) {
+	seenFiles := make(map[string]bool)
+	seenRoots := make(map[string]bool)
+	for _, resource := range h.buildResourcesMap() {
+		root, relativePath, ok := h.localManifest(resource)
+		if !ok || root == "" || root == "." {
+			continue
+		}
+		if file := filepath.Join(root, relativePath); !seenFiles[file] {
+			seenFiles[file] = true
+			files = append(files, file)
+		}
+		if !seenRoots[root] {
+			seenRoots[root] = true
+			roots = append(roots, root)
+		}
+	}
+	sort.Strings(files)
+	sort.Strings(roots)
+	return files, roots
+}
+
+// scannedFileSet indexes the scanned manifests for overwritesScannedManifest:
+// by absolute path, and by identity for the ones still on disk.
+type scannedFileSet struct {
+	paths map[string]string // absolute path -> scanned path
+	infos []scannedFileInfo
+}
+
+type scannedFileInfo struct {
+	path string
+	info os.FileInfo
+}
+
+func (h *FixHandler) scannedFiles(extra ...string) scannedFileSet {
+	files, _ := h.scannedManifests()
+	set := scannedFileSet{paths: make(map[string]string, len(files)+len(extra))}
+	for _, file := range append(files, extra...) {
+		abs, err := filepath.Abs(file)
+		if err != nil {
+			abs = filepath.Clean(file)
+		}
+		if _, seen := set.paths[abs]; seen {
+			continue
+		}
+		set.paths[abs] = file
+		if info, err := os.Stat(file); err == nil {
+			set.infos = append(set.infos, scannedFileInfo{path: file, info: info})
+		}
+	}
+	return set
+}
+
+// overwritesScannedManifest returns the scanned manifest destination would
+// overwrite, if any: one at the same path, or one the destination already
+// names under another, through a hard link or a symlink.
+func (set scannedFileSet) overwritesScannedManifest(destination string) (string, bool) {
+	if abs, err := filepath.Abs(destination); err == nil {
+		if scanned, ok := set.paths[abs]; ok {
+			return scanned, true
+		}
+	}
+	existing, err := os.Stat(destination)
+	if err != nil {
+		return "", false
+	}
+	for _, scanned := range set.infos {
+		if os.SameFile(existing, scanned.info) {
+			return scanned.path, true
+		}
+	}
+	return "", false
+}
+
+// sharedScanRoot returns the deepest directory containing every scan root, or ""
+// when the scan has a single root, whose recorded relative paths are already a
+// tree. It fails when the roots share no directory at all, as inputs on two
+// Windows volumes do.
+func (h *FixHandler) sharedScanRoot() (string, error) {
+	roots := h.scanRoots()
+	if len(roots) < 2 {
+		return "", nil
+	}
+
+	shared := roots[0]
+	for _, root := range roots[1:] {
+		for !isLexicallyWithin(shared, root) {
+			parent := filepath.Dir(shared)
+			if parent == shared {
+				return "", fmt.Errorf("the scanned inputs %q and %q share no common directory to lay out --output-dir under; fix them in separate runs", roots[0], root)
+			}
+			shared = parent
+		}
+	}
+	return shared, nil
+}
+
+// isLexicallyWithin reports whether target is base or lies below it, comparing
+// the paths as written. Both come from resourceBasePath, which has already
+// decided which root each manifest is read from.
+func isLexicallyWithin(base, target string) bool {
+	rel, err := filepath.Rel(base, target)
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 func (h *FixHandler) buildResourcesMap() map[string]*reporthandling.Resource {
@@ -664,6 +824,7 @@ func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInf
 					ControlID:    ac.GetID(),
 					ControlName:  ac.GetName(),
 					ResourceName: resourceID,
+					ResourceID:   resourceID,
 					Reason:       "skipped: resource data missing from report",
 				})
 			}
@@ -678,12 +839,14 @@ func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInf
 					continue
 				}
 				h.unfixedControls = append(h.unfixedControls, UnfixedControl{
-					ControlID:    ac.GetID(),
-					ControlName:  ac.GetName(),
-					ResourceName: resourceObj.GetName(),
-					ResourceKind: resourceObj.GetKind(),
-					FilePath:     sanitizeForLog(src.reportedPath),
-					Reason:       src.skipReason,
+					ControlID:     ac.GetID(),
+					ControlName:   ac.GetName(),
+					ResourceName:  resourceObj.GetName(),
+					ResourceKind:  resourceObj.GetKind(),
+					FilePath:      sanitizeForLog(src.reportedPath),
+					ResourceID:    resourceID,
+					DocumentIndex: src.documentIndex,
+					Reason:        src.skipReason,
 				})
 			}
 			continue
@@ -726,11 +889,13 @@ func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInf
 			added, skipped := rfi.addYamlExpressionsFromResourceAssociatedControl(src.documentIndex, ac, h.fixInfo.SkipUserValues)
 
 			rfi.failedControls = append(rfi.failedControls, UnfixedControl{
-				ControlID:    ac.GetID(),
-				ControlName:  ac.GetName(),
-				ResourceName: resourceObj.GetName(),
-				ResourceKind: resourceObj.GetKind(),
-				FilePath:     location,
+				ControlID:     ac.GetID(),
+				ControlName:   ac.GetName(),
+				ResourceName:  resourceObj.GetName(),
+				ResourceKind:  resourceObj.GetKind(),
+				FilePath:      location,
+				ResourceID:    resourceID,
+				DocumentIndex: src.documentIndex,
 			})
 
 			// Fully auto-remediated: every failed path produced an expression.
@@ -753,12 +918,14 @@ func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInf
 			}
 			tentativeUnfixed = append(tentativeUnfixed, pendingUnfixed{
 				entry: UnfixedControl{
-					ControlID:    ac.GetID(),
-					ControlName:  ac.GetName(),
-					ResourceName: resourceObj.GetName(),
-					ResourceKind: resourceObj.GetKind(),
-					FilePath:     location,
-					Reason:       reason,
+					ControlID:     ac.GetID(),
+					ControlName:   ac.GetName(),
+					ResourceName:  resourceObj.GetName(),
+					ResourceKind:  resourceObj.GetKind(),
+					FilePath:      location,
+					ResourceID:    resourceID,
+					DocumentIndex: src.documentIndex,
+					Reason:        reason,
 				},
 				ac: ac,
 			})
@@ -978,9 +1145,7 @@ func (h *FixHandler) PrintHelmSuggestions(suggestions []HelmFixSuggestion) {
 // UnfixedControls returns the failed (resource, control) tuples discovered during
 // the most recent call to PrepareResourcesToFix that the fixer did not auto-remediate.
 func (h *FixHandler) UnfixedControls() []UnfixedControl {
-	out := make([]UnfixedControl, len(h.unfixedControls))
-	copy(out, h.unfixedControls)
-	return out
+	return dedupUnfixedControlsForAccounting(h.unfixedControls)
 }
 
 // FixedControlsCount returns the number of failed (resource, control) tuples that
@@ -1003,13 +1168,31 @@ const (
 	PhaseApplied
 )
 
-// dedupUnfixedControls returns a deduplicated copy of the unfixed controls
-// slice, using ControlID|Kind/Name|FilePath as the dedup key.
-func dedupUnfixedControls(controls []UnfixedControl) []UnfixedControl {
+// dedupUnfixedControlsForDisplay returns a deduplicated copy of the unfixed controls
+// slice, using ControlID|Kind/Name|FilePath as the dedup key. This intentionally
+// collapses same-named resources across namespaces to match the printer's display limitations.
+func dedupUnfixedControlsForDisplay(controls []UnfixedControl) []UnfixedControl {
 	seen := make(map[string]bool, len(controls))
 	out := make([]UnfixedControl, 0, len(controls))
 	for _, u := range controls {
 		key := u.ControlID + "|" + u.ResourceKind + "/" + u.ResourceName + "|" + u.FilePath
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, u)
+	}
+	return out
+}
+
+// dedupUnfixedControlsForAccounting returns a deduplicated copy of the unfixed controls
+// slice, using a strict identity key. This deduplicates identical failures for the exact
+// same resource instance without collapsing visually similar resources.
+func dedupUnfixedControlsForAccounting(controls []UnfixedControl) []UnfixedControl {
+	seen := make(map[string]bool, len(controls))
+	out := make([]UnfixedControl, 0, len(controls))
+	for _, u := range controls {
+		key := u.ControlID + "|" + u.ResourceID + "|" + fmt.Sprint(u.DocumentIndex) + "|" + u.FilePath
 		if seen[key] {
 			continue
 		}
@@ -1028,9 +1211,11 @@ func (h *FixHandler) PrintUnfixedControls(phase Phase) {
 		return
 	}
 
-	deduped := dedupUnfixedControls(h.unfixedControls)
+	accountingRecords := dedupUnfixedControlsForAccounting(h.unfixedControls)
+	totalFailed := h.fixedControlsCount + len(accountingRecords)
+
+	deduped := dedupUnfixedControlsForDisplay(h.unfixedControls)
 	var sb strings.Builder
-	totalFailed := h.fixedControlsCount + len(deduped)
 	verb := "Would auto-fix"
 	if phase == PhaseApplied {
 		verb = "Auto-fixed"
@@ -1064,6 +1249,10 @@ func (h *FixHandler) PrintExpectedChanges(resourcesToFix []ResourceFixInfo) {
 			sb.WriteString("Source: cluster\n")
 		default:
 			fmt.Fprintf(&sb, "File: %s\n", resourceFixInfo.FilePath)
+			if ns := resourceFixInfo.Resource.GetNamespace(); ns != "" {
+				fmt.Fprintf(&sb, "Namespace: %s\n", ns)
+			}
+			fmt.Fprintf(&sb, "Document index: %d\n", resourceFixInfo.DocumentIndex)
 		}
 		fmt.Fprintf(&sb, "Resource: %s\n", resourceFixInfo.Resource.GetName())
 		fmt.Fprintf(&sb, "Kind: %s\n", resourceFixInfo.Resource.GetKind())
@@ -1137,18 +1326,31 @@ func (h *FixHandler) ApplyChanges(ctx context.Context, resourcesToFix []Resource
 }
 
 // OutputPaths maps every manifest ApplyChanges would rewrite to the path its
-// fixed copy is written to under FixInfo.OutputDir. The output tree mirrors the
-// scanned one: a manifest keeps the relative path the report recorded for it,
-// so nested directories survive and a multi-document file stays one file.
+// fixed copy is written to under FixInfo.OutputDir. The output tree recreates
+// the scanned one, so nested directories survive and a multi-document file
+// stays one file:
+//   - with a single scan root (a git repository, or a single input) a manifest
+//     keeps the path the report recorded for it, relative to that root.
+//   - with several roots (a multi-input scan outside git) it keeps its path
+//     below the directory the roots share. Each root's recorded paths start
+//     afresh, so two inputs that both hold a deploy.yaml would otherwise both
+//     claim fixed/deploy.yaml (#4042).
+//
+// The layout is decided by the scan, through scanRoots, and not by the files
+// being written: a later run of the same scan that fixes fewer files, or
+// selects fewer controls, writes into the same tree.
 //
 // It refuses, before anything is written, a plan that could not do what the
 // flag promises:
 //   - a destination outside the output directory. The relative path is report
 //     input, the same field resolveResourceSource containment-checks on the
 //     source side.
-//   - a destination that is the source itself, which happens when the output
-//     directory is the scanned directory. Writing there is an in-place fix
-//     under another name, the one outcome --output-dir exists to avoid.
+//   - a destination that is a scanned manifest: its own source, when the
+//     output directory is the scanned directory, or any other manifest the
+//     scan read, when the output directory overlaps a scanned root. Writing
+//     there replaces a manifest, the one outcome --output-dir exists to avoid.
+//     The comparison is by file as well as by path, and covers manifests with
+//     nothing to fix.
 //   - two manifests that map to the same destination, as the inputs of a
 //     multi-input scan can when they share file names. One copy would silently
 //     replace the other.
@@ -1157,6 +1359,23 @@ func (h *FixHandler) OutputPaths(resourcesToFix []ResourceFixInfo) (map[string]s
 		return nil, fmt.Errorf("no output directory was given")
 	}
 	outputDir := filepath.Clean(h.fixInfo.OutputDir)
+
+	sharedRoot, err := h.sharedScanRoot()
+	if err != nil {
+		return nil, err
+	}
+
+	// Every manifest the scan read, not only the ones being fixed: an output
+	// directory that overlaps a scanned root can map one manifest's copy onto
+	// another manifest, which may have nothing to fix. The sources being fixed
+	// are added in case the report does not list them as resources.
+	sources := make([]string, 0, len(resourcesToFix))
+	for i := range resourcesToFix {
+		if !resourcesToFix[i].inMemory {
+			sources = append(sources, resourcesToFix[i].FilePath)
+		}
+	}
+	scanned := h.scannedFiles(sources...)
 
 	destinations := make(map[string]string)
 	claimedBy := make(map[string]string)
@@ -1171,7 +1390,13 @@ func (h *FixHandler) OutputPaths(resourcesToFix []ResourceFixInfo) (map[string]s
 		}
 
 		relativePath := resource.relativePath
-		if relativePath == "" {
+		if sharedRoot != "" {
+			rel, err := filepath.Rel(sharedRoot, source)
+			if err != nil || !isLexicallyWithin(sharedRoot, source) {
+				return nil, fmt.Errorf("cannot place %q below the scanned inputs' shared directory %q", sanitizeForLog(source), sharedRoot)
+			}
+			relativePath = rel
+		} else if relativePath == "" {
 			relativePath = filepath.Base(source)
 		}
 		destination := filepath.Join(outputDir, relativePath)
@@ -1179,8 +1404,8 @@ func (h *FixHandler) OutputPaths(resourcesToFix []ResourceFixInfo) (map[string]s
 		if rel, err := filepath.Rel(outputDir, destination); err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 			return nil, fmt.Errorf("refusing to write %q outside the output directory %q", sanitizeForLog(relativePath), outputDir)
 		}
-		if isSameFile(source, destination) {
-			return nil, fmt.Errorf("output directory %q is where the scanned manifests are: writing there would overwrite %q. Choose another directory, or omit --output-dir to fix the manifests in place", outputDir, sanitizeForLog(source))
+		if overwritten, ok := scanned.overwritesScannedManifest(destination); ok {
+			return nil, fmt.Errorf("output directory %q holds scanned manifests: writing the fixed copy of %q there would overwrite %q. Choose a directory outside the scanned ones, or omit --output-dir to fix the manifests in place", outputDir, sanitizeForLog(source), sanitizeForLog(overwritten))
 		}
 		if other, claimed := claimedBy[destination]; claimed {
 			return nil, fmt.Errorf("%q and %q would both be written to %q; fix them in separate runs", sanitizeForLog(other), sanitizeForLog(source), destination)
@@ -1190,20 +1415,6 @@ func (h *FixHandler) OutputPaths(resourcesToFix []ResourceFixInfo) (map[string]s
 		claimedBy[destination] = source
 	}
 	return destinations, nil
-}
-
-// isSameFile reports whether two paths name the same file, either because they
-// are the same path or because the filesystem resolves them to the same file
-// (a symlinked output directory, for one).
-func isSameFile(a, b string) bool {
-	absA, errA := filepath.Abs(a)
-	absB, errB := filepath.Abs(b)
-	if errA == nil && errB == nil && absA == absB {
-		return true
-	}
-	infoA, errA := os.Stat(a)
-	infoB, errB := os.Stat(b)
-	return errA == nil && errB == nil && os.SameFile(infoA, infoB)
 }
 
 // isPathContained reports whether target resolves to a path inside base,
@@ -1762,5 +1973,16 @@ func determineNewlineSeparator(contents string) string {
 		return windowsNewline
 	default:
 		return unixNewline
+	}
+}
+
+// DeclineResources moves the given resources from fixed to unfixed controls.
+func (h *FixHandler) DeclineResources(declined []ResourceFixInfo) {
+	for _, r := range declined {
+		h.fixedControlsCount -= r.fixedCount
+		for _, unfixed := range r.failedControls {
+			unfixed.Reason = "skipped: user declined the interactive prompt"
+			h.unfixedControls = append(h.unfixedControls, unfixed)
+		}
 	}
 }

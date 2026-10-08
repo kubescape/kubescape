@@ -67,9 +67,14 @@ func (ks *Kubescape) Fix(fixInfo *metav1.FixInfo) error {
 		return nil
 	}
 
-	handler.PrintExpectedChanges(resourcesToFix)
+	if !fixInfo.Interactive {
+		handler.PrintExpectedChanges(resourcesToFix)
+	}
 
 	if fixInfo.DryRun {
+		if fixInfo.Interactive {
+			handler.PrintExpectedChanges(resourcesToFix)
+		}
 		logger.L().Info(noChangesApplied)
 		handler.PrintUnfixedControls(fixhandler.PhasePlanned)
 		return nil
@@ -81,6 +86,9 @@ func (ks *Kubescape) Fix(fixInfo *metav1.FixInfo) error {
 	// confirmation prompt, which exists to guard in-place edits that this path
 	// never makes.
 	if handler.IsClusterReport() {
+		if fixInfo.Interactive {
+			handler.PrintExpectedChanges(resourcesToFix)
+		}
 		return ks.emitClusterFixes(handler, resourcesToFix, fixInfo)
 	}
 
@@ -88,13 +96,41 @@ func (ks *Kubescape) Fix(fixInfo *metav1.FixInfo) error {
 	// path it sits before the confirmation prompt: the prompt guards edits to
 	// the user's own manifests, and this path makes none.
 	if fixInfo.OutputDir != "" {
+		if fixInfo.Interactive {
+			handler.PrintExpectedChanges(resourcesToFix)
+		}
 		return ks.writeFixedCopies(handler, resourcesToFix, fixInfo)
 	}
 
-	if !fixInfo.NoConfirm && !userConfirmed() {
-		logger.L().Info(noChangesApplied)
-		handler.PrintUnfixedControls(fixhandler.PhasePlanned)
-		return nil
+	if fixInfo.Interactive && !fixInfo.NoConfirm {
+		var acceptedResources []fixhandler.ResourceFixInfo
+		var declinedResources []fixhandler.ResourceFixInfo
+		for _, r := range resourcesToFix {
+			handler.PrintExpectedChanges([]fixhandler.ResourceFixInfo{r})
+			if userConfirmed() {
+				acceptedResources = append(acceptedResources, r)
+			} else {
+				declinedResources = append(declinedResources, r)
+			}
+		}
+		if len(declinedResources) > 0 {
+			handler.DeclineResources(declinedResources)
+		}
+		if len(acceptedResources) == 0 {
+			logger.L().Info(noChangesApplied)
+			handler.PrintUnfixedControls(fixhandler.PhasePlanned)
+			return nil
+		}
+		resourcesToFix = acceptedResources
+	} else {
+		if fixInfo.Interactive && fixInfo.NoConfirm {
+			handler.PrintExpectedChanges(resourcesToFix)
+		}
+		if !fixInfo.NoConfirm && !userConfirmed() {
+			logger.L().Info(noChangesApplied)
+			handler.PrintUnfixedControls(fixhandler.PhasePlanned)
+			return nil
+		}
 	}
 
 	plannedFiles := make(map[string]bool, len(resourcesToFix))

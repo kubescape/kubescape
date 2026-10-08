@@ -1,0 +1,18 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: baseline-deployment
+  namespace: test-pss
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: baseline
+  template:
+    metadata:
+      labels:
+        app: baseline
+    spec:
+      containers:
+      - name: main
+        image: nginx:latest

@@ -6,6 +6,7 @@ import (
 	stderrors "errors"
 	"fmt"
 	"maps"
+	"time"
 
 	"github.com/armosec/utils-k8s-go/wlid"
 	"github.com/kubescape/go-logger"
@@ -29,6 +30,59 @@ import (
 )
 
 var storageInstance *APIServerStore
+
+const reportCreatedAtAnnotation = "kubescape.io/report-created-at"
+
+// compareReportTimes returns 0 for the same report (or an incoming report
+// without an identity), 1 for a newer report, and -1 for an older delayed
+// result. A timestamped report supersedes a legacy stored object: otherwise a
+// failure written before report identities existed could never be remediated.
+func compareReportTimes(existing, incoming time.Time) int {
+	if incoming.IsZero() {
+		return 0
+	}
+	if existing.IsZero() {
+		return 1
+	}
+	if incoming.After(existing) {
+		return 1
+	}
+	if incoming.Before(existing) {
+		return -1
+	}
+	return 0
+}
+
+func scanReportTime(spec v1beta1.WorkloadConfigurationScanSpec) time.Time {
+	if spec.Metadata == nil {
+		return time.Time{}
+	}
+	return spec.Metadata.Report.CreatedAt.Time
+}
+
+func summaryReportTime(annotations map[string]string) time.Time {
+	parsed, err := time.Parse(time.RFC3339Nano, annotations[reportCreatedAtAnnotation])
+	if err != nil {
+		return time.Time{}
+	}
+	return parsed
+}
+
+func workloadScanReportTime(scan *v1beta1.WorkloadConfigurationScan) time.Time {
+	if annotated := summaryReportTime(scan.Annotations); !annotated.IsZero() {
+		return annotated
+	}
+	return scanReportTime(scan.Spec)
+}
+
+func annotateReportTime(annotations map[string]string, reportTime time.Time) map[string]string {
+	if reportTime.IsZero() {
+		return annotations
+	}
+	return mergeMaps(annotations, map[string]string{
+		reportCreatedAtAnnotation: reportTime.Format(time.RFC3339Nano),
+	})
+}
 
 // ErrIncompleteRelatedObjects is returned when a RegoResponseVector lacks the expected Role+RoleBinding pair (e.g. orphaned binding).
 var ErrIncompleteRelatedObjects = stderrors.New("incomplete related objects")
@@ -264,6 +318,11 @@ func workloadConfigurationScanMetadata(report *v2.PostureReport) *v1beta1.Worklo
 
 // StoreWorkloadConfigurationScanResult stores a WorkloadConfigurationScan manifest
 func (a *APIServerStore) StoreWorkloadConfigurationScanResult(ctx context.Context, manifest *v1beta1.WorkloadConfigurationScan) error {
+	// metav1.Time is serialized with second precision. Keep the exact report
+	// identity in an annotation so partial results from one report are not
+	// mistaken for a newer generation after an API-server round trip.
+	manifest = manifest.DeepCopy()
+	manifest.Annotations = annotateReportTime(manifest.Annotations, scanReportTime(manifest.Spec))
 	namespace := manifest.GetNamespace()
 	_, err := a.StorageClient.WorkloadConfigurationScans(namespace).Create(ctx, manifest, metav1.CreateOptions{})
 	switch {
@@ -275,10 +334,18 @@ func (a *APIServerStore) StoreWorkloadConfigurationScanResult(ctx context.Contex
 			if getErr != nil {
 				return getErr
 			}
+			switch compareReportTimes(workloadScanReportTime(result), workloadScanReportTime(manifest)) {
+			case 1:
+				result.Spec = manifest.Spec
+			case -1:
+				// Leave status and object metadata untouched for a delayed scan.
+				return nil
+			default:
+				result.Spec = mergeSameReportWorkloadConfigurationScanSpec(result.Spec, manifest.Spec)
+			}
 			// update the workload configuration scan manifest
 			result.Annotations = mergeMaps(result.Annotations, manifest.Annotations)
 			result.Labels = mergeMaps(result.Labels, manifest.Labels)
-			result.Spec = mergeWorkloadConfigurationScanSpec(result.Spec, manifest.Spec)
 			// try to send the updated workload configuration scan manifest
 			_, updateErr := a.StorageClient.WorkloadConfigurationScans(namespace).Update(ctx, result, metav1.UpdateOptions{})
 			return updateErr
@@ -300,6 +367,16 @@ func (a *APIServerStore) StoreWorkloadConfigurationScanResult(ctx context.Contex
 }
 
 func mergeWorkloadConfigurationScanSpec(existingSpec v1beta1.WorkloadConfigurationScanSpec, newSpec v1beta1.WorkloadConfigurationScanSpec) v1beta1.WorkloadConfigurationScanSpec {
+	switch compareReportTimes(scanReportTime(existingSpec), scanReportTime(newSpec)) {
+	case 1:
+		return newSpec
+	case -1:
+		return existingSpec
+	}
+	return mergeSameReportWorkloadConfigurationScanSpec(existingSpec, newSpec)
+}
+
+func mergeSameReportWorkloadConfigurationScanSpec(existingSpec v1beta1.WorkloadConfigurationScanSpec, newSpec v1beta1.WorkloadConfigurationScanSpec) v1beta1.WorkloadConfigurationScanSpec {
 	if existingSpec.Controls == nil {
 		existingSpec.Controls = make(map[string]v1beta1.ScannedControl)
 	}
@@ -426,7 +503,7 @@ func (a *APIServerStore) StoreWorkloadConfigurationScanResultSummary(ctx context
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        workloadScan.Name,
 			Namespace:   namespace,
-			Annotations: workloadScan.Annotations,
+			Annotations: maps.Clone(workloadScan.Annotations),
 			Labels:      workloadScan.Labels,
 		},
 		Spec: v1beta1.WorkloadConfigurationScanSummarySpec{
@@ -434,6 +511,7 @@ func (a *APIServerStore) StoreWorkloadConfigurationScanResultSummary(ctx context
 			Controls:   controlsSummary,
 		},
 	}
+	manifest.Annotations = annotateReportTime(manifest.Annotations, scanReportTime(workloadScan.Spec))
 
 	_, err := a.StorageClient.WorkloadConfigurationScanSummaries(namespace).Create(ctx, &manifest, metav1.CreateOptions{})
 	switch {
@@ -446,9 +524,17 @@ func (a *APIServerStore) StoreWorkloadConfigurationScanResultSummary(ctx context
 				return getErr
 			}
 			// update the manifest
+			switch compareReportTimes(summaryReportTime(result.Annotations), summaryReportTime(manifest.Annotations)) {
+			case 1:
+				result.Spec = manifest.Spec
+			case -1:
+				// A delayed older result must not roll a remediated scan back.
+				return nil
+			default:
+				result.Spec = mergeWorkloadConfigurationScanSummarySpec(result.Spec, manifest.Spec)
+			}
 			result.Annotations = mergeMaps(result.Annotations, manifest.Annotations)
 			result.Labels = mergeMaps(result.Labels, manifest.Labels)
-			result.Spec = mergeWorkloadConfigurationScanSummarySpec(result.Spec, manifest.Spec)
 			// try to send the updated manifest
 			_, updateErr := a.StorageClient.WorkloadConfigurationScanSummaries(namespace).Update(ctx, result, metav1.UpdateOptions{})
 			return updateErr
@@ -543,7 +629,7 @@ func getRoleAndRoleBindingFromRelatedObjects(relatedObjects []workloadinterface.
 		case "RoleBinding", "ClusterRoleBinding":
 			roleBinding = relatedObjects[i]
 		default:
-			return nil, nil, fmt.Errorf("unknown related object kind %s", relatedObjects[i].GetKind())
+			return nil, nil, fmt.Errorf("%w: unknown related object kind %s", ErrIncompleteRelatedObjects, relatedObjects[i].GetKind())
 		}
 	}
 	if role == nil || roleBinding == nil {

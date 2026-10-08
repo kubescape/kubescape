@@ -117,7 +117,6 @@ curl -s https://raw.githubusercontent.com/kubescape/kubescape/master/install.sh 
 | **Homebrew** | `brew install kubescape` |
 | **Krew** | `kubectl krew install kubescape` |
 | **Arch Linux** | `yay -S kubescape` |
-| **Ubuntu** | `sudo add-apt-repository ppa:kubescape/kubescape && sudo apt install kubescape` |
 | **NixOS** | `nix-shell -p kubescape` |
 | **Chocolatey** | `choco install kubescape` |
 | **Scoop** | `scoop install kubescape` |
@@ -206,6 +205,22 @@ kubescape scan --view resource --compliance-threshold 80
 
 # Set severity threshold
 kubescape scan --severity-threshold high
+```
+
+#### Report Metadata Protection
+
+```bash
+# Hide sensitive metadata using deterministic pseudonymization
+kubescape scan --hide
+
+# Set exactly one master key before encrypting and decrypting (at least 16 characters)
+export KUBESCAPE_MASTER_KEY="your-secure-passphrase"
+
+# Encrypt sensitive metadata into a JSON report
+kubescape scan --encrypt --format json --output encrypted-report.json
+
+# Decrypt the encrypted report
+kubescape decrypt encrypted-report.json > decrypted-report.json
 ```
 
 #### Output Formats

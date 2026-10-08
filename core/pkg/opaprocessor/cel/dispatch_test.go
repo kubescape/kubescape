@@ -171,3 +171,29 @@ func TestEvaluateControlResolvesParamsEndToEnd(t *testing.T) {
 		}
 	})
 }
+
+func TestEvaluateVAPGateExcludesBeforeValidationInputsAreResolved(t *testing.T) {
+	e, err := NewEvaluator()
+	require.NoError(t, err)
+	vap := &VAP{
+		matchConditions: []MatchCondition{{Name: "only-system", Expression: "object.metadata.namespace == 'kube-system'"}},
+		Validations:     []Validation{{Expression: "namespaceObject.metadata.name == 'prod'"}},
+	}
+
+	gate, err := e.EvaluateVAPGate(context.Background(), vap, gatedPod(), nil)
+	require.NoError(t, err)
+	assert.False(t, gate.Applicable)
+	assert.Empty(t, gate.Results)
+}
+
+func TestEvaluateVAPGateRetainsMatchConditionError(t *testing.T) {
+	e, err := NewEvaluator()
+	require.NoError(t, err)
+	vap := &VAP{matchConditions: []MatchCondition{{Name: "namespace", Expression: "namespaceObject.metadata.name == 'prod'"}}}
+
+	gate, err := e.EvaluateVAPGate(context.Background(), vap, gatedPod(), nil)
+	require.NoError(t, err)
+	assert.True(t, gate.Applicable)
+	require.Len(t, gate.Results, 1)
+	assert.Error(t, gate.Results[0].Err)
+}

@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/meta"
 	metav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
 	"github.com/spf13/cobra"
@@ -131,6 +132,10 @@ func parseSetArgs(args []string) (*metav1.SetConfig, error) {
 
 	setConfig := &metav1.SetConfig{}
 	if setConfigFunc, ok := findConfigSetter(key); ok {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			return nil, fmt.Errorf("value for key %q cannot be empty; use \"%s config delete %s\" to remove it", key, cautils.ExecName(), key)
+		}
 		if err := setConfigFunc(setConfig, value); err != nil {
 			return nil, err
 		}

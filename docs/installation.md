@@ -56,11 +56,7 @@ curl -s https://raw.githubusercontent.com/kubescape/kubescape/master/install.sh 
 brew install kubescape
 ```
 
-> **Note**: The [official Homebrew formula](https://formulae.brew.sh/formula/kubescape#default) has git scanning disabled. For full functionality:
-> ```bash
-> brew tap kubescape/tap
-> brew install kubescape-cli
-> ```
+> **Note**: The [official Homebrew formula](https://formulae.brew.sh/formula/kubescape#default) has git scanning disabled. For full functionality, use the [install script](#quick-install) or a [GitHub release](#manual-installation).
 
 ### Krew (kubectl plugin)
 
@@ -71,16 +67,6 @@ kubectl krew install kubescape
 # Use as kubectl plugin
 kubectl kubescape scan
 ```
-
-### Ubuntu / Debian
-
-```bash
-sudo add-apt-repository ppa:kubescape/kubescape
-sudo apt update
-sudo apt install kubescape
-```
-
-For other Debian-based or RPM-based distributions, see the [openSUSE Build Service](https://software.opensuse.org/download.html?project=home%3Akubescape&package=kubescape).
 
 ### Arch Linux
 
@@ -118,14 +104,6 @@ home.packages = with pkgs; [ kubescape ];
 
 > **Note**: Community-supported. See [NixOS support](https://nixos.wiki/wiki/Support) for issues.
 
-### Snap
-
-[![Get it from the Snap Store](https://snapcraft.io/static/images/badges/en/snap-store-white.svg)](https://snapcraft.io/kubescape)
-
-```bash
-sudo snap install kubescape
-```
-
 ### Chocolatey (Windows)
 
 ```powershell
@@ -160,10 +138,19 @@ sudo mv kubescape /usr/local/bin/
 
 ### Build from Source
 
+Requirements:
+
+- [Go](https://go.dev/doc/install) at the version in the `go` line of [`go.mod`](../go.mod). Go 1.21 and later download that toolchain automatically when `GOTOOLCHAIN` is `auto`, the default in the standard Go distribution. With `local`, `path` or a `+path` suffix, Go does not download it, so install that version yourself.
+- Git
+- Make (optional: `make build` runs `go build -v .`)
+
+The Makefile builds with `CGO_ENABLED=0`, so no C compiler is needed. Go downloads the module dependencies listed in `go.mod` on the first build and checks them against `go.sum`.
+
 ```bash
 git clone https://github.com/kubescape/kubescape.git
 cd kubescape
 make build
+make test     # optional: runs the unit tests
 ```
 
 ---
@@ -209,9 +196,6 @@ Use your package manager's update command:
 # Homebrew
 brew upgrade kubescape
 
-# apt
-sudo apt update && sudo apt upgrade kubescape
-
 # Krew
 kubectl krew upgrade kubescape
 ```
@@ -234,9 +218,6 @@ Use your package manager's uninstall command:
 ```bash
 # Homebrew
 brew uninstall kubescape
-
-# apt
-sudo apt remove kubescape
 
 # Krew
 kubectl krew uninstall kubescape

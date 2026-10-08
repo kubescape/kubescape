@@ -275,6 +275,46 @@ func TestMarkdownPrinter_ActionPrint_FailedSection(t *testing.T) {
 	assert.Contains(t, out, "hub.armosec.io/docs/c-0057", "control URL must include lowercase ID")
 }
 
+func TestMarkdownPrinter_ActionPrint_MultilineRemediationStaysQuoted(t *testing.T) {
+	session := mdSessionFixture()
+	ctrl := session.Report.SummaryDetails.Controls[mdControlID1]
+	ctrl.Remediation = "Run the following command\n\n \n```\nchmod 600 /var/lib/kubelet/config.yaml\n\n```"
+	session.Report.SummaryDetails.Controls[mdControlID1] = ctrl
+
+	out := mdRunActionPrint(t, session)
+
+	assert.Contains(t, out, "> **Remediation:** Run the following command\n>\n>\n> ```\n> chmod 600 /var/lib/kubelet/config.yaml\n>\n> ```\n\n[View documentation]")
+}
+
+func TestMarkdownPrinter_ActionPrint_BlankRemediationOmitted(t *testing.T) {
+	session := mdSessionFixture()
+	ctrl := session.Report.SummaryDetails.Controls[mdControlID1]
+	ctrl.Remediation = " \n\t"
+	session.Report.SummaryDetails.Controls[mdControlID1] = ctrl
+
+	assert.NotContains(t, mdRunActionPrint(t, session), "**Remediation:**")
+}
+
+func TestMdBlockquote(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"single line", "fix it", "> fix it"},
+		{"paragraphs", "first\n\nsecond", "> first\n>\n> second"},
+		{"crlf", "first\r\nsecond\r\n", "> first\n> second"},
+		{"whitespace-only line", "first\n\t \nsecond", "> first\n>\n> second"},
+		{"hard line break", "First step  \nSecond step", "> First step  \n> Second step"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, mdBlockquote(tc.input))
+		})
+	}
+}
+
 func TestMarkdownPrinter_ActionPrint_ResourceTable(t *testing.T) {
 	out := mdRunActionPrint(t, mdSessionFixture())
 
@@ -698,4 +738,73 @@ func TestMarkdownPrinter_ActionPrint_CombinedPostureAndImageScan(t *testing.T) {
 	assert.Contains(t, text, "# Kubescape Security Report", "must contain posture report heading")
 	assert.Contains(t, text, "# Kubescape Image Scan Report", "must contain image scan report heading")
 	assert.Contains(t, text, "`registry.example.com/combined:v1`", "must contain scanned image name")
+}
+
+func TestMarkdownPrinter_ActionPrint_CoverageSectionPresent(t *testing.T) {
+	session := mdSessionFixture()
+	session.ScanCoverage = cautils.ScanCoverage{
+		CoverageScore:     85.0,
+		EvaluatedControls: 17,
+		TotalControls:     20,
+		Degraded:          true,
+		NotEvaluatedControls: []cautils.NotEvaluatedControl{
+			{
+				ControlID:   "C-0099",
+				MissingGVRs: []string{"apps/v1/daemonsets"},
+			},
+		},
+	}
+
+	out := mdRunActionPrint(t, session)
+
+	assert.Contains(t, out, "## Scan Coverage")
+	assert.Contains(t, out, "**Coverage Score:** 85% ⚠️ Degraded")
+	assert.Contains(t, out, "Evaluated 17 of 20 controls")
+	assert.Contains(t, out, "| Control ID | Name | Reason |")
+	assert.Contains(t, out, "| C-0099 | C-0099 | missing: apps/v1/daemonsets |")
+}
+
+func TestMarkdownPrinter_ActionPrint_CoverageSectionOmittedWhenPerfect(t *testing.T) {
+	session := mdSessionFixture()
+	session.ScanCoverage = cautils.ScanCoverage{
+		CoverageScore:     100.0,
+		EvaluatedControls: 20,
+		TotalControls:     20,
+		Degraded:          false,
+	}
+
+	out := mdRunActionPrint(t, session)
+
+	assert.NotContains(t, out, "## Scan Coverage")
+}
+
+func TestMarkdownPrinter_ActionPrint_CoverageSkippedControlsWithReasons(t *testing.T) {
+	session := mdSessionFixture()
+	skippedStatus := &apis.StatusInfo{
+		InnerStatus: apis.StatusSkipped,
+		SubStatus:   apis.SubStatusIrrelevant,
+		InnerInfo:   "no matching resources in cluster",
+	}
+	ctrlSkipped := &reportsummary.ControlSummary{
+		ControlID:   "C-0070",
+		Name:        "Host IPC",
+		ScoreFactor: 6.0,
+		StatusInfo:  *skippedStatus,
+	}
+	ctrlSkipped.Append(skippedStatus, mdResourceID1)
+	session.Report.SummaryDetails.Controls["C-0070"] = *ctrlSkipped
+
+	session.ScanCoverage = cautils.ScanCoverage{
+		CoverageScore:     90.0,
+		EvaluatedControls: 9,
+		TotalControls:     10,
+		Degraded:          true,
+	}
+
+	out := mdRunActionPrint(t, session)
+
+	assert.Contains(t, out, "## Scan Coverage")
+	assert.Contains(t, out, "C-0070")
+	assert.Contains(t, out, "Host IPC")
+	assert.Contains(t, out, "irrelevant: no matching resources in cluster")
 }

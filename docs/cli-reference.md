@@ -425,6 +425,17 @@ threshold — for example, a single silent failed GVR pull yields a score of 97.
 > meaning may now fail on scans that previously passed. Re-check your threshold
 > if you rely on this flag in CI.
 
+### Scan coverage reporting across output formats
+
+Scan coverage gaps (skipped or unevaluated controls, missing GVR permissions, partial query results, and degraded policy inputs) are consistently surfaced across output formats (#3884):
+
+- **Terminal (pretty-printer):** Displays the aggregate coverage score, evaluated vs. total control counts, and a degraded warning banner when gaps exist.
+- **JUnit (`--format junit`):** Records coverage metrics (`coverageScore`, `evaluatedControls`, `totalControls`, `degraded`) as testsuite properties and marks skipped controls with diagnostic skip reasons.
+- **SARIF (`--format sarif`):** Emits unevaluated controls and runtime gaps through tool execution notifications and invocation descriptor properties.
+- **GitHub Actions (`--format github-actions`):** Emits workflow warnings for degraded scan coverage and annotates skipped controls with their failure or skip reasons.
+- **PDF (`--format pdf`):** Displays scan coverage metrics alongside the resource summary and appends a `Skipped controls` section detailing severity, control reference, control name, and skip reasons (omitted on 100% clean scans).
+- **CSV (`--format csv`):** Emits unevaluated and skipped controls as rows with status `skipped`, populating remediation with the diagnostic reason.
+
 ### OpenTelemetry export
 
 `--otel-endpoint` sends the scan's traces and metrics to any OTLP collector.
@@ -812,11 +823,20 @@ kubescape fix results.json --no-confirm
 kubescape fix results.json --output-dir ./fixed
 ```
 
-With `--output-dir` the copies mirror the scanned directory —
-`/path/to/manifests/k8s/prod/deploy.yaml` is written to
-`./fixed/k8s/prod/deploy.yaml` — and a multi-document file stays one file. Review them with `diff -r`, then copy them over the originals or apply
-them as they are. A directory that is the scanned one is refused: writing there
-would be an in-place fix under another name.
+With `--output-dir` the copies recreate the scanned tree, and a multi-document
+file stays one file. Where the tree starts depends on the scan:
+
+| Scan | Copies are laid out from | `scan` input → copy |
+|------|--------------------------|---------------------|
+| Inside a git repository | the repository root | `k8s/prod` → `./fixed/k8s/prod/deploy.yaml` |
+| One directory, outside git | that directory | `/path/to/manifests` → `./fixed/k8s/prod/deploy.yaml` |
+| Several directories, outside git | the directory they share | `apps/web/k8s infra/db/k8s` → `./fixed/apps/web/k8s/deploy.yaml` and `./fixed/infra/db/k8s/deploy.yaml` |
+
+The layout depends only on what was scanned, so a later run of the same scan
+writes into the same tree even if it fixes fewer files or selects fewer
+controls. Review the copies against the originals, then copy them over the
+originals or apply them as they are. A directory that is the scanned one is
+refused: writing there would be an in-place fix under another name.
 
 Fixing a cluster scan:
 
@@ -1329,6 +1349,65 @@ kubescape mcpserver
 
 ---
 
+## kubescape predict pss
+
+Predict Kubernetes Pod Security Standards (PSS) compliance for workloads in a live cluster namespace or local manifest files without modifying cluster admission configurations.
+
+### Synopsis
+
+```bash
+kubescape predict pss [<path>...] [flags]
+```
+
+### Description
+
+Evaluates workloads against the official Kubernetes Pod Security Standards (Privileged, Baseline, Restricted) according to PSS v1.37 specifications. When invoked without path arguments, it connects to the cluster and evaluates all workloads in the specified namespace, automatically deduplicating child resources (e.g., ReplicaSets and Pods managed by Deployments). When given file paths or directories, it parses local YAML/JSON manifests and evaluates them directly.
+
+This answers the critical hardening question: *"What would break if I enforced Baseline or Restricted on this namespace?"*
+
+### Flags
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `-n, --namespace <string>` | Namespace to evaluate (required in cluster mode; filters by namespace if specified in local mode) | - |
+| `--level <string>` | Target PSS level to evaluate against: `Privileged`, `Baseline`, `Restricted` | `Restricted` |
+| `--workload <string>` | Filter evaluation to a specific workload (`Kind/Name` or bare `Name`) | - |
+| `-f, --format <string>` | Output format: `pretty-printer`, `json`, `table`, `sarif`, `junit` | `pretty-printer` |
+| `-o, --output <path>` | Write output to file instead of stdout | stdout |
+| `-v, --verbose` | Show passing workloads in addition to failing ones | `false` |
+
+### Examples
+
+```bash
+# Predict Restricted compliance for all workloads in production namespace
+kubescape predict pss -n production
+
+# Check if a namespace is ready for Baseline enforcement
+kubescape predict pss -n staging --level Baseline
+
+# Check a specific workload before applying hardening changes
+kubescape predict pss -n production --workload Deployment/web-api
+
+# Predict compliance for local YAML manifest files
+kubescape predict pss ./manifests/
+
+# Output machine-readable JSON report
+kubescape predict pss -n production -f json -o pss-report.json
+
+# Generate JUnit XML report for CI/CD pipeline gating
+kubescape predict pss ./deploy/ -f junit -o pss-results.xml
+
+# Generate SARIF report for GitHub Code Scanning integration
+kubescape predict pss ./k8s/ -f sarif -o pss.sarif
+```
+
+### Exit Codes
+
+- `0`: All evaluated workloads pass at the target PSS level.
+- `1`: One or more workloads fail the target PSS level, or an error occurred.
+
+---
+
 ## kubescape version
 
 Display version information.
@@ -1432,3 +1511,4 @@ Kubescape respects the following environment variables:
 - [Architecture](architecture.md)
 - [Troubleshooting](troubleshooting.md)
 - [MCP Server Documentation](mcp-server.md)
+- [Pod Security Standards Predictor](pss-predictor.md)
