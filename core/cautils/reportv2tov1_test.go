@@ -193,6 +193,94 @@ func TestReportV2ToV1_MapsDeleteReviewPathsAndFixCommand(t *testing.T) {
 	assert.Equal(t, "kubectl delete pod demo", response.FixCommand)
 }
 
+// A rule's paths can belong to a related resource: the processor records a
+// RelatedObject's paths under that object's ResourceID (exposure-to-internet
+// reports the exposing Service's spec.type against the failed Pod). The v1
+// response must keep them on that related object, not move them onto the Pod.
+func TestReportV2ToV1_KeepsRelatedResourcePathsOnRelatedObject(t *testing.T) {
+	podID := "/v1/default/Pod/demo"
+	serviceID := "/v1/default/Service/demo-svc"
+	controlID := "C-0256"
+
+	controlSummary := reportsummary.ControlSummary{ControlID: controlID, Name: "exposure to internet", ScoreFactor: 7}
+	controlSummary.Append(helpersv1.NewStatus(apis.StatusFailed), podID)
+
+	session := &OPASessionObj{
+		AllResources: map[string]workloadinterface.IMetadata{
+			podID: workloadinterface.NewWorkloadObj(map[string]any{
+				"apiVersion": "v1",
+				"kind":       "Pod",
+				"metadata":   map[string]any{"name": "demo", "namespace": "default"},
+				"spec":       map[string]any{"hostPID": true},
+			}),
+			serviceID: workloadinterface.NewWorkloadObj(map[string]any{
+				"apiVersion": "v1",
+				"kind":       "Service",
+				"metadata":   map[string]any{"name": "demo-svc", "namespace": "default"},
+				"spec":       map[string]any{"type": "LoadBalancer"},
+			}),
+		},
+		ResourcesResult: map[string]resourcesresults.Result{
+			podID: {
+				ResourceID: podID,
+				AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+					{
+						ControlID: controlID,
+						ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{
+							{
+								Name:                "exposure-to-internet",
+								Status:              apis.StatusFailed,
+								RelatedResourcesIDs: []string{serviceID},
+								Paths: []armotypes.PosturePaths{
+									{ResourceID: podID, DeletePath: "spec.hostPID"},
+									{ResourceID: podID, FixCommand: "kubectl label pod demo exposed=false"},
+									{ResourceID: serviceID, ReviewPath: "spec.type"},
+									{ResourceID: serviceID, DeletePath: "spec.externalIPs"},
+									{ResourceID: serviceID, FixCommand: "kubectl patch svc demo-svc -p '{\"spec\":{\"type\":\"ClusterIP\"}}'"},
+									{ResourceID: serviceID, FixCommand: "kubectl annotate svc demo-svc reviewed=true"},
+									{ResourceID: serviceID, FixCommand: "kubectl annotate svc demo-svc reviewed=true"},
+									// legacy data without a ResourceID describes the failed resource
+									{FailedPath: "spec.hostNetwork"},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		Report: &reporthandlingv2.PostureReport{
+			SummaryDetails: reportsummary.SummaryDetails{
+				Controls: reportsummary.ControlSummaries{controlID: controlSummary},
+			},
+		},
+	}
+
+	got := ReportV2ToV1(session)
+
+	require.Len(t, got.FrameworkReports, 1)
+	require.Len(t, got.FrameworkReports[0].ControlReports, 1)
+	require.Len(t, got.FrameworkReports[0].ControlReports[0].RuleReports, 1)
+	require.Len(t, got.FrameworkReports[0].ControlReports[0].RuleReports[0].RuleResponses, 1)
+	response := got.FrameworkReports[0].ControlReports[0].RuleReports[0].RuleResponses[0]
+
+	// the Pod keeps only its own remediation
+	assert.Equal(t, []string{"spec.hostPID"}, response.DeletePaths)
+	assert.Nil(t, response.ReviewPaths, "the Service's spec.type must not be reported against the Pod")
+	assert.Equal(t, []string{"spec.hostNetwork"}, response.FailedPaths)
+	assert.Equal(t, "kubectl label pod demo exposed=false", response.FixCommand)
+	require.Len(t, response.AlertObject.K8SApiObjects, 1)
+	assert.Equal(t, "Pod", response.AlertObject.K8SApiObjects[0]["kind"])
+
+	// the Service's remediation stays attached to the Service
+	require.Len(t, response.RelatedObjects, 1)
+	related := response.RelatedObjects[0]
+	assert.Equal(t, "Service", related.Object["kind"])
+	assert.Equal(t, map[string]any{"name": "demo-svc", "namespace": "default"}, related.Object["metadata"])
+	assert.Equal(t, []string{"spec.type"}, related.ReviewPaths)
+	assert.Equal(t, []string{"spec.externalIPs"}, related.DeletePaths)
+	assert.Equal(t, "kubectl patch svc demo-svc -p '{\"spec\":{\"type\":\"ClusterIP\"}}'\nkubectl annotate svc demo-svc reviewed=true", related.FixCommand)
+}
+
 func TestReportV2ToV1_StatusCounters(t *testing.T) {
 	controlID := "C-001"
 	controlSummary := reportsummary.ControlSummary{
