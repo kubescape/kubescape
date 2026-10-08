@@ -9,6 +9,7 @@ import (
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/stretchr/testify/require"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -231,6 +232,20 @@ func TestEvaluateCelRule_ValidationAndEvaluation(t *testing.T) {
 		require.Contains(t, toolErr.Message, "exceeds size limits")
 	})
 
+	t.Run("padded whitespace cel_expression exceeds raw size limit", func(t *testing.T) {
+		paddedExpr := strings.Repeat(" ", 10001) + "true"
+		result := registeredToolResult(t, dispatchRegisteredTool(t, ksServer, "evaluate_cel_rule", map[string]any{
+			"cel_expression": paddedExpr,
+			"resource_json":  `{"metadata":{"name":"test"}}`,
+		}))
+		require.True(t, result.IsError)
+		var toolErr ToolError
+		require.NoError(t, json.Unmarshal([]byte(toolResultText(t, result)), &toolErr))
+		require.Equal(t, ErrCodeInvalidArgument, toolErr.Code)
+		require.Equal(t, "cel_expression", toolErr.Details["argument"])
+		require.Contains(t, toolErr.Message, "exceeds size limits")
+	})
+
 	t.Run("invalid CEL expression syntax", func(t *testing.T) {
 		result := registeredToolResult(t, dispatchRegisteredTool(t, ksServer, "evaluate_cel_rule", map[string]any{
 			"cel_expression": "invalid == syntax %%%",
@@ -333,6 +348,16 @@ func TestDryRunRemediation_ArgumentValidation(t *testing.T) {
 			expectedCode: ErrCodeInvalidArgument,
 			expectedArg:  "patch_json",
 		},
+		{
+			name: "padded patch_json exceeds raw size limit",
+			arguments: map[string]any{
+				"resource_kind": "pods",
+				"resource_name": "app",
+				"patch_json":    strings.Repeat(" ", 1000001) + validPatch,
+			},
+			expectedCode: ErrCodeInvalidArgument,
+			expectedArg:  "patch_json",
+		},
 	}
 
 	for _, tc := range tests {
@@ -405,19 +430,23 @@ func TestDryRunRemediation_Success(t *testing.T) {
 			},
 		},
 	}
+	patchJSON := `{"metadata":{"labels":{"remediated":"true"}}}`
+
 	dyn := dynamicfake.NewSimpleDynamicClient(runtime.NewScheme(), pod)
 	dyn.PrependReactor("patch", "pods", func(action clienttesting.Action) (bool, runtime.Object, error) {
-		patchAction := action.(clienttesting.PatchAction)
+		patchAction, ok := action.(clienttesting.PatchActionImpl)
+		require.True(t, ok)
 		require.Equal(t, types.StrategicMergePatchType, patchAction.GetPatchType())
 		require.Equal(t, "nginx-pod", patchAction.GetName())
 		require.Equal(t, "default", patchAction.GetNamespace())
+		require.Equal(t, []string{metav1.DryRunAll}, patchAction.GetPatchOptions().DryRun)
+		require.JSONEq(t, patchJSON, string(patchAction.GetPatch()))
 		patched := pod.DeepCopy()
 		_ = unstructured.SetNestedField(patched.Object, "true", "metadata", "labels", "remediated")
 		return true, patched, nil
 	})
 	ksServer := newTestMCPServerWithK8s(&k8sinterface.KubernetesApi{DynamicClient: dyn})
 
-	patchJSON := `{"metadata":{"labels":{"remediated":"true"}}}`
 	result := registeredToolResult(t, dispatchRegisteredTool(t, ksServer, "dry_run_remediation", map[string]any{
 		"resource_kind": "pods",
 		"resource_name": "nginx-pod",

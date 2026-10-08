@@ -144,6 +144,14 @@ func createAdvancedTools(ksServer *KubescapeMcpserver) {
 			args = map[string]any{}
 		}
 
+		// Enforce raw input byte caps before trimming to prevent unbounded payloads.
+		if rawCel, ok := args["cel_expression"].(string); ok && len(rawCel) > 10000 {
+			return mcpToolError(ErrCodeInvalidArgument, "input exceeds size limits", map[string]any{"argument": "cel_expression"}), nil
+		}
+		if rawRes, ok := args["resource_json"].(string); ok && len(rawRes) > 1000000 {
+			return mcpToolError(ErrCodeInvalidArgument, "input exceeds size limits", map[string]any{"argument": "resource_json"}), nil
+		}
+
 		celExpr, toolErr := mcpRequiredStringArg(args, "cel_expression")
 		if toolErr != nil {
 			return toolErr, nil
@@ -151,10 +159,6 @@ func createAdvancedTools(ksServer *KubescapeMcpserver) {
 		resourceJSON, toolErr := mcpRequiredStringArg(args, "resource_json")
 		if toolErr != nil {
 			return toolErr, nil
-		}
-
-		if len(resourceJSON) > 1000000 || len(celExpr) > 10000 {
-			return mcpToolError(ErrCodeInvalidArgument, "input exceeds size limits", nil), nil
 		}
 
 		var resourceObj map[string]any
@@ -205,6 +209,10 @@ func createAdvancedTools(ksServer *KubescapeMcpserver) {
 			args = map[string]any{}
 		}
 
+		if rawPatch, ok := args["patch_json"].(string); ok && len(rawPatch) > 1000000 {
+			return mcpToolError(ErrCodeInvalidArgument, "patch_json exceeds size limit", map[string]any{"argument": "patch_json"}), nil
+		}
+
 		kind, toolErr := mcpRequiredStringArg(args, "resource_kind")
 		if toolErr != nil {
 			return toolErr, nil
@@ -220,10 +228,6 @@ func createAdvancedTools(ksServer *KubescapeMcpserver) {
 		namespace, toolErr := mcpStringArg(args, "namespace")
 		if toolErr != nil {
 			return toolErr, nil
-		}
-
-		if len(patchJSON) > 1000000 {
-			return mcpToolError(ErrCodeInvalidArgument, "patch_json exceeds size limit", map[string]any{"argument": "patch_json"}), nil
 		}
 
 		if !json.Valid([]byte(patchJSON)) {
