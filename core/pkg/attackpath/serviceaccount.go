@@ -81,6 +81,44 @@ func containersFieldPath(kind string) []string {
 	return []string{"spec", "template", "spec", "containers"}
 }
 
+func initContainersFieldPath(kind string) []string {
+	if kind == "Pod" {
+		return []string{"spec", "initContainers"}
+	}
+	if kind == "CronJob" {
+		return []string{"spec", "jobTemplate", "spec", "template", "spec", "initContainers"}
+	}
+	return []string{"spec", "template", "spec", "initContainers"}
+}
+
+const defaultTokenPath = "/var/run/secrets/kubernetes.io/serviceaccount"
+
+// isMountPathOccupied reports whether any regular or init container already
+// mounts something at the default token path, which causes Kubernetes admission
+// to skip injecting the automatic token mount.
+// See: https://github.com/kubernetes/kubernetes/blob/v1.35.0/plugin/pkg/admission/serviceaccount/admission.go#L407
+func isMountPathOccupied(u *unstructured.Unstructured, kind string) bool {
+	regular, _, _ := unstructured.NestedSlice(u.Object, containersFieldPath(kind)...)
+	init_, _, _ := unstructured.NestedSlice(u.Object, initContainersFieldPath(kind)...)
+	for _, c := range append(regular, init_...) {
+		container, ok := c.(map[string]any)
+		if !ok {
+			continue
+		}
+		mounts, _, _ := unstructured.NestedSlice(container, "volumeMounts")
+		for _, m := range mounts {
+			mount, ok := m.(map[string]any)
+			if !ok {
+				continue
+			}
+			if mp, _ := mount["mountPath"].(string); mp == defaultTokenPath {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // hasProjectedServiceAccountToken reports whether the pod spec contains
 // a projected serviceAccountToken volume that is actually mounted by at
 // least one container. A declared but unmounted volume does not expose
@@ -122,15 +160,16 @@ func hasProjectedServiceAccountToken(obj map[string]any, kind string) bool {
 		return false
 	}
 
-	// Step 2: confirm at least one container mounts one of those volumes.
-	// A declared but unmounted volume does not expose its token.
-	containers, found, err := unstructured.NestedSlice(u.Object, containersFieldPath(kind)...)
-	if err != nil || !found {
-		// No containers field: conservatively treat declaration as mounted
-		// (errs toward over-reporting, never under-reporting).
+	// Step 2: confirm at least one regular or init container mounts one of
+	// those volumes. Native sidecars (initContainers with restartPolicy:Always)
+	// run for the pod lifetime and have the same token access as regular containers.
+	regular, foundRegular, _ := unstructured.NestedSlice(u.Object, containersFieldPath(kind)...)
+	init_, foundInit, _ := unstructured.NestedSlice(u.Object, initContainersFieldPath(kind)...)
+	if !foundRegular && !foundInit {
+		// No containers at all: conservatively treat declaration as mounted.
 		return true
 	}
-	for _, c := range containers {
+	for _, c := range append(regular, init_...) {
 		container, ok := c.(map[string]any)
 		if !ok {
 			continue
@@ -201,15 +240,17 @@ func ResolveServiceAccountBindings(
 		// Determine token mount status per the three-level logic above.
 		tokenMounted := false
 		if hasProjectedServiceAccountToken(obj, r.GetKind()) {
-			// Explicit projected volume: token is mounted unconditionally.
+			// Explicit projected volume mounted by at least one container.
 			tokenMounted = true
 		} else {
 			// Check pod-level automountServiceAccountToken.
+			// null (podVal == nil with podFound == true) is treated as unset:
+			// Kubernetes decodes null to a nil pointer which falls through to
+			// the ServiceAccount/default preference.
 			podVal, podFound, _ := unstructured.NestedFieldNoCopy(u.Object, automountPath(r.GetKind())...)
-			if podFound {
-				if b, ok := podVal.(bool); ok {
-					tokenMounted = b
-				}
+			podBool, podIsBool := podVal.(bool)
+			if podFound && podVal != nil && podIsBool {
+				tokenMounted = podBool
 			} else {
 				// Fall back to SA-level value.
 				saKey := r.GetNamespace() + "/" + saName
@@ -218,6 +259,12 @@ func ResolveServiceAccountBindings(
 				} else {
 					tokenMounted = true // Kubernetes default
 				}
+			}
+			// Even when automount is enabled, Kubernetes admission skips
+			// injecting the token when the default path is already occupied.
+			// See: https://github.com/kubernetes/kubernetes/blob/v1.35.0/plugin/pkg/admission/serviceaccount/admission.go#L407
+			if tokenMounted && isMountPathOccupied(u, r.GetKind()) {
+				tokenMounted = false
 			}
 		}
 

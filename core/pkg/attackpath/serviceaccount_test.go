@@ -334,3 +334,112 @@ func TestResolveServiceAccountBindings_ProjectedVolumeMountedByContainer(t *test
 		t.Error("expected TokenMounted=true: projected volume mounted by container")
 	}
 }
+
+func TestResolveServiceAccountBindings_NativeSidecarMountsMakeTokenMounted(t *testing.T) {
+	vol := map[string]any{
+		"name": "kube-api-access",
+		"projected": map[string]any{
+			"sources": []any{
+				map[string]any{
+					"serviceAccountToken": map[string]any{
+						"expirationSeconds": int64(3607),
+						"path":              "token",
+					},
+				},
+			},
+		},
+	}
+	w := resource(map[string]any{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata":   map[string]any{"name": "sidecar-mount", "namespace": "prod"},
+		"spec": map[string]any{
+			"template": map[string]any{
+				"metadata": map[string]any{"labels": map[string]any{"app": "sidecar-mount"}},
+				"spec": map[string]any{
+					"automountServiceAccountToken": false,
+					"volumes":                      []any{vol},
+					"containers": []any{
+						map[string]any{"name": "app", "image": "nginx"},
+					},
+					"initContainers": []any{
+						map[string]any{
+							"name":          "token-sidecar",
+							"image":         "busybox",
+							"restartPolicy": "Always",
+							"volumeMounts": []any{
+								map[string]any{
+									"name":      "kube-api-access",
+									"mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	})
+	results := ResolveServiceAccountBindings(makeResources(w), saIndex())
+	r := resultFor(t, results, "sidecar-mount")
+	if !r.TokenMounted {
+		t.Error("expected TokenMounted=true: native sidecar init-container mounts the projected token")
+	}
+}
+
+func TestResolveServiceAccountBindings_NullAutomountUsesDefault(t *testing.T) {
+	// automountServiceAccountToken: null must be treated as unset,
+	// falling through to the Kubernetes default of true.
+	w := resource(map[string]any{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata":   map[string]any{"name": "null-automount", "namespace": "prod"},
+		"spec": map[string]any{
+			"template": map[string]any{
+				"metadata": map[string]any{"labels": map[string]any{"app": "null-automount"}},
+				"spec": map[string]any{
+					"automountServiceAccountToken": nil,
+				},
+			},
+		},
+	})
+	results := ResolveServiceAccountBindings(makeResources(w), saIndex())
+	r := resultFor(t, results, "null-automount")
+	if !r.TokenMounted {
+		t.Error("expected TokenMounted=true: null automount must fall through to Kubernetes default")
+	}
+}
+
+func TestResolveServiceAccountBindings_AutomountBlockedByExistingMount(t *testing.T) {
+	// automountServiceAccountToken: true but the default token path is
+	// already occupied — Kubernetes admission skips injection.
+	w := resource(map[string]any{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata":   map[string]any{"name": "blocked-mount", "namespace": "prod"},
+		"spec": map[string]any{
+			"template": map[string]any{
+				"metadata": map[string]any{"labels": map[string]any{"app": "blocked-mount"}},
+				"spec": map[string]any{
+					"automountServiceAccountToken": true,
+					"containers": []any{
+						map[string]any{
+							"name":  "app",
+							"image": "nginx",
+							"volumeMounts": []any{
+								map[string]any{
+									"name":      "custom-vol",
+									"mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	})
+	results := ResolveServiceAccountBindings(makeResources(w), saIndex())
+	r := resultFor(t, results, "blocked-mount")
+	if r.TokenMounted {
+		t.Error("expected TokenMounted=false: existing mount at token path blocks automatic injection")
+	}
+}
