@@ -472,3 +472,16 @@ func TestPrintFleetReportReportsAnUnavailableReferenceWithNoDivergence(t *testin
 	assert.NotContains(t, out, "agreed",
 		"only prod reported, so there was nobody for it to agree with")
 }
+
+// TestPrintFleetReportShowsRetries pins that a cluster tried more than once says so, and a single attempt adds nothing.
+func TestPrintFleetReportShowsRetries(t *testing.T) {
+	out := renderFleet(&fleet.FleetReport{Clusters: []fleet.ClusterResult{
+		{ClusterID: "prod", Status: fleet.ClusterScanned, Attempts: 1},
+		{ClusterID: "staging", Status: fleet.ClusterScanned, Attempts: 2},
+		{ClusterID: "dr", Status: fleet.ClusterUnreachable, Attempts: 3},
+	}})
+
+	assert.Contains(t, out, "unreachable (3 attempts)")
+	assert.Contains(t, out, "scanned (2 attempts)", "a cluster that answered on a retry still shows it needed one")
+	assert.NotContains(t, out, "(1 attempts)")
+}

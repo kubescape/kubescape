@@ -2,7 +2,6 @@ package core
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 
@@ -379,7 +378,8 @@ func getConfigInputsGetterForTarget(ctx context.Context, ControlsInputs string, 
 			if _, crdErr := crdInputs.GetControlsInputs(ctx, ""); crdErr == nil {
 				logger.L().Ctx(ctx).Info("using ControlInput CRD for control configuration")
 				return crdInputs, false, nil
-			} else if isContextErr(crdErr) {
+			} else if ctx.Err() != nil {
+				// a dial timeout also matches context.DeadlineExceeded, so only a stopped scan ends here
 				return nil, false, crdErr
 			}
 			logger.L().Ctx(ctx).Debug("ControlInput CRD found but default resource not available, falling back")
@@ -487,9 +487,4 @@ func GetUIPrinter(ctx context.Context, scanInfo *cautils.ScanInfo, clusterName s
 		}
 	}
 	return p
-}
-
-// isContextErr reports whether err was caused by context cancellation or a deadline.
-func isContextErr(err error) bool {
-	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
 }

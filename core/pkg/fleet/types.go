@@ -100,6 +100,8 @@ type ClusterResult struct {
 	// stays readable to a human skimming a report; a consumer that needs to
 	// compute with it can parse it back with time.ParseDuration.
 	Duration string `json:"duration,omitempty"`
+	// Attempts is how many times the cluster was scanned; above one it was retried, and Duration covers every attempt and wait.
+	Attempts int `json:"attempts,omitempty"`
 	// Report is the cluster's own report with its raw resources removed. The
 	// per-context output file already carries the manifests, and keeping every
 	// cluster's resident until the last context finishes would make the fleet

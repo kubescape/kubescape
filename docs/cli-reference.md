@@ -54,6 +54,10 @@ kubescape scan [target] [flags]
 | `--keep-local` | Don't report results to backend | `false` |
 | `--notify <url>` | POST the posture scan summary to a webhook URL. Slack incoming webhooks receive Block Kit, Microsoft Teams webhooks an Adaptive Card, and other destinations generic JSON. Repeat for multiple endpoints. Delivery is best-effort and does not affect scan exit status. Not supported by `scan image`. | - |
 | `--kubeconfig <path>` | Path to kubeconfig file | - |
+| `--kube-contexts <ctx,...>` | Scan each of these kube contexts in one run, one after another, writing one report per context named after `--output`. Requires `--output`. See [scanning a fleet of clusters](fleet-scanning.md). | - |
+| `--fleet-report <path>` | With `--kube-contexts`, also write one combined JSON report across every context. Not supported with `--hide` or `--encrypt`. | - |
+| `--reference-cluster <ctx>` | With `--fleet-report`, the context the other clusters are compared against. Must be one of `--kube-contexts`. | - |
+| `--retries <n>` | With `--kube-contexts`, how many more times to try a cluster whose API server never answered, waiting 2s, then 4s, doubling up to 30s. `0` disables retries. | `2` |
 | `-o, --output <path>` | Output file path | stdout |
 | `--release-name <name>` | Helm release name made available as `.Release.Name` when rendering a chart | - |
 | `--release-namespace <ns>` | Helm release namespace made available as `.Release.Namespace` when rendering a chart | - |
