@@ -236,7 +236,8 @@ func TestGetWriter_ExistingPermissiveFileIsTightened(t *testing.T) {
 		t.Skip("POSIX permission bits are not modeled on Windows")
 	}
 	target := filepath.Join(t.TempDir(), "report.json")
-	require.NoError(t, os.WriteFile(target, []byte("old"), 0o644))
+	require.NoError(t, os.WriteFile(target, []byte("old"), 0o600))
+	require.NoError(t, os.Chmod(target, 0o644))
 
 	f := GetWriter(context.Background(), target)
 	require.NotNil(t, f)
@@ -271,7 +272,8 @@ func TestGetWriterNoFallback_ExistingPermissiveFileIsTightened(t *testing.T) {
 		t.Skip("POSIX permission bits are not modeled on Windows")
 	}
 	target := filepath.Join(t.TempDir(), "report.json")
-	require.NoError(t, os.WriteFile(target, []byte("old"), 0o644))
+	require.NoError(t, os.WriteFile(target, []byte("old"), 0o600))
+	require.NoError(t, os.Chmod(target, 0o644))
 
 	f, err := GetWriterNoFallback(target)
 	require.NoError(t, err)
@@ -291,7 +293,8 @@ func TestGetWriterNoStdoutFallback_ExistingPermissiveFileIsTightened(t *testing.
 		t.Skip("POSIX permission bits are not modeled on Windows")
 	}
 	target := filepath.Join(t.TempDir(), "report.pdf")
-	require.NoError(t, os.WriteFile(target, []byte("old"), 0o644))
+	require.NoError(t, os.WriteFile(target, []byte("old"), 0o600))
+	require.NoError(t, os.Chmod(target, 0o644))
 
 	f := GetWriterNoStdoutFallback(context.Background(), target, "kubescape-report-*.pdf")
 	require.NotNil(t, f)
