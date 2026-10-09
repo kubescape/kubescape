@@ -443,3 +443,71 @@ func TestResolveServiceAccountBindings_AutomountBlockedByExistingMount(t *testin
 		t.Error("expected TokenMounted=false: existing mount at token path blocks automatic injection")
 	}
 }
+
+func TestReviewProjectedTokenExcludedBySubPath(t *testing.T) {
+	makeObj := func(subPath string) map[string]any {
+		mount := map[string]any{
+			"name":      "identity",
+			"mountPath": "/var/meta",
+		}
+		if subPath != "" {
+			mount["subPath"] = subPath
+		}
+		return map[string]any{
+			"kind": "Pod",
+			"spec": map[string]any{
+				"automountServiceAccountToken": false,
+				"serviceAccountName":           "my-sa",
+				"volumes": []any{
+					map[string]any{
+						"name": "identity",
+						"projected": map[string]any{
+							"sources": []any{
+								map[string]any{
+									"serviceAccountToken": map[string]any{
+										"path":              "token",
+										"expirationSeconds": int64(3600),
+									},
+								},
+								map[string]any{
+									"downwardAPI": map[string]any{
+										"items": []any{
+											map[string]any{
+												"path":     "namespace",
+												"fieldRef": map[string]any{"fieldPath": "metadata.namespace"},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+				"containers": []any{
+					map[string]any{
+						"name":         "app",
+						"image":        "busybox",
+						"volumeMounts": []any{mount},
+					},
+				},
+			},
+		}
+	}
+
+	tests := []struct {
+		name    string
+		subPath string
+		want    bool
+	}{
+		{"sibling subPath excludes token", "namespace", false},
+		{"token subPath exposes token", "token", true},
+		{"whole-volume mount exposes token", "", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := hasProjectedServiceAccountToken(makeObj(tt.subPath), "Pod"); got != tt.want {
+				t.Errorf("subPath=%q: got %v, want %v", tt.subPath, got, tt.want)
+			}
+		})
+	}
+}
