@@ -2,6 +2,7 @@ package attackpath
 
 import (
 	"slices"
+	"strings"
 
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -145,7 +146,8 @@ func hasProjectedServiceAccountToken(obj map[string]any, kind string) bool {
 	if err != nil || !found {
 		return false
 	}
-	projectedVolNames := map[string]bool{}
+	// projectedVolTokenPaths maps volume name → token file paths within the volume.
+	projectedVolTokenPaths := map[string][]string{}
 	for _, v := range vols {
 		vol, ok := v.(map[string]any)
 		if !ok {
@@ -165,18 +167,28 @@ func hasProjectedServiceAccountToken(obj map[string]any, kind string) bool {
 			if !ok {
 				continue
 			}
-			if _, has := src["serviceAccountToken"]; has {
-				projectedVolNames[name] = true
+			sat, has := src["serviceAccountToken"]
+			if !has {
+				continue
 			}
+			tp := ""
+			if satMap, ok := sat.(map[string]any); ok {
+				tp, _ = satMap["path"].(string)
+			}
+			if tp == "" {
+				tp = "token"
+			}
+			projectedVolTokenPaths[name] = append(projectedVolTokenPaths[name], tp)
 		}
 	}
-	if len(projectedVolNames) == 0 {
+	if len(projectedVolTokenPaths) == 0 {
 		return false
 	}
 
 	// Step 2: confirm at least one regular or init container mounts one of
-	// those volumes. Native sidecars (initContainers with restartPolicy:Always)
-	// run for the pod lifetime and have the same token access as regular containers.
+	// those volumes in a way that exposes the token file.
+	// Native sidecars (initContainers with restartPolicy:Always) run for the
+	// pod lifetime and have the same token access as regular containers.
 	regular, foundRegular, _ := unstructured.NestedSlice(u.Object, containersFieldPath(kind)...)
 	init_, foundInit, _ := unstructured.NestedSlice(u.Object, initContainersFieldPath(kind)...)
 	if !foundRegular && !foundInit {
@@ -195,8 +207,26 @@ func hasProjectedServiceAccountToken(obj map[string]any, kind string) bool {
 				continue
 			}
 			mountName, _ := mount["name"].(string)
-			if projectedVolNames[mountName] {
+			tokenPaths, isProjected := projectedVolTokenPaths[mountName]
+			if !isProjected {
+				continue
+			}
+			subPath, _ := mount["subPath"].(string)
+			subPathExpr, _ := mount["subPathExpr"].(string)
+			if subPath == "" && subPathExpr == "" {
+				// Whole-volume mount: token is accessible.
 				return true
+			}
+			if subPathExpr != "" {
+				// Dynamic expression: conservatively treat as mounted.
+				return true
+			}
+			// Targeted subPath: exposes the token only when the subPath
+			// names the token file exactly or is an ancestor directory.
+			for _, tp := range tokenPaths {
+				if subPath == tp || strings.HasPrefix(tp, subPath+"/") {
+					return true
+				}
 			}
 		}
 	}
