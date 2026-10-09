@@ -646,38 +646,11 @@ func getContainersFromObj(obj map[string]interface{}) []map[string]interface{} {
 	return res
 }
 
-// hasRedactedEnvironment returns true if scannedObj contains scanner redaction placeholders
-// in container environment variables or Secret data, or if candidateObj has container envFrom
-// or environment variables that were cleared by the scanner from scannedObj.
-func hasRedactedEnvironment(scannedObj, candidateObj map[string]interface{}) bool {
-	if hasRedactedPlaceholder(scannedObj) {
-		return true
-	}
-	candContainers := getContainersFromObj(candidateObj)
-	scannedContainers := getContainersFromObj(scannedObj)
-	for i, cc := range candContainers {
-		if envFrom, ok := cc["envFrom"].([]interface{}); ok && len(envFrom) > 0 {
-			if i < len(scannedContainers) {
-				scannedEnvFrom, sOk := scannedContainers[i]["envFrom"].([]interface{})
-				if !sOk || len(scannedEnvFrom) == 0 {
-					return true
-				}
-			} else {
-				return true
-			}
-		}
-		if envList, ok := cc["env"].([]interface{}); ok && len(envList) > 0 {
-			if i < len(scannedContainers) {
-				scannedEnv, sOk := scannedContainers[i]["env"].([]interface{})
-				if !sOk || len(scannedEnv) == 0 {
-					return true
-				}
-			} else {
-				return true
-			}
-		}
-	}
-	return false
+// hasValueOverrides returns true if opts provides any Helm value overrides
+// (values files, set values, string values, or file values).
+func hasValueOverrides(opts cautils.HelmValueOptions) bool {
+	return len(opts.ValueFiles) > 0 || len(opts.Values) > 0 ||
+		len(opts.StringValues) > 0 || len(opts.FileValues) > 0
 }
 
 // resolveBaseObject determines the verified unredacted base Kubernetes object for a suggestion.
@@ -710,11 +683,17 @@ func resolveBaseObject(s HelmFixSuggestion, chartCache map[string]map[string][]w
 		return nil, "unproven report fidelity: scan reports redact container environment variables and remove envFrom without leaving placeholders; provide a verified unredacted rendered base or explicit fidelity provenance"
 	}
 
-	// If the scan report has redacted environment configuration and no verified Helm render inputs
-	// were provided, correspondence with scan-time configuration cannot be established.
-	if s.Resource != nil && s.Resource.GetObject() != nil && s.HelmValueOptions.IsEmpty() && !s.FidelityProvenance && s.UnredactedBase == nil {
-		if hasRedactedEnvironment(s.Resource.GetObject(), candidate) {
-			return nil, "declined: scan report redacts container environment configuration and no verified Helm render inputs were provided; cannot establish correspondence with scan-time overrides"
+	// If the scan report comes from a scan (not an unredacted base or proven fidelity),
+	// container environment configuration cannot be verified without complete render provenance
+	// (Helm value overrides). Scan reports redact container environment variables and remove envFrom
+	// without leaving placeholders (processorhandlerutils.go:826). Placeholder absence and matching
+	// surviving fields cannot prove the original render inputs even when both objects lack envFrom.
+	// Therefore, complete render provenance (Helm value overrides) or a verified unredacted base is required.
+	if s.Resource != nil && s.Resource.GetObject() != nil && !s.FidelityProvenance && s.UnredactedBase == nil {
+		if len(getContainersFromObj(s.Resource.GetObject())) > 0 || len(getContainersFromObj(candidate)) > 0 {
+			if !hasValueOverrides(s.HelmValueOptions) {
+				return nil, "declined: scan report redacts container environment configuration and no verified Helm render inputs were provided; cannot establish correspondence with scan-time overrides"
+			}
 		}
 	}
 
@@ -738,9 +717,9 @@ func resolveBaseObject(s HelmFixSuggestion, chartCache map[string]map[string][]w
 	return candidate, ""
 }
 
-// validateChartFilesContainment ensures that the chart directory and every file or symlink
-// target inside it resolves within allowedBasePath, preventing Helm loader from following
-// symlinks to external files outside the allowed boundary.
+// validateChartFilesContainment ensures that the chart directory and every file, directory, or symlink
+// target inside it resolves within allowedBasePath, preventing Helm loader from following symlinks
+// or directory symlinks to external files outside the allowed boundary.
 func validateChartFilesContainment(chartPath, allowedBasePath string) error {
 	resolvedAllowedBase, err := filepath.EvalSymlinks(allowedBasePath)
 	if err != nil {
@@ -756,24 +735,48 @@ func validateChartFilesContainment(chartPath, allowedBasePath string) error {
 		return fmt.Errorf("chart path %q is outside allowed base path %q", chartPath, allowedBasePath)
 	}
 
-	// Walk every entry inside the chart directory and verify canonical target containment
-	err = filepath.Walk(chartPath, func(path string, info os.FileInfo, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		resolvedTarget, err := filepath.EvalSymlinks(path)
-		if err != nil {
-			return fmt.Errorf("failed to resolve chart file %q: %w", path, err)
-		}
-		if !isPathContained(resolvedAllowedBase, resolvedTarget) {
-			return fmt.Errorf("chart file %q resolves to %q, which is outside allowed base path %q", path, resolvedTarget, allowedBasePath)
-		}
-		return nil
-	})
+	visitedDirs := make(map[string]bool)
+	return validateDirContainment(resolvedChart, resolvedAllowedBase, visitedDirs)
+}
+
+func validateDirContainment(dirPath, allowedBasePath string, visitedDirs map[string]bool) error {
+	resolvedDir, err := filepath.EvalSymlinks(dirPath)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to resolve chart directory %q: %w", dirPath, err)
+	}
+	if !isPathContained(allowedBasePath, resolvedDir) {
+		return fmt.Errorf("chart directory %q resolves to %q, which is outside allowed base path %q", dirPath, resolvedDir, allowedBasePath)
+	}
+	if visitedDirs[resolvedDir] {
+		return nil
+	}
+	visitedDirs[resolvedDir] = true
+
+	entries, err := os.ReadDir(resolvedDir)
+	if err != nil {
+		return fmt.Errorf("failed to read chart directory %q: %w", resolvedDir, err)
 	}
 
+	for _, entry := range entries {
+		entryPath := filepath.Join(resolvedDir, entry.Name())
+		resolvedEntry, err := filepath.EvalSymlinks(entryPath)
+		if err != nil {
+			return fmt.Errorf("failed to resolve chart entry %q: %w", entryPath, err)
+		}
+		if !isPathContained(allowedBasePath, resolvedEntry) {
+			return fmt.Errorf("chart file %q resolves to %q, which is outside allowed base path %q", entryPath, resolvedEntry, allowedBasePath)
+		}
+
+		info, err := os.Stat(resolvedEntry)
+		if err != nil {
+			return fmt.Errorf("failed to stat chart entry %q: %w", resolvedEntry, err)
+		}
+		if info.IsDir() {
+			if err := validateDirContainment(resolvedEntry, allowedBasePath, visitedDirs); err != nil {
+				return err
+			}
+		}
+	}
 	return nil
 }
 
@@ -793,6 +796,18 @@ func loadUnredactedFromChart(s HelmFixSuggestion, chartCache map[string]map[stri
 			resolvedVF, err := filepath.EvalSymlinks(vf)
 			if err != nil || !isPathContained(s.AllowedBasePath, resolvedVF) {
 				return nil, fmt.Errorf("values file %q is outside allowed base path %q", vf, s.AllowedBasePath)
+			}
+		}
+		for _, fv := range s.HelmValueOptions.FileValues {
+			for _, item := range strings.Split(fv, ",") {
+				parts := strings.SplitN(item, "=", 2)
+				if len(parts) == 2 {
+					filePath := parts[1]
+					resolvedFP, err := filepath.EvalSymlinks(filePath)
+					if err != nil || !isPathContained(s.AllowedBasePath, resolvedFP) {
+						return nil, fmt.Errorf("file-values file %q is outside allowed base path %q", filePath, s.AllowedBasePath)
+					}
+				}
 			}
 		}
 	}

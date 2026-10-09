@@ -14,6 +14,7 @@ import (
 
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/go-logger"
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	metav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
 	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
 	"github.com/kubescape/opa-utils/reporthandling"
@@ -835,6 +836,7 @@ func buildFixableHelmReport(t *testing.T, dir string) string {
 
 	chartYaml := "apiVersion: v2\nname: demo-chart\nversion: 0.1.0\n"
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "Chart.yaml"), []byte(chartYaml), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "values.yaml"), []byte("image:\n  tag: latest\n"), 0600))
 	templatesDir := filepath.Join(dir, "templates")
 	require.NoError(t, os.MkdirAll(templatesDir, 0750))
 	deploymentYaml := `apiVersion: apps/v1
@@ -924,7 +926,14 @@ func TestFix_DryRunOutputKustomizeWritesNothing(t *testing.T) {
 	kustDir := filepath.Join(t.TempDir(), "kust-output")
 
 	ks := &Kubescape{Ctx: context.Background()}
-	err := ks.Fix(&metav1.FixInfo{ReportFile: reportPath, KustomizeDir: kustDir, DryRun: true})
+	err := ks.Fix(&metav1.FixInfo{
+		ReportFile:   reportPath,
+		KustomizeDir: kustDir,
+		DryRun:       true,
+		HelmValueOptions: cautils.HelmValueOptions{
+			ValueFiles: []string{filepath.Join(dir, "values.yaml")},
+		},
+	})
 	assert.NoError(t, err)
 
 	assert.NoDirExists(t, kustDir, "DryRun must not create KustomizeDir output")
@@ -940,7 +949,13 @@ func TestFix_OutputKustomizeErrorPropagated(t *testing.T) {
 	invalidDir := filepath.Join(filePath, "cannot-create-dir-here")
 
 	ks := &Kubescape{Ctx: context.Background()}
-	err := ks.Fix(&metav1.FixInfo{ReportFile: reportPath, KustomizeDir: invalidDir})
+	err := ks.Fix(&metav1.FixInfo{
+		ReportFile:   reportPath,
+		KustomizeDir: invalidDir,
+		HelmValueOptions: cautils.HelmValueOptions{
+			ValueFiles: []string{filepath.Join(dir, "values.yaml")},
+		},
+	})
 	assert.Error(t, err, "Fix must return an error when Kustomize patch emission fails")
 }
 
@@ -950,7 +965,13 @@ func TestFix_OutputKustomizeSuccess(t *testing.T) {
 	kustDir := filepath.Join(t.TempDir(), "kust-output")
 
 	ks := &Kubescape{Ctx: context.Background()}
-	err := ks.Fix(&metav1.FixInfo{ReportFile: reportPath, KustomizeDir: kustDir})
+	err := ks.Fix(&metav1.FixInfo{
+		ReportFile:   reportPath,
+		KustomizeDir: kustDir,
+		HelmValueOptions: cautils.HelmValueOptions{
+			ValueFiles: []string{filepath.Join(dir, "values.yaml")},
+		},
+	})
 	require.NoError(t, err)
 
 	assert.DirExists(t, kustDir)

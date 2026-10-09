@@ -2,8 +2,10 @@ package fixhandler
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/armosec/armoapi-go/armotypes"
@@ -1246,7 +1248,8 @@ spec:
 		require.NoError(t, err)
 		assert.Empty(t, res.EmittedResources)
 		require.Len(t, res.SkippedResources, 1)
-		assert.Contains(t, res.SkippedResources[0].Reason, "does not match scan-time resource configuration")
+		assert.True(t, strings.Contains(res.SkippedResources[0].Reason, "scan report redacts container environment configuration") ||
+			strings.Contains(res.SkippedResources[0].Reason, "does not match scan-time resource configuration"))
 
 		_, err = os.Stat(filepath.Join(outDir, "base.yaml"))
 		assert.True(t, os.IsNotExist(err), "base.yaml must not be written when overrides mismatch")
@@ -1593,7 +1596,10 @@ spec:
 			{
 				Resource:  &reporthandling.Resource{Object: scannedObj},
 				ChartPath: chartDirNoRes,
-				FixPaths:  []armotypes.FixPath{{Path: "spec.template.spec.containers[0].securityContext.privileged", Value: "false"}},
+				HelmValueOptions: cautils.HelmValueOptions{
+					ValueFiles: []string{filepath.Join(chartDirNoRes, "values.yaml")},
+				},
+				FixPaths: []armotypes.FixPath{{Path: "spec.template.spec.containers[0].securityContext.privileged", Value: "false"}},
 			},
 		}
 
@@ -1663,4 +1669,315 @@ stringData:
 	if data, err := os.ReadFile(baseFile); err == nil {
 		assert.NotContains(t, string(data), "OUTSIDE_ROOT_SENTINEL", "external sentinel must not be copied into base.yaml")
 	}
+}
+
+// TestReview4034ScanOnlyEnvFromEmptyChartDefault verifies [P1]:
+// When a chart's default has empty extraEnvFrom=[] (or lacks envFrom), and a scan-time override
+// added envFrom (e.g. configMapRef=prod-config) without explicit env, scanner removeContainersData
+// deletes envFrom without leaving XXXXXX. Both default candidate and scan report lack envFrom.
+//  1. Without value overrides (missing render provenance), the emitter must visibly decline rather than
+//     silently dropping prod-config.
+//  2. Passing --release-name alone does NOT satisfy render provenance, and must still be visibly declined.
+//  3. When verified Helm value overrides are supplied, the emitter preserves prod-config in base.yaml.
+func TestReview4034ScanOnlyEnvFromEmptyChartDefault(t *testing.T) {
+	chartDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "Chart.yaml"), []byte("apiVersion: v2\nname: emptyenvchart\nversion: 0.1.0\n"), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "values.yaml"), []byte("extraEnvFrom: []\n"), 0600))
+	require.NoError(t, os.MkdirAll(filepath.Join(chartDir, "templates"), 0700))
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "templates", "deployment.yaml"), []byte(`apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-app
+spec:
+  template:
+    spec:
+      containers:
+      - name: app
+        image: example:v1
+        {{- with .Values.extraEnvFrom }}
+        envFrom:
+          {{- toYaml . | nindent 8 }}
+        {{- end }}
+        securityContext:
+          privileged: true
+`), 0600))
+
+	// Scanned object at scan time had --set extraEnvFrom[0].configMapRef.name=prod-config,
+	// and scanner removeContainersData deleted envFrom without leaving XXXXXX.
+	containers := []corev1.Container{
+		{
+			Name:  "app",
+			Image: "example:v1",
+			EnvFrom: []corev1.EnvFromSource{
+				{ConfigMapRef: &corev1.ConfigMapEnvSource{LocalObjectReference: corev1.LocalObjectReference{Name: "prod-config"}}},
+			},
+			SecurityContext: &corev1.SecurityContext{
+				Privileged: ptrBool(true),
+			},
+		},
+	}
+	removeContainersData(containers)
+	require.Nil(t, containers[0].EnvFrom, "scanner must have cleared envFrom")
+	require.Empty(t, containers[0].Env, "env must remain empty")
+
+	b, err := json.Marshal(map[string]interface{}{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata":   map[string]interface{}{"name": "my-app"},
+		"spec": map[string]interface{}{
+			"template": map[string]interface{}{
+				"spec": map[string]interface{}{
+					"containers": containers,
+				},
+			},
+		},
+	})
+	require.NoError(t, err)
+
+	var scannedObj map[string]interface{}
+	require.NoError(t, json.Unmarshal(b, &scannedObj))
+	scannedRes := &reporthandling.Resource{Object: scannedObj}
+
+	t.Run("declines without value overrides", func(t *testing.T) {
+		outDir := t.TempDir()
+		suggs := []HelmFixSuggestion{
+			{
+				Resource:  scannedRes,
+				ChartPath: chartDir,
+				FixPaths:  []armotypes.FixPath{{Path: "spec.template.spec.containers[0].securityContext.privileged", Value: "false"}},
+			},
+		}
+
+		res, err := EmitKustomizePatch(suggs, outDir)
+		require.NoError(t, err)
+		assert.Empty(t, res.EmittedResources)
+		require.Len(t, res.SkippedResources, 1)
+		assert.Contains(t, res.SkippedResources[0].Reason, "scan report redacts container environment configuration and no verified Helm render inputs were provided")
+	})
+
+	t.Run("declines when only release-name is provided without value overrides", func(t *testing.T) {
+		outDir := t.TempDir()
+		suggs := []HelmFixSuggestion{
+			{
+				Resource:  scannedRes,
+				ChartPath: chartDir,
+				HelmValueOptions: cautils.HelmValueOptions{
+					ReleaseName: "my-release",
+				},
+				FixPaths: []armotypes.FixPath{{Path: "spec.template.spec.containers[0].securityContext.privileged", Value: "false"}},
+			},
+		}
+
+		res, err := EmitKustomizePatch(suggs, outDir)
+		require.NoError(t, err)
+		assert.Empty(t, res.EmittedResources)
+		require.Len(t, res.SkippedResources, 1)
+		assert.Contains(t, res.SkippedResources[0].Reason, "scan report redacts container environment configuration and no verified Helm render inputs were provided")
+	})
+
+	t.Run("preserves scan-time envFrom when complete render provenance is supplied", func(t *testing.T) {
+		outDir := t.TempDir()
+		suggs := []HelmFixSuggestion{
+			{
+				Resource:  scannedRes,
+				ChartPath: chartDir,
+				HelmValueOptions: cautils.HelmValueOptions{
+					Values: []string{"extraEnvFrom[0].configMapRef.name=prod-config"},
+				},
+				FixPaths: []armotypes.FixPath{{Path: "spec.template.spec.containers[0].securityContext.privileged", Value: "false"}},
+			},
+		}
+
+		res, err := EmitKustomizePatch(suggs, outDir)
+		require.NoError(t, err)
+		require.Len(t, res.EmittedResources, 1)
+
+		k := krusty.MakeKustomizer(krusty.MakeDefaultOptions())
+		resMap, err := k.Run(filesys.MakeFsOnDisk(), outDir)
+		require.NoError(t, err)
+		outYaml, err := resMap.AsYaml()
+		require.NoError(t, err)
+		assert.Contains(t, string(outYaml), "prod-config")
+		assert.Contains(t, string(outYaml), "privileged: false")
+	})
+}
+
+// TestReview4034DirectorySymlinkDescendantContainment verifies [P1]:
+// When a chart directory contains a directory symlink whose resolved target is within AllowedBasePath,
+// but that target contains a nested symlink pointing outside AllowedBasePath (e.g.
+// chart/files -> allowed/shared and allowed/shared/sentinel -> outside/sentinel),
+// traversal detects the external descendant and rejects the chart before Helm reads it.
+// Also verifies that symlinked chart roots are resolved and traversed with cycle protection.
+func TestReview4034DirectorySymlinkDescendantContainment(t *testing.T) {
+	allowedBase := t.TempDir()
+	outsideDir := t.TempDir()
+
+	// External secret sentinel
+	outsideFile := filepath.Join(outsideDir, "secret.txt")
+	require.NoError(t, os.WriteFile(outsideFile, []byte("SUPER_SECRET_LEAK\n"), 0600))
+
+	// Shared folder inside allowedBase
+	sharedDir := filepath.Join(allowedBase, "shared")
+	require.NoError(t, os.MkdirAll(sharedDir, 0700))
+	// Nested symlink inside shared pointing outside allowedBase
+	require.NoError(t, os.Symlink(outsideFile, filepath.Join(sharedDir, "sentinel")))
+
+	// Chart inside allowedBase
+	chartDir := filepath.Join(allowedBase, "chart")
+	require.NoError(t, os.MkdirAll(filepath.Join(chartDir, "templates"), 0700))
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "Chart.yaml"), []byte("apiVersion: v2\nname: dirsymlinkchart\nversion: 0.1.0\n"), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "values.yaml"), []byte("dummy: val\n"), 0600))
+
+	// Directory symlink: chart/files -> allowed/shared
+	require.NoError(t, os.Symlink(sharedDir, filepath.Join(chartDir, "files")))
+
+	// Template reading files/sentinel via Helm's .Files.Get
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "templates", "secret.yaml"), []byte(`apiVersion: v1
+kind: Secret
+metadata:
+  name: leak-secret
+stringData:
+  CONTENT: {{ .Files.Get "files/sentinel" }}
+`), 0600))
+
+	outDir := t.TempDir()
+	sugg := HelmFixSuggestion{
+		Resource: &reporthandling.Resource{
+			Object: map[string]interface{}{
+				"apiVersion": "v1",
+				"kind":       "Secret",
+				"metadata":   map[string]interface{}{"name": "leak-secret"},
+				"stringData": map[string]interface{}{"CONTENT": "SUPER_SECRET_LEAK"},
+			},
+		},
+		ChartPath:       chartDir,
+		AllowedBasePath: allowedBase,
+		HelmValueOptions: cautils.HelmValueOptions{
+			Values: []string{"dummy=val"},
+		},
+		FixPaths: []armotypes.FixPath{{Path: "metadata.labels.patched", Value: "true"}},
+	}
+
+	res, err := EmitKustomizePatch([]HelmFixSuggestion{sugg}, outDir)
+	require.NoError(t, err)
+	assert.Empty(t, res.EmittedResources)
+	require.Len(t, res.SkippedResources, 1)
+	assert.Contains(t, res.SkippedResources[0].Reason, "outside allowed base path")
+
+	baseFile := filepath.Join(outDir, "base.yaml")
+	if data, err := os.ReadFile(baseFile); err == nil {
+		assert.NotContains(t, string(data), "SUPER_SECRET_LEAK")
+	}
+
+	// Also verify symlinked chart root (chart root is itself a symlink)
+	chartLink := filepath.Join(allowedBase, "chart-symlink")
+	require.NoError(t, os.Symlink(chartDir, chartLink))
+	suggLink := sugg
+	suggLink.ChartPath = chartLink
+	outDir2 := t.TempDir()
+	res2, err := EmitKustomizePatch([]HelmFixSuggestion{suggLink}, outDir2)
+	require.NoError(t, err)
+	assert.Empty(t, res2.EmittedResources)
+	require.Len(t, res2.SkippedResources, 1)
+	assert.Contains(t, res2.SkippedResources[0].Reason, "outside allowed base path")
+}
+
+// TestReview4034FileValuesContainment verifies that FileValues (--set-file) operands
+// pointing to files outside AllowedBasePath are constrained and rejected.
+func TestReview4034FileValuesContainment(t *testing.T) {
+	allowedBase := t.TempDir()
+	outsideDir := t.TempDir()
+
+	outsideFile := filepath.Join(outsideDir, "outside-secret.txt")
+	require.NoError(t, os.WriteFile(outsideFile, []byte("OUTSIDE_FILE_VAL\n"), 0600))
+
+	insideFile := filepath.Join(allowedBase, "inside-secret.txt")
+	require.NoError(t, os.WriteFile(insideFile, []byte("INSIDE_FILE_VAL\n"), 0600))
+
+	chartDir := filepath.Join(allowedBase, "chart")
+	require.NoError(t, os.MkdirAll(filepath.Join(chartDir, "templates"), 0700))
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "Chart.yaml"), []byte("apiVersion: v2\nname: filevalchart\nversion: 0.1.0\n"), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "values.yaml"), []byte("myval: default\n"), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "templates", "service.yaml"), []byte(`apiVersion: v1
+kind: Service
+metadata:
+  name: my-service
+  labels:
+    content: {{ .Values.myval }}
+spec:
+  ports:
+  - port: 80
+`), 0600))
+
+	t.Run("rejects external FileValues", func(t *testing.T) {
+		outDir := t.TempDir()
+		sugg := HelmFixSuggestion{
+			Resource: &reporthandling.Resource{
+				Object: map[string]interface{}{
+					"apiVersion": "v1",
+					"kind":       "Service",
+					"metadata": map[string]interface{}{
+						"name":   "my-service",
+						"labels": map[string]interface{}{"content": "OUTSIDE_FILE_VAL"},
+					},
+					"spec": map[string]interface{}{
+						"ports": []interface{}{
+							map[string]interface{}{"port": 80},
+						},
+					},
+				},
+			},
+			ChartPath:       chartDir,
+			AllowedBasePath: allowedBase,
+			HelmValueOptions: cautils.HelmValueOptions{
+				FileValues: []string{fmt.Sprintf("myval=%s", outsideFile)},
+			},
+			FixPaths: []armotypes.FixPath{{Path: "metadata.labels.patched", Value: "true"}},
+		}
+
+		res, err := EmitKustomizePatch([]HelmFixSuggestion{sugg}, outDir)
+		require.NoError(t, err)
+		assert.Empty(t, res.EmittedResources)
+		require.Len(t, res.SkippedResources, 1)
+		assert.Contains(t, res.SkippedResources[0].Reason, "file-values file")
+		assert.Contains(t, res.SkippedResources[0].Reason, "outside allowed base path")
+	})
+
+	t.Run("accepts internal FileValues", func(t *testing.T) {
+		outDir := t.TempDir()
+		sugg := HelmFixSuggestion{
+			Resource: &reporthandling.Resource{
+				Object: map[string]interface{}{
+					"apiVersion": "v1",
+					"kind":       "Service",
+					"metadata": map[string]interface{}{
+						"name":   "my-service",
+						"labels": map[string]interface{}{"content": "INSIDE_FILE_VAL"},
+					},
+					"spec": map[string]interface{}{
+						"ports": []interface{}{
+							map[string]interface{}{"port": 80},
+						},
+					},
+				},
+			},
+			ChartPath:       chartDir,
+			AllowedBasePath: allowedBase,
+			HelmValueOptions: cautils.HelmValueOptions{
+				FileValues: []string{fmt.Sprintf("myval=%s", insideFile)},
+			},
+			FixPaths: []armotypes.FixPath{{Path: "metadata.labels.patched", Value: "true"}},
+		}
+
+		res, err := EmitKustomizePatch([]HelmFixSuggestion{sugg}, outDir)
+		require.NoError(t, err)
+		require.Len(t, res.EmittedResources, 1)
+
+		k := krusty.MakeKustomizer(krusty.MakeDefaultOptions())
+		resMap, err := k.Run(filesys.MakeFsOnDisk(), outDir)
+		require.NoError(t, err)
+		outYaml, err := resMap.AsYaml()
+		require.NoError(t, err)
+		assert.Contains(t, string(outYaml), "INSIDE_FILE_VAL")
+	})
 }
