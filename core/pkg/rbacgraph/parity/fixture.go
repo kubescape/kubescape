@@ -99,8 +99,9 @@ func (r ServiceAccountRef) String() string {
 //
 // Kubernetes: a dry-run PUT (verb "update") or PATCH (verb "patch") of the
 // Role with a rule granting everything. rbacgraph: an escalate-verb edge
-// whose Target covers the Role. rbacgraph does not distinguish the two verbs,
-// so Verb must be one the fixture's grants actually hold.
+// whose Target covers the Role. rbacgraph does not distinguish the two verbs:
+// one edge stands for both. Answer therefore looks for the edge with the
+// verb the question does not use taken out of the subject's rules.
 type RewriteRole struct {
 	Namespace string `json:"namespace"`
 	Name      string `json:"name"`

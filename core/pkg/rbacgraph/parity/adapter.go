@@ -3,6 +3,7 @@ package parity
 import (
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v4/core/pkg/rbacgraph"
@@ -40,7 +41,20 @@ func NewKubescape(f Fixture) (*Kubescape, error) {
 // "denied" here.
 func (k *Kubescape) Answer(q Question) Answer {
 	subject := rbacgraph.Subject{Kind: rbacgraph.KindServiceAccount, Namespace: q.ServiceAccount.Namespace, Name: q.ServiceAccount.Name}
-	for _, edge := range k.idx.DirectEscalationEdges(subject, k.idx.DirectRules(subject)) {
+	rules := k.idx.DirectRules(subject)
+	if q.RewriteRole != nil {
+		// rbacgraph asks whether a Role can be rewritten at all, so one
+		// escalate-verb edge stands for update and patch alike. The question
+		// is one request, made with one of them. rbacgraph is therefore asked
+		// about the subject as it would be without the other verb, and an
+		// edge it still finds rests on the verb the request uses.
+		other := "patch"
+		if q.RewriteRole.Verb == "patch" {
+			other = "update"
+		}
+		rules = withoutVerb(rules, other)
+	}
+	for _, edge := range k.idx.DirectEscalationEdges(subject, rules) {
 		if answers(edge, q) {
 			return Allowed
 		}
@@ -62,4 +76,16 @@ func answers(edge rbacgraph.EscalationEdge, q Question) bool {
 			edge.Scope == q.BindClusterRole.Namespace
 	}
 	return false
+}
+
+// withoutVerb returns rules with verb taken out of every rule that lists it.
+// A rule granting "*" is left as it is: it grants every verb, so whatever it
+// allows with verb it allows with any other too. The rules are copied, since
+// they share their slices with the Index.
+func withoutVerb(rules []rbacgraph.ScopedRule, verb string) []rbacgraph.ScopedRule {
+	out := slices.Clone(rules)
+	for i := range out {
+		out[i].Rule.Verbs = slices.DeleteFunc(slices.Clone(out[i].Rule.Verbs), func(v string) bool { return v == verb })
+	}
+	return out
 }

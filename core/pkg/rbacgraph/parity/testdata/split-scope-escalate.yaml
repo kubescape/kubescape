@@ -13,6 +13,7 @@ objects:
   - {apiVersion: v1, kind: ServiceAccount, metadata: {name: update-only, namespace: lab}}
   - {apiVersion: v1, kind: ServiceAccount, metadata: {name: escalate-cluster-patch-namespace, namespace: lab}}
   - {apiVersion: v1, kind: ServiceAccount, metadata: {name: update-in-other-namespace, namespace: lab}}
+  - {apiVersion: v1, kind: ServiceAccount, metadata: {name: every-verb, namespace: lab}}
   - apiVersion: rbac.authorization.k8s.io/v1
     kind: Role
     metadata: {name: editable, namespace: lab}
@@ -33,6 +34,11 @@ objects:
     metadata: {name: patch-roles}
     rules:
       - {apiGroups: ["rbac.authorization.k8s.io"], resources: ["roles"], verbs: [get, patch]}
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: ClusterRole
+    metadata: {name: every-verb-on-roles}
+    rules:
+      - {apiGroups: ["rbac.authorization.k8s.io"], resources: ["roles"], verbs: ["*"]}
   - apiVersion: rbac.authorization.k8s.io/v1
     kind: ClusterRoleBinding
     metadata: {name: escalate-cluster-wide}
@@ -74,6 +80,12 @@ objects:
     roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: update-roles}
     subjects:
       - {kind: ServiceAccount, name: update-in-other-namespace, namespace: lab}
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: RoleBinding
+    metadata: {name: every-verb-in-lab, namespace: lab}
+    roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: every-verb-on-roles}
+    subjects:
+      - {kind: ServiceAccount, name: every-verb, namespace: lab}
 questions:
   - id: escalate-cluster-wide-update-namespaced
     serviceAccount: {namespace: lab, name: escalate-cluster-update-namespace}
@@ -104,3 +116,22 @@ questions:
     serviceAccount: {namespace: lab, name: update-in-other-namespace}
     rewriteRole: {namespace: lab, name: editable, verb: update}
     kubernetes: denied
+  # update and patch are separate verbs: holding one does not authorize a
+  # request made with the other, whatever escalate allows.
+  - id: update-does-not-allow-a-patch
+    serviceAccount: {namespace: lab, name: escalate-cluster-update-namespace}
+    rewriteRole: {namespace: lab, name: editable, verb: patch}
+    kubernetes: denied
+  - id: patch-does-not-allow-an-update
+    serviceAccount: {namespace: lab, name: escalate-cluster-patch-namespace}
+    rewriteRole: {namespace: lab, name: editable, verb: update}
+    kubernetes: denied
+  # Control: "*" grants both, along with escalate.
+  - id: every-verb-allows-a-patch
+    serviceAccount: {namespace: lab, name: every-verb}
+    rewriteRole: {namespace: lab, name: editable, verb: patch}
+    kubernetes: allowed
+  - id: every-verb-allows-an-update
+    serviceAccount: {namespace: lab, name: every-verb}
+    rewriteRole: {namespace: lab, name: editable, verb: update}
+    kubernetes: allowed

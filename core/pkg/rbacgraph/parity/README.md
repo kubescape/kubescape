@@ -70,7 +70,7 @@ as `cluster_admin_equivalent` has no single request to compare with.
 | Question | Request made as the ServiceAccount | rbacgraph edge |
 | --- | --- | --- |
 | `mintToken` | `POST` `serviceaccounts/<name>/token` | `mint-serviceaccount-token` to that ServiceAccount |
-| `rewriteRole` | dry-run `PUT` (`verb: update`) or `PATCH` (`verb: patch`) of the Role with a rule granting everything | `escalate-verb` whose `Target` covers the Role |
+| `rewriteRole` | dry-run `PUT` (`verb: update`) or `PATCH` (`verb: patch`) of the Role with a rule granting everything | `escalate-verb` whose `Target` covers the Role, and which still exists when the verb the question does not use is removed from the subject's rules |
 | `bindClusterRole` | dry-run `POST` of a ClusterRoleBinding, or of a RoleBinding in `namespace`, binding the ClusterRole to the ServiceAccount itself | `bind-verb` whose `Target` is the ClusterRole and whose `Scope` is `namespace` |
 
 Things to keep in mind when writing one:
@@ -86,8 +86,10 @@ Things to keep in mind when writing one:
   subject to itself. The question would compare an authorization with an
   escalation, so loading the fixture fails. It is not something to record as
   an `intentionalDifference`.
-- rbacgraph does not distinguish `update` from `patch`. Use the `verb` the
-  fixture's grants actually hold.
+- rbacgraph does not distinguish `update` from `patch`: either one, with
+  `escalate`, gives the same edge. Kubernetes does, so the adapter looks for
+  the edge with the verb the question does not use removed from the subject's
+  rules. A subject that holds only `update` is denied a `patch` on both sides.
 - Kubernetes lets anyone bind a role whose permissions they already hold. For
   `bindClusterRole`, give the ClusterRole a permission the subject does not
   have, or the question is not about the `bind` verb.
