@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/armosec/armoapi-go/armotypes"
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	metav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
 	"github.com/kubescape/opa-utils/reporthandling"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
@@ -63,6 +64,18 @@ type HelmFixSuggestion struct {
 	TemplateFile string              // chart-relative, e.g. "templates/deployment.yaml"
 	ValuesPaths  []string            // candidate dotted .Values.* keys referenced by the template; may be empty
 	FixPaths     []armotypes.FixPath // rule-suggested rendered-YAML edits, for the user to translate into values.yaml
+
+	// FidelityProvenance establishes that Resource.Object is a complete, unredacted
+	// representation (e.g. from an unredacted rendered source).
+	FidelityProvenance bool
+	// UnredactedBase provides a verified unredacted base object, when available.
+	UnredactedBase map[string]interface{}
+
+	// HelmValueOptions carries the render inputs (values files, set overrides, release identity)
+	// used to reproduce the scanned resource.
+	HelmValueOptions cautils.HelmValueOptions
+	// AllowedBasePath restricts on-disk chart reading to the allowed base directory boundary.
+	AllowedBasePath string
 }
 
 // UnfixedControl describes a failed (resource, control) tuple for which `kubescape fix`

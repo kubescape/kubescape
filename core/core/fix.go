@@ -60,6 +60,45 @@ func (ks *Kubescape) Fix(fixInfo *metav1.FixInfo) error {
 	// path below, since we do not auto-edit chart templates or values.yaml.
 	handler.PrintHelmSuggestions(helmSuggestions)
 
+	// Emit Kustomize JSON 6902 patches when --output-kustomize is given.
+	// This is a machine-applicable companion to PrintHelmSuggestions: the
+	// generated patches can be applied via:
+	//   kustomize build <dir> | kubectl apply -f -
+	if fixInfo.KustomizeDir != "" && !fixInfo.DryRun {
+		if fixInfo.BasePath != "" {
+			for i := range helmSuggestions {
+				if helmSuggestions[i].AllowedBasePath == "" {
+					helmSuggestions[i].AllowedBasePath = fixInfo.BasePath
+				}
+			}
+		}
+		if !fixInfo.HelmValueOptions.IsEmpty() {
+			for i := range helmSuggestions {
+				if helmSuggestions[i].HelmValueOptions.IsEmpty() {
+					helmSuggestions[i].HelmValueOptions = fixInfo.HelmValueOptions
+				}
+			}
+		}
+		emitRes, err := fixhandler.EmitKustomizePatch(helmSuggestions, fixInfo.KustomizeDir)
+		if err != nil {
+			logger.L().Error("failed to write Kustomize patches", helpers.Error(err))
+			return fmt.Errorf("failed to write Kustomize patches: %w", err)
+		}
+		if emitRes != nil {
+			for _, skipped := range emitRes.SkippedResources {
+				logger.L().Warning(fmt.Sprintf("skipped Kustomize patch generation for %s: %s", skipped.ResourceKey, skipped.Reason))
+			}
+			if len(emitRes.EmittedResources) > 0 {
+				logger.L().Info(fmt.Sprintf(
+					"Kustomize patches written to %q\n  Apply with: kustomize build %s | kubectl apply -f -",
+					fixInfo.KustomizeDir, fixInfo.KustomizeDir,
+				))
+			} else if len(emitRes.SkippedResources) > 0 {
+				logger.L().Info("No Kustomize patches were emitted (all resources were declined or skipped).")
+			}
+		}
+	}
+
 	if len(resourcesToFix) == 0 {
 		logger.L().Info(noResourcesToFix)
 		// Even with nothing to auto-fix, surface controls that still need manual remediation.

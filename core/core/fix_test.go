@@ -14,6 +14,7 @@ import (
 
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/go-logger"
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	metav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
 	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
 	"github.com/kubescape/opa-utils/reporthandling"
@@ -828,4 +829,322 @@ func TestFix_MultiInputScanOutsideGit(t *testing.T) {
 			assert.Contains(t, fileContent(t, filepath.Join(dir, filepath.FromSlash(input))), "privileged: true", "the source must not be modified")
 		}
 	})
+}
+
+func buildFixableHelmReport(t *testing.T, dir string) string {
+	t.Helper()
+
+	chartYaml := "apiVersion: v2\nname: demo-chart\nversion: 0.1.0\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "Chart.yaml"), []byte(chartYaml), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "values.yaml"), []byte("image:\n  tag: latest\n"), 0600))
+	templatesDir := filepath.Join(dir, "templates")
+	require.NoError(t, os.MkdirAll(templatesDir, 0750))
+	deploymentYaml := `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo-helm
+  namespace: default
+spec:
+  template:
+    spec:
+      containers:
+      - name: demo
+        securityContext:
+          privileged: true
+`
+	require.NoError(t, os.WriteFile(filepath.Join(templatesDir, "deployment.yaml"), []byte(deploymentYaml), 0600))
+
+	helmObj := map[string]any{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata":   map[string]any{"name": "demo-helm", "namespace": "default"},
+		"spec": map[string]any{
+			"template": map[string]any{
+				"spec": map[string]any{
+					"containers": []any{
+						map[string]any{
+							"name": "demo",
+							"securityContext": map[string]any{
+								"privileged": true,
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	helmRes := reporthandling.Resource{
+		Object: helmObj,
+		Source: &reporthandling.Source{
+			FileType:         reporthandling.SourceTypeHelmChart,
+			HelmPath:         dir,
+			HelmChartName:    "demo-chart",
+			HelmTemplateFile: "templates/deployment.yaml",
+			HelmValuesPaths:  []string{"image.tag"},
+		},
+	}
+	helmRes.ResourceID = helmRes.GetID()
+
+	report := &reporthandlingv2.PostureReport{
+		Metadata: reporthandlingv2.Metadata{
+			ScanMetadata: reporthandlingv2.ScanMetadata{ScanningTarget: reporthandlingv2.Directory},
+			ContextMetadata: reporthandlingv2.ContextMetadata{
+				DirectoryContextMetadata: &reporthandlingv2.DirectoryContextMetadata{BasePath: dir},
+			},
+		},
+		Resources: []reporthandling.Resource{helmRes},
+		Results: []resourcesresults.Result{
+			{
+				ResourceID: helmRes.ResourceID,
+				AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+					{
+						ControlID: "C-0057",
+						Name:      "Privileged container",
+						Status:    apis.StatusInfo{InnerStatus: apis.StatusFailed},
+						ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{
+							{
+								Name:   "rule-privileged",
+								Status: apis.StatusFailed,
+								Paths: []armotypes.PosturePaths{
+									{FixPath: armotypes.FixPath{Path: "spec.template.spec.containers[0].securityContext.privileged", Value: "false"}},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	return writeReportFile(t, dir, report)
+}
+
+func TestFix_DryRunOutputKustomizeWritesNothing(t *testing.T) {
+	dir := t.TempDir()
+	reportPath := buildFixableHelmReport(t, dir)
+	kustDir := filepath.Join(t.TempDir(), "kust-output")
+
+	ks := &Kubescape{Ctx: context.Background()}
+	err := ks.Fix(&metav1.FixInfo{
+		ReportFile:   reportPath,
+		KustomizeDir: kustDir,
+		DryRun:       true,
+		HelmValueOptions: cautils.HelmValueOptions{
+			ValueFiles: []string{filepath.Join(dir, "values.yaml")},
+		},
+	})
+	assert.NoError(t, err)
+
+	assert.NoDirExists(t, kustDir, "DryRun must not create KustomizeDir output")
+}
+
+func TestFix_OutputKustomizeErrorPropagated(t *testing.T) {
+	dir := t.TempDir()
+	reportPath := buildFixableHelmReport(t, dir)
+
+	// An invalid destination (e.g. creating a directory inside a regular file) will fail MkdirAll
+	filePath := filepath.Join(t.TempDir(), "a-regular-file")
+	require.NoError(t, os.WriteFile(filePath, []byte("data"), 0600))
+	invalidDir := filepath.Join(filePath, "cannot-create-dir-here")
+
+	ks := &Kubescape{Ctx: context.Background()}
+	err := ks.Fix(&metav1.FixInfo{
+		ReportFile:   reportPath,
+		KustomizeDir: invalidDir,
+		HelmValueOptions: cautils.HelmValueOptions{
+			ValueFiles: []string{filepath.Join(dir, "values.yaml")},
+		},
+	})
+	assert.Error(t, err, "Fix must return an error when Kustomize patch emission fails")
+}
+
+func TestFix_OutputKustomizeSuccess(t *testing.T) {
+	dir := t.TempDir()
+	reportPath := buildFixableHelmReport(t, dir)
+	kustDir := filepath.Join(t.TempDir(), "kust-output")
+
+	ks := &Kubescape{Ctx: context.Background()}
+	err := ks.Fix(&metav1.FixInfo{
+		ReportFile:   reportPath,
+		KustomizeDir: kustDir,
+		HelmValueOptions: cautils.HelmValueOptions{
+			ValueFiles: []string{filepath.Join(dir, "values.yaml")},
+		},
+	})
+	require.NoError(t, err)
+
+	assert.DirExists(t, kustDir)
+	assert.FileExists(t, filepath.Join(kustDir, "kustomization.yaml"))
+	assert.FileExists(t, filepath.Join(kustDir, "base.yaml"))
+}
+
+func TestFix_OutputKustomizeDoesNotAdvertiseStaleOverlay(t *testing.T) {
+	// P2 blocker: When generation is declined because fidelity cannot be proven
+	// or placeholders are present, fix must not advertise an existing non-empty
+	// directory as current or print apply instructions.
+	dir := t.TempDir()
+	// Build report where resource contains placeholder "XXXXXX" and chart cannot be loaded
+	redactedObj := map[string]any{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata":   map[string]any{"name": "demo-helm", "namespace": "default"},
+		"spec": map[string]any{
+			"template": map[string]any{
+				"spec": map[string]any{
+					"containers": []any{
+						map[string]any{
+							"name":  "demo",
+							"image": "XXXXXX",
+						},
+					},
+				},
+			},
+		},
+	}
+	helmRes := reporthandling.Resource{
+		Object: redactedObj,
+		Source: &reporthandling.Source{
+			FileType: reporthandling.SourceTypeHelmChart,
+			HelmPath: filepath.Join(dir, "nonexistent-chart"),
+		},
+	}
+	helmRes.ResourceID = helmRes.GetID()
+	report := &reporthandlingv2.PostureReport{
+		Metadata: reporthandlingv2.Metadata{
+			ScanMetadata: reporthandlingv2.ScanMetadata{ScanningTarget: reporthandlingv2.Directory},
+			ContextMetadata: reporthandlingv2.ContextMetadata{
+				DirectoryContextMetadata: &reporthandlingv2.DirectoryContextMetadata{BasePath: dir},
+			},
+		},
+		Resources: []reporthandling.Resource{helmRes},
+		Results: []resourcesresults.Result{
+			{
+				ResourceID: helmRes.ResourceID,
+				AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+					{
+						ControlID: "C-0057",
+						Name:      "Privileged container",
+						Status:    apis.StatusInfo{InnerStatus: apis.StatusFailed},
+						ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{
+							{
+								Name:   "rule-privileged",
+								Status: apis.StatusFailed,
+								Paths: []armotypes.PosturePaths{
+									{FixPath: armotypes.FixPath{Path: "spec.template.spec.containers[0].securityContext.privileged", Value: "false"}},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	reportPath := writeReportFile(t, dir, report)
+
+	kustDir := filepath.Join(t.TempDir(), "stale-overlay")
+	require.NoError(t, os.MkdirAll(kustDir, 0700))
+	staleContent := "resources:\n  - base.yaml\n"
+	require.NoError(t, os.WriteFile(filepath.Join(kustDir, "kustomization.yaml"), []byte(staleContent), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(kustDir, "base.yaml"), []byte("apiVersion: apps/v1\nkind: Deployment\n"), 0600))
+
+	readLog := captureLoggerOutput(t)
+
+	ks := &Kubescape{Ctx: context.Background()}
+	err := ks.Fix(&metav1.FixInfo{ReportFile: reportPath, KustomizeDir: kustDir})
+	require.NoError(t, err)
+
+	logs := readLog()
+	assert.Contains(t, logs, "skipped Kustomize patch generation")
+	assert.Contains(t, logs, "No Kustomize patches were emitted")
+	assert.NotContains(t, logs, "Apply with: kustomize build")
+}
+
+// TestRereview4034HelmReadHonorsBasePath verifies that Kubescape.Fix enforces --base-path
+// on report-controlled Source.HelmPath, refusing to read or copy an outside chart's content
+// into base.yaml even when the scan directory claim is inside the allowed root.
+func TestRereview4034HelmReadHonorsBasePath(t *testing.T) {
+	allowedRoot := t.TempDir()
+	outsideRoot := t.TempDir()
+
+	// External chart outside allowed root with a synthetic sentinel value
+	require.NoError(t, os.WriteFile(filepath.Join(outsideRoot, "Chart.yaml"), []byte("apiVersion: v2\nname: sentinelchart\nversion: 0.1.0\n"), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(outsideRoot, "values.yaml"), []byte("\n"), 0600))
+	require.NoError(t, os.MkdirAll(filepath.Join(outsideRoot, "templates"), 0700))
+	require.NoError(t, os.WriteFile(filepath.Join(outsideRoot, "templates", "secret.yaml"), []byte(`apiVersion: v1
+kind: Secret
+metadata:
+  name: outside-secret
+stringData:
+  SENTINEL: outside-sentinel-value-xyz
+`), 0600))
+
+	// Scanned report inside allowed root claiming Source.HelmPath is in outsideRoot
+	helmRes := reporthandling.Resource{
+		Object: map[string]any{
+			"apiVersion": "v1",
+			"kind":       "Secret",
+			"metadata":   map[string]any{"name": "outside-secret"},
+			"stringData": map[string]any{"SENTINEL": "outside-sentinel-value-xyz"},
+		},
+		Source: &reporthandling.Source{
+			FileType: reporthandling.SourceTypeHelmChart,
+			HelmPath: outsideRoot,
+		},
+	}
+	helmRes.ResourceID = helmRes.GetID()
+
+	report := &reporthandlingv2.PostureReport{
+		Metadata: reporthandlingv2.Metadata{
+			ScanMetadata: reporthandlingv2.ScanMetadata{ScanningTarget: reporthandlingv2.Directory},
+			ContextMetadata: reporthandlingv2.ContextMetadata{
+				DirectoryContextMetadata: &reporthandlingv2.DirectoryContextMetadata{BasePath: allowedRoot},
+			},
+		},
+		Resources: []reporthandling.Resource{helmRes},
+		Results: []resourcesresults.Result{
+			{
+				ResourceID: helmRes.ResourceID,
+				AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+					{
+						ControlID: "C-0001",
+						Status:    apis.StatusInfo{InnerStatus: apis.StatusFailed},
+						ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{
+							{
+								Name:   "rule-1",
+								Status: apis.StatusFailed,
+								Paths: []armotypes.PosturePaths{
+									{FixPath: armotypes.FixPath{Path: "metadata.labels.remediated", Value: "true"}},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	reportPath := writeReportFile(t, allowedRoot, report)
+
+	kustDir := filepath.Join(t.TempDir(), "kust-output")
+	readLog := captureLoggerOutput(t)
+
+	ks := &Kubescape{Ctx: context.Background()}
+	err := ks.Fix(&metav1.FixInfo{
+		ReportFile:   reportPath,
+		KustomizeDir: kustDir,
+		BasePath:     allowedRoot,
+	})
+	require.NoError(t, err)
+
+	logs := readLog()
+	assert.Contains(t, logs, "skipped Kustomize patch generation")
+	assert.Contains(t, logs, "outside allowed base path")
+	assert.Contains(t, logs, "No Kustomize patches were emitted")
+	assert.NotContains(t, logs, "Apply with: kustomize build")
+
+	// Ensure outside sentinel was not copied into base.yaml
+	basePath := filepath.Join(kustDir, "base.yaml")
+	if data, err := os.ReadFile(basePath); err == nil {
+		assert.NotContains(t, string(data), "outside-sentinel-value-xyz", "outside chart content must not be copied into base.yaml")
+	}
 }
