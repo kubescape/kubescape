@@ -317,7 +317,10 @@ func csvControlPaths(result resourcesresults.Result, controlID, kind string, sho
 	return "", ""
 }
 
-// appendCSVFailedPath records path when it is non-empty and not already present.
+// appendCSVFailedPath appends path to failed when path is non-empty and not
+// already recorded in seen. seen is updated so a later DeletePath, ReviewPath,
+// or FailedPath with the same text is emitted once. The returned slice is the
+// failed paths collected so far.
 func appendCSVFailedPath(failed []string, seen map[string]struct{}, path string) []string {
 	if path == "" {
 		return failed

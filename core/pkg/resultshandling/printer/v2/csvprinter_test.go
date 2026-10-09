@@ -444,6 +444,9 @@ func TestActionPrint_Csv_NilSession(t *testing.T) {
 	cp.ActionPrint(context.TODO(), nil, nil)
 }
 
+// TestCsvControlPaths verifies the Failed Paths and Fix Paths cells. It covers
+// delete paths, review paths, legacy failed paths, duplicate locations, and
+// fix-value redaction.
 func TestCsvControlPaths(t *testing.T) {
 	makeResult := func(controlID string, rules []resourcesresults.ResourceAssociatedRule) resourcesresults.Result {
 		return resourcesresults.Result{
