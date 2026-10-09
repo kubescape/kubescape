@@ -2,6 +2,7 @@ package exposure
 
 import (
 	"fmt"
+	"slices"
 
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
@@ -89,18 +90,15 @@ func (idx *Index) ServiceExposure(ref ServiceRef) (paths []ExposurePath, unclear
 	}
 
 	for _, route := range idx.routesByNS[ref.Namespace] {
-		if !idx.routeAttachesToAGateway(route) {
+		hosts := idx.attachedRouteHostnames(route)
+		if len(hosts) == 0 {
 			continue
 		}
 		if !routeReferencesService(route, ref) {
 			continue
 		}
 		source := fmt.Sprintf("%s/%s", route.Namespace, route.Name)
-		if len(route.Hostnames) == 0 {
-			paths = append(paths, ExposurePath{Kind: routeExposureKind(route.Kind), Source: source})
-			continue
-		}
-		for _, host := range route.Hostnames {
+		for _, host := range hosts {
 			paths = append(paths, ExposurePath{Kind: routeExposureKind(route.Kind), Source: source, Host: host})
 		}
 	}
@@ -218,8 +216,8 @@ func routeReferencesService(route *gatewayRoute, ref ServiceRef) bool {
 // listener with that name -- no other listener of the Gateway may admit
 // the route, and a sectionName naming no collected listener contributes
 // nothing. Otherwise every listener is evaluated. A listener must admit
-// the route on BOTH axes: its AllowedRoutes namespaces policy and its
-// AllowedRoutes kinds policy. A listener whose namespace admission cannot
+// the route's hostname as well as its AllowedRoutes namespaces and kinds
+// policies. A listener whose namespace admission cannot
 // be confirmed to exclude the route (a Selector needing namespace labels
 // this Index was not given) is conservatively treated as admitting it:
 // this package errs toward reporting a possible exposure rather than
@@ -231,6 +229,29 @@ func routeReferencesService(route *gatewayRoute, ref ServiceRef) bool {
 // not exist -- so it gets the same conservative treatment rather than
 // being silently treated as a non-match.
 func (idx *Index) routeAttachesToAGateway(route *gatewayRoute) bool {
+	return len(idx.attachedRouteHostnames(route)) > 0
+}
+
+// attachedRouteHostnames returns only the intersections admitted by a
+// listener. An empty hostname denotes unrestricted host matching; a nil
+// slice means no collected listener can accept the route. Missing Gateway
+// data retains the existing conservative possible-exposure behavior.
+func (idx *Index) attachedRouteHostnames(route *gatewayRoute) []string {
+	var hosts []string
+	add := func(candidates []string) {
+		for _, host := range candidates {
+			if host == "" {
+				hosts = []string{""}
+				return
+			}
+			if slices.Contains(hosts, "") {
+				continue
+			}
+			if !slices.Contains(hosts, host) {
+				hosts = append(hosts, host)
+			}
+		}
+	}
 	for _, ref := range route.ParentRefs {
 		if !isGatewayParentRef(ref) {
 			continue
@@ -241,7 +262,8 @@ func (idx *Index) routeAttachesToAGateway(route *gatewayRoute) bool {
 		}
 		gw, ok := idx.gateways[ServiceRef{Namespace: ns, Name: ref.Name}]
 		if !ok {
-			return true
+			add(listenerRouteHostnames("", route.Hostnames))
+			continue
 		}
 		for _, l := range gw.Listeners {
 			if ref.SectionName != nil && l.Name != *ref.SectionName {
@@ -252,11 +274,11 @@ func (idx *Index) routeAttachesToAGateway(route *gatewayRoute) bool {
 			}
 			admits, determinable := idx.gatewayAdmitsRouteNamespace(l, route.Namespace, gw.Namespace)
 			if admits || !determinable {
-				return true
+				add(listenerRouteHostnames(l.Hostname, route.Hostnames))
 			}
 		}
 	}
-	return false
+	return hosts
 }
 
 // listenerAdmitsRouteKind reports whether the listener's allowedRoutes

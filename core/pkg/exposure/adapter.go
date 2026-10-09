@@ -130,6 +130,7 @@ type gatewayAPIWireShape struct {
 		// Gateway fields.
 		Listeners []struct {
 			Name          string `json:"name"`
+			Hostname      string `json:"hostname,omitempty"`
 			AllowedRoutes *struct {
 				Namespaces *struct {
 					From     *string              `json:"from,omitempty"`
@@ -186,7 +187,7 @@ func decodeGateway(obj map[string]any) (gateway, error) {
 
 	g := gateway{Namespace: wire.Metadata.Namespace, Name: wire.Metadata.Name}
 	for _, l := range wire.Spec.Listeners {
-		out := listener{Name: l.Name}
+		out := listener{Name: l.Name, Hostname: l.Hostname}
 		if l.AllowedRoutes != nil {
 			ar := &allowedRoutes{}
 			if l.AllowedRoutes.Namespaces != nil {

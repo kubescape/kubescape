@@ -35,7 +35,7 @@ const (
 	// ExposureHTTPRoute means a Gateway API HTTPRoute names this Service as
 	// a backend, and at least one of its parentRefs names a Gateway object
 	// this Index was given whose listener admits the route (per
-	// AllowedRoutes -- see Index.gatewayAdmitsRouteNamespace). A listener
+	// AllowedRoutes and hostname intersection). A listener
 	// whose admission can't be confirmed one way or the other is
 	// conservatively treated as admitting it.
 	ExposureHTTPRoute
@@ -83,10 +83,10 @@ type ExposurePath struct {
 	// Service itself for LoadBalancer/NodePort.
 	Source string
 	// Host is the hostname traffic must arrive with to reach this path, per
-	// the responsible Ingress rule or route hostname. Empty means any
+	// the responsible Ingress rule or route/listener hostname intersection. Empty means any
 	// host (an Ingress rule/defaultBackend with no host restriction, a
-	// LoadBalancer/NodePort Service, or a route with no hostnames
-	// declared).
+	// LoadBalancer/NodePort Service, or a route/listener pair with no
+	// hostnames declared).
 	Host string
 }
 
@@ -189,6 +189,7 @@ type gateway struct {
 
 type listener struct {
 	Name          string
+	Hostname      string
 	AllowedRoutes *allowedRoutes
 }
 
