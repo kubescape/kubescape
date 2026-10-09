@@ -1,6 +1,10 @@
 package rbacgraph
 
-import rbacv1 "k8s.io/api/rbac/v1"
+import (
+	"slices"
+
+	rbacv1 "k8s.io/api/rbac/v1"
+)
 
 // ruleGrants reports whether rule grants verb on the given apiGroup and
 // resource (a "*" entry in any of rule's Verbs/APIGroups/Resources matches
@@ -29,6 +33,13 @@ func namedResources(rule rbacv1.PolicyRule) (names []string, restricted bool) {
 		return nil, false
 	}
 	return rule.ResourceNames, true
+}
+
+// resourceNameMatches follows the RBAC authorizer's literal name comparison.
+// Unlike verbs, resources and API groups, resourceNames has no wildcard:
+// ["*"] grants access only to an object actually named "*".
+func resourceNameMatches(names []string, name string) bool {
+	return slices.Contains(names, name)
 }
 
 // ruleGrantsUnnamedCreate reports whether rule grants an unrestricted

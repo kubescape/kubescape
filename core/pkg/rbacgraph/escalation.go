@@ -81,7 +81,7 @@ func (idx *Index) impersonateEdges(rules []ScopedRule) []EscalationEdge {
 			}
 			for _, ns := range idx.targetNamespaces(sr.Namespace) {
 				for _, saName := range idx.serviceAccountsByNS[ns] {
-					if restricted && !containsOrWildcard(names, saName) {
+					if restricted && !resourceNameMatches(names, saName) {
 						continue
 					}
 					edges = append(edges, EscalationEdge{
@@ -382,7 +382,7 @@ func (idx *Index) mintServiceAccountTokenEdges(rules []ScopedRule) []EscalationE
 		names, restricted := namedResources(sr.Rule)
 		for _, ns := range idx.targetNamespaces(sr.Namespace) {
 			for _, saName := range idx.serviceAccountsByNS[ns] {
-				if restricted && !containsOrWildcard(names, saName) {
+				if restricted && !resourceNameMatches(names, saName) {
 					continue
 				}
 				edges = append(edges, EscalationEdge{
@@ -447,7 +447,7 @@ func (idx *Index) matchingClusterRoles(names []string, restricted bool) []*rbacv
 	var out []*rbacv1.ClusterRole
 	for _, name := range slices.Sorted(maps.Keys(idx.clusterRoles)) {
 		cr := idx.clusterRoles[name]
-		if restricted && !containsOrWildcard(names, cr.Name) {
+		if restricted && !resourceNameMatches(names, cr.Name) {
 			continue
 		}
 		out = append(out, cr)
@@ -462,7 +462,7 @@ func (idx *Index) matchingRoles(namespace string, names []string, restricted boo
 		if r.Namespace != namespace {
 			continue
 		}
-		if restricted && !containsOrWildcard(names, r.Name) {
+		if restricted && !resourceNameMatches(names, r.Name) {
 			continue
 		}
 		out = append(out, r)
@@ -477,7 +477,7 @@ func (idx *Index) matchingRolesAnyNamespace(names []string, restricted bool) []*
 	var out []*rbacv1.Role
 	for _, key := range slices.Sorted(maps.Keys(idx.roles)) {
 		r := idx.roles[key]
-		if restricted && !containsOrWildcard(names, r.Name) {
+		if restricted && !resourceNameMatches(names, r.Name) {
 			continue
 		}
 		out = append(out, r)
