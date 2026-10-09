@@ -1,6 +1,7 @@
 package ghworkflows
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -76,7 +77,131 @@ type securityInsights struct {
 		URL      string                    `yaml:"url"`
 		Status   string                    `yaml:"status"`
 		CoreTeam []securityInsightsContact `yaml:"core-team"`
+		Security struct {
+			Assessments struct {
+				Self securityInsightsAssessment `yaml:"self"`
+			} `yaml:"assessments"`
+		} `yaml:"security"`
 	} `yaml:"repository"`
+}
+
+type securityInsightsAssessment struct {
+	Evidence string `yaml:"evidence"`
+	Date     string `yaml:"date"`
+	Comment  string `yaml:"comment"`
+}
+
+const (
+	securityAssessmentPath = "docs/security/self-assessment.md"
+	securityAssessmentURL  = "https://github.com/kubescape/kubescape/blob/master/" + securityAssessmentPath
+	securityAssessmentLink = "[Security Self-Assessment](security/self-assessment.md)"
+)
+
+// validateSecurityAssessment checks that the Security Insights evidence points
+// to the intended assessment and that the document is present and indexed.
+func validateSecurityAssessment(root string, assessment securityInsightsAssessment) error {
+	if assessment.Evidence != securityAssessmentURL {
+		return fmt.Errorf("repository.security.assessments.self.evidence must be %q, got %q", securityAssessmentURL, assessment.Evidence)
+	}
+
+	assessmentPath := filepath.Join(root, filepath.FromSlash(securityAssessmentPath))
+	content, err := os.ReadFile(assessmentPath)
+	if err != nil {
+		return fmt.Errorf("cannot read %s: %w", securityAssessmentPath, err)
+	}
+	if strings.TrimSpace(string(content)) == "" {
+		return fmt.Errorf("%s must not be empty", securityAssessmentPath)
+	}
+
+	indexPath := filepath.Join(root, "docs", "README.md")
+	index, err := os.ReadFile(indexPath)
+	if err != nil {
+		return fmt.Errorf("cannot read docs/README.md: %w", err)
+	}
+	if !strings.Contains(string(index), securityAssessmentLink) {
+		return fmt.Errorf("docs/README.md must contain %s", securityAssessmentLink)
+	}
+	return nil
+}
+
+func securityAssessmentPathIsWatched(patterns []string, path string) bool {
+	for _, pattern := range patterns {
+		if pathCoveredBy(pattern, filepath.ToSlash(path)) {
+			return true
+		}
+	}
+	return false
+}
+
+func writeSecurityAssessmentFixture(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "docs", "security"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(root, filepath.FromSlash(securityAssessmentPath)), []byte("# Security assessment\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "docs", "README.md"), []byte(securityAssessmentLink+"\n"), 0o600))
+	return root
+}
+
+func TestSecurityAssessmentEvidenceIsValid(t *testing.T) {
+	insights := loadSecurityInsights(t)
+	require.NoError(t, validateSecurityAssessment(repoRoot(t), insights.Repository.Security.Assessments.Self))
+}
+
+func TestValidateSecurityAssessmentRejectsRegressions(t *testing.T) {
+	tests := []struct {
+		name       string
+		evidence   string
+		assessment string
+		index      string
+		wantError  string
+	}{
+		{name: "incorrect evidence", evidence: "https://example.com/wrong.md", assessment: "# Assessment", index: securityAssessmentLink, wantError: "evidence must be"},
+		{name: "missing file", evidence: securityAssessmentURL, assessment: "missing", index: securityAssessmentLink, wantError: "cannot read " + securityAssessmentPath},
+		{name: "empty file", evidence: securityAssessmentURL, assessment: "", index: securityAssessmentLink, wantError: securityAssessmentPath + " must not be empty"},
+		{name: "whitespace-only file", evidence: securityAssessmentURL, assessment: " \n\t", index: securityAssessmentLink, wantError: securityAssessmentPath + " must not be empty"},
+		{name: "missing index link", evidence: securityAssessmentURL, assessment: "# Assessment", index: "# Documentation", wantError: "docs/README.md must contain"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := writeSecurityAssessmentFixture(t)
+			assessmentPath := filepath.Join(root, filepath.FromSlash(securityAssessmentPath))
+			if tt.assessment == "missing" {
+				require.NoError(t, os.Remove(assessmentPath))
+			} else {
+				require.NoError(t, os.WriteFile(assessmentPath, []byte(tt.assessment), 0o600))
+			}
+			require.NoError(t, os.WriteFile(filepath.Join(root, "docs", "README.md"), []byte(tt.index), 0o600))
+
+			err := validateSecurityAssessment(root, securityInsightsAssessment{Evidence: tt.evidence})
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.wantError)
+		})
+	}
+}
+
+func TestRepoHygieneWatchesSecurityAssessmentDocs(t *testing.T) {
+	var workflow hygieneWorkflow
+	loadWorkflow(t, hygieneWorkflowName, &workflow)
+	paths := workflow.On.PullRequest.Paths
+
+	for _, path := range []string{"docs/README.md", securityAssessmentPath} {
+		assert.Truef(t, securityAssessmentPathIsWatched(paths, path),
+			"%s must trigger %s so docs-only changes run this validation", path, hygieneWorkflowName)
+	}
+
+	for _, removed := range []string{"docs/README.md", securityAssessmentPath} {
+		t.Run("detects removal of "+removed, func(t *testing.T) {
+			filtered := make([]string, 0, len(paths))
+			for _, path := range paths {
+				if path != removed {
+					filtered = append(filtered, path)
+				}
+			}
+			assert.Falsef(t, securityAssessmentPathIsWatched(filtered, removed),
+				"removing %s from the workflow paths must be detected", removed)
+		})
+	}
 }
 
 func securityInsightsPath(t *testing.T) string {

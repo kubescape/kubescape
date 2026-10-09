@@ -36,6 +36,8 @@ on:
     # documentation drifted into a different one.
     paths:
       - ".github/**"
+      - "docs/README.md"
+      - "docs/security/self-assessment.md"
       - "internal/ghworkflows/**"
       - "security-insights.yml"
       - "SECURITY-INSIGHTS.yml"

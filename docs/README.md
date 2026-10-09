@@ -41,6 +41,7 @@ Welcome to the Kubescape documentation. This directory contains detailed guides 
 
 | Document | Description |
 |----------|-------------|
+| [Security Self-Assessment](security/self-assessment.md) | Evidence-backed security assessment; currently incomplete pending maintainer review |
 | [Environment Dependencies Policy](environment-dependencies-policy.md) | Policy on external dependencies |
 | [Roadmap](roadmap.md) | Project roadmap (see centralized governance repo) |
 
@@ -51,6 +52,7 @@ Welcome to the Kubescape documentation. This directory contains detailed guides 
 | [img/](img/) | Images and diagrams used in documentation |
 | [proposals/](proposals/) | Design proposals and RFCs |
 | [providers/](providers/) | Provider-specific documentation |
+| [security/](security/) | Security assessment and related documentation |
 
 ## 🔗 External Documentation
 
@@ -87,6 +89,7 @@ We welcome contributions to improve our documentation! Please see the [Contribut
 | [ics-ot-workloads.md](ics-ot-workloads.md) | ✅ Current | Scanning ICS/OT workloads on Kubernetes |
 | [cel-engine.md](cel-engine.md) | ✅ Current | CEL rule engine: offline VAP evaluation and scan/admission equivalence |
 | [image-scanning.md](image-scanning.md) | ✅ Current | Scanning container images for vulnerabilities |
+| [security/self-assessment.md](security/self-assessment.md) | 🟡 Incomplete | Security self-assessment pending maintainer review |
 
 ---
 

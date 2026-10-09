@@ -85,9 +85,8 @@ repository:
   security:
     assessments:
       self:
-        evidence: https://github.com/cncf/toc/blob/main/projects/kubescape/security-assessment/self-assessment.md
-        date: '2024-12-10'
-        comment: CNCF TAG Security self-assessment.
+        evidence: https://github.com/kubescape/kubescape/blob/master/docs/security/self-assessment.md
+        comment: Evidence-backed draft based on the 2024 CNCF assessment; incomplete pending maintainer review.
     tools:
       - name: Dependabot
         type: SCA
