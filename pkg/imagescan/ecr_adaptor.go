@@ -33,7 +33,10 @@ func ecrRegistryAccount(registry string) (string, error) {
 	validDualStack := len(parts) == 5 &&
 		(parts[1] == "dkr-ecr" || parts[1] == "dkr-ecr-fips") &&
 		parts[2] != "" && parts[3] == "on" && parts[4] == "aws"
-	if !validStandard && !validDualStack {
+	validChinaDualStack := len(parts) == 7 && parts[1] == "dkr-ecr" &&
+		parts[2] != "" && parts[3] == "on" && parts[4] == "amazonwebservices" &&
+		parts[5] == "com" && parts[6] == "cn"
+	if !validStandard && !validDualStack && !validChinaDualStack {
 		return "", fmt.Errorf("invalid private ECR registry %q", registry)
 	}
 	account := parts[0]

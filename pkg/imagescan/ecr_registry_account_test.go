@@ -25,6 +25,8 @@ func TestECRRegistryAccount(t *testing.T) {
 		{"123456789012.dkr.ecr-fips.us-east-1.amazonaws.com", "123456789012"},
 		{"123456789012.dkr-ecr.us-east-1.on.aws", "123456789012"},
 		{"123456789012.dkr-ecr-fips.us-east-1.on.aws", "123456789012"},
+		{"123456789012.dkr-ecr.cn-north-1.on.amazonwebservices.com.cn", "123456789012"},
+		{"123456789012.dkr-ecr.cn-northwest-1.on.amazonwebservices.com.cn", "123456789012"},
 	} {
 		t.Run(tt.registry, func(t *testing.T) {
 			account, err := ecrRegistryAccount(tt.registry)
@@ -60,6 +62,15 @@ func TestECRRegistryAccountRejectsAmbiguousOwner(t *testing.T) {
 		"123456789012.dkr-ecr-fips.us-east-1.on.example",
 		"https://123456789012.dkr-ecr.us-east-1.on.aws",
 		"123456789012.dkr-ecr.us-east-1.on.aws/repo",
+		"12345.dkr-ecr.cn-north-1.on.amazonwebservices.com.cn",
+		"12345678901x.dkr-ecr.cn-northwest-1.on.amazonwebservices.com.cn",
+		"1234567890123.dkr-ecr.cn-north-1.on.amazonwebservices.com.cn",
+		"123456789012.dkr-ecr..on.amazonwebservices.com.cn",
+		"123456789012.dkr-other.cn-north-1.on.amazonwebservices.com.cn",
+		"123456789012.dkr-ecr.cn-north-1.on.amazonwebservices.com.cn.evil",
+		"123456789012.dkr-ecr.cn-north-1.on.amazonwebservices.com",
+		"https://123456789012.dkr-ecr.cn-north-1.on.amazonwebservices.com.cn",
+		"123456789012.dkr-ecr.cn-north-1.on.amazonwebservices.com.cn/repo",
 	} {
 		t.Run(registry, func(t *testing.T) {
 			account, err := ecrRegistryAccount(registry)
@@ -365,6 +376,8 @@ func TestECRAccountSelection_DualStackScanMethodsAndPagination(t *testing.T) {
 	for _, registry := range []string{
 		"123456789012.dkr-ecr.us-east-1.on.aws",
 		"123456789012.dkr-ecr-fips.us-east-1.on.aws",
+		"123456789012.dkr-ecr.cn-north-1.on.amazonwebservices.com.cn",
+		"123456789012.dkr-ecr.cn-northwest-1.on.amazonwebservices.com.cn",
 	} {
 		t.Run(registry, func(t *testing.T) {
 			image := ContainerImageIdentifier{Registry: registry, Repository: "repo", Tag: "release"}
