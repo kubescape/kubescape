@@ -462,7 +462,7 @@ func TestAWSECRAdaptor_Pagination(t *testing.T) {
 	}
 
 	images := []ContainerImageIdentifier{
-		{Registry: "12345.dkr.ecr.us-east-1.amazonaws.com", Repository: "test-repo", Tag: "latest"},
+		{Registry: "123456789012.dkr.ecr.us-east-1.amazonaws.com", Repository: "test-repo", Tag: "latest"},
 	}
 
 	reports, err := adaptor.GetImagesVulnerabilities(context.Background(), images)
@@ -595,7 +595,7 @@ func TestAWSECRAdaptorPaginationStopsOnImmediateTokenRepeat(t *testing.T) {
 	}
 
 	reports, err := adaptor.GetImagesVulnerabilities(context.Background(), []ContainerImageIdentifier{
-		{Registry: "12345.dkr.ecr.us-east-1.amazonaws.com", Repository: "stalled-repo", Tag: "latest"},
+		{Registry: "123456789012.dkr.ecr.us-east-1.amazonaws.com", Repository: "stalled-repo", Tag: "latest"},
 	})
 
 	require.ErrorContains(t, err, `repeated continuation token "stalled"`)
@@ -622,7 +622,7 @@ func TestAWSECRAdaptorPaginationStopsOnCursorCycle(t *testing.T) {
 	}
 
 	reports, err := adaptor.GetImagesVulnerabilities(context.Background(), []ContainerImageIdentifier{
-		{Registry: "12345.dkr.ecr.us-east-1.amazonaws.com", Repository: "cyclic-repo", Hash: "sha256:123"},
+		{Registry: "123456789012.dkr.ecr.us-east-1.amazonaws.com", Repository: "cyclic-repo", Hash: "sha256:123"},
 	})
 
 	require.ErrorContains(t, err, `repeated continuation token "cursor-a"`)
@@ -644,7 +644,7 @@ func TestAWSECRAdaptorPaginationRejectsEmptyToken(t *testing.T) {
 	}
 
 	reports, err := adaptor.GetImagesVulnerabilities(context.Background(), []ContainerImageIdentifier{
-		{Registry: "12345.dkr.ecr.us-east-1.amazonaws.com", Repository: "empty-token", Tag: "latest"},
+		{Registry: "123456789012.dkr.ecr.us-east-1.amazonaws.com", Repository: "empty-token", Tag: "latest"},
 	})
 
 	require.ErrorContains(t, err, "empty continuation token")
@@ -674,8 +674,8 @@ func TestAWSECRAdaptorPaginationKeepsOtherImageResults(t *testing.T) {
 	}
 
 	reports, err := adaptor.GetImagesVulnerabilities(context.Background(), []ContainerImageIdentifier{
-		{Registry: "12345.dkr.ecr.us-east-1.amazonaws.com", Repository: "healthy", Tag: "latest"},
-		{Registry: "12345.dkr.ecr.us-east-1.amazonaws.com", Repository: "stalled", Tag: "latest"},
+		{Registry: "123456789012.dkr.ecr.us-east-1.amazonaws.com", Repository: "healthy", Tag: "latest"},
+		{Registry: "123456789012.dkr.ecr.us-east-1.amazonaws.com", Repository: "stalled", Tag: "latest"},
 	})
 
 	require.ErrorContains(t, err, "repeated continuation token")
@@ -708,7 +708,7 @@ func TestAWSECRAdaptorPaginationUsesEveryDistinctTokenOnce(t *testing.T) {
 	}
 
 	reports, err := adaptor.GetImagesVulnerabilities(context.Background(), []ContainerImageIdentifier{
-		{Registry: "12345.dkr.ecr.us-east-1.amazonaws.com", Repository: "healthy", Tag: "latest"},
+		{Registry: "123456789012.dkr.ecr.us-east-1.amazonaws.com", Repository: "healthy", Tag: "latest"},
 	})
 
 	require.NoError(t, err)
@@ -733,7 +733,7 @@ func TestAWSECRAdaptorPaginationReturnsAPIErrorsWithPartialData(t *testing.T) {
 	}
 
 	reports, err := adaptor.GetImagesVulnerabilities(context.Background(), []ContainerImageIdentifier{
-		{Registry: "12345.dkr.ecr.us-east-1.amazonaws.com", Repository: "partial", Tag: "latest"},
+		{Registry: "123456789012.dkr.ecr.us-east-1.amazonaws.com", Repository: "partial", Tag: "latest"},
 	})
 
 	require.ErrorContains(t, err, "temporary ECR failure")
@@ -760,8 +760,8 @@ func TestAWSECRAdaptorPaginationCursorStateIsScopedPerImage(t *testing.T) {
 	}
 
 	reports, err := adaptor.GetImagesVulnerabilities(context.Background(), []ContainerImageIdentifier{
-		{Registry: "12345.dkr.ecr.us-east-1.amazonaws.com", Repository: "first-repo", Tag: "latest"},
-		{Registry: "12345.dkr.ecr.us-east-1.amazonaws.com", Repository: "second-repo", Tag: "latest"},
+		{Registry: "123456789012.dkr.ecr.us-east-1.amazonaws.com", Repository: "first-repo", Tag: "latest"},
+		{Registry: "123456789012.dkr.ecr.us-east-1.amazonaws.com", Repository: "second-repo", Tag: "latest"},
 	})
 
 	require.NoError(t, err)
@@ -792,7 +792,7 @@ func TestAWSECRAdaptorPaginationAdvancesAcrossEmptyFindingPages(t *testing.T) {
 	}
 
 	reports, err := adaptor.GetImagesVulnerabilities(context.Background(), []ContainerImageIdentifier{
-		{Registry: "12345.dkr.ecr.us-east-1.amazonaws.com", Repository: "sparse", Tag: "latest"},
+		{Registry: "123456789012.dkr.ecr.us-east-1.amazonaws.com", Repository: "sparse", Tag: "latest"},
 	})
 
 	require.NoError(t, err)
