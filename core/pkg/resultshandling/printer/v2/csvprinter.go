@@ -272,28 +272,33 @@ func (cp *CsvPrinter) CloseWriter() error {
 
 // csvControlPaths returns the semicolon-separated failed paths and fix paths
 // for the given controlID in result. Both strings are empty when the control
-// is not found or has no paths. FixPath.Value is redacted to [redacted] for
-// sensitive paths (Secret.data, container env[].value, and other
-// secret-shaped fields -- see isSensitivePath) unless showSecrets is true,
-// matching the terminal pretty-printer's default. kind == "" (the caller's
-// AllResources lookup missed, so the resource's real kind is unknown) is
-// treated as sensitive too: isSensitivePath's Secret.data/stringData check
-// requires kind == "Secret" to fire, so an unresolved kind would otherwise
-// silently skip that check and only catch a value that also happens to
-// match a known credential-shaped field name -- failing closed here instead
-// means an unresolvable resource never leaks its fix value by accident.
+// is not found or has no paths. Failed paths come from DeletePath and
+// ReviewPath, which is how appendPaths records a rule's locations, and from
+// FailedPath on older results. The same location can be stored under more
+// than one of those fields, so each path is emitted once. FixPath.Value is
+// redacted to [redacted] for sensitive paths (Secret.data, container
+// env[].value, and other secret-shaped fields -- see isSensitivePath) unless
+// showSecrets is true, matching the terminal pretty-printer's default.
+// kind == "" (the caller's AllResources lookup missed, so the resource's real
+// kind is unknown) is treated as sensitive too: isSensitivePath's
+// Secret.data/stringData check requires kind == "Secret" to fire, so an
+// unresolved kind would otherwise silently skip that check and only catch a
+// value that also happens to match a known credential-shaped field name --
+// failing closed here instead means an unresolvable resource never leaks its
+// fix value by accident.
 func csvControlPaths(result resourcesresults.Result, controlID, kind string, showSecrets bool) (failedPaths, fixPaths string) {
 	for i := range result.AssociatedControls {
 		if result.AssociatedControls[i].GetID() != controlID {
 			continue
 		}
 		var failed, fix []string
+		seenFailed := make(map[string]struct{})
 		for j := range result.AssociatedControls[i].ResourceAssociatedRules {
 			for k := range result.AssociatedControls[i].ResourceAssociatedRules[j].Paths {
 				p := result.AssociatedControls[i].ResourceAssociatedRules[j].Paths[k]
-				if p.ReviewPath != "" {
-					failed = append(failed, p.ReviewPath)
-				}
+				failed = appendCSVFailedPath(failed, seenFailed, p.DeletePath)
+				failed = appendCSVFailedPath(failed, seenFailed, p.ReviewPath)
+				failed = appendCSVFailedPath(failed, seenFailed, p.FailedPath)
 				if p.FixPath.Path != "" {
 					v := p.FixPath.Value
 					if !showSecrets && (kind == "" || isSensitivePath(kind, p.FixPath.Path)) {
@@ -310,6 +315,18 @@ func csvControlPaths(result resourcesresults.Result, controlID, kind string, sho
 		return strings.Join(failed, "; "), strings.Join(fix, "; ")
 	}
 	return "", ""
+}
+
+// appendCSVFailedPath records path when it is non-empty and not already present.
+func appendCSVFailedPath(failed []string, seen map[string]struct{}, path string) []string {
+	if path == "" {
+		return failed
+	}
+	if _, ok := seen[path]; ok {
+		return failed
+	}
+	seen[path] = struct{}{}
+	return append(failed, path)
 }
 
 // csvSourcePath returns the best available source path from a Source entry.

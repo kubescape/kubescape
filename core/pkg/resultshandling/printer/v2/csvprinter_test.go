@@ -496,6 +496,77 @@ func TestCsvControlPaths(t *testing.T) {
 			wantFix:    "",
 		},
 		{
+			name: "delete path is reported as a failed path",
+			result: makeResult("C-0041", []resourcesresults.ResourceAssociatedRule{
+				{
+					Paths: []armotypes.PosturePaths{
+						{DeletePath: "spec.hostNetwork"},
+					},
+				},
+			}),
+			controlID:  "C-0041",
+			kind:       "Pod",
+			wantFailed: "spec.hostNetwork",
+			wantFix:    "",
+		},
+		{
+			name: "delete and review paths are both listed",
+			result: makeResult("C-0041", []resourcesresults.ResourceAssociatedRule{
+				{
+					Paths: []armotypes.PosturePaths{
+						{DeletePath: "spec.hostNetwork"},
+						{ReviewPath: "spec.hostPID"},
+					},
+				},
+			}),
+			controlID:  "C-0041",
+			kind:       "Pod",
+			wantFailed: "spec.hostNetwork; spec.hostPID",
+			wantFix:    "",
+		},
+		{
+			name: "duplicate delete and review path is listed once",
+			result: makeResult("C-0041", []resourcesresults.ResourceAssociatedRule{
+				{
+					Paths: []armotypes.PosturePaths{
+						{DeletePath: "spec.hostPID", ReviewPath: "spec.hostPID"},
+					},
+				},
+			}),
+			controlID:  "C-0041",
+			kind:       "Pod",
+			wantFailed: "spec.hostPID",
+			wantFix:    "",
+		},
+		{
+			name: "legacy failed path is included",
+			result: makeResult("C-0041", []resourcesresults.ResourceAssociatedRule{
+				{
+					Paths: []armotypes.PosturePaths{
+						{FailedPath: "spec.hostIPC"},
+					},
+				},
+			}),
+			controlID:  "C-0041",
+			kind:       "Pod",
+			wantFailed: "spec.hostIPC",
+			wantFix:    "",
+		},
+		{
+			name: "legacy failed path matching the review path is listed once",
+			result: makeResult("C-0041", []resourcesresults.ResourceAssociatedRule{
+				{
+					Paths: []armotypes.PosturePaths{
+						{FailedPath: "spec.hostIPC", ReviewPath: "spec.hostIPC"},
+					},
+				},
+			}),
+			controlID:  "C-0041",
+			kind:       "Pod",
+			wantFailed: "spec.hostIPC",
+			wantFix:    "",
+		},
+		{
 			name: "fix path without failed path",
 			result: makeResult("C-0057", []resourcesresults.ResourceAssociatedRule{
 				{
