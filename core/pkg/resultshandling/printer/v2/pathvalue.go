@@ -1,6 +1,7 @@
 package printer
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"reflect"
@@ -79,13 +80,20 @@ func anyToString(v any) (string, bool) {
 // otherwise be invisible to it - which is most posture findings, since they
 // target container-scoped fields. Round-tripping through JSON once per
 // resource makes the whole tree walkable regardless of how it got there.
+//
+// Numbers are decoded as json.Number rather than float64. A float64 cannot
+// hold every integer above 2^53, so the default decoding would report
+// metadata.generation 9007199254740993 as 9007199254740992; json.Number keeps
+// the literal digits, and anyToString renders them unchanged.
 func normalizeForPathExtraction(obj map[string]any) map[string]any {
 	b, err := json.Marshal(obj)
 	if err != nil {
 		return obj
 	}
+	dec := json.NewDecoder(bytes.NewReader(b))
+	dec.UseNumber()
 	var normalized map[string]any
-	if err := json.Unmarshal(b, &normalized); err != nil {
+	if err := dec.Decode(&normalized); err != nil {
 		return obj
 	}
 	return normalized
@@ -102,19 +110,95 @@ func extractValueAtPath(obj map[string]any, path string) (string, bool) {
 	if err != nil || len(segments) == 0 {
 		return "", false
 	}
+	cur, ok := resolveSegments(obj, segments)
+	if !ok {
+		return "", false
+	}
+	return anyToString(cur)
+}
 
+// extractRedactedValueAtPath is extractValueAtPath for output that must not
+// carry credentials: the path itself is checked with isSensitivePath, and when
+// it selects an object or list, every credential-shaped descendant is replaced
+// with redactedValue before the value is serialized. Checking only the path a
+// rule named is not enough when that path is an ancestor - spec.volumes[0]
+// is not sensitive, but a field below it can be.
+func extractRedactedValueAtPath(kind string, obj map[string]any, path string) (string, bool) {
+	if len(obj) == 0 || path == "" {
+		return "", false
+	}
+	segments, err := pathparse.ParsePath(path)
+	if err != nil || len(segments) == 0 {
+		return "", false
+	}
+	if isSensitiveSegments(kind, segments) {
+		return "", false
+	}
+	cur, ok := resolveSegments(obj, segments)
+	if !ok {
+		return "", false
+	}
+	return anyToString(redactSensitiveDescendants(kind, segments, cur))
+}
+
+// redactSensitiveDescendants returns a copy of v, the value found at segments,
+// with each descendant that isSensitiveSegments flags replaced by
+// redactedValue. Descendant paths are built as segments, in the same shape
+// pathparse produces, so the classifier sees exactly the path a rule would
+// have to name to reach that field directly: a list element sets the index of
+// the segment that holds the list ("volumes" becomes "volumes[0]"), and a map
+// entry appends a new segment. Values that are neither maps nor lists are
+// returned as they are.
+func redactSensitiveDescendants(kind string, segments []pathSegment, v any) any {
+	switch val := v.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(val))
+		for key, child := range val {
+			childPath := append(slices.Clone(segments), pathSegment{Key: key, Index: -1})
+			if isSensitiveSegments(kind, childPath) {
+				out[key] = redactedValue
+				continue
+			}
+			out[key] = redactSensitiveDescendants(kind, childPath, child)
+		}
+		return out
+	case []any:
+		out := make([]any, len(val))
+		for i, child := range val {
+			childPath := slices.Clone(segments)
+			if last := len(childPath) - 1; last >= 0 && childPath[last].Index < 0 {
+				childPath[last].Index = i
+			} else {
+				// A list inside a list has no spelling in the path grammar;
+				// its elements are classified by the keys below them.
+				childPath = append(childPath, pathSegment{Index: i})
+			}
+			if isSensitiveSegments(kind, childPath) {
+				out[i] = redactedValue
+				continue
+			}
+			out[i] = redactSensitiveDescendants(kind, childPath, child)
+		}
+		return out
+	default:
+		return v
+	}
+}
+
+// resolveSegments walks obj along segments and returns the value found there.
+func resolveSegments(obj map[string]any, segments []pathSegment) (any, bool) {
 	var cur any = obj
 	for _, seg := range segments {
 		switch v := cur.(type) {
 		case map[string]any:
 			next, ok := v[seg.Key]
 			if !ok {
-				return "", false
+				return nil, false
 			}
 			if seg.Index >= 0 {
 				elem, ok := indexList(next, seg.Index)
 				if !ok {
-					return "", false
+					return nil, false
 				}
 				cur = elem
 			} else {
@@ -135,16 +219,16 @@ func extractValueAtPath(obj map[string]any, path string) (string, bool) {
 			// means, and the safe direction for a malformed path is to resolve
 			// nothing.
 			if seg.Key != "" {
-				return "", false
+				return nil, false
 			}
 			elem, ok := indexList(v, seg.Index)
 			if !ok {
-				return "", false
+				return nil, false
 			}
 			cur = elem
 		}
 	}
-	return anyToString(cur)
+	return cur, true
 }
 
 // indexList returns the element at index i of a slice. JSON-decoded objects
@@ -427,7 +511,11 @@ func isSensitivePath(kind, path string) bool {
 		// extraction - so it is hidden rather than shown on a guess.
 		return true
 	}
+	return isSensitiveSegments(kind, segments)
+}
 
+// isSensitiveSegments is isSensitivePath on an already parsed path.
+func isSensitiveSegments(kind string, segments []pathSegment) bool {
 	// Everything under a Secret's data or stringData is sensitive, whatever the
 	// individual key happens to be called. Deciding that on the first segment
 	// covers a bracketed key: "data[username]" holds Secret content exactly as
