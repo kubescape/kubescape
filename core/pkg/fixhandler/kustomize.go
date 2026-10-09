@@ -502,9 +502,36 @@ func joinPath(parent, child string) string {
 	return parent + "." + child
 }
 
+// isEmptyValue reports whether v is nil, empty string, empty slice, or an empty map
+// (or a map where all values are themselves empty values).
+func isEmptyValue(v interface{}) bool {
+	if v == nil {
+		return true
+	}
+	switch val := v.(type) {
+	case map[string]interface{}:
+		if len(val) == 0 {
+			return true
+		}
+		for _, child := range val {
+			if !isEmptyValue(child) {
+				return false
+			}
+		}
+		return true
+	case []interface{}:
+		return len(val) == 0
+	case string:
+		return val == ""
+	default:
+		return false
+	}
+}
+
 // verifyScannedFieldsMatch recursively checks that every non-redacted field present in scannedVal
 // matches the corresponding field in candVal. Any field with placeholder "XXXXXX" or omitted in
-// scannedVal is ignored. Returns an error if any concrete non-redacted value conflicts.
+// scannedVal is ignored. Empty/default fields (such as scanner-added empty resources: {}) are
+// normalized so unchanged manifests match. Returns an error if any concrete non-redacted value conflicts.
 func verifyScannedFieldsMatch(scannedVal, candVal interface{}, path string) error {
 	if scannedVal == nil {
 		return nil
@@ -529,7 +556,14 @@ func verifyScannedFieldsMatch(scannedVal, candVal interface{}, path string) erro
 			}
 			candChild, exists := cMap[k]
 			if !exists {
+				// Normalize equivalent empty/default fields (such as scanner-added resources: {})
+				if isEmptyValue(v) {
+					continue
+				}
 				return fmt.Errorf("field %s present in scanned resource is missing in rendered base", joinPath(path, k))
+			}
+			if isEmptyValue(v) && isEmptyValue(candChild) {
+				continue
 			}
 			if err := verifyScannedFieldsMatch(v, candChild, joinPath(path, k)); err != nil {
 				return err
@@ -571,6 +605,81 @@ func verifyScannedFieldsMatch(scannedVal, candVal interface{}, path string) erro
 	}
 }
 
+func getContainersFromObj(obj map[string]interface{}) []map[string]interface{} {
+	if obj == nil {
+		return nil
+	}
+	var res []map[string]interface{}
+	extractContainers := func(containersList interface{}) {
+		if list, ok := containersList.([]interface{}); ok {
+			for _, item := range list {
+				if m, ok := item.(map[string]interface{}); ok {
+					res = append(res, m)
+				}
+			}
+		}
+	}
+
+	if spec, ok := obj["spec"].(map[string]interface{}); ok {
+		extractContainers(spec["containers"])
+		extractContainers(spec["initContainers"])
+		extractContainers(spec["ephemeralContainers"])
+		if tmpl, ok := spec["template"].(map[string]interface{}); ok {
+			if tmplSpec, ok := tmpl["spec"].(map[string]interface{}); ok {
+				extractContainers(tmplSpec["containers"])
+				extractContainers(tmplSpec["initContainers"])
+				extractContainers(tmplSpec["ephemeralContainers"])
+			}
+		}
+		if jobTmpl, ok := spec["jobTemplate"].(map[string]interface{}); ok {
+			if jobSpec, ok := jobTmpl["spec"].(map[string]interface{}); ok {
+				if jobTmpl2, ok := jobSpec["template"].(map[string]interface{}); ok {
+					if jobTmplSpec, ok := jobTmpl2["spec"].(map[string]interface{}); ok {
+						extractContainers(jobTmplSpec["containers"])
+						extractContainers(jobTmplSpec["initContainers"])
+						extractContainers(jobTmplSpec["ephemeralContainers"])
+					}
+				}
+			}
+		}
+	}
+	return res
+}
+
+// hasRedactedEnvironment returns true if scannedObj contains scanner redaction placeholders
+// in container environment variables or Secret data, or if candidateObj has container envFrom
+// or environment variables that were cleared by the scanner from scannedObj.
+func hasRedactedEnvironment(scannedObj, candidateObj map[string]interface{}) bool {
+	if hasRedactedPlaceholder(scannedObj) {
+		return true
+	}
+	candContainers := getContainersFromObj(candidateObj)
+	scannedContainers := getContainersFromObj(scannedObj)
+	for i, cc := range candContainers {
+		if envFrom, ok := cc["envFrom"].([]interface{}); ok && len(envFrom) > 0 {
+			if i < len(scannedContainers) {
+				scannedEnvFrom, sOk := scannedContainers[i]["envFrom"].([]interface{})
+				if !sOk || len(scannedEnvFrom) == 0 {
+					return true
+				}
+			} else {
+				return true
+			}
+		}
+		if envList, ok := cc["env"].([]interface{}); ok && len(envList) > 0 {
+			if i < len(scannedContainers) {
+				scannedEnv, sOk := scannedContainers[i]["env"].([]interface{})
+				if !sOk || len(scannedEnv) == 0 {
+					return true
+				}
+			} else {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // resolveBaseObject determines the verified unredacted base Kubernetes object for a suggestion.
 // Because the scan redactor (removeData / processorhandlerutils.go:826) replaces container environment
 // variables with XXXXXX and deletes envFrom outright without leaving a placeholder, report objects
@@ -580,8 +689,8 @@ func verifyScannedFieldsMatch(scannedVal, candVal interface{}, path string) erro
 //  3. Be verified and loaded directly from the local Helm chart on disk (s.ChartPath).
 //
 // In all cases, the candidate base is verified against the non-redacted fields of the scanned resource.
-// If none of these conditions is met, or if the candidate contains redaction placeholders, the resource
-// is visibly declined with an explanatory reason.
+// If the scan report has redacted environment configuration and no verified Helm render inputs were
+// provided, the missing information prevents establishing fidelity and the resource is visibly declined.
 func resolveBaseObject(s HelmFixSuggestion, chartCache map[string]map[string][]workloadinterface.IMetadata) (map[string]interface{}, string) {
 	var candidate map[string]interface{}
 	var loadErr error
@@ -599,6 +708,14 @@ func resolveBaseObject(s HelmFixSuggestion, chartCache map[string]map[string][]w
 			return nil, fmt.Sprintf("declined: %s", loadErr.Error())
 		}
 		return nil, "unproven report fidelity: scan reports redact container environment variables and remove envFrom without leaving placeholders; provide a verified unredacted rendered base or explicit fidelity provenance"
+	}
+
+	// If the scan report has redacted environment configuration and no verified Helm render inputs
+	// were provided, correspondence with scan-time configuration cannot be established.
+	if s.Resource != nil && s.Resource.GetObject() != nil && s.HelmValueOptions.IsEmpty() && !s.FidelityProvenance && s.UnredactedBase == nil {
+		if hasRedactedEnvironment(s.Resource.GetObject(), candidate) {
+			return nil, "declined: scan report redacts container environment configuration and no verified Helm render inputs were provided; cannot establish correspondence with scan-time overrides"
+		}
 	}
 
 	if s.Resource != nil && s.Resource.GetObject() != nil {
@@ -621,16 +738,63 @@ func resolveBaseObject(s HelmFixSuggestion, chartCache map[string]map[string][]w
 	return candidate, ""
 }
 
+// validateChartFilesContainment ensures that the chart directory and every file or symlink
+// target inside it resolves within allowedBasePath, preventing Helm loader from following
+// symlinks to external files outside the allowed boundary.
+func validateChartFilesContainment(chartPath, allowedBasePath string) error {
+	resolvedAllowedBase, err := filepath.EvalSymlinks(allowedBasePath)
+	if err != nil {
+		return fmt.Errorf("invalid allowed base path %q: %w", allowedBasePath, err)
+	}
+
+	resolvedChart, err := filepath.EvalSymlinks(chartPath)
+	if err != nil {
+		return fmt.Errorf("failed to resolve chart path %q: %w", chartPath, err)
+	}
+
+	if !isPathContained(resolvedAllowedBase, resolvedChart) {
+		return fmt.Errorf("chart path %q is outside allowed base path %q", chartPath, allowedBasePath)
+	}
+
+	// Walk every entry inside the chart directory and verify canonical target containment
+	err = filepath.Walk(chartPath, func(path string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		resolvedTarget, err := filepath.EvalSymlinks(path)
+		if err != nil {
+			return fmt.Errorf("failed to resolve chart file %q: %w", path, err)
+		}
+		if !isPathContained(resolvedAllowedBase, resolvedTarget) {
+			return fmt.Errorf("chart file %q resolves to %q, which is outside allowed base path %q", path, resolvedTarget, allowedBasePath)
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
 // loadUnredactedFromChart renders the chart at chartPath using s.HelmValueOptions and returns the unredacted
 // workload object matching s.Resource's full API identity (group, version, kind, name, namespace).
-// It verifies that s.ChartPath is contained within s.AllowedBasePath (if specified) before reading.
+// It verifies that s.ChartPath and all files/symlinks inside it are contained within s.AllowedBasePath.
 func loadUnredactedFromChart(s HelmFixSuggestion, chartCache map[string]map[string][]workloadinterface.IMetadata) (map[string]interface{}, error) {
 	if s.ChartPath == "" {
 		return nil, errors.New("empty chart path")
 	}
 
-	if s.AllowedBasePath != "" && !isPathContained(s.AllowedBasePath, s.ChartPath) {
-		return nil, fmt.Errorf("chart path %q is outside allowed base path %q", s.ChartPath, s.AllowedBasePath)
+	if s.AllowedBasePath != "" {
+		if err := validateChartFilesContainment(s.ChartPath, s.AllowedBasePath); err != nil {
+			return nil, err
+		}
+		for _, vf := range s.HelmValueOptions.ValueFiles {
+			resolvedVF, err := filepath.EvalSymlinks(vf)
+			if err != nil || !isPathContained(s.AllowedBasePath, resolvedVF) {
+				return nil, fmt.Errorf("values file %q is outside allowed base path %q", vf, s.AllowedBasePath)
+			}
+		}
 	}
 
 	chartYaml := filepath.Join(s.ChartPath, "Chart.yaml")

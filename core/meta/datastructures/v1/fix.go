@@ -1,5 +1,7 @@
 package v1
 
+import "github.com/kubescape/kubescape/v4/core/cautils"
+
 type FixInfo struct {
 	ReportFile     string // path to report file (mandatory)
 	NoConfirm      bool   // if true, no confirmation will be given to the user before applying the fix
@@ -35,4 +37,7 @@ type FixInfo struct {
 	//
 	// This is opt-in and does not affect the normal fix pipeline.
 	KustomizeDir string
+	// HelmValueOptions carries user-supplied Helm value overrides and release identity
+	// used to reproduce scan-time chart renders during fix generation.
+	HelmValueOptions cautils.HelmValueOptions
 }

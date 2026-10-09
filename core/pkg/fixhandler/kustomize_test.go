@@ -1424,3 +1424,243 @@ stringData:
 	_, err = os.Stat(filepath.Join(outDir, "base.yaml"))
 	assert.True(t, os.IsNotExist(err), "base.yaml must not exist for outside chart")
 }
+
+// TestReview4034ActualScanRoundTrip tests the interaction between scanner container redaction,
+// typed JSON serialization, and Kustomize base verification.
+func TestReview4034ActualScanRoundTrip(t *testing.T) {
+	chartDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "Chart.yaml"), []byte("apiVersion: v2\nname: appchart\nversion: 0.1.0\n"), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "values.yaml"), []byte(`envFrom: dev-config
+appMode: development
+`), 0600))
+	require.NoError(t, os.MkdirAll(filepath.Join(chartDir, "templates"), 0700))
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "templates", "deployment.yaml"), []byte(`apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-app
+spec:
+  template:
+    spec:
+      containers:
+      - name: app
+        image: example:v1
+        envFrom:
+        - configMapRef:
+            name: {{ .Values.envFrom }}
+        env:
+        - name: APP_MODE
+          value: {{ .Values.appMode }}
+        securityContext:
+          privileged: true
+`), 0600))
+
+	t.Run("redacted_only_override", func(t *testing.T) {
+		// Scanned object where scan overrides were envFrom=prod-config, APP_MODE=production,
+		// and scanner removeData redacted APP_MODE to XXXXXX and removed envFrom.
+		containers := []corev1.Container{
+			{
+				Name:  "app",
+				Image: "example:v1",
+				Env: []corev1.EnvVar{
+					{Name: "APP_MODE", Value: "production"},
+				},
+				EnvFrom: []corev1.EnvFromSource{
+					{ConfigMapRef: &corev1.ConfigMapEnvSource{LocalObjectReference: corev1.LocalObjectReference{Name: "prod-config"}}},
+				},
+				SecurityContext: &corev1.SecurityContext{
+					Privileged: ptrBool(true),
+				},
+			},
+		}
+		// Run actual scanner redaction
+		removeContainersData(containers)
+
+		// Round-trip through JSON
+		b, err := json.Marshal(map[string]interface{}{
+			"apiVersion": "apps/v1",
+			"kind":       "Deployment",
+			"metadata":   map[string]interface{}{"name": "my-app"},
+			"spec": map[string]interface{}{
+				"template": map[string]interface{}{
+					"spec": map[string]interface{}{
+						"containers": containers,
+					},
+				},
+			},
+		})
+		require.NoError(t, err)
+
+		var scannedObj map[string]interface{}
+		require.NoError(t, json.Unmarshal(b, &scannedObj))
+
+		scannedRes := &reporthandling.Resource{Object: scannedObj}
+
+		outDir := t.TempDir()
+
+		// Without verified HelmValueOptions, the emitter must decline rather than reverting to chart defaults
+		suggsWithoutOpts := []HelmFixSuggestion{
+			{
+				Resource:  scannedRes,
+				ChartPath: chartDir,
+				FixPaths:  []armotypes.FixPath{{Path: "spec.template.spec.containers[0].securityContext.privileged", Value: "false"}},
+			},
+		}
+
+		res, err := EmitKustomizePatch(suggsWithoutOpts, outDir)
+		require.NoError(t, err)
+		assert.Empty(t, res.EmittedResources, "must decline when missing render inputs prevent establishing fidelity")
+		require.Len(t, res.SkippedResources, 1)
+		assert.Contains(t, res.SkippedResources[0].Reason, "scan report redacts container environment configuration")
+
+		_, err = os.Stat(filepath.Join(outDir, "base.yaml"))
+		assert.True(t, os.IsNotExist(err), "base.yaml must not be written when declined")
+
+		// With verified HelmValueOptions matching scan overrides, the emitter reproduces and preserves them
+		outDir2 := t.TempDir()
+		suggsWithOpts := []HelmFixSuggestion{
+			{
+				Resource:  scannedRes,
+				ChartPath: chartDir,
+				HelmValueOptions: cautils.HelmValueOptions{
+					Values: []string{"envFrom=prod-config", "appMode=production"},
+				},
+				FixPaths: []armotypes.FixPath{{Path: "spec.template.spec.containers[0].securityContext.privileged", Value: "false"}},
+			},
+		}
+		res2, err := EmitKustomizePatch(suggsWithOpts, outDir2)
+		require.NoError(t, err)
+		require.Len(t, res2.EmittedResources, 1)
+
+		k := krusty.MakeKustomizer(krusty.MakeDefaultOptions())
+		resMap, err := k.Run(filesys.MakeFsOnDisk(), outDir2)
+		require.NoError(t, err)
+		outYaml, err := resMap.AsYaml()
+		require.NoError(t, err)
+		assert.Contains(t, string(outYaml), "prod-config")
+		assert.Contains(t, string(outYaml), "production")
+		assert.Contains(t, string(outYaml), "privileged: false")
+	})
+
+	t.Run("unchanged_chart_without_resources", func(t *testing.T) {
+		// Chart without resources in template
+		chartDirNoRes := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(chartDirNoRes, "Chart.yaml"), []byte("apiVersion: v2\nname: noreschart\nversion: 0.1.0\n"), 0600))
+		require.NoError(t, os.WriteFile(filepath.Join(chartDirNoRes, "values.yaml"), []byte("\n"), 0600))
+		require.NoError(t, os.MkdirAll(filepath.Join(chartDirNoRes, "templates"), 0700))
+		require.NoError(t, os.WriteFile(filepath.Join(chartDirNoRes, "templates", "deployment.yaml"), []byte(`apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: no-res-app
+spec:
+  template:
+    spec:
+      containers:
+      - name: app
+        image: example:v1
+        securityContext:
+          privileged: true
+`), 0600))
+
+		// Scanner round-trip introduces resources: {} via corev1.Container
+		containers := []corev1.Container{
+			{
+				Name:  "app",
+				Image: "example:v1",
+				SecurityContext: &corev1.SecurityContext{
+					Privileged: ptrBool(true),
+				},
+			},
+		}
+		b, err := json.Marshal(map[string]interface{}{
+			"apiVersion": "apps/v1",
+			"kind":       "Deployment",
+			"metadata":   map[string]interface{}{"name": "no-res-app"},
+			"spec": map[string]interface{}{
+				"template": map[string]interface{}{
+					"spec": map[string]interface{}{
+						"containers": containers,
+					},
+				},
+			},
+		})
+		require.NoError(t, err)
+
+		var scannedObj map[string]interface{}
+		require.NoError(t, json.Unmarshal(b, &scannedObj))
+
+		outDir := t.TempDir()
+		suggs := []HelmFixSuggestion{
+			{
+				Resource:  &reporthandling.Resource{Object: scannedObj},
+				ChartPath: chartDirNoRes,
+				FixPaths:  []armotypes.FixPath{{Path: "spec.template.spec.containers[0].securityContext.privileged", Value: "false"}},
+			},
+		}
+
+		res, err := EmitKustomizePatch(suggs, outDir)
+		require.NoError(t, err)
+		assert.Len(t, res.EmittedResources, 1, "unchanged chart with scanner-added empty resources must be emitted")
+		assert.Empty(t, res.SkippedResources)
+
+		k := krusty.MakeKustomizer(krusty.MakeDefaultOptions())
+		resMap, err := k.Run(filesys.MakeFsOnDisk(), outDir)
+		require.NoError(t, err)
+		outYaml, err := resMap.AsYaml()
+		require.NoError(t, err)
+		assert.Contains(t, string(outYaml), "privileged: false")
+	})
+}
+
+// TestReview4034ContainedChartExternalValues verifies that symlinks inside an allowed chart
+// pointing to external files outside AllowedBasePath are detected and rejected.
+func TestReview4034ContainedChartExternalValues(t *testing.T) {
+	allowedBase := t.TempDir()
+	outsideDir := t.TempDir()
+
+	// External values file with sentinel
+	externalValuesFile := filepath.Join(outsideDir, "external-values.yaml")
+	require.NoError(t, os.WriteFile(externalValuesFile, []byte("sentinel: OUTSIDE_ROOT_SENTINEL\n"), 0600))
+
+	// Chart root is inside allowedBase
+	chartDir := filepath.Join(allowedBase, "symlink-chart")
+	require.NoError(t, os.MkdirAll(filepath.Join(chartDir, "templates"), 0700))
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "Chart.yaml"), []byte("apiVersion: v2\nname: symlinkchart\nversion: 0.1.0\n"), 0600))
+
+	// values.yaml inside chart is a symlink pointing outside allowedBase
+	require.NoError(t, os.Symlink(externalValuesFile, filepath.Join(chartDir, "values.yaml")))
+
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "templates", "secret.yaml"), []byte(`apiVersion: v1
+kind: Secret
+metadata:
+  name: symlink-secret
+stringData:
+  KEY: {{ .Values.sentinel }}
+`), 0600))
+
+	outDir := t.TempDir()
+
+	sugg := HelmFixSuggestion{
+		Resource: &reporthandling.Resource{
+			Object: map[string]interface{}{
+				"apiVersion": "v1",
+				"kind":       "Secret",
+				"metadata":   map[string]interface{}{"name": "symlink-secret"},
+				"stringData": map[string]interface{}{"KEY": "OUTSIDE_ROOT_SENTINEL"},
+			},
+		},
+		ChartPath:       chartDir,
+		AllowedBasePath: allowedBase,
+		FixPaths:        []armotypes.FixPath{{Path: "metadata.labels.patched", Value: "true"}},
+	}
+
+	res, err := EmitKustomizePatch([]HelmFixSuggestion{sugg}, outDir)
+	require.NoError(t, err)
+	assert.Empty(t, res.EmittedResources)
+	require.Len(t, res.SkippedResources, 1)
+	assert.Contains(t, res.SkippedResources[0].Reason, "outside allowed base path")
+
+	baseFile := filepath.Join(outDir, "base.yaml")
+	if data, err := os.ReadFile(baseFile); err == nil {
+		assert.NotContains(t, string(data), "OUTSIDE_ROOT_SENTINEL", "external sentinel must not be copied into base.yaml")
+	}
+}

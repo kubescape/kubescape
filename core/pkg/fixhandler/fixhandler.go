@@ -1097,18 +1097,21 @@ func (h *FixHandler) PrepareHelmSuggestions(ctx context.Context) []HelmFixSugges
 		}
 
 		allowedBasePath := ""
+		var helmOpts cautils.HelmValueOptions
 		if h.fixInfo != nil {
 			allowedBasePath = h.fixInfo.BasePath
+			helmOpts = h.fixInfo.HelmValueOptions
 		}
 
 		suggestions = append(suggestions, HelmFixSuggestion{
-			Resource:        resourceObj,
-			ChartPath:       resourceObj.Source.HelmPath,
-			ChartName:       resourceObj.Source.HelmChartName,
-			TemplateFile:    resourceObj.Source.HelmTemplateFile,
-			ValuesPaths:     resourceObj.Source.HelmValuesPaths,
-			FixPaths:        fixPaths,
-			AllowedBasePath: allowedBasePath,
+			Resource:         resourceObj,
+			ChartPath:        resourceObj.Source.HelmPath,
+			ChartName:        resourceObj.Source.HelmChartName,
+			TemplateFile:     resourceObj.Source.HelmTemplateFile,
+			ValuesPaths:      resourceObj.Source.HelmValuesPaths,
+			FixPaths:         fixPaths,
+			AllowedBasePath:  allowedBasePath,
+			HelmValueOptions: helmOpts,
 		})
 	}
 	return suggestions

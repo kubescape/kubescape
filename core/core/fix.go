@@ -72,6 +72,13 @@ func (ks *Kubescape) Fix(fixInfo *metav1.FixInfo) error {
 				}
 			}
 		}
+		if !fixInfo.HelmValueOptions.IsEmpty() {
+			for i := range helmSuggestions {
+				if helmSuggestions[i].HelmValueOptions.IsEmpty() {
+					helmSuggestions[i].HelmValueOptions = fixInfo.HelmValueOptions
+				}
+			}
+		}
 		emitRes, err := fixhandler.EmitKustomizePatch(helmSuggestions, fixInfo.KustomizeDir)
 		if err != nil {
 			logger.L().Error("failed to write Kustomize patches", helpers.Error(err))
