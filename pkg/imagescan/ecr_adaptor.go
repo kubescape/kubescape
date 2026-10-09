@@ -22,6 +22,35 @@ type ecrClientFactory func(cfg aws.Config) ECRAPI
 
 const maxECRVulnerabilityPages = 1000
 
+// ecrRegistryAccount identifies the registry owning an image. Omitting
+// RegistryId makes ECR query the credentials' account instead, which is not
+// necessarily the image's account when cross-account access is configured.
+func ecrRegistryAccount(registry string) (string, error) {
+	parts := strings.Split(registry, ".")
+	validStandard := (len(parts) == 6 || (len(parts) == 7 && parts[6] == "cn")) &&
+		parts[1] == "dkr" && (parts[2] == "ecr" || parts[2] == "ecr-fips") &&
+		parts[3] != "" && parts[4] == "amazonaws" && parts[5] == "com"
+	validDualStack := len(parts) == 5 &&
+		(parts[1] == "dkr-ecr" || parts[1] == "dkr-ecr-fips") &&
+		parts[2] != "" && parts[3] == "on" && parts[4] == "aws"
+	validChinaDualStack := len(parts) == 7 && parts[1] == "dkr-ecr" &&
+		parts[2] != "" && parts[3] == "on" && parts[4] == "amazonwebservices" &&
+		parts[5] == "com" && parts[6] == "cn"
+	if !validStandard && !validDualStack && !validChinaDualStack {
+		return "", fmt.Errorf("invalid private ECR registry %q", registry)
+	}
+	account := parts[0]
+	if len(account) != 12 {
+		return "", fmt.Errorf("ECR registry %q must contain a 12-digit account ID", registry)
+	}
+	for _, digit := range account {
+		if digit < '0' || digit > '9' {
+			return "", fmt.Errorf("ECR registry %q must contain a 12-digit account ID", registry)
+		}
+	}
+	return account, nil
+}
+
 // AWSECRAdaptor implements IContainerImageVulnerabilityAdaptor for AWS ECR.
 type AWSECRAdaptor struct {
 	client         ECRAPI
@@ -86,6 +115,10 @@ func (a *AWSECRAdaptor) GetImagesScanStatus(ctx context.Context, imageIDs []Cont
 			if imageID.Hash == "" && imageID.Tag == "" {
 				return status, nil
 			}
+			account, err := ecrRegistryAccount(imageID.Registry)
+			if err != nil {
+				return status, err
+			}
 
 			var ecrImageID types.ImageIdentifier
 			if imageID.Hash != "" {
@@ -95,6 +128,7 @@ func (a *AWSECRAdaptor) GetImagesScanStatus(ctx context.Context, imageIDs []Cont
 			}
 
 			input := &ecr.DescribeImageScanFindingsInput{
+				RegistryId:     aws.String(account),
 				RepositoryName: aws.String(imageID.Repository),
 				ImageId:        &ecrImageID,
 				MaxResults:     aws.Int32(1),
@@ -154,6 +188,10 @@ func (a *AWSECRAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs [
 			if imageID.Hash == "" && imageID.Tag == "" {
 				return report, nil
 			}
+			account, err := ecrRegistryAccount(imageID.Registry)
+			if err != nil {
+				return report, err
+			}
 
 			var ecrImageID types.ImageIdentifier
 			if imageID.Hash != "" {
@@ -163,6 +201,7 @@ func (a *AWSECRAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs [
 			}
 
 			input := &ecr.DescribeImageScanFindingsInput{
+				RegistryId:     aws.String(account),
 				RepositoryName: aws.String(imageID.Repository),
 				ImageId:        &ecrImageID,
 			}
