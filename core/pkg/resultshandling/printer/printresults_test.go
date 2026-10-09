@@ -227,6 +227,119 @@ func TestGetWriterNoStdoutFallback_MkdirAllFailsFallsBackToTemp(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+// An existing regular file with permissive mode (e.g. 0644) must be tightened
+// to 0600 before a report is written into it. GetWriter's own success-path
+// test only covers a newly created file; this exercises the pre-existing,
+// looser-permission case explicitly (GHSA-5j8g-x5p8-6p6r / #4091).
+func TestGetWriter_ExistingPermissiveFileIsTightened(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX permission bits are not modeled on Windows")
+	}
+	target := filepath.Join(t.TempDir(), "report.json")
+	require.NoError(t, os.WriteFile(target, []byte("old"), 0o644))
+
+	f := GetWriter(context.Background(), target)
+	require.NotNil(t, f)
+	t.Cleanup(func() { _ = f.Close() })
+
+	info, err := os.Stat(target)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+}
+
+// GetWriterNoFallback's existing tests only cover the chmod-failure error
+// path (on a file already at 0600) and directory-creation failure; neither
+// asserts the success-path permission policy a caller actually relies on.
+func TestGetWriterNoFallback_NewFileHasSecurePermissions(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX permission bits are not modeled on Windows")
+	}
+	target := filepath.Join(t.TempDir(), "report.json")
+
+	f, err := GetWriterNoFallback(target)
+	require.NoError(t, err)
+	require.NotNil(t, f)
+	t.Cleanup(func() { _ = f.Close() })
+
+	info, err := os.Stat(target)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+}
+
+func TestGetWriterNoFallback_ExistingPermissiveFileIsTightened(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX permission bits are not modeled on Windows")
+	}
+	target := filepath.Join(t.TempDir(), "report.json")
+	require.NoError(t, os.WriteFile(target, []byte("old"), 0o644))
+
+	f, err := GetWriterNoFallback(target)
+	require.NoError(t, err)
+	require.NotNil(t, f)
+	t.Cleanup(func() { _ = f.Close() })
+
+	info, err := os.Stat(target)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+}
+
+// GetWriterNoStdoutFallback's existing ValidFileName test only covers a
+// newly created file; a pre-existing, looser-permission file at the
+// requested path must be tightened too, on the direct (non-fallback) path.
+func TestGetWriterNoStdoutFallback_ExistingPermissiveFileIsTightened(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX permission bits are not modeled on Windows")
+	}
+	target := filepath.Join(t.TempDir(), "report.pdf")
+	require.NoError(t, os.WriteFile(target, []byte("old"), 0o644))
+
+	f := GetWriterNoStdoutFallback(context.Background(), target, "kubescape-report-*.pdf")
+	require.NotNil(t, f)
+	t.Cleanup(func() { _ = f.Close() })
+
+	assert.Equal(t, target, f.Name(), "must write into the requested path, not fall back")
+	info, err := os.Stat(target)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+}
+
+// openFileForWrite must skip Chmod entirely for a non-regular sink such as
+// /dev/null: tightening permissions on a device node is not this fix's
+// concern and typically isn't even permitted for a non-owning process.
+// Exercised through all three writer entry points sharing the helper.
+func TestWriters_NonRegularSinkSkipsChmod(t *testing.T) {
+	if f, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0); err != nil {
+		t.Skipf("os.DevNull unavailable in this environment: %v", err)
+	} else {
+		_ = f.Close()
+	}
+
+	var chmodCalls int
+	oldChmod := chmodFile
+	chmodFile = func(f *os.File, mode os.FileMode) error {
+		chmodCalls++
+		return oldChmod(f, mode)
+	}
+	t.Cleanup(func() { chmodFile = oldChmod })
+
+	f := GetWriter(context.Background(), os.DevNull)
+	require.NotNil(t, f)
+	assert.NotSame(t, os.Stdout, f, "GetWriter should open the sink directly, not fall back to stdout")
+	_ = f.Close()
+	assert.Equal(t, 0, chmodCalls, "GetWriter must not Chmod a non-regular sink")
+
+	f2, err := GetWriterNoFallback(os.DevNull)
+	require.NoError(t, err)
+	require.NotNil(t, f2)
+	_ = f2.Close()
+	assert.Equal(t, 0, chmodCalls, "GetWriterNoFallback must not Chmod a non-regular sink")
+
+	f3 := GetWriterNoStdoutFallback(context.Background(), os.DevNull, "kubescape-report-*.pdf")
+	require.NotNil(t, f3)
+	_ = f3.Close()
+	assert.Equal(t, 0, chmodCalls, "GetWriterNoStdoutFallback must not Chmod a non-regular sink")
+}
+
 func TestLogOutputFile(t *testing.T) {
 	out := captureLog(t, func() { LogOutputFile(filepath.Join(t.TempDir(), "report.json")) })
 	assert.Contains(t, out, "Scan results saved")
