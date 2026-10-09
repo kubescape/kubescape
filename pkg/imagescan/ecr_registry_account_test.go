@@ -23,6 +23,8 @@ func TestECRRegistryAccount(t *testing.T) {
 		{"999999999999.dkr.ecr.us-gov-west-1.amazonaws.com", "999999999999"},
 		{"123456789012.dkr.ecr.cn-north-1.amazonaws.com.cn", "123456789012"},
 		{"123456789012.dkr.ecr-fips.us-east-1.amazonaws.com", "123456789012"},
+		{"123456789012.dkr-ecr.us-east-1.on.aws", "123456789012"},
+		{"123456789012.dkr-ecr-fips.us-east-1.on.aws", "123456789012"},
 	} {
 		t.Run(tt.registry, func(t *testing.T) {
 			account, err := ecrRegistryAccount(tt.registry)
@@ -48,6 +50,16 @@ func TestECRRegistryAccountRejectsAmbiguousOwner(t *testing.T) {
 		"123456789012.dkr.ecr.us-east-1.amazonaws.com.cn.evil",
 		"https://123456789012.dkr.ecr.us-east-1.amazonaws.com",
 		"123456789012.dkr.ecr.us-east-1.amazonaws.com/repo",
+		"12345.dkr-ecr.us-east-1.on.aws",
+		"12345678901x.dkr-ecr-fips.us-east-1.on.aws",
+		"1234567890123.dkr-ecr.us-east-1.on.aws",
+		"123456789012.dkr-ecr..on.aws",
+		"123456789012.dkr-ecr-fips..on.aws",
+		"123456789012.dkr-other.us-east-1.on.aws",
+		"123456789012.dkr-ecr.us-east-1.on.aws.evil",
+		"123456789012.dkr-ecr-fips.us-east-1.on.example",
+		"https://123456789012.dkr-ecr.us-east-1.on.aws",
+		"123456789012.dkr-ecr.us-east-1.on.aws/repo",
 	} {
 		t.Run(registry, func(t *testing.T) {
 			account, err := ecrRegistryAccount(registry)
@@ -347,4 +359,55 @@ func TestECRAccountSelection_StatusUsesDigestInChinaRegistry(t *testing.T) {
 	require.Len(t, statuses, 1)
 	assert.Equal(t, image, statuses[0].ImageID)
 	assert.Equal(t, ScanStatusScanned, statuses[0].Status)
+}
+
+func TestECRAccountSelection_DualStackScanMethodsAndPagination(t *testing.T) {
+	for _, registry := range []string{
+		"123456789012.dkr-ecr.us-east-1.on.aws",
+		"123456789012.dkr-ecr-fips.us-east-1.on.aws",
+	} {
+		t.Run(registry, func(t *testing.T) {
+			image := ContainerImageIdentifier{Registry: registry, Repository: "repo", Tag: "release"}
+			completed := time.Date(2026, 10, 9, 1, 2, 3, 0, time.UTC)
+			calls := 0
+			a := NewAWSECRAdaptor()
+			a.client = &mockECRClient{describeFindingsFunc: func(_ context.Context, input *ecr.DescribeImageScanFindingsInput) (*ecr.DescribeImageScanFindingsOutput, error) {
+				calls++
+				assert.Equal(t, "123456789012", aws.ToString(input.RegistryId))
+				assert.Equal(t, image.Repository, aws.ToString(input.RepositoryName))
+				assert.Equal(t, image.Tag, aws.ToString(input.ImageId.ImageTag))
+				out := &ecr.DescribeImageScanFindingsOutput{
+					ImageScanStatus: &types.ImageScanStatus{Status: types.ScanStatusComplete},
+					ImageScanFindings: &types.ImageScanFindings{
+						ImageScanCompletedAt: &completed,
+						Findings:             []types.ImageScanFinding{{Name: aws.String("CVE-" + aws.ToString(input.NextToken))}},
+					},
+				}
+				if input.MaxResults == nil && input.NextToken == nil {
+					out.NextToken = aws.String("second")
+				}
+				if input.NextToken != nil {
+					assert.Equal(t, "second", aws.ToString(input.NextToken))
+				}
+				return out, nil
+			}}
+			statuses, err := a.GetImagesScanStatus(context.Background(), []ContainerImageIdentifier{image})
+			require.NoError(t, err)
+			require.Len(t, statuses, 1)
+			assert.True(t, statuses[0].IsScanAvailable)
+			assert.Equal(t, ScanStatusScanned, statuses[0].Status)
+			assert.Equal(t, completed, statuses[0].LastScanDate)
+			assert.Equal(t, image, statuses[0].ImageID)
+			assert.Equal(t, 1, calls)
+			reports, err := a.GetImagesVulnerabilities(context.Background(), []ContainerImageIdentifier{image})
+			require.NoError(t, err)
+			require.Len(t, reports, 1)
+			assert.Equal(t, image, reports[0].ImageID)
+			assert.Equal(t, ScanStatusScanned, reports[0].Status)
+			require.Len(t, reports[0].Vulnerabilities, 2)
+			assert.Equal(t, "CVE-", reports[0].Vulnerabilities[0].ID)
+			assert.Equal(t, "CVE-second", reports[0].Vulnerabilities[1].ID)
+			assert.Equal(t, 3, calls)
+		})
+	}
 }

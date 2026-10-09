@@ -27,9 +27,13 @@ const maxECRVulnerabilityPages = 1000
 // necessarily the image's account when cross-account access is configured.
 func ecrRegistryAccount(registry string) (string, error) {
 	parts := strings.Split(registry, ".")
-	validSuffix := len(parts) == 6 || (len(parts) == 7 && parts[6] == "cn")
-	if !validSuffix || parts[1] != "dkr" || (parts[2] != "ecr" && parts[2] != "ecr-fips") ||
-		parts[3] == "" || parts[4] != "amazonaws" || parts[5] != "com" {
+	validStandard := (len(parts) == 6 || (len(parts) == 7 && parts[6] == "cn")) &&
+		parts[1] == "dkr" && (parts[2] == "ecr" || parts[2] == "ecr-fips") &&
+		parts[3] != "" && parts[4] == "amazonaws" && parts[5] == "com"
+	validDualStack := len(parts) == 5 &&
+		(parts[1] == "dkr-ecr" || parts[1] == "dkr-ecr-fips") &&
+		parts[2] != "" && parts[3] == "on" && parts[4] == "aws"
+	if !validStandard && !validDualStack {
 		return "", fmt.Errorf("invalid private ECR registry %q", registry)
 	}
 	account := parts[0]
