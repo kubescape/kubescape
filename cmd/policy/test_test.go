@@ -2,6 +2,7 @@ package policy
 
 import (
 	"bytes"
+	"context"
 	"path/filepath"
 	"testing"
 
@@ -47,4 +48,44 @@ func TestPolicyTestCmd_MissingPathReturnsError(t *testing.T) {
 
 	err := cmd.Execute()
 	assert.Error(t, err)
+}
+
+func TestPolicyTestCmd_ContextCanceledReturnsError(t *testing.T) {
+	dir, err := filepath.Abs("../../rules")
+	require.NoError(t, err)
+
+	cmd := getPolicyTestCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{dir})
+	cmd.SilenceErrors = true
+	cmd.SilenceUsage = true
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err = cmd.ExecuteContext(ctx)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, context.Canceled)
+}
+
+func TestPolicyUpdateCmd_ContextCanceledReturnsError(t *testing.T) {
+	dir, err := filepath.Abs("../../rules")
+	require.NoError(t, err)
+
+	cmd := getPolicyTestCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{dir, "--update"})
+	cmd.SilenceErrors = true
+	cmd.SilenceUsage = true
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err = cmd.ExecuteContext(ctx)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, context.Canceled)
 }

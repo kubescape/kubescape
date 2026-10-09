@@ -1,7 +1,6 @@
 package policy
 
 import (
-	"context"
 	"fmt"
 
 	"github.com/kubescape/kubescape/v4/core/pkg/policytest"
@@ -35,14 +34,20 @@ func runPolicyUpdate(cmd *cobra.Command, path string) error {
 		return err
 	}
 
-	ctx := context.Background()
+	ctx := cmd.Context()
 	changed, failed := 0, 0
 	for _, rule := range rules {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if len(rule.Cases) == 0 {
 			fmt.Fprintf(cmd.OutOrStdout(), "%s: no test cases\n", rule.Name)
 			continue
 		}
 		for _, result := range policytest.UpdateRule(ctx, rule) {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
 			switch {
 			case result.Err != nil:
 				failed++
@@ -80,14 +85,20 @@ func runPolicyTest(cmd *cobra.Command, path string) error {
 		return err
 	}
 
-	ctx := context.Background()
+	ctx := cmd.Context()
 	total, failed := 0, 0
 	for _, rule := range rules {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if len(rule.Cases) == 0 {
 			fmt.Fprintf(cmd.OutOrStdout(), "%s: no test cases\n", rule.Name)
 			continue
 		}
 		for _, result := range policytest.RunRule(ctx, rule) {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
 			total++
 			switch {
 			case result.Err != nil:
