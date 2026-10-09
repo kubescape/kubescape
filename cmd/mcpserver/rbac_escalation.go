@@ -166,14 +166,17 @@ func buildUnboundedSummaries(findings []rbacgraph.UnboundedFinding) []map[string
 	out := make([]map[string]any, 0, len(findings))
 	for _, f := range findings {
 		scope := f.Edge.Scope
-		if scope == "" {
+		if f.Edge.ScopeUnknown {
+			scope = "unknown"
+		} else if scope == "" {
 			scope = "cluster-wide"
 		}
 		out = append(out, map[string]any{
-			"subject":   f.Subject.String(),
-			"primitive": string(f.Edge.Primitive),
-			"detail":    f.Edge.Detail,
-			"scope":     scope,
+			"subject":       f.Subject.String(),
+			"primitive":     string(f.Edge.Primitive),
+			"detail":        f.Edge.Detail,
+			"scope":         scope,
+			"scope_unknown": f.Edge.ScopeUnknown,
 		})
 	}
 	return out
