@@ -7,6 +7,7 @@ import (
 	"sort"
 
 	rbacv1 "k8s.io/api/rbac/v1"
+	"k8s.io/apiserver/pkg/authentication/serviceaccount"
 )
 
 // superuserGroups are RBAC subject names the authorizer treats as
@@ -100,6 +101,13 @@ func (idx *Index) impersonateEdges(rules []ScopedRule) []EscalationEdge {
 				edges = append(edges, EscalationEdge{Primitive: PrimitiveImpersonate, Detail: "can impersonate any User (unrestricted impersonate on users)", Unbounded: true})
 			} else {
 				for _, name := range names {
+					// The API server authorizes impersonating a ServiceAccount
+					// username against the serviceaccounts resource, not
+					// users, so a grant on users does not reach it; the
+					// serviceaccounts branch above is what does.
+					if _, _, err := serviceaccount.SplitUsername(name); err == nil {
+						continue
+					}
 					edges = append(edges, EscalationEdge{Primitive: PrimitiveImpersonate, Detail: fmt.Sprintf("can impersonate User %q", name), ToSubject: &Subject{Kind: KindUser, Name: name}})
 				}
 			}
@@ -138,6 +146,33 @@ func (c *roleCoverage) add(rule rbacv1.PolicyRule) {
 	}
 }
 
+// mergeCoverage returns the union of two coverages, either of which may be
+// nil; it is nil only when both are.
+func mergeCoverage(a, b *roleCoverage) *roleCoverage {
+	if a == nil {
+		return b
+	}
+	if b == nil {
+		return a
+	}
+	merged := &roleCoverage{unrestricted: a.unrestricted || b.unrestricted, names: map[string]bool{}}
+	maps.Copy(merged.names, a.names)
+	maps.Copy(merged.names, b.names)
+	return merged
+}
+
+// coverageScopes returns, sorted, every scope either map has an entry for.
+func coverageScopes(a, b map[string]*roleCoverage) []string {
+	scopes := map[string]bool{}
+	for scope := range a {
+		scopes[scope] = true
+	}
+	for scope := range b {
+		scopes[scope] = true
+	}
+	return slices.Sorted(maps.Keys(scopes))
+}
+
 // escalateVerbEdges implements the escalate-verb primitive: Kubernetes'
 // RBAC self-escalation prevention normally stops a subject from granting a
 // Role/ClusterRole rules it doesn't already itself hold, unless the
@@ -149,11 +184,14 @@ func (c *roleCoverage) add(rule rbacv1.PolicyRule) {
 // role-b) don't combine into anything exploitable, so this correlates them
 // by target name (or scope-wide, when either or both sides are
 // unrestricted) rather than just checking "does the subject hold both verbs
-// somewhere in this scope." Only clusterroles at cluster scope and roles at
+// somewhere in this scope." The two grants need not have the same scope: for
+// a Role, either half may be granted in the Role's namespace or cluster-wide
+// (see the loop below). Only clusterroles at cluster scope and roles at
 // either scope are modeled; a namespace-scoped rule naming the
 // cluster-scoped "clusterroles" resource type is an unusual enough pattern
 // that this package doesn't attempt to reason about its effect.
 func (idx *Index) escalateVerbEdges(rules []ScopedRule) []EscalationEdge {
+	roleKinds := map[string]string{"clusterroles": "ClusterRole", "roles": "Role"}
 	var edges []EscalationEdge
 	for _, resource := range []string{"clusterroles", "roles"} {
 		escalateByScope := map[string]*roleCoverage{}
@@ -177,13 +215,21 @@ func (idx *Index) escalateVerbEdges(rules []ScopedRule) []EscalationEdge {
 			}
 		}
 
-		for _, scope := range slices.Sorted(maps.Keys(escalateByScope)) {
-			esc := escalateByScope[scope]
+		for _, scope := range coverageScopes(escalateByScope, mutateByScope) {
 			if resource == "clusterroles" && scope != "" {
 				continue
 			}
-			mut, ok := mutateByScope[scope]
-			if !ok {
+			esc, mut := escalateByScope[scope], mutateByScope[scope]
+			if scope != "" {
+				// The API server authorizes escalate and update/patch as two
+				// separate requests in the Role's namespace, and a
+				// cluster-wide grant answers either one there. So within a
+				// namespace each half may come from that namespace's own
+				// grants or from the cluster-wide ones.
+				esc = mergeCoverage(esc, escalateByScope[""])
+				mut = mergeCoverage(mut, mutateByScope[""])
+			}
+			if esc == nil || mut == nil {
 				continue
 			}
 
@@ -193,6 +239,7 @@ func (idx *Index) escalateVerbEdges(rules []ScopedRule) []EscalationEdge {
 					Detail:    fmt.Sprintf("holds escalate + update/patch on %s.rbac.authorization.k8s.io", resource),
 					Unbounded: true,
 					Scope:     scope,
+					Target:    &RoleTarget{Kind: roleKinds[resource], Namespace: scope},
 				})
 				continue
 			}
@@ -227,12 +274,20 @@ func (idx *Index) escalateVerbEdges(rules []ScopedRule) []EscalationEdge {
 					// scope-level Unbounded here, and dropping that
 					// silently would be a regression in exactly the
 					// direction this package exists to avoid.
-					edges = append(edges, EscalationEdge{
-						Primitive: PrimitiveEscalateVerb,
-						Detail:    fmt.Sprintf("holds escalate + update/patch on ClusterRole(s) %v, not found in the collected snapshot -- may be a partial collection, not a confirmed absence", targetNames),
-						Unbounded: true,
-						Scope:     "",
-					})
+					//
+					// One edge per name, each still naming its object: the
+					// finding is about scope-level risk, but the grant itself
+					// reaches no further than these names, and a Target left
+					// unnamed would say it covers every ClusterRole.
+					for _, name := range targetNames {
+						edges = append(edges, EscalationEdge{
+							Primitive: PrimitiveEscalateVerb,
+							Detail:    fmt.Sprintf("holds escalate + update/patch on ClusterRole %q, not found in the collected snapshot -- may be a partial collection, not a confirmed absence", name),
+							Unbounded: true,
+							Scope:     "",
+							Target:    &RoleTarget{Kind: "ClusterRole", Name: name},
+						})
+					}
 				}
 				for _, cr := range matched {
 					edges = append(edges, EscalationEdge{
@@ -240,6 +295,7 @@ func (idx *Index) escalateVerbEdges(rules []ScopedRule) []EscalationEdge {
 						Detail:    fmt.Sprintf("holds escalate + update/patch on ClusterRole %q: can rewrite it to grant itself anything", cr.Name),
 						Unbounded: true,
 						Scope:     "",
+						Target:    &RoleTarget{Kind: "ClusterRole", Name: cr.Name},
 					})
 				}
 				continue
@@ -253,13 +309,16 @@ func (idx *Index) escalateVerbEdges(rules []ScopedRule) []EscalationEdge {
 			}
 			if len(roles) == 0 {
 				// Same partial-collection fallback as the clusterroles case
-				// above.
-				edges = append(edges, EscalationEdge{
-					Primitive: PrimitiveEscalateVerb,
-					Detail:    fmt.Sprintf("holds escalate + update/patch on Role(s) %v in namespace scope %q, not found in the collected snapshot -- may be a partial collection, not a confirmed absence", targetNames, scope),
-					Unbounded: true,
-					Scope:     scope,
-				})
+				// above, one edge per name for the same reason.
+				for _, name := range targetNames {
+					edges = append(edges, EscalationEdge{
+						Primitive: PrimitiveEscalateVerb,
+						Detail:    fmt.Sprintf("holds escalate + update/patch on Role %q in namespace scope %q, not found in the collected snapshot -- may be a partial collection, not a confirmed absence", name, scope),
+						Unbounded: true,
+						Scope:     scope,
+						Target:    &RoleTarget{Kind: "Role", Namespace: scope, Name: name},
+					})
+				}
 			}
 			for _, r := range roles {
 				edges = append(edges, EscalationEdge{
@@ -267,6 +326,7 @@ func (idx *Index) escalateVerbEdges(rules []ScopedRule) []EscalationEdge {
 					Detail:    fmt.Sprintf("holds escalate + update/patch on Role %q in namespace %q: can rewrite it to grant itself anything", r.Name, r.Namespace),
 					Unbounded: true,
 					Scope:     r.Namespace,
+					Target:    &RoleTarget{Kind: "Role", Namespace: r.Namespace, Name: r.Name},
 				})
 			}
 		}
@@ -282,7 +342,9 @@ func (idx *Index) escalateVerbEdges(rules []ScopedRule) []EscalationEdge {
 // its rules without ever having held them directly. A cluster-wide grant of
 // either half (bind, or create rolebindings/clusterrolebindings) is treated
 // as covering every namespace this Index knows about, not skipped -- it is
-// the more powerful case, not an edge case to exclude.
+// the more powerful case, not an edge case to exclude. A namespace-scoped
+// bind grant, on the other hand, reaches no further than RoleBindings in
+// that namespace.
 func (idx *Index) bindVerbEdges(rules []ScopedRule) []EscalationEdge {
 	var edges []EscalationEdge
 
@@ -293,16 +355,25 @@ func (idx *Index) bindVerbEdges(rules []ScopedRule) []EscalationEdge {
 		names, restricted := namedResources(sr.Rule)
 		targets := idx.matchingClusterRoles(names, restricted)
 
-		if idx.hasClusterWideCreate(rules, "clusterrolebindings") {
+		// The API server checks bind in the namespace of the binding being
+		// created: none for a ClusterRoleBinding, the RoleBinding's own
+		// otherwise (BindingAuthorized in Kubernetes' pkg/registry/rbac).
+		// A bind grant confined to one namespace therefore authorizes
+		// neither a ClusterRoleBinding nor a RoleBinding anywhere else.
+		if sr.Namespace == "" && idx.hasClusterWideCreate(rules, "clusterrolebindings") {
 			for _, cr := range targets {
 				edges = append(edges, EscalationEdge{
 					Primitive:    PrimitiveBindVerb,
 					Detail:       fmt.Sprintf("can bind ClusterRole %q cluster-wide via a new ClusterRoleBinding", cr.Name),
 					GrantedRules: scopeRules(cr.Rules, ""),
+					Target:       &RoleTarget{Kind: "ClusterRole", Name: cr.Name},
 				})
 			}
 		}
 		for _, ns := range idx.knownNamespaces() {
+			if sr.Namespace != "" && sr.Namespace != ns {
+				continue
+			}
 			if !idx.canCreateRoleBindingsIn(rules, ns) {
 				continue
 			}
@@ -311,6 +382,8 @@ func (idx *Index) bindVerbEdges(rules []ScopedRule) []EscalationEdge {
 					Primitive:    PrimitiveBindVerb,
 					Detail:       fmt.Sprintf("can bind ClusterRole %q within namespace %q via a new RoleBinding", cr.Name, ns),
 					GrantedRules: scopeRules(cr.Rules, ns),
+					Scope:        ns,
+					Target:       &RoleTarget{Kind: "ClusterRole", Name: cr.Name},
 				})
 			}
 		}
@@ -335,6 +408,8 @@ func (idx *Index) bindVerbEdges(rules []ScopedRule) []EscalationEdge {
 				Primitive:    PrimitiveBindVerb,
 				Detail:       fmt.Sprintf("can bind Role %q within namespace %q via a new RoleBinding", r.Name, r.Namespace),
 				GrantedRules: scopeRules(r.Rules, r.Namespace),
+				Scope:        r.Namespace,
+				Target:       &RoleTarget{Kind: "Role", Namespace: r.Namespace, Name: r.Name},
 			})
 		}
 	}
@@ -376,7 +451,7 @@ func (idx *Index) assignServiceAccountEdges(rules []ScopedRule) []EscalationEdge
 func (idx *Index) mintServiceAccountTokenEdges(rules []ScopedRule) []EscalationEdge {
 	var edges []EscalationEdge
 	for _, sr := range rules {
-		if !ruleGrants(sr.Rule, "", "serviceaccounts/token", "create") {
+		if !ruleGrantsSubresource(sr.Rule, "", "serviceaccounts", "token", "create") {
 			continue
 		}
 		names, restricted := namedResources(sr.Rule)

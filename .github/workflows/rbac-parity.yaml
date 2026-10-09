@@ -1,0 +1,71 @@
+name: rbac-parity
+permissions:
+  contents: read
+on:
+  workflow_dispatch: {}
+  pull_request:
+    types: [opened, reopened, synchronize, ready_for_review]
+    # 00-pr-scanner.yaml skips a PR whose every file matches its paths-ignore
+    # list, and the parity fixtures are YAML: a PR that only adds or edits a
+    # fixture would run no check at all there. This workflow uses `paths` - an
+    # allow-list - so that every change to what the parity tests read starts
+    # it: rbacgraph and its fixtures, the Kubernetes libraries rbacgraph is
+    # built against, and this file.
+    paths:
+      - "core/pkg/rbacgraph/**"
+      - "go.mod"
+      - "go.sum"
+      - ".github/workflows/rbac-parity.yaml"
+  # A pull_request run proves the branch against the base as it stood when the
+  # run started; the push run gives the merge commit its own verdict, as
+  # 00-pr-scanner.yaml does for the unit tests.
+  push:
+    branches: [master]
+    # Keep this list in step with the pull_request one above.
+    paths:
+      - "core/pkg/rbacgraph/**"
+      - "go.mod"
+      - "go.sum"
+      - ".github/workflows/rbac-parity.yaml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  reference:
+    name: verify RBAC fixtures against kube-apiserver
+    # Nothing here needs a secret, a container runtime or a privileged runner:
+    # envtest starts kube-apiserver and etcd as ordinary processes. That also
+    # means the job runs unchanged on a pull request from a fork.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      KUBEBUILDER_ASSETS: ${{ github.workspace }}/.rbac-parity-reference
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        name: Installing go
+        with:
+          go-version-file: go.mod
+
+      # The key is the file that pins the versions and their checksums, so a
+      # new reference is a cache miss. A restored binary is not trusted for
+      # being in the cache: fetch-reference.sh checks it against the pinned
+      # checksum again and downloads it afresh if it does not match.
+      - name: Cache the reference binaries
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.KUBEBUILDER_ASSETS }}
+          key: rbac-parity-reference-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('core/pkg/rbacgraph/parity/reference.env') }}
+
+      - name: Download kube-apiserver and etcd
+        run: bash core/pkg/rbacgraph/parity/fetch-reference.sh "${KUBEBUILDER_ASSETS}"
+
+      # The tag adds the tests that start the reference server; the package's
+      # ordinary tests run in the same invocation. The reference tests check
+      # the server's reported version against reference.env themselves and
+      # fail, rather than skip, if the server cannot be started.
+      - name: Run the RBAC parity tests
+        run: go test -tags rbacparity -count=1 -v ./core/pkg/rbacgraph/parity/...

@@ -14,6 +14,8 @@ Two GitHub Apps report alongside it: the DCO check, which requires a `Signed-off
 
 `00-pr-scanner.yaml` carries a `paths-ignore` filter, so a PR that touches nothing else can skip the build entirely. It ignores `**.md`, `**.yaml`, `**.yml` and `**.sh` at any depth, plus files sitting directly in `website/`, `examples/`, `docs/`, `build/` and `.github/`. Those last five are single-level patterns: a nested file such as `docs/guide/diagram.svg` does not match and will still start the workflow. The build is skipped only when *every* changed file in the PR matches one of the patterns.
 
+A PR that touches `core/pkg/rbacgraph/`, `go.mod` or `go.sum` also triggers `rbac-parity.yaml`. It downloads the `kube-apiserver` and `etcd` releases pinned in `core/pkg/rbacgraph/parity/reference.env`, verifies their checksums, and runs `go test -tags rbacparity ./core/pkg/rbacgraph/parity/...`, which checks the Kubernetes answer recorded in every RBAC parity fixture against that server. It uses a `paths` allow-list rather than a deny-list because the fixtures are YAML, which `00-pr-scanner.yaml` ignores. It needs no secrets, so it runs on PRs from forks, and it runs again on the push to `master`. See `core/pkg/rbacgraph/parity/README.md`.
+
 ### Reviewing a PR
 
 The E2E system tests do not live in this repository. `00-pr-scanner.yaml` dispatches them to a private repository and polls for the result.

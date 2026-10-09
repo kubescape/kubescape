@@ -1,0 +1,64 @@
+name: escalate-resource-names
+description: |
+  escalate and update restricted by resourceNames authorize rewriting the
+  named Role and no other. That holds when the named Role does not exist:
+  the grant then authorizes nothing, and it does not spill over onto the
+  Roles that do exist.
+
+  rbacgraph still reports a grant on a Role it cannot find, in case the
+  collection was partial. That finding names the missing Role. It is not an
+  authorization to rewrite the others.
+objects:
+  - {apiVersion: v1, kind: Namespace, metadata: {name: lab}}
+  - {apiVersion: v1, kind: ServiceAccount, metadata: {name: named-missing, namespace: lab}}
+  - {apiVersion: v1, kind: ServiceAccount, metadata: {name: named-missing-cluster-wide, namespace: lab}}
+  - {apiVersion: v1, kind: ServiceAccount, metadata: {name: named-editable, namespace: lab}}
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: Role
+    metadata: {name: editable, namespace: lab}
+    rules:
+      - {apiGroups: [""], resources: ["configmaps"], verbs: [get]}
+  # No Role or ClusterRole named "missing" exists.
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: ClusterRole
+    metadata: {name: rewrite-missing}
+    rules:
+      - {apiGroups: ["rbac.authorization.k8s.io"], resources: ["roles"], verbs: [escalate, update], resourceNames: [missing]}
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: ClusterRole
+    metadata: {name: rewrite-editable}
+    rules:
+      - {apiGroups: ["rbac.authorization.k8s.io"], resources: ["roles"], verbs: [escalate, update], resourceNames: [editable]}
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: RoleBinding
+    metadata: {name: rewrite-missing, namespace: lab}
+    roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: rewrite-missing}
+    subjects:
+      - {kind: ServiceAccount, name: named-missing, namespace: lab}
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: ClusterRoleBinding
+    metadata: {name: rewrite-missing-cluster-wide}
+    roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: rewrite-missing}
+    subjects:
+      - {kind: ServiceAccount, name: named-missing-cluster-wide, namespace: lab}
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: RoleBinding
+    metadata: {name: rewrite-editable, namespace: lab}
+    roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: rewrite-editable}
+    subjects:
+      - {kind: ServiceAccount, name: named-editable, namespace: lab}
+questions:
+  - id: grant-on-a-missing-role-does-not-cover-an-existing-one
+    serviceAccount: {namespace: lab, name: named-missing}
+    rewriteRole: {namespace: lab, name: editable, verb: update}
+    kubernetes: denied
+  # The same grant held cluster-wide.
+  - id: cluster-wide-grant-on-a-missing-role-does-not-cover-an-existing-one
+    serviceAccount: {namespace: lab, name: named-missing-cluster-wide}
+    rewriteRole: {namespace: lab, name: editable, verb: update}
+    kubernetes: denied
+  # Control: the grant names the Role being rewritten.
+  - id: grant-on-the-named-role-covers-it
+    serviceAccount: {namespace: lab, name: named-editable}
+    rewriteRole: {namespace: lab, name: editable, verb: update}
+    kubernetes: allowed
