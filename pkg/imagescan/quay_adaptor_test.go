@@ -433,6 +433,7 @@ func TestQuayAdaptor_GetImagesScanStatus(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, res, 1)
 		assert.True(t, res[0].IsScanAvailable)
+		assert.Equal(t, ScanStatusScanned, res[0].Status)
 	})
 
 	t.Run("queued status marks scan unavailable", func(t *testing.T) {
@@ -445,6 +446,7 @@ func TestQuayAdaptor_GetImagesScanStatus(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, res, 1)
 		assert.False(t, res[0].IsScanAvailable)
+		assert.Equal(t, ScanStatusQueued, res[0].Status)
 	})
 
 	t.Run("unsupported and failed statuses mark scan unavailable", func(t *testing.T) {
@@ -461,7 +463,9 @@ func TestQuayAdaptor_GetImagesScanStatus(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, res, 2)
 		assert.False(t, res[0].IsScanAvailable)
+		assert.Equal(t, ScanStatusUnsupported, res[0].Status)
 		assert.False(t, res[1].IsScanAvailable)
+		assert.Equal(t, ScanStatusFailed, res[1].Status)
 	})
 
 	t.Run("api error propagates joined error while retaining result slot", func(t *testing.T) {
@@ -810,9 +814,10 @@ func TestQuayAdaptor_GetImagesVulnerabilities(t *testing.T) {
 		require.Len(t, res, 1, "failed scan must retain report slot")
 		assert.Equal(t, "myorg/failedscan", res[0].ImageID.Repository)
 		assert.Empty(t, res[0].Vulnerabilities)
+		assert.Equal(t, ScanStatusFailed, res[0].Status)
 	})
 
-	t.Run("queued and unsupported statuses return error and retain report slot", func(t *testing.T) {
+	t.Run("queued status returns error and unsupported status returns clean report without error", func(t *testing.T) {
 		pathQueued := quayManifestSecurityPath("myorg", "queued", "sha256:queued123", true)
 		mock.responses[pathQueued] = []byte(`{"status": "queued", "data": null}`)
 
@@ -825,8 +830,25 @@ func TestQuayAdaptor_GetImagesVulnerabilities(t *testing.T) {
 		})
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "quay security scan is queued")
-		assert.Contains(t, err.Error(), "quay security scan unsupported")
+		assert.NotContains(t, err.Error(), "quay security scan unsupported")
 		require.Len(t, res, 2, "both slots must be retained")
+		assert.Equal(t, ScanStatusQueued, res[0].Status)
+		assert.Empty(t, res[0].Vulnerabilities)
+		assert.Equal(t, ScanStatusUnsupported, res[1].Status)
+		assert.Empty(t, res[1].Vulnerabilities)
+	})
+
+	t.Run("unsupported status alone returns report with ScanStatusUnsupported and no error", func(t *testing.T) {
+		pathUnsupported := quayManifestSecurityPath("myorg", "distroless", "sha256:distroless123", true)
+		mock.responses[pathUnsupported] = []byte(`{"status": "unsupported", "data": null}`)
+
+		res, err := adaptor.GetImagesVulnerabilities(context.Background(), []ContainerImageIdentifier{
+			{Registry: "quay.io", Repository: "myorg/distroless", Hash: "sha256:distroless123"},
+		})
+		require.NoError(t, err)
+		require.Len(t, res, 1)
+		assert.Equal(t, ScanStatusUnsupported, res[0].Status)
+		assert.Empty(t, res[0].Vulnerabilities)
 	})
 
 	t.Run("failed-then-successful batch preserves order and aggregates error", func(t *testing.T) {
@@ -865,9 +887,11 @@ func TestQuayAdaptor_GetImagesVulnerabilities(t *testing.T) {
 		require.Len(t, res, 2)
 		assert.Equal(t, "myorg/image1", res[0].ImageID.Repository)
 		assert.Empty(t, res[0].Vulnerabilities)
+		assert.Equal(t, ScanStatusFailed, res[0].Status)
 		assert.Equal(t, "myorg/image2", res[1].ImageID.Repository)
 		require.Len(t, res[1].Vulnerabilities, 1)
 		assert.Equal(t, "CVE-2023-38545", res[1].Vulnerabilities[0].ID)
+		assert.Equal(t, ScanStatusScanned, res[1].Status)
 	})
 
 	t.Run("api failure returns joined error with report placeholder", func(t *testing.T) {

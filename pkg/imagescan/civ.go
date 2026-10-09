@@ -15,12 +15,36 @@ type ContainerImageIdentifier struct {
 	Hash       string `json:"hash"`
 }
 
+// ScanStatus represents the outcome of a vulnerability scan attempt
+type ScanStatus string
+
+const (
+	// ScanStatusScanned indicates the scan completed successfully
+	ScanStatusScanned ScanStatus = "scanned"
+	// ScanStatusQueued indicates the scan is pending or in-progress
+	ScanStatusQueued ScanStatus = "queued"
+	// ScanStatusUnsupported indicates the image format is not supported for scanning
+	// (e.g., scratch, static binaries, distroless without OS packages)
+	ScanStatusUnsupported ScanStatus = "unsupported"
+	// ScanStatusFailed indicates the scan was attempted but failed
+	ScanStatusFailed ScanStatus = "failed"
+	// ScanStatusUnknown indicates the scan status could not be determined
+	ScanStatusUnknown ScanStatus = "unknown"
+)
+
+// IsTerminal returns true if the scan status represents a final state
+// (i.e., it won't change with time). Queued scans are non-terminal.
+func (s ScanStatus) IsTerminal() bool {
+	return s == ScanStatusScanned || s == ScanStatusUnsupported || s == ScanStatusFailed
+}
+
 // ContainerImageScanStatus represents the current state of vulnerability scanning for an image
 type ContainerImageScanStatus struct {
 	ImageID         ContainerImageIdentifier `json:"imageID"`
 	IsScanAvailable bool                     `json:"isScanAvailable"`
 	IsBomAvailable  bool                     `json:"isBomAvailable"`
 	LastScanDate    time.Time                `json:"lastScanDate"`
+	Status          ScanStatus               `json:"status,omitempty"`
 }
 
 // Vulnerability represents a single container vulnerability
@@ -35,6 +59,7 @@ type Vulnerability struct {
 type ContainerImageVulnerabilityReport struct {
 	ImageID         ContainerImageIdentifier `json:"imageID"`
 	Vulnerabilities []Vulnerability          `json:"vulnerabilities,omitempty"`
+	Status          ScanStatus               `json:"status,omitempty"`
 }
 
 // ContainerImageInformation contains the metadata and bill of materials for an image

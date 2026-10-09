@@ -166,61 +166,66 @@ func (a *AzureAdaptor) GetImagesScanStatus(ctx context.Context, imageIDs []Conta
 
 	return ProcessImages(imageIDs,
 		func(imageID ContainerImageIdentifier) (ContainerImageScanStatus, error) {
-			status := ContainerImageScanStatus{
-				ImageID:         imageID,
-				IsScanAvailable: false,
-				IsBomAvailable:  false,
-			}
+			return a.getImageScanStatus(ctx, registryName, imageID)
+		},
+	)
+}
 
-			if imageID.Hash == "" {
-				return status, nil
-			}
+func (a *AzureAdaptor) getImageScanStatus(ctx context.Context, registryName string, imageID ContainerImageIdentifier) (ContainerImageScanStatus, error) {
+	status := ContainerImageScanStatus{
+		ImageID:         imageID,
+		IsScanAvailable: false,
+		IsBomAvailable:  false,
+	}
 
-			if err := a.validateImageID(imageID); err != nil {
-				return status, err
-			}
+	if imageID.Hash == "" {
+		return status, nil
+	}
 
-			// Query ARG for parent assessment to determine scan availability
-			queryStr := fmt.Sprintf(`
-			securityresources
-			| where type == "microsoft.security/assessments"
-			| extend registryName = extract(@"(?i)/registries/([^/]+)/", 1, id)
-			| where registryName =~ "%s"
-			| where properties.resourceDetails.id contains "%s"
-			| project timeGenerated = properties.timeGenerated
-			| limit 1
-		`, registryName, imageID.Hash)
+	if err := a.validateImageID(imageID); err != nil {
+		return status, err
+	}
 
-			req := armresourcegraph.QueryRequest{
-				Query: to.Ptr(queryStr),
-				Options: &armresourcegraph.QueryRequestOptions{
-					ResultFormat: to.Ptr(armresourcegraph.ResultFormatObjectArray),
-				},
-			}
+	// Query ARG for parent assessment to determine scan availability
+	queryStr := fmt.Sprintf(`
+	securityresources
+	| where type == "microsoft.security/assessments"
+	| extend registryName = extract(@"(?i)/registries/([^/]+)/", 1, id)
+	| where registryName =~ "%s"
+	| where properties.resourceDetails.id contains "%s"
+	| project timeGenerated = properties.timeGenerated
+	| limit 1
+`, registryName, imageID.Hash)
 
-			res, err := a.client.Resources(ctx, req, nil)
-			if err != nil {
-				return status, fmt.Errorf("failed to query scan status for repository %s: %w", imageID.Repository, err)
-			}
+	req := armresourcegraph.QueryRequest{
+		Query: to.Ptr(queryStr),
+		Options: &armresourcegraph.QueryRequestOptions{
+			ResultFormat: to.Ptr(armresourcegraph.ResultFormatObjectArray),
+		},
+	}
 
-			if res.TotalRecords != nil && *res.TotalRecords > 0 {
-				status.IsScanAvailable = true
-				if res.Data != nil {
-					if dataList, ok := res.Data.([]interface{}); ok && len(dataList) > 0 {
-						if row, ok := dataList[0].(map[string]interface{}); ok {
-							if tg := getStringSafe(row, "timeGenerated"); tg != "" {
-								if parsedTime, err := time.Parse(time.RFC3339Nano, tg); err == nil {
-									status.LastScanDate = parsedTime
-								}
-							}
+	res, err := a.client.Resources(ctx, req, nil)
+	if err != nil {
+		return status, fmt.Errorf("failed to query scan status for repository %s: %w", imageID.Repository, err)
+	}
+
+	if res.TotalRecords != nil && *res.TotalRecords > 0 {
+		status.IsScanAvailable = true
+		status.Status = ScanStatusScanned
+		if res.Data != nil {
+			if dataList, ok := res.Data.([]interface{}); ok && len(dataList) > 0 {
+				if row, ok := dataList[0].(map[string]interface{}); ok {
+					if tg := getStringSafe(row, "timeGenerated"); tg != "" {
+						if parsedTime, err := time.Parse(time.RFC3339Nano, tg); err == nil {
+							status.LastScanDate = parsedTime
 						}
 					}
 				}
 			}
+		}
+	}
 
-			return status, nil
-		},
-	)
+	return status, nil
 }
 
 // GetImagesVulnerabilities retrieves the vulnerability reports for a list of image identifiers.
@@ -344,6 +349,18 @@ func (a *AzureAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs []
 					break
 				}
 				skipToken = to.Ptr(nextToken)
+			}
+
+			if len(report.Vulnerabilities) > 0 {
+				report.Status = ScanStatusScanned
+			} else {
+				scanStatus, err := a.getImageScanStatus(ctx, registryName, imageID)
+				if err != nil {
+					return report, err
+				}
+				if scanStatus.IsScanAvailable {
+					report.Status = ScanStatusScanned
+				}
 			}
 
 			return report, nil

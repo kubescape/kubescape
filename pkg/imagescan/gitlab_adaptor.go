@@ -484,6 +484,10 @@ func (a *GitlabAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs [
 			report.Vulnerabilities = append(report.Vulnerabilities, vuln)
 		}
 
+		if len(report.Vulnerabilities) > 0 {
+			report.Status = ScanStatusScanned
+		}
+
 		reports = append(reports, report)
 	}
 
