@@ -14,6 +14,8 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 )
 
+var supportedAdvancedWorkloadKinds = []string{"pods", "deployments", "daemonsets", "statefulsets"}
+
 func createAdvancedTools(ksServer *KubescapeMcpserver) {
 	// Tool 1: scan_resource_slice
 	scanResourceSliceTool := mcp.NewTool(
@@ -31,11 +33,14 @@ func createAdvancedTools(ksServer *KubescapeMcpserver) {
 			args = map[string]any{}
 		}
 
-		kind, ok := args["resource_kind"].(string)
-		if !ok || kind == "" {
-			return mcpToolError(ErrCodeInvalidArgument, "resource_kind is required", map[string]any{"argument": "resource_kind"}), nil
+		kind, toolErr := mcpRequiredStringArg(args, "resource_kind")
+		if toolErr != nil {
+			return toolErr, nil
 		}
-		namespace, _ := args["namespace"].(string)
+		namespace, toolErr := mcpStringArg(args, "namespace")
+		if toolErr != nil {
+			return toolErr, nil
+		}
 
 		limit := int64(10)
 		if l, ok := args["limit"].(float64); ok {
@@ -46,8 +51,14 @@ func createAdvancedTools(ksServer *KubescapeMcpserver) {
 			if limit > 500 {
 				limit = 500
 			}
+		} else if lRaw, ok := args["limit"]; ok && lRaw != nil {
+			return mcpToolError(ErrCodeInvalidArgument, "limit must be a number", map[string]any{"argument": "limit"}), nil
 		}
-		continueToken, _ := args["continue"].(string)
+
+		continueToken, toolErr := mcpStringArg(args, "continue")
+		if toolErr != nil {
+			return toolErr, nil
+		}
 
 		// Simplified mapping for common kinds, to support granular resource fetching.
 		// Validated before client acquisition so an unsupported kind is rejected
@@ -63,7 +74,9 @@ func createAdvancedTools(ksServer *KubescapeMcpserver) {
 		case "statefulsets", "statefulset":
 			gvr = schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "statefulsets"}
 		default:
-			return mcpToolError(ErrCodeUnsupportedResource, fmt.Sprintf("unsupported resource kind %q; supported kinds are: pods, deployments, daemonsets, statefulsets", kind), map[string]any{"kind": kind, "supported_kinds": []string{"pods", "deployments", "daemonsets", "statefulsets"}}), nil
+			return mcpToolError(ErrCodeUnsupportedResource,
+				fmt.Sprintf("unsupported resource kind %q; supported kinds are: %s", kind, strings.Join(supportedAdvancedWorkloadKinds, ", ")),
+				map[string]any{"kind": kind, "supported_kinds": supportedAdvancedWorkloadKinds}), nil
 		}
 
 		k8sClient, err := ksServer.getK8sClient()
@@ -131,22 +144,26 @@ func createAdvancedTools(ksServer *KubescapeMcpserver) {
 			args = map[string]any{}
 		}
 
-		celExpr, ok := args["cel_expression"].(string)
-		if !ok || celExpr == "" {
-			return mcpToolError(ErrCodeInvalidArgument, "cel_expression is required", map[string]any{"argument": "cel_expression"}), nil
+		// Enforce raw input byte caps before trimming to prevent unbounded payloads.
+		if rawCel, ok := args["cel_expression"].(string); ok && len(rawCel) > 10000 {
+			return mcpToolError(ErrCodeInvalidArgument, "input exceeds size limits", map[string]any{"argument": "cel_expression"}), nil
 		}
-		resourceJSON, ok := args["resource_json"].(string)
-		if !ok || resourceJSON == "" {
-			return mcpToolError(ErrCodeInvalidArgument, "resource_json is required", map[string]any{"argument": "resource_json"}), nil
+		if rawRes, ok := args["resource_json"].(string); ok && len(rawRes) > 1000000 {
+			return mcpToolError(ErrCodeInvalidArgument, "input exceeds size limits", map[string]any{"argument": "resource_json"}), nil
 		}
 
-		if len(resourceJSON) > 1000000 || len(celExpr) > 10000 {
-			return mcpToolError(ErrCodeInvalidArgument, "input exceeds size limits", nil), nil
+		celExpr, toolErr := mcpRequiredStringArg(args, "cel_expression")
+		if toolErr != nil {
+			return toolErr, nil
+		}
+		resourceJSON, toolErr := mcpRequiredStringArg(args, "resource_json")
+		if toolErr != nil {
+			return toolErr, nil
 		}
 
 		var resourceObj map[string]any
 		if err := json.Unmarshal([]byte(resourceJSON), &resourceObj); err != nil {
-			return mcpToolError(ErrCodeInvalidArgument, fmt.Sprintf("failed to parse resource_json: %v", err), nil), nil
+			return mcpToolError(ErrCodeInvalidArgument, fmt.Sprintf("failed to parse resource_json: %v", err), map[string]any{"argument": "resource_json"}), nil
 		}
 
 		env, err := cel.NewEnv(
@@ -158,7 +175,7 @@ func createAdvancedTools(ksServer *KubescapeMcpserver) {
 
 		ast, issues := env.Compile(celExpr)
 		if issues != nil && issues.Err() != nil {
-			return mcpToolError(ErrCodeInvalidArgument, fmt.Sprintf("failed to compile CEL expression: %v", issues.Err()), nil), nil
+			return mcpToolError(ErrCodeInvalidArgument, fmt.Sprintf("failed to compile CEL expression: %v", issues.Err()), map[string]any{"argument": "cel_expression"}), nil
 		}
 
 		prg, err := env.Program(ast, cel.CostLimit(100000))
@@ -192,31 +209,34 @@ func createAdvancedTools(ksServer *KubescapeMcpserver) {
 			args = map[string]any{}
 		}
 
-		kind, _ := args["resource_kind"].(string)
-		namespace, _ := args["namespace"].(string)
-		name, _ := args["resource_name"].(string)
-		patchJSON, _ := args["patch_json"].(string)
+		if rawPatch, ok := args["patch_json"].(string); ok && len(rawPatch) > 1000000 {
+			return mcpToolError(ErrCodeInvalidArgument, "patch_json exceeds size limit", map[string]any{"argument": "patch_json"}), nil
+		}
 
-		if kind == "" || name == "" || patchJSON == "" {
-			return mcpToolError(ErrCodeInvalidArgument, "resource_kind, resource_name, and patch_json are required", nil), nil
+		kind, toolErr := mcpRequiredStringArg(args, "resource_kind")
+		if toolErr != nil {
+			return toolErr, nil
+		}
+		name, toolErr := mcpRequiredStringArg(args, "resource_name")
+		if toolErr != nil {
+			return toolErr, nil
+		}
+		patchJSON, toolErr := mcpRequiredStringArg(args, "patch_json")
+		if toolErr != nil {
+			return toolErr, nil
+		}
+		namespace, toolErr := mcpStringArg(args, "namespace")
+		if toolErr != nil {
+			return toolErr, nil
+		}
+
+		if !json.Valid([]byte(patchJSON)) {
+			return mcpToolError(ErrCodeInvalidArgument, "patch_json must be valid JSON", map[string]any{"argument": "patch_json"}), nil
 		}
 
 		// Security/Privilege Drop checks: explicitly allow only certain workload kinds.
-		allowedKinds := map[string]bool{
-			"pod": true, "pods": true,
-			"deployment": true, "deployments": true,
-			"daemonset": true, "daemonsets": true,
-			"statefulset": true, "statefulsets": true,
-		}
-		if !allowedKinds[strings.ToLower(kind)] {
-			return mcpToolError(ErrCodeUnsupportedResource, fmt.Sprintf("security barrier: patching kind '%s' is not permitted", kind), map[string]any{"kind": kind}), nil
-		}
-
-		k8sClient, err := ksServer.getK8sClient()
-		if err != nil {
-			return mcpToolError(ErrCodeK8sClientError, fmt.Sprintf("failed to get k8s client: %v", err), nil), nil
-		}
-
+		// Validated before client acquisition so an unsupported kind is rejected
+		// regardless of whether a Kubernetes configuration is available.
 		var gvr schema.GroupVersionResource
 		switch strings.ToLower(kind) {
 		case "pods", "pod":
@@ -227,10 +247,18 @@ func createAdvancedTools(ksServer *KubescapeMcpserver) {
 			gvr = schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "daemonsets"}
 		case "statefulsets", "statefulset":
 			gvr = schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "statefulsets"}
+		default:
+			return mcpToolError(ErrCodeUnsupportedResource,
+				fmt.Sprintf("security barrier: patching kind %q is not permitted; supported kinds are: %s", kind, strings.Join(supportedAdvancedWorkloadKinds, ", ")),
+				map[string]any{"kind": kind, "supported_kinds": supportedAdvancedWorkloadKinds}), nil
+		}
+
+		k8sClient, err := ksServer.getK8sClient()
+		if err != nil {
+			return mcpToolError(ErrCodeK8sClientError, fmt.Sprintf("failed to get k8s client: %v", err), nil), nil
 		}
 
 		dynClient := k8sClient.DynamicClient
-
 		patchType := types.StrategicMergePatchType
 
 		var patchedObj *unstructured.Unstructured
@@ -245,7 +273,7 @@ func createAdvancedTools(ksServer *KubescapeMcpserver) {
 		}
 
 		if err != nil {
-			return mcpToolError(ErrCodeK8sClientError, fmt.Sprintf("dry-run patch failed: %v", err), nil), nil
+			return mcpToolError(ErrCodeK8sClientError, fmt.Sprintf("dry-run patch failed: %v", err), map[string]any{"kind": kind, "name": name, "namespace": namespace}), nil
 		}
 
 		resBytes, _ := json.Marshal(patchedObj.Object)
