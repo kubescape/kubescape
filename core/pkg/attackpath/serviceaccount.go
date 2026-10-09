@@ -91,7 +91,12 @@ func initContainersFieldPath(kind string) []string {
 	return []string{"spec", "template", "spec", "initContainers"}
 }
 
-const defaultTokenPath = "/var/run/secrets/kubernetes.io/serviceaccount"
+// serviceAccountTokenMountPath is the filesystem path where Kubernetes
+// admission injects the service account token mount. This is a well-known
+// Kubernetes path, not a credential.
+//
+//nolint:gosec // G101: this is a mount path, not a hardcoded credential
+const serviceAccountTokenMountPath = "/var/run/secrets/kubernetes.io/serviceaccount"
 
 // isMountPathOccupied reports whether any regular or init container already
 // mounts something at the default token path, which causes Kubernetes admission
@@ -116,7 +121,7 @@ func isMountPathOccupied(u *unstructured.Unstructured, kind string) bool {
 			if !ok {
 				continue
 			}
-			if mp, _ := mount["mountPath"].(string); mp == defaultTokenPath {
+			if mp, _ := mount["mountPath"].(string); mp == serviceAccountTokenMountPath {
 				occupied = true
 				break
 			}

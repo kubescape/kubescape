@@ -292,3 +292,59 @@ func TestResolveEndpoints_EmptyRefsReturnsEmpty(t *testing.T) {
 		t.Errorf("expected empty slice for nil refs, got %+v", results)
 	}
 }
+
+func TestResolveEndpoints_HostNetworkPodIsReflectedOnEndpoint(t *testing.T) {
+	// A Pod with spec.hostNetwork: true must produce Resolved=true with
+	// HostNetwork=true on the returned Endpoint so the networkpolicy engine
+	// classifies it as ExposureOpen rather than restricted.
+	p := resource(map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Pod",
+		"metadata": map[string]any{
+			"name":      "hostnet",
+			"namespace": "prod",
+			"labels":    map[string]any{"app": "hostnet"},
+		},
+		"spec": map[string]any{
+			"hostNetwork": true,
+		},
+	})
+	resources := makeResources(p)
+	refs := []WorkloadRef{{Namespace: "prod", Kind: "Pod", Name: "hostnet"}}
+
+	results := ResolveEndpointsFromResources(resources, refs)
+
+	if len(results) != 1 || !results[0].Resolved {
+		t.Fatalf("expected 1 resolved result, got %+v", results)
+	}
+	if !results[0].Endpoint.HostNetwork {
+		t.Error("expected HostNetwork=true for a Pod with spec.hostNetwork=true")
+	}
+}
+
+func TestResolveEndpoints_DeploymentHostNetworkReflected(t *testing.T) {
+	d := resource(map[string]any{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata":   map[string]any{"name": "hostnet-deploy", "namespace": "prod"},
+		"spec": map[string]any{
+			"template": map[string]any{
+				"metadata": map[string]any{"labels": map[string]any{"app": "hostnet"}},
+				"spec": map[string]any{
+					"hostNetwork": true,
+				},
+			},
+		},
+	})
+	resources := makeResources(d)
+	refs := []WorkloadRef{{Namespace: "prod", Kind: "Deployment", Name: "hostnet-deploy"}}
+
+	results := ResolveEndpointsFromResources(resources, refs)
+
+	if len(results) != 1 || !results[0].Resolved {
+		t.Fatalf("expected 1 resolved result, got %+v", results)
+	}
+	if !results[0].Endpoint.HostNetwork {
+		t.Error("expected HostNetwork=true for a Deployment with hostNetwork=true in pod template")
+	}
+}
