@@ -154,8 +154,13 @@ func ResolveEndpointsFromResources(
 			continue
 		}
 		results = append(results, WorkloadEndpointResult{
-			Ref:      ref,
-			Endpoint: networkpolicy.Endpoint{Namespace: ref.Namespace, Name: ref.Name, Labels: labels},
+			Ref: ref,
+			Endpoint: networkpolicy.Endpoint{
+				Namespace:   ref.Namespace,
+				Name:        ref.Name,
+				Labels:      labels,
+				HostNetwork: PodTemplateHostNetwork(ref.Kind, r.GetObject()),
+			},
 			Resolved: true,
 		})
 	}
