@@ -1,6 +1,6 @@
 header:
   schema-version: 2.2.0
-  last-updated: '2026-10-07'
+  last-updated: '2026-10-09'
   last-reviewed: '2026-10-07'
   url: https://raw.githubusercontent.com/kubescape/kubescape/master/security-insights.yml
 
@@ -83,9 +83,8 @@ repository:
   security:
     assessments:
       self:
-        evidence: https://github.com/cncf/toc/blob/main/projects/kubescape/security-assessment/self-assessment.md
-        date: '2024-12-10'
-        comment: CNCF TAG Security self-assessment.
+        evidence: https://github.com/kubescape/kubescape/blob/master/docs/security/self-assessment.md
+        comment: Evidence-backed draft based on the 2024 CNCF assessment; incomplete pending maintainer review.
     tools:
       - name: Dependabot
         type: SCA
