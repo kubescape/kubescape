@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
@@ -459,12 +458,6 @@ func resourceControlStatusCounters(result *resourcesresults.Result) (int, int, i
 		}
 	}
 	return passed, skipped, failed
-}
-
-func (m *Metrics) setResourcesCounters(
-	resources map[string]workloadinterface.IMetadata,
-	results map[string]resourcesresults.Result) {
-	m.setResourcesCountersFromCatalog(cautils.NewMapResourceCatalog(resources), results)
 }
 
 func (m *Metrics) setResourcesCountersFromCatalog(
