@@ -252,13 +252,15 @@ func (idx *Index) escalateVerbEdges(rules []ScopedRule) []EscalationEdge {
 				roles = idx.matchingRoles(scope, targetNames, true)
 			}
 			if len(roles) == 0 {
-				// Same partial-collection fallback as the clusterroles case
-				// above.
+				// Preserve the partial-collection warning. A cluster-wide
+				// grant on Roles still targets namespaced objects: without a
+				// matching Role, its namespace is unknown, not cluster-wide.
 				edges = append(edges, EscalationEdge{
-					Primitive: PrimitiveEscalateVerb,
-					Detail:    fmt.Sprintf("holds escalate + update/patch on Role(s) %v in namespace scope %q, not found in the collected snapshot -- may be a partial collection, not a confirmed absence", targetNames, scope),
-					Unbounded: true,
-					Scope:     scope,
+					Primitive:    PrimitiveEscalateVerb,
+					Detail:       fmt.Sprintf("holds escalate + update/patch on Role(s) %v in namespace scope %q, not found in the collected snapshot -- may be a partial collection, not a confirmed absence", targetNames, scope),
+					Unbounded:    true,
+					Scope:        scope,
+					ScopeUnknown: scope == "",
 				})
 			}
 			for _, r := range roles {

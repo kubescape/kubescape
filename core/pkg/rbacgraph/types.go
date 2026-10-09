@@ -165,15 +165,22 @@ type EscalationEdge struct {
 
 	GrantedRules []ScopedRule
 
-	// Unbounded is true when this edge grants everything within Scope,
+	// Unbounded is true when this edge grants everything within a known Scope,
 	// rather than a specific enumerable rule set -- an unrestricted bind or
 	// escalate rule (no resourceNames) is not confined to the
 	// Roles/ClusterRoles this package happened to collect; it covers any
-	// Role/ClusterRole that could ever exist in that scope.
+	// Role/ClusterRole that could ever exist in that scope. It also records
+	// conservative missing-target warnings; ScopeUnknown distinguishes an
+	// unresolved namespaced Role from a cluster-wide permission grant.
 	Unbounded bool
 	// Scope is "" for cluster-wide, else the namespace Unbounded is
-	// confined to. Meaningful only when Unbounded is true.
+	// confined to, unless ScopeUnknown is true. Meaningful only when
+	// Unbounded is true.
 	Scope string
+	// ScopeUnknown marks a missing named Role whose namespace is unresolved.
+	// The warning must remain visible, but it cannot establish cluster-admin
+	// or contribute wildcard permissions to the closure.
+	ScopeUnknown bool
 }
 
 // EscalationPath is one hop-by-hop chain from a starting Subject, letting a
