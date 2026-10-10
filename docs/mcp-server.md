@@ -393,6 +393,68 @@ Predict which workloads in a namespace would fail Pod Security Standards (PSS v1
 }
 ```
 
+#### `detect_secret_exposure`
+
+Detect potential secret exposure in Kubernetes workloads and ConfigMaps within a namespace. Analyzes container environment variables, `envFrom` configurations, and `ConfigMap` data for exposed plain-text credentials and high-confidence secret patterns (such as AWS keys, GitHub tokens, Slack tokens, private keys, JWTs, and database URIs with credentials). Masked previews are provided to prevent credential leakage. If listing ConfigMaps is forbidden (RBAC) during a workload-scoped scan, `configMapReferencesResolved` is set to `false` and a warning indicates that `envFrom` and `configMapKeyRef` references could not be evaluated. Other ConfigMap list errors return a tool error.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `namespace` | string | Yes | Namespace to analyze |
+| `resource_kind` | string | No | Filter by resource kind: `Deployment`, `DaemonSet`, `StatefulSet`, `ReplicaSet`, `Job`, `CronJob`, `Pod`, `ConfigMap` |
+| `resource_name` | string | No | Specific resource name to check. Omit to evaluate all supported resources in the namespace |
+
+**Example Response:**
+
+```json
+{
+  "namespace": "production",
+  "totalWorkloads": 5,
+  "totalConfigMaps": 3,
+  "findingsCount": 2,
+  "findings": [
+    {
+      "resourceKind": "Deployment",
+      "resourceName": "backend-api",
+      "namespace": "production",
+      "container": "api-server",
+      "location": "env.DB_PASSWORD",
+      "key": "DB_PASSWORD",
+      "ruleId": "ENV_CREDENTIAL_KEYWORD",
+      "description": "Plain-text credential configured directly in configuration data",
+      "maskedValue": "supe****123!",
+      "severity": "High"
+    },
+    {
+      "resourceKind": "ConfigMap",
+      "resourceName": "app-config",
+      "namespace": "production",
+      "location": "data.id_rsa",
+      "key": "id_rsa",
+      "ruleId": "CONFIGMAP_SENSITIVE_KEY",
+      "description": "ConfigMap data key indicates credential or sensitive secret file",
+      "maskedValue": "-----BEGIN PRIVATE KEY...[REDACTED]-----",
+      "severity": "High"
+    }
+  ],
+  "configMapReferencesResolved": true
+}
+```
+
+##### Relationship to Control C-0012 (`Applications credentials in configuration files`)
+
+`detect_secret_exposure` complements Kubescape posture control C-0012 with interactive, live-cluster secret exposure detection. While both share the core objective of identifying exposed credentials in Kubernetes configurations, the MCP tool deliberately differs in several areas to improve signal quality and detection depth for AI assistants:
+
+| Capability / Behavior | Posture Control C-0012 | `detect_secret_exposure` MCP Tool |
+|-----------------------|------------------------|-----------------------------------|
+| **Workload & ConfigMap Cross-Referencing** | Evaluates resources in isolation. Skips `envFrom` and ignores `valueFrom.configMapKeyRef` references (`is_not_reference` check). | **Actively resolves references across resources.** Traces container `envFrom.configMapRef` to ConfigMaps containing exposed secrets (`ENVFROM_EXPOSED_CONFIGMAP`) and validates `configMapKeyRef` targets (`CONFIGMAP_KEY_REF_CREDENTIAL`). |
+| **High-Confidence Value Detection** | Generic substring matching (`_key_`, `_secret_`, `Bearer`, `JWT`, `PRIVATE KEY`). | **Dedicated regex patterns for concrete credentials**: AWS Access Keys (`AKIA...`), GitHub personal access tokens (`ghp_...`), Slack tokens (`xoxb-...`), full JSON Web Tokens, PEM private keys, and connection strings with embedded credentials (`protocol://user:pass@host`). |
+| **Connection String Credentials** | Flags key names matching `database_url`, but does not inspect URIs without keyword matches. | Detects embedded credentials directly in connection URIs (`URI_CREDENTIALS`), even when configured under generic variable names. |
+| **Key Name Matching Heuristics** | Unanchored substring matching on keywords (e.g. `key`, `pwd`, `token`), which can produce false positives on non-secret variables (e.g. `KEYBOARD_LAYOUT`, `PKEY_TYPE`). | Uses bounded, delimited regexes (`(?:^\|_\|-)KEYWORD(?:$\|_\|-)`) combined with non-secret suffix exclusions (`_NAME`, `_FILE`, `_PATH`, `_DIR`, `_REF`, `_TTL`, `_TIMEOUT`, etc.) and path exclusions for `PWD` / `*_PWD`. |
+| **Safe Placeholders & Templates** | Requires custom configuration in `sensitiveValuesAllowed` (defaults to empty). | Automatically recognizes common placeholder values (`true`, `false`, `none`, `dummy`, `changeme`, etc.) and dynamic runtime expressions (`$(...)`, `${...}`, `{{...}}`). |
+| **Configuration Files & Binary Data** | Scans ConfigMap `data` strings only. | Specifically identifies sensitive credential files (`.env`, `credentials.json`, `id_rsa`, `jwt.key`), scans both `data` and `binaryData`, and provides safe, fully redacted previews (`******`) to prevent credential leakage in responses. |
+
 ## Resource Templates
 
 The MCP server also exposes resource templates for direct access to data:
