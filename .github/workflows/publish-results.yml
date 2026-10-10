@@ -1,0 +1,44 @@
+# Publishes the OSPS Baseline evaluation of this repository to grc.store.
+#
+# The publisher is referenced by tag, not by commit SHA, on purpose: a
+# SHA-pinned call puts the SHA in the signing certificate instead of
+# refs/tags/v1, and the hub's identity check rejects it.
+#
+# Never add a pull_request trigger. The job mints an OIDC token that the hub
+# trusts for this repository, and it must not run on code from a fork.
+
+name: Publish OSPS Baseline results
+on:
+  schedule:
+    - cron: "0 0 * * 1"
+  workflow_dispatch: {}
+
+permissions: {}
+
+jobs:
+  publish:
+    name: Publish to grc.store
+    permissions:
+      # Needed to check out the repository and run the scanner against it.
+      contents: read
+      # Needed to authenticate to the hub with the job's OIDC token; the hub
+      # must list this repository and ref as a trusted publisher.
+      id-token: write
+    uses: revanite-io/pvtr-publish-results/.github/workflows/publish.yml@v1
+    with:
+      target: kubescape/kubescape@master
+      license: CC0-1.0
+    secrets:
+      config: |
+        services:
+          kubescape:
+            plugin: openssf/github-repo
+            policy:
+              catalogs:
+                - osps-baseline
+              applicability:
+                - maturity-2
+            vars:
+              owner: kubescape
+              repo: kubescape
+              token: ${{ secrets.GITHUB_TOKEN }}
