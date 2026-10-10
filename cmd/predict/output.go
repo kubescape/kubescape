@@ -7,11 +7,13 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"text/tabwriter"
 	"time"
 
 	"github.com/kubescape/kubescape/v4/core/pkg/pss"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer"
 )
 
 const outputDirPerm = 0o750
@@ -55,20 +57,28 @@ func writeOutput(result pss.NamespaceResult, format, outputFile string, verbose 
 		w = os.Stdout
 	}
 
+	var err error
 	switch format {
 	case "json":
-		return writeJSON(w, result)
+		err = writeJSON(w, result)
 	case "table":
-		return writeTable(w, result, verbose)
+		err = writeTable(w, result, verbose)
 	case "sarif":
-		return writeSARIF(w, result)
+		err = writeSARIF(w, result)
 	case "junit":
-		return writeJUnit(w, result)
+		err = writeJUnit(w, result)
 	case "pretty-printer":
-		return writePretty(w, result, verbose)
+		err = writePretty(w, result, verbose)
 	default:
 		return fmt.Errorf("unsupported format %q", format)
 	}
+	if err != nil {
+		return err
+	}
+	if outputFile != "" {
+		printer.LogOutputFile(outputFile)
+	}
+	return nil
 }
 
 // --- JSON formatter ---
@@ -178,6 +188,17 @@ func writeTable(w io.Writer, result pss.NamespaceResult, verbose bool) error {
 
 	if err := tw.Flush(); err != nil {
 		return err
+	}
+
+	if len(result.DecodeWarnings) > 0 {
+		if _, err := fmt.Fprintf(w, "\nWarnings (%d unevaluated):\n", result.UnevaluatedWorkloads); err != nil {
+			return err
+		}
+		for _, warning := range result.DecodeWarnings {
+			if _, err := fmt.Fprintf(w, "  ⚠ %s\n", warning); err != nil {
+				return err
+			}
+		}
 	}
 
 	// Summary line
@@ -318,6 +339,7 @@ type sarifMessage struct {
 
 type sarifResult struct {
 	RuleID    string          `json:"ruleId"`
+	RuleIndex int             `json:"ruleIndex"`
 	Level     string          `json:"level"`
 	Message   sarifMessage    `json:"message"`
 	Locations []sarifLocation `json:"locations"`
@@ -346,8 +368,17 @@ func writeSARIF(w io.Writer, result pss.NamespaceResult) error {
 		}
 	}
 
-	rules := make([]sarifRule, 0)
-	for ruleID, level := range ruleMap {
+	ruleIDs := make([]string, 0, len(ruleMap))
+	for ruleID := range ruleMap {
+		ruleIDs = append(ruleIDs, ruleID)
+	}
+	sort.Strings(ruleIDs)
+
+	ruleIndexMap := make(map[string]int, len(ruleIDs))
+	rules := make([]sarifRule, 0, len(ruleIDs))
+	for i, ruleID := range ruleIDs {
+		ruleIndexMap[ruleID] = i
+		level := ruleMap[ruleID]
 		sarifLevel := "warning"
 		if level <= pss.Baseline {
 			sarifLevel = "error"
@@ -376,9 +407,10 @@ func writeSARIF(w io.Writer, result pss.NamespaceResult) error {
 				fqn += "/" + v.Container
 			}
 			results = append(results, sarifResult{
-				RuleID:  ruleID,
-				Level:   level,
-				Message: sarifMessage{Text: v.Description},
+				RuleID:    ruleID,
+				RuleIndex: ruleIndexMap[ruleID],
+				Level:     level,
+				Message:   sarifMessage{Text: v.Description},
 				Locations: []sarifLocation{{
 					LogicalLocations: []sarifLogicalLocation{{
 						Name:               r.Name,
@@ -415,6 +447,9 @@ func writeSARIF(w io.Writer, result pss.NamespaceResult) error {
 
 type junitTestSuites struct {
 	XMLName   xml.Name         `xml:"testsuites"`
+	Tests     int              `xml:"tests,attr"`
+	Failures  int              `xml:"failures,attr"`
+	Skipped   int              `xml:"skipped,attr"`
 	TestSuite []junitTestSuite `xml:"testsuite"`
 }
 
@@ -488,6 +523,9 @@ func writeJUnit(w io.Writer, result pss.NamespaceResult) error {
 	}
 
 	suites := junitTestSuites{
+		Tests:    result.TotalWorkloads,
+		Failures: result.FailingWorkloads,
+		Skipped:  result.UnevaluatedWorkloads,
 		TestSuite: []junitTestSuite{{
 			Name:      suiteName,
 			Tests:     result.TotalWorkloads,
