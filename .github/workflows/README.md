@@ -12,13 +12,13 @@ Opening a PR triggers `00-pr-scanner.yaml`, which calls the reusable `a-pr-scann
 
 Two GitHub Apps report alongside it: the DCO check, which requires a `Signed-off-by:` trailer on every commit, and GitGuardian secret scanning.
 
-`00-pr-scanner.yaml` carries a `paths-ignore` filter, so a PR that touches nothing else can skip the build entirely. It ignores `**.md`, `**.yaml`, `**.yml` and `**.sh` at any depth, plus files sitting directly in `website/`, `examples/`, `docs/`, `build/` and `.github/`. Those last five are single-level patterns: a nested file such as `docs/guide/diagram.svg` does not match and will still start the workflow. The build is skipped only when *every* changed file in the PR matches one of the patterns.
+`00-pr-scanner.yaml` runs on every PR, and its `changes` job decides whether the build and E2E jobs run, so a PR that touches nothing else skips them. A skipped job reports as passed, so required checks never wait on a docs-only PR. It ignores `**.md`, `**.yaml`, `**.yml` and `**.sh` at any depth, plus files sitting directly in `website/`, `examples/`, `docs/`, `build/` and `.github/`. Those last five are single-level patterns: a nested file such as `docs/guide/diagram.svg` does not match and will still run the build. The build is skipped only when *every* changed file in the PR matches one of the patterns.
 
 ### Reviewing a PR
 
 The E2E system tests do not live in this repository. `00-pr-scanner.yaml` dispatches them to a private repository and polls for the result.
 
-They run automatically on every PR — there is no label to add and no approval gate. The `run-system-tests` job is gated only on the `wf-preparation` job finding the required organization secrets, which means it is **skipped on PRs from forks**. If you are contributing from a fork, the unit tests and the smoke test are the only automated verification available to you, so cover your change with unit tests.
+They run automatically on every PR that changes code — there is no label to add and no approval gate. The `run-system-tests` job is gated only on the `changes` job finding a code change and the `wf-preparation` job finding the required organization secrets, which means it is **skipped on docs-only PRs and on PRs from forks**. If you are contributing from a fork, the unit tests and the smoke test are the only automated verification available to you, so cover your change with unit tests.
 
 ### Approving a PR
 
@@ -28,7 +28,7 @@ Once a maintainer approves and the required checks are green, the PR can be merg
 
 The code is merged, no other actions are needed.
 
-`00-pr-scanner.yaml` then runs again on the push to `master`, under the same `paths-ignore` filter, so the merge commit gets the same build, tests and lint the PR got. This matters because a PR run only proves the branch was green against the base *as it stood when that run started*: two PRs can each pass, merge, and still break `master` between them. Without the push run the failure first surfaces on the next contributor's PR, pointing at files they never touched.
+`00-pr-scanner.yaml` then runs again on the push to `master`, with the same paths in its `paths-ignore` filter, so the merge commit gets the same build, tests and lint the PR got. This matters because a PR run only proves the branch was green against the base *as it stood when that run started*: two PRs can each pass, merge, and still break `master` between them. Without the push run the failure first surfaces on the next contributor's PR, pointing at files they never touched.
 
 The E2E system tests do **not** run on merge — `run-system-tests` is gated on `github.event_name != 'push'`. Each push run gets a concurrency group of its own (`github.run_id`) and is never cancelled, so a burst of merges cannot cancel or replace another merge's run; pull request runs are still grouped by ref and superseded by the next push to the PR. `internal/ghworkflows/masterbuild_test.go` asserts all of this.
 

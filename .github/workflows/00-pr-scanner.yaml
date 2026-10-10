@@ -4,16 +4,6 @@ on:
     workflow_dispatch: {}
     pull_request:
         types: [opened, reopened, synchronize, ready_for_review]
-        paths-ignore:
-            - "**.yaml"
-            - "**.yml"
-            - "**.md"
-            - "**.sh"
-            - "website/*"
-            - "examples/*"
-            - "docs/*"
-            - "build/*"
-            - ".github/*"
     # A pull_request run builds the PR merged into the base as the base stood
     # when the run started. Two PRs can therefore each be green against a base
     # that does not yet contain the other, merge, and leave master broken with
@@ -25,8 +15,8 @@ on:
     #
     # Running the same checks on the merge commit attributes that breakage to
     # the merge that caused it, within minutes. The paths-ignore list mirrors
-    # the pull_request one above: a merge that changes only docs cannot change
-    # whether master compiles. Keep the two lists in step.
+    # the changes job's filter below: a merge that changes only docs cannot
+    # change whether master compiles. Keep the two lists in step.
     push:
         branches: [master]
         paths-ignore:
@@ -53,7 +43,35 @@ concurrency:
     cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+    # Required checks wait forever on a workflow that never starts, but a
+    # skipped job reports as passed, so docs-only PRs are skipped per job here.
+    changes:
+        runs-on: ubuntu-latest
+        outputs:
+            # A skipped or failed filter counts as a code change, so nothing is skipped by mistake.
+            code: ${{ steps.filter.outcome != 'success' || steps.filter.outputs.code == 'true' }}
+        steps:
+            - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+              id: filter
+              if: ${{ github.event_name == 'pull_request' }}
+              continue-on-error: true
+              with:
+                  predicate-quantifier: every
+                  filters: |
+                      code:
+                          - "**"
+                          - "!**.yaml"
+                          - "!**.yml"
+                          - "!**.md"
+                          - "!**.sh"
+                          - "!website/*"
+                          - "!examples/*"
+                          - "!docs/*"
+                          - "!build/*"
+                          - "!.github/*"
+
     pr-scanner:
+        needs: changes
         permissions:
             actions: read
             artifact-metadata: read
@@ -77,6 +95,7 @@ jobs:
             CLIENT: test
             CGO_ENABLED: 0
             GO111MODULE: ""
+            SKIP: ${{ needs.changes.outputs.code != 'true' }}
         secrets: inherit
 
     wf-preparation:
@@ -100,7 +119,7 @@ jobs:
 
 
     run-system-tests:
-        needs: [wf-preparation, pr-scanner]
+        needs: [changes, wf-preparation, pr-scanner]
         # Not on a merge. The E2E suite is dispatched to a private repository and
         # polled for up to an hour, and its correlation id and KS_BRANCH come
         # from the head ref, which on a push to master is just master - a run
@@ -108,7 +127,7 @@ jobs:
         # not a health check on the merged branch, so the push trigger stops at
         # the build and tests. Excluding push rather than requiring
         # pull_request leaves the existing workflow_dispatch path untouched.
-        if: ${{ (github.event_name != 'push') && (needs.wf-preparation.outputs.is-secret-set == 'true') && (always() && (contains(needs.*.result, 'success') || contains(needs.*.result, 'skipped')) && !(contains(needs.*.result, 'failure')) && !(contains(needs.*.result, 'cancelled'))) }}
+        if: ${{ (github.event_name != 'push') && (needs.wf-preparation.outputs.is-secret-set == 'true') && (always() && (contains(needs.*.result, 'success') || contains(needs.*.result, 'skipped')) && !(contains(needs.*.result, 'failure')) && !(contains(needs.*.result, 'cancelled'))) && (needs.changes.outputs.code == 'true') }}
         runs-on: ubuntu-latest
         permissions:
             actions: read
