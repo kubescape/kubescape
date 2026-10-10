@@ -69,6 +69,8 @@ func closePrinters(printers ...printer.IPrinter) error {
 	return closeErr
 }
 
+// getInterfaces initializes and returns the component interfaces required for scanning,
+// including Kubernetes API and tenant configuration.
 func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo, policyIdentifiers []cautils.PolicyIdentifier) (componentInterfaces, error) {
 	ctx, span := otel.Tracer("").Start(ctx, "setup interfaces")
 	defer span.End()
@@ -89,11 +91,18 @@ func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo, policyIdenti
 	}
 
 	// ================== setup tenant object ======================================
-	k8sForTenant := k8s
-	if k8sForTenant == nil {
-		k8sForTenant = kubernetesAPIFunc()
+	var tenantConfig cautils.ITenantConfig
+	if k8s != nil {
+		tenantConfig = cautils.GetTenantConfig(ctx, scanInfo.AccountID, scanInfo.AccessKey, scanInfo.GetClusterContextName(), scanInfo.CustomClusterName, k8s)
+	} else {
+		localTenantConfig := cautils.NewLocalConfig(scanInfo.AccountID, scanInfo.AccessKey, scanInfo.GetClusterContextName(), scanInfo.CustomClusterName)
+		if hasResolvedTenantConfig(scanInfo, localTenantConfig) {
+			tenantConfig = localTenantConfig
+		} else {
+			k8sForTenant := kubernetesAPIFunc()
+			tenantConfig = cautils.GetTenantConfig(ctx, scanInfo.AccountID, scanInfo.AccessKey, scanInfo.GetClusterContextName(), scanInfo.CustomClusterName, k8sForTenant)
+		}
 	}
-	tenantConfig := cautils.GetTenantConfig(ctx, scanInfo.AccountID, scanInfo.AccessKey, scanInfo.GetClusterContextName(), scanInfo.CustomClusterName, k8sForTenant)
 
 	// Set submit behavior AFTER loading tenant config
 	setSubmitBehavior(scanInfo, tenantConfig)
@@ -157,6 +166,33 @@ func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo, policyIdenti
 		hostSensorHandler: hostSensorHandler,
 		k8s:               k8s,
 	}, nil
+}
+
+// hasResolvedTenantConfig reports whether all required tenant configuration fields
+// (AccountID, AccessKey, CloudReportURL, and CloudAPIURL) are already resolved locally
+// and supported by explicit credential overrides, eliminating the need to query in-cluster
+// ConfigMap and Secret fixtures.
+func hasResolvedTenantConfig(scanInfo *cautils.ScanInfo, tc cautils.ITenantConfig) bool {
+	if tc == nil {
+		return false
+	}
+	if tc.GetAccountID() == "" ||
+		tc.GetAccessKey() == "" ||
+		tc.GetCloudReportURL() == "" ||
+		tc.GetCloudAPIURL() == "" {
+		return false
+	}
+
+	// Verify credential provenance:
+	// In-cluster Secret credentials have higher precedence than the local cache.
+	// Only accept localTenantConfig as fully resolved when credentials are
+	// explicitly provided by the caller (via CLI flags or environment variables),
+	// which outrank in-cluster Secret. Cache-derived credentials must not bypass
+	// cluster Secret lookup.
+	hasAccountOverride := (scanInfo != nil && scanInfo.AccountID != "") || os.Getenv(cautils.AccountIdEnvVar) != ""
+	hasAccessKeyOverride := (scanInfo != nil && scanInfo.AccessKey != "") || os.Getenv(cautils.AccessKeyEnvVar) != ""
+
+	return hasAccountOverride && hasAccessKeyOverride
 }
 
 func validateSBOMOutput(scanInfo *cautils.ScanInfo, format string) error {
