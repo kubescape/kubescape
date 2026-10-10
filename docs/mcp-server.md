@@ -391,6 +391,52 @@ Predict which workloads in a namespace would fail Pod Security Standards (PSS v1
     }
   ]
 }
+#### `detect_secret_exposure`
+
+Detect potential secret exposure in Kubernetes workloads and ConfigMaps within a namespace. Analyzes container environment variables, `envFrom` configurations, and `ConfigMap` data for exposed plain-text credentials and high-confidence secret patterns (such as AWS keys, GitHub tokens, Slack tokens, private keys, JWTs, and database URIs with credentials). Masked previews are provided to prevent credential leakage.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `namespace` | string | Yes | Namespace to analyze |
+| `resource_kind` | string | No | Filter by resource kind: `Deployment`, `DaemonSet`, `StatefulSet`, `ReplicaSet`, `Job`, `CronJob`, `Pod`, `ConfigMap` |
+| `resource_name` | string | No | Specific resource name to check. Omit to evaluate all supported resources in the namespace |
+
+**Example Response:**
+
+```json
+{
+  "namespace": "production",
+  "totalWorkloads": 5,
+  "totalConfigMaps": 3,
+  "findingsCount": 2,
+  "findings": [
+    {
+      "resourceKind": "Deployment",
+      "resourceName": "backend-api",
+      "namespace": "production",
+      "container": "api-server",
+      "location": "env.DB_PASSWORD",
+      "key": "DB_PASSWORD",
+      "ruleId": "ENV_CREDENTIAL_KEYWORD",
+      "description": "Plain-text credential configured directly in configuration data",
+      "maskedValue": "supe****123!",
+      "severity": "High"
+    },
+    {
+      "resourceKind": "ConfigMap",
+      "resourceName": "app-config",
+      "namespace": "production",
+      "location": "data.id_rsa",
+      "key": "id_rsa",
+      "ruleId": "CONFIGMAP_SENSITIVE_KEY",
+      "description": "ConfigMap data key indicates credential or sensitive secret file",
+      "maskedValue": "-----BEGIN PRIVATE KEY...[REDACTED]-----",
+      "severity": "High"
+    }
+  ]
+}
 ```
 
 ## Resource Templates
