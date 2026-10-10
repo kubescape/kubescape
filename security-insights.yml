@@ -1,6 +1,6 @@
 header:
   schema-version: 2.2.0
-  last-updated: '2026-10-07'
+  last-updated: '2026-10-10'
   last-reviewed: '2026-10-07'
   url: https://raw.githubusercontent.com/kubescape/kubescape/master/security-insights.yml
 
@@ -35,6 +35,7 @@ project:
       email: cncf-kubescape-maintainers@lists.cncf.io
       primary: true
   documentation:
+    design: https://github.com/kubescape/kubescape/blob/master/docs/architecture.md
     detailed-guide: https://kubescape.io/docs/
     code-of-conduct: https://github.com/kubescape/project-governance/blob/main/CODE_OF_CONDUCT.md
     quickstart-guide: https://kubescape.io/docs/getting-started/
