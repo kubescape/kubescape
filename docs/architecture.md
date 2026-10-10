@@ -292,12 +292,12 @@ Who and what interacts with Kubescape, and what each one does. The interfaces th
 | Kubernetes API server | A kubeconfig, or the pod's service account for the microservice | Serves the resources a cluster scan reads. `kubescape operator` port-forwards through it to the operator |
 | Container registries | Image references | Serve images for image scanning. `kubescape patch` pushes the patched image to a registry with `--push`, or loads it into the local Docker daemon |
 | Policy source | HTTPS, or a local directory | Provides frameworks, controls, exceptions and control inputs: the [regolibrary](https://github.com/kubescape/regolibrary) GitHub releases by default, or local files given with `--use-from` or `--use-artifacts-from` |
-| Vulnerability database | HTTPS | Provides the Grype database for image scanning. `--grype-db-url` sets another source |
+| Vulnerability database | HTTPS, or the HTTP(S) URL given with `--grype-db-url` | Provides the Grype database for image scanning |
 | Git hosts | Git over HTTPS | Serve the repository when a scan target is a remote Git URL |
 | Kubescape backend (optional) | HTTPS, only when an account ID or `--server` is configured | Provides policies, exceptions and control inputs in place of the regolibrary, and receives reports sent with `--submit` |
 | Webhook receivers (optional) | HTTPS POST, only with `--notify` | Receive the scan summary: a Block Kit message for Slack, an Adaptive Card for Microsoft Teams, and the summary JSON for any other URL |
 | Cloud provider APIs (EKS, GKE, AKS) | The cloud SDK's default credentials, during a scan of a managed cluster | Describe the cluster and its registries, for the controls that need that data |
-| Version check service | HTTPS POST to `version-check.ks-services.co` on `scan`, `version` and `update`, unless `KS_SKIP_UPDATE_CHECK` is `true` | Receives the client version and build, the framework and scanning context, whether the run came from a pipeline, the account ID when one is configured, the Helm chart version when run from the chart, and for a cluster scan the node count and an ID derived from the cluster's `kubernetes` Service. Replies with the latest release |
+| Version check service | HTTPS POST to `version-check.ks-services.co` on `scan` and `version` unless `KS_SKIP_UPDATE_CHECK` is `true`, and on `update` always | Receives the client version and build, the framework and scanning context, whether the run came from a pipeline, the account ID when one is configured, the Helm chart version when run from the chart, and for a cluster scan the node count and an ID derived from the cluster's `kubernetes` Service. Replies with the latest release |
 | OpenTelemetry collector (optional) | OTLP, only with `--otel-endpoint` or `OTEL_EXPORTER_OTLP_ENDPOINT` | Receives the scan's traces and metrics |
 
 ## External interfaces
@@ -315,7 +315,7 @@ Who and what interacts with Kubescape, and what each one does. The interfaces th
 
 ### Consumed
 
-The outbound connections in [Actors and actions](#actors-and-actions). A scan of a cluster, an image or a remote repository reaches the Kubernetes API server, the registry or the Git host it targets. It also fetches its policies and, for image scanning, the vulnerability database, unless they are given locally (`--use-artifacts-from`, `--use-from`, `--grype-db-url`). The version check runs unless `KS_SKIP_UPDATE_CHECK` is set, and cloud provider APIs are called only for a managed cluster. The Kubescape backend, webhook receivers and an OpenTelemetry collector are contacted only when configured.
+The outbound connections in [Actors and actions](#actors-and-actions). A scan of a cluster, an image or a remote repository reaches the Kubernetes API server, the registry or the Git host it targets. It also fetches its policies, unless they are given as local files (`--use-artifacts-from`, `--use-from`), and for image scanning the vulnerability database, from the server `--grype-db-url` names if set, such as a local mirror. The version check runs on `update`, and on `scan` and `version` unless `KS_SKIP_UPDATE_CHECK` is set. Cloud provider APIs are called only for a managed cluster. The Kubescape backend, webhook receivers and an OpenTelemetry collector are contacted only when configured.
 
 ---
 
