@@ -18,7 +18,7 @@ Two GitHub Apps report alongside it: the DCO check, which requires a `Signed-off
 
 The E2E system tests do not live in this repository. `00-pr-scanner.yaml` dispatches them to a private repository and polls for the result.
 
-They run automatically on every PR — there is no label to add and no approval gate. The `run-system-tests` job is gated only on the `wf-preparation` job finding the required organization secrets, which means it is **skipped on PRs from forks**. If you are contributing from a fork, the unit tests and the smoke test are the only automated verification available to you, so cover your change with unit tests.
+They run automatically on every PR that changes code — there is no label to add and no approval gate. The `run-system-tests` job is gated only on the `changes` job finding a code change and the `wf-preparation` job finding the required organization secrets, which means it is **skipped on docs-only PRs and on PRs from forks**. If you are contributing from a fork, the unit tests and the smoke test are the only automated verification available to you, so cover your change with unit tests.
 
 ### Approving a PR
 
