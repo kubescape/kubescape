@@ -116,6 +116,7 @@ type gatewayAPIWireShape struct {
 			Namespace   *string `json:"namespace,omitempty"`
 			Name        string  `json:"name"`
 			SectionName *string `json:"sectionName,omitempty"`
+			Port        *int32  `json:"port,omitempty"`
 		} `json:"parentRefs,omitempty"`
 		Hostnames []string `json:"hostnames,omitempty"`
 		Rules     []struct {
@@ -131,6 +132,7 @@ type gatewayAPIWireShape struct {
 		Listeners []struct {
 			Name          string `json:"name"`
 			Hostname      string `json:"hostname,omitempty"`
+			Port          int32  `json:"port"`
 			AllowedRoutes *struct {
 				Namespaces *struct {
 					From     *string              `json:"from,omitempty"`
@@ -167,7 +169,7 @@ func decodeGatewayRoute(kind string, obj map[string]any) (gatewayRoute, error) {
 		Hostnames: wire.Spec.Hostnames,
 	}
 	for _, p := range wire.Spec.ParentRefs {
-		r.ParentRefs = append(r.ParentRefs, parentRef{Group: p.Group, Kind: p.Kind, Namespace: p.Namespace, Name: p.Name, SectionName: p.SectionName})
+		r.ParentRefs = append(r.ParentRefs, parentRef{Group: p.Group, Kind: p.Kind, Namespace: p.Namespace, Name: p.Name, SectionName: p.SectionName, Port: p.Port})
 	}
 	for _, rule := range wire.Spec.Rules {
 		var backends []backendRef
@@ -187,7 +189,7 @@ func decodeGateway(obj map[string]any) (gateway, error) {
 
 	g := gateway{Namespace: wire.Metadata.Namespace, Name: wire.Metadata.Name}
 	for _, l := range wire.Spec.Listeners {
-		out := listener{Name: l.Name, Hostname: l.Hostname}
+		out := listener{Name: l.Name, Hostname: l.Hostname, Port: l.Port}
 		if l.AllowedRoutes != nil {
 			ar := &allowedRoutes{}
 			if l.AllowedRoutes.Namespaces != nil {

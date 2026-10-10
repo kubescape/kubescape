@@ -139,12 +139,15 @@ const gatewayAPIGroup = "gateway.networking.k8s.io"
 // SectionName, when present, pins the attachment to the one listener with
 // that name: per the Gateway API spec the route then attaches to that
 // section only, and no other listener of the Gateway may admit it.
+// Port, when present, further restricts attachment to listeners on that port.
+// Both restrictions must match when supplied together.
 type parentRef struct {
 	Group       *string
 	Kind        *string
 	Namespace   *string
 	Name        string
 	SectionName *string
+	Port        *int32
 }
 
 // isGatewayParentRef reports whether ref effectively names a Gateway once
@@ -188,6 +191,7 @@ type gateway struct {
 }
 
 type listener struct {
+	Port          int32
 	Name          string
 	Hostname      string
 	AllowedRoutes *allowedRoutes
