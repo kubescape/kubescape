@@ -46,16 +46,16 @@ func TestCallToolValidation(t *testing.T) {
 		wantError string
 	}{
 		{name: "unknown tool", server: ksServer, tool: "missing", arguments: map[string]any{}, wantError: "unknown tool"},
-		{name: "vulnerability namespace type", server: ksServer, tool: "list_vulnerability_manifests", arguments: map[string]any{"namespace": 42}, wantError: "namespace must be a string"},
-		{name: "CVE list requires manifest", server: ksServer, tool: "list_vulnerabilities_in_manifest", arguments: map[string]any{}, wantError: "manifest_name is required"},
-		{name: "CVE list manifest type", server: ksServer, tool: "list_vulnerabilities_in_manifest", arguments: map[string]any{"manifest_name": 42}, wantError: "manifest_name must be a string"},
-		{name: "CVE match requires ID", server: ksServer, tool: "list_vulnerability_matches_for_cve", arguments: map[string]any{"manifest_name": "manifest"}, wantError: "cve_id is required"},
-		{name: "CVE match ID type", server: ksServer, tool: "list_vulnerability_matches_for_cve", arguments: map[string]any{"manifest_name": "manifest", "cve_id": 42}, wantError: "cve_id must be a string"},
-		{name: "configuration namespace type", server: ksServer, tool: "list_configuration_security_scan_manifests", arguments: map[string]any{"namespace": true}, wantError: "namespace must be a string"},
-		{name: "configuration get requires name", server: ksServer, tool: "get_configuration_security_scan_manifest", arguments: map[string]any{}, wantError: "manifest_name is required"},
-		{name: "profile namespace type", server: ksServer, tool: "list_container_profiles", arguments: map[string]any{"namespace": true}, wantError: "namespace must be a string"},
-		{name: "profile get requires name", server: ksServer, tool: "get_container_profile", arguments: map[string]any{}, wantError: "profile_name is required"},
-		{name: "profile name type", server: ksServer, tool: "get_container_profile", arguments: map[string]any{"profile_name": 42}, wantError: "profile_name must be a string"},
+		{name: "vulnerability namespace type", server: ksServer, tool: "list_vulnerability_manifests", arguments: map[string]any{"namespace": 42}, wantError: "namespace argument must be a string"},
+		{name: "CVE list requires manifest", server: ksServer, tool: "list_vulnerabilities_in_manifest", arguments: map[string]any{}, wantError: "manifest_name argument is required"},
+		{name: "CVE list manifest type", server: ksServer, tool: "list_vulnerabilities_in_manifest", arguments: map[string]any{"manifest_name": 42}, wantError: "manifest_name argument must be a string"},
+		{name: "CVE match requires ID", server: ksServer, tool: "list_vulnerability_matches_for_cve", arguments: map[string]any{"manifest_name": "manifest"}, wantError: "cve_id argument is required"},
+		{name: "CVE match ID type", server: ksServer, tool: "list_vulnerability_matches_for_cve", arguments: map[string]any{"manifest_name": "manifest", "cve_id": 42}, wantError: "cve_id argument must be a string"},
+		{name: "configuration namespace type", server: ksServer, tool: "list_configuration_security_scan_manifests", arguments: map[string]any{"namespace": true}, wantError: "namespace argument must be a string"},
+		{name: "configuration get requires name", server: ksServer, tool: "get_configuration_security_scan_manifest", arguments: map[string]any{}, wantError: "manifest_name argument is required"},
+		{name: "profile namespace type", server: ksServer, tool: "list_container_profiles", arguments: map[string]any{"namespace": true}, wantError: "namespace argument must be a string"},
+		{name: "profile get requires name", server: ksServer, tool: "get_container_profile", arguments: map[string]any{}, wantError: "profile_name argument is required"},
+		{name: "profile name type", server: ksServer, tool: "get_container_profile", arguments: map[string]any{"profile_name": 42}, wantError: "profile_name argument must be a string"},
 
 		{name: "vulnerability list kubernetes error", server: ksErrorServer, tool: "list_vulnerability_manifests", arguments: map[string]any{}, wantError: "simulated list error"},
 		{name: "configuration list kubernetes error", server: ksErrorServer, tool: "list_configuration_security_scan_manifests", arguments: map[string]any{}, wantError: "simulated list error"},
@@ -65,9 +65,14 @@ func TestCallToolValidation(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			result, err := test.server.CallTool(context.Background(), test.tool, test.arguments)
-			require.Error(t, err)
-			assert.Nil(t, result)
-			assert.Contains(t, err.Error(), test.wantError)
+			if err != nil {
+				assert.Nil(t, result)
+				assert.Contains(t, err.Error(), test.wantError)
+			} else {
+				require.NotNil(t, result)
+				assert.True(t, result.IsError)
+				assert.Contains(t, result.Content[0].(mcp.TextContent).Text, test.wantError)
+			}
 		})
 	}
 }
