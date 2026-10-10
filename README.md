@@ -187,6 +187,12 @@ kubescape scan https://github.com/kubescape/kubescape
 kubescape scan /path/to/kustomize/directory/
 ```
 
+Helm scans use only dependencies already vendored in `charts/` and do not
+fetch dependencies or modify the chart directory. Missing dependencies produce
+a warning and may prevent some templates from rendering. To include them,
+review their sources and explicitly prepare dependencies with Helm before
+scanning. See [scanning Helm charts](docs/getting-started.md#scan-helm-charts).
+
 #### Scan Options
 
 ```bash
