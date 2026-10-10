@@ -1320,7 +1320,7 @@ kubescape mcpserver
 
 ### Description
 
-Starts an MCP server that exposes Kubescape data to AI assistants. The server communicates via stdio.
+Starts an MCP server that exposes Kubescape data to AI assistants. The server communicates via stdio by default. With `--transport sse` it serves SSE on `127.0.0.1` instead, on the port given by `--port` (default `8080`).
 
 ### Prerequisites
 
@@ -1488,6 +1488,7 @@ Kubescape respects the following environment variables:
 | `KS_FORMAT` | Default output format |
 | `KS_LOGGER` | Log level |
 | `KS_LOGGER_NAME` | Logger name |
+| `KS_SKIP_UPDATE_CHECK` | Set to `true` to skip the version check that `scan`, `version` and `update` send to `version-check.ks-services.co` (see [Actors and actions](architecture.md#actors-and-actions) for what it sends). `KUBESCAPE_SKIP_UPDATE_CHECK` is the deprecated name |
 | `KUBECONFIG` | Path to kubeconfig file |
 | `KUBESCAPE_MASTER_KEY` | 32-character master key used to encrypt and decrypt report metadata |
 | `HTTPS_PROXY` | HTTPS proxy URL |
