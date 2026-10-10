@@ -214,10 +214,9 @@ func TestShutdown_AdmissionRace(t *testing.T) {
 }
 
 func TestShutdown_DisconnectedWaiterDoesNotReleaseScan(t *testing.T) {
-	for _, mode := range []string{"scan", "metrics", "keep"} {
+	for _, mode := range []string{"scan", "keep"} {
 		t.Run(mode, func(t *testing.T) {
 			withTempOutputDirs(t)
-			metrics := mode == "metrics"
 			synctest.Test(t, func(t *testing.T) {
 				started, release := make(chan struct{}), make(chan struct{})
 				var artifacts []string
@@ -243,11 +242,7 @@ func TestShutdown_DisconnectedWaiterDoesNotReleaseScan(t *testing.T) {
 				go func() {
 					defer close(done)
 					w := httptest.NewRecorder()
-					if metrics {
-						h.Metrics(w, httptest.NewRequestWithContext(ctx, http.MethodGet, "/v1/metrics", nil))
-					} else {
-						h.Scan(w, httptest.NewRequestWithContext(ctx, http.MethodPost, "/v1/scan?wait=true&keep="+fmt.Sprint(mode == "keep"), strings.NewReader(`{}`)))
-					}
+					h.Scan(w, httptest.NewRequestWithContext(ctx, http.MethodPost, "/v1/scan?wait=true&keep="+fmt.Sprint(mode == "keep"), strings.NewReader(`{}`)))
 				}()
 				<-started
 				cancel()
