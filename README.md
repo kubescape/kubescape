@@ -289,6 +289,9 @@ kubescape fix results.json --dry-run
 # Apply fixes without confirmation prompts
 kubescape fix results.json --no-confirm
 
+# Review each resource's changes and approve them one by one
+kubescape fix results.json --interactive
+
 # Keep the originals untouched: write the fixed copies to a directory instead
 kubescape fix results.json --output-dir ./fixed
 
