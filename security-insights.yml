@@ -1,7 +1,7 @@
 header:
   schema-version: 2.2.0
-  last-updated: '2026-10-07'
-  last-reviewed: '2026-10-07'
+  last-updated: '2026-10-11'
+  last-reviewed: '2026-10-11'
   url: https://raw.githubusercontent.com/kubescape/kubescape/master/security-insights.yml
 
 project:
@@ -117,3 +117,17 @@ repository:
           release: false
         results: {}
         comment: Runs weekly and on every push to master.
+      - name: OSPS Baseline scanner
+        type: other
+        rulesets:
+          - osps-baseline
+        integration:
+          adhoc: true
+          ci: true
+          release: false
+        results:
+          ci:
+            name: OSPS Baseline results on grc.store
+            location: https://grc.store/targets/kubescape/kubescape
+            predicate-uri: https://github.com/revanite-io/pvtr-publish-results
+        comment: Evaluated against the maturity-2 applicability and published to grc.store weekly and on demand.
