@@ -1,8 +1,9 @@
 package exposure
 
 import (
-	corev1 "k8s.io/api/core/v1"
 	"testing"
+
+	corev1 "k8s.io/api/core/v1"
 )
 
 func TestServiceExposure_BackendWeight(t *testing.T) {
