@@ -127,8 +127,17 @@ func controlReportV2ToV1(opaSessionObj *OPASessionObj, frameworkName string, con
 							if rulev2.Paths[i].FailedPath != "" {
 								ruleResponse.FailedPaths = append(ruleResponse.FailedPaths, rulev2.Paths[i].FailedPath)
 							}
+							if rulev2.Paths[i].DeletePath != "" {
+								ruleResponse.DeletePaths = append(ruleResponse.DeletePaths, rulev2.Paths[i].DeletePath)
+							}
+							if rulev2.Paths[i].ReviewPath != "" {
+								ruleResponse.ReviewPaths = append(ruleResponse.ReviewPaths, rulev2.Paths[i].ReviewPath)
+							}
 							if rulev2.Paths[i].FixPath.Path != "" {
 								ruleResponse.FixPaths = append(ruleResponse.FixPaths, rulev2.Paths[i].FixPath)
+							}
+							if rulev2.Paths[i].FixCommand != "" && ruleResponse.FixCommand == "" {
+								ruleResponse.FixCommand = rulev2.Paths[i].FixCommand
 							}
 						}
 						ruleResponse.RuleStatus = string(status.Status())

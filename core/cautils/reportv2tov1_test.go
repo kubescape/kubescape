@@ -333,3 +333,97 @@ func TestReportV2ToV1_FrameworkStatusCounters_MultipleControls(t *testing.T) {
 		}
 	}
 }
+
+func TestReportV2ToV1_PreservesDeleteAndReviewPaths(t *testing.T) {
+	resourceID := "apps/v1/default/Deployment/coredns"
+	controlID := "C-0012"
+
+	controlSummary := reportsummary.ControlSummary{
+		ControlID:   controlID,
+		Name:        "credentials in env",
+		ScoreFactor: 5,
+	}
+	controlSummary.Append(helpersv1.NewStatus(apis.StatusFailed), resourceID)
+
+	session := &OPASessionObj{
+		AllResources: map[string]workloadinterface.IMetadata{
+			resourceID: workloadinterface.NewWorkloadObj(map[string]any{
+				"apiVersion": "apps/v1",
+				"kind":       "Deployment",
+				"metadata":   map[string]any{"name": "coredns", "namespace": "default"},
+				"spec": map[string]any{
+					"containers": []any{
+						map[string]any{
+							"name": "coredns",
+							"env": []any{
+								map[string]any{"name": "aws_access_key_id", "value": "secret"},
+							},
+						},
+					},
+				},
+			}),
+		},
+		ResourcesResult: map[string]resourcesresults.Result{
+			resourceID: {
+				ResourceID: resourceID,
+				AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+					{
+						ControlID: controlID,
+						ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{
+							{
+								Name:   "credentials-in-env",
+								Status: apis.StatusFailed,
+								Paths: []armotypes.PosturePaths{
+									{
+										DeletePath: "spec.template.spec.containers[0].env[0].name",
+									},
+									{
+										DeletePath: "spec.template.spec.containers[0].env[0].value",
+										ReviewPath: "spec.template.spec.containers[0].env[0]",
+										FixPath:    armotypes.FixPath{Path: "spec.template.spec.containers[0].env", Value: "[]"},
+										FixCommand: "kubectl patch deployment coredns",
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		Report: &reporthandlingv2.PostureReport{
+			SummaryDetails: reportsummary.SummaryDetails{
+				Controls: reportsummary.ControlSummaries{controlID: controlSummary},
+			},
+		},
+	}
+
+	got := ReportV2ToV1(session)
+
+	require.Len(t, got.FrameworkReports, 1)
+	require.Len(t, got.FrameworkReports[0].ControlReports, 1)
+	require.Len(t, got.FrameworkReports[0].ControlReports[0].RuleReports, 1)
+	ruleReports := got.FrameworkReports[0].ControlReports[0].RuleReports
+	require.Len(t, ruleReports[0].RuleResponses, 1)
+
+	resp := ruleReports[0].RuleResponses[0]
+	assert.Equal(t, "credentials-in-env", resp.Rulename)
+	assert.Equal(t, string(apis.StatusFailed), resp.RuleStatus)
+
+	// Delete and Review paths must be preserved even when FailedPaths is empty
+	expectedDeletePaths := []string{
+		"spec.template.spec.containers[0].env[0].name",
+		"spec.template.spec.containers[0].env[0].value",
+	}
+	assert.Equal(t, expectedDeletePaths, resp.DeletePaths)
+
+	expectedReviewPaths := []string{
+		"spec.template.spec.containers[0].env[0]",
+	}
+	assert.Equal(t, expectedReviewPaths, resp.ReviewPaths)
+
+	expectedFixPaths := []armotypes.FixPath{
+		{Path: "spec.template.spec.containers[0].env", Value: "[]"},
+	}
+	assert.Equal(t, expectedFixPaths, resp.FixPaths)
+	assert.Equal(t, "kubectl patch deployment coredns", resp.FixCommand)
+}
