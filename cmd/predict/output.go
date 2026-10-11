@@ -21,6 +21,7 @@ const outputDirPerm = 0o750
 // writeOutput dispatches to the appropriate formatter based on format string.
 func writeOutput(result pss.NamespaceResult, format, outputFile string, verbose bool) (retErr error) {
 	var w io.Writer
+	var f *os.File
 	if outputFile != "" {
 		if dir, _ := filepath.Split(outputFile); dir != "" {
 			if err := os.MkdirAll(dir, outputDirPerm); err != nil {
@@ -28,7 +29,8 @@ func writeOutput(result pss.NamespaceResult, format, outputFile string, verbose 
 			}
 		}
 
-		f, err := os.OpenFile(outputFile, os.O_WRONLY|os.O_CREATE, 0o600)
+		var err error
+		f, err = os.OpenFile(outputFile, os.O_WRONLY|os.O_CREATE, 0o600)
 		if err != nil {
 			return fmt.Errorf("cannot create output file %q: %w", outputFile, err)
 		}
@@ -48,8 +50,10 @@ func writeOutput(result pss.NamespaceResult, format, outputFile string, verbose 
 			}
 		}
 		defer func() {
-			if cerr := f.Close(); cerr != nil && retErr == nil {
-				retErr = cerr
+			if f != nil {
+				if cerr := f.Close(); cerr != nil && retErr == nil {
+					retErr = cerr
+				}
 			}
 		}()
 		w = f
@@ -75,7 +79,12 @@ func writeOutput(result pss.NamespaceResult, format, outputFile string, verbose 
 	if err != nil {
 		return err
 	}
-	if outputFile != "" {
+	if f != nil {
+		fileToClose := f
+		f = nil
+		if cerr := fileToClose.Close(); cerr != nil {
+			return cerr
+		}
 		printer.LogOutputFile(outputFile)
 	}
 	return nil
