@@ -1,9 +1,10 @@
 package exposure
 
 import (
-	corev1 "k8s.io/api/core/v1"
 	"reflect"
 	"testing"
+
+	corev1 "k8s.io/api/core/v1"
 )
 
 func TestServiceExposure_ParentListenerPort(t *testing.T) {
