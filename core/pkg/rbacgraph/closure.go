@@ -21,7 +21,9 @@ type EscalationResult struct {
 	// namespace-scoped finding is also materialized into that subject's own
 	// rule set (as a wildcard rule confined to the finding's Scope) and the
 	// subject is re-queued, so anything it unlocks is still chased by the
-	// traversal -- see the e.Unbounded case below.
+	// traversal -- see the e.Unbounded case below. ScopeUnknown findings
+	// retain uncertainty about missing named Roles without granting any
+	// permissions or proving cluster-admin.
 	Unbounded []UnboundedFinding
 	// EffectiveRules is the union of every ScopedRule reachable: Start's
 	// own direct rules, every rule granted via bind-verb/escalate-verb
@@ -31,8 +33,8 @@ type EscalationResult struct {
 	EffectiveRules []ScopedRule
 	// ClusterAdmin is true when EffectiveRules includes a cluster-wide
 	// */*/* rule, an Unbounded finding covers the whole cluster
-	// (Scope == ""), or a superuser group (system:masters) was reached via
-	// impersonation -- however it was actually reached. Once true, the BFS
+	// (Scope == "" and !ScopeUnknown), or a superuser group (system:masters)
+	// was reached via impersonation -- however it was actually reached. Once true, the BFS
 	// stops expanding further: cluster-admin-equivalent power already
 	// implies every other identity and permission is reachable, so
 	// continuing would only enumerate implied consequences (e.g. every
@@ -57,7 +59,9 @@ type EscalationResult struct {
 // UnboundedFinding records that Subject holds an unrestricted escalation
 // primitive whose targets this package cannot enumerate from collected
 // cluster objects (e.g. impersonate on users with no resourceNames
-// restriction, or escalate+update on clusterroles cluster-wide).
+// restriction, or escalate+update on clusterroles cluster-wide). A
+// ScopeUnknown edge instead warns about a missing named Role with no
+// resolved namespace; it does not confirm authority in any scope.
 type UnboundedFinding struct {
 	Subject Subject
 	Edge    EscalationEdge
@@ -138,6 +142,9 @@ func (idx *Index) AnalyzeEscalation(start Subject) EscalationResult {
 				if !unboundedSeen[key] {
 					unboundedSeen[key] = true
 					unbounded = append(unbounded, UnboundedFinding{Subject: s, Edge: e})
+				}
+				if e.ScopeUnknown {
+					continue // report uncertainty, never synthesize permissions from it
 				}
 				if e.Scope == "" {
 					clusterAdmin = true

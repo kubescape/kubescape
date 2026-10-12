@@ -153,14 +153,14 @@ func bindingNamesSubject(subjects []rbacv1.Subject, bindingNamespace string, sub
 
 // IsClusterAdminEquivalent reports whether rules includes a cluster-wide
 // (Namespace == "") rule granting every verb on every resource in every
-// API group -- the literal definition of the built-in cluster-admin
+// API group, without a resourceNames restriction -- the definition of the built-in cluster-admin
 // ClusterRole's power, however it was actually reached.
 func IsClusterAdminEquivalent(rules []ScopedRule) bool {
 	for _, sr := range rules {
 		if sr.Namespace != "" {
 			continue
 		}
-		if ruleGrants(sr.Rule, "*", "*", "*") {
+		if len(sr.Rule.ResourceNames) == 0 && ruleGrants(sr.Rule, "*", "*", "*") {
 			return true
 		}
 	}
