@@ -1345,6 +1345,12 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 			return mcpToolError(ErrCodeScanFailed, fmt.Sprintf("failed to list controls: %v", err), nil), nil
 		}
 		return mcp.NewToolResultText(string(result)), nil
+	case "list_admission_policies":
+		result, err := ksServer.ListAdmissionPolicies(ctx)
+		if err != nil {
+			return mcpToolError(ErrCodeScanFailed, fmt.Sprintf("failed to list admission policies: %v", err), nil), nil
+		}
+		return mcp.NewToolResultText(string(result)), nil
 	default:
 		return nil, fmt.Errorf("unknown tool: %s", name)
 	}
@@ -1516,8 +1522,14 @@ func createPolicyListingTools(ksServer *KubescapeMcpserver) {
 		"list_controls",
 		mcp.WithDescription("List all available security controls with their IDs, names, and the frameworks they belong to. Use a returned ID as a control_ids value in scan_controls."),
 	)
+	listAdmissionPoliciesTool := mcp.NewTool(
+		"list_admission_policies",
+		mcp.WithDescription("List the ValidatingAdmissionPolicies in the CEL admission policy library embedded in Kubescape, with the Kubescape control each one implements (controlID), whether it reads parameters (takesParams), its failurePolicy and the resources it matches. Read-only: it does not create, bind or apply any policy. Kubescape's ValidatingAdmissionPolicy support is experimental."),
+		mcp.WithReadOnlyHintAnnotation(true),
+	)
 	ksServer.s.AddTool(listFrameworksTool, ksServer.toolHandler(listFrameworksTool.Name))
 	ksServer.s.AddTool(listControlsTool, ksServer.toolHandler(listControlsTool.Name))
+	ksServer.s.AddTool(listAdmissionPoliciesTool, ksServer.toolHandler(listAdmissionPoliciesTool.Name))
 }
 
 func GetMCPServerCmd() *cobra.Command {
