@@ -29,6 +29,7 @@ import (
 	"testing"
 	"unicode"
 
+	"github.com/bmatcuk/doublestar/v4"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
@@ -141,9 +142,70 @@ func TestPRScannerAlwaysRunsOnPullRequest(t *testing.T) {
 		prScannerWorkflowName, changesJobName)
 }
 
+// TestPRScannerChangesFilterClassifiesPaths runs the changes job's filter on
+// sample PRs. The filter uses picomatch, not GitHub's matcher, so a pattern
+// such as "!**.md" reads the same but misses nested files; doublestar matches
+// these patterns the way picomatch does.
+func TestPRScannerChangesFilterClassifiesPaths(t *testing.T) {
+	patterns := changesFilter(t, loadPRScanner(t))
+
+	for _, tc := range []struct {
+		files []string
+		code  bool
+	}{
+		{files: []string{"README.md"}},
+		{files: []string{"docs/guide/readme.md"}},
+		{files: []string{".github/workflows/00-pr-scanner.yaml"}},
+		{files: []string{"scripts/deep/check.sh"}},
+		{files: []string{"docs/diagram.svg"}},
+		{files: []string{"docs/guide/diagram.svg"}, code: true},
+		{files: []string{"core/pkg/fleet/types.go"}, code: true},
+		{files: []string{"docs/guide/readme.md", "core/pkg/fleet/types.go"}, code: true},
+	} {
+		assert.Equalf(t, tc.code, filterMatchesAny(t, patterns, tc.files),
+			"%s's %q filter classifies %v wrongly", prScannerWorkflowName, changesJobName, tc.files)
+	}
+}
+
+// filterMatchesAny applies paths-filter's "every" quantifier: a file counts
+// when it matches every plain pattern and none of the negated ones.
+func filterMatchesAny(t *testing.T, patterns, files []string) bool {
+	t.Helper()
+
+	for _, file := range files {
+		matched := true
+		for _, pattern := range patterns {
+			negated, isNegated := strings.CutPrefix(pattern, "!")
+			ok, err := doublestar.Match(negated, file)
+			require.NoErrorf(t, err, "bad pattern %q", pattern)
+			if ok == isNegated {
+				matched = false
+				break
+			}
+		}
+		if matched {
+			return true
+		}
+	}
+	return false
+}
+
 // changesFilterIgnores returns the negated patterns of the changes job's
 // "code" filter, which match the push trigger's paths-ignore entries.
 func changesFilterIgnores(t *testing.T, workflow prScannerWorkflow) []string {
+	t.Helper()
+
+	var ignored []string
+	for _, pattern := range changesFilter(t, workflow) {
+		if path, ok := strings.CutPrefix(pattern, "!"); ok {
+			ignored = append(ignored, path)
+		}
+	}
+	return ignored
+}
+
+// changesFilter returns the patterns of the changes job's "code" filter.
+func changesFilter(t *testing.T, workflow prScannerWorkflow) []string {
 	t.Helper()
 
 	job, ok := workflow.Jobs[changesJobName]
@@ -159,13 +221,7 @@ func changesFilterIgnores(t *testing.T, workflow prScannerWorkflow) []string {
 		require.NoErrorf(t, yaml.Unmarshal([]byte(step.With["filters"]), &filters),
 			"%s's %q filters are not valid YAML", prScannerWorkflowName, changesJobName)
 
-		var ignored []string
-		for _, pattern := range filters["code"] {
-			if path, ok := strings.CutPrefix(pattern, "!"); ok {
-				ignored = append(ignored, path)
-			}
-		}
-		return ignored
+		return filters["code"]
 	}
 
 	require.Failf(t, "filter step missing", "%s's %q job has no step with id \"filter\"",

@@ -12,7 +12,7 @@ Opening a PR triggers `00-pr-scanner.yaml`, which calls the reusable `a-pr-scann
 
 Two GitHub Apps report alongside it: the DCO check, which requires a `Signed-off-by:` trailer on every commit, and GitGuardian secret scanning.
 
-`00-pr-scanner.yaml` runs on every PR, and its `changes` job decides whether the build and E2E jobs run, so a PR that touches nothing else skips them. A skipped job reports as passed, so required checks never wait on a docs-only PR. It ignores `**.md`, `**.yaml`, `**.yml` and `**.sh` at any depth, plus files sitting directly in `website/`, `examples/`, `docs/`, `build/` and `.github/`. Those last five are single-level patterns: a nested file such as `docs/guide/diagram.svg` does not match and will still run the build. The build is skipped only when *every* changed file in the PR matches one of the patterns.
+`00-pr-scanner.yaml` runs on every PR, and its `changes` job decides whether the build and E2E jobs run, so a PR that touches nothing else skips them. A skipped job reports as passed, so required checks never wait on a docs-only PR. It ignores `**/*.md`, `**/*.yaml`, `**/*.yml` and `**/*.sh` at any depth, plus files sitting directly in `website/`, `examples/`, `docs/`, `build/` and `.github/`. Those last five are single-level patterns: a nested file such as `docs/guide/diagram.svg` does not match and will still run the build. The build is skipped only when *every* changed file in the PR matches one of the patterns.
 
 ### Reviewing a PR
 

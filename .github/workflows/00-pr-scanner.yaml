@@ -20,10 +20,10 @@ on:
     push:
         branches: [master]
         paths-ignore:
-            - "**.yaml"
-            - "**.yml"
-            - "**.md"
-            - "**.sh"
+            - "**/*.yaml"
+            - "**/*.yml"
+            - "**/*.md"
+            - "**/*.sh"
             - "website/*"
             - "examples/*"
             - "docs/*"
@@ -60,10 +60,10 @@ jobs:
                   filters: |
                       code:
                           - "**"
-                          - "!**.yaml"
-                          - "!**.yml"
-                          - "!**.md"
-                          - "!**.sh"
+                          - "!**/*.yaml"
+                          - "!**/*.yml"
+                          - "!**/*.md"
+                          - "!**/*.sh"
                           - "!website/*"
                           - "!examples/*"
                           - "!docs/*"
