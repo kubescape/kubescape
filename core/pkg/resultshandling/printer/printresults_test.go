@@ -319,9 +319,11 @@ func TestWriters_NonRegularSinkSkipsChmod(t *testing.T) {
 
 	var chmodCalls int
 	oldChmod := chmodFile
-	chmodFile = func(f *os.File, mode os.FileMode) error {
+	// The spy only counts calls and never reaches the real Chmod, so a
+	// regression in the regular-file guard cannot alter /dev/null's mode.
+	chmodFile = func(*os.File, os.FileMode) error {
 		chmodCalls++
-		return oldChmod(f, mode)
+		return nil
 	}
 	t.Cleanup(func() { chmodFile = oldChmod })
 
