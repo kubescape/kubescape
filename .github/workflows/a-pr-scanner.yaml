@@ -26,9 +26,13 @@ on:
       CGO_ENABLED:
         type: number
         default: 1
+      SKIP:
+        description: 'Skip the build, e.g. for a PR that changes no code'
+        type: boolean
+        default: false
 jobs:
   unit-tests:
-    if: ${{ github.actor != 'kubescape' }}
+    if: ${{ github.actor != 'kubescape' && !inputs.SKIP }}
     name: Create cross-platform build
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
