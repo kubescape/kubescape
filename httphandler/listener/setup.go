@@ -205,12 +205,14 @@ type tlsReloader struct {
 	certFile string
 	keyFile  string
 
-	mu          sync.RWMutex
-	cert        *tls.Certificate
-	certModTime time.Time
-	certSize    int64
-	keyModTime  time.Time
-	keySize     int64
+	mu           sync.RWMutex
+	cert         *tls.Certificate
+	certFileInfo os.FileInfo
+	keyFileInfo  os.FileInfo
+	certModTime  time.Time
+	certSize     int64
+	keyModTime   time.Time
+	keySize      int64
 }
 
 // newTLSReloader creates and initializes a tlsReloader.
@@ -277,6 +279,8 @@ func (r *tlsReloader) reload() error {
 
 	r.mu.Lock()
 	r.cert = &pair
+	r.certFileInfo = certStat
+	r.keyFileInfo = keyStat
 	r.certModTime = certStat.ModTime()
 	r.certSize = certStat.Size()
 	r.keyModTime = keyStat.ModTime()
@@ -300,7 +304,9 @@ func (r *tlsReloader) maybeReload() error {
 	}
 
 	r.mu.RLock()
-	unchanged := certStat.ModTime().Equal(r.certModTime) &&
+	unchanged := os.SameFile(certStat, r.certFileInfo) &&
+		os.SameFile(keyStat, r.keyFileInfo) &&
+		certStat.ModTime().Equal(r.certModTime) &&
 		certStat.Size() == r.certSize &&
 		keyStat.ModTime().Equal(r.keyModTime) &&
 		keyStat.Size() == r.keySize
@@ -314,7 +320,9 @@ func (r *tlsReloader) maybeReload() error {
 	defer r.mu.Unlock()
 
 	// Double check under write lock to avoid redundant loads from concurrent handshakes.
-	if certStat.ModTime().Equal(r.certModTime) &&
+	if os.SameFile(certStat, r.certFileInfo) &&
+		os.SameFile(keyStat, r.keyFileInfo) &&
+		certStat.ModTime().Equal(r.certModTime) &&
 		certStat.Size() == r.certSize &&
 		keyStat.ModTime().Equal(r.keyModTime) &&
 		keyStat.Size() == r.keySize {
@@ -327,6 +335,8 @@ func (r *tlsReloader) maybeReload() error {
 	}
 
 	r.cert = &pair
+	r.certFileInfo = certStat
+	r.keyFileInfo = keyStat
 	r.certModTime = certStat.ModTime()
 	r.certSize = certStat.Size()
 	r.keyModTime = keyStat.ModTime()

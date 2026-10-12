@@ -1,6 +1,7 @@
 package listener
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
@@ -189,11 +190,13 @@ func TestSetupHTTPListener(t *testing.T) {
 			return err == nil && cn == "cert-v1.local"
 		}, 3*time.Second, 50*time.Millisecond)
 
-		// Rotate certificate files on disk
-		time.Sleep(10 * time.Millisecond)
+		// Rotate certificate files on disk with distinct modification times
 		certPEM2, keyPEM2 := generateTestCertAndKey(t, "cert-v2.local")
 		require.NoError(t, os.WriteFile(certFile, certPEM2, 0o600))
 		require.NoError(t, os.WriteFile(keyFile, keyPEM2, 0o600))
+		newMTime := time.Now().Add(2 * time.Second)
+		require.NoError(t, os.Chtimes(certFile, newMTime, newMTime))
+		require.NoError(t, os.Chtimes(keyFile, newMTime, newMTime))
 
 		// Subsequent connection should receive rotated certificate without server restart
 		require.Eventually(t, func() bool {
@@ -576,6 +579,101 @@ func TestTLSReloader_SymlinkRotation(t *testing.T) {
 	parsed2, err := x509.ParseCertificate(cert2.Certificate[0])
 	require.NoError(t, err)
 	require.Equal(t, "k8s-cert-2.example.com", parsed2.Subject.CommonName)
+}
+
+func TestTLSReloader_EqualMetadataSymlinkRotation(t *testing.T) {
+	// Simulates Kubernetes Secret volume mount symlink swaps where the new certificate
+	// and key files happen to have the exact same file sizes and modification times
+	// as the original files. os.SameFile must detect that the underlying file identities
+	// changed via the symlink swap.
+	rootDir := t.TempDir()
+	dir1 := filepath.Join(rootDir, "dir1")
+	dir2 := filepath.Join(rootDir, "dir2")
+	require.NoError(t, os.Mkdir(dir1, 0o700))
+	require.NoError(t, os.Mkdir(dir2, 0o700))
+
+	certPEM1, keyPEM1 := generateTestCertAndKey(t, "equal-1.example.com")
+	certPEM2, keyPEM2 := generateTestCertAndKey(t, "equal-2.example.com")
+
+	// Equalize payload sizes by padding with trailing newlines (valid in PEM)
+	padToEqual := func(a, b []byte) ([]byte, []byte) {
+		maxLen := len(a)
+		if len(b) > maxLen {
+			maxLen = len(b)
+		}
+		if len(a) < maxLen {
+			a = append(a, bytes.Repeat([]byte("\n"), maxLen-len(a))...)
+		}
+		if len(b) < maxLen {
+			b = append(b, bytes.Repeat([]byte("\n"), maxLen-len(b))...)
+		}
+		return a, b
+	}
+	certPEM1, certPEM2 = padToEqual(certPEM1, certPEM2)
+	keyPEM1, keyPEM2 = padToEqual(keyPEM1, keyPEM2)
+
+	cert1Path := filepath.Join(dir1, "tls.crt")
+	key1Path := filepath.Join(dir1, "tls.key")
+	cert2Path := filepath.Join(dir2, "tls.crt")
+	key2Path := filepath.Join(dir2, "tls.key")
+
+	require.NoError(t, os.WriteFile(cert1Path, certPEM1, 0o600))
+	require.NoError(t, os.WriteFile(key1Path, keyPEM1, 0o600))
+	require.NoError(t, os.WriteFile(cert2Path, certPEM2, 0o600))
+	require.NoError(t, os.WriteFile(key2Path, keyPEM2, 0o600))
+
+	// Explicitly set identical modification timestamps on both file pairs
+	fixedTime := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	require.NoError(t, os.Chtimes(cert1Path, fixedTime, fixedTime))
+	require.NoError(t, os.Chtimes(key1Path, fixedTime, fixedTime))
+	require.NoError(t, os.Chtimes(cert2Path, fixedTime, fixedTime))
+	require.NoError(t, os.Chtimes(key2Path, fixedTime, fixedTime))
+
+	// Assert metadata is strictly equal and identities differ
+	s1Cert, err := os.Stat(cert1Path)
+	require.NoError(t, err)
+	s2Cert, err := os.Stat(cert2Path)
+	require.NoError(t, err)
+	require.Equal(t, s1Cert.Size(), s2Cert.Size())
+	require.True(t, s1Cert.ModTime().Equal(s2Cert.ModTime()))
+	require.False(t, os.SameFile(s1Cert, s2Cert))
+
+	s1Key, err := os.Stat(key1Path)
+	require.NoError(t, err)
+	s2Key, err := os.Stat(key2Path)
+	require.NoError(t, err)
+	require.Equal(t, s1Key.Size(), s2Key.Size())
+	require.True(t, s1Key.ModTime().Equal(s2Key.ModTime()))
+	require.False(t, os.SameFile(s1Key, s2Key))
+
+	dataSymlink := filepath.Join(rootDir, "..data")
+	require.NoError(t, os.Symlink(dir1, dataSymlink))
+
+	certSymlink := filepath.Join(rootDir, "tls.crt")
+	keySymlink := filepath.Join(rootDir, "tls.key")
+	require.NoError(t, os.Symlink(filepath.Join(dataSymlink, "tls.crt"), certSymlink))
+	require.NoError(t, os.Symlink(filepath.Join(dataSymlink, "tls.key"), keySymlink))
+
+	reloader, err := newTLSReloader(certSymlink, keySymlink)
+	require.NoError(t, err)
+
+	cert1, err := reloader.GetCertificate(&tls.ClientHelloInfo{})
+	require.NoError(t, err)
+	parsed1, err := x509.ParseCertificate(cert1.Certificate[0])
+	require.NoError(t, err)
+	require.Equal(t, "equal-1.example.com", parsed1.Subject.CommonName)
+
+	// Atomically swap ..data symlink to dir2
+	tmpDataSymlink := filepath.Join(rootDir, "..data_tmp")
+	require.NoError(t, os.Symlink(dir2, tmpDataSymlink))
+	require.NoError(t, os.Rename(tmpDataSymlink, dataSymlink))
+
+	// Reloader must detect rotation via os.SameFile despite matching sizes and mtimes
+	cert2, err := reloader.GetCertificate(&tls.ClientHelloInfo{})
+	require.NoError(t, err)
+	parsed2, err := x509.ParseCertificate(cert2.Certificate[0])
+	require.NoError(t, err)
+	require.Equal(t, "equal-2.example.com", parsed2.Subject.CommonName)
 }
 
 func TestTLSReloader_ConcurrentGetCertificate(t *testing.T) {
