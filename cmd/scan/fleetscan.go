@@ -599,6 +599,10 @@ func runFleetContext(kubeContext string, scanInfo *cautils.ScanInfo, ks meta.IKu
 
 	ctx, cancel := deriveTimeoutContext(scanInfo, ks)
 	defer cancel()
+	// A run already stopped skips the scan, so later contexts never start initializing.
+	if err := ctx.Err(); err != nil {
+		return nil, 0, interruptedError{err: err}
+	}
 
 	started := time.Now()
 	results, err = run(ctx, scanInfo, ks, policyIdentifiers)

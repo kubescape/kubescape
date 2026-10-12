@@ -188,11 +188,11 @@ func TestFleetScan_DoesNotRetryACancelledScan(t *testing.T) {
 
 	require.Error(t, fleetScan(scanInfo, &lifecycleContextKubescape{ctx: stopped}, nil, runner.run))
 
-	assert.Equal(t, 1, runner.calls("prod"))
+	assert.Zero(t, runner.calls("prod"), "a run that is already stopped never starts the scan")
 	assert.Equal(t, fleet.ClusterCancelled, prodResult(t, scanInfo).Status)
 }
 
-// TestFleetScan_StopsWaitingAsSoonAsTheRunIsStopped pins that Ctrl-C during the wait takes effect at once.
+// TestFleetScan_StopsWaitingAsSoonAsTheRunIsStopped pins that Ctrl-C during the wait takes effect at once and skips later contexts.
 func TestFleetScan_StopsWaitingAsSoonAsTheRunIsStopped(t *testing.T) {
 	running, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -205,16 +205,20 @@ func TestFleetScan_StopsWaitingAsSoonAsTheRunIsStopped(t *testing.T) {
 	t.Cleanup(func() { fleetRetryDelay = original })
 
 	scanInfo := retryScanInfo(t, 2, true)
-	runner := newRetryRunner(map[string][]attemptOutcome{"prod": {refused}})
+	scanInfo.KubeContexts = []string{"prod", "staging"}
+	runner := newRetryRunner(map[string][]attemptOutcome{"prod": {refused}, "staging": {scannedCleanly}})
 
 	started := time.Now()
 	require.Error(t, fleetScan(scanInfo, &lifecycleContextKubescape{ctx: running}, nil, runner.run))
 
 	assert.Less(t, time.Since(started), 10*time.Second, "an hour-long wait has to end when the run is stopped")
 	assert.Equal(t, 1, runner.calls("prod"))
-	got := prodResult(t, scanInfo)
-	assert.Equal(t, fleet.ClusterUnreachable, got.Status, "the attempt that ran found the cluster unreachable, and that is what it keeps")
-	assert.Equal(t, 1, got.Attempts)
+	assert.Zero(t, runner.calls("staging"), "a context after the stop never starts its scan")
+	report := fleetReportFromFile(t, scanInfo.FleetReport)
+	require.Len(t, report.Clusters, 2)
+	assert.Equal(t, fleet.ClusterUnreachable, report.Clusters[0].Status, "the attempt that ran found the cluster unreachable, and that is what it keeps")
+	assert.Equal(t, 1, report.Clusters[0].Attempts)
+	assert.Equal(t, fleet.ClusterCancelled, report.Clusters[1].Status)
 }
 
 // TestFleetScan_RetriesWithoutAFleetReport pins that retries belong to --kube-contexts, not to --fleet-report.
