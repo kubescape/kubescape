@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/cautils/getter"
 	metav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
+	"github.com/kubescape/opa-utils/reporthandling"
 )
 
 const (
@@ -269,6 +271,10 @@ func downloadFramework(ctx context.Context, downloadInfo *metav1.DownloadInfo) (
 		if err != nil {
 			return nil, err
 		}
+		frameworks, err = appendSecurityViewFrameworks(g, frameworks)
+		if err != nil {
+			return nil, err
+		}
 		var files []string
 		for _, fw := range frameworks {
 			filename, err := getter.PolicyCacheFilename(fw.Name)
@@ -308,6 +314,29 @@ func downloadFramework(ctx context.Context, downloadInfo *metav1.DownloadInfo) (
 	}
 	logger.L().Success("Downloaded", helpers.String("artifact", downloadInfo.Target), helpers.String("name", framework.Name), helpers.String("path", downloadTo))
 	return []string{downloadTo}, nil
+}
+
+// appendSecurityViewFrameworks adds the frameworks the default `kubescape scan`
+// evaluates to a "download all" result. GetFrameworks lists compliance
+// frameworks only, so without this an offline bundle cannot serve the scan it
+// is documented for: `kubescape scan --use-artifacts-from <dir>` asks for
+// workloadscan or clusterscan and finds neither. A getter that already listed
+// one is not asked for it again.
+func appendSecurityViewFrameworks(g getter.IPolicyGetter, frameworks []reporthandling.Framework) ([]reporthandling.Framework, error) {
+	for _, name := range getter.SecurityViewFrameworks {
+		if slices.ContainsFunc(frameworks, func(fw reporthandling.Framework) bool { return strings.EqualFold(fw.Name, name) }) {
+			continue
+		}
+		framework, err := g.GetFramework(name)
+		if err != nil {
+			return nil, fmt.Errorf("failed to download framework '%s': %w", name, err)
+		}
+		if framework == nil {
+			return nil, fmt.Errorf("failed to download framework '%s' - received empty objects", name)
+		}
+		frameworks = append(frameworks, *framework)
+	}
+	return frameworks, nil
 }
 
 func downloadControl(ctx context.Context, downloadInfo *metav1.DownloadInfo) ([]string, error) {

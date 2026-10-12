@@ -374,7 +374,7 @@ func TestDownload_ArtifactsJSONOutputWritesToCurrentDirectory(t *testing.T) {
 	withConfigInputsGetter(t, &fakeControlsInputsGetter{inputs: map[string][]string{"a": {"1"}}}, nil)
 	withExceptionsGetter(t, &fakeExceptionsGetter{exceptions: []armotypes.PostureExceptionPolicy{{}}}, nil)
 	withAttackTracksGetter(t, &fakeAttackTracksGetter{tracks: []v1alpha1.AttackTrack{{}}}, nil)
-	withPolicyGetter(t, &fakePolicyGetter{frameworks: []reporthandling.Framework{{PortalBase: armotypes.PortalBase{Name: "nsa"}}}}, nil)
+	withPolicyGetter(t, &fakePolicyGetter{frameworks: []reporthandling.Framework{{PortalBase: armotypes.PortalBase{Name: "nsa"}}}, named: fakeSecurityViewFrameworks()}, nil)
 
 	origDownloadFunc := downloadFunc
 	t.Cleanup(func() { downloadFunc = origDownloadFunc })
@@ -404,18 +404,36 @@ func TestDownload_ArtifactsJSONOutputWritesToCurrentDirectory(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 type fakePolicyGetter struct {
-	frameworks      []reporthandling.Framework
-	frameworksErr   error
-	framework       *reporthandling.Framework
-	frameworkErr    error
+	frameworks    []reporthandling.Framework
+	frameworksErr error
+	framework     *reporthandling.Framework
+	frameworkErr  error
+	// named answers GetFramework for specific names ahead of framework and
+	// frameworkErr; requested records every name GetFramework was asked for.
+	named           map[string]*reporthandling.Framework
+	requested       []string
 	control         *reporthandling.Control
 	controlErr      error
 	controlsList    []string
 	controlsListErr error
 }
 
-func (f *fakePolicyGetter) GetFramework(string) (*reporthandling.Framework, error) {
+func (f *fakePolicyGetter) GetFramework(name string) (*reporthandling.Framework, error) {
+	f.requested = append(f.requested, name)
+	if fw, ok := f.named[name]; ok {
+		return fw, nil
+	}
 	return f.framework, f.frameworkErr
+}
+
+// fakeSecurityViewFrameworks answers the by-name requests a "download all"
+// makes for getter.SecurityViewFrameworks, the way a real release does.
+func fakeSecurityViewFrameworks() map[string]*reporthandling.Framework {
+	named := make(map[string]*reporthandling.Framework, len(getter.SecurityViewFrameworks))
+	for _, name := range getter.SecurityViewFrameworks {
+		named[name] = &reporthandling.Framework{PortalBase: armotypes.PortalBase{Name: name}}
+	}
+	return named
 }
 func (f *fakePolicyGetter) GetFrameworks() ([]reporthandling.Framework, error) {
 	return f.frameworks, f.frameworksErr
@@ -689,6 +707,18 @@ func TestDownloadAttackTracks(t *testing.T) {
 	})
 }
 
+// dirEntryNames returns the names of the entries in dir, sorted.
+func dirEntryNames(t *testing.T, dir string) []string {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+	names := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		names = append(names, entry.Name())
+	}
+	return names
+}
+
 func TestDownloadFramework(t *testing.T) {
 	t.Run("returns error from the getter constructor", func(t *testing.T) {
 		withTenantConfig(t, &fakeTenantConfig{})
@@ -711,23 +741,79 @@ func TestDownloadFramework(t *testing.T) {
 		withPolicyGetter(t, &fakePolicyGetter{frameworks: []reporthandling.Framework{
 			{PortalBase: armotypes.PortalBase{Name: ""}},
 			{PortalBase: armotypes.PortalBase{Name: "nsa"}},
-		}}, nil)
+		}, named: fakeSecurityViewFrameworks()}, nil)
 
 		dir := t.TempDir()
 		_, err := downloadFramework(context.Background(), &metav1.DownloadInfo{Target: TargetFramework, Path: dir})
 		require.NoError(t, err)
 
-		entries, err := os.ReadDir(dir)
+		assert.Equal(t, []string{"clusterscan.json", "nsa.json", "workloadscan.json"}, dirEntryNames(t, dir))
+	})
+
+	// The default `kubescape scan` evaluates workloadscan (path) or clusterscan
+	// (cluster), which GetFrameworks does not list. A "download all" that leaves
+	// them out produces a bundle `scan --use-artifacts-from` cannot use (#4118).
+	t.Run("no identifier: adds the security view frameworks GetFrameworks leaves out", func(t *testing.T) {
+		withTenantConfig(t, &fakeTenantConfig{})
+		g := &fakePolicyGetter{frameworks: []reporthandling.Framework{
+			{PortalBase: armotypes.PortalBase{Name: "nsa"}},
+		}, named: fakeSecurityViewFrameworks()}
+		withPolicyGetter(t, g, nil)
+
+		dir := t.TempDir()
+		files, err := downloadFramework(context.Background(), &metav1.DownloadInfo{Target: TargetFramework, Path: dir})
 		require.NoError(t, err)
-		require.Len(t, entries, 1)
-		assert.Equal(t, "nsa.json", entries[0].Name())
+
+		assert.Equal(t, getter.SecurityViewFrameworks, g.requested)
+		assert.Equal(t, []string{"clusterscan.json", "nsa.json", "workloadscan.json"}, dirEntryNames(t, dir))
+		assert.Len(t, files, 3)
+
+		var got reporthandling.Framework
+		readJSONFile(t, filepath.Join(dir, "workloadscan.json"), &got)
+		assert.Equal(t, "workloadscan", got.Name)
+	})
+
+	t.Run("no identifier: does not request a security view framework GetFrameworks already listed", func(t *testing.T) {
+		withTenantConfig(t, &fakeTenantConfig{})
+		g := &fakePolicyGetter{frameworks: []reporthandling.Framework{
+			{PortalBase: armotypes.PortalBase{Name: "WorkloadScan"}},
+		}, named: fakeSecurityViewFrameworks()}
+		withPolicyGetter(t, g, nil)
+
+		dir := t.TempDir()
+		files, err := downloadFramework(context.Background(), &metav1.DownloadInfo{Target: TargetFramework, Path: dir})
+		require.NoError(t, err)
+
+		assert.Equal(t, []string{"clusterscan"}, g.requested)
+		assert.Equal(t, []string{"clusterscan.json", "workloadscan.json"}, dirEntryNames(t, dir))
+		assert.Len(t, files, 2)
+	})
+
+	t.Run("no identifier: returns error when a security view framework cannot be fetched", func(t *testing.T) {
+		withTenantConfig(t, &fakeTenantConfig{})
+		withPolicyGetter(t, &fakePolicyGetter{frameworks: []reporthandling.Framework{
+			{PortalBase: armotypes.PortalBase{Name: "nsa"}},
+		}, frameworkErr: errors.New("fetch failed")}, nil)
+
+		_, err := downloadFramework(context.Background(), &metav1.DownloadInfo{Target: TargetFramework, Path: t.TempDir()})
+		require.EqualError(t, err, "failed to download framework 'workloadscan': fetch failed")
+	})
+
+	t.Run("no identifier: returns error when a security view framework is nil", func(t *testing.T) {
+		withTenantConfig(t, &fakeTenantConfig{})
+		withPolicyGetter(t, &fakePolicyGetter{frameworks: []reporthandling.Framework{
+			{PortalBase: armotypes.PortalBase{Name: "nsa"}},
+		}}, nil)
+
+		_, err := downloadFramework(context.Background(), &metav1.DownloadInfo{Target: TargetFramework, Path: t.TempDir()})
+		require.EqualError(t, err, "failed to download framework 'workloadscan' - received empty objects")
 	})
 
 	t.Run("no identifier: returns error when SaveInFile fails", func(t *testing.T) {
 		withTenantConfig(t, &fakeTenantConfig{})
 		withPolicyGetter(t, &fakePolicyGetter{frameworks: []reporthandling.Framework{
 			{PortalBase: armotypes.PortalBase{Name: "nsa"}},
-		}}, nil)
+		}, named: fakeSecurityViewFrameworks()}, nil)
 
 		_, err := downloadFramework(context.Background(), &metav1.DownloadInfo{Target: TargetFramework, Path: blockedDir(t)})
 		require.ErrorContains(t, err, "blocker")
@@ -874,13 +960,13 @@ func TestDownloadArtifacts(t *testing.T) {
 		withConfigInputsGetter(t, &fakeControlsInputsGetter{inputs: map[string][]string{"a": {"1"}}}, nil)
 		withExceptionsGetter(t, &fakeExceptionsGetter{exceptions: []armotypes.PostureExceptionPolicy{{}}}, nil)
 		withAttackTracksGetter(t, &fakeAttackTracksGetter{tracks: []v1alpha1.AttackTrack{{}}}, nil)
-		withPolicyGetter(t, &fakePolicyGetter{frameworks: []reporthandling.Framework{{PortalBase: armotypes.PortalBase{Name: "nsa"}}}}, nil)
+		withPolicyGetter(t, &fakePolicyGetter{frameworks: []reporthandling.Framework{{PortalBase: armotypes.PortalBase{Name: "nsa"}}}, named: fakeSecurityViewFrameworks()}, nil)
 
 		dir := t.TempDir()
 		_, err := downloadArtifacts(context.Background(), &metav1.DownloadInfo{Target: TargetArtifacts, Path: dir})
 		require.NoError(t, err)
 
-		for _, want := range []string{"controls-inputs.json", "exceptions.json", "nsa.json", "attack-tracks.json"} {
+		for _, want := range []string{"controls-inputs.json", "exceptions.json", "nsa.json", "workloadscan.json", "clusterscan.json", "attack-tracks.json"} {
 			_, statErr := os.Stat(filepath.Join(dir, want))
 			assert.NoError(t, statErr, "expected %s to have been written", want)
 		}
@@ -891,7 +977,7 @@ func TestDownloadArtifacts(t *testing.T) {
 		withConfigInputsGetter(t, &fakeControlsInputsGetter{inputs: map[string][]string{"a": {"1"}}}, nil)
 		withExceptionsGetter(t, nil, errors.New("boom"))
 		withAttackTracksGetter(t, &fakeAttackTracksGetter{tracks: []v1alpha1.AttackTrack{{}}}, nil)
-		withPolicyGetter(t, &fakePolicyGetter{frameworks: []reporthandling.Framework{{PortalBase: armotypes.PortalBase{Name: "nsa"}}}}, nil)
+		withPolicyGetter(t, &fakePolicyGetter{frameworks: []reporthandling.Framework{{PortalBase: armotypes.PortalBase{Name: "nsa"}}}, named: fakeSecurityViewFrameworks()}, nil)
 
 		dir := t.TempDir()
 		files, err := downloadArtifacts(context.Background(), &metav1.DownloadInfo{Target: TargetArtifacts, Path: dir})
