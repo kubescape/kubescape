@@ -6,24 +6,54 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
+	"sort"
 	"strings"
 	"text/tabwriter"
 	"time"
 
 	"github.com/kubescape/kubescape/v4/core/pkg/pss"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer"
 )
+
+const outputDirPerm = 0o750
 
 // writeOutput dispatches to the appropriate formatter based on format string.
 func writeOutput(result pss.NamespaceResult, format, outputFile string, verbose bool) (retErr error) {
 	var w io.Writer
+	var f *os.File
 	if outputFile != "" {
-		f, err := os.Create(outputFile)
+		if dir, _ := filepath.Split(outputFile); dir != "" {
+			if err := os.MkdirAll(dir, outputDirPerm); err != nil {
+				return fmt.Errorf("cannot create output directory %q: %w", dir, err)
+			}
+		}
+
+		var err error
+		f, err = os.OpenFile(outputFile, os.O_WRONLY|os.O_CREATE, 0o600)
 		if err != nil {
 			return fmt.Errorf("cannot create output file %q: %w", outputFile, err)
 		}
+		info, err := f.Stat()
+		if err != nil {
+			_ = f.Close()
+			return fmt.Errorf("cannot stat output file %q: %w", outputFile, err)
+		}
+		if info.Mode().IsRegular() {
+			if err := f.Chmod(0o600); err != nil {
+				_ = f.Close()
+				return fmt.Errorf("cannot set permissions on output file %q: %w", outputFile, err)
+			}
+			if err := f.Truncate(0); err != nil {
+				_ = f.Close()
+				return fmt.Errorf("cannot truncate output file %q: %w", outputFile, err)
+			}
+		}
 		defer func() {
-			if cerr := f.Close(); cerr != nil && retErr == nil {
-				retErr = cerr
+			if f != nil {
+				if cerr := f.Close(); cerr != nil && retErr == nil {
+					retErr = cerr
+				}
 			}
 		}()
 		w = f
@@ -31,20 +61,33 @@ func writeOutput(result pss.NamespaceResult, format, outputFile string, verbose 
 		w = os.Stdout
 	}
 
+	var err error
 	switch format {
 	case "json":
-		return writeJSON(w, result)
+		err = writeJSON(w, result)
 	case "table":
-		return writeTable(w, result, verbose)
+		err = writeTable(w, result, verbose)
 	case "sarif":
-		return writeSARIF(w, result)
+		err = writeSARIF(w, result)
 	case "junit":
-		return writeJUnit(w, result)
+		err = writeJUnit(w, result)
 	case "pretty-printer":
-		return writePretty(w, result, verbose)
+		err = writePretty(w, result, verbose)
 	default:
 		return fmt.Errorf("unsupported format %q", format)
 	}
+	if err != nil {
+		return err
+	}
+	if f != nil {
+		fileToClose := f
+		f = nil
+		if cerr := fileToClose.Close(); cerr != nil {
+			return cerr
+		}
+		printer.LogOutputFile(outputFile)
+	}
+	return nil
 }
 
 // --- JSON formatter ---
@@ -80,6 +123,7 @@ type jsonViolation struct {
 	Description string `json:"description"`
 }
 
+// writeJSON formats the prediction results as JSON.
 func writeJSON(w io.Writer, result pss.NamespaceResult) error {
 	out := jsonOutput{
 		Namespace:   result.Namespace,
@@ -123,8 +167,7 @@ func writeJSON(w io.Writer, result pss.NamespaceResult) error {
 	return enc.Encode(out)
 }
 
-// --- Table formatter ---
-
+// writeTable formats the prediction results as a summary table.
 func writeTable(w io.Writer, result pss.NamespaceResult, verbose bool) error {
 	tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
 	if _, err := fmt.Fprintln(tw, "KIND\tNAME\tPASSES_AT\tVIOLATIONS"); err != nil {
@@ -154,6 +197,17 @@ func writeTable(w io.Writer, result pss.NamespaceResult, verbose bool) error {
 
 	if err := tw.Flush(); err != nil {
 		return err
+	}
+
+	if len(result.DecodeWarnings) > 0 {
+		if _, err := fmt.Fprintf(w, "\nWarnings (%d unevaluated):\n", result.UnevaluatedWorkloads); err != nil {
+			return err
+		}
+		for _, warning := range result.DecodeWarnings {
+			if _, err := fmt.Fprintf(w, "  ⚠ %s\n", warning); err != nil {
+				return err
+			}
+		}
 	}
 
 	// Summary line
@@ -187,6 +241,7 @@ func (ew *errorWriter) println(a ...any) {
 	_, ew.err = fmt.Fprintln(ew.w, a...)
 }
 
+// writePretty formats the prediction results in a human-readable format.
 func writePretty(w io.Writer, result pss.NamespaceResult, verbose bool) error {
 	ew := &errorWriter{w: w}
 	ns := result.Namespace
@@ -293,6 +348,7 @@ type sarifMessage struct {
 
 type sarifResult struct {
 	RuleID    string          `json:"ruleId"`
+	RuleIndex int             `json:"ruleIndex"`
 	Level     string          `json:"level"`
 	Message   sarifMessage    `json:"message"`
 	Locations []sarifLocation `json:"locations"`
@@ -308,6 +364,7 @@ type sarifLogicalLocation struct {
 	Kind               string `json:"kind"`
 }
 
+// writeSARIF formats the prediction results as a SARIF report.
 func writeSARIF(w io.Writer, result pss.NamespaceResult) error {
 	// Collect unique rule IDs
 	ruleMap := make(map[string]pss.Level)
@@ -320,8 +377,17 @@ func writeSARIF(w io.Writer, result pss.NamespaceResult) error {
 		}
 	}
 
-	rules := make([]sarifRule, 0)
-	for ruleID, level := range ruleMap {
+	ruleIDs := make([]string, 0, len(ruleMap))
+	for ruleID := range ruleMap {
+		ruleIDs = append(ruleIDs, ruleID)
+	}
+	sort.Strings(ruleIDs)
+
+	ruleIndexMap := make(map[string]int, len(ruleIDs))
+	rules := make([]sarifRule, 0, len(ruleIDs))
+	for i, ruleID := range ruleIDs {
+		ruleIndexMap[ruleID] = i
+		level := ruleMap[ruleID]
 		sarifLevel := "warning"
 		if level <= pss.Baseline {
 			sarifLevel = "error"
@@ -350,9 +416,10 @@ func writeSARIF(w io.Writer, result pss.NamespaceResult) error {
 				fqn += "/" + v.Container
 			}
 			results = append(results, sarifResult{
-				RuleID:  ruleID,
-				Level:   level,
-				Message: sarifMessage{Text: v.Description},
+				RuleID:    ruleID,
+				RuleIndex: ruleIndexMap[ruleID],
+				Level:     level,
+				Message:   sarifMessage{Text: v.Description},
 				Locations: []sarifLocation{{
 					LogicalLocations: []sarifLogicalLocation{{
 						Name:               r.Name,
@@ -389,6 +456,9 @@ func writeSARIF(w io.Writer, result pss.NamespaceResult) error {
 
 type junitTestSuites struct {
 	XMLName   xml.Name         `xml:"testsuites"`
+	Tests     int              `xml:"tests,attr"`
+	Failures  int              `xml:"failures,attr"`
+	Skipped   int              `xml:"skipped,attr"`
 	TestSuite []junitTestSuite `xml:"testsuite"`
 }
 
@@ -420,6 +490,7 @@ type junitFailure struct {
 	Text    string `xml:",chardata"`
 }
 
+// writeJUnit formats the prediction results as a JUnit XML report.
 func writeJUnit(w io.Writer, result pss.NamespaceResult) error {
 	ns := result.Namespace
 	if ns == "" {
@@ -461,6 +532,9 @@ func writeJUnit(w io.Writer, result pss.NamespaceResult) error {
 	}
 
 	suites := junitTestSuites{
+		Tests:    result.TotalWorkloads,
+		Failures: result.FailingWorkloads,
+		Skipped:  result.UnevaluatedWorkloads,
 		TestSuite: []junitTestSuite{{
 			Name:      suiteName,
 			Tests:     result.TotalWorkloads,

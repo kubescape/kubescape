@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"encoding/xml"
 	"errors"
+	"os"
+	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/kubescape/kubescape/v4/core/pkg/pss"
@@ -75,6 +78,7 @@ func TestWriteJSON(t *testing.T) {
 	assert.Equal(t, "Baseline", fw["passes_at"])
 }
 
+// TestWriteTable verifies tabular output for failing workloads and verbose mode.
 func TestWriteTable(t *testing.T) {
 	res := sampleResult()
 
@@ -98,6 +102,24 @@ func TestWriteTable(t *testing.T) {
 
 	assert.Contains(t, outVerbose, "failing-app")
 	assert.Contains(t, outVerbose, "passing-app")
+}
+
+// TestWriteTable_WithDecodeWarnings verifies that unevaluated workloads and
+// decode warnings are displayed in the summary table before the summary line.
+func TestWriteTable_WithDecodeWarnings(t *testing.T) {
+	res := sampleResult()
+	res.UnevaluatedWorkloads = 1
+	res.TotalWorkloads += 1
+	res.DecodeWarnings = []string{"Pod/bad-pod: PodSpec extraction failed"}
+
+	var buf bytes.Buffer
+	err := writeTable(&buf, res, false)
+	require.NoError(t, err)
+	out := buf.String()
+
+	assert.Contains(t, out, "Warnings (1 unevaluated):")
+	assert.Contains(t, out, "⚠ Pod/bad-pod: PodSpec extraction failed")
+	assert.Contains(t, out, "Summary: 1/3 workloads pass at Restricted (current effective level: Baseline)")
 }
 
 func TestWritePretty(t *testing.T) {
@@ -138,6 +160,7 @@ func TestWritePretty_Empty(t *testing.T) {
 	assert.Contains(t, buf.String(), "No workloads found.")
 }
 
+// TestWriteSARIF verifies SARIF report generation for sample prediction results.
 func TestWriteSARIF(t *testing.T) {
 	res := sampleResult()
 
@@ -159,12 +182,77 @@ func TestWriteSARIF(t *testing.T) {
 
 	require.Len(t, run.Results, 1)
 	assert.Equal(t, "PSS/Capabilities", run.Results[0].RuleID)
+	assert.Equal(t, 0, run.Results[0].RuleIndex)
 	assert.Equal(t, "warning", run.Results[0].Level)
 	require.NotEmpty(t, run.Results[0].Locations)
 	assert.Equal(t, "failing-app", run.Results[0].Locations[0].LogicalLocations[0].Name)
 	assert.Equal(t, "test-ns/Deployment/failing-app/main", run.Results[0].Locations[0].LogicalLocations[0].FullyQualifiedName)
 }
 
+// TestWriteSARIF_DeterministicRuleOrdering verifies that SARIF rules are sorted
+// alphabetically by rule ID rather than emitting in non-deterministic map order,
+// and that each result's ruleIndex points to the correct rule in the driver.
+func TestWriteSARIF_DeterministicRuleOrdering(t *testing.T) {
+	res := pss.NamespaceResult{
+		Namespace:        "test-ns",
+		TargetLevel:      pss.Restricted,
+		TotalWorkloads:   2,
+		PassingWorkloads: 0,
+		FailingWorkloads: 2,
+		Results: []pss.WorkloadResult{
+			{
+				Kind:     "Deployment",
+				Name:     "app-a",
+				PassesAt: pss.Privileged,
+				Violations: []pss.Violation{
+					{Check: "Privileged", Level: pss.Baseline, Description: "container is privileged"},
+					{Check: "Capabilities", Level: pss.Restricted, Description: "drop ALL capabilities"},
+				},
+			},
+			{
+				Kind:     "DaemonSet",
+				Name:     "app-b",
+				PassesAt: pss.Privileged,
+				Violations: []pss.Violation{
+					{Check: "HostNetwork", Level: pss.Baseline, Description: "hostNetwork not allowed"},
+					{Check: "AllowPrivilegeEscalation", Level: pss.Restricted, Description: "allowPrivilegeEscalation must be false"},
+				},
+			},
+		},
+	}
+
+	for i := 0; i < 5; i++ {
+		var buf bytes.Buffer
+		err := writeSARIF(&buf, res)
+		require.NoError(t, err)
+
+		var report sarifReport
+		err = json.Unmarshal(buf.Bytes(), &report)
+		require.NoError(t, err)
+
+		require.Len(t, report.Runs, 1)
+		driver := report.Runs[0].Tool.Driver
+		require.Len(t, driver.Rules, 4)
+
+		expectedRules := []string{
+			"PSS/AllowPrivilegeEscalation",
+			"PSS/Capabilities",
+			"PSS/HostNetwork",
+			"PSS/Privileged",
+		}
+		for idx, expectedID := range expectedRules {
+			assert.Equal(t, expectedID, driver.Rules[idx].ID)
+		}
+
+		for _, result := range report.Runs[0].Results {
+			require.GreaterOrEqual(t, result.RuleIndex, 0)
+			require.Less(t, result.RuleIndex, len(driver.Rules))
+			assert.Equal(t, result.RuleID, driver.Rules[result.RuleIndex].ID)
+		}
+	}
+}
+
+// TestWriteSARIF_CleanReport verifies that a clean report outputs empty slices rather than null.
 func TestWriteSARIF_CleanReport(t *testing.T) {
 	// A report with no failing results should serialize empty arrays for rules and results, not null
 	res := pss.NamespaceResult{
@@ -186,6 +274,7 @@ func TestWriteSARIF_CleanReport(t *testing.T) {
 	assert.Contains(t, out, `"results": []`)
 }
 
+// TestWriteJUnit verifies JUnit XML output generation and aggregate counters.
 func TestWriteJUnit(t *testing.T) {
 	res := sampleResult()
 
@@ -196,6 +285,10 @@ func TestWriteJUnit(t *testing.T) {
 	var suites junitTestSuites
 	err = xml.Unmarshal(buf.Bytes(), &suites)
 	require.NoError(t, err)
+
+	assert.Equal(t, 2, suites.Tests)
+	assert.Equal(t, 1, suites.Failures)
+	assert.Equal(t, 0, suites.Skipped)
 
 	require.Len(t, suites.TestSuite, 1)
 	suite := suites.TestSuite[0]
@@ -213,6 +306,7 @@ func TestWriteJUnit(t *testing.T) {
 	assert.Nil(t, suite.TestCases[1].Failure)
 }
 
+// TestWriteJUnit_WithDecodeWarnings verifies JUnit XML output when unevaluated workloads exist.
 func TestWriteJUnit_WithDecodeWarnings(t *testing.T) {
 	res := sampleResult()
 	res.UnevaluatedWorkloads = 1
@@ -226,6 +320,10 @@ func TestWriteJUnit_WithDecodeWarnings(t *testing.T) {
 	var suites junitTestSuites
 	err = xml.Unmarshal(buf.Bytes(), &suites)
 	require.NoError(t, err)
+
+	assert.Equal(t, 3, suites.Tests)
+	assert.Equal(t, 1, suites.Failures)
+	assert.Equal(t, 1, suites.Skipped)
 
 	require.Len(t, suites.TestSuite, 1)
 	suite := suites.TestSuite[0]
@@ -338,5 +436,113 @@ func TestWriteJUnit_FailingWriter(t *testing.T) {
 		err := writeJUnit(fw, res)
 		assert.Error(t, err)
 		assert.Equal(t, "disk full", err.Error())
+	})
+}
+
+func TestWriteOutput_NestedDirectoryAndPermissions(t *testing.T) {
+	res := sampleResult()
+	tmpDir := t.TempDir()
+
+	t.Run("creates nested directories and writes json output", func(t *testing.T) {
+		nestedOutput := filepath.Join(tmpDir, "nested", "sub", "report.json")
+		err := writeOutput(res, "json", nestedOutput, false)
+		require.NoError(t, err)
+
+		info, err := os.Stat(nestedOutput)
+		require.NoError(t, err)
+		assert.True(t, info.Mode().IsRegular())
+
+		// On Unix systems, verify permissions are 0600
+		if runtime.GOOS != "windows" {
+			assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+		}
+
+		data, err := os.ReadFile(nestedOutput)
+		require.NoError(t, err)
+		assert.Contains(t, string(data), `"namespace": "test-ns"`)
+	})
+
+	t.Run("supports all valid formats when writing to file", func(t *testing.T) {
+		formats := []string{"json", "table", "sarif", "junit", "pretty-printer"}
+		for _, fmtName := range formats {
+			outPath := filepath.Join(tmpDir, fmtName+"-report.out")
+			err := writeOutput(res, fmtName, outPath, true)
+			require.NoError(t, err, "format %s should succeed", fmtName)
+
+			info, err := os.Stat(outPath)
+			require.NoError(t, err)
+			assert.Greater(t, info.Size(), int64(0))
+		}
+	})
+
+	t.Run("tightens permissions on pre-existing file", func(t *testing.T) {
+		existingFile := filepath.Join(tmpDir, "existing.json")
+		require.NoError(t, os.WriteFile(existingFile, []byte("old content"), 0o600))
+		if runtime.GOOS != "windows" {
+			require.NoError(t, os.Chmod(existingFile, 0o644))
+			initialInfo, err := os.Stat(existingFile)
+			require.NoError(t, err)
+			require.Equal(t, os.FileMode(0o644), initialInfo.Mode().Perm())
+		}
+
+		err := writeOutput(res, "json", existingFile, false)
+		require.NoError(t, err)
+
+		info, err := os.Stat(existingFile)
+		require.NoError(t, err)
+		if runtime.GOOS != "windows" {
+			assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+		}
+	})
+
+	t.Run("returns error on unsupported format", func(t *testing.T) {
+		outPath := filepath.Join(tmpDir, "invalid.out")
+		err := writeOutput(res, "unknown-format", outPath, false)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "unsupported format")
+	})
+
+	t.Run("preserves symlink target resolution without overwriting lexical sentinel", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("skipping symlink test on windows")
+		}
+		baseDir := t.TempDir()
+		sentinel := filepath.Join(baseDir, "report.json")
+		require.NoError(t, os.WriteFile(sentinel, []byte("sentinel content"), 0o600))
+
+		physicalDir := filepath.Join(baseDir, "physical", "child")
+		require.NoError(t, os.MkdirAll(physicalDir, 0o750))
+
+		linkPath := filepath.Join(baseDir, "link")
+		require.NoError(t, os.Symlink(physicalDir, linkPath))
+
+		outputPath := linkPath + string(filepath.Separator) + ".." + string(filepath.Separator) + "report.json"
+		err := writeOutput(res, "json", outputPath, false)
+		require.NoError(t, err)
+
+		// Sentinel in baseDir must remain untouched
+		sentinelContent, err := os.ReadFile(sentinel)
+		require.NoError(t, err)
+		assert.Equal(t, "sentinel content", string(sentinelContent))
+
+		// Actual target in physical directory must be written
+		targetFile := filepath.Join(baseDir, "physical", "report.json")
+		targetContent, err := os.ReadFile(targetFile)
+		require.NoError(t, err)
+		assert.Contains(t, string(targetContent), `"namespace": "test-ns"`)
+	})
+
+	t.Run("fails when output path has trailing slash and leaves sentinel untouched", func(t *testing.T) {
+		baseDir := t.TempDir()
+		sentinelFile := filepath.Join(baseDir, "report.json")
+		require.NoError(t, os.WriteFile(sentinelFile, []byte("sentinel content"), 0o600))
+
+		trailingSlashPath := sentinelFile + string(filepath.Separator)
+		err := writeOutput(res, "json", trailingSlashPath, false)
+		assert.Error(t, err)
+
+		sentinelContent, err := os.ReadFile(sentinelFile)
+		require.NoError(t, err)
+		assert.Equal(t, "sentinel content", string(sentinelContent))
 	})
 }

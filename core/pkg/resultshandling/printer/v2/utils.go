@@ -439,10 +439,6 @@ func mapInfoToPrintInfo(controls reportsummary.ControlSummaries) []infoStars {
 	return infoToPrintInfo
 }
 
-func finalizeResources(results []resourcesresults.Result, allResources map[string]workloadinterface.IMetadata, resourcesSource map[string]reporthandling.Source) []reporthandling.Resource {
-	return finalizeResourcesFromCatalog(results, cautils.NewMapResourceCatalog(allResources), resourcesSource)
-}
-
 func finalizeResourcesFromCatalog(results []resourcesresults.Result, catalog cautils.ResourceCatalog, resourcesSource map[string]reporthandling.Source) []reporthandling.Resource {
 	resources := make([]reporthandling.Resource, 0)
 	if catalog == nil {

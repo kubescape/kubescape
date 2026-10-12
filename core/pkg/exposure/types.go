@@ -35,7 +35,7 @@ const (
 	// ExposureHTTPRoute means a Gateway API HTTPRoute names this Service as
 	// a backend, and at least one of its parentRefs names a Gateway object
 	// this Index was given whose listener admits the route (per
-	// AllowedRoutes -- see Index.gatewayAdmitsRouteNamespace). A listener
+	// AllowedRoutes and hostname intersection). A listener
 	// whose admission can't be confirmed one way or the other is
 	// conservatively treated as admitting it.
 	ExposureHTTPRoute
@@ -83,10 +83,10 @@ type ExposurePath struct {
 	// Service itself for LoadBalancer/NodePort.
 	Source string
 	// Host is the hostname traffic must arrive with to reach this path, per
-	// the responsible Ingress rule or route hostname. Empty means any
+	// the responsible Ingress rule or route/listener hostname intersection. Empty means any
 	// host (an Ingress rule/defaultBackend with no host restriction, a
-	// LoadBalancer/NodePort Service, or a route with no hostnames
-	// declared).
+	// LoadBalancer/NodePort Service, or a route/listener pair with no
+	// hostnames declared).
 	Host string
 }
 
@@ -139,12 +139,15 @@ const gatewayAPIGroup = "gateway.networking.k8s.io"
 // SectionName, when present, pins the attachment to the one listener with
 // that name: per the Gateway API spec the route then attaches to that
 // section only, and no other listener of the Gateway may admit it.
+// Port, when present, further restricts attachment to listeners on that port.
+// Both restrictions must match when supplied together.
 type parentRef struct {
 	Group       *string
 	Kind        *string
 	Namespace   *string
 	Name        string
 	SectionName *string
+	Port        *int32
 }
 
 // isGatewayParentRef reports whether ref effectively names a Gateway once
@@ -167,6 +170,8 @@ type gatewayRouteRule struct {
 // backend (e.g. a multicluster ServiceImport) that this package does not
 // model as a Service exposure path, however closely its name matches one.
 type backendRef struct {
+	// Weight defaults to 1; an explicit zero forwards no requests.
+	Weight    *int32
 	Group     *string
 	Kind      *string
 	Namespace *string
@@ -188,7 +193,9 @@ type gateway struct {
 }
 
 type listener struct {
+	Port          int32
 	Name          string
+	Hostname      string
 	AllowedRoutes *allowedRoutes
 }
 

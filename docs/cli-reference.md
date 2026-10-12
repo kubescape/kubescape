@@ -756,6 +756,7 @@ a config omits, so the live `envFrom` survives.
 |------|-------------|---------|
 | `--dry-run` | Preview changes without applying | `false` |
 | `--no-confirm` | Apply without confirmation | `false` |
+| `-i`, `--interactive` | Show each resource's changes and ask before fixing it, instead of one prompt for the whole run. Only manifest files fixed in place are asked about: with `--dry-run`, `--no-confirm`, `--output-dir` or a cluster scan, the changes are shown without asking | `false` |
 | `--skip-user-values` | Skip changes requiring user values | `true` |
 | `--output-dir` | Write the fixes into this directory instead of their default destination. Manifest files: fixed copies that mirror the scanned tree, originals untouched. Cluster scans: one patched manifest per resource | *(fix in place / print to stdout)* |
 | `--include-controls` | Remediate only these control IDs (comma-separated, case-insensitive). Disables `--container-profile` drift remediation — see [selecting controls to fix](#selecting-controls-to-fix) | *(all)* |
@@ -835,8 +836,23 @@ file stays one file. Where the tree starts depends on the scan:
 The layout depends only on what was scanned, so a later run of the same scan
 writes into the same tree even if it fixes fewer files or selects fewer
 controls. Review the copies against the originals, then copy them over the
-originals or apply them as they are. A directory that is the scanned one is
-refused: writing there would be an in-place fix under another name.
+originals or apply them as they are.
+
+Before writing anything, `--output-dir` refuses a run that could not keep the
+originals intact and the copies apart, even with `--no-confirm`:
+
+- A copy would overwrite a manifest the scan read. That covers the scanned
+  directory itself, a directory inside a scanned input, and a file reached
+  through a hard link or symlink. Manifests with nothing to fix count too.
+- Two manifests would be written to the same copy.
+- A path from the report would leave the output directory.
+- The scanned inputs share no common directory, such as inputs on two Windows
+  drives.
+
+While writing, it also refuses to follow a symlink in the output directory to a
+place outside it, and to replace a copy it has already written in the same run
+under another name, as two names differing only in case are on a
+case-insensitive filesystem.
 
 Fixing a cluster scan:
 
@@ -863,7 +879,8 @@ kubectl apply -f ./fixes
 >
 > The prompt does not apply to cluster scans, or to manifest files fixed with
 > `--output-dir`: neither path edits anything in place, so there is nothing to
-> confirm. With `--output-dir`, a non-empty directory is refused unless you pass
+> confirm. `--interactive` shows the changes on those paths without asking. With
+> `--output-dir`, a non-empty directory is refused unless you pass
 > `--no-confirm`.
 
 ---

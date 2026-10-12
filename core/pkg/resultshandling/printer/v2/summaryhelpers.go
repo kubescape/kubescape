@@ -229,10 +229,6 @@ func isKindToBeGrouped(kind string) bool {
 	return false
 }
 
-func listResultSummary(controlSummary reportsummary.IControlSummary, allResources map[string]workloadinterface.IMetadata) []WorkloadSummary {
-	return listResultSummaryFromCatalog(controlSummary, cautils.NewMapResourceCatalog(allResources))
-}
-
 func listResultSummaryFromCatalog(controlSummary reportsummary.IControlSummary, catalog cautils.ResourceCatalog) []WorkloadSummary {
 	resourceIds := helpersv1.GetAllListsFromPool()
 	defer helpersv1.PutAllListsToPool(resourceIds)

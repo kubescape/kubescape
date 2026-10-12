@@ -433,6 +433,7 @@ func TestQuayAdaptor_GetImagesScanStatus(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, res, 1)
 		assert.True(t, res[0].IsScanAvailable)
+		assert.Equal(t, ScanStatusScanned, res[0].Status)
 	})
 
 	t.Run("queued status marks scan unavailable", func(t *testing.T) {
@@ -445,6 +446,7 @@ func TestQuayAdaptor_GetImagesScanStatus(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, res, 1)
 		assert.False(t, res[0].IsScanAvailable)
+		assert.Equal(t, ScanStatusQueued, res[0].Status)
 	})
 
 	t.Run("unsupported and failed statuses mark scan unavailable", func(t *testing.T) {
@@ -461,7 +463,9 @@ func TestQuayAdaptor_GetImagesScanStatus(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, res, 2)
 		assert.False(t, res[0].IsScanAvailable)
+		assert.Equal(t, ScanStatusUnsupported, res[0].Status)
 		assert.False(t, res[1].IsScanAvailable)
+		assert.Equal(t, ScanStatusFailed, res[1].Status)
 	})
 
 	t.Run("api error propagates joined error while retaining result slot", func(t *testing.T) {
@@ -810,9 +814,10 @@ func TestQuayAdaptor_GetImagesVulnerabilities(t *testing.T) {
 		require.Len(t, res, 1, "failed scan must retain report slot")
 		assert.Equal(t, "myorg/failedscan", res[0].ImageID.Repository)
 		assert.Empty(t, res[0].Vulnerabilities)
+		assert.Equal(t, ScanStatusFailed, res[0].Status)
 	})
 
-	t.Run("queued and unsupported statuses return error and retain report slot", func(t *testing.T) {
+	t.Run("queued status returns error and unsupported status returns clean report without error", func(t *testing.T) {
 		pathQueued := quayManifestSecurityPath("myorg", "queued", "sha256:queued123", true)
 		mock.responses[pathQueued] = []byte(`{"status": "queued", "data": null}`)
 
@@ -825,8 +830,25 @@ func TestQuayAdaptor_GetImagesVulnerabilities(t *testing.T) {
 		})
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "quay security scan is queued")
-		assert.Contains(t, err.Error(), "quay security scan unsupported")
+		assert.NotContains(t, err.Error(), "quay security scan unsupported")
 		require.Len(t, res, 2, "both slots must be retained")
+		assert.Equal(t, ScanStatusQueued, res[0].Status)
+		assert.Empty(t, res[0].Vulnerabilities)
+		assert.Equal(t, ScanStatusUnsupported, res[1].Status)
+		assert.Empty(t, res[1].Vulnerabilities)
+	})
+
+	t.Run("unsupported status alone returns report with ScanStatusUnsupported and no error", func(t *testing.T) {
+		pathUnsupported := quayManifestSecurityPath("myorg", "distroless", "sha256:distroless123", true)
+		mock.responses[pathUnsupported] = []byte(`{"status": "unsupported", "data": null}`)
+
+		res, err := adaptor.GetImagesVulnerabilities(context.Background(), []ContainerImageIdentifier{
+			{Registry: "quay.io", Repository: "myorg/distroless", Hash: "sha256:distroless123"},
+		})
+		require.NoError(t, err)
+		require.Len(t, res, 1)
+		assert.Equal(t, ScanStatusUnsupported, res[0].Status)
+		assert.Empty(t, res[0].Vulnerabilities)
 	})
 
 	t.Run("failed-then-successful batch preserves order and aggregates error", func(t *testing.T) {
@@ -865,9 +887,11 @@ func TestQuayAdaptor_GetImagesVulnerabilities(t *testing.T) {
 		require.Len(t, res, 2)
 		assert.Equal(t, "myorg/image1", res[0].ImageID.Repository)
 		assert.Empty(t, res[0].Vulnerabilities)
+		assert.Equal(t, ScanStatusFailed, res[0].Status)
 		assert.Equal(t, "myorg/image2", res[1].ImageID.Repository)
 		require.Len(t, res[1].Vulnerabilities, 1)
 		assert.Equal(t, "CVE-2023-38545", res[1].Vulnerabilities[0].ID)
+		assert.Equal(t, ScanStatusScanned, res[1].Status)
 	})
 
 	t.Run("api failure returns joined error with report placeholder", func(t *testing.T) {
@@ -1519,6 +1543,286 @@ func TestQuayAdaptor_EnterpriseFixture_DeduplicationAndEnrichment(t *testing.T) 
 	require.True(t, exists)
 	assert.Equal(t, "Critical", v4.Severity)
 	assert.Equal(t, "https://nvd.nist.gov/vuln/detail/CVE-2023-38545", v4.Links[0])
+
+	// 5. Multi-package CVE deduplication: CVE-2023-4911 affects both glibc and python3.
+	// The deduplicated entry retains the primary description and appends secondary package context.
+	v5, exists := vulnMap["CVE-2023-4911"]
+	require.True(t, exists)
+	assert.Equal(t, "High", v5.Severity)
+	assert.Contains(t, v5.Description, "GLibc")
+	assert.Contains(t, v5.Description, "also affects: python3 (3.6.8-45.el8)")
+}
+
+func TestQuayAdaptor_DeduplicationMergesLinks(t *testing.T) {
+	mock := newMockQuayAPI()
+	digest := "sha256:linksdedup1234567890abcdef"
+	path := quayManifestSecurityPath("org", "repo", digest, true)
+	mock.responses[path] = []byte(`{
+		"status": "scanned",
+		"data": {
+			"Layer": {
+				"Features": [
+					{
+						"Name": "curl",
+						"Version": "7.61.1",
+						"Vulnerabilities": [
+							{
+								"Name": "CVE-2023-38545",
+								"Severity": "High",
+								"Link": "https://curl.se/docs/CVE-2023-38545.html https://access.redhat.com/security/cve/CVE-2023-38545"
+							}
+						]
+					},
+					{
+						"Name": "libcurl",
+						"Version": "7.61.1",
+						"Vulnerabilities": [
+							{
+								"Name": "CVE-2023-38545",
+								"Severity": "Critical",
+								"Link": "https://nvd.nist.gov/vuln/detail/CVE-2023-38545 https://curl.se/docs/CVE-2023-38545.html"
+							}
+						]
+					}
+				]
+			}
+		}
+	}`)
+
+	adaptor := NewQuayAdaptor()
+	adaptor.client = mock
+
+	reports, err := adaptor.GetImagesVulnerabilities(context.Background(), []ContainerImageIdentifier{
+		{
+			Registry:   "quay.io",
+			Repository: "quay.io/org/repo",
+			Hash:       digest,
+		},
+	})
+	require.NoError(t, err)
+	require.Len(t, reports, 1)
+	require.Len(t, reports[0].Vulnerabilities, 1)
+
+	v := reports[0].Vulnerabilities[0]
+	assert.Equal(t, "CVE-2023-38545", v.ID)
+	assert.Equal(t, "Critical", v.Severity)
+	// Links should contain all 3 unique links deduplicated
+	assert.Len(t, v.Links, 3)
+	assert.Contains(t, v.Links, "https://curl.se/docs/CVE-2023-38545.html")
+	assert.Contains(t, v.Links, "https://access.redhat.com/security/cve/CVE-2023-38545")
+	assert.Contains(t, v.Links, "https://nvd.nist.gov/vuln/detail/CVE-2023-38545")
+}
+
+func TestQuayAdaptor_DeduplicationMergesPackageContext(t *testing.T) {
+	t.Run("merges multiple packages with versions and fixes without duplicating same package", func(t *testing.T) {
+		mock := newMockQuayAPI()
+		digest := "sha256:pkgcontext1234567890abcdef"
+		path := quayManifestSecurityPath("org", "repo", digest, true)
+		mock.responses[path] = []byte(`{
+			"status": "scanned",
+			"data": {
+				"Layer": {
+					"Features": [
+						{
+							"Name": "glibc",
+							"Version": "2.28-151",
+							"Vulnerabilities": [
+								{
+									"Name": "CVE-2023-4911",
+									"Severity": "Medium",
+									"Description": "GLibc buffer overflow",
+									"FixedBy": "2.28-152"
+								}
+							]
+						},
+						{
+							"Name": "python3",
+							"Version": "3.8.10",
+							"Vulnerabilities": [
+								{
+									"Name": "CVE-2023-4911",
+									"Severity": "High",
+									"FixedBy": "3.8.11"
+								}
+							]
+						},
+						{
+							"Name": "ruby",
+							"Vulnerabilities": [
+								{
+									"Name": "CVE-2023-4911",
+									"Severity": "Low"
+								}
+							]
+						},
+						{
+							"Name": "python3",
+							"Version": "3.8.10",
+							"Vulnerabilities": [
+								{
+									"Name": "CVE-2023-4911",
+									"Severity": "High",
+									"FixedBy": "3.8.11"
+								}
+							]
+						}
+					]
+				}
+			}
+		}`)
+
+		adaptor := NewQuayAdaptor()
+		adaptor.client = mock
+
+		reports, err := adaptor.GetImagesVulnerabilities(context.Background(), []ContainerImageIdentifier{
+			{
+				Registry:   "quay.io",
+				Repository: "quay.io/org/repo",
+				Hash:       digest,
+			},
+		})
+		require.NoError(t, err)
+		require.Len(t, reports, 1)
+		require.Len(t, reports[0].Vulnerabilities, 1)
+
+		v := reports[0].Vulnerabilities[0]
+		assert.Equal(t, "CVE-2023-4911", v.ID)
+		assert.Equal(t, "High", v.Severity)
+		// Primary package info + secondary python3 and ruby
+		assert.Contains(t, v.Description, "GLibc buffer overflow (fixed in 2.28-152)")
+		assert.Contains(t, v.Description, "also affects: python3 (3.8.10) [fixed in 3.8.11]")
+		assert.Contains(t, v.Description, "also affects: ruby")
+		// python3 should only be mentioned once in "also affects"
+		assert.Equal(t, 1, strings.Count(v.Description, "also affects: python3"))
+	})
+
+	t.Run("empty primary description initialized then secondary appended", func(t *testing.T) {
+		mock := newMockQuayAPI()
+		digest := "sha256:emptydesc1234567890abcdef"
+		path := quayManifestSecurityPath("org", "repo", digest, true)
+		mock.responses[path] = []byte(`{
+			"status": "scanned",
+			"data": {
+				"Layer": {
+					"Features": [
+						{
+							"Name": "openssl",
+							"Version": "1.1.1",
+							"Vulnerabilities": [
+								{
+									"Name": "CVE-2024-9999",
+									"Severity": "Low"
+								}
+							]
+						},
+						{
+							"Name": "curl",
+							"Version": "7.88.1",
+							"Vulnerabilities": [
+								{
+									"Name": "CVE-2024-9999",
+									"Severity": "High",
+									"FixedBy": "7.88.2"
+								}
+							]
+						}
+					]
+				}
+			}
+		}`)
+
+		adaptor := NewQuayAdaptor()
+		adaptor.client = mock
+
+		reports, err := adaptor.GetImagesVulnerabilities(context.Background(), []ContainerImageIdentifier{
+			{
+				Registry:   "quay.io",
+				Repository: "quay.io/org/repo",
+				Hash:       digest,
+			},
+		})
+		require.NoError(t, err)
+		require.Len(t, reports, 1)
+		require.Len(t, reports[0].Vulnerabilities, 1)
+
+		v := reports[0].Vulnerabilities[0]
+		assert.Equal(t, "CVE-2024-9999", v.ID)
+		assert.Equal(t, "High", v.Severity)
+		assert.Equal(t, "Vulnerability in package openssl (1.1.1); also affects: curl (7.88.1) [fixed in 7.88.2]", v.Description)
+	})
+
+	t.Run("tracks different versions of same package separately with distinct fixes", func(t *testing.T) {
+		mock := newMockQuayAPI()
+		digest := "sha256:samepkgdiffver1234567890abcdef"
+		path := quayManifestSecurityPath("org", "repo", digest, true)
+		mock.responses[path] = []byte(`{
+			"status": "scanned",
+			"data": {
+				"Layer": {
+					"Features": [
+						{
+							"Name": "openssl",
+							"Version": "1.1.1k-1.el8",
+							"Vulnerabilities": [
+								{
+									"Name": "CVE-2023-3817",
+									"Severity": "Medium",
+									"Description": "Excessive time in DH keys",
+									"FixedBy": "1.1.1k-2.el8"
+								}
+							]
+						},
+						{
+							"Name": "openssl",
+							"Version": "3.0.7-1.el9",
+							"Vulnerabilities": [
+								{
+									"Name": "CVE-2023-3817",
+									"Severity": "High",
+									"FixedBy": "3.0.7-2.el9"
+								}
+							]
+						},
+						{
+							"Name": "openssl",
+							"Version": "3.0.7-1.el9",
+							"Vulnerabilities": [
+								{
+									"Name": "CVE-2023-3817",
+									"Severity": "High",
+									"FixedBy": "3.0.7-2.el9"
+								}
+							]
+						}
+					]
+				}
+			}
+		}`)
+
+		adaptor := NewQuayAdaptor()
+		adaptor.client = mock
+
+		reports, err := adaptor.GetImagesVulnerabilities(context.Background(), []ContainerImageIdentifier{
+			{
+				Registry:   "quay.io",
+				Repository: "quay.io/org/repo",
+				Hash:       digest,
+			},
+		})
+		require.NoError(t, err)
+		require.Len(t, reports, 1)
+		require.Len(t, reports[0].Vulnerabilities, 1)
+
+		v := reports[0].Vulnerabilities[0]
+		assert.Equal(t, "CVE-2023-3817", v.ID)
+		assert.Equal(t, "High", v.Severity)
+		// Primary openssl 1.1.1k description and its fix
+		assert.Contains(t, v.Description, "Excessive time in DH keys (fixed in 1.1.1k-2.el8)")
+		// Secondary openssl 3.0.7 is NOT suppressed and retains its own fix context
+		assert.Contains(t, v.Description, "also affects: openssl (3.0.7-1.el9) [fixed in 3.0.7-2.el9]")
+		// Duplicate openssl 3.0.7 in another layer is suppressed
+		assert.Equal(t, 1, strings.Count(v.Description, "also affects: openssl (3.0.7-1.el9)"))
+	})
 }
 
 func TestQuayAdaptor_ServerErrorAndContextCancellation(t *testing.T) {

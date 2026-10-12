@@ -1,7 +1,7 @@
 header:
   schema-version: 2.2.0
-  last-updated: '2026-10-06'
-  last-reviewed: '2026-10-06'
+  last-updated: '2026-10-07'
+  last-reviewed: '2026-10-07'
   url: https://raw.githubusercontent.com/kubescape/kubescape/master/security-insights.yml
 
 project:
@@ -37,6 +37,8 @@ project:
   documentation:
     detailed-guide: https://kubescape.io/docs/
     code-of-conduct: https://github.com/kubescape/project-governance/blob/main/CODE_OF_CONDUCT.md
+    quickstart-guide: https://kubescape.io/docs/getting-started/
+    release-process: https://github.com/kubescape/kubescape/blob/master/.github/workflows/README.md#release-process
 
 repository:
   url: https://github.com/kubescape/kubescape

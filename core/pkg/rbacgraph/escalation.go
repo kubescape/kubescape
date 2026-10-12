@@ -82,7 +82,7 @@ func (idx *Index) impersonateEdges(rules []ScopedRule) []EscalationEdge {
 			}
 			for _, ns := range idx.targetNamespaces(sr.Namespace) {
 				for _, saName := range idx.serviceAccountsByNS[ns] {
-					if restricted && !containsOrWildcard(names, saName) {
+					if restricted && !resourceNameMatches(names, saName) {
 						continue
 					}
 					edges = append(edges, EscalationEdge{
@@ -308,15 +308,19 @@ func (idx *Index) escalateVerbEdges(rules []ScopedRule) []EscalationEdge {
 				roles = idx.matchingRoles(scope, targetNames, true)
 			}
 			if len(roles) == 0 {
-				// Same partial-collection fallback as the clusterroles case
-				// above, one edge per name for the same reason.
+				// Preserve the partial-collection warning, one edge per name
+				// for the same reason as the clusterroles case above. A
+				// cluster-wide grant on Roles still targets namespaced
+				// objects: without a matching Role, its namespace is unknown,
+				// not cluster-wide.
 				for _, name := range targetNames {
 					edges = append(edges, EscalationEdge{
-						Primitive: PrimitiveEscalateVerb,
-						Detail:    fmt.Sprintf("holds escalate + update/patch on Role %q in namespace scope %q, not found in the collected snapshot -- may be a partial collection, not a confirmed absence", name, scope),
-						Unbounded: true,
-						Scope:     scope,
-						Target:    &RoleTarget{Kind: "Role", Namespace: scope, Name: name},
+						Primitive:    PrimitiveEscalateVerb,
+						Detail:       fmt.Sprintf("holds escalate + update/patch on Role %q in namespace scope %q, not found in the collected snapshot -- may be a partial collection, not a confirmed absence", name, scope),
+						Unbounded:    true,
+						Scope:        scope,
+						ScopeUnknown: scope == "",
+						Target:       &RoleTarget{Kind: "Role", Namespace: scope, Name: name},
 					})
 				}
 			}
@@ -457,7 +461,7 @@ func (idx *Index) mintServiceAccountTokenEdges(rules []ScopedRule) []EscalationE
 		names, restricted := namedResources(sr.Rule)
 		for _, ns := range idx.targetNamespaces(sr.Namespace) {
 			for _, saName := range idx.serviceAccountsByNS[ns] {
-				if restricted && !containsOrWildcard(names, saName) {
+				if restricted && !resourceNameMatches(names, saName) {
 					continue
 				}
 				edges = append(edges, EscalationEdge{
@@ -522,7 +526,7 @@ func (idx *Index) matchingClusterRoles(names []string, restricted bool) []*rbacv
 	var out []*rbacv1.ClusterRole
 	for _, name := range slices.Sorted(maps.Keys(idx.clusterRoles)) {
 		cr := idx.clusterRoles[name]
-		if restricted && !containsOrWildcard(names, cr.Name) {
+		if restricted && !resourceNameMatches(names, cr.Name) {
 			continue
 		}
 		out = append(out, cr)
@@ -537,7 +541,7 @@ func (idx *Index) matchingRoles(namespace string, names []string, restricted boo
 		if r.Namespace != namespace {
 			continue
 		}
-		if restricted && !containsOrWildcard(names, r.Name) {
+		if restricted && !resourceNameMatches(names, r.Name) {
 			continue
 		}
 		out = append(out, r)
@@ -552,7 +556,7 @@ func (idx *Index) matchingRolesAnyNamespace(names []string, restricted bool) []*
 	var out []*rbacv1.Role
 	for _, key := range slices.Sorted(maps.Keys(idx.roles)) {
 		r := idx.roles[key]
-		if restricted && !containsOrWildcard(names, r.Name) {
+		if restricted && !resourceNameMatches(names, r.Name) {
 			continue
 		}
 		out = append(out, r)

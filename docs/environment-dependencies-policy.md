@@ -28,6 +28,15 @@ When adding a new third-party package to Kubescape, maintainers must follow thes
 4. Pin the package to the specific version in the Kubescape codebase. 
 5. Update the Kubescape documentation to reflect the new dependency.
 
+## Tracking
+
+Dependencies are recorded in the repository and updated through pull requests:
+
+- Go module versions are declared in `go.mod`. `go.sum` records the checksum of each module, so the build fails if a downloaded module does not match.
+- GitHub Actions used by the workflows are pinned to a full commit SHA.
+- [Dependabot](../.github/dependabot.yaml) checks Go modules and GitHub Actions weekly and opens a pull request for each update. The Kubernetes client libraries (`k8s.io/api`, `k8s.io/apimachinery`, `k8s.io/apiserver`, `k8s.io/client-go`) are updated together in one pull request.
+- FOSSA checks every pull request for license compliance and dependency quality.
+
 ## Enforcement
 
 This policy is enforced by the Kubescape maintainers.
@@ -35,4 +44,4 @@ Maintainers are expected to review each other's code changes to ensure that they
 
 ## Exceptions
 
-Exceptions to this policy may be granted by the Kubescape project lead on a case-by-case basis.
+Exceptions to this policy may be granted by the Kubescape maintainers on a case-by-case basis.

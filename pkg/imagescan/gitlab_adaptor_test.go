@@ -255,8 +255,81 @@ func TestGitlabAdaptor_GetImagesScanStatus(t *testing.T) {
 	assert.False(t, statuses[6].IsScanAvailable) // Format Error
 	assert.False(t, statuses[7].IsScanAvailable) // Malformed JSON
 
+	for _, s := range statuses {
+		assert.Empty(t, s.Status)
+		assert.False(t, s.Status.IsTerminal())
+	}
+
 	// Verify caching - 'my-group/my-project' should only have 1 call
 	assert.Equal(t, 1, mockAPI.callCount["my-group/my-project"])
+}
+
+func TestGitlabAdaptor_GetImagesScanStatus_EmptyProjectAndUnmatchedDigestsLeaveStatusUnset(t *testing.T) {
+	mockAPI := &mockGitlabAPI{
+		responses: map[string][]byte{
+			"my-group/empty-project": []byte(`{
+				"data": {
+					"project": {
+						"vulnerabilities": {
+							"nodes": []
+						}
+					}
+				}
+			}`),
+			"my-group/scanned-project": []byte(`{
+				"data": {
+					"project": {
+						"vulnerabilities": {
+							"nodes": [
+								{ "title": "CVE-2023-1234" }
+							]
+						}
+					}
+				}
+			}`),
+		},
+	}
+
+	adaptor := NewGitlabAdaptor()
+	adaptor.client = mockAPI
+
+	t.Run("empty project leaves status unset for multiple unverified digests with cached request", func(t *testing.T) {
+		imageIDs := []ContainerImageIdentifier{
+			{Repository: "my-group/empty-project/app", Hash: "sha256:unknown"},
+			{Repository: "my-group/empty-project/app", Hash: "sha256:unscanned"},
+		}
+
+		statuses, err := adaptor.GetImagesScanStatus(context.Background(), imageIDs)
+		require.NoError(t, err)
+		require.Len(t, statuses, 2)
+
+		for _, status := range statuses {
+			assert.True(t, status.IsScanAvailable, "project-level scanning availability is preserved")
+			assert.Empty(t, status.Status, "project query does not establish image completion")
+			assert.False(t, status.Status.IsTerminal(), "unset status must not be terminal")
+		}
+
+		assert.Equal(t, 1, mockAPI.callCount["my-group/empty-project"])
+	})
+
+	t.Run("same project with findings leaves status unset for unverified digests with cached request", func(t *testing.T) {
+		imageIDs := []ContainerImageIdentifier{
+			{Repository: "my-group/scanned-project/app", Hash: "sha256:unknown"},
+			{Repository: "my-group/scanned-project/app", Hash: "sha256:unscanned"},
+		}
+
+		statuses, err := adaptor.GetImagesScanStatus(context.Background(), imageIDs)
+		require.NoError(t, err)
+		require.Len(t, statuses, 2)
+
+		for _, status := range statuses {
+			assert.True(t, status.IsScanAvailable, "project-level scanning availability is preserved")
+			assert.Empty(t, status.Status, "project query does not establish image completion")
+			assert.False(t, status.Status.IsTerminal(), "unset status must not be terminal")
+		}
+
+		assert.Equal(t, 1, mockAPI.callCount["my-group/scanned-project"])
+	})
 }
 
 func TestGitlabAdaptor_GetImagesVulnerabilities(t *testing.T) {
@@ -348,6 +421,9 @@ func TestGitlabAdaptor_GetImagesVulnerabilities(t *testing.T) {
 	assert.Equal(t, "CVE-2023-9999", vuln2.ID)
 	assert.Equal(t, "Critical", vuln2.Severity)
 
+	assert.Equal(t, ScanStatusScanned, reports[0].Status)
+	assert.Equal(t, ScanStatusScanned, reports[1].Status)
+
 	// Verify caching - 'my-group/my-project' should only have 1 call for base and 1 for paginated
 	assert.Equal(t, 1, mockAPI.callCount["my-group/my-project"])
 	assert.Equal(t, 1, mockAPI.callCount["my-group/my-project_cursor123"])
@@ -361,6 +437,7 @@ func TestGitlabAdaptor_GetImagesVulnerabilities(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Len(t, reportsHash, 1)
 	assert.Len(t, reportsHash[0].Vulnerabilities, 1) // Should only match the digest vulnerability!
+	assert.Equal(t, ScanStatusScanned, reportsHash[0].Status)
 
 	vulnDigest := reportsHash[0].Vulnerabilities[0]
 	assert.Equal(t, "CVE-2023-0000", vulnDigest.ID)
@@ -374,6 +451,42 @@ func TestGitlabAdaptor_GetImagesVulnerabilities(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Len(t, reportsUnmatched, 1)
 	assert.Len(t, reportsUnmatched[0].Vulnerabilities, 0) // Should match nothing because the digest isn't present
+	assert.Empty(t, reportsUnmatched[0].Status, "unmatched digest must leave status unset")
+
+	// Test case 4: Mixed batch testing cache isolation with unmatched digest
+	imageIDsMixed := []ContainerImageIdentifier{
+		{Repository: "my-group/my-project/app", Tag: "latest"},
+		{Repository: "my-group/my-project/app", Hash: "sha256:unknown"},
+	}
+
+	reportsMixed, err := adaptor.GetImagesVulnerabilities(context.Background(), imageIDsMixed)
+	assert.NoError(t, err)
+	require.Len(t, reportsMixed, 2)
+	assert.Equal(t, ScanStatusScanned, reportsMixed[0].Status)
+	assert.Len(t, reportsMixed[0].Vulnerabilities, 2)
+	assert.Empty(t, reportsMixed[1].Status, "cached project results must not mark unmatched digest as scanned")
+	assert.Empty(t, reportsMixed[1].Vulnerabilities)
+}
+
+func TestGitlabAdaptor_GetImagesVulnerabilities_RetrievalErrorDoesNotSetScannerFailure(t *testing.T) {
+	mockAPI := &mockGitlabAPI{
+		errors: map[string]error{
+			"my-group/my-project": fmt.Errorf("network failure querying graphql"),
+		},
+	}
+
+	adaptor := NewGitlabAdaptor()
+	adaptor.client = mockAPI
+
+	reports, err := adaptor.GetImagesVulnerabilities(context.Background(), []ContainerImageIdentifier{
+		{Repository: "my-group/my-project/app", Tag: "latest"},
+	})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "network failure querying graphql")
+	require.Len(t, reports, 1)
+	assert.Empty(t, reports[0].Status, "retrieval error must not set scanner status to failed")
+	assert.Empty(t, reports[0].Vulnerabilities)
 }
 
 func TestGitlabAdaptor_GetImagesVulnerabilitiesRejectsStalledPagination(t *testing.T) {

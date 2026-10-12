@@ -2,6 +2,7 @@ package exposure
 
 import (
 	"fmt"
+	"slices"
 
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
@@ -89,18 +90,15 @@ func (idx *Index) ServiceExposure(ref ServiceRef) (paths []ExposurePath, unclear
 	}
 
 	for _, route := range idx.routesByNS[ref.Namespace] {
-		if !idx.routeAttachesToAGateway(route) {
+		hosts := idx.attachedRouteHostnames(route)
+		if len(hosts) == 0 {
 			continue
 		}
 		if !routeReferencesService(route, ref) {
 			continue
 		}
 		source := fmt.Sprintf("%s/%s", route.Namespace, route.Name)
-		if len(route.Hostnames) == 0 {
-			paths = append(paths, ExposurePath{Kind: routeExposureKind(route.Kind), Source: source})
-			continue
-		}
-		for _, host := range route.Hostnames {
+		for _, host := range hosts {
 			paths = append(paths, ExposurePath{Kind: routeExposureKind(route.Kind), Source: source, Host: host})
 		}
 	}
@@ -140,8 +138,9 @@ func (idx *Index) crossNamespaceBackendRefIsUnmodeled(ref ServiceRef) bool {
 				for _, backend := range rule.BackendRefs {
 					// Only an effective core-Service backendRef names this
 					// Service; a non-Service backend sharing its name says
-					// nothing about its exposure.
-					if !isServiceBackendRef(backend) {
+					// nothing about its exposure. Zero-weight backends
+					// receive no requests and are not exposure paths.
+					if !isServiceBackendRef(backend) || (backend.Weight != nil && *backend.Weight == 0) {
 						continue
 					}
 					if backend.Namespace != nil && *backend.Namespace == ref.Namespace && backend.Name == ref.Name {
@@ -183,7 +182,8 @@ func backendNamesService(backend *networkingv1.IngressBackend, serviceName strin
 }
 
 // routeReferencesService reports whether any rule in route sends
-// traffic to ref. Only effective core-Service backends count (per Gateway
+// traffic to ref. Zero-weight backends receive no requests. Only effective
+// core-Service backends count (per Gateway
 // API's group/kind defaults -- a backendRef naming another kind must not
 // produce a Service exposure path however closely its name matches). A
 // backendRef with no Namespace defaults to the route's own namespace, per
@@ -194,7 +194,7 @@ func backendNamesService(backend *networkingv1.IngressBackend, serviceName strin
 func routeReferencesService(route *gatewayRoute, ref ServiceRef) bool {
 	for _, rule := range route.Rules {
 		for _, backend := range rule.BackendRefs {
-			if !isServiceBackendRef(backend) {
+			if !isServiceBackendRef(backend) || (backend.Weight != nil && *backend.Weight == 0) {
 				continue
 			}
 			ns := route.Namespace
@@ -217,9 +217,11 @@ func routeReferencesService(route *gatewayRoute, ref ServiceRef) bool {
 // a parentRef carries a sectionName, it pins the attachment to the one
 // listener with that name -- no other listener of the Gateway may admit
 // the route, and a sectionName naming no collected listener contributes
-// nothing. Otherwise every listener is evaluated. A listener must admit
-// the route on BOTH axes: its AllowedRoutes namespaces policy and its
-// AllowedRoutes kinds policy. A listener whose namespace admission cannot
+// nothing. A specified port also restricts attachment; with both fields
+// present a listener must match both. Otherwise every listener is evaluated.
+// A listener must admit the route's hostname as well as its AllowedRoutes
+// namespaces and kinds
+// policies. A listener whose namespace admission cannot
 // be confirmed to exclude the route (a Selector needing namespace labels
 // this Index was not given) is conservatively treated as admitting it:
 // this package errs toward reporting a possible exposure rather than
@@ -231,6 +233,29 @@ func routeReferencesService(route *gatewayRoute, ref ServiceRef) bool {
 // not exist -- so it gets the same conservative treatment rather than
 // being silently treated as a non-match.
 func (idx *Index) routeAttachesToAGateway(route *gatewayRoute) bool {
+	return len(idx.attachedRouteHostnames(route)) > 0
+}
+
+// attachedRouteHostnames returns only the intersections admitted by a
+// listener. An empty hostname denotes unrestricted host matching; a nil
+// slice means no collected listener can accept the route. Missing Gateway
+// data retains the existing conservative possible-exposure behavior.
+func (idx *Index) attachedRouteHostnames(route *gatewayRoute) []string {
+	var hosts []string
+	add := func(candidates []string) {
+		for _, host := range candidates {
+			if host == "" {
+				hosts = []string{""}
+				return
+			}
+			if slices.Contains(hosts, "") {
+				continue
+			}
+			if !slices.Contains(hosts, host) {
+				hosts = append(hosts, host)
+			}
+		}
+	}
 	for _, ref := range route.ParentRefs {
 		if !isGatewayParentRef(ref) {
 			continue
@@ -241,10 +266,14 @@ func (idx *Index) routeAttachesToAGateway(route *gatewayRoute) bool {
 		}
 		gw, ok := idx.gateways[ServiceRef{Namespace: ns, Name: ref.Name}]
 		if !ok {
-			return true
+			add(listenerRouteHostnames("", route.Hostnames))
+			continue
 		}
 		for _, l := range gw.Listeners {
 			if ref.SectionName != nil && l.Name != *ref.SectionName {
+				continue
+			}
+			if ref.Port != nil && l.Port != *ref.Port {
 				continue
 			}
 			if !idx.listenerAdmitsRouteKind(l, route.Kind) {
@@ -252,11 +281,11 @@ func (idx *Index) routeAttachesToAGateway(route *gatewayRoute) bool {
 			}
 			admits, determinable := idx.gatewayAdmitsRouteNamespace(l, route.Namespace, gw.Namespace)
 			if admits || !determinable {
-				return true
+				add(listenerRouteHostnames(l.Hostname, route.Hostnames))
 			}
 		}
 	}
-	return false
+	return hosts
 }
 
 // listenerAdmitsRouteKind reports whether the listener's allowedRoutes

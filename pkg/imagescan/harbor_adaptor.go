@@ -178,6 +178,9 @@ func (a *HarborAdaptor) GetImagesScanStatus(ctx context.Context, imageIDs []Cont
 		}
 
 		status.IsScanAvailable, status.LastScanDate = latestSuccessfulHarborScan(artifact.ScanOverview)
+		if status.IsScanAvailable {
+			status.Status = ScanStatusScanned
+		}
 
 		return status, nil
 	})
@@ -267,6 +270,7 @@ func (a *HarborAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs [
 			}
 		}
 
+		report.Status = ScanStatusScanned
 		return report, nil
 	})
 }

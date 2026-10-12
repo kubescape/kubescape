@@ -122,6 +122,34 @@ func TestProcessImages(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, []string{"empty-repo1", "processed-repo2"}, results)
 	})
+
+	t.Run("PreservesScanStatusInReports", func(t *testing.T) {
+		images := []ContainerImageIdentifier{
+			{Repository: "clean-repo", Hash: "hash1"},
+			{Repository: "unsupported-repo", Hash: "hash2"},
+			{Repository: "queued-repo", Hash: "hash3"},
+		}
+
+		processFunc := func(id ContainerImageIdentifier) (ContainerImageVulnerabilityReport, error) {
+			switch id.Repository {
+			case "clean-repo":
+				return ContainerImageVulnerabilityReport{ImageID: id, Status: ScanStatusScanned}, nil
+			case "unsupported-repo":
+				return ContainerImageVulnerabilityReport{ImageID: id, Status: ScanStatusUnsupported}, nil
+			case "queued-repo":
+				return ContainerImageVulnerabilityReport{ImageID: id, Status: ScanStatusQueued}, errors.New("scan queued")
+			default:
+				return ContainerImageVulnerabilityReport{ImageID: id}, nil
+			}
+		}
+
+		results, err := ProcessImages(images, processFunc)
+		assert.ErrorContains(t, err, "scan queued")
+		require.Len(t, results, 3)
+		assert.Equal(t, ScanStatusScanned, results[0].Status)
+		assert.Equal(t, ScanStatusUnsupported, results[1].Status)
+		assert.Equal(t, ScanStatusQueued, results[2].Status)
+	})
 }
 
 func vulnerabilityIDs(report ContainerImageVulnerabilityReport) []string {

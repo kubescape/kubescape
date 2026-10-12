@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -1165,6 +1166,7 @@ func (a *QuayAdaptor) GetImagesScanStatus(ctx context.Context, imageIDs []Contai
 		switch strings.ToLower(payload.Status) {
 		case "scanned":
 			status.IsScanAvailable = true
+			status.Status = ScanStatusScanned
 		case "unsupported":
 			// If unsupported, target digest might be a manifest list / OCI index that was not resolved upfront.
 			// Try resolving to platform child and retrying the security query.
@@ -1190,20 +1192,37 @@ func (a *QuayAdaptor) GetImagesScanStatus(ctx context.Context, imageIDs []Contai
 				switch strings.ToLower(retryPayload.Status) {
 				case "scanned":
 					status.IsScanAvailable = true
+					status.Status = ScanStatusScanned
 					return status, nil
-				case "queued", "failed", "unsupported":
+				case "queued":
 					status.IsScanAvailable = false
+					status.Status = ScanStatusQueued
+					return status, nil
+				case "failed":
+					status.IsScanAvailable = false
+					status.Status = ScanStatusFailed
+					return status, nil
+				case "unsupported":
+					status.IsScanAvailable = false
+					status.Status = ScanStatusUnsupported
 					return status, nil
 				default:
 					status.IsScanAvailable = false
+					status.Status = ScanStatusUnknown
 					return status, nil
 				}
 			}
 			status.IsScanAvailable = false
-		case "queued", "failed":
+			status.Status = ScanStatusUnsupported
+		case "queued":
 			status.IsScanAvailable = false
+			status.Status = ScanStatusQueued
+		case "failed":
+			status.IsScanAvailable = false
+			status.Status = ScanStatusFailed
 		default:
 			status.IsScanAvailable = false
+			status.Status = ScanStatusUnknown
 		}
 
 		return status, nil
@@ -1246,6 +1265,12 @@ type quayVulnerabilityPayload struct {
 			} `json:"Features"`
 		} `json:"Layer"`
 	} `json:"data"`
+}
+
+// quayPackageIdentity represents the package name and version for tracking affected packages.
+type quayPackageIdentity struct {
+	name    string
+	version string
 }
 
 // GetImagesVulnerabilities retrieves vulnerability reports for a list of image identifiers.
@@ -1299,6 +1324,7 @@ func (a *QuayAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs []C
 	scanStatusSwitch:
 		switch strings.ToLower(payload.Status) {
 		case "scanned":
+			report.Status = ScanStatusScanned
 			if payload.Data == nil || payload.Data.Layer == nil {
 				return report, nil
 			}
@@ -1324,31 +1350,41 @@ func (a *QuayAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs []C
 				}
 				switch strings.ToLower(retryPayload.Status) {
 				case "scanned":
+					report.Status = ScanStatusScanned
 					if retryPayload.Data == nil || retryPayload.Data.Layer == nil {
 						return report, nil
 					}
 					payload = retryPayload
 					break scanStatusSwitch
 				case "failed":
+					report.Status = ScanStatusFailed
 					return report, fmt.Errorf("quay security scan failed for child manifest %s/%s@%s", org, repo, childDigest)
 				case "queued":
+					report.Status = ScanStatusQueued
 					return report, fmt.Errorf("quay security scan is queued for child manifest %s/%s@%s", org, repo, childDigest)
 				case "unsupported":
-					return report, fmt.Errorf("quay security scan unsupported for child manifest %s/%s@%s", org, repo, childDigest)
+					report.Status = ScanStatusUnsupported
+					return report, nil
 				default:
+					report.Status = ScanStatusUnknown
 					return report, fmt.Errorf("unknown scan status %q for child manifest %s/%s@%s", retryPayload.Status, org, repo, childDigest)
 				}
 			}
-			return report, fmt.Errorf("quay security scan unsupported for %s/%s@%s", org, repo, manifestRef)
+			report.Status = ScanStatusUnsupported
+			return report, nil
 		case "failed":
+			report.Status = ScanStatusFailed
 			return report, fmt.Errorf("quay security scan failed for %s/%s@%s", org, repo, manifestRef)
 		case "queued":
+			report.Status = ScanStatusQueued
 			return report, fmt.Errorf("quay security scan is queued for %s/%s@%s", org, repo, manifestRef)
 		default:
+			report.Status = ScanStatusUnknown
 			return report, fmt.Errorf("quay security scan unavailable for %s/%s@%s (status: %s)", org, repo, manifestRef, payload.Status)
 		}
 
 		seenVulns := make(map[string]int)
+		seenVulnPkgs := make(map[string]map[quayPackageIdentity]struct{})
 
 		for _, feature := range payload.Data.Layer.Features {
 			for _, v := range feature.Vulnerabilities {
@@ -1357,14 +1393,59 @@ func (a *QuayAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs []C
 				}
 
 				// Deduplicate findings if reported across multiple layers or feature packages,
-				// retaining the highest reported severity across occurrences.
+				// retaining the highest reported severity across occurrences, merging links,
+				// and appending secondary affected package context.
 				if idx, seen := seenVulns[v.Name]; seen {
 					if sev := normalizeQuaySeverity(v.Severity); quaySeverityRank(sev) > quaySeverityRank(report.Vulnerabilities[idx].Severity) {
 						report.Vulnerabilities[idx].Severity = sev
 					}
+
+					// Merge links from the duplicate occurrence.
+					var dupLinks []string
+					if links := strings.Fields(v.Link); len(links) > 0 {
+						dupLinks = links
+					} else if strings.HasPrefix(strings.ToUpper(v.Name), "CVE-") {
+						dupLinks = []string{fmt.Sprintf("https://nvd.nist.gov/vuln/detail/%s", v.Name)}
+					}
+					for _, link := range dupLinks {
+						if !slices.Contains(report.Vulnerabilities[idx].Links, link) {
+							report.Vulnerabilities[idx].Links = append(report.Vulnerabilities[idx].Links, link)
+						}
+					}
+
+					// Append secondary affected package context to description.
+					if feature.Name != "" {
+						pkgs := seenVulnPkgs[v.Name]
+						if pkgs == nil {
+							pkgs = make(map[quayPackageIdentity]struct{})
+							seenVulnPkgs[v.Name] = pkgs
+						}
+						pkgKey := quayPackageIdentity{name: feature.Name, version: feature.Version}
+						if _, alreadySeen := pkgs[pkgKey]; !alreadySeen {
+							pkgs[pkgKey] = struct{}{}
+							pkgInfo := feature.Name
+							if feature.Version != "" {
+								pkgInfo += " (" + feature.Version + ")"
+							}
+							if v.FixedBy != "" {
+								pkgInfo += " [fixed in " + v.FixedBy + "]"
+							}
+							existing := report.Vulnerabilities[idx].Description
+							if existing != "" {
+								report.Vulnerabilities[idx].Description = existing + "; also affects: " + pkgInfo
+							} else {
+								report.Vulnerabilities[idx].Description = "Vulnerability in package " + pkgInfo
+							}
+						}
+					}
 					continue
 				}
 				seenVulns[v.Name] = len(report.Vulnerabilities)
+				pkgs := make(map[quayPackageIdentity]struct{})
+				if feature.Name != "" {
+					pkgs[quayPackageIdentity{name: feature.Name, version: feature.Version}] = struct{}{}
+				}
+				seenVulnPkgs[v.Name] = pkgs
 
 				desc := v.Description
 				if desc == "" && feature.Name != "" {
