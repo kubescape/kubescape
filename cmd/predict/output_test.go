@@ -78,6 +78,7 @@ func TestWriteJSON(t *testing.T) {
 	assert.Equal(t, "Baseline", fw["passes_at"])
 }
 
+// TestWriteTable verifies tabular output for failing workloads and verbose mode.
 func TestWriteTable(t *testing.T) {
 	res := sampleResult()
 
@@ -101,6 +102,24 @@ func TestWriteTable(t *testing.T) {
 
 	assert.Contains(t, outVerbose, "failing-app")
 	assert.Contains(t, outVerbose, "passing-app")
+}
+
+// TestWriteTable_WithDecodeWarnings verifies that unevaluated workloads and
+// decode warnings are displayed in the summary table before the summary line.
+func TestWriteTable_WithDecodeWarnings(t *testing.T) {
+	res := sampleResult()
+	res.UnevaluatedWorkloads = 1
+	res.TotalWorkloads += 1
+	res.DecodeWarnings = []string{"Pod/bad-pod: PodSpec extraction failed"}
+
+	var buf bytes.Buffer
+	err := writeTable(&buf, res, false)
+	require.NoError(t, err)
+	out := buf.String()
+
+	assert.Contains(t, out, "Warnings (1 unevaluated):")
+	assert.Contains(t, out, "⚠ Pod/bad-pod: PodSpec extraction failed")
+	assert.Contains(t, out, "Summary: 1/3 workloads pass at Restricted (current effective level: Baseline)")
 }
 
 func TestWritePretty(t *testing.T) {
@@ -141,6 +160,7 @@ func TestWritePretty_Empty(t *testing.T) {
 	assert.Contains(t, buf.String(), "No workloads found.")
 }
 
+// TestWriteSARIF verifies SARIF report generation for sample prediction results.
 func TestWriteSARIF(t *testing.T) {
 	res := sampleResult()
 
@@ -162,12 +182,77 @@ func TestWriteSARIF(t *testing.T) {
 
 	require.Len(t, run.Results, 1)
 	assert.Equal(t, "PSS/Capabilities", run.Results[0].RuleID)
+	assert.Equal(t, 0, run.Results[0].RuleIndex)
 	assert.Equal(t, "warning", run.Results[0].Level)
 	require.NotEmpty(t, run.Results[0].Locations)
 	assert.Equal(t, "failing-app", run.Results[0].Locations[0].LogicalLocations[0].Name)
 	assert.Equal(t, "test-ns/Deployment/failing-app/main", run.Results[0].Locations[0].LogicalLocations[0].FullyQualifiedName)
 }
 
+// TestWriteSARIF_DeterministicRuleOrdering verifies that SARIF rules are sorted
+// alphabetically by rule ID rather than emitting in non-deterministic map order,
+// and that each result's ruleIndex points to the correct rule in the driver.
+func TestWriteSARIF_DeterministicRuleOrdering(t *testing.T) {
+	res := pss.NamespaceResult{
+		Namespace:        "test-ns",
+		TargetLevel:      pss.Restricted,
+		TotalWorkloads:   2,
+		PassingWorkloads: 0,
+		FailingWorkloads: 2,
+		Results: []pss.WorkloadResult{
+			{
+				Kind:     "Deployment",
+				Name:     "app-a",
+				PassesAt: pss.Privileged,
+				Violations: []pss.Violation{
+					{Check: "Privileged", Level: pss.Baseline, Description: "container is privileged"},
+					{Check: "Capabilities", Level: pss.Restricted, Description: "drop ALL capabilities"},
+				},
+			},
+			{
+				Kind:     "DaemonSet",
+				Name:     "app-b",
+				PassesAt: pss.Privileged,
+				Violations: []pss.Violation{
+					{Check: "HostNetwork", Level: pss.Baseline, Description: "hostNetwork not allowed"},
+					{Check: "AllowPrivilegeEscalation", Level: pss.Restricted, Description: "allowPrivilegeEscalation must be false"},
+				},
+			},
+		},
+	}
+
+	for i := 0; i < 5; i++ {
+		var buf bytes.Buffer
+		err := writeSARIF(&buf, res)
+		require.NoError(t, err)
+
+		var report sarifReport
+		err = json.Unmarshal(buf.Bytes(), &report)
+		require.NoError(t, err)
+
+		require.Len(t, report.Runs, 1)
+		driver := report.Runs[0].Tool.Driver
+		require.Len(t, driver.Rules, 4)
+
+		expectedRules := []string{
+			"PSS/AllowPrivilegeEscalation",
+			"PSS/Capabilities",
+			"PSS/HostNetwork",
+			"PSS/Privileged",
+		}
+		for idx, expectedID := range expectedRules {
+			assert.Equal(t, expectedID, driver.Rules[idx].ID)
+		}
+
+		for _, result := range report.Runs[0].Results {
+			require.GreaterOrEqual(t, result.RuleIndex, 0)
+			require.Less(t, result.RuleIndex, len(driver.Rules))
+			assert.Equal(t, result.RuleID, driver.Rules[result.RuleIndex].ID)
+		}
+	}
+}
+
+// TestWriteSARIF_CleanReport verifies that a clean report outputs empty slices rather than null.
 func TestWriteSARIF_CleanReport(t *testing.T) {
 	// A report with no failing results should serialize empty arrays for rules and results, not null
 	res := pss.NamespaceResult{
@@ -189,6 +274,7 @@ func TestWriteSARIF_CleanReport(t *testing.T) {
 	assert.Contains(t, out, `"results": []`)
 }
 
+// TestWriteJUnit verifies JUnit XML output generation and aggregate counters.
 func TestWriteJUnit(t *testing.T) {
 	res := sampleResult()
 
@@ -199,6 +285,10 @@ func TestWriteJUnit(t *testing.T) {
 	var suites junitTestSuites
 	err = xml.Unmarshal(buf.Bytes(), &suites)
 	require.NoError(t, err)
+
+	assert.Equal(t, 2, suites.Tests)
+	assert.Equal(t, 1, suites.Failures)
+	assert.Equal(t, 0, suites.Skipped)
 
 	require.Len(t, suites.TestSuite, 1)
 	suite := suites.TestSuite[0]
@@ -216,6 +306,7 @@ func TestWriteJUnit(t *testing.T) {
 	assert.Nil(t, suite.TestCases[1].Failure)
 }
 
+// TestWriteJUnit_WithDecodeWarnings verifies JUnit XML output when unevaluated workloads exist.
 func TestWriteJUnit_WithDecodeWarnings(t *testing.T) {
 	res := sampleResult()
 	res.UnevaluatedWorkloads = 1
@@ -229,6 +320,10 @@ func TestWriteJUnit_WithDecodeWarnings(t *testing.T) {
 	var suites junitTestSuites
 	err = xml.Unmarshal(buf.Bytes(), &suites)
 	require.NoError(t, err)
+
+	assert.Equal(t, 3, suites.Tests)
+	assert.Equal(t, 1, suites.Failures)
+	assert.Equal(t, 1, suites.Skipped)
 
 	require.Len(t, suites.TestSuite, 1)
 	suite := suites.TestSuite[0]
