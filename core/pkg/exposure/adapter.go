@@ -124,6 +124,7 @@ type gatewayAPIWireShape struct {
 				Kind      *string `json:"kind,omitempty"`
 				Namespace *string `json:"namespace,omitempty"`
 				Name      string  `json:"name"`
+				Weight    *int32  `json:"weight,omitempty"`
 			} `json:"backendRefs,omitempty"`
 		} `json:"rules,omitempty"`
 
@@ -172,7 +173,7 @@ func decodeGatewayRoute(kind string, obj map[string]any) (gatewayRoute, error) {
 	for _, rule := range wire.Spec.Rules {
 		var backends []backendRef
 		for _, b := range rule.BackendRefs {
-			backends = append(backends, backendRef{Group: b.Group, Kind: b.Kind, Namespace: b.Namespace, Name: b.Name})
+			backends = append(backends, backendRef{Group: b.Group, Kind: b.Kind, Namespace: b.Namespace, Name: b.Name, Weight: b.Weight})
 		}
 		r.Rules = append(r.Rules, gatewayRouteRule{BackendRefs: backends})
 	}

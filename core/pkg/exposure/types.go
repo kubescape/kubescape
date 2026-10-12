@@ -167,6 +167,8 @@ type gatewayRouteRule struct {
 // backend (e.g. a multicluster ServiceImport) that this package does not
 // model as a Service exposure path, however closely its name matches one.
 type backendRef struct {
+	// Weight defaults to 1; an explicit zero forwards no requests.
+	Weight    *int32
 	Group     *string
 	Kind      *string
 	Namespace *string

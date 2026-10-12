@@ -138,8 +138,9 @@ func (idx *Index) crossNamespaceBackendRefIsUnmodeled(ref ServiceRef) bool {
 				for _, backend := range rule.BackendRefs {
 					// Only an effective core-Service backendRef names this
 					// Service; a non-Service backend sharing its name says
-					// nothing about its exposure.
-					if !isServiceBackendRef(backend) {
+					// nothing about its exposure. Zero-weight backends
+					// receive no requests and are not exposure paths.
+					if !isServiceBackendRef(backend) || (backend.Weight != nil && *backend.Weight == 0) {
 						continue
 					}
 					if backend.Namespace != nil && *backend.Namespace == ref.Namespace && backend.Name == ref.Name {
@@ -181,7 +182,8 @@ func backendNamesService(backend *networkingv1.IngressBackend, serviceName strin
 }
 
 // routeReferencesService reports whether any rule in route sends
-// traffic to ref. Only effective core-Service backends count (per Gateway
+// traffic to ref. Zero-weight backends receive no requests. Only effective
+// core-Service backends count (per Gateway
 // API's group/kind defaults -- a backendRef naming another kind must not
 // produce a Service exposure path however closely its name matches). A
 // backendRef with no Namespace defaults to the route's own namespace, per
@@ -192,7 +194,7 @@ func backendNamesService(backend *networkingv1.IngressBackend, serviceName strin
 func routeReferencesService(route *gatewayRoute, ref ServiceRef) bool {
 	for _, rule := range route.Rules {
 		for _, backend := range rule.BackendRefs {
-			if !isServiceBackendRef(backend) {
+			if !isServiceBackendRef(backend) || (backend.Weight != nil && *backend.Weight == 0) {
 				continue
 			}
 			ns := route.Namespace
