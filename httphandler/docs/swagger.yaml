@@ -14,6 +14,18 @@ definitions:
         format: uuid4
         type: string
         x-go-name: Account
+      excludeControls:
+        description: |-
+          Controls omitted before evaluation and compliance scoring.
+
+          Same as `kubescape scan --exclude-controls`.
+        example:
+        - C-0069
+        - C-0070
+        items:
+          type: string
+        type: array
+        x-go-name: ExcludeControls
       excludedNamespaces:
         description: |-
           Namespaces to exclude.

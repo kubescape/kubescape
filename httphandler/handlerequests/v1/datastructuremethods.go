@@ -18,6 +18,7 @@ import (
 
 func ToScanInfo(scanRequest *utilsmetav1.PostScanRequest) (*cautils.ScanInfo, []cautils.PolicyIdentifier) {
 	scanInfo := defaultScanInfo()
+	scanInfo.ExcludeControls = append([]string(nil), scanRequest.ExcludeControls...)
 
 	policyIdentifiers := setTargetInScanInfo(scanRequest, scanInfo)
 

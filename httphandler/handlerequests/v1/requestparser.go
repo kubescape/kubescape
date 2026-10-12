@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/gorilla/schema"
 	"github.com/kubescape/go-logger"
@@ -104,6 +105,11 @@ func getScanParamsFromRequest(r *http.Request, scanID string) (*scanRequestParam
 		}
 		if err := json.Unmarshal(readBuffer, &scanRequest); err != nil {
 			return nil, fmt.Errorf("failed to parse request payload, reason: %w", err)
+		}
+		for _, control := range scanRequest.ExcludeControls {
+			if strings.TrimSpace(control) == "" {
+				return nil, fmt.Errorf("excludeControls contains an empty control identifier")
+			}
 		}
 		logger.L().Info("REST API received scan request", helpers.String("scanID", scanID), helpers.String("format", scanRequest.Format))
 	}
