@@ -8,7 +8,6 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v4/core/cautils"
-	"github.com/kubescape/kubescape/v4/core/core"
 	"github.com/kubescape/kubescape/v4/core/meta"
 	"github.com/spf13/cobra"
 )
@@ -106,7 +105,7 @@ func getOperatorRemediateCmd(ks meta.IKubescape, operatorInfo cautils.OperatorIn
 				logger.L().Warning(fmt.Sprintf("applying %q to every workload matching the selector, across all namespaces", remediationInfo.Action))
 			}
 
-			operatorAdapter, err := core.NewOperatorAdapter(operatorInfo.OperatorScanInfo, operatorInfo.Namespace)
+			operatorAdapter, err := newOperatorAdapter(operatorInfo.OperatorScanInfo, operatorInfo.Namespace, cmd.Context())
 			if err != nil {
 				return err
 			}
@@ -116,7 +115,7 @@ func getOperatorRemediateCmd(ks meta.IKubescape, operatorInfo cautils.OperatorIn
 				verb = "Applying"
 			}
 			logger.L().Start(fmt.Sprintf("%s remediation %q via Kubescape Operator", verb, remediationInfo.Action))
-			if _, err := operatorAdapter.OperatorScan(); err != nil {
+			if _, err := operatorAdapter.OperatorScan(cmd.Context()); err != nil {
 				logger.L().StopError("Failed to submit remediation to Kubescape Operator", helpers.Error(err))
 				return err
 			}

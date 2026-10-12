@@ -6,7 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -239,11 +242,13 @@ type httpPostRecorder struct {
 	headers map[string]string
 	body    []byte
 	client  httputils.IHttpClient
+	ctx     context.Context
 }
 
-func (r *httpPostRecorder) fakeHTTPPost(statusCode int, postErr error) func(httputils.IHttpClient, string, map[string]string, []byte) (*http.Response, error) {
-	return func(client httputils.IHttpClient, url string, headers map[string]string, body []byte) (*http.Response, error) {
+func (r *httpPostRecorder) fakeHTTPPost(statusCode int, postErr error) func(context.Context, httputils.IHttpClient, string, map[string]string, []byte) (*http.Response, error) {
+	return func(ctx context.Context, client httputils.IHttpClient, url string, headers map[string]string, body []byte) (*http.Response, error) {
 		r.calls++
+		r.ctx = ctx
 		r.url = url
 		r.headers = headers
 		r.body = body
@@ -415,7 +420,113 @@ func TestOperatorAdapter_OperatorScan(t *testing.T) {
 		assert.Empty(t, got)
 		assert.Equal(t, 0, recorder.calls, "httpPostFunc must not be invoked when context is cancelled")
 	})
+
+	t.Run("cancels in-flight HTTP POST while server holds response", func(t *testing.T) {
+		reqReceived := make(chan struct{})
+		holdResponse := make(chan struct{})
+		var holdOnce sync.Once
+		releaseHold := func() {
+			holdOnce.Do(func() {
+				close(holdResponse)
+			})
+		}
+
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			select {
+			case <-reqReceived:
+			default:
+				close(reqReceived)
+			}
+			select {
+			case <-holdResponse:
+				w.WriteHeader(http.StatusOK)
+			case <-r.Context().Done():
+				return
+			}
+		}))
+		defer ts.Close()
+		defer releaseHold()
+
+		tsURL, err := url.Parse(ts.URL)
+		require.NoError(t, err)
+
+		connector := &fakeOperatorConnector{localhost: tsURL.Host}
+		scanInfo := &fakeOperatorScanInfo{payload: &apis.Commands{Commands: []apis.Command{{CommandName: "scan"}}}}
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		adapter := &OperatorAdapter{
+			OperatorScanInfo:  scanInfo,
+			OperatorConnector: connector,
+		}
+
+		errChan := make(chan error, 1)
+		go func() {
+			_, scanErr := adapter.OperatorScan(ctx)
+			errChan <- scanErr
+		}()
+
+		// Wait until the server receives the request
+		select {
+		case <-reqReceived:
+		case <-time.After(5 * time.Second):
+			t.Fatal("timed out waiting for HTTP request to reach test server")
+		}
+
+		// Cancel while server is holding the response
+		cancel()
+
+		select {
+		case opErr := <-errChan:
+			require.Error(t, opErr)
+			require.ErrorIs(t, opErr, context.Canceled)
+		case <-time.After(5 * time.Second):
+			t.Fatal("timed out waiting for OperatorScan to abort after context cancellation")
+		}
+
+		releaseHold()
+
+		assert.Equal(t, 1, connector.stopCalls, "StopPortForwarder must be called on cancellation")
+	})
+
+	t.Run("legacy connector without StartPortForwarderContext falls back to StartPortForwarder", func(t *testing.T) {
+		legacyConn := &legacyOperatorConnector{}
+		recorder := &httpPostRecorder{}
+		scanInfo := &fakeOperatorScanInfo{payload: &apis.Commands{Commands: []apis.Command{{CommandName: "scan"}}}}
+		adapter := &OperatorAdapter{
+			httpPostFunc:      recorder.fakeHTTPPost(http.StatusOK, nil), //nolint:bodyclose // fakeHTTPPost returns a func value, not a response; the response's Body is http.NoBody (Close is a no-op) and is closed by httpPostOperatorScanRequest's own defer
+			OperatorScanInfo:  scanInfo,
+			OperatorConnector: legacyConn,
+		}
+
+		got, err := adapter.OperatorScan(context.Background())
+		require.NoError(t, err)
+		assert.Equal(t, "success", got)
+		assert.Equal(t, 1, legacyConn.startCalls)
+		assert.Equal(t, 1, legacyConn.stopCalls)
+		assert.Equal(t, 1, recorder.calls)
+	})
+}
+
+type legacyOperatorConnector struct {
+	startCalls int
+	stopCalls  int
+}
+
+func (f *legacyOperatorConnector) StartPortForwarder() error {
+	f.startCalls++
+	return nil
+}
+
+func (f *legacyOperatorConnector) StopPortForwarder() {
+	f.stopCalls++
+}
+
+func (f *legacyOperatorConnector) GetPortForwardLocalhost() string {
+	return "127.0.0.1:4002"
 }
 
 var _ cautils.OperatorScanInfo = (*fakeOperatorScanInfo)(nil)
 var _ cautils.OperatorConnector = (*fakeOperatorConnector)(nil)
+var _ cautils.OperatorConnector = (*legacyOperatorConnector)(nil)

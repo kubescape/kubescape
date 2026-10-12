@@ -32,12 +32,12 @@ func getOperatorScanVulnerabilitiesCmd(ks meta.IKubescape, operatorInfo *cautils
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			vulnerabilitiesScanInfo.ClusterName = k8sinterface.GetContextName()
-			operatorAdapter, err := newOperatorAdapter(vulnerabilitiesScanInfo, operatorInfo.Namespace)
+			operatorAdapter, err := newOperatorAdapter(vulnerabilitiesScanInfo, operatorInfo.Namespace, cmd.Context())
 			if err != nil {
 				return err
 			}
 			logger.L().Start("Triggering the Kubescape Operator for vulnerability scanning")
-			_, err = operatorAdapter.OperatorScan()
+			_, err = operatorAdapter.OperatorScan(cmd.Context())
 			if err != nil {
 				logger.L().StopError("Failed to trigger the Kubescape Operator for vulnerability scanning", helpers.Error(err))
 				return err
