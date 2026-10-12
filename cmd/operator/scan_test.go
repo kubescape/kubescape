@@ -1,6 +1,7 @@
 package operator
 
 import (
+	"context"
 	"errors"
 	"io"
 	"testing"
@@ -63,7 +64,7 @@ func TestOperatorScanCmd_NamespaceFlagPropagatesToChildCommands(t *testing.T) {
 	var gotScanInfo cautils.OperatorScanInfo
 	var gotNamespace string
 	prevAdapter := newOperatorAdapter
-	newOperatorAdapter = func(scanInfo cautils.OperatorScanInfo, ns string) (*core.OperatorAdapter, error) {
+	newOperatorAdapter = func(scanInfo cautils.OperatorScanInfo, ns string, _ ...context.Context) (*core.OperatorAdapter, error) {
 		gotScanInfo = scanInfo
 		gotNamespace = ns
 		return nil, errors.New("stub: no real cluster in unit tests")
@@ -90,7 +91,7 @@ func TestOperatorScanCmd_NamespaceFlagPropagatesToChildCommands(t *testing.T) {
 func TestOperatorScanConfigCmd_FrameworksDefaultsToAll(t *testing.T) {
 	var gotScanInfo cautils.OperatorScanInfo
 	prev := newOperatorAdapter
-	newOperatorAdapter = func(si cautils.OperatorScanInfo, _ string) (*core.OperatorAdapter, error) {
+	newOperatorAdapter = func(si cautils.OperatorScanInfo, _ string, _ ...context.Context) (*core.OperatorAdapter, error) {
 		gotScanInfo = si
 		return nil, errors.New("stub")
 	}
@@ -113,7 +114,7 @@ func TestOperatorScanConfigCmd_FrameworksDefaultsToAll(t *testing.T) {
 func TestOperatorScanConfigCmd_ExplicitFrameworksReplacesDefault(t *testing.T) {
 	var gotScanInfo cautils.OperatorScanInfo
 	prev := newOperatorAdapter
-	newOperatorAdapter = func(si cautils.OperatorScanInfo, _ string) (*core.OperatorAdapter, error) {
+	newOperatorAdapter = func(si cautils.OperatorScanInfo, _ string, _ ...context.Context) (*core.OperatorAdapter, error) {
 		gotScanInfo = si
 		return nil, errors.New("stub")
 	}
@@ -129,3 +130,22 @@ func TestOperatorScanConfigCmd_ExplicitFrameworksReplacesDefault(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, []string{"nsa", "mitre"}, cfg.Frameworks)
 }
+
+type stubOperatorConnector struct {
+	onStart func()
+}
+
+func (s *stubOperatorConnector) StartPortForwarder() error {
+	if s.onStart != nil {
+		s.onStart()
+	}
+	return nil
+}
+
+func (s *stubOperatorConnector) StopPortForwarder() {}
+
+func (s *stubOperatorConnector) GetPortForwardLocalhost() string {
+	return "127.0.0.1:4002"
+}
+
+var _ cautils.OperatorConnector = (*stubOperatorConnector)(nil)
