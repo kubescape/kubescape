@@ -189,7 +189,9 @@ func TestFleetScan_DoesNotRetryACancelledScan(t *testing.T) {
 	require.Error(t, fleetScan(scanInfo, &lifecycleContextKubescape{ctx: stopped}, nil, runner.run))
 
 	assert.Zero(t, runner.calls("prod"), "a run that is already stopped never starts the scan")
-	assert.Equal(t, fleet.ClusterCancelled, prodResult(t, scanInfo).Status)
+	got := prodResult(t, scanInfo)
+	assert.Equal(t, fleet.ClusterCancelled, got.Status)
+	assert.Zero(t, got.Attempts, "a scan that never started is not an attempt")
 }
 
 // TestFleetScan_StopsWaitingAsSoonAsTheRunIsStopped pins that Ctrl-C during the wait takes effect at once and skips later contexts.
@@ -219,6 +221,17 @@ func TestFleetScan_StopsWaitingAsSoonAsTheRunIsStopped(t *testing.T) {
 	assert.Equal(t, fleet.ClusterUnreachable, report.Clusters[0].Status, "the attempt that ran found the cluster unreachable, and that is what it keeps")
 	assert.Equal(t, 1, report.Clusters[0].Attempts)
 	assert.Equal(t, fleet.ClusterCancelled, report.Clusters[1].Status)
+	assert.Zero(t, report.Clusters[1].Attempts, "a context skipped after the stop was never attempted")
+}
+
+// TestWaitForRetry_StoppedRunNeverRetries pins that a stop wins even when it lands as the wait ends.
+func TestWaitForRetry_StoppedRunNeverRetries(t *testing.T) {
+	stopped, cancel := context.WithCancel(context.Background())
+	cancel()
+	for range 100 {
+		require.False(t, waitForRetry(stopped, 0))
+	}
+	assert.True(t, waitForRetry(context.Background(), 0))
 }
 
 // TestFleetScan_RetriesWithoutAFleetReport pins that retries belong to --kube-contexts, not to --fleet-report.

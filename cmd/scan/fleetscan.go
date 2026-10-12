@@ -548,6 +548,10 @@ func fleetScan(baseScanInfo cautils.ScanInfo, ks meta.IKubescape, policyIdentifi
 // Each attempt gets a fresh clone of the settings, since a scan updates its own settings as it runs.
 func scanFleetContext(kubeContext, outputPath string, baseScanInfo *cautils.ScanInfo, ks meta.IKubescape, policyIdentifiers []cautils.PolicyIdentifier, run fleetRunner) (results *resultshandling.ResultsHandler, elapsed time.Duration, attempts int, err error) {
 	started := time.Now()
+	// A run already stopped never starts the scan, so no attempt is counted.
+	if err := ks.Context().Err(); err != nil {
+		return nil, time.Since(started), 0, interruptedError{err: err}
+	}
 	for {
 		attempts++
 		results, _, err = runFleetContext(kubeContext, baseScanInfo.CloneForContext(kubeContext, outputPath), ks, policyIdentifiers, run)
@@ -584,7 +588,7 @@ func waitForRetry(ctx context.Context, delay time.Duration) bool {
 	defer timer.Stop()
 	select {
 	case <-timer.C:
-		return true
+		return ctx.Err() == nil
 	case <-ctx.Done():
 		return false
 	}
@@ -599,10 +603,6 @@ func runFleetContext(kubeContext string, scanInfo *cautils.ScanInfo, ks meta.IKu
 
 	ctx, cancel := deriveTimeoutContext(scanInfo, ks)
 	defer cancel()
-	// A run already stopped skips the scan, so later contexts never start initializing.
-	if err := ctx.Err(); err != nil {
-		return nil, 0, interruptedError{err: err}
-	}
 
 	started := time.Now()
 	results, err = run(ctx, scanInfo, ks, policyIdentifiers)
