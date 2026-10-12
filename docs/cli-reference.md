@@ -55,6 +55,11 @@ kubescape scan [target] [flags]
 | `--notify <url>` | POST the posture scan summary to a webhook URL. Slack incoming webhooks receive Block Kit, Microsoft Teams webhooks an Adaptive Card, and other destinations generic JSON. Repeat for multiple endpoints. Delivery is best-effort and does not affect scan exit status. Not supported by `scan image`. | - |
 | `--kubeconfig <path>` | Path to kubeconfig file | - |
 | `-o, --output <path>` | Output file path | stdout |
+| `--release-name <name>` | Helm release name made available as `.Release.Name` when rendering a chart | - |
+| `--release-namespace <ns>` | Helm release namespace made available as `.Release.Namespace` when rendering a chart | - |
+| `--set <key=value>` | Set Helm values when scanning a chart. Repeat for more than one | - |
+| `--set-file <key=path>` | Set Helm values from files when scanning a chart. Repeat for more than one | - |
+| `--set-string <key=value>` | Set Helm string values when scanning a chart. Repeat for more than one | - |
 | `--otel-endpoint <endpoint>` | Export scan traces and metrics to an OTLP collector — see [OpenTelemetry export](#opentelemetry-export). Accepts `host:port` (plaintext) or a `http(s)://` URL. | `OTEL_EXPORTER_OTLP_ENDPOINT` |
 | `--scan-images` | Also scan container images for vulnerabilities. Required for `--format cyclonedx-json` and `--format spdx-json` — see [generating an SBOM](#generating-an-sbom) | `false` |
 | `--image-platform <platform>` | OCI platform for workload image scans, such as `linux/amd64`. Overrides platform inferred from Nodes and hard scheduling constraints | inferred |
@@ -65,6 +70,7 @@ kubescape scan [target] [flags]
 | `--submit` | Submit results to Kubescape SaaS | `false` |
 | `--use-artifacts-from <path>` | Load artifacts from local directory (offline mode) | - |
 | `--use-from <path>` | Load specific policy from path | - |
+| `--values <path>` | Helm values file or URL to use when scanning a chart. Repeat, or separate with commas, for more than one | - |
 | `-v, --verbose` | Display all resources, not just failed ones | `false` |
 | `--view <type>` | View type: `security`, `control`, `resource` | `security` |
 
