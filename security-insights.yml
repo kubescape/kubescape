@@ -123,10 +123,10 @@ repository:
           - osps-baseline
         integration:
           adhoc: true
-          ci: true
+          ci: false
           release: false
         results:
-          ci:
+          adhoc:
             name: OSPS Baseline results on grc.store
             location: https://grc.store/targets/kubescape/kubescape
             predicate-uri: https://github.com/revanite-io/pvtr-publish-results
