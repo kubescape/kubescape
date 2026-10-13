@@ -1359,12 +1359,17 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 func mcpServerEntrypoint(transport string, port int) error {
 	logger.L().Info("Starting MCP server...")
 
-	// Create a new MCP server
+	// Create a new MCP server. WithRecovery must stay first so it wraps the
+	// tool-call recorder (which only observes a panic, never recovers it).
+	serverOptions := []server.ServerOption{
+		server.WithToolCapabilities(false),
+		server.WithRecovery(),
+	}
+	serverOptions = append(serverOptions, toolCallObserverOptions(logger.L().GetLevel(), transport)...)
 	s := server.NewMCPServer(
 		"Kubescape MCP Server",
 		"0.0.1",
-		server.WithToolCapabilities(false),
-		server.WithRecovery(),
+		serverOptions...,
 	)
 
 	drp := getter.NewDownloadReleasedPolicy()
