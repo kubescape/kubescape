@@ -11,7 +11,10 @@ import (
 )
 
 func (ksServer *KubescapeMcpserver) ListFrameworks(ctx context.Context) ([]byte, error) {
-	pg := ksServer.getPolicyGetter()
+	pg, err := ksServer.readyPolicyGetter(ctx)
+	if err != nil {
+		return nil, err
+	}
 	names, err := pg.ListFrameworks()
 	if err != nil {
 		names = getter.NativeFrameworks
@@ -23,7 +26,10 @@ func (ksServer *KubescapeMcpserver) ListFrameworks(ctx context.Context) ([]byte,
 }
 
 func (ksServer *KubescapeMcpserver) ListControls(ctx context.Context) ([]byte, error) {
-	pg := ksServer.getPolicyGetter()
+	pg, err := ksServer.readyPolicyGetter(ctx)
+	if err != nil {
+		return nil, err
+	}
 	pipes, err := pg.ListControls()
 	if err != nil {
 		return nil, err

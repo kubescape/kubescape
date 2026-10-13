@@ -111,7 +111,10 @@ func executeScan(ctx context.Context, ksServer *KubescapeMcpserver, req scanRequ
 
 	scanInfo := buildScanInfo(req)
 
-	policyGetter := ksServer.getPolicyGetter()
+	policyGetter, err := ksServer.readyPolicyGetter(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
 	getters := cautils.Getters{
 		PolicyGetter: policyGetter,
 	}
