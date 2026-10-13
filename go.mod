@@ -55,7 +55,7 @@ require (
 	github.com/kubescape/go-logger v0.0.35
 	github.com/kubescape/k8s-interface v0.0.221
 	github.com/kubescape/opa-utils v0.0.315
-	github.com/kubescape/rbac-utils v0.0.21
+	github.com/kubescape/rbac-utils v0.0.22
 	github.com/kubescape/regolibrary/v2 v2.0.38
 	github.com/kubescape/sizing-checker v0.0.0-20250323151332-73a18561dc73
 	github.com/kubescape/storage v0.0.342
