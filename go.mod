@@ -38,7 +38,7 @@ require (
 	github.com/go-git/go-git/v5 v5.19.2
 	github.com/go-openapi/runtime v0.33.2
 	github.com/gofrs/flock v0.13.0
-	github.com/google/cel-go v0.29.2
+	github.com/google/cel-go v0.31.0
 	github.com/google/go-cmp v0.7.0
 	github.com/google/go-containerregistry v0.21.7
 	github.com/google/uuid v1.6.0
@@ -49,7 +49,7 @@ require (
 	github.com/johnfercher/maroto/v2 v2.4.2
 	github.com/json-iterator/go v1.1.12
 	github.com/jwalton/gchalk v1.3.0
-	github.com/klauspost/compress v1.19.2
+	github.com/klauspost/compress v1.20.1
 	github.com/kubescape/backend v0.0.48
 	github.com/kubescape/go-git-url v0.0.33
 	github.com/kubescape/go-logger v0.0.35
@@ -70,7 +70,7 @@ require (
 	github.com/owenrumney/go-sarif/v2 v2.3.3
 	github.com/project-copacetic/copacetic v0.15.0
 	github.com/prometheus/common v0.70.1
-	github.com/quay/claircore v1.5.54
+	github.com/quay/claircore v1.6.1
 	github.com/schollz/progressbar/v3 v3.13.0
 	github.com/sergi/go-diff v1.4.0
 	github.com/sigstore/cosign/v3 v3.0.6
@@ -366,7 +366,7 @@ require (
 	github.com/google/go-querystring v1.2.0 // indirect
 	github.com/google/jsonschema-go v0.4.3 // indirect
 	github.com/google/licensecheck v0.3.1 // indirect
-	github.com/google/pprof v0.0.0-20260402051712-545e8a4df936 // indirect
+	github.com/google/pprof v0.0.0-20260802141513-ef3492d7dac3 // indirect
 	github.com/google/s2a-go v0.1.10 // indirect
 	github.com/google/shlex v0.0.0-20191202100458-e7afc7fbc510 // indirect
 	github.com/googleapis/enterprise-certificate-proxy v0.3.22 // indirect
@@ -476,7 +476,7 @@ require (
 	github.com/opencontainers/runtime-spec v1.3.0 // indirect
 	github.com/opencontainers/selinux v1.15.1 // indirect
 	github.com/owenrumney/go-sarif v1.1.2-0.20231003122901-1000f5e05554 // indirect
-	github.com/package-url/packageurl-go v0.1.6 // indirect
+	github.com/package-url/packageurl-go v0.1.7 // indirect
 	github.com/pandatix/go-cvss v0.6.2 // indirect
 	github.com/parthivsaikia/go-pacman-version v0.0.0-20260212091406-8640ae78daee // indirect
 	github.com/pborman/indent v1.2.1 // indirect
@@ -498,7 +498,7 @@ require (
 	github.com/prometheus/client_golang v1.24.1 // indirect
 	github.com/prometheus/client_model v0.6.2 // indirect
 	github.com/prometheus/procfs v0.21.1 // indirect
-	github.com/quay/claircore/toolkit v1.6.1 // indirect
+	github.com/quay/claircore/toolkit v1.7.0 // indirect
 	github.com/rcrowley/go-metrics v0.0.0-20250401214520-65e299d6c5c9 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
@@ -619,10 +619,10 @@ require (
 	k8s.io/klog/v2 v2.140.0 // indirect
 	k8s.io/kube-openapi v0.0.0-20260721132016-d427ff9ee9ad // indirect
 	k8s.io/kubectl v0.36.2 // indirect
-	modernc.org/libc v1.73.4 // indirect
+	modernc.org/libc v1.75.6 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
-	modernc.org/memory v1.11.0 // indirect
-	modernc.org/sqlite v1.53.0 // indirect
+	modernc.org/memory v1.12.1 // indirect
+	modernc.org/sqlite v1.58.0 // indirect
 	oras.land/oras-go/v2 v2.6.2 // indirect
 	sigs.k8s.io/json v0.0.0-20250730193827-2d320260d730 // indirect
 	sigs.k8s.io/randfill v1.0.0 // indirect
