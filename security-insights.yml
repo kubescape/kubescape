@@ -69,6 +69,7 @@ repository:
     governance: https://github.com/kubescape/project-governance/blob/main/GOVERNANCE.md
     dependency-management-policy: https://github.com/kubescape/kubescape/blob/master/docs/environment-dependencies-policy.md
     security-policy: https://github.com/kubescape/project-governance/blob/main/SECURITY.md
+    review-policy: https://github.com/kubescape/project-governance/blob/main/CONTRIBUTING.md#requirements-for-contributions
   release:
     automated-pipeline: true
     distribution-points:
