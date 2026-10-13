@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/kubescape/k8s-interface/workloadinterface"
@@ -79,93 +81,105 @@ func createNetworkReachabilityTools(ksServer *KubescapeMcpserver) {
 			port = &networkpolicy.PortSpec{Protocol: proto, Port: int32(f)}
 		}
 
-		k8sClient, err := ksServer.getK8sClient()
-		if err != nil {
-			return mcpToolError(ErrCodeK8sClientError, fmt.Sprintf("failed to get k8s client: %v", err), nil), nil
+		params := url.Values{
+			"source_namespace":      {srcNS},
+			"source_pod":            {srcName},
+			"destination_namespace": {dstNS},
+			"destination_pod":       {dstName},
 		}
-		dynClient := k8sClient.DynamicClient
-
-		policyList, err := dynClient.Resource(networkPolicyGVR).List(ctx, metav1.ListOptions{})
-		if err != nil {
-			return mcpToolError(classifyScanError(err), fmt.Sprintf("failed to list NetworkPolicy objects: %v", err), map[string]any{"resource_type": "NetworkPolicy"}), nil
+		if port != nil {
+			params.Set("port", strconv.Itoa(int(port.Port)))
+			params.Set("protocol", string(port.Protocol))
 		}
-		namespaceList, err := dynClient.Resource(namespaceGVR).List(ctx, metav1.ListOptions{})
-		if err != nil {
-			return mcpToolError(classifyScanError(err), fmt.Sprintf("failed to list Namespace objects: %v", err), map[string]any{"resource_type": "Namespace"}), nil
-		}
-		srcPodObj, err := dynClient.Resource(podGVR).Namespace(srcNS).Get(ctx, srcName, metav1.GetOptions{})
-		if err != nil {
-			return mcpToolError(classifyScanError(err), fmt.Sprintf("failed to get source pod %s/%s: %v", srcNS, srcName, err), map[string]any{"resource_type": "Pod", "namespace": srcNS, "name": srcName}), nil
-		}
-		dstPodObj, err := dynClient.Resource(podGVR).Namespace(dstNS).Get(ctx, dstName, metav1.GetOptions{})
-		if err != nil {
-			return mcpToolError(classifyScanError(err), fmt.Sprintf("failed to get destination pod %s/%s: %v", dstNS, dstName, err), map[string]any{"resource_type": "Pod", "namespace": dstNS, "name": dstName}), nil
-		}
-
-		resources := make(map[string]workloadinterface.IMetadata, len(policyList.Items)+len(namespaceList.Items))
-		for i := range policyList.Items {
-			w := workloadinterface.NewWorkloadObj(policyList.Items[i].Object)
-			resources[w.GetID()] = w
-		}
-		for i := range namespaceList.Items {
-			w := workloadinterface.NewWorkloadObj(namespaceList.Items[i].Object)
-			resources[w.GetID()] = w
-		}
-
-		policies, namespaces, decodeErrs := networkpolicy.FromResources(resources)
-
-		idx, indexErrs := networkpolicy.NewIndex(policies, namespaces)
-		decodeErrs = append(decodeErrs, indexErrs...)
-
-		src := networkpolicy.EndpointFromResource(workloadinterface.NewWorkloadObj(srcPodObj.Object))
-		dst := networkpolicy.EndpointFromResource(workloadinterface.NewWorkloadObj(dstPodObj.Object))
-		if ip, found := unstructuredNestedString(srcPodObj.Object, "status", "podIP"); found {
-			src.IP = ip
-		}
-		src.IPs = unstructuredPodIPs(srcPodObj.Object)
-		if ip, found := unstructuredNestedString(dstPodObj.Object, "status", "podIP"); found {
-			dst.IP = ip
-		}
-		dst.IPs = unstructuredPodIPs(dstPodObj.Object)
-
-		verdict, egress, ingress := idx.Reaches(src, dst, port)
-
-		result := map[string]any{
-			"verdict": verdict.String(),
-			"egress": map[string]any{
-				"verdict":        egress.Verdict.String(),
-				"reason":         egress.Reason,
-				"matched_policy": egress.MatchedPolicy,
-			},
-			"ingress": map[string]any{
-				"verdict":        ingress.Verdict.String(),
-				"reason":         ingress.Reason,
-				"matched_policy": ingress.MatchedPolicy,
-			},
-		}
-		if len(decodeErrs) > 0 {
-			msgs := make([]string, len(decodeErrs))
-			for i, e := range decodeErrs {
-				msgs[i] = e.Error()
+		return ksServer.doAnalysis(ctx, "analyze_network_reachability", params, func(ctx context.Context) *mcp.CallToolResult {
+			k8sClient, err := ksServer.getK8sClient()
+			if err != nil {
+				return mcpToolError(ErrCodeK8sClientError, fmt.Sprintf("failed to get k8s client: %v", err), nil)
 			}
-			result["decode_warnings"] = msgs
-			// A dropped NetworkPolicy (decode failure, or an unparseable
-			// podSelector) could have been the one restricting or allowing
-			// this exact connection, in either direction -- so a confident
-			// allowed/denied computed without it is not trustworthy. This
-			// package's own three-valued design exists precisely to avoid
-			// reporting a confident-but-wrong answer; a dropped policy is
-			// such a case, so the top-level verdict is downgraded here even
-			// though the underlying egress/ingress computation itself
-			// still reports whatever it could determine.
-			result["verdict"] = networkpolicy.Unknown.String()
-		}
+			dynClient := k8sClient.DynamicClient
 
-		resBytes, err := json.Marshal(result)
-		if err != nil {
-			return mcpToolError(ErrCodeMarshalError, fmt.Sprintf("failed to marshal result: %v", err), nil), nil
-		}
-		return mcp.NewToolResultText(string(resBytes)), nil
+			policyList, err := dynClient.Resource(networkPolicyGVR).List(ctx, metav1.ListOptions{})
+			if err != nil {
+				return mcpToolError(classifyScanError(err), fmt.Sprintf("failed to list NetworkPolicy objects: %v", err), map[string]any{"resource_type": "NetworkPolicy"})
+			}
+			namespaceList, err := dynClient.Resource(namespaceGVR).List(ctx, metav1.ListOptions{})
+			if err != nil {
+				return mcpToolError(classifyScanError(err), fmt.Sprintf("failed to list Namespace objects: %v", err), map[string]any{"resource_type": "Namespace"})
+			}
+			srcPodObj, err := dynClient.Resource(podGVR).Namespace(srcNS).Get(ctx, srcName, metav1.GetOptions{})
+			if err != nil {
+				return mcpToolError(classifyScanError(err), fmt.Sprintf("failed to get source pod %s/%s: %v", srcNS, srcName, err), map[string]any{"resource_type": "Pod", "namespace": srcNS, "name": srcName})
+			}
+			dstPodObj, err := dynClient.Resource(podGVR).Namespace(dstNS).Get(ctx, dstName, metav1.GetOptions{})
+			if err != nil {
+				return mcpToolError(classifyScanError(err), fmt.Sprintf("failed to get destination pod %s/%s: %v", dstNS, dstName, err), map[string]any{"resource_type": "Pod", "namespace": dstNS, "name": dstName})
+			}
+
+			resources := make(map[string]workloadinterface.IMetadata, len(policyList.Items)+len(namespaceList.Items))
+			for i := range policyList.Items {
+				w := workloadinterface.NewWorkloadObj(policyList.Items[i].Object)
+				resources[w.GetID()] = w
+			}
+			for i := range namespaceList.Items {
+				w := workloadinterface.NewWorkloadObj(namespaceList.Items[i].Object)
+				resources[w.GetID()] = w
+			}
+
+			policies, namespaces, decodeErrs := networkpolicy.FromResources(resources)
+
+			idx, indexErrs := networkpolicy.NewIndex(policies, namespaces)
+			decodeErrs = append(decodeErrs, indexErrs...)
+
+			src := networkpolicy.EndpointFromResource(workloadinterface.NewWorkloadObj(srcPodObj.Object))
+			dst := networkpolicy.EndpointFromResource(workloadinterface.NewWorkloadObj(dstPodObj.Object))
+			if ip, found := unstructuredNestedString(srcPodObj.Object, "status", "podIP"); found {
+				src.IP = ip
+			}
+			src.IPs = unstructuredPodIPs(srcPodObj.Object)
+			if ip, found := unstructuredNestedString(dstPodObj.Object, "status", "podIP"); found {
+				dst.IP = ip
+			}
+			dst.IPs = unstructuredPodIPs(dstPodObj.Object)
+
+			verdict, egress, ingress := idx.Reaches(src, dst, port)
+
+			result := map[string]any{
+				"verdict": verdict.String(),
+				"egress": map[string]any{
+					"verdict":        egress.Verdict.String(),
+					"reason":         egress.Reason,
+					"matched_policy": egress.MatchedPolicy,
+				},
+				"ingress": map[string]any{
+					"verdict":        ingress.Verdict.String(),
+					"reason":         ingress.Reason,
+					"matched_policy": ingress.MatchedPolicy,
+				},
+			}
+			if len(decodeErrs) > 0 {
+				msgs := make([]string, len(decodeErrs))
+				for i, e := range decodeErrs {
+					msgs[i] = e.Error()
+				}
+				result["decode_warnings"] = msgs
+				// A dropped NetworkPolicy (decode failure, or an unparseable
+				// podSelector) could have been the one restricting or allowing
+				// this exact connection, in either direction -- so a confident
+				// allowed/denied computed without it is not trustworthy. This
+				// package's own three-valued design exists precisely to avoid
+				// reporting a confident-but-wrong answer; a dropped policy is
+				// such a case, so the top-level verdict is downgraded here even
+				// though the underlying egress/ingress computation itself
+				// still reports whatever it could determine.
+				result["verdict"] = networkpolicy.Unknown.String()
+			}
+
+			resBytes, err := json.Marshal(result)
+			if err != nil {
+				return mcpToolError(ErrCodeMarshalError, fmt.Sprintf("failed to marshal result: %v", err), nil)
+			}
+			return mcp.NewToolResultText(string(resBytes))
+		}), nil
 	})
 }
 

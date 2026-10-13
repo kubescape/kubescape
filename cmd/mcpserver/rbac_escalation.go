@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v4/core/pkg/rbacgraph"
@@ -71,44 +72,51 @@ func createRBACEscalationTools(ksServer *KubescapeMcpserver) {
 			return mcpToolError(ErrCodeInvalidArgument, fmt.Sprintf("subject_kind must be one of ServiceAccount, User, Group; got %q", subjectKindStr), map[string]any{"argument": "subject_kind", "supported_values": []string{"ServiceAccount", "User", "Group"}}), nil
 		}
 
-		k8sClient, err := ksServer.getK8sClient()
-		if err != nil {
-			return mcpToolError(ErrCodeK8sClientError, fmt.Sprintf("failed to get k8s client: %v", err), nil), nil
+		params := url.Values{
+			"subject_kind": {string(kind)},
+			"namespace":    {namespace},
+			"name":         {name},
 		}
-
-		resources, err := listRBACResources(ctx, k8sClient.DynamicClient)
-		if err != nil {
-			return mcpToolError(ErrCodeK8sClientError, err.Error(), nil), nil
-		}
-
-		roles, clusterRoles, roleBindings, clusterRoleBindings, serviceAccounts, decodeErrs := rbacgraph.FromResources(resources)
-		idx := rbacgraph.NewIndex(roles, clusterRoles, roleBindings, clusterRoleBindings, serviceAccounts)
-
-		start := rbacgraph.Subject{Kind: kind, Namespace: namespace, Name: name}
-		result := idx.AnalyzeEscalation(start)
-
-		out := map[string]any{
-			"subject":                  start.String(),
-			"cluster_admin_equivalent": result.ClusterAdmin,
-			"reached":                  buildReachedSummaries(result.Reached),
-			"unbounded_findings":       buildUnboundedSummaries(result.Unbounded),
-		}
-		if result.Truncated {
-			out["truncated"] = "the search hit its safety bound before confirming cluster_admin_equivalent one way or the other -- this result may be an incomplete negative, not a confirmed one"
-		}
-		if len(decodeErrs) > 0 {
-			msgs := make([]string, len(decodeErrs))
-			for i, e := range decodeErrs {
-				msgs[i] = e.Error()
+		return ksServer.doAnalysis(ctx, "analyze_rbac_escalation_paths", params, func(ctx context.Context) *mcp.CallToolResult {
+			k8sClient, err := ksServer.getK8sClient()
+			if err != nil {
+				return mcpToolError(ErrCodeK8sClientError, fmt.Sprintf("failed to get k8s client: %v", err), nil)
 			}
-			out["decode_warnings"] = msgs
-		}
 
-		resBytes, err := json.Marshal(out)
-		if err != nil {
-			return mcpToolError(ErrCodeMarshalError, fmt.Sprintf("failed to marshal result: %v", err), nil), nil
-		}
-		return mcp.NewToolResultText(string(resBytes)), nil
+			resources, err := listRBACResources(ctx, k8sClient.DynamicClient)
+			if err != nil {
+				return mcpToolError(ErrCodeK8sClientError, err.Error(), nil)
+			}
+
+			roles, clusterRoles, roleBindings, clusterRoleBindings, serviceAccounts, decodeErrs := rbacgraph.FromResources(resources)
+			idx := rbacgraph.NewIndex(roles, clusterRoles, roleBindings, clusterRoleBindings, serviceAccounts)
+
+			start := rbacgraph.Subject{Kind: kind, Namespace: namespace, Name: name}
+			result := idx.AnalyzeEscalation(start)
+
+			out := map[string]any{
+				"subject":                  start.String(),
+				"cluster_admin_equivalent": result.ClusterAdmin,
+				"reached":                  buildReachedSummaries(result.Reached),
+				"unbounded_findings":       buildUnboundedSummaries(result.Unbounded),
+			}
+			if result.Truncated {
+				out["truncated"] = "the search hit its safety bound before confirming cluster_admin_equivalent one way or the other -- this result may be an incomplete negative, not a confirmed one"
+			}
+			if len(decodeErrs) > 0 {
+				msgs := make([]string, len(decodeErrs))
+				for i, e := range decodeErrs {
+					msgs[i] = e.Error()
+				}
+				out["decode_warnings"] = msgs
+			}
+
+			resBytes, err := json.Marshal(out)
+			if err != nil {
+				return mcpToolError(ErrCodeMarshalError, fmt.Sprintf("failed to marshal result: %v", err), nil)
+			}
+			return mcp.NewToolResultText(string(resBytes))
+		}), nil
 	})
 }
 

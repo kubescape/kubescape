@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v4/core/pkg/exposure"
@@ -61,128 +62,134 @@ func createServiceExposureTools(ksServer *KubescapeMcpserver) {
 			return toolErr, nil
 		}
 
-		k8sClient, err := ksServer.getK8sClient()
-		if err != nil {
-			return mcpToolError(ErrCodeK8sClientError, fmt.Sprintf("failed to get k8s client: %v", err), nil), nil
+		params := url.Values{
+			"namespace":    {namespace},
+			"service_name": {serviceName},
 		}
-		dynClient := k8sClient.DynamicClient
-
-		serviceList, err := dynClient.Resource(serviceGVR).Namespace(namespace).List(ctx, metav1.ListOptions{})
-		if err != nil {
-			return mcpToolError(classifyScanError(err), fmt.Sprintf("failed to list Service objects: %v", err), map[string]any{"resource_type": "Service"}), nil
-		}
-		ingressList, err := dynClient.Resource(ingressGVR).Namespace(namespace).List(ctx, metav1.ListOptions{})
-		if err != nil {
-			return mcpToolError(classifyScanError(err), fmt.Sprintf("failed to list Ingress objects: %v", err), map[string]any{"resource_type": "Ingress"}), nil
-		}
-		namespaceList, err := dynClient.Resource(namespaceGVR).List(ctx, metav1.ListOptions{})
-		if err != nil {
-			return mcpToolError(classifyScanError(err), fmt.Sprintf("failed to list Namespace objects: %v", err), map[string]any{"resource_type": "Namespace"}), nil
-		}
-
-		resources := make(map[string]workloadinterface.IMetadata, len(serviceList.Items)+len(ingressList.Items)+len(namespaceList.Items))
-		for i := range serviceList.Items {
-			w := workloadinterface.NewWorkloadObj(serviceList.Items[i].Object)
-			resources[w.GetID()] = w
-		}
-		for i := range ingressList.Items {
-			w := workloadinterface.NewWorkloadObj(ingressList.Items[i].Object)
-			resources[w.GetID()] = w
-		}
-		for i := range namespaceList.Items {
-			w := workloadinterface.NewWorkloadObj(namespaceList.Items[i].Object)
-			resources[w.GetID()] = w
-		}
-
-		services, ingresses, namespaces, decodeErrs := exposure.FromResources(resources)
-
-		// The Gateway API CRDs may not be installed on this cluster at all;
-		// that is not a tool error, just an empty set of routes/gateways --
-		// every service simply reports no route paths.
-		//
-		// Routes are listed cluster-wide, not scoped to namespace, same as
-		// Gateways below: a Service is exposed via any route naming it as
-		// a backend, including one that lives in another namespace and
-		// reaches in via a ReferenceGrant this package doesn't evaluate.
-		// Index.ServiceExposure still only builds an actual ExposurePath from
-		// a route in the Service's own namespace (that part is unaffected),
-		// but it uses this wider collection to report unclear=true when a
-		// cross-namespace backendRef exists that it cannot confirm one way or
-		// the other -- collecting only the queried namespace would make that
-		// signal silently unreachable.
-		gatewayResources := map[string]workloadinterface.IMetadata{}
-		routeList, routeErr := listGatewayKind(ctx, dynClient, httpRouteGVR, httpRouteGVRv1beta1)
-		if routeErr != nil {
-			return mcpToolError(classifyScanError(routeErr), fmt.Sprintf("failed to list HTTPRoute objects: %v", routeErr), map[string]any{"resource_type": "HTTPRoute"}), nil
-		}
-		for i := range routeList.Items {
-			w := workloadinterface.NewWorkloadObj(routeList.Items[i].Object)
-			gatewayResources[w.GetID()] = w
-		}
-		grpcRouteList, grpcRouteErr := listGatewayKind(ctx, dynClient, grpcRouteGVR, grpcRouteGVRv1alpha2)
-		if grpcRouteErr != nil {
-			return mcpToolError(classifyScanError(grpcRouteErr), fmt.Sprintf("failed to list GRPCRoute objects: %v", grpcRouteErr), map[string]any{"resource_type": "GRPCRoute"}), nil
-		}
-		for i := range grpcRouteList.Items {
-			w := workloadinterface.NewWorkloadObj(grpcRouteList.Items[i].Object)
-			gatewayResources[w.GetID()] = w
-		}
-		// Gateways are listed cluster-wide, not scoped to namespace: the
-		// dominant real-world topology puts the Gateway in an infra
-		// namespace (e.g. istio-system) with a route in an app
-		// namespace referencing it cross-namespace via parentRefs, and
-		// AllowedRoutes deciding whether that attachment is admitted.
-		// Scoping this list to namespace would make every such Gateway
-		// invisible to idx.routeAttachesToAGateway.
-		gwList, gwErr := listGatewayKind(ctx, dynClient, gatewayGVR, gatewayGVRv1beta1)
-		if gwErr != nil {
-			return mcpToolError(classifyScanError(gwErr), fmt.Sprintf("failed to list Gateway objects: %v", gwErr), map[string]any{"resource_type": "Gateway"}), nil
-		}
-		for i := range gwList.Items {
-			w := workloadinterface.NewWorkloadObj(gwList.Items[i].Object)
-			gatewayResources[w.GetID()] = w
-		}
-		httpRoutes, gateways, gwDecodeErrs := exposure.FromUnstructuredGatewayAPI(gatewayResources)
-		decodeErrs = append(decodeErrs, gwDecodeErrs...)
-
-		idx := exposure.NewIndex(services, ingresses, httpRoutes, gateways, namespaces)
-
-		var targets []string
-		if serviceName != "" {
-			targets = []string{serviceName}
-		} else {
-			for _, s := range services {
-				targets = append(targets, s.Name)
+		return ksServer.doAnalysis(ctx, "analyze_service_exposure", params, func(ctx context.Context) *mcp.CallToolResult {
+			k8sClient, err := ksServer.getK8sClient()
+			if err != nil {
+				return mcpToolError(ErrCodeK8sClientError, fmt.Sprintf("failed to get k8s client: %v", err), nil)
 			}
-		}
+			dynClient := k8sClient.DynamicClient
 
-		findings := make(map[string]any, len(targets))
-		for _, name := range targets {
-			paths, unclear := idx.ServiceExposure(exposure.ServiceRef{Namespace: namespace, Name: name})
-			finding := map[string]any{"paths": buildExposurePathSummaries(paths)}
-			if unclear {
-				finding["unclear"] = "a cross-namespace Gateway API HTTPRoute/GRPCRoute backendRef references this Service; whether it is authorized by a ReferenceGrant is not modeled, so an empty paths here is not a confirmed all-clear"
+			serviceList, err := dynClient.Resource(serviceGVR).Namespace(namespace).List(ctx, metav1.ListOptions{})
+			if err != nil {
+				return mcpToolError(classifyScanError(err), fmt.Sprintf("failed to list Service objects: %v", err), map[string]any{"resource_type": "Service"})
 			}
-			findings[name] = finding
-		}
-
-		result := map[string]any{
-			"namespace": namespace,
-			"services":  findings,
-		}
-		if len(decodeErrs) > 0 {
-			msgs := make([]string, len(decodeErrs))
-			for i, e := range decodeErrs {
-				msgs[i] = e.Error()
+			ingressList, err := dynClient.Resource(ingressGVR).Namespace(namespace).List(ctx, metav1.ListOptions{})
+			if err != nil {
+				return mcpToolError(classifyScanError(err), fmt.Sprintf("failed to list Ingress objects: %v", err), map[string]any{"resource_type": "Ingress"})
 			}
-			result["decode_warnings"] = msgs
-		}
+			namespaceList, err := dynClient.Resource(namespaceGVR).List(ctx, metav1.ListOptions{})
+			if err != nil {
+				return mcpToolError(classifyScanError(err), fmt.Sprintf("failed to list Namespace objects: %v", err), map[string]any{"resource_type": "Namespace"})
+			}
 
-		resBytes, err := json.Marshal(result)
-		if err != nil {
-			return mcpToolError(ErrCodeMarshalError, fmt.Sprintf("failed to marshal result: %v", err), nil), nil
-		}
-		return mcp.NewToolResultText(string(resBytes)), nil
+			resources := make(map[string]workloadinterface.IMetadata, len(serviceList.Items)+len(ingressList.Items)+len(namespaceList.Items))
+			for i := range serviceList.Items {
+				w := workloadinterface.NewWorkloadObj(serviceList.Items[i].Object)
+				resources[w.GetID()] = w
+			}
+			for i := range ingressList.Items {
+				w := workloadinterface.NewWorkloadObj(ingressList.Items[i].Object)
+				resources[w.GetID()] = w
+			}
+			for i := range namespaceList.Items {
+				w := workloadinterface.NewWorkloadObj(namespaceList.Items[i].Object)
+				resources[w.GetID()] = w
+			}
+
+			services, ingresses, namespaces, decodeErrs := exposure.FromResources(resources)
+
+			// The Gateway API CRDs may not be installed on this cluster at all;
+			// that is not a tool error, just an empty set of routes/gateways --
+			// every service simply reports no route paths.
+			//
+			// Routes are listed cluster-wide, not scoped to namespace, same as
+			// Gateways below: a Service is exposed via any route naming it as
+			// a backend, including one that lives in another namespace and
+			// reaches in via a ReferenceGrant this package doesn't evaluate.
+			// Index.ServiceExposure still only builds an actual ExposurePath from
+			// a route in the Service's own namespace (that part is unaffected),
+			// but it uses this wider collection to report unclear=true when a
+			// cross-namespace backendRef exists that it cannot confirm one way or
+			// the other -- collecting only the queried namespace would make that
+			// signal silently unreachable.
+			gatewayResources := map[string]workloadinterface.IMetadata{}
+			routeList, routeErr := listGatewayKind(ctx, dynClient, httpRouteGVR, httpRouteGVRv1beta1)
+			if routeErr != nil {
+				return mcpToolError(classifyScanError(routeErr), fmt.Sprintf("failed to list HTTPRoute objects: %v", routeErr), map[string]any{"resource_type": "HTTPRoute"})
+			}
+			for i := range routeList.Items {
+				w := workloadinterface.NewWorkloadObj(routeList.Items[i].Object)
+				gatewayResources[w.GetID()] = w
+			}
+			grpcRouteList, grpcRouteErr := listGatewayKind(ctx, dynClient, grpcRouteGVR, grpcRouteGVRv1alpha2)
+			if grpcRouteErr != nil {
+				return mcpToolError(classifyScanError(grpcRouteErr), fmt.Sprintf("failed to list GRPCRoute objects: %v", grpcRouteErr), map[string]any{"resource_type": "GRPCRoute"})
+			}
+			for i := range grpcRouteList.Items {
+				w := workloadinterface.NewWorkloadObj(grpcRouteList.Items[i].Object)
+				gatewayResources[w.GetID()] = w
+			}
+			// Gateways are listed cluster-wide, not scoped to namespace: the
+			// dominant real-world topology puts the Gateway in an infra
+			// namespace (e.g. istio-system) with a route in an app
+			// namespace referencing it cross-namespace via parentRefs, and
+			// AllowedRoutes deciding whether that attachment is admitted.
+			// Scoping this list to namespace would make every such Gateway
+			// invisible to idx.routeAttachesToAGateway.
+			gwList, gwErr := listGatewayKind(ctx, dynClient, gatewayGVR, gatewayGVRv1beta1)
+			if gwErr != nil {
+				return mcpToolError(classifyScanError(gwErr), fmt.Sprintf("failed to list Gateway objects: %v", gwErr), map[string]any{"resource_type": "Gateway"})
+			}
+			for i := range gwList.Items {
+				w := workloadinterface.NewWorkloadObj(gwList.Items[i].Object)
+				gatewayResources[w.GetID()] = w
+			}
+			httpRoutes, gateways, gwDecodeErrs := exposure.FromUnstructuredGatewayAPI(gatewayResources)
+			decodeErrs = append(decodeErrs, gwDecodeErrs...)
+
+			idx := exposure.NewIndex(services, ingresses, httpRoutes, gateways, namespaces)
+
+			var targets []string
+			if serviceName != "" {
+				targets = []string{serviceName}
+			} else {
+				for _, s := range services {
+					targets = append(targets, s.Name)
+				}
+			}
+
+			findings := make(map[string]any, len(targets))
+			for _, name := range targets {
+				paths, unclear := idx.ServiceExposure(exposure.ServiceRef{Namespace: namespace, Name: name})
+				finding := map[string]any{"paths": buildExposurePathSummaries(paths)}
+				if unclear {
+					finding["unclear"] = "a cross-namespace Gateway API HTTPRoute/GRPCRoute backendRef references this Service; whether it is authorized by a ReferenceGrant is not modeled, so an empty paths here is not a confirmed all-clear"
+				}
+				findings[name] = finding
+			}
+
+			result := map[string]any{
+				"namespace": namespace,
+				"services":  findings,
+			}
+			if len(decodeErrs) > 0 {
+				msgs := make([]string, len(decodeErrs))
+				for i, e := range decodeErrs {
+					msgs[i] = e.Error()
+				}
+				result["decode_warnings"] = msgs
+			}
+
+			resBytes, err := json.Marshal(result)
+			if err != nil {
+				return mcpToolError(ErrCodeMarshalError, fmt.Sprintf("failed to marshal result: %v", err), nil)
+			}
+			return mcp.NewToolResultText(string(resBytes))
+		}), nil
 	})
 }
 
