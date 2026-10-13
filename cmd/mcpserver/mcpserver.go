@@ -1384,6 +1384,7 @@ func mcpServerEntrypoint(transport string, port int) error {
 	createWorkloadScanningTools(ksServer)
 	createPolicyListingTools(ksServer)
 	createAdvancedTools(ksServer)
+	createSecretExposureTools(ksServer)
 
 	// Start the server
 	switch transport {
