@@ -111,6 +111,23 @@ func TestAnalyzeNetworkReachability_SingleStackIPBlockUnchanged(t *testing.T) {
 	}
 }
 
+// Pods whose reported addresses share no IP family cannot connect, with or
+// without a policy; a pod that reports no address at all is not such a case.
+func TestAnalyzeNetworkReachability_NoCommonIPFamilyIsDenied(t *testing.T) {
+	parsed := analyzeClientToServer(t,
+		dualStackPod("prod", "client", "10.244.1.2"),
+		dualStackPod("prod", "server", "fd00:10:244:2::2"))
+	require.Equal(t, "denied", parsed["verdict"])
+	for _, direction := range []string{"egress", "ingress"} {
+		require.Contains(t, parsed[direction].(map[string]any)["reason"], "no IP family in common")
+	}
+
+	parsed = analyzeClientToServer(t,
+		dualStackPod("prod", "client", "10.244.1.2"),
+		unstructuredPod("prod", "server", map[string]any{"app": "server"}))
+	require.Equal(t, "allowed", parsed["verdict"])
+}
+
 func TestUnstructuredPodIPs(t *testing.T) {
 	require.Equal(t, []string{"10.244.1.2", "fd00:10:244:1::2"},
 		unstructuredPodIPs(dualStackPod("prod", "client", "10.244.1.2", "fd00:10:244:1::2").Object))

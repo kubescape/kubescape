@@ -145,6 +145,13 @@ func hostNetworkNote(src, dst Endpoint) string {
 // verdict can then accompany two independently Allowed decisions. Reasons
 // name an IP family only when the families do not all give the same answer.
 //
+// For the same reason, two Pods whose addresses are all known and share no
+// IP family are Denied outright, whatever any policy says: there is no
+// connection for a policy to allow. An address that is missing or does not
+// parse is not known to be of another family, so it never causes this, and
+// neither do the addresses of a hostNetwork Pod, which are its node's and
+// need not be all the node has: that case is Unknown.
+//
 // Exception: a Pod can always reach itself. The Kubernetes NetworkPolicy
 // docs list this as one of the ways a peer is identified -- "a pod cannot
 // block access to itself" -- regardless of any policy selecting it, so
@@ -153,6 +160,9 @@ func (idx *Index) Reaches(src, dst Endpoint, port *PortSpec) (Verdict, Decision,
 	if samePod(src, dst) {
 		d := allow("source and destination are the same Pod; NetworkPolicy cannot block a Pod from reaching itself", "")
 		return Allowed, d, d
+	}
+	if d, none := noCommonIPFamily(src, dst); none {
+		return d.Verdict, d, d
 	}
 	if pairs := sameFamilyPairs(src, dst); len(pairs) > 0 {
 		return idx.reachesAnyFamily(pairs, port)
@@ -294,13 +304,50 @@ func ipFamily(ip string) string {
 	}
 }
 
+// noCommonIPFamily reports whether the addresses of src and dst share no IP
+// family, with the decision that follows from it. That takes an address on
+// both sides and every one of them parsing: a pod with no known address, or
+// with one that is not an IP address, may still have an address in the other
+// pod's family, so nothing is concluded about it here.
+//
+// A pod's own addresses (status.podIPs) are all it has, so two such pods
+// cannot connect and the decision is Denied. A hostNetwork pod instead
+// reports the addresses registered for its node, at most one per family,
+// and uses the node's network, which may have addresses beyond those; the
+// decision is then Unknown rather than a guess either way.
+func noCommonIPFamily(src, dst Endpoint) (decision Decision, none bool) {
+	families := func(e Endpoint) (only string, known bool) {
+		for _, ip := range e.addresses() {
+			family := ipFamily(ip)
+			if family == "" || (only != "" && family != only) {
+				// Unparseable, or both families: either way not a pod
+				// known to have a single family.
+				return "", false
+			}
+			only = family
+		}
+		return only, only != ""
+	}
+	srcFamily, srcKnown := families(src)
+	dstFamily, dstKnown := families(dst)
+	if !srcKnown || !dstKnown || srcFamily == dstFamily {
+		return Decision{}, false
+	}
+	reason := fmt.Sprintf("source has only %s addresses and destination has only %s addresses; ", srcFamily, dstFamily)
+	if src.HostNetwork || dst.HostNetwork {
+		return unknown(reason + "they share no IP family, but a pod on the host network (hostNetwork: true) reports only the addresses registered for its node, which may have others"), true
+	}
+	return deny(reason + "with no IP family in common no connection between them is possible, whatever NetworkPolicy allows"), true
+}
+
 // sameFamilyPairs lists the address pairs a connection from src to dst can
 // use when at least one of them has more than one address: every src address
 // with every dst address of the same IP family. It returns nil when neither
-// endpoint has several addresses, and also when they have no family in
-// common or one of them has no known address -- there is nothing to pair
-// then, and each direction is evaluated against whatever addresses are known
-// (see peerMatches for a peer that only some of them satisfy).
+// endpoint has several addresses, and also when one of them has no known
+// address or none that parses -- there is nothing to pair then, and each
+// direction is evaluated against whatever addresses are known (see
+// peerMatches for a peer that only some of them satisfy). Pods whose known
+// addresses share no family never get here (see noCommonIPFamily).
 func sameFamilyPairs(src, dst Endpoint) []familyPair {
 	srcAddrs, dstAddrs := src.addresses(), dst.addresses()
 	if len(srcAddrs) < 2 && len(dstAddrs) < 2 {

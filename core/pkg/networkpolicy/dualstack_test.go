@@ -479,3 +479,151 @@ func TestPeerListVerdict_PartialIPBlockMatchReason(t *testing.T) {
 		t.Errorf("candidate without an address: %v %q, want Unknown for an unknown IP", v, reason)
 	}
 }
+
+// Two pods whose known addresses share no IP family cannot open a connection
+// to each other at all, so the two directions must not be judged separately
+// -- each against an address the other end can never use -- and added up to
+// Allowed. That is different from an address that is simply not known.
+func TestReaches_NoCommonIPFamily(t *testing.T) {
+	pod := func(name string, ips ...string) Endpoint {
+		ep := Endpoint{Namespace: "ns", Name: name, Labels: map[string]string{"app": name}}
+		if len(ips) > 0 {
+			ep.IP, ep.IPs = ips[0], ips
+		}
+		return ep
+	}
+	const (
+		v4ToV6 = "source has only IPv4 addresses and destination has only IPv6 addresses; with no IP family in common no connection between them is possible, whatever NetworkPolicy allows"
+		v6ToV4 = "source has only IPv6 addresses and destination has only IPv4 addresses; with no IP family in common no connection between them is possible, whatever NetworkPolicy allows"
+	)
+	clientV4, clientV6 := pod("client", "10.244.1.2"), pod("client", "fd00:10:244:1::2")
+	serverV4, serverV6 := pod("server", "10.244.2.2"), pod("server", "fd00:10:244:2::2")
+	clientDual := pod("client", "10.244.1.2", "fd00:10:244:1::2")
+	serverDual := pod("server", "fd00:10:244:2::2", "10.244.2.2")
+	// Each direction, read alone, admits the other pod's only address.
+	crossFamilyAllow := []*networkingv1.NetworkPolicy{
+		clientEgress(ipBlockPeer("fd00:10:244::/56")),
+		serverIngress(ipBlockPeer("10.244.0.0/16")),
+	}
+	selectorAllow := []*networkingv1.NetworkPolicy{
+		clientEgress(podSelectorPeer("app", "server")),
+		serverIngress(podSelectorPeer("app", "client")),
+	}
+	ingressByIPBlock := []*networkingv1.NetworkPolicy{serverIngress(ipBlockPeer("10.244.0.0/16"), ipBlockPeer("fd00:10:244::/56"))}
+	egressByIPBlock := []*networkingv1.NetworkPolicy{clientEgress(ipBlockPeer("10.244.0.0/16"), ipBlockPeer("fd00:10:244::/56"))}
+
+	tests := []struct {
+		name     string
+		policies []*networkingv1.NetworkPolicy
+		src, dst Endpoint
+		want     Verdict
+		// wantReason, when set, is the reason both decisions must carry;
+		// otherwise neither may claim the pods have no family in common.
+		wantReason string
+	}{
+		{name: "IPv4-only to IPv6-only, no policy", src: clientV4, dst: serverV6, want: Denied, wantReason: v4ToV6},
+		{name: "IPv6-only to IPv4-only, no policy", src: clientV6, dst: serverV4, want: Denied, wantReason: v6ToV4},
+		{name: "IPv4-only to IPv6-only, each direction allows by ipBlock", policies: crossFamilyAllow, src: clientV4, dst: serverV6, want: Denied, wantReason: v4ToV6},
+		{name: "IPv4-only to IPv6-only, each direction allows by selector", policies: selectorAllow, src: clientV4, dst: serverV6, want: Denied, wantReason: v4ToV6},
+		{name: "IPv4-only to IPv6-only, addresses given through IPs alone", src: Endpoint{Namespace: "ns", Name: "client", IPs: []string{"10.244.1.2"}}, dst: Endpoint{Namespace: "ns", Name: "server", IPs: []string{"fd00:10:244:2::2"}}, want: Denied, wantReason: v4ToV6},
+
+		{name: "source address unknown, no policy", src: pod("client"), dst: serverV6, want: Allowed},
+		{name: "source address unknown, ingress by ipBlock", policies: ingressByIPBlock, src: pod("client"), dst: serverV6, want: Unknown},
+		{name: "destination address unknown, no policy", src: clientV4, dst: pod("server"), want: Allowed},
+		{name: "destination address unknown, egress by ipBlock", policies: egressByIPBlock, src: clientV4, dst: pod("server"), want: Unknown},
+		{name: "neither address known, no policy", src: pod("client"), dst: pod("server"), want: Allowed},
+		{name: "source address does not parse, no policy", src: pod("client", "not-an-ip"), dst: serverV6, want: Allowed},
+		{name: "one of the source's addresses does not parse", src: pod("client", "10.244.1.2", "not-an-ip"), dst: serverV6, want: Allowed},
+
+		{name: "dual-stack to IPv4-only, no policy", src: clientDual, dst: serverV4, want: Allowed},
+		{name: "dual-stack to IPv6-only, no policy", src: clientDual, dst: serverV6, want: Allowed},
+		{name: "IPv4-only to dual-stack, no policy", src: clientV4, dst: serverDual, want: Allowed},
+		{name: "dual-stack to IPv4-only, ingress by ipBlock", policies: ingressByIPBlock, src: clientDual, dst: serverV4, want: Allowed},
+		{name: "IPv4 to IPv4, no policy", src: clientV4, dst: serverV4, want: Allowed},
+		{name: "IPv6 to IPv6, no policy", src: clientV6, dst: serverV6, want: Allowed},
+		{name: "IPv4 to IPv4, ingress by ipBlock", policies: ingressByIPBlock, src: clientV4, dst: serverV4, want: Allowed},
+		{name: "IPv6 to IPv6, egress by ipBlock", policies: egressByIPBlock, src: clientV6, dst: serverV6, want: Allowed},
+		{name: "a pod reaches itself whatever its addresses", src: serverV6, dst: serverV6, want: Allowed},
+	}
+	for _, tt := range tests {
+		for _, port := range []*PortSpec{nil, portSpec(8080)} {
+			name := tt.name + "/any port"
+			if port != nil {
+				name = tt.name + "/port 8080"
+			}
+			t.Run(name, func(t *testing.T) {
+				idx, _ := NewIndex(tt.policies, nil)
+				got, egress, ingress := idx.Reaches(tt.src, tt.dst, port)
+				if got != tt.want {
+					t.Errorf("verdict = %v, want %v (egress: %s; ingress: %s)", got, tt.want, egress.Reason, ingress.Reason)
+				}
+				for dir, d := range map[string]Decision{"egress": egress, "ingress": ingress} {
+					if tt.wantReason != "" {
+						if d.Verdict != Denied || d.Reason != tt.wantReason {
+							t.Errorf("%s = %v %q, want Denied %q", dir, d.Verdict, d.Reason, tt.wantReason)
+						}
+					} else if strings.Contains(d.Reason, "no IP family in common") {
+						t.Errorf("%s reason %q claims the pods share no IP family", dir, d.Reason)
+					}
+				}
+			})
+		}
+	}
+}
+
+// A hostNetwork pod reports its node's registered addresses, not everything
+// the node's network has, so the same mismatch is not proof that it cannot
+// connect -- and not grounds for the Allowed that judging each direction on
+// its own would give.
+func TestReaches_NoCommonIPFamilyWithHostNetworkIsUnknown(t *testing.T) {
+	pod := func(name, ip string, hostNetwork bool) Endpoint {
+		return Endpoint{Namespace: "ns", Name: name, Labels: map[string]string{"app": name}, IP: ip, IPs: []string{ip}, HostNetwork: hostNetwork}
+	}
+	crossFamilyAllow := []*networkingv1.NetworkPolicy{
+		clientEgress(ipBlockPeer("fd00:10:244::/56")),
+		serverIngress(ipBlockPeer("172.18.0.0/16")),
+	}
+	denyAll := []*networkingv1.NetworkPolicy{policy("ns", "deny-all", metav1.LabelSelector{}, []networkingv1.PolicyType{networkingv1.PolicyTypeIngress, networkingv1.PolicyTypeEgress}, nil, nil)}
+
+	tests := []struct {
+		name     string
+		policies []*networkingv1.NetworkPolicy
+		src, dst Endpoint
+	}{
+		{name: "hostNetwork source, no policy", src: pod("client", "172.18.0.5", true), dst: pod("server", "fd00:10:244:2::2", false)},
+		{name: "hostNetwork destination, no policy", src: pod("client", "fd00:10:244:1::2", false), dst: pod("server", "172.18.0.5", true)},
+		{name: "both on the host network, no policy", src: pod("client", "172.18.0.5", true), dst: pod("server", "fc00:f853:ccd:e793::7", true)},
+		{name: "hostNetwork source, each direction allows by ipBlock", policies: crossFamilyAllow, src: pod("client", "172.18.0.5", true), dst: pod("server", "fd00:10:244:2::2", false)},
+		{name: "hostNetwork source, default deny", policies: denyAll, src: pod("client", "172.18.0.5", true), dst: pod("server", "fd00:10:244:2::2", false)},
+	}
+	for _, tt := range tests {
+		for _, port := range []*PortSpec{nil, portSpec(8080)} {
+			name := tt.name + "/any port"
+			if port != nil {
+				name = tt.name + "/port 8080"
+			}
+			t.Run(name, func(t *testing.T) {
+				idx, _ := NewIndex(tt.policies, nil)
+				got, egress, ingress := idx.Reaches(tt.src, tt.dst, port)
+				if got != Unknown {
+					t.Errorf("verdict = %v, want Unknown (egress: %s; ingress: %s)", got, egress.Reason, ingress.Reason)
+				}
+				for dir, d := range map[string]Decision{"egress": egress, "ingress": ingress} {
+					if d.Verdict != Unknown || !strings.Contains(d.Reason, "share no IP family") || !strings.Contains(d.Reason, "hostNetwork: true") {
+						t.Errorf("%s = %v %q, want Unknown naming the family mismatch and the host network", dir, d.Verdict, d.Reason)
+					}
+				}
+			})
+		}
+	}
+
+	// With a family in common, or on the same Pod, nothing changes.
+	idx, _ := NewIndex(nil, nil)
+	if got, _, _ := idx.Reaches(pod("client", "172.18.0.5", true), pod("server", "10.244.2.2", false), portSpec(8080)); got != Allowed {
+		t.Errorf("hostNetwork source with a common family: verdict = %v, want Allowed", got)
+	}
+	host := pod("server", "172.18.0.5", true)
+	if got, _, _ := idx.Reaches(host, host, portSpec(8080)); got != Allowed {
+		t.Errorf("hostNetwork pod to itself: verdict = %v, want Allowed", got)
+	}
+}

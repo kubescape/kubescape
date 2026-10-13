@@ -43,6 +43,10 @@ type Endpoint struct {
 	// guarantees that status.podIPs[0] equals status.podIP and that a pod has
 	// at most one address per IP family, so this is not validated here: if
 	// IP and IPs disagree, each address is evaluated.
+	//
+	// The addresses given are taken to be all the pod has, unless it is a
+	// hostNetwork pod: Reaches denies a connection between two pods whose
+	// addresses share no IP family.
 	IPs []string
 
 	// HostNetwork is true for a pod that runs in its node's network
