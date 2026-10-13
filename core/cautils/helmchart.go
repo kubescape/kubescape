@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/kubescape/go-logger"
@@ -236,8 +237,20 @@ func (hc *HelmChart) GetWorkloads(values map[string]any) (map[string][]workloadi
 // GetWorkloadsWithOptions renders chart template using the provided values and Helm release options
 // (release name/namespace), returning a map of source (absolute) file path to its workloads.
 // Charts that reference .Release.Name or .Release.Namespace require these options to render.
+// Equivalent to GetWorkloadsWithCapabilities(values, releaseOpts, HelmCapabilityOptions{}).
 func (hc *HelmChart) GetWorkloadsWithOptions(values map[string]any, releaseOpts helmchartutil.ReleaseOptions) (map[string][]workloadinterface.IMetadata, []error) {
-	vals, err := helmchartutil.ToRenderValues(hc.chart, values, releaseOpts, nil)
+	return hc.GetWorkloadsWithCapabilities(values, releaseOpts, HelmCapabilityOptions{})
+}
+
+// GetWorkloadsWithCapabilities renders like GetWorkloadsWithOptions, with the Kubernetes version
+// and the extra API versions that templates read from .Capabilities taken from capOpts.
+// A zero capOpts renders with Helm's library defaults.
+func (hc *HelmChart) GetWorkloadsWithCapabilities(values map[string]any, releaseOpts helmchartutil.ReleaseOptions, capOpts HelmCapabilityOptions) (map[string][]workloadinterface.IMetadata, []error) {
+	caps, err := hc.capabilities(capOpts)
+	if err != nil {
+		return nil, []error{err}
+	}
+	vals, err := helmchartutil.ToRenderValues(hc.chart, values, releaseOpts, caps)
 	if err != nil {
 		return nil, []error{err}
 	}
@@ -477,10 +490,62 @@ func isStaticTemplate(absPath string) (bool, error) {
 	return !bytes.Contains(content, []byte("{{")), nil
 }
 
-// HelmValueOptions describes the user-supplied Helm value overrides and release identity
-// to apply when rendering Helm charts during a scan. It mirrors the inputs accepted by
-// `helm install` so the kubescape CLI flags and the helm-kubescape plugin can pass values
-// through verbatim.
+// capabilities returns the Helm capabilities to render hc with, or nil for Helm's library
+// defaults: Kubernetes v1.20 and the built-in API versions.
+//
+// An explicit Kubernetes version that the chart's own kubeVersion constraint rejects is an
+// error, worded as Helm words it. The constraint is not enforced against the implicit default:
+// charts that declare one have always been rendered at that default, and failing them because
+// only API versions were added would be a new failure unrelated to what the caller asked for.
+func (hc *HelmChart) capabilities(opts HelmCapabilityOptions) (*helmchartutil.Capabilities, error) {
+	if opts.IsEmpty() {
+		return nil, nil
+	}
+	caps := helmchartutil.DefaultCapabilities.Copy()
+	if opts.KubeVersion != "" {
+		kubeVersion, err := helmchartutil.ParseKubeVersion(opts.KubeVersion)
+		if err != nil {
+			return nil, fmt.Errorf("%q is not a Kubernetes version: %w", opts.KubeVersion, err)
+		}
+		if hc.chart.Metadata != nil && hc.chart.Metadata.KubeVersion != "" &&
+			!helmchartutil.IsCompatibleRange(hc.chart.Metadata.KubeVersion, kubeVersion.String()) {
+			return nil, fmt.Errorf("chart requires kubeVersion: %s which is incompatible with Kubernetes %s", hc.chart.Metadata.KubeVersion, kubeVersion.String())
+		}
+		caps.KubeVersion = *kubeVersion
+	}
+	// Copy returns the shared DefaultVersionSet slice, so clone it before appending.
+	caps.APIVersions = append(slices.Clone(helmchartutil.DefaultVersionSet), opts.APIVersions...)
+	return caps, nil
+}
+
+// HelmCapabilityOptions describes the cluster a Helm chart is rendered for. It mirrors the
+// `helm template` flags of the same names.
+type HelmCapabilityOptions struct {
+	KubeVersion string   // --kube-version: Kubernetes version exposed as .Capabilities.KubeVersion
+	APIVersions []string // --api-versions: API versions added to .Capabilities.APIVersions
+}
+
+// IsEmpty reports whether the chart is to be rendered with Helm's default capabilities.
+func (o HelmCapabilityOptions) IsEmpty() bool {
+	return o.KubeVersion == "" && len(o.APIVersions) == 0
+}
+
+// ValidateHelmKubeVersion reports whether version can be used as HelmCapabilityOptions.KubeVersion.
+// An empty version is valid and selects the default.
+func ValidateHelmKubeVersion(version string) error {
+	if version == "" {
+		return nil
+	}
+	if _, err := helmchartutil.ParseKubeVersion(version); err != nil {
+		return fmt.Errorf("%q is not a Kubernetes version: %w", version, err)
+	}
+	return nil
+}
+
+// HelmValueOptions describes the user-supplied Helm value overrides, release identity and
+// target cluster capabilities to apply when rendering Helm charts during a scan. It mirrors
+// the inputs accepted by `helm install` and `helm template` so the kubescape CLI flags and
+// the helm-kubescape plugin can pass values through verbatim.
 type HelmValueOptions struct {
 	ValueFiles       []string // -f / --values
 	Values           []string // --set
@@ -488,16 +553,27 @@ type HelmValueOptions struct {
 	FileValues       []string // --set-file
 	ReleaseName      string
 	ReleaseNamespace string
+	KubeVersion      string   // --kube-version
+	APIVersions      []string // --api-versions
 }
 
-// IsEmpty reports whether no Helm value overrides or release identity have been set.
+// IsEmpty reports whether no Helm value overrides, release identity or capabilities have been set.
 func (o HelmValueOptions) IsEmpty() bool {
 	return len(o.ValueFiles) == 0 &&
 		len(o.Values) == 0 &&
 		len(o.StringValues) == 0 &&
 		len(o.FileValues) == 0 &&
 		o.ReleaseName == "" &&
-		o.ReleaseNamespace == ""
+		o.ReleaseNamespace == "" &&
+		o.CapabilityOptions().IsEmpty()
+}
+
+// CapabilityOptions returns the capabilities to render charts with.
+func (o HelmValueOptions) CapabilityOptions() HelmCapabilityOptions {
+	return HelmCapabilityOptions{
+		KubeVersion: o.KubeVersion,
+		APIVersions: o.APIVersions,
+	}
 }
 
 // MergeValues parses and merges the user-supplied value overrides using Helm's own

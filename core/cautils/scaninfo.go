@@ -195,6 +195,8 @@ type ScanInfo struct {
 	HelmSetFileValues         []string // --set-file: Helm value overrides whose value is read from a file
 	HelmReleaseName           string   // --release-name: Helm release name made available as .Release.Name during render
 	HelmReleaseNamespace      string   // --release-namespace: Helm release namespace made available as .Release.Namespace
+	HelmKubeVersion           string   // --kube-version: Kubernetes version made available as .Capabilities.KubeVersion
+	HelmAPIVersions           []string // --api-versions: API versions added to .Capabilities.APIVersions
 	LabelsToCopy              []string // Labels to copy from workloads to scan reports
 	SkipControls              string   // Control IDs to skip, e.g. "C-0001,C-0020"
 	IncludeControls           string   // Control IDs to include (all others skipped), e.g. "C-0001,C-0002"
@@ -610,6 +612,7 @@ func (scanInfo *ScanInfo) CloneForContext(kubeContext, output string) *ScanInfo 
 	clone.HelmSetValues = slices.Clone(scanInfo.HelmSetValues)
 	clone.HelmSetStringValues = slices.Clone(scanInfo.HelmSetStringValues)
 	clone.HelmSetFileValues = slices.Clone(scanInfo.HelmSetFileValues)
+	clone.HelmAPIVersions = slices.Clone(scanInfo.HelmAPIVersions)
 	clone.LabelsToCopy = slices.Clone(scanInfo.LabelsToCopy)
 	clone.KubeContexts = slices.Clone(scanInfo.KubeContexts)
 	clone.RegistryMapping = maps.Clone(scanInfo.RegistryMapping)

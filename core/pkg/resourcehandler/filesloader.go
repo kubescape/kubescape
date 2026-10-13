@@ -186,7 +186,7 @@ func publishFileResourceBatch(ctx context.Context, batchChan chan<- *cautils.Res
 	}
 }
 
-// helmValueOptionsFromScanInfo extracts the user-supplied Helm value/release flags from ScanInfo
+// helmValueOptionsFromScanInfo extracts the user-supplied Helm value/release/capability flags from ScanInfo
 // into the cautils.HelmValueOptions used by chart rendering.
 func helmValueOptionsFromScanInfo(scanInfo *cautils.ScanInfo) cautils.HelmValueOptions {
 	if scanInfo == nil {
@@ -199,6 +199,8 @@ func helmValueOptionsFromScanInfo(scanInfo *cautils.ScanInfo) cautils.HelmValueO
 		FileValues:       scanInfo.HelmSetFileValues,
 		ReleaseName:      scanInfo.HelmReleaseName,
 		ReleaseNamespace: scanInfo.HelmReleaseNamespace,
+		KubeVersion:      scanInfo.HelmKubeVersion,
+		APIVersions:      scanInfo.HelmAPIVersions,
 	}
 }
 
