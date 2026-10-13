@@ -226,6 +226,7 @@ type ScanInfo struct {
 	KubeContexts              []string                    // --kube-contexts: scan each of these kube contexts sequentially, one report per context (fleet mode)
 	FleetReport               string                      // --fleet-report: with --kube-contexts, also write one combined JSON report across every context to this path
 	ReferenceCluster          string                      // --reference-cluster: with --fleet-report, the kube context whose findings the other clusters are read against
+	KubeContextRetries        int                         // --retries: with --kube-contexts, how many more times to try a cluster whose API server never answered
 	WholeClusterPolicy        WholeClusterExecutionPolicy // Execution policy for whole-cluster controls (projected, fallback, skip, verify)
 }
 

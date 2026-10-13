@@ -225,7 +225,11 @@ presence of a `Chart.yaml` file.
  ```
 > **Note**  
 > Kubescape will load the default `values.yaml` file. To use a 
-> custom values file, use the `--helm-values` flag.
+> custom values file, use the `--values` flag. You can also set
+> single values with `--set`, `--set-string` and `--set-file`.
+ ```bash
+    kubescape scan /path/to/helm/chart/directory --values my-values.yaml --set image.tag=1.2.3
+ ```
 
 #### Scan a Kustomize directory
 

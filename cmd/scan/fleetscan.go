@@ -56,6 +56,9 @@ func validateKubeContextsSupported(cmd *cobra.Command, scanInfo *cautils.ScanInf
 	if err := validateReferenceCluster(scanInfo); err != nil {
 		return err
 	}
+	if err := validateRetries(cmd, scanInfo); err != nil {
+		return err
+	}
 	if len(scanInfo.KubeContexts) == 0 {
 		return nil
 	}
@@ -193,6 +196,17 @@ func validateReferenceCluster(scanInfo *cautils.ScanInfo) error {
 	}
 	if !slices.Contains(scanInfo.KubeContexts, reference) {
 		return fmt.Errorf("--reference-cluster %q is not one of --kube-contexts (%s): the reference has to be a cluster the run is scanning", reference, strings.Join(scanInfo.KubeContexts, ", "))
+	}
+	return nil
+}
+
+// validateRetries rejects a negative --retries, and an explicit one without --kube-contexts where it would do nothing.
+func validateRetries(cmd *cobra.Command, scanInfo *cautils.ScanInfo) error {
+	if scanInfo.KubeContextRetries < 0 {
+		return fmt.Errorf("--retries %d is negative: it is how many more times to try an unreachable cluster, so 0 disables retries", scanInfo.KubeContextRetries)
+	}
+	if commandFlagChanged(cmd, "retries") && len(scanInfo.KubeContexts) == 0 {
+		return fmt.Errorf("--retries requires --kube-contexts: it retries clusters of a multi-context scan that could not be reached")
 	}
 	return nil
 }
@@ -458,17 +472,20 @@ func fleetScan(baseScanInfo cautils.ScanInfo, ks meta.IKubescape, policyIdentifi
 	for _, kubeContext := range baseScanInfo.KubeContexts {
 		outputPath := outputPaths[kubeContext]
 
-		contextScanInfo := baseScanInfo.CloneForContext(kubeContext, outputPath)
-
 		logger.L().Info("fleet scan: scanning context", helpers.String("context", kubeContext), helpers.String("output", outputPath))
 
-		results, elapsed, err := runFleetContext(kubeContext, contextScanInfo, ks, policyIdentifiers, run)
+		results, elapsed, attempts, err := scanFleetContext(kubeContext, outputPath, &baseScanInfo, ks, policyIdentifiers, run)
 
 		if wantFleetReport {
-			clusters = append(clusters, newClusterResult(kubeContext, results, err, elapsed))
+			cluster := newClusterResult(kubeContext, results, err, elapsed)
+			cluster.Attempts = attempts
+			clusters = append(clusters, cluster)
 		}
 
 		if err != nil {
+			if attempts > 1 {
+				err = fmt.Errorf("%w (after %d attempts)", err, attempts)
+			}
 			failed = append(failed, fmt.Sprintf("%s: %s", kubeContext, err))
 			logger.L().Error("fleet scan: context failed", helpers.String("context", kubeContext), helpers.Error(err))
 			continue
@@ -525,6 +542,56 @@ func fleetScan(baseScanInfo cautils.ScanInfo, ks meta.IKubescape, policyIdentifi
 		return fmt.Errorf("fleet scan: every context was scanned but the fleet report was not written: %w", fleetReportErr)
 	}
 	return nil
+}
+
+// scanFleetContext scans one context, retrying while its API server never answers, up to KubeContextRetries more times.
+// Each attempt gets a fresh clone of the settings, since a scan updates its own settings as it runs.
+func scanFleetContext(kubeContext, outputPath string, baseScanInfo *cautils.ScanInfo, ks meta.IKubescape, policyIdentifiers []cautils.PolicyIdentifier, run fleetRunner) (results *resultshandling.ResultsHandler, elapsed time.Duration, attempts int, err error) {
+	started := time.Now()
+	// A run already stopped never starts the scan, so no attempt is counted.
+	if err := ks.Context().Err(); err != nil {
+		return nil, time.Since(started), 0, interruptedError{err: err}
+	}
+	for {
+		attempts++
+		results, _, err = runFleetContext(kubeContext, baseScanInfo.CloneForContext(kubeContext, outputPath), ks, policyIdentifiers, run)
+		if results != nil || err == nil || failureStatus(err) != fleet.ClusterUnreachable || attempts > baseScanInfo.KubeContextRetries {
+			return results, time.Since(started), attempts, err
+		}
+
+		delay := fleetRetryDelay(attempts)
+		logger.L().Warning("fleet scan: context unreachable, retrying",
+			helpers.String("context", kubeContext), helpers.Int("attempt", attempts),
+			helpers.String("wait", delay.String()), helpers.Error(err))
+		if !waitForRetry(ks.Context(), delay) {
+			return results, time.Since(started), attempts, err
+		}
+	}
+}
+
+// fleetRetryDelay is the wait before retrying an unreachable cluster.
+var fleetRetryDelay = retryDelay
+
+// retryDelay is the wait before the given retry: 2s, then doubling, up to 30s.
+func retryDelay(retry int) time.Duration {
+	const first, ceiling = 2 * time.Second, 30 * time.Second
+	delay := first
+	for i := 1; i < retry && delay < ceiling; i++ {
+		delay *= 2
+	}
+	return min(delay, ceiling)
+}
+
+// waitForRetry waits for delay and reports whether to try again, which is false as soon as the run is stopped.
+func waitForRetry(ctx context.Context, delay time.Duration) bool {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return ctx.Err() == nil
+	case <-ctx.Done():
+		return false
+	}
 }
 
 // runFleetContext scopes the Kubernetes context and timeout to one fleet
@@ -594,15 +661,7 @@ func newClusterResult(kubeContext string, results *resultshandling.ResultsHandle
 	}
 
 	if results == nil {
-		var interrupted interruptedError
-		switch {
-		case errors.As(err, &interrupted):
-			cluster.Status = fleet.ClusterCancelled
-		case clusterUnreachable(err):
-			cluster.Status = fleet.ClusterUnreachable
-		default:
-			cluster.Status = fleet.ClusterError
-		}
+		cluster.Status = failureStatus(err)
 		if err != nil {
 			cluster.Error = err.Error()
 		}
@@ -620,6 +679,19 @@ func newClusterResult(kubeContext string, results *resultshandling.ResultsHandle
 	cluster.ComplianceScore = &score
 	cluster.Coverage = &coverage
 	return cluster
+}
+
+// failureStatus classifies a context whose scan produced no results.
+func failureStatus(err error) fleet.ClusterScanStatus {
+	var interrupted interruptedError
+	switch {
+	case errors.As(err, &interrupted):
+		return fleet.ClusterCancelled
+	case clusterUnreachable(err):
+		return fleet.ClusterUnreachable
+	default:
+		return fleet.ClusterError
+	}
 }
 
 // clusterUnreachable reports whether err shows the API server never answered:

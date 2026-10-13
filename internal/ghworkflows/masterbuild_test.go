@@ -14,8 +14,8 @@
 // opened, which reads as "my PR is broken" rather than "the base is broken".
 //
 // These tests assert the push trigger still exists, still names the branch
-// scorecard.yml pins, still ignores exactly the paths the pull_request trigger
-// ignores, and still gives every merge a run of its own that nothing cancels or
+// scorecard.yml pins, still ignores exactly the paths the pull_request run
+// skips, and still gives every merge a run of its own that nothing cancels or
 // replaces - and that widening the trigger did not also start dispatching the
 // private E2E suite on every merge.
 //
@@ -29,8 +29,10 @@ import (
 	"testing"
 	"unicode"
 
+	"github.com/bmatcuk/doublestar/v4"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v3"
 )
 
 const (
@@ -41,6 +43,9 @@ const (
 	// polls it for up to an hour. It is a review gate on a proposed change, so
 	// it has no business running on a merge.
 	systemTestsJobName = "run-system-tests"
+
+	// changesJobName decides whether a pull request changes any code.
+	changesJobName = "changes"
 )
 
 // prScannerWorkflow is the subset of 00-pr-scanner.yaml these tests assert on.
@@ -49,6 +54,7 @@ const (
 type prScannerWorkflow struct {
 	On struct {
 		PullRequest struct {
+			Paths       []string `yaml:"paths"`
 			PathsIgnore []string `yaml:"paths-ignore"`
 		} `yaml:"pull_request"`
 		Push struct {
@@ -63,7 +69,11 @@ type prScannerWorkflow struct {
 		CancelInProgress string `yaml:"cancel-in-progress"`
 	} `yaml:"concurrency"`
 	Jobs map[string]struct {
-		If string `yaml:"if"`
+		If    string `yaml:"if"`
+		Steps []struct {
+			ID   string            `yaml:"id"`
+			With map[string]string `yaml:"with"`
+		} `yaml:"steps"`
 	} `yaml:"jobs"`
 }
 
@@ -105,15 +115,118 @@ func TestPRScannerRunsOnPushToDefaultBranch(t *testing.T) {
 // PRs were skipped.
 func TestPRScannerPushAndPullRequestIgnoreTheSamePaths(t *testing.T) {
 	workflow := loadPRScanner(t)
+	pullRequestIgnore := changesFilterIgnores(t, workflow)
 
-	require.NotEmptyf(t, workflow.On.PullRequest.PathsIgnore,
-		"%s declares no pull_request paths-ignore; this guard compares the two lists and needs both",
-		prScannerWorkflowName)
+	require.NotEmptyf(t, pullRequestIgnore,
+		"%s's %q job ignores no paths; this guard compares the two lists and needs both",
+		prScannerWorkflowName, changesJobName)
 
-	assert.ElementsMatchf(t, workflow.On.PullRequest.PathsIgnore, workflow.On.Push.PathsIgnore,
-		"%s's push and pull_request paths-ignore lists have drifted apart (pull_request: %v, push: %v); "+
+	assert.ElementsMatchf(t, pullRequestIgnore, workflow.On.Push.PathsIgnore,
+		"%s's push paths-ignore and %q filter have drifted apart (pull_request: %v, push: %v); "+
 			"both decide whether a change can affect the build, so they have to say the same thing",
-		prScannerWorkflowName, workflow.On.PullRequest.PathsIgnore, workflow.On.Push.PathsIgnore)
+		prScannerWorkflowName, changesJobName, pullRequestIgnore, workflow.On.Push.PathsIgnore)
+}
+
+// TestPRScannerAlwaysRunsOnPullRequest keeps the pull_request trigger free of
+// path filters. A workflow that never starts reports no checks, so a required
+// check would leave a docs-only PR waiting forever. Skipping per job reports
+// the check as passed instead.
+func TestPRScannerAlwaysRunsOnPullRequest(t *testing.T) {
+	workflow := loadPRScanner(t)
+
+	assert.Emptyf(t, workflow.On.PullRequest.PathsIgnore,
+		"%s filters pull_request by paths-ignore; skip in the %q job instead so required checks still report",
+		prScannerWorkflowName, changesJobName)
+	assert.Emptyf(t, workflow.On.PullRequest.Paths,
+		"%s filters pull_request by paths; skip in the %q job instead so required checks still report",
+		prScannerWorkflowName, changesJobName)
+}
+
+// TestPRScannerChangesFilterClassifiesPaths runs the changes job's filter on
+// sample PRs. The filter uses picomatch, not GitHub's matcher, so a pattern
+// such as "!**.md" reads the same but misses nested files; doublestar matches
+// these patterns the way picomatch does.
+func TestPRScannerChangesFilterClassifiesPaths(t *testing.T) {
+	patterns := changesFilter(t, loadPRScanner(t))
+
+	for _, tc := range []struct {
+		files []string
+		code  bool
+	}{
+		{files: []string{"README.md"}},
+		{files: []string{"docs/guide/readme.md"}},
+		{files: []string{".github/workflows/00-pr-scanner.yaml"}},
+		{files: []string{"scripts/deep/check.sh"}},
+		{files: []string{"docs/diagram.svg"}},
+		{files: []string{"docs/guide/diagram.svg"}, code: true},
+		{files: []string{"core/pkg/fleet/types.go"}, code: true},
+		{files: []string{"docs/guide/readme.md", "core/pkg/fleet/types.go"}, code: true},
+	} {
+		assert.Equalf(t, tc.code, filterMatchesAny(t, patterns, tc.files),
+			"%s's %q filter classifies %v wrongly", prScannerWorkflowName, changesJobName, tc.files)
+	}
+}
+
+// filterMatchesAny applies paths-filter's "every" quantifier: a file counts
+// when it matches every plain pattern and none of the negated ones.
+func filterMatchesAny(t *testing.T, patterns, files []string) bool {
+	t.Helper()
+
+	for _, file := range files {
+		matched := true
+		for _, pattern := range patterns {
+			negated, isNegated := strings.CutPrefix(pattern, "!")
+			ok, err := doublestar.Match(negated, file)
+			require.NoErrorf(t, err, "bad pattern %q", pattern)
+			if ok == isNegated {
+				matched = false
+				break
+			}
+		}
+		if matched {
+			return true
+		}
+	}
+	return false
+}
+
+// changesFilterIgnores returns the negated patterns of the changes job's
+// "code" filter, which match the push trigger's paths-ignore entries.
+func changesFilterIgnores(t *testing.T, workflow prScannerWorkflow) []string {
+	t.Helper()
+
+	var ignored []string
+	for _, pattern := range changesFilter(t, workflow) {
+		if path, ok := strings.CutPrefix(pattern, "!"); ok {
+			ignored = append(ignored, path)
+		}
+	}
+	return ignored
+}
+
+// changesFilter returns the patterns of the changes job's "code" filter.
+func changesFilter(t *testing.T, workflow prScannerWorkflow) []string {
+	t.Helper()
+
+	job, ok := workflow.Jobs[changesJobName]
+	require.Truef(t, ok, "%s has no %q job; this guard needs updating to follow it",
+		prScannerWorkflowName, changesJobName)
+
+	for _, step := range job.Steps {
+		if step.ID != "filter" {
+			continue
+		}
+
+		var filters map[string][]string
+		require.NoErrorf(t, yaml.Unmarshal([]byte(step.With["filters"]), &filters),
+			"%s's %q filters are not valid YAML", prScannerWorkflowName, changesJobName)
+
+		return filters["code"]
+	}
+
+	require.Failf(t, "filter step missing", "%s's %q job has no step with id \"filter\"",
+		prScannerWorkflowName, changesJobName)
+	return nil
 }
 
 // TestPRScannerGivesEveryMasterPushItsOwnRun guards the other half of the

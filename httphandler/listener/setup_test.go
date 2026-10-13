@@ -1,18 +1,22 @@
 package listener
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"errors"
 	"math/big"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -140,6 +144,68 @@ func TestSetupHTTPListener(t *testing.T) {
 		// SetupHTTPListener propagates the ListenAndServe(TLS) error instead
 		// of blocking, so a plain error check is enough.
 		require.Error(t, err)
+	})
+
+	t.Run("serves over TLS and dynamically picks up rotated certificate", func(t *testing.T) {
+		dir := t.TempDir()
+		certFile := filepath.Join(dir, "cert.pem")
+		keyFile := filepath.Join(dir, "key.pem")
+
+		certPEM1, keyPEM1 := generateTestCertAndKey(t, "cert-v1.local")
+		require.NoError(t, os.WriteFile(certFile, certPEM1, 0o600))
+		require.NoError(t, os.WriteFile(keyFile, keyPEM1, 0o600))
+
+		port := freePort(t)
+		t.Setenv("KS_CERT_FILE", certFile)
+		t.Setenv("KS_KEY_FILE", keyFile)
+		t.Setenv("KS_PORT", port)
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		serverErr := make(chan error, 1)
+		go func() {
+			serverErr <- SetupHTTPListener(ctx)
+		}()
+
+		getPeerCertCN := func() (string, error) {
+			conf := &tls.Config{
+				InsecureSkipVerify: true, // #nosec G402 -- test helper to inspect served certificate
+			}
+			conn, err := tls.DialWithDialer(&net.Dialer{Timeout: 200 * time.Millisecond}, "tcp", "127.0.0.1:"+port, conf)
+			if err != nil {
+				return "", err
+			}
+			defer conn.Close()
+			certs := conn.ConnectionState().PeerCertificates
+			if len(certs) == 0 {
+				return "", errors.New("no peer certificates")
+			}
+			return certs[0].Subject.CommonName, nil
+		}
+
+		// Wait until server is up and serving cert-v1
+		require.Eventually(t, func() bool {
+			cn, err := getPeerCertCN()
+			return err == nil && cn == "cert-v1.local"
+		}, 3*time.Second, 50*time.Millisecond)
+
+		// Rotate certificate files on disk with distinct modification times
+		certPEM2, keyPEM2 := generateTestCertAndKey(t, "cert-v2.local")
+		require.NoError(t, os.WriteFile(certFile, certPEM2, 0o600))
+		require.NoError(t, os.WriteFile(keyFile, keyPEM2, 0o600))
+		newMTime := time.Now().Add(2 * time.Second)
+		require.NoError(t, os.Chtimes(certFile, newMTime, newMTime))
+		require.NoError(t, os.Chtimes(keyFile, newMTime, newMTime))
+
+		// Subsequent connection should receive rotated certificate without server restart
+		require.Eventually(t, func() bool {
+			cn, err := getPeerCertCN()
+			return err == nil && cn == "cert-v2.local"
+		}, 3*time.Second, 50*time.Millisecond)
+
+		cancel()
+		require.NoError(t, <-serverErr)
 	})
 }
 
@@ -327,4 +393,305 @@ func freePort(t *testing.T) string {
 	_, p, err := net.SplitHostPort(ln.Addr().String())
 	require.NoError(t, err)
 	return p
+}
+
+func generateTestCertAndKey(t *testing.T, commonName string) ([]byte, []byte) {
+	t.Helper()
+
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+
+	template := &x509.Certificate{
+		SerialNumber: big.NewInt(time.Now().UnixNano()),
+		Subject: pkix.Name{
+			CommonName: commonName,
+		},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(time.Hour),
+		KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		BasicConstraintsValid: true,
+		DNSNames:              []string{commonName},
+	}
+
+	certDER, err := x509.CreateCertificate(rand.Reader, template, template, &privateKey.PublicKey, privateKey)
+	require.NoError(t, err)
+
+	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER})
+	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(privateKey)})
+
+	return certPEM, keyPEM
+}
+
+func TestNewTLSReloader(t *testing.T) {
+	t.Run("returns nil reloader and nil error when both are unset", func(t *testing.T) {
+		reloader, err := newTLSReloader("", "")
+		require.NoError(t, err)
+		require.Nil(t, reloader)
+	})
+
+	t.Run("returns error when cert is set without key", func(t *testing.T) {
+		reloader, err := newTLSReloader("cert.pem", "")
+		require.Nil(t, reloader)
+		require.EqualError(t, err, `both KS_CERT_FILE and KS_KEY_FILE must be set to enable TLS (got certFile="cert.pem", keyFile="")`)
+	})
+
+	t.Run("returns error when key is set without cert", func(t *testing.T) {
+		reloader, err := newTLSReloader("", "key.pem")
+		require.Nil(t, reloader)
+		require.EqualError(t, err, `both KS_CERT_FILE and KS_KEY_FILE must be set to enable TLS (got certFile="", keyFile="key.pem")`)
+	})
+
+	t.Run("returns error when files do not exist", func(t *testing.T) {
+		dir := t.TempDir()
+		reloader, err := newTLSReloader(filepath.Join(dir, "missing.crt"), filepath.Join(dir, "missing.key"))
+		require.Error(t, err)
+		require.Nil(t, reloader)
+		require.Contains(t, err.Error(), "failed to stat cert file")
+	})
+
+	t.Run("initializes reloader successfully with valid files", func(t *testing.T) {
+		certFile, keyFile := writeTestTLSFiles(t)
+		reloader, err := newTLSReloader(certFile, keyFile)
+		require.NoError(t, err)
+		require.NotNil(t, reloader)
+
+		cert, err := reloader.GetCertificate(&tls.ClientHelloInfo{})
+		require.NoError(t, err)
+		require.NotNil(t, cert)
+		assert.NotEmpty(t, cert.Certificate)
+	})
+}
+
+func TestTLSReloader_DynamicReload(t *testing.T) {
+	dir := t.TempDir()
+	certFile := filepath.Join(dir, "tls.crt")
+	keyFile := filepath.Join(dir, "tls.key")
+
+	certPEM1, keyPEM1 := generateTestCertAndKey(t, "initial.example.com")
+	require.NoError(t, os.WriteFile(certFile, certPEM1, 0o600))
+	require.NoError(t, os.WriteFile(keyFile, keyPEM1, 0o600))
+
+	reloader, err := newTLSReloader(certFile, keyFile)
+	require.NoError(t, err)
+	require.NotNil(t, reloader)
+
+	// Verify initial certificate
+	cert1, err := reloader.GetCertificate(&tls.ClientHelloInfo{})
+	require.NoError(t, err)
+	parsed1, err := x509.ParseCertificate(cert1.Certificate[0])
+	require.NoError(t, err)
+	require.Equal(t, "initial.example.com", parsed1.Subject.CommonName)
+
+	// Sleep briefly to ensure filesystem mtime difference
+	time.Sleep(10 * time.Millisecond)
+
+	// Update files with new certificate
+	certPEM2, keyPEM2 := generateTestCertAndKey(t, "rotated.example.com")
+	require.NoError(t, os.WriteFile(certFile, certPEM2, 0o600))
+	require.NoError(t, os.WriteFile(keyFile, keyPEM2, 0o600))
+
+	// GetCertificate should detect change and reload
+	cert2, err := reloader.GetCertificate(&tls.ClientHelloInfo{})
+	require.NoError(t, err)
+	parsed2, err := x509.ParseCertificate(cert2.Certificate[0])
+	require.NoError(t, err)
+	require.Equal(t, "rotated.example.com", parsed2.Subject.CommonName)
+}
+
+func TestTLSReloader_FallbackOnInvalidRotatedFile(t *testing.T) {
+	dir := t.TempDir()
+	certFile := filepath.Join(dir, "tls.crt")
+	keyFile := filepath.Join(dir, "tls.key")
+
+	certPEM, keyPEM := generateTestCertAndKey(t, "stable.example.com")
+	require.NoError(t, os.WriteFile(certFile, certPEM, 0o600))
+	require.NoError(t, os.WriteFile(keyFile, keyPEM, 0o600))
+
+	reloader, err := newTLSReloader(certFile, keyFile)
+	require.NoError(t, err)
+
+	cert1, err := reloader.GetCertificate(&tls.ClientHelloInfo{})
+	require.NoError(t, err)
+	parsed1, err := x509.ParseCertificate(cert1.Certificate[0])
+	require.NoError(t, err)
+	require.Equal(t, "stable.example.com", parsed1.Subject.CommonName)
+
+	time.Sleep(10 * time.Millisecond)
+
+	// Corrupt the cert file to simulate an in-progress or broken write
+	require.NoError(t, os.WriteFile(certFile, []byte("invalid-cert-bytes"), 0o600))
+
+	// Should not fail the handshake; should fallback to last valid certificate
+	cert2, err := reloader.GetCertificate(&tls.ClientHelloInfo{})
+	require.NoError(t, err)
+	parsed2, err := x509.ParseCertificate(cert2.Certificate[0])
+	require.NoError(t, err)
+	require.Equal(t, "stable.example.com", parsed2.Subject.CommonName)
+}
+
+func TestTLSReloader_SymlinkRotation(t *testing.T) {
+	// Simulates Kubernetes Secret volume mount symlink swaps:
+	// tls.crt -> ..data/tls.crt
+	// ..data -> ..dir1 (initially)
+	// ..data -> ..dir2 (after rotation)
+	rootDir := t.TempDir()
+	dir1 := filepath.Join(rootDir, "dir1")
+	dir2 := filepath.Join(rootDir, "dir2")
+	require.NoError(t, os.Mkdir(dir1, 0o700))
+	require.NoError(t, os.Mkdir(dir2, 0o700))
+
+	certPEM1, keyPEM1 := generateTestCertAndKey(t, "k8s-cert-1.example.com")
+	require.NoError(t, os.WriteFile(filepath.Join(dir1, "tls.crt"), certPEM1, 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir1, "tls.key"), keyPEM1, 0o600))
+
+	certPEM2, keyPEM2 := generateTestCertAndKey(t, "k8s-cert-2.example.com")
+	require.NoError(t, os.WriteFile(filepath.Join(dir2, "tls.crt"), certPEM2, 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir2, "tls.key"), keyPEM2, 0o600))
+
+	dataSymlink := filepath.Join(rootDir, "..data")
+	require.NoError(t, os.Symlink(dir1, dataSymlink))
+
+	certSymlink := filepath.Join(rootDir, "tls.crt")
+	keySymlink := filepath.Join(rootDir, "tls.key")
+	require.NoError(t, os.Symlink(filepath.Join(dataSymlink, "tls.crt"), certSymlink))
+	require.NoError(t, os.Symlink(filepath.Join(dataSymlink, "tls.key"), keySymlink))
+
+	reloader, err := newTLSReloader(certSymlink, keySymlink)
+	require.NoError(t, err)
+
+	cert1, err := reloader.GetCertificate(&tls.ClientHelloInfo{})
+	require.NoError(t, err)
+	parsed1, err := x509.ParseCertificate(cert1.Certificate[0])
+	require.NoError(t, err)
+	require.Equal(t, "k8s-cert-1.example.com", parsed1.Subject.CommonName)
+
+	time.Sleep(10 * time.Millisecond)
+
+	// Atomically swap ..data symlink
+	tmpDataSymlink := filepath.Join(rootDir, "..data_tmp")
+	require.NoError(t, os.Symlink(dir2, tmpDataSymlink))
+	require.NoError(t, os.Rename(tmpDataSymlink, dataSymlink))
+
+	// Reloader should follow symlink to dir2 and reload
+	cert2, err := reloader.GetCertificate(&tls.ClientHelloInfo{})
+	require.NoError(t, err)
+	parsed2, err := x509.ParseCertificate(cert2.Certificate[0])
+	require.NoError(t, err)
+	require.Equal(t, "k8s-cert-2.example.com", parsed2.Subject.CommonName)
+}
+
+func TestTLSReloader_EqualMetadataSymlinkRotation(t *testing.T) {
+	// Simulates Kubernetes Secret volume mount symlink swaps where the new certificate
+	// and key files happen to have the exact same file sizes and modification times
+	// as the original files. os.SameFile must detect that the underlying file identities
+	// changed via the symlink swap.
+	rootDir := t.TempDir()
+	dir1 := filepath.Join(rootDir, "dir1")
+	dir2 := filepath.Join(rootDir, "dir2")
+	require.NoError(t, os.Mkdir(dir1, 0o700))
+	require.NoError(t, os.Mkdir(dir2, 0o700))
+
+	certPEM1, keyPEM1 := generateTestCertAndKey(t, "equal-1.example.com")
+	certPEM2, keyPEM2 := generateTestCertAndKey(t, "equal-2.example.com")
+
+	// Equalize payload sizes by padding with trailing newlines (valid in PEM)
+	padToEqual := func(a, b []byte) ([]byte, []byte) {
+		maxLen := len(a)
+		if len(b) > maxLen {
+			maxLen = len(b)
+		}
+		if len(a) < maxLen {
+			a = append(a, bytes.Repeat([]byte("\n"), maxLen-len(a))...)
+		}
+		if len(b) < maxLen {
+			b = append(b, bytes.Repeat([]byte("\n"), maxLen-len(b))...)
+		}
+		return a, b
+	}
+	certPEM1, certPEM2 = padToEqual(certPEM1, certPEM2)
+	keyPEM1, keyPEM2 = padToEqual(keyPEM1, keyPEM2)
+
+	cert1Path := filepath.Join(dir1, "tls.crt")
+	key1Path := filepath.Join(dir1, "tls.key")
+	cert2Path := filepath.Join(dir2, "tls.crt")
+	key2Path := filepath.Join(dir2, "tls.key")
+
+	require.NoError(t, os.WriteFile(cert1Path, certPEM1, 0o600))
+	require.NoError(t, os.WriteFile(key1Path, keyPEM1, 0o600))
+	require.NoError(t, os.WriteFile(cert2Path, certPEM2, 0o600))
+	require.NoError(t, os.WriteFile(key2Path, keyPEM2, 0o600))
+
+	// Explicitly set identical modification timestamps on both file pairs
+	fixedTime := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	require.NoError(t, os.Chtimes(cert1Path, fixedTime, fixedTime))
+	require.NoError(t, os.Chtimes(key1Path, fixedTime, fixedTime))
+	require.NoError(t, os.Chtimes(cert2Path, fixedTime, fixedTime))
+	require.NoError(t, os.Chtimes(key2Path, fixedTime, fixedTime))
+
+	// Assert metadata is strictly equal and identities differ
+	s1Cert, err := os.Stat(cert1Path)
+	require.NoError(t, err)
+	s2Cert, err := os.Stat(cert2Path)
+	require.NoError(t, err)
+	require.Equal(t, s1Cert.Size(), s2Cert.Size())
+	require.True(t, s1Cert.ModTime().Equal(s2Cert.ModTime()))
+	require.False(t, os.SameFile(s1Cert, s2Cert))
+
+	s1Key, err := os.Stat(key1Path)
+	require.NoError(t, err)
+	s2Key, err := os.Stat(key2Path)
+	require.NoError(t, err)
+	require.Equal(t, s1Key.Size(), s2Key.Size())
+	require.True(t, s1Key.ModTime().Equal(s2Key.ModTime()))
+	require.False(t, os.SameFile(s1Key, s2Key))
+
+	dataSymlink := filepath.Join(rootDir, "..data")
+	require.NoError(t, os.Symlink(dir1, dataSymlink))
+
+	certSymlink := filepath.Join(rootDir, "tls.crt")
+	keySymlink := filepath.Join(rootDir, "tls.key")
+	require.NoError(t, os.Symlink(filepath.Join(dataSymlink, "tls.crt"), certSymlink))
+	require.NoError(t, os.Symlink(filepath.Join(dataSymlink, "tls.key"), keySymlink))
+
+	reloader, err := newTLSReloader(certSymlink, keySymlink)
+	require.NoError(t, err)
+
+	cert1, err := reloader.GetCertificate(&tls.ClientHelloInfo{})
+	require.NoError(t, err)
+	parsed1, err := x509.ParseCertificate(cert1.Certificate[0])
+	require.NoError(t, err)
+	require.Equal(t, "equal-1.example.com", parsed1.Subject.CommonName)
+
+	// Atomically swap ..data symlink to dir2
+	tmpDataSymlink := filepath.Join(rootDir, "..data_tmp")
+	require.NoError(t, os.Symlink(dir2, tmpDataSymlink))
+	require.NoError(t, os.Rename(tmpDataSymlink, dataSymlink))
+
+	// Reloader must detect rotation via os.SameFile despite matching sizes and mtimes
+	cert2, err := reloader.GetCertificate(&tls.ClientHelloInfo{})
+	require.NoError(t, err)
+	parsed2, err := x509.ParseCertificate(cert2.Certificate[0])
+	require.NoError(t, err)
+	require.Equal(t, "equal-2.example.com", parsed2.Subject.CommonName)
+}
+
+func TestTLSReloader_ConcurrentGetCertificate(t *testing.T) {
+	certFile, keyFile := writeTestTLSFiles(t)
+	reloader, err := newTLSReloader(certFile, keyFile)
+	require.NoError(t, err)
+
+	var wg sync.WaitGroup
+	for i := 0; i < 20; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 50; j++ {
+				cert, err := reloader.GetCertificate(&tls.ClientHelloInfo{})
+				require.NoError(t, err)
+				require.NotNil(t, cert)
+			}
+		}()
+	}
+	wg.Wait()
 }

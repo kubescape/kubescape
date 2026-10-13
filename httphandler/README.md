@@ -185,6 +185,7 @@ Delete cached scan results.
 {
   "format": "json",
   "excludedNamespaces": ["kube-system", "kube-public"],
+  "excludeControls": ["C-0069", "C-0070"],
   "includeNamespaces": ["production", "staging"],
   "useCachedArtifacts": false,
   "keepLocal": true,
@@ -197,11 +198,20 @@ Delete cached scan results.
 |-------|------|-------------|
 | `format` | string | Output format (default: `json`) |
 | `excludedNamespaces` | []string | Namespaces to exclude from scan |
+| `excludeControls` | []string | Control IDs or legacy CIS section numbers omitted before evaluation and scoring |
 | `includeNamespaces` | []string | Namespaces to include in scan |
 | `useCachedArtifacts` | bool | Use cached artifacts (offline mode) |
 | `keepLocal` | bool | Don't submit results to backend |
 | `targetType` | string | `"framework"` or `"control"` |
 | `targetNames` | []string | Frameworks/controls to scan |
+
+`excludeControls` uses the existing CLI `--exclude-controls` filter. An absent,
+null, or empty list preserves the selected assessment scope. Wrong types and
+blank identifiers are rejected. Unknown IDs produce the existing warning;
+excluding every selected control fails the scan. Excluded controls are not
+marked as passing. These requests narrow the assessment rather than improve
+cluster security. The scanner uses only the supplied list; installation-wide
+settings are added by a compatible operator before forwarding.
 
 > **`account` / `accessKey` are ignored.** These endpoints are unauthenticated,
 > so the server never takes its Kubescape SaaS identity from the request body —

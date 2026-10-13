@@ -142,6 +142,12 @@ func (c *roleCoverage) add(rule rbacv1.PolicyRule) {
 		return
 	}
 	for _, n := range names {
+		// escalate, update and patch always name the Role they act on, so an
+		// empty entry matches none of those requests. No object can have an
+		// empty name either, so it is never a Role the snapshot missed.
+		if n == "" {
+			continue
+		}
 		c.names[n] = true
 	}
 }

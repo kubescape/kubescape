@@ -288,12 +288,20 @@ func (idx *Index) attachedRouteHostnames(route *gatewayRoute) []string {
 	return hosts
 }
 
-// listenerAdmitsRouteKind reports whether the listener's allowedRoutes
-// kinds list admits a route of the given kind. The kinds policy is always
-// determinable -- unlike the namespace policy it never depends on labels
-// this Index was not given. A listener with no allowedRoutes (or an empty
-// kinds list) admits every kind, per the Gateway API default.
+// listenerAdmitsRouteKind checks protocol compatibility and allowedRoutes.kinds.
+// Unlike namespace admission, these checks never depend on uncollected labels.
+// An omitted kinds list adds no restriction beyond protocol compatibility.
 func (idx *Index) listenerAdmitsRouteKind(l listener, routeKind string) bool {
+	// allowedRoutes.kinds cannot make an HTTP-family route compatible with
+	// a transport listener. TLS passthrough requires TLSRoute, not HTTPRoute.
+	// Missing/custom protocols remain conservative for incomplete inventory
+	// and implementation-specific protocols this static model cannot resolve.
+	if routeKind == "HTTPRoute" || routeKind == "GRPCRoute" {
+		switch l.Protocol {
+		case "TCP", "UDP", "TLS":
+			return false
+		}
+	}
 	if l.AllowedRoutes == nil {
 		return true
 	}

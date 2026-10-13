@@ -135,20 +135,6 @@ func (a *GitlabAdaptor) DescribeAdaptor() string {
 	return "GitLab Container Registry Vulnerability Adaptor"
 }
 
-// splitGitLabProjectPath splits a repository string into the project's GraphQL
-// fullPath and the trailing container image name.
-func splitGitLabProjectPath(repo string) (string, string, error) {
-	repo = strings.TrimPrefix(repo, "/")
-	if strings.Count(repo, "/") < 2 {
-		return "", "", fmt.Errorf("invalid gitlab repository format: expected at least group/project/image, got %s", repo)
-	}
-	idx := strings.LastIndex(repo, "/")
-	if idx <= 0 || idx == len(repo)-1 {
-		return "", "", fmt.Errorf("invalid gitlab repository format: expected at least group/project/image, got %s", repo)
-	}
-	return repo[:idx], repo[idx+1:], nil
-}
-
 // normalizeGitLabSeverity maps GitLab severity to Kubescape severity strings
 func normalizeGitLabSeverity(severity string) string {
 	switch strings.ToUpper(severity) {
@@ -210,6 +196,7 @@ func (a *GitlabAdaptor) GetImagesScanStatus(ctx context.Context, imageIDs []Cont
 	var statuses []ContainerImageScanStatus
 	var aggErr error
 	cache := make(map[string]scanCacheEntry)
+	projectCache := make(map[string]gitLabProjectResolution)
 
 	for _, imageID := range imageIDs {
 		status := ContainerImageScanStatus{
@@ -218,9 +205,9 @@ func (a *GitlabAdaptor) GetImagesScanStatus(ctx context.Context, imageIDs []Cont
 			IsBomAvailable:  false,
 		}
 
-		fullPath, _, err := splitGitLabProjectPath(imageID.Repository)
+		fullPath, err := a.resolveRegistryProject(ctx, imageID.Repository, projectCache)
 		if err != nil {
-			fetchErr := fmt.Errorf("failed to parse gitlab path: %w", err)
+			fetchErr := fmt.Errorf("failed to resolve gitlab project: %w", err)
 			logger.L().Warning("image scan status error, result may be incomplete", helpers.Error(fetchErr))
 			aggErr = errors.Join(aggErr, fetchErr)
 			statuses = append(statuses, status)
@@ -325,21 +312,7 @@ func nextGitLabVulnerabilityCursor(hasNextPage bool, endCursor string, seen map[
 
 // imageMatches provides a boundary-safe match for the image location.
 func imageMatches(locationImage string, imageID ContainerImageIdentifier) bool {
-	if imageID.Hash != "" {
-		expectedSuffix := imageID.Repository + "@" + imageID.Hash
-		if locationImage == expectedSuffix || strings.HasSuffix(locationImage, "/"+expectedSuffix) {
-			return true
-		}
-	}
-
-	if imageID.Tag != "" {
-		expectedSuffix := imageID.Repository + ":" + imageID.Tag
-		if locationImage == expectedSuffix || strings.HasSuffix(locationImage, "/"+expectedSuffix) {
-			return true
-		}
-	}
-
-	return false
+	return gitLabLocationMatches(locationImage, imageID)
 }
 
 // GetImagesVulnerabilities retrieves the vulnerability reports for a list of image identifiers.
@@ -351,6 +324,7 @@ func (a *GitlabAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs [
 	var reports []ContainerImageVulnerabilityReport
 	var aggErr error
 	cache := make(map[string]vulnCacheEntry)
+	projectCache := make(map[string]gitLabProjectResolution)
 
 	for _, imageID := range imageIDs {
 		report := ContainerImageVulnerabilityReport{
@@ -358,9 +332,9 @@ func (a *GitlabAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs [
 			Vulnerabilities: []Vulnerability{},
 		}
 
-		fullPath, _, err := splitGitLabProjectPath(imageID.Repository)
+		fullPath, err := a.resolveRegistryProject(ctx, imageID.Repository, projectCache)
 		if err != nil {
-			fetchErr := fmt.Errorf("failed to parse gitlab path: %w", err)
+			fetchErr := fmt.Errorf("failed to resolve gitlab project: %w", err)
 			logger.L().Warning("image scan error, result may be incomplete", helpers.Error(fetchErr))
 			aggErr = errors.Join(aggErr, fetchErr)
 			reports = append(reports, report)

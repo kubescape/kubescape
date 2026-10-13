@@ -193,6 +193,7 @@ type gateway struct {
 }
 
 type listener struct {
+	Protocol      string
 	Port          int32
 	Name          string
 	Hostname      string

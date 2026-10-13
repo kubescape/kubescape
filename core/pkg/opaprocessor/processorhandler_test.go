@@ -23,6 +23,7 @@ import (
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
+	helpersv1 "github.com/kubescape/opa-utils/reporthandling/helpers/v1"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/kubescape/opa-utils/resources"
@@ -340,9 +341,27 @@ func TestProcessResourcesResult(t *testing.T) {
 
 	res = opaSessionObj.ResourcesResult[deployment.GetID()]
 	assert.Equal(t, 2, res.ListControlsIDs(nil).Len())
-	assert.Equal(t, 2, res.ListControlsIDs(nil).Passed())
-	assert.True(t, res.GetStatus(nil).IsPassed())
-	assert.False(t, res.GetStatus(nil).IsFailed())
+	// A framework-scoped exception suppresses the finding only in that framework.
+	// Global and unrelated-framework views must preserve the failing assessment.
+	for _, tc := range []struct {
+		name           string
+		filter         *helpersv1.Filters
+		passed, failed int
+	}{
+		{"global", nil, 1, 1},
+		{"matching framework", &helpersv1.Filters{FrameworkNames: []string{frameworks[0].Name}}, 2, 0},
+		{"unrelated framework", &helpersv1.Filters{FrameworkNames: []string{"unrelated-framework"}}, 1, 1},
+		{"matching and unrelated frameworks", &helpersv1.Filters{FrameworkNames: []string{frameworks[0].Name, "unrelated-framework"}}, 1, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, 2, res.ListControlsIDs(tc.filter).Len())
+			assert.Equal(t, tc.passed, res.ListControlsIDs(tc.filter).Passed())
+			assert.Equal(t, tc.failed, res.ListControlsIDs(tc.filter).Failed())
+			assert.Equal(t, 0, res.ListControlsIDs(tc.filter).Skipped())
+			assert.Equal(t, tc.failed > 0, res.GetStatus(tc.filter).IsFailed())
+			assert.Equal(t, tc.failed == 0, res.GetStatus(tc.filter).IsPassed())
+		})
+	}
 	assert.Equal(t, deployment.GetID(), opaSessionObj.ResourcesResult[deployment.GetID()].ResourceID)
 
 	// test resource listing

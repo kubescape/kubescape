@@ -675,6 +675,7 @@ func (ksServer *KubescapeMcpserver) ReadContainerProfileResource(ctx context.Con
 	}}, nil
 }
 
+// CallTool executes the named MCP tool with the supplied arguments.
 func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, arguments map[string]any) (*mcp.CallToolResult, error) {
 	switch name {
 	case "run_rbac_security_scan":
@@ -771,18 +772,18 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		responseBytes := v.([]byte)
 		return mcp.NewToolResultText(string(responseBytes)), nil
 	case "list_vulnerability_manifests":
-		namespace := metav1.NamespaceAll
-		if ns, ok := arguments["namespace"]; ok {
-			nsStr, ok := ns.(string)
-			if !ok {
-				return nil, fmt.Errorf("namespace must be a string")
-			}
-			if nsStr != "" {
-				namespace = nsStr
-			}
+		namespace, toolErr := mcpStringArg(arguments, "namespace")
+		if toolErr != nil {
+			return toolErr, nil
 		}
-		level, ok := arguments["level"]
-		if !ok {
+		if namespace == "" {
+			namespace = metav1.NamespaceAll
+		}
+		level, toolErr := mcpStringArg(arguments, "level")
+		if toolErr != nil {
+			return toolErr, nil
+		}
+		if level == "" {
 			level = "both"
 		}
 
@@ -799,16 +800,14 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 			labelSelector = "kubescape.io/context=non-filtered"
 		}
 
-		continueToken := ""
-		if c, ok := arguments["continue"]; ok {
-			if cStr, ok := c.(string); ok {
-				continueToken = cStr
-			}
+		continueToken, toolErr := mcpStringArg(arguments, "continue")
+		if toolErr != nil {
+			return toolErr, nil
 		}
 
 		client, ksErr := ksServer.getKsClient()
 		if ksErr != nil {
-			return nil, fmt.Errorf("failed to connect to Kubernetes cluster: %w", ksErr)
+			return mcpToolError(ErrCodeK8sClientError, fmt.Sprintf("failed to connect to Kubernetes cluster: %v", ksErr), nil), nil
 		}
 
 		listOpts := metav1.ListOptions{Limit: 100, Continue: continueToken}
@@ -868,25 +867,20 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 			},
 		}, nil
 	case "list_vulnerabilities_in_manifest":
-		namespace, ok := arguments["namespace"]
-		if !ok {
-			namespace = "kubescape"
+		namespaceStr, toolErr := mcpStringArg(arguments, "namespace")
+		if toolErr != nil {
+			return toolErr, nil
 		}
-		namespaceStr, ok := namespace.(string)
-		if !ok {
-			return nil, fmt.Errorf("namespace must be a string")
+		if namespaceStr == "" {
+			namespaceStr = "kubescape"
 		}
-		manifestName, ok := arguments["manifest_name"]
-		if !ok {
-			return nil, fmt.Errorf("manifest_name is required")
-		}
-		manifestNameStr, ok := manifestName.(string)
-		if !ok {
-			return nil, fmt.Errorf("manifest_name must be a string")
+		manifestNameStr, toolErr := mcpRequiredStringArg(arguments, "manifest_name")
+		if toolErr != nil {
+			return toolErr, nil
 		}
 		client, ksErr := ksServer.getKsClient()
 		if ksErr != nil {
-			return nil, fmt.Errorf("failed to connect to Kubernetes cluster: %w", ksErr)
+			return mcpToolError(ErrCodeK8sClientError, fmt.Sprintf("failed to connect to Kubernetes cluster: %v", ksErr), nil), nil
 		}
 		manifest, err := client.VulnerabilityManifests(namespaceStr).Get(ctx, manifestNameStr, metav1.GetOptions{})
 		if err != nil {
@@ -909,33 +903,24 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 			},
 		}, nil
 	case "list_vulnerability_matches_for_cve":
-		namespace, ok := arguments["namespace"]
-		if !ok {
-			namespace = "kubescape"
+		namespaceStr, toolErr := mcpStringArg(arguments, "namespace")
+		if toolErr != nil {
+			return toolErr, nil
 		}
-		namespaceStr, ok := namespace.(string)
-		if !ok {
-			return nil, fmt.Errorf("namespace must be a string")
+		if namespaceStr == "" {
+			namespaceStr = "kubescape"
 		}
-		manifestName, ok := arguments["manifest_name"]
-		if !ok {
-			return nil, fmt.Errorf("manifest_name is required")
+		manifestNameStr, toolErr := mcpRequiredStringArg(arguments, "manifest_name")
+		if toolErr != nil {
+			return toolErr, nil
 		}
-		manifestNameStr, ok := manifestName.(string)
-		if !ok {
-			return nil, fmt.Errorf("manifest_name must be a string")
-		}
-		cveID, ok := arguments["cve_id"]
-		if !ok {
-			return nil, fmt.Errorf("cve_id is required")
-		}
-		cveIDStr, ok := cveID.(string)
-		if !ok {
-			return nil, fmt.Errorf("cve_id must be a string")
+		cveIDStr, toolErr := mcpRequiredStringArg(arguments, "cve_id")
+		if toolErr != nil {
+			return toolErr, nil
 		}
 		client, ksErr := ksServer.getKsClient()
 		if ksErr != nil {
-			return nil, fmt.Errorf("failed to connect to Kubernetes cluster: %w", ksErr)
+			return mcpToolError(ErrCodeK8sClientError, fmt.Sprintf("failed to connect to Kubernetes cluster: %v", ksErr), nil), nil
 		}
 		manifest, err := client.VulnerabilityManifests(namespaceStr).Get(ctx, manifestNameStr, metav1.GetOptions{})
 		if err != nil {
@@ -960,23 +945,21 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 			},
 		}, nil
 	case "list_configuration_security_scan_manifests":
-		namespace, ok := arguments["namespace"]
-		if !ok {
-			namespace = "kubescape"
+		namespaceStr := "kubescape"
+		if raw, ok := arguments["namespace"]; ok && raw != nil {
+			ns, toolErr := mcpStringArg(arguments, "namespace")
+			if toolErr != nil {
+				return toolErr, nil
+			}
+			namespaceStr = ns
 		}
-		namespaceStr, ok := namespace.(string)
-		if !ok {
-			return nil, fmt.Errorf("namespace must be a string")
+		continueToken, toolErr := mcpStringArg(arguments, "continue")
+		if toolErr != nil {
+			return toolErr, nil
 		}
 		client, ksErr := ksServer.getKsClient()
 		if ksErr != nil {
-			return nil, fmt.Errorf("failed to connect to Kubernetes cluster: %w", ksErr)
-		}
-		continueToken := ""
-		if c, ok := arguments["continue"]; ok {
-			if cStr, ok := c.(string); ok {
-				continueToken = cStr
-			}
+			return mcpToolError(ErrCodeK8sClientError, fmt.Sprintf("failed to connect to Kubernetes cluster: %v", ksErr), nil), nil
 		}
 
 		chunk, err := client.WorkloadConfigurationScans(namespaceStr).List(ctx, metav1.ListOptions{Limit: 100, Continue: continueToken})
@@ -1020,25 +1003,20 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 			},
 		}, nil
 	case "get_configuration_security_scan_manifest":
-		namespace, ok := arguments["namespace"]
-		if !ok {
-			namespace = "kubescape"
+		namespaceStr, toolErr := mcpStringArg(arguments, "namespace")
+		if toolErr != nil {
+			return toolErr, nil
 		}
-		namespaceStr, ok := namespace.(string)
-		if !ok {
-			return nil, fmt.Errorf("namespace must be a string")
+		if namespaceStr == "" {
+			namespaceStr = "kubescape"
 		}
-		manifestName, ok := arguments["manifest_name"]
-		if !ok {
-			return nil, fmt.Errorf("manifest_name is required")
-		}
-		manifestNameStr, ok := manifestName.(string)
-		if !ok {
-			return nil, fmt.Errorf("manifest_name must be a string")
+		manifestNameStr, toolErr := mcpRequiredStringArg(arguments, "manifest_name")
+		if toolErr != nil {
+			return toolErr, nil
 		}
 		client, ksErr := ksServer.getKsClient()
 		if ksErr != nil {
-			return nil, fmt.Errorf("failed to connect to Kubernetes cluster: %w", ksErr)
+			return mcpToolError(ErrCodeK8sClientError, fmt.Sprintf("failed to connect to Kubernetes cluster: %v", ksErr), nil), nil
 		}
 		manifest, err := client.WorkloadConfigurationScans(namespaceStr).Get(ctx, manifestNameStr, metav1.GetOptions{})
 		if err != nil {
@@ -1057,25 +1035,20 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 			},
 		}, nil
 	case "list_container_profiles":
-		namespace := metav1.NamespaceAll
-		if ns, ok := arguments["namespace"]; ok {
-			nsStr, ok := ns.(string)
-			if !ok {
-				return nil, fmt.Errorf("namespace must be a string")
-			}
-			if nsStr != "" {
-				namespace = nsStr
-			}
+		namespace, toolErr := mcpStringArg(arguments, "namespace")
+		if toolErr != nil {
+			return toolErr, nil
+		}
+		if namespace == "" {
+			namespace = metav1.NamespaceAll
+		}
+		continueToken, toolErr := mcpStringArg(arguments, "continue")
+		if toolErr != nil {
+			return toolErr, nil
 		}
 		client, ksErr := ksServer.getKsClient()
 		if ksErr != nil {
-			return nil, fmt.Errorf("failed to connect to Kubernetes cluster: %w", ksErr)
-		}
-		continueToken := ""
-		if c, ok := arguments["continue"]; ok {
-			if cStr, ok := c.(string); ok {
-				continueToken = cStr
-			}
+			return mcpToolError(ErrCodeK8sClientError, fmt.Sprintf("failed to connect to Kubernetes cluster: %v", ksErr), nil), nil
 		}
 
 		chunk, err := client.ContainerProfiles(namespace).List(ctx, metav1.ListOptions{Limit: 100, Continue: continueToken})
@@ -1119,25 +1092,20 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 			},
 		}, nil
 	case "get_container_profile":
-		namespace, ok := arguments["namespace"]
-		if !ok {
-			namespace = "kubescape"
+		namespaceStr, toolErr := mcpStringArg(arguments, "namespace")
+		if toolErr != nil {
+			return toolErr, nil
 		}
-		namespaceStr, ok := namespace.(string)
-		if !ok {
-			return nil, fmt.Errorf("namespace must be a string")
+		if namespaceStr == "" {
+			namespaceStr = "kubescape"
 		}
-		profileName, ok := arguments["profile_name"]
-		if !ok {
-			return nil, fmt.Errorf("profile_name is required")
-		}
-		profileNameStr, ok := profileName.(string)
-		if !ok {
-			return nil, fmt.Errorf("profile_name must be a string")
+		profileNameStr, toolErr := mcpRequiredStringArg(arguments, "profile_name")
+		if toolErr != nil {
+			return toolErr, nil
 		}
 		client, ksErr := ksServer.getKsClient()
 		if ksErr != nil {
-			return nil, fmt.Errorf("failed to connect to Kubernetes cluster: %w", ksErr)
+			return mcpToolError(ErrCodeK8sClientError, fmt.Sprintf("failed to connect to Kubernetes cluster: %v", ksErr), nil), nil
 		}
 		profile, err := client.ContainerProfiles(namespaceStr).Get(ctx, profileNameStr, metav1.GetOptions{})
 		if err != nil {
@@ -1345,6 +1313,12 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 			return mcpToolError(ErrCodeScanFailed, fmt.Sprintf("failed to list controls: %v", err), nil), nil
 		}
 		return mcp.NewToolResultText(string(result)), nil
+	case "list_admission_policies":
+		result, err := ksServer.ListAdmissionPolicies(ctx)
+		if err != nil {
+			return mcpToolError(ErrCodeScanFailed, fmt.Sprintf("failed to list admission policies: %v", err), nil), nil
+		}
+		return mcp.NewToolResultText(string(result)), nil
 	default:
 		return nil, fmt.Errorf("unknown tool: %s", name)
 	}
@@ -1353,12 +1327,17 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 func mcpServerEntrypoint(transport string, port int) error {
 	logger.L().Info("Starting MCP server...")
 
-	// Create a new MCP server
+	// Create a new MCP server. WithRecovery must stay first so it wraps the
+	// tool-call recorder (which only observes a panic, never recovers it).
+	serverOptions := []server.ServerOption{
+		server.WithToolCapabilities(false),
+		server.WithRecovery(),
+	}
+	serverOptions = append(serverOptions, toolCallObserverOptions(logger.L().GetLevel(), transport)...)
 	s := server.NewMCPServer(
 		"Kubescape MCP Server",
 		"0.0.1",
-		server.WithToolCapabilities(false),
-		server.WithRecovery(),
+		serverOptions...,
 	)
 
 	drp := getter.NewDownloadReleasedPolicy()
@@ -1516,8 +1495,14 @@ func createPolicyListingTools(ksServer *KubescapeMcpserver) {
 		"list_controls",
 		mcp.WithDescription("List all available security controls with their IDs, names, and the frameworks they belong to. Use a returned ID as a control_ids value in scan_controls."),
 	)
+	listAdmissionPoliciesTool := mcp.NewTool(
+		"list_admission_policies",
+		mcp.WithDescription("List the ValidatingAdmissionPolicies in the CEL admission policy library embedded in Kubescape, with the Kubescape control each one implements (controlID), whether it reads parameters (takesParams), its failurePolicy and the resources it matches. Read-only: it does not create, bind or apply any policy. Kubescape's ValidatingAdmissionPolicy support is experimental."),
+		mcp.WithReadOnlyHintAnnotation(true),
+	)
 	ksServer.s.AddTool(listFrameworksTool, ksServer.toolHandler(listFrameworksTool.Name))
 	ksServer.s.AddTool(listControlsTool, ksServer.toolHandler(listControlsTool.Name))
+	ksServer.s.AddTool(listAdmissionPoliciesTool, ksServer.toolHandler(listAdmissionPoliciesTool.Name))
 }
 
 func GetMCPServerCmd() *cobra.Command {
