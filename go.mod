@@ -312,7 +312,7 @@ require (
 	github.com/felixge/httpsnoop v1.1.0 // indirect
 	github.com/francoispqt/gojay v1.2.13 // indirect
 	github.com/fsnotify/fsnotify v1.10.1 // indirect
-	github.com/fvbommel/sortorder v1.1.0 // indirect
+	github.com/fvbommel/sortorder v1.2.0 // indirect
 	github.com/fxamacker/cbor/v2 v2.9.1 // indirect
 	github.com/github/go-spdx/v2 v2.4.0 // indirect
 	github.com/glebarez/go-sqlite v1.22.0 // indirect
