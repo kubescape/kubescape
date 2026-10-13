@@ -76,15 +76,11 @@ func (a *AWSECRAdaptor) Login(ctx context.Context, registry string, credentials 
 		return fmt.Errorf("explicit credentials are intentionally unsupported for AWS ECR; use AWS IRSA or default credential chain")
 	}
 
-	var opts []func(*config.LoadOptions) error
-
-	// Extract region from registry URL (e.g., <account>.dkr.ecr.<region>.amazonaws.com)
-	parts := strings.Split(registry, ".")
-	if len(parts) >= 6 && parts[1] == "dkr" && parts[2] == "ecr" && parts[4] == "amazonaws" && parts[5] == "com" {
-		opts = append(opts, config.WithRegion(parts[3]))
+	if _, err := ecrRegistryAccount(registry); err != nil {
+		return err
 	}
 
-	cfg, err := a.configProvider(ctx, opts...)
+	cfg, err := a.configProvider(ctx, config.WithRegion(ecrRegistryRegion(registry)))
 	if err != nil {
 		return fmt.Errorf("unable to load AWS SDK config: %w", err)
 	}
@@ -134,7 +130,7 @@ func (a *AWSECRAdaptor) GetImagesScanStatus(ctx context.Context, imageIDs []Cont
 				MaxResults:     aws.Int32(1),
 			}
 
-			out, err := a.client.DescribeImageScanFindings(ctx, input)
+			out, err := a.client.DescribeImageScanFindings(ctx, input, ecrImageRegion(imageID.Registry))
 			if err != nil {
 				return status, fmt.Errorf("failed to describe image scan findings for repository %s: %w", imageID.Repository, err)
 			}
@@ -211,7 +207,7 @@ func (a *AWSECRAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs [
 			seenTokens := make(map[string]struct{})
 
 			for pagesFetched := 0; ; pagesFetched++ {
-				out, err := a.client.DescribeImageScanFindings(ctx, input)
+				out, err := a.client.DescribeImageScanFindings(ctx, input, ecrImageRegion(imageID.Registry))
 				if err != nil {
 					fetchErr = err
 					break

@@ -419,7 +419,7 @@ func TestAWSECRAdaptor_Login_Success(t *testing.T) {
 	adaptor.configProvider = mockConfigProvider
 	adaptor.clientFactory = mockClientFactory
 
-	err := adaptor.Login(context.Background(), "12345.dkr.ecr.us-east-1.amazonaws.com", RegistryCredentials{})
+	err := adaptor.Login(context.Background(), "123456789012.dkr.ecr.us-east-1.amazonaws.com", RegistryCredentials{})
 	assert.NoError(t, err)
 	assert.NotNil(t, adaptor.client)
 }
