@@ -1,0 +1,97 @@
+name: namespaced-bind-scope
+description: |
+  Creating a binding to a role the caller does not already hold needs the
+  bind verb on that role, checked in the namespace of the binding being
+  created: no namespace for a ClusterRoleBinding, the RoleBinding's own
+  namespace otherwise. A bind grant from a RoleBinding in one namespace
+  therefore authorizes neither a ClusterRoleBinding nor a RoleBinding
+  anywhere else.
+  
+  widget-admin grants a permission no subject here holds. Kubernetes also
+  admits a binding to a role whose permissions the caller already has, and
+  that is not what these questions are about.
+objects:
+  - {apiVersion: v1, kind: Namespace, metadata: {name: lab}}
+  - {apiVersion: v1, kind: Namespace, metadata: {name: lab2}}
+  - {apiVersion: v1, kind: ServiceAccount, metadata: {name: bind-namespaced-create-cluster, namespace: lab}}
+  - {apiVersion: v1, kind: ServiceAccount, metadata: {name: bind-lab-create-lab2, namespace: lab}}
+  - {apiVersion: v1, kind: ServiceAccount, metadata: {name: bind-cluster-create-cluster, namespace: lab}}
+  - {apiVersion: v1, kind: ServiceAccount, metadata: {name: bind-lab-create-everywhere, namespace: lab}}
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: ClusterRole
+    metadata: {name: widget-admin}
+    rules:
+      - {apiGroups: ["parity.kubescape.io"], resources: ["widgets"], verbs: ["*"]}
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: ClusterRole
+    metadata: {name: bind-clusterroles}
+    rules:
+      - {apiGroups: ["rbac.authorization.k8s.io"], resources: ["clusterroles"], verbs: [bind]}
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: ClusterRole
+    metadata: {name: create-clusterrolebindings}
+    rules:
+      - {apiGroups: ["rbac.authorization.k8s.io"], resources: ["clusterrolebindings"], verbs: [create]}
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: ClusterRole
+    metadata: {name: create-rolebindings}
+    rules:
+      - {apiGroups: ["rbac.authorization.k8s.io"], resources: ["rolebindings"], verbs: [create]}
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: RoleBinding
+    metadata: {name: bind-in-lab, namespace: lab}
+    roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: bind-clusterroles}
+    subjects:
+      - {kind: ServiceAccount, name: bind-namespaced-create-cluster, namespace: lab}
+      - {kind: ServiceAccount, name: bind-lab-create-lab2, namespace: lab}
+      - {kind: ServiceAccount, name: bind-lab-create-everywhere, namespace: lab}
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: ClusterRoleBinding
+    metadata: {name: create-clusterrolebindings}
+    roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: create-clusterrolebindings}
+    subjects:
+      - {kind: ServiceAccount, name: bind-namespaced-create-cluster, namespace: lab}
+      - {kind: ServiceAccount, name: bind-cluster-create-cluster, namespace: lab}
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: RoleBinding
+    metadata: {name: create-rolebindings-in-lab2, namespace: lab2}
+    roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: create-rolebindings}
+    subjects:
+      - {kind: ServiceAccount, name: bind-lab-create-lab2, namespace: lab}
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: ClusterRoleBinding
+    metadata: {name: bind-cluster-wide}
+    roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: bind-clusterroles}
+    subjects:
+      - {kind: ServiceAccount, name: bind-cluster-create-cluster, namespace: lab}
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: ClusterRoleBinding
+    metadata: {name: create-rolebindings-everywhere}
+    roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: create-rolebindings}
+    subjects:
+      - {kind: ServiceAccount, name: bind-lab-create-everywhere, namespace: lab}
+questions:
+  - id: namespaced-bind-does-not-allow-a-clusterrolebinding
+    serviceAccount: {namespace: lab, name: bind-namespaced-create-cluster}
+    bindClusterRole: {name: widget-admin}
+    kubernetes: denied
+  - id: bind-in-one-namespace-does-not-allow-a-rolebinding-in-another
+    serviceAccount: {namespace: lab, name: bind-lab-create-lab2}
+    bindClusterRole: {name: widget-admin, namespace: lab2}
+    kubernetes: denied
+  # Control: both halves granted cluster-wide.
+  - id: cluster-wide-bind-allows-a-clusterrolebinding
+    serviceAccount: {namespace: lab, name: bind-cluster-create-cluster}
+    bindClusterRole: {name: widget-admin}
+    kubernetes: allowed
+  # Control: the bind grant is used where it was granted.
+  - id: namespaced-bind-allows-a-rolebinding-in-its-own-namespace
+    serviceAccount: {namespace: lab, name: bind-lab-create-everywhere}
+    bindClusterRole: {name: widget-admin, namespace: lab}
+    kubernetes: allowed
+  # Control: being able to create RoleBindings everywhere does not widen the
+  # bind grant beyond its own namespace.
+  - id: namespaced-bind-does-not-follow-a-cluster-wide-create
+    serviceAccount: {namespace: lab, name: bind-lab-create-everywhere}
+    bindClusterRole: {name: widget-admin, namespace: lab2}
+    kubernetes: denied

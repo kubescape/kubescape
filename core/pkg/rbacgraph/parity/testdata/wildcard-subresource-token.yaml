@@ -1,0 +1,59 @@
+name: wildcard-subresource-token
+description: |
+  A rule can name a subresource of every resource as "*/<subresource>".
+  Kubernetes ResourceMatches accepts that form, so "*/token" authorizes
+  create on serviceaccounts/token (the TokenRequest API).
+objects:
+  - {apiVersion: v1, kind: Namespace, metadata: {name: lab}}
+  - {apiVersion: v1, kind: ServiceAccount, metadata: {name: target, namespace: lab}}
+  - {apiVersion: v1, kind: ServiceAccount, metadata: {name: wildcard, namespace: lab}}
+  - {apiVersion: v1, kind: ServiceAccount, metadata: {name: exact, namespace: lab}}
+  - {apiVersion: v1, kind: ServiceAccount, metadata: {name: other-subresource, namespace: lab}}
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: Role
+    metadata: {name: wildcard-token, namespace: lab}
+    rules:
+      - {apiGroups: [""], resources: ["*/token"], verbs: [create]}
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: Role
+    metadata: {name: exact-token, namespace: lab}
+    rules:
+      - {apiGroups: [""], resources: ["serviceaccounts/token"], verbs: [create]}
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: Role
+    metadata: {name: wildcard-status, namespace: lab}
+    rules:
+      - {apiGroups: [""], resources: ["*/status"], verbs: [create]}
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: RoleBinding
+    metadata: {name: wildcard, namespace: lab}
+    roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: wildcard-token}
+    subjects:
+      - {kind: ServiceAccount, name: wildcard, namespace: lab}
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: RoleBinding
+    metadata: {name: exact, namespace: lab}
+    roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: exact-token}
+    subjects:
+      - {kind: ServiceAccount, name: exact, namespace: lab}
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: RoleBinding
+    metadata: {name: other-subresource, namespace: lab}
+    roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: wildcard-status}
+    subjects:
+      - {kind: ServiceAccount, name: other-subresource, namespace: lab}
+questions:
+  - id: wildcard-subresource-rule-mints
+    serviceAccount: {namespace: lab, name: wildcard}
+    mintToken: {namespace: lab, name: target}
+    kubernetes: allowed
+  # Control: the exact resource/subresource form.
+  - id: exact-subresource-rule-mints
+    serviceAccount: {namespace: lab, name: exact}
+    mintToken: {namespace: lab, name: target}
+    kubernetes: allowed
+  # Control: "*/status" is a different subresource and grants nothing here.
+  - id: other-wildcard-subresource-does-not-mint
+    serviceAccount: {namespace: lab, name: other-subresource}
+    mintToken: {namespace: lab, name: target}
+    kubernetes: denied

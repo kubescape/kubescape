@@ -5,6 +5,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
+	"k8s.io/apiserver/pkg/authentication/serviceaccount"
 )
 
 // Index indexes a cluster's Role, ClusterRole, RoleBinding,
@@ -115,8 +116,12 @@ func (idx *Index) DirectRules(subject Subject) []ScopedRule {
 // to, or "" for a ClusterRoleBinding. A ServiceAccount subject may leave its
 // namespace out, and the API server then resolves it in the RoleBinding's
 // namespace; a ClusterRoleBinding has none to resolve it in, so there such a
-// subject matches nobody. This follows appliesToUser in Kubernetes'
-// pkg/registry/rbac/validation.
+// subject matches nobody. The authorizer matches User and ServiceAccount
+// subjects on the username alone, and a ServiceAccount's username is
+// system:serviceaccount:<namespace>:<name>: a User subject carrying that name
+// applies to the ServiceAccount, and a ServiceAccount subject applies to a
+// User asked about under that name. All of this follows appliesToUser in
+// Kubernetes' pkg/registry/rbac/validation.
 func bindingNamesSubject(subjects []rbacv1.Subject, bindingNamespace string, subject Subject) bool {
 	for _, s := range subjects {
 		switch subject.Kind {
@@ -130,6 +135,13 @@ func bindingNamesSubject(subjects []rbacv1.Subject, bindingNamespace string, sub
 					return true
 				}
 			}
+			// A ServiceAccount authenticates as the user
+			// system:serviceaccount:<namespace>:<name>, and the authorizer
+			// compares a User subject with the authenticated username, so a
+			// User subject carrying that name is this ServiceAccount.
+			if s.Kind == "User" && serviceaccount.MatchesUsername(subject.Namespace, subject.Name, s.Name) {
+				return true
+			}
 			if s.Kind == "Group" && (s.Name == "system:serviceaccounts" ||
 				s.Name == "system:serviceaccounts:"+subject.Namespace ||
 				s.Name == "system:authenticated") {
@@ -138,6 +150,22 @@ func bindingNamesSubject(subjects []rbacv1.Subject, bindingNamespace string, sub
 		case KindUser:
 			if s.Kind == "User" && s.Name == subject.Name {
 				return true
+			}
+			// The same rule read the other way: a ServiceAccount subject
+			// applies to whoever carries that ServiceAccount's username, so it
+			// applies to a User asked about under it. Only the username is
+			// shared. The ServiceAccount groups are assigned by the
+			// authenticator and are not implied by the name, so the Group
+			// subjects that the ServiceAccount case above honors do not apply
+			// to a User.
+			if s.Kind == "ServiceAccount" {
+				saNamespace := s.Namespace
+				if saNamespace == "" {
+					saNamespace = bindingNamespace
+				}
+				if saNamespace != "" && serviceaccount.MatchesUsername(saNamespace, s.Name, subject.Name) {
+					return true
+				}
 			}
 			if s.Kind == "Group" && s.Name == "system:authenticated" {
 				return true

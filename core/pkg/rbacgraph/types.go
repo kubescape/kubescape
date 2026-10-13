@@ -111,6 +111,13 @@ const (
 // only ever set) for a ServiceAccount -- Users and Groups are cluster-scoped
 // identities in Kubernetes' RBAC model, even when everything they've been
 // granted is namespace-confined.
+//
+// A User named system:serviceaccount:<namespace>:<name> carries a
+// ServiceAccount's username and is granted whatever is bound to that username,
+// by a User or a ServiceAccount subject. It is not credited with the
+// ServiceAccount's groups: those come from the authenticator, not from the
+// name. To analyze the ServiceAccount as its own token authenticates, groups
+// included, use KindServiceAccount.
 type Subject struct {
 	Kind      SubjectKind
 	Namespace string
@@ -173,14 +180,46 @@ type EscalationEdge struct {
 	// conservative missing-target warnings; ScopeUnknown distinguishes an
 	// unresolved namespaced Role from a cluster-wide permission grant.
 	Unbounded bool
-	// Scope is "" for cluster-wide, else the namespace Unbounded is
-	// confined to, unless ScopeUnknown is true. Meaningful only when
-	// Unbounded is true.
+	// Scope is "" for cluster-wide, else the namespace the edge is confined
+	// to: the namespace an Unbounded edge grants everything in, or, for a
+	// bind-verb edge, the namespace the new RoleBinding is created in ("" for
+	// a ClusterRoleBinding). Unset on every other edge, and not a statement
+	// about scope when ScopeUnknown is true.
 	Scope string
 	// ScopeUnknown marks a missing named Role whose namespace is unresolved.
 	// The warning must remain visible, but it cannot establish cluster-admin
 	// or contribute wildcard permissions to the closure.
 	ScopeUnknown bool
+
+	// Target is the Role or ClusterRole an escalate-verb edge rewrites or a
+	// bind-verb edge binds, so a caller can tell which object an edge is
+	// about without parsing Detail. Nil on every other primitive.
+	Target *RoleTarget
+}
+
+// RoleTarget identifies the Role(s) or ClusterRole(s) an escalate-verb or
+// bind-verb EscalationEdge acts on.
+type RoleTarget struct {
+	// Kind is "Role" or "ClusterRole".
+	Kind string
+	// Namespace is the Role's namespace. It is "" for a ClusterRole, and ""
+	// for a Role when the edge covers Roles in every namespace.
+	Namespace string
+	// Name is the object's name, or "" when the edge covers every object of
+	// Kind in Namespace (an unrestricted grant). A grant restricted by
+	// resourceNames always carries the name, whether or not an object of that
+	// name was found in the collected snapshot. An empty entry in resourceNames
+	// names no object, so it produces no edge rather than a Target whose Name
+	// is "".
+	Name string
+}
+
+// Covers reports whether t includes the Role or ClusterRole identified by
+// kind, namespace and name.
+func (t RoleTarget) Covers(kind, namespace, name string) bool {
+	return t.Kind == kind &&
+		(t.Namespace == "" || t.Namespace == namespace) &&
+		(t.Name == "" || t.Name == name)
 }
 
 // EscalationPath is one hop-by-hop chain from a starting Subject, letting a
