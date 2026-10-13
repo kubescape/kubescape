@@ -16,8 +16,18 @@ import (
 // *mcp.CallToolResult from it, so no caller can observe or cause a mutation
 // of another caller's result.
 type analysisOutput struct {
-	text    string
-	isError bool
+	text       string
+	isError    bool
+	structured analysisStructured
+}
+
+// analysisStructured is implemented by structured tool results that know how
+// to deep-copy themselves. Structured content is arbitrary and may hold
+// slices, maps or pointers, so a result is only shared when each caller can be
+// given its own copy, and with the same concrete type, so the encoded
+// response is unchanged.
+type analysisStructured interface {
+	cloneStructured() any
 }
 
 // analysisKey builds the coalescing key for one analysis request. params must
@@ -41,7 +51,9 @@ func analysisKey(tool string, params url.Values) string {
 // run receives the shared execution's context, which is cancelled when every
 // caller has gone, not the context of whichever caller happened to start it.
 // It must return a single text result (as produced by mcp.NewToolResultText
-// or mcpToolError); anything else is reported as an error rather than shared.
+// or mcpToolError), optionally with structured content that implements
+// analysisStructured; anything else is reported as an error rather than
+// shared.
 func (ksServer *KubescapeMcpserver) doAnalysis(ctx context.Context, tool string, params url.Values, run func(context.Context) *mcp.CallToolResult) *mcp.CallToolResult {
 	v, err := ksServer.doSharedChan(ctx, analysisKey(tool, params), false, func(runCtx context.Context) (out interface{}, err error) {
 		// The shared function runs on a goroutine owned by singleflight, where
@@ -64,19 +76,35 @@ func (ksServer *KubescapeMcpserver) doAnalysis(ctx context.Context, tool string,
 		return mcpToolError(code, classifyScanErrorMessage(code, "analysis", err), map[string]any{"tool": tool})
 	}
 	out := v.(analysisOutput)
-	return &mcp.CallToolResult{
+	result := &mcp.CallToolResult{
 		Content: []mcp.Content{mcp.TextContent{Type: mcp.ContentTypeText, Text: out.text}},
 		IsError: out.isError,
 	}
+	if out.structured != nil {
+		result.StructuredContent = out.structured.cloneStructured()
+	}
+	return result
 }
 
 func snapshotAnalysisResult(res *mcp.CallToolResult) (analysisOutput, error) {
-	if res == nil || len(res.Content) != 1 || res.StructuredContent != nil || res.Meta != nil {
+	if res == nil || len(res.Content) != 1 || res.Meta != nil {
 		return analysisOutput{}, fmt.Errorf("analysis result is not a single plain text content and cannot be shared")
+	}
+	var structured analysisStructured
+	if res.StructuredContent != nil {
+		c, ok := res.StructuredContent.(analysisStructured)
+		if !ok {
+			return analysisOutput{}, fmt.Errorf("analysis structured content of type %T cannot be shared", res.StructuredContent)
+		}
+		// Keep a private copy so nothing the producer still references is shared.
+		structured, ok = c.cloneStructured().(analysisStructured)
+		if !ok {
+			return analysisOutput{}, fmt.Errorf("analysis structured content of type %T must clone to its own type", res.StructuredContent)
+		}
 	}
 	text, ok := res.Content[0].(mcp.TextContent)
 	if !ok || text.Meta != nil || text.Annotations != nil {
 		return analysisOutput{}, fmt.Errorf("analysis result is not a single plain text content and cannot be shared")
 	}
-	return analysisOutput{text: text.Text, isError: res.IsError}, nil
+	return analysisOutput{text: text.Text, isError: res.IsError, structured: structured}, nil
 }

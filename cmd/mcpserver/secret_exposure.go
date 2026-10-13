@@ -5,7 +5,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"net/url"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -92,6 +94,14 @@ type SecretExposureResult struct {
 	Findings                    []SecretFinding `json:"findings"`
 	ConfigMapReferencesResolved bool            `json:"configMapReferencesResolved"`
 	Warnings                    []string        `json:"warnings,omitempty"`
+}
+
+// cloneStructured lets a SecretExposureResult be shared between callers of one
+// in-flight analysis: every caller gets its own slices.
+func (r SecretExposureResult) cloneStructured() any {
+	r.Findings = slices.Clone(r.Findings)
+	r.Warnings = slices.Clone(r.Warnings)
+	return r
 }
 
 var (
@@ -299,13 +309,26 @@ func createSecretExposureTools(ksServer *KubescapeMcpserver) {
 			return toolErr, nil
 		}
 
-		k8sClient, err := ksServer.getK8sClient()
-		if err != nil {
-			return mcpToolError(ErrCodeK8sClientError, fmt.Sprintf("failed to get k8s client: %v", err), nil), nil
+		// Both registered names run this handler and produce the same result
+		// for the same arguments, so they share one key: overlapping calls
+		// through either name join a single execution. filterKind is the
+		// canonical kind, so spelling and case do not split the key.
+		params := url.Values{
+			"namespace":     {namespace},
+			"resource_kind": {filterKind},
+			"resource_name": {resourceName},
 		}
-		dynClient := k8sClient.DynamicClient
-
-		return executeSecretExposureScan(ctx, dynClient, namespace, filterKind, resourceName)
+		return ksServer.doAnalysis(ctx, "secret_exposure", params, func(ctx context.Context) *mcp.CallToolResult {
+			k8sClient, err := ksServer.getK8sClient()
+			if err != nil {
+				return mcpToolError(ErrCodeK8sClientError, fmt.Sprintf("failed to get k8s client: %v", err), nil)
+			}
+			res, err := executeSecretExposureScan(ctx, k8sClient.DynamicClient, namespace, filterKind, resourceName)
+			if err != nil {
+				return mcpToolError(classifyScanError(err), err.Error(), nil)
+			}
+			return res
+		}), nil
 	}
 
 	tool := mcp.NewTool(
