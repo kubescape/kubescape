@@ -154,6 +154,16 @@ func redis(namespace string) map[string]string {
 // cloud/file (primary) exceptions win on overlap, CRD (secondary) exceptions are kept
 // only for control+workload pairs not already covered, and partial overlaps keep the
 // non-overlapping designators.
+func TestMergedExceptionsGetter_IncludesClusterExceptions(t *testing.T) {
+	primary := &exceptionsGetterStub{}
+
+	assert.True(t, NewMergedExceptionsGetter(primary, &exceptionsGetterStub{}).IncludesClusterExceptions())
+	assert.False(t, NewMergedExceptionsGetter(primary, nil).IncludesClusterExceptions())
+
+	var unset *MergedExceptionsGetter
+	assert.False(t, unset.IncludesClusterExceptions())
+}
+
 func TestMergedExceptionsGetter_Deduplication(t *testing.T) {
 	tests := []struct {
 		name  string

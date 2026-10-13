@@ -18,6 +18,7 @@ import (
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/cautils/getter"
 	metav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
+	"github.com/kubescape/kubescape/v4/core/pkg/policyhandler"
 	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
@@ -221,6 +222,79 @@ deny contains message if {
 	assert.Equal(t, 1, summary.StatusCounters.FailedResources)
 	assert.Empty(t, data.Exceptions)
 	assert.Zero(t, crdReads.Load(), "a file scan must not ask the cluster for SecurityException CRDs")
+}
+
+// TestExceptionsCacheKeepsFileAndClusterScansApart pins that, with
+// POLICIES_CACHE_TTL set, a scan of local files and a scan of the cluster that
+// resolve the same cluster name, and so share a policy handler, do not serve
+// each other's cached exceptions. Only the cluster scan may see the cluster's
+// SecurityException CRDs, whichever of the two runs first.
+func TestExceptionsCacheKeepsFileAndClusterScansApart(t *testing.T) {
+	t.Setenv(policyhandler.PoliciesCacheTtlEnvVar, "5m")
+
+	var crdReads atomic.Int64
+	withGlobalClusterAPI(t, "global", &crdReads)
+
+	dir := t.TempDir()
+	writeFile := func(name, content string) string {
+		path := filepath.Join(dir, name)
+		require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+		return path
+	}
+	framework := reporthandling.Framework{Controls: []reporthandling.Control{{ControlID: "C-0001"}}}
+	framework.Name = "cache-probe"
+	frameworkBytes, err := json.Marshal(framework)
+	require.NoError(t, err)
+	frameworkPath := writeFile("framework.json", string(frameworkBytes))
+	controlsInputsPath := writeFile("controls-inputs.json", `{"probe":["value"]}`)
+	exceptionsPath := writeFile("exceptions.json", `[]`)
+	identifiers := []cautils.PolicyIdentifier{{Identifier: framework.Name, Kind: apisv1.KindFramework}}
+
+	// collect resolves the exceptions the way ScanContext does: a getter built
+	// for the kind of scan, read through the handler shared by clusterName.
+	collect := func(t *testing.T, clusterName string, clusterScan bool) []armotypes.PostureExceptionPolicy {
+		t.Helper()
+		exceptionsGetter, _, err := getExceptionsGetterForTarget(context.Background(), exceptionsPath, "", nil, clusterScan, false, nil)
+		require.NoError(t, err)
+		session, err := collectPolicies(context.Background(), clusterName, identifiers, &cautils.ScanInfo{}, &cautils.Getters{
+			PolicyGetter:         getter.NewLoadPolicy([]string{frameworkPath}),
+			ControlsInputsGetter: getter.NewLoadPolicy([]string{controlsInputsPath}),
+			ExceptionsGetter:     exceptionsGetter,
+		})
+		require.NoError(t, err)
+		require.Empty(t, session.PolicyDegradations)
+		return session.Exceptions
+	}
+	requireClusterExceptions := func(t *testing.T, exceptions []armotypes.PostureExceptionPolicy) {
+		t.Helper()
+		require.Len(t, exceptions, 1)
+		assert.Equal(t, "global-exception/C-0001", exceptions[0].Name)
+	}
+
+	t.Run("file scan then cluster scan", func(t *testing.T) {
+		crdReads.Store(0)
+		assert.Empty(t, collect(t, t.Name(), false))
+		assert.Zero(t, crdReads.Load(), "a file scan must not ask the cluster for SecurityException CRDs")
+
+		requireClusterExceptions(t, collect(t, t.Name(), true))
+		assert.Positive(t, crdReads.Load())
+	})
+
+	t.Run("cluster scan then file scan", func(t *testing.T) {
+		requireClusterExceptions(t, collect(t, t.Name(), true))
+
+		crdReads.Store(0)
+		assert.Empty(t, collect(t, t.Name(), false))
+		assert.Zero(t, crdReads.Load(), "a file scan must not ask the cluster for SecurityException CRDs")
+	})
+
+	t.Run("repeated cluster scan reuses the cache", func(t *testing.T) {
+		requireClusterExceptions(t, collect(t, t.Name(), true))
+
+		crdReads.Store(0)
+		requireClusterExceptions(t, collect(t, t.Name(), true))
+		assert.Zero(t, crdReads.Load(), "the second cluster scan should be served from the cache")
+	})
 }
 
 // TestDownloadExceptionsLeavesClusterSecurityExceptionsOut pins that the

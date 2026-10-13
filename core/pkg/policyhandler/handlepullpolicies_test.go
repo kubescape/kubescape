@@ -277,6 +277,76 @@ func TestGetExceptions(t *testing.T) {
 	assert.Equal(t, cachedExceptions, exceptions)
 }
 
+// recordingExceptionsGetter serves fixed exceptions and records each read.
+type recordingExceptionsGetter struct {
+	exceptions   []armotypes.PostureExceptionPolicy
+	clusterNames []string
+}
+
+func (g *recordingExceptionsGetter) GetExceptions(_ context.Context, clusterName string) ([]armotypes.PostureExceptionPolicy, error) {
+	g.clusterNames = append(g.clusterNames, clusterName)
+	return g.exceptions, nil
+}
+
+// TestGetExceptions_CacheKeepsClusterExceptionsApart pins that exceptions cached
+// by a scan that leaves the cluster's SecurityException CRDs out are not served
+// to a scan that merges them, nor the other way round. Both scans share one
+// handler when they resolve the same cluster name.
+func TestGetExceptions_CacheKeepsClusterExceptionsApart(t *testing.T) {
+	t.Setenv(PoliciesCacheTtlEnvVar, "5m")
+
+	const clusterName = "test-cluster"
+	primaryException := armotypes.PostureExceptionPolicy{PortalBase: armotypes.PortalBase{Name: "from-primary"}}
+	clusterException := armotypes.PostureExceptionPolicy{PortalBase: armotypes.PortalBase{Name: "from-cluster"}}
+	withoutCluster := []armotypes.PostureExceptionPolicy{primaryException}
+	withCluster := []armotypes.PostureExceptionPolicy{primaryException, clusterException}
+
+	type scan struct {
+		clusterScan bool
+		want        []armotypes.PostureExceptionPolicy
+	}
+	fileScan := scan{clusterScan: false, want: withoutCluster}
+	clusterScan := scan{clusterScan: true, want: withCluster}
+
+	for name, tc := range map[string]struct {
+		scans            []scan
+		wantPrimaryReads int
+		wantClusterReads int
+	}{
+		"file scan then cluster scan": {scans: []scan{fileScan, clusterScan}, wantPrimaryReads: 2, wantClusterReads: 1},
+		"cluster scan then file scan": {scans: []scan{clusterScan, fileScan}, wantPrimaryReads: 2, wantClusterReads: 1},
+		"repeated file scan":          {scans: []scan{fileScan, fileScan}, wantPrimaryReads: 1, wantClusterReads: 0},
+		"repeated cluster scan":       {scans: []scan{clusterScan, clusterScan}, wantPrimaryReads: 1, wantClusterReads: 1},
+	} {
+		t.Run(name, func(t *testing.T) {
+			handler := NewRequestScopedPolicyHandler(clusterName)
+			defer handler.Close()
+
+			primary := &recordingExceptionsGetter{exceptions: withoutCluster}
+			cluster := &recordingExceptionsGetter{exceptions: []armotypes.PostureExceptionPolicy{clusterException}}
+
+			for i, scan := range tc.scans {
+				// Each scan builds its own getter, as core does.
+				var secondary getter.IExceptionsGetter
+				if scan.clusterScan {
+					secondary = cluster
+				}
+				getters := &cautils.Getters{ExceptionsGetter: getter.NewMergedExceptionsGetter(primary, secondary)}
+
+				exceptions, err := handler.getExceptions(context.Background(), nil, getters)
+				require.NoError(t, err)
+				assert.Equalf(t, scan.want, exceptions, "scan %d", i+1)
+			}
+
+			assert.Len(t, primary.clusterNames, tc.wantPrimaryReads)
+			assert.Len(t, cluster.clusterNames, tc.wantClusterReads)
+			for _, got := range append(primary.clusterNames, cluster.clusterNames...) {
+				assert.Equal(t, clusterName, got)
+			}
+		})
+	}
+}
+
 func TestGetControlInputs(t *testing.T) {
 	cachedControlInputs := CachedControlInputs
 	policyHandler := NewPolicyHandler("test-cluster")
