@@ -245,7 +245,9 @@ func listExceptions(ctx context.Context, listPolicies *metav1.ListPolicies) ([]s
 	tenant := cautils.GetTenantConfig(ctx, listPolicies.AccountID, listPolicies.AccessKey, "", "", getKubernetesApi())
 
 	var exceptionsNames []string
-	ksCloudAPI, _, err := getExceptionsGetter(ctx, "", tenant.GetAccountID(), nil, false)
+	// A cluster scan merges the SecurityException CRDs of the connected cluster,
+	// so leaving them out would list fewer exceptions than that scan applies.
+	ksCloudAPI, _, err := getExceptionsGetter(ctx, "", tenant.GetAccountID(), nil, true, false)
 	if err != nil {
 		return exceptionsNames, err
 	}

@@ -203,7 +203,9 @@ func downloadConfigInputs(ctx context.Context, downloadInfo *metav1.DownloadInfo
 
 func downloadExceptions(ctx context.Context, downloadInfo *metav1.DownloadInfo) ([]string, error) {
 	tenant := tenantConfigFunc(ctx, downloadInfo.AccountID, downloadInfo.AccessKey, "", "", kubernetesAPIFunc())
-	exceptionsGetter, _, err := exceptionsGetterFunc(ctx, "", tenant.GetAccountID(), nil, false)
+	// The downloaded file serves any later scan, so it must not carry the
+	// SecurityException CRDs of the cluster the kube-context points at today.
+	exceptionsGetter, _, err := exceptionsGetterFunc(ctx, "", tenant.GetAccountID(), nil, false, false)
 	if err != nil {
 		return nil, err
 	}

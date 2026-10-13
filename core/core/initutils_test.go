@@ -139,7 +139,7 @@ func TestGetExceptionsGetter(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, _, err := getExceptionsGetter(tt.args.ctx, tt.args.useExceptions, tt.args.accountID, tt.args.downloadReleasedPolicy, false)
+			got, _, err := getExceptionsGetter(tt.args.ctx, tt.args.useExceptions, tt.args.accountID, tt.args.downloadReleasedPolicy, false, false)
 			assert.NoError(t, err)
 			assert.Equal(t, tt.want, reflect.TypeOf(got).String())
 		})
@@ -161,7 +161,7 @@ func (s *releasedExceptionsGetterStub) GetExceptions(context.Context, string) ([
 
 func TestGetReleasedExceptionsGetterReportsCacheFallback(t *testing.T) {
 	t.Run("fresh release", func(t *testing.T) {
-		got, fromCache, err := getReleasedExceptionsGetter(context.Background(), &releasedExceptionsGetterStub{})
+		got, fromCache, err := getReleasedExceptionsGetter(context.Background(), &releasedExceptionsGetterStub{}, false)
 		require.NoError(t, err)
 		assert.False(t, fromCache)
 		assert.Equal(t, "*getter.MergedExceptionsGetter", reflect.TypeOf(got).String())
@@ -175,7 +175,7 @@ func TestGetReleasedExceptionsGetterReportsCacheFallback(t *testing.T) {
 		want := []armotypes.PostureExceptionPolicy{{PortalBase: armotypes.PortalBase{Name: "cached-exception"}}}
 		require.NoError(t, getter.SaveInFile(want, getter.GetDefaultPath(cautils.LocalExceptionsFilename)))
 
-		got, fromCache, err := getReleasedExceptionsGetter(context.Background(), &releasedExceptionsGetterStub{fallback: true})
+		got, fromCache, err := getReleasedExceptionsGetter(context.Background(), &releasedExceptionsGetterStub{fallback: true}, false)
 		require.NoError(t, err)
 		assert.True(t, fromCache)
 		assert.Equal(t, "*getter.MergedExceptionsGetter", reflect.TypeOf(got).String())
@@ -187,7 +187,7 @@ func TestGetReleasedExceptionsGetterReportsCacheFallback(t *testing.T) {
 
 	t.Run("hard error", func(t *testing.T) {
 		wantErr := errors.New("release unavailable")
-		got, fromCache, err := getReleasedExceptionsGetter(context.Background(), &releasedExceptionsGetterStub{err: wantErr})
+		got, fromCache, err := getReleasedExceptionsGetter(context.Background(), &releasedExceptionsGetterStub{err: wantErr}, false)
 		require.ErrorIs(t, err, wantErr)
 		assert.False(t, fromCache)
 		assert.Nil(t, got)
@@ -207,7 +207,7 @@ func TestGettersAirGappedUseCache(t *testing.T) {
 			attackTracksGetter, err := getAttackTracksGetter(ctx, "", accountID, nil, true)
 			assert.NoError(t, err)
 			assert.Equal(t, "*getter.LoadPolicy", reflect.TypeOf(attackTracksGetter).String())
-			exceptionsGetter, fromCache, err := getExceptionsGetter(ctx, "", accountID, nil, true)
+			exceptionsGetter, fromCache, err := getExceptionsGetter(ctx, "", accountID, nil, false, true)
 			assert.NoError(t, err)
 			assert.False(t, fromCache)
 			assert.Equal(t, "*getter.MergedExceptionsGetter", reflect.TypeOf(exceptionsGetter).String())
@@ -847,7 +847,7 @@ func TestPinnedVersionGettersReturnHardError(t *testing.T) {
 	})
 
 	t.Run("getExceptionsGetter", func(t *testing.T) {
-		g, fromCache, err := getExceptionsGetter(ctx, "", "", newPinned(), false)
+		g, fromCache, err := getExceptionsGetter(ctx, "", "", newPinned(), false, false)
 		require.Error(t, err)
 		require.False(t, fromCache)
 		require.Nil(t, g)
