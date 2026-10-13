@@ -12,6 +12,7 @@ package networkpolicy
 
 import (
 	"fmt"
+	"slices"
 
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
@@ -33,6 +34,17 @@ type Endpoint struct {
 	// then reports Unknown rather than a guessed answer.
 	IP string
 
+	// IPs optionally lists every address assigned to the pod
+	// (status.podIPs). A dual-stack pod has one IPv4 and one IPv6 address,
+	// and an ipBlock peer is matched against whichever of them a connection
+	// uses, so a caller that knows them all sets them here. IP, when set,
+	// counts as one of the pod's addresses whether or not IPs repeats it, so
+	// a caller that knows a single address keeps setting IP alone. The API
+	// guarantees that status.podIPs[0] equals status.podIP and that a pod has
+	// at most one address per IP family, so this is not validated here: if
+	// IP and IPs disagree, each address is evaluated.
+	IPs []string
+
 	// HostNetwork is true for a pod that runs in its node's network
 	// namespace (spec.hostNetwork). The Kubernetes NetworkPolicy docs leave
 	// the behaviour for such pods undefined: a network plugin either applies
@@ -42,6 +54,27 @@ type Endpoint struct {
 	// against a podSelector or namespaceSelector peer. A verdict that would
 	// differ between those two behaviours is reported as Unknown.
 	HostNetwork bool
+}
+
+// addresses returns every known address of e: IP first, then each entry of
+// IPs that is not empty and not already listed.
+func (e Endpoint) addresses() []string {
+	if len(e.IPs) == 0 {
+		if e.IP == "" {
+			return nil
+		}
+		return []string{e.IP}
+	}
+	addrs := make([]string, 0, len(e.IPs)+1)
+	if e.IP != "" {
+		addrs = append(addrs, e.IP)
+	}
+	for _, ip := range e.IPs {
+		if ip != "" && !slices.Contains(addrs, ip) {
+			addrs = append(addrs, ip)
+		}
+	}
+	return addrs
 }
 
 // NamespaceInfo carries a namespace's own labels, needed for
