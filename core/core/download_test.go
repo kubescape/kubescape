@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/armosec/armoapi-go/armotypes"
@@ -549,6 +550,22 @@ func withPolicyGetter(t *testing.T, g getter.IPolicyGetter, err error) {
 	t.Cleanup(func() { policyGetterFunc = orig })
 }
 
+// withFrameworksCache redirects the local store to a temp dir holding one
+// framework file per name, and stubs policyGetterFunc with the loader
+// getDownloadReleasedPolicy falls back to when a release cannot be fetched.
+func withFrameworksCache(t *testing.T, names ...string) {
+	t.Helper()
+	origStore := getter.DefaultLocalStore
+	getter.DefaultLocalStore = t.TempDir()
+	t.Cleanup(func() { getter.DefaultLocalStore = origStore })
+
+	for _, name := range names {
+		fw := reporthandling.Framework{PortalBase: armotypes.PortalBase{Name: name}}
+		require.NoError(t, getter.SaveInFile(fw, getter.GetDefaultPath(name+".json")))
+	}
+	withPolicyGetter(t, getter.NewLoadPolicy(getDefaultFrameworksPaths()), nil)
+}
+
 // withTenantConfig stubs tenantConfigFunc AND kubernetesAPIFunc so the
 // download* functions never reach cautils.GetTenantConfig or
 // getKubernetesApi. Both must be stubbed together: kubernetesAPIFunc() is
@@ -809,6 +826,41 @@ func TestDownloadFramework(t *testing.T) {
 		require.EqualError(t, err, "failed to download framework 'workloadscan' - received empty objects")
 	})
 
+	// The cache fallback loads the NativeFrameworks files only, and a LoadPolicy
+	// looks nowhere but its own paths. With a release out of reach, a cache that
+	// holds every framework still has to export all of them.
+	t.Run("no identifier: exports a complete cache when the release cannot be fetched", func(t *testing.T) {
+		withTenantConfig(t, &fakeTenantConfig{})
+		withFrameworksCache(t, slices.Concat(getter.NativeFrameworks, getter.SecurityViewFrameworks)...)
+
+		dir := t.TempDir()
+		files, err := downloadFramework(context.Background(), &metav1.DownloadInfo{Target: TargetFramework, Path: dir})
+		require.NoError(t, err)
+
+		assert.Equal(t, []string{"allcontrols.json", "clusterscan.json", "mitre.json", "nsa.json", "workloadscan.json"}, dirEntryNames(t, dir))
+		assert.Len(t, files, 5)
+
+		var got reporthandling.Framework
+		readJSONFile(t, filepath.Join(dir, "clusterscan.json"), &got)
+		assert.Equal(t, "clusterscan", got.Name)
+	})
+
+	t.Run("no identifier: returns error when the cache lacks a security view framework", func(t *testing.T) {
+		for _, missing := range getter.SecurityViewFrameworks {
+			t.Run(missing, func(t *testing.T) {
+				cached := slices.DeleteFunc(slices.Concat(getter.NativeFrameworks, getter.SecurityViewFrameworks), func(name string) bool { return name == missing })
+				withTenantConfig(t, &fakeTenantConfig{})
+				withFrameworksCache(t, cached...)
+
+				dir := t.TempDir()
+				_, err := downloadFramework(context.Background(), &metav1.DownloadInfo{Target: TargetFramework, Path: dir})
+				require.ErrorIs(t, err, getter.ErrFrameworkNotMatching)
+				require.ErrorContains(t, err, fmt.Sprintf("failed to download framework '%s'", missing))
+				assert.Empty(t, dirEntryNames(t, dir))
+			})
+		}
+	})
+
 	t.Run("no identifier: returns error when SaveInFile fails", func(t *testing.T) {
 		withTenantConfig(t, &fakeTenantConfig{})
 		withPolicyGetter(t, &fakePolicyGetter{frameworks: []reporthandling.Framework{
@@ -967,6 +1019,23 @@ func TestDownloadArtifacts(t *testing.T) {
 		require.NoError(t, err)
 
 		for _, want := range []string{"controls-inputs.json", "exceptions.json", "nsa.json", "workloadscan.json", "clusterscan.json", "attack-tracks.json"} {
+			_, statErr := os.Stat(filepath.Join(dir, want))
+			assert.NoError(t, statErr, "expected %s to have been written", want)
+		}
+	})
+
+	t.Run("saves the frameworks of a complete cache when the release cannot be fetched", func(t *testing.T) {
+		withTenantConfig(t, &fakeTenantConfig{})
+		withConfigInputsGetter(t, &fakeControlsInputsGetter{inputs: map[string][]string{"a": {"1"}}}, nil)
+		withExceptionsGetter(t, &fakeExceptionsGetter{exceptions: []armotypes.PostureExceptionPolicy{{}}}, nil)
+		withAttackTracksGetter(t, &fakeAttackTracksGetter{tracks: []v1alpha1.AttackTrack{{}}}, nil)
+		withFrameworksCache(t, slices.Concat(getter.NativeFrameworks, getter.SecurityViewFrameworks)...)
+
+		dir := t.TempDir()
+		_, err := downloadArtifacts(context.Background(), &metav1.DownloadInfo{Target: TargetArtifacts, Path: dir})
+		require.NoError(t, err)
+
+		for _, want := range []string{"allcontrols.json", "nsa.json", "mitre.json", "workloadscan.json", "clusterscan.json"} {
 			_, statErr := os.Stat(filepath.Join(dir, want))
 			assert.NoError(t, statErr, "expected %s to have been written", want)
 		}

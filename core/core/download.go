@@ -271,7 +271,7 @@ func downloadFramework(ctx context.Context, downloadInfo *metav1.DownloadInfo) (
 		if err != nil {
 			return nil, err
 		}
-		frameworks, err = appendSecurityViewFrameworks(g, frameworks)
+		frameworks, err = appendSecurityViewFrameworks(securityViewFrameworksGetter(g), frameworks)
 		if err != nil {
 			return nil, err
 		}
@@ -337,6 +337,25 @@ func appendSecurityViewFrameworks(g getter.IPolicyGetter, frameworks []reporthan
 		frameworks = append(frameworks, *framework)
 	}
 	return frameworks, nil
+}
+
+// securityViewFrameworksGetter returns the getter a "download all" asks for the
+// security view frameworks. A release answers for them by name, so it is used as
+// is. The cache that getDownloadReleasedPolicy falls back to when a release
+// cannot be fetched is a LoadPolicy over the NativeFrameworks files, and a
+// LoadPolicy looks nowhere but its own paths, so there the two files are read
+// from the same cache through a loader of their own. A file that is missing
+// stays a hard error. NativeFrameworks is left alone because it also decides
+// what a compliance scan of all frameworks evaluates.
+func securityViewFrameworksGetter(g getter.IPolicyGetter) getter.IPolicyGetter {
+	if _, ok := g.(*getter.LoadPolicy); !ok {
+		return g
+	}
+	fwPaths := make([]string, 0, len(getter.SecurityViewFrameworks))
+	for _, name := range getter.SecurityViewFrameworks {
+		fwPaths = append(fwPaths, getter.GetDefaultPath(name+".json"))
+	}
+	return getter.NewLoadPolicy(fwPaths)
 }
 
 func downloadControl(ctx context.Context, downloadInfo *metav1.DownloadInfo) ([]string, error) {
