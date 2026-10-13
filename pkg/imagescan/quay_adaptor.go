@@ -68,7 +68,7 @@ func createQuayHTTPClient(baseClient *http.Client, allowInsecureHTTPCredentials 
 		client = *baseClient
 	}
 	origCheckRedirect := client.CheckRedirect
-	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+	validateRedirect := func(req *http.Request, via []*http.Request) error {
 		if !allowInsecureHTTPCredentials {
 			if !strings.EqualFold(req.URL.Scheme, "https") {
 				for _, prev := range via {
@@ -88,8 +88,19 @@ func createQuayHTTPClient(baseClient *http.Client, allowInsecureHTTPCredentials 
 				return fmt.Errorf("refusing redirect: authenticated request changed origin from %s to %s", previous.URL.Host, req.URL.Host)
 			}
 		}
+		return nil
+	}
+	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		if err := validateRedirect(req, via); err != nil {
+			return err
+		}
 		if origCheckRedirect != nil {
-			return origCheckRedirect(req, via)
+			if err := origCheckRedirect(req, via); err != nil {
+				return err
+			}
+			// The caller may rewrite req.URL after Go has copied credentials.
+			// Recheck the final destination before the request can be sent.
+			return validateRedirect(req, via)
 		}
 		if len(via) >= 10 {
 			return errors.New("stopped after 10 redirects")

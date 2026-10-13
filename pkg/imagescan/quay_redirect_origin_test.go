@@ -13,6 +13,88 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestQuayRedirect_CallbackCannotRewriteDestinationAcrossOrigins(t *testing.T) {
+	for _, basic := range []bool{false, true} {
+		t.Run(fmt.Sprintf("basic=%t", basic), func(t *testing.T) {
+			var targetHits, callbackCalls atomic.Int32
+			target := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				targetHits.Add(1)
+				w.WriteHeader(http.StatusOK)
+			}))
+			defer target.Close()
+			source := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				http.Redirect(w, r, "/same-origin", http.StatusFound)
+			}))
+			defer source.Close()
+			base := source.Client()
+			base.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+				callbackCalls.Add(1)
+				mutated, err := url.Parse(target.URL + "/foreign")
+				if err != nil {
+					return err
+				}
+				req.URL = mutated
+				return nil
+			}
+			req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, source.URL, nil)
+			require.NoError(t, err)
+			if basic {
+				req.SetBasicAuth("fixture", "callback-test-password")
+			} else {
+				req.Header.Set("Authorization", "Bearer "+"callback-test-credential")
+			}
+			resp, err := createQuayHTTPClient(base, false).Do(req)
+			if resp != nil {
+				_ = resp.Body.Close()
+			}
+			require.Zero(t, targetHits.Load(), "the callback's final destination must be checked before any request is sent")
+			require.Equal(t, int32(1), callbackCalls.Load())
+			require.ErrorContains(t, err, "changed origin")
+		})
+	}
+}
+
+func TestQuayRedirect_CallbackMutationPreservesPolicyAndErrors(t *testing.T) {
+	for _, tc := range []struct {
+		name, target string
+		callbackErr  error
+		wantError    string
+	}{
+		{"same origin", "https://quay.example/rewritten", nil, ""},
+		{"downgrade", "http://quay.example/rewritten", nil, "scheme downgrade"},
+		{"different port", "https://quay.example:8443/rewritten", nil, "changed origin"},
+		{"custom rejection", "https://other.example/rewritten", errors.New("caller rejected redirect"), ""},
+		{"last response", "https://other.example/rewritten", http.ErrUseLastResponse, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			first, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "https://quay.example/start", nil)
+			require.NoError(t, err)
+			first.Header.Set("Authorization", "Bearer "+"callback-test-credential")
+			next, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "https://quay.example/next", nil)
+			require.NoError(t, err)
+			base := &http.Client{CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				req.URL, err = url.Parse(tc.target)
+				require.NoError(t, err)
+				return tc.callbackErr
+			}}
+			// A custom callback owns its redirect limit, even beyond the
+			// default client's ten-redirect cap.
+			via := make([]*http.Request, 11)
+			for i := range via {
+				via[i] = first
+			}
+			err = createQuayHTTPClient(base, false).CheckRedirect(next, via)
+			if tc.callbackErr != nil {
+				require.Same(t, tc.callbackErr, err)
+			} else if tc.wantError != "" {
+				require.ErrorContains(t, err, tc.wantError)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
+
 func TestQuayRedirect_AuthenticatedCrossOriginNeverReachesTarget(t *testing.T) {
 	for _, auth := range []string{"Bearer fixture-token", "Basic Zml4dHVyZTpwYXNzd29yZA=="} {
 		for _, insecure := range []bool{false, true} {
