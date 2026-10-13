@@ -312,21 +312,7 @@ func nextGitLabVulnerabilityCursor(hasNextPage bool, endCursor string, seen map[
 
 // imageMatches provides a boundary-safe match for the image location.
 func imageMatches(locationImage string, imageID ContainerImageIdentifier) bool {
-	if imageID.Hash != "" {
-		expectedSuffix := imageID.Repository + "@" + imageID.Hash
-		if locationImage == expectedSuffix || strings.HasSuffix(locationImage, "/"+expectedSuffix) {
-			return true
-		}
-	}
-
-	if imageID.Tag != "" {
-		expectedSuffix := imageID.Repository + ":" + imageID.Tag
-		if locationImage == expectedSuffix || strings.HasSuffix(locationImage, "/"+expectedSuffix) {
-			return true
-		}
-	}
-
-	return false
+	return gitLabLocationMatches(locationImage, imageID)
 }
 
 // GetImagesVulnerabilities retrieves the vulnerability reports for a list of image identifiers.
