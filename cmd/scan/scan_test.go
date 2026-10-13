@@ -3,6 +3,7 @@ package scan
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"github.com/anchore/grype/grype/vulnerability"
 	"github.com/kubescape/kubescape/v4/cmd/shared"
 	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/cautils/getter"
 	"github.com/kubescape/kubescape/v4/core/mocks"
 	resultshandlingpkg "github.com/kubescape/kubescape/v4/core/pkg/resultshandling"
 	v1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
@@ -1543,4 +1545,26 @@ func TestScanCommandPersistentPreRunE_ResolvesPolicyFromEnv(t *testing.T) {
 			})
 		}
 	})
+}
+
+// TestSecurityViewFrameworksAreDownloaded keeps the default scan and
+// `kubescape download artifacts` in step. The download fetches the compliance
+// frameworks a release lists, which cover getter.NativeFrameworks, plus
+// getter.SecurityViewFrameworks by name. A framework the security view starts
+// asking for that is in neither set would be missing from every offline bundle,
+// and `kubescape scan --use-artifacts-from` would fail on it (#4118).
+func TestSecurityViewFrameworksAreDownloaded(t *testing.T) {
+	downloaded := slices.Concat(getter.NativeFrameworks, getter.SecurityViewFrameworks)
+
+	for name, args := range map[string][]string{
+		"cluster scan": nil,
+		"path scan":    {"."},
+	} {
+		t.Run(name, func(t *testing.T) {
+			for _, policy := range setSecurityViewScanInfo(args, &cautils.ScanInfo{}) {
+				assert.Equal(t, v1.KindFramework, policy.Kind)
+				assert.Contains(t, downloaded, policy.Identifier)
+			}
+		})
+	}
 }
