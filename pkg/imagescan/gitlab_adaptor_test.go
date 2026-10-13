@@ -2,9 +2,11 @@ package imagescan
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -28,6 +30,17 @@ func (m *mockGitlabAPI) DoGraphQL(ctx context.Context, query string, variables m
 	}
 
 	key := fullPath
+	if strings.Contains(query, "ResolveRegistryProject") {
+		// Project discovery is distinct from fetching vulnerability data.
+		// Existing fixtures identify which project paths are present, including
+		// paths whose subsequent findings request intentionally fails.
+		_, hasResponse := m.responses[fullPath]
+		_, hasError := m.errors[fullPath]
+		if hasResponse || hasError {
+			return json.Marshal(map[string]any{"data": map[string]any{"project": map[string]any{"fullPath": fullPath}}})
+		}
+		return []byte(`{"data":{"project":null}}`), nil
+	}
 	if after, ok := variables["after"].(string); ok && after != "" {
 		key += "_" + after
 	}
@@ -150,35 +163,6 @@ func TestGitlabAPIWrapperRejectsOversizedResponse(t *testing.T) {
 
 	assert.Nil(t, body)
 	assert.ErrorContains(t, err, "exceeds the 8-byte limit")
-}
-
-func TestSplitGitLabProjectPath(t *testing.T) {
-	tests := []struct {
-		repo             string
-		expectedFullPath string
-		expectedImage    string
-		wantErr          bool
-	}{
-		{"my-group/my-project/my-image", "my-group/my-project", "my-image", false},
-		{"my-group/subgroup/my-project/my-image", "my-group/subgroup/my-project", "my-image", false},
-		{"my-group", "", "", true},          // Missing slash
-		{"/my-image", "", "", true},         // Invalid leading slash making fullPath empty
-		{"my-group/my-image", "", "", true}, // Only one slash, fails 'at least group/project/image'
-		{"/my-group/my-project/my-image", "my-group/my-project", "my-image", false}, // leading slash valid if rest is ok
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.repo, func(t *testing.T) {
-			fullPath, imageName, err := splitGitLabProjectPath(tt.repo)
-			if tt.wantErr {
-				assert.Error(t, err)
-			} else {
-				assert.NoError(t, err)
-				assert.Equal(t, tt.expectedFullPath, fullPath)
-				assert.Equal(t, tt.expectedImage, imageName)
-			}
-		})
-	}
 }
 
 func TestGitlabAdaptor_GetImagesScanStatus(t *testing.T) {
