@@ -3,18 +3,24 @@ package core
 import (
 	"context"
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sync/atomic"
 	"testing"
 
 	"github.com/kubescape/k8s-interface/k8sinterface"
+	"github.com/kubescape/kubescape/v4/core/cautils/getter"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/dynamic"
+	dynamicfake "k8s.io/client-go/dynamic/fake"
 	restclient "k8s.io/client-go/rest"
+	k8stesting "k8s.io/client-go/testing"
 )
 
 func TestCRDPolicyGettersUseScanTargetClient(t *testing.T) {
@@ -68,6 +74,38 @@ func TestCRDPolicyGettersUseScanTargetClient(t *testing.T) {
 
 	assert.Zero(t, globalRequests.Load(), "CRD policy reads must not consult the process-global API server")
 	assert.Positive(t, targetRequests.Load())
+}
+
+// TestConfigInputsGetterOnlyAbortsWhenTheScanIsStopped pins that a ControlInput read that timed out connecting falls back instead of aborting the scan.
+func TestConfigInputsGetterOnlyAbortsWhenTheScanIsStopped(t *testing.T) {
+	dialTimeout := &url.Error{Op: "Get", URL: "https://10.255.255.1/apis/kubescape.io/v1/controlinputs/default", Err: &net.OpError{Op: "dial", Net: "tcp", Err: context.DeadlineExceeded}}
+	target := &k8sinterface.KubernetesApi{DynamicClient: failingDynamicClient(dialTimeout)}
+
+	t.Run("cluster timed out", func(t *testing.T) {
+		g, _, err := getConfigInputsGetterForTarget(context.Background(), "", "", nil, true, false, target)
+		require.NoError(t, err)
+		require.NotNil(t, g)
+		_, isCRD := g.(*getter.CRDControlInputs)
+		assert.False(t, isCRD)
+	})
+
+	t.Run("scan stopped", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		target := &k8sinterface.KubernetesApi{DynamicClient: failingDynamicClient(context.Canceled)}
+		g, _, err := getConfigInputsGetterForTarget(ctx, "", "", nil, true, false, target)
+		require.ErrorIs(t, err, context.Canceled)
+		assert.Nil(t, g)
+	})
+}
+
+// failingDynamicClient returns a dynamic client whose every get fails with err.
+func failingDynamicClient(err error) dynamic.Interface {
+	client := dynamicfake.NewSimpleDynamicClient(runtime.NewScheme())
+	client.PrependReactor("get", "*", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, err
+	})
+	return client
 }
 
 func newCRDPolicyAPIServer(t *testing.T, source string, requests *atomic.Int64) *httptest.Server {

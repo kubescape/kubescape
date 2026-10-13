@@ -57,9 +57,13 @@ func printFleetClusters(w io.Writer, report *fleet.FleetReport) {
 
 	for i := range report.Clusters {
 		cluster := &report.Clusters[i]
+		status := fleetStatusText(cluster.Status)
+		if cluster.Attempts > 1 {
+			status += fmt.Sprintf(" (%d attempts)", cluster.Attempts)
+		}
 		clusters.AppendRow(table.Row{
 			cluster.ClusterID,
-			fleetStatusText(cluster.Status),
+			status,
 			percentOrDash(cluster.ComplianceScore),
 			fleetCoverageText(cluster),
 			valueOrDash(cluster.Duration),
