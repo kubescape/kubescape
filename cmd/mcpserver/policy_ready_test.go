@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -11,6 +12,8 @@ import (
 
 	"github.com/kubescape/kubescape/v4/core/cautils/getter"
 	"github.com/kubescape/kubescape/v4/core/pkg/resourcehandler"
+	"github.com/kubescape/opa-utils/reporthandling"
+	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -20,10 +23,17 @@ import (
 // makes any other policy call fail loudly instead of returning plausible data.
 type fakePolicyGetter struct {
 	getter.IPolicyGetter
-	frameworks []string
+	frameworks   []string
+	controls     []string
+	getFramework atomic.Int32
 }
 
 func (f *fakePolicyGetter) ListFrameworks() ([]string, error) { return f.frameworks, nil }
+func (f *fakePolicyGetter) ListControls() ([]string, error)   { return f.controls, nil }
+func (f *fakePolicyGetter) GetFramework(name string) (*reporthandling.Framework, error) {
+	f.getFramework.Add(1)
+	return nil, fmt.Errorf("framework %q not found", name)
+}
 
 // fakeStoreLoader is a policyStoreLoader with a scripted outcome.
 type fakeStoreLoader struct {
@@ -115,7 +125,8 @@ func TestPolicyToolsSucceedAfterReadiness(t *testing.T) {
 	load, calls := blockedLoad(&fakePolicyGetter{frameworks: []string{"nsa", "mitre"}}, release)
 	ks.startPolicyLoad(load)
 
-	// A call that started waiting before readiness completes once it arrives.
+	// A call racing the load completes once the load finishes, whether or not
+	// it had already started waiting.
 	type result struct {
 		out []byte
 		err error
@@ -125,7 +136,6 @@ func TestPolicyToolsSucceedAfterReadiness(t *testing.T) {
 		out, err := ks.ListFrameworks(context.Background())
 		res <- result{out, err}
 	}()
-	time.Sleep(20 * time.Millisecond) // let it reach the wait; correctness does not depend on it
 	close(release)
 
 	select {
@@ -245,4 +255,122 @@ func TestReadyPolicyGetterWithoutLoadIsImmediate(t *testing.T) {
 	got, err := ks.readyPolicyGetter(context.Background())
 	require.NoError(t, err)
 	assert.Same(t, pg, got)
+}
+
+// toolErrorOf decodes the structured error payload of an error result.
+func toolErrorOf(t *testing.T, res *mcp.CallToolResult) ToolError {
+	t.Helper()
+	require.NotNil(t, res)
+	require.True(t, res.IsError, "expected an error result")
+	require.Len(t, res.Content, 1)
+	text, ok := res.Content[0].(mcp.TextContent)
+	require.True(t, ok)
+	var te ToolError
+	require.NoError(t, json.Unmarshal([]byte(text.Text), &te))
+	return te
+}
+
+func TestCallTool_ListToolsReportTimeoutBeforePolicyReadiness(t *testing.T) {
+	release := make(chan struct{})
+	defer close(release)
+	ks := &KubescapeMcpserver{policyReadyWait: 25 * time.Millisecond}
+	load, _ := blockedLoad(&fakePolicyGetter{}, release)
+	ks.startPolicyLoad(load)
+
+	for _, tool := range []string{"list_frameworks", "list_controls"} {
+		t.Run(tool, func(t *testing.T) {
+			res, err := ks.CallTool(context.Background(), tool, map[string]any{})
+			require.NoError(t, err)
+			te := toolErrorOf(t, res)
+			assert.Equal(t, ErrCodeTimeout, te.Code)
+			assert.Contains(t, te.Message, "policy bundle is still loading")
+		})
+	}
+}
+
+func TestCallTool_ScanToolReportsTimeoutBeforePolicyReadiness(t *testing.T) {
+	release := make(chan struct{})
+	defer close(release)
+	pg := &fakePolicyGetter{}
+	ks := &KubescapeMcpserver{policyReadyWait: 25 * time.Millisecond}
+	load, _ := blockedLoad(pg, release)
+	ks.startPolicyLoad(load)
+
+	// scan_local_iac uses the file resource handler, so no cluster client is
+	// ever built on this path.
+	res, err := ks.CallTool(context.Background(), "scan_local_iac", map[string]any{
+		"path": "testdata/privileged-pod.yaml",
+	})
+	require.NoError(t, err)
+	te := toolErrorOf(t, res)
+	assert.Equal(t, ErrCodeTimeout, te.Code)
+	assert.Contains(t, te.Message, "policy bundle is still loading")
+	assert.Zero(t, pg.getFramework.Load(), "no policy may be read before the load finishes")
+}
+
+func TestCallTool_PolicyToolsSucceedOnRetryAfterLoadCompletes(t *testing.T) {
+	release := make(chan struct{})
+	pg := &fakePolicyGetter{frameworks: []string{"nsa", "mitre"}, controls: []string{"C-0001|Forbidden container registries|nsa"}}
+	ks := &KubescapeMcpserver{policyReadyWait: 25 * time.Millisecond}
+	load, calls := blockedLoad(pg, release)
+	ks.startPolicyLoad(load)
+
+	// First attempt: still loading.
+	res, err := ks.CallTool(context.Background(), "list_frameworks", map[string]any{})
+	require.NoError(t, err)
+	assert.Equal(t, ErrCodeTimeout, toolErrorOf(t, res).Code)
+
+	// Let the load finish, then wait for the gate with a generous bound.
+	close(release)
+	ks.policyReadyWait = 0
+	_, err = ks.readyPolicyGetter(context.Background())
+	require.NoError(t, err)
+
+	// Retry: every policy-dependent tool now works.
+	res, err = ks.CallTool(context.Background(), "list_frameworks", map[string]any{})
+	require.NoError(t, err)
+	require.False(t, res.IsError)
+	assert.JSONEq(t, `["mitre","nsa"]`, res.Content[0].(mcp.TextContent).Text)
+
+	res, err = ks.CallTool(context.Background(), "list_controls", map[string]any{})
+	require.NoError(t, err)
+	require.False(t, res.IsError)
+	assert.Contains(t, res.Content[0].(mcp.TextContent).Text, "C-0001")
+
+	// A scan tool now gets past the gate and reaches the policy getter. The
+	// fake has no framework, so it fails there, and not with "still loading".
+	res, err = ks.CallTool(context.Background(), "scan_local_iac", map[string]any{
+		"path": "testdata/privileged-pod.yaml",
+	})
+	require.NoError(t, err)
+	te := toolErrorOf(t, res)
+	assert.NotContains(t, te.Message, "still loading")
+	assert.NotZero(t, pg.getFramework.Load(), "scan must have reached the policy getter")
+	assert.EqualValues(t, 1, calls.Load(), "policy store must be initialized exactly once")
+}
+
+func TestMCPToolsCallWhileLoadingReturnsStructuredTimeoutOverJSONRPC(t *testing.T) {
+	release := make(chan struct{})
+	defer close(release)
+	ks := &KubescapeMcpserver{s: server.NewMCPServer("test", "0"), policyReadyWait: 25 * time.Millisecond}
+	load, _ := blockedLoad(&fakePolicyGetter{}, release)
+	ks.startPolicyLoad(load)
+	createPolicyListingTools(ks)
+
+	// Initialize and discovery stay responsive while the load is blocked...
+	ctx := context.Background()
+	require.NotNil(t, ks.s.HandleMessage(ctx, json.RawMessage(
+		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"t","version":"0"}}}`)))
+	list, err := json.Marshal(ks.s.HandleMessage(ctx, json.RawMessage(`{"jsonrpc":"2.0","id":2,"method":"tools/list"}`)))
+	require.NoError(t, err)
+	assert.Contains(t, string(list), `"list_frameworks"`)
+	assert.Contains(t, string(list), `"list_controls"`)
+
+	// ...and a policy tool called through the registered handler reports the
+	// bounded, structured error instead of hanging or returning an empty list.
+	resp, err := json.Marshal(ks.s.HandleMessage(ctx, json.RawMessage(
+		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"list_frameworks","arguments":{}}}`)))
+	require.NoError(t, err)
+	assert.Contains(t, string(resp), `TIMEOUT`)
+	assert.Contains(t, string(resp), `policy bundle is still loading`)
 }

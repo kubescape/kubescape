@@ -1312,13 +1312,13 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 	case "list_frameworks":
 		result, err := ksServer.ListFrameworks(ctx)
 		if err != nil {
-			return mcpToolError(ErrCodeScanFailed, fmt.Sprintf("failed to list frameworks: %v", err), nil), nil
+			return mcpToolError(classifyScanError(err), fmt.Sprintf("failed to list frameworks: %v", err), nil), nil
 		}
 		return mcp.NewToolResultText(string(result)), nil
 	case "list_controls":
 		result, err := ksServer.ListControls(ctx)
 		if err != nil {
-			return mcpToolError(ErrCodeScanFailed, fmt.Sprintf("failed to list controls: %v", err), nil), nil
+			return mcpToolError(classifyScanError(err), fmt.Sprintf("failed to list controls: %v", err), nil), nil
 		}
 		return mcp.NewToolResultText(string(result)), nil
 	case "list_admission_policies":
