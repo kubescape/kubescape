@@ -208,7 +208,9 @@ type RoleTarget struct {
 	// Name is the object's name, or "" when the edge covers every object of
 	// Kind in Namespace (an unrestricted grant). A grant restricted by
 	// resourceNames always carries the name, whether or not an object of that
-	// name was found in the collected snapshot.
+	// name was found in the collected snapshot. An empty entry in resourceNames
+	// names no object, so it produces no edge rather than a Target whose Name
+	// is "".
 	Name string
 }
 

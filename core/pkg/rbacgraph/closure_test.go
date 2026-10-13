@@ -1103,6 +1103,52 @@ func TestDirectEscalationEdges_UnfoundEscalateTargetKeepsItsResourceNames(t *tes
 	}
 }
 
+func TestDirectEscalationEdges_EmptyResourceNameIsNotAnUnrestrictedTarget(t *testing.T) {
+	// A Target with no Name covers every Role, which is how an unrestricted
+	// grant is described. resourceNames: [""] is a restricted grant, and one
+	// that reaches no Role at all, so it must not surface as a Target whose
+	// Name is "": a caller would read that as covering the Roles that exist.
+	index := func(names ...string) *Index {
+		rbacRule := func(resource string) rbacv1.PolicyRule {
+			return rule([]string{"rbac.authorization.k8s.io"}, []string{resource}, []string{"escalate", "update"}, names)
+		}
+		return NewIndex(
+			[]rbacv1.Role{role("dev", "editable"), role("dev", "namespaced", rbacRule("roles"))},
+			[]rbacv1.ClusterRole{clusterRole("existing"), clusterRole("cluster-wide", rbacRule("roles"), rbacRule("clusterroles"))},
+			[]rbacv1.RoleBinding{roleBinding("dev", "rb", "Role", "namespaced", saSubject("dev", "attacker"))},
+			[]rbacv1.ClusterRoleBinding{clusterRoleBinding("crb", "cluster-wide", saSubject("dev", "attacker"))},
+			nil)
+	}
+	targets := func(idx *Index) []RoleTarget {
+		var targets []RoleTarget
+		for _, e := range idx.DirectEscalationEdges(sa("dev", "attacker"), idx.DirectRules(sa("dev", "attacker"))) {
+			if e.Primitive != PrimitiveEscalateVerb {
+				continue
+			}
+			if e.Target == nil {
+				t.Fatalf("edge %q has no Target", e.Detail)
+			}
+			targets = append(targets, *e.Target)
+		}
+		return targets
+	}
+
+	if got := targets(index("")); len(got) != 0 {
+		t.Errorf("escalate-verb Targets = %+v, want none: no Role or ClusterRole can be named \"\"", got)
+	}
+
+	// Next to a real name, the empty one adds nothing and takes nothing away.
+	got := targets(index("", "editable"))
+	if !slices.Contains(got, RoleTarget{Kind: "Role", Namespace: "dev", Name: "editable"}) {
+		t.Errorf("escalate-verb Targets = %+v, want Role dev/editable among them", got)
+	}
+	for _, target := range got {
+		if target.Name == "" || target.Covers("Role", "dev", "namespaced") || target.Covers("ClusterRole", "", "existing") {
+			t.Errorf("Target %+v covers an object the grant does not name", target)
+		}
+	}
+}
+
 func TestAnalyzeEscalation_NamespacedBindDoesNotAllowAClusterRoleBinding(t *testing.T) {
 	// bind is checked in the namespace of the binding being created, and a
 	// ClusterRoleBinding has none: a bind grant from a RoleBinding cannot
