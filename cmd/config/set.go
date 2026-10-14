@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/meta"
 	metav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
@@ -33,7 +34,13 @@ func getSetCmd(ks meta.IKubescape) *cobra.Command {
 
 var supportConfigSet = map[string]func(*metav1.SetConfig, string) error{
 	"accessKey": func(s *metav1.SetConfig, accessKey string) error { s.AccessKey = accessKey; return nil },
-	"accountID": func(s *metav1.SetConfig, account string) error { s.Account = account; return nil },
+	"accountID": func(s *metav1.SetConfig, account string) error {
+		if _, err := uuid.Parse(account); err != nil {
+			return fmt.Errorf("invalid accountID: %w", err)
+		}
+		s.Account = account
+		return nil
+	},
 	"cloudAPIURL": func(s *metav1.SetConfig, cloudAPIURL string) error {
 		if err := validateURL(cloudAPIURL); err != nil {
 			return fmt.Errorf("invalid cloudAPIURL: %w", err)

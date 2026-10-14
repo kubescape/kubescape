@@ -122,6 +122,22 @@ func TestValidateConfig_TrimsRequiredFields(t *testing.T) {
 	assertConfigCheck(t, result.Checks, "accessKey", ConfigValidationStatusMissing)
 }
 
+func TestValidateConfig_InvalidAccountID(t *testing.T) {
+	for _, profile := range []ConfigValidationProfile{ConfigValidationProfileCloud, ConfigValidationProfileOffline} {
+		t.Run(string(profile), func(t *testing.T) {
+			cfg := validConfigForValidation()
+			cfg.AccountID = "not-a-uuid"
+
+			result := ValidateConfig(cfg, profile)
+
+			assert.False(t, result.Valid)
+			check := requireConfigCheck(t, result.Checks, "accountID")
+			assert.Equal(t, ConfigValidationStatusInvalid, check.Status)
+			assert.Contains(t, check.Message, "must be a valid UUID")
+		})
+	}
+}
+
 func TestValidateConfig_InvalidCloudAPIURL(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -177,7 +193,7 @@ func TestValidateConfig_InvalidCloudReportURL(t *testing.T) {
 
 func TestFormatConfigValidationResultTextFailuresOnlyByDefault(t *testing.T) {
 	result := ValidateConfig(&ConfigObj{
-		AccountID:      "account-123",
+		AccountID:      "6f2c3e1a-9b4d-4c8e-a1f2-3b4c5d6e7f80",
 		AccessKey:      "",
 		CloudAPIURL:    "https://api.example.com",
 		CloudReportURL: "ftp://report.example.com",
@@ -212,7 +228,7 @@ func TestFormatConfigValidationResultTextIncludesPassingChecks(t *testing.T) {
 
 func TestFormatConfigValidationResultJSON(t *testing.T) {
 	result := ValidateConfig(&ConfigObj{
-		AccountID:      "account-123",
+		AccountID:      "6f2c3e1a-9b4d-4c8e-a1f2-3b4c5d6e7f80",
 		AccessKey:      "access-key",
 		CloudAPIURL:    "https://api.example.com",
 		CloudReportURL: "",
@@ -318,7 +334,7 @@ func TestFilterConfigValidationChecksDropsOKChecks(t *testing.T) {
 
 func validConfigForValidation() *ConfigObj {
 	return &ConfigObj{
-		AccountID:      "account-123",
+		AccountID:      "6f2c3e1a-9b4d-4c8e-a1f2-3b4c5d6e7f80",
 		AccessKey:      "access-key",
 		CloudAPIURL:    "https://api.example.com",
 		CloudReportURL: "https://report.example.com",

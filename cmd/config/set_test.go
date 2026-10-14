@@ -33,7 +33,7 @@ func TestGetSetCmd(t *testing.T) {
 	assert.Equal(t, setConfigExample, configSetCmd.Example)
 	assert.Equal(t, stringKeysToSlice(supportConfigSet), configSetCmd.ValidArgs)
 
-	err := configSetCmd.RunE(&cobra.Command{}, []string{"accountID=value1"})
+	err := configSetCmd.RunE(&cobra.Command{}, []string{"accountID=6f2c3e1a-9b4d-4c8e-a1f2-3b4c5d6e7f80"})
 	assert.Nil(t, err)
 
 	err = configSetCmd.RunE(&cobra.Command{}, []string{})
@@ -43,7 +43,7 @@ func TestGetSetCmd(t *testing.T) {
 
 func TestGetSetCmd_SetCachedConfigReturnsError(t *testing.T) {
 	cmd := getSetCmd(&setCachedConfigErr{})
-	err := cmd.RunE(&cobra.Command{}, []string{"accountID=value1"})
+	err := cmd.RunE(&cobra.Command{}, []string{"accountID=6f2c3e1a-9b4d-4c8e-a1f2-3b4c5d6e7f80"})
 	assert.EqualError(t, err, "persist failed")
 }
 
@@ -78,9 +78,9 @@ func TestParseSetArgs_AccessKey(t *testing.T) {
 }
 
 func TestParseSetArgs_Single(t *testing.T) {
-	args := []string{"accountID=value1"}
+	args := []string{"accountID=6f2c3e1a-9b4d-4c8e-a1f2-3b4c5d6e7f80"}
 	setConfig, _ := parseSetArgs(args)
-	assert.Equal(t, "value1", setConfig.Account)
+	assert.Equal(t, "6f2c3e1a-9b4d-4c8e-a1f2-3b4c5d6e7f80", setConfig.Account)
 	assert.Equal(t, "", setConfig.AccessKey)
 	assert.Equal(t, "", setConfig.CloudReportURL)
 	assert.Equal(t, "", setConfig.CloudAPIURL)
@@ -99,12 +99,12 @@ func TestParseSetArgs_CaseInsensitiveAndKebabCase(t *testing.T) {
 		wantField string
 		wantVal   string
 	}{
-		{name: "accountId camelCase", args: []string{"accountId=val-acc"}, wantField: "account", wantVal: "val-acc"},
-		{name: "accountid lowercase", args: []string{"accountid=val-acc"}, wantField: "account", wantVal: "val-acc"},
-		{name: "account-id kebab-case", args: []string{"account-id=val-acc"}, wantField: "account", wantVal: "val-acc"},
-		{name: "account_id snake-case", args: []string{"account_id", "val-acc"}, wantField: "account", wantVal: "val-acc"},
-		{name: "account alias", args: []string{"account=val-acc"}, wantField: "account", wantVal: "val-acc"},
-		{name: "ACCOUNT_ID uppercase", args: []string{"ACCOUNT_ID=val-acc"}, wantField: "account", wantVal: "val-acc"},
+		{name: "accountId camelCase", args: []string{"accountId=6f2c3e1a-9b4d-4c8e-a1f2-3b4c5d6e7f80"}, wantField: "account", wantVal: "6f2c3e1a-9b4d-4c8e-a1f2-3b4c5d6e7f80"},
+		{name: "accountid lowercase", args: []string{"accountid=6f2c3e1a-9b4d-4c8e-a1f2-3b4c5d6e7f80"}, wantField: "account", wantVal: "6f2c3e1a-9b4d-4c8e-a1f2-3b4c5d6e7f80"},
+		{name: "account-id kebab-case", args: []string{"account-id=6f2c3e1a-9b4d-4c8e-a1f2-3b4c5d6e7f80"}, wantField: "account", wantVal: "6f2c3e1a-9b4d-4c8e-a1f2-3b4c5d6e7f80"},
+		{name: "account_id snake-case", args: []string{"account_id", "6f2c3e1a-9b4d-4c8e-a1f2-3b4c5d6e7f80"}, wantField: "account", wantVal: "6f2c3e1a-9b4d-4c8e-a1f2-3b4c5d6e7f80"},
+		{name: "account alias", args: []string{"account=6f2c3e1a-9b4d-4c8e-a1f2-3b4c5d6e7f80"}, wantField: "account", wantVal: "6f2c3e1a-9b4d-4c8e-a1f2-3b4c5d6e7f80"},
+		{name: "ACCOUNT_ID uppercase", args: []string{"ACCOUNT_ID=6f2c3e1a-9b4d-4c8e-a1f2-3b4c5d6e7f80"}, wantField: "account", wantVal: "6f2c3e1a-9b4d-4c8e-a1f2-3b4c5d6e7f80"},
 
 		{name: "accesskey lowercase", args: []string{"accesskey=val-key"}, wantField: "accessKey", wantVal: "val-key"},
 		{name: "access-key kebab-case", args: []string{"access-key=val-key"}, wantField: "accessKey", wantVal: "val-key"},
@@ -144,6 +144,13 @@ func TestParseSetArgs_TooManyArgs(t *testing.T) {
 	_, err := parseSetArgs([]string{"accountID", "v", "extra"})
 	assert.ErrorContains(t, err, "too many arguments")
 	assert.ErrorContains(t, err, "supported keys:")
+}
+
+func TestParseSetArgs_AccountID_Invalid(t *testing.T) {
+	args := []string{"accountID=not-a-uuid"}
+	setConfig, err := parseSetArgs(args)
+	assert.Nil(t, setConfig)
+	assert.ErrorContains(t, err, "invalid accountID")
 }
 
 func TestParseSetArgs_CloudAPIURL_Invalid(t *testing.T) {
