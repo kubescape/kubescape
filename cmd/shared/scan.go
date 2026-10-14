@@ -146,6 +146,13 @@ func ValidateCommonScanFlags(cmd *cobra.Command, scanInfo *cautils.ScanInfo, sup
 	if err := ValidateScanFormat(scanInfo.Format, supportedFormats); err != nil {
 		return err
 	}
+	if scanInfo.ScanImages && scanInfo.ScanType != cautils.ScanTypeImage {
+		for _, format := range strings.Split(scanInfo.Format, ",") {
+			if strings.TrimSpace(format) == printer.GitLabSASTFormat {
+				return fmt.Errorf("gitlab-sast requires separate posture and image scans; use json or sarif for a combined scan with --scan-images")
+			}
+		}
+	}
 	if err := ValidateKindFilters(scanInfo); err != nil {
 		return err
 	}
