@@ -140,6 +140,14 @@ type KubescapeMcpserver struct {
 	scanGroup      singleflight.Group
 	scanCtxMu      sync.Mutex
 	scanCtxs       map[string]*scanCtxState
+
+	// policyReady is closed once the startup policy load has finished. It is
+	// nil for a server that was given its policyGetter directly, which is
+	// ready by definition. See startPolicyLoad.
+	policyReady chan struct{}
+	// policyReadyWait bounds how long a tool call waits for policyReady.
+	// Zero means defaultPolicyReadyWait.
+	policyReadyWait time.Duration
 }
 
 // getPolicyGetter lazily constructs policyGetter on first use, guarded so
@@ -1304,13 +1312,13 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 	case "list_frameworks":
 		result, err := ksServer.ListFrameworks(ctx)
 		if err != nil {
-			return mcpToolError(ErrCodeScanFailed, fmt.Sprintf("failed to list frameworks: %v", err), nil), nil
+			return mcpToolError(classifyScanError(err), fmt.Sprintf("failed to list frameworks: %v", err), nil), nil
 		}
 		return mcp.NewToolResultText(string(result)), nil
 	case "list_controls":
 		result, err := ksServer.ListControls(ctx)
 		if err != nil {
-			return mcpToolError(ErrCodeScanFailed, fmt.Sprintf("failed to list controls: %v", err), nil), nil
+			return mcpToolError(classifyScanError(err), fmt.Sprintf("failed to list controls: %v", err), nil), nil
 		}
 		return mcp.NewToolResultText(string(result)), nil
 	case "list_admission_policies":
@@ -1341,26 +1349,19 @@ func mcpServerEntrypoint(transport string, port int) error {
 	)
 
 	drp := getter.NewDownloadReleasedPolicy()
-	var pg getter.IPolicyGetter = drp
-
-	// Initialize the policy getter to load the local ~/.kubescape cache.
-	// Without this, the getter will always hit the GitHub API directly for every scan,
-	// defeating offline scanning and causing rate limits.
-	if fallback, err := drp.SetRegoObjectsWithFallback(); err != nil {
-		logger.L().Warning("Failed to initialize policy store at startup (falling back to direct download later)", helpers.Error(err))
-	} else if fallback {
-		logger.L().Warning("Failed to get policies from github release, loading policies from cache")
-		paths := make([]string, 0, len(getter.NativeFrameworks))
-		for _, fw := range getter.NativeFrameworks {
-			paths = append(paths, getter.GetDefaultPath(fw+".json"))
-		}
-		pg = getter.NewLoadPolicy(paths)
-	}
 
 	ksServer := &KubescapeMcpserver{
 		s:            s,
-		policyGetter: pg,
+		policyGetter: drp,
 	}
+
+	// The policy bundle download can take well over a minute. Load it in the
+	// background so the MCP initialize handshake and tool discovery are not
+	// held up behind it; tools that need policies wait for it (see
+	// readyPolicyGetter).
+	ksServer.startPolicyLoad(func() getter.IPolicyGetter {
+		return loadPolicyGetter(drp)
+	})
 
 	// Creating Kubescape tools and resources
 

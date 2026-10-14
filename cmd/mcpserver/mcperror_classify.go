@@ -45,7 +45,8 @@ func classifyScanError(err error) ErrorCode {
 	case apierrors.IsNotFound(err):
 		return ErrCodeResourceNotFound
 
-	case errors.Is(err, context.DeadlineExceeded),
+	case errors.Is(err, errPolicyNotReady),
+		errors.Is(err, context.DeadlineExceeded),
 		errors.Is(err, context.Canceled):
 		return ErrCodeTimeout
 
