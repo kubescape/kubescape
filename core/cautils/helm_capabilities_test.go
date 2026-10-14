@@ -8,6 +8,8 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	helmchartutil "helm.sh/helm/v3/pkg/chartutil"
@@ -329,4 +331,55 @@ func TestLoadResourcesFromHelmCharts_DefaultsToChartKubeVersion(t *testing.T) {
 	require.Len(t, sourceToWorkloads[webPath], 1)
 	assert.Equal(t, "Deployment", sourceToWorkloads[webPath][0].GetKind())
 	assert.NotContains(t, sourceToWorkloads, routePath, "API-gated templates still need --api-versions")
+}
+
+// captureHelmLoadLog returns what LoadResourcesFromHelmCharts logs at info level for chartDir.
+func captureHelmLoadLog(t *testing.T, chartDir string, valueOpts HelmValueOptions) string {
+	t.Helper()
+	originalLevel := logger.L().GetLevel()
+	require.NoError(t, logger.L().SetLevel(helpers.InfoLevel.String()))
+	defer func() { _ = logger.L().SetLevel(originalLevel) }()
+
+	logFile, err := os.Create(filepath.Join(t.TempDir(), "log"))
+	require.NoError(t, err)
+	defer logFile.Close()
+	originalWriter := logger.L().GetWriter()
+	logger.L().SetWriter(logFile)
+	defer logger.L().SetWriter(originalWriter)
+
+	_, _, _, err = LoadResourcesFromHelmCharts(context.Background(), chartDir, valueOpts)
+	require.NoError(t, err)
+
+	out, err := os.ReadFile(logFile.Name())
+	require.NoError(t, err)
+	return string(out)
+}
+
+func TestLoadResourcesFromHelmCharts_LogsRenderKubeVersion(t *testing.T) {
+	newestVersion := "v" + componentversion.DefaultKubeBinaryVersion + ".0"
+
+	t.Run("version from the chart constraint", func(t *testing.T) {
+		out := captureHelmLoadLog(t, writeCapabilitiesChart(t, ">=1.29.0-0"), HelmValueOptions{})
+		assert.Contains(t, out, "Rendering Helm chart for "+newestVersion+", the newest Kubernetes version its kubeVersion allows")
+		assert.Contains(t, out, ">=1.29.0-0")
+		assert.Contains(t, out, "--kube-version")
+	})
+
+	t.Run("no constraint", func(t *testing.T) {
+		out := captureHelmLoadLog(t, writeCapabilitiesChart(t, ""), HelmValueOptions{})
+		assert.Contains(t, out, "Rendering Helm chart for Kubernetes v1.20.0, as it declares no kubeVersion")
+		assert.Contains(t, out, "--kube-version")
+	})
+
+	t.Run("constraint no supported version satisfies", func(t *testing.T) {
+		out := captureHelmLoadLog(t, writeCapabilitiesChart(t, "~1.29.3"), HelmValueOptions{})
+		assert.Contains(t, out, "No supported Kubernetes version satisfies the Helm chart's kubeVersion, rendering for v1.20.0")
+		assert.Contains(t, out, "~1.29.3")
+	})
+
+	t.Run("explicit version", func(t *testing.T) {
+		out := captureHelmLoadLog(t, writeCapabilitiesChart(t, ">=1.29.0-0"), HelmValueOptions{KubeVersion: "1.31"})
+		assert.NotContains(t, out, "Rendering Helm chart for")
+		assert.NotContains(t, out, "No supported Kubernetes version")
+	})
 }

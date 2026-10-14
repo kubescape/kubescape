@@ -28,6 +28,7 @@ import (
 	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
 	"github.com/valyala/fastjson"
 	"gopkg.in/yaml.v3"
+	helmchartutil "helm.sh/helm/v3/pkg/chartutil"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -170,6 +171,9 @@ func loadResourcesFromHelmCharts(ctx context.Context, basePath string, valueOpts
 		if userValues != nil {
 			values = mergeMaps(values, userValues)
 		}
+		if capOpts.KubeVersion == "" {
+			logHelmKubeVersion(ctx, chart)
+		}
 		wls, errs := chart.GetWorkloadsWithCapabilities(values, releaseOpts, capOpts)
 		if len(errs) > 0 {
 			logger.L().Ctx(ctx).Warning(fmt.Sprintf("Rendering of Helm chart template '%s', failed: %v", chart.GetName(), errs))
@@ -189,6 +193,25 @@ func loadResourcesFromHelmCharts(ctx context.Context, basePath string, valueOpts
 		}
 	}
 	return sourceToWorkloads, sourceToChart, renderedCharts, nil
+}
+
+// logHelmKubeVersion says which Kubernetes version chart is rendered for when --kube-version is
+// not set. The version decides which version-gated templates are rendered, and so scanned.
+func logHelmKubeVersion(ctx context.Context, chart *HelmChart) {
+	helmDefault := helmchartutil.DefaultCapabilities.KubeVersion.Version
+	constraint := chart.kubeVersionConstraint()
+	if constraint == "" {
+		logger.L().Ctx(ctx).Info("Rendering Helm chart for Kubernetes "+helmDefault+", as it declares no kubeVersion. Use --kube-version to choose another",
+			helpers.String("chart", chart.GetName()))
+		return
+	}
+	if kubeVersion := chart.defaultKubeVersion(); kubeVersion != nil {
+		logger.L().Ctx(ctx).Info("Rendering Helm chart for "+kubeVersion.Version+", the newest Kubernetes version its kubeVersion allows. Use --kube-version to choose another",
+			helpers.String("chart", chart.GetName()), helpers.String("kubeVersion", constraint))
+		return
+	}
+	logger.L().Ctx(ctx).Warning("No supported Kubernetes version satisfies the Helm chart's kubeVersion, rendering for "+helmDefault+". Use --kube-version to choose one",
+		helpers.String("chart", chart.GetName()), helpers.String("kubeVersion", constraint))
 }
 
 // helmChartOwnedByAny reports whether chartDir is inside the unpacked dependency
