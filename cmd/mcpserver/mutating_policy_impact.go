@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/kubescape/kubescape/v4/core/pkg/mapreconcile"
@@ -100,83 +102,95 @@ func createMutatingAdmissionPolicyTools(ksServer *KubescapeMcpserver) {
 			operation = op
 		}
 
-		k8sClient, err := ksServer.getK8sClient()
-		if err != nil {
-			return mcpToolError(ErrCodeK8sClientError, fmt.Sprintf("failed to get k8s client: %v", err), nil), nil
+		params := url.Values{
+			"namespace":      {namespace},
+			"name":           {name},
+			"api_group":      {apiGroup},
+			"api_version":    {apiVersion},
+			"resource":       {resource},
+			"subresource":    {subresource},
+			"operation":      {string(operation)},
+			"cluster_scoped": {strconv.FormatBool(effectiveClusterScoped)},
 		}
-
-		policies, bindings, decodeErrs, err := mapreconcile.Collect(ctx, k8sClient)
-		if err != nil {
-			if errors.Is(err, mapreconcile.ErrUnsupported) {
-				return mcp.NewToolResultText(`{"supported":false,"reason":"cluster does not serve MutatingAdmissionPolicy resources"}`), nil
+		return ksServer.doAnalysis(ctx, "analyze_mutating_admission_policy_impact", params, func(ctx context.Context) *mcp.CallToolResult {
+			k8sClient, err := ksServer.getK8sClient()
+			if err != nil {
+				return mcpToolError(ErrCodeK8sClientError, fmt.Sprintf("failed to get k8s client: %v", err), nil)
 			}
-			return mcpToolError(ErrCodeK8sClientError, fmt.Sprintf("failed to collect MutatingAdmissionPolicy resources: %v", err), nil), nil
-		}
 
-		gvr := schema.GroupVersionResource{Group: apiGroup, Version: apiVersion, Resource: resource}
-		dynClient := k8sClient.DynamicClient
-
-		resourceInterface := dynClient.Resource(gvr)
-		var obj *unstructured.Unstructured
-		var getErr error
-		if effectiveClusterScoped {
-			obj, getErr = resourceInterface.Get(ctx, name, metav1.GetOptions{})
-		} else {
-			obj, getErr = resourceInterface.Namespace(namespace).Get(ctx, name, metav1.GetOptions{})
-		}
-		if getErr != nil {
-			if apierrors.IsNotFound(getErr) {
-				// ErrCodeResourceNotFound: the requested target object does not exist in the cluster.
-				// Semantics align with classifyScanError: agent recovery action is to verify kind/name/ns.
-				return mcpToolError(ErrCodeResourceNotFound, fmt.Sprintf("resource %s/%s (%s) not found: %v", namespace, name, gvr.String(), getErr), map[string]any{"resource_type": resource, "namespace": namespace, "name": name}), nil
+			policies, bindings, decodeErrs, err := mapreconcile.Collect(ctx, k8sClient)
+			if err != nil {
+				if errors.Is(err, mapreconcile.ErrUnsupported) {
+					return mcp.NewToolResultText(`{"supported":false,"reason":"cluster does not serve MutatingAdmissionPolicy resources"}`)
+				}
+				return mcpToolError(ErrCodeK8sClientError, fmt.Sprintf("failed to collect MutatingAdmissionPolicy resources: %v", err), nil)
 			}
-			return mcpToolError(ErrCodeK8sClientError, fmt.Sprintf("failed to get resource %s/%s (%s): %v", namespace, name, gvr.String(), getErr), map[string]any{"resource_type": resource, "namespace": namespace, "name": name}), nil
-		}
 
-		info := mapreconcile.ObjectInfo{
-			Group:             apiGroup,
-			Version:           apiVersion,
-			Resource:          resource,
-			Subresource:       subresource,
-			Name:              name,
-			Namespace:         namespace,
-			Labels:            obj.GetLabels(),
-			Operation:         operation,
-			ClusterScoped:     effectiveClusterScoped,
-			IsNamespaceObject: isNamespaceResource,
-		}
+			gvr := schema.GroupVersionResource{Group: apiGroup, Version: apiVersion, Resource: resource}
+			dynClient := k8sClient.DynamicClient
 
-		if !effectiveClusterScoped {
-			nsObj, nsErr := dynClient.Resource(namespaceGVR).Get(ctx, namespace, metav1.GetOptions{})
-			if nsErr == nil {
-				info.NamespaceLabels = nsObj.GetLabels()
-				info.NamespaceLabelsKnown = true
-			} else if !apierrors.IsNotFound(nsErr) {
-				return mcpToolError(ErrCodeK8sClientError, fmt.Sprintf("failed to get namespace %s: %v", namespace, nsErr), map[string]any{"namespace": namespace}), nil
+			resourceInterface := dynClient.Resource(gvr)
+			var obj *unstructured.Unstructured
+			var getErr error
+			if effectiveClusterScoped {
+				obj, getErr = resourceInterface.Get(ctx, name, metav1.GetOptions{})
+			} else {
+				obj, getErr = resourceInterface.Namespace(namespace).Get(ctx, name, metav1.GetOptions{})
 			}
-		}
-
-		idx, indexErrs := mapreconcile.NewIndex(policies, bindings)
-		matches := idx.Matches(info)
-
-		result := map[string]any{
-			"supported": true,
-			"matches":   buildMatchSummaries(matches),
-		}
-		allWarnings := append(append([]error{}, decodeErrs...), indexErrs...)
-		if len(allWarnings) > 0 {
-			msgs := make([]string, len(allWarnings))
-			for i, e := range allWarnings {
-				msgs[i] = e.Error()
+			if getErr != nil {
+				if apierrors.IsNotFound(getErr) {
+					// ErrCodeResourceNotFound: the requested target object does not exist in the cluster.
+					// Semantics align with classifyScanError: agent recovery action is to verify kind/name/ns.
+					return mcpToolError(ErrCodeResourceNotFound, fmt.Sprintf("resource %s/%s (%s) not found: %v", namespace, name, gvr.String(), getErr), map[string]any{"resource_type": resource, "namespace": namespace, "name": name})
+				}
+				return mcpToolError(ErrCodeK8sClientError, fmt.Sprintf("failed to get resource %s/%s (%s): %v", namespace, name, gvr.String(), getErr), map[string]any{"resource_type": resource, "namespace": namespace, "name": name})
 			}
-			result["decode_warnings"] = msgs
-		}
 
-		resBytes, err := json.Marshal(result)
-		if err != nil {
-			return mcpToolError(ErrCodeMarshalError, fmt.Sprintf("failed to marshal result: %v", err), nil), nil
-		}
-		return mcp.NewToolResultText(string(resBytes)), nil
+			info := mapreconcile.ObjectInfo{
+				Group:             apiGroup,
+				Version:           apiVersion,
+				Resource:          resource,
+				Subresource:       subresource,
+				Name:              name,
+				Namespace:         namespace,
+				Labels:            obj.GetLabels(),
+				Operation:         operation,
+				ClusterScoped:     effectiveClusterScoped,
+				IsNamespaceObject: isNamespaceResource,
+			}
+
+			if !effectiveClusterScoped {
+				nsObj, nsErr := dynClient.Resource(namespaceGVR).Get(ctx, namespace, metav1.GetOptions{})
+				if nsErr == nil {
+					info.NamespaceLabels = nsObj.GetLabels()
+					info.NamespaceLabelsKnown = true
+				} else if !apierrors.IsNotFound(nsErr) {
+					return mcpToolError(ErrCodeK8sClientError, fmt.Sprintf("failed to get namespace %s: %v", namespace, nsErr), map[string]any{"namespace": namespace})
+				}
+			}
+
+			idx, indexErrs := mapreconcile.NewIndex(policies, bindings)
+			matches := idx.Matches(info)
+
+			result := map[string]any{
+				"supported": true,
+				"matches":   buildMatchSummaries(matches),
+			}
+			allWarnings := append(append([]error{}, decodeErrs...), indexErrs...)
+			if len(allWarnings) > 0 {
+				msgs := make([]string, len(allWarnings))
+				for i, e := range allWarnings {
+					msgs[i] = e.Error()
+				}
+				result["decode_warnings"] = msgs
+			}
+
+			resBytes, err := json.Marshal(result)
+			if err != nil {
+				return mcpToolError(ErrCodeMarshalError, fmt.Sprintf("failed to marshal result: %v", err), nil)
+			}
+			return mcp.NewToolResultText(string(resBytes))
+		}), nil
 	})
 }
 

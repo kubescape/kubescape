@@ -180,7 +180,17 @@ func (ksServer *KubescapeMcpserver) getScanSem() *semaphore.Weighted {
 }
 
 // doScanChan executes a singleflight scan wrapped with context cancellation reference counting.
+// Scans are additionally limited to the scan semaphore's capacity.
 func (ksServer *KubescapeMcpserver) doScanChan(ctx context.Context, key string, scanFunc func(context.Context) (interface{}, error)) (interface{}, error) {
+	return ksServer.doSharedChan(ctx, key, true, scanFunc)
+}
+
+// doSharedChan is the coordination core behind doScanChan: overlapping calls
+// with the same key join one execution, each caller can stop waiting on its
+// own, and the execution's context is cancelled once no caller is left. When
+// limited is true the execution first takes a scan-semaphore slot; analysis
+// tools pass false so cheap read-only requests never queue behind scans.
+func (ksServer *KubescapeMcpserver) doSharedChan(ctx context.Context, key string, limited bool, scanFunc func(context.Context) (interface{}, error)) (interface{}, error) {
 	ksServer.scanCtxMu.Lock()
 	if ksServer.scanCtxs == nil {
 		ksServer.scanCtxs = make(map[string]*scanCtxState)
@@ -211,10 +221,12 @@ func (ksServer *KubescapeMcpserver) doScanChan(ctx context.Context, key string, 
 	}()
 
 	ch := ksServer.scanGroup.DoChan(key, func() (interface{}, error) {
-		if err := ksServer.getScanSem().Acquire(state.ctx, 1); err != nil {
-			return nil, err
+		if limited {
+			if err := ksServer.getScanSem().Acquire(state.ctx, 1); err != nil {
+				return nil, err
+			}
+			defer ksServer.getScanSem().Release(1)
 		}
-		defer ksServer.getScanSem().Release(1)
 		return scanFunc(state.ctx)
 	})
 

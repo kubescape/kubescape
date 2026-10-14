@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 
 	"github.com/kubescape/kubescape/v4/core/pkg/pss"
@@ -82,65 +83,72 @@ func createPSSPredictorTools(ksServer *KubescapeMcpserver) {
 			return toolErr, nil
 		}
 
-		k8sClient, err := ksServer.getK8sClient()
-		if err != nil {
-			return mcpToolError(ErrCodeK8sClientError, fmt.Sprintf("failed to get k8s client: %v", err), nil), nil
+		params := url.Values{
+			"namespace":     {namespace},
+			"level":         {fmt.Sprint(targetLevel)},
+			"workload_name": {workloadName},
 		}
-		dynClient := k8sClient.DynamicClient
+		return ksServer.doAnalysis(ctx, "predict_pss_compliance", params, func(ctx context.Context) *mcp.CallToolResult {
+			k8sClient, err := ksServer.getK8sClient()
+			if err != nil {
+				return mcpToolError(ErrCodeK8sClientError, fmt.Sprintf("failed to get k8s client: %v", err), nil)
+			}
+			dynClient := k8sClient.DynamicClient
 
-		listTargets := pssWorkloadTargets
-		var filterKind, filterName string
-		if workloadName != "" {
-			if strings.Contains(workloadName, "/") {
-				parts := strings.SplitN(workloadName, "/", 2)
-				filterKind = strings.TrimSpace(parts[0])
-				filterName = strings.TrimSpace(parts[1])
-				if filterKind != "" {
-					listTargets = nil
-					for _, target := range pssWorkloadTargets {
-						if strings.EqualFold(target.kind, filterKind) {
-							listTargets = []pssWorkloadTarget{target}
-							break
+			listTargets := pssWorkloadTargets
+			var filterKind, filterName string
+			if workloadName != "" {
+				if strings.Contains(workloadName, "/") {
+					parts := strings.SplitN(workloadName, "/", 2)
+					filterKind = strings.TrimSpace(parts[0])
+					filterName = strings.TrimSpace(parts[1])
+					if filterKind != "" {
+						listTargets = nil
+						for _, target := range pssWorkloadTargets {
+							if strings.EqualFold(target.kind, filterKind) {
+								listTargets = []pssWorkloadTarget{target}
+								break
+							}
 						}
 					}
+				} else {
+					filterName = workloadName
+				}
+			}
+
+			workloads, listToolErr := listPSSWorkloads(ctx, dynClient, namespace, listTargets)
+			if listToolErr != nil {
+				return listToolErr
+			}
+
+			var selected []unstructured.Unstructured
+			if workloadName != "" {
+				for _, w := range workloads {
+					nameMatches := w.GetName() == filterName
+					kindMatches := filterKind == "" || strings.EqualFold(w.GetKind(), filterKind)
+					if nameMatches && kindMatches {
+						selected = append(selected, w)
+					}
+				}
+
+				if len(selected) == 0 {
+					return mcpToolError(ErrCodeResourceNotFound,
+						fmt.Sprintf("workload %q not found in namespace %q", workloadName, namespace),
+						map[string]any{"argument": "workload_name", "namespace": namespace, "workload_name": workloadName})
 				}
 			} else {
-				filterName = workloadName
-			}
-		}
-
-		workloads, listToolErr := listPSSWorkloads(ctx, dynClient, namespace, listTargets)
-		if listToolErr != nil {
-			return listToolErr, nil
-		}
-
-		var selected []unstructured.Unstructured
-		if workloadName != "" {
-			for _, w := range workloads {
-				nameMatches := w.GetName() == filterName
-				kindMatches := filterKind == "" || strings.EqualFold(w.GetKind(), filterKind)
-				if nameMatches && kindMatches {
-					selected = append(selected, w)
-				}
+				selected = deduplicateWorkloads(workloads)
 			}
 
-			if len(selected) == 0 {
-				return mcpToolError(ErrCodeResourceNotFound,
-					fmt.Sprintf("workload %q not found in namespace %q", workloadName, namespace),
-					map[string]any{"argument": "workload_name", "namespace": namespace, "workload_name": workloadName}), nil
+			nsResult := pss.Aggregate(namespace, selected, targetLevel)
+			result := nsResult.ToMap()
+
+			resBytes, err := jsonMarshal(result)
+			if err != nil {
+				return mcpToolError(ErrCodeMarshalError, fmt.Sprintf("failed to marshal result: %v", err), nil)
 			}
-		} else {
-			selected = deduplicateWorkloads(workloads)
-		}
-
-		nsResult := pss.Aggregate(namespace, selected, targetLevel)
-		result := nsResult.ToMap()
-
-		resBytes, err := jsonMarshal(result)
-		if err != nil {
-			return mcpToolError(ErrCodeMarshalError, fmt.Sprintf("failed to marshal result: %v", err), nil), nil
-		}
-		return mcp.NewToolResultText(string(resBytes)), nil
+			return mcp.NewToolResultText(string(resBytes))
+		}), nil
 	})
 }
 
