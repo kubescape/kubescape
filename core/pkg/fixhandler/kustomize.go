@@ -646,6 +646,40 @@ func getContainersFromObj(obj map[string]interface{}) []map[string]interface{} {
 	return res
 }
 
+// hasRedactedEnvironment returns true if scannedObj contains scanner redaction placeholders
+// in container environment variables or Secret data, or if candidateObj has container envFrom
+// or environment variables that were cleared by the scanner from scannedObj.
+func hasRedactedEnvironment(scannedObj, candidateObj map[string]interface{}) bool {
+	if hasRedactedPlaceholder(scannedObj) {
+		return true
+	}
+	candContainers := getContainersFromObj(candidateObj)
+	scannedContainers := getContainersFromObj(scannedObj)
+	for i, cc := range candContainers {
+		if envFrom, ok := cc["envFrom"].([]interface{}); ok && len(envFrom) > 0 {
+			if i < len(scannedContainers) {
+				scannedEnvFrom, sOk := scannedContainers[i]["envFrom"].([]interface{})
+				if !sOk || len(scannedEnvFrom) == 0 {
+					return true
+				}
+			} else {
+				return true
+			}
+		}
+		if envList, ok := cc["env"].([]interface{}); ok && len(envList) > 0 {
+			if i < len(scannedContainers) {
+				scannedEnv, sOk := scannedContainers[i]["env"].([]interface{})
+				if !sOk || len(scannedEnv) == 0 {
+					return true
+				}
+			} else {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // hasValueOverrides returns true if opts provides any Helm value overrides
 // (values files, set values, string values, or file values).
 func hasValueOverrides(opts cautils.HelmValueOptions) bool {
@@ -688,11 +722,17 @@ func resolveBaseObject(s HelmFixSuggestion, chartCache map[string]map[string][]w
 	// (Helm value overrides). Scan reports redact container environment variables and remove envFrom
 	// without leaving placeholders (processorhandlerutils.go:826). Placeholder absence and matching
 	// surviving fields cannot prove the original render inputs even when both objects lack envFrom.
-	// Therefore, complete render provenance (Helm value overrides) or a verified unredacted base is required.
+	// Furthermore, supplying value overrides alone does not establish that file contents or values match
+	// the scan when environment configuration was redacted. Therefore, complete render provenance is required,
+	// and a verified unredacted base (s.UnredactedBase) or explicit fidelity provenance (s.FidelityProvenance)
+	// is required when redacted container environment settings are present.
 	if s.Resource != nil && s.Resource.GetObject() != nil && !s.FidelityProvenance && s.UnredactedBase == nil {
 		if len(getContainersFromObj(s.Resource.GetObject())) > 0 || len(getContainersFromObj(candidate)) > 0 {
 			if !hasValueOverrides(s.HelmValueOptions) {
 				return nil, "declined: scan report redacts container environment configuration and no verified Helm render inputs were provided; cannot establish correspondence with scan-time overrides"
+			}
+			if hasRedactedEnvironment(s.Resource.GetObject(), candidate) {
+				return nil, "declined: scan report redacts container environment configuration and scan-time render contents cannot be verified; provide a verified unredacted base or explicit fidelity provenance"
 			}
 		}
 	}

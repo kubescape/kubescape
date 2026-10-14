@@ -1,6 +1,7 @@
 package fixhandler
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -1460,6 +1461,38 @@ spec:
 	t.Run("redacted_only_override", func(t *testing.T) {
 		// Scanned object where scan overrides were envFrom=prod-config, APP_MODE=production,
 		// and scanner removeData redacted APP_MODE to XXXXXX and removed envFrom.
+		unredactedContainers := []corev1.Container{
+			{
+				Name:  "app",
+				Image: "example:v1",
+				Env: []corev1.EnvVar{
+					{Name: "APP_MODE", Value: "production"},
+				},
+				EnvFrom: []corev1.EnvFromSource{
+					{ConfigMapRef: &corev1.ConfigMapEnvSource{LocalObjectReference: corev1.LocalObjectReference{Name: "prod-config"}}},
+				},
+				SecurityContext: &corev1.SecurityContext{
+					Privileged: ptrBool(true),
+				},
+			},
+		}
+
+		bUnredacted, err := json.Marshal(map[string]interface{}{
+			"apiVersion": "apps/v1",
+			"kind":       "Deployment",
+			"metadata":   map[string]interface{}{"name": "my-app"},
+			"spec": map[string]interface{}{
+				"template": map[string]interface{}{
+					"spec": map[string]interface{}{
+						"containers": unredactedContainers,
+					},
+				},
+			},
+		})
+		require.NoError(t, err)
+		var unredactedObj map[string]interface{}
+		require.NoError(t, json.Unmarshal(bUnredacted, &unredactedObj))
+
 		containers := []corev1.Container{
 			{
 				Name:  "app",
@@ -1518,7 +1551,8 @@ spec:
 		_, err = os.Stat(filepath.Join(outDir, "base.yaml"))
 		assert.True(t, os.IsNotExist(err), "base.yaml must not be written when declined")
 
-		// With verified HelmValueOptions matching scan overrides, the emitter reproduces and preserves them
+		// Even with HelmValueOptions matching scan overrides, supplying value overrides alone does not
+		// verify scan-time render contents against redacted scan reports; generation must decline.
 		outDir2 := t.TempDir()
 		suggsWithOpts := []HelmFixSuggestion{
 			{
@@ -1532,10 +1566,32 @@ spec:
 		}
 		res2, err := EmitKustomizePatch(suggsWithOpts, outDir2)
 		require.NoError(t, err)
-		require.Len(t, res2.EmittedResources, 1)
+		assert.Empty(t, res2.EmittedResources, "must decline redacted report even with HelmValueOptions")
+		require.Len(t, res2.SkippedResources, 1)
+		assert.Contains(t, res2.SkippedResources[0].Reason, "scan report redacts container environment configuration")
+
+		_, err = os.Stat(filepath.Join(outDir2, "base.yaml"))
+		assert.True(t, os.IsNotExist(err), "base.yaml must not be written when declined")
+
+		// When a verified unredacted base is provided, generation succeeds and preserves live configuration
+		outDir3 := t.TempDir()
+		suggsWithUnredactedBase := []HelmFixSuggestion{
+			{
+				Resource:       scannedRes,
+				UnredactedBase: unredactedObj,
+				ChartPath:      chartDir,
+				HelmValueOptions: cautils.HelmValueOptions{
+					Values: []string{"envFrom=prod-config", "appMode=production"},
+				},
+				FixPaths: []armotypes.FixPath{{Path: "spec.template.spec.containers[0].securityContext.privileged", Value: "false"}},
+			},
+		}
+		res3, err := EmitKustomizePatch(suggsWithUnredactedBase, outDir3)
+		require.NoError(t, err)
+		require.Len(t, res3.EmittedResources, 1)
 
 		k := krusty.MakeKustomizer(krusty.MakeDefaultOptions())
-		resMap, err := k.Run(filesys.MakeFsOnDisk(), outDir2)
+		resMap, err := k.Run(filesys.MakeFsOnDisk(), outDir3)
 		require.NoError(t, err)
 		outYaml, err := resMap.AsYaml()
 		require.NoError(t, err)
@@ -1704,6 +1760,34 @@ spec:
 
 	// Scanned object at scan time had --set extraEnvFrom[0].configMapRef.name=prod-config,
 	// and scanner removeContainersData deleted envFrom without leaving XXXXXX.
+	unredactedContainers := []corev1.Container{
+		{
+			Name:  "app",
+			Image: "example:v1",
+			EnvFrom: []corev1.EnvFromSource{
+				{ConfigMapRef: &corev1.ConfigMapEnvSource{LocalObjectReference: corev1.LocalObjectReference{Name: "prod-config"}}},
+			},
+			SecurityContext: &corev1.SecurityContext{
+				Privileged: ptrBool(true),
+			},
+		},
+	}
+	bUnredacted, err := json.Marshal(map[string]interface{}{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata":   map[string]interface{}{"name": "my-app"},
+		"spec": map[string]interface{}{
+			"template": map[string]interface{}{
+				"spec": map[string]interface{}{
+					"containers": unredactedContainers,
+				},
+			},
+		},
+	})
+	require.NoError(t, err)
+	var unredactedObj map[string]interface{}
+	require.NoError(t, json.Unmarshal(bUnredacted, &unredactedObj))
+
 	containers := []corev1.Container{
 		{
 			Name:  "app",
@@ -1775,7 +1859,7 @@ spec:
 		assert.Contains(t, res.SkippedResources[0].Reason, "scan report redacts container environment configuration and no verified Helm render inputs were provided")
 	})
 
-	t.Run("preserves scan-time envFrom when complete render provenance is supplied", func(t *testing.T) {
+	t.Run("declines with value overrides alone, but preserves when verified unredacted base is supplied", func(t *testing.T) {
 		outDir := t.TempDir()
 		suggs := []HelmFixSuggestion{
 			{
@@ -1790,10 +1874,30 @@ spec:
 
 		res, err := EmitKustomizePatch(suggs, outDir)
 		require.NoError(t, err)
-		require.Len(t, res.EmittedResources, 1)
+		assert.Empty(t, res.EmittedResources, "must decline redacted report even with HelmValueOptions")
+		require.Len(t, res.SkippedResources, 1)
+		assert.Contains(t, res.SkippedResources[0].Reason, "scan report redacts container environment configuration")
+
+		// With verified unredacted base, generation succeeds and preserves envFrom
+		outDirPreserved := t.TempDir()
+		suggsPreserved := []HelmFixSuggestion{
+			{
+				Resource:       scannedRes,
+				UnredactedBase: unredactedObj,
+				ChartPath:      chartDir,
+				HelmValueOptions: cautils.HelmValueOptions{
+					Values: []string{"extraEnvFrom[0].configMapRef.name=prod-config"},
+				},
+				FixPaths: []armotypes.FixPath{{Path: "spec.template.spec.containers[0].securityContext.privileged", Value: "false"}},
+			},
+		}
+
+		resPreserved, err := EmitKustomizePatch(suggsPreserved, outDirPreserved)
+		require.NoError(t, err)
+		require.Len(t, resPreserved.EmittedResources, 1)
 
 		k := krusty.MakeKustomizer(krusty.MakeDefaultOptions())
-		resMap, err := k.Run(filesys.MakeFsOnDisk(), outDir)
+		resMap, err := k.Run(filesys.MakeFsOnDisk(), outDirPreserved)
 		require.NoError(t, err)
 		outYaml, err := resMap.AsYaml()
 		require.NoError(t, err)
@@ -1980,4 +2084,138 @@ spec:
 		require.NoError(t, err)
 		assert.Contains(t, string(outYaml), "INSIDE_FILE_VAL")
 	})
+}
+
+// TestReview4034HelmOverlayDeclinesWhenValuesFileChangedRedactedSetting verifies that
+// when a values file path is supplied but its content changed a redacted setting (such as envFrom)
+// after scan time, the overlay generator declines the resource rather than silently overwriting
+// the application's configuration with the changed values.
+func TestReview4034HelmOverlayDeclinesWhenValuesFileChangedRedactedSetting(t *testing.T) {
+	chartDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "Chart.yaml"), []byte("apiVersion: v2\nname: appchart\nversion: 0.1.0\n"), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "values.yaml"), []byte("configMapName: default-config\n"), 0600))
+	require.NoError(t, os.MkdirAll(filepath.Join(chartDir, "templates"), 0700))
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "templates", "deployment.yaml"), []byte(`apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prod-app
+spec:
+  template:
+    spec:
+      containers:
+      - name: app
+        image: example:v1
+        envFrom:
+        - configMapRef:
+            name: {{ .Values.configMapName }}
+        securityContext:
+          privileged: true
+`), 0600))
+
+	// 1. Write production.yaml setting envFrom ConfigMap to prod-config
+	valuesFile := filepath.Join(chartDir, "production.yaml")
+	require.NoError(t, os.WriteFile(valuesFile, []byte("configMapName: prod-config\n"), 0600))
+
+	// 2. Render Deployment using the real Helm renderer
+	sourceToWorkloads, _, _, err := cautils.LoadResourcesFromHelmCharts(context.Background(), chartDir, cautils.HelmValueOptions{
+		ValueFiles: []string{valuesFile},
+	})
+	require.NoError(t, err)
+
+	var renderedObj map[string]interface{}
+	for _, workloads := range sourceToWorkloads {
+		for _, w := range workloads {
+			if w.GetKind() == "Deployment" && w.GetName() == "prod-app" {
+				renderedObj = deepCopyMap(w.GetObject())
+				break
+			}
+		}
+	}
+	require.NotNil(t, renderedObj)
+
+	// Save an unredacted base copy for later preservation verification
+	unredactedBase := deepCopyMap(renderedObj)
+
+	// 3. Redact using the actual scanner removeContainersData (clears envFrom without leaving placeholder)
+	containers := getContainersFromObj(renderedObj)
+	require.NotEmpty(t, containers)
+	var coreContainers []corev1.Container
+	containerBytes, err := json.Marshal(containers)
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(containerBytes, &coreContainers))
+	removeContainersData(coreContainers)
+	require.Nil(t, coreContainers[0].EnvFrom, "scanner redactor must have cleared envFrom")
+
+	// 4. JSON serialization roundtrip to simulate scan report persistence
+	redactedContainerBytes, err := json.Marshal(coreContainers)
+	require.NoError(t, err)
+	var unmarshaledContainers []interface{}
+	require.NoError(t, json.Unmarshal(redactedContainerBytes, &unmarshaledContainers))
+
+	scannedObj := deepCopyMap(renderedObj)
+	spec := scannedObj["spec"].(map[string]interface{})
+	tmpl := spec["template"].(map[string]interface{})
+	tmplSpec := tmpl["spec"].(map[string]interface{})
+	tmplSpec["containers"] = unmarshaledContainers
+
+	scannedRes := &reporthandling.Resource{
+		Object: scannedObj,
+		Source: &reporthandling.Source{
+			FileType:         reporthandling.SourceTypeHelmChart,
+			HelmPath:         chartDir,
+			HelmChartName:    "appchart",
+			HelmTemplateFile: "templates/deployment.yaml",
+		},
+	}
+
+	// 5. Change that same values file to use dev-config
+	require.NoError(t, os.WriteFile(valuesFile, []byte("configMapName: dev-config\n"), 0600))
+
+	// 6. Generate the overlay using the same values-file path, requesting only privileged=false
+	outDir := t.TempDir()
+	suggs := []HelmFixSuggestion{
+		{
+			Resource:  scannedRes,
+			ChartPath: chartDir,
+			HelmValueOptions: cautils.HelmValueOptions{
+				ValueFiles: []string{valuesFile},
+			},
+			FixPaths: []armotypes.FixPath{{Path: "spec.template.spec.containers[0].securityContext.privileged", Value: "false"}},
+		},
+	}
+
+	res, err := EmitKustomizePatch(suggs, outDir)
+	require.NoError(t, err)
+	assert.Empty(t, res.EmittedResources, "must decline generation when values file changed a redacted setting")
+	require.Len(t, res.SkippedResources, 1, "must record declined resource")
+	assert.Contains(t, res.SkippedResources[0].Reason, "scan report redacts container environment configuration")
+
+	_, err = os.Stat(filepath.Join(outDir, "base.yaml"))
+	assert.True(t, os.IsNotExist(err), "base.yaml must not be written when declined")
+
+	// 7. When a verified unredacted base is preserved, generation succeeds and preserves prod-config
+	outDirPreserved := t.TempDir()
+	suggsPreserved := []HelmFixSuggestion{
+		{
+			Resource:       scannedRes,
+			UnredactedBase: unredactedBase,
+			ChartPath:      chartDir,
+			HelmValueOptions: cautils.HelmValueOptions{
+				ValueFiles: []string{valuesFile},
+			},
+			FixPaths: []armotypes.FixPath{{Path: "spec.template.spec.containers[0].securityContext.privileged", Value: "false"}},
+		},
+	}
+	resPreserved, err := EmitKustomizePatch(suggsPreserved, outDirPreserved)
+	require.NoError(t, err)
+	require.Len(t, resPreserved.EmittedResources, 1)
+
+	k := krusty.MakeKustomizer(krusty.MakeDefaultOptions())
+	resMap, err := k.Run(filesys.MakeFsOnDisk(), outDirPreserved)
+	require.NoError(t, err)
+	outYaml, err := resMap.AsYaml()
+	require.NoError(t, err)
+	assert.Contains(t, string(outYaml), "prod-config", "verified unredacted base must preserve prod-config")
+	assert.NotContains(t, string(outYaml), "dev-config", "must not contain dev-config from changed values file")
+	assert.Contains(t, string(outYaml), "privileged: false")
 }
