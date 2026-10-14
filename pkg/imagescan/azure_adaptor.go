@@ -193,7 +193,8 @@ func (a *AzureAdaptor) getImageScanStatus(ctx context.Context, registryName stri
 	| extend registryName = extract(@"(?i)/registries/([^/]+)/", 1, id)
 	| where registryName =~ "%s"
 	| where properties.resourceDetails.id contains "%s"
-	| project timeGenerated = properties.timeGenerated
+	| project timeGenerated = todatetime(properties.timeGenerated)
+	| order by timeGenerated desc nulls last
 	| limit 1
 `, registryName, imageID.Hash)
 
