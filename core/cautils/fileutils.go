@@ -126,6 +126,12 @@ func loadResourcesFromHelmCharts(ctx context.Context, basePath string, valueOpts
 		}
 	}
 	releaseOpts := valueOpts.ReleaseOptions()
+	// Like a bad value override, a version that cannot be parsed fails the scan instead of
+	// failing every chart's render one warning at a time.
+	capOpts := valueOpts.CapabilityOptions()
+	if err := ValidateHelmKubeVersion(capOpts.KubeVersion); err != nil {
+		return nil, nil, nil, fmt.Errorf("failed to parse Helm capabilities: %w", err)
+	}
 
 	// A parent chart owns unpacked dependencies below its charts/ directory. Process
 	// parents before their descendants so a successful parent render can suppress a
@@ -164,7 +170,7 @@ func loadResourcesFromHelmCharts(ctx context.Context, basePath string, valueOpts
 		if userValues != nil {
 			values = mergeMaps(values, userValues)
 		}
-		wls, errs := chart.GetWorkloadsWithOptions(values, releaseOpts)
+		wls, errs := chart.GetWorkloadsWithCapabilities(values, releaseOpts, capOpts)
 		if len(errs) > 0 {
 			logger.L().Ctx(ctx).Warning(fmt.Sprintf("Rendering of Helm chart template '%s', failed: %v", chart.GetName(), errs))
 			continue
