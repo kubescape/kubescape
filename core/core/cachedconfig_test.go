@@ -239,3 +239,306 @@ func TestDeleteCachedConfig_MissingFileIsNonFatal(t *testing.T) {
 	ks := NewKubescape(context.Background())
 	require.NoError(t, ks.DeleteCachedConfig(&metav1.DeleteConfig{}))
 }
+
+func TestGetNormalizedKey(t *testing.T) {
+	tests := []struct {
+		name string
+		key  string
+		want string
+	}{
+		{
+			name: "account alias lowercase",
+			key:  "account",
+			want: "accountid",
+		},
+		{
+			name: "account alias titlecase",
+			key:  "Account",
+			want: "accountid",
+		},
+		{
+			name: "account alias uppercase",
+			key:  "ACCOUNT",
+			want: "accountid",
+		},
+		{
+			name: "accountid canonical",
+			key:  "accountid",
+			want: "accountid",
+		},
+		{
+			name: "account_id snake case",
+			key:  "account_id",
+			want: "accountid",
+		},
+		{
+			name: "account-id kebab case",
+			key:  "account-id",
+			want: "accountid",
+		},
+		{
+			name: "ACCOUNT-ID uppercase kebab case",
+			key:  "ACCOUNT-ID",
+			want: "accountid",
+		},
+		{
+			name: "clustername canonical",
+			key:  "clustername",
+			want: "clustername",
+		},
+		{
+			name: "cluster_name snake case",
+			key:  "cluster_name",
+			want: "clustername",
+		},
+		{
+			name: "cluster-name kebab case",
+			key:  "cluster-name",
+			want: "clustername",
+		},
+		{
+			name: "ClusterName camel case",
+			key:  "ClusterName",
+			want: "clustername",
+		},
+		{
+			name: "CLUSTER-NAME uppercase kebab case",
+			key:  "CLUSTER-NAME",
+			want: "clustername",
+		},
+		{
+			name: "cloudapiurl canonical",
+			key:  "cloudapiurl",
+			want: "cloudapiurl",
+		},
+		{
+			name: "cloud_api_url snake case",
+			key:  "cloud_api_url",
+			want: "cloudapiurl",
+		},
+		{
+			name: "cloud-api-url kebab case",
+			key:  "cloud-api-url",
+			want: "cloudapiurl",
+		},
+		{
+			name: "CloudAPIURL mixed case",
+			key:  "CloudAPIURL",
+			want: "cloudapiurl",
+		},
+		{
+			name: "cloudreporturl canonical",
+			key:  "cloudreporturl",
+			want: "cloudreporturl",
+		},
+		{
+			name: "cloud_report_url snake case",
+			key:  "cloud_report_url",
+			want: "cloudreporturl",
+		},
+		{
+			name: "cloud-report-url kebab case",
+			key:  "cloud-report-url",
+			want: "cloudreporturl",
+		},
+		{
+			name: "CloudReportURL mixed case",
+			key:  "CloudReportURL",
+			want: "cloudreporturl",
+		},
+		{
+			name: "accesskey canonical",
+			key:  "accesskey",
+			want: "accesskey",
+		},
+		{
+			name: "access_key snake case",
+			key:  "access_key",
+			want: "accesskey",
+		},
+		{
+			name: "access-key kebab case",
+			key:  "access-key",
+			want: "accesskey",
+		},
+		{
+			name: "AccessKey camel case",
+			key:  "AccessKey",
+			want: "accesskey",
+		},
+		{
+			name: "ACCESS_KEY uppercase snake case",
+			key:  "ACCESS_KEY",
+			want: "accesskey",
+		},
+		{
+			name: "empty string",
+			key:  "",
+			want: "",
+		},
+		{
+			name: "unsupported key stripped and lowercased",
+			key:  "UNKNOWN-KEY_NAME",
+			want: "unknownkeyname",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, getNormalizedKey(tt.key))
+		})
+	}
+}
+
+func TestDeleteCachedConfig_SelectiveKeyDeletion(t *testing.T) {
+	tests := []struct {
+		name       string
+		keys       []string
+		wantErr    string
+		wantConfig func(initial cautils.ConfigObj) cautils.ConfigObj
+	}{
+		{
+			name: "Delete single key with alias account",
+			keys: []string{"account"},
+			wantConfig: func(initial cautils.ConfigObj) cautils.ConfigObj {
+				initial.AccountID = ""
+				return initial
+			},
+		},
+		{
+			name: "Delete single key account_id snake case",
+			keys: []string{"account_id"},
+			wantConfig: func(initial cautils.ConfigObj) cautils.ConfigObj {
+				initial.AccountID = ""
+				return initial
+			},
+		},
+		{
+			name: "Delete single key ACCOUNT-ID upper kebab case",
+			keys: []string{"ACCOUNT-ID"},
+			wantConfig: func(initial cautils.ConfigObj) cautils.ConfigObj {
+				initial.AccountID = ""
+				return initial
+			},
+		},
+		{
+			name: "Delete single key Account title case",
+			keys: []string{"Account"},
+			wantConfig: func(initial cautils.ConfigObj) cautils.ConfigObj {
+				initial.AccountID = ""
+				return initial
+			},
+		},
+		{
+			name: "Delete single key cluster-name kebab case",
+			keys: []string{"cluster-name"},
+			wantConfig: func(initial cautils.ConfigObj) cautils.ConfigObj {
+				return initial
+			},
+		},
+		{
+			name: "Delete single key cloud_api_url snake case",
+			keys: []string{"cloud_api_url"},
+			wantConfig: func(initial cautils.ConfigObj) cautils.ConfigObj {
+				initial.CloudAPIURL = ""
+				return initial
+			},
+		},
+		{
+			name: "Delete single key cloud-report-url kebab case",
+			keys: []string{"cloud-report-url"},
+			wantConfig: func(initial cautils.ConfigObj) cautils.ConfigObj {
+				initial.CloudReportURL = ""
+				return initial
+			},
+		},
+		{
+			name: "Delete single key access_key snake case",
+			keys: []string{"access_key"},
+			wantConfig: func(initial cautils.ConfigObj) cautils.ConfigObj {
+				initial.AccessKey = ""
+				return initial
+			},
+		},
+		{
+			name: "Delete multiple keys at once",
+			keys: []string{"account", "access-key", "cloud_report_url"},
+			wantConfig: func(initial cautils.ConfigObj) cautils.ConfigObj {
+				initial.AccountID = ""
+				initial.AccessKey = ""
+				initial.CloudReportURL = ""
+				return initial
+			},
+		},
+		{
+			name: "Delete all supported keys",
+			keys: []string{"account", "cluster_name", "cloud_api_url", "cloud_report_url", "access_key"},
+			wantConfig: func(initial cautils.ConfigObj) cautils.ConfigObj {
+				return cautils.ConfigObj{}
+			},
+		},
+		{
+			name:    "Attempt to delete unknown key",
+			keys:    []string{"unknown-key"},
+			wantErr: "unknown key: unknown-key",
+			wantConfig: func(initial cautils.ConfigObj) cautils.ConfigObj {
+				return initial // unchanged
+			},
+		},
+		{
+			name:    "Attempt to delete valid key alongside unknown key",
+			keys:    []string{"account", "invalid_key"},
+			wantErr: "unknown key: invalid_key",
+			wantConfig: func(initial cautils.ConfigObj) cautils.ConfigObj {
+				return initial // unchanged
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			isolateCachedConfigTest(t)
+
+			originalConnected := k8sinterface.IsConnectedToCluster()
+			k8sinterface.SetConnectedToCluster(false)
+			t.Cleanup(func() { k8sinterface.SetConnectedToCluster(originalConnected) })
+
+			ks := NewKubescape(context.Background())
+			initial := cautils.ConfigObj{
+				AccountID:      "test-account-id",
+				CloudAPIURL:    "https://api.example.test",
+				CloudReportURL: "https://report.example.test",
+				AccessKey:      "test-access-key",
+			}
+
+			require.NoError(t, ks.SetCachedConfig(&metav1.SetConfig{
+				Account:        initial.AccountID,
+				AccessKey:      initial.AccessKey,
+				CloudAPIURL:    initial.CloudAPIURL,
+				CloudReportURL: initial.CloudReportURL,
+			}))
+
+			require.Equal(t, initial, readPersistedConfig(t))
+
+			deleteConfig := &metav1.DeleteConfig{
+				Keys: tt.keys,
+			}
+
+			err := ks.DeleteCachedConfig(deleteConfig)
+			if tt.wantErr != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.wantErr)
+			} else {
+				require.NoError(t, err)
+			}
+
+			persisted := readPersistedConfig(t)
+			expected := tt.wantConfig(initial)
+			assert.Equal(t, expected, persisted)
+
+			// When selective deletion occurs, the config file should still exist
+			_, statErr := os.Stat(cautils.ConfigFileFullPath())
+			require.NoError(t, statErr)
+		})
+	}
+}
