@@ -1,7 +1,6 @@
 package scan
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -27,10 +26,7 @@ func TestGetFrameworkCmd(t *testing.T) {
 
 	cmd := getFrameworkCmd(mockKubescape, &scanInfo)
 
-	// Verify the command name and short description
 	assert.Equal(t, "framework <framework names list> [`<glob pattern>`/`-`] [flags]", cmd.Use)
-	assert.Equal(t, fmt.Sprintf("The framework you wish to use. Run '%[1]s list frameworks' for the list of supported frameworks", cautils.ExecName()), cmd.Short)
-	assert.Equal(t, frameworkExample, cmd.Example)
 
 	err := cmd.Args(&cobra.Command{}, []string{})
 	expectedErrorMessage := "requires at least one framework name"

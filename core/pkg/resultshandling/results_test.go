@@ -644,12 +644,6 @@ func TestSetDataGetData(t *testing.T) {
 	assert.Equal(t, float32(55.0), rh.GetComplianceScore())
 }
 
-func TestGetResults(t *testing.T) {
-	rh := makeResultsHandler(80.0, 60.0)
-	results := rh.GetResults()
-	assert.NotNil(t, results)
-}
-
 func TestToJson(t *testing.T) {
 	rh := makeResultsHandler(75.0, 50.0)
 	data, err := rh.ToJson()

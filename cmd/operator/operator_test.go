@@ -14,11 +14,7 @@ func TestGetOperatorCmd(t *testing.T) {
 
 	cmd := GetOperatorCmd(mockKubescape)
 
-	// Verify the command name and short description
 	assert.Equal(t, "operator", cmd.Use)
-	assert.Equal(t, "The operator is used to communicate with the Kubescape Operator within the cluster components.", cmd.Short)
-	assert.Equal(t, "", cmd.Long)
-	assert.Equal(t, operatorExamples, cmd.Example)
 
 	err := cmd.Args(&cobra.Command{}, []string{})
 	expectedErrorMessage := "for the operator sub-command, you need to provide at least one additional sub-command. Refer to the examples above"

@@ -13,10 +13,6 @@ type stubResource struct {
 func (r stubResource) String() string      { return r.registry }
 func (r stubResource) RegistryStr() string { return r.registry }
 
-func TestNewRegistryKeychainImplementsAuthnKeychain(t *testing.T) {
-	var _ = newRegistryKeychain()
-}
-
 // getProviderConfig no longer composes anything itself: composition (an
 // existing docker login, then any cloud-provider keychains such as
 // newACRKeychain in azure_adaptor.go) happens once, in newRegistryKeychain,

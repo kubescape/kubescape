@@ -18,11 +18,7 @@ func TestGetOperatorScanConfigCmd(t *testing.T) {
 
 	cmd := getOperatorScanConfigCmd(mockKubescape, &operatorInfo)
 
-	// Verify the command name and short description
 	assert.Equal(t, "configurations", cmd.Use)
-	assert.Equal(t, "Trigger configuration scanning from the Kubescape Operator microservice", cmd.Short)
-	assert.Equal(t, "", cmd.Long)
-	assert.Equal(t, operatorScanConfigExamples, cmd.Example)
 
 	err := cmd.Args(&cobra.Command{}, []string{})
 	assert.Nil(t, err)

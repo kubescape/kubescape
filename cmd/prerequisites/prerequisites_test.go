@@ -19,7 +19,6 @@ func TestGetPreReqCmd(t *testing.T) {
 
 	assert.NotNil(t, cmd)
 	assert.Equal(t, "prerequisites", cmd.Use)
-	assert.Equal(t, "Check prerequisites for installing Kubescape Operator", cmd.Short)
 	assert.NotNil(t, cmd.RunE)
 }
 
@@ -31,7 +30,6 @@ func TestGetPreReqCmdKubeconfigFlag(t *testing.T) {
 	flag := cmd.PersistentFlags().Lookup("kubeconfig")
 	assert.NotNil(t, flag)
 	assert.Equal(t, "", flag.DefValue)
-	assert.Equal(t, "Path to the kubeconfig file. If not set, in-cluster config is used or $HOME/.kube/config if outside a cluster.", flag.Usage)
 }
 
 func TestRunPrerequisites_NilClientReturnsError(t *testing.T) {

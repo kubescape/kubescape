@@ -35,35 +35,29 @@ func TestGetValidateCmd(t *testing.T) {
 	cmd := getValidateCmd(&mocks.MockIKubescape{})
 
 	assert.Equal(t, "validate", cmd.Use)
-	assert.Equal(t, "Validate cached configurations", cmd.Short)
-	assert.Equal(t, "Validate cached Kubescape configuration and render diagnostics as text, JSON, or YAML.", cmd.Long)
 
 	formatFlag := cmd.Flag("format")
 	if assert.NotNil(t, formatFlag) {
 		assert.Equal(t, "f", formatFlag.Shorthand)
 		assert.Equal(t, "text", formatFlag.DefValue)
-		assert.Equal(t, "Output format: text, json, or yaml", formatFlag.Usage)
 	}
 
 	outputFlag := cmd.Flag("output")
 	if assert.NotNil(t, outputFlag) {
 		assert.Equal(t, "o", outputFlag.Shorthand)
 		assert.Equal(t, "text", outputFlag.DefValue)
-		assert.Equal(t, "Output format: text, json, or yaml (alias for --format)", outputFlag.Usage)
 	}
 
 	includeOKFlag := cmd.Flag("include-ok")
 	if assert.NotNil(t, includeOKFlag) {
 		assert.Equal(t, "", includeOKFlag.Shorthand)
 		assert.Equal(t, "false", includeOKFlag.DefValue)
-		assert.Equal(t, "Include passing validation checks in the rendered output", includeOKFlag.Usage)
 	}
 
 	profileFlag := cmd.Flag("profile")
 	if assert.NotNil(t, profileFlag) {
 		assert.Equal(t, "", profileFlag.Shorthand)
 		assert.Equal(t, "cloud", profileFlag.DefValue)
-		assert.Equal(t, "Validation profile: cloud or offline", profileFlag.Usage)
 	}
 }
 

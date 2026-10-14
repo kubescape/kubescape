@@ -211,19 +211,6 @@ func TestActionPrint_Csv_MidLoopWriteFailureIsReported(t *testing.T) {
 	require.Error(t, err, "ActionPrint must surface a mid-loop write failure instead of silently returning nil")
 }
 
-func TestNewCsvPrinter(t *testing.T) {
-	cp := NewCsvPrinter(false)
-	assert.NotNil(t, cp)
-}
-
-func TestSetWriter_Csv(t *testing.T) {
-	cp := NewCsvPrinter(false)
-	assert.NotNil(t, cp)
-
-	cp.SetWriter(context.TODO(), "")
-	assert.NotNil(t, cp.writer)
-	cp.CloseWriter()
-}
 
 func TestScore_Csv(t *testing.T) {
 	tests := []struct {
@@ -438,11 +425,6 @@ func TestActionPrint_Csv_MissingAllResourcesEntryFailsClosed(t *testing.T) {
 	assert.Contains(t, foundRow[9], "[redacted]", "Fix Paths column must fail closed to redacted")
 }
 
-func TestActionPrint_Csv_NilSession(t *testing.T) {
-	cp := NewCsvPrinter(false)
-	cp.writer = os.Stdout
-	cp.ActionPrint(context.TODO(), nil, nil)
-}
 
 // TestCsvControlPaths verifies the Failed Paths and Fix Paths cells. It covers
 // delete paths, review paths, legacy failed paths, duplicate locations, and

@@ -218,5 +218,24 @@ func TestSetWriterUsesSharedOutputResolution(t *testing.T) {
 
 			assert.Equal(t, want, tc.writerName(p))
 		})
+
+		t.Run(tc.name+"/empty explicit output sets writer without error", func(t *testing.T) {
+			workingDir := t.TempDir()
+			originalDir, err := os.Getwd()
+			require.NoError(t, err)
+			require.NoError(t, os.Chdir(workingDir))
+			t.Cleanup(func() { require.NoError(t, os.Chdir(originalDir)) })
+
+			p := tc.newPrinter()
+			require.NoError(t, p.SetWriter(context.Background(), ""))
+			t.Cleanup(func() { assert.NoError(t, tc.closeWriter(p)) })
+
+			want := os.Stdout.Name()
+			switch tc.format {
+			case baseprinter.HtmlFormat, baseprinter.PdfFormat, baseprinter.MarkdownFormat:
+				want = baseprinter.ResolveDefaultOutputFile(tc.format, tc.baseName)
+			}
+			assert.Equal(t, want, tc.writerName(p))
+		})
 	}
 }

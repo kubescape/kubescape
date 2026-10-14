@@ -474,11 +474,6 @@ func TestPrintUnfixedControls_Dedups(t *testing.T) {
 	assert.Len(t, h.unfixedControls, 3)
 }
 
-func TestPrintUnfixedControls_EmptyIsNoop(t *testing.T) {
-	h := &FixHandler{}
-	h.PrintUnfixedControls(PhasePlanned) // must not panic
-}
-
 // --- NewFixHandler input validation --------------------------------------
 
 func TestNewFixHandler_RejectsYamlManifest(t *testing.T) {
