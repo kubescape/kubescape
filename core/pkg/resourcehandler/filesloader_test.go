@@ -1157,3 +1157,29 @@ func TestExcludeFilesUnderDirectories_CanonicalizesSymlinkedDirs(t *testing.T) {
 
 	assert.NotContains(t, sources, lexicalSource, "the input is under the physical directory, so it must be excluded")
 }
+
+func TestHelmValueOptionsFromScanInfo(t *testing.T) {
+	assert.True(t, helmValueOptionsFromScanInfo(nil).IsEmpty())
+
+	scanInfo := &cautils.ScanInfo{
+		HelmValueFiles:       []string{"values.yaml"},
+		HelmSetValues:        []string{"replicas=2"},
+		HelmSetStringValues:  []string{"image.tag=1.27"},
+		HelmSetFileValues:    []string{"tls.crt=cert.pem"},
+		HelmReleaseName:      "web",
+		HelmReleaseNamespace: "shop",
+		HelmKubeVersion:      "1.31",
+		HelmAPIVersions:      []string{"gateway.networking.k8s.io/v1"},
+	}
+
+	assert.Equal(t, cautils.HelmValueOptions{
+		ValueFiles:       []string{"values.yaml"},
+		Values:           []string{"replicas=2"},
+		StringValues:     []string{"image.tag=1.27"},
+		FileValues:       []string{"tls.crt=cert.pem"},
+		ReleaseName:      "web",
+		ReleaseNamespace: "shop",
+		KubeVersion:      "1.31",
+		APIVersions:      []string{"gateway.networking.k8s.io/v1"},
+	}, helmValueOptionsFromScanInfo(scanInfo))
+}

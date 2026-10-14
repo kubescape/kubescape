@@ -61,6 +61,8 @@ kubescape scan [target] [flags]
 | `-o, --output <path>` | Output file path | stdout |
 | `--release-name <name>` | Helm release name made available as `.Release.Name` when rendering a chart | - |
 | `--release-namespace <ns>` | Helm release namespace made available as `.Release.Namespace` when rendering a chart | - |
+| `--kube-version <version>` | Kubernetes version made available as `.Capabilities.KubeVersion` when rendering a chart, as in `helm template`. A chart whose `kubeVersion` constraint rejects it is not rendered | `v1.20` (Helm's library default) |
+| `--api-versions <group/version,...>` | Kubernetes API versions added to `.Capabilities.APIVersions` when rendering a chart, as in `helm template`. Repeat or separate with commas | built-in APIs only |
 | `--set <key=value>` | Set Helm values when scanning a chart. Repeat for more than one | - |
 | `--set-file <key=path>` | Set Helm values from files when scanning a chart. Repeat for more than one | - |
 | `--set-string <key=value>` | Set Helm string values when scanning a chart. Repeat for more than one | - |
