@@ -265,6 +265,9 @@ func TestDiffOutputPath(t *testing.T) {
 		{"pretty stdout sink resolves to no file", "pretty-printer", os.Stdout.Name(), "", false},
 		{"devnull sink keeps exact path", "sarif", os.DevNull, os.DevNull, true},
 		{"summary-json stdout sink resolves to no file", "summary-json", os.Stdout.Name(), "", false},
+		{"trailing separator writes inside the directory", "json", "out/", filepath.Join("out", "diff.json"), true},
+		{"trailing separator with summary format", "summary-yaml", " out/ ", filepath.Join("out", "diff.yaml"), true},
+		{"trailing separator with pretty output", "pretty-printer", "out/", filepath.Join("out", "diff"), true},
 	}
 
 	for _, test := range tests {
