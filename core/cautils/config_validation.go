@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/google/uuid"
 	"gopkg.in/yaml.v3"
 )
 
@@ -79,14 +80,14 @@ func validateConfigForProfile(cfg *ConfigObj, profile ConfigValidationProfile) [
 	switch profile {
 	case ConfigValidationProfileOffline:
 		return []ConfigValidationCheck{
-			validateOptionalConfigField("accountID", cfg.AccountID, "account ID is configured", "accountID is not required for offline validation"),
+			validateOptionalUUIDConfigField("accountID", cfg.AccountID, "account ID is configured", "accountID is not required for offline validation"),
 			validateOptionalConfigField("accessKey", cfg.AccessKey, "access key is configured", "accessKey is not required for offline validation"),
 			validateOptionalURLConfigField("cloudAPIURL", cfg.CloudAPIURL, "cloud API URL is configured", "cloudAPIURL is not configured; offline scans can use local policy sources"),
 			validateOptionalURLConfigField("cloudReportURL", cfg.CloudReportURL, "cloud report URL is configured", "cloudReportURL is not configured; offline scans can skip cloud submission"),
 		}
 	default:
 		return []ConfigValidationCheck{
-			validateRequiredConfigField("accountID", cfg.AccountID, "account ID is configured"),
+			validateRequiredUUIDConfigField("accountID", cfg.AccountID, "account ID is configured"),
 			validateRequiredConfigField("accessKey", cfg.AccessKey, "access key is configured"),
 			validateRequiredURLConfigField("cloudAPIURL", cfg.CloudAPIURL, "cloud API URL is configured"),
 			validateRequiredURLConfigField("cloudReportURL", cfg.CloudReportURL, "cloud report URL is configured"),
@@ -151,6 +152,50 @@ func validateOptionalConfigField(field, value, okMessage, emptyMessage string) C
 		Status:  ConfigValidationStatusOK,
 		Message: okMessage,
 	}
+}
+
+func validateRequiredUUIDConfigField(field, value, okMessage string) ConfigValidationCheck {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return ConfigValidationCheck{
+			Field:   field,
+			Status:  ConfigValidationStatusMissing,
+			Message: fmt.Sprintf("%s is required", field),
+		}
+	}
+	// The stored value is used untrimmed, and uuid.Parse accepts some padded
+	// strings (it drops the first character of any 38-character input), so
+	// surrounding whitespace has to be rejected explicitly.
+	if trimmed != value {
+		return ConfigValidationCheck{
+			Field:   field,
+			Status:  ConfigValidationStatusInvalid,
+			Message: fmt.Sprintf("%s must be a valid UUID without surrounding whitespace", field),
+		}
+	}
+	if _, err := uuid.Parse(value); err != nil {
+		return ConfigValidationCheck{
+			Field:   field,
+			Status:  ConfigValidationStatusInvalid,
+			Message: fmt.Sprintf("%s must be a valid UUID: %v", field, err),
+		}
+	}
+	return ConfigValidationCheck{
+		Field:   field,
+		Status:  ConfigValidationStatusOK,
+		Message: okMessage,
+	}
+}
+
+func validateOptionalUUIDConfigField(field, value, okMessage, emptyMessage string) ConfigValidationCheck {
+	if strings.TrimSpace(value) == "" {
+		return ConfigValidationCheck{
+			Field:   field,
+			Status:  ConfigValidationStatusOK,
+			Message: emptyMessage,
+		}
+	}
+	return validateRequiredUUIDConfigField(field, value, okMessage)
 }
 
 func validateRequiredURLConfigField(field, value, okMessage string) ConfigValidationCheck {
