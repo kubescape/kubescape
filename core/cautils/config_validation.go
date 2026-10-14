@@ -155,12 +155,22 @@ func validateOptionalConfigField(field, value, okMessage, emptyMessage string) C
 }
 
 func validateRequiredUUIDConfigField(field, value, okMessage string) ConfigValidationCheck {
-	value = strings.TrimSpace(value)
-	if value == "" {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
 		return ConfigValidationCheck{
 			Field:   field,
 			Status:  ConfigValidationStatusMissing,
 			Message: fmt.Sprintf("%s is required", field),
+		}
+	}
+	// The stored value is used untrimmed, and uuid.Parse accepts some padded
+	// strings (it drops the first character of any 38-character input), so
+	// surrounding whitespace has to be rejected explicitly.
+	if trimmed != value {
+		return ConfigValidationCheck{
+			Field:   field,
+			Status:  ConfigValidationStatusInvalid,
+			Message: fmt.Sprintf("%s must be a valid UUID without surrounding whitespace", field),
 		}
 	}
 	if _, err := uuid.Parse(value); err != nil {
@@ -178,8 +188,7 @@ func validateRequiredUUIDConfigField(field, value, okMessage string) ConfigValid
 }
 
 func validateOptionalUUIDConfigField(field, value, okMessage, emptyMessage string) ConfigValidationCheck {
-	value = strings.TrimSpace(value)
-	if value == "" {
+	if strings.TrimSpace(value) == "" {
 		return ConfigValidationCheck{
 			Field:   field,
 			Status:  ConfigValidationStatusOK,

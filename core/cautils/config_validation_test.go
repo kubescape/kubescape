@@ -123,18 +123,24 @@ func TestValidateConfig_TrimsRequiredFields(t *testing.T) {
 }
 
 func TestValidateConfig_InvalidAccountID(t *testing.T) {
-	for _, profile := range []ConfigValidationProfile{ConfigValidationProfileCloud, ConfigValidationProfileOffline} {
-		t.Run(string(profile), func(t *testing.T) {
-			cfg := validConfigForValidation()
-			cfg.AccountID = "not-a-uuid"
+	values := map[string]string{
+		"not a uuid":        "not-a-uuid",
+		"space-padded uuid": " " + validConfigForValidation().AccountID + " ",
+	}
+	for name, value := range values {
+		for _, profile := range []ConfigValidationProfile{ConfigValidationProfileCloud, ConfigValidationProfileOffline} {
+			t.Run(name+"/"+string(profile), func(t *testing.T) {
+				cfg := validConfigForValidation()
+				cfg.AccountID = value
 
-			result := ValidateConfig(cfg, profile)
+				result := ValidateConfig(cfg, profile)
 
-			assert.False(t, result.Valid)
-			check := requireConfigCheck(t, result.Checks, "accountID")
-			assert.Equal(t, ConfigValidationStatusInvalid, check.Status)
-			assert.Contains(t, check.Message, "must be a valid UUID")
-		})
+				assert.False(t, result.Valid)
+				check := requireConfigCheck(t, result.Checks, "accountID")
+				assert.Equal(t, ConfigValidationStatusInvalid, check.Status)
+				assert.Contains(t, check.Message, "must be a valid UUID")
+			})
+		}
 	}
 }
 
