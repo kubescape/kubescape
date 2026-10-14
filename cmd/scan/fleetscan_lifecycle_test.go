@@ -284,7 +284,8 @@ func TestRunFleetContext_HonorsPerClusterTimeoutAndRestoresContext(t *testing.T)
 	ks := &lifecycleContextKubescape{ctx: context.Background()}
 	var runnerContext context.Context
 
-	result, elapsed, err := runFleetContext("slow", info, ks, nil,
+	started := time.Now()
+	result, _, err := runFleetContext("slow", info, ks, nil,
 		func(ctx context.Context, _ *cautils.ScanInfo, _ meta.IKubescape, _ []cautils.PolicyIdentifier) (*resultshandling.ResultsHandler, error) {
 			runnerContext = ctx
 			assert.Equal(t, "slow", k8sinterface.GetContextName())
@@ -294,7 +295,9 @@ func TestRunFleetContext_HonorsPerClusterTimeoutAndRestoresContext(t *testing.T)
 
 	assert.Nil(t, result)
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
-	assert.GreaterOrEqual(t, elapsed, 25*time.Millisecond)
+	// The timeout starts before runFleetContext measures the runner duration.
+	// Measure the whole call to include that setup time.
+	assert.GreaterOrEqual(t, time.Since(started), info.ScanTimeout)
 	assert.Equal(t, "ambient", k8sinterface.GetContextName())
 	require.NotNil(t, runnerContext)
 	assert.ErrorIs(t, runnerContext.Err(), context.DeadlineExceeded)
