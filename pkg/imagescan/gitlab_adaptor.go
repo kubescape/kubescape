@@ -44,7 +44,7 @@ func (w *gitlabAPIWrapper) DoGraphQL(ctx context.Context, query string, variable
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 
-	resp, err := w.httpClient.Do(req)
+	resp, err := registryAPIHTTPClient(w.httpClient).Do(req)
 	if err != nil {
 		return nil, err
 	}
