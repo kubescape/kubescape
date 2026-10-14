@@ -83,24 +83,39 @@ func newCRDExceptionsGetter(ctx context.Context, target *k8sinterface.Kubernetes
 	return getter.NewCRDExceptionsGetter(k8sClient)
 }
 
+// crdExceptionsSource returns the SecurityException CRD source to merge into the
+// primary one, or nil when useCRD is false. The CRDs describe the workloads of
+// the cluster they live in. Only a caller working on that cluster asks for them:
+// a scan of local files or a download would otherwise pick up the exceptions of
+// whichever cluster the current kube-context points at. The result is an
+// interface so that "no CRD source" is a nil MergedExceptionsGetter secondary.
+func crdExceptionsSource(ctx context.Context, useCRD bool, target *k8sinterface.KubernetesApi) getter.IExceptionsGetter {
+	if !useCRD {
+		return nil
+	}
+	return newCRDExceptionsGetter(ctx, target)
+}
+
 // getExceptionsGetter returns the selected getter and whether an online
 // GitHub source degraded to the bundled cache. Explicit local/air-gapped
 // sources are intentional selections and therefore do not count as fallback.
-func getExceptionsGetter(ctx context.Context, useExceptions string, accountID string, downloadReleasedPolicy *getter.DownloadReleasedPolicy, airGapped bool) (getter.IExceptionsGetter, bool, error) {
-	return getExceptionsGetterForTarget(ctx, useExceptions, accountID, downloadReleasedPolicy, airGapped, nil)
+func getExceptionsGetter(ctx context.Context, useExceptions string, accountID string, downloadReleasedPolicy *getter.DownloadReleasedPolicy, useCRD bool, airGapped bool) (getter.IExceptionsGetter, bool, error) {
+	return getExceptionsGetterForTarget(ctx, useExceptions, accountID, downloadReleasedPolicy, useCRD, airGapped, nil)
 }
 
-func getExceptionsGetterForTarget(ctx context.Context, useExceptions string, accountID string, downloadReleasedPolicy *getter.DownloadReleasedPolicy, airGapped bool, target *k8sinterface.KubernetesApi) (getter.IExceptionsGetter, bool, error) {
+// getExceptionsGetterForTarget merges the SecurityException CRDs of the cluster
+// into the selected source when useCRD is set (live cluster scans only).
+func getExceptionsGetterForTarget(ctx context.Context, useExceptions string, accountID string, downloadReleasedPolicy *getter.DownloadReleasedPolicy, useCRD bool, airGapped bool, target *k8sinterface.KubernetesApi) (getter.IExceptionsGetter, bool, error) {
 	var primary getter.IExceptionsGetter
 
 	if useExceptions != "" {
 		// load exceptions from file
 		primary = getter.NewLoadPolicy([]string{useExceptions})
-		return getter.NewMergedExceptionsGetter(primary, newCRDExceptionsGetter(ctx, target)), false, nil
+		return getter.NewMergedExceptionsGetter(primary, crdExceptionsSource(ctx, useCRD, target)), false, nil
 	}
 	if airGapped {
 		primary = getter.NewLoadPolicy([]string{getter.GetDefaultPath(cautils.LocalExceptionsFilename)})
-		return getter.NewMergedExceptionsGetter(primary, newCRDExceptionsGetter(ctx, target)), false, nil
+		return getter.NewMergedExceptionsGetter(primary, crdExceptionsSource(ctx, useCRD, target)), false, nil
 	}
 	if accountID != "" {
 		if downloadReleasedPolicy != nil && downloadReleasedPolicy.IsVersionPinned() {
@@ -108,23 +123,23 @@ func getExceptionsGetterForTarget(ctx context.Context, useExceptions string, acc
 		}
 		// download exceptions from Kubescape Cloud backend
 		primary = getter.GetKSCloudAPIAdapter()
-		return getter.NewMergedExceptionsGetter(primary, newCRDExceptionsGetter(ctx, target)), false, nil
+		return getter.NewMergedExceptionsGetter(primary, crdExceptionsSource(ctx, useCRD, target)), false, nil
 	}
 	// download exceptions from GitHub
 	if downloadReleasedPolicy == nil {
 		downloadReleasedPolicy = getter.NewDownloadReleasedPolicy()
 	}
-	return getReleasedExceptionsGetterForTarget(ctx, downloadReleasedPolicy, target)
+	return getReleasedExceptionsGetterForTarget(ctx, downloadReleasedPolicy, useCRD, target)
 }
 
 // getReleasedExceptionsGetter reports whether the GitHub release could not be
 // fetched and the bundled local cache is being used instead. The caller must
 // preserve that signal because cached exceptions can change scan findings.
-func getReleasedExceptionsGetter(ctx context.Context, downloadReleasedPolicy releasedExceptionsGetter) (getter.IExceptionsGetter, bool, error) {
-	return getReleasedExceptionsGetterForTarget(ctx, downloadReleasedPolicy, nil)
+func getReleasedExceptionsGetter(ctx context.Context, downloadReleasedPolicy releasedExceptionsGetter, useCRD bool) (getter.IExceptionsGetter, bool, error) {
+	return getReleasedExceptionsGetterForTarget(ctx, downloadReleasedPolicy, useCRD, nil)
 }
 
-func getReleasedExceptionsGetterForTarget(ctx context.Context, downloadReleasedPolicy releasedExceptionsGetter, target *k8sinterface.KubernetesApi) (getter.IExceptionsGetter, bool, error) {
+func getReleasedExceptionsGetterForTarget(ctx context.Context, downloadReleasedPolicy releasedExceptionsGetter, useCRD bool, target *k8sinterface.KubernetesApi) (getter.IExceptionsGetter, bool, error) {
 	var primary getter.IExceptionsGetter = downloadReleasedPolicy
 	fallback, err := downloadReleasedPolicy.SetRegoObjectsWithFallback()
 	if err != nil {
@@ -135,7 +150,7 @@ func getReleasedExceptionsGetterForTarget(ctx context.Context, downloadReleasedP
 		logger.L().Ctx(ctx).Warning("failed to get exceptions from github release, loading exceptions from cache")
 		primary = getter.NewLoadPolicy([]string{getter.GetDefaultPath(cautils.LocalExceptionsFilename)})
 	}
-	return getter.NewMergedExceptionsGetter(primary, newCRDExceptionsGetter(ctx, target)), fallback, nil
+	return getter.NewMergedExceptionsGetter(primary, crdExceptionsSource(ctx, useCRD, target)), fallback, nil
 }
 
 func getRBACHandler(tenantConfig cautils.ITenantConfig, k8s *k8sinterface.KubernetesApi, submit bool) *cautils.RBACObjects {

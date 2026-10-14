@@ -9,11 +9,19 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 
+	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/k8s-interface/k8sinterface"
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/cautils/getter"
+	metav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
+	"github.com/kubescape/kubescape/v4/core/pkg/policyhandler"
+	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
+	"github.com/kubescape/opa-utils/reporthandling"
+	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -61,7 +69,7 @@ func TestCRDPolicyGettersUseScanTargetClient(t *testing.T) {
 	exceptionsPath := filepath.Join(t.TempDir(), "exceptions.json")
 	require.NoError(t, os.WriteFile(exceptionsPath, []byte("[]"), 0o600))
 	exceptionsGetter, exceptionsFromCache, err := getExceptionsGetterForTarget(
-		context.Background(), exceptionsPath, "", nil, false, target,
+		context.Background(), exceptionsPath, "", nil, true, false, target,
 	)
 	require.NoError(t, err)
 	assert.False(t, exceptionsFromCache)
@@ -74,6 +82,277 @@ func TestCRDPolicyGettersUseScanTargetClient(t *testing.T) {
 
 	assert.Zero(t, globalRequests.Load(), "CRD policy reads must not consult the process-global API server")
 	assert.Positive(t, targetRequests.Load())
+}
+
+// TestExceptionsGetterReadsCRDsOnlyWhenAsked pins that no exceptions source
+// reaches for the cluster in the current kube-context on its own: the
+// SecurityException CRDs are merged only for a caller that asks for them.
+func TestExceptionsGetterReadsCRDsOnlyWhenAsked(t *testing.T) {
+	var crdReads atomic.Int64
+	withGlobalClusterAPI(t, "global", &crdReads)
+
+	originalStore := getter.DefaultLocalStore
+	getter.DefaultLocalStore = t.TempDir()
+	t.Cleanup(func() { getter.DefaultLocalStore = originalStore })
+	require.NoError(t, os.WriteFile(getter.GetDefaultPath(cautils.LocalExceptionsFilename), []byte("[]"), 0o600))
+
+	exceptionsPath := filepath.Join(t.TempDir(), "exceptions.json")
+	require.NoError(t, os.WriteFile(exceptionsPath, []byte("[]"), 0o600))
+
+	ctx := context.Background()
+	sources := map[string]func(useCRD bool) (getter.IExceptionsGetter, bool, error){
+		"exceptions file": func(useCRD bool) (getter.IExceptionsGetter, bool, error) {
+			return getExceptionsGetter(ctx, exceptionsPath, "", nil, useCRD, false)
+		},
+		"air-gapped cache": func(useCRD bool) (getter.IExceptionsGetter, bool, error) {
+			return getExceptionsGetter(ctx, "", "", nil, useCRD, true)
+		},
+		"release": func(useCRD bool) (getter.IExceptionsGetter, bool, error) {
+			return getReleasedExceptionsGetter(ctx, &releasedExceptionsGetterStub{}, useCRD)
+		},
+		"release cache fallback": func(useCRD bool) (getter.IExceptionsGetter, bool, error) {
+			return getReleasedExceptionsGetter(ctx, &releasedExceptionsGetterStub{fallback: true}, useCRD)
+		},
+	}
+
+	for name, source := range sources {
+		t.Run(name, func(t *testing.T) {
+			crdReads.Store(0)
+			exceptionsGetter, _, err := source(false)
+			require.NoError(t, err)
+			exceptions, err := exceptionsGetter.GetExceptions(ctx, "")
+			require.NoError(t, err)
+			assert.Empty(t, exceptions)
+			assert.Zero(t, crdReads.Load(), "the cluster must not be asked for SecurityException CRDs")
+
+			exceptionsGetter, _, err = source(true)
+			require.NoError(t, err)
+			exceptions, err = exceptionsGetter.GetExceptions(ctx, "")
+			require.NoError(t, err)
+			require.Len(t, exceptions, 1)
+			assert.Equal(t, "global-exception/C-0001", exceptions[0].Name)
+			assert.Positive(t, crdReads.Load())
+		})
+	}
+}
+
+// TestFileScanIgnoresClusterSecurityExceptions pins #4124: a scan of local
+// files must report the same result whichever cluster the current kube-context
+// points at, so it neither reads nor applies that cluster's SecurityException
+// CRDs.
+func TestFileScanIgnoresClusterSecurityExceptions(t *testing.T) {
+	var crdReads atomic.Int64
+	// The cluster excepts C-0001 for every workload in the "global-ns" namespace.
+	withGlobalClusterAPI(t, "global", &crdReads)
+
+	originalStore := getter.DefaultLocalStore
+	getter.DefaultLocalStore = t.TempDir()
+	t.Cleanup(func() { getter.DefaultLocalStore = originalStore })
+
+	dir := t.TempDir()
+	writeFile := func(name, content string) string {
+		path := filepath.Join(dir, name)
+		require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+		return path
+	}
+	manifestPath := writeFile("pod.yaml", `apiVersion: v1
+kind: Pod
+metadata:
+  name: web
+  namespace: global-ns
+`)
+
+	rule := reporthandling.PolicyRule{
+		Rule: `package armo_builtins
+
+import rego.v1
+
+deny contains message if {
+	resource := input[_]
+	resource.kind == "Pod"
+	message := {
+		"alertMessage": "pod is not allowed",
+		"packagename": "armo_builtins",
+		"failedPaths": [],
+		"fixPaths": [],
+		"alertScore": 7,
+		"alertObject": {"k8sApiObjects": [resource]}
+	}
+}
+`,
+		RuleLanguage: reporthandling.RegoLanguage,
+		Match: []reporthandling.RuleMatchObjects{{
+			APIGroups:   []string{""},
+			APIVersions: []string{"v1"},
+			Resources:   []string{"Pod"},
+		}},
+	}
+	rule.Name = "deny-pods"
+	control := reporthandling.Control{ControlID: "C-0001", BaseScore: 7, Rules: []reporthandling.PolicyRule{rule}}
+	control.Name = "deny-pods"
+	framework := reporthandling.Framework{Controls: []reporthandling.Control{control}}
+	framework.Name = "file-scan-probe"
+	frameworkBytes, err := json.Marshal(framework)
+	require.NoError(t, err)
+
+	scanInfo := &cautils.ScanInfo{
+		UseFrom:        []string{writeFile("framework.json", string(frameworkBytes))},
+		ControlsInputs: writeFile("controls-inputs.json", `{}`),
+		UseExceptions:  writeFile("exceptions.json", `[]`),
+		AttackTracks:   writeFile("attack-tracks.json", `[]`),
+		InputPatterns:  []string{manifestPath},
+		Local:          true,
+		FrameworkScan:  true,
+		ScanType:       cautils.ScanTypeFramework,
+	}
+	scanInfo.Submit.SetBool(false)
+
+	results, err := NewKubescape(context.Background()).Scan(scanInfo, []cautils.PolicyIdentifier{{
+		Identifier: framework.Name,
+		Kind:       apisv1.KindFramework,
+	}})
+	require.NoError(t, err)
+	require.NotNil(t, results)
+	data := results.GetData()
+	require.NotNil(t, data)
+
+	summary, ok := data.Report.SummaryDetails.Controls[control.ControlID]
+	require.True(t, ok)
+	assert.Equal(t, apis.StatusFailed, summary.GetStatus().Status())
+	assert.Equal(t, 1, summary.StatusCounters.FailedResources)
+	assert.Empty(t, data.Exceptions)
+	assert.Zero(t, crdReads.Load(), "a file scan must not ask the cluster for SecurityException CRDs")
+}
+
+// TestExceptionsCacheKeepsFileAndClusterScansApart pins that, with
+// POLICIES_CACHE_TTL set, a scan of local files and a scan of the cluster that
+// resolve the same cluster name, and so share a policy handler, do not serve
+// each other's cached exceptions. Only the cluster scan may see the cluster's
+// SecurityException CRDs, whichever of the two runs first.
+func TestExceptionsCacheKeepsFileAndClusterScansApart(t *testing.T) {
+	t.Setenv(policyhandler.PoliciesCacheTtlEnvVar, "5m")
+
+	var crdReads atomic.Int64
+	withGlobalClusterAPI(t, "global", &crdReads)
+
+	dir := t.TempDir()
+	writeFile := func(name, content string) string {
+		path := filepath.Join(dir, name)
+		require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+		return path
+	}
+	framework := reporthandling.Framework{Controls: []reporthandling.Control{{ControlID: "C-0001"}}}
+	framework.Name = "cache-probe"
+	frameworkBytes, err := json.Marshal(framework)
+	require.NoError(t, err)
+	frameworkPath := writeFile("framework.json", string(frameworkBytes))
+	controlsInputsPath := writeFile("controls-inputs.json", `{"probe":["value"]}`)
+	exceptionsPath := writeFile("exceptions.json", `[]`)
+	identifiers := []cautils.PolicyIdentifier{{Identifier: framework.Name, Kind: apisv1.KindFramework}}
+
+	// collect resolves the exceptions the way ScanContext does: a getter built
+	// for the kind of scan, read through the handler shared by clusterName.
+	collect := func(t *testing.T, clusterName string, clusterScan bool) []armotypes.PostureExceptionPolicy {
+		t.Helper()
+		exceptionsGetter, _, err := getExceptionsGetterForTarget(context.Background(), exceptionsPath, "", nil, clusterScan, false, nil)
+		require.NoError(t, err)
+		session, err := collectPolicies(context.Background(), clusterName, identifiers, &cautils.ScanInfo{}, &cautils.Getters{
+			PolicyGetter:         getter.NewLoadPolicy([]string{frameworkPath}),
+			ControlsInputsGetter: getter.NewLoadPolicy([]string{controlsInputsPath}),
+			ExceptionsGetter:     exceptionsGetter,
+		})
+		require.NoError(t, err)
+		require.Empty(t, session.PolicyDegradations)
+		return session.Exceptions
+	}
+	requireClusterExceptions := func(t *testing.T, exceptions []armotypes.PostureExceptionPolicy) {
+		t.Helper()
+		require.Len(t, exceptions, 1)
+		assert.Equal(t, "global-exception/C-0001", exceptions[0].Name)
+	}
+
+	t.Run("file scan then cluster scan", func(t *testing.T) {
+		crdReads.Store(0)
+		assert.Empty(t, collect(t, t.Name(), false))
+		assert.Zero(t, crdReads.Load(), "a file scan must not ask the cluster for SecurityException CRDs")
+
+		requireClusterExceptions(t, collect(t, t.Name(), true))
+		assert.Positive(t, crdReads.Load())
+	})
+
+	t.Run("cluster scan then file scan", func(t *testing.T) {
+		requireClusterExceptions(t, collect(t, t.Name(), true))
+
+		crdReads.Store(0)
+		assert.Empty(t, collect(t, t.Name(), false))
+		assert.Zero(t, crdReads.Load(), "a file scan must not ask the cluster for SecurityException CRDs")
+	})
+
+	t.Run("repeated cluster scan reuses the cache", func(t *testing.T) {
+		requireClusterExceptions(t, collect(t, t.Name(), true))
+
+		crdReads.Store(0)
+		requireClusterExceptions(t, collect(t, t.Name(), true))
+		assert.Zero(t, crdReads.Load(), "the second cluster scan should be served from the cache")
+	})
+}
+
+// TestDownloadExceptionsLeavesClusterSecurityExceptionsOut pins that the
+// downloaded exceptions, which later scans of any target load, hold the
+// selected source only and not the SecurityException CRDs of the cluster in
+// the current kube-context.
+func TestDownloadExceptionsLeavesClusterSecurityExceptionsOut(t *testing.T) {
+	var crdReads atomic.Int64
+	withGlobalClusterAPI(t, "global", &crdReads)
+	withTenantConfig(t, &fakeTenantConfig{})
+
+	want := []armotypes.PostureExceptionPolicy{{PortalBase: armotypes.PortalBase{Name: "from-source"}}}
+	sourcePath := filepath.Join(t.TempDir(), "source.json")
+	require.NoError(t, getter.SaveInFile(want, sourcePath))
+
+	// Keep the real getter and the CRD choice downloadExceptions makes, with a
+	// local file standing in for the release it would otherwise fetch.
+	original := exceptionsGetterFunc
+	exceptionsGetterFunc = func(ctx context.Context, _ string, accountID string, downloadReleasedPolicy *getter.DownloadReleasedPolicy, useCRD bool, airGapped bool) (getter.IExceptionsGetter, bool, error) {
+		return getExceptionsGetter(ctx, sourcePath, accountID, downloadReleasedPolicy, useCRD, airGapped)
+	}
+	t.Cleanup(func() { exceptionsGetterFunc = original })
+
+	dir := t.TempDir()
+	files, err := downloadExceptions(context.Background(), &metav1.DownloadInfo{Target: TargetExceptions, Path: dir})
+	require.NoError(t, err)
+	require.Len(t, files, 1)
+
+	var got []armotypes.PostureExceptionPolicy
+	readJSONFile(t, files[0], &got)
+	assert.Equal(t, want, got)
+	assert.Zero(t, crdReads.Load(), "a download must not ask the cluster for SecurityException CRDs")
+}
+
+// withGlobalClusterAPI points the process-global Kubernetes configuration at a
+// fake API server, the way a reachable current kube-context does, and counts
+// the requests it receives for kubescape.io SecurityException resources.
+func withGlobalClusterAPI(t *testing.T, source string, crdReads *atomic.Int64) {
+	t.Helper()
+
+	api := newCRDPolicyAPIServer(t, source, new(atomic.Int64))
+	t.Cleanup(api.Close)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "securityexceptions") {
+			crdReads.Add(1)
+		}
+		api.Config.Handler.ServeHTTP(w, r)
+	}))
+	t.Cleanup(server.Close)
+
+	previousConfig := k8sinterface.K8SConfig
+	previousConnected := k8sinterface.IsConnectedToCluster()
+	k8sinterface.K8SConfig = &restclient.Config{Host: server.URL}
+	k8sinterface.SetConnectedToCluster(true)
+	t.Cleanup(func() {
+		k8sinterface.K8SConfig = previousConfig
+		k8sinterface.SetConnectedToCluster(previousConnected)
+	})
 }
 
 // TestConfigInputsGetterOnlyAbortsWhenTheScanIsStopped pins that a ControlInput read that timed out connecting falls back instead of aborting the scan.

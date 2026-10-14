@@ -29,6 +29,9 @@ type cachedPoliciesEntry struct {
 type cachedExceptionsEntry struct {
 	exceptions  []armotypes.PostureExceptionPolicy
 	runnerInput reporthandlingv2.ScanContractRunnerInput
+	// includesClusterExceptions records whether the exceptions were read with
+	// the cluster's SecurityException CRDs merged in.
+	includesClusterExceptions bool
 }
 
 type cachedControlInputsEntry struct {
@@ -38,6 +41,12 @@ type cachedControlInputsEntry struct {
 
 type policyArtifactPersistence interface {
 	ShouldPersistPolicyArtifacts() bool
+}
+
+// clusterExceptionsSource is implemented by exception getters that can merge the
+// cluster's SecurityException CRDs into the selected source.
+type clusterExceptionsSource interface {
+	IncludesClusterExceptions() bool
 }
 
 // PolicyHandler
@@ -303,7 +312,17 @@ func (policyHandler *PolicyHandler) downloadScanPolicies(ctx context.Context, po
 }
 
 func (policyHandler *PolicyHandler) getExceptions(ctx context.Context, scanInfo *cautils.ScanInfo, getters *cautils.Getters) ([]armotypes.PostureExceptionPolicy, error) {
-	if cachedExceptions, exist := policyHandler.cachedExceptions.Get(); exist {
+	// A scan of local files and a scan of the cluster can resolve the same
+	// cluster name and so share this handler, but only the cluster scan merges
+	// the cluster's SecurityException CRDs. An entry cached by one is a miss for
+	// the other: reusing it would drop the CRDs from a cluster scan, or apply
+	// them to local files.
+	includesClusterExceptions := false
+	if source, ok := getters.ExceptionsGetter.(clusterExceptionsSource); ok {
+		includesClusterExceptions = source.IncludesClusterExceptions()
+	}
+
+	if cachedExceptions, exist := policyHandler.cachedExceptions.Get(); exist && cachedExceptions.includesClusterExceptions == includesClusterExceptions {
 		logger.L().Info("Using cached exceptions")
 		cautils.RecordCachedScanContractRunnerInput(scanInfo, cachedExceptions.runnerInput)
 		return cachedExceptions.exceptions, nil
@@ -312,7 +331,7 @@ func (policyHandler *PolicyHandler) getExceptions(ctx context.Context, scanInfo 
 	exceptions, err := getters.ExceptionsGetter.GetExceptions(ctx, policyHandler.clusterName)
 	if err == nil {
 		runnerInput, _ := cautils.RecordScanContractRunnerInput(scanInfo, "exceptions", getters.ExceptionsGetter)
-		policyHandler.cachedExceptions.Set(cachedExceptionsEntry{exceptions: exceptions, runnerInput: runnerInput})
+		policyHandler.cachedExceptions.Set(cachedExceptionsEntry{exceptions: exceptions, runnerInput: runnerInput, includesClusterExceptions: includesClusterExceptions})
 	}
 
 	return exceptions, err

@@ -60,6 +60,14 @@ func (g *MergedExceptionsGetter) GetExceptions(ctx context.Context, clusterName 
 	return deduplicateExceptions(exceptions, crdExceptions), nil
 }
 
+// IncludesClusterExceptions reports whether a secondary source is merged into
+// the primary one, which is how the cluster's SecurityException CRDs reach a
+// scan. Exceptions read with and without them are not interchangeable, so a
+// cache must not serve one kind of scan with what it stored for the other.
+func (g *MergedExceptionsGetter) IncludesClusterExceptions() bool {
+	return g != nil && g.secondary != nil
+}
+
 // ConsumedFileDigest forwards provenance from the primary local source. CRD
 // exceptions are not files and therefore deliberately have no file digest.
 func (g *MergedExceptionsGetter) ConsumedFileDigest() (path, digest string, ok bool) {
