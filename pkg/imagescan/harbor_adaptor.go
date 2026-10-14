@@ -153,6 +153,9 @@ func (a *HarborAdaptor) GetImagesScanStatus(ctx context.Context, imageIDs []Cont
 		if ref == "" {
 			return status, nil
 		}
+		if err := a.validateImageRegistry(imageID); err != nil {
+			return status, err
+		}
 
 		project, repo, err := extractProjectAndRepo(imageID.Repository)
 		if err != nil {
@@ -228,6 +231,9 @@ func (a *HarborAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs [
 		}
 		if ref == "" {
 			return report, nil
+		}
+		if err := a.validateImageRegistry(imageID); err != nil {
+			return report, err
 		}
 
 		project, repo, err := extractProjectAndRepo(imageID.Repository)
