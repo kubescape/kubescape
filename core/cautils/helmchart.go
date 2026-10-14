@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/kubescape/go-logger"
@@ -25,7 +26,9 @@ import (
 	helmengine "helm.sh/helm/v3/pkg/engine"
 	helmgetter "helm.sh/helm/v3/pkg/getter"
 	helmregistry "helm.sh/helm/v3/pkg/registry"
+	k8sversion "k8s.io/apimachinery/pkg/util/version"
 	"k8s.io/client-go/util/homedir"
+	componentversion "k8s.io/component-base/version"
 )
 
 type HelmChart struct {
@@ -244,7 +247,8 @@ func (hc *HelmChart) GetWorkloadsWithOptions(values map[string]any, releaseOpts 
 
 // GetWorkloadsWithCapabilities renders like GetWorkloadsWithOptions, with the Kubernetes version
 // and the extra API versions that templates read from .Capabilities taken from capOpts.
-// A zero capOpts renders with Helm's library defaults.
+// A zero capOpts renders with Helm's library defaults, except for the Kubernetes version of a
+// chart that declares a kubeVersion constraint (see defaultKubeVersion).
 func (hc *HelmChart) GetWorkloadsWithCapabilities(values map[string]any, releaseOpts helmchartutil.ReleaseOptions, capOpts HelmCapabilityOptions) (map[string][]workloadinterface.IMetadata, []error) {
 	caps, err := hc.capabilities(capOpts)
 	if err != nil {
@@ -493,29 +497,89 @@ func isStaticTemplate(absPath string) (bool, error) {
 // capabilities returns the Helm capabilities to render hc with, or nil for Helm's library
 // defaults: Kubernetes v1.20 and the built-in API versions.
 //
-// An explicit Kubernetes version that the chart's own kubeVersion constraint rejects is an
-// error, worded as Helm words it. The constraint is not enforced against the implicit default:
-// charts that declare one have always been rendered at that default, and failing them because
-// only API versions were added would be a new failure unrelated to what the caller asked for.
+// The Kubernetes version is opts.KubeVersion when set, otherwise the one defaultKubeVersion
+// picks from the chart's kubeVersion constraint. An explicit version that the constraint
+// rejects is an error, worded as Helm words it.
 func (hc *HelmChart) capabilities(opts HelmCapabilityOptions) (*helmchartutil.Capabilities, error) {
-	if opts.IsEmpty() {
+	kubeVersion, err := hc.kubeVersion(opts.KubeVersion)
+	if err != nil {
+		return nil, err
+	}
+	if kubeVersion == nil && len(opts.APIVersions) == 0 {
 		return nil, nil
 	}
 	caps := helmchartutil.DefaultCapabilities.Copy()
-	if opts.KubeVersion != "" {
-		kubeVersion, err := helmchartutil.ParseKubeVersion(opts.KubeVersion)
-		if err != nil {
-			return nil, fmt.Errorf("%q is not a Kubernetes version: %w", opts.KubeVersion, err)
-		}
-		if hc.chart.Metadata != nil && hc.chart.Metadata.KubeVersion != "" &&
-			!helmchartutil.IsCompatibleRange(hc.chart.Metadata.KubeVersion, kubeVersion.String()) {
-			return nil, fmt.Errorf("chart requires kubeVersion: %s which is incompatible with Kubernetes %s", hc.chart.Metadata.KubeVersion, kubeVersion.String())
-		}
+	if kubeVersion != nil {
 		caps.KubeVersion = *kubeVersion
 	}
 	// Copy returns the shared DefaultVersionSet slice, so clone it before appending.
 	caps.APIVersions = append(slices.Clone(helmchartutil.DefaultVersionSet), opts.APIVersions...)
 	return caps, nil
+}
+
+// kubeVersion returns the Kubernetes version to render hc for, or nil for Helm's library
+// default. explicit is the version the caller asked for; empty leaves the choice to the chart.
+func (hc *HelmChart) kubeVersion(explicit string) (*helmchartutil.KubeVersion, error) {
+	if explicit == "" {
+		return hc.defaultKubeVersion(), nil
+	}
+	kubeVersion, err := helmchartutil.ParseKubeVersion(explicit)
+	if err != nil {
+		return nil, fmt.Errorf("%q is not a Kubernetes version: %w", explicit, err)
+	}
+	if constraint := hc.kubeVersionConstraint(); constraint != "" &&
+		!helmchartutil.IsCompatibleRange(constraint, kubeVersion.String()) {
+		return nil, fmt.Errorf("chart requires kubeVersion: %s which is incompatible with Kubernetes %s", constraint, kubeVersion.String())
+	}
+	return kubeVersion, nil
+}
+
+// defaultKubeVersion returns the Kubernetes version to render hc for when the caller does not
+// choose one: the newest minor, v1.N.0 down to v1.0.0, that satisfies the chart's kubeVersion
+// constraint, checked as Helm checks it. N is the minor of the vendored Kubernetes libraries,
+// so it moves when they are bumped.
+//
+// It returns nil, which keeps Helm's library default of v1.20, when the chart declares no
+// constraint, when the constraint does not parse, or when no such version satisfies it (a
+// constraint on a patch release, such as "~1.29.3", or on a minor newer than N). Rendering
+// those charts as before is preferred over failing them.
+func (hc *HelmChart) defaultKubeVersion() *helmchartutil.KubeVersion {
+	constraint := hc.kubeVersionConstraint()
+	if constraint == "" {
+		return nil
+	}
+	newest, err := newestKubeVersion()
+	if err != nil {
+		logger.L().Debug("failed to read the vendored Kubernetes version, rendering Helm chart for the default",
+			helpers.String("chart", hc.GetName()), helpers.Error(err))
+		return nil
+	}
+	major := strconv.FormatUint(uint64(newest.Major()), 10)
+	for minor := int(newest.Minor()); minor >= 0; minor-- {
+		candidate := helmchartutil.KubeVersion{
+			Version: fmt.Sprintf("v%s.%d.0", major, minor),
+			Major:   major,
+			Minor:   strconv.Itoa(minor),
+		}
+		if helmchartutil.IsCompatibleRange(constraint, candidate.Version) {
+			return &candidate
+		}
+	}
+	return nil
+}
+
+// kubeVersionConstraint returns the chart's kubeVersion constraint from Chart.yaml, or "".
+func (hc *HelmChart) kubeVersionConstraint() string {
+	if hc.chart.Metadata == nil {
+		return ""
+	}
+	return hc.chart.Metadata.KubeVersion
+}
+
+// newestKubeVersion returns the Kubernetes version of the vendored Kubernetes libraries,
+// major and minor only.
+func newestKubeVersion() (*k8sversion.Version, error) {
+	return k8sversion.ParseGeneric(componentversion.DefaultKubeBinaryVersion)
 }
 
 // HelmCapabilityOptions describes the cluster a Helm chart is rendered for. It mirrors the

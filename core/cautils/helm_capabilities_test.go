@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	helmchartutil "helm.sh/helm/v3/pkg/chartutil"
+	componentversion "k8s.io/component-base/version"
 )
 
 const (
@@ -158,12 +159,16 @@ func TestHelmCapabilities_ChartKubeVersionConstraint(t *testing.T) {
 		assert.Equal(t, "v1.31", kubeVersion)
 	})
 
-	t.Run("the constraint is not enforced against the implicit default", func(t *testing.T) {
-		rendered, _ := renderCapabilitiesChart(t, chartDir, HelmCapabilityOptions{})
-		assert.Equal(t, []string{"ConfigMap/rendered-for"}, rendered)
+	t.Run("without an explicit version the chart picks the newest it allows", func(t *testing.T) {
+		newest := "v" + componentversion.DefaultKubeBinaryVersion + ".0"
 
-		rendered, _ = renderCapabilitiesChart(t, chartDir, HelmCapabilityOptions{APIVersions: []string{capabilitiesChartGatewayAPI}})
-		assert.Equal(t, []string{"ConfigMap/rendered-for", "HTTPRoute/web-public"}, rendered)
+		rendered, kubeVersion := renderCapabilitiesChart(t, chartDir, HelmCapabilityOptions{})
+		assert.Equal(t, []string{"ConfigMap/rendered-for", "Deployment/web"}, rendered)
+		assert.Equal(t, newest, kubeVersion)
+
+		rendered, kubeVersion = renderCapabilitiesChart(t, chartDir, HelmCapabilityOptions{APIVersions: []string{capabilitiesChartGatewayAPI}})
+		assert.Equal(t, []string{"ConfigMap/rendered-for", "Deployment/web", "HTTPRoute/web-public"}, rendered)
+		assert.Equal(t, newest, kubeVersion)
 	})
 }
 
