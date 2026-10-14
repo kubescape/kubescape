@@ -7,6 +7,9 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
+	idhelpers "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	storagev1beta1 "github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
@@ -17,6 +20,47 @@ func isValidCapability(s string) bool {
 		}
 	}
 	return len(s) > 0
+}
+
+// fsMutatingSyscalls are syscalls that change the filesystem without an open(2)
+// the profile's Opens list could describe. Only their presence is evidence;
+// their absence from a profile proves nothing, as event capture is not
+// guaranteed to be complete.
+var fsMutatingSyscalls = map[string]bool{
+	"creat": true, "truncate": true, "ftruncate": true,
+	"unlink": true, "unlinkat": true, "rmdir": true,
+	"rename": true, "renameat": true, "renameat2": true,
+	"mkdir": true, "mkdirat": true, "mknod": true, "mknodat": true,
+	"link": true, "linkat": true, "symlink": true, "symlinkat": true,
+	"chmod": true, "fchmod": true, "fchmodat": true,
+	"chown": true, "fchown": true, "lchown": true, "fchownat": true,
+	"setxattr": true, "lsetxattr": true, "fsetxattr": true,
+	"removexattr": true, "lremovexattr": true, "fremovexattr": true,
+}
+
+// profileMarkedIncomplete reports whether the profile's annotations explicitly
+// say it is still learning or was only partially observed. Missing annotations
+// are not treated as incomplete, which keeps unannotated profiles (for example
+// hand-written ones) on the pre-existing behavior. A completed/full profile is
+// not proof of complete coverage; it only means no such marker is present.
+func profileMarkedIncomplete(profile *storagev1beta1.ContainerProfile) bool {
+	annotations := profile.GetAnnotations()
+	if status, ok := annotations[idhelpers.StatusMetadataKey]; ok && status != idhelpers.Completed {
+		return true
+	}
+	if completion, ok := annotations[idhelpers.CompletionMetadataKey]; ok && completion != idhelpers.Full {
+		return true
+	}
+	return false
+}
+
+func hasFsMutatingSyscall(profile *storagev1beta1.ContainerProfile) bool {
+	for _, sc := range profile.Spec.Syscalls {
+		if fsMutatingSyscalls[strings.ToLower(sc)] {
+			return true
+		}
+	}
+	return false
 }
 
 // FixSuggestion represents a suggested fix based on drift detection
@@ -112,6 +156,15 @@ func DetectProfileDrift(manifest []byte, profile *storagev1beta1.ContainerProfil
 		return fixes
 	}
 
+	// Both the read-only rootfs and the drop-ALL suggestions are inferred from
+	// something not having been observed, so they are withheld when the profile
+	// says its observations are not complete.
+	absenceEvidenceUsable := !profileMarkedIncomplete(profile)
+	if !absenceEvidenceUsable {
+		logger.L().Debug("skipping absence-based profile drift suggestions: container profile is marked incomplete",
+			helpers.String("profile", profile.GetName()))
+	}
+
 	baseContextPath := fmt.Sprintf("%s[%d].securityContext", containersPath, containerIndex)
 
 	// Check if readOnlyRootFilesystem is already set to true in the manifest
@@ -123,8 +176,8 @@ func DetectProfileDrift(manifest []byte, profile *storagev1beta1.ContainerProfil
 	}
 
 	// 1. Rootfs Check
-	if !isReadOnlyManifest {
-		hasWrite := false
+	if !isReadOnlyManifest && absenceEvidenceUsable {
+		hasWrite := hasFsMutatingSyscall(profile)
 		for _, openCall := range profile.Spec.Opens {
 			for _, flag := range openCall.Flags {
 				if strings.Contains(flag, "O_WRONLY") || strings.Contains(flag, "O_RDWR") ||
@@ -161,7 +214,7 @@ func DetectProfileDrift(manifest []byte, profile *storagev1beta1.ContainerProfil
 	}
 
 	if len(profile.Spec.Capabilities) == 0 {
-		if !existingDrops["ALL"] {
+		if absenceEvidenceUsable && !existingDrops["ALL"] {
 			var finalDrops []string
 			for k := range existingDrops {
 				finalDrops = append(finalDrops, "\""+k+"\"")
