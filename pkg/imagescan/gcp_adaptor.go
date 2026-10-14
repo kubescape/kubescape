@@ -2,6 +2,7 @@ package imagescan
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -245,9 +246,12 @@ func (a *GCPAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs []Co
 				return report, nil
 			}
 
-			scanStatus, err := a.getImageScanStatus(ctx, imageID)
-			if err != nil {
-				return report, err
+			scanStatus, discoveryErr := a.getImageScanStatus(ctx, imageID)
+			// Discovery status and vulnerability occurrences are independent
+			// queries. Keep available findings when only discovery fails, while
+			// still returning its error so callers cannot read an all-clear.
+			if ctx.Err() != nil {
+				return report, errors.Join(discoveryErr, ctx.Err())
 			}
 
 			if scanStatus.Status == ScanStatusScanned {
@@ -269,7 +273,7 @@ func (a *GCPAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs []Co
 					break
 				}
 				if err != nil {
-					return report, fmt.Errorf("failed to query vulnerabilities for repository %s: %w", imageID.Repository, err)
+					return report, errors.Join(discoveryErr, fmt.Errorf("failed to query vulnerabilities for repository %s: %w", imageID.Repository, err))
 				}
 
 				if len(report.Vulnerabilities) >= maxVulns {
@@ -299,7 +303,7 @@ func (a *GCPAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs []Co
 				}
 			}
 
-			return report, nil
+			return report, discoveryErr
 		},
 	)
 }
