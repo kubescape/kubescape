@@ -506,6 +506,57 @@ func parityCases() []parityCase {
 	cases = append(cases, parityVolumeCases()...)
 	cases = append(cases, parityCapabilityCases()...)
 	cases = append(cases, parityContainerKindCases()...)
+	cases = append(cases, parityUserNamespaceCases(cases)...)
+	return cases
+}
+
+// parityUserNamespaceCases repeats cases from the corpus in a user namespace
+// (hostUsers: false). Since v1.35 the standards relax the runAsNonRoot,
+// runAsUser and Baseline procMount checks for such a pod, and only those; the
+// cases above witness the relaxation, these that every other check still
+// applies, and that the relaxation reaches init and ephemeral containers.
+// hostNetwork, hostPID and hostIPC are left out: pod validation rejects them
+// together with hostUsers: false.
+func parityUserNamespaceCases(corpus []parityCase) []parityCase {
+	byName := map[string]func(*corev1.Pod){}
+	for _, tc := range corpus {
+		byName[tc.name] = tc.mutate
+	}
+
+	var cases []parityCase
+	for _, name := range []string{
+		"hostPort",
+		"liveness httpGet host",
+		"hostPath volume",
+		"nfs volume",
+		"sysctl kernel.msgmax",
+		"sysctl net.ipv4.tcp_syncookies",
+		"add SYS_ADMIN",
+		"add CHOWN",
+		"add NET_BIND_SERVICE",
+		"selinux type spc_t",
+		"seccomp pod Unconfined",
+		"seccomp container Unconfined",
+		"seccomp unset",
+		"apparmor container Unconfined",
+		"apparmor annotation unconfined",
+		"allowPrivilegeEscalation true",
+		"allowPrivilegeEscalation unset",
+		"init container: runAsUser 0",
+		"init container: runAsNonRoot false",
+		"ephemeral container: runAsUser 0",
+		"ephemeral container: runAsNonRoot false",
+		"ephemeral container: procMount Unmasked",
+	} {
+		mutate, ok := byName[name]
+		if !ok {
+			panic("parityUserNamespaceCases: no case named " + name)
+		}
+		cases = append(cases, parityCase{"user namespace, " + name, func(p *corev1.Pod) {
+			p.Spec.HostUsers = parityPtr(false)
+			mutate(p)
+		}})
+	}
 	return cases
 }
 
