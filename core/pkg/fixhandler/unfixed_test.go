@@ -310,6 +310,41 @@ func TestPrepareResourcesToFix_SkipUserValuesReason(t *testing.T) {
 	}
 }
 
+// TestPrepareResourcesToFix_PlaceholderDoesNotShadowChildFix: with
+// --skip-user-values=false, a placeholder written at a parent path
+// (seccompProfile = YOUR_VALUE) used to be applied before the concrete fix
+// under it (seccompProfile.type = RuntimeDefault), turning the parent into a
+// string so the child edit failed and the whole resource was left unfixed.
+func TestPrepareResourcesToFix_PlaceholderDoesNotShadowChildFix(t *testing.T) {
+	dir := t.TempDir()
+	body := "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: demo\nspec:\n  template:\n    spec:\n      containers:\n      - name: app\n        image: nginx\n"
+	manifest := writeManifest(t, dir, "deploy.yaml", body)
+	rel, _ := filepath.Rel(dir, manifest)
+	res := buildResource(t, dir, rel, "Deployment", "demo", 0)
+
+	const seccomp = "spec.template.spec.containers[0].securityContext.seccompProfile"
+	results := []resourcesresults.Result{
+		{
+			ResourceID:  res.GetID(),
+			RawResource: res,
+			AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+				failedControl("C-0055", "Linux hardening", failedRuleWithFix(seccomp, "YOUR_VALUE")),
+				failedControl("C-0210", "Set seccomp profile to RuntimeDefault", failedRuleWithFix(seccomp+".type", "RuntimeDefault")),
+			},
+		},
+	}
+	h := newHandlerForResources(dir, results, nil, false /* skipUserValues */)
+	rtf := h.PrepareResourcesToFix(context.Background())
+	require.Len(t, rtf, 1)
+	for _, fp := range rtf[0].YamlExpressions {
+		assert.NotEqual(t, seccomp, fp.Path, "placeholder at the parent path must be dropped")
+	}
+
+	fixed, err := ApplyFixToContent(context.Background(), body, reduceYamlExpressions(&rtf[0]))
+	require.NoError(t, err)
+	assert.Contains(t, fixed, "type: RuntimeDefault")
+}
+
 func TestPrepareResourcesToFix_MissingFile(t *testing.T) {
 	dir := t.TempDir()
 	// note: we deliberately do NOT create the manifest
@@ -548,6 +583,90 @@ func TestUnfixedControls_ReturnsCopy(t *testing.T) {
 	got[0].ControlName = "mutated"
 	assert.Equal(t, "orig", h.unfixedControls[0].ControlName,
 		"caller mutation must not leak into internal state")
+}
+
+func TestDropShadowedPlaceholders(t *testing.T) {
+	const sc = "spec.containers[0].securityContext"
+	cases := []struct {
+		name  string
+		exprs map[string]armotypes.FixPath
+		want  []string
+	}{
+		{
+			name: "placeholder above a concrete fix is dropped",
+			exprs: map[string]armotypes.FixPath{
+				"parent": {Path: sc + ".seccompProfile", Value: "YOUR_VALUE"},
+				"child":  {Path: sc + ".seccompProfile.type", Value: "RuntimeDefault"},
+			},
+			want: []string{"child"},
+		},
+		{
+			name: "placeholder above a list item is dropped",
+			exprs: map[string]armotypes.FixPath{
+				"parent": {Path: sc + ".capabilities.drop", Value: "YOUR_VALUE"},
+				"child":  {Path: sc + ".capabilities.drop[0]", Value: "NET_RAW"},
+			},
+			want: []string{"child"},
+		},
+		{
+			name: "placeholder above another placeholder: only the parent is dropped",
+			exprs: map[string]armotypes.FixPath{
+				"parent": {Path: "spec.containers[0].resources", Value: "YOUR_VALUE"},
+				"child":  {Path: "spec.containers[0].resources.limits.cpu", Value: "YOUR_VALUE"},
+			},
+			want: []string{"child"},
+		},
+		{
+			name: "placeholder at the same path as a concrete fix is dropped",
+			exprs: map[string]armotypes.FixPath{
+				"placeholder": {Path: sc + ".seccompProfile.type", Value: "YOUR_VALUE"},
+				"concrete":    {Path: sc + ".seccompProfile.type", Value: "RuntimeDefault"},
+			},
+			want: []string{"concrete"},
+		},
+		{
+			name: "two placeholders at the same path are both kept",
+			exprs: map[string]armotypes.FixPath{
+				"a": {Path: "metadata.namespace", Value: "YOUR_NAMESPACE"},
+				"b": {Path: "metadata.namespace", Value: "YOUR_VALUE"},
+			},
+			want: []string{"a", "b"},
+		},
+		{
+			name: "placeholder next to a sibling with a shared prefix is kept",
+			exprs: map[string]armotypes.FixPath{
+				"placeholder": {Path: sc + ".seccompProfile", Value: "YOUR_VALUE"},
+				"sibling":     {Path: sc + ".seccompProfileX", Value: "x"},
+			},
+			want: []string{"placeholder", "sibling"},
+		},
+		{
+			name: "placeholder below a concrete fix is kept",
+			exprs: map[string]armotypes.FixPath{
+				"parent": {Path: sc, Value: "{}"},
+				"child":  {Path: sc + ".seLinuxOptions", Value: "YOUR_VALUE"},
+			},
+			want: []string{"parent", "child"},
+		},
+		{
+			name: "concrete fixes are never dropped",
+			exprs: map[string]armotypes.FixPath{
+				"parent": {Path: sc + ".capabilities.drop", Value: `["ALL"]`},
+				"child":  {Path: sc + ".capabilities.drop[0]", Value: "NET_RAW"},
+			},
+			want: []string{"parent", "child"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dropShadowedPlaceholders(tc.exprs)
+			got := make([]string, 0, len(tc.exprs))
+			for expr := range tc.exprs {
+				got = append(got, expr)
+			}
+			assert.ElementsMatch(t, tc.want, got)
+		})
+	}
 }
 
 // --- cross-control reconciliation (#2279) --------------------------------

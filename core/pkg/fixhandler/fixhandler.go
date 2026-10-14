@@ -941,6 +941,8 @@ func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInf
 			})
 		}
 
+		dropShadowedPlaceholders(rfi.YamlExpressions)
+
 		// Reconcile tentative-unfixed entries against the final set of planned
 		// YamlExpressions for this resource: a control's failed paths may be
 		// covered by another control's FixPath (e.g. C-0016's
@@ -1619,6 +1621,34 @@ func yamlValuesEqual(a, b string) bool {
 		return a == b
 	}
 	return reflect.DeepEqual(av, bv)
+}
+
+// dropShadowedPlaceholders removes user-value placeholder fixes (YOUR_...)
+// that would break or undo another planned fix for the same resource:
+//   - a fix under the placeholder's path: the placeholder is written as a
+//     scalar first, so "seccompProfile.type = RuntimeDefault" next to
+//     "seccompProfile = YOUR_VALUE" fails with "path requires a mapping" and
+//     the whole resource is left unfixed;
+//   - a concrete fix at the same path: expressions are applied one after
+//     another in sorted order, so the placeholder could overwrite the
+//     concrete value.
+//
+// Either way the other fix sets the path the placeholder asked the user to
+// fill in, so dropping the placeholder loses nothing.
+func dropShadowedPlaceholders(exprs map[string]armotypes.FixPath) {
+	for expr, fp := range exprs {
+		if !strings.HasPrefix(fp.Value, UserValuePrefix) {
+			continue
+		}
+		for _, other := range exprs {
+			under := other.Path != fp.Path && yamlPathCovers(fp.Path, other.Path)
+			concreteSamePath := other.Path == fp.Path && !strings.HasPrefix(other.Value, UserValuePrefix)
+			if under || concreteSamePath {
+				delete(exprs, expr)
+				break
+			}
+		}
+	}
 }
 
 // yamlPathCovers reports whether setting `planned` necessarily satisfies a
