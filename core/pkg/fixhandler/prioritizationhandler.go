@@ -36,6 +36,9 @@ var fsMutatingSyscalls = map[string]bool{
 	"chown": true, "fchown": true, "lchown": true, "fchownat": true,
 	"setxattr": true, "lsetxattr": true, "fsetxattr": true,
 	"removexattr": true, "lremovexattr": true, "fremovexattr": true,
+	"fallocate": true, "copy_file_range": true,
+	"utime": true, "utimes": true, "futimesat": true, "utimensat": true,
+	"mount": true,
 }
 
 // profileMarkedIncomplete reports whether the profile's annotations explicitly

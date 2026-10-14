@@ -72,6 +72,11 @@ func TestDetectProfileDrift_EvidencePolicy(t *testing.T) {
 			wantDrop: true,
 		},
 		{
+			name:     "descriptor and mount mutations also veto rootfs",
+			profile:  driftProfile(completedFull, nil, []string{"fallocate", "mount"}),
+			wantDrop: true,
+		},
+		{
 			name:     "syscall match is case-insensitive",
 			profile:  driftProfile(completedFull, nil, []string{"Rename"}),
 			wantDrop: true,
