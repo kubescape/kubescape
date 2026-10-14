@@ -105,6 +105,12 @@ func ResolveOutputFile(format, outputFile, defaultBaseName string) (string, bool
 		return outputFile, true
 	}
 
+	// A trailing separator names a directory: write the default report name
+	// inside it rather than a hidden file such as "reports/.json".
+	if defaultBaseName != "" && os.IsPathSeparator(outputFile[len(outputFile)-1]) {
+		outputFile = filepath.Join(outputFile, defaultBaseName)
+	}
+
 	ext, ok := FormatOutputExt[format]
 	if !ok || ext == "" {
 		return outputFile, true
