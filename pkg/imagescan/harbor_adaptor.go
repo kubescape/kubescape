@@ -38,7 +38,7 @@ func (w *harborAPIWrapper) DoRequest(ctx context.Context, method, path string) (
 	}
 	req.Header.Set("Accept", "application/json")
 
-	resp, err := w.httpClient.Do(req)
+	resp, err := registryAPIHTTPClient(w.httpClient).Do(req)
 	if err != nil {
 		return nil, err
 	}
