@@ -86,7 +86,7 @@ func (idx *Index) ServiceExposure(ref ServiceRef) (paths []ExposurePath, unclear
 	}
 
 	for _, ing := range idx.ingressesByNS[ref.Namespace] {
-		paths = append(paths, ingressPathsFor(ing, ref.Name)...)
+		paths = append(paths, ingressPathsFor(ing, svc)...)
 	}
 
 	for _, route := range idx.routesByNS[ref.Namespace] {
@@ -94,7 +94,7 @@ func (idx *Index) ServiceExposure(ref ServiceRef) (paths []ExposurePath, unclear
 		if len(hosts) == 0 {
 			continue
 		}
-		if !routeReferencesService(route, ref) {
+		if !routeReferencesService(route, ref, svc) {
 			continue
 		}
 		source := fmt.Sprintf("%s/%s", route.Namespace, route.Name)
@@ -143,6 +143,9 @@ func (idx *Index) crossNamespaceBackendRefIsUnmodeled(ref ServiceRef) bool {
 					if !isServiceBackendRef(backend) || (backend.Weight != nil && *backend.Weight == 0) {
 						continue
 					}
+					if !gatewayBackendPortMatches(backend, idx.services[ref]) {
+						continue
+					}
 					if backend.Namespace != nil && *backend.Namespace == ref.Namespace && backend.Name == ref.Name {
 						return true
 					}
@@ -155,11 +158,11 @@ func (idx *Index) crossNamespaceBackendRefIsUnmodeled(ref ServiceRef) bool {
 
 // ingressPathsFor returns one ExposurePath per Ingress rule (or the
 // defaultBackend) whose backend names serviceName.
-func ingressPathsFor(ing *networkingv1.Ingress, serviceName string) []ExposurePath {
+func ingressPathsFor(ing *networkingv1.Ingress, svc *corev1.Service) []ExposurePath {
 	var paths []ExposurePath
 	source := fmt.Sprintf("%s/%s", ing.Namespace, ing.Name)
 
-	if backendNamesService(ing.Spec.DefaultBackend, serviceName) {
+	if backendNamesService(ing.Spec.DefaultBackend, svc) {
 		paths = append(paths, ExposurePath{Kind: ExposureIngress, Source: source})
 	}
 
@@ -168,7 +171,7 @@ func ingressPathsFor(ing *networkingv1.Ingress, serviceName string) []ExposurePa
 			continue
 		}
 		for _, path := range rule.HTTP.Paths {
-			if backendNamesService(&path.Backend, serviceName) {
+			if backendNamesService(&path.Backend, svc) {
 				paths = append(paths, ExposurePath{Kind: ExposureIngress, Source: source, Host: rule.Host})
 			}
 		}
@@ -177,8 +180,9 @@ func ingressPathsFor(ing *networkingv1.Ingress, serviceName string) []ExposurePa
 	return paths
 }
 
-func backendNamesService(backend *networkingv1.IngressBackend, serviceName string) bool {
-	return backend != nil && backend.Service != nil && backend.Service.Name == serviceName
+func backendNamesService(backend *networkingv1.IngressBackend, svc *corev1.Service) bool {
+	return backend != nil && backend.Service != nil && backend.Service.Name == svc.Name &&
+		serviceBackendPortMatches(svc, backend.Service.Port.Name, backend.Service.Port.Number)
 }
 
 // routeReferencesService reports whether any rule in route sends
@@ -191,10 +195,13 @@ func backendNamesService(backend *networkingv1.IngressBackend, serviceName strin
 // backendRef reaching into another namespace via a ReferenceGrant, since
 // that requires collecting and evaluating a third resource kind this Index
 // is not given.
-func routeReferencesService(route *gatewayRoute, ref ServiceRef) bool {
+func routeReferencesService(route *gatewayRoute, ref ServiceRef, svc *corev1.Service) bool {
 	for _, rule := range route.Rules {
 		for _, backend := range rule.BackendRefs {
 			if !isServiceBackendRef(backend) || (backend.Weight != nil && *backend.Weight == 0) {
+				continue
+			}
+			if !gatewayBackendPortMatches(backend, svc) {
 				continue
 			}
 			ns := route.Namespace

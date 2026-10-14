@@ -170,6 +170,8 @@ type gatewayRouteRule struct {
 // backend (e.g. a multicluster ServiceImport) that this package does not
 // model as a Service exposure path, however closely its name matches one.
 type backendRef struct {
+	// Port names a Service port, not a targetPort or Gateway listener port.
+	Port *int32
 	// Weight defaults to 1; an explicit zero forwards no requests.
 	Weight    *int32
 	Group     *string
