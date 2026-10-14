@@ -756,20 +756,45 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		}
 		return mcp.NewToolResultText(string(v.([]byte))), nil
 	case "apply_remediation":
-		path, toolErr := mcpRequiredStringArg(arguments, "path")
+		path, toolErr := mcpStringArg(arguments, "path")
 		if toolErr != nil {
 			return toolErr, nil
+		}
+		reportPath, toolErr := mcpStringArg(arguments, "report_path")
+		if toolErr != nil {
+			return toolErr, nil
+		}
+		basePath, toolErr := mcpStringArg(arguments, "base_path")
+		if toolErr != nil {
+			return toolErr, nil
+		}
+		switch {
+		case path == "" && reportPath == "":
+			return mcpToolError(ErrCodeInvalidArgument, "path argument is required and cannot be empty, unless report_path is supplied instead (exactly one of path or report_path is required)", map[string]any{"argument": "path"}), nil
+		case path != "" && reportPath != "":
+			return mcpToolError(ErrCodeInvalidArgument, "path and report_path are mutually exclusive; supply exactly one", map[string]any{"argument": "report_path"}), nil
+		case path != "" && basePath != "":
+			return mcpToolError(ErrCodeInvalidArgument, "base_path applies only with report_path", map[string]any{"argument": "base_path"}), nil
 		}
 		rawControlIDs, hasControlIDs := arguments["control_ids"]
 		controlIDs, toolErr := parseControlIDs(rawControlIDs, hasControlIDs)
 		if toolErr != nil {
 			return toolErr, nil
 		}
-		key := fmt.Sprintf("apply_remediation:%s:%s", url.QueryEscape(path), url.QueryEscape(strings.Join(controlIDs, ",")))
+		// report_path and base_path both change the result, so both belong in
+		// the key: two calls that differ only in either must not share one.
+		key := remediationKey(path, reportPath, basePath, controlIDs)
 		v, err := ksServer.doScanChan(ctx, key, func(scanCtx context.Context) (interface{}, error) {
+			if reportPath != "" {
+				return runApplyRemediationFromReport(scanCtx, reportPath, basePath, controlIDs)
+			}
 			return ksServer.runApplyRemediation(scanCtx, path, controlIDs)
 		})
 		if err != nil {
+			var inputErr *remediationInputError
+			if errors.As(err, &inputErr) {
+				return mcpToolError(ErrCodeInvalidArgument, inputErr.Error(), nil), nil
+			}
 			code := classifyScanError(err)
 			msg := fmt.Sprintf("failed to compute remediation: %v", err)
 			return mcpToolError(code, msg, nil), nil

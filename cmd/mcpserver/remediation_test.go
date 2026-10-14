@@ -557,8 +557,13 @@ func TestCreateRemediationTools_RegistersApplyRemediation(t *testing.T) {
 		}
 		found = true
 		assert.Contains(t, tool.InputSchema.Properties, "path")
+		assert.Contains(t, tool.InputSchema.Properties, "report_path")
+		assert.Contains(t, tool.InputSchema.Properties, "base_path")
 		assert.Contains(t, tool.InputSchema.Properties, "control_ids")
-		assert.Contains(t, tool.InputSchema.Required, "path")
+		// path and report_path are alternatives, so neither can be required by
+		// the schema; the handler enforces that exactly one is given.
+		assert.NotContains(t, tool.InputSchema.Required, "path")
+		assert.NotContains(t, tool.InputSchema.Required, "report_path")
 		assert.Contains(t, tool.InputSchema.Required, "control_ids")
 	}
 	assert.True(t, found, "apply_remediation was not registered")
