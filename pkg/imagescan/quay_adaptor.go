@@ -68,7 +68,7 @@ func createQuayHTTPClient(baseClient *http.Client, allowInsecureHTTPCredentials 
 		client = *baseClient
 	}
 	origCheckRedirect := client.CheckRedirect
-	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+	validateRedirect := func(req *http.Request, via []*http.Request) error {
 		if !allowInsecureHTTPCredentials {
 			if !strings.EqualFold(req.URL.Scheme, "https") {
 				for _, prev := range via {
@@ -79,8 +79,28 @@ func createQuayHTTPClient(baseClient *http.Client, allowInsecureHTTPCredentials 
 				return fmt.Errorf("refusing redirect to %s: insecure http redirect not allowed; use https or enable WithInsecureHTTPCredentials", req.URL.String())
 			}
 		}
+		// Go forwards Authorization to the same hostname (including another
+		// port) and its subdomains. Registry credentials are only trusted for
+		// their original origin; a redirect must not expand that trust boundary.
+		for _, previous := range via {
+			if (previous.Header.Get("Authorization") != "" || previous.URL.User != nil) &&
+				!sameQuayOrigin(previous.URL, req.URL) {
+				return fmt.Errorf("refusing redirect: authenticated request changed origin from %s to %s", previous.URL.Host, req.URL.Host)
+			}
+		}
+		return nil
+	}
+	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		if err := validateRedirect(req, via); err != nil {
+			return err
+		}
 		if origCheckRedirect != nil {
-			return origCheckRedirect(req, via)
+			if err := origCheckRedirect(req, via); err != nil {
+				return err
+			}
+			// The caller may rewrite req.URL after Go has copied credentials.
+			// Recheck the final destination before the request can be sent.
+			return validateRedirect(req, via)
 		}
 		if len(via) >= 10 {
 			return errors.New("stopped after 10 redirects")
@@ -88,6 +108,20 @@ func createQuayHTTPClient(baseClient *http.Client, allowInsecureHTTPCredentials 
 		return nil
 	}
 	return &client
+}
+
+func sameQuayOrigin(a, b *url.URL) bool {
+	port := func(u *url.URL) string {
+		if explicit := u.Port(); explicit != "" {
+			return explicit
+		}
+		if strings.EqualFold(u.Scheme, "https") {
+			return "443"
+		}
+		return "80"
+	}
+	return strings.EqualFold(a.Scheme, b.Scheme) &&
+		strings.EqualFold(a.Hostname(), b.Hostname()) && port(a) == port(b)
 }
 
 func isRedirectError(err error) bool {
