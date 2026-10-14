@@ -101,6 +101,9 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 			if scanInfo.ControlTimeout < 0 {
 				return fmt.Errorf("invalid --control-timeout %s: must be zero or positive", scanInfo.ControlTimeout)
 			}
+			if err := cautils.ValidateHelmKubeVersion(scanInfo.HelmKubeVersion); err != nil {
+				return fmt.Errorf("invalid --kube-version: %w", err)
+			}
 			if strings.Contains(scanInfo.ControlsVersion, "/") {
 				return fmt.Errorf(
 					"invalid --controls-version %q: must be a regolibrary release tag and cannot contain '/'",
@@ -320,6 +323,8 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	scanCmd.PersistentFlags().StringArrayVar(&scanInfo.HelmSetFileValues, "set-file", nil, "Set Helm values from respective files specified via the command line (can specify multiple)")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.HelmReleaseName, "release-name", "", "Helm release name made available as .Release.Name when rendering the chart")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.HelmReleaseNamespace, "release-namespace", "", "Helm release namespace made available as .Release.Namespace when rendering the chart")
+	scanCmd.PersistentFlags().StringVar(&scanInfo.HelmKubeVersion, "kube-version", "", "Kubernetes version made available as .Capabilities.KubeVersion when rendering a Helm chart (e.g. 1.31). Defaults to Helm's library default, v1.20")
+	scanCmd.PersistentFlags().StringSliceVar(&scanInfo.HelmAPIVersions, "api-versions", nil, "Kubernetes API versions added to .Capabilities.APIVersions when rendering a Helm chart (can specify multiple, or separate values with commas)")
 
 	// hidden flags
 	_ = scanCmd.PersistentFlags().MarkHidden("omit-raw-resources") // #nosec G104 -- flag defined on this command; MarkHidden only errors for an unknown flag

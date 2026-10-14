@@ -512,11 +512,13 @@ func TestGetScanCommand_PersistentFlagValidation(t *testing.T) {
 		{name: "rejects empty format version", args: []string{"--format-version="}, wantError: "invalid --format-version"},
 		{name: "rejects negative scan timeout", args: []string{"--scan-timeout=-1s"}, wantError: "invalid --scan-timeout"},
 		{name: "rejects negative control timeout", args: []string{"--control-timeout=-1s"}, wantError: "invalid --control-timeout"},
+		{name: "rejects a kube version that is not a version", args: []string{"--kube-version=latest"}, wantError: "invalid --kube-version"},
 		{name: "accepts defaults", wantCalls: 1, wantError: "scan reached"},
 		{name: "accepts format version v1", args: []string{"--format-version=v1"}, wantCalls: 1, wantError: "scan reached"},
 		{name: "accepts format version v2", args: []string{"--format-version=v2"}, wantCalls: 1, wantError: "scan reached"},
 		{name: "accepts zero timeouts", args: []string{"--scan-timeout=0", "--control-timeout=0"}, wantCalls: 1, wantError: "scan reached"},
 		{name: "accepts positive timeouts", args: []string{"--scan-timeout=2s", "--control-timeout=1s"}, wantCalls: 1, wantError: "scan reached"},
+		{name: "accepts a kube version and api versions", args: []string{"--kube-version=1.31", "--api-versions=gateway.networking.k8s.io/v1,cert-manager.io/v1"}, wantCalls: 1, wantError: "scan reached"},
 	}
 
 	for _, tt := range tests {

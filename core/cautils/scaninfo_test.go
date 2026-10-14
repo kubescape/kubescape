@@ -244,6 +244,7 @@ func TestCloneForContextIsolatesMutableConfiguration(t *testing.T) {
 		HelmSetValues:            []string{"replicas=2"},
 		HelmSetStringValues:      []string{"image.tag=latest"},
 		HelmSetFileValues:        []string{"tls.crt=cert.pem"},
+		HelmAPIVersions:          []string{"gateway.networking.k8s.io/v1"},
 		LabelsToCopy:             []string{"team"},
 		KubeContexts:             []string{"east", "west"},
 		RegistryMapping:          map[string]string{"internal.invalid": "mirror.invalid"},
@@ -265,6 +266,7 @@ func TestCloneForContextIsolatesMutableConfiguration(t *testing.T) {
 	first.HelmSetValues[0] = "replicas=9"
 	first.HelmSetStringValues[0] = "image.tag=first"
 	first.HelmSetFileValues[0] = "tls.crt=first.pem"
+	first.HelmAPIVersions[0] = "first.invalid/v1"
 	first.LabelsToCopy[0] = "owner"
 	first.KubeContexts[0] = "mutated"
 	first.RegistryMapping["internal.invalid"] = "first.invalid"
@@ -291,6 +293,8 @@ func TestCloneForContextIsolatesMutableConfiguration(t *testing.T) {
 	assert.Equal(t, []string{"image.tag=latest"}, second.HelmSetStringValues)
 	assert.Equal(t, []string{"tls.crt=cert.pem"}, parent.HelmSetFileValues)
 	assert.Equal(t, []string{"tls.crt=cert.pem"}, second.HelmSetFileValues)
+	assert.Equal(t, []string{"gateway.networking.k8s.io/v1"}, parent.HelmAPIVersions)
+	assert.Equal(t, []string{"gateway.networking.k8s.io/v1"}, second.HelmAPIVersions)
 	assert.Equal(t, []string{"team"}, parent.LabelsToCopy)
 	assert.Equal(t, []string{"team"}, second.LabelsToCopy)
 	assert.Equal(t, []string{"east", "west"}, parent.KubeContexts)
