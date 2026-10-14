@@ -69,6 +69,9 @@ func createQuayHTTPClient(baseClient *http.Client, allowInsecureHTTPCredentials 
 	}
 	origCheckRedirect := client.CheckRedirect
 	validateRedirect := func(req *http.Request, via []*http.Request) error {
+		if req.URL == nil {
+			return errors.New("refusing redirect: destination URL is missing")
+		}
 		if !allowInsecureHTTPCredentials {
 			if !strings.EqualFold(req.URL.Scheme, "https") {
 				for _, prev := range via {
@@ -91,7 +94,14 @@ func createQuayHTTPClient(baseClient *http.Client, allowInsecureHTTPCredentials 
 		return nil
 	}
 	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
-		if err := validateRedirect(req, via); err != nil {
+		// Callbacks receive mutable requests, including the redirect history.
+		// Snapshot URLs and credentials before invoking application code so
+		// rewriting history cannot redefine the trusted origin or scheme.
+		history := make([]*http.Request, len(via))
+		for i, previous := range via {
+			history[i] = previous.Clone(previous.Context())
+		}
+		if err := validateRedirect(req, history); err != nil {
 			return err
 		}
 		if origCheckRedirect != nil {
@@ -100,7 +110,20 @@ func createQuayHTTPClient(baseClient *http.Client, allowInsecureHTTPCredentials 
 			}
 			// The caller may rewrite req.URL after Go has copied credentials.
 			// Recheck the final destination before the request can be sent.
-			return validateRedirect(req, via)
+			if err := validateRedirect(req, history); err != nil {
+				return err
+			}
+			// Go reuses via on later hops. Do not let a successful callback
+			// erase the original trust evidence for the next redirect.
+			for i, previous := range history {
+				if via[i] == nil || via[i].URL == nil ||
+					!sameQuayOrigin(previous.URL, via[i].URL) ||
+					previous.Header.Get("Authorization") != via[i].Header.Get("Authorization") ||
+					previous.URL.User.String() != via[i].URL.User.String() {
+					return errors.New("refusing redirect: callback modified trusted request history")
+				}
+			}
+			return nil
 		}
 		if len(via) >= 10 {
 			return errors.New("stopped after 10 redirects")
