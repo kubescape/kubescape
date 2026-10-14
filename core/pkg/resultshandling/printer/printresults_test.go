@@ -486,6 +486,22 @@ func TestResolveOutputFile(t *testing.T) {
 			wantExplicit: false,
 		},
 		{
+			name:         "trailing separator writes default base inside the directory",
+			format:       JsonFormat,
+			outputFile:   "reports/",
+			defaultBase:  "report",
+			wantFile:     filepath.Join("reports", "report.json"),
+			wantExplicit: true,
+		},
+		{
+			name:         "trailing separator uses the printer's default base",
+			format:       CycloneDXFormat,
+			outputFile:   "  out/sboms/  ",
+			defaultBase:  "sbom",
+			wantFile:     filepath.Join("out", "sboms", "sbom.cdx.json"),
+			wantExplicit: true,
+		},
+		{
 			name:         "devnull sink keeps explicit path without extension",
 			format:       JsonFormat,
 			outputFile:   os.DevNull,
