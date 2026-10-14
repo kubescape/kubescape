@@ -102,12 +102,15 @@ func (gp *GitHubActionsPrinter) ActionPrint(ctx context.Context, opaSessionObj *
 		return annotations[i].resourceID < annotations[j].resourceID
 	})
 
+	// Assemble the bounded annotation output before writing so every output
+	// path shares the same error check.
+	var output strings.Builder
 	emitted := 0
 	for _, annotation := range annotations {
 		if emitted == githubActionsMaxAnnotations {
 			break
 		}
-		fmt.Fprintf(gp.writer, "::error file=%s,line=%d,title=%s::%s\n",
+		fmt.Fprintf(&output, "::error file=%s,line=%d,title=%s::%s\n",
 			escapeAnnotationProperty(annotation.file),
 			annotation.line,
 			escapeAnnotationProperty(annotation.title),
@@ -115,12 +118,12 @@ func (gp *GitHubActionsPrinter) ActionPrint(ctx context.Context, opaSessionObj *
 		emitted++
 	}
 
-	fmt.Fprintf(gp.writer, "Kubescape: %d of %d High/Critical finding(s) annotated; %d suppressed by GitHub's 10-annotation step limit; %d finding(s) below the High severity threshold. Use --format json for the complete report.\n",
+	fmt.Fprintf(&output, "Kubescape: %d of %d High/Critical finding(s) annotated; %d suppressed by GitHub's 10-annotation step limit; %d finding(s) below the High severity threshold. Use --format json for the complete report.\n",
 		emitted, len(annotations), len(annotations)-emitted, belowThreshold)
 
 	if opaSessionObj.ScanCoverage.Degraded {
 		scoreStr := cautils.ComplianceScoreToString(opaSessionObj.ScanCoverage.CoverageScore, 2)
-		fmt.Fprintf(gp.writer, "::warning title=Degraded Scan Coverage::Scan coverage is degraded (%s%%): %d of %d controls evaluated\n",
+		fmt.Fprintf(&output, "::warning title=Degraded Scan Coverage::Scan coverage is degraded (%s%%): %d of %d controls evaluated\n",
 			scoreStr, opaSessionObj.ScanCoverage.EvaluatedControls, opaSessionObj.ScanCoverage.TotalControls)
 
 		skippedControls := collectSkippedControls(opaSessionObj)
@@ -133,18 +136,22 @@ func (gp *GitHubActionsPrinter) ActionPrint(ctx context.Context, opaSessionObj *
 			if sc.reason == "" {
 				msg = fmt.Sprintf("Control %s was not evaluated", sc.controlID)
 			}
-			fmt.Fprintf(gp.writer, "::warning title=%s::%s\n",
+			fmt.Fprintf(&output, "::warning title=%s::%s\n",
 				escapeAnnotationProperty("Control "+sc.controlID+" Skipped"),
 				escapeAnnotationData(msg))
 			emittedWarnings++
 		}
 		if omitted := len(skippedControls) - emittedWarnings; omitted > 0 {
-			fmt.Fprintf(gp.writer, "Kubescape: %d of %d skipped control(s) annotated as warnings; %d omitted due to GitHub's 10-warning step limit. See step summary for full list.\n",
+			fmt.Fprintf(&output, "Kubescape: %d of %d skipped control(s) annotated as warnings; %d omitted due to GitHub's 10-warning step limit. See step summary for full list.\n",
 				emittedWarnings, len(skippedControls), omitted)
 			logger.L().Ctx(ctx).Warning("skipped controls omitted from GitHub Actions warning annotations",
 				helpers.Int("omittedControls", omitted),
 				helpers.Int("totalSkippedControls", len(skippedControls)))
 		}
+	}
+
+	if _, err := gp.writer.WriteString(output.String()); err != nil {
+		return fmt.Errorf("failed to write GitHub Actions output: %w", err)
 	}
 
 	if summaryPath := gp.stepSummaryPath; summaryPath != "" {
