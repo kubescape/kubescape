@@ -323,7 +323,7 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	scanCmd.PersistentFlags().StringArrayVar(&scanInfo.HelmSetFileValues, "set-file", nil, "Set Helm values from respective files specified via the command line (can specify multiple)")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.HelmReleaseName, "release-name", "", "Helm release name made available as .Release.Name when rendering the chart")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.HelmReleaseNamespace, "release-namespace", "", "Helm release namespace made available as .Release.Namespace when rendering the chart")
-	scanCmd.PersistentFlags().StringVar(&scanInfo.HelmKubeVersion, "kube-version", "", "Kubernetes version made available as .Capabilities.KubeVersion when rendering a Helm chart (e.g. 1.31). Defaults to Helm's library default, v1.20")
+	scanCmd.PersistentFlags().StringVar(&scanInfo.HelmKubeVersion, "kube-version", "", "Kubernetes version made available as .Capabilities.KubeVersion when rendering a Helm chart (e.g. 1.31). Defaults to the newest version the chart's kubeVersion allows, or v1.20 when it declares none")
 	scanCmd.PersistentFlags().StringSliceVar(&scanInfo.HelmAPIVersions, "api-versions", nil, "Kubernetes API versions added to .Capabilities.APIVersions when rendering a Helm chart (can specify multiple, or separate values with commas)")
 
 	// hidden flags
