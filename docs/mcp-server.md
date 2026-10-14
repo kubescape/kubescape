@@ -372,7 +372,7 @@ Classification comes from the fixer, never from whether a `fix_path` is present.
 
 `patch_available` is a statement about the resource's patch as a whole. The fixer plans one patch per resource and may count a control as covered because another control's expression changes the same path, so it does not mean an expression exists that is specific to that control.
 
-A fix whose value is a `YOUR_...` placeholder is still planned and counted, because the calling agent is the party that can substitute a real value. Check `applied_expressions` and `rendered_manifests` before applying anything.
+A fix whose value is a `YOUR_...` placeholder is still planned and counted, because the calling agent is the party that can substitute a real value. Check `applied_expressions` (file-backed) or the rendered manifest (cluster) before applying anything.
 
 **`report`:**
 
@@ -469,7 +469,7 @@ A report file does not carry the `truncated` flag of the `run_framework_security
 }
 ```
 
-**Errors:** `INVALID_ARGUMENT` for a missing, conflicting, unreadable, oversized or non-report input, or a report whose files are outside `base_path`.
+**Errors:** `INVALID_ARGUMENT` for a missing, conflicting, unreadable, oversized or non-report input, or a report whose recorded scan location is outside `base_path`. A single resource whose manifest resolves outside `base_path` is not an error: it is skipped and reported as `manual`.
 
 ### Compliance & Hardening Tools
 

@@ -592,3 +592,71 @@ func TestApplyRemediation_EmptyItemsSerialiseAsArrays(t *testing.T) {
 	assert.JSONEq(t, `[]`, string(raw["files"]))
 	assert.JSONEq(t, `[]`, string(raw["rendered_manifests"]))
 }
+
+// --- containment of report-supplied paths ----------------------------------
+
+// A resource may record its own source root. That root is as report-supplied as
+// the report-wide location, so it must not let the report reach a manifest
+// outside base_path even when the report-wide location is inside it.
+func TestApplyRemediation_ResourceSourceOutsideBasePathIsNotRead(t *testing.T) {
+	forbidScan(t)
+	dir := t.TempDir()   // base_path, and the report-wide location
+	other := t.TempDir() // a root the resource claims for itself
+	require.NoError(t, os.WriteFile(filepath.Join(other, "deploy.yaml"), []byte(deploymentNoSecurityContext), 0o600))
+
+	res := remediationResource(other, "deploy.yaml", "Deployment", "demo", 0)
+	report := remediationReport(dir, res, remediationFailedControl("C-0057", "Privileged container",
+		remediationFailedRuleWithFix("spec.containers[0].securityContext.privileged", "false")))
+	reportPath := writeRemediationReport(t, t.TempDir(), report, nil)
+
+	resp := callReport(t, map[string]any{"report_path": reportPath, "base_path": dir, "control_ids": "C-0057"})
+
+	assert.Empty(t, resp.Files, "a manifest outside base_path must not be read or returned")
+	require.Len(t, resp.Items, 1)
+	assert.Equal(t, classManual, resp.Items[0].Classification)
+	assert.NotEmpty(t, resp.Items[0].Reason)
+}
+
+func TestApplyRemediation_RelativeTraversalOutsideBasePathIsNotRead(t *testing.T) {
+	forbidScan(t)
+	parent := t.TempDir()
+	base := filepath.Join(parent, "scanned")
+	require.NoError(t, os.MkdirAll(base, 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(parent, "outside.yaml"), []byte(deploymentNoSecurityContext), 0o600))
+
+	res := remediationResource(base, "../outside.yaml", "Deployment", "demo", 0)
+	report := remediationReport(base, res, remediationFailedControl("C-0057", "Privileged container",
+		remediationFailedRuleWithFix("spec.containers[0].securityContext.privileged", "false")))
+	reportPath := writeRemediationReport(t, t.TempDir(), report, nil)
+
+	resp := callReport(t, map[string]any{"report_path": reportPath, "base_path": base, "control_ids": "C-0057"})
+
+	assert.Empty(t, resp.Files)
+	require.Len(t, resp.Items, 1)
+	assert.Equal(t, classManual, resp.Items[0].Classification)
+}
+
+// A cluster report has no files. Whatever source a resource records, nothing on
+// disk is consulted: a source naming a path that does not exist must not turn
+// into a "file not found" skip.
+func TestApplyRemediation_ClusterReportIgnoresRecordedSourcePaths(t *testing.T) {
+	forbidScan(t)
+	res := remediationClusterResource("Deployment", "nginx", "default")
+	res.Source = &reporthandling.Source{
+		FileType:     reporthandling.SourceTypeYaml,
+		Path:         filepath.Join(t.TempDir(), "does-not-exist"),
+		RelativePath: "deploy.yaml",
+	}
+	report := remediationClusterReport([]resourcesresults.Result{
+		remediationClusterResult(res, remediationFailedControl("C-0057", "Privileged container",
+			remediationFailedRuleWithFix(privilegedFixPath, "false"))),
+	}, res)
+	reportPath := writeRemediationReport(t, t.TempDir(), report, nil)
+
+	resp := callReport(t, map[string]any{"report_path": reportPath, "control_ids": "C-0057"})
+
+	require.Len(t, resp.Items, 1)
+	assert.Equal(t, classPatchAvailable, resp.Items[0].Classification)
+	assert.Empty(t, resp.Items[0].FilePath)
+	assert.Len(t, resp.RenderedManifests, 1)
+}

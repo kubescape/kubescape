@@ -187,11 +187,7 @@ func normalizeControlID(id string) string {
 
 // reportedControlIDs collects every control the scan actually accounted for,
 // from both the summary and the per-resource results.
-func reportedControlIDs(reportJSON []byte) (map[string]bool, error) {
-	var report reporthandlingv2.PostureReport
-	if err := json.Unmarshal(reportJSON, &report); err != nil {
-		return nil, fmt.Errorf("failed to parse posture report: %w", err)
-	}
+func reportedControlIDs(report *reporthandlingv2.PostureReport) map[string]bool {
 	seen := make(map[string]bool)
 	for id := range report.SummaryDetails.Controls {
 		seen[normalizeControlID(id)] = true
@@ -201,7 +197,7 @@ func reportedControlIDs(reportJSON []byte) (map[string]bool, error) {
 			seen[normalizeControlID(control.ControlID)] = true
 		}
 	}
-	return seen, nil
+	return seen
 }
 
 // unaddressedControls returns an UnfixedControl for every requested control the
@@ -304,6 +300,9 @@ type remediationRequest struct {
 	notEvaluated []cautils.NotEvaluatedControl
 	// useScanOutcome distinguishes a scan this process ran from a report file.
 	useScanOutcome bool
+	// report is the decoded report when the caller already has it, so a large
+	// report is not decoded again.
+	report *reporthandlingv2.PostureReport
 }
 
 func (ksServer *KubescapeMcpserver) runApplyRemediation(ctx context.Context, path string, controlIDs []string) ([]byte, error) {
@@ -335,7 +334,7 @@ func runApplyRemediationFromReport(ctx context.Context, reportPath, basePath str
 		return nil, newRemediationInputError("report_path %q is not a Kubescape posture report JSON: %v", reportPath, err)
 	}
 
-	req := remediationRequest{controlIDs: controlIDs, selectControls: true, inputErrors: true}
+	req := remediationRequest{controlIDs: controlIDs, selectControls: true, inputErrors: true, report: &report}
 	if !fixhandler.IsClusterPostureReport(&report) {
 		// A file-backed report names, itself, where the files to patch are. A
 		// report from another party must not be allowed to name a place the
@@ -472,7 +471,7 @@ func runRemediation(ctx context.Context, reportBytes []byte, req remediationRequ
 		return nil, fmt.Errorf("failed to initialize fix handler: %w", err)
 	}
 
-	report, coverage, err := parseRemediationReport(reportBytes)
+	report, coverage, err := parseRemediationReport(reportBytes, req.report)
 	if err != nil {
 		return nil, err
 	}
@@ -564,10 +563,7 @@ func runRemediation(ctx context.Context, reportBytes []byte, req remediationRequ
 		}
 		return a.FilePath < b.FilePath
 	})
-	reported, err := reportedControlIDs(reportBytes)
-	if err != nil {
-		return nil, err
-	}
+	reported := reportedControlIDs(report)
 	notEvaluated := req.notEvaluated
 	degraded := req.degraded
 	if !req.useScanOutcome && coverage != nil {
@@ -600,10 +596,13 @@ func runRemediation(ctx context.Context, reportBytes []byte, req remediationRequ
 // parseRemediationReport decodes the report and, separately, its top-level
 // scanCoverage, which PostureReport does not model. coverage is nil when the
 // report has none.
-func parseRemediationReport(reportJSON []byte) (*reporthandlingv2.PostureReport, *cautils.ScanCoverage, error) {
-	var report reporthandlingv2.PostureReport
-	if err := json.Unmarshal(reportJSON, &report); err != nil {
-		return nil, nil, fmt.Errorf("failed to parse posture report: %w", err)
+func parseRemediationReport(reportJSON []byte, decoded *reporthandlingv2.PostureReport) (*reporthandlingv2.PostureReport, *cautils.ScanCoverage, error) {
+	report := decoded
+	if report == nil {
+		report = &reporthandlingv2.PostureReport{}
+		if err := json.Unmarshal(reportJSON, report); err != nil {
+			return nil, nil, fmt.Errorf("failed to parse posture report: %w", err)
+		}
 	}
 	var envelope struct {
 		ScanCoverage *cautils.ScanCoverage `json:"scanCoverage"`
@@ -611,7 +610,7 @@ func parseRemediationReport(reportJSON []byte) (*reporthandlingv2.PostureReport,
 	if err := json.Unmarshal(reportJSON, &envelope); err != nil {
 		return nil, nil, fmt.Errorf("failed to parse posture report coverage: %w", err)
 	}
-	return &report, envelope.ScanCoverage, nil
+	return report, envelope.ScanCoverage, nil
 }
 
 func boundWarnings(warnings []string) []string {
