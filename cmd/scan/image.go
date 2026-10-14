@@ -57,6 +57,8 @@ func getImageCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Command 
 				return err
 			}
 
+			// Validate the effective command mode, before the core image scanner runs.
+			scanInfo.SetScanType(cautils.ScanTypeImage)
 			if err := shared.ValidateCommonScanFlags(cmd, scanInfo, shared.ImageScanFormats); err != nil {
 				return err
 			}
