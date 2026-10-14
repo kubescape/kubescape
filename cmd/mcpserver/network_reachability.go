@@ -122,9 +122,11 @@ func createNetworkReachabilityTools(ksServer *KubescapeMcpserver) {
 		if ip, found := unstructuredNestedString(srcPodObj.Object, "status", "podIP"); found {
 			src.IP = ip
 		}
+		src.IPs = unstructuredPodIPs(srcPodObj.Object)
 		if ip, found := unstructuredNestedString(dstPodObj.Object, "status", "podIP"); found {
 			dst.IP = ip
 		}
+		dst.IPs = unstructuredPodIPs(dstPodObj.Object)
 
 		verdict, egress, ingress := idx.Reaches(src, dst, port)
 
@@ -189,4 +191,26 @@ func unstructuredNestedString(obj map[string]any, path ...string) (value string,
 		return "", false
 	}
 	return s, true
+}
+
+// unstructuredPodIPs reads a Pod's status.podIPs, which on a dual-stack
+// cluster holds one address per IP family where status.podIP holds only the
+// primary one. An absent or malformed list, or entry, is skipped the same
+// way unstructuredNestedString treats an absent podIP.
+func unstructuredPodIPs(obj map[string]any) []string {
+	status, ok := obj["status"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	entries, ok := status["podIPs"].([]any)
+	if !ok {
+		return nil
+	}
+	var ips []string
+	for _, entry := range entries {
+		if ip, found := unstructuredNestedString(map[string]any{"entry": entry}, "entry", "ip"); found && ip != "" {
+			ips = append(ips, ip)
+		}
+	}
+	return ips
 }

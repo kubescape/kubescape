@@ -38,13 +38,26 @@ func corev1ProtocolOrDefault(p corev1.Protocol) corev1.Protocol {
 // against a candidate with no known IP, or a namespaceSelector against a
 // namespace this Index was never given labels for) -- in that case the
 // first return is meaningless and callers must treat this as Unknown, not
-// as a confident false.
+// as a confident false. A candidate with several addresses is in that
+// position too when an ipBlock peer contains some of them but not others:
+// the answer then depends on which address the connection uses. Reaches
+// avoids this by narrowing a dual-stack pair to one IP family at a time.
 func (idx *Index) peerMatches(peer networkingv1.NetworkPolicyPeer, policyNamespace string, candidate Endpoint) (matched bool, determinable bool) {
 	if peer.IPBlock != nil {
-		if candidate.IP == "" {
+		addrs := candidate.addresses()
+		if len(addrs) == 0 {
 			return false, false
 		}
-		return ipBlockMatches(peer.IPBlock, candidate.IP), true
+		matches := 0
+		for _, ip := range addrs {
+			if ipBlockMatches(peer.IPBlock, ip) {
+				matches++
+			}
+		}
+		if matches != 0 && matches != len(addrs) {
+			return false, false
+		}
+		return matches != 0, true
 	}
 
 	switch {
@@ -145,11 +158,17 @@ func (idx *Index) peerListVerdict(peers []networkingv1.NetworkPolicyPeer, policy
 		return Allowed, "rule has no source/destination restriction"
 	}
 
-	sawUnknown, sawHostNetwork := false, false
+	sawUnknown, sawHostNetwork, sawSomeAddresses := false, false, false
 	for _, peer := range peers {
 		matched, determinable := idx.peerMatches(peer, policyNamespace, candidate)
 		if !determinable {
-			sawUnknown = true
+			// An ipBlock peer is only undeterminable for a candidate with
+			// known addresses when it contains some of them (see peerMatches).
+			if peer.IPBlock != nil && len(candidate.addresses()) > 0 {
+				sawSomeAddresses = true
+			} else {
+				sawUnknown = true
+			}
 			continue
 		}
 		if matched && candidate.HostNetwork && !selected.HostNetwork && peer.IPBlock == nil {
@@ -173,6 +192,9 @@ func (idx *Index) peerListVerdict(peers []networkingv1.NetworkPolicyPeer, policy
 	}
 	if sawUnknown {
 		return Unknown, "a peer in this rule could not be resolved (unknown IP or namespace labels)"
+	}
+	if sawSomeAddresses {
+		return Unknown, "an ipBlock peer in this rule contains some of the pod's addresses but not all, and which of them the connection uses could not be resolved"
 	}
 	return Denied, "no peer in this rule matched"
 }
