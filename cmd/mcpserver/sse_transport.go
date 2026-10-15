@@ -23,13 +23,26 @@ import (
 // with the user's kubeconfig. The MCP specification requires servers to
 // validate the Origin header for exactly this reason.
 func newSSEServer(s *server.MCPServer, addr string) (*server.SSEServer, http.Handler) {
+	t := newSSETransport(s, addr)
+	return t.sse, t.handler
+}
+
+// sseTransport is the SSE server together with the HTTP server it is served
+// by, so the caller can serve on a listener it owns and shut both down.
+type sseTransport struct {
+	sse     *server.SSEServer
+	http    *http.Server
+	handler http.Handler
+}
+
+func newSSETransport(s *server.MCPServer, addr string) *sseTransport {
 	httpServer := &http.Server{
 		Addr:              addr,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	sseServer := server.NewSSEServer(s, server.WithHTTPServer(httpServer))
 	httpServer.Handler = rejectCrossOriginRequests(sseServer)
-	return sseServer, httpServer.Handler
+	return &sseTransport{sse: sseServer, http: httpServer, handler: httpServer.Handler}
 }
 
 // rejectCrossOriginRequests answers 403 to any request whose Origin header

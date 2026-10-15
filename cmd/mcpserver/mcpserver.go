@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"strings"
 	"sync"
@@ -24,7 +25,6 @@ import (
 	"github.com/kubescape/kubescape/v4/core/cautils/getter"
 	"github.com/kubescape/kubescape/v4/core/pkg/fixhandler"
 	"golang.org/x/sync/semaphore"
-	"golang.org/x/sync/singleflight"
 )
 
 // newKsClient creates the Kubescape storage client. It is a package-level
@@ -122,6 +122,12 @@ type scanCtxState struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 	count  int
+
+	// done is closed after val and err are set by the generation's single
+	// execution.
+	done chan struct{}
+	val  interface{}
+	err  error
 }
 
 type KubescapeMcpserver struct {
@@ -137,7 +143,6 @@ type KubescapeMcpserver struct {
 	policyGetter   getter.IPolicyGetter
 	scanSemMu      sync.Mutex
 	scanSem        *semaphore.Weighted
-	scanGroup      singleflight.Group
 	scanCtxMu      sync.Mutex
 	scanCtxs       map[string]*scanCtxState
 
@@ -148,6 +153,10 @@ type KubescapeMcpserver struct {
 	// policyReadyWait bounds how long a tool call waits for policyReady.
 	// Zero means defaultPolicyReadyWait.
 	policyReadyWait time.Duration
+
+	// work tracks in-flight MCP work so shutdown can drain, cancel and join
+	// it. See workLifecycle.
+	work workLifecycle
 }
 
 // getPolicyGetter lazily constructs policyGetter on first use, guarded so
@@ -201,8 +210,17 @@ func (ksServer *KubescapeMcpserver) doSharedChan(ctx context.Context, key string
 		state = &scanCtxState{
 			ctx:    scanCtx,
 			cancel: cancel,
+			done:   make(chan struct{}),
 		}
 		ksServer.scanCtxs[key] = state
+		// A generation owns exactly one execution, started here while
+		// scanCtxMu is held, so a joiner can never start a second one for the
+		// same generation. The execution outlives callers that stop waiting,
+		// so it is tracked for shutdown to join, and registered before the
+		// last caller can leave: shutdown must not see the lifecycle idle
+		// while it is pending. The execution goroutine ends it exactly once.
+		ksServer.work.beginShared()
+		go ksServer.runShared(key, state, limited, scanFunc)
 	}
 	state.count++
 	ksServer.scanCtxMu.Unlock()
@@ -213,29 +231,46 @@ func (ksServer *KubescapeMcpserver) doSharedChan(ctx context.Context, key string
 		state.count--
 		if state.count <= 0 {
 			state.cancel()
-			delete(ksServer.scanCtxs, key)
-			// Keep this inside scanCtxMu's critical section. Otherwise a new
-			// generation could be registered and then forgotten here.
-			ksServer.scanGroup.Forget(key)
+			// A finished execution already removed itself; only drop the
+			// entry if it still belongs to this generation.
+			if ksServer.scanCtxs[key] == state {
+				delete(ksServer.scanCtxs, key)
+			}
 		}
 	}()
-
-	ch := ksServer.scanGroup.DoChan(key, func() (interface{}, error) {
-		if limited {
-			if err := ksServer.getScanSem().Acquire(state.ctx, 1); err != nil {
-				return nil, err
-			}
-			defer ksServer.getScanSem().Release(1)
-		}
-		return scanFunc(state.ctx)
-	})
 
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
-	case res := <-ch:
-		return res.Val, res.Err
+	case <-state.done:
+		return state.val, state.err
 	}
+}
+
+// runShared is the single execution of one shared generation. It publishes the
+// result to every caller of the generation through state.done and, once it has
+// returned, retires the generation so later callers start a fresh execution
+// instead of reusing a finished result.
+func (ksServer *KubescapeMcpserver) runShared(key string, state *scanCtxState, limited bool, scanFunc func(context.Context) (interface{}, error)) {
+	defer ksServer.work.end()
+	defer func() {
+		ksServer.scanCtxMu.Lock()
+		if ksServer.scanCtxs[key] == state {
+			delete(ksServer.scanCtxs, key)
+		}
+		ksServer.scanCtxMu.Unlock()
+		state.cancel()
+		close(state.done)
+	}()
+	if limited {
+		sem := ksServer.getScanSem()
+		if err := sem.Acquire(state.ctx, 1); err != nil {
+			state.err = err
+			return
+		}
+		defer sem.Release(1)
+	}
+	state.val, state.err = scanFunc(state.ctx)
 }
 
 // getKsClient lazily initializes the Kubescape storage client. A transient
@@ -1369,8 +1404,12 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 	}
 }
 
-func mcpServerEntrypoint(transport string, port int) error {
+func mcpServerEntrypoint(ctx context.Context, transport string, port int) error {
 	logger.L().Info("Starting MCP server...")
+
+	// ksServer is created below, once the MCP server exists; the lifecycle
+	// middleware only dereferences it when a request arrives.
+	var ksServer *KubescapeMcpserver
 
 	// Create a new MCP server. WithRecovery must stay first so it wraps the
 	// tool-call recorder (which only observes a panic, never recovers it).
@@ -1379,6 +1418,7 @@ func mcpServerEntrypoint(transport string, port int) error {
 		server.WithRecovery(),
 	}
 	serverOptions = append(serverOptions, toolCallObserverOptions(logger.L().GetLevel(), transport)...)
+	serverOptions = append(serverOptions, lifecycleServerOptions(transport, func() *workLifecycle { return &ksServer.work })...)
 	s := server.NewMCPServer(
 		"Kubescape MCP Server",
 		"0.0.1",
@@ -1387,7 +1427,7 @@ func mcpServerEntrypoint(transport string, port int) error {
 
 	drp := getter.NewDownloadReleasedPolicy()
 
-	ksServer := &KubescapeMcpserver{
+	ksServer = &KubescapeMcpserver{
 		s:            s,
 		policyGetter: drp,
 	}
@@ -1428,9 +1468,12 @@ func mcpServerEntrypoint(transport string, port int) error {
 	switch transport {
 	case "sse":
 		addr := fmt.Sprintf("127.0.0.1:%d", port)
-		sseServer, _ := newSSEServer(s, addr)
+		ln, err := net.Listen("tcp", addr)
+		if err != nil {
+			return fmt.Errorf("sse server error: %w", err)
+		}
 		logger.L().Info("Starting SSE server", helpers.String("addr", addr))
-		if err := sseServer.Start(addr); err != nil {
+		if err := serveSSEUntilShutdown(ctx, newSSETransport(s, addr), ln, &ksServer.work, mcpDrainPeriod, mcpShutdownTimeout); err != nil {
 			return fmt.Errorf("sse server error: %w", err)
 		}
 		return nil
@@ -1552,7 +1595,13 @@ func GetMCPServerCmd() *cobra.Command {
 		Short: "Start the Kubescape MCP server",
 		Long:  `Start the Kubescape MCP server`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return mcpServerEntrypoint(transport, port)
+			// The root command's context is cancelled on the first SIGINT or
+			// SIGTERM (see main.go); SSE shuts down when it ends.
+			ctx := cmd.Context()
+			if ctx == nil {
+				ctx = context.Background()
+			}
+			return mcpServerEntrypoint(ctx, transport, port)
 		},
 	}
 	cmd.Flags().StringVarP(&transport, "transport", "t", "stdio", "Transport protocol to use (stdio or sse)")

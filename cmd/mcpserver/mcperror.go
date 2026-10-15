@@ -29,6 +29,10 @@ const (
 	ErrCodeNotWorkload         ErrorCode = "NOT_A_WORKLOAD"
 	ErrCodeSecretScanDenied    ErrorCode = "SECRET_SCAN_DENIED"
 	ErrCodeUnsupportedResource ErrorCode = "UNSUPPORTED_RESOURCE_KIND"
+	// ErrCodeShuttingDown indicates the server has begun shutting down and no
+	// longer accepts new tool calls. The call did not run; retry against a
+	// server that is up.
+	ErrCodeShuttingDown ErrorCode = "SERVER_SHUTTING_DOWN"
 )
 
 // ToolError is the structured JSON payload returned inside

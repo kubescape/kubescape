@@ -160,8 +160,8 @@ func TestDoScanChan_NewCallerDoesNotInheritCanceledGeneration(t *testing.T) {
 
 	// Done is evaluated only after DoChan has either joined the old call or
 	// registered a new generation. Keep the old call alive until that point so
-	// this test exercises the singleflight cleanup window deterministically.
-	receiveWithin(t, enteredSelect, "fresh caller to register with singleflight")
+	// this test exercises the generation cleanup window deterministically.
+	receiveWithin(t, enteredSelect, "fresh caller to register a new generation")
 	releaseOldScan()
 
 	assert.NoError(t, receiveWithin(t, freshDone, "fresh caller to return"))

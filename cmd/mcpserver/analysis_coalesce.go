@@ -56,7 +56,7 @@ func analysisKey(tool string, params url.Values) string {
 // shared.
 func (ksServer *KubescapeMcpserver) doAnalysis(ctx context.Context, tool string, params url.Values, run func(context.Context) *mcp.CallToolResult) *mcp.CallToolResult {
 	v, err := ksServer.doSharedChan(ctx, analysisKey(tool, params), false, func(runCtx context.Context) (out interface{}, err error) {
-		// The shared function runs on a goroutine owned by singleflight, where
+		// The shared function runs on a goroutine owned by the shared execution, where
 		// an unrecovered panic would terminate the whole process and bypass the
 		// server's recovery middleware. Report it to every waiter as an error,
 		// with its stack in the log.
