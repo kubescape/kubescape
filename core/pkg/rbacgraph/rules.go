@@ -68,13 +68,24 @@ func resourceNameMatches(names []string, name string) bool {
 // compares the rule's resourceNames with the empty string: a rule restricted
 // to real names authorizes nothing for create, not "every object of that
 // type", and only an unrestricted rule or one that lists "" does.
-// Only used for top-level collection creates (pods, rolebindings,
+// Only used for top-level collection creates (pods and the other workloads,
+// rolebindings,
 // clusterrolebindings); a subresource create on an already-named parent
 // object (e.g. serviceaccounts/token) does have a real object name to
 // match against and should use ruleGrantsSubresource directly instead.
 func ruleGrantsUnnamedCreate(rule rbacv1.PolicyRule, apiGroup, resource string) bool {
 	return ruleGrants(rule, apiGroup, resource, "create") &&
 		(len(rule.ResourceNames) == 0 || resourceNameMatches(rule.ResourceNames, ""))
+}
+
+// ruleGrantsExistingObject reports whether rule grants verb on apiGroup/
+// resource for a request that names an existing object, as update and patch
+// do. Unlike a create, such a request has a real name, so a rule restricted
+// by resourceNames grants it for those names; the empty name matches no
+// existing object, so a rule listing nothing else grants nothing.
+func ruleGrantsExistingObject(rule rbacv1.PolicyRule, apiGroup, resource, verb string) bool {
+	return ruleGrants(rule, apiGroup, resource, verb) &&
+		(len(rule.ResourceNames) == 0 || slices.ContainsFunc(rule.ResourceNames, func(n string) bool { return n != "" }))
 }
 
 func setToSlice(set map[string]bool) []string {
