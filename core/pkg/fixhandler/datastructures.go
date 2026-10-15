@@ -23,6 +23,11 @@ type FixHandler struct {
 	// fixedControlsCount is the number of failed (resource, control) tuples that
 	// produced at least one yaml expression to apply.
 	fixedControlsCount int
+	// fixedControls records the same tuples fixedControlsCount counts, so a
+	// caller can tell which control on which resource was remediated rather
+	// than only how many. It is kept in step with fixedControlsCount: every
+	// place that withdraws a resource's fixed controls withdraws these too.
+	fixedControls []UnfixedControl
 }
 
 // ResourceFixInfo is a struct that holds the information about the resource that needs to be fixed
@@ -41,7 +46,10 @@ type ResourceFixInfo struct {
 	// unfixed and the count of fully fixed controls is given back.
 	failedControls []UnfixedControl
 	fixedCount     int
-	fileKey        string
+	// fixedControls are the entries of failedControls the fixer counted in
+	// fixedCount, so they can be recorded and withdrawn with it.
+	fixedControls []UnfixedControl
+	fileKey       string
 
 	// inMemory marks a resource with no manifest on disk — a live object from a
 	// cluster scan. Its fix is rendered from the scanned object by RenderFixes
@@ -115,4 +123,37 @@ func withNewline(content, targetNewline string) string {
 
 	replacer := strings.NewReplacer(newlinesOldNew...)
 	return replacer.Replace(content)
+}
+
+// ControlOutcome is the fixer's verdict on one failed (resource, control) tuple
+// from the most recent call to PrepareResourcesToFix.
+//
+// Granularity: a patch is planned per resource, not per control. Fixed means
+// the fixer counted the control as fully remediated by that resource's planned
+// expressions, either because every one of the control's failed paths produced
+// an expression or because another control's planned paths cover them. It does
+// not mean an expression exists that is specific to this control, and it says
+// nothing about whether the patch has been, or will be, written anywhere.
+type ControlOutcome struct {
+	ControlID     string
+	ControlName   string
+	ResourceID    string
+	ResourceName  string
+	ResourceKind  string
+	DocumentIndex int
+	// FilePath is the manifest the resource was read from. It is empty for a
+	// resource of a cluster report, which has no manifest.
+	FilePath string
+	// InMemory reports that the resource is a live cluster object whose fix is
+	// rendered by RenderFixes, not written to a file.
+	InMemory bool
+	// Fixed is true when the control was counted by FixedControlsCount.
+	Fixed bool
+	// Partial is true for an unfixed control that some of whose failed paths
+	// did produce expressions. Those expressions are still part of the
+	// resource's plan; the control is unfixed because others were not.
+	Partial bool
+	// Reason is the fixer's own reason for an unfixed control, verbatim. It is
+	// empty when Fixed is true.
+	Reason string
 }

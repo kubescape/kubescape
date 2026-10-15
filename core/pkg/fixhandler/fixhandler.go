@@ -222,6 +222,14 @@ func isClusterReport(report *reporthandlingv2.PostureReport) bool {
 		report.Metadata.ContextMetadata.ClusterContextMetadata != nil
 }
 
+// IsClusterPostureReport reports whether report came from a live-cluster scan,
+// by the same test NewFixHandler applies. A caller that must decide how to treat
+// a report before loading it (for example, whether it names files on disk) uses
+// this rather than re-deriving the rule.
+func IsClusterPostureReport(report *reporthandlingv2.PostureReport) bool {
+	return isClusterReport(report)
+}
+
 func (h *FixHandler) isClusterReport() bool {
 	return isClusterReport(h.reportObj)
 }
@@ -778,6 +786,7 @@ func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInf
 	resourcesPerFile := h.countResourcesPerFile(resourceIdToResource)
 	h.unfixedControls = h.unfixedControls[:0]
 	h.fixedControlsCount = 0
+	h.fixedControls = h.fixedControls[:0]
 
 	var containerProfile *storagev1beta1.ContainerProfile
 	if h.fixInfo != nil && h.fixInfo.ContainerProfilePath != "" {
@@ -902,6 +911,7 @@ func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInf
 			if added > 0 && len(skipped) == 0 {
 				h.fixedControlsCount++
 				rfi.fixedCount++
+				rfi.fixedControls = append(rfi.fixedControls, rfi.failedControls[len(rfi.failedControls)-1])
 				continue
 			}
 
@@ -914,7 +924,7 @@ func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInf
 				reason = skipped[0]
 			}
 			if added > 0 {
-				reason = "partial: " + reason
+				reason = partialReasonPrefix + reason
 			}
 			tentativeUnfixed = append(tentativeUnfixed, pendingUnfixed{
 				entry: UnfixedControl{
@@ -941,6 +951,7 @@ func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInf
 			if len(plannedPaths) > 0 && controlIsCoveredByPlannedPaths(pu.ac, plannedPaths) {
 				h.fixedControlsCount++
 				rfi.fixedCount++
+				rfi.fixedControls = append(rfi.fixedControls, withoutReason(pu.entry))
 				continue
 			}
 			h.unfixedControls = append(h.unfixedControls, pu.entry)
@@ -988,6 +999,10 @@ func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInf
 				}
 			}
 		}
+
+		// Recorded for every resource, not only those that end up in
+		// resourcesToFix, because fixedControlsCount counted them all.
+		h.fixedControls = append(h.fixedControls, rfi.fixedControls...)
 
 		if len(rfi.YamlExpressions) > 0 {
 			resourcesToFix = append(resourcesToFix, rfi)
@@ -1040,6 +1055,8 @@ func (h *FixHandler) dropWrappedResources(ctx context.Context, resourcesToFix []
 		}
 
 		h.fixedControlsCount -= rfi.fixedCount
+		h.withdrawFixedControls(rfi.fixedControls)
+		h.withdrawPartialControls(rfi.failedControls)
 		for _, unfixed := range rfi.failedControls {
 			unfixed.Reason = "skipped: the file declares several resources in one document"
 			h.unfixedControls = append(h.unfixedControls, unfixed)
@@ -1980,9 +1997,124 @@ func determineNewlineSeparator(contents string) string {
 func (h *FixHandler) DeclineResources(declined []ResourceFixInfo) {
 	for _, r := range declined {
 		h.fixedControlsCount -= r.fixedCount
+		h.withdrawFixedControls(r.fixedControls)
+		h.withdrawPartialControls(r.failedControls)
 		for _, unfixed := range r.failedControls {
 			unfixed.Reason = "skipped: user declined the interactive prompt"
 			h.unfixedControls = append(h.unfixedControls, unfixed)
 		}
 	}
+}
+
+// partialReasonPrefix marks the reason of a control that some, but not all, of
+// whose failed paths produced an expression.
+const partialReasonPrefix = "partial: "
+
+// withoutReason copies an unfixed-control entry as the fixed record it would
+// have been, with no reason.
+func withoutReason(u UnfixedControl) UnfixedControl {
+	u.Reason = ""
+	return u
+}
+
+// withdrawFixedControls removes fixed records, mirroring the decrement of
+// fixedControlsCount at the call site.
+func (h *FixHandler) withdrawFixedControls(withdrawn []UnfixedControl) {
+	if len(withdrawn) == 0 {
+		return
+	}
+	gone := make(map[string]int, len(withdrawn))
+	for _, u := range withdrawn {
+		gone[fixedControlKey(u)]++
+	}
+	kept := h.fixedControls[:0]
+	for _, u := range h.fixedControls {
+		if key := fixedControlKey(u); gone[key] > 0 {
+			gone[key]--
+			continue
+		}
+		kept = append(kept, u)
+	}
+	h.fixedControls = kept
+}
+
+// withdrawPartialControls drops the provisional partial records of controls
+// whose plan was withdrawn. UnfixedControls keeps the first record per control,
+// so a stale "partial: ..." entry would otherwise outlive the plan it
+// described and shadow the skipped record appended after it.
+func (h *FixHandler) withdrawPartialControls(withdrawn []UnfixedControl) {
+	if len(withdrawn) == 0 {
+		return
+	}
+	gone := make(map[string]bool, len(withdrawn))
+	for _, u := range withdrawn {
+		gone[fixedControlKey(u)] = true
+	}
+	kept := h.unfixedControls[:0]
+	for _, u := range h.unfixedControls {
+		if strings.HasPrefix(u.Reason, partialReasonPrefix) && gone[fixedControlKey(u)] {
+			continue
+		}
+		kept = append(kept, u)
+	}
+	h.unfixedControls = kept
+}
+
+func fixedControlKey(u UnfixedControl) string {
+	return u.ControlID + "|" + u.ResourceID + "|" + fmt.Sprint(u.DocumentIndex) + "|" + u.FilePath
+}
+
+// ControlOutcomes returns the fixer's verdict on every failed (resource,
+// control) tuple of the most recent PrepareResourcesToFix, fixed and unfixed
+// alike, ordered by resource ID, control ID, document index and file path.
+//
+// It is a read-only view over the same accounting FixedControlsCount and
+// UnfixedControls report: the fixed outcomes number FixedControlsCount() and
+// the unfixed ones are exactly UnfixedControls(). A control that was filtered
+// out by the control selection, or that the report did not mark failed, has no
+// outcome.
+func (h *FixHandler) ControlOutcomes() []ControlOutcome {
+	inMemory := h.isClusterReport()
+	toOutcome := func(u UnfixedControl, fixed bool) ControlOutcome {
+		path := u.FilePath
+		if inMemory {
+			path = ""
+		}
+		return ControlOutcome{
+			ControlID:     u.ControlID,
+			ControlName:   u.ControlName,
+			ResourceID:    u.ResourceID,
+			ResourceName:  u.ResourceName,
+			ResourceKind:  u.ResourceKind,
+			DocumentIndex: u.DocumentIndex,
+			FilePath:      path,
+			InMemory:      inMemory,
+			Fixed:         fixed,
+			Partial:       !fixed && strings.HasPrefix(u.Reason, partialReasonPrefix),
+			Reason:        u.Reason,
+		}
+	}
+
+	unfixed := h.UnfixedControls()
+	out := make([]ControlOutcome, 0, len(h.fixedControls)+len(unfixed))
+	for _, u := range h.fixedControls {
+		out = append(out, toOutcome(u, true))
+	}
+	for _, u := range unfixed {
+		out = append(out, toOutcome(u, false))
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		a, b := out[i], out[j]
+		if a.ResourceID != b.ResourceID {
+			return a.ResourceID < b.ResourceID
+		}
+		if a.ControlID != b.ControlID {
+			return a.ControlID < b.ControlID
+		}
+		if a.DocumentIndex != b.DocumentIndex {
+			return a.DocumentIndex < b.DocumentIndex
+		}
+		return a.FilePath < b.FilePath
+	})
+	return out
 }

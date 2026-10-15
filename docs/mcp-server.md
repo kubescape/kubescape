@@ -308,6 +308,169 @@ Compare two already-produced Kubescape scan report files (JSON) and return what 
 }
 ```
 
+### Remediation Tools
+
+#### `apply_remediation`
+
+Compute the deterministic YAML patch Kubescape's fixer plans for failed controls, from either local IaC (`path`) or an existing posture report (`report_path`), which may be a live-cluster report. It reuses the same fixer as `kubescape fix`; it does not implement a second remediation engine.
+
+This tool only plans. It does not modify any file, and it does not change the cluster. The patched YAML it returns is for the caller to write or apply.
+
+**Parameters:**
+
+| Parameter     | Type            | Required                                    | Description                                                                         |
+| ------------- | --------------- | ------------------------------------------- | ----------------------------------------------------------------------------------- |
+| `path`        | string          | One of `path` / `report_path`               | Local YAML file or directory to scan and remediate                                  |
+| `report_path` | string          | One of `path` / `report_path`               | Path to a posture report JSON file (`kubescape scan --format json`). No scan is run |
+| `base_path`   | string          | With `report_path`, for file-backed reports | Directory the report's files must stay inside. Not allowed with `path`              |
+| `control_ids` | string or array | Yes                                         | Control IDs to remediate, e.g. `"C-0013,C-0017"` or `["C-0013"]`                    |
+
+Exactly one of `path` and `report_path` must be given. Existing callers that pass `path` and `control_ids` are unaffected.
+
+**Report input and `base_path`:**
+
+- A report of a file, directory or git scan names, inside itself, where its manifests are. Because a report may come from another party, `base_path` is required for these and every file the fixer reads must resolve inside it. `base_path`, the report's own recorded location and symlinks are all resolved before they are compared, so `..` and symlinks cannot widen it. The report's own directory is not used as a default, because a report is routinely written somewhere other than the tree it scanned.
+- A cluster report has no files, so `base_path` is not used and is ignored if given.
+- The report is read once, and must be a regular file of at most 64 MiB.
+- Findings that are not for the controls in `control_ids` are left out.
+
+**Response fields:**
+
+| Field                     | Description                                                                                                                                                                                    |
+| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `files`                   | Patched YAML per manifest file. Always `[]` for a cluster report                                                                                                                               |
+| `rendered_manifests`      | Patched manifest per live-cluster resource, sorted by `resource_id`. Always `[]` for a file-backed report. These are rendered from the scanned object; nothing has been applied to the cluster |
+| `fixed_control_instances` | Count of (resource, control) pairs the fixer remediated                                                                                                                                        |
+| `unfixed_controls`        | Controls with no automatic fix, with the fixer's reason, plus any requested control the scan did not evaluate                                                                                  |
+| `degraded`                | The scan behind the report did not fully complete. An empty result on a degraded run is not "everything is compliant"                                                                          |
+| `items`                   | One entry per failed (resource, control) pair, sorted by `resource_id` then control ID. Always present                                                                                         |
+| `report`                  | Bounded summary of the report's scan coverage                                                                                                                                                  |
+| `warnings`                | Notes about the run, for example that the report carries no coverage information                                                                                                               |
+
+**Each entry in `items`:**
+
+| Field            | Description                                                                                                                                                                                                                                                    |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `resource_id`    | The report's opaque resource identifier. It is the identity of the item and must not be parsed: it can be a composite RBAC chain. Empty for `not_evaluated`                                                                                                    |
+| `resource`       | `kind`, `name` and `namespace` from the report, when it has the resource. `namespace` is `""` when the object has none. Two resources can share these three values and still be distinct                                                                       |
+| `control`        | `id` and `name`                                                                                                                                                                                                                                                |
+| `evidence`       | The report's own rule results for the control: rule name, status, and the paths as recorded (`failed_path`, `review_path`, `delete_path`, `fix_path`, `fix_value`). Bounded to 20 rules and 20 paths per rule; `evidence_truncated` / `paths_truncated` say so |
+| `classification` | See below                                                                                                                                                                                                                                                      |
+| `reason`         | The fixer's reason, verbatim, for anything other than `patch_available`                                                                                                                                                                                        |
+| `file_path`      | The manifest the resource was read from. Absent for a cluster resource                                                                                                                                                                                         |
+
+**`classification`:**
+
+| Value             | Meaning                                                                                                                        |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `patch_available` | The fixer counted the control as remediated by the patch it planned for the resource                                           |
+| `partial_patch`   | Some of the control's failed paths are covered by the resource's patch and others are not. The control still needs manual work |
+| `manual`          | The fixer produced no remediation. `reason` says why                                                                           |
+| `not_evaluated`   | The control was requested but the scan never evaluated it, so nothing is known about the resources it would flag               |
+
+Classification comes from the fixer, never from whether a `fix_path` is present. A control can carry a `fix_path` and still be `manual`: the fixer declines a resource it cannot patch faithfully, for example one owned by another resource (fix its owner), a workload whose container environment the scan redacted (a rendered manifest would overwrite the real values), a Secret or ConfigMap, a finding that spans several objects such as an RBAC chain, or a fix that needs a value only the caller can supply.
+
+`patch_available` is a statement about the resource's patch as a whole. The fixer plans one patch per resource and may count a control as covered because another control's expression changes the same path, so it does not mean an expression exists that is specific to that control.
+
+A fix whose value is a `YOUR_...` placeholder is still planned and counted, because the calling agent is the party that can substitute a real value. Check `applied_expressions` (file-backed) or the rendered manifest (cluster) before applying anything.
+
+**`report`:**
+
+| Field                                                             | Description                                                                                           |
+| ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `kind`                                                            | `cluster`, `directory`, `file`, `git` or `unknown`                                                    |
+| `coverage_available`                                              | `false` when the report has no `scanCoverage`; the counters below then say nothing about completeness |
+| `degraded`                                                        | The report's own degraded flag                                                                        |
+| `evaluated_controls`, `total_controls`                            | Controls evaluated, and in scope                                                                      |
+| `not_evaluated_control_ids`, `not_evaluated_control_count`        | At most 50 sorted IDs, and the full count                                                             |
+| `failed_gvr_pulls`, `silent_failed_gvr_count`, `unexamined_kinds` | Counts only; the lists are not copied                                                                 |
+
+A report file does not carry the `truncated` flag of the `run_framework_security_scan` response, so this tool cannot tell whether a failed-resource list was truncated before the report was written. Do not read an absent flag as completeness.
+
+**Example Response (cluster report, `control_ids` = `C-0057,C-0041`):**
+
+```json
+{
+  "files": [],
+  "fixed_control_instances": 1,
+  "degraded": true,
+  "unfixed_controls": [
+    {
+      "ControlID": "C-0041",
+      "ControlName": "HostNetwork access",
+      "ResourceName": "nginx",
+      "ResourceKind": "Deployment",
+      "FilePath": "cluster",
+      "ResourceID": "apps/v1/default/Deployment/nginx",
+      "DocumentIndex": 0,
+      "Reason": "no auto-fix available for this control"
+    }
+  ],
+  "items": [
+    {
+      "resource_id": "apps/v1/default/Deployment/nginx",
+      "resource": {
+        "kind": "Deployment",
+        "name": "nginx",
+        "namespace": "default"
+      },
+      "control": { "id": "C-0041", "name": "HostNetwork access" },
+      "evidence": [
+        {
+          "rule": "rule-no-fix",
+          "status": "failed",
+          "paths": [{ "failed_path": "spec.hostNetwork" }]
+        }
+      ],
+      "classification": "manual",
+      "reason": "no auto-fix available for this control"
+    },
+    {
+      "resource_id": "apps/v1/default/Deployment/nginx",
+      "resource": {
+        "kind": "Deployment",
+        "name": "nginx",
+        "namespace": "default"
+      },
+      "control": { "id": "C-0057", "name": "Privileged container" },
+      "evidence": [
+        {
+          "rule": "rule-spec.template.spec.containers[0].securityContext.privileged",
+          "status": "failed",
+          "paths": [
+            {
+              "fix_path": "spec.template.spec.containers[0].securityContext.privileged",
+              "fix_value": "false"
+            }
+          ]
+        }
+      ],
+      "classification": "patch_available"
+    }
+  ],
+  "rendered_manifests": [
+    {
+      "resource_id": "apps/v1/default/Deployment/nginx",
+      "manifest": "apiVersion: apps/v1\nkind: Deployment\n..."
+    }
+  ],
+  "report": {
+    "kind": "cluster",
+    "coverage_available": true,
+    "degraded": true,
+    "evaluated_controls": 20,
+    "total_controls": 22,
+    "not_evaluated_control_ids": ["C-0069"],
+    "not_evaluated_control_count": 1,
+    "failed_gvr_pulls": 1,
+    "silent_failed_gvr_count": 3,
+    "unexamined_kinds": 2
+  }
+}
+```
+
+**Errors:** `INVALID_ARGUMENT` for a missing, conflicting, unreadable, oversized or non-report input, or a report whose recorded scan location is outside `base_path`. A single resource whose manifest resolves outside `base_path` is not an error: it is skipped and reported as `manual`.
+
 ### Compliance & Hardening Tools
 
 #### `predict_pss_compliance`
