@@ -373,13 +373,28 @@ func createVulnerabilityToolsAndResources(ksServer *KubescapeMcpserver) {
 
 	listVulnerabilitiesTool := mcp.NewTool(
 		"list_vulnerabilities_in_manifest",
-		mcp.WithDescription("List all vulnerabilities in a given manifest"),
+		mcp.WithDescription("List the vulnerabilities in a given manifest, one entry per CVE and affected package, most severe first. Returns a page of results (see limit/offset) with the total count; long text fields are left out unless include_details is true."),
 		mcp.WithString("namespace",
 			mcp.Description("Filter by namespace (optional)"),
 		),
 		mcp.WithString("manifest_name",
 			mcp.Required(),
 			mcp.Description("Name of the manifest to list vulnerabilities from"),
+		),
+		mcp.WithString("min_severity",
+			mcp.Description("Minimum severity to include: Critical, High, Medium, Low, Negligible (optional; by default every severity, including unclassified ones, is returned)"),
+		),
+		mcp.WithBoolean("fixable_only",
+			mcp.Description("Only return vulnerabilities that have a fixed version (optional, default false)"),
+		),
+		mcp.WithBoolean("include_details",
+			mcp.Description("Include description, CVSS, URLs, advisories and data source for each entry (optional, default false; makes the response much larger)"),
+		),
+		mcp.WithNumber("limit",
+			mcp.Description("Maximum number of entries to return (optional, default 100, maximum 500)"),
+		),
+		mcp.WithNumber("offset",
+			mcp.Description("Number of entries to skip; pass the previous response's next_offset to get the next page (optional, default 0)"),
 		),
 	)
 
@@ -958,6 +973,10 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		if toolErr != nil {
 			return toolErr, nil
 		}
+		listOpts, toolErr := parseVulnerabilityListOptions(arguments)
+		if toolErr != nil {
+			return toolErr, nil
+		}
 		client, ksErr := ksServer.getKsClient()
 		if ksErr != nil {
 			return mcpToolError(ErrCodeK8sClientError, fmt.Sprintf("failed to connect to Kubernetes cluster: %v", ksErr), nil), nil
@@ -966,11 +985,7 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		if err != nil {
 			return nil, fmt.Errorf("failed to get vulnerability manifest: %w", err)
 		}
-		var cveList []v1beta1.Vulnerability
-		for _, match := range manifest.Spec.Payload.Matches {
-			cveList = append(cveList, match.Vulnerability)
-		}
-		responseJson, err := json.Marshal(cveList)
+		responseJson, err := json.Marshal(listVulnerabilities(manifest.Spec.Payload.Matches, listOpts))
 		if err != nil {
 			return nil, fmt.Errorf("failed to marshal cve list: %w", err)
 		}
@@ -1006,7 +1021,7 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		if err != nil {
 			return nil, fmt.Errorf("failed to get vulnerability manifest: %w", err)
 		}
-		var match []v1beta1.Match
+		match := []v1beta1.Match{}
 		for _, m := range manifest.Spec.Payload.Matches {
 			if m.Vulnerability.ID == cveIDStr {
 				match = append(match, m)

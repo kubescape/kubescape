@@ -98,7 +98,7 @@ func TestRegisteredStorageToolsDispatchToTheirDeclaredNames(t *testing.T) {
 			name: "list vulnerabilities", tool: "list_vulnerabilities_in_manifest",
 			arguments: map[string]any{"namespace": "security", "manifest_name": "nginx"},
 			assertJSON: func(t *testing.T, value any) {
-				vulnerabilities := value.([]any)
+				vulnerabilities := value.(map[string]any)["vulnerabilities"].([]any)
 				require.Len(t, vulnerabilities, 1)
 				assert.Equal(t, "CVE-2026-1000", vulnerabilities[0].(map[string]any)["id"])
 			},

@@ -85,27 +85,45 @@ Discover available vulnerability manifests at image and workload levels.
 
 #### `list_vulnerabilities_in_manifest`
 
-List all vulnerabilities (CVEs) found in a specific manifest.
+List the vulnerabilities (CVEs) found in a specific manifest: one entry per CVE and affected package, most severe first. Results come in pages; long text fields are only included with `include_details`. The full records stay available through the `kubescape://vulnerability-manifests/{namespace}/{manifest_name}` resource.
 
 **Parameters:**
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `namespace` | string | No | Namespace of the manifest (default: `"kubescape"`) |
 | `manifest_name` | string | Yes | Name of the manifest |
+| `min_severity` | string | No | Minimum severity: `Critical`, `High`, `Medium`, `Low` or `Negligible` (default: every severity) |
+| `fixable_only` | boolean | No | Only vulnerabilities with a fixed version (default: `false`) |
+| `include_details` | boolean | No | Add `description`, `cvss`, `urls`, `advisories` and `data_source` to each entry (default: `false`) |
+| `limit` | number | No | Entries per page, 1–500 (default: `100`) |
+| `offset` | number | No | Entries to skip; pass the previous `next_offset` (default: `0`) |
 
 **Example Response:**
 ```json
-[
-  {
-    "id": "CVE-2023-12345",
-    "severity": "High",
-    "description": "Buffer overflow in libfoo",
-    "fix": {
-      "versions": ["1.2.4"],
-      "state": "fixed"
+{
+  "total": 48,
+  "returned": 2,
+  "truncated": true,
+  "next_offset": 2,
+  "vulnerabilities": [
+    {
+      "id": "CVE-2021-22945",
+      "severity": "Critical",
+      "package": "curl",
+      "version": "7.74.0-1.3+deb11u1",
+      "package_type": "deb",
+      "fix": {"versions": ["7.74.0-1.3+deb11u2"], "state": "fixed"}
+    },
+    {
+      "id": "CVE-2021-22945",
+      "severity": "Critical",
+      "package": "libcurl4",
+      "version": "7.74.0-1.3+deb11u1",
+      "package_type": "deb",
+      "fix": {"versions": ["7.74.0-1.3+deb11u2"], "state": "fixed"}
     }
-  }
-]
+  ]
+}
 ```
 
 #### `list_vulnerability_matches_for_cve`
