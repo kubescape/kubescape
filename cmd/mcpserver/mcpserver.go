@@ -25,7 +25,6 @@ import (
 	"github.com/kubescape/kubescape/v4/core/cautils/getter"
 	"github.com/kubescape/kubescape/v4/core/pkg/fixhandler"
 	"golang.org/x/sync/semaphore"
-	"golang.org/x/sync/singleflight"
 )
 
 // newKsClient creates the Kubescape storage client. It is a package-level
@@ -123,6 +122,12 @@ type scanCtxState struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 	count  int
+
+	// done is closed after val and err are set by the generation's single
+	// execution.
+	done chan struct{}
+	val  interface{}
+	err  error
 }
 
 type KubescapeMcpserver struct {
@@ -138,7 +143,6 @@ type KubescapeMcpserver struct {
 	policyGetter   getter.IPolicyGetter
 	scanSemMu      sync.Mutex
 	scanSem        *semaphore.Weighted
-	scanGroup      singleflight.Group
 	scanCtxMu      sync.Mutex
 	scanCtxs       map[string]*scanCtxState
 
@@ -206,14 +210,17 @@ func (ksServer *KubescapeMcpserver) doSharedChan(ctx context.Context, key string
 		state = &scanCtxState{
 			ctx:    scanCtx,
 			cancel: cancel,
+			done:   make(chan struct{}),
 		}
 		ksServer.scanCtxs[key] = state
-		// The execution outlives callers that stop waiting, so it is tracked
-		// for shutdown to join. It is registered here, with the generation,
-		// not when its goroutine starts: the last caller may leave first, and
-		// shutdown must not see the lifecycle idle while the work is pending.
-		// The execution below ends it, exactly once per generation.
+		// A generation owns exactly one execution, started here while
+		// scanCtxMu is held, so a joiner can never start a second one for the
+		// same generation. The execution outlives callers that stop waiting,
+		// so it is tracked for shutdown to join, and registered before the
+		// last caller can leave: shutdown must not see the lifecycle idle
+		// while it is pending. The execution goroutine ends it exactly once.
 		ksServer.work.beginShared()
+		go ksServer.runShared(key, state, limited, scanFunc)
 	}
 	state.count++
 	ksServer.scanCtxMu.Unlock()
@@ -224,30 +231,46 @@ func (ksServer *KubescapeMcpserver) doSharedChan(ctx context.Context, key string
 		state.count--
 		if state.count <= 0 {
 			state.cancel()
-			delete(ksServer.scanCtxs, key)
-			// Keep this inside scanCtxMu's critical section. Otherwise a new
-			// generation could be registered and then forgotten here.
-			ksServer.scanGroup.Forget(key)
+			// A finished execution already removed itself; only drop the
+			// entry if it still belongs to this generation.
+			if ksServer.scanCtxs[key] == state {
+				delete(ksServer.scanCtxs, key)
+			}
 		}
 	}()
-
-	ch := ksServer.scanGroup.DoChan(key, func() (interface{}, error) {
-		defer ksServer.work.end()
-		if limited {
-			if err := ksServer.getScanSem().Acquire(state.ctx, 1); err != nil {
-				return nil, err
-			}
-			defer ksServer.getScanSem().Release(1)
-		}
-		return scanFunc(state.ctx)
-	})
 
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
-	case res := <-ch:
-		return res.Val, res.Err
+	case <-state.done:
+		return state.val, state.err
 	}
+}
+
+// runShared is the single execution of one shared generation. It publishes the
+// result to every caller of the generation through state.done and, once it has
+// returned, retires the generation so later callers start a fresh execution
+// instead of reusing a finished result.
+func (ksServer *KubescapeMcpserver) runShared(key string, state *scanCtxState, limited bool, scanFunc func(context.Context) (interface{}, error)) {
+	defer ksServer.work.end()
+	defer func() {
+		ksServer.scanCtxMu.Lock()
+		if ksServer.scanCtxs[key] == state {
+			delete(ksServer.scanCtxs, key)
+		}
+		ksServer.scanCtxMu.Unlock()
+		state.cancel()
+		close(state.done)
+	}()
+	if limited {
+		sem := ksServer.getScanSem()
+		if err := sem.Acquire(state.ctx, 1); err != nil {
+			state.err = err
+			return
+		}
+		defer sem.Release(1)
+	}
+	state.val, state.err = scanFunc(state.ctx)
 }
 
 // getKsClient lazily initializes the Kubescape storage client. A transient

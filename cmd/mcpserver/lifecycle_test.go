@@ -11,7 +11,10 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"runtime"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -479,6 +482,9 @@ func TestSSEShutdown_Signals(t *testing.T) {
 		fmt.Println("shutdown complete")
 		return
 	}
+	if runtime.GOOS == "windows" {
+		t.Skip("delivering SIGTERM/os.Interrupt to a child process is not supported on Windows")
+	}
 	for _, sig := range []os.Signal{syscall.SIGTERM, os.Interrupt} {
 		t.Run(sig.String(), func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -505,25 +511,141 @@ func TestSSEShutdown_Signals(t *testing.T) {
 
 // A shared execution is registered with its generation, so shutdown cannot
 // observe an idle lifecycle in the window between the last caller leaving and
-// the execution's goroutine starting.
+// the execution's goroutine starting. The caller's context is already
+// cancelled, and the execution is held until released, so the only ready case
+// in the caller's select is cancellation.
 func TestWorkLifecycle_SharedWorkIsTrackedBeforeItStarts(t *testing.T) {
 	ksServer := &KubescapeMcpserver{}
 	work := &ksServer.work
 	require.True(t, work.begin())
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	releaseExec := func() { releaseOnce.Do(func() { close(release) }) }
+	t.Cleanup(releaseExec)
 	ran := make(chan struct{})
 	_, err := ksServer.doSharedChan(ctx, "early", false, func(context.Context) (interface{}, error) {
 		close(ran)
+		<-release
 		return nil, nil
 	})
 	require.ErrorIs(t, err, context.Canceled)
 	work.end()
 
-	// Whether or not the execution has started, it is either still counted or
-	// already finished; shutdown reports success only after it returned.
+	assert.Equal(t, 1, work.activeCount(), "the departed caller's execution is still tracked")
+	sctx, scancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer scancel()
+	require.Error(t, work.shutdown(sctx, 10*time.Millisecond), "shutdown must not succeed while the execution runs")
+
+	receiveWithin(t, ran, "execution to start")
+	releaseExec()
+	sctx2, scancel2 := context.WithTimeout(context.Background(), lifecycleWait)
+	defer scancel2()
+	require.NoError(t, work.shutdown(sctx2, time.Second))
+	assert.Zero(t, work.activeCount())
+}
+
+// Joiners of one generation share a single execution that is counted once,
+// however many callers join or leave, and the count never goes negative.
+func TestWorkLifecycle_GenerationHasOneTrackedExecution(t *testing.T) {
+	ksServer := &KubescapeMcpserver{}
+	work := &ksServer.work
+	started := make(chan struct{}, 4)
+	release := make(chan struct{})
+	var executions atomic.Int32
+	run := func(context.Context) (interface{}, error) {
+		executions.Add(1)
+		started <- struct{}{}
+		<-release
+		return "result", nil
+	}
+
+	type outcome struct {
+		val interface{}
+		err error
+	}
+	results := make(chan outcome, 2)
+	ctxA, cancelA := context.WithCancel(context.Background())
+	defer cancelA()
+	go func() {
+		v, err := ksServer.doSharedChan(ctxA, "gen", false, run)
+		results <- outcome{v, err}
+	}()
+	receiveWithin(t, started, "first execution to start")
+
+	// B joins the running generation; Done is read once B is registered.
+	joined := make(chan struct{})
+	ctxB := &doneObservedContext{Context: context.Background(), observed: joined}
+	go func() {
+		v, err := ksServer.doSharedChan(ctxB, "gen", false, run)
+		results <- outcome{v, err}
+	}()
+	receiveWithin(t, joined, "second caller to join the generation")
+
+	// The caller that created the generation leaves; B still needs it.
+	cancelA()
+	assert.ErrorIs(t, receiveWithin(t, results, "first caller to leave").err, context.Canceled)
+	assert.Equal(t, 1, work.activeCount(), "the execution B waits on stays tracked")
+
+	close(release)
+	got := receiveWithin(t, results, "second caller's result")
+	require.NoError(t, got.err)
+	assert.Equal(t, "result", got.val)
+	assert.EqualValues(t, 1, executions.Load(), "one generation runs one execution")
+
 	sctx, scancel := context.WithTimeout(context.Background(), lifecycleWait)
 	defer scancel()
 	require.NoError(t, work.shutdown(sctx, time.Second))
+	assert.Zero(t, work.activeCount())
+}
+
+// After a generation's execution finishes quickly, a later caller starts a new
+// execution for the key. Shutdown must wait for it even after its only caller
+// has cancelled, and must not be satisfied by the earlier, finished execution.
+func TestWorkLifecycle_ShutdownWaitsForExecutionStartedAfterEarlierOneFinished(t *testing.T) {
+	ksServer := &KubescapeMcpserver{}
+	work := &ksServer.work
+
+	_, err := ksServer.doSharedChan(context.Background(), "k", false, func(context.Context) (interface{}, error) {
+		return nil, errors.New("early failure")
+	})
+	require.Error(t, err)
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	releaseExec := func() { releaseOnce.Do(func() { close(release) }) }
+	t.Cleanup(releaseExec)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		_, err := ksServer.doSharedChan(ctx, "k", false, func(context.Context) (interface{}, error) {
+			close(started)
+			<-release
+			return nil, nil
+		})
+		done <- err
+	}()
+	receiveWithin(t, started, "second execution to start")
+	cancel()
+	assert.ErrorIs(t, receiveWithin(t, done, "caller to leave"), context.Canceled)
+	assert.Equal(t, 1, work.activeCount())
+
+	shutdownDone := make(chan error, 1)
+	go func() {
+		sctx, scancel := context.WithTimeout(context.Background(), lifecycleWait)
+		defer scancel()
+		shutdownDone <- work.shutdown(sctx, time.Second)
+	}()
+	select {
+	case err := <-shutdownDone:
+		t.Fatalf("shutdown returned %v while an execution was still running", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	assert.Equal(t, 1, work.activeCount())
+
+	releaseExec()
+	require.NoError(t, receiveWithin(t, shutdownDone, "shutdown to finish"))
 	assert.Zero(t, work.activeCount())
 }
