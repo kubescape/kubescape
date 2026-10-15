@@ -218,7 +218,13 @@ func GetWriter(ctx context.Context, outputFile string) *os.File {
 // legacy helpers, it never redirects an error to stdout or a temporary file:
 // callers can return the setup failure before a scan starts.
 func GetWriterNoFallback(outputFile string) (*os.File, error) {
-	if err := os.MkdirAll(filepath.Dir(outputFile), outputDirPerm); err != nil {
+	// filepath.Dir would clean "link/../" lexically and create a different
+	// directory than the one the file is opened in; keep the path as given.
+	outputDir, _ := filepath.Split(outputFile)
+	if outputDir == "" {
+		outputDir = "."
+	}
+	if err := os.MkdirAll(outputDir, outputDirPerm); err != nil {
 		return nil, fmt.Errorf("create output directory for %q: %w", outputFile, err)
 	}
 	f, err := openFileForWrite(outputFile)

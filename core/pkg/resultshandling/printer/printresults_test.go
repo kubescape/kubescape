@@ -554,6 +554,27 @@ func TestResolveOutputFile_DirectoryThroughSymlinkParent(t *testing.T) {
 	assert.NoFileExists(t, filepath.Join(work, "report.json"))
 }
 
+// TestGetWriterNoFallback_NewDirectoryThroughSymlinkParent: the missing
+// directory must be created where the file is opened, through the symlink.
+func TestGetWriterNoFallback_NewDirectoryThroughSymlinkParent(t *testing.T) {
+	root := t.TempDir()
+	storage := filepath.Join(root, "storage")
+	reports := filepath.Join(storage, "reports")
+	work := filepath.Join(root, "work")
+	require.NoError(t, os.MkdirAll(reports, 0o755))
+	require.NoError(t, os.MkdirAll(work, 0o755))
+	if err := os.Symlink(reports, filepath.Join(work, "link")); err != nil {
+		t.Skipf("symlinks not supported: %v", err)
+	}
+
+	sep := string(filepath.Separator)
+	f, err := GetWriterNoFallback(work + sep + "link" + sep + ".." + sep + "newdir" + sep + "report.json")
+	require.NoError(t, err)
+	require.NoError(t, f.Close())
+	assert.FileExists(t, filepath.Join(storage, "newdir", "report.json"))
+	assert.NoDirExists(t, filepath.Join(work, "newdir"))
+}
+
 func TestResolveDefaultOutputFile(t *testing.T) {
 	assert.Equal(t, "report.html", ResolveDefaultOutputFile(HtmlFormat, "report"))
 	assert.Equal(t, "report.pdf", ResolveDefaultOutputFile(PdfFormat, "report"))
