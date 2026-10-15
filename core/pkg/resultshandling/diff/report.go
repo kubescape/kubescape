@@ -3,12 +3,14 @@ package diff
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 )
@@ -114,14 +116,55 @@ type notEvaluatedControl struct {
 	Reason    string `json:"reason,omitempty"`
 }
 
-func loadReport(path string) (*scanReport, error) {
-	file, err := os.Open(filepath.Clean(path))
+// maxReportSize bounds how many bytes of a report file are read.
+const maxReportSize = 64 << 20 // 64 MiB
+
+var (
+	errReportNotRegular = errors.New("report is not a regular file")
+	errReportTooLarge   = errors.New("report is too large")
+)
+
+// openReport opens path for reading and rejects anything but a regular file.
+// O_NONBLOCK keeps opening a FIFO from waiting for a writer, and the check is
+// made on the opened descriptor so a path swapped afterwards cannot slip past.
+func openReport(path string) (*os.File, error) {
+	file, err := os.OpenFile(filepath.Clean(path), os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return nil, err
+	}
+	info, err := file.Stat()
+	if err != nil {
+		file.Close()
+		return nil, err
+	}
+	if !info.Mode().IsRegular() {
+		file.Close()
+		return nil, fmt.Errorf("%w: %q", errReportNotRegular, path)
+	}
+	return file, nil
+}
+
+// readReport returns the contents of the report at path, reading at most
+// maxReportSize bytes so a file that grows while it is read stays bounded.
+func readReport(path string) ([]byte, error) {
+	file, err := openReport(path)
 	if err != nil {
 		return nil, err
 	}
 	defer file.Close()
 
-	data, err := io.ReadAll(file)
+	data, err := io.ReadAll(io.LimitReader(file, maxReportSize+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > maxReportSize {
+		return nil, fmt.Errorf("%w: %q exceeds the %d byte limit", errReportTooLarge, path, int64(maxReportSize))
+	}
+	return data, nil
+}
+
+func loadReport(path string) (*scanReport, error) {
+	data, err := readReport(path)
 	if err != nil {
 		return nil, err
 	}
