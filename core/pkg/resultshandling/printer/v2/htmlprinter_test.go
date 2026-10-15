@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/armosec/armoapi-go/armotypes"
+	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
@@ -344,4 +345,133 @@ func TestHtmlPrinter_ActionPrint_CoverageSkippedControlTable(t *testing.T) {
 	assert.Contains(t, htmlContent, "<td>C-0070</td>")
 	assert.Contains(t, htmlContent, "<td>Host IPC</td>")
 	assert.Contains(t, htmlContent, "<td>irrelevant: no matching resources in cluster</td>")
+}
+
+// TestSortHTMLResourceTableView_DeterministicOrdering verifies that sortHTMLResourceTableView
+// sorts resources deterministically across multiple levels: namespace ascending, kind ascending,
+// name ascending, and ID ascending.
+func TestSortHTMLResourceTableView_DeterministicOrdering(t *testing.T) {
+	r1 := ResourceResult{Resource: &mockResource{namespace: "kube-system", kind: "Pod", name: "coredns", id: "id-3"}}
+	r2 := ResourceResult{Resource: &mockResource{namespace: "default", kind: "Deployment", name: "api", id: "id-1"}}
+	r3 := ResourceResult{Resource: &mockResource{namespace: "default", kind: "Deployment", name: "worker", id: "id-2"}}
+	r4 := ResourceResult{Resource: &mockResource{namespace: "default", kind: "ConfigMap", name: "config", id: "id-0"}}
+	r5 := ResourceResult{Resource: &mockResource{namespace: "", kind: "ClusterRole", name: "admin", id: "id-a"}}
+	r6 := ResourceResult{Resource: &mockResource{namespace: "", kind: "ClusterRole", name: "admin", id: "id-b"}}
+
+	input := ResourceTableView{r1, r2, r3, r4, r5, r6}
+	sorted := sortHTMLResourceTableView(input)
+
+	require.Len(t, sorted, 6)
+	// Cluster-scoped (empty namespace) first, same kind and name sorted by ID
+	assert.Equal(t, "id-a", sorted[0].Resource.GetID())
+	assert.Equal(t, "id-b", sorted[1].Resource.GetID())
+	// Namespace "default": ConfigMap before Deployment
+	assert.Equal(t, "config", sorted[2].Resource.GetName())
+	// Namespace "default", Deployment: "api" before "worker"
+	assert.Equal(t, "api", sorted[3].Resource.GetName())
+	assert.Equal(t, "worker", sorted[4].Resource.GetName())
+	// Namespace "kube-system"
+	assert.Equal(t, "coredns", sorted[5].Resource.GetName())
+
+	// Reverse input order produces the identical deterministic result
+	reversedInput := ResourceTableView{r6, r5, r4, r3, r2, r1}
+	sortedReversed := sortHTMLResourceTableView(reversedInput)
+	assert.Equal(t, sorted, sortedReversed)
+}
+
+// TestSortHTMLControlsBySeverityName_DeterministicOrdering verifies that control summaries
+// are sorted primarily by severity descending, then name ascending, and finally control ID ascending.
+func TestSortHTMLControlsBySeverityName_DeterministicOrdering(t *testing.T) {
+	controls := map[string]reportsummary.ControlSummary{
+		"C-0001": {ControlID: "C-0001", Name: "Beta High", ScoreFactor: 7.0},
+		"C-0002": {ControlID: "C-0002", Name: "Alpha High", ScoreFactor: 7.0},
+		"C-0003": {ControlID: "C-0003", Name: "Alpha High", ScoreFactor: 7.0},
+		"C-0004": {ControlID: "C-0004", Name: "Alpha Low", ScoreFactor: 2.0},
+		"C-0005": {ControlID: "C-0005", Name: "Zeta Critical", ScoreFactor: 9.0},
+	}
+
+	sorted := sortHTMLControlsBySeverityName(controls)
+	require.Len(t, sorted, 5)
+
+	// Highest severity (Critical, ScoreFactor 9.0) first
+	assert.Equal(t, "C-0005", sorted[0].GetID())
+	// Next severity (High, ScoreFactor 7.0): Alpha before Beta; tied name broken by ID (C-0002 before C-0003)
+	assert.Equal(t, "C-0002", sorted[1].GetID())
+	assert.Equal(t, "C-0003", sorted[2].GetID())
+	assert.Equal(t, "C-0001", sorted[3].GetID())
+	// Lowest severity (Low, ScoreFactor 2.0)
+	assert.Equal(t, "C-0004", sorted[4].GetID())
+}
+
+// TestHtmlPrinter_ActionPrint_ValidHTMLTableStructure ensures that rendered HTML reports
+// have balanced table tags (<tbody> matching </tbody>, <table> matching </table>, <tr> matching </tr>)
+// and contain no duplicate </tr> tags or stray </div> tags.
+func TestHtmlPrinter_ActionPrint_ValidHTMLTableStructure(t *testing.T) {
+	ctx := context.Background()
+	out := filepath.Join(t.TempDir(), "report.html")
+
+	hp := NewHtmlPrinter(false)
+	assert.NoError(t, hp.SetWriter(ctx, out))
+
+	session := cautils.NewOPASessionObjMock()
+	session.Report.SummaryDetails.Controls = reportsummary.ControlSummaries{
+		"C-0001": reportsummary.ControlSummary{
+			ControlID:   "C-0001",
+			Name:        "Test Control 1",
+			Score:       50.0,
+			ScoreFactor: 8.0,
+			StatusCounters: reportsummary.StatusCounters{
+				FailedResources: 1,
+				PassedResources: 1,
+			},
+		},
+	}
+	session.AllResources = map[string]workloadinterface.IMetadata{
+		"res-1": &mockResource{kind: "Pod", name: "test-pod", namespace: "default", id: "res-1"},
+	}
+	session.ResourcesResult = map[string]resourcesresults.Result{
+		"res-1": {
+			ResourceID: "res-1",
+			AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+				{
+					ControlID: "C-0001",
+					Status:    apis.StatusInfo{InnerStatus: apis.StatusFailed},
+				},
+			},
+		},
+	}
+	session.ScanCoverage = cautils.ScanCoverage{
+		CoverageScore:     80.0,
+		EvaluatedControls: 8,
+		TotalControls:     10,
+		Degraded:          true,
+	}
+
+	imageScanData := []cautils.ImageScanData{
+		{
+			Image: "example.com/app:v1",
+		},
+	}
+
+	assert.NoError(t, hp.ActionPrint(ctx, session, imageScanData))
+	assert.NoError(t, hp.CloseWriter())
+
+	content, err := os.ReadFile(out)
+	assert.NoError(t, err)
+	htmlContent := string(content)
+
+	// Verify all table and body tags are balanced
+	assert.Equal(t, strings.Count(htmlContent, "<table>"), strings.Count(htmlContent, "</table>"),
+		"table start and end tags must match")
+	assert.Equal(t, strings.Count(htmlContent, "<tbody>"), strings.Count(htmlContent, "</tbody>"),
+		"tbody start and end tags must match")
+	assert.Equal(t, strings.Count(htmlContent, "<tr>"), strings.Count(htmlContent, "</tr>"),
+		"tr start and end tags must match")
+
+	// Ensure no duplicate </tr> (two adjacent closing tr tags)
+	assert.NotContains(t, htmlContent, "</tr>\n      </tr>")
+	assert.NotContains(t, htmlContent, "</tr>\r\n      </tr>")
+
+	// Ensure no stray </div> in failed resources section
+	assert.NotContains(t, htmlContent, "</div>")
 }

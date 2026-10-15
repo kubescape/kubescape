@@ -511,24 +511,27 @@ func makeControlWithPaths(failedPaths, reviewPaths []string) *resourcesresults.R
 }
 
 type mockResource struct {
-	kind string
-	obj  map[string]any
+	kind      string
+	name      string
+	namespace string
+	id        string
+	obj       map[string]any
 }
 
 func (m *mockResource) GetObject() map[string]any   { return m.obj }
 func (m *mockResource) GetApiVersion() string       { return "" }
 func (m *mockResource) GetKind() string             { return m.kind }
-func (m *mockResource) GetName() string             { return "" }
-func (m *mockResource) GetNamespace() string        { return "" }
-func (m *mockResource) GetID() string               { return "" }
+func (m *mockResource) GetName() string             { return m.name }
+func (m *mockResource) GetNamespace() string        { return m.namespace }
+func (m *mockResource) GetID() string               { return m.id }
 func (m *mockResource) GetWorkload() map[string]any { return m.obj }
 func (m *mockResource) GetObjectType() workloadinterface.ObjectType {
 	return workloadinterface.TypeUnknown
 }
 
-func (m *mockResource) SetNamespace(string)                {}
-func (m *mockResource) SetName(string)                     {}
-func (m *mockResource) SetKind(string)                     {}
+func (m *mockResource) SetNamespace(ns string)             { m.namespace = ns }
+func (m *mockResource) SetName(name string)                { m.name = name }
+func (m *mockResource) SetKind(kind string)                { m.kind = kind }
 func (m *mockResource) SetWorkload(map[string]interface{}) {}
 func (m *mockResource) SetObject(map[string]interface{})   {}
 func (m *mockResource) SetApiVersion(string)               {}
