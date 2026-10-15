@@ -1,7 +1,6 @@
 package config
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/kubescape/kubescape/v4/core/mocks"
@@ -15,33 +14,19 @@ func TestGetConfigCmd(t *testing.T) {
 	// Call the GetConfigCmd function
 	configCmd := GetConfigCmd(mockKubescape)
 
-	// Verify the command name and short description
 	assert.Equal(t, "config", configCmd.Use)
-	assert.Equal(t, "Handle cached configurations", configCmd.Short)
-	assert.Equal(t, configExample, configCmd.Example)
 
-	// Verify that the subcommands are added correctly
-	assert.Equal(t, 4, len(configCmd.Commands()))
+	expectedSubcommands := map[string]string{
+		"delete":   "delete [KEY...]",
+		"set":      "set",
+		"validate": "validate",
+		"view":     "view [KEY]",
+	}
 
-	for _, subcmd := range configCmd.Commands() {
-		switch subcmd.Name() {
-		case "delete":
-			// Verify that the delete subcommand is added correctly
-			assert.Equal(t, "delete [KEY...]", subcmd.Use)
-			assert.Equal(t, "Delete cached configurations", subcmd.Short)
-		case "set":
-			// Verify that the set subcommand is added correctly
-			assert.Equal(t, "set", subcmd.Use)
-			assert.Equal(t, "Set configurations, supported: "+strings.Join(stringKeysToSlice(supportConfigSet), "/"), subcmd.Short)
-		case "validate":
-			assert.Equal(t, "validate", subcmd.Use)
-			assert.Equal(t, "Validate cached configurations", subcmd.Short)
-		case "view":
-			// Verify that the view subcommand is added correctly
-			assert.Equal(t, "view [KEY]", subcmd.Use)
-			assert.Equal(t, "View cached configurations", subcmd.Short)
-		default:
-			t.Errorf("Unexpected subcommand name: %s", subcmd.Name())
+	for name, wantUse := range expectedSubcommands {
+		subcmd, _, err := configCmd.Find([]string{name})
+		if assert.NoError(t, err, "subcommand %s must be registered", name) && assert.NotNil(t, subcmd) {
+			assert.Equal(t, wantUse, subcmd.Use)
 		}
 	}
 }

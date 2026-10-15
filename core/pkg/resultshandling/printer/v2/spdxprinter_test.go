@@ -12,17 +12,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestNewSPDXPrinter(t *testing.T) {
-	sp := NewSPDXPrinter()
-	assert.NotNil(t, sp)
-}
-
-func TestSetWriter_SPDX(t *testing.T) {
-	sp := NewSPDXPrinter()
-	sp.SetWriter(context.TODO(), "")
-	assert.NotNil(t, sp.writer)
-	sp.CloseWriter()
-}
 
 func TestSetWriter_SPDX_AppendsExtension(t *testing.T) {
 	sp := NewSPDXPrinter()

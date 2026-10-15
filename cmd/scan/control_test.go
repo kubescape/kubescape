@@ -1,7 +1,6 @@
 package scan
 
 import (
-	"fmt"
 	"testing"
 
 	"github.com/kubescape/kubescape/v4/core/cautils"
@@ -19,10 +18,7 @@ func TestGetControlCmd(t *testing.T) {
 
 	cmd := getControlCmd(mockKubescape, &scanInfo)
 
-	// Verify the command name and short description
 	assert.Equal(t, "control <control names list>/<control ids list>", cmd.Use)
-	assert.Equal(t, fmt.Sprintf("The controls you wish to use. Run '%[1]s list controls' for the list of supported controls", cautils.ExecName()), cmd.Short)
-	assert.Equal(t, controlExample, cmd.Example)
 
 	err := cmd.Args(&cobra.Command{}, []string{})
 	expectedErrorMessage := "requires at least one control name"

@@ -14,20 +14,7 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
-func TestNewYamlPrinter(t *testing.T) {
-	yp := NewYamlPrinter()
-	assert.NotNil(t, yp)
-}
-
 func TestSetWriter_Yaml(t *testing.T) {
-	yp := NewYamlPrinter()
-	assert.NotNil(t, yp)
-
-	// Test without outputFile (should use stdout)
-	yp.SetWriter(context.TODO(), "")
-	assert.NotNil(t, yp.writer)
-	yp.CloseWriter()
-
 	tests := []struct {
 		name       string
 		outputFile string

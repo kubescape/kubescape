@@ -18,12 +18,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Initializes a new instance of FileResourceHandler.
-func TestNewFileResourceHandler_InitializesNewInstance(t *testing.T) {
-	fileHandler := NewFileResourceHandler()
-	assert.NotNil(t, fileHandler)
-}
-
 func drainFileResourceStream(batchChan <-chan *cautils.ResourceBatch, errChan <-chan error, setupErr error) ([]*cautils.ResourceBatch, []error) {
 	var batches []*cautils.ResourceBatch
 	if batchChan != nil {

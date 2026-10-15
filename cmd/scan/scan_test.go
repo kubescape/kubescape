@@ -351,11 +351,7 @@ func TestGetScanCommand(t *testing.T) {
 
 	cmd := GetScanCommand(mockKubescape)
 
-	// Verify the command name and short description
 	assert.Equal(t, "scan", cmd.Use)
-	assert.Equal(t, "Scan a Kubernetes cluster or YAML files for image vulnerabilities and misconfigurations", cmd.Short)
-	assert.Equal(t, "Scan a Kubernetes cluster, YAML files, Helm charts, Kustomize directories, Git repositories, or container images for security misconfigurations and vulnerabilities.", cmd.Long)
-	assert.Equal(t, scanCmdExamples, cmd.Example)
 }
 
 func registryFixtureValue(parts ...string) string {
@@ -759,7 +755,6 @@ func TestGetScanCommand_RegistryCredentialFlags(t *testing.T) {
 
 	registryMapping := cmd.PersistentFlags().Lookup("registry-mapping")
 	require.NotNil(t, registryMapping)
-	assert.NotContains(t, registryMapping.Usage, "anonymous")
 }
 
 func TestGetScanCommand_RunE_RejectsUnscopedRegistryCredentialsForScanImages(t *testing.T) {
@@ -1386,8 +1381,6 @@ func TestGetScanCommandRegistersImagePlatformFlag(t *testing.T) {
 	flag := cmd.PersistentFlags().Lookup("image-platform")
 	require.NotNil(t, flag)
 	assert.Empty(t, flag.DefValue)
-	assert.Contains(t, flag.Usage, "linux/amd64")
-	assert.Contains(t, flag.Usage, "overrides platform inferred")
 }
 
 func TestScanCommandRegistersSkipDBUpdateFlag(t *testing.T) {

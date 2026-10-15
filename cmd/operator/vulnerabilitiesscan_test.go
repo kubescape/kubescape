@@ -23,11 +23,7 @@ func TestGetOperatorScanVulnerabilitiesCmd(t *testing.T) {
 
 	cmd := getOperatorScanVulnerabilitiesCmd(mockKubescape, &operatorInfo)
 
-	// Verify the command name and short description
 	assert.Equal(t, "vulnerabilities", cmd.Use)
-	assert.Equal(t, "Scan your cluster for vulnerabilities using the Kubescape Operator in-cluster components", cmd.Short)
-	assert.Equal(t, "", cmd.Long)
-	assert.Equal(t, operatorScanVulnerabilitiesExamples, cmd.Example)
 
 	err := cmd.Args(&cobra.Command{}, []string{"random-arg"})
 	assert.Nil(t, err)

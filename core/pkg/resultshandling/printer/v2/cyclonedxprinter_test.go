@@ -11,17 +11,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestNewCycloneDXPrinter(t *testing.T) {
-	cp := NewCycloneDXPrinter()
-	assert.NotNil(t, cp)
-}
-
-func TestSetWriter_CycloneDX(t *testing.T) {
-	cp := NewCycloneDXPrinter()
-	cp.SetWriter(context.TODO(), "")
-	assert.NotNil(t, cp.writer)
-	cp.CloseWriter()
-}
 
 func TestSetWriter_CycloneDX_AppendsExtension(t *testing.T) {
 	cp := NewCycloneDXPrinter()

@@ -117,11 +117,15 @@ func namespacedPodResource(id, namespace string) workloadinterface.IMetadata {
 }
 
 func TestApplySeverityFilters_NilSessionObj(t *testing.T) {
-	ApplySeverityFilters(nil, "high", "")
+	assert.NotPanics(t, func() {
+		ApplySeverityFilters(nil, "high", "")
+	})
 }
 
 func TestApplySeverityFilters_NilReport(t *testing.T) {
-	ApplySeverityFilters(&cautils.OPASessionObj{}, "high", "")
+	assert.NotPanics(t, func() {
+		ApplySeverityFilters(&cautils.OPASessionObj{}, "high", "")
+	})
 }
 
 func TestApplySeverityFilters_BothEmpty(t *testing.T) {

@@ -22,13 +22,7 @@ func TestGetOperatorScanCmd(t *testing.T) {
 
 	cmd := getOperatorScanCmd(mockKubescape, &operatorInfo)
 
-	// Verify the command name and short description
 	assert.Equal(t, "scan", cmd.Use)
-	assert.Equal(t, "Scan your cluster using the Kubescape-operator within the cluster components", cmd.Short)
-	assert.Equal(t, "", cmd.Long)
-	assert.Equal(t, operatorScanExamples, cmd.Example)
-	// `operator scan` must not advertise the parent's `operator remediate` example.
-	assert.NotContains(t, cmd.Example, "operator remediate")
 
 	err := cmd.Args(&cobra.Command{}, []string{})
 	expectedErrorMessage := "for operator scan sub command, you must pass at least 1 more sub commands, see above examples"

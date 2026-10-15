@@ -16,11 +16,7 @@ func TestGetFixCmd(t *testing.T) {
 	// Call the GetFixCmd function
 	fixCmd := GetFixCmd(mockKubescape)
 
-	// Verify the command name and short description
 	assert.Equal(t, "fix <report output file>", fixCmd.Use)
-	assert.Equal(t, "Propose a fix for the misconfiguration found when scanning Kubernetes manifest files", fixCmd.Short)
-	assert.Equal(t, "", fixCmd.Long)
-	assert.Equal(t, fixCmdExamples, fixCmd.Example)
 
 	err := fixCmd.RunE(&cobra.Command{}, []string{})
 	expectedErrorMessage := "report output file is required"

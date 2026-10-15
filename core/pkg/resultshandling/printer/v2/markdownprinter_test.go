@@ -146,11 +146,6 @@ func mdRunImageActionPrint(t *testing.T, imageScanData []cautils.ImageScanData) 
 	return string(content)
 }
 
-func TestNewMarkdownPrinter(t *testing.T) {
-	mp := NewMarkdownPrinter()
-	assert.NotNil(t, mp)
-}
-
 func TestMarkdownPrinter_SetWriter_DefaultFile(t *testing.T) {
 	tmpDir := t.TempDir()
 

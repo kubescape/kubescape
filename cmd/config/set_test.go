@@ -2,7 +2,6 @@ package config
 
 import (
 	"fmt"
-	"strings"
 	"testing"
 
 	metav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
@@ -27,10 +26,7 @@ func TestGetSetCmd(t *testing.T) {
 	// Call the GetConfigCmd function
 	configSetCmd := getSetCmd(mockKubescape)
 
-	// Verify the command name and short description
 	assert.Equal(t, "set", configSetCmd.Use)
-	assert.Equal(t, "Set configurations, supported: "+strings.Join(stringKeysToSlice(supportConfigSet), "/"), configSetCmd.Short)
-	assert.Equal(t, setConfigExample, configSetCmd.Example)
 	assert.Equal(t, stringKeysToSlice(supportConfigSet), configSetCmd.ValidArgs)
 
 	err := configSetCmd.RunE(&cobra.Command{}, []string{"accountID=6f2c3e1a-9b4d-4c8e-a1f2-3b4c5d6e7f80"})

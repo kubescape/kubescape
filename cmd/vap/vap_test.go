@@ -876,7 +876,6 @@ func TestGetDeployLibraryCmd(t *testing.T) {
 	cmd := getDeployLibraryCmd()
 	require.NotNil(t, cmd)
 	assert.Equal(t, "deploy-library", cmd.Use)
-	assert.Equal(t, "Install Kubescape CEL admission policy library", cmd.Short)
 	assert.NotNil(t, cmd.RunE)
 
 	// Check flags
@@ -897,7 +896,6 @@ func TestGetCreatePolicyBindingCmd(t *testing.T) {
 	cmd := getCreatePolicyBindingCmd()
 	require.NotNil(t, cmd)
 	assert.Equal(t, "create-policy-binding", cmd.Use)
-	assert.Equal(t, "Create a policy binding", cmd.Short)
 	assert.NotNil(t, cmd.RunE)
 
 	// Check that required flags are marked

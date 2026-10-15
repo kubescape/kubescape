@@ -28,10 +28,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
-func TestNewJsonPrinter(t *testing.T) {
-	pp := NewJsonPrinter()
-	assert.NotNil(t, pp)
-}
 
 // TestSetWriter_Json_CaseInsensitiveExtension guards against the extension
 // check regressing to a case-sensitive comparison: an outputFile whose

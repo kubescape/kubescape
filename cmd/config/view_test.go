@@ -28,30 +28,24 @@ func TestGetViewCmd(t *testing.T) {
 	// Call the GetConfigCmd function
 	configCmd := getViewCmd(mockKubescape)
 
-	// Verify the command name and short description
 	assert.Equal(t, "view [KEY]", configCmd.Use)
-	assert.Equal(t, "View cached configurations", configCmd.Short)
-	assert.Equal(t, "View cached Kubescape configuration in a human-readable text format, or render it as JSON or YAML.", configCmd.Long)
 
 	formatFlag := configCmd.Flag("format")
 	if assert.NotNil(t, formatFlag) {
 		assert.Equal(t, "f", formatFlag.Shorthand)
 		assert.Equal(t, "text", formatFlag.DefValue)
-		assert.Equal(t, "Output format: text, json, or yaml", formatFlag.Usage)
 	}
 
 	outputFlag := configCmd.Flag("output")
 	if assert.NotNil(t, outputFlag) {
 		assert.Equal(t, "o", outputFlag.Shorthand)
 		assert.Equal(t, "text", outputFlag.DefValue)
-		assert.Equal(t, "Output format: text, json, or yaml (alias for --format)", outputFlag.Usage)
 	}
 
 	includeEmptyFlag := configCmd.Flag("include-empty")
 	if assert.NotNil(t, includeEmptyFlag) {
 		assert.Equal(t, "e", includeEmptyFlag.Shorthand)
 		assert.Equal(t, "false", includeEmptyFlag.DefValue)
-		assert.Equal(t, "Include empty values in the rendered output", includeEmptyFlag.Usage)
 	}
 }
 

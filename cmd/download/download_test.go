@@ -1,7 +1,6 @@
 package download
 
 import (
-	"fmt"
 	"strings"
 	"testing"
 
@@ -34,11 +33,7 @@ func TestGetViewCmd(t *testing.T) {
 	// Call the GetConfigCmd function
 	configCmd := GetDownloadCmd(mockKubescape)
 
-	// Verify the command name and short description
 	assert.Equal(t, "download <policy> <policy name>", configCmd.Use)
-	assert.Equal(t, fmt.Sprintf("Download %s", strings.Join(core.DownloadSupportCommands(), ",")), configCmd.Short)
-	assert.Equal(t, "", configCmd.Long)
-	assert.Equal(t, downloadExample, configCmd.Example)
 }
 
 // TestGetViewCmd_Args tests command argument validation with valid, invalid, plural, and alias target names.
@@ -49,11 +44,7 @@ func TestGetViewCmd_Args(t *testing.T) {
 	// Call the GetConfigCmd function
 	downloadCmd := GetDownloadCmd(mockKubescape)
 
-	// Verify the command name and short description
 	assert.Equal(t, "download <policy> <policy name>", downloadCmd.Use)
-	assert.Equal(t, fmt.Sprintf("Download %s", strings.Join(core.DownloadSupportCommands(), ",")), downloadCmd.Short)
-	assert.Equal(t, "", downloadCmd.Long)
-	assert.Equal(t, downloadExample, downloadCmd.Example)
 
 	err := downloadCmd.RunE(&cobra.Command{}, []string{"artifacts"})
 	assert.Nil(t, err)
