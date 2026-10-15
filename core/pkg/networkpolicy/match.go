@@ -5,6 +5,8 @@ import (
 	"math"
 	"net"
 
+	"github.com/kubescape/kubescape/v4/core/pkg/namespaceselector"
+
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -107,16 +109,11 @@ func (idx *Index) peerMatches(peer networkingv1.NetworkPolicyPeer, policyNamespa
 // A selector that matches everything (nil or empty matchLabels/
 // matchExpressions) is determinable regardless of whether this Index was
 // given that namespace's labels, since the labels can't change the answer;
-// any other selector requires the namespace's labels to be known.
+// the immutable namespace-name label can be inferred from the endpoint.
+// Requirements on other labels still need a collected namespace.
 func (idx *Index) namespaceSelectorMatches(nsSel labels.Selector, namespace string) (matched bool, determinable bool) {
-	if nsSel.Empty() {
-		return true, true
-	}
-	nsInfo, ok := idx.namespaces[namespace]
-	if !ok {
-		return false, false
-	}
-	return nsSel.Matches(labels.Set(nsInfo.Labels)), true
+	nsInfo, collected := idx.namespaces[namespace]
+	return namespaceselector.Matches(nsSel, namespace, nsInfo.Labels, collected)
 }
 
 // ipBlockMatches reports whether ip falls inside block.CIDR and outside
