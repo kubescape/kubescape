@@ -45,12 +45,12 @@ func TestLoadersUseBoundedRead(t *testing.T) {
 	_, err = loadVulnerabilityReport(oversized)
 	require.ErrorIs(t, err, errReportTooLarge)
 
-	// The deciding key sits beyond the limit, so it is never reached.
-	late := filepath.Join(t.TempDir(), "late.json")
-	content := append([]byte(`{"pad":"`), bytes.Repeat([]byte("a"), maxReportSize)...)
-	content = append(content, []byte(`","results":[]}`)...)
-	require.NoError(t, os.WriteFile(late, content, 0o600))
-	assert.Equal(t, UnreadableReport, ReportKindOf(late))
+	// An oversized report is unreadable even when its deciding key comes first.
+	early := filepath.Join(t.TempDir(), "early.json")
+	content := append([]byte(`{"results":[],"pad":"`), bytes.Repeat([]byte("a"), maxReportSize)...)
+	content = append(content, []byte(`"}`)...)
+	require.NoError(t, os.WriteFile(early, content, 0o600))
+	assert.Equal(t, UnreadableReport, ReportKindOf(early))
 
 	report, err := loadReport(paddedReport(t, maxReportSize))
 	require.NoError(t, err)
