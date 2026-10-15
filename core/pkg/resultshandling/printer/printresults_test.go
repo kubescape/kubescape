@@ -490,7 +490,7 @@ func TestResolveOutputFile(t *testing.T) {
 			format:       JsonFormat,
 			outputFile:   "reports/",
 			defaultBase:  "report",
-			wantFile:     filepath.Join("reports", "report.json"),
+			wantFile:     "reports/report.json",
 			wantExplicit: true,
 		},
 		{
@@ -498,7 +498,15 @@ func TestResolveOutputFile(t *testing.T) {
 			format:       CycloneDXFormat,
 			outputFile:   "  out/sboms/  ",
 			defaultBase:  "sbom",
-			wantFile:     filepath.Join("out", "sboms", "sbom.cdx.json"),
+			wantFile:     "out/sboms/sbom.cdx.json",
+			wantExplicit: true,
+		},
+		{
+			name:         "trailing separator keeps parent components",
+			format:       JsonFormat,
+			outputFile:   "out/link/../",
+			defaultBase:  "report",
+			wantFile:     "out/link/../report.json",
 			wantExplicit: true,
 		},
 		{
@@ -518,6 +526,32 @@ func TestResolveOutputFile(t *testing.T) {
 			assert.Equal(t, tt.wantExplicit, gotExplicit)
 		})
 	}
+}
+
+// TestResolveOutputFile_DirectoryThroughSymlinkParent: "link/../" must resolve
+// on the filesystem, through the symlink, not be cleaned lexically to the
+// directory that holds the link.
+func TestResolveOutputFile_DirectoryThroughSymlinkParent(t *testing.T) {
+	root := t.TempDir()
+	storage := filepath.Join(root, "storage")
+	reports := filepath.Join(storage, "reports")
+	work := filepath.Join(root, "work")
+	require.NoError(t, os.MkdirAll(reports, 0o755))
+	require.NoError(t, os.MkdirAll(work, 0o755))
+	if err := os.Symlink(reports, filepath.Join(work, "link")); err != nil {
+		t.Skipf("symlinks not supported: %v", err)
+	}
+
+	// Built by hand: filepath.Join would clean "link/.." away before the test.
+	sep := string(filepath.Separator)
+	got, explicit := ResolveOutputFile(JsonFormat, work+sep+"link"+sep+".."+sep, "report")
+	require.True(t, explicit)
+
+	f, err := os.Create(got)
+	require.NoError(t, err)
+	require.NoError(t, f.Close())
+	assert.FileExists(t, filepath.Join(storage, "report.json"))
+	assert.NoFileExists(t, filepath.Join(work, "report.json"))
 }
 
 func TestResolveDefaultOutputFile(t *testing.T) {
