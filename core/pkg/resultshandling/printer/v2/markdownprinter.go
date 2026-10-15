@@ -138,7 +138,10 @@ func mdSortedControls(controls reportsummary.ControlSummaries) []reportsummary.C
 		if si != sj {
 			return si > sj
 		}
-		return out[i].GetName() < out[j].GetName()
+		if out[i].GetName() != out[j].GetName() {
+			return out[i].GetName() < out[j].GetName()
+		}
+		return out[i].GetID() < out[j].GetID()
 	})
 	return out
 }

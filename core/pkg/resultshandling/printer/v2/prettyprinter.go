@@ -310,8 +310,13 @@ func attachAssistedRemediation(workloads []WorkloadSummary, controlID string, re
 
 func (pp *PrettyPrinter) printGroupedResources(workloads map[string][]WorkloadSummary) {
 	indent := "  "
-	for title, rsc := range workloads {
-		pp.printGroupedResource(indent, title, rsc)
+	titles := make([]string, 0, len(workloads))
+	for title := range workloads {
+		titles = append(titles, title)
+	}
+	sort.Strings(titles)
+	for _, title := range titles {
+		pp.printGroupedResource(indent, title, workloads[title])
 	}
 }
 

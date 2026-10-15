@@ -803,3 +803,39 @@ func TestMarkdownPrinter_ActionPrint_CoverageSkippedControlsWithReasons(t *testi
 	assert.Contains(t, out, "Host IPC")
 	assert.Contains(t, out, "irrelevant: no matching resources in cluster")
 }
+
+func TestMdSortedControls_DeterministicTieBreakByID(t *testing.T) {
+	controls := reportsummary.ControlSummaries{
+		"C-0099": {
+			ControlID:   "C-0099",
+			Name:        "Duplicate Name",
+			ScoreFactor: 9.0,
+		},
+		"C-0010": {
+			ControlID:   "C-0010",
+			Name:        "Duplicate Name",
+			ScoreFactor: 9.0,
+		},
+		"C-0050": {
+			ControlID:   "C-0050",
+			Name:        "Duplicate Name",
+			ScoreFactor: 9.0,
+		},
+		"C-0001": {
+			ControlID:   "C-0001",
+			Name:        "Another Duplicate",
+			ScoreFactor: 9.0,
+		},
+	}
+
+	for i := 0; i < 20; i++ {
+		sorted := mdSortedControls(controls)
+		require.Len(t, sorted, 4)
+		// "Another Duplicate" comes first alphabetically
+		assert.Equal(t, "C-0001", sorted[0].GetID())
+		// The three "Duplicate Name" controls break tie by ID ascending
+		assert.Equal(t, "C-0010", sorted[1].GetID())
+		assert.Equal(t, "C-0050", sorted[2].GetID())
+		assert.Equal(t, "C-0099", sorted[3].GetID())
+	}
+}
