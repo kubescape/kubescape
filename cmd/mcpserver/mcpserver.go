@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"strings"
 	"sync"
@@ -148,6 +149,10 @@ type KubescapeMcpserver struct {
 	// policyReadyWait bounds how long a tool call waits for policyReady.
 	// Zero means defaultPolicyReadyWait.
 	policyReadyWait time.Duration
+
+	// work tracks in-flight MCP work so shutdown can drain, cancel and join
+	// it. See workLifecycle.
+	work workLifecycle
 }
 
 // getPolicyGetter lazily constructs policyGetter on first use, guarded so
@@ -203,6 +208,12 @@ func (ksServer *KubescapeMcpserver) doSharedChan(ctx context.Context, key string
 			cancel: cancel,
 		}
 		ksServer.scanCtxs[key] = state
+		// The execution outlives callers that stop waiting, so it is tracked
+		// for shutdown to join. It is registered here, with the generation,
+		// not when its goroutine starts: the last caller may leave first, and
+		// shutdown must not see the lifecycle idle while the work is pending.
+		// The execution below ends it, exactly once per generation.
+		ksServer.work.beginShared()
 	}
 	state.count++
 	ksServer.scanCtxMu.Unlock()
@@ -221,6 +232,7 @@ func (ksServer *KubescapeMcpserver) doSharedChan(ctx context.Context, key string
 	}()
 
 	ch := ksServer.scanGroup.DoChan(key, func() (interface{}, error) {
+		defer ksServer.work.end()
 		if limited {
 			if err := ksServer.getScanSem().Acquire(state.ctx, 1); err != nil {
 				return nil, err
@@ -1369,8 +1381,12 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 	}
 }
 
-func mcpServerEntrypoint(transport string, port int) error {
+func mcpServerEntrypoint(ctx context.Context, transport string, port int) error {
 	logger.L().Info("Starting MCP server...")
+
+	// ksServer is created below, once the MCP server exists; the lifecycle
+	// middleware only dereferences it when a request arrives.
+	var ksServer *KubescapeMcpserver
 
 	// Create a new MCP server. WithRecovery must stay first so it wraps the
 	// tool-call recorder (which only observes a panic, never recovers it).
@@ -1379,6 +1395,7 @@ func mcpServerEntrypoint(transport string, port int) error {
 		server.WithRecovery(),
 	}
 	serverOptions = append(serverOptions, toolCallObserverOptions(logger.L().GetLevel(), transport)...)
+	serverOptions = append(serverOptions, lifecycleServerOptions(transport, func() *workLifecycle { return &ksServer.work })...)
 	s := server.NewMCPServer(
 		"Kubescape MCP Server",
 		"0.0.1",
@@ -1387,7 +1404,7 @@ func mcpServerEntrypoint(transport string, port int) error {
 
 	drp := getter.NewDownloadReleasedPolicy()
 
-	ksServer := &KubescapeMcpserver{
+	ksServer = &KubescapeMcpserver{
 		s:            s,
 		policyGetter: drp,
 	}
@@ -1428,9 +1445,12 @@ func mcpServerEntrypoint(transport string, port int) error {
 	switch transport {
 	case "sse":
 		addr := fmt.Sprintf("127.0.0.1:%d", port)
-		sseServer, _ := newSSEServer(s, addr)
+		ln, err := net.Listen("tcp", addr)
+		if err != nil {
+			return fmt.Errorf("sse server error: %w", err)
+		}
 		logger.L().Info("Starting SSE server", helpers.String("addr", addr))
-		if err := sseServer.Start(addr); err != nil {
+		if err := serveSSEUntilShutdown(ctx, newSSETransport(s, addr), ln, &ksServer.work, mcpDrainPeriod, mcpShutdownTimeout); err != nil {
 			return fmt.Errorf("sse server error: %w", err)
 		}
 		return nil
@@ -1552,7 +1572,13 @@ func GetMCPServerCmd() *cobra.Command {
 		Short: "Start the Kubescape MCP server",
 		Long:  `Start the Kubescape MCP server`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return mcpServerEntrypoint(transport, port)
+			// The root command's context is cancelled on the first SIGINT or
+			// SIGTERM (see main.go); SSE shuts down when it ends.
+			ctx := cmd.Context()
+			if ctx == nil {
+				ctx = context.Background()
+			}
+			return mcpServerEntrypoint(ctx, transport, port)
 		},
 	}
 	cmd.Flags().StringVarP(&transport, "transport", "t", "stdio", "Transport protocol to use (stdio or sse)")
