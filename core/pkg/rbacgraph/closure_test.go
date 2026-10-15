@@ -132,8 +132,8 @@ func TestAnalyzeEscalation_UnrestrictedImpersonateOnUsersIsUnbounded(t *testing.
 	if len(result.Unbounded) != 1 || result.Unbounded[0].Edge.Primitive != PrimitiveImpersonate {
 		t.Fatalf("Unbounded = %+v, want one impersonate finding", result.Unbounded)
 	}
-	if !result.ClusterAdmin {
-		t.Error("ClusterAdmin = false, want true: unrestricted user impersonation is treated as cluster-wide severity")
+	if result.ClusterAdmin {
+		t.Error("unrestricted user impersonation is a risk finding, not proof that any target is cluster-admin")
 	}
 }
 

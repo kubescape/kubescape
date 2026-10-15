@@ -85,11 +85,12 @@
 //
 // # Non-goals (initial scope)
 //
-// Arbitrary User/Group impersonation (an unrestricted, wildcard-
-// resourceNames grant) is reported as an Unbounded finding rather than
-// enumerable edges, since there is no cluster object to enumerate target
-// identities from. A "get/list secrets" edge toward legacy long-lived
-// ServiceAccount token Secrets is not modeled at all.
+// Arbitrary User/Group impersonation (an unrestricted resourceNames grant)
+// remains an Unbounded finding because the snapshot cannot enumerate every
+// identity. Users mentioned in collected bindings are additionally followed
+// as concrete targets, without inventing permissions for missing identities.
+// A "get/list secrets" edge toward legacy long-lived ServiceAccount token
+// Secrets is not modeled at all.
 package rbacgraph
 
 import (
@@ -172,16 +173,23 @@ type EscalationEdge struct {
 
 	GrantedRules []ScopedRule
 
-	// Unbounded is true when this edge grants everything within a known Scope,
-	// rather than a specific enumerable rule set -- an unrestricted bind or
+	// Unbounded marks either an unrestricted permission grant or an identity
+	// set that cannot be fully enumerated. ImpersonatedKind distinguishes the
+	// latter: choosing any User/ServiceAccount does not create new permissions.
+	// An unrestricted bind or
 	// escalate rule (no resourceNames) is not confined to the
 	// Roles/ClusterRoles this package happened to collect; it covers any
 	// Role/ClusterRole that could ever exist in that scope. It also records
 	// conservative missing-target warnings; ScopeUnknown distinguishes an
 	// unresolved namespaced Role from a cluster-wide permission grant.
 	Unbounded bool
+	// ImpersonatedKind identifies an unbounded set of possible identities, not
+	// an unbounded permission grant. Users and ServiceAccounts contribute only
+	// their actual collected rules. Unrestricted Groups include system:masters.
+	// Empty for non-impersonation edges and concrete ToSubject edges.
+	ImpersonatedKind SubjectKind
 	// Scope is "" for cluster-wide, else the namespace the edge is confined
-	// to: the namespace an Unbounded edge grants everything in, or, for a
+	// to: the scope of a permission grant or impersonation target set, or, for a
 	// bind-verb edge, the namespace the new RoleBinding is created in ("" for
 	// a ClusterRoleBinding). Unset on every other edge, and not a statement
 	// about scope when ScopeUnknown is true.

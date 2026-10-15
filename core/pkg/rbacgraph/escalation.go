@@ -54,9 +54,11 @@ func (idx *Index) DirectEscalationEdges(subject Subject, rules []ScopedRule) []E
 // enumerate the same targets too, in addition to being reported as
 // Unbounded for whatever this Index didn't collect).
 //
-// users/groups targets are enumerated only when the rule names them
-// explicitly via resourceNames, since there is no cluster object to
-// enumerate arbitrary user/group identities from. These two branches also
+// User targets come from resourceNames or, for an unrestricted grant, User
+// subjects in collected bindings. The latter is not a complete inventory, so
+// the unbounded warning remains. Groups are enumerated only when explicitly
+// named by resourceNames; unrestricted groups include system:masters.
+// These two branches also
 // only fire from a cluster-wide rule (granted via ClusterRoleBinding):
 // Users and Groups are not namespaced identities, and Kubernetes' RBAC
 // authorizer does not honor a namespace-scoped Role/RoleBinding's grant
@@ -74,10 +76,11 @@ func (idx *Index) impersonateEdges(rules []ScopedRule) []EscalationEdge {
 		if containsOrWildcard(rule.Resources, "serviceaccounts") || containsOrWildcard(rule.Resources, "*") {
 			if !restricted {
 				edges = append(edges, EscalationEdge{
-					Primitive: PrimitiveImpersonate,
-					Detail:    "can impersonate any ServiceAccount (unrestricted impersonate on serviceaccounts)",
-					Unbounded: true,
-					Scope:     sr.Namespace,
+					Primitive:        PrimitiveImpersonate,
+					ImpersonatedKind: KindServiceAccount,
+					Detail:           "can impersonate any ServiceAccount (unrestricted impersonate on serviceaccounts)",
+					Unbounded:        true,
+					Scope:            sr.Namespace,
 				})
 			}
 			for _, ns := range idx.targetNamespaces(sr.Namespace) {
@@ -97,24 +100,25 @@ func (idx *Index) impersonateEdges(rules []ScopedRule) []EscalationEdge {
 			continue // users/groups impersonation is not honored from a namespace-scoped grant
 		}
 		if containsOrWildcard(rule.Resources, "users") || containsOrWildcard(rule.Resources, "*") {
+			targets := names
 			if !restricted {
-				edges = append(edges, EscalationEdge{Primitive: PrimitiveImpersonate, Detail: "can impersonate any User (unrestricted impersonate on users)", Unbounded: true})
-			} else {
-				for _, name := range names {
-					// The API server authorizes impersonating a ServiceAccount
-					// username against the serviceaccounts resource, not
-					// users, so a grant on users does not reach it; the
-					// serviceaccounts branch above is what does.
-					if _, _, err := serviceaccount.SplitUsername(name); err == nil {
-						continue
-					}
-					edges = append(edges, EscalationEdge{Primitive: PrimitiveImpersonate, Detail: fmt.Sprintf("can impersonate User %q", name), ToSubject: &Subject{Kind: KindUser, Name: name}})
+				edges = append(edges, EscalationEdge{Primitive: PrimitiveImpersonate, ImpersonatedKind: KindUser, Detail: "can impersonate any User (unrestricted impersonate on users)", Unbounded: true})
+				targets = idx.boundUserNames()
+			}
+			for _, name := range targets {
+				// ServiceAccount usernames require impersonate on serviceaccounts.
+				if name == "" {
+					continue
 				}
+				if _, _, err := serviceaccount.SplitUsername(name); err == nil {
+					continue
+				}
+				edges = append(edges, EscalationEdge{Primitive: PrimitiveImpersonate, Detail: fmt.Sprintf("can impersonate User %q", name), ToSubject: &Subject{Kind: KindUser, Name: name}})
 			}
 		}
 		if containsOrWildcard(rule.Resources, "groups") || containsOrWildcard(rule.Resources, "*") {
 			if !restricted {
-				edges = append(edges, EscalationEdge{Primitive: PrimitiveImpersonate, Detail: "can impersonate any Group (unrestricted impersonate on groups)", Unbounded: true})
+				edges = append(edges, EscalationEdge{Primitive: PrimitiveImpersonate, ImpersonatedKind: KindGroup, Detail: "can impersonate any Group (unrestricted impersonate on groups)", Unbounded: true})
 			} else {
 				for _, name := range names {
 					edges = append(edges, EscalationEdge{Primitive: PrimitiveImpersonate, Detail: fmt.Sprintf("can impersonate Group %q", name), ToSubject: &Subject{Kind: KindGroup, Name: name}})
@@ -123,6 +127,27 @@ func (idx *Index) impersonateEdges(rules []ScopedRule) []EscalationEdge {
 		}
 	}
 	return edges
+}
+
+// boundUserNames enumerates only user identities whose permissions can be
+// recovered from this snapshot. An unrestricted grant still carries a warning
+// for all other users; it does not prove they hold arbitrary permissions.
+func (idx *Index) boundUserNames() []string {
+	seen := map[string]bool{}
+	add := func(subjects []rbacv1.Subject) {
+		for _, subject := range subjects {
+			if subject.Kind == "User" && subject.Name != "" {
+				seen[subject.Name] = true
+			}
+		}
+	}
+	for _, binding := range idx.roleBindings {
+		add(binding.Subjects)
+	}
+	for _, binding := range idx.clusterRoleBindings {
+		add(binding.Subjects)
+	}
+	return slices.Sorted(maps.Keys(seen))
 }
 
 // roleCoverage tracks, for one verb across one scope, whether a subject's
