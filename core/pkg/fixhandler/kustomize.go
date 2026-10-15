@@ -680,6 +680,53 @@ func hasRedactedEnvironment(scannedObj, candidateObj map[string]interface{}) boo
 	return false
 }
 
+// containersLackEnvFrom returns true if the object contains at least one container
+// and none of its containers contain a non-empty envFrom slice.
+func containersLackEnvFrom(obj map[string]interface{}) bool {
+	containers := getContainersFromObj(obj)
+	if len(containers) == 0 {
+		return false
+	}
+	for _, c := range containers {
+		if envFrom, ok := c["envFrom"].([]interface{}); ok && len(envFrom) > 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// chartTemplateDefinesEnvFrom checks whether the chart templates (or the specified template file)
+// contain envFrom, indicating that container envFrom can be conditionally or statically rendered.
+func chartTemplateDefinesEnvFrom(chartPath, templateFile string) bool {
+	if chartPath == "" {
+		return false
+	}
+	if templateFile != "" {
+		fullPath := filepath.Join(chartPath, templateFile)
+		if data, err := os.ReadFile(fullPath); err == nil {
+			if strings.Contains(string(data), "envFrom") {
+				return true
+			}
+		}
+	}
+	templatesDir := filepath.Join(chartPath, "templates")
+	var found bool
+	_ = filepath.Walk(templatesDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil || found || info == nil || info.IsDir() {
+			return nil
+		}
+		if strings.HasSuffix(path, ".yaml") || strings.HasSuffix(path, ".yml") || strings.HasSuffix(path, ".tpl") {
+			if data, err := os.ReadFile(path); err == nil {
+				if strings.Contains(string(data), "envFrom") {
+					found = true
+				}
+			}
+		}
+		return nil
+	})
+	return found
+}
+
 // hasValueOverrides returns true if opts provides any Helm value overrides
 // (values files, set values, string values, or file values).
 func hasValueOverrides(opts cautils.HelmValueOptions) bool {
@@ -733,6 +780,16 @@ func resolveBaseObject(s HelmFixSuggestion, chartCache map[string]map[string][]w
 			}
 			if hasRedactedEnvironment(s.Resource.GetObject(), candidate) {
 				return nil, "declined: scan report redacts container environment configuration and scan-time render contents cannot be verified; provide a verified unredacted base or explicit fidelity provenance"
+			}
+			// Ambiguous both-absent case: when both scanned object and rendered candidate lack container envFrom,
+			// but the chart template defines or conditionally renders envFrom (or chart provenance is unverified),
+			// the absence of envFrom in the candidate may be caused by values changes (e.g. configMapName: "")
+			// while the scan report had envFrom stripped by the scanner redactor.
+			// Render fidelity cannot be proven without verified scan-time provenance.
+			if containersLackEnvFrom(candidate) && containersLackEnvFrom(s.Resource.GetObject()) {
+				if s.ChartPath == "" || chartTemplateDefinesEnvFrom(s.ChartPath, s.TemplateFile) {
+					return nil, "declined: scan report redacts container environment configuration and scan-time render contents cannot be verified; provide a verified unredacted base or explicit fidelity provenance"
+				}
 			}
 		}
 	}

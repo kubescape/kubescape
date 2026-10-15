@@ -1650,8 +1650,9 @@ spec:
 		outDir := t.TempDir()
 		suggs := []HelmFixSuggestion{
 			{
-				Resource:  &reporthandling.Resource{Object: scannedObj},
-				ChartPath: chartDirNoRes,
+				Resource:           &reporthandling.Resource{Object: scannedObj},
+				ChartPath:          chartDirNoRes,
+				FidelityProvenance: true,
 				HelmValueOptions: cautils.HelmValueOptions{
 					ValueFiles: []string{filepath.Join(chartDirNoRes, "values.yaml")},
 				},
@@ -2088,8 +2089,9 @@ spec:
 
 // TestReview4034HelmOverlayDeclinesWhenValuesFileChangedRedactedSetting verifies that
 // when a values file path is supplied but its content changed a redacted setting (such as envFrom)
-// after scan time, the overlay generator declines the resource rather than silently overwriting
-// the application's configuration with the changed values.
+// after scan time — including changing the reference or removing envFrom entirely — the overlay
+// generator declines the resource rather than silently overwriting or omitting the application's
+// configuration with the changed values.
 func TestReview4034HelmOverlayDeclinesWhenValuesFileChangedRedactedSetting(t *testing.T) {
 	chartDir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "Chart.yaml"), []byte("apiVersion: v2\nname: appchart\nversion: 0.1.0\n"), 0600))
@@ -2105,9 +2107,11 @@ spec:
       containers:
       - name: app
         image: example:v1
+        {{- if .Values.configMapName }}
         envFrom:
         - configMapRef:
             name: {{ .Values.configMapName }}
+        {{- end }}
         securityContext:
           privileged: true
 `), 0600))
@@ -2168,12 +2172,13 @@ spec:
 		},
 	}
 
-	// 5. Change that same values file to use dev-config
-	require.NoError(t, os.WriteFile(valuesFile, []byte("configMapName: dev-config\n"), 0600))
+	// 5. Case A: Changed values file removes envFrom entirely (configMapName: "")
+	// Both scanned report and new render candidate lack envFrom (ambiguous both-absent case).
+	// Without verified scan-time provenance, generation must decline.
+	require.NoError(t, os.WriteFile(valuesFile, []byte("configMapName: \"\"\n"), 0600))
 
-	// 6. Generate the overlay using the same values-file path, requesting only privileged=false
-	outDir := t.TempDir()
-	suggs := []HelmFixSuggestion{
+	outDirRemoved := t.TempDir()
+	suggsRemoved := []HelmFixSuggestion{
 		{
 			Resource:  scannedRes,
 			ChartPath: chartDir,
@@ -2183,17 +2188,39 @@ spec:
 			FixPaths: []armotypes.FixPath{{Path: "spec.template.spec.containers[0].securityContext.privileged", Value: "false"}},
 		},
 	}
-
-	res, err := EmitKustomizePatch(suggs, outDir)
+	resRemoved, err := EmitKustomizePatch(suggsRemoved, outDirRemoved)
 	require.NoError(t, err)
-	assert.Empty(t, res.EmittedResources, "must decline generation when values file changed a redacted setting")
-	require.Len(t, res.SkippedResources, 1, "must record declined resource")
-	assert.Contains(t, res.SkippedResources[0].Reason, "scan report redacts container environment configuration")
+	assert.Empty(t, resRemoved.EmittedResources, "must decline generation when values file removed envFrom entirely")
+	require.Len(t, resRemoved.SkippedResources, 1, "must record declined resource")
+	assert.Contains(t, resRemoved.SkippedResources[0].Reason, "scan report redacts container environment configuration")
 
-	_, err = os.Stat(filepath.Join(outDir, "base.yaml"))
+	_, err = os.Stat(filepath.Join(outDirRemoved, "base.yaml"))
+	assert.True(t, os.IsNotExist(err), "base.yaml must not be written when declined for removed envFrom")
+
+	// 6. Case B: Changed values file modifies envFrom reference (prod-config -> dev-config)
+	require.NoError(t, os.WriteFile(valuesFile, []byte("configMapName: dev-config\n"), 0600))
+
+	outDirModified := t.TempDir()
+	suggsModified := []HelmFixSuggestion{
+		{
+			Resource:  scannedRes,
+			ChartPath: chartDir,
+			HelmValueOptions: cautils.HelmValueOptions{
+				ValueFiles: []string{valuesFile},
+			},
+			FixPaths: []armotypes.FixPath{{Path: "spec.template.spec.containers[0].securityContext.privileged", Value: "false"}},
+		},
+	}
+	resModified, err := EmitKustomizePatch(suggsModified, outDirModified)
+	require.NoError(t, err)
+	assert.Empty(t, resModified.EmittedResources, "must decline generation when values file changed envFrom to dev-config")
+	require.Len(t, resModified.SkippedResources, 1, "must record declined resource")
+	assert.Contains(t, resModified.SkippedResources[0].Reason, "scan report redacts container environment configuration")
+
+	_, err = os.Stat(filepath.Join(outDirModified, "base.yaml"))
 	assert.True(t, os.IsNotExist(err), "base.yaml must not be written when declined")
 
-	// 7. When a verified unredacted base is preserved, generation succeeds and preserves prod-config
+	// 7. Case C: When a verified unredacted base is preserved, generation succeeds and preserves prod-config
 	outDirPreserved := t.TempDir()
 	suggsPreserved := []HelmFixSuggestion{
 		{
@@ -2218,4 +2245,74 @@ spec:
 	assert.Contains(t, string(outYaml), "prod-config", "verified unredacted base must preserve prod-config")
 	assert.NotContains(t, string(outYaml), "dev-config", "must not contain dev-config from changed values file")
 	assert.Contains(t, string(outYaml), "privileged: false")
+}
+
+// TestReview4034AmbiguousBothAbsentGuard verifies the guard logic
+// directly for the ambiguous both-absent envFrom case: when a scanned object has containers
+// and the candidate object lacks envFrom with no explicit env entries or placeholders,
+// resolveBaseObject must decline when chart provenance is unverified or template defines envFrom.
+func TestReview4034AmbiguousBothAbsentGuard(t *testing.T) {
+	scannedObj := map[string]interface{}{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata":   map[string]interface{}{"name": "prod-app"},
+		"spec": map[string]interface{}{
+			"template": map[string]interface{}{
+				"spec": map[string]interface{}{
+					"containers": []interface{}{
+						map[string]interface{}{
+							"name":  "app",
+							"image": "example:v1",
+							"securityContext": map[string]interface{}{
+								"privileged": true,
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	candidateObj := deepCopyMap(scannedObj)
+
+	// Surviving non-redacted fields match
+	assert.NoError(t, verifyScannedFieldsMatch(scannedObj, candidateObj, ""))
+
+	// Without verified scan-time provenance (no UnredactedBase or FidelityProvenance),
+	// and unproven chart provenance, the ambiguous both-absent case is declined.
+	chartDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "Chart.yaml"), []byte("apiVersion: v2\nname: app\nversion: 0.1.0\n"), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "values.yaml"), []byte("configMapName: \"\"\n"), 0600))
+	require.NoError(t, os.MkdirAll(filepath.Join(chartDir, "templates"), 0700))
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "templates", "deployment.yaml"), []byte(`apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prod-app
+spec:
+  template:
+    spec:
+      containers:
+      - name: app
+        image: example:v1
+        {{- if .Values.configMapName }}
+        envFrom:
+        - configMapRef:
+            name: {{ .Values.configMapName }}
+        {{- end }}
+        securityContext:
+          privileged: true
+`), 0600))
+
+	sugg := HelmFixSuggestion{
+		Resource:     &reporthandling.Resource{Object: scannedObj},
+		ChartPath:    chartDir,
+		TemplateFile: "templates/deployment.yaml",
+		HelmValueOptions: cautils.HelmValueOptions{
+			ValueFiles: []string{filepath.Join(chartDir, "values.yaml")},
+		},
+	}
+
+	resolved, reason := resolveBaseObject(sugg, nil)
+	assert.Nil(t, resolved, "must decline ambiguous both-absent case when template defines envFrom")
+	assert.Contains(t, reason, "scan report redacts container environment configuration")
 }
