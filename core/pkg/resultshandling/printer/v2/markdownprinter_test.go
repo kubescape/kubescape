@@ -826,16 +826,32 @@ func TestMdSortedControls_DeterministicTieBreakByID(t *testing.T) {
 			Name:        "Another Duplicate",
 			ScoreFactor: 9.0,
 		},
+		// Same ID, Name, Severity, but different map keys
+		"z-custom-key": {
+			ControlID:   "C-9999",
+			Name:        "Identical Everything",
+			ScoreFactor: 5.0,
+			Remediation: "z-key-remediation",
+		},
+		"a-custom-key": {
+			ControlID:   "C-9999",
+			Name:        "Identical Everything",
+			ScoreFactor: 5.0,
+			Remediation: "a-key-remediation",
+		},
 	}
 
 	for i := 0; i < 20; i++ {
 		sorted := mdSortedControls(controls)
-		require.Len(t, sorted, 4)
+		require.Len(t, sorted, 6)
 		// "Another Duplicate" comes first alphabetically
 		assert.Equal(t, "C-0001", sorted[0].GetID())
 		// The three "Duplicate Name" controls break tie by ID ascending
 		assert.Equal(t, "C-0010", sorted[1].GetID())
 		assert.Equal(t, "C-0050", sorted[2].GetID())
 		assert.Equal(t, "C-0099", sorted[3].GetID())
+		// "Identical Everything" (score 5) breaks tie by map key: "a-custom-key" before "z-custom-key"
+		assert.Equal(t, "a-key-remediation", sorted[4].GetRemediation())
+		assert.Equal(t, "z-key-remediation", sorted[5].GetRemediation())
 	}
 }
