@@ -14,9 +14,14 @@ func TestVulnerabilityExposureIncludesRequestMirror(t *testing.T) {
 		name         string
 		percent      int64
 		wantExposure bool
+		onBackend    bool
+		parentPort   int64
 	}{
 		{name: "active mirror", percent: 1, wantExposure: true},
 		{name: "disabled mirror", percent: 0},
+		{name: "backend mirror with valid parent", percent: 1, wantExposure: true, onBackend: true, parentPort: 80},
+		{name: "backend mirror with mismatched parent port", percent: 1, onBackend: true, parentPort: 90},
+		{name: "backend mirror with uncollected parent", percent: 1, wantExposure: true, onBackend: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			deploy := unstructuredDeployment("prod", "shadow", map[string]any{"app": "shadow"})
@@ -42,6 +47,13 @@ func TestVulnerabilityExposureIncludesRequestMirror(t *testing.T) {
 					}},
 				},
 			}}
+			if tc.onBackend {
+				rule := route.Object["spec"].(map[string]any)["rules"].([]any)[0].(map[string]any)
+				backend := rule["backendRefs"].([]any)[0].(map[string]any)
+				backend["filters"] = rule["filters"]
+				delete(rule, "filters")
+			}
+
 			gateway := &unstructured.Unstructured{Object: map[string]any{
 				"apiVersion": "gateway.networking.k8s.io/v1",
 				"kind":       "Gateway",
@@ -52,7 +64,13 @@ func TestVulnerabilityExposureIncludesRequestMirror(t *testing.T) {
 			}}
 			manifest := vulnerabilityManifest("prod", "shadow-vulns",
 				"wlid://cluster-test/namespace-prod/deployment-shadow", criticalMatch("CVE-2026-12345"))
-			tool := newVulnExposureTestServer(t, []runtime.Object{deploy, service, route, gateway}, manifest)
+			objects := []runtime.Object{deploy, service, route, gateway}
+			if tc.parentPort != 0 {
+				primary := unstructuredServiceWithSelector("prod", "primary", "ClusterIP", map[string]any{"app": "primary"})
+				primary.Object["spec"].(map[string]any)["ports"] = []any{map[string]any{"port": tc.parentPort}}
+				objects = append(objects, primary)
+			}
+			tool := newVulnExposureTestServer(t, objects, manifest)
 			result := registeredToolResult(t, dispatchRegisteredTool(t, tool, "analyze_vulnerability_exposure", map[string]any{}))
 			require.False(t, result.IsError)
 			var parsed map[string]any

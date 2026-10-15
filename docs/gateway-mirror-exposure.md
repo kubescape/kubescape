@@ -9,7 +9,11 @@ Both rule-level filters and filters on an active backend reference are read.
 A mirror with `percent: 0` or a fraction whose numerator is zero contributes no
 exposure. An omitted sampling setting mirrors all requests. A zero-weight
 forwarding backend does not activate its own filters; it does not disable
-filters belonging to the enclosing rule.
+filters belonging to the enclosing rule. Backend-scoped mirrors also retain
+their parent's Service reference: if collected Service data shows that the
+parent port or protocol cannot receive traffic, its mirrors are excluded.
+Missing parent inventory remains conservative, and rule-level mirrors remain
+independent of ordinary forwarding backends.
 
 Mirror paths use the same Gateway listener, allowed namespace/kind, hostname,
 backend kind/group, and Service-port checks as ordinary backend references.

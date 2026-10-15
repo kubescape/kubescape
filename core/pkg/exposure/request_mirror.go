@@ -35,9 +35,9 @@ func (b gatewayBackendWire) reference() backendRef {
 // is an exposure path even though its response is discarded: external input
 // still reaches that service. Both HTTPRoute and GRPCRoute use this shape.
 //
-// Folding active mirror references into the rule's effective backend list
-// reuses listener admission, hostname, Service-port and ReferenceGrant
-// uncertainty handling rather than introducing a less strict parallel path.
+// Active mirror references reuse listener admission, hostname, Service-port
+// and ReferenceGrant uncertainty handling. Backend-scoped mirrors additionally
+// retain their parent reference until Service inventory can validate it.
 func mirrorBackends(filters []gatewayFilterWire) []backendRef {
 	var backends []backendRef
 	for _, filter := range filters {
@@ -58,4 +58,27 @@ func mirrorBackends(filters []gatewayFilterWire) []backendRef {
 		backends = append(backends, b)
 	}
 	return backends
+}
+
+// mirrorParentCanForward excludes a dependent mirror only when collected
+// parent data proves forwarding impossible. Missing Service/port inventory or
+// an unmodeled backend kind remains possible, as with ordinary backend refs.
+// Resolve the parent in its own namespace, not the mirror target's namespace.
+func (idx *Index) mirrorParentCanForward(mirror backendRef, routeNamespace string) bool {
+	parent := mirror.Parent
+	if parent == nil {
+		return true
+	}
+	if parent.Weight != nil && *parent.Weight == 0 {
+		return false
+	}
+	if !isServiceBackendRef(*parent) {
+		return true
+	}
+	namespace := routeNamespace
+	if parent.Namespace != nil {
+		namespace = *parent.Namespace
+	}
+	service := idx.services[ServiceRef{Namespace: namespace, Name: parent.Name}]
+	return gatewayBackendPortMatches(*parent, service)
 }

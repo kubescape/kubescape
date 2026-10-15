@@ -174,7 +174,11 @@ func decodeGatewayRoute(kind string, obj map[string]any) (gatewayRoute, error) {
 			backends = append(backends, b.reference())
 			// Backend filters apply only when traffic is sent to that backend.
 			if b.Weight == nil || *b.Weight > 0 {
-				backends = append(backends, mirrorBackends(b.Filters)...)
+				parent := b.reference()
+				for _, mirror := range mirrorBackends(b.Filters) {
+					mirror.Parent = &parent
+					backends = append(backends, mirror)
+				}
 			}
 		}
 		backends = append(backends, mirrorBackends(rule.Filters)...)
