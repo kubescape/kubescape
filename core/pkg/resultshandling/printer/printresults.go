@@ -106,9 +106,11 @@ func ResolveOutputFile(format, outputFile, defaultBaseName string) (string, bool
 	}
 
 	// A trailing separator names a directory: write the default report name
-	// inside it rather than a hidden file such as "reports/.json".
+	// inside it rather than a hidden file such as "reports/.json". Append
+	// instead of filepath.Join, which would clean "link/../" lexically and
+	// pick a different directory than the filesystem does through a symlink.
 	if defaultBaseName != "" && os.IsPathSeparator(outputFile[len(outputFile)-1]) {
-		outputFile = filepath.Join(outputFile, defaultBaseName)
+		outputFile += defaultBaseName
 	}
 
 	ext, ok := FormatOutputExt[format]
@@ -216,7 +218,13 @@ func GetWriter(ctx context.Context, outputFile string) *os.File {
 // legacy helpers, it never redirects an error to stdout or a temporary file:
 // callers can return the setup failure before a scan starts.
 func GetWriterNoFallback(outputFile string) (*os.File, error) {
-	if err := os.MkdirAll(filepath.Dir(outputFile), outputDirPerm); err != nil {
+	// filepath.Dir would clean "link/../" lexically and create a different
+	// directory than the one the file is opened in; keep the path as given.
+	outputDir, _ := filepath.Split(outputFile)
+	if outputDir == "" {
+		outputDir = "."
+	}
+	if err := os.MkdirAll(outputDir, outputDirPerm); err != nil {
 		return nil, fmt.Errorf("create output directory for %q: %w", outputFile, err)
 	}
 	f, err := openFileForWrite(outputFile)
