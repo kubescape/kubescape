@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"slices"
 
+	"github.com/kubescape/kubescape/v4/core/pkg/namespaceselector"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/labels"
 )
 
 // Index indexes a cluster's Service, Ingress, Gateway API route
@@ -341,14 +341,8 @@ func (idx *Index) gatewayAdmitsRouteNamespace(l listener, routeNamespace, gatewa
 		if err != nil {
 			return false, true
 		}
-		if sel.Empty() {
-			return true, true
-		}
-		info, ok := idx.namespacesByName[routeNamespace]
-		if !ok {
-			return false, false
-		}
-		return sel.Matches(labels.Set(info.Labels)), true
+		info, collected := idx.namespacesByName[routeNamespace]
+		return namespaceselector.Matches(sel, routeNamespace, info.Labels, collected)
 	default:
 		return false, true
 	}
