@@ -94,7 +94,7 @@ func (idx *Index) ServiceExposure(ref ServiceRef) (paths []ExposurePath, unclear
 		if len(hosts) == 0 {
 			continue
 		}
-		if !routeReferencesService(route, ref, svc) {
+		if !idx.routeReferencesService(route, ref, svc) {
 			continue
 		}
 		source := fmt.Sprintf("%s/%s", route.Namespace, route.Name)
@@ -141,6 +141,9 @@ func (idx *Index) crossNamespaceBackendRefIsUnmodeled(ref ServiceRef) bool {
 					// nothing about its exposure. Zero-weight backends
 					// receive no requests and are not exposure paths.
 					if !isServiceBackendRef(backend) || (backend.Weight != nil && *backend.Weight == 0) {
+						continue
+					}
+					if !idx.mirrorParentCanForward(backend, route.Namespace) {
 						continue
 					}
 					if !gatewayBackendPortMatches(backend, idx.services[ref]) {
@@ -195,10 +198,13 @@ func backendNamesService(backend *networkingv1.IngressBackend, svc *corev1.Servi
 // backendRef reaching into another namespace via a ReferenceGrant, since
 // that requires collecting and evaluating a third resource kind this Index
 // is not given.
-func routeReferencesService(route *gatewayRoute, ref ServiceRef, svc *corev1.Service) bool {
+func (idx *Index) routeReferencesService(route *gatewayRoute, ref ServiceRef, svc *corev1.Service) bool {
 	for _, rule := range route.Rules {
 		for _, backend := range rule.BackendRefs {
 			if !isServiceBackendRef(backend) || (backend.Weight != nil && *backend.Weight == 0) {
+				continue
+			}
+			if !idx.mirrorParentCanForward(backend, route.Namespace) {
 				continue
 			}
 			if !gatewayBackendPortMatches(backend, svc) {

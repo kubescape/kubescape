@@ -170,6 +170,10 @@ type gatewayRouteRule struct {
 // backend (e.g. a multicluster ServiceImport) that this package does not
 // model as a Service exposure path, however closely its name matches one.
 type backendRef struct {
+	// Parent is set only for a backend-scoped mirror. Its filter can run
+	// only if forwarding to this originating backend is possible. Rule-level
+	// mirrors have no parent and remain independent of ordinary backend refs.
+	Parent *backendRef
 	// Port names a Service port, not a targetPort or Gateway listener port.
 	Port *int32
 	// Weight defaults to 1; an explicit zero forwards no requests.
