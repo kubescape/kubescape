@@ -265,6 +265,10 @@ func TestDiffOutputPath(t *testing.T) {
 		{"pretty stdout sink resolves to no file", "pretty-printer", os.Stdout.Name(), "", false},
 		{"devnull sink keeps exact path", "sarif", os.DevNull, os.DevNull, true},
 		{"summary-json stdout sink resolves to no file", "summary-json", os.Stdout.Name(), "", false},
+		{"trailing separator writes inside the directory", "json", "out/", "out/diff.json", true},
+		{"trailing separator with summary format", "summary-yaml", " out/ ", "out/diff.yaml", true},
+		{"trailing separator with pretty output", "pretty-printer", "out/", "out/diff", true},
+		{"trailing separator keeps parent components", "json", "out/link/../", "out/link/../diff.json", true},
 	}
 
 	for _, test := range tests {
@@ -274,6 +278,32 @@ func TestDiffOutputPath(t *testing.T) {
 			assert.Equal(t, test.wantExplicit, gotExplicit)
 		})
 	}
+}
+
+// TestDiffOutputPath_DirectoryThroughSymlinkParent: "link/../" must resolve on
+// the filesystem, through the symlink, not be cleaned lexically to the
+// directory that holds the link.
+func TestDiffOutputPath_DirectoryThroughSymlinkParent(t *testing.T) {
+	root := t.TempDir()
+	storage := filepath.Join(root, "storage")
+	reports := filepath.Join(storage, "reports")
+	work := filepath.Join(root, "work")
+	require.NoError(t, os.MkdirAll(reports, 0o755))
+	require.NoError(t, os.MkdirAll(work, 0o755))
+	if err := os.Symlink(reports, filepath.Join(work, "link")); err != nil {
+		t.Skipf("symlinks not supported: %v", err)
+	}
+
+	// Built by hand: filepath.Join would clean "link/.." away before the test.
+	sep := string(filepath.Separator)
+	got, explicit := diffOutputPath("json", work+sep+"link"+sep+".."+sep)
+	require.True(t, explicit)
+
+	f, err := os.Create(got)
+	require.NoError(t, err)
+	require.NoError(t, f.Close())
+	assert.FileExists(t, filepath.Join(storage, "diff.json"))
+	assert.NoFileExists(t, filepath.Join(work, "diff.json"))
 }
 
 // TestDiff_StdoutSinkWritesThroughExistingStdout checks the writer behind the

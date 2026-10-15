@@ -130,6 +130,9 @@ func closeDiffOutput(closer io.Closer, err error) error {
 // stdout is a socket and truncates a regular file stdout was redirected to.
 // /dev/null stays a real open, so failing to open it still surfaces as an
 // error instead of silently falling back to stdout.
+// diffOutputBaseName is the file name used when --output names a directory.
+const diffOutputBaseName = "diff"
+
 func diffOutputPath(format, outputFile string) (string, bool) {
 	if outputFile == "" {
 		return "", false
@@ -145,6 +148,13 @@ func diffOutputPath(format, outputFile string) (string, bool) {
 	}
 	if outputFile == os.DevNull {
 		return outputFile, true
+	}
+	// A trailing separator names a directory: write a "diff" file inside it
+	// rather than a hidden file such as "out/.json" (or failing to open "out/").
+	// Append instead of filepath.Join, which would clean "link/../" lexically
+	// and pick a different directory than the filesystem does through a symlink.
+	if os.IsPathSeparator(outputFile[len(outputFile)-1]) {
+		outputFile += diffOutputBaseName
 	}
 	if format == printer.PrettyFormat {
 		return outputFile, true
