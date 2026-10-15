@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -696,115 +695,6 @@ func containersLackEnvFrom(obj map[string]interface{}) bool {
 	return true
 }
 
-// chartTemplateCanDefineEnvFrom checks whether the chart templates, dynamic template expressions,
-// or supplied value overrides can define or inject container environment configuration (such as envFrom).
-// If the template defines envFrom, renders containers dynamically from values (e.g. {{- toYaml .Values.containers }}),
-// or values options define containers or environment settings, it returns true, indicating that absence of envFrom
-// in candidate cannot prove fidelity against a redacted scan report without verified scan-time provenance.
-func chartTemplateCanDefineEnvFrom(chartPath, templateFile string, opts cautils.HelmValueOptions) bool {
-	if chartPath == "" {
-		return true
-	}
-
-	// Check if HelmValueOptions explicitly define or reference containers or environment
-	checkValueString := func(s string) bool {
-		lower := strings.ToLower(s)
-		return strings.Contains(lower, "envfrom") || strings.Contains(lower, "containers") ||
-			strings.Contains(lower, "extraenv") || strings.Contains(lower, ".env")
-	}
-	for _, v := range opts.Values {
-		if checkValueString(v) {
-			return true
-		}
-	}
-	for _, sv := range opts.StringValues {
-		if checkValueString(sv) {
-			return true
-		}
-	}
-	for _, fv := range opts.FileValues {
-		if checkValueString(fv) {
-			return true
-		}
-	}
-
-	root, err := os.OpenRoot(chartPath)
-	if err != nil {
-		return true
-	}
-	defer root.Close()
-
-	// Check supplied values files for container or environment settings
-	for _, vf := range opts.ValueFiles {
-		if data, err := os.ReadFile(vf); err == nil {
-			lower := strings.ToLower(string(data))
-			if strings.Contains(lower, "envfrom") || strings.Contains(lower, "containers:") ||
-				strings.Contains(lower, "extraenv") {
-				return true
-			}
-		}
-	}
-
-	// Helper to inspect template text for explicit envFrom or dynamic container rendering
-	inspectTemplate := func(content string) bool {
-		if strings.Contains(content, "envFrom") {
-			return true
-		}
-		lower := strings.ToLower(content)
-		if strings.Contains(lower, ".values.containers") ||
-			strings.Contains(lower, ".values.extraenv") ||
-			strings.Contains(lower, "toyaml .values") ||
-			strings.Contains(lower, "toyaml .") {
-			return true
-		}
-		if idx := strings.Index(content, "containers:"); idx != -1 {
-			section := content[idx:]
-			lines := strings.Split(section, "\n")
-			for _, l := range lines {
-				trimmed := strings.TrimSpace(l)
-				if trimmed == "" || strings.HasPrefix(trimmed, "#") {
-					continue
-				}
-				if strings.Contains(trimmed, "{{") && (strings.Contains(trimmed, "toyaml") ||
-					strings.Contains(trimmed, "include") || strings.Contains(trimmed, "tpl") ||
-					strings.Contains(trimmed, "range") || strings.Contains(trimmed, "with") ||
-					strings.Contains(trimmed, "env") || strings.Contains(trimmed, "values")) {
-					return true
-				}
-			}
-		}
-		return false
-	}
-
-	if templateFile != "" {
-		rel := filepath.Clean(templateFile)
-		if data, err := root.ReadFile(rel); err == nil {
-			if inspectTemplate(string(data)) {
-				return true
-			}
-		}
-	}
-
-	var found bool
-	_ = fs.WalkDir(root.FS(), ".", func(path string, d fs.DirEntry, err error) error {
-		if err != nil || found || d == nil || d.IsDir() {
-			return nil
-		}
-		if !strings.HasPrefix(path, "templates/") && path != "templates" {
-			return nil
-		}
-		if strings.HasSuffix(path, ".yaml") || strings.HasSuffix(path, ".yml") || strings.HasSuffix(path, ".tpl") {
-			if data, err := root.ReadFile(path); err == nil {
-				if inspectTemplate(string(data)) {
-					found = true
-				}
-			}
-		}
-		return nil
-	})
-	return found
-}
-
 // hasValueOverrides returns true if opts provides any Helm value overrides
 // (values files, set values, string values, or file values).
 func hasValueOverrides(opts cautils.HelmValueOptions) bool {
@@ -860,16 +750,13 @@ func resolveBaseObject(s HelmFixSuggestion, chartCache map[string]map[string][]w
 				return nil, "declined: scan report redacts container environment configuration and scan-time render contents cannot be verified; provide a verified unredacted base or explicit fidelity provenance"
 			}
 			// Ambiguous both-absent case: when both scanned object and rendered candidate lack container envFrom,
-			// check if the chart template or values can define or inject container environment configuration
-			// (e.g. conditional envFrom, values-driven containers such as {{- toYaml .Values.containers }}, or
-			// container definitions in values). When dynamic environment or container templating is possible,
-			// absence of envFrom in the candidate may be caused by values changes while the scan report had
-			// envFrom stripped by the scanner redactor (processorhandlerutils.go:826).
-			// Render fidelity cannot be proven without verified scan-time provenance.
+			// the absence of envFrom in the candidate may be caused by values changes or chart drift (such as
+			// removing envFrom from the chart or values) while the scan report had envFrom stripped by the scanner
+			// redactor (processorhandlerutils.go:826). Present-day chart syntax or values cannot establish
+			// scan-time fidelity. Therefore, verified scan-time content/provenance (s.UnredactedBase or
+			// s.FidelityProvenance) is required for ambiguous container resources.
 			if containersLackEnvFrom(candidate) && containersLackEnvFrom(s.Resource.GetObject()) {
-				if chartTemplateCanDefineEnvFrom(s.ChartPath, s.TemplateFile, s.HelmValueOptions) {
-					return nil, "declined: scan report redacts container environment configuration and scan-time render contents cannot be verified; provide a verified unredacted base or explicit fidelity provenance"
-				}
+				return nil, "declined: scan report redacts container environment configuration and scan-time render contents cannot be verified; provide a verified unredacted base or explicit fidelity provenance"
 			}
 		}
 	}
