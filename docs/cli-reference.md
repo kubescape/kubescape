@@ -655,6 +655,12 @@ and `spdx-json` emit a JSON array with one document per image (a single image
 keeps the bare document shape), while the table, HTML, PDF, markdown, SARIF,
 GitLab SAST, JUnit and Prometheus outputs report every image in one document.
 
+GitLab reports require separate posture and image scans. Combining
+`--scan-images` with `--format gitlab-sast` is rejected because a SAST artifact
+cannot also serve as a dependency scanning artifact. Run a posture scan and
+`kubescape scan image` separately for GitLab, or use `--format json` or
+`--format sarif` to include both kinds of findings in a combined scan.
+
 ### Examples
 
 ```bash

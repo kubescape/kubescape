@@ -75,6 +75,10 @@ func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comma
 			if err := validateWorkloadArgs(args, scanInfo); err != nil {
 				return err
 			}
+			// Workload scans always include images, even without --scan-images.
+			// Establish that mode before validation or local-input preparation.
+			scanInfo.SetScanType(cautils.ScanTypeWorkload)
+			scanInfo.ScanImages = true
 			if err := shared.ValidateCommonScanFlags(cmd, scanInfo, shared.ScanFormats); err != nil {
 				return err
 			}

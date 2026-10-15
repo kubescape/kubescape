@@ -155,6 +155,11 @@ func (gp *GitLabSASTPrinter) PrintNextSteps() {
 // ActionPrint writes a GitLab SAST report for a configuration scan, or a GitLab Dependency Scanning
 // report for an image scan (#2782)
 func (gp *GitLabSASTPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
+	// GitLab expects SAST and dependency scanning in separate artifacts. A
+	// successful SAST report must not silently discard image vulnerabilities.
+	if opaSessionObj != nil && len(imageScanData) > 0 {
+		return fmt.Errorf("gitlab-sast requires separate posture and image scans; use json or sarif for a combined scan")
+	}
 	if opaSessionObj == nil {
 		if len(imageScanData) == 0 {
 			return fmt.Errorf("failed to write results in GitLab dependency scanning format: no data provided")
