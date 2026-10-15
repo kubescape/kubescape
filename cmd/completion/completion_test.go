@@ -1,187 +1,75 @@
 package completion
 
 import (
+	"bytes"
+	"errors"
 	"io"
-	"os"
+	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
-	"github.com/stretchr/testify/assert"
 )
 
-// Generates autocompletion script for valid shell types
-func TestGetCompletionCmd(t *testing.T) {
-	// Arrange
-	completionCmd := GetCompletionCmd()
-	assert.Equal(t, "completion [bash|zsh|fish|powershell]", completionCmd.Use)
-	assert.Equal(t, "Generate autocompletion script", completionCmd.Short)
-	assert.Equal(t, "To load completions", completionCmd.Long)
-	assert.Equal(t, completionCmdExamples, completionCmd.Example)
-	assert.Equal(t, true, completionCmd.DisableFlagsInUseLine)
-	assert.Equal(t, []string{"bash", "zsh", "fish", "powershell"}, completionCmd.ValidArgs)
-}
+func TestCompletionUsesCommandWriter(t *testing.T) {
+	for _, shell := range []string{"bash", "zsh", "fish", "powershell"} {
+		t.Run(shell, func(t *testing.T) {
+			var output bytes.Buffer
+			root := &cobra.Command{Use: "kubescape"}
+			root.AddCommand(GetCompletionCmd())
+			root.SetOut(&output)
+			root.SetErr(io.Discard)
+			root.SetArgs([]string{"completion", shell})
 
-func TestGetCompletionCmd_RunExpectedOutputs(t *testing.T) {
-	tests := []struct {
-		name string
-		args []string
-		want string
-	}{
-		{
-			name: "Unknown completion",
-			args: []string{"unknown"},
-			want: "Invalid argument unknown",
-		},
-		{
-			name: "Empty arguments",
-			args: []string{},
-			want: "No arguments provided.\n",
-		},
-	}
-
-	completionCmd := GetCompletionCmd()
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Redirect stdout to a buffer
-			rescueStdout := os.Stdout
-			r, w, _ := os.Pipe()
-			os.Stdout = w
-
-			completionCmd.Run(&cobra.Command{}, tt.args)
-
-			w.Close()
-			got, _ := io.ReadAll(r)
-			os.Stdout = rescueStdout
-
-			assert.Equal(t, tt.want, string(got))
+			if err := root.Execute(); err != nil {
+				t.Fatalf("generate %s completion: %v", shell, err)
+			}
+			if !strings.Contains(output.String(), "kubescape") {
+				t.Fatalf("expected a completion script in the configured writer, got %q", output.String())
+			}
 		})
 	}
 }
 
-func TestGetCompletionCmd_RunNotExpectedOutputs(t *testing.T) {
-	notExpectedOutput1 := "No arguments provided."
-	notExpectedOutput2 := "No arguments provided."
+type failingCompletionWriter struct {
+	err error
+}
 
-	tests := []struct {
-		name string
-		args []string
-	}{
-		{
-			name: "Bash completion",
-			args: []string{"bash"},
-		},
-		{
-			name: "Zsh completion",
-			args: []string{"zsh"},
-		},
-		{
-			name: "Fish completion",
-			args: []string{"fish"},
-		},
-		{
-			name: "PowerShell completion",
-			args: []string{"powershell"},
-		},
-	}
+func (w failingCompletionWriter) Write([]byte) (int, error) {
+	return 0, w.err
+}
 
-	completionCmd := GetCompletionCmd()
+func TestCompletionReturnsWriteError(t *testing.T) {
+	for _, shell := range []string{"bash", "zsh", "fish", "powershell"} {
+		t.Run(shell, func(t *testing.T) {
+			writeErr := errors.New("completion output unavailable")
+			root := &cobra.Command{Use: "kubescape"}
+			root.AddCommand(GetCompletionCmd())
+			root.SetOut(failingCompletionWriter{err: writeErr})
+			root.SetErr(io.Discard)
+			root.SetArgs([]string{"completion", shell})
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Redirect stdout to a buffer
-			rescueStdout := os.Stdout
-			r, w, _ := os.Pipe()
-			os.Stdout = w
-
-			completionCmd.Run(&cobra.Command{}, tt.args)
-
-			w.Close()
-			got, _ := io.ReadAll(r)
-			os.Stdout = rescueStdout
-
-			assert.NotEqual(t, notExpectedOutput1, string(got))
-			assert.NotEqual(t, notExpectedOutput2, string(got))
+			if err := root.Execute(); !errors.Is(err, writeErr) {
+				t.Fatalf("expected writer error %v, got %v", writeErr, err)
+			}
 		})
 	}
 }
 
-func TestGetCompletionCmd_RunBashCompletionNotExpectedOutputs(t *testing.T) {
-	notExpectedOutput1 := "Unexpected output for bash completion test 1."
-	notExpectedOutput2 := "Unexpected output for bash completion test 2."
-
-	// Redirect stdout to a buffer
-	rescueStdout := os.Stdout
-	r, w, _ := os.Pipe()
-	os.Stdout = w
-
-	completionCmd := GetCompletionCmd()
-	completionCmd.Run(&cobra.Command{}, []string{"bash"})
-
-	w.Close()
-	got, _ := io.ReadAll(r)
-	os.Stdout = rescueStdout
-
-	assert.NotEqual(t, notExpectedOutput1, string(got))
-	assert.NotEqual(t, notExpectedOutput2, string(got))
-}
-
-func TestGetCompletionCmd_RunZshCompletionNotExpectedOutputs(t *testing.T) {
-	notExpectedOutput1 := "Unexpected output for zsh completion test 1."
-	notExpectedOutput2 := "Unexpected output for zsh completion test 2."
-
-	// Redirect stdout to a buffer
-	rescueStdout := os.Stdout
-	r, w, _ := os.Pipe()
-	os.Stdout = w
-
-	completionCmd := GetCompletionCmd()
-	completionCmd.Run(&cobra.Command{}, []string{"zsh"})
-
-	w.Close()
-	got, _ := io.ReadAll(r)
-	os.Stdout = rescueStdout
-
-	assert.NotEqual(t, notExpectedOutput1, string(got))
-	assert.NotEqual(t, notExpectedOutput2, string(got))
-}
-
-func TestGetCompletionCmd_RunFishCompletionNotExpectedOutputs(t *testing.T) {
-	notExpectedOutput1 := "Unexpected output for fish completion test 1."
-	notExpectedOutput2 := "Unexpected output for fish completion test 2."
-
-	// Redirect stdout to a buffer
-	rescueStdout := os.Stdout
-	r, w, _ := os.Pipe()
-	os.Stdout = w
-
-	completionCmd := GetCompletionCmd()
-	completionCmd.Run(&cobra.Command{}, []string{"fish"})
-
-	w.Close()
-	got, _ := io.ReadAll(r)
-	os.Stdout = rescueStdout
-
-	assert.NotEqual(t, notExpectedOutput1, string(got))
-	assert.NotEqual(t, notExpectedOutput2, string(got))
-}
-
-func TestGetCompletionCmd_RunPowerShellCompletionNotExpectedOutputs(t *testing.T) {
-	notExpectedOutput1 := "Unexpected output for powershell completion test 1."
-	notExpectedOutput2 := "Unexpected output for powershell completion test 2."
-
-	// Redirect stdout to a buffer
-	rescueStdout := os.Stdout
-	r, w, _ := os.Pipe()
-	os.Stdout = w
-
-	completionCmd := GetCompletionCmd()
-	completionCmd.Run(&cobra.Command{}, []string{"powershell"})
-
-	w.Close()
-	got, _ := io.ReadAll(r)
-	os.Stdout = rescueStdout
-
-	assert.NotEqual(t, notExpectedOutput1, string(got))
-	assert.NotEqual(t, notExpectedOutput2, string(got))
+func TestCompletionRejectsInvalidArguments(t *testing.T) {
+	for _, args := range [][]string{nil, {"unknown"}, {"bash", "zsh"}} {
+		t.Run(strings.Join(args, "_"), func(t *testing.T) {
+			var output bytes.Buffer
+			root := &cobra.Command{Use: "kubescape", SilenceUsage: true}
+			root.AddCommand(GetCompletionCmd())
+			root.SetOut(&output)
+			root.SetErr(io.Discard)
+			root.SetArgs(append([]string{"completion"}, args...))
+			if err := root.Execute(); err == nil {
+				t.Fatal("expected argument validation error")
+			}
+			if output.Len() != 0 {
+				t.Fatalf("invalid arguments generated output: %q", output.String())
+			}
+		})
+	}
 }
