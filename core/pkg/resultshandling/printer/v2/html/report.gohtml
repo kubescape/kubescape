@@ -113,9 +113,8 @@
           <td class="controlRiskCell numericCell">{{ sum $control.StatusCounters.SkippedResources $control.StatusCounters.FailedResources $control.StatusCounters.PassedResources }}</td>
           <td class="controlRiskCell numericCell">{{ riskScoreToInt $control.Score }}</td>
         </tr>
-      </tr>
       {{ end }}
-      <tbody>
+      </tbody>
     </table>
     {{ end }}
     {{ if .CoverageData }}
@@ -174,7 +173,6 @@
         {{ end }}
         </tbody>
       </table>
-    </div>
     {{ end }}
     {{ end }}
     {{ if .ImageScanSummary }}

@@ -110,6 +110,62 @@ func (hp *HtmlPrinter) PrintNextSteps() {
 
 }
 
+// sortHTMLResourceTableView returns a copy of resourceTableView sorted deterministically:
+// primarily by Namespace ascending, then by Kind ascending, Name ascending, and ID ascending.
+func sortHTMLResourceTableView(resourceTableView ResourceTableView) ResourceTableView {
+	sortedResourceTableView := make(ResourceTableView, len(resourceTableView))
+	copy(sortedResourceTableView, resourceTableView)
+
+	sort.SliceStable(
+		sortedResourceTableView,
+		func(i, j int) bool {
+			nsI := sortedResourceTableView[i].Resource.GetNamespace()
+			nsJ := sortedResourceTableView[j].Resource.GetNamespace()
+			if nsI != nsJ {
+				return nsI < nsJ
+			}
+			kindI := sortedResourceTableView[i].Resource.GetKind()
+			kindJ := sortedResourceTableView[j].Resource.GetKind()
+			if kindI != kindJ {
+				return kindI < kindJ
+			}
+			nameI := sortedResourceTableView[i].Resource.GetName()
+			nameJ := sortedResourceTableView[j].Resource.GetName()
+			if nameI != nameJ {
+				return nameI < nameJ
+			}
+			return sortedResourceTableView[i].Resource.GetID() < sortedResourceTableView[j].Resource.GetID()
+		},
+	)
+	return sortedResourceTableView
+}
+
+// sortHTMLControlsBySeverityName sorts control summaries primarily by severity descending,
+// then alphabetically by name ascending, breaking ties by control ID ascending.
+func sortHTMLControlsBySeverityName(controlSummaries map[string]reportsummary.ControlSummary) []reportsummary.ControlSummary {
+	sortedSlice := make([]reportsummary.ControlSummary, 0, len(controlSummaries))
+	for _, val := range controlSummaries {
+		sortedSlice = append(sortedSlice, val)
+	}
+
+	sort.SliceStable(
+		sortedSlice,
+		func(i, j int) bool {
+			iSeverity := apis.ControlSeverityToInt(sortedSlice[i].GetScoreFactor())
+			jSeverity := apis.ControlSeverityToInt(sortedSlice[j].GetScoreFactor())
+			if iSeverity != jSeverity {
+				return iSeverity > jSeverity
+			}
+			if sortedSlice[i].GetName() != sortedSlice[j].GetName() {
+				return sortedSlice[i].GetName() < sortedSlice[j].GetName()
+			}
+			return sortedSlice[i].GetID() < sortedSlice[j].GetID()
+		},
+	)
+
+	return sortedSlice
+}
+
 func (hp *HtmlPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
 	if opaSessionObj == nil && len(imageScanData) == 0 {
 		return fmt.Errorf("failed to print results, missing data")
@@ -123,46 +179,11 @@ func (hp *HtmlPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.O
 			}
 			return total
 		},
-		"riskScoreToInt": cautils.RiskScoreToInt,
-		"lower":          strings.ToLower,
-		"sortByNamespace": func(resourceTableView ResourceTableView) ResourceTableView {
-			sortedResourceTableView := make(ResourceTableView, len(resourceTableView))
-			copy(sortedResourceTableView, resourceTableView)
-
-			sort.SliceStable(
-				sortedResourceTableView,
-				func(i, j int) bool {
-					return sortedResourceTableView[i].Resource.GetNamespace() < sortedResourceTableView[j].Resource.GetNamespace()
-				},
-			)
-			return sortedResourceTableView
-		},
+		"riskScoreToInt":          cautils.RiskScoreToInt,
+		"lower":                   strings.ToLower,
+		"sortByNamespace":         sortHTMLResourceTableView,
 		"controlSeverityToString": apis.ControlSeverityToString,
-		"sortBySeverityName": func(controlSummaries map[string]reportsummary.ControlSummary) []reportsummary.ControlSummary {
-			sortedSlice := make([]reportsummary.ControlSummary, 0, len(controlSummaries))
-			for _, val := range controlSummaries {
-				sortedSlice = append(sortedSlice, val)
-			}
-
-			sort.SliceStable(
-				sortedSlice,
-				func(i, j int) bool {
-					//First sort by Severity descending
-					iSeverity := apis.ControlSeverityToInt(sortedSlice[i].GetScoreFactor())
-					jSeverity := apis.ControlSeverityToInt(sortedSlice[j].GetScoreFactor())
-					if iSeverity > jSeverity {
-						return true
-					}
-					if iSeverity < jSeverity {
-						return false
-					}
-					//And then by Name ascending
-					return sortedSlice[i].GetName() < sortedSlice[j].GetName()
-				},
-			)
-
-			return sortedSlice
-		},
+		"sortBySeverityName":      sortHTMLControlsBySeverityName,
 	}
 	tpl := template.Must(
 		template.New("htmlReport").Funcs(tplFuncMap).Parse(reportTemplate),
