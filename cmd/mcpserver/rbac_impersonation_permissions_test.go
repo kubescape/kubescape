@@ -68,3 +68,24 @@ func TestRBACImpersonationReachesBoundServiceAccountWithoutObject(t *testing.T) 
 	require.NotEmpty(t, parsed["reached"])
 	require.NotEmpty(t, parsed["unbounded_findings"])
 }
+
+func TestRBACImpersonationReachesImplicitServiceAccountGroups(t *testing.T) {
+	for _, group := range []string{"system:serviceaccounts", "system:serviceaccounts:prod"} {
+		t.Run(group, func(t *testing.T) {
+			grant := unstructuredClusterRole("impersonator", unstructuredPolicyRule([]string{""}, []string{"serviceaccounts"}, []string{"impersonate"}, nil))
+			binding := unstructuredClusterRoleBinding("grant", "impersonator", "prod", "unused")
+			binding.Object["subjects"] = []any{map[string]any{"kind": "User", "apiGroup": "rbac.authorization.k8s.io", "name": "alice"}}
+			admin := unstructuredClusterRole("admin", unstructuredPolicyRule([]string{"*"}, []string{"*"}, []string{"*"}, nil))
+			adminBinding := unstructuredClusterRoleBinding("group-admin", "admin", "prod", "unused")
+			adminBinding.Object["subjects"] = []any{map[string]any{"kind": "Group", "apiGroup": "rbac.authorization.k8s.io", "name": group}}
+			tool := newRBACEscalationTestServer(t, grant, binding, admin, adminBinding)
+			result := registeredToolResult(t, dispatchRegisteredTool(t, tool, "analyze_rbac_escalation_paths", map[string]any{"subject_kind": "User", "name": "alice"}))
+			require.False(t, result.IsError)
+			var parsed map[string]any
+			require.NoError(t, json.Unmarshal([]byte(toolResultText(t, result)), &parsed))
+			require.Equal(t, true, parsed["cluster_admin_equivalent"])
+			require.NotEmpty(t, parsed["reached"])
+			require.NotEmpty(t, parsed["unbounded_findings"])
+		})
+	}
+}

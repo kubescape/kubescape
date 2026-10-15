@@ -83,7 +83,7 @@ func (idx *Index) impersonateEdges(rules []ScopedRule) []EscalationEdge {
 					Scope:            sr.Namespace,
 				})
 			}
-			for _, target := range idx.serviceAccountImpersonationTargets(sr.Namespace) {
+			for _, target := range idx.serviceAccountImpersonationTargets(sr.Namespace, names) {
 				if restricted && !resourceNameMatches(names, target.Name) {
 					continue
 				}

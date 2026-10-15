@@ -11,8 +11,12 @@ their actual rules. ServiceAccount subjects and ServiceAccount-form User names
 in bindings remain impersonation targets even if their objects were deleted:
 Kubernetes authorizes impersonation without looking up those objects. A missing
 namespace on a RoleBinding ServiceAccount subject defaults to the binding
-namespace. These identities do not enter the live ServiceAccount inventory used
-for pod creation or token minting. A target with only read access contributes
+namespace. Group-only bindings to `system:serviceaccounts` or
+`system:serviceaccounts:<namespace>` also supply known permissions. Analysis
+follows a valid representative username for each relevant group namespace,
+using the exact names allowed by a restricted grant. These representatives do not
+require a ServiceAccount object. These identities do not enter the live
+ServiceAccount inventory used for pod creation or token minting. A target with only read access contributes
 only read access; a namespaced permission remains namespaced.
 
 `cluster_admin_equivalent` is confirmed when a real target or subsequent
