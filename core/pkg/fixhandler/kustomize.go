@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -701,22 +702,31 @@ func chartTemplateDefinesEnvFrom(chartPath, templateFile string) bool {
 	if chartPath == "" {
 		return false
 	}
+	root, err := os.OpenRoot(chartPath)
+	if err != nil {
+		return false
+	}
+	defer root.Close()
+
 	if templateFile != "" {
-		fullPath := filepath.Join(chartPath, templateFile)
-		if data, err := os.ReadFile(fullPath); err == nil {
+		rel := filepath.Clean(templateFile)
+		if data, err := root.ReadFile(rel); err == nil {
 			if strings.Contains(string(data), "envFrom") {
 				return true
 			}
 		}
 	}
-	templatesDir := filepath.Join(chartPath, "templates")
+
 	var found bool
-	_ = filepath.Walk(templatesDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil || found || info == nil || info.IsDir() {
+	_ = fs.WalkDir(root.FS(), ".", func(path string, d fs.DirEntry, err error) error {
+		if err != nil || found || d == nil || d.IsDir() {
+			return nil
+		}
+		if !strings.HasPrefix(path, "templates/") && path != "templates" {
 			return nil
 		}
 		if strings.HasSuffix(path, ".yaml") || strings.HasSuffix(path, ".yml") || strings.HasSuffix(path, ".tpl") {
-			if data, err := os.ReadFile(path); err == nil {
+			if data, err := root.ReadFile(path); err == nil {
 				if strings.Contains(string(data), "envFrom") {
 					found = true
 				}
