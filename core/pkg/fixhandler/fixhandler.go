@@ -1056,6 +1056,7 @@ func (h *FixHandler) dropWrappedResources(ctx context.Context, resourcesToFix []
 
 		h.fixedControlsCount -= rfi.fixedCount
 		h.withdrawFixedControls(rfi.fixedControls)
+		h.withdrawPartialControls(rfi.failedControls)
 		for _, unfixed := range rfi.failedControls {
 			unfixed.Reason = "skipped: the file declares several resources in one document"
 			h.unfixedControls = append(h.unfixedControls, unfixed)
@@ -1997,6 +1998,7 @@ func (h *FixHandler) DeclineResources(declined []ResourceFixInfo) {
 	for _, r := range declined {
 		h.fixedControlsCount -= r.fixedCount
 		h.withdrawFixedControls(r.fixedControls)
+		h.withdrawPartialControls(r.failedControls)
 		for _, unfixed := range r.failedControls {
 			unfixed.Reason = "skipped: user declined the interactive prompt"
 			h.unfixedControls = append(h.unfixedControls, unfixed)
@@ -2034,6 +2036,28 @@ func (h *FixHandler) withdrawFixedControls(withdrawn []UnfixedControl) {
 		kept = append(kept, u)
 	}
 	h.fixedControls = kept
+}
+
+// withdrawPartialControls drops the provisional partial records of controls
+// whose plan was withdrawn. UnfixedControls keeps the first record per control,
+// so a stale "partial: ..." entry would otherwise outlive the plan it
+// described and shadow the skipped record appended after it.
+func (h *FixHandler) withdrawPartialControls(withdrawn []UnfixedControl) {
+	if len(withdrawn) == 0 {
+		return
+	}
+	gone := make(map[string]bool, len(withdrawn))
+	for _, u := range withdrawn {
+		gone[fixedControlKey(u)] = true
+	}
+	kept := h.unfixedControls[:0]
+	for _, u := range h.unfixedControls {
+		if strings.HasPrefix(u.Reason, partialReasonPrefix) && gone[fixedControlKey(u)] {
+			continue
+		}
+		kept = append(kept, u)
+	}
+	h.unfixedControls = kept
 }
 
 func fixedControlKey(u UnfixedControl) string {

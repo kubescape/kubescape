@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 
 	"github.com/mark3labs/mcp-go/mcp"
 
@@ -364,7 +365,15 @@ func readRemediationReport(reportPath string) ([]byte, error) {
 	if err != nil {
 		return nil, newRemediationInputError("report_path %q cannot be read: %v", reportPath, err)
 	}
-	f, err := os.Open(resolved)
+	// Reject a FIFO or device before opening it: opening a FIFO with no writer
+	// blocks forever.
+	if pre, err := os.Stat(resolved); err == nil && !pre.Mode().IsRegular() {
+		return nil, newRemediationInputError("report_path %q is not a regular file", reportPath)
+	}
+	// The path can be swapped for a FIFO after the check above, so the open
+	// itself must not block: O_NONBLOCK makes opening a FIFO return at once,
+	// and the descriptor is validated below.
+	f, err := os.OpenFile(resolved, os.O_RDONLY|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		return nil, newRemediationInputError("report_path %q cannot be read: %v", reportPath, err)
 	}
@@ -722,13 +731,15 @@ func buildRemediationItems(outcomes []fixhandler.ControlOutcome, unaddressed []f
 		if res, ok := resources[o.ResourceID]; ok {
 			item.Resource = &remediationResourceRef{Kind: res.GetKind(), Name: res.GetName(), Namespace: res.GetNamespace()}
 		}
+		// A render failure leaves no manifest to apply, so it overrides both
+		// the fixed and the partial outcome.
+		renderMsg, renderFailedForItem := renderFailed[o.ResourceID]
 		switch {
+		case renderFailedForItem && (o.Fixed || o.Partial):
+			item.Classification = classManual
+			item.Reason = "the planned fix could not be rendered: " + renderMsg
 		case o.Fixed:
 			item.Classification = classPatchAvailable
-			if msg, failed := renderFailed[o.ResourceID]; failed {
-				item.Classification = classManual
-				item.Reason = "the planned fix could not be rendered: " + msg
-			}
 		case o.Partial:
 			item.Classification = classPartialPatch
 		default:

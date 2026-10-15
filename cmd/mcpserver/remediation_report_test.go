@@ -216,6 +216,31 @@ func TestApplyRemediation_ClusterReportSkipsAreManualWithFixerReason(t *testing.
 	assert.False(t, resp.Report.CoverageAvailable)
 }
 
+// A resource that is only partly fixable, and whose planned fix cannot be
+// rendered, has no manifest to offer: it is manual, not a partial patch.
+func TestApplyRemediation_ClusterReportRenderFailureOverridesPartial(t *testing.T) {
+	forbidScan(t)
+	res := remediationClusterResource("Deployment", "nginx", "default")
+	report := remediationClusterReport([]resourcesresults.Result{
+		remediationClusterResult(res,
+			remediationFailedControl("C-0057", "Privileged container",
+				remediationFailedRuleWithFix("spec.template.spec.containers[2].securityContext.privileged", "false"),
+				remediationFailedRuleNoFix(),
+			),
+		),
+	}, res)
+	path := writeRemediationReport(t, t.TempDir(), report, nil)
+
+	resp := callReport(t, map[string]any{"report_path": path, "control_ids": "C-0057"})
+
+	assert.Empty(t, resp.RenderedManifests)
+	item := itemFor(t, resp, res.GetID(), "C-0057")
+	assert.Equal(t, classManual, item.Classification)
+	assert.Contains(t, item.Reason, "could not be rendered")
+	assert.NotEqual(t, classPartialPatch, item.Classification)
+	assert.NotEmpty(t, resp.Warnings)
+}
+
 func TestApplyRemediation_ClusterReportCompositeRBACIDIsOpaque(t *testing.T) {
 	forbidScan(t)
 	vector := &reporthandling.Resource{Object: map[string]any{

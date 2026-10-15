@@ -2,6 +2,7 @@ package fixhandler
 
 import (
 	"context"
+	"path/filepath"
 	"testing"
 
 	"github.com/kubescape/opa-utils/reporthandling"
@@ -247,5 +248,86 @@ func TestControlOutcomes_UnselectedControlsHaveNoOutcome(t *testing.T) {
 	outcomes := h.ControlOutcomes()
 	require.Len(t, outcomes, 1)
 	assert.Equal(t, "C-0057", outcomes[0].ControlID)
+	assertAccounting(t, h)
+}
+
+// partialControl fails on two rules, one with a fix path and one without, so
+// the fixer plans an edit and still reports the control as partial.
+func partialControl() resourcesresults.ResourceAssociatedControl {
+	return failedControl("C-0057", "Privileged container",
+		failedRuleWithFix("spec.privileged", "false"),
+		failedRuleNoFix(),
+	)
+}
+
+// A plan withdrawn by the wrapped-document guard must not leave its
+// provisional partial record behind, nothing was written for it.
+func TestControlOutcomes_WrappedListWithdrawsPartialOutcome(t *testing.T) {
+	dir := t.TempDir()
+	manifest := writeManifest(t, dir, "list.yaml", "apiVersion: v1\nkind: List\nitems:\n  - kind: Pod\n  - kind: Pod\n")
+	rel, err := filepath.Rel(dir, manifest)
+	require.NoError(t, err)
+
+	results := make([]resourcesresults.Result, 0, 2)
+	for i, name := range []string{"api", "web"} {
+		res := buildResource(t, dir, rel, "Pod", name, i)
+		res.Source.FileType = reporthandling.SourceTypeYaml
+		results = append(results, resourcesresults.Result{
+			ResourceID:         res.GetID(),
+			RawResource:        res,
+			AssociatedControls: []resourcesresults.ResourceAssociatedControl{partialControl()},
+		})
+	}
+
+	h := newHandlerForResources(dir, results, nil, false)
+	assert.Empty(t, h.PrepareResourcesToFix(context.Background()))
+
+	outcomes := h.ControlOutcomes()
+	require.Len(t, outcomes, 2)
+	for _, o := range outcomes {
+		assert.False(t, o.Fixed)
+		assert.False(t, o.Partial, "a withdrawn plan is not a partial patch")
+		assert.Contains(t, o.Reason, "several resources in one document")
+	}
+	assertAccounting(t, h)
+}
+
+func TestControlOutcomes_DeclinedPartialOutcomeIsNotPartial(t *testing.T) {
+	dir := t.TempDir()
+	writeManifest(t, dir, "deploy.yaml", "apiVersion: apps/v1\nkind: Deployment\nspec: {}\n")
+	res := buildResource(t, dir, "deploy.yaml", "Deployment", "demo", 0)
+	h := newHandlerForResources(dir, []resourcesresults.Result{
+		clusterResultFor(res, partialControl()),
+	}, []reporthandling.Resource{*res}, false)
+
+	toFix := h.PrepareResourcesToFix(context.Background())
+	require.Len(t, toFix, 1)
+	before := h.ControlOutcomes()
+	require.Len(t, before, 1)
+	require.True(t, before[0].Partial, "the plan is partial until it is declined")
+
+	h.DeclineResources(toFix)
+
+	after := h.ControlOutcomes()
+	require.Len(t, after, 1)
+	assert.False(t, after[0].Partial)
+	assert.Equal(t, "skipped: user declined the interactive prompt", after[0].Reason)
+	assertAccounting(t, h)
+}
+
+func TestControlOutcomes_SurvivingPartialPlanStaysPartial(t *testing.T) {
+	dir := t.TempDir()
+	writeManifest(t, dir, "deploy.yaml", "apiVersion: apps/v1\nkind: Deployment\nspec: {}\n")
+	res := buildResource(t, dir, "deploy.yaml", "Deployment", "demo", 0)
+	h := newHandlerForResources(dir, []resourcesresults.Result{
+		clusterResultFor(res, partialControl()),
+	}, []reporthandling.Resource{*res}, false)
+
+	require.Len(t, h.PrepareResourcesToFix(context.Background()), 1)
+
+	outcomes := h.ControlOutcomes()
+	require.Len(t, outcomes, 1)
+	assert.True(t, outcomes[0].Partial)
+	assert.False(t, outcomes[0].Fixed)
 	assertAccounting(t, h)
 }
