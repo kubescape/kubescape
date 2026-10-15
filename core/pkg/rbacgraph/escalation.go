@@ -464,26 +464,38 @@ func (w serviceAccountWorkload) label() string {
 	return w.apiGroup + "/" + w.resource
 }
 
+// workloadCapability is one way a rule lets its holder select the
+// ServiceAccount a workload runs as, described as "<verb> <resource>".
+type workloadCapability struct {
+	description string
+	// namedOnly is true when the rule grants it only for objects listed in
+	// resourceNames, so it reaches those objects and not every one.
+	namedOnly bool
+}
+
 // serviceAccountCapabilities returns what rule lets its holder do to
-// workloads that selects the ServiceAccount they run as, each as
-// "<verb> <resource>". It is empty when the rule grants none of them.
+// workloads that selects the ServiceAccount they run as. It is empty when
+// the rule grants none of them.
 //
 // create is a top-level create, so resourceNames cannot authorize it (see
 // ruleGrantsUnnamedCreate). update and patch act on an existing, named
 // object, so a rule restricted to real names still lets its holder repoint
-// those objects.
-func serviceAccountCapabilities(rule rbacv1.PolicyRule) []string {
-	var caps []string
+// those objects -- and only those, which namedOnly records.
+func serviceAccountCapabilities(rule rbacv1.PolicyRule) []workloadCapability {
+	var caps []workloadCapability
 	for _, w := range serviceAccountWorkloads {
 		if ruleGrantsUnnamedCreate(rule, w.apiGroup, w.resource) {
-			caps = append(caps, "create "+w.label())
+			caps = append(caps, workloadCapability{description: "create " + w.label()})
 		}
 		if !w.templateMutable {
 			continue
 		}
 		for _, verb := range []string{"update", "patch"} {
 			if ruleGrantsExistingObject(rule, w.apiGroup, w.resource, verb) {
-				caps = append(caps, verb+" "+w.label())
+				caps = append(caps, workloadCapability{
+					description: verb + " " + w.label(),
+					namedOnly:   len(rule.ResourceNames) > 0,
+				})
 			}
 		}
 	}
@@ -500,31 +512,41 @@ func serviceAccountCapabilities(rule rbacv1.PolicyRule) []string {
 // permission to create the resulting Pods itself: the controller does that.
 //
 // One edge is emitted per target ServiceAccount, however many rules and
-// workload resources grant the capability; its Detail lists them all.
+// workload resources grant the capability; its Detail lists them all. A
+// capability is qualified "(named objects only)" only when every rule that
+// grants it is restricted by resourceNames.
 func (idx *Index) assignServiceAccountEdges(rules []ScopedRule) []EscalationEdge {
-	capsByNS := map[string]map[string]bool{}
+	// namespace -> capability -> whether every granting rule names objects.
+	namedOnlyByNS := map[string]map[string]bool{}
 	for _, sr := range rules {
 		caps := serviceAccountCapabilities(sr.Rule)
 		if len(caps) == 0 {
 			continue
 		}
 		for _, ns := range idx.targetNamespaces(sr.Namespace) {
-			if capsByNS[ns] == nil {
-				capsByNS[ns] = map[string]bool{}
+			if namedOnlyByNS[ns] == nil {
+				namedOnlyByNS[ns] = map[string]bool{}
 			}
 			for _, c := range caps {
-				capsByNS[ns][c] = true
+				prev, seen := namedOnlyByNS[ns][c.description]
+				namedOnlyByNS[ns][c.description] = c.namedOnly && (!seen || prev)
 			}
 		}
 	}
 
 	var edges []EscalationEdge
-	for _, ns := range slices.Sorted(maps.Keys(capsByNS)) {
-		via := strings.Join(slices.Sorted(maps.Keys(capsByNS[ns])), ", ")
+	for _, ns := range slices.Sorted(maps.Keys(namedOnlyByNS)) {
+		var via []string
+		for _, desc := range slices.Sorted(maps.Keys(namedOnlyByNS[ns])) {
+			if namedOnlyByNS[ns][desc] {
+				desc += " (named objects only)"
+			}
+			via = append(via, desc)
+		}
 		for _, saName := range idx.serviceAccountsByNS[ns] {
 			edges = append(edges, EscalationEdge{
 				Primitive: PrimitiveAssignServiceAccount,
-				Detail:    fmt.Sprintf("can assign spec.serviceAccountName=%q to workloads in namespace %q (%s), inheriting its mounted token", saName, ns, via),
+				Detail:    fmt.Sprintf("can assign spec.serviceAccountName=%q to workloads in namespace %q (%s), inheriting its mounted token", saName, ns, strings.Join(via, ", ")),
 				ToSubject: &Subject{Kind: KindServiceAccount, Namespace: ns, Name: saName},
 			})
 		}

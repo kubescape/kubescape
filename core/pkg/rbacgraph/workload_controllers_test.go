@@ -156,3 +156,77 @@ func TestAnalyzeEscalation_DeploymentCreateReachesPrivilegedServiceAccount(t *te
 		t.Errorf("Reached = %+v, want one assign-serviceaccount path to prod/privileged", result.Reached)
 	}
 }
+
+func TestAssignServiceAccount_DetailQualifiesNamedObjectOnlyWrites(t *testing.T) {
+	deployments := []string{"deployments"}
+	apps := []string{"apps"}
+	for _, tt := range []struct {
+		name       string
+		rules      []rbacv1.PolicyRule
+		want       []string
+		wantAbsent []string
+	}{
+		{
+			name:  "named update is qualified",
+			rules: []rbacv1.PolicyRule{rule(apps, deployments, []string{"update"}, []string{"web"})},
+			want:  []string{"update apps/deployments (named objects only)"},
+		},
+		{
+			name:       "unrestricted update is not qualified",
+			rules:      []rbacv1.PolicyRule{rule(apps, deployments, []string{"update"}, nil)},
+			want:       []string{"update apps/deployments)"},
+			wantAbsent: []string{"named objects only"},
+		},
+		{
+			name: "named and unrestricted rules for the same capability are not qualified",
+			rules: []rbacv1.PolicyRule{
+				rule(apps, deployments, []string{"patch"}, []string{"web"}),
+				rule(apps, deployments, []string{"patch"}, nil),
+			},
+			want:       []string{"patch apps/deployments)"},
+			wantAbsent: []string{"named objects only"},
+		},
+		{
+			name: "qualification is per capability",
+			rules: []rbacv1.PolicyRule{
+				rule(apps, deployments, []string{"create"}, nil),
+				rule(apps, deployments, []string{"update"}, []string{"web"}),
+				rule(apps, []string{"statefulsets"}, []string{"update"}, nil),
+			},
+			want: []string{
+				"create apps/deployments,",
+				"update apps/deployments (named objects only)",
+				"update apps/statefulsets)",
+			},
+		},
+		{
+			name:       "create is never qualified",
+			rules:      []rbacv1.PolicyRule{rule(apps, deployments, []string{"create"}, []string{""})},
+			want:       []string{"(create apps/deployments)"},
+			wantAbsent: []string{"named objects only"},
+		},
+		{
+			name:       "pod-only detail is unchanged",
+			rules:      []rbacv1.PolicyRule{rule([]string{""}, []string{"pods"}, []string{"create"}, nil)},
+			want:       []string{"(create pods), inheriting its mounted token"},
+			wantAbsent: []string{"named objects only"},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			e, ok := assignTargets(workloadFixture(tt.rules...), sa("prod", "attacker"))["prod/privileged"]
+			if !ok {
+				t.Fatal("no edge to prod/privileged")
+			}
+			for _, w := range tt.want {
+				if !strings.Contains(e.Detail, w) {
+					t.Errorf("Detail = %q, want it to contain %q", e.Detail, w)
+				}
+			}
+			for _, w := range tt.wantAbsent {
+				if strings.Contains(e.Detail, w) {
+					t.Errorf("Detail = %q, must not contain %q", e.Detail, w)
+				}
+			}
+		})
+	}
+}
