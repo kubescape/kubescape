@@ -120,14 +120,8 @@ type gatewayAPIWireShape struct {
 		} `json:"parentRefs,omitempty"`
 		Hostnames []string `json:"hostnames,omitempty"`
 		Rules     []struct {
-			BackendRefs []struct {
-				Group     *string `json:"group,omitempty"`
-				Kind      *string `json:"kind,omitempty"`
-				Namespace *string `json:"namespace,omitempty"`
-				Name      string  `json:"name"`
-				Weight    *int32  `json:"weight,omitempty"`
-				Port      *int32  `json:"port,omitempty"`
-			} `json:"backendRefs,omitempty"`
+			BackendRefs []gatewayBackendWire `json:"backendRefs,omitempty"`
+			Filters     []gatewayFilterWire  `json:"filters,omitempty"`
 		} `json:"rules,omitempty"`
 
 		// Gateway fields.
@@ -177,8 +171,13 @@ func decodeGatewayRoute(kind string, obj map[string]any) (gatewayRoute, error) {
 	for _, rule := range wire.Spec.Rules {
 		var backends []backendRef
 		for _, b := range rule.BackendRefs {
-			backends = append(backends, backendRef{Group: b.Group, Kind: b.Kind, Namespace: b.Namespace, Name: b.Name, Weight: b.Weight, Port: b.Port})
+			backends = append(backends, b.reference())
+			// Backend filters apply only when traffic is sent to that backend.
+			if b.Weight == nil || *b.Weight > 0 {
+				backends = append(backends, mirrorBackends(b.Filters)...)
+			}
 		}
+		backends = append(backends, mirrorBackends(rule.Filters)...)
 		r.Rules = append(r.Rules, gatewayRouteRule{BackendRefs: backends})
 	}
 	return r, nil
