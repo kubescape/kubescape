@@ -1,6 +1,7 @@
 package attackpath
 
 import (
+	"path/filepath"
 	"slices"
 	"strings"
 
@@ -218,13 +219,34 @@ func hasProjectedServiceAccountToken(obj map[string]any, kind string) bool {
 				return true
 			}
 			if subPathExpr != "" {
-				// Dynamic expression: conservatively treat as mounted.
-				return true
+				if strings.Contains(subPathExpr, "$(") {
+					// Env-var expression: conservatively treat as mounted.
+					return true
+				}
+				// Literal expression: treat like a subPath.
+				normalizedExpr := filepath.Clean(subPathExpr)
+				if normalizedExpr == "." {
+					return true
+				}
+				for _, tp := range tokenPaths {
+					normalizedTP := filepath.Clean(tp)
+					if normalizedExpr == normalizedTP || strings.HasPrefix(normalizedTP, normalizedExpr+"/") {
+						return true
+					}
+				}
+				continue
 			}
 			// Targeted subPath: exposes the token only when the subPath
 			// names the token file exactly or is an ancestor directory.
+			// Normalize via filepath.Clean, matching kubelet behavior.
+			normalizedSubPath := filepath.Clean(subPath)
+			if normalizedSubPath == "." {
+				// Volume root — all files including token are accessible.
+				return true
+			}
 			for _, tp := range tokenPaths {
-				if subPath == tp || strings.HasPrefix(tp, subPath+"/") {
+				normalizedTP := filepath.Clean(tp)
+				if normalizedSubPath == normalizedTP || strings.HasPrefix(normalizedTP, normalizedSubPath+"/") {
 					return true
 				}
 			}

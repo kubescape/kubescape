@@ -511,3 +511,164 @@ func TestReviewProjectedTokenExcludedBySubPath(t *testing.T) {
 		})
 	}
 }
+
+func TestResolveServiceAccountBindings_SubpathDotRootIsTokenAccess(t *testing.T) {
+	// subPath: "." selects the volume root, which includes the token file.
+	vol := map[string]any{
+		"name": "kube-api-access",
+		"projected": map[string]any{
+			"sources": []any{
+				map[string]any{
+					"serviceAccountToken": map[string]any{
+						"expirationSeconds": int64(3607),
+						"path":              "token",
+					},
+				},
+			},
+		},
+	}
+	w := resource(map[string]any{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata":   map[string]any{"name": "dot-root", "namespace": "prod"},
+		"spec": map[string]any{
+			"template": map[string]any{
+				"metadata": map[string]any{"labels": map[string]any{"app": "dot-root"}},
+				"spec": map[string]any{
+					"automountServiceAccountToken": false,
+					"volumes":                      []any{vol},
+					"containers": []any{
+						map[string]any{
+							"name":  "app",
+							"image": "nginx",
+							"volumeMounts": []any{
+								map[string]any{
+									"name":      "kube-api-access",
+									"mountPath": "/custom",
+									"subPath":   ".",
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	})
+	results := ResolveServiceAccountBindings(makeResources(w), saIndex())
+	r := resultFor(t, results, "dot-root")
+	if !r.TokenMounted {
+		t.Error("expected TokenMounted=true: subPath \".\" selects volume root including token")
+	}
+}
+
+func TestResolveServiceAccountBindings_SubpathDotTokenIsTokenAccess(t *testing.T) {
+	// subPath: "./token" normalizes to "token" — same as the token file path.
+	vol := map[string]any{
+		"name": "kube-api-access",
+		"projected": map[string]any{
+			"sources": []any{
+				map[string]any{
+					"serviceAccountToken": map[string]any{
+						"expirationSeconds": int64(3607),
+						"path":              "token",
+					},
+				},
+			},
+		},
+	}
+	w := resource(map[string]any{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata":   map[string]any{"name": "dot-token", "namespace": "prod"},
+		"spec": map[string]any{
+			"template": map[string]any{
+				"metadata": map[string]any{"labels": map[string]any{"app": "dot-token"}},
+				"spec": map[string]any{
+					"automountServiceAccountToken": false,
+					"volumes":                      []any{vol},
+					"containers": []any{
+						map[string]any{
+							"name":  "app",
+							"image": "nginx",
+							"volumeMounts": []any{
+								map[string]any{
+									"name":      "kube-api-access",
+									"mountPath": "/custom",
+									"subPath":   "./token",
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	})
+	results := ResolveServiceAccountBindings(makeResources(w), saIndex())
+	r := resultFor(t, results, "dot-token")
+	if !r.TokenMounted {
+		t.Error("expected TokenMounted=true: subPath \"./token\" normalizes to \"token\"")
+	}
+}
+
+func TestResolveServiceAccountBindings_LiteralSubPathExprSiblingNotTokenAccess(t *testing.T) {
+	// subPathExpr: "namespace" is a literal (no $() substitution) that
+	// selects only the namespace sibling file, not the token.
+	vol := map[string]any{
+		"name": "kube-api-access",
+		"projected": map[string]any{
+			"sources": []any{
+				map[string]any{
+					"serviceAccountToken": map[string]any{
+						"expirationSeconds": int64(3607),
+						"path":              "token",
+					},
+				},
+				map[string]any{
+					"downwardAPI": map[string]any{
+						"items": []any{
+							map[string]any{
+								"path": "namespace",
+								"fieldRef": map[string]any{
+									"apiVersion": "v1",
+									"fieldPath":  "metadata.namespace",
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	w := resource(map[string]any{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata":   map[string]any{"name": "expr-sibling", "namespace": "prod"},
+		"spec": map[string]any{
+			"template": map[string]any{
+				"metadata": map[string]any{"labels": map[string]any{"app": "expr-sibling"}},
+				"spec": map[string]any{
+					"automountServiceAccountToken": false,
+					"volumes":                      []any{vol},
+					"containers": []any{
+						map[string]any{
+							"name":  "app",
+							"image": "nginx",
+							"volumeMounts": []any{
+								map[string]any{
+									"name":        "kube-api-access",
+									"mountPath":   "/custom",
+									"subPathExpr": "namespace",
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	})
+	results := ResolveServiceAccountBindings(makeResources(w), saIndex())
+	r := resultFor(t, results, "expr-sibling")
+	if r.TokenMounted {
+		t.Error("expected TokenMounted=false: literal subPathExpr \"namespace\" selects only the namespace sibling")
+	}
+}
