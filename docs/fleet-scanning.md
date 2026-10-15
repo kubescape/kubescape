@@ -125,6 +125,16 @@ jq '.clusters[] | {clusterID, status, attempts}' fleet.json
 
 ## Exit code
 
-The command exits with an error if any cluster could not be scanned or breached
-a threshold, or if the fleet report could not be written. The fleet report and
-the summary are still produced for the clusters that were scanned.
+A fleet run tells CI whether the fleet failed a check or could not be fully
+scanned:
+
+| Code | Meaning |
+|------|---------|
+| `0` | Every cluster was scanned and passed. |
+| `1` | Every cluster was scanned, but at least one failed a gate: `--compliance-threshold`, `--severity-threshold`, `--fail-coverage-below`, `--fail-on-degraded-config` or `--baseline-fail-on-new`. |
+| `2` | At least one cluster was `unreachable`, `error` or `cancelled`, a cluster's report could not be written, or the fleet report could not be written. |
+
+If one cluster fails a gate and another could not be scanned, the run exits
+with `2`, since part of the fleet was never checked. An invalid command line still exits with `1`, as it does for any
+other scan. The fleet report and the summary are still produced for the
+clusters that were scanned.

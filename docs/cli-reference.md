@@ -1537,6 +1537,7 @@ Kubescape respects the following environment variables:
 |------|-------------|
 | `0` | Success |
 | `1` | Failure (threshold exceeded, scan failed, etc.) |
+| `2` | `--kube-contexts` only: a cluster could not be scanned, or a report could not be written. See [scanning a fleet of clusters](fleet-scanning.md#exit-code). |
 
 ---
 

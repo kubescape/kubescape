@@ -129,7 +129,7 @@ func runControlScan(ctx context.Context, scanInfo *cautils.ScanInfo, ks meta.IKu
 		logger.L().Info("Run with '--verbose'/'-v' flag for detailed resources view\n")
 	}
 	if results.GetComplianceScore() < float32(scanInfo.ComplianceThreshold) {
-		return results, fmt.Errorf("scan compliance-score is below permitted threshold: %.2f (compliance-threshold: %.2f)", results.GetComplianceScore(), scanInfo.ComplianceThreshold)
+		return results, gateFailure(fmt.Errorf("scan compliance-score is below permitted threshold: %.2f (compliance-threshold: %.2f)", results.GetComplianceScore(), scanInfo.ComplianceThreshold))
 	}
 	if err := enforceSeverityThresholds(&results.GetResults().SummaryDetails, scanInfo); err != nil {
 		return results, err

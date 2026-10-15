@@ -2,6 +2,7 @@ package scan
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -476,9 +477,27 @@ func enforceBaselineDrift(ctx context.Context, results *resultshandling.ResultsH
 		return err
 	}
 	if scanInfo.BaselineFailOnNew && newFailures > 0 {
-		return fmt.Errorf("baseline drift: found %d new failure(s) at or above baseline severity threshold %q", newFailures, severityLabelOrAll(scanInfo.BaselineSeverityThreshold))
+		return gateFailure(fmt.Errorf("baseline drift: found %d new failure(s) at or above baseline severity threshold %q", newFailures, severityLabelOrAll(scanInfo.BaselineSeverityThreshold)))
 	}
 	return nil
+}
+
+// gateError marks a scan that completed but failed a gate the operator set, such as a threshold or baseline drift.
+type gateError struct {
+	err error
+}
+
+func (e gateError) Error() string { return e.err.Error() }
+
+func (e gateError) Unwrap() error { return e.err }
+
+// gateFailure marks err as a failed gate.
+func gateFailure(err error) error { return gateError{err: err} }
+
+// isGateFailure reports whether err is a failed gate.
+func isGateFailure(err error) bool {
+	var gate gateError
+	return errors.As(err, &gate)
 }
 
 func severityLabelOrAll(s string) string {
@@ -525,7 +544,7 @@ func enforceImageSeverityThresholds(imageScanData []cautils.ImageScanData, scanI
 		}
 	}
 	if breach || unknownCount > 0 {
-		return thresholdExceededError(scanInfo.FailThresholdSeverity, unknownCount)
+		return gateFailure(thresholdExceededError(scanInfo.FailThresholdSeverity, unknownCount))
 	}
 	return nil
 }
