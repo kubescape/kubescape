@@ -48,8 +48,8 @@ func (idx *Index) DirectEscalationEdges(subject Subject, rules []ScopedRule) []E
 // verb (core API group) on serviceaccounts/users/groups lets a subject act
 // as the impersonated identity outright.
 //
-// serviceaccounts targets are enumerated against collected ServiceAccount
-// objects regardless of whether the rule is resourceNames-restricted (an
+// serviceaccounts targets include collected objects and binding-evidenced
+// identities regardless of whether the rule is resourceNames-restricted (an
 // unrestricted grant is a superset of the restricted case, so it must
 // enumerate the same targets too, in addition to being reported as
 // Unbounded for whatever this Index didn't collect).
@@ -83,17 +83,15 @@ func (idx *Index) impersonateEdges(rules []ScopedRule) []EscalationEdge {
 					Scope:            sr.Namespace,
 				})
 			}
-			for _, ns := range idx.targetNamespaces(sr.Namespace) {
-				for _, saName := range idx.serviceAccountsByNS[ns] {
-					if restricted && !resourceNameMatches(names, saName) {
-						continue
-					}
-					edges = append(edges, EscalationEdge{
-						Primitive: PrimitiveImpersonate,
-						Detail:    fmt.Sprintf("can impersonate ServiceAccount %s/%s", ns, saName),
-						ToSubject: &Subject{Kind: KindServiceAccount, Namespace: ns, Name: saName},
-					})
+			for _, target := range idx.serviceAccountImpersonationTargets(sr.Namespace) {
+				if restricted && !resourceNameMatches(names, target.Name) {
+					continue
 				}
+				edges = append(edges, EscalationEdge{
+					Primitive: PrimitiveImpersonate,
+					Detail:    fmt.Sprintf("can impersonate ServiceAccount %s/%s", target.Namespace, target.Name),
+					ToSubject: &target,
+				})
 			}
 		}
 		if sr.Namespace != "" {

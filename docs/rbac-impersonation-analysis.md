@@ -6,9 +6,14 @@ administrator permissions.
 
 RBAC escalation analysis keeps these grants in `unbounded_findings`, including
 an `impersonated_kind` identifying the target type. It follows collected
-ServiceAccounts and User subjects mentioned in collected bindings to recover
-their actual rules. A target with only read access contributes only read access;
-a namespaced permission remains namespaced.
+ServiceAccounts and identities mentioned in collected bindings to recover
+their actual rules. ServiceAccount subjects and ServiceAccount-form User names
+in bindings remain impersonation targets even if their objects were deleted:
+Kubernetes authorizes impersonation without looking up those objects. A missing
+namespace on a RoleBinding ServiceAccount subject defaults to the binding
+namespace. These identities do not enter the live ServiceAccount inventory used
+for pod creation or token minting. A target with only read access contributes
+only read access; a namespaced permission remains namespaced.
 
 `cluster_admin_equivalent` is confirmed when a real target or subsequent
 escalation grants cluster-wide administrative power. A false value accompanied

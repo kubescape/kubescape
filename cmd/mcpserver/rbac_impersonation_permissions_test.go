@@ -51,3 +51,20 @@ func TestUnboundedSummariesDistinguishTargetSetsFromPermissionGrants(t *testing.
 	require.Equal(t, "prod", summaries[0]["scope"])
 	require.Equal(t, "prod", summaries[1]["scope"])
 }
+
+func TestRBACImpersonationReachesBoundServiceAccountWithoutObject(t *testing.T) {
+	grant := unstructuredClusterRole("impersonator", unstructuredPolicyRule([]string{""}, []string{"serviceaccounts"}, []string{"impersonate"}, nil))
+	binding := unstructuredClusterRoleBinding("grant", "impersonator", "prod", "caller")
+	admin := unstructuredClusterRole("admin", unstructuredPolicyRule([]string{"*"}, []string{"*"}, []string{"*"}, nil))
+	adminBinding := unstructuredClusterRoleBinding("dangling-admin", "admin", "prod", "deleted-admin")
+	tool := newRBACEscalationTestServer(t, grant, binding, admin, adminBinding)
+	result := registeredToolResult(t, dispatchRegisteredTool(t, tool, "analyze_rbac_escalation_paths", map[string]any{
+		"subject_kind": "ServiceAccount", "namespace": "prod", "name": "caller",
+	}))
+	require.False(t, result.IsError)
+	var parsed map[string]any
+	require.NoError(t, json.Unmarshal([]byte(toolResultText(t, result)), &parsed))
+	require.Equal(t, true, parsed["cluster_admin_equivalent"])
+	require.NotEmpty(t, parsed["reached"])
+	require.NotEmpty(t, parsed["unbounded_findings"])
+}
