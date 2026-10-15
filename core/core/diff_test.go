@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -290,6 +291,11 @@ func TestDiffOutputPath_DirectoryThroughSymlinkParent(t *testing.T) {
 	work := filepath.Join(root, "work")
 	require.NoError(t, os.MkdirAll(reports, 0o755))
 	require.NoError(t, os.MkdirAll(work, 0o755))
+	// Windows normalizes "link\.." in the path string before it reaches the
+	// filesystem, so this only holds on Unix.
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows resolves \"..\" lexically, before following symlinks")
+	}
 	if err := os.Symlink(reports, filepath.Join(work, "link")); err != nil {
 		t.Skipf("symlinks not supported: %v", err)
 	}

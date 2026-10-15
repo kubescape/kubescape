@@ -528,6 +528,19 @@ func TestResolveOutputFile(t *testing.T) {
 	}
 }
 
+// symlinkThroughParent creates link -> target for tests that rely on "link/.."
+// being resolved on the filesystem. Windows normalizes "link\.." in the path
+// string before it reaches the filesystem, so those tests only hold on Unix.
+func symlinkThroughParent(t *testing.T, target, link string) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows resolves \"..\" lexically, before following symlinks")
+	}
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlinks not supported: %v", err)
+	}
+}
+
 // TestResolveOutputFile_DirectoryThroughSymlinkParent: "link/../" must resolve
 // on the filesystem, through the symlink, not be cleaned lexically to the
 // directory that holds the link.
@@ -538,9 +551,7 @@ func TestResolveOutputFile_DirectoryThroughSymlinkParent(t *testing.T) {
 	work := filepath.Join(root, "work")
 	require.NoError(t, os.MkdirAll(reports, 0o755))
 	require.NoError(t, os.MkdirAll(work, 0o755))
-	if err := os.Symlink(reports, filepath.Join(work, "link")); err != nil {
-		t.Skipf("symlinks not supported: %v", err)
-	}
+	symlinkThroughParent(t, reports, filepath.Join(work, "link"))
 
 	// Built by hand: filepath.Join would clean "link/.." away before the test.
 	sep := string(filepath.Separator)
@@ -563,9 +574,7 @@ func TestGetWriterNoFallback_NewDirectoryThroughSymlinkParent(t *testing.T) {
 	work := filepath.Join(root, "work")
 	require.NoError(t, os.MkdirAll(reports, 0o755))
 	require.NoError(t, os.MkdirAll(work, 0o755))
-	if err := os.Symlink(reports, filepath.Join(work, "link")); err != nil {
-		t.Skipf("symlinks not supported: %v", err)
-	}
+	symlinkThroughParent(t, reports, filepath.Join(work, "link"))
 
 	sep := string(filepath.Separator)
 	f, err := GetWriterNoFallback(work + sep + "link" + sep + ".." + sep + "newdir" + sep + "report.json")
