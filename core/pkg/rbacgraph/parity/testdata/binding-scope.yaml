@@ -1,0 +1,228 @@
+name: binding-scope
+description: |
+  Where a binding's rules apply, and whom its subjects name.
+
+  A ClusterRoleBinding grants in every namespace. A RoleBinding grants in its
+  own namespace only, whether it refers to a Role or to a ClusterRole, and
+  whatever namespace its subject lives in. A RoleBinding refers to a Role of
+  its own namespace, and a reference that resolves to nothing grants nothing.
+
+  A ServiceAccount subject is identified by namespace and name together. In a
+  RoleBinding the namespace may be left out, and it is then the RoleBinding's.
+objects:
+  - {apiVersion: v1, kind: Namespace, metadata: {name: lab}}
+  - {apiVersion: v1, kind: Namespace, metadata: {name: lab2}}
+  - {apiVersion: v1, kind: ServiceAccount, metadata: {name: target, namespace: lab}}
+  - {apiVersion: v1, kind: ServiceAccount, metadata: {name: target, namespace: lab2}}
+  - {apiVersion: v1, kind: ServiceAccount, metadata: {name: other, namespace: lab2}}
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: ClusterRole
+    metadata: {name: mint}
+    rules:
+      - {apiGroups: [""], resources: ["serviceaccounts/token"], verbs: ["create"]}
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: ClusterRole
+    metadata: {name: mint-target}
+    rules:
+      - {apiGroups: [""], resources: ["serviceaccounts/token"], verbs: ["create"], resourceNames: ["target"]}
+  # A Role of this name exists in lab2 only.
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: Role
+    metadata: {name: mint-local, namespace: lab2}
+    rules:
+      - {apiGroups: [""], resources: ["serviceaccounts/token"], verbs: ["create"]}
+  - {apiVersion: v1, kind: ServiceAccount, metadata: {name: cluster-wide, namespace: lab}}
+  - {apiVersion: v1, kind: ServiceAccount, metadata: {name: cluster-wide-named, namespace: lab}}
+  - {apiVersion: v1, kind: ServiceAccount, metadata: {name: clusterrole-in-lab, namespace: lab}}
+  - {apiVersion: v1, kind: ServiceAccount, metadata: {name: bound-in-lab2, namespace: lab}}
+  - {apiVersion: v1, kind: ServiceAccount, metadata: {name: bound-in-both, namespace: lab}}
+  - {apiVersion: v1, kind: ServiceAccount, metadata: {name: unqualified, namespace: lab}}
+  - {apiVersion: v1, kind: ServiceAccount, metadata: {name: unqualified-elsewhere, namespace: lab}}
+  - {apiVersion: v1, kind: ServiceAccount, metadata: {name: shared-name, namespace: lab}}
+  - {apiVersion: v1, kind: ServiceAccount, metadata: {name: dangling-role, namespace: lab}}
+  - {apiVersion: v1, kind: ServiceAccount, metadata: {name: dangling-clusterrole, namespace: lab}}
+  - {apiVersion: v1, kind: ServiceAccount, metadata: {name: role-ref-to-a-clusterrole, namespace: lab}}
+  - {apiVersion: v1, kind: ServiceAccount, metadata: {name: role-in-another-namespace, namespace: lab}}
+  - {apiVersion: v1, kind: ServiceAccount, metadata: {name: listed-twice, namespace: lab}}
+  - {apiVersion: v1, kind: ServiceAccount, metadata: {name: from-lab2, namespace: lab2}}
+  - {apiVersion: v1, kind: ServiceAccount, metadata: {name: unqualified, namespace: lab2}}
+  - {apiVersion: v1, kind: ServiceAccount, metadata: {name: shared-name, namespace: lab2}}
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: ClusterRoleBinding
+    metadata: {name: cluster-wide}
+    roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: mint}
+    subjects:
+      - {kind: ServiceAccount, name: cluster-wide, namespace: lab}
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: ClusterRoleBinding
+    metadata: {name: cluster-wide-named}
+    roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: mint-target}
+    subjects:
+      - {kind: ServiceAccount, name: cluster-wide-named, namespace: lab}
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: RoleBinding
+    metadata: {name: mint, namespace: lab}
+    roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: mint}
+    subjects:
+      - {kind: ServiceAccount, name: clusterrole-in-lab, namespace: lab}
+      - {kind: ServiceAccount, name: bound-in-both, namespace: lab}
+      - {kind: ServiceAccount, name: from-lab2, namespace: lab2}
+      - {kind: ServiceAccount, name: shared-name, namespace: lab2}
+      - {kind: ServiceAccount, name: listed-twice, namespace: lab}
+      - {kind: ServiceAccount, name: listed-twice, namespace: lab}
+      - {apiGroup: rbac.authorization.k8s.io, kind: User, name: "system:serviceaccount:lab:listed-twice"}
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: RoleBinding
+    metadata: {name: mint-again, namespace: lab}
+    roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: mint}
+    subjects:
+      - {kind: ServiceAccount, name: listed-twice, namespace: lab}
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: RoleBinding
+    metadata: {name: mint, namespace: lab2}
+    roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: mint}
+    subjects:
+      - {kind: ServiceAccount, name: bound-in-lab2, namespace: lab}
+      - {kind: ServiceAccount, name: bound-in-both, namespace: lab}
+  # A ServiceAccount subject may leave its namespace out in a RoleBinding. It is
+  # then the ServiceAccount of that name in the RoleBinding's namespace.
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: RoleBinding
+    metadata: {name: unqualified, namespace: lab}
+    roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: mint}
+    subjects:
+      - {kind: ServiceAccount, name: unqualified}
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: RoleBinding
+    metadata: {name: unqualified-elsewhere, namespace: lab2}
+    roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: mint}
+    subjects:
+      - {kind: ServiceAccount, name: unqualified-elsewhere}
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: RoleBinding
+    metadata: {name: dangling-role, namespace: lab}
+    roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: does-not-exist}
+    subjects:
+      - {kind: ServiceAccount, name: dangling-role, namespace: lab}
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: RoleBinding
+    metadata: {name: dangling-clusterrole, namespace: lab}
+    roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: does-not-exist}
+    subjects:
+      - {kind: ServiceAccount, name: dangling-clusterrole, namespace: lab}
+  # "mint" exists as a ClusterRole, not as a Role in lab.
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: RoleBinding
+    metadata: {name: role-ref-to-a-clusterrole, namespace: lab}
+    roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: mint}
+    subjects:
+      - {kind: ServiceAccount, name: role-ref-to-a-clusterrole, namespace: lab}
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: RoleBinding
+    metadata: {name: role-in-another-namespace, namespace: lab}
+    roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: mint-local}
+    subjects:
+      - {kind: ServiceAccount, name: role-in-another-namespace, namespace: lab}
+questions:
+  # A ClusterRoleBinding grants in every namespace.
+  - id: clusterrolebinding-reaches-every-namespace
+    serviceAccount: {namespace: lab, name: cluster-wide}
+    mintToken: {namespace: lab, name: target}
+    kubernetes: allowed
+  - id: clusterrolebinding-reaches-another-namespace
+    serviceAccount: {namespace: lab, name: cluster-wide}
+    mintToken: {namespace: lab2, name: target}
+    kubernetes: allowed
+  # resourceNames holds names only, so a cluster-wide grant on a name covers the
+  # object of that name in each namespace, and no other object.
+  - id: cluster-wide-name-covers-that-name-in-every-namespace
+    serviceAccount: {namespace: lab, name: cluster-wide-named}
+    mintToken: {namespace: lab2, name: target}
+    kubernetes: allowed
+  - id: cluster-wide-name-does-not-cover-another-name
+    serviceAccount: {namespace: lab, name: cluster-wide-named}
+    mintToken: {namespace: lab2, name: other}
+    kubernetes: denied
+  # A RoleBinding confines a ClusterRole's rules to the RoleBinding's namespace.
+  - id: rolebinding-to-a-clusterrole-grants-in-its-namespace
+    serviceAccount: {namespace: lab, name: clusterrole-in-lab}
+    mintToken: {namespace: lab, name: target}
+    kubernetes: allowed
+  - id: rolebinding-to-a-clusterrole-grants-nowhere-else
+    serviceAccount: {namespace: lab, name: clusterrole-in-lab}
+    mintToken: {namespace: lab2, name: target}
+    kubernetes: denied
+  # The grant follows the RoleBinding's namespace, not the subject's.
+  - id: rolebinding-in-another-namespace-grants-there
+    serviceAccount: {namespace: lab, name: bound-in-lab2}
+    mintToken: {namespace: lab2, name: target}
+    kubernetes: allowed
+  - id: rolebinding-in-another-namespace-grants-nothing-at-home
+    serviceAccount: {namespace: lab, name: bound-in-lab2}
+    mintToken: {namespace: lab, name: target}
+    kubernetes: denied
+  - id: two-rolebindings-grant-in-both-namespaces
+    serviceAccount: {namespace: lab, name: bound-in-both}
+    mintToken: {namespace: lab2, name: target}
+    kubernetes: allowed
+  # A RoleBinding may name a ServiceAccount of another namespace.
+  - id: subject-from-another-namespace
+    serviceAccount: {namespace: lab2, name: from-lab2}
+    mintToken: {namespace: lab, name: target}
+    kubernetes: allowed
+  - id: subject-from-another-namespace-gains-nothing-at-home
+    serviceAccount: {namespace: lab2, name: from-lab2}
+    mintToken: {namespace: lab2, name: target}
+    kubernetes: denied
+  - id: unqualified-subject-is-in-the-rolebinding-namespace
+    serviceAccount: {namespace: lab, name: unqualified}
+    mintToken: {namespace: lab, name: target}
+    kubernetes: allowed
+  - id: unqualified-subject-is-not-its-namesake-elsewhere
+    serviceAccount: {namespace: lab2, name: unqualified}
+    mintToken: {namespace: lab, name: target}
+    kubernetes: denied
+  # The RoleBinding is in lab2, so it names lab2/unqualified-elsewhere, which does
+  # not exist. The ServiceAccount of that name in lab is someone else.
+  - id: unqualified-subject-is-not-resolved-in-its-own-namespace
+    serviceAccount: {namespace: lab, name: unqualified-elsewhere}
+    mintToken: {namespace: lab2, name: target}
+    kubernetes: denied
+  # Two ServiceAccounts with one name in two namespaces are two identities.
+  - id: same-name-in-the-bound-namespace
+    serviceAccount: {namespace: lab2, name: shared-name}
+    mintToken: {namespace: lab, name: target}
+    kubernetes: allowed
+  - id: same-name-in-another-namespace
+    serviceAccount: {namespace: lab, name: shared-name}
+    mintToken: {namespace: lab, name: target}
+    kubernetes: denied
+  # The API server accepts a binding to a role that does not exist. It grants
+  # nothing.
+  - id: rolebinding-to-a-missing-role-grants-nothing
+    serviceAccount: {namespace: lab, name: dangling-role}
+    mintToken: {namespace: lab, name: target}
+    kubernetes: denied
+  - id: rolebinding-to-a-missing-clusterrole-grants-nothing
+    serviceAccount: {namespace: lab, name: dangling-clusterrole}
+    mintToken: {namespace: lab, name: target}
+    kubernetes: denied
+  - id: role-reference-does-not-fall-back-to-a-clusterrole
+    serviceAccount: {namespace: lab, name: role-ref-to-a-clusterrole}
+    mintToken: {namespace: lab, name: target}
+    kubernetes: denied
+  # A RoleBinding refers to a Role in its own namespace only.
+  - id: role-reference-does-not-reach-another-namespace
+    serviceAccount: {namespace: lab, name: role-in-another-namespace}
+    mintToken: {namespace: lab, name: target}
+    kubernetes: denied
+  - id: role-of-another-namespace-grants-nothing-there-either
+    serviceAccount: {namespace: lab, name: role-in-another-namespace}
+    mintToken: {namespace: lab2, name: target}
+    kubernetes: denied
+  # Control: naming a subject several times, in several forms and bindings,
+  # changes nothing.
+  - id: subject-listed-more-than-once
+    serviceAccount: {namespace: lab, name: listed-twice}
+    mintToken: {namespace: lab, name: target}
+    kubernetes: allowed
