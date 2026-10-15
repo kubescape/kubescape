@@ -219,7 +219,7 @@ func lifecycleServerOptions(transport string, work func() *workLifecycle) []serv
 //  2. refuse new tool calls and let running ones finish for up to drain, so
 //     their results can still be delivered;
 //  3. cancel whatever is left and wait for it to return;
-//  4. after a short flush grace, close the SSE sessions and the HTTP server.
+//  4. after a short, best-effort flush grace, close the SSE sessions and the HTTP server.
 //
 // Everything is bounded by timeout. The returned error joins serve, transport
 // and work-shutdown failures; a clean, requested shutdown returns nil.
@@ -245,13 +245,14 @@ func serveSSEUntilShutdown(ctx context.Context, t *sseTransport, ln net.Listener
 	if expectedClose {
 		_ = ln.Close()
 	}
-	hadWork := work.running()
 	workErr := work.shutdown(shutdownCtx, drain)
-	if hadWork {
-		select {
-		case <-time.After(sseFlushGrace):
-		case <-shutdownCtx.Done():
-		}
+	// Always give queued responses a moment to be written before the sessions
+	// close. A handler that returned just before shutdown began is no longer
+	// counted as running, yet mcp-go queues and writes its response after the
+	// handler returns. This is best-effort, not a delivery guarantee.
+	select {
+	case <-time.After(sseFlushGrace):
+	case <-shutdownCtx.Done():
 	}
 	httpErr := t.sse.Shutdown(shutdownCtx)
 	if expectedClose && errors.Is(httpErr, net.ErrClosed) {

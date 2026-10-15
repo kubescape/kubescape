@@ -221,6 +221,24 @@ func TestSSEShutdown_ClosesStreamsAndStopsAccepting(t *testing.T) {
 	require.Error(t, err, "the listener must be closed once shutdown returns")
 }
 
+// The flush grace is not skipped merely because no tracked work is running when
+// shutdown begins: mcp-go queues and writes a response after its handler has
+// returned, so an idle lifecycle does not mean the stream is flushed. The
+// grace is a lower bound on how long shutdown takes, so this does not depend on
+// scheduling.
+func TestSSEShutdown_AppliesFlushGraceWhenIdle(t *testing.T) {
+	work := &workLifecycle{}
+	r := runSSE(t, newLifecycleMCPServer(work, newBlockTool(true)), work, time.Second, 3*time.Second)
+	c := openSSEClient(t, r.addr)
+	require.False(t, work.running())
+
+	start := time.Now()
+	r.cancel()
+	c.waitClosed()
+	require.NoError(t, r.result(t))
+	assert.GreaterOrEqual(t, time.Since(start), sseFlushGrace)
+}
+
 func TestSSEShutdown_DrainsInFlightCallAndRefusesNewOnes(t *testing.T) {
 	bt := newBlockTool(true)
 	work := &workLifecycle{}
