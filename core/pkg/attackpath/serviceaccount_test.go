@@ -672,3 +672,53 @@ func TestResolveServiceAccountBindings_LiteralSubPathExprSiblingNotTokenAccess(t
 		t.Error("expected TokenMounted=false: literal subPathExpr \"namespace\" selects only the namespace sibling")
 	}
 }
+
+func TestResolveServiceAccountBindings_SubpathAncestorDirectoryIsTokenAccess(t *testing.T) {
+	// subPath: "identity" is an ancestor directory of token path "identity/token".
+	// Uses path.Clean (slash-only) so this works correctly on Windows hosts too.
+	vol := map[string]any{
+		"name": "kube-api-access",
+		"projected": map[string]any{
+			"sources": []any{
+				map[string]any{
+					"serviceAccountToken": map[string]any{
+						"expirationSeconds": int64(3607),
+						"path":              "identity/token",
+					},
+				},
+			},
+		},
+	}
+	w := resource(map[string]any{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata":   map[string]any{"name": "ancestor-dir", "namespace": "prod"},
+		"spec": map[string]any{
+			"template": map[string]any{
+				"metadata": map[string]any{"labels": map[string]any{"app": "ancestor-dir"}},
+				"spec": map[string]any{
+					"automountServiceAccountToken": false,
+					"volumes":                      []any{vol},
+					"containers": []any{
+						map[string]any{
+							"name":  "app",
+							"image": "nginx",
+							"volumeMounts": []any{
+								map[string]any{
+									"name":      "kube-api-access",
+									"mountPath": "/custom",
+									"subPath":   "identity",
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	})
+	results := ResolveServiceAccountBindings(makeResources(w), saIndex())
+	r := resultFor(t, results, "ancestor-dir")
+	if !r.TokenMounted {
+		t.Error("expected TokenMounted=true: subPath \"identity\" is an ancestor of token path \"identity/token\"")
+	}
+}
