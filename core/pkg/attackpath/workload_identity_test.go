@@ -367,3 +367,85 @@ func TestResolveServiceAccount_EphemeralContainerCanMountAnExistingTokenVolume(t
 		t.Errorf("Token = %q, want unknown for unreadable ephemeral containers", got.Token)
 	}
 }
+
+// podObject builds a bare Pod; annotations may be nil.
+func podObject(ns, name string, annotations map[string]any, spec map[string]any) map[string]any {
+	if _, ok := spec["containers"]; !ok {
+		spec["containers"] = []any{map[string]any{"name": "c", "image": "c:1"}}
+	}
+	meta := map[string]any{"namespace": ns, "name": name}
+	if annotations != nil {
+		meta["annotations"] = annotations
+	}
+	return map[string]any{"apiVersion": "v1", "kind": "Pod", "metadata": meta, "spec": spec}
+}
+
+var mirrorAnnotation = map[string]any{corev1.MirrorPodAnnotationKey: "0f1e2d3c4b5a"}
+
+func TestResolveServiceAccount_MirrorPodHasNoServiceAccountIdentity(t *testing.T) {
+	// kube-system/default exists and would grant a token: it must not be used.
+	sas := saIndex(saWith("kube-system", "default", nil), saWith("kube-system", "worker", nil))
+	etcd := vulnexposure.Workload{Namespace: "kube-system", Kind: "Pod", Name: "etcd-node1"}
+
+	cases := map[string]map[string]any{
+		"no serviceAccountName":                  {},
+		"empty serviceAccountName":               {"serviceAccountName": ""},
+		"misleading serviceAccountName":          {"serviceAccountName": "worker"},
+		"misleading deprecated serviceAccount":   {"serviceAccount": "worker"},
+		"automount explicitly true":              {"automountServiceAccountToken": true},
+		"projected token volume mounted in full": {"volumes": []any{tokenVolume("tok", "token")}, "containers": []any{containerMounting(mount("tok", "/t"))}},
+	}
+	for name, spec := range cases {
+		t.Run(name, func(t *testing.T) {
+			got := ResolveServiceAccount(etcd, podObject("kube-system", "etcd-node1", mirrorAnnotation, spec), sas)
+
+			if got.Resolved {
+				t.Fatalf("Resolved = true (%s/%s), want an unresolved mirror Pod", got.Namespace, got.Name)
+			}
+			if got.Name != "" || got.Namespace != "" || got.Origin != "" || got.Token != "" || got.TokenReason != "" {
+				t.Errorf("identity fields were set on an unresolved result: %+v", got)
+			}
+			if !strings.Contains(got.Reason, "static (mirror) Pod") {
+				t.Errorf("Reason = %q, want it to name the static/mirror Pod", got.Reason)
+			}
+		})
+	}
+}
+
+func TestResolveServiceAccount_MirrorAnnotationOnlyMattersOnAPod(t *testing.T) {
+	sas := saIndex(saWith("shop", "default", nil))
+	// A controller carrying the annotation on its own metadata or its pod
+	// template is not a mirror Pod and resolves as usual.
+	d := deployment("shop", "web", map[string]any{})
+	d["metadata"].(map[string]any)["annotations"] = mirrorAnnotation
+	d["spec"].(map[string]any)["template"].(map[string]any)["metadata"] = map[string]any{"annotations": mirrorAnnotation}
+
+	got := ResolveServiceAccount(shopWeb, d, sas)
+	if !got.Resolved || got.Name != "default" || got.Origin != OriginDefaulted {
+		t.Errorf("Deployment with the annotation = %+v, want the ordinary defaulted ServiceAccount", got)
+	}
+}
+
+func TestResolveServiceAccount_OrdinaryPodKeepsDefaultingAndTokenResolution(t *testing.T) {
+	sas := saIndex(saWith("shop", "default", nil), saWith("shop", "worker", boolPtr(false)))
+	w := vulnexposure.Workload{Namespace: "shop", Kind: "Pod", Name: "p"}
+
+	t.Run("no annotations", func(t *testing.T) {
+		got := ResolveServiceAccount(w, podObject("shop", "p", nil, map[string]any{}), sas)
+		if !got.Resolved || got.Name != "default" || got.Namespace != "shop" || got.Origin != OriginDefaulted || got.Token != TokenMounted {
+			t.Errorf("got %+v, want shop/default, defaulted, mounted", got)
+		}
+	})
+	t.Run("unrelated annotations", func(t *testing.T) {
+		got := ResolveServiceAccount(w, podObject("shop", "p", map[string]any{"kubernetes.io/config.source": "api", "team": "x"}, map[string]any{}), sas)
+		if !got.Resolved || got.Name != "default" {
+			t.Errorf("got %+v, want the defaulted ServiceAccount", got)
+		}
+	})
+	t.Run("explicit service account with automount off", func(t *testing.T) {
+		got := ResolveServiceAccount(w, podObject("shop", "p", nil, map[string]any{"serviceAccountName": "worker"}), sas)
+		if !got.Resolved || got.Name != "worker" || got.Origin != OriginExplicit || got.Token != TokenNotMounted {
+			t.Errorf("got %+v, want shop/worker, explicit, not-mounted", got)
+		}
+	})
+}

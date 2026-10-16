@@ -379,22 +379,47 @@ func ruleKey(r rbacgraph.ScopedRule) string {
 
 // mergeVulnerabilities removes repeats of one vulnerability ID (the same CVE
 // reported by several containers or manifests) without dropping distinct
-// ones. A repeat keeps the first severity and is fixable if any copy is.
+// ones. A repeat keeps the highest severity any copy reports, by
+// vulnexposure.ParseSeverity's ordering, and is fixable if any copy is, so the
+// result does not depend on the order the copies arrived in. An unrecognized or
+// empty severity never replaces a recognized one. The input is not modified,
+// and the findings the tool reports elsewhere keep each source's own severity.
 func mergeVulnerabilities(in []VulnerabilityRef) []VulnerabilityRef {
 	byID := map[string]int{}
 	out := make([]VulnerabilityRef, 0, len(in))
 	for _, v := range in {
-		if i, ok := byID[v.ID]; ok {
-			out[i].FixAvailable = out[i].FixAvailable || v.FixAvailable
+		i, ok := byID[v.ID]
+		if !ok {
+			byID[v.ID] = len(out)
+			out = append(out, v)
 			continue
 		}
-		byID[v.ID] = len(out)
-		out = append(out, v)
+		out[i].FixAvailable = out[i].FixAvailable || v.FixAvailable
+		out[i].Severity = higherSeverity(out[i].Severity, v.Severity)
 	}
 	slices.SortStableFunc(out, func(a, b VulnerabilityRef) int {
 		return cmp.Compare(a.ID, b.ID)
 	})
 	return out
+}
+
+// higherSeverity returns the more severe of two severity strings as they were
+// reported. Equal ranks (including two unrecognized values) resolve to a
+// non-empty value first, then to the lexicographically smaller one, so the
+// choice never depends on argument order.
+func higherSeverity(a, b string) string {
+	ra, rb := vulnexposure.ParseSeverity(a), vulnexposure.ParseSeverity(b)
+	switch {
+	case ra > rb:
+		return a
+	case rb > ra:
+		return b
+	case a == "":
+		return b
+	case b == "":
+		return a
+	}
+	return min(a, b)
 }
 
 func compareWorkloads(a, b vulnexposure.Workload) int {

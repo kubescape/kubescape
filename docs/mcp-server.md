@@ -144,7 +144,7 @@ Each entry has:
 | Field | Meaning |
 |-------|---------|
 | `namespace`, `workload_kind`, `workload_name` | The workload |
-| `vulnerabilities` | Its vulnerabilities at or above `min_severity` (`cve_id`, `severity`, `fix_available`), de-duplicated by CVE ID |
+| `vulnerabilities` | Its vulnerabilities at or above `min_severity` (`cve_id`, `severity`, `fix_available`), de-duplicated by CVE ID, keeping the highest severity any copy reports |
 | `status` | See [Statuses](#statuses) |
 | `reason` | Why the status is not `analyzed` (when applicable) |
 | `service_account` | `namespace`, `name`, `origin` (`explicit`, `defaulted`, or `unknown`), and `object_collected` (`present`, `absent`, or `unknown`). Absent when the workload could not be resolved |
@@ -158,7 +158,7 @@ Each entry has:
 |--------|---------|-----------------------|
 | `analyzed` | The workload resolved to a ServiceAccount, RBAC objects were collected completely, and the escalation analysis ran | That the ServiceAccount is safe, or that it gains no permissions |
 | `token-not-mounted` | As `analyzed`, but the workload spec shows no ServiceAccount token reaching the pod. The RBAC analysis is still included | That the ServiceAccount's permissions are irrelevant |
-| `workload-unresolved` | No ServiceAccount could be established (unsupported kind, object not found, or an unreadable spec). `reason` says why | Anything about the workload's identity or RBAC |
+| `workload-unresolved` | No ServiceAccount could be established (unsupported kind, object not found, an unreadable spec, or a static/mirror Pod, which the kubelet creates without a ServiceAccount). `reason` says why | Anything about the workload's identity or RBAC |
 | `rbac-unavailable` | RBAC objects could not be listed, so no analysis ran | An empty analysis |
 | `rbac-incomplete` | Some RBAC objects could not be decoded. The analysis covers only what was collected, and it is included | A complete analysis |
 

@@ -120,6 +120,15 @@ func ResolveServiceAccount(w vulnexposure.Workload, obj map[string]any, serviceA
 		return ServiceAccountResolution{Reason: fmt.Sprintf("object name %q does not match workload name %q", name, w.Name)}
 	}
 
+	// A static pod runs from a manifest on the node, and the kubelet publishes
+	// a mirror Pod for it. Nothing assigns that Pod a ServiceAccount, so
+	// "default" would be fabricated and another identity's RBAC attached to
+	// it. Decide this before any ServiceAccount defaulting, from the
+	// annotation alone: a mirror Pod has no ServiceAccount to read.
+	if w.Kind == "Pod" && isMirrorPod(obj) {
+		return ServiceAccountResolution{Reason: fmt.Sprintf("Pod %s/%s is a static (mirror) Pod: no ServiceAccount is assigned to it, so no ServiceAccount identity is resolved", w.Namespace, w.Name)}
+	}
+
 	rawSpec, found, err := unstructured.NestedFieldNoCopy(obj, workloadinterface.PodSpec(w.Kind)...)
 	spec, isMap := rawSpec.(map[string]any)
 	if err != nil || !found || !isMap {
@@ -140,6 +149,18 @@ func ResolveServiceAccount(w vulnexposure.Workload, obj map[string]any, serviceA
 	automount, saFound := serviceAccounts.lookup(w.Namespace, name)
 	res.Token, res.TokenReason = tokenState(spec, automount, saFound)
 	return res
+}
+
+// isMirrorPod reports whether a Pod object carries the annotation the kubelet
+// sets on the mirror Pod of a static pod.
+func isMirrorPod(obj map[string]any) bool {
+	annotations, _, _ := unstructured.NestedFieldNoCopy(obj, "metadata", "annotations")
+	m, ok := annotations.(map[string]any)
+	if !ok {
+		return false
+	}
+	_, mirror := m[corev1.MirrorPodAnnotationKey]
+	return mirror
 }
 
 // serviceAccountName returns the effective ServiceAccount name of a pod spec.

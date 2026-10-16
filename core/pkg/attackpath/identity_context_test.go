@@ -566,3 +566,123 @@ func TestSummarize_GainedRulesAreDeduplicatedAndOrdered(t *testing.T) {
 		t.Error("PermissionGain = false, want true")
 	}
 }
+
+func TestCorrelateIdentity_MirrorPodNeverReceivesAnotherIdentitysPermissions(t *testing.T) {
+	// Every ServiceAccount in the cluster is bound to cluster-admin through
+	// the implicit group, so a fabricated kube-system/default identity would
+	// be reported as cluster-admin.
+	idx := rbacgraph.NewIndex(
+		nil,
+		[]rbacv1.ClusterRole{clusterRole("cluster-admin", rule([]string{"*"}, []string{"*"}, []string{"*"}, nil))},
+		nil,
+		[]rbacv1.ClusterRoleBinding{clusterRoleBinding("all-sas", "cluster-admin", rbacv1.Subject{Kind: "Group", Name: "system:serviceaccounts"})},
+		[]corev1.ServiceAccount{saObj("kube-system", "default")},
+	)
+	etcd := wl("kube-system", "Pod", "etcd-node1")
+	objects := map[vulnexposure.Workload]map[string]any{
+		etcd: {
+			"kind":     "Pod",
+			"metadata": map[string]any{"namespace": "kube-system", "name": "etcd-node1", "annotations": map[string]any{corev1.MirrorPodAnnotationKey: "hash"}},
+			"spec":     map[string]any{"containers": []any{map[string]any{"name": "etcd"}}},
+		},
+	}
+
+	identities, unresolved := ResolveWorkloadIdentities(objects, []vulnexposure.Workload{etcd}, NewServiceAccountIndex([]corev1.ServiceAccount{saObj("kube-system", "default")}))
+	got := correlateOne(t, IdentityInput{
+		Workloads:         []WorkloadVulns{{Workload: etcd, Vulnerabilities: []VulnerabilityRef{critical("CVE-2024-1")}}},
+		Identities:        identities,
+		UnresolvedReasons: unresolved,
+		RBAC:              completeRBAC(idx),
+	})
+
+	if len(identities) != 0 {
+		t.Fatalf("identities = %+v, want none for a mirror Pod", identities)
+	}
+	if got.Status != IdentityWorkloadUnresolved || got.ServiceAccount != nil {
+		t.Errorf("Status/ServiceAccount = %q/%v, want workload-unresolved with no identity", got.Status, got.ServiceAccount)
+	}
+	if got.Escalation != nil || got.Permissions != nil {
+		t.Errorf("a permission analysis was attached: escalation %v, permissions %v", got.Escalation, got.Permissions)
+	}
+	if got.Token != TokenUnknown {
+		t.Errorf("Token = %q, want unknown: no identity was established", got.Token)
+	}
+	if len(got.Vulnerabilities) != 1 || got.Vulnerabilities[0].ID != "CVE-2024-1" {
+		t.Errorf("Vulnerabilities = %+v, want the finding kept", got.Vulnerabilities)
+	}
+}
+
+func TestMergeVulnerabilities_KeepsTheHighestSeverityRegardlessOfOrder(t *testing.T) {
+	v := func(sev string, fix bool) VulnerabilityRef {
+		return VulnerabilityRef{ID: "CVE-1", Severity: sev, FixAvailable: fix}
+	}
+
+	cases := []struct {
+		name    string
+		in      []VulnerabilityRef
+		wantSev string
+		wantFix bool
+	}{
+		{"medium then critical", []VulnerabilityRef{v("Medium", false), v("Critical", false)}, "Critical", false},
+		{"critical then medium", []VulnerabilityRef{v("Critical", false), v("Medium", false)}, "Critical", false},
+		{"same severity is stable", []VulnerabilityRef{v("High", false), v("High", false)}, "High", false},
+		{"empty never replaces a known severity", []VulnerabilityRef{v("Low", false), v("", false)}, "Low", false},
+		{"empty first is replaced by a known severity", []VulnerabilityRef{v("", false), v("Low", false)}, "Low", false},
+		{"unrecognized never replaces a known severity", []VulnerabilityRef{v("High", false), v("Catastrophic", false)}, "High", false},
+		{"unrecognized first is replaced", []VulnerabilityRef{v("Catastrophic", false), v("Negligible", false)}, "Negligible", false},
+		{"fix on any copy wins", []VulnerabilityRef{v("Critical", false), v("Medium", true)}, "Critical", true},
+		{"fix on the first copy is kept", []VulnerabilityRef{v("Medium", true), v("Critical", false)}, "Critical", true},
+		{"case variants resolve deterministically", []VulnerabilityRef{v("critical", false), v("Critical", false)}, "Critical", false},
+		{"three copies", []VulnerabilityRef{v("Low", false), v("Critical", true), v("High", false)}, "Critical", true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			before := append([]VulnerabilityRef(nil), c.in...)
+			got := mergeVulnerabilities(c.in)
+			if len(got) != 1 || got[0].Severity != c.wantSev || got[0].FixAvailable != c.wantFix {
+				t.Errorf("got %+v, want one entry with severity %q fixable=%v", got, c.wantSev, c.wantFix)
+			}
+			for i := range before {
+				if c.in[i] != before[i] {
+					t.Errorf("input[%d] was modified: %+v, want %+v", i, c.in[i], before[i])
+				}
+			}
+			// Reversed input gives the same result.
+			rev := make([]VulnerabilityRef, len(c.in))
+			for i, x := range c.in {
+				rev[len(c.in)-1-i] = x
+			}
+			if r := mergeVulnerabilities(rev); len(r) != 1 || r[0] != got[0] {
+				t.Errorf("reversed input gave %+v, want %+v", r, got)
+			}
+		})
+	}
+}
+
+func TestMergeVulnerabilities_DistinctIDsStaySeparate(t *testing.T) {
+	got := mergeVulnerabilities([]VulnerabilityRef{
+		{ID: "CVE-2", Severity: "Low"}, {ID: "CVE-1", Severity: "Critical"}, {ID: "CVE-2", Severity: "High"},
+	})
+	if len(got) != 2 || got[0].ID != "CVE-1" || got[0].Severity != "Critical" || got[1].ID != "CVE-2" || got[1].Severity != "High" {
+		t.Errorf("got %+v, want [CVE-1 Critical, CVE-2 High]", got)
+	}
+}
+
+func TestCorrelateIdentity_DuplicateSeveritiesDoNotAlterTheCallersInput(t *testing.T) {
+	idx := rbacgraph.NewIndex(nil, nil, nil, nil, []corev1.ServiceAccount{saObj("shop", "sa")})
+	w := wl("shop", "Deployment", "a")
+	in := []VulnerabilityRef{{ID: "CVE-1", Severity: "Medium"}, {ID: "CVE-1", Severity: "Critical"}}
+
+	got := correlateOne(t, IdentityInput{
+		Workloads:  []WorkloadVulns{{Workload: w, Vulnerabilities: in}},
+		Identities: map[vulnexposure.Workload]WorkloadIdentity{w: explicit("shop", "sa")},
+		RBAC:       completeRBAC(idx),
+	})
+
+	if len(got.Vulnerabilities) != 1 || got.Vulnerabilities[0].Severity != "Critical" {
+		t.Errorf("Vulnerabilities = %+v, want one Critical entry", got.Vulnerabilities)
+	}
+	if in[0].Severity != "Medium" || in[1].Severity != "Critical" {
+		t.Errorf("caller's slice was modified: %+v", in)
+	}
+}
