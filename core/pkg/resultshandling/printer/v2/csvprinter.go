@@ -42,6 +42,40 @@ func NewCsvPrinter(showSecrets bool) *CsvPrinter {
 	return &CsvPrinter{showSecrets: showSecrets}
 }
 
+// csvFormulaPrefixes are the leading characters that make a spreadsheet
+// application (Excel, LibreOffice Calc, Google Sheets) interpret a cell as a
+// formula rather than text. Several values written below are taken from the
+// scanned manifests and so are attacker-influenced: a Deployment named
+// "=cmd|' /C calc'!A0", a namespace, a source path or a fix value all reach the
+// CSV verbatim. Opening such a report would execute the payload in the
+// analyst's spreadsheet (CSV injection / formula injection, CWE-1236). Leading
+// whitespace is included too: a cell beginning with a newline or carriage
+// return can still carry a formula on its first non-blank line.
+const csvFormulaPrefixes = "=+-@\t\r\n"
+
+// csvSafeCell neutralizes a cell against spreadsheet formula injection by
+// prepending a single quote, the standard mitigation: spreadsheets treat a
+// leading apostrophe as "the rest of this cell is literal text" and do not
+// display it, while other CSV consumers see an inert character instead of an
+// executable formula.
+func csvSafeCell(cell string) string {
+	if cell == "" {
+		return cell
+	}
+	if strings.ContainsRune(csvFormulaPrefixes, rune(cell[0])) {
+		return "'" + cell
+	}
+	return cell
+}
+
+// csvSafeRow applies csvSafeCell to every cell of a data row.
+func csvSafeRow(row []string) []string {
+	for i := range row {
+		row[i] = csvSafeCell(row[i])
+	}
+	return row
+}
+
 func (cp *CsvPrinter) SetWriter(ctx context.Context, outputFile string) error {
 	outputFile, explicitOutput := printer.ResolveOutputFile(printer.CsvFormat, outputFile, csvOutputFile)
 	if explicitOutput {
@@ -192,7 +226,7 @@ func (cp *CsvPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OP
 				cautils.GetControlLink(ctrlID),
 				sourcePath,
 			}
-			if err := csvWriter.Write(row); err != nil {
+			if err := csvWriter.Write(csvSafeRow(row)); err != nil {
 				logger.L().Ctx(ctx).Error("failed to write CSV row", helpers.Error(err))
 				return fmt.Errorf("failed to write CSV row: %w", err)
 			}
@@ -250,7 +284,7 @@ func (cp *CsvPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OP
 			cautils.GetControlLink(sc.controlID),
 			"",
 		}
-		if err := csvWriter.Write(row); err != nil {
+		if err := csvWriter.Write(csvSafeRow(row)); err != nil {
 			logger.L().Ctx(ctx).Error("failed to write CSV row for skipped control", helpers.Error(err))
 			return fmt.Errorf("failed to write CSV row: %w", err)
 		}

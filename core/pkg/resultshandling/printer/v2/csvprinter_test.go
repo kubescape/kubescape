@@ -211,7 +211,6 @@ func TestActionPrint_Csv_MidLoopWriteFailureIsReported(t *testing.T) {
 	require.Error(t, err, "ActionPrint must surface a mid-loop write failure instead of silently returning nil")
 }
 
-
 func TestScore_Csv(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -424,7 +423,6 @@ func TestActionPrint_Csv_MissingAllResourcesEntryFailsClosed(t *testing.T) {
 	assert.NotContains(t, foundRow[9], "s3cr3t-plaintext-password", "Fix Paths column must not leak the value when kind is unresolved")
 	assert.Contains(t, foundRow[9], "[redacted]", "Fix Paths column must fail closed to redacted")
 }
-
 
 // TestCsvControlPaths verifies the Failed Paths and Fix Paths cells. It covers
 // delete paths, review paths, legacy failed paths, duplicate locations, and
@@ -1275,4 +1273,126 @@ func TestActionPrint_Csv_PreserveNotEvaluatedWhenResourceRowSkippedWithInherited
 
 	assert.Equal(t, 1, resourceSkippedCount, "expected exactly one resource-level skipped row")
 	assert.Equal(t, 1, notEvaluatedCount, "expected exactly one control-level not evaluated row")
+}
+
+// TestCsvSafeCell covers the spreadsheet formula-injection guard: any cell that
+// begins with a character a spreadsheet reads as the start of a formula must be
+// prefixed with a single quote, and everything else must be left untouched.
+func TestCsvSafeCell(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{name: "empty stays empty", in: "", want: ""},
+		{name: "plain text is unchanged", in: "demo", want: "demo"},
+		{name: "equals is neutralized", in: "=1+1", want: "'=1+1"},
+		{name: "plus is neutralized", in: "+1", want: "'+1"},
+		{name: "minus is neutralized", in: "-1", want: "'-1"},
+		{name: "at sign is neutralized", in: "@SUM(A1)", want: "'@SUM(A1)"},
+		{name: "tab is neutralized", in: "\tcmd", want: "'\tcmd"},
+		{name: "carriage return is neutralized", in: "\rcmd", want: "'\rcmd"},
+		{name: "line feed is neutralized", in: "\n=1+1", want: "'\n=1+1"},
+		{name: "dde payload is neutralized", in: "=cmd|' /C calc'!A0", want: "'=cmd|' /C calc'!A0"},
+		{name: "leading pipe is not a formula prefix", in: "|table", want: "|table"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, csvSafeCell(tc.in))
+		})
+	}
+}
+
+// TestActionPrint_Csv_NeutralizesFormulaInjection is a regression test: a
+// resource name, namespace and source path are taken verbatim from the scanned
+// manifests, so a manifest can set metadata.name to a spreadsheet formula. The
+// printed CSV must never emit a cell that a spreadsheet would execute (CSV
+// injection, CWE-1236).
+func TestActionPrint_Csv_NeutralizesFormulaInjection(t *testing.T) {
+	const injectedName = "=cmd|' /C calc'!A0"
+	const injectedPath = "-injected/path.yaml"
+	const skippedControlID = "C-injection-skipped"
+	const injectedSkippedName = "=cmd|' /C calc'!A0"
+	const injectedSkippedReason = "+injected skip reason"
+
+	obj := map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "Pod",
+		"metadata": map[string]interface{}{
+			"name":      injectedName,
+			"namespace": "default",
+		},
+		"spec": map[string]interface{}{},
+	}
+	lw := localworkload.NewLocalWorkload(obj)
+
+	const resID = "v1/Pod/default/injected"
+	session := cautils.NewOPASessionObjMock()
+	session.ResourcesResult[resID] = resourcesresults.Result{
+		ResourceID: resID,
+		AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+			{
+				ControlID: testControlID1,
+				Name:      "Privileged container",
+				Status:    apis.StatusInfo{InnerStatus: apis.StatusFailed},
+			},
+		},
+	}
+	session.AllResources[resID] = lw
+	session.ResourceSource = map[string]reporthandling.Source{
+		resID: {RelativePath: injectedPath},
+	}
+	session.Report = &reporthandlingv2.PostureReport{
+		SummaryDetails: reportsummary.SummaryDetails{
+			Controls: reportsummary.ControlSummaries{
+				testControlID1: reportsummary.ControlSummary{ControlID: testControlID1, Name: "Privileged container", ScoreFactor: 9.0},
+			},
+		},
+	}
+	// A summary-level skipped control exercises the second sanitizer call site
+	// (the skipped-row writer), where both the name and the reason come from the
+	// report and can therefore be formula-leading too.
+	session.Report.SummaryDetails.Controls[skippedControlID] = reportsummary.ControlSummary{
+		ControlID:   skippedControlID,
+		Name:        injectedSkippedName,
+		ScoreFactor: 9.0,
+		StatusInfo: apis.StatusInfo{
+			InnerStatus: apis.StatusSkipped,
+			InnerInfo:   injectedSkippedReason,
+		},
+	}
+
+	tmpCsv, err := os.CreateTemp("", "csv-injection-*.csv")
+	require.NoError(t, err)
+	defer os.Remove(tmpCsv.Name())
+
+	cp := NewCsvPrinter(false)
+	cp.writer = tmpCsv
+	require.NoError(t, cp.ActionPrint(context.TODO(), session, nil))
+	require.NoError(t, cp.CloseWriter())
+
+	f, err := os.Open(tmpCsv.Name())
+	require.NoError(t, err)
+	defer f.Close()
+
+	records, err := csv.NewReader(f).ReadAll()
+	require.NoError(t, err)
+
+	var found bool
+	var foundSkipped bool
+	for _, row := range records[1:] {
+		if row[1] == testControlID1 {
+			found = true
+			assert.Equal(t, "'"+injectedName, row[4], "resource name must be neutralized")
+			assert.Equal(t, "'"+injectedPath, row[12], "source path must be neutralized")
+		}
+		if row[1] == skippedControlID {
+			foundSkipped = true
+			assert.Equal(t, "'"+injectedSkippedName, row[0], "skipped control name must be neutralized")
+			assert.Equal(t, "'"+injectedSkippedReason, row[10], "skipped control reason must be neutralized")
+		}
+	}
+	require.True(t, found, "expected the injected resource row")
+	require.True(t, foundSkipped, "expected the injected skipped-control row")
 }
