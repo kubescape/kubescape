@@ -644,3 +644,115 @@ func TestAnalyzeMutatingAdmissionPolicyImpact_UngatedPolicyStaysDeterminable(t *
 	require.True(t, match["determinable"].(bool))
 	require.Empty(t, match["match_conditions"])
 }
+
+// TestAnalyzeMutatingAdmissionPolicyImpact_InvalidArgumentTypes verifies that
+// malformed tools/call arguments are rejected before discovery or resource reads.
+func TestAnalyzeMutatingAdmissionPolicyImpact_InvalidArgumentTypes(t *testing.T) {
+	for _, argument := range []string{"api_group", "namespace", "operation", "cluster_scoped"} {
+		t.Run(argument, func(t *testing.T) {
+			values := map[string]any{
+				"number": float64(7),
+				"object": map[string]any{"value": "true"},
+				"array":  []any{"true"},
+			}
+			if argument == "cluster_scoped" {
+				values["string"] = "true"
+			} else {
+				values["boolean"] = true
+			}
+			for label, value := range values {
+				t.Run(label, func(t *testing.T) {
+					ksServer := newMutatingPolicyTestServer(t, unstructuredTestPod("prod", "server", nil))
+					args := map[string]any{"namespace": "prod", "name": "server", "api_version": "v1", "resource": "pods"}
+					args[argument] = value
+					result := registeredToolResult(t, dispatchRegisteredTool(t, ksServer, "analyze_mutating_admission_policy_impact", args))
+					require.True(t, result.IsError)
+					var toolErr ToolError
+					require.NoError(t, json.Unmarshal([]byte(toolResultText(t, result)), &toolErr))
+					require.Equal(t, ErrCodeInvalidArgument, toolErr.Code)
+					require.Equal(t, argument, toolErr.Details["argument"])
+					expectedType := "string"
+					if argument == "cluster_scoped" {
+						expectedType = "boolean"
+					}
+					require.Contains(t, toolErr.Message, expectedType)
+					require.Empty(t, ksServer.k8sClient.DynamicClient.(*dynamicfake.FakeDynamicClient).Actions())
+					require.Empty(t, ksServer.k8sClient.DiscoveryClient.(*discoveryfake.FakeDiscovery).Actions())
+				})
+			}
+		})
+	}
+}
+
+// TestAnalyzeMutatingAdmissionPolicyImpact_EmptyRequiredArguments rejects
+// whitespace-only resource identifiers rather than issuing a Kubernetes request.
+func TestAnalyzeMutatingAdmissionPolicyImpact_EmptyRequiredArguments(t *testing.T) {
+	for _, argument := range []string{"name", "api_version", "resource"} {
+		t.Run(argument, func(t *testing.T) {
+			ksServer := newMutatingPolicyTestServer(t)
+			args := map[string]any{"namespace": "prod", "name": "server", "api_version": "v1", "resource": "pods"}
+			args[argument] = " \t\n "
+			result := registeredToolResult(t, dispatchRegisteredTool(t, ksServer, "analyze_mutating_admission_policy_impact", args))
+			require.True(t, result.IsError)
+			var toolErr ToolError
+			require.NoError(t, json.Unmarshal([]byte(toolResultText(t, result)), &toolErr))
+			require.Equal(t, ErrCodeInvalidArgument, toolErr.Code)
+			require.Equal(t, argument, toolErr.Details["argument"])
+			require.Empty(t, ksServer.k8sClient.DynamicClient.(*dynamicfake.FakeDynamicClient).Actions())
+			require.Empty(t, ksServer.k8sClient.DiscoveryClient.(*discoveryfake.FakeDiscovery).Actions())
+		})
+	}
+}
+
+// TestAnalyzeMutatingAdmissionPolicyImpact_NullOptionalArgumentsPreserveDefaults
+// preserves the existing convention that null optional values count as absent.
+func TestAnalyzeMutatingAdmissionPolicyImpact_NullOptionalArgumentsPreserveDefaults(t *testing.T) {
+	constraints := allPodsMatchConstraints()
+	constraints["resourceRules"].([]any)[0].(map[string]any)["operations"] = []any{"CREATE"}
+	policy := unstructuredMutatingPolicy("create-only", constraints, addLabelMutation())
+	binding := unstructuredMutatingPolicyBinding("create-only-binding", "create-only")
+	ksServer := newMutatingPolicyTestServer(t, policy, binding, unstructuredTestPod("prod", "server", nil))
+	args := map[string]any{"namespace": "prod", "name": "server", "api_version": "v1", "resource": "pods"}
+	for _, argument := range []string{"api_group", "operation", "cluster_scoped"} {
+		args[argument] = nil
+	}
+	result := registeredToolResult(t, dispatchRegisteredTool(t, ksServer, "analyze_mutating_admission_policy_impact", args))
+	require.False(t, result.IsError)
+	require.Equal(t, []string{"create-only"}, matchedPolicyNames(t, result))
+}
+
+// TestAnalyzeMutatingAdmissionPolicyImpact_ValidOperations checks that validation
+// preserves operation-specific policy matching, including lowercase input.
+func TestAnalyzeMutatingAdmissionPolicyImpact_ValidOperations(t *testing.T) {
+	for _, operation := range []string{"CREATE", "UPDATE", "CONNECT", "update"} {
+		t.Run(operation, func(t *testing.T) {
+			constraints := allPodsMatchConstraints()
+			constraints["resourceRules"].([]any)[0].(map[string]any)["operations"] = []any{"UPDATE"}
+			policy := unstructuredMutatingPolicy("update-only", constraints, addLabelMutation())
+			binding := unstructuredMutatingPolicyBinding("update-only-binding", "update-only")
+			ksServer := newMutatingPolicyTestServer(t, policy, binding, unstructuredTestPod("prod", "server", nil))
+			result := registeredToolResult(t, dispatchRegisteredTool(t, ksServer, "analyze_mutating_admission_policy_impact", map[string]any{
+				"namespace": "prod", "name": "server", "api_version": "v1", "resource": "pods", "operation": operation,
+			}))
+			require.False(t, result.IsError)
+			if operation == "UPDATE" || operation == "update" {
+				require.Equal(t, []string{"update-only"}, matchedPolicyNames(t, result))
+			} else {
+				require.Empty(t, matchedPolicyNames(t, result))
+			}
+		})
+	}
+}
+
+// TestAnalyzeMutatingAdmissionPolicyImpact_NullNamespaceForClusterScopedResource
+// preserves null namespaces for requests that do not require one.
+func TestAnalyzeMutatingAdmissionPolicyImpact_NullNamespaceForClusterScopedResource(t *testing.T) {
+	namespace := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "v1", "kind": "Namespace", "metadata": map[string]any{"name": "prod"},
+	}}
+	ksServer := newMutatingPolicyTestServer(t, namespace)
+	result := registeredToolResult(t, dispatchRegisteredTool(t, ksServer, "analyze_mutating_admission_policy_impact", map[string]any{
+		"namespace": nil, "name": "prod", "api_version": "v1", "resource": "namespaces", "cluster_scoped": true,
+	}))
+	require.False(t, result.IsError)
+}

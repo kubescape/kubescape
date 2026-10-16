@@ -52,21 +52,38 @@ func createMutatingAdmissionPolicyTools(ksServer *KubescapeMcpserver) {
 			args = map[string]any{}
 		}
 
-		name, ok := args["name"].(string)
-		if !ok || name == "" {
-			return mcpToolError(ErrCodeInvalidArgument, "name is required", map[string]any{"argument": "name"}), nil
+		name, toolErr := mcpRequiredStringArg(args, "name")
+		if toolErr != nil {
+			return toolErr, nil
 		}
-		apiVersion, ok := args["api_version"].(string)
-		if !ok || apiVersion == "" {
-			return mcpToolError(ErrCodeInvalidArgument, "api_version is required", map[string]any{"argument": "api_version"}), nil
+		apiVersion, toolErr := mcpRequiredStringArg(args, "api_version")
+		if toolErr != nil {
+			return toolErr, nil
 		}
-		resource, ok := args["resource"].(string)
-		if !ok || resource == "" {
-			return mcpToolError(ErrCodeInvalidArgument, "resource is required", map[string]any{"argument": "resource"}), nil
+		resource, toolErr := mcpRequiredStringArg(args, "resource")
+		if toolErr != nil {
+			return toolErr, nil
 		}
-		apiGroup, _ := args["api_group"].(string)
-		namespace, _ := args["namespace"].(string)
-		clusterScoped, _ := args["cluster_scoped"].(bool)
+		apiGroup, argErr := optionalStringArg(args, "api_group")
+		if argErr != nil {
+			return mcpToolError(ErrCodeInvalidArgument, argErr.Error(), map[string]any{"argument": "api_group"}), nil
+		}
+		namespace, argErr := optionalStringArg(args, "namespace")
+		if argErr != nil {
+			return mcpToolError(ErrCodeInvalidArgument, argErr.Error(), map[string]any{"argument": "namespace"}), nil
+		}
+		clusterScoped := false
+		if raw := args["cluster_scoped"]; raw != nil {
+			var valid bool
+			clusterScoped, valid = raw.(bool)
+			if !valid {
+				return mcpToolError(ErrCodeInvalidArgument, "cluster_scoped must be a boolean", map[string]any{"argument": "cluster_scoped"}), nil
+			}
+		}
+		rawOp, argErr := optionalStringArg(args, "operation")
+		if argErr != nil {
+			return mcpToolError(ErrCodeInvalidArgument, argErr.Error(), map[string]any{"argument": "operation"}), nil
+		}
 
 		// A subresource is one path segment: "status", not "pods/status". A
 		// caller repeating the parent would otherwise match no rule at all and
@@ -93,7 +110,7 @@ func createMutatingAdmissionPolicyTools(ksServer *KubescapeMcpserver) {
 		}
 
 		operation := admissionregistrationv1alpha1.Create
-		if rawOp, ok := args["operation"].(string); ok && rawOp != "" {
+		if rawOp != "" {
 			normalized := strings.ToUpper(rawOp)
 			op, known := mutatingAdmissionPolicyOperations[normalized]
 			if !known {
