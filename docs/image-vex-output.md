@@ -9,9 +9,8 @@ two extra columns:
 
 Example:
 
-| Severity | Vulnerability | Component | Version | Fixed in | Image | VEX Status | VEX Justification |
-|---|---|---|---|---|---|---|---|
-| High | CVE-2026-0001 | openssl | 1.0.0 |  | nginx:latest | not_affected | component_not_present |
+| Severity | Vulnerability | KEV | EPSS | Component | Version | Fixed in | Image | VEX Status | VEX Justification |
+|---|---|---|---|---|---|---|---|---|---|
+| High | CVE-2026-0001 |  | 0.2% (41st) | openssl | 1.0.0 |  | nginx:latest | not_affected | component_not_present |
 
-When no vulnerability has VEX data, Kubescape keeps the existing six-column
-image vulnerability table unchanged.
+When no vulnerability has VEX data, the two VEX columns are omitted.

@@ -310,6 +310,8 @@ func (t TableObject) GetContent(i int) core.Row {
 // ImageTableObject maps a single CVE row for the image-scan PDF report (#2782)
 type ImageTableObject struct {
 	cveID        string
+	kev          string
+	epss         string
 	packageName  string
 	version      string
 	severity     string
@@ -317,9 +319,11 @@ type ImageTableObject struct {
 	getTextColor getTextColorFunc
 }
 
-func NewImageTableRow(cveID, packageName, version, severity, fixVersions string, getTextColor getTextColorFunc) *ImageTableObject {
+func NewImageTableRow(cveID, kev, epss, packageName, version, severity, fixVersions string, getTextColor getTextColorFunc) *ImageTableObject {
 	return &ImageTableObject{
 		cveID:        cveID,
+		kev:          kev,
+		epss:         epss,
 		packageName:  packageName,
 		version:      version,
 		severity:     severity,
@@ -332,9 +336,11 @@ func (t ImageTableObject) GetHeader() core.Row {
 	return row.New(10).Add(
 		text.NewCol(1, "Severity", props.Text{Size: 6, Family: fontfamily.Arial, Style: fontstyle.Bold}),
 		text.NewCol(2, "CVE ID", props.Text{Size: 6, Family: fontfamily.Arial, Style: fontstyle.Bold}),
-		text.NewCol(4, "Package", props.Text{Size: 6, Family: fontfamily.Arial, Style: fontstyle.Bold}),
+		text.NewCol(1, "KEV", props.Text{Size: 6, Family: fontfamily.Arial, Style: fontstyle.Bold}),
+		text.NewCol(1, "EPSS", props.Text{Size: 6, Family: fontfamily.Arial, Style: fontstyle.Bold}),
+		text.NewCol(3, "Package", props.Text{Size: 6, Family: fontfamily.Arial, Style: fontstyle.Bold}),
 		text.NewCol(2, "Version", props.Text{Size: 6, Family: fontfamily.Arial, Style: fontstyle.Bold}),
-		text.NewCol(3, "Fixed in", props.Text{Size: 6, Family: fontfamily.Arial, Style: fontstyle.Bold}),
+		text.NewCol(2, "Fixed in", props.Text{Size: 6, Family: fontfamily.Arial, Style: fontstyle.Bold}),
 	)
 }
 
@@ -342,9 +348,11 @@ func (t ImageTableObject) GetContent(i int) core.Row {
 	r := row.New(3).Add(
 		text.NewCol(1, t.severity, props.Text{Style: fontstyle.Normal, Family: fontfamily.Courier, Size: 6, Color: t.getTextColor(t.severity)}),
 		text.NewCol(2, t.cveID, props.Text{Style: fontstyle.Normal, Family: fontfamily.Courier, Size: 6, Color: &props.Color{}}),
-		text.NewCol(4, t.packageName, props.Text{Style: fontstyle.Normal, Family: fontfamily.Courier, Size: 6}),
+		text.NewCol(1, t.kev, props.Text{Style: fontstyle.Bold, Family: fontfamily.Courier, Size: 6}),
+		text.NewCol(1, t.epss, props.Text{Style: fontstyle.Normal, Family: fontfamily.Courier, Size: 6}),
+		text.NewCol(3, t.packageName, props.Text{Style: fontstyle.Normal, Family: fontfamily.Courier, Size: 6}),
 		text.NewCol(2, t.version, props.Text{Style: fontstyle.Normal, Family: fontfamily.Courier, Size: 6}),
-		text.NewCol(3, t.fixVersions, props.Text{VerticalPadding: 1, Style: fontstyle.Normal, Family: fontfamily.Courier, Size: 6}),
+		text.NewCol(2, t.fixVersions, props.Text{VerticalPadding: 1, Style: fontstyle.Normal, Family: fontfamily.Courier, Size: 6}),
 	)
 
 	if i%2 == 0 {

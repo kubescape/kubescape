@@ -48,7 +48,7 @@ func TestRenderTable(t *testing.T) {
 					},
 				},
 			},
-			want: "╭──────────┬───────────────┬───────────┬─────────┬──────────┬──────────────╮\n│ Severity │ Vulnerability │ Component │ Version │ Fixed in │ Image        │\n├──────────┼───────────────┼───────────┼─────────┼──────────┼──────────────┤\n│   High   │ CVE-2020-0002 │ package2  │ 1.0.0   │          │ alpine:3.18  │\n│  Medium  │ CVE-2020-0003 │ package3  │ 1.0.0   │          │ ubuntu:22.04 │\n│    Low   │ CVE-2020-0001 │ package1  │ 1.0.0   │          │ nginx:latest │\n╰──────────┴───────────────┴───────────┴─────────┴──────────┴──────────────╯\n",
+			want: "╭──────────┬───────────────┬─────┬──────┬───────────┬─────────┬──────────┬──────────────╮\n│ Severity │ Vulnerability │ KEV │ EPSS │ Component │ Version │ Fixed in │ Image        │\n├──────────┼───────────────┼─────┼──────┼───────────┼─────────┼──────────┼──────────────┤\n│   High   │ CVE-2020-0002 │     │  N/A │ package2  │ 1.0.0   │          │ alpine:3.18  │\n│  Medium  │ CVE-2020-0003 │     │  N/A │ package3  │ 1.0.0   │          │ ubuntu:22.04 │\n│    Low   │ CVE-2020-0001 │     │  N/A │ package1  │ 1.0.0   │          │ nginx:latest │\n╰──────────┴───────────────┴─────┴──────┴───────────┴─────────┴──────────┴──────────────╯\n",
 		},
 		{
 			name: "check fixed CVEs show versions",
@@ -73,7 +73,43 @@ func TestRenderTable(t *testing.T) {
 					},
 				},
 			},
-			want: "╭──────────┬───────────────┬───────────┬─────────┬──────────┬─────────────╮\n│ Severity │ Vulnerability │ Component │ Version │ Fixed in │ Image       │\n├──────────┼───────────────┼───────────┼─────────┼──────────┼─────────────┤\n│   High   │ CVE-2020-0002 │ package2  │ 1.0.0   │ v1,v2    │ golang:1.24 │\n│    Low   │ CVE-2020-0001 │ package1  │ 1.0.0   │          │ test:latest │\n╰──────────┴───────────────┴───────────┴─────────┴──────────┴─────────────╯\n",
+			want: "╭──────────┬───────────────┬─────┬──────┬───────────┬─────────┬──────────┬─────────────╮\n│ Severity │ Vulnerability │ KEV │ EPSS │ Component │ Version │ Fixed in │ Image       │\n├──────────┼───────────────┼─────┼──────┼───────────┼─────────┼──────────┼─────────────┤\n│   High   │ CVE-2020-0002 │     │  N/A │ package2  │ 1.0.0   │ v1,v2    │ golang:1.24 │\n│    Low   │ CVE-2020-0001 │     │  N/A │ package1  │ 1.0.0   │          │ test:latest │\n╰──────────┴───────────────┴─────┴──────┴───────────┴─────────┴──────────┴─────────────╯\n",
+		},
+		{
+			name: "check KEV and EPSS are shown and drive the order",
+			summary: ImageScanSummary{
+				CVEs: []CVE{
+					{
+						ID:         "CVE-2020-0001",
+						Severity:   "Critical",
+						Package:    "package1",
+						Version:    "1.0.0",
+						FixedState: string(v5.NotFixedState),
+						Image:      "nginx:1.17.0",
+						EPSS:       &EPSS{Score: 0.004, Percentile: 0.61},
+					},
+					{
+						ID:         "CVE-2020-15999",
+						Severity:   "Medium",
+						Package:    "libfreetype6",
+						Version:    "2.9.1",
+						FixedState: string(v5.NotFixedState),
+						Image:      "nginx:1.17.0",
+						KEV:        true,
+						EPSS:       &EPSS{Score: 0.63894, Percentile: 0.99215},
+					},
+					{
+						ID:         "CVE-2020-0002",
+						Severity:   "Critical",
+						Package:    "package2",
+						Version:    "1.0.0",
+						FixedState: string(v5.NotFixedState),
+						Image:      "nginx:1.17.0",
+						EPSS:       &EPSS{Score: 0.2, Percentile: 0.95},
+					},
+				},
+			},
+			want: "╭──────────┬────────────────┬─────┬──────────────┬──────────────┬─────────┬──────────┬──────────────╮\n│ Severity │ Vulnerability  │ KEV │ EPSS         │ Component    │ Version │ Fixed in │ Image        │\n├──────────┼────────────────┼─────┼──────────────┼──────────────┼─────────┼──────────┼──────────────┤\n│  Medium  │ CVE-2020-15999 │ yes │ 63.9% (99th) │ libfreetype6 │ 2.9.1   │          │ nginx:1.17.0 │\n│ Critical │ CVE-2020-0002  │     │ 20.0% (95th) │ package2     │ 1.0.0   │          │ nginx:1.17.0 │\n│ Critical │ CVE-2020-0001  │     │  0.4% (61st) │ package1     │ 1.0.0   │          │ nginx:1.17.0 │\n╰──────────┴────────────────┴─────┴──────────────┴──────────────┴─────────┴──────────┴──────────────╯\n",
 		},
 	}
 
@@ -147,9 +183,9 @@ func TestGenerateRows(t *testing.T) {
 				},
 			},
 			expectedRows: [][]string{
-				{"High", "CVE-2020-0002", "package2", "1.0.0", "", "alpine:3.18"},
-				{"Medium", "CVE-2020-0003", "package3", "1.0.0", "", "ubuntu:22.04"},
-				{"Low", "CVE-2020-0001", "package1", "1.0.0", "", "nginx:latest"},
+				{"High", "CVE-2020-0002", "", "N/A", "package2", "1.0.0", "", "alpine:3.18"},
+				{"Medium", "CVE-2020-0003", "", "N/A", "package3", "1.0.0", "", "ubuntu:22.04"},
+				{"Low", "CVE-2020-0001", "", "N/A", "package1", "1.0.0", "", "nginx:latest"},
 			},
 		},
 		{
@@ -176,8 +212,8 @@ func TestGenerateRows(t *testing.T) {
 				},
 			},
 			expectedRows: [][]string{
-				{"High", "CVE-2020-0002", "package2", "1.0.0", "v1,v2", "golang:1.24"},
-				{"Low", "CVE-2020-0001", "package1", "1.0.0", "", "test:latest"},
+				{"High", "CVE-2020-0002", "", "N/A", "package2", "1.0.0", "v1,v2", "golang:1.24"},
+				{"Low", "CVE-2020-0001", "", "N/A", "package1", "1.0.0", "", "test:latest"},
 			},
 		},
 	}
@@ -185,17 +221,11 @@ func TestGenerateRows(t *testing.T) {
 	for _, tt := range test {
 		t.Run(tt.name, func(t *testing.T) {
 			actualRows := generateRows(tt.summary)
-			if len(actualRows) != len(tt.expectedRows) {
-				t.Errorf("expected %d rows, got %d", len(tt.expectedRows), len(actualRows))
-			}
-
+			got := make([][]string, len(actualRows))
 			for i := range actualRows {
-				for j := range actualRows[i] {
-					if actualRows[i][j] != tt.expectedRows[i][j] {
-						t.Errorf("expected %s, got %s", tt.expectedRows[i][j], actualRows[i][j])
-					}
-				}
+				got[i] = rowToStrings(actualRows[i])
 			}
+			assert.Equal(t, tt.expectedRows, got)
 		})
 
 	}
@@ -218,7 +248,7 @@ func TestGenerateRow(t *testing.T) {
 				FixedState:  string(v5.FixedState),
 				Image:       "golang:1.24",
 			},
-			want: []string{"High", "CVE-2020-0001", "package1", "1.0.0", "v1,v2", "golang:1.24"},
+			want: []string{"High", "CVE-2020-0001", "", "N/A", "package1", "1.0.0", "v1,v2", "golang:1.24"},
 		},
 		{
 			name: "check row with not fixed version",
@@ -230,19 +260,27 @@ func TestGenerateRow(t *testing.T) {
 				FixedState: string(v5.NotFixedState),
 				Image:      "nginx:latest",
 			},
-			want: []string{"High", "CVE-2020-0001", "package1", "1.0.0", "", "nginx:latest"},
+			want: []string{"High", "CVE-2020-0001", "", "N/A", "package1", "1.0.0", "", "nginx:latest"},
+		},
+		{
+			name: "check row with KEV and EPSS",
+			cve: CVE{
+				Severity:   "Medium",
+				ID:         "CVE-2020-15999",
+				Package:    "libfreetype6",
+				Version:    "2.9.1",
+				FixedState: string(v5.NotFixedState),
+				Image:      "nginx:1.17.0",
+				KEV:        true,
+				EPSS:       &EPSS{Score: 0.63894, Percentile: 0.99215},
+			},
+			want: []string{"Medium", "CVE-2020-15999", "yes", "63.9% (99th)", "libfreetype6", "2.9.1", "", "nginx:1.17.0"},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			actualRow := generateRow(tt.cve)
-			for i := range actualRow {
-				if actualRow[i] != tt.want[i] {
-					t.Errorf("expected %s, got %s", tt.want[i], actualRow[i])
-				}
-			}
-
+			assert.Equal(t, tt.want, rowToStrings(generateRow(tt.cve)))
 		})
 	}
 }
@@ -250,13 +288,9 @@ func TestGenerateRow(t *testing.T) {
 func TestGetImageScanningHeaders(t *testing.T) {
 	headers := getImageScanningHeaders()
 
-	expectedHeaders := []string{"Severity", "Vulnerability", "Component", "Version", "Fixed in", "Image"}
+	expectedHeaders := []string{"Severity", "Vulnerability", "KEV", "EPSS", "Component", "Version", "Fixed in", "Image"}
 
-	for i := range headers {
-		if headers[i] != expectedHeaders[i] {
-			t.Errorf("expected %s, got %s", expectedHeaders[i], headers[i])
-		}
-	}
+	assert.Equal(t, expectedHeaders, rowToStrings(headers))
 }
 
 func TestGenerateRows_AppendsVEXColumnsWhenPresent(t *testing.T) {
@@ -288,6 +322,8 @@ func TestGenerateRows_AppendsVEXColumnsWhenPresent(t *testing.T) {
 	assert.Equal(t, []string{
 		"High",
 		"CVE-2020-0002",
+		"",
+		"N/A",
 		"package2",
 		"1.0.0",
 		"",
@@ -298,6 +334,8 @@ func TestGenerateRows_AppendsVEXColumnsWhenPresent(t *testing.T) {
 	assert.Equal(t, []string{
 		"Low",
 		"CVE-2020-0001",
+		"",
+		"N/A",
 		"package1",
 		"1.0.0",
 		"",
@@ -340,18 +378,14 @@ func TestRenderTable_WithVEXColumns(t *testing.T) {
 
 func TestGetImageScanningHeadersWithVEX(t *testing.T) {
 	headers := getImageScanningHeadersWithVEX(true)
-	expectedHeaders := []string{"Severity", "Vulnerability", "Component", "Version", "Fixed in", "Image", "VEX Status", "VEX Justification"}
+	expectedHeaders := []string{"Severity", "Vulnerability", "KEV", "EPSS", "Component", "Version", "Fixed in", "Image", "VEX Status", "VEX Justification"}
 
-	for i := range headers {
-		if headers[i] != expectedHeaders[i] {
-			t.Errorf("expected %s, got %s", expectedHeaders[i], headers[i])
-		}
-	}
+	assert.Equal(t, expectedHeaders, rowToStrings(headers))
 }
 
 func TestGetImageScanningColumnsAlignmentsWithVEX(t *testing.T) {
-	assert.Len(t, getImageScanningColumnsAlignmentsWithVEX(false), 6)
-	assert.Len(t, getImageScanningColumnsAlignmentsWithVEX(true), 8)
+	assert.Len(t, getImageScanningColumnsAlignmentsWithVEX(false), 8)
+	assert.Len(t, getImageScanningColumnsAlignmentsWithVEX(true), 10)
 }
 
 func TestSummaryHasVEX(t *testing.T) {

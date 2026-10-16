@@ -184,6 +184,9 @@ func (hp *HtmlPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.O
 		"sortByNamespace":         sortHTMLResourceTableView,
 		"controlSeverityToString": apis.ControlSeverityToString,
 		"sortBySeverityName":      sortHTMLControlsBySeverityName,
+		"sortCVEsByRisk":          imageprinter.SortedCVEs,
+		"formatKEV":               imageprinter.FormatKEV,
+		"formatEPSS":              imageprinter.FormatEPSS,
 	}
 	tpl := template.Must(
 		template.New("htmlReport").Funcs(tplFuncMap).Parse(reportTemplate),

@@ -8,6 +8,7 @@ import (
 
 	v5 "github.com/anchore/grype/grype/db/v5"
 	"github.com/anchore/grype/grype/match"
+	"github.com/anchore/grype/grype/vulnerability"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils"
@@ -537,6 +538,8 @@ func extractCVEs(matches match.Matches, image string, vexStatuses map[string]cau
 			FixVersions: m.Vulnerability.Fix.Versions,
 			FixedState:  m.Vulnerability.Fix.State.String(),
 			Image:       image,
+			KEV:         len(m.Vulnerability.Metadata.KnownExploited) > 0,
+			EPSS:        highestEPSS(m.Vulnerability.Metadata.EPSS),
 		}
 		if vexStatus, ok := vexStatuses[cve.ID]; ok {
 			cve.VexStatus = vexStatus.Status
@@ -545,6 +548,22 @@ func extractCVEs(matches match.Matches, image string, vexStatuses map[string]cau
 		CVEs = append(CVEs, cve)
 	}
 	return CVEs
+}
+
+// highestEPSS returns the highest of a match's EPSS scores, or nil when it has
+// none. Grype attaches one score per CVE the vulnerability maps to, so a
+// non-CVE ID such as a GHSA can carry several.
+func highestEPSS(scores []vulnerability.EPSS) *imageprinter.EPSS {
+	if len(scores) == 0 {
+		return nil
+	}
+	highest := scores[0]
+	for _, s := range scores[1:] {
+		if s.EPSS > highest.EPSS {
+			highest = s
+		}
+	}
+	return &imageprinter.EPSS{Score: highest.EPSS, Percentile: highest.Percentile}
 }
 
 // buildImageScanSummary aggregates per-image scan data into the summary every

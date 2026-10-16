@@ -30,8 +30,8 @@
 
 ## Vulnerabilities
 
-| Severity | Vulnerability | Package | Version | Fixed In | Image |
-|---|---|---|---|---|---|
-| Critical | CVE-2026-0001 | openssl | 1.0.0 | 1.0.1, 1.0.2 | `registry.example.com/app:v1 [linux/amd64]` |
-| High | CVE-2026-0003 | glibc | 2.39 | wont-fix | `registry.example.com/app:v1 [linux/arm64]` |
-| Medium | CVE-2026-0002 | busybox | 1.36.0 |  | `registry.example.com/app:v1 [linux/amd64]` |
+| Severity | Vulnerability | KEV | EPSS | Package | Version | Fixed In | Image |
+|---|---|:---:|---:|---|---|---|---|
+| Medium | CVE-2026-0002 | yes | 63.9% (99th) | busybox | 1.36.0 |  | `registry.example.com/app:v1 [linux/amd64]` |
+| Critical | CVE-2026-0001 |  | < 0.1% (12th) | openssl | 1.0.0 | 1.0.1, 1.0.2 | `registry.example.com/app:v1 [linux/amd64]` |
+| High | CVE-2026-0003 |  | N/A | glibc | 2.39 | wont-fix | `registry.example.com/app:v1 [linux/arm64]` |

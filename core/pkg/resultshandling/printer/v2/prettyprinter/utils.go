@@ -102,14 +102,26 @@ func addEmptySeverities(mapSeverityTSummary map[string]*imageprinter.SeveritySum
 	}
 }
 
-// getFilteredCVEs returns a list of CVEs to show in the table. If there are no vulnerabilities with severity Critical or High, it will return vulnerabilities with severity Medium. Otherwise it will return vulnerabilities with severity Critical or High
+// getFilteredCVEs returns a list of CVEs to show in the table. If there are no vulnerabilities with severity Critical or High, it will return vulnerabilities with severity Medium. Otherwise it will return vulnerabilities with severity Critical or High.
+// Vulnerabilities on the CISA KEV catalog are always returned, whatever their severity.
 func getFilteredCVEs(cves []imageprinter.CVE) []imageprinter.CVE {
-	// filter out vulnerabilities with severity lower than High
-	filteredCVEs := filterCVEsBySeverities(cves, []string{apis.SeverityCriticalString, apis.SeverityHighString})
+	severities := []string{apis.SeverityCriticalString, apis.SeverityHighString}
 
-	// if there are no vulnerabilities with severity Critical or High, add vulnerabilities with severity Medium
-	if len(filteredCVEs) == 0 {
-		filteredCVEs = filterCVEsBySeverities(cves, []string{apis.SeverityMediumString})
+	// if there are no vulnerabilities with severity Critical or High, show vulnerabilities with severity Medium
+	if len(filterCVEsBySeverities(cves, severities)) == 0 {
+		severities = []string{apis.SeverityMediumString}
+	}
+
+	severityMap := make(map[string]bool, len(severities))
+	for _, severity := range severities {
+		severityMap[severity] = true
+	}
+
+	filteredCVEs := []imageprinter.CVE{}
+	for _, cve := range cves {
+		if cve.KEV || severityMap[cve.Severity] {
+			filteredCVEs = append(filteredCVEs, cve)
+		}
 	}
 
 	return filteredCVEs
@@ -132,6 +144,17 @@ func filterCVEsBySeverities(cves []imageprinter.CVE, severities []string) []imag
 	}
 
 	return filteredCVEs
+}
+
+// countKEV returns how many CVEs are on the CISA KEV catalog.
+func countKEV(cves []imageprinter.CVE) int {
+	count := 0
+	for _, cve := range cves {
+		if cve.KEV {
+			count++
+		}
+	}
+	return count
 }
 
 // getSortPackageScores returns a slice of package names sorted by score
@@ -253,6 +276,10 @@ func printImageScanningSummary(writer *os.File, summary imageprinter.ImageScanSu
 
 	for _, k := range keys {
 		cautils.StarDisplay(writer, "%d %s \n", mapSeverityTSummary[k].NumberOfCVEs, utils.GetColorForVulnerabilitySeverity(k)(k))
+	}
+
+	if kevCount := countKEV(summary.CVEs); kevCount > 0 {
+		cautils.StarDisplay(writer, "%d known exploited (CISA KEV) \n", kevCount)
 	}
 
 	cautils.SimpleDisplay(writer, "\n")

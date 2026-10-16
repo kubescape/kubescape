@@ -236,6 +236,57 @@ func TestExtractCVEsAddsMatchingVEXStatus(t *testing.T) {
 	assert.Equal(t, "component_not_present", got[0].VexJustification)
 }
 
+func TestExtractCVEsAddsKEVAndEPSS(t *testing.T) {
+	newMatch := func(id, pkgName string, kev []vulnerability.KnownExploited, epss []vulnerability.EPSS) match.Match {
+		return match.Match{
+			Package: pkg.Package{
+				ID:      pkg.ID(pkgName),
+				Name:    pkgName,
+				Version: "1.0.0",
+			},
+			Vulnerability: vulnerability.Vulnerability{
+				Reference: vulnerability.Reference{ID: id},
+				Metadata: &vulnerability.Metadata{
+					ID:             id,
+					Severity:       "Medium",
+					KnownExploited: kev,
+					EPSS:           epss,
+				},
+			},
+		}
+	}
+	matches := match.NewMatches(
+		newMatch("CVE-2020-15999", "libfreetype6",
+			[]vulnerability.KnownExploited{{CVE: "CVE-2020-15999"}},
+			[]vulnerability.EPSS{{CVE: "CVE-2020-15999", EPSS: 0.63894, Percentile: 0.99215}}),
+		newMatch("GHSA-aaaa-bbbb-cccc", "lib-ghsa", nil,
+			[]vulnerability.EPSS{
+				{CVE: "CVE-2026-0001", EPSS: 0.02, Percentile: 0.8},
+				{CVE: "CVE-2026-0002", EPSS: 0.4, Percentile: 0.97},
+				{CVE: "CVE-2026-0003", EPSS: 0.1, Percentile: 0.93},
+			}),
+		newMatch("CVE-2026-0004", "lib-unscored", nil, nil),
+	)
+
+	got := extractCVEs(matches, "nginx:1.17.0", nil)
+
+	byID := make(map[string]imageprinter.CVE, len(got))
+	for _, cve := range got {
+		byID[cve.ID] = cve
+	}
+	require.Len(t, byID, 3)
+
+	assert.True(t, byID["CVE-2020-15999"].KEV)
+	assert.Equal(t, &imageprinter.EPSS{Score: 0.63894, Percentile: 0.99215}, byID["CVE-2020-15999"].EPSS)
+
+	assert.False(t, byID["GHSA-aaaa-bbbb-cccc"].KEV)
+	assert.Equal(t, &imageprinter.EPSS{Score: 0.4, Percentile: 0.97}, byID["GHSA-aaaa-bbbb-cccc"].EPSS,
+		"a vulnerability with several CVEs takes its highest EPSS score")
+
+	assert.False(t, byID["CVE-2026-0004"].KEV)
+	assert.Nil(t, byID["CVE-2026-0004"].EPSS)
+}
+
 func TestExtractCVEsLeavesUnmatchedVEXEmpty(t *testing.T) {
 	matches := match.NewMatches(match.Match{
 		Package: pkg.Package{

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
 )
@@ -146,4 +147,55 @@ func TestPrintImageScanningSummary_NoDBLineWhenNil(t *testing.T) {
 		t.Fatal(err)
 	}
 	assert.False(t, strings.Contains(string(got), "Vulnerability DB built:"))
+}
+
+func TestPrintImageScanningSummary_KEVCount(t *testing.T) {
+	tests := []struct {
+		name    string
+		cves    []imageprinter.CVE
+		wantKEV bool
+	}{
+		{
+			name: "counts KEV findings",
+			cves: []imageprinter.CVE{
+				{ID: "CVE-1", Severity: "Critical"},
+				{ID: "CVE-2", Severity: "Medium", KEV: true},
+				{ID: "CVE-3", Severity: "Low", KEV: true},
+			},
+			wantKEV: true,
+		},
+		{
+			name: "omits the line without KEV findings",
+			cves: []imageprinter.CVE{
+				{ID: "CVE-1", Severity: "Critical"},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			summary := imageprinter.ImageScanSummary{
+				CVEs:                  tt.cves,
+				PackageScores:         map[string]*imageprinter.PackageScore{},
+				MapsSeverityToSummary: map[string]*imageprinter.SeveritySummary{},
+				Images:                []string{"img:1"},
+			}
+
+			f, err := os.CreateTemp(t.TempDir(), "kev-line")
+			require.NoError(t, err)
+			defer f.Close()
+
+			printImageScanningSummary(f, summary, false)
+
+			_, err = f.Seek(0, 0)
+			require.NoError(t, err)
+			got, err := io.ReadAll(f)
+			require.NoError(t, err)
+			if tt.wantKEV {
+				assert.Contains(t, string(got), "2 known exploited (CISA KEV)")
+			} else {
+				assert.NotContains(t, string(got), "CISA KEV")
+			}
+		})
+	}
 }
