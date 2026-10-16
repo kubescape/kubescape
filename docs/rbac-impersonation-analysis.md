@@ -19,6 +19,11 @@ require a ServiceAccount object. These identities do not enter the live
 ServiceAccount inventory used for pod creation or token minting. A target with only read access contributes
 only read access; a namespaced permission remains namespaced.
 
+Unrestricted User impersonation also follows `system:anonymous` when a collected
+binding grants permissions to `system:unauthenticated`. Anonymous impersonation
+inherits that group, excluding the default `system:authenticated` group. Explicit
+User name restrictions still apply, and namespaced group grants stay namespaced.
+
 `cluster_admin_equivalent` is confirmed when a real target or subsequent
 escalation grants cluster-wide administrative power. A false value accompanied
 by unbounded findings is not an all-clear: additional identities or bindings

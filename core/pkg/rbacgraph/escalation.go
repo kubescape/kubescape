@@ -8,6 +8,7 @@ import (
 
 	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apiserver/pkg/authentication/serviceaccount"
+	"k8s.io/apiserver/pkg/authentication/user"
 )
 
 // superuserGroups are RBAC subject names the authorizer treats as
@@ -136,6 +137,10 @@ func (idx *Index) boundUserNames() []string {
 		for _, subject := range subjects {
 			if subject.Kind == "User" && subject.Name != "" {
 				seen[subject.Name] = true
+			} else if subject.Kind == "Group" && subject.Name == user.AllUnauthenticated {
+				// Kubernetes assigns this group when impersonating system:anonymous,
+				// even when no binding explicitly names that user.
+				seen[user.Anonymous] = true
 			}
 		}
 	}

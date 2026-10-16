@@ -51,7 +51,8 @@
 //   - Kubernetes' implicit groups: every ServiceAccount is automatically a
 //     member of system:serviceaccounts, system:serviceaccounts:<its
 //     namespace>, and system:authenticated; every User is a member of
-//     system:authenticated. A RoleBinding/ClusterRoleBinding naming one of
+//     system:authenticated (system:anonymous instead belongs to
+//     system:unauthenticated). A RoleBinding/ClusterRoleBinding naming one of
 //     these as its subject grants its rules to every matching identity,
 //     not just to a literally-named Group object -- these are
 //     authenticator-assigned, not RBAC objects, and binding a privileged
