@@ -119,6 +119,118 @@ Get detailed information about a specific CVE in a manifest, including affected 
 | `manifest_name` | string | Yes | Name of the manifest |
 | `cve_id` | string | Yes | CVE identifier (e.g., `"CVE-2023-12345"`) |
 
+#### `analyze_vulnerability_exposure`
+
+Correlate known image vulnerabilities (from already-scanned `VulnerabilityManifest` objects) with how reachable each workload is: its NetworkPolicy ingress exposure and its external exposure through a Service, Ingress, or Gateway API route. With `include_identity` it also reports the ServiceAccount each vulnerable workload runs as and what the existing RBAC escalation analysis finds for it.
+
+**Parameters:**
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `namespace` | string | No | Restrict to one namespace (default: cluster-wide) |
+| `min_severity` | string | No | Minimum severity: `Critical`, `High` (default), `Medium`, `Low`, `Negligible` |
+| `include_identity` | boolean | No | Add the `identity` section described below (default `false`) |
+
+When `include_identity` is omitted, `null`, or `false`, the response is exactly what it was before the option existed: `findings` and, if there are any, `warnings`. A value that is not a boolean returns an `INVALID_ARGUMENT` error.
+
+##### Identity context (`include_identity: true`)
+
+The response gains two keys; `findings` is unchanged and no severity is altered.
+
+- `identity`: one entry per workload that has at least one vulnerability at or above `min_severity`, sorted by namespace, kind, and name. Workloads are matched by their exact namespace, kind, and name from the manifest's workload ID, never by name alone.
+- `identity_note`: a reminder of the limits described below.
+
+Each entry has:
+
+| Field | Meaning |
+|-------|---------|
+| `namespace`, `workload_kind`, `workload_name` | The workload |
+| `vulnerabilities` | Its vulnerabilities at or above `min_severity` (`cve_id`, `severity`, `fix_available`), de-duplicated by CVE ID |
+| `status` | See [Statuses](#statuses) |
+| `reason` | Why the status is not `analyzed` (when applicable) |
+| `service_account` | `namespace`, `name`, `origin` (`explicit`, `defaulted`, or `unknown`), and `object_collected` (`present`, `absent`, or `unknown`). Absent when the workload could not be resolved |
+| `token` | `state` (`mounted`, `not-mounted`, or `unknown`) and a `reason` for the last two |
+| `rbac` | `state`: `complete`, `partial`, or `unavailable` |
+| `permissions` | The RBAC analysis of the ServiceAccount, described below. Present only when the analysis ran |
+
+###### Statuses
+
+| Status | Meaning | What it does not mean |
+|--------|---------|-----------------------|
+| `analyzed` | The workload resolved to a ServiceAccount, RBAC objects were collected completely, and the escalation analysis ran | That the ServiceAccount is safe, or that it gains no permissions |
+| `token-not-mounted` | As `analyzed`, but the workload spec shows no ServiceAccount token reaching the pod. The RBAC analysis is still included | That the ServiceAccount's permissions are irrelevant |
+| `workload-unresolved` | No ServiceAccount could be established (unsupported kind, object not found, or an unreadable spec). `reason` says why | Anything about the workload's identity or RBAC |
+| `rbac-unavailable` | RBAC objects could not be listed, so no analysis ran | An empty analysis |
+| `rbac-incomplete` | Some RBAC objects could not be decoded. The analysis covers only what was collected, and it is included | A complete analysis |
+
+###### Direct and gained permissions
+
+`permissions` keeps these separate, and none implies another:
+
+| Field | Meaning |
+|-------|---------|
+| `direct_rules` | Rules the ServiceAccount holds through its own bindings, including bindings to the implicit groups `system:serviceaccounts`, `system:serviceaccounts:<namespace>`, and `system:authenticated` |
+| `gained_rules`, `permission_gain` | Finite rules the ServiceAccount can additionally adopt (through `bind` or `escalate`), or inherits from an identity it can reach: the analysis's effective rules that are not direct rules. This can be non-empty while every field below is empty or false |
+| `grants` | How each gain arises: the subject, the primitive (`bind-verb` or `escalate-verb`), the scope, and the target Role or ClusterRole |
+| `identities_reached` | Other identities it can assume (impersonation, creating a pod as another ServiceAccount, minting a token), each with its path |
+| `unbounded` | Grants that cannot be enumerated (for example an unrestricted `bind`), with their scope. An entry with `scope_unknown: true` is a warning about a Role that could not be found and grants nothing |
+| `scope_unknown` | Whether any `unbounded` entry has an unresolved scope |
+| `cluster_admin` | Whether cluster-admin-equivalent power is reachable by RBAC alone. When true, `gained_rules` and `identities_reached` are not complete enumerations |
+| `truncated` | The search ran out of budget before reaching a verdict, so a missing path is not confirmed |
+| `no_additional_reachability_found` | True only when RBAC was collected completely, the search was not truncated, and no other identity, unbounded grant, or unknown scope was found. It is not "safe" and says nothing about `gained_rules` |
+
+###### Token states
+
+The token state is the workload spec's static assessment of whether a ServiceAccount token reaches the pod. It is reported separately and never changes the RBAC analysis.
+
+- `mounted`: the ServiceAccount admission plugin would inject a token (automounting is on and some container does not already mount something at `/var/run/secrets/kubernetes.io/serviceaccount`), or a container mounts a projected `serviceAccountToken` volume in a way that exposes the token file. A `subPath` exposes it when it is `.`, the token file, or a directory containing it, after path cleaning (`./token` is the token file); a sibling file does not.
+- `not-mounted`: every such route is closed in the spec. It does not rule out a token mounted from a long-lived token Secret volume, which is not modelled.
+- `unknown`: the spec cannot establish it, for example the ServiceAccount's own `automountServiceAccountToken` is unset and the ServiceAccount object was not collected, a `subPathExpr` refers to environment variables (`$(VAR)`), or part of the spec could not be read. `unknown` is never reported as `not-mounted`.
+
+Kubernetes has no namespace-level automount setting; the pod spec's `automountServiceAccountToken` takes precedence over the ServiceAccount's, which defaults to true.
+
+The assessment is made from the workload object as it is stored. For a controller it describes the pod template, not individual running Pods, and it does not model mutating admission webhooks or other controllers that change a pod after creation, tokens mounted from a long-lived token Secret, or processes that obtain a token another way. Ephemeral containers are considered only for mounting a token volume the pod already has.
+
+###### Limits
+
+- The identity section is static context. It does not establish that a vulnerability is exploitable, that a credential is usable, that admission control (Pod Security, Kyverno, Gatekeeper) would allow a step, or what the workload does at runtime.
+- A missing, unresolved, incomplete, or truncated result is not evidence of safety.
+- RBAC objects are always collected cluster-wide, whatever `namespace` is set to, because an escalation path can lead into any namespace. If they cannot be listed, the workloads are reported `rbac-unavailable` and the rest of the response is unaffected.
+- The ServiceAccount is read from the live workload object: the pod spec for a Pod, or the pod template for Deployment, StatefulSet, DaemonSet, ReplicaSet, Job, and CronJob. Other kinds are `workload-unresolved`.
+- Vulnerabilities are attributed per workload from the manifest's workload ID, so an image-level manifest without one is not included.
+- The workload objects and the RBAC objects are read by separate API calls, so they can reflect slightly different moments in a changing cluster.
+
+**Example (abridged):**
+```json
+{
+  "findings": [ ... ],
+  "identity": [
+    {
+      "namespace": "prod",
+      "workload_kind": "Deployment",
+      "workload_name": "api",
+      "status": "analyzed",
+      "vulnerabilities": [{"cve_id": "CVE-2024-1", "severity": "Critical", "fix_available": false}],
+      "service_account": {"namespace": "prod", "name": "api", "origin": "explicit", "object_collected": "present"},
+      "token": {"state": "mounted"},
+      "rbac": {"state": "complete"},
+      "permissions": {
+        "direct_rules": [ ... ],
+        "gained_rules": [{"scope": "prod", "api_groups": [""], "resources": ["secrets"], "verbs": ["get", "list"]}],
+        "permission_gain": true,
+        "grants": [{"subject": "ServiceAccount prod/api", "primitive": "bind-verb", "scope": "prod", "detail": "...", "target": {"kind": "Role", "namespace": "prod", "name": "secret-reader"}}],
+        "identities_reached": [],
+        "unbounded": [],
+        "scope_unknown": false,
+        "cluster_admin": false,
+        "truncated": false,
+        "no_additional_reachability_found": true
+      }
+    }
+  ],
+  "identity_note": "..."
+}
+```
+
 ### Configuration Tools
 
 #### `list_configuration_security_scan_manifests`

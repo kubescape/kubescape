@@ -1,6 +1,11 @@
 package rbacgraph
 
-import rbacv1 "k8s.io/api/rbac/v1"
+import (
+	"slices"
+	"strings"
+
+	rbacv1 "k8s.io/api/rbac/v1"
+)
 
 // EscalationResult is the outcome of computing every RBAC escalation
 // technique reachable from a starting Subject.
@@ -25,6 +30,18 @@ type EscalationResult struct {
 	// retain uncertainty about missing named Roles without granting any
 	// permissions or proving cluster-admin.
 	Unbounded []UnboundedFinding
+	// Granted lists every finite rule grant -- a bind-verb or escalate-verb
+	// edge whose GrantedRules were adopted -- together with the subject that
+	// adopted it, deduplicated by (subject, primitive, scope, detail) and
+	// sorted by that key. It is the provenance of the rules EffectiveRules
+	// holds beyond the direct rules of the subject that adopted them: a
+	// grant leaves Reached, Unbounded and ClusterAdmin untouched, so without
+	// this the closure would show rules appearing from nowhere. A
+	// namespace-scoped Unbounded finding is not repeated here; it is already
+	// in Unbounded, and the wildcard rule it materializes is explained by it.
+	// Like EffectiveRules, it is not a complete enumeration once ClusterAdmin
+	// is confirmed.
+	Granted []GrantedFinding
 	// EffectiveRules is the union of every ScopedRule reachable: Start's
 	// own direct rules, every rule granted via bind-verb/escalate-verb
 	// (including transitively, when a granted Role/ClusterRole itself
@@ -63,6 +80,15 @@ type EscalationResult struct {
 // ScopeUnknown edge instead warns about a missing named Role with no
 // resolved namespace; it does not confirm authority in any scope.
 type UnboundedFinding struct {
+	Subject Subject
+	Edge    EscalationEdge
+}
+
+// GrantedFinding records that Subject adopted the finite rule set an
+// escalate-verb or bind-verb edge grants. Subject is Start for a grant its
+// own rules unlock, or an identity in Reached when that identity's rules
+// unlocked it; either way its GrantedRules are part of EffectiveRules.
+type GrantedFinding struct {
 	Subject Subject
 	Edge    EscalationEdge
 }
@@ -121,6 +147,7 @@ func (idx *Index) AnalyzeEscalation(start Subject) EscalationResult {
 	visited := map[Subject]bool{start: true}
 	var order []Subject
 	var unbounded []UnboundedFinding
+	var granted []GrantedFinding
 	clusterAdmin := IsClusterAdminEquivalent(subjectRules[start]) || superuserGroups[start.Name] && start.Kind == KindGroup
 
 	worklist := []Subject{start}
@@ -197,6 +224,7 @@ func (idx *Index) AnalyzeEscalation(start Subject) EscalationResult {
 				}
 				grantedSeen[s][grant] = true
 				subjectRules[s] = append(subjectRules[s], e.GrantedRules...)
+				granted = append(granted, GrantedFinding{Subject: s, Edge: e})
 				grew = true
 			}
 			if clusterAdmin {
@@ -230,8 +258,28 @@ func (idx *Index) AnalyzeEscalation(start Subject) EscalationResult {
 		Start:          start,
 		Reached:        reached,
 		Unbounded:      unbounded,
+		Granted:        sortGranted(granted),
 		EffectiveRules: allRules,
 		ClusterAdmin:   clusterAdmin,
 		Truncated:      truncated,
 	}
+}
+
+// sortGranted orders findings by subject, then primitive, scope and detail --
+// the same identity grantKey deduplicates on -- so the result does not depend
+// on the order the traversal happened to discover them in.
+func sortGranted(granted []GrantedFinding) []GrantedFinding {
+	slices.SortStableFunc(granted, func(a, b GrantedFinding) int {
+		if c := strings.Compare(a.Subject.String(), b.Subject.String()); c != 0 {
+			return c
+		}
+		if c := strings.Compare(string(a.Edge.Primitive), string(b.Edge.Primitive)); c != 0 {
+			return c
+		}
+		if c := strings.Compare(a.Edge.Scope, b.Edge.Scope); c != 0 {
+			return c
+		}
+		return strings.Compare(a.Edge.Detail, b.Edge.Detail)
+	})
+	return granted
 }

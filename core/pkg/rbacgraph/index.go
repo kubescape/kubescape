@@ -1,6 +1,7 @@
 package rbacgraph
 
 import (
+	"slices"
 	"sort"
 
 	corev1 "k8s.io/api/core/v1"
@@ -56,6 +57,15 @@ func NewIndex(roles []rbacv1.Role, clusterRoles []rbacv1.ClusterRole, roleBindin
 		sort.Strings(idx.serviceAccountsByNS[ns])
 	}
 	return idx
+}
+
+// HasServiceAccount reports whether a ServiceAccount named name was among the
+// objects the Index was built from. DirectRules and AnalyzeEscalation work from
+// bindings that name a subject, so they answer for a ServiceAccount whether or
+// not its object was collected; this is how a caller tells the two apart.
+func (idx *Index) HasServiceAccount(namespace, name string) bool {
+	_, found := slices.BinarySearch(idx.serviceAccountsByNS[namespace], name)
+	return found
 }
 
 func roleKey(namespace, name string) string {
