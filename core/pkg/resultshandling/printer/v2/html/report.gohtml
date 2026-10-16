@@ -186,16 +186,20 @@
       <tr>
         <th class="resourceSeverityCell">Severity</th>
         <th class="resourceNameCell">CVE</th>
+        <th>KEV</th>
+        <th class="numericCell">EPSS</th>
         <th class="resourceNameCell">Package</th>
         <th class="resourceURLCell">Version</th>
         <th class="resourceRemediationCell">Fixed In</th>
       </tr>
       </thead>
       <tbody>
-      {{ range .ImageScanSummary.CVEs }}
+      {{ range sortCVEsByRisk .ImageScanSummary.CVEs }}
         <tr>
           <td class="resourceSeverityCell">{{ .Severity }}</td>
           <td class="resourceNameCell">{{ .ID }}</td>
+          <td>{{ formatKEV .KEV }}</td>
+          <td class="numericCell">{{ formatEPSS .EPSS }}</td>
           <td class="resourceNameCell">{{ .Package }}</td>
           <td class="resourceURLCell">{{ .Version }}</td>
           <td class="resourceRemediationCell">{{ range .FixVersions }} <p>{{ . }}</p> {{ end }}</td>

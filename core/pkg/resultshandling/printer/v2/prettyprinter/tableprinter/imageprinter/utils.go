@@ -2,12 +2,12 @@ package imageprinter
 
 import (
 	"io"
-	"sort"
 	"strings"
 
 	v5 "github.com/anchore/grype/grype/db/v5"
 	"github.com/jedib0t/go-pretty/v6/table"
 	"github.com/jedib0t/go-pretty/v6/text"
+	"github.com/jwalton/gchalk"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/utils"
 )
 
@@ -30,13 +30,7 @@ func generateRows(summary ImageScanSummary) []table.Row {
 	rows := make([]table.Row, 0, len(summary.CVEs))
 	hasVEX := summaryHasVEX(summary)
 
-	// sort CVEs by severity (descending) and then by CVE ID (ascending)
-	sort.Slice(summary.CVEs, func(i, j int) bool {
-		if utils.ImageSeverityToInt(summary.CVEs[i].Severity) != utils.ImageSeverityToInt(summary.CVEs[j].Severity) {
-			return utils.ImageSeverityToInt(summary.CVEs[i].Severity) > utils.ImageSeverityToInt(summary.CVEs[j].Severity)
-		}
-		return summary.CVEs[i].ID < summary.CVEs[j].ID
-	})
+	SortCVEs(summary.CVEs)
 
 	for _, cve := range summary.CVEs {
 		row := generateRow(cve)
@@ -50,9 +44,15 @@ func generateRows(summary ImageScanSummary) []table.Row {
 }
 
 func generateRow(cve CVE) table.Row {
-	row := make(table.Row, 6)
+	row := make(table.Row, imageBaseColumns)
 	row[imageColumnSeverity] = utils.GetColorForVulnerabilitySeverity(cve.Severity)(cve.Severity)
 	row[imageColumnName] = cve.ID
+	kev := FormatKEV(cve.KEV)
+	if kev != "" {
+		kev = kevColor(kev)
+	}
+	row[imageColumnKEV] = kev
+	row[imageColumnEPSS] = FormatEPSS(cve.EPSS)
 	row[imageColumnComponent] = cve.Package
 	row[imageColumnVersion] = cve.Version
 	row[imageColumnImage] = cve.Image
@@ -70,6 +70,9 @@ func generateRow(cve CVE) table.Row {
 	return row
 }
 
+// kevColor matches the colour grype uses for its KEV marker.
+var kevColor = gchalk.WithAnsi256(198).Bold
+
 func summaryHasVEX(summary ImageScanSummary) bool {
 	for _, cve := range summary.CVEs {
 		if cve.VexStatus != "" || cve.VexJustification != "" {
@@ -84,9 +87,11 @@ func getImageScanningHeaders() table.Row {
 }
 
 func getImageScanningHeadersWithVEX(hasVEX bool) table.Row {
-	headers := make(table.Row, 6)
+	headers := make(table.Row, imageBaseColumns)
 	headers[imageColumnSeverity] = "Severity"
 	headers[imageColumnName] = "Vulnerability"
+	headers[imageColumnKEV] = "KEV"
+	headers[imageColumnEPSS] = "EPSS"
 	headers[imageColumnComponent] = "Component"
 	headers[imageColumnVersion] = "Version"
 	headers[imageColumnFixedIn] = "Fixed in"
@@ -103,17 +108,19 @@ func getImageScanningColumnsAlignments() []table.ColumnConfig {
 
 func getImageScanningColumnsAlignmentsWithVEX(hasVEX bool) []table.ColumnConfig {
 	columns := []table.ColumnConfig{
-		{Number: 1, Align: text.AlignCenter},
-		{Number: 2, Align: text.AlignLeft},
-		{Number: 3, Align: text.AlignLeft},
-		{Number: 4, Align: text.AlignLeft},
-		{Number: 5, Align: text.AlignLeft},
-		{Number: 6, Align: text.AlignLeft},
+		{Number: imageColumnSeverity + 1, Align: text.AlignCenter},
+		{Number: imageColumnName + 1, Align: text.AlignLeft},
+		{Number: imageColumnKEV + 1, Align: text.AlignCenter},
+		{Number: imageColumnEPSS + 1, Align: text.AlignRight},
+		{Number: imageColumnComponent + 1, Align: text.AlignLeft},
+		{Number: imageColumnVersion + 1, Align: text.AlignLeft},
+		{Number: imageColumnFixedIn + 1, Align: text.AlignLeft},
+		{Number: imageColumnImage + 1, Align: text.AlignLeft},
 	}
 	if hasVEX {
 		columns = append(columns,
-			table.ColumnConfig{Number: 7, Align: text.AlignLeft},
-			table.ColumnConfig{Number: 8, Align: text.AlignLeft},
+			table.ColumnConfig{Number: imageColumnVexStatus + 1, Align: text.AlignLeft},
+			table.ColumnConfig{Number: imageColumnVexReason + 1, Align: text.AlignLeft},
 		)
 	}
 	return columns
