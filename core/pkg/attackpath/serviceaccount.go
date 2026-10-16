@@ -93,6 +93,19 @@ func initContainersFieldPath(kind string) []string {
 	return []string{"spec", "template", "spec", "initContainers"}
 }
 
+// ephemeralContainersFieldPath returns the path to the ephemeralContainers
+// array in a workload pod spec. Ephemeral (debug) containers can mount
+// projected token volumes but are never injected by admission.
+func ephemeralContainersFieldPath(kind string) []string {
+	if kind == "Pod" {
+		return []string{"spec", "ephemeralContainers"}
+	}
+	if kind == "CronJob" {
+		return []string{"spec", "jobTemplate", "spec", "template", "spec", "ephemeralContainers"}
+	}
+	return []string{"spec", "template", "spec", "ephemeralContainers"}
+}
+
 // serviceAccountTokenMountPath is the filesystem path where Kubernetes
 // admission injects the service account token mount. This is a well-known
 // Kubernetes path, not a credential.
@@ -192,11 +205,14 @@ func hasProjectedServiceAccountToken(obj map[string]any, kind string) bool {
 	// pod lifetime and have the same token access as regular containers.
 	regular, foundRegular, _ := unstructured.NestedSlice(u.Object, containersFieldPath(kind)...)
 	init_, foundInit, _ := unstructured.NestedSlice(u.Object, initContainersFieldPath(kind)...)
+	// Ephemeral containers can mount projected token volumes (e.g. a debug
+	// container injected at runtime) but are never auto-injected by admission.
+	ephemeral, _, _ := unstructured.NestedSlice(u.Object, ephemeralContainersFieldPath(kind)...)
 	if !foundRegular && !foundInit {
 		// No containers at all: conservatively treat declaration as mounted.
 		return true
 	}
-	for _, c := range append(regular, init_...) {
+	for _, c := range append(append(regular, init_...), ephemeral...) {
 		container, ok := c.(map[string]any)
 		if !ok {
 			continue
@@ -298,7 +314,33 @@ func ResolveServiceAccountBindings(
 		obj := r.GetObject()
 		u := &unstructured.Unstructured{Object: obj}
 
+		// A missing or unreadable pod spec (e.g. Deployment with spec: {})
+		// cannot be analysed: skip rather than returning a misleading result.
+		var specPresent bool
+		if r.GetKind() == "CronJob" {
+			_, specPresent, _ = unstructured.NestedMap(u.Object, "spec", "jobTemplate", "spec", "template", "spec")
+		} else if r.GetKind() == "Pod" {
+			_, specPresent, _ = unstructured.NestedMap(u.Object, "spec")
+		} else {
+			_, specPresent, _ = unstructured.NestedMap(u.Object, "spec", "template", "spec")
+		}
+		if !specPresent {
+			out = append(out, ServiceAccountBinding{
+				WorkloadRef: ref,
+				Skipped:    true,
+				SkipReason: "pod spec missing or unreadable",
+			})
+			continue
+		}
+
 		saName, _, _ := unstructured.NestedString(u.Object, saPath(r.GetKind())...)
+		if saName == "" {
+			// Fall back to the legacy serviceAccount field before defaulting.
+			// Some older manifests use serviceAccount instead of serviceAccountName.
+			legacyPath := saPath(r.GetKind())
+			legacyPath[len(legacyPath)-1] = "serviceAccount"
+			saName, _, _ = unstructured.NestedString(u.Object, legacyPath...)
+		}
 		if saName == "" {
 			saName = "default"
 		}

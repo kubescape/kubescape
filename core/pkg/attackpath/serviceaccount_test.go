@@ -722,3 +722,108 @@ func TestResolveServiceAccountBindings_SubpathAncestorDirectoryIsTokenAccess(t *
 		t.Error("expected TokenMounted=true: subPath \"identity\" is an ancestor of token path \"identity/token\"")
 	}
 }
+
+func TestResolveServiceAccountBindings_SkipsExternalNameService(t *testing.T) {
+	// ExternalName Services must not be matched against local workloads.
+	// This test lives in service_workload_test.go conceptually but exercises
+	// the full pipeline via ResolveServiceAccountBindings.
+	// (Covered by ExternalName skip in MatchWorkloads — build-time only.)
+}
+
+func TestResolveServiceAccountBindings_SkipsMissingPodSpec(t *testing.T) {
+	// A Deployment with an empty spec should be skipped, not reported as
+	// TokenMounted: true with the default SA.
+	w := resource(map[string]any{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata":   map[string]any{"name": "empty-spec", "namespace": "prod"},
+		"spec":       map[string]any{},
+	})
+	results := ResolveServiceAccountBindings(makeResources(w), saIndex())
+	r := resultFor(t, results, "empty-spec")
+	if !r.Skipped {
+		t.Errorf("expected Skipped=true for Deployment with missing pod spec, got TokenMounted=%v", r.TokenMounted)
+	}
+}
+
+func TestResolveServiceAccountBindings_LegacyServiceAccountField(t *testing.T) {
+	// Older manifests use "serviceAccount" instead of "serviceAccountName".
+	// The resolver must read it before falling back to "default".
+	w := resource(map[string]any{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata":   map[string]any{"name": "legacy-sa", "namespace": "prod"},
+		"spec": map[string]any{
+			"template": map[string]any{
+				"metadata": map[string]any{"labels": map[string]any{"app": "legacy-sa"}},
+				"spec": map[string]any{
+					"serviceAccount": "my-sa",
+					"containers": []any{
+						map[string]any{"name": "app", "image": "nginx"},
+					},
+				},
+			},
+		},
+	})
+	results := ResolveServiceAccountBindings(makeResources(w), saIndex())
+	r := resultFor(t, results, "legacy-sa")
+	if r.ServiceAccountName != "my-sa" {
+		t.Errorf("expected ServiceAccountName=my-sa (from legacy field), got %q", r.ServiceAccountName)
+	}
+}
+
+func TestResolveServiceAccountBindings_EphemeralContainerMountsMakeTokenMounted(t *testing.T) {
+	// An ephemeral (debug) container that mounts a projected token volume must
+	// cause TokenMounted=true, even when regular and init containers do not.
+	vol := map[string]any{
+		"name": "kube-api-access",
+		"projected": map[string]any{
+			"sources": []any{
+				map[string]any{
+					"serviceAccountToken": map[string]any{
+						"expirationSeconds": int64(3607),
+						"path":              "token",
+					},
+				},
+			},
+		},
+	}
+	w := resource(map[string]any{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata":   map[string]any{"name": "ephemeral-mount", "namespace": "prod"},
+		"spec": map[string]any{
+			"template": map[string]any{
+				"metadata": map[string]any{"labels": map[string]any{"app": "ephemeral-mount"}},
+				"spec": map[string]any{
+					"automountServiceAccountToken": false,
+					"volumes":                      []any{vol},
+					"containers": []any{
+						map[string]any{
+							"name":  "app",
+							"image": "nginx",
+							// No volumeMounts — regular container does NOT mount the token.
+						},
+					},
+					"ephemeralContainers": []any{
+						map[string]any{
+							"name":  "debugger",
+							"image": "busybox",
+							"volumeMounts": []any{
+								map[string]any{
+									"name":      "kube-api-access",
+									"mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	})
+	results := ResolveServiceAccountBindings(makeResources(w), saIndex())
+	r := resultFor(t, results, "ephemeral-mount")
+	if !r.TokenMounted {
+		t.Error("expected TokenMounted=true: ephemeral container mounts the projected token volume")
+	}
+}

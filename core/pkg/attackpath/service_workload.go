@@ -83,6 +83,12 @@ func ResolveServiceBackends(
 
 	out := make([]ServiceBackend, 0, len(sorted))
 	for _, svc := range sorted {
+		// ExternalName Services have no pod selector and route to an external
+		// DNS name; Kubernetes ignores their selector entirely, so matching
+		// them here would link the Service to the wrong local workload.
+		if svc.Spec.Type == corev1.ServiceTypeExternalName {
+			continue
+		}
 		if len(svc.Spec.Selector) == 0 {
 			out = append(out, ServiceBackend{
 				ServiceNamespace: svc.Namespace,
