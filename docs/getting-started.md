@@ -214,6 +214,14 @@ acknowledges a finding, but the object remains failed and continues
 contributing to the compliance score. Manual-review controls have separate
 status handling.
 
+In SARIF output (`--format sarif`), a finding removed by a `disable` exception
+stays in the report as a suppressed result: it keeps its rule, location and
+fingerprint and carries an `external` suppression with status `accepted`, whose
+justification is the exception's `reason` (or its name). Code-scanning
+platforms that honor SARIF suppressions show it as dismissed. A finding
+acknowledged by an `alertOnly` exception is not suppressed; the exception's
+name and expiration date are added to the result's `properties`.
+
 [See more examples about exceptions.](../examples/exceptions/README.md)
 
 #### Scan Helm charts
