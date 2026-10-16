@@ -47,6 +47,12 @@ kubescape mcpserver
 
 The server starts and communicates via stdio, making it compatible with MCP-enabled AI tools.
 
+To serve clients over HTTP instead, use the SSE transport. It listens on `127.0.0.1` only, on port 8080 unless `--port` says otherwise, and answers `403` to a request whose `Origin` header names another site. Clients that send no `Origin`, such as CLIs, are unaffected:
+
+```bash
+kubescape mcpserver --transport sse --port 8080
+```
+
 ## Available Tools
 
 The MCP server exposes the following tools to AI assistants:
