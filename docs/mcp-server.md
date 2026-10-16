@@ -169,8 +169,8 @@ Each entry has:
 | Field | Meaning |
 |-------|---------|
 | `direct_rules` | Rules the ServiceAccount holds through its own bindings, including bindings to the implicit groups `system:serviceaccounts`, `system:serviceaccounts:<namespace>`, and `system:authenticated` |
-| `gained_rules`, `permission_gain` | Finite rules the ServiceAccount can additionally adopt (through `bind` or `escalate`), or inherits from an identity it can reach: the analysis's effective rules that are not direct rules. This can be non-empty while every field below is empty or false |
-| `grants` | How each gain arises: the subject, the primitive (`bind-verb` or `escalate-verb`), the scope, and the target Role or ClusterRole |
+| `gained_rules`, `permission_gain` | The analysis's effective rules that are not direct rules. They can come from a finite `bind` or `escalate` grant, from the rules of an identity the ServiceAccount can reach (`identities_reached`), or from a wildcard rule the analysis derives from a namespace-scoped `unbounded` finding. A finite gain can appear while `identities_reached` and `unbounded` are empty and `cluster_admin` is false |
+| `grants` | The finite `bind` and `escalate` grants the analysis applied: the subject that adopted each (the ServiceAccount itself, or an identity it can reach), the primitive (`bind-verb` or `escalate-verb`), the scope, and the target Role or ClusterRole. It does not explain every entry in `gained_rules`: a rule inherited from a reached identity, or a wildcard derived from an `unbounded` finding, has no entry here, so an empty `grants` is not evidence that `gained_rules` is empty |
 | `identities_reached` | Other identities it can assume (impersonation, creating a pod as another ServiceAccount, minting a token), each with its path |
 | `unbounded` | Grants that cannot be enumerated (for example an unrestricted `bind`), with their scope. An entry with `scope_unknown: true` is a warning about a Role that could not be found and grants nothing |
 | `scope_unknown` | Whether any `unbounded` entry has an unresolved scope |
