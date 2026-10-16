@@ -1,12 +1,16 @@
 package operator
 
 import (
+	"context"
+	"io"
 	"testing"
 
 	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/core"
 	"github.com/kubescape/kubescape/v4/core/mocks"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestGetOperatorRemediateCmd(t *testing.T) {
@@ -48,4 +52,29 @@ func TestGetOperatorRemediateCmd(t *testing.T) {
 	confirm, err := cmd.PersistentFlags().GetBool("confirm")
 	assert.NoError(t, err)
 	assert.False(t, confirm)
+}
+
+func TestOperatorRemediateCmd_ContextCanceled(t *testing.T) {
+	var startForwarderCalled bool
+	prevAdapter := newOperatorAdapter
+	newOperatorAdapter = func(scanInfo cautils.OperatorScanInfo, _ string, _ ...context.Context) (*core.OperatorAdapter, error) {
+		conn := &stubOperatorConnector{
+			onStart: func() { startForwarderCalled = true },
+		}
+		return core.NewOperatorAdapterWithConnector(scanInfo, conn), nil
+	}
+	t.Cleanup(func() { newOperatorAdapter = prevAdapter })
+
+	cmd := getOperatorRemediateCmd(&mocks.MockIKubescape{}, cautils.OperatorInfo{})
+	cmd.SetArgs([]string{annotateSubCommand, "--kind", "Deployment", "--name", "test-app", "--target-namespace", "default"})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := cmd.ExecuteContext(ctx)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, context.Canceled)
+	assert.False(t, startForwarderCalled, "must not attempt to start port forwarding when context is canceled")
 }

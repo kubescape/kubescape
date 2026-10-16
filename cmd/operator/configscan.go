@@ -35,7 +35,7 @@ func getOperatorScanConfigCmd(ks meta.IKubescape, operatorInfo *cautils.Operator
 				return err
 			}
 			logger.L().Start("Kubescape Operator Triggering for configuration scanning")
-			_, err = operatorAdapter.OperatorScan()
+			_, err = operatorAdapter.OperatorScan(cmd.Context())
 			if err != nil {
 				logger.L().StopError("Failed to triggering Kubescape Operator for configuration scanning", helpers.Error(err))
 				return err
