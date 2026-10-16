@@ -327,8 +327,8 @@ func ResolveServiceAccountBindings(
 		if !specPresent {
 			out = append(out, ServiceAccountBinding{
 				WorkloadRef: ref,
-				Skipped:    true,
-				SkipReason: "pod spec missing or unreadable",
+				Skipped:     true,
+				SkipReason:  "pod spec missing or unreadable",
 			})
 			continue
 		}
