@@ -1414,7 +1414,16 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		}
 		return mcp.NewToolResultText(string(result)), nil
 	case "list_controls":
-		result, err := ksServer.ListControls(ctx)
+		framework, toolErr := mcpStringArg(arguments, "framework")
+		if toolErr != nil {
+			return toolErr, nil
+		}
+		result, err := ksServer.ListControls(ctx, framework)
+		var unknown *unknownFrameworkError
+		if errors.As(err, &unknown) {
+			return mcpToolError(ErrCodeInvalidArgument, err.Error(),
+				map[string]any{"argument": "framework", "supported_values": unknown.supported}), nil
+		}
 		if err != nil {
 			return mcpToolError(classifyScanError(err), fmt.Sprintf("failed to list controls: %v", err), nil), nil
 		}
@@ -1601,7 +1610,10 @@ func createPolicyListingTools(ksServer *KubescapeMcpserver) {
 	)
 	listControlsTool := mcp.NewTool(
 		"list_controls",
-		mcp.WithDescription("List all available security controls with their IDs, names, and the frameworks they belong to. Use a returned ID as a control_ids value in scan_controls."),
+		mcp.WithDescription("List the available security controls with their IDs, names, and the frameworks they belong to. Pass framework to get only one framework's controls instead of all of them. Use a returned ID as a control_ids value in scan_controls."),
+		mcp.WithString("framework",
+			mcp.Description("Only return the controls of this framework, e.g. \"NSA\" (optional, case-insensitive; see list_frameworks)"),
+		),
 	)
 	listAdmissionPoliciesTool := mcp.NewTool(
 		"list_admission_policies",
