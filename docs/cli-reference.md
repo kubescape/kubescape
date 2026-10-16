@@ -80,6 +80,27 @@ kubescape scan [target] [flags]
 | `-v, --verbose` | Display all resources, not just failed ones | `false` |
 | `--view <type>` | View type: `security`, `control`, `resource` | `security` |
 
+### Framework-scoped exceptions
+
+Exceptions scoped to a framework apply only when that framework is selected and
+contains the matching control. For a failed control shared by NSA and MITRE, an
+NSA-only exception makes the NSA view passed with an exception, while the MITRE
+view and the aggregate result remain failed. The aggregate can still carry the
+`w/exceptions` substatus. Audit counts (`--audit-exceptions`) and
+`ExceptionMatched` events include only exceptions applicable to the selected
+frameworks; a partially excepted aggregate can still have a matched exception.
+
+Compatibility note: the scan retains raw rule evaluations and exception policies.
+Raw results embedded in MCP `failedResources` can still carry failed evaluations
+for controls excepted in a framework. Consumers should use `summaryDetails` for
+effective statuses, or `cautils.ControlStatus` with the report summary when
+processing Go result objects. Enriched JSON output carries effective control
+statuses. Reports written by older versions remain readable, but failures
+discarded by older serializers cannot be reconstructed.
+
+A `scan control` invocation has no framework context, so framework-scoped
+exceptions do not apply. Unscoped exceptions continue to apply.
+
 ### Webhook notifications
 
 Use `--notify` to send a compact summary after a posture scan or image vulnerability scan. Official Slack and GovSlack incoming webhook URLs receive a Block Kit message, Microsoft Teams incoming webhooks (`*.webhook.office.com`, `outlook.office.com`, `outlook.office365.com`) receive an Adaptive Card, and every other URL receives a JSON summary object:
