@@ -94,7 +94,7 @@ func (ks *Kubescape) Fix(fixInfo *metav1.FixInfo) error {
 					fixInfo.KustomizeDir, fixInfo.KustomizeDir,
 				))
 			} else if len(emitRes.SkippedResources) > 0 {
-				logger.L().Info("No Kustomize patches were emitted (all resources were declined or skipped).")
+				logger.L().Info("No Kustomize patches were emitted (all resources were declined or skipped). Note: ordinary scan reports redact container environment configuration; container resources are declined without programmatic provenance (UnredactedBase or FidelityProvenance), which is not supplied through the ordinary producer.")
 			}
 		}
 	}

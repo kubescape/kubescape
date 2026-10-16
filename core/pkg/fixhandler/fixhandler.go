@@ -1127,6 +1127,17 @@ func (h *FixHandler) PrintHelmSuggestions(suggestions []HelmFixSuggestion) {
 	}
 	var sb strings.Builder
 	sb.WriteString("\nHelm-rendered resources cannot be patched in place. Suggested values.yaml edits:\n\n")
+
+	var hasContainerWorkload bool
+	for _, s := range suggestions {
+		if s.Resource != nil && len(getContainersFromObj(s.Resource.GetObject())) > 0 {
+			hasContainerWorkload = true
+			break
+		}
+	}
+	if hasContainerWorkload {
+		sb.WriteString("(Note: Kustomize patch generation via --output-kustomize declines container resources from ordinary scan reports because environment configuration is redacted and programmatic scan-time provenance is not supplied through the ordinary producer.)\n\n")
+	}
 	for _, s := range suggestions {
 		fmt.Fprintf(&sb, "Chart: %s (%s)\n", s.ChartName, s.ChartPath)
 		if s.TemplateFile != "" {

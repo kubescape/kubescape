@@ -836,6 +836,88 @@ func buildFixableHelmReport(t *testing.T, dir string) string {
 
 	chartYaml := "apiVersion: v2\nname: demo-chart\nversion: 0.1.0\n"
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "Chart.yaml"), []byte(chartYaml), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "values.yaml"), []byte("service:\n  type: ClusterIP\n"), 0600))
+	templatesDir := filepath.Join(dir, "templates")
+	require.NoError(t, os.MkdirAll(templatesDir, 0750))
+	serviceYaml := `apiVersion: v1
+kind: Service
+metadata:
+  name: demo-service
+  namespace: default
+  labels:
+    app: demo
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+  - port: 80
+`
+	require.NoError(t, os.WriteFile(filepath.Join(templatesDir, "service.yaml"), []byte(serviceYaml), 0600))
+
+	helmObj := map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Service",
+		"metadata":   map[string]any{"name": "demo-service", "namespace": "default", "labels": map[string]any{"app": "demo"}},
+		"spec": map[string]any{
+			"type": "ClusterIP",
+			"ports": []any{
+				map[string]any{
+					"port": 80,
+				},
+			},
+		},
+	}
+
+	helmRes := reporthandling.Resource{
+		Object: helmObj,
+		Source: &reporthandling.Source{
+			FileType:         reporthandling.SourceTypeHelmChart,
+			HelmPath:         dir,
+			HelmChartName:    "demo-chart",
+			HelmTemplateFile: "templates/service.yaml",
+			HelmValuesPaths:  []string{"service.type"},
+		},
+	}
+	helmRes.ResourceID = helmRes.GetID()
+
+	report := &reporthandlingv2.PostureReport{
+		Metadata: reporthandlingv2.Metadata{
+			ScanMetadata: reporthandlingv2.ScanMetadata{ScanningTarget: reporthandlingv2.Directory},
+			ContextMetadata: reporthandlingv2.ContextMetadata{
+				DirectoryContextMetadata: &reporthandlingv2.DirectoryContextMetadata{BasePath: dir},
+			},
+		},
+		Resources: []reporthandling.Resource{helmRes},
+		Results: []resourcesresults.Result{
+			{
+				ResourceID: helmRes.ResourceID,
+				AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+					{
+						ControlID: "C-0001",
+						Name:      "Service label check",
+						Status:    apis.StatusInfo{InnerStatus: apis.StatusFailed},
+						ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{
+							{
+								Name:   "rule-service-label",
+								Status: apis.StatusFailed,
+								Paths: []armotypes.PosturePaths{
+									{FixPath: armotypes.FixPath{Path: "metadata.labels.patched", Value: "true"}},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	return writeReportFile(t, dir, report)
+}
+
+func buildFixableContainerHelmReport(t *testing.T, dir string) string {
+	t.Helper()
+
+	chartYaml := "apiVersion: v2\nname: demo-chart\nversion: 0.1.0\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "Chart.yaml"), []byte(chartYaml), 0600))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "values.yaml"), []byte("image:\n  tag: latest\n"), 0600))
 	templatesDir := filepath.Join(dir, "templates")
 	require.NoError(t, os.MkdirAll(templatesDir, 0750))
@@ -977,6 +1059,27 @@ func TestFix_OutputKustomizeSuccess(t *testing.T) {
 	assert.DirExists(t, kustDir)
 	assert.FileExists(t, filepath.Join(kustDir, "kustomization.yaml"))
 	assert.FileExists(t, filepath.Join(kustDir, "base.yaml"))
+}
+
+func TestFix_OutputKustomizeDeclinesContainerResourceWithoutProvenance(t *testing.T) {
+	// P2 contract: Container-bearing Helm resources from ordinary scan reports
+	// are declined by the CLI because environment configuration is redacted
+	// and ordinary report producers do not supply programmatic provenance
+	// (UnredactedBase or FidelityProvenance).
+	dir := t.TempDir()
+	reportPath := buildFixableContainerHelmReport(t, dir)
+	kustDir := filepath.Join(t.TempDir(), "kust-output")
+
+	ks := &Kubescape{Ctx: context.Background()}
+	err := ks.Fix(&metav1.FixInfo{
+		ReportFile:   reportPath,
+		KustomizeDir: kustDir,
+		HelmValueOptions: cautils.HelmValueOptions{
+			ValueFiles: []string{filepath.Join(dir, "values.yaml")},
+		},
+	})
+	assert.NoError(t, err)
+	assert.NoDirExists(t, kustDir, "Declined container resources must not emit Kustomize output directory")
 }
 
 func TestFix_OutputKustomizeDoesNotAdvertiseStaleOverlay(t *testing.T) {

@@ -64,6 +64,11 @@ var fixCmdExamples = fmt.Sprintf(`
   Resources whose scan record is redacted are declined rather than emitted,
   since a manifest built from one would overwrite your real configuration:
   workloads with container environment variables, plus Secrets and ConfigMaps.
+  For Helm-rendered resources (--output-kustomize), container workloads are
+  declined because ordinary scan reports redact container environment configuration
+  and programmatic scan-time provenance (UnredactedBase or FidelityProvenance)
+  is not supplied through the ordinary producer. Eligible non-container Helm
+  resources (such as Services) are emitted normally.
   Owner-managed resources are declined too — fix the owner instead. Each is
   listed with its reason. Fixing manifest files is unaffected.
 
@@ -100,7 +105,7 @@ func GetFixCmd(ks meta.IKubescape) *cobra.Command {
 	fixCmd.PersistentFlags().StringSliceVar(&fixInfo.IncludeControls, "include-controls", nil, "Remediate only these control IDs (comma-separated, case-insensitive). Controls outside the list are left untouched and are not reported as unfixed; disables --container-profile drift remediation")
 	fixCmd.PersistentFlags().StringSliceVar(&fixInfo.SkipControls, "skip-controls", nil, "Leave these control IDs untouched (comma-separated, case-insensitive). Takes precedence over --include-controls; disables --container-profile drift remediation")
 	fixCmd.PersistentFlags().StringVar(&fixInfo.OutputDir, "output-dir", "", "Write the fixes into this directory instead of their default destination. For manifest files: fixed copies that mirror the scanned tree, leaving the originals untouched instead of fixing them in place. For cluster scans: one patched manifest per resource, instead of printing them to stdout. A non-empty directory is refused unless --no-confirm is passed")
-	fixCmd.PersistentFlags().StringVar(&fixInfo.KustomizeDir, "output-kustomize", "", "Write a kustomization.yaml and JSON 6902 patch files for Helm-rendered resources into this directory. Apply with: kustomize build <dir> | kubectl apply -f -")
+	fixCmd.PersistentFlags().StringVar(&fixInfo.KustomizeDir, "output-kustomize", "", "Write a kustomization.yaml and JSON 6902 patch files for Helm-rendered resources into this directory. Apply with: kustomize build <dir> | kubectl apply -f -. Note: container resources from ordinary scan reports are declined because environment configuration is redacted and programmatic scan-time provenance is not supplied through the ordinary producer")
 	fixCmd.PersistentFlags().StringSliceVarP(&fixInfo.HelmValueOptions.ValueFiles, "values", "f", nil, "Specify values in a YAML file (can specify multiple)")
 	fixCmd.PersistentFlags().StringArrayVar(&fixInfo.HelmValueOptions.Values, "set", nil, "Set values on the command line (can specify multiple or separate values with commas: key1=val1,key2=val2)")
 	fixCmd.PersistentFlags().StringArrayVar(&fixInfo.HelmValueOptions.StringValues, "set-string", nil, "Set STRING values on the command line (can specify multiple or separate values with commas: key1=val1,key2=val2)")
