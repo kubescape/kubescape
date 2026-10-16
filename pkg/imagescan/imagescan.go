@@ -352,7 +352,7 @@ func filterMatchesBasedOnSeverity(severityExceptions []string, remainingMatches 
 		// Skip this match if the severity of this match is present in severityExceptions.
 		excludeSeverity := false
 		for _, sever := range severityExceptions {
-			if strings.ToUpper(metadata.Severity) == sever {
+			if strings.EqualFold(metadata.Severity, sever) {
 				excludeSeverity = true
 				break
 			}
@@ -385,12 +385,10 @@ func (s *Service) ScanWithOptions(ctx context.Context, userInput string, creds R
 		return nil, err
 	}
 
-	remainingMatches, ignoredMatches, err := getIgnoredMatches(vulnerabilityExceptions, s.vp, packages, pkgContext, s.useDefaultMatchers)
+	filteredMatches, ignoredMatches, err := s.MatchPackages(packages, pkgContext, vulnerabilityExceptions, severityExceptions)
 	if err != nil {
 		return nil, err
 	}
-
-	filteredMatches := filterMatchesBasedOnSeverity(severityExceptions, *remainingMatches, s.vp)
 
 	vexStatuses, err := s.vexClient.GetVexStatuses(ctx, userInput)
 	if err != nil {
@@ -413,6 +411,23 @@ func (s *Service) ScanWithOptions(ctx context.Context, userInput string, creds R
 	applyDBFreshness(&pb, s.dbStatus)
 
 	return &pb, nil
+}
+
+// MatchPackages matches an already-built package list against the loaded
+// vulnerability DB, applying the same vulnerability and severity exceptions as
+// ScanWithOptions. It lets callers assess software that is not shipped as an
+// image, such as cluster components identified only by their version.
+func (s *Service) MatchPackages(packages []pkg.Package, pkgContext pkg.Context, vulnerabilityExceptions, severityExceptions []string) (match.Matches, []match.IgnoredMatch, error) {
+	if s.vp == nil {
+		return match.Matches{}, nil, errors.New("vulnerability database is not loaded")
+	}
+
+	remainingMatches, ignoredMatches, err := getIgnoredMatches(vulnerabilityExceptions, s.vp, packages, pkgContext, s.useDefaultMatchers)
+	if err != nil {
+		return match.Matches{}, nil, err
+	}
+
+	return filterMatchesBasedOnSeverity(severityExceptions, *remainingMatches, s.vp), ignoredMatches, nil
 }
 
 // applyDBFreshness sets VulnDBBuilt on the scan result from the loaded DB
