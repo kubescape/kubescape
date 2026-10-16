@@ -114,30 +114,40 @@ func TestFilterControlsByFramework(t *testing.T) {
 		return out
 	}
 
-	got, err := filterControlsByFramework(entries, "")
+	got, err := filterControlsByFramework(entries, "", nil)
 	require.NoError(t, err)
 	assert.Equal(t, []string{"C-0001", "C-0012", "C-0017", "C-0030"}, ids(got), "no framework keeps every control")
 
-	got, err = filterControlsByFramework(entries, "NSA")
+	got, err = filterControlsByFramework(entries, "NSA", nil)
 	require.NoError(t, err)
 	assert.Equal(t, []string{"C-0012", "C-0017"}, ids(got))
 
-	got, err = filterControlsByFramework(entries, "mitre")
+	got, err = filterControlsByFramework(entries, "mitre", nil)
 	require.NoError(t, err)
 	assert.Equal(t, []string{"C-0012"}, ids(got), "matching is case-insensitive")
 
-	_, err = filterControlsByFramework(entries, "PCI")
+	catalog := []string{"NSA", "MITRE", "SOC2"}
+	got, err = filterControlsByFramework(entries, "soc2", catalog)
+	require.NoError(t, err, "a catalog framework with no controls is not an error")
+	assert.Empty(t, got)
+	assert.NotNil(t, got, "and it is an empty list, not null")
+
+	got, err = filterControlsByFramework(entries, "allcontrols", catalog)
+	require.NoError(t, err, "a framework only seen on controls is known too")
+	assert.Equal(t, []string{"C-0001", "C-0012", "C-0017"}, ids(got))
+
+	_, err = filterControlsByFramework(entries, "PCI", catalog)
 	var unknown *unknownFrameworkError
 	require.ErrorAs(t, err, &unknown)
-	assert.Equal(t, []string{"AllControls", "MITRE", "NSA"}, unknown.supported)
-	assert.Contains(t, err.Error(), `framework "PCI" has no controls`)
+	assert.Equal(t, []string{"AllControls", "MITRE", "NSA", "SOC2"}, unknown.supported)
+	assert.Contains(t, err.Error(), `unknown framework "PCI"`)
 }
 
 func listControlsServer(t *testing.T) *KubescapeMcpserver {
 	t.Helper()
 	ks := &KubescapeMcpserver{}
 	ks.startPolicyLoad(func() getter.IPolicyGetter {
-		return &fakePolicyGetter{controls: []string{
+		return &fakePolicyGetter{frameworks: []string{"NSA", "MITRE", "SOC2"}, controls: []string{
 			"C-0017|Immutable container filesystem|AllControls,NSA",
 			"C-0001|Forbidden Container Registries|AllControls",
 			"C-0012|Applications credentials in configuration files|AllControls,NSA,MITRE",
@@ -166,6 +176,7 @@ func TestListControlsTool_FrameworkFilter(t *testing.T) {
 	assert.Equal(t, []string{"C-0001", "C-0012", "C-0017"}, listControlIDs(t, ks, map[string]any{"framework": nil}), "null is treated as absent")
 	assert.Equal(t, []string{"C-0012", "C-0017"}, listControlIDs(t, ks, map[string]any{"framework": "nsa"}))
 	assert.Equal(t, []string{"C-0012"}, listControlIDs(t, ks, map[string]any{"framework": " MITRE "}), "surrounding spaces are trimmed")
+	assert.Equal(t, []string{}, listControlIDs(t, ks, map[string]any{"framework": "SOC2"}), "a catalog framework with no controls returns []")
 }
 
 func TestListControlsTool_InvalidFramework(t *testing.T) {
@@ -182,7 +193,7 @@ func TestListControlsTool_InvalidFramework(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(toolResultText(t, result)), &toolErr))
 	assert.Equal(t, string(ErrCodeInvalidArgument), toolErr.Code)
 	assert.Equal(t, "framework", toolErr.Details["argument"])
-	assert.Equal(t, []any{"AllControls", "MITRE", "NSA"}, toolErr.Details["supported_values"])
+	assert.Equal(t, []any{"AllControls", "MITRE", "NSA", "SOC2"}, toolErr.Details["supported_values"])
 
 	result, err = ks.CallTool(context.Background(), "list_controls", map[string]any{"framework": 7})
 	require.NoError(t, err)
