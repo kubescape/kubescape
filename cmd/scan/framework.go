@@ -148,7 +148,7 @@ func runFrameworkScan(ctx context.Context, scanInfo *cautils.ScanInfo, ks meta.I
 	}
 
 	if results.GetComplianceScore() < float32(scanInfo.ComplianceThreshold) {
-		return results, fmt.Errorf("scan compliance-score is below permitted threshold: %.2f (compliance-threshold: %.2f)", results.GetComplianceScore(), scanInfo.ComplianceThreshold)
+		return results, gateFailure(fmt.Errorf("scan compliance-score is below permitted threshold: %.2f (compliance-threshold: %.2f)", results.GetComplianceScore(), scanInfo.ComplianceThreshold))
 	}
 
 	if err := enforceSeverityThresholds(&results.GetData().Report.SummaryDetails, scanInfo); err != nil {
@@ -224,10 +224,10 @@ func enforceCoverageThreshold(coverage cautils.ScanCoverage, totalControls int, 
 		return nil
 	}
 	if totalControls == 0 {
-		return fmt.Errorf("scan loaded no controls: coverage is 0%% (fail-coverage-below: %.2f%%)", scanInfo.FailCoverageThreshold)
+		return gateFailure(fmt.Errorf("scan loaded no controls: coverage is 0%% (fail-coverage-below: %.2f%%)", scanInfo.FailCoverageThreshold))
 	}
 	if coverage.CoverageScore < scanInfo.FailCoverageThreshold {
-		return fmt.Errorf("scan coverage is below permitted threshold: %.2f%% (fail-coverage-below: %.2f%%)", coverage.CoverageScore, scanInfo.FailCoverageThreshold)
+		return gateFailure(fmt.Errorf("scan coverage is below permitted threshold: %.2f%% (fail-coverage-below: %.2f%%)", coverage.CoverageScore, scanInfo.FailCoverageThreshold))
 	}
 	return nil
 }
@@ -242,7 +242,7 @@ func enforcePolicyDegradation(coverage cautils.ScanCoverage, scanInfo *cautils.S
 	for _, d := range coverage.PolicyDegradations {
 		logger.L().Warning("policy input degraded, bundled defaults were used", helpers.String("component", d.Component), helpers.String("reason", d.Reason))
 	}
-	return fmt.Errorf("scan policy inputs were degraded (fail-on-degraded-config is true)")
+	return gateFailure(fmt.Errorf("scan policy inputs were degraded (fail-on-degraded-config is true)"))
 }
 
 // countFailedResourcesWithUnbucketedSeverity returns the number of failed
@@ -275,7 +275,7 @@ func enforceSeverityThresholds(summaryDetails *reportsummary.SummaryDetails, sca
 	}
 
 	if val, err := countersExceedSeverityThreshold(summaryDetails.GetResourcesSeverityCounters(), scanInfo); val && err == nil {
-		return fmt.Errorf("compliance result exceeds severity threshold: %s", scanInfo.FailThresholdSeverity)
+		return gateFailure(fmt.Errorf("compliance result exceeds severity threshold: %s", scanInfo.FailThresholdSeverity))
 	} else if err != nil {
 		return err
 	}
@@ -286,7 +286,7 @@ func enforceSeverityThresholds(summaryDetails *reportsummary.SummaryDetails, sca
 	// threshold the user set.
 	if unbucketed := countFailedResourcesWithUnbucketedSeverity(summaryDetails); unbucketed > 0 {
 		logger.L().Warning("failed resources with unknown severity counted toward the severity threshold", helpers.Int("failedResources", unbucketed))
-		return fmt.Errorf("compliance result exceeds severity threshold: %s (%d failed resource(s) with unknown severity)", scanInfo.FailThresholdSeverity, unbucketed)
+		return gateFailure(fmt.Errorf("compliance result exceeds severity threshold: %s (%d failed resource(s) with unknown severity)", scanInfo.FailThresholdSeverity, unbucketed))
 	}
 	return nil
 }

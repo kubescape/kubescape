@@ -9,6 +9,7 @@ import (
 	"github.com/kubescape/backend/pkg/versioncheck"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/kubescape/v4/cmd"
+	"github.com/kubescape/kubescape/v4/cmd/shared"
 )
 
 // GoReleaser will fill these at build time
@@ -44,6 +45,6 @@ func main() {
 
 	if err := cmd.Execute(ctx, version, commit, date); err != nil {
 		cancel()
-		os.Exit(1)
+		os.Exit(shared.ExitCode(err))
 	}
 }

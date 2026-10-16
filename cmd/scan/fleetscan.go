@@ -17,6 +17,7 @@ import (
 	"github.com/kubescape/backend/pkg/versioncheck"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/kubescape/v4/cmd/shared"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/meta"
 	"github.com/kubescape/kubescape/v4/core/pkg/fleet"
@@ -465,6 +466,7 @@ func fleetScan(baseScanInfo cautils.ScanInfo, ks meta.IKubescape, policyIdentifi
 	wantFleetReport := fleetReportRequested(baseScanInfo.FleetReport)
 
 	var failed []string
+	incomplete := false
 	var clusters []fleet.ClusterResult
 	if wantFleetReport {
 		clusters = make([]fleet.ClusterResult, 0, len(baseScanInfo.KubeContexts))
@@ -485,6 +487,9 @@ func fleetScan(baseScanInfo cautils.ScanInfo, ks meta.IKubescape, policyIdentifi
 		if err != nil {
 			if attempts > 1 {
 				err = fmt.Errorf("%w (after %d attempts)", err, attempts)
+			}
+			if results == nil || !isGateFailure(err) {
+				incomplete = true
 			}
 			failed = append(failed, fmt.Sprintf("%s: %s", kubeContext, err))
 			logger.L().Error("fleet scan: context failed", helpers.String("context", kubeContext), helpers.Error(err))
@@ -533,16 +538,30 @@ func fleetScan(baseScanInfo cautils.ScanInfo, ks meta.IKubescape, policyIdentifi
 	// context tally rather than inside it. Folding it into the count would
 	// print "1 of 1 context(s) failed" for a run in which the only context
 	// succeeded.
+	var runErr error
 	switch {
 	case len(failed) > 0 && fleetReportErr != nil:
-		return fmt.Errorf("fleet scan: %d of %d context(s) failed:\n%s\nfleet report: %w", len(failed), len(baseScanInfo.KubeContexts), strings.Join(failed, "\n"), fleetReportErr)
+		runErr = fmt.Errorf("fleet scan: %d of %d context(s) failed:\n%s\nfleet report: %w", len(failed), len(baseScanInfo.KubeContexts), strings.Join(failed, "\n"), fleetReportErr)
 	case len(failed) > 0:
-		return fmt.Errorf("fleet scan: %d of %d context(s) failed:\n%s", len(failed), len(baseScanInfo.KubeContexts), strings.Join(failed, "\n"))
+		runErr = fmt.Errorf("fleet scan: %d of %d context(s) failed:\n%s", len(failed), len(baseScanInfo.KubeContexts), strings.Join(failed, "\n"))
 	case fleetReportErr != nil:
-		return fmt.Errorf("fleet scan: every context was scanned but the fleet report was not written: %w", fleetReportErr)
+		runErr = fmt.Errorf("fleet scan: every context was scanned but the fleet report was not written: %w", fleetReportErr)
+	default:
+		return nil
 	}
-	return nil
+	// 1 when every cluster was scanned and only gates failed, 2 when a cluster could not be scanned or a report was not written.
+	code := exitGateFailed
+	if incomplete || fleetReportErr != nil {
+		code = exitIncomplete
+	}
+	return &shared.ExitError{Code: code, Err: runErr}
 }
+
+// Exit codes of a fleet run that did not fully pass.
+const (
+	exitGateFailed = 1
+	exitIncomplete = 2
+)
 
 // scanFleetContext scans one context, retrying while its API server never answers, up to KubeContextRetries more times.
 // Each attempt gets a fresh clone of the settings, since a scan updates its own settings as it runs.
