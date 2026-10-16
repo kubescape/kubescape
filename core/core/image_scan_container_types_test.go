@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils"
@@ -19,6 +20,10 @@ const (
 	containerTypesRegularImage   = "alpine:3.20"
 	containerTypesInitImage      = "busybox:1.36"
 	containerTypesEphemeralImage = "ubuntu:24.04"
+
+	// containerTypesPlaceholderPassword is a dummy value used only to tell
+	// credentials apart in these tests; it is not a real secret.
+	containerTypesPlaceholderPassword = "placeholder-not-a-secret"
 )
 
 type containerTypesPodSpec struct {
@@ -67,6 +72,10 @@ func newContainerTypesPod(p containerTypesPodSpec) *workloadinterface.Workload {
 		},
 		"spec": spec,
 	})
+}
+
+func containerTypesAuth(registry, user string) string {
+	return `"` + registry + `":{"username":"` + user + `","password":"` + containerTypesPlaceholderPassword + `"}`
 }
 
 func newContainerTypesSecret(name, auths string) *corev1.Secret {
@@ -193,14 +202,14 @@ func TestCollectImageScanTargetsResolvesPullSecretsForEveryContainerType(t *test
 		unmatchedImage = "reg-d.example.com/team/other:1"
 	)
 	credsFor := func(authority, user string) imagescan.RegistryCredentials {
-		return imagescan.RegistryCredentials{Authority: authority, Username: user, Password: "pw"}
+		return imagescan.RegistryCredentials{Authority: authority, Username: user, Password: containerTypesPlaceholderPassword}
 	}
 
 	t.Run("single workload", func(t *testing.T) {
 		client := fake.NewClientset(newContainerTypesSecret("pull",
-			`"reg-a.example.com":{"username":"user-a","password":"pw"},`+
-				`"reg-b.example.com":{"username":"user-b","password":"pw"},`+
-				`"reg-c.example.com":{"username":"user-c","password":"pw"}`))
+			containerTypesAuth("reg-a.example.com", "user-a")+","+
+				containerTypesAuth("reg-b.example.com", "user-b")+","+
+				containerTypesAuth("reg-c.example.com", "user-c")))
 		pod := newContainerTypesPod(containerTypesPodSpec{
 			name:       "app",
 			pullSecret: "pull",
@@ -227,9 +236,9 @@ func TestCollectImageScanTargetsResolvesPullSecretsForEveryContainerType(t *test
 
 	t.Run("all resources merges credentials per image", func(t *testing.T) {
 		client := fake.NewClientset(
-			newContainerTypesSecret("pull-one", `"reg-a.example.com":{"username":"user-a1","password":"pw"}`),
-			newContainerTypesSecret("pull-two", `"reg-a.example.com":{"username":"user-a2","password":"pw"}`),
-			newContainerTypesSecret("pull-dup", `"reg-a.example.com":{"username":"user-a1","password":"pw"}`),
+			newContainerTypesSecret("pull-one", containerTypesAuth("reg-a.example.com", "user-a1")),
+			newContainerTypesSecret("pull-two", containerTypesAuth("reg-a.example.com", "user-a2")),
+			newContainerTypesSecret("pull-dup", containerTypesAuth("reg-a.example.com", "user-a1")),
 		)
 		// All three workloads reference regularImage, each through a different
 		// container type and a different pull secret.
@@ -252,7 +261,7 @@ func TestCollectImageScanTargetsResolvesPullSecretsForEveryContainerType(t *test
 	})
 
 	t.Run("workload without pull secrets resolves nothing", func(t *testing.T) {
-		client := fake.NewClientset(newContainerTypesSecret("pull", `"reg-a.example.com":{"username":"user-a","password":"pw"}`))
+		client := fake.NewClientset(newContainerTypesSecret("pull", containerTypesAuth("reg-a.example.com", "user-a")))
 		pod := newContainerTypesPod(containerTypesPodSpec{
 			name:      "no-secrets",
 			regular:   []string{regularImage},
@@ -285,7 +294,7 @@ func TestCollectImageScanTargetsDoesNotReadSecretsOutsideClusterContext(t *testi
 				name = contextName + "/single workload"
 			}
 			t.Run(name, func(t *testing.T) {
-				client := fake.NewClientset(newContainerTypesSecret("pull", `"reg-a.example.com":{"username":"user-a","password":"pw"}`))
+				client := fake.NewClientset(newContainerTypesSecret("pull", containerTypesAuth("reg-a.example.com", "user-a")))
 				pod := newContainerTypesPod(containerTypesPodSpec{
 					name:       "app",
 					pullSecret: "pull",
@@ -304,4 +313,108 @@ func TestCollectImageScanTargetsDoesNotReadSecretsOutsideClusterContext(t *testi
 			})
 		}
 	}
+}
+
+func TestBuildWorkloadImageScanJobsCoversAllContainerTypes(t *testing.T) {
+	registryMapping := map[string]string{"docker.io": "mirror.example.com"}
+	pod := newContainerTypesPod(containerTypesPodSpec{
+		name:      "all-container-types",
+		regular:   []string{containerTypesRegularImage},
+		init:      []string{containerTypesInitImage},
+		ephemeral: []string{containerTypesEphemeralImage},
+	})
+	scanData := cautils.NewOPASessionObjMock()
+	scanData.AllResources[pod.GetID()] = pod
+	targets, creds, errs := collectImageScanTargets(cautils.ScanTypeCluster, scanData, context.Background(), cautils.ContextFile, nil, "")
+	require.Empty(t, errs)
+
+	jobs := buildWorkloadImageScanJobs(targets, creds, imagescan.RegistryCredentials{}, registryMapping)
+
+	// One job per image, ordered by image reference.
+	assert.Equal(t, []ImageScanJob{
+		{Image: containerTypesRegularImage, RegistryCredentials: []imagescan.RegistryCredentials{}, RegistryMapping: registryMapping},
+		{Image: containerTypesInitImage, RegistryCredentials: []imagescan.RegistryCredentials{}, RegistryMapping: registryMapping},
+		{Image: containerTypesEphemeralImage, RegistryCredentials: []imagescan.RegistryCredentials{}, RegistryMapping: registryMapping},
+	}, jobs)
+}
+
+func TestBuildWorkloadImageScanJobsCredentialSelection(t *testing.T) {
+	const (
+		resolvedImage   = "reg-a.example.com/team/app:1"
+		unresolvedImage = "reg-b.example.com/team/init:1"
+	)
+	workloadCreds := func(user string) imagescan.RegistryCredentials {
+		return imagescan.RegistryCredentials{Authority: "reg-a.example.com", Username: user, Password: containerTypesPlaceholderPassword}
+	}
+	cliCreds := imagescan.RegistryCredentials{Authority: "cli.example.com", Username: "cli", Password: containerTypesPlaceholderPassword}
+	targets := mapset.NewSet(ImageScanTarget{Image: resolvedImage}, ImageScanTarget{Image: unresolvedImage})
+	imageToCreds := map[string][]imagescan.RegistryCredentials{
+		// Deliberately unsorted: jobs must carry them in a stable order.
+		resolvedImage: {workloadCreds("user-b"), workloadCreds("user-a")},
+	}
+
+	jobs := buildWorkloadImageScanJobs(targets, imageToCreds, cliCreds, nil)
+
+	require.Len(t, jobs, 2)
+	assert.Equal(t, resolvedImage, jobs[0].Image)
+	assert.Equal(t, []imagescan.RegistryCredentials{workloadCreds("user-a"), workloadCreds("user-b")}, jobs[0].RegistryCredentials,
+		"workload credentials win over the CLI credentials and are ordered deterministically")
+	assert.Equal(t, unresolvedImage, jobs[1].Image)
+	assert.Equal(t, []imagescan.RegistryCredentials{cliCreds}, jobs[1].RegistryCredentials,
+		"the CLI credentials are the fallback when no workload credential resolved")
+
+	t.Run("no credentials anywhere", func(t *testing.T) {
+		jobs := buildWorkloadImageScanJobs(targets, nil, imagescan.RegistryCredentials{}, nil)
+
+		require.Len(t, jobs, 2)
+		assert.Empty(t, jobs[0].RegistryCredentials)
+		assert.Empty(t, jobs[1].RegistryCredentials)
+	})
+
+	for name, creds := range map[string]imagescan.RegistryCredentials{
+		"token only":    {Token: "tok"},
+		"username only": {Username: "cli"},
+		"password only": {Password: containerTypesPlaceholderPassword},
+	} {
+		t.Run("CLI fallback with "+name, func(t *testing.T) {
+			jobs := buildWorkloadImageScanJobs(targets, nil, creds, nil)
+
+			require.Len(t, jobs, 2)
+			assert.Equal(t, []imagescan.RegistryCredentials{creds}, jobs[0].RegistryCredentials)
+			assert.Equal(t, []imagescan.RegistryCredentials{creds}, jobs[1].RegistryCredentials)
+		})
+	}
+
+	t.Run("an authority alone is not a credential", func(t *testing.T) {
+		jobs := buildWorkloadImageScanJobs(targets, nil, imagescan.RegistryCredentials{Authority: "cli.example.com"}, nil)
+
+		require.Len(t, jobs, 2)
+		assert.Empty(t, jobs[0].RegistryCredentials)
+	})
+}
+
+func TestBuildWorkloadImageScanJobsOrdersAndKeepsPlatformVariants(t *testing.T) {
+	targets := mapset.NewSet(
+		ImageScanTarget{Image: containerTypesInitImage, Platform: "linux/arm64", SkipUnavailable: true},
+		ImageScanTarget{Image: containerTypesInitImage, Platform: "linux/amd64", SkipUnavailable: true},
+		ImageScanTarget{Image: containerTypesEphemeralImage},
+		ImageScanTarget{Image: containerTypesRegularImage},
+	)
+
+	jobs := buildWorkloadImageScanJobs(targets, nil, imagescan.RegistryCredentials{}, nil)
+
+	type key struct {
+		image, platform string
+		skip            bool
+	}
+	got := make([]key, 0, len(jobs))
+	for _, job := range jobs {
+		got = append(got, key{job.Image, job.Platform, job.SkipUnavailablePlatform})
+	}
+	assert.Equal(t, []key{
+		{containerTypesRegularImage, "", false},
+		{containerTypesInitImage, "linux/amd64", true},
+		{containerTypesInitImage, "linux/arm64", true},
+		{containerTypesEphemeralImage, "", false},
+	}, got)
 }

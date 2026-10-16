@@ -621,6 +621,21 @@ func scanImages(scanType cautils.ScanTypes, scanData *cautils.OPASessionObj, ctx
 	// Deferred into the joined error so image results are still collected first.
 	staleDBErr := imagescan.EnforceDBAge(svc, shouldUpdate, failOnStale, maxDBAge)
 	defaultCreds := registryCredentialsFromScanInfo(scanInfo)
+	jobs := buildWorkloadImageScanJobs(imagesToScan, imageToCreds, defaultCreds, scanInfo.RegistryMapping)
+
+	concurrency := scanInfo.ImageScanConcurrency
+	if concurrency <= 0 {
+		concurrency = 1
+	}
+
+	return errors.Join(staleDBErr, scanImageJobsWithDiscoveryErrors(ctx, svc, concurrency, jobs, resultsHandling, containerErrors))
+}
+
+// buildWorkloadImageScanJobs turns the collected targets into scan jobs, ordered by
+// image and then platform. Credentials resolved from a workload's
+// imagePullSecrets win; the CLI registry credentials are used only when none
+// resolved for the image.
+func buildWorkloadImageScanJobs(imagesToScan mapset.Set[ImageScanTarget], imageToCreds map[string][]imagescan.RegistryCredentials, defaultCreds imagescan.RegistryCredentials, registryMapping map[string]string) []ImageScanJob {
 	jobs := make([]ImageScanJob, 0, imagesToScan.Cardinality())
 	for target := range imagesToScan.Iter() {
 		img := target.Image
@@ -650,7 +665,7 @@ func scanImages(scanType cautils.ScanTypes, scanData *cautils.OPASessionObj, ctx
 			Platform:                target.Platform,
 			SkipUnavailablePlatform: target.SkipUnavailable,
 			RegistryCredentials:     credsList,
-			RegistryMapping:         scanInfo.RegistryMapping,
+			RegistryMapping:         registryMapping,
 		})
 	}
 	sort.Slice(jobs, func(i, j int) bool {
@@ -659,13 +674,7 @@ func scanImages(scanType cautils.ScanTypes, scanData *cautils.OPASessionObj, ctx
 		}
 		return jobs[i].Platform < jobs[j].Platform
 	})
-
-	concurrency := scanInfo.ImageScanConcurrency
-	if concurrency <= 0 {
-		concurrency = 1
-	}
-
-	return errors.Join(staleDBErr, scanImageJobsWithDiscoveryErrors(ctx, svc, concurrency, jobs, resultsHandling, containerErrors))
+	return jobs
 }
 
 func scanImageJobsWithDiscoveryErrors(ctx context.Context, svc imageScanService, concurrency int, jobs []ImageScanJob, resultsHandling *resultshandling.ResultsHandler, discoveryErrors []error) error {
