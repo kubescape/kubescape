@@ -8,7 +8,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
+	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	"github.com/stretchr/testify/assert"
 )
@@ -107,7 +109,7 @@ func TestBuildScanResponse(t *testing.T) {
 					},
 				}
 			}
-			resp := buildScanResponse(results, tt.complianceScore, tt.frameworkName, tt.degraded, tt.notEvaluatedControls, tt.totalControls)
+			resp := buildScanResponse(results, tt.complianceScore, tt.frameworkName, tt.degraded, tt.notEvaluatedControls, tt.totalControls, nil)
 
 			if resp.TotalFailed != tt.wantTotal {
 				t.Errorf("TotalFailed = %d, want %d", resp.TotalFailed, tt.wantTotal)
@@ -242,6 +244,26 @@ func TestBuildScanInfo(t *testing.T) {
 			})
 			assert.Equal(t, tt.expectedNamespace, scanInfo.IncludeNamespaces, "IncludeNamespaces should match")
 			assert.Equal(t, tt.expectedTimeout, scanInfo.ScanTimeout, "ScanTimeout should match")
+		})
+	}
+}
+
+func TestBuildScanResponseFrameworkScoped(t *testing.T) {
+	for _, dual := range []bool{false, true} {
+		t.Run(fmt.Sprintf("dual=%t", dual), func(t *testing.T) {
+			summary := reportsummary.SummaryDetails{Frameworks: []reportsummary.FrameworkSummary{{Name: "NSA", Controls: reportsummary.ControlSummaries{"C-0034": {}}}}}
+			if dual {
+				summary.Frameworks = append(summary.Frameworks, reportsummary.FrameworkSummary{Name: "MITRE", Controls: reportsummary.ControlSummaries{"C-0034": {}}})
+			}
+			result := resourcesresults.Result{ResourceID: "pod", AssociatedControls: []resourcesresults.ResourceAssociatedControl{{ControlID: "C-0034", Status: apis.StatusInfo{InnerStatus: apis.StatusFailed}, ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{{Name: "R1", Status: apis.StatusFailed, Exception: []armotypes.PostureExceptionPolicy{{PosturePolicies: []armotypes.PosturePolicy{{FrameworkName: "NSA", ControlID: "C-0034", RuleName: "R1"}}}}}}}}}
+			response := buildScanResponse(map[string]resourcesresults.Result{"pod": result}, nil, "", false, 0, 1, &summary)
+			expected := 0
+			if dual {
+				expected = 1
+			}
+			assert.Equal(t, expected, response.TotalFailed)
+			assert.Len(t, response.FailedResources, expected)
+			assert.Equal(t, apis.StatusFailed, result.AssociatedControls[0].ResourceAssociatedRules[0].Status)
 		})
 	}
 }

@@ -476,7 +476,7 @@ func TestApplyFixToContent_CraftedFixPathLeaksNothing(t *testing.T) {
 		failedRuleWithFix(`metadata.annotations.leak |= strenv(KUBESCAPE_ACCESS_KEY) | select(di==0).spec.hostNetwork`, "false"),
 	)
 
-	added, skipped := rfi.addYamlExpressionsFromResourceAssociatedControl(0, &ac, false)
+	added, skipped := rfi.addYamlExpressionsFromResourceAssociatedControl(0, &ac, false, nil)
 
 	assert.Equal(t, 0, added, "a crafted fix path must not become a fix")
 	assert.Empty(t, rfi.YamlExpressions)
