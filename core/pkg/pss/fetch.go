@@ -76,18 +76,52 @@ func (e *ListResourceError) Unwrap() error {
 func FetchNamespaceWorkloads(ctx context.Context, dynClient dynamic.Interface, namespace string, targets []WorkloadTarget) ([]unstructured.Unstructured, error) {
 	var all []unstructured.Unstructured
 	for _, target := range targets {
-		list, err := dynClient.Resource(target.GVR).Namespace(namespace).List(ctx, metav1.ListOptions{})
+		items, err := fetchWorkloadPages(ctx, dynClient, namespace, target)
 		if err != nil {
 			return nil, &ListResourceError{GVR: target.GVR, Kind: target.Kind, Err: err}
+		}
+		all = append(all, items...)
+	}
+	return all, nil
+}
+
+const workloadListPageSize int64 = 500
+const maxWorkloadListPages = 1000
+
+// fetchWorkloadPages follows the server's opaque continuation token. A failed
+// or cyclic listing is an error, never a successful partial compliance scan.
+func fetchWorkloadPages(ctx context.Context, client dynamic.Interface, namespace string, target WorkloadTarget) ([]unstructured.Unstructured, error) {
+	var items []unstructured.Unstructured
+	options := metav1.ListOptions{Limit: workloadListPageSize}
+	seen := make(map[string]struct{})
+	for page := 0; page < maxWorkloadListPages; page++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		list, err := client.Resource(target.GVR).Namespace(namespace).List(ctx, options)
+		if err != nil {
+			return nil, err
+		}
+		if list == nil {
+			return nil, fmt.Errorf("workload listing returned a nil list")
 		}
 		for i := range list.Items {
 			if list.Items[i].GetKind() == "" {
 				list.Items[i].SetKind(target.Kind)
 			}
-			all = append(all, list.Items[i])
 		}
+		items = append(items, list.Items...)
+		next := list.GetContinue()
+		if next == "" {
+			return items, nil
+		}
+		if _, duplicate := seen[next]; duplicate {
+			return nil, fmt.Errorf("workload listing repeated a continuation token")
+		}
+		seen[next] = struct{}{}
+		options.Continue = next
 	}
-	return all, nil
+	return nil, fmt.Errorf("workload listing exceeded the %d-page safety limit", maxWorkloadListPages)
 }
 
 // DeduplicateWorkloads filters workloads for namespace-wide scans, removing
