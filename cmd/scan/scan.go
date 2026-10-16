@@ -105,6 +105,9 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 			if err := cautils.ValidateHelmKubeVersion(scanInfo.HelmKubeVersion); err != nil {
 				return fmt.Errorf("invalid --kube-version: %w", err)
 			}
+			if strings.TrimSpace(scanInfo.IncludeNamespaces) != "" && strings.TrimSpace(scanInfo.ExcludedNamespaces) != "" {
+				return fmt.Errorf("invalid arguments: --include-namespaces and --exclude-namespaces cannot be used together")
+			}
 			if strings.Contains(scanInfo.ControlsVersion, "/") {
 				return fmt.Errorf(
 					"invalid --controls-version %q: must be a regolibrary release tag and cannot contain '/'",
@@ -226,7 +229,7 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	scanCmd.PersistentFlags().BoolVar(&scanInfo.AuditExceptions, "audit-exceptions", false, "Include an exception usage audit in supported scan outputs")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.UseArtifactsFrom, "use-artifacts-from", "", "Load artifacts from local directory. If not used will download them")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.CustomRules, "custom-rules", "", "Path to user-authored custom rules: a rule directory holding raw.rego and rule.metadata.json (the layout used by 'kubescape policy test'), a directory of such rule directories, or a directory of bare *.rego files. A rule's declared match selectors are honoured; a bare .rego file is matched against every resource kind. A custom rule is medium severity unless its Rego declares '# @baseScore <1-10>'")
-	scanCmd.PersistentFlags().StringVarP(&scanInfo.ExcludedNamespaces, "exclude-namespaces", "e", "", "Namespaces to exclude from scanning. e.g: --exclude-namespaces ns-a,ns-b. Notice, when running with `exclude-namespace` kubescape does not scan cluster-scoped objects.")
+	scanCmd.PersistentFlags().StringVarP(&scanInfo.ExcludedNamespaces, "exclude-namespaces", "e", "", "Namespaces to exclude from scanning. e.g: --exclude-namespaces ns-a,ns-b. Cannot be used together with --include-namespaces. Notice, when running with `exclude-namespace` kubescape does not scan cluster-scoped objects.")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.MinSeverity, "min-severity", "", "Only include controls at or above this severity (low, medium, high, critical) in the output. Does not affect exit codes — --compliance-threshold, --severity-threshold, --fail-coverage-below and --fail-on-degraded-config are always computed on the full unfiltered report")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.MaxSeverity, "max-severity", "", "Only include controls at or below this severity (low, medium, high, critical) in the output. Does not affect exit codes — thresholds are always computed on the full unfiltered report")
 
@@ -259,7 +262,7 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	honorInlineF.NoOptDefVal = "true"
 
 	scanCmd.PersistentFlags().StringVarP(&scanInfo.Format, "format", "f", "pretty-printer", fmt.Sprintf(`Output file format. Supported formats: "%s"`, strings.Join(shared.ScanFormats, `", "`)))
-	scanCmd.PersistentFlags().StringVar(&scanInfo.IncludeNamespaces, "include-namespaces", "", "scan specific namespaces. e.g: --include-namespaces ns-a,ns-b")
+	scanCmd.PersistentFlags().StringVar(&scanInfo.IncludeNamespaces, "include-namespaces", "", "scan specific namespaces. e.g: --include-namespaces ns-a,ns-b. Cannot be used together with --exclude-namespaces")
 	scanCmd.PersistentFlags().StringSliceVar(&scanInfo.ExcludeControls, "exclude-controls", nil, "Controls to leave out of the scan, by control ID (case-insensitive), applied to every framework in the scan. A control's CIS section number is accepted where the control carries one. Excluded controls are not evaluated and do not affect the compliance score. e.g: --exclude-controls C-0016,C-0017")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.IncludeKinds, "include-kinds", "", "scan only the specified Kubernetes resource kinds (case-insensitive, Kind name only — not group/version qualified). e.g: --include-kinds Deployment,DaemonSet")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.ExcludeKinds, "exclude-kinds", "", "exclude the specified Kubernetes resource kinds from the scan (case-insensitive, Kind name only — not group/version qualified). e.g: --exclude-kinds Job,CronJob")

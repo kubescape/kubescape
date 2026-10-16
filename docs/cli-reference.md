@@ -41,7 +41,7 @@ kubescape scan [target] [flags]
 | `--compliance-threshold <float>` | Fail if compliance score is below threshold. Applies to `scan framework`, `scan control`, and `--view resource\|control` — see [score thresholds](#score-thresholds). | `0` |
 | `--controls-config <path>` | Path to controls configuration file | - |
 | `--custom-rules <path>` | Path to user-authored custom rules — see [custom rules](#custom-rules) | - |
-| `-e, --exclude-namespaces <ns>` | Namespaces to exclude (comma-separated) | - |
+| `-e, --exclude-namespaces <ns>` | Namespaces to exclude (comma-separated). Cannot be combined with `--include-namespaces` | - |
 | `--encrypt` | Encrypt sensitive report metadata using the master key provided through the `KUBESCAPE_MASTER_KEY` environment variable. Requires `--format json` for reports that will later be decrypted with `kubescape decrypt`. If both `--encrypt` and `--hide` are specified, `--encrypt` takes precedence. | `false` |
 | `--exceptions <path>` | Path to exceptions file | - |
 | `--audit-exceptions` | Include exception usage details in supported scan outputs | `false` |
@@ -49,7 +49,7 @@ kubescape scan [target] [flags]
 | `-f, --format <format>` | Output format: `pretty-printer`, `json`, `junit`, `prometheus`, `pdf`, `html`, `sarif`, `gitlab-sast`, `github-actions`, `yaml`, `csv`, `markdown`, `policyreport`, `exceptions`, `cyclonedx-json`, `spdx-json` — see [generating an exceptions baseline](#generating-an-exceptions-baseline) and [generating an SBOM](#generating-an-sbom). `github-actions` emits failed High/Critical controls as `::error` workflow commands for inline PR annotations; local file scans only, capped at GitHub's 10-annotations-per-step limit | `pretty-printer` |
 | `--hide` | Replace sensitive report metadata with deterministic pseudonyms. Ignored when `--encrypt` is also specified. | `false` |
 | `--host-scan` | Enable host data collection from cluster nodes for certain controls. When not set, Kubescape auto-detects node-agent CRDs and uses a CRD-based host sensor if available. Use `--host-scan=false` to disable host data collection. See the [Kubescape operator](https://github.com/kubescape/helm-charts/tree/main/charts/kubescape-operator) for a managed alternative. | auto-detect |
-| `--include-namespaces <ns>` | Namespaces to include (comma-separated) | - |
+| `--include-namespaces <ns>` | Namespaces to include (comma-separated). Cannot be combined with `--exclude-namespaces` | - |
 | `--label-selector <selector>` | Filter collected resources by Kubernetes label selector. Accepts any expression `kubectl -l` supports, e.g. `app=nginx,env!=dev` or `env in (prod,staging)`. Syntax is validated before scanning begins; filtering is applied during live cluster collection and ignored when scanning local files. | - |
 | `--keep-local` | Don't report results to backend | `false` |
 | `--notify <url>` | POST the posture scan summary to a webhook URL. Slack incoming webhooks receive Block Kit, Microsoft Teams webhooks an Adaptive Card, and other destinations generic JSON. Repeat for multiple endpoints. Delivery is best-effort and does not affect scan exit status. Not supported by `scan image`. | - |
