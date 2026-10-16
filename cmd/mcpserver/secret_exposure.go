@@ -31,7 +31,7 @@ var (
 	githubTokenRegex     = regexp.MustCompile(`\b(?:gh[pousr]_[A-Za-z0-9_]{36,}|github_pat_[A-Za-z0-9_]{22,})\b`)
 	slackTokenRegex      = regexp.MustCompile(`\bxox[baprs]-[0-9A-Za-z]{10,}-[0-9A-Za-z]+\b`)
 	jwtTokenRegex        = regexp.MustCompile(`\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9._-]{10,}\.[A-Za-z0-9._-]+\b`)
-	uriCredentialsRegex  = regexp.MustCompile(`\b[a-zA-Z][a-zA-Z0-9+.-]*://[^:\s@/?#]+:[^\s/?#]+@[^/\s]+`)
+	uriCredentialsRegex  = regexp.MustCompile(`\b[a-zA-Z][a-zA-Z0-9+.-]*://([^:\s@/?#]+):([^\s/?#]+)@[^/\s]+`)
 
 	sensitiveConfigMapFileRegex = regexp.MustCompile(`(?i)(?:id_rsa|id_ecdsa|id_ed25519|credentials\.json|\.env|jwt\.key)$`)
 	nonSecretKeySuffixRegex     = regexp.MustCompile(`(?i)(?:[_-](?:NAME|FILE|PATH|DIR|REF|TTL|EXPIRY|EXPIRES|TIMEOUT|LENGTH|LEN|URL_PATH|ENABLED|TYPE|ENDPOINT|ISSUER|AUDIENCE|ALGORITHM|ALG|HEADER|SCOPES?)|(?:TOKEN|JWT|AUTH)[_-](?:URL|URI))$`)
@@ -244,8 +244,39 @@ var highConfidenceValuePatterns = []valuePattern{
 	},
 }
 
+func hasExposedURICredentials(val string) (hasMatch bool, hasExposed bool) {
+	matches := uriCredentialsRegex.FindAllStringSubmatch(val, -1)
+	if len(matches) == 0 {
+		return false, false
+	}
+	for _, m := range matches {
+		user := m[1]
+		pass := m[2]
+		// If password is not a safe placeholder or variable reference, it is an exposed secret
+		if !isSafeValue(pass) {
+			return true, true
+		}
+		// If username contains a high-confidence token, it is an exposed secret
+		if awsAccessKeyRegex.MatchString(user) || githubTokenRegex.MatchString(user) || slackTokenRegex.MatchString(user) || jwtTokenRegex.MatchString(user) {
+			return true, true
+		}
+	}
+	return true, false
+}
+
 func evaluateSecretString(key, val string) (matched bool, ruleID, desc, severity string) {
 	for _, p := range highConfidenceValuePatterns {
+		if p.ruleID == "URI_CREDENTIALS" {
+			hasMatch, hasExposed := hasExposedURICredentials(val)
+			if hasExposed {
+				return true, p.ruleID, p.description, p.severity
+			}
+			if hasMatch {
+				// URI credentials were present, but user and password parts are dynamic variable references or safe placeholders.
+				return false, "", "", ""
+			}
+			continue
+		}
 		if p.regex.MatchString(val) {
 			return true, p.ruleID, p.description, p.severity
 		}

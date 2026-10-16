@@ -2013,3 +2013,70 @@ func TestDetectSecretExposure_Deduplication_ConfirmedPodKeptWhenParentUncertain(
 	assert.True(t, foundSS, "expected uncertain StatefulSet finding")
 	assert.True(t, foundPod, "expected confirmed Pod finding to be preserved in namespace scan")
 }
+
+func TestDetectSecretExposure_DynamicVariableRefURI(t *testing.T) {
+	// Workload using recommended Kubernetes $(VAR) / ${VAR} / {{ .Template }} interpolation
+	// in connection URIs must NOT be flagged as URI_CREDENTIALS or ENV_CREDENTIAL_KEYWORD.
+	podSafe := testSecretPod("uri-test", "safe-uri-pod", []map[string]any{
+		{
+			"name": "app",
+			"env": []any{
+				map[string]any{
+					"name":  "DATABASE_URL",
+					"value": "post" + "gres://" + "admin:$(DB_PASSWORD)@db-service:5432/mydb",
+				},
+				map[string]any{
+					"name":  "ANALYTICS_URL",
+					"value": "post" + "gres://" + "$(DB_USER):$(DB_PASSWORD)@analytics-db:5432/analytics",
+				},
+				map[string]any{
+					"name":  "CACHE_URL",
+					"value": "post" + "gres://" + "admin:${CACHE_PASSWORD}@cache-db:5432/cache",
+				},
+				map[string]any{
+					"name":  "TEMPLATE_URL",
+					"value": "post" + "gres://" + "admin:{{ .Values.dbPassword }}@tpl-db:5432/tpl",
+				},
+			},
+		},
+	})
+
+	ksServerSafe := newSecretExposureTestServer(t, podSafe)
+	resSafe := registeredToolResult(t, dispatchRegisteredTool(t, ksServerSafe, "detect_secret_exposure", map[string]any{
+		"namespace": "uri-test",
+	}))
+	require.False(t, resSafe.IsError)
+	var resDataSafe SecretExposureResult
+	require.NoError(t, json.Unmarshal([]byte(toolResultText(t, resSafe)), &resDataSafe))
+	assert.Equal(t, 0, resDataSafe.FindingsCount, "dynamic variable references in URI credentials must be suppressed")
+
+	// Workload with literal credentials in password part must still be flagged as URI_CREDENTIALS
+	podExposed := testSecretPod("uri-test", "exposed-uri-pod", []map[string]any{
+		{
+			"name": "app",
+			"env": []any{
+				map[string]any{
+					"name":  "DATABASE_URL",
+					"value": "post" + "gres://" + "admin:" + testPassword() + "@db-service:5432/mydb",
+				},
+				map[string]any{
+					"name":  "COMPOSED_URL",
+					"value": "post" + "gres://" + "$(DB_USER):" + testPassword() + "@db-service:5432/mydb",
+				},
+			},
+		},
+	})
+
+	ksServerExposed := newSecretExposureTestServer(t, podExposed)
+	resExposed := registeredToolResult(t, dispatchRegisteredTool(t, ksServerExposed, "detect_secret_exposure", map[string]any{
+		"namespace": "uri-test",
+	}))
+	require.False(t, resExposed.IsError)
+	var resDataExposed SecretExposureResult
+	require.NoError(t, json.Unmarshal([]byte(toolResultText(t, resExposed)), &resDataExposed))
+	assert.Equal(t, 2, resDataExposed.FindingsCount, "literal credentials in URI must still be flagged")
+	for _, f := range resDataExposed.Findings {
+		assert.Equal(t, "URI_CREDENTIALS", f.RuleID)
+		assert.Equal(t, "High", f.Severity)
+	}
+}
