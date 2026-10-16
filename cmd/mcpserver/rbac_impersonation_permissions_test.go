@@ -94,14 +94,20 @@ func TestRBACAnonymousImpersonationUsesUnauthenticatedGroup(t *testing.T) {
 	for _, tc := range []struct {
 		name, group, subject string
 		wantAdmin            bool
+		grantToAnonymous     bool
 	}{
 		{name: "impersonate anonymous through group binding", group: "system:unauthenticated", subject: "alice", wantAdmin: true},
 		{name: "anonymous excludes authenticated grants", group: "system:authenticated", subject: "system:anonymous"},
+		{name: "anonymous impersonates authenticated user", group: "system:authenticated", subject: "system:anonymous", wantAdmin: true, grantToAnonymous: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			grant := unstructuredClusterRole("impersonator", unstructuredPolicyRule([]string{""}, []string{"users"}, []string{"impersonate"}, nil))
 			binding := unstructuredClusterRoleBinding("grant", "impersonator", "prod", "unused")
-			binding.Object["subjects"] = []any{map[string]any{"kind": "User", "apiGroup": "rbac.authorization.k8s.io", "name": "alice"}}
+			grantee := "alice"
+			if tc.grantToAnonymous {
+				grantee = "system:anonymous"
+			}
+			binding.Object["subjects"] = []any{map[string]any{"kind": "User", "apiGroup": "rbac.authorization.k8s.io", "name": grantee}}
 			admin := unstructuredClusterRole("admin", unstructuredPolicyRule([]string{"*"}, []string{"*"}, []string{"*"}, nil))
 			adminBinding := unstructuredClusterRoleBinding("group-admin", "admin", "prod", "unused")
 			adminBinding.Object["subjects"] = []any{map[string]any{"kind": "Group", "apiGroup": "rbac.authorization.k8s.io", "name": tc.group}}

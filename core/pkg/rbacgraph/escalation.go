@@ -141,6 +141,10 @@ func (idx *Index) boundUserNames() []string {
 				// Kubernetes assigns this group when impersonating system:anonymous,
 				// even when no binding explicitly names that user.
 				seen[user.Anonymous] = true
+			} else if subject.Kind == "Group" && subject.Name == user.AllAuthenticated {
+				// An unrestricted User grant can choose an ordinary username even
+				// when only the authenticated group, not a concrete user, is bound.
+				seen["impersonation-target"] = true
 			}
 		}
 	}

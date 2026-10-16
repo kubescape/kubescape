@@ -23,6 +23,9 @@ Unrestricted User impersonation also follows `system:anonymous` when a collected
 binding grants permissions to `system:unauthenticated`. Anonymous impersonation
 inherits that group, excluding the default `system:authenticated` group. Explicit
 User name restrictions still apply, and namespaced group grants stay namespaced.
+In the reverse direction, authenticated-group bindings supply an ordinary User
+representative for unrestricted User impersonation. An anonymous caller can
+reach those permissions through impersonation, but does not inherit them directly.
 
 `cluster_admin_equivalent` is confirmed when a real target or subsequent
 escalation grants cluster-wide administrative power. A false value accompanied
