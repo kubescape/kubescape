@@ -116,17 +116,65 @@ func TestReaches_CombinedNamespaceAndPodSelectorIsAND(t *testing.T) {
 		}, nil)
 	idx, _ := NewIndex([]*networkingv1.NetworkPolicy{allow}, []NamespaceInfo{
 		{Name: "prod-ns", Labels: map[string]string{"env": "prod"}},
+		{Name: "dev-ns", Labels: map[string]string{"env": "dev"}},
+		{Name: "ns"},
 	})
 
 	dst := Endpoint{Namespace: "ns", Name: "server", Labels: map[string]string{"app": "server"}}
 	rightNsRightLabel := Endpoint{Namespace: "prod-ns", Name: "c1", Labels: map[string]string{"app": "client"}}
 	rightNsWrongLabel := Endpoint{Namespace: "prod-ns", Name: "c2", Labels: map[string]string{"app": "not-client"}}
+	wrongNsRightLabel := Endpoint{Namespace: "dev-ns", Name: "c3", Labels: map[string]string{"app": "client"}}
+	policyNsRightLabel := Endpoint{Namespace: "ns", Name: "c4", Labels: map[string]string{"app": "client"}}
 
 	if v, _, _ := idx.Reaches(rightNsRightLabel, dst, nil); v != Allowed {
 		t.Errorf("namespace matches and pod label matches: verdict = %v, want Allowed", v)
 	}
 	if v, _, _ := idx.Reaches(rightNsWrongLabel, dst, nil); v != Denied {
 		t.Errorf("namespace matches but pod label does not: verdict = %v, want Denied (AND, not OR)", v)
+	}
+	// The other half of the AND: matching pod labels are not enough on their
+	// own, in another namespace or in the policy's own one.
+	if v, _, _ := idx.Reaches(wrongNsRightLabel, dst, nil); v != Denied {
+		t.Errorf("pod label matches but namespace does not: verdict = %v, want Denied (AND, not OR)", v)
+	}
+	if v, _, _ := idx.Reaches(policyNsRightLabel, dst, nil); v != Denied {
+		t.Errorf("pod label matches in the policy's own, non-matching namespace: verdict = %v, want Denied", v)
+	}
+}
+
+func TestReaches_CombinedNamespaceAndPodSelectorIsANDForEgress(t *testing.T) {
+	allow := policy("ns", "allow-to-prod-server", selector("app", "client"),
+		[]networkingv1.PolicyType{networkingv1.PolicyTypeEgress},
+		nil,
+		[]networkingv1.NetworkPolicyEgressRule{
+			{To: []networkingv1.NetworkPolicyPeer{{
+				NamespaceSelector: namespaceSelectorPtr(selector("env", "prod")),
+				PodSelector:       podSelectorPtr(selector("app", "server")),
+			}}},
+		})
+	idx, _ := NewIndex([]*networkingv1.NetworkPolicy{allow}, []NamespaceInfo{
+		{Name: "prod-ns", Labels: map[string]string{"env": "prod"}},
+		{Name: "dev-ns", Labels: map[string]string{"env": "dev"}},
+		{Name: "ns"},
+	})
+
+	src := Endpoint{Namespace: "ns", Name: "client", Labels: map[string]string{"app": "client"}}
+	tests := []struct {
+		name string
+		dst  Endpoint
+		want Verdict
+	}{
+		{"namespace and pod label match", Endpoint{Namespace: "prod-ns", Name: "s1", Labels: map[string]string{"app": "server"}}, Allowed},
+		{"namespace matches but pod label does not", Endpoint{Namespace: "prod-ns", Name: "s2", Labels: map[string]string{"app": "not-server"}}, Denied},
+		{"pod label matches but namespace does not", Endpoint{Namespace: "dev-ns", Name: "s3", Labels: map[string]string{"app": "server"}}, Denied},
+		{"pod label matches in the policy's own, non-matching namespace", Endpoint{Namespace: "ns", Name: "s4", Labels: map[string]string{"app": "server"}}, Denied},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if v, egress, _ := idx.Reaches(src, tt.dst, nil); v != tt.want || egress.Verdict != tt.want {
+				t.Errorf("verdict = %v, egress = %v, want %v", v, egress.Verdict, tt.want)
+			}
+		})
 	}
 }
 
