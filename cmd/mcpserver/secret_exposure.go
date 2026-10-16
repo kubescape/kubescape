@@ -31,10 +31,12 @@ var (
 	githubTokenRegex     = regexp.MustCompile(`\b(?:gh[pousr]_[A-Za-z0-9_]{36,}|github_pat_[A-Za-z0-9_]{22,})\b`)
 	slackTokenRegex      = regexp.MustCompile(`\bxox[baprs]-[0-9A-Za-z]{10,}-[0-9A-Za-z]+\b`)
 	jwtTokenRegex        = regexp.MustCompile(`\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9._-]{10,}\.[A-Za-z0-9._-]+\b`)
-	uriCredentialsRegex  = regexp.MustCompile(`\b[a-zA-Z][a-zA-Z0-9+.-]*://[^:\s@/?#]+:[^\s/?#]+@[^/\s]+`)
+	uriCredentialsRegex  = regexp.MustCompile(`\b[a-zA-Z][a-zA-Z0-9+.-]*://((?:\{\{[^{}]*\}\}|[^:\s@/?#])+):((?:\{\{[^{}]*\}\}|[^\s/?#])+)@[^/?#,;|\s"'` + "`" + `]+`)
+	uriStartRegex        = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9+.-]*://`)
 
 	sensitiveConfigMapFileRegex = regexp.MustCompile(`(?i)(?:id_rsa|id_ecdsa|id_ed25519|credentials\.json|\.env|jwt\.key)$`)
 	nonSecretKeySuffixRegex     = regexp.MustCompile(`(?i)(?:[_-](?:NAME|FILE|PATH|DIR|REF|TTL|EXPIRY|EXPIRES|TIMEOUT|LENGTH|LEN|URL_PATH|ENABLED|TYPE|ENDPOINT|ISSUER|AUDIENCE|ALGORITHM|ALG|HEADER|SCOPES?)|(?:TOKEN|JWT|AUTH)[_-](?:URL|URI))$`)
+	queryCredentialKeyRegex     = regexp.MustCompile(`(?i)^(?:pwd|sslpassword)$`)
 )
 
 var safePlaceholderValues = map[string]struct{}{
@@ -244,8 +246,126 @@ var highConfidenceValuePatterns = []valuePattern{
 	},
 }
 
+func hasExposedQueryCredentials(queryStr string) bool {
+	for _, segment := range strings.FieldsFunc(queryStr, func(r rune) bool {
+		return r == '&' || r == ';' || r == '?' || r == '#'
+	}) {
+		rawItems := strings.Split(segment, ",")
+		for i := 0; i < len(rawItems); i++ {
+			item := rawItems[i]
+			k, v, found := strings.Cut(item, "=")
+			if !found {
+				continue
+			}
+			if unescapedK, err := url.QueryUnescape(k); err == nil {
+				k = unescapedK
+			}
+			isCredentialKey := queryCredentialKeyRegex.MatchString(k) ||
+				(sensitiveEnvKeyRegex.MatchString(k) && !nonSecretKeySuffixRegex.MatchString(k))
+			if isCredentialKey {
+				for i+1 < len(rawItems) {
+					v = v + "," + rawItems[i+1]
+					i++
+				}
+			} else {
+				for i+1 < len(rawItems) && !strings.Contains(rawItems[i+1], "=") {
+					v = v + "," + rawItems[i+1]
+					i++
+				}
+			}
+			if unescapedV, err := url.QueryUnescape(v); err == nil {
+				v = unescapedV
+			}
+			if awsAccessKeyRegex.MatchString(v) || githubTokenRegex.MatchString(v) || slackTokenRegex.MatchString(v) || jwtTokenRegex.MatchString(v) {
+				return true
+			}
+			if isCredentialKey {
+				if strings.TrimSpace(v) != "" && !isCompletePlaceholderExpression(v) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+func isURISchemeByte(c byte) bool {
+	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '+' || c == '.' || c == '-'
+}
+
+func hasExposedURICredentials(val string) (hasMatch bool, hasExposed bool, safeRanges [][2]int) {
+	locs := uriCredentialsRegex.FindAllStringSubmatchIndex(val, -1)
+	if len(locs) == 0 {
+		return false, false, nil
+	}
+	hasMatch = true
+	for _, loc := range locs {
+		user := val[loc[2]:loc[3]]
+		pass := val[loc[4]:loc[5]]
+
+		isAuthExposed := !isCompletePlaceholderExpression(pass) ||
+			awsAccessKeyRegex.MatchString(user) ||
+			githubTokenRegex.MatchString(user) ||
+			slackTokenRegex.MatchString(user) ||
+			jwtTokenRegex.MatchString(user)
+
+		pos := loc[1]
+		for pos < len(val) {
+			if strings.ContainsRune(" \t\r\n\"'`", rune(val[pos])) {
+				break
+			}
+			if (val[pos] == ',' || val[pos] == ';' || val[pos] == '|') && uriStartRegex.MatchString(strings.TrimLeft(val[pos+1:], " \t\r\n")) {
+				break
+			}
+			if !isURISchemeByte(val[pos-1]) && uriStartRegex.MatchString(val[pos:]) {
+				break
+			}
+			pos++
+		}
+
+		queryExposed := hasExposedQueryCredentials(val[loc[5]+1 : pos])
+
+		if isAuthExposed || queryExposed {
+			hasExposed = true
+		} else {
+			safeRanges = append(safeRanges, [2]int{loc[0], pos})
+		}
+	}
+	return hasMatch, hasExposed, safeRanges
+}
+
 func evaluateSecretString(key, val string) (matched bool, ruleID, desc, severity string) {
 	for _, p := range highConfidenceValuePatterns {
+		if p.ruleID == "URI_CREDENTIALS" {
+			hasMatch, hasExposed, safeRanges := hasExposedURICredentials(val)
+			if hasExposed {
+				return true, p.ruleID, p.description, p.severity
+			}
+			if hasMatch {
+				// URI credentials were present and all matched URIs are safe.
+				// Exempt only the safe URI portions and evaluate remaining compound content.
+				var b strings.Builder
+				lastIdx := 0
+				for _, r := range safeRanges {
+					if r[0] > lastIdx {
+						b.WriteString(val[lastIdx:r[0]])
+					}
+					if r[1] > lastIdx {
+						lastIdx = r[1]
+					}
+				}
+				if lastIdx < len(val) {
+					b.WriteString(val[lastIdx:])
+				}
+				remaining := strings.Trim(b.String(), " \t\r\n,;|\"'`")
+
+				if remaining == "" {
+					return false, "", "", ""
+				}
+				return evaluateSecretString(key, remaining)
+			}
+			continue
+		}
 		if p.regex.MatchString(val) {
 			return true, p.ruleID, p.description, p.severity
 		}
