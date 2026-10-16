@@ -37,11 +37,17 @@ const (
 	credsLabelSelectors string = "kubescape.io/infra=credentials" //nolint:gosec
 
 	// env vars
-	defaultConfigMapNamespaceEnvVar string = "KS_DEFAULT_CONFIGMAP_NAMESPACE"
-	accountIdEnvVar                 string = "KS_ACCOUNT_ID"
-	accessKeyEnvVar                 string = "KS_ACCESS_KEY"
-	cloudApiUrlEnvVar               string = "KS_CLOUD_API_URL"
-	cloudReportUrlEnvVar            string = "KS_CLOUD_REPORT_URL"
+	DefaultConfigMapNamespaceEnvVar string = "KS_DEFAULT_CONFIGMAP_NAMESPACE"
+	AccountIdEnvVar                 string = "KS_ACCOUNT_ID"
+	AccessKeyEnvVar                 string = "KS_ACCESS_KEY"
+	CloudApiUrlEnvVar               string = "KS_CLOUD_API_URL"
+	CloudReportUrlEnvVar            string = "KS_CLOUD_REPORT_URL"
+
+	defaultConfigMapNamespaceEnvVar string = DefaultConfigMapNamespaceEnvVar
+	accountIdEnvVar                 string = AccountIdEnvVar
+	accessKeyEnvVar                 string = AccessKeyEnvVar
+	cloudApiUrlEnvVar               string = CloudApiUrlEnvVar
+	cloudReportUrlEnvVar            string = CloudReportUrlEnvVar
 )
 
 func ConfigFileFullPath() string { return getter.GetDefaultPath(configFileName + ".json") }
@@ -130,6 +136,10 @@ func NewLocalConfig(accountID, accessKey, clusterName, customClusterName string)
 		if err := loadConfigFromFile(lc.configObj); err != nil {
 			logger.L().Debug("failed to load cached config file", helpers.Error(err))
 		}
+	}
+
+	if err := loadUrlsFromFile(lc.configObj); err != nil {
+		logger.L().Debug("failed to load urls from config file", helpers.Error(err))
 	}
 
 	updateCredentials(lc.configObj, accountID, accessKey)
@@ -474,6 +484,15 @@ func readConfig(dat []byte, configObj *ConfigObj) error {
 // in-cluster. It is a var (not a const) so tests can point it at a temp file.
 var servicesConfigPath = "/etc/config/services.json"
 
+// SetServicesConfigPath overrides the services discovery config file path and returns a restore function.
+func SetServicesConfigPath(path string) func() {
+	original := servicesConfigPath
+	servicesConfigPath = path
+	return func() {
+		servicesConfigPath = original
+	}
+}
+
 func loadUrlsFromFile(obj *ConfigObj) error {
 	dat, err := os.ReadFile(servicesConfigPath)
 	if err != nil {
@@ -522,16 +541,27 @@ func GetConfigMapNamespace() string {
 
 func updateCredentials(configObj *ConfigObj, accountID, accessKey string) {
 	// Explicit flags take precedence over env vars; env vars are only applied as fallback.
-	if accessKey != "" {
-		configObj.AccessKey = accessKey
-	} else if envAccessKey := os.Getenv(accessKeyEnvVar); envAccessKey != "" {
-		configObj.AccessKey = envAccessKey
+	newAccessKey := accessKey
+	if newAccessKey == "" {
+		newAccessKey = os.Getenv(accessKeyEnvVar)
 	}
 
-	if accountID != "" {
-		configObj.AccountID = accountID
-	} else if envAccountID := os.Getenv(accountIdEnvVar); envAccountID != "" {
-		configObj.AccountID = envAccountID
+	newAccountID := accountID
+	if newAccountID == "" {
+		newAccountID = os.Getenv(accountIdEnvVar)
+	}
+
+	if newAccountID != "" && configObj.AccountID != "" && newAccountID != configObj.AccountID && newAccessKey == "" {
+		// When the account ID is explicitly changed to a different account
+		// and no matching access key is provided, the previous account's
+		// access key must not be retained.
+		configObj.AccessKey = ""
+	} else if newAccessKey != "" {
+		configObj.AccessKey = newAccessKey
+	}
+
+	if newAccountID != "" {
+		configObj.AccountID = newAccountID
 	}
 }
 
