@@ -103,6 +103,13 @@ type Finding struct {
 	ExternalExposure []exposure.ExposurePath
 }
 
+// FixAvailable reports whether grype says a fixed version of v exists. It is
+// the single definition Correlate and other consumers of the same findings
+// share, so a fix is never judged available by one and not the other.
+func FixAvailable(v storagev1beta1.Vulnerability) bool {
+	return len(v.Fix.Versions) > 0 && v.Fix.State == "fixed"
+}
+
 // exposureRank orders a Finding by how reachable it is, widest first.
 // Externally reachable (via a Service/Ingress/Gateway) always outranks any
 // NetworkPolicy-only level: being reachable from outside the cluster is a
@@ -154,7 +161,7 @@ func Correlate(idx *networkpolicy.Index, endpoints map[Workload]networkpolicy.En
 			findings = append(findings, Finding{
 				Workload:         workload,
 				Vulnerability:    v.VulnerabilityMetadata,
-				FixAvailable:     len(v.Fix.Versions) > 0 && v.Fix.State == "fixed",
+				FixAvailable:     FixAvailable(v),
 				Exposure:         npExposure,
 				ExternalExposure: extPaths,
 			})
