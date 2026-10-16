@@ -1,0 +1,286 @@
+name: request-attributes
+description: |
+  How a rule's verbs, apiGroups and resources are matched against a request,
+  asked with one request throughout: create on serviceaccounts/token in the
+  core API group.
+
+  "*" matches everything in each of the three lists. Anything else has to be
+  the exact string: matching is case-sensitive, the core group is the empty
+  string, a resource does not include its subresources, and the only
+  subresource wildcard is "*/<subresource>". All three have to match within a
+  single rule.
+objects:
+  - {apiVersion: v1, kind: Namespace, metadata: {name: lab}}
+  - {apiVersion: v1, kind: ServiceAccount, metadata: {name: target, namespace: lab}}
+  - {apiVersion: v1, kind: ServiceAccount, metadata: {name: verb-star, namespace: lab}}
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: Role
+    metadata: {name: verb-star, namespace: lab}
+    rules:
+      - {apiGroups: [""], resources: ["serviceaccounts/token"], verbs: ["*"]}
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: RoleBinding
+    metadata: {name: verb-star, namespace: lab}
+    roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: verb-star}
+    subjects:
+      - {kind: ServiceAccount, name: verb-star, namespace: lab}
+  - {apiVersion: v1, kind: ServiceAccount, metadata: {name: group-star, namespace: lab}}
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: Role
+    metadata: {name: group-star, namespace: lab}
+    rules:
+      - {apiGroups: ["*"], resources: ["serviceaccounts/token"], verbs: ["create"]}
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: RoleBinding
+    metadata: {name: group-star, namespace: lab}
+    roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: group-star}
+    subjects:
+      - {kind: ServiceAccount, name: group-star, namespace: lab}
+  - {apiVersion: v1, kind: ServiceAccount, metadata: {name: resource-star, namespace: lab}}
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: Role
+    metadata: {name: resource-star, namespace: lab}
+    rules:
+      - {apiGroups: [""], resources: ["*"], verbs: ["create"]}
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: RoleBinding
+    metadata: {name: resource-star, namespace: lab}
+    roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: resource-star}
+    subjects:
+      - {kind: ServiceAccount, name: resource-star, namespace: lab}
+  - {apiVersion: v1, kind: ServiceAccount, metadata: {name: everything, namespace: lab}}
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: Role
+    metadata: {name: everything, namespace: lab}
+    rules:
+      - {apiGroups: ["*"], resources: ["*"], verbs: ["*"]}
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: RoleBinding
+    metadata: {name: everything, namespace: lab}
+    roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: everything}
+    subjects:
+      - {kind: ServiceAccount, name: everything, namespace: lab}
+  - {apiVersion: v1, kind: ServiceAccount, metadata: {name: second-rule-matches, namespace: lab}}
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: Role
+    metadata: {name: second-rule-matches, namespace: lab}
+    rules:
+      - {apiGroups: [""], resources: ["configmaps"], verbs: ["get"]}
+      - {apiGroups: [""], resources: ["serviceaccounts/token"], verbs: ["create"]}
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: RoleBinding
+    metadata: {name: second-rule-matches, namespace: lab}
+    roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: second-rule-matches}
+    subjects:
+      - {kind: ServiceAccount, name: second-rule-matches, namespace: lab}
+  - {apiVersion: v1, kind: ServiceAccount, metadata: {name: other-verbs, namespace: lab}}
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: Role
+    metadata: {name: other-verbs, namespace: lab}
+    rules:
+      - {apiGroups: [""], resources: ["serviceaccounts/token"], verbs: ["get", "list", "watch", "update", "patch", "delete", "deletecollection"]}
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: RoleBinding
+    metadata: {name: other-verbs, namespace: lab}
+    roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: other-verbs}
+    subjects:
+      - {kind: ServiceAccount, name: other-verbs, namespace: lab}
+  - {apiVersion: v1, kind: ServiceAccount, metadata: {name: verb-wrong-case, namespace: lab}}
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: Role
+    metadata: {name: verb-wrong-case, namespace: lab}
+    rules:
+      - {apiGroups: [""], resources: ["serviceaccounts/token"], verbs: ["Create"]}
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: RoleBinding
+    metadata: {name: verb-wrong-case, namespace: lab}
+    roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: verb-wrong-case}
+    subjects:
+      - {kind: ServiceAccount, name: verb-wrong-case, namespace: lab}
+  - {apiVersion: v1, kind: ServiceAccount, metadata: {name: resource-wrong-case, namespace: lab}}
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: Role
+    metadata: {name: resource-wrong-case, namespace: lab}
+    rules:
+      - {apiGroups: [""], resources: ["ServiceAccounts/token"], verbs: ["create"]}
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: RoleBinding
+    metadata: {name: resource-wrong-case, namespace: lab}
+    roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: resource-wrong-case}
+    subjects:
+      - {kind: ServiceAccount, name: resource-wrong-case, namespace: lab}
+  - {apiVersion: v1, kind: ServiceAccount, metadata: {name: group-named-core, namespace: lab}}
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: Role
+    metadata: {name: group-named-core, namespace: lab}
+    rules:
+      - {apiGroups: ["core"], resources: ["serviceaccounts/token"], verbs: ["create"]}
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: RoleBinding
+    metadata: {name: group-named-core, namespace: lab}
+    roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: group-named-core}
+    subjects:
+      - {kind: ServiceAccount, name: group-named-core, namespace: lab}
+  - {apiVersion: v1, kind: ServiceAccount, metadata: {name: group-named-v1, namespace: lab}}
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: Role
+    metadata: {name: group-named-v1, namespace: lab}
+    rules:
+      - {apiGroups: ["v1"], resources: ["serviceaccounts/token"], verbs: ["create"]}
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: RoleBinding
+    metadata: {name: group-named-v1, namespace: lab}
+    roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: group-named-v1}
+    subjects:
+      - {kind: ServiceAccount, name: group-named-v1, namespace: lab}
+  - {apiVersion: v1, kind: ServiceAccount, metadata: {name: same-resource-other-group, namespace: lab}}
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: Role
+    metadata: {name: same-resource-other-group, namespace: lab}
+    rules:
+      - {apiGroups: ["authentication.k8s.io"], resources: ["serviceaccounts/token"], verbs: ["create"]}
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: RoleBinding
+    metadata: {name: same-resource-other-group, namespace: lab}
+    roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: same-resource-other-group}
+    subjects:
+      - {kind: ServiceAccount, name: same-resource-other-group, namespace: lab}
+  - {apiVersion: v1, kind: ServiceAccount, metadata: {name: parent-resource-only, namespace: lab}}
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: Role
+    metadata: {name: parent-resource-only, namespace: lab}
+    rules:
+      - {apiGroups: [""], resources: ["serviceaccounts"], verbs: ["create"]}
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: RoleBinding
+    metadata: {name: parent-resource-only, namespace: lab}
+    roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: parent-resource-only}
+    subjects:
+      - {kind: ServiceAccount, name: parent-resource-only, namespace: lab}
+  - {apiVersion: v1, kind: ServiceAccount, metadata: {name: subresource-name-only, namespace: lab}}
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: Role
+    metadata: {name: subresource-name-only, namespace: lab}
+    rules:
+      - {apiGroups: [""], resources: ["token"], verbs: ["create"]}
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: RoleBinding
+    metadata: {name: subresource-name-only, namespace: lab}
+    roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: subresource-name-only}
+    subjects:
+      - {kind: ServiceAccount, name: subresource-name-only, namespace: lab}
+  - {apiVersion: v1, kind: ServiceAccount, metadata: {name: resource-slash-star, namespace: lab}}
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: Role
+    metadata: {name: resource-slash-star, namespace: lab}
+    rules:
+      - {apiGroups: [""], resources: ["serviceaccounts/*"], verbs: ["create"]}
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: RoleBinding
+    metadata: {name: resource-slash-star, namespace: lab}
+    roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: resource-slash-star}
+    subjects:
+      - {kind: ServiceAccount, name: resource-slash-star, namespace: lab}
+  - {apiVersion: v1, kind: ServiceAccount, metadata: {name: star-slash-star, namespace: lab}}
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: Role
+    metadata: {name: star-slash-star, namespace: lab}
+    rules:
+      - {apiGroups: [""], resources: ["*/*"], verbs: ["create"]}
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: RoleBinding
+    metadata: {name: star-slash-star, namespace: lab}
+    roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: star-slash-star}
+    subjects:
+      - {kind: ServiceAccount, name: star-slash-star, namespace: lab}
+  - {apiVersion: v1, kind: ServiceAccount, metadata: {name: attributes-split-across-rules, namespace: lab}}
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: Role
+    metadata: {name: attributes-split-across-rules, namespace: lab}
+    rules:
+      - {apiGroups: [""], resources: ["configmaps"], verbs: ["create"]}
+      - {apiGroups: [""], resources: ["serviceaccounts/token"], verbs: ["get"]}
+      - {apiGroups: ["apps"], resources: ["serviceaccounts/token"], verbs: ["create"]}
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: RoleBinding
+    metadata: {name: attributes-split-across-rules, namespace: lab}
+    roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: attributes-split-across-rules}
+    subjects:
+      - {kind: ServiceAccount, name: attributes-split-across-rules, namespace: lab}
+questions:
+  # Control group: forms that do match create on serviceaccounts/token.
+  - id: verb-star
+    serviceAccount: {namespace: lab, name: verb-star}
+    mintToken: {namespace: lab, name: target}
+    kubernetes: allowed
+  - id: group-star
+    serviceAccount: {namespace: lab, name: group-star}
+    mintToken: {namespace: lab, name: target}
+    kubernetes: allowed
+  # "*" as a resource covers subresources too.
+  - id: resource-star
+    serviceAccount: {namespace: lab, name: resource-star}
+    mintToken: {namespace: lab, name: target}
+    kubernetes: allowed
+  - id: everything
+    serviceAccount: {namespace: lab, name: everything}
+    mintToken: {namespace: lab, name: target}
+    kubernetes: allowed
+  # One rule of several matching is enough.
+  - id: second-rule-matches
+    serviceAccount: {namespace: lab, name: second-rule-matches}
+    mintToken: {namespace: lab, name: target}
+    kubernetes: allowed
+  # Every verb but the one the request uses.
+  - id: other-verbs
+    serviceAccount: {namespace: lab, name: other-verbs}
+    mintToken: {namespace: lab, name: target}
+    kubernetes: denied
+  # Verbs, groups and resources are case-sensitive, and the API server accepts a
+  # rule whose verb it will never match.
+  - id: verb-wrong-case
+    serviceAccount: {namespace: lab, name: verb-wrong-case}
+    mintToken: {namespace: lab, name: target}
+    kubernetes: denied
+  - id: resource-wrong-case
+    serviceAccount: {namespace: lab, name: resource-wrong-case}
+    mintToken: {namespace: lab, name: target}
+    kubernetes: denied
+  # The core group is "", not "core" or "v1".
+  - id: group-named-core
+    serviceAccount: {namespace: lab, name: group-named-core}
+    mintToken: {namespace: lab, name: target}
+    kubernetes: denied
+  - id: group-named-v1
+    serviceAccount: {namespace: lab, name: group-named-v1}
+    mintToken: {namespace: lab, name: target}
+    kubernetes: denied
+  # The same resource name under another API group is another resource.
+  - id: same-resource-other-group
+    serviceAccount: {namespace: lab, name: same-resource-other-group}
+    mintToken: {namespace: lab, name: target}
+    kubernetes: denied
+  # A grant on a resource does not include its subresources.
+  - id: parent-resource-only
+    serviceAccount: {namespace: lab, name: parent-resource-only}
+    mintToken: {namespace: lab, name: target}
+    kubernetes: denied
+  - id: subresource-name-only
+    serviceAccount: {namespace: lab, name: subresource-name-only}
+    mintToken: {namespace: lab, name: target}
+    kubernetes: denied
+  # Only "*/<subresource>" is a wildcard form. "<resource>/*" and "*/*" are not.
+  - id: resource-slash-star
+    serviceAccount: {namespace: lab, name: resource-slash-star}
+    mintToken: {namespace: lab, name: target}
+    kubernetes: denied
+  - id: star-slash-star
+    serviceAccount: {namespace: lab, name: star-slash-star}
+    mintToken: {namespace: lab, name: target}
+    kubernetes: denied
+  # Rules are not combined: the verb, group and resource must all come from the
+  # same rule.
+  - id: attributes-split-across-rules
+    serviceAccount: {namespace: lab, name: attributes-split-across-rules}
+    mintToken: {namespace: lab, name: target}
+    kubernetes: denied
