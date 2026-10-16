@@ -105,6 +105,9 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 			if err := cautils.ValidateHelmKubeVersion(scanInfo.HelmKubeVersion); err != nil {
 				return fmt.Errorf("invalid --kube-version: %w", err)
 			}
+			if strings.TrimSpace(scanInfo.IncludeNamespaces) != "" && strings.TrimSpace(scanInfo.ExcludedNamespaces) != "" {
+				return fmt.Errorf("invalid arguments: --include-namespaces and --exclude-namespaces cannot be used together")
+			}
 			if strings.Contains(scanInfo.ControlsVersion, "/") {
 				return fmt.Errorf(
 					"invalid --controls-version %q: must be a regolibrary release tag and cannot contain '/'",
