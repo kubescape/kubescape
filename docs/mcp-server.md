@@ -147,13 +147,15 @@ Discover available security configuration scan results at the workload level.
 
 #### `get_configuration_security_scan_manifest`
 
-Get detailed configuration scan results for a specific workload, including failed controls and remediation guidance.
+Get detailed configuration scan results for a specific workload, including failed controls and remediation guidance. Most controls in a result usually passed, so use `status: "failed"` to get only the ones that need fixing. Without filters every control is returned.
 
 **Parameters:**
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `namespace` | string | No | Namespace of the manifest (default: `"kubescape"`) |
 | `manifest_name` | string | Yes | Name of the configuration manifest |
+| `status` | string | No | Only controls with these statuses, comma-separated: `failed`, `passed`, `skipped` |
+| `min_severity` | string | No | Only controls at or above this severity: `Critical`, `High`, `Medium` or `Low` |
 
 ### Live Scanning Tools
 

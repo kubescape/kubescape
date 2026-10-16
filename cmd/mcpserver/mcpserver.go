@@ -431,13 +431,19 @@ func createConfigurationsToolsAndResources(ksServer *KubescapeMcpserver) {
 
 	getConfigDetailsTool := mcp.NewTool(
 		"get_configuration_security_scan_manifest",
-		mcp.WithDescription("Get details of a specific security configuration scan result"),
+		mcp.WithDescription("Get details of a specific security configuration scan result. Most controls in a result usually passed; set status to \"failed\" to get only the controls that need fixing."),
 		mcp.WithString("namespace",
 			mcp.Description("Namespace of the manifest (optional, defaults to 'kubescape')"),
 		),
 		mcp.WithString("manifest_name",
 			mcp.Required(),
 			mcp.Description("Name of the configuration manifest to get details for (get this from the list_configuration_security_scan_manifests tool)"),
+		),
+		mcp.WithString("status",
+			mcp.Description("Only return controls with these statuses, comma-separated: failed, passed, skipped (optional; by default every control is returned)"),
+		),
+		mcp.WithString("min_severity",
+			mcp.Description("Only return controls at or above this severity: Critical, High, Medium or Low (optional)"),
 		),
 	)
 
@@ -1094,6 +1100,10 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		if toolErr != nil {
 			return toolErr, nil
 		}
+		controlFilter, toolErr := parseScannedControlFilter(arguments)
+		if toolErr != nil {
+			return toolErr, nil
+		}
 		client, ksErr := ksServer.getKsClient()
 		if ksErr != nil {
 			return mcpToolError(ErrCodeK8sClientError, fmt.Sprintf("failed to connect to Kubernetes cluster: %v", ksErr), nil), nil
@@ -1102,6 +1112,7 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		if err != nil {
 			return nil, fmt.Errorf("failed to get configuration manifest: %w", err)
 		}
+		manifest.Spec.Controls = filterScannedControls(manifest.Spec.Controls, controlFilter)
 		responseJson, err := json.Marshal(manifest)
 		if err != nil {
 			return nil, fmt.Errorf("failed to marshal configuration manifest: %w", err)
