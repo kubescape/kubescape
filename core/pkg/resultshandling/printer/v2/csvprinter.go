@@ -48,8 +48,10 @@ func NewCsvPrinter(showSecrets bool) *CsvPrinter {
 // scanned manifests and so are attacker-influenced: a Deployment named
 // "=cmd|' /C calc'!A0", a namespace, a source path or a fix value all reach the
 // CSV verbatim. Opening such a report would execute the payload in the
-// analyst's spreadsheet (CSV injection / formula injection, CWE-1236).
-const csvFormulaPrefixes = "=+-@\t\r"
+// analyst's spreadsheet (CSV injection / formula injection, CWE-1236). Leading
+// whitespace is included too: a cell beginning with a newline or carriage
+// return can still carry a formula on its first non-blank line.
+const csvFormulaPrefixes = "=+-@\t\r\n"
 
 // csvSafeCell neutralizes a cell against spreadsheet formula injection by
 // prepending a single quote, the standard mitigation: spreadsheets treat a

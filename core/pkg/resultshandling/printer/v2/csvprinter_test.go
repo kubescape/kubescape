@@ -1292,6 +1292,7 @@ func TestCsvSafeCell(t *testing.T) {
 		{name: "at sign is neutralized", in: "@SUM(A1)", want: "'@SUM(A1)"},
 		{name: "tab is neutralized", in: "\tcmd", want: "'\tcmd"},
 		{name: "carriage return is neutralized", in: "\rcmd", want: "'\rcmd"},
+		{name: "line feed is neutralized", in: "\n=1+1", want: "'\n=1+1"},
 		{name: "dde payload is neutralized", in: "=cmd|' /C calc'!A0", want: "'=cmd|' /C calc'!A0"},
 		{name: "leading pipe is not a formula prefix", in: "|table", want: "|table"},
 	}
