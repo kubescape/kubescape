@@ -5,6 +5,7 @@ import (
 	"maps"
 	"slices"
 	"sort"
+	"strings"
 
 	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apiserver/pkg/authentication/serviceaccount"
@@ -426,26 +427,128 @@ func (idx *Index) bindVerbEdges(rules []ScopedRule) []EscalationEdge {
 	return edges
 }
 
+// serviceAccountWorkload is a built-in resource whose spec carries a pod
+// template (or is a Pod), so whoever writes it chooses the
+// spec.serviceAccountName the resulting pods run under.
+type serviceAccountWorkload struct {
+	apiGroup string
+	resource string
+	// templateMutable reports whether the pod template of an existing object
+	// can be changed, so update/patch on it can repoint it at another
+	// ServiceAccount. A Pod's serviceAccountName and a Job's template are
+	// immutable once the object exists, so for those only create counts.
+	templateMutable bool
+}
+
+// serviceAccountWorkloads lists every built-in workload the
+// assign-serviceaccount primitive recognizes. Custom resources that
+// reconcile into pods are deliberately absent: nothing in RBAC objects says
+// which of them do.
+var serviceAccountWorkloads = []serviceAccountWorkload{
+	{apiGroup: "", resource: "pods"},
+	{apiGroup: "", resource: "replicationcontrollers", templateMutable: true},
+	{apiGroup: "apps", resource: "deployments", templateMutable: true},
+	{apiGroup: "apps", resource: "statefulsets", templateMutable: true},
+	{apiGroup: "apps", resource: "daemonsets", templateMutable: true},
+	{apiGroup: "apps", resource: "replicasets", templateMutable: true},
+	{apiGroup: "batch", resource: "jobs"},
+	{apiGroup: "batch", resource: "cronjobs", templateMutable: true},
+}
+
+// label names the workload the way kubectl does: group-qualified unless it
+// is in the core group.
+func (w serviceAccountWorkload) label() string {
+	if w.apiGroup == "" {
+		return w.resource
+	}
+	return w.apiGroup + "/" + w.resource
+}
+
+// workloadCapability is one way a rule lets its holder select the
+// ServiceAccount a workload runs as, described as "<verb> <resource>".
+type workloadCapability struct {
+	description string
+	// namedOnly is true when the rule grants it only for objects listed in
+	// resourceNames, so it reaches those objects and not every one.
+	namedOnly bool
+}
+
+// serviceAccountCapabilities returns what rule lets its holder do to
+// workloads that selects the ServiceAccount they run as. It is empty when
+// the rule grants none of them.
+//
+// create is a top-level create, so resourceNames cannot authorize it (see
+// ruleGrantsUnnamedCreate). update and patch act on an existing, named
+// object, so a rule restricted to real names still lets its holder repoint
+// those objects -- and only those, which namedOnly records.
+func serviceAccountCapabilities(rule rbacv1.PolicyRule) []workloadCapability {
+	var caps []workloadCapability
+	for _, w := range serviceAccountWorkloads {
+		if ruleGrantsUnnamedCreate(rule, w.apiGroup, w.resource) {
+			caps = append(caps, workloadCapability{description: "create " + w.label()})
+		}
+		if !w.templateMutable {
+			continue
+		}
+		for _, verb := range []string{"update", "patch"} {
+			if ruleGrantsExistingObject(rule, w.apiGroup, w.resource, verb) {
+				caps = append(caps, workloadCapability{
+					description: verb + " " + w.label(),
+					namedOnly:   len(rule.ResourceNames) > 0,
+				})
+			}
+		}
+	}
+	return caps
+}
+
 // assignServiceAccountEdges implements the assign-serviceaccount primitive:
-// create on pods lets a subject choose spec.serviceAccountName freely (see
-// the package doc comment's trust-model note on admission-time
-// restrictions this package does not model), so the subject can schedule a
-// pod running as any ServiceAccount in that namespace and read its mounted
-// token from within.
+// a subject who can write a workload -- a Pod, or a controller such as a
+// Deployment or CronJob whose pod template the controller turns into pods --
+// chooses spec.serviceAccountName freely (see the package doc comment's
+// trust-model note on admission-time restrictions this package does not
+// model), so the subject can run a container as any ServiceAccount in that
+// namespace and read its mounted token from within. The subject never needs
+// permission to create the resulting Pods itself: the controller does that.
+//
+// One edge is emitted per target ServiceAccount, however many rules and
+// workload resources grant the capability; its Detail lists them all. A
+// capability is qualified "(named objects only)" only when every rule that
+// grants it is restricted by resourceNames.
 func (idx *Index) assignServiceAccountEdges(rules []ScopedRule) []EscalationEdge {
-	var edges []EscalationEdge
+	// namespace -> capability -> whether every granting rule names objects.
+	namedOnlyByNS := map[string]map[string]bool{}
 	for _, sr := range rules {
-		if !ruleGrantsUnnamedCreate(sr.Rule, "", "pods") {
+		caps := serviceAccountCapabilities(sr.Rule)
+		if len(caps) == 0 {
 			continue
 		}
 		for _, ns := range idx.targetNamespaces(sr.Namespace) {
-			for _, saName := range idx.serviceAccountsByNS[ns] {
-				edges = append(edges, EscalationEdge{
-					Primitive: PrimitiveAssignServiceAccount,
-					Detail:    fmt.Sprintf("can create Pods in namespace %q and assign spec.serviceAccountName=%q, inheriting its mounted token", ns, saName),
-					ToSubject: &Subject{Kind: KindServiceAccount, Namespace: ns, Name: saName},
-				})
+			if namedOnlyByNS[ns] == nil {
+				namedOnlyByNS[ns] = map[string]bool{}
 			}
+			for _, c := range caps {
+				prev, seen := namedOnlyByNS[ns][c.description]
+				namedOnlyByNS[ns][c.description] = c.namedOnly && (!seen || prev)
+			}
+		}
+	}
+
+	var edges []EscalationEdge
+	for _, ns := range slices.Sorted(maps.Keys(namedOnlyByNS)) {
+		var via []string
+		for _, desc := range slices.Sorted(maps.Keys(namedOnlyByNS[ns])) {
+			if namedOnlyByNS[ns][desc] {
+				desc += " (named objects only)"
+			}
+			via = append(via, desc)
+		}
+		for _, saName := range idx.serviceAccountsByNS[ns] {
+			edges = append(edges, EscalationEdge{
+				Primitive: PrimitiveAssignServiceAccount,
+				Detail:    fmt.Sprintf("can assign spec.serviceAccountName=%q to workloads in namespace %q (%s), inheriting its mounted token", saName, ns, strings.Join(via, ", ")),
+				ToSubject: &Subject{Kind: KindServiceAccount, Namespace: ns, Name: saName},
+			})
 		}
 	}
 	return edges

@@ -30,15 +30,16 @@ var serviceAccountGVR = schema.GroupVersionResource{Group: "", Version: "v1", Re
 // Unlike this repo's other exposure/reachability MCP tools, RBAC objects
 // are always collected cluster-wide, not scoped to a single namespace: an
 // escalation edge can lead into any namespace (a ServiceAccount can be
-// impersonated, assigned via pod creation, or have its token minted from
-// any namespace a subject holds the right primitive in), so a
+// impersonated, have a workload -- a Pod, or a controller such as a
+// Deployment or CronJob -- run as it, or have its token minted from any
+// namespace a subject holds the right primitive in), so a
 // namespace-scoped collection would silently hide real paths the same way
 // the namespace-scoped Gateway listing bug in analyze_service_exposure did
 // before it was fixed.
 func createRBACEscalationTools(ksServer *KubescapeMcpserver) {
 	tool := mcp.NewTool(
 		"analyze_rbac_escalation_paths",
-		mcp.WithDescription("Determine every privilege-escalation path reachable from a starting RBAC identity (ServiceAccount, User, or Group) via graph analysis of the cluster's Roles/ClusterRoles/RoleBindings/ClusterRoleBindings -- not just a single-object posture check. Detects impersonation, the escalate/bind verb self-escalation-prevention bypasses, gaining a ServiceAccount's token by scheduling a Pod as it, and minting a ServiceAccount token directly via the TokenRequest API, chained across multiple hops. Reports every other identity reachable and whether cluster-admin-equivalent power is reachable at all, however indirectly."),
+		mcp.WithDescription("Determine every privilege-escalation path reachable from a starting RBAC identity (ServiceAccount, User, or Group) via graph analysis of the cluster's Roles/ClusterRoles/RoleBindings/ClusterRoleBindings -- not just a single-object posture check. Detects impersonation, the escalate/bind verb self-escalation-prevention bypasses, gaining a ServiceAccount's token by running a workload as it (creating a Pod, or a controller such as a Deployment or CronJob, or updating an existing controller), and minting a ServiceAccount token directly via the TokenRequest API, chained across multiple hops. Reports every other identity reachable and whether cluster-admin-equivalent power is reachable at all, however indirectly."),
 		mcp.WithString("subject_kind", mcp.Required(), mcp.Description("Kind of the starting identity: ServiceAccount, User, or Group")),
 		mcp.WithString("namespace", mcp.Description("Namespace of the starting ServiceAccount (required when subject_kind is ServiceAccount; ignored otherwise)")),
 		mcp.WithString("name", mcp.Required(), mcp.Description("Name of the starting identity")),

@@ -4,6 +4,7 @@ import (
 	"slices"
 
 	rbacv1 "k8s.io/api/rbac/v1"
+	"k8s.io/apimachinery/pkg/util/validation"
 )
 
 // ruleGrants reports whether rule grants verb on the given apiGroup and
@@ -68,13 +69,44 @@ func resourceNameMatches(names []string, name string) bool {
 // compares the rule's resourceNames with the empty string: a rule restricted
 // to real names authorizes nothing for create, not "every object of that
 // type", and only an unrestricted rule or one that lists "" does.
-// Only used for top-level collection creates (pods, rolebindings,
+// Only used for top-level collection creates (pods and the other workloads,
+// rolebindings,
 // clusterrolebindings); a subresource create on an already-named parent
 // object (e.g. serviceaccounts/token) does have a real object name to
 // match against and should use ruleGrantsSubresource directly instead.
 func ruleGrantsUnnamedCreate(rule rbacv1.PolicyRule, apiGroup, resource string) bool {
 	return ruleGrants(rule, apiGroup, resource, "create") &&
 		(len(rule.ResourceNames) == 0 || resourceNameMatches(rule.ResourceNames, ""))
+}
+
+// ruleGrantsExistingObject reports whether rule grants verb on apiGroup/
+// resource for a request that names an existing object, as update and patch
+// do. Unlike a create, such a request has a real name, so a rule restricted
+// by resourceNames grants it for those names -- but only a name some object
+// of that resource can actually carry. resourceNames is matched literally,
+// so "*" names an object called "*", which no workload can be: the empty name
+// and any other entry that is not a valid name for the resource identify
+// nothing, and a rule listing only those grants nothing.
+func ruleGrantsExistingObject(rule rbacv1.PolicyRule, apiGroup, resource, verb string) bool {
+	return ruleGrants(rule, apiGroup, resource, verb) &&
+		(len(rule.ResourceNames) == 0 || slices.ContainsFunc(rule.ResourceNames, func(name string) bool {
+			return isWorkloadName(resource, name)
+		}))
+}
+
+// isWorkloadName reports whether name is syntactically valid for an object of
+// the given workload resource, which also rules out "" and "*". Kubernetes
+// validates a StatefulSet name as a DNS-1123 label, because the name is part of
+// its pods' hostnames (ValidateStatefulSetName), and every other workload this
+// is used for as a DNS-1123 subdomain. CronJob names are additionally limited
+// to 52 characters; that is not enforced, so a 53 to 253 character name is
+// still accepted -- an over-report of an impossible object, never a missed
+// grant.
+func isWorkloadName(resource, name string) bool {
+	if resource == "statefulsets" {
+		return len(validation.IsDNS1123Label(name)) == 0
+	}
+	return len(validation.IsDNS1123Subdomain(name)) == 0
 }
 
 func setToSlice(set map[string]bool) []string {

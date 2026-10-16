@@ -34,12 +34,17 @@
 //     Role/ClusterRole they can bind to a subject of their choosing
 //     (typically themselves), adopting its rules without ever having held
 //     them directly.
-//   - assign-serviceaccount: create on pods lets a subject choose
+//   - assign-serviceaccount: writing a workload lets a subject choose its
 //     spec.serviceAccountName freely (this package does not model
 //     PodSecurity admission or third-party policy engines that might
 //     restrict that choice -- see the package's trust-model note below),
-//     so the subject can schedule a pod running as any ServiceAccount in
-//     that namespace and read its mounted token from within.
+//     so the subject can run a container as any ServiceAccount in that
+//     namespace and read its mounted token from within. The workloads are
+//     pods, replicationcontrollers, apps deployments/statefulsets/
+//     daemonsets/replicasets and batch jobs/cronjobs. Creating a
+//     controller suffices without any right to create pods: the
+//     controller creates them. Update/patch of an existing controller
+//     counts too, except for jobs, whose pod template is immutable.
 //   - mint-serviceaccount-token: create on the serviceaccounts/token
 //     subresource (the TokenRequest API) mints a live token for the named
 //     ServiceAccount directly, no pod required.
