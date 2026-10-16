@@ -1312,6 +1312,9 @@ func TestCsvSafeCell(t *testing.T) {
 func TestActionPrint_Csv_NeutralizesFormulaInjection(t *testing.T) {
 	const injectedName = "=cmd|' /C calc'!A0"
 	const injectedPath = "-injected/path.yaml"
+	const skippedControlID = "C-injection-skipped"
+	const injectedSkippedName = "=cmd|' /C calc'!A0"
+	const injectedSkippedReason = "+injected skip reason"
 
 	obj := map[string]interface{}{
 		"apiVersion": "v1",
@@ -1347,6 +1350,18 @@ func TestActionPrint_Csv_NeutralizesFormulaInjection(t *testing.T) {
 			},
 		},
 	}
+	// A summary-level skipped control exercises the second sanitizer call site
+	// (the skipped-row writer), where both the name and the reason come from the
+	// report and can therefore be formula-leading too.
+	session.Report.SummaryDetails.Controls[skippedControlID] = reportsummary.ControlSummary{
+		ControlID:   skippedControlID,
+		Name:        injectedSkippedName,
+		ScoreFactor: 9.0,
+		StatusInfo: apis.StatusInfo{
+			InnerStatus: apis.StatusSkipped,
+			InnerInfo:   injectedSkippedReason,
+		},
+	}
 
 	tmpCsv, err := os.CreateTemp("", "csv-injection-*.csv")
 	require.NoError(t, err)
@@ -1365,12 +1380,19 @@ func TestActionPrint_Csv_NeutralizesFormulaInjection(t *testing.T) {
 	require.NoError(t, err)
 
 	var found bool
+	var foundSkipped bool
 	for _, row := range records[1:] {
 		if row[1] == testControlID1 {
 			found = true
 			assert.Equal(t, "'"+injectedName, row[4], "resource name must be neutralized")
 			assert.Equal(t, "'"+injectedPath, row[12], "source path must be neutralized")
 		}
+		if row[1] == skippedControlID {
+			foundSkipped = true
+			assert.Equal(t, "'"+injectedSkippedName, row[0], "skipped control name must be neutralized")
+			assert.Equal(t, "'"+injectedSkippedReason, row[10], "skipped control reason must be neutralized")
+		}
 	}
 	require.True(t, found, "expected the injected resource row")
+	require.True(t, foundSkipped, "expected the injected skipped-control row")
 }
