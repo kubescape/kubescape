@@ -347,6 +347,10 @@ func projectedTokenVolumes(spec map[string]any, containers []map[string]any) (mo
 	return false, unknown, reason
 }
 
+// atomicWriterData is the link AtomicWriter keeps to a projected volume's
+// current contents.
+const atomicWriterData = "..data"
+
 type exposure int
 
 const (
@@ -389,6 +393,20 @@ func exposesToken(mount map[string]any, tokenPaths []string) exposure {
 	}
 	if c == "." {
 		return exposed
+	}
+	// The kubelet's AtomicWriter lays a projected volume out as "..data", a
+	// link to a timestamped directory, with each entry linking through it. So
+	// "..data" is the volume root and "..data/x" is "x". Any other leading
+	// ".." name is the timestamped directory itself, which the spec does not
+	// reveal.
+	if first, rest, _ := strings.Cut(c, "/"); strings.HasPrefix(first, "..") {
+		if first != atomicWriterData {
+			return exposureUnknown
+		}
+		if rest == "" {
+			return exposed
+		}
+		c = rest
 	}
 	for _, tp := range tokenPaths {
 		if tp == "" {

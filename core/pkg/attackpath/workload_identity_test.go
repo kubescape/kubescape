@@ -231,6 +231,15 @@ func TestResolveServiceAccount_ProjectedTokenSubPaths(t *testing.T) {
 		{"subPath names a sibling", tok, mount("tok", "/t", "subPath", "namespace"), TokenNotMounted},
 		{"subPath names a sibling in a directory", nested, mount("tok", "/t", "subPath", "dir/ca.crt"), TokenNotMounted},
 		{"subPath is a prefix of the name, not an ancestor", tok, mount("tok", "/t", "subPath", "tok"), TokenNotMounted},
+		// AtomicWriter aliases: "..data" is the volume root.
+		{"subPath ..data is the whole volume", tok, mount("tok", "/t", "subPath", "..data"), TokenMounted},
+		{"subPath ..data/token", tok, mount("tok", "/t", "subPath", "..data/token"), TokenMounted},
+		{"subPath ..data/dir/token", nested, mount("tok", "/t", "subPath", "..data/dir/token"), TokenMounted},
+		{"subPath ..data/dir", nested, mount("tok", "/t", "subPath", "..data/dir"), TokenMounted},
+		{"literal subPathExpr ..data/token", tok, mount("tok", "/t", "subPathExpr", "..data/token"), TokenMounted},
+		{"subPath ..data/ sibling", tok, mount("tok", "/t", "subPath", "..data/namespace"), TokenNotMounted},
+		{"subPath ..data/ sibling in a directory", nested, mount("tok", "/t", "subPath", "..data/dir/ca.crt"), TokenNotMounted},
+		{"subPath is the timestamped directory", tok, mount("tok", "/t", "subPath", "..2026_10_16_08_00_00.123456789/token"), TokenUnknown},
 		{"subPath escapes the volume", tok, mount("tok", "/t", "subPath", "../token"), TokenUnknown},
 		{"subPath is absolute", tok, mount("tok", "/t", "subPath", "/token"), TokenUnknown},
 		// A literal subPathExpr is a path like any other.
