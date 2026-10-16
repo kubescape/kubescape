@@ -131,8 +131,10 @@ func TestCallToolWithStorageResources(t *testing.T) {
 		},
 		{
 			name: "list vulnerabilities", tool: "list_vulnerabilities_in_manifest",
-			arguments:  map[string]any{"namespace": "security", "manifest_name": "nginx-manifest"},
-			assertJSON: func(t *testing.T, value any) { require.Len(t, value.([]any), 2) },
+			arguments: map[string]any{"namespace": "security", "manifest_name": "nginx-manifest"},
+			assertJSON: func(t *testing.T, value any) {
+				require.Len(t, value.(map[string]any)["vulnerabilities"].([]any), 2)
+			},
 		},
 		{
 			name: "filter vulnerability matches", tool: "list_vulnerability_matches_for_cve",
