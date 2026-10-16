@@ -4,7 +4,9 @@ import (
 	"fmt"
 
 	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/pkg/securityexception"
+	"github.com/kubescape/opa-utils/exceptions"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -35,7 +37,7 @@ func (opap *OPAProcessor) emitExceptionMatchEvents(resource workloadinterface.IM
 			continue
 		}
 		for _, rule := range control.ResourceAssociatedRules {
-			for _, exception := range rule.Exception {
+			for _, exception := range exceptions.FilterExceptionsByFrameworks(rule.Exception, cautils.ControlFilters(&opap.Report.SummaryDetails, control.ControlID).FrameworkNames, control.ControlID, rule.GetName()) {
 				var obj runtime.Object
 				var key string
 				if ref, ok := securityexception.CRDReferenceFromPolicy(exception); ok {

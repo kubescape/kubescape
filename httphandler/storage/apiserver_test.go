@@ -21,6 +21,7 @@ import (
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/kubescape/storage/pkg/generated/clientset/versioned/fake"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	k8stesting "k8s.io/client-go/testing"
@@ -183,7 +184,7 @@ func Test_getControlsMapFromResult(t *testing.T) {
 		},
 	}
 
-	actual := getControlsMapFromResult(context.Background(), &scanResult, controlSummaries)
+	actual := getControlsMapFromResult(context.Background(), &scanResult, &reportsummary.SummaryDetails{Controls: controlSummaries})
 	assert.Len(t, actual, len(scanResult.AssociatedControls))
 	if assert.Len(t, actual["C-002"].Rules, 1) {
 		assert.Equal(t, []string{"resource-1"}, actual["C-002"].Rules[0].RelatedResourcesIDs)
@@ -208,7 +209,7 @@ func TestGetControlsMapFromResult_MissingControl(t *testing.T) {
 	}
 
 	assert.NotPanics(t, func() {
-		actual := getControlsMapFromResult(context.Background(), &scanResult, reportsummary.ControlSummaries{})
+		actual := getControlsMapFromResult(context.Background(), &scanResult, &reportsummary.SummaryDetails{})
 		assert.Contains(t, actual, "C-MISSING")
 		assert.Equal(t, v1beta1.ControlSeverity{}, actual["C-MISSING"].Severity)
 	})
@@ -233,10 +234,10 @@ func TestGetControlsMapFromResult_RecoversMissingAssociationsFromSummary(t *test
 
 	actual := getControlsMapFromResult(context.Background(), &resourcesresults.Result{
 		ResourceID: resourceID,
-	}, reportsummary.ControlSummaries{
+	}, &reportsummary.SummaryDetails{Controls: reportsummary.ControlSummaries{
 		"C-001": failedControl,
 		"C-002": otherControl,
-	})
+	}})
 
 	if assert.Len(t, actual, 1) {
 		control := actual["C-001"]
@@ -270,7 +271,7 @@ func TestGetControlsMapFromResult_PrefersDetailedAssociationOverSummaryFallback(
 				Status: apis.StatusPassed,
 			}},
 		}},
-	}, reportsummary.ControlSummaries{"C-001": controlSummary})
+	}, &reportsummary.SummaryDetails{Controls: reportsummary.ControlSummaries{"C-001": controlSummary}})
 
 	if assert.Contains(t, actual, "C-001") {
 		control := actual["C-001"]
@@ -1758,4 +1759,77 @@ func TestStorePostureReportResults_ContinuesAfterNonRBACRelatedObject(t *testing
 		names = append(names, s.Name)
 	}
 	assert.Contains(t, names, "pod-test-pod")
+}
+
+func TestGetControlsMapFrameworkScoped(t *testing.T) {
+	for _, dual := range []bool{false, true} {
+		name := "single"
+		if dual {
+			name = "dual"
+		}
+		t.Run(name, func(t *testing.T) {
+			summary := reportsummary.SummaryDetails{Controls: reportsummary.ControlSummaries{"C-0034": {}}, Frameworks: []reportsummary.FrameworkSummary{{Name: "NSA", Controls: reportsummary.ControlSummaries{"C-0034": {}}}}}
+			if dual {
+				summary.Frameworks = append(summary.Frameworks, reportsummary.FrameworkSummary{Name: "MITRE", Controls: reportsummary.ControlSummaries{"C-0034": {}}})
+			}
+			result := resourcesresults.Result{ResourceID: "pod", AssociatedControls: []resourcesresults.ResourceAssociatedControl{{ControlID: "C-0034", Status: apis.StatusInfo{InnerStatus: apis.StatusFailed}, ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{{Name: "R1", Status: apis.StatusFailed, Exception: []armotypes.PostureExceptionPolicy{{PosturePolicies: []armotypes.PosturePolicy{{FrameworkName: "NSA", ControlID: "C-0034", RuleName: "R1"}}}}}}}}}
+			control := getControlsMapFromResult(context.Background(), &result, &summary)["C-0034"]
+			expected := apis.StatusPassed
+			if dual {
+				expected = apis.StatusFailed
+			}
+			assert.Equal(t, string(expected), control.Status.Status)
+			assert.Equal(t, string(apis.SubStatusException), control.Status.SubStatus)
+			if assert.Len(t, control.Rules, 1) {
+				assert.Equal(t, string(expected), control.Rules[0].Status.Status)
+				assert.Equal(t, string(apis.SubStatusException), control.Rules[0].Status.SubStatus)
+			}
+			assert.Equal(t, apis.StatusFailed, result.AssociatedControls[0].ResourceAssociatedRules[0].Status)
+		})
+	}
+}
+
+func TestStorePostureReportResults_FrameworkExceptionClearsPreviousFailure(t *testing.T) {
+	ctx := context.Background()
+	store := newSweepStore()
+	object := sweepObject{kind: "Pod", namespace: "default", name: "excepted"}
+	makeReport := func(at time.Time, excepted bool) *v2.PostureReport {
+		report := sweepReport(at, map[string]apis.ScanningStatus{"C-0034": apis.StatusFailed}, object)
+		report.SummaryDetails.Frameworks = []reportsummary.FrameworkSummary{{Name: "NSA", Controls: report.SummaryDetails.Controls}}
+		rule := resourcesresults.ResourceAssociatedRule{Name: "R1", Status: apis.StatusFailed}
+		if excepted {
+			rule.Exception = []armotypes.PostureExceptionPolicy{{Actions: []armotypes.PostureExceptionPolicyActions{armotypes.Disable}, PosturePolicies: []armotypes.PosturePolicy{{FrameworkName: "NSA", ControlID: "C-0034", RuleName: "R1"}}}}
+		}
+		report.Results[0].AssociatedControls[0].ResourceAssociatedRules = []resourcesresults.ResourceAssociatedRule{rule}
+		return report
+	}
+	first := makeReport(sweepEarlier, false)
+	second := makeReport(sweepLater, true)
+	check := func(status apis.ScanningStatus) {
+		t.Helper()
+		scans, err := store.StorageClient.WorkloadConfigurationScans("default").List(ctx, metav1.ListOptions{})
+		require.NoError(t, err)
+		require.Len(t, scans.Items, 1)
+		control := scans.Items[0].Spec.Controls["C-0034"]
+		assert.Equal(t, string(status), control.Status.Status)
+		require.Len(t, control.Rules, 1)
+		assert.Equal(t, string(status), control.Rules[0].Status.Status)
+		summaries, err := store.StorageClient.WorkloadConfigurationScanSummaries("default").List(ctx, metav1.ListOptions{})
+		require.NoError(t, err)
+		require.Len(t, summaries.Items, 1)
+		summary := summaries.Items[0].Spec.Controls["C-0034"]
+		assert.Equal(t, string(status), summary.Status.Status)
+		if status == apis.StatusPassed {
+			assert.Equal(t, string(apis.SubStatusException), control.Status.SubStatus)
+			assert.Equal(t, string(apis.SubStatusException), summary.Status.SubStatus)
+		}
+	}
+	require.NoError(t, store.StorePostureReportResults(ctx, first))
+	check(apis.StatusFailed)
+	require.NoError(t, store.StorePostureReportResults(ctx, second))
+	check(apis.StatusPassed)
+	// Delayed writes from the original scan must not restore its stale failure.
+	require.NoError(t, store.StorePostureReportResults(ctx, first))
+	check(apis.StatusPassed)
+	assert.Equal(t, apis.StatusFailed, second.Results[0].AssociatedControls[0].ResourceAssociatedRules[0].Status)
 }
