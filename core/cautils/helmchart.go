@@ -55,7 +55,8 @@ func NewHelmChart(path string) (*HelmChart, error) {
 }
 
 // Warn for missing dependencies, including those of vendored subcharts, while
-// allowing the available templates to render. No repository reference is resolved.
+// allowing rendering to be attempted. A missing helper can prevent the entire
+// chart from rendering. No repository reference is resolved.
 func warnMissingHelmDependencies(chart *helmchart.Chart, path string) {
 	vendored := make(map[string]bool, len(chart.Dependencies()))
 	for _, dependency := range chart.Dependencies() {

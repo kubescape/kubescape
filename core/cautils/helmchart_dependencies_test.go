@@ -163,3 +163,30 @@ func TestHelmScanUsesOnlyVendoredDependencies(t *testing.T) {
 		}
 	}
 }
+
+// A missing library helper prevents even otherwise valid parent resources from
+// rendering; vendored-only loading must not fetch it or modify the chart.
+func TestHelmMissingLibraryHelperPreventsRendering(t *testing.T) {
+	root := t.TempDir()
+	chartPath := filepath.Join(root, "parent")
+	require.NoError(t, os.MkdirAll(filepath.Join(chartPath, "templates"), 0o755))
+	writeManifestFixture(t, chartPath, "Chart.yaml", `apiVersion: v2
+name: parent
+version: 0.1.0
+dependencies:
+  - name: library
+    version: 0.1.0
+    repository: "@unconfigured"
+`)
+	writeManifestFixture(t, filepath.Join(chartPath, "templates"), "pod.yaml", validPodManifest)
+	writeManifestFixture(t, filepath.Join(chartPath, "templates"), "helper.yaml", `{{ include "library.requiredHelper" . }}`)
+	before := snapshotHelmScanTree(t, root)
+
+	chart, err := NewHelmChart(chartPath)
+	require.NoError(t, err)
+	workloads, errs := chart.GetWorkloadsWithDefaultValues()
+	require.Empty(t, workloads)
+	require.Len(t, errs, 1)
+	require.ErrorContains(t, errs[0], "library.requiredHelper")
+	require.Equal(t, before, snapshotHelmScanTree(t, root), "failed rendering must not modify the chart tree")
+}
