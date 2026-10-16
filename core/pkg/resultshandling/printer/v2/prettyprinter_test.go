@@ -546,3 +546,28 @@ func TestActionPrint_ResourceViewDefaultStillPrintsNoTable(t *testing.T) {
 
 	assert.NotContains(t, read(), "checkout-api")
 }
+
+func TestPrintGroupedResources_DeterministicNamespaceOrder(t *testing.T) {
+	workloads := map[string][]WorkloadSummary{
+		"Namespace zebra": {},
+		"Namespace alpha": {},
+		"Namespace beta":  {},
+		"Namespace gamma": {},
+	}
+
+	for i := 0; i < 20; i++ {
+		pp, read := newTestPrettyPrinterFile(t)
+		pp.printGroupedResources(workloads)
+		out := read()
+
+		idxAlpha := strings.Index(out, "Namespace alpha")
+		idxBeta := strings.Index(out, "Namespace beta")
+		idxGamma := strings.Index(out, "Namespace gamma")
+		idxZebra := strings.Index(out, "Namespace zebra")
+
+		require.True(t, idxAlpha >= 0 && idxBeta >= 0 && idxGamma >= 0 && idxZebra >= 0)
+		assert.True(t, idxAlpha < idxBeta, "alpha must appear before beta")
+		assert.True(t, idxBeta < idxGamma, "beta must appear before gamma")
+		assert.True(t, idxGamma < idxZebra, "gamma must appear before zebra")
+	}
+}

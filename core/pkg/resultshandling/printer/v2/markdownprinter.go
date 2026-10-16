@@ -128,18 +128,33 @@ func (e *mdErrWriter) printf(format string, args ...interface{}) {
 }
 
 func mdSortedControls(controls reportsummary.ControlSummaries) []reportsummary.ControlSummary {
-	out := make([]reportsummary.ControlSummary, 0, len(controls))
-	for _, ctrl := range controls {
-		out = append(out, ctrl)
+	type controlEntry struct {
+		key  string
+		ctrl reportsummary.ControlSummary
 	}
-	sort.SliceStable(out, func(i, j int) bool {
-		si := apis.ControlSeverityToInt(out[i].GetScoreFactor())
-		sj := apis.ControlSeverityToInt(out[j].GetScoreFactor())
+	entries := make([]controlEntry, 0, len(controls))
+	for key, ctrl := range controls {
+		entries = append(entries, controlEntry{key: key, ctrl: ctrl})
+	}
+	sort.SliceStable(entries, func(i, j int) bool {
+		si := apis.ControlSeverityToInt(entries[i].ctrl.GetScoreFactor())
+		sj := apis.ControlSeverityToInt(entries[j].ctrl.GetScoreFactor())
 		if si != sj {
 			return si > sj
 		}
-		return out[i].GetName() < out[j].GetName()
+		if entries[i].ctrl.GetName() != entries[j].ctrl.GetName() {
+			return entries[i].ctrl.GetName() < entries[j].ctrl.GetName()
+		}
+		if entries[i].ctrl.GetID() != entries[j].ctrl.GetID() {
+			return entries[i].ctrl.GetID() < entries[j].ctrl.GetID()
+		}
+		return entries[i].key < entries[j].key
 	})
+
+	out := make([]reportsummary.ControlSummary, len(entries))
+	for i := range entries {
+		out[i] = entries[i].ctrl
+	}
 	return out
 }
 
