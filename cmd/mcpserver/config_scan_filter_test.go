@@ -99,8 +99,8 @@ func TestGetConfigurationScanManifest_Filters(t *testing.T) {
 				assert.Equal(t, configScanFixture().Spec.Controls[id], c, "a kept control is returned unchanged")
 			}
 			want := configScanFixture()
-			assert.Equal(t, want.ObjectMeta.Name, got.Name)
-			assert.Equal(t, want.ObjectMeta.Labels, got.Labels)
+			assert.Equal(t, want.Name, got.Name)
+			assert.Equal(t, want.Labels, got.Labels)
 			assert.Equal(t, want.Spec.RelatedObjects, got.Spec.RelatedObjects)
 		})
 	}
