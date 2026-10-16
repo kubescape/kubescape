@@ -13,10 +13,14 @@ import (
 
 	"github.com/anchore/grype/grype/db/v6/distribution"
 	"github.com/anchore/grype/grype/db/v6/installation"
+	"github.com/anchore/grype/grype/distro"
 	"github.com/anchore/grype/grype/match"
 	grypepkg "github.com/anchore/grype/grype/pkg"
+	"github.com/anchore/grype/grype/version"
 	"github.com/anchore/grype/grype/vulnerability"
+	"github.com/anchore/grype/grype/vulnerability/mock"
 	"github.com/anchore/stereoscope/pkg/image"
+	syftpkg "github.com/anchore/syft/syft/pkg"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -994,4 +998,158 @@ func TestPatchBoundaryStaysWarnOnly(t *testing.T) {
 	// Usable-but-stale cache under a failed refresh: warn-only, never fatal.
 	stale := &vulnerability.ProviderStatus{Built: fixedNow.Add(-30 * 24 * time.Hour)}
 	assert.NoError(t, EnforceDBAge(&Service{dbStatus: stale}, shouldUpdate, fail, maxDBAge))
+}
+
+func TestMatchPackages(t *testing.T) {
+	goNamespace := "github:language:" + syftpkg.Go.String()
+	provider := mock.VulnerabilityProvider(
+		vulnerability.Vulnerability{
+			PackageName: "github.com/containerd/containerd",
+			Constraint:  version.MustGetConstraint("< 1.7.27", version.GolangFormat),
+			Reference: vulnerability.Reference{
+				ID:        "CVE-2024-40635",
+				Namespace: goNamespace,
+				Internal:  vulnerability.Metadata{Severity: "Medium"},
+			},
+		},
+		vulnerability.Vulnerability{
+			PackageName: "github.com/containerd/containerd",
+			Constraint:  version.MustGetConstraint("< 1.7.20", version.GolangFormat),
+			Reference: vulnerability.Reference{
+				ID:        "CVE-0000-0001",
+				Namespace: goNamespace,
+				Internal:  vulnerability.Metadata{Severity: "High"},
+			},
+		},
+	)
+
+	containerd := func(v string) []grypepkg.Package {
+		return []grypepkg.Package{{
+			ID:       grypepkg.ID("containerd-" + v),
+			Name:     "github.com/containerd/containerd",
+			Version:  v,
+			Type:     syftpkg.GoModulePkg,
+			Language: syftpkg.Go,
+		}}
+	}
+
+	tests := []struct {
+		name                    string
+		version                 string
+		vulnerabilityExceptions []string
+		severityExceptions      []string
+		wantMatches             []string
+		wantIgnored             []string
+	}{
+		{
+			name:        "vulnerable version matches every affected CVE",
+			version:     "v1.7.11",
+			wantMatches: []string{"CVE-2024-40635", "CVE-0000-0001"},
+		},
+		{
+			name:        "partially fixed version matches only the open CVE",
+			version:     "v1.7.20",
+			wantMatches: []string{"CVE-2024-40635"},
+		},
+		{
+			name:    "fixed version has no matches",
+			version: "v1.7.27",
+		},
+		{
+			name:                    "vulnerability exceptions move matches to ignored",
+			version:                 "v1.7.11",
+			vulnerabilityExceptions: []string{"CVE-0000-0001"},
+			wantMatches:             []string{"CVE-2024-40635"},
+			wantIgnored:             []string{"CVE-0000-0001"},
+		},
+		{
+			name:               "severity exceptions drop matches",
+			version:            "v1.7.11",
+			severityExceptions: []string{"MEDIUM"},
+			wantMatches:        []string{"CVE-0000-0001"},
+		},
+		{
+			name:               "severity exceptions ignore case",
+			version:            "v1.7.11",
+			severityExceptions: []string{"medium"},
+			wantMatches:        []string{"CVE-0000-0001"},
+		},
+	}
+
+	for _, useDefaultMatchers := range []bool{true, false} {
+		svc := &Service{vp: provider, useDefaultMatchers: useDefaultMatchers}
+		for _, tt := range tests {
+			t.Run(fmt.Sprintf("%s/defaultMatchers=%t", tt.name, useDefaultMatchers), func(t *testing.T) {
+				matches, ignored, err := svc.MatchPackages(containerd(tt.version), grypepkg.Context{}, tt.vulnerabilityExceptions, tt.severityExceptions)
+				require.NoError(t, err)
+				assert.ElementsMatch(t, tt.wantMatches, matchIDs(matches))
+
+				ignoredIDs := make([]string, 0, len(ignored))
+				for _, m := range ignored {
+					ignoredIDs = append(ignoredIDs, m.Vulnerability.ID)
+				}
+				assert.ElementsMatch(t, tt.wantIgnored, ignoredIDs)
+			})
+		}
+	}
+}
+
+func TestMatchPackagesUsesDistroContext(t *testing.T) {
+	provider := mock.VulnerabilityProvider(vulnerability.Vulnerability{
+		PackageName: "kernel",
+		Constraint:  version.MustGetConstraint("< 5.10.209-198.858.amzn2", version.RpmFormat),
+		Reference: vulnerability.Reference{
+			ID:        "CVE-2024-1086",
+			Namespace: "amazon:distro:amazonlinux:2",
+			Internal:  vulnerability.Metadata{Severity: "High"},
+		},
+	})
+	svc := &Service{vp: provider, useDefaultMatchers: true}
+
+	kernel := func(v string, d *distro.Distro) []grypepkg.Package {
+		return []grypepkg.Package{{
+			ID:      grypepkg.ID("kernel-" + v),
+			Name:    "kernel",
+			Version: v,
+			Type:    syftpkg.RpmPkg,
+			Distro:  d,
+		}}
+	}
+	amzn2 := distro.New(distro.AmazonLinux, "2", "")
+
+	tests := []struct {
+		name        string
+		packages    []grypepkg.Package
+		wantMatches []string
+	}{
+		{
+			name:        "vulnerable kernel on the advisory distro matches",
+			packages:    kernel("5.10.205-195.807.amzn2", amzn2),
+			wantMatches: []string{"CVE-2024-1086"},
+		},
+		{
+			name:     "fixed kernel does not match",
+			packages: kernel("5.10.209-198.858.amzn2", amzn2),
+		},
+		{
+			name:     "same kernel version on another distro does not match",
+			packages: kernel("5.10.205-195.807.amzn2", distro.New(distro.RedHat, "9", "")),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			matches, _, err := svc.MatchPackages(tt.packages, grypepkg.Context{}, nil, nil)
+			require.NoError(t, err)
+			assert.ElementsMatch(t, tt.wantMatches, matchIDs(matches))
+		})
+	}
+}
+
+func TestMatchPackagesNilProvider(t *testing.T) {
+	svc := &Service{}
+	matches, ignored, err := svc.MatchPackages(nil, grypepkg.Context{}, nil, nil)
+	require.Error(t, err)
+	assert.Zero(t, matches.Count())
+	assert.Empty(t, ignored)
 }
