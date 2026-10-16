@@ -83,23 +83,29 @@ func ruleGrantsUnnamedCreate(rule rbacv1.PolicyRule, apiGroup, resource string) 
 // resource for a request that names an existing object, as update and patch
 // do. Unlike a create, such a request has a real name, so a rule restricted
 // by resourceNames grants it for those names -- but only a name some object
-// can actually carry. resourceNames is matched literally, so "*" names an
-// object called "*", which no workload can be: the empty name and any other
-// entry that is not a valid object name identify nothing, and a rule listing
-// only those grants nothing.
-//
-// Every workload this is used for (see serviceAccountWorkloads) takes a DNS
-// subdomain name. CronJob names are additionally limited to 52 characters;
-// that is not enforced, so a 53 to 253 character name is still accepted --
-// an over-report of an impossible object, never a missed grant.
+// of that resource can actually carry. resourceNames is matched literally,
+// so "*" names an object called "*", which no workload can be: the empty name
+// and any other entry that is not a valid name for the resource identify
+// nothing, and a rule listing only those grants nothing.
 func ruleGrantsExistingObject(rule rbacv1.PolicyRule, apiGroup, resource, verb string) bool {
 	return ruleGrants(rule, apiGroup, resource, verb) &&
-		(len(rule.ResourceNames) == 0 || slices.ContainsFunc(rule.ResourceNames, isWorkloadName))
+		(len(rule.ResourceNames) == 0 || slices.ContainsFunc(rule.ResourceNames, func(name string) bool {
+			return isWorkloadName(resource, name)
+		}))
 }
 
-// isWorkloadName reports whether name is syntactically valid for a workload
-// object: a DNS-1123 subdomain, which also rules out "" and "*".
-func isWorkloadName(name string) bool {
+// isWorkloadName reports whether name is syntactically valid for an object of
+// the given workload resource, which also rules out "" and "*". Kubernetes
+// validates a StatefulSet name as a DNS-1123 label, because the name is part of
+// its pods' hostnames (ValidateStatefulSetName), and every other workload this
+// is used for as a DNS-1123 subdomain. CronJob names are additionally limited
+// to 52 characters; that is not enforced, so a 53 to 253 character name is
+// still accepted -- an over-report of an impossible object, never a missed
+// grant.
+func isWorkloadName(resource, name string) bool {
+	if resource == "statefulsets" {
+		return len(validation.IsDNS1123Label(name)) == 0
+	}
 	return len(validation.IsDNS1123Subdomain(name)) == 0
 }
 

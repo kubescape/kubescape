@@ -65,7 +65,13 @@ func TestAssignServiceAccount_WorkloadWrites(t *testing.T) {
 		{"update naming only a literal star", rule([]string{"apps"}, []string{"deployments"}, []string{"update"}, []string{"*"}), false},
 		{"patch naming only invalid names", rule([]string{"apps"}, []string{"deployments"}, []string{"patch"}, []string{"*", "", "Web_App", "web/app"}), false},
 		{"patch naming a literal star and a valid name", rule([]string{"apps"}, []string{"deployments"}, []string{"patch"}, []string{"*", "web"}), true},
-		{"update naming a dotted subdomain", rule([]string{"apps"}, []string{"statefulsets"}, []string{"update"}, []string{"db-0.shard"}), true},
+		{"update naming a dotted subdomain", rule([]string{"apps"}, []string{"deployments"}, []string{"update"}, []string{"web.shard"}), true},
+		// A StatefulSet name is a DNS label: no dots, and at most 63 characters.
+		{"update naming a StatefulSet by label", rule([]string{"apps"}, []string{"statefulsets"}, []string{"update"}, []string{"db"}), true},
+		{"update naming a StatefulSet with a dot", rule([]string{"apps"}, []string{"statefulsets"}, []string{"update"}, []string{"db.shard"}), false},
+		{"update naming a StatefulSet with a dot and a valid label", rule([]string{"apps"}, []string{"statefulsets"}, []string{"update"}, []string{"db.shard", "db"}), true},
+		{"update naming a StatefulSet too long for a label", rule([]string{"apps"}, []string{"statefulsets"}, []string{"update"}, []string{strings.Repeat("a", 64)}), false},
+		{"update naming a Deployment longer than a label", rule([]string{"apps"}, []string{"deployments"}, []string{"update"}, []string{strings.Repeat("a", 64)}), true},
 		{"update naming only the empty name", rule([]string{"apps"}, []string{"deployments"}, []string{"update"}, []string{""}), false},
 		// A Pod's serviceAccountName and a Job's template are immutable.
 		{"update pods", rule([]string{""}, []string{"pods"}, []string{"update", "patch"}, nil), false},
