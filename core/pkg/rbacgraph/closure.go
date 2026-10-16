@@ -13,17 +13,18 @@ type EscalationResult struct {
 	// case, since every further reach is implied and not worth the noise.
 	Reached []EscalationPath
 	// Unbounded lists every distinct escalation edge encountered anywhere
-	// in the closure that grants everything within some scope rather than
-	// a specific enumerable rule set, together with the subject that holds
+	// in the closure with permissions or possible targets that cannot be fully
+	// enumerated, together with the subject that holds
 	// it -- deduplicated by (subject, primitive, scope, detail), since the
 	// same grant can otherwise be rediscovered on more than one BFS pass over
 	// the same subject. This is a report of *why*, not a dead end: a
-	// namespace-scoped finding is also materialized into that subject's own
-	// rule set (as a wildcard rule confined to the finding's Scope) and the
+	// namespace-scoped permission grant is also materialized into that subject's
+	// own rule set (as a wildcard rule confined to the finding's Scope) and the
 	// subject is re-queued, so anything it unlocks is still chased by the
 	// traversal -- see the e.Unbounded case below. ScopeUnknown findings
 	// retain uncertainty about missing named Roles without granting any
-	// permissions or proving cluster-admin.
+	// permissions or proving cluster-admin. Unbounded User/ServiceAccount
+	// impersonation likewise retains the warning without inventing permissions.
 	Unbounded []UnboundedFinding
 	// EffectiveRules is the union of every ScopedRule reachable: Start's
 	// own direct rules, every rule granted via bind-verb/escalate-verb
@@ -33,7 +34,8 @@ type EscalationResult struct {
 	EffectiveRules []ScopedRule
 	// ClusterAdmin is true when EffectiveRules includes a cluster-wide
 	// */*/* rule, an Unbounded finding covers the whole cluster
-	// (Scope == "" and !ScopeUnknown), or a superuser group (system:masters)
+	// (Scope == "" and !ScopeUnknown, excluding User/ServiceAccount target
+	// enumeration warnings), or a superuser group (system:masters)
 	// was reached via impersonation -- however it was actually reached. Once true, the BFS
 	// stops expanding further: cluster-admin-equivalent power already
 	// implies every other identity and permission is reachable, so
@@ -162,6 +164,13 @@ func (idx *Index) AnalyzeEscalation(start Subject) EscalationResult {
 				if !unboundedSeen[key] {
 					unboundedSeen[key] = true
 					unbounded = append(unbounded, UnboundedFinding{Subject: s, Edge: e})
+				}
+				if e.Primitive == PrimitiveImpersonate &&
+					(e.ImpersonatedKind == KindUser || e.ImpersonatedKind == KindServiceAccount) {
+					// The target set is unbounded, not its permissions. Concrete
+					// identities are followed through ToSubject edges; uncollected
+					// identities remain a risk finding without granting wildcard rules.
+					continue
 				}
 				if e.ScopeUnknown {
 					continue // report uncertainty, never synthesize permissions from it

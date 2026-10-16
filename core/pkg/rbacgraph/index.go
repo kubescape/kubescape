@@ -6,6 +6,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apiserver/pkg/authentication/serviceaccount"
+	"k8s.io/apiserver/pkg/authentication/user"
 )
 
 // Index indexes a cluster's Role, ClusterRole, RoleBinding,
@@ -104,7 +105,8 @@ func (idx *Index) DirectRules(subject Subject) []ScopedRule {
 // implicit groups every identity of that kind automatically belongs to:
 // every ServiceAccount is a member of system:serviceaccounts,
 // system:serviceaccounts:<its namespace>, and system:authenticated; every
-// User is a member of system:authenticated. A RoleBinding/ClusterRoleBinding
+// non-anonymous User is a member of system:authenticated, while system:anonymous
+// belongs to system:unauthenticated. A RoleBinding/ClusterRoleBinding
 // naming one of these groups as its subject grants its rules to every
 // matching identity, not just to a literally-named Group object (there
 // usually isn't one -- these are authenticator-assigned, not RBAC objects).
@@ -167,7 +169,10 @@ func bindingNamesSubject(subjects []rbacv1.Subject, bindingNamespace string, sub
 					return true
 				}
 			}
-			if s.Kind == "Group" && s.Name == "system:authenticated" {
+			// Username-only impersonation of system:anonymous receives the
+			// unauthenticated group instead of the authenticated group.
+			if s.Kind == "Group" && ((subject.Name == user.Anonymous && s.Name == user.AllUnauthenticated) ||
+				(subject.Name != user.Anonymous && s.Name == user.AllAuthenticated)) {
 				return true
 			}
 		case KindGroup:
