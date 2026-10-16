@@ -289,7 +289,9 @@ func (rh *ResultsHandler) HandleResults(ctx context.Context, scanInfo *cautils.S
 		// Refine that coarse per-control Bound signal with per-resource
 		// binding-scope matching, before ApplySeverityFilters below narrows
 		// which resources/controls are considered.
-		failing := vapreconcile.CollectFailingResourcesByControlFromCatalog(rh.ScanData.ResourcesResult, rh.ScanData.GetCatalog())
+		failing := vapreconcile.CollectFailingResourcesByControlFromCatalog(rh.ScanData.ResourcesResult, rh.ScanData.GetCatalog(), func(control *resourcesresults.ResourceAssociatedControl) bool {
+			return cautils.ControlStatus(&rh.ScanData.Report.SummaryDetails, control).IsFailed()
+		})
 		namespaceLabels := vapreconcile.CollectNamespaceLabelsFromCatalog(rh.ScanData.GetCatalog())
 		rh.ScanData.VAPCoverage = vapreconcile.BuildCoverage(rh.ScanData.VAPPolicies, rh.ScanData.VAPBindings, failing, namespaceLabels)
 	}
