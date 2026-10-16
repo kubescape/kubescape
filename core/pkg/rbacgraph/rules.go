@@ -4,6 +4,7 @@ import (
 	"slices"
 
 	rbacv1 "k8s.io/api/rbac/v1"
+	"k8s.io/apimachinery/pkg/util/validation"
 )
 
 // ruleGrants reports whether rule grants verb on the given apiGroup and
@@ -81,11 +82,25 @@ func ruleGrantsUnnamedCreate(rule rbacv1.PolicyRule, apiGroup, resource string) 
 // ruleGrantsExistingObject reports whether rule grants verb on apiGroup/
 // resource for a request that names an existing object, as update and patch
 // do. Unlike a create, such a request has a real name, so a rule restricted
-// by resourceNames grants it for those names; the empty name matches no
-// existing object, so a rule listing nothing else grants nothing.
+// by resourceNames grants it for those names -- but only a name some object
+// can actually carry. resourceNames is matched literally, so "*" names an
+// object called "*", which no workload can be: the empty name and any other
+// entry that is not a valid object name identify nothing, and a rule listing
+// only those grants nothing.
+//
+// Every workload this is used for (see serviceAccountWorkloads) takes a DNS
+// subdomain name. CronJob names are additionally limited to 52 characters;
+// that is not enforced, so a 53 to 253 character name is still accepted --
+// an over-report of an impossible object, never a missed grant.
 func ruleGrantsExistingObject(rule rbacv1.PolicyRule, apiGroup, resource, verb string) bool {
 	return ruleGrants(rule, apiGroup, resource, verb) &&
-		(len(rule.ResourceNames) == 0 || slices.ContainsFunc(rule.ResourceNames, func(n string) bool { return n != "" }))
+		(len(rule.ResourceNames) == 0 || slices.ContainsFunc(rule.ResourceNames, isWorkloadName))
+}
+
+// isWorkloadName reports whether name is syntactically valid for a workload
+// object: a DNS-1123 subdomain, which also rules out "" and "*".
+func isWorkloadName(name string) bool {
+	return len(validation.IsDNS1123Subdomain(name)) == 0
 }
 
 func setToSlice(set map[string]bool) []string {

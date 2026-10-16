@@ -62,6 +62,10 @@ func TestAssignServiceAccount_WorkloadWrites(t *testing.T) {
 		{"scale subresource", rule([]string{"apps"}, []string{"deployments/scale"}, []string{"create", "update"}, nil), false},
 		{"podtemplates are not workloads", rule([]string{""}, []string{"podtemplates"}, []string{"create"}, nil), false},
 		{"create with only a real resource name", rule([]string{"apps"}, []string{"deployments"}, []string{"create"}, []string{"web"}), false},
+		{"update naming only a literal star", rule([]string{"apps"}, []string{"deployments"}, []string{"update"}, []string{"*"}), false},
+		{"patch naming only invalid names", rule([]string{"apps"}, []string{"deployments"}, []string{"patch"}, []string{"*", "", "Web_App", "web/app"}), false},
+		{"patch naming a literal star and a valid name", rule([]string{"apps"}, []string{"deployments"}, []string{"patch"}, []string{"*", "web"}), true},
+		{"update naming a dotted subdomain", rule([]string{"apps"}, []string{"statefulsets"}, []string{"update"}, []string{"db-0.shard"}), true},
 		{"update naming only the empty name", rule([]string{"apps"}, []string{"deployments"}, []string{"update"}, []string{""}), false},
 		// A Pod's serviceAccountName and a Job's template are immutable.
 		{"update pods", rule([]string{""}, []string{"pods"}, []string{"update", "patch"}, nil), false},
@@ -226,6 +230,44 @@ func TestAssignServiceAccount_DetailQualifiesNamedObjectOnlyWrites(t *testing.T)
 				if strings.Contains(e.Detail, w) {
 					t.Errorf("Detail = %q, must not contain %q", e.Detail, w)
 				}
+			}
+		})
+	}
+}
+
+func TestAnalyzeEscalation_DeploymentPatchNamingLiteralStarIsNotClusterAdmin(t *testing.T) {
+	// resourceNames is literal, so ["*"] names no Deployment that can exist.
+	// It must not reach the cluster-admin ServiceAccount, unlike a patch rule
+	// that names a real Deployment or has no resourceNames at all.
+	admin := clusterRole("admin", rule([]string{"*"}, []string{"*"}, []string{"*"}, nil))
+	reaches := func(names []string) bool {
+		idx := NewIndex(
+			[]rbacv1.Role{role("prod", "patcher", rule([]string{"apps"}, []string{"deployments"}, []string{"patch"}, names))},
+			[]rbacv1.ClusterRole{admin},
+			[]rbacv1.RoleBinding{roleBinding("prod", "patcher", "Role", "patcher", saSubject("prod", "attacker"))},
+			[]rbacv1.ClusterRoleBinding{clusterRoleBinding("admin", "admin", saSubject("prod", "privileged"))},
+			[]corev1.ServiceAccount{saObj("prod", "attacker"), saObj("prod", "privileged")},
+		)
+		result := idx.AnalyzeEscalation(sa("prod", "attacker"))
+		if result.ClusterAdmin != (len(result.Reached) == 1) {
+			t.Fatalf("ClusterAdmin = %v with Reached = %+v, want them to agree", result.ClusterAdmin, result.Reached)
+		}
+		return result.ClusterAdmin
+	}
+
+	for _, tt := range []struct {
+		name  string
+		names []string
+		want  bool
+	}{
+		{"literal star only", []string{"*"}, false},
+		{"literal star and a valid name", []string{"*", "web"}, true},
+		{"valid name", []string{"web"}, true},
+		{"no resourceNames", nil, true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := reaches(tt.names); got != tt.want {
+				t.Errorf("cluster-admin reachable = %v, want %v", got, tt.want)
 			}
 		})
 	}
