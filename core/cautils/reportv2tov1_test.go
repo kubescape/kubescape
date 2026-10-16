@@ -417,6 +417,88 @@ func TestReportV2ToV1_NilSafety(t *testing.T) {
 	assert.Empty(t, gotEmpty.FrameworkReports)
 }
 
+// The v1 report is a stable, cacheable artifact: ControlReports and
+// RuleReports were built by ranging over maps, so their order was reshuffled
+// on every run. Repeat the conversion enough times to exercise many map range
+// orders and require a sorted, reproducible sequence each time.
+func TestReportV2ToV1_DeterministicOrdering(t *testing.T) {
+	resourceID := "/v1/default/Pod/demo"
+	controlIDs := []string{"C-003", "C-001", "C-002"}
+	ruleNames := []string{"rule-zeta", "rule-alpha", "rule-mu"}
+
+	// Populate the maps in a deliberately unsorted order so a randomised range
+	// order would surface as an out-of-order result.
+	controls := reportsummary.ControlSummaries{}
+	associatedControls := []resourcesresults.ResourceAssociatedControl{}
+	for _, controlID := range controlIDs {
+		cs := reportsummary.ControlSummary{ControlID: controlID, Name: "control " + controlID, ScoreFactor: 5}
+		cs.Append(helpersv1.NewStatus(apis.StatusFailed), resourceID)
+		controls[controlID] = cs
+
+		rules := []resourcesresults.ResourceAssociatedRule{}
+		for _, ruleName := range ruleNames {
+			rules = append(rules, resourcesresults.ResourceAssociatedRule{
+				Name:   ruleName,
+				Status: apis.StatusFailed,
+				Paths: []armotypes.PosturePaths{
+					{ResourceID: resourceID, FixPath: armotypes.FixPath{Path: "spec.replicas", Value: "3"}},
+				},
+			})
+		}
+		associatedControls = append(associatedControls, resourcesresults.ResourceAssociatedControl{
+			ControlID:               controlID,
+			ResourceAssociatedRules: rules,
+		})
+	}
+
+	session := &OPASessionObj{
+		AllResources: map[string]workloadinterface.IMetadata{
+			resourceID: workloadinterface.NewWorkloadObj(map[string]any{
+				"apiVersion": "v1",
+				"kind":       "Pod",
+				"metadata":   map[string]any{"name": "demo", "namespace": "default"},
+			}),
+		},
+		ResourcesResult: map[string]resourcesresults.Result{
+			resourceID: {
+				ResourceID:         resourceID,
+				AssociatedControls: associatedControls,
+			},
+		},
+		Report: &reporthandlingv2.PostureReport{
+			SummaryDetails: reportsummary.SummaryDetails{
+				Controls: controls,
+			},
+		},
+	}
+
+	wantControlIDs := []string{"C-001", "C-002", "C-003"}
+	wantRuleNames := []string{"rule-alpha", "rule-mu", "rule-zeta"}
+
+	for i := 0; i < 50; i++ {
+		got := ReportV2ToV1(session)
+
+		require.Len(t, got.FrameworkReports, 1)
+		controlReports := got.FrameworkReports[0].ControlReports
+		require.Len(t, controlReports, len(controlIDs))
+
+		gotControlIDs := make([]string, 0, len(controlReports))
+		for _, cr := range controlReports {
+			gotControlIDs = append(gotControlIDs, cr.ControlID)
+		}
+		assert.Equal(t, wantControlIDs, gotControlIDs, "control reports must be emitted in sorted order")
+
+		for _, cr := range controlReports {
+			require.Len(t, cr.RuleReports, len(ruleNames))
+			gotRuleNames := make([]string, 0, len(cr.RuleReports))
+			for _, rr := range cr.RuleReports {
+				gotRuleNames = append(gotRuleNames, rr.Name)
+			}
+			assert.Equal(t, wantRuleNames, gotRuleNames, "rule reports must be emitted in sorted order")
+		}
+	}
+}
+
 func TestReportV2ToV1_FrameworkStatusCounters_MultipleControls(t *testing.T) {
 	// Framework counters aggregate unique resources across multiple controls
 	// and therefore differ from any individual control's counters.

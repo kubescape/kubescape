@@ -89,7 +89,11 @@ func ReportV2ToV1(opaSessionObj *OPASessionObj) *reporthandling.PostureReport {
 
 func controlReportV2ToV1(opaSessionObj *OPASessionObj, frameworkName string, controls map[string]reportsummary.ControlSummary) []reporthandling.ControlReport {
 	controlReports := []reporthandling.ControlReport{}
-	for controlID, crv2 := range controls {
+	// Iterate controls in sorted-key order so the v1 report is deterministic:
+	// a map's range order is randomised per run, which made ControlReports
+	// (and, below, RuleReports) appear in a different sequence each scan.
+	for _, controlID := range slices.Sorted(maps.Keys(controls)) {
+		crv2 := controls[controlID]
 		crv1 := reporthandling.ControlReport{}
 		crv1.ControlID = controlID
 		crv1.BaseScore = crv2.ScoreFactor
@@ -153,8 +157,10 @@ func controlReportV2ToV1(opaSessionObj *OPASessionObj, frameworkName string, con
 		}
 		helpersv1.PutAllListsToPool(l)
 		if len(rulesv1) > 0 {
-			for i := range rulesv1 {
-				crv1.RuleReports = append(crv1.RuleReports, rulesv1[i])
+			// Sorted-key order again: rulesv1 is a map keyed by rule name, so
+			// ranging over it directly would emit RuleReports in a random order.
+			for _, ruleName := range slices.Sorted(maps.Keys(rulesv1)) {
+				crv1.RuleReports = append(crv1.RuleReports, rulesv1[ruleName])
 			}
 		}
 		if len(crv1.RuleReports) == 0 {
