@@ -82,7 +82,7 @@ kubescape scan [target] [flags]
 
 ### Webhook notifications
 
-Use `--notify` to send a compact summary after a posture scan. Official Slack and GovSlack incoming webhook URLs receive a Block Kit message, Microsoft Teams incoming webhooks (`*.webhook.office.com`, `outlook.office.com`, `outlook.office365.com`) receive an Adaptive Card, and every other URL receives the existing JSON `summaryDetails` object:
+Use `--notify` to send a compact summary after a posture scan or image vulnerability scan. Official Slack and GovSlack incoming webhook URLs receive a Block Kit message, Microsoft Teams incoming webhooks (`*.webhook.office.com`, `outlook.office.com`, `outlook.office365.com`) receive an Adaptive Card, and every other URL receives a JSON summary object:
 
 ```bash
 export SLACK_WEBHOOK_URL='https://hooks.slack.com/services/T00000000/B00000000/SECRET'
@@ -92,6 +92,11 @@ export TEAMS_WEBHOOK_URL='https://contoso.webhook.office.com/webhookb2/00000000-
 kubescape scan manifests/ --notify "$TEAMS_WEBHOOK_URL"
 kubescape scan manifests/ --notify https://hooks.example.com/kubescape
 kubescape scan manifests/ --notify https://ops.example.com/kubescape --notify https://audit.example.com/kubescape
+
+# Image vulnerability scan notifications
+kubescape scan image nginx:latest --notify "$SLACK_WEBHOOK_URL"
+kubescape scan image nginx:latest --notify "$TEAMS_WEBHOOK_URL"
+kubescape scan image nginx:latest --notify https://hooks.example.com/kubescape
 ```
 
 Each destination gets one synchronous request with `Content-Type: application/json`; Kubescape allows up to five seconds per destination and does not follow redirects. Failures are logged as warnings and never override the scan's own exit status. The payload follows `--min-severity` and `--max-severity` output filtering. `--severity-threshold` continues to affect only the exit status.
@@ -151,6 +156,32 @@ Generic destinations continue to receive only the scan summary. An abridged exam
   "ResourceCounters": {"passedResources": 5, "failedResources": 2, "skippedResources": 1, "excludedResources": 0},
   "score": 73.2,
   "complianceScore": 73.2
+}
+```
+
+For image vulnerability scans (`kubescape scan image`), notifications deliver image-specific summaries including image targets, total/fixable vulnerability counts, severity breakdowns, and up to ten top vulnerabilities ordered by severity and fixability across Slack Block Kit, Teams Adaptive Cards, and generic JSON endpoints:
+
+```json
+{
+  "images": ["nginx:latest"],
+  "totalVulnerabilities": 18,
+  "fixableVulnerabilities": 8,
+  "severityCounts": {
+    "Critical": 2,
+    "High": 5,
+    "Medium": 10,
+    "Low": 1
+  },
+  "topVulnerabilities": [
+    {
+      "id": "CVE-2023-0001",
+      "severity": "Critical",
+      "package": "libcrypto",
+      "version": "1.1.1",
+      "fixedState": "fixed",
+      "fixVersions": ["1.1.2"]
+    }
+  ]
 }
 ```
 

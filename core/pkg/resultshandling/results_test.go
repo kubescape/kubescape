@@ -19,6 +19,7 @@ import (
 	"github.com/anchore/grype/grype/vulnerability"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/notification"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer"
 	printerv2 "github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer/v2"
 	"github.com/kubescape/opa-utils/reporthandling"
@@ -169,6 +170,39 @@ func TestResultsHandlerNotifyIsBestEffortAndDeliversOnlySummary(t *testing.T) {
 	require.NoError(t, json.Unmarshal(received, &payload))
 	assert.NotContains(t, payload, "results")
 	assert.NotContains(t, payload, "rawResources")
+}
+
+func TestResultsHandlerNotifyDeliversImageScanSummary(t *testing.T) {
+	var received []byte
+	success := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPost, r.Method)
+		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
+		var err error
+		received, err = io.ReadAll(r.Body)
+		require.NoError(t, err)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer success.Close()
+
+	failure := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer failure.Close()
+
+	handler := NewResultsHandler(nil, nil, &SpyPrinter{})
+	handler.ImageScanData = []cautils.ImageScanData{
+		{
+			Image: "nginx:latest",
+		},
+	}
+
+	require.NoError(t, handler.HandleResults(context.Background(), &cautils.ScanInfo{
+		NotifyURLs: []string{failure.URL + "/first?token=secret", success.URL + "/second?token=secret"},
+	}))
+
+	var payload notification.ImageNotificationSummary
+	require.NoError(t, json.Unmarshal(received, &payload))
+	assert.Equal(t, []string{"nginx:latest"}, payload.Images)
 }
 
 func TestResultsHandlerHandleResultsReturnsPrinterErrors(t *testing.T) {

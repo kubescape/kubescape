@@ -72,13 +72,14 @@ func TestGetImageCmd(t *testing.T) {
 	assert.NoError(t, err)
 }
 
-func TestGetImageCmdRejectsNotify(t *testing.T) {
+func TestGetImageCmdAcceptsNotify(t *testing.T) {
 	mockKubescape := &imageScanCaptureKubescape{}
 	scanInfo := cautils.ScanInfo{NotifyURLs: []string{"https://example.com/webhook"}}
 	cmd := getImageCmd(mockKubescape, &scanInfo)
 	err := cmd.RunE(cmd, []string{"nginx"})
-	require.EqualError(t, err, "--notify is not supported for image-only scans yet")
-	assert.Nil(t, mockKubescape.imgScanInfo)
+	assert.NoError(t, err)
+	assert.NotNil(t, mockKubescape.imgScanInfo)
+	assert.Equal(t, []string{"https://example.com/webhook"}, scanInfo.NotifyURLs)
 }
 
 func TestGetImageCmd_RunE_InvalidSeverity(t *testing.T) {
