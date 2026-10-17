@@ -48,7 +48,7 @@ func failedResourcesInPrintOrder(opaSessionObj *cautils.OPASessionObj) []scanned
 
 	failed := make([]scannedResource, 0, len(opaSessionObj.ResourcesResult))
 	for resourceID, result := range opaSessionObj.ResourcesResult {
-		if !result.GetStatus(nil).IsFailed() {
+		if !cautils.ResourceStatus(&opaSessionObj.Report.SummaryDetails, &result).IsFailed() {
 			continue
 		}
 		if res, ok := opaSessionObj.GetResource(resourceID); !ok || res == nil {
@@ -95,7 +95,7 @@ func (prettyPrinter *PrettyPrinter) resourceTable(opaSessionObj *cautils.OPASess
 		if resource.GetNamespace() != "" {
 			fmt.Fprintf(prettyPrinter.writer, "Namespace: %s\n", resource.GetNamespace())
 		}
-		fmt.Fprintf(prettyPrinter.writer, "\n%s\n\n", prettyprinter.ControlCountersForResource(result.ListControlsIDs(nil)))
+		fmt.Fprintf(prettyPrinter.writer, "\n%s\n\n", prettyprinter.ControlCountersForResource(cautils.ControlIDsByStatus(&opaSessionObj.Report.SummaryDetails, &result)))
 
 		summaryTable := table.NewWriter()
 		summaryTable.SetOutputMirror(prettyPrinter.writer)
@@ -180,7 +180,7 @@ func generateResourceRows(controls []resourcesresults.ResourceAssociatedControl,
 	for i := range controls {
 		row := make(table.Row, _resourceRowLen)
 
-		if !controls[i].GetStatus(nil).IsFailed() {
+		if !cautils.ControlStatus(summaryDetails, &controls[i]).IsFailed() {
 			continue
 		}
 

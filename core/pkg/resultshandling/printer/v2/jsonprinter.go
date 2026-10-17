@@ -192,7 +192,7 @@ func writeConfigurationJSON(w io.Writer, opaSessionObj *cautils.OPASessionObj, i
 				result.PrioritizedResource = &prioritized
 			}
 			res, _ := opaSessionObj.GetResource(result.ResourceID)
-			enriched := enrichResultWithSeverity(result, opaSessionObj.Report.SummaryDetails.Controls, res)
+			enriched := enrichResultWithSeverity(result, &opaSessionObj.Report.SummaryDetails, res)
 			slices.SortFunc(enriched.AssociatedControls, func(a, b ResourceAssociatedControlWithSeverity) int {
 				return strings.Compare(a.ControlID, b.ControlID)
 			})
