@@ -82,6 +82,106 @@ func FromUnstructuredGatewayAPI(resources map[string]workloadinterface.IMetadata
 	return routes, gateways, errs
 }
 
+// FromUnstructuredReferenceGrants decodes ReferenceGrant objects from their
+// generic unstructured representation. v1 and v1beta1 share one spec shape, so
+// the served version does not matter. Kept apart from
+// FromUnstructuredGatewayAPI because grants are an independent collection with
+// their own availability: a caller that could not list them must not pass an
+// empty result off as "no grants" (see WithReferenceGrants).
+//
+// A grant that cannot be decoded, or that lacks what is needed to place it
+// (its namespace, a non-empty from and to, a kind and a source namespace on
+// every entry), is skipped and its error appended to errs. A skipped grant may
+// have authorized a reference, so a caller that sees any error here must treat
+// authorization as undetermined rather than as denied.
+func FromUnstructuredReferenceGrants(resources map[string]workloadinterface.IMetadata) (grants []referenceGrant, errs []error) {
+	for _, resource := range resources {
+		if resource == nil || resource.GetKind() != "ReferenceGrant" {
+			continue
+		}
+		g, err := decodeReferenceGrant(resource.GetObject())
+		if err != nil {
+			errs = append(errs, fmt.Errorf("resource %s: %w", resource.GetID(), err))
+			continue
+		}
+		grants = append(grants, g)
+	}
+	return grants, errs
+}
+
+// ReferenceGrantsOption decodes a complete, successful listing of the
+// cluster's ReferenceGrants into an Index option (see WithReferenceGrants). An
+// empty resources map is a real answer: no grants exist.
+//
+// When any grant cannot be decoded the option is nil and errs says why: that
+// grant may have authorized a reference, so authorization is undetermined and
+// the caller must build the Index without grants (keeping such references
+// reported as unclear) and surface the errors.
+func ReferenceGrantsOption(resources map[string]workloadinterface.IMetadata) (opt Option, errs []error) {
+	grants, errs := FromUnstructuredReferenceGrants(resources)
+	if len(errs) > 0 {
+		return nil, errs
+	}
+	return WithReferenceGrants(grants), nil
+}
+
+// referenceGrantWire is the ReferenceGrant JSON shape. Group is a pointer only
+// so that an entry that omits it reads the same as the empty (core) group the
+// spec infers.
+type referenceGrantWire struct {
+	Metadata struct {
+		Namespace string `json:"namespace"`
+		Name      string `json:"name"`
+	} `json:"metadata"`
+	Spec struct {
+		From []struct {
+			Group     *string `json:"group,omitempty"`
+			Kind      string  `json:"kind"`
+			Namespace string  `json:"namespace"`
+		} `json:"from,omitempty"`
+		To []struct {
+			Group *string `json:"group,omitempty"`
+			Kind  string  `json:"kind"`
+			Name  *string `json:"name,omitempty"`
+		} `json:"to,omitempty"`
+	} `json:"spec"`
+}
+
+func decodeReferenceGrant(obj map[string]any) (referenceGrant, error) {
+	var wire referenceGrantWire
+	if err := decode(obj, &wire); err != nil {
+		return referenceGrant{}, err
+	}
+	if wire.Metadata.Namespace == "" {
+		return referenceGrant{}, fmt.Errorf("ReferenceGrant %q has no namespace", wire.Metadata.Name)
+	}
+	if len(wire.Spec.From) == 0 || len(wire.Spec.To) == 0 {
+		return referenceGrant{}, fmt.Errorf("ReferenceGrant %s/%s needs at least one from and one to entry", wire.Metadata.Namespace, wire.Metadata.Name)
+	}
+
+	g := referenceGrant{Namespace: wire.Metadata.Namespace, Name: wire.Metadata.Name}
+	for i, f := range wire.Spec.From {
+		if f.Kind == "" || f.Namespace == "" {
+			return referenceGrant{}, fmt.Errorf("ReferenceGrant %s/%s: from[%d] needs a kind and a namespace", g.Namespace, g.Name, i)
+		}
+		g.From = append(g.From, referenceGrantFrom{Group: derefString(f.Group), Kind: f.Kind, Namespace: f.Namespace})
+	}
+	for i, t := range wire.Spec.To {
+		if t.Kind == "" {
+			return referenceGrant{}, fmt.Errorf("ReferenceGrant %s/%s: to[%d] needs a kind", g.Namespace, g.Name, i)
+		}
+		g.To = append(g.To, referenceGrantTo{Group: derefString(t.Group), Kind: t.Kind, Name: t.Name})
+	}
+	return g, nil
+}
+
+func derefString(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}
+
 // decode converts an unstructured object's generic map into its typed shape
 // via a JSON round-trip, the same pattern core/pkg/networkpolicy's and
 // core/pkg/mapreconcile's adapters use to bridge a dynamic client's generic

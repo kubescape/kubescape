@@ -111,7 +111,7 @@ func TestRequestMirrorCrossNamespaceIsUncertain(t *testing.T) {
 		idx := NewIndex([]corev1.Service{svc("other", "shadow", corev1.ServiceTypeClusterIP)}, nil, []gatewayRoute{r}, nil, nil)
 		paths, unclear := idx.ServiceExposure(ref("other", "shadow"))
 		require.Empty(t, paths)
-		require.Equal(t, sampling == nil, unclear, "ReferenceGrant is not collected, so an active cross-namespace mirror cannot be declared safe")
+		require.Equal(t, sampling == nil, unclear, "no ReferenceGrants were supplied, so an active cross-namespace mirror cannot be declared safe")
 	}
 }
 
