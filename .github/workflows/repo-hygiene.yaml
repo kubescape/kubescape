@@ -10,10 +10,10 @@ on:
     - cron: '0 0 1 * *'
   pull_request:
     types: [opened, reopened, synchronize, ready_for_review]
-    # 00-pr-scanner.yaml skips a PR whose every file matches its paths-ignore
-    # list, and ".github/dependabot.yaml" matches two entries there ("**.yaml"
-    # and ".github/*"). A PR touching only that file therefore runs no checks
-    # at all, which is how an invalid config disabled Dependabot for three
+    # 00-pr-scanner.yaml skips code checks when every changed file matches its
+    # skip patterns, and ".github/dependabot.yaml" matches both "**/*.yaml"
+    # and ".github/*". Such a PR needs configuration validation here. Before
+    # this workflow existed, an invalid config disabled Dependabot for three
     # months. This workflow uses `paths` - an allow-list - to cover exactly the
     # blind spot the other workflow's deny-list leaves open.
     # security-insights.yml sits at the repository root and matches the
@@ -36,6 +36,8 @@ on:
     # documentation drifted into a different one.
     paths:
       - ".github/**"
+      - "docs/README.md"
+      - "docs/security/self-assessment.md"
       - "internal/ghworkflows/**"
       - "security-insights.yml"
       - "SECURITY-INSIGHTS.yml"
