@@ -164,9 +164,9 @@ type gatewayRouteRule struct {
 // backendRef names a Service a route rule sends traffic to. Namespace
 // defaults to the route's own namespace when nil, same as parentRef --
 // Gateway API does not support a backendRef reaching into another
-// namespace without a ReferenceGrant, which this package does not model
-// (see AnalyzeExposure's doc comment). Group and Kind default to a
-// core-group Service when absent; anything else names a non-Service
+// namespace without a ReferenceGrant, which Index evaluates when it is
+// given the cluster's grants (see WithReferenceGrants). Group and Kind
+// default to a core-group Service when absent; anything else names a non-Service
 // backend (e.g. a multicluster ServiceImport) that this package does not
 // model as a Service exposure path, however closely its name matches one.
 type backendRef struct {
@@ -250,4 +250,76 @@ const (
 type routeNamespaces struct {
 	From     *fromNamespaces
 	Selector *metav1.LabelSelector
+}
+
+// referenceGrant is a minimal local mirror of Gateway API's ReferenceGrant
+// (gateway.networking.k8s.io, served as v1 since Gateway API v1.5 and as
+// v1beta1 before that with an identical spec) -- only what authorizing a
+// route's cross-namespace Service backendRef needs.
+//
+// A grant lives in the namespace of the resources it makes referenceable and
+// says which kinds, from which namespaces, may reference which kinds there.
+type referenceGrant struct {
+	// Namespace is the grant's own namespace, which is the namespace of every
+	// resource it authorizes references to. ReferenceGrantTo has no namespace.
+	Namespace string
+	Name      string
+	From      []referenceGrantFrom
+	To        []referenceGrantTo
+}
+
+// referenceGrantFrom is one trusted source of references.
+type referenceGrantFrom struct {
+	// Group is the referrer's API group. The Gateway API spec says an empty
+	// group means the Kubernetes core group, so "" does not name a route.
+	Group     string
+	Kind      string
+	Namespace string
+}
+
+// referenceGrantTo is one kind of resource that may be referenced.
+type referenceGrantTo struct {
+	// Group is the referent's API group; "" is the core group, where Service lives.
+	Group string
+	Kind  string
+	// Name is nil or empty when the entry covers every resource of Group and
+	// Kind in the grant's namespace.
+	Name *string
+}
+
+// routeReferrer identifies the route a cross-namespace reference comes from.
+type routeReferrer struct {
+	Kind      string
+	Namespace string
+}
+
+// permitsService reports whether the grant authorizes a route, identified by
+// its kind and namespace, to reference the core-group Service target. Per the
+// Gateway API spec, the entries of From are alternatives and so are the
+// entries of To, so a grant authorizes any From entry together with any To
+// entry; separate grants add to one another and are evaluated one by one by
+// the caller. Group, kind and namespace are compared exactly.
+func (g referenceGrant) permitsService(from routeReferrer, target ServiceRef) bool {
+	if g.Namespace != target.Namespace {
+		return false
+	}
+	fromMatches := false
+	for _, f := range g.From {
+		if f.Group == gatewayAPIGroup && f.Kind == from.Kind && f.Namespace == from.Namespace {
+			fromMatches = true
+			break
+		}
+	}
+	if !fromMatches {
+		return false
+	}
+	for _, t := range g.To {
+		if t.Group != "" || t.Kind != "Service" {
+			continue
+		}
+		if t.Name == nil || *t.Name == "" || *t.Name == target.Name {
+			return true
+		}
+	}
+	return false
 }
