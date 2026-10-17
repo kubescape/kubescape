@@ -1115,13 +1115,22 @@ func (h *FixHandler) PrepareHelmSuggestions(ctx context.Context) []HelmFixSugges
 			continue
 		}
 
+		allowedBasePath := ""
+		var helmOpts cautils.HelmValueOptions
+		if h.fixInfo != nil {
+			allowedBasePath = h.fixInfo.BasePath
+			helmOpts = h.fixInfo.HelmValueOptions
+		}
+
 		suggestions = append(suggestions, HelmFixSuggestion{
-			Resource:     resourceObj,
-			ChartPath:    resourceObj.Source.HelmPath,
-			ChartName:    resourceObj.Source.HelmChartName,
-			TemplateFile: resourceObj.Source.HelmTemplateFile,
-			ValuesPaths:  resourceObj.Source.HelmValuesPaths,
-			FixPaths:     fixPaths,
+			Resource:         resourceObj,
+			ChartPath:        resourceObj.Source.HelmPath,
+			ChartName:        resourceObj.Source.HelmChartName,
+			TemplateFile:     resourceObj.Source.HelmTemplateFile,
+			ValuesPaths:      resourceObj.Source.HelmValuesPaths,
+			FixPaths:         fixPaths,
+			AllowedBasePath:  allowedBasePath,
+			HelmValueOptions: helmOpts,
 		})
 	}
 	return suggestions
@@ -1137,6 +1146,17 @@ func (h *FixHandler) PrintHelmSuggestions(suggestions []HelmFixSuggestion) {
 	}
 	var sb strings.Builder
 	sb.WriteString("\nHelm-rendered resources cannot be patched in place. Suggested values.yaml edits:\n\n")
+
+	var hasContainerWorkload bool
+	for _, s := range suggestions {
+		if s.Resource != nil && len(getContainersFromObj(s.Resource.GetObject())) > 0 {
+			hasContainerWorkload = true
+			break
+		}
+	}
+	if hasContainerWorkload {
+		sb.WriteString("(Note: Kustomize patch generation via --output-kustomize declines container resources from ordinary scan reports because environment configuration is redacted and programmatic scan-time provenance is not supplied through the ordinary producer.)\n\n")
+	}
 	for _, s := range suggestions {
 		fmt.Fprintf(&sb, "Chart: %s (%s)\n", s.ChartName, s.ChartPath)
 		if s.TemplateFile != "" {
