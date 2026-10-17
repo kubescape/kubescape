@@ -168,6 +168,112 @@ func TestAnalyzeRBACEscalationPaths_MissingNameReturnsError(t *testing.T) {
 		"namespace":    "prod",
 	}))
 	require.True(t, result.IsError)
+	te := parsePSSToolError(t, result)
+	require.Equal(t, ErrCodeInvalidArgument, te.Code)
+	require.Equal(t, "name", te.Details["argument"])
+}
+
+func TestAnalyzeRBACEscalationPaths_NullNameReturnsError(t *testing.T) {
+	ksServer := newRBACEscalationTestServer(t)
+	result := registeredToolResult(t, dispatchRegisteredTool(t, ksServer, "analyze_rbac_escalation_paths", map[string]any{
+		"subject_kind": "ServiceAccount",
+		"name":         nil,
+		"namespace":    "prod",
+	}))
+	require.True(t, result.IsError)
+	te := parsePSSToolError(t, result)
+	require.Equal(t, ErrCodeInvalidArgument, te.Code)
+	require.Equal(t, "name", te.Details["argument"])
+}
+
+func TestAnalyzeRBACEscalationPaths_NonStringNameReturnsError(t *testing.T) {
+	ksServer := newRBACEscalationTestServer(t)
+	result := registeredToolResult(t, dispatchRegisteredTool(t, ksServer, "analyze_rbac_escalation_paths", map[string]any{
+		"subject_kind": "ServiceAccount",
+		"name":         12345,
+		"namespace":    "prod",
+	}))
+	require.True(t, result.IsError)
+	te := parsePSSToolError(t, result)
+	require.Equal(t, ErrCodeInvalidArgument, te.Code)
+	require.Equal(t, "name", te.Details["argument"])
+}
+
+func TestAnalyzeRBACEscalationPaths_WhitespaceOnlyNameReturnsError(t *testing.T) {
+	ksServer := newRBACEscalationTestServer(t)
+	result := registeredToolResult(t, dispatchRegisteredTool(t, ksServer, "analyze_rbac_escalation_paths", map[string]any{
+		"subject_kind": "ServiceAccount",
+		"name":         "   ",
+		"namespace":    "prod",
+	}))
+	require.True(t, result.IsError)
+	te := parsePSSToolError(t, result)
+	require.Equal(t, ErrCodeInvalidArgument, te.Code)
+	require.Equal(t, "name", te.Details["argument"])
+}
+
+func TestAnalyzeRBACEscalationPaths_MissingSubjectKindReturnsError(t *testing.T) {
+	ksServer := newRBACEscalationTestServer(t)
+	result := registeredToolResult(t, dispatchRegisteredTool(t, ksServer, "analyze_rbac_escalation_paths", map[string]any{
+		"name":      "app",
+		"namespace": "prod",
+	}))
+	require.True(t, result.IsError)
+	te := parsePSSToolError(t, result)
+	require.Equal(t, ErrCodeInvalidArgument, te.Code)
+	require.Equal(t, "subject_kind", te.Details["argument"])
+}
+
+func TestAnalyzeRBACEscalationPaths_NullSubjectKindReturnsError(t *testing.T) {
+	ksServer := newRBACEscalationTestServer(t)
+	result := registeredToolResult(t, dispatchRegisteredTool(t, ksServer, "analyze_rbac_escalation_paths", map[string]any{
+		"subject_kind": nil,
+		"name":         "app",
+		"namespace":    "prod",
+	}))
+	require.True(t, result.IsError)
+	te := parsePSSToolError(t, result)
+	require.Equal(t, ErrCodeInvalidArgument, te.Code)
+	require.Equal(t, "subject_kind", te.Details["argument"])
+}
+
+func TestAnalyzeRBACEscalationPaths_NonStringSubjectKindReturnsError(t *testing.T) {
+	ksServer := newRBACEscalationTestServer(t)
+	result := registeredToolResult(t, dispatchRegisteredTool(t, ksServer, "analyze_rbac_escalation_paths", map[string]any{
+		"subject_kind": 12345,
+		"name":         "app",
+		"namespace":    "prod",
+	}))
+	require.True(t, result.IsError)
+	te := parsePSSToolError(t, result)
+	require.Equal(t, ErrCodeInvalidArgument, te.Code)
+	require.Equal(t, "subject_kind", te.Details["argument"])
+}
+
+func TestAnalyzeRBACEscalationPaths_WhitespaceOnlySubjectKindReturnsError(t *testing.T) {
+	ksServer := newRBACEscalationTestServer(t)
+	result := registeredToolResult(t, dispatchRegisteredTool(t, ksServer, "analyze_rbac_escalation_paths", map[string]any{
+		"subject_kind": "   ",
+		"name":         "app",
+		"namespace":    "prod",
+	}))
+	require.True(t, result.IsError)
+	te := parsePSSToolError(t, result)
+	require.Equal(t, ErrCodeInvalidArgument, te.Code)
+	require.Equal(t, "subject_kind", te.Details["argument"])
+}
+
+func TestAnalyzeRBACEscalationPaths_NonStringNamespaceReturnsError(t *testing.T) {
+	ksServer := newRBACEscalationTestServer(t)
+	result := registeredToolResult(t, dispatchRegisteredTool(t, ksServer, "analyze_rbac_escalation_paths", map[string]any{
+		"subject_kind": "User",
+		"name":         "alice",
+		"namespace":    12345,
+	}))
+	require.True(t, result.IsError)
+	te := parsePSSToolError(t, result)
+	require.Equal(t, ErrCodeInvalidArgument, te.Code)
+	require.Equal(t, "namespace", te.Details["argument"])
 }
 
 func TestAnalyzeRBACEscalationPaths_ServiceAccountWithoutNamespaceReturnsError(t *testing.T) {
@@ -177,6 +283,22 @@ func TestAnalyzeRBACEscalationPaths_ServiceAccountWithoutNamespaceReturnsError(t
 		"name":         "app",
 	}))
 	require.True(t, result.IsError)
+	te := parsePSSToolError(t, result)
+	require.Equal(t, ErrCodeInvalidArgument, te.Code)
+	require.Equal(t, "namespace", te.Details["argument"])
+}
+
+func TestAnalyzeRBACEscalationPaths_ServiceAccountWithNullNamespaceReturnsError(t *testing.T) {
+	ksServer := newRBACEscalationTestServer(t)
+	result := registeredToolResult(t, dispatchRegisteredTool(t, ksServer, "analyze_rbac_escalation_paths", map[string]any{
+		"subject_kind": "ServiceAccount",
+		"name":         "app",
+		"namespace":    nil,
+	}))
+	require.True(t, result.IsError)
+	te := parsePSSToolError(t, result)
+	require.Equal(t, ErrCodeInvalidArgument, te.Code)
+	require.Equal(t, "namespace", te.Details["argument"])
 }
 
 func TestAnalyzeRBACEscalationPaths_InvalidSubjectKindReturnsError(t *testing.T) {
@@ -186,6 +308,9 @@ func TestAnalyzeRBACEscalationPaths_InvalidSubjectKindReturnsError(t *testing.T)
 		"name":         "app",
 	}))
 	require.True(t, result.IsError)
+	te := parsePSSToolError(t, result)
+	require.Equal(t, ErrCodeInvalidArgument, te.Code)
+	require.Equal(t, "subject_kind", te.Details["argument"])
 }
 
 func TestAnalyzeRBACEscalationPaths_UserSubjectNeedsNoNamespace(t *testing.T) {

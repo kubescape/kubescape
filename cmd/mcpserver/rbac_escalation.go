@@ -51,12 +51,18 @@ func createRBACEscalationTools(ksServer *KubescapeMcpserver) {
 			args = map[string]any{}
 		}
 
-		subjectKindStr, _ := args["subject_kind"].(string)
-		name, ok := args["name"].(string)
-		if !ok || name == "" {
-			return mcpToolError(ErrCodeInvalidArgument, "name is required", map[string]any{"argument": "name"}), nil
+		subjectKindStr, toolErr := mcpRequiredStringArg(args, "subject_kind")
+		if toolErr != nil {
+			return toolErr, nil
 		}
-		namespace, _ := args["namespace"].(string)
+		name, toolErr := mcpRequiredStringArg(args, "name")
+		if toolErr != nil {
+			return toolErr, nil
+		}
+		namespace, toolErr := mcpStringArg(args, "namespace")
+		if toolErr != nil {
+			return toolErr, nil
+		}
 
 		var kind rbacgraph.SubjectKind
 		switch subjectKindStr {
