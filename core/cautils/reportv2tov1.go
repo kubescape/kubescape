@@ -123,7 +123,7 @@ func controlReportV2ToV1(opaSessionObj *OPASessionObj, frameworkName string, con
 					}
 
 					rulev1 := rulesv1[rulev2.GetName()]
-					status := rulev2.GetStatus(nil)
+					status := RuleStatus(&opaSessionObj.Report.SummaryDetails, crv2.GetID(), &rulev2)
 
 					if status.IsFailed() {
 

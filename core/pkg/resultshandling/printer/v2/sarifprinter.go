@@ -438,7 +438,7 @@ func resolveReviewPathLocations(opaSessionObj *cautils.OPASessionObj, locationRe
 
 	var locations map[string]locationresolver.Location
 	for i := range ac.ResourceAssociatedRules {
-		if !ac.ResourceAssociatedRules[i].GetStatus(nil).IsFailed() {
+		if !cautils.RuleStatus(&opaSessionObj.Report.SummaryDetails, ac.GetID(), &ac.ResourceAssociatedRules[i]).IsFailed() {
 			continue
 		}
 		for _, p := range ac.ResourceAssociatedRules[i].Paths {
@@ -725,7 +725,7 @@ func (sp *SARIFPrinter) writeConfigurationSARIF(ctx context.Context, w io.Writer
 	basePath := getBasePathFromMetadata(opaSessionObj)
 	failed := make([]scannedResource, 0, len(opaSessionObj.ResourcesResult))
 	for resourceID, result := range opaSessionObj.ResourcesResult {
-		if !result.GetStatus(nil).IsFailed() {
+		if !cautils.ResourceStatus(&opaSessionObj.Report.SummaryDetails, &result).IsFailed() {
 			continue
 		}
 
@@ -753,7 +753,7 @@ func (sp *SARIFPrinter) writeConfigurationSARIF(ctx context.Context, w io.Writer
 	ruleIndexes := make(map[string]int)
 	for _, resource := range ordered {
 		for _, ac := range sortedSARIFControls(opaSessionObj.ResourcesResult[resource.resourceID].AssociatedControls) {
-			if !ac.GetStatus(nil).IsFailed() {
+			if !cautils.ControlStatus(&opaSessionObj.Report.SummaryDetails, &ac).IsFailed() {
 				continue
 			}
 			ctl := opaSessionObj.Report.SummaryDetails.Controls.GetControl(reportsummary.EControlCriteriaID, ac.GetID())
@@ -820,7 +820,7 @@ func (sp *SARIFPrinter) writeConfigurationSARIF(ctx context.Context, w io.Writer
 			}
 			ac := toPin
 
-			if ac.GetStatus(nil).IsFailed() {
+			if cautils.ControlStatus(&opaSessionObj.Report.SummaryDetails, &ac).IsFailed() {
 				ctl := opaSessionObj.Report.SummaryDetails.Controls.GetControl(reportsummary.EControlCriteriaID, ac.GetID())
 				if ctl == nil {
 					logger.L().Debug("control not found in summary details, skipping", helpers.String("controlID", ac.GetID()))
@@ -1112,7 +1112,7 @@ func collectFixes(ctx context.Context, cache *fixReportCache, result *sarif.Resu
 	}
 
 	for _, rule := range ac.ResourceAssociatedRules {
-		if !rule.GetStatus(nil).IsFailed() {
+		if !cautils.RuleStatus(&opaSessionObj.Report.SummaryDetails, ac.GetID(), &rule).IsFailed() {
 			continue
 		}
 
