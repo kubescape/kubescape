@@ -2796,7 +2796,7 @@ spec:
 
 func TestReview4034SourcePathNormalizedOnRenderedResource(t *testing.T) {
 	chartDir := t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "Chart.yaml"), []byte("apiVersion: v2\nname: test-svc\nversion: 0.1.0\n"), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "Chart.yaml"), []byte("apiVersion: v2\nname: test-svc\nversion: 0.1.0\n"), 0600))
 	templatesDir := filepath.Join(chartDir, "templates")
 	require.NoError(t, os.MkdirAll(templatesDir, 0755))
 
@@ -2809,7 +2809,7 @@ spec:
   - port: 80
   externalTrafficPolicy: Cluster
 `
-	require.NoError(t, os.WriteFile(filepath.Join(templatesDir, "service.yaml"), []byte(svcYaml), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(templatesDir, "service.yaml"), []byte(svcYaml), 0600))
 
 	// The scan report retains sourcePath and path, while the re-rendered base removes them.
 	scannedSvc := &reporthandling.Resource{
@@ -2855,7 +2855,7 @@ spec:
 
 func TestReview4034NamespaceScopedTargetsDoNotOverwriteProdFix(t *testing.T) {
 	chartDir := t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "Chart.yaml"), []byte("apiVersion: v2\nname: test-svc\nversion: 0.1.0\n"), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "Chart.yaml"), []byte("apiVersion: v2\nname: test-svc\nversion: 0.1.0\n"), 0600))
 	templatesDir := filepath.Join(chartDir, "templates")
 	require.NoError(t, os.MkdirAll(templatesDir, 0755))
 
@@ -2867,7 +2867,7 @@ metadata:
 spec:
   externalTrafficPolicy: Cluster
 `
-	require.NoError(t, os.WriteFile(filepath.Join(templatesDir, "svc-prod.yaml"), []byte(svcProdYaml), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(templatesDir, "svc-prod.yaml"), []byte(svcProdYaml), 0600))
 
 	svcNoNsYaml := `apiVersion: v1
 kind: Service
@@ -2876,7 +2876,7 @@ metadata:
 spec:
   externalTrafficPolicy: Cluster
 `
-	require.NoError(t, os.WriteFile(filepath.Join(templatesDir, "svc-nons.yaml"), []byte(svcNoNsYaml), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(templatesDir, "svc-nons.yaml"), []byte(svcNoNsYaml), 0600))
 
 	prodSvc := &reporthandling.Resource{
 		Object: map[string]interface{}{
@@ -2966,7 +2966,7 @@ metadata:
 spec:
   externalTrafficPolicy: Cluster
 `
-	require.NoError(t, os.WriteFile(filepath.Join(templatesDir, "svc-default.yaml"), []byte(svcDefaultYaml), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(templatesDir, "svc-default.yaml"), []byte(svcDefaultYaml), 0600))
 
 	explicitDefaultSvc := &reporthandling.Resource{
 		Object: map[string]interface{}{
@@ -3002,7 +3002,7 @@ spec:
 
 func TestReview4034RejectsAdditionalNonRedactedFieldsFromChartDrift(t *testing.T) {
 	chartDir := t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "Chart.yaml"), []byte("apiVersion: v2\nname: test-svc\nversion: 0.1.0\n"), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "Chart.yaml"), []byte("apiVersion: v2\nname: test-svc\nversion: 0.1.0\n"), 0600))
 	templatesDir := filepath.Join(chartDir, "templates")
 	require.NoError(t, os.MkdirAll(templatesDir, 0755))
 
@@ -3018,7 +3018,7 @@ spec:
   - 198.51.100.1
   externalTrafficPolicy: Cluster
 `
-	require.NoError(t, os.WriteFile(filepath.Join(templatesDir, "service.yaml"), []byte(svcDriftedYaml), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(templatesDir, "service.yaml"), []byte(svcDriftedYaml), 0600))
 
 	// Scanned resource did NOT have externalIPs
 	scannedSvc := &reporthandling.Resource{
