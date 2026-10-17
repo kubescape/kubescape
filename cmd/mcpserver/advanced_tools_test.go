@@ -462,3 +462,65 @@ func TestDryRunRemediation_Success(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, "true", labels["remediated"])
 }
+
+func TestScanResourceSlice_MarshalError(t *testing.T) {
+	origMarshal := jsonMarshal
+	t.Cleanup(func() { jsonMarshal = origMarshal })
+	jsonMarshal = func(any) ([]byte, error) {
+		return nil, errors.New("simulated marshal error")
+	}
+
+	listKinds := map[schema.GroupVersionResource]string{
+		podGVR: "PodList",
+	}
+	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), listKinds)
+	ksServer := newTestMCPServerWithK8s(&k8sinterface.KubernetesApi{DynamicClient: dyn})
+
+	result := registeredToolResult(t, dispatchRegisteredTool(t, ksServer, "scan_resource_slice", map[string]any{
+		"resource_kind": "pods",
+	}))
+	require.True(t, result.IsError)
+
+	var toolErr ToolError
+	require.NoError(t, json.Unmarshal([]byte(toolResultText(t, result)), &toolErr))
+	require.Equal(t, ErrCodeMarshalError, toolErr.Code)
+	require.Contains(t, toolErr.Message, "failed to marshal result: simulated marshal error")
+}
+
+func TestDryRunRemediation_MarshalError(t *testing.T) {
+	origMarshal := jsonMarshal
+	t.Cleanup(func() { jsonMarshal = origMarshal })
+	jsonMarshal = func(any) ([]byte, error) {
+		return nil, errors.New("simulated marshal error")
+	}
+
+	pod := &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "v1",
+			"kind":       "Pod",
+			"metadata": map[string]any{
+				"name":      "nginx-pod",
+				"namespace": "default",
+			},
+		},
+	}
+	patchJSON := `{"metadata":{"labels":{"remediated":"true"}}}`
+	dyn := dynamicfake.NewSimpleDynamicClient(runtime.NewScheme(), pod)
+	dyn.PrependReactor("patch", "pods", func(action clienttesting.Action) (bool, runtime.Object, error) {
+		return true, pod.DeepCopy(), nil
+	})
+	ksServer := newTestMCPServerWithK8s(&k8sinterface.KubernetesApi{DynamicClient: dyn})
+
+	result := registeredToolResult(t, dispatchRegisteredTool(t, ksServer, "dry_run_remediation", map[string]any{
+		"resource_kind": "pods",
+		"resource_name": "nginx-pod",
+		"namespace":     "default",
+		"patch_json":    patchJSON,
+	}))
+	require.True(t, result.IsError)
+
+	var toolErr ToolError
+	require.NoError(t, json.Unmarshal([]byte(toolResultText(t, result)), &toolErr))
+	require.Equal(t, ErrCodeMarshalError, toolErr.Code)
+	require.Contains(t, toolErr.Message, "failed to marshal result: simulated marshal error")
+}

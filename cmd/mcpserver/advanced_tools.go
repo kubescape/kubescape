@@ -126,7 +126,10 @@ func createAdvancedTools(ksServer *KubescapeMcpserver) {
 			"count":     len(simplifiedItems),
 		}
 
-		resBytes, _ := json.Marshal(result)
+		resBytes, err := jsonMarshal(result)
+		if err != nil {
+			return mcpToolError(ErrCodeMarshalError, fmt.Sprintf("failed to marshal result: %v", err), nil), nil
+		}
 		return mcp.NewToolResultText(string(resBytes)), nil
 	})
 
@@ -276,7 +279,10 @@ func createAdvancedTools(ksServer *KubescapeMcpserver) {
 			return mcpToolError(ErrCodeK8sClientError, fmt.Sprintf("dry-run patch failed: %v", err), map[string]any{"kind": kind, "name": name, "namespace": namespace}), nil
 		}
 
-		resBytes, _ := json.Marshal(patchedObj.Object)
+		resBytes, err := jsonMarshal(patchedObj.Object)
+		if err != nil {
+			return mcpToolError(ErrCodeMarshalError, fmt.Sprintf("failed to marshal result: %v", err), nil), nil
+		}
 		return mcp.NewToolResultText(string(resBytes)), nil
 	})
 }
