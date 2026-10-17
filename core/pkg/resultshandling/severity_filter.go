@@ -3,6 +3,7 @@ package resultshandling
 import (
 	"strings"
 
+	"github.com/anchore/grype/grype/match"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	helpersv1 "github.com/kubescape/opa-utils/reporthandling/helpers/v1"
@@ -177,4 +178,39 @@ func severityRankFromString(severity string) int {
 	default:
 		return apis.SeverityUnknown
 	}
+}
+
+// filterImageScanDataBySeverity creates a shallow copy of ImageScanData with its
+// matches filtered to the [minSeverity, maxSeverity] range, preserving the original
+// rh.ImageScanData slice and matches intact for exit-threshold checks.
+func filterImageScanDataBySeverity(data []cautils.ImageScanData, minSeverity, maxSeverity string) []cautils.ImageScanData {
+	if len(data) == 0 || (minSeverity == "" && maxSeverity == "") {
+		return data
+	}
+
+	minRank := 0
+	if minSeverity != "" {
+		minRank = severityRankFromString(minSeverity)
+	}
+	maxRank := apis.SeverityCritical
+	if maxSeverity != "" {
+		maxRank = severityRankFromString(maxSeverity)
+	}
+
+	filtered := make([]cautils.ImageScanData, len(data))
+	for i, item := range data {
+		filtered[i] = item
+		filteredMatches := match.NewMatches()
+		for _, m := range item.Matches.Sorted() {
+			rank := 0
+			if m.Vulnerability.Metadata != nil {
+				rank = severityRankFromString(m.Vulnerability.Metadata.Severity)
+			}
+			if rank >= minRank && rank <= maxRank {
+				filteredMatches.Add(m)
+			}
+		}
+		filtered[i].Matches = filteredMatches
+	}
+	return filtered
 }

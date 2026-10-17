@@ -547,12 +547,16 @@ func extractCVEs(matches match.Matches, image string, vexStatuses map[string]cau
 	return CVEs
 }
 
-// buildImageScanSummary aggregates per-image scan data into the summary every
+// BuildImageScanSummary aggregates per-image scan data into the summary every
 // output format consumes. The image list is deduplicated with a set so this is
 // O(N) in the number of images; the printer-local copies this replaces used
 // slices.Contains and were O(N^2) on large image sets.
-func buildImageScanSummary(imageScanData []cautils.ImageScanData) *imageprinter.ImageScanSummary {
+func BuildImageScanSummary(imageScanData []cautils.ImageScanData) *imageprinter.ImageScanSummary {
 	return buildImageScanSummaryWithTarget(imageScanData, true)
+}
+
+func buildImageScanSummary(imageScanData []cautils.ImageScanData) *imageprinter.ImageScanSummary {
+	return BuildImageScanSummary(imageScanData)
 }
 
 // buildMachineImageScanSummary preserves the historical image reference used

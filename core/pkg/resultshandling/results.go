@@ -345,19 +345,38 @@ func (rh *ResultsHandler) HandleResults(ctx context.Context, scanInfo *cautils.S
 	// Deliver the same summary seen by output printers. Delivery is deliberately
 	// best-effort: a notification endpoint must never alter scan results or exit
 	// status.
-	if len(scanInfo.NotifyURLs) > 0 && rh.ScanData != nil && rh.ScanData.Report != nil {
-		client := notification.NewClient(notification.DefaultTimeout)
-		for _, endpoint := range scanInfo.NotifyURLs {
-			payload, err := notification.MarshalPayload(endpoint, &rh.ScanData.Report.SummaryDetails)
-			if err != nil {
-				logger.L().Ctx(ctx).Warning("Failed to marshal scan summary for notification", helpers.String("target", notification.SafeTarget(endpoint)), helpers.Error(err))
-				continue
+	if len(scanInfo.NotifyURLs) > 0 {
+		if rh.ScanData != nil && rh.ScanData.Report != nil {
+			client := notification.NewClient(notification.DefaultTimeout)
+			for _, endpoint := range scanInfo.NotifyURLs {
+				payload, err := notification.MarshalPayload(endpoint, &rh.ScanData.Report.SummaryDetails)
+				if err != nil {
+					logger.L().Ctx(ctx).Warning("Failed to marshal scan summary for notification", helpers.String("target", notification.SafeTarget(endpoint)), helpers.Error(err))
+					continue
+				}
+				requestCtx, cancel := context.WithTimeout(ctx, notification.DefaultTimeout)
+				sendErr := notification.Send(requestCtx, client, endpoint, payload)
+				cancel()
+				if sendErr != nil {
+					logger.L().Ctx(ctx).Warning("Failed to deliver scan notification", helpers.String("target", notification.SafeTarget(endpoint)), helpers.Error(sendErr))
+				}
 			}
-			requestCtx, cancel := context.WithTimeout(ctx, notification.DefaultTimeout)
-			sendErr := notification.Send(requestCtx, client, endpoint, payload)
-			cancel()
-			if sendErr != nil {
-				logger.L().Ctx(ctx).Warning("Failed to deliver scan notification", helpers.String("target", notification.SafeTarget(endpoint)), helpers.Error(sendErr))
+		} else if len(rh.ImageScanData) > 0 {
+			filteredImageData := filterImageScanDataBySeverity(rh.ImageScanData, scanInfo.MinSeverity, scanInfo.MaxSeverity)
+			imageSummary := printerv2.BuildImageScanSummary(filteredImageData)
+			client := notification.NewClient(notification.DefaultTimeout)
+			for _, endpoint := range scanInfo.NotifyURLs {
+				payload, err := notification.MarshalImagePayload(endpoint, imageSummary)
+				if err != nil {
+					logger.L().Ctx(ctx).Warning("Failed to marshal image scan summary for notification", helpers.String("target", notification.SafeTarget(endpoint)), helpers.Error(err))
+					continue
+				}
+				requestCtx, cancel := context.WithTimeout(ctx, notification.DefaultTimeout)
+				sendErr := notification.Send(requestCtx, client, endpoint, payload)
+				cancel()
+				if sendErr != nil {
+					logger.L().Ctx(ctx).Warning("Failed to deliver image scan notification", helpers.String("target", notification.SafeTarget(endpoint)), helpers.Error(sendErr))
+				}
 			}
 		}
 	}
