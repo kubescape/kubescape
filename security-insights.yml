@@ -1,7 +1,7 @@
 header:
   schema-version: 2.2.0
-  last-updated: '2026-10-20'
-  last-reviewed: '2026-10-07'
+  last-updated: '2026-10-21'
+  last-reviewed: '2026-10-21'
   url: https://raw.githubusercontent.com/kubescape/kubescape/master/security-insights.yml
 
 project:
@@ -34,6 +34,7 @@ project:
       name: Kubescape maintainers
       email: cncf-kubescape-maintainers@lists.cncf.io
       primary: true
+    comment: "Report vulnerabilities through GitHub private vulnerability reporting: https://github.com/kubescape/kubescape/security/advisories/new"
   documentation:
     design: https://github.com/kubescape/kubescape/blob/master/docs/architecture.md
     detailed-guide: https://kubescape.io/docs/
