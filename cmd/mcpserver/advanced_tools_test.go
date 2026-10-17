@@ -55,7 +55,7 @@ func TestScanResourceSlice_EmptyResultMarshalsAsEmptyArray(t *testing.T) {
 
 // TestScanResourceSlice_UnsupportedKindReturnsError guards against a silent
 // fallback to core/v1 for resource kinds the tool does not explicitly map
-// (e.g. "jobs"). Falling back would send a request to the wrong API group and
+// (e.g. "services"). Falling back would send a request to the wrong API group and
 // surface the cluster's "resource not found" rejection as an opaque list
 // failure, indistinguishable from a connectivity problem.
 func TestScanResourceSlice_UnsupportedKindReturnsError(t *testing.T) {
@@ -63,18 +63,21 @@ func TestScanResourceSlice_UnsupportedKindReturnsError(t *testing.T) {
 	ksServer := newTestMCPServerWithK8s(&k8sinterface.KubernetesApi{DynamicClient: dyn})
 
 	result := registeredToolResult(t, dispatchRegisteredTool(t, ksServer, "scan_resource_slice", map[string]any{
-		"resource_kind": "jobs",
+		"resource_kind": "services",
 	}))
 	require.True(t, result.IsError)
 	var toolErr ToolError
 	require.NoError(t, json.Unmarshal([]byte(toolResultText(t, result)), &toolErr))
 	require.Equal(t, ErrCodeUnsupportedResource, toolErr.Code)
-	require.Contains(t, toolErr.Message, `unsupported resource kind "jobs"`)
+	require.Contains(t, toolErr.Message, `unsupported resource kind "services"`)
 	require.Contains(t, toolErr.Message, "pods")
 	require.Contains(t, toolErr.Message, "deployments")
 	require.Contains(t, toolErr.Message, "daemonsets")
 	require.Contains(t, toolErr.Message, "statefulsets")
-	require.Equal(t, "jobs", toolErr.Details["kind"])
+	require.Contains(t, toolErr.Message, "replicasets")
+	require.Contains(t, toolErr.Message, "jobs")
+	require.Contains(t, toolErr.Message, "cronjobs")
+	require.Equal(t, "services", toolErr.Details["kind"])
 }
 
 // TestScanResourceSlice_UnsupportedKindReturnsErrorWithoutClusterConfig
@@ -98,13 +101,13 @@ func TestScanResourceSlice_UnsupportedKindReturnsErrorWithoutClusterConfig(t *te
 	createAdvancedTools(ksServer)
 
 	result := registeredToolResult(t, dispatchRegisteredTool(t, ksServer, "scan_resource_slice", map[string]any{
-		"resource_kind": "jobs",
+		"resource_kind": "services",
 	}))
 	require.True(t, result.IsError)
 	var toolErr ToolError
 	require.NoError(t, json.Unmarshal([]byte(toolResultText(t, result)), &toolErr))
 	require.Equal(t, ErrCodeUnsupportedResource, toolErr.Code)
-	require.Contains(t, toolErr.Message, `unsupported resource kind "jobs"`)
+	require.Contains(t, toolErr.Message, `unsupported resource kind "services"`)
 }
 
 func TestScanResourceSlice_ArgumentValidation(t *testing.T) {
@@ -461,4 +464,121 @@ func TestDryRunRemediation_Success(t *testing.T) {
 	labels, ok := output["metadata"].(map[string]any)["labels"].(map[string]any)
 	require.True(t, ok)
 	require.Equal(t, "true", labels["remediated"])
+}
+
+func TestScanResourceSlice_SupportedWorkloadKinds(t *testing.T) {
+	listKinds := map[schema.GroupVersionResource]string{
+		podGVR:         "PodList",
+		deploymentGVR:  "DeploymentList",
+		daemonSetGVR:   "DaemonSetList",
+		statefulSetGVR: "StatefulSetList",
+		replicaSetGVR:  "ReplicaSetList",
+		jobGVR:         "JobList",
+		cronJobGVR:     "CronJobList",
+	}
+
+	testCases := []struct {
+		kind string
+	}{
+		{kind: "pods"},
+		{kind: "pod"},
+		{kind: "deployments"},
+		{kind: "deployment"},
+		{kind: "daemonsets"},
+		{kind: "daemonset"},
+		{kind: "statefulsets"},
+		{kind: "statefulset"},
+		{kind: "replicasets"},
+		{kind: "replicaset"},
+		{kind: "jobs"},
+		{kind: "job"},
+		{kind: "cronjobs"},
+		{kind: "cronjob"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.kind, func(t *testing.T) {
+			dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), listKinds)
+			ksServer := newTestMCPServerWithK8s(&k8sinterface.KubernetesApi{DynamicClient: dyn})
+
+			result := registeredToolResult(t, dispatchRegisteredTool(t, ksServer, "scan_resource_slice", map[string]any{
+				"resource_kind": tc.kind,
+			}))
+			require.False(t, result.IsError)
+			raw := toolResultText(t, result)
+			require.JSONEq(t, `{"resources":[],"continue":"","count":0}`, raw)
+		})
+	}
+}
+
+func TestDryRunRemediation_SupportedWorkloadKinds(t *testing.T) {
+	testCases := []struct {
+		kind         string
+		resourceName string
+		expectedKind string
+		gvrResource  string
+	}{
+		{kind: "pods", resourceName: "test-pod", expectedKind: "Pod", gvrResource: "pods"},
+		{kind: "pod", resourceName: "test-pod", expectedKind: "Pod", gvrResource: "pods"},
+		{kind: "deployments", resourceName: "test-deploy", expectedKind: "Deployment", gvrResource: "deployments"},
+		{kind: "deployment", resourceName: "test-deploy", expectedKind: "Deployment", gvrResource: "deployments"},
+		{kind: "daemonsets", resourceName: "test-daemon", expectedKind: "DaemonSet", gvrResource: "daemonsets"},
+		{kind: "daemonset", resourceName: "test-daemon", expectedKind: "DaemonSet", gvrResource: "daemonsets"},
+		{kind: "statefulsets", resourceName: "test-stateful", expectedKind: "StatefulSet", gvrResource: "statefulsets"},
+		{kind: "statefulset", resourceName: "test-stateful", expectedKind: "StatefulSet", gvrResource: "statefulsets"},
+		{kind: "replicasets", resourceName: "test-rs", expectedKind: "ReplicaSet", gvrResource: "replicasets"},
+		{kind: "replicaset", resourceName: "test-rs", expectedKind: "ReplicaSet", gvrResource: "replicasets"},
+		{kind: "jobs", resourceName: "test-job", expectedKind: "Job", gvrResource: "jobs"},
+		{kind: "job", resourceName: "test-job", expectedKind: "Job", gvrResource: "jobs"},
+		{kind: "cronjobs", resourceName: "test-cj", expectedKind: "CronJob", gvrResource: "cronjobs"},
+		{kind: "cronjob", resourceName: "test-cj", expectedKind: "CronJob", gvrResource: "cronjobs"},
+	}
+
+	patchJSON := `{"metadata":{"labels":{"remediated":"true"}}}`
+
+	for _, tc := range testCases {
+		t.Run(tc.kind, func(t *testing.T) {
+			obj := &unstructured.Unstructured{
+				Object: map[string]any{
+					"apiVersion": "v1",
+					"kind":       tc.expectedKind,
+					"metadata": map[string]any{
+						"name":      tc.resourceName,
+						"namespace": "default",
+					},
+				},
+			}
+
+			dyn := dynamicfake.NewSimpleDynamicClient(runtime.NewScheme(), obj)
+			dyn.PrependReactor("patch", tc.gvrResource, func(action clienttesting.Action) (bool, runtime.Object, error) {
+				patchAction, ok := action.(clienttesting.PatchActionImpl)
+				require.True(t, ok)
+				require.Equal(t, types.StrategicMergePatchType, patchAction.GetPatchType())
+				require.Equal(t, tc.resourceName, patchAction.GetName())
+				require.Equal(t, "default", patchAction.GetNamespace())
+				require.Equal(t, []string{metav1.DryRunAll}, patchAction.GetPatchOptions().DryRun)
+				require.JSONEq(t, patchJSON, string(patchAction.GetPatch()))
+				patched := obj.DeepCopy()
+				_ = unstructured.SetNestedField(patched.Object, "true", "metadata", "labels", "remediated")
+				return true, patched, nil
+			})
+
+			ksServer := newTestMCPServerWithK8s(&k8sinterface.KubernetesApi{DynamicClient: dyn})
+
+			result := registeredToolResult(t, dispatchRegisteredTool(t, ksServer, "dry_run_remediation", map[string]any{
+				"resource_kind": tc.kind,
+				"resource_name": tc.resourceName,
+				"namespace":     "default",
+				"patch_json":    patchJSON,
+			}))
+			require.False(t, result.IsError)
+
+			var output map[string]any
+			require.NoError(t, json.Unmarshal([]byte(toolResultText(t, result)), &output))
+			require.Equal(t, tc.expectedKind, output["kind"])
+			labels, ok := output["metadata"].(map[string]any)["labels"].(map[string]any)
+			require.True(t, ok)
+			require.Equal(t, "true", labels["remediated"])
+		})
+	}
 }
