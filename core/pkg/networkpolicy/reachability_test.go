@@ -428,6 +428,86 @@ func TestReaches_EmptyNamespaceSelectorMatchesEverythingEvenIfUncollected(t *tes
 	}
 }
 
+func TestReaches_EmptyPodSelectorPeerSelectsEveryPodInItsNamespaces(t *testing.T) {
+	// A present but empty podSelector selects every pod: in the policy's own
+	// namespace when it stands alone, and in each namespace the
+	// namespaceSelector selects when the two are combined. Each policy
+	// selects a server of its own, so their rules do not OR together.
+	sameNamespace := policy("ns", "allow-from-own-namespace", selector("app", "own-ns-server"),
+		[]networkingv1.PolicyType{networkingv1.PolicyTypeIngress},
+		[]networkingv1.NetworkPolicyIngressRule{
+			{From: []networkingv1.NetworkPolicyPeer{{PodSelector: &metav1.LabelSelector{}}}},
+		}, nil)
+	prodNamespaces := policy("ns", "allow-from-prod-namespaces", selector("app", "prod-server"),
+		[]networkingv1.PolicyType{networkingv1.PolicyTypeIngress},
+		[]networkingv1.NetworkPolicyIngressRule{
+			{From: []networkingv1.NetworkPolicyPeer{{
+				NamespaceSelector: namespaceSelectorPtr(selector("env", "prod")),
+				PodSelector:       &metav1.LabelSelector{},
+			}}},
+		}, nil)
+	everyNamespace := policy("ns", "allow-from-every-namespace", selector("app", "open-server"),
+		[]networkingv1.PolicyType{networkingv1.PolicyTypeIngress},
+		[]networkingv1.NetworkPolicyIngressRule{
+			{From: []networkingv1.NetworkPolicyPeer{{
+				NamespaceSelector: &metav1.LabelSelector{},
+				PodSelector:       &metav1.LabelSelector{},
+			}}},
+		}, nil)
+	toOwnNamespace := policy("ns", "allow-to-own-namespace", selector("app", "client"),
+		[]networkingv1.PolicyType{networkingv1.PolicyTypeEgress},
+		nil,
+		[]networkingv1.NetworkPolicyEgressRule{
+			{To: []networkingv1.NetworkPolicyPeer{{PodSelector: &metav1.LabelSelector{}}}},
+		})
+	idx, _ := NewIndex([]*networkingv1.NetworkPolicy{sameNamespace, prodNamespaces, everyNamespace, toOwnNamespace}, []NamespaceInfo{
+		{Name: "ns"},
+		{Name: "prod-ns", Labels: map[string]string{"env": "prod"}},
+		{Name: "dev-ns", Labels: map[string]string{"env": "dev"}},
+	})
+
+	ownNSServer := Endpoint{Namespace: "ns", Name: "own-ns-server", Labels: map[string]string{"app": "own-ns-server"}}
+	prodServer := Endpoint{Namespace: "ns", Name: "prod-server", Labels: map[string]string{"app": "prod-server"}}
+	openServer := Endpoint{Namespace: "ns", Name: "open-server", Labels: map[string]string{"app": "open-server"}}
+	client := Endpoint{Namespace: "ns", Name: "client", Labels: map[string]string{"app": "client"}}
+	unlabeledInNS := Endpoint{Namespace: "ns", Name: "unlabeled"}
+	labeledInNS := Endpoint{Namespace: "ns", Name: "labeled", Labels: map[string]string{"app": "anything"}}
+	inProd := Endpoint{Namespace: "prod-ns", Name: "prod-pod", Labels: map[string]string{"app": "anything"}}
+	inDev := Endpoint{Namespace: "dev-ns", Name: "dev-pod", Labels: map[string]string{"app": "anything"}}
+	inUncollected := Endpoint{Namespace: "uncollected-ns", Name: "elsewhere"}
+
+	tests := []struct {
+		name     string
+		src, dst Endpoint
+		dir      Direction
+		want     Verdict
+	}{
+		{"podSelector {} admits an unlabeled pod in the policy's namespace", unlabeledInNS, ownNSServer, Ingress, Allowed},
+		{"podSelector {} admits a labeled pod in the policy's namespace", labeledInNS, ownNSServer, Ingress, Allowed},
+		{"podSelector {} alone admits no pod in another namespace", inProd, ownNSServer, Ingress, Denied},
+		{"podSelector {} with a namespaceSelector admits any pod in a selected namespace", inProd, prodServer, Ingress, Allowed},
+		{"podSelector {} with a namespaceSelector admits no pod in an unselected namespace", inDev, prodServer, Ingress, Denied},
+		{"podSelector {} with a namespaceSelector admits no pod in the policy's own, unselected namespace", labeledInNS, prodServer, Ingress, Denied},
+		{"podSelector {} with namespaceSelector {} admits a pod in any namespace", inDev, openServer, Ingress, Allowed},
+		{"podSelector {} with namespaceSelector {} admits a pod in an uncollected namespace", inUncollected, openServer, Ingress, Allowed},
+		{"egress podSelector {} reaches any pod in the policy's namespace", client, labeledInNS, Egress, Allowed},
+		{"egress podSelector {} alone reaches no pod in another namespace", client, inProd, Egress, Denied},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			v, egress, ingress := idx.Reaches(tt.src, tt.dst, nil)
+			decided := ingress
+			if tt.dir == Egress {
+				decided = egress
+			}
+			if v != tt.want || decided.Verdict != tt.want {
+				t.Errorf("%s/%s -> %s/%s: verdict = %v, %v = %v (%s), want %v",
+					tt.src.Namespace, tt.src.Name, tt.dst.Namespace, tt.dst.Name, v, tt.dir, decided.Verdict, decided.Reason, tt.want)
+			}
+		})
+	}
+}
+
 func TestReaches_EmptyFromListMatchesNoOne(t *testing.T) {
 	// A rule with an explicit, empty from list ([]NetworkPolicyPeer{}) is a
 	// different Go value than a nil slice, but Kubernetes treats both the
