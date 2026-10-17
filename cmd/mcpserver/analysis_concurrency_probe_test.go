@@ -169,6 +169,7 @@ func newProbeServer(t *testing.T, counter *apiCounter) *KubescapeMcpserver {
 		networkPolicyGVR: "NetworkPolicyList", podGVR: "PodList",
 		httpRouteGVR: "HTTPRouteList", grpcRouteGVR: "GRPCRouteList", gatewayGVR: "GatewayList",
 		httpRouteGVRv1beta1: "HTTPRouteList", grpcRouteGVRv1alpha2: "GRPCRouteList", gatewayGVRv1beta1: "GatewayList",
+		referenceGrantGVR: "ReferenceGrantList", referenceGrantGVRv1beta1: "ReferenceGrantList",
 		deploymentGVR: "DeploymentList", daemonSetGVR: "DaemonSetList", statefulSetGVR: "StatefulSetList",
 		replicaSetGVR: "ReplicaSetList", jobGVR: "JobList", cronJobGVR: "CronJobList",
 		mutatingAdmissionPolicyGVR:        "MutatingAdmissionPolicyList",

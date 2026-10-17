@@ -37,6 +37,7 @@ func newServiceExposureTestServer(t *testing.T, objects ...runtime.Object) *Kube
 		httpRouteGVRv1beta1:  "HTTPRouteList",
 		grpcRouteGVRv1alpha2: "GRPCRouteList",
 		gatewayGVRv1beta1:    "GatewayList",
+		referenceGrantGVR:    "ReferenceGrantList", referenceGrantGVRv1beta1: "ReferenceGrantList",
 	}
 	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), listKinds, objects...)
 
@@ -477,6 +478,10 @@ func TestAnalyzeServiceExposure_CrossNamespaceBackendRefIsFlaggedUnclear(t *test
 	dyn := ksServer.k8sClient.DynamicClient
 	_, err := dyn.Resource(gatewayGVR).Namespace("edge").Create(context.Background(), gw, metav1.CreateOptions{})
 	require.NoError(t, err)
+	// Without readable ReferenceGrants the reference can be neither confirmed
+	// nor ruled out. (A successful, empty grant list is a definite "no": see
+	// TestAnalyzeServiceExposure_ReferenceGrantOutcomes.)
+	dyn.(*dynamicfake.FakeDynamicClient).PrependReactor("list", "referencegrants", forbidden(referenceGrantGVR))
 
 	result := registeredToolResult(t, dispatchRegisteredTool(t, ksServer, "analyze_service_exposure", map[string]any{
 		"namespace":    "prod",

@@ -36,7 +36,7 @@ func (b gatewayBackendWire) reference() backendRef {
 // still reaches that service. Both HTTPRoute and GRPCRoute use this shape.
 //
 // Active mirror references reuse listener admission, hostname, Service-port
-// and ReferenceGrant uncertainty handling. Backend-scoped mirrors additionally
+// and ReferenceGrant authorization handling. Backend-scoped mirrors additionally
 // retain their parent reference until Service inventory can validate it.
 func mirrorBackends(filters []gatewayFilterWire) []backendRef {
 	var backends []backendRef
@@ -64,7 +64,10 @@ func mirrorBackends(filters []gatewayFilterWire) []backendRef {
 // parent data proves forwarding impossible. Missing Service/port inventory or
 // an unmodeled backend kind remains possible, as with ordinary backend refs.
 // Resolve the parent in its own namespace, not the mirror target's namespace.
-func (idx *Index) mirrorParentCanForward(mirror backendRef, routeNamespace string) bool {
+// A parent whose cross-namespace reference no collected ReferenceGrant allows
+// receives no requests, so its filters never run either; an undetermined
+// reference stays possible.
+func (idx *Index) mirrorParentCanForward(mirror backendRef, route *gatewayRoute) bool {
 	parent := mirror.Parent
 	if parent == nil {
 		return true
@@ -75,10 +78,14 @@ func (idx *Index) mirrorParentCanForward(mirror backendRef, routeNamespace strin
 	if !isServiceBackendRef(*parent) {
 		return true
 	}
-	namespace := routeNamespace
+	namespace := route.Namespace
 	if parent.Namespace != nil {
 		namespace = *parent.Namespace
 	}
-	service := idx.services[ServiceRef{Namespace: namespace, Name: parent.Name}]
+	parentRef := ServiceRef{Namespace: namespace, Name: parent.Name}
+	if idx.authorizeServiceReference(route, parentRef) == referenceDenied {
+		return false
+	}
+	service := idx.services[parentRef]
 	return gatewayBackendPortMatches(*parent, service)
 }
