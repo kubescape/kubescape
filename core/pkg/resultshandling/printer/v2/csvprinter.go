@@ -369,8 +369,5 @@ func appendCSVFailedPath(failed []string, seen map[string]struct{}, path string)
 // csvSourcePath returns the best available source path from a Source entry.
 // RelativePath is preferred because it is repo-relative and more portable.
 func csvSourcePath(src reporthandling.Source) string {
-	if src.RelativePath != "" {
-		return src.RelativePath
-	}
-	return src.Path
+	return BestSourcePath(src)
 }

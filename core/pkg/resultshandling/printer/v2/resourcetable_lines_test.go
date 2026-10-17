@@ -715,3 +715,35 @@ func TestResourceTable_OmitRawResourcesStillShowsEvidence(t *testing.T) {
 
 	assert.Contains(t, outputLineWith(t, out, "privileged=false"), "(line 14)")
 }
+
+// TestResourceTable_SourcePathFallbackAndCleanDisplay verifies that the resource table
+// header and evidence row use BestSourcePath: displaying Path when RelativePath is empty,
+// and suppressing the "Source: " header line completely when both paths are empty (such
+// as during cluster scans).
+func TestResourceTable_SourcePathFallbackAndCleanDisplay(t *testing.T) {
+	t.Run("fallback to Path when RelativePath is empty", func(t *testing.T) {
+		session := resourceTableLineNumberSession(t, lineNumberManifest, "")
+		resourceID := "apps/v1/default/Deployment/demo"
+		session.ResourceSource[resourceID] = reporthandling.Source{
+			RelativePath: "",
+			Path:         "/abs/path/manifests/demo.yaml",
+		}
+
+		out := renderResourceTable(t, session, true)
+		assert.Contains(t, out, "Source: /abs/path/manifests/demo.yaml", "resource header should display fallback Path")
+		assert.Contains(t, out, "@ /abs/path/manifests/demo.yaml", "evidence column should prefix with fallback Path")
+		assert.NotContains(t, out, "Source: \n", "should not print empty Source: header")
+	})
+
+	t.Run("suppresses Source header when both RelativePath and Path are empty", func(t *testing.T) {
+		session := resourceTableLineNumberSession(t, lineNumberManifest, "")
+		resourceID := "apps/v1/default/Deployment/demo"
+		session.ResourceSource[resourceID] = reporthandling.Source{
+			RelativePath: "",
+			Path:         "",
+		}
+
+		out := renderResourceTable(t, session, true)
+		assert.NotContains(t, out, "Source:", "no Source line should appear when source paths are empty")
+	})
+}

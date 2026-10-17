@@ -472,7 +472,7 @@ func testsCases(results *cautils.OPASessionObj, controls reportsummary.IControls
 				}
 				sourcePath := ""
 				if ResourceSourcePath, ok := results.ResourceSource[rId]; ok {
-					sourcePath = ResourceSourcePath.RelativePath
+					sourcePath = BestSourcePath(ResourceSourcePath)
 				}
 				resources[resourceToString(resource, sourcePath)] = nil
 			}

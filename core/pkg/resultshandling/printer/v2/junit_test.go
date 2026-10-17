@@ -1494,3 +1494,67 @@ func TestJunitActionPrintMissingResourceNoPanic(t *testing.T) {
 
 	require.NoError(t, tmp.Close())
 }
+
+// TestTestsCases_SourcePathFallback verifies that when a control fails on resources,
+// JUnit failure details format the source path using BestSourcePath: preferring
+// RelativePath, falling back to Path when RelativePath is empty, and omitting
+// sourcePath when neither is set.
+func TestTestsCases_SourcePathFallback(t *testing.T) {
+	session := &cautils.OPASessionObj{
+		Report: &reporthandlingv2.PostureReport{
+			SummaryDetails: reportsummary.SummaryDetails{Controls: reportsummary.ControlSummaries{}},
+		},
+		AllResources:   map[string]workloadinterface.IMetadata{},
+		ResourceSource: map[string]reporthandling.Source{},
+	}
+
+	workload1 := exceptionsWorkload(t, "Deployment", "prod", "workload-rel")
+	workload2 := exceptionsWorkload(t, "Pod", "staging", "workload-abs")
+	workload3 := exceptionsWorkload(t, "Service", "default", "workload-none")
+
+	session.AllResources["r-rel"] = workload1
+	session.AllResources["r-abs"] = workload2
+	session.AllResources["r-none"] = workload3
+
+	session.ResourceSource["r-rel"] = reporthandling.Source{
+		RelativePath: "manifests/deploy.yaml",
+		Path:         "/workspace/manifests/deploy.yaml",
+	}
+	session.ResourceSource["r-abs"] = reporthandling.Source{
+		RelativePath: "",
+		Path:         "/var/manifests/pod.yaml",
+	}
+	session.ResourceSource["r-none"] = reporthandling.Source{
+		RelativePath: "",
+		Path:         "",
+	}
+
+	resourceIDs := helpersv1.AllLists{}
+	resourceIDs.Append(apis.StatusFailed, "r-rel")
+	resourceIDs.Append(apis.StatusFailed, "r-abs")
+	resourceIDs.Append(apis.StatusFailed, "r-none")
+
+	control := reportsummary.ControlSummary{
+		ControlID: "C-0001",
+		Name:      "Test Source Path Control",
+		Status:    apis.StatusFailed,
+		StatusInfo: apis.StatusInfo{
+			InnerStatus: apis.StatusFailed,
+		},
+		ResourceIDs: resourceIDs,
+	}
+
+	controls := reportsummary.ControlSummaries{
+		"C-0001": control,
+	}
+
+	cases := testsCases(session, &controls, "TestSuite")
+	require.Len(t, cases, 1)
+	require.NotNil(t, cases[0].Failure)
+
+	contents := cases[0].Failure.Contents
+	assert.Contains(t, contents, "sourcePath: manifests/deploy.yaml", "should prefer RelativePath")
+	assert.Contains(t, contents, "sourcePath: /var/manifests/pod.yaml", "should fallback to Path when RelativePath is empty")
+	assert.Contains(t, contents, "name: workload-none", "should include resource without source path")
+	assert.NotContains(t, contents, "name: workload-none; sourcePath:", "should not include sourcePath when both are empty")
+}

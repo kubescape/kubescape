@@ -87,7 +87,9 @@ func (prettyPrinter *PrettyPrinter) resourceTable(opaSessionObj *cautils.OPASess
 		fmt.Fprintf(prettyPrinter.writer, "\n%s\n", getSeparator("#"))
 
 		if source, ok := opaSessionObj.ResourceSource[resourceID]; ok {
-			fmt.Fprintf(prettyPrinter.writer, "Source: %s\n", source.RelativePath)
+			if srcPath := BestSourcePath(source); srcPath != "" {
+				fmt.Fprintf(prettyPrinter.writer, "Source: %s\n", srcPath)
+			}
 		}
 		fmt.Fprintf(prettyPrinter.writer, "ApiVersion: %s\n", resource.GetApiVersion())
 		fmt.Fprintf(prettyPrinter.writer, "Kind: %s\n", resource.GetKind())
@@ -108,7 +110,7 @@ func (prettyPrinter *PrettyPrinter) resourceTable(opaSessionObj *cautils.OPASess
 
 		var sourcePath string
 		if src, ok := opaSessionObj.ResourceSource[resourceID]; ok {
-			sourcePath = src.RelativePath
+			sourcePath = BestSourcePath(src)
 		}
 		lineFor := prettyPrinter.pathLineResolver(opaSessionObj, &caches, scanned)
 		resourceRows := generateResourceRows(result.ListControls(), &opaSessionObj.Report.SummaryDetails, resource, prettyPrinter.showEvidence, prettyPrinter.showSecrets, sourcePath, lineFor)
