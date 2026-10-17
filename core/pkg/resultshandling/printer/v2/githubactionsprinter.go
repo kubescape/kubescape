@@ -438,7 +438,7 @@ func (gp *GitHubActionsPrinter) collectAnnotations(ctx context.Context, opaSessi
 	var withoutFilePath, outsideRepository int
 	failed := make([]scannedResource, 0, len(opaSessionObj.ResourcesResult))
 	for resourceID, result := range opaSessionObj.ResourcesResult {
-		if !result.GetStatus(nil).IsFailed() {
+		if !cautils.ResourceStatus(&opaSessionObj.Report.SummaryDetails, &result).IsFailed() {
 			continue
 		}
 
@@ -480,7 +480,7 @@ func (gp *GitHubActionsPrinter) collectAnnotations(ctx context.Context, opaSessi
 
 		for _, toPin := range opaSessionObj.ResourcesResult[resource.resourceID].AssociatedControls {
 			ac := toPin
-			if !ac.GetStatus(nil).IsFailed() {
+			if !cautils.ControlStatus(&opaSessionObj.Report.SummaryDetails, &ac).IsFailed() {
 				continue
 			}
 

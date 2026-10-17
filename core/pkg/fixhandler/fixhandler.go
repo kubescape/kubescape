@@ -285,16 +285,24 @@ func (h *FixHandler) reportControlSelection(ctx context.Context) {
 	logger.L().Info(fmt.Sprintf("%s selected %d of %d flagged control instances", h.controls.describe(), selected, total))
 }
 
+// failingRules returns ac restricted to the rules that still fail in the
+// frameworks that contain the control, so a rule excepted for those frameworks
+// is not remediated.
+func (h *FixHandler) failingRules(ac *resourcesresults.ResourceAssociatedControl) *resourcesresults.ResourceAssociatedControl {
+	failing := cautils.FailedRules(&h.reportObj.SummaryDetails, *ac)
+	return &failing
+}
+
 // controlSelectionCounts reports how many of the report's failed
 // (resource, control) tuples the current selection keeps.
 func (h *FixHandler) controlSelectionCounts() (selected, total int) {
 	for _, result := range h.reportObj.Results {
-		if !result.GetStatus(nil).IsFailed() {
+		if !cautils.ResourceStatus(&h.reportObj.SummaryDetails, &result).IsFailed() {
 			continue
 		}
 		for i := range result.AssociatedControls {
 			ac := &result.AssociatedControls[i]
-			if !ac.GetStatus(nil).IsFailed() {
+			if !cautils.ControlStatus(&h.reportObj.SummaryDetails, ac).IsFailed() {
 				continue
 			}
 			total++
@@ -813,7 +821,7 @@ func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInf
 	}
 
 	for _, result := range h.reportObj.Results {
-		if !result.GetStatus(nil).IsFailed() {
+		if !cautils.ResourceStatus(&h.reportObj.SummaryDetails, &result).IsFailed() {
 			continue
 		}
 
@@ -826,7 +834,7 @@ func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInf
 			logger.L().Ctx(ctx).Warning("Skipping result with no resource data in report: " + sanitizeForLog(resourceID))
 			for i := range result.AssociatedControls {
 				ac := &result.AssociatedControls[i]
-				if !ac.GetStatus(nil).IsFailed() || !h.controls.selects(ac.GetID()) {
+				if !cautils.ControlStatus(&h.reportObj.SummaryDetails, ac).IsFailed() || !h.controls.selects(ac.GetID()) {
 					continue
 				}
 				h.unfixedControls = append(h.unfixedControls, UnfixedControl{
@@ -844,7 +852,7 @@ func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInf
 		if src.skipReason != "" {
 			for i := range result.AssociatedControls {
 				ac := &result.AssociatedControls[i]
-				if !ac.GetStatus(nil).IsFailed() || !h.controls.selects(ac.GetID()) {
+				if !cautils.ControlStatus(&h.reportObj.SummaryDetails, ac).IsFailed() || !h.controls.selects(ac.GetID()) {
 					continue
 				}
 				h.unfixedControls = append(h.unfixedControls, UnfixedControl{
@@ -891,11 +899,11 @@ func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInf
 
 		for i := range result.AssociatedControls {
 			ac := &result.AssociatedControls[i]
-			if !ac.GetStatus(nil).IsFailed() || !h.controls.selects(ac.GetID()) {
+			if !cautils.ControlStatus(&h.reportObj.SummaryDetails, ac).IsFailed() || !h.controls.selects(ac.GetID()) {
 				continue
 			}
 
-			added, skipped := rfi.addYamlExpressionsFromResourceAssociatedControl(src.documentIndex, ac, h.fixInfo.SkipUserValues)
+			added, skipped := rfi.addYamlExpressionsFromResourceAssociatedControl(src.documentIndex, h.failingRules(ac), h.fixInfo.SkipUserValues)
 
 			rfi.failedControls = append(rfi.failedControls, UnfixedControl{
 				ControlID:     ac.GetID(),
@@ -950,7 +958,7 @@ func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInf
 		// fixed instead of misleading the user with "no auto-fix available".
 		plannedPaths := plannedPathsFromExpressions(rfi.YamlExpressions)
 		for _, pu := range tentativeUnfixed {
-			if len(plannedPaths) > 0 && controlIsCoveredByPlannedPaths(pu.ac, plannedPaths) {
+			if len(plannedPaths) > 0 && controlIsCoveredByPlannedPaths(h.failingRules(pu.ac), plannedPaths) {
 				h.fixedControlsCount++
 				rfi.fixedCount++
 				rfi.fixedControls = append(rfi.fixedControls, withoutReason(pu.entry))
@@ -1079,7 +1087,7 @@ func (h *FixHandler) PrepareHelmSuggestions(ctx context.Context) []HelmFixSugges
 	suggestions := make([]HelmFixSuggestion, 0)
 
 	for _, result := range h.reportObj.Results {
-		if !result.GetStatus(nil).IsFailed() {
+		if !cautils.ResourceStatus(&h.reportObj.SummaryDetails, &result).IsFailed() {
 			continue
 		}
 		resourceObj := resourceIdToResource[result.ResourceID]
@@ -1093,11 +1101,11 @@ func (h *FixHandler) PrepareHelmSuggestions(ctx context.Context) []HelmFixSugges
 		var fixPaths []armotypes.FixPath
 		for i := range result.AssociatedControls {
 			ac := &result.AssociatedControls[i]
-			if !ac.GetStatus(nil).IsFailed() || !h.controls.selects(ac.GetID()) {
+			if !cautils.ControlStatus(&h.reportObj.SummaryDetails, ac).IsFailed() || !h.controls.selects(ac.GetID()) {
 				continue
 			}
 			for _, rule := range ac.ResourceAssociatedRules {
-				if !rule.GetStatus(nil).IsFailed() {
+				if !cautils.RuleStatus(&h.reportObj.SummaryDetails, ac.GetID(), &rule).IsFailed() {
 					continue
 				}
 				for _, rp := range rule.Paths {

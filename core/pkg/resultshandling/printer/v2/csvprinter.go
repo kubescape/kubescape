@@ -180,7 +180,8 @@ func (cp *CsvPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OP
 				severity = "Unknown"
 			}
 
-			status := string(assocCtrl.GetStatus(nil).Status())
+			ctrlStatus := cautils.ControlStatus(&opaSessionObj.Report.SummaryDetails, &assocCtrl.ResourceAssociatedControl)
+			status := string(ctrlStatus.Status())
 			if status == "" {
 				status = "unknown"
 			}
@@ -192,8 +193,8 @@ func (cp *CsvPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OP
 			}
 
 			remediation := ""
-			if assocCtrl.GetStatus(nil).IsSkipped() {
-				if msg := buildSkipMessage(assocCtrl.GetStatus(nil)); msg != "" {
+			if ctrlStatus.IsSkipped() {
+				if msg := buildSkipMessage(ctrlStatus); msg != "" {
 					remediation = msg
 				} else if reason, ok := skippedReasonByControl[ctrlID]; ok && reason != "" {
 					remediation = reason

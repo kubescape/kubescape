@@ -152,22 +152,27 @@ func enrichControlsWithSeverity(controls reportsummary.ControlSummaries) map[str
 // - when allResources has an entry for the result's ResourceID - resolved
 // evidence values for each control's failed paths.
 func enrichResultsWithSeverity(results []resourcesresults.Result, controlSummaries reportsummary.ControlSummaries, allResources map[string]workloadinterface.IMetadata) []ResultWithSeverity {
-	return enrichResultsWithSeverityFromCatalog(results, controlSummaries, cautils.NewMapResourceCatalog(allResources))
+	return enrichResultsWithSeverityFromCatalog(results, &reportsummary.SummaryDetails{Controls: controlSummaries}, cautils.NewMapResourceCatalog(allResources))
 }
 
-func enrichResultsWithSeverityFromCatalog(results []resourcesresults.Result, controlSummaries reportsummary.ControlSummaries, catalog cautils.ResourceCatalog) []ResultWithSeverity {
+func enrichResultsWithSeverityFromCatalog(results []resourcesresults.Result, summary *reportsummary.SummaryDetails, catalog cautils.ResourceCatalog) []ResultWithSeverity {
 	enrichedResults := make([]ResultWithSeverity, len(results))
 	for i, result := range results {
 		var resource workloadinterface.IMetadata
 		if catalog != nil {
 			resource, _ = catalog.Get(result.ResourceID)
 		}
-		enrichedResults[i] = enrichResultWithSeverity(result, controlSummaries, resource)
+		enrichedResults[i] = enrichResultWithSeverity(result, summary, resource)
 	}
 	return enrichedResults
 }
 
-func enrichResultWithSeverity(result resourcesresults.Result, controlSummaries reportsummary.ControlSummaries, resource workloadinterface.IMetadata) ResultWithSeverity {
+// enrichResultWithSeverity enriches one result. A control excepted in the
+// frameworks that contain it carries that status in the enriched copy (see
+// cautils.SettleControlStatus), the way the summary reports it; the result
+// passed in is not modified.
+func enrichResultWithSeverity(result resourcesresults.Result, summary *reportsummary.SummaryDetails, resource workloadinterface.IMetadata) ResultWithSeverity {
+	controlSummaries := summary.Controls
 	enrichedControls := make([]ResourceAssociatedControlWithSeverity, len(result.AssociatedControls))
 	for j, control := range result.AssociatedControls {
 		// Get the severity from the control summary
@@ -175,10 +180,12 @@ func enrichResultWithSeverity(result resourcesresults.Result, controlSummaries r
 		if controlSummary, exists := controlSummaries[control.GetID()]; exists {
 			severity = apis.ControlSeverityToString(controlSummary.GetScoreFactor())
 		}
+		evidence := failedPathValues(&control, resource)
+		cautils.SettleControlStatus(summary, &control)
 		enrichedControls[j] = ResourceAssociatedControlWithSeverity{
 			ResourceAssociatedControl: control,
 			Severity:                  severity,
-			Evidence:                  failedPathValues(&control, resource),
+			Evidence:                  evidence,
 		}
 	}
 	return ResultWithSeverity{
@@ -259,7 +266,7 @@ func ConvertToPostureReportWithSeverityLabelsAndCoverageFromCatalog(report *repo
 		return nil
 	}
 	enrichedControls := enrichControlsWithSeverity(report.SummaryDetails.Controls)
-	enrichedResults := enrichResultsWithSeverityFromCatalog(report.Results, report.SummaryDetails.Controls, catalog)
+	enrichedResults := enrichResultsWithSeverityFromCatalog(report.Results, &report.SummaryDetails, catalog)
 
 	// Extract labels from resources if labelsToCopy is specified
 	var resourceLabels map[string]map[string]string
