@@ -3,6 +3,8 @@ package mcpserver
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/kubescape/kubescape/v4/core/cautils/getter"
@@ -133,8 +135,12 @@ func TestFilterControlsByFramework(t *testing.T) {
 	assert.NotNil(t, got, "and it is an empty list, not null")
 
 	got, err = filterControlsByFramework(entries, "allcontrols", catalog)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"C-0001", "C-0012", "C-0017", "C-0030"}, ids(got), "AllControls is every control, tagged or not")
+
+	got, err = filterControlsByFramework([]metav1.ControlListEntry{{ID: "C-0001", Frameworks: []string{"ClusterScan"}}}, "clusterscan", catalog)
 	require.NoError(t, err, "a framework only seen on controls is known too")
-	assert.Equal(t, []string{"C-0001", "C-0012", "C-0017"}, ids(got))
+	assert.Equal(t, []string{"C-0001"}, ids(got))
 
 	_, err = filterControlsByFramework(entries, "PCI", catalog)
 	var unknown *unknownFrameworkError
@@ -199,4 +205,25 @@ func TestListControlsTool_InvalidFramework(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, result.IsError)
 	assert.Contains(t, toolResultText(t, result), "framework argument must be a string")
+}
+
+// The cached-policy fallback uses getter.LoadPolicy, whose control entries
+// never carry the AllControls tag.
+func TestListControlsTool_FrameworkFilterLocalPolicy(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name, body string) string {
+		path := filepath.Join(dir, name)
+		require.NoError(t, os.WriteFile(path, []byte(body), 0o600))
+		return path
+	}
+	paths := []string{
+		write("allcontrols.json", `{"name":"AllControls","controls":[{"controlID":"C-0001","name":"Forbidden Container Registries"},{"controlID":"C-0012","name":"Applications credentials in configuration files"}]}`),
+		write("nsa.json", `{"name":"NSA","controls":[{"controlID":"C-0012","name":"Applications credentials in configuration files"}]}`),
+	}
+	ks := &KubescapeMcpserver{}
+	ks.startPolicyLoad(func() getter.IPolicyGetter { return getter.NewLoadPolicy(paths) })
+
+	assert.Equal(t, []string{"C-0001", "C-0012"}, listControlIDs(t, ks, map[string]any{}))
+	assert.Equal(t, []string{"C-0001", "C-0012"}, listControlIDs(t, ks, map[string]any{"framework": "AllControls"}))
+	assert.Equal(t, []string{"C-0012"}, listControlIDs(t, ks, map[string]any{"framework": "nsa"}))
 }

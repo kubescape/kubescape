@@ -76,8 +76,12 @@ func (e *unknownFrameworkError) Error() string {
 // framework is known if the catalog lists it or a control is tagged with it:
 // controls also carry tags such as ClusterScan that list_frameworks does not
 // return. A known framework with no controls gives an empty list.
+//
+// AllControls is every control. It is not matched by tag, because the local
+// policy getter used when the released bundle cannot be downloaded leaves the
+// AllControls tag off its control entries.
 func filterControlsByFramework(entries []metav1.ControlListEntry, framework string, catalog []string) ([]metav1.ControlListEntry, error) {
-	if framework == "" {
+	if framework == "" || strings.EqualFold(framework, "allcontrols") {
 		return entries, nil
 	}
 	known := map[string]bool{}
