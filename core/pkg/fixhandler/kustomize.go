@@ -528,10 +528,24 @@ func isEmptyValue(v interface{}) bool {
 	}
 }
 
+// isSourceMetadataKey reports whether key is scanner/report source metadata that should
+// be normalized and ignored during fidelity comparison of root resource objects.
+func isSourceMetadataKey(path, key string) bool {
+	return path == "" && (key == "path" || key == "sourcePath")
+}
+
+// isRedactedFieldKey reports whether key is an environment configuration field that the
+// scanner redactor removes without leaving a placeholder (specifically container envFrom).
+func isRedactedFieldKey(key string) bool {
+	return key == "envFrom"
+}
+
 // verifyScannedFieldsMatch recursively checks that every non-redacted field present in scannedVal
-// matches the corresponding field in candVal. Any field with placeholder "XXXXXX" or omitted in
-// scannedVal is ignored. Empty/default fields (such as scanner-added empty resources: {}) are
-// normalized so unchanged manifests match. Returns an error if any concrete non-redacted value conflicts.
+// matches the corresponding field in candVal, and that no additional non-redacted fields are
+// present in candVal that were absent from scannedVal. Any field with placeholder "XXXXXX"
+// or source metadata (path, sourcePath) is normalized. Empty/default fields (such as scanner-added
+// empty resources: {}) are normalized so unchanged manifests match. Returns an error if any
+// concrete non-redacted value conflicts or if additional non-redacted fields exist.
 func verifyScannedFieldsMatch(scannedVal, candVal interface{}, path string) error {
 	if scannedVal == nil {
 		return nil
@@ -548,7 +562,7 @@ func verifyScannedFieldsMatch(scannedVal, candVal interface{}, path string) erro
 			return fmt.Errorf("type mismatch at %s: expected map, got %T", path, candVal)
 		}
 		for k, v := range sTyped {
-			if path == "" && k == "path" {
+			if isSourceMetadataKey(path, k) {
 				continue
 			}
 			if s, isStr := v.(string); isStr && s == "XXXXXX" {
@@ -567,6 +581,20 @@ func verifyScannedFieldsMatch(scannedVal, candVal interface{}, path string) erro
 			}
 			if err := verifyScannedFieldsMatch(v, candChild, joinPath(path, k)); err != nil {
 				return err
+			}
+		}
+
+		for k, candChild := range cMap {
+			if isSourceMetadataKey(path, k) || isRedactedFieldKey(k) {
+				continue
+			}
+			_, exists := sTyped[k]
+			if !exists {
+				// Normalize equivalent empty/default fields (such as empty map or slice)
+				if isEmptyValue(candChild) {
+					continue
+				}
+				return fmt.Errorf("field %s present in rendered base is missing in scanned resource", joinPath(path, k))
 			}
 		}
 		return nil
@@ -938,6 +966,23 @@ func loadUnredactedFromChart(s HelmFixSuggestion, chartCache map[string]map[stri
 	return matches[0], nil
 }
 
+// isClusterScopedKind reports whether a standard Kubernetes resource kind is cluster-scoped.
+func isClusterScopedKind(kind string) bool {
+	switch kind {
+	case "ClusterRole", "ClusterRoleBinding", "Namespace", "Node",
+		"PersistentVolume", "CustomResourceDefinition", "ComponentStatus",
+		"APIService", "TokenReview", "SubjectAccessReview",
+		"SelfSubjectAccessReview", "SelfSubjectRulesReview",
+		"StorageClass", "VolumeAttachment", "IngressClass",
+		"RuntimeClass", "PriorityClass", "MutatingWebhookConfiguration",
+		"ValidatingWebhookConfiguration", "ValidatingAdmissionPolicy",
+		"ValidatingAdmissionPolicyBinding":
+		return true
+	default:
+		return false
+	}
+}
+
 // writeRestrictedFile writes data to path with mode 0600 and explicitly chmods an existing file to 0600.
 func writeRestrictedFile(path string, data []byte) error {
 	if err := os.WriteFile(path, data, 0600); err != nil {
@@ -1069,6 +1114,7 @@ func EmitKustomizePatch(suggestions []HelmFixSuggestion, dir string) (*Kustomize
 
 	// 3. Generate one patch file per unique resource
 	writtenFiles := make(map[string]resourceKey)
+	writtenTargets := make(map[string]string)
 
 	for _, key := range keysInOrder {
 		rg := groups[key]
@@ -1124,17 +1170,27 @@ func EmitKustomizePatch(suggestions []HelmFixSuggestion, dir string) (*Kustomize
 		}
 		if rg.key.Namespace != "" {
 			target.Namespace = regexp.QuoteMeta(rg.key.Namespace)
+		} else if !isClusterScopedKind(rg.key.Kind) {
+			target.Namespace = "default"
 		}
+
+		resIdent := fmt.Sprintf("%s/%s", rg.key.Kind, rg.key.Name)
+		if rg.key.Namespace != "" {
+			resIdent = fmt.Sprintf("%s/%s/%s", rg.key.Kind, rg.key.Namespace, rg.key.Name)
+		}
+
+		targetKey := fmt.Sprintf("%s/%s/%s/%s/%s", target.Group, target.Version, target.Kind, target.Namespace, target.Name)
+		if existing, exists := writtenTargets[targetKey]; exists {
+			return nil, fmt.Errorf("ambiguous patch target detected: target %s/%s in namespace %q matches multiple resources (%s and %s)",
+				target.Kind, target.Name, target.Namespace, existing, resIdent)
+		}
+		writtenTargets[targetKey] = resIdent
 
 		kust.Patches = append(kust.Patches, kustomizePatchEntry{
 			Path:   patchFileName,
 			Target: target,
 		})
 
-		resIdent := fmt.Sprintf("%s/%s", rg.key.Kind, rg.key.Name)
-		if rg.key.Namespace != "" {
-			resIdent = fmt.Sprintf("%s/%s/%s", rg.key.Kind, rg.key.Namespace, rg.key.Name)
-		}
 		result.EmittedResources = append(result.EmittedResources, resIdent)
 	}
 

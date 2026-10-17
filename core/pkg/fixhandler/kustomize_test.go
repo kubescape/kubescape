@@ -2475,6 +2475,7 @@ spec:
 
 	resPreserved, err := EmitKustomizePatch(suggsPreserved, outDirPreserved)
 	require.NoError(t, err)
+	t.Logf("Skipped: %+v", resPreserved.SkippedResources)
 	require.Len(t, resPreserved.EmittedResources, 1, "must emit patch when unredacted base is provided")
 	assert.Empty(t, resPreserved.SkippedResources)
 
@@ -2791,4 +2792,268 @@ spec:
 	require.NoError(t, err)
 	assert.Contains(t, string(outYaml), "prod-config", "verified unredacted base must preserve prod-config")
 	assert.Contains(t, string(outYaml), "privileged: false", "must apply requested security fix")
+}
+
+func TestReview4034SourcePathNormalizedOnRenderedResource(t *testing.T) {
+	chartDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "Chart.yaml"), []byte("apiVersion: v2\nname: test-svc\nversion: 0.1.0\n"), 0644))
+	templatesDir := filepath.Join(chartDir, "templates")
+	require.NoError(t, os.MkdirAll(templatesDir, 0755))
+
+	svcYaml := `apiVersion: v1
+kind: Service
+metadata:
+  name: my-service
+spec:
+  ports:
+  - port: 80
+  externalTrafficPolicy: Cluster
+`
+	require.NoError(t, os.WriteFile(filepath.Join(templatesDir, "service.yaml"), []byte(svcYaml), 0644))
+
+	// The scan report retains sourcePath and path, while the re-rendered base removes them.
+	scannedSvc := &reporthandling.Resource{
+		Object: map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "Service",
+			"path":       "templates/service.yaml",
+			"sourcePath": filepath.Join(chartDir, "templates/service.yaml"),
+			"metadata": map[string]interface{}{
+				"name": "my-service",
+			},
+			"spec": map[string]interface{}{
+				"ports": []interface{}{
+					map[string]interface{}{"port": 80},
+				},
+				"externalTrafficPolicy": "Cluster",
+			},
+		},
+	}
+
+	outDir := t.TempDir()
+	suggs := []HelmFixSuggestion{
+		{
+			Resource:     scannedSvc,
+			ChartPath:    chartDir,
+			TemplateFile: "templates/service.yaml",
+			FixPaths:     []armotypes.FixPath{{Path: "spec.externalTrafficPolicy", Value: "Local"}},
+		},
+	}
+
+	res, err := EmitKustomizePatch(suggs, outDir)
+	require.NoError(t, err)
+	require.Len(t, res.EmittedResources, 1, "unchanged rendered Service must not be declined due to sourcePath")
+	assert.Empty(t, res.SkippedResources)
+
+	k := krusty.MakeKustomizer(krusty.MakeDefaultOptions())
+	resMap, err := k.Run(filesys.MakeFsOnDisk(), outDir)
+	require.NoError(t, err)
+	outYaml, err := resMap.AsYaml()
+	require.NoError(t, err)
+	assert.Contains(t, string(outYaml), "externalTrafficPolicy: Local")
+}
+
+func TestReview4034NamespaceScopedTargetsDoNotOverwriteProdFix(t *testing.T) {
+	chartDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "Chart.yaml"), []byte("apiVersion: v2\nname: test-svc\nversion: 0.1.0\n"), 0644))
+	templatesDir := filepath.Join(chartDir, "templates")
+	require.NoError(t, os.MkdirAll(templatesDir, 0755))
+
+	svcProdYaml := `apiVersion: v1
+kind: Service
+metadata:
+  name: web
+  namespace: prod
+spec:
+  externalTrafficPolicy: Cluster
+`
+	require.NoError(t, os.WriteFile(filepath.Join(templatesDir, "svc-prod.yaml"), []byte(svcProdYaml), 0644))
+
+	svcNoNsYaml := `apiVersion: v1
+kind: Service
+metadata:
+  name: web
+spec:
+  externalTrafficPolicy: Cluster
+`
+	require.NoError(t, os.WriteFile(filepath.Join(templatesDir, "svc-nons.yaml"), []byte(svcNoNsYaml), 0644))
+
+	prodSvc := &reporthandling.Resource{
+		Object: map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "Service",
+			"metadata": map[string]interface{}{
+				"name":      "web",
+				"namespace": "prod",
+			},
+			"spec": map[string]interface{}{
+				"externalTrafficPolicy": "Cluster",
+			},
+		},
+	}
+	noNsSvc := &reporthandling.Resource{
+		Object: map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "Service",
+			"metadata": map[string]interface{}{
+				"name": "web",
+			},
+			"spec": map[string]interface{}{
+				"externalTrafficPolicy": "Cluster",
+			},
+		},
+	}
+
+	outDir := t.TempDir()
+	suggs := []HelmFixSuggestion{
+		{
+			Resource:     prodSvc,
+			ChartPath:    chartDir,
+			TemplateFile: "templates/svc-prod.yaml",
+			FixPaths:     []armotypes.FixPath{{Path: "spec.externalTrafficPolicy", Value: "Local"}},
+		},
+		{
+			Resource:     noNsSvc,
+			ChartPath:    chartDir,
+			TemplateFile: "templates/svc-nons.yaml",
+			FixPaths:     []armotypes.FixPath{{Path: "spec.externalTrafficPolicy", Value: "Cluster"}},
+		},
+	}
+
+	res, err := EmitKustomizePatch(suggs, outDir)
+	require.NoError(t, err)
+	require.Len(t, res.EmittedResources, 2)
+	assert.Empty(t, res.SkippedResources)
+
+	k := krusty.MakeKustomizer(krusty.MakeDefaultOptions())
+	resMap, err := k.Run(filesys.MakeFsOnDisk(), outDir)
+	require.NoError(t, err)
+	outYaml, err := resMap.AsYaml()
+	require.NoError(t, err)
+
+	docs := splitYamlDocs(outYaml)
+	require.Len(t, docs, 2)
+
+	var foundProd, foundNoNs bool
+	for _, docBytes := range docs {
+		var s struct {
+			Metadata struct {
+				Name      string `yaml:"name"`
+				Namespace string `yaml:"namespace"`
+			} `yaml:"metadata"`
+			Spec struct {
+				ExternalTrafficPolicy string `yaml:"externalTrafficPolicy"`
+			} `yaml:"spec"`
+		}
+		require.NoError(t, yaml.Unmarshal(docBytes, &s))
+		if s.Metadata.Namespace == "prod" {
+			foundProd = true
+			assert.Equal(t, "Local", s.Spec.ExternalTrafficPolicy, "prod fix must not be overwritten by namespace-less patch")
+		} else {
+			foundNoNs = true
+			assert.Equal(t, "Cluster", s.Spec.ExternalTrafficPolicy)
+		}
+	}
+	assert.True(t, foundProd, "prod service must be present in build output")
+	assert.True(t, foundNoNs, "namespaceless service must be present in build output")
+
+	// Verify ambiguous target collision is rejected
+	svcDefaultYaml := `apiVersion: v1
+kind: Service
+metadata:
+  name: web
+  namespace: default
+spec:
+  externalTrafficPolicy: Cluster
+`
+	require.NoError(t, os.WriteFile(filepath.Join(templatesDir, "svc-default.yaml"), []byte(svcDefaultYaml), 0644))
+
+	explicitDefaultSvc := &reporthandling.Resource{
+		Object: map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "Service",
+			"metadata": map[string]interface{}{
+				"name":      "web",
+				"namespace": "default",
+			},
+			"spec": map[string]interface{}{
+				"externalTrafficPolicy": "Cluster",
+			},
+		},
+	}
+	ambiguousSuggs := []HelmFixSuggestion{
+		{
+			Resource:     noNsSvc,
+			ChartPath:    chartDir,
+			TemplateFile: "templates/svc-nons.yaml",
+			FixPaths:     []armotypes.FixPath{{Path: "spec.externalTrafficPolicy", Value: "Cluster"}},
+		},
+		{
+			Resource:     explicitDefaultSvc,
+			ChartPath:    chartDir,
+			TemplateFile: "templates/svc-default.yaml",
+			FixPaths:     []armotypes.FixPath{{Path: "spec.externalTrafficPolicy", Value: "Local"}},
+		},
+	}
+	_, err = EmitKustomizePatch(ambiguousSuggs, t.TempDir())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "ambiguous patch target detected")
+}
+
+func TestReview4034RejectsAdditionalNonRedactedFieldsFromChartDrift(t *testing.T) {
+	chartDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "Chart.yaml"), []byte("apiVersion: v2\nname: test-svc\nversion: 0.1.0\n"), 0644))
+	templatesDir := filepath.Join(chartDir, "templates")
+	require.NoError(t, os.MkdirAll(templatesDir, 0755))
+
+	// Chart was modified after scan to add a new externalIPs field
+	svcDriftedYaml := `apiVersion: v1
+kind: Service
+metadata:
+  name: web
+spec:
+  ports:
+  - port: 80
+  externalIPs:
+  - 198.51.100.1
+  externalTrafficPolicy: Cluster
+`
+	require.NoError(t, os.WriteFile(filepath.Join(templatesDir, "service.yaml"), []byte(svcDriftedYaml), 0644))
+
+	// Scanned resource did NOT have externalIPs
+	scannedSvc := &reporthandling.Resource{
+		Object: map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "Service",
+			"sourcePath": filepath.Join(chartDir, "templates/service.yaml"),
+			"metadata": map[string]interface{}{
+				"name": "web",
+			},
+			"spec": map[string]interface{}{
+				"ports": []interface{}{
+					map[string]interface{}{"port": 80},
+				},
+				"externalTrafficPolicy": "Cluster",
+			},
+		},
+	}
+
+	outDir := t.TempDir()
+	suggs := []HelmFixSuggestion{
+		{
+			Resource:     scannedSvc,
+			ChartPath:    chartDir,
+			TemplateFile: "templates/service.yaml",
+			FixPaths:     []armotypes.FixPath{{Path: "spec.externalTrafficPolicy", Value: "Local"}},
+		},
+	}
+
+	res, err := EmitKustomizePatch(suggs, outDir)
+	require.NoError(t, err)
+	assert.Empty(t, res.EmittedResources, "must decline when newly added non-redacted field is present in rendered chart")
+	require.Len(t, res.SkippedResources, 1)
+	assert.Contains(t, res.SkippedResources[0].Reason, "externalIPs")
+
+	_, err = os.Stat(filepath.Join(outDir, "base.yaml"))
+	assert.True(t, os.IsNotExist(err), "base.yaml must not be written when declined")
 }
