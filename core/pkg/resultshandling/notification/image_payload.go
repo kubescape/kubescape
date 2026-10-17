@@ -11,12 +11,12 @@ import (
 )
 
 const (
-	maxFailingCVEs            = 10
-	maxSlackImageNameLength   = 200
-	maxSlackCVEIDLength       = 40
-	maxSlackCVEPkgLength      = 80
-	slackTopCVEsHeading       = "*Top vulnerabilities*"
-	teamsTopCVEsHeading       = "Top vulnerabilities"
+	maxFailingCVEs          = 10
+	maxSlackImageNameLength = 200
+	maxSlackCVEIDLength     = 40
+	maxSlackCVEPkgLength    = 80
+	slackTopCVEsHeading     = "*Top vulnerabilities*"
+	teamsTopCVEsHeading     = "Top vulnerabilities"
 )
 
 // ImageNotificationSummary represents the generic JSON webhook payload for image scans.

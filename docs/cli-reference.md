@@ -52,7 +52,7 @@ kubescape scan [target] [flags]
 | `--include-namespaces <ns>` | Namespaces to include (comma-separated). Cannot be combined with `--exclude-namespaces` | - |
 | `--label-selector <selector>` | Filter collected resources by Kubernetes label selector. Accepts any expression `kubectl -l` supports, e.g. `app=nginx,env!=dev` or `env in (prod,staging)`. Syntax is validated before scanning begins; filtering is applied during live cluster collection and ignored when scanning local files. | - |
 | `--keep-local` | Don't report results to backend | `false` |
-| `--notify <url>` | POST the posture scan summary to a webhook URL. Slack incoming webhooks receive Block Kit, Microsoft Teams webhooks an Adaptive Card, and other destinations generic JSON. Repeat for multiple endpoints. Delivery is best-effort and does not affect scan exit status. Not supported by `scan image`. | - |
+| `--notify <url>` | POST the scan summary to a webhook URL. Slack incoming webhooks receive Block Kit, Microsoft Teams webhooks an Adaptive Card, and other destinations generic JSON. Repeat for multiple endpoints. Delivery is best-effort and does not affect scan exit status. | - |
 | `--kubeconfig <path>` | Path to kubeconfig file | - |
 | `--kube-contexts <ctx,...>` | Scan each of these kube contexts in one run, one after another, writing one report per context named after `--output`. Requires `--output`. See [scanning a fleet of clusters](fleet-scanning.md). | - |
 | `--fleet-report <path>` | With `--kube-contexts`, also write one combined JSON report across every context. Not supported with `--hide` or `--encrypt`. | - |

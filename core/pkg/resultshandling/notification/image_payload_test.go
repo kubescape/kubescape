@@ -34,12 +34,12 @@ func sampleImageScanSummary() *imageprinter.ImageScanSummary {
 				Image:       "nginx:1.21.0",
 			},
 			{
-				ID:          "CVE-2023-0002",
-				Severity:    "Critical",
-				Package:     "glibc",
-				Version:     "2.31",
-				FixedState:  "not-fixed",
-				Image:       "nginx:1.21.0",
+				ID:         "CVE-2023-0002",
+				Severity:   "Critical",
+				Package:    "glibc",
+				Version:    "2.31",
+				FixedState: "not-fixed",
+				Image:      "nginx:1.21.0",
 			},
 			{
 				ID:          "CVE-2023-0003",

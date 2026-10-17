@@ -205,6 +205,57 @@ func TestResultsHandlerNotifyDeliversImageScanSummary(t *testing.T) {
 	assert.Equal(t, []string{"nginx:latest"}, payload.Images)
 }
 
+func TestResultsHandlerNotifyHonorsImageSeverityFilters(t *testing.T) {
+	var received []byte
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var err error
+		received, err = io.ReadAll(r.Body)
+		require.NoError(t, err)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	highMatch := match.Match{
+		Vulnerability: vulnerability.Vulnerability{
+			Reference: vulnerability.Reference{ID: "CVE-HIGH", Namespace: "nvd"},
+			Metadata:  &vulnerability.Metadata{ID: "CVE-HIGH", Severity: "High"},
+		},
+		Package: grypepkg.Package{Name: "pkg-high", Version: "1.0"},
+	}
+	lowMatch := match.Match{
+		Vulnerability: vulnerability.Vulnerability{
+			Reference: vulnerability.Reference{ID: "CVE-LOW", Namespace: "nvd"},
+			Metadata:  &vulnerability.Metadata{ID: "CVE-LOW", Severity: "Low"},
+		},
+		Package: grypepkg.Package{Name: "pkg-low", Version: "1.0"},
+	}
+
+	handler := NewResultsHandler(nil, nil, &SpyPrinter{})
+	originalMatches := match.NewMatches(highMatch, lowMatch)
+	handler.ImageScanData = []cautils.ImageScanData{
+		{
+			Image:   "filtered:latest",
+			Matches: originalMatches,
+		},
+	}
+
+	require.NoError(t, handler.HandleResults(context.Background(), &cautils.ScanInfo{
+		MinSeverity: "high",
+		NotifyURLs:  []string{server.URL},
+	}))
+
+	var payload notification.ImageNotificationSummary
+	require.NoError(t, json.Unmarshal(received, &payload))
+	assert.Equal(t, 1, payload.TotalVulnerabilities)
+	assert.Equal(t, 1, payload.SeverityCounts["High"])
+	assert.Equal(t, 0, payload.SeverityCounts["Low"])
+	require.Len(t, payload.TopVulnerabilities, 1)
+	assert.Equal(t, "CVE-HIGH", payload.TopVulnerabilities[0].ID)
+
+	// Ensure rh.ImageScanData remains unmutated for thresholds
+	assert.Equal(t, 2, handler.ImageScanData[0].Matches.Count())
+}
+
 func TestResultsHandlerHandleResultsReturnsPrinterErrors(t *testing.T) {
 	uiErr := errors.New("ui print failed")
 	outputErr := errors.New("output print failed")

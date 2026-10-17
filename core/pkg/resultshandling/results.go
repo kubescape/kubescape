@@ -362,7 +362,8 @@ func (rh *ResultsHandler) HandleResults(ctx context.Context, scanInfo *cautils.S
 				}
 			}
 		} else if len(rh.ImageScanData) > 0 {
-			imageSummary := printerv2.BuildImageScanSummary(rh.ImageScanData)
+			filteredImageData := filterImageScanDataBySeverity(rh.ImageScanData, scanInfo.MinSeverity, scanInfo.MaxSeverity)
+			imageSummary := printerv2.BuildImageScanSummary(filteredImageData)
 			client := notification.NewClient(notification.DefaultTimeout)
 			for _, endpoint := range scanInfo.NotifyURLs {
 				payload, err := notification.MarshalImagePayload(endpoint, imageSummary)
