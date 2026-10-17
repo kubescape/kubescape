@@ -14,6 +14,7 @@ import (
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
+	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
@@ -1459,4 +1460,54 @@ func TestPathValue_EmptyValueIsSerialized(t *testing.T) {
 	value, ok := decoded["value"]
 	require.True(t, ok, "value field must be present even when empty")
 	assert.Equal(t, "", value)
+}
+
+// TestBestSourcePath verifies that RelativePath is preferred when available,
+// falling back to Path when RelativePath is empty, and returning an empty string
+// when neither is populated.
+func TestBestSourcePath(t *testing.T) {
+	tests := []struct {
+		name string
+		src  reporthandling.Source
+		want string
+	}{
+		{
+			name: "prefers RelativePath when both RelativePath and Path are set",
+			src: reporthandling.Source{
+				RelativePath: "manifests/deployment.yaml",
+				Path:         "/workspace/repo/manifests/deployment.yaml",
+			},
+			want: "manifests/deployment.yaml",
+		},
+		{
+			name: "falls back to Path when RelativePath is empty",
+			src: reporthandling.Source{
+				RelativePath: "",
+				Path:         "/abs/path/manifests/deployment.yaml",
+			},
+			want: "/abs/path/manifests/deployment.yaml",
+		},
+		{
+			name: "uses RelativePath when Path is empty",
+			src: reporthandling.Source{
+				RelativePath: "k8s/pod.yaml",
+				Path:         "",
+			},
+			want: "k8s/pod.yaml",
+		},
+		{
+			name: "returns empty string when both RelativePath and Path are empty",
+			src: reporthandling.Source{
+				RelativePath: "",
+				Path:         "",
+			},
+			want: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, BestSourcePath(tt.src))
+		})
+	}
 }

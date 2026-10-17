@@ -167,6 +167,16 @@ func TestSetWriterUsesSharedOutputResolution(t *testing.T) {
 				return p.(*PolicyReportPrinter).CloseWriter()
 			},
 		},
+		{
+			name:       "github-actions",
+			format:     baseprinter.GitHubActionsFormat,
+			baseName:   githubActionsOutputFile,
+			newPrinter: func() setWriterPrinter { return NewGitHubActionsPrinter() },
+			writerName: func(p setWriterPrinter) string { return p.(*GitHubActionsPrinter).writer.Name() },
+			closeWriter: func(p setWriterPrinter) error {
+				return p.(*GitHubActionsPrinter).CloseWriter()
+			},
+		},
 	}
 
 	for _, tc := range cases {
