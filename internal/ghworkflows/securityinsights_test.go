@@ -124,6 +124,7 @@ func validateSecurityAssessment(root string, assessment securityInsightsAssessme
 	return nil
 }
 
+// securityAssessmentPathIsWatched reports whether workflow filters cover a document.
 func securityAssessmentPathIsWatched(patterns []string, path string) bool {
 	for _, pattern := range patterns {
 		if pathCoveredBy(pattern, filepath.ToSlash(path)) {
@@ -133,6 +134,7 @@ func securityAssessmentPathIsWatched(patterns []string, path string) bool {
 	return false
 }
 
+// writeSecurityAssessmentFixture creates a valid document and index for negative cases.
 func writeSecurityAssessmentFixture(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
@@ -142,11 +144,13 @@ func writeSecurityAssessmentFixture(t *testing.T) string {
 	return root
 }
 
+// TestSecurityAssessmentEvidenceIsValid checks the real assessment wiring.
 func TestSecurityAssessmentEvidenceIsValid(t *testing.T) {
 	insights := loadSecurityInsights(t)
 	require.NoError(t, validateSecurityAssessment(repoRoot(t), insights.Repository.Security.Assessments.Self))
 }
 
+// TestValidateSecurityAssessmentRejectsRegressions exercises broken evidence, documents, and index links.
 func TestValidateSecurityAssessmentRejectsRegressions(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -180,6 +184,7 @@ func TestValidateSecurityAssessmentRejectsRegressions(t *testing.T) {
 	}
 }
 
+// TestRepoHygieneWatchesSecurityAssessmentDocs keeps documentation edits covered by CI.
 func TestRepoHygieneWatchesSecurityAssessmentDocs(t *testing.T) {
 	var workflow hygieneWorkflow
 	loadWorkflow(t, hygieneWorkflowName, &workflow)
