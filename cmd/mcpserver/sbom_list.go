@@ -119,11 +119,14 @@ func parseSBOMPackageListOptions(arguments map[string]any) (sbomPackageListOptio
 }
 
 // listSBOMPackages filters the SBOM's packages and orders them by name,
-// version and type, so that paging with offset is stable. The same package
-// found in several places is listed once.
+// version, type and purl, so that paging with offset is stable. The same
+// package found in several places is listed once, with the licenses of all
+// its copies. A package is identified by its purl, or by name, version and
+// type when it has none, so two Java packages with the same name and version
+// but different group IDs are both listed.
 func listSBOMPackages(sbom *v1beta1.SBOMSyft, opts sbomPackageListOptions) sbomPackageListResponse {
 	doc := sbom.Spec.Syft
-	seen := map[[3]string]bool{}
+	seen := map[[4]string]int{}
 	entries := []sbomPackageEntry{}
 	for _, p := range doc.Artifacts {
 		if opts.name != "" && !strings.Contains(strings.ToLower(p.Name), opts.name) {
@@ -132,29 +135,32 @@ func listSBOMPackages(sbom *v1beta1.SBOMSyft, opts sbomPackageListOptions) sbomP
 		if opts.packageType != "" && !strings.EqualFold(p.Type, opts.packageType) {
 			continue
 		}
-		key := [3]string{p.Name, p.Version, p.Type}
-		if seen[key] {
-			continue
+		key := [4]string{p.PURL}
+		if p.PURL == "" {
+			key = [4]string{"", p.Name, p.Version, p.Type}
 		}
-		seen[key] = true
-		licenses := []string{}
+		i, ok := seen[key]
+		if !ok {
+			i = len(entries)
+			seen[key] = i
+			entries = append(entries, sbomPackageEntry{
+				Name:     p.Name,
+				Version:  p.Version,
+				Type:     p.Type,
+				Language: p.Language,
+				PURL:     p.PURL,
+				Licenses: []string{},
+			})
+		}
 		for _, l := range p.Licenses {
 			value := l.SPDXExpression
 			if value == "" {
 				value = l.Value
 			}
-			if value != "" && !slices.Contains(licenses, value) {
-				licenses = append(licenses, value)
+			if value != "" && !slices.Contains(entries[i].Licenses, value) {
+				entries[i].Licenses = append(entries[i].Licenses, value)
 			}
 		}
-		entries = append(entries, sbomPackageEntry{
-			Name:     p.Name,
-			Version:  p.Version,
-			Type:     p.Type,
-			Language: p.Language,
-			PURL:     p.PURL,
-			Licenses: licenses,
-		})
 	}
 	sort.Slice(entries, func(i, j int) bool {
 		a, b := entries[i], entries[j]
@@ -164,7 +170,10 @@ func listSBOMPackages(sbom *v1beta1.SBOMSyft, opts sbomPackageListOptions) sbomP
 		if a.Version != b.Version {
 			return a.Version < b.Version
 		}
-		return a.Type < b.Type
+		if a.Type != b.Type {
+			return a.Type < b.Type
+		}
+		return a.PURL < b.PURL
 	})
 
 	resp := sbomPackageListResponse{

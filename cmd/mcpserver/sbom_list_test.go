@@ -168,9 +168,37 @@ func TestListSBOMPackages_InvalidArguments(t *testing.T) {
 }
 
 func TestListSBOMPackages_NotFound(t *testing.T) {
-	_, err := sbomListServer(t).CallTool(context.Background(), "list_sbom_packages", map[string]any{"sbom_name": "missing"})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to get SBOM")
+	result, err := sbomListServer(t).CallTool(context.Background(), "list_sbom_packages", map[string]any{"sbom_name": "missing"})
+	require.NoError(t, err)
+	require.True(t, result.IsError)
+	text := toolResultText(t, result)
+	assert.Contains(t, text, string(ErrCodeResourceNotFound))
+	assert.Contains(t, text, "failed to get SBOM")
+}
+
+func TestListSBOMPackages_PackageIdentity(t *testing.T) {
+	maven := func(group string, licenses ...storagev1beta1.License) storagev1beta1.SyftPackage {
+		p := sbomPackage("commons-text", "1.9", "java-archive", licenses...)
+		p.PURL = "pkg:maven/" + group + "/commons-text@1.9"
+		return p
+	}
+	sbom := &storagev1beta1.SBOMSyft{
+		ObjectMeta: metav1.ObjectMeta{Name: "app", Namespace: "kubescape"},
+		Spec: storagev1beta1.SBOMSyftSpec{Syft: storagev1beta1.SyftDocument{Artifacts: []storagev1beta1.SyftPackage{
+			maven("org.apache.commons", storagev1beta1.License{Value: "Apache-2.0", SPDXExpression: "Apache-2.0"}),
+			// Same name, version and type, but a different group ID: a different package.
+			maven("com.example"),
+			// The same package found in a second jar, with a license the first copy did not have.
+			maven("org.apache.commons", storagev1beta1.License{Value: "MIT", SPDXExpression: "MIT"}),
+		}}},
+	}
+	ks := &KubescapeMcpserver{ksClient: storagefake.NewClientset(sbom).SpdxV1beta1()}
+	resp := callSBOMPackages(t, ks, map[string]any{"sbom_name": "app"})
+	require.Equal(t, 2, resp.Total)
+	assert.Equal(t, "pkg:maven/com.example/commons-text@1.9", resp.Packages[0].PURL, "ties on name, version and type are ordered by purl")
+	assert.Equal(t, []string{}, resp.Packages[0].Licenses)
+	assert.Equal(t, "pkg:maven/org.apache.commons/commons-text@1.9", resp.Packages[1].PURL)
+	assert.Equal(t, []string{"Apache-2.0", "MIT"}, resp.Packages[1].Licenses, "licenses of all copies are kept")
 }
 
 func TestListSBOMs(t *testing.T) {

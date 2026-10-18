@@ -1102,7 +1102,7 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		}
 		chunk, err := client.SBOMSyfts(namespaceStr).List(ctx, metav1.ListOptions{Limit: 100, Continue: continueToken})
 		if err != nil {
-			return nil, fmt.Errorf("failed to list SBOMs: %w", err)
+			return mcpToolError(classifyScanError(err), fmt.Sprintf("failed to list SBOMs: %v", err), nil), nil
 		}
 		responseJson, err := json.Marshal(sbomListResponse{SBOMs: listSBOMEntries(chunk.Items), Continue: chunk.GetContinue()})
 		if err != nil {
@@ -1131,7 +1131,7 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		}
 		sbom, err := client.SBOMSyfts(namespaceStr).Get(ctx, sbomNameStr, metav1.GetOptions{})
 		if err != nil {
-			return nil, fmt.Errorf("failed to get SBOM: %w", err)
+			return mcpToolError(classifyScanError(err), fmt.Sprintf("failed to get SBOM: %v", err), nil), nil
 		}
 		responseJson, err := json.Marshal(listSBOMPackages(sbom, listOpts))
 		if err != nil {
