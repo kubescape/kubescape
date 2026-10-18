@@ -1091,6 +1091,36 @@ func TestEnforceImageSeverityThresholds(t *testing.T) {
 			expectedError: true,
 		},
 		{
+			name:          "mixed-case threshold exceeded",
+			threshold:     "High",
+			matchSeverity: "Critical",
+			expectedError: true,
+		},
+		{
+			name:          "threshold with leading whitespace exceeded",
+			threshold:     " high",
+			matchSeverity: "Critical",
+			expectedError: true,
+		},
+		{
+			name:          "threshold with trailing whitespace exceeded",
+			threshold:     "high ",
+			matchSeverity: "Critical",
+			expectedError: true,
+		},
+		{
+			name:          "threshold with carriage return exceeded",
+			threshold:     "high\r",
+			matchSeverity: "Critical",
+			expectedError: true,
+		},
+		{
+			name:          "padded threshold below match severity passes",
+			threshold:     " critical ",
+			matchSeverity: "High",
+			expectedError: false,
+		},
+		{
 			name:          "empty embedded severity falls back to provider metadata",
 			threshold:     "high",
 			matchSeverity: "Critical",

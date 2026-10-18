@@ -563,7 +563,10 @@ func wrapDBLoadError(err error, shouldUpdate bool) error {
 
 // ParseSeverity returns a Grype severity given a severity string
 //
-// Used as a thin wrapper for ease of access from one image scan package
+// Used as a thin wrapper for ease of access from one image scan package.
+// Surrounding whitespace is trimmed to match shared.ValidateSeverity, which
+// accepts padded values; grype only lowercases, so "high " would otherwise
+// parse as UnknownSeverity and silently disable the threshold gate.
 func ParseSeverity(severity string) vulnerability.Severity {
-	return vulnerability.ParseSeverity(severity)
+	return vulnerability.ParseSeverity(strings.TrimSpace(severity))
 }

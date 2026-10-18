@@ -210,9 +210,33 @@ func TestParseSeverity(t *testing.T) {
 			name: "critical",
 			want: vulnerability.CriticalSeverity,
 		},
+		{
+			name: "HiGh",
+			want: vulnerability.HighSeverity,
+		},
+		{
+			name: " high",
+			want: vulnerability.HighSeverity,
+		},
+		{
+			name: "high ",
+			want: vulnerability.HighSeverity,
+		},
+		{
+			name: "high\r",
+			want: vulnerability.HighSeverity,
+		},
+		{
+			name: "\tCritical\n",
+			want: vulnerability.CriticalSeverity,
+		},
+		{
+			name: "   ",
+			want: vulnerability.UnknownSeverity,
+		},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(fmt.Sprintf("%q", tt.name), func(t *testing.T) {
 			got := ParseSeverity(tt.name)
 			assert.Equal(t, tt.want, got)
 		})
@@ -538,6 +562,19 @@ func TestExceedsSeverityThresholdNilProvider(t *testing.T) {
 	matches := match.NewMatches(makeThresholdTestMatch("CVE-anything"))
 	assert.True(t, svc.ExceedsSeverityThreshold(vulnerability.LowSeverity, matches, false),
 		"nil provider with unknown severity must fail closed")
+}
+
+// TestExceedsSeverityThresholdPaddedThreshold pins that a threshold accepted
+// by shared.ValidateSeverity with surrounding whitespace still enforces the
+// gate, instead of parsing as UnknownSeverity and passing the scan.
+func TestExceedsSeverityThresholdPaddedThreshold(t *testing.T) {
+	svc := &Service{}
+	matches := match.NewMatches(makeThresholdTestMatchWithMetadata("CVE-critical", vulnerability.CriticalSeverity.String()))
+	for _, threshold := range []string{"high", "High", " high", "high ", "high\r", "\thigh\n"} {
+		t.Run(fmt.Sprintf("%q", threshold), func(t *testing.T) {
+			assert.True(t, svc.ExceedsSeverityThreshold(ParseSeverity(threshold), matches, false))
+		})
+	}
 }
 
 func TestMatchSeverity(t *testing.T) {
