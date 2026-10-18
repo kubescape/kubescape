@@ -197,6 +197,8 @@ func openFileForWrite(path string) (*os.File, error) {
 	return f, nil
 }
 
+// GetWriter opens outputFile for writing with owner-only permissions. If outputFile
+// is empty or opening/creating the file fails, it logs a warning and falls back to os.Stdout.
 func GetWriter(ctx context.Context, outputFile string) *os.File {
 	if outputFile != "" {
 		outputDir, _ := filepath.Split(outputFile)
