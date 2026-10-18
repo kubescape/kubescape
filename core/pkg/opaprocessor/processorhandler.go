@@ -1298,6 +1298,31 @@ func statusAliases(module *ast.Module) map[ast.Var]struct{} {
 	return aliases
 }
 
+// objectGetMayReadStatus clears only literal, nonempty paths that cannot
+// name status. Computed keys and an empty path can expose the unhashed
+// status field, so their rules must be evaluated rather than replayed.
+// This intentionally excludes variable keys even when they look constant:
+// proving their values would require scope-aware propagation, including
+// shadowed bindings and function arguments.
+func objectGetMayReadStatus(key *ast.Term) bool {
+	switch value := key.Value.(type) {
+	case ast.String:
+		return value == "status"
+	case *ast.Array:
+		if value.Len() == 0 {
+			return true // object.get(object, [], default) returns the object
+		}
+		for i := 0; i < value.Len(); i++ {
+			if objectGetMayReadStatus(value.Elem(i)) {
+				return true
+			}
+		}
+		return false
+	default:
+		return true // runtime keys cannot be proven independent of status
+	}
+}
+
 func moduleReadsStatus(module *ast.Module) bool {
 	aliases := statusAliases(module)
 	isStatus := func(term *ast.Term) bool {
@@ -1320,7 +1345,7 @@ func moduleReadsStatus(module *ast.Module) bool {
 			return false
 		}
 		operands := expr.Operands()
-		if len(operands) >= 2 && isStatus(operands[1]) {
+		if len(operands) >= 2 && objectGetMayReadStatus(operands[1]) {
 			reads = true
 		}
 		return reads
@@ -1336,7 +1361,7 @@ func moduleReadsStatus(module *ast.Module) bool {
 		case ast.Call:
 			// Calls nested in assignments/comparisons are terms rather than
 			// expressions. object.get's second argument is a direct key here.
-			if len(value) >= 3 && value[0].String() == "object.get" && isStatus(value[2]) {
+			if len(value) >= 3 && value[0].String() == "object.get" && objectGetMayReadStatus(value[2]) {
 				reads = true
 			}
 		case ast.Ref:
