@@ -123,27 +123,25 @@ func parseSBOMPackageListOptions(arguments map[string]any) (sbomPackageListOptio
 // package found in several places is listed once, with the licenses of all
 // its copies. A package is identified by its purl, or by name, version and
 // type when it has none, so two Java packages with the same name and version
-// but different group IDs are both listed.
+// but different group IDs are both listed. Copies are grouped before the
+// filters run, and a package is listed when any of its copies matches, so a
+// filter never drops licenses that only another copy carries.
 func listSBOMPackages(sbom *v1beta1.SBOMSyft, opts sbomPackageListOptions) sbomPackageListResponse {
 	doc := sbom.Spec.Syft
 	seen := map[[4]string]int{}
-	entries := []sbomPackageEntry{}
+	all := []sbomPackageEntry{}
+	matched := []bool{}
 	for _, p := range doc.Artifacts {
-		if opts.name != "" && !strings.Contains(strings.ToLower(p.Name), opts.name) {
-			continue
-		}
-		if opts.packageType != "" && !strings.EqualFold(p.Type, opts.packageType) {
-			continue
-		}
 		key := [4]string{p.PURL}
 		if p.PURL == "" {
 			key = [4]string{"", p.Name, p.Version, p.Type}
 		}
 		i, ok := seen[key]
 		if !ok {
-			i = len(entries)
+			i = len(all)
 			seen[key] = i
-			entries = append(entries, sbomPackageEntry{
+			matched = append(matched, false)
+			all = append(all, sbomPackageEntry{
 				Name:     p.Name,
 				Version:  p.Version,
 				Type:     p.Type,
@@ -152,14 +150,24 @@ func listSBOMPackages(sbom *v1beta1.SBOMSyft, opts sbomPackageListOptions) sbomP
 				Licenses: []string{},
 			})
 		}
+		if (opts.name == "" || strings.Contains(strings.ToLower(p.Name), opts.name)) &&
+			(opts.packageType == "" || strings.EqualFold(p.Type, opts.packageType)) {
+			matched[i] = true
+		}
 		for _, l := range p.Licenses {
 			value := l.SPDXExpression
 			if value == "" {
 				value = l.Value
 			}
-			if value != "" && !slices.Contains(entries[i].Licenses, value) {
-				entries[i].Licenses = append(entries[i].Licenses, value)
+			if value != "" && !slices.Contains(all[i].Licenses, value) {
+				all[i].Licenses = append(all[i].Licenses, value)
 			}
+		}
+	}
+	entries := []sbomPackageEntry{}
+	for i, e := range all {
+		if matched[i] {
+			entries = append(entries, e)
 		}
 	}
 	sort.Slice(entries, func(i, j int) bool {

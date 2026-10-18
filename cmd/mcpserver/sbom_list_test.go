@@ -199,6 +199,15 @@ func TestListSBOMPackages_PackageIdentity(t *testing.T) {
 	assert.Equal(t, []string{}, resp.Packages[0].Licenses)
 	assert.Equal(t, "pkg:maven/org.apache.commons/commons-text@1.9", resp.Packages[1].PURL)
 	assert.Equal(t, []string{"Apache-2.0", "MIT"}, resp.Packages[1].Licenses, "licenses of all copies are kept")
+
+	// A copy that the name filter does not match still adds its licenses.
+	renamed := maven("org.apache.commons", storagev1beta1.License{Value: "BSD-3-Clause", SPDXExpression: "BSD-3-Clause"})
+	renamed.Name = "apache-text"
+	sbom.Spec.Syft.Artifacts = append(sbom.Spec.Syft.Artifacts, renamed)
+	ks = &KubescapeMcpserver{ksClient: storagefake.NewClientset(sbom).SpdxV1beta1()}
+	resp = callSBOMPackages(t, ks, map[string]any{"sbom_name": "app", "name": "commons-text", "package_type": "java-archive"})
+	require.Equal(t, 2, resp.Total)
+	assert.Equal(t, []string{"Apache-2.0", "MIT", "BSD-3-Clause"}, resp.Packages[1].Licenses)
 }
 
 func TestListSBOMs(t *testing.T) {
