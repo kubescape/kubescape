@@ -125,7 +125,8 @@ func parseSBOMPackageListOptions(arguments map[string]any) (sbomPackageListOptio
 // type when it has none, so two Java packages with the same name and version
 // but different group IDs are both listed. Copies are grouped before the
 // filters run, and a package is listed when any of its copies matches, so a
-// filter never drops licenses that only another copy carries.
+// filter never drops licenses that only another copy carries. The name and
+// type shown are those of the first matching copy.
 func listSBOMPackages(sbom *v1beta1.SBOMSyft, opts sbomPackageListOptions) sbomPackageListResponse {
 	doc := sbom.Spec.Syft
 	seen := map[[4]string]int{}
@@ -151,8 +152,9 @@ func listSBOMPackages(sbom *v1beta1.SBOMSyft, opts sbomPackageListOptions) sbomP
 			})
 		}
 		if (opts.name == "" || strings.Contains(strings.ToLower(p.Name), opts.name)) &&
-			(opts.packageType == "" || strings.EqualFold(p.Type, opts.packageType)) {
+			(opts.packageType == "" || strings.EqualFold(p.Type, opts.packageType)) && !matched[i] {
 			matched[i] = true
+			all[i].Name, all[i].Version, all[i].Type, all[i].Language = p.Name, p.Version, p.Type, p.Language
 		}
 		for _, l := range p.Licenses {
 			value := l.SPDXExpression

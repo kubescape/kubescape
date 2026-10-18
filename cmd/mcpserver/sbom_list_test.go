@@ -11,6 +11,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	k8stesting "k8s.io/client-go/testing"
 )
 
 func sbomPackage(name, version, pkgType string, licenses ...storagev1beta1.License) storagev1beta1.SyftPackage {
@@ -208,6 +210,12 @@ func TestListSBOMPackages_PackageIdentity(t *testing.T) {
 	resp = callSBOMPackages(t, ks, map[string]any{"sbom_name": "app", "name": "commons-text", "package_type": "java-archive"})
 	require.Equal(t, 2, resp.Total)
 	assert.Equal(t, []string{"Apache-2.0", "MIT", "BSD-3-Clause"}, resp.Packages[1].Licenses)
+
+	// The fields shown come from a copy that matches the filter.
+	resp = callSBOMPackages(t, ks, map[string]any{"sbom_name": "app", "name": "apache-text"})
+	require.Equal(t, 1, resp.Total)
+	assert.Equal(t, "apache-text", resp.Packages[0].Name)
+	assert.Equal(t, []string{"Apache-2.0", "MIT", "BSD-3-Clause"}, resp.Packages[0].Licenses)
 }
 
 func TestListSBOMs(t *testing.T) {
@@ -249,4 +257,43 @@ func TestListSBOMs(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, result.IsError)
 	assert.Contains(t, toolResultText(t, result), "continue argument must be a string")
+}
+
+func TestListSBOMs_Continue(t *testing.T) {
+	first := storagev1beta1.SBOMSyft{ObjectMeta: metav1.ObjectMeta{Name: "nginx-1.21", Namespace: "kubescape"}}
+	second := storagev1beta1.SBOMSyft{ObjectMeta: metav1.ObjectMeta{Name: "redis-7", Namespace: "kubescape"}}
+	client := storagefake.NewClientset()
+	// The fake clientset does not page, so serve two pages by continue token.
+	client.PrependReactor("list", "sbomsyfts", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		opts := action.(k8stesting.ListActionImpl).GetListOptions()
+		assert.Equal(t, int64(100), opts.Limit)
+		if opts.Continue == "" {
+			return true, &storagev1beta1.SBOMSyftList{
+				ListMeta: metav1.ListMeta{Continue: "page-2"},
+				Items:    []storagev1beta1.SBOMSyft{first},
+			}, nil
+		}
+		assert.Equal(t, "page-2", opts.Continue)
+		return true, &storagev1beta1.SBOMSyftList{Items: []storagev1beta1.SBOMSyft{second}}, nil
+	})
+	ks := &KubescapeMcpserver{ksClient: client.SpdxV1beta1()}
+	call := func(args map[string]any) sbomListResponse {
+		t.Helper()
+		result, err := ks.CallTool(context.Background(), "list_sboms", args)
+		require.NoError(t, err)
+		require.False(t, result.IsError, toolResultText(t, result))
+		var resp sbomListResponse
+		require.NoError(t, json.Unmarshal([]byte(toolResultText(t, result)), &resp))
+		return resp
+	}
+
+	page1 := call(map[string]any{"namespace": "kubescape"})
+	require.Len(t, page1.SBOMs, 1)
+	assert.Equal(t, "nginx-1.21", page1.SBOMs[0].SBOMName)
+	assert.Equal(t, "page-2", page1.Continue)
+
+	page2 := call(map[string]any{"namespace": "kubescape", "continue": page1.Continue})
+	require.Len(t, page2.SBOMs, 1)
+	assert.Equal(t, "redis-7", page2.SBOMs[0].SBOMName)
+	assert.Empty(t, page2.Continue)
 }
