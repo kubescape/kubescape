@@ -82,7 +82,8 @@ func Parse(r io.Reader) (*Index, error) {
 }
 
 // Lookup reports whether cve affects component at version on a node running
-// operatingSystem (as in Node status.nodeInfo.operatingSystem).
+// operatingSystem (as in Node status.nodeInfo.operatingSystem). A missing or
+// unknown operating system is unattributed.
 func (ix *Index) Lookup(cve, component, version, operatingSystem string) Applicability {
 	e, ok := ix.entries[strings.ToUpper(cve)]
 	if !ok || e.affected == nil {
@@ -92,8 +93,14 @@ func (ix *Index) Lookup(cve, component, version, operatingSystem string) Applica
 	if err != nil || !full {
 		return Unattributed
 	}
-	if e.windowsOnly && !strings.EqualFold(operatingSystem, "windows") {
-		return NotApplicable
+	switch strings.ToLower(operatingSystem) {
+	case "windows":
+	case "linux":
+		if e.windowsOnly {
+			return NotApplicable
+		}
+	default:
+		return Unattributed
 	}
 	for _, r := range e.affected[component] {
 		if r.contains(v) {

@@ -32,6 +32,10 @@ func TestParseRange(t *testing.T) {
 		{in: `v1.11.0 \- 1.11.4`, inside: []string{"1.11.4"}, outside: []string{"1.11.5"}},
 		{in: "v1.20 - v1.21", inside: []string{"1.20.0", "1.21.9"}, outside: []string{"1.19.9", "1.22.0"}},
 		{in: "v2.0.0-alpha.0", wantFail: true},
+		{in: "v1.29.3 - v1.29.0", wantFail: true},
+		{in: "v1.22 - v1.21", wantFail: true},
+		{in: "v1.21.5 - v1.21", inside: []string{"1.21.9"}, outside: []string{"1.21.4"}},
+		{in: "v1.2.3 - v1.2.3", inside: []string{"1.2.3"}, outside: []string{"1.2.4"}},
 		{in: "<= v1", wantFail: true},
 		{in: "all versions", wantFail: true},
 	}
@@ -125,6 +129,21 @@ func TestParseAffected(t *testing.T) {
 		}
 	})
 
+	t.Run("exclusive series start does not re-include fixed patches", func(t *testing.T) {
+		affected, err := parseAffected([]string{
+			"- ingress-nginx: < 1.13.8",
+			"- ingress-nginx: < 1.14.4",
+			"- ingress-nginx: < 1.15.0",
+		})
+		require.NoError(t, err)
+		for _, v := range []string{"1.12.0", "1.13.7", "1.14.0", "1.14.3"} {
+			assert.True(t, containsAny(affected["ingress-nginx"], mustVersion(t, v)), v)
+		}
+		for _, v := range []string{"1.13.8", "1.14.4", "1.14.9", "1.15.0"} {
+			assert.False(t, containsAny(affected["ingress-nginx"], mustVersion(t, v)), v)
+		}
+	})
+
 	for name, lines := range map[string][]string{
 		"no lines":               nil,
 		"no component":           {"v1.22.0 - v1.22.1"},
@@ -133,6 +152,7 @@ func TestParseAffected(t *testing.T) {
 		"prose next to versions": {"The feature gate is enabled by default starting on version v1.31.", "- kube-controller-manager: <= v1.30.14"},
 		"unparseable range":      {"- kubernetes-csi-proxy <= v2.0.0-alpha.0"},
 		"unscopable major bound": {"- kubelet < v2.0.0", "- kubelet <= v1.5.3"},
+		"reversed range":         {"- kube-apiserver v1.29.3 - v1.29.0"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			affected, err := parseAffected(lines)

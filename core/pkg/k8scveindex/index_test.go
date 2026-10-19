@@ -65,6 +65,10 @@ func TestLookup(t *testing.T) {
 		{"CVE-2099-0001", "kubelet", "1.28.4", "linux", Unattributed},
 		{"CVE-2024-3177", "kube-apiserver", "1.28", "linux", Unattributed},
 		{"CVE-2024-3177", "kube-apiserver", "", "linux", Unattributed},
+		{"CVE-2024-3177", "kube-apiserver", "1.28.4", "", Unattributed},
+		{"CVE-2023-3676", "kubelet", "1.27.3", "", Unattributed},
+		{"CVE-2023-3676", "kubelet", "1.27.3", "darwin", Unattributed},
+		{"CVE-2024-3177", "kube-apiserver", "1.28.4", "Linux", Applicable},
 	}
 
 	for _, tt := range tests {
@@ -96,6 +100,9 @@ func TestEmbeddedFeed(t *testing.T) {
 	assert.Equal(t, NotApplicable, ix.Lookup("CVE-2023-3676", "kubelet", "1.27.3", "linux"))
 	assert.Equal(t, NotApplicable, ix.Lookup("CVE-2023-5528", "kubelet", "1.27.3", "linux"))
 	assert.Equal(t, Applicable, ix.Lookup("CVE-2023-5528", "kubelet", "1.27.3", "windows"))
+	assert.Equal(t, Applicable, ix.Lookup("CVE-2026-3288", "ingress-nginx", "1.14.3", "linux"))
+	assert.Equal(t, NotApplicable, ix.Lookup("CVE-2026-3288", "ingress-nginx", "1.14.4", "linux"))
+	assert.Equal(t, NotApplicable, ix.Lookup("CVE-2026-3288", "ingress-nginx", "1.15.0", "linux"))
 }
 
 func TestStale(t *testing.T) {

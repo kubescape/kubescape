@@ -105,6 +105,9 @@ func parseRange(s string) (versionRange, error) {
 		if !full {
 			to = to.nextMinor()
 		}
+		if to.compare(from) < 0 || (!full && to.compare(from) == 0) {
+			return versionRange{}, fmt.Errorf("reversed range %q", s)
+		}
 		return versionRange{From: &from, To: &to, ToInclusive: full}, nil
 	}
 	if m := exactRange.FindStringSubmatch(s); m != nil {
@@ -180,12 +183,19 @@ func parseAffected(lines []string) (map[string][]versionRange, error) {
 
 // scopeUpperBounds handles entries that list one "<= vX.Y.Z" line per
 // supported minor, such as "<= v1.28.0" and "<= v1.27.4". Each of those only
-// covers its own minor series; only the lowest stays open below.
+// covers its own minor series; only the lowest stays open below. An exclusive
+// "< vX.Y.0" covers the X.(Y-1) series only when no other bound does, so it
+// cannot re-include patches another line marks as fixed.
 func scopeUpperBounds(ranges []versionRange) error {
 	var upper []int
+	covered := map[[2]int]bool{}
 	for i, r := range ranges {
-		if r.From == nil && r.To != nil {
-			upper = append(upper, i)
+		if r.From != nil || r.To == nil {
+			continue
+		}
+		upper = append(upper, i)
+		if !isSeriesStart(r) {
+			covered[[2]int{r.To.major, r.To.minor}] = true
 		}
 	}
 	if len(upper) < 2 {
@@ -193,14 +203,21 @@ func scopeUpperBounds(ranges []versionRange) error {
 	}
 	slices.SortFunc(upper, func(a, b int) int { return ranges[a].To.compare(*ranges[b].To) })
 	for _, i := range upper[1:] {
-		from := semver{ranges[i].To.major, ranges[i].To.minor, 0}
-		if !ranges[i].ToInclusive && ranges[i].To.patch == 0 {
-			if from.minor == 0 {
-				return fmt.Errorf("cannot scope < %d.0.0 to a minor series", from.major)
+		to := *ranges[i].To
+		from := semver{to.major, to.minor, 0}
+		if isSeriesStart(ranges[i]) {
+			if to.minor == 0 {
+				return fmt.Errorf("cannot scope < %d.0.0 to a minor series", to.major)
 			}
-			from.minor--
+			if !covered[[2]int{to.major, to.minor - 1}] {
+				from.minor--
+			}
 		}
 		ranges[i].From = &from
 	}
 	return nil
+}
+
+func isSeriesStart(r versionRange) bool {
+	return !r.ToInclusive && r.To.patch == 0
 }
