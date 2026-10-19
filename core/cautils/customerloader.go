@@ -152,8 +152,6 @@ func NewLocalConfig(accountID, accessKey, clusterName, customClusterName string)
 		lc.configObj.ClusterName = AdoptClusterName(clusterName) // override config clusterName
 	}
 
-	initializeCloudAPI(lc)
-
 	return lc
 }
 
@@ -660,7 +658,14 @@ func initializeCloudAPI(c ITenantConfig) *v1.KSCloudAPI {
 
 func GetTenantConfig(ctx context.Context, accountID, accessKey, clusterName, customClusterName string, k8s *k8sinterface.KubernetesApi) ITenantConfig {
 	if !k8sinterface.IsConnectedToCluster() || k8s == nil {
-		return NewLocalConfig(accountID, accessKey, clusterName, customClusterName)
+		lc := NewLocalConfig(accountID, accessKey, clusterName, customClusterName)
+		initializeCloudAPI(lc)
+		return lc
 	}
 	return NewClusterConfig(ctx, k8s, accountID, accessKey, clusterName, customClusterName)
+}
+
+// InitCloudAPI initializes the KS Cloud API connector from the given tenant configuration.
+func InitCloudAPI(c ITenantConfig) *v1.KSCloudAPI {
+	return initializeCloudAPI(c)
 }

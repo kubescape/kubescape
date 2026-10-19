@@ -102,6 +102,7 @@ func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo, policyIdenti
 			tenantConfig = cautils.GetTenantConfig(ctx, scanInfo.AccountID, scanInfo.AccessKey, scanInfo.GetClusterContextName(), scanInfo.CustomClusterName, k8sForTenant)
 		}
 	}
+	cautils.InitCloudAPI(tenantConfig)
 
 	// Set submit behavior AFTER loading tenant config
 	setSubmitBehavior(scanInfo, tenantConfig)
@@ -169,8 +170,10 @@ func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo, policyIdenti
 
 // hasResolvedTenantConfig reports whether all required tenant configuration fields
 // (AccountID, AccessKey, CloudReportURL, and CloudAPIURL) are already resolved locally
-// and supported by explicit credential overrides, eliminating the need to query in-cluster
-// ConfigMap and Secret fixtures.
+// from cached config, services.json, or environment variables, and supported by explicit
+// credential overrides, eliminating the need to query in-cluster ConfigMap and Secret fixtures.
+// If either endpoint is missing locally and would depend on connector fallback, discovery
+// is preserved so that an in-cluster ConfigMap can take precedence.
 func hasResolvedTenantConfig(scanInfo *cautils.ScanInfo, tc cautils.ITenantConfig) bool {
 	if tc == nil {
 		return false

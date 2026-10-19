@@ -9,8 +9,10 @@ import (
 	"sync/atomic"
 	"testing"
 
+	v1 "github.com/kubescape/backend/pkg/client/v1"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/cautils/getter"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
@@ -534,4 +536,141 @@ func TestGetInterfaces_NonClusterScan_ServicesJsonTakesPrecedenceOverCachedUrls(
 	assert.Equal(t, int32(0), callCount.Load(), "kubernetesAPIFunc should not be called when explicit credentials are provided")
 	assert.Equal(t, servicesAPI, interfaces.tenantConfig.GetCloudAPIURL(), "services.json API URL must outrank cached URL")
 	assert.Equal(t, servicesReport, interfaces.tenantConfig.GetCloudReportURL(), "services.json Report URL must outrank cached URL")
+}
+
+// TestGetInterfaces_NonClusterScan_ConflictingConnectorAndClusterConfigMapPreservesClusterPrecedence verifies that
+// for a manifest scan with explicit account/key, empty cache/services/environment endpoints, an existing global
+// connector using URLs A, and a connected cluster ConfigMap supplying URLs B, getInterfaces preserves cluster
+// discovery and selects the cluster ConfigMap URLs B over the connector fallback URLs A.
+func TestGetInterfaces_NonClusterScan_ConflictingConnectorAndClusterConfigMapPreservesClusterPrecedence(t *testing.T) {
+	isolateCachedConfigTest(t)
+
+	const (
+		accountID        = "11111111-2222-3333-4444-555555555555"
+		accessKey        = "my-access-key"
+		connectorAPIURL  = "https://api-connector-a.example.com"
+		connectorReport  = "https://report-connector-a.example.com"
+		clusterAPIURL    = "https://api-cluster-b.example.com"
+		clusterReportURL = "https://report-cluster-b.example.com"
+		ksNamespace      = "kubescape"
+	)
+
+	// Pre-populate the global connector with URLs A
+	prevConnector := getter.GetKSCloudAPIConnector()
+	t.Cleanup(func() { getter.SetKSCloudAPIConnector(prevConnector) })
+	connectorA, err := v1.NewKSCloudAPI(connectorAPIURL, connectorReport, "", "")
+	require.NoError(t, err)
+	getter.SetKSCloudAPIConnector(connectorA)
+
+	// Connected cluster ConfigMap supplies URLs B
+	configMap := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "kubescape-config",
+			Namespace: ksNamespace,
+			Labels: map[string]string{
+				"kubescape.io/infra": "config",
+			},
+		},
+		Data: map[string]string{
+			"clusterData": fmt.Sprintf(`{"cloudReportURL":%q,"cloudAPIURL":%q}`, clusterReportURL, clusterAPIURL),
+		},
+	}
+
+	fakeClient := fake.NewSimpleClientset(configMap)
+	fakeK8s := &k8sinterface.KubernetesApi{
+		KubernetesClient: fakeClient,
+	}
+
+	var callCount atomic.Int32
+	originalKubernetesAPIFunc := kubernetesAPIFunc
+	kubernetesAPIFunc = func() *k8sinterface.KubernetesApi {
+		callCount.Add(1)
+		return fakeK8s
+	}
+	t.Cleanup(func() { kubernetesAPIFunc = originalKubernetesAPIFunc })
+
+	originalK8SConfig := k8sinterface.K8SConfig
+	t.Cleanup(func() { k8sinterface.K8SConfig = originalK8SConfig })
+	k8sinterface.K8SConfig = &restclient.Config{}
+
+	originalConnected := k8sinterface.IsConnectedToCluster()
+	t.Cleanup(func() { k8sinterface.SetConnectedToCluster(originalConnected) })
+	k8sinterface.SetConnectedToCluster(true)
+
+	// Manifest scan with explicit account and key, but no endpoints in cache, services.json, or environment
+	scanInfo := &cautils.ScanInfo{
+		AccountID:     accountID,
+		AccessKey:     accessKey,
+		InputPatterns: []string{"manifest.yaml"},
+		Local:         true,
+	}
+
+	interfaces, err := getInterfaces(context.Background(), scanInfo, nil)
+	require.NoError(t, err)
+
+	assert.Equal(t, int32(1), callCount.Load(), "kubernetesAPIFunc must be called when endpoints depend on connector fallback")
+	assert.IsType(t, &cautils.ClusterConfig{}, interfaces.tenantConfig, "must select ClusterConfig when connected cluster ConfigMap supplies endpoints")
+	assert.Equal(t, clusterAPIURL, interfaces.tenantConfig.GetCloudAPIURL(), "cluster ConfigMap API URL B must take precedence over connector fallback URLs A")
+	assert.Equal(t, clusterReportURL, interfaces.tenantConfig.GetCloudReportURL(), "cluster ConfigMap Report URL B must take precedence over connector fallback URLs A")
+
+	// Verify that the connector was initialized after final configuration selection with URLs B and explicit credentials
+	gotConnector := getter.GetKSCloudAPIConnector()
+	require.NotNil(t, gotConnector)
+	assert.Equal(t, clusterAPIURL, gotConnector.GetCloudAPIURL(), "connector API URL must be updated with cluster ConfigMap URL B")
+	assert.Equal(t, clusterReportURL, gotConnector.GetCloudReportURL(), "connector Report URL must be updated with cluster ConfigMap URL B")
+	assert.Equal(t, accountID, gotConnector.GetAccountID())
+	assert.Equal(t, accessKey, gotConnector.GetAccessKey())
+}
+
+// TestGetInterfaces_NonClusterScan_ConnectorFallbackWhenClusterDisconnected verifies that
+// when explicit credentials are provided without local endpoints, and cluster discovery
+// finds no connected cluster, the connector fallback URLs A are preserved and submission is supported.
+func TestGetInterfaces_NonClusterScan_ConnectorFallbackWhenClusterDisconnected(t *testing.T) {
+	isolateCachedConfigTest(t)
+
+	const (
+		accountID       = "11111111-2222-3333-4444-555555555555"
+		accessKey       = "my-access-key"
+		connectorAPIURL = "https://api-connector-a.example.com"
+		connectorReport = "https://report-connector-a.example.com"
+	)
+
+	prevConnector := getter.GetKSCloudAPIConnector()
+	t.Cleanup(func() { getter.SetKSCloudAPIConnector(prevConnector) })
+	connectorA, err := v1.NewKSCloudAPI(connectorAPIURL, connectorReport, "", "")
+	require.NoError(t, err)
+	getter.SetKSCloudAPIConnector(connectorA)
+
+	var callCount atomic.Int32
+	originalKubernetesAPIFunc := kubernetesAPIFunc
+	kubernetesAPIFunc = func() *k8sinterface.KubernetesApi {
+		callCount.Add(1)
+		return nil
+	}
+	t.Cleanup(func() { kubernetesAPIFunc = originalKubernetesAPIFunc })
+
+	originalConnected := k8sinterface.IsConnectedToCluster()
+	t.Cleanup(func() { k8sinterface.SetConnectedToCluster(originalConnected) })
+	k8sinterface.SetConnectedToCluster(false)
+
+	scanInfo := &cautils.ScanInfo{
+		AccountID:     accountID,
+		AccessKey:     accessKey,
+		InputPatterns: []string{"manifest.yaml"},
+		Local:         true,
+	}
+
+	interfaces, err := getInterfaces(context.Background(), scanInfo, nil)
+	require.NoError(t, err)
+
+	assert.Equal(t, int32(1), callCount.Load(), "kubernetesAPIFunc must be called when local endpoints are missing")
+	assert.IsType(t, &cautils.LocalConfig{}, interfaces.tenantConfig, "must fall back to LocalConfig when cluster is disconnected")
+	assert.Equal(t, connectorAPIURL, interfaces.tenantConfig.GetCloudAPIURL(), "must fall back to connector API URL A")
+	assert.Equal(t, connectorReport, interfaces.tenantConfig.GetCloudReportURL(), "must fall back to connector Report URL A")
+
+	// Explicit submission decision remains supported with fallback report URL
+	submitScanInfo := &cautils.ScanInfo{}
+	submitScanInfo.Submit.SetBool(true)
+	setSubmitBehavior(submitScanInfo, interfaces.tenantConfig)
+	assert.True(t, submitScanInfo.Submit.GetBool(), "explicit submission must remain enabled with connector-fallback report URL")
 }
