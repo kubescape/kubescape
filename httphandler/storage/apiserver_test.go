@@ -880,6 +880,37 @@ func TestStorePostureReportResults_NonRecoverableError(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func TestStorePostureReportResults_ContinuesAfterResultMissingFromReport(t *testing.T) {
+	store := NewFakeAPIServerStorage("kubescape")
+	ctx := context.Background()
+
+	// The host sensor can emit a result whose ID has an empty name and no
+	// matching resource in the report.
+	pr := &v2.PostureReport{
+		Resources: []reporthandling.Resource{
+			{ResourceID: "pod-id", Object: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "Pod",
+				"metadata":   map[string]any{"name": "test-pod", "namespace": "default"},
+			}},
+		},
+		Results: []resourcesresults.Result{
+			{ResourceID: "hostdata.kubescape.cloud/v1beta0/KubeletInfo/"},
+			{ResourceID: "pod-id"},
+		},
+	}
+
+	err := store.StorePostureReportResults(ctx, pr)
+
+	assert.ErrorContains(t, err, "failed to store 1 of 2 posture scan results")
+	assert.ErrorContains(t, err, "resource hostdata.kubescape.cloud/v1beta0/KubeletInfo/ not found in report")
+
+	summaries, listErr := store.StorageClient.WorkloadConfigurationScanSummaries("default").List(ctx, metav1.ListOptions{})
+	assert.NoError(t, listErr)
+	assert.Len(t, summaries.Items, 1)
+	assert.Equal(t, "pod-test-pod", summaries.Items[0].Name)
+}
+
 func TestStorePostureReportResults_PersistsControlsFromSummaryWhenAssociationsAreMissing(t *testing.T) {
 	const resourceID = "v1/default/Pod/test-pod"
 
