@@ -1310,7 +1310,9 @@ kubescape vap deploy-library | kubectl apply -f -
 
 #### create-policy-binding
 
-Create a ValidatingAdmissionPolicyBinding.
+Create a ValidatingAdmissionPolicyBinding. The same validation is available to
+AI assistants as the `create_admission_policy_binding` tool of the
+[MCP server](mcp-server.md#admission-policy-tools).
 
 ```bash
 kubescape vap create-policy-binding [flags]

@@ -1,6 +1,7 @@
 package vap
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -113,50 +114,22 @@ func getCreatePolicyBindingCmd() *cobra.Command {
 		Short: "Create a policy binding",
 		Long:  ``,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// Validate the inputs
-			if err := isValidK8sObjectName(policyBindingName); err != nil {
-				return fmt.Errorf("invalid policy binding name %s: %w", policyBindingName, err)
-			}
-			resolvedPolicyName, err := resolvePolicyName(policyName, controlID)
+			result, err := BuildPolicyBinding(BindingOptions{
+				Name:               policyBindingName,
+				PolicyName:         policyName,
+				ControlID:          controlID,
+				Namespaces:         namespaceArr,
+				Labels:             labelArr,
+				Actions:            actionArr,
+				ResourceRules:      resourceRuleArr,
+				ParameterReference: parameterReference,
+			})
+			// Warnings found before a later check failed are still worth showing.
+			logWarnings(result.Warnings)
 			if err != nil {
 				return err
 			}
-			normalizedControlID := strings.ToUpper(strings.TrimSpace(controlID))
-			if err := checkParameterReference(parameterReference, normalizedControlID, resolvedPolicyName); err != nil {
-				return err
-			}
-			if err := isValidK8sObjectName(resolvedPolicyName); err != nil {
-				return fmt.Errorf("invalid policy name %s: %w", resolvedPolicyName, err)
-			}
-			if err := checkResourceRulesInPolicyScope(resourceRuleArr, normalizedControlID, resolvedPolicyName); err != nil {
-				return err
-			}
-			for _, namespace := range namespaceArr {
-				if err := isValidNamespace(namespace); err != nil {
-					return fmt.Errorf("invalid namespace %s: %w", namespace, err)
-				}
-			}
-			if err := checkNamespaceSelectorScope(namespaceArr, resourceRuleArr, normalizedControlID, resolvedPolicyName); err != nil {
-				return err
-			}
-			if _, err := parseObjectSelectorLabels(labelArr); err != nil {
-				return err
-			}
-			actions, err := parseValidationActions(actionArr)
-			if err != nil {
-				return err
-			}
-			if parameterReference != "" {
-				if err := isValidK8sObjectName(parameterReference); err != nil {
-					return fmt.Errorf("invalid parameter reference %s: %w", parameterReference, err)
-				}
-			}
-
-			content, err := createPolicyBinding(policyBindingName, resolvedPolicyName, actions, parameterReference, namespaceArr, labelArr, resourceRuleArr)
-			if err != nil {
-				return err
-			}
-			return writeOutput(content, outputFile)
+			return writeOutput(result.Manifest, outputFile)
 		},
 	}
 	// Must specify the name of the policy binding
@@ -172,6 +145,135 @@ func getCreatePolicyBindingCmd() *cobra.Command {
 	createPolicyBindingCmd.Flags().StringVarP(&outputFile, "output", "o", "", "Write output to file instead of stdout")
 
 	return createPolicyBindingCmd
+}
+
+// ErrMarshalManifest marks a failure to serialize the binding, as opposed to a
+// rejected input, so callers can tell the two apart with errors.Is.
+var ErrMarshalManifest = errors.New("marshal policy binding")
+
+// BindingOptions are the inputs of BuildPolicyBinding. They carry the same
+// values, in the same formats, as the flags of `vap create-policy-binding`.
+type BindingOptions struct {
+	// Name is the name of the ValidatingAdmissionPolicyBinding.
+	Name string
+	// PolicyName and ControlID select the policy to bind; exactly one is required.
+	PolicyName string
+	ControlID  string
+	// Namespaces narrows the binding to these namespaces.
+	Namespaces []string
+	// Labels narrows the binding to objects carrying these labels (key=value).
+	Labels []string
+	// Actions are the validation actions (Deny, Warn, Audit). At least one is
+	// required: the Deny default belongs to the caller, as it does to the flag.
+	Actions []string
+	// ResourceRules restricts the binding to group/version/resource triples.
+	ResourceRules []string
+	// ParameterReference names the object the policy reads as params.
+	ParameterReference string
+}
+
+// BindingResult is what BuildPolicyBinding produced.
+type BindingResult struct {
+	// PolicyName is the resolved ValidatingAdmissionPolicy name.
+	PolicyName string
+	// ControlID is the normalized control ID the binding was requested by, empty
+	// when it was requested by policy name.
+	ControlID string
+	// Manifest is the binding as YAML.
+	Manifest string
+	// Warnings are the scope findings that did not block the binding. They are
+	// returned even when BuildPolicyBinding fails on a later check.
+	Warnings []Warning
+}
+
+// WarningField is one key/value detail of a Warning.
+type WarningField struct {
+	Key   string
+	Value string
+}
+
+// Warning is a finding that does not block the binding but that the caller
+// should see.
+type Warning struct {
+	Message string
+	Fields  []WarningField
+}
+
+// String renders the warning as a single line: the message followed by its
+// fields as key=value pairs.
+func (w Warning) String() string {
+	if len(w.Fields) == 0 {
+		return w.Message
+	}
+	parts := make([]string, 0, len(w.Fields))
+	for _, f := range w.Fields {
+		parts = append(parts, fmt.Sprintf("%s=%q", f.Key, f.Value))
+	}
+	return w.Message + " (" + strings.Join(parts, ", ") + ")"
+}
+
+func logWarnings(warnings []Warning) {
+	for _, w := range warnings {
+		fields := make([]helpers.IDetails, 0, len(w.Fields))
+		for _, f := range w.Fields {
+			fields = append(fields, helpers.String(f.Key, f.Value))
+		}
+		logger.L().Warning(w.Message, fields...)
+	}
+}
+
+// BuildPolicyBinding validates the options and renders the binding manifest. It
+// is the single path behind `vap create-policy-binding` and the MCP tool, so
+// both accept and refuse exactly the same inputs. It reads only the embedded
+// policy library: no cluster, file or network access.
+func BuildPolicyBinding(opts BindingOptions) (BindingResult, error) {
+	var result BindingResult
+	if err := isValidK8sObjectName(opts.Name); err != nil {
+		return result, fmt.Errorf("invalid policy binding name %s: %w", opts.Name, err)
+	}
+	resolvedPolicyName, err := resolvePolicyName(opts.PolicyName, opts.ControlID)
+	if err != nil {
+		return result, err
+	}
+	normalizedControlID := strings.ToUpper(strings.TrimSpace(opts.ControlID))
+	result.PolicyName = resolvedPolicyName
+	result.ControlID = normalizedControlID
+	if err := checkParameterReference(opts.ParameterReference, normalizedControlID, resolvedPolicyName); err != nil {
+		return result, err
+	}
+	if err := isValidK8sObjectName(resolvedPolicyName); err != nil {
+		return result, fmt.Errorf("invalid policy name %s: %w", resolvedPolicyName, err)
+	}
+	warnings, err := checkResourceRulesInPolicyScope(opts.ResourceRules, normalizedControlID, resolvedPolicyName)
+	result.Warnings = append(result.Warnings, warnings...)
+	if err != nil {
+		return result, err
+	}
+	for _, namespace := range opts.Namespaces {
+		if err := isValidNamespace(namespace); err != nil {
+			return result, fmt.Errorf("invalid namespace %s: %w", namespace, err)
+		}
+	}
+	warnings, err = checkNamespaceSelectorScope(opts.Namespaces, opts.ResourceRules, normalizedControlID, resolvedPolicyName)
+	result.Warnings = append(result.Warnings, warnings...)
+	if err != nil {
+		return result, err
+	}
+	if _, err := parseObjectSelectorLabels(opts.Labels); err != nil {
+		return result, err
+	}
+	actions, err := parseValidationActions(opts.Actions)
+	if err != nil {
+		return result, err
+	}
+	if opts.ParameterReference != "" {
+		if err := isValidK8sObjectName(opts.ParameterReference); err != nil {
+			return result, fmt.Errorf("invalid parameter reference %s: %w", opts.ParameterReference, err)
+		}
+	}
+
+	result.Manifest, err = createPolicyBinding(opts.Name, resolvedPolicyName, actions, opts.ParameterReference, opts.Namespaces, opts.Labels, opts.ResourceRules)
+	return result, err
 }
 
 // resolvePolicyName resolves the --policy/--control pair to a policy name.
@@ -612,34 +714,39 @@ func policyParamKind(controlID, policyName string) (paramKind *admissionv1.Param
 // the control's policy, --policy off the named one. A policy we know nothing
 // about — a name outside the embedded bundle, or one declaring no resource
 // rules — is left unchecked rather than blocked.
-func checkResourceRulesInPolicyScope(rules []string, controlID, policyName string) error {
+func checkResourceRulesInPolicyScope(rules []string, controlID, policyName string) ([]Warning, error) {
 	if len(rules) == 0 {
-		return nil
+		return nil, nil
 	}
 	constraints, err := policyMatchConstraints(controlID, policyName)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if constraints == nil || len(constraints.ResourceRules) == 0 {
-		return nil
+		return nil, nil
 	}
 	parsed, err := parseResourceRules(rules)
 	if err != nil {
-		return err
+		return nil, err
 	}
+	var warnings []Warning
 	for _, entry := range parsed {
 		switch classifyResourceRule(entry.rule, constraints.ResourceRules) {
 		case ruleOutsidePolicy:
-			return fmt.Errorf("resource rule %q is outside the matchConstraints of policy %s, so the binding would match nothing; the policy matches %s",
+			return warnings, fmt.Errorf("resource rule %q is outside the matchConstraints of policy %s, so the binding would match nothing; the policy matches %s",
 				entry.raw, policyName, describeResourceRules(constraints.ResourceRules))
 		case ruleConvertsToPolicy:
-			logger.L().Warning("resource rule names another API group or version than the policy constrains; the binding matches only if the cluster serves them as equivalent forms of one resource",
-				helpers.String("rule", entry.raw),
-				helpers.String("policy", policyName),
-				helpers.String("policyMatches", describeResourceRules(constraints.ResourceRules)))
+			warnings = append(warnings, Warning{
+				Message: "resource rule names another API group or version than the policy constrains; the binding matches only if the cluster serves them as equivalent forms of one resource",
+				Fields: []WarningField{
+					{Key: "rule", Value: entry.raw},
+					{Key: "policy", Value: policyName},
+					{Key: "policyMatches", Value: describeResourceRules(constraints.ResourceRules)},
+				},
+			})
 		}
 	}
-	return nil
+	return warnings, nil
 }
 
 // policyMatchConstraints resolves the bound policy's matchConstraints, nil when
@@ -1054,35 +1161,38 @@ func narrowWildcard(value, bound string) string {
 // can drop the rest. A --namespace that narrows nothing at all is refused, the
 // way --label is when it selects nothing — the emitted binding is then no
 // narrower than one carrying neither flag, and nothing else would say so.
-func checkNamespaceSelectorScope(namespaces, resourceRules []string, controlID, policyName string) error {
+func checkNamespaceSelectorScope(namespaces, resourceRules []string, controlID, policyName string) ([]Warning, error) {
 	if len(namespaces) == 0 {
-		return nil
+		return nil, nil
 	}
 	constraints, err := policyMatchConstraints(controlID, policyName)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if constraints == nil || len(constraints.ResourceRules) == 0 {
-		return nil
+		return nil, nil
 	}
 	bindingRules, err := parseResourceRules(resourceRules)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	reach := resolveNamespaceSelectorReach(constraints.ResourceRules, bindingResourceRules(bindingRules))
 	if len(reach.alwaysMatched) == 0 {
-		return nil
+		return nil, nil
 	}
 	if !reach.narrowable {
-		return fmt.Errorf("--namespace narrows nothing on %s: every resource the binding covers is cluster-scoped (%s), and a namespaceSelector never exempts a cluster-scoped request; omit --namespace, or point --resource-rule at a namespaced resource the policy matches",
+		return nil, fmt.Errorf("--namespace narrows nothing on %s: every resource the binding covers is cluster-scoped (%s), and a namespaceSelector never exempts a cluster-scoped request; omit --namespace, or point --resource-rule at a namespaced resource the policy matches",
 			describeBoundPolicy(controlID, policyName), strings.Join(reach.alwaysMatched, ", "))
 	}
-	logger.L().Warning("--namespace does not narrow the cluster-scoped resources this policy matches; the apiserver never exempts a cluster-scoped request from a binding's namespaceSelector, so the binding enforces on them cluster-wide",
-		helpers.String("policy", policyName),
-		helpers.String("clusterScoped", strings.Join(reach.alwaysMatched, ", ")),
-		helpers.String("hint", "drop them from the binding with --resource-rule"))
-	return nil
+	return []Warning{{
+		Message: "--namespace does not narrow the cluster-scoped resources this policy matches; the apiserver never exempts a cluster-scoped request from a binding's namespaceSelector, so the binding enforces on them cluster-wide",
+		Fields: []WarningField{
+			{Key: "policy", Value: policyName},
+			{Key: "clusterScoped", Value: strings.Join(reach.alwaysMatched, ", ")},
+			{Key: "hint", Value: "drop them from the binding with --resource-rule"},
+		},
+	}}, nil
 }
 
 // Create a policy binding
@@ -1133,7 +1243,7 @@ func createPolicyBinding(bindingName string, policyName string, actions []admiss
 	// Marshal the policy binding to YAML
 	out, err := yaml.Marshal(policyBinding)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("%w: %v", ErrMarshalManifest, err)
 	}
 	return string(out), nil
 }

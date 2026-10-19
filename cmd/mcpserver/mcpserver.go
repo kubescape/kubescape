@@ -1425,6 +1425,8 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 			return mcpToolError(ErrCodeScanFailed, fmt.Sprintf("failed to list admission policies: %v", err), nil), nil
 		}
 		return mcp.NewToolResultText(string(result)), nil
+	case "create_admission_policy_binding":
+		return ksServer.CreateAdmissionPolicyBinding(ctx, arguments)
 	default:
 		return nil, fmt.Errorf("unknown tool: %s", name)
 	}
@@ -1608,9 +1610,23 @@ func createPolicyListingTools(ksServer *KubescapeMcpserver) {
 		mcp.WithDescription("List the ValidatingAdmissionPolicies in the CEL admission policy library embedded in Kubescape, with the Kubescape control each one implements (controlID), whether it reads parameters (takesParams), its failurePolicy and the resources it matches. Read-only: it does not create, bind or apply any policy. Kubescape's ValidatingAdmissionPolicy support is experimental."),
 		mcp.WithReadOnlyHintAnnotation(true),
 	)
+	createAdmissionPolicyBindingTool := mcp.NewTool(
+		"create_admission_policy_binding",
+		mcp.WithDescription("Generate a ValidatingAdmissionPolicyBinding manifest for a policy in the embedded CEL admission policy library, validated like `kubescape vap create-policy-binding`. Name the policy with exactly one of policy_name (see list_admission_policies) or control_id. Read-only: it returns the YAML in manifest and any scope warnings in warnings, and does not create or apply anything in a cluster. Kubescape's ValidatingAdmissionPolicy support is experimental."),
+		mcp.WithString("binding_name", mcp.Required(), mcp.Description("Name of the binding (a DNS-1123 subdomain)")),
+		mcp.WithString("policy_name", mcp.Description("Name of the ValidatingAdmissionPolicy to bind. Exactly one of policy_name or control_id is required")),
+		mcp.WithString("control_id", mcp.Description("Kubescape control ID whose policy to bind (e.g. C-0016). Exactly one of policy_name or control_id is required")),
+		mcp.WithArray("validation_actions", mcp.WithStringItems(), mcp.Description("Actions to take when the policy fails: Deny, Warn, Audit. Deny and Warn cannot be combined. Defaults to [\"Deny\"]")),
+		mcp.WithString("parameter_reference", mcp.Description("Name of the object the policy reads as params. Required for a policy that declares a paramKind, rejected for one that declares none")),
+		mcp.WithArray("namespaces", mcp.WithStringItems(), mcp.Description("Namespaces to narrow the binding to. Narrows only namespaced resources; cluster-scoped ones are never exempted")),
+		mcp.WithArray("labels", mcp.WithStringItems(), mcp.Description("Object label selector entries as key=value or key==value")),
+		mcp.WithArray("resource_rules", mcp.WithStringItems(), mcp.Description("Restrict the binding to group/version/resource entries the policy already matches (e.g. apps/v1/deployments, /v1/pods). Omit to bind everything the policy matches")),
+		mcp.WithReadOnlyHintAnnotation(true),
+	)
 	ksServer.s.AddTool(listFrameworksTool, ksServer.toolHandler(listFrameworksTool.Name))
 	ksServer.s.AddTool(listControlsTool, ksServer.toolHandler(listControlsTool.Name))
 	ksServer.s.AddTool(listAdmissionPoliciesTool, ksServer.toolHandler(listAdmissionPoliciesTool.Name))
+	ksServer.s.AddTool(createAdmissionPolicyBindingTool, ksServer.toolHandler(createAdmissionPolicyBindingTool.Name))
 }
 
 func GetMCPServerCmd() *cobra.Command {

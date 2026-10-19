@@ -491,6 +491,50 @@ A report file does not carry the `truncated` flag of the `run_framework_security
 
 **Errors:** `INVALID_ARGUMENT` for a missing, conflicting, unreadable, oversized or non-report input, or a report whose recorded scan location is outside `base_path`. A single resource whose manifest resolves outside `base_path` is not an error: it is skipped and reported as `manual`.
 
+### Admission Policy Tools
+
+Both tools read only the CEL admission policy library embedded in the Kubescape binary. They make no cluster, file or network access, and neither applies anything to a cluster. Kubescape's ValidatingAdmissionPolicy support is experimental.
+
+#### `list_admission_policies`
+
+List the ValidatingAdmissionPolicies in the embedded library, with the Kubescape control each one implements (`controlID`), whether it reads parameters (`takesParams`), its `failurePolicy` and the `resources` it matches. It takes no arguments. The output is the same as `kubescape vap list-policies --format json`.
+
+#### `create_admission_policy_binding`
+
+Generate a `ValidatingAdmissionPolicyBinding` manifest. The tool runs the same validation as `kubescape vap create-policy-binding` and returns the YAML for you to review; it does **not** apply it to a cluster. Pipe the `manifest` to `kubectl apply -f -` yourself once you are happy with it.
+
+**Arguments:**
+
+| Argument | Type | Description |
+|----------|------|-------------|
+| `binding_name` | string, required | Name of the binding (a DNS-1123 subdomain) |
+| `policy_name` | string | Name of the policy to bind. Exactly one of `policy_name` or `control_id` is required |
+| `control_id` | string | Kubescape control ID whose policy to bind, in any casing (e.g. `C-0016`) |
+| `validation_actions` | string array | `Deny`, `Warn` and/or `Audit`. `Deny` and `Warn` cannot be combined. Default: `["Deny"]` |
+| `parameter_reference` | string | Name of the object the policy reads as params. Required for a policy that declares a `paramKind`, rejected for one that declares none |
+| `namespaces` | string array | Narrow the binding to these namespaces. Only namespaced resources are narrowed |
+| `labels` | string array | Object label selector, as `key=value` or `key==value` |
+| `resource_rules` | string array | Restrict the binding to `group/version/resource` entries the policy already matches, e.g. `apps/v1/deployments` or `/v1/pods` |
+
+**Response:**
+
+```json
+{
+  "policy": "kubescape-c-0016-allow-privilege-escalation",
+  "controlID": "C-0016",
+  "manifest": "apiVersion: admissionregistration.k8s.io/v1\nkind: ValidatingAdmissionPolicyBinding\n...",
+  "warnings": []
+}
+```
+
+- `policy` is the resolved policy name; `controlID` is present only when the binding was requested by control.
+- `manifest` is the generated YAML. The same inputs always produce the same manifest.
+- `warnings` is always an array. It lists scope findings that do not block the binding, such as a `namespaces` selector that narrows only some of the cluster-scoped and namespaced resources the policy matches, or a resource rule that names another API group or version than the policy constrains.
+
+A policy name that is not in the embedded library is accepted as is; its parameter and scope checks are skipped, as in the CLI.
+
+**Errors:** `INVALID_ARGUMENT` for any rejected input: a missing `binding_name`; neither or both of `policy_name` and `control_id`; an unknown control ID; an invalid binding name or namespace; a repeated action or `Deny` combined with `Warn`; a malformed label or resource rule; a resource rule outside the policy's match constraints; `namespaces` that narrow nothing because every covered resource is cluster-scoped; a missing `parameter_reference` for a policy with a `paramKind` (the message names the required kind); or a `parameter_reference` for a policy that takes none. Messages are the CLI's, so they may refer to the matching flag, for example `--parameter-reference`. `MARSHAL_ERROR` if the manifest or the response cannot be serialized.
+
 ### Compliance & Hardening Tools
 
 #### `predict_pss_compliance`
