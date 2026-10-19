@@ -161,6 +161,23 @@ func TestMarshalPayloadSlackOmitsFailingSectionWhenAllControlsPass(t *testing.T)
 	assert.Contains(t, got.Text, "0 of 1 controls failed")
 }
 
+func TestMarshalPayloadSlackKeepsNearPerfectScoreBelowHundred(t *testing.T) {
+	summary := &reportsummary.SummaryDetails{
+		ComplianceScore: 99.97,
+		Controls: reportsummary.ControlSummaries{
+			"C-0001": failedControl("C-0001", "Almost compliant", 5, 1),
+		},
+	}
+
+	raw, err := MarshalPayload("https://hooks.slack.com/services/T000/B000/secret", summary)
+	require.NoError(t, err)
+	var got slackPayload
+	require.NoError(t, json.Unmarshal(raw, &got))
+	assert.Equal(t, "Kubescape scan completed: 99.9% compliance; 1 of 1 controls failed.", got.Text)
+	require.Len(t, got.Blocks, 3)
+	assert.Equal(t, "*Compliance score*\n99.9%", got.Blocks[1].Fields[1].Text)
+}
+
 func TestMarshalPayloadRejectsNilSummary(t *testing.T) {
 	_, err := MarshalPayload("https://example.com/webhook", nil)
 	require.EqualError(t, err, "marshal notification payload: summary is nil")

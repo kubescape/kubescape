@@ -148,7 +148,7 @@ func runFrameworkScan(ctx context.Context, scanInfo *cautils.ScanInfo, ks meta.I
 	}
 
 	if results.GetComplianceScore() < float32(scanInfo.ComplianceThreshold) {
-		return results, gateFailure(fmt.Errorf("scan compliance-score is below permitted threshold: %.2f (compliance-threshold: %.2f)", results.GetComplianceScore(), scanInfo.ComplianceThreshold))
+		return results, gateFailure(fmt.Errorf("scan compliance-score is below permitted threshold: %s (compliance-threshold: %.2f)", cautils.ComplianceScoreToString(results.GetComplianceScore(), 2), scanInfo.ComplianceThreshold))
 	}
 
 	if err := enforceSeverityThresholds(&results.GetData().Report.SummaryDetails, scanInfo); err != nil {
@@ -227,7 +227,7 @@ func enforceCoverageThreshold(coverage cautils.ScanCoverage, totalControls int, 
 		return gateFailure(fmt.Errorf("scan loaded no controls: coverage is 0%% (fail-coverage-below: %.2f%%)", scanInfo.FailCoverageThreshold))
 	}
 	if coverage.CoverageScore < scanInfo.FailCoverageThreshold {
-		return gateFailure(fmt.Errorf("scan coverage is below permitted threshold: %.2f%% (fail-coverage-below: %.2f%%)", coverage.CoverageScore, scanInfo.FailCoverageThreshold))
+		return gateFailure(fmt.Errorf("scan coverage is below permitted threshold: %s%% (fail-coverage-below: %.2f%%)", cautils.ComplianceScoreToString(coverage.CoverageScore, 2), scanInfo.FailCoverageThreshold))
 	}
 	return nil
 }

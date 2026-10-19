@@ -49,6 +49,10 @@ func TestGateFailuresAreMarked(t *testing.T) {
 			err:     enforceCoverageThreshold(cautils.ScanCoverage{CoverageScore: 40}, 1, &cautils.ScanInfo{FailCoverageThreshold: 80}),
 			message: "scan coverage is below permitted threshold: 40.00% (fail-coverage-below: 80.00%)",
 		},
+		"coverage floor of 100 with a score just below it": {
+			err:     enforceCoverageThreshold(cautils.ScanCoverage{CoverageScore: 99.996}, 1, &cautils.ScanInfo{FailCoverageThreshold: 100}),
+			message: "scan coverage is below permitted threshold: 99.99% (fail-coverage-below: 100.00%)",
+		},
 		"coverage floor with no controls": {
 			err:     enforceCoverageThreshold(cautils.ScanCoverage{}, 0, &cautils.ScanInfo{FailCoverageThreshold: 1}),
 			message: "scan loaded no controls: coverage is 0% (fail-coverage-below: 1.00%)",
@@ -81,6 +85,19 @@ func TestComplianceThresholdIsAGate(t *testing.T) {
 			require.NotNil(t, results)
 			require.EqualError(t, err, "scan compliance-score is below permitted threshold: 50.00 (compliance-threshold: 80.00)")
 			assert.True(t, isGateFailure(err))
+		})
+	}
+}
+
+// TestComplianceThresholdMessageKeepsNearPerfectScoreBelowHundred pins that a score just under a threshold of 100 is not reported as 100.00.
+func TestComplianceThresholdMessageKeepsNearPerfectScoreBelowHundred(t *testing.T) {
+	runners := map[string]fleetRunner{"framework": runFrameworkScan, "control": runControlScan, "workload": runWorkloadScan}
+	for name, run := range runners {
+		t.Run(name, func(t *testing.T) {
+			var ks meta.IKubescape = &scoredWorkloadKubescape{complianceScore: 99.996}
+			_, err := run(context.Background(), &cautils.ScanInfo{ComplianceThreshold: 100}, ks, nil)
+
+			require.EqualError(t, err, "scan compliance-score is below permitted threshold: 99.99 (compliance-threshold: 100.00)")
 		})
 	}
 }
