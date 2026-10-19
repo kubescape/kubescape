@@ -192,6 +192,7 @@ func csvSafeRow(row []string) []string {
 	return row
 }
 
+// PrintSummaryCSV formats and writes summary data as CSV to w.
 func PrintSummaryCSV(w io.Writer, cs *ChangeSet, threshold string) error {
 	summary := Summarize(cs, threshold)
 	writer := csv.NewWriter(w)
@@ -202,6 +203,7 @@ func PrintSummaryCSV(w io.Writer, cs *ChangeSet, threshold string) error {
 	return writer.Error()
 }
 
+// writeSummaryCSV writes the formatted and sanitized summary rows to writer.
 func writeSummaryCSV(writer *csv.Writer, summary Summary) error {
 	for _, row := range summaryCSVRows(summary) {
 		if err := writer.Write(csvSafeRow(row)); err != nil {
