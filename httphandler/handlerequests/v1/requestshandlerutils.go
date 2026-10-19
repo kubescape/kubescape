@@ -399,8 +399,10 @@ func removeResultsFile(fileID string) error {
 		printer.PrometheusOutputExt,
 		printer.YamlOutputExt,
 		printer.CsvOutputExt,
+		printer.MarkdownOutputExt,
 		printer.CycloneDXOutputExt,
 		printer.SPDXOutputExt,
+		printer.ExceptionsOutputExt,
 	}
 
 	for _, dir := range dirs {
