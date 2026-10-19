@@ -164,6 +164,34 @@ func PrintSummaryYAML(w io.Writer, cs *ChangeSet, threshold string) error {
 	return err
 }
 
+// csvFormulaPrefixes contains the characters spreadsheets treat as the start of
+// an executable formula or command payload if placed at the start of a cell.
+// Leading whitespace is included too, since a cell starting with a newline or
+// carriage return can still execute a formula on its first non-blank line.
+const csvFormulaPrefixes = "=+-@\t\r\n"
+
+// csvSafeCell neutralizes a cell against spreadsheet formula injection (CWE-1236)
+// by prepending a single quote, the standard mitigation: spreadsheets treat a
+// leading apostrophe as literal text and do not execute or display it, while
+// other CSV consumers see an inert string.
+func csvSafeCell(cell string) string {
+	if cell == "" {
+		return cell
+	}
+	if strings.ContainsRune(csvFormulaPrefixes, rune(cell[0])) {
+		return "'" + cell
+	}
+	return cell
+}
+
+// csvSafeRow applies csvSafeCell across every cell of a CSV row.
+func csvSafeRow(row []string) []string {
+	for i := range row {
+		row[i] = csvSafeCell(row[i])
+	}
+	return row
+}
+
 func PrintSummaryCSV(w io.Writer, cs *ChangeSet, threshold string) error {
 	summary := Summarize(cs, threshold)
 	writer := csv.NewWriter(w)
@@ -176,7 +204,7 @@ func PrintSummaryCSV(w io.Writer, cs *ChangeSet, threshold string) error {
 
 func writeSummaryCSV(writer *csv.Writer, summary Summary) error {
 	for _, row := range summaryCSVRows(summary) {
-		if err := writer.Write(row); err != nil {
+		if err := writer.Write(csvSafeRow(row)); err != nil {
 			return err
 		}
 	}

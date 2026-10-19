@@ -340,6 +340,78 @@ func TestSummaryCSVHandlesCommasPipesAndNewlines(t *testing.T) {
 	assert.Contains(t, records, []string{"warning", "warning, with comma\nand newline", "", "", "", "", "", ""})
 }
 
+// TestCsvSafeCell_Diff verifies that cells starting with spreadsheet formula
+// prefix characters (=, +, -, @, \t, \r, \n) are prepended with a single quote.
+func TestCsvSafeCell_Diff(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{name: "empty stays empty", in: "", want: ""},
+		{name: "plain text is unchanged", in: "demo", want: "demo"},
+		{name: "equals is neutralized", in: "=1+1", want: "'=1+1"},
+		{name: "plus is neutralized", in: "+1", want: "'+1"},
+		{name: "minus is neutralized", in: "-1", want: "'-1"},
+		{name: "at sign is neutralized", in: "@SUM(A1)", want: "'@SUM(A1)"},
+		{name: "tab is neutralized", in: "\tcmd", want: "'\tcmd"},
+		{name: "carriage return is neutralized", in: "\rcmd", want: "'\rcmd"},
+		{name: "line feed is neutralized", in: "\n=1+1", want: "'\n=1+1"},
+		{name: "dde payload is neutralized", in: "=cmd|' /C calc'!A0", want: "'=cmd|' /C calc'!A0"},
+		{name: "leading pipe is not a formula prefix", in: "|table", want: "|table"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, csvSafeCell(tc.in))
+		})
+	}
+}
+
+// TestPrintSummaryCSV_NeutralizesFormulaInjection verifies that formula elements
+// in ResourceID, ControlName, ControlID, and Warnings are neutralized when exported to CSV.
+func TestPrintSummaryCSV_NeutralizesFormulaInjection(t *testing.T) {
+	const injectedResourceID = "=cmd|' /C calc'!A0"
+	const injectedControlName = "@SUM(A1)"
+	const injectedControlID = "+C-0001"
+	const injectedWarning = "-warning injected"
+
+	cs := &ChangeSet{
+		New: []ControlChange{
+			{
+				ResourceID:  injectedResourceID,
+				ControlID:   injectedControlID,
+				ControlName: injectedControlName,
+				Severity:    "high",
+			},
+		},
+		Warnings: []string{injectedWarning},
+	}
+	var out bytes.Buffer
+
+	require.NoError(t, PrintSummaryCSV(&out, cs, ""))
+
+	records, err := csv.NewReader(strings.NewReader(out.String())).ReadAll()
+	require.NoError(t, err)
+
+	var foundControl, foundResource, foundWarning bool
+	for _, row := range records {
+		if row[0] == "bucket_control" && row[4] == "'"+injectedControlID {
+			foundControl = true
+			assert.Equal(t, "'"+injectedControlName, row[5], "control name must be neutralized")
+		}
+		if row[0] == "bucket_resource" && row[6] == "'"+injectedResourceID {
+			foundResource = true
+		}
+		if row[0] == "warning" && row[1] == "'"+injectedWarning {
+			foundWarning = true
+		}
+	}
+	assert.True(t, foundControl, "expected neutralized bucket_control row")
+	assert.True(t, foundResource, "expected neutralized bucket_resource row")
+	assert.True(t, foundWarning, "expected neutralized warning row")
+}
+
 func TestSummarizeNormalizesMissingLabels(t *testing.T) {
 	cs := &ChangeSet{
 		New: []ControlChange{
