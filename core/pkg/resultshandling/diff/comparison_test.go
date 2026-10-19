@@ -444,7 +444,26 @@ func TestComputeEvidence_AbsentFailureResolutionSafety(t *testing.T) {
 			name: "failed GVR pull is incomparable even without degraded bit",
 			mutateHead: func(head *scanReport) {
 				head.SummaryDetails.Controls[testControl] = controlSummary{Severity: "High"}
-				head.ScanCoverage.FailedGVRPulls = []json.RawMessage{json.RawMessage(`{"gvr":"apps/v1/deployments"}`)}
+				head.ScanCoverage.FailedGVRPulls = []failedGVRPull{{GVR: "apps/v1/deployments"}}
+			},
+			wantIncomparable: 1,
+			wantReason:       "degraded scan coverage",
+		},
+		{
+			name: "failed GVR pull of other controls resolves removed resource",
+			mutateHead: func(head *scanReport) {
+				head.SummaryDetails.Controls[testControl] = controlSummary{Severity: "High"}
+				head.ScanCoverage.Degraded = true
+				head.ScanCoverage.FailedGVRPulls = []failedGVRPull{{GVR: "hostdata.kubescape.cloud/v1beta0/KubeletInfo", Controls: []string{"C-0069"}}}
+				head.ScanCoverage.NotEvaluatedControls = []notEvaluatedControl{{ControlID: "C-0069"}}
+			},
+			wantResolved: 1,
+		},
+		{
+			name: "failed GVR pull of this control is incomparable",
+			mutateHead: func(head *scanReport) {
+				head.SummaryDetails.Controls[testControl] = controlSummary{Severity: "High"}
+				head.ScanCoverage.FailedGVRPulls = []failedGVRPull{{GVR: "apps/v1/deployments", Controls: []string{testControl}}}
 			},
 			wantIncomparable: 1,
 			wantReason:       "degraded scan coverage",
@@ -594,6 +613,61 @@ func TestComputeEvidence_NewFailureScopeSafety(t *testing.T) {
 					testControl: {Severity: "High"},
 				}},
 				ScanCoverage: scanCoverage{Degraded: true},
+			},
+			wantIncomparable: 1,
+		},
+		{
+			// A CLI scan without the operator: the kubelet and cloud
+			// pulls fail, and only the controls that read them are affected.
+			name: "base failed pull of other controls accepts new resource",
+			base: scanReport{
+				SummaryDetails: summaryDetails{Controls: map[string]controlSummary{
+					testControl: {Severity: "High"},
+				}},
+				ScanCoverage: scanCoverage{
+					Degraded:             true,
+					FailedGVRPulls:       []failedGVRPull{{GVR: "hostdata.kubescape.cloud/v1beta0/KubeletInfo", Controls: []string{"C-0069", "C-0070"}}},
+					NotEvaluatedControls: []notEvaluatedControl{{ControlID: "C-0069"}, {ControlID: "C-0070"}},
+				},
+			},
+			wantNew: 1,
+		},
+		{
+			name: "base failed pull of this control is incomparable",
+			base: scanReport{
+				SummaryDetails: summaryDetails{Controls: map[string]controlSummary{
+					testControl: {Severity: "High"},
+				}},
+				ScanCoverage: scanCoverage{
+					Degraded:       true,
+					FailedGVRPulls: []failedGVRPull{{GVR: "apps/v1/deployments", Controls: []string{"C-OTHER", testControl}}},
+				},
+			},
+			wantIncomparable: 1,
+		},
+		{
+			name: "base failed pull without controls is incomparable",
+			base: scanReport{
+				SummaryDetails: summaryDetails{Controls: map[string]controlSummary{
+					testControl: {Severity: "High"},
+				}},
+				ScanCoverage: scanCoverage{
+					Degraded:       true,
+					FailedGVRPulls: []failedGVRPull{{GVR: "apps/v1/deployments"}, {GVR: "v1/nodes", Controls: []string{"C-OTHER"}}},
+				},
+			},
+			wantIncomparable: 1,
+		},
+		{
+			name: "base skipped manifests are incomparable",
+			base: scanReport{
+				SummaryDetails: summaryDetails{Controls: map[string]controlSummary{
+					testControl: {Severity: "High"},
+				}},
+				ScanCoverage: scanCoverage{
+					Degraded:         true,
+					SkippedManifests: []json.RawMessage{json.RawMessage(`{"path":"bad.yaml"}`)},
+				},
 			},
 			wantIncomparable: 1,
 		},
