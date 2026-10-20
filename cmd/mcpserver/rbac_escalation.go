@@ -180,13 +180,17 @@ func buildUnboundedSummaries(findings []rbacgraph.UnboundedFinding) []map[string
 		} else if scope == "" {
 			scope = "cluster-wide"
 		}
-		out = append(out, map[string]any{
+		summary := map[string]any{
 			"subject":       f.Subject.String(),
 			"primitive":     string(f.Edge.Primitive),
 			"detail":        f.Edge.Detail,
 			"scope":         scope,
 			"scope_unknown": f.Edge.ScopeUnknown,
-		})
+		}
+		if f.Edge.ImpersonatedKind != "" {
+			summary["impersonated_kind"] = string(f.Edge.ImpersonatedKind)
+		}
+		out = append(out, summary)
 	}
 	return out
 }
