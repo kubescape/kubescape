@@ -1,6 +1,6 @@
 header:
   schema-version: 2.2.0
-  last-updated: '2026-10-17'
+  last-updated: '2026-10-20'
   last-reviewed: '2026-10-07'
   url: https://raw.githubusercontent.com/kubescape/kubescape/master/security-insights.yml
 
