@@ -183,6 +183,64 @@ func TestCreateAdmissionPolicyBinding_InvalidArguments(t *testing.T) {
 	}
 }
 
+func TestCreateAdmissionPolicyBinding_ResourceRulesReachValidation(t *testing.T) {
+	const validRule = "apps/v1/deployments"
+	rejected := []struct {
+		name  string
+		rules any
+	}{
+		{"single space", []any{" "}},
+		{"tab only", []any{"\t"}},
+		{"newline and spaces", []any{" \n "}},
+		{"empty and blank", []any{"", " "}},
+		{"valid then blank", []any{validRule, " "}},
+		{"blank then valid", []any{" ", validRule}},
+		{"typed string slice", []string{validRule, " "}},
+	}
+	for _, tc := range rejected {
+		t.Run("rejects "+tc.name, func(t *testing.T) {
+			result := callCreateBinding(t, map[string]any{
+				"binding_name":   "my-binding",
+				"control_id":     "C-0016",
+				"resource_rules": tc.rules,
+			})
+			te := bindingToolError(t, result)
+			assert.Equal(t, ErrCodeInvalidArgument, te.Code)
+			assert.Contains(t, te.Message, "expected group/version/resource")
+			assert.NotContains(t, bindingResultText(t, result), "kind: ValidatingAdmissionPolicyBinding")
+		})
+	}
+
+	t.Run("valid rule still succeeds", func(t *testing.T) {
+		got := decodeBindingResponse(t, callCreateBinding(t, map[string]any{
+			"binding_name":   "my-binding",
+			"control_id":     "C-0016",
+			"resource_rules": []any{validRule},
+		}))
+		manifest, _ := got["manifest"].(string)
+		assert.Contains(t, manifest, "deployments")
+	})
+
+	// Omitted, null and empty all mean "do not narrow" and must stay equivalent.
+	unnarrowed := map[string]map[string]any{
+		"omitted": {},
+		"null":    {"resource_rules": nil},
+		"empty":   {"resource_rules": []any{}},
+	}
+	for name, extra := range unnarrowed {
+		t.Run("unnarrowed "+name, func(t *testing.T) {
+			args := map[string]any{"binding_name": "my-binding", "control_id": "C-0016"}
+			for k, v := range extra {
+				args[k] = v
+			}
+			got := decodeBindingResponse(t, callCreateBinding(t, args))
+			manifest, _ := got["manifest"].(string)
+			assert.Contains(t, manifest, "kind: ValidatingAdmissionPolicyBinding")
+			assert.NotContains(t, manifest, "resourceRules")
+		})
+	}
+}
+
 func TestCreateAdmissionPolicyBinding_ResponseMarshalFailure(t *testing.T) {
 	orig := jsonMarshal
 	t.Cleanup(func() { jsonMarshal = orig })

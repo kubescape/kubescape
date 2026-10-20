@@ -68,7 +68,9 @@ func createAdmissionPolicyBinding(arguments map[string]any) *mcp.CallToolResult 
 	if toolErr != nil {
 		return toolErr
 	}
-	resourceRules, toolErr := mcpStringListArg(arguments, "resource_rules")
+	// Passed through untouched: BuildPolicyBinding validates every entry, so a
+	// blank one must reach it rather than be dropped here and widen the binding.
+	resourceRules, toolErr := mcpRawStringListArg(arguments, "resource_rules")
 	if toolErr != nil {
 		return toolErr
 	}
@@ -109,6 +111,23 @@ func createAdmissionPolicyBinding(arguments map[string]any) *mcp.CallToolResult 
 // mcpStringListArg reads an optional array-of-strings argument. A missing or
 // null argument returns nil. Elements are trimmed; empty ones are dropped.
 func mcpStringListArg(arguments map[string]any, name string) ([]string, *mcp.CallToolResult) {
+	items, toolErr := mcpRawStringListArg(arguments, name)
+	if toolErr != nil || items == nil {
+		return nil, toolErr
+	}
+	list := make([]string, 0, len(items))
+	for _, item := range items {
+		if item = strings.TrimSpace(item); item != "" {
+			list = append(list, item)
+		}
+	}
+	return list, nil
+}
+
+// mcpRawStringListArg reads an optional array-of-strings argument without
+// altering its elements. A missing or null argument returns nil; a supplied
+// empty array returns an empty, non-nil slice.
+func mcpRawStringListArg(arguments map[string]any, name string) ([]string, *mcp.CallToolResult) {
 	raw, ok := arguments[name]
 	if !ok || raw == nil {
 		return nil, nil
@@ -118,6 +137,7 @@ func mcpStringListArg(arguments map[string]any, name string) ([]string, *mcp.Cal
 	case []string:
 		items = v
 	case []any:
+		items = make([]string, 0, len(v))
 		for _, item := range v {
 			s, ok := item.(string)
 			if !ok {
@@ -128,13 +148,7 @@ func mcpStringListArg(arguments map[string]any, name string) ([]string, *mcp.Cal
 	default:
 		return nil, mcpToolError(ErrCodeInvalidArgument, fmt.Sprintf("%s argument must be an array of strings", name), map[string]any{"argument": name})
 	}
-	list := make([]string, 0, len(items))
-	for _, item := range items {
-		if item = strings.TrimSpace(item); item != "" {
-			list = append(list, item)
-		}
-	}
-	return list, nil
+	return items, nil
 }
 
 // mcpSelectorListArg reads a list that narrows the binding. A supplied
