@@ -98,15 +98,11 @@ func isPodReady(pod *v1.Pod) bool {
 }
 
 func NewOperatorAdapter(scanInfo cautils.OperatorScanInfo, ns string, ctx ...context.Context) (*OperatorAdapter, error) {
-	c := context.Background()
-	if len(ctx) > 0 && ctx[0] != nil {
-		c = ctx[0]
-	}
 	k8sClient := getKubernetesApi()
 	if k8sClient == nil || k8sClient.KubernetesClient == nil {
 		return nil, errors.New("could not connect to cluster: set --kubeconfig, $KUBECONFIG, or $KUBERNETES_MASTER")
 	}
-	pod, err := getOperatorPod(k8sClient, ns, c)
+	pod, err := getOperatorPod(k8sClient, ns, ctx...)
 	if err != nil {
 		return nil, err
 	}

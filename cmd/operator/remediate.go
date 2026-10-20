@@ -1,6 +1,7 @@
 package operator
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -114,11 +115,6 @@ func getOperatorRemediateCmd(ks meta.IKubescape, operatorInfo cautils.OperatorIn
 			if !remediationInfo.IsDryRun() {
 				verb = "Applying"
 			}
-			logger.L().Start(fmt.Sprintf("%s remediation %q via Kubescape Operator", verb, remediationInfo.Action))
-			if _, err := operatorAdapter.OperatorScan(cmd.Context()); err != nil {
-				logger.L().StopError("Failed to submit remediation to Kubescape Operator", helpers.Error(err))
-				return err
-			}
 			// The operator processes the command asynchronously (the triggerAction
 			// endpoint acknowledges receipt and queues the work), so the outcome is
 			// not returned here. It is emitted as a "KubescapeRemediation" Kubernetes
@@ -130,6 +126,16 @@ func getOperatorRemediateCmd(ks meta.IKubescape, operatorInfo cautils.OperatorIn
 				eventsScope = "--all-namespaces"
 			}
 			eventsHint := fmt.Sprintf("kubectl get events %s --field-selector reason=KubescapeRemediation", eventsScope)
+
+			logger.L().Start(fmt.Sprintf("%s remediation %q via Kubescape Operator", verb, remediationInfo.Action))
+			if _, err := operatorAdapter.OperatorScan(cmd.Context()); err != nil {
+				if errors.Is(err, context.Canceled) || errors.Is(cmd.Context().Err(), context.Canceled) {
+					logger.L().StopError(fmt.Sprintf("Remediation submission canceled; submission outcome is unknown. Check remediation events via '%s' or the operator logs before retrying", eventsHint), helpers.Error(err))
+				} else {
+					logger.L().StopError("Failed to submit remediation to Kubescape Operator", helpers.Error(err))
+				}
+				return err
+			}
 			if remediationInfo.IsDryRun() {
 				logger.L().StopSuccess(fmt.Sprintf("Submitted remediation (dry-run) — no changes are applied. Check the plan via '%s' or the operator logs; re-run with --confirm to apply.", eventsHint))
 			} else {

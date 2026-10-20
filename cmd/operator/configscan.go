@@ -30,7 +30,7 @@ func getOperatorScanConfigCmd(ks meta.IKubescape, operatorInfo *cautils.Operator
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			operatorAdapter, err := newOperatorAdapter(configScanInfo, operatorInfo.Namespace)
+			operatorAdapter, err := newOperatorAdapter(configScanInfo, operatorInfo.Namespace, cmd.Context())
 			if err != nil {
 				return err
 			}

@@ -1,10 +1,12 @@
 package core
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -21,7 +23,9 @@ import (
 	"github.com/stretchr/testify/require"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/fake"
+	"k8s.io/client-go/rest"
 )
 
 // expectedOperatorURL is the exact endpoint httpPostOperatorScanRequest must
@@ -168,6 +172,145 @@ func Test_getOperatorPod_nilClient(t *testing.T) {
 
 	_, err = getOperatorPod(&k8sinterface.KubernetesApi{}, kubescapeNamespace)
 	assert.EqualError(t, err, "kubernetes client is not initialised")
+}
+
+type testRoundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (f testRoundTripperFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
+func Test_getOperatorPod_ContextCancellationWhileResponseHeld(t *testing.T) {
+	reqReceived := make(chan struct{})
+	holdResponse := make(chan struct{})
+	var holdOnce sync.Once
+	releaseHold := func() {
+		holdOnce.Do(func() {
+			close(holdResponse)
+		})
+	}
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-reqReceived:
+		default:
+			close(reqReceived)
+		}
+		select {
+		case <-holdResponse:
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(&v1.PodList{})
+		case <-r.Context().Done():
+			return
+		}
+	}))
+	defer ts.Close()
+	defer releaseHold()
+
+	clientset, err := kubernetes.NewForConfig(&rest.Config{
+		Host: ts.URL,
+	})
+	require.NoError(t, err)
+
+	k8sClient := &k8sinterface.KubernetesApi{
+		KubernetesClient: clientset,
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	errChan := make(chan error, 1)
+	go func() {
+		_, podErr := getOperatorPod(k8sClient, kubescapeNamespace, ctx)
+		errChan <- podErr
+	}()
+
+	select {
+	case <-reqReceived:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for HTTP pod-list request to reach test server")
+	}
+
+	// Cancel while server is holding the pod-list response
+	cancel()
+
+	select {
+	case podErr := <-errChan:
+		require.Error(t, podErr)
+		require.ErrorIs(t, podErr, context.Canceled)
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for getOperatorPod to abort after context cancellation")
+	}
+}
+
+func Test_getOperatorPod_PreservesClientContextWhenNoExplicitContext(t *testing.T) {
+	type ctxKey struct{}
+	key := ctxKey{}
+	expectedVal := "client-ctx-sentinel"
+
+	var capturedCtx context.Context
+	rt := testRoundTripperFunc(func(req *http.Request) (*http.Response, error) {
+		capturedCtx = req.Context()
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(bytes.NewReader([]byte(`{"apiVersion":"v1","kind":"PodList","items":[]}`))),
+			Request:    req,
+		}, nil
+	})
+
+	clientset, err := kubernetes.NewForConfig(&rest.Config{
+		Host:      "https://kubernetes.test:6443",
+		Transport: rt,
+	})
+	require.NoError(t, err)
+
+	clientCtx := context.WithValue(context.Background(), key, expectedVal)
+	k8sClient := &k8sinterface.KubernetesApi{
+		KubernetesClient: clientset,
+		Context:          clientCtx,
+	}
+
+	// Call without explicit context (legacy call)
+	_, _ = getOperatorPod(k8sClient, kubescapeNamespace)
+
+	require.NotNil(t, capturedCtx, "request must reach transport")
+	assert.Equal(t, expectedVal, capturedCtx.Value(key), "legacy call must preserve k8sClient.Context")
+}
+
+func Test_getOperatorPod_ExplicitContextOverridesClientContext(t *testing.T) {
+	type ctxKey struct{}
+	key := ctxKey{}
+
+	var capturedCtx context.Context
+	rt := testRoundTripperFunc(func(req *http.Request) (*http.Response, error) {
+		capturedCtx = req.Context()
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(bytes.NewReader([]byte(`{"apiVersion":"v1","kind":"PodList","items":[]}`))),
+			Request:    req,
+		}, nil
+	})
+
+	clientset, err := kubernetes.NewForConfig(&rest.Config{
+		Host:      "https://kubernetes.test:6443",
+		Transport: rt,
+	})
+	require.NoError(t, err)
+
+	clientCtx := context.WithValue(context.Background(), key, "client-val")
+	explicitCtx := context.WithValue(context.Background(), key, "explicit-val")
+	k8sClient := &k8sinterface.KubernetesApi{
+		KubernetesClient: clientset,
+		Context:          clientCtx,
+	}
+
+	// Call with explicit context
+	_, _ = getOperatorPod(k8sClient, kubescapeNamespace, explicitCtx)
+
+	require.NotNil(t, capturedCtx, "request must reach transport")
+	assert.Equal(t, "explicit-val", capturedCtx.Value(key), "explicit context must take precedence over k8sClient.Context")
 }
 
 func TestNewOperatorAdapter_NotConnectedToCluster(t *testing.T) {

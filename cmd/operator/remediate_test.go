@@ -55,9 +55,16 @@ func TestGetOperatorRemediateCmd(t *testing.T) {
 }
 
 func TestOperatorRemediateCmd_ContextCanceled(t *testing.T) {
+	var capturedCtx context.Context
 	var startForwarderCalled bool
 	prevAdapter := newOperatorAdapter
-	newOperatorAdapter = func(scanInfo cautils.OperatorScanInfo, _ string, _ ...context.Context) (*core.OperatorAdapter, error) {
+	newOperatorAdapter = func(scanInfo cautils.OperatorScanInfo, _ string, ctx ...context.Context) (*core.OperatorAdapter, error) {
+		if len(ctx) > 0 {
+			capturedCtx = ctx[0]
+		}
+		if capturedCtx != nil && capturedCtx.Err() != nil {
+			return nil, capturedCtx.Err()
+		}
 		conn := &stubOperatorConnector{
 			onStart: func() { startForwarderCalled = true },
 		}
@@ -76,5 +83,27 @@ func TestOperatorRemediateCmd_ContextCanceled(t *testing.T) {
 	err := cmd.ExecuteContext(ctx)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, context.Canceled)
+	assert.Equal(t, ctx, capturedCtx, "constructor must receive the command context")
 	assert.False(t, startForwarderCalled, "must not attempt to start port forwarding when context is canceled")
+}
+
+func TestOperatorRemediateCmd_CancellationDiagnostic(t *testing.T) {
+	prevAdapter := newOperatorAdapter
+	newOperatorAdapter = func(scanInfo cautils.OperatorScanInfo, _ string, ctx ...context.Context) (*core.OperatorAdapter, error) {
+		conn := &stubOperatorConnector{}
+		return core.NewOperatorAdapterWithConnector(scanInfo, conn), nil
+	}
+	t.Cleanup(func() { newOperatorAdapter = prevAdapter })
+
+	cmd := getOperatorRemediateCmd(&mocks.MockIKubescape{}, cautils.OperatorInfo{})
+	cmd.SetArgs([]string{annotateSubCommand, "--kind", "Deployment", "--name", "test-app", "--target-namespace", "default"})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := cmd.ExecuteContext(ctx)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, context.Canceled)
 }
