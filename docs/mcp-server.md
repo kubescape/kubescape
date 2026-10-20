@@ -294,6 +294,29 @@ Get detailed configuration scan results for a specific workload, including faile
 | `status` | string | No | Only controls with these statuses, comma-separated: `failed`, `passed`, `skipped` |
 | `min_severity` | string | No | Only controls at or above this severity: `Critical`, `High`, `Medium` or `Low` |
 
+### Policy Tools
+
+#### `list_frameworks`
+
+List the names of the frameworks available for scanning (for example `NSA`, `MITRE`, `cis-v1.12.0`).
+
+#### `list_controls`
+
+List the security controls with their IDs, names and the frameworks they belong to. Use `framework` to get one framework's controls instead of all of them (about 290).
+
+**Parameters:**
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `framework` | string | No | Only controls of this framework, case-insensitive (see `list_frameworks`). An unknown name returns an error listing the valid ones |
+
+**Example Response** (`framework: "NSA"`):
+```json
+[
+  {"id": "C-0002", "name": "Prevent containers from allowing command execution", "frameworks": ["MITRE", "ArmoBest", "NSA", "AllControls", "ClusterScan"]},
+  {"id": "C-0005", "name": "API server insecure port is enabled", "frameworks": ["ArmoBest", "NSA", "AllControls", "ClusterScan", "security"]}
+]
+```
+
 ### Live Scanning Tools
 
 #### `run_framework_security_scan`
