@@ -255,6 +255,9 @@ func (policyHandler *PolicyHandler) downloadScanPolicies(ctx context.Context, po
 	// misleading "framework '<control-id>' not found" error.
 	controlsFramework := reporthandling.Framework{}
 	var hasControls bool
+	// A control can be requested by its control ID and by its framework
+	// section number; it must still be scanned once.
+	seenControls := map[string]struct{}{}
 	for _, rule := range policyIdentifier {
 		switch rule.Kind {
 		case apisv1.KindFramework: // Download framework
@@ -287,8 +290,14 @@ func (policyHandler *PolicyHandler) downloadScanPolicies(ctx context.Context, po
 				return frameworks, controlDownloadError(err, rule.Identifier)
 			}
 			if receivedControl != nil {
-				hasControls = true
-				controlsFramework.Controls = append(controlsFramework.Controls, *receivedControl)
+				// Only the append is deduplicated: every requested identifier
+				// still gets its own cache file, which is what an offline
+				// lookup by that identifier reads.
+				if _, dup := seenControls[strings.ToLower(receivedControl.ControlID)]; !dup {
+					seenControls[strings.ToLower(receivedControl.ControlID)] = struct{}{}
+					hasControls = true
+					controlsFramework.Controls = append(controlsFramework.Controls, *receivedControl)
+				}
 				if !persistPolicyArtifacts {
 					continue
 				}

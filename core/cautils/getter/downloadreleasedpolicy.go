@@ -89,13 +89,41 @@ func (drp *DownloadReleasedPolicy) SetRegoObjectsWithFallback() (fallback bool, 
 	return false, nil
 }
 
+// GetControl returns a control by its control ID or, when it carries one, its
+// framework section number; see controlMatcher. The released store only
+// indexes control IDs, so a section number is resolved from the full control
+// list, and only after the control ID lookup reported the control as not
+// found. A failure to read the catalog is returned as is, never as an
+// unknown control.
 func (drp *DownloadReleasedPolicy) GetControl(ID string) (*reporthandling.Control, error) {
-	var control *reporthandling.Control
-	var err error
+	id := strings.TrimSpace(ID)
+	if id == "" {
+		return nil, ErrIDRequired
+	}
 
-	control, err = drp.gs.GetOPAControlByID(ID)
+	control, err := drp.gs.GetOPAControlByID(id)
+	if err == nil {
+		return control, nil
+	}
+	notFound := err
+	if err.Error() != fmt.Sprintf("control '%s' not found", id) {
+		return nil, err
+	}
+
+	controls, err := drp.gs.GetOPAControls()
 	if err != nil {
 		return nil, err
+	}
+	matcher := newControlMatcher(id)
+	for i := range controls {
+		matcher.offer(&controls[i])
+	}
+	control, err = matcher.bySection()
+	if err != nil {
+		return nil, err
+	}
+	if control == nil {
+		return nil, notFound
 	}
 	return control, nil
 }

@@ -30,6 +30,7 @@ var (
 	ErrIDRequired           = errors.New("missing required input control ID")
 	ErrFrameworkNotMatching = errors.New("framework from file not matching")
 	ErrControlNotMatching   = errors.New("control from file not matching")
+	ErrControlAmbiguous     = errors.New("control identifier matches more than one control")
 )
 
 var (
@@ -68,11 +69,14 @@ func (lp *LoadPolicy) ShouldPersistPolicyArtifacts() bool {
 	return false
 }
 
-// GetControl returns a control from the policy file.
+// GetControl returns a control from the policy file. The control is named by
+// its control ID or, when it carries one, its framework section number; see
+// controlMatcher.
 func (lp *LoadPolicy) GetControl(controlID string) (*reporthandling.Control, error) {
-	if controlID == "" {
+	if strings.TrimSpace(controlID) == "" {
 		return nil, ErrIDRequired
 	}
+	matcher := newControlMatcher(controlID)
 
 	for _, filePath := range lp.filePaths {
 		buf, err := os.ReadFile(filepath.Clean(filePath))
@@ -83,7 +87,7 @@ func (lp *LoadPolicy) GetControl(controlID string) (*reporthandling.Control, err
 		// check if the file is a control descriptor: a ControlID field is populated.
 		var control reporthandling.Control
 		if err = json.Unmarshal(buf, &control); err == nil && control.ControlID != "" {
-			if strings.EqualFold(controlID, control.ControlID) {
+			if matcher.offer(&control) {
 				return &control, nil
 			}
 			continue
@@ -94,13 +98,20 @@ func (lp *LoadPolicy) GetControl(controlID string) (*reporthandling.Control, err
 		if err = json.Unmarshal(buf, &framework); err == nil {
 			for _, toPin := range framework.Controls {
 				ctrl := toPin
-				if strings.EqualFold(ctrl.ControlID, controlID) {
+				if matcher.offer(&ctrl) {
 					return &ctrl, nil
 				}
 			}
 		}
 	}
 
+	control, err := matcher.bySection()
+	if err != nil {
+		return nil, err
+	}
+	if control != nil {
+		return control, nil
+	}
 	return nil, fmt.Errorf("controlID: %s: %w", controlID, ErrControlNotMatching)
 }
 
