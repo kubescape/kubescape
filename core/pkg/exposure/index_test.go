@@ -230,7 +230,7 @@ func TestServiceExposure_HTTPRouteBackendInAnotherNamespaceIsNotModeled(t *testi
 		Rules:      []gatewayRouteRule{{BackendRefs: []backendRef{{Namespace: &otherNS, Name: "app"}}}},
 	}
 	// The Service actually lives in ns, but the route's backendRef claims
-	// other-ns -- without a ReferenceGrant (not modeled), this must not
+	// other-ns -- without a ReferenceGrant, this must not
 	// match ns/app.
 	idx := NewIndex([]corev1.Service{svc("ns", "app", corev1.ServiceTypeClusterIP)}, nil, []gatewayRoute{route}, []gateway{gw}, nil)
 	paths, unclear := idx.ServiceExposure(ref("ns", "app"))
@@ -247,11 +247,9 @@ func TestServiceExposure_UnclearWhenCrossNamespaceHTTPRouteBackendRefIsUnmodeled
 	targetNS := "ns"
 	// A real, working topology: an HTTPRoute living in "edge" names ns/app as
 	// its backend via an explicit backendRef.namespace, authorized by a
-	// ReferenceGrant in ns (not modeled by this package -- see
-	// crossNamespaceBackendRefIsUnmodeled's doc comment). idx.routesByNS
-	// only looks up routes living *in* ref.Namespace when building paths, so
-	// this route is never examined there; the unclear signal exists
-	// precisely to catch what that omission would otherwise hide.
+	// ReferenceGrant in ns. This Index is built without grants, so whether the
+	// reference is authorized is unknown and must surface as unclear (see
+	// reference_grant_test.go for the grant-aware outcomes).
 	route := gatewayRoute{Kind: "HTTPRoute",
 		Namespace:  "edge",
 		Name:       "route",

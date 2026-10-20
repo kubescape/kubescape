@@ -3,6 +3,7 @@ package exposure
 import (
 	"fmt"
 	"slices"
+	"sort"
 
 	"github.com/kubescape/kubescape/v4/core/pkg/namespaceselector"
 	corev1 "k8s.io/api/core/v1"
@@ -19,6 +20,37 @@ type Index struct {
 	routesByNS       map[string][]*gatewayRoute
 	gateways         map[ServiceRef]*gateway // keyed the same shape as ServiceRef: namespace+name
 	namespacesByName map[string]NamespaceInfo
+
+	// grantsCollected records that the caller supplied the cluster's
+	// ReferenceGrants (see WithReferenceGrants). Without it a cross-namespace
+	// backendRef can be neither confirmed nor ruled out.
+	grantsCollected bool
+	// grantsByNS holds the collected grants by the namespace they live in,
+	// which is the namespace of the Services each one authorizes references to.
+	grantsByNS map[string][]referenceGrant
+}
+
+// Option customizes an Index built by NewIndex.
+type Option func(*Index)
+
+// WithReferenceGrants supplies every ReferenceGrant of the cluster, letting the
+// Index decide whether a route's cross-namespace Service backendRef is
+// authorized: a referenced Service becomes exposed through the route when a
+// grant permits it, and the reference is ruled out when none does.
+//
+// The list must be what a successful, complete listing returned. An empty list
+// is a real answer -- the cluster has no grants, so no cross-namespace
+// reference is authorized. A caller that could not list the grants, or could
+// not decode all of them, must not pass this option: an Index without it keeps
+// reporting such references as unclear instead of denying them.
+func WithReferenceGrants(grants []referenceGrant) Option {
+	return func(idx *Index) {
+		idx.grantsCollected = true
+		idx.grantsByNS = make(map[string][]referenceGrant)
+		for _, g := range grants {
+			idx.grantsByNS[g.Namespace] = append(idx.grantsByNS[g.Namespace], g)
+		}
+	}
 }
 
 // NewIndex builds an Index from a cluster's (or a query's) collected
@@ -26,7 +58,7 @@ type Index struct {
 // not an error -- a cluster without the Gateway API installed simply has no
 // routes/gateways to pass, and every query still works, just without
 // that exposure mechanism ever matching.
-func NewIndex(services []corev1.Service, ingresses []networkingv1.Ingress, routes []gatewayRoute, gateways []gateway, namespaces []NamespaceInfo) *Index {
+func NewIndex(services []corev1.Service, ingresses []networkingv1.Ingress, routes []gatewayRoute, gateways []gateway, namespaces []NamespaceInfo, opts ...Option) *Index {
 	idx := &Index{
 		services:         make(map[ServiceRef]*corev1.Service, len(services)),
 		ingressesByNS:    make(map[string][]*networkingv1.Ingress),
@@ -54,21 +86,26 @@ func NewIndex(services []corev1.Service, ingresses []networkingv1.Ingress, route
 	for _, ns := range namespaces {
 		idx.namespacesByName[ns.Name] = ns
 	}
+	for _, opt := range opts {
+		opt(idx)
+	}
 
 	return idx
 }
 
 // ServiceExposure reports every path that exposes the named Service to
 // traffic from outside the cluster, plus whether at least one plausible but
-// unmodeled exposure path exists that this function cannot confirm either
+// unconfirmable exposure path exists that this function cannot settle either
 // way. An empty paths with unclear=false means nothing in this snapshot
 // exposes the Service -- it is only reachable from inside the cluster (or
 // not collected/does not exist at all, which this function cannot tell
 // apart from "exists but not exposed"). unclear=true means paths must NOT
 // be read as a confirmed all-clear: a cross-namespace route backendRef
-// names this Service, and whether that reference is authorized (via a
-// ReferenceGrant this package does not collect or evaluate -- see the
-// package doc comment) is genuinely unknown.
+// names this Service, and the Index was not given the cluster's
+// ReferenceGrants (see WithReferenceGrants), so whether that reference is
+// authorized is genuinely unknown. With grants supplied, an authorized
+// cross-namespace reference is a path like any other and an unauthorized one
+// is not exposure, so unclear is never set.
 func (idx *Index) ServiceExposure(ref ServiceRef) (paths []ExposurePath, unclear bool) {
 	svc, ok := idx.services[ref]
 	if !ok {
@@ -89,21 +126,47 @@ func (idx *Index) ServiceExposure(ref ServiceRef) (paths []ExposurePath, unclear
 		paths = append(paths, ingressPathsFor(ing, svc)...)
 	}
 
-	for _, route := range idx.routesByNS[ref.Namespace] {
-		hosts := idx.attachedRouteHostnames(route)
-		if len(hosts) == 0 {
-			continue
-		}
-		if !idx.routeReferencesService(route, ref, svc) {
-			continue
-		}
-		source := fmt.Sprintf("%s/%s", route.Namespace, route.Name)
-		for _, host := range hosts {
-			paths = append(paths, ExposurePath{Kind: routeExposureKind(route.Kind), Source: source, Host: host})
+	// A route may live in any namespace and reach this Service through a
+	// cross-namespace backendRef, so every route is examined. The Service's own
+	// namespace comes first, then the rest in name order, keeping the result
+	// independent of map iteration order.
+	for _, ns := range idx.routeNamespacesFor(ref) {
+		for _, route := range idx.routesByNS[ns] {
+			permitted, undetermined := idx.routeReferencesService(route, ref, svc)
+			if !permitted && !undetermined {
+				continue
+			}
+			hosts := idx.attachedRouteHostnames(route)
+			if len(hosts) == 0 {
+				continue
+			}
+			if !permitted {
+				unclear = true
+				continue
+			}
+			source := fmt.Sprintf("%s/%s", route.Namespace, route.Name)
+			for _, host := range hosts {
+				paths = append(paths, ExposurePath{Kind: routeExposureKind(route.Kind), Source: source, Host: host})
+			}
 		}
 	}
 
-	return paths, idx.crossNamespaceBackendRefIsUnmodeled(ref)
+	return paths, unclear
+}
+
+// routeNamespacesFor lists the namespaces holding routes, ref's own first.
+func (idx *Index) routeNamespacesFor(ref ServiceRef) []string {
+	namespaces := make([]string, 0, len(idx.routesByNS))
+	for ns := range idx.routesByNS {
+		if ns != ref.Namespace {
+			namespaces = append(namespaces, ns)
+		}
+	}
+	sort.Strings(namespaces)
+	if _, ok := idx.routesByNS[ref.Namespace]; ok {
+		namespaces = append([]string{ref.Namespace}, namespaces...)
+	}
+	return namespaces
 }
 
 // routeExposureKind maps a Gateway API route kind to the ExposureKind that
@@ -116,47 +179,6 @@ func routeExposureKind(routeKind string) ExposureKind {
 		return ExposureGRPCRoute
 	}
 	return ExposureHTTPRoute
-}
-
-// crossNamespaceBackendRefIsUnmodeled reports whether some route this
-// Index was given, living outside ref's namespace and admitted by at least
-// one Gateway, explicitly names ref as a backend via backendRef.namespace.
-// That is a real, working, externally-reachable path when a matching
-// ReferenceGrant exists in ref's namespace -- a resource kind this package
-// does not collect or evaluate (see the package doc comment) -- so its
-// presence must not be silently folded into a confirmed "not exposed".
-func (idx *Index) crossNamespaceBackendRefIsUnmodeled(ref ServiceRef) bool {
-	for ns, routes := range idx.routesByNS {
-		if ns == ref.Namespace {
-			continue
-		}
-		for _, route := range routes {
-			if !idx.routeAttachesToAGateway(route) {
-				continue
-			}
-			for _, rule := range route.Rules {
-				for _, backend := range rule.BackendRefs {
-					// Only an effective core-Service backendRef names this
-					// Service; a non-Service backend sharing its name says
-					// nothing about its exposure. Zero-weight backends
-					// receive no requests and are not exposure paths.
-					if !isServiceBackendRef(backend) || (backend.Weight != nil && *backend.Weight == 0) {
-						continue
-					}
-					if !idx.mirrorParentCanForward(backend, route.Namespace) {
-						continue
-					}
-					if !gatewayBackendPortMatches(backend, idx.services[ref]) {
-						continue
-					}
-					if backend.Namespace != nil && *backend.Namespace == ref.Namespace && backend.Name == ref.Name {
-						return true
-					}
-				}
-			}
-		}
-	}
-	return false
 }
 
 // ingressPathsFor returns one ExposurePath per Ingress rule (or the
@@ -188,23 +210,24 @@ func backendNamesService(backend *networkingv1.IngressBackend, svc *corev1.Servi
 		serviceBackendPortMatches(svc, backend.Service.Port.Name, backend.Service.Port.Number)
 }
 
-// routeReferencesService reports whether any rule in route sends
-// traffic to ref. Zero-weight backends receive no requests. Only effective
-// core-Service backends count (per Gateway
-// API's group/kind defaults -- a backendRef naming another kind must not
-// produce a Service exposure path however closely its name matches). A
-// backendRef with no Namespace defaults to the route's own namespace, per
-// Gateway API's own defaulting rules -- this package does not model a
-// backendRef reaching into another namespace via a ReferenceGrant, since
-// that requires collecting and evaluating a third resource kind this Index
-// is not given.
-func (idx *Index) routeReferencesService(route *gatewayRoute, ref ServiceRef, svc *corev1.Service) bool {
+// routeReferencesService reports how route's rules reach ref. permitted is
+// true when some rule sends traffic to it through a reference that is
+// authorized; undetermined is true when the route has such a reference but
+// whether it is authorized cannot be told (a cross-namespace backendRef and no
+// grants supplied). A reference that is known unauthorized sets neither.
+//
+// Zero-weight backends receive no requests. Only effective core-Service
+// backends count (per Gateway API's group/kind defaults -- a backendRef naming
+// another kind must not produce a Service exposure path however closely its
+// name matches). A backendRef with no Namespace defaults to the route's own
+// namespace, per Gateway API's own defaulting rules.
+func (idx *Index) routeReferencesService(route *gatewayRoute, ref ServiceRef, svc *corev1.Service) (permitted, undetermined bool) {
 	for _, rule := range route.Rules {
 		for _, backend := range rule.BackendRefs {
 			if !isServiceBackendRef(backend) || (backend.Weight != nil && *backend.Weight == 0) {
 				continue
 			}
-			if !idx.mirrorParentCanForward(backend, route.Namespace) {
+			if !idx.mirrorParentCanForward(backend, route) {
 				continue
 			}
 			if !gatewayBackendPortMatches(backend, svc) {
@@ -214,12 +237,53 @@ func (idx *Index) routeReferencesService(route *gatewayRoute, ref ServiceRef, sv
 			if backend.Namespace != nil {
 				ns = *backend.Namespace
 			}
-			if ns == ref.Namespace && backend.Name == ref.Name {
-				return true
+			if ns != ref.Namespace || backend.Name != ref.Name {
+				continue
+			}
+			switch idx.authorizeServiceReference(route, ref) {
+			case referencePermitted:
+				return true, false
+			case referenceUndetermined:
+				undetermined = true
 			}
 		}
 	}
-	return false
+	return false, undetermined
+}
+
+// referenceVerdict is the outcome of authorizing a route's reference to a
+// Service in another namespace.
+type referenceVerdict int
+
+const (
+	// referencePermitted: same namespace, or a collected ReferenceGrant allows it.
+	referencePermitted referenceVerdict = iota
+	// referenceDenied: grants were collected and none allows it. Gateway API
+	// forbids the reference, so it carries no traffic and is not exposure.
+	referenceDenied
+	// referenceUndetermined: grants were not collected, so the reference is
+	// neither confirmed nor ruled out.
+	referenceUndetermined
+)
+
+// authorizeServiceReference decides whether route may reference target. A
+// reference within the route's own namespace never needs a grant; one into
+// another namespace is permitted only by a ReferenceGrant in the target's
+// namespace, and the Service merely existing authorizes nothing.
+func (idx *Index) authorizeServiceReference(route *gatewayRoute, target ServiceRef) referenceVerdict {
+	if route.Namespace == target.Namespace {
+		return referencePermitted
+	}
+	if !idx.grantsCollected {
+		return referenceUndetermined
+	}
+	from := routeReferrer{Kind: route.Kind, Namespace: route.Namespace}
+	for _, g := range idx.grantsByNS[target.Namespace] {
+		if g.permitsService(from, target) {
+			return referencePermitted
+		}
+	}
+	return referenceDenied
 }
 
 // routeAttachesToAGateway reports whether route is admitted by at least
