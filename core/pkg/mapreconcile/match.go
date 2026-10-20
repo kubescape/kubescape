@@ -238,18 +238,18 @@ func compileMatchResources(mr *admissionregistrationv1alpha1.MatchResources) (*c
 	return c, nil
 }
 
-// matches reports whether obj is matched by c. determinable is false only
-// when a namespaceSelector must be evaluated but obj's namespace labels were
-// never supplied -- in that case matched is meaningless and callers must
-// treat the result as Unknown, not as a confident non-match.
+// matches reports whether obj is matched by c. determinable is false when
+// required namespace labels or API equivalence data are unavailable. In that
+// case matched is meaningless and callers must treat the result as Unknown,
+// not as a confident match or non-match.
 //
 // matchPolicy Equivalent (the API's default) is documented to also match a
 // request arriving via an API-group/version this policy did not list, if
 // that version is equivalent to one that was. Resolving that equivalence
 // needs full API discovery data this package is not given, so a resourceRules
-// miss under an explicit Equivalent matchPolicy is reported as indeterminate
-// rather than a confident non-match: the object may still be covered via a
-// version this rule never named.
+// miss under Equivalent matchPolicy is reported as indeterminate rather than
+// a confident non-match. The same policy applies to exclusions: a possible
+// equivalent exclusion prevents an include match from being confirmed.
 func (c *compiledMatchResources) matches(obj ObjectInfo) (matched bool, determinable bool) {
 	if c.namespaceSelector != nil && !c.namespaceSelector.Empty() {
 		switch {
@@ -287,6 +287,12 @@ func (c *compiledMatchResources) matches(obj ObjectInfo) (matched bool, determin
 	}
 
 	if resourceRulesVerdict(c.resourceRules, obj) {
+		if c.matchPolicy == admissionregistrationv1alpha1.Equivalent && resourceRulesAmbiguousUnderEquivalence(c.excludeRules, obj) {
+			// The apiserver applies matchPolicy to exclusions too. Without
+			// its equivalence registry, an exact include cannot prove that
+			// an exclusion naming another group/version will not apply.
+			return false, false
+		}
 		return true, true
 	}
 	if c.matchPolicy == admissionregistrationv1alpha1.Equivalent && resourceRulesAmbiguousUnderEquivalence(c.resourceRules, obj) {
@@ -296,8 +302,8 @@ func (c *compiledMatchResources) matches(obj ObjectInfo) (matched bool, determin
 }
 
 // resourceRulesAmbiguousUnderEquivalence reports whether some rule in rules
-// matches obj's resource name and operation but not its group/version --
-// exactly the situation Equivalent matchPolicy resolves using API
+// matches obj's resource, operation, object name and scope but not its
+// group/version -- exactly the situation Equivalent matchPolicy resolves using API
 // group/version-equivalence data (e.g. autoscaling/v1 vs autoscaling/v2
 // HorizontalPodAutoscalers) that this package is not given. A rule that does
 // not even name this resource (e.g. "configmaps" when obj is a "pods") is
@@ -311,6 +317,9 @@ func resourceRulesAmbiguousUnderEquivalence(rules []admissionregistrationv1alpha
 			continue
 		}
 		if !resourceRuleMatches(rule.Resources, obj) {
+			continue
+		}
+		if !resourceNamesMatch(rule.ResourceNames, obj.Name) || !scopeMatches(rule.Scope, obj) {
 			continue
 		}
 		if !stringRuleMatches(rule.APIGroups, obj.Group) || !stringRuleMatches(rule.APIVersions, obj.Version) {
