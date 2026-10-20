@@ -134,7 +134,11 @@ func (a *APIServerStore) StorePostureReportResults(ctx context.Context, pr *v2.P
 				logger.L().Ctx(ctx).Warning("skipping result with incomplete related objects", helpers.Error(err), helpers.String("resourceID", pr.Results[i].ResourceID))
 				continue
 			}
-			return err
+			failedResults++
+			if firstStoreErr == nil {
+				firstStoreErr = err
+			}
+			continue
 		}
 		if len(pr.Results[i].AssociatedControls) == 0 && len(workloadScan.Spec.Controls) > 0 {
 			recoveredResources++
