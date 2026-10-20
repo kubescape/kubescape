@@ -14,7 +14,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 )
 
-var supportedAdvancedWorkloadKinds = []string{"pods", "deployments", "daemonsets", "statefulsets"}
+var supportedAdvancedWorkloadKinds = []string{"pods", "deployments", "daemonsets", "statefulsets", "replicasets", "jobs", "cronjobs"}
 
 func createAdvancedTools(ksServer *KubescapeMcpserver) {
 	// Tool 1: scan_resource_slice
@@ -66,13 +66,19 @@ func createAdvancedTools(ksServer *KubescapeMcpserver) {
 		var gvr schema.GroupVersionResource
 		switch strings.ToLower(kind) {
 		case "pods", "pod":
-			gvr = schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"}
+			gvr = podGVR
 		case "deployments", "deployment":
-			gvr = schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"}
+			gvr = deploymentGVR
 		case "daemonsets", "daemonset":
-			gvr = schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "daemonsets"}
+			gvr = daemonSetGVR
 		case "statefulsets", "statefulset":
-			gvr = schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "statefulsets"}
+			gvr = statefulSetGVR
+		case "replicasets", "replicaset":
+			gvr = replicaSetGVR
+		case "jobs", "job":
+			gvr = jobGVR
+		case "cronjobs", "cronjob":
+			gvr = cronJobGVR
 		default:
 			return mcpToolError(ErrCodeUnsupportedResource,
 				fmt.Sprintf("unsupported resource kind %q; supported kinds are: %s", kind, strings.Join(supportedAdvancedWorkloadKinds, ", ")),
@@ -240,13 +246,19 @@ func createAdvancedTools(ksServer *KubescapeMcpserver) {
 		var gvr schema.GroupVersionResource
 		switch strings.ToLower(kind) {
 		case "pods", "pod":
-			gvr = schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"}
+			gvr = podGVR
 		case "deployments", "deployment":
-			gvr = schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"}
+			gvr = deploymentGVR
 		case "daemonsets", "daemonset":
-			gvr = schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "daemonsets"}
+			gvr = daemonSetGVR
 		case "statefulsets", "statefulset":
-			gvr = schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "statefulsets"}
+			gvr = statefulSetGVR
+		case "replicasets", "replicaset":
+			gvr = replicaSetGVR
+		case "jobs", "job":
+			gvr = jobGVR
+		case "cronjobs", "cronjob":
+			gvr = cronJobGVR
 		default:
 			return mcpToolError(ErrCodeUnsupportedResource,
 				fmt.Sprintf("security barrier: patching kind %q is not permitted; supported kinds are: %s", kind, strings.Join(supportedAdvancedWorkloadKinds, ", ")),
