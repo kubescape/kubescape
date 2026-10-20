@@ -46,7 +46,11 @@ type gitLabOmittedResources struct {
 // A complete scan with nothing omitted returns nil, so its output is unchanged.
 // Messages come out in a fixed category order and sorted within a category,
 // so identical scans produce identical reports.
-func buildGitLabScanMessages(opaSessionObj *cautils.OPASessionObj, omitted gitLabOmittedResources, basePath string) []gitLabScanMessage {
+//
+// A skipped manifest's Reason is the loader's raw error, and a parser error can
+// quote the manifest content, a Secret's values included. Unless showSecrets is
+// set it is therefore never copied into a message; see gitLabSkipReason.
+func buildGitLabScanMessages(opaSessionObj *cautils.OPASessionObj, omitted gitLabOmittedResources, basePath string, showSecrets bool) []gitLabScanMessage {
 	if opaSessionObj == nil {
 		return nil
 	}
@@ -77,7 +81,7 @@ func buildGitLabScanMessages(opaSessionObj *cautils.OPASessionObj, omitted gitLa
 		return manifests[i].Reason < manifests[j].Reason
 	})
 	for _, m := range manifests {
-		add("Manifest %s was skipped: %s", gitLabDisplayPath(m.Path, basePath), m.Reason)
+		add("Manifest %s was skipped: %s", gitLabDisplayPath(m.Path, basePath), gitLabSkipReason(m.Reason, showSecrets))
 	}
 
 	// A control that could not be evaluated only because a GVR failed to pull is
@@ -195,4 +199,28 @@ func gitLabDisplayPath(p, basePath string) string {
 		}
 	}
 	return filepath.ToSlash(p)
+}
+
+// gitLabSkipReason returns the reason to show for a skipped manifest. With
+// showSecrets it is the loader's text unchanged. Otherwise only the category is
+// kept: the loader prefixes each reason with a fixed label of its own
+// ("parse error: ", "read error: ", ...), the rest is the underlying error and
+// may quote the manifest, so it is dropped rather than filtered. Anything
+// unrecognised gets the generic text.
+func gitLabSkipReason(reason string, showSecrets bool) string {
+	if showSecrets {
+		return reason
+	}
+	switch {
+	case strings.HasPrefix(reason, "parse error"):
+		return "it could not be parsed"
+	case strings.HasPrefix(reason, "unrendered Helm template"):
+		return "it is an unrendered Helm template"
+	case strings.HasPrefix(reason, "read error"):
+		return "it could not be read"
+	case strings.HasPrefix(reason, cautils.ErrFileTooLarge.Error()):
+		return "it exceeds the file size limit"
+	default:
+		return "it could not be loaded"
+	}
 }

@@ -108,7 +108,7 @@ func TestBuildGitLabScanMessages_Categories(t *testing.T) {
 		},
 	}, 20)
 
-	values := messageValues(buildGitLabScanMessages(session, gitLabOmittedResources{}, base))
+	values := messageValues(buildGitLabScanMessages(session, gitLabOmittedResources{}, base, true))
 
 	assert.Contains(t, values, "Manifest k8s/bad.yaml was skipped: parse error: line 2",
 		"a manifest inside the scan root is shown relative to it")
@@ -133,7 +133,7 @@ func TestBuildGitLabScanMessages_FailedPullNamesItsControls(t *testing.T) {
 		},
 	}, 20)
 
-	values := messageValues(buildGitLabScanMessages(session, gitLabOmittedResources{}, ""))
+	values := messageValues(buildGitLabScanMessages(session, gitLabOmittedResources{}, "", true))
 
 	assert.Contains(t, values, "Resources of rbac.authorization.k8s.io/v1/roles could not be collected: forbidden (controls not evaluated: C-0035, C-0188)")
 	for _, v := range values {
@@ -163,7 +163,7 @@ func TestBuildGitLabScanMessages_SkippedControlReportedOnce(t *testing.T) {
 		NotEvaluatedControls: []cautils.NotEvaluatedControl{{ControlID: "C-0099", Reason: "control timed out"}},
 	}, 20)
 
-	values := messageValues(buildGitLabScanMessages(session, gitLabOmittedResources{}, ""))
+	values := messageValues(buildGitLabScanMessages(session, gitLabOmittedResources{}, "", true))
 
 	count := 0
 	for _, v := range values {
@@ -186,7 +186,7 @@ func TestBuildGitLabScanMessages_ControlWarningsOnlyWhenDegraded(t *testing.T) {
 	degradeGitLabSession(session, cautils.ScanCoverage{}, 20)
 	require.False(t, session.ScanCoverage.Degraded)
 
-	assert.Nil(t, buildGitLabScanMessages(session, gitLabOmittedResources{}, ""),
+	assert.Nil(t, buildGitLabScanMessages(session, gitLabOmittedResources{}, "", true),
 		"a skipped control in a complete scan is not a coverage gap")
 }
 
@@ -235,7 +235,7 @@ func TestBuildGitLabScanMessages_OrderIsDeterministic(t *testing.T) {
 		session := cautils.NewOPASessionObjMock()
 		session.Report = &reporthandlingv2.PostureReport{}
 		degradeGitLabSession(session, cautils.ScanCoverage{SkippedManifests: m, PartialGVRPulls: p}, 20)
-		return messageValues(buildGitLabScanMessages(session, gitLabOmittedResources{}, ""))
+		return messageValues(buildGitLabScanMessages(session, gitLabOmittedResources{}, "", true))
 	}
 
 	first := build(manifests, partials)
@@ -254,7 +254,7 @@ func TestBuildGitLabScanMessages_CapsOutput(t *testing.T) {
 	session.Report = &reporthandlingv2.PostureReport{}
 	degradeGitLabSession(session, cautils.ScanCoverage{SkippedManifests: manifests}, 20)
 
-	messages := buildGitLabScanMessages(session, gitLabOmittedResources{}, "")
+	messages := buildGitLabScanMessages(session, gitLabOmittedResources{}, "", true)
 
 	require.Len(t, messages, maxGitLabScanMessages)
 	requireSchemaValidMessages(t, messages)
@@ -278,4 +278,82 @@ func TestGitLabDisplayPath(t *testing.T) {
 	assert.Equal(t, "k8s/a.yaml", gitLabDisplayPath(filepath.Join(base, "k8s", "a.yaml"), base))
 	assert.Equal(t, "/other/a.yaml", gitLabDisplayPath(filepath.Join(string(filepath.Separator), "other", "a.yaml"), base))
 	assert.Equal(t, "/repo/a.yaml", gitLabDisplayPath(filepath.Join(base, "a.yaml"), ""))
+}
+
+// TestGitLabSASTMessages_MalformedSecretDoesNotLeak runs the real manifest
+// loader on a malformed Secret next to a valid manifest. The pinned JSON
+// parser quotes the unparsed input in its error, so the loader's skip reason
+// carries the Secret's value; the serialized report must not.
+func TestGitLabSASTMessages_MalformedSecretDoesNotLeak(t *testing.T) {
+	const sentinel = "sentinel-secret-do-not-leak-4206"
+	dir := t.TempDir()
+	// The missing comma after metadata makes fastjson report the rest of the input.
+	malformed := `{"apiVersion":"v1","kind":"Secret","metadata":{"name":"s"} "stringData":{"password":"` + sentinel + `"}}`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "secret.json"), []byte(malformed), 0o600))
+	valid := `{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"ok"},"data":{"k":"v"}}`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "ok.json"), []byte(valid), 0o600))
+
+	workloads, skipped, _ := cautils.LoadResourcesFromFiles(context.Background(), dir, dir, nil)
+	require.Len(t, skipped, 1)
+	require.Contains(t, skipped[0].Reason, sentinel, "the loader's reason must carry the excerpt, or this test proves nothing")
+	require.Len(t, workloads, 1, "the valid manifest is still loaded")
+
+	session := gitLabSessionFixture(t, "C-0057", 8.0)
+	degradeGitLabSession(session, cautils.ScanCoverage{SkippedManifests: skipped}, 20)
+
+	tmp := filepath.Join(t.TempDir(), "report.json")
+	f, err := os.Create(tmp)
+	require.NoError(t, err)
+	gp := NewGitLabSASTPrinter(false)
+	gp.writer = f
+	require.NoError(t, gp.printConfigurationScan(context.Background(), session))
+	require.NoError(t, f.Close())
+	raw, err := os.ReadFile(tmp)
+	require.NoError(t, err)
+
+	assert.NotContains(t, string(raw), sentinel, "no part of the report may carry the Secret value")
+
+	var report gitLabSASTReport
+	require.NoError(t, json.Unmarshal(raw, &report))
+	requireSchemaValidMessages(t, report.Scan.Messages)
+	var skippedWarning string
+	for _, v := range messageValues(report.Scan.Messages) {
+		if strings.HasSuffix(v, "secret.json was skipped: it could not be parsed") {
+			skippedWarning = v
+		}
+	}
+	assert.NotEmpty(t, skippedWarning, "the warning still names the manifest and says it could not be parsed")
+	for _, m := range report.Scan.Messages {
+		assert.LessOrEqual(t, len([]rune(m.Value)), maxGitLabMessageLen)
+	}
+}
+
+func TestGitLabSkipReason(t *testing.T) {
+	for reason, want := range map[string]string{
+		"parse error: cannot parse " + "x":               "it could not be parsed",
+		"unrendered Helm template: x":                    "it is an unrendered Helm template",
+		"read error: open x: denied":                     "it could not be read",
+		cautils.ErrFileTooLarge.Error() + `: "f" size 9`: "it exceeds the file size limit",
+		"anything else, maybe quoting a value":           "it could not be loaded",
+	} {
+		assert.Equal(t, want, gitLabSkipReason(reason, false), reason)
+		assert.Equal(t, reason, gitLabSkipReason(reason, true), "showSecrets keeps the loader's text")
+	}
+}
+
+// TestBuildGitLabScanMessages_RedactsSkipReasonByDefault pins the builder
+// itself, so a new caller cannot reach the raw reason without opting in.
+func TestBuildGitLabScanMessages_RedactsSkipReasonByDefault(t *testing.T) {
+	session := cautils.NewOPASessionObjMock()
+	session.Report = &reporthandlingv2.PostureReport{}
+	degradeGitLabSession(session, cautils.ScanCoverage{
+		SkippedManifests: []cautils.SkippedManifest{{Path: "a.yaml", Reason: "parse error: unparsed tail: \"hunter2\""}},
+	}, 20)
+
+	redacted := messageValues(buildGitLabScanMessages(session, gitLabOmittedResources{}, "", false))
+	assert.Contains(t, redacted, "Manifest a.yaml was skipped: it could not be parsed")
+	assert.NotContains(t, strings.Join(redacted, "\n"), "hunter2")
+
+	shown := messageValues(buildGitLabScanMessages(session, gitLabOmittedResources{}, "", true))
+	assert.Contains(t, strings.Join(shown, "\n"), "hunter2")
 }

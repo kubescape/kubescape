@@ -393,7 +393,7 @@ func (gp *GitLabSASTPrinter) printConfigurationScan(ctx context.Context, opaSess
 		EndTime:   finishedAt.Format(gitLabTimeFormat),
 		Status:    "success",
 		Messages: buildGitLabScanMessages(opaSessionObj,
-			gitLabOmittedResources{withoutFilePath: withoutFilePath, outsideRepository: outsideRepository}, basePath),
+			gitLabOmittedResources{withoutFilePath: withoutFilePath, outsideRepository: outsideRepository}, basePath, gp.showSecrets),
 	}
 
 	encoded, err := json.MarshalIndent(report, "", "  ")
