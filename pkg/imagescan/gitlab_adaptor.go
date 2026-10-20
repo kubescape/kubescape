@@ -404,6 +404,16 @@ func (a *GitlabAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs [
 				}
 
 				if len(resp.Errors) > 0 {
+					// Execution errors may accompany usable partial data. Keep
+					// this page's findings, but stop and return the error so the
+					// result cannot be mistaken for a complete scan.
+					if resp.Data.Project != nil {
+						for _, node := range resp.Data.Project.Vulnerabilities.Nodes {
+							if node.Title != "" {
+								projectNodes = append(projectNodes, node)
+							}
+						}
+					}
 					fetchErr = fmt.Errorf("graphql error: %s", resp.Errors[0].Message)
 					logger.L().Warning("failed to fetch vulnerabilities due to graphql error, result may be incomplete", helpers.Error(fetchErr))
 					break
