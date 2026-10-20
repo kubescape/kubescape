@@ -870,6 +870,7 @@ func (sp *SARIFPrinter) writeConfigurationSARIF(ctx context.Context, w io.Writer
 				if !ok {
 					continue
 				}
+				addSARIFAlertOnlyProperties(r, split.suppressedAlertOnlyExceptions)
 				stream.separator(&firstResult)
 				stream.raw("\n        ")
 				stream.value(newSARIFSuppressedResult(r, split.suppressingExceptions))

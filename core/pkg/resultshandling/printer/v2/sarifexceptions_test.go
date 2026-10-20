@@ -535,3 +535,105 @@ func TestSARIFExceptions_SuppressedOnlyResourceIsReported(t *testing.T) {
 	}
 	assert.Equal(t, 1, suppressed)
 }
+
+// A rule matched by a disable and an alertOnly exception passes, because only an
+// all-alertOnly match keeps it failing. The disable exception is the one that
+// suppressed it; the alertOnly exception stays acknowledgment metadata.
+func TestSARIFExceptions_AlertOnlyAlongsideDisableIsNotASuppression(t *testing.T) {
+	expires := time.Date(2030, 6, 1, 0, 0, 0, 0, time.UTC)
+	disable := disableException("allow-privileged", strPtr("approved"))
+	alert := alertOnlyException("known-issue", &expires)
+
+	for name, attached := range map[string][]armotypes.PostureExceptionPolicy{
+		"disable first":   {disable, alert},
+		"alertOnly first": {alert, disable},
+	} {
+		t.Run(name, func(t *testing.T) {
+			raw := renderSARIF(t, NewSARIFPrinter(false),
+				sarifExceptionSession(t, sarifExceptionControl(failingRule("privileged", privilegedPath, attached...))))
+			requireValidSARIF(t, raw)
+			results := parseSARIFResults(t, raw)
+
+			require.Len(t, results, 1, "the finding is reported once, as suppressed")
+			require.Len(t, results[0].Suppressions, 1, "only the disable exception suppressed the finding")
+			assert.Equal(t, "approved", *results[0].Suppressions[0].Justification)
+
+			encoded, err := json.Marshal(results[0].Suppressions)
+			require.NoError(t, err)
+			assert.Contains(t, string(encoded), "allow-privileged")
+			assert.NotContains(t, string(encoded), "known-issue", "alertOnly must not be recorded as an accepted suppression")
+
+			assert.Equal(t, "alertOnly", results[0].Properties["exception-action"])
+			assert.Equal(t, "known-issue", results[0].Properties["exception-names"])
+			assert.Equal(t, "2030-06-01T00:00:00Z", results[0].Properties["exception-expiration"])
+		})
+	}
+}
+
+// Exceptions the printer cannot tell apart by name, reason or expiration are told
+// apart by GUID, and the report still satisfies the schema's uniqueItems rule.
+func TestSARIFExceptions_DistinctGUIDsStayDistinguishable(t *testing.T) {
+	expires := time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC)
+	build := func(guid string) armotypes.PostureExceptionPolicy {
+		ex := disableException("shared-name", strPtr("same reason"))
+		ex.GUID = guid
+		ex.ExpirationDate = &expires
+		return ex
+	}
+	first, second := build("11111111-aaaa"), build("22222222-bbbb")
+
+	render := func(attached ...armotypes.PostureExceptionPolicy) []byte {
+		return renderSARIF(t, NewSARIFPrinter(false),
+			sarifExceptionSession(t, sarifExceptionControl(failingRule("privileged", privilegedPath, attached...))))
+	}
+	raw := render(second, first)
+	requireValidSARIF(t, raw)
+	results := parseSARIFResults(t, raw)
+
+	require.Len(t, results, 1)
+	require.Len(t, results[0].Suppressions, 2, "both distinct exception records are kept")
+	guids := []any{
+		results[0].Suppressions[0].Properties["exception-guid"],
+		results[0].Suppressions[1].Properties["exception-guid"],
+	}
+	assert.Equal(t, []any{"11111111-aaaa", "22222222-bbbb"}, guids, "ordered by GUID")
+	assert.NotEqual(t, results[0].Suppressions[0].Properties, results[0].Suppressions[1].Properties)
+
+	// Same bytes on every run and whatever order the exceptions were attached in.
+	// The report embeds a per-session temp path, so compare the results.
+	results1 := parseSARIFResults(t, render(first, second))
+	encode := func(r []*sarif.Result) string {
+		b, err := json.Marshal(r[0].Suppressions)
+		require.NoError(t, err)
+		return string(b)
+	}
+	for i := 0; i < 5; i++ {
+		assert.Equal(t, encode(results), encode(parseSARIFResults(t, render(second, first))))
+	}
+	assert.Equal(t, encode(results), encode(results1))
+}
+
+// A suppression with no name, GUID or expiration has nothing to put in
+// properties, and must not serialize a null one.
+func TestSARIFExceptions_SuppressionWithoutOptionalFieldsIsSchemaValid(t *testing.T) {
+	raw := renderSARIF(t, NewSARIFPrinter(false),
+		sarifExceptionSession(t, sarifExceptionControl(failingRule("privileged", privilegedPath, disableException("", nil)))))
+	requireValidSARIF(t, raw)
+	assert.NotContains(t, string(raw), `"properties": null`)
+	assert.NotContains(t, string(raw), `"properties":null`)
+	results := parseSARIFResults(t, raw)
+	require.Len(t, results, 1)
+	require.Len(t, results[0].Suppressions, 1)
+}
+
+// Identical GUID-less exceptions would serialize to identical suppressions, which
+// the schema forbids; they are written once.
+func TestSARIFExceptions_IndistinguishableSuppressionsAreWrittenOnce(t *testing.T) {
+	a, b := disableException("same", strPtr("why")), disableException("same", strPtr(" why "))
+	raw := renderSARIF(t, NewSARIFPrinter(false),
+		sarifExceptionSession(t, sarifExceptionControl(failingRule("privileged", privilegedPath, a, b))))
+	requireValidSARIF(t, raw)
+	results := parseSARIFResults(t, raw)
+	require.Len(t, results, 1)
+	assert.Len(t, results[0].Suppressions, 1)
+}
