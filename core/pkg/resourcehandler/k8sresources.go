@@ -256,6 +256,8 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 
 	setMapNamespaceToNumOfResources(ctx, allResources, sessionObj)
 
+	cloudResources = k8sHandler.collectRequiredAPIServerInfo(ctx, sessionObj, allResources, ksResourceMap, cloudResources)
+
 	// check that controls use cloud resources
 	if len(cloudResources) > 0 {
 		err := k8sHandler.collectCloudResources(ctx, sessionObj, allResources, ksResourceMap, cloudResources)
@@ -663,6 +665,7 @@ func (k8sHandler *K8sResourceHandler) collectAndStreamBatches(ctx context.Contex
 		}
 	}
 
+	cloudResources = k8sHandler.collectRequiredAPIServerInfo(ctx, sessionObj, allResources, ksResourceMap, cloudResources)
 	if len(cloudResources) > 0 {
 		if err := k8sHandler.collectCloudResources(ctx, sessionObj, allResources, ksResourceMap, cloudResources); err != nil {
 			cautils.SetInfoMapForResources(err.Error(), cloudResources, sessionObj.InfoMap)
@@ -941,16 +944,32 @@ func (k8sHandler *K8sResourceHandler) collectCloudResources(ctx context.Context,
 	}
 	logger.L().StopSuccess("Downloaded cloud resources")
 
-	// get api server info resource
-	if cloudResourceRequired(cloudResources, string(cloudsupport.TypeApiServerInfo)) {
-		if err := k8sHandler.collectAPIServerInfoResource(allResources, externalResourceMap); err != nil {
-			logger.L().Ctx(ctx).Warning("failed to collect api server info resource", helpers.Error(err))
+	return nil
+}
 
-			return err
+// collectRequiredAPIServerInfo collects the APIServerInfo resource when a
+// control needs it, and returns the remaining cloud resources. APIServerInfo
+// comes from the API server's version endpoint, so it is collected whether or
+// not the cluster runs on a known cloud provider; collectCloudResources stops
+// early without one. On failure its entries are marked in the InfoMap, the
+// same way failed cloud resources are.
+func (k8sHandler *K8sResourceHandler) collectRequiredAPIServerInfo(ctx context.Context, sessionObj *cautils.OPASessionObj, allResources map[string]workloadinterface.IMetadata, externalResourceMap cautils.ExternalResources, cloudResources []string) []string {
+	var apiServerInfo, remaining []string
+	for _, resource := range cloudResources {
+		if strings.Contains(resource, string(cloudsupport.TypeApiServerInfo)) {
+			apiServerInfo = append(apiServerInfo, resource)
+		} else {
+			remaining = append(remaining, resource)
 		}
 	}
-
-	return nil
+	if len(apiServerInfo) == 0 {
+		return cloudResources
+	}
+	if err := k8sHandler.collectAPIServerInfoResource(allResources, externalResourceMap); err != nil {
+		logger.L().Ctx(ctx).Warning("failed to collect api server info resource", helpers.Error(err))
+		cautils.SetInfoMapForResources(err.Error(), apiServerInfo, sessionObj.InfoMap)
+	}
+	return remaining
 }
 
 func cloudResourceRequired(cloudResources []string, resource string) bool {
