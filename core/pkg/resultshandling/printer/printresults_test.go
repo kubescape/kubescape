@@ -584,6 +584,48 @@ func TestGetWriterNoFallback_NewDirectoryThroughSymlinkParent(t *testing.T) {
 	assert.NoDirExists(t, filepath.Join(work, "newdir"))
 }
 
+// TestGetWriter_NewDirectoryThroughSymlinkParent: GetWriter must create the missing
+// directory where the file is opened through the symlink, not under the lexical parent.
+func TestGetWriter_NewDirectoryThroughSymlinkParent(t *testing.T) {
+	root := t.TempDir()
+	storage := filepath.Join(root, "storage")
+	reports := filepath.Join(storage, "reports")
+	work := filepath.Join(root, "work")
+	require.NoError(t, os.MkdirAll(reports, 0o755))
+	require.NoError(t, os.MkdirAll(work, 0o755))
+	symlinkThroughParent(t, reports, filepath.Join(work, "link"))
+
+	sep := string(filepath.Separator)
+	target := work + sep + "link" + sep + ".." + sep + "newdir" + sep + "report.json"
+	f := GetWriter(context.Background(), target)
+	require.NotNil(t, f)
+	require.NotEqual(t, os.Stdout, f)
+	require.NoError(t, f.Close())
+	assert.FileExists(t, filepath.Join(storage, "newdir", "report.json"))
+	assert.NoDirExists(t, filepath.Join(work, "newdir"))
+}
+
+// TestGetWriterNoStdoutFallback_NewDirectoryThroughSymlinkParent: GetWriterNoStdoutFallback
+// must create the missing directory and file through the symlink without falling back to a temp file.
+func TestGetWriterNoStdoutFallback_NewDirectoryThroughSymlinkParent(t *testing.T) {
+	root := t.TempDir()
+	storage := filepath.Join(root, "storage")
+	reports := filepath.Join(storage, "reports")
+	work := filepath.Join(root, "work")
+	require.NoError(t, os.MkdirAll(reports, 0o755))
+	require.NoError(t, os.MkdirAll(work, 0o755))
+	symlinkThroughParent(t, reports, filepath.Join(work, "link"))
+
+	sep := string(filepath.Separator)
+	target := work + sep + "link" + sep + ".." + sep + "newdir" + sep + "report.html"
+	f := GetWriterNoStdoutFallback(context.Background(), target, "kubescape-report-*.html")
+	require.NotNil(t, f)
+	require.NotEqual(t, os.Stdout, f)
+	require.NoError(t, f.Close())
+	assert.FileExists(t, filepath.Join(storage, "newdir", "report.html"))
+	assert.NoDirExists(t, filepath.Join(work, "newdir"))
+}
+
 func TestResolveDefaultOutputFile(t *testing.T) {
 	assert.Equal(t, "report.html", ResolveDefaultOutputFile(HtmlFormat, "report"))
 	assert.Equal(t, "report.pdf", ResolveDefaultOutputFile(PdfFormat, "report"))

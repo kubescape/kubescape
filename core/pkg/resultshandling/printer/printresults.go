@@ -197,13 +197,19 @@ func openFileForWrite(path string) (*os.File, error) {
 	return f, nil
 }
 
+// GetWriter opens outputFile for writing with owner-only permissions. If outputFile
+// is empty or opening/creating the file fails, it logs a warning and falls back to os.Stdout.
 func GetWriter(ctx context.Context, outputFile string) *os.File {
 	if outputFile != "" {
-		if err := os.MkdirAll(filepath.Dir(outputFile), outputDirPerm); err != nil {
+		outputDir, _ := filepath.Split(outputFile)
+		if outputDir == "" {
+			outputDir = "."
+		}
+		if err := os.MkdirAll(outputDir, outputDirPerm); err != nil {
 			logger.L().Ctx(ctx).Warning(fmt.Sprintf("failed to create directory, reason: %s", err.Error()))
 			return os.Stdout
 		}
-		f, err := openFileForWrite(filepath.Clean(outputFile))
+		f, err := openFileForWrite(outputFile)
 		if err != nil {
 			logger.L().Ctx(ctx).Warning(fmt.Sprintf("failed to open file for writing, reason: %s", err.Error()))
 			return os.Stdout
@@ -242,8 +248,12 @@ func GetWriterNoFallback(outputFile string) (*os.File, error) {
 // It never returns os.Stdout.
 func GetWriterNoStdoutFallback(ctx context.Context, outputFile, tempPattern string) *os.File {
 	if outputFile != "" {
-		if err := os.MkdirAll(filepath.Dir(outputFile), outputDirPerm); err == nil {
-			if f, err := openFileForWrite(filepath.Clean(outputFile)); err == nil {
+		outputDir, _ := filepath.Split(outputFile)
+		if outputDir == "" {
+			outputDir = "."
+		}
+		if err := os.MkdirAll(outputDir, outputDirPerm); err == nil {
+			if f, err := openFileForWrite(outputFile); err == nil {
 				return f
 			} else {
 				logger.L().Ctx(ctx).Warning(fmt.Sprintf("failed to open file for writing, reason: %s", err.Error()))
