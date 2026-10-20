@@ -14,6 +14,7 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
+	"github.com/mitchellh/copystructure"
 )
 
 const cacheFileName = "incremental-scan-cache.json"
@@ -128,11 +129,32 @@ func (s *Store) Get(controlID, resourceID, hash string) (resourcesresults.Resour
 	if !ok || e.Hash != hash {
 		return resourcesresults.ResourceAssociatedControl{}, false
 	}
-	return e.Verdict, true
+	verdict, err := cloneVerdict(e.Verdict)
+	if err != nil {
+		return resourcesresults.ResourceAssociatedControl{}, false
+	}
+	return verdict, true
+}
+
+// cloneVerdict keeps the cache's mutable rule tree private. Copy only that
+// tree: copying the control through reflection would lose its unexported
+// actionRequired state. The remaining control fields are value types.
+func cloneVerdict(verdict resourcesresults.ResourceAssociatedControl) (resourcesresults.ResourceAssociatedControl, error) {
+	rules, err := copystructure.Copy(verdict.ResourceAssociatedRules)
+	if err != nil {
+		return resourcesresults.ResourceAssociatedControl{}, err
+	}
+	verdict.ResourceAssociatedRules = rules.([]resourcesresults.ResourceAssociatedRule)
+	return verdict, nil
 }
 
 func (s *Store) Put(controlID, resourceID, hash string, verdict resourcesresults.ResourceAssociatedControl) {
 	if hash == "" {
+		return
+	}
+	verdict, err := cloneVerdict(verdict)
+	if err != nil {
+		logger.L().Warning("incremental scan cache: unable to copy verdict, skipping cache", helpers.Error(err))
 		return
 	}
 	s.mu.Lock()
