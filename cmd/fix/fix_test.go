@@ -1,6 +1,7 @@
 package fix
 
 import (
+	"io"
 	"testing"
 
 	metav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
@@ -24,6 +25,36 @@ func TestGetFixCmd(t *testing.T) {
 
 	err = fixCmd.RunE(&cobra.Command{}, []string{"random-file.json"})
 	assert.Nil(t, err)
+}
+
+// Goes through Execute, not RunE, so Cobra's argument validation runs.
+func TestFixCmdArgs(t *testing.T) {
+	tests := []struct {
+		name    string
+		args    []string
+		wantErr string
+	}{
+		// Non-nil: SetArgs(nil) makes Execute fall back to os.Args.
+		{name: "no report", args: []string{}, wantErr: "report output file is required"},
+		{name: "one report", args: []string{"report.json"}},
+		{name: "extra report", args: []string{"a.json", "b.json"}, wantErr: "accepts at most 1 arg(s), received 2"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fixCmd := GetFixCmd(&mocks.MockIKubescape{})
+			fixCmd.SetArgs(tt.args)
+			fixCmd.SetOut(io.Discard)
+			fixCmd.SetErr(io.Discard)
+
+			err := fixCmd.Execute()
+			if tt.wantErr == "" {
+				assert.NoError(t, err)
+				return
+			}
+			assert.EqualError(t, err, tt.wantErr)
+		})
+	}
 }
 
 func TestValidateControlSelection(t *testing.T) {
