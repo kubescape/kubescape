@@ -36,6 +36,7 @@ func (a Applicability) String() string {
 
 type entry struct {
 	affected    map[string][]versionRange
+	fixed       map[string][]semver
 	windowsOnly bool
 }
 
@@ -73,8 +74,11 @@ func Parse(r io.Reader) (*Index, error) {
 	ix := &Index{Updated: f.Meta.UpdatedAt, entries: make(map[string]*entry, len(f.Items))}
 	for _, item := range f.Items {
 		e := &entry{windowsOnly: windowsPlatform.MatchString(item.Summary)}
-		if lines, ok := affectedSection(item.ContentText); ok {
+		if lines, ok := section(item.ContentText, affectedHeader); ok {
 			e.affected, _ = parseAffected(lines)
+		}
+		if lines, ok := section(item.ContentText, fixedHeader); ok {
+			e.fixed = parseFixed(lines)
 		}
 		ix.entries[strings.ToUpper(item.ID)] = e
 	}
@@ -102,12 +106,39 @@ func (ix *Index) Lookup(cve, component, version, operatingSystem string) Applica
 	default:
 		return Unattributed
 	}
+	matched, openEnded := false, false
 	for _, r := range e.affected[component] {
 		if r.contains(v) {
-			return Applicable
+			matched = true
+			openEnded = openEnded || r.To == nil
 		}
 	}
-	return NotApplicable
+	if !matched {
+		return NotApplicable
+	}
+	return e.reconcileFixes(component, v, openEnded)
+}
+
+// reconcileFixes applies the advisory's fixed releases to an affected match.
+// A fix covers later patches of its own minor series. An open-ended range
+// matching a series newer than every listed fix cannot be resolved from the
+// advisory, so it is left unattributed.
+func (e *entry) reconcileFixes(component string, v semver, openEnded bool) Applicability {
+	fixes := e.fixed[component]
+	newest := -1
+	for _, f := range fixes {
+		if f.major != v.major {
+			continue
+		}
+		if f.minor == v.minor && v.patch >= f.patch {
+			return NotApplicable
+		}
+		newest = max(newest, f.minor)
+	}
+	if openEnded && len(fixes) > 0 && v.minor > newest {
+		return Unattributed
+	}
+	return Applicable
 }
 
 // Stale reports whether the index is older than maxAge or than the

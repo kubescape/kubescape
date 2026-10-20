@@ -100,6 +100,13 @@ func TestEmbeddedFeed(t *testing.T) {
 	assert.Equal(t, NotApplicable, ix.Lookup("CVE-2023-3676", "kubelet", "1.27.3", "linux"))
 	assert.Equal(t, NotApplicable, ix.Lookup("CVE-2023-5528", "kubelet", "1.27.3", "linux"))
 	assert.Equal(t, Applicable, ix.Lookup("CVE-2023-5528", "kubelet", "1.27.3", "windows"))
+	for _, v := range []string{"1.28.4", "1.27.8", "1.26.11", "1.25.16", "1.28.9"} {
+		assert.Equal(t, NotApplicable, ix.Lookup("CVE-2023-5528", "kubelet", v, "windows"), v)
+	}
+	for _, v := range []string{"1.28.3", "1.27.7", "1.26.10", "1.25.15", "1.20.0"} {
+		assert.Equal(t, Applicable, ix.Lookup("CVE-2023-5528", "kubelet", v, "windows"), v)
+	}
+	assert.Equal(t, Unattributed, ix.Lookup("CVE-2023-5528", "kubelet", "1.29.0", "windows"))
 	assert.Equal(t, Applicable, ix.Lookup("CVE-2026-3288", "ingress-nginx", "1.14.3", "linux"))
 	assert.Equal(t, NotApplicable, ix.Lookup("CVE-2026-3288", "ingress-nginx", "1.14.4", "linux"))
 	assert.Equal(t, NotApplicable, ix.Lookup("CVE-2026-3288", "ingress-nginx", "1.15.0", "linux"))

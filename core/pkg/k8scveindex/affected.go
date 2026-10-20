@@ -43,12 +43,14 @@ func (r versionRange) contains(v semver) bool {
 const versionPattern = `v?\d+\.\d+(?:\.\d+)?`
 
 var (
-	sectionHeader = regexp.MustCompile(`(?i)^(?:#+\s*|\*\*)affected versions\b`)
-	anyHeader     = regexp.MustCompile(`^(?:#+\s|\*\*[^*]+\*\*\s*:?\s*$)`)
-	affectedLine  = regexp.MustCompile(`^(?:[-*]\s*)?(?i:kubernetes\s+)?([a-z][a-z0-9-]*(?:/[a-z][a-z0-9-]*)*):?\s+(.+?)\s*(?:\([^)]*\))?$`)
-	boundRange    = regexp.MustCompile(`^(<=|>=|<|>|=)\s*(` + versionPattern + `)$`)
-	spanRange     = regexp.MustCompile(`^(` + versionPattern + `)\s*(?:\\?-|to)\s*(` + versionPattern + `)$`)
-	exactRange    = regexp.MustCompile(`^(` + versionPattern + `)$`)
+	affectedHeader = regexp.MustCompile(`(?i)^(?:#+\s*|\*\*)affected versions\b`)
+	fixedHeader    = regexp.MustCompile(`(?i)^(?:#+\s*|\*\*)fixed versions?\b`)
+	anyHeader      = regexp.MustCompile(`^(?:#+\s|\*\*[^*]+\*\*\s*:?\s*$)`)
+	affectedLine   = regexp.MustCompile(`^(?:[-*]\s*)?(?i:kubernetes\s+)?([a-z][a-z0-9-]*(?:/[a-z][a-z0-9-]*)*):?\s+(.+?)\s*(?:\([^)]*\))?$`)
+	fixedLine      = regexp.MustCompile(`^(?:[-*]\s*)?(?i:kubernetes\s+)?([a-z][a-z0-9-]*(?:/[a-z][a-z0-9-]*)*):?\s+(?:>=\s*)?v?(\d+\.\d+\.\d+)\+?(?:\s|$)`)
+	boundRange     = regexp.MustCompile(`^(<=|>=|<|>|=)\s*(` + versionPattern + `)$`)
+	spanRange      = regexp.MustCompile(`^(` + versionPattern + `)\s*(?:\\?-|to)\s*(` + versionPattern + `)$`)
+	exactRange     = regexp.MustCompile(`^(` + versionPattern + `)$`)
 )
 
 // parseVersion parses a feed version. Minor-only versions such as "v1.30"
@@ -128,11 +130,11 @@ func exact(v semver, full bool) versionRange {
 	return versionRange{From: &v, To: &v, ToInclusive: true}
 }
 
-// affectedSection returns the lines of the "Affected Versions" section of a
-// feed entry, or false when the entry has none.
-func affectedSection(content string) ([]string, bool) {
+// section returns the non-empty lines under the first heading matching
+// header, or false when the entry has no such heading.
+func section(content string, header *regexp.Regexp) ([]string, bool) {
 	lines := strings.Split(strings.ReplaceAll(content, "\r\n", "\n"), "\n")
-	start := slices.IndexFunc(lines, func(l string) bool { return sectionHeader.MatchString(strings.TrimSpace(l)) })
+	start := slices.IndexFunc(lines, func(l string) bool { return header.MatchString(strings.TrimSpace(l)) })
 	if start < 0 {
 		return nil, false
 	}
@@ -181,6 +183,29 @@ func parseAffected(lines []string) (map[string][]versionRange, error) {
 	return affected, nil
 }
 
+// parseFixed maps each component to the releases a "Fixed Versions" section
+// names. Lines without a component and full release, such as "master" or
+// prose, are skipped.
+func parseFixed(lines []string) map[string][]semver {
+	fixed := map[string][]semver{}
+	for _, line := range lines {
+		m := fixedLine.FindStringSubmatch(line)
+		if m == nil {
+			continue
+		}
+		v, _, err := parseVersion(m[2])
+		if err != nil {
+			continue
+		}
+		for _, c := range strings.Split(m[1], "/") {
+			if c != "kubernetes" {
+				fixed[c] = append(fixed[c], v)
+			}
+		}
+	}
+	return fixed
+}
+
 // scopeUpperBounds handles entries that list one "<= vX.Y.Z" line per
 // supported minor, such as "<= v1.28.0" and "<= v1.27.4". Each of those only
 // covers its own minor series; only the lowest stays open below. An exclusive
@@ -190,12 +215,21 @@ func scopeUpperBounds(ranges []versionRange) error {
 	var upper []int
 	covered := map[[2]int]bool{}
 	for i, r := range ranges {
-		if r.From != nil || r.To == nil {
-			continue
-		}
-		upper = append(upper, i)
-		if !isSeriesStart(r) {
-			covered[[2]int{r.To.major, r.To.minor}] = true
+		switch {
+		case r.To == nil:
+		case r.From == nil:
+			upper = append(upper, i)
+			if !isSeriesStart(r) {
+				covered[[2]int{r.To.major, r.To.minor}] = true
+			}
+		case r.From.major == r.To.major:
+			last := r.To.minor
+			if isSeriesStart(r) {
+				last--
+			}
+			for minor := r.From.minor; minor <= last; minor++ {
+				covered[[2]int{r.From.major, minor}] = true
+			}
 		}
 	}
 	if len(upper) < 2 {

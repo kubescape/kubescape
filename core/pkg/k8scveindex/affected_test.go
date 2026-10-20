@@ -90,7 +90,7 @@ func TestAffectedSection(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, found := affectedSection(tt.content)
+			got, found := section(tt.content, affectedHeader)
 			assert.Equal(t, tt.found, found)
 			assert.Equal(t, tt.want, got)
 		})
@@ -144,6 +144,31 @@ func TestParseAffected(t *testing.T) {
 		}
 	})
 
+	t.Run("explicit spans count as covered series", func(t *testing.T) {
+		affected, err := parseAffected([]string{
+			"- ingress-nginx: < 1.13.8",
+			"- ingress-nginx: 1.14.0 - 1.14.3",
+			"- ingress-nginx: < 1.15.0",
+		})
+		require.NoError(t, err)
+		for _, v := range []string{"1.13.7", "1.14.0", "1.14.3"} {
+			assert.True(t, containsAny(affected["ingress-nginx"], mustVersion(t, v)), v)
+		}
+		for _, v := range []string{"1.13.8", "1.14.4", "1.15.0"} {
+			assert.False(t, containsAny(affected["ingress-nginx"], mustVersion(t, v)), v)
+		}
+	})
+
+	t.Run("series start covers the previous series when nothing else does", func(t *testing.T) {
+		affected, err := parseAffected([]string{
+			"- kubelet: < 1.13.8",
+			"- kubelet: < 1.15.0",
+		})
+		require.NoError(t, err)
+		assert.True(t, containsAny(affected["kubelet"], mustVersion(t, "1.14.9")))
+		assert.False(t, containsAny(affected["kubelet"], mustVersion(t, "1.13.8")))
+	})
+
 	for name, lines := range map[string][]string{
 		"no lines":               nil,
 		"no component":           {"v1.22.0 - v1.22.1"},
@@ -160,6 +185,27 @@ func TestParseAffected(t *testing.T) {
 			assert.Nil(t, affected)
 		})
 	}
+}
+
+func TestParseFixed(t *testing.T) {
+	fixed := parseFixed([]string{
+		"- kubelet master - fixed by #121881",
+		"- kubelet v1.28.4 - fixed by #121882",
+		"* kubelet master/v1.31.0  - fixed by #124531",
+		"kube-apiserver: >= v1.31.12",
+		"- Kubernetes kube-apiserver v1.25.4",
+		"- kubelet/kube-proxy v1.18.4+ - fixed by #92038",
+		"- kubernetes-csi-proxy v2.0.0-alpha.1 - fixed by #307",
+		"- Kubernetes v1.14+ - Fixed by default in #72552",
+		"kubernetes v1.20.0",
+		"To upgrade, refer to the documentation: https://kubernetes.io/docs/tasks/administer-cluster/cluster-upgrade/",
+	})
+
+	assert.Equal(t, map[string][]semver{
+		"kubelet":        {{1, 28, 4}, {1, 18, 4}},
+		"kube-apiserver": {{1, 31, 12}, {1, 25, 4}},
+		"kube-proxy":     {{1, 18, 4}},
+	}, fixed)
 }
 
 func mustVersion(t *testing.T, s string) semver {
