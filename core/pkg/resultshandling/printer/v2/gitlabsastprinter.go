@@ -69,6 +69,8 @@ type gitLabScan struct {
 	StartTime string        `json:"start_time"`
 	EndTime   string        `json:"end_time"`
 	Status    string        `json:"status"`
+	// Messages carries warnings about gaps in the scan; omitted when there are none.
+	Messages []gitLabScanMessage `json:"messages,omitempty"`
 }
 
 type gitLabScanner struct {
@@ -390,6 +392,8 @@ func (gp *GitLabSASTPrinter) printConfigurationScan(ctx context.Context, opaSess
 		StartTime: startedAt.Format(gitLabTimeFormat),
 		EndTime:   finishedAt.Format(gitLabTimeFormat),
 		Status:    "success",
+		Messages: buildGitLabScanMessages(opaSessionObj,
+			gitLabOmittedResources{withoutFilePath: withoutFilePath, outsideRepository: outsideRepository}, basePath, gp.showSecrets),
 	}
 
 	encoded, err := json.MarshalIndent(report, "", "  ")
