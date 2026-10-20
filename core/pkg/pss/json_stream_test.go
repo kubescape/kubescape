@@ -108,12 +108,45 @@ func TestJSONStream_UnsupportedRecordsDoNotHideLaterWorkload(t *testing.T) {
 }
 
 func TestJSONStream_EmptyObjectsDoNotTerminateStream(t *testing.T) {
-	for _, prefix := range []string{`{}`, `{"metadata":{"name":"unknown"}}`} {
+	// Begin with an object so the decoder selects JSON stream mode.
+	for _, prefix := range []string{"{}", "{}\nnull\n{}"} {
 		source := prefix + "\n" + jsonRecord(t, streamPod("last", true))
 		items, err := parseMultiDoc([]byte(source), "empty-prefix.json")
 		require.NoError(t, err)
 		require.Equal(t, []string{"last"}, streamNames(items))
 	}
+}
+
+func TestJSONStream_LocalParserRejectsPopulatedObjectsWithoutKind(t *testing.T) {
+	for _, kind := range []string{"absent", "null", "empty"} {
+		for _, prefix := range []string{"", "apiVersion: v1\nkind: Pod\nmetadata:\n  name: safe\n---\n", jsonRecord(t, streamPod("safe", false)) + "\n"} {
+			t.Run(fmt.Sprintf("%s/prefix-%d", kind, len(prefix)), func(t *testing.T) {
+				object := streamPod("unsafe", true)
+				switch kind {
+				case "absent":
+					delete(object, "kind")
+				case "null":
+					object["kind"] = nil
+				case "empty":
+					object["kind"] = ""
+				}
+				path := filepath.Join(t.TempDir(), "missing-kind.yaml")
+				require.NoError(t, os.WriteFile(path, []byte(prefix+jsonRecord(t, object)), 0o600))
+				items, err := ParseLocalWorkloads([]string{path})
+				require.ErrorContains(t, err, "kind is required")
+				require.ErrorContains(t, err, path)
+				require.ErrorContains(t, err, "document")
+				require.ErrorContains(t, err, "record")
+				require.Empty(t, items, "an invalid suffix must not return a successful prefix")
+			})
+		}
+	}
+}
+
+func TestJSONStream_RejectsMetadataOnlyObject(t *testing.T) {
+	items, err := parseMultiDoc([]byte(`{"metadata":{"name":"unknown"}}`), "metadata.json")
+	require.ErrorContains(t, err, "kind is required")
+	require.Empty(t, items)
 }
 
 func TestJSONStream_NestedListsRemainSupportedInAnyRecord(t *testing.T) {

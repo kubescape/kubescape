@@ -131,6 +131,11 @@ func parseMultiDoc(data []byte, source string) ([]unstructured.Unstructured, err
 			if err := k8sjson.Unmarshal(raw, &object); err != nil {
 				return nil, fmt.Errorf("decoding document %d record %d in %s: %w", docIndex, recordIndex, source, err)
 			}
+			// Only genuinely empty objects and null records may be skipped.
+			// A populated manifest without a kind must not become a clean scan.
+			if len(object) == 0 {
+				continue
+			}
 			if kind, present := object["kind"]; present && kind != nil {
 				if _, ok := kind.(string); !ok {
 					return nil, fmt.Errorf("document %d record %d in %s: kind must be a string", docIndex, recordIndex, source)
@@ -138,9 +143,8 @@ func parseMultiDoc(data []byte, source string) ([]unstructured.Unstructured, err
 			}
 			u := unstructured.Unstructured{Object: object}
 
-			// Empty values and unsupported kinds do not terminate the stream.
-			if u.Object == nil || u.GetKind() == "" {
-				continue
+			if u.GetKind() == "" {
+				return nil, fmt.Errorf("document %d record %d in %s: kind is required", docIndex, recordIndex, source)
 			}
 
 			if listKind, isList := listEnvelopeKind(u.Object); isList {
