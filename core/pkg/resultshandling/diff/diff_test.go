@@ -325,6 +325,28 @@ func TestFilterBySeverity_BelowThresholdReturnsEmpty(t *testing.T) {
 	assert.Empty(t, result)
 }
 
+// Regression for issue-4239: shared.ValidateSeverity accepts thresholds with
+// surrounding whitespace, so they must filter exactly like the trimmed value
+// rather than ranking 0 and keeping every change.
+func TestFilterBySeverity_PaddedThreshold(t *testing.T) {
+	changes := []ControlChange{
+		{ControlID: "C-001", Severity: "Critical"},
+		{ControlID: "C-002", Severity: "High"},
+		{ControlID: "C-003", Severity: "Medium"},
+		{ControlID: "C-004", Severity: "Low"},
+	}
+
+	for _, threshold := range []string{"High", "high", " high", "high ", "high\r", "\tHIGH\n"} {
+		t.Run(fmt.Sprintf("%q", threshold), func(t *testing.T) {
+			var ids []string
+			for _, change := range FilterBySeverity(changes, threshold) {
+				ids = append(ids, change.ControlID)
+			}
+			assert.Equal(t, []string{"C-001", "C-002"}, ids)
+		})
+	}
+}
+
 // Regression for issue-3405: a change whose severity could not be resolved
 // (empty, or "Unknown" - what apis.ControlSeverityToString returns for a
 // control with a zero/missing baseScore, see buildSeverityMap) must not be

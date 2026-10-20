@@ -375,8 +375,11 @@ func sortChanges(changes []ControlChange) {
 	})
 }
 
+// severityRank trims surrounding whitespace, as shared.ValidateSeverity does,
+// so a padded threshold ranks like its trimmed form instead of 0 (which
+// FilterBySeverity would treat as "keep everything").
 func severityRank(value string) int {
-	switch strings.ToLower(value) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "critical":
 		return 4
 	case "high":
