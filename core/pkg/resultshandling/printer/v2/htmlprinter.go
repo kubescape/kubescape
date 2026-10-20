@@ -257,7 +257,7 @@ func buildResourceControlResultTable(resourceControls []resourcesresults.Resourc
 			if control == nil {
 				continue
 			}
-			ctlResult := buildResourceControlResult(resourceControl, control, resource, showSecrets)
+			ctlResult := buildResourceControlResult(cautils.EvidenceControl(summaryDetails, resourceControl), control, resource, showSecrets)
 
 			ctlResults = append(ctlResults, ctlResult)
 		}

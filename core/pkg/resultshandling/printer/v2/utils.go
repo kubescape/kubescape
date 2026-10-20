@@ -180,7 +180,8 @@ func enrichResultWithSeverity(result resourcesresults.Result, summary *reportsum
 		if controlSummary, exists := controlSummaries[control.GetID()]; exists {
 			severity = apis.ControlSeverityToString(controlSummary.GetScoreFactor())
 		}
-		evidence := failedPathValues(&control, resource)
+		displayed := cautils.EvidenceControl(summary, control)
+		evidence := failedPathValues(&displayed, resource)
 		cautils.SettleControlStatus(summary, &control)
 		enrichedControls[j] = ResourceAssociatedControlWithSeverity{
 			ResourceAssociatedControl: control,

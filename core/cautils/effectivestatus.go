@@ -55,6 +55,20 @@ func RuleStatus(summary *reportsummary.SummaryDetails, controlID string, rule *r
 	return rule.GetStatus(ControlFilters(summary, controlID))
 }
 
+// FrameworkRuleStatus is the status of one rule evaluated in a single framework,
+// for output that belongs to that framework alone (a section of the legacy v1
+// report). An exception scoped to another framework does not apply to it. With
+// no framework name it falls back to RuleStatus.
+func FrameworkRuleStatus(summary *reportsummary.SummaryDetails, frameworkName, controlID string, rule *resourcesresults.ResourceAssociatedRule) apis.IStatus {
+	if frameworkName == "" {
+		return RuleStatus(summary, controlID, rule)
+	}
+	if len(rule.Exception) == 0 {
+		return rule.GetStatus(nil)
+	}
+	return rule.GetStatus(&helpersv1.Filters{FrameworkNames: []string{frameworkName}})
+}
+
 // ResourceStatus folds the framework-aware status of each control of the
 // resource, the way Result.GetStatus folds the recorded ones.
 func ResourceStatus(summary *reportsummary.SummaryDetails, result *resourcesresults.Result) apis.IStatus {
@@ -78,6 +92,17 @@ func FailedRules(summary *reportsummary.SummaryDetails, control resourcesresults
 	}
 	control.ResourceAssociatedRules = rules
 	return control
+}
+
+// EvidenceControl returns the control as its evidence should be displayed: a
+// control with a matched exception keeps only the rules that still fail, so the
+// paths of an excepted rule are not offered as something to fix. Any other
+// control is returned as is. The report's own rules are not modified.
+func EvidenceControl(summary *reportsummary.SummaryDetails, control resourcesresults.ResourceAssociatedControl) resourcesresults.ResourceAssociatedControl {
+	if !hasException(&control) {
+		return control
+	}
+	return FailedRules(summary, control)
 }
 
 // ControlIDsByStatus lists the controls of the resource by their framework-aware

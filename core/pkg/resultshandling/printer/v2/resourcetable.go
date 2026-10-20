@@ -188,9 +188,10 @@ func generateResourceRows(controls []resourcesresults.ResourceAssociatedControl,
 
 		row[resourceColumnURL] = cautils.GetControlLink(controls[i].GetID())
 		if showEvidence {
-			paths := AssistedRemediationPathsWithCurrentValuesFiltered(&controls[i], resource, showSecrets)
+			displayed := cautils.EvidenceControl(summaryDetails, controls[i])
+			paths := AssistedRemediationPathsWithCurrentValuesFiltered(&displayed, resource, showSecrets)
 			addContainerNameToAssistedRemediation(resource, &paths)
-			annotatePathLines(&paths, &controls[i], lineFor)
+			annotatePathLines(&paths, &displayed, lineFor)
 			if sourcePath != "" {
 				paths = append([]string{"@ " + sourcePath}, paths...)
 			}
