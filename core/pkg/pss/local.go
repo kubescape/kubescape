@@ -3,6 +3,7 @@ package pss
 import (
 	"bufio"
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -12,6 +13,7 @@ import (
 	k8syaml "k8s.io/apimachinery/pkg/util/yaml"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	k8sjson "k8s.io/apimachinery/pkg/util/json"
 )
 
 // supportedKinds is the set of Kubernetes resource kinds whose PodSpec
@@ -22,6 +24,7 @@ var supportedKinds = SupportedKinds()
 // returns unstructured objects suitable for PSS evaluation. Each path
 // may be a file or a directory (non-recursive). Multi-document YAML
 // files (separated by "---") are supported.
+// Consecutive JSON object records in a single document are supported too.
 //
 // Only objects whose Kind is in the supported workload set
 // (Pod, Deployment, DaemonSet, StatefulSet, ReplicaSet, Job, CronJob)
@@ -112,26 +115,47 @@ func parseMultiDoc(data []byte, source string) ([]unstructured.Unstructured, err
 		}
 
 		decoder := k8syaml.NewYAMLOrJSONDecoder(bytes.NewReader(doc), len(doc))
-		var u unstructured.Unstructured
-		if err := decoder.Decode(&u); err != nil {
-			return nil, fmt.Errorf("decoding document %d in %s: %w", docIndex, source, err)
-		}
-
-		// Skip empty objects (malformed documents that decode to nothing)
-		if u.Object == nil || u.GetKind() == "" {
-			docIndex++
-			continue
-		}
-
-		// Check for List / typed-list envelope (e.g. List, PodList)
-		if listKind, isList := listEnvelopeKind(u.Object); isList {
-			workloads, err := expandListEnvelope(&u, listKind)
-			if err != nil {
-				return nil, fmt.Errorf("document %d in %s: %w", docIndex, source, err)
+		// A YAML reader segment can contain a stream of JSON values. Decode
+		// through EOF so neither later workloads nor trailing errors disappear.
+		for recordIndex := 0; ; recordIndex++ {
+			var raw json.RawMessage
+			if err := decoder.Decode(&raw); err == io.EOF {
+				break
+			} else if err != nil {
+				return nil, fmt.Errorf("decoding document %d record %d in %s: %w", docIndex, recordIndex, source, err)
 			}
-			results = append(results, workloads...)
-		} else if supportedKinds[u.GetKind()] {
-			results = append(results, u)
+			if len(bytes.TrimSpace(raw)) == 0 {
+				continue
+			}
+			var object map[string]any
+			if err := k8sjson.Unmarshal(raw, &object); err != nil {
+				return nil, fmt.Errorf("decoding document %d record %d in %s: %w", docIndex, recordIndex, source, err)
+			}
+			// Only genuinely empty objects and null records may be skipped.
+			// A populated manifest without a kind must not become a clean scan.
+			if len(object) == 0 {
+				continue
+			}
+			if kind, present := object["kind"]; present && kind != nil {
+				if _, ok := kind.(string); !ok {
+					return nil, fmt.Errorf("document %d record %d in %s: kind must be a string", docIndex, recordIndex, source)
+				}
+			}
+			u := unstructured.Unstructured{Object: object}
+
+			if u.GetKind() == "" {
+				return nil, fmt.Errorf("document %d record %d in %s: kind is required", docIndex, recordIndex, source)
+			}
+
+			if listKind, isList := listEnvelopeKind(u.Object); isList {
+				workloads, err := expandListEnvelope(&u, listKind)
+				if err != nil {
+					return nil, fmt.Errorf("document %d record %d in %s: %w", docIndex, recordIndex, source, err)
+				}
+				results = append(results, workloads...)
+			} else if supportedKinds[u.GetKind()] {
+				results = append(results, u)
+			}
 		}
 		docIndex++
 	}
