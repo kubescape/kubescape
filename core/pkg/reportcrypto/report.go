@@ -471,8 +471,13 @@ func (d *reportDecryptor) remapResources() error {
 	return nil
 }
 
-// remapRule restores resource IDs in rule paths and related-resource lists.
+// remapRule restores resource IDs in rule paths and related-resource lists,
+// and the exception metadata attached to the rule.
 func (d *reportDecryptor) remapRule(rule rawObject, context string) error {
+	if err := d.decryptRuleExceptions(rule, context); err != nil {
+		return err
+	}
+
 	pathsRaw, ok := rule["paths"]
 	if ok && !isJSONNull(pathsRaw) {
 		paths, err := decodeObjectArray(pathsRaw, context+".paths")
@@ -515,6 +520,47 @@ func (d *reportDecryptor) remapRule(rule rawObject, context string) error {
 	}
 	rule["relatedResourcesIDs"] = updatedRelated
 
+	return nil
+}
+
+// decryptRuleExceptions restores the name, GUID and reason of the exceptions
+// attached to a rule, the fields anonymizer's exceptionTransformer encrypts.
+// Other exception fields, including ones unknown to this version, are left as
+// they are.
+func (d *reportDecryptor) decryptRuleExceptions(rule rawObject, context string) error {
+	exceptionsRaw, ok := rule["exception"]
+	if !ok || isJSONNull(exceptionsRaw) {
+		return nil
+	}
+	exceptionsContext := context + ".exception"
+	exceptions, err := decodeObjectArray(exceptionsRaw, exceptionsContext)
+	if err != nil {
+		return err
+	}
+	for i := range exceptions {
+		for _, field := range []string{"name", "guid", "reason"} {
+			fieldContext := fmt.Sprintf("%s[%d].%s", exceptionsContext, i, field)
+			value, ok, err := optionalString(exceptions[i], field, fieldContext)
+			if err != nil {
+				return err
+			}
+			if !ok {
+				continue
+			}
+			restored, err := decryptEmbeddedCiphertexts(value, d.dek)
+			if err != nil {
+				return fmt.Errorf("failed to restore %s: %w", fieldContext, err)
+			}
+			exceptions[i][field], err = json.Marshal(restored)
+			if err != nil {
+				return fmt.Errorf("failed to marshal %s: %w", fieldContext, err)
+			}
+		}
+	}
+	rule["exception"], err = json.Marshal(exceptions)
+	if err != nil {
+		return fmt.Errorf("failed to marshal %s: %w", exceptionsContext, err)
+	}
 	return nil
 }
 

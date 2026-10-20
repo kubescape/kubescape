@@ -701,6 +701,37 @@ func (sp *SARIFPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.
 	return nil
 }
 
+// configurationResult builds the SARIF result for one control on one resource,
+// including its fix regions. It reports false when the control is missing from
+// the summary, in which case there is nothing to report.
+func (sp *SARIFPrinter) configurationResult(ctx context.Context, opaSessionObj *cautils.OPASessionObj, cache *fixReportCache, locationResolver *locationresolver.PathLocationResolver, resource scannedResource, ac resourcesresults.ResourceAssociatedControl, ruleIndexes map[string]int) (*sarif.Result, bool) {
+	ctl := opaSessionObj.Report.SummaryDetails.Controls.GetControl(reportsummary.EControlCriteriaID, ac.GetID())
+	if ctl == nil {
+		logger.L().Debug("control not found in summary details, skipping", helpers.String("controlID", ac.GetID()))
+		return nil, false
+	}
+	location := resolveFixLocation(opaSessionObj, locationResolver, &ac, resource.resourceID)
+	reviewPathLocations := resolveReviewPathLocations(opaSessionObj, locationResolver, &ac, resource.resourceID)
+	rsrc, _ := opaSessionObj.GetResource(resource.resourceID)
+	var prioritized *prioritization.PrioritizedResource
+	if opaSessionObj.ResourcesPrioritized != nil {
+		if pr, ok := opaSessionObj.ResourcesPrioritized[resource.resourceID]; ok {
+			prioritized = &pr
+		}
+	}
+	r := sp.createResult(ctl, resource.relPath, location, &ac, resource.resourceID, rsrc, reviewPathLocations, prioritized)
+	r.WithRuleIndex(ruleIndexes[ctl.GetID()])
+	// kind stays "" when rsrc is nil (the resource lookup missed) --
+	// collectFixes below treats an unresolved kind as sensitive,
+	// the same fail-closed rule csvControlPaths applies.
+	kind := ""
+	if rsrc != nil {
+		kind = rsrc.GetKind()
+	}
+	collectFixes(ctx, cache, r, ac, opaSessionObj, resource.resourceID, resource.relPath, resource.absPath, kind, sp.showSecrets)
+	return r, true
+}
+
 // printConfigurationScan renders configuration scan results to the SARIF printer's
 // writer, appending any additional image vulnerability runs.
 func (sp *SARIFPrinter) printConfigurationScan(ctx context.Context, opaSessionObj *cautils.OPASessionObj, additionalRuns ...*sarif.Run) error {
@@ -725,7 +756,7 @@ func (sp *SARIFPrinter) writeConfigurationSARIF(ctx context.Context, w io.Writer
 	basePath := getBasePathFromMetadata(opaSessionObj)
 	failed := make([]scannedResource, 0, len(opaSessionObj.ResourcesResult))
 	for resourceID, result := range opaSessionObj.ResourcesResult {
-		if !result.GetStatus(nil).IsFailed() {
+		if !result.GetStatus(nil).IsFailed() && !hasSARIFSuppressedFinding(result) {
 			continue
 		}
 
@@ -753,7 +784,7 @@ func (sp *SARIFPrinter) writeConfigurationSARIF(ctx context.Context, w io.Writer
 	ruleIndexes := make(map[string]int)
 	for _, resource := range ordered {
 		for _, ac := range sortedSARIFControls(opaSessionObj.ResourcesResult[resource.resourceID].AssociatedControls) {
-			if !ac.GetStatus(nil).IsFailed() {
+			if !ac.GetStatus(nil).IsFailed() && !isSARIFSuppressedControl(ac) {
 				continue
 			}
 			ctl := opaSessionObj.Report.SummaryDetails.Controls.GetControl(reportsummary.EControlCriteriaID, ac.GetID())
@@ -819,35 +850,30 @@ func (sp *SARIFPrinter) writeConfigurationSARIF(ctx context.Context, w io.Writer
 				return fmt.Errorf("failed to write SARIF report: %w", stream.err)
 			}
 			ac := toPin
+			split := splitSARIFExceptions(ac)
 
 			if ac.GetStatus(nil).IsFailed() {
-				ctl := opaSessionObj.Report.SummaryDetails.Controls.GetControl(reportsummary.EControlCriteriaID, ac.GetID())
-				if ctl == nil {
-					logger.L().Debug("control not found in summary details, skipping", helpers.String("controlID", ac.GetID()))
+				r, ok := sp.configurationResult(ctx, opaSessionObj, cache, locationResolver, resource, split.visible, ruleIndexes)
+				if !ok {
 					continue
 				}
-				location := resolveFixLocation(opaSessionObj, locationResolver, &ac, resource.resourceID)
-				reviewPathLocations := resolveReviewPathLocations(opaSessionObj, locationResolver, &ac, resource.resourceID)
-				rsrc, _ := opaSessionObj.GetResource(resource.resourceID)
-				var prioritized *prioritization.PrioritizedResource
-				if opaSessionObj.ResourcesPrioritized != nil {
-					if pr, ok := opaSessionObj.ResourcesPrioritized[resource.resourceID]; ok {
-						prioritized = &pr
-					}
-				}
-				r := sp.createResult(ctl, resource.relPath, location, &ac, resource.resourceID, rsrc, reviewPathLocations, prioritized)
-				r.WithRuleIndex(ruleIndexes[ctl.GetID()])
-				// kind stays "" when rsrc is nil (the resource lookup missed) --
-				// collectFixes below treats an unresolved kind as sensitive,
-				// the same fail-closed rule csvControlPaths applies.
-				kind := ""
-				if rsrc != nil {
-					kind = rsrc.GetKind()
-				}
-				collectFixes(ctx, cache, r, ac, opaSessionObj, resource.resourceID, resource.relPath, resource.absPath, kind, sp.showSecrets)
+				addSARIFAlertOnlyProperties(r, split.alertOnlyExceptions)
 				stream.separator(&firstResult)
 				stream.raw("\n        ")
 				stream.value(r)
+			}
+
+			// The finding a disable exception removed stays in the report as a
+			// suppressed result, so the exception leaves an audit trail.
+			if split.hasSuppressed && !ac.GetStatus(nil).IsSkipped() {
+				r, ok := sp.configurationResult(ctx, opaSessionObj, cache, locationResolver, resource, split.suppressed, ruleIndexes)
+				if !ok {
+					continue
+				}
+				addSARIFAlertOnlyProperties(r, split.suppressedAlertOnlyExceptions)
+				stream.separator(&firstResult)
+				stream.raw("\n        ")
+				stream.value(newSARIFSuppressedResult(r, split.suppressingExceptions))
 			}
 		}
 	}

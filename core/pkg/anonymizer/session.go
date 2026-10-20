@@ -304,6 +304,7 @@ func transformSessionInPlace(session *cautils.OPASessionObj, transformer Transfo
 	}
 	session.SetCatalog(newCatalog)
 
+	exceptionAnonymizer := newExceptionTransformer(transformer)
 	newResourcesResult := make(map[string]resourcesresults.Result, len(session.ResourcesResult))
 	for oldID, result := range session.ResourcesResult {
 		newID, err := resolveMappedID(transformer, idMapping, oldID, "ref")
@@ -319,6 +320,12 @@ func transformSessionInPlace(session *cautils.OPASessionObj, transformer Transfo
 		for controlIndex := range result.AssociatedControls {
 			for ruleIndex := range result.AssociatedControls[controlIndex].ResourceAssociatedRules {
 				rule := &result.AssociatedControls[controlIndex].ResourceAssociatedRules[ruleIndex]
+
+				anonymizedExceptions, err := exceptionAnonymizer.policies(rule.Exception)
+				if err != nil {
+					return err
+				}
+				rule.Exception = anonymizedExceptions
 
 				for pathIndex := range rule.Paths {
 					mappedID, err := resolveMappedID(
