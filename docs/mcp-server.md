@@ -8,6 +8,7 @@ The MCP server allows AI assistants (like Claude, ChatGPT, or custom AI tools) t
 
 - List and query vulnerability manifests for images and workloads
 - Retrieve CVE details and vulnerability matches
+- Look up the packages in image SBOMs
 - Access configuration security scan results
 - Provide security recommendations based on real cluster data
 
@@ -720,6 +721,63 @@ Detect potential secret exposure in Kubernetes workloads and ConfigMaps within a
 | **Key Name Matching Heuristics** | Unanchored substring matching on keywords (e.g. `key`, `pwd`, `token`), which can produce false positives on non-secret variables (e.g. `KEYBOARD_LAYOUT`, `PKEY_TYPE`). | Uses bounded, delimited regexes (`(?:^\|_\|-)KEYWORD(?:$\|_\|-)`) combined with non-secret suffix exclusions (`_NAME`, `_FILE`, `_PATH`, `_DIR`, `_REF`, `_TTL`, `_TIMEOUT`, etc.) and path exclusions for `PWD` / `*_PWD`. |
 | **Safe Placeholders & Templates** | Requires custom configuration in `sensitiveValuesAllowed` (defaults to empty). | Automatically recognizes common placeholder values (`true`, `false`, `none`, `dummy`, `changeme`, etc.) and dynamic runtime expressions (`$(...)`, `${...}`, `{{...}}`). |
 | **Configuration Files & Binary Data** | Scans ConfigMap `data` strings only. | Specifically identifies sensitive credential files (`.env`, `credentials.json`, `id_rsa`, `jwt.key`), scans both `data` and `binaryData`, and provides safe, fully redacted previews (`******`) to prevent credential leakage in responses. |
+
+### SBOM Tools
+
+#### `list_sboms`
+
+List the image SBOMs stored in the cluster, without their content.
+
+**Parameters:**
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `namespace` | string | No | Namespace to list (default: all namespaces) |
+| `continue` | string | No | Continuation token from the previous response |
+
+**Example Response:**
+```json
+{
+  "sboms": [
+    {
+      "namespace": "kubescape",
+      "sbom_name": "docker.io-library-nginx-1.21-65e514",
+      "image_id": "docker.io/library/nginx@sha256:2bcabc23b45489fb0885d69a06ba1d648aeda973fae7bb981bafbb884165e514",
+      "image_tag": "docker.io/library/nginx:1.21",
+      "status": "ready"
+    }
+  ]
+}
+```
+
+#### `list_sbom_packages`
+
+List the packages in an SBOM, sorted by name. File locations, CPEs and cataloger metadata are left out; the same package found in several places is listed once. `status` is the SBOM's status in storage: an SBOM that was too large to store has no packages.
+
+**Parameters:**
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `namespace` | string | No | Namespace of the SBOM (default: `"kubescape"`) |
+| `sbom_name` | string | Yes | Name of the SBOM (see `list_sboms`) |
+| `name` | string | No | Only packages whose name contains this text, case-insensitive |
+| `package_type` | string | No | Only packages of this type, e.g. `deb`, `rpm`, `apk`, `npm`, `python`, `go-module`, `java-archive` |
+| `limit` | number | No | Maximum number of packages to return (default 100, max 500) |
+| `offset` | number | No | Number of packages to skip; use `next_offset` from the previous response |
+
+**Example Response** (`name: "ssl"`):
+```json
+{
+  "sbom_name": "docker.io-library-nginx-1.21-65e514",
+  "status": "ready",
+  "distro": "debian 11",
+  "total": 2,
+  "returned": 2,
+  "truncated": false,
+  "packages": [
+    {"name": "libssl1.1", "version": "1.1.1n-0+deb11u2", "type": "deb", "purl": "pkg:deb/debian/libssl1.1@1.1.1n-0%2Bdeb11u2?arch=amd64&distro=debian-11&upstream=openssl", "licenses": ["OpenSSL"]},
+    {"name": "openssl", "version": "1.1.1n-0+deb11u2", "type": "deb", "purl": "pkg:deb/debian/openssl@1.1.1n-0%2Bdeb11u2?arch=amd64&distro=debian-11", "licenses": ["OpenSSL"]}
+  ]
+}
+```
 
 ## Resource Templates
 

@@ -418,6 +418,45 @@ func createVulnerabilityToolsAndResources(ksServer *KubescapeMcpserver) {
 
 	ksServer.s.AddTool(listVulnerabilityMatchesForCVE, ksServer.toolHandler(listVulnerabilityMatchesForCVE.Name))
 
+	listSBOMsTool := mcp.NewTool(
+		"list_sboms",
+		mcp.WithDescription("Discover the image SBOMs stored in the cluster, without their content. Use list_sbom_packages to read the packages of one."),
+		mcp.WithString("namespace",
+			mcp.Description("Filter by namespace (optional, default all namespaces)"),
+		),
+		mcp.WithString("continue",
+			mcp.Description("Optional Kubernetes continuation token for pagination"),
+		),
+	)
+
+	ksServer.s.AddTool(listSBOMsTool, ksServer.toolHandler(listSBOMsTool.Name))
+
+	listSBOMPackagesTool := mcp.NewTool(
+		"list_sbom_packages",
+		mcp.WithDescription("List the packages in an image SBOM (name, version, type, purl, licenses), sorted by name. Returns a page of results (see limit/offset) with the total count. Use name or package_type to look for specific packages."),
+		mcp.WithString("namespace",
+			mcp.Description("Namespace of the SBOM (optional, default kubescape)"),
+		),
+		mcp.WithString("sbom_name",
+			mcp.Required(),
+			mcp.Description("Name of the SBOM, as returned by list_sboms"),
+		),
+		mcp.WithString("name",
+			mcp.Description("Only packages whose name contains this text, case-insensitive (optional)"),
+		),
+		mcp.WithString("package_type",
+			mcp.Description("Only packages of this type, for example deb, rpm, apk, npm, python, go-module, java-archive (optional)"),
+		),
+		mcp.WithNumber("limit",
+			mcp.Description("Maximum number of packages to return (optional, default 100, max 500)"),
+		),
+		mcp.WithNumber("offset",
+			mcp.Description("Number of packages to skip; pass the previous response's next_offset to get the next page (optional, default 0)"),
+		),
+	)
+
+	ksServer.s.AddTool(listSBOMPackagesTool, ksServer.toolHandler(listSBOMPackagesTool.Name))
+
 	vulnerabilityManifestTemplate := mcp.NewResourceTemplate(
 		"kubescape://vulnerability-manifests/{namespace}/{manifest_name}",
 		"Vulnerability Manifest",
@@ -1045,6 +1084,60 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 				},
 			},
 		}, nil
+	case "list_sboms":
+		namespaceStr, toolErr := mcpStringArg(arguments, "namespace")
+		if toolErr != nil {
+			return toolErr, nil
+		}
+		if namespaceStr == "" {
+			namespaceStr = metav1.NamespaceAll
+		}
+		continueToken, toolErr := mcpStringArg(arguments, "continue")
+		if toolErr != nil {
+			return toolErr, nil
+		}
+		client, ksErr := ksServer.getKsClient()
+		if ksErr != nil {
+			return mcpToolError(ErrCodeK8sClientError, fmt.Sprintf("failed to connect to Kubernetes cluster: %v", ksErr), nil), nil
+		}
+		chunk, err := client.SBOMSyfts(namespaceStr).List(ctx, metav1.ListOptions{Limit: 100, Continue: continueToken})
+		if err != nil {
+			return mcpToolError(classifyScanError(err), fmt.Sprintf("failed to list SBOMs: %v", err), nil), nil
+		}
+		responseJson, err := json.Marshal(sbomListResponse{SBOMs: listSBOMEntries(chunk.Items), Continue: chunk.GetContinue()})
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal SBOM list: %w", err)
+		}
+		return mcp.NewToolResultText(string(responseJson)), nil
+	case "list_sbom_packages":
+		namespaceStr, toolErr := mcpStringArg(arguments, "namespace")
+		if toolErr != nil {
+			return toolErr, nil
+		}
+		if namespaceStr == "" {
+			namespaceStr = "kubescape"
+		}
+		sbomNameStr, toolErr := mcpRequiredStringArg(arguments, "sbom_name")
+		if toolErr != nil {
+			return toolErr, nil
+		}
+		listOpts, toolErr := parseSBOMPackageListOptions(arguments)
+		if toolErr != nil {
+			return toolErr, nil
+		}
+		client, ksErr := ksServer.getKsClient()
+		if ksErr != nil {
+			return mcpToolError(ErrCodeK8sClientError, fmt.Sprintf("failed to connect to Kubernetes cluster: %v", ksErr), nil), nil
+		}
+		sbom, err := client.SBOMSyfts(namespaceStr).Get(ctx, sbomNameStr, metav1.GetOptions{})
+		if err != nil {
+			return mcpToolError(classifyScanError(err), fmt.Sprintf("failed to get SBOM: %v", err), nil), nil
+		}
+		responseJson, err := json.Marshal(listSBOMPackages(sbom, listOpts))
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal SBOM packages: %w", err)
+		}
+		return mcp.NewToolResultText(string(responseJson)), nil
 	case "list_configuration_security_scan_manifests":
 		namespaceStr := "kubescape"
 		if raw, ok := arguments["namespace"]; ok && raw != nil {
