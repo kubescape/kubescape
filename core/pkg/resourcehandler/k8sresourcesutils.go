@@ -103,6 +103,7 @@ func setComplexKSResourceMap(frameworks []reporthandling.Framework, resourceToCo
 				}
 				for _, match := range rule.DynamicMatch {
 					insertKSResourcesAndControls(k8sResources, match, resourceToControls, control)
+					insertDynamicMatchControls(match, resourceToControls, control)
 				}
 			}
 		}
@@ -141,6 +142,49 @@ func insertControls(resource string, resourceToControl map[string][]string, cont
 			resourceToControl[r] = append(resourceToControl[r], control.ControlID)
 		}
 	}
+}
+
+// insertDynamicMatchControls records control as depending on every
+// Kubescape-served resource its DynamicMatch selects, using the evaluator's
+// matching rules (getKubernetesObjects in opaprocessor): "*" for any group,
+// version or resource, "core" for the empty group, and resource names compared
+// case-insensitively. insertControls only looks resource names up exactly, so
+// a rule written with "*" or another case would otherwise read the resource
+// without the dependency being recorded, and a failed pull of it would not be
+// attributed to the control. The virtual identities of these resources use the
+// kind as the resource name, so matching by name also covers matching by kind.
+func insertDynamicMatchControls(match reporthandling.RuleMatchObjects, resourceToControl map[string][]string, control reporthandling.Control) {
+	add := func(resource string, apiVersions []string) {
+		for _, apiVersion := range apiVersions {
+			group, version := k8sinterface.SplitApiVersion(apiVersion)
+			if !dynamicMatchSelects(match, group, version, resource) {
+				continue
+			}
+			r := k8sinterface.JoinResourceTriplets(group, version, resource)
+			if !slices.Contains(resourceToControl[r], control.ControlID) {
+				resourceToControl[r] = append(resourceToControl[r], control.ControlID)
+			}
+		}
+	}
+	for resource, apiVersion := range MapResourceToApiGroup {
+		add(resource, []string{apiVersion})
+	}
+	for resource, apiVersions := range MapResourceToApiGroupCloud {
+		add(resource, apiVersions)
+	}
+	for resource, apiVersions := range MapResourceToApiGroupVuln {
+		add(resource, apiVersions)
+	}
+}
+
+// dynamicMatchSelects reports whether match selects group/version/resource.
+func dynamicMatchSelects(match reporthandling.RuleMatchObjects, group, version, resource string) bool {
+	matches := func(policyValue, value string) bool {
+		return policyValue == "*" || policyValue == value || (policyValue == "core" && value == "")
+	}
+	return slices.ContainsFunc(match.APIGroups, func(g string) bool { return matches(g, group) }) &&
+		slices.ContainsFunc(match.APIVersions, func(v string) bool { return matches(v, version) }) &&
+		slices.ContainsFunc(match.Resources, func(r string) bool { return r == "*" || strings.EqualFold(r, resource) })
 }
 
 func insertKSResourcesAndControls(k8sResources map[string]map[string]map[string]any, match reporthandling.RuleMatchObjects, resourceToControl map[string][]string, control reporthandling.Control) {
