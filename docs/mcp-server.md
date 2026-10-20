@@ -529,7 +529,7 @@ Generate a `ValidatingAdmissionPolicyBinding` manifest. The tool runs the same v
 
 - `policy` is the resolved policy name; `controlID` is present only when the binding was requested by control.
 - `manifest` is the generated YAML. The same inputs always produce the same manifest.
-- `warnings` is always an array. It lists scope findings that do not block the binding, such as a `namespaces` selector that narrows only some of the cluster-scoped and namespaced resources the policy matches, or a resource rule that names another API group or version than the policy constrains.
+- `warnings` is always an array. It lists scope findings that do not block the binding, such as a `namespaces` selector on a policy that matches both namespaced and cluster-scoped resources (the selector narrows only the namespaced ones, and the binding still applies to the matching cluster-scoped resources cluster-wide), or a resource rule that names another API group or version than the policy constrains.
 
 A policy name that is not in the embedded library is accepted as is; its parameter and scope checks are skipped, as in the CLI.
 

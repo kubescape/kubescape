@@ -60,11 +60,11 @@ func createAdmissionPolicyBinding(arguments map[string]any) *mcp.CallToolResult 
 	if actions == nil {
 		actions = []string{"Deny"}
 	}
-	namespaces, toolErr := mcpStringListArg(arguments, "namespaces")
+	namespaces, toolErr := mcpSelectorListArg(arguments, "namespaces")
 	if toolErr != nil {
 		return toolErr
 	}
-	labels, toolErr := mcpStringListArg(arguments, "labels")
+	labels, toolErr := mcpSelectorListArg(arguments, "labels")
 	if toolErr != nil {
 		return toolErr
 	}
@@ -133,6 +133,27 @@ func mcpStringListArg(arguments map[string]any, name string) ([]string, *mcp.Cal
 		if item = strings.TrimSpace(item); item != "" {
 			list = append(list, item)
 		}
+	}
+	return list, nil
+}
+
+// mcpSelectorListArg reads a list that narrows the binding. A supplied
+// non-empty list whose entries are all blank is refused: dropping them would
+// silently leave the binding without the selector and so wider than asked.
+func mcpSelectorListArg(arguments map[string]any, name string) ([]string, *mcp.CallToolResult) {
+	list, toolErr := mcpStringListArg(arguments, name)
+	if toolErr != nil {
+		return nil, toolErr
+	}
+	supplied := 0
+	switch v := arguments[name].(type) {
+	case []string:
+		supplied = len(v)
+	case []any:
+		supplied = len(v)
+	}
+	if supplied > 0 && len(list) == 0 {
+		return nil, mcpToolError(ErrCodeInvalidArgument, fmt.Sprintf("%s must not contain only blank entries", name), map[string]any{"argument": name})
 	}
 	return list, nil
 }

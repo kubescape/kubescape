@@ -236,3 +236,44 @@ func TestCreateAdmissionPolicyBinding_ToolRegistration(t *testing.T) {
 	assert.Empty(t, list.InputSchema.Properties)
 	assert.Empty(t, list.InputSchema.Required)
 }
+
+func TestCreateAdmissionPolicyBinding_BlankSelectorLists(t *testing.T) {
+	for _, arg := range []string{"namespaces", "labels"} {
+		valid := map[string]string{"namespaces": "prod", "labels": "app=nginx"}[arg]
+		build := func(value any) map[string]any {
+			return map[string]any{"binding_name": "my-binding", "control_id": "C-0016", arg: value}
+		}
+
+		for name, value := range map[string]any{
+			"empty string":    []any{""},
+			"whitespace only": []any{"  ", "\t"},
+			"string slice":    []string{" "},
+		} {
+			t.Run(arg+"/"+name, func(t *testing.T) {
+				te := bindingToolError(t, callCreateBinding(t, build(value)))
+				assert.Equal(t, ErrCodeInvalidArgument, te.Code)
+				assert.Equal(t, arg, te.Details["argument"])
+			})
+		}
+
+		t.Run(arg+"/mixed blank and valid", func(t *testing.T) {
+			got := decodeBindingResponse(t, callCreateBinding(t, build([]any{"", " " + valid + " "})))
+			manifest, _ := got["manifest"].(string)
+			assert.NotContains(t, manifest, "matchResources: {}")
+		})
+
+		for name, value := range map[string]any{"null": nil, "empty array": []any{}} {
+			t.Run(arg+"/"+name, func(t *testing.T) {
+				got := decodeBindingResponse(t, callCreateBinding(t, build(value)))
+				manifest, _ := got["manifest"].(string)
+				assert.Contains(t, manifest, "matchResources: {}")
+			})
+		}
+
+		t.Run(arg+"/omitted", func(t *testing.T) {
+			got := decodeBindingResponse(t, callCreateBinding(t, map[string]any{"binding_name": "my-binding", "control_id": "C-0016"}))
+			manifest, _ := got["manifest"].(string)
+			assert.Contains(t, manifest, "matchResources: {}")
+		})
+	}
+}
