@@ -594,3 +594,13 @@ func buildImageScanSummaryWithTarget(imageScanData []cautils.ImageScanData, incl
 
 	return imageScanSummary
 }
+
+// BestSourcePath returns the best available source path from a Source entry.
+// RelativePath is preferred because it is repo-relative and more portable;
+// Path is used as a fallback when RelativePath is empty.
+func BestSourcePath(src reporthandling.Source) string {
+	if src.RelativePath != "" {
+		return src.RelativePath
+	}
+	return src.Path
+}
