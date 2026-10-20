@@ -138,10 +138,15 @@ func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo, policyIdenti
 	// reporting behavior - setup reporter
 	reportHandler := getReporter(ctx, tenantConfig, scanInfo.ScanID, scanInfo.Submit.GetBool(), scanInfo.FrameworkScan, *scanInfo)
 
-	// setup printers
-	outputPrinters, err := GetOutputPrinters(scanInfo, ctx, tenantConfig.GetContextName())
-	if err != nil {
-		return componentInterfaces{}, err
+	// setup printers. A dry run produces no report, so it must not open (and
+	// truncate) the --output file a previous scan left behind.
+	var outputPrinters []printer.IPrinter
+	if !scanInfo.DryRun {
+		var err error
+		outputPrinters, err = GetOutputPrinters(scanInfo, ctx, tenantConfig.GetContextName())
+		if err != nil {
+			return componentInterfaces{}, err
+		}
 	}
 
 	uiPrinter := GetUIPrinter(ctx, scanInfo, tenantConfig.GetContextName())
@@ -425,7 +430,8 @@ func (ks *Kubescape) ScanContext(ctx context.Context, scanInfo *cautils.ScanInfo
 		if denied := result.Denied(); len(denied) > 0 {
 			return resultsHandling, fmt.Errorf("dry-run: %d required resource type(s) cannot be listed with the current credentials", len(denied))
 		}
-		printersOwnedByScan = false
+		// Nothing was collected or evaluated, so callers skip HandleResults
+		// for a dry run. Scan keeps ownership of the printers and closes them.
 		return resultsHandling, nil
 	}
 

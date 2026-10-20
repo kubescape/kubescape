@@ -142,6 +142,11 @@ func runFrameworkScan(ctx context.Context, scanInfo *cautils.ScanInfo, ks meta.I
 	if err != nil {
 		return nil, err
 	}
+	if scanInfo.DryRun {
+		// The preflight verdict is already printed and nothing was evaluated:
+		// there is no report to write or submit and no threshold to enforce.
+		return results, nil
+	}
 
 	if err = results.HandleResults(ctx, scanInfo); err != nil {
 		return results, err
