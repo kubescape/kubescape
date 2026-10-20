@@ -428,7 +428,7 @@ A workload that is owned by another resource — a Pod belonging to a ReplicaSet
 
 #### `diff_reports`
 
-Compare two already-produced Kubescape scan report files (JSON) and return what changed, reusing the same comparison engine as `kubescape diff`/`--baseline`. Works for posture reports (`kubescape scan --format json`), reporting new, resolved, unchanged, and incomparable control failures, and for image vulnerability reports (`kubescape scan image --format json`), reporting new, resolved, and unchanged CVEs. Both reports must be the same kind; comparing a posture report against a vulnerability report is rejected rather than silently treated as comparable.
+Compare two already-produced Kubescape scan report files (JSON) and return what changed, reusing the same comparison engine as `kubescape diff`/`--baseline`. Works for posture reports (`kubescape scan --format json`), reporting new, resolved, unchanged, and incomparable control failures, and for image vulnerability reports (`kubescape scan image --format json`), reporting new, resolved, and unchanged CVEs. Unchanged findings are only counted unless `include_unchanged` is true. Both reports must be the same kind; comparing a posture report against a vulnerability report is rejected rather than silently treated as comparable.
 
 **Parameters:**
 
@@ -436,6 +436,7 @@ Compare two already-produced Kubescape scan report files (JSON) and return what 
 |-----------|------|----------|-------------|
 | `base_report` | string | Yes | Path to the baseline/base Kubescape scan report JSON file |
 | `head_report` | string | Yes | Path to the current/head Kubescape scan report JSON file |
+| `include_unchanged` | boolean | No | Also list the findings that are the same in both reports (default false). `counts` always gives the number of new, resolved, unchanged and incomparable findings |
 
 **Example use case:** "What changed between these two Kubescape reports?"
 
