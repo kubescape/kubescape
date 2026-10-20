@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 )
@@ -79,7 +80,7 @@ func newTeamsPayload(summary *reportsummary.SummaryDetails) teamsPayload {
 		{
 			Type: "FactSet",
 			Facts: []teamsFact{
-				{Title: "Compliance score", Value: fmt.Sprintf("%.1f%%", summary.ComplianceScore)},
+				{Title: "Compliance score", Value: cautils.ComplianceScoreToString(summary.ComplianceScore, 1) + "%"},
 				{Title: "Controls failed", Value: fmt.Sprintf("%d of %d", controls.failed, controls.total)},
 				{Title: "Passed", Value: fmt.Sprintf("%d", controls.passed)},
 				{Title: "Skipped", Value: fmt.Sprintf("%d", controls.skipped)},

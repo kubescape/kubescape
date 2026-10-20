@@ -168,7 +168,7 @@ func runWorkloadScan(ctx context.Context, scanInfo *cautils.ScanInfo, ks meta.IK
 	}
 
 	if results.GetComplianceScore() < float32(scanInfo.ComplianceThreshold) {
-		return results, gateFailure(fmt.Errorf("scan compliance-score is below permitted threshold: %.2f (compliance-threshold: %.2f)", results.GetComplianceScore(), scanInfo.ComplianceThreshold))
+		return results, gateFailure(fmt.Errorf("scan compliance-score is below permitted threshold: %s (compliance-threshold: %.2f)", cautils.ComplianceScoreToString(results.GetComplianceScore(), 2), scanInfo.ComplianceThreshold))
 	}
 
 	if err := enforceSeverityThresholds(&results.GetData().Report.SummaryDetails, scanInfo); err != nil {

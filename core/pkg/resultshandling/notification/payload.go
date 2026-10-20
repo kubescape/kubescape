@@ -7,6 +7,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 )
@@ -78,8 +79,8 @@ func MarshalPayload(endpoint string, summary *reportsummary.SummaryDetails) ([]b
 func newSlackPayload(summary *reportsummary.SummaryDetails) slackPayload {
 	controls := summarizeControls(summary.Controls)
 	fallback := fmt.Sprintf(
-		"Kubescape scan completed: %.1f%% compliance; %d of %d controls failed.",
-		summary.ComplianceScore,
+		"Kubescape scan completed: %s%% compliance; %d of %d controls failed.",
+		cautils.ComplianceScoreToString(summary.ComplianceScore, 1),
 		controls.failed,
 		controls.total,
 	)
@@ -95,7 +96,7 @@ func newSlackPayload(summary *reportsummary.SummaryDetails) slackPayload {
 				Type: "section",
 				Fields: []slackText{
 					{Type: "mrkdwn", Text: fmt.Sprintf("*Controls*\n%d failed / %d total\n%d passed · %d skipped", controls.failed, controls.total, controls.passed, controls.skipped), Verbatim: true},
-					{Type: "mrkdwn", Text: fmt.Sprintf("*Compliance score*\n%.1f%%", summary.ComplianceScore), Verbatim: true},
+					{Type: "mrkdwn", Text: fmt.Sprintf("*Compliance score*\n%s%%", cautils.ComplianceScoreToString(summary.ComplianceScore, 1)), Verbatim: true},
 				},
 			},
 		},

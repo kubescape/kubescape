@@ -162,6 +162,20 @@ func TestMarshalPayloadTeamsOmitsFailingSectionWhenAllControlsPass(t *testing.T)
 	}
 }
 
+func TestMarshalPayloadTeamsKeepsNearPerfectScoreBelowHundred(t *testing.T) {
+	payload, err := MarshalPayload("https://contoso.webhook.office.com/webhookb2/id", &reportsummary.SummaryDetails{
+		ComplianceScore: 99.97,
+		Controls: reportsummary.ControlSummaries{
+			"C-0001": failedControl("C-0001", "Almost compliant", 5, 1),
+		},
+	})
+	require.NoError(t, err)
+
+	sets := teamsFactsByBlock(decodeTeamsCard(t, payload))
+	require.NotEmpty(t, sets)
+	assert.Equal(t, teamsFact{Title: "Compliance score", Value: "99.9%"}, sets[0][0])
+}
+
 func TestMarshalPayloadTeamsFallsBackForUnknownControlText(t *testing.T) {
 	payload, err := MarshalPayload("https://contoso.webhook.office.com/webhookb2/id", &reportsummary.SummaryDetails{
 		Controls: reportsummary.ControlSummaries{"": failedControl("", "", 8, 1)},

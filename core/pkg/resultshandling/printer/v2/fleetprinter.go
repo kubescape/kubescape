@@ -310,7 +310,7 @@ func fleetCoverageText(cluster *fleet.ClusterResult) string {
 	if cluster.Coverage == nil {
 		return notMeasured
 	}
-	coverage := fmt.Sprintf("%.0f%%", cluster.Coverage.CoverageScore)
+	coverage := cautils.ComplianceScoreToString(cluster.Coverage.CoverageScore, 0) + "%"
 	if cluster.Coverage.Degraded {
 		return gchalk.WithYellow().Bold(coverage + " degraded")
 	}
@@ -331,7 +331,7 @@ func percentOrDash(score *float32) string {
 	if score == nil {
 		return notMeasured
 	}
-	return fmt.Sprintf("%.0f%%", *score)
+	return cautils.ComplianceScoreToString(*score, 0) + "%"
 }
 
 // valueOrDash renders a string that may be empty.

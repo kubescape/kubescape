@@ -74,6 +74,20 @@ func TestPrintFleetReportListsEveryCluster(t *testing.T) {
 	assert.Contains(t, out, "context canceled")
 }
 
+// TestPrintFleetReportKeepsNearPerfectScoresBelowHundred pins that a cluster
+// which fell short is never printed as 100%, in either score column.
+func TestPrintFleetReportKeepsNearPerfectScoresBelowHundred(t *testing.T) {
+	out := renderFleet(&fleet.FleetReport{
+		Clusters: []fleet.ClusterResult{
+			{ClusterID: "prod", Status: fleet.ClusterScanned, ComplianceScore: scorePtr(99.7),
+				Coverage: &cautils.ScanCoverage{CoverageScore: 99.6, Degraded: true}},
+		},
+	})
+
+	assert.Contains(t, out, "99% degraded")
+	assert.NotContains(t, out, "100%")
+}
+
 // TestPrintFleetReportNeverPrintsZeroForAbsent covers the rule the whole
 // package is built on. A cluster nobody could reach has no score, and printing
 // 0% would read as fully non-compliant rather than never measured.
