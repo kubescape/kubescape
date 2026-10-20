@@ -232,6 +232,21 @@ func TestDiffReports_UnchangedOnlyCountedByDefault(t *testing.T) {
 	})
 }
 
+func TestDiffReports_CountsAlwaysHaveAllFourFields(t *testing.T) {
+	ksServer := newDiffReportsTestServer(t)
+	result := registeredToolResult(t, dispatchRegisteredTool(t, ksServer, "diff_reports", map[string]any{
+		"base_report": writeDiffReportFixture(t, diffReportsImageBase),
+		"head_report": writeDiffReportFixture(t, diffReportsImageHead),
+	}))
+	require.False(t, result.IsError, "unexpected tool error: %s", toolResultText(t, result))
+
+	var top struct {
+		Counts map[string]int `json:"counts"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(toolResultText(t, result)), &top))
+	assert.Equal(t, map[string]int{"new": 1, "resolved": 1, "unchanged": 0, "incomparable": 0}, top.Counts)
+}
+
 func TestDiffReports_IncludeUnchanged(t *testing.T) {
 	t.Run("posture", func(t *testing.T) {
 		counts, fields := diffReportsSection(t, map[string]any{

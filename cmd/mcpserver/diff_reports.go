@@ -27,7 +27,7 @@ type diffReportsCounts struct {
 	New          int `json:"new"`
 	Resolved     int `json:"resolved"`
 	Unchanged    int `json:"unchanged"`
-	Incomparable int `json:"incomparable,omitempty"`
+	Incomparable int `json:"incomparable"`
 }
 
 // postureDiff and vulnerabilityDiff are the change sets as returned by the
