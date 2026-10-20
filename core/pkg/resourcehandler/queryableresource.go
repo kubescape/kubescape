@@ -21,6 +21,9 @@ type QueryableResource struct {
 	// resolver could not name it. It lets query planning honor the kind filters
 	// before the LIST runs (see filterQueryableResourcesByKind).
 	Kind string
+	// RuleFiltered is true when a rule's match.fieldSelector narrows this
+	// query, so its LIST returns only some of the resource's objects.
+	RuleFiltered bool
 }
 
 func (qr *QueryableResource) String() string {
@@ -36,6 +39,7 @@ func (qr *QueryableResource) Copy() QueryableResource {
 		FieldSelectors:              qr.FieldSelectors,
 		Namespaced:                  qr.Namespaced,
 		Kind:                        qr.Kind,
+		RuleFiltered:                qr.RuleFiltered,
 	}
 }
 
@@ -58,6 +62,17 @@ func (qrm QueryableResources) ToK8sResourceMap() cautils.K8SResources {
 		resources[qr.GroupVersionResourceTriplet] = nil
 	}
 	return resources
+}
+
+// ListedGVRs maps each queried <api group/api version/resource> to whether at
+// least one of its queries carries no rule field selector, so that its LIST
+// returns every object in the scan scope.
+func (qrm QueryableResources) ListedGVRs() map[string]bool {
+	listed := make(map[string]bool, len(qrm))
+	for _, qr := range qrm {
+		listed[qr.GroupVersionResourceTriplet] = listed[qr.GroupVersionResourceTriplet] || !qr.RuleFiltered
+	}
+	return listed
 }
 
 func (qrm QueryableResources) Add(qr QueryableResource) {

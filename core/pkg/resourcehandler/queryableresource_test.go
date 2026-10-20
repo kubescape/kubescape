@@ -124,3 +124,20 @@ func TestAdd(t *testing.T) {
 		t.Fatalf("Expected: %v, got: %v", qr, resource)
 	}
 }
+
+func TestListedGVRs(t *testing.T) {
+	qrm := make(QueryableResources)
+	qrm.Add(QueryableResource{GroupVersionResourceTriplet: "/v1/secrets", FieldSelectors: "metadata.name=a", RuleFiltered: true})
+	qrm.Add(QueryableResource{GroupVersionResourceTriplet: "/v1/configmaps", FieldSelectors: "metadata.name=b", RuleFiltered: true})
+	qrm.Add(QueryableResource{GroupVersionResourceTriplet: "/v1/configmaps"})
+	qrm.Add(QueryableResource{GroupVersionResourceTriplet: "/v1/nodes"})
+
+	expected := map[string]bool{
+		"/v1/secrets":    false,
+		"/v1/configmaps": true,
+		"/v1/nodes":      true,
+	}
+	if result := qrm.ListedGVRs(); !reflect.DeepEqual(result, expected) {
+		t.Errorf("Expected: %v, got: %v", expected, result)
+	}
+}

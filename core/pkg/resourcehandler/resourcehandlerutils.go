@@ -233,6 +233,7 @@ func updateQueryableResourcesMapFromRuleMatchObject(match *reporthandling.RuleMa
 					for _, fieldSelector := range match.FieldSelector {
 						qrCopy := queryableResource.Copy()
 						qrCopy.AddFieldSelector(fieldSelector)
+						qrCopy.RuleFiltered = true
 						queryableResources.Add(qrCopy)
 					}
 

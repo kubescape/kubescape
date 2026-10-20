@@ -273,6 +273,10 @@ func scan(ctx context.Context, scanInfo *cautils.ScanInfo, policyIdentifiers []c
 			// valid result rather than overwriting it with a failed artifact.
 			if err := store.StorePostureReportResults(ctx, pr); err != nil {
 				logger.L().Ctx(ctx).Error("failed to persist scan results to storage", helpers.String("scanID", scanID), helpers.Error(err))
+			} else if shouldSweepOrphanedPostureResults(scanInfo) {
+				if err := store.SweepOrphanedPostureResults(ctx, pr, scanCollection(result.ScanData)); err != nil {
+					logger.L().Ctx(ctx).Warning("failed to delete orphaned posture records", helpers.String("scanID", scanID), helpers.Error(err))
+				}
 			}
 		} else {
 			logger.L().Debug("storage is not initialized - skipping storing results")
@@ -282,6 +286,33 @@ func scan(ctx context.Context, scanInfo *cautils.ScanInfo, policyIdentifiers []c
 	}
 
 	return nil, nil
+}
+
+// sweepOrphanedPostureResultsEnv opts in to deleting the posture records of
+// objects that a complete, cluster-wide scan no longer reports. It is off by
+// default because storage ignores delete preconditions, see
+// storage.SweepOrphanedPostureResults.
+const sweepOrphanedPostureResultsEnv = "KS_SWEEP_ORPHANED_POSTURE_RESULTS"
+
+func shouldSweepOrphanedPostureResults(scanInfo *cautils.ScanInfo) bool {
+	return scanInfo.ScanObject == nil && envToBool(sweepOrphanedPostureResultsEnv, false)
+}
+
+// scanCollection describes what the scan listed and what it could not list in
+// full.
+func scanCollection(scanData *cautils.OPASessionObj) storage.Collection {
+	if scanData == nil {
+		return storage.Collection{}
+	}
+	coverage := scanData.ScanCoverage
+	incomplete := make([]string, 0, len(coverage.FailedGVRPulls)+len(coverage.PartialGVRPulls))
+	for _, pull := range coverage.FailedGVRPulls {
+		incomplete = append(incomplete, pull.GVR)
+	}
+	for _, pull := range coverage.PartialGVRPulls {
+		incomplete = append(incomplete, pull.GVR)
+	}
+	return storage.Collection{Listed: scanData.ListedGVRs, Incomplete: incomplete}
 }
 
 func shouldPersistCanonicalResult(ctx context.Context, scanInfo *cautils.ScanInfo) bool {
