@@ -629,6 +629,12 @@ func TestWorkLifecycle_ShutdownWaitsForExecutionStartedAfterEarlierOneFinished(t
 		return nil, errors.New("early failure")
 	})
 	require.Error(t, err)
+	// The first execution has returned to its caller, but its goroutine may not
+	// have retired yet: runShared closes state.done (releasing the caller)
+	// before its deferred work.end runs. Wait for the lifecycle to go idle so
+	// the count below reflects only the second execution and not a first one
+	// that is still finishing.
+	receiveWithin(t, work.idle(), "first execution to retire")
 
 	started := make(chan struct{})
 	release := make(chan struct{})
