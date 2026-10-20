@@ -293,8 +293,10 @@ func TestResultsDeleteRemovesOnlyKnownResultArtifacts(t *testing.T) {
 		".txt",
 		".yaml",
 		".csv",
+		".md",
 		".cdx.json",
 		".spdx.json",
+		".exceptions.json",
 	}
 	for _, dir := range []string{OutputDir, FailedOutputDir} {
 		for _, suffix := range knownSuffixes {
