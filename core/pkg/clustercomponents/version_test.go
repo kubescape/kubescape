@@ -28,6 +28,8 @@ func TestParseKubernetesVersion(t *testing.T) {
 		{raw: "v1.29", wantErr: true},
 		{raw: "v1.29.3.1", wantErr: true},
 		{raw: "latest", wantErr: true},
+		{raw: "v1.29.3+", wantErr: true},
+		{raw: "v1.29.3-dev", wantErr: true},
 	}
 
 	for _, tt := range tests {
@@ -57,11 +59,21 @@ func TestParseContainerRuntimeVersion(t *testing.T) {
 		{raw: "cri-o://1.29.1", component: CRIO, version: "1.29.1", assessment: Verified},
 		{raw: "containerd://1.7.15-k3s1", component: Containerd, version: "1.7.15", assessment: VendorBuild},
 		{raw: "containerd://1.6.28+bottlerocket", component: Containerd, version: "1.6.28", assessment: VendorBuild},
+		{raw: "containerd://1.7.22-1", component: Containerd, version: "1.7.22", assessment: VendorBuild},
+		{raw: "containerd://1.7.11-1.amzn2.0.1", component: Containerd, version: "1.7.11", assessment: VendorBuild},
+		{raw: "cri-o://1.29.6-3.rhaos4.16.git0e72a5b.el9", component: CRIO, version: "1.29.6", assessment: VendorBuild},
 		{raw: "containerd://2.0.0-rc.3", wantErr: true},
 		{raw: "containerd://1.7.0-rc1", wantErr: true},
 		{raw: "docker://24.0.7", wantErr: true},
 		{raw: "containerd://", wantErr: true},
 		{raw: "1.7.11", wantErr: true},
+		{raw: "containerd://2.0.0-dev", wantErr: true},
+		{raw: "containerd://2.0.0-pre.1", wantErr: true},
+		{raw: "containerd://1.7.11+", wantErr: true},
+		{raw: "containerd://1.7.11-", wantErr: true},
+		{raw: "containerd://1.7.11-custom", wantErr: true},
+		{raw: "containerd://1.7.11+dirty", wantErr: true},
+		{raw: "cri-o://1.29.6-3.el9", wantErr: true},
 	}
 
 	for _, tt := range tests {

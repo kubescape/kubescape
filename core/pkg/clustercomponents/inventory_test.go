@@ -86,6 +86,24 @@ func TestBuild(t *testing.T) {
 	}, ubuntu)
 }
 
+func TestBuildRecordsGapForUnrecognizedRuntimeBuilds(t *testing.T) {
+	for _, raw := range []string{"containerd://2.0.0-dev", "containerd://2.0.0-pre.1", "containerd://1.7.11+"} {
+		t.Run(raw, func(t *testing.T) {
+			inv := Build(&version.Info{GitVersion: "v1.30.2"}, []corev1.Node{
+				node("node-1", corev1.NodeSystemInfo{KubeletVersion: "v1.30.2", ContainerRuntimeVersion: raw}),
+			}, nil)
+
+			require.Len(t, inv.Nodes, 1)
+			assert.Nil(t, inv.Nodes[0].Runtime)
+			assert.NotNil(t, inv.Nodes[0].Kubelet)
+			require.Len(t, inv.Gaps, 1)
+			assert.Equal(t, ContainerRuntime, inv.Gaps[0].Component)
+			assert.Equal(t, "node-1", inv.Gaps[0].Node)
+			assert.Contains(t, inv.Gaps[0].Reason, raw)
+		})
+	}
+}
+
 func TestBuildRecordsGaps(t *testing.T) {
 	nodes := []corev1.Node{
 		node("win-1", corev1.NodeSystemInfo{
