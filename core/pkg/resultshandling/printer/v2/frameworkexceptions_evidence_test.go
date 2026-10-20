@@ -130,3 +130,42 @@ func TestEvidence_FullyExceptedControlOffersNoActionableEvidence(t *testing.T) {
 	require.Empty(t, displayed.ResourceAssociatedRules)
 	require.Len(t, result.AssociatedControls[0].ResourceAssociatedRules, 1)
 }
+
+func TestEvidence_ControlViewAndCSVOmitExceptedRulePaths(t *testing.T) {
+	session, id := sessionWithPartlyExceptedControl(t, true)
+	summary := &session.Report.SummaryDetails
+	resource := session.AllResources[id]
+
+	// control view (--show-evidence)
+	workloads := []WorkloadSummary{{resource: resource, status: apis.StatusFailed}}
+	attachAssistedRemediation(summary, workloads, testHostNetworkControl, session.ResourcesResult, false)
+	require.NotContains(t, workloads[0].assistedRemediation, exceptedEvidencePath)
+	require.Contains(t, workloads[0].assistedRemediation, failingEvidencePath)
+
+	// CSV Failed Paths and Fix Paths
+	result := session.ResourcesResult[id]
+	result.AssociatedControls[0].ResourceAssociatedRules[0].Paths[0].FixPath = armotypes.FixPath{Path: exceptedEvidencePath, Value: "false"}
+	result.AssociatedControls[0].ResourceAssociatedRules[1].Paths[0].FixPath = armotypes.FixPath{Path: failingEvidencePath, Value: "false"}
+	failed, fix := csvControlPaths(summary, result, testHostNetworkControl, "Pod", false)
+	require.NotContains(t, failed, exceptedEvidencePath)
+	require.Contains(t, failed, failingEvidencePath)
+	require.NotContains(t, fix, exceptedEvidencePath)
+	require.Contains(t, fix, failingEvidencePath)
+
+	// the raw rules keep both paths for audit
+	raw := session.ResourcesResult[id].AssociatedControls[0]
+	require.Len(t, raw.ResourceAssociatedRules, 2)
+	require.Equal(t, exceptedEvidencePath, raw.ResourceAssociatedRules[0].Paths[0].ReviewPath)
+	require.Equal(t, exceptedEvidencePath, raw.ResourceAssociatedRules[0].Paths[0].FixPath.Path)
+}
+
+func TestEvidence_FullyExceptedControlHasNoCSVPaths(t *testing.T) {
+	session, id := sessionWithPartlyExceptedControl(t, false)
+	summary := &session.Report.SummaryDetails
+	result := session.ResourcesResult[id]
+
+	failed, fix := csvControlPaths(summary, result, testHostNetworkControl, "Pod", false)
+	require.Empty(t, failed)
+	require.Empty(t, fix)
+	require.Len(t, session.ResourcesResult[id].AssociatedControls[0].ResourceAssociatedRules, 1)
+}

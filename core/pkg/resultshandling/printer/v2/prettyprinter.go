@@ -299,7 +299,8 @@ func attachAssistedRemediation(summary *reportsummary.SummaryDetails, workloads 
 			if !cautils.ControlStatus(summary, &result.AssociatedControls[j]).IsFailed() {
 				continue
 			}
-			paths := AssistedRemediationPathsWithCurrentValuesFiltered(&result.AssociatedControls[j], workloads[i].resource, showSecrets)
+			displayed := cautils.EvidenceControl(summary, result.AssociatedControls[j])
+			paths := AssistedRemediationPathsWithCurrentValuesFiltered(&displayed, workloads[i].resource, showSecrets)
 			if len(paths) > 0 {
 				workloads[i].assistedRemediation = strings.Join(paths, ", ")
 			}

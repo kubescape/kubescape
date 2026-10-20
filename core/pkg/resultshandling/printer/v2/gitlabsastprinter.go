@@ -360,7 +360,8 @@ func (gp *GitLabSASTPrinter) printConfigurationScan(ctx context.Context, opaSess
 
 			location := resolveFixLocation(opaSessionObj, locationResolver, &ac, resource.resourceID)
 			res, _ := opaSessionObj.GetResource(resource.resourceID)
-			report.Vulnerabilities = append(report.Vulnerabilities, toGitLabVulnerability(ctl, &ac, res, resource.resourceID, resource.relPath, location, gp.showSecrets))
+			evidence := cautils.EvidenceControl(&opaSessionObj.Report.SummaryDetails, ac)
+			report.Vulnerabilities = append(report.Vulnerabilities, toGitLabVulnerability(ctl, &evidence, res, resource.resourceID, resource.relPath, location, gp.showSecrets))
 		}
 	}
 
