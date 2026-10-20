@@ -248,3 +248,63 @@ func TestAnalyzeVulnerabilityExposure_ReferenceGrantOutcomes(t *testing.T) {
 		})
 	}
 }
+
+// multiBackendRoute is a route in "edge" whose backendRefs reach each named
+// Service in prod.
+func multiBackendRoute(services ...string) *unstructured.Unstructured {
+	refs := make([]any, 0, len(services))
+	for _, s := range services {
+		refs = append(refs, map[string]any{"name": s, "namespace": "prod"})
+	}
+	return &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "gateway.networking.k8s.io/v1",
+		"kind":       "HTTPRoute",
+		"metadata":   map[string]any{"name": "route", "namespace": "edge"},
+		"spec": map[string]any{
+			"parentRefs": []any{map[string]any{"name": "gw"}},
+			"rules":      []any{map[string]any{"backendRefs": refs}},
+		},
+	}}
+}
+
+// A workload fronted by several unclear Services must produce one warning, and
+// distinct workloads must each still produce their own.
+func TestAnalyzeVulnerabilityExposure_UnclearWarningsDeduplicatedPerWorkload(t *testing.T) {
+	web := unstructuredDeployment("prod", "web", map[string]any{"app": "web"})
+	api := unstructuredDeployment("prod", "api", map[string]any{"app": "api"})
+	objs := []runtime.Object{
+		web, api,
+		unstructuredServiceWithSelector("prod", "web-svc", "ClusterIP", map[string]any{"app": "web"}),
+		unstructuredServiceWithSelector("prod", "web-svc-2", "ClusterIP", map[string]any{"app": "web"}),
+		unstructuredServiceWithSelector("prod", "api-svc", "ClusterIP", map[string]any{"app": "api"}),
+		multiBackendRoute("web-svc", "web-svc-2", "api-svc"),
+	}
+	ksServer := newVulnExposureTestServer(t, objs,
+		vulnerabilityManifest("prod", "web-manifest", grantWlid, criticalMatch("CVE-2024-1")),
+		vulnerabilityManifest("prod", "api-manifest", "wlid://cluster-test/namespace-prod/deployment-api", criticalMatch("CVE-2024-2")))
+	dyn := ksServer.k8sClient.DynamicClient.(*dynamicfake.FakeDynamicClient)
+	_, err := dyn.Resource(gatewayGVR).Namespace("edge").Create(context.Background(), grantTestGateway(), metav1.CreateOptions{})
+	require.NoError(t, err)
+	dyn.PrependReactor("list", "referencegrants", forbidden(referenceGrantGVR))
+
+	result := registeredToolResult(t, dispatchRegisteredTool(t, ksServer, "analyze_vulnerability_exposure", map[string]any{}))
+	require.False(t, result.IsError)
+
+	var parsed map[string]any
+	require.NoError(t, json.Unmarshal([]byte(toolResultText(t, result)), &parsed))
+	warnings, _ := parsed["warnings"].([]any)
+	counts := map[string]int{}
+	for _, w := range warnings {
+		ws, _ := w.(string)
+		if !containsAll(ws, "ReferenceGrant", "unknown") {
+			continue
+		}
+		switch {
+		case containsAll(ws, "(web)"):
+			counts["web"]++
+		case containsAll(ws, "(api)"):
+			counts["api"]++
+		}
+	}
+	require.Equal(t, map[string]int{"web": 1, "api": 1}, counts, "warnings: %v", warnings)
+}
