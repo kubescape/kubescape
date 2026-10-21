@@ -308,11 +308,39 @@ func yamlControlsFormat(entries []metav1.ControlListEntry) {
 	fmt.Printf("%s\n", y)
 }
 
+// csvFormulaPrefixes contains the characters spreadsheets treat as the start of
+// an executable formula or command payload if placed at the start of a cell.
+// Leading whitespace is included too, since a cell starting with a newline or
+// carriage return can still execute a formula on its first non-blank line.
+const csvFormulaPrefixes = "=+-@\t\r\n"
+
+// csvSafeCell neutralizes a cell against spreadsheet formula injection (CWE-1236)
+// by prepending a single quote, the standard mitigation: spreadsheets treat a
+// leading apostrophe as literal text and do not execute or display it, while
+// other CSV consumers see an inert string.
+func csvSafeCell(cell string) string {
+	if cell == "" {
+		return cell
+	}
+	if strings.ContainsRune(csvFormulaPrefixes, rune(cell[0])) {
+		return "'" + cell
+	}
+	return cell
+}
+
+// csvSafeRow applies csvSafeCell across every cell of a CSV row.
+func csvSafeRow(row []string) []string {
+	for i := range row {
+		row[i] = csvSafeCell(row[i])
+	}
+	return row
+}
+
 func csvListFormat(_ context.Context, _ string, policies []string) {
 	writer := csv.NewWriter(os.Stdout)
 	_ = writer.Write([]string{"name"})
 	for _, policy := range policies {
-		_ = writer.Write([]string{policy})
+		_ = writer.Write(csvSafeRow([]string{policy}))
 	}
 	writer.Flush()
 	if err := writer.Error(); err != nil {
@@ -325,7 +353,7 @@ func csvControlsFormat(entries []metav1.ControlListEntry) {
 	_ = writer.Write([]string{"id", "name", "frameworks"})
 	for _, entry := range entries {
 		frameworks := strings.Join(entry.Frameworks, ";")
-		_ = writer.Write([]string{entry.ID, entry.Name, frameworks})
+		_ = writer.Write(csvSafeRow([]string{entry.ID, entry.Name, frameworks}))
 	}
 	writer.Flush()
 	if err := writer.Error(); err != nil {
@@ -530,13 +558,13 @@ func csvControlsConfigFormat(entries []metav1.ControlConfigEntry) {
 	writer := csv.NewWriter(os.Stdout)
 	_ = writer.Write([]string{"name", "title", "values", "controls", "description"})
 	for _, entry := range entries {
-		_ = writer.Write([]string{
+		_ = writer.Write(csvSafeRow([]string{
 			entry.Name,
 			entry.Title,
 			strings.Join(entry.Values, ";"),
 			strings.Join(entry.Controls, ";"),
 			entry.Description,
-		})
+		}))
 	}
 	writer.Flush()
 	if err := writer.Error(); err != nil {
