@@ -75,7 +75,7 @@ func (pp *PrometheusPrinter) generatePrometheusFormatFromCatalog(
 
 	m := &Metrics{}
 	m.setComplianceScores(summaryDetails)
-	m.setResourcesCountersFromCatalog(catalog, results)
+	m.setResourcesCountersFromCatalog(catalog, results, summaryDetails)
 	m.setCoverageScore(coverage)
 
 	return m

@@ -180,7 +180,8 @@ func (cp *CsvPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OP
 				severity = "Unknown"
 			}
 
-			status := string(assocCtrl.GetStatus(nil).Status())
+			ctrlStatus := cautils.ControlStatus(&opaSessionObj.Report.SummaryDetails, &assocCtrl.ResourceAssociatedControl)
+			status := string(ctrlStatus.Status())
 			if status == "" {
 				status = "unknown"
 			}
@@ -188,12 +189,12 @@ func (cp *CsvPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OP
 			failedPaths := ""
 			fixPaths := ""
 			if hasResult {
-				failedPaths, fixPaths = csvControlPaths(resourceResult, ctrlID, resKind, cp.showSecrets)
+				failedPaths, fixPaths = csvControlPaths(&opaSessionObj.Report.SummaryDetails, resourceResult, ctrlID, resKind, cp.showSecrets)
 			}
 
 			remediation := ""
-			if assocCtrl.GetStatus(nil).IsSkipped() {
-				if msg := buildSkipMessage(assocCtrl.GetStatus(nil)); msg != "" {
+			if ctrlStatus.IsSkipped() {
+				if msg := buildSkipMessage(ctrlStatus); msg != "" {
 					remediation = msg
 				} else if reason, ok := skippedReasonByControl[ctrlID]; ok && reason != "" {
 					remediation = reason
@@ -320,16 +321,19 @@ func (cp *CsvPrinter) CloseWriter() error {
 // value that also happens to match a known credential-shaped field name --
 // failing closed here instead means an unresolvable resource never leaks its
 // fix value by accident.
-func csvControlPaths(result resourcesresults.Result, controlID, kind string, showSecrets bool) (failedPaths, fixPaths string) {
+func csvControlPaths(summary *reportsummary.SummaryDetails, result resourcesresults.Result, controlID, kind string, showSecrets bool) (failedPaths, fixPaths string) {
 	for i := range result.AssociatedControls {
 		if result.AssociatedControls[i].GetID() != controlID {
 			continue
 		}
 		var failed, fix []string
 		seenFailed := make(map[string]struct{})
-		for j := range result.AssociatedControls[i].ResourceAssociatedRules {
-			for k := range result.AssociatedControls[i].ResourceAssociatedRules[j].Paths {
-				p := result.AssociatedControls[i].ResourceAssociatedRules[j].Paths[k]
+		// Only the rules that still fail are actionable; an excepted rule's
+		// paths stay in the report's own rules for audit.
+		displayed := cautils.EvidenceControl(summary, result.AssociatedControls[i])
+		for j := range displayed.ResourceAssociatedRules {
+			for k := range displayed.ResourceAssociatedRules[j].Paths {
+				p := displayed.ResourceAssociatedRules[j].Paths[k]
 				failed = appendCSVFailedPath(failed, seenFailed, p.DeletePath)
 				failed = appendCSVFailedPath(failed, seenFailed, p.ReviewPath)
 				failed = appendCSVFailedPath(failed, seenFailed, p.FailedPath)

@@ -476,12 +476,12 @@ func TestSARIFExceptions_SkippedControlIsNotReportedAsSuppressed(t *testing.T) {
 
 func TestSARIFExceptions_SplitLeavesUnexceptedControlsAlone(t *testing.T) {
 	ac := sarifExceptionControl(failingRule("privileged", privilegedPath))
-	split := splitSARIFExceptions(ac)
+	split := splitSARIFExceptions(nil, ac)
 
 	assert.False(t, split.hasSuppressed)
 	assert.Empty(t, split.alertOnlyExceptions)
 	assert.Equal(t, ac.ResourceAssociatedRules, split.visible.ResourceAssociatedRules)
-	assert.False(t, isSARIFSuppressedControl(ac))
+	assert.False(t, isSARIFSuppressedControl(nil, ac))
 	assert.False(t, strings.Contains(string(renderSARIF(t, NewSARIFPrinter(false), sarifExceptionSession(t, ac))), "suppressions"))
 }
 

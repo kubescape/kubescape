@@ -10,8 +10,11 @@ import (
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/opa-utils/exceptions"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
+	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	"github.com/owenrumney/go-sarif/v2/sarif"
+
+	"github.com/kubescape/kubescape/v4/core/cautils"
 )
 
 // SARIF 2.1.0 suppression vocabulary (sections 3.35.3 and 3.35.4). An exception is
@@ -54,19 +57,25 @@ type sarifExceptionSplit struct {
 // failed and whose effective status carries the exception sub-status was
 // affected by an exception: passed means a disable action removed the finding,
 // failed means alertOnly acknowledged it.
-func splitSARIFExceptions(ac resourcesresults.ResourceAssociatedControl) sarifExceptionSplit {
+//
+// Rules are judged in the frameworks of the scan that contain the control, the
+// same view the summary and the control's status use, so an exception scoped to
+// one framework does not suppress a rule that another selected framework still
+// reports as failing.
+func splitSARIFExceptions(summary *reportsummary.SummaryDetails, ac resourcesresults.ResourceAssociatedControl) sarifExceptionSplit {
 	split := sarifExceptionSplit{visible: ac, suppressed: ac}
 	var visibleRules, suppressedRules []resourcesresults.ResourceAssociatedRule
+	frameworkNames := cautils.ControlFilters(summary, ac.ControlID).FrameworkNames
 
 	for _, rule := range ac.ResourceAssociatedRules {
-		effective := rule.GetStatus(nil)
+		effective := cautils.RuleStatus(summary, ac.ControlID, &rule)
 		if rule.Status != apis.StatusFailed || effective.GetSubStatus() != apis.SubStatusException {
 			visibleRules = append(visibleRules, rule)
 			continue
 		}
 		// These are the same exceptions the processor matched, selected with the
 		// same filter it used to decide the rule's status.
-		matched := exceptions.FilterExceptionsByFrameworks(rule.Exception, nil, ac.ControlID, rule.GetName())
+		matched := matchedSARIFExceptions(rule.Exception, frameworkNames, ac.ControlID, rule.GetName())
 		if effective.IsPassed() {
 			// The rule passes when any matched exception is not alertOnly, so the
 			// matches may mix actions. Only a non-alertOnly exception removed the
@@ -83,7 +92,13 @@ func splitSARIFExceptions(ac resourcesresults.ResourceAssociatedControl) sarifEx
 			suppressedRules = append(suppressedRules, rule)
 			continue
 		}
-		split.alertOnlyExceptions = append(split.alertOnlyExceptions, matched...)
+		// The rule stays failing, so a disable exception scoped to one of several
+		// frameworks did not decide it; only an alertOnly one acknowledged it.
+		for _, e := range matched {
+			if e.IsAlertOnly() {
+				split.alertOnlyExceptions = append(split.alertOnlyExceptions, e)
+			}
+		}
 		visibleRules = append(visibleRules, rule)
 	}
 
@@ -98,18 +113,34 @@ func splitSARIFExceptions(ac resourcesresults.ResourceAssociatedControl) sarifEx
 	return split
 }
 
+// matchedSARIFExceptions selects the exceptions that apply to a rule in the given
+// frameworks. With no framework it selects the framework-agnostic ones, as the
+// processor does; otherwise it gathers those that apply in each framework.
+func matchedSARIFExceptions(list []armotypes.PostureExceptionPolicy, frameworkNames []string, controlID, ruleName string) []armotypes.PostureExceptionPolicy {
+	if len(frameworkNames) == 0 {
+		return exceptions.FilterExceptionsByFrameworks(list, nil, controlID, ruleName)
+	}
+	var matched []armotypes.PostureExceptionPolicy
+	for _, name := range frameworkNames {
+		matched = append(matched, exceptions.FilterExceptionsByFrameworks(list, []string{name}, controlID, ruleName)...)
+	}
+	return matched
+}
+
 // isSARIFSuppressedControl reports whether a disable exception removed at least
 // one failing rule of ac and the control was otherwise evaluated.
-func isSARIFSuppressedControl(ac resourcesresults.ResourceAssociatedControl) bool {
-	return !ac.GetStatus(nil).IsSkipped() && splitSARIFExceptions(ac).hasSuppressed
+func isSARIFSuppressedControl(summary *reportsummary.SummaryDetails, ac resourcesresults.ResourceAssociatedControl) bool {
+	// Skipped is the recorded outcome of a control that was not evaluated, which
+	// no framework-scoped exception changes, so the recorded status is the right one.
+	return !ac.GetStatus(nil).IsSkipped() && splitSARIFExceptions(summary, ac).hasSuppressed
 }
 
 // hasSARIFSuppressedFinding reports whether any control of result carries a
 // finding a disable exception removed. Such a resource is not failing, but it
 // still has something to report.
-func hasSARIFSuppressedFinding(result resourcesresults.Result) bool {
+func hasSARIFSuppressedFinding(summary *reportsummary.SummaryDetails, result resourcesresults.Result) bool {
 	for _, ac := range result.AssociatedControls {
-		if isSARIFSuppressedControl(ac) {
+		if isSARIFSuppressedControl(summary, ac) {
 			return true
 		}
 	}

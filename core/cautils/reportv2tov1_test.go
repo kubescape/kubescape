@@ -1,6 +1,7 @@
 package cautils
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -562,4 +563,116 @@ func TestReportV2ToV1_FrameworkStatusCounters_MultipleControls(t *testing.T) {
 			assert.Equal(t, 3, cr.WarningResources)
 		}
 	}
+}
+
+// A combined NSA + MITRE scan with an exception scoped to NSA: each legacy
+// section is evaluated in its own framework, so the NSA section agrees with its
+// control summary (passed, no rule response) while the MITRE section keeps the
+// finding. A control only MITRE evaluates is absent from the NSA section.
+func TestReportV2ToV1_RuleStatusFollowsSectionFramework(t *testing.T) {
+	const (
+		resourceID   = "/v1/default/Pod/demo"
+		sharedCtl    = "C-0041"
+		mitreOnlyCtl = "C-0017"
+	)
+	nsaException := armotypes.PostureExceptionPolicy{
+		PortalBase:      armotypes.PortalBase{Name: "nsa-only"},
+		Actions:         []armotypes.PostureExceptionPolicyActions{armotypes.Disable},
+		PosturePolicies: []armotypes.PosturePolicy{{FrameworkName: "NSA", ControlID: sharedCtl}},
+	}
+	hostNetworkRule := resourcesresults.ResourceAssociatedRule{
+		Name:      "host-network-access",
+		Status:    apis.StatusFailed,
+		Paths:     []armotypes.PosturePaths{{ResourceID: resourceID, ReviewPath: "spec.hostNetwork"}},
+		Exception: []armotypes.PostureExceptionPolicy{nsaException},
+	}
+	mitreOnlyRule := resourcesresults.ResourceAssociatedRule{
+		Name:   "immutable-container-filesystem",
+		Status: apis.StatusFailed,
+		Paths:  []armotypes.PosturePaths{{ResourceID: resourceID, ReviewPath: "spec.containers[0].securityContext"}},
+	}
+
+	// the summary as the scan computes it: NSA excepts the finding, MITRE does not
+	nsaShared := reportsummary.ControlSummary{ControlID: sharedCtl, Name: "HostNetwork access"}
+	nsaShared.Append(&apis.StatusInfo{InnerStatus: apis.StatusPassed, SubStatus: apis.SubStatusException}, resourceID)
+	mitreShared := reportsummary.ControlSummary{ControlID: sharedCtl, Name: "HostNetwork access"}
+	mitreShared.Append(helpersv1.NewStatus(apis.StatusFailed), resourceID)
+	mitreOnly := reportsummary.ControlSummary{ControlID: mitreOnlyCtl, Name: "Immutable filesystem"}
+	mitreOnly.Append(helpersv1.NewStatus(apis.StatusFailed), resourceID)
+
+	session := &OPASessionObj{
+		AllResources: map[string]workloadinterface.IMetadata{
+			resourceID: workloadinterface.NewWorkloadObj(map[string]any{
+				"apiVersion": "v1", "kind": "Pod",
+				"metadata": map[string]any{"name": "demo", "namespace": "default"},
+				"spec":     map[string]any{"hostNetwork": true},
+			}),
+		},
+		ResourcesResult: map[string]resourcesresults.Result{
+			resourceID: {
+				ResourceID: resourceID,
+				AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+					{ControlID: sharedCtl, Status: apis.StatusInfo{InnerStatus: apis.StatusFailed}, ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{hostNetworkRule}},
+					{ControlID: mitreOnlyCtl, Status: apis.StatusInfo{InnerStatus: apis.StatusFailed}, ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{mitreOnlyRule}},
+				},
+			},
+		},
+		Report: &reporthandlingv2.PostureReport{
+			SummaryDetails: reportsummary.SummaryDetails{
+				Frameworks: []reportsummary.FrameworkSummary{
+					{Name: "NSA", Controls: reportsummary.ControlSummaries{sharedCtl: nsaShared}},
+					{Name: "MITRE", Controls: reportsummary.ControlSummaries{sharedCtl: mitreShared, mitreOnlyCtl: mitreOnly}},
+				},
+			},
+		},
+	}
+
+	// assert the serialized report, as a consumer of the legacy format reads it
+	raw, err := json.Marshal(ReportV2ToV1(session))
+	require.NoError(t, err)
+	var got reporthandling.PostureReport
+	require.NoError(t, json.Unmarshal(raw, &got))
+	require.Len(t, got.FrameworkReports, 2)
+
+	byID := func(fw reporthandling.FrameworkReport, id string) (reporthandling.ControlReport, bool) {
+		for _, c := range fw.ControlReports {
+			if c.ControlID == id {
+				return c, true
+			}
+		}
+		return reporthandling.ControlReport{}, false
+	}
+
+	nsa, mitre := got.FrameworkReports[0], got.FrameworkReports[1]
+	require.Equal(t, "NSA", nsa.Name)
+
+	nsaControl, ok := byID(nsa, sharedCtl)
+	require.True(t, ok)
+	assert.Zero(t, nsaControl.FailedResources, "the NSA summary reports the control passed")
+	require.Len(t, nsaControl.RuleReports, 1)
+	assert.Empty(t, nsaControl.RuleReports[0].RuleResponses, "so the NSA section carries no failed rule response")
+	assert.Equal(t, "success", nsaControl.RuleReports[0].RuleStatus.Status)
+	_, ok = byID(nsa, mitreOnlyCtl)
+	assert.False(t, ok, "a control NSA does not evaluate stays out of its section")
+
+	mitreControl, ok := byID(mitre, sharedCtl)
+	require.True(t, ok)
+	assert.Equal(t, 1, mitreControl.FailedResources)
+	require.Len(t, mitreControl.RuleReports, 1)
+	require.Len(t, mitreControl.RuleReports[0].RuleResponses, 1, "the exception is not NSA's to give MITRE")
+	response := mitreControl.RuleReports[0].RuleResponses[0]
+	assert.Equal(t, string(apis.StatusFailed), response.RuleStatus)
+	assert.Equal(t, []string{"spec.hostNetwork"}, response.ReviewPaths)
+	require.NotNil(t, response.Exception, "the exception stays attached for audit")
+	assert.Equal(t, "nsa-only", response.Exception.Name)
+
+	mitreOnlyControl, ok := byID(mitre, mitreOnlyCtl)
+	require.True(t, ok)
+	require.Len(t, mitreOnlyControl.RuleReports, 1)
+	assert.Len(t, mitreOnlyControl.RuleReports[0].RuleResponses, 1, "a rule without exceptions is unchanged")
+
+	// the evaluation held by the scan is not rewritten
+	rawRule := session.ResourcesResult[resourceID].AssociatedControls[0].ResourceAssociatedRules[0]
+	assert.Equal(t, apis.StatusFailed, rawRule.Status)
+	assert.Equal(t, []armotypes.PostureExceptionPolicy{nsaException}, rawRule.Exception)
 }

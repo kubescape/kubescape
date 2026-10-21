@@ -316,7 +316,7 @@ func (gp *GitLabSASTPrinter) printConfigurationScan(ctx context.Context, opaSess
 	var withoutFilePath, outsideRepository int
 	failed := make([]scannedResource, 0, len(opaSessionObj.ResourcesResult))
 	for resourceID, result := range opaSessionObj.ResourcesResult {
-		if !result.GetStatus(nil).IsFailed() {
+		if !cautils.ResourceStatus(&opaSessionObj.Report.SummaryDetails, &result).IsFailed() {
 			continue
 		}
 
@@ -348,7 +348,7 @@ func (gp *GitLabSASTPrinter) printConfigurationScan(ctx context.Context, opaSess
 
 		for _, toPin := range opaSessionObj.ResourcesResult[resource.resourceID].AssociatedControls {
 			ac := toPin
-			if !ac.GetStatus(nil).IsFailed() {
+			if !cautils.ControlStatus(&opaSessionObj.Report.SummaryDetails, &ac).IsFailed() {
 				continue
 			}
 
@@ -358,9 +358,12 @@ func (gp *GitLabSASTPrinter) printConfigurationScan(ctx context.Context, opaSess
 				continue
 			}
 
-			location := resolveFixLocation(opaSessionObj, locationResolver, &ac, resource.resourceID)
+			// resolve the location from the same evidence the report shows, so it never
+			// points at a field that an exception removed from the description
+			evidence := cautils.EvidenceControl(&opaSessionObj.Report.SummaryDetails, ac)
+			location := resolveFixLocation(opaSessionObj, locationResolver, &evidence, resource.resourceID)
 			res, _ := opaSessionObj.GetResource(resource.resourceID)
-			report.Vulnerabilities = append(report.Vulnerabilities, toGitLabVulnerability(ctl, &ac, res, resource.resourceID, resource.relPath, location, gp.showSecrets))
+			report.Vulnerabilities = append(report.Vulnerabilities, toGitLabVulnerability(ctl, &evidence, res, resource.resourceID, resource.relPath, location, gp.showSecrets))
 		}
 	}
 

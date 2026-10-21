@@ -438,7 +438,7 @@ func (gp *GitHubActionsPrinter) collectAnnotations(ctx context.Context, opaSessi
 	var withoutFilePath, outsideRepository int
 	failed := make([]scannedResource, 0, len(opaSessionObj.ResourcesResult))
 	for resourceID, result := range opaSessionObj.ResourcesResult {
-		if !result.GetStatus(nil).IsFailed() {
+		if !cautils.ResourceStatus(&opaSessionObj.Report.SummaryDetails, &result).IsFailed() {
 			continue
 		}
 
@@ -480,7 +480,7 @@ func (gp *GitHubActionsPrinter) collectAnnotations(ctx context.Context, opaSessi
 
 		for _, toPin := range opaSessionObj.ResourcesResult[resource.resourceID].AssociatedControls {
 			ac := toPin
-			if !ac.GetStatus(nil).IsFailed() {
+			if !cautils.ControlStatus(&opaSessionObj.Report.SummaryDetails, &ac).IsFailed() {
 				continue
 			}
 
@@ -496,11 +496,14 @@ func (gp *GitHubActionsPrinter) collectAnnotations(ctx context.Context, opaSessi
 				continue
 			}
 
-			location := resolveFixLocation(opaSessionObj, locationResolver, &ac, resource.resourceID)
+			// the location and the message must come from the same evidence, or the
+			// annotation could point at a field that an exception removed from the message
+			evidence := cautils.EvidenceControl(&opaSessionObj.Report.SummaryDetails, ac)
+			location := resolveFixLocation(opaSessionObj, locationResolver, &evidence, resource.resourceID)
 			msg := fmt.Sprintf("%s severity finding on %s. Remediation: %s",
 				apis.ControlSeverityToString(ctl.GetScoreFactor()), resource.resourceID, cautils.GetControlLink(ctl.GetID()))
 			if res, ok := opaSessionObj.GetResource(resource.resourceID); ok && res != nil {
-				if paths := AssistedRemediationPathsWithCurrentValuesFiltered(&ac, res, false); len(paths) > 0 {
+				if paths := AssistedRemediationPathsWithCurrentValuesFiltered(&evidence, res, false); len(paths) > 0 {
 					msg += "\nFailed paths:\n" + strings.Join(paths, "\n")
 				}
 			}
