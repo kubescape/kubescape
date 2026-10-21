@@ -1,6 +1,7 @@
 package download
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -180,6 +181,28 @@ func TestDownloadCmd_UpperCaseJSONOutputPathPreSplit(t *testing.T) {
 	require.NotNil(t, ks.captured)
 	assert.Equal(t, "", ks.captured.Path)
 	assert.Equal(t, "NSA.JSON", ks.captured.FileName)
+}
+
+// TestDownloadCmd_NonJSONExtensionOutputPathNotSplit verifies that an
+// --output path whose final extension is not .json is passed through as a
+// directory, even when the name contains an upper-case .JSON.
+func TestDownloadCmd_NonJSONExtensionOutputPathNotSplit(t *testing.T) {
+	for _, output := range []string{
+		filepath.Join("out", "report.JSON.bak"),
+		filepath.Join("out", "report.JSONL"),
+	} {
+		t.Run(output, func(t *testing.T) {
+			ks := &recordingDownloadKS{}
+			cmd := GetDownloadCmd(ks)
+			require.NoError(t, cmd.Flags().Set("output", output))
+
+			require.NoError(t, cmd.RunE(cmd, []string{"framework", "nsa"}))
+
+			require.NotNil(t, ks.captured)
+			assert.Equal(t, output, ks.captured.Path)
+			assert.Equal(t, "", ks.captured.FileName)
+		})
+	}
 }
 
 func TestFlagValidationDownload_NoError(t *testing.T) {
