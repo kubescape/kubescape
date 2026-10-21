@@ -228,6 +228,23 @@ func TestSetPathAndFilename(t *testing.T) {
 			expectedFilename: "nsa.json",
 		},
 		{
+			// The .json extension is matched case-insensitively, so an
+			// upper-case --output file is not created as a directory.
+			downloadInfo: &metav1.DownloadInfo{
+				Path: filepath.Join("custom", "output", "NSA.JSON"),
+			},
+			expectedPath:     filepath.Join("custom", "output"),
+			expectedFilename: "NSA.JSON",
+		},
+		{
+			// Bare upper-case .json file name goes to the current directory.
+			downloadInfo: &metav1.DownloadInfo{
+				Path: "NSA.Json",
+			},
+			expectedPath:     ".",
+			expectedFilename: "NSA.Json",
+		},
+		{
 			// Deep nested directory with trailing directory format
 			downloadInfo: &metav1.DownloadInfo{
 				Path: filepath.Join("custom", "output", "nested_dir"),

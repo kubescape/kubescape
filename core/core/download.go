@@ -124,7 +124,7 @@ func setPathAndFilename(downloadInfo *metav1.DownloadInfo) {
 	}
 
 	dir, file := filepath.Split(downloadInfo.Path)
-	if dir == "" && file != "." && file != ".." && filepath.Ext(file) == ".json" {
+	if dir == "" && file != "." && file != ".." && strings.EqualFold(filepath.Ext(file), ".json") {
 		// Bare .json file name (e.g. "nsa.json" passed straight to the API):
 		// save it to the current directory instead of misreading it as a
 		// directory. Non-.json bare names keep their directory behavior, since
@@ -140,7 +140,7 @@ func setPathAndFilename(downloadInfo *metav1.DownloadInfo) {
 	}
 	// Intentionally restricted to ".json" and left as-is: an existing
 	// TestSetPathAndFilename case enshrines .txt-in-dir-as-directory behavior.
-	if strings.Contains(file, ".json") {
+	if strings.Contains(strings.ToLower(file), ".json") {
 		downloadInfo.Path = filepath.Clean(dir)
 		downloadInfo.FileName = file
 	} else {

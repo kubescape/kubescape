@@ -168,6 +168,20 @@ func TestDownloadCmd_JSONOutputPathPreSplit(t *testing.T) {
 	assert.Equal(t, "nsa.json", ks.captured.FileName)
 }
 
+// TestDownloadCmd_UpperCaseJSONOutputPathPreSplit verifies the .json
+// extension of --output is matched case-insensitively.
+func TestDownloadCmd_UpperCaseJSONOutputPathPreSplit(t *testing.T) {
+	ks := &recordingDownloadKS{}
+	cmd := GetDownloadCmd(ks)
+	require.NoError(t, cmd.Flags().Set("output", "NSA.JSON"))
+
+	require.NoError(t, cmd.RunE(cmd, []string{"framework", "nsa"}))
+
+	require.NotNil(t, ks.captured)
+	assert.Equal(t, "", ks.captured.Path)
+	assert.Equal(t, "NSA.JSON", ks.captured.FileName)
+}
+
 func TestFlagValidationDownload_NoError(t *testing.T) {
 	downloadInfo := v1.DownloadInfo{
 		AccessKey: "",
