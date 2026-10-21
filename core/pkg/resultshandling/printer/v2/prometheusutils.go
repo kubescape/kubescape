@@ -2,6 +2,7 @@ package printer
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/kubescape/kubescape/v4/core/cautils"
@@ -469,7 +470,17 @@ func (m *Metrics) setResourcesCountersFromCatalog(
 		return
 	}
 
-	for resourceID, result := range results {
+	// results is a map, so its iteration order is randomised. Walk the resource
+	// IDs in sorted order so that identical scan data always produces an
+	// identical report file, which matters when outputs are diffed or archived.
+	resourceIDs := make([]string, 0, len(results))
+	for resourceID := range results {
+		resourceIDs = append(resourceIDs, resourceID)
+	}
+	sort.Strings(resourceIDs)
+
+	for _, resourceID := range resourceIDs {
+		result := results[resourceID]
 		r, ok := catalog.Get(resourceID)
 		if !ok || r == nil {
 			continue
@@ -501,7 +512,17 @@ func (m *Metrics) setImageVulnerabilities(imageScanData []cautils.ImageScanData)
 		severityToSummary := map[string]*imageprinter.SeveritySummary{}
 		setSeverityToSummaryMap(cves, severityToSummary)
 
-		for severity, summary := range severityToSummary {
+		// severityToSummary is a map, so its iteration order is randomised.
+		// Emit the severities in sorted order so repeated runs and report
+		// diffs stay stable.
+		severities := make([]string, 0, len(severityToSummary))
+		for severity := range severityToSummary {
+			severities = append(severities, severity)
+		}
+		sort.Strings(severities)
+
+		for _, severity := range severities {
+			summary := severityToSummary[severity]
 			m.listImages = append(m.listImages, mImageVulnerability{
 				image:           imageScanData[i].Image,
 				platform:        imageScanData[i].Platform,
