@@ -211,3 +211,58 @@ type lookupErr struct{ is error }
 
 func (e *lookupErr) Error() string        { return "control 'C-9999' not found" }
 func (e *lookupErr) Is(target error) bool { return target == e.is }
+
+// fallbackServer starts a server whose release download failed, so it serves
+// controls from the local policy cache in store.
+func fallbackServer(t *testing.T, store string) *KubescapeMcpserver {
+	t.Helper()
+	prev := getter.DefaultLocalStore
+	getter.DefaultLocalStore = store
+	t.Cleanup(func() { getter.DefaultLocalStore = prev })
+
+	ks := &KubescapeMcpserver{}
+	drp := &fakeStoreLoader{fallback: true}
+	ks.startPolicyLoad(func() getter.IPolicyGetter { return loadPolicyGetter(drp) })
+	return ks
+}
+
+// If the cache the server fell back to is missing or corrupt, a control that
+// exists must not be reported as unknown: the catalog is unavailable.
+func TestValidateScanSelection_UnusableFallbackCacheIsNotUnknown(t *testing.T) {
+	corrupt := t.TempDir()
+	for _, fw := range getter.NativeFrameworks {
+		require.NoError(t, os.WriteFile(filepath.Join(corrupt, fw+".json"), []byte("{not json"), 0o600))
+	}
+
+	for name, store := range map[string]string{
+		"missing cache": t.TempDir(),
+		"corrupt cache": corrupt,
+	} {
+		t.Run(name, func(t *testing.T) {
+			ks := fallbackServer(t, store)
+
+			res, err := ks.CallTool(context.Background(), "validate_scan_selection", map[string]any{"control_ids": "C-0012"})
+			require.NoError(t, err)
+			te := toolErrorOf(t, res)
+			assert.Equal(t, ErrCodeScanFailed, te.Code)
+			assert.Contains(t, te.Message, getter.ErrCatalogUnavailable.Error())
+
+			// scan_controls classifies the same failure the same way.
+			err = fmt.Errorf("failed to collect Control policies: %w", errors.Join(getter.ErrCatalogUnavailable, os.ErrNotExist))
+			assert.Equal(t, ErrCodeScanFailed, classifyScanError(err))
+		})
+	}
+}
+
+// A cache with some usable files still answers; a miss in it is a real unknown.
+func TestValidateScanSelection_PartialFallbackCache(t *testing.T) {
+	store := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(store, getter.NativeFrameworks[0]+".json"), []byte("{not json"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(store, getter.NativeFrameworks[1]+".json"), []byte(selectionFramework), 0o600))
+	ks := fallbackServer(t, store)
+
+	got := validateSelection(t, ks, []any{"CIS-3.1.1", "C-9999"})
+	assert.False(t, got.Valid)
+	assert.Equal(t, []resolvedControl{{Input: "CIS-3.1.1", ControlID: "C-0286"}}, got.Resolved)
+	assert.Equal(t, []string{"C-9999"}, got.Unknown)
+}

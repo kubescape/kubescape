@@ -2,6 +2,8 @@ package getter
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/kubescape/opa-utils/reporthandling"
@@ -122,5 +124,55 @@ func TestResolveControlErrorsAreNotUnknownControls(t *testing.T) {
 		got, err := ResolveControl(&stubControlGetter{control: want}, "C-0001")
 		require.NoError(t, err)
 		require.Same(t, want, got)
+	})
+}
+
+// A catalog the getter could not read says nothing about whether a control
+// exists, so it must not be reported as an unknown one.
+func TestLoadPolicyGetControlUnusableCatalog(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	good := writePolicyFile(t, dir, "good.json", reporthandling.Framework{
+		PortalBase: portalBase("cis"), Controls: sectionTestControls(),
+	})
+	corrupt := filepath.Join(dir, "corrupt.json")
+	require.NoError(t, os.WriteFile(corrupt, []byte("{not json"), 0o600))
+	empty := filepath.Join(dir, "empty.json")
+	require.NoError(t, os.WriteFile(empty, []byte(`{"name":"cis","controls":[]}`), 0o600))
+	missing := filepath.Join(dir, "missing.json")
+
+	for name, files := range map[string][]string{
+		"no files":                   {},
+		"missing file":               {missing},
+		"corrupt file":               {corrupt},
+		"framework with no controls": {empty},
+		"every file unusable":        {missing, corrupt, empty},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			control, err := ResolveControl(NewLoadPolicy(files), "C-0012")
+			require.ErrorIs(t, err, ErrCatalogUnavailable)
+			require.NotErrorIs(t, err, ErrControlNotFound)
+			require.Nil(t, control)
+		})
+	}
+
+	t.Run("the cause of the failure is kept", func(t *testing.T) {
+		t.Parallel()
+		_, err := ResolveControl(NewLoadPolicy([]string{missing}), "C-0012")
+		require.ErrorIs(t, err, os.ErrNotExist)
+	})
+
+	t.Run("a partly damaged cache still answers", func(t *testing.T) {
+		t.Parallel()
+		files := []string{missing, corrupt, good}
+
+		control, err := ResolveControl(NewLoadPolicy(files), "CIS-3.1.1")
+		require.NoError(t, err)
+		require.Equal(t, "C-0286", control.ControlID)
+
+		_, err = ResolveControl(NewLoadPolicy(files), "C-9999")
+		require.ErrorIs(t, err, ErrControlNotFound, "a usable catalog establishes a miss")
+		require.NotErrorIs(t, err, ErrCatalogUnavailable)
 	})
 }

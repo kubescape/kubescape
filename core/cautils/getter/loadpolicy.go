@@ -31,6 +31,10 @@ var (
 	ErrFrameworkNotMatching = errors.New("framework from file not matching")
 	ErrControlNotMatching   = errors.New("control from file not matching")
 	ErrControlAmbiguous     = errors.New("control identifier matches more than one control")
+	// ErrCatalogUnavailable is returned when none of the local policy files
+	// could be read as a control or a framework with controls, so nothing can
+	// be said about whether a control exists.
+	ErrCatalogUnavailable = errors.New("no usable local policy catalog")
 )
 
 var (
@@ -72,21 +76,32 @@ func (lp *LoadPolicy) ShouldPersistPolicyArtifacts() bool {
 // GetControl returns a control from the policy file. The control is named by
 // its control ID or, when it carries one, its framework section number; see
 // controlMatcher.
+//
+// A file that cannot be read or decoded is skipped, so a partly damaged cache
+// still answers for the controls in its other files. If no file is usable the
+// catalog is unavailable, and that is reported as ErrCatalogUnavailable
+// rather than as an unknown control.
 func (lp *LoadPolicy) GetControl(controlID string) (*reporthandling.Control, error) {
 	if strings.TrimSpace(controlID) == "" {
 		return nil, ErrIDRequired
 	}
 	matcher := newControlMatcher(controlID)
+	usable := false        // some file held a control or a framework with controls
+	var firstFailure error // why the first unusable file was skipped
 
 	for _, filePath := range lp.filePaths {
 		buf, err := os.ReadFile(filepath.Clean(filePath))
 		if err != nil {
+			if firstFailure == nil {
+				firstFailure = err
+			}
 			continue
 		}
 
 		// check if the file is a control descriptor: a ControlID field is populated.
 		var control reporthandling.Control
 		if err = json.Unmarshal(buf, &control); err == nil && control.ControlID != "" {
+			usable = true
 			if matcher.offer(&control) {
 				return &control, nil
 			}
@@ -95,14 +110,27 @@ func (lp *LoadPolicy) GetControl(controlID string) (*reporthandling.Control, err
 
 		// check if the file is a framework descriptor
 		var framework reporthandling.Framework
-		if err = json.Unmarshal(buf, &framework); err == nil {
+		if err = json.Unmarshal(buf, &framework); err == nil && len(framework.Controls) > 0 {
+			usable = true
 			for _, toPin := range framework.Controls {
 				ctrl := toPin
 				if matcher.offer(&ctrl) {
 					return &ctrl, nil
 				}
 			}
+		} else if firstFailure == nil {
+			firstFailure = fmt.Errorf("%s: not a control or a framework with controls", filepath.Base(filePath))
+			if err != nil {
+				firstFailure = fmt.Errorf("%s: %w", filepath.Base(filePath), err)
+			}
 		}
+	}
+
+	if !usable {
+		if firstFailure == nil {
+			firstFailure = errors.New("no policy files")
+		}
+		return nil, fmt.Errorf("controlID: %s: %w: %w", controlID, ErrCatalogUnavailable, firstFailure)
 	}
 
 	control, err := matcher.bySection()
