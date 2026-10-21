@@ -3295,3 +3295,266 @@ spec:
 	require.Len(t, res.SkippedResources, 1)
 	assert.Contains(t, res.SkippedResources[0].Reason, "externalIPs")
 }
+
+func TestReview4034SelectorRemovalAndConflationRegressions(t *testing.T) {
+	// 1. Direct helper: scanned PDB spec.selector: {} rejected against rendered selector: null
+	scannedPDB := map[string]interface{}{
+		"apiVersion": "policy/v1",
+		"kind":       "PodDisruptionBudget",
+		"metadata": map[string]interface{}{
+			"name": "app-pdb",
+		},
+		"spec": map[string]interface{}{
+			"selector": map[string]interface{}{},
+		},
+	}
+	renderedNullSelector := map[string]interface{}{
+		"apiVersion": "policy/v1",
+		"kind":       "PodDisruptionBudget",
+		"metadata": map[string]interface{}{
+			"name": "app-pdb",
+		},
+		"spec": map[string]interface{}{
+			"selector": nil,
+		},
+	}
+	errNull := verifyScannedFieldsMatch(scannedPDB, renderedNullSelector, "")
+	require.Error(t, errNull, "empty selector {} in scanned PDB must not match rendered selector: null")
+	assert.Contains(t, errNull.Error(), "spec.selector")
+
+	// 2. Direct helper: scanned PDB spec.selector: {} rejected against rendered missing selector
+	renderedMissingSelector := map[string]interface{}{
+		"apiVersion": "policy/v1",
+		"kind":       "PodDisruptionBudget",
+		"metadata": map[string]interface{}{
+			"name": "app-pdb",
+		},
+		"spec": map[string]interface{}{},
+	}
+	errMissing := verifyScannedFieldsMatch(scannedPDB, renderedMissingSelector, "")
+	require.Error(t, errMissing, "empty selector {} in scanned PDB must not match omitted selector")
+	assert.Contains(t, errMissing.Error(), "spec.selector")
+
+	// 3. Direct helper: scanned Service selector with empty leaf {app: "web", canary: ""} rejected when canary is missing
+	scannedSvc := map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "Service",
+		"metadata": map[string]interface{}{
+			"name": "web",
+		},
+		"spec": map[string]interface{}{
+			"selector": map[string]interface{}{
+				"app":    "web",
+				"canary": "",
+			},
+		},
+	}
+	renderedSvcMissingLeaf := map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "Service",
+		"metadata": map[string]interface{}{
+			"name": "web",
+		},
+		"spec": map[string]interface{}{
+			"selector": map[string]interface{}{
+				"app": "web",
+			},
+		},
+	}
+	errLeaf := verifyScannedFieldsMatch(scannedSvc, renderedSvcMissingLeaf, "")
+	require.Error(t, errLeaf, "missing empty-string leaf canary: \"\" must be rejected")
+	assert.Contains(t, errLeaf.Error(), "spec.selector.canary")
+
+	// 4. Direct helper: documented scanner-added container resources: {} accepted when omitted in rendered base
+	scannedContainer := map[string]interface{}{
+		"spec": map[string]interface{}{
+			"containers": []interface{}{
+				map[string]interface{}{
+					"name":      "app",
+					"resources": map[string]interface{}{},
+				},
+			},
+		},
+	}
+	renderedContainerNoRes := map[string]interface{}{
+		"spec": map[string]interface{}{
+			"containers": []interface{}{
+				map[string]interface{}{
+					"name": "app",
+				},
+			},
+		},
+	}
+	errContainer := verifyScannedFieldsMatch(scannedContainer, renderedContainerNoRes, "")
+	require.NoError(t, errContainer, "scanner-added empty resources: {} must match omitted container resources")
+
+	// 5. Full EmitKustomizePatch integration test: PDB with empty selector {} declined when chart has null selector
+	chartDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "Chart.yaml"), []byte("apiVersion: v2\nname: test-pdb\nversion: 0.1.0\n"), 0600))
+	templatesDir := filepath.Join(chartDir, "templates")
+	require.NoError(t, os.MkdirAll(templatesDir, 0755))
+
+	pdbChartYaml := `apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: my-pdb
+spec:
+  minAvailable: 1
+  selector: null
+`
+	require.NoError(t, os.WriteFile(filepath.Join(templatesDir, "pdb.yaml"), []byte(pdbChartYaml), 0600))
+
+	scannedPDBRes := &reporthandling.Resource{
+		Object: map[string]interface{}{
+			"apiVersion": "policy/v1",
+			"kind":       "PodDisruptionBudget",
+			"sourcePath": filepath.Join(chartDir, "templates/pdb.yaml"),
+			"metadata": map[string]interface{}{
+				"name": "my-pdb",
+			},
+			"spec": map[string]interface{}{
+				"minAvailable": 1,
+				"selector":     map[string]interface{}{},
+			},
+		},
+	}
+
+	outDir := t.TempDir()
+	suggs := []HelmFixSuggestion{
+		{
+			Resource:     scannedPDBRes,
+			ChartPath:    chartDir,
+			TemplateFile: "templates/pdb.yaml",
+			FixPaths:     []armotypes.FixPath{{Path: "spec.minAvailable", Value: "2"}},
+		},
+	}
+
+	res, err := EmitKustomizePatch(suggs, outDir)
+	require.NoError(t, err)
+	assert.Empty(t, res.EmittedResources, "must decline when scanned selector {} matches rendered selector: null")
+	require.Len(t, res.SkippedResources, 1)
+	assert.Contains(t, res.SkippedResources[0].Reason, "spec.selector")
+}
+
+func TestReview4034CrossNamespaceCustomResourceScopeRegression(t *testing.T) {
+	// 1. Direct helper: custom resource example.com/v1 Node is NOT cluster-scoped
+	customNodeKey := resourceKey{
+		Group:     "example.com",
+		Version:   "v1",
+		Kind:      "Node",
+		Namespace: "",
+		Name:      "my-node",
+	}
+	assert.False(t, isClusterScopedResource(customNodeKey), "custom resource example.com/v1 Node must not be classified as cluster-scoped")
+
+	// Standard Kubernetes core /v1 Node IS cluster-scoped
+	standardNodeKey := resourceKey{
+		Group:     "",
+		Version:   "v1",
+		Kind:      "Node",
+		Namespace: "",
+		Name:      "standard-node",
+	}
+	assert.True(t, isClusterScopedResource(standardNodeKey), "standard Kubernetes core /v1 Node must be classified as cluster-scoped")
+
+	// 2. Full EmitKustomizePatch + Kustomize build test:
+	// Two example.com/v1 Node resources named "my-node":
+	// - One in namespace "prod" with spec.secure: true (fixed from false)
+	// - One without a namespace (scoped to default) with spec.secure: false
+	// The namespace-less patch must NOT target wildcard and must NOT overwrite prod's secure: true fix.
+	chartDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "Chart.yaml"), []byte("apiVersion: v2\nname: test-custom\nversion: 0.1.0\n"), 0600))
+	templatesDir := filepath.Join(chartDir, "templates")
+	require.NoError(t, os.MkdirAll(templatesDir, 0755))
+
+	prodNodeYaml := `apiVersion: example.com/v1
+kind: Node
+metadata:
+  name: my-node
+  namespace: prod
+spec:
+  secure: false
+`
+	require.NoError(t, os.WriteFile(filepath.Join(templatesDir, "prod-node.yaml"), []byte(prodNodeYaml), 0600))
+
+	clusterNodeYaml := `apiVersion: example.com/v1
+kind: Node
+metadata:
+  name: my-node
+spec:
+  secure: false
+`
+	require.NoError(t, os.WriteFile(filepath.Join(templatesDir, "cluster-node.yaml"), []byte(clusterNodeYaml), 0600))
+
+	scannedProdNode := &reporthandling.Resource{
+		Object: map[string]interface{}{
+			"apiVersion": "example.com/v1",
+			"kind":       "Node",
+			"sourcePath": filepath.Join(chartDir, "templates/prod-node.yaml"),
+			"metadata": map[string]interface{}{
+				"name":      "my-node",
+				"namespace": "prod",
+			},
+			"spec": map[string]interface{}{
+				"secure": false,
+			},
+		},
+	}
+
+	scannedDefaultNode := &reporthandling.Resource{
+		Object: map[string]interface{}{
+			"apiVersion": "example.com/v1",
+			"kind":       "Node",
+			"sourcePath": filepath.Join(chartDir, "templates/cluster-node.yaml"),
+			"metadata": map[string]interface{}{
+				"name": "my-node",
+			},
+			"spec": map[string]interface{}{
+				"secure": false,
+			},
+		},
+	}
+
+	outDir := t.TempDir()
+	suggs := []HelmFixSuggestion{
+		{
+			Resource:     scannedProdNode,
+			ChartPath:    chartDir,
+			TemplateFile: "templates/prod-node.yaml",
+			FixPaths:     []armotypes.FixPath{{Path: "spec.secure", Value: "true"}},
+		},
+		{
+			Resource:     scannedDefaultNode,
+			ChartPath:    chartDir,
+			TemplateFile: "templates/cluster-node.yaml",
+			FixPaths:     []armotypes.FixPath{{Path: "spec.secure", Value: "false"}},
+		},
+	}
+
+	res, err := EmitKustomizePatch(suggs, outDir)
+	require.NoError(t, err)
+	require.Len(t, res.EmittedResources, 2)
+	assert.Empty(t, res.SkippedResources)
+
+	// Read kustomization.yaml: verify namespace-less custom resource has target.Namespace = "default"
+	kustBytes, err := os.ReadFile(filepath.Join(outDir, "kustomization.yaml"))
+	require.NoError(t, err)
+	var kd kustomizationDoc
+	require.NoError(t, yaml.Unmarshal(kustBytes, &kd))
+	require.Len(t, kd.Patches, 2)
+
+	namespaces := []string{kd.Patches[0].Target.Namespace, kd.Patches[1].Target.Namespace}
+	assert.Contains(t, namespaces, "prod")
+	assert.Contains(t, namespaces, "default", "namespaceless custom resource must have target namespace defaulted to 'default', not empty wildcard")
+
+	// Execute actual pinned Kustomize build
+	k := krusty.MakeKustomizer(krusty.MakeDefaultOptions())
+	resMap, err := k.Run(filesys.MakeFsOnDisk(), outDir)
+	require.NoError(t, err)
+	outYaml, err := resMap.AsYaml()
+	require.NoError(t, err)
+
+	// Verify prod resource retained secure: true and was NOT reset to false by the other patch
+	assert.Contains(t, string(outYaml), "namespace: prod")
+	assert.Contains(t, string(outYaml), "secure: true")
+}

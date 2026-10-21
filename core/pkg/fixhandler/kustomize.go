@@ -503,22 +503,26 @@ func joinPath(parent, child string) string {
 	return parent + "." + child
 }
 
-// isEmptyValue reports whether v is nil, empty string, empty slice, or an empty map.
-// Nonempty maps (even where leaves are empty strings) represent meaningful structure.
-func isEmptyValue(v interface{}) bool {
-	if v == nil {
-		return true
-	}
-	switch val := v.(type) {
-	case map[string]interface{}:
-		return len(val) == 0
-	case []interface{}:
-		return len(val) == 0
-	case string:
-		return val == ""
-	default:
+// isScannerAddedEmptyField reports whether fieldPath and val correspond to a documented
+// artifact of the scanner's typed struct unmarshaling (specifically container resources: {})
+// that should be normalized when absent or null in the rendered base manifest.
+func isScannerAddedEmptyField(fieldPath string, val interface{}) bool {
+	m, ok := val.(map[string]interface{})
+	if !ok || len(m) != 0 {
 		return false
 	}
+	return isContainerResourcesPath(fieldPath)
+}
+
+// isContainerResourcesPath checks whether fieldPath points to container resources, e.g.
+// "spec.containers[0].resources" or "spec.template.spec.initContainers[1].resources".
+func isContainerResourcesPath(fieldPath string) bool {
+	if !strings.HasSuffix(fieldPath, ".resources") && fieldPath != "resources" {
+		return false
+	}
+	return strings.Contains(fieldPath, "containers") ||
+		strings.Contains(fieldPath, "initContainers") ||
+		strings.Contains(fieldPath, "ephemeralContainers")
 }
 
 // isSourceMetadataKey reports whether key is scanner/report source metadata that should
@@ -536,18 +540,19 @@ func isRedactedFieldKey(key string) bool {
 // verifyScannedFieldsMatch recursively checks that every non-redacted field present in scannedVal
 // matches the corresponding field in candVal, and that no additional non-redacted fields are
 // present in candVal that were absent from scannedVal. Any field with placeholder "XXXXXX"
-// or source metadata (path, sourcePath) is normalized. Empty/default fields (such as scanner-added
-// empty resources: {}) are normalized so unchanged manifests match. Returns an error if any
-// concrete non-redacted value conflicts or if additional non-redacted fields exist.
+// or source metadata (path, sourcePath) is normalized. Documented scanner-added fields
+// (specifically empty container resources: {}) are normalized so unchanged manifests match.
+// Returns an error if any concrete non-redacted value conflicts, if selectors or empty values
+// are conflated with null or missing fields, or if additional non-redacted fields exist.
 func verifyScannedFieldsMatch(scannedVal, candVal interface{}, path string) error {
 	if scannedVal == nil {
-		if candVal == nil || isEmptyValue(candVal) {
+		if candVal == nil {
 			return nil
 		}
 		return fmt.Errorf("field %s is null in scanned resource but present with non-empty value in rendered base", path)
 	}
 	if candVal == nil {
-		if isEmptyValue(scannedVal) {
+		if isScannerAddedEmptyField(path, scannedVal) {
 			return nil
 		}
 		return fmt.Errorf("field %s is present with non-empty value in scanned resource but null in rendered base", path)
@@ -570,18 +575,16 @@ func verifyScannedFieldsMatch(scannedVal, candVal interface{}, path string) erro
 			if s, isStr := v.(string); isStr && s == "XXXXXX" {
 				continue
 			}
+			childPath := joinPath(path, k)
 			candChild, exists := cMap[k]
 			if !exists {
-				// Normalize equivalent empty/default fields (such as scanner-added resources: {})
-				if isEmptyValue(v) {
+				// Normalize documented scanner-added fields (such as container resources: {})
+				if isScannerAddedEmptyField(childPath, v) {
 					continue
 				}
-				return fmt.Errorf("field %s present in scanned resource is missing in rendered base", joinPath(path, k))
+				return fmt.Errorf("field %s present in scanned resource is missing in rendered base", childPath)
 			}
-			if isEmptyValue(v) && isEmptyValue(candChild) {
-				continue
-			}
-			if err := verifyScannedFieldsMatch(v, candChild, joinPath(path, k)); err != nil {
+			if err := verifyScannedFieldsMatch(v, candChild, childPath); err != nil {
 				return err
 			}
 		}
@@ -965,28 +968,41 @@ func loadUnredactedFromChart(s HelmFixSuggestion, chartCache map[string]map[stri
 }
 
 // isClusterScopedResource reports whether a Kubernetes resource is cluster-scoped,
-// deriving scope from the full GVK using Kustomize's openapi definitions with a fallback
-// for standard cluster-scoped kinds.
+// deriving scope from the full GVK using Kustomize's openapi definitions with compatibility
+// fallback constrained strictly to exact built-in Kubernetes GVKs.
 func isClusterScopedResource(key resourceKey) bool {
 	if resid.NewGvk(key.Group, key.Version, key.Kind).IsClusterScoped() {
 		return true
 	}
-	return isClusterScopedKind(key.Kind)
+	return isBuiltinClusterScopedGVK(key.Group, key.Kind)
 }
 
-// isClusterScopedKind reports whether a standard Kubernetes resource kind is cluster-scoped.
-func isClusterScopedKind(kind string) bool {
+// isBuiltinClusterScopedGVK reports whether the group and kind match a standard built-in
+// cluster-scoped Kubernetes resource. Custom resources in other API groups (even if sharing
+// a kind name like "Node") are not matched.
+func isBuiltinClusterScopedGVK(group, kind string) bool {
 	switch kind {
-	case "ClusterRole", "ClusterRoleBinding", "Namespace", "Node",
-		"PersistentVolume", "CustomResourceDefinition", "ComponentStatus",
-		"APIService", "TokenReview", "SubjectAccessReview",
-		"SelfSubjectAccessReview", "SelfSubjectRulesReview",
-		"StorageClass", "VolumeAttachment", "IngressClass",
-		"RuntimeClass", "PriorityClass", "MutatingWebhookConfiguration",
-		"ValidatingWebhookConfiguration", "ValidatingAdmissionPolicy",
-		"ValidatingAdmissionPolicyBinding",
-		"CSIDriver", "CSINode", "CertificateSigningRequest":
-		return true
+	case "ClusterRole", "ClusterRoleBinding":
+		return group == "rbac.authorization.k8s.io"
+	case "Namespace", "Node", "PersistentVolume", "ComponentStatus":
+		return group == ""
+	case "CustomResourceDefinition":
+		return group == "apiextensions.k8s.io"
+	case "APIService":
+		return group == "apiregistration.k8s.io"
+	case "StorageClass", "VolumeAttachment", "CSIDriver", "CSINode":
+		return group == "storage.k8s.io"
+	case "IngressClass":
+		return group == "networking.k8s.io"
+	case "RuntimeClass":
+		return group == "node.k8s.io"
+	case "PriorityClass":
+		return group == "scheduling.k8s.io"
+	case "MutatingWebhookConfiguration", "ValidatingWebhookConfiguration",
+		"ValidatingAdmissionPolicy", "ValidatingAdmissionPolicyBinding":
+		return group == "admissionregistration.k8s.io"
+	case "CertificateSigningRequest":
+		return group == "certificates.k8s.io"
 	default:
 		return false
 	}
