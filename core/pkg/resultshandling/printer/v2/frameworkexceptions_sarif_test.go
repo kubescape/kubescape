@@ -137,6 +137,8 @@ func TestSARIFFrameworkExceptions_OtherFrameworkIsNotSuppressed(t *testing.T) {
 			assert.Empty(t, suppressed)
 			require.Len(t, visible, 1)
 			assert.Equal(t, hostNetworkLine, sarifStartLine(t, visible[0]), "the rule is still actionable, so it is the first fix")
+			assert.NotContains(t, visible[0].Properties, "exception-action", "a disable exception scoped to another framework is not an acknowledgement")
+			assert.NotContains(t, visible[0].Properties, "exception-names")
 		})
 	}
 }

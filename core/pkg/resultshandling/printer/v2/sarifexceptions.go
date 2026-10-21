@@ -92,7 +92,13 @@ func splitSARIFExceptions(summary *reportsummary.SummaryDetails, ac resourcesres
 			suppressedRules = append(suppressedRules, rule)
 			continue
 		}
-		split.alertOnlyExceptions = append(split.alertOnlyExceptions, matched...)
+		// The rule stays failing, so a disable exception scoped to one of several
+		// frameworks did not decide it; only an alertOnly one acknowledged it.
+		for _, e := range matched {
+			if e.IsAlertOnly() {
+				split.alertOnlyExceptions = append(split.alertOnlyExceptions, e)
+			}
+		}
 		visibleRules = append(visibleRules, rule)
 	}
 
