@@ -683,3 +683,19 @@ func TestFilterRuleMatchesForResource(t *testing.T) {
 		})
 	}
 }
+
+// A rule with a field selector lists only some objects of a resource, so the
+// resource counts as listed in full only when another rule lists it without one.
+func TestUpdateQueryableResourcesMapFromRuleMatchObject_MarksRuleFieldSelectors(t *testing.T) {
+	matches := []reporthandling.RuleMatchObjects{
+		{APIGroups: []string{""}, APIVersions: []string{"v1"}, Resources: []string{"Secret"}, FieldSelector: []string{"metadata.name=secret1"}},
+		{APIGroups: []string{""}, APIVersions: []string{"v1"}, Resources: []string{"ConfigMap"}, FieldSelector: []string{"metadata.name=cm1"}},
+		{APIGroups: []string{""}, APIVersions: []string{"v1"}, Resources: []string{"ConfigMap"}},
+	}
+	queryableResources := make(QueryableResources)
+	for i := range matches {
+		updateQueryableResourcesMapFromRuleMatchObject(&matches[i], nil, queryableResources, "", defaultResourceResolver)
+	}
+
+	assert.Equal(t, map[string]bool{"/v1/secrets": false, "/v1/configmaps": true}, queryableResources.ListedGVRs())
+}

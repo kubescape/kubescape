@@ -156,6 +156,7 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 		sessionObj.UnexaminedKinds = computeUnexaminedKinds(discoveredResources, queryableResources)
 	}
 	filterQueryableResourcesByKind(queryableResources, scanInfo)
+	sessionObj.ListedGVRs = queryableResources.ListedGVRs()
 	ksResourceMap := setKSResourceMap(sessionObj.Policies, resourceToControl, resolver)
 	recordDiscoveryFailureDependencies(sessionObj.Policies, sessionObj.SingleResourceScan, scanningScope, resolver, discoveryFailures, resourceToControl, policyWarnings)
 
@@ -346,6 +347,7 @@ func (k8sHandler *K8sResourceHandler) StreamResourcesBatches(ctx context.Context
 		sessionObj.UnexaminedKinds = computeUnexaminedKinds(discoveredResources, queryableResources)
 	}
 	filterQueryableResourcesByKind(queryableResources, scanInfo)
+	sessionObj.ListedGVRs = queryableResources.ListedGVRs()
 	ksResourceMap := setKSResourceMap(sessionObj.Policies, resourceToControl, resolver)
 	recordDiscoveryFailureDependencies(sessionObj.Policies, sessionObj.SingleResourceScan, scanningScope, resolver, discoveryFailures, resourceToControl, policyWarnings)
 	sessionObj.ResourceToControlsMap = resourceToControl
