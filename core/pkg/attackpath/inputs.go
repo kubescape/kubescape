@@ -12,7 +12,7 @@ import (
 	networkingv1 "k8s.io/api/networking/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 
-	"github.com/kubescape/kubescape/v4/core/pkg/exposure"
+	exposurepkg "github.com/kubescape/kubescape/v4/core/pkg/exposure"
 	"github.com/kubescape/kubescape/v4/core/pkg/networkpolicy"
 	"github.com/kubescape/kubescape/v4/core/pkg/rbacgraph"
 )
@@ -23,7 +23,7 @@ type Inputs struct {
 	// Exposure engine
 	Services  []corev1.Service
 	Ingresses []networkingv1.Ingress
-	ExpNS     []exposure.NamespaceInfo
+	ExpNS     []exposurepkg.NamespaceInfo
 
 	// NetworkPolicy engine
 	Policies []*networkingv1.NetworkPolicy
@@ -48,7 +48,7 @@ func CollectInputs(resources map[string]workloadinterface.IMetadata) Inputs {
 	var inp Inputs
 
 	// Exposure engine (Services, Ingresses, plain Namespaces).
-	svcs, ings, expNS, expErrs := exposure.FromResources(resources)
+	svcs, ings, expNS, expErrs := exposurepkg.FromResources(resources)
 	inp.Services = svcs
 	inp.Ingresses = ings
 	inp.ExpNS = expNS
@@ -57,11 +57,11 @@ func CollectInputs(resources map[string]workloadinterface.IMetadata) Inputs {
 	}
 
 	// Exposure engine — Gateway API objects (HTTPRoute, GRPCRoute, Gateway).
-	_, _, gwErrs := exposure.FromUnstructuredGatewayAPI(resources)
+	_, _, gwErrs := exposurepkg.FromUnstructuredGatewayAPI(resources)
 	for _, e := range gwErrs {
 		inp.Warnings = append(inp.Warnings, "exposure/gateway: "+e.Error())
 	}
-	// Note: gateway routes/gateways are kept inside the exposure.Index;
+	// Note: gateway routes/gateways are kept inside the exposurepkg.Index;
 	// CollectInputs does not need to carry them separately — the Index
 	// is built from them at graph-build time by the caller.
 

@@ -8,10 +8,10 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// boolPtr is a test helper: the Kubernetes API uses *bool for
+// automountBoolPtr is a test helper: the Kubernetes API uses *bool for
 // automountServiceAccountToken so that unset (nil) is distinguishable
 // from explicitly false.
-func boolPtr(b bool) *bool { return &b }
+func automountBoolPtr(b bool) *bool { return &b }
 
 // workloadObj builds a Deployment IMetadata with the given pod-spec fields
 // set, for ServiceAccount binding tests.
@@ -58,14 +58,14 @@ func projectedSATokenVolume() map[string]any {
 	}
 }
 
-// saIndex is a shorthand to build the automount index from ServiceAccount
+// automountSAIndex is a shorthand to build the automount index from ServiceAccount
 // typed objects, the same way production code builds it via
 // ServiceAccountAutomountIndex.
-func saIndex(sas ...corev1.ServiceAccount) map[string]*bool {
+func automountSAIndex(sas ...corev1.ServiceAccount) map[string]*bool {
 	return ServiceAccountAutomountIndex(sas)
 }
 
-func saObj(namespace, name string, automount *bool) corev1.ServiceAccount {
+func automountSAObj(namespace, name string, automount *bool) corev1.ServiceAccount {
 	return corev1.ServiceAccount{
 		ObjectMeta:                   metav1.ObjectMeta{Namespace: namespace, Name: name},
 		AutomountServiceAccountToken: automount,
@@ -88,7 +88,7 @@ func resultFor(t *testing.T, results []ServiceAccountBinding, name string) Servi
 // --- ServiceAccountAutomountIndex tests ---
 
 func TestServiceAccountAutomountIndex_NilAutomountStoredAsNilPointer(t *testing.T) {
-	idx := saIndex(saObj("prod", "app", nil))
+	idx := automountSAIndex(automountSAObj("prod", "app", nil))
 	v, ok := idx["prod/app"]
 	if !ok {
 		t.Fatal("expected prod/app in index")
@@ -99,7 +99,7 @@ func TestServiceAccountAutomountIndex_NilAutomountStoredAsNilPointer(t *testing.
 }
 
 func TestServiceAccountAutomountIndex_FalseStoredCorrectly(t *testing.T) {
-	idx := saIndex(saObj("prod", "restricted", boolPtr(false)))
+	idx := automountSAIndex(automountSAObj("prod", "restricted", automountBoolPtr(false)))
 	v := idx["prod/restricted"]
 	if v == nil || *v != false {
 		t.Errorf("expected *false for restricted SA, got %v", v)
@@ -107,7 +107,7 @@ func TestServiceAccountAutomountIndex_FalseStoredCorrectly(t *testing.T) {
 }
 
 func TestServiceAccountAutomountIndex_TrueStoredCorrectly(t *testing.T) {
-	idx := saIndex(saObj("prod", "permissive", boolPtr(true)))
+	idx := automountSAIndex(automountSAObj("prod", "permissive", automountBoolPtr(true)))
 	v := idx["prod/permissive"]
 	if v == nil || *v != true {
 		t.Errorf("expected *true for permissive SA, got %v", v)
@@ -120,7 +120,7 @@ func TestResolveServiceAccountBindings_DefaultSAAndKubernetesDefaultMountTrue(t 
 	// No serviceAccountName set, no automount anywhere → resolves to
 	// "default" SA with TokenMounted=true (the Kubernetes default).
 	w := workloadWithSA("prod", "web", "", nil, nil)
-	results := ResolveServiceAccountBindings(makeResources(w), saIndex())
+	results := ResolveServiceAccountBindings(makeResources(w), automountSAIndex())
 
 	r := resultFor(t, results, "web")
 	if r.ServiceAccountName != "default" {
@@ -134,10 +134,10 @@ func TestResolveServiceAccountBindings_DefaultSAAndKubernetesDefaultMountTrue(t 
 func TestResolveServiceAccountBindings_PodLevelFalseWins(t *testing.T) {
 	// automountServiceAccountToken: false at the pod level → TokenMounted=false,
 	// regardless of what the SA says. This is golden-file case 1 from proposal §7.
-	w := workloadWithSA("prod", "secure", "my-sa", boolPtr(false), nil)
+	w := workloadWithSA("prod", "secure", "my-sa", automountBoolPtr(false), nil)
 	results := ResolveServiceAccountBindings(
 		makeResources(w),
-		saIndex(saObj("prod", "my-sa", boolPtr(true))), // SA says true; pod overrides
+		automountSAIndex(automountSAObj("prod", "my-sa", automountBoolPtr(true))), // SA says true; pod overrides
 	)
 
 	r := resultFor(t, results, "secure")
@@ -152,7 +152,7 @@ func TestResolveServiceAccountBindings_SALevelFalseAppliesWhenPodNotSet(t *testi
 	w := workloadWithSA("prod", "worker", "restricted-sa", nil, nil)
 	results := ResolveServiceAccountBindings(
 		makeResources(w),
-		saIndex(saObj("prod", "restricted-sa", boolPtr(false))),
+		automountSAIndex(automountSAObj("prod", "restricted-sa", automountBoolPtr(false))),
 	)
 
 	r := resultFor(t, results, "worker")
@@ -166,9 +166,9 @@ func TestResolveServiceAccountBindings_ProjectedTokenVolumeWinsOverPodFalse(t *t
 	// serviceAccountToken volume is explicitly present → TokenMounted=true.
 	// This is the critical golden-file case from proposal §7: the token IS
 	// mounted because it was explicitly projected, overriding the automount flag.
-	w := workloadWithSA("prod", "explicit", "my-sa", boolPtr(false),
+	w := workloadWithSA("prod", "explicit", "my-sa", automountBoolPtr(false),
 		[]any{projectedSATokenVolume()})
-	results := ResolveServiceAccountBindings(makeResources(w), saIndex())
+	results := ResolveServiceAccountBindings(makeResources(w), automountSAIndex())
 
 	r := resultFor(t, results, "explicit")
 	if !r.TokenMounted {
@@ -184,7 +184,7 @@ func TestResolveServiceAccountBindings_ProjectedTokenVolumeWinsOverSAFalse(t *te
 		[]any{projectedSATokenVolume()})
 	results := ResolveServiceAccountBindings(
 		makeResources(w),
-		saIndex(saObj("prod", "no-mount-sa", boolPtr(false))),
+		automountSAIndex(automountSAObj("prod", "no-mount-sa", automountBoolPtr(false))),
 	)
 
 	r := resultFor(t, results, "projected-only")
@@ -195,7 +195,7 @@ func TestResolveServiceAccountBindings_ProjectedTokenVolumeWinsOverSAFalse(t *te
 
 func TestResolveServiceAccountBindings_ExplicitSANameCarriedThrough(t *testing.T) {
 	w := workloadWithSA("prod", "api", "custom-sa", nil, nil)
-	results := ResolveServiceAccountBindings(makeResources(w), saIndex())
+	results := ResolveServiceAccountBindings(makeResources(w), automountSAIndex())
 
 	r := resultFor(t, results, "api")
 	if r.ServiceAccountName != "custom-sa" {
@@ -215,7 +215,7 @@ func TestResolveServiceAccountBindings_NonWorkloadKindIsIgnored(t *testing.T) {
 		"metadata":   map[string]any{"name": "svc", "namespace": "prod"},
 		"spec":       map[string]any{"selector": map[string]any{"app": "web"}},
 	})
-	results := ResolveServiceAccountBindings(makeResources(svc), saIndex())
+	results := ResolveServiceAccountBindings(makeResources(svc), automountSAIndex())
 	if len(results) != 0 {
 		t.Errorf("expected no results for a non-workload kind, got %+v", results)
 	}
@@ -227,8 +227,8 @@ func TestResolveServiceAccountBindings_OutputIsDeterministic(t *testing.T) {
 	b := workloadWithSA("beta", "app", "sa-b", nil, nil)
 	c := workloadWithSA("alpha", "worker", "sa-c", nil, nil)
 
-	first := ResolveServiceAccountBindings(makeResources(a, b, c), saIndex())
-	second := ResolveServiceAccountBindings(makeResources(a, b, c), saIndex())
+	first := ResolveServiceAccountBindings(makeResources(a, b, c), automountSAIndex())
+	second := ResolveServiceAccountBindings(makeResources(a, b, c), automountSAIndex())
 
 	if len(first) != len(second) {
 		t.Fatalf("run lengths differ: %d vs %d", len(first), len(second))
@@ -241,7 +241,7 @@ func TestResolveServiceAccountBindings_OutputIsDeterministic(t *testing.T) {
 }
 
 func TestResolveServiceAccountBindings_EmptyResourcesReturnsEmpty(t *testing.T) {
-	results := ResolveServiceAccountBindings(map[string]workloadinterface.IMetadata{}, saIndex())
+	results := ResolveServiceAccountBindings(map[string]workloadinterface.IMetadata{}, automountSAIndex())
 	if len(results) != 0 {
 		t.Errorf("expected empty result for empty resources, got %+v", results)
 	}
@@ -281,7 +281,7 @@ func TestResolveServiceAccountBindings_ProjectedVolumeNotMountedByContainer(t *t
 			},
 		},
 	})
-	results := ResolveServiceAccountBindings(makeResources(w), saIndex())
+	results := ResolveServiceAccountBindings(makeResources(w), automountSAIndex())
 	r := resultFor(t, results, "no-mount")
 	if r.TokenMounted {
 		t.Error("expected TokenMounted=false: projected volume declared but not mounted by any container")
@@ -328,7 +328,7 @@ func TestResolveServiceAccountBindings_ProjectedVolumeMountedByContainer(t *test
 			},
 		},
 	})
-	results := ResolveServiceAccountBindings(makeResources(w), saIndex())
+	results := ResolveServiceAccountBindings(makeResources(w), automountSAIndex())
 	r := resultFor(t, results, "with-mount")
 	if !r.TokenMounted {
 		t.Error("expected TokenMounted=true: projected volume mounted by container")
@@ -379,7 +379,7 @@ func TestResolveServiceAccountBindings_NativeSidecarMountsMakeTokenMounted(t *te
 			},
 		},
 	})
-	results := ResolveServiceAccountBindings(makeResources(w), saIndex())
+	results := ResolveServiceAccountBindings(makeResources(w), automountSAIndex())
 	r := resultFor(t, results, "sidecar-mount")
 	if !r.TokenMounted {
 		t.Error("expected TokenMounted=true: native sidecar init-container mounts the projected token")
@@ -402,7 +402,7 @@ func TestResolveServiceAccountBindings_NullAutomountUsesDefault(t *testing.T) {
 			},
 		},
 	})
-	results := ResolveServiceAccountBindings(makeResources(w), saIndex())
+	results := ResolveServiceAccountBindings(makeResources(w), automountSAIndex())
 	r := resultFor(t, results, "null-automount")
 	if !r.TokenMounted {
 		t.Error("expected TokenMounted=true: null automount must fall through to Kubernetes default")
@@ -437,7 +437,7 @@ func TestResolveServiceAccountBindings_AutomountBlockedByExistingMount(t *testin
 			},
 		},
 	})
-	results := ResolveServiceAccountBindings(makeResources(w), saIndex())
+	results := ResolveServiceAccountBindings(makeResources(w), automountSAIndex())
 	r := resultFor(t, results, "blocked-mount")
 	if r.TokenMounted {
 		t.Error("expected TokenMounted=false: existing mount at token path blocks automatic injection")
@@ -554,7 +554,7 @@ func TestResolveServiceAccountBindings_SubpathDotRootIsTokenAccess(t *testing.T)
 			},
 		},
 	})
-	results := ResolveServiceAccountBindings(makeResources(w), saIndex())
+	results := ResolveServiceAccountBindings(makeResources(w), automountSAIndex())
 	r := resultFor(t, results, "dot-root")
 	if !r.TokenMounted {
 		t.Error("expected TokenMounted=true: subPath \".\" selects volume root including token")
@@ -603,7 +603,7 @@ func TestResolveServiceAccountBindings_SubpathDotTokenIsTokenAccess(t *testing.T
 			},
 		},
 	})
-	results := ResolveServiceAccountBindings(makeResources(w), saIndex())
+	results := ResolveServiceAccountBindings(makeResources(w), automountSAIndex())
 	r := resultFor(t, results, "dot-token")
 	if !r.TokenMounted {
 		t.Error("expected TokenMounted=true: subPath \"./token\" normalizes to \"token\"")
@@ -666,7 +666,7 @@ func TestResolveServiceAccountBindings_LiteralSubPathExprSiblingNotTokenAccess(t
 			},
 		},
 	})
-	results := ResolveServiceAccountBindings(makeResources(w), saIndex())
+	results := ResolveServiceAccountBindings(makeResources(w), automountSAIndex())
 	r := resultFor(t, results, "expr-sibling")
 	if r.TokenMounted {
 		t.Error("expected TokenMounted=false: literal subPathExpr \"namespace\" selects only the namespace sibling")
@@ -716,7 +716,7 @@ func TestResolveServiceAccountBindings_SubpathAncestorDirectoryIsTokenAccess(t *
 			},
 		},
 	})
-	results := ResolveServiceAccountBindings(makeResources(w), saIndex())
+	results := ResolveServiceAccountBindings(makeResources(w), automountSAIndex())
 	r := resultFor(t, results, "ancestor-dir")
 	if !r.TokenMounted {
 		t.Error("expected TokenMounted=true: subPath \"identity\" is an ancestor of token path \"identity/token\"")
@@ -739,7 +739,7 @@ func TestResolveServiceAccountBindings_SkipsMissingPodSpec(t *testing.T) {
 		"metadata":   map[string]any{"name": "empty-spec", "namespace": "prod"},
 		"spec":       map[string]any{},
 	})
-	results := ResolveServiceAccountBindings(makeResources(w), saIndex())
+	results := ResolveServiceAccountBindings(makeResources(w), automountSAIndex())
 	r := resultFor(t, results, "empty-spec")
 	if !r.Skipped {
 		t.Errorf("expected Skipped=true for Deployment with missing pod spec, got TokenMounted=%v", r.TokenMounted)
@@ -765,7 +765,7 @@ func TestResolveServiceAccountBindings_LegacyServiceAccountField(t *testing.T) {
 			},
 		},
 	})
-	results := ResolveServiceAccountBindings(makeResources(w), saIndex())
+	results := ResolveServiceAccountBindings(makeResources(w), automountSAIndex())
 	r := resultFor(t, results, "legacy-sa")
 	if r.ServiceAccountName != "my-sa" {
 		t.Errorf("expected ServiceAccountName=my-sa (from legacy field), got %q", r.ServiceAccountName)
@@ -821,7 +821,7 @@ func TestResolveServiceAccountBindings_EphemeralContainerMountsMakeTokenMounted(
 			},
 		},
 	})
-	results := ResolveServiceAccountBindings(makeResources(w), saIndex())
+	results := ResolveServiceAccountBindings(makeResources(w), automountSAIndex())
 	r := resultFor(t, results, "ephemeral-mount")
 	if !r.TokenMounted {
 		t.Error("expected TokenMounted=true: ephemeral container mounts the projected token volume")

@@ -106,13 +106,6 @@ func ephemeralContainersFieldPath(kind string) []string {
 	return []string{"spec", "template", "spec", "ephemeralContainers"}
 }
 
-// serviceAccountTokenMountPath is the filesystem path where Kubernetes
-// admission injects the service account token mount. This is a well-known
-// Kubernetes path, not a credential.
-//
-//nolint:gosec // G101: this is a mount path, not a hardcoded credential
-const serviceAccountTokenMountPath = "/var/run/secrets/kubernetes.io/serviceaccount"
-
 // isMountPathOccupied reports whether any regular or init container already
 // mounts something at the default token path, which causes Kubernetes admission
 // to skip injecting the automatic token mount.
