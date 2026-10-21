@@ -65,6 +65,30 @@ func TestDiscoveryResolverDropsUnregisteredAPIServerInfoIdentity(t *testing.T) {
 	assert.NotContains(t, external, "hostdata.kubescape.cloud/v1beta0/APIServerInfo")
 }
 
+// A custom DynamicMatch may select a registered cloud identity with a "*"
+// version, and the evaluator accepts it. When it is the only rule asking for
+// ClusterDescribe, the resolver must still keep it, so the cloud collector is
+// triggered, while the unregistered host-data APIServerInfo stays dropped.
+func TestDiscoveryResolverKeepsWildcardVersionOfRegisteredIdentity(t *testing.T) {
+	resolver, _ := newDiscoveryResourceResolver(coreGroupDiscovery())
+	assert.NotEmpty(t, resolver("eks.amazonaws.com", "*", "ClusterDescribe"))
+	assert.Empty(t, resolver("hostdata.kubescape.cloud", "*", "APIServerInfo"))
+
+	frameworks := []reporthandling.Framework{{Controls: []reporthandling.Control{
+		{ControlID: "C-CUSTOM", Rules: []reporthandling.PolicyRule{{DynamicMatch: []reporthandling.RuleMatchObjects{{
+			APIGroups: []string{"eks.amazonaws.com"}, APIVersions: []string{"*"}, Resources: []string{"ClusterDescribe"},
+		}}}}},
+		{ControlID: "C-0161", Rules: []reporthandling.PolicyRule{{Match: []reporthandling.RuleMatchObjects{{
+			APIGroups: []string{"hostdata.kubescape.cloud"}, APIVersions: []string{"v1beta0"}, Resources: []string{"APIServerInfo"},
+		}}}}},
+	}}}
+	external := setKSResourceMap(frameworks, map[string][]string{}, resolver)
+	cloud := cautils.MapCloudResources(external)
+	require.Len(t, cloud, 1)
+	assert.Contains(t, cloud[0], "ClusterDescribe")
+	assert.NotContains(t, external, "hostdata.kubescape.cloud/v1beta0/APIServerInfo")
+}
+
 // C-0089 reads APIServerInfo through DynamicMatch. It must be selected for
 // collection, routed with the cloud resources, and recorded as the control's
 // dependency so a failed collection shows up in the scan coverage.

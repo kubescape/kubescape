@@ -136,13 +136,20 @@ func mapKSResourceToApiGroup(resource string) []string {
 // reads APIServerInfo under the host-data group: no cluster and no Kubescape
 // collector serves that one, so it must not become a live query just because
 // the resource name is known. References under any other group keep resolving
-// by name as before.
+// by name as before, and a "*" version matches any version registered under the
+// group, as the DynamicMatch evaluator accepts it.
 func isUnservedKSIdentity(group, version, resource string) bool {
 	registered := mapKSResourceToApiGroup(resource)
 	if len(registered) == 0 || !isKSServedGroup(group) {
 		return false
 	}
-	return !slices.Contains(registered, group+"/"+version)
+	for _, apiVersion := range registered {
+		g, v := k8sinterface.SplitApiVersion(apiVersion)
+		if g == group && (version == "*" || version == v) {
+			return false
+		}
+	}
+	return true
 }
 
 // isKSServedGroup reports whether group is one of the API groups of the
