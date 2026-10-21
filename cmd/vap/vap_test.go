@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -2110,5 +2111,97 @@ func TestBuildPolicyBinding(t *testing.T) {
 				require.Error(t, err)
 			})
 		}
+	})
+}
+
+func TestWriteOutput(t *testing.T) {
+	t.Run("writes content to newly created nested path", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		outPath := filepath.Join(tmpDir, "nested", "dir", "output.yaml")
+		content := "apiVersion: admissionregistration.k8s.io/v1\nkind: ValidatingAdmissionPolicy\n"
+
+		err := writeOutput(content, outPath)
+		require.NoError(t, err)
+
+		data, err := os.ReadFile(outPath)
+		require.NoError(t, err)
+		assert.Equal(t, content, string(data))
+
+		info, err := os.Stat(outPath)
+		require.NoError(t, err)
+		if runtime.GOOS != "windows" {
+			assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+		}
+	})
+
+	t.Run("tightens permissions on preexisting file", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		outPath := filepath.Join(tmpDir, "existing.yaml")
+		require.NoError(t, os.WriteFile(outPath, []byte("old"), 0o600))
+		if runtime.GOOS != "windows" {
+			require.NoError(t, os.Chmod(outPath, 0o644))
+		}
+
+		newContent := "updated: true\n"
+		err := writeOutput(newContent, outPath)
+		require.NoError(t, err)
+
+		data, err := os.ReadFile(outPath)
+		require.NoError(t, err)
+		assert.Equal(t, newContent, string(data))
+
+		info, err := os.Stat(outPath)
+		require.NoError(t, err)
+		if runtime.GOOS != "windows" {
+			assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+		}
+	})
+
+	t.Run("empty output path succeeds without writing to file", func(t *testing.T) {
+		originalStdout := os.Stdout
+		stdoutFile, err := os.CreateTemp(t.TempDir(), "stdout-*")
+		require.NoError(t, err)
+		os.Stdout = stdoutFile
+		t.Cleanup(func() {
+			os.Stdout = originalStdout
+			_ = stdoutFile.Close()
+		})
+
+		err = writeOutput("stdout content", "")
+		require.NoError(t, err)
+		require.NoError(t, stdoutFile.Close())
+		os.Stdout = originalStdout
+
+		data, err := os.ReadFile(stdoutFile.Name())
+		require.NoError(t, err)
+		assert.Equal(t, "stdout content", string(data))
+	})
+
+	t.Run("preserves symlink target resolution without overwriting lexical sentinel", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("skipping symlink test on windows")
+		}
+		baseDir := t.TempDir()
+		sentinel := filepath.Join(baseDir, "output.yaml")
+		require.NoError(t, os.WriteFile(sentinel, []byte("sentinel content"), 0o600))
+
+		physicalDir := filepath.Join(baseDir, "physical", "child")
+		require.NoError(t, os.MkdirAll(physicalDir, 0o750))
+
+		linkPath := filepath.Join(baseDir, "link")
+		require.NoError(t, os.Symlink(physicalDir, linkPath))
+
+		outputPath := linkPath + string(filepath.Separator) + ".." + string(filepath.Separator) + "output.yaml"
+		err := writeOutput("target content", outputPath)
+		require.NoError(t, err)
+
+		sentinelContent, err := os.ReadFile(sentinel)
+		require.NoError(t, err)
+		assert.Equal(t, "sentinel content", string(sentinelContent))
+
+		targetFile := filepath.Join(baseDir, "physical", "output.yaml")
+		targetContent, err := os.ReadFile(targetFile)
+		require.NoError(t, err)
+		assert.Equal(t, "target content", string(targetContent))
 	})
 }

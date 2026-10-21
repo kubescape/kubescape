@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -16,6 +14,7 @@ import (
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/pkg/opaprocessor/cel"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer"
 	"github.com/spf13/cobra"
 	admissionv1 "k8s.io/api/admissionregistration/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -402,12 +401,19 @@ func downloadFileToString(url string, timeout time.Duration) (string, error) {
 	return bodyString, nil
 }
 
-func writeOutput(content string, outputFile string) error {
+func writeOutput(content string, outputFile string) (retErr error) {
 	if outputFile != "" {
-		if err := os.MkdirAll(filepath.Dir(outputFile), 0750); err != nil {
+		w, err := printer.GetWriterNoFallback(outputFile)
+		if err != nil {
 			return err
 		}
-		return os.WriteFile(outputFile, []byte(content), 0600)
+		defer func() {
+			if cerr := w.Close(); cerr != nil && retErr == nil {
+				retErr = cerr
+			}
+		}()
+		_, err = io.WriteString(w, content)
+		return err
 	}
 	fmt.Print(content)
 	return nil
