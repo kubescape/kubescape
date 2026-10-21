@@ -2196,18 +2196,20 @@ func (opap *OPAProcessor) runCELOnK8s(ctx context.Context, rule *reporthandling.
 	}
 
 	bindings := opap.celBindingsFor(vap.PolicyName)
-	var paramRef *admissionregistrationv1.ParamRef
+	var bindingParamRef *admissionregistrationv1.ParamRef
+	var bindingScope *cel.BindingScope
 	switch len(bindings) {
 	case 0:
 		// no live binding: fall back to the bundled ControlConfiguration
 	case 1:
-		if celBindingHasMatchResources(bindings[0]) {
-			return nil, celOutcome{}, fmt.Errorf("rule: '%s', binding for policy %q declares spec.matchResources, which the offline engine does not evaluate yet; refusing it to preserve scan/admission parity", rule.Name, vap.PolicyName)
-		}
 		if vap.TakesParams() && celBindingSelectsParams(bindings[0]) {
 			return nil, celOutcome{}, fmt.Errorf("rule: '%s', binding for policy %q selects its params with spec.paramRef.selector, which the offline engine does not resolve yet; refusing it to preserve scan/admission parity", rule.Name, vap.PolicyName)
 		}
-		paramRef = celParamRefForBinding(bindings[0])
+		bindingScope, err = cel.ParseBindingScope(bindings[0].Object)
+		if err != nil {
+			return nil, celOutcome{}, fmt.Errorf("rule: '%s', binding for policy %q: %w", rule.Name, vap.PolicyName, err)
+		}
+		bindingParamRef = celParamRefForBinding(bindings[0])
 	default:
 		return nil, celOutcome{}, fmt.Errorf("rule: '%s', policy %q is matched by %d live bindings; the offline engine does not yet select per-binding paramRefs, so refusing it to preserve scan/admission parity", rule.Name, vap.PolicyName, len(bindings))
 	}
@@ -2227,6 +2229,22 @@ func (opap *OPAProcessor) runCELOnK8s(ctx context.Context, rule *reporthandling.
 			resID := celResourceID(obj)
 			outcome.excluded[resID] = struct{}{}
 			continue
+		}
+
+		// The binding's paramRef reaches only the objects its matchResources bind;
+		// any other object the policy matches is evaluated against the bundled
+		// defaults, as when there is no binding. When the binding supplies no
+		// params the choice is the same either way, so its scope is not read.
+		paramRef := bindingParamRef
+		if paramRef != nil && vap.TakesParams() {
+			covered, err := bindingScope.Covers(obj, opap.celNamespaceObjectFor(obj))
+			if err != nil {
+				outcome.skipped = append(outcome.skipped, skippedCELResource{obj: obj, err: fmt.Errorf("cannot tell whether the binding for policy %q binds this resource: %w", vap.PolicyName, err)})
+				continue
+			}
+			if !covered {
+				paramRef = nil
+			}
 		}
 
 		// Resolve the params for this object: a binding's paramRef may point to a
@@ -2495,21 +2513,6 @@ func (opap *OPAProcessor) celBindingsFor(policyName string) []metav1unstructured
 		}
 	}
 	return matches
-}
-
-// celBindingHasMatchResources reports whether a binding narrows the objects it
-// governs. The offline engine cannot evaluate that scoping yet, so a binding
-// that carries matchResources cannot safely supply its paramRef.
-func celBindingHasMatchResources(binding metav1unstructured.Unstructured) bool {
-	if binding.Object == nil {
-		return false
-	}
-	spec, ok := binding.Object["spec"].(map[string]any)
-	if !ok {
-		return false
-	}
-	mr, ok := spec["matchResources"].(map[string]any)
-	return ok && len(mr) > 0
 }
 
 // celBindingSelectsParams reports whether the binding picks its params with

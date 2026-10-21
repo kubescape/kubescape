@@ -32,12 +32,10 @@ func (v *VAP) AppliesTo(obj map[string]any) bool {
 	if v.matchConstraints == nil || len(v.matchConstraints.ResourceRules) == 0 {
 		return true // no scoping info: evaluate (a malformed-policy edge)
 	}
-	gvr, resources, ok := objectGVR(obj)
+	target, ok := newScopedObject(obj)
 	if !ok {
 		return true // kind undeterminable; let evaluation proceed (it will error and skip)
 	}
-	name, _, _ := unstructured.NestedString(obj, "metadata", "name")
-	target := scopedObject{gvr: gvr, resources: resources, name: name, namespaced: isNamespaced(obj)}
 	matchPolicy := effectiveMatchPolicy(v.matchConstraints)
 
 	included := false
@@ -179,6 +177,17 @@ type scopedObject struct {
 	resources  []string
 	name       string
 	namespaced bool
+}
+
+// newScopedObject reads the fields resource rules match on off obj. ok is false
+// when the object's apiVersion or kind is missing or unparsable.
+func newScopedObject(obj map[string]any) (target scopedObject, ok bool) {
+	gvr, resources, ok := objectGVR(obj)
+	if !ok {
+		return scopedObject{}, false
+	}
+	name, _, _ := unstructured.NestedString(obj, "metadata", "name")
+	return scopedObject{gvr: gvr, resources: resources, name: name, namespaced: isNamespaced(obj)}, true
 }
 
 func resourceRuleMatches(rule *admissionregistrationv1.NamedRuleWithOperations, target scopedObject, matchPolicy admissionregistrationv1.MatchPolicyType) bool {
