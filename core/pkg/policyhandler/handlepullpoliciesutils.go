@@ -36,7 +36,9 @@ func controlDownloadError(err error, controls string) error {
 	if strings.Contains(err.Error(), "unsupported protocol scheme") {
 		err = fmt.Errorf("failed to download from GitHub release, try running with `--use-default` flag")
 	}
-	if strings.Contains(err.Error(), "not found") && !errors.Is(err, getter.ErrControlAmbiguous) {
+	// Only a genuine unknown control is reworded: a catalog failure never
+	// carries the sentinel, whatever its text says.
+	if errors.Is(err, getter.ErrControlNotFound) && strings.Contains(err.Error(), "not found") {
 		err = &controlLookupError{
 			msg:   fmt.Sprintf("control '%s' not found, run `kubescape list controls` for available controls", controls),
 			cause: err,

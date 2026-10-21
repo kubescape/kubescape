@@ -42,6 +42,13 @@ func TestControlDownloadErrorKeepsErrorIdentity(t *testing.T) {
 	require.EqualError(t, err, "controlID: CIS-9.9.9: control from file not matching")
 }
 
+// Only an error carrying the unknown-control sentinel is rewritten; text alone
+// never is.
+func TestControlDownloadErrorRewritesOnlyTheSentinel(t *testing.T) {
+	plain := errors.New("control 'c-0005' not found")
+	require.Same(t, plain, controlDownloadError(plain, "c-0005"))
+}
+
 func TestControlDownloadErrorAmbiguousKeepsCandidates(t *testing.T) {
 	lp := controlPolicyGetter(t, `{"name":"x","controls":[
  {"controlID":"C-0001","id":"X-1"},{"controlID":"C-0002","id":"X-1"}]}`)
