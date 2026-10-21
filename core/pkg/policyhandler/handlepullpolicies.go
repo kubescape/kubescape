@@ -285,7 +285,7 @@ func (policyHandler *PolicyHandler) downloadScanPolicies(ctx context.Context, po
 			}
 		case apisv1.KindControl: // Download control
 			logger.L().Debug("Downloading control", helpers.String("control", rule.Identifier))
-			receivedControl, err := getters.PolicyGetter.GetControl(rule.Identifier)
+			receivedControl, err := getter.ResolveControl(getters.PolicyGetter, rule.Identifier)
 			if err != nil {
 				return frameworks, controlDownloadError(err, rule.Identifier)
 			}

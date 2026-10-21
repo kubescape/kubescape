@@ -1,11 +1,13 @@
 package policyhandler
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/cautils/getter"
 	"github.com/kubescape/opa-utils/reporthandling"
 )
 
@@ -18,12 +20,29 @@ func frameworkDownloadError(err error, fwName string) error {
 	}
 	return err
 }
+
+// controlLookupError carries a user-facing message while keeping the error it
+// replaced reachable through errors.Is and errors.As, so callers can still tell
+// an unknown control from a catalog failure.
+type controlLookupError struct {
+	msg   string
+	cause error
+}
+
+func (e *controlLookupError) Error() string { return e.msg }
+func (e *controlLookupError) Unwrap() error { return e.cause }
+
 func controlDownloadError(err error, controls string) error {
 	if strings.Contains(err.Error(), "unsupported protocol scheme") {
 		err = fmt.Errorf("failed to download from GitHub release, try running with `--use-default` flag")
 	}
-	if strings.Contains(err.Error(), "not found") {
-		err = fmt.Errorf("control '%s' not found, run `kubescape list controls` for available controls", controls)
+	// Only a genuine unknown control is reworded: a catalog failure never
+	// carries the sentinel, whatever its text says.
+	if errors.Is(err, getter.ErrControlNotFound) && strings.Contains(err.Error(), "not found") {
+		err = &controlLookupError{
+			msg:   fmt.Sprintf("control '%s' not found, run `kubescape list controls` for available controls", controls),
+			cause: err,
+		}
 	}
 	return err
 }

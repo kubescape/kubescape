@@ -1455,9 +1455,20 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		if err != nil {
 			code := classifyScanError(err)
 			msg := classifyScanErrorMessage(code, "control", err)
-			return mcpToolError(code, msg, nil), nil
+			return mcpToolError(code, msg, controlSelectionErrorDetails(code, err)), nil
 		}
 		return mcp.NewToolResultText(string(v.([]byte))), nil
+	case "validate_scan_selection":
+		rawControlIDs, hasControlIDs := arguments["control_ids"]
+		controlIDs, toolErr := parseControlIDs(rawControlIDs, hasControlIDs)
+		if toolErr != nil {
+			return toolErr, nil
+		}
+		result, err := ksServer.ValidateScanSelection(ctx, controlIDs)
+		if err != nil {
+			return mcpToolError(classifyScanError(err), fmt.Sprintf("failed to validate scan selection: %v", err), nil), nil
+		}
+		return mcp.NewToolResultText(string(result)), nil
 	case "scan_workload":
 		workload, toolErr := mcpRequiredStringArg(arguments, "workload")
 		if toolErr != nil {
@@ -1728,8 +1739,15 @@ func createPolicyListingTools(ksServer *KubescapeMcpserver) {
 		mcp.WithArray("resource_rules", mcp.WithStringItems(), mcp.Description("Restrict the binding to group/version/resource entries the policy already matches (e.g. apps/v1/deployments, /v1/pods). Omit to bind everything the policy matches")),
 		mcp.WithReadOnlyHintAnnotation(true),
 	)
+	validateScanSelectionTool := mcp.NewTool(
+		"validate_scan_selection",
+		mcp.WithDescription("Check, without running a scan, whether control identifiers resolve against the policy catalog the way scan_controls resolves them. Each identifier is a control ID (e.g. C-0286) or a framework section number (e.g. CIS-3.1.1), case-insensitive. Reports which identifiers resolve to which control, which are unknown, which section numbers are ambiguous, and which name a control already named by an earlier identifier. Read-only: it needs no cluster access. If the policy bundle is still loading or cannot be read it returns an error rather than reporting identifiers as unknown."),
+		withControlIDsProperty("Control identifiers to check: a comma-separated string (e.g. \"C-0012,CIS-3.1.1\") or an array of strings. At least one is required."),
+		mcp.WithReadOnlyHintAnnotation(true),
+	)
 	ksServer.s.AddTool(listFrameworksTool, ksServer.toolHandler(listFrameworksTool.Name))
 	ksServer.s.AddTool(listControlsTool, ksServer.toolHandler(listControlsTool.Name))
+	ksServer.s.AddTool(validateScanSelectionTool, ksServer.toolHandler(validateScanSelectionTool.Name))
 	ksServer.s.AddTool(listAdmissionPoliciesTool, ksServer.toolHandler(listAdmissionPoliciesTool.Name))
 	ksServer.s.AddTool(createAdmissionPolicyBindingTool, ksServer.toolHandler(createAdmissionPolicyBindingTool.Name))
 }

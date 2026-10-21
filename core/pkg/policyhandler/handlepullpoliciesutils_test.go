@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/cautils/getter"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/stretchr/testify/assert"
 )
@@ -81,7 +82,7 @@ func TestPolicyDownloadError(t *testing.T) {
 			kind: "framework",
 		},
 		{
-			err:  errors.New("control 'c-0005' not found"),
+			err:  fmt.Errorf("control 'c-0005' not found: %w", getter.ErrControlNotFound),
 			want: fmt.Errorf("control 'c-0005' not found, run `kubescape list controls` for available controls"),
 			name: "c-0005",
 			kind: "control",
@@ -94,7 +95,7 @@ func TestPolicyDownloadError(t *testing.T) {
 			case "framework":
 				assert.Equal(t, tt.want, frameworkDownloadError(tt.err, tt.name))
 			case "control":
-				assert.Equal(t, tt.want, controlDownloadError(tt.err, tt.name))
+				assert.EqualError(t, controlDownloadError(tt.err, tt.name), tt.want.Error())
 			default:
 				assert.Equal(t, tt.want, frameworkDownloadError(tt.err, tt.name))
 				assert.Equal(t, tt.want, controlDownloadError(tt.err, tt.name))
