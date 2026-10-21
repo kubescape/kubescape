@@ -2,9 +2,11 @@ package printer
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"testing"
 
 	"github.com/anchore/grype/grype/match"
@@ -313,4 +315,78 @@ func TestPrometheusActionPrint_MissingDataReturnsError(t *testing.T) {
 	promPrinter := NewPrometheusPrinter(false)
 	err := promPrinter.ActionPrint(context.Background(), nil, nil)
 	assert.Error(t, err)
+}
+
+func TestSetResourcesCountersFromCatalog_DeterministicOrder(t *testing.T) {
+	// results is a map, so without an explicit sort the emitted resource
+	// metrics follow a randomised iteration order and two runs over the same
+	// scan data can produce different report files.
+	resources := map[string]workloadinterface.IMetadata{}
+	results := map[string]resourcesresults.Result{}
+	idToName := map[string]string{}
+	for i := 0; i < 32; i++ {
+		name := fmt.Sprintf("resource-%02d", i)
+		wl := workloadinterface.NewWorkloadObj(map[string]any{
+			"apiVersion": "v1",
+			"kind":       "Pod",
+			"metadata":   map[string]any{"name": name, "namespace": "default"},
+		})
+		id := wl.GetID()
+		resources[id] = wl
+		results[id] = resourcesresults.Result{ResourceID: id}
+		idToName[id] = name
+	}
+	require.Len(t, results, 32)
+
+	ids := make([]string, 0, len(results))
+	for id := range results {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	want := make([]string, 0, len(ids))
+	for _, id := range ids {
+		want = append(want, idToName[id])
+	}
+
+	catalog := cautils.NewMapResourceCatalog(resources)
+	for i := 0; i < 50; i++ {
+		m := &Metrics{}
+		m.setResourcesCountersFromCatalog(catalog, results, &reportsummary.SummaryDetails{})
+		got := make([]string, 0, len(m.listResources))
+		for _, r := range m.listResources {
+			got = append(got, r.name)
+		}
+		require.Equal(t, want, got, "resource metrics must follow sorted resource ID order")
+	}
+}
+
+func TestSetImageVulnerabilities_DeterministicSeverityOrder(t *testing.T) {
+	severities := []string{"Critical", "High", "Medium", "Low", "Negligible", "Unknown"}
+	matches := make([]match.Match, 0, len(severities))
+	for i, sev := range severities {
+		matches = append(matches, match.Match{
+			Package: grypepkg.Package{ID: grypepkg.ID(fmt.Sprintf("pkg-%d", i)), Name: "openssl", Version: "1.0.0"},
+			Vulnerability: vulnerability.Vulnerability{
+				Metadata: &vulnerability.Metadata{ID: fmt.Sprintf("CVE-%d", i), Severity: sev},
+			},
+		})
+	}
+	imageData := []cautils.ImageScanData{{
+		Image:    "test-image:latest",
+		Platform: "linux/amd64",
+		Matches:  match.NewMatches(matches...),
+	}}
+
+	want := append([]string(nil), severities...)
+	sort.Strings(want)
+
+	for i := 0; i < 50; i++ {
+		m := &Metrics{}
+		m.setImageVulnerabilities(imageData)
+		got := make([]string, 0, len(m.listImages))
+		for _, img := range m.listImages {
+			got = append(got, img.severity)
+		}
+		require.Equal(t, want, got, "image severities must be emitted in sorted order")
+	}
 }
