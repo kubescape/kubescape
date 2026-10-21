@@ -428,7 +428,7 @@ A workload that is owned by another resource — a Pod belonging to a ReplicaSet
 
 #### `diff_reports`
 
-Compare two already-produced Kubescape scan report files (JSON) and return what changed, reusing the same comparison engine as `kubescape diff`/`--baseline`. Works for posture reports (`kubescape scan --format json`), reporting new, resolved, unchanged, and incomparable control failures, and for image vulnerability reports (`kubescape scan image --format json`), reporting new, resolved, and unchanged CVEs. Both reports must be the same kind; comparing a posture report against a vulnerability report is rejected rather than silently treated as comparable.
+Compare two already-produced Kubescape scan report files (JSON) and return what changed, reusing the same comparison engine as `kubescape diff`/`--baseline`. Works for posture reports (`kubescape scan --format json`), reporting new, resolved, unchanged, and incomparable control failures, and for image vulnerability reports (`kubescape scan image --format json`), reporting new, resolved, and unchanged CVEs. Unchanged findings are only counted unless `include_unchanged` is true. Both reports must be the same kind; comparing a posture report against a vulnerability report is rejected rather than silently treated as comparable.
 
 **Parameters:**
 
@@ -436,36 +436,36 @@ Compare two already-produced Kubescape scan report files (JSON) and return what 
 |-----------|------|----------|-------------|
 | `base_report` | string | Yes | Path to the baseline/base Kubescape scan report JSON file |
 | `head_report` | string | Yes | Path to the current/head Kubescape scan report JSON file |
+| `include_unchanged` | boolean | No | Also list the findings that are the same in both reports (default false). `counts` always gives the number of new, resolved, unchanged and incomparable findings |
 
 **Example use case:** "What changed between these two Kubescape reports?"
 
-**Example Response (posture reports):**
+**Example Response (posture reports, without `include_unchanged`):**
 ```json
 {
   "kind": "posture",
   "base_report": "base.json",
   "head_report": "head.json",
+  "counts": {"new": 1, "resolved": 0, "unchanged": 12, "incomparable": 0},
   "posture": {
     "new": [{"resourceID": "...", "controlID": "C-0001", "severity": "High", "baseStatus": "passed", "headStatus": "failed"}],
-    "resolved": [],
-    "unchanged": [],
-    "incomparable": []
+    "resolved": []
   }
 }
 ```
 
-**Example Response (image vulnerability reports):**
+**Example Response (image vulnerability reports, without `include_unchanged`):**
 ```json
 {
   "kind": "vulnerability",
   "base_report": "base-image.json",
   "head_report": "head-image.json",
+  "counts": {"new": 1, "resolved": 1, "unchanged": 0, "incomparable": 0},
   "vulnerability": {
     "baseImages": ["app:1.0"],
     "headImages": ["app:1.1"],
     "new": [{"id": "CVE-NEW-HIGH", "severity": "High", "package": "curl", "version": "1.0"}],
-    "resolved": [{"id": "CVE-OLD", "severity": "High", "package": "openssl", "version": "3.0.1"}],
-    "unchanged": []
+    "resolved": [{"id": "CVE-OLD", "severity": "High", "package": "openssl", "version": "3.0.1"}]
   }
 }
 ```

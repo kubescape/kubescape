@@ -167,3 +167,132 @@ func TestDiffReports_MissingArgumentsReturnInvalidArgument(t *testing.T) {
 		assert.Equal(t, ErrCodeInvalidArgument, te.Code)
 	})
 }
+
+const (
+	diffReportsPostureBaseWithStillFailing = `{
+		"results":[{"resourceID":"res1","controls":[
+			{"controlID":"C-STILL","name":"Still","status":{"status":"failed"}},
+			{"controlID":"C-HIGH","name":"High","status":{"status":"passed"}}
+		]}],
+		"summaryDetails":{"controls":{"C-STILL":{"scoreFactor":5.0},"C-HIGH":{"scoreFactor":7.0}}}
+	}`
+	diffReportsPostureHeadWithStillFailing = `{
+		"results":[{"resourceID":"res1","controls":[
+			{"controlID":"C-STILL","name":"Still","status":{"status":"failed"}},
+			{"controlID":"C-HIGH","name":"High","status":{"status":"failed"}}
+		]}],
+		"summaryDetails":{"controls":{"C-STILL":{"scoreFactor":5.0},"C-HIGH":{"scoreFactor":7.0}}}
+	}`
+	diffReportsImageHeadWithStillPresent = `{"matches":[
+		{"vulnerability":{"id":"CVE-OLD","severity":"High","fix":{"versions":[]}},"artifact":{"name":"openssl","version":"3.0.1","type":"apk"}},
+		{"vulnerability":{"id":"CVE-NEW-HIGH","severity":"High","fix":{"versions":["2.0"]}},"artifact":{"name":"curl","version":"1.0","type":"apk"}}
+	],"source":{"target":{"userInput":"app:1.1"}}}`
+)
+
+// diffReportsSection calls diff_reports and returns the decoded counts and the
+// raw JSON of the posture or vulnerability section, so a test can check
+// whether the unchanged key is present at all.
+func diffReportsSection(t *testing.T, args map[string]any, section string) (diffReportsCounts, map[string]json.RawMessage) {
+	t.Helper()
+	ksServer := newDiffReportsTestServer(t)
+	result := registeredToolResult(t, dispatchRegisteredTool(t, ksServer, "diff_reports", args))
+	require.False(t, result.IsError, "unexpected tool error: %s", toolResultText(t, result))
+
+	var top struct {
+		Counts diffReportsCounts `json:"counts"`
+	}
+	text := []byte(toolResultText(t, result))
+	require.NoError(t, json.Unmarshal(text, &top))
+	var sections map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(text, &sections))
+	var fields map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(sections[section], &fields))
+	return top.Counts, fields
+}
+
+func TestDiffReports_UnchangedOnlyCountedByDefault(t *testing.T) {
+	t.Run("posture", func(t *testing.T) {
+		counts, fields := diffReportsSection(t, map[string]any{
+			"base_report": writeDiffReportFixture(t, diffReportsPostureBaseWithStillFailing),
+			"head_report": writeDiffReportFixture(t, diffReportsPostureHeadWithStillFailing),
+		}, "posture")
+		assert.Equal(t, diffReportsCounts{New: 1, Unchanged: 1}, counts)
+		assert.NotContains(t, fields, "unchanged")
+		assert.Contains(t, fields, "new")
+	})
+
+	t.Run("vulnerability", func(t *testing.T) {
+		counts, fields := diffReportsSection(t, map[string]any{
+			"base_report": writeDiffReportFixture(t, diffReportsImageBase),
+			"head_report": writeDiffReportFixture(t, diffReportsImageHeadWithStillPresent),
+		}, "vulnerability")
+		assert.Equal(t, diffReportsCounts{New: 1, Unchanged: 1}, counts)
+		assert.NotContains(t, fields, "unchanged")
+		assert.Contains(t, fields, "new")
+	})
+}
+
+func TestDiffReports_CountsAlwaysHaveAllFourFields(t *testing.T) {
+	ksServer := newDiffReportsTestServer(t)
+	result := registeredToolResult(t, dispatchRegisteredTool(t, ksServer, "diff_reports", map[string]any{
+		"base_report": writeDiffReportFixture(t, diffReportsImageBase),
+		"head_report": writeDiffReportFixture(t, diffReportsImageHead),
+	}))
+	require.False(t, result.IsError, "unexpected tool error: %s", toolResultText(t, result))
+
+	var top struct {
+		Counts map[string]int `json:"counts"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(toolResultText(t, result)), &top))
+	assert.Equal(t, map[string]int{"new": 1, "resolved": 1, "unchanged": 0, "incomparable": 0}, top.Counts)
+}
+
+func TestDiffReports_IncludeUnchanged(t *testing.T) {
+	t.Run("posture", func(t *testing.T) {
+		counts, fields := diffReportsSection(t, map[string]any{
+			"base_report":       writeDiffReportFixture(t, diffReportsPostureBaseWithStillFailing),
+			"head_report":       writeDiffReportFixture(t, diffReportsPostureHeadWithStillFailing),
+			"include_unchanged": true,
+		}, "posture")
+		assert.Equal(t, 1, counts.Unchanged)
+		var unchanged []map[string]any
+		require.NoError(t, json.Unmarshal(fields["unchanged"], &unchanged))
+		require.Len(t, unchanged, 1)
+		assert.Equal(t, "C-STILL", unchanged[0]["controlID"])
+	})
+
+	t.Run("vulnerability", func(t *testing.T) {
+		counts, fields := diffReportsSection(t, map[string]any{
+			"base_report":       writeDiffReportFixture(t, diffReportsImageBase),
+			"head_report":       writeDiffReportFixture(t, diffReportsImageHeadWithStillPresent),
+			"include_unchanged": true,
+		}, "vulnerability")
+		assert.Equal(t, 1, counts.Unchanged)
+		var unchanged []map[string]any
+		require.NoError(t, json.Unmarshal(fields["unchanged"], &unchanged))
+		require.Len(t, unchanged, 1)
+		assert.Equal(t, "CVE-OLD", unchanged[0]["id"])
+	})
+
+	t.Run("nothing unchanged is an empty list, not null", func(t *testing.T) {
+		counts, fields := diffReportsSection(t, map[string]any{
+			"base_report":       writeDiffReportFixture(t, diffReportsPostureBase),
+			"head_report":       writeDiffReportFixture(t, diffReportsPostureHead),
+			"include_unchanged": true,
+		}, "posture")
+		assert.Equal(t, 0, counts.Unchanged)
+		assert.JSONEq(t, `[]`, string(fields["unchanged"]))
+	})
+}
+
+func TestDiffReports_IncludeUnchangedMustBeBoolean(t *testing.T) {
+	ksServer := newDiffReportsTestServer(t)
+	result := registeredToolResult(t, dispatchRegisteredTool(t, ksServer, "diff_reports", map[string]any{
+		"base_report":       writeDiffReportFixture(t, diffReportsPostureBase),
+		"head_report":       writeDiffReportFixture(t, diffReportsPostureHead),
+		"include_unchanged": "yes",
+	}))
+	te := parsePSSToolError(t, result)
+	assert.Equal(t, ErrCodeInvalidArgument, te.Code)
+	assert.Equal(t, "include_unchanged", te.Details["argument"])
+}
