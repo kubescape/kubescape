@@ -3,6 +3,7 @@ package imagescan
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -263,8 +264,18 @@ func (a *HarborAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs [
 		if err := json.Unmarshal(data, &harborVulnPayload); err != nil {
 			return report, fmt.Errorf("failed to parse vulnerability payload for repository %s: %w", repo, err)
 		}
+		if len(harborVulnPayload) == 0 {
+			return report, fmt.Errorf("missing vulnerability report for repository %s", repo)
+		}
 
-		for _, mimeTypeData := range harborVulnPayload {
+		var reportErr error
+		for mimeType, mimeTypeData := range harborVulnPayload {
+			// Harbor emits an explicit empty array for a clean scan. A null
+			// report or missing/null findings is not evidence of completion.
+			if mimeTypeData.Vulnerabilities == nil {
+				reportErr = errors.Join(reportErr, fmt.Errorf("invalid vulnerability report %q for repository %s: vulnerabilities must be an array", mimeType, repo))
+				continue
+			}
 			for _, v := range mimeTypeData.Vulnerabilities {
 				vuln := Vulnerability{
 					ID:          v.ID,
@@ -276,8 +287,10 @@ func (a *HarborAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs [
 			}
 		}
 
-		report.Status = ScanStatusScanned
-		return report, nil
+		if reportErr == nil {
+			report.Status = ScanStatusScanned
+		}
+		return report, reportErr
 	})
 }
 
