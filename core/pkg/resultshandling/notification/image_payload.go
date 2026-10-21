@@ -143,13 +143,15 @@ func newImageSlackPayload(summary *imageprinter.ImageScanSummary) slackPayload {
 	criticalCount := stats.bySeverity["Critical"]
 	highCount := stats.bySeverity["High"]
 
+	escapedImage := escapeSlackText(stats.imagesStr)
+
 	var fallback string
 	if stats.total == 0 {
-		fallback = fmt.Sprintf("Kubescape image scan completed for %s: no vulnerabilities found.", stats.imagesStr)
+		fallback = fmt.Sprintf("Kubescape image scan completed for %s: no vulnerabilities found.", escapedImage)
 	} else {
 		fallback = fmt.Sprintf(
 			"Kubescape image scan completed for %s: %d vulnerabilities (%d Critical, %d High, %d fixable).",
-			stats.imagesStr,
+			escapedImage,
 			stats.total,
 			criticalCount,
 			highCount,

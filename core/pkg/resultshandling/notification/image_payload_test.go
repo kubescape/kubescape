@@ -192,3 +192,63 @@ func TestMarshalImagePayload_CappingTopCVEs(t *testing.T) {
 	require.NoError(t, json.Unmarshal(raw, &payload))
 	assert.Len(t, payload.TopVulnerabilities, maxFailingCVEs)
 }
+
+func TestMarshalImagePayload_SlackEscapesMentionLikePaths(t *testing.T) {
+	mentionPath := "sbom:./<!channel>.json"
+
+	t.Run("with vulnerabilities", func(t *testing.T) {
+		summary := &imageprinter.ImageScanSummary{
+			Images: []string{mentionPath},
+			MapsSeverityToSummary: map[string]*imageprinter.SeveritySummary{
+				"Critical": {NumberOfCVEs: 1, NumberOfFixableCVEs: 1},
+			},
+			CVEs: []imageprinter.CVE{
+				{
+					ID:         "CVE-2023-0001",
+					Severity:   "Critical",
+					Package:    "pkg",
+					FixedState: "fixed",
+				},
+			},
+		}
+
+		raw, err := MarshalImagePayload("https://hooks.slack.com/services/T00/B00/X00", summary)
+		require.NoError(t, err)
+
+		var payload slackPayload
+		require.NoError(t, json.Unmarshal(raw, &payload))
+
+		assert.NotContains(t, payload.Text, "<!channel>")
+		assert.Contains(t, payload.Text, "&lt;!channel&gt;")
+		assert.Contains(t, payload.Text, "Kubescape image scan completed for sbom:./&lt;!channel&gt;.json")
+
+		require.GreaterOrEqual(t, len(payload.Blocks), 2)
+		require.Len(t, payload.Blocks[1].Fields, 2)
+		assert.NotContains(t, payload.Blocks[1].Fields[0].Text, "<!channel>")
+		assert.Contains(t, payload.Blocks[1].Fields[0].Text, "&lt;!channel&gt;")
+	})
+
+	t.Run("zero vulnerabilities", func(t *testing.T) {
+		summary := &imageprinter.ImageScanSummary{
+			Images: []string{mentionPath},
+			MapsSeverityToSummary: map[string]*imageprinter.SeveritySummary{
+				"Critical": {NumberOfCVEs: 0},
+			},
+		}
+
+		raw, err := MarshalImagePayload("https://hooks.slack.com/services/T00/B00/X00", summary)
+		require.NoError(t, err)
+
+		var payload slackPayload
+		require.NoError(t, json.Unmarshal(raw, &payload))
+
+		assert.NotContains(t, payload.Text, "<!channel>")
+		assert.Contains(t, payload.Text, "&lt;!channel&gt;")
+		assert.Contains(t, payload.Text, "Kubescape image scan completed for sbom:./&lt;!channel&gt;.json: no vulnerabilities found.")
+
+		require.GreaterOrEqual(t, len(payload.Blocks), 2)
+		require.Len(t, payload.Blocks[1].Fields, 2)
+		assert.NotContains(t, payload.Blocks[1].Fields[0].Text, "<!channel>")
+		assert.Contains(t, payload.Blocks[1].Fields[0].Text, "&lt;!channel&gt;")
+	})
+}
