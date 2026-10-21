@@ -1301,50 +1301,56 @@ func TestCheckResourceRulesInPolicyScope(t *testing.T) {
 	const c0016Policy = "kubescape-c-0016-allow-privilege-escalation"
 
 	t.Run("rule outside the policy is refused", func(t *testing.T) {
-		err := checkResourceRulesInPolicyScope([]string{"agents.x-k8s.io/v1beta1/sandboxes"}, "C-0016", c0016Policy)
+		_, err := checkResourceRulesInPolicyScope([]string{"agents.x-k8s.io/v1beta1/sandboxes"}, "C-0016", c0016Policy)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "would match nothing")
 		assert.Contains(t, err.Error(), "apps/v1/deployments", "the refusal names what the policy does match")
 	})
 
 	t.Run("rule inside the policy is accepted", func(t *testing.T) {
-		require.NoError(t, checkResourceRulesInPolicyScope([]string{"apps/v1/deployments", "/v1/pods"}, "C-0016", c0016Policy))
+		_, err := checkResourceRulesInPolicyScope([]string{"apps/v1/deployments", "/v1/pods"}, "C-0016", c0016Policy)
+		require.NoError(t, err)
 	})
 
 	t.Run("one out-of-scope rule refuses the whole binding", func(t *testing.T) {
-		err := checkResourceRulesInPolicyScope([]string{"/v1/pods", "ate.dev/v1alpha1/actortemplates"}, "C-0016", c0016Policy)
+		_, err := checkResourceRulesInPolicyScope([]string{"/v1/pods", "ate.dev/v1alpha1/actortemplates"}, "C-0016", c0016Policy)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "ate.dev/v1alpha1/actortemplates")
 	})
 
 	t.Run("policy resolved by name only", func(t *testing.T) {
-		err := checkResourceRulesInPolicyScope([]string{"ate.dev/v1alpha1/workerpools"}, "", c0016Policy)
+		_, err := checkResourceRulesInPolicyScope([]string{"ate.dev/v1alpha1/workerpools"}, "", c0016Policy)
 		require.Error(t, err)
 	})
 
 	// Equivalent matching is the default and this command never sets matchPolicy,
 	// so a rule the apiserver may convert into the policy is reported, not refused.
 	t.Run("another version of a constrained resource is allowed", func(t *testing.T) {
-		require.NoError(t, checkResourceRulesInPolicyScope([]string{"apps/v1beta1/deployments"}, "C-0016", c0016Policy))
-		require.NoError(t, checkResourceRulesInPolicyScope([]string{"extensions/v1beta1/deployments"}, "C-0016", c0016Policy))
+		_, err := checkResourceRulesInPolicyScope([]string{"apps/v1beta1/deployments"}, "C-0016", c0016Policy)
+		require.NoError(t, err)
+		_, err = checkResourceRulesInPolicyScope([]string{"extensions/v1beta1/deployments"}, "C-0016", c0016Policy)
+		require.NoError(t, err)
 	})
 
 	t.Run("policy outside the bundle is left unchecked", func(t *testing.T) {
-		require.NoError(t, checkResourceRulesInPolicyScope([]string{"ate.dev/v1alpha1/workerpools"}, "", "my-own-sandbox-policy"))
+		_, err := checkResourceRulesInPolicyScope([]string{"ate.dev/v1alpha1/workerpools"}, "", "my-own-sandbox-policy")
+		require.NoError(t, err)
 	})
 
 	t.Run("no rules is nothing to check", func(t *testing.T) {
-		require.NoError(t, checkResourceRulesInPolicyScope(nil, "C-0016", c0016Policy))
+		_, err := checkResourceRulesInPolicyScope(nil, "C-0016", c0016Policy)
+		require.NoError(t, err)
 	})
 
 	// A subresource policy is a separate surface: binding it to the bare
 	// resource would enforce nothing.
 	t.Run("bare resource does not reach a subresource policy", func(t *testing.T) {
-		err := checkResourceRulesInPolicyScope([]string{"/v1/pods"}, "", "cluster-policy-deny-exec")
+		_, err := checkResourceRulesInPolicyScope([]string{"/v1/pods"}, "", "cluster-policy-deny-exec")
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "/v1/pods/exec")
 
-		require.NoError(t, checkResourceRulesInPolicyScope([]string{"/v1/pods/exec"}, "", "cluster-policy-deny-exec"))
+		_, err = checkResourceRulesInPolicyScope([]string{"/v1/pods/exec"}, "", "cluster-policy-deny-exec")
+		require.NoError(t, err)
 	})
 }
 
@@ -1784,7 +1790,8 @@ func TestCheckNamespaceSelectorScope(t *testing.T) {
 	)
 
 	t.Run("a fully namespaced policy is accepted", func(t *testing.T) {
-		require.NoError(t, checkNamespaceSelectorScope([]string{"prod"}, nil, "C-0016", c0016Policy))
+		_, err := checkNamespaceSelectorScope([]string{"prod"}, nil, "C-0016", c0016Policy)
+		require.NoError(t, err)
 	})
 
 	// Accepted, because the namespaced half of the binding is what was asked
@@ -1803,14 +1810,15 @@ func TestCheckNamespaceSelectorScope(t *testing.T) {
 			assert.Equal(t, []string{clusterScoped}, reach.alwaysMatched, control)
 			assert.True(t, reach.narrowable, control)
 
-			require.NoError(t, checkNamespaceSelectorScope([]string{"prod"}, nil, control, ""))
+			_, err = checkNamespaceSelectorScope([]string{"prod"}, nil, control, "")
+			require.NoError(t, err)
 		}
 	})
 
 	// Narrowed to the cluster-scoped half, the selector has nothing left to act
 	// on: the binding is exactly as broad as one carrying no --namespace.
 	t.Run("a binding covering only cluster-scoped resources is refused", func(t *testing.T) {
-		err := checkNamespaceSelectorScope([]string{"prod"}, []string{rbac + "/v1/clusterroles"}, "C-0280", c0280Policy)
+		_, err := checkNamespaceSelectorScope([]string{"prod"}, []string{rbac + "/v1/clusterroles"}, "C-0280", c0280Policy)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "narrows nothing")
 		assert.Contains(t, err.Error(), rbac+"/v1/clusterroles")
@@ -1818,19 +1826,23 @@ func TestCheckNamespaceSelectorScope(t *testing.T) {
 	})
 
 	t.Run("narrowing to the namespaced half is accepted", func(t *testing.T) {
-		require.NoError(t, checkNamespaceSelectorScope([]string{"prod"}, []string{rbac + "/v1/roles"}, "C-0280", c0280Policy))
+		_, err := checkNamespaceSelectorScope([]string{"prod"}, []string{rbac + "/v1/roles"}, "C-0280", c0280Policy)
+		require.NoError(t, err)
 	})
 
 	t.Run("no namespace is nothing to check", func(t *testing.T) {
-		require.NoError(t, checkNamespaceSelectorScope(nil, nil, "C-0280", c0280Policy))
+		_, err := checkNamespaceSelectorScope(nil, nil, "C-0280", c0280Policy)
+		require.NoError(t, err)
 	})
 
 	t.Run("a policy outside the bundle is left unchecked", func(t *testing.T) {
-		require.NoError(t, checkNamespaceSelectorScope([]string{"prod"}, nil, "", "my-own-sandbox-policy"))
+		_, err := checkNamespaceSelectorScope([]string{"prod"}, nil, "", "my-own-sandbox-policy")
+		require.NoError(t, err)
 	})
 
 	t.Run("an unresolvable control is reported", func(t *testing.T) {
-		require.Error(t, checkNamespaceSelectorScope([]string{"prod"}, nil, "C-9999", "kubescape-c-9999"))
+		_, err := checkNamespaceSelectorScope([]string{"prod"}, nil, "C-9999", "kubescape-c-9999")
+		require.Error(t, err)
 	})
 }
 
@@ -1990,5 +2002,113 @@ func TestCreatePolicyBindingCmdLabelSelector(t *testing.T) {
 		require.NoError(t, yaml.Unmarshal(content, &binding))
 		require.NotNil(t, binding.Spec.MatchResources.ObjectSelector)
 		assert.Equal(t, map[string]string{"app": "nginx", "env": "prod"}, binding.Spec.MatchResources.ObjectSelector.MatchLabels)
+	})
+}
+
+func TestBuildPolicyBinding(t *testing.T) {
+	const c0016Policy = "kubescape-c-0016-allow-privilege-escalation"
+	base := func() BindingOptions {
+		return BindingOptions{Name: "my-binding", ControlID: "c-0016", Actions: []string{"Deny"}}
+	}
+
+	t.Run("control ID resolves to the policy and is normalized", func(t *testing.T) {
+		result, err := BuildPolicyBinding(base())
+		require.NoError(t, err)
+		assert.Equal(t, c0016Policy, result.PolicyName)
+		assert.Equal(t, "C-0016", result.ControlID)
+		assert.Empty(t, result.Warnings)
+		assert.Contains(t, result.Manifest, "kind: ValidatingAdmissionPolicyBinding")
+		assert.Contains(t, result.Manifest, "policyName: "+c0016Policy)
+	})
+
+	t.Run("manifest is deterministic", func(t *testing.T) {
+		opts := base()
+		opts.Namespaces = []string{"b", "a"}
+		opts.Labels = []string{"z=1", "a=2"}
+		first, err := BuildPolicyBinding(opts)
+		require.NoError(t, err)
+		second, err := BuildPolicyBinding(opts)
+		require.NoError(t, err)
+		assert.Equal(t, first.Manifest, second.Manifest)
+	})
+
+	t.Run("policy name binding has no control ID", func(t *testing.T) {
+		result, err := BuildPolicyBinding(BindingOptions{Name: "my-binding", PolicyName: "  My-Own-Policy ", Actions: []string{"Audit"}})
+		require.NoError(t, err)
+		assert.Equal(t, "my-own-policy", result.PolicyName)
+		assert.Empty(t, result.ControlID)
+	})
+
+	t.Run("custom policy skips parameter and scope checks", func(t *testing.T) {
+		result, err := BuildPolicyBinding(BindingOptions{
+			Name: "my-binding", PolicyName: "my-own-policy", Actions: []string{"Deny"},
+			ParameterReference: "params", Namespaces: []string{"prod"}, ResourceRules: []string{"/v1/pods"},
+		})
+		require.NoError(t, err)
+		assert.Empty(t, result.Warnings)
+		assert.Contains(t, result.Manifest, "parameterNotFoundAction: Deny")
+	})
+
+	t.Run("parameterized control without a reference names the paramKind", func(t *testing.T) {
+		_, err := BuildPolicyBinding(BindingOptions{Name: "my-binding", ControlID: "C-0009", Actions: []string{"Deny"}})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "kubescape.io/v1 ControlConfiguration")
+	})
+
+	t.Run("reference on a policy without params is refused", func(t *testing.T) {
+		opts := base()
+		opts.ParameterReference = "params"
+		_, err := BuildPolicyBinding(opts)
+		require.ErrorContains(t, err, "takes no --parameter-reference")
+	})
+
+	t.Run("convertible resource rule warns", func(t *testing.T) {
+		opts := base()
+		opts.ResourceRules = []string{"apps/v1beta1/deployments"}
+		result, err := BuildPolicyBinding(opts)
+		require.NoError(t, err)
+		require.Len(t, result.Warnings, 1)
+		assert.Contains(t, result.Warnings[0].Message, "another API group or version")
+		assert.Contains(t, result.Warnings[0].String(), `rule="apps/v1beta1/deployments"`)
+	})
+
+	t.Run("partially narrowing namespace selector warns", func(t *testing.T) {
+		result, err := BuildPolicyBinding(BindingOptions{Name: "my-binding", ControlID: "C-0280", Actions: []string{"Deny"}, Namespaces: []string{"prod"}})
+		require.NoError(t, err)
+		require.Len(t, result.Warnings, 1)
+		assert.Contains(t, result.Warnings[0].Message, "--namespace does not narrow")
+	})
+
+	t.Run("warnings survive a later failure", func(t *testing.T) {
+		opts := base()
+		opts.ResourceRules = []string{"apps/v1beta1/deployments"}
+		opts.Actions = []string{"Deny", "Warn"}
+		result, err := BuildPolicyBinding(opts)
+		require.Error(t, err)
+		assert.Len(t, result.Warnings, 1)
+	})
+
+	t.Run("invalid inputs are refused", func(t *testing.T) {
+		cases := map[string]func(*BindingOptions){
+			"binding name":        func(o *BindingOptions) { o.Name = "Not_Valid" },
+			"no policy":           func(o *BindingOptions) { o.ControlID = "" },
+			"both policy+control": func(o *BindingOptions) { o.PolicyName = "p" },
+			"unknown control":     func(o *BindingOptions) { o.ControlID = "C-9999" },
+			"namespace":           func(o *BindingOptions) { o.Namespaces = []string{"Bad_NS"} },
+			"deny with warn":      func(o *BindingOptions) { o.Actions = []string{"Deny", "Warn"} },
+			"duplicate action":    func(o *BindingOptions) { o.Actions = []string{"Audit", "Audit"} },
+			"no action":           func(o *BindingOptions) { o.Actions = nil },
+			"malformed label":     func(o *BindingOptions) { o.Labels = []string{"nolabel"} },
+			"malformed rule":      func(o *BindingOptions) { o.ResourceRules = []string{"deployments"} },
+			"rule outside scope":  func(o *BindingOptions) { o.ResourceRules = []string{"agents.x-k8s.io/v1beta1/sandboxes"} },
+		}
+		for name, mutate := range cases {
+			t.Run(name, func(t *testing.T) {
+				opts := base()
+				mutate(&opts)
+				_, err := BuildPolicyBinding(opts)
+				require.Error(t, err)
+			})
+		}
 	})
 }
