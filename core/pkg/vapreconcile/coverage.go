@@ -6,6 +6,7 @@ import (
 	"slices"
 
 	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/kubescape/v4/core/pkg/namespaceselector"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -19,6 +20,7 @@ type ResourceInfo struct {
 	ResourceID string
 	APIVersion string
 	Kind       string
+	Name       string // object name; Namespace objects use it for the immutable namespace-name label
 	Namespace  string
 	Labels     map[string]string
 }
@@ -125,8 +127,9 @@ type bindingScope struct {
 //
 // namespaceLabelsKnown is false when the resource's Namespace object was not
 // collected by the scan (out of scope, or the scan predates namespace
-// collection): a namespaceSelector then cannot be evaluated, so the binding
-// is treated as not matching rather than optimistically matching --
+// collection). Only the immutable namespace-name label can be inferred in
+// that case; selectors needing other labels remain uncovered rather than
+// optimistically matching --
 // silently over-crediting a binding's coverage would defeat the point of
 // this check.
 func (s *bindingScope) matches(res ResourceInfo, namespaceLabels map[string]string, namespaceLabelsKnown bool) (bool, string) {
@@ -139,7 +142,7 @@ func (s *bindingScope) matches(res ResourceInfo, namespaceLabels map[string]stri
 			// read against the object's own labels. Falling through to the
 			// cluster-scoped arm below covered it unconditionally, which
 			// overstated the reach of a binding that excludes it.
-			if !s.namespaceSelector.Matches(labels.Set(res.Labels)) {
+			if matched, _ := namespaceselector.Matches(s.namespaceSelector, res.Name, res.Labels, true); !matched {
 				return false, "namespaceSelector does not match the namespace's own labels"
 			}
 			return true, ""
@@ -152,10 +155,11 @@ func (s *bindingScope) matches(res ResourceInfo, namespaceLabels map[string]stri
 			// understated the reach of every binding scoped by namespace.
 			return true, ""
 		}
-		if !namespaceLabelsKnown {
+		matched, determinable := namespaceselector.Matches(s.namespaceSelector, res.Namespace, namespaceLabels, namespaceLabelsKnown)
+		if !determinable {
 			return false, "namespaceSelector is set but the resource's Namespace object was not collected by the scan"
 		}
-		if !s.namespaceSelector.Matches(labels.Set(namespaceLabels)) {
+		if !matched {
 			return false, "namespaceSelector does not match the resource's namespace"
 		}
 	}
@@ -409,6 +413,7 @@ func CollectFailingResourcesByControlFromCatalog(
 			ResourceID: resourceID,
 			APIVersion: resource.GetApiVersion(),
 			Kind:       resource.GetKind(),
+			Name:       resource.GetName(),
 			Namespace:  resource.GetNamespace(),
 			Labels:     resourceLabels(resource),
 		}
