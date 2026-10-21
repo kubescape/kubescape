@@ -8,6 +8,7 @@ import (
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/pkg/hostsensorutils"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/reporthandling"
 )
@@ -157,7 +158,9 @@ func insertControls(resource string, resourceToControl map[string][]string, cont
 // Each selected identity is also added to k8sResources, so it is collected (or
 // its failure recorded) like a name the rule spelled out. A dependency that is
 // never requested has no failure entry, and BuildScanCoverage would read it as
-// collected and count the control as evaluated.
+// collected and count the control as evaluated. For the same reason only the
+// host kinds the host sensor collects are selected: the legacy names left in
+// MapResourceToApiGroup never get a status from it.
 func insertDynamicMatchControls(k8sResources map[string]map[string]map[string]any, match reporthandling.RuleMatchObjects, resourceToControl map[string][]string, control reporthandling.Control) {
 	add := func(resource string, apiVersions []string) {
 		for _, apiVersion := range apiVersions {
@@ -178,8 +181,8 @@ func insertDynamicMatchControls(k8sResources map[string]map[string]map[string]an
 			}
 		}
 	}
-	for resource, apiVersion := range MapResourceToApiGroup {
-		add(resource, []string{apiVersion})
+	for _, resource := range hostsensorutils.CollectedResources() {
+		add(resource.String(), []string{MapResourceToApiGroup[resource.String()]})
 	}
 	for resource, apiVersions := range MapResourceToApiGroupCloud {
 		add(resource, apiVersions)

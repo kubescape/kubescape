@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/pkg/hostsensorutils"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/diff"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
@@ -143,7 +144,7 @@ func TestDynamicMatchDependenciesAreCollected(t *testing.T) {
 		}
 	}
 	hostResources := cautils.MapHostResources(plan)
-	assert.Len(t, hostResources, len(MapResourceToApiGroup))
+	assert.Len(t, hostResources, len(hostsensorutils.CollectedResources()))
 
 	// No host sensor: the handler marks every requested host resource as skipped.
 	infoMap := map[string]apis.StatusInfo{}

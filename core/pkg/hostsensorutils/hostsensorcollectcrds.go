@@ -303,10 +303,51 @@ func (hsh *HostSensorHandler) CollectResources(ctx context.Context) ([]hostsenso
 		}
 	}
 
-	for _, toPin := range []struct {
-		Resource k8shostsensor.HostSensorResource
-		Query    func(context.Context) ([]hostsensor.HostSensorDataEnvelope, crdCollection, error)
-	}{
+	for _, toPin := range hsh.crdQueries() {
+		k8sInfo := toPin
+
+		if k8sInfo.Resource == k8shostsensor.ControlPlaneInfo && hasCloudProvider {
+			logger.L().Info("Skipping ControlPlaneInfo collection due to cloud provider presence")
+			// we retrieve control plane info only if we are not using a cloud provider
+			continue
+		}
+
+		kcData, collected, err := k8sInfo.Query(ctx)
+		switch {
+		case err != nil:
+			addInfoToMap(k8sInfo.Resource, infoMap, err)
+			logger.L().Ctx(ctx).Warning("Failed to get resource from CRD",
+				helpers.String("resource", k8sInfo.Resource.String()),
+				helpers.Error(err))
+		case collected.listed == 0 && hsh.nodeCount > 0:
+			err = fmt.Errorf("node-agent didn't report any %s for %d nodes", k8sInfo.Resource.String(), hsh.nodeCount)
+			addInfoToMap(k8sInfo.Resource, infoMap, err)
+			logger.L().Ctx(ctx).Warning("Zero CRD items found",
+				helpers.String("resource", k8sInfo.Resource.String()),
+				helpers.Error(err))
+		default:
+			partialPulls = append(partialPulls, reportCollectionGaps(ctx, k8sInfo.Resource, collected, infoMap)...)
+		}
+
+		if len(kcData) > 0 {
+			res = append(res, kcData...)
+		}
+	}
+
+	logger.L().Info("Done collecting information from CRDs", helpers.Int("totalResources", len(res)))
+	return res, infoMap, partialPulls, nil
+}
+
+// crdQuery reads one host resource kind from its node-agent CRD.
+type crdQuery struct {
+	Resource k8shostsensor.HostSensorResource
+	Query    func(context.Context) ([]hostsensor.HostSensorDataEnvelope, crdCollection, error)
+}
+
+// crdQueries lists the host resource kinds CollectResources reads after
+// CloudProviderInfo, in collection order.
+func (hsh *HostSensorHandler) crdQueries() []crdQuery {
+	return []crdQuery{
 		// queries to CRDs
 		{
 			Resource: k8shostsensor.OsReleaseFile,
@@ -344,37 +385,19 @@ func (hsh *HostSensorHandler) CollectResources(ctx context.Context) ([]hostsenso
 			Resource: k8shostsensor.ControlPlaneInfo,
 			Query:    hsh.getControlPlaneInfo,
 		},
-	} {
-		k8sInfo := toPin
-
-		if k8sInfo.Resource == k8shostsensor.ControlPlaneInfo && hasCloudProvider {
-			logger.L().Info("Skipping ControlPlaneInfo collection due to cloud provider presence")
-			// we retrieve control plane info only if we are not using a cloud provider
-			continue
-		}
-
-		kcData, collected, err := k8sInfo.Query(ctx)
-		switch {
-		case err != nil:
-			addInfoToMap(k8sInfo.Resource, infoMap, err)
-			logger.L().Ctx(ctx).Warning("Failed to get resource from CRD",
-				helpers.String("resource", k8sInfo.Resource.String()),
-				helpers.Error(err))
-		case collected.listed == 0 && hsh.nodeCount > 0:
-			err = fmt.Errorf("node-agent didn't report any %s for %d nodes", k8sInfo.Resource.String(), hsh.nodeCount)
-			addInfoToMap(k8sInfo.Resource, infoMap, err)
-			logger.L().Ctx(ctx).Warning("Zero CRD items found",
-				helpers.String("resource", k8sInfo.Resource.String()),
-				helpers.Error(err))
-		default:
-			partialPulls = append(partialPulls, reportCollectionGaps(ctx, k8sInfo.Resource, collected, infoMap)...)
-		}
-
-		if len(kcData) > 0 {
-			res = append(res, kcData...)
-		}
 	}
+}
 
-	logger.L().Info("Done collecting information from CRDs", helpers.Int("totalResources", len(res)))
-	return res, infoMap, partialPulls, nil
+// CollectedResources returns every host resource kind CollectResources
+// queries. Other names in the host-data registry, such as the legacy
+// KubeletConfiguration and KubeletCommandLine, are never collected, so a
+// dependency on them never gets a status from the collector.
+func CollectedResources() []k8shostsensor.HostSensorResource {
+	queries := (&HostSensorHandler{}).crdQueries()
+	resources := make([]k8shostsensor.HostSensorResource, 0, len(queries)+1)
+	resources = append(resources, k8shostsensor.CloudProviderInfo)
+	for _, query := range queries {
+		resources = append(resources, query.Resource)
+	}
+	return resources
 }
