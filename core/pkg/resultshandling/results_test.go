@@ -19,6 +19,7 @@ import (
 	"github.com/anchore/grype/grype/vulnerability"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/notification"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer"
 	printerv2 "github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer/v2"
 	"github.com/kubescape/opa-utils/reporthandling"
@@ -169,6 +170,90 @@ func TestResultsHandlerNotifyIsBestEffortAndDeliversOnlySummary(t *testing.T) {
 	require.NoError(t, json.Unmarshal(received, &payload))
 	assert.NotContains(t, payload, "results")
 	assert.NotContains(t, payload, "rawResources")
+}
+
+func TestResultsHandlerNotifyDeliversImageScanSummary(t *testing.T) {
+	var received []byte
+	success := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPost, r.Method)
+		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
+		var err error
+		received, err = io.ReadAll(r.Body)
+		require.NoError(t, err)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer success.Close()
+
+	failure := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer failure.Close()
+
+	handler := NewResultsHandler(nil, nil, &SpyPrinter{})
+	handler.ImageScanData = []cautils.ImageScanData{
+		{
+			Image: "nginx:latest",
+		},
+	}
+
+	require.NoError(t, handler.HandleResults(context.Background(), &cautils.ScanInfo{
+		NotifyURLs: []string{failure.URL + "/first?token=secret", success.URL + "/second?token=secret"},
+	}))
+
+	var payload notification.ImageNotificationSummary
+	require.NoError(t, json.Unmarshal(received, &payload))
+	assert.Equal(t, []string{"nginx:latest"}, payload.Images)
+}
+
+func TestResultsHandlerNotifyHonorsImageSeverityFilters(t *testing.T) {
+	var received []byte
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var err error
+		received, err = io.ReadAll(r.Body)
+		require.NoError(t, err)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	highMatch := match.Match{
+		Vulnerability: vulnerability.Vulnerability{
+			Reference: vulnerability.Reference{ID: "CVE-HIGH", Namespace: "nvd"},
+			Metadata:  &vulnerability.Metadata{ID: "CVE-HIGH", Severity: "High"},
+		},
+		Package: grypepkg.Package{Name: "pkg-high", Version: "1.0"},
+	}
+	lowMatch := match.Match{
+		Vulnerability: vulnerability.Vulnerability{
+			Reference: vulnerability.Reference{ID: "CVE-LOW", Namespace: "nvd"},
+			Metadata:  &vulnerability.Metadata{ID: "CVE-LOW", Severity: "Low"},
+		},
+		Package: grypepkg.Package{Name: "pkg-low", Version: "1.0"},
+	}
+
+	handler := NewResultsHandler(nil, nil, &SpyPrinter{})
+	originalMatches := match.NewMatches(highMatch, lowMatch)
+	handler.ImageScanData = []cautils.ImageScanData{
+		{
+			Image:   "filtered:latest",
+			Matches: originalMatches,
+		},
+	}
+
+	require.NoError(t, handler.HandleResults(context.Background(), &cautils.ScanInfo{
+		MinSeverity: "high",
+		NotifyURLs:  []string{server.URL},
+	}))
+
+	var payload notification.ImageNotificationSummary
+	require.NoError(t, json.Unmarshal(received, &payload))
+	assert.Equal(t, 1, payload.TotalVulnerabilities)
+	assert.Equal(t, 1, payload.SeverityCounts["High"])
+	assert.Equal(t, 0, payload.SeverityCounts["Low"])
+	require.Len(t, payload.TopVulnerabilities, 1)
+	assert.Equal(t, "CVE-HIGH", payload.TopVulnerabilities[0].ID)
+
+	// Ensure rh.ImageScanData remains unmutated for thresholds
+	assert.Equal(t, 2, handler.ImageScanData[0].Matches.Count())
 }
 
 func TestResultsHandlerHandleResultsReturnsPrinterErrors(t *testing.T) {
