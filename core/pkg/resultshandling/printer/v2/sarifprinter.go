@@ -756,7 +756,7 @@ func (sp *SARIFPrinter) writeConfigurationSARIF(ctx context.Context, w io.Writer
 	basePath := getBasePathFromMetadata(opaSessionObj)
 	failed := make([]scannedResource, 0, len(opaSessionObj.ResourcesResult))
 	for resourceID, result := range opaSessionObj.ResourcesResult {
-		if !cautils.ResourceStatus(&opaSessionObj.Report.SummaryDetails, &result).IsFailed() && !hasSARIFSuppressedFinding(result) {
+		if !cautils.ResourceStatus(&opaSessionObj.Report.SummaryDetails, &result).IsFailed() && !hasSARIFSuppressedFinding(&opaSessionObj.Report.SummaryDetails, result) {
 			continue
 		}
 
@@ -784,7 +784,7 @@ func (sp *SARIFPrinter) writeConfigurationSARIF(ctx context.Context, w io.Writer
 	ruleIndexes := make(map[string]int)
 	for _, resource := range ordered {
 		for _, ac := range sortedSARIFControls(opaSessionObj.ResourcesResult[resource.resourceID].AssociatedControls) {
-			if !cautils.ControlStatus(&opaSessionObj.Report.SummaryDetails, &ac).IsFailed() && !isSARIFSuppressedControl(ac) {
+			if !cautils.ControlStatus(&opaSessionObj.Report.SummaryDetails, &ac).IsFailed() && !isSARIFSuppressedControl(&opaSessionObj.Report.SummaryDetails, ac) {
 				continue
 			}
 			ctl := opaSessionObj.Report.SummaryDetails.Controls.GetControl(reportsummary.EControlCriteriaID, ac.GetID())
@@ -850,7 +850,7 @@ func (sp *SARIFPrinter) writeConfigurationSARIF(ctx context.Context, w io.Writer
 				return fmt.Errorf("failed to write SARIF report: %w", stream.err)
 			}
 			ac := toPin
-			split := splitSARIFExceptions(ac)
+			split := splitSARIFExceptions(&opaSessionObj.Report.SummaryDetails, ac)
 
 			if cautils.ControlStatus(&opaSessionObj.Report.SummaryDetails, &ac).IsFailed() {
 				r, ok := sp.configurationResult(ctx, opaSessionObj, cache, locationResolver, resource, split.visible, ruleIndexes)

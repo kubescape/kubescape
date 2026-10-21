@@ -358,9 +358,11 @@ func (gp *GitLabSASTPrinter) printConfigurationScan(ctx context.Context, opaSess
 				continue
 			}
 
-			location := resolveFixLocation(opaSessionObj, locationResolver, &ac, resource.resourceID)
-			res, _ := opaSessionObj.GetResource(resource.resourceID)
+			// resolve the location from the same evidence the report shows, so it never
+			// points at a field that an exception removed from the description
 			evidence := cautils.EvidenceControl(&opaSessionObj.Report.SummaryDetails, ac)
+			location := resolveFixLocation(opaSessionObj, locationResolver, &evidence, resource.resourceID)
+			res, _ := opaSessionObj.GetResource(resource.resourceID)
 			report.Vulnerabilities = append(report.Vulnerabilities, toGitLabVulnerability(ctl, &evidence, res, resource.resourceID, resource.relPath, location, gp.showSecrets))
 		}
 	}

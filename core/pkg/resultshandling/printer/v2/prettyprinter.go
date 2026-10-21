@@ -285,10 +285,11 @@ func (pp *PrettyPrinter) printResources(summary *reportsummary.SummaryDetails, c
 
 func attachAssistedRemediation(summary *reportsummary.SummaryDetails, workloads []WorkloadSummary, controlID string, resourcesResult map[string]resourcesresults.Result, showSecrets bool) {
 	for i := range workloads {
-		if workloads[i].status != apis.StatusFailed {
+		workload := &workloads[i]
+		if workload.status != apis.StatusFailed {
 			continue
 		}
-		result, ok := resourcesResult[workloads[i].resource.GetID()]
+		result, ok := resourcesResult[workload.resource.GetID()]
 		if !ok {
 			continue
 		}
@@ -300,9 +301,9 @@ func attachAssistedRemediation(summary *reportsummary.SummaryDetails, workloads 
 				continue
 			}
 			displayed := cautils.EvidenceControl(summary, result.AssociatedControls[j])
-			paths := AssistedRemediationPathsWithCurrentValuesFiltered(&displayed, workloads[i].resource, showSecrets)
+			paths := AssistedRemediationPathsWithCurrentValuesFiltered(&displayed, workload.resource, showSecrets)
 			if len(paths) > 0 {
-				workloads[i].assistedRemediation = strings.Join(paths, ", ")
+				workload.assistedRemediation = strings.Join(paths, ", ")
 			}
 			break
 		}
