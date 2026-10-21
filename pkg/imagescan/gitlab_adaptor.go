@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/kubescape/go-logger"
@@ -69,6 +70,7 @@ func (w *gitlabAPIWrapper) DoGraphQL(ctx context.Context, query string, variable
 // GitlabAdaptor implements IContainerImageVulnerabilityAdaptor for GitLab Container Registry.
 type GitlabAdaptor struct {
 	client GitlabAPI
+	mu     sync.RWMutex
 }
 
 // NewGitlabAdaptor creates a new GitLab adaptor instance.
@@ -78,6 +80,12 @@ func NewGitlabAdaptor() *GitlabAdaptor {
 
 // Login authenticates with GitLab GraphQL API.
 func (a *GitlabAdaptor) Login(ctx context.Context, registry string, credentials RegistryCredentials) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	// Invalidate any previous session immediately so failed re-login does not leave stale authenticated state
+	a.client = nil
+
 	if credentials.Token == "" {
 		return fmt.Errorf("gitlab adaptor requires a personal or project access token; username/password is not supported for the GraphQL API")
 	}
@@ -189,7 +197,11 @@ type scanCacheEntry struct {
 
 // GetImagesScanStatus retrieves the scan status for a list of image identifiers.
 func (a *GitlabAdaptor) GetImagesScanStatus(ctx context.Context, imageIDs []ContainerImageIdentifier) ([]ContainerImageScanStatus, error) {
-	if a.client == nil {
+	a.mu.RLock()
+	client := a.client
+	a.mu.RUnlock()
+
+	if client == nil {
 		return nil, fmt.Errorf("gitlab client not initialized, call login first")
 	}
 
@@ -205,7 +217,7 @@ func (a *GitlabAdaptor) GetImagesScanStatus(ctx context.Context, imageIDs []Cont
 			IsBomAvailable:  false,
 		}
 
-		fullPath, err := a.resolveRegistryProject(ctx, imageID.Repository, projectCache)
+		fullPath, err := a.resolveRegistryProjectWithClient(ctx, client, imageID.Repository, projectCache)
 		if err != nil {
 			fetchErr := fmt.Errorf("failed to resolve gitlab project: %w", err)
 			logger.L().Warning("image scan status error, result may be incomplete", helpers.Error(fetchErr))
@@ -239,7 +251,7 @@ func (a *GitlabAdaptor) GetImagesScanStatus(ctx context.Context, imageIDs []Cont
 			"fullPath": fullPath,
 		}
 
-		data, err := a.client.DoGraphQL(ctx, query, variables)
+		data, err := client.DoGraphQL(ctx, query, variables)
 		if err != nil {
 			fetchErr := fmt.Errorf("failed to query scan status for repository %s: %w", fullPath, err)
 			logger.L().Warning("image scan status error, result may be incomplete", helpers.Error(fetchErr))
@@ -317,7 +329,11 @@ func imageMatches(locationImage string, imageID ContainerImageIdentifier) bool {
 
 // GetImagesVulnerabilities retrieves the vulnerability reports for a list of image identifiers.
 func (a *GitlabAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs []ContainerImageIdentifier) ([]ContainerImageVulnerabilityReport, error) {
-	if a.client == nil {
+	a.mu.RLock()
+	client := a.client
+	a.mu.RUnlock()
+
+	if client == nil {
 		return nil, fmt.Errorf("gitlab client not initialized, call login first")
 	}
 
@@ -332,7 +348,7 @@ func (a *GitlabAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs [
 			Vulnerabilities: []Vulnerability{},
 		}
 
-		fullPath, err := a.resolveRegistryProject(ctx, imageID.Repository, projectCache)
+		fullPath, err := a.resolveRegistryProjectWithClient(ctx, client, imageID.Repository, projectCache)
 		if err != nil {
 			fetchErr := fmt.Errorf("failed to resolve gitlab project: %w", err)
 			logger.L().Warning("image scan error, result may be incomplete", helpers.Error(fetchErr))
@@ -389,7 +405,7 @@ func (a *GitlabAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs [
 					variables["after"] = afterCursor
 				}
 
-				data, err := a.client.DoGraphQL(ctx, query, variables)
+				data, err := client.DoGraphQL(ctx, query, variables)
 				if err != nil {
 					fetchErr = fmt.Errorf("failed to query vulnerabilities for repository %s: %w", fullPath, err)
 					logger.L().Warning("image scan error, result may be incomplete", helpers.Error(fetchErr))
@@ -481,7 +497,11 @@ func (a *GitlabAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs [
 // GetImagesInformation retrieves the BOM and manifest information for a list of image identifiers.
 // Note: The GitLab GraphQL API does not expose SBOM data, so this always returns an empty BOM.
 func (a *GitlabAdaptor) GetImagesInformation(ctx context.Context, imageIDs []ContainerImageIdentifier) ([]ContainerImageInformation, error) {
-	if a.client == nil {
+	a.mu.RLock()
+	client := a.client
+	a.mu.RUnlock()
+
+	if client == nil {
 		return nil, fmt.Errorf("gitlab client not initialized, call login first")
 	}
 
@@ -500,5 +520,8 @@ func (a *GitlabAdaptor) GetImagesInformation(ctx context.Context, imageIDs []Con
 
 // Destroy cleans up any persistent resources used by the adaptor.
 func (a *GitlabAdaptor) Destroy() error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.client = nil
 	return nil
 }
