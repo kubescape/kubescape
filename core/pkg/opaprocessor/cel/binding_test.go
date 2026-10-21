@@ -240,3 +240,42 @@ func namespaceObject(name string, nsLabels map[string]string) map[string]any {
 		"metadata":   map[string]any{"name": name, "labels": l},
 	}
 }
+
+// TestBindingScopeNamespacelessPod covers an offline Pod manifest without
+// metadata.namespace: it is namespaced, so a namespaceSelector cannot be
+// answered without knowing where it will be created.
+func TestBindingScopeNamespacelessPod(t *testing.T) {
+	scope, err := ParseBindingScope(bindingWith(map[string]any{
+		"namespaceSelector": map[string]any{"matchLabels": map[string]any{"env": "prod"}},
+	}))
+	require.NoError(t, err)
+
+	_, err = scope.Covers(workload("v1", "Pod", "p", "", nil), nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no metadata.namespace")
+}
+
+// TestBindingScopeEquivalentVersions covers rules that name another version of
+// the object's resource. Under Equivalent only the cluster knows whether they
+// are equivalent, so the answer is unknown; under Exact they do not match.
+func TestBindingScopeEquivalentVersions(t *testing.T) {
+	podsV2 := []any{map[string]any{
+		"apiGroups": []any{""}, "apiVersions": []any{"v2"},
+		"resources": []any{"pods"}, "operations": []any{"CREATE"},
+	}}
+	pod := workload("v1", "Pod", "p", "prod", nil)
+
+	for _, field := range []string{"resourceRules", "excludeResourceRules"} {
+		scope, err := ParseBindingScope(bindingWith(map[string]any{field: podsV2}))
+		require.NoError(t, err)
+		_, err = scope.Covers(pod, nil)
+		require.Error(t, err, field)
+		assert.Contains(t, err.Error(), field)
+	}
+
+	scope, err := ParseBindingScope(bindingWith(map[string]any{"resourceRules": podsV2, "matchPolicy": "Exact"}))
+	require.NoError(t, err)
+	covered, err := scope.Covers(pod, nil)
+	require.NoError(t, err)
+	assert.False(t, covered)
+}
