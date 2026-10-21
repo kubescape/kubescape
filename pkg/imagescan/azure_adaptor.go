@@ -102,6 +102,10 @@ func resolveAzureCloudConfig(registryHost string) (cloud.Configuration, error) {
 // Explicit credentials passed via RegistryCredentials are intentionally unsupported
 // as Azure SDK relies heavily on Managed Identities and Azure CLI credentials.
 func (a *AzureAdaptor) Login(ctx context.Context, registry string, credentials RegistryCredentials) error {
+	// A failed login must not leave an earlier identity callable or pair an
+	// old client with a newly requested registry. Publish only after the probe.
+	a.client = nil
+	a.registryHost = ""
 	if credentials.Username != "" || credentials.Password != "" || credentials.Token != "" {
 		return fmt.Errorf("explicit credentials are intentionally unsupported for Azure; use DefaultAzureCredential")
 	}
@@ -110,8 +114,6 @@ func (a *AzureAdaptor) Login(ctx context.Context, registry string, credentials R
 	if err != nil {
 		return err
 	}
-	a.registryHost = strings.ToLower(registry)
-
 	clientOpts := azcore.ClientOptions{Cloud: cloudConfig}
 
 	cred, err := a.credProvider(&azidentity.DefaultAzureCredentialOptions{
@@ -127,16 +129,16 @@ func (a *AzureAdaptor) Login(ctx context.Context, registry string, credentials R
 	if err != nil {
 		return fmt.Errorf("unable to load azure resource graph client: %w", err)
 	}
-	a.client = c
-
 	// Cheap probe query so Login fails fast on bad/missing identity
 	probeReq := armresourcegraph.QueryRequest{
 		Query: to.Ptr("securityresources | limit 1"),
 	}
-	if _, err := a.client.Resources(ctx, probeReq, nil); err != nil {
+	if _, err := c.Resources(ctx, probeReq, nil); err != nil {
 		return fmt.Errorf("failed azure identity probe: %w", err)
 	}
 
+	a.client = c
+	a.registryHost = strings.ToLower(registry)
 	return nil
 }
 
