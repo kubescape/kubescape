@@ -140,6 +140,34 @@ func prettyPrintPolicies(out io.Writer, entries []policyListEntry) {
 	policyTable.Render()
 }
 
+// csvFormulaPrefixes contains the characters spreadsheets treat as the start of
+// an executable formula or command payload if placed at the start of a cell.
+// Leading whitespace is included too, since a cell starting with a newline or
+// carriage return can still execute a formula on its first non-blank line.
+const csvFormulaPrefixes = "=+-@\t\r\n"
+
+// csvSafeCell neutralizes a cell against spreadsheet formula injection (CWE-1236)
+// by prepending a single quote, the standard mitigation: spreadsheets treat a
+// leading apostrophe as literal text and do not execute or display it, while
+// other CSV consumers see an inert string.
+func csvSafeCell(cell string) string {
+	if cell == "" {
+		return cell
+	}
+	if strings.ContainsRune(csvFormulaPrefixes, rune(cell[0])) {
+		return "'" + cell
+	}
+	return cell
+}
+
+// csvSafeRow applies csvSafeCell across every cell of a CSV row.
+func csvSafeRow(row []string) []string {
+	for i := range row {
+		row[i] = csvSafeCell(row[i])
+	}
+	return row
+}
+
 func csvPolicies(out io.Writer, entries []policyListEntry) error {
 	writer := csv.NewWriter(out)
 	if err := writer.Write([]string{"controlID", "policy", "takesParams", "failurePolicy", "resources", "duplicateName", "duplicateControl"}); err != nil {
@@ -155,7 +183,7 @@ func csvPolicies(out io.Writer, entries []policyListEntry) error {
 			strconv.FormatBool(entry.DuplicateName),
 			strconv.FormatBool(entry.DuplicateControl),
 		}
-		if err := writer.Write(record); err != nil {
+		if err := writer.Write(csvSafeRow(record)); err != nil {
 			return fmt.Errorf("write csv output: %w", err)
 		}
 	}
