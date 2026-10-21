@@ -18,6 +18,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/kustomize/api/krusty"
 	"sigs.k8s.io/kustomize/kyaml/filesys"
+	"sigs.k8s.io/kustomize/kyaml/resid"
 )
 
 // copy of scanner container-redaction function from processorhandlerutils.go:811
@@ -3056,4 +3057,241 @@ spec:
 
 	_, err = os.Stat(filepath.Join(outDir, "base.yaml"))
 	assert.True(t, os.IsNotExist(err), "base.yaml must not be written when declined")
+}
+
+func TestReview4034ClusterScopedCSIDriverKustomizeBuild(t *testing.T) {
+	chartDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "Chart.yaml"), []byte("apiVersion: v2\nname: test-csi\nversion: 0.1.0\n"), 0600))
+	templatesDir := filepath.Join(chartDir, "templates")
+	require.NoError(t, os.MkdirAll(templatesDir, 0755))
+
+	csiYaml := `apiVersion: storage.k8s.io/v1
+kind: CSIDriver
+metadata:
+  name: my-csi-driver
+spec:
+  attachRequired: true
+`
+	require.NoError(t, os.WriteFile(filepath.Join(templatesDir, "csidriver.yaml"), []byte(csiYaml), 0600))
+
+	scannedCSI := &reporthandling.Resource{
+		Object: map[string]interface{}{
+			"apiVersion": "storage.k8s.io/v1",
+			"kind":       "CSIDriver",
+			"sourcePath": filepath.Join(chartDir, "templates/csidriver.yaml"),
+			"metadata": map[string]interface{}{
+				"name": "my-csi-driver",
+			},
+			"spec": map[string]interface{}{
+				"attachRequired": true,
+			},
+		},
+	}
+
+	// Verify Kustomize's full GVK OpenAPI scope knowledge recognizes CSIDriver as cluster-scoped
+	assert.True(t, resid.NewGvk("storage.k8s.io", "v1", "CSIDriver").IsClusterScoped())
+
+	outDir := t.TempDir()
+	suggs := []HelmFixSuggestion{
+		{
+			Resource:     scannedCSI,
+			ChartPath:    chartDir,
+			TemplateFile: "templates/csidriver.yaml",
+			FixPaths:     []armotypes.FixPath{{Path: "spec.attachRequired", Value: "false"}},
+		},
+	}
+
+	res, err := EmitKustomizePatch(suggs, outDir)
+	require.NoError(t, err)
+	require.Len(t, res.EmittedResources, 1)
+	assert.Empty(t, res.SkippedResources)
+
+	// Read generated kustomization.yaml to verify target.Namespace is omitted (not set to "default")
+	kustBytes, err := os.ReadFile(filepath.Join(outDir, "kustomization.yaml"))
+	require.NoError(t, err)
+	var kd kustomizationDoc
+	require.NoError(t, yaml.Unmarshal(kustBytes, &kd))
+	require.Len(t, kd.Patches, 1)
+	assert.Empty(t, kd.Patches[0].Target.Namespace, "cluster-scoped CSIDriver must not have target namespace default")
+
+	// Execute actual kustomize build and assert attachRequired changed to false
+	k := krusty.MakeKustomizer(krusty.MakeDefaultOptions())
+	resMap, err := k.Run(filesys.MakeFsOnDisk(), outDir)
+	require.NoError(t, err)
+	outYaml, err := resMap.AsYaml()
+	require.NoError(t, err)
+
+	assert.Contains(t, string(outYaml), "attachRequired: false", "kustomize build must apply patch modifying attachRequired to false")
+	assert.NotContains(t, string(outYaml), "attachRequired: true", "kustomize build must not leave attachRequired: true")
+}
+
+func TestReview4034RejectsAddedServiceSelectorWithEmptyLeaf(t *testing.T) {
+	// 1. Direct helper test: verifyScannedFieldsMatch rejects added selector with empty leaf {app: ""}
+	scannedMap := map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "Service",
+		"metadata": map[string]interface{}{
+			"name": "web",
+		},
+		"spec": map[string]interface{}{
+			"externalTrafficPolicy": "Cluster",
+		},
+	}
+	driftedMap := map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "Service",
+		"metadata": map[string]interface{}{
+			"name": "web",
+		},
+		"spec": map[string]interface{}{
+			"selector": map[string]interface{}{
+				"app": "",
+			},
+			"externalTrafficPolicy": "Cluster",
+		},
+	}
+	err := verifyScannedFieldsMatch(scannedMap, driftedMap, "")
+	require.Error(t, err, "verifyScannedFieldsMatch must reject added selector even when leaf value is empty string")
+	assert.Contains(t, err.Error(), "spec.selector")
+
+	// Also verify when scanned resource had empty selector map {}
+	scannedWithEmptySelector := map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "Service",
+		"metadata": map[string]interface{}{
+			"name": "web",
+		},
+		"spec": map[string]interface{}{
+			"selector":              map[string]interface{}{},
+			"externalTrafficPolicy": "Cluster",
+		},
+	}
+	errEmpty := verifyScannedFieldsMatch(scannedWithEmptySelector, driftedMap, "")
+	require.Error(t, errEmpty, "verifyScannedFieldsMatch must reject {app: \"\"} when scanned was empty map")
+
+	// 2. Full EmitKustomizePatch integration test: Service chart drift with {app: ""} is declined
+	chartDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "Chart.yaml"), []byte("apiVersion: v2\nname: test-svc\nversion: 0.1.0\n"), 0600))
+	templatesDir := filepath.Join(chartDir, "templates")
+	require.NoError(t, os.MkdirAll(templatesDir, 0755))
+
+	svcDriftedYaml := `apiVersion: v1
+kind: Service
+metadata:
+  name: web
+spec:
+  selector:
+    app: ""
+  externalTrafficPolicy: Cluster
+`
+	require.NoError(t, os.WriteFile(filepath.Join(templatesDir, "service.yaml"), []byte(svcDriftedYaml), 0600))
+
+	scannedSvc := &reporthandling.Resource{
+		Object: map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "Service",
+			"sourcePath": filepath.Join(chartDir, "templates/service.yaml"),
+			"metadata": map[string]interface{}{
+				"name": "web",
+			},
+			"spec": map[string]interface{}{
+				"externalTrafficPolicy": "Cluster",
+			},
+		},
+	}
+
+	outDir := t.TempDir()
+	suggs := []HelmFixSuggestion{
+		{
+			Resource:     scannedSvc,
+			ChartPath:    chartDir,
+			TemplateFile: "templates/service.yaml",
+			FixPaths:     []armotypes.FixPath{{Path: "spec.externalTrafficPolicy", Value: "Local"}},
+		},
+	}
+
+	res, err := EmitKustomizePatch(suggs, outDir)
+	require.NoError(t, err)
+	assert.Empty(t, res.EmittedResources, "must decline when chart drifted with selector {app: \"\"}")
+	require.Len(t, res.SkippedResources, 1)
+	assert.Contains(t, res.SkippedResources[0].Reason, "spec.selector")
+}
+
+func TestReview4034RejectsNullExternalIPsBecomingNonEmptyList(t *testing.T) {
+	// 1. Direct helper test: null externalIPs in scanned resource cannot match nonempty list
+	scannedMap := map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "Service",
+		"metadata": map[string]interface{}{
+			"name": "web",
+		},
+		"spec": map[string]interface{}{
+			"externalIPs":           nil,
+			"externalTrafficPolicy": "Cluster",
+		},
+	}
+	driftedMap := map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "Service",
+		"metadata": map[string]interface{}{
+			"name": "web",
+		},
+		"spec": map[string]interface{}{
+			"externalIPs": []interface{}{
+				"198.51.100.1",
+			},
+			"externalTrafficPolicy": "Cluster",
+		},
+	}
+	err := verifyScannedFieldsMatch(scannedMap, driftedMap, "")
+	require.Error(t, err, "null externalIPs in scanned resource must not match nonempty rendered list")
+	assert.Contains(t, err.Error(), "spec.externalIPs")
+
+	// 2. Full EmitKustomizePatch test: declined when null externalIPs became nonempty list
+	chartDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "Chart.yaml"), []byte("apiVersion: v2\nname: test-svc\nversion: 0.1.0\n"), 0600))
+	templatesDir := filepath.Join(chartDir, "templates")
+	require.NoError(t, os.MkdirAll(templatesDir, 0755))
+
+	svcDriftedYaml := `apiVersion: v1
+kind: Service
+metadata:
+  name: web
+spec:
+  externalIPs:
+  - 198.51.100.1
+  externalTrafficPolicy: Cluster
+`
+	require.NoError(t, os.WriteFile(filepath.Join(templatesDir, "service.yaml"), []byte(svcDriftedYaml), 0600))
+
+	scannedSvc := &reporthandling.Resource{
+		Object: map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "Service",
+			"sourcePath": filepath.Join(chartDir, "templates/service.yaml"),
+			"metadata": map[string]interface{}{
+				"name": "web",
+			},
+			"spec": map[string]interface{}{
+				"externalIPs":           nil,
+				"externalTrafficPolicy": "Cluster",
+			},
+		},
+	}
+
+	outDir := t.TempDir()
+	suggs := []HelmFixSuggestion{
+		{
+			Resource:     scannedSvc,
+			ChartPath:    chartDir,
+			TemplateFile: "templates/service.yaml",
+			FixPaths:     []armotypes.FixPath{{Path: "spec.externalTrafficPolicy", Value: "Local"}},
+		},
+	}
+
+	res, err := EmitKustomizePatch(suggs, outDir)
+	require.NoError(t, err)
+	assert.Empty(t, res.EmittedResources, "must decline when null externalIPs became nonempty list")
+	require.Len(t, res.SkippedResources, 1)
+	assert.Contains(t, res.SkippedResources[0].Reason, "externalIPs")
 }

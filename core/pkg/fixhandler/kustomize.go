@@ -18,6 +18,7 @@ import (
 	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"gopkg.in/yaml.v3"
+	"sigs.k8s.io/kustomize/kyaml/resid"
 )
 
 // KustomizeEmitResult records the outcome of generating Kustomize patches for Helm resources.
@@ -502,23 +503,15 @@ func joinPath(parent, child string) string {
 	return parent + "." + child
 }
 
-// isEmptyValue reports whether v is nil, empty string, empty slice, or an empty map
-// (or a map where all values are themselves empty values).
+// isEmptyValue reports whether v is nil, empty string, empty slice, or an empty map.
+// Nonempty maps (even where leaves are empty strings) represent meaningful structure.
 func isEmptyValue(v interface{}) bool {
 	if v == nil {
 		return true
 	}
 	switch val := v.(type) {
 	case map[string]interface{}:
-		if len(val) == 0 {
-			return true
-		}
-		for _, child := range val {
-			if !isEmptyValue(child) {
-				return false
-			}
-		}
-		return true
+		return len(val) == 0
 	case []interface{}:
 		return len(val) == 0
 	case string:
@@ -548,7 +541,16 @@ func isRedactedFieldKey(key string) bool {
 // concrete non-redacted value conflicts or if additional non-redacted fields exist.
 func verifyScannedFieldsMatch(scannedVal, candVal interface{}, path string) error {
 	if scannedVal == nil {
-		return nil
+		if candVal == nil || isEmptyValue(candVal) {
+			return nil
+		}
+		return fmt.Errorf("field %s is null in scanned resource but present with non-empty value in rendered base", path)
+	}
+	if candVal == nil {
+		if isEmptyValue(scannedVal) {
+			return nil
+		}
+		return fmt.Errorf("field %s is present with non-empty value in scanned resource but null in rendered base", path)
 	}
 
 	if s, ok := scannedVal.(string); ok && s == "XXXXXX" {
@@ -584,16 +586,12 @@ func verifyScannedFieldsMatch(scannedVal, candVal interface{}, path string) erro
 			}
 		}
 
-		for k, candChild := range cMap {
+		for k := range cMap {
 			if isSourceMetadataKey(path, k) || isRedactedFieldKey(k) {
 				continue
 			}
 			_, exists := sTyped[k]
 			if !exists {
-				// Normalize equivalent empty/default fields (such as empty map or slice)
-				if isEmptyValue(candChild) {
-					continue
-				}
 				return fmt.Errorf("field %s present in rendered base is missing in scanned resource", joinPath(path, k))
 			}
 		}
@@ -966,6 +964,16 @@ func loadUnredactedFromChart(s HelmFixSuggestion, chartCache map[string]map[stri
 	return matches[0], nil
 }
 
+// isClusterScopedResource reports whether a Kubernetes resource is cluster-scoped,
+// deriving scope from the full GVK using Kustomize's openapi definitions with a fallback
+// for standard cluster-scoped kinds.
+func isClusterScopedResource(key resourceKey) bool {
+	if resid.NewGvk(key.Group, key.Version, key.Kind).IsClusterScoped() {
+		return true
+	}
+	return isClusterScopedKind(key.Kind)
+}
+
 // isClusterScopedKind reports whether a standard Kubernetes resource kind is cluster-scoped.
 func isClusterScopedKind(kind string) bool {
 	switch kind {
@@ -976,7 +984,8 @@ func isClusterScopedKind(kind string) bool {
 		"StorageClass", "VolumeAttachment", "IngressClass",
 		"RuntimeClass", "PriorityClass", "MutatingWebhookConfiguration",
 		"ValidatingWebhookConfiguration", "ValidatingAdmissionPolicy",
-		"ValidatingAdmissionPolicyBinding":
+		"ValidatingAdmissionPolicyBinding",
+		"CSIDriver", "CSINode", "CertificateSigningRequest":
 		return true
 	default:
 		return false
@@ -1170,7 +1179,7 @@ func EmitKustomizePatch(suggestions []HelmFixSuggestion, dir string) (*Kustomize
 		}
 		if rg.key.Namespace != "" {
 			target.Namespace = regexp.QuoteMeta(rg.key.Namespace)
-		} else if !isClusterScopedKind(rg.key.Kind) {
+		} else if !isClusterScopedResource(rg.key) {
 			target.Namespace = "default"
 		}
 
