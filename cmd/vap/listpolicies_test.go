@@ -120,3 +120,62 @@ func TestListPoliciesCommandWritesToStdoutByDefault(t *testing.T) {
 
 	assert.Contains(t, stdout.String(), "C-0016")
 }
+
+// TestCsvSafeCell_VAP verifies that cells starting with spreadsheet formula
+// prefix characters (=, +, -, @, \t, \r, \n) are prepended with a single quote.
+func TestCsvSafeCell_VAP(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{name: "empty stays empty", in: "", want: ""},
+		{name: "plain text is unchanged", in: "demo", want: "demo"},
+		{name: "equals is neutralized", in: "=1+1", want: "'=1+1"},
+		{name: "plus is neutralized", in: "+1", want: "'+1"},
+		{name: "minus is neutralized", in: "-1", want: "'-1"},
+		{name: "at sign is neutralized", in: "@SUM(A1)", want: "'@SUM(A1)"},
+		{name: "tab is neutralized", in: "\tcmd", want: "'\tcmd"},
+		{name: "carriage return is neutralized", in: "\rcmd", want: "'\rcmd"},
+		{name: "line feed is neutralized", in: "\n=1+1", want: "'\n=1+1"},
+		{name: "dde payload is neutralized", in: "=cmd|' /C calc'!A0", want: "'=cmd|' /C calc'!A0"},
+		{name: "leading pipe is not a formula prefix", in: "|table", want: "|table"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, csvSafeCell(tc.in))
+		})
+	}
+}
+
+func TestCsvPolicies_NeutralizesFormulaInjection(t *testing.T) {
+	entries := []policyListEntry{
+		{
+			ControlID:        "+C-0001",
+			Policy:           "=cmd|' /C calc'!A0",
+			TakesParams:      true,
+			FailurePolicy:    "@Fail",
+			Resources:        []string{"-pods", "=deployments"},
+			DuplicateName:    false,
+			DuplicateControl: false,
+		},
+	}
+
+	buf := &bytes.Buffer{}
+	require.NoError(t, csvPolicies(buf, entries))
+
+	records, err := csv.NewReader(buf).ReadAll()
+	require.NoError(t, err)
+	require.Len(t, records, 2)
+	assert.Equal(t, []string{"controlID", "policy", "takesParams", "failurePolicy", "resources", "duplicateName", "duplicateControl"}, records[0])
+	assert.Equal(t, []string{
+		"'+C-0001",
+		"'=cmd|' /C calc'!A0",
+		"true",
+		"'@Fail",
+		"'-pods;=deployments",
+		"false",
+		"false",
+	}, records[1])
+}
