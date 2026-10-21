@@ -282,10 +282,14 @@ func (a *GCPAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs []Co
 				}
 
 				if vulnDetails := occurrence.GetVulnerability(); vulnDetails != nil {
+					// The note identifies the advisory; ShortDescription is prose
+					// and can be shared by several distinct vulnerabilities.
 					id := vulnDetails.GetShortDescription()
-					if id == "" && occurrence.GetNoteName() != "" {
+					if occurrence.GetNoteName() != "" {
 						parts := strings.Split(occurrence.GetNoteName(), "/")
-						id = parts[len(parts)-1]
+						if noteID := parts[len(parts)-1]; noteID != "" {
+							id = noteID
+						}
 					}
 
 					vuln := Vulnerability{
