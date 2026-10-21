@@ -103,7 +103,7 @@ func setComplexKSResourceMap(frameworks []reporthandling.Framework, resourceToCo
 				}
 				for _, match := range rule.DynamicMatch {
 					insertKSResourcesAndControls(k8sResources, match, resourceToControls, control)
-					insertDynamicMatchControls(match, resourceToControls, control)
+					insertDynamicMatchControls(k8sResources, match, resourceToControls, control)
 				}
 			}
 		}
@@ -153,13 +153,25 @@ func insertControls(resource string, resourceToControl map[string][]string, cont
 // without the dependency being recorded, and a failed pull of it would not be
 // attributed to the control. The virtual identities of these resources use the
 // kind as the resource name, so matching by name also covers matching by kind.
-func insertDynamicMatchControls(match reporthandling.RuleMatchObjects, resourceToControl map[string][]string, control reporthandling.Control) {
+//
+// Each selected identity is also added to k8sResources, so it is collected (or
+// its failure recorded) like a name the rule spelled out. A dependency that is
+// never requested has no failure entry, and BuildScanCoverage would read it as
+// collected and count the control as evaluated.
+func insertDynamicMatchControls(k8sResources map[string]map[string]map[string]any, match reporthandling.RuleMatchObjects, resourceToControl map[string][]string, control reporthandling.Control) {
 	add := func(resource string, apiVersions []string) {
 		for _, apiVersion := range apiVersions {
 			group, version := k8sinterface.SplitApiVersion(apiVersion)
 			if !dynamicMatchSelects(match, group, version, resource) {
 				continue
 			}
+			if k8sResources[group] == nil {
+				k8sResources[group] = make(map[string]map[string]any)
+			}
+			if k8sResources[group][version] == nil {
+				k8sResources[group][version] = make(map[string]any)
+			}
+			k8sResources[group][version][resource] = nil
 			r := k8sinterface.JoinResourceTriplets(group, version, resource)
 			if !slices.Contains(resourceToControl[r], control.ControlID) {
 				resourceToControl[r] = append(resourceToControl[r], control.ControlID)

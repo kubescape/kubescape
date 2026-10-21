@@ -120,6 +120,49 @@ func TestDynamicMatchWildcardFailedPullIsIncomparable(t *testing.T) {
 	assert.True(t, resolved["C-PODS"], "C-PODS does not read the failed pull")
 }
 
+// TestDynamicMatchDependenciesAreCollected checks the contract between the
+// collection plan and the dependency map: every Kubescape-served resource a
+// control is recorded as depending on is also requested, so on a cluster
+// without host data each of them gets a failure entry. Otherwise a dependency
+// that was never requested reads as collected, and a control with no input
+// counts as evaluated.
+func TestDynamicMatchDependenciesAreCollected(t *testing.T) {
+	framework := reporthandling.Framework{Controls: []reporthandling.Control{
+		dynamicMatchOnControl("C-B", []string{"hostdata.kubescape.cloud"}, []string{"v1beta0"}, []string{"KubeletInfo", "*"}),
+		dynamicMatchOnControl("C-LOWER-CASE", []string{"hostdata.kubescape.cloud"}, []string{"v1beta0"}, []string{"cloudProviderInfo"}),
+		{ControlID: "C-PODS", Rules: []reporthandling.PolicyRule{{Match: []reporthandling.RuleMatchObjects{{
+			APIGroups: []string{""}, APIVersions: []string{"v1"}, Resources: []string{"Pod"},
+		}}}}},
+	}}
+	resourceToControls := map[string][]string{}
+	plan := setKSResourceMap([]reporthandling.Framework{framework}, resourceToControls, defaultResourceResolver)
+
+	for gvr := range resourceToControls {
+		if isExternalResource(gvr) {
+			assert.Contains(t, plan, gvr, "dependency is not requested for collection")
+		}
+	}
+	hostResources := cautils.MapHostResources(plan)
+	assert.Len(t, hostResources, len(MapResourceToApiGroup))
+
+	// No host sensor: the handler marks every requested host resource as skipped.
+	infoMap := map[string]apis.StatusInfo{}
+	cautils.SetInfoMapForResources("host sensor not available", hostResources, infoMap)
+	coverage := cautils.BuildScanCoverage(infoMap, resourceToControls, nil, nil, nil, nil,
+		map[string]struct{}{"C-B": {}, "C-LOWER-CASE": {}, "C-PODS": {}})
+	coverage.ComputeCoverageScore(3)
+
+	notEvaluated := make([]string, 0, len(coverage.NotEvaluatedControls))
+	for _, control := range coverage.NotEvaluatedControls {
+		notEvaluated = append(notEvaluated, control.ControlID)
+	}
+	slices.Sort(notEvaluated)
+	assert.Equal(t, []string{"C-B", "C-LOWER-CASE"}, notEvaluated)
+	assert.Equal(t, 1, coverage.EvaluatedControls)
+	assert.Zero(t, coverage.SilentFailedGVRCount)
+	assert.InDelta(t, 100.0/3, coverage.CoverageScore, 0.01)
+}
+
 func writeJSONReport(t *testing.T, report any) string {
 	t.Helper()
 	data, err := json.Marshal(report)
