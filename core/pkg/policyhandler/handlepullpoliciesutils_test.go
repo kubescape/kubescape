@@ -94,7 +94,7 @@ func TestPolicyDownloadError(t *testing.T) {
 			case "framework":
 				assert.Equal(t, tt.want, frameworkDownloadError(tt.err, tt.name))
 			case "control":
-				assert.Equal(t, tt.want, controlDownloadError(tt.err, tt.name))
+				assert.EqualError(t, controlDownloadError(tt.err, tt.name), tt.want.Error())
 			default:
 				assert.Equal(t, tt.want, frameworkDownloadError(tt.err, tt.name))
 				assert.Equal(t, tt.want, controlDownloadError(tt.err, tt.name))

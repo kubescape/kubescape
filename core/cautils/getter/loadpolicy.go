@@ -112,7 +112,7 @@ func (lp *LoadPolicy) GetControl(controlID string) (*reporthandling.Control, err
 	if control != nil {
 		return control, nil
 	}
-	return nil, fmt.Errorf("controlID: %s: %w", controlID, ErrControlNotMatching)
+	return nil, &controlNotFoundError{cause: fmt.Errorf("controlID: %s: %w", controlID, ErrControlNotMatching)}
 }
 
 // GetFramework retrieves a framework configuration from the policy paths.

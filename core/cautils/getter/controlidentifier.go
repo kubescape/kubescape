@@ -1,7 +1,6 @@
 package getter
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/kubescape/opa-utils/reporthandling"
@@ -63,5 +62,5 @@ func (m *controlMatcher) bySection() (*reporthandling.Control, error) {
 	for i := range m.sections {
 		ids[i] = m.sections[i].ControlID
 	}
-	return nil, fmt.Errorf("%w: %q is the section number of %s", ErrControlAmbiguous, strings.TrimSpace(m.id), strings.Join(ids, ", "))
+	return nil, &AmbiguousControlError{Identifier: strings.TrimSpace(m.id), Matches: ids}
 }

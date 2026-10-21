@@ -123,7 +123,7 @@ func (drp *DownloadReleasedPolicy) GetControl(ID string) (*reporthandling.Contro
 		return nil, err
 	}
 	if control == nil {
-		return nil, notFound
+		return nil, &controlNotFoundError{cause: notFound}
 	}
 	return control, nil
 }

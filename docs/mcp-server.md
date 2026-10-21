@@ -317,6 +317,43 @@ List the security controls with their IDs, names and the frameworks they belong 
 ]
 ```
 
+#### `validate_scan_selection`
+
+Check, without running a scan, whether control identifiers resolve the way `scan_controls` resolves them. Run it before an expensive scan to find typos and ambiguous section numbers in one pass. It is read-only and needs no cluster access.
+
+Each identifier is a control ID (`C-0286`) or a framework section number (`CIS-3.1.1`). Matching is case-insensitive and ignores surrounding whitespace. An identifier is reported as one of:
+
+- **resolved**: it names exactly one control; `control_id` is that control's canonical ID.
+- **unknown**: no control carries it.
+- **ambiguous**: it is a section number shared by several controls; `matches` lists their control IDs. Use one of those IDs instead.
+- **duplicate**: it names a control that an earlier identifier already named. This does not make the selection invalid; `scan_controls` scans the control once.
+
+`valid` is `true` when nothing is unknown or ambiguous. Unlike `scan_controls`, which stops at the first identifier it cannot resolve, this reports every identifier.
+
+The tool checks identifiers only. It does not check that a control belongs to a framework, because `scan_controls` does not either, and it does not report whether a control would find anything in your cluster.
+
+If the policy bundle is still loading, the call fails with a `TIMEOUT` error; retry shortly. If the bundle cannot be read, the call fails with an error. Neither is reported as an unknown identifier, because neither says anything about your selection.
+
+**Parameters:**
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `control_ids` | string or array of strings | Yes | Control IDs or section numbers, as a comma-separated string or an array. Same format as `scan_controls` |
+
+**Example Response** (`control_ids: ["CIS-3.1.1", "C-0286", "C-9999"]`):
+```json
+{
+  "valid": false,
+  "resolved": [
+    {"input": "CIS-3.1.1", "control_id": "C-0286"}
+  ],
+  "unknown": ["C-9999"],
+  "ambiguous": [],
+  "duplicates": [
+    {"input": "C-0286", "matches_input": "CIS-3.1.1", "control_id": "C-0286"}
+  ]
+}
+```
+
 ### Live Scanning Tools
 
 #### `run_framework_security_scan`
