@@ -114,6 +114,12 @@ func decodePodSpec(raw any) (corev1.PodSpec, error) {
 	if err := json.Unmarshal(b, &ps); err != nil {
 		return corev1.PodSpec{}, fmt.Errorf("unmarshal: %w", err)
 	}
+	// Without an application container there is no usable workload to
+	// evaluate. Treat templating mistakes as incomplete analysis instead of
+	// letting the empty container loop produce a compliant result.
+	if len(ps.Containers) == 0 {
+		return corev1.PodSpec{}, fmt.Errorf("PodSpec must contain at least one regular container")
+	}
 	return ps, nil
 }
 
