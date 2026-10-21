@@ -3,6 +3,7 @@ package mcpserver
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"net/url"
@@ -535,6 +536,27 @@ func scanConfigMap(cm *unstructured.Unstructured, namespace string) []SecretFind
 
 	for _, k := range binKeys {
 		v := binaryData[k]
+		// The API represents binaryData bytes as base64 strings. Inspect
+		// the decoded content just as we inspect data, while always fully
+		// masking binary findings (including the encoded representation).
+		// Key-based findings retain their existing handling below.
+		if decoded, err := base64.StdEncoding.DecodeString(v); err == nil {
+			if matched, ruleID, desc, severity := evaluateSecretString("", string(decoded)); matched {
+				findings = append(findings, SecretFinding{
+					ResourceKind: "ConfigMap",
+					ResourceName: cmName,
+					Namespace:    namespace,
+					Location:     fmt.Sprintf("binaryData.%s", k),
+					Key:          k,
+					RuleID:       ruleID,
+					Description:  desc,
+					MaskedValue:  "******",
+					Severity:     severity,
+					valueDigest:  computeValueDigest(string(decoded)),
+				})
+				continue
+			}
+		}
 		if sensitiveConfigMapFileRegex.MatchString(k) || (sensitiveEnvKeyRegex.MatchString(k) && !nonSecretKeySuffixRegex.MatchString(k)) {
 			findings = append(findings, SecretFinding{
 				ResourceKind: "ConfigMap",
