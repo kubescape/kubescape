@@ -6,6 +6,7 @@ package pss
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -128,7 +129,10 @@ func fetchWorkloadPages(ctx context.Context, client dynamic.Interface, namespace
 // child workloads (e.g., ReplicaSets and Pods) only when an evaluated
 // supported ancestor actually represents the workload. Custom-owned workloads
 // (e.g., Deployments or Pods managed by CRD operators) and workloads whose
-// controller owners are absent from the scan are retained as roots.
+// controller owners are absent from the scan are retained as roots. Children
+// with different PSS violations, or whose PodSpec cannot be decoded, are kept
+// even when their owner is present; ownership alone does not prove the current
+// template represents an old revision or an admission-mutated Pod.
 func DeduplicateWorkloads(workloads []unstructured.Unstructured) []unstructured.Unstructured {
 	byUID := make(map[types.UID]int, len(workloads))
 	byKindName := make(map[string]int, len(workloads))
@@ -141,9 +145,24 @@ func DeduplicateWorkloads(workloads []unstructured.Unstructured) []unstructured.
 		byKindName[key] = i
 	}
 
+	// Compare all checks, even when the caller requests Baseline, so a
+	// distinct Restricted violation cannot disappear behind a parent either.
+	type evaluation struct {
+		violations []Violation
+		err        error
+	}
+	evaluations := make([]evaluation, len(workloads))
+	for i, w := range workloads {
+		evaluations[i].violations, evaluations[i].err = EvaluateUnstructured(w.GetKind(), w.Object, Restricted)
+	}
+	equivalent := func(a, b int) bool {
+		return evaluations[a].err == nil && evaluations[b].err == nil &&
+			slices.Equal(evaluations[a].violations, evaluations[b].violations)
+	}
+
 	var selected []unstructured.Unstructured
 	for i, w := range workloads {
-		if hasEvaluatedAncestor(i, workloads, byUID, byKindName) {
+		if hasEvaluatedAncestor(i, workloads, byUID, byKindName, equivalent) {
 			continue
 		}
 		selected = append(selected, w)
@@ -185,44 +204,42 @@ func findParentInWorkloads(ref metav1.OwnerReference, workloads []unstructured.U
 	return -1, false
 }
 
-// hasEvaluatedAncestor walks the controller-owner chain starting at
-// workloads[idx] and returns true if an ancestor in the workloads slice
-// would be evaluated in its place (meaning idx should be skipped).
-func hasEvaluatedAncestor(idx int, workloads []unstructured.Unstructured, byUID map[types.UID]int, byKindName map[string]int) bool {
-	visited := make(map[int]int) // workload index -> step in traversal path
+// hasEvaluatedAncestor drops a workload only when a collected ancestor has
+// the same PSS result. Old revisions and admission-mutated children can differ
+// from a controller's current template and must then be evaluated themselves.
+func hasEvaluatedAncestor(idx int, workloads []unstructured.Unstructured, byUID map[types.UID]int, byKindName map[string]int, equivalent func(int, int) bool) bool {
+	visited := make(map[int]int)
 	var path []int
+	cycleIncludesStart := false
 
 	curr := idx
 	for {
 		if step, seen := visited[curr]; seen {
-			// Cycle detected in ancestor chain. Designate the lowest index in the cycle
-			// as the evaluated root so that cyclic workloads are not dropped entirely.
-			cycle := path[step:]
-			minIdx := cycle[0]
-			for _, c := range cycle[1:] {
-				if c < minIdx {
-					minIdx = c
-				}
-			}
-			return idx != minIdx
+			cycleIncludesStart = step == 0
+			break
 		}
-
 		visited[curr] = len(path)
 		path = append(path, curr)
-
 		ref := getControllerRef(workloads[curr])
 		if ref == nil {
-			// No controller parent. If curr != idx, curr is the evaluated root ancestor.
-			return curr != idx
+			break
 		}
-
 		parentIdx, found := findParentInWorkloads(*ref, workloads, byUID, byKindName)
 		if !found {
-			// Controller parent is an unsupported kind (custom resource) or absent from the scan.
-			// If curr != idx, curr is the evaluated root ancestor.
-			return curr != idx
+			break
 		}
-
 		curr = parentIdx
 	}
+
+	for _, ancestor := range path[1:] {
+		// Inside an owner cycle, retain the lowest index for each distinct
+		// result, rather than allowing equivalent members to drop each other.
+		if cycleIncludesStart && ancestor > idx {
+			continue
+		}
+		if equivalent(idx, ancestor) {
+			return true
+		}
+	}
+	return false
 }

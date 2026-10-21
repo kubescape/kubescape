@@ -64,6 +64,12 @@ func makeWorkloadWithUID(kind, name, namespace string, uid types.UID, ownerRefs 
 			},
 		},
 	}
+	if kind == "Pod" {
+		// Pods carry their PodSpec directly, unlike controller templates.
+		spec, _, _ := unstructured.NestedMap(u.Object, "spec", "template", "spec")
+		u.Object["spec"] = spec
+		u.SetAPIVersion("v1")
+	}
 	if len(ownerRefs) > 0 {
 		u.SetOwnerReferences(ownerRefs)
 	}
