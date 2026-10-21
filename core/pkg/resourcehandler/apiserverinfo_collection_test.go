@@ -40,6 +40,31 @@ func TestDiscoveryResolverKeepsKubescapeServedIdentities(t *testing.T) {
 	}
 }
 
+// C-0161 matches APIServerInfo under the host-data group, an identity no
+// cluster and no Kubescape collector serves. Registering the C-0089 identity
+// must not turn that one into a live LIST: the fallback is for the registered
+// group and version only, and the host-data one stays dropped as on master.
+func TestDiscoveryResolverDropsUnregisteredAPIServerInfoIdentity(t *testing.T) {
+	resolver, _ := newDiscoveryResourceResolver(coreGroupDiscovery())
+	assert.Empty(t, resolver("hostdata.kubescape.cloud", "v1beta0", "APIServerInfo"))
+	assert.Empty(t, resolver("eks.amazonaws.com", "v1", "APIServerInfo"))
+
+	frameworks := []reporthandling.Framework{{Controls: []reporthandling.Control{
+		{ControlID: "C-0161", Rules: []reporthandling.PolicyRule{{Match: []reporthandling.RuleMatchObjects{{
+			APIGroups: []string{"hostdata.kubescape.cloud"}, APIVersions: []string{"v1beta0"}, Resources: []string{"APIServerInfo"},
+		}}}}},
+		{ControlID: "C-0089", Rules: []reporthandling.PolicyRule{{DynamicMatch: []reporthandling.RuleMatchObjects{{
+			APIGroups: []string{"apiserverinfo.kubescape.cloud"}, APIVersions: []string{"v1beta0"}, Resources: []string{"APIServerInfo"},
+		}}}}},
+	}}}
+	queryable, _ := getQueryableResourceMapFromPolicies(frameworks, nil, reporthandling.ScopeCluster, resolver)
+	assert.Empty(t, queryable.ToK8sResourceMap(), "no live LIST for either APIServerInfo identity")
+
+	external := setKSResourceMap(frameworks, map[string][]string{}, resolver)
+	assert.Contains(t, external, apiServerInfoGVR)
+	assert.NotContains(t, external, "hostdata.kubescape.cloud/v1beta0/APIServerInfo")
+}
+
 // C-0089 reads APIServerInfo through DynamicMatch. It must be selected for
 // collection, routed with the cloud resources, and recorded as the control's
 // dependency so a failed collection shows up in the scan coverage.

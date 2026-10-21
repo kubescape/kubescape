@@ -130,6 +130,41 @@ func mapKSResourceToApiGroup(resource string) []string {
 	return []string{}
 }
 
+// isUnservedKSIdentity reports whether group/version/resource names a group
+// Kubescape serves itself (host data, cloud, image vulnerabilities) without
+// being one of the identities registered for resource in the maps above. C-0161
+// reads APIServerInfo under the host-data group: no cluster and no Kubescape
+// collector serves that one, so it must not become a live query just because
+// the resource name is known. References under any other group keep resolving
+// by name as before.
+func isUnservedKSIdentity(group, version, resource string) bool {
+	registered := mapKSResourceToApiGroup(resource)
+	if len(registered) == 0 || !isKSServedGroup(group) {
+		return false
+	}
+	return !slices.Contains(registered, group+"/"+version)
+}
+
+// isKSServedGroup reports whether group is one of the API groups of the
+// resources Kubescape serves itself.
+func isKSServedGroup(group string) bool {
+	for _, apiVersion := range MapResourceToApiGroup {
+		if g, _ := k8sinterface.SplitApiVersion(apiVersion); g == group {
+			return true
+		}
+	}
+	for _, families := range []map[string][]string{MapResourceToApiGroupCloud, MapResourceToApiGroupVuln} {
+		for _, apiVersions := range families {
+			for _, apiVersion := range apiVersions {
+				if g, _ := k8sinterface.SplitApiVersion(apiVersion); g == group {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
 // isExternalResource reports whether a resolved group/version/resource triplet
 // names a resource Kubescape serves itself - host sensor data, cloud provider
 // descriptions, image vulnerabilities. Their API groups belong to Kubescape, so
