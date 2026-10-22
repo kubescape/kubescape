@@ -24,6 +24,7 @@ func TestRegisteredStorageToolsRejectMalformedArguments(t *testing.T) {
 		"list_sbom_packages",
 		"list_configuration_security_scan_manifests",
 		"get_configuration_security_scan_manifest",
+		"list_configuration_security_scan_summaries",
 	}
 	malformed := []struct {
 		name      string

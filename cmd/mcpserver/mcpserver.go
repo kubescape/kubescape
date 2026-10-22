@@ -15,6 +15,7 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
+	"github.com/kubescape/storage/pkg/apis/softwarecomposition"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	spdxv1beta1 "github.com/kubescape/storage/pkg/generated/clientset/versioned/typed/softwarecomposition/v1beta1"
 	"github.com/mark3labs/mcp-go/mcp"
@@ -502,6 +503,22 @@ func createConfigurationsToolsAndResources(ksServer *KubescapeMcpserver) {
 	)
 
 	ksServer.s.AddTool(getConfigDetailsTool, ksServer.toolHandler(getConfigDetailsTool.Name))
+
+	listConfigSummariesTool := mcp.NewTool(
+		"list_configuration_security_scan_summaries",
+		mcp.WithDescription("List configuration scan results per resource: the failed controls (ID and severity) and the number of controls by status. Summaries are stored on every install; the full manifests behind get_configuration_security_scan_manifest are stored only when continuous scanning is enabled. Use list_controls for what a control checks."),
+		mcp.WithString("namespace",
+			mcp.Description("Filter by namespace (optional, default all namespaces). A workload's summary is stored in the workload's namespace; summaries of cluster-scoped and RBAC resources are in 'kubescape'"),
+		),
+		mcp.WithString("min_severity",
+			mcp.Description("Only list failed controls at or above this severity, and only resources that have one: Critical, High, Medium or Low (optional). A page can then be empty while continue is set"),
+		),
+		mcp.WithString("continue",
+			mcp.Description("Optional Kubernetes continuation token for pagination"),
+		),
+	)
+
+	ksServer.s.AddTool(listConfigSummariesTool, ksServer.toolHandler(listConfigSummariesTool.Name))
 
 	configManifestTemplate := mcp.NewResourceTemplate(
 		"kubescape://configuration-manifests/{namespace}/{manifest_name}",
@@ -1233,6 +1250,36 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 				},
 			},
 		}, nil
+	case "list_configuration_security_scan_summaries":
+		namespaceStr, toolErr := mcpStringArg(arguments, "namespace")
+		if toolErr != nil {
+			return toolErr, nil
+		}
+		if namespaceStr == "" {
+			namespaceStr = metav1.NamespaceAll
+		}
+		minSeverity, toolErr := parseControlMinSeverity(arguments)
+		if toolErr != nil {
+			return toolErr, nil
+		}
+		continueToken, toolErr := mcpStringArg(arguments, "continue")
+		if toolErr != nil {
+			return toolErr, nil
+		}
+		client, ksErr := ksServer.getKsClient()
+		if ksErr != nil {
+			return mcpToolError(ErrCodeK8sClientError, fmt.Sprintf("failed to connect to Kubernetes cluster: %v", ksErr), nil), nil
+		}
+		// Storage lists only metadata unless asked for the full spec.
+		chunk, err := client.WorkloadConfigurationScanSummaries(namespaceStr).List(ctx, metav1.ListOptions{ResourceVersion: softwarecomposition.ResourceVersionFullSpec, Limit: 100, Continue: continueToken})
+		if err != nil {
+			return mcpToolError(classifyScanError(err), fmt.Sprintf("failed to list configuration scan summaries: %v", err), nil), nil
+		}
+		responseJson, err := json.Marshal(configScanSummaryListResponse{Summaries: listConfigScanSummaryEntries(chunk.Items, minSeverity), Continue: chunk.GetContinue()})
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal configuration scan summaries: %w", err)
+		}
+		return mcp.NewToolResultText(string(responseJson)), nil
 	case "list_container_profiles":
 		namespace, toolErr := mcpStringArg(arguments, "namespace")
 		if toolErr != nil {
