@@ -507,6 +507,8 @@ func createConfigurationsToolsAndResources(ksServer *KubescapeMcpserver) {
 	listConfigSummariesTool := mcp.NewTool(
 		"list_configuration_security_scan_summaries",
 		mcp.WithDescription("List configuration scan results per resource: the failed controls (ID and severity) and the number of controls by status. Summaries are stored on every install; the full manifests behind get_configuration_security_scan_manifest are stored only when continuous scanning is enabled. Use list_controls for what a control checks."),
+		mcp.WithReadOnlyHintAnnotation(true),
+		mcp.WithDestructiveHintAnnotation(false),
 		mcp.WithString("namespace",
 			mcp.Description("Filter by namespace (optional, default all namespaces). A workload's summary is stored in the workload's namespace; summaries of cluster-scoped and RBAC resources are in 'kubescape'"),
 		),

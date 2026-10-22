@@ -177,6 +177,15 @@ func TestListConfigScanSummaries_FullSpecAndContinue(t *testing.T) {
 	assert.Empty(t, page2.Continue)
 }
 
+func TestListConfigScanSummaries_ReadOnlyAnnotations(t *testing.T) {
+	tool := newRegisteredStorageToolTestServer().s.GetTool("list_configuration_security_scan_summaries")
+	require.NotNil(t, tool, "list_configuration_security_scan_summaries must be registered")
+	require.NotNil(t, tool.Tool.Annotations.ReadOnlyHint)
+	assert.True(t, *tool.Tool.Annotations.ReadOnlyHint)
+	require.NotNil(t, tool.Tool.Annotations.DestructiveHint)
+	assert.False(t, *tool.Tool.Annotations.DestructiveHint)
+}
+
 func TestListConfigScanSummaries_ListError(t *testing.T) {
 	client := storagefake.NewClientset()
 	client.PrependReactor("list", "workloadconfigurationscansummaries", func(k8stesting.Action) (bool, runtime.Object, error) {
