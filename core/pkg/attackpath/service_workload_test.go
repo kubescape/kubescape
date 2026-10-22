@@ -47,34 +47,69 @@ func TestResolveServiceBackends_MatchesDeploymentBySelector(t *testing.T) {
 	}
 }
 
-func TestResolveServiceBackends_SelectorLessServiceIsHeadless(t *testing.T) {
-	// A Service with no selector at all: Headless=true, Backends empty.
-	// The reliability bar says: "a selector-less/headless Service is
-	// reported as skipped, not guessed."
-	svc := typedSvc("prod", "headless-svc", nil)
+func TestResolveServiceBackends_HeadlessAndSelectorlessAreIndependent(t *testing.T) {
+	for _, tt := range []struct {
+		name         string
+		clusterIP    string
+		selector     map[string]string
+		headless     bool
+		selectorless bool
+		backends     int
+	}{
+		{name: "cluster-ip with selector", clusterIP: "10.0.0.1", selector: map[string]string{"app": "web"}, backends: 1},
+		{name: "cluster-ip without selector", clusterIP: "10.0.0.1", selectorless: true},
+		{name: "headless with selector", clusterIP: corev1.ClusterIPNone, selector: map[string]string{"app": "web"}, headless: true, backends: 1},
+		{name: "headless without selector", clusterIP: corev1.ClusterIPNone, headless: true, selectorless: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			svc := typedSvc("prod", "web-svc", tt.selector)
+			svc.Spec.ClusterIP = tt.clusterIP
+			d := deploymentResource("prod", "web", map[string]any{"app": "web"})
 
-	results := ResolveServiceBackends([]corev1.Service{svc}, makeResources())
+			results := ResolveServiceBackends([]corev1.Service{svc}, makeResources(d))
 
-	r := backendsFor(t, results, "headless-svc")
-	if !r.Headless {
-		t.Error("expected Headless=true for a selector-less Service")
+			r := backendsFor(t, results, "web-svc")
+			if r.Headless != tt.headless || r.Selectorless != tt.selectorless {
+				t.Errorf("expected Headless=%v, Selectorless=%v, got %+v", tt.headless, tt.selectorless, r)
+			}
+			if len(r.Backends) != tt.backends {
+				t.Fatalf("expected %d backends, got %+v", tt.backends, r.Backends)
+			}
+			if tt.backends > 0 && r.Backends[0] != (WorkloadRef{Namespace: "prod", Kind: "Deployment", Name: "web"}) {
+				t.Errorf("expected matching Deployment backend, got %+v", r.Backends)
+			}
+		})
 	}
-	if len(r.Backends) != 0 {
-		t.Errorf("expected no backends for a headless Service, got %+v", r.Backends)
+}
+
+func TestResolveServiceBackends_ExternalNameIgnoresSelector(t *testing.T) {
+	external := typedSvc("prod", "external-svc", map[string]string{"app": "web"})
+	external.Spec.Type = corev1.ServiceTypeExternalName
+	external.Spec.ExternalName = "example.com"
+	local := typedSvc("prod", "local-svc", map[string]string{"app": "web"})
+	d := deploymentResource("prod", "web", map[string]any{"app": "web"})
+
+	results := ResolveServiceBackends([]corev1.Service{external, local}, makeResources(d))
+
+	if len(results) != 1 || results[0].ServiceName != "local-svc" {
+		t.Fatalf("expected only the local Service, got %+v", results)
+	}
+	if len(results[0].Backends) != 1 || results[0].Backends[0].Name != "web" {
+		t.Errorf("expected local Service to retain its matching backend, got %+v", results[0].Backends)
 	}
 }
 
 func TestResolveServiceBackends_SelectorMatchesNothingIsNotHeadless(t *testing.T) {
 	// A Service WITH a selector that matches no collected workload:
-	// Headless=false, Backends empty. Different from a headless service.
+	// Selectorless=false, Backends empty.
 	svc := typedSvc("prod", "orphan-svc", map[string]string{"app": "ghost"})
 	d := deploymentResource("prod", "web", map[string]any{"app": "web"})
 
 	results := ResolveServiceBackends([]corev1.Service{svc}, makeResources(d))
 
 	r := backendsFor(t, results, "orphan-svc")
-	if r.Headless {
-		t.Error("expected Headless=false: Service has a selector, it just matches nothing")
+	if r.Headless || r.Selectorless {
+		t.Error("expected Headless=false and Selectorless=false: ordinary Service with an unmatched selector")
 	}
 	if len(r.Backends) != 0 {
 		t.Errorf("expected empty Backends when selector matches nothing, got %+v", r.Backends)

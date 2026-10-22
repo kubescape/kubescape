@@ -16,7 +16,7 @@ func automountBoolPtr(b bool) *bool { return &b }
 // workloadObj builds a Deployment IMetadata with the given pod-spec fields
 // set, for ServiceAccount binding tests.
 func workloadWithSA(namespace, name, saName string, automount *bool, volumes []any) workloadinterface.IMetadata {
-	podSpec := map[string]any{}
+	podSpec := map[string]any{"containers": []any{map[string]any{"name": "app", "image": "test"}}}
 	if saName != "" {
 		podSpec["serviceAccountName"] = saName
 	}
@@ -25,6 +25,7 @@ func workloadWithSA(namespace, name, saName string, automount *bool, volumes []a
 	}
 	if len(volumes) > 0 {
 		podSpec["volumes"] = volumes
+		podSpec["containers"] = []any{map[string]any{"name": "app", "image": "test", "volumeMounts": []any{map[string]any{"name": "kube-api-access", "mountPath": "/token"}}}}
 	}
 	return resource(map[string]any{
 		"apiVersion": "apps/v1",
@@ -398,6 +399,7 @@ func TestResolveServiceAccountBindings_NullAutomountUsesDefault(t *testing.T) {
 				"metadata": map[string]any{"labels": map[string]any{"app": "null-automount"}},
 				"spec": map[string]any{
 					"automountServiceAccountToken": nil,
+					"containers":                   []any{map[string]any{"name": "app", "image": "test"}},
 				},
 			},
 		},
@@ -505,7 +507,10 @@ func TestReviewProjectedTokenExcludedBySubPath(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := hasProjectedServiceAccountToken(makeObj(tt.subPath), "Pod"); got != tt.want {
+			obj := makeObj(tt.subPath)
+			obj["metadata"] = map[string]any{"name": "subpath", "namespace": "prod"}
+			r := resultFor(t, ResolveServiceAccountBindings(makeResources(resource(obj)), nil), "subpath")
+			if got := r.TokenMounted; got != tt.want {
 				t.Errorf("subPath=%q: got %v, want %v", tt.subPath, got, tt.want)
 			}
 		})
@@ -723,13 +728,6 @@ func TestResolveServiceAccountBindings_SubpathAncestorDirectoryIsTokenAccess(t *
 	}
 }
 
-func TestResolveServiceAccountBindings_SkipsExternalNameService(t *testing.T) {
-	// ExternalName Services must not be matched against local workloads.
-	// This test lives in service_workload_test.go conceptually but exercises
-	// the full pipeline via ResolveServiceAccountBindings.
-	// (Covered by ExternalName skip in MatchWorkloads — build-time only.)
-}
-
 func TestResolveServiceAccountBindings_SkipsMissingPodSpec(t *testing.T) {
 	// A Deployment with an empty spec should be skipped, not reported as
 	// TokenMounted: true with the default SA.
@@ -876,5 +874,55 @@ func TestResolveServiceAccountBindings_MirrorPodHasNoIdentity(t *testing.T) {
 	r := resultFor(t, ResolveServiceAccountBindings(makeResources(w), map[string]*bool{"kube-system/default": nil}), "kube-apiserver")
 	if !r.Skipped || r.SkipReason == "" || r.ServiceAccountName != "" || r.TokenMounted {
 		t.Fatalf("mirror Pod must not acquire a ServiceAccount identity: %+v", r)
+	}
+}
+
+func TestResolveServiceAccountBindings_IdentityValidation(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		fields map[string]any
+	}{
+		{"invalid name", map[string]any{"serviceAccountName": int64(7)}},
+		{"invalid legacy name", map[string]any{"serviceAccount": false}},
+		{"conflicting names", map[string]any{"serviceAccountName": "one", "serviceAccount": "two"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.fields["containers"] = []any{map[string]any{"name": "app", "image": "test"}}
+			w := resource(map[string]any{"apiVersion": "v1", "kind": "Pod", "metadata": map[string]any{"name": "invalid", "namespace": "prod"}, "spec": tc.fields})
+			r := resultFor(t, ResolveServiceAccountBindings(makeResources(w), map[string]*bool{"prod/default": nil}), "invalid")
+			if !r.Skipped || r.SkipReason == "" || r.ServiceAccountName != "" || r.TokenMounted {
+				t.Fatalf("invalid identity must be skipped with reason: %+v", r)
+			}
+		})
+	}
+}
+
+func TestResolveServiceAccountBindings_TokenUncertaintyAndAliases(t *testing.T) {
+	for _, tc := range []struct {
+		name, field, value string
+		automount          any
+		mounted, unknown   bool
+	}{
+		{name: "malformed automount", automount: "false", unknown: true},
+		{name: "environment expression", field: "subPathExpr", value: "$(FILE)", automount: false, unknown: true},
+		{name: "automatic injection wins", field: "subPathExpr", value: "$(FILE)", automount: true, mounted: true},
+		{name: "data root subpath", field: "subPath", value: "..data", automount: false, mounted: true},
+		{name: "data token subpath", field: "subPath", value: "..data/token", automount: false, mounted: true},
+		{name: "data root expression", field: "subPathExpr", value: "..data", automount: false, mounted: true},
+		{name: "data token expression", field: "subPathExpr", value: "..data/token", automount: false, mounted: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			container := map[string]any{"name": "app", "image": "test"}
+			spec := map[string]any{"containers": []any{container}, "automountServiceAccountToken": tc.automount}
+			if tc.field != "" {
+				spec["volumes"] = []any{projectedSATokenVolume()}
+				container["volumeMounts"] = []any{map[string]any{"name": "kube-api-access", "mountPath": "/token", tc.field: tc.value}}
+			}
+			w := resource(map[string]any{"apiVersion": "v1", "kind": "Pod", "metadata": map[string]any{"name": "token", "namespace": "prod"}, "spec": spec})
+			r := resultFor(t, ResolveServiceAccountBindings(makeResources(w), map[string]*bool{"prod/default": nil}), "token")
+			if r.TokenMounted != tc.mounted || r.TokenUnknown != tc.unknown {
+				t.Fatalf("want mounted=%v unknown=%v, got %+v", tc.mounted, tc.unknown, r)
+			}
+		})
 	}
 }

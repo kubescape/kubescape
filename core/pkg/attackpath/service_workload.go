@@ -15,20 +15,23 @@ type ServiceBackend struct {
 	ServiceNamespace string
 	ServiceName      string
 	// Backends are the workloads whose pod-template labels match the
-	// Service's selector. Empty when the Service is selector-less/headless
+	// Service's selector. Empty when the Service is selector-less
 	// or no collected workload matches.
 	Backends []WorkloadRef
-	// Headless is true when the Service has no selector at all (a headless
-	// Service); no backend edge is emitted for it per the reliability bar.
+	// Headless is true when spec.clusterIP is None. A headless Service
+	// with a selector can still have workload backends.
 	Headless bool
+	// Selectorless is true when the Service has no selector; no workload
+	// backends can be inferred for it.
+	Selectorless bool
 }
 
 // ResolveServiceBackends matches every Service's spec.selector against
 // pod-template labels in resources, visiting Services in namespace/name
 // order for determinism.
-// A selector-less Service is reported as Headless=true with no Backends.
+// A selector-less Service is reported as Selectorless=true with no Backends.
 // A Service whose selector matches nothing is reported with an empty
-// Backends slice (not Headless — it has a selector, just nothing behind it).
+// Backends slice. Headless records spec.clusterIP independently of selectors.
 func ResolveServiceBackends(
 	services []corev1.Service,
 	resources map[string]workloadinterface.IMetadata,
@@ -89,19 +92,17 @@ func ResolveServiceBackends(
 		if svc.Spec.Type == corev1.ServiceTypeExternalName {
 			continue
 		}
-		if len(svc.Spec.Selector) == 0 {
-			out = append(out, ServiceBackend{
-				ServiceNamespace: svc.Namespace,
-				ServiceName:      svc.Name,
-				Headless:         true,
-			})
-			continue
-		}
-		sel := labels.SelectorFromSet(labels.Set(svc.Spec.Selector))
 		sb := ServiceBackend{
 			ServiceNamespace: svc.Namespace,
 			ServiceName:      svc.Name,
+			Headless:         svc.Spec.ClusterIP == corev1.ClusterIPNone,
+			Selectorless:     len(svc.Spec.Selector) == 0,
 		}
+		if sb.Selectorless {
+			out = append(out, sb)
+			continue
+		}
+		sel := labels.SelectorFromSet(labels.Set(svc.Spec.Selector))
 		for _, wl := range workloads {
 			// A Service only selects pods in its own namespace.
 			if wl.ref.Namespace != svc.Namespace {

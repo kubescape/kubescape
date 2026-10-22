@@ -1,12 +1,11 @@
 package attackpath
 
 import (
-	"path"
 	"slices"
 	"strings"
 
 	"github.com/kubescape/k8s-interface/workloadinterface"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"github.com/kubescape/kubescape/v4/core/pkg/vulnexposure"
 )
 
 // ServiceAccountBinding records which ServiceAccount a workload runs as,
@@ -19,253 +18,16 @@ type ServiceAccountBinding struct {
 	ServiceAccountName string
 	// Namespace is the workload's namespace; the SA is always in the same one.
 	Namespace string
-	// TokenMounted is true when a service account token is actually mounted
-	// into the pod. When both TokenMounted and TokenUnknown are false, the
-	// workload does not yield a usable token (no runs-as edge). The logic follows the Kubernetes spec:
-	//   1. If a projected serviceAccountToken volume is present → true,
-	//      regardless of automountServiceAccountToken values (the token is
-	//      explicitly requested).
-	//   2. Otherwise, the pod-level automountServiceAccountToken wins if set.
-	//   3. Otherwise, the SA-level automountServiceAccountToken applies
-	//      (true when a collected SA leaves it unset; unknown if the SA is absent).
-	// The proposal §7 golden-file cases are exactly this logic.
+	// TokenMounted is true when the shared identity resolver establishes token
+	// access. When TokenUnknown is true, false is not evidence of no access.
 	TokenMounted bool
-	// TokenUnknown is true when token access cannot be established because
-	// the ServiceAccount was not collected. TokenMounted is false in that case;
-	// callers must not interpret it as evidence that no token is available.
+	// TokenUnknown covers incomplete or malformed input and environment-dependent
+	// mount paths. It is false if another mount or automatic injection proves access.
 	TokenUnknown bool
 	// Skipped is true when the workload's object could not be decoded for
 	// SA resolution, or has no ServiceAccount identity (a static mirror Pod).
 	Skipped    bool
 	SkipReason string
-}
-
-// saPath is the pod-template field path to spec.serviceAccountName.
-// For non-CronJob controllers this is spec.template.spec.serviceAccountName;
-// for CronJob it is one level deeper.
-func saPath(kind string) []string {
-	if kind == "Pod" {
-		return []string{"spec", "serviceAccountName"}
-	}
-	if kind == "CronJob" {
-		return []string{"spec", "jobTemplate", "spec", "template", "spec", "serviceAccountName"}
-	}
-	return []string{"spec", "template", "spec", "serviceAccountName"}
-}
-
-func automountPath(kind string) []string {
-	if kind == "Pod" {
-		return []string{"spec", "automountServiceAccountToken"}
-	}
-	if kind == "CronJob" {
-		return []string{"spec", "jobTemplate", "spec", "template", "spec", "automountServiceAccountToken"}
-	}
-	return []string{"spec", "template", "spec", "automountServiceAccountToken"}
-}
-
-func volumesPath(kind string) []string {
-	if kind == "Pod" {
-		return []string{"spec", "volumes"}
-	}
-	if kind == "CronJob" {
-		return []string{"spec", "jobTemplate", "spec", "template", "spec", "volumes"}
-	}
-	return []string{"spec", "template", "spec", "volumes"}
-}
-
-// hasProjectedServiceAccountToken reports whether the pod spec contains
-// a projected volume of type serviceAccountToken, meaning the token is
-// explicitly mounted regardless of automountServiceAccountToken settings.
-// containersFieldPath returns the path to the containers array in a workload's pod spec.
-func containersFieldPath(kind string) []string {
-	if kind == "Pod" {
-		return []string{"spec", "containers"}
-	}
-	if kind == "CronJob" {
-		return []string{"spec", "jobTemplate", "spec", "template", "spec", "containers"}
-	}
-	return []string{"spec", "template", "spec", "containers"}
-}
-
-func initContainersFieldPath(kind string) []string {
-	if kind == "Pod" {
-		return []string{"spec", "initContainers"}
-	}
-	if kind == "CronJob" {
-		return []string{"spec", "jobTemplate", "spec", "template", "spec", "initContainers"}
-	}
-	return []string{"spec", "template", "spec", "initContainers"}
-}
-
-// ephemeralContainersFieldPath returns the path to the ephemeralContainers
-// array in a workload pod spec. Ephemeral (debug) containers can mount
-// projected token volumes but are never injected by admission.
-func ephemeralContainersFieldPath(kind string) []string {
-	if kind == "Pod" {
-		return []string{"spec", "ephemeralContainers"}
-	}
-	if kind == "CronJob" {
-		return []string{"spec", "jobTemplate", "spec", "template", "spec", "ephemeralContainers"}
-	}
-	return []string{"spec", "template", "spec", "ephemeralContainers"}
-}
-
-// isMountPathOccupied reports whether any regular or init container already
-// mounts something at the default token path, which causes Kubernetes admission
-// to skip injecting the automatic token mount.
-// See: https://github.com/kubernetes/kubernetes/blob/v1.35.0/plugin/pkg/admission/serviceaccount/admission.go#L407
-func isMountPathOccupied(u *unstructured.Unstructured, kind string) bool {
-	regular, _, _ := unstructured.NestedSlice(u.Object, containersFieldPath(kind)...)
-	init_, _, _ := unstructured.NestedSlice(u.Object, initContainersFieldPath(kind)...)
-	all := append(regular, init_...)
-	if len(all) == 0 {
-		return false
-	}
-	for _, c := range all {
-		container, ok := c.(map[string]any)
-		if !ok {
-			return false
-		}
-		occupied := false
-		mounts, _, _ := unstructured.NestedSlice(container, "volumeMounts")
-		for _, m := range mounts {
-			mount, ok := m.(map[string]any)
-			if !ok {
-				continue
-			}
-			if mp, _ := mount["mountPath"].(string); mp == serviceAccountTokenMountPath {
-				occupied = true
-				break
-			}
-		}
-		if !occupied {
-			return false
-		}
-	}
-	return true
-}
-
-// hasProjectedServiceAccountToken reports whether the pod spec contains
-// a projected serviceAccountToken volume that is actually mounted by at
-// least one container. A declared but unmounted volume does not expose
-// the token to any container process.
-func hasProjectedServiceAccountToken(obj map[string]any, kind string) bool {
-	u := &unstructured.Unstructured{Object: obj}
-
-	// Step 1: collect names of volumes that carry a projected serviceAccountToken.
-	vols, found, err := unstructured.NestedSlice(u.Object, volumesPath(kind)...)
-	if err != nil || !found {
-		return false
-	}
-	// projectedVolTokenPaths maps volume name → token file paths within the volume.
-	projectedVolTokenPaths := map[string][]string{}
-	for _, v := range vols {
-		vol, ok := v.(map[string]any)
-		if !ok {
-			continue
-		}
-		name, _ := vol["name"].(string)
-		projected, ok := vol["projected"].(map[string]any)
-		if !ok {
-			continue
-		}
-		sources, ok := projected["sources"].([]any)
-		if !ok {
-			continue
-		}
-		for _, s := range sources {
-			src, ok := s.(map[string]any)
-			if !ok {
-				continue
-			}
-			sat, has := src["serviceAccountToken"]
-			if !has {
-				continue
-			}
-			tp := ""
-			if satMap, ok := sat.(map[string]any); ok {
-				tp, _ = satMap["path"].(string)
-			}
-			if tp == "" {
-				tp = "token"
-			}
-			projectedVolTokenPaths[name] = append(projectedVolTokenPaths[name], tp)
-		}
-	}
-	if len(projectedVolTokenPaths) == 0 {
-		return false
-	}
-
-	// Step 2: confirm at least one regular or init container mounts one of
-	// those volumes in a way that exposes the token file.
-	// Native sidecars (initContainers with restartPolicy:Always) run for the
-	// pod lifetime and have the same token access as regular containers.
-	regular, foundRegular, _ := unstructured.NestedSlice(u.Object, containersFieldPath(kind)...)
-	init_, foundInit, _ := unstructured.NestedSlice(u.Object, initContainersFieldPath(kind)...)
-	// Ephemeral containers can mount projected token volumes (e.g. a debug
-	// container injected at runtime) but are never auto-injected by admission.
-	ephemeral, _, _ := unstructured.NestedSlice(u.Object, ephemeralContainersFieldPath(kind)...)
-	if !foundRegular && !foundInit {
-		// No containers at all: conservatively treat declaration as mounted.
-		return true
-	}
-	for _, c := range append(append(regular, init_...), ephemeral...) {
-		container, ok := c.(map[string]any)
-		if !ok {
-			continue
-		}
-		mounts, _, _ := unstructured.NestedSlice(container, "volumeMounts")
-		for _, m := range mounts {
-			mount, ok := m.(map[string]any)
-			if !ok {
-				continue
-			}
-			mountName, _ := mount["name"].(string)
-			tokenPaths, isProjected := projectedVolTokenPaths[mountName]
-			if !isProjected {
-				continue
-			}
-			subPath, _ := mount["subPath"].(string)
-			subPathExpr, _ := mount["subPathExpr"].(string)
-			if subPath == "" && subPathExpr == "" {
-				// Whole-volume mount: token is accessible.
-				return true
-			}
-			if subPathExpr != "" {
-				if strings.Contains(subPathExpr, "$(") {
-					// Env-var expression: conservatively treat as mounted.
-					return true
-				}
-				// Literal expression: treat like a subPath.
-				normalizedExpr := path.Clean(subPathExpr)
-				if normalizedExpr == "." {
-					return true
-				}
-				for _, tp := range tokenPaths {
-					normalizedTP := path.Clean(tp)
-					if normalizedExpr == normalizedTP || strings.HasPrefix(normalizedTP, normalizedExpr+"/") {
-						return true
-					}
-				}
-				continue
-			}
-			// Targeted subPath: exposes the token only when the subPath
-			// names the token file exactly or is an ancestor directory.
-			// Normalize via path.Clean, matching kubelet behavior.
-			normalizedSubPath := path.Clean(subPath)
-			if normalizedSubPath == "." {
-				// Volume root — all files including token are accessible.
-				return true
-			}
-			for _, tp := range tokenPaths {
-				normalizedTP := path.Clean(tp)
-				if normalizedSubPath == normalizedTP || strings.HasPrefix(normalizedTP, normalizedSubPath+"/") {
-					return true
-				}
-			}
-		}
-	}
-	return false
 }
 
 // ResolveServiceAccountBindings resolves every workload in the resource
@@ -305,97 +67,23 @@ func ResolveServiceAccountBindings(
 		return 0
 	})
 
+	// Adapt the batch index once; both APIs use the same identity and token rules.
+	index := &ServiceAccountIndex{automount: make(map[serviceAccountKey]*bool, len(saAutomountByNsName))}
+	for key, value := range saAutomountByNsName {
+		namespace, name, found := strings.Cut(key, "/")
+		if found {
+			index.automount[serviceAccountKey{namespace, name}] = value
+		}
+	}
 	var out []ServiceAccountBinding
 	for _, e := range entries {
 		r := e.res
 		ref := WorkloadRef{Namespace: r.GetNamespace(), Kind: r.GetKind(), Name: r.GetName()}
-		obj := r.GetObject()
-		u := &unstructured.Unstructured{Object: obj}
-
-		// Static mirror Pods have no ServiceAccount assigned by admission.
-		if r.GetKind() == "Pod" && isMirrorPod(obj) {
-			out = append(out, ServiceAccountBinding{
-				WorkloadRef: ref,
-				Skipped:     true,
-				SkipReason:  "static (mirror) Pod has no ServiceAccount identity",
-			})
-			continue
-		}
-
-		// A missing or unreadable pod spec (e.g. Deployment with spec: {})
-		// cannot be analysed: skip rather than returning a misleading result.
-		var specPresent bool
-		if r.GetKind() == "CronJob" {
-			_, specPresent, _ = unstructured.NestedMap(u.Object, "spec", "jobTemplate", "spec", "template", "spec")
-		} else if r.GetKind() == "Pod" {
-			_, specPresent, _ = unstructured.NestedMap(u.Object, "spec")
-		} else {
-			_, specPresent, _ = unstructured.NestedMap(u.Object, "spec", "template", "spec")
-		}
-		if !specPresent {
-			out = append(out, ServiceAccountBinding{
-				WorkloadRef: ref,
-				Skipped:     true,
-				SkipReason:  "pod spec missing or unreadable",
-			})
-			continue
-		}
-
-		saName, _, _ := unstructured.NestedString(u.Object, saPath(r.GetKind())...)
-		if saName == "" {
-			// Fall back to the legacy serviceAccount field before defaulting.
-			// Some older manifests use serviceAccount instead of serviceAccountName.
-			legacyPath := saPath(r.GetKind())
-			legacyPath[len(legacyPath)-1] = "serviceAccount"
-			saName, _, _ = unstructured.NestedString(u.Object, legacyPath...)
-		}
-		if saName == "" {
-			saName = "default"
-		}
-
-		// Determine token mount status per the three-level logic above.
-		tokenMounted := false
-		tokenUnknown := false
-		if hasProjectedServiceAccountToken(obj, r.GetKind()) {
-			// Explicit projected volume mounted by at least one container.
-			tokenMounted = true
-		} else {
-			// Check pod-level automountServiceAccountToken.
-			// null (podVal == nil with podFound == true) is treated as unset:
-			// Kubernetes decodes null to a nil pointer which falls through to
-			// the ServiceAccount/default preference.
-			podVal, podFound, _ := unstructured.NestedFieldNoCopy(u.Object, automountPath(r.GetKind())...)
-			podBool, podIsBool := podVal.(bool)
-			if podFound && podVal != nil && podIsBool {
-				tokenMounted = podBool
-			} else {
-				// Fall back to SA-level value.
-				saKey := r.GetNamespace() + "/" + saName
-				saVal, found := saAutomountByNsName[saKey]
-				switch {
-				case !found:
-					tokenUnknown = true
-				case saVal != nil:
-					tokenMounted = *saVal
-				default:
-					tokenMounted = true // Collected SA with the Kubernetes default.
-				}
-			}
-			// Even when automount is enabled, Kubernetes admission skips
-			// injecting the token when the default path is already occupied.
-			// See: https://github.com/kubernetes/kubernetes/blob/v1.35.0/plugin/pkg/admission/serviceaccount/admission.go#L407
-			if (tokenMounted || tokenUnknown) && isMountPathOccupied(u, r.GetKind()) {
-				tokenMounted = false
-				tokenUnknown = false
-			}
-		}
-
+		resolution := ResolveServiceAccount(vulnexposure.Workload{Namespace: ref.Namespace, Kind: ref.Kind, Name: ref.Name}, r.GetObject(), index)
 		out = append(out, ServiceAccountBinding{
-			WorkloadRef:        ref,
-			ServiceAccountName: saName,
-			Namespace:          r.GetNamespace(),
-			TokenMounted:       tokenMounted,
-			TokenUnknown:       tokenUnknown,
+			WorkloadRef: ref, ServiceAccountName: resolution.Name, Namespace: resolution.Namespace,
+			TokenMounted: resolution.Token == TokenMounted, TokenUnknown: resolution.Token == TokenUnknown,
+			Skipped: !resolution.Resolved, SkipReason: resolution.Reason,
 		})
 	}
 	return out

@@ -24,6 +24,8 @@ type Inputs struct {
 	Services  []corev1.Service
 	Ingresses []networkingv1.Ingress
 	ExpNS     []exposurepkg.NamespaceInfo
+	// ExposureIndex retains decoded Gateway API objects for exposure queries.
+	ExposureIndex *exposurepkg.Index
 
 	// NetworkPolicy engine
 	Policies []*networkingv1.NetworkPolicy
@@ -57,13 +59,13 @@ func CollectInputs(resources map[string]workloadinterface.IMetadata) Inputs {
 	}
 
 	// Exposure engine — Gateway API objects (HTTPRoute, GRPCRoute, Gateway).
-	_, _, gwErrs := exposurepkg.FromUnstructuredGatewayAPI(resources)
+	routes, gateways, gwErrs := exposurepkg.FromUnstructuredGatewayAPI(resources)
 	for _, e := range gwErrs {
 		inp.Warnings = append(inp.Warnings, "exposure/gateway: "+e.Error())
 	}
-	// Note: gateway routes/gateways are kept inside the exposurepkg.Index;
-	// CollectInputs does not need to carry them separately — the Index
-	// is built from them at graph-build time by the caller.
+	// The resource map does not establish that ReferenceGrants were completely
+	// collected. Keep cross-namespace backend authorization undetermined.
+	inp.ExposureIndex = exposurepkg.NewIndex(svcs, ings, routes, gateways, expNS)
 
 	// NetworkPolicy engine.
 	policies, npNS, npErrs := networkpolicy.FromResources(resources)
