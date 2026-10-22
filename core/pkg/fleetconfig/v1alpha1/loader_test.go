@@ -29,7 +29,7 @@ func TestLoadReadsEverySetting(t *testing.T) {
 	spec := document.Spec
 	assert.Equal(t, "production", document.Metadata.Name)
 	require.NotNil(t, spec.Contexts)
-	assert.Equal(t, []string{"prod", "staging", "dr"}, *spec.Contexts)
+	assert.Equal(t, ContextList{"prod", "staging", "dr"}, *spec.Contexts)
 	assert.Equal(t, "reports/report.json", *spec.Output)
 	assert.Equal(t, "reports/fleet.json", *spec.FleetReport)
 	assert.Equal(t, "prod", *spec.ReferenceCluster)
@@ -54,16 +54,19 @@ func TestLoadRejectsInvalidDocuments(t *testing.T) {
 		contents string
 		want     string
 	}{
-		"empty":              {contents: "  \n", want: "document is empty"},
-		"wrong apiVersion":   {contents: "apiVersion: config.kubescape.io/v2\nkind: FleetConfig\n", want: `unsupported apiVersion "config.kubescape.io/v2"`},
-		"a scan contract":    {contents: "apiVersion: config.kubescape.io/v1alpha1\nkind: ScanContract\nspec:\n  contracts: {}\n", want: `unsupported kind "ScanContract"`},
-		"misspelt field":     {contents: "apiVersion: config.kubescape.io/v1alpha1\nkind: FleetConfig\nspec:\n  fleetreport: fleet.json\n", want: "field fleetreport not found"},
-		"retries as words":   {contents: "apiVersion: config.kubescape.io/v1alpha1\nkind: FleetConfig\nspec:\n  retries: two\n", want: `"two" is not a whole number`},
-		"fractional retries": {contents: "apiVersion: config.kubescape.io/v1alpha1\nkind: FleetConfig\nspec:\n  retries: 1.5\n", want: `"1.5" is not a whole number`},
-		"negative fraction":  {contents: "apiVersion: config.kubescape.io/v1alpha1\nkind: FleetConfig\nspec:\n  retries: -0.5\n", want: `"-0.5" is not a whole number`},
-		"retries as a list":  {contents: "apiVersion: config.kubescape.io/v1alpha1\nkind: FleetConfig\nspec:\n  retries: [2]\n", want: "is not a whole number"},
-		"two documents":      {contents: fullConfig + "---\n" + fullConfig, want: "exactly one YAML document"},
-		"not yaml at all":    {contents: "apiVersion: [\n", want: "decode version envelope"},
+		"empty":               {contents: "  \n", want: "document is empty"},
+		"wrong apiVersion":    {contents: "apiVersion: config.kubescape.io/v2\nkind: FleetConfig\n", want: `unsupported apiVersion "config.kubescape.io/v2"`},
+		"a scan contract":     {contents: "apiVersion: config.kubescape.io/v1alpha1\nkind: ScanContract\nspec:\n  contracts: {}\n", want: `unsupported kind "ScanContract"`},
+		"misspelt field":      {contents: "apiVersion: config.kubescape.io/v1alpha1\nkind: FleetConfig\nspec:\n  fleetreport: fleet.json\n", want: "field fleetreport not found"},
+		"null context":        {contents: "apiVersion: config.kubescape.io/v1alpha1\nkind: FleetConfig\nspec:\n  contexts: [prod, null, staging]\n", want: "a context in the list is null"},
+		"tilde context":       {contents: "apiVersion: config.kubescape.io/v1alpha1\nkind: FleetConfig\nspec:\n  contexts:\n    - prod\n    - ~\n", want: "line 6: a context in the list is null"},
+		"contexts not a list": {contents: "apiVersion: config.kubescape.io/v1alpha1\nkind: FleetConfig\nspec:\n  contexts: prod\n", want: "contexts must be a list"},
+		"retries as words":    {contents: "apiVersion: config.kubescape.io/v1alpha1\nkind: FleetConfig\nspec:\n  retries: two\n", want: `"two" is not a whole number`},
+		"fractional retries":  {contents: "apiVersion: config.kubescape.io/v1alpha1\nkind: FleetConfig\nspec:\n  retries: 1.5\n", want: `"1.5" is not a whole number`},
+		"negative fraction":   {contents: "apiVersion: config.kubescape.io/v1alpha1\nkind: FleetConfig\nspec:\n  retries: -0.5\n", want: `"-0.5" is not a whole number`},
+		"retries as a list":   {contents: "apiVersion: config.kubescape.io/v1alpha1\nkind: FleetConfig\nspec:\n  retries: [2]\n", want: "is not a whole number"},
+		"two documents":       {contents: fullConfig + "---\n" + fullConfig, want: "exactly one YAML document"},
+		"not yaml at all":     {contents: "apiVersion: [\n", want: "decode version envelope"},
 	}
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {

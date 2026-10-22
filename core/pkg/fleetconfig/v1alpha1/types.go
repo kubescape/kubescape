@@ -26,11 +26,31 @@ type Metadata struct {
 
 // Spec holds the fleet flags: contexts is --kube-contexts, output is --output, and so on.
 type Spec struct {
-	Contexts         *[]string `yaml:"contexts,omitempty"`
-	Output           *string   `yaml:"output,omitempty"`
-	FleetReport      *string   `yaml:"fleetReport,omitempty"`
-	ReferenceCluster *string   `yaml:"referenceCluster,omitempty"`
-	Retries          *Count    `yaml:"retries,omitempty"`
+	Contexts         *ContextList `yaml:"contexts,omitempty"`
+	Output           *string      `yaml:"output,omitempty"`
+	FleetReport      *string      `yaml:"fleetReport,omitempty"`
+	ReferenceCluster *string      `yaml:"referenceCluster,omitempty"`
+	Retries          *Count       `yaml:"retries,omitempty"`
+}
+
+// ContextList is the contexts to scan; a null entry is an error, where yaml.v3 would silently drop it.
+type ContextList []string
+
+func (l *ContextList) UnmarshalYAML(value *yaml.Node) error {
+	if value.Kind != yaml.SequenceNode {
+		return fmt.Errorf("line %d: contexts must be a list", value.Line)
+	}
+	for _, item := range value.Content {
+		if item.ShortTag() == "!!null" {
+			return fmt.Errorf("line %d: a context in the list is null", item.Line)
+		}
+	}
+	var contexts []string
+	if err := value.Decode(&contexts); err != nil {
+		return err
+	}
+	*l = contexts
+	return nil
 }
 
 // Count is a whole number; yaml.v3 would otherwise truncate a value like 1.5 into an int instead of rejecting it.
