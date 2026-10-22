@@ -2,6 +2,7 @@ package attackpath
 
 import (
 	"fmt"
+	"maps"
 	"slices"
 
 	"github.com/kubescape/k8s-interface/workloadinterface"
@@ -94,11 +95,21 @@ func ResolveEndpointsFromResources(
 ) []WorkloadEndpointResult {
 	// Build a lookup: "namespace/kind/name" → IMetadata
 	lookup := make(map[string]workloadinterface.IMetadata, len(resources))
+	ambiguous := make(map[string]bool)
 	for _, r := range resources {
 		if r == nil {
 			continue
 		}
 		key := r.GetNamespace() + "/" + r.GetKind() + "/" + r.GetName()
+		if previous, exists := lookup[key]; exists {
+			previousLabels := PodTemplateLabels(r.GetKind(), previous.GetObject())
+			currentLabels := PodTemplateLabels(r.GetKind(), r.GetObject())
+			if (previousLabels == nil) != (currentLabels == nil) ||
+				!maps.Equal(previousLabels, currentLabels) ||
+				PodTemplateHostNetwork(r.GetKind(), previous.GetObject()) != PodTemplateHostNetwork(r.GetKind(), r.GetObject()) {
+				ambiguous[key] = true
+			}
+		}
 		lookup[key] = r
 	}
 
@@ -135,6 +146,13 @@ func ResolveEndpointsFromResources(
 			continue
 		}
 		key := ref.Namespace + "/" + ref.Kind + "/" + ref.Name
+		if ambiguous[key] {
+			results = append(results, WorkloadEndpointResult{
+				Ref:    ref,
+				Reason: fmt.Sprintf("%s %s/%s: conflicting endpoint data in collected manifests", ref.Kind, ref.Namespace, ref.Name),
+			})
+			continue
+		}
 		r, ok := lookup[key]
 		if !ok {
 			results = append(results, WorkloadEndpointResult{

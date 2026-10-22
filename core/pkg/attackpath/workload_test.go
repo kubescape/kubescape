@@ -383,3 +383,32 @@ func TestResolveEndpoints_ControllerIdentityDoesNotBypassPolicies(t *testing.T) 
 		t.Errorf("real Pod must retain self-access: %v", v)
 	}
 }
+
+func TestResolveEndpoints_DuplicateManifestData(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		labels      map[string]any
+		hostNetwork bool
+		resolved    bool
+	}{
+		{name: "conflicting labels", labels: map[string]any{"app": "other"}},
+		{name: "conflicting host network", labels: map[string]any{"app": "api"}, hostNetwork: true},
+		{name: "identical endpoint data", labels: map[string]any{"app": "api"}, resolved: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			first := deploymentResource("prod", "api", map[string]any{"app": "api"})
+			other := deploymentResource("prod", "api", tc.labels).GetObject()
+			other["spec"].(map[string]any)["template"].(map[string]any)["spec"] = map[string]any{"hostNetwork": tc.hostNetwork}
+			resources := map[string]workloadinterface.IMetadata{"first.yaml": first, "second.yaml": resource(other)}
+			for i := 0; i < 30; i++ {
+				results := ResolveEndpointsFromResources(resources, []WorkloadRef{{Namespace: "prod", Kind: "Deployment", Name: "api"}})
+				if len(results) != 1 || results[0].Resolved != tc.resolved {
+					t.Fatalf("expected resolved=%v, got %+v", tc.resolved, results)
+				}
+				if !tc.resolved && results[0].Reason == "" {
+					t.Fatal("ambiguous result needs a reason")
+				}
+			}
+		})
+	}
+}
