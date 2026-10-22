@@ -380,3 +380,49 @@ func TestSupportedInputResourcesGroups(t *testing.T) {
 		}
 	}
 }
+
+func TestCollectInputsLegacyIngressExposureUnavailable(t *testing.T) {
+	for _, version := range []string{"extensions/v1beta1", "networking.k8s.io/v1beta1"} {
+		for _, backendLocation := range []string{"default", "rule"} {
+			t.Run(version+"/"+backendLocation, func(t *testing.T) {
+				backend := map[string]any{"serviceName": "app", "servicePort": 80}
+				spec := map[string]any{"backend": backend}
+				if backendLocation == "rule" {
+					spec = map[string]any{"rules": []any{map[string]any{"http": map[string]any{"paths": []any{map[string]any{"path": "/", "backend": backend}}}}}}
+				}
+				inputs := CollectInputs(makeResources(
+					resource(map[string]any{"apiVersion": "v1", "kind": "Service", "metadata": map[string]any{"name": "app", "namespace": "apps"}, "spec": map[string]any{"type": "ClusterIP", "ports": []any{map[string]any{"port": 80}}}}),
+					resource(map[string]any{"apiVersion": version, "kind": "Ingress", "metadata": map[string]any{"name": "legacy", "namespace": "apps"}, "spec": spec}),
+					resource(map[string]any{"apiVersion": "networking.k8s.io/v1", "kind": "NetworkPolicy", "metadata": map[string]any{"name": "policy", "namespace": "apps"}, "spec": map[string]any{"podSelector": map[string]any{}}}),
+					resource(map[string]any{"apiVersion": "v1", "kind": "ServiceAccount", "metadata": map[string]any{"name": "sa", "namespace": "apps"}}),
+				))
+				if inputs.ExposureIndex != nil {
+					t.Fatal("legacy Ingress must not produce a definite all-clear")
+				}
+				if len(inputs.Warnings) != 1 || !strings.Contains(inputs.Warnings[0], "unsupported Ingress API version "+version+" for apps/legacy; exposure index unavailable") {
+					t.Fatalf("missing unsupported-version diagnostic: %v", inputs.Warnings)
+				}
+				if len(inputs.Ingresses) != 0 {
+					t.Fatalf("legacy backends silently decoded into v1: %+v", inputs.Ingresses)
+				}
+				if len(inputs.Services) != 1 || len(inputs.Policies) != 1 || len(inputs.ServiceAccounts) != 1 {
+					t.Fatalf("other inputs were lost: %+v", inputs)
+				}
+			})
+		}
+	}
+}
+
+func TestCollectInputsV1IngressStillExposesService(t *testing.T) {
+	inputs := CollectInputs(makeResources(
+		resource(map[string]any{"apiVersion": "v1", "kind": "Service", "metadata": map[string]any{"name": "app", "namespace": "apps"}, "spec": map[string]any{"type": "ClusterIP", "ports": []any{map[string]any{"port": 80}}}}),
+		exposureRouteResource("Ingress", "app", "v1"),
+	))
+	if inputs.ExposureIndex == nil || len(inputs.Warnings) != 0 {
+		t.Fatalf("valid v1 Ingress became unavailable: %+v", inputs)
+	}
+	paths, unclear := inputs.ExposureIndex.ServiceExposure(exposurepkg.ServiceRef{Namespace: "apps", Name: "app"})
+	if unclear || len(paths) != 1 || paths[0].Kind != exposurepkg.ExposureIngress {
+		t.Fatalf("v1 Ingress exposure lost: paths=%v unclear=%v", paths, unclear)
+	}
+}

@@ -122,7 +122,9 @@ func ResolveEndpointsFromResources(
 		if previous, exists := lookup[key]; exists {
 			previousLabels := PodTemplateLabels(r.GetKind(), previous.GetObject())
 			currentLabels := PodTemplateLabels(r.GetKind(), r.GetObject())
-			if (previousLabels == nil) != (currentLabels == nil) ||
+			// Missing controller template labels prevent resolution, but a Pod's
+			// omitted labels and explicit empty labels are the same label set.
+			if (r.GetKind() != "Pod" && (previousLabels == nil) != (currentLabels == nil)) ||
 				!maps.Equal(previousLabels, currentLabels) ||
 				PodTemplateHostNetwork(r.GetKind(), previous.GetObject()) != PodTemplateHostNetwork(r.GetKind(), r.GetObject()) {
 				ambiguous[key] = true

@@ -33,8 +33,9 @@ type Inputs struct {
 	Ingresses []networkingv1.Ingress
 	ExpNS     []exposurepkg.NamespaceInfo
 	// ExposureIndex retains decoded Gateway API objects for exposure queries.
-	// It is nil when conflicting exposure resource definitions
-	// prevent a reliable verdict; callers must handle an unavailable index.
+	// It is nil when conflicting definitions or unsupported Ingress API versions
+	// prevent a reliable verdict; callers must handle an unavailable index and
+	// consult Warnings. Only networking.k8s.io/v1 Ingress backends are decoded.
 	ExposureIndex *exposurepkg.Index
 	// AmbiguousServices lists identities with conflicting Service specs in namespace/name
 	// order. An unavailable ExposureIndex must not be interpreted as no exposure.
@@ -72,6 +73,7 @@ func CollectInputs(resources map[string]workloadinterface.IMetadata) Inputs {
 
 	// Exposure engine (Services, Ingresses, plain Namespaces).
 	exposureResources := make(map[string]workloadinterface.IMetadata)
+	var unsupportedIngressWarnings []string
 	for id, res := range resources {
 		if res == nil {
 			continue
@@ -85,10 +87,18 @@ func CollectInputs(resources map[string]workloadinterface.IMetadata) Inputs {
 			}
 		case "Ingress":
 			if qualified && (group == "networking.k8s.io" || group == "extensions") && version != "" {
-				exposureResources[id] = res
+				if apiVersion == "networking.k8s.io/v1" {
+					exposureResources[id] = res
+				} else {
+					// Legacy backends have a different wire shape. Decoding them
+					// as v1 silently drops serviceName/servicePort and spec.backend.
+					unsupportedIngressWarnings = append(unsupportedIngressWarnings, fmt.Sprintf("exposure: unsupported Ingress API version %s for %s/%s; exposure index unavailable", apiVersion, res.GetNamespace(), res.GetName()))
+				}
 			}
 		}
 	}
+	sort.Strings(unsupportedIngressWarnings)
+	inp.Warnings = append(inp.Warnings, unsupportedIngressWarnings...)
 	svcs, ings, expNS, expErrs := exposurepkg.FromResources(exposureResources)
 	inp.Services = svcs
 	inp.AmbiguousServices = conflictingServices(svcs)
@@ -162,7 +172,7 @@ func CollectInputs(resources map[string]workloadinterface.IMetadata) Inputs {
 	sort.Strings(inp.AmbiguousNamespaces)
 	// The resource map does not establish that ReferenceGrants were completely
 	// collected. Keep cross-namespace backend authorization undetermined.
-	if len(inp.AmbiguousServices) == 0 && len(inp.AmbiguousGateways) == 0 && len(inp.AmbiguousNamespaces) == 0 && len(inp.AmbiguousIngresses) == 0 && len(inp.AmbiguousRoutes) == 0 {
+	if len(unsupportedIngressWarnings) == 0 && len(inp.AmbiguousServices) == 0 && len(inp.AmbiguousGateways) == 0 && len(inp.AmbiguousNamespaces) == 0 && len(inp.AmbiguousIngresses) == 0 && len(inp.AmbiguousRoutes) == 0 {
 		inp.ExposureIndex = exposurepkg.NewIndex(svcs, ings, routes, gateways, expNS)
 	} else {
 		for _, ref := range inp.AmbiguousServices {

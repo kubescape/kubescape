@@ -412,3 +412,18 @@ func TestResolveEndpoints_DuplicateManifestData(t *testing.T) {
 		})
 	}
 }
+
+func TestResolveEndpoints_UnlabeledPodCopiesAreEquivalent(t *testing.T) {
+	for _, reverse := range []bool{false, true} {
+		absent := podResource("prod", "pod", nil).GetObject()
+		delete(absent["metadata"].(map[string]any), "labels")
+		first, second := resource(absent), podResource("prod", "pod", map[string]any{})
+		if reverse {
+			first, second = second, first
+		}
+		results := ResolveEndpointsFromResources(map[string]workloadinterface.IMetadata{"a": first, "b": second}, []WorkloadRef{{Namespace: "prod", Kind: "Pod", Name: "pod"}})
+		if len(results) != 1 || !results[0].Resolved || len(results[0].Endpoint.Labels) != 0 {
+			t.Fatalf("equivalent empty Pod labels must resolve: %+v", results)
+		}
+	}
+}
