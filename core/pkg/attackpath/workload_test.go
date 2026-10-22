@@ -427,3 +427,41 @@ func TestResolveEndpoints_UnlabeledPodCopiesAreEquivalent(t *testing.T) {
 		}
 	}
 }
+
+func TestResolveEndpoints_MalformedFieldsRemainUnresolved(t *testing.T) {
+	for _, kind := range []string{"Pod", "Deployment"} {
+		for _, field := range []string{"labels", "hostNetwork"} {
+			t.Run(kind+"/"+field, func(t *testing.T) {
+				makeObject := func(malformed bool) workloadinterface.IMetadata {
+					metadata := map[string]any{"name": "api", "namespace": "prod", "labels": map[string]any{"app": "api"}}
+					spec := map[string]any{}
+					labelsMetadata := metadata
+					obj := map[string]any{"apiVersion": "v1", "kind": kind, "metadata": metadata, "spec": spec}
+					if kind != "Pod" {
+						obj["apiVersion"] = "apps/v1"
+						labelsMetadata = map[string]any{"labels": map[string]any{"app": "api"}}
+						obj["spec"] = map[string]any{"template": map[string]any{"metadata": labelsMetadata, "spec": spec}}
+					}
+					if malformed {
+						if field == "labels" {
+							labelsMetadata["labels"] = map[string]any{"app": true}
+						} else {
+							spec["hostNetwork"] = "true"
+						}
+					}
+					return resource(obj)
+				}
+				for _, copies := range [][]bool{{true}, {true, false}, {false, true}, {true, false, false}} {
+					resources := map[string]workloadinterface.IMetadata{}
+					for i, bad := range copies {
+						resources[string(rune('a'+i))] = makeObject(bad)
+					}
+					results := ResolveEndpointsFromResources(resources, []WorkloadRef{{Namespace: "prod", Kind: kind, Name: "api"}})
+					if len(results) != 1 || results[0].Resolved || results[0].Reason == "" {
+						t.Fatalf("malformed %s must be unresolved even with valid copies: %+v", field, results)
+					}
+				}
+			})
+		}
+	}
+}

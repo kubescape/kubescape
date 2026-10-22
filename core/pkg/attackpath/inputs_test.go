@@ -426,3 +426,87 @@ func TestCollectInputsV1IngressStillExposesService(t *testing.T) {
 		t.Fatalf("v1 Ingress exposure lost: paths=%v unclear=%v", paths, unclear)
 	}
 }
+
+func TestCollectInputsConflictingPolicyAndRBACDefinitions(t *testing.T) {
+	for _, kind := range []string{"NetworkPolicy", "Role", "ClusterRole", "RoleBinding", "ClusterRoleBinding"} {
+		for _, variants := range [][]string{{"deny", "allow"}, {"allow", "deny"}, {"deny", "allow", "deny"}, {"allow", "deny", "allow"}, {"allow", "allow"}} {
+			t.Run(kind+"/"+strings.Join(variants, "-"), func(t *testing.T) {
+				resources := make(map[string]workloadinterface.IMetadata)
+				for i, variant := range variants {
+					version := "rbac.authorization.k8s.io/v1"
+					metadata := map[string]any{"name": "shared", "annotations": map[string]any{"source": fmt.Sprint(i)}}
+					if kind != "ClusterRole" && kind != "ClusterRoleBinding" {
+						metadata["namespace"] = "apps"
+					}
+					obj := map[string]any{"apiVersion": version, "kind": kind, "metadata": metadata}
+					switch kind {
+					case "NetworkPolicy":
+						obj["apiVersion"] = "networking.k8s.io/v1"
+						spec := map[string]any{"podSelector": map[string]any{}, "policyTypes": []any{"Ingress"}}
+						if variant == "allow" {
+							spec["ingress"] = []any{map[string]any{}}
+						}
+						obj["spec"] = spec
+					case "Role", "ClusterRole":
+						obj["rules"] = []any{map[string]any{"apiGroups": []any{""}, "resources": []any{"pods"}, "verbs": []any{variant}}}
+					default:
+						obj["roleRef"] = map[string]any{"apiGroup": "rbac.authorization.k8s.io", "kind": "ClusterRole", "name": variant}
+						obj["subjects"] = []any{map[string]any{"kind": "ServiceAccount", "name": variant, "namespace": "apps"}}
+					}
+					resources[fmt.Sprintf("source-%d", i)] = resource(obj)
+				}
+				for attempt := 0; attempt < 5; attempt++ {
+					inputs := CollectInputs(resources)
+					conflict := variants[0] != variants[1]
+					unavailable, ambiguous := inputs.RBACUnavailable, inputs.AmbiguousRBAC
+					count := len(inputs.Roles) + len(inputs.ClusterRoles) + len(inputs.RoleBindings) + len(inputs.ClusterRoleBindings)
+					if kind == "NetworkPolicy" {
+						unavailable, ambiguous, count = inputs.NetworkPolicyUnavailable, inputs.AmbiguousPolicies, len(inputs.Policies)
+					}
+					if unavailable != conflict {
+						t.Fatalf("unavailable=%v want %v", unavailable, conflict)
+					}
+					if !conflict {
+						if count != 1 || len(ambiguous) != 0 || len(inputs.Warnings) != 0 {
+							t.Fatalf("equivalent definitions not coalesced: count=%d ambiguous=%v warnings=%v", count, ambiguous, inputs.Warnings)
+						}
+					} else {
+						if count != 2 || len(ambiguous) != 1 || !strings.HasPrefix(ambiguous[0], kind+"/") || len(inputs.Warnings) != 1 || !strings.Contains(inputs.Warnings[0], "unavailable") {
+							t.Fatalf("conflict not preserved and diagnosed: count=%d ambiguous=%v warnings=%v", count, ambiguous, inputs.Warnings)
+						}
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestCollectInputsBindingConflictFields(t *testing.T) {
+	for _, kind := range []string{"RoleBinding", "ClusterRoleBinding"} {
+		for _, field := range []string{"roleRef", "subjects"} {
+			t.Run(kind+"/"+field, func(t *testing.T) {
+				resources := make(map[string]workloadinterface.IMetadata)
+				for i := 0; i < 2; i++ {
+					role, subject := "reader", "alice"
+					if i == 1 {
+						if field == "roleRef" {
+							role = "admin"
+						} else {
+							subject = "bob"
+						}
+					}
+					resources[fmt.Sprint(i)] = resource(map[string]any{
+						"apiVersion": "rbac.authorization.k8s.io/v1", "kind": kind,
+						"metadata": map[string]any{"name": "binding", "namespace": "apps"},
+						"roleRef":  map[string]any{"apiGroup": "rbac.authorization.k8s.io", "kind": "ClusterRole", "name": role},
+						"subjects": []any{map[string]any{"kind": "User", "apiGroup": "rbac.authorization.k8s.io", "name": subject}},
+					})
+				}
+				inputs := CollectInputs(resources)
+				if !inputs.RBACUnavailable || len(inputs.AmbiguousRBAC) != 1 {
+					t.Fatalf("%s difference did not disable RBAC: %+v", field, inputs)
+				}
+			})
+		}
+	}
+}

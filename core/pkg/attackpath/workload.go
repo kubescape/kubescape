@@ -56,19 +56,27 @@ type WorkloadRef struct {
 // template's labels. Exported so cmd/mcpserver can call it directly.
 // Returns nil when the path cannot be found (selector-less or headless).
 func PodTemplateLabels(kind string, obj map[string]any) map[string]string {
-	u := &unstructured.Unstructured{Object: obj}
-	if kind == "Pod" {
-		return u.GetLabels()
-	}
+	labels, _ := podTemplateLabelsChecked(kind, obj)
+	return labels
+}
+
+func podTemplateLabelsChecked(kind string, obj map[string]any) (map[string]string, error) {
 	path := []string{"spec", "template", "metadata", "labels"}
+	if kind == "Pod" {
+		path = []string{"metadata", "labels"}
+	}
 	if kind == "CronJob" {
 		path = []string{"spec", "jobTemplate", "spec", "template", "metadata", "labels"}
 	}
-	raw, found, err := unstructured.NestedStringMap(u.Object, path...)
-	if err != nil || !found {
-		return nil
+	raw, found, err := unstructured.NestedFieldNoCopy(obj, path...)
+	if err != nil {
+		return nil, err
 	}
-	return raw
+	if !found || raw == nil {
+		return nil, nil
+	}
+	labels, _, err := unstructured.NestedStringMap(obj, path...)
+	return labels, err
 }
 
 // PodTemplateHostNetwork extracts the hostNetwork field from a workload's
@@ -76,7 +84,11 @@ func PodTemplateLabels(kind string, obj map[string]any) map[string]string {
 // namespace and gets ExposureOpen regardless of NetworkPolicy rules.
 // Exported so cmd/mcpserver can call it alongside PodTemplateLabels.
 func PodTemplateHostNetwork(kind string, obj map[string]any) bool {
-	u := &unstructured.Unstructured{Object: obj}
+	hostNetwork, _ := podTemplateHostNetworkChecked(kind, obj)
+	return hostNetwork
+}
+
+func podTemplateHostNetworkChecked(kind string, obj map[string]any) (bool, error) {
 	path := []string{"spec", "template", "spec", "hostNetwork"}
 	if kind == "Pod" {
 		path = []string{"spec", "hostNetwork"}
@@ -84,11 +96,18 @@ func PodTemplateHostNetwork(kind string, obj map[string]any) bool {
 	if kind == "CronJob" {
 		path = []string{"spec", "jobTemplate", "spec", "template", "spec", "hostNetwork"}
 	}
-	val, found, err := unstructured.NestedBool(u.Object, path...)
-	if err != nil || !found {
-		return false
+	raw, found, err := unstructured.NestedFieldNoCopy(obj, path...)
+	if err != nil {
+		return false, err
 	}
-	return val
+	if !found || raw == nil {
+		return false, nil
+	}
+	value, ok := raw.(bool)
+	if !ok {
+		return false, fmt.Errorf("hostNetwork is not a boolean")
+	}
+	return value, nil
 }
 
 // WorkloadEndpointResult is the outcome of resolving one workload to its
@@ -111,26 +130,33 @@ func ResolveEndpointsFromResources(
 	resources map[string]workloadinterface.IMetadata,
 	refs []WorkloadRef,
 ) []WorkloadEndpointResult {
-	// Build a lookup: "namespace/kind/name" → IMetadata
-	lookup := make(map[string]workloadinterface.IMetadata, len(resources))
+	// Build a lookup of decoded endpoint data by namespace/kind/name.
+	type endpointData struct {
+		labels      map[string]string
+		hostNetwork bool
+		malformed   bool
+	}
+	lookup := make(map[string]endpointData, len(resources))
 	ambiguous := make(map[string]bool)
 	for _, r := range resources {
 		if !isSupportedWorkloadResource(r) {
 			continue
 		}
 		key := r.GetNamespace() + "/" + r.GetKind() + "/" + r.GetName()
+
+		labels, labelsErr := podTemplateLabelsChecked(r.GetKind(), r.GetObject())
+		hostNetwork, hostErr := podTemplateHostNetworkChecked(r.GetKind(), r.GetObject())
+		data := endpointData{labels: labels, hostNetwork: hostNetwork, malformed: labelsErr != nil || hostErr != nil}
 		if previous, exists := lookup[key]; exists {
-			previousLabels := PodTemplateLabels(r.GetKind(), previous.GetObject())
-			currentLabels := PodTemplateLabels(r.GetKind(), r.GetObject())
+			data.malformed = data.malformed || previous.malformed
 			// Missing controller template labels prevent resolution, but a Pod's
 			// omitted labels and explicit empty labels are the same label set.
-			if (r.GetKind() != "Pod" && (previousLabels == nil) != (currentLabels == nil)) ||
-				!maps.Equal(previousLabels, currentLabels) ||
-				PodTemplateHostNetwork(r.GetKind(), previous.GetObject()) != PodTemplateHostNetwork(r.GetKind(), r.GetObject()) {
+			if (r.GetKind() != "Pod" && (previous.labels == nil) != (labels == nil)) ||
+				!maps.Equal(previous.labels, labels) || previous.hostNetwork != hostNetwork {
 				ambiguous[key] = true
 			}
 		}
-		lookup[key] = r
+		lookup[key] = data
 	}
 
 	// Sort refs for deterministic output.
@@ -173,7 +199,7 @@ func ResolveEndpointsFromResources(
 			})
 			continue
 		}
-		r, ok := lookup[key]
+		data, ok := lookup[key]
 		if !ok {
 			results = append(results, WorkloadEndpointResult{
 				Ref:    ref,
@@ -181,7 +207,11 @@ func ResolveEndpointsFromResources(
 			})
 			continue
 		}
-		labels := PodTemplateLabels(ref.Kind, r.GetObject())
+		if data.malformed {
+			results = append(results, WorkloadEndpointResult{Ref: ref, Reason: fmt.Sprintf("%s %s/%s: pod labels or hostNetwork could not be decoded", ref.Kind, ref.Namespace, ref.Name)})
+			continue
+		}
+		labels := data.labels
 		// nil labels on a non-Pod workload means no pod template found
 		// (e.g. a selector-less Job). Report it as skipped, not guessed.
 		if labels == nil && ref.Kind != "Pod" {
@@ -204,7 +234,7 @@ func ResolveEndpointsFromResources(
 				Namespace:   ref.Namespace,
 				Name:        podName,
 				Labels:      labels,
-				HostNetwork: PodTemplateHostNetwork(ref.Kind, r.GetObject()),
+				HostNetwork: data.hostNetwork,
 			},
 			Resolved: true,
 		})

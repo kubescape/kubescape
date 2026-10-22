@@ -48,11 +48,17 @@ type Inputs struct {
 	// AmbiguousRoutes contains sorted Kind/namespace/name Gateway API identities.
 	AmbiguousRoutes []string
 
-	// NetworkPolicy engine
-	Policies []*networkingv1.NetworkPolicy
-	NpNS     []networkpolicy.NamespaceInfo
+	// NetworkPolicy engine. Callers MUST check NetworkPolicyUnavailable before
+	// evaluation: conflicting definitions are retained, not unioned or dropped.
+	Policies                 []*networkingv1.NetworkPolicy
+	NpNS                     []networkpolicy.NamespaceInfo
+	NetworkPolicyUnavailable bool
+	AmbiguousPolicies        []string // sorted Kind/namespace/name identities
 
-	// RBAC engine
+	// RBAC engine. Callers MUST check RBACUnavailable before evaluation;
+	// conflicting definitions remain present for diagnosis, not authorization.
+	RBACUnavailable     bool
+	AmbiguousRBAC       []string // sorted Kind/namespace/name identities
 	Roles               []rbacv1.Role
 	ClusterRoles        []rbacv1.ClusterRole
 	RoleBindings        []rbacv1.RoleBinding
@@ -195,7 +201,13 @@ func CollectInputs(resources map[string]workloadinterface.IMetadata) Inputs {
 
 	// NetworkPolicy engine.
 	policies, npNS, npErrs := networkpolicy.FromResources(resources)
-	inp.Policies = policies
+	inp.Policies, inp.AmbiguousPolicies = coalesceAnalysisDefinitions(policies, func(p *networkingv1.NetworkPolicy) (string, any) {
+		return "NetworkPolicy/" + p.Namespace + "/" + p.Name, p.Spec
+	})
+	inp.NetworkPolicyUnavailable = len(inp.AmbiguousPolicies) > 0
+	for _, identity := range inp.AmbiguousPolicies {
+		inp.Warnings = append(inp.Warnings, "networkpolicy: conflicting definitions for "+identity+"; NetworkPolicy evaluation unavailable")
+	}
 	inp.NpNS = npNS
 	for _, e := range npErrs {
 		inp.Warnings = append(inp.Warnings, "networkpolicy: "+e.Error())
@@ -203,10 +215,38 @@ func CollectInputs(resources map[string]workloadinterface.IMetadata) Inputs {
 
 	// RBAC engine.
 	roles, crs, rbs, crbs, sas, rbacErrs := rbacgraph.FromResources(resources)
-	inp.Roles = roles
-	inp.ClusterRoles = crs
-	inp.RoleBindings = rbs
-	inp.ClusterRoleBindings = crbs
+	var conflicts []string
+	inp.Roles, conflicts = coalesceAnalysisDefinitions(roles, func(r rbacv1.Role) (string, any) {
+		return "Role/" + r.Namespace + "/" + r.Name, r.Rules
+	})
+	inp.AmbiguousRBAC = append(inp.AmbiguousRBAC, conflicts...)
+	inp.ClusterRoles, conflicts = coalesceAnalysisDefinitions(crs, func(r rbacv1.ClusterRole) (string, any) {
+		return "ClusterRole//" + r.Name, struct {
+			Rules       []rbacv1.PolicyRule
+			Aggregation *rbacv1.AggregationRule
+			Labels      map[string]string
+		}{r.Rules, r.AggregationRule, r.Labels}
+	})
+	inp.AmbiguousRBAC = append(inp.AmbiguousRBAC, conflicts...)
+	inp.RoleBindings, conflicts = coalesceAnalysisDefinitions(rbs, func(r rbacv1.RoleBinding) (string, any) {
+		return "RoleBinding/" + r.Namespace + "/" + r.Name, struct {
+			RoleRef  rbacv1.RoleRef
+			Subjects []rbacv1.Subject
+		}{r.RoleRef, r.Subjects}
+	})
+	inp.AmbiguousRBAC = append(inp.AmbiguousRBAC, conflicts...)
+	inp.ClusterRoleBindings, conflicts = coalesceAnalysisDefinitions(crbs, func(r rbacv1.ClusterRoleBinding) (string, any) {
+		return "ClusterRoleBinding//" + r.Name, struct {
+			RoleRef  rbacv1.RoleRef
+			Subjects []rbacv1.Subject
+		}{r.RoleRef, r.Subjects}
+	})
+	inp.AmbiguousRBAC = append(inp.AmbiguousRBAC, conflicts...)
+	sort.Strings(inp.AmbiguousRBAC)
+	inp.RBACUnavailable = len(inp.AmbiguousRBAC) > 0
+	for _, identity := range inp.AmbiguousRBAC {
+		inp.Warnings = append(inp.Warnings, "rbacgraph: conflicting definitions for "+identity+"; RBAC evaluation unavailable")
+	}
 	inp.ServiceAccounts = sas
 	for _, e := range rbacErrs {
 		inp.Warnings = append(inp.Warnings, "rbacgraph: "+e.Error())
@@ -277,4 +317,34 @@ func supportedInputResources(resources map[string]workloadinterface.IMetadata) m
 		}
 	}
 	return filtered
+}
+
+// coalesceAnalysisDefinitions retains each distinct definition once and marks
+// identities with multiple definitions. Callers must disable the engine on any
+// conflict: retaining conflicting policies must never imply an allow-rule union.
+func coalesceAnalysisDefinitions[T any](items []T, definition func(T) (string, any)) ([]T, []string) {
+	seen := make(map[string][]any)
+	var unique []T
+	for _, item := range items {
+		identity, data := definition(item)
+		duplicate := false
+		for _, previous := range seen[identity] {
+			if reflect.DeepEqual(previous, data) {
+				duplicate = true
+				break
+			}
+		}
+		if !duplicate {
+			seen[identity] = append(seen[identity], data)
+			unique = append(unique, item)
+		}
+	}
+	var conflicts []string
+	for identity, definitions := range seen {
+		if len(definitions) > 1 {
+			conflicts = append(conflicts, identity)
+		}
+	}
+	sort.Strings(conflicts)
+	return unique, conflicts
 }
