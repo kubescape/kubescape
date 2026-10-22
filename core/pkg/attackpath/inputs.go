@@ -69,7 +69,25 @@ func CollectInputs(resources map[string]workloadinterface.IMetadata) Inputs {
 	var inp Inputs
 
 	// Exposure engine (Services, Ingresses, plain Namespaces).
-	svcs, ings, expNS, expErrs := exposurepkg.FromResources(resources)
+	exposureResources := make(map[string]workloadinterface.IMetadata)
+	for id, res := range resources {
+		if res == nil {
+			continue
+		}
+		apiVersion, _ := res.GetObject()["apiVersion"].(string)
+		group, version, qualified := strings.Cut(apiVersion, "/")
+		switch res.GetKind() {
+		case "Service", "Namespace":
+			if !qualified && apiVersion != "" {
+				exposureResources[id] = res
+			}
+		case "Ingress":
+			if qualified && (group == "networking.k8s.io" || group == "extensions") && version != "" {
+				exposureResources[id] = res
+			}
+		}
+	}
+	svcs, ings, expNS, expErrs := exposurepkg.FromResources(exposureResources)
 	inp.Services = svcs
 	inp.AmbiguousServices = conflictingServices(svcs)
 	inp.Ingresses = ings
