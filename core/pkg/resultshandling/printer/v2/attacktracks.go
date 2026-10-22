@@ -93,7 +93,14 @@ func (prettyPrinter *PrettyPrinter) printAttackTracks(opaSessionObj *cautils.OPA
 		resources = append(resources, value)
 	}
 
+	// ResourcesPrioritized is a map, so the slice above starts in random order
+	// and the score sort below is not stable. Break score ties on the resource
+	// ID, as SetTopWorkloads does, so equal-scoring resources keep the same
+	// order - and are the same top-N resources - on every run.
 	sort.Slice(resources, func(i, j int) bool {
+		if resources[i].Score == resources[j].Score {
+			return resources[i].ResourceID < resources[j].ResourceID
+		}
 		return resources[i].Score > resources[j].Score
 	})
 
