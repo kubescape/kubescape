@@ -299,7 +299,12 @@ func newDiscoveryResourceResolverWithKinds(client discovery.DiscoveryInterface) 
 			return nil
 		}
 
-		if len(mapKSResourceToApiGroup(resource)) > 0 && !isUnservedKSIdentity(group, version, resource) {
+		if registered := mapKSResourceToApiGroup(resource); len(registered) > 0 && !isUnservedKSIdentity(group, version, resource) {
+			if version == "*" {
+				if resolved := resolveRegisteredVersions(group, resource, registered); len(resolved) > 0 {
+					return resolved
+				}
+			}
 			return defaultResourceResolver(group, version, resource)
 		}
 		if _, err := k8sinterface.GetGroupVersionResource(resource); err == nil {
@@ -314,6 +319,21 @@ func newDiscoveryResourceResolverWithKinds(client discovery.DiscoveryInterface) 
 		})
 		return nil
 	}, discoveryFailures, discovered
+}
+
+// resolveRegisteredVersions resolves a "*" version of a Kubescape-served
+// identity to the versions it is registered under in group. Passing the "*"
+// through would produce a triplet with an empty version, which names nothing a
+// collector serves and sits next to the concrete identity when a DynamicMatch
+// also records it, so the same resource would be requested twice.
+func resolveRegisteredVersions(group, resource string, registered []string) []resolvedResource {
+	var resolved []resolvedResource
+	for _, apiVersion := range registered {
+		if g, v := k8sinterface.SplitApiVersion(apiVersion); g == group {
+			resolved = append(resolved, defaultResourceResolver(g, v, resource)...)
+		}
+	}
+	return resolved
 }
 
 func getDiscoveryFailures(err error) []cautils.PartialGVRPull {

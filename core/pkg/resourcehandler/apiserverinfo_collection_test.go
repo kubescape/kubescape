@@ -71,7 +71,9 @@ func TestDiscoveryResolverDropsUnregisteredAPIServerInfoIdentity(t *testing.T) {
 // triggered, while the unregistered host-data APIServerInfo stays dropped.
 func TestDiscoveryResolverKeepsWildcardVersionOfRegisteredIdentity(t *testing.T) {
 	resolver, _ := newDiscoveryResourceResolver(coreGroupDiscovery())
-	assert.NotEmpty(t, resolver("eks.amazonaws.com", "*", "ClusterDescribe"))
+	resolved := resolver("eks.amazonaws.com", "*", "ClusterDescribe")
+	require.Len(t, resolved, 1)
+	assert.Equal(t, "eks.amazonaws.com/v1/ClusterDescribe", resolved[0].groupVersionResourceTriplet, "a * version resolves to the registered version, not an empty one")
 	assert.Empty(t, resolver("hostdata.kubescape.cloud", "*", "APIServerInfo"))
 
 	frameworks := []reporthandling.Framework{{Controls: []reporthandling.Control{
