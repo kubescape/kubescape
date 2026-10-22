@@ -141,7 +141,7 @@ func DeduplicateWorkloads(workloads []unstructured.Unstructured) []unstructured.
 		if uid := w.GetUID(); uid != "" {
 			byUID[uid] = i
 		}
-		key := fmt.Sprintf("%s/%s", strings.ToLower(w.GetKind()), w.GetName())
+		key := fmt.Sprintf("%s/%s/%s", w.GetNamespace(), strings.ToLower(w.GetKind()), w.GetName())
 		byKindName[key] = i
 	}
 
@@ -184,16 +184,18 @@ func getControllerRef(obj unstructured.Unstructured) *metav1.OwnerReference {
 
 // findParentInWorkloads looks up a controller owner reference in the
 // workload indices. It first tries UID-based lookup, then falls back to
-// kind/name-based lookup with UID cross-validation when available.
-func findParentInWorkloads(ref metav1.OwnerReference, workloads []unstructured.Unstructured, byUID map[types.UID]int, byKindName map[string]int) (int, bool) {
+// namespace/kind/name-based lookup with UID cross-validation when available.
+// All supported workloads are namespaced: an owner in a different namespace
+// cannot represent this child's evaluation, even if a stale UID matches.
+func findParentInWorkloads(ref metav1.OwnerReference, namespace string, workloads []unstructured.Unstructured, byUID map[types.UID]int, byKindName map[string]int) (int, bool) {
 	if ref.UID != "" {
 		if idx, ok := byUID[ref.UID]; ok {
-			if strings.EqualFold(workloads[idx].GetKind(), ref.Kind) {
+			if workloads[idx].GetNamespace() == namespace && strings.EqualFold(workloads[idx].GetKind(), ref.Kind) {
 				return idx, true
 			}
 		}
 	}
-	key := fmt.Sprintf("%s/%s", strings.ToLower(ref.Kind), ref.Name)
+	key := fmt.Sprintf("%s/%s/%s", namespace, strings.ToLower(ref.Kind), ref.Name)
 	if idx, ok := byKindName[key]; ok {
 		parent := workloads[idx]
 		if ref.UID != "" && parent.GetUID() != "" && ref.UID != parent.GetUID() {
@@ -224,7 +226,7 @@ func hasEvaluatedAncestor(idx int, workloads []unstructured.Unstructured, byUID 
 		if ref == nil {
 			break
 		}
-		parentIdx, found := findParentInWorkloads(*ref, workloads, byUID, byKindName)
+		parentIdx, found := findParentInWorkloads(*ref, workloads[curr].GetNamespace(), workloads, byUID, byKindName)
 		if !found {
 			break
 		}
