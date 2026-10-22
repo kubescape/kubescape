@@ -219,3 +219,79 @@ func TestCollectInputsConflictingExposureDefinitions(t *testing.T) {
 		}
 	}
 }
+
+func TestCollectInputsIgnoresUnrelatedGatewayGroups(t *testing.T) {
+	inputs := CollectInputs(map[string]workloadinterface.IMetadata{
+		"real": resource(map[string]any{
+			"apiVersion": "gateway.networking.k8s.io/v1", "kind": "Gateway",
+			"metadata": map[string]any{"name": "edge", "namespace": "apps"},
+			"spec":     map[string]any{"listeners": []any{map[string]any{"name": "http", "protocol": "HTTP", "port": 80}}},
+		}),
+		"istio": resource(map[string]any{
+			"apiVersion": "networking.istio.io/v1", "kind": "Gateway",
+			"metadata": map[string]any{"name": "edge", "namespace": "apps"},
+			"spec":     map[string]any{"servers": []any{}},
+		}),
+		"foreign-route": resource(map[string]any{
+			"apiVersion": "other.example/v1", "kind": "HTTPRoute",
+			"metadata": map[string]any{"name": "foreign", "namespace": "apps"},
+			"spec":     map[string]any{"parentRefs": "not-a-gateway-api-route"},
+		}),
+	})
+	if inputs.ExposureIndex == nil || len(inputs.AmbiguousGateways) != 0 || len(inputs.Warnings) != 0 {
+		t.Fatalf("unrelated API groups affected Gateway exposure: %+v", inputs)
+	}
+}
+
+func exposureRouteResource(kind, backend, source string) workloadinterface.IMetadata {
+	obj := map[string]any{
+		"kind":     kind,
+		"metadata": map[string]any{"name": "route", "namespace": "apps", "annotations": map[string]any{"source": source}},
+	}
+	if kind == "Ingress" {
+		obj["apiVersion"] = "networking.k8s.io/v1"
+		obj["spec"] = map[string]any{"defaultBackend": map[string]any{"service": map[string]any{"name": backend, "port": map[string]any{"number": 80}}}}
+	} else {
+		obj["apiVersion"] = "gateway.networking.k8s.io/v1"
+		obj["spec"] = map[string]any{
+			"parentRefs": []any{map[string]any{"name": "edge"}},
+			"rules":      []any{map[string]any{"backendRefs": []any{map[string]any{"name": backend, "port": 80}}}},
+		}
+	}
+	return resource(obj)
+}
+
+func TestCollectInputsConflictingIngressAndRoutes(t *testing.T) {
+	for _, kind := range []string{"Ingress", "HTTPRoute", "GRPCRoute"} {
+		for _, backends := range [][]string{{"one", "two"}, {"two", "one"}, {"one", "two", "one"}, {"two", "one", "two"}, {"one", "one"}} {
+			t.Run(kind+"/"+strings.Join(backends, "-"), func(t *testing.T) {
+				resources := make(map[string]workloadinterface.IMetadata)
+				for i, backend := range backends {
+					resources[fmt.Sprint(i)] = exposureRouteResource(kind, backend, fmt.Sprint(i))
+				}
+				for attempt := 0; attempt < 10; attempt++ {
+					inputs := CollectInputs(resources)
+					if backends[0] == backends[1] {
+						if inputs.ExposureIndex == nil || len(inputs.Warnings) != 0 {
+							t.Fatalf("equivalent route definitions should remain usable: %+v", inputs)
+						}
+						continue
+					}
+					if inputs.ExposureIndex != nil || len(inputs.Warnings) != 1 || !strings.Contains(inputs.Warnings[0], "conflicting "+kind+" definitions for apps/route") {
+						t.Fatalf("conflict must disable index with identity diagnostic: %+v", inputs)
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestCollectInputsKeepsRouteKindsSeparate(t *testing.T) {
+	inputs := CollectInputs(map[string]workloadinterface.IMetadata{
+		"http": exposureRouteResource("HTTPRoute", "one", "http"),
+		"grpc": exposureRouteResource("GRPCRoute", "two", "grpc"),
+	})
+	if inputs.ExposureIndex == nil || len(inputs.Warnings) != 0 {
+		t.Fatalf("distinct route kinds cannot conflict: %+v", inputs)
+	}
+}

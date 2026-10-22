@@ -11,6 +11,7 @@ import (
 	"maps"
 	"reflect"
 	"sort"
+	"strings"
 
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	corev1 "k8s.io/api/core/v1"
@@ -31,7 +32,7 @@ type Inputs struct {
 	Ingresses []networkingv1.Ingress
 	ExpNS     []exposurepkg.NamespaceInfo
 	// ExposureIndex retains decoded Gateway API objects for exposure queries.
-	// It is nil when conflicting Service, Gateway, or Namespace definitions
+	// It is nil when conflicting exposure resource definitions
 	// prevent a reliable verdict; callers must handle an unavailable index.
 	ExposureIndex *exposurepkg.Index
 	// AmbiguousServices lists identities with conflicting Service specs in namespace/name
@@ -41,6 +42,9 @@ type Inputs struct {
 	// inputs in sorted order, ignoring metadata unrelated to exposure analysis.
 	AmbiguousGateways   []exposurepkg.ServiceRef
 	AmbiguousNamespaces []string
+	AmbiguousIngresses  []exposurepkg.ServiceRef
+	// AmbiguousRoutes contains sorted Kind/namespace/name Gateway API identities.
+	AmbiguousRoutes []string
 
 	// NetworkPolicy engine
 	Policies []*networkingv1.NetworkPolicy
@@ -69,13 +73,39 @@ func CollectInputs(resources map[string]workloadinterface.IMetadata) Inputs {
 	inp.Services = svcs
 	inp.AmbiguousServices = conflictingServices(svcs)
 	inp.Ingresses = ings
+	seenIngresses := make(map[exposurepkg.ServiceRef]networkingv1.IngressSpec)
+	ingressConflicts := make(map[exposurepkg.ServiceRef]bool)
+	for _, ing := range ings {
+		ref := exposurepkg.ServiceRef{Namespace: ing.Namespace, Name: ing.Name}
+		if previous, exists := seenIngresses[ref]; exists {
+			if !reflect.DeepEqual(previous, ing.Spec) {
+				ingressConflicts[ref] = true
+			}
+		} else {
+			seenIngresses[ref] = ing.Spec
+		}
+	}
+	inp.AmbiguousIngresses = sortedExposureRefs(ingressConflicts)
 	inp.ExpNS = expNS
 	for _, e := range expErrs {
 		inp.Warnings = append(inp.Warnings, "exposure: "+e.Error())
 	}
 
 	// Exposure engine — Gateway API objects (HTTPRoute, GRPCRoute, Gateway).
-	routes, gateways, gwErrs := exposurepkg.FromUnstructuredGatewayAPI(resources)
+	// Kind names are not unique across API groups (for example Istio Gateway).
+	// The exposure decoder dispatches by kind, so constrain its input here.
+	gatewayResources := make(map[string]workloadinterface.IMetadata)
+	for key, res := range resources {
+		if res == nil {
+			continue
+		}
+		apiVersion, _ := res.GetObject()["apiVersion"].(string)
+		group, version, qualified := strings.Cut(apiVersion, "/")
+		if qualified && group == "gateway.networking.k8s.io" && version != "" {
+			gatewayResources[key] = res
+		}
+	}
+	routes, gateways, gwErrs := exposurepkg.FromUnstructuredGatewayAPI(gatewayResources)
 	for _, e := range gwErrs {
 		inp.Warnings = append(inp.Warnings, "exposure/gateway: "+e.Error())
 	}
@@ -92,6 +122,22 @@ func CollectInputs(resources map[string]workloadinterface.IMetadata) Inputs {
 		}
 	}
 	inp.AmbiguousGateways = sortedExposureRefs(gatewayConflicts)
+	seenRoutes := make(map[string]any)
+	routeConflicts := make(map[string]bool)
+	for _, route := range routes {
+		key := route.Kind + "/" + route.Namespace + "/" + route.Name
+		if previous, exists := seenRoutes[key]; exists {
+			if !reflect.DeepEqual(previous, route) {
+				routeConflicts[key] = true
+			}
+		} else {
+			seenRoutes[key] = route
+		}
+	}
+	for key := range routeConflicts {
+		inp.AmbiguousRoutes = append(inp.AmbiguousRoutes, key)
+	}
+	sort.Strings(inp.AmbiguousRoutes)
 	seenNamespaces := make(map[string]map[string]string)
 	namespaceConflicts := make(map[string]bool)
 	for _, ns := range expNS {
@@ -109,7 +155,7 @@ func CollectInputs(resources map[string]workloadinterface.IMetadata) Inputs {
 	sort.Strings(inp.AmbiguousNamespaces)
 	// The resource map does not establish that ReferenceGrants were completely
 	// collected. Keep cross-namespace backend authorization undetermined.
-	if len(inp.AmbiguousServices) == 0 && len(inp.AmbiguousGateways) == 0 && len(inp.AmbiguousNamespaces) == 0 {
+	if len(inp.AmbiguousServices) == 0 && len(inp.AmbiguousGateways) == 0 && len(inp.AmbiguousNamespaces) == 0 && len(inp.AmbiguousIngresses) == 0 && len(inp.AmbiguousRoutes) == 0 {
 		inp.ExposureIndex = exposurepkg.NewIndex(svcs, ings, routes, gateways, expNS)
 	} else {
 		for _, ref := range inp.AmbiguousServices {
@@ -120,6 +166,13 @@ func CollectInputs(resources map[string]workloadinterface.IMetadata) Inputs {
 		}
 		for _, name := range inp.AmbiguousNamespaces {
 			inp.Warnings = append(inp.Warnings, fmt.Sprintf("exposure: conflicting Namespace labels for %s; exposure index unavailable", name))
+		}
+		for _, ref := range inp.AmbiguousIngresses {
+			inp.Warnings = append(inp.Warnings, fmt.Sprintf("exposure: conflicting Ingress definitions for %s/%s; exposure index unavailable", ref.Namespace, ref.Name))
+		}
+		for _, key := range inp.AmbiguousRoutes {
+			kind, ref, _ := strings.Cut(key, "/")
+			inp.Warnings = append(inp.Warnings, fmt.Sprintf("exposure: conflicting %s definitions for %s; exposure index unavailable", kind, ref))
 		}
 	}
 
