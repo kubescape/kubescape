@@ -34,22 +34,32 @@ type gitLabProjectResolution struct {
 }
 
 func (a *GitlabAdaptor) resolveRegistryProject(ctx context.Context, repository string, cache map[string]gitLabProjectResolution) (string, error) {
+	a.mu.RLock()
+	client := a.client
+	a.mu.RUnlock()
+	return a.resolveRegistryProjectWithClient(ctx, client, repository, cache)
+}
+
+func (a *GitlabAdaptor) resolveRegistryProjectWithClient(ctx context.Context, client GitlabAPI, repository string, cache map[string]gitLabProjectResolution) (string, error) {
 	if result, ok := cache[repository]; ok {
 		return result.path, result.err
 	}
-	path, err := a.lookupRegistryProject(ctx, repository)
+	path, err := a.lookupRegistryProject(ctx, client, repository)
 	cache[repository] = gitLabProjectResolution{path: path, err: err}
 	return path, err
 }
 
-func (a *GitlabAdaptor) lookupRegistryProject(ctx context.Context, repository string) (string, error) {
+func (a *GitlabAdaptor) lookupRegistryProject(ctx context.Context, client GitlabAPI, repository string) (string, error) {
+	if client == nil {
+		return "", fmt.Errorf("gitlab client not initialized, call login first")
+	}
 	candidates, err := gitLabProjectCandidates(repository)
 	if err != nil {
 		return "", err
 	}
 	const query = `query ResolveRegistryProject($fullPath: ID!) { project(fullPath: $fullPath) { fullPath } }`
 	for _, candidate := range candidates {
-		data, err := a.client.DoGraphQL(ctx, query, map[string]interface{}{"fullPath": candidate})
+		data, err := client.DoGraphQL(ctx, query, map[string]interface{}{"fullPath": candidate})
 		if err != nil {
 			return "", fmt.Errorf("resolve gitlab project %s: %w", candidate, err)
 		}
