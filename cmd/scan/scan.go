@@ -72,6 +72,7 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	var scanInfo cautils.ScanInfo
 	var scanContractPath string
 	var scanContractName string
+	var fleetConfigPath string
 	var selectedContract *contractv1alpha1.SelectedContract
 
 	// scanCmd represents the scan command
@@ -90,6 +91,9 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 			var err error
 			selectedContract, err = loadAndApplyScanContract(cmd, &scanInfo, scanContractPath, scanContractName)
 			if err != nil {
+				return err
+			}
+			if err := applyFleetConfig(cmd, &scanInfo, fleetConfigPath); err != nil {
 				return err
 			}
 			// runs for the bare scan command and all subcommands (framework, control, workload, image)
@@ -340,6 +344,8 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 
 	scanCmd.PersistentFlags().StringSliceVar(&scanInfo.KubeContexts, "kube-contexts", nil, "Scan each of these kube contexts in one run (comma-separated, or repeat the flag), writing one report per context to a context-suffixed --output path. Requires --output. Distinct from --kube-context, which selects a single context; when --kube-contexts is set it takes over the scan instead.")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.FleetReport, "fleet-report", "", "With --kube-contexts, also write one combined JSON report across every scanned context to this path, alongside the per-context reports. Every requested context appears in it, including the ones that could not be scanned, with a control-by-cluster matrix over those that could. Not supported with --hide or --encrypt.")
+
+	scanCmd.PersistentFlags().StringVar(&fleetConfigPath, "fleet-config", "", "Path to a fleet config file (kind FleetConfig) with the contexts to scan and where the reports go: contexts, output, fleetReport, referenceCluster and retries. A flag given on the command line overrides the same setting in the file.")
 
 	scanCmd.PersistentFlags().IntVar(&scanInfo.KubeContextRetries, "retries", 2, "With --kube-contexts, how many more times to try a cluster whose API server never answered, waiting 2s, then 4s, doubling up to 30s between attempts. A cluster that answered with an error, or whose scan was cancelled, is not retried. 0 disables retries.")
 

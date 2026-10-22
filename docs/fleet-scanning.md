@@ -29,12 +29,50 @@ another, and then:
 | `--fleet-report <path>` | Also write one combined JSON report across every context to this path. Not supported with `--hide` or `--encrypt`. | - |
 | `--reference-cluster <ctx>` | With `--fleet-report`, the context the other clusters are compared against. Must be one of `--kube-contexts`. | - |
 | `--retries <n>` | How many more times to try a cluster whose API server never answered. `0` disables retries. | `2` |
+| `--fleet-config <path>` | Read the fleet settings from a file instead. See [fleet config file](#fleet-config-file). | - |
 | `--fail-coverage-below <float>` | Also used as the coverage floor for the fleet score: a cluster scanned with less coverage is left out of it. | `0` |
 | `--scan-timeout <duration>` | Limits each scan attempt of each cluster. An attempt that runs out of time is `cancelled` and is not retried. | - |
 
 `--kube-contexts` works with `kubescape scan` (security view), `scan framework`,
 `scan control` and `scan workload`. Contexts are scanned one at a time, and one
 cluster failing never stops the others from being scanned.
+
+## Fleet config file
+
+Instead of repeating the fleet flags on every run, you can keep them in a file
+and pass it with `--fleet-config`:
+
+```yaml
+apiVersion: config.kubescape.io/v1alpha1
+kind: FleetConfig
+metadata:
+  name: production
+spec:
+  contexts: [prod, staging, dr]
+  output: report.json
+  fleetReport: fleet.json
+  referenceCluster: prod
+  retries: 2
+```
+
+```bash
+kubescape scan framework nsa --fleet-config fleet.yaml
+```
+
+Each field sets the matching flag: `contexts` is `--kube-contexts`,
+`output` is `--output`, `fleetReport` is `--fleet-report`, `referenceCluster`
+is `--reference-cluster` and `retries` is `--retries`. Every field under `spec`
+is optional, but the contexts have to come from somewhere: the file or
+`--kube-contexts`.
+Paths are read relative to where you run the command, as they are for the
+flags.
+
+A flag given on the command line overrides the same setting in the file, so
+`--fleet-config fleet.yaml --retries 0` scans the same contexts without
+retrying. Values from the file are checked exactly as the flags are, and a
+misspelt or unknown field is an error rather than being ignored. Scan settings such as frameworks,
+thresholds and timeouts are not part of the fleet config; they stay on the
+command line or in a scan contract (`--scan-contract`).
 
 ## Cluster statuses
 
