@@ -153,11 +153,18 @@ func ResolveEndpointsFromResources(
 			})
 			continue
 		}
+		// Endpoint.Name identifies a concrete Pod for Reaches' self-access
+		// shortcut. A controller represents multiple Pods, not one Pod; its
+		// identity remains in Ref and must not bypass policy evaluation.
+		podName := ""
+		if ref.Kind == "Pod" {
+			podName = ref.Name
+		}
 		results = append(results, WorkloadEndpointResult{
 			Ref: ref,
 			Endpoint: networkpolicy.Endpoint{
 				Namespace:   ref.Namespace,
-				Name:        ref.Name,
+				Name:        podName,
 				Labels:      labels,
 				HostNetwork: PodTemplateHostNetwork(ref.Kind, r.GetObject()),
 			},

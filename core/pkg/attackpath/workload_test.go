@@ -4,6 +4,9 @@ import (
 	"testing"
 
 	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/kubescape/v4/core/pkg/networkpolicy"
+	networkingv1 "k8s.io/api/networking/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // resource builds a minimal IMetadata object from a raw map, the same
@@ -154,7 +157,7 @@ func TestResolveEndpoints_DeploymentFullyResolved(t *testing.T) {
 	if !r.Resolved {
 		t.Fatalf("expected Resolved=true, got Reason=%q", r.Reason)
 	}
-	if r.Endpoint.Namespace != "prod" || r.Endpoint.Name != "web" {
+	if r.Endpoint.Namespace != "prod" || r.Endpoint.Name != "" || r.Ref.Name != "web" {
 		t.Errorf("unexpected endpoint identity: %+v", r.Endpoint)
 	}
 	if r.Endpoint.Labels["app"] != "web" {
@@ -346,5 +349,37 @@ func TestResolveEndpoints_DeploymentHostNetworkReflected(t *testing.T) {
 	}
 	if !results[0].Endpoint.HostNetwork {
 		t.Error("expected HostNetwork=true for a Deployment with hostNetwork=true in pod template")
+	}
+}
+
+func TestResolveEndpoints_ControllerIdentityDoesNotBypassPolicies(t *testing.T) {
+	deployment := deploymentResource("prod", "api", map[string]any{"app": "api"})
+	stateful := deploymentResource("prod", "api", map[string]any{"app": "api"}).GetObject()
+	stateful["kind"] = "StatefulSet"
+	pod := podResource("prod", "api", map[string]any{"app": "api"})
+	results := ResolveEndpointsFromResources(makeResources(deployment, resource(stateful), pod), []WorkloadRef{
+		{Namespace: "prod", Kind: "Deployment", Name: "api"},
+		{Namespace: "prod", Kind: "StatefulSet", Name: "api"},
+		{Namespace: "prod", Kind: "Pod", Name: "api"},
+	})
+	endpoints := map[string]networkpolicy.Endpoint{}
+	for _, r := range results {
+		if !r.Resolved {
+			t.Fatal(r.Reason)
+		}
+		endpoints[r.Ref.Kind] = r.Endpoint
+	}
+	idx, errs := networkpolicy.NewIndex([]*networkingv1.NetworkPolicy{{ObjectMeta: metav1.ObjectMeta{Name: "deny-all", Namespace: "prod"}, Spec: networkingv1.NetworkPolicySpec{PodSelector: metav1.LabelSelector{}, PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeIngress, networkingv1.PolicyTypeEgress}}}}, nil)
+	if len(errs) > 0 {
+		t.Fatal(errs)
+	}
+	for _, pair := range [][2]string{{"Deployment", "StatefulSet"}, {"Deployment", "Pod"}, {"Deployment", "Deployment"}, {"StatefulSet", "StatefulSet"}} {
+		v, _, _ := idx.Reaches(endpoints[pair[0]], endpoints[pair[1]], nil)
+		if v != networkpolicy.Denied {
+			t.Errorf("%v: got %v, want Denied", pair, v)
+		}
+	}
+	if v, _, _ := idx.Reaches(endpoints["Pod"], endpoints["Pod"], nil); v != networkpolicy.Allowed {
+		t.Errorf("real Pod must retain self-access: %v", v)
 	}
 }
