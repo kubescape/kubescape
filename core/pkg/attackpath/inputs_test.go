@@ -137,8 +137,8 @@ func TestCollectInputsPreservesGatewayDecodeWarnings(t *testing.T) {
 		"metadata": map[string]any{"name": "broken", "namespace": "apps"},
 		"spec":     map[string]any{"parentRefs": "invalid"},
 	})))
-	if inputs.ExposureIndex == nil {
-		t.Fatal("decode failure should not prevent index construction")
+	if inputs.ExposureIndex != nil {
+		t.Fatal("decode failure must leave exposure unavailable")
 	}
 	if len(inputs.Warnings) != 1 || !strings.HasPrefix(inputs.Warnings[0], "exposure/gateway: ") {
 		t.Fatalf("expected attributed gateway decode warning, got %v", inputs.Warnings)
@@ -540,5 +540,41 @@ func TestCollectInputsBindingConflictFields(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestCollectInputsMalformedNamespaceLabels(t *testing.T) {
+	for _, variants := range [][]string{{"bad"}, {"bad", "valid"}, {"valid", "bad"}, {"valid", "bad", "valid"}, {"omitted"}} {
+		t.Run(strings.Join(variants, "-"), func(t *testing.T) {
+			resources := make(map[string]workloadinterface.IMetadata)
+			for i, variant := range variants {
+				metadata := map[string]any{"name": "client"}
+				if variant == "bad" {
+					metadata["labels"] = map[string]any{"env": true}
+				}
+				if variant == "valid" {
+					metadata["labels"] = map[string]any{}
+				}
+				resources[fmt.Sprint(i)] = resource(map[string]any{"apiVersion": "v1", "kind": "Namespace", "metadata": metadata})
+			}
+			inputs := CollectInputs(resources)
+			bad := variants[0] != "omitted"
+			if inputs.NetworkPolicyUnavailable != bad || (inputs.ExposureIndex == nil) != bad {
+				t.Fatalf("malformed namespace availability: %+v", inputs)
+			}
+			if bad && !strings.Contains(strings.Join(inputs.Warnings, "\n"), "malformed Namespace labels for client") {
+				t.Fatalf("missing diagnostic: %v", inputs.Warnings)
+			}
+		})
+	}
+}
+
+func TestCollectInputsDroppedIngressUnavailable(t *testing.T) {
+	inputs := CollectInputs(makeResources(
+		resource(map[string]any{"apiVersion": "v1", "kind": "Service", "metadata": map[string]any{"name": "app", "namespace": "apps"}, "spec": map[string]any{"ports": []any{map[string]any{"port": 80}}}}),
+		resource(map[string]any{"apiVersion": "networking.k8s.io/v1", "kind": "Ingress", "metadata": map[string]any{"name": "bad", "namespace": "apps"}, "spec": map[string]any{"rules": "invalid"}}),
+	))
+	if inputs.ExposureIndex != nil || len(inputs.Services) != 1 || inputs.NetworkPolicyUnavailable || inputs.RBACUnavailable || len(inputs.Warnings) != 1 {
+		t.Fatalf("exposure decode failure not isolated: %+v", inputs)
 	}
 }

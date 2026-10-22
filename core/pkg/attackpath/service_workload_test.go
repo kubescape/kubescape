@@ -9,6 +9,49 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+func TestResolveServiceBackends_MalformedLabelsRemainUnresolved(t *testing.T) {
+	malformed := deploymentResource("prod", "web", map[string]any{"app": 42})
+	valid := deploymentResource("prod", "web", map[string]any{"app": "web"})
+	omitted := deploymentResource("prod", "web", nil)
+	delete(omitted.GetObject()["spec"].(map[string]any)["template"].(map[string]any)["metadata"].(map[string]any), "labels")
+	for _, tt := range []struct {
+		name    string
+		items   []workloadinterface.IMetadata
+		unknown bool
+	}{
+		{name: "malformed only", items: []workloadinterface.IMetadata{malformed}, unknown: true},
+		{name: "malformed then valid", items: []workloadinterface.IMetadata{malformed, valid, valid}, unknown: true},
+		{name: "valid then malformed", items: []workloadinterface.IMetadata{valid, malformed, valid}, unknown: true},
+		{name: "omitted labels", items: []workloadinterface.IMetadata{omitted}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			resources := make(map[string]workloadinterface.IMetadata)
+			for i, item := range tt.items {
+				resources[string(rune('a'+i))] = item
+			}
+			results := ResolveServiceBackends([]corev1.Service{
+				typedSvc("prod", "matching", map[string]string{"app": "web"}),
+				typedSvc("prod", "other-selector", map[string]string{"app": "other"}),
+				typedSvc("staging", "other-namespace", map[string]string{"app": "web"}),
+				typedSvc("prod", "selectorless", nil),
+			}, resources)
+			for _, name := range []string{"matching", "other-selector", "other-namespace", "selectorless"} {
+				r := backendsFor(t, results, name)
+				if len(r.Backends) != 0 {
+					t.Errorf("expected no confirmed backends for %s, got %+v", name, r)
+				}
+				var want []WorkloadRef
+				if tt.unknown && (name == "matching" || name == "other-selector") {
+					want = []WorkloadRef{{Namespace: "prod", Kind: "Deployment", Name: "web"}}
+				}
+				if !reflect.DeepEqual(r.UnresolvedBackends, want) {
+					t.Errorf("%s unresolved backends = %+v, want %+v", name, r.UnresolvedBackends, want)
+				}
+			}
+		})
+	}
+}
+
 func TestResolveServiceBackends_DuplicateWorkloadLabels(t *testing.T) {
 	web := map[string]any{"app": "web"}
 	api := map[string]any{"app": "api"}

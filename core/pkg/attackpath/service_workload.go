@@ -20,6 +20,8 @@ type ServiceBackend struct {
 	Backends []WorkloadRef
 	// UnresolvedBackends are identities with conflicting collected label sets,
 	// at least one of which matches this Service. They are excluded from Backends.
+	// Malformed label data is unresolved for every selecting Service in the same
+	// namespace, since its labels cannot establish whether the selector matches.
 	UnresolvedBackends []WorkloadRef
 	// Headless is true when spec.clusterIP is None. A headless Service
 	// with a selector can still have workload backends.
@@ -41,8 +43,9 @@ func ResolveServiceBackends(
 ) []ServiceBackend {
 	// Pre-resolve pod-template labels for every known workload kind.
 	type workloadLabels struct {
-		ref      WorkloadRef
-		variants []labels.Set
+		ref       WorkloadRef
+		variants  []labels.Set
+		malformed bool
 	}
 	var workloads []workloadLabels
 	positions := make(map[WorkloadRef]int)
@@ -54,9 +57,10 @@ func ResolveServiceBackends(
 		if !isSupportedWorkloadResource(r) {
 			continue
 		}
-		lbls := PodTemplateLabels(r.GetKind(), r.GetObject())
+		lbls, labelsErr := podTemplateLabelsChecked(r.GetKind(), r.GetObject())
 		ref := WorkloadRef{Namespace: r.GetNamespace(), Kind: r.GetKind(), Name: r.GetName()}
 		if pos, exists := positions[ref]; exists {
+			workloads[pos].malformed = workloads[pos].malformed || labelsErr != nil
 			if !slices.ContainsFunc(workloads[pos].variants, func(existing labels.Set) bool {
 				return maps.Equal(existing, lbls)
 			}) {
@@ -66,8 +70,9 @@ func ResolveServiceBackends(
 		}
 		positions[ref] = len(workloads)
 		workloads = append(workloads, workloadLabels{
-			ref:      ref,
-			variants: []labels.Set{labels.Set(lbls)},
+			ref:       ref,
+			variants:  []labels.Set{labels.Set(lbls)},
+			malformed: labelsErr != nil,
 		})
 	}
 
@@ -114,6 +119,10 @@ func ResolveServiceBackends(
 		for _, wl := range workloads {
 			// A Service only selects pods in its own namespace.
 			if wl.ref.Namespace != svc.Namespace {
+				continue
+			}
+			if wl.malformed {
+				sb.UnresolvedBackends = append(sb.UnresolvedBackends, wl.ref)
 				continue
 			}
 			if slices.ContainsFunc(wl.variants, func(variant labels.Set) bool { return sel.Matches(variant) }) {

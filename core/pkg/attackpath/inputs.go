@@ -17,6 +17,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	exposurepkg "github.com/kubescape/kubescape/v4/core/pkg/exposure"
@@ -33,7 +34,7 @@ type Inputs struct {
 	Ingresses []networkingv1.Ingress
 	ExpNS     []exposurepkg.NamespaceInfo
 	// ExposureIndex retains decoded Gateway API objects for exposure queries.
-	// It is nil when conflicting definitions or unsupported Ingress API versions
+	// It is nil when decoding errors, malformed Namespace labels, conflicting definitions or unsupported Ingress API versions
 	// prevent a reliable verdict; callers must handle an unavailable index and
 	// consult Warnings. Only networking.k8s.io/v1 Ingress backends are decoded.
 	ExposureIndex *exposurepkg.Index
@@ -76,6 +77,25 @@ type Inputs struct {
 func CollectInputs(resources map[string]workloadinterface.IMetadata) Inputs {
 	var inp Inputs
 	resources = supportedInputResources(resources)
+	malformedNamespaces := make(map[string]bool)
+	for _, res := range resources {
+		if res.GetKind() != "Namespace" {
+			continue
+		}
+		raw, found, err := unstructured.NestedFieldNoCopy(res.GetObject(), "metadata", "labels")
+		if err == nil && found && raw != nil {
+			_, _, err = unstructured.NestedStringMap(res.GetObject(), "metadata", "labels")
+		}
+		if err != nil {
+			malformedNamespaces[res.GetName()] = true
+		}
+	}
+	var malformedNamespaceWarnings []string
+	for name := range malformedNamespaces {
+		malformedNamespaceWarnings = append(malformedNamespaceWarnings, "malformed Namespace labels for "+name+"; exposure and NetworkPolicy evaluation unavailable")
+	}
+	sort.Strings(malformedNamespaceWarnings)
+	inp.Warnings = append(inp.Warnings, malformedNamespaceWarnings...)
 
 	// Exposure engine (Services, Ingresses, plain Namespaces).
 	exposureResources := make(map[string]workloadinterface.IMetadata)
@@ -178,7 +198,7 @@ func CollectInputs(resources map[string]workloadinterface.IMetadata) Inputs {
 	sort.Strings(inp.AmbiguousNamespaces)
 	// The resource map does not establish that ReferenceGrants were completely
 	// collected. Keep cross-namespace backend authorization undetermined.
-	if len(unsupportedIngressWarnings) == 0 && len(inp.AmbiguousServices) == 0 && len(inp.AmbiguousGateways) == 0 && len(inp.AmbiguousNamespaces) == 0 && len(inp.AmbiguousIngresses) == 0 && len(inp.AmbiguousRoutes) == 0 {
+	if len(expErrs) == 0 && len(gwErrs) == 0 && len(malformedNamespaces) == 0 && len(unsupportedIngressWarnings) == 0 && len(inp.AmbiguousServices) == 0 && len(inp.AmbiguousGateways) == 0 && len(inp.AmbiguousNamespaces) == 0 && len(inp.AmbiguousIngresses) == 0 && len(inp.AmbiguousRoutes) == 0 {
 		inp.ExposureIndex = exposurepkg.NewIndex(svcs, ings, routes, gateways, expNS)
 	} else {
 		for _, ref := range inp.AmbiguousServices {
@@ -204,7 +224,7 @@ func CollectInputs(resources map[string]workloadinterface.IMetadata) Inputs {
 	inp.Policies, inp.AmbiguousPolicies = coalesceAnalysisDefinitions(policies, func(p *networkingv1.NetworkPolicy) (string, any) {
 		return "NetworkPolicy/" + p.Namespace + "/" + p.Name, p.Spec
 	})
-	inp.NetworkPolicyUnavailable = len(npErrs) > 0 || len(inp.AmbiguousPolicies) > 0 || len(inp.AmbiguousNamespaces) > 0
+	inp.NetworkPolicyUnavailable = len(malformedNamespaces) > 0 || len(npErrs) > 0 || len(inp.AmbiguousPolicies) > 0 || len(inp.AmbiguousNamespaces) > 0
 	for _, namespace := range inp.AmbiguousNamespaces {
 		inp.Warnings = append(inp.Warnings, "networkpolicy: conflicting Namespace definitions for "+namespace+"; NetworkPolicy evaluation unavailable")
 	}
