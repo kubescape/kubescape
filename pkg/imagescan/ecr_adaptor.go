@@ -72,6 +72,10 @@ func NewAWSECRAdaptor() *AWSECRAdaptor {
 // Explicit credentials passed via RegistryCredentials are intentionally unsupported
 // as AWS SDK v2 relies heavily on IAM Roles for Service Accounts (IRSA) and default configuration.
 func (a *AWSECRAdaptor) Login(ctx context.Context, registry string, credentials RegistryCredentials) error {
+	// Every attempt replaces the session. A validation/configuration error
+	// must not leave scans using the previous AWS identity's client.
+	a.client = nil
+
 	if credentials.Username != "" || credentials.Password != "" || credentials.Token != "" {
 		return fmt.Errorf("explicit credentials are intentionally unsupported for AWS ECR; use AWS IRSA or default credential chain")
 	}
