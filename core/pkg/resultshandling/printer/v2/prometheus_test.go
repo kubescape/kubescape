@@ -390,3 +390,122 @@ func TestSetImageVulnerabilities_DeterministicSeverityOrder(t *testing.T) {
 		require.Equal(t, want, got, "image severities must be emitted in sorted order")
 	}
 }
+
+// TestSetComplianceScores_DeterministicControlOrder guards against non-deterministic
+// Prometheus control metrics. Because summaryDetails.ListControls() traverses an internal
+// Go map whose iteration order is randomised, setComplianceScores must sort controls
+// by controlID so that identical scan inputs always produce identically ordered metric lines.
+func TestSetComplianceScores_DeterministicControlOrder(t *testing.T) {
+	controls := reportsummary.ControlSummaries{}
+	want := make([]string, 0, 32)
+	score := float32(80.0)
+	for i := 0; i < 32; i++ {
+		controlID := fmt.Sprintf("C-%04d", i)
+		controls[controlID] = reportsummary.ControlSummary{
+			ControlID:       controlID,
+			Name:            fmt.Sprintf("Control %04d", i),
+			ScoreFactor:     apis.SeverityHigh,
+			ComplianceScore: &score,
+		}
+		want = append(want, controlID)
+	}
+	sort.Strings(want)
+
+	summaryDetails := &reportsummary.SummaryDetails{
+		Controls: controls,
+	}
+
+	for i := 0; i < 50; i++ {
+		m := &Metrics{}
+		m.setComplianceScores(summaryDetails)
+		got := make([]string, 0, len(m.listControls))
+		for _, c := range m.listControls {
+			got = append(got, c.controlID)
+		}
+		require.Equal(t, want, got, "control metrics must follow sorted control ID order")
+	}
+}
+
+// TestSetComplianceScores_DeterministicFrameworkOrder verifies that framework compliance
+// metrics are emitted in a deterministic, alphabetically sorted order by framework name.
+func TestSetComplianceScores_DeterministicFrameworkOrder(t *testing.T) {
+	frameworkNames := []string{"NSA", "MITRE", "CIS", "ArmoBest"}
+	frameworks := make([]reportsummary.FrameworkSummary, 0, len(frameworkNames))
+	for _, name := range frameworkNames {
+		frameworks = append(frameworks, reportsummary.FrameworkSummary{
+			Name:            name,
+			ComplianceScore: 75.0,
+		})
+	}
+
+	want := append([]string(nil), frameworkNames...)
+	sort.Strings(want)
+
+	summaryDetails := &reportsummary.SummaryDetails{
+		Frameworks: frameworks,
+	}
+
+	for i := 0; i < 50; i++ {
+		m := &Metrics{}
+		m.setComplianceScores(summaryDetails)
+		got := make([]string, 0, len(m.listFrameworks))
+		for _, f := range m.listFrameworks {
+			got = append(got, f.frameworkName)
+		}
+		require.Equal(t, want, got, "framework metrics must follow sorted framework name order")
+	}
+}
+
+// TestSetImageVulnerabilities_DeterministicMultiImageOrder verifies that container image
+// vulnerability metrics across multiple images and platforms are emitted deterministically
+// in canonical (image, platform, severity) sorted order.
+func TestSetImageVulnerabilities_DeterministicMultiImageOrder(t *testing.T) {
+	severities := []string{"Critical", "High"}
+	mkMatches := func() []match.Match {
+		matches := make([]match.Match, 0, len(severities))
+		for i, sev := range severities {
+			matches = append(matches, match.Match{
+				Package: grypepkg.Package{ID: grypepkg.ID(fmt.Sprintf("pkg-%d", i)), Name: "pkg", Version: "1.0.0"},
+				Vulnerability: vulnerability.Vulnerability{
+					Metadata: &vulnerability.Metadata{ID: fmt.Sprintf("CVE-%d", i), Severity: sev},
+				},
+			})
+		}
+		return matches
+	}
+
+	// Supply images in non-sorted order: z-image first, then a-image with different platforms.
+	imageData := []cautils.ImageScanData{
+		{Image: "z-image:v1", Platform: "linux/amd64", Matches: match.NewMatches(mkMatches()...)},
+		{Image: "a-image:v1", Platform: "linux/arm64", Matches: match.NewMatches(mkMatches()...)},
+		{Image: "a-image:v1", Platform: "linux/amd64", Matches: match.NewMatches(mkMatches()...)},
+	}
+
+	type imgKey struct {
+		image    string
+		platform string
+		severity string
+	}
+	want := []imgKey{
+		{image: "a-image:v1", platform: "linux/amd64", severity: "Critical"},
+		{image: "a-image:v1", platform: "linux/amd64", severity: "High"},
+		{image: "a-image:v1", platform: "linux/arm64", severity: "Critical"},
+		{image: "a-image:v1", platform: "linux/arm64", severity: "High"},
+		{image: "z-image:v1", platform: "linux/amd64", severity: "Critical"},
+		{image: "z-image:v1", platform: "linux/amd64", severity: "High"},
+	}
+
+	for i := 0; i < 50; i++ {
+		m := &Metrics{}
+		m.setImageVulnerabilities(imageData)
+		got := make([]imgKey, 0, len(m.listImages))
+		for _, img := range m.listImages {
+			got = append(got, imgKey{
+				image:    img.image,
+				platform: img.platform,
+				severity: img.severity,
+			})
+		}
+		require.Equal(t, want, got, "multi-image metrics must follow canonical (image, platform, severity) sorted order")
+	}
+}

@@ -2,6 +2,7 @@ package printer
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -417,6 +418,9 @@ func (m *Metrics) setComplianceScores(summaryDetails *reportsummary.SummaryDetai
 	m.rs.complianceScore = cautils.ComplianceScoreToInt(summaryDetails.ComplianceScore)
 
 	for _, fw := range summaryDetails.ListFrameworks() {
+		if fw == nil {
+			continue
+		}
 		mfrs := mFrameworkComplianceScore{
 			frameworkName:   fw.GetName(),
 			complianceScore: cautils.ComplianceScoreToInt(fw.GetComplianceScore()),
@@ -424,8 +428,15 @@ func (m *Metrics) setComplianceScores(summaryDetails *reportsummary.SummaryDetai
 		mfrs.set(fw.NumberOfResources(), fw.NumberOfControls())
 		m.listFrameworks = append(m.listFrameworks, mfrs)
 	}
+	// Sort frameworks by name to ensure consistent metric ordering across runs.
+	slices.SortFunc(m.listFrameworks, func(a, b mFrameworkComplianceScore) int {
+		return strings.Compare(a.frameworkName, b.frameworkName)
+	})
 
 	for _, control := range summaryDetails.ListControls() {
+		if control == nil {
+			continue
+		}
 		mcrs := mControlComplianceScore{
 			controlName:     control.GetName(),
 			controlID:       control.GetID(),
@@ -437,6 +448,15 @@ func (m *Metrics) setComplianceScores(summaryDetails *reportsummary.SummaryDetai
 		mcrs.set(control.NumberOfResources())
 		m.listControls = append(m.listControls, mcrs)
 	}
+	// summaryDetails.ListControls() traverses an internal map, so its iteration
+	// order is randomised. Sort m.listControls by controlID so that identical
+	// scan inputs always emit control metric families in a deterministic order.
+	slices.SortFunc(m.listControls, func(a, b mControlComplianceScore) int {
+		if a.controlID != b.controlID {
+			return strings.Compare(a.controlID, b.controlID)
+		}
+		return strings.Compare(a.controlName, b.controlName)
+	})
 }
 
 func (m *Metrics) setCoverageScore(coverage cautils.ScanCoverage) {
@@ -532,4 +552,16 @@ func (m *Metrics) setImageVulnerabilities(imageScanData []cautils.ImageScanData)
 			})
 		}
 	}
+	// Sort image metrics by image, then platform, then severity so that
+	// multi-image and multi-arch scans emit metrics deterministically regardless
+	// of discovery or slice ordering.
+	slices.SortFunc(m.listImages, func(a, b mImageVulnerability) int {
+		if a.image != b.image {
+			return strings.Compare(a.image, b.image)
+		}
+		if a.platform != b.platform {
+			return strings.Compare(a.platform, b.platform)
+		}
+		return strings.Compare(a.severity, b.severity)
+	})
 }
