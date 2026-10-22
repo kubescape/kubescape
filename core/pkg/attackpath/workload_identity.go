@@ -40,11 +40,13 @@ type ServiceAccountIndex struct {
 	automount map[serviceAccountKey]*bool
 }
 
-// NewServiceAccountIndex indexes the collected ServiceAccount objects.
+// NewServiceAccountIndex snapshots the collected ServiceAccount objects.
+// Conflicting duplicates remain unknown, just as in the batch resolver.
 func NewServiceAccountIndex(serviceAccounts []corev1.ServiceAccount) *ServiceAccountIndex {
 	idx := &ServiceAccountIndex{automount: make(map[serviceAccountKey]*bool, len(serviceAccounts))}
-	for _, sa := range serviceAccounts {
-		idx.automount[serviceAccountKey{sa.Namespace, sa.Name}] = sa.AutomountServiceAccountToken
+	for key, value := range ServiceAccountAutomountIndex(serviceAccounts) {
+		namespace, name, _ := strings.Cut(key, "/")
+		idx.automount[serviceAccountKey{namespace, name}] = value
 	}
 	return idx
 }
