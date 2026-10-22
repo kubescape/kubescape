@@ -4,6 +4,8 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -272,17 +274,38 @@ func TestHtmlPrinter_ActionPrint_ImageScanShowsKEVAndEPSS(t *testing.T) {
 	require.NoError(t, err)
 	htmlContent := string(content)
 
-	assert.Contains(t, htmlContent, "<th>KEV</th>")
-	assert.Contains(t, htmlContent, `<th class="numericCell">EPSS</th>`)
-	assert.Contains(t, htmlContent, "<td>yes</td>")
-	assert.Contains(t, htmlContent, `<td class="numericCell">63.9% (99th)</td>`)
-	assert.Contains(t, htmlContent, `<td class="numericCell">N/A</td>`)
+	assert.Contains(t, htmlContent, `<th class="imageKEVCell">KEV</th>`)
+	assert.Contains(t, htmlContent, `<th class="imageEPSSCell numericCell">EPSS</th>`)
+	assert.Contains(t, htmlContent, `<td class="imageKEVCell">yes</td>`)
+	assert.Contains(t, htmlContent, `<td class="imageEPSSCell numericCell">63.9% (99th)</td>`)
+	assert.Contains(t, htmlContent, `<td class="imageEPSSCell numericCell">N/A</td>`)
 
 	kev := strings.Index(htmlContent, "CVE-2020-15999")
 	critical := strings.Index(htmlContent, "CVE-2019-0001")
 	require.NotEqual(t, -1, kev)
 	require.NotEqual(t, -1, critical)
 	assert.Less(t, kev, critical, "KEV findings must be listed before higher-severity ones")
+}
+
+// The report table uses table-layout: fixed, so a column without a width, or
+// widths summing past 100%, collapses to zero width in the browser.
+func TestHtmlReportTemplate_ImageTableColumnWidths(t *testing.T) {
+	head := reportTemplate[strings.Index(reportTemplate, `<table class="imageTable">`):]
+	head = head[:strings.Index(head, "</thead>")]
+	headers := regexp.MustCompile(`<th class="(image\w+Cell)[^"]*">`).FindAllStringSubmatch(head, -1)
+	require.Len(t, headers, strings.Count(head, "<th>")+strings.Count(head, "<th "), "every image table header needs an image*Cell width class")
+	require.Len(t, headers, 7)
+
+	total := 0
+	for _, h := range headers {
+		width := regexp.MustCompile(`\.` + h[1] + ` \{\s*width: (\d+)%;`).FindStringSubmatch(reportTemplate)
+		require.NotNil(t, width, "no width rule for .%s", h[1])
+		w, err := strconv.Atoi(width[1])
+		require.NoError(t, err)
+		assert.Positive(t, w, ".%s", h[1])
+		total += w
+	}
+	assert.Equal(t, 100, total, "image table column widths must sum to 100%%")
 }
 
 func TestHtmlPrinter_ActionPrint_CoverageSectionPresent(t *testing.T) {
@@ -500,7 +523,7 @@ func TestHtmlPrinter_ActionPrint_ValidHTMLTableStructure(t *testing.T) {
 	htmlContent := string(content)
 
 	// Verify all table and body tags are balanced
-	assert.Equal(t, strings.Count(htmlContent, "<table>"), strings.Count(htmlContent, "</table>"),
+	assert.Equal(t, strings.Count(htmlContent, "<table>")+strings.Count(htmlContent, "<table "), strings.Count(htmlContent, "</table>"),
 		"table start and end tags must match")
 	assert.Equal(t, strings.Count(htmlContent, "<tbody>"), strings.Count(htmlContent, "</tbody>"),
 		"tbody start and end tags must match")
