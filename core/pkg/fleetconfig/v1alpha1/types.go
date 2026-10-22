@@ -1,5 +1,11 @@
 package v1alpha1
 
+import (
+	"fmt"
+
+	"gopkg.in/yaml.v3"
+)
+
 const (
 	APIVersion = "config.kubescape.io/v1alpha1"
 	Kind       = "FleetConfig"
@@ -24,5 +30,20 @@ type Spec struct {
 	Output           *string   `yaml:"output,omitempty"`
 	FleetReport      *string   `yaml:"fleetReport,omitempty"`
 	ReferenceCluster *string   `yaml:"referenceCluster,omitempty"`
-	Retries          *int      `yaml:"retries,omitempty"`
+	Retries          *Count    `yaml:"retries,omitempty"`
+}
+
+// Count is a whole number; yaml.v3 would otherwise truncate a value like 1.5 into an int instead of rejecting it.
+type Count int
+
+func (c *Count) UnmarshalYAML(value *yaml.Node) error {
+	if value.Kind != yaml.ScalarNode || value.ShortTag() != "!!int" {
+		return fmt.Errorf("line %d: %q is not a whole number", value.Line, value.Value)
+	}
+	var whole int
+	if err := value.Decode(&whole); err != nil {
+		return err
+	}
+	*c = Count(whole)
+	return nil
 }

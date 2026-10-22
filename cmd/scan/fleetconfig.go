@@ -34,7 +34,7 @@ func applyFleetConfig(cmd *cobra.Command, scanInfo *cautils.ScanInfo, path strin
 		scanInfo.ReferenceCluster = *spec.ReferenceCluster
 	}
 	if spec.Retries != nil && !commandFlagChanged(cmd, "retries") {
-		scanInfo.KubeContextRetries = *spec.Retries
+		scanInfo.KubeContextRetries = int(*spec.Retries)
 	}
 
 	if len(scanInfo.KubeContexts) == 0 {
