@@ -284,10 +284,14 @@ Several pieces hold this up:
 - lazily evaluated `variables`, matching admission, so an unreferenced broken
   variable is ignored and a broken referenced one fails only the validations that
   reference it
-- null fields read as unset. An empty YAML block (`env:`, `annotations:`) is null in
-  the file, but the apiserver decodes the object into its typed struct before any
-  policy sees it, so the field is simply absent there. The engine drops null map
-  keys before evaluating, so it sees the same object
+- nulls in built-in kinds read the way the apiserver decodes them. An empty YAML
+  block (`env:`, `annotations:`) is null in the file, but the apiserver decodes a
+  built-in kind into its Go struct before any policy sees it. There such a field
+  is simply unset, while a null entry inside a map or list keeps its key or index
+  with a zero value (`data: {k: null}` reads as `{k: ""}`). The engine applies the
+  same rules using the field types from the client-go scheme. Custom resources are
+  left as written, since their schema may declare a field nullable, and so are
+  fields the Go type does not declare
 
 An expression that errors, or returns a non-boolean, sets an error on the result
 rather than passing. An unknown verdict is never reported as a pass.
