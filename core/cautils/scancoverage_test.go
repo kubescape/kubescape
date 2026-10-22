@@ -89,6 +89,21 @@ func TestBuildScanCoverage_FailedGVRPopulated(t *testing.T) {
 	assert.Len(t, coverage.FailedGVRPulls, 1)
 	assert.Equal(t, "networking.k8s.io/v1/networkpolicies", coverage.FailedGVRPulls[0].GVR)
 	assert.Equal(t, "RBAC denied", coverage.FailedGVRPulls[0].Error)
+	assert.Equal(t, []string{"C-0001"}, coverage.FailedGVRPulls[0].Controls)
+}
+
+func TestBuildScanCoverage_FailedGVRNamesInScopeControls(t *testing.T) {
+	infoMap := map[string]apis.StatusInfo{
+		"hostdata.kubescape.cloud/v1beta0/KubeletInfo": {InnerStatus: apis.StatusSkipped, InnerInfo: "operator only"},
+	}
+	resourceToControlsMap := map[string][]string{
+		"hostdata.kubescape.cloud/v1beta0/KubeletInfo": {"C-0070", "C-0069", "C-0070", "C-0999"},
+		"v1/pods": {"C-0057"},
+	}
+	inScope := map[string]struct{}{"C-0069": {}, "C-0070": {}, "C-0057": {}}
+	coverage := BuildScanCoverage(infoMap, resourceToControlsMap, nil, nil, nil, nil, inScope)
+	require.Len(t, coverage.FailedGVRPulls, 1)
+	assert.Equal(t, []string{"C-0069", "C-0070"}, coverage.FailedGVRPulls[0].Controls, "sorted, unique, in scope only")
 }
 
 func TestBuildScanCoverage_NoResourceMap(t *testing.T) {

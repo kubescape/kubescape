@@ -69,6 +69,12 @@ func NewHostSensorHandler(k8sObj *k8sinterface.KubernetesApi, _ string) (*HostSe
 	return hsh, nil
 }
 
+// NewHostSensorHandlerWithClient builds a CRD-based host sensor handler that
+// reads through dynamicClient, for a cluster with nodeCount nodes.
+func NewHostSensorHandlerWithClient(dynamicClient dynamic.Interface, nodeCount int) *HostSensorHandler {
+	return &HostSensorHandler{dynamicClient: dynamicClient, nodeCount: nodeCount}
+}
+
 // Init is a no-op for CRD-based implementation.
 // The node-agent daemonset is expected to be already deployed and creating CRDs.
 func (hsh *HostSensorHandler) Init(ctx context.Context) error {

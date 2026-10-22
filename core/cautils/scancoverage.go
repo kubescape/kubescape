@@ -1,6 +1,7 @@
 package cautils
 
 import (
+	"slices"
 	"sort"
 	"strings"
 
@@ -130,6 +131,9 @@ type PolicyDegradation struct {
 type FailedGVRPull struct {
 	GVR   string `json:"gvr"`
 	Error string `json:"error"`
+	// Controls lists the in-scope controls that read this GVR, so a reader
+	// can tell which results the failure may affect.
+	Controls []string `json:"controls,omitempty"`
 }
 
 // PartialGVRPull records a LIST failure scoped to a specific field selector
@@ -345,8 +349,9 @@ func BuildScanCoverage(infoMap map[string]apis.StatusInfo, resourceToControlsMap
 				continue
 			}
 			coverage.FailedGVRPulls = append(coverage.FailedGVRPulls, FailedGVRPull{
-				GVR:   gvr,
-				Error: statusInfo.InnerInfo,
+				GVR:      gvr,
+				Error:    statusInfo.InnerInfo,
+				Controls: sortedUnique(resourceToControlsMap[gvr]),
 			})
 		}
 
@@ -442,4 +447,13 @@ func DetectVacuousFrameworks(frameworks []reportsummary.FrameworkSummary) []stri
 		}
 	}
 	return vacuous
+}
+
+func sortedUnique(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	out := append([]string(nil), values...)
+	sort.Strings(out)
+	return slices.Compact(out)
 }

@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"syscall"
@@ -104,11 +105,17 @@ type scanMetadata struct {
 }
 
 type scanCoverage struct {
-	FailedGVRPulls       []json.RawMessage     `json:"failedGVRPulls,omitempty"`
+	FailedGVRPulls       []failedGVRPull       `json:"failedGVRPulls,omitempty"`
 	PartialGVRPulls      []json.RawMessage     `json:"partialGVRPulls,omitempty"`
 	PolicyDegradations   []json.RawMessage     `json:"policyDegradations,omitempty"`
+	SkippedManifests     []json.RawMessage     `json:"skippedManifests,omitempty"`
 	NotEvaluatedControls []notEvaluatedControl `json:"notEvaluatedControls,omitempty"`
 	Degraded             bool                  `json:"degraded,omitempty"`
+}
+
+type failedGVRPull struct {
+	GVR      string   `json:"gvr"`
+	Controls []string `json:"controls,omitempty"`
 }
 
 type notEvaluatedControl struct {
@@ -374,11 +381,28 @@ func absentNewFailureRisk(report *scanReport, controlID string) string {
 			return "control was not evaluated in the base report, so the head failure cannot be classified as new"
 		}
 	}
-	coverage := report.ScanCoverage
-	if coverage.Degraded || len(coverage.FailedGVRPulls) > 0 || len(coverage.PartialGVRPulls) > 0 || len(coverage.PolicyDegradations) > 0 {
+	if coverageGapAffects(report.ScanCoverage, controlID) {
 		return "base report has degraded scan coverage, so the head failure cannot be classified as new"
 	}
 	return ""
+}
+
+// coverageGapAffects reports whether a gap in a report's scan coverage could
+// hide a failure of controlID. A failed GVR pull only affects the controls it
+// names; one that names none comes from an older report and may affect any
+// control. Partial pulls, policy fallbacks and skipped manifests may affect
+// any control, and so does a degraded bit with nothing recorded behind it.
+// A control that was not evaluated is checked by the callers.
+func coverageGapAffects(coverage scanCoverage, controlID string) bool {
+	if len(coverage.PartialGVRPulls) > 0 || len(coverage.PolicyDegradations) > 0 || len(coverage.SkippedManifests) > 0 {
+		return true
+	}
+	for _, pull := range coverage.FailedGVRPulls {
+		if len(pull.Controls) == 0 || slices.Contains(pull.Controls, controlID) {
+			return true
+		}
+	}
+	return coverage.Degraded && len(coverage.FailedGVRPulls) == 0 && len(coverage.NotEvaluatedControls) == 0
 }
 
 func summaryContainsControl(report *scanReport, controlID string) bool {
@@ -395,8 +419,7 @@ func absentResolutionRisk(report *scanReport, controlID string) string {
 			return "control was not evaluated in the head report"
 		}
 	}
-	coverage := report.ScanCoverage
-	if coverage.Degraded || len(coverage.FailedGVRPulls) > 0 || len(coverage.PartialGVRPulls) > 0 || len(coverage.PolicyDegradations) > 0 {
+	if coverageGapAffects(report.ScanCoverage, controlID) {
 		return "head report has degraded scan coverage, so an absent failure is not a conclusive resolution"
 	}
 	return ""

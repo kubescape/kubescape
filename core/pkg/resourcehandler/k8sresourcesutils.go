@@ -8,6 +8,7 @@ import (
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/pkg/hostsensorutils"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/reporthandling"
 )
@@ -103,6 +104,7 @@ func setComplexKSResourceMap(frameworks []reporthandling.Framework, resourceToCo
 				}
 				for _, match := range rule.DynamicMatch {
 					insertKSResourcesAndControls(k8sResources, match, resourceToControls, control)
+					insertDynamicMatchControls(k8sResources, match, resourceToControls, control)
 				}
 			}
 		}
@@ -141,6 +143,63 @@ func insertControls(resource string, resourceToControl map[string][]string, cont
 			resourceToControl[r] = append(resourceToControl[r], control.ControlID)
 		}
 	}
+}
+
+// insertDynamicMatchControls records control as depending on every
+// Kubescape-served resource its DynamicMatch selects, using the evaluator's
+// matching rules (getKubernetesObjects in opaprocessor): "*" for any group,
+// version or resource, "core" for the empty group, and resource names compared
+// case-insensitively. insertControls only looks resource names up exactly, so
+// a rule written with "*" or another case would otherwise read the resource
+// without the dependency being recorded, and a failed pull of it would not be
+// attributed to the control. The virtual identities of these resources use the
+// kind as the resource name, so matching by name also covers matching by kind.
+//
+// Each selected identity is also added to k8sResources, so it is collected (or
+// its failure recorded) like a name the rule spelled out. A dependency that is
+// never requested has no failure entry, and BuildScanCoverage would read it as
+// collected and count the control as evaluated. For the same reason only the
+// host kinds the host sensor collects are selected: the legacy names left in
+// MapResourceToApiGroup never get a status from it.
+func insertDynamicMatchControls(k8sResources map[string]map[string]map[string]any, match reporthandling.RuleMatchObjects, resourceToControl map[string][]string, control reporthandling.Control) {
+	add := func(resource string, apiVersions []string) {
+		for _, apiVersion := range apiVersions {
+			group, version := k8sinterface.SplitApiVersion(apiVersion)
+			if !dynamicMatchSelects(match, group, version, resource) {
+				continue
+			}
+			if k8sResources[group] == nil {
+				k8sResources[group] = make(map[string]map[string]any)
+			}
+			if k8sResources[group][version] == nil {
+				k8sResources[group][version] = make(map[string]any)
+			}
+			k8sResources[group][version][resource] = nil
+			r := k8sinterface.JoinResourceTriplets(group, version, resource)
+			if !slices.Contains(resourceToControl[r], control.ControlID) {
+				resourceToControl[r] = append(resourceToControl[r], control.ControlID)
+			}
+		}
+	}
+	for _, resource := range hostsensorutils.CollectedResources() {
+		add(resource.String(), []string{MapResourceToApiGroup[resource.String()]})
+	}
+	for resource, apiVersions := range MapResourceToApiGroupCloud {
+		add(resource, apiVersions)
+	}
+	for resource, apiVersions := range MapResourceToApiGroupVuln {
+		add(resource, apiVersions)
+	}
+}
+
+// dynamicMatchSelects reports whether match selects group/version/resource.
+func dynamicMatchSelects(match reporthandling.RuleMatchObjects, group, version, resource string) bool {
+	matches := func(policyValue, value string) bool {
+		return policyValue == "*" || policyValue == value || (policyValue == "core" && value == "")
+	}
+	return slices.ContainsFunc(match.APIGroups, func(g string) bool { return matches(g, group) }) &&
+		slices.ContainsFunc(match.APIVersions, func(v string) bool { return matches(v, version) }) &&
+		slices.ContainsFunc(match.Resources, func(r string) bool { return r == "*" || strings.EqualFold(r, resource) })
 }
 
 func insertKSResourcesAndControls(k8sResources map[string]map[string]map[string]any, match reporthandling.RuleMatchObjects, resourceToControl map[string][]string, control reporthandling.Control) {
