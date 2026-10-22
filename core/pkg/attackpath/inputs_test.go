@@ -295,3 +295,88 @@ func TestCollectInputsKeepsRouteKindsSeparate(t *testing.T) {
 		t.Fatalf("distinct route kinds cannot conflict: %+v", inputs)
 	}
 }
+
+func TestCollectInputsFiltersForeignKindsAcrossAdapters(t *testing.T) {
+	for _, reverse := range []bool{false, true} {
+		t.Run(fmt.Sprint(reverse), func(t *testing.T) {
+			resources := make(map[string]workloadinterface.IMetadata)
+			add := func(kind, version string, native bool, fields map[string]any) {
+				obj := map[string]any{"apiVersion": version, "kind": kind, "metadata": map[string]any{"name": "shared", "namespace": "apps"}}
+				for key, value := range fields {
+					obj[key] = value
+				}
+				order := "a"
+				if native == reverse {
+					order = "z"
+				}
+				resources[order+kind] = resource(obj)
+			}
+			add("Service", "v1", true, map[string]any{"spec": map[string]any{"type": "LoadBalancer"}})
+			add("Service", "serving.knative.dev/v1", false, nil)
+			add("NetworkPolicy", "networking.k8s.io/v1", true, map[string]any{"spec": map[string]any{"podSelector": map[string]any{}}})
+			add("NetworkPolicy", "projectcalico.org/v3", false, map[string]any{"spec": map[string]any{"selector": "all()"}})
+			add("Role", "rbac.authorization.k8s.io/v1", true, map[string]any{"rules": []any{map[string]any{"apiGroups": []any{""}, "resources": []any{"pods"}, "verbs": []any{"get"}}}})
+			add("Role", "foreign.example/v1", false, map[string]any{"rules": []any{map[string]any{"verbs": []any{"*"}}}})
+			add("ServiceAccount", "foreign.example/v1", false, nil)
+			inputs := CollectInputs(resources)
+			if inputs.ExposureIndex == nil || len(inputs.AmbiguousServices) != 0 || len(inputs.Services) != 1 {
+				t.Fatalf("foreign Service contaminated exposure: %+v", inputs)
+			}
+			paths, unclear := inputs.ExposureIndex.ServiceExposure(exposurepkg.ServiceRef{Namespace: "apps", Name: "shared"})
+			if unclear || len(paths) != 1 || paths[0].Kind != exposurepkg.ExposureLoadBalancer {
+				t.Fatalf("native exposure lost: %v %v", paths, unclear)
+			}
+			if len(inputs.Policies) != 1 || inputs.Policies[0].APIVersion != "networking.k8s.io/v1" {
+				t.Fatalf("foreign policy decoded: %+v", inputs.Policies)
+			}
+			if len(inputs.Roles) != 1 || len(inputs.Roles[0].Rules) != 1 || inputs.Roles[0].Rules[0].Verbs[0] != "get" {
+				t.Fatalf("foreign Role replaced native: %+v", inputs.Roles)
+			}
+			if len(inputs.ServiceAccounts) != 0 {
+				t.Fatalf("foreign ServiceAccount became native identity: %+v", inputs.ServiceAccounts)
+			}
+			if len(inputs.Warnings) != 0 {
+				t.Fatalf("unexpected warnings: %v", inputs.Warnings)
+			}
+		})
+	}
+}
+
+func TestCollectInputsRetainsNativeDecodeWarnings(t *testing.T) {
+	inputs := CollectInputs(map[string]workloadinterface.IMetadata{
+		"service": resource(map[string]any{"apiVersion": "v1", "kind": "Service", "metadata": map[string]any{"name": "bad"}, "spec": "invalid"}),
+		"policy":  resource(map[string]any{"apiVersion": "networking.k8s.io/v1", "kind": "NetworkPolicy", "metadata": map[string]any{"name": "bad"}, "spec": "invalid"}),
+		"role":    resource(map[string]any{"apiVersion": "rbac.authorization.k8s.io/v1", "kind": "Role", "metadata": map[string]any{"name": "bad"}, "rules": "invalid"}),
+	})
+	if len(inputs.Warnings) != 3 {
+		t.Fatalf("native decode warnings lost: %v", inputs.Warnings)
+	}
+}
+
+func TestSupportedInputResourcesGroups(t *testing.T) {
+	for kind, versions := range map[string][]string{
+		"Service": {"v1"}, "Namespace": {"v1"}, "ServiceAccount": {"v1"},
+		"Ingress":       {"networking.k8s.io/v1", "extensions/v1beta1"},
+		"NetworkPolicy": {"networking.k8s.io/v1", "extensions/v1beta1"},
+		"Role":          {"rbac.authorization.k8s.io/v1"}, "ClusterRole": {"rbac.authorization.k8s.io/v1"},
+		"RoleBinding": {"rbac.authorization.k8s.io/v1"}, "ClusterRoleBinding": {"rbac.authorization.k8s.io/v1"},
+		"Gateway": {"gateway.networking.k8s.io/v1"}, "HTTPRoute": {"gateway.networking.k8s.io/v1"}, "GRPCRoute": {"gateway.networking.k8s.io/v1"},
+	} {
+		for _, version := range append(versions, "other.example/v1", "", "invalid/group/v1", "gateway.networking.k8s.io/") {
+			t.Run(kind+"/"+version, func(t *testing.T) {
+				inputs := map[string]workloadinterface.IMetadata{"resource": resource(map[string]any{
+					"apiVersion": version, "kind": kind, "metadata": map[string]any{"name": "test"},
+				})}
+				want := false
+				for _, supported := range versions {
+					if version == supported {
+						want = true
+					}
+				}
+				if got := len(supportedInputResources(inputs)) == 1; got != want {
+					t.Fatalf("accepted=%v, want %v", got, want)
+				}
+			})
+		}
+	}
+}

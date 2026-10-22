@@ -17,6 +17,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	exposurepkg "github.com/kubescape/kubescape/v4/core/pkg/exposure"
 	"github.com/kubescape/kubescape/v4/core/pkg/networkpolicy"
@@ -67,6 +68,7 @@ type Inputs struct {
 // surfaced as a warning; it never aborts the collection.
 func CollectInputs(resources map[string]workloadinterface.IMetadata) Inputs {
 	var inp Inputs
+	resources = supportedInputResources(resources)
 
 	// Exposure engine (Services, Ingresses, plain Namespaces).
 	exposureResources := make(map[string]workloadinterface.IMetadata)
@@ -110,20 +112,7 @@ func CollectInputs(resources map[string]workloadinterface.IMetadata) Inputs {
 	}
 
 	// Exposure engine — Gateway API objects (HTTPRoute, GRPCRoute, Gateway).
-	// Kind names are not unique across API groups (for example Istio Gateway).
-	// The exposure decoder dispatches by kind, so constrain its input here.
-	gatewayResources := make(map[string]workloadinterface.IMetadata)
-	for key, res := range resources {
-		if res == nil {
-			continue
-		}
-		apiVersion, _ := res.GetObject()["apiVersion"].(string)
-		group, version, qualified := strings.Cut(apiVersion, "/")
-		if qualified && group == "gateway.networking.k8s.io" && version != "" {
-			gatewayResources[key] = res
-		}
-	}
-	routes, gateways, gwErrs := exposurepkg.FromUnstructuredGatewayAPI(gatewayResources)
+	routes, gateways, gwErrs := exposurepkg.FromUnstructuredGatewayAPI(resources)
 	for _, e := range gwErrs {
 		inp.Warnings = append(inp.Warnings, "exposure/gateway: "+e.Error())
 	}
@@ -246,4 +235,36 @@ func sortedExposureRefs(conflicts map[exposurepkg.ServiceRef]bool) []exposurepkg
 		return refs[i].Name < refs[j].Name
 	})
 	return refs
+}
+
+// supportedInputResources validates identity before the adapters dispatch by
+// kind. Custom resources may reuse built-in kind names with different schemas.
+func supportedInputResources(resources map[string]workloadinterface.IMetadata) map[string]workloadinterface.IMetadata {
+	filtered := make(map[string]workloadinterface.IMetadata)
+	for key, res := range resources {
+		if res == nil {
+			continue
+		}
+		apiVersion, _ := res.GetObject()["apiVersion"].(string)
+		gv, err := schema.ParseGroupVersion(apiVersion)
+		if err != nil || gv.Version == "" {
+			continue
+		}
+		allowed := false
+		switch res.GetKind() {
+		case "Service", "Namespace", "ServiceAccount":
+			allowed = gv.Group == ""
+		case "Ingress", "NetworkPolicy":
+			// Preserve the historical extensions API group for both kinds.
+			allowed = gv.Group == "networking.k8s.io" || gv.Group == "extensions"
+		case "Role", "ClusterRole", "RoleBinding", "ClusterRoleBinding":
+			allowed = gv.Group == "rbac.authorization.k8s.io"
+		case "Gateway", "HTTPRoute", "GRPCRoute":
+			allowed = gv.Group == "gateway.networking.k8s.io"
+		}
+		if allowed {
+			filtered[key] = res
+		}
+	}
+	return filtered
 }
