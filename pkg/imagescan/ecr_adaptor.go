@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"sync"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -53,6 +54,8 @@ func ecrRegistryAccount(registry string) (string, error) {
 
 // AWSECRAdaptor implements IContainerImageVulnerabilityAdaptor for AWS ECR.
 type AWSECRAdaptor struct {
+	loginMu        sync.Mutex   // serialize session replacement across Login calls
+	mu             sync.RWMutex // protects client publication and snapshots
 	client         ECRAPI
 	configProvider awsConfigProvider
 	clientFactory  ecrClientFactory
@@ -72,9 +75,13 @@ func NewAWSECRAdaptor() *AWSECRAdaptor {
 // Explicit credentials passed via RegistryCredentials are intentionally unsupported
 // as AWS SDK v2 relies heavily on IAM Roles for Service Accounts (IRSA) and default configuration.
 func (a *AWSECRAdaptor) Login(ctx context.Context, registry string, credentials RegistryCredentials) error {
+	a.loginMu.Lock()
+	defer a.loginMu.Unlock()
 	// Every attempt replaces the session. A validation/configuration error
 	// must not leave scans using the previous AWS identity's client.
+	a.mu.Lock()
 	a.client = nil
+	a.mu.Unlock()
 
 	if credentials.Username != "" || credentials.Password != "" || credentials.Token != "" {
 		return fmt.Errorf("explicit credentials are intentionally unsupported for AWS ECR; use AWS IRSA or default credential chain")
@@ -89,8 +96,20 @@ func (a *AWSECRAdaptor) Login(ctx context.Context, registry string, credentials 
 		return fmt.Errorf("unable to load AWS SDK config: %w", err)
 	}
 
-	a.client = a.clientFactory(cfg)
+	client := a.clientFactory(cfg)
+	a.mu.Lock()
+	a.client = client
+	a.mu.Unlock()
 	return nil
+}
+
+// clientSnapshot keeps an operation on one session across images and pages.
+// Login may invalidate or replace the published client while this operation
+// finishes using its snapshot; new operations observe the updated state.
+func (a *AWSECRAdaptor) clientSnapshot() ECRAPI {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.client
 }
 
 // DescribeAdaptor provides a string description of the adaptor for help purposes.
@@ -100,7 +119,8 @@ func (a *AWSECRAdaptor) DescribeAdaptor() string {
 
 // GetImagesScanStatus retrieves the scan status for a list of image identifiers.
 func (a *AWSECRAdaptor) GetImagesScanStatus(ctx context.Context, imageIDs []ContainerImageIdentifier) ([]ContainerImageScanStatus, error) {
-	if a.client == nil {
+	client := a.clientSnapshot()
+	if client == nil {
 		return nil, fmt.Errorf("ECR client not initialized, call Login first")
 	}
 
@@ -134,7 +154,7 @@ func (a *AWSECRAdaptor) GetImagesScanStatus(ctx context.Context, imageIDs []Cont
 				MaxResults:     aws.Int32(1),
 			}
 
-			out, err := a.client.DescribeImageScanFindings(ctx, input, ecrImageRegion(imageID.Registry))
+			out, err := client.DescribeImageScanFindings(ctx, input, ecrImageRegion(imageID.Registry))
 			if err != nil {
 				return status, fmt.Errorf("failed to describe image scan findings for repository %s: %w", imageID.Repository, err)
 			}
@@ -174,7 +194,8 @@ func mapECRScanStatus(scanStatus *types.ImageScanStatus) ScanStatus {
 
 // GetImagesVulnerabilities retrieves the vulnerability reports for a list of image identifiers.
 func (a *AWSECRAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs []ContainerImageIdentifier) ([]ContainerImageVulnerabilityReport, error) {
-	if a.client == nil {
+	client := a.clientSnapshot()
+	if client == nil {
 		return nil, fmt.Errorf("ECR client not initialized, call Login first")
 	}
 
@@ -211,7 +232,7 @@ func (a *AWSECRAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs [
 			seenTokens := make(map[string]struct{})
 
 			for pagesFetched := 0; ; pagesFetched++ {
-				out, err := a.client.DescribeImageScanFindings(ctx, input, ecrImageRegion(imageID.Registry))
+				out, err := client.DescribeImageScanFindings(ctx, input, ecrImageRegion(imageID.Registry))
 				if err != nil {
 					fetchErr = err
 					break
@@ -303,7 +324,7 @@ func nextECRVulnerabilityToken(nextToken *string, seen map[string]struct{}, page
 
 // GetImagesInformation retrieves the BOM and manifest information for a list of image identifiers.
 func (a *AWSECRAdaptor) GetImagesInformation(ctx context.Context, imageIDs []ContainerImageIdentifier) ([]ContainerImageInformation, error) {
-	if a.client == nil {
+	if a.clientSnapshot() == nil {
 		return nil, fmt.Errorf("ECR client not initialized, call Login first")
 	}
 	return FetchImagesInformation(imageIDs)

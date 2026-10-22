@@ -83,9 +83,10 @@ func TestECRFailedReloginInvalidatesSession(t *testing.T) {
 			}
 			err = adaptor.Login(loginCtx, registry, credentials)
 			require.Error(t, err)
-			if stage == "config" {
+			switch stage {
+			case "config":
 				require.ErrorIs(t, err, configErr)
-			} else if stage == "cancelled" {
+			case "cancelled":
 				require.ErrorIs(t, err, context.Canceled)
 			}
 			configsAfterFailure := configCalls
