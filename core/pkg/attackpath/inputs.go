@@ -204,7 +204,10 @@ func CollectInputs(resources map[string]workloadinterface.IMetadata) Inputs {
 	inp.Policies, inp.AmbiguousPolicies = coalesceAnalysisDefinitions(policies, func(p *networkingv1.NetworkPolicy) (string, any) {
 		return "NetworkPolicy/" + p.Namespace + "/" + p.Name, p.Spec
 	})
-	inp.NetworkPolicyUnavailable = len(inp.AmbiguousPolicies) > 0
+	inp.NetworkPolicyUnavailable = len(inp.AmbiguousPolicies) > 0 || len(inp.AmbiguousNamespaces) > 0
+	for _, namespace := range inp.AmbiguousNamespaces {
+		inp.Warnings = append(inp.Warnings, "networkpolicy: conflicting Namespace definitions for "+namespace+"; NetworkPolicy evaluation unavailable")
+	}
 	for _, identity := range inp.AmbiguousPolicies {
 		inp.Warnings = append(inp.Warnings, "networkpolicy: conflicting definitions for "+identity+"; NetworkPolicy evaluation unavailable")
 	}

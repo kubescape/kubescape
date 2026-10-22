@@ -204,7 +204,11 @@ func TestCollectInputsConflictingExposureDefinitions(t *testing.T) {
 					if inputs.ExposureIndex != nil {
 						t.Fatal("conflicting exposure definitions must not produce a definite index")
 					}
-					if len(inputs.Warnings) != 1 || !strings.Contains(inputs.Warnings[0], "conflicting "+kind) {
+					warningCount := 1
+					if kind == "Namespace" {
+						warningCount = 2 // Exposure and NetworkPolicy both depend on Namespace labels.
+					}
+					if len(inputs.Warnings) != warningCount || !strings.Contains(inputs.Warnings[0], "conflicting "+kind) {
 						t.Fatalf("missing explicit diagnostic: %v", inputs.Warnings)
 					}
 					if kind == "Gateway" {
@@ -478,6 +482,31 @@ func TestCollectInputsConflictingPolicyAndRBACDefinitions(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestCollectInputsNamespaceConflictDisablesNetworkPolicy(t *testing.T) {
+	for _, labels := range [][]string{{"prod", "dev"}, {"dev", "prod"}, {"prod", "dev", "prod"}, {"prod", "prod"}} {
+		t.Run(strings.Join(labels, "-"), func(t *testing.T) {
+			resources := makeResources(resource(map[string]any{
+				"apiVersion": "networking.k8s.io/v1", "kind": "NetworkPolicy",
+				"metadata": map[string]any{"name": "allow-prod", "namespace": "apps"},
+				"spec":     map[string]any{"podSelector": map[string]any{}, "policyTypes": []any{"Ingress"}, "ingress": []any{map[string]any{"from": []any{map[string]any{"namespaceSelector": map[string]any{"matchLabels": map[string]any{"env": "prod"}}}}}}},
+			}))
+			for i, env := range labels {
+				resources[fmt.Sprintf("namespace-%d", i)] = resource(map[string]any{"apiVersion": "v1", "kind": "Namespace", "metadata": map[string]any{"name": "client", "labels": map[string]any{"env": env}}})
+			}
+			for attempt := 0; attempt < 5; attempt++ {
+				inputs := CollectInputs(resources)
+				wantUnavailable := labels[0] != labels[1]
+				if inputs.NetworkPolicyUnavailable != wantUnavailable || len(inputs.Policies) != 1 || len(inputs.AmbiguousPolicies) != 0 {
+					t.Fatalf("namespace conflict availability incorrect: %+v", inputs)
+				}
+				if wantUnavailable && !strings.Contains(strings.Join(inputs.Warnings, "\n"), "networkpolicy: conflicting Namespace definitions for client") {
+					t.Fatalf("missing NetworkPolicy namespace diagnostic: %v", inputs.Warnings)
+				}
+			}
+		})
 	}
 }
 
