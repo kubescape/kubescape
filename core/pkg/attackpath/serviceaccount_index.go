@@ -27,7 +27,14 @@ func ServiceAccountAutomountIndex(sas []corev1.ServiceAccount) map[string]*bool 
 			}
 			continue
 		}
-		out[key] = sa.AutomountServiceAccountToken
+		// A collected object may be reused or modified after indexing. Keep
+		// its value, not its pointer, so the snapshot cannot change silently.
+		var snapshot *bool
+		if sa.AutomountServiceAccountToken != nil {
+			value := *sa.AutomountServiceAccountToken
+			snapshot = &value
+		}
+		out[key] = snapshot
 	}
 	return out
 }
