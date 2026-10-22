@@ -2,9 +2,12 @@ package operator
 
 import (
 	"context"
+	"errors"
 	"io"
+	"os"
 	"testing"
 
+	"github.com/kubescape/go-logger"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/core"
 	"github.com/kubescape/kubescape/v4/core/mocks"
@@ -12,6 +15,23 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func captureLog(t *testing.T, fn func()) string {
+	t.Helper()
+	buf, err := os.CreateTemp(t.TempDir(), "log-*")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = buf.Close() })
+	prev := logger.L().GetWriter()
+	logger.L().SetWriter(buf)
+	t.Cleanup(func() { logger.L().SetWriter(prev) })
+
+	fn()
+
+	require.NoError(t, buf.Sync())
+	b, err := os.ReadFile(buf.Name())
+	require.NoError(t, err)
+	return string(b)
+}
 
 func TestGetOperatorRemediateCmd(t *testing.T) {
 	cmd := getOperatorRemediateCmd(&mocks.MockIKubescape{}, cautils.OperatorInfo{})
@@ -56,7 +76,6 @@ func TestGetOperatorRemediateCmd(t *testing.T) {
 
 func TestOperatorRemediateCmd_ContextCanceled(t *testing.T) {
 	var capturedCtx context.Context
-	var startForwarderCalled bool
 	prevAdapter := newOperatorAdapter
 	newOperatorAdapter = func(scanInfo cautils.OperatorScanInfo, _ string, ctx ...context.Context) (*core.OperatorAdapter, error) {
 		if len(ctx) > 0 {
@@ -65,6 +84,28 @@ func TestOperatorRemediateCmd_ContextCanceled(t *testing.T) {
 		if capturedCtx != nil && capturedCtx.Err() != nil {
 			return nil, capturedCtx.Err()
 		}
+		return nil, errors.New("unexpected call")
+	}
+	t.Cleanup(func() { newOperatorAdapter = prevAdapter })
+
+	cmd := getOperatorRemediateCmd(&mocks.MockIKubescape{}, cautils.OperatorInfo{})
+	cmd.SetArgs([]string{annotateSubCommand, "--kind", "Deployment", "--name", "test-app", "--target-namespace", "default"})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := cmd.ExecuteContext(ctx)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, context.Canceled)
+	assert.Equal(t, ctx, capturedCtx, "constructor must receive the command context")
+}
+
+func TestOperatorRemediateCmd_ContextCanceled_NoPortForward(t *testing.T) {
+	var startForwarderCalled bool
+	prevAdapter := newOperatorAdapter
+	newOperatorAdapter = func(scanInfo cautils.OperatorScanInfo, _ string, ctx ...context.Context) (*core.OperatorAdapter, error) {
 		conn := &stubOperatorConnector{
 			onStart: func() { startForwarderCalled = true },
 		}
@@ -83,7 +124,6 @@ func TestOperatorRemediateCmd_ContextCanceled(t *testing.T) {
 	err := cmd.ExecuteContext(ctx)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, context.Canceled)
-	assert.Equal(t, ctx, capturedCtx, "constructor must receive the command context")
 	assert.False(t, startForwarderCalled, "must not attempt to start port forwarding when context is canceled")
 }
 
@@ -103,7 +143,12 @@ func TestOperatorRemediateCmd_CancellationDiagnostic(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	err := cmd.ExecuteContext(ctx)
+	var err error
+	output := captureLog(t, func() {
+		err = cmd.ExecuteContext(ctx)
+	})
 	require.Error(t, err)
 	assert.ErrorIs(t, err, context.Canceled)
+	assert.Contains(t, output, "Remediation submission canceled; submission outcome is unknown")
+	assert.Contains(t, output, "kubectl get events -n default --field-selector reason=KubescapeRemediation")
 }

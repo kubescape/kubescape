@@ -138,7 +138,6 @@ func TestOperatorScanConfigCmd_ExplicitFrameworksReplacesDefault(t *testing.T) {
 
 func TestOperatorScanConfigCmd_ContextCanceled(t *testing.T) {
 	var capturedCtx context.Context
-	var startForwarderCalled bool
 	prevAdapter := newOperatorAdapter
 	newOperatorAdapter = func(scanInfo cautils.OperatorScanInfo, _ string, ctx ...context.Context) (*core.OperatorAdapter, error) {
 		if len(ctx) > 0 {
@@ -147,6 +146,28 @@ func TestOperatorScanConfigCmd_ContextCanceled(t *testing.T) {
 		if capturedCtx != nil && capturedCtx.Err() != nil {
 			return nil, capturedCtx.Err()
 		}
+		return nil, errors.New("unexpected call")
+	}
+	t.Cleanup(func() { newOperatorAdapter = prevAdapter })
+
+	cmd := getOperatorScanCmd(&mocks.MockIKubescape{}, &cautils.OperatorInfo{})
+	cmd.SetArgs([]string{"configurations"})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := cmd.ExecuteContext(ctx)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, context.Canceled)
+	assert.Equal(t, ctx, capturedCtx, "constructor must receive the command context")
+}
+
+func TestOperatorScanConfigCmd_ContextCanceled_NoPortForward(t *testing.T) {
+	var startForwarderCalled bool
+	prevAdapter := newOperatorAdapter
+	newOperatorAdapter = func(scanInfo cautils.OperatorScanInfo, _ string, ctx ...context.Context) (*core.OperatorAdapter, error) {
 		conn := &stubOperatorConnector{
 			onStart: func() { startForwarderCalled = true },
 		}
@@ -165,7 +186,6 @@ func TestOperatorScanConfigCmd_ContextCanceled(t *testing.T) {
 	err := cmd.ExecuteContext(ctx)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, context.Canceled)
-	assert.Equal(t, ctx, capturedCtx, "constructor must receive the command context")
 	assert.False(t, startForwarderCalled, "must not attempt to start port forwarding when context is canceled")
 }
 
