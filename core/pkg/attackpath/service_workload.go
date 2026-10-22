@@ -47,10 +47,7 @@ func ResolveServiceBackends(
 	ids := slices.Sorted(maps.Keys(resources))
 	for _, id := range ids {
 		r := resources[id]
-		if r == nil {
-			continue
-		}
-		if _, ok := WorkloadKindGVRs[r.GetKind()]; !ok {
+		if !isSupportedWorkloadResource(r) {
 			continue
 		}
 		lbls := PodTemplateLabels(r.GetKind(), r.GetObject())

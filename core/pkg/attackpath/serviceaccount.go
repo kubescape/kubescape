@@ -48,10 +48,7 @@ func ResolveServiceAccountBindings(
 	}
 	var entries []entry
 	for id, r := range resources {
-		if r == nil {
-			continue
-		}
-		if _, ok := WorkloadKindGVRs[r.GetKind()]; !ok {
+		if !isSupportedWorkloadResource(r) {
 			continue
 		}
 		entries = append(entries, entry{id: id, res: r})

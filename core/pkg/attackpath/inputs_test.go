@@ -1,11 +1,69 @@
 package attackpath
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
+	"github.com/kubescape/k8s-interface/workloadinterface"
 	exposurepkg "github.com/kubescape/kubescape/v4/core/pkg/exposure"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
+
+func TestCollectInputsConflictingServices(t *testing.T) {
+	for _, types := range [][]string{
+		{"LoadBalancer", "ClusterIP"},
+		{"ClusterIP", "LoadBalancer"},
+		{"LoadBalancer", "ClusterIP", "LoadBalancer"},
+		{"ClusterIP", "LoadBalancer", "ClusterIP"},
+		{"LoadBalancer", "LoadBalancer"},
+	} {
+		t.Run(strings.Join(types, "-"), func(t *testing.T) {
+			resources := make(map[string]workloadinterface.IMetadata)
+			var ordered []corev1.Service
+			for i, serviceType := range types {
+				resources[fmt.Sprintf("file-%d", i)] = resource(map[string]any{
+					"apiVersion": "v1", "kind": "Service",
+					"metadata": map[string]any{
+						"name": "app", "namespace": "apps", "resourceVersion": fmt.Sprint(i),
+						"annotations": map[string]any{"source": fmt.Sprintf("file-%d", i)},
+					},
+					"spec": map[string]any{"type": serviceType},
+				})
+				ordered = append(ordered, corev1.Service{
+					ObjectMeta: metav1.ObjectMeta{Namespace: "apps", Name: "app"},
+					Spec:       corev1.ServiceSpec{Type: corev1.ServiceType(serviceType)},
+				})
+			}
+			wantConflict := types[0] != types[1]
+			// Exercise exact orders as well as the adapter's map iteration order.
+			if refs := conflictingServices(ordered); (len(refs) != 0) != wantConflict {
+				t.Fatalf("ordered conflicts = %v, want conflict=%v", refs, wantConflict)
+			}
+			inputs := CollectInputs(resources)
+			if !wantConflict {
+				if inputs.ExposureIndex == nil || len(inputs.AmbiguousServices) != 0 || len(inputs.Warnings) != 0 {
+					t.Fatalf("equivalent duplicates should remain usable: %+v", inputs)
+				}
+				paths, unclear := inputs.ExposureIndex.ServiceExposure(exposurepkg.ServiceRef{Namespace: "apps", Name: "app"})
+				if unclear || len(paths) != 1 || paths[0].Kind != exposurepkg.ExposureLoadBalancer {
+					t.Fatalf("equivalent services lost exposure: paths=%+v unclear=%v", paths, unclear)
+				}
+				return
+			}
+			if inputs.ExposureIndex != nil {
+				t.Fatal("conflicting definitions must not produce a definite exposure index")
+			}
+			if len(inputs.AmbiguousServices) != 1 || inputs.AmbiguousServices[0] != (exposurepkg.ServiceRef{Namespace: "apps", Name: "app"}) {
+				t.Fatalf("unexpected ambiguous identities: %v", inputs.AmbiguousServices)
+			}
+			if len(inputs.Warnings) != 1 || inputs.Warnings[0] != "exposure: conflicting Service definitions for apps/app; exposure index unavailable" {
+				t.Fatalf("missing ambiguity diagnostic: %v", inputs.Warnings)
+			}
+		})
+	}
+}
 
 func TestCollectInputsRetainsGatewayExposure(t *testing.T) {
 	for _, kind := range []string{"HTTPRoute", "GRPCRoute"} {

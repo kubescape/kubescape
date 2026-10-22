@@ -508,6 +508,7 @@ func TestReviewProjectedTokenExcludedBySubPath(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			obj := makeObj(tt.subPath)
+			obj["apiVersion"] = "v1"
 			obj["metadata"] = map[string]any{"name": "subpath", "namespace": "prod"}
 			r := resultFor(t, ResolveServiceAccountBindings(makeResources(resource(obj)), nil), "subpath")
 			if got := r.TokenMounted; got != tt.want {

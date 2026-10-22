@@ -7,11 +7,26 @@ import corev1 "k8s.io/api/core/v1"
 // RBAC adapter already collected. A ServiceAccount with no
 // automountServiceAccountToken field maps to a nil pointer, which
 // ResolveServiceAccountBindings treats as the Kubernetes default (true).
+// Conflicting duplicate accounts are omitted so their token access remains
+// unknown. An unset field and explicit true are equivalent.
 func ServiceAccountAutomountIndex(sas []corev1.ServiceAccount) map[string]*bool {
 	out := make(map[string]*bool, len(sas))
+	ambiguous := make(map[string]bool)
 	for i := range sas {
 		sa := &sas[i]
 		key := sa.Namespace + "/" + sa.Name
+		if ambiguous[key] {
+			continue
+		}
+		if previous, exists := out[key]; exists {
+			previousEnabled := previous == nil || *previous
+			currentEnabled := sa.AutomountServiceAccountToken == nil || *sa.AutomountServiceAccountToken
+			if previousEnabled != currentEnabled {
+				delete(out, key)
+				ambiguous[key] = true
+			}
+			continue
+		}
 		out[key] = sa.AutomountServiceAccountToken
 	}
 	return out

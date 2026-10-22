@@ -25,6 +25,24 @@ var WorkloadKindGVRs = map[string]schema.GroupVersionResource{
 	"CronJob":     {Group: "batch", Version: "v1", Resource: "cronjobs"},
 }
 
+// isSupportedWorkloadResource excludes custom resources that reuse a built-in
+// kind name. Versions may differ, but the API group must match the supported GVR.
+func isSupportedWorkloadResource(r workloadinterface.IMetadata) bool {
+	if r == nil {
+		return false
+	}
+	gvr, supported := WorkloadKindGVRs[r.GetKind()]
+	if !supported {
+		return false
+	}
+	apiVersion, ok := r.GetObject()["apiVersion"].(string)
+	if !ok {
+		return false
+	}
+	gv, err := schema.ParseGroupVersion(apiVersion)
+	return err == nil && gv.Version != "" && gv.Group == gvr.Group
+}
+
 // WorkloadRef identifies one workload in the collected resource map.
 type WorkloadRef struct {
 	Namespace string
@@ -97,7 +115,7 @@ func ResolveEndpointsFromResources(
 	lookup := make(map[string]workloadinterface.IMetadata, len(resources))
 	ambiguous := make(map[string]bool)
 	for _, r := range resources {
-		if r == nil {
+		if !isSupportedWorkloadResource(r) {
 			continue
 		}
 		key := r.GetNamespace() + "/" + r.GetKind() + "/" + r.GetName()
