@@ -86,6 +86,16 @@ func (a *GCPAdaptor) setOwningClient(c *containeranalysis.Client) {
 // Explicit credentials passed via RegistryCredentials are intentionally unsupported
 // as GCP SDK relies heavily on Workload Identity and Application Default Credentials.
 func (a *GCPAdaptor) Login(ctx context.Context, registry string, credentials RegistryCredentials) error {
+	// Drop the previous session before validating the new login, so a failed
+	// re-login does not leave the previous project's client callable.
+	a.client = nil
+	if a.owningClient != nil {
+		if err := a.owningClient.Close(); err != nil {
+			return fmt.Errorf("failed to close previous container analysis client: %w", err)
+		}
+		a.owningClient = nil
+	}
+
 	if credentials.Username != "" || credentials.Password != "" || credentials.Token != "" {
 		return fmt.Errorf("explicit credentials are intentionally unsupported for gcp; use Application Default Credentials or Workload Identity")
 	}
@@ -96,16 +106,6 @@ func (a *GCPAdaptor) Login(ctx context.Context, registry string, credentials Reg
 		newProjectID = parts[1]
 	} else {
 		return fmt.Errorf("invalid gcp registry format: expected location-docker.pkg.dev/project/repository, got %s", registry)
-	}
-
-	if a.owningClient != nil {
-		a.client = nil // Stage clearing of client
-		if err := a.owningClient.Close(); err != nil {
-			return fmt.Errorf("failed to close previous container analysis client: %w", err)
-		}
-		a.owningClient = nil
-	} else {
-		a.client = nil
 	}
 
 	c, err := a.clientFactory(ctx)
