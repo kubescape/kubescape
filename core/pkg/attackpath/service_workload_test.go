@@ -1,12 +1,83 @@
 package attackpath
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
+
+func TestResolveServiceBackends_DuplicateWorkloadLabels(t *testing.T) {
+	web := map[string]any{"app": "web"}
+	api := map[string]any{"app": "api"}
+	for _, tt := range []struct {
+		name       string
+		first      map[string]any
+		second     map[string]any
+		third      map[string]any
+		unresolved bool
+	}{
+		{name: "equivalent", first: web, second: map[string]any{"app": "web"}, third: web},
+		{name: "conflicting", first: web, second: api, third: web, unresolved: true},
+		{name: "missing labels", first: web, second: nil, third: web, unresolved: true},
+	} {
+		for _, reverse := range []bool{false, true} {
+			name := tt.name + "/forward"
+			if reverse {
+				name = tt.name + "/reverse"
+			}
+			t.Run(name, func(t *testing.T) {
+				first, second := tt.first, tt.second
+				if reverse {
+					first, second = second, first
+				}
+				resources := map[string]workloadinterface.IMetadata{
+					"a": deploymentResource("prod", "app", first),
+					"b": deploymentResource("prod", "app", second),
+					"c": deploymentResource("prod", "app", tt.third),
+					"d": deploymentResource("staging", "app", web),
+				}
+				services := []corev1.Service{
+					typedSvc("prod", "web", map[string]string{"app": "web"}),
+					typedSvc("prod", "api", map[string]string{"app": "api"}),
+					typedSvc("prod", "unmatched", map[string]string{"app": "other"}),
+					typedSvc("staging", "staging-web", map[string]string{"app": "web"}),
+					typedSvc("prod", "selectorless", nil),
+				}
+				results := ResolveServiceBackends(services, resources)
+				ref := []WorkloadRef{{Namespace: "prod", Kind: "Deployment", Name: "app"}}
+				webResult := backendsFor(t, results, "web")
+				if tt.unresolved {
+					if len(webResult.Backends) != 0 || !reflect.DeepEqual(webResult.UnresolvedBackends, ref) {
+						t.Errorf("expected one unresolved identity, got %+v", webResult)
+					}
+				} else if !reflect.DeepEqual(webResult.Backends, ref) || len(webResult.UnresolvedBackends) != 0 {
+					t.Errorf("expected one coalesced backend, got %+v", webResult)
+				}
+				apiResult := backendsFor(t, results, "api")
+				if tt.name == "conflicting" {
+					if len(apiResult.Backends) != 0 || !reflect.DeepEqual(apiResult.UnresolvedBackends, ref) {
+						t.Errorf("expected ambiguity for second matching variant, got %+v", apiResult)
+					}
+				} else if len(apiResult.Backends) != 0 || len(apiResult.UnresolvedBackends) != 0 {
+					t.Errorf("unexpected api backend: %+v", apiResult)
+				}
+				for _, svc := range []string{"unmatched", "selectorless"} {
+					r := backendsFor(t, results, svc)
+					if len(r.Backends) != 0 || len(r.UnresolvedBackends) != 0 {
+						t.Errorf("unexpected backend for %s: %+v", svc, r)
+					}
+				}
+				staging := backendsFor(t, results, "staging-web")
+				if !reflect.DeepEqual(staging.Backends, []WorkloadRef{{Namespace: "staging", Kind: "Deployment", Name: "app"}}) || len(staging.UnresolvedBackends) != 0 {
+					t.Errorf("namespace isolation failed: %+v", staging)
+				}
+			})
+		}
+	}
+}
 
 // typedSvc builds a typed corev1.Service with the given selector, for
 // passing directly to ResolveServiceBackends.

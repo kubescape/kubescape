@@ -32,7 +32,8 @@ type ServiceAccountBinding struct {
 
 // ResolveServiceAccountBindings resolves every workload in the resource
 // map to its ServiceAccount and token-mount status, in resource-ID order
-// for determinism.
+// for determinism. Equivalent copies coalesce; conflicting identities are skipped,
+// and conflicting token access remains unknown.
 // saAutomountByNsName is a map of "namespace/name" → *bool reflecting
 // each ServiceAccount's own automountServiceAccountToken setting;
 // a present key with a nil pointer uses the Kubernetes default (true).
@@ -73,15 +74,35 @@ func ResolveServiceAccountBindings(
 		}
 	}
 	var out []ServiceAccountBinding
+	positions := make(map[WorkloadRef]int)
+	identityConflicts := make(map[WorkloadRef]bool)
 	for _, e := range entries {
 		r := e.res
 		ref := WorkloadRef{Namespace: r.GetNamespace(), Kind: r.GetKind(), Name: r.GetName()}
 		resolution := ResolveServiceAccount(vulnexposure.Workload{Namespace: ref.Namespace, Kind: ref.Kind, Name: ref.Name}, r.GetObject(), index)
-		out = append(out, ServiceAccountBinding{
+		binding := ServiceAccountBinding{
 			WorkloadRef: ref, ServiceAccountName: resolution.Name, Namespace: resolution.Namespace,
 			TokenMounted: resolution.Token == TokenMounted, TokenUnknown: resolution.Token == TokenUnknown,
 			Skipped: !resolution.Resolved, SkipReason: resolution.Reason,
-		})
+		}
+		position, exists := positions[ref]
+		if !exists {
+			positions[ref] = len(out)
+			out = append(out, binding)
+			continue
+		}
+		if identityConflicts[ref] {
+			continue
+		}
+		previous := &out[position]
+		if previous.Skipped != binding.Skipped || previous.ServiceAccountName != binding.ServiceAccountName || previous.Namespace != binding.Namespace || previous.SkipReason != binding.SkipReason {
+			*previous = ServiceAccountBinding{WorkloadRef: ref, Skipped: true, SkipReason: "conflicting ServiceAccount identities in collected manifests"}
+			identityConflicts[ref] = true
+		} else if previous.TokenMounted != binding.TokenMounted || previous.TokenUnknown != binding.TokenUnknown {
+			// A later duplicate cannot restore certainty once copies disagree.
+			previous.TokenMounted = false
+			previous.TokenUnknown = true
+		}
 	}
 	return out
 }

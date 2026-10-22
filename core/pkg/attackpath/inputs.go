@@ -8,6 +8,7 @@ package attackpath
 
 import (
 	"fmt"
+	"maps"
 	"reflect"
 	"sort"
 
@@ -30,11 +31,16 @@ type Inputs struct {
 	Ingresses []networkingv1.Ingress
 	ExpNS     []exposurepkg.NamespaceInfo
 	// ExposureIndex retains decoded Gateway API objects for exposure queries.
-	// It is nil when conflicting Service definitions prevent a reliable verdict.
+	// It is nil when conflicting Service, Gateway, or Namespace definitions
+	// prevent a reliable verdict; callers must handle an unavailable index.
 	ExposureIndex *exposurepkg.Index
 	// AmbiguousServices lists identities with conflicting Service specs in namespace/name
 	// order. An unavailable ExposureIndex must not be interpreted as no exposure.
 	AmbiguousServices []exposurepkg.ServiceRef
+	// AmbiguousGateways and AmbiguousNamespaces identify conflicting exposure
+	// inputs in sorted order, ignoring metadata unrelated to exposure analysis.
+	AmbiguousGateways   []exposurepkg.ServiceRef
+	AmbiguousNamespaces []string
 
 	// NetworkPolicy engine
 	Policies []*networkingv1.NetworkPolicy
@@ -73,13 +79,47 @@ func CollectInputs(resources map[string]workloadinterface.IMetadata) Inputs {
 	for _, e := range gwErrs {
 		inp.Warnings = append(inp.Warnings, "exposure/gateway: "+e.Error())
 	}
+	seenGateways := make(map[exposurepkg.ServiceRef]any)
+	gatewayConflicts := make(map[exposurepkg.ServiceRef]bool)
+	for _, gw := range gateways {
+		ref := exposurepkg.ServiceRef{Namespace: gw.Namespace, Name: gw.Name}
+		if previous, exists := seenGateways[ref]; exists {
+			if !reflect.DeepEqual(previous, gw) {
+				gatewayConflicts[ref] = true
+			}
+		} else {
+			seenGateways[ref] = gw
+		}
+	}
+	inp.AmbiguousGateways = sortedExposureRefs(gatewayConflicts)
+	seenNamespaces := make(map[string]map[string]string)
+	namespaceConflicts := make(map[string]bool)
+	for _, ns := range expNS {
+		if previous, exists := seenNamespaces[ns.Name]; exists {
+			if !maps.Equal(previous, ns.Labels) {
+				namespaceConflicts[ns.Name] = true
+			}
+		} else {
+			seenNamespaces[ns.Name] = ns.Labels
+		}
+	}
+	for name := range namespaceConflicts {
+		inp.AmbiguousNamespaces = append(inp.AmbiguousNamespaces, name)
+	}
+	sort.Strings(inp.AmbiguousNamespaces)
 	// The resource map does not establish that ReferenceGrants were completely
 	// collected. Keep cross-namespace backend authorization undetermined.
-	if len(inp.AmbiguousServices) == 0 {
+	if len(inp.AmbiguousServices) == 0 && len(inp.AmbiguousGateways) == 0 && len(inp.AmbiguousNamespaces) == 0 {
 		inp.ExposureIndex = exposurepkg.NewIndex(svcs, ings, routes, gateways, expNS)
 	} else {
 		for _, ref := range inp.AmbiguousServices {
 			inp.Warnings = append(inp.Warnings, fmt.Sprintf("exposure: conflicting Service definitions for %s/%s; exposure index unavailable", ref.Namespace, ref.Name))
+		}
+		for _, ref := range inp.AmbiguousGateways {
+			inp.Warnings = append(inp.Warnings, fmt.Sprintf("exposure: conflicting Gateway definitions for %s/%s; exposure index unavailable", ref.Namespace, ref.Name))
+		}
+		for _, name := range inp.AmbiguousNamespaces {
+			inp.Warnings = append(inp.Warnings, fmt.Sprintf("exposure: conflicting Namespace labels for %s; exposure index unavailable", name))
 		}
 	}
 
@@ -120,6 +160,10 @@ func conflictingServices(services []corev1.Service) []exposurepkg.ServiceRef {
 			seen[ref] = svc
 		}
 	}
+	return sortedExposureRefs(conflicts)
+}
+
+func sortedExposureRefs(conflicts map[exposurepkg.ServiceRef]bool) []exposurepkg.ServiceRef {
 	var refs []exposurepkg.ServiceRef
 	for ref := range conflicts {
 		refs = append(refs, ref)

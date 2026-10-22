@@ -18,6 +18,9 @@ type ServiceBackend struct {
 	// Service's selector. Empty when the Service is selector-less
 	// or no collected workload matches.
 	Backends []WorkloadRef
+	// UnresolvedBackends are identities with conflicting collected label sets,
+	// at least one of which matches this Service. They are excluded from Backends.
+	UnresolvedBackends []WorkloadRef
 	// Headless is true when spec.clusterIP is None. A headless Service
 	// with a selector can still have workload backends.
 	Headless bool
@@ -38,10 +41,11 @@ func ResolveServiceBackends(
 ) []ServiceBackend {
 	// Pre-resolve pod-template labels for every known workload kind.
 	type workloadLabels struct {
-		ref    WorkloadRef
-		labels labels.Set
+		ref      WorkloadRef
+		variants []labels.Set
 	}
 	var workloads []workloadLabels
+	positions := make(map[WorkloadRef]int)
 
 	// Sort resource IDs for determinism.
 	ids := slices.Sorted(maps.Keys(resources))
@@ -51,12 +55,19 @@ func ResolveServiceBackends(
 			continue
 		}
 		lbls := PodTemplateLabels(r.GetKind(), r.GetObject())
-		if lbls == nil {
-			continue // no pod-template labels: can't be selected
+		ref := WorkloadRef{Namespace: r.GetNamespace(), Kind: r.GetKind(), Name: r.GetName()}
+		if pos, exists := positions[ref]; exists {
+			if !slices.ContainsFunc(workloads[pos].variants, func(existing labels.Set) bool {
+				return maps.Equal(existing, lbls)
+			}) {
+				workloads[pos].variants = append(workloads[pos].variants, labels.Set(lbls))
+			}
+			continue
 		}
+		positions[ref] = len(workloads)
 		workloads = append(workloads, workloadLabels{
-			ref:    WorkloadRef{Namespace: r.GetNamespace(), Kind: r.GetKind(), Name: r.GetName()},
-			labels: labels.Set(lbls),
+			ref:      ref,
+			variants: []labels.Set{labels.Set(lbls)},
 		})
 	}
 
@@ -105,8 +116,12 @@ func ResolveServiceBackends(
 			if wl.ref.Namespace != svc.Namespace {
 				continue
 			}
-			if sel.Matches(wl.labels) {
-				sb.Backends = append(sb.Backends, wl.ref)
+			if slices.ContainsFunc(wl.variants, func(variant labels.Set) bool { return sel.Matches(variant) }) {
+				if len(wl.variants) > 1 {
+					sb.UnresolvedBackends = append(sb.UnresolvedBackends, wl.ref)
+				} else {
+					sb.Backends = append(sb.Backends, wl.ref)
+				}
 			}
 		}
 		out = append(out, sb)

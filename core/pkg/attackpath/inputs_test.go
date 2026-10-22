@@ -166,3 +166,56 @@ func TestCollectInputsLeavesUncollectedReferenceGrantsUnclear(t *testing.T) {
 		t.Fatalf("uncollected grants must leave authorization unclear: paths=%+v, unclear=%v", paths, unclear)
 	}
 }
+
+func TestCollectInputsConflictingExposureDefinitions(t *testing.T) {
+	for _, kind := range []string{"Gateway", "Namespace"} {
+		for _, values := range [][]string{{"All", "Same"}, {"Same", "All"}, {"All", "Same", "All"}, {"All", "All"}} {
+			t.Run(kind+"/"+strings.Join(values, "-"), func(t *testing.T) {
+				resources := make(map[string]workloadinterface.IMetadata)
+				for i, value := range values {
+					metadata := map[string]any{
+						"name": "edge", "resourceVersion": fmt.Sprint(i),
+						"annotations": map[string]any{"source": fmt.Sprint(i)},
+					}
+					obj := map[string]any{"kind": kind, "metadata": metadata}
+					if kind == "Gateway" {
+						obj["apiVersion"] = "gateway.networking.k8s.io/v1"
+						metadata["namespace"] = "edge"
+						obj["spec"] = map[string]any{"listeners": []any{map[string]any{
+							"name": "http", "protocol": "HTTP", "port": 80,
+							"allowedRoutes": map[string]any{"namespaces": map[string]any{"from": value}},
+						}}}
+					} else {
+						obj["apiVersion"] = "v1"
+						metadata["labels"] = map[string]any{"env": value}
+					}
+					resources[fmt.Sprint(i)] = resource(obj)
+				}
+				// Repeat to exercise independently randomized adapter iteration.
+				for attempt := 0; attempt < 10; attempt++ {
+					inputs := CollectInputs(resources)
+					conflict := values[0] != values[1]
+					if !conflict {
+						if inputs.ExposureIndex == nil || len(inputs.Warnings) != 0 || len(inputs.AmbiguousGateways) != 0 || len(inputs.AmbiguousNamespaces) != 0 {
+							t.Fatalf("equivalent %s definitions must stay usable: %+v", kind, inputs)
+						}
+						continue
+					}
+					if inputs.ExposureIndex != nil {
+						t.Fatal("conflicting exposure definitions must not produce a definite index")
+					}
+					if len(inputs.Warnings) != 1 || !strings.Contains(inputs.Warnings[0], "conflicting "+kind) {
+						t.Fatalf("missing explicit diagnostic: %v", inputs.Warnings)
+					}
+					if kind == "Gateway" {
+						if len(inputs.AmbiguousGateways) != 1 || inputs.AmbiguousGateways[0] != (exposurepkg.ServiceRef{Namespace: "edge", Name: "edge"}) {
+							t.Fatalf("unexpected Gateway ambiguity: %v", inputs.AmbiguousGateways)
+						}
+					} else if len(inputs.AmbiguousNamespaces) != 1 || inputs.AmbiguousNamespaces[0] != "edge" {
+						t.Fatalf("unexpected Namespace ambiguity: %v", inputs.AmbiguousNamespaces)
+					}
+				}
+			})
+		}
+	}
+}
