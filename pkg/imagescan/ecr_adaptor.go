@@ -225,6 +225,13 @@ func (a *AWSECRAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs [
 						})
 					}
 					for _, finding := range out.ImageScanFindings.EnhancedFindings {
+						// Inspector retains closed findings after remediation or
+						// loss of scan eligibility. They are historical records,
+						// not current vulnerabilities. Suppressed/unknown states
+						// remain visible; only explicit closure removes a finding.
+						if strings.EqualFold(strings.TrimSpace(aws.ToString(finding.Status)), "CLOSED") {
+							continue
+						}
 						vulnerability := Vulnerability{
 							Severity:    NormalizeSeverity(aws.ToString(finding.Severity)),
 							Description: aws.ToString(finding.Description),
