@@ -355,6 +355,9 @@ func TestCollectInputsRetainsNativeDecodeWarnings(t *testing.T) {
 	if len(inputs.Warnings) != 3 {
 		t.Fatalf("native decode warnings lost: %v", inputs.Warnings)
 	}
+	if !inputs.NetworkPolicyUnavailable || !inputs.RBACUnavailable {
+		t.Fatalf("decode failures must make incomplete analysis unavailable: %+v", inputs)
+	}
 }
 
 func TestSupportedInputResourcesGroups(t *testing.T) {

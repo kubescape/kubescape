@@ -204,7 +204,7 @@ func CollectInputs(resources map[string]workloadinterface.IMetadata) Inputs {
 	inp.Policies, inp.AmbiguousPolicies = coalesceAnalysisDefinitions(policies, func(p *networkingv1.NetworkPolicy) (string, any) {
 		return "NetworkPolicy/" + p.Namespace + "/" + p.Name, p.Spec
 	})
-	inp.NetworkPolicyUnavailable = len(inp.AmbiguousPolicies) > 0 || len(inp.AmbiguousNamespaces) > 0
+	inp.NetworkPolicyUnavailable = len(npErrs) > 0 || len(inp.AmbiguousPolicies) > 0 || len(inp.AmbiguousNamespaces) > 0
 	for _, namespace := range inp.AmbiguousNamespaces {
 		inp.Warnings = append(inp.Warnings, "networkpolicy: conflicting Namespace definitions for "+namespace+"; NetworkPolicy evaluation unavailable")
 	}
@@ -246,7 +246,7 @@ func CollectInputs(resources map[string]workloadinterface.IMetadata) Inputs {
 	})
 	inp.AmbiguousRBAC = append(inp.AmbiguousRBAC, conflicts...)
 	sort.Strings(inp.AmbiguousRBAC)
-	inp.RBACUnavailable = len(inp.AmbiguousRBAC) > 0
+	inp.RBACUnavailable = len(rbacErrs) > 0 || len(inp.AmbiguousRBAC) > 0
 	for _, identity := range inp.AmbiguousRBAC {
 		inp.Warnings = append(inp.Warnings, "rbacgraph: conflicting definitions for "+identity+"; RBAC evaluation unavailable")
 	}
