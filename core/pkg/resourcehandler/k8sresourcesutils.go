@@ -17,6 +17,8 @@ var (
 	ClusterDescribe              = "ClusterDescribe"
 	DescribeRepositories         = "DescribeRepositories"
 	ListEntitiesForPolicies      = "ListEntitiesForPolicies"
+	PolicyVersion                = "PolicyVersion"
+	APIServerInfo                = "APIServerInfo"
 	KubeletConfiguration         = "KubeletConfiguration"
 	OsReleaseFile                = "OsReleaseFile"
 	KernelVersion                = "KernelVersion"
@@ -47,10 +49,15 @@ var (
 	}
 	MapResourceToApiGroupVuln = map[string][]string{
 		ImageVulnerabilities: {"armo.vuln.images/v1", "image.vulnscan.com/v1"}}
+	// MapResourceToApiGroupCloud also holds APIServerInfo: it is built from the
+	// API server's version endpoint, not a cloud provider, but it is selected
+	// and collected together with the cloud resources (cautils.CloudResources).
 	MapResourceToApiGroupCloud = map[string][]string{
 		ClusterDescribe:         {"container.googleapis.com/v1", "eks.amazonaws.com/v1", "management.azure.com/v1"},
 		DescribeRepositories:    {"container.googleapis.com/v1", "eks.amazonaws.com/v1"}, //TODO - add azure when ensure-image-scanning-enabled-cloud supports ACR
 		ListEntitiesForPolicies: {"container.googleapis.com/v1", "eks.amazonaws.com/v1", "management.azure.com/v1"},
+		PolicyVersion:           {"eks.amazonaws.com/v1", "management.azure.com/v1"},
+		APIServerInfo:           {"apiserverinfo.kubescape.cloud/v1beta0"},
 	}
 )
 
@@ -123,6 +130,48 @@ func mapKSResourceToApiGroup(resource string) []string {
 		return val
 	}
 	return []string{}
+}
+
+// isUnservedKSIdentity reports whether group/version/resource names a group
+// Kubescape serves itself (host data, cloud, image vulnerabilities) without
+// being one of the identities registered for resource in the maps above. C-0161
+// reads APIServerInfo under the host-data group: no cluster and no Kubescape
+// collector serves that one, so it must not become a live query just because
+// the resource name is known. References under any other group keep resolving
+// by name as before, and a "*" version matches any version registered under the
+// group, as the DynamicMatch evaluator accepts it.
+func isUnservedKSIdentity(group, version, resource string) bool {
+	registered := mapKSResourceToApiGroup(resource)
+	if len(registered) == 0 || !isKSServedGroup(group) {
+		return false
+	}
+	for _, apiVersion := range registered {
+		g, v := k8sinterface.SplitApiVersion(apiVersion)
+		if g == group && (version == "*" || version == v) {
+			return false
+		}
+	}
+	return true
+}
+
+// isKSServedGroup reports whether group is one of the API groups of the
+// resources Kubescape serves itself.
+func isKSServedGroup(group string) bool {
+	for _, apiVersion := range MapResourceToApiGroup {
+		if g, _ := k8sinterface.SplitApiVersion(apiVersion); g == group {
+			return true
+		}
+	}
+	for _, families := range []map[string][]string{MapResourceToApiGroupCloud, MapResourceToApiGroupVuln} {
+		for _, apiVersions := range families {
+			for _, apiVersion := range apiVersions {
+				if g, _ := k8sinterface.SplitApiVersion(apiVersion); g == group {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 // isExternalResource reports whether a resolved group/version/resource triplet

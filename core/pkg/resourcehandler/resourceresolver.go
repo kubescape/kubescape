@@ -299,7 +299,7 @@ func newDiscoveryResourceResolverWithKinds(client discovery.DiscoveryInterface) 
 			return nil
 		}
 
-		if len(mapKSResourceToApiGroup(resource)) > 0 {
+		if len(mapKSResourceToApiGroup(resource)) > 0 && !isUnservedKSIdentity(group, version, resource) {
 			return defaultResourceResolver(group, version, resource)
 		}
 		if _, err := k8sinterface.GetGroupVersionResource(resource); err == nil {
