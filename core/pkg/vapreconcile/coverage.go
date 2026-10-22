@@ -198,8 +198,14 @@ func parseSelector(raw any) (labels.Selector, error) {
 // beyond its policy's own matchConstraints, so it resolves to a scope that
 // matches everything.
 func resolveBindingScope(binding unstructured.Unstructured) (*bindingScope, error) {
-	spec, _ := binding.Object["spec"].(map[string]any)
-	matchResources, _ := spec["matchResources"].(map[string]any)
+	return resolveSelectorScope(binding, "matchResources")
+}
+
+// resolveSelectorScope shares selector parsing between policies and bindings.
+// Their selectors are intersected, not alternatives.
+func resolveSelectorScope(obj unstructured.Unstructured, field string) (*bindingScope, error) {
+	spec, _ := obj.Object["spec"].(map[string]any)
+	matchResources, _ := spec[field].(map[string]any)
 
 	var nsRaw, objRaw any
 	if matchResources != nil {
@@ -209,11 +215,11 @@ func resolveBindingScope(binding unstructured.Unstructured) (*bindingScope, erro
 
 	nsSel, err := parseSelector(nsRaw)
 	if err != nil {
-		return nil, fmt.Errorf("binding %q: invalid namespaceSelector: %w", binding.GetName(), err)
+		return nil, fmt.Errorf("%s %q: invalid namespaceSelector: %w", field, obj.GetName(), err)
 	}
 	objSel, err := parseSelector(objRaw)
 	if err != nil {
-		return nil, fmt.Errorf("binding %q: invalid objectSelector: %w", binding.GetName(), err)
+		return nil, fmt.Errorf("%s %q: invalid objectSelector: %w", field, obj.GetName(), err)
 	}
 	return &bindingScope{namespaceSelector: nsSel, objectSelector: objSel}, nil
 }
@@ -263,7 +269,8 @@ func indexBindingsByPolicy(bindings []unstructured.Unstructured, controlByPolicy
 // resources actually falls within the scope of a live, bound VAPBinding --
 // refining BuildIndex's coarser "is any binding present" signal with the
 // namespaceSelector/objectSelector scoping the Kubernetes API server itself
-// applies at admission time. A control absent from the returned map has no
+// applies at admission time, intersected with the selectors in each policy's
+// matchConstraints. A control absent from the returned map has no
 // VAP at all (BuildIndex would not have indexed it either); a control
 // present with Bound=false has a policy but no binding names it -- both
 // match BuildIndex's own reporting for the same inputs.
@@ -281,6 +288,20 @@ func BuildCoverage(
 ) map[string]*ControlCoverage {
 	controlByPolicy, policiesByControl := indexPoliciesByControl(policies)
 	bindingsByPolicy := indexBindingsByPolicy(bindings, controlByPolicy)
+	policyScopes := make(map[string]*bindingScope, len(controlByPolicy))
+	for _, policy := range policies {
+		name := policy.GetName()
+		if controlID, known := controlByPolicy[name]; !known || policy.GetLabels()[controlIDLabel] != controlID {
+			continue
+		}
+		if _, seen := policyScopes[name]; seen {
+			continue
+		}
+		// Preserve Bound for malformed policies, but never credit coverage
+		// when their selectors cannot be evaluated.
+		scope, _ := resolveSelectorScope(policy, "matchConstraints")
+		policyScopes[name] = scope
+	}
 
 	coverage := make(map[string]*ControlCoverage, len(failingByControl))
 	for controlID, resources := range failingByControl {
@@ -320,7 +341,16 @@ func BuildCoverage(
 			if result.Bound {
 				reason = "no binding's scope covers this resource"
 			policyLoop:
-				for _, scopes := range scopesByPolicy {
+				for name, scopes := range scopesByPolicy {
+					policyScope := policyScopes[name]
+					if policyScope == nil {
+						reason = "policy selectors could not be evaluated"
+						continue
+					}
+					if ok, whyNot := policyScope.matches(res, nsLabels, known); !ok {
+						reason = "policy " + whyNot
+						continue
+					}
 					for _, scope := range scopes {
 						ok, whyNot := scope.matches(res, nsLabels, known)
 						if ok {
