@@ -117,10 +117,10 @@ func TestServiceAccountAutomountIndex_TrueStoredCorrectly(t *testing.T) {
 // --- ResolveServiceAccountBindings golden-file cases (proposal §7) ---
 
 func TestResolveServiceAccountBindings_DefaultSAAndKubernetesDefaultMountTrue(t *testing.T) {
-	// No serviceAccountName set, no automount anywhere → resolves to
+	// Collected default SA, with no automount field set → resolves to
 	// "default" SA with TokenMounted=true (the Kubernetes default).
 	w := workloadWithSA("prod", "web", "", nil, nil)
-	results := ResolveServiceAccountBindings(makeResources(w), automountSAIndex())
+	results := ResolveServiceAccountBindings(makeResources(w), automountSAIndex(automountSAObj("prod", "default", nil)))
 
 	r := resultFor(t, results, "web")
 	if r.ServiceAccountName != "default" {
@@ -402,7 +402,7 @@ func TestResolveServiceAccountBindings_NullAutomountUsesDefault(t *testing.T) {
 			},
 		},
 	})
-	results := ResolveServiceAccountBindings(makeResources(w), automountSAIndex())
+	results := ResolveServiceAccountBindings(makeResources(w), automountSAIndex(automountSAObj("prod", "default", nil)))
 	r := resultFor(t, results, "null-automount")
 	if !r.TokenMounted {
 		t.Error("expected TokenMounted=true: null automount must fall through to Kubernetes default")
@@ -825,5 +825,56 @@ func TestResolveServiceAccountBindings_EphemeralContainerMountsMakeTokenMounted(
 	r := resultFor(t, results, "ephemeral-mount")
 	if !r.TokenMounted {
 		t.Error("expected TokenMounted=true: ephemeral container mounts the projected token volume")
+	}
+}
+
+func TestResolveServiceAccountBindings_ServiceAccountAvailability(t *testing.T) {
+	for _, tc := range []struct {
+		name                string
+		index               map[string]*bool
+		podAutomount        *bool
+		projected, occupied bool
+		mounted, unknown    bool
+	}{
+		{name: "missing account", unknown: true},
+		{name: "collected unset account", index: map[string]*bool{"prod/custom": nil}, mounted: true},
+		{name: "collected disabled account", index: map[string]*bool{"prod/custom": automountBoolPtr(false)}},
+		{name: "pod enables without account", podAutomount: automountBoolPtr(true), mounted: true},
+		{name: "pod disables without account", podAutomount: automountBoolPtr(false)},
+		{name: "projected token without account", projected: true, mounted: true},
+		{name: "occupied path without account", occupied: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			spec := map[string]any{"serviceAccountName": "custom"}
+			container := map[string]any{"name": "app", "image": "test"}
+			if tc.podAutomount != nil {
+				spec["automountServiceAccountToken"] = *tc.podAutomount
+			}
+			if tc.projected {
+				spec["volumes"] = []any{projectedSATokenVolume()}
+				container["volumeMounts"] = []any{map[string]any{"name": "kube-api-access", "mountPath": "/token"}}
+			}
+			if tc.occupied {
+				container["volumeMounts"] = []any{map[string]any{"name": "other", "mountPath": serviceAccountTokenMountPath}}
+			}
+			spec["containers"] = []any{container}
+			w := resource(map[string]any{"apiVersion": "v1", "kind": "Pod", "metadata": map[string]any{"name": "web", "namespace": "prod"}, "spec": spec})
+			r := resultFor(t, ResolveServiceAccountBindings(makeResources(w), tc.index), "web")
+			if r.TokenMounted != tc.mounted || r.TokenUnknown != tc.unknown || r.Skipped || r.ServiceAccountName != "custom" {
+				t.Fatalf("expected mounted=%v unknown=%v with resolved identity, got %+v", tc.mounted, tc.unknown, r)
+			}
+		})
+	}
+}
+
+func TestResolveServiceAccountBindings_MirrorPodHasNoIdentity(t *testing.T) {
+	w := resource(map[string]any{
+		"apiVersion": "v1", "kind": "Pod",
+		"metadata": map[string]any{"namespace": "kube-system", "name": "kube-apiserver", "annotations": map[string]any{"kubernetes.io/config.mirror": "hash"}},
+		"spec":     map[string]any{"containers": []any{map[string]any{"name": "server", "image": "test"}}},
+	})
+	r := resultFor(t, ResolveServiceAccountBindings(makeResources(w), map[string]*bool{"kube-system/default": nil}), "kube-apiserver")
+	if !r.Skipped || r.SkipReason == "" || r.ServiceAccountName != "" || r.TokenMounted {
+		t.Fatalf("mirror Pod must not acquire a ServiceAccount identity: %+v", r)
 	}
 }

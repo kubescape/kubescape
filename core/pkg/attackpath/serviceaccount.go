@@ -15,23 +15,27 @@ import (
 type ServiceAccountBinding struct {
 	WorkloadRef WorkloadRef
 	// ServiceAccountName is the resolved serviceAccountName.
-	// Empty means "default" per Kubernetes semantics.
+	// An omitted workload field resolves to "default"; skipped bindings leave this empty.
 	ServiceAccountName string
 	// Namespace is the workload's namespace; the SA is always in the same one.
 	Namespace string
 	// TokenMounted is true when a service account token is actually mounted
-	// into the pod. When false, compromising the workload does not yield a
-	// usable token (no runs-as edge). The logic follows the Kubernetes spec:
+	// into the pod. When both TokenMounted and TokenUnknown are false, the
+	// workload does not yield a usable token (no runs-as edge). The logic follows the Kubernetes spec:
 	//   1. If a projected serviceAccountToken volume is present → true,
 	//      regardless of automountServiceAccountToken values (the token is
 	//      explicitly requested).
 	//   2. Otherwise, the pod-level automountServiceAccountToken wins if set.
 	//   3. Otherwise, the SA-level automountServiceAccountToken applies
-	//      (assumed true when not set, matching the Kubernetes default).
+	//      (true when a collected SA leaves it unset; unknown if the SA is absent).
 	// The proposal §7 golden-file cases are exactly this logic.
 	TokenMounted bool
+	// TokenUnknown is true when token access cannot be established because
+	// the ServiceAccount was not collected. TokenMounted is false in that case;
+	// callers must not interpret it as evidence that no token is available.
+	TokenUnknown bool
 	// Skipped is true when the workload's object could not be decoded for
-	// SA resolution (kind not in WorkloadKindGVRs, missing from resources).
+	// SA resolution, or has no ServiceAccount identity (a static mirror Pod).
 	Skipped    bool
 	SkipReason string
 }
@@ -269,7 +273,8 @@ func hasProjectedServiceAccountToken(obj map[string]any, kind string) bool {
 // for determinism.
 // saAutomountByNsName is a map of "namespace/name" → *bool reflecting
 // each ServiceAccount's own automountServiceAccountToken setting;
-// a missing key or nil pointer is treated as the Kubernetes default (true).
+// a present key with a nil pointer uses the Kubernetes default (true).
+// A missing key leaves token access unknown unless pod settings or mounts decide it.
 func ResolveServiceAccountBindings(
 	resources map[string]workloadinterface.IMetadata,
 	saAutomountByNsName map[string]*bool,
@@ -307,6 +312,16 @@ func ResolveServiceAccountBindings(
 		obj := r.GetObject()
 		u := &unstructured.Unstructured{Object: obj}
 
+		// Static mirror Pods have no ServiceAccount assigned by admission.
+		if r.GetKind() == "Pod" && isMirrorPod(obj) {
+			out = append(out, ServiceAccountBinding{
+				WorkloadRef: ref,
+				Skipped:     true,
+				SkipReason:  "static (mirror) Pod has no ServiceAccount identity",
+			})
+			continue
+		}
+
 		// A missing or unreadable pod spec (e.g. Deployment with spec: {})
 		// cannot be analysed: skip rather than returning a misleading result.
 		var specPresent bool
@@ -340,6 +355,7 @@ func ResolveServiceAccountBindings(
 
 		// Determine token mount status per the three-level logic above.
 		tokenMounted := false
+		tokenUnknown := false
 		if hasProjectedServiceAccountToken(obj, r.GetKind()) {
 			// Explicit projected volume mounted by at least one container.
 			tokenMounted = true
@@ -355,17 +371,22 @@ func ResolveServiceAccountBindings(
 			} else {
 				// Fall back to SA-level value.
 				saKey := r.GetNamespace() + "/" + saName
-				if saVal, ok := saAutomountByNsName[saKey]; ok && saVal != nil {
+				saVal, found := saAutomountByNsName[saKey]
+				switch {
+				case !found:
+					tokenUnknown = true
+				case saVal != nil:
 					tokenMounted = *saVal
-				} else {
-					tokenMounted = true // Kubernetes default
+				default:
+					tokenMounted = true // Collected SA with the Kubernetes default.
 				}
 			}
 			// Even when automount is enabled, Kubernetes admission skips
 			// injecting the token when the default path is already occupied.
 			// See: https://github.com/kubernetes/kubernetes/blob/v1.35.0/plugin/pkg/admission/serviceaccount/admission.go#L407
-			if tokenMounted && isMountPathOccupied(u, r.GetKind()) {
+			if (tokenMounted || tokenUnknown) && isMountPathOccupied(u, r.GetKind()) {
 				tokenMounted = false
+				tokenUnknown = false
 			}
 		}
 
@@ -374,6 +395,7 @@ func ResolveServiceAccountBindings(
 			ServiceAccountName: saName,
 			Namespace:          r.GetNamespace(),
 			TokenMounted:       tokenMounted,
+			TokenUnknown:       tokenUnknown,
 		})
 	}
 	return out
