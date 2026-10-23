@@ -313,18 +313,23 @@ const variablesTypeName = "kubescape.cel.variables"
 // others) would re-enter its own callback before lazy.MapValue memoizes anything,
 // recursing until the Go stack overflows: a fatal error, not a recoverable panic.
 // The apiserver never gets that far, because it declares each variable's field
-// only after compiling it, so a self or cyclic reference is an undefined-field
-// compile error there. We keep accepting acyclic forward references, so rather
-// than reject by declaration order we track the variables being evaluated right
-// now and turn a re-entry into an error value naming the cycle.
+// only after compiling it: a variable that reads itself or a later one fails to
+// compile, and that failure comes back as the variable's error value when
+// something reads it (composition.go variableAccessor.Callback). We keep
+// accepting acyclic forward references, so rather than reject by declaration
+// order we track the variables being evaluated right now and turn a re-entry
+// into an error value naming the cycle.
 //
 // That state belongs to this map and so to one evaluation, which is
 // single-threaded like the map itself; nothing is shared between evaluations.
-// Two limits follow from evaluating lazily. A cycle among variables nothing
-// reads never runs, so it is not reported (the apiserver would reject the
-// policy outright). And the cycle is an error VALUE, so CEL's error-absorbing
+// This detects the cycles evaluation reaches, not every cyclic policy. A cycle
+// among variables nothing reads never runs, so it is not reported; the
+// apiserver is no different, since an uncompilable variable only matters once
+// it is read. And the cycle is an error VALUE, so CEL's error-absorbing
 // operators can mask it exactly as they can any other variable error:
-// `variables.a || true` is true even if a is cyclic.
+// `variables.a || true` is true even if a is cyclic. When a variable's own
+// expression is what masks the cycle, what the variables on it end up holding
+// depends on which of them is read first.
 func (e *Evaluator) lazyVariables(ctx context.Context, variables []Variable, activation map[string]any, budget *costBudget) *lazy.MapValue {
 	lazyVars := lazy.NewMapValue(types.NewObjectType(variablesTypeName))
 	var resolving []string // variables mid-evaluation, outermost first

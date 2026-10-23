@@ -77,6 +77,14 @@ func TestVariableCycleIsReportedNotRecursed(t *testing.T) {
 			wantCycle:  "a -> b -> a",
 		},
 		{
+			// ok finishes before the cycle closes. Its entry must be gone from the
+			// resolving stack by then, or it would show up in the reported path.
+			name:       "a sibling resolved on the way is not part of the cycle",
+			vars:       []Variable{{"ok", "object.spec.replicas"}, {"a", "variables.ok + variables.b"}, {"b", "variables.a"}},
+			validation: "variables.a == 1",
+			wantCycle:  "a -> b -> a",
+		},
+		{
 			name:       "cycle through a bracket index",
 			vars:       []Variable{{"a", `variables["b"]`}, {"b", `variables["a"]`}},
 			validation: "variables.a == 1",
@@ -294,6 +302,25 @@ func TestVariableCycleDoesNotBreakPathsOrMessages(t *testing.T) {
 		assert.Equal(t, "no host network", res[0].Message)
 	})
 
+	t.Run("paths are derived while re-evaluating through a self-cyclic variable", func(t *testing.T) {
+		// `&& false` absorbs the cycle error, so the left side is false and the
+		// verdict comes from the comprehension: a clean violation. Because the
+		// expression has a comprehension, path derivation narrows the containers
+		// list and re-evaluates the whole expression on each candidate, and every
+		// re-evaluation reads the cyclic variable again on a fresh activation.
+		self := []Variable{{"a", "variables.a + 1"}}
+		res, err := e.EvaluateOnObject(context.Background(), hostNetworkPod(), nil, nil, self,
+			[]Validation{{Expression: "(variables.a == 1 && false) || object.spec.containers.all(c, c.image != '')"}})
+		require.NoError(t, err)
+		require.NoError(t, res[0].Err)
+		assert.False(t, res[0].Passed)
+		var paths []string
+		for _, hint := range res[0].Paths {
+			paths = append(paths, hint.Path)
+		}
+		assert.Contains(t, paths, "spec.containers[1].image")
+	})
+
 	t.Run("a messageExpression that hits a cycle falls back to the message", func(t *testing.T) {
 		res, err := e.EvaluateOnObject(context.Background(), cycleTestObject(), nil, nil, vars,
 			[]Validation{{Expression: "false", Message: "static", MessageExpression: "string(variables.a)"}})
@@ -302,6 +329,24 @@ func TestVariableCycleDoesNotBreakPathsOrMessages(t *testing.T) {
 		assert.False(t, res[0].Passed)
 		assert.Equal(t, "static", res[0].Message)
 	})
+}
+
+// The cycle is an error value, so CEL's error-absorbing operators treat it like
+// any other variable error. This pins the limitation the code comment states.
+func TestVariableCycleErrorCanBeAbsorbedByCEL(t *testing.T) {
+	vars := []Variable{{"a", "variables.a + 1"}}
+
+	absorbed := evalVars(t, vars, "variables.a == 1 || true", "variables.a == 1 && false")
+	require.NoError(t, absorbed[0].Err)
+	assert.True(t, absorbed[0].Passed, "true absorbs the error")
+	require.NoError(t, absorbed[1].Err)
+	assert.False(t, absorbed[1].Passed, "false absorbs the error")
+
+	notAbsorbed := evalVars(t, vars, "variables.a == 1 || false", "variables.a == 1 && true")
+	for i, res := range notAbsorbed {
+		require.Errorf(t, res.Err, "validation %d", i)
+		assert.Contains(t, res.Err.Error(), "cyclic reference a -> a")
+	}
 }
 
 func TestVariableCycleEvaluationsAreIndependent(t *testing.T) {
