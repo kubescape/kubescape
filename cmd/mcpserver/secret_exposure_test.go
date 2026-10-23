@@ -2283,3 +2283,143 @@ func TestDetectSecretExposure_QueryCommaEqualsRegression(t *testing.T) {
 		})
 	}
 }
+
+func TestSecretExposure_DotSeparatedKeys(t *testing.T) {
+	plainSecret := "mock" + "-plain" + "-secret-123"
+	dbURL := testDatabaseURL()
+
+	cases := []struct {
+		key         string
+		val         string
+		shouldMatch bool
+	}{
+		// Dot-separated sensitive keys
+		{"db.password", plainSecret, true},
+		{"spring.datasource.password", plainSecret, true},
+		{"spring.datasource.password.primary", plainSecret, true},
+		{"api.key", plainSecret, true},
+		{"app.api.key", plainSecret, true},
+		{"app.api_key", plainSecret, true},
+		{"db.pass", plainSecret, true},
+		{"app.db.pass", plainSecret, true},
+		{"service.client_secret", plainSecret, true},
+		{"client.secret", plainSecret, true},
+		{"auth.token", plainSecret, true},
+		{"private.key", plainSecret, true},
+		{"access.key", plainSecret, true},
+		{"database.url", plainSecret, true},
+		{"database.url", dbURL, true},
+
+		// Dot-separated non-secret exclusions
+		{"db.password.file", "/etc/secrets/password", false},
+		{"spring.datasource.password.path", "/var/run/secrets/db_pass", false},
+		{"api.key.file", "/etc/secrets/apikey", false},
+		{"db.pass.file", "/etc/secrets/dbpass", false},
+		{"db.pass.path", "/var/run/secrets/db_pass", false},
+		{"auth.token.url", "https://auth.example.com/oauth/token", false},
+		{"auth.token.endpoint", "https://auth.example.com/token", false},
+		{"auth.token.ttl", "3600", false},
+
+		// Safe placeholder values under sensitive dot-separated keys
+		{"db.password", "", false},
+		{"db.password", "placeholder", false},
+		{"db.password", "changeme", false},
+		{"api.key", "", false},
+		{"api.key", "placeholder", false},
+		{"db.pass", "", false},
+		{"db.pass", "changeme", false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.key+"="+tc.val, func(t *testing.T) {
+			matched, ruleID, _, severity := evaluateSecretString(tc.key, tc.val)
+			assert.Equal(t, tc.shouldMatch, matched, "expected match=%v for key=%s, val=%s", tc.shouldMatch, tc.key, tc.val)
+			if tc.shouldMatch {
+				if tc.key == "database.url" && tc.val == dbURL {
+					assert.Equal(t, "URI_CREDENTIALS", ruleID)
+				} else {
+					assert.Equal(t, "ENV_CREDENTIAL_KEYWORD", ruleID)
+				}
+				assert.Equal(t, "High", severity)
+			}
+		})
+	}
+}
+
+func TestDetectSecretExposure_ConfigMapDotSeparatedKeys(t *testing.T) {
+	cmData := make(map[string]string)
+	cmData["db."+"password"] = testPassword()
+	cmData["db."+"password.file"] = "/etc/secrets/pass"
+	cmData["api."+"key"] = testPassword()
+	cmData["api."+"key.file"] = "/etc/secrets/api"
+	cmData["db."+"pass"] = testPassword()
+	cmData["db."+"pass.path"] = "/var/run/secrets/dbpass"
+
+	cm := testSecretConfigMap("dot-test", "dot-cm", cmData)
+	ksServer := newSecretExposureTestServer(t, cm)
+	result := registeredToolResult(t, dispatchRegisteredTool(t, ksServer, "detect_secret_exposure", map[string]any{
+		"namespace": "dot-test",
+	}))
+	require.False(t, result.IsError)
+
+	var res SecretExposureResult
+	require.NoError(t, json.Unmarshal([]byte(toolResultText(t, result)), &res))
+
+	require.Equal(t, 3, res.FindingsCount)
+	keys := make(map[string]bool)
+	for _, f := range res.Findings {
+		assert.Equal(t, "ConfigMap", f.ResourceKind)
+		assert.Equal(t, "ENV_CREDENTIAL_KEYWORD", f.RuleID)
+		assert.Equal(t, "High", f.Severity)
+		keys[f.Key] = true
+	}
+	assert.True(t, keys["db.password"])
+	assert.True(t, keys["api.key"])
+	assert.True(t, keys["db.pass"])
+	assert.False(t, keys["db.password.file"])
+	assert.False(t, keys["api.key.file"])
+	assert.False(t, keys["db.pass.path"])
+}
+
+func TestDetectSecretExposure_WorkloadConfigMapKeyRefDotSeparated(t *testing.T) {
+	cmData := make(map[string]string)
+	cmData["db."+"password"] = testPassword()
+
+	cm := testSecretConfigMap("dot-test", "db-config", cmData)
+	pod := testSecretPod("dot-test", "backend-pod", []map[string]any{
+		{
+			"name": "backend",
+			"env": []any{
+				map[string]any{
+					"name": "CUSTOM_ENV_VAR",
+					"valueFrom": map[string]any{
+						"configMapKeyRef": map[string]any{
+							"name": "db-config",
+							"key":  "db.password",
+						},
+					},
+				},
+			},
+		},
+	})
+
+	ksServer := newSecretExposureTestServer(t, cm, pod)
+	result := registeredToolResult(t, dispatchRegisteredTool(t, ksServer, "detect_secret_exposure", map[string]any{
+		"namespace": "dot-test",
+	}))
+	require.False(t, result.IsError)
+
+	var res SecretExposureResult
+	require.NoError(t, json.Unmarshal([]byte(toolResultText(t, result)), &res))
+
+	var foundWorkloadFinding bool
+	for _, f := range res.Findings {
+		if f.ResourceKind == "Pod" && f.Key == "CUSTOM_ENV_VAR" {
+			foundWorkloadFinding = true
+			assert.Equal(t, "ENV_CREDENTIAL_KEYWORD", f.RuleID)
+			assert.Equal(t, "High", f.Severity)
+			assert.Contains(t, f.Location, "valueFrom.configMapKeyRef(db-config.db.password)")
+		}
+	}
+	assert.True(t, foundWorkloadFinding, "expected finding on Pod referencing dot-separated ConfigMap key")
+}
