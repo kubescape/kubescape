@@ -358,6 +358,56 @@ func TestGetOutputPrintersCollisionReturnsError(t *testing.T) {
 	assert.Contains(t, err.Error(), "output path collision")
 }
 
+func TestGetOutputPrintersRejectsWhitespaceAndDirectoryCollisions(t *testing.T) {
+	tests := []struct {
+		name    string
+		formats string
+		output  string
+		want    string
+	}{
+		{
+			name:    "json and gitlab-sast collide on whitespace output",
+			formats: "json,gitlab-sast",
+			output:  "   ",
+			want:    "report.json",
+		},
+		{
+			name:    "pretty-printer and prometheus collide on whitespace output",
+			formats: "pretty-printer,prometheus",
+			output:  "   ",
+			want:    "report.txt",
+		},
+		{
+			name:    "yaml and policyreport collide on whitespace output",
+			formats: "yaml,policyreport",
+			output:  "   ",
+			want:    "report.yaml",
+		},
+		{
+			name:    "json and gitlab-sast collide inside directory",
+			formats: "json,gitlab-sast",
+			output:  filepath.Join(t.TempDir(), "reports") + string(filepath.Separator),
+			want:    "report.json",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			scanInfo := &cautils.ScanInfo{
+				ScanType:      cautils.ScanTypeControl,
+				Format:        tt.formats,
+				Output:        tt.output,
+				InputPatterns: []string{"manifest.yaml"},
+			}
+
+			_, err := GetOutputPrinters(scanInfo, context.Background(), "test-cluster")
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "output path collision")
+			assert.Contains(t, err.Error(), tt.want)
+		})
+	}
+}
+
 func TestGetOutputPrintersClosesV1JSONWriterAfterLaterSetupFailure(t *testing.T) {
 	if _, err := os.Stat("/proc/self/fd"); err != nil {
 		t.Skip("requires /proc/self/fd")
@@ -394,6 +444,11 @@ func TestResolvedOutputPath(t *testing.T) {
 		{"preserve markdown", printer.MarkdownFormat, "report.md", "report.md"},
 		{"stdout sink skips collision tracking", printer.JsonFormat, os.Stdout.Name(), ""},
 		{"devnull sink skips collision tracking", printer.JsonFormat, os.DevNull, ""},
+		{"empty output skips collision tracking", printer.JsonFormat, "", ""},
+		{"whitespace explicit output resolves to default base for JSON", printer.JsonFormat, "   ", "report.json"},
+		{"whitespace explicit output resolves to default base for CycloneDX", printer.CycloneDXFormat, "   ", "sbom.cdx.json"},
+		{"directory path with trailing separator for JSON", printer.JsonFormat, "reports/", "reports/report.json"},
+		{"directory path with trailing separator for CycloneDX", printer.CycloneDXFormat, "reports/", "reports/sbom.cdx.json"},
 	}
 
 	for _, test := range tests {
