@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/google/cel-go/cel"
@@ -306,11 +307,37 @@ const variablesTypeName = "kubescape.cel.variables"
 // apiserver's compositionContext accounts for them. Memoization means a second
 // validation reading the same variable pays nothing, offline and at admission
 // alike.
+//
+// The env declares "variables" dynamic, so the compiler cannot see which
+// variable reads which, and a variable that reads itself (directly or through
+// others) would re-enter its own callback before lazy.MapValue memoizes anything,
+// recursing until the Go stack overflows: a fatal error, not a recoverable panic.
+// The apiserver never gets that far, because it declares each variable's field
+// only after compiling it, so a self or cyclic reference is an undefined-field
+// compile error there. We keep accepting acyclic forward references, so rather
+// than reject by declaration order we track the variables being evaluated right
+// now and turn a re-entry into an error value naming the cycle.
+//
+// That state belongs to this map and so to one evaluation, which is
+// single-threaded like the map itself; nothing is shared between evaluations.
+// Two limits follow from evaluating lazily. A cycle among variables nothing
+// reads never runs, so it is not reported (the apiserver would reject the
+// policy outright). And the cycle is an error VALUE, so CEL's error-absorbing
+// operators can mask it exactly as they can any other variable error:
+// `variables.a || true` is true even if a is cyclic.
 func (e *Evaluator) lazyVariables(ctx context.Context, variables []Variable, activation map[string]any, budget *costBudget) *lazy.MapValue {
 	lazyVars := lazy.NewMapValue(types.NewObjectType(variablesTypeName))
+	var resolving []string // variables mid-evaluation, outermost first
 	for _, v := range variables {
 		v := v // capture per iteration for the callback
 		lazyVars.Append(v.Name, func(*lazy.MapValue) ref.Val {
+			if i := slices.Index(resolving, v.Name); i >= 0 {
+				cycle := append(slices.Clone(resolving[i:]), v.Name)
+				return types.NewErr("variable %q: cyclic reference %s", v.Name, strings.Join(cycle, " -> "))
+			}
+			resolving = append(resolving, v.Name)
+			defer func() { resolving = resolving[:len(resolving)-1] }()
+
 			// Compiling first keeps a variable that never ran out of the cost
 			// accounting entirely: a compile failure is this variable's error to
 			// report, not a missing cost report to complain about.
