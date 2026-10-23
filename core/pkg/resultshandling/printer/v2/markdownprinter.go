@@ -344,12 +344,14 @@ func mdWriteImageVulnerabilities(w io.Writer, cves []imageprinter.CVE) error {
 		return ew.err
 	}
 
-	ew.printf("| Severity | Vulnerability | Package | Version | Fixed In | Image |\n")
-	ew.printf("|---|---|---|---|---|---|\n")
-	for _, cve := range mdSortedImageCVEs(cves) {
-		ew.printf("| %s | %s | %s | %s | %s | `%s` |\n",
+	ew.printf("| Severity | Vulnerability | KEV | EPSS | Package | Version | Fixed In | Image |\n")
+	ew.printf("|---|---|:---:|---:|---|---|---|---|\n")
+	for _, cve := range imageprinter.SortedCVEs(cves) {
+		ew.printf("| %s | %s | %s | %s | %s | %s | %s | `%s` |\n",
 			mdEscapeCell(cve.Severity),
 			mdEscapeCell(cve.ID),
+			imageprinter.FormatKEV(cve.KEV),
+			imageprinter.FormatEPSS(cve.EPSS),
 			mdEscapeCell(cve.Package),
 			mdEscapeCell(cve.Version),
 			mdEscapeCell(mdFixedIn(cve)),
@@ -388,25 +390,6 @@ func mdSortedImagePackages(packages map[string]*imageprinter.PackageScore) []*im
 			return out[i].Name < out[j].Name
 		}
 		return out[i].Version < out[j].Version
-	})
-	return out
-}
-
-func mdSortedImageCVEs(cves []imageprinter.CVE) []imageprinter.CVE {
-	out := append([]imageprinter.CVE(nil), cves...)
-	sort.SliceStable(out, func(i, j int) bool {
-		ri := tableutils.ImageSeverityToInt(out[i].Severity)
-		rj := tableutils.ImageSeverityToInt(out[j].Severity)
-		if ri != rj {
-			return ri > rj
-		}
-		if out[i].ID != out[j].ID {
-			return out[i].ID < out[j].ID
-		}
-		if out[i].Package != out[j].Package {
-			return out[i].Package < out[j].Package
-		}
-		return out[i].Image < out[j].Image
 	})
 	return out
 }

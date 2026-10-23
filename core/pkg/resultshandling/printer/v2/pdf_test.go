@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -181,6 +182,34 @@ func TestGenerateImagePdf_NoVulnerabilities(t *testing.T) {
 	if len(out) == 0 {
 		t.Fatal("expected non-empty PDF bytes for clean image")
 	}
+}
+
+func TestGenerateImagePdf_ShowsKEVAndEPSS(t *testing.T) {
+	pp := NewPdfPrinter()
+	data := []cautils.ImageScanData{
+		{
+			Image: "nginx:1.17.0",
+			Matches: match.NewMatches(
+				mdImageMatch("CVE-2019-0001", "Critical", "openssl", "1.0.0", vulnerability.FixStateNotFixed),
+				mdWithExploitData(mdImageMatch("CVE-2020-15999", "Medium", "zlib1g", "1.2.11", vulnerability.FixStateNotFixed), true, 0.63894, 0.99215),
+			),
+		},
+	}
+
+	out, err := pp.generateImagePdf(data)
+	require.NoError(t, err)
+	pdfText := string(out)
+
+	assert.Contains(t, pdfText, "KEV")
+	assert.Contains(t, pdfText, "EPSS")
+	assert.Contains(t, pdfText, "63.9%")
+	assert.Contains(t, pdfText, "N/A")
+
+	kev := strings.Index(pdfText, "CVE-2020-15999")
+	critical := strings.Index(pdfText, "CVE-2019-0001")
+	require.NotEqual(t, -1, kev)
+	require.NotEqual(t, -1, critical)
+	assert.Less(t, kev, critical, "KEV findings must be listed before higher-severity ones")
 }
 
 // TestGeneratePdf_CombinedScanIncludesImageFindings checks that a combined PDF contains posture findings, image CVEs, and the clean-image placeholder.

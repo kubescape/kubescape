@@ -145,20 +145,20 @@ func (pp *PdfPrinter) getImageTableObjects(cves []imageprinter.CVE) (*[]pdf.Imag
 		// A single placeholder row keeps the table non-empty and tells
 		// the reader the scan was clean, instead of failing silently.
 		rows := []pdf.ImageTableObject{
-			*pdf.NewImageTableRow("—", "—", "—", "None", "No vulnerabilities found", getSeverityColor),
+			*pdf.NewImageTableRow("—", "", "", "—", "—", "None", "No vulnerabilities found", getSeverityColor),
 		}
 		return &rows, 0
 	}
 
 	rows := make([]pdf.ImageTableObject, 0, len(cves))
 	fixableCVEs := 0
-	for _, cve := range cves {
+	for _, cve := range imageprinter.SortedCVEs(cves) {
 		fixVersions := "no fix available"
 		if len(cve.FixVersions) > 0 {
 			fixVersions = strings.Join(cve.FixVersions, ", ")
 			fixableCVEs++
 		}
-		rows = append(rows, *pdf.NewImageTableRow(cve.ID, cve.Package, cve.Version, cve.Severity, fixVersions, getSeverityColor))
+		rows = append(rows, *pdf.NewImageTableRow(cve.ID, imageprinter.FormatKEV(cve.KEV), imageprinter.FormatEPSSProbability(cve.EPSS), cve.Package, cve.Version, cve.Severity, fixVersions, getSeverityColor))
 	}
 	return &rows, fixableCVEs
 }

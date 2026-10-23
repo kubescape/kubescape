@@ -63,6 +63,33 @@
   .resourceRemediationCell {
     width: 50%;
   }
+  /* The vulnerability table has seven columns, so it needs its own widths
+     summing to 100%; the resource widths above would leave KEV and EPSS none. */
+  .imageTable td, .imageTable th {
+    overflow-wrap: anywhere;
+  }
+  .imageSeverityCell {
+    width: 10%;
+  }
+  .imageCVECell {
+    width: 20%;
+  }
+  .imageKEVCell {
+    width: 6%;
+  }
+  .imageEPSSCell {
+    width: 16%;
+    padding-right: 1em;
+  }
+  .imagePackageCell {
+    width: 20%;
+  }
+  .imageVersionCell {
+    width: 12%;
+  }
+  .imageFixedInCell {
+    width: 16%;
+  }
   .logo {
     width: 25%;
     float: right;
@@ -181,24 +208,28 @@
     <p>{{ range .ImageScanSummary.Images }}{{ . }} {{ end }}</p>
     </br>
     <h2>Vulnerabilities:</h2>
-    <table>
+    <table class="imageTable">
       <thead>
       <tr>
-        <th class="resourceSeverityCell">Severity</th>
-        <th class="resourceNameCell">CVE</th>
-        <th class="resourceNameCell">Package</th>
-        <th class="resourceURLCell">Version</th>
-        <th class="resourceRemediationCell">Fixed In</th>
+        <th class="imageSeverityCell">Severity</th>
+        <th class="imageCVECell">CVE</th>
+        <th class="imageKEVCell">KEV</th>
+        <th class="imageEPSSCell numericCell">EPSS</th>
+        <th class="imagePackageCell">Package</th>
+        <th class="imageVersionCell">Version</th>
+        <th class="imageFixedInCell">Fixed In</th>
       </tr>
       </thead>
       <tbody>
-      {{ range .ImageScanSummary.CVEs }}
+      {{ range sortCVEsByRisk .ImageScanSummary.CVEs }}
         <tr>
-          <td class="resourceSeverityCell">{{ .Severity }}</td>
-          <td class="resourceNameCell">{{ .ID }}</td>
-          <td class="resourceNameCell">{{ .Package }}</td>
-          <td class="resourceURLCell">{{ .Version }}</td>
-          <td class="resourceRemediationCell">{{ range .FixVersions }} <p>{{ . }}</p> {{ end }}</td>
+          <td class="imageSeverityCell">{{ .Severity }}</td>
+          <td class="imageCVECell">{{ .ID }}</td>
+          <td class="imageKEVCell">{{ formatKEV .KEV }}</td>
+          <td class="imageEPSSCell numericCell">{{ formatEPSS .EPSS }}</td>
+          <td class="imagePackageCell">{{ .Package }}</td>
+          <td class="imageVersionCell">{{ .Version }}</td>
+          <td class="imageFixedInCell">{{ range .FixVersions }} <p>{{ . }}</p> {{ end }}</td>
         </tr>
       {{ end }}
       </tbody>

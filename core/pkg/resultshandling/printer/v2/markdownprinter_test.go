@@ -129,6 +129,15 @@ func mdImageMatch(id, severity, packageName, version string, fixState vulnerabil
 	}
 }
 
+// mdWithExploitData adds CISA KEV and EPSS data to a match built by mdImageMatch.
+func mdWithExploitData(m match.Match, kev bool, epss, percentile float64) match.Match {
+	if kev {
+		m.Vulnerability.Metadata.KnownExploited = []vulnerability.KnownExploited{{CVE: m.Vulnerability.ID}}
+	}
+	m.Vulnerability.Metadata.EPSS = []vulnerability.EPSS{{CVE: m.Vulnerability.ID, EPSS: epss, Percentile: percentile}}
+	return m
+}
+
 func mdRunImageActionPrint(t *testing.T, imageScanData []cautils.ImageScanData) string {
 	t.Helper()
 	tmp, err := os.CreateTemp("", "kubescape-image-md-*.md")
@@ -539,9 +548,15 @@ func TestMarkdownPrinter_ActionPrint_ImageScanReport(t *testing.T) {
 	assert.Contains(t, out, "| busybox | 1.36.0 |")
 
 	assert.Contains(t, out, "## Vulnerabilities")
-	assert.Contains(t, out, "| Critical | CVE-2026-0001 | openssl | 1.0.0 | 1.0.1, 1.0.2 | `registry.example.com/app:v1 [linux/amd64]` |")
-	assert.Contains(t, out, "| High | CVE-2026-0003 | glibc | 2.39 | wont-fix | `registry.example.com/app:v1 [linux/arm64]` |")
-	assert.Contains(t, out, "| Medium | CVE-2026-0002 | busybox | 1.36.0 |  | `registry.example.com/app:v1 [linux/amd64]` |")
+	assert.Contains(t, out, "| Severity | Vulnerability | KEV | EPSS | Package | Version | Fixed In | Image |")
+	assert.Contains(t, out, "| Critical | CVE-2026-0001 |  | < 0.1% (12th) | openssl | 1.0.0 | 1.0.1, 1.0.2 | `registry.example.com/app:v1 [linux/amd64]` |")
+	assert.Contains(t, out, "| High | CVE-2026-0003 |  | N/A | glibc | 2.39 | wont-fix | `registry.example.com/app:v1 [linux/arm64]` |")
+	assert.Contains(t, out, "| Medium | CVE-2026-0002 | yes | 63.9% (99th) | busybox | 1.36.0 |  | `registry.example.com/app:v1 [linux/amd64]` |")
+
+	kev := strings.Index(out, "| Medium | CVE-2026-0002 |")
+	critical := strings.Index(out, "| Critical | CVE-2026-0001 |")
+	high := strings.Index(out, "| High | CVE-2026-0003 |")
+	assert.True(t, kev < critical && critical < high, "KEV findings must be listed first, then by severity")
 }
 
 func TestMarkdownPrinter_ActionPrint_ImageScanGolden(t *testing.T) {
@@ -560,8 +575,8 @@ func mdImageScanDataFixture() []cautils.ImageScanData {
 			Platform:    "linux/amd64",
 			VulnDBBuilt: &dbBuilt,
 			Matches: match.NewMatches(
-				mdImageMatch("CVE-2026-0001", "Critical", "openssl", "1.0.0", vulnerability.FixStateFixed, "1.0.1", "1.0.2"),
-				mdImageMatch("CVE-2026-0002", "Medium", "busybox", "1.36.0", vulnerability.FixStateNotFixed),
+				mdWithExploitData(mdImageMatch("CVE-2026-0001", "Critical", "openssl", "1.0.0", vulnerability.FixStateFixed, "1.0.1", "1.0.2"), false, 0.0004, 0.12),
+				mdWithExploitData(mdImageMatch("CVE-2026-0002", "Medium", "busybox", "1.36.0", vulnerability.FixStateNotFixed), true, 0.63894, 0.99215),
 			),
 		},
 		{
@@ -606,7 +621,7 @@ func TestMarkdownPrinter_ActionPrint_ImageScanEscapesTableCells(t *testing.T) {
 	out := mdRunImageActionPrint(t, imageScanData)
 
 	assert.Contains(t, out, "`registry.example.com/app\\|with-pipe:v1 [linux/amd64]`")
-	assert.Contains(t, out, "| High | CVE-2026-PIPE | pkg\\|name | 1\\|2 | 3\\|4 | `registry.example.com/app\\|with-pipe:v1 [linux/amd64]` |")
+	assert.Contains(t, out, "| High | CVE-2026-PIPE |  | N/A | pkg\\|name | 1\\|2 | 3\\|4 | `registry.example.com/app\\|with-pipe:v1 [linux/amd64]` |")
 }
 
 func TestMdWriteImageSeveritySummarySortsBySeverity(t *testing.T) {
@@ -641,23 +656,6 @@ func TestMdSortedImagePackages(t *testing.T) {
 	assert.Equal(t, "a", got[1].Name)
 	assert.Equal(t, "2", got[1].Version)
 	assert.Equal(t, "b", got[2].Name)
-}
-
-func TestMdSortedImageCVEs(t *testing.T) {
-	cves := []imageprinter.CVE{
-		{ID: "CVE-Z", Severity: "Low", Package: "pkg", Image: "image"},
-		{ID: "CVE-B", Severity: "Critical", Package: "pkg", Image: "image"},
-		{ID: "CVE-A", Severity: "Critical", Package: "pkg", Image: "image"},
-		{ID: "CVE-M", Severity: "High", Package: "pkg", Image: "image"},
-	}
-
-	got := mdSortedImageCVEs(cves)
-
-	require.Len(t, got, 4)
-	assert.Equal(t, "CVE-A", got[0].ID)
-	assert.Equal(t, "CVE-B", got[1].ID)
-	assert.Equal(t, "CVE-M", got[2].ID)
-	assert.Equal(t, "CVE-Z", got[3].ID)
 }
 
 func TestMdUnknownSeverityCount(t *testing.T) {

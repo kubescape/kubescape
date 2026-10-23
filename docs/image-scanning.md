@@ -42,6 +42,28 @@ To see the full vulnerability report, use the `-v` (verbose) flag:
 kubescape scan image "nginx" -v
 ```
 
+### Exploitability: KEV and EPSS
+
+The vulnerability table in the pretty, HTML, Markdown and PDF outputs has two
+columns that show how likely each vulnerability is to be exploited:
+
+- `KEV` is `yes` when the vulnerability is on the CISA
+  [Known Exploited Vulnerabilities](https://www.cisa.gov/known-exploited-vulnerabilities-catalog)
+  catalog, meaning it has been exploited in the wild.
+- `EPSS` is the [Exploit Prediction Scoring System](https://www.first.org/epss/)
+  probability of exploitation in the next 30 days, followed by its percentile,
+  for example `63.9% (99th)`. It is `N/A` when the vulnerability has no score.
+  The PDF shows the probability only.
+
+Rows are sorted with KEV entries first, then by severity, then by EPSS score.
+The default (non-verbose) table, which otherwise lists only Critical and High
+vulnerabilities, always includes KEV entries whatever their severity, and the
+summary counts them.
+
+Both values come from the Grype vulnerability database, including the offline
+database image. EPSS scores change daily, so their accuracy depends on how
+recently the database was built (see `--max-db-age`).
+
 ### Exceptions
 
 If you want to ignore certain vulnerabilities based on an exceptions file, use the `--exceptions` flag:

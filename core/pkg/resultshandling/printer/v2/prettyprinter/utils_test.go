@@ -760,6 +760,59 @@ func TestGetFilteredCVEs(t *testing.T) {
 	}
 }
 
+func TestGetFilteredCVEsKeepsKEV(t *testing.T) {
+	tests := []struct {
+		name string
+		cves []imageprinter.CVE
+		want []imageprinter.CVE
+	}{
+		{
+			name: "KEV below High is kept alongside Critical and High",
+			cves: []imageprinter.CVE{
+				{ID: "CVE-1", Severity: "Critical"},
+				{ID: "CVE-2", Severity: "Medium", KEV: true},
+				{ID: "CVE-3", Severity: "Medium"},
+				{ID: "CVE-4", Severity: "Low", KEV: true},
+				{ID: "CVE-5", Severity: "High"},
+			},
+			want: []imageprinter.CVE{
+				{ID: "CVE-1", Severity: "Critical"},
+				{ID: "CVE-2", Severity: "Medium", KEV: true},
+				{ID: "CVE-4", Severity: "Low", KEV: true},
+				{ID: "CVE-5", Severity: "High"},
+			},
+		},
+		{
+			name: "a low KEV does not hide the Medium fallback",
+			cves: []imageprinter.CVE{
+				{ID: "CVE-1", Severity: "Medium"},
+				{ID: "CVE-2", Severity: "Low", KEV: true},
+				{ID: "CVE-3", Severity: "Low"},
+			},
+			want: []imageprinter.CVE{
+				{ID: "CVE-1", Severity: "Medium"},
+				{ID: "CVE-2", Severity: "Low", KEV: true},
+			},
+		},
+		{
+			name: "without KEV the filter is unchanged",
+			cves: []imageprinter.CVE{
+				{ID: "CVE-1", Severity: "High"},
+				{ID: "CVE-2", Severity: "Medium"},
+			},
+			want: []imageprinter.CVE{
+				{ID: "CVE-1", Severity: "High"},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, getFilteredCVEs(tt.cves))
+		})
+	}
+}
+
 // TestPrintTopComponents_PackageNameWithPercentVerbs guards against a
 // regression where a pre-built package summary line was passed as the format
 // argument to cautils.StarDisplay instead of as a %s value: a package name
