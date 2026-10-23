@@ -37,8 +37,10 @@ Wait for the operator to complete initial scans:
 
 ```bash
 kubectl -n kubescape get vulnerabilitymanifests
-kubectl -n kubescape get workloadconfigurationscans
+kubectl get workloadconfigurationscansummaries -A
 ```
+
+Configuration scans are stored as summaries (`list_configuration_security_scan_summaries`). The full scan manifests (`list_configuration_security_scan_manifests`, `get_configuration_security_scan_manifest`) are stored only when continuous scanning is enabled with `--set capabilities.continuousScan=enable`.
 
 ## Starting the MCP Server
 
@@ -294,6 +296,43 @@ Get detailed configuration scan results for a specific workload, including faile
 | `manifest_name` | string | Yes | Name of the configuration manifest |
 | `status` | string | No | Only controls with these statuses, comma-separated: `failed`, `passed`, `skipped` |
 | `min_severity` | string | No | Only controls at or above this severity: `Critical`, `High`, `Medium` or `Low` |
+
+#### `list_configuration_security_scan_summaries`
+
+List configuration scan results per resource: the failed controls, most severe first, and the number of controls by status. Summaries are stored on every install; the full manifests read by the two tools above are stored only with `capabilities.continuousScan=enable`. Summaries of RBAC and cluster-scoped resources are stored in the `kubescape` namespace; `workload_namespace` is the namespace of the resource itself. `name` is the exact resource name, read from the summary's WLID annotation. RBAC summaries carry the WLID of the binding, so for an RBAC subject `name` is left out and `name_label` holds the name label instead. That is the name made into a valid label value (characters other than letters, digits, `-`, `_` and `.` replaced, lowercased, cut to 63 characters), so it can differ from the real name.
+
+**Parameters:**
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `namespace` | string | No | Namespace to list (default: all namespaces) |
+| `min_severity` | string | No | Only failed controls at or above this severity, and only resources that have one: `Critical`, `High`, `Medium` or `Low`. A page can then be empty while `continue` is set |
+| `continue` | string | No | Continuation token from the previous response |
+
+**Example Response:**
+```json
+{
+  "summaries": [
+    {
+      "namespace": "default",
+      "manifest_name": "deployment-web",
+      "kind": "Deployment",
+      "name": "web",
+      "workload_namespace": "default",
+      "failed_controls": [
+        {"id": "C-0270", "severity": "High"},
+        {"id": "C-0271", "severity": "High"},
+        {"id": "C-0013", "severity": "Medium"},
+        {"id": "C-0016", "severity": "Medium"},
+        {"id": "C-0030", "severity": "Medium"},
+        {"id": "C-0034", "severity": "Medium"},
+        {"id": "C-0055", "severity": "Medium"},
+        {"id": "C-0017", "severity": "Low"}
+      ],
+      "status_counts": {"failed": 8, "passed": 7}
+    }
+  ]
+}
+```
 
 ### Policy Tools
 

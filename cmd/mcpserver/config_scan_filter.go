@@ -47,20 +47,25 @@ func parseScannedControlFilter(arguments map[string]any) (scannedControlFilter, 
 		}
 	}
 
+	f.minSeverity, toolErr = parseControlMinSeverity(arguments)
+	return f, toolErr
+}
+
+// parseControlMinSeverity reads the optional min_severity argument of the
+// configuration scan tools. It returns SeverityUnknown when it is not set.
+func parseControlMinSeverity(arguments map[string]any) (vulnexposure.Severity, *mcp.CallToolResult) {
 	minSeverity, toolErr := mcpStringArg(arguments, "min_severity")
-	if toolErr != nil {
-		return f, toolErr
+	if toolErr != nil || minSeverity == "" {
+		return vulnexposure.SeverityUnknown, toolErr
 	}
-	if minSeverity != "" {
-		f.minSeverity = vulnexposure.ParseSeverity(minSeverity)
-		// Controls are rated Low to Critical; grype's Negligible does not apply.
-		if f.minSeverity == vulnexposure.SeverityUnknown || f.minSeverity == vulnexposure.SeverityNegligible {
-			return f, mcpToolError(ErrCodeInvalidArgument,
-				fmt.Sprintf("min_severity must be one of Critical, High, Medium, Low (got %q)", minSeverity),
-				map[string]any{"argument": "min_severity", "supported_values": []string{"Critical", "High", "Medium", "Low"}})
-		}
+	severity := vulnexposure.ParseSeverity(minSeverity)
+	// Controls are rated Low to Critical; grype's Negligible does not apply.
+	if severity == vulnexposure.SeverityUnknown || severity == vulnexposure.SeverityNegligible {
+		return vulnexposure.SeverityUnknown, mcpToolError(ErrCodeInvalidArgument,
+			fmt.Sprintf("min_severity must be one of Critical, High, Medium, Low (got %q)", minSeverity),
+			map[string]any{"argument": "min_severity", "supported_values": []string{"Critical", "High", "Medium", "Low"}})
 	}
-	return f, nil
+	return severity, nil
 }
 
 func isControlStatusFilterValue(s string) bool {
