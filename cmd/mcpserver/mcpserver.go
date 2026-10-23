@@ -474,7 +474,7 @@ func createConfigurationsToolsAndResources(ksServer *KubescapeMcpserver) {
 		"list_configuration_security_scan_manifests",
 		mcp.WithDescription("Discover available security configuration scan results at workload level (this returns a list of manifests, not the scan results themselves, to get the scan results, use the get_configuration_security_scan_manifest tool)"),
 		mcp.WithString("namespace",
-			mcp.Description("Filter by namespace (optional)"),
+			mcp.Description("Filter by namespace (optional; all namespaces by default). A workload's scan is stored in the workload's namespace; scans of cluster-scoped resources are in 'kubescape'"),
 		),
 		mcp.WithString("continue",
 			mcp.Description("Optional Kubernetes continuation token for pagination"),
@@ -487,7 +487,7 @@ func createConfigurationsToolsAndResources(ksServer *KubescapeMcpserver) {
 		"get_configuration_security_scan_manifest",
 		mcp.WithDescription("Get details of a specific security configuration scan result. Most controls in a result usually passed; set status to \"failed\" to get only the controls that need fixing."),
 		mcp.WithString("namespace",
-			mcp.Description("Namespace of the manifest (optional, defaults to 'kubescape')"),
+			mcp.Description("Namespace of the manifest, as returned by list_configuration_security_scan_manifests (optional, defaults to 'kubescape')"),
 		),
 		mcp.WithString("manifest_name",
 			mcp.Required(),
@@ -1139,13 +1139,14 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		}
 		return mcp.NewToolResultText(string(responseJson)), nil
 	case "list_configuration_security_scan_manifests":
-		namespaceStr := "kubescape"
-		if raw, ok := arguments["namespace"]; ok && raw != nil {
-			ns, toolErr := mcpStringArg(arguments, "namespace")
-			if toolErr != nil {
-				return toolErr, nil
-			}
-			namespaceStr = ns
+		// Scans of namespaced workloads are stored in the workload's own
+		// namespace, so no namespace means every namespace.
+		namespaceStr, toolErr := mcpStringArg(arguments, "namespace")
+		if toolErr != nil {
+			return toolErr, nil
+		}
+		if namespaceStr == "" {
+			namespaceStr = metav1.NamespaceAll
 		}
 		continueToken, toolErr := mcpStringArg(arguments, "continue")
 		if toolErr != nil {

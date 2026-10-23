@@ -265,7 +265,8 @@ Discover available security configuration scan results at the workload level.
 **Parameters:**
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `namespace` | string | No | Filter by namespace (default: `"kubescape"`) |
+| `namespace` | string | No | Filter by namespace (default: all namespaces). A workload's scan is stored in the workload's namespace; scans of cluster-scoped resources are in `kubescape` |
+| `continue` | string | No | Continuation token from the previous response |
 
 **Example Response:**
 ```json

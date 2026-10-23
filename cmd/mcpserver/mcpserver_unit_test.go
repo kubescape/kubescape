@@ -157,35 +157,19 @@ func TestCallToolWithStorageResources(t *testing.T) {
 			},
 		},
 		{
-			name: "list configuration scans default namespace when omitted", tool: "list_configuration_security_scan_manifests",
-			arguments: map[string]any{},
-			assertJSON: func(t *testing.T, value any) {
-				root := value.(map[string]any)
-				items := root["configuration_manifests"].(map[string]any)["manifests"].([]any)
-				require.Len(t, items, 1)
-				assert.Equal(t, "deployment-kubescape", items[0].(map[string]any)["manifest_name"])
-				assert.Equal(t, "kubescape", items[0].(map[string]any)["namespace"])
-			},
+			name: "list configuration scans all namespaces when omitted", tool: "list_configuration_security_scan_manifests",
+			arguments:  map[string]any{},
+			assertJSON: assertConfigurationScanNamespaces("kubescape", "security"),
 		},
 		{
-			name: "list configuration scans default namespace when null", tool: "list_configuration_security_scan_manifests",
-			arguments: map[string]any{"namespace": nil},
-			assertJSON: func(t *testing.T, value any) {
-				root := value.(map[string]any)
-				items := root["configuration_manifests"].(map[string]any)["manifests"].([]any)
-				require.Len(t, items, 1)
-				assert.Equal(t, "deployment-kubescape", items[0].(map[string]any)["manifest_name"])
-				assert.Equal(t, "kubescape", items[0].(map[string]any)["namespace"])
-			},
+			name: "list configuration scans all namespaces when null", tool: "list_configuration_security_scan_manifests",
+			arguments:  map[string]any{"namespace": nil},
+			assertJSON: assertConfigurationScanNamespaces("kubescape", "security"),
 		},
 		{
 			name: "list configuration scans all namespaces when empty", tool: "list_configuration_security_scan_manifests",
-			arguments: map[string]any{"namespace": ""},
-			assertJSON: func(t *testing.T, value any) {
-				root := value.(map[string]any)
-				items := root["configuration_manifests"].(map[string]any)["manifests"].([]any)
-				require.Len(t, items, 2)
-			},
+			arguments:  map[string]any{"namespace": ""},
+			assertJSON: assertConfigurationScanNamespaces("kubescape", "security"),
 		},
 		{
 			name: "get configuration scan", tool: "get_configuration_security_scan_manifest",
@@ -370,5 +354,18 @@ func TestGetConfigurationDrift_WhitespaceArgumentsRejected(t *testing.T) {
 			assert.Equal(t, ErrCodeInvalidArgument, toolErr.Code)
 			assert.Equal(t, arg, toolErr.Details["argument"])
 		})
+	}
+}
+
+// assertConfigurationScanNamespaces checks that list_configuration_security_scan_manifests
+// returned exactly one scan from each of the given namespaces.
+func assertConfigurationScanNamespaces(want ...string) func(*testing.T, any) {
+	return func(t *testing.T, value any) {
+		items := value.(map[string]any)["configuration_manifests"].(map[string]any)["manifests"].([]any)
+		got := make([]string, 0, len(items))
+		for _, item := range items {
+			got = append(got, item.(map[string]any)["namespace"].(string))
+		}
+		assert.ElementsMatch(t, want, got)
 	}
 }
