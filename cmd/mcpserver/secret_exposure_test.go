@@ -2013,3 +2013,273 @@ func TestDetectSecretExposure_Deduplication_ConfirmedPodKeptWhenParentUncertain(
 	assert.True(t, foundSS, "expected uncertain StatefulSet finding")
 	assert.True(t, foundPod, "expected confirmed Pod finding to be preserved in namespace scan")
 }
+
+func TestDetectSecretExposure_DynamicVariableRefURI(t *testing.T) {
+	// Workload using recommended Kubernetes $(VAR) / ${VAR} / {{ .Template }} interpolation
+	// in connection URIs must NOT be flagged as URI_CREDENTIALS or ENV_CREDENTIAL_KEYWORD.
+	podSafe := testSecretPod("uri-test", "safe-uri-pod", []map[string]any{
+		{
+			"name": "app",
+			"env": []any{
+				map[string]any{
+					"name":  "DATABASE_URL",
+					"value": "post" + "gres://" + "admin:$(DB_PASSWORD)@db-service:5432/mydb",
+				},
+				map[string]any{
+					"name":  "ANALYTICS_URL",
+					"value": "post" + "gres://" + "$(DB_USER):$(DB_PASSWORD)@analytics-db:5432/analytics",
+				},
+				map[string]any{
+					"name":  "CACHE_URL",
+					"value": "post" + "gres://" + "admin:${CACHE_PASSWORD}@cache-db:5432/cache",
+				},
+				map[string]any{
+					"name":  "TEMPLATE_URL",
+					"value": "post" + "gres://" + "admin:{{ .Values.dbPassword }}@tpl-db:5432/tpl",
+				},
+				map[string]any{
+					"name":  "DATABASE_URL_HELM",
+					"value": "post" + "gres://" + "admin:{{ .Values.dbPassword }}@tpl-db:5432/tpl",
+				},
+				map[string]any{
+					"name":  "DATABASE_URL_SAFE_QUERY",
+					"value": "post" + "gres://" + "admin:$(DB_PASSWORD)@db-service:5432/mydb?sslmode=disable",
+				},
+				map[string]any{
+					"name":  "DATABASE_URL_DYNAMIC_QUERY",
+					"value": "post" + "gres://" + "admin:$(DB_PASSWORD)@db-service:5432/mydb?password=$(DB_PASSWORD)",
+				},
+				map[string]any{
+					"name":  "DATABASE_URL_SAFE_PWD",
+					"value": "post" + "gres://" + "admin:$(DB_PASSWORD)@db-service:5432/mydb?pwd=$(DB_PASSWORD)",
+				},
+				map[string]any{
+					"name":  "DATABASE_URL_SAFE_SSLPASSWORD",
+					"value": "post" + "gres://" + "admin:$(DB_PASSWORD)@db-service:5432/mydb?sslpassword=$(DB_PASSWORD)",
+				},
+				map[string]any{
+					"name":  "CALLBACK_URL_SAFE_FRAGMENT",
+					"value": "http" + "s://" + "u:$(P)@h/cb#access_token=$(TOKEN)",
+				},
+				map[string]any{
+					"name":  "DATABASE_URL_SAFE_PATH_PARAM",
+					"value": "post" + "gres://" + "admin:$(DB_PASSWORD)@db-service:5432/mydb;password=$(DB_PASSWORD)",
+				},
+				map[string]any{
+					"name":  "DATABASE_URL_SAFE_HOST_PARAM",
+					"value": "post" + "gres://" + "admin:$(DB_PASSWORD)@db-service;pwd=$(DB_PASSWORD)",
+				},
+				map[string]any{
+					"name":  "DATABASE_URL_SAFE_COMMA_PARAM",
+					"value": "post" + "gres://" + "admin:$(DB_PASSWORD)@db/mydb,password=$(DB_PASSWORD)",
+				},
+				map[string]any{
+					"name":  "CALLBACK_URL",
+					"value": "http" + "s://" + "u:$(P)@h/cb?next=" + "http" + "s://" + "u:$(Q)@h2",
+				},
+				map[string]any{
+					"name":  "DATABASE_URL_SAFE_COMMA_PAIR",
+					"value": "redis://" + "u:$(P1)@a:6379," + "redis://" + "u:$(P2)@b:6379",
+				},
+			},
+		},
+	})
+
+	ksServerSafe := newSecretExposureTestServer(t, podSafe)
+	resSafe := registeredToolResult(t, dispatchRegisteredTool(t, ksServerSafe, "detect_secret_exposure", map[string]any{
+		"namespace": "uri-test",
+	}))
+	require.False(t, resSafe.IsError)
+	var resDataSafe SecretExposureResult
+	require.NoError(t, json.Unmarshal([]byte(toolResultText(t, resSafe)), &resDataSafe))
+	assert.Equal(t, 0, resDataSafe.FindingsCount, "dynamic variable references and safe queries in URI credentials must be suppressed")
+
+	// Workload with literal credentials in password part, query string, or multiline must still be flagged
+	podExposed := testSecretPod("uri-test", "exposed-uri-pod", []map[string]any{
+		{
+			"name": "app",
+			"env": []any{
+				map[string]any{
+					"name":  "DATABASE_URL",
+					"value": "post" + "gres://" + "admin:" + testPassword() + "@db-service:5432/mydb",
+				},
+				map[string]any{
+					"name":  "COMPOSED_URL",
+					"value": "post" + "gres://" + "$(DB_USER):" + testPassword() + "@db-service:5432/mydb",
+				},
+				map[string]any{
+					"name":  "DATABASE_URL_QUERY_PASSWORD",
+					"value": "post" + "gres://" + "admin:$(DB_PASSWORD)@db/mydb?password=realPassword123",
+				},
+				map[string]any{
+					"name":  "DATABASE_URL_QUERY_PWD",
+					"value": "post" + "gres://" + "admin:$(DB_PASSWORD)@db/mydb?pwd=realPassword123",
+				},
+				map[string]any{
+					"name":  "DATABASE_URL_QUERY_SSLPASSWORD",
+					"value": "post" + "gres://" + "admin:$(DB_PASSWORD)@db/mydb?sslpassword=realPassword123",
+				},
+				map[string]any{
+					"name":  "CALLBACK_URL_FRAGMENT",
+					"value": "http" + "s://" + "u:$(P)@h/cb#access_token=literalAccessToken123",
+				},
+				map[string]any{
+					"name":  "DATABASE_URL_HOST_PARAM",
+					"value": "post" + "gres://" + "admin:$(DB_PASSWORD)@db;Password=realPassword123",
+				},
+				map[string]any{
+					"name":  "DATABASE_URL_PATH_PARAM",
+					"value": "post" + "gres://" + "admin:$(DB_PASSWORD)@db/mydb;password=realPassword123",
+				},
+				map[string]any{
+					"name":  "DATABASE_URL_COMMA_PARAM",
+					"value": "post" + "gres://" + "admin:$(DB_PASSWORD)@db/mydb,password=realPassword123",
+				},
+				map[string]any{
+					"name":  "DB_PASSWORD",
+					"value": "post" + "gres://" + "admin:$(DB_PASSWORD)@db/mydb\npassword=realPassword123",
+				},
+				map[string]any{
+					"name":  "DATABASE_URL_MULTILINE",
+					"value": "post" + "gres://" + "admin:$(DB_PASSWORD)@db/mydb\npassword=realPassword123",
+				},
+				map[string]any{
+					"name":  "DATABASE_URL_CHANGEME",
+					"value": "post" + "gres://" + "admin:changeme@db-service:5432/mydb",
+				},
+				map[string]any{
+					"name":  "DATABASE_URL_QUERY_CHANGEME",
+					"value": "post" + "gres://" + "admin:$(DB_PASSWORD)@db/mydb?password=changeme",
+				},
+				map[string]any{
+					"name":  "DATABASE_URL_QUERY_PASSWORD_MIXED",
+					"value": "post" + "gres://" + "admin:$(DB_PASSWORD)@db/mydb?password=$(OTHER),realPassword123",
+				},
+				map[string]any{
+					"name":  "DATABASE_URL_QUERY_PASSWORD_EMPTY_PREFIX",
+					"value": "post" + "gres://" + "admin:$(DB_PASSWORD)@db/mydb?password=,realPassword123",
+				},
+				map[string]any{
+					"name":  "DATABASE_URL_QUERY_PASSWORD_COMMA_EQUALS",
+					"value": "post" + "gres://" + "admin:$(DB_PASSWORD)@db/mydb?password=$(OTHER),abc=def",
+				},
+				map[string]any{
+					"name":  "DATABASE_URL_QUERY_PASSWORD_EMPTY_COMMA_EQUALS",
+					"value": "post" + "gres://" + "admin:$(DB_PASSWORD)@db/mydb?password=,abc=def",
+				},
+				map[string]any{
+					"name":  "DATABASE_URL_COMMA_MIXED",
+					"value": "redis://" + "u:$(P)@a:6379," + "redis://" + "u:LiteralPass@b:6379",
+				},
+			},
+		},
+	})
+
+	ksServerExposed := newSecretExposureTestServer(t, podExposed)
+	resExposed := registeredToolResult(t, dispatchRegisteredTool(t, ksServerExposed, "detect_secret_exposure", map[string]any{
+		"namespace": "uri-test",
+	}))
+	require.False(t, resExposed.IsError)
+	var resDataExposed SecretExposureResult
+	require.NoError(t, json.Unmarshal([]byte(toolResultText(t, resExposed)), &resDataExposed))
+	assert.Equal(t, 18, resDataExposed.FindingsCount, "literal credentials in URI, query string, or remaining lines must still be flagged")
+	for _, f := range resDataExposed.Findings {
+		assert.Equal(t, "High", f.Severity)
+		switch f.Key {
+		case "DATABASE_URL", "COMPOSED_URL", "DATABASE_URL_QUERY_PASSWORD", "DATABASE_URL_QUERY_PWD", "DATABASE_URL_QUERY_SSLPASSWORD", "DATABASE_URL_CHANGEME", "DATABASE_URL_QUERY_CHANGEME", "CALLBACK_URL_FRAGMENT", "DATABASE_URL_HOST_PARAM", "DATABASE_URL_PATH_PARAM", "DATABASE_URL_COMMA_PARAM", "DATABASE_URL_QUERY_PASSWORD_MIXED", "DATABASE_URL_QUERY_PASSWORD_EMPTY_PREFIX", "DATABASE_URL_QUERY_PASSWORD_COMMA_EQUALS", "DATABASE_URL_QUERY_PASSWORD_EMPTY_COMMA_EQUALS", "DATABASE_URL_COMMA_MIXED":
+			assert.Equal(t, "URI_CREDENTIALS", f.RuleID)
+		case "DB_PASSWORD", "DATABASE_URL_MULTILINE":
+			assert.Equal(t, "ENV_CREDENTIAL_KEYWORD", f.RuleID)
+		default:
+			t.Fatalf("unexpected finding key: %s", f.Key)
+		}
+	}
+}
+
+func TestDetectSecretExposure_MixedDynamicLiteralURIRegression(t *testing.T) {
+	// Mixed dynamic and literal comma-separated URIs must not exempt the literal credential.
+	// Regression for review feedback on PR #4201:
+	// DATABASE_URL=redis://u:$(P)@a:6379,redis://u:LiteralPass@b:6379
+	val := "redis://" + "u:$(P)@a:6379," + "redis://" + "u:LiteralPass@b:6379"
+
+	hasMatch, hasExposed, safeRanges := hasExposedURICredentials(val)
+	assert.True(t, hasMatch, "should match URIs with credentials")
+	assert.True(t, hasExposed, "literal credential in second URI must be flagged as exposed")
+	require.Len(t, safeRanges, 1, "only the first dynamic URI should be recorded as safe")
+	assert.Equal(t, [2]int{0, len("redis://u:$(P)@a:6379")}, safeRanges[0])
+
+	matched, ruleID, _, severity := evaluateSecretString("DATABASE_URL", val)
+	assert.True(t, matched, "mixed dynamic/literal URI pair must produce a finding")
+	assert.Equal(t, "URI_CREDENTIALS", ruleID)
+	assert.Equal(t, "High", severity)
+
+	// Reverse order: literal followed by dynamic
+	valRev := "redis://" + "u:LiteralPass@a:6379," + "redis://" + "u:$(P)@b:6379"
+	matchedRev, ruleIDRev, _, severityRev := evaluateSecretString("DATABASE_URL", valRev)
+	assert.True(t, matchedRev, "literal URI followed by dynamic URI must produce a finding")
+	assert.Equal(t, "URI_CREDENTIALS", ruleIDRev)
+	assert.Equal(t, "High", severityRev)
+
+	// Purely dynamic comma-separated URIs must be suppressed
+	valSafe := "redis://" + "u:$(P1)@a:6379," + "redis://" + "u:$(P2)@b:6379"
+	matchedSafe, _, _, _ := evaluateSecretString("DATABASE_URL", valSafe)
+	assert.False(t, matchedSafe, "safe dynamic comma-separated URIs must produce no finding")
+
+	// End-to-end MCP detector verification
+	pod := testSecretPod("uri-regression", "mixed-pair-pod", []map[string]any{
+		{
+			"name": "app",
+			"env": []any{
+				map[string]any{
+					"name":  "DATABASE_URL",
+					"value": val,
+				},
+			},
+		},
+	})
+	ksServer := newSecretExposureTestServer(t, pod)
+	res := registeredToolResult(t, dispatchRegisteredTool(t, ksServer, "detect_secret_exposure", map[string]any{
+		"namespace": "uri-regression",
+	}))
+	require.False(t, res.IsError)
+	var resData SecretExposureResult
+	require.NoError(t, json.Unmarshal([]byte(toolResultText(t, res)), &resData))
+	require.Equal(t, 1, resData.FindingsCount, "mixed dynamic/literal URI in workload must be flagged")
+	assert.Equal(t, "URI_CREDENTIALS", resData.Findings[0].RuleID)
+	assert.Equal(t, "High", resData.Findings[0].Severity)
+	assert.Equal(t, "DATABASE_URL", resData.Findings[0].Key)
+	assert.Equal(t, "******", resData.Findings[0].MaskedValue)
+}
+
+func TestDetectSecretExposure_QueryCommaEqualsRegression(t *testing.T) {
+	// The query helper must not consider ?password=$(OTHER),abc=def or ?password=,abc=def safe.
+	// Regression for review feedback on PR #4201:
+	// A comma suffix containing '=' must not be treated as a separate parameter exempting the credential.
+	cases := []struct {
+		name string
+		val  string
+	}{
+		{
+			name: "mixed placeholder and comma equals suffix",
+			val:  "post" + "gres://" + "admin:$(DB_PASSWORD)@db/mydb?password=$(OTHER),abc=def",
+		},
+		{
+			name: "empty prefix and comma equals suffix",
+			val:  "post" + "gres://" + "admin:$(DB_PASSWORD)@db/mydb?password=,abc=def",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			hasMatch, hasExposed, safeRanges := hasExposedURICredentials(tc.val)
+			assert.True(t, hasMatch, "should match URI with credentials")
+			assert.True(t, hasExposed, "literal suffix in query parameter must be flagged as exposed")
+			assert.Empty(t, safeRanges, "exposed URI must not produce safe ranges")
+
+			matched, ruleID, _, severity := evaluateSecretString("DATABASE_URL", tc.val)
+			assert.True(t, matched, "URI with comma equals suffix must produce a finding")
+			assert.Equal(t, "URI_CREDENTIALS", ruleID)
+			assert.Equal(t, "High", severity)
+		})
+	}
+}
