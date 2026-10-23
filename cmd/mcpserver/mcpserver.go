@@ -487,7 +487,7 @@ func createConfigurationsToolsAndResources(ksServer *KubescapeMcpserver) {
 		"get_configuration_security_scan_manifest",
 		mcp.WithDescription("Get details of a specific security configuration scan result. Most controls in a result usually passed; set status to \"failed\" to get only the controls that need fixing."),
 		mcp.WithString("namespace",
-			mcp.Description("Namespace of the manifest, as returned by list_configuration_security_scan_manifests (optional, defaults to 'kubescape')"),
+			mcp.Description("Namespace of the manifest, as returned by list_configuration_security_scan_manifests (optional; if omitted, the manifest is looked up by name in every namespace)"),
 		),
 		mcp.WithString("manifest_name",
 			mcp.Required(),
@@ -532,7 +532,7 @@ func createRuntimeToolsAndResources(ksServer *KubescapeMcpserver) {
 		"get_container_profile",
 		mcp.WithDescription("Get details of a specific container profile"),
 		mcp.WithString("namespace",
-			mcp.Description("Namespace of the profile (optional, defaults to 'kubescape')"),
+			mcp.Description("Namespace of the profile, as returned by list_container_profiles (optional; if omitted, the profile is looked up by name in every namespace)"),
 		),
 		mcp.WithString("profile_name",
 			mcp.Required(),
@@ -1202,9 +1202,6 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		if toolErr != nil {
 			return toolErr, nil
 		}
-		if namespaceStr == "" {
-			namespaceStr = "kubescape"
-		}
 		manifestNameStr, toolErr := mcpRequiredStringArg(arguments, "manifest_name")
 		if toolErr != nil {
 			return toolErr, nil
@@ -1216,6 +1213,19 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		client, ksErr := ksServer.getKsClient()
 		if ksErr != nil {
 			return mcpToolError(ErrCodeK8sClientError, fmt.Sprintf("failed to connect to Kubernetes cluster: %v", ksErr), nil), nil
+		}
+		if namespaceStr == "" {
+			scans, err := client.WorkloadConfigurationScans(metav1.NamespaceAll).List(ctx, nameSelector(manifestNameStr))
+			if err != nil {
+				return nil, fmt.Errorf("failed to find configuration manifest: %w", err)
+			}
+			found := make([]metav1.ObjectMeta, len(scans.Items))
+			for i := range scans.Items {
+				found[i] = scans.Items[i].ObjectMeta
+			}
+			if namespaceStr, toolErr = pickNamespace("configuration manifest", manifestNameStr, found); toolErr != nil {
+				return toolErr, nil
+			}
 		}
 		manifest, err := client.WorkloadConfigurationScans(namespaceStr).Get(ctx, manifestNameStr, metav1.GetOptions{})
 		if err != nil {
@@ -1296,9 +1306,6 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		if toolErr != nil {
 			return toolErr, nil
 		}
-		if namespaceStr == "" {
-			namespaceStr = "kubescape"
-		}
 		profileNameStr, toolErr := mcpRequiredStringArg(arguments, "profile_name")
 		if toolErr != nil {
 			return toolErr, nil
@@ -1306,6 +1313,19 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		client, ksErr := ksServer.getKsClient()
 		if ksErr != nil {
 			return mcpToolError(ErrCodeK8sClientError, fmt.Sprintf("failed to connect to Kubernetes cluster: %v", ksErr), nil), nil
+		}
+		if namespaceStr == "" {
+			profiles, err := client.ContainerProfiles(metav1.NamespaceAll).List(ctx, nameSelector(profileNameStr))
+			if err != nil {
+				return nil, fmt.Errorf("failed to find container profile: %w", err)
+			}
+			found := make([]metav1.ObjectMeta, len(profiles.Items))
+			for i := range profiles.Items {
+				found[i] = profiles.Items[i].ObjectMeta
+			}
+			if namespaceStr, toolErr = pickNamespace("container profile", profileNameStr, found); toolErr != nil {
+				return toolErr, nil
+			}
 		}
 		profile, err := client.ContainerProfiles(namespaceStr).Get(ctx, profileNameStr, metav1.GetOptions{})
 		if err != nil {

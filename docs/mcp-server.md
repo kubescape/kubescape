@@ -290,7 +290,7 @@ Get detailed configuration scan results for a specific workload, including faile
 **Parameters:**
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `namespace` | string | No | Namespace of the manifest (default: `"kubescape"`) |
+| `namespace` | string | No | Namespace of the manifest. If omitted, the manifest is looked up by name in every namespace; a name found in more than one namespace returns `AMBIGUOUS_RESOURCE` with the namespaces |
 | `manifest_name` | string | Yes | Name of the configuration manifest |
 | `status` | string | No | Only controls with these statuses, comma-separated: `failed`, `passed`, `skipped` |
 | `min_severity` | string | No | Only controls at or above this severity: `Critical`, `High`, `Medium` or `Low` |
