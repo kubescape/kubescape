@@ -60,6 +60,8 @@ func TestLoadRejectsInvalidDocuments(t *testing.T) {
 		"misspelt field":      {contents: "apiVersion: config.kubescape.io/v1alpha1\nkind: FleetConfig\nspec:\n  fleetreport: fleet.json\n", want: "field fleetreport not found"},
 		"null context":        {contents: "apiVersion: config.kubescape.io/v1alpha1\nkind: FleetConfig\nspec:\n  contexts: [prod, null, staging]\n", want: "a context in the list is null"},
 		"tilde context":       {contents: "apiVersion: config.kubescape.io/v1alpha1\nkind: FleetConfig\nspec:\n  contexts:\n    - prod\n    - ~\n", want: "line 6: a context in the list is null"},
+		"empty context":       {contents: "apiVersion: config.kubescape.io/v1alpha1\nkind: FleetConfig\nspec:\n  contexts: [prod, \"\"]\n", want: "line 4: a context in the list is empty"},
+		"blank context":       {contents: "apiVersion: config.kubescape.io/v1alpha1\nkind: FleetConfig\nspec:\n  contexts:\n    - prod\n    - \"   \"\n", want: "line 6: a context in the list is empty"},
 		"contexts not a list": {contents: "apiVersion: config.kubescape.io/v1alpha1\nkind: FleetConfig\nspec:\n  contexts: prod\n", want: "contexts must be a list"},
 		"retries as words":    {contents: "apiVersion: config.kubescape.io/v1alpha1\nkind: FleetConfig\nspec:\n  retries: two\n", want: `"two" is not a whole number`},
 		"fractional retries":  {contents: "apiVersion: config.kubescape.io/v1alpha1\nkind: FleetConfig\nspec:\n  retries: 1.5\n", want: `"1.5" is not a whole number`},

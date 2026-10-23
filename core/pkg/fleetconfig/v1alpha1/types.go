@@ -2,6 +2,7 @@ package v1alpha1
 
 import (
 	"fmt"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -33,7 +34,7 @@ type Spec struct {
 	Retries          *Count       `yaml:"retries,omitempty"`
 }
 
-// ContextList is the contexts to scan; a null entry is an error, where yaml.v3 would silently drop it.
+// ContextList is the contexts to scan; a null or blank entry is an error, where yaml.v3 would drop or keep it silently.
 type ContextList []string
 
 func (l *ContextList) UnmarshalYAML(value *yaml.Node) error {
@@ -48,6 +49,11 @@ func (l *ContextList) UnmarshalYAML(value *yaml.Node) error {
 	var contexts []string
 	if err := value.Decode(&contexts); err != nil {
 		return err
+	}
+	for i, context := range contexts {
+		if strings.TrimSpace(context) == "" {
+			return fmt.Errorf("line %d: a context in the list is empty", value.Content[i].Line)
+		}
 	}
 	*l = contexts
 	return nil
