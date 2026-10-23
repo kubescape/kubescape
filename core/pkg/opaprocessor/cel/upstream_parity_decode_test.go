@@ -136,6 +136,13 @@ func parityDecodeCases() []parityCase {
 		{"absent-creation-timestamp", podWith(func(p map[string]any) {}), map[string]string{
 			"has": "has(object.metadata.creationTimestamp)",
 		}},
+		{"zero-creation-timestamp", podWith(func(p map[string]any) { meta(p)["creationTimestamp"] = "0001-01-01T00:00:00Z" }), map[string]string{
+			"has": "has(object.metadata.creationTimestamp)",
+		}},
+		{"populated-creation-timestamp", podWith(func(p map[string]any) { meta(p)["creationTimestamp"] = "2024-01-02T03:04:05Z" }), map[string]string{
+			"has":   "has(object.metadata.creationTimestamp)",
+			"value": "object.metadata.creationTimestamp == '2024-01-02T03:04:05Z'",
+		}},
 	}
 	for _, s := range shapes {
 		for name, expr := range s.exprs {
@@ -188,6 +195,19 @@ func parityDecodeCases() []parityCase {
 			"size": "size(namespaceObject.metadata.labels) == 0",
 		}},
 		{"null-creation-timestamp", nsWith(func(ns map[string]any) { nsMeta(ns)["creationTimestamp"] = nil }), map[string]string{
+			"has": "has(namespaceObject.metadata.creationTimestamp)",
+		}},
+		{"absent-creation-timestamp", nsWith(func(map[string]any) {}), map[string]string{
+			"has": "has(namespaceObject.metadata.creationTimestamp)",
+		}},
+		{"zero-creation-timestamp", nsWith(func(ns map[string]any) { nsMeta(ns)["creationTimestamp"] = "0001-01-01T00:00:00Z" }), map[string]string{
+			"has": "has(namespaceObject.metadata.creationTimestamp)",
+		}},
+		// No value comparison here: the apiserver types namespaceObject
+		// statically, so creationTimestamp is a timestamp there and a
+		// comparison with a string does not compile. That is the static typing
+		// difference the static-typing cases cover, not a timestamp one.
+		{"populated-creation-timestamp", nsWith(func(ns map[string]any) { nsMeta(ns)["creationTimestamp"] = "2024-01-02T03:04:05Z" }), map[string]string{
 			"has": "has(namespaceObject.metadata.creationTimestamp)",
 		}},
 		{"populated-status", nsWith(func(ns map[string]any) { ns["status"] = map[string]any{"phase": "Active"} }), map[string]string{
