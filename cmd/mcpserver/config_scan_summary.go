@@ -99,9 +99,10 @@ func resourceNameFromWlid(wlid, kind string) (string, bool) {
 	if wlid == "" || kind == "" {
 		return "", false
 	}
-	// Resource names cannot contain "/"; cluster names can.
+	// Resource names cannot contain "/"; cluster names can. The WLID kind
+	// is lowercased with "-" removed.
 	last := wlid[strings.LastIndex(wlid, "/")+1:]
-	name, ok := strings.CutPrefix(last, strings.ToLower(kind)+"-")
+	name, ok := strings.CutPrefix(last, strings.ReplaceAll(strings.ToLower(kind), "-", "")+"-")
 	if !ok || name == "" {
 		return "", false
 	}

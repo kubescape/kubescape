@@ -158,6 +158,7 @@ func TestResourceNameFromWlid(t *testing.T) {
 		{"wlid://cluster-kind-ks-dev/namespace-default/deployment-web", "Deployment", "web", true},
 		{"wlid://cluster-kind-ks-dev/namespace-/namespace-default", "Namespace", "default", true},
 		{"wlid://cluster-arn:aws:eks:us-east-1:1:cluster/prod/namespace-default/deployment-web", "Deployment", "web", true},
+		{wlid.GetK8sWLID("kind-ks-dev", "default", "My-Widget", "web"), "My-Widget", "web", true},
 		{"wlid://cluster-kind-ks-dev/namespace-default/rolebinding-admin", "ServiceAccount", "", false},
 		{"wlid://cluster-kind-ks-dev/namespace-default/rolebinding-admin", "Role", "", false},
 		{"", "Deployment", "", false},
