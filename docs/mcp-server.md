@@ -298,7 +298,7 @@ Get detailed configuration scan results for a specific workload, including faile
 
 #### `list_configuration_security_scan_summaries`
 
-List configuration scan results per resource: the failed controls, most severe first, and the number of controls by status. Summaries are stored on every install; the full manifests read by the two tools above are stored only with `capabilities.continuousScan=enable`. Summaries of RBAC and cluster-scoped resources are stored in the `kubescape` namespace; `workload_namespace` is the namespace of the resource itself.
+List configuration scan results per resource: the failed controls, most severe first, and the number of controls by status. Summaries are stored on every install; the full manifests read by the two tools above are stored only with `capabilities.continuousScan=enable`. Summaries of RBAC and cluster-scoped resources are stored in the `kubescape` namespace; `workload_namespace` is the namespace of the resource itself. `name` is the exact resource name, read from the summary's WLID annotation. RBAC summaries carry the WLID of the binding, so for an RBAC subject `name` is left out and `name_label` holds the name label instead. That is the name made into a valid label value (characters other than letters, digits, `-`, `_` and `.` replaced, lowercased, cut to 63 characters), so it can differ from the real name.
 
 **Parameters:**
 | Parameter | Type | Required | Description |

@@ -4,9 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
+	"github.com/armosec/utils-k8s-go/wlid"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
+	"github.com/kubescape/k8s-interface/names"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition"
 	storagev1beta1 "github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	storagefake "github.com/kubescape/storage/pkg/generated/clientset/versioned/fake"
@@ -24,15 +27,37 @@ func controlSummary(status, severity string) storagev1beta1.ScannedControlSummar
 	}
 }
 
+// configScanSummary builds a summary with the metadata the producer sets
+// (httphandler/storage getManifestObjectLabelsAndAnnotations): the resource's
+// WLID, and labels that are sanitized, so names over 63 characters are cut.
 func configScanSummary(namespace, name, kind, workloadName, workloadNamespace string, controls map[string]storagev1beta1.ScannedControlSummary) *storagev1beta1.WorkloadConfigurationScanSummary {
+	labels := map[string]string{
+		helpersv1.RelatedKindMetadataKey: kind,
+		helpersv1.RelatedNameMetadataKey: workloadName,
+	}
+	if workloadNamespace != "" {
+		labels[helpersv1.RelatedNamespaceMetadataKey] = workloadNamespace
+	}
+	names.SanitizeLabelValues(labels)
 	return &storagev1beta1.WorkloadConfigurationScanSummary{
-		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace, Labels: map[string]string{
-			helpersv1.RelatedKindMetadataKey:      kind,
-			helpersv1.RelatedNameMetadataKey:      workloadName,
-			helpersv1.RelatedNamespaceMetadataKey: workloadNamespace,
-		}},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        name,
+			Namespace:   namespace,
+			Labels:      labels,
+			Annotations: map[string]string{helpersv1.WlidMetadataKey: wlid.GetK8sWLID("kind-ks-dev", workloadNamespace, kind, workloadName)},
+		},
 		Spec: storagev1beta1.WorkloadConfigurationScanSummarySpec{Controls: controls},
 	}
+}
+
+// rbacConfigScanSummary builds the summary of an RBAC subject. Like the
+// producer, it stores it in the Kubescape namespace with the WLID of the
+// binding, not of the subject.
+func rbacConfigScanSummary(name, kind, subjectName, subjectNamespace, bindingNamespace, bindingName string, controls map[string]storagev1beta1.ScannedControlSummary) *storagev1beta1.WorkloadConfigurationScanSummary {
+	summary := configScanSummary("kubescape", name, kind, subjectName, subjectNamespace, controls)
+	summary.Labels[helpersv1.RbacResourceMetadataKey] = "true"
+	summary.Annotations[helpersv1.WlidMetadataKey] = wlid.GetK8sWLID("kind-ks-dev", bindingNamespace, "RoleBinding", bindingName)
+	return summary
 }
 
 func configScanSummaryServer(t *testing.T) *KubescapeMcpserver {
@@ -49,7 +74,7 @@ func configScanSummaryServer(t *testing.T) *KubescapeMcpserver {
 		"C-0012": controlSummary("passed", "High"),
 	})
 	// RBAC results are stored in the Kubescape namespace, not in the subject's.
-	rbac := configScanSummary("kubescape", "serviceaccount-admin", "ServiceAccount", "admin", "kube-system", map[string]storagev1beta1.ScannedControlSummary{
+	rbac := rbacConfigScanSummary("serviceaccount-admin", "ServiceAccount", "admin", "kube-system", "kube-system", "admin-binding", map[string]storagev1beta1.ScannedControlSummary{
 		"C-0035": controlSummary("failed", "High"),
 	})
 	return &KubescapeMcpserver{ksClient: storagefake.NewClientset(web, clean, rbac).SpdxV1beta1()}
@@ -97,6 +122,8 @@ func TestListConfigScanSummaries(t *testing.T) {
 	assert.Empty(t, byName["configmap-settings"].FailedControls)
 	assert.NotNil(t, byName["configmap-settings"].FailedControls, "no failed controls is [], not null")
 	assert.Equal(t, "kube-system", byName["serviceaccount-admin"].WorkloadNamespace)
+	assert.Equal(t, "admin", byName["serviceaccount-admin"].NameLabel, "the WLID of an RBAC summary names the binding")
+	assert.Empty(t, byName["serviceaccount-admin"].Name)
 	assert.Equal(t, "kubescape", byName["serviceaccount-admin"].Namespace)
 
 	resp := callConfigScanSummaries(t, ks, map[string]any{"namespace": "default"})
@@ -105,6 +132,41 @@ func TestListConfigScanSummaries(t *testing.T) {
 	result, err := ks.CallTool(context.Background(), "list_configuration_security_scan_summaries", map[string]any{"namespace": "nobody"})
 	require.NoError(t, err)
 	assert.JSONEq(t, `{"summaries":[]}`, toolResultText(t, result))
+}
+
+func TestListConfigScanSummaries_ExactName(t *testing.T) {
+	// A valid name, longer than the 63 characters a label value can hold.
+	long := strings.Repeat("a", 64)
+	configMap := configScanSummary("default", "configmap-"+long, "ConfigMap", long, "default", nil)
+	require.Len(t, configMap.Labels[helpersv1.RelatedNameMetadataKey], 63, "the producer cuts the name label")
+	subject := rbacConfigScanSummary("serviceaccount-"+long, "ServiceAccount", long, "default", "default", "system:controller:"+long, nil)
+	ks := &KubescapeMcpserver{ksClient: storagefake.NewClientset(configMap, subject).SpdxV1beta1()}
+
+	byName := summariesByName(callConfigScanSummaries(t, ks, map[string]any{}).Summaries)
+
+	assert.Equal(t, long, byName["configmap-"+long].Name, "the name comes from the WLID")
+	assert.Empty(t, byName["configmap-"+long].NameLabel)
+	assert.Empty(t, byName["serviceaccount-"+long].Name, "the subject's exact name is not stored")
+	assert.Equal(t, long[:63], byName["serviceaccount-"+long].NameLabel)
+}
+
+func TestResourceNameFromWlid(t *testing.T) {
+	for _, tc := range []struct {
+		wlid, kind, want string
+		ok               bool
+	}{
+		{"wlid://cluster-kind-ks-dev/namespace-default/deployment-web", "Deployment", "web", true},
+		{"wlid://cluster-kind-ks-dev/namespace-/namespace-default", "Namespace", "default", true},
+		{"wlid://cluster-arn:aws:eks:us-east-1:1:cluster/prod/namespace-default/deployment-web", "Deployment", "web", true},
+		{"wlid://cluster-kind-ks-dev/namespace-default/rolebinding-admin", "ServiceAccount", "", false},
+		{"wlid://cluster-kind-ks-dev/namespace-default/rolebinding-admin", "Role", "", false},
+		{"", "Deployment", "", false},
+		{"wlid://cluster-kind-ks-dev/namespace-default/deployment-web", "", "", false},
+	} {
+		name, ok := resourceNameFromWlid(tc.wlid, tc.kind)
+		assert.Equal(t, tc.ok, ok, tc.wlid)
+		assert.Equal(t, tc.want, name, tc.wlid)
+	}
 }
 
 func TestListConfigScanSummaries_MinSeverity(t *testing.T) {
