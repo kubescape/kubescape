@@ -58,6 +58,7 @@ kubescape scan [target] [flags]
 | `--fleet-report <path>` | With `--kube-contexts`, also write one combined JSON report across every context. Not supported with `--hide` or `--encrypt`. | - |
 | `--reference-cluster <ctx>` | With `--fleet-report`, the context the other clusters are compared against. Must be one of `--kube-contexts`. | - |
 | `--retries <n>` | With `--kube-contexts`, how many more times to try a cluster whose API server never answered, waiting 2s, then 4s, doubling up to 30s. `0` disables retries. | `2` |
+| `--fleet-config <path>` | Read `--kube-contexts`, `--output`, `--fleet-report`, `--reference-cluster` and `--retries` from a `FleetConfig` file. A flag on the command line overrides the file. See [fleet config file](fleet-scanning.md#fleet-config-file). | - |
 | `-o, --output <path>` | Output file path | stdout |
 | `--release-name <name>` | Helm release name made available as `.Release.Name` when rendering a chart | - |
 | `--release-namespace <ns>` | Helm release namespace made available as `.Release.Namespace` when rendering a chart | - |
