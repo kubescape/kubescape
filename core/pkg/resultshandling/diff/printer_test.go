@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"os"
 	"regexp"
 	"testing"
 
@@ -165,7 +166,7 @@ func TestPrintPretty_OmitsEmptySectionsAndEvidenceDetails(t *testing.T) {
 
 	var output bytes.Buffer
 	PrintPretty(&output, changes)
-	actual := output.String()
+	actual := ansi.ReplaceAllString(output.String(), "")
 
 	assert.Contains(t, actual, "New failures (1)")
 	assert.NotContains(t, actual, "Resolved (")
@@ -317,3 +318,26 @@ func TestPrintYAML_NoANSI(t *testing.T) {
 	assert.NotRegexp(t, ansi, output.String(), "YAML output must not contain ANSI escape sequences")
 }
 
+func TestPrintPretty_DestinationFileNotTerminal(t *testing.T) {
+	origLevel := gchalk.GetLevel()
+	gchalk.SetLevel(gchalk.LevelAnsi256)
+	defer gchalk.SetLevel(origLevel)
+
+	f, err := os.CreateTemp(t.TempDir(), "diff-out-*.txt")
+	require.NoError(t, err)
+	defer f.Close()
+
+	changes := &ChangeSet{
+		New:      []ControlChange{printableChange()},
+		Resolved: []ControlChange{printableChange()},
+		Warnings: []string{"test warning"},
+	}
+
+	require.NoError(t, PrintPretty(f, changes))
+	content, err := os.ReadFile(f.Name())
+	require.NoError(t, err)
+
+	assert.NotRegexp(t, ansi, string(content), "redirected file output must not contain ANSI escape sequences")
+	assert.Contains(t, string(content), "WARNING: test warning")
+	assert.Contains(t, string(content), "Summary: 1 new, 1 resolved, 0 unchanged, 0 incomparable")
+}
