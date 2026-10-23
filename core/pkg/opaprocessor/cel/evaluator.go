@@ -243,7 +243,7 @@ func (e *Evaluator) EvaluateOnObject(
 // nil for an unmetered activation (path derivation, see violationPaths).
 func (e *Evaluator) activationFor(ctx context.Context, obj, namespaceObject map[string]any, params any, variables []Variable, budget *costBudget) map[string]any {
 	activation := stubBindings(obj, namespaceObject)
-	activation["object"] = obj
+	activation["object"] = normalizeNullFields(obj)
 	activation["params"] = params
 	activation["variables"] = e.lazyVariables(ctx, variables, activation, budget)
 	return activation
