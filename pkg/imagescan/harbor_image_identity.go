@@ -9,20 +9,20 @@ import (
 // validateImageRegistry prevents a repository/tag collision at another
 // registry from being reported as findings belonging to the requested image.
 // Empty registry fields retain the legacy single-registry calling convention.
-func (a *HarborAdaptor) validateImageRegistry(image ContainerImageIdentifier) error {
-	if image.Registry == "" || a.host == "" {
+func (a *HarborAdaptor) validateImageRegistry(image ContainerImageIdentifier, host string) error {
+	if image.Registry == "" || host == "" {
 		return nil
 	}
 	actual, err := harborRegistryAuthority(image.Registry)
 	if err != nil {
 		return err
 	}
-	expected, err := harborRegistryAuthority(a.host)
+	expected, err := harborRegistryAuthority(host)
 	if err != nil {
 		return err
 	}
 	if actual != expected {
-		return fmt.Errorf("image registry %q does not match logged-in Harbor registry %q", image.Registry, a.host)
+		return fmt.Errorf("image registry %q does not match logged-in Harbor registry %q", image.Registry, host)
 	}
 	return nil
 }

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -54,8 +55,18 @@ func (w *harborAPIWrapper) DoRequest(ctx context.Context, method, path string) (
 
 // HarborAdaptor implements IContainerImageVulnerabilityAdaptor for Harbor Container Registry.
 type HarborAdaptor struct {
+	mu     sync.RWMutex
 	client HarborAPI
 	host   string
+}
+
+func (a *HarborAdaptor) getSession() (HarborAPI, string, error) {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	if a.client == nil {
+		return nil, "", fmt.Errorf("harbor client not initialized, call login first")
+	}
+	return a.client, a.host, nil
 }
 
 type harborScanOverview struct {
@@ -70,17 +81,23 @@ func NewHarborAdaptor() *HarborAdaptor {
 
 // Login authenticates with Harbor. The registry string should be the host (e.g. core.harbor.domain).
 func (a *HarborAdaptor) Login(ctx context.Context, registry string, credentials RegistryCredentials) error {
-	a.host = registry
+	a.mu.Lock()
+	defer a.mu.Unlock()
 
+	// Invalidate any previous session immediately so failed re-login does not leave stale authenticated state
+	a.client = nil
+	a.host = ""
+
+	cleanHost := registry
 	scheme := "https"
-	if strings.HasPrefix(a.host, "http://") {
+	if strings.HasPrefix(cleanHost, "http://") {
 		scheme = "http"
-		a.host = strings.TrimPrefix(a.host, "http://")
+		cleanHost = strings.TrimPrefix(cleanHost, "http://")
 	} else {
-		a.host = strings.TrimPrefix(a.host, "https://")
+		cleanHost = strings.TrimPrefix(cleanHost, "https://")
 	}
 
-	baseURL := fmt.Sprintf("%s://%s", scheme, a.host)
+	baseURL := fmt.Sprintf("%s://%s", scheme, cleanHost)
 
 	wrapper := &harborAPIWrapper{
 		baseURL:         baseURL,
@@ -94,18 +111,17 @@ func (a *HarborAdaptor) Login(ctx context.Context, registry string, credentials 
 		wrapper.token = credentials.Token
 	}
 
-	a.client = wrapper
-
 	// Ping to verify connectivity. Note: /api/v2.0/systeminfo permits anonymous requests,
 	// so this primarily validates that the Harbor endpoint is reachable and the URL is correct,
 	// rather than strictly verifying the validity of the credentials for all projects.
 	// We rely on actual vulnerability fetch calls to return 401/403 if credentials are invalid.
-	_, err := a.client.DoRequest(ctx, http.MethodGet, "/api/v2.0/systeminfo")
+	_, err := wrapper.DoRequest(ctx, http.MethodGet, "/api/v2.0/systeminfo")
 	if err != nil {
-		a.client = nil
 		return fmt.Errorf("failed to connect to harbor at %s: %w", baseURL, err)
 	}
 
+	a.client = wrapper
+	a.host = registry
 	return nil
 }
 
@@ -136,8 +152,9 @@ func harborRepositoryPathSegment(repository string) string {
 
 // GetImagesScanStatus retrieves the scan status for a list of image identifiers.
 func (a *HarborAdaptor) GetImagesScanStatus(ctx context.Context, imageIDs []ContainerImageIdentifier) ([]ContainerImageScanStatus, error) {
-	if a.client == nil {
-		return nil, fmt.Errorf("harbor client not initialized, call login first")
+	client, host, err := a.getSession()
+	if err != nil {
+		return nil, err
 	}
 
 	return ProcessImages(imageIDs, func(imageID ContainerImageIdentifier) (ContainerImageScanStatus, error) {
@@ -154,7 +171,7 @@ func (a *HarborAdaptor) GetImagesScanStatus(ctx context.Context, imageIDs []Cont
 		if ref == "" {
 			return status, nil
 		}
-		if err := a.validateImageRegistry(imageID); err != nil {
+		if err := a.validateImageRegistry(imageID, host); err != nil {
 			return status, err
 		}
 
@@ -168,7 +185,7 @@ func (a *HarborAdaptor) GetImagesScanStatus(ctx context.Context, imageIDs []Cont
 			harborRepositoryPathSegment(repo),
 			url.PathEscape(ref))
 
-		data, err := a.client.DoRequest(ctx, http.MethodGet, path)
+		data, err := client.DoRequest(ctx, http.MethodGet, path)
 		if err != nil {
 			return status, fmt.Errorf("failed to query scan status for repository %s: %w", repo, err)
 		}
@@ -216,8 +233,9 @@ func latestSuccessfulHarborScan(overviews map[string]harborScanOverview) (bool, 
 
 // GetImagesVulnerabilities retrieves the vulnerability reports for a list of image identifiers.
 func (a *HarborAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs []ContainerImageIdentifier) ([]ContainerImageVulnerabilityReport, error) {
-	if a.client == nil {
-		return nil, fmt.Errorf("harbor client not initialized, call login first")
+	client, host, err := a.getSession()
+	if err != nil {
+		return nil, err
 	}
 
 	return ProcessImages(imageIDs, func(imageID ContainerImageIdentifier) (ContainerImageVulnerabilityReport, error) {
@@ -233,7 +251,7 @@ func (a *HarborAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs [
 		if ref == "" {
 			return report, nil
 		}
-		if err := a.validateImageRegistry(imageID); err != nil {
+		if err := a.validateImageRegistry(imageID, host); err != nil {
 			return report, err
 		}
 
@@ -247,7 +265,7 @@ func (a *HarborAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs [
 			harborRepositoryPathSegment(repo),
 			url.PathEscape(ref))
 
-		data, err := a.client.DoRequest(ctx, http.MethodGet, path)
+		data, err := client.DoRequest(ctx, http.MethodGet, path)
 		if err != nil {
 			return report, fmt.Errorf("failed to query vulnerabilities for repository %s: %w", repo, err)
 		}
@@ -296,8 +314,8 @@ func (a *HarborAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs [
 
 // GetImagesInformation retrieves the BOM and manifest information for a list of image identifiers.
 func (a *HarborAdaptor) GetImagesInformation(ctx context.Context, imageIDs []ContainerImageIdentifier) ([]ContainerImageInformation, error) {
-	if a.client == nil {
-		return nil, fmt.Errorf("harbor client not initialized, call login first")
+	if _, _, err := a.getSession(); err != nil {
+		return nil, err
 	}
 
 	return FetchImagesInformation(imageIDs)
@@ -305,6 +323,9 @@ func (a *HarborAdaptor) GetImagesInformation(ctx context.Context, imageIDs []Con
 
 // Destroy cleans up any persistent resources used by the adaptor.
 func (a *HarborAdaptor) Destroy() error {
-	// The HTTP client automatically closes idle connections
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.client = nil
+	a.host = ""
 	return nil
 }
