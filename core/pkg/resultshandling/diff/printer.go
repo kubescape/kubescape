@@ -20,6 +20,9 @@ var (
 )
 
 func shouldColor(w io.Writer) bool {
+	if _, set := os.LookupEnv("NO_COLOR"); set {
+		return false
+	}
 	if gchalk.GetLevel() == gchalk.LevelNone {
 		return false
 	}

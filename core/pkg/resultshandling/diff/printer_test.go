@@ -322,6 +322,7 @@ func TestPrintPretty_DestinationFileNotTerminal(t *testing.T) {
 	origLevel := gchalk.GetLevel()
 	gchalk.SetLevel(gchalk.LevelAnsi256)
 	defer gchalk.SetLevel(origLevel)
+	t.Setenv("FORCE_COLOR", "0")
 
 	f, err := os.CreateTemp(t.TempDir(), "diff-out-*.txt")
 	require.NoError(t, err)
@@ -340,4 +341,23 @@ func TestPrintPretty_DestinationFileNotTerminal(t *testing.T) {
 	assert.NotRegexp(t, ansi, string(content), "redirected file output must not contain ANSI escape sequences")
 	assert.Contains(t, string(content), "WARNING: test warning")
 	assert.Contains(t, string(content), "Summary: 1 new, 1 resolved, 0 unchanged, 0 incomparable")
+}
+
+func TestPrintPretty_NoColorEnvTakesPrecedence(t *testing.T) {
+	origLevel := gchalk.GetLevel()
+	gchalk.SetLevel(gchalk.LevelAnsi256)
+	defer gchalk.SetLevel(origLevel)
+	t.Setenv("FORCE_COLOR", "1")
+	t.Setenv("NO_COLOR", "1")
+
+	var output bytes.Buffer
+	changes := &ChangeSet{
+		New:      []ControlChange{printableChange()},
+		Resolved: []ControlChange{printableChange()},
+		Warnings: []string{"test warning"},
+	}
+
+	require.NoError(t, PrintPretty(&output, changes))
+	assert.NotRegexp(t, ansi, output.String(), "NO_COLOR must disable ANSI colors even if FORCE_COLOR is set")
+	assert.Contains(t, output.String(), "WARNING: test warning")
 }
