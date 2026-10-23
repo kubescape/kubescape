@@ -1,12 +1,17 @@
 package core
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -18,7 +23,9 @@ import (
 	"github.com/stretchr/testify/require"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/fake"
+	"k8s.io/client-go/rest"
 )
 
 // expectedOperatorURL is the exact endpoint httpPostOperatorScanRequest must
@@ -167,6 +174,145 @@ func Test_getOperatorPod_nilClient(t *testing.T) {
 	assert.EqualError(t, err, "kubernetes client is not initialised")
 }
 
+type testRoundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (f testRoundTripperFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
+func Test_getOperatorPod_ContextCancellationWhileResponseHeld(t *testing.T) {
+	reqReceived := make(chan struct{})
+	holdResponse := make(chan struct{})
+	var holdOnce sync.Once
+	releaseHold := func() {
+		holdOnce.Do(func() {
+			close(holdResponse)
+		})
+	}
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-reqReceived:
+		default:
+			close(reqReceived)
+		}
+		select {
+		case <-holdResponse:
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(&v1.PodList{})
+		case <-r.Context().Done():
+			return
+		}
+	}))
+	defer ts.Close()
+	defer releaseHold()
+
+	clientset, err := kubernetes.NewForConfig(&rest.Config{
+		Host: ts.URL,
+	})
+	require.NoError(t, err)
+
+	k8sClient := &k8sinterface.KubernetesApi{
+		KubernetesClient: clientset,
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	errChan := make(chan error, 1)
+	go func() {
+		_, podErr := getOperatorPod(k8sClient, kubescapeNamespace, ctx)
+		errChan <- podErr
+	}()
+
+	select {
+	case <-reqReceived:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for HTTP pod-list request to reach test server")
+	}
+
+	// Cancel while server is holding the pod-list response
+	cancel()
+
+	select {
+	case podErr := <-errChan:
+		require.Error(t, podErr)
+		require.ErrorIs(t, podErr, context.Canceled)
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for getOperatorPod to abort after context cancellation")
+	}
+}
+
+func Test_getOperatorPod_PreservesClientContextWhenNoExplicitContext(t *testing.T) {
+	type ctxKey struct{}
+	key := ctxKey{}
+	expectedVal := "client-ctx-sentinel"
+
+	var capturedCtx context.Context
+	rt := testRoundTripperFunc(func(req *http.Request) (*http.Response, error) {
+		capturedCtx = req.Context()
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(bytes.NewReader([]byte(`{"apiVersion":"v1","kind":"PodList","items":[]}`))),
+			Request:    req,
+		}, nil
+	})
+
+	clientset, err := kubernetes.NewForConfig(&rest.Config{
+		Host:      "https://kubernetes.test:6443",
+		Transport: rt,
+	})
+	require.NoError(t, err)
+
+	clientCtx := context.WithValue(context.Background(), key, expectedVal)
+	k8sClient := &k8sinterface.KubernetesApi{
+		KubernetesClient: clientset,
+		Context:          clientCtx,
+	}
+
+	// Call without explicit context (legacy call)
+	_, _ = getOperatorPod(k8sClient, kubescapeNamespace)
+
+	require.NotNil(t, capturedCtx, "request must reach transport")
+	assert.Equal(t, expectedVal, capturedCtx.Value(key), "legacy call must preserve k8sClient.Context")
+}
+
+func Test_getOperatorPod_ExplicitContextOverridesClientContext(t *testing.T) {
+	type ctxKey struct{}
+	key := ctxKey{}
+
+	var capturedCtx context.Context
+	rt := testRoundTripperFunc(func(req *http.Request) (*http.Response, error) {
+		capturedCtx = req.Context()
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(bytes.NewReader([]byte(`{"apiVersion":"v1","kind":"PodList","items":[]}`))),
+			Request:    req,
+		}, nil
+	})
+
+	clientset, err := kubernetes.NewForConfig(&rest.Config{
+		Host:      "https://kubernetes.test:6443",
+		Transport: rt,
+	})
+	require.NoError(t, err)
+
+	clientCtx := context.WithValue(context.Background(), key, "client-val")
+	explicitCtx := context.WithValue(context.Background(), key, "explicit-val")
+	k8sClient := &k8sinterface.KubernetesApi{
+		KubernetesClient: clientset,
+		Context:          clientCtx,
+	}
+
+	// Call with explicit context
+	_, _ = getOperatorPod(k8sClient, kubescapeNamespace, explicitCtx)
+
+	require.NotNil(t, capturedCtx, "request must reach transport")
+	assert.Equal(t, "explicit-val", capturedCtx.Value(key), "explicit context must take precedence over k8sClient.Context")
+}
+
 func TestNewOperatorAdapter_NotConnectedToCluster(t *testing.T) {
 	originalConnected := k8sinterface.IsConnectedToCluster()
 	t.Cleanup(func() { k8sinterface.SetConnectedToCluster(originalConnected) })
@@ -211,6 +357,14 @@ func (f *fakeOperatorConnector) StartPortForwarder() error {
 	return f.startErr
 }
 
+func (f *fakeOperatorConnector) StartPortForwarderContext(ctx context.Context) error {
+	f.startCalls++
+	if ctx != nil && ctx.Err() != nil {
+		return ctx.Err()
+	}
+	return f.startErr
+}
+
 func (f *fakeOperatorConnector) StopPortForwarder() {
 	f.stopCalls++
 }
@@ -231,11 +385,13 @@ type httpPostRecorder struct {
 	headers map[string]string
 	body    []byte
 	client  httputils.IHttpClient
+	ctx     context.Context
 }
 
-func (r *httpPostRecorder) fakeHTTPPost(statusCode int, postErr error) func(httputils.IHttpClient, string, map[string]string, []byte) (*http.Response, error) {
-	return func(client httputils.IHttpClient, url string, headers map[string]string, body []byte) (*http.Response, error) {
+func (r *httpPostRecorder) fakeHTTPPost(statusCode int, postErr error) func(context.Context, httputils.IHttpClient, string, map[string]string, []byte) (*http.Response, error) {
+	return func(ctx context.Context, client httputils.IHttpClient, url string, headers map[string]string, body []byte) (*http.Response, error) {
 		r.calls++
+		r.ctx = ctx
 		r.url = url
 		r.headers = headers
 		r.body = body
@@ -304,7 +460,7 @@ func TestOperatorAdapter_httpPostOperatorScanRequest(t *testing.T) {
 				OperatorConnector: connector,
 			}
 
-			got, err := adapter.httpPostOperatorScanRequest(payload)
+			got, err := adapter.httpPostOperatorScanRequest(context.Background(), payload)
 
 			if tc.expectErr != "" {
 				require.Error(t, err)
@@ -388,7 +544,132 @@ func TestOperatorAdapter_OperatorScan(t *testing.T) {
 		require.True(t, ok, "expected client to be of type *http.Client")
 		assert.Equal(t, 30*time.Second, httpClient.Timeout, "the HTTP client must have a 30 second timeout to prevent hanging")
 	})
+
+	t.Run("returns early on context cancellation", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		connector := &fakeOperatorConnector{}
+		recorder := &httpPostRecorder{}
+		scanInfo := &fakeOperatorScanInfo{payload: &apis.Commands{}}
+		adapter := &OperatorAdapter{
+			httpPostFunc:      recorder.fakeHTTPPost(http.StatusOK, nil), //nolint:bodyclose // fakeHTTPPost returns a func value, not a response; the response's Body is http.NoBody (Close is a no-op) and is closed by httpPostOperatorScanRequest's own defer
+			OperatorScanInfo:  scanInfo,
+			OperatorConnector: connector,
+		}
+
+		got, opErr := adapter.OperatorScan(ctx)
+		require.ErrorIs(t, opErr, context.Canceled)
+		assert.Empty(t, got)
+		assert.Equal(t, 0, recorder.calls, "httpPostFunc must not be invoked when context is cancelled")
+	})
+
+	t.Run("cancels in-flight HTTP POST while server holds response", func(t *testing.T) {
+		reqReceived := make(chan struct{})
+		holdResponse := make(chan struct{})
+		var holdOnce sync.Once
+		releaseHold := func() {
+			holdOnce.Do(func() {
+				close(holdResponse)
+			})
+		}
+
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			select {
+			case <-reqReceived:
+			default:
+				close(reqReceived)
+			}
+			select {
+			case <-holdResponse:
+				w.WriteHeader(http.StatusOK)
+			case <-r.Context().Done():
+				return
+			}
+		}))
+		defer ts.Close()
+		defer releaseHold()
+
+		tsURL, err := url.Parse(ts.URL)
+		require.NoError(t, err)
+
+		connector := &fakeOperatorConnector{localhost: tsURL.Host}
+		scanInfo := &fakeOperatorScanInfo{payload: &apis.Commands{Commands: []apis.Command{{CommandName: "scan"}}}}
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		adapter := &OperatorAdapter{
+			OperatorScanInfo:  scanInfo,
+			OperatorConnector: connector,
+		}
+
+		errChan := make(chan error, 1)
+		go func() {
+			_, scanErr := adapter.OperatorScan(ctx)
+			errChan <- scanErr
+		}()
+
+		// Wait until the server receives the request
+		select {
+		case <-reqReceived:
+		case <-time.After(5 * time.Second):
+			t.Fatal("timed out waiting for HTTP request to reach test server")
+		}
+
+		// Cancel while server is holding the response
+		cancel()
+
+		select {
+		case opErr := <-errChan:
+			require.Error(t, opErr)
+			require.ErrorIs(t, opErr, context.Canceled)
+		case <-time.After(5 * time.Second):
+			t.Fatal("timed out waiting for OperatorScan to abort after context cancellation")
+		}
+
+		releaseHold()
+
+		assert.Equal(t, 1, connector.stopCalls, "StopPortForwarder must be called on cancellation")
+	})
+
+	t.Run("legacy connector without StartPortForwarderContext falls back to StartPortForwarder", func(t *testing.T) {
+		legacyConn := &legacyOperatorConnector{}
+		recorder := &httpPostRecorder{}
+		scanInfo := &fakeOperatorScanInfo{payload: &apis.Commands{Commands: []apis.Command{{CommandName: "scan"}}}}
+		adapter := &OperatorAdapter{
+			httpPostFunc:      recorder.fakeHTTPPost(http.StatusOK, nil), //nolint:bodyclose // fakeHTTPPost returns a func value, not a response; the response's Body is http.NoBody (Close is a no-op) and is closed by httpPostOperatorScanRequest's own defer
+			OperatorScanInfo:  scanInfo,
+			OperatorConnector: legacyConn,
+		}
+
+		got, err := adapter.OperatorScan(context.Background())
+		require.NoError(t, err)
+		assert.Equal(t, "success", got)
+		assert.Equal(t, 1, legacyConn.startCalls)
+		assert.Equal(t, 1, legacyConn.stopCalls)
+		assert.Equal(t, 1, recorder.calls)
+	})
+}
+
+type legacyOperatorConnector struct {
+	startCalls int
+	stopCalls  int
+}
+
+func (f *legacyOperatorConnector) StartPortForwarder() error {
+	f.startCalls++
+	return nil
+}
+
+func (f *legacyOperatorConnector) StopPortForwarder() {
+	f.stopCalls++
+}
+
+func (f *legacyOperatorConnector) GetPortForwardLocalhost() string {
+	return "127.0.0.1:4002"
 }
 
 var _ cautils.OperatorScanInfo = (*fakeOperatorScanInfo)(nil)
 var _ cautils.OperatorConnector = (*fakeOperatorConnector)(nil)
+var _ cautils.OperatorConnector = (*legacyOperatorConnector)(nil)

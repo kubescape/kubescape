@@ -1,6 +1,7 @@
 package operator
 
 import (
+	"context"
 	"errors"
 	"io"
 	"testing"
@@ -36,7 +37,7 @@ func TestOperatorScanVulnerabilitiesCmd_ResolvesClusterNameAfterRootPreRun(t *te
 
 	previousAdapter := newOperatorAdapter
 	var gotScanInfo cautils.OperatorScanInfo
-	newOperatorAdapter = func(scanInfo cautils.OperatorScanInfo, _ string) (*core.OperatorAdapter, error) {
+	newOperatorAdapter = func(scanInfo cautils.OperatorScanInfo, _ string, _ ...context.Context) (*core.OperatorAdapter, error) {
 		gotScanInfo = scanInfo
 		return nil, errors.New("stub: no real cluster in unit tests")
 	}
@@ -66,4 +67,55 @@ func TestOperatorScanVulnerabilitiesCmd_ResolvesClusterNameAfterRootPreRun(t *te
 	payload := vulnerabilitiesScanInfo.GetRequestPayload()
 	require.Len(t, payload.Commands, 1)
 	assert.Equal(t, "wlid://cluster-selected-context/namespace-", payload.Commands[0].WildWlid)
+}
+
+func TestOperatorScanVulnerabilitiesCmd_ContextCanceled(t *testing.T) {
+	var capturedCtx context.Context
+	prevAdapter := newOperatorAdapter
+	newOperatorAdapter = func(scanInfo cautils.OperatorScanInfo, _ string, ctx ...context.Context) (*core.OperatorAdapter, error) {
+		if len(ctx) > 0 {
+			capturedCtx = ctx[0]
+		}
+		if capturedCtx != nil && capturedCtx.Err() != nil {
+			return nil, capturedCtx.Err()
+		}
+		return nil, errors.New("unexpected call")
+	}
+	t.Cleanup(func() { newOperatorAdapter = prevAdapter })
+
+	cmd := getOperatorScanVulnerabilitiesCmd(&mocks.MockIKubescape{}, &cautils.OperatorInfo{})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := cmd.ExecuteContext(ctx)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, context.Canceled)
+	assert.Equal(t, ctx, capturedCtx, "constructor must receive the command context")
+}
+
+func TestOperatorScanVulnerabilitiesCmd_ContextCanceled_NoPortForward(t *testing.T) {
+	var startForwarderCalled bool
+	prevAdapter := newOperatorAdapter
+	newOperatorAdapter = func(scanInfo cautils.OperatorScanInfo, _ string, ctx ...context.Context) (*core.OperatorAdapter, error) {
+		conn := &stubOperatorConnector{
+			onStart: func() { startForwarderCalled = true },
+		}
+		return core.NewOperatorAdapterWithConnector(scanInfo, conn), nil
+	}
+	t.Cleanup(func() { newOperatorAdapter = prevAdapter })
+
+	cmd := getOperatorScanVulnerabilitiesCmd(&mocks.MockIKubescape{}, &cautils.OperatorInfo{})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := cmd.ExecuteContext(ctx)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, context.Canceled)
+	assert.False(t, startForwarderCalled, "must not attempt to start port forwarding when context is canceled")
 }

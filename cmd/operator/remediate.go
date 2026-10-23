@@ -1,6 +1,7 @@
 package operator
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -8,7 +9,6 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v4/core/cautils"
-	"github.com/kubescape/kubescape/v4/core/core"
 	"github.com/kubescape/kubescape/v4/core/meta"
 	"github.com/spf13/cobra"
 )
@@ -106,7 +106,7 @@ func getOperatorRemediateCmd(ks meta.IKubescape, operatorInfo cautils.OperatorIn
 				logger.L().Warning(fmt.Sprintf("applying %q to every workload matching the selector, across all namespaces", remediationInfo.Action))
 			}
 
-			operatorAdapter, err := core.NewOperatorAdapter(operatorInfo.OperatorScanInfo, operatorInfo.Namespace)
+			operatorAdapter, err := newOperatorAdapter(operatorInfo.OperatorScanInfo, operatorInfo.Namespace, cmd.Context())
 			if err != nil {
 				return err
 			}
@@ -114,11 +114,6 @@ func getOperatorRemediateCmd(ks meta.IKubescape, operatorInfo cautils.OperatorIn
 			verb := "Previewing"
 			if !remediationInfo.IsDryRun() {
 				verb = "Applying"
-			}
-			logger.L().Start(fmt.Sprintf("%s remediation %q via Kubescape Operator", verb, remediationInfo.Action))
-			if _, err := operatorAdapter.OperatorScan(); err != nil {
-				logger.L().StopError("Failed to submit remediation to Kubescape Operator", helpers.Error(err))
-				return err
 			}
 			// The operator processes the command asynchronously (the triggerAction
 			// endpoint acknowledges receipt and queues the work), so the outcome is
@@ -131,6 +126,16 @@ func getOperatorRemediateCmd(ks meta.IKubescape, operatorInfo cautils.OperatorIn
 				eventsScope = "--all-namespaces"
 			}
 			eventsHint := fmt.Sprintf("kubectl get events %s --field-selector reason=KubescapeRemediation", eventsScope)
+
+			logger.L().Start(fmt.Sprintf("%s remediation %q via Kubescape Operator", verb, remediationInfo.Action))
+			if _, err := operatorAdapter.OperatorScan(cmd.Context()); err != nil {
+				if errors.Is(err, context.Canceled) || errors.Is(cmd.Context().Err(), context.Canceled) {
+					logger.L().StopError(fmt.Sprintf("Remediation submission canceled; submission outcome is unknown. Check remediation events via '%s' or the operator logs before retrying", eventsHint), helpers.Error(err))
+				} else {
+					logger.L().StopError("Failed to submit remediation to Kubescape Operator", helpers.Error(err))
+				}
+				return err
+			}
 			if remediationInfo.IsDryRun() {
 				logger.L().StopSuccess(fmt.Sprintf("Submitted remediation (dry-run) — no changes are applied. Check the plan via '%s' or the operator logs; re-run with --confirm to apply.", eventsHint))
 			} else {
