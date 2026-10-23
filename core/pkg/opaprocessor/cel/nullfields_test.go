@@ -75,7 +75,7 @@ func lookup(v any, path []string) (any, bool) {
 // Every null in a built-in kind must come out exactly as the apiserver's typed
 // decoding leaves it: gone, a zero value, or a key or index that is kept.
 func TestNormalizeNullFieldsMatchesTypedDecoding(t *testing.T) {
-	for name, manifest := range map[string]string{
+	for name, manifest := range map[string]string{ // #nosec G101 -- null-valued Secret fixture, not a hardcoded credential
 		"pod": `{"apiVersion":"v1","kind":"Pod","metadata":{"name":"p","labels":null,"annotations":{"kept":null,"other":"x"}},
 			"spec":{"hostPID":null,"volumes":null,"initContainers":null,"securityContext":null,
 			"containers":[{"name":"c","image":"i","env":null,"args":["x",null],"resources":null,
