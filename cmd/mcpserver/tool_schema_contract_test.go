@@ -145,6 +145,39 @@ func TestToolSchemaViolations(t *testing.T) {
 			}))},
 			want: []string{`"branch": property "x": anyOf[1]: no type`},
 		},
+		{
+			name: "malformed required",
+			tools: []map[string]any{
+				tool("reqstr", map[string]any{"type": "object", "properties": map[string]any{"a": str}, "required": "a"}),
+				tool("reqnum", object(map[string]any{"a": str}, 1)),
+			},
+			want: []string{`"reqstr": required is string, want an array`, `"reqnum": required entry 1 is not a string`},
+		},
+		{
+			name: "array items are checked",
+			tools: []map[string]any{tool("items", object(map[string]any{
+				"empty":   map[string]any{"type": "array", "description": "d", "items": map[string]any{}},
+				"notobj":  map[string]any{"type": "array", "description": "d", "items": "string"},
+				"typed":   map[string]any{"type": "array", "description": "d", "items": map[string]any{"type": "string"}},
+				"nesting": map[string]any{"type": "array", "description": "d", "items": map[string]any{"type": "array"}},
+			}))},
+			want: []string{
+				`"items": property "empty": items: no type`,
+				`"items": property "nesting": items: array has no items`,
+				`"items": property "notobj": items: schema is not an object`,
+			},
+		},
+		{
+			name: "empty or non-array combinators",
+			tools: []map[string]any{tool("combo", object(map[string]any{
+				"empty":  map[string]any{"description": "d", "anyOf": []any{}},
+				"scalar": map[string]any{"description": "d", "oneOf": "string"},
+			}))},
+			want: []string{
+				`"combo": property "empty": anyOf must be a non-empty array`,
+				`"combo": property "scalar": oneOf must be a non-empty array`,
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -194,9 +227,16 @@ func toolSchemaViolations(tools []map[string]any) []string {
 		props, _ := schema["properties"].(map[string]any)
 
 		reqSeen := map[string]bool{}
-		required, _ := schema["required"].([]any)
+		required, isList := schema["required"].([]any)
+		if _, present := schema["required"]; present && !isList {
+			out = append(out, fmt.Sprintf("%s: required is %T, want an array", label, schema["required"]))
+		}
 		for _, r := range required {
-			arg, _ := r.(string)
+			arg, isString := r.(string)
+			if !isString {
+				out = append(out, fmt.Sprintf("%s: required entry %v is not a string", label, r))
+				continue
+			}
 			if reqSeen[arg] {
 				out = append(out, fmt.Sprintf("%s: required %q is listed more than once", label, arg))
 				continue
@@ -241,8 +281,14 @@ func propertyViolations(v any, top bool) []string {
 				out = append(out, fmt.Sprintf("unknown type %q", t))
 			}
 		}
-		if contains(typeNames(typ), "array") && schema["items"] == nil {
-			out = append(out, "array has no items")
+		if contains(typeNames(typ), "array") {
+			if items, ok := schema["items"]; !ok || items == nil {
+				out = append(out, "array has no items")
+			} else {
+				for _, msg := range propertyViolations(items, false) {
+					out = append(out, "items: "+msg)
+				}
+			}
 		}
 	} else if !hasCombinator {
 		out = append(out, "no type")
@@ -263,7 +309,15 @@ func propertyViolations(v any, top bool) []string {
 	}
 
 	for _, k := range []string{"anyOf", "oneOf", "allOf"} {
-		branches, _ := schema[k].([]any)
+		raw, present := schema[k]
+		if !present {
+			continue
+		}
+		branches, isList := raw.([]any)
+		if !isList || len(branches) == 0 {
+			out = append(out, k+" must be a non-empty array")
+			continue
+		}
 		for i, b := range branches {
 			for _, msg := range propertyViolations(b, false) {
 				out = append(out, fmt.Sprintf("%s[%d]: %s", k, i, msg))
