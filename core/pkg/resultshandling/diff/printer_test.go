@@ -3,12 +3,18 @@ package diff
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
+	"regexp"
 	"testing"
 
+	"github.com/jwalton/gchalk"
+	tableprinterutils "github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"sigs.k8s.io/yaml"
 )
+
+var ansi = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 
 func printableChange() ControlChange {
 	return ControlChange{
@@ -44,7 +50,7 @@ func TestPrintPretty_PrintsEvidenceAndAllBuckets(t *testing.T) {
 
 	var output bytes.Buffer
 	PrintPretty(&output, changes)
-	actual := output.String()
+	actual := ansi.ReplaceAllString(output.String(), "")
 
 	assert.Contains(t, actual, "WARNING: included namespaces differ")
 	assert.Contains(t, actual, "New failures (1)")
@@ -58,6 +64,90 @@ func TestPrintPretty_PrintsEvidenceAndAllBuckets(t *testing.T) {
 	assert.Contains(t, actual, "Evidence resource: apps/v1/default/Pod/api-abc")
 	assert.Contains(t, actual, "Reason: head scan coverage was degraded")
 	assert.Contains(t, actual, "Summary: 1 new, 1 resolved, 1 unchanged, 1 incomparable")
+}
+
+func TestPrintPretty_ColorFormatting(t *testing.T) {
+	origLevel := gchalk.GetLevel()
+	gchalk.SetLevel(gchalk.LevelAnsi256)
+	defer gchalk.SetLevel(origLevel)
+
+	criticalChange := printableChange()
+	criticalChange.Severity = "Critical"
+	criticalChange.ControlName = "Critical control"
+
+	highChange := printableChange()
+	highChange.Severity = "High"
+
+	mediumChange := printableChange()
+	mediumChange.Severity = "Medium"
+
+	lowChange := printableChange()
+	lowChange.Severity = "Low"
+
+	incomparableChange := printableChange()
+	incomparableChange.Severity = "Unknown"
+	incomparableChange.Reason = "head scan coverage degraded"
+
+	changes := &ChangeSet{
+		New:          []ControlChange{criticalChange, highChange},
+		Resolved:     []ControlChange{mediumChange},
+		Unchanged:    []ControlChange{lowChange},
+		Incomparable: []ControlChange{incomparableChange},
+		Warnings:     []string{"scope differs"},
+	}
+
+	var output bytes.Buffer
+	require.NoError(t, PrintPretty(&output, changes))
+	actual := output.String()
+
+	// 1. Warnings label is bold bright yellow
+	assert.Contains(t, actual, gchalk.WithBrightYellow().Bold("WARNING:")+" scope differs")
+
+	// 2. Section headers
+	assert.Contains(t, actual, gchalk.WithBrightRed().Bold("New failures (2)"))
+	assert.Contains(t, actual, gchalk.WithBrightGreen().Bold("Resolved (1)"))
+	assert.Contains(t, actual, "Still failing (unchanged) (1)")
+	assert.Contains(t, actual, gchalk.WithBrightYellow().Bold("Incomparable (1)"))
+
+	// 3. Line prefixes and severity colors
+	assert.Contains(t, actual, gchalk.WithBrightRed().Bold("+")+" ["+tableprinterutils.GetColorForVulnerabilitySeverity("Critical")("Critical")+"]")
+	assert.Contains(t, actual, gchalk.WithBrightRed().Bold("+")+" ["+tableprinterutils.GetColorForVulnerabilitySeverity("High")("High")+"]")
+	assert.Contains(t, actual, gchalk.WithBrightGreen().Bold("-")+" ["+tableprinterutils.GetColorForVulnerabilitySeverity("Medium")("Medium")+"]")
+	assert.Contains(t, actual, " ["+tableprinterutils.GetColorForVulnerabilitySeverity("Low")("Low")+"]")
+	assert.Contains(t, actual, gchalk.WithBrightYellow().Bold("?")+" ["+tableprinterutils.GetColorForVulnerabilitySeverity("Unknown")("Unknown")+"]")
+
+	// 4. Summary counts are bold with respective colors
+	expectedSummary := fmt.Sprintf("\nSummary: %s new, %s resolved, %s unchanged, %s incomparable\n",
+		gchalk.WithBrightRed().Bold("2"),
+		gchalk.WithBrightGreen().Bold("1"),
+		gchalk.Bold("1"),
+		gchalk.WithBrightYellow().Bold("1"),
+	)
+	assert.Contains(t, actual, expectedSummary)
+}
+
+func TestPrintPretty_NoColor(t *testing.T) {
+	origLevel := gchalk.GetLevel()
+	gchalk.SetLevel(gchalk.LevelNone)
+	defer gchalk.SetLevel(origLevel)
+
+	newChange := printableChange()
+	resolvedChange := printableChange()
+	changes := &ChangeSet{
+		New:      []ControlChange{newChange},
+		Resolved: []ControlChange{resolvedChange},
+		Warnings: []string{"test warning"},
+	}
+
+	var output bytes.Buffer
+	require.NoError(t, PrintPretty(&output, changes))
+	actual := output.String()
+
+	assert.NotRegexp(t, ansi, actual, "output must not contain ANSI escape sequences when color is disabled")
+	assert.Contains(t, actual, "WARNING: test warning")
+	assert.Contains(t, actual, "New failures (1)")
+	assert.Contains(t, actual, "+ [High] Require a security context (C-1000)")
+	assert.Contains(t, actual, "Summary: 1 new, 1 resolved, 0 unchanged, 0 incomparable")
 }
 
 func TestPrintPretty_OmitsEmptySectionsAndEvidenceDetails(t *testing.T) {
@@ -190,3 +280,40 @@ func TestPrintYAML_PreservesNewBucketsAndEvidence(t *testing.T) {
 	assert.Contains(t, decoded, "incomparable")
 	assert.Contains(t, decoded, "warnings")
 }
+
+func TestPrintJSON_NoANSI(t *testing.T) {
+	origLevel := gchalk.GetLevel()
+	gchalk.SetLevel(gchalk.LevelAnsi256)
+	defer gchalk.SetLevel(origLevel)
+
+	changes := &ChangeSet{
+		New:          []ControlChange{printableChange()},
+		Resolved:     []ControlChange{printableChange()},
+		Unchanged:    []ControlChange{printableChange()},
+		Incomparable: []ControlChange{{Reason: "unsafe comparison"}},
+		Warnings:     []string{"scope differs"},
+	}
+
+	var output bytes.Buffer
+	require.NoError(t, PrintJSON(&output, changes))
+	assert.NotRegexp(t, ansi, output.String(), "JSON output must not contain ANSI escape sequences")
+}
+
+func TestPrintYAML_NoANSI(t *testing.T) {
+	origLevel := gchalk.GetLevel()
+	gchalk.SetLevel(gchalk.LevelAnsi256)
+	defer gchalk.SetLevel(origLevel)
+
+	changes := &ChangeSet{
+		New:          []ControlChange{printableChange()},
+		Resolved:     []ControlChange{printableChange()},
+		Unchanged:    []ControlChange{printableChange()},
+		Incomparable: []ControlChange{{Reason: "unsafe comparison"}},
+		Warnings:     []string{"scope differs"},
+	}
+
+	var output bytes.Buffer
+	require.NoError(t, PrintYAML(&output, changes))
+	assert.NotRegexp(t, ansi, output.String(), "YAML output must not contain ANSI escape sequences")
+}
+
