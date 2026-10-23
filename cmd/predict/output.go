@@ -110,6 +110,7 @@ type jsonSummary struct {
 }
 
 type jsonWorkload struct {
+	Namespace  string          `json:"namespace,omitempty"`
 	Kind       string          `json:"kind"`
 	Name       string          `json:"name"`
 	Violations []jsonViolation `json:"violations"`
@@ -146,6 +147,7 @@ func writeJSON(w io.Writer, result pss.NamespaceResult) error {
 
 	for _, r := range result.FailingResults() {
 		jw := jsonWorkload{
+			Namespace:  resultWorkloadNamespace(result, r),
 			Kind:       r.Kind,
 			Name:       r.Name,
 			Violations: make([]jsonViolation, 0, len(r.Violations)),
@@ -170,7 +172,7 @@ func writeJSON(w io.Writer, result pss.NamespaceResult) error {
 // writeTable formats the prediction results as a summary table.
 func writeTable(w io.Writer, result pss.NamespaceResult, verbose bool) error {
 	tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
-	if _, err := fmt.Fprintln(tw, "KIND\tNAME\tPASSES_AT\tVIOLATIONS"); err != nil {
+	if _, err := fmt.Fprintln(tw, "NAMESPACE\tKIND\tNAME\tPASSES_AT\tVIOLATIONS"); err != nil {
 		return err
 	}
 
@@ -190,7 +192,7 @@ func writeTable(w io.Writer, result pss.NamespaceResult, verbose bool) error {
 			}
 			violations = strings.Join(parts, ", ")
 		}
-		if _, err := fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", r.Kind, r.Name, r.PassesAt.String(), violations); err != nil {
+		if _, err := fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", resultWorkloadNamespace(result, r), r.Kind, r.Name, r.PassesAt.String(), violations); err != nil {
 			return err
 		}
 	}
@@ -265,7 +267,7 @@ func writePretty(w io.Writer, result pss.NamespaceResult, verbose bool) error {
 	if len(failing) > 0 {
 		ew.printf("Failing Workloads (%d):\n\n", len(failing))
 		for _, r := range failing {
-			ew.printf("  ✗ %s/%s  (passes at: %s)\n", r.Kind, r.Name, r.PassesAt.String())
+			ew.printf("  ✗ %s  (passes at: %s)\n", resultDisplayIdentity(result, r), r.PassesAt.String())
 			for _, v := range r.Violations {
 				container := ""
 				if v.Container != "" {
@@ -283,7 +285,7 @@ func writePretty(w io.Writer, result pss.NamespaceResult, verbose bool) error {
 		if len(passing) > 0 {
 			ew.printf("Passing Workloads (%d):\n\n", len(passing))
 			for _, r := range passing {
-				ew.printf("  ✓ %s/%s\n", r.Kind, r.Name)
+				ew.printf("  ✓ %s\n", resultDisplayIdentity(result, r))
 			}
 			ew.println()
 		}
@@ -408,10 +410,7 @@ func writeSARIF(w io.Writer, result pss.NamespaceResult) error {
 			if v.Level <= pss.Baseline {
 				level = "error"
 			}
-			fqn := fmt.Sprintf("%s/%s", r.Kind, r.Name)
-			if result.Namespace != "" {
-				fqn = fmt.Sprintf("%s/%s/%s", result.Namespace, r.Kind, r.Name)
-			}
+			fqn := resultWorkloadIdentity(result, r)
 			if v.Container != "" {
 				fqn += "/" + v.Container
 			}
@@ -500,9 +499,13 @@ func writeJUnit(w io.Writer, result pss.NamespaceResult) error {
 
 	var testCases []junitTestCase
 	for _, r := range result.Results {
+		workloadNS := resultWorkloadNamespace(result, r)
+		if workloadNS == "" {
+			workloadNS = "local"
+		}
 		tc := junitTestCase{
 			Name:      fmt.Sprintf("%s/%s", r.Kind, r.Name),
-			ClassName: fmt.Sprintf("pss.%s.%s", ns, r.Kind),
+			ClassName: fmt.Sprintf("pss.%s.%s", workloadNS, r.Kind),
 		}
 		if len(r.Violations) > 0 {
 			var lines []string
@@ -555,4 +558,28 @@ func writeJUnit(w io.Writer, result pss.NamespaceResult) error {
 	}
 	_, err := fmt.Fprintln(w)
 	return err
+}
+
+// The scan's namespace is only a fallback for objects without one (and for
+// callers constructing results themselves). A local report can span namespaces.
+func resultWorkloadNamespace(result pss.NamespaceResult, workload pss.WorkloadResult) string {
+	if workload.Namespace != "" {
+		return workload.Namespace
+	}
+	return result.Namespace
+}
+
+func resultWorkloadIdentity(result pss.NamespaceResult, workload pss.WorkloadResult) string {
+	identity := workload.Kind + "/" + workload.Name
+	if namespace := resultWorkloadNamespace(result, workload); namespace != "" {
+		return namespace + "/" + identity
+	}
+	return identity
+}
+
+func resultDisplayIdentity(result pss.NamespaceResult, workload pss.WorkloadResult) string {
+	if resultWorkloadNamespace(result, workload) == result.Namespace {
+		return workload.Kind + "/" + workload.Name
+	}
+	return resultWorkloadIdentity(result, workload)
 }
