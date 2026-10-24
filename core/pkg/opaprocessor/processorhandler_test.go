@@ -362,6 +362,13 @@ func TestProcessResourcesResult(t *testing.T) {
 			assert.Equal(t, tc.failed == 0, res.GetStatus(tc.filter).IsPassed())
 		})
 	}
+	// Framework-scoped exceptions affect selected views, not the underlying
+	// framework-agnostic result used by GetStatus(nil).
+	assert.True(t, res.GetStatus(nil).IsFailed())
+	for i := range res.AssociatedControls {
+		assert.True(t, cautils.ControlStatus(&opaSessionObj.Report.SummaryDetails, &res.AssociatedControls[i]).IsPassed())
+	}
+	assert.True(t, cautils.ResourceStatus(&opaSessionObj.Report.SummaryDetails, &res).IsPassed())
 	assert.Equal(t, deployment.GetID(), opaSessionObj.ResourcesResult[deployment.GetID()].ResourceID)
 
 	// test resource listing
