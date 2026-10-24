@@ -23,12 +23,12 @@ func TestValidateAccountID(t *testing.T) {
 		{
 			name:          "too short account ID",
 			accountID:     "22019933-feac-4012-a8eb-e81461ba665",
-			expectedError: "bad argument: accound ID must be a valid UUID",
+			expectedError: "bad argument: account ID must be a valid UUID",
 		},
 		{
 			name:          "non uuid account ID",
 			accountID:     "not-a-uuid",
-			expectedError: "bad argument: accound ID must be a valid UUID",
+			expectedError: "bad argument: account ID must be a valid UUID",
 		},
 	}
 
