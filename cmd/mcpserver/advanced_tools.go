@@ -16,6 +16,17 @@ import (
 
 var supportedAdvancedWorkloadKinds = []string{"pods", "deployments", "daemonsets", "statefulsets"}
 
+// classifyK8sAPIError classifies an error from a direct Kubernetes API call.
+// Forbidden, NotFound, and timeout/cancellation get their specific codes via
+// classifyScanError; anything else (API-server status errors, transport
+// failures) remains K8S_CLIENT_ERROR rather than the scan-pipeline fallback.
+func classifyK8sAPIError(err error) ErrorCode {
+	if code := classifyScanError(err); code != ErrCodeScanFailed {
+		return code
+	}
+	return ErrCodeK8sClientError
+}
+
 func createAdvancedTools(ksServer *KubescapeMcpserver) {
 	// Tool 1: scan_resource_slice
 	scanResourceSliceTool := mcp.NewTool(
@@ -98,7 +109,7 @@ func createAdvancedTools(ksServer *KubescapeMcpserver) {
 		}
 
 		if err != nil {
-			return mcpToolError(ErrCodeK8sClientError, fmt.Sprintf("failed to list resources: %v", err), map[string]any{"resource_type": kind}), nil
+			return mcpToolError(classifyK8sAPIError(err), fmt.Sprintf("failed to list resources: %v", err), map[string]any{"resource_type": kind}), nil
 		}
 
 		nextContinueToken := list.GetContinue()
@@ -276,7 +287,7 @@ func createAdvancedTools(ksServer *KubescapeMcpserver) {
 		}
 
 		if err != nil {
-			return mcpToolError(ErrCodeK8sClientError, fmt.Sprintf("dry-run patch failed: %v", err), map[string]any{"kind": kind, "name": name, "namespace": namespace}), nil
+			return mcpToolError(classifyK8sAPIError(err), fmt.Sprintf("dry-run patch failed: %v", err), map[string]any{"kind": kind, "name": name, "namespace": namespace}), nil
 		}
 
 		resBytes, err := jsonMarshal(patchedObj.Object)
