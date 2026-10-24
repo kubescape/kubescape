@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	corev1 "k8s.io/api/core/v1"
+	sigsjson "sigs.k8s.io/json"
 )
 
 // ExtractPodSpec extracts the corev1.PodSpec from an unstructured workload
@@ -110,8 +111,10 @@ func decodePodSpec(raw any) (corev1.PodSpec, error) {
 	if err != nil {
 		return corev1.PodSpec{}, fmt.Errorf("marshal: %w", err)
 	}
+	// Decode case-sensitively, as the API server does: a key that differs from
+	// a field only in case is an unknown field, not that field.
 	var ps corev1.PodSpec
-	if err := json.Unmarshal(b, &ps); err != nil {
+	if err := sigsjson.UnmarshalCaseSensitivePreserveInts(b, &ps); err != nil {
 		return corev1.PodSpec{}, fmt.Errorf("unmarshal: %w", err)
 	}
 	// Without an application container there is no usable workload to
