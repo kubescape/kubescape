@@ -408,7 +408,7 @@ func TestEmitKustomizePatch_NullValueEmitsValueNull(t *testing.T) {
 	patchStr := string(patchContent)
 	assert.Contains(t, patchStr, "op: add")
 	assert.Contains(t, patchStr, "path: /spec/storageClassName")
-	assert.Contains(t, patchStr, "value: null")
+	assert.Contains(t, patchStr, "value: \"null\"")
 }
 
 // TestEmitKustomizePatch_ArrayElementTargetUsesReplace verifies that targeting an existing array element index
@@ -3557,4 +3557,316 @@ spec:
 	// Verify prod resource retained secure: true and was NOT reset to false by the other patch
 	assert.Contains(t, string(outYaml), "namespace: prod")
 	assert.Contains(t, string(outYaml), "secure: true")
+}
+
+// TestReview4034_APIGroupExactMatching verifies that target selector uses exact group matching (^$ for empty group,
+// and escaped group names for non-empty groups) so that a Service patch in core group does not overwrite
+// or patch a Service in a custom API group when kustomize build runs.
+func TestReview4034_APIGroupExactMatching(t *testing.T) {
+	dir := t.TempDir()
+
+	coreSvc := makeResource("Service", "my-svc")
+	coreSvc.SetApiVersion("v1")
+	coreSvc.GetObject()["spec"] = map[string]interface{}{
+		"ports": []interface{}{map[string]interface{}{"port": 80}},
+	}
+
+	customSvc := makeResource("Service", "my-svc")
+	customSvc.SetApiVersion("custom.example.com/v1")
+	customSvc.GetObject()["spec"] = map[string]interface{}{
+		"ports": []interface{}{map[string]interface{}{"port": 8080}},
+	}
+
+	suggestions := []HelmFixSuggestion{
+		{
+			Resource:           coreSvc,
+			ChartName:          "my-chart",
+			FidelityProvenance: true,
+			FixPaths:           []armotypes.FixPath{{Path: "metadata.labels.coreOnly", Value: "true"}},
+		},
+		{
+			Resource:           customSvc,
+			ChartName:          "my-chart",
+			FidelityProvenance: true,
+			FixPaths:           []armotypes.FixPath{{Path: "metadata.labels.customOnly", Value: "true"}},
+		},
+	}
+
+	res, err := EmitKustomizePatch(suggestions, dir)
+	require.NoError(t, err)
+	require.Len(t, res.EmittedResources, 2)
+
+	// Check kustomization.yaml
+	kustContent, err := os.ReadFile(filepath.Join(dir, "kustomization.yaml"))
+	require.NoError(t, err)
+	kustStr := string(kustContent)
+	assert.Contains(t, kustStr, "group: ^$")
+	assert.Contains(t, kustStr, `group: ^custom\.example\.com$`)
+
+	// Run kustomize build to verify patches apply strictly to their own groups without collision
+	k := krusty.MakeKustomizer(krusty.MakeDefaultOptions())
+	fSys := filesys.MakeFsOnDisk()
+	m, err := k.Run(fSys, dir)
+	require.NoError(t, err)
+	yamlOut, err := m.AsYaml()
+	require.NoError(t, err)
+
+	rawDocs := splitYamlDocs(yamlOut)
+	require.Len(t, rawDocs, 2)
+
+	for _, docBytes := range rawDocs {
+		var doc struct {
+			APIVersion string `yaml:"apiVersion"`
+			Metadata   struct {
+				Labels map[string]interface{} `yaml:"labels"`
+			} `yaml:"metadata"`
+		}
+		require.NoError(t, yaml.Unmarshal(docBytes, &doc))
+		if doc.APIVersion == "v1" {
+			assert.Equal(t, true, doc.Metadata.Labels["coreOnly"])
+			assert.Nil(t, doc.Metadata.Labels["customOnly"])
+		} else if doc.APIVersion == "custom.example.com/v1" {
+			assert.Equal(t, true, doc.Metadata.Labels["customOnly"])
+			assert.Nil(t, doc.Metadata.Labels["coreOnly"])
+		}
+	}
+}
+
+// TestReview4034_SliceIndexingCreatesList verifies that addressing an array index in a missing
+// field (like spec.externalIPs[0]) initializes a list rather than a map, producing a valid
+// Kubernetes list in the output.
+func TestReview4034_SliceIndexingCreatesList(t *testing.T) {
+	dir := t.TempDir()
+
+	svc := makeResource("Service", "test-svc")
+	svc.SetApiVersion("v1")
+	svc.GetObject()["spec"] = map[string]interface{}{
+		"ports": []interface{}{map[string]interface{}{"port": 80}},
+	}
+
+	suggestions := []HelmFixSuggestion{
+		{
+			Resource:           svc,
+			ChartName:          "my-chart",
+			FidelityProvenance: true,
+			FixPaths: []armotypes.FixPath{
+				{Path: "spec.externalIPs[0]", Value: "192.0.2.1"},
+			},
+		},
+	}
+
+	_, err := EmitKustomizePatch(suggestions, dir)
+	require.NoError(t, err)
+
+	// Verify patch content creates empty list and adds index 0
+	patchFileName := resourcePatchFilename(resourceKey{
+		Group:     "",
+		Version:   "v1",
+		Kind:      "Service",
+		Namespace: "default",
+		Name:      "test-svc",
+	})
+	patchContent, err := os.ReadFile(filepath.Join(dir, patchFileName))
+	require.NoError(t, err)
+	var ops []kustomizePatchOp
+	err = yaml.Unmarshal(patchContent, &ops)
+	require.NoError(t, err)
+	require.Len(t, ops, 2)
+	assert.Equal(t, "add", ops[0].Op)
+	assert.Equal(t, "/spec/externalIPs", ops[0].Path)
+	assert.Equal(t, []interface{}{}, ops[0].Value)
+	assert.Equal(t, "add", ops[1].Op)
+	assert.Equal(t, "/spec/externalIPs/0", ops[1].Path)
+	assert.Equal(t, "192.0.2.1", ops[1].Value)
+
+	// Run kustomize build to ensure Kubernetes type is a list
+	k := krusty.MakeKustomizer(krusty.MakeDefaultOptions())
+	fSys := filesys.MakeFsOnDisk()
+	m, err := k.Run(fSys, dir)
+	require.NoError(t, err)
+	yamlOut, err := m.AsYaml()
+	require.NoError(t, err)
+
+	rawDocs := splitYamlDocs(yamlOut)
+	require.Len(t, rawDocs, 1)
+
+	var builtSvc struct {
+		Spec struct {
+			ExternalIPs []string `yaml:"externalIPs"`
+		} `yaml:"spec"`
+	}
+	require.NoError(t, yaml.Unmarshal(rawDocs[0], &builtSvc))
+	require.Len(t, builtSvc.Spec.ExternalIPs, 1)
+	assert.Equal(t, "192.0.2.1", builtSvc.Spec.ExternalIPs[0])
+}
+
+// TestReview4034_FixValueParsingRulesParity verifies that fix value parsing rules match the standard fixer:
+// "null" becomes string "null" (not nil), ""quoted"" retains quotes, and safe sequences parse as lists.
+func TestReview4034_FixValueParsingRulesParity(t *testing.T) {
+	dir := t.TempDir()
+
+	deploy := makeResource("Deployment", "val-app")
+	deploy.GetObject()["spec"] = map[string]interface{}{
+		"template": map[string]interface{}{
+			"spec": map[string]interface{}{
+				"containers": []interface{}{
+					map[string]interface{}{"name": "app"},
+				},
+			},
+		},
+	}
+
+	suggestions := []HelmFixSuggestion{
+		{
+			Resource:           deploy,
+			ChartName:          "my-chart",
+			FidelityProvenance: true,
+			FixPaths: []armotypes.FixPath{
+				{Path: "spec.nullString", Value: "null"},
+				{Path: "spec.quotedString", Value: `"quoted"`},
+				{Path: "spec.boolVal", Value: "true"},
+				{Path: "spec.intVal", Value: "123"},
+				{Path: "spec.seqVal", Value: `["drop1", "drop2"]`},
+			},
+		},
+	}
+
+	_, err := EmitKustomizePatch(suggestions, dir)
+	require.NoError(t, err)
+
+	patchFileName := resourcePatchFilename(resourceKey{
+		Group:     "apps",
+		Version:   "v1",
+		Kind:      "Deployment",
+		Namespace: "default",
+		Name:      "val-app",
+	})
+	patchContent, err := os.ReadFile(filepath.Join(dir, patchFileName))
+	require.NoError(t, err)
+	var ops []kustomizePatchOp
+	err = yaml.Unmarshal(patchContent, &ops)
+	require.NoError(t, err)
+
+	opMap := make(map[string]interface{})
+	for _, op := range ops {
+		opMap[op.Path] = op.Value
+	}
+
+	// null should be string "null"
+	assert.Equal(t, "null", opMap["/spec/nullString"])
+	// "quoted" should retain literal quotes
+	assert.Equal(t, `"quoted"`, opMap["/spec/quotedString"])
+	// true should be bool true
+	assert.Equal(t, true, opMap["/spec/boolVal"])
+	// 123 should be int(123)
+	assert.Equal(t, 123, opMap["/spec/intVal"])
+	// sequence should be []interface{}
+	assert.Equal(t, []interface{}{"drop1", "drop2"}, opMap["/spec/seqVal"])
+}
+
+// TestReview4034_RedactedPlaceholderExemptionRestricted verifies that fields not actually redacted by the
+// scanner (such as Service selector app: XXXXXX changing to other-app) are NOT exempted and result in
+// declining the resource, while actual redacted fields (container env vars) are exempted.
+func TestReview4034_RedactedPlaceholderExemptionRestricted(t *testing.T) {
+	dir := t.TempDir()
+
+	// Scenario 1: Non-redacted field (Service selector) has drift from XXXXXX to other-app.
+	// Must be declined!
+	scannedSvc := makeResource("Service", "drift-svc")
+	scannedSvc.GetObject()["spec"] = map[string]interface{}{
+		"selector": map[string]interface{}{"app": "XXXXXX"},
+	}
+
+	candSvc := makeResource("Service", "drift-svc")
+	candSvc.GetObject()["spec"] = map[string]interface{}{
+		"selector": map[string]interface{}{"app": "other-app"},
+	}
+
+	// Direct verification check
+	err := verifyScannedFieldsMatch(scannedSvc.GetObject()["spec"], candSvc.GetObject()["spec"], "spec")
+	require.Error(t, err, "non-redacted field containing XXXXXX must not match different rendered value")
+	assert.Contains(t, err.Error(), "spec.selector.app")
+
+	// Verify via EmitKustomizePatch with UnredactedBase
+	sug1 := []HelmFixSuggestion{
+		{
+			Resource:       scannedSvc,
+			UnredactedBase: candSvc.GetObject(),
+			ChartName:      "my-chart",
+			FixPaths:       []armotypes.FixPath{{Path: "metadata.labels.fix", Value: "applied"}},
+		},
+	}
+	res1, err := EmitKustomizePatch(sug1, dir)
+	require.NoError(t, err)
+	require.Len(t, res1.SkippedResources, 1)
+	assert.Contains(t, res1.SkippedResources[0].Reason, "spec.selector.app")
+
+	// Scenario 2: Actually redacted field (container env value XXXXXX) IS exempted.
+	scannedDeploy := makeResource("Deployment", "env-app")
+	scannedDeploy.GetObject()["spec"] = map[string]interface{}{
+		"template": map[string]interface{}{
+			"spec": map[string]interface{}{
+				"containers": []interface{}{
+					map[string]interface{}{
+						"name": "web",
+						"env": []interface{}{
+							map[string]interface{}{"name": "SECRET_KEY", "value": "XXXXXX"},
+						},
+					},
+				},
+			},
+		},
+	}
+	candDeploy := makeResource("Deployment", "env-app")
+	candDeploy.GetObject()["spec"] = map[string]interface{}{
+		"template": map[string]interface{}{
+			"spec": map[string]interface{}{
+				"containers": []interface{}{
+					map[string]interface{}{
+						"name": "web",
+						"env": []interface{}{
+							map[string]interface{}{"name": "SECRET_KEY", "value": "real-secret-123"},
+						},
+					},
+				},
+			},
+		},
+	}
+	err = verifyScannedFieldsMatch(scannedDeploy.GetObject()["spec"], candDeploy.GetObject()["spec"], "spec")
+	assert.NoError(t, err, "actually redacted container env value must be exempted from drift check")
+}
+
+// TestReview4034_RootContainmentBlocksSymlinkEscape verifies that EmitKustomizePatch does not follow
+// existing symlinks pointing outside the output directory (e.g. base.yaml -> outside file).
+func TestReview4034_RootContainmentBlocksSymlinkEscape(t *testing.T) {
+	tmpDir := t.TempDir()
+	outDir := filepath.Join(tmpDir, "out")
+	outsideDir := filepath.Join(tmpDir, "outside")
+	require.NoError(t, os.MkdirAll(outDir, 0700))
+	require.NoError(t, os.MkdirAll(outsideDir, 0700))
+
+	outsideFile := filepath.Join(outsideDir, "target.txt")
+	require.NoError(t, os.WriteFile(outsideFile, []byte("sensitive-original-content"), 0600))
+
+	// Create symlink base.yaml inside outDir pointing outside to target.txt
+	linkPath := filepath.Join(outDir, "base.yaml")
+	require.NoError(t, os.Symlink(outsideFile, linkPath))
+
+	deploy := makeResource("Deployment", "my-app")
+	suggestions := []HelmFixSuggestion{
+		{
+			Resource:           deploy,
+			ChartName:          "my-chart",
+			FidelityProvenance: true,
+			FixPaths:           []armotypes.FixPath{{Path: "metadata.labels.fix", Value: "applied"}},
+		},
+	}
+
+	_, err := EmitKustomizePatch(suggestions, outDir)
+	require.Error(t, err, "EmitKustomizePatch must fail when base.yaml symlink escapes output directory")
+
+	// Ensure outside file was not overwritten
+	outsideContent, err := os.ReadFile(outsideFile)
+	require.NoError(t, err)
+	assert.Equal(t, "sensitive-original-content", string(outsideContent))
 }

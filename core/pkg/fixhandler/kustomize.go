@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -171,34 +172,26 @@ func ensureSubpath(dir, filename string) (string, error) {
 	return targetPath, nil
 }
 
-// parseFixValue parses raw string fix values into their natural Go types (bool, int, float, slice, map, string, nil).
+// parseFixValue parses raw string fix values reusing the normal fixer's parsing rules:
+// booleans, integers, floats, and safe YAML flow sequences are parsed into their respective types;
+// everything else (including "null" and quoted strings) remains a string so that fix semantics
+// match the standard fixer.
 func parseFixValue(raw string) interface{} {
-	trimmed := strings.TrimSpace(raw)
-	if trimmed == "" {
-		return ""
-	}
-	if trimmed == "null" {
-		return nil
-	}
-
-	var jsonVal interface{}
-	if err := json.Unmarshal([]byte(trimmed), &jsonVal); err == nil {
-		if f, ok := jsonVal.(float64); ok {
-			if f == float64(int64(f)) {
-				return int64(f)
-			}
-		}
-		return jsonVal
-	}
-
-	if b, err := strconv.ParseBool(trimmed); err == nil {
+	if b, err := strconv.ParseBool(raw); err == nil {
 		return b
 	}
-
-	if i, err := strconv.Atoi(trimmed); err == nil {
+	if i, err := strconv.ParseInt(raw, 10, 64); err == nil {
 		return i
 	}
-
+	if f, err := strconv.ParseFloat(raw, 64); err == nil && !math.IsNaN(f) && !math.IsInf(f, 0) {
+		return f
+	}
+	if safeSequenceValue.MatchString(raw) {
+		var seq []interface{}
+		if err := yaml.Unmarshal([]byte(raw), &seq); err == nil {
+			return seq
+		}
+	}
 	return raw
 }
 
@@ -328,6 +321,8 @@ func resolveFixPathOps(workingObj map[string]interface{}, fp armotypes.FixPath) 
 	var ops []kustomizePatchOp
 	var pointerTokens []string
 	var current interface{} = workingObj
+	var parentMap map[string]interface{}
+	var parentKey string
 
 	for i, part := range parts {
 		isLast := i == len(parts)-1
@@ -339,6 +334,8 @@ func resolveFixPathOps(workingObj map[string]interface{}, fp armotypes.FixPath) 
 				if !ok || part.index < 0 || part.index >= len(slice) {
 					return nil
 				}
+				parentMap = nil
+				parentKey = ""
 				current = slice[part.index]
 			} else {
 				pointerTokens = append(pointerTokens, escapeJSONPointerToken(part.key))
@@ -346,17 +343,30 @@ func resolveFixPathOps(workingObj map[string]interface{}, fp armotypes.FixPath) 
 				if !ok {
 					return nil
 				}
+				parentMap = m
+				parentKey = part.key
 				nextVal, exists := m[part.key]
 				if !exists || nextVal == nil {
-					newMap := make(map[string]interface{})
 					ancestorPtr := "/" + strings.Join(pointerTokens, "/")
-					ops = append(ops, kustomizePatchOp{
-						Op:    "add",
-						Path:  ancestorPtr,
-						Value: newMap,
-					})
-					m[part.key] = newMap
-					current = newMap
+					if parts[i+1].sequence {
+						newList := make([]interface{}, 0)
+						ops = append(ops, kustomizePatchOp{
+							Op:    "add",
+							Path:  ancestorPtr,
+							Value: newList,
+						})
+						m[part.key] = newList
+						current = newList
+					} else {
+						newMap := make(map[string]interface{})
+						ops = append(ops, kustomizePatchOp{
+							Op:    "add",
+							Path:  ancestorPtr,
+							Value: newMap,
+						})
+						m[part.key] = newMap
+						current = newMap
+					}
 				} else {
 					current = nextVal
 				}
@@ -379,6 +389,15 @@ func resolveFixPathOps(workingObj map[string]interface{}, fp armotypes.FixPath) 
 						Path:  targetPtr,
 						Value: parsedVal,
 					})
+					if ok {
+						for len(slice) < part.index {
+							slice = append(slice, nil)
+						}
+						slice = append(slice, parsedVal)
+						if parentMap != nil && parentKey != "" {
+							parentMap[parentKey] = slice
+						}
+					}
 				}
 			} else {
 				pointerTokens = append(pointerTokens, escapeJSONPointerToken(part.key))
@@ -537,10 +556,27 @@ func isRedactedFieldKey(key string) bool {
 	return key == "envFrom"
 }
 
+// isScannerRedactedField reports whether path corresponds to a field that the scan redactor
+// actually replaces with "XXXXXX":
+// 1. Data entries in Secrets/ConfigMaps: data.<key>, stringData.<key>, binaryData.<key>
+// 2. Container environment variable values: ...containers[i].env[j].value
+func isScannerRedactedField(path string) bool {
+	if strings.HasPrefix(path, "data.") || strings.HasPrefix(path, "stringData.") || strings.HasPrefix(path, "binaryData.") {
+		return true
+	}
+	if strings.HasSuffix(path, ".value") && (strings.Contains(path, ".env[") || strings.HasPrefix(path, "env[")) {
+		return strings.Contains(path, "containers[") ||
+			strings.Contains(path, "initContainers[") ||
+			strings.Contains(path, "ephemeralContainers[")
+	}
+	return false
+}
+
 // verifyScannedFieldsMatch recursively checks that every non-redacted field present in scannedVal
 // matches the corresponding field in candVal, and that no additional non-redacted fields are
-// present in candVal that were absent from scannedVal. Any field with placeholder "XXXXXX"
-// or source metadata (path, sourcePath) is normalized. Documented scanner-added fields
+// present in candVal that were absent from scannedVal. Only fields that the scanner actually
+// redacts (secret/configmap data, container env values) with placeholder "XXXXXX" or source
+// metadata (path, sourcePath) are exempted from matching. Documented scanner-added fields
 // (specifically empty container resources: {}) are normalized so unchanged manifests match.
 // Returns an error if any concrete non-redacted value conflicts, if selectors or empty values
 // are conflated with null or missing fields, or if additional non-redacted fields exist.
@@ -559,7 +595,9 @@ func verifyScannedFieldsMatch(scannedVal, candVal interface{}, path string) erro
 	}
 
 	if s, ok := scannedVal.(string); ok && s == "XXXXXX" {
-		return nil
+		if isScannerRedactedField(path) {
+			return nil
+		}
 	}
 
 	switch sTyped := scannedVal.(type) {
@@ -572,10 +610,12 @@ func verifyScannedFieldsMatch(scannedVal, candVal interface{}, path string) erro
 			if isSourceMetadataKey(path, k) {
 				continue
 			}
-			if s, isStr := v.(string); isStr && s == "XXXXXX" {
-				continue
-			}
 			childPath := joinPath(path, k)
+			if s, isStr := v.(string); isStr && s == "XXXXXX" {
+				if isScannerRedactedField(childPath) {
+					continue
+				}
+			}
 			candChild, exists := cMap[k]
 			if !exists {
 				// Normalize documented scanner-added fields (such as container resources: {})
@@ -1008,12 +1048,22 @@ func isBuiltinClusterScopedGVK(group, kind string) bool {
 	}
 }
 
-// writeRestrictedFile writes data to path with mode 0600 and explicitly chmods an existing file to 0600.
-func writeRestrictedFile(path string, data []byte) error {
-	if err := os.WriteFile(path, data, 0600); err != nil {
+// writeRestrictedFile writes data to filename within root with mode 0600 and explicitly chmods an existing file to 0600.
+// It uses os.Root containment to prevent following symlinks that escape the output directory.
+func writeRestrictedFile(root *os.Root, filename string, data []byte) error {
+	file, err := root.OpenFile(filename, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
+	if err != nil {
 		return err
 	}
-	return os.Chmod(path, 0600)
+	if err := file.Chmod(0600); err != nil {
+		_ = file.Close()
+		return err
+	}
+	if _, err := file.Write(data); err != nil {
+		_ = file.Close()
+		return err
+	}
+	return file.Close()
 }
 
 // EmitKustomizePatch writes a kustomization.yaml, base.yaml, and one JSON 6902 patch
@@ -1100,6 +1150,12 @@ func EmitKustomizePatch(suggestions []HelmFixSuggestion, dir string) (*Kustomize
 		return nil, fmt.Errorf("failed to restrict permissions on kustomize output dir %q: %w", dir, err)
 	}
 
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open output directory %q: %w", dir, err)
+	}
+	defer root.Close()
+
 	kust := kustomizationDoc{
 		APIVersion: "kustomize.config.k8s.io/v1beta1",
 		Kind:       "Kustomization",
@@ -1119,8 +1175,7 @@ func EmitKustomizePatch(suggestions []HelmFixSuggestion, dir string) (*Kustomize
 	}
 
 	if len(baseYamlParts) > 0 {
-		baseFilePath, err := ensureSubpath(dir, "base.yaml")
-		if err != nil {
+		if _, err := ensureSubpath(dir, "base.yaml"); err != nil {
 			return nil, err
 		}
 		var baseContent []byte
@@ -1130,8 +1185,8 @@ func EmitKustomizePatch(suggestions []HelmFixSuggestion, dir string) (*Kustomize
 			}
 			baseContent = append(baseContent, part...)
 		}
-		// Write base.yaml with restricted mode 0600, updating existing file mode if already present.
-		if err := writeRestrictedFile(baseFilePath, baseContent); err != nil {
+		// Write base.yaml with restricted mode 0600, contained within root.
+		if err := writeRestrictedFile(root, "base.yaml", baseContent); err != nil {
 			return nil, fmt.Errorf("failed to write base.yaml: %w", err)
 		}
 		kust.Resources = append(kust.Resources, "base.yaml")
@@ -1174,8 +1229,7 @@ func EmitKustomizePatch(suggestions []HelmFixSuggestion, dir string) (*Kustomize
 		}
 		writtenFiles[patchFileName] = rg.key
 
-		patchFilePath, err := ensureSubpath(dir, patchFileName)
-		if err != nil {
+		if _, err := ensureSubpath(dir, patchFileName); err != nil {
 			return nil, err
 		}
 
@@ -1183,14 +1237,18 @@ func EmitKustomizePatch(suggestions []HelmFixSuggestion, dir string) (*Kustomize
 		if err != nil {
 			return nil, fmt.Errorf("failed to marshal patch for %s/%s: %w", rg.key.Kind, rg.key.Name, err)
 		}
-		if err := writeRestrictedFile(patchFilePath, patchBytes); err != nil {
+		if err := writeRestrictedFile(root, patchFileName, patchBytes); err != nil {
 			return nil, fmt.Errorf("failed to write patch file %q: %w", patchFileName, err)
 		}
 
+		groupSelector := "^$"
+		if rg.key.Group != "" {
+			groupSelector = "^" + regexp.QuoteMeta(rg.key.Group) + "$"
+		}
 		target := kustomizeTarget{
-			Group:   rg.key.Group,
-			Version: rg.key.Version,
-			Kind:    rg.key.Kind,
+			Group:   groupSelector,
+			Version: regexp.QuoteMeta(rg.key.Version),
+			Kind:    regexp.QuoteMeta(rg.key.Kind),
 			Name:    regexp.QuoteMeta(rg.key.Name),
 		}
 		if rg.key.Namespace != "" {
@@ -1223,8 +1281,7 @@ func EmitKustomizePatch(suggestions []HelmFixSuggestion, dir string) (*Kustomize
 		return result, nil
 	}
 
-	kustFilePath, err := ensureSubpath(dir, "kustomization.yaml")
-	if err != nil {
+	if _, err := ensureSubpath(dir, "kustomization.yaml"); err != nil {
 		return nil, err
 	}
 
@@ -1232,8 +1289,8 @@ func EmitKustomizePatch(suggestions []HelmFixSuggestion, dir string) (*Kustomize
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal kustomization.yaml: %w", err)
 	}
-	if err := writeRestrictedFile(kustFilePath, kustBytes); err != nil {
-		return nil, err
+	if err := writeRestrictedFile(root, "kustomization.yaml", kustBytes); err != nil {
+		return nil, fmt.Errorf("failed to write kustomization.yaml: %w", err)
 	}
 	return result, nil
 }
