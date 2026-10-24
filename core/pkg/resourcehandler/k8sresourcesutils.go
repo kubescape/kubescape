@@ -54,7 +54,7 @@ var (
 	// and collected together with the cloud resources (cautils.CloudResources).
 	MapResourceToApiGroupCloud = map[string][]string{
 		ClusterDescribe:         {"container.googleapis.com/v1", "eks.amazonaws.com/v1", "management.azure.com/v1"},
-		DescribeRepositories:    {"container.googleapis.com/v1", "eks.amazonaws.com/v1"}, //TODO - add azure when ensure-image-scanning-enabled-cloud supports ACR
+		DescribeRepositories:    {"container.googleapis.com/v1", "eks.amazonaws.com/v1", "management.azure.com/v1"},
 		ListEntitiesForPolicies: {"container.googleapis.com/v1", "eks.amazonaws.com/v1", "management.azure.com/v1"},
 		PolicyVersion:           {"eks.amazonaws.com/v1", "management.azure.com/v1"},
 		APIServerInfo:           {"apiserverinfo.kubescape.cloud/v1beta0"},
