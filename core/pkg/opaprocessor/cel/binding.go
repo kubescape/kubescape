@@ -5,6 +5,7 @@ import (
 	"slices"
 
 	"github.com/kubescape/k8s-interface/k8sinterface"
+	"github.com/kubescape/kubescape/v4/core/pkg/namespaceselector"
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -201,7 +202,9 @@ func (s *BindingScope) namespaceSelectorMatches(obj map[string]any, scope object
 		return true, nil
 	}
 	if isNamespaceObject(obj) {
-		return s.namespaceSelector.Matches(labels.Set(objectLabels(obj))), nil
+		name, _, _ := unstructured.NestedString(obj, "metadata", "name")
+		matched, _ := namespaceselector.Matches(s.namespaceSelector, name, objectLabels(obj), true)
+		return matched, nil
 	}
 	switch scope {
 	case scopeCluster:
@@ -213,10 +216,16 @@ func (s *BindingScope) namespaceSelectorMatches(obj map[string]any, scope object
 	if namespace == "" {
 		return false, fmt.Errorf("the resource is namespaced but has no metadata.namespace, so the binding's namespaceSelector cannot be evaluated")
 	}
-	if namespaceObject == nil {
+	collected := namespaceObject != nil
+	var nsLabels map[string]string
+	if collected {
+		nsLabels = objectLabels(namespaceObject)
+	}
+	matched, determinable := namespaceselector.Matches(s.namespaceSelector, namespace, nsLabels, collected)
+	if !determinable {
 		return false, fmt.Errorf("namespace %q was not collected, so the binding's namespaceSelector cannot be evaluated", namespace)
 	}
-	return s.namespaceSelector.Matches(labels.Set(objectLabels(namespaceObject))), nil
+	return matched, nil
 }
 
 // ruleResult is a three-way rule match, ordered so the strongest result wins.
