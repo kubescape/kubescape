@@ -1,6 +1,12 @@
 package attackpath
 
-import "sort"
+import (
+	"cmp"
+	"slices"
+	"strings"
+
+	"github.com/kubescape/kubescape/v4/core/pkg/vulnexposure"
+)
 
 // SearchOptions controls path search behaviour.
 type SearchOptions struct {
@@ -11,25 +17,41 @@ type SearchOptions struct {
 	// MaxDepth is the maximum number of edges in a path. Defaults to 10.
 	MaxDepth int
 	// MaxPaths caps the total number of paths returned. Defaults to 100.
-	// When the cap is hit, the Truncated flag on the result is set.
 	MaxPaths int
 }
 
 // SearchResult is the output of FindPaths.
 type SearchResult struct {
 	Paths []AttackPath
-	// Truncated is true when MaxPaths was hit before all paths were found.
+	// Truncated is true only when a path beyond MaxPaths exists: a search that
+	// finds exactly MaxPaths paths and nothing more is complete. When true,
+	// Paths holds the first MaxPaths paths in deterministic search order, not
+	// the MaxPaths highest-scoring ones.
 	Truncated bool
-	// UncertainEdgeCount is the total number of Certain=false edges across
-	// all returned paths, surfaced so a "no paths found" result can be
-	// accompanied by "but N uncertain edges exist" per proposal §7.
+	// DepthLimited is true when the search stopped extending at least one
+	// path because it reached MaxDepth. Longer paths may exist.
+	DepthLimited bool
+	// UncertainEdgeCount is the number of distinct Certain=false edges
+	// reachable from the source, whether or not they lie on a complete path.
+	// It is what lets a "no paths found" result be reported as "but N
+	// uncertain edges exist" per proposal §7.
 	UncertainEdgeCount int
+	// Warnings, Skipped and HasVulnerabilityData are copied from the Graph so
+	// a negative result carries its own diagnostics.
+	Warnings             []string
+	Skipped              []string
+	HasVulnerabilityData bool
+	// Incomplete is true when the graph was built from incomplete analysis
+	// (len(Warnings) > 0). An empty Paths with Incomplete set is not a
+	// statement that the cluster is safe.
+	Incomplete bool
 }
 
 // FindPaths performs a bounded, deterministic depth-first search from
 // opts.From to opts.To, returning all simple paths (no repeated nodes)
 // up to opts.MaxDepth edges long and opts.MaxPaths total.
-// Results are sorted by descending Score so the highest-risk path is first.
+// Results are sorted by descending Score, ties broken by path identity, so
+// the highest-risk path is first and the order is stable across runs.
 func FindPaths(g *Graph, opts SearchOptions) SearchResult {
 	if opts.From == "" {
 		opts.From = nodeID(NodeInternet, "", "")
@@ -44,9 +66,21 @@ func FindPaths(g *Graph, opts SearchOptions) SearchResult {
 		opts.MaxPaths = 100
 	}
 
-	var result SearchResult
-	visited := make(map[NodeID]bool)
-	var currentNodes []Node
+	result := SearchResult{
+		Warnings:             g.Warnings,
+		Skipped:              g.Skipped,
+		HasVulnerabilityData: g.HasVulnerabilityData,
+		Incomplete:           len(g.Warnings) > 0,
+	}
+
+	startNode, ok := g.Nodes[opts.From]
+	if !ok {
+		return result // source does not exist in graph
+	}
+	result.UncertainEdgeCount = countReachableUncertainEdges(g, opts.From)
+
+	visited := map[NodeID]bool{opts.From: true}
+	currentNodes := []Node{startNode}
 	var currentEdges []Edge
 
 	var dfs func(current NodeID)
@@ -55,24 +89,23 @@ func FindPaths(g *Graph, opts SearchOptions) SearchResult {
 			return
 		}
 		if current == opts.To {
-			path := buildPath(g, currentNodes, currentEdges)
-			result.Paths = append(result.Paths, path)
 			if len(result.Paths) >= opts.MaxPaths {
-				result.Truncated = true
+				result.Truncated = true // a path exists beyond the cap
+				return
+			}
+			result.Paths = append(result.Paths, buildPath(currentNodes, currentEdges))
+			return
+		}
+		neighbours := sortedEdges(g.Edges[current])
+		if len(currentEdges) >= opts.MaxDepth {
+			for _, e := range neighbours {
+				if _, known := g.Nodes[e.To]; known && !visited[e.To] {
+					result.DepthLimited = true
+					break
+				}
 			}
 			return
 		}
-		if len(currentEdges) >= opts.MaxDepth {
-			return
-		}
-
-		// Sort neighbours by To node ID for determinism.
-		neighbours := make([]Edge, len(g.Edges[current]))
-		copy(neighbours, g.Edges[current])
-		sort.Slice(neighbours, func(i, j int) bool {
-			return neighbours[i].To < neighbours[j].To
-		})
-
 		for _, edge := range neighbours {
 			if visited[edge.To] {
 				continue // no cycles
@@ -84,96 +117,117 @@ func FindPaths(g *Graph, opts SearchOptions) SearchResult {
 			visited[edge.To] = true
 			currentNodes = append(currentNodes, nextNode)
 			currentEdges = append(currentEdges, edge)
-
 			dfs(edge.To)
-
 			// backtrack
 			currentNodes = currentNodes[:len(currentNodes)-1]
 			currentEdges = currentEdges[:len(currentEdges)-1]
 			visited[edge.To] = false
 		}
 	}
-
-	startNode, ok := g.Nodes[opts.From]
-	if !ok {
-		return result // source does not exist in graph
-	}
-	visited[opts.From] = true
-	currentNodes = append(currentNodes, startNode)
 	dfs(opts.From)
 
-	// Score and sort: highest score first.
 	for i := range result.Paths {
 		result.Paths[i].Score = ScorePath(result.Paths[i])
 	}
-	sort.Slice(result.Paths, func(i, j int) bool {
-		return result.Paths[i].Score > result.Paths[j].Score
-	})
-
-	// Count uncertain edges across all paths.
-	for _, p := range result.Paths {
-		for _, e := range p.Edges {
-			if !e.Certain {
-				result.UncertainEdgeCount++
-			}
+	slices.SortStableFunc(result.Paths, func(a, b AttackPath) int {
+		if c := cmp.Compare(b.Score, a.Score); c != 0 {
+			return c // higher score first
 		}
-	}
-
+		return strings.Compare(pathKey(a), pathKey(b))
+	})
 	return result
 }
 
-// buildPath assembles one AttackPath from the DFS node/edge stacks.
-func buildPath(g *Graph, nodes []Node, edges []Edge) AttackPath {
-	p := AttackPath{
-		Nodes: make([]Node, len(nodes)),
-		Edges: make([]Edge, len(edges)),
-	}
-	copy(p.Nodes, nodes)
-	copy(p.Edges, edges)
-
-	certain := true
-	maxSev := ""
-	for _, e := range p.Edges {
-		if !e.Certain {
-			certain = false
+// sortedEdges returns a copy of edges ordered by destination, then kind,
+// then certain-before-uncertain, then evidence, so traversal order never
+// depends on insertion order.
+func sortedEdges(edges []Edge) []Edge {
+	out := slices.Clone(edges)
+	slices.SortFunc(out, func(a, b Edge) int {
+		if c := cmp.Compare(a.To, b.To); c != 0 {
+			return c
 		}
+		if c := cmp.Compare(a.Kind, b.Kind); c != 0 {
+			return c
+		}
+		if a.Certain != b.Certain {
+			if a.Certain {
+				return -1
+			}
+			return 1
+		}
+		return cmp.Compare(a.Evidence, b.Evidence)
+	})
+	return out
+}
+
+// pathKey is a total order over distinct paths, used as the score tie-break.
+func pathKey(p AttackPath) string {
+	var sb strings.Builder
+	for _, e := range p.Edges {
+		sb.WriteString(string(e.From))
+		sb.WriteString(">")
+		sb.WriteString(string(e.To))
+		sb.WriteString("/")
+		sb.WriteString(string(e.Kind))
+		if e.Certain {
+			sb.WriteString("/certain/")
+		} else {
+			sb.WriteString("/uncertain/")
+		}
+		sb.WriteString(e.Evidence)
+		sb.WriteString("|")
 	}
-	for _, n := range p.Nodes {
-		if n.Kind == NodeCVE {
-			// CVE node Name is the CVE ID; severity is in the incoming edge Evidence.
-			for _, e := range p.Edges {
-				if e.To == n.ID && e.Kind == EdgeVulnerable {
-					// Evidence format: "severity=Critical fix=true"
-					sev := extractSeverity(e.Evidence)
-					if CVESeverityRank(sev) > CVESeverityRank(maxSev) {
-						maxSev = sev
-					}
-				}
+	return sb.String()
+}
+
+// countReachableUncertainEdges counts distinct Certain=false edges reachable
+// from the source, ignoring depth and the sink.
+func countReachableUncertainEdges(g *Graph, from NodeID) int {
+	seen := map[NodeID]bool{from: true}
+	queue := []NodeID{from}
+	count := 0
+	for len(queue) > 0 {
+		cur := queue[0]
+		queue = queue[1:]
+		for _, e := range g.Edges[cur] {
+			if !e.Certain {
+				count++
+			}
+			if !seen[e.To] {
+				seen[e.To] = true
+				queue = append(queue, e.To)
 			}
 		}
 	}
-	p.Certain = certain
-	p.CVESeverity = maxSev
-	return p
+	return count
 }
 
-// extractSeverity parses the severity from an EdgeVulnerable Evidence string.
-func extractSeverity(evidence string) string {
-	// Evidence format: "severity=Critical fix=true"
-	const prefix = "severity="
-	start := 0
-	for i := 0; i < len(evidence)-len(prefix); i++ {
-		if evidence[i:i+len(prefix)] == prefix {
-			start = i + len(prefix)
-			break
+// buildPath assembles one AttackPath from the DFS node/edge stacks.
+func buildPath(nodes []Node, edges []Edge) AttackPath {
+	p := AttackPath{
+		Nodes:   slices.Clone(nodes),
+		Edges:   slices.Clone(edges),
+		Certain: true,
+	}
+	for _, e := range p.Edges {
+		if !e.Certain {
+			p.Certain = false
 		}
 	}
-	if start == 0 {
-		return ""
+	best := vulnexposure.SeverityUnknown
+	for _, n := range p.Nodes {
+		for _, v := range n.Vulnerabilities {
+			if s := vulnexposure.ParseSeverity(v.Severity); s > best {
+				best = s
+			}
+			if v.FixAvailable {
+				p.CVEFixAvailable = true
+			}
+		}
 	}
-	end := start
-	for end < len(evidence) && evidence[end] != ' ' {
-		end++
+	if best > vulnexposure.SeverityUnknown {
+		p.CVESeverity = best.String()
 	}
-	return evidence[start:end]
+	return p
 }
