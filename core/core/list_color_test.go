@@ -195,12 +195,9 @@ func TestPrettyPrintControls_DestinationFileNotTerminal(t *testing.T) {
 	gchalk.SetLevel(gchalk.LevelAnsi256)
 
 	t.Setenv("FORCE_COLOR", "0")
-	_ = os.Unsetenv("FORCE_COLOR")
-	_ = os.Unsetenv("NO_COLOR")
 
-	tmpFile, err := os.CreateTemp("", "ks-list-test-*")
+	tmpFile, err := os.CreateTemp(t.TempDir(), "ks-list-test-*")
 	require.NoError(t, err)
-	defer os.Remove(tmpFile.Name())
 	defer tmpFile.Close()
 
 	rescueStdout := os.Stdout
@@ -220,4 +217,40 @@ func TestPrettyPrintControls_DestinationFileNotTerminal(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.False(t, ansiRegex.MatchString(string(data)), "output redirected to file should not contain ANSI sequences")
+}
+
+func TestPrettyPrint_NoColorEnvTakesPrecedence(t *testing.T) {
+	oldLevel := gchalk.GetLevel()
+	defer gchalk.SetLevel(oldLevel)
+	gchalk.SetLevel(gchalk.LevelAnsi256)
+
+	t.Setenv("FORCE_COLOR", "1")
+	t.Setenv("NO_COLOR", "1")
+
+	ctx := context.Background()
+	entries := []metav1.ControlListEntry{
+		{ID: "C-0001", Name: "Control 1", Frameworks: []string{"NSA"}},
+	}
+
+	got := captureStdout(t, func() {
+		prettyPrintControls(ctx, entries)
+	})
+
+	assert.False(t, ansiRegex.MatchString(got), "NO_COLOR must disable ANSI colors even if FORCE_COLOR is set")
+}
+
+func TestShortFormatControlRows_Colored(t *testing.T) {
+	rows := generateControlRows([]metav1.ControlListEntry{
+		{ID: "C-0001", Name: "Control 1", Frameworks: []string{"NSA"}},
+	}, true)
+
+	shortRows := shortFormatControlRows(rows, true)
+	require.Len(t, shortRows, 1)
+
+	formatted, ok := shortRows[0][0].(string)
+	require.True(t, ok)
+
+	assert.Contains(t, formatted, gchalk.WithBrightWhite().Bold("Control ID"))
+	assert.Contains(t, formatted, gchalk.WithBrightCyan().Bold("C-0001"))
+	assert.Contains(t, formatted, gchalk.Cyan("https://hub.armosec.io/docs/c-0001"))
 }

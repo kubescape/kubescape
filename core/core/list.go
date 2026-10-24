@@ -370,9 +370,9 @@ func prettyPrintControls(ctx context.Context, entries []metav1.ControlListEntry)
 	controlsTable.Style().Box = table.StyleBoxRounded
 	controlsTable.SetColumnConfigs([]table.ColumnConfig{{Number: 1, Align: text.AlignRight}})
 
+	uncoloredRows := generateControlRows(entries, false)
+	short := utils.CheckShortTerminalWidth(uncoloredRows, table.Row{"Control ID", "Control name", "Docs", "Frameworks"})
 	controlRows := generateControlRows(entries, colored)
-
-	short := utils.CheckShortTerminalWidth(controlRows, table.Row{"Control ID", "Control name", "Docs", "Frameworks"})
 	if short {
 		header := "Controls"
 		if colored {
