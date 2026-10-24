@@ -3622,10 +3622,11 @@ func TestReview4034_APIGroupExactMatching(t *testing.T) {
 			} `yaml:"metadata"`
 		}
 		require.NoError(t, yaml.Unmarshal(docBytes, &doc))
-		if doc.APIVersion == "v1" {
+		switch doc.APIVersion {
+		case "v1":
 			assert.Equal(t, true, doc.Metadata.Labels["coreOnly"])
 			assert.Nil(t, doc.Metadata.Labels["customOnly"])
-		} else if doc.APIVersion == "custom.example.com/v1" {
+		case "custom.example.com/v1":
 			assert.Equal(t, true, doc.Metadata.Labels["customOnly"])
 			assert.Nil(t, doc.Metadata.Labels["coreOnly"])
 		}
