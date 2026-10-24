@@ -226,8 +226,26 @@ func expandListEnvelope(u *unstructured.Unstructured, listKind string) ([]unstru
 	if !ok || itemsRaw == nil {
 		return nil, fmt.Errorf("%s.items must be an array", listKind)
 	}
-	if _, ok := itemsRaw.([]any); !ok {
+	items, ok := itemsRaw.([]any)
+	if !ok {
 		return nil, fmt.Errorf("%s.items must be an array", listKind)
+	}
+	// Validate before ToList and typed-list defaulting can replace an
+	// unreadable kind. Generic Lists cannot supply a missing item kind.
+	for i, raw := range items {
+		item, ok := raw.(map[string]any)
+		if !ok || item == nil {
+			return nil, fmt.Errorf("%s.items[%d] is not a Kubernetes object", listKind, i)
+		}
+		kind, present := item["kind"]
+		if present && kind != nil {
+			if _, ok := kind.(string); !ok {
+				return nil, fmt.Errorf("%s.items[%d]: kind must be a string", listKind, i)
+			}
+		}
+		if listKind == "List" && (kind == nil || kind == "") {
+			return nil, fmt.Errorf("%s.items[%d]: kind is required", listKind, i)
+		}
 	}
 
 	ulist, err := u.ToList()
