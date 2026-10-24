@@ -35,7 +35,7 @@ type NamespaceResult struct {
 	CurrentEffectiveLevel Level
 
 	// Results contains WorkloadResult for every evaluated workload, both
-	// passing and failing, sorted by Kind then Name.
+	// passing and failing, sorted by Kind, Namespace, then Name.
 	Results []WorkloadResult
 
 	// DecodeWarnings contains human-readable messages for workloads that
@@ -74,7 +74,7 @@ func (nr *NamespaceResult) HasFailures() bool {
 // target PSS level and produces a NamespaceResult. Workloads whose PodSpec
 // cannot be extracted are counted as unevaluated and recorded in DecodeWarnings.
 //
-// The results are sorted by Kind then Name for stable, deterministic output.
+// The results are sorted by Kind, Namespace, then Name for deterministic output.
 func Aggregate(namespace string, workloads []unstructured.Unstructured, targetLevel Level) NamespaceResult {
 	nr := NamespaceResult{
 		Namespace:             namespace,
@@ -88,9 +88,17 @@ func Aggregate(namespace string, workloads []unstructured.Unstructured, targetLe
 		kind := item.GetKind()
 		name := item.GetName()
 
-		res, err := WorkloadResultFromUnstructured(kind, name, namespace, item.Object, targetLevel)
+		workloadNamespace := item.GetNamespace()
+		if workloadNamespace == "" {
+			workloadNamespace = namespace
+		}
+		res, err := WorkloadResultFromUnstructured(kind, name, workloadNamespace, item.Object, targetLevel)
 		if err != nil {
-			nr.DecodeWarnings = append(nr.DecodeWarnings, fmt.Sprintf("%s/%s: %v", kind, name, err))
+			identity := kind + "/" + name
+			if workloadNamespace != "" {
+				identity = workloadNamespace + "/" + identity
+			}
+			nr.DecodeWarnings = append(nr.DecodeWarnings, fmt.Sprintf("%s: %v", identity, err))
 			nr.UnevaluatedWorkloads++
 			continue
 		}
@@ -108,10 +116,13 @@ func Aggregate(namespace string, workloads []unstructured.Unstructured, targetLe
 		nr.Results = append(nr.Results, res)
 	}
 
-	// Sort by Kind then Name for deterministic output.
+	// Namespace is part of identity, including when a local scan has no scope.
 	sort.Slice(nr.Results, func(i, j int) bool {
 		if nr.Results[i].Kind != nr.Results[j].Kind {
 			return nr.Results[i].Kind < nr.Results[j].Kind
+		}
+		if nr.Results[i].Namespace != nr.Results[j].Namespace {
+			return nr.Results[i].Namespace < nr.Results[j].Namespace
 		}
 		return nr.Results[i].Name < nr.Results[j].Name
 	})
@@ -147,6 +158,7 @@ func (nr *NamespaceResult) ToMap() map[string]any {
 		failingWorkloads = append(failingWorkloads, map[string]any{
 			"kind":       res.Kind,
 			"name":       res.Name,
+			"namespace":  res.Namespace,
 			"violations": vSummaries,
 			"passes_at":  res.PassesAt.String(),
 		})
