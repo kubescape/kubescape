@@ -25,6 +25,12 @@ func setupColorTest(t *testing.T) {
 	})
 	gchalk.SetLevel(gchalk.LevelAnsi256)
 	t.Setenv("FORCE_COLOR", "1")
+	if oldNoColor, set := os.LookupEnv("NO_COLOR"); set {
+		_ = os.Unsetenv("NO_COLOR")
+		t.Cleanup(func() {
+			_ = os.Setenv("NO_COLOR", oldNoColor)
+		})
+	}
 }
 
 func TestPrettyPrintControls_HeadersAreBold(t *testing.T) {
@@ -253,4 +259,40 @@ func TestShortFormatControlRows_Colored(t *testing.T) {
 	assert.Contains(t, formatted, gchalk.WithBrightWhite().Bold("Control ID"))
 	assert.Contains(t, formatted, gchalk.WithBrightCyan().Bold("C-0001"))
 	assert.Contains(t, formatted, gchalk.Cyan("https://hub.armosec.io/docs/c-0001"))
+}
+
+func TestShouldColor_ForceColorVariations(t *testing.T) {
+	oldLevel := gchalk.GetLevel()
+	defer gchalk.SetLevel(oldLevel)
+	gchalk.SetLevel(gchalk.LevelAnsi256)
+
+	tmpFile, err := os.CreateTemp(t.TempDir(), "ks-shouldcolor-*")
+	require.NoError(t, err)
+	defer tmpFile.Close()
+
+	// Isolate from inherited NO_COLOR
+	if old, set := os.LookupEnv("NO_COLOR"); set {
+		_ = os.Unsetenv("NO_COLOR")
+		defer os.Setenv("NO_COLOR", old)
+	}
+
+	// 1. FORCE_COLOR unset on non-terminal file -> false
+	_ = os.Unsetenv("FORCE_COLOR")
+	assert.False(t, shouldColor(tmpFile), "unset FORCE_COLOR on file should be false")
+
+	// 2. FORCE_COLOR empty string -> true (honor empty FORCE_COLOR as enabling color)
+	t.Setenv("FORCE_COLOR", "")
+	assert.True(t, shouldColor(tmpFile), "empty string FORCE_COLOR should force color")
+
+	// 3. FORCE_COLOR="0" -> false
+	t.Setenv("FORCE_COLOR", "0")
+	assert.False(t, shouldColor(tmpFile), "FORCE_COLOR=0 should disable color")
+
+	// 4. FORCE_COLOR="1" -> true
+	t.Setenv("FORCE_COLOR", "1")
+	assert.True(t, shouldColor(tmpFile), "FORCE_COLOR=1 should force color")
+
+	// 5. NO_COLOR set takes precedence over FORCE_COLOR="" or "1"
+	t.Setenv("NO_COLOR", "")
+	assert.False(t, shouldColor(tmpFile), "NO_COLOR should take precedence over FORCE_COLOR")
 }

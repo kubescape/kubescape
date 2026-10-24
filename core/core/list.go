@@ -269,8 +269,8 @@ func shouldColor(w io.Writer) bool {
 		return false
 	}
 	if f, ok := w.(*os.File); ok {
-		if os.Getenv("FORCE_COLOR") != "" && os.Getenv("FORCE_COLOR") != "0" {
-			return true
+		if val, set := os.LookupEnv("FORCE_COLOR"); set {
+			return val != "0"
 		}
 		return isTerminal(f.Fd()) || isCygwinTerminal(f.Fd())
 	}
