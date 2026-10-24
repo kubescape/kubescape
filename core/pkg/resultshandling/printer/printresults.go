@@ -131,6 +131,21 @@ func ResolveDefaultOutputFile(format, defaultBaseName string) string {
 	return outputFile
 }
 
+// DefaultBaseNameForFormat returns the fallback base file name used when
+// --output is blank or names a directory.
+func DefaultBaseNameForFormat(format string) string {
+	switch format {
+	case CycloneDXFormat, SPDXFormat:
+		return "sbom"
+	case ExceptionsFormat:
+		return "exceptions"
+	case GitHubActionsFormat:
+		return "github-actions"
+	default:
+		return "report"
+	}
+}
+
 // FormatOutputExt maps a format to the extension its printer enforces in
 // SetWriter. Callers resolving an --output path must read it from here rather
 // than re-deriving it, so a format can never resolve to a path its printer

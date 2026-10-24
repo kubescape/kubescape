@@ -262,31 +262,24 @@ func GetOutputPrinters(scanInfo *cautils.ScanInfo, ctx context.Context, clusterN
 }
 
 func resolvedOutputPath(format, outputFile string) string {
-	trimmed := strings.TrimSpace(outputFile)
-	if trimmed == "" {
+	if outputFile == "" {
 		return ""
 	}
+	baseName := printer.DefaultBaseNameForFormat(format)
+	resolvedFormat := format
+	if _, ok := printer.FormatOutputExt[format]; !ok {
+		resolvedFormat = printer.PrettyFormat
+	}
+	path, explicit := printer.ResolveOutputFile(resolvedFormat, outputFile, baseName)
 	// Well-known sinks are shared destinations, not files: two formats both
 	// writing stdout (or both discarding to /dev/null) is the intended
 	// multi-format behavior, same as an empty --output, so they are skipped
 	// from collision tracking. This mirrors the sink handling in
 	// printer.ResolveOutputFile so the detector and the printers agree.
-	if trimmed == os.Stdout.Name() || trimmed == os.DevNull {
+	if !explicit || path == "" || path == os.DevNull {
 		return ""
 	}
-	ext := fileExtForFormat(format)
-
-	// Case-insensitive, exactly like printer.HasOutputExt in
-	// ResolveOutputFile, so the detector predicts the same path the
-	// printers actually open for mixed-case extensions (see #3334).
-	if ext == printer.YamlOutputExt && printer.HasOutputExt(trimmed, ".yml") {
-		return trimmed
-	}
-
-	if ext != "" && !printer.HasOutputExt(trimmed, ext) {
-		return trimmed + ext
-	}
-	return trimmed
+	return path
 }
 
 // fileExtForFormat returns the extension the format's printer appends to

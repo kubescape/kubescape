@@ -632,3 +632,13 @@ func TestResolveDefaultOutputFile(t *testing.T) {
 	assert.Equal(t, "report.md", ResolveDefaultOutputFile(MarkdownFormat, "report"))
 	assert.Equal(t, "report.yaml", ResolveDefaultOutputFile(PolicyReportFormat, "report"))
 }
+
+func TestDefaultBaseNameForFormat(t *testing.T) {
+	assert.Equal(t, "sbom", DefaultBaseNameForFormat(CycloneDXFormat))
+	assert.Equal(t, "sbom", DefaultBaseNameForFormat(SPDXFormat))
+	assert.Equal(t, "exceptions", DefaultBaseNameForFormat(ExceptionsFormat))
+	assert.Equal(t, "github-actions", DefaultBaseNameForFormat(GitHubActionsFormat))
+	assert.Equal(t, "report", DefaultBaseNameForFormat(JsonFormat))
+	assert.Equal(t, "report", DefaultBaseNameForFormat(PrettyFormat))
+	assert.Equal(t, "report", DefaultBaseNameForFormat("unknown"))
+}
