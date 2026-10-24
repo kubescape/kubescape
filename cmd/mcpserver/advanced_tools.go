@@ -15,6 +15,7 @@ import (
 )
 
 var supportedAdvancedWorkloadKinds = []string{"pods", "deployments", "daemonsets", "statefulsets"}
+var supportedPatchTypes = []string{"strategic-merge-patch", "merge-patch", "json-patch"}
 
 func createAdvancedTools(ksServer *KubescapeMcpserver) {
 	// Tool 1: scan_resource_slice
@@ -204,6 +205,7 @@ func createAdvancedTools(ksServer *KubescapeMcpserver) {
 		mcp.WithString("namespace", mcp.Description("Namespace of the resource (optional for cluster-scoped)")),
 		mcp.WithString("resource_name", mcp.Required(), mcp.Description("Name of the resource to patch")),
 		mcp.WithString("patch_json", mcp.Required(), mcp.Description("JSON representation of the patch to apply")),
+		mcp.WithString("patch_type", mcp.Description("Patch type to apply (optional, default: strategic-merge-patch; alternatives: merge-patch, json-patch)")),
 	)
 
 	ksServer.s.AddTool(dryRunRemediationTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -232,9 +234,31 @@ func createAdvancedTools(ksServer *KubescapeMcpserver) {
 		if toolErr != nil {
 			return toolErr, nil
 		}
+		patchTypeStr, toolErr := mcpStringArg(args, "patch_type")
+		if toolErr != nil {
+			return toolErr, nil
+		}
 
 		if !json.Valid([]byte(patchJSON)) {
 			return mcpToolError(ErrCodeInvalidArgument, "patch_json must be valid JSON", map[string]any{"argument": "patch_json"}), nil
+		}
+
+		if patchTypeStr == "" {
+			patchTypeStr = "strategic-merge-patch"
+		}
+
+		var patchType types.PatchType
+		switch strings.ToLower(patchTypeStr) {
+		case "strategic-merge-patch", "strategic-merge", string(types.StrategicMergePatchType):
+			patchType = types.StrategicMergePatchType
+		case "merge-patch", "merge", string(types.MergePatchType):
+			patchType = types.MergePatchType
+		case "json-patch", "json", string(types.JSONPatchType):
+			patchType = types.JSONPatchType
+		default:
+			return mcpToolError(ErrCodeInvalidArgument,
+				fmt.Sprintf("invalid patch_type %q; supported patch types are: %s", patchTypeStr, strings.Join(supportedPatchTypes, ", ")),
+				map[string]any{"argument": "patch_type", "supported_patch_types": supportedPatchTypes}), nil
 		}
 
 		// Security/Privilege Drop checks: explicitly allow only certain workload kinds.
@@ -262,7 +286,6 @@ func createAdvancedTools(ksServer *KubescapeMcpserver) {
 		}
 
 		dynClient := k8sClient.DynamicClient
-		patchType := types.StrategicMergePatchType
 
 		var patchedObj *unstructured.Unstructured
 		patchOptions := metav1.PatchOptions{
