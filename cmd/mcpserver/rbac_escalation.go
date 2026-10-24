@@ -92,7 +92,8 @@ func createRBACEscalationTools(ksServer *KubescapeMcpserver) {
 
 			resources, err := listRBACResources(ctx, k8sClient.DynamicClient)
 			if err != nil {
-				return mcpToolError(ErrCodeK8sClientError, err.Error(), nil)
+				code := classifyScanError(err)
+				return mcpToolError(code, classifyScanErrorMessage(code, "RBAC escalation", err), nil)
 			}
 
 			roles, clusterRoles, roleBindings, clusterRoleBindings, serviceAccounts, decodeErrs := rbacgraph.FromResources(resources)
