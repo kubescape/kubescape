@@ -26,7 +26,7 @@ import (
 var configMapGVR = schema.GroupVersionResource{Group: "", Version: "v1", Resource: "configmaps"}
 
 var (
-	sensitiveEnvKeyRegex = regexp.MustCompile(`(?i)(?:(?:^|_|-)(?:PASSWORD|PASSWD|SECRET|TOKEN|API_KEY|APIKEY|AUTH_TOKEN|AUTH_CONFIG|PRIVATE_KEY|ACCESS_KEY|CLIENT_SECRET|DATABASE_URL|DB_PASS|DB_PASSWORD|CREDENTIALS?|SSH_AUTH_SOCK|DOCKER_AUTH_CONFIG|JWT|BEARER)|PGPASS(?:WORD|WD)|[A-Za-z0-9_]+_PWD)(?:$|_|-)`)
+	sensitiveEnvKeyRegex = regexp.MustCompile(`(?i)(?:(?:^|_|-|\.)(?:PASSWORD|PASSWD|SECRET|TOKEN|API[._-]KEY|APIKEY|AUTH[._-]TOKEN|AUTH[._-]CONFIG|PRIVATE[._-]KEY|ACCESS[._-]KEY|CLIENT[._-]SECRET|DATABASE[._-]URL|DB[._-]PASS|DB[._-]PASSWORD|CREDENTIALS?|SSH[._-]AUTH[._-]SOCK|DOCKER[._-]AUTH[._-]CONFIG|JWT|BEARER)|PGPASS(?:WORD|WD)|[A-Za-z0-9_]+_PWD)(?:$|_|-|\.)`)
 	privateKeyRegex      = regexp.MustCompile(`-----BEGIN (?:[A-Z0-9]+ )?PRIVATE KEY-----`)
 	awsAccessKeyRegex    = regexp.MustCompile(`\b(?:AKIA|ASIA)[0-9A-Z]{16}\b`)
 	githubTokenRegex     = regexp.MustCompile(`\b(?:gh[pousr]_[A-Za-z0-9_]{36,}|github_pat_[A-Za-z0-9_]{22,})\b`)
@@ -36,7 +36,7 @@ var (
 	uriStartRegex        = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9+.-]*://`)
 
 	sensitiveConfigMapFileRegex = regexp.MustCompile(`(?i)(?:id_rsa|id_ecdsa|id_ed25519|credentials\.json|\.env|jwt\.key)$`)
-	nonSecretKeySuffixRegex     = regexp.MustCompile(`(?i)(?:[_-](?:NAME|FILE|PATH|DIR|REF|TTL|EXPIRY|EXPIRES|TIMEOUT|LENGTH|LEN|URL_PATH|ENABLED|TYPE|ENDPOINT|ISSUER|AUDIENCE|ALGORITHM|ALG|HEADER|SCOPES?)|(?:TOKEN|JWT|AUTH)[_-](?:URL|URI))$`)
+	nonSecretKeySuffixRegex     = regexp.MustCompile(`(?i)(?:[._-](?:NAME|FILE|PATH|DIR|REF|TTL|EXPIRY|EXPIRES|TIMEOUT|LENGTH|LEN|URL[._-]PATH|ENABLED|TYPE|ENDPOINT|ISSUER|AUDIENCE|ALGORITHM|ALG|HEADER|SCOPES?)|(?:TOKEN|JWT|AUTH)[._-](?:URL|URI))$`)
 	queryCredentialKeyRegex     = regexp.MustCompile(`(?i)^(?:pwd|sslpassword)$`)
 )
 
