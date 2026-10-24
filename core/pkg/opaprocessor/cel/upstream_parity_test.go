@@ -8,9 +8,11 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	admissionv1 "k8s.io/api/admission/v1"
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -90,6 +92,11 @@ type parityOutcome struct {
 	Msgs map[int]string
 	// Deny is the effective decision: whether the request is rejected.
 	Deny bool
+	// GateBudgetSpent is an observation of the apiserver side and is not part
+	// of the compared outcome: the gate's cost budget ran out. Under
+	// failurePolicy Ignore that looks like any other skip, so the fixtures
+	// that claim an exhausted gate check it here.
+	GateBudgetSpent bool
 }
 
 func (o parityOutcome) String() string {
@@ -356,6 +363,37 @@ func parityKubescape(t *testing.T, c parityCase, obj, ns, params map[string]any)
 	return out
 }
 
+// parityRecorder wraps an upstream ConditionEvaluator and notes what each call
+// returned, so the harness reads the errors of the real Validate call instead of
+// evaluating the expressions a second time. It forwards every call unchanged:
+// the arguments, the budget and the results pass through as they came, and it
+// adds no evaluation of its own. A recorder belongs to one run; the mutex makes
+// it safe should the wrapped evaluator be called from several goroutines.
+type parityRecorder struct {
+	celplugin.ConditionEvaluator
+
+	mu      sync.Mutex
+	calls   int
+	results []celplugin.EvaluationResult
+	err     error
+}
+
+func (r *parityRecorder) ForInput(ctx context.Context, versionedAttr *admission.VersionedAttributes, request *admissionv1.AdmissionRequest, inputs celplugin.OptionalVariableBindings, namespace *corev1.Namespace, runtimeCELCostBudget int64) ([]celplugin.EvaluationResult, int64, error) {
+	results, remaining, err := r.ConditionEvaluator.ForInput(ctx, versionedAttr, request, inputs, namespace, runtimeCELCostBudget)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.calls++
+	r.results, r.err = results, err
+	return results, remaining, err
+}
+
+// recorded returns the number of calls and the results and error of the last one.
+func (r *parityRecorder) recorded() (int, []celplugin.EvaluationResult, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.calls, r.results, r.err
+}
+
 // parityUpstream runs a case through the apiserver's admission policy
 // components.
 func parityUpstream(t *testing.T, c parityCase, obj, old, ns, params map[string]any) parityOutcome {
@@ -375,13 +413,15 @@ func parityUpstream(t *testing.T, c parityCase, obj, old, ns, params map[string]
 
 	var matcher matchconditions.Matcher
 	var gateFilter celplugin.ConditionEvaluator
+	var gateRecorder *parityRecorder
 	if len(p.Spec.MatchConditions) > 0 {
 		accessors := make([]celplugin.ExpressionAccessor, len(p.Spec.MatchConditions))
 		for i := range p.Spec.MatchConditions {
 			accessors[i] = (*matchconditions.MatchCondition)(&p.Spec.MatchConditions[i])
 		}
 		gateFilter = compiler.CompileCondition(accessors, withAuthorizer, environment.StoredExpressions)
-		matcher = matchconditions.NewMatcher(gateFilter, p.Spec.FailurePolicy, "policy", "validate", p.Name)
+		gateRecorder = &parityRecorder{ConditionEvaluator: gateFilter}
+		matcher = matchconditions.NewMatcher(gateRecorder, p.Spec.FailurePolicy, "policy", "validate", p.Name)
 	}
 	validations := make([]celplugin.ExpressionAccessor, len(p.Spec.Validations))
 	messages := make([]celplugin.ExpressionAccessor, len(p.Spec.Validations))
@@ -393,11 +433,18 @@ func parityUpstream(t *testing.T, c parityCase, obj, old, ns, params map[string]
 	}
 	// NewValidator dereferences the audit annotation filter, so an empty
 	// compiled one stands in for a policy without audit annotations.
+	//
+	// The validation and message filters are wrapped so that the errors they
+	// return during Validate are observed: Validate hands the message filter
+	// whatever budget the validations left, and reports its failure only as the
+	// text of a decision.
+	validationRecorder := &parityRecorder{ConditionEvaluator: compiler.CompileCondition(validations, withAuthorizer, environment.StoredExpressions)}
+	messageRecorder := &parityRecorder{ConditionEvaluator: compiler.CompileCondition(messages, withoutAuthorizer, environment.StoredExpressions)}
 	validator := validating.NewValidator(
-		compiler.CompileCondition(validations, withAuthorizer, environment.StoredExpressions),
+		validationRecorder,
 		matcher,
 		compiler.CompileCondition(nil, withAuthorizer, environment.StoredExpressions),
-		compiler.CompileCondition(messages, withoutAuthorizer, environment.StoredExpressions),
+		messageRecorder,
 		p.Spec.FailurePolicy, nil)
 
 	subject := &unstructured.Unstructured{Object: obj}
@@ -439,12 +486,14 @@ func parityUpstream(t *testing.T, c parityCase, obj, old, ns, params map[string]
 	out := parityOutcome{Gate: parityGateMatched}
 	if matcher != nil {
 		result := matcher.Match(ctx, versioned, boundParams, parityAllowAll{})
+		_, _, gateErr := gateRecorder.recorded()
+		out.GateBudgetSpent = errors.Is(gateErr, apiservercel.ErrOutOfBudget)
 		switch {
 		case result.Error != nil:
 			out.Gate = parityGateError
 			out.GateErr = parityErrRuntime
 			switch {
-			case errors.Is(result.Error, apiservercel.ErrOutOfBudget):
+			case out.GateBudgetSpent:
 				out.GateErr = parityErrBudget
 			case len(gateFilter.CompilationErrors()) > 0:
 				out.GateErr = parityErrCompile
@@ -463,14 +512,12 @@ func parityUpstream(t *testing.T, c parityCase, obj, old, ns, params map[string]
 		return out
 	}
 
-	// A validation that exhausts the cost budget ends the whole policy: the
-	// apiserver reports one error decision for it instead of one per validation.
-	budgetSpent := false
-	filter := compiler.CompileCondition(validations, withAuthorizer, environment.StoredExpressions)
-	if _, _, err := filter.ForInput(ctx, versioned, celplugin.CreateAdmissionRequest(versioned.Attributes, metav1.GroupVersionResource(versioned.GetResource()), metav1.GroupVersionKind(versioned.VersionedKind)),
-		celplugin.OptionalVariableBindings{VersionedParams: boundParams}, celplugin.CreateNamespaceObject(namespaceObject), budget); err != nil {
-		budgetSpent = errors.Is(err, apiservercel.ErrOutOfBudget)
-	}
+	// A validation that exhausts the cost budget ends the whole policy, and so
+	// does a messageExpression that runs out of what the validations left: the
+	// apiserver reports one error decision for it. Both errors were returned to
+	// Validate above, and the recorders hold them.
+	_, validationResults, validationErr := validationRecorder.recorded()
+	_, _, messageErr := messageRecorder.recorded()
 	for i, d := range result.Decisions {
 		switch {
 		case d.Evaluation == validating.EvalError && d.Action == validating.ActionAdmit:
@@ -479,7 +526,13 @@ func parityUpstream(t *testing.T, c parityCase, obj, old, ns, params map[string]
 		case d.Evaluation == validating.EvalError:
 			kind := parityErrRuntime
 			switch {
-			case budgetSpent:
+			case i < len(validationResults) && validationResults[i].Error != nil:
+				// The validation itself failed; only a compile failure is told
+				// apart from a runtime one.
+				if len(compiler.CompileCondition(validations[i:i+1], withAuthorizer, environment.StoredExpressions).CompilationErrors()) > 0 {
+					kind = parityErrCompile
+				}
+			case errors.Is(validationErr, apiservercel.ErrOutOfBudget), errors.Is(messageErr, apiservercel.ErrOutOfBudget):
 				kind = parityErrBudget
 			case i < len(validations) && len(compiler.CompileCondition(validations[i:i+1], withAuthorizer, environment.StoredExpressions).CompilationErrors()) > 0:
 				kind = parityErrCompile
@@ -747,6 +800,12 @@ func TestUpstreamParityAdaptersReportOutcomes(t *testing.T) {
 			"gate=skipped vals=[] deny=false"},
 		{parityNew("budget", parityCatBudget, parityBudget(1), parityExprs(parityCostly(55))),
 			"gate=matched vals=[error:budget] deny=true"},
+		// The budget runs out inside the message filter, not in a validation:
+		// the validation costs next to nothing. A regression that reported the
+		// failure as an ordinary runtime error would read error:runtime here.
+		{parityNew("message budget", parityCatBudget, parityBudget(400),
+			parityValidations(parityValidation{Expression: "false", Message: "static", MessageExpression: parityCostly(55) + " ? 'a' : 'b'"})),
+			"gate=matched vals=[error:budget] deny=true"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.c.ID, func(t *testing.T) {
@@ -797,6 +856,143 @@ func TestUpstreamParityProductionEntryPoint(t *testing.T) {
 				require.Equal(t, split.Results[i].Passed, whole.Results[i].Passed, "result %d", i)
 				require.Equal(t, split.Results[i].Err == nil, whole.Results[i].Err == nil, "result %d error", i)
 				require.Equal(t, split.Results[i].Message, whole.Results[i].Message, "result %d message", i)
+			}
+		})
+	}
+}
+
+// fakeCondition returns a fixed result from ForInput.
+type fakeCondition struct {
+	results   []celplugin.EvaluationResult
+	remaining int64
+	err       error
+}
+
+func (f fakeCondition) ForInput(context.Context, *admission.VersionedAttributes, *admissionv1.AdmissionRequest, celplugin.OptionalVariableBindings, *corev1.Namespace, int64) ([]celplugin.EvaluationResult, int64, error) {
+	return f.results, f.remaining, f.err
+}
+
+func (fakeCondition) CompilationErrors() []error { return nil }
+
+// TestUpstreamParityRecorderIsTransparent checks that the wrapper around the
+// upstream evaluators hands back exactly what the wrapped one returned, notes
+// the call and its error, and can be called from several goroutines.
+func TestUpstreamParityRecorderIsTransparent(t *testing.T) {
+	want := []celplugin.EvaluationResult{{EvalResult: nil}, {}}
+	budgetErr := &apiservercel.Error{Type: apiservercel.ErrorTypeInvalid, Detail: "out of budget", Cause: apiservercel.ErrOutOfBudget}
+	rec := &parityRecorder{ConditionEvaluator: fakeCondition{results: want, remaining: 7, err: budgetErr}}
+
+	results, remaining, err := rec.ForInput(context.Background(), nil, nil, celplugin.OptionalVariableBindings{}, nil, 99)
+	require.Equal(t, want, results)
+	require.Equal(t, int64(7), remaining, "the remaining budget must pass through")
+	require.Same(t, budgetErr, err, "the error must pass through unwrapped")
+
+	calls, recorded, recordedErr := rec.recorded()
+	require.Equal(t, 1, calls)
+	require.Equal(t, want, recorded)
+	require.ErrorIs(t, recordedErr, apiservercel.ErrOutOfBudget)
+
+	var wg sync.WaitGroup
+	for range 16 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, _, _ = rec.ForInput(context.Background(), nil, nil, celplugin.OptionalVariableBindings{}, nil, 1)
+			_, _, _ = rec.recorded()
+		}()
+	}
+	wg.Wait()
+	calls, _, _ = rec.recorded()
+	require.Equal(t, 17, calls)
+}
+
+// parityUpstreamCost is the runtime cost the apiserver's evaluator charges for
+// the expressions together, measured by running them through it with a budget
+// no policy could spend. It is what makes a fixture's claim about the budget a
+// measurement and not a guess.
+func parityUpstreamCost(t *testing.T, exprs ...string) int64 {
+	t.Helper()
+	compiler, err := celplugin.NewCompositedCompiler(environment.MustBaseEnvSet(environment.DefaultCompatibilityVersion()))
+	require.NoError(t, err)
+	accessors := make([]celplugin.ExpressionAccessor, len(exprs))
+	for i, expr := range exprs {
+		accessors[i] = &matchconditions.MatchCondition{Name: fmt.Sprintf("m%d", i), Expression: expr}
+	}
+	filter := compiler.CompileCondition(accessors, celplugin.OptionalVariableDeclarations{HasAuthorizer: true}, environment.StoredExpressions)
+	require.Empty(t, filter.CompilationErrors())
+
+	subject := &unstructured.Unstructured{Object: parityPod()}
+	gvk := subject.GroupVersionKind()
+	gvr := schema.GroupVersionResource{Version: gvk.Version, Resource: "pods"}
+	attr := admission.NewAttributesRecord(subject, nil, gvk, subject.GetNamespace(), subject.GetName(), gvr, "", admission.Create, &metav1.CreateOptions{}, false, &user.DefaultInfo{})
+	versioned, err := admission.NewVersionedAttributes(attr, gvk, nil)
+	require.NoError(t, err)
+
+	const budget = int64(1) << 40
+	results, remaining, err := filter.ForInput(context.Background(), versioned,
+		celplugin.CreateAdmissionRequest(versioned.Attributes, metav1.GroupVersionResource(versioned.GetResource()), metav1.GroupVersionKind(versioned.VersionedKind)),
+		celplugin.OptionalVariableBindings{Authorizer: parityAllowAll{}}, nil, budget)
+	require.NoError(t, err)
+	for _, r := range results {
+		require.NoError(t, r.Error)
+	}
+	return budget - remaining
+}
+
+// TestUpstreamParityGateBudgetFixtures pins what the gate budget fixtures are
+// meant to do before their outcomes are compared: that each condition fits the
+// per-call limit, that the conditions together run past the matchConditions
+// budget, and that upstream reaches the outcome the fixture's name claims. A
+// fixture that stopped exhausting the budget would otherwise keep passing as an
+// ordinary skip or match.
+func TestUpstreamParityGateBudgetFixtures(t *testing.T) {
+	costly := parityCostly(parityGateCostlyN)
+	one := parityUpstreamCost(t, costly)
+	require.Less(t, one, int64(celconfig.PerCallLimit), "each condition must fit the per-call limit")
+
+	limit := int64(celconfig.RuntimeCELCostBudgetMatchConditions)
+	ev, err := NewEvaluator()
+	require.NoError(t, err)
+	require.Equal(t, limit, ev.matchConditionsBudgetLimit(), "the offline gate must run on the apiserver's gate budget")
+
+	four := parityUpstreamCost(t, costly, costly, costly, costly)
+	five := parityUpstreamCost(t, costly, costly, costly, costly, costly)
+	require.Equal(t, 4*one, four)
+	require.Equal(t, 5*one, five)
+	require.LessOrEqual(t, four, limit, "four conditions must still fit, so the fifth is what runs the budget out")
+	require.Greater(t, five, limit, "five conditions must run past the gate budget")
+
+	cases := map[string]parityCase{}
+	for _, c := range parityGateCases() {
+		cases[strings.TrimPrefix(c.ID, parityCatBudget+"/")] = c
+	}
+	for _, tc := range []struct {
+		id         string
+		upstream   string
+		kubescape  string
+		withinOnly bool
+	}{
+		// Exhausted under Fail: the matcher fails, and the request is denied.
+		{"gate-budget-exhausted-fail", "gate=gate-error(error:budget) vals=[] deny=true", "gate=gate-error(error:budget) vals=[] deny=false", false},
+		// Exhausted under Ignore: the matcher skips the policy.
+		{"gate-budget-exhausted-ignore", "gate=skipped vals=[] deny=false", "gate=gate-error(error:budget) vals=[] deny=false", false},
+		// A leading false does not stop the later conditions from being
+		// evaluated, so the exhaustion is reported and not the skip.
+		{"gate-budget-false-first", "gate=gate-error(error:budget) vals=[] deny=true", "gate=gate-error(error:budget) vals=[] deny=false", false},
+		// The same leading false with the budget intact skips the policy.
+		{"gate-false-first-within-budget", "gate=skipped vals=[] deny=false", "gate=skipped vals=[] deny=false", true},
+		// Four conditions fit, so the policy is matched and its validation runs.
+		{"gate-just-within-budget", `gate=matched vals=[deny] deny=true msg[0]="failed expression: false"`, `gate=matched vals=[deny] deny=true msg[0]="failed expression: false"`, true},
+	} {
+		t.Run(tc.id, func(t *testing.T) {
+			c, ok := cases[tc.id]
+			require.True(t, ok, "no gate case %s", tc.id)
+			upstream, kubescape := parityRun(t, parityRunnable{c: c, in: parityRaw})
+			require.Equal(t, tc.upstream, upstream.String(), "upstream")
+			require.Equal(t, tc.kubescape, kubescape.String(), "kubescape")
+			require.Equal(t, !tc.withinOnly, upstream.GateBudgetSpent, "upstream's gate budget")
+			if !tc.withinOnly {
+				require.Equal(t, parityErrBudget, kubescape.GateErr, "kubescape must report an exhausted budget")
 			}
 		})
 	}

@@ -180,6 +180,9 @@ func parityCostly(n int) string {
 	return fmt.Sprintf("%[1]s.map(x, %[1]s.map(y, x * y)).size() > 0", list)
 }
 
+// parityGateCostlyN sizes the matchConditions that use up the gate budget.
+const parityGateCostlyN = 200
+
 const (
 	parityFail   = admissionregistrationv1.Fail
 	parityIgnore = admissionregistrationv1.Ignore
@@ -325,7 +328,10 @@ func parityRuntimeCases() []parityCase {
 
 // C. matchConditions and the gate.
 func parityGateCases() []parityCase {
-	costly := parityCostly(55)
+	// Measured at 602,603 cost units upstream, under the 1,000,000 per-call
+	// limit: four of them fit the 2,500,000 matchConditions budget (2,410,412)
+	// and the fifth runs it out (see TestUpstreamParityGateBudgetFixtures).
+	costly := parityCostly(parityGateCostlyN)
 	return []parityCase{
 		parityNew("none", parityCatGate, parityExprs("false")),
 		parityNew("one-true", parityCatGate, parityGateExprs("true"), parityExprs("false")),
@@ -364,10 +370,14 @@ func parityGateCases() []parityCase {
 		parityNew("params-in-gate-nonmatching", parityCatGate, parityWithParams(parityConfigMap), parityGateExprs("params.data.mode == 'lax'"), parityExprs("false")),
 		parityNew("params-missing-in-gate-fail", parityCatGate, parityMissingParams(), parityFailure(parityFail), parityGateExprs("params.data.mode == 'strict'"), parityExprs("false")),
 		parityNew("gate-budget-exhausted-fail", parityCatBudget, parityFailure(parityFail), parityGateExprs(costly, costly, costly, costly, costly), parityExprs("false"),
-			parityNote("five expensive conditions exceed the 2.5M match-condition budget together, though each fits alone")),
+			parityNote("five conditions of about 600k units each run out the 2.5M match-condition budget together, though each fits alone")),
 		parityNew("gate-budget-exhausted-ignore", parityCatBudget, parityFailure(parityIgnore), parityGateExprs(costly, costly, costly, costly, costly), parityExprs("false")),
 		parityNew("gate-budget-false-first", parityCatBudget, parityFailure(parityFail), parityGateExprs("false", costly, costly, costly, costly, costly), parityExprs("false"),
-			parityNote("a false condition does not stop the later ones from spending the budget")),
+			parityNote("upstream evaluates every condition before it looks for a false one, so the exhausted budget wins over the leading false")),
+		parityNew("gate-false-first-within-budget", parityCatBudget, parityFailure(parityFail), parityGateExprs("false", costly, costly), parityExprs("false"),
+			parityNote("the same leading false with the budget intact skips the policy")),
+		parityNew("gate-just-within-budget", parityCatBudget, parityFailure(parityFail), parityGateExprs(costly, costly, costly, costly), parityExprs("false"),
+			parityNote("four conditions spend 2.41M of the 2.5M budget and still run")),
 		parityNew("gate-within-budget", parityCatBudget, parityFailure(parityFail), parityGateExprs(costly, costly), parityExprs("false")),
 		parityNew("gate-cancelled", parityCatBudget, parityCancelled(), parityGateExprs("true"), parityExprs("false")),
 	}
