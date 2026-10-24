@@ -122,6 +122,10 @@ func resourcePlural(obj map[string]any) string {
 // namespaced but the scan does not have the Namespace object (namespaceObject
 // is nil), it also binds to null; policies that read namespaceObject.* then
 // see an absent namespace rather than failing to evaluate.
+//
+// The Namespace is normalized the same way as the object: the apiserver hands
+// admission a typed Namespace, so a null block in the manifest is unset or a
+// zero value there, and namespaceObject must read the same way as object does.
 func stubNamespaceObject(obj, namespaceObject map[string]any) any {
 	if !isNamespaced(obj) {
 		return nil
@@ -129,7 +133,7 @@ func stubNamespaceObject(obj, namespaceObject map[string]any) any {
 	if namespaceObject == nil {
 		return nil
 	}
-	return namespaceObject
+	return normalizeNullFields(namespaceObject)
 }
 
 // isNamespaced reports whether the resource carries a non-empty

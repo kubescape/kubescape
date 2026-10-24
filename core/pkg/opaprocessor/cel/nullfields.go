@@ -22,11 +22,12 @@ import (
 // block) is null in the file. The apiserver decodes a built-in kind into its Go
 // struct before any policy runs, and what a null becomes there depends on the
 // field's type: an omitempty pointer, slice, map or scalar is simply unset, so
-// the key is gone; a struct is its zero value; and an entry of a map or list
-// keeps its key or index with the element's zero value (`data: {k: null}` is
-// `{k: ""}` for a map of strings). Left raw, the null makes has() true and the
-// next list or map step errors, which a Fail policy reports as a violation
-// admission would never make.
+// the key is gone; a field tagged omitzero is dropped too, since a null always
+// decodes to its zero value; a struct is its zero value; and an entry of a map
+// or list keeps its key or index with the element's zero value (`data: {k:
+// null}` is `{k: ""}` for a map of strings). Left raw, the null makes has()
+// true and the next list or map step errors, which a Fail policy reports as a
+// violation admission would never make.
 //
 // Only kinds the client-go scheme knows are touched. A custom resource is left
 // exactly as written, because its schema may declare a field nullable, and then
@@ -153,12 +154,18 @@ const (
 type jsonField struct {
 	typ       reflect.Type
 	omitempty bool
+	omitzero  bool
 }
 
 // nullDecoding says what a null in this field becomes after decoding into the
-// Go struct and converting back: JSON leaves the field at its zero value, and
-// omitempty drops a zero pointer, slice, map or scalar but never a struct.
+// Go struct and converting back: JSON leaves the field at its zero value,
+// omitzero drops any zero value (a null always decodes to one, structs such as
+// metav1.Time included), and omitempty drops a zero pointer, slice, map or
+// scalar but never a struct.
 func (f jsonField) nullDecoding() nullOutcome {
+	if f.omitzero {
+		return nullUnset
+	}
 	kind := f.typ.Kind()
 	switch {
 	case kind == reflect.Struct:
@@ -275,13 +282,16 @@ func jsonFieldsOf(t reflect.Type) map[string]jsonField {
 		if name == "" {
 			name = f.Name
 		}
-		omit := false
+		field := jsonField{typ: f.Type}
 		for _, opt := range strings.Split(opts, ",") {
-			if opt == "omitempty" || opt == "omitzero" {
-				omit = true
+			switch opt {
+			case "omitempty":
+				field.omitempty = true
+			case "omitzero":
+				field.omitzero = true
 			}
 		}
-		fields[name] = jsonField{typ: f.Type, omitempty: omit}
+		fields[name] = field
 	}
 	fieldsByType.Store(t, fields)
 	return fields

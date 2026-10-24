@@ -85,6 +85,8 @@ func TestNormalizeNullFieldsMatchesTypedDecoding(t *testing.T) {
 		"secret":    `{"apiVersion":"v1","kind":"Secret","metadata":{"name":"s"},"stringData":{"k":null},"data":{"d":null}}`,
 		"service":   `{"apiVersion":"v1","kind":"Service","metadata":{"name":"s","annotations":null},"spec":{"type":"LoadBalancer","ports":[{"port":443,"targetPort":null,"nodePort":null}]}}`,
 		"quantity":  `{"apiVersion":"v1","kind":"Pod","metadata":{"name":"p"},"spec":{"containers":[{"name":"c","image":"i","resources":{"limits":{"cpu":null}}}]}}`,
+		"namespace": `{"apiVersion":"v1","kind":"Namespace","metadata":{"name":"ns","creationTimestamp":null},
+			"status":{"conditions":[{"type":"Ready","status":"True","lastTransitionTime":null}]}}`,
 		"deployment": `{"apiVersion":"apps/v1","kind":"Deployment","metadata":{"name":"d"},"spec":{"replicas":null,"strategy":null,
 			"selector":{"matchLabels":{"a":"b"}},"template":{"metadata":{"annotations":null},"spec":{"containers":[{"name":"c","image":"i","env":null}]}}}}`,
 	} {
