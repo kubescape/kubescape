@@ -7,6 +7,7 @@ import (
 
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/cautils/getter"
+	"github.com/kubescape/kubescape/v4/core/pkg/mapreconcile"
 	"github.com/kubescape/kubescape/v4/core/pkg/resourcehandler"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 )
@@ -47,7 +48,11 @@ func classifyScanError(err error) ErrorCode {
 		errors.Is(err, getter.ErrControlAmbiguous):
 		return ErrCodeInvalidArgument
 
-	case apierrors.IsForbidden(err):
+	// mapreconcile.ErrForbidden is a sentinel that replaces the apiserver's
+	// Forbidden status when listing MutatingAdmissionPolicy objects, so
+	// apierrors.IsForbidden cannot see it.
+	case apierrors.IsForbidden(err),
+		errors.Is(err, mapreconcile.ErrForbidden):
 		return ErrCodeRBACDenied
 	case apierrors.IsNotFound(err):
 		return ErrCodeResourceNotFound

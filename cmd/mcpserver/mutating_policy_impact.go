@@ -140,7 +140,7 @@ func createMutatingAdmissionPolicyTools(ksServer *KubescapeMcpserver) {
 				if errors.Is(err, mapreconcile.ErrUnsupported) {
 					return mcp.NewToolResultText(`{"supported":false,"reason":"cluster does not serve MutatingAdmissionPolicy resources"}`)
 				}
-				return mcpToolError(ErrCodeK8sClientError, fmt.Sprintf("failed to collect MutatingAdmissionPolicy resources: %v", err), nil)
+				return mcpToolError(classifyScanError(err), fmt.Sprintf("failed to collect MutatingAdmissionPolicy resources: %v", err), nil)
 			}
 
 			gvr := schema.GroupVersionResource{Group: apiGroup, Version: apiVersion, Resource: resource}
@@ -160,7 +160,7 @@ func createMutatingAdmissionPolicyTools(ksServer *KubescapeMcpserver) {
 					// Semantics align with classifyScanError: agent recovery action is to verify kind/name/ns.
 					return mcpToolError(ErrCodeResourceNotFound, fmt.Sprintf("resource %s/%s (%s) not found: %v", namespace, name, gvr.String(), getErr), map[string]any{"resource_type": resource, "namespace": namespace, "name": name})
 				}
-				return mcpToolError(ErrCodeK8sClientError, fmt.Sprintf("failed to get resource %s/%s (%s): %v", namespace, name, gvr.String(), getErr), map[string]any{"resource_type": resource, "namespace": namespace, "name": name})
+				return mcpToolError(classifyScanError(getErr), fmt.Sprintf("failed to get resource %s/%s (%s): %v", namespace, name, gvr.String(), getErr), map[string]any{"resource_type": resource, "namespace": namespace, "name": name})
 			}
 
 			info := mapreconcile.ObjectInfo{
@@ -182,7 +182,7 @@ func createMutatingAdmissionPolicyTools(ksServer *KubescapeMcpserver) {
 					info.NamespaceLabels = nsObj.GetLabels()
 					info.NamespaceLabelsKnown = true
 				} else if !apierrors.IsNotFound(nsErr) {
-					return mcpToolError(ErrCodeK8sClientError, fmt.Sprintf("failed to get namespace %s: %v", namespace, nsErr), map[string]any{"namespace": namespace})
+					return mcpToolError(classifyScanError(nsErr), fmt.Sprintf("failed to get namespace %s: %v", namespace, nsErr), map[string]any{"namespace": namespace})
 				}
 			}
 
