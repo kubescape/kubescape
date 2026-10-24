@@ -432,3 +432,31 @@ func TestIsUnrenderedHelmTemplate(t *testing.T) {
 		})
 	}
 }
+
+func TestLoadResourcesFromFilesSkipsHostSensorEnvelopeThatDoesNotDecode(t *testing.T) {
+	dir := t.TempDir()
+	writeManifestFixture(t, dir, "valid.yaml", validPodManifest)
+	envelope := writeManifestFixture(t, dir, "host-data.yaml", "apiVersion: hostdata.kubescape.cloud/v1\nkind: OsReleaseFile\nmetadata: \"node-1\"\n")
+
+	workloads, skips, err := LoadResourcesFromFiles(context.Background(), dir, dir, nil)
+
+	require.NoError(t, err)
+	require.Contains(t, workloads, filepath.Join(dir, "valid.yaml"))
+	require.Len(t, skips, 1)
+	assert.Equal(t, envelope, skips[0].Path)
+	assert.Contains(t, skips[0].Reason, "not a valid Kubernetes object")
+}
+
+func TestLoadResourcesFromFilesSkipsCloudDescribeEnvelopeThatDoesNotDecode(t *testing.T) {
+	dir := t.TempDir()
+	writeManifestFixture(t, dir, "valid.yaml", validPodManifest)
+	envelope := writeManifestFixture(t, dir, "cluster-describe.json", `{"apiVersion":"eks.amazonaws.com/v1","kind":"ClusterDescribe","metadata":{"name":"c"},"data":[]}`)
+
+	workloads, skips, err := LoadResourcesFromFiles(context.Background(), dir, dir, nil)
+
+	require.NoError(t, err)
+	require.Contains(t, workloads, filepath.Join(dir, "valid.yaml"))
+	require.Len(t, skips, 1)
+	assert.Equal(t, envelope, skips[0].Path)
+	assert.Contains(t, skips[0].Reason, "not a valid Kubernetes object")
+}
