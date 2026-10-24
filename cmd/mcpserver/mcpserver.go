@@ -1615,6 +1615,33 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 	}
 }
 
+// registerTools adds every Kubescape tool and resource to ksServer's MCP
+// server. It only registers definitions; it starts no transport and contacts
+// no cluster, so tests can use it to enumerate the served tool surface.
+func registerTools(ksServer *KubescapeMcpserver) {
+	createVulnerabilityToolsAndResources(ksServer)
+	createConfigurationsToolsAndResources(ksServer)
+	createRuntimeToolsAndResources(ksServer)
+	createRBACScanningTools(ksServer)
+	createNetworkScanningTools(ksServer)
+	createNetworkReachabilityTools(ksServer)
+	createMutatingAdmissionPolicyTools(ksServer)
+	createVulnerabilityExposureTools(ksServer)
+	createServiceExposureTools(ksServer)
+	createPSSPredictorTools(ksServer)
+	createRBACEscalationTools(ksServer)
+	createDiffReportsTools(ksServer)
+	createFrameworkScanningTools(ksServer)
+	createIaCScanningTools(ksServer)
+	createIaCControlScanningTool(ksServer)
+	createRemediationTools(ksServer)
+	createControlScanningTools(ksServer)
+	createWorkloadScanningTools(ksServer)
+	createPolicyListingTools(ksServer)
+	createAdvancedTools(ksServer)
+	createSecretExposureTools(ksServer)
+}
+
 func mcpServerEntrypoint(ctx context.Context, transport string, port int) error {
 	logger.L().Info("Starting MCP server...")
 
@@ -1651,29 +1678,7 @@ func mcpServerEntrypoint(ctx context.Context, transport string, port int) error 
 		return loadPolicyGetter(drp)
 	})
 
-	// Creating Kubescape tools and resources
-
-	createVulnerabilityToolsAndResources(ksServer)
-	createConfigurationsToolsAndResources(ksServer)
-	createRuntimeToolsAndResources(ksServer)
-	createRBACScanningTools(ksServer)
-	createNetworkScanningTools(ksServer)
-	createNetworkReachabilityTools(ksServer)
-	createMutatingAdmissionPolicyTools(ksServer)
-	createVulnerabilityExposureTools(ksServer)
-	createServiceExposureTools(ksServer)
-	createPSSPredictorTools(ksServer)
-	createRBACEscalationTools(ksServer)
-	createDiffReportsTools(ksServer)
-	createFrameworkScanningTools(ksServer)
-	createIaCScanningTools(ksServer)
-	createIaCControlScanningTool(ksServer)
-	createRemediationTools(ksServer)
-	createControlScanningTools(ksServer)
-	createWorkloadScanningTools(ksServer)
-	createPolicyListingTools(ksServer)
-	createAdvancedTools(ksServer)
-	createSecretExposureTools(ksServer)
+	registerTools(ksServer)
 
 	// Start the server
 	switch transport {

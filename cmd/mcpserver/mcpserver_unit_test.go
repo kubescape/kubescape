@@ -209,15 +209,7 @@ func TestCallToolWithStorageResources(t *testing.T) {
 
 func TestMCPToolAndResourceRegistration(t *testing.T) {
 	ksServer := &KubescapeMcpserver{s: server.NewMCPServer("kubescape-test", "test")}
-	require.NotPanics(t, func() {
-		createVulnerabilityToolsAndResources(ksServer)
-		createConfigurationsToolsAndResources(ksServer)
-		createRuntimeToolsAndResources(ksServer)
-		createRBACScanningTools(ksServer)
-		createNetworkScanningTools(ksServer)
-		createFrameworkScanningTools(ksServer)
-		createWorkloadScanningTools(ksServer)
-	})
+	require.NotPanics(t, func() { registerTools(ksServer) })
 	assert.NotNil(t, GetMCPServerCmd())
 }
 
