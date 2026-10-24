@@ -506,3 +506,32 @@ func TestClusterResourcesOmitThePathAxis(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildExceptionPolicies_NilReportDoesNotPanic(t *testing.T) {
+	session := exceptionsSession(t)
+	session.Report = nil
+
+	var policies []armotypes.PostureExceptionPolicy
+	require.NotPanics(t, func() {
+		policies = buildExceptionPolicies(context.Background(), session)
+	})
+	require.NotEmpty(t, policies)
+	for _, policy := range policies {
+		require.NotEmpty(t, policy.CreationTime)
+	}
+}
+
+func TestActionPrint_NilReportDoesNotPanic(t *testing.T) {
+	session := exceptionsSession(t)
+	session.Report = nil
+
+	f, err := os.CreateTemp(t.TempDir(), "exceptions-*.json")
+	require.NoError(t, err)
+	defer f.Close()
+
+	ep := &ExceptionsPrinter{writer: f}
+	require.NotPanics(t, func() {
+		err = ep.ActionPrint(context.Background(), session, nil)
+	})
+	require.NoError(t, err)
+}

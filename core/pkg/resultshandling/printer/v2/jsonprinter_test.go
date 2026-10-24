@@ -465,7 +465,7 @@ func TestEnrichResultsWithSeverity(t *testing.T) {
 	}
 
 	// Enrich results with severity
-	enrichedResults := enrichResultsWithSeverity(results, controlSummaries, nil)
+	enrichedResults := enrichResultsWithSeverity(results, &reportsummary.SummaryDetails{Controls: controlSummaries}, nil)
 
 	// Verify results structure
 	assert.Equal(t, 2, len(enrichedResults))
@@ -521,7 +521,7 @@ func TestEnrichResultsWithSeverity_PopulatesEvidenceFromResources(t *testing.T) 
 		"test-resource-2": &mockResource{obj: map[string]any{}},
 	}
 
-	enrichedResults := enrichResultsWithSeverity(results, controlSummaries, allResources)
+	enrichedResults := enrichResultsWithSeverity(results, &reportsummary.SummaryDetails{Controls: controlSummaries}, allResources)
 
 	require.Len(t, enrichedResults, 1)
 	evidence := enrichedResults[0].AssociatedControls[0].Evidence
@@ -580,7 +580,7 @@ func TestEnrichResultsWithSeverity_PopulatesEvidenceFromDeleteAndReviewPaths(t *
 		},
 	}
 
-	enrichedResults := enrichResultsWithSeverity(results, controlSummaries, allResources)
+	enrichedResults := enrichResultsWithSeverity(results, &reportsummary.SummaryDetails{Controls: controlSummaries}, allResources)
 
 	require.Len(t, enrichedResults, 1)
 	require.Len(t, enrichedResults[0].AssociatedControls, 2)
@@ -604,7 +604,7 @@ func TestEnrichResultsWithSeverity_NoResourceMatchLeavesEvidenceNil(t *testing.T
 		},
 	}
 
-	enrichedResults := enrichResultsWithSeverity(results, controlSummaries, nil)
+	enrichedResults := enrichResultsWithSeverity(results, &reportsummary.SummaryDetails{Controls: controlSummaries}, nil)
 
 	require.Len(t, enrichedResults, 1)
 	assert.Nil(t, enrichedResults[0].AssociatedControls[0].Evidence)
