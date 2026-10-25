@@ -12,6 +12,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/util/validation/field"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 	clienttesting "k8s.io/client-go/testing"
 )
@@ -33,6 +34,8 @@ func advancedToolAPIErrors() []struct {
 		{"not found", apierrors.NewNotFound(podsResource, "app"), ErrCodeResourceNotFound},
 		{"deadline exceeded", context.DeadlineExceeded, ErrCodeTimeout},
 		{"canceled", context.Canceled, ErrCodeTimeout},
+		{"bad request", apierrors.NewBadRequest("the patch is malformed"), ErrCodeInvalidArgument},
+		{"invalid", apierrors.NewInvalid(schema.GroupKind{Kind: "Pod"}, "app", field.ErrorList{field.Invalid(field.NewPath("spec", "containers"), "x", "bad")}), ErrCodeInvalidArgument},
 		{"api server failure", apierrors.NewInternalError(errors.New("boom")), ErrCodeK8sClientError},
 		{"generic transport error", errors.New("connection refused"), ErrCodeK8sClientError},
 	}
@@ -53,6 +56,7 @@ func TestScanResourceSlice_ClassifiesAPIErrors(t *testing.T) {
 			require.NoError(t, json.Unmarshal([]byte(toolResultText(t, result)), &toolErr))
 			require.Equal(t, tc.code, toolErr.Code)
 			require.Contains(t, toolErr.Message, "failed to list resources")
+			require.Contains(t, toolErr.Message, tc.err.Error())
 		})
 	}
 }
@@ -77,6 +81,7 @@ func TestDryRunRemediation_ClassifiesAPIErrors(t *testing.T) {
 			require.NoError(t, json.Unmarshal([]byte(toolResultText(t, result)), &toolErr))
 			require.Equal(t, tc.code, toolErr.Code)
 			require.Contains(t, toolErr.Message, "dry-run patch failed")
+			require.Contains(t, toolErr.Message, tc.err.Error())
 		})
 	}
 }
@@ -91,6 +96,8 @@ func TestClassifyK8sAPIError(t *testing.T) {
 		err  error
 		code ErrorCode
 	}{
+		{"wrapped bad request", fmt.Errorf("patch: %w", apierrors.NewBadRequest("malformed")), ErrCodeInvalidArgument},
+		{"wrapped invalid", fmt.Errorf("patch: %w", apierrors.NewInvalid(schema.GroupKind{Kind: "Pod"}, "app", nil)), ErrCodeInvalidArgument},
 		{"wrapped forbidden", fmt.Errorf("patch: %w", forbidden), ErrCodeRBACDenied},
 		{"wrapped not found", fmt.Errorf("get: %w", notFound), ErrCodeResourceNotFound},
 		{"wrapped deadline exceeded", fmt.Errorf("list: %w", context.DeadlineExceeded), ErrCodeTimeout},

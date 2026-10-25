@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/cel-go/cel"
 	"github.com/mark3labs/mcp-go/mcp"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -18,9 +19,15 @@ var supportedAdvancedWorkloadKinds = []string{"pods", "deployments", "daemonsets
 
 // classifyK8sAPIError classifies an error from a direct Kubernetes API call.
 // Forbidden, NotFound, and timeout/cancellation get their specific codes via
-// classifyScanError; anything else (API-server status errors, transport
-// failures) remains K8S_CLIENT_ERROR rather than the scan-pipeline fallback.
+// classifyScanError. A BadRequest (400) or Invalid (422) response means the
+// caller's input was rejected -- a malformed patch, an object failing
+// validation, an invalid continue token -- and is INVALID_ARGUMENT. Anything
+// else (other API-server status errors, transport failures) remains
+// K8S_CLIENT_ERROR rather than the scan-pipeline fallback.
 func classifyK8sAPIError(err error) ErrorCode {
+	if apierrors.IsBadRequest(err) || apierrors.IsInvalid(err) {
+		return ErrCodeInvalidArgument
+	}
 	if code := classifyScanError(err); code != ErrCodeScanFailed {
 		return code
 	}
