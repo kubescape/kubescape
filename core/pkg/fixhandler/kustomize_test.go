@@ -3727,6 +3727,8 @@ func TestReview4034_FixValueParsingRulesParity(t *testing.T) {
 				{Path: "spec.quotedString", Value: `"quoted"`},
 				{Path: "spec.boolVal", Value: "true"},
 				{Path: "spec.intVal", Value: "123"},
+				{Path: "spec.zeroVal", Value: "0"},
+				{Path: "spec.oneVal", Value: "1"},
 				{Path: "spec.seqVal", Value: `["drop1", "drop2"]`},
 			},
 		},
@@ -3761,6 +3763,11 @@ func TestReview4034_FixValueParsingRulesParity(t *testing.T) {
 	assert.Equal(t, true, opMap["/spec/boolVal"])
 	// 123 should be int(123)
 	assert.Equal(t, 123, opMap["/spec/intVal"])
+	// 0 and 1 must be preserved as integers rather than boolean false/true
+	assert.Equal(t, 0, opMap["/spec/zeroVal"])
+	assert.NotEqual(t, false, opMap["/spec/zeroVal"])
+	assert.Equal(t, 1, opMap["/spec/oneVal"])
+	assert.NotEqual(t, true, opMap["/spec/oneVal"])
 	// sequence should be []interface{}
 	assert.Equal(t, []interface{}{"drop1", "drop2"}, opMap["/spec/seqVal"])
 }
@@ -3870,4 +3877,187 @@ func TestReview4034_RootContainmentBlocksSymlinkEscape(t *testing.T) {
 	outsideContent, err := os.ReadFile(outsideFile)
 	require.NoError(t, err)
 	assert.Equal(t, "sensitive-original-content", string(outsideContent))
+}
+
+// TestReview4034_ServiceSelectorEnvFromNotExempted verifies that an added field named "envFrom"
+// in non-container objects (such as Service spec.selector.envFrom) is NOT exempted from drift
+// detection, declining the candidate base to avoid redirecting pod traffic.
+func TestReview4034_ServiceSelectorEnvFromNotExempted(t *testing.T) {
+	dir := t.TempDir()
+
+	scannedSvc := makeResource("Service", "web-svc")
+	scannedSvc.GetObject()["spec"] = map[string]interface{}{
+		"selector": map[string]interface{}{"app": "web"},
+	}
+
+	candSvc := makeResource("Service", "web-svc")
+	candSvc.GetObject()["spec"] = map[string]interface{}{
+		"selector": map[string]interface{}{
+			"app":     "web",
+			"envFrom": "production",
+		},
+	}
+
+	// Direct verification check: should fail with missing field error
+	err := verifyScannedFieldsMatch(scannedSvc.GetObject()["spec"], candSvc.GetObject()["spec"], "spec")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "spec.selector.envFrom")
+
+	// EmitKustomizePatch with UnredactedBase must decline the resource
+	sug := []HelmFixSuggestion{
+		{
+			Resource:       scannedSvc,
+			UnredactedBase: candSvc.GetObject(),
+			ChartName:      "my-chart",
+			FixPaths:       []armotypes.FixPath{{Path: "metadata.labels.fix", Value: "applied"}},
+		},
+	}
+	res, err := EmitKustomizePatch(sug, dir)
+	require.NoError(t, err)
+	require.Len(t, res.SkippedResources, 1)
+	assert.Contains(t, res.SkippedResources[0].Reason, "spec.selector.envFrom")
+}
+
+// TestReview4034_NumericZeroAndOnePreservedAsIntegers verifies that raw fix values "0" and "1"
+// are preserved as integer types (rather than boolean false/true from strconv.ParseBool),
+// matching the standard fixer and preserving fields like PodDisruptionBudget minAvailable: 0.
+func TestReview4034_NumericZeroAndOnePreservedAsIntegers(t *testing.T) {
+	dir := t.TempDir()
+
+	pdb := makeResource("PodDisruptionBudget", "app-pdb")
+	pdb.SetApiVersion("policy/v1")
+	pdb.GetObject()["spec"] = map[string]interface{}{
+		"selector": map[string]interface{}{"matchLabels": map[string]interface{}{"app": "demo"}},
+	}
+
+	suggestions := []HelmFixSuggestion{
+		{
+			Resource:           pdb,
+			ChartName:          "my-chart",
+			FidelityProvenance: true,
+			FixPaths: []armotypes.FixPath{
+				{Path: "spec.minAvailable", Value: "0"},
+				{Path: "spec.maxUnavailable", Value: "1"},
+			},
+		},
+	}
+
+	_, err := EmitKustomizePatch(suggestions, dir)
+	require.NoError(t, err)
+
+	patchFileName := resourcePatchFilename(resourceKey{
+		Group:     "policy",
+		Version:   "v1",
+		Kind:      "PodDisruptionBudget",
+		Namespace: "default",
+		Name:      "app-pdb",
+	})
+	patchContent, err := os.ReadFile(filepath.Join(dir, patchFileName))
+	require.NoError(t, err)
+
+	var ops []kustomizePatchOp
+	require.NoError(t, yaml.Unmarshal(patchContent, &ops))
+	require.Len(t, ops, 2)
+
+	assert.Equal(t, "/spec/minAvailable", ops[0].Path)
+	assert.Equal(t, 0, ops[0].Value)
+	assert.NotEqual(t, false, ops[0].Value, "minAvailable 0 must not be boolean false")
+
+	assert.Equal(t, "/spec/maxUnavailable", ops[1].Path)
+	assert.Equal(t, 1, ops[1].Value)
+	assert.NotEqual(t, true, ops[1].Value, "maxUnavailable 1 must not be boolean true")
+
+	// Verify with kustomize build
+	k := krusty.MakeKustomizer(krusty.MakeDefaultOptions())
+	fSys := filesys.MakeFsOnDisk()
+	m, err := k.Run(fSys, dir)
+	require.NoError(t, err)
+	yamlOut, err := m.AsYaml()
+	require.NoError(t, err)
+
+	rawDocs := splitYamlDocs(yamlOut)
+	require.Len(t, rawDocs, 1)
+
+	var builtPDB struct {
+		Spec struct {
+			MinAvailable   int `yaml:"minAvailable"`
+			MaxUnavailable int `yaml:"maxUnavailable"`
+		} `yaml:"spec"`
+	}
+	require.NoError(t, yaml.Unmarshal(rawDocs[0], &builtPDB))
+	assert.Equal(t, 0, builtPDB.Spec.MinAvailable)
+	assert.Equal(t, 1, builtPDB.Spec.MaxUnavailable)
+}
+
+// TestReview4034_MissingIntermediateArrayElementCreated verifies that fixing a path with a missing
+// intermediate array element (such as spec.ingress[0].from[0].namespaceSelector.matchLabels.team on
+// a NetworkPolicy where from does not exist) creates the missing element and applies the restriction,
+// rather than silently dropping the fix.
+func TestReview4034_MissingIntermediateArrayElementCreated(t *testing.T) {
+	dir := t.TempDir()
+
+	np := makeResource("NetworkPolicy", "restrict-ingress")
+	np.SetApiVersion("networking.k8s.io/v1")
+	np.GetObject()["spec"] = map[string]interface{}{
+		"ingress": []interface{}{
+			map[string]interface{}{
+				"ports": []interface{}{
+					map[string]interface{}{"port": 80},
+				},
+			},
+		},
+	}
+
+	suggestions := []HelmFixSuggestion{
+		{
+			Resource:           np,
+			ChartName:          "my-chart",
+			FidelityProvenance: true,
+			FixPaths: []armotypes.FixPath{
+				{Path: "metadata.labels.applied", Value: "true"},
+				{Path: "spec.ingress[0].from[0].namespaceSelector.matchLabels.team", Value: "security"},
+			},
+		},
+	}
+
+	res, err := EmitKustomizePatch(suggestions, dir)
+	require.NoError(t, err)
+	require.Len(t, res.EmittedResources, 1)
+	require.Empty(t, res.SkippedResources)
+
+	// Run kustomize build to verify the restriction is actually present in the rendered manifest
+	k := krusty.MakeKustomizer(krusty.MakeDefaultOptions())
+	fSys := filesys.MakeFsOnDisk()
+	m, err := k.Run(fSys, dir)
+	require.NoError(t, err)
+	yamlOut, err := m.AsYaml()
+	require.NoError(t, err)
+
+	rawDocs := splitYamlDocs(yamlOut)
+	require.Len(t, rawDocs, 1)
+
+	var builtNP struct {
+		Metadata struct {
+			Labels map[string]string `yaml:"labels"`
+		} `yaml:"metadata"`
+		Spec struct {
+			Ingress []struct {
+				From []struct {
+					NamespaceSelector struct {
+						MatchLabels map[string]string `yaml:"matchLabels"`
+					} `yaml:"namespaceSelector"`
+				} `yaml:"from"`
+				Ports []struct {
+					Port int `yaml:"port"`
+				} `yaml:"ports"`
+			} `yaml:"ingress"`
+		} `yaml:"spec"`
+	}
+	require.NoError(t, yaml.Unmarshal(rawDocs[0], &builtNP))
+	assert.Equal(t, "true", builtNP.Metadata.Labels["applied"])
+	require.Len(t, builtNP.Spec.Ingress, 1)
+	require.Len(t, builtNP.Spec.Ingress[0].From, 1)
+	assert.Equal(t, "security", builtNP.Spec.Ingress[0].From[0].NamespaceSelector.MatchLabels["team"])
+	require.Len(t, builtNP.Spec.Ingress[0].Ports, 1)
+	assert.Equal(t, 80, builtNP.Spec.Ingress[0].Ports[0].Port)
 }

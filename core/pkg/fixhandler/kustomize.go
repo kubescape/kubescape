@@ -177,11 +177,11 @@ func ensureSubpath(dir, filename string) (string, error) {
 // everything else (including "null" and quoted strings) remains a string so that fix semantics
 // match the standard fixer.
 func parseFixValue(raw string) interface{} {
-	if b, err := strconv.ParseBool(raw); err == nil {
-		return b
-	}
 	if i, err := strconv.ParseInt(raw, 10, 64); err == nil {
 		return i
+	}
+	if b, err := strconv.ParseBool(raw); err == nil {
+		return b
 	}
 	if f, err := strconv.ParseFloat(raw, 64); err == nil && !math.IsNaN(f) && !math.IsInf(f, 0) {
 		return f
@@ -307,14 +307,25 @@ func expandWildcardFixPaths(obj map[string]interface{}, fp armotypes.FixPath) []
 	return expanded
 }
 
+func updateParentContainer(parentMap map[string]interface{}, parentKey string, parentSlice []interface{}, parentSliceIdx int, val interface{}) {
+	if parentMap != nil && parentKey != "" {
+		parentMap[parentKey] = val
+	} else if parentSlice != nil && parentSliceIdx >= 0 && parentSliceIdx < len(parentSlice) {
+		parentSlice[parentSliceIdx] = val
+	}
+}
+
 // resolveFixPathOps resolves a concrete FixPath against an evolving working copy of the resource.
 // If intermediate ancestor maps are missing, it emits an "add" op creating the ancestor as {}
 // once, updates the evolving copy, and resolves child fields so sibling fixes sharing a missing
 // parent are both preserved.
-func resolveFixPathOps(workingObj map[string]interface{}, fp armotypes.FixPath) []kustomizePatchOp {
+func resolveFixPathOps(workingObj map[string]interface{}, fp armotypes.FixPath) ([]kustomizePatchOp, error) {
 	parts, err := parseYAMLPath(fp.Path)
-	if err != nil || len(parts) == 0 {
-		return nil
+	if err != nil {
+		return nil, fmt.Errorf("invalid fix path %q: %w", fp.Path, err)
+	}
+	if len(parts) == 0 {
+		return nil, nil
 	}
 
 	parsedVal := parseFixValue(fp.Value)
@@ -323,17 +334,46 @@ func resolveFixPathOps(workingObj map[string]interface{}, fp armotypes.FixPath) 
 	var current interface{} = workingObj
 	var parentMap map[string]interface{}
 	var parentKey string
+	var parentSlice []interface{}
+	var parentSliceIdx int = -1
 
 	for i, part := range parts {
 		isLast := i == len(parts)-1
 
 		if !isLast {
 			if part.sequence {
+				if part.index < 0 {
+					return nil, fmt.Errorf("negative array index %d in path %s", part.index, fp.Path)
+				}
 				pointerTokens = append(pointerTokens, strconv.Itoa(part.index))
 				slice, ok := current.([]interface{})
-				if !ok || part.index < 0 || part.index >= len(slice) {
-					return nil
+				if !ok {
+					return nil, fmt.Errorf("expected slice at %s but found %T in path %s", strings.Join(pointerTokens[:len(pointerTokens)-1], "/"), current, fp.Path)
 				}
+				if part.index >= len(slice) {
+					// Create missing intermediate array elements up to part.index
+					for len(slice) <= part.index {
+						var newElem interface{}
+						isTargetIdx := len(slice) == part.index
+						if isTargetIdx && parts[i+1].sequence {
+							newElem = make([]interface{}, 0)
+						} else {
+							newElem = make(map[string]interface{})
+						}
+						currTokens := append([]string{}, pointerTokens[:len(pointerTokens)-1]...)
+						currTokens = append(currTokens, strconv.Itoa(len(slice)))
+						ancestorPtr := "/" + strings.Join(currTokens, "/")
+						ops = append(ops, kustomizePatchOp{
+							Op:    "add",
+							Path:  ancestorPtr,
+							Value: newElem,
+						})
+						slice = append(slice, newElem)
+					}
+					updateParentContainer(parentMap, parentKey, parentSlice, parentSliceIdx, slice)
+				}
+				parentSlice = slice
+				parentSliceIdx = part.index
 				parentMap = nil
 				parentKey = ""
 				current = slice[part.index]
@@ -341,10 +381,12 @@ func resolveFixPathOps(workingObj map[string]interface{}, fp armotypes.FixPath) 
 				pointerTokens = append(pointerTokens, escapeJSONPointerToken(part.key))
 				m, ok := current.(map[string]interface{})
 				if !ok {
-					return nil
+					return nil, fmt.Errorf("expected map at %s but found %T in path %s", strings.Join(pointerTokens[:len(pointerTokens)-1], "/"), current, fp.Path)
 				}
 				parentMap = m
 				parentKey = part.key
+				parentSlice = nil
+				parentSliceIdx = -1
 				nextVal, exists := m[part.key]
 				if !exists || nextVal == nil {
 					ancestorPtr := "/" + strings.Join(pointerTokens, "/")
@@ -373,10 +415,16 @@ func resolveFixPathOps(workingObj map[string]interface{}, fp armotypes.FixPath) 
 			}
 		} else {
 			if part.sequence {
+				if part.index < 0 {
+					return nil, fmt.Errorf("negative array index %d in path %s", part.index, fp.Path)
+				}
 				pointerTokens = append(pointerTokens, strconv.Itoa(part.index))
 				targetPtr := "/" + strings.Join(pointerTokens, "/")
 				slice, ok := current.([]interface{})
-				if ok && part.index >= 0 && part.index < len(slice) {
+				if !ok {
+					return nil, fmt.Errorf("expected slice at %s but found %T in path %s", targetPtr, current, fp.Path)
+				}
+				if part.index < len(slice) {
 					ops = append(ops, kustomizePatchOp{
 						Op:    "replace",
 						Path:  targetPtr,
@@ -384,27 +432,23 @@ func resolveFixPathOps(workingObj map[string]interface{}, fp armotypes.FixPath) 
 					})
 					slice[part.index] = parsedVal
 				} else {
+					for len(slice) < part.index {
+						slice = append(slice, nil)
+					}
 					ops = append(ops, kustomizePatchOp{
 						Op:    "add",
 						Path:  targetPtr,
 						Value: parsedVal,
 					})
-					if ok {
-						for len(slice) < part.index {
-							slice = append(slice, nil)
-						}
-						slice = append(slice, parsedVal)
-						if parentMap != nil && parentKey != "" {
-							parentMap[parentKey] = slice
-						}
-					}
+					slice = append(slice, parsedVal)
+					updateParentContainer(parentMap, parentKey, parentSlice, parentSliceIdx, slice)
 				}
 			} else {
 				pointerTokens = append(pointerTokens, escapeJSONPointerToken(part.key))
 				targetPtr := "/" + strings.Join(pointerTokens, "/")
 				m, ok := current.(map[string]interface{})
 				if !ok {
-					return nil
+					return nil, fmt.Errorf("expected map at %s but found %T in path %s", targetPtr, current, fp.Path)
 				}
 				op := "add"
 				if _, exists := m[part.key]; exists {
@@ -420,7 +464,7 @@ func resolveFixPathOps(workingObj map[string]interface{}, fp armotypes.FixPath) 
 		}
 	}
 
-	return ops
+	return ops, nil
 }
 
 // hasRedactedPlaceholder checks if the object contains the scan redactor's "XXXXXX" placeholder
@@ -550,10 +594,16 @@ func isSourceMetadataKey(path, key string) bool {
 	return path == "" && (key == "path" || key == "sourcePath")
 }
 
-// isRedactedFieldKey reports whether key is an environment configuration field that the
-// scanner redactor removes without leaving a placeholder (specifically container envFrom).
-func isRedactedFieldKey(key string) bool {
-	return key == "envFrom"
+// isContainerEnvFrom reports whether key is "envFrom" on a container object
+// (spec.containers[i], initContainers, ephemeralContainers), which the scanner
+// redactor removes without leaving a placeholder.
+func isContainerEnvFrom(path, key string) bool {
+	if key != "envFrom" {
+		return false
+	}
+	return strings.Contains(path, "containers[") ||
+		strings.Contains(path, "initContainers[") ||
+		strings.Contains(path, "ephemeralContainers[")
 }
 
 // isScannerRedactedField reports whether path corresponds to a field that the scan redactor
@@ -630,7 +680,7 @@ func verifyScannedFieldsMatch(scannedVal, candVal interface{}, path string) erro
 		}
 
 		for k := range cMap {
-			if isSourceMetadataKey(path, k) || isRedactedFieldKey(k) {
+			if isSourceMetadataKey(path, k) || isContainerEnvFrom(path, k) {
 				continue
 			}
 			_, exists := sTyped[k]
@@ -1213,9 +1263,22 @@ func EmitKustomizePatch(suggestions []HelmFixSuggestion, dir string) (*Kustomize
 		}
 
 		var ops []kustomizePatchOp
+		var applyErr error
 		for _, fp := range concreteFixPaths {
-			patchOps := resolveFixPathOps(workingObj, fp)
+			patchOps, err := resolveFixPathOps(workingObj, fp)
+			if err != nil {
+				applyErr = err
+				break
+			}
 			ops = append(ops, patchOps...)
+		}
+
+		if applyErr != nil {
+			result.SkippedResources = append(result.SkippedResources, KustomizeSkippedResource{
+				ResourceKey: fmt.Sprintf("%s/%s", rg.key.Kind, rg.key.Name),
+				Reason:      fmt.Sprintf("declined: fix path could not be applied: %v", applyErr),
+			})
+			continue
 		}
 
 		if len(ops) == 0 {
