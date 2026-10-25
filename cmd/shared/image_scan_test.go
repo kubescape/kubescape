@@ -128,7 +128,7 @@ func TestValidateImageScanInfo(t *testing.T) {
 				if want == assert.AnError {
 					assert.Error(t, got)
 				} else {
-					assert.Equal(t, want, got)
+					assert.ErrorIs(t, got, want)
 				}
 			},
 		)
