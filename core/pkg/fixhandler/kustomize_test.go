@@ -4061,3 +4061,305 @@ func TestReview4034_MissingIntermediateArrayElementCreated(t *testing.T) {
 	require.Len(t, builtNP.Spec.Ingress[0].Ports, 1)
 	assert.Equal(t, 80, builtNP.Spec.Ingress[0].Ports[0].Port)
 }
+
+// TestReview4034_ArrayGapsRejected verifies that array gaps are rejected instead of filling
+// preceding elements with empty objects or emitting out-of-bounds array patches.
+func TestReview4034_ArrayGapsRejected(t *testing.T) {
+	dir := t.TempDir()
+
+	// 1. Intermediate array gap: NetworkPolicy with no ingress list, targeting index 1
+	np := makeResource("NetworkPolicy", "np-gap")
+	np.SetApiVersion("networking.k8s.io/v1")
+	np.GetObject()["spec"] = map[string]interface{}{}
+
+	suggestions := []HelmFixSuggestion{
+		{
+			Resource:           np,
+			ChartName:          "my-chart",
+			FidelityProvenance: true,
+			FixPaths: []armotypes.FixPath{
+				{Path: "spec.ingress[1].from[0].namespaceSelector.matchLabels.team", Value: "security"},
+			},
+		},
+	}
+
+	res, err := EmitKustomizePatch(suggestions, dir)
+	require.NoError(t, err)
+	require.Empty(t, res.EmittedResources)
+	require.Len(t, res.SkippedResources, 1)
+	assert.Contains(t, res.SkippedResources[0].Reason, "array gap detected")
+
+	// 2. Terminal array gap: Service with empty externalIPs, targeting index 2
+	svc := makeResource("Service", "svc-gap")
+	svc.GetObject()["spec"] = map[string]interface{}{
+		"externalIPs": []interface{}{},
+	}
+
+	suggestions2 := []HelmFixSuggestion{
+		{
+			Resource:           svc,
+			ChartName:          "my-chart",
+			FidelityProvenance: true,
+			FixPaths: []armotypes.FixPath{
+				{Path: "spec.externalIPs[2]", Value: "1.2.3.4"},
+			},
+		},
+	}
+
+	dir2 := t.TempDir()
+	res2, err := EmitKustomizePatch(suggestions2, dir2)
+	require.NoError(t, err)
+	require.Empty(t, res2.EmittedResources)
+	require.Len(t, res2.SkippedResources, 1)
+	assert.Contains(t, res2.SkippedResources[0].Reason, "array gap detected")
+}
+
+// TestReview4034_DeclinedResourcesExcludedFromBaseAndStalePatchesPurged verifies that
+// fixes are resolved before writing output files, so declined resources do not appear
+// in base.yaml, and reruns where fixes are declined do not produce mismatched overlays.
+func TestReview4034_DeclinedResourcesExcludedFromBaseAndStalePatchesPurged(t *testing.T) {
+	dir := t.TempDir()
+
+	validDeploy := makeResource("Deployment", "valid-app")
+	validDeploy.GetObject()["spec"] = map[string]interface{}{
+		"template": map[string]interface{}{
+			"spec": map[string]interface{}{
+				"containers": []interface{}{
+					map[string]interface{}{"name": "web"},
+				},
+			},
+		},
+	}
+
+	invalidNP := makeResource("NetworkPolicy", "invalid-np")
+	invalidNP.SetApiVersion("networking.k8s.io/v1")
+	invalidNP.GetObject()["spec"] = map[string]interface{}{}
+
+	suggestions := []HelmFixSuggestion{
+		{
+			Resource:           validDeploy,
+			ChartName:          "my-chart",
+			FidelityProvenance: true,
+			FixPaths: []armotypes.FixPath{
+				{Path: "spec.template.spec.containers[0].securityContext.privileged", Value: "false"},
+			},
+		},
+		{
+			Resource:           invalidNP,
+			ChartName:          "my-chart",
+			FidelityProvenance: true,
+			FixPaths: []armotypes.FixPath{
+				{Path: "spec.ingress[5].from[0].namespaceSelector.matchLabels.team", Value: "security"},
+			},
+		},
+	}
+
+	res, err := EmitKustomizePatch(suggestions, dir)
+	require.NoError(t, err)
+	require.Len(t, res.EmittedResources, 1)
+	assert.Equal(t, "Deployment/default/valid-app", res.EmittedResources[0])
+	require.Len(t, res.SkippedResources, 1)
+	assert.Equal(t, "NetworkPolicy/invalid-np", res.SkippedResources[0].ResourceKey)
+
+	// Verify base.yaml only contains the valid Deployment, NOT the declined NetworkPolicy
+	baseContent, err := os.ReadFile(filepath.Join(dir, "base.yaml"))
+	require.NoError(t, err)
+	docs := splitYamlDocs(baseContent)
+	require.Len(t, docs, 1, "declined resource must not appear in base.yaml")
+	assert.Contains(t, string(docs[0]), "kind: Deployment")
+	assert.NotContains(t, string(baseContent), "NetworkPolicy")
+
+	// Verify kustomize build succeeds and only contains the Deployment
+	k := krusty.MakeKustomizer(krusty.MakeDefaultOptions())
+	fSys := filesys.MakeFsOnDisk()
+	m, err := k.Run(fSys, dir)
+	require.NoError(t, err)
+	builtYaml, err := m.AsYaml()
+	require.NoError(t, err)
+	assert.Contains(t, string(builtYaml), "kind: Deployment")
+	assert.NotContains(t, string(builtYaml), "NetworkPolicy")
+
+	// Rerun where all fixes are declined: must emit 0 resources and not overwrite with inconsistent state
+	emptyDir := t.TempDir()
+	allDeclined := []HelmFixSuggestion{
+		{
+			Resource:           invalidNP,
+			ChartName:          "my-chart",
+			FidelityProvenance: true,
+			FixPaths: []armotypes.FixPath{
+				{Path: "spec.ingress[5].from[0].namespaceSelector.matchLabels.team", Value: "security"},
+			},
+		},
+	}
+	res2, err := EmitKustomizePatch(allDeclined, emptyDir)
+	require.NoError(t, err)
+	require.Empty(t, res2.EmittedResources)
+	require.Len(t, res2.SkippedResources, 1)
+	// No base.yaml should be created in emptyDir
+	_, err = os.Stat(filepath.Join(emptyDir, "base.yaml"))
+	assert.True(t, os.IsNotExist(err), "base.yaml must not be written when all resources are declined")
+}
+
+// TestReview4034_OctalLeadingZeroNumericParsing verifies that YAML octal values like 0777
+// are parsed to decimal integers (511) matching the standard fixer.
+func TestReview4034_OctalLeadingZeroNumericParsing(t *testing.T) {
+	dir := t.TempDir()
+
+	deploy := makeResource("Deployment", "mode-app")
+	deploy.GetObject()["spec"] = map[string]interface{}{
+		"template": map[string]interface{}{
+			"spec": map[string]interface{}{
+				"volumes": []interface{}{
+					map[string]interface{}{
+						"name": "vol",
+						"configMap": map[string]interface{}{
+							"name": "cfg",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	suggestions := []HelmFixSuggestion{
+		{
+			Resource:           deploy,
+			ChartName:          "my-chart",
+			FidelityProvenance: true,
+			FixPaths: []armotypes.FixPath{
+				{Path: "spec.template.spec.volumes[0].configMap.defaultMode", Value: "0777"},
+				{Path: "spec.octal644", Value: "0644"},
+			},
+		},
+	}
+
+	res, err := EmitKustomizePatch(suggestions, dir)
+	require.NoError(t, err)
+	require.Len(t, res.EmittedResources, 1)
+
+	patchFileName := resourcePatchFilename(resourceKey{
+		Group:     "apps",
+		Version:   "v1",
+		Kind:      "Deployment",
+		Namespace: "default",
+		Name:      "mode-app",
+	})
+	patchContent, err := os.ReadFile(filepath.Join(dir, patchFileName))
+	require.NoError(t, err)
+
+	var ops []kustomizePatchOp
+	require.NoError(t, yaml.Unmarshal(patchContent, &ops))
+	require.Len(t, ops, 2)
+
+	assert.Equal(t, "/spec/template/spec/volumes/0/configMap/defaultMode", ops[0].Path)
+	assert.Equal(t, 511, ops[0].Value, "0777 must be parsed as octal integer 511")
+
+	assert.Equal(t, "/spec/octal644", ops[1].Path)
+	assert.Equal(t, 420, ops[1].Value, "0644 must be parsed as octal integer 420")
+
+	// Verify build output
+	k := krusty.MakeKustomizer(krusty.MakeDefaultOptions())
+	fSys := filesys.MakeFsOnDisk()
+	m, err := k.Run(fSys, dir)
+	require.NoError(t, err)
+	yamlOut, err := m.AsYaml()
+	require.NoError(t, err)
+
+	var built struct {
+		Spec struct {
+			Template struct {
+				Spec struct {
+					Volumes []struct {
+						ConfigMap struct {
+							DefaultMode int `yaml:"defaultMode"`
+						} `yaml:"configMap"`
+					} `yaml:"volumes"`
+				} `yaml:"spec"`
+			} `yaml:"template"`
+			Octal644 int `yaml:"octal644"`
+		} `yaml:"spec"`
+	}
+	require.NoError(t, yaml.Unmarshal(yamlOut, &built))
+	assert.Equal(t, 511, built.Spec.Template.Spec.Volumes[0].ConfigMap.DefaultMode)
+	assert.Equal(t, 420, built.Spec.Octal644)
+}
+
+// TestReview4034_CustomResourceDriftRejectedAndRedactionRestricted verifies that:
+// 1. String "123" changing to numeric 123 is rejected as a type mismatch.
+// 2. Literal data.setting: XXXXXX changing in a custom resource is rejected.
+// 3. Added envFrom under spec.rules.containers[0] in a custom resource is rejected.
+func TestReview4034_CustomResourceDriftRejectedAndRedactionRestricted(t *testing.T) {
+	// Case 1: spec.setting string "123" vs numeric 123
+	scannedStr := map[string]interface{}{
+		"apiVersion": "example.com/v1",
+		"kind":       "MyCustomResource",
+		"metadata":   map[string]interface{}{"name": "cr-1"},
+		"spec": map[string]interface{}{
+			"setting": "123",
+		},
+	}
+	candNum := map[string]interface{}{
+		"apiVersion": "example.com/v1",
+		"kind":       "MyCustomResource",
+		"metadata":   map[string]interface{}{"name": "cr-1"},
+		"spec": map[string]interface{}{
+			"setting": 123,
+		},
+	}
+	err1 := verifyScannedFieldsMatch(scannedStr, candNum, "")
+	require.Error(t, err1, "string '123' becoming numeric 123 must be rejected")
+	assert.Contains(t, err1.Error(), "type mismatch at spec.setting")
+
+	// Case 2: Custom resource with data.setting: XXXXXX changing to changed
+	scannedCR := map[string]interface{}{
+		"apiVersion": "example.com/v1",
+		"kind":       "MyCustomResource",
+		"metadata":   map[string]interface{}{"name": "cr-2"},
+		"data": map[string]interface{}{
+			"setting": "XXXXXX",
+		},
+	}
+	candCRChanged := map[string]interface{}{
+		"apiVersion": "example.com/v1",
+		"kind":       "MyCustomResource",
+		"metadata":   map[string]interface{}{"name": "cr-2"},
+		"data": map[string]interface{}{
+			"setting": "changed",
+		},
+	}
+	err2 := verifyScannedFieldsMatch(scannedCR, candCRChanged, "")
+	require.Error(t, err2, "literal data.setting: XXXXXX in custom resource must not be exempted from drift")
+	assert.Contains(t, err2.Error(), "value mismatch at data.setting")
+
+	// Case 3: Added envFrom under spec.rules.containers[0] on custom resource
+	scannedRules := map[string]interface{}{
+		"apiVersion": "example.com/v1",
+		"kind":       "MyCustomResource",
+		"metadata":   map[string]interface{}{"name": "cr-3"},
+		"spec": map[string]interface{}{
+			"rules": map[string]interface{}{
+				"containers": []interface{}{
+					map[string]interface{}{"name": "custom-box"},
+				},
+			},
+		},
+	}
+	candRulesWithEnvFrom := map[string]interface{}{
+		"apiVersion": "example.com/v1",
+		"kind":       "MyCustomResource",
+		"metadata":   map[string]interface{}{"name": "cr-3"},
+		"spec": map[string]interface{}{
+			"rules": map[string]interface{}{
+				"containers": []interface{}{
+					map[string]interface{}{
+						"name":    "custom-box",
+						"envFrom": []interface{}{map[string]interface{}{"configMapRef": map[string]interface{}{"name": "cm"}}},
+					},
+				},
+			},
+		},
+	}
+	err3 := verifyScannedFieldsMatch(scannedRules, candRulesWithEnvFrom, "")
+	require.Error(t, err3, "added envFrom under non-pod container path spec.rules.containers[0] must be rejected")
+	assert.Contains(t, err3.Error(), "spec.rules.containers[0].envFrom")
+}

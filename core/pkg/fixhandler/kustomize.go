@@ -9,6 +9,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
@@ -177,19 +178,29 @@ func ensureSubpath(dir, filename string) (string, error) {
 // everything else (including "null" and quoted strings) remains a string so that fix semantics
 // match the standard fixer.
 func parseFixValue(raw string) interface{} {
-	if i, err := strconv.ParseInt(raw, 10, 64); err == nil {
-		return i
-	}
-	if b, err := strconv.ParseBool(raw); err == nil {
-		return b
-	}
-	if f, err := strconv.ParseFloat(raw, 64); err == nil && !math.IsNaN(f) && !math.IsInf(f, 0) {
-		return f
-	}
-	if safeSequenceValue.MatchString(raw) {
-		var seq []interface{}
-		if err := yaml.Unmarshal([]byte(raw), &seq); err == nil {
-			return seq
+	if node, err := parseYAMLLiteral(raw); err == nil {
+		switch node.Tag {
+		case "!!int":
+			var i int
+			if err := node.Decode(&i); err == nil {
+				return i
+			}
+		case "!!bool":
+			var b bool
+			if err := node.Decode(&b); err == nil {
+				return b
+			}
+		case "!!float":
+			var f float64
+			if err := node.Decode(&f); err == nil && !math.IsNaN(f) && !math.IsInf(f, 0) {
+				return f
+			}
+		}
+		if node.Kind == yaml.SequenceNode {
+			var seq []interface{}
+			if err := node.Decode(&seq); err == nil {
+				return seq
+			}
 		}
 	}
 	return raw
@@ -345,31 +356,30 @@ func resolveFixPathOps(workingObj map[string]interface{}, fp armotypes.FixPath) 
 				if part.index < 0 {
 					return nil, fmt.Errorf("negative array index %d in path %s", part.index, fp.Path)
 				}
-				pointerTokens = append(pointerTokens, strconv.Itoa(part.index))
 				slice, ok := current.([]interface{})
 				if !ok {
-					return nil, fmt.Errorf("expected slice at %s but found %T in path %s", strings.Join(pointerTokens[:len(pointerTokens)-1], "/"), current, fp.Path)
+					return nil, fmt.Errorf("expected slice at %s but found %T in path %s", strings.Join(pointerTokens, "/"), current, fp.Path)
 				}
-				if part.index >= len(slice) {
-					// Create missing intermediate array elements up to part.index
-					for len(slice) <= part.index {
-						var newElem interface{}
-						isTargetIdx := len(slice) == part.index
-						if isTargetIdx && parts[i+1].sequence {
-							newElem = make([]interface{}, 0)
-						} else {
-							newElem = make(map[string]interface{})
-						}
-						currTokens := append([]string{}, pointerTokens[:len(pointerTokens)-1]...)
-						currTokens = append(currTokens, strconv.Itoa(len(slice)))
-						ancestorPtr := "/" + strings.Join(currTokens, "/")
-						ops = append(ops, kustomizePatchOp{
-							Op:    "add",
-							Path:  ancestorPtr,
-							Value: newElem,
-						})
-						slice = append(slice, newElem)
+				if part.index > len(slice) {
+					return nil, fmt.Errorf("array gap detected: intermediate index %d exceeds slice length %d in path %s", part.index, len(slice), fp.Path)
+				}
+				pointerTokens = append(pointerTokens, strconv.Itoa(part.index))
+				if part.index == len(slice) {
+					var newElem interface{}
+					if parts[i+1].sequence {
+						newElem = make([]interface{}, 0)
+					} else {
+						newElem = make(map[string]interface{})
 					}
+					currTokens := append([]string{}, pointerTokens[:len(pointerTokens)-1]...)
+					currTokens = append(currTokens, strconv.Itoa(part.index))
+					ancestorPtr := "/" + strings.Join(currTokens, "/")
+					ops = append(ops, kustomizePatchOp{
+						Op:    "add",
+						Path:  ancestorPtr,
+						Value: newElem,
+					})
+					slice = append(slice, newElem)
 					updateParentContainer(parentMap, parentKey, parentSlice, parentSliceIdx, slice)
 				}
 				parentSlice = slice
@@ -418,12 +428,15 @@ func resolveFixPathOps(workingObj map[string]interface{}, fp armotypes.FixPath) 
 				if part.index < 0 {
 					return nil, fmt.Errorf("negative array index %d in path %s", part.index, fp.Path)
 				}
-				pointerTokens = append(pointerTokens, strconv.Itoa(part.index))
-				targetPtr := "/" + strings.Join(pointerTokens, "/")
 				slice, ok := current.([]interface{})
 				if !ok {
-					return nil, fmt.Errorf("expected slice at %s but found %T in path %s", targetPtr, current, fp.Path)
+					return nil, fmt.Errorf("expected slice at %s but found %T in path %s", strings.Join(pointerTokens, "/"), current, fp.Path)
 				}
+				if part.index > len(slice) {
+					return nil, fmt.Errorf("array gap detected: terminal index %d exceeds slice length %d in path %s", part.index, len(slice), fp.Path)
+				}
+				pointerTokens = append(pointerTokens, strconv.Itoa(part.index))
+				targetPtr := "/" + strings.Join(pointerTokens, "/")
 				if part.index < len(slice) {
 					ops = append(ops, kustomizePatchOp{
 						Op:    "replace",
@@ -432,9 +445,6 @@ func resolveFixPathOps(workingObj map[string]interface{}, fp armotypes.FixPath) 
 					})
 					slice[part.index] = parsedVal
 				} else {
-					for len(slice) < part.index {
-						slice = append(slice, nil)
-					}
 					ops = append(ops, kustomizePatchOp{
 						Op:    "add",
 						Path:  targetPtr,
@@ -470,35 +480,41 @@ func resolveFixPathOps(workingObj map[string]interface{}, fp armotypes.FixPath) 
 // hasRedactedPlaceholder checks if the object contains the scan redactor's "XXXXXX" placeholder
 // in container environment variables, secret data, or configmap data.
 func hasRedactedPlaceholder(data interface{}) bool {
-	switch v := data.(type) {
-	case map[string]interface{}:
-		for _, field := range []string{"data", "stringData", "binaryData"} {
-			if m, ok := v[field].(map[string]interface{}); ok {
-				for _, val := range m {
-					if s, ok := val.(string); ok && s == "XXXXXX" {
+	m, ok := data.(map[string]interface{})
+	if !ok {
+		return false
+	}
+	kind, _ := m["kind"].(string)
+	switch kind {
+	case "Secret":
+		for _, f := range []string{"data", "stringData"} {
+			if dataMap, ok := m[f].(map[string]interface{}); ok {
+				for _, v := range dataMap {
+					if s, ok := v.(string); ok && s == "XXXXXX" {
 						return true
 					}
 				}
 			}
 		}
-		if envList, ok := v["env"].([]interface{}); ok {
+	case "ConfigMap":
+		for _, f := range []string{"data", "binaryData"} {
+			if dataMap, ok := m[f].(map[string]interface{}); ok {
+				for _, v := range dataMap {
+					if s, ok := v.(string); ok && s == "XXXXXX" {
+						return true
+					}
+				}
+			}
+		}
+	}
+	for _, c := range getContainersFromObj(m) {
+		if envList, ok := c["env"].([]interface{}); ok {
 			for _, item := range envList {
 				if envMap, ok := item.(map[string]interface{}); ok {
 					if val, ok := envMap["value"].(string); ok && val == "XXXXXX" {
 						return true
 					}
 				}
-			}
-		}
-		for _, child := range v {
-			if hasRedactedPlaceholder(child) {
-				return true
-			}
-		}
-	case []interface{}:
-		for _, child := range v {
-			if hasRedactedPlaceholder(child) {
-				return true
 			}
 		}
 	}
@@ -566,26 +582,71 @@ func joinPath(parent, child string) string {
 	return parent + "." + child
 }
 
+var (
+	containerIndexRegex     = regexp.MustCompile(`^(containers|initContainers|ephemeralContainers)\[\d+\]$`)
+	containerEnvValueRegex  = regexp.MustCompile(`^(containers|initContainers|ephemeralContainers)\[\d+\]\.env\[\d+\]\.value$`)
+	containerResourcesRegex = regexp.MustCompile(`^(containers|initContainers|ephemeralContainers)\[\d+\]\.resources$`)
+)
+
+func isPodWorkloadKind(kind string) bool {
+	switch kind {
+	case "Pod", "Deployment", "StatefulSet", "DaemonSet", "ReplicaSet", "ReplicationController", "Job", "CronJob":
+		return true
+	default:
+		return false
+	}
+}
+
+func getValidPodSpecPrefixes(kind string) []string {
+	switch kind {
+	case "Pod":
+		return []string{"spec"}
+	case "Deployment", "StatefulSet", "DaemonSet", "ReplicaSet", "ReplicationController", "Job":
+		return []string{"spec.template.spec"}
+	case "CronJob":
+		return []string{"spec.jobTemplate.spec.template.spec"}
+	case "":
+		// When kind is unknown (e.g. direct helper test on submap), allow standard pod workload prefixes
+		return []string{"spec", "spec.template.spec", "spec.jobTemplate.spec.template.spec"}
+	default:
+		return nil
+	}
+}
+
+func isContainerPath(kind, path string) bool {
+	prefixes := getValidPodSpecPrefixes(kind)
+	for _, prefix := range prefixes {
+		if strings.HasPrefix(path, prefix+".") {
+			relPath := strings.TrimPrefix(path, prefix+".")
+			if containerIndexRegex.MatchString(relPath) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // isScannerAddedEmptyField reports whether fieldPath and val correspond to a documented
 // artifact of the scanner's typed struct unmarshaling (specifically container resources: {})
 // that should be normalized when absent or null in the rendered base manifest.
-func isScannerAddedEmptyField(fieldPath string, val interface{}) bool {
+func isScannerAddedEmptyField(kind, fieldPath string, val interface{}) bool {
 	m, ok := val.(map[string]interface{})
 	if !ok || len(m) != 0 {
 		return false
 	}
-	return isContainerResourcesPath(fieldPath)
-}
-
-// isContainerResourcesPath checks whether fieldPath points to container resources, e.g.
-// "spec.containers[0].resources" or "spec.template.spec.initContainers[1].resources".
-func isContainerResourcesPath(fieldPath string) bool {
-	if !strings.HasSuffix(fieldPath, ".resources") && fieldPath != "resources" {
+	if kind != "" && !isPodWorkloadKind(kind) {
 		return false
 	}
-	return strings.Contains(fieldPath, "containers") ||
-		strings.Contains(fieldPath, "initContainers") ||
-		strings.Contains(fieldPath, "ephemeralContainers")
+	prefixes := getValidPodSpecPrefixes(kind)
+	for _, prefix := range prefixes {
+		if strings.HasPrefix(fieldPath, prefix+".") {
+			relPath := strings.TrimPrefix(fieldPath, prefix+".")
+			if containerResourcesRegex.MatchString(relPath) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // isSourceMetadataKey reports whether key is scanner/report source metadata that should
@@ -597,29 +658,38 @@ func isSourceMetadataKey(path, key string) bool {
 // isContainerEnvFrom reports whether key is "envFrom" on a container object
 // (spec.containers[i], initContainers, ephemeralContainers), which the scanner
 // redactor removes without leaving a placeholder.
-func isContainerEnvFrom(path, key string) bool {
+func isContainerEnvFrom(kind, path, key string) bool {
 	if key != "envFrom" {
 		return false
 	}
-	return strings.Contains(path, "containers[") ||
-		strings.Contains(path, "initContainers[") ||
-		strings.Contains(path, "ephemeralContainers[")
+	return isContainerPath(kind, path)
 }
 
 // isScannerRedactedField reports whether path corresponds to a field that the scan redactor
 // actually replaces with "XXXXXX":
 // 1. Data entries in Secrets/ConfigMaps: data.<key>, stringData.<key>, binaryData.<key>
 // 2. Container environment variable values: ...containers[i].env[j].value
-func isScannerRedactedField(path string) bool {
-	if strings.HasPrefix(path, "data.") || strings.HasPrefix(path, "stringData.") || strings.HasPrefix(path, "binaryData.") {
-		return true
+func isScannerRedactedField(kind, path string) bool {
+	switch kind {
+	case "Secret":
+		return strings.HasPrefix(path, "data.") || strings.HasPrefix(path, "stringData.")
+	case "ConfigMap":
+		return strings.HasPrefix(path, "data.") || strings.HasPrefix(path, "binaryData.")
+	default:
+		if kind != "" && !isPodWorkloadKind(kind) {
+			return false
+		}
+		prefixes := getValidPodSpecPrefixes(kind)
+		for _, prefix := range prefixes {
+			if strings.HasPrefix(path, prefix+".") {
+				relPath := strings.TrimPrefix(path, prefix+".")
+				if containerEnvValueRegex.MatchString(relPath) {
+					return true
+				}
+			}
+		}
+		return false
 	}
-	if strings.HasSuffix(path, ".value") && (strings.Contains(path, ".env[") || strings.HasPrefix(path, "env[")) {
-		return strings.Contains(path, "containers[") ||
-			strings.Contains(path, "initContainers[") ||
-			strings.Contains(path, "ephemeralContainers[")
-	}
-	return false
 }
 
 // verifyScannedFieldsMatch recursively checks that every non-redacted field present in scannedVal
@@ -630,7 +700,23 @@ func isScannerRedactedField(path string) bool {
 // (specifically empty container resources: {}) are normalized so unchanged manifests match.
 // Returns an error if any concrete non-redacted value conflicts, if selectors or empty values
 // are conflated with null or missing fields, or if additional non-redacted fields exist.
-func verifyScannedFieldsMatch(scannedVal, candVal interface{}, path string) error {
+func verifyScannedFieldsMatch(scannedVal, candVal interface{}, path string, kind ...string) error {
+	var rKind string
+	if len(kind) > 0 && kind[0] != "" {
+		rKind = kind[0]
+	} else if m, ok := scannedVal.(map[string]interface{}); ok {
+		if k, ok := m["kind"].(string); ok {
+			rKind = k
+		}
+	}
+	if rKind == "" {
+		if m, ok := candVal.(map[string]interface{}); ok {
+			if k, ok := m["kind"].(string); ok {
+				rKind = k
+			}
+		}
+	}
+
 	if scannedVal == nil {
 		if candVal == nil {
 			return nil
@@ -638,14 +724,14 @@ func verifyScannedFieldsMatch(scannedVal, candVal interface{}, path string) erro
 		return fmt.Errorf("field %s is null in scanned resource but present with non-empty value in rendered base", path)
 	}
 	if candVal == nil {
-		if isScannerAddedEmptyField(path, scannedVal) {
+		if isScannerAddedEmptyField(rKind, path, scannedVal) {
 			return nil
 		}
 		return fmt.Errorf("field %s is present with non-empty value in scanned resource but null in rendered base", path)
 	}
 
 	if s, ok := scannedVal.(string); ok && s == "XXXXXX" {
-		if isScannerRedactedField(path) {
+		if isScannerRedactedField(rKind, path) {
 			return nil
 		}
 	}
@@ -662,25 +748,25 @@ func verifyScannedFieldsMatch(scannedVal, candVal interface{}, path string) erro
 			}
 			childPath := joinPath(path, k)
 			if s, isStr := v.(string); isStr && s == "XXXXXX" {
-				if isScannerRedactedField(childPath) {
+				if isScannerRedactedField(rKind, childPath) {
 					continue
 				}
 			}
 			candChild, exists := cMap[k]
 			if !exists {
 				// Normalize documented scanner-added fields (such as container resources: {})
-				if isScannerAddedEmptyField(childPath, v) {
+				if isScannerAddedEmptyField(rKind, childPath, v) {
 					continue
 				}
 				return fmt.Errorf("field %s present in scanned resource is missing in rendered base", childPath)
 			}
-			if err := verifyScannedFieldsMatch(v, candChild, childPath); err != nil {
+			if err := verifyScannedFieldsMatch(v, candChild, childPath, rKind); err != nil {
 				return err
 			}
 		}
 
 		for k := range cMap {
-			if isSourceMetadataKey(path, k) || isContainerEnvFrom(path, k) {
+			if isSourceMetadataKey(path, k) || isContainerEnvFrom(rKind, path, k) {
 				continue
 			}
 			_, exists := sTyped[k]
@@ -700,27 +786,50 @@ func verifyScannedFieldsMatch(scannedVal, candVal interface{}, path string) erro
 		}
 		for i := range sTyped {
 			elemPath := fmt.Sprintf("%s[%d]", path, i)
-			if err := verifyScannedFieldsMatch(sTyped[i], cSlice[i], elemPath); err != nil {
+			if err := verifyScannedFieldsMatch(sTyped[i], cSlice[i], elemPath, rKind); err != nil {
 				return err
 			}
 		}
 		return nil
 
 	default:
-		if sf, isSNumeric := toFloat64(scannedVal); isSNumeric {
-			if cf, isCNumeric := toFloat64(candVal); isCNumeric {
-				if sf != cf {
-					return fmt.Errorf("value mismatch at %s: scanned %v, rendered %v", path, scannedVal, candVal)
-				}
-				return nil
+		switch s := scannedVal.(type) {
+		case string:
+			c, ok := candVal.(string)
+			if !ok {
+				return fmt.Errorf("type mismatch at %s: scanned string %q, rendered %T (%v)", path, s, candVal, candVal)
 			}
-			return fmt.Errorf("type mismatch at %s: scanned numeric %v, rendered %T", path, scannedVal, candVal)
+			if s != c {
+				return fmt.Errorf("value mismatch at %s: scanned %q, rendered %q", path, s, c)
+			}
+			return nil
+		case bool:
+			c, ok := candVal.(bool)
+			if !ok {
+				return fmt.Errorf("type mismatch at %s: scanned bool %v, rendered %T (%v)", path, s, candVal, candVal)
+			}
+			if s != c {
+				return fmt.Errorf("value mismatch at %s: scanned %v, rendered %v", path, s, c)
+			}
+			return nil
+		default:
+			if sf, isSNumeric := toFloat64(scannedVal); isSNumeric {
+				if cf, isCNumeric := toFloat64(candVal); isCNumeric {
+					if sf != cf {
+						return fmt.Errorf("value mismatch at %s: scanned %v, rendered %v", path, scannedVal, candVal)
+					}
+					return nil
+				}
+				return fmt.Errorf("type mismatch at %s: scanned numeric %v, rendered %T (%v)", path, scannedVal, candVal, candVal)
+			}
+			if reflect.TypeOf(scannedVal) != reflect.TypeOf(candVal) {
+				return fmt.Errorf("type mismatch at %s: scanned %T, rendered %T", path, scannedVal, candVal)
+			}
+			if scannedVal != candVal {
+				return fmt.Errorf("value mismatch at %s: scanned %v, rendered %v", path, scannedVal, candVal)
+			}
+			return nil
 		}
-
-		if fmt.Sprintf("%v", scannedVal) != fmt.Sprintf("%v", candVal) {
-			return fmt.Errorf("value mismatch at %s: scanned %v, rendered %v", path, scannedVal, candVal)
-		}
-		return nil
 	}
 }
 
@@ -1206,43 +1315,16 @@ func EmitKustomizePatch(suggestions []HelmFixSuggestion, dir string) (*Kustomize
 	}
 	defer root.Close()
 
-	kust := kustomizationDoc{
-		APIVersion: "kustomize.config.k8s.io/v1beta1",
-		Kind:       "Kustomization",
+	type plannedResourcePatch struct {
+		key           resourceKey
+		resIdent      string
+		patchFileName string
+		patchBytes    []byte
+		target        kustomizeTarget
+		baseDoc       []byte
 	}
 
-	// 2. Build base.yaml containing all rendered resources so `kustomize build <dir>` works out of the box.
-	var baseYamlParts [][]byte
-	for _, key := range keysInOrder {
-		rg := groups[key]
-		if rg.baseObj != nil {
-			cleanObj := stripServerManagedFields(rg.baseObj)
-			objBytes, err := yaml.Marshal(cleanObj)
-			if err == nil && len(objBytes) > 0 {
-				baseYamlParts = append(baseYamlParts, objBytes)
-			}
-		}
-	}
-
-	if len(baseYamlParts) > 0 {
-		if _, err := ensureSubpath(dir, "base.yaml"); err != nil {
-			return nil, err
-		}
-		var baseContent []byte
-		for i, part := range baseYamlParts {
-			if i > 0 {
-				baseContent = append(baseContent, []byte("---\n")...)
-			}
-			baseContent = append(baseContent, part...)
-		}
-		// Write base.yaml with restricted mode 0600, contained within root.
-		if err := writeRestrictedFile(root, "base.yaml", baseContent); err != nil {
-			return nil, fmt.Errorf("failed to write base.yaml: %w", err)
-		}
-		kust.Resources = append(kust.Resources, "base.yaml")
-	}
-
-	// 3. Generate one patch file per unique resource
+	var plannedPatches []plannedResourcePatch
 	writtenFiles := make(map[string]resourceKey)
 	writtenTargets := make(map[string]string)
 
@@ -1300,9 +1382,6 @@ func EmitKustomizePatch(suggestions []HelmFixSuggestion, dir string) (*Kustomize
 		if err != nil {
 			return nil, fmt.Errorf("failed to marshal patch for %s/%s: %w", rg.key.Kind, rg.key.Name, err)
 		}
-		if err := writeRestrictedFile(root, patchFileName, patchBytes); err != nil {
-			return nil, fmt.Errorf("failed to write patch file %q: %w", patchFileName, err)
-		}
 
 		groupSelector := "^$"
 		if rg.key.Group != "" {
@@ -1332,18 +1411,74 @@ func EmitKustomizePatch(suggestions []HelmFixSuggestion, dir string) (*Kustomize
 		}
 		writtenTargets[targetKey] = resIdent
 
-		kust.Patches = append(kust.Patches, kustomizePatchEntry{
-			Path:   patchFileName,
-			Target: target,
-		})
+		cleanObj := stripServerManagedFields(rg.baseObj)
+		baseDocBytes, err := yaml.Marshal(cleanObj)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal base document for %s/%s: %w", rg.key.Kind, rg.key.Name, err)
+		}
 
-		result.EmittedResources = append(result.EmittedResources, resIdent)
+		plannedPatches = append(plannedPatches, plannedResourcePatch{
+			key:           rg.key,
+			resIdent:      resIdent,
+			patchFileName: patchFileName,
+			patchBytes:    patchBytes,
+			target:        target,
+			baseDoc:       baseDocBytes,
+		})
 	}
 
-	if len(kust.Patches) == 0 {
+	if len(plannedPatches) == 0 {
 		return result, nil
 	}
 
+	// Clean up any stale patch-*.yaml files in dir from prior runs so that
+	// old patches are not left around or applied by mistake.
+	entries, readErr := os.ReadDir(dir)
+	if readErr == nil {
+		for _, e := range entries {
+			if !e.IsDir() && strings.HasPrefix(e.Name(), "patch-") && strings.HasSuffix(e.Name(), ".yaml") {
+				_ = root.Remove(e.Name())
+			}
+		}
+	}
+
+	kust := kustomizationDoc{
+		APIVersion: "kustomize.config.k8s.io/v1beta1",
+		Kind:       "Kustomization",
+	}
+
+	// 2. Build base.yaml containing ONLY the successfully resolved resources.
+	var baseContent []byte
+	for i, p := range plannedPatches {
+		if i > 0 {
+			baseContent = append(baseContent, []byte("---\n")...)
+		}
+		baseContent = append(baseContent, p.baseDoc...)
+	}
+
+	if len(baseContent) > 0 {
+		if _, err := ensureSubpath(dir, "base.yaml"); err != nil {
+			return nil, err
+		}
+		if err := writeRestrictedFile(root, "base.yaml", baseContent); err != nil {
+			return nil, fmt.Errorf("failed to write base.yaml: %w", err)
+		}
+		kust.Resources = append(kust.Resources, "base.yaml")
+	}
+
+	// 3. Write patch files for the planned patches
+	for _, p := range plannedPatches {
+		if err := writeRestrictedFile(root, p.patchFileName, p.patchBytes); err != nil {
+			return nil, fmt.Errorf("failed to write patch file %q: %w", p.patchFileName, err)
+		}
+		kust.Patches = append(kust.Patches, kustomizePatchEntry{
+			Path:   p.patchFileName,
+			Target: p.target,
+		})
+		result.EmittedResources = append(result.EmittedResources, p.resIdent)
+	}
+
+	// 4. Write kustomization.yaml
 	if _, err := ensureSubpath(dir, "kustomization.yaml"); err != nil {
 		return nil, err
 	}
