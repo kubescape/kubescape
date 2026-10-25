@@ -10,55 +10,7 @@ import (
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
-	"github.com/kubescape/opa-utils/reporthandling"
 )
-
-// providerRank ranks discovery providers so rendered output wins over raw file input.
-func providerRank(fileType string) int {
-	switch fileType {
-	case reporthandling.SourceTypeKustomizeDirectory, reporthandling.SourceTypeHelmChart, "Terraform":
-		return 2
-	case reporthandling.SourceTypeYaml, reporthandling.SourceTypeJson:
-		return 1
-	default:
-		return 0
-	}
-}
-
-// resourceIdentity returns the path-independent k8s identity tuple used for dedup.
-func resourceIdentity(w workloadinterface.IMetadata) string {
-	group, _ := k8sinterface.SplitApiVersion(w.GetApiVersion())
-	kind := w.GetKind()
-	if cautils.IsBuiltinGroup(group) {
-		kind = cautils.NormalizeWorkloadKind(kind)
-	}
-	return fmt.Sprintf("%s/%s/%s/%s", w.GetApiVersion(), w.GetNamespace(), kind, w.GetName())
-}
-
-// dedupWorkloads drops lower-ranked cross-provider duplicates only; same-rank duplicates are kept.
-func dedupWorkloads(workloads []workloadinterface.IMetadata, workloadIDToSource map[string]reporthandling.Source) ([]workloadinterface.IMetadata, map[string]reporthandling.Source) {
-	maxRank := make(map[string]int, len(workloads))
-	for _, w := range workloads {
-		key := resourceIdentity(w)
-		rank := providerRank(workloadIDToSource[w.GetID()].FileType)
-		if rank > maxRank[key] {
-			maxRank[key] = rank
-		}
-	}
-
-	out := make([]workloadinterface.IMetadata, 0, len(workloads))
-	pruned := make(map[string]reporthandling.Source, len(workloads))
-	for _, w := range workloads {
-		rank := providerRank(workloadIDToSource[w.GetID()].FileType)
-		if rank == maxRank[resourceIdentity(w)] {
-			out = append(out, w)
-			if s, ok := workloadIDToSource[w.GetID()]; ok {
-				pruned[w.GetID()] = s
-			}
-		}
-	}
-	return out, pruned
-}
 
 func addWorkloadsToResourcesMap(allResources map[string][]workloadinterface.IMetadata, workloads []workloadinterface.IMetadata) {
 	for i := range workloads {

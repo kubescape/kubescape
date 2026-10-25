@@ -580,8 +580,8 @@ func getResourcesFromPath(ctx context.Context, path string, helmValueOpts cautil
 		}
 	}
 
-	// backstop: drop cross-provider identity collisions the path-level kustomize skip can't see (e.g. helm + raw YAML)
-	workloads, workloadIDToSource = dedupWorkloads(workloads, workloadIDToSource)
+	// Successful renderers already exclude their owned raw inputs. Preserve all
+	// remaining sources, even when their Kubernetes identities match.
 	if len(workloads) == 0 {
 		return nil, nil, allSkips, fmt.Errorf("no scannable Kubernetes resources found for input %q", path)
 	}
