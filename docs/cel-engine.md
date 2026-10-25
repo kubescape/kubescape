@@ -299,10 +299,13 @@ rather than passing. An unknown verdict is never reported as a pass.
 What becomes of that error follows the policy's `spec.failurePolicy`, as it does
 at admission. Under `Fail`, which is the default and what every policy in the
 bundle uses, an errored expression denies the object, so the scan reports a
-failure whose message is the error instead of quietly downgrading it to a skip.
-Under `Ignore` the resource is skipped. Compile failures, budget exhaustion and
-cancellation stay unknown verdicts either way: a cluster never produces them, so
-there is no admission outcome to mirror.
+failure instead of downgrading it to a skip. Evaluation errors are logged as
+warnings with the control ID, rule name, resource ID and error text. The warning
+also appears when another validation confirms a violation on the same resource.
+Under `Ignore`, validation expression errors are ignored and do not cause a
+failure; a match-condition expression error excludes the object from that policy.
+Compile failures, budget exhaustion and cancellation stay unknown verdicts either
+way: a cluster never produces them, so there is no admission outcome to mirror.
 
 ### Verifying it against a cluster
 
@@ -366,6 +369,13 @@ point, and failing to render an explanation is not grounds for discarding it. Th
 message expression draws from the same cost budget as the validations, as it does
 at admission.
 
+These messages are stored in the internal `RuleResponse.AlertMessage`, but scan
+result conversion does not preserve that field. CEL evaluation-error warnings
+make errors visible in the CLI at normal verbosity (on stderr with the default
+logger); they are not included in JSON scan results or backend reports. Ordinary
+violations do not emit evaluation-error warnings. Structured message support in
+scan results requires a separate change to the shared result model and printers.
+
 ### Remediation paths
 
 VAP validations carry no path information: a validation has an expression, a
@@ -378,10 +388,11 @@ Because `kubescape fix` writes YAML from these paths, a wrong path is worse than
 path. Paths are only reported when the walk can justify them, and a path with no
 justified value is reported for review rather than as a fix.
 
-Errors are scoped as narrowly as the failure allows. A single object that fails to
-evaluate marks that object skipped, and does not erase confirmed violations for the
-other objects in the batch. A policy that fails to load is what marks the whole
-control skipped.
+Errors are scoped as narrowly as the failure allows. An expression error under
+`failurePolicy: Fail` marks that object failed. An offline evaluation error, such
+as a compile failure, marks that object skipped unless another validation confirms
+a violation. Neither erases confirmed violations for other objects in the batch.
+A policy that fails to load is what marks the whole control skipped.
 
 ## Out of scope
 
