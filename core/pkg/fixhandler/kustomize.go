@@ -335,7 +335,7 @@ func resolveFixPathOps(workingObj map[string]interface{}, fp armotypes.FixPath) 
 	var parentMap map[string]interface{}
 	var parentKey string
 	var parentSlice []interface{}
-	var parentSliceIdx int = -1
+	parentSliceIdx := -1
 
 	for i, part := range parts {
 		isLast := i == len(parts)-1
