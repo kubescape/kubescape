@@ -530,13 +530,18 @@ func setPkgNameToScoreMap(matches match.Matches, pkgScores map[string]*imageprin
 			}
 		}
 
-		if _, ok := pkgScores[key].MapSeverityToCVEsNumber[m.Vulnerability.Metadata.Severity]; !ok {
-			pkgScores[key].MapSeverityToCVEsNumber[m.Vulnerability.Metadata.Severity] = 1
-		} else {
-			pkgScores[key].MapSeverityToCVEsNumber[m.Vulnerability.Metadata.Severity] += 1
+		severity := ""
+		if m.Vulnerability.Metadata != nil {
+			severity = m.Vulnerability.Metadata.Severity
 		}
 
-		pkgScores[key].Score += utils.ImageSeverityToInt(m.Vulnerability.Metadata.Severity)
+		if _, ok := pkgScores[key].MapSeverityToCVEsNumber[severity]; !ok {
+			pkgScores[key].MapSeverityToCVEsNumber[severity] = 1
+		} else {
+			pkgScores[key].MapSeverityToCVEsNumber[severity] += 1
+		}
+
+		pkgScores[key].Score += utils.ImageSeverityToInt(severity)
 	}
 }
 
@@ -544,15 +549,20 @@ func extractCVEs(matches match.Matches, image string, vexStatuses map[string]cau
 	var CVEs []imageprinter.CVE
 	for _, m := range matches.Sorted() {
 		cve := imageprinter.CVE{
-			ID:          m.Vulnerability.Metadata.ID,
-			Severity:    m.Vulnerability.Metadata.Severity,
+			ID:          m.Vulnerability.ID,
 			Package:     m.Package.Name,
 			Version:     m.Package.Version,
 			FixVersions: m.Vulnerability.Fix.Versions,
 			FixedState:  m.Vulnerability.Fix.State.String(),
 			Image:       image,
-			KEV:         len(m.Vulnerability.Metadata.KnownExploited) > 0,
-			EPSS:        highestEPSS(m.Vulnerability.Metadata.EPSS),
+		}
+		if m.Vulnerability.Metadata != nil {
+			if m.Vulnerability.Metadata.ID != "" {
+				cve.ID = m.Vulnerability.Metadata.ID
+			}
+			cve.Severity = m.Vulnerability.Metadata.Severity
+			cve.KEV = len(m.Vulnerability.Metadata.KnownExploited) > 0
+			cve.EPSS = highestEPSS(m.Vulnerability.Metadata.EPSS)
 		}
 		if vexStatus, ok := vexStatuses[cve.ID]; ok {
 			cve.VexStatus = vexStatus.Status
