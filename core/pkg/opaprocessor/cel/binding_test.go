@@ -279,3 +279,38 @@ func TestBindingScopeEquivalentVersions(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, covered)
 }
+
+func TestBindingScopeNamespaceSelectorMetadataName(t *testing.T) {
+	// A namespaceSelector filtering on kubernetes.io/metadata.name matches a Namespace
+	// object even when the label is omitted from its manifest.
+	scope, err := ParseBindingScope(bindingWith(map[string]any{
+		"namespaceSelector": map[string]any{
+			"matchLabels": map[string]any{
+				"kubernetes.io/metadata.name": "production",
+			},
+		},
+	}))
+	require.NoError(t, err)
+
+	nsWithoutLabel := namespaceObject("production", nil)
+	covered, err := scope.Covers(nsWithoutLabel, nil)
+	require.NoError(t, err)
+	assert.True(t, covered, "Namespace object should match kubernetes.io/metadata.name implicitly")
+
+	nsDifferentName := namespaceObject("staging", nil)
+	covered, err = scope.Covers(nsDifferentName, nil)
+	require.NoError(t, err)
+	assert.False(t, covered, "Namespace object with different name should not match")
+
+	// In offline scans without a collected Namespace object, matching by metadata.name succeeds.
+	pod := workload("v1", "Pod", "web", "production", nil)
+	covered, err = scope.Covers(pod, nil)
+	require.NoError(t, err)
+	assert.True(t, covered, "Namespaced workload should match on metadata.name even without collected namespace")
+
+	// In offline scans, a pod in another namespace is conclusively rejected without uncollected error.
+	podOther := workload("v1", "Pod", "web", "staging", nil)
+	covered, err = scope.Covers(podOther, nil)
+	require.NoError(t, err)
+	assert.False(t, covered, "Mismatched namespace should be rejected without error")
+}
