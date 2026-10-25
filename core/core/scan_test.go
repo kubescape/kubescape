@@ -358,6 +358,49 @@ func TestGetOutputPrintersCollisionReturnsError(t *testing.T) {
 	assert.Contains(t, err.Error(), "output path collision")
 }
 
+// A collision must be rejected before any writer is opened: opening an output
+// file truncates it, so detecting the collision afterwards would empty a report
+// left by a previous run.
+func TestGetOutputPrintersCollisionDoesNotTouchOutputFiles(t *testing.T) {
+	collidingScanInfo := func(output string) *cautils.ScanInfo {
+		return &cautils.ScanInfo{
+			ScanType:      cautils.ScanTypeControl,
+			Format:        printer.JsonFormat + "," + printer.GitLabSASTFormat,
+			Output:        output,
+			InputPatterns: []string{"manifest.yaml"},
+		}
+	}
+
+	t.Run("existing report is preserved", func(t *testing.T) {
+		dir := t.TempDir()
+		report := filepath.Join(dir, "report.json")
+		previous := []byte(`{"previous":"results"}`)
+		require.NoError(t, os.WriteFile(report, previous, 0o644)) //nolint:gosec // G306: a mode other than 0600 lets the test detect the chmod applied when the file is opened
+		before, err := os.Stat(report)
+		require.NoError(t, err)
+
+		outputPrinters, err := GetOutputPrinters(collidingScanInfo(dir+string(filepath.Separator)), context.Background(), "test-cluster")
+
+		require.ErrorContains(t, err, "output path collision")
+		assert.Nil(t, outputPrinters)
+		got, err := os.ReadFile(report)
+		require.NoError(t, err)
+		assert.Equal(t, previous, got)
+		after, err := os.Stat(report)
+		require.NoError(t, err)
+		assert.Equal(t, before.Mode(), after.Mode())
+	})
+
+	t.Run("no output is created", func(t *testing.T) {
+		dir := filepath.Join(t.TempDir(), "out")
+
+		_, err := GetOutputPrinters(collidingScanInfo(dir+string(filepath.Separator)), context.Background(), "test-cluster")
+
+		require.ErrorContains(t, err, "output path collision")
+		assert.NoDirExists(t, dir)
+	})
+}
+
 func TestGetOutputPrintersRejectsWhitespaceAndDirectoryCollisions(t *testing.T) {
 	tests := []struct {
 		name    string
