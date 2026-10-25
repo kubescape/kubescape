@@ -149,3 +149,32 @@ func TestEnrichResult_WithoutExceptionsKeepsRecordedStatus(t *testing.T) {
 	enriched := enrichResultWithSeverity(result, &session.Report.SummaryDetails, nil)
 	require.Equal(t, result.AssociatedControls[0].Status, enriched.AssociatedControls[0].Status)
 }
+
+func TestEnrichResult_NilSummaryDoesNotPanic(t *testing.T) {
+	session, id := sessionWithFrameworkException(t, map[string][]string{"NSA": {testHostNetworkControl}}, true)
+	result := session.ResourcesResult[id]
+
+	var enriched ResultWithSeverity
+	require.NotPanics(t, func() {
+		enriched = enrichResultWithSeverity(result, nil, nil)
+	})
+	require.Len(t, enriched.AssociatedControls, len(result.AssociatedControls))
+	for _, ac := range enriched.AssociatedControls {
+		require.Equal(t, "Unknown", ac.Severity)
+	}
+}
+
+func TestEnrichResults_NilSummaryDoesNotPanic(t *testing.T) {
+	session, id := sessionWithFrameworkException(t, map[string][]string{"NSA": {testHostNetworkControl}}, true)
+	results := []resourcesresults.Result{session.ResourcesResult[id]}
+
+	var enriched []ResultWithSeverity
+	require.NotPanics(t, func() {
+		enriched = enrichResultsWithSeverity(results, nil, nil)
+	})
+	require.Len(t, enriched, 1)
+	require.Len(t, enriched[0].AssociatedControls, len(results[0].AssociatedControls))
+	for _, ac := range enriched[0].AssociatedControls {
+		require.Equal(t, "Unknown", ac.Severity)
+	}
+}

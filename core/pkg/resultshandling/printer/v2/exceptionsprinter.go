@@ -100,7 +100,10 @@ func buildExceptionPolicies(ctx context.Context, opaSessionObj *cautils.OPASessi
 		return []armotypes.PostureExceptionPolicy{}
 	}
 
-	creationTime := opaSessionObj.Report.ReportGenerationTime
+	var creationTime time.Time
+	if opaSessionObj != nil && opaSessionObj.Report != nil {
+		creationTime = opaSessionObj.Report.ReportGenerationTime
+	}
 	if creationTime.IsZero() {
 		creationTime = time.Now().UTC()
 	}
@@ -183,11 +186,19 @@ type resourceKey struct {
 // collectFailures maps each failed control to the resources that failed it.
 func collectFailures(ctx context.Context, opaSessionObj *cautils.OPASessionObj) map[string]map[resourceKey]struct{} {
 	failures := map[string]map[resourceKey]struct{}{}
+	if opaSessionObj == nil {
+		return failures
+	}
+
+	var summary *reportsummary.SummaryDetails
+	if opaSessionObj.Report != nil {
+		summary = &opaSessionObj.Report.SummaryDetails
+	}
 
 	for resourceID, result := range opaSessionObj.ResourcesResult {
 		resource, ok := opaSessionObj.GetResource(resourceID)
 		if !ok || resource == nil {
-			if hasFailedControl(&opaSessionObj.Report.SummaryDetails, result) {
+			if hasFailedControl(summary, result) {
 				logger.L().Ctx(ctx).Warning("skipping failed resource with no scanned object; its findings are not in the baseline",
 					helpers.String("resourceID", resourceID))
 			}
@@ -201,7 +212,7 @@ func collectFailures(ctx context.Context, opaSessionObj *cautils.OPASessionObj) 
 			path:      sourcePath(resource),
 		}
 		if key.kind == "" || key.name == "" {
-			if hasFailedControl(&opaSessionObj.Report.SummaryDetails, result) {
+			if hasFailedControl(summary, result) {
 				logger.L().Ctx(ctx).Warning("skipping failed resource with no kind or name; its findings are not in the baseline",
 					helpers.String("resourceID", resourceID))
 			}
@@ -210,7 +221,7 @@ func collectFailures(ctx context.Context, opaSessionObj *cautils.OPASessionObj) 
 
 		for i := range result.AssociatedControls {
 			control := &result.AssociatedControls[i]
-			if cautils.ControlStatus(&opaSessionObj.Report.SummaryDetails, control).Status() != apis.StatusFailed {
+			if cautils.ControlStatus(summary, control).Status() != apis.StatusFailed {
 				continue
 			}
 			if _, ok := failures[control.ControlID]; !ok {
