@@ -228,7 +228,7 @@ func TestFlagValidationDownload_Error(t *testing.T) {
 			},
 		},
 	}
-	want := "bad argument: accound ID must be a valid UUID"
+	want := "bad argument: account ID must be a valid UUID"
 	for _, tt := range tests {
 		t.Run(tt.downloadInfo.AccountID, func(t *testing.T) {
 			assert.Equal(t, want, flagValidationDownload(&tt.downloadInfo).Error())

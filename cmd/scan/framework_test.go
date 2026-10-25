@@ -40,7 +40,7 @@ func TestGetFrameworkCmd(t *testing.T) {
 	assert.Equal(t, expectedErrorMessage, err.Error())
 
 	err = cmd.RunE(&cobra.Command{}, []string{})
-	expectedErrorMessage = "bad argument: accound ID must be a valid UUID"
+	expectedErrorMessage = "bad argument: account ID must be a valid UUID"
 	assert.Equal(t, expectedErrorMessage, err.Error())
 }
 
@@ -58,7 +58,7 @@ func TestGetFrameworkCmdWithNonExistentFramework(t *testing.T) {
 	err := cmd.RunE(&cobra.Command{}, []string{"framework", "nsa,mitre"})
 
 	// Check that there is an error and the error message is as expected
-	expectedErrorMessage := "bad argument: accound ID must be a valid UUID"
+	expectedErrorMessage := "bad argument: account ID must be a valid UUID"
 	assert.Error(t, err)
 	assert.Equal(t, expectedErrorMessage, err.Error())
 }

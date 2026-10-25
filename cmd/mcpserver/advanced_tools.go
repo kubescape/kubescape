@@ -8,14 +8,33 @@ import (
 
 	"github.com/google/cel-go/cel"
 	"github.com/mark3labs/mcp-go/mcp"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 )
 
-var supportedAdvancedWorkloadKinds = []string{"pods", "deployments", "daemonsets", "statefulsets"}
+var supportedAdvancedWorkloadKinds = []string{"pods", "deployments", "daemonsets", "statefulsets", "replicasets", "jobs", "cronjobs"}
 var supportedPatchTypes = []string{"strategic-merge-patch", "merge-patch", "json-patch"}
+
+
+// classifyK8sAPIError classifies an error from a direct Kubernetes API call.
+// Forbidden, NotFound, and timeout/cancellation get their specific codes via
+// classifyScanError. A BadRequest (400) or Invalid (422) response means the
+// caller's input was rejected -- a malformed patch, an object failing
+// validation, an invalid continue token -- and is INVALID_ARGUMENT. Anything
+// else (other API-server status errors, transport failures) remains
+// K8S_CLIENT_ERROR rather than the scan-pipeline fallback.
+func classifyK8sAPIError(err error) ErrorCode {
+	if apierrors.IsBadRequest(err) || apierrors.IsInvalid(err) {
+		return ErrCodeInvalidArgument
+	}
+	if code := classifyScanError(err); code != ErrCodeScanFailed {
+		return code
+	}
+	return ErrCodeK8sClientError
+}
 
 func createAdvancedTools(ksServer *KubescapeMcpserver) {
 	// Tool 1: scan_resource_slice
@@ -67,13 +86,19 @@ func createAdvancedTools(ksServer *KubescapeMcpserver) {
 		var gvr schema.GroupVersionResource
 		switch strings.ToLower(kind) {
 		case "pods", "pod":
-			gvr = schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"}
+			gvr = podGVR
 		case "deployments", "deployment":
-			gvr = schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"}
+			gvr = deploymentGVR
 		case "daemonsets", "daemonset":
-			gvr = schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "daemonsets"}
+			gvr = daemonSetGVR
 		case "statefulsets", "statefulset":
-			gvr = schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "statefulsets"}
+			gvr = statefulSetGVR
+		case "replicasets", "replicaset":
+			gvr = replicaSetGVR
+		case "jobs", "job":
+			gvr = jobGVR
+		case "cronjobs", "cronjob":
+			gvr = cronJobGVR
 		default:
 			return mcpToolError(ErrCodeUnsupportedResource,
 				fmt.Sprintf("unsupported resource kind %q; supported kinds are: %s", kind, strings.Join(supportedAdvancedWorkloadKinds, ", ")),
@@ -99,7 +124,7 @@ func createAdvancedTools(ksServer *KubescapeMcpserver) {
 		}
 
 		if err != nil {
-			return mcpToolError(ErrCodeK8sClientError, fmt.Sprintf("failed to list resources: %v", err), map[string]any{"resource_type": kind}), nil
+			return mcpToolError(classifyK8sAPIError(err), fmt.Sprintf("failed to list resources: %v", err), map[string]any{"resource_type": kind}), nil
 		}
 
 		nextContinueToken := list.GetContinue()
@@ -267,13 +292,19 @@ func createAdvancedTools(ksServer *KubescapeMcpserver) {
 		var gvr schema.GroupVersionResource
 		switch strings.ToLower(kind) {
 		case "pods", "pod":
-			gvr = schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"}
+			gvr = podGVR
 		case "deployments", "deployment":
-			gvr = schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"}
+			gvr = deploymentGVR
 		case "daemonsets", "daemonset":
-			gvr = schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "daemonsets"}
+			gvr = daemonSetGVR
 		case "statefulsets", "statefulset":
-			gvr = schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "statefulsets"}
+			gvr = statefulSetGVR
+		case "replicasets", "replicaset":
+			gvr = replicaSetGVR
+		case "jobs", "job":
+			gvr = jobGVR
+		case "cronjobs", "cronjob":
+			gvr = cronJobGVR
 		default:
 			return mcpToolError(ErrCodeUnsupportedResource,
 				fmt.Sprintf("security barrier: patching kind %q is not permitted; supported kinds are: %s", kind, strings.Join(supportedAdvancedWorkloadKinds, ", ")),
@@ -299,7 +330,7 @@ func createAdvancedTools(ksServer *KubescapeMcpserver) {
 		}
 
 		if err != nil {
-			return mcpToolError(ErrCodeK8sClientError, fmt.Sprintf("dry-run patch failed: %v", err), map[string]any{"kind": kind, "name": name, "namespace": namespace}), nil
+			return mcpToolError(classifyK8sAPIError(err), fmt.Sprintf("dry-run patch failed: %v", err), map[string]any{"kind": kind, "name": name, "namespace": namespace}), nil
 		}
 
 		resBytes, err := jsonMarshal(patchedObj.Object)

@@ -1,16 +1,21 @@
 package mcpserver
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/stretchr/testify/require"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
+	k8stesting "k8s.io/client-go/testing"
 )
 
 func newRBACEscalationTestServer(t *testing.T, objects ...runtime.Object) *KubescapeMcpserver {
@@ -377,4 +382,70 @@ func TestAnalyzeRBACEscalationPaths_UnqualifiedServiceAccountSubjectIsFollowed(t
 	reached := parsed["reached"].([]any)
 	require.Len(t, reached, 1)
 	require.Equal(t, "ServiceAccount payments/target", reached[0].(map[string]any)["subject"])
+}
+
+func TestAnalyzeRBACEscalationPaths_ListFailureIsClassified(t *testing.T) {
+	resources := []struct {
+		name string
+		gvr  schema.GroupVersionResource
+	}{
+		{"roles", roleGVR},
+		{"clusterroles", clusterRoleGVR},
+		{"rolebindings", roleBindingGVR},
+		{"clusterrolebindings", clusterRoleBindingGVR},
+		{"serviceaccounts", serviceAccountGVR},
+	}
+	causes := []struct {
+		name string
+		err  func(schema.GroupVersionResource) error
+		want ErrorCode
+	}{
+		{"forbidden", func(gvr schema.GroupVersionResource) error {
+			return apierrors.NewForbidden(gvr.GroupResource(), "", errors.New("denied"))
+		}, ErrCodeRBACDenied},
+		{"context canceled", func(schema.GroupVersionResource) error { return context.Canceled }, ErrCodeTimeout},
+		{"deadline exceeded", func(schema.GroupVersionResource) error { return context.DeadlineExceeded }, ErrCodeTimeout},
+		{"api server error", func(gvr schema.GroupVersionResource) error {
+			return apierrors.NewInternalError(errors.New("boom"))
+		}, ErrCodeK8sClientError},
+		{"generic error", func(schema.GroupVersionResource) error { return errors.New("connection refused") }, ErrCodeScanFailed},
+	}
+
+	for _, res := range resources {
+		for _, cause := range causes {
+			t.Run(res.name+"/"+cause.name, func(t *testing.T) {
+				ksServer := newRBACEscalationTestServer(t)
+				dyn := ksServer.k8sClient.DynamicClient.(*dynamicfake.FakeDynamicClient)
+				listErr := cause.err(res.gvr)
+				dyn.PrependReactor("list", res.name, func(k8stesting.Action) (bool, runtime.Object, error) {
+					return true, nil, listErr
+				})
+
+				result := registeredToolResult(t, dispatchRegisteredTool(t, ksServer, "analyze_rbac_escalation_paths", map[string]any{
+					"subject_kind": "ServiceAccount",
+					"namespace":    "prod",
+					"name":         "app",
+				}))
+
+				te := toolErrorOf(t, result)
+				require.Equal(t, cause.want, te.Code)
+				require.Contains(t, te.Message, res.name, "message should name the resource that failed")
+				require.Contains(t, te.Message, listErr.Error(), "message should keep the underlying error")
+			})
+		}
+	}
+}
+
+func TestListRBACResources_PreservesErrorIdentity(t *testing.T) {
+	ksServer := newRBACEscalationTestServer(t)
+	dyn := ksServer.k8sClient.DynamicClient.(*dynamicfake.FakeDynamicClient)
+	dyn.PrependReactor("list", "rolebindings", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewForbidden(roleBindingGVR.GroupResource(), "", errors.New("denied"))
+	})
+
+	_, err := listRBACResources(context.Background(), dyn)
+	require.Error(t, err)
+	require.True(t, apierrors.IsForbidden(err), "wrapping must keep the Forbidden status reachable: %v", err)
+	require.Equal(t, ErrCodeRBACDenied, classifyScanError(err))
+	require.NotEmpty(t, fmt.Sprint(err))
 }

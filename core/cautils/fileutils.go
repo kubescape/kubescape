@@ -12,6 +12,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"slices"
 	"sort"
@@ -1219,7 +1220,7 @@ func manifestObjectToWorkloads(obj map[string]any) ([]workloadinterface.IMetadat
 		return expandListEnvelope(obj, kind)
 	}
 
-	if o := objectsenvelopes.NewObject(obj); o != nil {
+	if o := objectsenvelopes.NewObject(obj); !isNilEnvelope(o) {
 		return []workloadinterface.IMetadata{o}, nil
 	}
 
@@ -1233,6 +1234,22 @@ func manifestObjectToWorkloads(obj map[string]any) ([]workloadinterface.IMetadat
 		return nil, fmt.Errorf("not a valid Kubernetes object")
 	}
 	return nil, nil
+}
+
+// isNilEnvelope reports whether NewObject returned a nil pointer held in a
+// non-nil interface. The host sensor and cloud provider describe constructors
+// do that when a document carries their apiVersion but does not decode into
+// their struct, and both dereference the receiver in GetObject.
+func isNilEnvelope(o workloadinterface.IMetadata) bool {
+	if o == nil {
+		return true
+	}
+	switch v := reflect.ValueOf(o); v.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return v.IsNil()
+	default:
+		return false
+	}
 }
 
 // listEnvelopeKind recognizes the canonical List kind and typed list

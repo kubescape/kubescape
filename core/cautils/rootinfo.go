@@ -22,7 +22,7 @@ type CloudURLs struct {
 func ValidateAccountID(accountID string) error {
 	// Check if the Account-ID is valid
 	if _, err := uuid.Parse(accountID); accountID != "" && err != nil {
-		return fmt.Errorf("bad argument: accound ID must be a valid UUID")
+		return fmt.Errorf("bad argument: account ID must be a valid UUID")
 	}
 
 	return nil

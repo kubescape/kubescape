@@ -5,12 +5,14 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"sort"
 	"strings"
 
 	"github.com/jedib0t/go-pretty/v6/table"
 	"github.com/jedib0t/go-pretty/v6/text"
+	"github.com/jwalton/gchalk"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/cautils/getter"
 	metav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
@@ -261,12 +263,35 @@ func listExceptions(ctx context.Context, listPolicies *metav1.ListPolicies) ([]s
 	return exceptionsNames, nil
 }
 
+func shouldColor(w io.Writer) bool {
+	if _, set := os.LookupEnv("NO_COLOR"); set {
+		return false
+	}
+	if gchalk.GetLevel() == gchalk.LevelNone {
+		return false
+	}
+	if f, ok := w.(*os.File); ok {
+		if val, set := os.LookupEnv("FORCE_COLOR"); set {
+			return val != "0"
+		}
+		return isTerminal(f.Fd()) || isCygwinTerminal(f.Fd())
+	}
+	return true
+}
+
 func prettyPrintListFormat(ctx context.Context, targetPolicy string, policies []string) {
+	w := printer.GetWriter(ctx, "")
+	colored := shouldColor(w)
+
 	policyTable := table.NewWriter()
-	policyTable.SetOutputMirror(printer.GetWriter(ctx, ""))
+	policyTable.SetOutputMirror(w)
 
 	header := fmt.Sprintf("Supported %s", targetPolicy)
-	policyTable.AppendHeader(table.Row{header})
+	headerRow := table.Row{header}
+	if colored {
+		headerRow = table.Row{gchalk.WithBrightWhite().Bold(header)}
+	}
+	policyTable.AppendHeader(headerRow)
 	policyTable.Style().Options.SeparateHeader = true
 	policyTable.Style().Options.SeparateRows = true
 	policyTable.Style().Format.HeaderAlign = text.AlignLeft
@@ -274,7 +299,7 @@ func prettyPrintListFormat(ctx context.Context, targetPolicy string, policies []
 	policyTable.Style().Format.RowAlign = text.AlignCenter
 	policyTable.Style().Box = table.StyleBoxRounded
 
-	policyTable.AppendRows(generatePolicyRows(policies))
+	policyTable.AppendRows(generatePolicyRows(policies, colored))
 	policyTable.Render()
 }
 
@@ -362,8 +387,11 @@ func csvControlsFormat(entries []metav1.ControlListEntry) {
 }
 
 func prettyPrintControls(ctx context.Context, entries []metav1.ControlListEntry) {
+	w := printer.GetWriter(ctx, "")
+	colored := shouldColor(w)
+
 	controlsTable := table.NewWriter()
-	controlsTable.SetOutputMirror(printer.GetWriter(ctx, ""))
+	controlsTable.SetOutputMirror(w)
 
 	controlsTable.Style().Options.SeparateHeader = true
 	controlsTable.Style().Options.SeparateRows = true
@@ -372,45 +400,84 @@ func prettyPrintControls(ctx context.Context, entries []metav1.ControlListEntry)
 	controlsTable.Style().Box = table.StyleBoxRounded
 	controlsTable.SetColumnConfigs([]table.ColumnConfig{{Number: 1, Align: text.AlignRight}})
 
-	controlRows := generateControlRows(entries)
-
-	short := utils.CheckShortTerminalWidth(controlRows, table.Row{"Control ID", "Control name", "Docs", "Frameworks"})
+	uncoloredRows := generateControlRows(entries, false)
+	short := utils.CheckShortTerminalWidth(uncoloredRows, table.Row{"Control ID", "Control name", "Docs", "Frameworks"})
+	controlRows := generateControlRows(entries, colored)
 	if short {
-		controlsTable.AppendHeader(table.Row{"Controls"})
-		controlRows = shortFormatControlRows(controlRows)
+		header := "Controls"
+		if colored {
+			header = gchalk.WithBrightWhite().Bold(header)
+		}
+		controlsTable.AppendHeader(table.Row{header})
+		controlRows = shortFormatControlRows(controlRows, colored)
 	} else {
-		controlsTable.AppendHeader(table.Row{"Control ID", "Control name", "Docs", "Frameworks"})
+		headerRow := table.Row{"Control ID", "Control name", "Docs", "Frameworks"}
+		if colored {
+			headerRow = table.Row{
+				gchalk.WithBrightWhite().Bold("Control ID"),
+				gchalk.WithBrightWhite().Bold("Control name"),
+				gchalk.WithBrightWhite().Bold("Docs"),
+				gchalk.WithBrightWhite().Bold("Frameworks"),
+			}
+		}
+		controlsTable.AppendHeader(headerRow)
 	}
 
 	controlsTable.AppendRows(controlRows)
 	controlsTable.Render()
 }
 
-func generateControlRows(entries []metav1.ControlListEntry) []table.Row {
+func generateControlRows(entries []metav1.ControlListEntry, colored ...bool) []table.Row {
+	isColored := len(colored) > 0 && colored[0]
 	rows := make([]table.Row, 0, len(entries))
 
 	for _, entry := range entries {
 		docs := cautils.GetControlLink(entry.ID)
 		frameworks := strings.Join(entry.Frameworks, "\n")
-		rows = append(rows, table.Row{entry.ID, entry.Name, docs, frameworks})
+		id := entry.ID
+		if isColored {
+			if id != "" {
+				id = gchalk.WithBrightCyan().Bold(entry.ID)
+			}
+			if docs != "" {
+				docs = gchalk.Cyan(docs)
+			}
+		}
+		rows = append(rows, table.Row{id, entry.Name, docs, frameworks})
 	}
 
 	return rows
 }
 
-func generatePolicyRows(policies []string) []table.Row {
+func generatePolicyRows(policies []string, colored ...bool) []table.Row {
+	isColored := len(colored) > 0 && colored[0]
 	rows := make([]table.Row, 0, len(policies))
 
 	for _, policy := range policies {
-		rows = append(rows, table.Row{policy})
+		val := policy
+		if isColored {
+			val = gchalk.WithBrightCyan().Bold(policy)
+		}
+		rows = append(rows, table.Row{val})
 	}
 	return rows
 }
 
-func shortFormatControlRows(controlRows []table.Row) []table.Row {
+func shortFormatControlRows(controlRows []table.Row, colored ...bool) []table.Row {
+	isColored := len(colored) > 0 && colored[0]
 	rows := make([]table.Row, 0, len(controlRows))
 	for _, controlRow := range controlRows {
-		rows = append(rows, table.Row{fmt.Sprintf("Control ID"+strings.Repeat(" ", 3)+": %+v\nControl Name"+strings.Repeat(" ", 1)+": %+v\nDocs"+strings.Repeat(" ", 9)+": %+v\nFrameworks"+strings.Repeat(" ", 3)+": %+v", controlRow[0], controlRow[1], controlRow[2], strings.ReplaceAll(controlRow[3].(string), "\n", " "))})
+		idLabel := "Control ID" + strings.Repeat(" ", 3)
+		nameLabel := "Control Name" + strings.Repeat(" ", 1)
+		docsLabel := "Docs" + strings.Repeat(" ", 9)
+		fwLabel := "Frameworks" + strings.Repeat(" ", 3)
+		if isColored {
+			idLabel = gchalk.WithBrightWhite().Bold("Control ID") + strings.Repeat(" ", 3)
+			nameLabel = gchalk.WithBrightWhite().Bold("Control Name") + strings.Repeat(" ", 1)
+			docsLabel = gchalk.WithBrightWhite().Bold("Docs") + strings.Repeat(" ", 9)
+			fwLabel = gchalk.WithBrightWhite().Bold("Frameworks") + strings.Repeat(" ", 3)
+		}
+		rows = append(rows, table.Row{fmt.Sprintf("%s: %+v\n%s: %+v\n%s: %+v\n%s: %+v", idLabel, controlRow[0], nameLabel, controlRow[1], docsLabel, controlRow[2], fwLabel, strings.ReplaceAll(controlRow[3].(string), "\n", " "))})
 	}
 	return rows
 }
@@ -573,8 +640,11 @@ func csvControlsConfigFormat(entries []metav1.ControlConfigEntry) {
 }
 
 func prettyPrintControlsConfig(ctx context.Context, entries []metav1.ControlConfigEntry) {
+	w := printer.GetWriter(ctx, "")
+	colored := shouldColor(w)
+
 	configTable := table.NewWriter()
-	configTable.SetOutputMirror(printer.GetWriter(ctx, ""))
+	configTable.SetOutputMirror(w)
 
 	configTable.Style().Options.SeparateHeader = true
 	configTable.Style().Options.SeparateRows = true
@@ -585,13 +655,35 @@ func prettyPrintControlsConfig(ctx context.Context, entries []metav1.ControlConf
 	rows := make([]table.Row, 0, len(entries))
 	for _, entry := range entries {
 		values := strings.Join(entry.Values, "\n")
+		displayValues := values
 		if values == "" {
-			values = "<unset>"
+			if colored {
+				displayValues = gchalk.Yellow("<unset>")
+			} else {
+				displayValues = "<unset>"
+			}
 		}
-		rows = append(rows, table.Row{entry.Name, entry.Title, values, strings.Join(entry.Controls, "\n")})
+		name := entry.Name
+		controls := strings.Join(entry.Controls, "\n")
+		if colored {
+			name = gchalk.WithBrightCyan().Bold(entry.Name)
+			if len(entry.Controls) > 0 {
+				controls = gchalk.Cyan(controls)
+			}
+		}
+		rows = append(rows, table.Row{name, entry.Title, displayValues, controls})
 	}
 
-	configTable.AppendHeader(table.Row{"Key", "Configuration", "Value", "Controls"})
+	headerRow := table.Row{"Key", "Configuration", "Value", "Controls"}
+	if colored {
+		headerRow = table.Row{
+			gchalk.WithBrightWhite().Bold("Key"),
+			gchalk.WithBrightWhite().Bold("Configuration"),
+			gchalk.WithBrightWhite().Bold("Value"),
+			gchalk.WithBrightWhite().Bold("Controls"),
+		}
+	}
+	configTable.AppendHeader(headerRow)
 	configTable.AppendRows(rows)
 	configTable.Render()
 }

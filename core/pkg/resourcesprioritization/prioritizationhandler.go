@@ -14,6 +14,7 @@ import (
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/attacktrack/v1alpha1"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/prioritization"
+	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 )
 
 type ResourcesPrioritizationHandler struct {
@@ -109,6 +110,9 @@ func (handler *ResourcesPrioritizationHandler) GetPodTemplateFallback() bool {
 }
 
 func (handler *ResourcesPrioritizationHandler) PrioritizeResources(sessionObj *cautils.OPASessionObj) error {
+	if sessionObj == nil {
+		return fmt.Errorf("expected sessionObj to not be nil")
+	}
 	if sessionObj.AllPolicies == nil {
 		return fmt.Errorf("expected to find policies map")
 	} else if len(sessionObj.AllPolicies.Controls) == 0 {
@@ -131,7 +135,11 @@ func (handler *ResourcesPrioritizationHandler) PrioritizeResources(sessionObj *c
 
 		if workload != nil && handler.isSupportedKind(workload) {
 			// build a map of attack track categories to a list of failed controls for the specific resource
-			controlsIds := cautils.ControlIDsByStatus(&sessionObj.Report.SummaryDetails, &result)
+			var summary *reportsummary.SummaryDetails
+			if sessionObj.Report != nil {
+				summary = &sessionObj.Report.SummaryDetails
+			}
+			controlsIds := cautils.ControlIDsByStatus(summary, &result)
 			if controlsIds.Failed() > 0 {
 				failedControls := controlsIds.GetItems(apis.StatusFailed)
 				controlsLookup := v1alpha1.NewAttackTrackControlsLookup(handler.attackTracks, failedControls, allControls)

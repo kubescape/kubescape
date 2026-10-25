@@ -152,8 +152,8 @@ func enrichControlsWithSeverity(controls reportsummary.ControlSummaries) map[str
 // enrichResultsWithSeverity adds severity field to controls in results, and
 // - when allResources has an entry for the result's ResourceID - resolved
 // evidence values for each control's failed paths.
-func enrichResultsWithSeverity(results []resourcesresults.Result, controlSummaries reportsummary.ControlSummaries, allResources map[string]workloadinterface.IMetadata) []ResultWithSeverity {
-	return enrichResultsWithSeverityFromCatalog(results, &reportsummary.SummaryDetails{Controls: controlSummaries}, cautils.NewMapResourceCatalog(allResources))
+func enrichResultsWithSeverity(results []resourcesresults.Result, summary *reportsummary.SummaryDetails, allResources map[string]workloadinterface.IMetadata) []ResultWithSeverity {
+	return enrichResultsWithSeverityFromCatalog(results, summary, cautils.NewMapResourceCatalog(allResources))
 }
 
 func enrichResultsWithSeverityFromCatalog(results []resourcesresults.Result, summary *reportsummary.SummaryDetails, catalog cautils.ResourceCatalog) []ResultWithSeverity {
@@ -173,13 +173,18 @@ func enrichResultsWithSeverityFromCatalog(results []resourcesresults.Result, sum
 // cautils.SettleControlStatus), the way the summary reports it; the result
 // passed in is not modified.
 func enrichResultWithSeverity(result resourcesresults.Result, summary *reportsummary.SummaryDetails, resource workloadinterface.IMetadata) ResultWithSeverity {
-	controlSummaries := summary.Controls
+	var controlSummaries reportsummary.ControlSummaries
+	if summary != nil {
+		controlSummaries = summary.Controls
+	}
 	enrichedControls := make([]ResourceAssociatedControlWithSeverity, len(result.AssociatedControls))
 	for j, control := range result.AssociatedControls {
 		// Get the severity from the control summary
 		severity := "Unknown"
-		if controlSummary, exists := controlSummaries[control.GetID()]; exists {
-			severity = apis.ControlSeverityToString(controlSummary.GetScoreFactor())
+		if controlSummaries != nil {
+			if controlSummary, exists := controlSummaries[control.GetID()]; exists {
+				severity = apis.ControlSeverityToString(controlSummary.GetScoreFactor())
+			}
 		}
 		displayed := cautils.EvidenceControl(summary, control)
 		evidence := failedPathValues(&displayed, resource)

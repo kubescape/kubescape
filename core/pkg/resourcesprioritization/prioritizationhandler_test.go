@@ -535,3 +535,42 @@ func TestResourcesPrioritizationHandler_copyAttackTrack(t *testing.T) {
 		})
 	}
 }
+
+func TestResourcesPrioritizationHandler_PrioritizeResources_NilReport(t *testing.T) {
+	handler, err := NewResourcesPrioritizationHandler(context.Background(), &AttackTracksGetterMock{}, false)
+	assert.NoError(t, err)
+
+	allPoliciesControls := map[string]reporthandling.Control{
+		"C-001": ControlMock("C-001", 3, []string{"security"}, []string{"D"}),
+	}
+	results := map[string]resourcesresults.Result{
+		"resource1": {
+			AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+				ResourceAssociatedControlMock("C-001", apis.StatusFailed),
+			},
+		},
+	}
+	resources := map[string]workloadinterface.IMetadata{
+		"resource1": DeploymentWorkloadMock(1),
+	}
+
+	sessionObj := OPASessionObjMock(allPoliciesControls, results, nil, resources)
+	sessionObj.Report = nil
+
+	assert.NotPanics(t, func() {
+		err = handler.PrioritizeResources(sessionObj)
+	})
+	assert.NoError(t, err)
+	assert.NotEmpty(t, sessionObj.ResourcesPrioritized)
+}
+
+func TestResourcesPrioritizationHandler_PrioritizeResources_NilSession(t *testing.T) {
+	handler, err := NewResourcesPrioritizationHandler(context.Background(), &AttackTracksGetterMock{}, false)
+	assert.NoError(t, err)
+
+	assert.NotPanics(t, func() {
+		err = handler.PrioritizeResources(nil)
+	})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "expected sessionObj to not be nil")
+}
