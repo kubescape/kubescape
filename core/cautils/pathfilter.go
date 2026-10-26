@@ -334,7 +334,7 @@ func ignoreRoot(input string) string {
 // metadata, so "manifests/**/*.yaml" anchors at "manifests" rather than "manifests/**".
 func literalDir(path string) string {
 	dir := filepath.Dir(path)
-	for hasGlobMeta(filepath.Base(dir)) {
+	for hasGlobMeta(dir) {
 		parent := filepath.Dir(dir)
 		if parent == dir {
 			break

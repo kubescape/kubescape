@@ -419,6 +419,56 @@ func TestNewScanPathFilterAnchorsAGlobInputAtItsLiteralDirectory(t *testing.T) {
 	assert.True(t, filter.Excluded(filepath.Join(root, "manifests", "app", "pod.yaml"), false))
 }
 
+func TestLiteralDir(t *testing.T) {
+	tests := []struct {
+		name string
+		path string
+		want string
+	}{
+		{name: "file", path: "manifests/pod.yaml", want: "manifests"},
+		{name: "file glob", path: "manifests/*.yaml", want: "manifests"},
+		{name: "directory glob", path: "manifests/**/*.yaml", want: "manifests"},
+		{name: "literal directory after glob", path: "manifests/*/nested/*.yaml", want: "manifests"},
+		{name: "literal directory after globstar", path: "manifests/**/nested/*.yaml", want: "manifests"},
+		{name: "multiple directory globs", path: "manifests/*/nested/?/resources/pod.yaml", want: "manifests"},
+		{name: "character class", path: "manifests/[ab]/nested/pod.yaml", want: "manifests"},
+		{name: "relative root", path: "*/nested/pod.yaml", want: "."},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, filepath.FromSlash(tt.want), literalDir(filepath.FromSlash(tt.path)))
+		})
+	}
+}
+
+func TestNewScanPathFilterAnchorsGlobWithLiteralSubdirectory(t *testing.T) {
+	for _, useIgnoreFile := range []bool{true, false} {
+		name := "command line exclusions"
+		if useIgnoreFile {
+			name = "ignore file exclusions"
+		}
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			manifest := filepath.Join(root, "app", "nested", "pod.yaml")
+			require.NoError(t, os.MkdirAll(filepath.Dir(manifest), 0o750))
+			require.NoError(t, os.WriteFile(manifest, []byte("kind: Pod\n"), 0o600))
+
+			var patterns []string
+			if useIgnoreFile {
+				writeIgnoreFile(t, root, "app/nested/pod.yaml\n")
+			} else {
+				patterns = []string{"app/nested/pod.yaml"}
+			}
+			filter, err := NewScanPathFilter(filepath.Join(root, "*", "nested", "*.yaml"), patterns, useIgnoreFile)
+			require.NoError(t, err)
+			require.NotNil(t, filter)
+			assert.Equal(t, root, filter.Root())
+			assert.True(t, filter.Excluded(manifest, false))
+			assert.False(t, filter.Excluded(filepath.Join(root, "other", "nested", "pod.yaml"), false))
+		})
+	}
+}
+
 // A repository input is scanned from its clone, so the filter has to anchor there too:
 // the ignore file lives in the clone, not next to the URL the user typed.
 func TestNewScanPathFilterAnchorsARepositoryInputAtItsClone(t *testing.T) {
