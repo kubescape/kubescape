@@ -1,6 +1,7 @@
 package download
 
 import (
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -19,30 +20,34 @@ import (
 type recordingDownloadKS struct {
 	meta.IKubescape
 	captured *v1.DownloadInfo
+	err      error
 }
 
 func (r *recordingDownloadKS) Download(info *v1.DownloadInfo) (*v1.DownloadResult, error) {
 	r.captured = info
+	if r.err != nil {
+		return nil, r.err
+	}
 	return &v1.DownloadResult{}, nil
 }
 
-// TestGetViewCmd verifies the download command metadata and default properties.
-func TestGetViewCmd(t *testing.T) {
+// TestGetDownloadCmd verifies the download command metadata and default properties.
+func TestGetDownloadCmd(t *testing.T) {
 	// Create a mock Kubescape interface
 	mockKubescape := &mocks.MockIKubescape{}
 
-	// Call the GetConfigCmd function
-	configCmd := GetDownloadCmd(mockKubescape)
+	// Call the GetDownloadCmd function
+	downloadCmd := GetDownloadCmd(mockKubescape)
 
-	assert.Equal(t, "download <policy> <policy name>", configCmd.Use)
+	assert.Equal(t, "download <policy> <policy name>", downloadCmd.Use)
 }
 
-// TestGetViewCmd_Args tests command argument validation with valid, invalid, plural, and alias target names.
-func TestGetViewCmd_Args(t *testing.T) {
+// TestGetDownloadCmd_Args tests command argument validation with valid, invalid, plural, and alias target names.
+func TestGetDownloadCmd_Args(t *testing.T) {
 	// Create a mock Kubescape interface
 	mockKubescape := &mocks.MockIKubescape{}
 
-	// Call the GetConfigCmd function
+	// Call the GetDownloadCmd function
 	downloadCmd := GetDownloadCmd(mockKubescape)
 
 	assert.Equal(t, "download <policy> <policy name>", downloadCmd.Use)
@@ -234,4 +239,120 @@ func TestFlagValidationDownload_Error(t *testing.T) {
 			assert.Equal(t, want, flagValidationDownload(&tt.downloadInfo).Error())
 		})
 	}
+}
+
+// TestDownloadCmd_EmptyIdentifierValidation verifies that empty policy names
+// are rejected for framework and control downloads, but permitted for targets
+// that do not require an identifier.
+func TestDownloadCmd_EmptyIdentifierValidation(t *testing.T) {
+	tests := []struct {
+		name        string
+		args        []string
+		wantErr     bool
+		expectedErr string
+		wantTarget  string
+		wantID      string
+	}{
+		{
+			name:        "framework with empty name",
+			args:        []string{"framework", ""},
+			wantErr:     true,
+			expectedErr: "name cannot be empty for framework download",
+		},
+		{
+			name:        "frameworks alias with empty name",
+			args:        []string{"frameworks", ""},
+			wantErr:     true,
+			expectedErr: "name cannot be empty for framework download",
+		},
+		{
+			name:        "control with empty name",
+			args:        []string{"control", ""},
+			wantErr:     true,
+			expectedErr: "name cannot be empty for control download",
+		},
+		{
+			name:        "controls alias with empty name",
+			args:        []string{"controls", ""},
+			wantErr:     true,
+			expectedErr: "name cannot be empty for control download",
+		},
+		{
+			name:       "artifacts with empty identifier",
+			args:       []string{"artifacts", ""},
+			wantErr:    false,
+			wantTarget: core.TargetArtifacts,
+			wantID:     "",
+		},
+		{
+			name:       "exceptions with empty identifier",
+			args:       []string{"exceptions", ""},
+			wantErr:    false,
+			wantTarget: core.TargetExceptions,
+			wantID:     "",
+		},
+		{
+			name:       "controls-inputs with empty identifier",
+			args:       []string{"controls-inputs", ""},
+			wantErr:    false,
+			wantTarget: core.TargetControlsInputs,
+			wantID:     "",
+		},
+		{
+			name:       "attack-tracks with empty identifier",
+			args:       []string{"attack-tracks", ""},
+			wantErr:    false,
+			wantTarget: core.TargetAttackTracks,
+			wantID:     "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ks := &recordingDownloadKS{}
+			cmd := GetDownloadCmd(ks)
+
+			err := cmd.RunE(cmd, tt.args)
+			if tt.wantErr {
+				require.Error(t, err)
+				assert.Equal(t, tt.expectedErr, err.Error())
+				assert.Nil(t, ks.captured, "Download should not be called when validation fails")
+			} else {
+				require.NoError(t, err)
+				require.NotNil(t, ks.captured)
+				assert.Equal(t, tt.wantTarget, ks.captured.Target)
+				assert.Equal(t, tt.wantID, ks.captured.Identifier)
+			}
+		})
+	}
+}
+
+// TestDownloadCmd_DownloadErrorPropagation verifies that errors returned by
+// the Kubescape interface are propagated back by the download command Execute.
+func TestDownloadCmd_DownloadErrorPropagation(t *testing.T) {
+	expectedErr := errors.New("simulated network error during download")
+	ks := &recordingDownloadKS{err: expectedErr}
+	cmd := GetDownloadCmd(ks)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+	cmd.SetArgs([]string{"framework", "nsa"})
+
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.ErrorIs(t, err, expectedErr)
+}
+
+// TestDownloadCmd_FlagValidationErrorPropagation verifies that flag validation
+// errors (such as an invalid account UUID) halt execution and return the error.
+func TestDownloadCmd_FlagValidationErrorPropagation(t *testing.T) {
+	ks := &recordingDownloadKS{}
+	cmd := GetDownloadCmd(ks)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+	cmd.SetArgs([]string{"framework", "nsa", "--account", "invalid-uuid"})
+
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "account ID must be a valid UUID")
+	assert.Nil(t, ks.captured, "Download should not be called when flag validation fails")
 }
