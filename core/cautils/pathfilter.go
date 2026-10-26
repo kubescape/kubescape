@@ -334,11 +334,12 @@ func ignoreRoot(input string) string {
 	return literalDir(input)
 }
 
-// literalDir returns the deepest ancestor directory of path that carries no glob
-// metadata, so "manifests/**/*.yaml" anchors at "manifests" rather than "manifests/**".
+// literalDir returns the deepest ancestor directory of path that exists or carries
+// no glob metadata. Existing directories preserve literal names such as
+// "manifests[old]", while "manifests/*/nested/*.yaml" anchors at "manifests".
 func literalDir(path string) string {
 	dir := filepath.Dir(path)
-	for hasGlobMeta(dir) {
+	for hasGlobMeta(dir) && !isDir(dir) {
 		parent := filepath.Dir(dir)
 		if parent == dir {
 			break

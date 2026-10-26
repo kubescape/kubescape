@@ -443,6 +443,27 @@ func TestLiteralDir(t *testing.T) {
 	}
 }
 
+// TestLiteralDirPreservesExistingDirectories checks literal ancestors across supported glob forms.
+func TestLiteralDirPreservesExistingDirectories(t *testing.T) {
+	for _, directory := range []string{"manifests[old]", filepath.Join("manifests[old]", "nested")} {
+		t.Run(directory, func(t *testing.T) {
+			root := filepath.Join(t.TempDir(), directory)
+			require.NoError(t, os.MkdirAll(root, 0o750))
+			for _, pattern := range []string{
+				"*.yaml",
+				"*/nested/*.yaml",
+				"**/nested/*.yaml",
+				"?/nested/*.yaml",
+				"[ab]/nested/*.yaml",
+			} {
+				t.Run(pattern, func(t *testing.T) {
+					assert.Equal(t, root, literalDir(filepath.Join(root, filepath.FromSlash(pattern))))
+				})
+			}
+		})
+	}
+}
+
 // TestNewScanPathFilterAnchorsGlobWithLiteralSubdirectory verifies both exclusion sources use the literal root.
 func TestNewScanPathFilterAnchorsGlobWithLiteralSubdirectory(t *testing.T) {
 	for _, useIgnoreFile := range []bool{true, false} {
@@ -461,6 +482,35 @@ func TestNewScanPathFilterAnchorsGlobWithLiteralSubdirectory(t *testing.T) {
 				writeIgnoreFile(t, root, "app/nested/pod.yaml\n")
 			} else {
 				patterns = []string{"app/nested/pod.yaml"}
+			}
+			filter, err := NewScanPathFilter(filepath.Join(root, "*", "nested", "*.yaml"), patterns, useIgnoreFile)
+			require.NoError(t, err)
+			require.NotNil(t, filter)
+			assert.Equal(t, root, filter.Root())
+			assert.True(t, filter.Excluded(manifest, false))
+			assert.False(t, filter.Excluded(filepath.Join(root, "other", "nested", "pod.yaml"), false))
+		})
+	}
+}
+
+// TestNewScanPathFilterAnchorsGlobInsideBracketedDirectory preserves existing literal ancestors of glob inputs.
+func TestNewScanPathFilterAnchorsGlobInsideBracketedDirectory(t *testing.T) {
+	for _, useIgnoreFile := range []bool{true, false} {
+		name := "command line exclusions"
+		if useIgnoreFile {
+			name = "ignore file exclusions"
+		}
+		t.Run(name, func(t *testing.T) {
+			root := filepath.Join(t.TempDir(), "manifests[old]")
+			manifest := filepath.Join(root, "app", "nested", "pod.yaml")
+			require.NoError(t, os.MkdirAll(filepath.Dir(manifest), 0o750))
+			require.NoError(t, os.WriteFile(manifest, []byte("kind: Pod\n"), 0o600))
+
+			var patterns []string
+			if useIgnoreFile {
+				writeIgnoreFile(t, root, "/app/nested/pod.yaml\n")
+			} else {
+				patterns = []string{"/app/nested/pod.yaml"}
 			}
 			filter, err := NewScanPathFilter(filepath.Join(root, "*", "nested", "*.yaml"), patterns, useIgnoreFile)
 			require.NoError(t, err)
