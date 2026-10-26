@@ -3,6 +3,7 @@ package cautils
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -179,11 +180,8 @@ func (lc *LocalConfig) UpdateCachedConfig() error {
 	return updateConfigFile(lc.configObj)
 }
 
-func (lc *LocalConfig) DeleteCachedConfig(ctx context.Context) error {
-	if err := DeleteConfigFile(); err != nil {
-		logger.L().Ctx(ctx).Warning("failed to delete cached config", helpers.Error(err))
-	}
-	return nil
+func (lc *LocalConfig) DeleteCachedConfig(_ context.Context) error {
+	return deleteCachedConfigFile()
 }
 
 // ======================================================================================
@@ -272,11 +270,8 @@ func (c *ClusterConfig) UpdateCachedConfig() error {
 	return updateConfigFile(c.configObj)
 }
 
-func (c *ClusterConfig) DeleteCachedConfig(ctx context.Context) error {
-	if err := DeleteConfigFile(); err != nil {
-		logger.L().Ctx(ctx).Warning("failed to delete cached config", helpers.Error(err))
-	}
-	return nil
+func (c *ClusterConfig) DeleteCachedConfig(_ context.Context) error {
+	return deleteCachedConfigFile()
 }
 func (c *ClusterConfig) GetContextName() string {
 	return c.configObj.ClusterName
@@ -519,6 +514,16 @@ func loadUrlsFromFile(obj *ConfigObj) error {
 
 func DeleteConfigFile() error {
 	return os.Remove(ConfigFileFullPath())
+}
+
+// deleteCachedConfigFile removes the cached config file and reports any failure,
+// since the file holds the account ID and access key. A config file that does
+// not exist has nothing left to delete, so that is not an error.
+func deleteCachedConfigFile() error {
+	if err := DeleteConfigFile(); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("delete cached config: %w", err)
+	}
+	return nil
 }
 
 func AdoptClusterName(clusterName string) string {
