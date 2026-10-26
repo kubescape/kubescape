@@ -181,6 +181,38 @@ func TestPerContextOutputPaths_RejectsCollidingContexts(t *testing.T) {
 	assert.ErrorContains(t, err, "report.prod_us-east-1.json")
 }
 
+// Kube context names are case-sensitive, so "Prod" and "prod" are two valid,
+// distinct contexts. Their derived report files (report.Prod.json and
+// report.prod.json) differ as strings but resolve to the same file on
+// case-insensitive filesystems (macOS APFS default, Windows NTFS).
+// perContextOutputPaths must reject this up front regardless of the host OS,
+// because report correctness should not depend on the filesystem the user
+// happens to be on.
+//
+// Policy note: this is a conservative choice. On a case-sensitive filesystem
+// (most Linux setups) the two paths would not actually collide. Rejecting
+// case-only differences everywhere was chosen over runtime filesystem probing
+// because it is simpler, deterministic, and avoids producing reports that
+// work on the build machine but silently break on a colleague's Mac or
+// Windows laptop.
+func TestPerContextOutputPaths_RejectsCaseFoldedCollision(t *testing.T) {
+	_, err := perContextOutputPaths("report.json", []string{"Prod", "prod"}, []string{"json"})
+
+	require.Error(t, err, "paths differing only by case should collide")
+	assert.ErrorContains(t, err, "Prod")
+	assert.ErrorContains(t, err, "prod")
+	assert.ErrorContains(t, err, "report.Prod.json")
+}
+
+// Verify that contexts whose names differ by more than just case still pass.
+func TestPerContextOutputPaths_CaseDifferentContextsPass(t *testing.T) {
+	paths, err := perContextOutputPaths("report.json", []string{"production", "staging"}, []string{"json"})
+
+	require.NoError(t, err)
+	assert.Equal(t, "report.production.json", paths["production"])
+	assert.Equal(t, "report.staging.json", paths["staging"])
+}
+
 func TestPerContextOutputPaths_NoCollisions(t *testing.T) {
 	paths, err := perContextOutputPaths("report.json", []string{"ctx-a", "ctx-b", "ctx-c"}, nil)
 
