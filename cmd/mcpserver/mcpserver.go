@@ -1592,7 +1592,25 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		if toolErr != nil {
 			return toolErr, nil
 		}
-		result, err := ksServer.ListControls(ctx, framework)
+		limit := defaultControlsListLimit
+		if requestedLimit, set, argErr := mcpIntArg(arguments, "limit"); argErr != nil {
+			return argErr, nil
+		} else if set {
+			if requestedLimit < 1 || requestedLimit > maxControlsListLimit {
+				return mcpToolError(ErrCodeInvalidArgument,
+					fmt.Sprintf("limit must be between 1 and %d", maxControlsListLimit),
+					map[string]any{"argument": "limit"}), nil
+			}
+			limit = requestedLimit
+		}
+		offset, _, toolErr := mcpIntArg(arguments, "offset")
+		if toolErr != nil {
+			return toolErr, nil
+		}
+		if offset < 0 {
+			return mcpToolError(ErrCodeInvalidArgument, "offset must not be negative", map[string]any{"argument": "offset"}), nil
+		}
+		result, err := ksServer.ListControls(ctx, framework, limit, offset)
 		var unknown *unknownFrameworkError
 		if errors.As(err, &unknown) {
 			return mcpToolError(ErrCodeInvalidArgument, err.Error(),
@@ -1791,9 +1809,15 @@ func createPolicyListingTools(ksServer *KubescapeMcpserver) {
 	)
 	listControlsTool := mcp.NewTool(
 		"list_controls",
-		mcp.WithDescription("List the available security controls with their IDs, names, and the frameworks they belong to. Pass framework to get only one framework's controls instead of all of them. Use a returned ID as a control_ids value in scan_controls."),
+		mcp.WithDescription("List the available security controls with their IDs, names, and the frameworks they belong to. Returns total, returned, truncated, and controls; pass framework to filter and use next_offset to request the next page. Use a returned ID as a control_ids value in scan_controls."),
 		mcp.WithString("framework",
 			mcp.Description("Only return the controls of this framework, e.g. \"NSA\" (optional, case-insensitive; see list_frameworks)"),
+		),
+		mcp.WithNumber("limit",
+			mcp.Description("Maximum number of controls to return (optional, default 100, maximum 500)"),
+		),
+		mcp.WithNumber("offset",
+			mcp.Description("Number of controls to skip; pass the previous response's next_offset to get the next page (optional, default 0)"),
 		),
 	)
 	listAdmissionPoliciesTool := mcp.NewTool(

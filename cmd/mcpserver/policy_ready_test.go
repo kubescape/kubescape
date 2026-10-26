@@ -107,7 +107,7 @@ func TestPolicyToolsReturnBoundedErrorBeforeReadiness(t *testing.T) {
 	assert.Less(t, time.Since(start), 5*time.Second, "wait must be bounded")
 	assert.Equal(t, ErrCodeTimeout, classifyScanError(err))
 
-	_, err = ks.ListControls(context.Background(), "")
+	_, err = ks.ListControls(context.Background(), "", defaultControlsListLimit, 0)
 	assert.ErrorIs(t, err, errPolicyNotReady)
 
 	// executeScan must refuse rather than evaluate against an unloaded store.
