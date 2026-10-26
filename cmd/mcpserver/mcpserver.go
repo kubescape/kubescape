@@ -1605,7 +1605,7 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 	case "list_admission_policies":
 		result, err := ksServer.ListAdmissionPolicies(ctx)
 		if err != nil {
-			return mcpToolError(ErrCodeScanFailed, fmt.Sprintf("failed to list admission policies: %v", err), nil), nil
+			return mcpToolError(classifyScanError(err), fmt.Sprintf("failed to list admission policies: %v", err), nil), nil
 		}
 		return mcp.NewToolResultText(string(result)), nil
 	case "create_admission_policy_binding":
