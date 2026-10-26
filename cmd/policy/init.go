@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/jwalton/gchalk"
 	"github.com/kubescape/kubescape/v4/core/pkg/policytest"
 	"github.com/spf13/cobra"
 )
@@ -37,14 +38,25 @@ func runPolicyInit(cmd *cobra.Command, path string, opts policytest.ScaffoldOpti
 	files, err := policytest.Scaffold(context.Background(), path, opts)
 
 	out := cmd.OutOrStdout()
+	colored := shouldColor(out)
+
 	for _, file := range files {
-		fmt.Fprintf(out, "wrote %s\n", file)
+		if colored {
+			fmt.Fprintf(out, "%s %s\n", gchalk.WithBrightGreen().Bold("wrote"), gchalk.BrightCyan(file))
+		} else {
+			fmt.Fprintf(out, "wrote %s\n", file)
+		}
 	}
 	if err != nil {
 		return err
 	}
 
-	fmt.Fprintf(out, "\nRun '%s policy test %s' to verify.\n", cmd.Root().Name(), path)
+	if colored {
+		cmdStr := gchalk.WithBrightWhite().Bold(fmt.Sprintf("%s policy test %s", cmd.Root().Name(), path))
+		fmt.Fprintf(out, "\nRun '%s' to verify.\n", cmdStr)
+	} else {
+		fmt.Fprintf(out, "\nRun '%s policy test %s' to verify.\n", cmd.Root().Name(), path)
+	}
 
 	return nil
 }
