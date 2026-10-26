@@ -807,7 +807,8 @@ func writeFleetReport(path string, report *fleet.FleetReport) error {
 // discovering it later from a report that doesn't match its own context.
 func perContextOutputPaths(output string, kubeContexts, formats []string) (map[string]string, error) {
 	paths := make(map[string]string, len(kubeContexts))
-	collisions := make(map[string][]string) // destination -> contexts that derived it
+	collisions := make(map[string][]string)   // lowered-destination -> contexts that derived it
+	collisionPaths := make(map[string]string) // lowered-destination -> first original spelling
 
 	for _, kubeContext := range kubeContexts {
 		path, err := perContextOutputPath(output, kubeContext)
@@ -825,7 +826,15 @@ func perContextOutputPaths(output string, kubeContexts, formats []string) (map[s
 		// such as "report.prod" and "report.prod.json" under --format json,
 		// are still caught.
 		for _, destination := range printerDestinations(path, formats) {
-			collisions[destination] = append(collisions[destination], kubeContext)
+			// Case-fold so that paths differing only by case - e.g.
+			// report.Prod.json vs report.prod.json - are caught: on
+			// case-insensitive filesystems (macOS APFS, Windows NTFS)
+			// both resolve to the same file.
+			key := strings.ToLower(destination)
+			collisions[key] = append(collisions[key], kubeContext)
+			if _, ok := collisionPaths[key]; !ok {
+				collisionPaths[key] = destination // keep the first spelling for the error message
+			}
 		}
 	}
 
@@ -834,7 +843,7 @@ func perContextOutputPaths(output string, kubeContexts, formats []string) (map[s
 	var conflicts []string
 	for path, contexts := range collisions {
 		if len(contexts) > 1 {
-			conflicts = append(conflicts, fmt.Sprintf("%s -> %s", strings.Join(contexts, ", "), path))
+			conflicts = append(conflicts, fmt.Sprintf("%s -> %s", strings.Join(contexts, ", "), collisionPaths[path]))
 		}
 	}
 	if len(conflicts) > 0 {
