@@ -2177,8 +2177,9 @@ type skippedCELResource struct {
 //   - a violation produces a RuleResponse (a failure);
 //   - an object outside the policy's matchConstraints is excluded, matching
 //     admission where it is never matched;
-//   - an object with no violation but an eval error has an unknown verdict and
-//     is skipped, never inferred as a pass;
+//   - an expression error under failurePolicy Fail produces a failure;
+//   - an offline evaluation error with no confirmed violation is skipped,
+//     never inferred as a pass;
 //   - anything else passes (no entry; processRule infers it).
 //
 // A control-wide failure (the evaluator or policy will not load) is the only
@@ -2312,22 +2313,24 @@ func (opap *OPAProcessor) runCELOnK8s(ctx context.Context, rule *reporthandling.
 			}
 		}
 
+		// Scan results do not retain RuleResponse.AlertMessage. Surface errors
+		// before choosing the verdict, including when a confirmed violation wins
+		// over an errored sibling validation or an offline error causes a skip.
+		if len(objErrs) > 0 {
+			logger.L().Ctx(ctx).Warning("CEL evaluation error",
+				helpers.String("control", controlID),
+				helpers.String("rule", rule.Name),
+				helpers.String("resource", celResourceID(obj)),
+				helpers.Error(errors.Join(objErrs...)))
+		}
+
 		switch {
 		case violated:
 			responses = append(responses, celRuleResponse(rule, obj, messages, hints))
-			// A confirmed violation wins over a sibling validation that errored,
-			// matching admission (a deny stands). Surface the dropped errors so a
-			// broken validation in an otherwise-failing policy is not invisible.
-			if len(objErrs) > 0 {
-				logger.L().Debug("CEL validation error on an already-violating resource",
-					helpers.String("rule", rule.Name),
-					helpers.String("resource", celResourceID(obj)),
-					helpers.Error(errors.Join(objErrs...)))
-			}
 		case len(denyErrs) > 0:
 			// failurePolicy Fail turned the eval error into a deny, exactly as
-			// admission would. Report it as a failure whose message is the error,
-			// so the finding is visible instead of silently downgraded to a skip.
+			// admission would. Keep the failure status; the warning above exposes
+			// the error even though scan results do not carry AlertMessage.
 			responses = append(responses, celErrorRuleResponse(rule, obj, errors.Join(denyErrs...)))
 		case len(objErrs) > 0:
 			outcome.skipped = append(outcome.skipped, skippedCELResource{obj: obj, err: errors.Join(objErrs...)})
