@@ -8,9 +8,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/armosec/armoapi-go/armotypes"
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
+	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestBuildScanResponse(t *testing.T) {
@@ -107,7 +111,7 @@ func TestBuildScanResponse(t *testing.T) {
 					},
 				}
 			}
-			resp := buildScanResponse(results, tt.complianceScore, tt.frameworkName, tt.degraded, tt.notEvaluatedControls, tt.totalControls)
+			resp := buildScanResponse(nil, results, tt.complianceScore, tt.frameworkName, tt.degraded, tt.notEvaluatedControls, tt.totalControls)
 
 			if resp.TotalFailed != tt.wantTotal {
 				t.Errorf("TotalFailed = %d, want %d", resp.TotalFailed, tt.wantTotal)
@@ -140,7 +144,7 @@ func TestBuildScanResponse(t *testing.T) {
 				var expectedFailedKeys []string
 				for _, k := range expectedKeys {
 					res := results[k]
-					if res.GetStatus(nil).IsFailed() {
+					if cautils.ResourceStatus(nil, &res).IsFailed() {
 						expectedFailedKeys = append(expectedFailedKeys, k)
 					}
 				}
@@ -244,4 +248,81 @@ func TestBuildScanInfo(t *testing.T) {
 			assert.Equal(t, tt.expectedTimeout, scanInfo.ScanTimeout, "ScanTimeout should match")
 		})
 	}
+}
+
+func TestBuildScanResponse_FrameworkScopedExceptionKeepsWorkloadOutOfFailedResources(t *testing.T) {
+	controlID := "C-0041"
+	workloadID := "default/Pod/test-workload"
+
+	exceptedRule := resourcesresults.ResourceAssociatedRule{
+		Name:   "host-network-access",
+		Status: apis.StatusFailed,
+		Exception: []armotypes.PostureExceptionPolicy{
+			{
+				PortalBase:      armotypes.PortalBase{Name: "nsa-only-exception"},
+				Actions:         []armotypes.PostureExceptionPolicyActions{armotypes.Disable},
+				PosturePolicies: []armotypes.PosturePolicy{{FrameworkName: "NSA", ControlID: controlID}},
+			},
+		},
+	}
+
+	result := resourcesresults.Result{
+		ResourceID: workloadID,
+		AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+			{
+				ControlID:               controlID,
+				Status:                  apis.StatusInfo{InnerStatus: apis.StatusFailed},
+				ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{exceptedRule},
+			},
+		},
+	}
+
+	results := map[string]resourcesresults.Result{
+		workloadID: result,
+	}
+
+	// 1. Scanned in framework "NSA" where the exception applies:
+	// cautils.ResourceStatus evaluates the workload as passed (with exception substatus),
+	// keeping it out of failedResources and leaving totalFailed at 0.
+	nsaSummary := &reportsummary.SummaryDetails{
+		Frameworks: []reportsummary.FrameworkSummary{
+			{
+				Name: "NSA",
+				Controls: reportsummary.ControlSummaries{
+					controlID: reportsummary.ControlSummary{ControlID: controlID},
+				},
+			},
+		},
+	}
+
+	nsaResp := buildScanResponse(nsaSummary, results, nil, "NSA", false, 0, 1)
+	assert.Equal(t, 0, nsaResp.TotalFailed)
+	assert.Equal(t, 0, nsaResp.ReturnedFailed)
+	assert.Empty(t, nsaResp.FailedResources)
+
+	// 2. Scanned in another framework (e.g., "MITRE") where the exception does not apply:
+	// The workload remains failed and is returned in failedResources.
+	mitreSummary := &reportsummary.SummaryDetails{
+		Frameworks: []reportsummary.FrameworkSummary{
+			{
+				Name: "MITRE",
+				Controls: reportsummary.ControlSummaries{
+					controlID: reportsummary.ControlSummary{ControlID: controlID},
+				},
+			},
+		},
+	}
+
+	mitreResp := buildScanResponse(mitreSummary, results, nil, "MITRE", false, 0, 1)
+	assert.Equal(t, 1, mitreResp.TotalFailed)
+	assert.Equal(t, 1, mitreResp.ReturnedFailed)
+	require.Len(t, mitreResp.FailedResources, 1)
+	assert.Equal(t, workloadID, mitreResp.FailedResources[0].(resourcesresults.Result).ResourceID)
+
+	// 3. Without framework context (summary == nil), the framework-scoped exception
+	// does not apply, and the workload remains failed.
+	nilSummaryResp := buildScanResponse(nil, results, nil, "", false, 0, 1)
+	assert.Equal(t, 1, nilSummaryResp.TotalFailed)
+	assert.Equal(t, 1, nilSummaryResp.ReturnedFailed)
+	require.Len(t, nilSummaryResp.FailedResources, 1)
 }
