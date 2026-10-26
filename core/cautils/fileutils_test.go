@@ -970,6 +970,39 @@ metadata:
 	}
 }
 
+func TestLoadResourcesFromFilesCustomResourceItems(t *testing.T) {
+	for _, directoryInput := range []bool{false, true} {
+		name := "single file"
+		if directoryInput {
+			name = "directory"
+		}
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			path := filepath.Join(root, "catalog.yaml")
+			require.NoError(t, os.WriteFile(path, []byte(`apiVersion: example.com/v1
+kind: Catalog
+metadata:
+  name: products
+items:
+  - apiVersion: v1
+    kind: Product
+`), 0o600))
+			input := path
+			if directoryInput {
+				input = root
+			}
+
+			workloads, skipped, err := LoadResourcesFromFiles(context.Background(), input, root, nil)
+			require.NoError(t, err)
+			assert.Empty(t, skipped)
+			require.Len(t, workloads[path], 1)
+			assert.Equal(t, "Catalog", workloads[path][0].GetKind())
+			assert.Equal(t, "products", workloads[path][0].GetName())
+			assert.Equal(t, []any{map[string]any{"apiVersion": "v1", "kind": "Product"}}, workloads[path][0].GetObject()["items"])
+		})
+	}
+}
+
 func TestReadYamlFileValidatesAgainstScheme(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -1006,6 +1039,64 @@ spec:
   replicas: "not-a-number"`,
 			wantCount:     1,
 			wantErrSubstr: "structurally invalid",
+		},
+		{
+			name: "custom resource items are application data",
+			content: `apiVersion: example.com/v1
+kind: Catalog
+metadata:
+  name: products
+items:
+  - apiVersion: v1
+    kind: Product`,
+			wantCount: 1,
+		},
+		{
+			name: "named custom resource ending in List is not a list envelope",
+			content: `apiVersion: example.com/v1
+kind: AllowList
+metadata:
+  name: allowed-products
+items:
+  - apiVersion: v1
+    kind: Product`,
+			wantCount: 1,
+		},
+		{
+			name: "non-manifest items are ignored",
+			content: `items:
+  - apiVersion: v1
+    kind: Product`,
+			wantCount: 0,
+		},
+		{
+			name: "custom resource items inside a List remain application data",
+			content: `apiVersion: v1
+kind: List
+items:
+  - apiVersion: example.com/v1
+    kind: Catalog
+    metadata:
+      name: products
+    items:
+      - apiVersion: v1
+        kind: Product`,
+			wantCount: 1,
+		},
+		{
+			name: "invalid built-in kind inside a nested List is surfaced",
+			content: `apiVersion: v1
+kind: List
+items:
+  - apiVersion: v1
+    kind: List
+    items:
+      - apiVersion: v1
+        kind: Product
+        metadata:
+          name: invalid-product`,
+			wantCount:     1,
+			wantErrSubstr: "is not a valid Kubernetes kind",
 		},
 		{
 			name: "typo'd kind in a built-in group is surfaced",

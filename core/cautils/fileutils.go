@@ -1409,6 +1409,12 @@ func validateManifestAgainstScheme(obj map[string]any) error {
 	if err := validateSingleManifest(obj); err != nil {
 		errs = append(errs, err)
 	}
+	// An items field is application data unless the object is a list envelope.
+	// Use the loader's classification so named custom resources such as AllowList
+	// are not treated as lists merely because of their kind's suffix.
+	if _, isList, _ := listEnvelopeKind(obj); !isList {
+		return errors.Join(errs...)
+	}
 	if items, ok := obj["items"].([]any); ok {
 		for i, item := range items {
 			if itemObj, ok := item.(map[string]any); ok {
