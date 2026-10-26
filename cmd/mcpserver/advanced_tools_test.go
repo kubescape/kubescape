@@ -361,6 +361,28 @@ func TestDryRunRemediation_ArgumentValidation(t *testing.T) {
 			expectedCode: ErrCodeInvalidArgument,
 			expectedArg:  "patch_json",
 		},
+		{
+			name: "invalid patch_type type",
+			arguments: map[string]any{
+				"resource_kind": "pods",
+				"resource_name": "app",
+				"patch_json":    validPatch,
+				"patch_type":    1234,
+			},
+			expectedCode: ErrCodeInvalidArgument,
+			expectedArg:  "patch_type",
+		},
+		{
+			name: "unsupported patch_type",
+			arguments: map[string]any{
+				"resource_kind": "pods",
+				"resource_name": "app",
+				"patch_json":    validPatch,
+				"patch_type":    "unsupported-patch-type",
+			},
+			expectedCode: ErrCodeInvalidArgument,
+			expectedArg:  "patch_type",
+		},
 	}
 
 	for _, tc := range tests {
@@ -526,6 +548,92 @@ func TestDryRunRemediation_MarshalError(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(toolResultText(t, result)), &toolErr))
 	require.Equal(t, ErrCodeMarshalError, toolErr.Code)
 	require.Contains(t, toolErr.Message, "failed to marshal result: simulated marshal error")
+}
+
+func TestDryRunRemediation_PatchTypes(t *testing.T) {
+	pod := &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "v1",
+			"kind":       "Pod",
+			"metadata": map[string]any{
+				"name":      "nginx-pod",
+				"namespace": "default",
+			},
+		},
+	}
+	defaultPatchJSON := `{"metadata":{"labels":{"remediated":"true"}}}`
+	jsonPatchJSON := `[{"op":"add","path":"/metadata/labels/remediated","value":"true"}]`
+
+	testCases := []struct {
+		name              string
+		patchTypeArg      any
+		patchPayload      string
+		expectedPatchType types.PatchType
+	}{
+		{
+			name:              "default when patch_type is omitted",
+			patchTypeArg:      nil,
+			patchPayload:      defaultPatchJSON,
+			expectedPatchType: types.StrategicMergePatchType,
+		},
+		{
+			name:              "explicit strategic-merge-patch",
+			patchTypeArg:      "strategic-merge-patch",
+			patchPayload:      defaultPatchJSON,
+			expectedPatchType: types.StrategicMergePatchType,
+		},
+		{
+			name:              "explicit merge-patch",
+			patchTypeArg:      "merge-patch",
+			patchPayload:      defaultPatchJSON,
+			expectedPatchType: types.MergePatchType,
+		},
+		{
+			name:              "explicit json-patch",
+			patchTypeArg:      "json-patch",
+			patchPayload:      jsonPatchJSON,
+			expectedPatchType: types.JSONPatchType,
+		},
+		{
+			name:              "case-insensitive patch type",
+			patchTypeArg:      "Merge-Patch",
+			patchPayload:      defaultPatchJSON,
+			expectedPatchType: types.MergePatchType,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			dyn := dynamicfake.NewSimpleDynamicClient(runtime.NewScheme(), pod)
+			var capturedPatchType types.PatchType
+			var capturedPatchBytes []byte
+			dyn.PrependReactor("patch", "pods", func(action clienttesting.Action) (bool, runtime.Object, error) {
+				patchAction, ok := action.(clienttesting.PatchActionImpl)
+				require.True(t, ok)
+				capturedPatchType = patchAction.GetPatchType()
+				capturedPatchBytes = patchAction.GetPatch()
+				patched := pod.DeepCopy()
+				_ = unstructured.SetNestedField(patched.Object, "true", "metadata", "labels", "remediated")
+				return true, patched, nil
+			})
+			ksServer := newTestMCPServerWithK8s(&k8sinterface.KubernetesApi{DynamicClient: dyn})
+
+			args := map[string]any{
+				"resource_kind": "pods",
+				"resource_name": "nginx-pod",
+				"namespace":     "default",
+				"patch_json":    tc.patchPayload,
+			}
+			if tc.patchTypeArg != nil {
+				args["patch_type"] = tc.patchTypeArg
+			}
+
+			result := registeredToolResult(t, dispatchRegisteredTool(t, ksServer, "dry_run_remediation", args))
+			require.False(t, result.IsError)
+			require.Equal(t, tc.expectedPatchType, capturedPatchType)
+			require.JSONEq(t, tc.patchPayload, string(capturedPatchBytes))
+		})
+	}
 }
 
 func TestScanResourceSlice_SupportedWorkloadKinds(t *testing.T) {
