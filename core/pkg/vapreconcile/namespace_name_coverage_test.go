@@ -63,7 +63,7 @@ func TestCollectedCoverageResourcesKeepNamespaceObjectName(t *testing.T) {
 	resource := workloadinterface.NewWorkloadObj(map[string]any{"apiVersion": "v1", "kind": "Namespace", "metadata": map[string]any{"name": "prod"}})
 	resourceID := resource.GetID()
 	failed := resourcesresults.ResourceAssociatedControl{ControlID: "C-0001", ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{{Status: apis.StatusFailed}}}
-	byControl := CollectFailingResourcesByControl(map[string]resourcesresults.Result{resourceID: {AssociatedControls: []resourcesresults.ResourceAssociatedControl{failed}}}, map[string]workloadinterface.IMetadata{resourceID: resource})
+	byControl := CollectFailingResourcesByControl(nil, map[string]resourcesresults.Result{resourceID: {AssociatedControls: []resourcesresults.ResourceAssociatedControl{failed}}}, map[string]workloadinterface.IMetadata{resourceID: resource})
 	require.Len(t, byControl["C-0001"], 1)
 	require.Equal(t, "prod", byControl["C-0001"][0].Name)
 	coverage := BuildCoverage([]unstructured.Unstructured{makeVAP("policy", "C-0001")}, []unstructured.Unstructured{makeVAPBScoped("binding", "policy", matchLabels("kubernetes.io/metadata.name", "prod"), nil)}, byControl, nil)
