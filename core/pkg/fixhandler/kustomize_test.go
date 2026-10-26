@@ -4200,6 +4200,60 @@ func TestReview4034_DeclinedResourcesExcludedFromBaseAndStalePatchesPurged(t *te
 	assert.True(t, os.IsNotExist(err), "base.yaml must not be written when all resources are declined")
 }
 
+// TestReview4034_ExistingDirectoryPreservesUnrelatedFiles verifies that EmitKustomizePatch
+// does not delete user-authored files (such as patch-custom.yaml or custom notes)
+// when outputting to an existing directory.
+func TestReview4034_ExistingDirectoryPreservesUnrelatedFiles(t *testing.T) {
+	dir := t.TempDir()
+
+	// Pre-populate existing output directory with user-authored files
+	customPatchPath := filepath.Join(dir, "patch-custom.yaml")
+	customPatchContent := []byte("# User-authored custom patch\n- op: add\n  path: /metadata/labels/custom\n  value: user-label\n")
+	require.NoError(t, os.WriteFile(customPatchPath, customPatchContent, 0600))
+
+	unrelatedTxtPath := filepath.Join(dir, "custom-notes.txt")
+	require.NoError(t, os.WriteFile(unrelatedTxtPath, []byte("custom notes"), 0600))
+
+	deploy := makeResource("Deployment", "my-app")
+	deploy.GetObject()["spec"] = map[string]interface{}{
+		"template": map[string]interface{}{
+			"spec": map[string]interface{}{
+				"containers": []interface{}{
+					map[string]interface{}{"name": "web"},
+				},
+			},
+		},
+	}
+
+	suggestions := []HelmFixSuggestion{
+		{
+			Resource:           deploy,
+			ChartName:          "my-chart",
+			FidelityProvenance: true,
+			FixPaths: []armotypes.FixPath{
+				{Path: "spec.template.spec.containers[0].securityContext.privileged", Value: "false"},
+			},
+		},
+	}
+
+	res, err := EmitKustomizePatch(suggestions, dir)
+	require.NoError(t, err)
+	require.Len(t, res.EmittedResources, 1)
+
+	// Verify user-authored files were NOT deleted
+	savedCustomPatch, err := os.ReadFile(customPatchPath)
+	require.NoError(t, err, "user-authored patch-custom.yaml must not be deleted")
+	assert.Equal(t, string(customPatchContent), string(savedCustomPatch))
+
+	savedNotes, err := os.ReadFile(unrelatedTxtPath)
+	require.NoError(t, err, "unrelated files must not be deleted")
+	assert.Equal(t, "custom notes", string(savedNotes))
+
+	// Verify Kubescape own files were written properly
+	assert.FileExists(t, filepath.Join(dir, "base.yaml"))
+	assert.FileExists(t, filepath.Join(dir, "kustomization.yaml"))
+}
+
 // TestReview4034_OctalLeadingZeroNumericParsing verifies that YAML octal values like 0777
 // are parsed to decimal integers (511) matching the standard fixer.
 func TestReview4034_OctalLeadingZeroNumericParsing(t *testing.T) {

@@ -1431,17 +1431,6 @@ func EmitKustomizePatch(suggestions []HelmFixSuggestion, dir string) (*Kustomize
 		return result, nil
 	}
 
-	// Clean up any stale patch-*.yaml files in dir from prior runs so that
-	// old patches are not left around or applied by mistake.
-	entries, readErr := os.ReadDir(dir)
-	if readErr == nil {
-		for _, e := range entries {
-			if !e.IsDir() && strings.HasPrefix(e.Name(), "patch-") && strings.HasSuffix(e.Name(), ".yaml") {
-				_ = root.Remove(e.Name())
-			}
-		}
-	}
-
 	kust := kustomizationDoc{
 		APIVersion: "kustomize.config.k8s.io/v1beta1",
 		Kind:       "Kustomization",
