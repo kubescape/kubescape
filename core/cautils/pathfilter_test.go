@@ -406,6 +406,7 @@ func TestPathFilterMatchesGitignoreSemantics(t *testing.T) {
 	}
 }
 
+// TestNewScanPathFilterAnchorsAGlobInputAtItsLiteralDirectory checks that glob inputs load exclusions from their literal ancestor.
 func TestNewScanPathFilterAnchorsAGlobInputAtItsLiteralDirectory(t *testing.T) {
 	root := t.TempDir()
 	require.NoError(t, os.MkdirAll(filepath.Join(root, "manifests"), 0o750))
@@ -417,6 +418,141 @@ func TestNewScanPathFilterAnchorsAGlobInputAtItsLiteralDirectory(t *testing.T) {
 
 	assert.Equal(t, filepath.Join(root, "manifests"), filter.Root())
 	assert.True(t, filter.Excluded(filepath.Join(root, "manifests", "app", "pod.yaml"), false))
+}
+
+// TestLiteralDir checks that glob ancestors are removed even when followed by literal directories.
+func TestLiteralDir(t *testing.T) {
+	tests := []struct {
+		name string
+		path string
+		want string
+	}{
+		{name: "file", path: "manifests/pod.yaml", want: "manifests"},
+		{name: "file glob", path: "manifests/*.yaml", want: "manifests"},
+		{name: "directory glob", path: "manifests/**/*.yaml", want: "manifests"},
+		{name: "literal directory after glob", path: "manifests/*/nested/*.yaml", want: "manifests"},
+		{name: "literal directory after globstar", path: "manifests/**/nested/*.yaml", want: "manifests"},
+		{name: "multiple directory globs", path: "manifests/*/nested/?/resources/pod.yaml", want: "manifests"},
+		{name: "character class", path: "manifests/[ab]/nested/pod.yaml", want: "manifests"},
+		{name: "relative root", path: "*/nested/pod.yaml", want: "."},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, filepath.FromSlash(tt.want), literalDir(filepath.FromSlash(tt.path)))
+		})
+	}
+}
+
+// TestLiteralDirPreservesExistingDirectories checks literal ancestors across supported glob forms.
+func TestLiteralDirPreservesExistingDirectories(t *testing.T) {
+	for _, directory := range []string{"manifests[old]", filepath.Join("manifests[old]", "nested")} {
+		t.Run(directory, func(t *testing.T) {
+			root := filepath.Join(t.TempDir(), directory)
+			require.NoError(t, os.MkdirAll(root, 0o750))
+			for _, pattern := range []string{
+				"*.yaml",
+				"*/nested/*.yaml",
+				"**/nested/*.yaml",
+				"?/nested/*.yaml",
+				"[ab]/nested/*.yaml",
+			} {
+				t.Run(pattern, func(t *testing.T) {
+					assert.Equal(t, root, literalDir(filepath.Join(root, filepath.FromSlash(pattern))))
+				})
+			}
+		})
+	}
+}
+
+// TestNewScanPathFilterAnchorsGlobWithLiteralSubdirectory verifies both exclusion sources use the literal root.
+func TestNewScanPathFilterAnchorsGlobWithLiteralSubdirectory(t *testing.T) {
+	for _, useIgnoreFile := range []bool{true, false} {
+		name := "command line exclusions"
+		if useIgnoreFile {
+			name = "ignore file exclusions"
+		}
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			manifest := filepath.Join(root, "app", "nested", "pod.yaml")
+			require.NoError(t, os.MkdirAll(filepath.Dir(manifest), 0o750))
+			require.NoError(t, os.WriteFile(manifest, []byte("kind: Pod\n"), 0o600))
+
+			var patterns []string
+			if useIgnoreFile {
+				writeIgnoreFile(t, root, "app/nested/pod.yaml\n")
+			} else {
+				patterns = []string{"app/nested/pod.yaml"}
+			}
+			filter, err := NewScanPathFilter(filepath.Join(root, "*", "nested", "*.yaml"), patterns, useIgnoreFile)
+			require.NoError(t, err)
+			require.NotNil(t, filter)
+			assert.Equal(t, root, filter.Root())
+			assert.True(t, filter.Excluded(manifest, false))
+			assert.False(t, filter.Excluded(filepath.Join(root, "other", "nested", "pod.yaml"), false))
+		})
+	}
+}
+
+// TestNewScanPathFilterAnchorsGlobInsideBracketedDirectory preserves existing literal ancestors of glob inputs.
+func TestNewScanPathFilterAnchorsGlobInsideBracketedDirectory(t *testing.T) {
+	for _, useIgnoreFile := range []bool{true, false} {
+		name := "command line exclusions"
+		if useIgnoreFile {
+			name = "ignore file exclusions"
+		}
+		t.Run(name, func(t *testing.T) {
+			root := filepath.Join(t.TempDir(), "manifests[old]")
+			manifest := filepath.Join(root, "app", "nested", "pod.yaml")
+			require.NoError(t, os.MkdirAll(filepath.Dir(manifest), 0o750))
+			require.NoError(t, os.WriteFile(manifest, []byte("kind: Pod\n"), 0o600))
+
+			var patterns []string
+			if useIgnoreFile {
+				writeIgnoreFile(t, root, "/app/nested/pod.yaml\n")
+			} else {
+				patterns = []string{"/app/nested/pod.yaml"}
+			}
+			filter, err := NewScanPathFilter(filepath.Join(root, "*", "nested", "*.yaml"), patterns, useIgnoreFile)
+			require.NoError(t, err)
+			require.NotNil(t, filter)
+			assert.Equal(t, root, filter.Root())
+			assert.True(t, filter.Excluded(manifest, false))
+			assert.False(t, filter.Excluded(filepath.Join(root, "other", "nested", "pod.yaml"), false))
+		})
+	}
+}
+
+// TestNewScanPathFilterPreservesExistingFileRoot verifies that glob characters in literal paths do not change the exclusion root.
+func TestNewScanPathFilterPreservesExistingFileRoot(t *testing.T) {
+	for _, directory := range []string{"manifests[old]", filepath.Join("manifests[old]", "nested")} {
+		t.Run(directory, func(t *testing.T) {
+			for _, useIgnoreFile := range []bool{true, false} {
+				name := "command line exclusions"
+				if useIgnoreFile {
+					name = "ignore file exclusions"
+				}
+				t.Run(name, func(t *testing.T) {
+					root := filepath.Join(t.TempDir(), directory)
+					require.NoError(t, os.MkdirAll(root, 0o750))
+					manifest := filepath.Join(root, "pod.yaml")
+					require.NoError(t, os.WriteFile(manifest, []byte("kind: Pod\n"), 0o600))
+
+					var patterns []string
+					if useIgnoreFile {
+						writeIgnoreFile(t, root, "/pod.yaml\n")
+					} else {
+						patterns = []string{"/pod.yaml"}
+					}
+					filter, err := NewScanPathFilter(manifest, patterns, useIgnoreFile)
+					require.NoError(t, err)
+					require.NotNil(t, filter)
+					assert.Equal(t, root, filter.Root())
+					assert.True(t, filter.Excluded(manifest, false))
+					assert.False(t, filter.Excluded(filepath.Join(root, "other.yaml"), false))
+				})
+			}
+		})
+	}
 }
 
 // A repository input is scanned from its clone, so the filter has to anchor there too:
