@@ -160,7 +160,43 @@ func listControls(ctx context.Context, listPolicies *metav1.ListPolicies) ([]met
 	for _, pipe := range pipes {
 		entries = append(entries, parseControlEntry(pipe))
 	}
+	if framework := strings.TrimSpace(listPolicies.ControlFilters.Framework); framework != "" {
+		if err := checkFrameworkKnown(framework, listFrameworksNames(policyGetter), entries); err != nil {
+			return nil, err
+		}
+	}
 	return filterControlEntries(entries, listPolicies.ControlFilters), nil
+}
+
+// checkFrameworkKnown returns an error listing the known frameworks when
+// framework is neither in the catalog nor on any control, so that a misspelled
+// name is not mistaken for a framework without controls. Controls also carry
+// tags that the catalog does not list, and those count as known too. Names are
+// compared case-insensitively, as in filterControlEntries.
+func checkFrameworkKnown(framework string, catalog []string, entries []metav1.ControlListEntry) error {
+	known := make(map[string]struct{}, len(catalog))
+	addKnown := func(name string) {
+		if name = strings.TrimSpace(name); name != "" {
+			known[name] = struct{}{}
+		}
+	}
+	for _, name := range catalog {
+		addKnown(name)
+	}
+	for _, entry := range entries {
+		for _, name := range entry.Frameworks {
+			addKnown(name)
+		}
+	}
+
+	names := make([]string, 0, len(known))
+	for name := range known {
+		if strings.EqualFold(name, framework) {
+			return nil
+		}
+		names = append(names, name)
+	}
+	return fmt.Errorf("unknown framework %q; use one of: %s", framework, strings.Join(naturalSortPolicies(names), ", "))
 }
 
 // parseControlEntry converts a pipe-delimited "id|name|fw1, fw2" string into a ControlListEntry.

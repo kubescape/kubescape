@@ -330,6 +330,42 @@ func TestControlEntryHasFrameworkTrimsCatalogValues(t *testing.T) {
 	assert.True(t, controlEntryHasFramework(entry, "NSA "))
 }
 
+func TestCheckFrameworkKnown(t *testing.T) {
+	catalog := []string{"NSA", " MITRE ", "SOC2", "cis-v1.10.0"}
+	entries := []metav1.ControlListEntry{
+		{ID: "C-0001", Frameworks: []string{"NSA", "ClusterScan"}},
+		{ID: "C-0002", Frameworks: []string{"cis-v1.10.0"}},
+	}
+
+	tests := []struct {
+		name      string
+		framework string
+		wantErr   string
+	}{
+		{name: "catalog framework", framework: "NSA"},
+		{name: "catalog framework is case-insensitive", framework: "nsa"},
+		{name: "catalog values are trimmed", framework: "mitre"},
+		{name: "catalog framework without controls", framework: "soc2"},
+		{name: "control tag missing from the catalog", framework: "clusterscan"},
+		{
+			name:      "unknown framework lists the known ones",
+			framework: "cis-v1.10",
+			wantErr:   `unknown framework "cis-v1.10"; use one of: ClusterScan, MITRE, NSA, SOC2, cis-v1.10.0`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := checkFrameworkKnown(tt.framework, catalog, entries)
+			if tt.wantErr == "" {
+				assert.NoError(t, err)
+				return
+			}
+			assert.EqualError(t, err, tt.wantErr)
+		})
+	}
+}
+
 func controlEntryIDs(entries []metav1.ControlListEntry) []string {
 	ids := make([]string, 0, len(entries))
 	for _, entry := range entries {
