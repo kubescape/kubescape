@@ -35,14 +35,20 @@ var (
 // FailCoverageThreshold are all within [0, 100]. This mirrors the check in
 // validateFrameworkScanInfo and validateControlScanInfo.
 func ValidateThresholds(scanInfo *cautils.ScanInfo) error {
-	if math.IsNaN(float64(scanInfo.FailThreshold)) || 100 < scanInfo.FailThreshold || 0 > scanInfo.FailThreshold {
-		return ErrBadThreshold
+	if err := ValidateThreshold("fail-threshold", scanInfo.FailThreshold); err != nil {
+		return err
 	}
-	if math.IsNaN(float64(scanInfo.ComplianceThreshold)) || 100 < scanInfo.ComplianceThreshold || 0 > scanInfo.ComplianceThreshold {
-		return ErrBadThreshold
+	if err := ValidateThreshold("compliance-threshold", scanInfo.ComplianceThreshold); err != nil {
+		return err
 	}
-	if math.IsNaN(float64(scanInfo.FailCoverageThreshold)) || 100 < scanInfo.FailCoverageThreshold || 0 > scanInfo.FailCoverageThreshold {
-		return ErrBadThreshold
+	return ValidateThreshold("fail-coverage-below", scanInfo.FailCoverageThreshold)
+}
+
+// ValidateThreshold returns an error wrapping ErrBadThreshold, and naming the
+// flag and its value, when value is NaN or outside [0, 100].
+func ValidateThreshold(flag string, value float32) error {
+	if math.IsNaN(float64(value)) || value < 0 || value > 100 {
+		return fmt.Errorf("%w: --%s must be between 0 and 100, got %v", ErrBadThreshold, flag, value)
 	}
 	return nil
 }

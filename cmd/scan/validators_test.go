@@ -1,11 +1,14 @@
 package scan
 
 import (
+	"errors"
 	"math"
 	"testing"
 
 	"github.com/kubescape/kubescape/v4/cmd/shared"
 	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // Test_validateControlScanInfo tests how scan info is validated for the `scan control` command
@@ -51,7 +54,7 @@ func Test_validateControlScanInfo(t *testing.T) {
 
 				got := validateControlScanInfo(tc.ScanInfo)
 
-				if got != want {
+				if !errors.Is(got, want) {
 					t.Errorf("got: %v, want: %v", got, want)
 				}
 			},
@@ -136,7 +139,7 @@ func Test_validateFrameworkScanInfo(t *testing.T) {
 					return
 				}
 
-				if got != want {
+				if !errors.Is(got, want) {
 					t.Errorf("got: %v, want: %v", got, want)
 				}
 			},
@@ -178,7 +181,7 @@ func Test_validateCoverageThreshold(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.Description, func(t *testing.T) {
 			got := validateThresholdsOnly(tc.ScanInfo)
-			if got != tc.Want {
+			if !errors.Is(got, tc.Want) {
 				t.Errorf("got: %v, want: %v", got, tc.Want)
 			}
 		})
@@ -201,8 +204,33 @@ func Test_validateThresholdsOnly_Compliance(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.Description, func(t *testing.T) {
 			got := validateThresholdsOnly(tc.ScanInfo)
-			if got != tc.Want {
+			if !errors.Is(got, tc.Want) {
 				t.Errorf("got: %v, want: %v", got, tc.Want)
+			}
+		})
+	}
+}
+
+func Test_validatePostureThresholds_NamesOffendingFlag(t *testing.T) {
+	testCases := []struct {
+		Description string
+		ScanInfo    *cautils.ScanInfo
+		WantErr     string
+	}{
+		{"compliance threshold", &cautils.ScanInfo{ComplianceThreshold: 150}, "bad argument: out of range threshold: --compliance-threshold must be between 0 and 100, got 150"},
+		{"coverage threshold", &cautils.ScanInfo{FailCoverageThreshold: 101}, "bad argument: out of range threshold: --fail-coverage-below must be between 0 and 100, got 101"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.Description, func(t *testing.T) {
+			for name, validate := range map[string]func(*cautils.ScanInfo) error{
+				"framework":       validateFrameworkScanInfo,
+				"control":         validateControlScanInfo,
+				"thresholds only": validateThresholdsOnly,
+			} {
+				err := validate(tc.ScanInfo)
+				require.ErrorIs(t, err, ErrBadThreshold, name)
+				assert.EqualError(t, err, tc.WantErr, name)
 			}
 		})
 	}
@@ -226,7 +254,7 @@ func Test_validateWorkloadIdentifier(t *testing.T) {
 			want := testCase.Want
 			got := validateWorkloadIdentifier(input)
 
-			if got != want {
+			if !errors.Is(got, want) {
 				t.Errorf("got: %v, want: %v", got, want)
 			}
 		})

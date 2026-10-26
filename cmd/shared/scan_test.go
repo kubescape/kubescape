@@ -1,6 +1,7 @@
 package shared
 
 import (
+	"math"
 	"testing"
 	"time"
 
@@ -72,6 +73,52 @@ func TestValidateSeverity(t *testing.T) {
 			if got != want {
 				t.Errorf("got: %v, want: %v", got, want)
 			}
+		})
+	}
+}
+
+func TestValidateThreshold(t *testing.T) {
+	testCases := []struct {
+		Description string
+		Value       float32
+		WantErr     string
+	}{
+		{"0 is valid", 0, ""},
+		{"100 is valid", 100, ""},
+		{"above 100 names the flag, range and value", 150, "bad argument: out of range threshold: --compliance-threshold must be between 0 and 100, got 150"},
+		{"below 0 names the flag, range and value", -5, "bad argument: out of range threshold: --compliance-threshold must be between 0 and 100, got -5"},
+		{"NaN names the flag, range and value", float32(math.NaN()), "bad argument: out of range threshold: --compliance-threshold must be between 0 and 100, got NaN"},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.Description, func(t *testing.T) {
+			err := ValidateThreshold("compliance-threshold", testCase.Value)
+			if testCase.WantErr == "" {
+				assert.NoError(t, err)
+				return
+			}
+			require.ErrorIs(t, err, ErrBadThreshold)
+			assert.EqualError(t, err, testCase.WantErr)
+		})
+	}
+}
+
+func TestValidateThresholdsNamesOffendingFlag(t *testing.T) {
+	testCases := []struct {
+		Description string
+		ScanInfo    *cautils.ScanInfo
+		WantFlag    string
+	}{
+		{"fail threshold", &cautils.ScanInfo{FailThreshold: 101}, "--fail-threshold"},
+		{"compliance threshold", &cautils.ScanInfo{ComplianceThreshold: 101}, "--compliance-threshold"},
+		{"coverage threshold", &cautils.ScanInfo{FailCoverageThreshold: 101}, "--fail-coverage-below"},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.Description, func(t *testing.T) {
+			err := ValidateThresholds(testCase.ScanInfo)
+			require.ErrorIs(t, err, ErrBadThreshold)
+			assert.ErrorContains(t, err, testCase.WantFlag+" must be between 0 and 100, got 101")
 		})
 	}
 }

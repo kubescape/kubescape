@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
 	"slices"
 	"strings"
 
@@ -42,7 +41,7 @@ var (
 `, cautils.ExecName())
 
 	ErrSecurityViewNotSupported = errors.New("security view is not supported for framework scan")
-	ErrBadThreshold             = errors.New("bad argument: out of range threshold")
+	ErrBadThreshold             = shared.ErrBadThreshold
 	ErrControlTimeoutTooHigh    = errors.New("--control-timeout must be lower than --scan-timeout")
 )
 
@@ -296,8 +295,8 @@ func validateFrameworkScanInfo(scanInfo *cautils.ScanInfo) error {
 	if scanInfo.View == string(cautils.SecurityViewType) {
 		scanInfo.View = string(cautils.ResourceViewType)
 	}
-	if postureThresholdsOutOfRange(scanInfo) {
-		return ErrBadThreshold
+	if err := validatePostureThresholds(scanInfo); err != nil {
+		return err
 	}
 	if err := validateControlTimeout(scanInfo); err != nil {
 		return err
@@ -326,15 +325,17 @@ func validateControlTimeout(scanInfo *cautils.ScanInfo) error {
 // Unlike validateFrameworkScanInfo, this function does not mutate scanInfo
 // or enforce unrelated constraints.
 func validateThresholdsOnly(scanInfo *cautils.ScanInfo) error {
-	if postureThresholdsOutOfRange(scanInfo) {
-		return ErrBadThreshold
+	if err := validatePostureThresholds(scanInfo); err != nil {
+		return err
 	}
 	return validateControlTimeout(scanInfo)
 }
 
-func postureThresholdsOutOfRange(scanInfo *cautils.ScanInfo) bool {
-	return math.IsNaN(float64(scanInfo.ComplianceThreshold)) ||
-		math.IsNaN(float64(scanInfo.FailCoverageThreshold)) ||
-		scanInfo.ComplianceThreshold < 0 || scanInfo.ComplianceThreshold > 100 ||
-		scanInfo.FailCoverageThreshold < 0 || scanInfo.FailCoverageThreshold > 100
+// validatePostureThresholds returns an error naming the first of
+// --compliance-threshold and --fail-coverage-below that is outside [0, 100].
+func validatePostureThresholds(scanInfo *cautils.ScanInfo) error {
+	if err := shared.ValidateThreshold("compliance-threshold", scanInfo.ComplianceThreshold); err != nil {
+		return err
+	}
+	return shared.ValidateThreshold("fail-coverage-below", scanInfo.FailCoverageThreshold)
 }
