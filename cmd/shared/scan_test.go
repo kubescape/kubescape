@@ -167,6 +167,13 @@ func TestValidateCommonScanFlags(t *testing.T) {
 			expectedErr:   "format cannot be empty, supported formats",
 		},
 		{
+			name:          "Whitespace-only format flag explicitly passed",
+			severity:      "High",
+			format:        "   ",
+			formatChanged: true,
+			expectedErr:   "format cannot be empty, supported formats",
+		},
+		{
 			name:          "Invalid format",
 			severity:      "High",
 			format:        "fake-format",
