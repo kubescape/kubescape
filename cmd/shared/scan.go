@@ -146,7 +146,7 @@ func ValidateCommonScanFlags(cmd *cobra.Command, scanInfo *cautils.ScanInfo, sup
 	if f == nil {
 		f = cmd.InheritedFlags().Lookup("format")
 	}
-	if f != nil && f.Changed && scanInfo.Format == "" {
+	if f != nil && f.Changed && strings.TrimSpace(scanInfo.Format) == "" {
 		return fmt.Errorf("format cannot be empty, supported formats: %s", strings.Join(supportedFormats, ", "))
 	}
 	if err := ValidateScanFormat(scanInfo.Format, supportedFormats); err != nil {
