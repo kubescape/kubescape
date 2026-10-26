@@ -406,6 +406,7 @@ func TestPathFilterMatchesGitignoreSemantics(t *testing.T) {
 	}
 }
 
+// TestNewScanPathFilterAnchorsAGlobInputAtItsLiteralDirectory checks that glob inputs load exclusions from their literal ancestor.
 func TestNewScanPathFilterAnchorsAGlobInputAtItsLiteralDirectory(t *testing.T) {
 	root := t.TempDir()
 	require.NoError(t, os.MkdirAll(filepath.Join(root, "manifests"), 0o750))
@@ -419,6 +420,7 @@ func TestNewScanPathFilterAnchorsAGlobInputAtItsLiteralDirectory(t *testing.T) {
 	assert.True(t, filter.Excluded(filepath.Join(root, "manifests", "app", "pod.yaml"), false))
 }
 
+// TestLiteralDir checks that glob ancestors are removed even when followed by literal directories.
 func TestLiteralDir(t *testing.T) {
 	tests := []struct {
 		name string
@@ -441,6 +443,7 @@ func TestLiteralDir(t *testing.T) {
 	}
 }
 
+// TestNewScanPathFilterAnchorsGlobWithLiteralSubdirectory verifies both exclusion sources use the literal root.
 func TestNewScanPathFilterAnchorsGlobWithLiteralSubdirectory(t *testing.T) {
 	for _, useIgnoreFile := range []bool{true, false} {
 		name := "command line exclusions"
@@ -465,6 +468,39 @@ func TestNewScanPathFilterAnchorsGlobWithLiteralSubdirectory(t *testing.T) {
 			assert.Equal(t, root, filter.Root())
 			assert.True(t, filter.Excluded(manifest, false))
 			assert.False(t, filter.Excluded(filepath.Join(root, "other", "nested", "pod.yaml"), false))
+		})
+	}
+}
+
+// TestNewScanPathFilterPreservesExistingFileRoot verifies that glob characters in literal paths do not change the exclusion root.
+func TestNewScanPathFilterPreservesExistingFileRoot(t *testing.T) {
+	for _, directory := range []string{"manifests[old]", filepath.Join("manifests[old]", "nested")} {
+		t.Run(directory, func(t *testing.T) {
+			for _, useIgnoreFile := range []bool{true, false} {
+				name := "command line exclusions"
+				if useIgnoreFile {
+					name = "ignore file exclusions"
+				}
+				t.Run(name, func(t *testing.T) {
+					root := filepath.Join(t.TempDir(), directory)
+					require.NoError(t, os.MkdirAll(root, 0o750))
+					manifest := filepath.Join(root, "pod.yaml")
+					require.NoError(t, os.WriteFile(manifest, []byte("kind: Pod\n"), 0o600))
+
+					var patterns []string
+					if useIgnoreFile {
+						writeIgnoreFile(t, root, "/pod.yaml\n")
+					} else {
+						patterns = []string{"/pod.yaml"}
+					}
+					filter, err := NewScanPathFilter(manifest, patterns, useIgnoreFile)
+					require.NoError(t, err)
+					require.NotNil(t, filter)
+					assert.Equal(t, root, filter.Root())
+					assert.True(t, filter.Excluded(manifest, false))
+					assert.False(t, filter.Excluded(filepath.Join(root, "other.yaml"), false))
+				})
+			}
 		})
 	}
 }

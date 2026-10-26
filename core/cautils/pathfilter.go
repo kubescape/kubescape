@@ -316,7 +316,6 @@ func descendantPrefix(rule ignoreRule) string {
 
 // ignoreRoot resolves the directory a scan input is anchored at. A file or a glob is
 // anchored at its parent directory, so patterns stay relative to the same place.
-
 func ignoreRoot(input string) string {
 	if input == "" {
 		return "."
@@ -326,6 +325,11 @@ func ignoreRoot(input string) string {
 	}
 	if isDir(input) {
 		return input
+	}
+	// File discovery treats existing files literally, even when an ancestor's
+	// name contains glob characters. Keep their exclusions at the same parent.
+	if isFile(input) {
+		return filepath.Dir(input)
 	}
 	return literalDir(input)
 }
