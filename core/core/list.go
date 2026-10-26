@@ -47,6 +47,11 @@ func ListSupportActions() []string {
 	return commands
 }
 
+// ListSupportFormats returns the formats supported by the list command.
+func ListSupportFormats() []string {
+	return []string{"pretty-print", "json", "yaml", "csv"}
+}
+
 func (ks *Kubescape) List(listPolicies *metav1.ListPolicies) (*metav1.ListResult, error) {
 	if listPolicies.Target == "controls" {
 		entries, err := listControls(ks.Context(), listPolicies)
@@ -82,6 +87,8 @@ func PrintListResult(ctx context.Context, result *metav1.ListResult, target, for
 	if result == nil {
 		return nil
 	}
+
+	format = strings.ToLower(strings.TrimSpace(format))
 
 	switch target {
 	case "controls":

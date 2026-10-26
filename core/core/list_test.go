@@ -756,3 +756,13 @@ func TestPrintListResult(t *testing.T) {
 		})
 	}
 }
+
+func TestListSupportFormats(t *testing.T) {
+	assert.Equal(t, []string{"pretty-print", "json", "yaml", "csv"}, ListSupportFormats())
+}
+
+func TestPrintListResult_NormalizesFormat(t *testing.T) {
+	result := &metav1.ListResult{Names: []string{"nsa"}}
+	assert.NoError(t, PrintListResult(context.Background(), result, "frameworks", " JSON "))
+	assert.NoError(t, PrintListResult(context.Background(), result, "frameworks", "Pretty-Print"))
+}
