@@ -283,13 +283,17 @@ func (rh *ResultsHandler) HandleResults(ctx context.Context, scanInfo *cautils.S
 	}()
 
 	if rh.ScanData != nil && len(rh.ScanData.VAPPolicies) > 0 {
-		index := vapreconcile.BuildIndex(rh.ScanData.VAPPolicies, rh.ScanData.VAPBindings)
-		vapreconcile.EnrichSummary(rh.ScanData.Report.SummaryDetails.Controls, index)
+		var summary *reportsummary.SummaryDetails
+		if rh.ScanData.Report != nil {
+			summary = &rh.ScanData.Report.SummaryDetails
+			index := vapreconcile.BuildIndex(rh.ScanData.VAPPolicies, rh.ScanData.VAPBindings)
+			vapreconcile.EnrichSummary(rh.ScanData.Report.SummaryDetails.Controls, index)
+		}
 
 		// Refine that coarse per-control Bound signal with per-resource
 		// binding-scope matching, before ApplySeverityFilters below narrows
 		// which resources/controls are considered.
-		failing := vapreconcile.CollectFailingResourcesByControlFromCatalog(rh.ScanData.ResourcesResult, rh.ScanData.GetCatalog())
+		failing := vapreconcile.CollectFailingResourcesByControlFromCatalog(summary, rh.ScanData.ResourcesResult, rh.ScanData.GetCatalog())
 		namespaceLabels := vapreconcile.CollectNamespaceLabelsFromCatalog(rh.ScanData.GetCatalog())
 		rh.ScanData.VAPCoverage = vapreconcile.BuildCoverage(rh.ScanData.VAPPolicies, rh.ScanData.VAPBindings, failing, namespaceLabels)
 	}

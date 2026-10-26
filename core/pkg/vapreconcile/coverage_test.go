@@ -3,8 +3,10 @@ package vapreconcile
 import (
 	"testing"
 
+	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
+	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -381,7 +383,7 @@ func TestCollectFailingResourcesByControl_OnlyIncludesFailedControls(t *testing.
 	}
 	allResources := map[string]workloadinterface.IMetadata{resourceID: wl}
 
-	byControl := CollectFailingResourcesByControl(resourcesResult, allResources)
+	byControl := CollectFailingResourcesByControl(nil, resourcesResult, allResources)
 
 	require.Contains(t, byControl, "C-0001")
 	require.Len(t, byControl["C-0001"], 1)
@@ -494,13 +496,13 @@ func TestCollectFailingResourcesByControlFromCatalog_OnDemandLookup(t *testing.T
 		},
 	}
 
-	byControl := CollectFailingResourcesByControlFromCatalog(resourcesResult, tc)
+	byControl := CollectFailingResourcesByControlFromCatalog(nil, resourcesResult, tc)
 	require.Contains(t, byControl, "C-0001")
 	assert.Equal(t, 1, tc.getCalls[failingWL.GetID()], "failing workload should be retrieved on demand")
 	assert.Equal(t, 0, tc.getCalls[passingWL.GetID()], "passing workload without failures should never be retrieved from catalog")
 
 	// Nil catalog handling
-	assert.Empty(t, CollectFailingResourcesByControlFromCatalog(resourcesResult, nil))
+	assert.Empty(t, CollectFailingResourcesByControlFromCatalog(nil, resourcesResult, nil))
 }
 
 func TestCollectNamespaceLabelsFromCatalog_IteratesNamespaces(t *testing.T) {
@@ -556,4 +558,91 @@ func TestParseSelector_InvalidSelectorReturnsError(t *testing.T) {
 		},
 	})
 	assert.Error(t, err)
+}
+
+func TestCollectFailingResourcesByControl_FrameworkScopedException(t *testing.T) {
+	controlID := "C-0041"
+	otherControlID := "C-0017"
+	workload := workloadinterface.NewWorkloadObj(map[string]any{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata": map[string]any{
+			"name":      "test-app",
+			"namespace": "default",
+		},
+	})
+	resourceID := workload.GetID()
+
+	exceptedRule := resourcesresults.ResourceAssociatedRule{
+		Name:   "rule-1",
+		Status: apis.StatusFailed,
+		Exception: []armotypes.PostureExceptionPolicy{
+			{
+				PortalBase:      armotypes.PortalBase{Name: "nsa-exception"},
+				Actions:         []armotypes.PostureExceptionPolicyActions{armotypes.Disable},
+				PosturePolicies: []armotypes.PosturePolicy{{FrameworkName: "NSA", ControlID: controlID}},
+			},
+		},
+	}
+
+	resourcesResult := map[string]resourcesresults.Result{
+		resourceID: {
+			ResourceID: resourceID,
+			AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+				{
+					ControlID:               controlID,
+					Status:                  apis.StatusInfo{InnerStatus: apis.StatusFailed},
+					ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{exceptedRule},
+				},
+				{
+					ControlID:               otherControlID,
+					Status:                  apis.StatusInfo{InnerStatus: apis.StatusFailed},
+					ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{{Name: "rule-2", Status: apis.StatusFailed}},
+				},
+			},
+		},
+	}
+	allResources := map[string]workloadinterface.IMetadata{resourceID: workload}
+
+	// 1. Scanned with framework "NSA":
+	// The exception applies to C-0041, so C-0041 must NOT include the workload.
+	// C-0017 has no exception, so it MUST include the workload.
+	nsaSummary := &reportsummary.SummaryDetails{
+		Frameworks: []reportsummary.FrameworkSummary{
+			{
+				Name: "NSA",
+				Controls: reportsummary.ControlSummaries{
+					controlID:      reportsummary.ControlSummary{ControlID: controlID},
+					otherControlID: reportsummary.ControlSummary{ControlID: otherControlID},
+				},
+			},
+		},
+	}
+	byControlNSA := CollectFailingResourcesByControl(nsaSummary, resourcesResult, allResources)
+	assert.NotContains(t, byControlNSA, controlID, "excepted control must not be collected as failing")
+	assert.Contains(t, byControlNSA, otherControlID, "unexcepted failing control must still be collected")
+	assert.Len(t, byControlNSA[otherControlID], 1)
+
+	// 2. Scanned with another framework (e.g. "MITRE") where the exception does not apply:
+	// Both controls must include the workload.
+	mitreSummary := &reportsummary.SummaryDetails{
+		Frameworks: []reportsummary.FrameworkSummary{
+			{
+				Name: "MITRE",
+				Controls: reportsummary.ControlSummaries{
+					controlID:      reportsummary.ControlSummary{ControlID: controlID},
+					otherControlID: reportsummary.ControlSummary{ControlID: otherControlID},
+				},
+			},
+		},
+	}
+	byControlMITRE := CollectFailingResourcesByControl(mitreSummary, resourcesResult, allResources)
+	assert.Contains(t, byControlMITRE, controlID, "control without matching exception must be collected as failing")
+	assert.Contains(t, byControlMITRE, otherControlID)
+
+	// 3. Without framework context (summary == nil):
+	// Framework-scoped exception does not apply, so both controls are collected as failing.
+	byControlNil := CollectFailingResourcesByControl(nil, resourcesResult, allResources)
+	assert.Contains(t, byControlNil, controlID)
+	assert.Contains(t, byControlNil, otherControlID)
 }

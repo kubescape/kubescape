@@ -7,6 +7,9 @@ import (
 
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v4/core/pkg/namespaceselector"
+	"github.com/kubescape/opa-utils/reporthandling/apis"
+	helpersv1 "github.com/kubescape/opa-utils/reporthandling/helpers/v1"
+	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -403,20 +406,55 @@ func (m mapResourceCatalog) ForEach(fn func(id string, res workloadinterface.IMe
 	}
 }
 
+func hasException(control *resourcesresults.ResourceAssociatedControl) bool {
+	for i := range control.ResourceAssociatedRules {
+		if len(control.ResourceAssociatedRules[i].Exception) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func controlFilters(summary *reportsummary.SummaryDetails, controlID string) *helpersv1.Filters {
+	filters := &helpersv1.Filters{}
+	if summary == nil {
+		return filters
+	}
+	for i := range summary.Frameworks {
+		framework := &summary.Frameworks[i]
+		if _, ok := framework.Controls[controlID]; ok && framework.GetName() != "" {
+			filters.FrameworkNames = append(filters.FrameworkNames, framework.GetName())
+		}
+	}
+	return filters
+}
+
+// controlStatus returns the effective status of a control in the frameworks of
+// the scan that contain it, matching how the report summary and printers evaluate
+// framework-scoped exceptions. With no summary it falls back to raw status.
+func controlStatus(summary *reportsummary.SummaryDetails, control *resourcesresults.ResourceAssociatedControl) apis.IStatus {
+	if !hasException(control) {
+		return control.GetStatus(nil)
+	}
+	return control.GetStatus(controlFilters(summary, control.GetID()))
+}
+
 // CollectFailingResourcesByControl derives, for every control, the identity
 // (ID, namespace, labels) of each resource that failed it -- the input
 // BuildCoverage needs to check per-resource binding scope, since neither
 // ResourcesResult nor the OPA session tracks that on its own.
 // Maintained for backward compatibility.
 func CollectFailingResourcesByControl(
+	summary *reportsummary.SummaryDetails,
 	resourcesResult map[string]resourcesresults.Result,
 	allResources map[string]workloadinterface.IMetadata,
 ) map[string][]ResourceInfo {
-	return CollectFailingResourcesByControlFromCatalog(resourcesResult, mapResourceCatalog(allResources))
+	return CollectFailingResourcesByControlFromCatalog(summary, resourcesResult, mapResourceCatalog(allResources))
 }
 
 // CollectFailingResourcesByControlFromCatalog derives failing resource identities on demand from catalog.
 func CollectFailingResourcesByControlFromCatalog(
+	summary *reportsummary.SummaryDetails,
 	resourcesResult map[string]resourcesresults.Result,
 	catalog ResourceCatalog,
 ) map[string][]ResourceInfo {
@@ -426,8 +464,8 @@ func CollectFailingResourcesByControlFromCatalog(
 	}
 	for resourceID, result := range resourcesResult {
 		hasFailed := false
-		for _, ac := range result.AssociatedControls {
-			if ac.GetStatus(nil).IsFailed() {
+		for i := range result.AssociatedControls {
+			if controlStatus(summary, &result.AssociatedControls[i]).IsFailed() {
 				hasFailed = true
 				break
 			}
@@ -447,8 +485,9 @@ func CollectFailingResourcesByControlFromCatalog(
 			Namespace:  resource.GetNamespace(),
 			Labels:     resourceLabels(resource),
 		}
-		for _, ac := range result.AssociatedControls {
-			if !ac.GetStatus(nil).IsFailed() {
+		for i := range result.AssociatedControls {
+			ac := &result.AssociatedControls[i]
+			if !controlStatus(summary, ac).IsFailed() {
 				continue
 			}
 			byControl[ac.ControlID] = append(byControl[ac.ControlID], info)
