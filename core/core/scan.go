@@ -215,23 +215,22 @@ func validateSBOMOutput(scanInfo *cautils.ScanInfo, format string) error {
 }
 
 func GetOutputPrinters(scanInfo *cautils.ScanInfo, ctx context.Context, clusterName string) ([]printer.IPrinter, error) {
-	formats := scanInfo.Formats()
+	// Validate every format and check every output path before opening any
+	// writer: SetWriter truncates the file it opens, so a collision found after
+	// an earlier format's writer was set up would already have emptied a report
+	// left there by a previous run.
+	requested := scanInfo.Formats()
+	formats := make([]string, 0, len(requested))
 	containPrettyPrinter := false
-	outputPrinters := make([]printer.IPrinter, 0)
 	resolvedPaths := make(map[string]string)
-	closeConfiguredPrinters := func(setupErr error, additional ...printer.IPrinter) error {
-		printersToClose := append([]printer.IPrinter(nil), outputPrinters...)
-		printersToClose = append(printersToClose, additional...)
-		return errors.Join(setupErr, closePrinters(printersToClose...))
-	}
-	for _, format := range formats {
+	for _, format := range requested {
 		usesPrettyPrinter, err := resultshandling.ValidatePrinter(scanInfo.ScanType, scanInfo.GetScanningContext(), format)
 		if err != nil {
-			return nil, closeConfiguredPrinters(err)
+			return nil, err
 		}
 
 		if err := validateSBOMOutput(scanInfo, format); err != nil {
-			return nil, closeConfiguredPrinters(err)
+			return nil, err
 		}
 
 		if usesPrettyPrinter && containPrettyPrinter {
@@ -240,22 +239,25 @@ func GetOutputPrinters(scanInfo *cautils.ScanInfo, ctx context.Context, clusterN
 
 		if path := resolvedOutputPath(format, scanInfo.Output); path != "" {
 			if existing, collision := resolvedPaths[path]; collision {
-				setupErr := fmt.Errorf("output path collision: formats %q and %q both resolve to %q; specify distinct output paths or use format-specific file extensions", existing, format, path)
-				return nil, closeConfiguredPrinters(setupErr)
+				return nil, fmt.Errorf("output path collision: formats %q and %q both resolve to %q; specify distinct output paths or use format-specific file extensions", existing, format, path)
 			}
 			resolvedPaths[path] = format
 		}
 
-		printerHandler := resultshandling.NewPrinter(ctx, format, scanInfo, clusterName)
-		if err := printerHandler.SetWriter(ctx, scanInfo.Output); err != nil {
-			setupErr := fmt.Errorf("configure %q output: %w", format, err)
-			return nil, closeConfiguredPrinters(setupErr, printerHandler)
-		}
-		outputPrinters = append(outputPrinters, printerHandler)
-
 		if usesPrettyPrinter {
 			containPrettyPrinter = true
 		}
+		formats = append(formats, format)
+	}
+
+	outputPrinters := make([]printer.IPrinter, 0, len(formats))
+	for _, format := range formats {
+		printerHandler := resultshandling.NewPrinter(ctx, format, scanInfo, clusterName)
+		if err := printerHandler.SetWriter(ctx, scanInfo.Output); err != nil {
+			setupErr := fmt.Errorf("configure %q output: %w", format, err)
+			return nil, errors.Join(setupErr, closePrinters(append(outputPrinters, printerHandler)...))
+		}
+		outputPrinters = append(outputPrinters, printerHandler)
 	}
 
 	return outputPrinters, nil
