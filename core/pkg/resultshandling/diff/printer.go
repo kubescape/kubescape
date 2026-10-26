@@ -111,6 +111,10 @@ func severityColor(severity string) func(...string) string {
 		return tableprinterutils.GetColorForVulnerabilitySeverity(apis.SeverityMediumString)
 	case "low":
 		return tableprinterutils.GetColorForVulnerabilitySeverity(apis.SeverityLowString)
+	case "negligible":
+		return tableprinterutils.GetColorForVulnerabilitySeverity(apis.SeverityNegligibleString)
+	case "unknown":
+		return tableprinterutils.GetColorForVulnerabilitySeverity(apis.SeverityUnknownString)
 	default:
 		return tableprinterutils.GetColorForVulnerabilitySeverity(severity)
 	}
