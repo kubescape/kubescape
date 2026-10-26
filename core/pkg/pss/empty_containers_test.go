@@ -8,7 +8,7 @@ import (
 )
 
 func TestEmptyContainerPodSpecsAreUnevaluated(t *testing.T) {
-	for _, kind := range []string{"Pod", "Deployment", "DaemonSet", "StatefulSet", "ReplicaSet", "Job", "CronJob"} {
+	for _, kind := range []string{"Pod", "PodTemplate", "Deployment", "DaemonSet", "StatefulSet", "ReplicaSet", "ReplicationController", "Job", "CronJob"} {
 		for _, tc := range []struct {
 			name string
 			spec map[string]any
@@ -24,6 +24,9 @@ func TestEmptyContainerPodSpecsAreUnevaluated(t *testing.T) {
 				case "Pod":
 					object["apiVersion"] = "v1"
 					object["spec"] = tc.spec
+				case "PodTemplate":
+					object["apiVersion"] = "v1"
+					object["template"] = map[string]any{"spec": tc.spec}
 				case "CronJob":
 					object["spec"] = map[string]any{"jobTemplate": map[string]any{"spec": map[string]any{"template": map[string]any{"spec": tc.spec}}}}
 				default:
