@@ -46,11 +46,13 @@ func GetPatchCmd(ks meta.IKubescape) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			applyRegistryCredentialsFromEnv(cmd, &patchInfo)
 
-			if f := cmd.Flags().Lookup("format"); f != nil && f.Changed && scanInfo.Format == "" {
+			if f := cmd.Flags().Lookup("format"); f != nil && f.Changed && strings.TrimSpace(scanInfo.Format) == "" {
 				return fmt.Errorf("format cannot be empty, supported formats: %s", strings.Join(shared.ImageScanFormats, ", "))
 			}
-			if err := shared.ValidateScanFormat(scanInfo.Format, shared.ImageScanFormats); err != nil {
-				return err
+			if scanInfo.Format != "" {
+				if err := shared.ValidateScanFormat(scanInfo.Format, shared.ImageScanFormats); err != nil {
+					return err
+				}
 			}
 			if err := shared.ValidateImageScanInfo(&scanInfo); err != nil {
 				return err

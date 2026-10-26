@@ -114,9 +114,28 @@ func TestPatchCmd_FormatFlagValidation(t *testing.T) {
 		assert.Contains(t, err.Error(), "pretty-printer")
 	})
 
+	t.Run("accepts_omitted_format", func(t *testing.T) {
+		cmd := GetPatchCmd(mockKubescape)
+		cmd.SetArgs([]string{"--image", "nginx:1.23"})
+		err := cmd.Execute()
+		// Past the format check, execution fails later (no buildkit/registry available
+		// in this test environment) - what matters is the error is NOT a format complaint.
+		if err != nil {
+			assert.NotContains(t, err.Error(), "format")
+		}
+	})
+
 	t.Run("rejects_empty", func(t *testing.T) {
 		cmd := GetPatchCmd(mockKubescape)
 		cmd.SetArgs([]string{"--image", "nginx:1.23", "--format", ""})
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "format cannot be empty")
+	})
+
+	t.Run("rejects_whitespace_empty", func(t *testing.T) {
+		cmd := GetPatchCmd(mockKubescape)
+		cmd.SetArgs([]string{"--image", "nginx:1.23", "--format", "   "})
 		err := cmd.Execute()
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "format cannot be empty")
