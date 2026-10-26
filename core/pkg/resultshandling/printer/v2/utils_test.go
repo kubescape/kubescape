@@ -315,6 +315,64 @@ func TestExtractCVEsLeavesUnmatchedVEXEmpty(t *testing.T) {
 	assert.Empty(t, got[0].VexJustification)
 }
 
+func TestExtractCVEsNilMetadata(t *testing.T) {
+	matches := match.NewMatches(
+		match.Match{
+			Package: pkg.Package{
+				ID:      "1",
+				Name:    "openssl",
+				Version: "1.0.0",
+			},
+			Vulnerability: vulnerability.Vulnerability{
+				Reference: vulnerability.Reference{ID: "CVE-2026-9999"},
+				Metadata:  nil,
+				Fix: vulnerability.Fix{
+					State: vulnerability.FixStateNotFixed,
+				},
+			},
+		},
+		match.Match{
+			Package: pkg.Package{
+				ID:      "2",
+				Name:    "curl",
+				Version: "7.68.0",
+			},
+			Vulnerability: vulnerability.Vulnerability{
+				Reference: vulnerability.Reference{ID: "CVE-2026-1111"},
+				Metadata: &vulnerability.Metadata{
+					ID:             "CVE-2026-1111",
+					Severity:       "High",
+					KnownExploited: []vulnerability.KnownExploited{{CVE: "CVE-2026-1111"}},
+				},
+				Fix: vulnerability.Fix{
+					State: vulnerability.FixStateFixed,
+				},
+			},
+		},
+	)
+
+	got := extractCVEs(matches, "myimage:latest", nil)
+
+	require.Len(t, got, 2)
+	byID := make(map[string]imageprinter.CVE, len(got))
+	for _, cve := range got {
+		byID[cve.ID] = cve
+	}
+
+	nilMetaCVE := byID["CVE-2026-9999"]
+	assert.Equal(t, "CVE-2026-9999", nilMetaCVE.ID)
+	assert.Equal(t, "", nilMetaCVE.Severity)
+	assert.False(t, nilMetaCVE.KEV)
+	assert.Nil(t, nilMetaCVE.EPSS)
+	assert.Equal(t, "openssl", nilMetaCVE.Package)
+	assert.Equal(t, "1.0.0", nilMetaCVE.Version)
+
+	normalCVE := byID["CVE-2026-1111"]
+	assert.Equal(t, "CVE-2026-1111", normalCVE.ID)
+	assert.Equal(t, "High", normalCVE.Severity)
+	assert.True(t, normalCVE.KEV)
+}
+
 func TestSetPkgNameToScoreMap(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -322,6 +380,32 @@ func TestSetPkgNameToScoreMap(t *testing.T) {
 		originalMap map[string]*imageprinter.PackageScore
 		want        map[string]*imageprinter.PackageScore
 	}{
+		{
+			name: "package with nil metadata vulnerability",
+			matches: match.NewMatches([]match.Match{
+				{
+					Package: pkg.Package{
+						ID:      "1",
+						Name:    "foo",
+						Version: "1.2.3",
+					},
+					Vulnerability: vulnerability.Vulnerability{
+						Reference: vulnerability.Reference{ID: "CVE-2026-9999"},
+						Metadata:  nil,
+					},
+				},
+			}...),
+			want: map[string]*imageprinter.PackageScore{
+				"foo@1.2.3": {
+					Name:    "foo",
+					Score:   0,
+					Version: "1.2.3",
+					MapSeverityToCVEsNumber: map[string]int{
+						"": 1,
+					},
+				},
+			},
+		},
 		{
 			name: "single package",
 			matches: match.NewMatches([]match.Match{
@@ -1496,6 +1580,35 @@ func TestBuildImageScanSummary_NilWhenNoBuilt(t *testing.T) {
 
 	require.NotNil(t, summary)
 	assert.Nil(t, summary.VulnDBBuilt)
+}
+
+func TestBuildImageScanSummary_NilMetadata(t *testing.T) {
+	matches := match.NewMatches(match.Match{
+		Package: pkg.Package{
+			ID:      "1",
+			Name:    "zlib",
+			Version: "1.2.11",
+		},
+		Vulnerability: vulnerability.Vulnerability{
+			Reference: vulnerability.Reference{ID: "CVE-2026-5555"},
+			Metadata:  nil,
+		},
+	})
+
+	imageData := []cautils.ImageScanData{
+		{
+			Image:   "zlib-test:latest",
+			Matches: matches,
+		},
+	}
+
+	summary := BuildImageScanSummary(imageData)
+	require.NotNil(t, summary)
+	require.Len(t, summary.CVEs, 1)
+	assert.Equal(t, "CVE-2026-5555", summary.CVEs[0].ID)
+	assert.Equal(t, "", summary.CVEs[0].Severity)
+	assert.Contains(t, summary.PackageScores, "zlib@1.2.11")
+	assert.Equal(t, 0, summary.PackageScores["zlib@1.2.11"].Score)
 }
 
 // TestPathValue_EmptyValueIsSerialized guards against Value carrying
