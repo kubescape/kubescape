@@ -2,6 +2,7 @@ package cautils
 
 import (
 	"encoding/json"
+	"os"
 	"github.com/jwalton/gchalk"
 	"testing"
 
@@ -257,6 +258,12 @@ func TestFormatConfigFieldOutput(t *testing.T) {
 }
 
 func TestFormatConfigOutputText_WithColor(t *testing.T) {
+	if orig, ok := os.LookupEnv("NO_COLOR"); ok {
+		os.Unsetenv("NO_COLOR")
+		t.Cleanup(func() {
+			_ = os.Setenv("NO_COLOR", orig)
+		})
+	}
 	t.Setenv("FORCE_COLOR", "1")
 	prevLevel := gchalk.GetLevel()
 	gchalk.SetLevel(gchalk.LevelAnsi16m)
@@ -308,6 +315,12 @@ func TestFormatConfigOutputText_NoColorPrecedence(t *testing.T) {
 }
 
 func TestFormatConfigOutput_ExportPathsHaveZeroANSI(t *testing.T) {
+	if orig, ok := os.LookupEnv("NO_COLOR"); ok {
+		os.Unsetenv("NO_COLOR")
+		t.Cleanup(func() {
+			_ = os.Setenv("NO_COLOR", orig)
+		})
+	}
 	t.Setenv("FORCE_COLOR", "1")
 	prevLevel := gchalk.GetLevel()
 	gchalk.SetLevel(gchalk.LevelAnsi16m)
@@ -327,4 +340,28 @@ func TestFormatConfigOutput_ExportPathsHaveZeroANSI(t *testing.T) {
 	yamlOut, err := FormatConfigOutput(cfg, "yaml", true)
 	require.NoError(t, err)
 	assert.NotContains(t, string(yamlOut), "\x1b[", "YAML output must have zero ANSI codes")
+}
+
+func TestFormatConfigOutputText_EmptyNoColorTreatedAsUnset(t *testing.T) {
+	if orig, ok := os.LookupEnv("NO_COLOR"); ok {
+		t.Cleanup(func() {
+			_ = os.Setenv("NO_COLOR", orig)
+		})
+	}
+	t.Setenv("NO_COLOR", "")
+	t.Setenv("FORCE_COLOR", "1")
+	prevLevel := gchalk.GetLevel()
+	gchalk.SetLevel(gchalk.LevelAnsi16m)
+	defer gchalk.SetLevel(prevLevel)
+
+	cfg := &ConfigObj{
+		AccountID: "account-123",
+	}
+
+	output, err := FormatConfigOutput(cfg, "text", false)
+	require.NoError(t, err)
+
+	outStr := string(output)
+	assert.Contains(t, outStr, gchalk.WithBrightCyan().Bold("accountID"))
+	assert.Contains(t, outStr, gchalk.BrightWhite("account-123"))
 }
