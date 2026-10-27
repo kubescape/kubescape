@@ -122,11 +122,13 @@ func (ks *Kubescape) Fix(fixInfo *metav1.FixInfo) error {
 		}
 
 		if fixInfo.PostRendererDir != "" {
-			if err := fixhandler.EmitPostRenderer(fixInfo.KustomizeDir, fixInfo.PostRendererDir); err != nil {
-				logger.L().Error("failed to write post-renderer scripts", helpers.Error(err))
-				return fmt.Errorf("failed to write post-renderer scripts: %w", err)
-			}
-			if emitRes != nil && len(emitRes.EmittedResources) > 0 {
+			if emitRes == nil || len(emitRes.EmittedResources) == 0 {
+				logger.L().Warning("--output-post-renderer: no Kustomize patches were emitted; skipping post-renderer script emission")
+			} else {
+				if err := fixhandler.EmitPostRenderer(fixInfo.KustomizeDir, fixInfo.PostRendererDir); err != nil {
+					logger.L().Error("failed to write post-renderer scripts", helpers.Error(err))
+					return fmt.Errorf("failed to write post-renderer scripts: %w", err)
+				}
 				logger.L().Info(fmt.Sprintf(
 					"Helm post-renderer script written to %q\n  Apply with: helm install <release> <chart> --post-renderer %s/renderer.sh",
 					fixInfo.PostRendererDir, fixInfo.PostRendererDir,

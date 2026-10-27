@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/armosec/armoapi-go/armotypes"
+	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/stretchr/testify/assert"
@@ -4514,6 +4515,33 @@ dependencies:
 	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "Chart.yaml"), []byte(validChartYaml), 0600))
 	err = verifyChartDependenciesContainment(chartDir, allowedBase)
 	require.NoError(t, err, "in-tree file:// dependency must pass containment verification")
+
+	// Absolute outside dependency must be rejected
+	absOutsideChartYaml := fmt.Sprintf(`apiVersion: v2
+name: my-chart
+version: 0.1.0
+dependencies:
+  - name: outside-subchart
+    version: 0.1.0
+    repository: "file://%s"
+`, outsideDep)
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "Chart.yaml"), []byte(absOutsideChartYaml), 0600))
+	err = verifyChartDependenciesContainment(chartDir, allowedBase)
+	require.Error(t, err, "absolute file:// dependency pointing outside allowed base path must be rejected")
+	assert.Contains(t, err.Error(), "outside allowed base path")
+
+	// Absolute inside dependency must pass
+	absInsideChartYaml := fmt.Sprintf(`apiVersion: v2
+name: my-chart
+version: 0.1.0
+dependencies:
+  - name: in-tree-subchart
+    version: 0.1.0
+    repository: "file://%s"
+`, inTreeDep)
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "Chart.yaml"), []byte(absInsideChartYaml), 0600))
+	err = verifyChartDependenciesContainment(chartDir, allowedBase)
+	require.NoError(t, err, "absolute file:// dependency inside allowed base path must pass containment verification")
 }
 
 // TestKustomize_ClusterRoleAndNamespacelessServiceMatching verifies that cluster-scoped
@@ -4596,11 +4624,79 @@ func TestKustomize_ClusterRoleAndNamespacelessServiceMatching(t *testing.T) {
 	require.NoError(t, yaml.Unmarshal(kustData, &kust))
 	require.Len(t, kust.Patches, 2)
 
+	seen := map[string]bool{}
 	for _, p := range kust.Patches {
-		if p.Target.Kind == "^ClusterRole$" {
+		seen[p.Target.Kind] = true
+		switch p.Target.Kind {
+		case "ClusterRole":
 			assert.Empty(t, p.Target.Namespace, "ClusterRole target must have empty namespace")
-		} else if p.Target.Kind == "^Service$" {
+		case "Service":
 			assert.Equal(t, "default", p.Target.Namespace, "Namespaceless Service target must default to default namespace")
 		}
 	}
+	assert.True(t, seen["ClusterRole"] && seen["Service"], "both targets must be present")
+}
+
+// TestKustomize_LoadUnredactedFromChart_ReleaseNamespaceMatching tests that loadUnredactedFromChart
+// correctly matches when target is in ReleaseNamespace and candidate omits metadata.namespace.
+func TestKustomize_LoadUnredactedFromChart_ReleaseNamespaceMatching(t *testing.T) {
+	chartDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "Chart.yaml"), []byte("apiVersion: v2\nname: testchart\nversion: 0.1.0\n"), 0600))
+	require.NoError(t, os.MkdirAll(filepath.Join(chartDir, "templates"), 0700))
+
+	// Template omits metadata.namespace
+	depYaml := `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: namespaceless-app
+spec:
+  template:
+    spec:
+      containers:
+        - name: app
+          image: nginx:latest
+`
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "templates", "deployment.yaml"), []byte(depYaml), 0600))
+
+	// Target resource has namespace "staging"
+	targetObj := map[string]interface{}{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata": map[string]interface{}{
+			"name":      "namespaceless-app",
+			"namespace": "staging",
+		},
+	}
+	targetRes := reporthandling.Resource{
+		Object: targetObj,
+		Source: &reporthandling.Source{FileType: reporthandling.SourceTypeHelmChart},
+	}
+
+	// 1. ReleaseNamespace matches target namespace ("staging") -> candidate matches
+	s1 := HelmFixSuggestion{
+		Resource:        &targetRes,
+		ChartPath:       chartDir,
+		AllowedBasePath: chartDir,
+		HelmValueOptions: cautils.HelmValueOptions{
+			ReleaseNamespace: "staging",
+		},
+	}
+	chartCache := make(map[string]map[string][]workloadinterface.IMetadata)
+	matched, err := loadUnredactedFromChart(s1, chartCache)
+	require.NoError(t, err, "candidate with omitted namespace must match target in ReleaseNamespace")
+	require.NotNil(t, matched)
+	assert.Equal(t, "namespaceless-app", matched["metadata"].(map[string]interface{})["name"])
+
+	// 2. ReleaseNamespace does not match target namespace ("production" != "staging") -> match fails
+	s2 := HelmFixSuggestion{
+		Resource:        &targetRes,
+		ChartPath:       chartDir,
+		AllowedBasePath: chartDir,
+		HelmValueOptions: cautils.HelmValueOptions{
+			ReleaseNamespace: "production",
+		},
+	}
+	_, err = loadUnredactedFromChart(s2, chartCache)
+	require.Error(t, err, "candidate must not match when ReleaseNamespace differs from target namespace")
+	assert.Contains(t, err.Error(), "not found in rendered chart")
 }

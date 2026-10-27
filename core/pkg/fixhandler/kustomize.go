@@ -1036,7 +1036,16 @@ func verifyChartDependenciesContainment(chartDir, allowedBasePath string) error 
 	for _, dep := range meta.Dependencies {
 		if strings.HasPrefix(dep.Repository, "file://") {
 			relPath := strings.TrimPrefix(dep.Repository, "file://")
-			targetPath := filepath.Join(chartDir, relPath)
+			targetPath := relPath
+			if strings.HasPrefix(relPath, "/") {
+				var absErr error
+				targetPath, absErr = filepath.Abs(relPath)
+				if absErr != nil {
+					return fmt.Errorf("failed to resolve chart dependency %q: %w", dep.Name, absErr)
+				}
+			} else {
+				targetPath = filepath.Join(chartDir, relPath)
+			}
 			resolvedTarget, err := filepath.EvalSymlinks(targetPath)
 			if err != nil || !isPathContained(resolvedAllowedBase, resolvedTarget) {
 				return fmt.Errorf("chart dependency %q references repository %q outside allowed base path %q", dep.Name, dep.Repository, allowedBasePath)
@@ -1193,11 +1202,14 @@ func loadUnredactedFromChart(s HelmFixSuggestion, chartCache map[string]map[stri
 			if isClusterScoped {
 				// Cluster-scoped resources match on GVK + Name; namespace is ignored.
 			} else {
-				// Namespaced resources: exact namespace match, or candidate matching ReleaseNamespace when target namespace is empty.
-				if candNamespace != targetNamespace {
-					if targetNamespace != "" || s.HelmValueOptions.ReleaseNamespace == "" || candNamespace != s.HelmValueOptions.ReleaseNamespace {
-						continue
-					}
+				namespaceMatch := candNamespace == targetNamespace
+				if !namespaceMatch && s.HelmValueOptions.ReleaseNamespace != "" {
+					namespaceMatch =
+						(targetNamespace == "" && candNamespace == s.HelmValueOptions.ReleaseNamespace) ||
+							(candNamespace == "" && targetNamespace == s.HelmValueOptions.ReleaseNamespace)
+				}
+				if !namespaceMatch {
+					continue
 				}
 			}
 
@@ -1500,8 +1512,9 @@ func EmitKustomizePatch(suggestions []HelmFixSuggestion, dir string) (*Kustomize
 		baseContent = append(baseContent, p.baseDoc...)
 	}
 
-	// Create an isolated staging directory inside dir to guarantee atomic output.
-	// If any write or validation fails, stagingDir is wiped and dir remains pristine.
+	// Create an isolated staging directory inside dir before promotion.
+	// Staging protects the destination from write and validation failures before promotion.
+	// If any write or verification fails, stagingDir is wiped without modifying destination files.
 	stagingDir, err := os.MkdirTemp(dir, ".kust-staging-")
 	if err != nil {
 		return nil, fmt.Errorf("failed to create staging directory in %q: %w", dir, err)

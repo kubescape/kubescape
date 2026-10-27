@@ -4,7 +4,23 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
+
+// shQuote escapes a string for safe usage in POSIX shells (bash) by wrapping in single quotes
+// and escaping existing single quotes as '\”.
+func shQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// batEscape escapes % and ! for Windows cmd batch scripts when enabledelayedexpansion is active.
+func batEscape(s string) string {
+	// In batch files, % must be escaped as %% to avoid variable expansion.
+	s = strings.ReplaceAll(s, "%", "%%")
+	// With enabledelayedexpansion active, ! must be escaped as ^^! so that it survives both parse phases.
+	s = strings.ReplaceAll(s, "!", "^^!")
+	return s
+}
 
 // EmitPostRenderer writes executable Helm post-renderer scripts (POSIX bash and Windows batch)
 // into outputDir. The script accepts Helm-rendered manifests on stdin, pipes them through Kustomize
@@ -40,14 +56,14 @@ func EmitPostRenderer(kustomizeDir, outputDir string) error {
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-KUST_DIR=%q
+KUST_DIR=%s
 
 # If KUST_DIR is not found at original absolute path, check relative to this script
 if [ ! -d "$KUST_DIR" ]; then
   if [ -f "$SCRIPT_DIR/kustomization.yaml" ]; then
     KUST_DIR="$SCRIPT_DIR"
-  elif [ -d "$SCRIPT_DIR/%s" ]; then
-    KUST_DIR="$SCRIPT_DIR/%s"
+  elif [ -d "$SCRIPT_DIR"/%s ]; then
+    KUST_DIR="$SCRIPT_DIR"/%s
   fi
 fi
 
@@ -77,11 +93,14 @@ if [ -f "$KUST_DIR/kustomization.yaml" ]; then
   sed -n '/^patches:/,$p' "$KUST_DIR/kustomization.yaml" >> "$WORK_DIR/kustomization.yaml"
   # Copy patch files into the isolated workspace
   find "$KUST_DIR" -maxdepth 1 \( -name "*.yaml" -o -name "*.json" \) ! -name "base.yaml" ! -name "kustomization.yaml" -exec cp {} "$WORK_DIR/" \;
+else
+  echo "[error] kustomization.yaml not found in $KUST_DIR; refusing to emit unpatched manifests" >&2
+  exit 1
 fi
 
 # Execute kustomize build and emit remediated YAML directly to stdout
 kustomize build "$WORK_DIR"
-`, outputDir, cleanKustDir, kustBaseName, kustBaseName)
+`, outputDir, shQuote(cleanKustDir), shQuote(kustBaseName), shQuote(kustBaseName))
 
 	shPath := filepath.Join(outputDir, "renderer.sh")
 	if err := os.WriteFile(shPath, []byte(shContent), 0755); err != nil {
@@ -116,7 +135,17 @@ mkdir "!WORK_DIR!" >nul 2>nul
 REM Stream stdin to all.yaml
 findstr "^" > "!WORK_DIR!\all.yaml"
 
-REM Construct transient kustomization.yaml
+if not exist "!KUST_DIR!\kustomization.yaml" (
+  echo [error] kustomization.yaml not found in !KUST_DIR!; refusing to emit unpatched manifests >&2
+  rd /s /q "!WORK_DIR!" >nul 2>nul
+  exit /b 1
+)
+
+copy /y "!KUST_DIR!\*.yaml" "!WORK_DIR!\" >nul 2>nul
+copy /y "!KUST_DIR!\*.json" "!WORK_DIR!\" >nul 2>nul
+del /q "!WORK_DIR!\base.yaml" >nul 2>nul
+
+REM Construct transient kustomization.yaml (after copy so all.yaml reference is not overwritten)
 (
 echo apiVersion: kustomize.config.k8s.io/v1beta1
 echo kind: Kustomization
@@ -124,19 +153,14 @@ echo resources:
 echo   - all.yaml
 ) > "!WORK_DIR!\kustomization.yaml"
 
-if exist "!KUST_DIR!\kustomization.yaml" (
-  copy /y "!KUST_DIR!\*.yaml" "!WORK_DIR!\" >nul 2>nul
-  copy /y "!KUST_DIR!\*.json" "!WORK_DIR!\" >nul 2>nul
-  del /q "!WORK_DIR!\base.yaml" >nul 2>nul
-  powershell -NoProfile -Command "Get-Content '!KUST_DIR!\kustomization.yaml' | Select-String -Pattern '^patches:' -Context 0, 10000 | ForEach-Object { $_.Line; $_.Context.PostContext } | Add-Content '!WORK_DIR!\kustomization.yaml'" >nul 2>nul
-)
+powershell -NoProfile -Command "Get-Content '!KUST_DIR!\kustomization.yaml' | Select-String -Pattern '^patches:' -Context 0, 10000 | ForEach-Object { $_.Line; $_.Context.PostContext } | Add-Content '!WORK_DIR!\kustomization.yaml'" >nul 2>nul
 
 kustomize build "!WORK_DIR!"
 set EXIT_CODE=%%ERRORLEVEL%%
 
 rd /s /q "!WORK_DIR!" >nul 2>nul
 exit /b %%EXIT_CODE%%
-`, cleanKustDir, kustBaseName, kustBaseName)
+`, batEscape(cleanKustDir), batEscape(kustBaseName), batEscape(kustBaseName))
 
 	batPath := filepath.Join(outputDir, "renderer.bat")
 	if err := os.WriteFile(batPath, []byte(batContent), 0755); err != nil {

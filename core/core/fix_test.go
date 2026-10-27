@@ -1318,3 +1318,31 @@ func TestFix_OutputPostRendererSuccess(t *testing.T) {
 	assert.Contains(t, logs, "Helm post-renderer script written to")
 	assert.Contains(t, logs, "--post-renderer")
 }
+
+// TestFix_OutputPostRendererSkippedWhenNoPatchesEmitted verifies that specifying
+// both --output-kustomize and --output-post-renderer skips script emission and logs
+// a warning when no Kustomize patches are emitted (e.g. when all resources are declined).
+func TestFix_OutputPostRendererSkippedWhenNoPatchesEmitted(t *testing.T) {
+	dir := t.TempDir()
+	reportPath := buildFixableContainerHelmReport(t, dir)
+	kustDir := filepath.Join(t.TempDir(), "kust-output")
+	postDir := filepath.Join(t.TempDir(), "post-output")
+
+	readLog := captureLoggerOutput(t)
+
+	ks := &Kubescape{Ctx: context.Background()}
+	err := ks.Fix(&metav1.FixInfo{
+		ReportFile:      reportPath,
+		KustomizeDir:    kustDir,
+		PostRendererDir: postDir,
+		HelmValueOptions: cautils.HelmValueOptions{
+			ValueFiles: []string{filepath.Join(dir, "values.yaml")},
+		},
+	})
+	require.NoError(t, err)
+
+	logs := readLog()
+	assert.Contains(t, logs, "--output-post-renderer: no Kustomize patches were emitted; skipping post-renderer script emission")
+	assert.NoFileExists(t, filepath.Join(postDir, "renderer.sh"))
+	assert.NoFileExists(t, filepath.Join(postDir, "renderer.bat"))
+}
