@@ -4,7 +4,10 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"net"
 	"net/url"
+	"path"
+	"slices"
 	"strings"
 
 	"github.com/distribution/reference"
@@ -47,7 +50,7 @@ func resolveRegistryCredentials(ctx context.Context, k8sApi *k8sinterface.Kubern
 	if err != nil {
 		return imagescan.RegistryCredentials{}, false
 	}
-	domain := reference.Domain(ref)
+	domain, repository := reference.Domain(ref), reference.Path(ref)
 
 	for _, secretRef := range imagePullSecrets {
 		secret, err := k8sApi.KubernetesClient.CoreV1().Secrets(namespace).Get(ctx, secretRef.Name, metav1.GetOptions{})
@@ -60,7 +63,7 @@ func resolveRegistryCredentials(ctx context.Context, k8sApi *k8sinterface.Kubern
 		if dockerConfigJSON, ok := secret.Data[".dockerconfigjson"]; ok {
 			var cfg dockerConfig
 			if err := json.Unmarshal(dockerConfigJSON, &cfg); err == nil {
-				if creds, found := extractCredsFromAuths(cfg.Auths, domain); found {
+				if creds, found := extractCredsFromAuths(cfg.Auths, domain, repository); found {
 					return creds, true
 				}
 			}
@@ -70,7 +73,7 @@ func resolveRegistryCredentials(ctx context.Context, k8sApi *k8sinterface.Kubern
 		if dockerCfg, ok := secret.Data[".dockercfg"]; ok {
 			var auths map[string]dockerAuthConfig
 			if err := json.Unmarshal(dockerCfg, &auths); err == nil {
-				if creds, found := extractCredsFromAuths(auths, domain); found {
+				if creds, found := extractCredsFromAuths(auths, domain, repository); found {
 					return creds, true
 				}
 			}
@@ -80,51 +83,120 @@ func resolveRegistryCredentials(ctx context.Context, k8sApi *k8sinterface.Kubern
 	return imagescan.RegistryCredentials{}, false
 }
 
-func normalizeRegistry(registry string) string {
-	if !strings.HasPrefix(registry, "http://") && !strings.HasPrefix(registry, "https://") {
-		registry = "https://" + registry
+// registryKey is a docker config "auths" key, normalized the way the kubelet
+// keyring normalizes it (BasicDockerKeyring.Add in Kubernetes'
+// pkg/credentialprovider/keyring.go): the scheme is dropped and a leading
+// /v1/ or /v2/ API path is ignored. The Docker Hub host aliases also become
+// docker.io, the domain reference.Domain reports for Docker Hub images.
+type registryKey struct {
+	raw  string
+	host string
+	path string
+}
+
+func parseRegistryKey(raw string) (registryKey, bool) {
+	key := raw
+	if !strings.HasPrefix(key, "http://") && !strings.HasPrefix(key, "https://") {
+		key = "https://" + key
 	}
-	u, err := url.Parse(registry)
-	if err != nil {
-		return ""
+	u, err := url.Parse(key)
+	if err != nil || u.Host == "" {
+		return registryKey{}, false
 	}
 	host := u.Host
 	if host == "registry-1.docker.io" || host == "index.docker.io" {
 		host = "docker.io"
 	}
-	return host
+	keyPath := u.Path
+	if strings.HasPrefix(keyPath, "/v1/") || strings.HasPrefix(keyPath, "/v2/") {
+		keyPath = keyPath[3:]
+	}
+	if keyPath == "/" {
+		keyPath = ""
+	}
+	return registryKey{raw: raw, host: host, path: keyPath}, true
 }
 
-func extractCredsFromAuths(auths map[string]dockerAuthConfig, domain string) (imagescan.RegistryCredentials, bool) {
-	for registry, auth := range auths {
-		normRegistry := normalizeRegistry(registry)
-		if normRegistry == domain {
-			creds := imagescan.RegistryCredentials{
-				Authority: normRegistry,
-				Username:  auth.Username,
-				Password:  auth.Password,
-			}
-			if auth.Auth != "" {
-				// auth is base64 encoded username:password. sometimes it's used as token, but actually syft expects username/password if present, or token
-				// Let's decode if username and password are empty
-				if auth.Username == "" && auth.Password == "" {
-					decoded, err := base64.StdEncoding.DecodeString(auth.Auth)
-					if err == nil {
-						parts := strings.SplitN(string(decoded), ":", 2)
-						if len(parts) == 2 {
-							creds.Username = parts[0]
-							creds.Password = parts[1]
-						} else {
-							creds.Token = auth.Auth
-						}
+// matches reports whether the key applies to an image in repository on the
+// registry domain, following URLsMatch in the kubelet keyring: the hosts must
+// have the same number of labels, each key label is a glob pattern for the
+// matching domain label (so "*.example.com" covers "registry.example.com"),
+// the ports must be equal, and the repository path must start with the key's
+// path (so "registry.example.com/team" covers "registry.example.com/team/app").
+func (k registryKey) matches(domain, repository string) bool {
+	keyLabels, keyPort := splitRegistryHost(k.host)
+	domainLabels, domainPort := splitRegistryHost(domain)
+	if keyPort != domainPort || len(keyLabels) != len(domainLabels) {
+		return false
+	}
+	if !strings.HasPrefix("/"+repository, k.path) {
+		return false
+	}
+	for i, pattern := range keyLabels {
+		if matched, err := path.Match(pattern, domainLabels[i]); err != nil || !matched {
+			return false
+		}
+	}
+	return true
+}
+
+func splitRegistryHost(hostport string) (labels []string, port string) {
+	host, port, err := net.SplitHostPort(hostport)
+	if err != nil {
+		host, port = hostport, ""
+	}
+	return strings.Split(host, "."), port
+}
+
+// extractCredsFromAuths returns the first usable credentials among the auths
+// entries that apply to an image in repository on the registry domain. Like
+// the kubelet, it tries the matching keys in reverse lexical order, so a key
+// scoped to a repository path is tried before the bare registry host and a
+// literal host before a wildcard one. The order is deterministic even when
+// several keys match.
+func extractCredsFromAuths(auths map[string]dockerAuthConfig, domain, repository string) (imagescan.RegistryCredentials, bool) {
+	keys := make([]registryKey, 0, len(auths))
+	for raw := range auths {
+		if key, ok := parseRegistryKey(raw); ok && key.matches(domain, repository) {
+			keys = append(keys, key)
+		}
+	}
+	slices.SortFunc(keys, func(a, b registryKey) int {
+		if c := strings.Compare(b.host+b.path, a.host+a.path); c != 0 {
+			return c
+		}
+		return strings.Compare(a.raw, b.raw)
+	})
+
+	for _, key := range keys {
+		auth := auths[key.raw]
+		creds := imagescan.RegistryCredentials{
+			// The scanner matches credentials to the registry an image is
+			// pulled from, so a wildcard key must not become the authority.
+			Authority: domain,
+			Username:  auth.Username,
+			Password:  auth.Password,
+		}
+		if auth.Auth != "" {
+			// auth is base64 encoded username:password. sometimes it's used as token, but actually syft expects username/password if present, or token
+			// Let's decode if username and password are empty
+			if auth.Username == "" && auth.Password == "" {
+				decoded, err := base64.StdEncoding.DecodeString(auth.Auth)
+				if err == nil {
+					parts := strings.SplitN(string(decoded), ":", 2)
+					if len(parts) == 2 {
+						creds.Username = parts[0]
+						creds.Password = parts[1]
 					} else {
 						creds.Token = auth.Auth
 					}
+				} else {
+					creds.Token = auth.Auth
 				}
 			}
-			if creds.Token != "" || (creds.Username != "" && creds.Password != "") {
-				return creds, true
-			}
+		}
+		if creds.Token != "" || (creds.Username != "" && creds.Password != "") {
+			return creds, true
 		}
 	}
 	return imagescan.RegistryCredentials{}, false
