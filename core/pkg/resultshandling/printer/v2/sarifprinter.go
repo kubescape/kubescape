@@ -227,7 +227,9 @@ func sarifEvidenceIdentity(ac *resourcesresults.ResourceAssociatedControl) []sar
 	}
 	fragments := make([]sarifEvidenceFragment, 0, len(ac.ResourceAssociatedRules))
 	for _, rule := range ac.ResourceAssociatedRules {
-		if !rule.GetStatus(nil).IsFailed() {
+		// The caller has already selected effective evidence for this control.
+		// A framework-agnostic recheck can lose correlated failing rules.
+		if rule.Status != apis.StatusFailed {
 			continue
 		}
 		fragment := sarifEvidenceFragment{
