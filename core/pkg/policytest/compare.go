@@ -25,7 +25,11 @@ func normalize(responses []reporthandling.RuleResponse) []reporthandling.RuleRes
 		sort.Strings(out[i].ReviewPaths)
 		sort.Strings(out[i].DeletePaths)
 		sort.Slice(out[i].FixPaths, func(a, b int) bool {
-			return out[i].FixPaths[a].Path < out[i].FixPaths[b].Path
+			left, right := out[i].FixPaths[a], out[i].FixPaths[b]
+			if left.Path != right.Path {
+				return left.Path < right.Path
+			}
+			return left.Value < right.Value
 		})
 		// A nil slice and an empty slice both mean "no k8s objects"; the
 		// evaluator and expected.json fixtures don't agree on which one they

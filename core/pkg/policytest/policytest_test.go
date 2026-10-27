@@ -2,7 +2,10 @@ package policytest
 
 import (
 	"context"
+	"encoding/json"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/armosec/armoapi-go/armotypes"
@@ -135,4 +138,58 @@ func TestCompare_TiedOnPathsDistinguishedByFixPaths(t *testing.T) {
 	got := []reporthandling.RuleResponse{y, x}
 
 	assert.Empty(t, Compare(got, want), "reversed order of responses tied on paths but distinct FixPaths must still compare equal")
+}
+
+// TestCompareFixPathsWithSamePath verifies that values break path-order ties without hiding real differences or duplicate counts.
+func TestCompareFixPathsWithSamePath(t *testing.T) {
+	first := armotypes.FixPath{Path: "spec.mode", Value: "first"}
+	second := armotypes.FixPath{Path: "spec.mode", Value: "second"}
+	tests := []struct {
+		name  string
+		got   []armotypes.FixPath
+		want  []armotypes.FixPath
+		equal bool
+	}{
+		{name: "reversed values", got: []armotypes.FixPath{second, first}, want: []armotypes.FixPath{first, second}, equal: true},
+		{name: "reordered duplicates", got: []armotypes.FixPath{second, first, first}, want: []armotypes.FixPath{first, second, first}, equal: true},
+		{name: "changed value", got: []armotypes.FixPath{first}, want: []armotypes.FixPath{second}},
+		{name: "missing duplicate", got: []armotypes.FixPath{first, second}, want: []armotypes.FixPath{first, first, second}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := []reporthandling.RuleResponse{{AssistedRemediation: reporthandling.AssistedRemediation{FixPaths: tt.got}}}
+			want := []reporthandling.RuleResponse{{AssistedRemediation: reporthandling.AssistedRemediation{FixPaths: tt.want}}}
+			assert.Equal(t, tt.equal, Compare(got, want) == "")
+		})
+	}
+}
+
+// TestRunRuleIgnoresFixPathValueOrder exercises real evaluation and fixture updates when equal-path fixes are reordered.
+func TestRunRuleIgnoresFixPathValueOrder(t *testing.T) {
+	rule := scaffoldedRuleUnderTest(t)
+	c := caseByName(t, rule, flaggedCaseName)
+	rule.Rule.Rule = strings.Replace(rule.Rule.Rule, `"fixPaths": [],`, `"fixPaths": [{"path": "spec.mode", "value": "first"}, {"path": "spec.mode", "value": "second"}],`, 1)
+
+	responses, err := EvaluateCase(context.Background(), rule, c)
+	require.NoError(t, err)
+	require.Len(t, responses, 1)
+	require.Len(t, responses[0].FixPaths, 2)
+	responses[0].FixPaths[0], responses[0].FixPaths[1] = responses[0].FixPaths[1], responses[0].FixPaths[0]
+	expected, err := json.MarshalIndent(responses, "", "  ")
+	require.NoError(t, err)
+	expectedPath := filepath.Join(c.Dir, expectedFileName)
+	require.NoError(t, os.WriteFile(expectedPath, expected, 0o600))
+
+	for _, result := range RunRule(context.Background(), rule) {
+		require.NoError(t, result.Err)
+		assert.True(t, result.Passed, "case %s: %s", result.CaseName, result.Diff)
+	}
+	responses, err = EvaluateCase(context.Background(), rule, c)
+	require.NoError(t, err)
+	changed, err := WriteExpected(c, responses)
+	require.NoError(t, err)
+	assert.False(t, changed, "reordering equal-path fixes must not rewrite expected.json")
+	actual, err := os.ReadFile(expectedPath)
+	require.NoError(t, err)
+	assert.Equal(t, string(expected), string(actual))
 }
