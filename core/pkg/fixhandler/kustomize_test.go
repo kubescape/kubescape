@@ -4708,3 +4708,62 @@ spec:
 	require.Error(t, err, "candidate must not match when ReleaseNamespace differs from target namespace")
 	assert.Contains(t, err.Error(), "not found in rendered chart")
 }
+
+// TestKustomize_HasEmittableKustomizePatches verifies that HasEmittableKustomizePatches
+// correctly differentiates emittable suggestions from declined or empty ones.
+func TestKustomize_HasEmittableKustomizePatches(t *testing.T) {
+	assert.False(t, HasEmittableKustomizePatches(nil), "nil suggestions must return false")
+	assert.False(t, HasEmittableKustomizePatches([]HelmFixSuggestion{}), "empty suggestions must return false")
+
+	// Nil resource or no fix paths
+	assert.False(t, HasEmittableKustomizePatches([]HelmFixSuggestion{
+		{Resource: nil},
+	}))
+
+	deploy := makeResource("Deployment", "app1")
+	assert.False(t, HasEmittableKustomizePatches([]HelmFixSuggestion{
+		{Resource: deploy, FixPaths: nil},
+	}))
+
+	// Resource declined (no provenance or unredacted base)
+	assert.False(t, HasEmittableKustomizePatches([]HelmFixSuggestion{
+		{
+			Resource: deploy,
+			FixPaths: []armotypes.FixPath{{Path: "spec.replicas", Value: "2"}},
+		},
+	}))
+
+	// Resource with fidelity provenance is emittable
+	assert.True(t, HasEmittableKustomizePatches([]HelmFixSuggestion{
+		{
+			Resource:           deploy,
+			FidelityProvenance: true,
+			UnredactedBase:     deepCopyMap(deploy.GetObject()),
+			FixPaths:           []armotypes.FixPath{{Path: "spec.replicas", Value: "2"}},
+		},
+	}))
+}
+
+// TestKustomize_RestoreBackups verifies that restoreBackups correctly restores files
+// and returns errors when destination files already exist.
+func TestKustomize_RestoreBackups(t *testing.T) {
+	backupDir := t.TempDir()
+	dstDir := t.TempDir()
+
+	require.NoError(t, os.WriteFile(filepath.Join(backupDir, "base.yaml"), []byte("BACKUP_BASE"), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(backupDir, "kustomization.yaml"), []byte("BACKUP_KUST"), 0600))
+
+	// Clean destination: both files restored
+	err := restoreBackups(backupDir, dstDir)
+	require.NoError(t, err)
+
+	data, err := os.ReadFile(filepath.Join(dstDir, "base.yaml"))
+	require.NoError(t, err)
+	assert.Equal(t, "BACKUP_BASE", string(data))
+
+	// Destination already has base.yaml: returns error
+	require.NoError(t, os.WriteFile(filepath.Join(backupDir, "base.yaml"), []byte("NEW_BACKUP"), 0600))
+	err = restoreBackups(backupDir, dstDir)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "destination exists")
+}

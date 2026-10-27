@@ -1347,10 +1347,32 @@ func TestFix_OutputPostRendererSkippedWhenNoPatchesEmitted(t *testing.T) {
 	assert.NoFileExists(t, filepath.Join(postDir, "renderer.bat"))
 }
 
-// TestFix_OutputKustomizeNonInteractiveRefusesOverwriteWithoutNoConfirm verifies that
-// when Kustomize files already exist, stdin is not a terminal, and --no-confirm is unset,
-// Fix refuses to overwrite existing files and returns an error.
-func TestFix_OutputKustomizeNonInteractiveRefusesOverwriteWithoutNoConfirm(t *testing.T) {
+// TestFix_OutputKustomizeNonInteractiveRefusesOverwriteWhenEmittingWithoutNoConfirm verifies that
+// when Kustomize files already exist, stdin is not a terminal, --no-confirm is unset, and emittable
+// patches exist, Fix refuses to overwrite existing files and returns an error.
+func TestFix_OutputKustomizeNonInteractiveRefusesOverwriteWhenEmittingWithoutNoConfirm(t *testing.T) {
+	dir := t.TempDir()
+	reportPath := buildFixableHelmReport(t, dir)
+	kustDir := filepath.Join(t.TempDir(), "existing-kust")
+	require.NoError(t, os.MkdirAll(kustDir, 0700))
+	require.NoError(t, os.WriteFile(filepath.Join(kustDir, "kustomization.yaml"), []byte("apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\n"), 0600))
+
+	ks := &Kubescape{Ctx: context.Background()}
+	err := ks.Fix(&metav1.FixInfo{
+		ReportFile:   reportPath,
+		KustomizeDir: kustDir,
+		HelmValueOptions: cautils.HelmValueOptions{
+			ValueFiles: []string{filepath.Join(dir, "values.yaml")},
+		},
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "already contains Kustomize files; pass --no-confirm to overwrite them")
+}
+
+// TestFix_OutputKustomizeNonInteractiveDoesNotRefuseWhenNoPatchesEmitted verifies that
+// when no Kustomize patches can be emitted (e.g. all resources are declined), Fix skips
+// patch generation without failing or prompting for existing files.
+func TestFix_OutputKustomizeNonInteractiveDoesNotRefuseWhenNoPatchesEmitted(t *testing.T) {
 	dir := t.TempDir()
 	reportPath := buildFixableContainerHelmReport(t, dir)
 	kustDir := filepath.Join(t.TempDir(), "existing-kust")
@@ -1361,7 +1383,9 @@ func TestFix_OutputKustomizeNonInteractiveRefusesOverwriteWithoutNoConfirm(t *te
 	err := ks.Fix(&metav1.FixInfo{
 		ReportFile:   reportPath,
 		KustomizeDir: kustDir,
+		HelmValueOptions: cautils.HelmValueOptions{
+			ValueFiles: []string{filepath.Join(dir, "values.yaml")},
+		},
 	})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "already contains Kustomize files; pass --no-confirm to overwrite them")
+	require.NoError(t, err)
 }

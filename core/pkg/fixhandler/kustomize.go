@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"math"
 	"os"
 	"path/filepath"
@@ -1292,6 +1293,51 @@ func writeRestrictedFile(root *os.Root, filename string, data []byte) error {
 	return file.Close()
 }
 
+// HasEmittableKustomizePatches checks whether any of the suggestions can produce
+// a valid Kustomize patch without being skipped or declined.
+func HasEmittableKustomizePatches(suggestions []HelmFixSuggestion) bool {
+	if len(suggestions) == 0 {
+		return false
+	}
+	chartCache := make(map[string]map[string][]workloadinterface.IMetadata)
+	for _, s := range suggestions {
+		if s.Resource == nil || len(s.FixPaths) == 0 {
+			continue
+		}
+		_, declineReason := resolveBaseObject(s, chartCache)
+		if declineReason == "" {
+			return true
+		}
+	}
+	return false
+}
+
+// restoreBackups moves each entry in backupDir back into dir.
+// It restores an entry only when dir has no entry with that name.
+// It returns an error for every entry it does not restore, including entries skipped
+// because dir already has that name. The caller keeps backupDir when the error is non-nil.
+func restoreBackups(backupDir, dir string) error {
+	entries, err := os.ReadDir(backupDir)
+	if err != nil {
+		return err
+	}
+	var errs []error
+	for _, e := range entries {
+		dst := filepath.Join(dir, e.Name())
+		if _, err := os.Lstat(dst); err == nil {
+			errs = append(errs, fmt.Errorf("cannot restore %q: destination exists", e.Name()))
+			continue
+		} else if !errors.Is(err, fs.ErrNotExist) {
+			errs = append(errs, fmt.Errorf("cannot restore %q: %w", e.Name(), err))
+			continue
+		}
+		if err := os.Rename(filepath.Join(backupDir, e.Name()), dst); err != nil {
+			errs = append(errs, fmt.Errorf("cannot restore %q: %w", e.Name(), err))
+		}
+	}
+	return errors.Join(errs...)
+}
+
 // EmitKustomizePatch writes a kustomization.yaml, base.yaml, and one JSON 6902 patch
 // file per Helm resource into dir. It is a machine-applicable companion to
 // PrintHelmSuggestions: where that function prints human guidance for editing
@@ -1519,7 +1565,12 @@ func EmitKustomizePatch(suggestions []HelmFixSuggestion, dir string) (*Kustomize
 	if err != nil {
 		return nil, fmt.Errorf("failed to create staging directory in %q: %w", dir, err)
 	}
-	defer os.RemoveAll(stagingDir)
+	keepStaging := false
+	defer func() {
+		if !keepStaging {
+			_ = os.RemoveAll(stagingDir)
+		}
+	}()
 
 	stagingRoot, err := os.OpenRoot(stagingDir)
 	if err != nil {
@@ -1591,11 +1642,22 @@ func EmitKustomizePatch(suggestions []HelmFixSuggestion, dir string) (*Kustomize
 	// Back up existing regular files that will be overwritten
 	for _, fName := range stagedFiles {
 		dstPath := filepath.Join(dir, fName)
-		if fi, err := os.Lstat(dstPath); err == nil && !fi.IsDir() {
+		fi, err := os.Lstat(dstPath)
+		if err == nil && !fi.IsDir() {
 			backupPath := filepath.Join(backupDir, fName)
 			if err := os.Rename(dstPath, backupPath); err != nil {
+				if restoreErr := restoreBackups(backupDir, dir); restoreErr != nil {
+					keepStaging = true
+					return nil, fmt.Errorf("failed to back up %q: %w; backups not restored and kept in %s: %v", fName, err, backupDir, restoreErr)
+				}
 				return nil, fmt.Errorf("failed to back up existing file %q before promotion: %w", fName, err)
 			}
+		} else if err != nil && !errors.Is(err, fs.ErrNotExist) {
+			if restoreErr := restoreBackups(backupDir, dir); restoreErr != nil {
+				keepStaging = true
+				return nil, fmt.Errorf("failed to inspect destination file %q: %w; backups not restored and kept in %s: %v", fName, err, backupDir, restoreErr)
+			}
+			return nil, fmt.Errorf("failed to inspect destination file %q before promotion: %w", fName, err)
 		}
 	}
 
@@ -1612,23 +1674,19 @@ func EmitKustomizePatch(suggestions []HelmFixSuggestion, dir string) (*Kustomize
 	}
 
 	if promotionErr != nil {
-		// Roll back partially promoted files and restore pre-existing destination state
+		var removalErrs []error
+		// Roll back partially promoted files
 		for _, fName := range promoted {
 			dstPath := filepath.Join(dir, fName)
-			backupPath := filepath.Join(backupDir, fName)
-			if _, err := os.Lstat(backupPath); err == nil {
-				_ = os.Rename(backupPath, dstPath)
-			} else {
-				_ = os.Remove(dstPath)
+			if err := os.Remove(dstPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
+				removalErrs = append(removalErrs, fmt.Errorf("failed to remove partially promoted file %q: %w", fName, err))
 			}
 		}
-		if backupEntries, err := os.ReadDir(backupDir); err == nil {
-			for _, bEntry := range backupEntries {
-				dstPath := filepath.Join(dir, bEntry.Name())
-				if _, err := os.Lstat(dstPath); os.IsNotExist(err) {
-					_ = os.Rename(filepath.Join(backupDir, bEntry.Name()), dstPath)
-				}
-			}
+		restoreErr := restoreBackups(backupDir, dir)
+		if len(removalErrs) > 0 || restoreErr != nil {
+			keepStaging = true
+			return nil, fmt.Errorf("failed to promote staged files: %w; rollback incomplete (backups preserved in %s): removal errors: %v; restore errors: %v",
+				promotionErr, backupDir, errors.Join(removalErrs...), restoreErr)
 		}
 		return nil, fmt.Errorf("failed to promote staged file: %w", promotionErr)
 	}
