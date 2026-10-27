@@ -2,6 +2,7 @@ package fixhandler
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
@@ -16,6 +17,7 @@ import (
 	"strings"
 
 	"github.com/armosec/armoapi-go/armotypes"
+	"github.com/gofrs/flock"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
@@ -67,8 +69,67 @@ type kustomizationDoc struct {
 	Patches    []kustomizePatchEntry `yaml:"patches,omitempty"`
 }
 
-// resourceKey uniquely identifies a Kubernetes resource across namespace/group/version/kind/name.
-type resourceKey struct {
+// registeredTarget tracks an emitted patch target to detect ambiguities and selector overlaps.
+type registeredTarget struct {
+	target          kustomizeTarget
+	resIdent        string
+	isClusterScoped bool
+	candidateNs     string
+}
+
+func targetsOverlap(t1, t2 registeredTarget) bool {
+	if t1.target.Group != t2.target.Group ||
+		t1.target.Version != t2.target.Version ||
+		t1.target.Kind != t2.target.Kind ||
+		t1.target.Name != t2.target.Name {
+		return false
+	}
+	if t1.isClusterScoped && t2.isClusterScoped {
+		return true
+	}
+	if t1.target.Namespace == t2.target.Namespace {
+		return true
+	}
+
+	matchNs := func(targetNs, ns string) bool {
+		if targetNs == "" {
+			return true
+		}
+		if targetNs == ns {
+			return true
+		}
+		pattern := targetNs
+		if !strings.HasPrefix(pattern, "^") {
+			pattern = "^" + regexp.QuoteMeta(pattern)
+		}
+		if !strings.HasSuffix(pattern, "$") {
+			pattern = pattern + "$"
+		}
+		re, err := regexp.Compile(pattern)
+		if err == nil {
+			return re.MatchString(ns)
+		}
+		return false
+	}
+
+	candidates := []string{"", "default"}
+	if t1.candidateNs != "" {
+		candidates = append(candidates, t1.candidateNs)
+	}
+	if t2.candidateNs != "" {
+		candidates = append(candidates, t2.candidateNs)
+	}
+
+	for _, ns := range candidates {
+		if matchNs(t1.target.Namespace, ns) && matchNs(t2.target.Namespace, ns) {
+			return true
+		}
+	}
+	return false
+}
+
+// ResourceKey uniquely identifies a Kubernetes resource across namespace/group/version/kind/name.
+type ResourceKey struct {
 	Group     string
 	Version   string
 	Kind      string
@@ -76,12 +137,16 @@ type resourceKey struct {
 	Name      string
 }
 
+type resourceKey = ResourceKey
+
 // resourceGroup holds all fixes and the base resource for a unique resourceKey.
 type resourceGroup struct {
-	key      resourceKey
-	resource *reporthandling.Resource
-	baseObj  map[string]interface{}
-	fixPaths []armotypes.FixPath
+	key                resourceKey
+	resource           *reporthandling.Resource
+	baseObj            map[string]interface{}
+	fixPaths           []armotypes.FixPath
+	isClusterScoped    bool
+	isReleaseNamespace bool
 }
 
 // escapeJSONPointerToken escapes '~' to '~0' and '/' to '~1' per RFC 6901.
@@ -175,9 +240,10 @@ func ensureSubpath(dir, filename string) (string, error) {
 }
 
 // parseFixValue parses raw string fix values reusing the normal fixer's parsing rules:
-// booleans, integers, floats, and safe YAML flow sequences are parsed into their respective types;
-// everything else (including "null" and quoted strings) remains a string so that fix semantics
-// match the standard fixer.
+// booleans, integers (including unsigned integers up to uint64), floats, and safe YAML flow sequences
+// adhering to safeSequenceValue are parsed into their respective types; everything else (including
+// nested sequences, maps, "null", and quoted strings) remains a string so that fix semantics match
+// the standard fixer.
 func parseFixValue(raw string) interface{} {
 	if node, err := parseYAMLLiteral(raw); err == nil {
 		switch node.Tag {
@@ -185,6 +251,14 @@ func parseFixValue(raw string) interface{} {
 			var i int
 			if err := node.Decode(&i); err == nil {
 				return i
+			}
+			var i64 int64
+			if err := node.Decode(&i64); err == nil {
+				return i64
+			}
+			var u uint64
+			if err := node.Decode(&u); err == nil {
+				return u
 			}
 		case "!!bool":
 			var b bool
@@ -197,7 +271,7 @@ func parseFixValue(raw string) interface{} {
 				return f
 			}
 		}
-		if node.Kind == yaml.SequenceNode {
+		if node.Kind == yaml.SequenceNode && safeSequenceValue.MatchString(raw) {
 			var seq []interface{}
 			if err := node.Decode(&seq); err == nil {
 				return seq
@@ -216,20 +290,37 @@ func parseGroupVersion(apiVersion string) (group, version string) {
 	return "", apiVersion
 }
 
-// deepCopyMap creates an isolated deep copy of a resource map object.
+// deepCopyValue creates a deep copy of an arbitrary nested object without JSON serialization
+// to preserve exact integer and floating-point types (e.g. int, int64, uint64).
+func deepCopyValue(v interface{}) interface{} {
+	if v == nil {
+		return nil
+	}
+	switch val := v.(type) {
+	case map[string]interface{}:
+		return deepCopyMap(val)
+	case []interface{}:
+		copySlice := make([]interface{}, len(val))
+		for i, item := range val {
+			copySlice[i] = deepCopyValue(item)
+		}
+		return copySlice
+	default:
+		return val
+	}
+}
+
+// deepCopyMap creates an isolated deep copy of a resource map object without JSON serialization
+// to preserve exact integer and floating-point types.
 func deepCopyMap(m map[string]interface{}) map[string]interface{} {
 	if m == nil {
 		return nil
 	}
-	b, err := json.Marshal(m)
-	if err != nil {
-		return nil
+	copyMap := make(map[string]interface{}, len(m))
+	for k, v := range m {
+		copyMap[k] = deepCopyValue(v)
 	}
-	var res map[string]interface{}
-	if err := json.Unmarshal(b, &res); err != nil {
-		return nil
-	}
-	return res
+	return copyMap
 }
 
 // expandWildcardFixPaths expands wildcard fix paths such as
@@ -341,6 +432,10 @@ func resolveFixPathOps(workingObj map[string]interface{}, fp armotypes.FixPath) 
 	}
 
 	parsedVal := parseFixValue(fp.Value)
+	if exceedsSafeInteger(parsedVal) {
+		return nil, fmt.Errorf("integer value %s cannot be preserved exactly through Kustomize build (exceeds safe integer limit %d)", fp.Value, maxSafeInteger)
+	}
+
 	var ops []kustomizePatchOp
 	var pointerTokens []string
 	var current interface{} = workingObj
@@ -545,10 +640,141 @@ func chartCacheKey(chartPath string, opts cautils.HelmValueOptions) string {
 	)
 }
 
+const maxSafeInteger = (1 << 53) - 1
+
+func toInt64(v interface{}) (int64, bool) {
+	switch n := v.(type) {
+	case int:
+		return int64(n), true
+	case int8:
+		return int64(n), true
+	case int16:
+		return int64(n), true
+	case int32:
+		return int64(n), true
+	case int64:
+		return n, true
+	case uint:
+		if u := uint64(n); u <= math.MaxInt64 {
+			return int64(u), true
+		}
+	case uint8:
+		return int64(n), true
+	case uint16:
+		return int64(n), true
+	case uint32:
+		return int64(n), true
+	case uint64:
+		if n <= math.MaxInt64 {
+			return int64(n), true
+		}
+	case json.Number:
+		if i, err := strconv.ParseInt(string(n), 10, 64); err == nil {
+			return i, true
+		}
+	}
+	return 0, false
+}
+
+func toUint64(v interface{}) (uint64, bool) {
+	switch n := v.(type) {
+	case uint:
+		return uint64(n), true
+	case uint8:
+		return uint64(n), true
+	case uint16:
+		return uint64(n), true
+	case uint32:
+		return uint64(n), true
+	case uint64:
+		return n, true
+	case int:
+		if n >= 0 {
+			return uint64(n), true
+		}
+	case int8:
+		if n >= 0 {
+			return uint64(n), true
+		}
+	case int16:
+		if n >= 0 {
+			return uint64(n), true
+		}
+	case int32:
+		if n >= 0 {
+			return uint64(n), true
+		}
+	case int64:
+		if n >= 0 {
+			return uint64(n), true
+		}
+	case json.Number:
+		if u, err := strconv.ParseUint(string(n), 10, 64); err == nil {
+			return u, true
+		}
+	}
+	return 0, false
+}
+
+// exceedsSafeInteger reports whether v, or any element contained recursively within v
+// if v is a slice/sequence, is an integer that exceeds the safe integer limit [-maxSafeInteger, maxSafeInteger].
+func exceedsSafeInteger(v interface{}) bool {
+	if u, ok := toUint64(v); ok && u > maxSafeInteger {
+		return true
+	}
+	if i, ok := toInt64(v); ok && (i > int64(maxSafeInteger) || i < -int64(maxSafeInteger)) {
+		return true
+	}
+	if seq, ok := v.([]interface{}); ok {
+		for _, elem := range seq {
+			if exceedsSafeInteger(elem) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func isInteger(v interface{}) bool {
+	switch n := v.(type) {
+	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
+		return true
+	case json.Number:
+		_, err := strconv.ParseInt(string(n), 10, 64)
+		if err == nil {
+			return true
+		}
+		_, err = strconv.ParseUint(string(n), 10, 64)
+		return err == nil
+	default:
+		return false
+	}
+}
+
+// compareIntegers compares two integer values with exact arithmetic, avoiding float64 precision loss.
+func compareIntegers(a, b interface{}) (bool, bool) {
+	if !isInteger(a) || !isInteger(b) {
+		return false, false
+	}
+	sA, okSA := toInt64(a)
+	sB, okSB := toInt64(b)
+	if okSA && okSB {
+		return sA == sB, true
+	}
+	uA, okUA := toUint64(a)
+	uB, okUB := toUint64(b)
+	if okUA && okUB {
+		return uA == uB, true
+	}
+	return false, true
+}
+
 func toFloat64(v interface{}) (float64, bool) {
 	switch n := v.(type) {
 	case int:
-		return float64(n), true
+		if int64(n) >= -maxSafeInteger && int64(n) <= maxSafeInteger {
+			return float64(n), true
+		}
 	case int8:
 		return float64(n), true
 	case int16:
@@ -556,9 +782,13 @@ func toFloat64(v interface{}) (float64, bool) {
 	case int32:
 		return float64(n), true
 	case int64:
-		return float64(n), true
+		if n >= -maxSafeInteger && n <= maxSafeInteger {
+			return float64(n), true
+		}
 	case uint:
-		return float64(n), true
+		if uint64(n) <= maxSafeInteger {
+			return float64(n), true
+		}
 	case uint8:
 		return float64(n), true
 	case uint16:
@@ -566,14 +796,21 @@ func toFloat64(v interface{}) (float64, bool) {
 	case uint32:
 		return float64(n), true
 	case uint64:
-		return float64(n), true
+		if n <= maxSafeInteger {
+			return float64(n), true
+		}
 	case float32:
 		return float64(n), true
 	case float64:
 		return n, true
+	case json.Number:
+		if f, err := n.Float64(); err == nil {
+			return f, true
+		}
 	default:
 		return 0, false
 	}
+	return 0, false
 }
 
 func joinPath(parent, child string) string {
@@ -814,6 +1051,32 @@ func verifyScannedFieldsMatch(scannedVal, candVal interface{}, path string, kind
 			}
 			return nil
 		default:
+			if eq, bothInts := compareIntegers(scannedVal, candVal); bothInts {
+				if !eq {
+					return fmt.Errorf("value mismatch at %s: scanned %v, rendered %v", path, scannedVal, candVal)
+				}
+				return nil
+			}
+			if isInteger(scannedVal) {
+				if cf, isCFloat := toFloat64(candVal); isCFloat {
+					if cf == math.Trunc(cf) && cf >= -maxSafeInteger && cf <= maxSafeInteger {
+						if eq, _ := compareIntegers(scannedVal, int64(cf)); eq {
+							return nil
+						}
+					}
+					return fmt.Errorf("value mismatch at %s: scanned %v, rendered %v", path, scannedVal, candVal)
+				}
+			}
+			if isInteger(candVal) {
+				if sf, isSFloat := toFloat64(scannedVal); isSFloat {
+					if sf == math.Trunc(sf) && sf >= -maxSafeInteger && sf <= maxSafeInteger {
+						if eq, _ := compareIntegers(int64(sf), candVal); eq {
+							return nil
+						}
+					}
+					return fmt.Errorf("value mismatch at %s: scanned %v, rendered %v", path, scannedVal, candVal)
+				}
+			}
 			if sf, isSNumeric := toFloat64(scannedVal); isSNumeric {
 				if cf, isCNumeric := toFloat64(candVal); isCNumeric {
 					if sf != cf {
@@ -990,8 +1253,63 @@ func resolveBaseObject(s HelmFixSuggestion, chartCache map[string]map[string][]w
 		}
 	}
 
-	if s.Resource != nil && s.Resource.GetObject() != nil {
-		if err := verifyScannedFieldsMatch(s.Resource.GetObject(), candidate, ""); err != nil {
+	// When ReleaseNamespace is specified for namespaced resources, normalize release namespaces
+	// symmetrically in both directions before verifyScannedFieldsMatch runs:
+	// 1. If candidate omits metadata.namespace and scanned matches ReleaseNamespace, set on candidate copy.
+	// 2. If scanned omits metadata.namespace and candidate explicitly uses ReleaseNamespace, set on scanned copy.
+	// Copies of top-level and metadata maps are used to avoid mutating caller objects while preserving exact types.
+	scannedObjToCompare := s.Resource.GetObject()
+	if s.Resource != nil && s.HelmValueOptions.ReleaseNamespace != "" {
+		scannedNamespace := s.Resource.GetNamespace()
+		if scannedNamespace == "" && s.Resource.GetObject() != nil {
+			if meta, ok := s.Resource.GetObject()["metadata"].(map[string]interface{}); ok && meta != nil {
+				scannedNamespace, _ = meta["namespace"].(string)
+			}
+		}
+
+		var candNamespace string
+		if meta, ok := candidate["metadata"].(map[string]interface{}); ok && meta != nil {
+			candNamespace, _ = meta["namespace"].(string)
+		}
+
+		isClusterScopedRes := isSuggestionClusterScoped(s, []HelmFixSuggestion{s}, chartCache)
+
+		if !isClusterScopedRes {
+			if candNamespace == "" && s.HelmValueOptions.ReleaseNamespace == scannedNamespace {
+				newCandidate := make(map[string]interface{}, len(candidate)+1)
+				for k, v := range candidate {
+					newCandidate[k] = v
+				}
+				metadata := make(map[string]interface{})
+				if meta, ok := candidate["metadata"].(map[string]interface{}); ok && meta != nil {
+					for k, v := range meta {
+						metadata[k] = v
+					}
+				}
+				metadata["namespace"] = s.HelmValueOptions.ReleaseNamespace
+				newCandidate["metadata"] = metadata
+				candidate = newCandidate
+			}
+			if scannedNamespace == "" && candNamespace == s.HelmValueOptions.ReleaseNamespace && s.Resource.GetObject() != nil {
+				newScanned := make(map[string]interface{}, len(s.Resource.GetObject())+1)
+				for k, v := range s.Resource.GetObject() {
+					newScanned[k] = v
+				}
+				metadata := make(map[string]interface{})
+				if meta, ok := s.Resource.GetObject()["metadata"].(map[string]interface{}); ok && meta != nil {
+					for k, v := range meta {
+						metadata[k] = v
+					}
+				}
+				metadata["namespace"] = s.HelmValueOptions.ReleaseNamespace
+				newScanned["metadata"] = metadata
+				scannedObjToCompare = newScanned
+			}
+		}
+	}
+
+	if s.Resource != nil && scannedObjToCompare != nil {
+		if err := verifyScannedFieldsMatch(scannedObjToCompare, candidate, ""); err != nil {
 			return nil, fmt.Sprintf("declined: rendered chart base does not match scan-time resource configuration (%s)", err.Error())
 		}
 	}
@@ -1073,35 +1391,54 @@ func validateDirContainment(dirPath, allowedBasePath string, visitedDirs map[str
 	return nil
 }
 
-// loadUnredactedFromChart renders the chart at chartPath using s.HelmValueOptions and returns the unredacted
-// workload object matching s.Resource's full API identity (group, version, kind, name, namespace).
+// validateChartAndValuesContainment ensures that the chart directory, all files inside it,
+// and any values files or file-values passed in valueOpts resolve within allowedBasePath.
+func validateChartAndValuesContainment(chartPath, allowedBasePath string, valueOpts cautils.HelmValueOptions) error {
+	if allowedBasePath == "" {
+		return nil
+	}
+	if err := validateChartFilesContainment(chartPath, allowedBasePath); err != nil {
+		return err
+	}
+	for _, vf := range valueOpts.ValueFiles {
+		resolvedVF, err := filepath.EvalSymlinks(vf)
+		if err != nil || !isPathContained(allowedBasePath, resolvedVF) {
+			return fmt.Errorf("values file %q is outside allowed base path %q", vf, allowedBasePath)
+		}
+	}
+	for _, fv := range valueOpts.FileValues {
+		for _, item := range strings.Split(fv, ",") {
+			parts := strings.SplitN(item, "=", 2)
+			if len(parts) == 2 {
+				filePath := parts[1]
+				resolvedFP, err := filepath.EvalSymlinks(filePath)
+				if err != nil || !isPathContained(allowedBasePath, resolvedFP) {
+					return fmt.Errorf("file-values file %q is outside allowed base path %q", filePath, allowedBasePath)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// getOrLoadChartWorkloads returns the rendered workloads for s.ChartPath using s.HelmValueOptions,
+// fetching from chartCache if available or rendering and caching them.
 // It verifies that s.ChartPath and all files/symlinks inside it are contained within s.AllowedBasePath.
-func loadUnredactedFromChart(s HelmFixSuggestion, chartCache map[string]map[string][]workloadinterface.IMetadata) (map[string]interface{}, error) {
+func getOrLoadChartWorkloads(s HelmFixSuggestion, chartCache map[string]map[string][]workloadinterface.IMetadata) (map[string][]workloadinterface.IMetadata, error) {
 	if s.ChartPath == "" {
 		return nil, errors.New("empty chart path")
 	}
 
 	if s.AllowedBasePath != "" {
-		if err := validateChartFilesContainment(s.ChartPath, s.AllowedBasePath); err != nil {
+		if err := validateChartAndValuesContainment(s.ChartPath, s.AllowedBasePath, s.HelmValueOptions); err != nil {
 			return nil, err
 		}
-		for _, vf := range s.HelmValueOptions.ValueFiles {
-			resolvedVF, err := filepath.EvalSymlinks(vf)
-			if err != nil || !isPathContained(s.AllowedBasePath, resolvedVF) {
-				return nil, fmt.Errorf("values file %q is outside allowed base path %q", vf, s.AllowedBasePath)
-			}
-		}
-		for _, fv := range s.HelmValueOptions.FileValues {
-			for _, item := range strings.Split(fv, ",") {
-				parts := strings.SplitN(item, "=", 2)
-				if len(parts) == 2 {
-					filePath := parts[1]
-					resolvedFP, err := filepath.EvalSymlinks(filePath)
-					if err != nil || !isPathContained(s.AllowedBasePath, resolvedFP) {
-						return nil, fmt.Errorf("file-values file %q is outside allowed base path %q", filePath, s.AllowedBasePath)
-					}
-				}
-			}
+	}
+
+	cacheKey := chartCacheKey(s.ChartPath, s.HelmValueOptions)
+	if chartCache != nil {
+		if sourceToWorkloads, ok := chartCache[cacheKey]; ok {
+			return sourceToWorkloads, nil
 		}
 	}
 
@@ -1110,17 +1447,23 @@ func loadUnredactedFromChart(s HelmFixSuggestion, chartCache map[string]map[stri
 		return nil, err
 	}
 
-	cacheKey := chartCacheKey(s.ChartPath, s.HelmValueOptions)
-	sourceToWorkloads, ok := chartCache[cacheKey]
-	if !ok {
-		var err error
-		sourceToWorkloads, _, _, err = cautils.LoadResourcesFromHelmCharts(context.Background(), s.ChartPath, s.HelmValueOptions)
-		if err != nil {
-			return nil, err
-		}
-		if chartCache != nil {
-			chartCache[cacheKey] = sourceToWorkloads
-		}
+	sourceToWorkloads, _, _, err := cautils.LoadResourcesFromHelmCharts(context.Background(), s.ChartPath, s.HelmValueOptions)
+	if err != nil {
+		return nil, err
+	}
+	if chartCache != nil {
+		chartCache[cacheKey] = sourceToWorkloads
+	}
+	return sourceToWorkloads, nil
+}
+
+// loadUnredactedFromChart renders the chart at chartPath using s.HelmValueOptions and returns the unredacted
+// workload object matching s.Resource's full API identity (group, version, kind, name, namespace).
+// It verifies that s.ChartPath and all files/symlinks inside it are contained within s.AllowedBasePath.
+func loadUnredactedFromChart(s HelmFixSuggestion, chartCache map[string]map[string][]workloadinterface.IMetadata) (map[string]interface{}, error) {
+	sourceToWorkloads, err := getOrLoadChartWorkloads(s, chartCache)
+	if err != nil {
+		return nil, err
 	}
 
 	if s.Resource == nil {
@@ -1132,11 +1475,19 @@ func loadUnredactedFromChart(s HelmFixSuggestion, chartCache map[string]map[stri
 	targetName := s.Resource.GetName()
 	targetNamespace := s.Resource.GetNamespace()
 
-	isClusterScoped := isClusterScopedResource(resourceKey{
+	crdScopes := extractClusterScopedCRDsFromWorkloads(sourceToWorkloads)
+	for k, v := range extractCRDsFromChartDir(s.ChartPath, s.AllowedBasePath) {
+		crdScopes[k] = v
+	}
+	for k, v := range extractClusterScopedCRDsFromSuggestions([]HelmFixSuggestion{s}) {
+		crdScopes[k] = v
+	}
+
+	isClusterScopedRes := isClusterScoped(resourceKey{
 		Group:   targetGroup,
 		Version: targetVersion,
 		Kind:    targetKind,
-	})
+	}, crdScopes)
 
 	var matches []map[string]interface{}
 	for _, workloads := range sourceToWorkloads {
@@ -1145,13 +1496,12 @@ func loadUnredactedFromChart(s HelmFixSuggestion, chartCache map[string]map[stri
 			candKind := w.GetKind()
 			candName := w.GetName()
 			candNamespace := w.GetNamespace()
-
 			if candGroup != targetGroup || candVersion != targetVersion ||
 				candKind != targetKind || candName != targetName {
 				continue
 			}
 
-			if isClusterScoped {
+			if isClusterScopedRes {
 				// Cluster-scoped resources match on GVK + Name; namespace is ignored.
 			} else {
 				namespaceMatch := candNamespace == targetNamespace
@@ -1226,6 +1576,337 @@ func isBuiltinClusterScopedGVK(group, kind string) bool {
 	}
 }
 
+// isBuiltinNamespacedGVK reports whether the group and kind match a standard built-in
+// namespaced Kubernetes resource.
+func isBuiltinNamespacedGVK(group, kind string) bool {
+	switch group {
+	case "":
+		switch kind {
+		case "Pod", "Service", "ConfigMap", "Secret", "ServiceAccount",
+			"PersistentVolumeClaim", "Endpoints", "LimitRange", "ResourceQuota",
+			"ReplicationController", "PodTemplate", "Event":
+			return true
+		}
+	case "apps":
+		switch kind {
+		case "Deployment", "StatefulSet", "DaemonSet", "ReplicaSet", "ControllerRevision":
+			return true
+		}
+	case "batch":
+		switch kind {
+		case "Job", "CronJob":
+			return true
+		}
+	case "networking.k8s.io":
+		switch kind {
+		case "Ingress", "NetworkPolicy":
+			return true
+		}
+	case "rbac.authorization.k8s.io":
+		switch kind {
+		case "Role", "RoleBinding":
+			return true
+		}
+	case "policy":
+		switch kind {
+		case "PodDisruptionBudget":
+			return true
+		}
+	case "autoscaling":
+		switch kind {
+		case "HorizontalPodAutoscaler":
+			return true
+		}
+	case "coordination.k8s.io":
+		switch kind {
+		case "Lease":
+			return true
+		}
+	case "discovery.k8s.io":
+		switch kind {
+		case "EndpointSlice":
+			return true
+		}
+	}
+	return false
+}
+
+type crdScopeKey struct {
+	Group string
+	Kind  string
+}
+
+// extractCRDsFromChartDir inspects standard Helm CRD directories (crds/ and dependency charts/*/crds/)
+// within chartPath, parsing all YAML files for CustomResourceDefinition declarations.
+func extractCRDsFromChartDir(chartPath string, allowedBasePath string) map[crdScopeKey]bool {
+	res := make(map[crdScopeKey]bool)
+	if chartPath == "" {
+		return res
+	}
+
+	var crdDirs []string
+	mainCrds := filepath.Join(chartPath, "crds")
+	if fi, err := os.Stat(mainCrds); err == nil && fi.IsDir() {
+		crdDirs = append(crdDirs, mainCrds)
+	}
+
+	chartsDir := filepath.Join(chartPath, "charts")
+	if entries, err := os.ReadDir(chartsDir); err == nil {
+		for _, entry := range entries {
+			if entry.IsDir() {
+				subCrds := filepath.Join(chartsDir, entry.Name(), "crds")
+				if fi, err := os.Stat(subCrds); err == nil && fi.IsDir() {
+					crdDirs = append(crdDirs, subCrds)
+				}
+			}
+		}
+	}
+
+	for _, dir := range crdDirs {
+		crdRoot, openErr := os.OpenRoot(dir)
+		if openErr != nil {
+			continue
+		}
+		_ = fs.WalkDir(crdRoot.FS(), ".", func(path string, d fs.DirEntry, err error) error {
+			if err != nil || d.IsDir() {
+				return nil
+			}
+			ext := strings.ToLower(filepath.Ext(path))
+			if ext != ".yaml" && ext != ".yml" {
+				return nil
+			}
+			if allowedBasePath != "" {
+				fullPath := filepath.Join(dir, path)
+				resolved, evalErr := filepath.EvalSymlinks(fullPath)
+				if evalErr != nil || !isPathContained(allowedBasePath, resolved) {
+					return nil
+				}
+			}
+			data, readErr := crdRoot.ReadFile(path)
+			if readErr != nil {
+				return nil
+			}
+			decoder := yaml.NewDecoder(strings.NewReader(string(data)))
+			for {
+				var obj map[string]interface{}
+				if decErr := decoder.Decode(&obj); decErr != nil {
+					break
+				}
+				if obj == nil {
+					continue
+				}
+				kind, _ := obj["kind"].(string)
+				if kind != "CustomResourceDefinition" {
+					continue
+				}
+				spec, ok := obj["spec"].(map[string]interface{})
+				if !ok || spec == nil {
+					continue
+				}
+				scope, _ := spec["scope"].(string)
+				group, _ := spec["group"].(string)
+				names, _ := spec["names"].(map[string]interface{})
+				if names == nil {
+					continue
+				}
+				crdKind, _ := names["kind"].(string)
+				group = strings.TrimSpace(group)
+				crdKind = strings.TrimSpace(crdKind)
+				if group != "" && crdKind != "" {
+					isCluster := strings.EqualFold(strings.TrimSpace(scope), "Cluster")
+					res[crdScopeKey{Group: group, Kind: crdKind}] = isCluster
+				}
+			}
+			return nil
+		})
+		_ = crdRoot.Close()
+	}
+
+	return res
+}
+
+// extractClusterScopedCRDsFromWorkloads scans rendered chart workloads for any CustomResourceDefinition
+// returning the map of (Group, Kind) -> isClusterScoped.
+func extractClusterScopedCRDsFromWorkloads(sourceToWorkloads map[string][]workloadinterface.IMetadata) map[crdScopeKey]bool {
+	res := make(map[crdScopeKey]bool)
+	for _, workloads := range sourceToWorkloads {
+		for _, w := range workloads {
+			if w.GetKind() != "CustomResourceDefinition" {
+				continue
+			}
+			obj := w.GetObject()
+			if obj == nil {
+				continue
+			}
+			spec, ok := obj["spec"].(map[string]interface{})
+			if !ok || spec == nil {
+				continue
+			}
+			scope, _ := spec["scope"].(string)
+			group, _ := spec["group"].(string)
+			names, _ := spec["names"].(map[string]interface{})
+			if names == nil {
+				continue
+			}
+			kind, _ := names["kind"].(string)
+			group = strings.TrimSpace(group)
+			kind = strings.TrimSpace(kind)
+			if group != "" && kind != "" {
+				res[crdScopeKey{Group: group, Kind: kind}] = strings.EqualFold(strings.TrimSpace(scope), "Cluster")
+			}
+		}
+	}
+	return res
+}
+
+// extractClusterScopedCRDsFromSuggestions scans fix suggestions (and their unredacted bases)
+// for any CustomResourceDefinition returning the map of (Group, Kind) -> isClusterScoped.
+func extractClusterScopedCRDsFromSuggestions(suggestions []HelmFixSuggestion) map[crdScopeKey]bool {
+	res := make(map[crdScopeKey]bool)
+	checkObj := func(obj map[string]interface{}) {
+		if obj == nil {
+			return
+		}
+		kind, _ := obj["kind"].(string)
+		if kind != "CustomResourceDefinition" {
+			return
+		}
+		spec, ok := obj["spec"].(map[string]interface{})
+		if !ok || spec == nil {
+			return
+		}
+		scope, _ := spec["scope"].(string)
+		group, _ := spec["group"].(string)
+		names, _ := spec["names"].(map[string]interface{})
+		if names == nil {
+			return
+		}
+		k, _ := names["kind"].(string)
+		group = strings.TrimSpace(group)
+		k = strings.TrimSpace(k)
+		if group != "" && k != "" {
+			res[crdScopeKey{Group: group, Kind: k}] = strings.EqualFold(strings.TrimSpace(scope), "Cluster")
+		}
+	}
+	for _, s := range suggestions {
+		if s.Resource != nil {
+			checkObj(s.Resource.GetObject())
+		}
+		if s.UnredactedBase != nil {
+			checkObj(s.UnredactedBase)
+		}
+	}
+	return res
+}
+
+type resourceScope int
+
+const (
+	scopeUnknown resourceScope = iota
+	scopeNamespaced
+	scopeCluster
+)
+
+// resolveResourceScope derives the resource scope (cluster, namespaced, or unknown) from
+// OpenAPI definitions, built-in Kubernetes GVK tables, and discovered CRDs.
+func resolveResourceScope(key resourceKey, crdScopes map[crdScopeKey]bool) resourceScope {
+	if isClusterScopedResource(key) {
+		return scopeCluster
+	}
+	if isBuiltinNamespacedGVK(key.Group, key.Kind) {
+		return scopeNamespaced
+	}
+	if crdScopes != nil {
+		if isCluster, found := crdScopes[crdScopeKey{Group: key.Group, Kind: key.Kind}]; found {
+			if isCluster {
+				return scopeCluster
+			}
+			return scopeNamespaced
+		}
+	}
+	return scopeUnknown
+}
+
+// isClusterScoped reports whether key identifies a cluster-scoped resource.
+// Unknown scopes are explicitly treated as namespaced to protect multi-namespace tenancy.
+func isClusterScoped(key resourceKey, crdScopes map[crdScopeKey]bool) bool {
+	scope := resolveResourceScope(key, crdScopes)
+	switch scope {
+	case scopeCluster:
+		return true
+	case scopeNamespaced:
+		return false
+	case scopeUnknown:
+		// Explicitly handle unknown scope: resources with unknown scope cannot be
+		// assumed cluster-scoped and are kept namespaced to protect multi-namespace tenancy.
+		return false
+	default:
+		return false
+	}
+}
+
+// isSuggestionClusterScoped reports whether suggestion s refers to a cluster-scoped resource.
+// Built-in types are identified via isClusterScopedResource and isBuiltinNamespacedGVK.
+// For custom resources, CRD declarations are inspected strictly from s's own chart (if s.ChartPath != "")
+// or from non-chart suggestions in the batch. CRD declarations from different charts are isolated
+// and cannot override or pollute each other.
+func isSuggestionClusterScoped(s HelmFixSuggestion, allSuggestions []HelmFixSuggestion, chartCache map[string]map[string][]workloadinterface.IMetadata) bool {
+	targetGroup, targetVersion := parseGroupVersion(s.Resource.GetApiVersion())
+	targetKind := s.Resource.GetKind()
+	if (targetGroup == "" && targetVersion == "") || targetKind == "" {
+		if s.Resource.GetObject() != nil {
+			if apiVersion, _ := s.Resource.GetObject()["apiVersion"].(string); apiVersion != "" {
+				targetGroup, targetVersion = parseGroupVersion(apiVersion)
+			}
+			if kind, _ := s.Resource.GetObject()["kind"].(string); kind != "" {
+				targetKind = kind
+			}
+		}
+	}
+	if targetKind == "" && s.UnredactedBase != nil {
+		targetKind, _ = s.UnredactedBase["kind"].(string)
+		apiVersion, _ := s.UnredactedBase["apiVersion"].(string)
+		targetGroup, targetVersion = parseGroupVersion(apiVersion)
+	}
+
+	key := resourceKey{
+		Group:   targetGroup,
+		Version: targetVersion,
+		Kind:    targetKind,
+	}
+	if isClusterScopedResource(key) {
+		return true
+	}
+	if isBuiltinNamespacedGVK(key.Group, key.Kind) {
+		return false
+	}
+
+	crdScopes := make(map[crdScopeKey]bool)
+	if s.ChartPath != "" {
+		for k, v := range extractCRDsFromChartDir(s.ChartPath, s.AllowedBasePath) {
+			crdScopes[k] = v
+		}
+		if sourceToWorkloads, err := getOrLoadChartWorkloads(s, chartCache); err == nil && sourceToWorkloads != nil {
+			for k, v := range extractClusterScopedCRDsFromWorkloads(sourceToWorkloads) {
+				crdScopes[k] = v
+			}
+		}
+		for k, v := range extractClusterScopedCRDsFromSuggestions([]HelmFixSuggestion{s}) {
+			crdScopes[k] = v
+		}
+	} else {
+		var nonChartSuggestions []HelmFixSuggestion
+		for _, item := range allSuggestions {
+			if item.ChartPath == "" {
+				nonChartSuggestions = append(nonChartSuggestions, item)
+			}
+		}
+		crdScopes = extractClusterScopedCRDsFromSuggestions(nonChartSuggestions)
+	}
+
+	return isClusterScoped(key, crdScopes)
+}
+
 // writeRestrictedFile writes data to filename within root with mode 0600 and explicitly chmods an existing file to 0600.
 // It uses os.Root containment to prevent following symlinks that escape the output directory.
 func writeRestrictedFile(root *os.Root, filename string, data []byte) error {
@@ -1244,13 +1925,25 @@ func writeRestrictedFile(root *os.Root, filename string, data []byte) error {
 	return file.Close()
 }
 
+// ChartCache stores rendered chart workloads keyed by chart path and value options.
+type ChartCache = map[string]map[string][]workloadinterface.IMetadata
+
+// NewChartCache creates an empty cache for sharing rendered chart workloads across Kustomize operations.
+func NewChartCache() ChartCache {
+	return make(ChartCache)
+}
+
 // HasEmittableKustomizePatches checks whether any of the suggestions can produce
 // a valid Kustomize patch without being skipped or declined.
-func HasEmittableKustomizePatches(suggestions []HelmFixSuggestion) bool {
+// An optional shared chartCache can be passed to share rendered chart workloads across callers.
+func HasEmittableKustomizePatches(suggestions []HelmFixSuggestion, sharedCache ...ChartCache) bool {
 	if len(suggestions) == 0 {
 		return false
 	}
 	chartCache := make(map[string]map[string][]workloadinterface.IMetadata)
+	if len(sharedCache) > 0 && sharedCache[0] != nil {
+		chartCache = sharedCache[0]
+	}
 	for _, s := range suggestions {
 		if s.Resource == nil || len(s.FixPaths) == 0 {
 			continue
@@ -1263,59 +1956,56 @@ func HasEmittableKustomizePatches(suggestions []HelmFixSuggestion) bool {
 	return false
 }
 
-// restoreBackups moves each entry in backupDir back into dir.
-// It restores an entry only when dir has no entry with that name.
+// restoreBackups moves each entry in backupRelDir back into root.
+// It restores an entry only when root has no entry with that name.
 // It returns an error for every entry it does not restore, including entries skipped
-// because dir already has that name. The caller keeps backupDir when the error is non-nil.
-func restoreBackups(backupDir, dir string) error {
-	entries, err := os.ReadDir(backupDir)
+// because root already has that name. The caller keeps backupRelDir when the error is non-nil.
+func restoreBackups(root *os.Root, backupRelDir string) error {
+	entries, err := fs.ReadDir(root.FS(), backupRelDir)
 	if err != nil {
 		return err
 	}
 	var errs []error
 	for _, e := range entries {
-		dst := filepath.Join(dir, e.Name())
-		if _, err := os.Lstat(dst); err == nil {
+		if _, err := root.Lstat(e.Name()); err == nil {
 			errs = append(errs, fmt.Errorf("cannot restore %q: destination exists", e.Name()))
 			continue
 		} else if !errors.Is(err, fs.ErrNotExist) {
 			errs = append(errs, fmt.Errorf("cannot restore %q: %w", e.Name(), err))
 			continue
 		}
-		if err := os.Rename(filepath.Join(backupDir, e.Name()), dst); err != nil {
+		backupPath := filepath.Join(backupRelDir, e.Name())
+		if err := root.Rename(backupPath, e.Name()); err != nil {
 			errs = append(errs, fmt.Errorf("cannot restore %q: %w", e.Name(), err))
 		}
 	}
 	return errors.Join(errs...)
 }
 
-// EmitKustomizePatch writes a kustomization.yaml, base.yaml, and one JSON 6902 patch
-// file per Helm resource into dir. It is a machine-applicable companion to
-// PrintHelmSuggestions: where that function prints human guidance for editing
-// values.yaml, this produces patch files and base manifests that can be applied directly to
-// Helm-rendered manifests without modifying the original chart.
-//
-// Usage after generation:
-//
-//	kustomize build <dir> | kubectl apply -f -
-//
-// Patch files are named unambiguously to encode the full resource identity and prevent
-// collisions. The saved base.yaml acts as a snapshot of rendered resources with suggestions.
-// Output directory and files are written with restricted permissions (0700/0600) to protect
-// rendered manifests that may contain sensitive data, explicitly enforcing permissions even
-// when regenerating into existing directories or files.
-//
-// To avoid corrupting live application configuration, resources whose recorded content cannot
-// be reproduced faithfully (such as objects from scan reports where removeData replaced container
-// environment variables or secret data with "XXXXXX", or cleared envFrom) are visibly declined.
-// EmitKustomizePatch returns an explicit KustomizeEmitResult listing all emitted and skipped resources.
-func EmitKustomizePatch(suggestions []HelmFixSuggestion, dir string) (*KustomizeEmitResult, error) {
+// failKustomizeWriteDuringPublication is an unexported hook used in tests to inject write failures
+// during the staging or publication phases.
+var failKustomizeWriteDuringPublication func(filename string) error
+
+// plannedResourcePatch holds the planned patch file, target, and base document for a resource.
+type plannedResourcePatch struct {
+	key           resourceKey
+	resIdent      string
+	patchFileName string
+	patchBytes    []byte
+	target        kustomizeTarget
+	baseDoc       []byte
+}
+
+func planKustomizePatches(suggestions []HelmFixSuggestion, dir string, sharedCache ...ChartCache) ([]plannedResourcePatch, *KustomizeEmitResult, error) {
 	result := &KustomizeEmitResult{}
 	if len(suggestions) == 0 {
-		return result, nil
+		return nil, result, nil
 	}
 
-	chartCache := make(map[string]map[string][]workloadinterface.IMetadata)
+	chartCache := make(ChartCache)
+	if len(sharedCache) > 0 && sharedCache[0] != nil {
+		chartCache = sharedCache[0]
+	}
 
 	// 1. Group suggestions by unique resourceKey to merge multiple suggestions for the same workload,
 	// and prevent overwriting between resources with same kind/name in different namespaces.
@@ -1338,21 +2028,53 @@ func EmitKustomizePatch(suggestions []HelmFixSuggestion, dir string) (*Kustomize
 			continue
 		}
 
+		isClusterScopedRes := isSuggestionClusterScoped(s, suggestions, chartCache)
+
 		group, version := parseGroupVersion(s.Resource.GetApiVersion())
+		rNamespace := s.Resource.GetNamespace()
+		if rNamespace == "" && s.Resource.GetObject() != nil {
+			if meta, ok := s.Resource.GetObject()["metadata"].(map[string]interface{}); ok && meta != nil {
+				rNamespace, _ = meta["namespace"].(string)
+			}
+		}
 		key := resourceKey{
 			Group:     group,
 			Version:   version,
 			Kind:      s.Resource.GetKind(),
-			Namespace: s.Resource.GetNamespace(),
+			Namespace: rNamespace,
 			Name:      s.Resource.GetName(),
+		}
+		isReleaseNamespace := false
+		if key.Namespace == "" && !isClusterScopedRes && s.HelmValueOptions.ReleaseNamespace != "" {
+			key.Namespace = s.HelmValueOptions.ReleaseNamespace
+			isReleaseNamespace = true
+			// Copy top-level map and metadata map to avoid mutating caller object,
+			// preserving exact numeric types in spec and nested structures.
+			newBaseObj := make(map[string]interface{}, len(baseObj)+1)
+			for k, v := range baseObj {
+				newBaseObj[k] = v
+			}
+			metadata := make(map[string]interface{})
+			if meta, ok := baseObj["metadata"].(map[string]interface{}); ok && meta != nil {
+				for k, v := range meta {
+					metadata[k] = v
+				}
+			}
+			if namespace, _ := metadata["namespace"].(string); namespace == "" {
+				metadata["namespace"] = key.Namespace
+			}
+			newBaseObj["metadata"] = metadata
+			baseObj = newBaseObj
 		}
 
 		rg, exists := groups[key]
 		if !exists {
 			rg = &resourceGroup{
-				key:      key,
-				resource: s.Resource,
-				baseObj:  baseObj,
+				key:                key,
+				resource:           s.Resource,
+				baseObj:            baseObj,
+				isClusterScoped:    isClusterScopedRes,
+				isReleaseNamespace: isReleaseNamespace,
 			}
 			groups[key] = rg
 			keysInOrder = append(keysInOrder, key)
@@ -1362,35 +2084,12 @@ func EmitKustomizePatch(suggestions []HelmFixSuggestion, dir string) (*Kustomize
 	}
 
 	if len(groups) == 0 {
-		return result, nil
-	}
-
-	// Restrict permissions on the output directory containing rendered manifests, enforcing 0700 on existing dirs too.
-	if err := os.MkdirAll(dir, 0700); err != nil {
-		return nil, fmt.Errorf("failed to create kustomize output dir %q: %w", dir, err)
-	}
-	if err := os.Chmod(dir, 0700); err != nil {
-		return nil, fmt.Errorf("failed to restrict permissions on kustomize output dir %q: %w", dir, err)
-	}
-
-	root, err := os.OpenRoot(dir)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open output directory %q: %w", dir, err)
-	}
-	defer root.Close()
-
-	type plannedResourcePatch struct {
-		key           resourceKey
-		resIdent      string
-		patchFileName string
-		patchBytes    []byte
-		target        kustomizeTarget
-		baseDoc       []byte
+		return nil, result, nil
 	}
 
 	var plannedPatches []plannedResourcePatch
 	writtenFiles := make(map[string]resourceKey)
-	writtenTargets := make(map[string]string)
+	var registeredTargets []registeredTarget
 
 	for _, key := range keysInOrder {
 		rg := groups[key]
@@ -1433,18 +2132,20 @@ func EmitKustomizePatch(suggestions []HelmFixSuggestion, dir string) (*Kustomize
 
 		patchFileName := resourcePatchFilename(rg.key)
 		if existingKey, exists := writtenFiles[patchFileName]; exists {
-			return nil, fmt.Errorf("filename collision detected: patch file %q for resource %s/%s collides with %s/%s",
+			return nil, nil, fmt.Errorf("filename collision detected: patch file %q for resource %s/%s collides with %s/%s",
 				patchFileName, rg.key.Kind, rg.key.Name, existingKey.Kind, existingKey.Name)
 		}
 		writtenFiles[patchFileName] = rg.key
 
-		if _, err := ensureSubpath(dir, patchFileName); err != nil {
-			return nil, err
+		if dir != "" {
+			if _, err := ensureSubpath(dir, patchFileName); err != nil {
+				return nil, nil, err
+			}
 		}
 
 		patchBytes, err := yaml.Marshal(ops)
 		if err != nil {
-			return nil, fmt.Errorf("failed to marshal patch for %s/%s: %w", rg.key.Kind, rg.key.Name, err)
+			return nil, nil, fmt.Errorf("failed to marshal patch for %s/%s: %w", rg.key.Kind, rg.key.Name, err)
 		}
 
 		groupSelector := "^$"
@@ -1457,9 +2158,13 @@ func EmitKustomizePatch(suggestions []HelmFixSuggestion, dir string) (*Kustomize
 			Kind:    regexp.QuoteMeta(rg.key.Kind),
 			Name:    regexp.QuoteMeta(rg.key.Name),
 		}
-		if rg.key.Namespace != "" {
-			target.Namespace = regexp.QuoteMeta(rg.key.Namespace)
-		} else if !isClusterScopedResource(rg.key) {
+		if rg.isClusterScoped {
+			target.Namespace = ""
+		} else if rg.isReleaseNamespace && rg.key.Namespace != "" && rg.key.Namespace != "default" {
+			target.Namespace = fmt.Sprintf("^($|default|%s$)", regexp.QuoteMeta(rg.key.Namespace))
+		} else if rg.key.Namespace != "" {
+			target.Namespace = rg.key.Namespace
+		} else {
 			target.Namespace = "default"
 		}
 
@@ -1468,17 +2173,24 @@ func EmitKustomizePatch(suggestions []HelmFixSuggestion, dir string) (*Kustomize
 			resIdent = fmt.Sprintf("%s/%s/%s", rg.key.Kind, rg.key.Namespace, rg.key.Name)
 		}
 
-		targetKey := fmt.Sprintf("%s/%s/%s/%s/%s", target.Group, target.Version, target.Kind, target.Namespace, target.Name)
-		if existing, exists := writtenTargets[targetKey]; exists {
-			return nil, fmt.Errorf("ambiguous patch target detected: target %s/%s in namespace %q matches multiple resources (%s and %s)",
-				target.Kind, target.Name, target.Namespace, existing, resIdent)
+		currentRegistered := registeredTarget{
+			target:          target,
+			resIdent:        resIdent,
+			isClusterScoped: rg.isClusterScoped,
+			candidateNs:     rg.key.Namespace,
 		}
-		writtenTargets[targetKey] = resIdent
+		for _, existing := range registeredTargets {
+			if targetsOverlap(existing, currentRegistered) {
+				return nil, nil, fmt.Errorf("ambiguous patch target detected: target %s/%s in namespace %q matches multiple resources (%s and %s)",
+					target.Kind, target.Name, target.Namespace, existing.resIdent, resIdent)
+			}
+		}
+		registeredTargets = append(registeredTargets, currentRegistered)
 
 		cleanObj := stripServerManagedFields(rg.baseObj)
 		baseDocBytes, err := yaml.Marshal(cleanObj)
 		if err != nil {
-			return nil, fmt.Errorf("failed to marshal base document for %s/%s: %w", rg.key.Kind, rg.key.Name, err)
+			return nil, nil, fmt.Errorf("failed to marshal base document for %s/%s: %w", rg.key.Kind, rg.key.Name, err)
 		}
 
 		plannedPatches = append(plannedPatches, plannedResourcePatch{
@@ -1491,8 +2203,125 @@ func EmitKustomizePatch(suggestions []HelmFixSuggestion, dir string) (*Kustomize
 		})
 	}
 
+	return plannedPatches, result, nil
+}
+
+// PlannedKustomizeFiles returns the filenames of all files that EmitKustomizePatch
+// would generate for the given suggestions ("base.yaml", "kustomization.yaml",
+// and all planned patch filenames). If no patches would be emitted, returns nil.
+// An optional shared chartCache can be passed to avoid re-rendering Helm charts.
+func PlannedKustomizeFiles(suggestions []HelmFixSuggestion, sharedCache ...ChartCache) []string {
+	plannedPatches, _, err := planKustomizePatches(suggestions, "", sharedCache...)
+	if err != nil || len(plannedPatches) == 0 {
+		return nil
+	}
+	files := make([]string, 0, len(plannedPatches)+2)
+	files = append(files, "base.yaml", "kustomization.yaml")
+	for _, p := range plannedPatches {
+		files = append(files, p.patchFileName)
+	}
+	return files
+}
+
+// EmitKustomizeOption configures EmitKustomizePatch execution.
+type EmitKustomizeOption func(*emitKustomizeOptions)
+
+type emitKustomizeOptions struct {
+	overwrite  bool
+	chartCache ChartCache
+}
+
+// WithOverwrite configures whether EmitKustomizePatch is permitted to overwrite
+// an existing non-empty output directory. When false (the default), EmitKustomizePatch
+// refuses to write into a non-empty directory.
+func WithOverwrite(overwrite bool) EmitKustomizeOption {
+	return func(o *emitKustomizeOptions) {
+		o.overwrite = overwrite
+	}
+}
+
+// WithChartCache configures a shared ChartCache to avoid re-rendering Helm charts.
+func WithChartCache(cache ChartCache) EmitKustomizeOption {
+	return func(o *emitKustomizeOptions) {
+		o.chartCache = cache
+	}
+}
+
+// EmitKustomizePatch writes a kustomization.yaml, base.yaml, and one JSON 6902 patch
+// file per Helm resource into dir. It is a machine-applicable companion to
+// PrintHelmSuggestions: where that function prints human guidance for editing
+// values.yaml, this produces patch files and base manifests that can be applied directly to
+// Helm-rendered manifests without modifying the original chart.
+//
+// Usage after generation:
+//
+//	kustomize build <dir> | kubectl apply -f -
+//
+// Patch files are named unambiguously to encode the full resource identity and prevent
+// collisions. The saved base.yaml acts as a snapshot of rendered resources with suggestions.
+// Output directory and files are written with restricted permissions (0700/0600) to protect
+// rendered manifests that may contain sensitive data, explicitly enforcing permissions even
+// when regenerating into existing directories or files.
+//
+// To avoid corrupting live application configuration, resources whose recorded content cannot
+// be reproduced faithfully (such as objects from scan reports where removeData replaced container
+// environment variables or secret data with "XXXXXX", or cleared envFrom) are visibly declined.
+// EmitKustomizePatch returns an explicit KustomizeEmitResult listing all emitted and skipped resources.
+func EmitKustomizePatch(suggestions []HelmFixSuggestion, dir string, opts ...EmitKustomizeOption) (*KustomizeEmitResult, error) {
+	var options emitKustomizeOptions
+	for _, opt := range opts {
+		if opt != nil {
+			opt(&options)
+		}
+	}
+
+	plannedPatches, result, err := planKustomizePatches(suggestions, dir, options.chartCache)
+	if err != nil {
+		return nil, err
+	}
 	if len(plannedPatches) == 0 {
 		return result, nil
+	}
+
+	// Ensure the output directory exists
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return nil, fmt.Errorf("failed to create kustomize output dir %q: %w", dir, err)
+	}
+
+	lockPath := filepath.Join(dir, ".kust.lock")
+	fileLock := flock.New(lockPath)
+	locked, err := fileLock.TryLock()
+	if err != nil {
+		return nil, fmt.Errorf("failed to lock output directory %q: %w", dir, err)
+	}
+	if !locked {
+		return nil, fmt.Errorf("output directory %q is locked by another operation", dir)
+	}
+	defer func() {
+		_ = fileLock.Unlock()
+	}()
+
+	// Refuse non-empty destination directory unless explicit overwrite permission is granted
+	if !options.overwrite {
+		entries, err := os.ReadDir(dir)
+		if err != nil && !os.IsNotExist(err) {
+			return nil, fmt.Errorf("failed to inspect output directory %q: %w", dir, err)
+		}
+		var nonEmpty bool
+		for _, e := range entries {
+			if e.Name() != ".kust.lock" {
+				nonEmpty = true
+				break
+			}
+		}
+		if nonEmpty {
+			return nil, fmt.Errorf("output directory %q is not empty; pass --no-confirm to write into it anyway", dir)
+		}
+	}
+
+	// Restrict permissions on the output directory containing rendered manifests, enforcing 0700 on existing dirs too.
+	if err := os.Chmod(dir, 0700); err != nil {
+		return nil, fmt.Errorf("failed to restrict permissions on kustomize output dir %q: %w", dir, err)
 	}
 
 	kust := kustomizationDoc{
@@ -1509,23 +2338,33 @@ func EmitKustomizePatch(suggestions []HelmFixSuggestion, dir string) (*Kustomize
 		baseContent = append(baseContent, p.baseDoc...)
 	}
 
-	// Create an isolated staging directory inside dir before promotion.
-	// Staging protects the destination from write and validation failures before promotion.
-	// If any write or verification fails, stagingDir is wiped without modifying destination files.
-	stagingDir, err := os.MkdirTemp(dir, ".kust-staging-")
+	root, err := os.OpenRoot(dir)
 	if err != nil {
+		return nil, fmt.Errorf("failed to open output directory %q: %w", dir, err)
+	}
+	defer root.Close()
+
+	// Create an isolated staging directory inside root before promotion.
+	// Staging protects the destination from write and validation failures before promotion.
+	// If any write or verification fails, staging directory is wiped under root without modifying destination files.
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return nil, fmt.Errorf("failed to generate staging directory name: %w", err)
+	}
+	stagingRelDir := fmt.Sprintf(".kust-staging-%d-%x", os.Getpid(), b)
+	if err := root.Mkdir(stagingRelDir, 0700); err != nil {
 		return nil, fmt.Errorf("failed to create staging directory in %q: %w", dir, err)
 	}
 	keepStaging := false
 	defer func() {
 		if !keepStaging {
-			_ = os.RemoveAll(stagingDir)
+			_ = root.RemoveAll(stagingRelDir)
 		}
 	}()
 
-	stagingRoot, err := os.OpenRoot(stagingDir)
+	stagingRoot, err := root.OpenRoot(stagingRelDir)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open staging directory %q: %w", stagingDir, err)
+		return nil, fmt.Errorf("failed to open staging directory %q: %w", stagingRelDir, err)
 	}
 	defer stagingRoot.Close()
 
@@ -1534,6 +2373,11 @@ func EmitKustomizePatch(suggestions []HelmFixSuggestion, dir string) (*Kustomize
 	if len(baseContent) > 0 {
 		if _, err := ensureSubpath(dir, "base.yaml"); err != nil {
 			return nil, err
+		}
+		if failKustomizeWriteDuringPublication != nil {
+			if err := failKustomizeWriteDuringPublication("base.yaml"); err != nil {
+				return nil, err
+			}
 		}
 		if err := writeRestrictedFile(stagingRoot, "base.yaml", baseContent); err != nil {
 			return nil, fmt.Errorf("failed to write base.yaml: %w", err)
@@ -1546,6 +2390,11 @@ func EmitKustomizePatch(suggestions []HelmFixSuggestion, dir string) (*Kustomize
 	for _, p := range plannedPatches {
 		if _, err := ensureSubpath(dir, p.patchFileName); err != nil {
 			return nil, err
+		}
+		if failKustomizeWriteDuringPublication != nil {
+			if err := failKustomizeWriteDuringPublication(p.patchFileName); err != nil {
+				return nil, err
+			}
 		}
 		if err := writeRestrictedFile(stagingRoot, p.patchFileName, p.patchBytes); err != nil {
 			return nil, fmt.Errorf("failed to write patch file %q: %w", p.patchFileName, err)
@@ -1566,6 +2415,11 @@ func EmitKustomizePatch(suggestions []HelmFixSuggestion, dir string) (*Kustomize
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal kustomization.yaml: %w", err)
 	}
+	if failKustomizeWriteDuringPublication != nil {
+		if err := failKustomizeWriteDuringPublication("kustomization.yaml"); err != nil {
+			return nil, err
+		}
+	}
 	if err := writeRestrictedFile(stagingRoot, "kustomization.yaml", kustBytes); err != nil {
 		return nil, fmt.Errorf("failed to write kustomization.yaml: %w", err)
 	}
@@ -1573,40 +2427,69 @@ func EmitKustomizePatch(suggestions []HelmFixSuggestion, dir string) (*Kustomize
 
 	_ = stagingRoot.Close()
 
-	// 5. Verify symlink containment on any pre-existing files before moving
+	// 5. Reject unsupported entries before publication, keeping backup operations root-contained.
+	// Preserves existing directories, symlinks, and non-regular files from being overwritten or destroyed on failure.
 	for _, fName := range stagedFiles {
-		dstPath := filepath.Join(dir, fName)
-		if fi, err := os.Lstat(dstPath); err == nil && (fi.Mode()&os.ModeSymlink != 0) {
-			resolved, err := filepath.EvalSymlinks(dstPath)
-			if err != nil || !isPathContained(dir, resolved) {
-				return nil, fmt.Errorf("pre-existing file %q is a symlink escaping output directory %q", fName, dir)
+		fi, err := root.Lstat(fName)
+		if err == nil {
+			if fi.IsDir() {
+				return nil, fmt.Errorf("unsupported destination entry %q: cannot overwrite directory", fName)
+			}
+			if fi.Mode()&os.ModeSymlink != 0 {
+				target, linkErr := root.Readlink(fName)
+				if linkErr == nil && (filepath.IsAbs(target) || strings.HasPrefix(filepath.Clean(target), "..")) {
+					return nil, fmt.Errorf("pre-existing file %q is a symlink escaping output directory %q", fName, dir)
+				}
+				return nil, fmt.Errorf("unsupported destination entry %q: cannot overwrite symbolic link", fName)
+			}
+			if !fi.Mode().IsRegular() {
+				return nil, fmt.Errorf("unsupported destination entry %q: unsupported file type", fName)
+			}
+		} else if !errors.Is(err, fs.ErrNotExist) {
+			return nil, fmt.Errorf("failed to inspect destination file %q: %w", fName, err)
+		}
+	}
+
+	if !options.overwrite {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			return nil, fmt.Errorf("failed to inspect output directory %q: %w", dir, err)
+		}
+		for _, e := range entries {
+			if e.Name() != ".kust.lock" && e.Name() != stagingRelDir {
+				return nil, fmt.Errorf("output directory %q is not empty; pass --no-confirm to write into it anyway", dir)
 			}
 		}
 	}
 
 	// 6. Atomically promote staged files to destination directory with rollback on failure
-	backupDir := filepath.Join(stagingDir, ".backup")
-	if err := os.MkdirAll(backupDir, 0700); err != nil {
-		return nil, fmt.Errorf("failed to create backup directory in %q: %w", stagingDir, err)
+	backupRelDir := filepath.Join(stagingRelDir, ".backup")
+	if err := root.Mkdir(backupRelDir, 0700); err != nil {
+		return nil, fmt.Errorf("failed to create backup directory in %q: %w", stagingRelDir, err)
 	}
 
-	// Back up existing regular files that will be overwritten
+	// Back up existing regular files that will be overwritten, keeping inspection and backup root-contained
 	for _, fName := range stagedFiles {
-		dstPath := filepath.Join(dir, fName)
-		fi, err := os.Lstat(dstPath)
-		if err == nil && !fi.IsDir() {
-			backupPath := filepath.Join(backupDir, fName)
-			if err := os.Rename(dstPath, backupPath); err != nil {
-				if restoreErr := restoreBackups(backupDir, dir); restoreErr != nil {
+		fi, err := root.Lstat(fName)
+		if err == nil && fi.Mode().IsRegular() {
+			backupRelPath := filepath.Join(backupRelDir, fName)
+			if err := root.Rename(fName, backupRelPath); err != nil {
+				if restoreErr := restoreBackups(root, backupRelDir); restoreErr != nil {
 					keepStaging = true
-					return nil, fmt.Errorf("failed to back up %q: %w; backups not restored and kept in %s: %v", fName, err, backupDir, restoreErr)
+					return nil, fmt.Errorf("failed to back up %q: %w; backups not restored and kept in %s: %v", fName, err, filepath.Join(dir, backupRelDir), restoreErr)
 				}
 				return nil, fmt.Errorf("failed to back up existing file %q before promotion: %w", fName, err)
 			}
-		} else if err != nil && !errors.Is(err, fs.ErrNotExist) {
-			if restoreErr := restoreBackups(backupDir, dir); restoreErr != nil {
+		} else if err == nil {
+			if restoreErr := restoreBackups(root, backupRelDir); restoreErr != nil {
 				keepStaging = true
-				return nil, fmt.Errorf("failed to inspect destination file %q: %w; backups not restored and kept in %s: %v", fName, err, backupDir, restoreErr)
+				return nil, fmt.Errorf("unsupported destination entry %q changed before promotion; backups not restored and kept in %s: %v", fName, filepath.Join(dir, backupRelDir), restoreErr)
+			}
+			return nil, fmt.Errorf("unsupported destination entry %q changed before promotion", fName)
+		} else if err != nil && !errors.Is(err, fs.ErrNotExist) {
+			if restoreErr := restoreBackups(root, backupRelDir); restoreErr != nil {
+				keepStaging = true
+				return nil, fmt.Errorf("failed to inspect destination file %q: %w; backups not restored and kept in %s: %v", fName, err, filepath.Join(dir, backupRelDir), restoreErr)
 			}
 			return nil, fmt.Errorf("failed to inspect destination file %q before promotion: %w", fName, err)
 		}
@@ -1615,9 +2498,14 @@ func EmitKustomizePatch(suggestions []HelmFixSuggestion, dir string) (*Kustomize
 	var promoted []string
 	var promotionErr error
 	for _, fName := range stagedFiles {
-		srcPath := filepath.Join(stagingDir, fName)
-		dstPath := filepath.Join(dir, fName)
-		if err := os.Rename(srcPath, dstPath); err != nil {
+		if failKustomizeWriteDuringPublication != nil {
+			if err := failKustomizeWriteDuringPublication("publish:" + fName); err != nil {
+				promotionErr = err
+				break
+			}
+		}
+		srcRelPath := filepath.Join(stagingRelDir, fName)
+		if err := root.Rename(srcRelPath, fName); err != nil {
 			promotionErr = err
 			break
 		}
@@ -1626,18 +2514,17 @@ func EmitKustomizePatch(suggestions []HelmFixSuggestion, dir string) (*Kustomize
 
 	if promotionErr != nil {
 		var removalErrs []error
-		// Roll back partially promoted files
+		// Roll back partially promoted files under root
 		for _, fName := range promoted {
-			dstPath := filepath.Join(dir, fName)
-			if err := os.Remove(dstPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			if err := root.Remove(fName); err != nil && !errors.Is(err, fs.ErrNotExist) {
 				removalErrs = append(removalErrs, fmt.Errorf("failed to remove partially promoted file %q: %w", fName, err))
 			}
 		}
-		restoreErr := restoreBackups(backupDir, dir)
+		restoreErr := restoreBackups(root, backupRelDir)
 		if len(removalErrs) > 0 || restoreErr != nil {
 			keepStaging = true
 			return nil, fmt.Errorf("failed to promote staged files: %w; rollback incomplete (backups preserved in %s): removal errors: %v; restore errors: %v",
-				promotionErr, backupDir, errors.Join(removalErrs...), restoreErr)
+				promotionErr, filepath.Join(dir, backupRelDir), errors.Join(removalErrs...), restoreErr)
 		}
 		return nil, fmt.Errorf("failed to promote staged file: %w", promotionErr)
 	}
@@ -1645,5 +2532,6 @@ func EmitKustomizePatch(suggestions []HelmFixSuggestion, dir string) (*Kustomize
 	for _, p := range plannedPatches {
 		result.EmittedResources = append(result.EmittedResources, p.resIdent)
 	}
+
 	return result, nil
 }

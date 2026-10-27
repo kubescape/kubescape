@@ -767,7 +767,48 @@ fixed normally, each document there being a resource in its own right.
 
 Helm charts are reported as suggestions rather than edited, because a rendered
 resource's fix path does not map reliably back to a template line. Resources
-from any other source are listed as unfixed with the reason.
+from any other source are listed as unfixed with the reason. To generate machine-applicable
+Kustomize JSON 6902 patches for Helm-rendered resources, use `--output-kustomize`.
+
+### Helm-rendered resources and Kustomize overlays
+
+When Helm charts cannot be modified in place (for example, third-party charts or GitOps pipelines),
+pass `--output-kustomize <dir>` to generate a machine-applicable overlay consisting of
+a `kustomization.yaml`, a `base.yaml` snapshot of rendered resources, and RFC 6902 JSON patch
+files targeting each remediated resource.
+
+#### Usage
+
+```bash
+# Scan a local Helm chart directory
+kubescape scan ./my-chart --format json --output output.json
+
+# Generate Kustomize patch overlay
+kubescape fix output.json --output-kustomize ./patches --values ./my-chart/values.yaml
+
+# Build and apply the overlay
+kustomize build ./patches | kubectl apply -f -
+```
+
+#### Directory protection and staging
+
+Writing to `--output-kustomize` follows the output directory protection policy:
+- Generation is staged in a temporary directory and promoted to the target directory under exclusive file locking. If writing a file fails, the operation attempts a best-effort rollback. If the process is abruptly terminated or killed during publication, partial output or leftover staging directories (`.kust-staging-*`) may remain on disk:
+  - Backups of original pre-existing files that were replaced are held under `.kust-staging-*/.backup` within the output directory; inspect and manually restore or remove them as appropriate before retrying.
+  - Because leftover staging directories make the output directory non-empty, retrying `kubescape fix` against the directory will require `--no-confirm`.
+- When overwrite is confirmed or `--no-confirm` is passed, files that the command generates (`base.yaml`, `kustomization.yaml`, and the generated patch files) overwrite same-named files. Other files in the directory are left in place, but the new `kustomization.yaml` does not reference them.
+
+#### Applicable Helm options
+
+When resolving and rendering chart templates for Kustomize overlays, you can supply Helm value options to match scan-time parameters:
+- `-f`, `--values`: Provide one or more YAML values files.
+- `--set`, `--set-string`, `--set-file`: Override specific chart values.
+- `--release-name`: Release name used during rendering.
+- `--release-namespace`: Release namespace used during rendering. Namespaced resources without an explicit template namespace are scoped to this namespace, while cluster-scoped resources remain namespace-free.
+
+#### Container workload refusal
+
+Container workloads from ordinary scan reports are declined under `--output-kustomize`. Ordinary scan reports redact container environment configuration (substituting `XXXXXX` and stripping `envFrom`), and ordinary report producers do not supply scan-time provenance (`UnredactedBase` or `FidelityProvenance`). Generating patches from redacted reports could drop production environment variables. Eligible non-container Helm resources (such as `Service`) are emitted normally.
 
 ### Cluster scans
 
@@ -829,7 +870,15 @@ a config omits, so the live `envFrom` survives.
 | `--no-confirm` | Apply without confirmation | `false` |
 | `-i`, `--interactive` | Show each resource's changes and ask before fixing it, instead of one prompt for the whole run. Only manifest files fixed in place are asked about: with `--dry-run`, `--no-confirm`, `--output-dir` or a cluster scan, the changes are shown without asking | `false` |
 | `--skip-user-values` | Skip changes requiring user values | `true` |
-| `--output-dir` | Write the fixes into this directory instead of their default destination. Manifest files: fixed copies that mirror the scanned tree, originals untouched. Cluster scans: one patched manifest per resource | *(fix in place / print to stdout)* |
+| `--base-path` | Restrict fixes to this directory: the report's own recorded scan location must resolve inside it | - |
+| `--output-dir` | Write the fixes into this directory instead of their default destination. Manifest files: fixed copies that mirror the scanned tree, originals untouched. Cluster scans: one patched manifest per resource. A non-empty directory is refused unless `--no-confirm` is passed | *(fix in place / print to stdout)* |
+| `--output-kustomize` | Write a `kustomization.yaml` and JSON 6902 patch files for Helm-rendered resources into this directory. A non-empty directory is refused unless `--no-confirm` is passed | - |
+| `-f`, `--values` | Specify Helm values in a YAML file (can specify multiple) | - |
+| `--set` | Set Helm values on the command line (e.g. `key1=val1,key2=val2`) | - |
+| `--set-string` | Set Helm STRING values on the command line | - |
+| `--set-file` | Set Helm values from respective files specified via the command line | - |
+| `--release-name` | Release name to use when rendering Helm charts | - |
+| `--release-namespace` | Release namespace to use when rendering Helm charts | - |
 | `--include-controls` | Remediate only these control IDs (comma-separated, case-insensitive). Disables `--container-profile` drift remediation — see [selecting controls to fix](#selecting-controls-to-fix) | *(all)* |
 | `--skip-controls` | Leave these control IDs untouched (comma-separated, case-insensitive). Takes precedence over `--include-controls`, and disables `--container-profile` drift remediation | - |
 
@@ -948,10 +997,11 @@ kubectl apply -f ./fixes
 > context — the prompt is skipped and no changes are applied. Use
 > `--no-confirm` to apply fixes in non-interactive contexts.
 >
-> The prompt does not apply to cluster scans, or to manifest files fixed with
-> `--output-dir`: neither path edits anything in place, so there is nothing to
-> confirm. `--interactive` shows the changes on those paths without asking. With
-> `--output-dir`, a non-empty directory is refused unless you pass
+> The in-place file modification confirmation prompt does not apply to cluster
+> scans or `--output-dir` (which write manifests to stdout or separate files).
+> However, with `--output-kustomize`, if the target directory already contains
+> Kustomize files, Kubescape prompts for confirmation before overwriting; in
+> non-interactive contexts, a non-empty directory is refused unless you pass
 > `--no-confirm`.
 
 ---
