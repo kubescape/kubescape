@@ -113,4 +113,22 @@ func TestCompareReportsVulnerabilityWithUnreadableFile(t *testing.T) {
 		assert.Equal(t, VulnerabilityReport, kind)
 		assert.Contains(t, err.Error(), "loading base report")
 	})
+
+	t.Run("truncated JSON head file", func(t *testing.T) {
+		truncated := writeRawReport(t, `{"results":[]`)
+		kind, _, _, err := CompareReports(vulnerability, truncated, Options{})
+		require.Error(t, err)
+		assert.NotErrorIs(t, err, ErrMixedReportKinds)
+		assert.Equal(t, VulnerabilityReport, kind)
+		assert.Contains(t, err.Error(), "loading head report")
+	})
+
+	t.Run("truncated JSON base file", func(t *testing.T) {
+		truncated := writeRawReport(t, `{"results":[]`)
+		kind, _, _, err := CompareReports(truncated, vulnerability, Options{})
+		require.Error(t, err)
+		assert.NotErrorIs(t, err, ErrMixedReportKinds)
+		assert.Equal(t, VulnerabilityReport, kind)
+		assert.Contains(t, err.Error(), "loading base report")
+	})
 }

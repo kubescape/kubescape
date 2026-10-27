@@ -495,4 +495,26 @@ func TestDiff_UnreadableReportKeepsLoaderError(t *testing.T) {
 		assert.Contains(t, err.Error(), "loading head report")
 		assert.Contains(t, err.Error(), "no such file or directory")
 	})
+
+	t.Run("truncated base file", func(t *testing.T) {
+		_, err := ks.Diff(&metav1.DiffInfo{
+			BaseFile: writeReport(t, `{"results":[]`),
+			HeadFile: writeReport(t, imageReportHead),
+			Format:   "json",
+		})
+		require.Error(t, err)
+		assert.NotErrorIs(t, err, diff.ErrMixedReportKinds)
+		assert.Contains(t, err.Error(), "loading base report")
+	})
+
+	t.Run("truncated head file", func(t *testing.T) {
+		_, err := ks.Diff(&metav1.DiffInfo{
+			BaseFile: writeReport(t, imageReportBase),
+			HeadFile: writeReport(t, `{"results":[]`),
+			Format:   "json",
+		})
+		require.Error(t, err)
+		assert.NotErrorIs(t, err, diff.ErrMixedReportKinds)
+		assert.Contains(t, err.Error(), "loading head report")
+	})
 }
