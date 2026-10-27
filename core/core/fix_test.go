@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -1250,4 +1251,70 @@ stringData:
 	if data, err := os.ReadFile(basePath); err == nil {
 		assert.NotContains(t, string(data), "outside-sentinel-value-xyz", "outside chart content must not be copied into base.yaml")
 	}
+}
+
+// TestFix_OutputPostRendererWithoutKustomizeLogsWarning verifies that specifying
+// --output-post-renderer without --output-kustomize logs a warning and declines emission.
+func TestFix_OutputPostRendererWithoutKustomizeLogsWarning(t *testing.T) {
+	dir := t.TempDir()
+	reportPath := buildFixableHelmReport(t, dir)
+	postDir := filepath.Join(t.TempDir(), "post-output")
+
+	readLog := captureLoggerOutput(t)
+
+	ks := &Kubescape{Ctx: context.Background()}
+	err := ks.Fix(&metav1.FixInfo{
+		ReportFile:      reportPath,
+		PostRendererDir: postDir,
+		HelmValueOptions: cautils.HelmValueOptions{
+			ValueFiles: []string{filepath.Join(dir, "values.yaml")},
+		},
+	})
+	require.NoError(t, err)
+
+	logs := readLog()
+	assert.Contains(t, logs, "--output-post-renderer was passed without --output-kustomize")
+	assert.NoFileExists(t, filepath.Join(postDir, "renderer.sh"))
+}
+
+// TestFix_OutputPostRendererSuccess verifies that specifying both --output-kustomize
+// and --output-post-renderer successfully produces the Kustomize overlay and executable
+// post-renderer script with usage instructions.
+func TestFix_OutputPostRendererSuccess(t *testing.T) {
+	dir := t.TempDir()
+	reportPath := buildFixableHelmReport(t, dir)
+	kustDir := filepath.Join(t.TempDir(), "kust-output")
+	postDir := filepath.Join(t.TempDir(), "post-output")
+
+	readLog := captureLoggerOutput(t)
+
+	ks := &Kubescape{Ctx: context.Background()}
+	err := ks.Fix(&metav1.FixInfo{
+		ReportFile:      reportPath,
+		KustomizeDir:    kustDir,
+		PostRendererDir: postDir,
+		HelmValueOptions: cautils.HelmValueOptions{
+			ValueFiles: []string{filepath.Join(dir, "values.yaml")},
+		},
+	})
+	require.NoError(t, err)
+
+	assert.DirExists(t, kustDir)
+	assert.FileExists(t, filepath.Join(kustDir, "kustomization.yaml"))
+	assert.FileExists(t, filepath.Join(kustDir, "base.yaml"))
+
+	shPath := filepath.Join(postDir, "renderer.sh")
+	assert.FileExists(t, shPath)
+	assert.FileExists(t, filepath.Join(postDir, "renderer.bat"))
+
+	info, err := os.Stat(shPath)
+	require.NoError(t, err)
+	if runtime.GOOS != "windows" {
+		assert.Equal(t, os.FileMode(0755), info.Mode().Perm())
+	}
+
+	logs := readLog()
+	assert.Contains(t, logs, "Kustomize patches written to")
+	assert.Contains(t, logs, "Helm post-renderer script written to")
+	assert.Contains(t, logs, "--post-renderer")
 }

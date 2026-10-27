@@ -1009,6 +1009,43 @@ func resolveBaseObject(s HelmFixSuggestion, chartCache map[string]map[string][]w
 	return candidate, ""
 }
 
+// verifyChartDependenciesContainment inspects Chart.yaml dependencies and ensures
+// all local repository paths (e.g. file://...) resolve within allowedBasePath.
+func verifyChartDependenciesContainment(chartDir, allowedBasePath string) error {
+	resolvedAllowedBase, err := filepath.EvalSymlinks(allowedBasePath)
+	if err != nil {
+		return fmt.Errorf("invalid allowed base path %q: %w", allowedBasePath, err)
+	}
+
+	chartMetaPath := filepath.Join(chartDir, "Chart.yaml")
+	data, err := os.ReadFile(chartMetaPath)
+	if err != nil {
+		return nil // Non-fatal if Chart.yaml is absent or unreadable
+	}
+
+	var meta struct {
+		Dependencies []struct {
+			Name       string `yaml:"name"`
+			Repository string `yaml:"repository"`
+		} `yaml:"dependencies"`
+	}
+	if err := yaml.Unmarshal(data, &meta); err != nil {
+		return nil
+	}
+
+	for _, dep := range meta.Dependencies {
+		if strings.HasPrefix(dep.Repository, "file://") {
+			relPath := strings.TrimPrefix(dep.Repository, "file://")
+			targetPath := filepath.Join(chartDir, relPath)
+			resolvedTarget, err := filepath.EvalSymlinks(targetPath)
+			if err != nil || !isPathContained(resolvedAllowedBase, resolvedTarget) {
+				return fmt.Errorf("chart dependency %q references repository %q outside allowed base path %q", dep.Name, dep.Repository, allowedBasePath)
+			}
+		}
+	}
+	return nil
+}
+
 // validateChartFilesContainment ensures that the chart directory and every file, directory, or symlink
 // target inside it resolves within allowedBasePath, preventing Helm loader from following symlinks
 // or directory symlinks to external files outside the allowed boundary.
@@ -1084,6 +1121,9 @@ func loadUnredactedFromChart(s HelmFixSuggestion, chartCache map[string]map[stri
 		if err := validateChartFilesContainment(s.ChartPath, s.AllowedBasePath); err != nil {
 			return nil, err
 		}
+		if err := verifyChartDependenciesContainment(s.ChartPath, s.AllowedBasePath); err != nil {
+			return nil, err
+		}
 		for _, vf := range s.HelmValueOptions.ValueFiles {
 			resolvedVF, err := filepath.EvalSymlinks(vf)
 			if err != nil || !isPathContained(s.AllowedBasePath, resolvedVF) {
@@ -1131,6 +1171,12 @@ func loadUnredactedFromChart(s HelmFixSuggestion, chartCache map[string]map[stri
 	targetName := s.Resource.GetName()
 	targetNamespace := s.Resource.GetNamespace()
 
+	isClusterScoped := isClusterScopedResource(resourceKey{
+		Group:   targetGroup,
+		Version: targetVersion,
+		Kind:    targetKind,
+	})
+
 	var matches []map[string]interface{}
 	for _, workloads := range sourceToWorkloads {
 		for _, w := range workloads {
@@ -1138,21 +1184,30 @@ func loadUnredactedFromChart(s HelmFixSuggestion, chartCache map[string]map[stri
 			candKind := w.GetKind()
 			candName := w.GetName()
 			candNamespace := w.GetNamespace()
-			if candNamespace == "" && s.HelmValueOptions.ReleaseNamespace != "" {
-				candNamespace = s.HelmValueOptions.ReleaseNamespace
+
+			if candGroup != targetGroup || candVersion != targetVersion ||
+				candKind != targetKind || candName != targetName {
+				continue
 			}
 
-			if candGroup == targetGroup && candVersion == targetVersion &&
-				candKind == targetKind && candName == targetName &&
-				candNamespace == targetNamespace {
-				obj := w.GetObject()
-				if localworkload.IsTypeLocalWorkload(obj) {
-					lw := localworkload.NewLocalWorkload(obj)
-					lw.DeletePathEntry()
-					obj = lw.GetObject()
+			if isClusterScoped {
+				// Cluster-scoped resources match on GVK + Name; namespace is ignored.
+			} else {
+				// Namespaced resources: exact namespace match, or candidate matching ReleaseNamespace when target namespace is empty.
+				if candNamespace != targetNamespace {
+					if targetNamespace != "" || s.HelmValueOptions.ReleaseNamespace == "" || candNamespace != s.HelmValueOptions.ReleaseNamespace {
+						continue
+					}
 				}
-				matches = append(matches, deepCopyMap(obj))
 			}
+
+			obj := w.GetObject()
+			if localworkload.IsTypeLocalWorkload(obj) {
+				lw := localworkload.NewLocalWorkload(obj)
+				lw.DeletePathEntry()
+				obj = lw.GetObject()
+			}
+			matches = append(matches, deepCopyMap(obj))
 		}
 	}
 
@@ -1445,29 +1500,49 @@ func EmitKustomizePatch(suggestions []HelmFixSuggestion, dir string) (*Kustomize
 		baseContent = append(baseContent, p.baseDoc...)
 	}
 
+	// Create an isolated staging directory inside dir to guarantee atomic output.
+	// If any write or validation fails, stagingDir is wiped and dir remains pristine.
+	stagingDir, err := os.MkdirTemp(dir, ".kust-staging-")
+	if err != nil {
+		return nil, fmt.Errorf("failed to create staging directory in %q: %w", dir, err)
+	}
+	defer os.RemoveAll(stagingDir)
+
+	stagingRoot, err := os.OpenRoot(stagingDir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open staging directory %q: %w", stagingDir, err)
+	}
+	defer stagingRoot.Close()
+
+	var stagedFiles []string
+
 	if len(baseContent) > 0 {
 		if _, err := ensureSubpath(dir, "base.yaml"); err != nil {
 			return nil, err
 		}
-		if err := writeRestrictedFile(root, "base.yaml", baseContent); err != nil {
+		if err := writeRestrictedFile(stagingRoot, "base.yaml", baseContent); err != nil {
 			return nil, fmt.Errorf("failed to write base.yaml: %w", err)
 		}
+		stagedFiles = append(stagedFiles, "base.yaml")
 		kust.Resources = append(kust.Resources, "base.yaml")
 	}
 
-	// 3. Write patch files for the planned patches
+	// 3. Write patch files for the planned patches into staging
 	for _, p := range plannedPatches {
-		if err := writeRestrictedFile(root, p.patchFileName, p.patchBytes); err != nil {
+		if _, err := ensureSubpath(dir, p.patchFileName); err != nil {
+			return nil, err
+		}
+		if err := writeRestrictedFile(stagingRoot, p.patchFileName, p.patchBytes); err != nil {
 			return nil, fmt.Errorf("failed to write patch file %q: %w", p.patchFileName, err)
 		}
+		stagedFiles = append(stagedFiles, p.patchFileName)
 		kust.Patches = append(kust.Patches, kustomizePatchEntry{
 			Path:   p.patchFileName,
 			Target: p.target,
 		})
-		result.EmittedResources = append(result.EmittedResources, p.resIdent)
 	}
 
-	// 4. Write kustomization.yaml
+	// 4. Write kustomization.yaml into staging
 	if _, err := ensureSubpath(dir, "kustomization.yaml"); err != nil {
 		return nil, err
 	}
@@ -1476,8 +1551,35 @@ func EmitKustomizePatch(suggestions []HelmFixSuggestion, dir string) (*Kustomize
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal kustomization.yaml: %w", err)
 	}
-	if err := writeRestrictedFile(root, "kustomization.yaml", kustBytes); err != nil {
+	if err := writeRestrictedFile(stagingRoot, "kustomization.yaml", kustBytes); err != nil {
 		return nil, fmt.Errorf("failed to write kustomization.yaml: %w", err)
+	}
+	stagedFiles = append(stagedFiles, "kustomization.yaml")
+
+	_ = stagingRoot.Close()
+
+	// 5. Verify symlink containment on any pre-existing files before moving
+	for _, fName := range stagedFiles {
+		dstPath := filepath.Join(dir, fName)
+		if fi, err := os.Lstat(dstPath); err == nil && (fi.Mode()&os.ModeSymlink != 0) {
+			resolved, err := filepath.EvalSymlinks(dstPath)
+			if err != nil || !isPathContained(dir, resolved) {
+				return nil, fmt.Errorf("pre-existing file %q is a symlink escaping output directory %q", fName, dir)
+			}
+		}
+	}
+
+	// 6. Atomically promote staged files to destination directory
+	for _, fName := range stagedFiles {
+		srcPath := filepath.Join(stagingDir, fName)
+		dstPath := filepath.Join(dir, fName)
+		if err := os.Rename(srcPath, dstPath); err != nil {
+			return nil, fmt.Errorf("failed to promote staged file %q to %q: %w", fName, dir, err)
+		}
+	}
+
+	for _, p := range plannedPatches {
+		result.EmittedResources = append(result.EmittedResources, p.resIdent)
 	}
 	return result, nil
 }

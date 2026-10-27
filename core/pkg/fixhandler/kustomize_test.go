@@ -4417,3 +4417,190 @@ func TestReview4034_CustomResourceDriftRejectedAndRedactionRestricted(t *testing
 	require.Error(t, err3, "added envFrom under non-pod container path spec.rules.containers[0] must be rejected")
 	assert.Contains(t, err3.Error(), "spec.rules.containers[0].envFrom")
 }
+
+// TestKustomize_AtomicStagingRollbackOnFailure verifies that if writing any patch file
+// fails during overlay generation, the staging directory is cleaned up and no partial
+// base.yaml or corrupted files are left in the destination directory.
+func TestKustomize_AtomicStagingRollbackOnFailure(t *testing.T) {
+	outDir := t.TempDir()
+
+	deploy := makeResource("Deployment", "app1")
+	deploy.GetObject()["spec"] = map[string]interface{}{
+		"template": map[string]interface{}{
+			"spec": map[string]interface{}{
+				"containers": []interface{}{
+					map[string]interface{}{"name": "c1"},
+				},
+			},
+		},
+	}
+
+	// Two suggestions: first valid, second has an invalid path that fails ensureSubpath traversal check
+	suggestions := []HelmFixSuggestion{
+		{
+			Resource:           deploy,
+			ChartName:          "chart1",
+			FidelityProvenance: true,
+			FixPaths: []armotypes.FixPath{
+				{Path: "spec.template.spec.containers[0].securityContext.privileged", Value: "false"},
+			},
+		},
+	}
+
+	// Verify that if pre-existing files were not present, a clean run writes base.yaml
+	res, err := EmitKustomizePatch(suggestions, outDir)
+	require.NoError(t, err)
+	require.Len(t, res.EmittedResources, 1)
+	require.FileExists(t, filepath.Join(outDir, "base.yaml"))
+
+	// Force promotion failure by creating a directory where a staged file would be promoted
+	failDir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(failDir, "kustomization.yaml"), 0700))
+
+	// Calling EmitKustomizePatch into failDir must fail when promoting kustomization.yaml
+	_, err = EmitKustomizePatch(suggestions, failDir)
+	require.Error(t, err)
+
+	// Verify that staging directory was cleaned up and no .kust-staging-* remains
+	entries, readErr := os.ReadDir(failDir)
+	require.NoError(t, readErr)
+	for _, e := range entries {
+		assert.False(t, strings.HasPrefix(e.Name(), ".kust-staging-"), "staging directory must be removed on failure")
+	}
+}
+
+// TestKustomize_FileDependencyEscapingRootRejected verifies that verifyChartDependenciesContainment
+// detects and declines charts with file:// dependencies pointing outside AllowedBasePath.
+func TestKustomize_FileDependencyEscapingRootRejected(t *testing.T) {
+	allowedBase := t.TempDir()
+	outsideBase := t.TempDir()
+
+	chartDir := filepath.Join(allowedBase, "my-chart")
+	require.NoError(t, os.MkdirAll(chartDir, 0700))
+
+	// Outside dependency
+	outsideDep := filepath.Join(outsideBase, "outside-subchart")
+	require.NoError(t, os.MkdirAll(outsideDep, 0700))
+
+	relOutside, err := filepath.Rel(chartDir, outsideDep)
+	require.NoError(t, err)
+
+	chartYaml := fmt.Sprintf(`apiVersion: v2
+name: my-chart
+version: 0.1.0
+dependencies:
+  - name: outside-subchart
+    version: 0.1.0
+    repository: "file://%s"
+`, relOutside)
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "Chart.yaml"), []byte(chartYaml), 0600))
+
+	err = verifyChartDependenciesContainment(chartDir, allowedBase)
+	require.Error(t, err, "file:// dependency pointing outside allowed base path must be rejected")
+	assert.Contains(t, err.Error(), "references repository")
+	assert.Contains(t, err.Error(), "outside allowed base path")
+
+	// Valid in-tree dependency must pass
+	inTreeDep := filepath.Join(chartDir, "charts", "in-tree-subchart")
+	require.NoError(t, os.MkdirAll(inTreeDep, 0700))
+	validChartYaml := `apiVersion: v2
+name: my-chart
+version: 0.1.0
+dependencies:
+  - name: in-tree-subchart
+    version: 0.1.0
+    repository: "file://./charts/in-tree-subchart"
+`
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "Chart.yaml"), []byte(validChartYaml), 0600))
+	err = verifyChartDependenciesContainment(chartDir, allowedBase)
+	require.NoError(t, err, "in-tree file:// dependency must pass containment verification")
+}
+
+// TestKustomize_ClusterRoleAndNamespacelessServiceMatching verifies that cluster-scoped
+// resources (ClusterRole) and namespace-less services are matched correctly against candidates
+// without namespace mismatch rejections.
+func TestKustomize_ClusterRoleAndNamespacelessServiceMatching(t *testing.T) {
+	outDir := t.TempDir()
+
+	// 1. ClusterRole (cluster-scoped, group rbac.authorization.k8s.io, no namespace)
+	clusterRoleObj := map[string]interface{}{
+		"apiVersion": "rbac.authorization.k8s.io/v1",
+		"kind":       "ClusterRole",
+		"metadata": map[string]interface{}{
+			"name": "secret-reader",
+		},
+		"rules": []interface{}{
+			map[string]interface{}{
+				"apiGroups": []interface{}{""},
+				"resources": []interface{}{"secrets"},
+				"verbs":     []interface{}{"get", "watch", "list"},
+			},
+		},
+	}
+	crRes := reporthandling.Resource{
+		Object: clusterRoleObj,
+		Source: &reporthandling.Source{FileType: reporthandling.SourceTypeHelmChart},
+	}
+
+	// 2. Namespace-less Service (namespaced kind, but metadata has no namespace)
+	svcObj := map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "Service",
+		"metadata": map[string]interface{}{
+			"name": "my-service",
+		},
+		"spec": map[string]interface{}{
+			"selector": map[string]interface{}{"app": "frontend"},
+			"ports": []interface{}{
+				map[string]interface{}{"port": 80},
+			},
+		},
+	}
+	svcRes := reporthandling.Resource{
+		Object: svcObj,
+		Source: &reporthandling.Source{FileType: reporthandling.SourceTypeHelmChart},
+	}
+
+	suggestions := []HelmFixSuggestion{
+		{
+			Resource:           &crRes,
+			ChartName:          "auth-chart",
+			FidelityProvenance: true,
+			UnredactedBase:     deepCopyMap(clusterRoleObj),
+			FixPaths: []armotypes.FixPath{
+				{Path: "metadata.labels.hardened", Value: "true"},
+			},
+		},
+		{
+			Resource:           &svcRes,
+			ChartName:          "auth-chart",
+			FidelityProvenance: true,
+			UnredactedBase:     deepCopyMap(svcObj),
+			FixPaths: []armotypes.FixPath{
+				{Path: "metadata.labels.hardened", Value: "true"},
+			},
+		},
+	}
+
+	res, err := EmitKustomizePatch(suggestions, outDir)
+	require.NoError(t, err)
+	require.Len(t, res.EmittedResources, 2)
+	assert.Contains(t, res.EmittedResources, "ClusterRole/secret-reader")
+	assert.Contains(t, res.EmittedResources, "Service/my-service")
+
+	// Read generated kustomization.yaml to verify target selector rules
+	kustData, err := os.ReadFile(filepath.Join(outDir, "kustomization.yaml"))
+	require.NoError(t, err)
+
+	var kust kustomizationDoc
+	require.NoError(t, yaml.Unmarshal(kustData, &kust))
+	require.Len(t, kust.Patches, 2)
+
+	for _, p := range kust.Patches {
+		if p.Target.Kind == "^ClusterRole$" {
+			assert.Empty(t, p.Target.Namespace, "ClusterRole target must have empty namespace")
+		} else if p.Target.Kind == "^Service$" {
+			assert.Equal(t, "default", p.Target.Namespace, "Namespaceless Service target must default to default namespace")
+		}
+	}
+}
