@@ -44,6 +44,7 @@ func TestFormatConfigOutputYAML(t *testing.T) {
 }
 
 func TestFormatConfigOutputText(t *testing.T) {
+	t.Setenv("FORCE_COLOR", "0")
 	cfg := &ConfigObj{
 		AccountID:      "account-123",
 		CloudAPIURL:    "https://api.example.com",
@@ -59,6 +60,7 @@ func TestFormatConfigOutputText(t *testing.T) {
 }
 
 func TestFormatConfigOutputTextOmitsEmptyValues(t *testing.T) {
+	t.Setenv("FORCE_COLOR", "0")
 	cfg := &ConfigObj{AccountID: "account-123"}
 
 	output, err := FormatConfigOutput(cfg, "text", false)
@@ -100,6 +102,7 @@ func TestFormatConfigOutputYAMLIncludesEmptyValuesWhenRequested(t *testing.T) {
 }
 
 func TestFormatConfigOutputDefaultFormatIsText(t *testing.T) {
+	t.Setenv("FORCE_COLOR", "0")
 	cfg := &ConfigObj{AccountID: "account-123"}
 
 	output, err := FormatConfigOutput(cfg, "", false)
@@ -170,6 +173,7 @@ func TestFormatConfigOutputYAMLParsesAsMap(t *testing.T) {
 }
 
 func TestFormatConfigOutputMasksAccessKey(t *testing.T) {
+	t.Setenv("FORCE_COLOR", "0")
 	const accessKey = "test-access-key-1234"
 	cfg := &ConfigObj{AccountID: "account-123", AccessKey: accessKey}
 
@@ -186,6 +190,7 @@ func TestFormatConfigOutputMasksAccessKey(t *testing.T) {
 }
 
 func TestFormatConfigOutputMasksShortAccessKeyInFull(t *testing.T) {
+	t.Setenv("FORCE_COLOR", "0")
 	for _, accessKey := range []string{"k", "12345678"} {
 		t.Run(accessKey, func(t *testing.T) {
 			output, err := FormatConfigOutput(&ConfigObj{AccessKey: accessKey}, "text", false)
