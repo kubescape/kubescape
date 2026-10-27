@@ -50,8 +50,12 @@ func NormalizeSeverity(severity string) string {
 		return "Medium"
 	case "low":
 		return "Low"
-	case "minimal", "informational", "untriaged", "unassigned", "negligible", "none":
+	case "minimal", "informational", "negligible", "none":
 		return "Negligible"
+	case "untriaged", "unassigned":
+		// No assessment is not an assessment of negligible risk. Keep these
+		// findings unknown so downstream gates retain their fail-closed behavior.
+		return "Unknown"
 	default:
 		return "Unknown"
 	}
