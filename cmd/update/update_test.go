@@ -1,13 +1,16 @@
 package update
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
 	"testing"
 
 	"github.com/kubescape/backend/pkg/versioncheck"
+	"github.com/kubescape/go-logger"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/meta"
 	metav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
@@ -144,11 +147,11 @@ func TestGetUpdateCmd_UnsupportedFormat(t *testing.T) {
 
 	cmd := GetUpdateCmd(&stubKubescape{ctx: context.Background()})
 	require.NotNil(t, cmd)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+	cmd.SetArgs([]string{"--format", "yaml"})
 
-	err := cmd.Flags().Set("format", "yaml")
-	require.NoError(t, err)
-
-	err = cmd.RunE(cmd, []string{})
+	err := cmd.Execute()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unsupported format \"yaml\"")
 }
@@ -217,4 +220,156 @@ func TestUpdateCommandDoesNotHonorSkipUpdateCheckEnv(t *testing.T) {
 
 	assert.True(t, isReal, "update command must use the real version-check handler at runtime")
 	assert.False(t, isMock, "update command must not use the skip-check mock when KS_SKIP_UPDATE_CHECK is set")
+}
+
+func TestGetUpdateCmd_DevelopmentVersion(t *testing.T) {
+	devVersions := []string{"", "v3.0.0-rc.1"}
+
+	for _, buildNum := range devVersions {
+		testName := buildNum
+		if testName == "" {
+			testName = "empty_build_number"
+		}
+
+		t.Run("text_"+testName, func(t *testing.T) {
+			withVersionCheckHandler(t, versioncheck.NewVersionCheckHandlerMock())
+			withVersionGlobals(t, buildNum, "v3.1.0")
+
+			cmd := GetUpdateCmd(&stubKubescape{ctx: context.Background()})
+			require.NotNil(t, cmd)
+
+			r, w, err := os.Pipe()
+			require.NoError(t, err)
+			origStdout := os.Stdout
+			os.Stdout = w
+			t.Cleanup(func() { os.Stdout = origStdout })
+
+			cmd.SetArgs([]string{"--format", "text"})
+			require.NoError(t, cmd.Execute())
+			require.NoError(t, w.Close())
+			out, err := io.ReadAll(r)
+			require.NoError(t, err)
+
+			assert.Contains(t, string(out), "Nothing to update: you are running the development version")
+		})
+
+		t.Run("json_"+testName, func(t *testing.T) {
+			withVersionCheckHandler(t, versioncheck.NewVersionCheckHandlerMock())
+			withVersionGlobals(t, buildNum, "v3.1.0")
+
+			cmd := GetUpdateCmd(&stubKubescape{ctx: context.Background()})
+			require.NotNil(t, cmd)
+
+			var buf bytes.Buffer
+			cmd.SetOut(&buf)
+			cmd.SetArgs([]string{"--format", "json"})
+			require.NoError(t, cmd.Execute())
+
+			var info UpdateInfo
+			require.NoError(t, json.Unmarshal(buf.Bytes(), &info))
+			assert.Equal(t, "Nothing to update: you are running the development version", info.Message)
+			assert.Empty(t, info.LatestVersion)
+		})
+	}
+}
+
+func TestGetUpdateCmd_FailedUpdateCheck_JSON(t *testing.T) {
+	withVersionCheckHandler(t, &stubVersionCheckHandler{latest: ""})
+	withVersionGlobals(t, "v3.0.0", "")
+
+	cmd := GetUpdateCmd(&stubKubescape{ctx: context.Background()})
+	require.NotNil(t, cmd)
+
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetArgs([]string{"--format", "json"})
+	require.NoError(t, cmd.Execute())
+
+	var info UpdateInfo
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &info))
+	assert.Equal(t, "Failed to check for updates", info.Message)
+	assert.Empty(t, info.LatestVersion)
+}
+
+func TestGetUpdateCmd_Text_AlreadyUpToDate(t *testing.T) {
+	withVersionCheckHandler(t, &stubVersionCheckHandler{latest: "v3.0.0"})
+	withVersionGlobals(t, "v3.0.0", "")
+
+	cmd := GetUpdateCmd(&stubKubescape{ctx: context.Background()})
+	require.NotNil(t, cmd)
+
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	origWriter := logger.L().GetWriter()
+	logger.L().SetWriter(w)
+	origStdout := os.Stdout
+	os.Stdout = w
+	origStderr := os.Stderr
+	os.Stderr = w
+	t.Cleanup(func() {
+		logger.L().SetWriter(origWriter)
+		os.Stdout = origStdout
+		os.Stderr = origStderr
+	})
+
+	cmd.SetArgs([]string{"--format", "text"})
+	require.NoError(t, cmd.Execute())
+	require.NoError(t, w.Close())
+	out, err := io.ReadAll(r)
+	require.NoError(t, err)
+
+	assert.Contains(t, string(out), "Nothing to update: you are running the latest version")
+}
+
+func TestGetUpdateCmd_Text_FailedUpdateCheck(t *testing.T) {
+	withVersionCheckHandler(t, &stubVersionCheckHandler{latest: ""})
+	withVersionGlobals(t, "v3.0.0", "")
+
+	cmd := GetUpdateCmd(&stubKubescape{ctx: context.Background()})
+	require.NotNil(t, cmd)
+
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	origWriter := logger.L().GetWriter()
+	logger.L().SetWriter(w)
+	origStdout := os.Stdout
+	os.Stdout = w
+	origStderr := os.Stderr
+	os.Stderr = w
+	t.Cleanup(func() {
+		logger.L().SetWriter(origWriter)
+		os.Stdout = origStdout
+		os.Stderr = origStderr
+	})
+
+	cmd.SetArgs([]string{"--format", "text"})
+	require.NoError(t, cmd.Execute())
+	require.NoError(t, w.Close())
+	out, err := io.ReadAll(r)
+	require.NoError(t, err)
+
+	assert.Contains(t, string(out), "Failed to check for updates")
+}
+
+type failingUpdateWriter struct {
+	err error
+}
+
+func (w failingUpdateWriter) Write([]byte) (int, error) {
+	return 0, w.err
+}
+
+func TestGetUpdateCmd_JSON_WriterError(t *testing.T) {
+	withVersionCheckHandler(t, &stubVersionCheckHandler{latest: "v3.0.0"})
+	withVersionGlobals(t, "v3.0.0", "")
+
+	writeErr := errors.New("cannot write output")
+	cmd := GetUpdateCmd(&stubKubescape{ctx: context.Background()})
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+	cmd.SetArgs([]string{"--format", "json"})
+	cmd.SetOut(failingUpdateWriter{err: writeErr})
+
+	err := cmd.Execute()
+	require.ErrorIs(t, err, writeErr)
 }
