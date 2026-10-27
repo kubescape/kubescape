@@ -4478,78 +4478,90 @@ func TestKustomize_AtomicStagingRollbackOnFailure(t *testing.T) {
 	}
 }
 
-// TestKustomize_FileDependencyEscapingRootRejected verifies that verifyChartDependenciesContainment
-// detects and declines charts with file:// dependencies pointing outside AllowedBasePath.
-func TestKustomize_FileDependencyEscapingRootRejected(t *testing.T) {
+// TestKustomize_VendoredChartWithOutsideOrMissingFileRepositoryAllowed verifies that
+// a chart declaring a dependency with repository: file://../child is not declined
+// when that original source was removed or lives outside allowedBase, provided the
+// chart dependency is vendored inside charts/ and all chart files are contained.
+func TestKustomize_VendoredChartWithOutsideOrMissingFileRepositoryAllowed(t *testing.T) {
 	allowedBase := t.TempDir()
 	outsideBase := t.TempDir()
 
-	chartDir := filepath.Join(allowedBase, "my-chart")
-	require.NoError(t, os.MkdirAll(chartDir, 0700))
+	chartDir := filepath.Join(allowedBase, "parent-chart")
+	require.NoError(t, os.MkdirAll(filepath.Join(chartDir, "templates"), 0700))
+	require.NoError(t, os.MkdirAll(filepath.Join(chartDir, "charts", "child", "templates"), 0700))
 
-	// Outside dependency
-	outsideDep := filepath.Join(outsideBase, "outside-subchart")
-	require.NoError(t, os.MkdirAll(outsideDep, 0700))
-
+	// Outside dependency path that does not exist in allowedBase
+	outsideDep := filepath.Join(outsideBase, "missing-child-source")
 	relOutside, err := filepath.Rel(chartDir, outsideDep)
 	require.NoError(t, err)
 
-	chartYaml := fmt.Sprintf(`apiVersion: v2
-name: my-chart
+	parentChartYaml := fmt.Sprintf(`apiVersion: v2
+name: parent-chart
 version: 0.1.0
 dependencies:
-  - name: outside-subchart
+  - name: child
     version: 0.1.0
     repository: "file://%s"
 `, relOutside)
-	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "Chart.yaml"), []byte(chartYaml), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "Chart.yaml"), []byte(parentChartYaml), 0600))
 
-	err = verifyChartDependenciesContainment(chartDir, allowedBase)
-	require.Error(t, err, "file:// dependency pointing outside allowed base path must be rejected")
-	assert.Contains(t, err.Error(), "references repository")
-	assert.Contains(t, err.Error(), "outside allowed base path")
-
-	// Valid in-tree dependency must pass
-	inTreeDep := filepath.Join(chartDir, "charts", "in-tree-subchart")
-	require.NoError(t, os.MkdirAll(inTreeDep, 0700))
-	validChartYaml := `apiVersion: v2
-name: my-chart
+	childChartYaml := `apiVersion: v2
+name: child
 version: 0.1.0
-dependencies:
-  - name: in-tree-subchart
-    version: 0.1.0
-    repository: "file://./charts/in-tree-subchart"
 `
-	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "Chart.yaml"), []byte(validChartYaml), 0600))
-	err = verifyChartDependenciesContainment(chartDir, allowedBase)
-	require.NoError(t, err, "in-tree file:// dependency must pass containment verification")
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "charts", "child", "Chart.yaml"), []byte(childChartYaml), 0600))
 
-	// Absolute outside dependency must be rejected
-	absOutsideChartYaml := fmt.Sprintf(`apiVersion: v2
-name: my-chart
-version: 0.1.0
-dependencies:
-  - name: outside-subchart
-    version: 0.1.0
-    repository: "file://%s"
-`, outsideDep)
-	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "Chart.yaml"), []byte(absOutsideChartYaml), 0600))
-	err = verifyChartDependenciesContainment(chartDir, allowedBase)
-	require.Error(t, err, "absolute file:// dependency pointing outside allowed base path must be rejected")
-	assert.Contains(t, err.Error(), "outside allowed base path")
+	childDeploymentYaml := `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: child-workload
+  namespace: default
+spec:
+  template:
+    spec:
+      containers:
+        - name: app
+          image: nginx:1.21
+          securityContext:
+            allowPrivilegeEscalation: true
+`
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "charts", "child", "templates", "deployment.yaml"), []byte(childDeploymentYaml), 0600))
 
-	// Absolute inside dependency must pass
-	absInsideChartYaml := fmt.Sprintf(`apiVersion: v2
-name: my-chart
-version: 0.1.0
-dependencies:
-  - name: in-tree-subchart
-    version: 0.1.0
-    repository: "file://%s"
-`, inTreeDep)
-	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "Chart.yaml"), []byte(absInsideChartYaml), 0600))
-	err = verifyChartDependenciesContainment(chartDir, allowedBase)
-	require.NoError(t, err, "absolute file:// dependency inside allowed base path must pass containment verification")
+	// Containment validation of the actual chart files passes
+	require.NoError(t, validateChartFilesContainment(chartDir, allowedBase))
+
+	// EmitKustomizePatch must succeed loading and fixing the vendored child chart workload
+	res := makeResource("Deployment", "child-workload")
+	res.SetApiVersion("apps/v1")
+	res.SetNamespace("default")
+
+	sug := []HelmFixSuggestion{
+		{
+			Resource:           res,
+			ChartName:          "parent-chart",
+			ChartPath:          chartDir,
+			AllowedBasePath:    allowedBase,
+			FidelityProvenance: true,
+			FixPaths: []armotypes.FixPath{
+				{Path: "spec.template.spec.containers[0].securityContext.allowPrivilegeEscalation", Value: "false"},
+			},
+		},
+	}
+
+	outDir := filepath.Join(t.TempDir(), "kustomize-out")
+	emitRes, err := EmitKustomizePatch(sug, outDir)
+	require.NoError(t, err, "vendored chart with outside/missing file:// metadata must not be rejected")
+	require.Len(t, emitRes.EmittedResources, 1)
+	require.Empty(t, emitRes.SkippedResources)
+
+	// Verify kustomize build renders the fixed patch
+	k := krusty.MakeKustomizer(krusty.MakeDefaultOptions())
+	fSys := filesys.MakeFsOnDisk()
+	m, err := k.Run(fSys, outDir)
+	require.NoError(t, err)
+	yamlOut, err := m.AsYaml()
+	require.NoError(t, err)
+	assert.Contains(t, string(yamlOut), "allowPrivilegeEscalation: false")
 }
 
 // TestKustomize_ClusterRoleAndNamespacelessServiceMatching verifies that cluster-scoped

@@ -161,11 +161,29 @@ if %%ERRORLEVEL%% neq 0 (
   exit /b 1
 )
 
-set "WORK_DIR=%%TEMP%%\kust-helm-%%RANDOM%%"
-mkdir "!WORK_DIR!" >nul 2>nul
+REM Create an exclusive temporary workspace with collision retry
+set "WORK_DIR="
+for /L %%%%I in (1,1,50) do (
+  if not defined WORK_DIR (
+    set "CANDIDATE=%%TEMP%%\kust-helm-!RANDOM!-!RANDOM!-%%%%I"
+    2>nul (
+      mkdir "!CANDIDATE!" && set "WORK_DIR=!CANDIDATE!"
+    )
+  )
+)
 
-REM Stream stdin to all.yaml
-findstr "^" > "!WORK_DIR!\all.yaml"
+if not defined WORK_DIR (
+  echo [error] failed to create exclusive temporary workspace in %%TEMP%% >&2
+  exit /b 1
+)
+
+REM Stream stdin as raw binary bytes to all.yaml without line-length truncation
+powershell -NoProfile -Command "$in = [Console]::OpenStandardInput(); $out = [System.IO.File]::Create($args[0]); $in.CopyTo($out); $out.Close(); $in.Close()" "!WORK_DIR!\all.yaml"
+if errorlevel 1 (
+  echo [error] failed to read Helm manifest stream from stdin >&2
+  rd /s /q "!WORK_DIR!" >nul 2>nul
+  exit /b 1
+)
 
 if not exist "!KUST_DIR!\kustomization.yaml" (
   echo [error] kustomization.yaml not found in !KUST_DIR!; refusing to emit unpatched manifests >&2

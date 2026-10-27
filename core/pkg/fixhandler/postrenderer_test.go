@@ -64,6 +64,12 @@ func TestPostRenderer_ScriptGenerationAndPermissions(t *testing.T) {
 	assert.Contains(t, batStr, "kustomize build")
 	assert.Contains(t, batStr, "refusing to emit unpatched manifests")
 	assert.Contains(t, batStr, "exit /b 1")
+	assert.Contains(t, batStr, "for /L %%I in (1,1,50) do")
+	assert.Contains(t, batStr, "[Console]::OpenStandardInput()")
+	assert.Contains(t, batStr, "$in.CopyTo($out)")
+	assert.NotContains(t, batStr, "findstr \"^\"")
+	assert.Contains(t, batStr, "failed to create exclusive temporary workspace")
+	assert.Contains(t, batStr, "failed to read Helm manifest stream from stdin")
 }
 
 func TestPostRenderer_IsolatedStdinExecution(t *testing.T) {
@@ -445,7 +451,18 @@ patches:
 	batPath := filepath.Join(outDir, "renderer.bat")
 	require.FileExists(t, batPath)
 
-	helmStdinInput := `apiVersion: v1
+	// Long line (16 KiB) to verify bytes-oriented stdin streaming without findstr 8 KiB line limit
+	longSecretToken := strings.Repeat("A", 16384)
+	helmStdinInput := fmt.Sprintf(`apiVersion: v1
+kind: Secret
+metadata:
+  name: large-secret
+  namespace: default
+type: Opaque
+data:
+  token: %s
+---
+apiVersion: v1
 kind: Service
 metadata:
   name: nginx-svc
@@ -467,18 +484,35 @@ spec:
           image: nginx:1.21
           securityContext:
             privileged: true
-`
+`, longSecretToken)
 
-	cmd := exec.Command("cmd.exe", "/c", batPath)
-	cmd.Stdin = strings.NewReader(helmStdinInput)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	// Test concurrent executions to verify exclusive workspace creation without collision
+	const concurrency = 3
+	errCh := make(chan error, concurrency)
+	outCh := make(chan string, concurrency)
 
-	runErr := cmd.Run()
-	require.NoError(t, runErr, "renderer.bat execution failed: %s", stderr.String())
+	for i := 0; i < concurrency; i++ {
+		go func() {
+			c := exec.Command("cmd.exe", "/c", batPath)
+			c.Stdin = strings.NewReader(helmStdinInput)
+			var outBuf, errBuf bytes.Buffer
+			c.Stdout = &outBuf
+			c.Stderr = &errBuf
+			err := c.Run()
+			if err != nil {
+				errCh <- fmt.Errorf("concurrent run failed: %w (stderr: %s)", err, errBuf.String())
+				return
+			}
+			outCh <- outBuf.String()
+			errCh <- nil
+		}()
+	}
 
-	output := stdout.String()
-	assert.Contains(t, output, "privileged: false", "Kustomize patch must remediate privileged to false")
-	assert.Contains(t, output, "nginx-svc", "Non-patched Service must pass through unmodified")
+	for i := 0; i < concurrency; i++ {
+		require.NoError(t, <-errCh)
+		out := <-outCh
+		assert.Contains(t, out, "privileged: false", "Kustomize patch must remediate privileged to false")
+		assert.Contains(t, out, "nginx-svc", "Non-patched Service must pass through unmodified")
+		assert.Contains(t, out, longSecretToken, "Long line (>8 KiB) in manifest must not be truncated or dropped by stdin streaming")
+	}
 }

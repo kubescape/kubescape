@@ -1010,52 +1010,6 @@ func resolveBaseObject(s HelmFixSuggestion, chartCache map[string]map[string][]w
 	return candidate, ""
 }
 
-// verifyChartDependenciesContainment inspects Chart.yaml dependencies and ensures
-// all local repository paths (e.g. file://...) resolve within allowedBasePath.
-func verifyChartDependenciesContainment(chartDir, allowedBasePath string) error {
-	resolvedAllowedBase, err := filepath.EvalSymlinks(allowedBasePath)
-	if err != nil {
-		return fmt.Errorf("invalid allowed base path %q: %w", allowedBasePath, err)
-	}
-
-	chartMetaPath := filepath.Join(chartDir, "Chart.yaml")
-	data, err := os.ReadFile(chartMetaPath)
-	if err != nil {
-		return nil // Non-fatal if Chart.yaml is absent or unreadable
-	}
-
-	var meta struct {
-		Dependencies []struct {
-			Name       string `yaml:"name"`
-			Repository string `yaml:"repository"`
-		} `yaml:"dependencies"`
-	}
-	if err := yaml.Unmarshal(data, &meta); err != nil {
-		return nil
-	}
-
-	for _, dep := range meta.Dependencies {
-		if strings.HasPrefix(dep.Repository, "file://") {
-			relPath := strings.TrimPrefix(dep.Repository, "file://")
-			var targetPath string
-			if strings.HasPrefix(relPath, "/") {
-				var absErr error
-				targetPath, absErr = filepath.Abs(relPath)
-				if absErr != nil {
-					return fmt.Errorf("failed to resolve chart dependency %q: %w", dep.Name, absErr)
-				}
-			} else {
-				targetPath = filepath.Join(chartDir, relPath)
-			}
-			resolvedTarget, err := filepath.EvalSymlinks(targetPath)
-			if err != nil || !isPathContained(resolvedAllowedBase, resolvedTarget) {
-				return fmt.Errorf("chart dependency %q references repository %q outside allowed base path %q", dep.Name, dep.Repository, allowedBasePath)
-			}
-		}
-	}
-	return nil
-}
-
 // validateChartFilesContainment ensures that the chart directory and every file, directory, or symlink
 // target inside it resolves within allowedBasePath, preventing Helm loader from following symlinks
 // or directory symlinks to external files outside the allowed boundary.
@@ -1129,9 +1083,6 @@ func loadUnredactedFromChart(s HelmFixSuggestion, chartCache map[string]map[stri
 
 	if s.AllowedBasePath != "" {
 		if err := validateChartFilesContainment(s.ChartPath, s.AllowedBasePath); err != nil {
-			return nil, err
-		}
-		if err := verifyChartDependenciesContainment(s.ChartPath, s.AllowedBasePath); err != nil {
 			return nil, err
 		}
 		for _, vf := range s.HelmValueOptions.ValueFiles {
