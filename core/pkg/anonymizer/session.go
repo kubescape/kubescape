@@ -17,6 +17,7 @@ import (
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
+	k8sjson "k8s.io/apimachinery/pkg/util/json"
 )
 
 // transformSession applies the supplied Transformer to sensitive resource
@@ -113,7 +114,10 @@ func cloneJSON[T any](value T) (T, error) {
 	if err != nil {
 		return cloned, err
 	}
-	if err := json.Unmarshal(raw, &cloned); err != nil {
+	// Interface-valued resource specs and rule evidence carry int64 values.
+	// encoding/json's float64 default rounds them beyond 2^53, even though
+	// anonymization is only supposed to change identifying strings.
+	if err := k8sjson.Unmarshal(raw, &cloned); err != nil {
 		return cloned, err
 	}
 	return cloned, nil
