@@ -342,19 +342,26 @@ List the names of the frameworks available for scanning (for example `NSA`, `MIT
 
 #### `list_controls`
 
-List the security controls with their IDs, names and the frameworks they belong to. Use `framework` to get one framework's controls instead of all of them (about 290).
+List the security controls with their IDs, names and the frameworks they belong to. Results are paginated to keep responses manageable. Use `framework` to filter to one framework.
 
 **Parameters:**
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `framework` | string | No | Only controls of this framework, case-insensitive (see `list_frameworks`). An unknown name returns an error listing the valid ones |
+| `limit` | number | No | Maximum number of controls per page (default 100, maximum 500) |
+| `offset` | number | No | Number of controls to skip (default 0); use the previous response's `next_offset` to fetch the next page |
 
-**Example Response** (`framework: "NSA"`):
+**Example Response** (`framework: "NSA"`, first page):
 ```json
-[
-  {"id": "C-0002", "name": "Prevent containers from allowing command execution", "frameworks": ["MITRE", "ArmoBest", "NSA", "AllControls", "ClusterScan"]},
-  {"id": "C-0005", "name": "API server insecure port is enabled", "frameworks": ["ArmoBest", "NSA", "AllControls", "ClusterScan", "security"]}
-]
+{
+  "total": 2,
+  "returned": 2,
+  "truncated": false,
+  "controls": [
+    {"id": "C-0002", "name": "Prevent containers from allowing command execution", "frameworks": ["MITRE", "ArmoBest", "NSA", "AllControls", "ClusterScan"]},
+    {"id": "C-0005", "name": "API server insecure port is enabled", "frameworks": ["ArmoBest", "NSA", "AllControls", "ClusterScan", "security"]}
+  ]
+}
 ```
 
 #### `validate_scan_selection`

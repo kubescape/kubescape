@@ -66,13 +66,13 @@ func TestListFrameworks_ReturnsJSON(t *testing.T) {
 
 func TestListControls_ReturnsJSON(t *testing.T) {
 	srv := &KubescapeMcpserver{}
-	data, err := srv.ListControls(t.Context(), "")
+	data, err := srv.ListControls(t.Context(), "", defaultControlsListLimit, 0)
 	if err != nil {
 		t.Skipf("skipping: could not download controls (no network?): %v", err)
 	}
-	var entries []metav1.ControlListEntry
-	require.NoError(t, json.Unmarshal(data, &entries), "output must be a JSON array of ControlListEntry")
-	for _, e := range entries {
+	var response controlsListResponse
+	require.NoError(t, json.Unmarshal(data, &response), "output must be a paginated controls response")
+	for _, e := range response.Controls {
 		assert.NotEmpty(t, e.ID, "every entry must have an ID")
 	}
 }
@@ -90,14 +90,14 @@ func TestListFrameworks_IsSorted(t *testing.T) {
 
 func TestListControls_IsSorted(t *testing.T) {
 	srv := &KubescapeMcpserver{}
-	data, err := srv.ListControls(t.Context(), "")
+	data, err := srv.ListControls(t.Context(), "", defaultControlsListLimit, 0)
 	if err != nil {
 		t.Skipf("skipping: could not download controls (no network?): %v", err)
 	}
-	var entries []metav1.ControlListEntry
-	require.NoError(t, json.Unmarshal(data, &entries))
-	for i := 1; i < len(entries); i++ {
-		assert.LessOrEqual(t, entries[i-1].ID, entries[i].ID, "controls must be sorted by ID")
+	var response controlsListResponse
+	require.NoError(t, json.Unmarshal(data, &response))
+	for i := 1; i < len(response.Controls); i++ {
+		assert.LessOrEqual(t, response.Controls[i-1].ID, response.Controls[i].ID, "controls must be sorted by ID")
 	}
 }
 
@@ -162,15 +162,21 @@ func listControlsServer(t *testing.T) *KubescapeMcpserver {
 	return ks
 }
 
-func listControlIDs(t *testing.T, ks *KubescapeMcpserver, args map[string]any) []string {
+func listControls(t *testing.T, ks *KubescapeMcpserver, args map[string]any) controlsListResponse {
 	t.Helper()
 	result, err := ks.CallTool(context.Background(), "list_controls", args)
 	require.NoError(t, err)
 	require.False(t, result.IsError, toolResultText(t, result))
-	var entries []metav1.ControlListEntry
-	require.NoError(t, json.Unmarshal([]byte(toolResultText(t, result)), &entries))
-	out := []string{}
-	for _, e := range entries {
+	var response controlsListResponse
+	require.NoError(t, json.Unmarshal([]byte(toolResultText(t, result)), &response))
+	return response
+}
+
+func listControlIDs(t *testing.T, ks *KubescapeMcpserver, args map[string]any) []string {
+	t.Helper()
+	response := listControls(t, ks, args)
+	out := make([]string, 0, len(response.Controls))
+	for _, e := range response.Controls {
 		out = append(out, e.ID)
 	}
 	return out
@@ -178,11 +184,58 @@ func listControlIDs(t *testing.T, ks *KubescapeMcpserver, args map[string]any) [
 
 func TestListControlsTool_FrameworkFilter(t *testing.T) {
 	ks := listControlsServer(t)
+	defaultPage := listControls(t, ks, map[string]any{})
 	assert.Equal(t, []string{"C-0001", "C-0012", "C-0017"}, listControlIDs(t, ks, map[string]any{}))
+	assert.Equal(t, 3, defaultPage.Total)
+	assert.Equal(t, 3, defaultPage.Returned)
+	assert.False(t, defaultPage.Truncated)
+	assert.Nil(t, defaultPage.NextOffset)
 	assert.Equal(t, []string{"C-0001", "C-0012", "C-0017"}, listControlIDs(t, ks, map[string]any{"framework": nil}), "null is treated as absent")
 	assert.Equal(t, []string{"C-0012", "C-0017"}, listControlIDs(t, ks, map[string]any{"framework": "nsa"}))
 	assert.Equal(t, []string{"C-0012"}, listControlIDs(t, ks, map[string]any{"framework": " MITRE "}), "surrounding spaces are trimmed")
 	assert.Equal(t, []string{}, listControlIDs(t, ks, map[string]any{"framework": "SOC2"}), "a catalog framework with no controls returns []")
+	filteredPage := listControls(t, ks, map[string]any{"framework": "NSA", "limit": float64(1)})
+	assert.Equal(t, 2, filteredPage.Total)
+	assert.Equal(t, 1, filteredPage.Returned)
+	assert.True(t, filteredPage.Truncated)
+	assert.Equal(t, "C-0012", filteredPage.Controls[0].ID)
+}
+
+func TestListControlsTool_Paging(t *testing.T) {
+	ks := listControlsServer(t)
+	first := listControls(t, ks, map[string]any{"limit": float64(2)})
+	assert.Equal(t, 3, first.Total)
+	assert.Equal(t, 2, first.Returned)
+	assert.True(t, first.Truncated)
+	require.NotNil(t, first.NextOffset)
+	assert.Equal(t, 2, *first.NextOffset)
+	assert.Equal(t, []string{"C-0001", "C-0012"}, listControlIDs(t, ks, map[string]any{"limit": float64(2)}))
+
+	second := listControls(t, ks, map[string]any{"limit": float64(2), "offset": float64(*first.NextOffset)})
+	require.Len(t, second.Controls, 1)
+	assert.Equal(t, "C-0017", second.Controls[0].ID)
+	assert.False(t, second.Truncated)
+	assert.Nil(t, second.NextOffset)
+
+	pastEnd := listControls(t, ks, map[string]any{"offset": float64(10)})
+	assert.Equal(t, 3, pastEnd.Total)
+	assert.Equal(t, 0, pastEnd.Returned)
+	assert.NotNil(t, pastEnd.Controls)
+}
+
+func TestListControlsTool_InvalidPaging(t *testing.T) {
+	ks := listControlsServer(t)
+	for _, args := range []map[string]any{
+		{"limit": float64(0)},
+		{"limit": float64(maxControlsListLimit + 1)},
+		{"limit": 1.5},
+		{"offset": float64(-1)},
+		{"offset": "1"},
+	} {
+		result, err := ks.CallTool(context.Background(), "list_controls", args)
+		require.NoError(t, err)
+		assert.True(t, result.IsError, "args: %#v", args)
+	}
 }
 
 func TestListControlsTool_InvalidFramework(t *testing.T) {

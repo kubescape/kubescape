@@ -11,6 +11,19 @@ import (
 	metav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
 )
 
+const (
+	defaultControlsListLimit = 100
+	maxControlsListLimit     = 500
+)
+
+type controlsListResponse struct {
+	Total      int                       `json:"total"`
+	Returned   int                       `json:"returned"`
+	Truncated  bool                      `json:"truncated"`
+	NextOffset *int                      `json:"next_offset,omitempty"`
+	Controls   []metav1.ControlListEntry `json:"controls"`
+}
+
 func (ksServer *KubescapeMcpserver) ListFrameworks(ctx context.Context) ([]byte, error) {
 	pg, err := ksServer.readyPolicyGetter(ctx)
 	if err != nil {
@@ -26,10 +39,16 @@ func (ksServer *KubescapeMcpserver) ListFrameworks(ctx context.Context) ([]byte,
 	return json.Marshal(sorted)
 }
 
-// ListControls lists the available controls, sorted by ID. When framework is
-// set, only the controls that belong to it are returned; an unknown framework
-// is an *unknownFrameworkError.
-func (ksServer *KubescapeMcpserver) ListControls(ctx context.Context, framework string) ([]byte, error) {
+// ListControls lists a page of available controls, sorted by ID. When
+// framework is set, only the controls that belong to it are returned; an
+// unknown framework is an *unknownFrameworkError.
+func (ksServer *KubescapeMcpserver) ListControls(ctx context.Context, framework string, limit, offset int) ([]byte, error) {
+	if limit < 1 || limit > maxControlsListLimit {
+		return nil, fmt.Errorf("limit must be between 1 and %d", maxControlsListLimit)
+	}
+	if offset < 0 {
+		return nil, fmt.Errorf("offset must not be negative")
+	}
 	pg, err := ksServer.readyPolicyGetter(ctx)
 	if err != nil {
 		return nil, err
@@ -57,7 +76,24 @@ func (ksServer *KubescapeMcpserver) ListControls(ctx context.Context, framework 
 	sort.Slice(entries, func(i, j int) bool {
 		return entries[i].ID < entries[j].ID
 	})
-	return json.Marshal(entries)
+	response := controlsListResponse{
+		Total:    len(entries),
+		Controls: []metav1.ControlListEntry{},
+	}
+	if offset < len(entries) {
+		end := len(entries)
+		if limit < len(entries)-offset {
+			end = offset + limit
+		}
+		response.Controls = entries[offset:end]
+		if end < len(entries) {
+			response.Truncated = true
+			next := end
+			response.NextOffset = &next
+		}
+	}
+	response.Returned = len(response.Controls)
+	return json.Marshal(response)
 }
 
 // unknownFrameworkError reports a framework name that is neither in the
