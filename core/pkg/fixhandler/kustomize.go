@@ -1036,7 +1036,7 @@ func verifyChartDependenciesContainment(chartDir, allowedBasePath string) error 
 	for _, dep := range meta.Dependencies {
 		if strings.HasPrefix(dep.Repository, "file://") {
 			relPath := strings.TrimPrefix(dep.Repository, "file://")
-			targetPath := relPath
+			var targetPath string
 			if strings.HasPrefix(relPath, "/") {
 				var absErr error
 				targetPath, absErr = filepath.Abs(relPath)
@@ -1582,13 +1582,55 @@ func EmitKustomizePatch(suggestions []HelmFixSuggestion, dir string) (*Kustomize
 		}
 	}
 
-	// 6. Atomically promote staged files to destination directory
+	// 6. Atomically promote staged files to destination directory with rollback on failure
+	backupDir := filepath.Join(stagingDir, ".backup")
+	if err := os.MkdirAll(backupDir, 0700); err != nil {
+		return nil, fmt.Errorf("failed to create backup directory in %q: %w", stagingDir, err)
+	}
+
+	// Back up existing regular files that will be overwritten
+	for _, fName := range stagedFiles {
+		dstPath := filepath.Join(dir, fName)
+		if fi, err := os.Lstat(dstPath); err == nil && !fi.IsDir() {
+			backupPath := filepath.Join(backupDir, fName)
+			if err := os.Rename(dstPath, backupPath); err != nil {
+				return nil, fmt.Errorf("failed to back up existing file %q before promotion: %w", fName, err)
+			}
+		}
+	}
+
+	var promoted []string
+	var promotionErr error
 	for _, fName := range stagedFiles {
 		srcPath := filepath.Join(stagingDir, fName)
 		dstPath := filepath.Join(dir, fName)
 		if err := os.Rename(srcPath, dstPath); err != nil {
-			return nil, fmt.Errorf("failed to promote staged file %q to %q: %w", fName, dir, err)
+			promotionErr = err
+			break
 		}
+		promoted = append(promoted, fName)
+	}
+
+	if promotionErr != nil {
+		// Roll back partially promoted files and restore pre-existing destination state
+		for _, fName := range promoted {
+			dstPath := filepath.Join(dir, fName)
+			backupPath := filepath.Join(backupDir, fName)
+			if _, err := os.Lstat(backupPath); err == nil {
+				_ = os.Rename(backupPath, dstPath)
+			} else {
+				_ = os.Remove(dstPath)
+			}
+		}
+		if backupEntries, err := os.ReadDir(backupDir); err == nil {
+			for _, bEntry := range backupEntries {
+				dstPath := filepath.Join(dir, bEntry.Name())
+				if _, err := os.Lstat(dstPath); os.IsNotExist(err) {
+					_ = os.Rename(filepath.Join(backupDir, bEntry.Name()), dstPath)
+				}
+			}
+		}
+		return nil, fmt.Errorf("failed to promote staged file: %w", promotionErr)
 	}
 
 	for _, p := range plannedPatches {

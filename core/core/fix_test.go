@@ -1155,7 +1155,7 @@ func TestFix_OutputKustomizeDoesNotAdvertiseStaleOverlay(t *testing.T) {
 	readLog := captureLoggerOutput(t)
 
 	ks := &Kubescape{Ctx: context.Background()}
-	err := ks.Fix(&metav1.FixInfo{ReportFile: reportPath, KustomizeDir: kustDir})
+	err := ks.Fix(&metav1.FixInfo{ReportFile: reportPath, KustomizeDir: kustDir, NoConfirm: true})
 	require.NoError(t, err)
 
 	logs := readLog()
@@ -1345,4 +1345,23 @@ func TestFix_OutputPostRendererSkippedWhenNoPatchesEmitted(t *testing.T) {
 	assert.Contains(t, logs, "--output-post-renderer: no Kustomize patches were emitted; skipping post-renderer script emission")
 	assert.NoFileExists(t, filepath.Join(postDir, "renderer.sh"))
 	assert.NoFileExists(t, filepath.Join(postDir, "renderer.bat"))
+}
+
+// TestFix_OutputKustomizeNonInteractiveRefusesOverwriteWithoutNoConfirm verifies that
+// when Kustomize files already exist, stdin is not a terminal, and --no-confirm is unset,
+// Fix refuses to overwrite existing files and returns an error.
+func TestFix_OutputKustomizeNonInteractiveRefusesOverwriteWithoutNoConfirm(t *testing.T) {
+	dir := t.TempDir()
+	reportPath := buildFixableContainerHelmReport(t, dir)
+	kustDir := filepath.Join(t.TempDir(), "existing-kust")
+	require.NoError(t, os.MkdirAll(kustDir, 0700))
+	require.NoError(t, os.WriteFile(filepath.Join(kustDir, "kustomization.yaml"), []byte("apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\n"), 0600))
+
+	ks := &Kubescape{Ctx: context.Background()}
+	err := ks.Fix(&metav1.FixInfo{
+		ReportFile:   reportPath,
+		KustomizeDir: kustDir,
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "already contains Kustomize files; pass --no-confirm to overwrite them")
 }

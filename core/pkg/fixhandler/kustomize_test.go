@@ -4457,16 +4457,24 @@ func TestKustomize_AtomicStagingRollbackOnFailure(t *testing.T) {
 	// Force promotion failure by creating a directory where a staged file would be promoted
 	failDir := t.TempDir()
 	require.NoError(t, os.MkdirAll(filepath.Join(failDir, "kustomization.yaml"), 0700))
+	origBaseContent := "ORIGINAL_BASE_CONTENT_PRESERVED"
+	require.NoError(t, os.WriteFile(filepath.Join(failDir, "base.yaml"), []byte(origBaseContent), 0600))
 
 	// Calling EmitKustomizePatch into failDir must fail when promoting kustomization.yaml
 	_, err = EmitKustomizePatch(suggestions, failDir)
 	require.Error(t, err)
 
-	// Verify that staging directory was cleaned up and no .kust-staging-* remains
+	// Verify that destination pre-existing base.yaml was restored and not overwritten
+	currentBase, err := os.ReadFile(filepath.Join(failDir, "base.yaml"))
+	require.NoError(t, err)
+	assert.Equal(t, origBaseContent, string(currentBase), "original base.yaml must be preserved on promotion failure")
+
+	// Verify that staging directory was cleaned up and no .kust-staging-* remains, and no partial patches left
 	entries, readErr := os.ReadDir(failDir)
 	require.NoError(t, readErr)
 	for _, e := range entries {
 		assert.False(t, strings.HasPrefix(e.Name(), ".kust-staging-"), "staging directory must be removed on failure")
+		assert.False(t, strings.HasPrefix(e.Name(), "apps-") || strings.HasPrefix(e.Name(), "patch-"), "partially promoted patch files must be rolled back on failure")
 	}
 }
 

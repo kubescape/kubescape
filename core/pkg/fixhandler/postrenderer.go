@@ -22,6 +22,29 @@ func batEscape(s string) string {
 	return s
 }
 
+// writeRestrictedScript writes executable script data to filename within root with 0755 permissions.
+// It uses os.Root containment and rejects symbolic links to prevent escaping outputDir.
+func writeRestrictedScript(root *os.Root, filename string, data []byte) error {
+	// Reject symlinks before writing to guarantee containment and preserve external targets.
+	if fi, err := root.Lstat(filename); err == nil && (fi.Mode()&os.ModeSymlink != 0) {
+		return fmt.Errorf("refusing to write script %q: target is a symbolic link", filename)
+	}
+
+	file, err := root.OpenFile(filename, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0755) // #nosec G306 -- generated script requires executable permissions (0755)
+	if err != nil {
+		return err
+	}
+	if err := file.Chmod(0755); err != nil { // #nosec G302 -- generated script requires executable permissions (0755)
+		_ = file.Close()
+		return err
+	}
+	if _, err := file.Write(data); err != nil {
+		_ = file.Close()
+		return err
+	}
+	return file.Close()
+}
+
 // EmitPostRenderer writes executable Helm post-renderer scripts (POSIX bash and Windows batch)
 // into outputDir. The script accepts Helm-rendered manifests on stdin, pipes them through Kustomize
 // with the patches emitted in kustomizeDir in an isolated workspace, and emits the remediated
@@ -41,6 +64,12 @@ func EmitPostRenderer(kustomizeDir, outputDir string) error {
 	if err := os.MkdirAll(outputDir, 0755); err != nil {
 		return fmt.Errorf("failed to create post-renderer directory %q: %w", outputDir, err)
 	}
+
+	root, err := os.OpenRoot(outputDir)
+	if err != nil {
+		return fmt.Errorf("failed to open output directory %q: %w", outputDir, err)
+	}
+	defer root.Close()
 
 	cleanKustDir, err := filepath.Abs(kustomizeDir)
 	if err != nil {
@@ -91,8 +120,12 @@ EOF
 if [ -f "$KUST_DIR/kustomization.yaml" ]; then
   # Extract patches block from kustomization.yaml and append to transient kustomization
   sed -n '/^patches:/,$p' "$KUST_DIR/kustomization.yaml" >> "$WORK_DIR/kustomization.yaml"
-  # Copy patch files into the isolated workspace
-  find "$KUST_DIR" -maxdepth 1 \( -name "*.yaml" -o -name "*.json" \) ! -name "base.yaml" ! -name "kustomization.yaml" -exec cp {} "$WORK_DIR/" \;
+  # Copy patch files into the isolated workspace, excluding all.yaml, base.yaml, and kustomization.yaml
+  find "$KUST_DIR" -maxdepth 1 \( -name "*.yaml" -o -name "*.json" \) ! -name "all.yaml" ! -name "base.yaml" ! -name "kustomization.yaml" -exec cp {} "$WORK_DIR/" \;
+  if ! grep -q "^patches:" "$WORK_DIR/kustomization.yaml"; then
+    echo "[error] no patches found in $KUST_DIR/kustomization.yaml; refusing to emit unpatched manifests" >&2
+    exit 1
+  fi
 else
   echo "[error] kustomization.yaml not found in $KUST_DIR; refusing to emit unpatched manifests" >&2
   exit 1
@@ -102,9 +135,8 @@ fi
 kustomize build "$WORK_DIR"
 `, outputDir, shQuote(cleanKustDir), shQuote(kustBaseName), shQuote(kustBaseName))
 
-	shPath := filepath.Join(outputDir, "renderer.sh")
-	if err := os.WriteFile(shPath, []byte(shContent), 0755); err != nil {
-		return fmt.Errorf("failed to write post-renderer script %q: %w", shPath, err)
+	if err := writeRestrictedScript(root, "renderer.sh", []byte(shContent)); err != nil {
+		return fmt.Errorf("failed to write post-renderer script \"renderer.sh\": %w", err)
 	}
 
 	// 2. Generate Windows batch script (renderer.bat)
@@ -141,9 +173,11 @@ if not exist "!KUST_DIR!\kustomization.yaml" (
   exit /b 1
 )
 
-copy /y "!KUST_DIR!\*.yaml" "!WORK_DIR!\" >nul 2>nul
-copy /y "!KUST_DIR!\*.json" "!WORK_DIR!\" >nul 2>nul
-del /q "!WORK_DIR!\base.yaml" >nul 2>nul
+for %%%%F in ("!KUST_DIR!\*.yaml" "!KUST_DIR!\*.json") do (
+  if /i not "%%%%~nxF"=="all.yaml" if /i not "%%%%~nxF"=="base.yaml" if /i not "%%%%~nxF"=="kustomization.yaml" (
+    copy /y "%%%%F" "!WORK_DIR!\" >nul 2>nul
+  )
+)
 
 REM Construct transient kustomization.yaml (after copy so all.yaml reference is not overwritten)
 (
@@ -153,7 +187,19 @@ echo resources:
 echo   - all.yaml
 ) > "!WORK_DIR!\kustomization.yaml"
 
-powershell -NoProfile -Command "Get-Content '!KUST_DIR!\kustomization.yaml' | Select-String -Pattern '^patches:' -Context 0, 10000 | ForEach-Object { $_.Line; $_.Context.PostContext } | Add-Content '!WORK_DIR!\kustomization.yaml'" >nul 2>nul
+powershell -NoProfile -Command "$k = Join-Path $env:KUST_DIR 'kustomization.yaml'; $w = Join-Path $env:WORK_DIR 'kustomization.yaml'; Get-Content $k | Select-String -Pattern '^patches:' -Context 0, 10000 | ForEach-Object { $_.Line; $_.Context.PostContext } | Add-Content $w" >nul 2>nul
+if errorlevel 1 (
+  echo [error] failed to extract patches from kustomization.yaml; refusing to emit unpatched manifests >&2
+  rd /s /q "!WORK_DIR!" >nul 2>nul
+  exit /b 1
+)
+
+findstr /b "patches:" "!WORK_DIR!\kustomization.yaml" >nul 2>nul
+if errorlevel 1 (
+  echo [error] no patches found in kustomization.yaml; refusing to emit unpatched manifests >&2
+  rd /s /q "!WORK_DIR!" >nul 2>nul
+  exit /b 1
+)
 
 kustomize build "!WORK_DIR!"
 set EXIT_CODE=%%ERRORLEVEL%%
@@ -162,9 +208,8 @@ rd /s /q "!WORK_DIR!" >nul 2>nul
 exit /b %%EXIT_CODE%%
 `, batEscape(cleanKustDir), batEscape(kustBaseName), batEscape(kustBaseName))
 
-	batPath := filepath.Join(outputDir, "renderer.bat")
-	if err := os.WriteFile(batPath, []byte(batContent), 0755); err != nil {
-		return fmt.Errorf("failed to write Windows post-renderer script %q: %w", batPath, err)
+	if err := writeRestrictedScript(root, "renderer.bat", []byte(batContent)); err != nil {
+		return fmt.Errorf("failed to write Windows post-renderer script \"renderer.bat\": %w", err)
 	}
 
 	return nil

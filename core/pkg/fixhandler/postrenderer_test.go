@@ -194,11 +194,11 @@ patches:
 	err := EmitPostRenderer(kustDir, outDir)
 	require.NoError(t, err)
 
-	// Verify batch script escaped % to %%
+	// Verify batch script escaped % to %% in the kustomize path
 	batPath := filepath.Join(outDir, "renderer.bat")
 	batData, err := os.ReadFile(batPath)
 	require.NoError(t, err)
-	assert.Contains(t, string(batData), "%%", "batch script must escape % as %%")
+	assert.Contains(t, string(batData), "dir%%_test", "batch script must escape % in the kustomize path as %%")
 
 	// Verify bash script escaped using single quotes
 	shPath := filepath.Join(outDir, "renderer.sh")
@@ -264,6 +264,9 @@ func TestPostRenderer_FailClosedWhenKustomizationMissing(t *testing.T) {
 	if _, err := exec.LookPath("bash"); err != nil {
 		t.Skip("bash executable not found in PATH")
 	}
+	if _, err := exec.LookPath("kustomize"); err != nil {
+		t.Skip("kustomize executable not found in PATH")
+	}
 
 	cmd := exec.Command(shPath)
 	cmd.Stdin = strings.NewReader("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: test\n")
@@ -274,6 +277,125 @@ func TestPostRenderer_FailClosedWhenKustomizationMissing(t *testing.T) {
 	runErr := cmd.Run()
 	require.Error(t, runErr, "renderer.sh must exit with error when kustomization.yaml is missing")
 	assert.Contains(t, stderr.String(), "refusing to emit unpatched manifests")
+}
+
+func TestPostRenderer_EscapingSymlinkRejected(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Skipping symlink test on Windows")
+	}
+
+	outsideDir := t.TempDir()
+	outsideSh := filepath.Join(outsideDir, "valuable-sh.txt")
+	outsideBat := filepath.Join(outsideDir, "valuable-bat.txt")
+	require.NoError(t, os.WriteFile(outsideSh, []byte("SENTINEL_SH"), 0600))
+	require.NoError(t, os.WriteFile(outsideBat, []byte("SENTINEL_BAT"), 0600))
+
+	kustDir := t.TempDir()
+	outDir := filepath.Join(t.TempDir(), "scripts")
+	require.NoError(t, os.MkdirAll(outDir, 0755))
+
+	// Symlink renderer.sh to outside file
+	require.NoError(t, os.Symlink(outsideSh, filepath.Join(outDir, "renderer.sh")))
+
+	err := EmitPostRenderer(kustDir, outDir)
+	require.Error(t, err, "EmitPostRenderer must reject writing to an existing symlink")
+	assert.Contains(t, err.Error(), "symbolic link")
+
+	// Sentinel file must remain completely uncorrupted and intact
+	shContent, err := os.ReadFile(outsideSh)
+	require.NoError(t, err)
+	assert.Equal(t, "SENTINEL_SH", string(shContent), "outside sentinel file must not be modified or truncated")
+
+	// Remove renderer.sh symlink and test renderer.bat symlink
+	require.NoError(t, os.Remove(filepath.Join(outDir, "renderer.sh")))
+	require.NoError(t, os.Symlink(outsideBat, filepath.Join(outDir, "renderer.bat")))
+
+	err = EmitPostRenderer(kustDir, outDir)
+	require.Error(t, err, "EmitPostRenderer must reject writing to an existing symlink for renderer.bat")
+	assert.Contains(t, err.Error(), "symbolic link")
+
+	batContent, err := os.ReadFile(outsideBat)
+	require.NoError(t, err)
+	assert.Equal(t, "SENTINEL_BAT", string(batContent), "outside sentinel file must not be modified or truncated")
+}
+
+func TestPostRenderer_SourceAllYamlDoesNotOverwriteHelmStdin(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Skipping bash execution on Windows")
+	}
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash executable not found in PATH")
+	}
+	if _, err := exec.LookPath("kustomize"); err != nil {
+		t.Skip("kustomize executable not found in PATH")
+	}
+
+	kustDir := t.TempDir()
+	outDir := filepath.Join(kustDir, "renderer")
+	require.NoError(t, os.MkdirAll(outDir, 0755))
+
+	// Source directory contains an all.yaml file
+	require.NoError(t, os.WriteFile(filepath.Join(kustDir, "all.yaml"), []byte("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: stale-all-yaml\n"), 0600))
+
+	patchContent := `[
+  {
+    "op": "replace",
+    "path": "/spec/template/spec/containers/0/securityContext/privileged",
+    "value": false
+  }
+]`
+	patchFileName := "apps-Deployment-default-nginx-12345678.yaml"
+	require.NoError(t, os.WriteFile(filepath.Join(kustDir, patchFileName), []byte(patchContent), 0600))
+
+	kustContent := fmt.Sprintf(`apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - base.yaml
+patches:
+  - path: %s
+    target:
+      group: ^apps$
+      version: ^v1$
+      kind: ^Deployment$
+      name: ^nginx$
+      namespace: ^default$
+`, patchFileName)
+	require.NoError(t, os.WriteFile(filepath.Join(kustDir, "kustomization.yaml"), []byte(kustContent), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(kustDir, "base.yaml"), []byte("apiVersion: apps/v1\nkind: Deployment\n"), 0600))
+
+	err := EmitPostRenderer(kustDir, outDir)
+	require.NoError(t, err)
+
+	shPath := filepath.Join(outDir, "renderer.sh")
+	require.FileExists(t, shPath)
+
+	helmStdinInput := `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx
+  namespace: default
+spec:
+  template:
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:1.21
+          securityContext:
+            privileged: true
+`
+
+	cmd := exec.Command(shPath)
+	cmd.Stdin = strings.NewReader(helmStdinInput)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	runErr := cmd.Run()
+	require.NoError(t, runErr, "renderer.sh execution failed: %s", stderr.String())
+
+	output := stdout.String()
+	assert.Contains(t, output, "privileged: false", "Kustomize patch must remediate privileged to false")
+	assert.NotContains(t, output, "stale-all-yaml", "source all.yaml must NOT overwrite Helm stdin")
 }
 
 func TestPostRenderer_WindowsExecution(t *testing.T) {

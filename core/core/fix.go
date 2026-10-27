@@ -83,6 +83,8 @@ func (ks *Kubescape) Fix(fixInfo *metav1.FixInfo) error {
 							logger.L().Info("Kustomize patch generation cancelled by user.")
 							return nil
 						}
+					} else {
+						return fmt.Errorf("directory %q already contains Kustomize files; pass --no-confirm to overwrite them", fixInfo.KustomizeDir)
 					}
 				}
 			}
