@@ -2,10 +2,17 @@ package operator
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
+	"github.com/armosec/armoapi-go/apis"
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/prettylogger"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/core"
@@ -118,4 +125,116 @@ func TestOperatorScanVulnerabilitiesCmd_ContextCanceled_NoPortForward(t *testing
 	require.Error(t, err)
 	assert.ErrorIs(t, err, context.Canceled)
 	assert.False(t, startForwarderCalled, "must not attempt to start port forwarding when context is canceled")
+}
+
+// TestOperatorScanVulnerabilitiesCmd_FlagsAndArgs verifies command use string, subcommand tracking, and flag registration.
+func TestOperatorScanVulnerabilitiesCmd_FlagsAndArgs(t *testing.T) {
+	mockKubescape := &mocks.MockIKubescape{}
+	operatorInfo := cautils.OperatorInfo{
+		Namespace: "custom-namespace",
+	}
+
+	cmd := getOperatorScanVulnerabilitiesCmd(mockKubescape, &operatorInfo)
+	assert.Equal(t, "vulnerabilities", cmd.Use)
+
+	err := cmd.Args(&cobra.Command{}, []string{"test"})
+	assert.NoError(t, err)
+	assert.Contains(t, operatorInfo.Subcommands, cautils.OperatorSubCommand("vulnerabilities"))
+
+	flag := cmd.PersistentFlags().Lookup("include-namespaces")
+	assert.NotNil(t, flag)
+
+	includeNs, err := cmd.PersistentFlags().GetStringSlice("include-namespaces")
+	require.NoError(t, err)
+	assert.Empty(t, includeNs)
+}
+
+func withCapturableLogger(t *testing.T) {
+	t.Helper()
+	origLogger := logger.L().LoggerName()
+	origLevel := logger.L().GetLevel()
+	origWriter := logger.L().GetWriter()
+	logger.InitLogger(prettylogger.LoggerName)
+	_ = logger.L().SetLevel("debug")
+	t.Cleanup(func() {
+		logger.InitLogger(origLogger)
+		_ = logger.L().SetLevel(origLevel)
+		logger.L().SetWriter(origWriter)
+	})
+}
+
+// TestOperatorScanVulnerabilitiesCmd_ExecutionSuccess verifies successful scan triggering, command payload, and confirmation logging.
+func TestOperatorScanVulnerabilitiesCmd_ExecutionSuccess(t *testing.T) {
+	withCapturableLogger(t)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/v1/triggerAction", r.URL.Path)
+		assert.Equal(t, http.MethodPost, r.Method)
+
+		var payload apis.Commands
+		err := json.NewDecoder(r.Body).Decode(&payload)
+		assert.NoError(t, err)
+		require.Len(t, payload.Commands, 2)
+		assert.Equal(t, apis.TypeScanImages, payload.Commands[0].CommandName)
+		assert.Contains(t, payload.Commands[0].WildWlid, "namespace-dev")
+		assert.Equal(t, apis.TypeScanImages, payload.Commands[1].CommandName)
+		assert.Contains(t, payload.Commands[1].WildWlid, "namespace-staging")
+
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	host := strings.TrimPrefix(server.URL, "http://")
+	prevAdapter := newOperatorAdapter
+	newOperatorAdapter = func(scanInfo cautils.OperatorScanInfo, _ string, _ ...context.Context) (*core.OperatorAdapter, error) {
+		conn := &stubOperatorConnector{host: host}
+		return core.NewOperatorAdapterWithConnector(scanInfo, conn), nil
+	}
+	t.Cleanup(func() { newOperatorAdapter = prevAdapter })
+
+	cmd := getOperatorScanCmd(&mocks.MockIKubescape{}, &cautils.OperatorInfo{})
+	cmd.SetArgs([]string{"vulnerabilities", "--include-namespaces", "dev,staging"})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+
+	var err error
+	output := captureLog(t, func() {
+		err = cmd.Execute()
+	})
+
+	require.NoError(t, err)
+	assert.Contains(t, output, "Triggering the Kubescape Operator for vulnerability scanning")
+	assert.Contains(t, output, "Triggered Kubescape Operator for vulnerability scanning")
+}
+
+// TestOperatorScanVulnerabilitiesCmd_ScanError verifies error logging when triggering the scan fails.
+func TestOperatorScanVulnerabilitiesCmd_ScanError(t *testing.T) {
+	withCapturableLogger(t)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	host := strings.TrimPrefix(server.URL, "http://")
+	prevAdapter := newOperatorAdapter
+	newOperatorAdapter = func(scanInfo cautils.OperatorScanInfo, _ string, _ ...context.Context) (*core.OperatorAdapter, error) {
+		conn := &stubOperatorConnector{host: host}
+		return core.NewOperatorAdapterWithConnector(scanInfo, conn), nil
+	}
+	t.Cleanup(func() { newOperatorAdapter = prevAdapter })
+
+	cmd := getOperatorScanCmd(&mocks.MockIKubescape{}, &cautils.OperatorInfo{})
+	cmd.SetArgs([]string{"vulnerabilities"})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+
+	var err error
+	output := captureLog(t, func() {
+		err = cmd.Execute()
+	})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "http-error: 500")
+	assert.Contains(t, output, "Failed to trigger the Kubescape Operator for vulnerability scanning")
 }
