@@ -297,9 +297,7 @@ func (a *AzureAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs []
 					malformed := false
 					for _, item := range dataList {
 						if count >= maxAzureVulnerabilities {
-							// Log truncation rather than failing hard
-							logger.L().Warning("truncated vulnerabilities", helpers.String("repository", imageID.Repository), helpers.Int("limit", maxAzureVulnerabilities))
-							break
+							return report, azureFindingLimitError(imageID.Repository)
 						}
 
 						row, ok := item.(map[string]interface{})
@@ -319,7 +317,7 @@ func (a *AzureAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs []
 						if cves := getMultipleNestedStringSafe(row, "cve", "title"); len(cves) > 0 {
 							for _, cve := range cves {
 								if count >= maxAzureVulnerabilities {
-									break
+									return report, azureFindingLimitError(imageID.Repository)
 								}
 								newVuln := vuln
 								newVuln.ID = cve
@@ -336,10 +334,6 @@ func (a *AzureAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs []
 					}
 				}
 
-				if count >= maxAzureVulnerabilities {
-					break
-				}
-
 				nextToken, hasNextPage, cursorErr := nextAzureVulnerabilityToken(
 					res.SkipToken,
 					seenSkipTokens,
@@ -349,7 +343,13 @@ func (a *AzureAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs []
 					return report, fmt.Errorf("failed to query vulnerabilities for repository %s: %w", imageID.Repository, cursorErr)
 				}
 				if !hasNextPage {
+					if res.ResultTruncated != nil && *res.ResultTruncated == armresourcegraph.ResultTruncatedTrue {
+						return report, fmt.Errorf("vulnerabilities for repository %s are incomplete: Resource Graph truncated results without a continuation token", imageID.Repository)
+					}
 					break
+				}
+				if count >= maxAzureVulnerabilities {
+					return report, azureFindingLimitError(imageID.Repository)
 				}
 				skipToken = to.Ptr(nextToken)
 			}
@@ -369,6 +369,10 @@ func (a *AzureAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs []
 			return report, nil
 		},
 	)
+}
+
+func azureFindingLimitError(repository string) error {
+	return fmt.Errorf("vulnerabilities for repository %s are incomplete: exceeded the %d-finding limit", repository, maxAzureVulnerabilities)
 }
 
 // nextAzureVulnerabilityToken decides whether another Resource Graph request
