@@ -17,8 +17,17 @@ import (
 )
 
 // supportedKinds is the set of Kubernetes resource kinds whose PodSpec
-// can be extracted and evaluated by the PSS library.
-var supportedKinds = SupportedKinds()
+// can be extracted and evaluated by the PSS library. Besides the cluster
+// workload targets, local manifests may hold the other pod-template kinds
+// that Pod Security Admission evaluates: ReplicationController and PodTemplate.
+var supportedKinds = localSupportedKinds()
+
+func localSupportedKinds() map[string]bool {
+	kinds := SupportedKinds()
+	kinds["ReplicationController"] = true
+	kinds["PodTemplate"] = true
+	return kinds
+}
 
 // ParseLocalWorkloads reads YAML/JSON files from the given paths and
 // returns unstructured objects suitable for PSS evaluation. Each path
@@ -27,8 +36,9 @@ var supportedKinds = SupportedKinds()
 // Consecutive JSON object records in a single document are supported too.
 //
 // Only objects whose Kind is in the supported workload set
-// (Pod, Deployment, DaemonSet, StatefulSet, ReplicaSet, Job, CronJob)
-// are returned; other kinds are silently skipped.
+// (Pod, PodTemplate, Deployment, DaemonSet, StatefulSet, ReplicaSet,
+// ReplicationController, Job, CronJob) are returned; other kinds are
+// silently skipped.
 func ParseLocalWorkloads(paths []string) ([]unstructured.Unstructured, error) {
 	var results []unstructured.Unstructured
 	for _, p := range paths {

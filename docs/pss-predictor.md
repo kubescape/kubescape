@@ -88,6 +88,8 @@ kubescape predict pss ./manifests/ --workload Deployment/web-api
 kubescape predict pss ./manifests/ -n production
 ```
 
+Local manifests are evaluated when their kind carries a pod spec: `Pod`, `PodTemplate`, `Deployment`, `DaemonSet`, `StatefulSet`, `ReplicaSet`, `ReplicationController`, `Job` and `CronJob`, including inside `List` envelopes. Other kinds are skipped.
+
 > [!NOTE]
 > When scanning local manifests without `-n, --namespace`, workloads across all files are aggregated together. If identical `Kind/Name` pairs exist across different manifests/namespaces, use `-n, --namespace` to scope evaluation to a specific namespace and disambiguate resources.
 
