@@ -17,7 +17,7 @@ var (
 )
 
 func shouldColor() bool {
-	if val, set := os.LookupEnv("NO_COLOR"); set && val != "" {
+	if _, set := os.LookupEnv("NO_COLOR"); set {
 		return false
 	}
 	if val, set := os.LookupEnv("FORCE_COLOR"); set {

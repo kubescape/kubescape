@@ -3,9 +3,9 @@ package cautils
 import (
 	"encoding/json"
 	"os"
-	"github.com/jwalton/gchalk"
 	"testing"
 
+	"github.com/jwalton/gchalk"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
@@ -347,17 +347,9 @@ func TestFormatConfigOutput_ExportPathsHaveZeroANSI(t *testing.T) {
 	assert.NotContains(t, string(yamlOut), "\x1b[", "YAML output must have zero ANSI codes")
 }
 
-func TestFormatConfigOutputText_EmptyNoColorTreatedAsUnset(t *testing.T) {
-	if orig, ok := os.LookupEnv("NO_COLOR"); ok {
-		t.Cleanup(func() {
-			_ = os.Setenv("NO_COLOR", orig)
-		})
-	}
+func TestFormatConfigOutputText_EmptyNoColorDisablesColor(t *testing.T) {
 	t.Setenv("NO_COLOR", "")
 	t.Setenv("FORCE_COLOR", "1")
-	prevLevel := gchalk.GetLevel()
-	gchalk.SetLevel(gchalk.LevelAnsi16m)
-	defer gchalk.SetLevel(prevLevel)
 
 	cfg := &ConfigObj{
 		AccountID: "account-123",
@@ -367,6 +359,6 @@ func TestFormatConfigOutputText_EmptyNoColorTreatedAsUnset(t *testing.T) {
 	require.NoError(t, err)
 
 	outStr := string(output)
-	assert.Contains(t, outStr, gchalk.WithBrightCyan().Bold("accountID"))
-	assert.Contains(t, outStr, gchalk.BrightWhite("account-123"))
+	assert.NotContains(t, outStr, "\x1b[", "any present NO_COLOR must disable ANSI color even if empty")
+	assert.Equal(t, "accountID: account-123\n", outStr)
 }
