@@ -12,6 +12,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/kubescape/backend/pkg/versioncheck"
 	"github.com/kubescape/kubescape/v4/core/pkg/pss"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer"
 )
@@ -329,7 +330,7 @@ type sarifTool struct {
 type sarifDriver struct {
 	Name           string      `json:"name"`
 	InformationURI string      `json:"informationUri"`
-	Version        string      `json:"version"`
+	Version        string      `json:"version,omitempty"`
 	Rules          []sarifRule `json:"rules"`
 }
 
@@ -438,8 +439,10 @@ func writeSARIF(w io.Writer, result pss.NamespaceResult) error {
 				Driver: sarifDriver{
 					Name:           "kubescape",
 					InformationURI: "https://kubescape.io",
-					Version:        "1.0.0",
-					Rules:          rules,
+					// The running kubescape version, "dev" for a local build.
+					// It is optional in SARIF, so it is left out when unset.
+					Version: versioncheck.BuildNumber,
+					Rules:   rules,
 				},
 			},
 			Results: results,
