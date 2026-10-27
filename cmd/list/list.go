@@ -66,6 +66,9 @@ func GetListCmd(ks meta.IKubescape) *cobra.Command {
 			if err := validateControlListFilters(listPolicies.Target, listPolicies.ControlFilters); err != nil {
 				return err
 			}
+			if err := validateControlsConfigFlag(listPolicies.Target, listPolicies.ControlsInputs); err != nil {
+				return err
+			}
 
 			result, err := ks.List(&listPolicies)
 			if err != nil {
@@ -128,6 +131,13 @@ func validateControlListFilters(target string, filters v1.ControlListFilters) er
 			return fmt.Errorf("--framework can only be used with 'list controls'")
 		}
 		return fmt.Errorf("--search can only be used with 'list controls'")
+	}
+	return nil
+}
+
+func validateControlsConfigFlag(target string, controlsInputs string) error {
+	if strings.TrimSpace(controlsInputs) != "" && target != "controls-config" {
+		return fmt.Errorf("--controls-config can only be used with 'list controls-config'")
 	}
 	return nil
 }
