@@ -1093,7 +1093,11 @@ func scanYAMLDocuments(r io.Reader, bufMax int) ([][]byte, error) {
 				docs = append(docs, append([]byte{}, doc...))
 			}
 			current.Reset()
-			continue
+			// A document may start on the marker's line. Preserve that line
+			// for the YAML decoder instead of discarding its inline content.
+			if rest := bytes.TrimSpace(line[3:]); len(rest) == 0 || rest[0] == '#' {
+				continue
+			}
 		}
 		current.Write(line)
 		current.WriteByte('\n')
@@ -1118,8 +1122,7 @@ func isYAMLDocumentSeparator(line []byte) bool {
 	if !bytes.HasPrefix(line, []byte("---")) {
 		return false
 	}
-	rest := bytes.TrimLeft(line[3:], " \t")
-	return len(rest) == 0 || rest[0] == '#'
+	return len(line) == 3 || line[3] == ' ' || line[3] == '\t'
 }
 
 func readJsonFile(jsonFile []byte) (workloads []workloadinterface.IMetadata, err error) {
