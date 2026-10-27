@@ -19,7 +19,7 @@ func TestGetPredictCmd(t *testing.T) {
 	pssSubCmd, _, err := cmd.Find([]string{"pss"})
 	require.NoError(t, err)
 	require.NotNil(t, pssSubCmd)
-	assert.Equal(t, "pss [<path>...] [flags]", pssSubCmd.Use)
+	assert.Equal(t, "pss [<path>.../`-`] [flags]", pssSubCmd.Use)
 
 	assert.NotNil(t, pssSubCmd.Flags().Lookup("namespace"))
 	assert.NotNil(t, pssSubCmd.Flags().Lookup("level"))

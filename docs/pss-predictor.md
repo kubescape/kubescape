@@ -50,7 +50,7 @@ The predictor implements full evaluation of the Kubernetes PSS v1.37 controls:
 ### Basic Syntax
 
 ```bash
-kubescape predict pss [<path>...] [flags]
+kubescape predict pss [<path>.../`-`] [flags]
 ```
 
 ### Cluster Mode
@@ -86,7 +86,12 @@ kubescape predict pss ./manifests/ --workload Deployment/web-api
 
 # Scope local manifests to a specific namespace
 kubescape predict pss ./manifests/ -n production
+
+# Read manifests from stdin, such as a rendered Helm chart
+helm template ./chart | kubescape predict pss -
 ```
+
+A single `-` reads the manifests from stdin instead of from files. It cannot be combined with other paths.
 
 Local manifests are evaluated when their kind carries a pod spec: `Pod`, `PodTemplate`, `Deployment`, `DaemonSet`, `StatefulSet`, `ReplicaSet`, `ReplicationController`, `Job` and `CronJob`, including inside `List` envelopes. Other kinds are skipped.
 
@@ -195,6 +200,6 @@ Add PSS prediction to your CI pipeline to prevent non-compliant workloads from e
 | Capability | CLI (`kubescape predict pss`) | MCP Tool (`predict_pss_compliance`) |
 |------------|--------------------------------|--------------------------------------|
 | **Interface** | Terminal / Shell / CI/CD scripts | AI Assistant prompt (Claude, ChatGPT) |
-| **Local Manifests** | Supported (`kubescape predict pss ./path`) | Cluster only (reads via dynamic client) |
+| **Local Manifests** | Supported (`kubescape predict pss ./path`, or `-` for stdin) | Cluster only (reads via dynamic client) |
 | **Output Formats** | Pretty, Table, JSON, SARIF, JUnit | JSON text payload for AI reasoning |
 | **Automation** | Direct integration into GitOps & GitHub Actions | Conversational hardening planning & audit |
