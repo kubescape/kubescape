@@ -145,6 +145,13 @@ func splitRegistryHost(hostport string) (labels []string, port string) {
 	if err != nil {
 		host, port = hostport, ""
 	}
+	if strings.HasPrefix(host, "[") && strings.HasSuffix(host, "]") {
+		// Without a port, SplitHostPort leaves an IPv6 literal bracketed,
+		// and path.Match would read the brackets as a character class.
+		// The address itself has no glob metacharacters, so as a single
+		// label it is compared literally.
+		return []string{host[1 : len(host)-1]}, port
+	}
 	return strings.Split(host, "."), port
 }
 

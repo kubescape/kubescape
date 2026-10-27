@@ -181,6 +181,32 @@ func TestExtractCredsFromAuthsFollowsKubeletKeyMatching(t *testing.T) {
 			domain:     "registry.example.com",
 			repository: "team/app",
 		},
+		{
+			name:         "IPv6 registry without a port",
+			auths:        map[string]dockerAuthConfig{"[2001:db8::1]": basic("ipv6")},
+			domain:       "[2001:db8::1]",
+			repository:   "team/app",
+			expectedUser: "ipv6",
+		},
+		{
+			name:         "IPv6 registry with a port",
+			auths:        map[string]dockerAuthConfig{"https://[2001:db8::1]:5000": basic("ipv6")},
+			domain:       "[2001:db8::1]:5000",
+			repository:   "team/app",
+			expectedUser: "ipv6",
+		},
+		{
+			name:       "different IPv6 registry",
+			auths:      map[string]dockerAuthConfig{"[2001:db8::2]": basic("ipv6")},
+			domain:     "[2001:db8::1]",
+			repository: "team/app",
+		},
+		{
+			name:       "IPv6 registry port mismatch",
+			auths:      map[string]dockerAuthConfig{"[2001:db8::1]:5000": basic("ipv6")},
+			domain:     "[2001:db8::1]",
+			repository: "team/app",
+		},
 	}
 
 	for _, tt := range tests {
