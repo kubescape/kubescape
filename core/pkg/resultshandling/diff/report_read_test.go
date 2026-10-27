@@ -64,6 +64,53 @@ func TestCompareReportsKeepsMixedKindsAndRejectsDirectory(t *testing.T) {
 	_, _, _, err := CompareReports(posture, vulnerability, Options{})
 	require.ErrorIs(t, err, ErrMixedReportKinds)
 
-	_, _, _, err = CompareReports(posture, t.TempDir(), Options{})
+	kind, _, _, err := CompareReports(posture, t.TempDir(), Options{})
 	require.ErrorIs(t, err, errReportNotRegular)
+	assert.Equal(t, PostureReport, kind)
+
+	kind, _, _, err = CompareReports(vulnerability, t.TempDir(), Options{})
+	require.ErrorIs(t, err, errReportNotRegular)
+	assert.Equal(t, VulnerabilityReport, kind)
+	assert.Contains(t, err.Error(), "loading head report")
+
+	kind, _, _, err = CompareReports(t.TempDir(), vulnerability, Options{})
+	require.ErrorIs(t, err, errReportNotRegular)
+	assert.Equal(t, VulnerabilityReport, kind)
+	assert.Contains(t, err.Error(), "loading base report")
+}
+
+func TestCompareReportsVulnerabilityWithUnreadableFile(t *testing.T) {
+	vulnerability := writeJSONReport(t, imageDocument("app:1"))
+	missing := filepath.Join(t.TempDir(), "missing.json")
+	oversized := paddedReport(t, maxReportSize+1)
+
+	t.Run("missing head file", func(t *testing.T) {
+		kind, _, _, err := CompareReports(vulnerability, missing, Options{})
+		require.Error(t, err)
+		assert.Equal(t, VulnerabilityReport, kind)
+		assert.Contains(t, err.Error(), "loading head report")
+		assert.Contains(t, err.Error(), "no such file or directory")
+	})
+
+	t.Run("missing base file", func(t *testing.T) {
+		kind, _, _, err := CompareReports(missing, vulnerability, Options{})
+		require.Error(t, err)
+		assert.Equal(t, VulnerabilityReport, kind)
+		assert.Contains(t, err.Error(), "loading base report")
+		assert.Contains(t, err.Error(), "no such file or directory")
+	})
+
+	t.Run("oversized head file", func(t *testing.T) {
+		kind, _, _, err := CompareReports(vulnerability, oversized, Options{})
+		require.ErrorIs(t, err, errReportTooLarge)
+		assert.Equal(t, VulnerabilityReport, kind)
+		assert.Contains(t, err.Error(), "loading head report")
+	})
+
+	t.Run("oversized base file", func(t *testing.T) {
+		kind, _, _, err := CompareReports(oversized, vulnerability, Options{})
+		require.ErrorIs(t, err, errReportTooLarge)
+		assert.Equal(t, VulnerabilityReport, kind)
+		assert.Contains(t, err.Error(), "loading base report")
+	})
 }

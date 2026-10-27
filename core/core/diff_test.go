@@ -471,12 +471,28 @@ func TestDiff_RejectsMixedReportKinds(t *testing.T) {
 
 func TestDiff_UnreadableReportKeepsLoaderError(t *testing.T) {
 	ks := NewKubescape(context.Background())
-	_, err := ks.Diff(&metav1.DiffInfo{
-		BaseFile: filepath.Join(t.TempDir(), "missing.json"),
-		HeadFile: writeReport(t, imageReportHead),
-		Format:   "json",
+
+	t.Run("missing base file", func(t *testing.T) {
+		_, err := ks.Diff(&metav1.DiffInfo{
+			BaseFile: filepath.Join(t.TempDir(), "missing.json"),
+			HeadFile: writeReport(t, imageReportHead),
+			Format:   "json",
+		})
+		require.Error(t, err)
+		assert.NotErrorIs(t, err, diff.ErrMixedReportKinds)
+		assert.Contains(t, err.Error(), "loading base report")
+		assert.Contains(t, err.Error(), "no such file or directory")
 	})
-	require.Error(t, err)
-	assert.NotErrorIs(t, err, diff.ErrMixedReportKinds)
-	assert.Contains(t, err.Error(), "no such file or directory")
+
+	t.Run("missing head file", func(t *testing.T) {
+		_, err := ks.Diff(&metav1.DiffInfo{
+			BaseFile: writeReport(t, imageReportBase),
+			HeadFile: filepath.Join(t.TempDir(), "missing.json"),
+			Format:   "json",
+		})
+		require.Error(t, err)
+		assert.NotErrorIs(t, err, diff.ErrMixedReportKinds)
+		assert.Contains(t, err.Error(), "loading head report")
+		assert.Contains(t, err.Error(), "no such file or directory")
+	})
 }
