@@ -302,6 +302,9 @@ func TestFormatConfigOutputText_WithColor(t *testing.T) {
 func TestFormatConfigOutputText_NoColorPrecedence(t *testing.T) {
 	t.Setenv("FORCE_COLOR", "1")
 	t.Setenv("NO_COLOR", "1")
+	prevLevel := gchalk.GetLevel()
+	gchalk.SetLevel(gchalk.LevelAnsi16m)
+	defer gchalk.SetLevel(prevLevel)
 
 	cfg := &ConfigObj{
 		AccountID: "account-123",
@@ -350,6 +353,9 @@ func TestFormatConfigOutput_ExportPathsHaveZeroANSI(t *testing.T) {
 func TestFormatConfigOutputText_EmptyNoColorDisablesColor(t *testing.T) {
 	t.Setenv("NO_COLOR", "")
 	t.Setenv("FORCE_COLOR", "1")
+	prevLevel := gchalk.GetLevel()
+	gchalk.SetLevel(gchalk.LevelAnsi16m)
+	defer gchalk.SetLevel(prevLevel)
 
 	cfg := &ConfigObj{
 		AccountID: "account-123",
