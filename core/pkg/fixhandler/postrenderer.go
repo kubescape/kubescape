@@ -178,7 +178,7 @@ if not defined WORK_DIR (
 )
 
 REM Stream stdin as raw binary bytes to all.yaml without line-length truncation
-powershell -NoProfile -Command "$in = [Console]::OpenStandardInput(); $out = [System.IO.File]::Create($args[0]); $in.CopyTo($out); $out.Close(); $in.Close()" "!WORK_DIR!\all.yaml"
+powershell -NoProfile -Command "$w = Join-Path $env:WORK_DIR 'all.yaml'; $in = [Console]::OpenStandardInput(); $out = [System.IO.File]::Create($w); try { $in.CopyTo($out) } catch { exit 1 } finally { $out.Close(); $in.Close() }"
 if errorlevel 1 (
   echo [error] failed to read Helm manifest stream from stdin >&2
   rd /s /q "!WORK_DIR!" >nul 2>nul

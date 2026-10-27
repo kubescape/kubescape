@@ -65,6 +65,7 @@ func TestPostRenderer_ScriptGenerationAndPermissions(t *testing.T) {
 	assert.Contains(t, batStr, "refusing to emit unpatched manifests")
 	assert.Contains(t, batStr, "exit /b 1")
 	assert.Contains(t, batStr, "for /L %%I in (1,1,50) do")
+	assert.Contains(t, batStr, "Join-Path $env:WORK_DIR 'all.yaml'")
 	assert.Contains(t, batStr, "[Console]::OpenStandardInput()")
 	assert.Contains(t, batStr, "$in.CopyTo($out)")
 	assert.NotContains(t, batStr, "findstr \"^\"")
