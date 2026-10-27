@@ -2,6 +2,7 @@ package cautils
 
 import (
 	"encoding/json"
+	"github.com/jwalton/gchalk"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -253,4 +254,77 @@ func TestFormatConfigFieldOutput(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestFormatConfigOutputText_WithColor(t *testing.T) {
+	t.Setenv("FORCE_COLOR", "1")
+	prevLevel := gchalk.GetLevel()
+	gchalk.SetLevel(gchalk.LevelAnsi16m)
+	defer gchalk.SetLevel(prevLevel)
+
+	cfg := &ConfigObj{
+		AccountID: "account-123",
+		AccessKey: "test-access-key-1234",
+	}
+
+	output, err := FormatConfigOutput(cfg, "text", true)
+	require.NoError(t, err)
+
+	outStr := string(output)
+
+	// Key names in bright cyan bold
+	assert.Contains(t, outStr, gchalk.WithBrightCyan().Bold("accountID"))
+	assert.Contains(t, outStr, gchalk.WithBrightCyan().Bold("accessKey"))
+	assert.Contains(t, outStr, gchalk.WithBrightCyan().Bold("clusterName"))
+
+	// Normal value in bright white
+	assert.Contains(t, outStr, gchalk.BrightWhite("account-123"))
+
+	// Masked secret in yellow
+	assert.Contains(t, outStr, gchalk.Yellow("****1234"))
+
+	// Empty value in yellow (<not set>)
+	assert.Contains(t, outStr, gchalk.Yellow("<not set>"))
+}
+
+func TestFormatConfigOutputText_NoColorPrecedence(t *testing.T) {
+	t.Setenv("FORCE_COLOR", "1")
+	t.Setenv("NO_COLOR", "1")
+
+	cfg := &ConfigObj{
+		AccountID: "account-123",
+		AccessKey: "test-access-key-1234",
+	}
+
+	output, err := FormatConfigOutput(cfg, "text", true)
+	require.NoError(t, err)
+
+	outStr := string(output)
+	// Zero ANSI codes must be emitted
+	assert.NotContains(t, outStr, "\x1b[", "NO_COLOR must ensure zero ANSI escape sequences")
+	assert.Contains(t, outStr, "accountID: account-123")
+	assert.Contains(t, outStr, "accessKey: ****1234")
+	assert.Contains(t, outStr, "clusterName: <not set>")
+}
+
+func TestFormatConfigOutput_ExportPathsHaveZeroANSI(t *testing.T) {
+	t.Setenv("FORCE_COLOR", "1")
+	prevLevel := gchalk.GetLevel()
+	gchalk.SetLevel(gchalk.LevelAnsi16m)
+	defer gchalk.SetLevel(prevLevel)
+
+	cfg := &ConfigObj{
+		AccountID: "account-123",
+		AccessKey: "test-access-key-1234",
+	}
+
+	// JSON output must have zero ANSI
+	jsonOut, err := FormatConfigOutput(cfg, "json", true)
+	require.NoError(t, err)
+	assert.NotContains(t, string(jsonOut), "\x1b[", "JSON output must have zero ANSI codes")
+
+	// YAML output must have zero ANSI
+	yamlOut, err := FormatConfigOutput(cfg, "yaml", true)
+	require.NoError(t, err)
+	assert.NotContains(t, string(yamlOut), "\x1b[", "YAML output must have zero ANSI codes")
 }
