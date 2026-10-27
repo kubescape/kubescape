@@ -146,3 +146,83 @@ func TestGetListCmd_ControlFilterFlagMetadata(t *testing.T) {
 	require.NotNil(t, searchFlag)
 	assert.Equal(t, "", searchFlag.DefValue)
 }
+
+func TestGetListCmd_FormatValidation(t *testing.T) {
+	tests := []struct {
+		name        string
+		args        []string
+		wantErr     bool
+		expectedErr string
+		wantFormat  string
+	}{
+		{
+			name:        "invalid format rejected upfront",
+			args:        []string{"controls", "--format", "invalid"},
+			wantErr:     true,
+			expectedErr: `invalid format "invalid", supported formats: 'pretty-print'/'json'/'yaml'/'csv'`,
+		},
+		{
+			name:        "unsupported sarif format rejected upfront",
+			args:        []string{"controls", "--format", "sarif"},
+			wantErr:     true,
+			expectedErr: `invalid format "sarif", supported formats: 'pretty-print'/'json'/'yaml'/'csv'`,
+		},
+		{
+			name:        "empty format rejected",
+			args:        []string{"controls", "--format", ""},
+			wantErr:     true,
+			expectedErr: "format cannot be empty, supported formats: 'pretty-print'/'json'/'yaml'/'csv'",
+		},
+		{
+			name:        "whitespace-only format rejected",
+			args:        []string{"controls", "--format", "   "},
+			wantErr:     true,
+			expectedErr: "format cannot be empty, supported formats: 'pretty-print'/'json'/'yaml'/'csv'",
+		},
+		{
+			name:       "valid json format passes",
+			args:       []string{"controls", "--format", "json"},
+			wantErr:    false,
+			wantFormat: "json",
+		},
+		{
+			name:       "valid uppercase and untrimmed format normalizes",
+			args:       []string{"controls", "--format", " YAML "},
+			wantErr:    false,
+			wantFormat: "yaml",
+		},
+		{
+			name:       "valid pretty-print format passes",
+			args:       []string{"frameworks", "--format", "pretty-print"},
+			wantErr:    false,
+			wantFormat: "pretty-print",
+		},
+		{
+			name:       "valid csv format passes",
+			args:       []string{"controls-config", "--format", "csv"},
+			wantErr:    false,
+			wantFormat: "csv",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			recorder := &recordingListKubescape{}
+			listCmd := GetListCmd(recorder)
+			listCmd.SilenceUsage = true
+			listCmd.SilenceErrors = true
+			listCmd.SetArgs(tt.args)
+
+			err := listCmd.Execute()
+			if tt.wantErr {
+				require.Error(t, err)
+				assert.Equal(t, tt.expectedErr, err.Error())
+				assert.Nil(t, recorder.received, "ks.List should not be called when format validation fails")
+			} else {
+				require.NoError(t, err)
+				require.NotNil(t, recorder.received)
+				assert.Equal(t, tt.wantFormat, recorder.received.Format)
+			}
+		})
+	}
+}

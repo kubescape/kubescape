@@ -93,11 +93,24 @@ func GetListCmd(ks meta.IKubescape) *cobra.Command {
 	return listCmd
 }
 
+const listSupportedFormatsDisplay = "'pretty-print'/'json'/'yaml'/'csv'"
+
 // Check if the flag entered are valid
 func flagValidationList(listPolicies *v1.ListPolicies) error {
+	if err := cautils.ValidateAccountID(listPolicies.AccountID); err != nil {
+		return err
+	}
 
-	// Validate the user's credentials
-	return cautils.ValidateAccountID(listPolicies.AccountID)
+	trimmedFormat := strings.ToLower(strings.TrimSpace(listPolicies.Format))
+	if trimmedFormat == "" {
+		return fmt.Errorf("format cannot be empty, supported formats: %s", listSupportedFormatsDisplay)
+	}
+	if !slices.Contains(core.ListSupportFormats(), trimmedFormat) {
+		return fmt.Errorf("invalid format %q, supported formats: %s", listPolicies.Format, listSupportedFormatsDisplay)
+	}
+	listPolicies.Format = trimmedFormat
+
+	return nil
 }
 
 func validateControlListFilters(target string, filters v1.ControlListFilters) error {
