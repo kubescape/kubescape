@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -333,6 +334,71 @@ func TestVerify_IgnoreTlogDoesNotFetchRekorKeys(t *testing.T) {
 	assert.True(t, ok)
 }
 
+// TestVerify_RekorURL covers the cosignRekorURL control input: when it is set,
+// a signature without a Rekor bundle is looked up online in that Rekor, like
+// `cosign verify --rekor-url`.
+func TestVerify_RekorURL(t *testing.T) {
+	signer, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	logKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	rekorPub := filepath.Join(t.TempDir(), "rekor.pub")
+	require.NoError(t, os.WriteFile(rekorPub, publicKeyPEM(t, &logKey.PublicKey), 0o600))
+	t.Setenv("SIGSTORE_REKOR_PUBLIC_KEY", rekorPub)
+
+	server := httptest.NewServer(registry.New(registry.Logger(log.New(io.Discard, "", 0))))
+	t.Cleanup(server.Close)
+	img := pushRandomImage(t, strings.TrimPrefix(server.URL, "http://")+"/test/signed")
+	attachSignature(t, img, signImageDigestWithoutBundle(t, signer, img))
+	key := string(publicKeyPEM(t, &signer.PublicKey))
+
+	var rekorRequests []string
+	rekor := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rekorRequests = append(rekorRequests, r.Method+" "+r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, "[]")
+	}))
+	t.Cleanup(rekor.Close)
+
+	tests := []struct {
+		name         string
+		inputs       map[string][]string
+		wantErr      string
+		wantRequests []string
+	}{
+		{name: "no input keeps the default", inputs: nil, wantErr: "rekor client not provided"},
+		{name: "empty value keeps the default", inputs: map[string][]string{cosignRekorURLInput: {""}}, wantErr: "rekor client not provided"},
+		{
+			name:         "set looks up the signature in that Rekor",
+			inputs:       map[string][]string{cosignRekorURLInput: {rekor.URL}},
+			wantErr:      "signature not found in transparency log",
+			wantRequests: []string{"POST /api/v1/log/entries/retrieve"},
+		},
+		{
+			name: "ignored when the tlog is not required",
+			inputs: map[string][]string{
+				cosignRekorURLInput:               {rekor.URL},
+				cosignRequireTransparencyLogInput: {"false"},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rekorRequests = nil
+			ok, err := verify(withCosignPolicy(context.Background(), tt.inputs), img.String(), key)
+			if tt.wantErr != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.wantErr)
+				assert.False(t, ok)
+			} else {
+				require.NoError(t, err)
+				assert.True(t, ok)
+			}
+			assert.Equal(t, tt.wantRequests, rekorRequests)
+		})
+	}
+}
+
 func TestWithCosignPolicy(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -351,6 +417,33 @@ func TestWithCosignPolicy(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := withCosignPolicy(context.Background(), tt.inputs)
 			assert.Equal(t, tt.want, cosignPolicyFrom(ctx).ignoreTlog)
+		})
+	}
+}
+
+func TestWithCosignPolicy_RekorURL(t *testing.T) {
+	tests := []struct {
+		name   string
+		inputs map[string][]string
+		want   string
+	}{
+		{name: "input absent", inputs: map[string][]string{"trustedCosignPublicKeys": {"k"}}, want: ""},
+		{name: "empty list", inputs: map[string][]string{cosignRekorURLInput: {}}, want: ""},
+		{name: "empty value", inputs: map[string][]string{cosignRekorURLInput: {" "}}, want: ""},
+		{name: "set", inputs: map[string][]string{cosignRekorURLInput: {" https://rekor.example.com "}}, want: "https://rekor.example.com"},
+		{
+			name: "set with the tlog input",
+			inputs: map[string][]string{
+				cosignRekorURLInput:               {"https://rekor.example.com"},
+				cosignRequireTransparencyLogInput: {"true"},
+			},
+			want: "https://rekor.example.com",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := withCosignPolicy(context.Background(), tt.inputs)
+			assert.Equal(t, tt.want, cosignPolicyFrom(ctx).rekorURL)
 		})
 	}
 }
