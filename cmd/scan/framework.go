@@ -53,15 +53,17 @@ func getFrameworkCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comm
 		Example: frameworkExample,
 		Long:    "Execute a scan on a running Kubernetes cluster or `yaml`/`json` files (use glob) or `-` for stdin",
 		Args: func(cmd *cobra.Command, args []string) error {
-			if len(args) > 0 {
-				frameworks := strings.Split(args[0], ",")
-				if len(frameworks) > 1 {
-					if slices.Contains(frameworks, "") {
+			if len(args) == 0 {
+				return fmt.Errorf("requires at least one framework name")
+			}
+			frameworks := strings.Split(args[0], ",")
+			for _, f := range frameworks {
+				if strings.TrimSpace(f) == "" {
+					if len(frameworks) > 1 {
 						return fmt.Errorf("usage: <framework-0>,<framework-1>")
 					}
+					return fmt.Errorf("requires at least one framework name")
 				}
-			} else {
-				return fmt.Errorf("requires at least one framework name")
 			}
 			return nil
 		},
@@ -86,7 +88,13 @@ func getFrameworkCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comm
 				scanInfo.ScanAll = true
 			} else {
 				// Read frameworks from input args
-				frameworks = strings.Split(args[0], ",")
+				rawFrameworks := strings.Split(args[0], ",")
+				frameworks = make([]string, 0, len(rawFrameworks))
+				for _, f := range rawFrameworks {
+					if trimmed := strings.TrimSpace(f); trimmed != "" {
+						frameworks = append(frameworks, trimmed)
+					}
+				}
 				if slices.Contains(frameworks, "all") {
 					scanInfo.ScanAll = true
 					frameworks = getter.NativeFrameworks

@@ -31,6 +31,21 @@ func TestGetControlCmd(t *testing.T) {
 	expectedErrorMessage = "usage: <control-0>,<control-1>"
 	assert.Equal(t, expectedErrorMessage, err.Error())
 
+	err = cmd.Args(&cobra.Command{}, []string{""})
+	assert.Equal(t, "requires at least one control name", err.Error())
+
+	err = cmd.Args(&cobra.Command{}, []string{"   "})
+	assert.Equal(t, "requires at least one control name", err.Error())
+
+	err = cmd.Args(&cobra.Command{}, []string{"C-0001,   "})
+	assert.Equal(t, expectedErrorMessage, err.Error())
+
+	err = cmd.Args(&cobra.Command{}, []string{"   ,C-0002"})
+	assert.Equal(t, expectedErrorMessage, err.Error())
+
+	err = cmd.Args(&cobra.Command{}, []string{"C-0001,  ,C-0002"})
+	assert.Equal(t, expectedErrorMessage, err.Error())
+
 	err = cmd.RunE(&cobra.Command{}, []string{})
 	expectedErrorMessage = "bad argument: account ID must be a valid UUID"
 	assert.Equal(t, expectedErrorMessage, err.Error())
