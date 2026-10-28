@@ -79,24 +79,70 @@ func (ks *Kubescape) Fix(fixInfo *metav1.FixInfo) error {
 				}
 			}
 		}
-		emitRes, err := fixhandler.EmitKustomizePatch(helmSuggestions, fixInfo.KustomizeDir)
-		if err != nil {
-			logger.L().Error("failed to write Kustomize patches", helpers.Error(err))
-			return fmt.Errorf("failed to write Kustomize patches: %w", err)
-		}
-		if emitRes != nil {
-			for _, skipped := range emitRes.SkippedResources {
-				logger.L().Warning(fmt.Sprintf("skipped Kustomize patch generation for %s: %s", skipped.ResourceKey, skipped.Reason))
+
+		skipKustomize := false
+		if !fixInfo.NoConfirm && fixhandler.HasEmittableKustomizePatches(helmSuggestions) {
+			if entries, err := os.ReadDir(fixInfo.KustomizeDir); err == nil && len(entries) > 0 {
+				hasKustFile := false
+				for _, e := range entries {
+					if e.Name() == "kustomization.yaml" || e.Name() == "base.yaml" {
+						hasKustFile = true
+						break
+					}
+				}
+				if hasKustFile {
+					fd := os.Stdin.Fd()
+					if isTerminal(fd) || isCygwinTerminal(fd) {
+						fmt.Fprintf(os.Stderr, "Directory %q already contains Kustomize files. Overwrite? [y/N]: ", fixInfo.KustomizeDir)
+						var resp string
+						if _, err := fmt.Fscanln(os.Stdin, &resp); err != nil || strings.ToLower(strings.TrimSpace(resp)) != "y" {
+							logger.L().Info("Kustomize patch generation cancelled by user.")
+							skipKustomize = true
+						}
+					} else {
+						return fmt.Errorf("directory %q already contains Kustomize files; pass --no-confirm to overwrite them", fixInfo.KustomizeDir)
+					}
+				}
 			}
-			if len(emitRes.EmittedResources) > 0 {
-				logger.L().Info(fmt.Sprintf(
-					"Kustomize patches written to %q\n  Apply with: kustomize build %s | kubectl apply -f -",
-					fixInfo.KustomizeDir, fixInfo.KustomizeDir,
-				))
-			} else if len(emitRes.SkippedResources) > 0 {
-				logger.L().Info("No Kustomize patches were emitted (all resources were declined or skipped). Note: ordinary scan reports redact container environment configuration; container resources are declined without programmatic provenance (UnredactedBase or FidelityProvenance), which is not supplied through the ordinary producer.")
+		}
+
+		if !skipKustomize {
+			emitRes, err := fixhandler.EmitKustomizePatch(helmSuggestions, fixInfo.KustomizeDir)
+			if err != nil {
+				logger.L().Error("failed to write Kustomize patches", helpers.Error(err))
+				return fmt.Errorf("failed to write Kustomize patches: %w", err)
+			}
+			if emitRes != nil {
+				for _, skipped := range emitRes.SkippedResources {
+					logger.L().Warning(fmt.Sprintf("skipped Kustomize patch generation for %s: %s", skipped.ResourceKey, skipped.Reason))
+				}
+				if len(emitRes.EmittedResources) > 0 {
+					logger.L().Info(fmt.Sprintf(
+						"Kustomize patches written to %q\n  Apply with: kustomize build %s | kubectl apply -f -",
+						fixInfo.KustomizeDir, fixInfo.KustomizeDir,
+					))
+				} else if len(emitRes.SkippedResources) > 0 {
+					logger.L().Info("No Kustomize patches were emitted (all resources were declined or skipped). Note: ordinary scan reports redact container environment configuration; container resources are declined without programmatic provenance (UnredactedBase or FidelityProvenance), which is not supplied through the ordinary producer.")
+				}
+			}
+
+			if fixInfo.PostRendererDir != "" {
+				if emitRes == nil || len(emitRes.EmittedResources) == 0 {
+					logger.L().Warning("--output-post-renderer: no Kustomize patches were emitted; skipping post-renderer script emission")
+				} else {
+					if err := fixhandler.EmitPostRenderer(fixInfo.KustomizeDir, fixInfo.PostRendererDir); err != nil {
+						logger.L().Error("failed to write post-renderer scripts", helpers.Error(err))
+						return fmt.Errorf("failed to write post-renderer scripts: %w", err)
+					}
+					logger.L().Info(fmt.Sprintf(
+						"Helm post-renderer script written to %q\n  Apply with: helm install <release> <chart> --post-renderer %s/renderer.sh",
+						fixInfo.PostRendererDir, fixInfo.PostRendererDir,
+					))
+				}
 			}
 		}
+	} else if fixInfo.PostRendererDir != "" && !fixInfo.DryRun {
+		logger.L().Warning("--output-post-renderer was passed without --output-kustomize; skipping post-renderer script emission (requires Kustomize patches)")
 	}
 
 	if len(resourcesToFix) == 0 {

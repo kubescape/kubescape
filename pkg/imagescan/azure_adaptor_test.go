@@ -434,7 +434,7 @@ func TestAzureAdaptor_GetImagesVulnerabilities_PaginationAndCVE(t *testing.T) {
 }
 
 func TestAzureAdaptor_GetImagesVulnerabilities_Cap(t *testing.T) {
-	// Test that >1000 items truncates instead of failing hard
+	// A bounded prefix is still returned, but omission must be reported.
 	adaptor := NewAzureAdaptor()
 	adaptor.registryHost = "test.azurecr.io"
 	adaptor.client = &mockAzureClient{
@@ -454,9 +454,9 @@ func TestAzureAdaptor_GetImagesVulnerabilities_Cap(t *testing.T) {
 	}
 
 	reports, err := adaptor.GetImagesVulnerabilities(context.Background(), images)
-	assert.NoError(t, err)
+	assert.ErrorContains(t, err, "incomplete")
 	assert.Len(t, reports, 1)
-	assert.Len(t, reports[0].Vulnerabilities, 1000) // Truncated cleanly
+	assert.Len(t, reports[0].Vulnerabilities, 1000) // Retain the bounded prefix
 }
 
 func TestNextAzureVulnerabilityToken(t *testing.T) {

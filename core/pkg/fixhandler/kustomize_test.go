@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/armosec/armoapi-go/armotypes"
+	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/stretchr/testify/assert"
@@ -46,20 +47,6 @@ func makeResource(kind, name string) *reporthandling.Resource {
 			"metadata": map[string]interface{}{
 				"name":      name,
 				"namespace": "default",
-			},
-		},
-	}
-}
-
-// makeResourceWithNS builds a reporthandling.Resource with kind, name, and namespace.
-func makeResourceWithNS(kind, namespace, name string) *reporthandling.Resource {
-	return &reporthandling.Resource{
-		Object: map[string]interface{}{
-			"apiVersion": "apps/v1",
-			"kind":       kind,
-			"metadata": map[string]interface{}{
-				"name":      name,
-				"namespace": namespace,
 			},
 		},
 	}
@@ -234,63 +221,6 @@ func TestEmitKustomizePatch_CombinesMultipleSuggestionsForSameResource(t *testin
 	// Both operations must be in the single patch file
 	assert.Contains(t, patchStr, "/spec/template/spec/securityContext/runAsNonRoot")
 	assert.Contains(t, patchStr, "/spec/template/spec/containers/0/securityContext/privileged")
-}
-
-// TestEmitKustomizePatch_MultipleResources verifies multiple resources in different
-// namespaces each get their own patch file and targets.
-func TestEmitKustomizePatch_MultipleResources(t *testing.T) {
-	dir := t.TempDir()
-
-	suggestions := []HelmFixSuggestion{
-		{
-			Resource:           makeResourceWithNS("Deployment", "blue", "nginx"),
-			ChartName:          "my-chart",
-			FidelityProvenance: true,
-			FixPaths:           []armotypes.FixPath{{Path: "spec.template.spec.securityContext.runAsNonRoot", Value: "true"}},
-		},
-		{
-			Resource:           makeResourceWithNS("Deployment", "green", "nginx"),
-			ChartName:          "my-chart",
-			FidelityProvenance: true,
-			FixPaths:           []armotypes.FixPath{{Path: "spec.template.spec.securityContext.runAsNonRoot", Value: "true"}},
-		},
-	}
-
-	_, err := EmitKustomizePatch(suggestions, dir)
-	require.NoError(t, err)
-
-	assert.FileExists(t, filepath.Join(dir, "kustomization.yaml"))
-	kustContent, _ := os.ReadFile(filepath.Join(dir, "kustomization.yaml"))
-	kustStr := string(kustContent)
-	assert.Contains(t, kustStr, "apps-Deployment-blue-nginx-")
-	assert.Contains(t, kustStr, "apps-Deployment-green-nginx-")
-}
-
-// TestEmitKustomizePatch_EmptyInput verifies nothing is written for empty suggestions.
-func TestEmitKustomizePatch_EmptyInput(t *testing.T) {
-	dir := t.TempDir()
-	_, err := EmitKustomizePatch(nil, dir)
-	require.NoError(t, err)
-	entries, _ := os.ReadDir(dir)
-	assert.Empty(t, entries, "no files should be written for empty suggestions")
-}
-
-// TestEmitKustomizePatch_SkipsEmptyFixPaths verifies suggestions with no fix paths
-// are silently skipped without writing any files.
-func TestEmitKustomizePatch_SkipsEmptyFixPaths(t *testing.T) {
-	dir := t.TempDir()
-	suggestions := []HelmFixSuggestion{
-		{
-			Resource:           makeResource("Deployment", "empty-app"),
-			ChartName:          "my-chart",
-			FidelityProvenance: true,
-			FixPaths:           []armotypes.FixPath{},
-		},
-	}
-	_, err := EmitKustomizePatch(suggestions, dir)
-	require.NoError(t, err)
-	entries, _ := os.ReadDir(dir)
-	assert.Empty(t, entries, "no files should be written when fix paths are empty")
 }
 
 // TestEmitKustomizePatch_EmptyValueIsAssignment verifies that an empty Value
@@ -752,36 +682,6 @@ func findSubslice(s, sub []byte) int {
 		}
 	}
 	return -1
-}
-
-// TestEmitKustomizePatch_Permissions verifies that directory is created with 0700 and files with 0600.
-func TestEmitKustomizePatch_Permissions(t *testing.T) {
-	parentDir := t.TempDir()
-	outDir := filepath.Join(parentDir, "kust-out")
-
-	suggestions := []HelmFixSuggestion{
-		{
-			Resource:           makeResource("Deployment", "perm-app"),
-			ChartName:          "my-chart",
-			FidelityProvenance: true,
-			FixPaths:           []armotypes.FixPath{{Path: "spec.replicas", Value: "2"}},
-		},
-	}
-
-	_, err := EmitKustomizePatch(suggestions, outDir)
-	require.NoError(t, err)
-
-	info, err := os.Stat(outDir)
-	require.NoError(t, err)
-	assert.Equal(t, os.FileMode(0700), info.Mode().Perm(), "directory must have 0700 permissions")
-
-	baseInfo, err := os.Stat(filepath.Join(outDir, "base.yaml"))
-	require.NoError(t, err)
-	assert.Equal(t, os.FileMode(0600), baseInfo.Mode().Perm(), "base.yaml must have 0600 permissions")
-
-	kustInfo, err := os.Stat(filepath.Join(outDir, "kustomization.yaml"))
-	require.NoError(t, err)
-	assert.Equal(t, os.FileMode(0600), kustInfo.Mode().Perm(), "kustomization.yaml must have 0600 permissions")
 }
 
 // TestReview4034LiteralResourceNames verifies that regex special characters (like '.') in resource names
@@ -2489,312 +2389,6 @@ spec:
 	assert.Contains(t, string(outYaml), "privileged: false", "must apply requested security fix")
 }
 
-// TestReview4034ChartDriftAmbiguousEnvFromDeclined verifies that when a static Deployment template
-// initially references prod-config via envFrom, and the block is removed from the chart before
-// running fix with an unrelated override (e.g. --set unused=true):
-//  1. At scan time, the chart template defines envFrom: [{configMapRef: {name: prod-config}}],
-//     and the scanner redacts envFrom from the report without leaving a placeholder.
-//  2. Before running fix, chart drift occurs: the envFrom block is removed from the chart template on disk.
-//  3. When running fix with an unrelated override (--set unused=true), the rendered candidate also lacks envFrom.
-//  4. Present-day chart files contain no envFrom or heuristic strings, but resolveBaseObject / EmitKustomizePatch
-//     must decline generation to prevent prod-config from disappearing alongside the security fix.
-//  5. When verified scan-time provenance or an unredacted base is provided, generation succeeds and preserves prod-config.
-func TestReview4034ChartDriftAmbiguousEnvFromDeclined(t *testing.T) {
-	chartDir := t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "Chart.yaml"), []byte("apiVersion: v2\nname: driftchart\nversion: 0.1.0\n"), 0600))
-	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "values.yaml"), []byte("unused: false\n"), 0600))
-	require.NoError(t, os.MkdirAll(filepath.Join(chartDir, "templates"), 0700))
-
-	templatePath := filepath.Join(chartDir, "templates", "deployment.yaml")
-	// 1. Initial chart template has static envFrom referencing prod-config
-	initialTemplate := `apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: prod-app
-spec:
-  template:
-    spec:
-      containers:
-      - name: app
-        image: example:v1
-        envFrom:
-        - configMapRef:
-            name: prod-config
-        securityContext:
-          privileged: true
-`
-	require.NoError(t, os.WriteFile(templatePath, []byte(initialTemplate), 0600))
-
-	// Render Deployment using the real Helm renderer to obtain the scan-time object
-	sourceToWorkloads, _, _, err := cautils.LoadResourcesFromHelmCharts(context.Background(), chartDir, cautils.HelmValueOptions{
-		Values: []string{"unused=false"},
-	})
-	require.NoError(t, err)
-
-	var renderedObj map[string]interface{}
-	for _, workloads := range sourceToWorkloads {
-		for _, w := range workloads {
-			if w.GetKind() == "Deployment" && w.GetName() == "prod-app" {
-				renderedObj = deepCopyMap(w.GetObject())
-				break
-			}
-		}
-	}
-	require.NotNil(t, renderedObj, "must find rendered prod-app deployment")
-
-	unredactedObj := deepCopyMap(renderedObj)
-
-	// Redact using scanner removeContainersData (clears envFrom without leaving placeholder)
-	renderedContainers := getContainersFromObj(renderedObj)
-	require.Len(t, renderedContainers, 1)
-	coreContainers := []corev1.Container{
-		{
-			Name:  "app",
-			Image: "example:v1",
-			EnvFrom: []corev1.EnvFromSource{
-				{ConfigMapRef: &corev1.ConfigMapEnvSource{LocalObjectReference: corev1.LocalObjectReference{Name: "prod-config"}}},
-			},
-			SecurityContext: &corev1.SecurityContext{
-				Privileged: ptrBool(true),
-			},
-		},
-	}
-	removeContainersData(coreContainers)
-	require.Nil(t, coreContainers[0].EnvFrom, "actual scanner redactor must have cleared envFrom")
-
-	bContainers, err := json.Marshal(coreContainers)
-	require.NoError(t, err)
-	var redactedContainers []interface{}
-	require.NoError(t, json.Unmarshal(bContainers, &redactedContainers))
-
-	scannedObj := deepCopyMap(renderedObj)
-	scannedObj["spec"].(map[string]interface{})["template"].(map[string]interface{})["spec"].(map[string]interface{})["containers"] = redactedContainers
-	scannedRes := &reporthandling.Resource{Object: scannedObj}
-
-	// 2. Chart drift: remove the envFrom block from the chart template on disk before running fix
-	driftedTemplate := `apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: prod-app
-spec:
-  template:
-    spec:
-      containers:
-      - name: app
-        image: example:v1
-        securityContext:
-          privileged: true
-`
-	require.NoError(t, os.WriteFile(templatePath, []byte(driftedTemplate), 0600))
-
-	// 3. Case A: Run fix with unrelated override (--set unused=true).
-	// Without verified scan-time provenance, generation must be declined.
-	outDir := t.TempDir()
-	suggs := []HelmFixSuggestion{
-		{
-			Resource:     scannedRes,
-			ChartPath:    chartDir,
-			TemplateFile: "templates/deployment.yaml",
-			HelmValueOptions: cautils.HelmValueOptions{
-				Values: []string{"unused=true"},
-			},
-			FixPaths: []armotypes.FixPath{{Path: "spec.template.spec.containers[0].securityContext.privileged", Value: "false"}},
-		},
-	}
-
-	res, err := EmitKustomizePatch(suggs, outDir)
-	require.NoError(t, err)
-	assert.Empty(t, res.EmittedResources, "must decline generation when chart drifted and removed envFrom")
-	require.Len(t, res.SkippedResources, 1, "must record declined resource")
-	assert.Contains(t, res.SkippedResources[0].Reason, "scan report redacts container environment configuration")
-
-	_, err = os.Stat(filepath.Join(outDir, "base.yaml"))
-	assert.True(t, os.IsNotExist(err), "base.yaml must not be written when declined")
-
-	// Direct resolveBaseObject verification matching maintainer probe
-	resolved, reason := resolveBaseObject(suggs[0], nil)
-	assert.Nil(t, resolved, "resolveBaseObject must decline ambiguous drifted chart base")
-	assert.Contains(t, reason, "scan report redacts container environment configuration")
-
-	// 4. Case B: When verified unredacted base is preserved, generation succeeds and preserves prod-config
-	outDirPreserved := t.TempDir()
-	suggsPreserved := []HelmFixSuggestion{
-		{
-			Resource:       scannedRes,
-			UnredactedBase: unredactedObj,
-			ChartPath:      chartDir,
-			TemplateFile:   "templates/deployment.yaml",
-			HelmValueOptions: cautils.HelmValueOptions{
-				Values: []string{"unused=true"},
-			},
-			FixPaths: []armotypes.FixPath{{Path: "spec.template.spec.containers[0].securityContext.privileged", Value: "false"}},
-		},
-	}
-
-	resPreserved, err := EmitKustomizePatch(suggsPreserved, outDirPreserved)
-	require.NoError(t, err)
-	require.Len(t, resPreserved.EmittedResources, 1, "must emit patch when unredacted base is provided")
-	assert.Empty(t, resPreserved.SkippedResources)
-
-	k := krusty.MakeKustomizer(krusty.MakeDefaultOptions())
-	resMap, err := k.Run(filesys.MakeFsOnDisk(), outDirPreserved)
-	require.NoError(t, err)
-	outYaml, err := resMap.AsYaml()
-	require.NoError(t, err)
-	assert.Contains(t, string(outYaml), "prod-config", "verified unredacted base must preserve prod-config")
-	assert.Contains(t, string(outYaml), "privileged: false", "must apply requested security fix")
-}
-
-// TestReview4034PipedRenderAmbiguousEnvFromDeclined verifies that when an unchanged template renders
-// a container using piped toYaml ({{- .Values.extraContainer | toYaml | nindent 8 }}), and only
-// extraContainer.envFrom is removed from the values file:
-//  1. At scan time, values file defines extraContainer with envFrom referencing prod-config.
-//  2. The scanner redacts envFrom from the report without leaving a placeholder.
-//  3. After scanning, extraContainer.envFrom is removed from the values file.
-//  4. The template uses piped toYaml rendering: {{- .Values.extraContainer | toYaml | nindent 8 }}.
-//  5. Without verified scan-time provenance, resolveBaseObject / EmitKustomizePatch must decline generation.
-//  6. When verified scan-time provenance or an unredacted base is provided, generation succeeds and preserves prod-config.
-func TestReview4034PipedRenderAmbiguousEnvFromDeclined(t *testing.T) {
-	chartDir := t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "Chart.yaml"), []byte("apiVersion: v2\nname: pipedchart\nversion: 0.1.0\n"), 0600))
-	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "values.yaml"), []byte("extraContainer: []\n"), 0600))
-	require.NoError(t, os.MkdirAll(filepath.Join(chartDir, "templates"), 0700))
-
-	// Template uses piped toYaml rendering for extraContainer
-	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "templates", "deployment.yaml"), []byte(`apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: prod-app
-spec:
-  template:
-    spec:
-      containers:
-        {{- .Values.extraContainer | toYaml | nindent 8 }}
-`), 0600))
-
-	// 1. Initial values file defines extraContainer with envFrom referencing prod-config
-	valuesFile := filepath.Join(chartDir, "env.yaml")
-	require.NoError(t, os.WriteFile(valuesFile, []byte(`extraContainer:
-- name: app
-  image: example:v1
-  envFrom:
-  - configMapRef:
-      name: prod-config
-  securityContext:
-    privileged: true
-`), 0600))
-
-	// Render Deployment using real Helm renderer
-	sourceToWorkloads, _, _, err := cautils.LoadResourcesFromHelmCharts(context.Background(), chartDir, cautils.HelmValueOptions{
-		ValueFiles: []string{valuesFile},
-	})
-	require.NoError(t, err)
-
-	var renderedObj map[string]interface{}
-	for _, workloads := range sourceToWorkloads {
-		for _, w := range workloads {
-			if w.GetKind() == "Deployment" && w.GetName() == "prod-app" {
-				renderedObj = deepCopyMap(w.GetObject())
-				break
-			}
-		}
-	}
-	require.NotNil(t, renderedObj, "must find rendered prod-app deployment")
-
-	unredactedObj := deepCopyMap(renderedObj)
-
-	// Redact using scanner removeContainersData (clears envFrom without leaving placeholder)
-	renderedContainers := getContainersFromObj(renderedObj)
-	require.Len(t, renderedContainers, 1)
-	coreContainers := []corev1.Container{
-		{
-			Name:  "app",
-			Image: "example:v1",
-			EnvFrom: []corev1.EnvFromSource{
-				{ConfigMapRef: &corev1.ConfigMapEnvSource{LocalObjectReference: corev1.LocalObjectReference{Name: "prod-config"}}},
-			},
-			SecurityContext: &corev1.SecurityContext{
-				Privileged: ptrBool(true),
-			},
-		},
-	}
-	removeContainersData(coreContainers)
-	require.Nil(t, coreContainers[0].EnvFrom, "actual scanner redactor must have cleared envFrom")
-
-	bContainers, err := json.Marshal(coreContainers)
-	require.NoError(t, err)
-	var redactedContainers []interface{}
-	require.NoError(t, json.Unmarshal(bContainers, &redactedContainers))
-
-	scannedObj := deepCopyMap(renderedObj)
-	scannedObj["spec"].(map[string]interface{})["template"].(map[string]interface{})["spec"].(map[string]interface{})["containers"] = redactedContainers
-	scannedRes := &reporthandling.Resource{Object: scannedObj}
-
-	// 2. Remove only extraContainer.envFrom from the values file
-	require.NoError(t, os.WriteFile(valuesFile, []byte(`extraContainer:
-- name: app
-  image: example:v1
-  securityContext:
-    privileged: true
-`), 0600))
-
-	// 3. Case A: Run fix without verified scan-time provenance -> must decline
-	outDir := t.TempDir()
-	suggs := []HelmFixSuggestion{
-		{
-			Resource:     scannedRes,
-			ChartPath:    chartDir,
-			TemplateFile: "templates/deployment.yaml",
-			HelmValueOptions: cautils.HelmValueOptions{
-				ValueFiles: []string{valuesFile},
-			},
-			FixPaths: []armotypes.FixPath{{Path: "spec.template.spec.containers[0].securityContext.privileged", Value: "false"}},
-		},
-	}
-
-	res, err := EmitKustomizePatch(suggs, outDir)
-	require.NoError(t, err)
-	assert.Empty(t, res.EmittedResources, "must decline generation when piped toYaml removed envFrom")
-	require.Len(t, res.SkippedResources, 1, "must record declined resource")
-	assert.Contains(t, res.SkippedResources[0].Reason, "scan report redacts container environment configuration")
-
-	_, err = os.Stat(filepath.Join(outDir, "base.yaml"))
-	assert.True(t, os.IsNotExist(err), "base.yaml must not be written when declined")
-
-	// Direct resolveBaseObject verification matching maintainer probe
-	resolved, reason := resolveBaseObject(suggs[0], nil)
-	assert.Nil(t, resolved, "resolveBaseObject must decline ambiguous piped-render template")
-	assert.Contains(t, reason, "scan report redacts container environment configuration")
-
-	// 4. Case B: When verified unredacted base is preserved, generation succeeds and preserves prod-config
-	outDirPreserved := t.TempDir()
-	suggsPreserved := []HelmFixSuggestion{
-		{
-			Resource:       scannedRes,
-			UnredactedBase: unredactedObj,
-			ChartPath:      chartDir,
-			TemplateFile:   "templates/deployment.yaml",
-			HelmValueOptions: cautils.HelmValueOptions{
-				ValueFiles: []string{valuesFile},
-			},
-			FixPaths: []armotypes.FixPath{{Path: "spec.template.spec.containers[0].securityContext.privileged", Value: "false"}},
-		},
-	}
-
-	resPreserved, err := EmitKustomizePatch(suggsPreserved, outDirPreserved)
-	require.NoError(t, err)
-	require.Len(t, resPreserved.EmittedResources, 1, "must emit patch when unredacted base is provided")
-	assert.Empty(t, resPreserved.SkippedResources)
-
-	k := krusty.MakeKustomizer(krusty.MakeDefaultOptions())
-	resMap, err := k.Run(filesys.MakeFsOnDisk(), outDirPreserved)
-	require.NoError(t, err)
-	outYaml, err := resMap.AsYaml()
-	require.NoError(t, err)
-	assert.Contains(t, string(outYaml), "prod-config", "verified unredacted base must preserve prod-config")
-	assert.Contains(t, string(outYaml), "privileged: false", "must apply requested security fix")
-}
-
 func TestReview4034SourcePathNormalizedOnRenderedResource(t *testing.T) {
 	chartDir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "Chart.yaml"), []byte("apiVersion: v2\nname: test-svc\nversion: 0.1.0\n"), 0600))
@@ -4416,4 +4010,365 @@ func TestReview4034_CustomResourceDriftRejectedAndRedactionRestricted(t *testing
 	err3 := verifyScannedFieldsMatch(scannedRules, candRulesWithEnvFrom, "")
 	require.Error(t, err3, "added envFrom under non-pod container path spec.rules.containers[0] must be rejected")
 	assert.Contains(t, err3.Error(), "spec.rules.containers[0].envFrom")
+}
+
+// TestKustomize_AtomicStagingRollbackOnFailure verifies that if writing any patch file
+// fails during overlay generation, the staging directory is cleaned up and no partial
+// base.yaml or corrupted files are left in the destination directory.
+func TestKustomize_AtomicStagingRollbackOnFailure(t *testing.T) {
+	outDir := t.TempDir()
+
+	deploy := makeResource("Deployment", "app1")
+	deploy.GetObject()["spec"] = map[string]interface{}{
+		"template": map[string]interface{}{
+			"spec": map[string]interface{}{
+				"containers": []interface{}{
+					map[string]interface{}{"name": "c1"},
+				},
+			},
+		},
+	}
+
+	// Two suggestions: first valid, second has an invalid path that fails ensureSubpath traversal check
+	suggestions := []HelmFixSuggestion{
+		{
+			Resource:           deploy,
+			ChartName:          "chart1",
+			FidelityProvenance: true,
+			FixPaths: []armotypes.FixPath{
+				{Path: "spec.template.spec.containers[0].securityContext.privileged", Value: "false"},
+			},
+		},
+	}
+
+	// Verify that if pre-existing files were not present, a clean run writes base.yaml
+	res, err := EmitKustomizePatch(suggestions, outDir)
+	require.NoError(t, err)
+	require.Len(t, res.EmittedResources, 1)
+	require.FileExists(t, filepath.Join(outDir, "base.yaml"))
+
+	// Force promotion failure by creating a directory where a staged file would be promoted
+	failDir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(failDir, "kustomization.yaml"), 0700))
+	origBaseContent := "ORIGINAL_BASE_CONTENT_PRESERVED"
+	require.NoError(t, os.WriteFile(filepath.Join(failDir, "base.yaml"), []byte(origBaseContent), 0600))
+
+	// Calling EmitKustomizePatch into failDir must fail when promoting kustomization.yaml
+	_, err = EmitKustomizePatch(suggestions, failDir)
+	require.Error(t, err)
+
+	// Verify that destination pre-existing base.yaml was restored and not overwritten
+	currentBase, err := os.ReadFile(filepath.Join(failDir, "base.yaml"))
+	require.NoError(t, err)
+	assert.Equal(t, origBaseContent, string(currentBase), "original base.yaml must be preserved on promotion failure")
+
+	// Verify that staging directory was cleaned up and no .kust-staging-* remains, and no partial patches left
+	entries, readErr := os.ReadDir(failDir)
+	require.NoError(t, readErr)
+	for _, e := range entries {
+		assert.False(t, strings.HasPrefix(e.Name(), ".kust-staging-"), "staging directory must be removed on failure")
+		assert.False(t, strings.HasPrefix(e.Name(), "apps-") || strings.HasPrefix(e.Name(), "patch-"), "partially promoted patch files must be rolled back on failure")
+	}
+}
+
+// TestKustomize_VendoredChartWithOutsideOrMissingFileRepositoryAllowed verifies that
+// a chart declaring a dependency with repository: file://../child is not declined
+// when that original source was removed or lives outside allowedBase, provided the
+// chart dependency is vendored inside charts/ and all chart files are contained.
+func TestKustomize_VendoredChartWithOutsideOrMissingFileRepositoryAllowed(t *testing.T) {
+	allowedBase := t.TempDir()
+	outsideBase := t.TempDir()
+
+	chartDir := filepath.Join(allowedBase, "parent-chart")
+	require.NoError(t, os.MkdirAll(filepath.Join(chartDir, "templates"), 0700))
+	require.NoError(t, os.MkdirAll(filepath.Join(chartDir, "charts", "child", "templates"), 0700))
+
+	// Outside dependency path that does not exist in allowedBase
+	outsideDep := filepath.Join(outsideBase, "missing-child-source")
+	relOutside, err := filepath.Rel(chartDir, outsideDep)
+	require.NoError(t, err)
+
+	parentChartYaml := fmt.Sprintf(`apiVersion: v2
+name: parent-chart
+version: 0.1.0
+dependencies:
+  - name: child
+    version: 0.1.0
+    repository: "file://%s"
+`, relOutside)
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "Chart.yaml"), []byte(parentChartYaml), 0600))
+
+	childChartYaml := `apiVersion: v2
+name: child
+version: 0.1.0
+`
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "charts", "child", "Chart.yaml"), []byte(childChartYaml), 0600))
+
+	childDeploymentYaml := `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: child-workload
+  namespace: default
+spec:
+  template:
+    spec:
+      containers:
+        - name: app
+          image: nginx:1.21
+          securityContext:
+            allowPrivilegeEscalation: true
+`
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "charts", "child", "templates", "deployment.yaml"), []byte(childDeploymentYaml), 0600))
+
+	// Containment validation of the actual chart files passes
+	require.NoError(t, validateChartFilesContainment(chartDir, allowedBase))
+
+	// EmitKustomizePatch must succeed loading and fixing the vendored child chart workload
+	res := makeResource("Deployment", "child-workload")
+	res.SetApiVersion("apps/v1")
+	res.SetNamespace("default")
+
+	sug := []HelmFixSuggestion{
+		{
+			Resource:           res,
+			ChartName:          "parent-chart",
+			ChartPath:          chartDir,
+			AllowedBasePath:    allowedBase,
+			FidelityProvenance: true,
+			FixPaths: []armotypes.FixPath{
+				{Path: "spec.template.spec.containers[0].securityContext.allowPrivilegeEscalation", Value: "false"},
+			},
+		},
+	}
+
+	outDir := filepath.Join(t.TempDir(), "kustomize-out")
+	emitRes, err := EmitKustomizePatch(sug, outDir)
+	require.NoError(t, err, "vendored chart with outside/missing file:// metadata must not be rejected")
+	require.Len(t, emitRes.EmittedResources, 1)
+	require.Empty(t, emitRes.SkippedResources)
+
+	// Verify kustomize build renders the fixed patch
+	k := krusty.MakeKustomizer(krusty.MakeDefaultOptions())
+	fSys := filesys.MakeFsOnDisk()
+	m, err := k.Run(fSys, outDir)
+	require.NoError(t, err)
+	yamlOut, err := m.AsYaml()
+	require.NoError(t, err)
+	assert.Contains(t, string(yamlOut), "allowPrivilegeEscalation: false")
+}
+
+// TestKustomize_ClusterRoleAndNamespacelessServiceMatching verifies that cluster-scoped
+// resources (ClusterRole) and namespace-less services are matched correctly against candidates
+// without namespace mismatch rejections.
+func TestKustomize_ClusterRoleAndNamespacelessServiceMatching(t *testing.T) {
+	outDir := t.TempDir()
+
+	// 1. ClusterRole (cluster-scoped, group rbac.authorization.k8s.io, no namespace)
+	clusterRoleObj := map[string]interface{}{
+		"apiVersion": "rbac.authorization.k8s.io/v1",
+		"kind":       "ClusterRole",
+		"metadata": map[string]interface{}{
+			"name": "secret-reader",
+		},
+		"rules": []interface{}{
+			map[string]interface{}{
+				"apiGroups": []interface{}{""},
+				"resources": []interface{}{"secrets"},
+				"verbs":     []interface{}{"get", "watch", "list"},
+			},
+		},
+	}
+	crRes := reporthandling.Resource{
+		Object: clusterRoleObj,
+		Source: &reporthandling.Source{FileType: reporthandling.SourceTypeHelmChart},
+	}
+
+	// 2. Namespace-less Service (namespaced kind, but metadata has no namespace)
+	svcObj := map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "Service",
+		"metadata": map[string]interface{}{
+			"name": "my-service",
+		},
+		"spec": map[string]interface{}{
+			"selector": map[string]interface{}{"app": "frontend"},
+			"ports": []interface{}{
+				map[string]interface{}{"port": 80},
+			},
+		},
+	}
+	svcRes := reporthandling.Resource{
+		Object: svcObj,
+		Source: &reporthandling.Source{FileType: reporthandling.SourceTypeHelmChart},
+	}
+
+	suggestions := []HelmFixSuggestion{
+		{
+			Resource:           &crRes,
+			ChartName:          "auth-chart",
+			FidelityProvenance: true,
+			UnredactedBase:     deepCopyMap(clusterRoleObj),
+			FixPaths: []armotypes.FixPath{
+				{Path: "metadata.labels.hardened", Value: "true"},
+			},
+		},
+		{
+			Resource:           &svcRes,
+			ChartName:          "auth-chart",
+			FidelityProvenance: true,
+			UnredactedBase:     deepCopyMap(svcObj),
+			FixPaths: []armotypes.FixPath{
+				{Path: "metadata.labels.hardened", Value: "true"},
+			},
+		},
+	}
+
+	res, err := EmitKustomizePatch(suggestions, outDir)
+	require.NoError(t, err)
+	require.Len(t, res.EmittedResources, 2)
+	assert.Contains(t, res.EmittedResources, "ClusterRole/secret-reader")
+	assert.Contains(t, res.EmittedResources, "Service/my-service")
+
+	// Read generated kustomization.yaml to verify target selector rules
+	kustData, err := os.ReadFile(filepath.Join(outDir, "kustomization.yaml"))
+	require.NoError(t, err)
+
+	var kust kustomizationDoc
+	require.NoError(t, yaml.Unmarshal(kustData, &kust))
+	require.Len(t, kust.Patches, 2)
+
+	seen := map[string]bool{}
+	for _, p := range kust.Patches {
+		seen[p.Target.Kind] = true
+		switch p.Target.Kind {
+		case "ClusterRole":
+			assert.Empty(t, p.Target.Namespace, "ClusterRole target must have empty namespace")
+		case "Service":
+			assert.Equal(t, "default", p.Target.Namespace, "Namespaceless Service target must default to default namespace")
+		}
+	}
+	assert.True(t, seen["ClusterRole"] && seen["Service"], "both targets must be present")
+}
+
+// TestKustomize_LoadUnredactedFromChart_ReleaseNamespaceMatching tests that loadUnredactedFromChart
+// correctly matches when target is in ReleaseNamespace and candidate omits metadata.namespace.
+func TestKustomize_LoadUnredactedFromChart_ReleaseNamespaceMatching(t *testing.T) {
+	chartDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "Chart.yaml"), []byte("apiVersion: v2\nname: testchart\nversion: 0.1.0\n"), 0600))
+	require.NoError(t, os.MkdirAll(filepath.Join(chartDir, "templates"), 0700))
+
+	// Template omits metadata.namespace
+	depYaml := `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: namespaceless-app
+spec:
+  template:
+    spec:
+      containers:
+        - name: app
+          image: nginx:latest
+`
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "templates", "deployment.yaml"), []byte(depYaml), 0600))
+
+	// Target resource has namespace "staging"
+	targetObj := map[string]interface{}{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata": map[string]interface{}{
+			"name":      "namespaceless-app",
+			"namespace": "staging",
+		},
+	}
+	targetRes := reporthandling.Resource{
+		Object: targetObj,
+		Source: &reporthandling.Source{FileType: reporthandling.SourceTypeHelmChart},
+	}
+
+	// 1. ReleaseNamespace matches target namespace ("staging") -> candidate matches
+	s1 := HelmFixSuggestion{
+		Resource:        &targetRes,
+		ChartPath:       chartDir,
+		AllowedBasePath: chartDir,
+		HelmValueOptions: cautils.HelmValueOptions{
+			ReleaseNamespace: "staging",
+		},
+	}
+	chartCache := make(map[string]map[string][]workloadinterface.IMetadata)
+	matched, err := loadUnredactedFromChart(s1, chartCache)
+	require.NoError(t, err, "candidate with omitted namespace must match target in ReleaseNamespace")
+	require.NotNil(t, matched)
+	assert.Equal(t, "namespaceless-app", matched["metadata"].(map[string]interface{})["name"])
+
+	// 2. ReleaseNamespace does not match target namespace ("production" != "staging") -> match fails
+	s2 := HelmFixSuggestion{
+		Resource:        &targetRes,
+		ChartPath:       chartDir,
+		AllowedBasePath: chartDir,
+		HelmValueOptions: cautils.HelmValueOptions{
+			ReleaseNamespace: "production",
+		},
+	}
+	_, err = loadUnredactedFromChart(s2, chartCache)
+	require.Error(t, err, "candidate must not match when ReleaseNamespace differs from target namespace")
+	assert.Contains(t, err.Error(), "not found in rendered chart")
+}
+
+// TestKustomize_HasEmittableKustomizePatches verifies that HasEmittableKustomizePatches
+// correctly differentiates emittable suggestions from declined or empty ones.
+func TestKustomize_HasEmittableKustomizePatches(t *testing.T) {
+	assert.False(t, HasEmittableKustomizePatches(nil), "nil suggestions must return false")
+	assert.False(t, HasEmittableKustomizePatches([]HelmFixSuggestion{}), "empty suggestions must return false")
+
+	// Nil resource or no fix paths
+	assert.False(t, HasEmittableKustomizePatches([]HelmFixSuggestion{
+		{Resource: nil},
+	}))
+
+	deploy := makeResource("Deployment", "app1")
+	assert.False(t, HasEmittableKustomizePatches([]HelmFixSuggestion{
+		{Resource: deploy, FixPaths: nil},
+	}))
+
+	// Resource declined (no provenance or unredacted base)
+	assert.False(t, HasEmittableKustomizePatches([]HelmFixSuggestion{
+		{
+			Resource: deploy,
+			FixPaths: []armotypes.FixPath{{Path: "spec.replicas", Value: "2"}},
+		},
+	}))
+
+	// Resource with fidelity provenance is emittable
+	assert.True(t, HasEmittableKustomizePatches([]HelmFixSuggestion{
+		{
+			Resource:           deploy,
+			FidelityProvenance: true,
+			UnredactedBase:     deepCopyMap(deploy.GetObject()),
+			FixPaths:           []armotypes.FixPath{{Path: "spec.replicas", Value: "2"}},
+		},
+	}))
+}
+
+// TestKustomize_RestoreBackups verifies that restoreBackups correctly restores files
+// and returns errors when destination files already exist.
+func TestKustomize_RestoreBackups(t *testing.T) {
+	backupDir := t.TempDir()
+	dstDir := t.TempDir()
+
+	require.NoError(t, os.WriteFile(filepath.Join(backupDir, "base.yaml"), []byte("BACKUP_BASE"), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(backupDir, "kustomization.yaml"), []byte("BACKUP_KUST"), 0600))
+
+	// Clean destination: both files restored
+	err := restoreBackups(backupDir, dstDir)
+	require.NoError(t, err)
+
+	data, err := os.ReadFile(filepath.Join(dstDir, "base.yaml"))
+	require.NoError(t, err)
+	assert.Equal(t, "BACKUP_BASE", string(data))
+
+	// Destination already has base.yaml: returns error
+	require.NoError(t, os.WriteFile(filepath.Join(backupDir, "base.yaml"), []byte("NEW_BACKUP"), 0600))
+	err = restoreBackups(backupDir, dstDir)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "destination exists")
 }

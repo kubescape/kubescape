@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/sigstore/cosign/v3/cmd/cosign/cli/options"
+	"github.com/sigstore/cosign/v3/cmd/cosign/cli/rekor"
 	"github.com/sigstore/cosign/v3/cmd/cosign/cli/sign"
 	"github.com/sigstore/cosign/v3/pkg/cosign"
 	"github.com/sigstore/cosign/v3/pkg/cosign/pkcs11key"
@@ -50,23 +51,33 @@ type VerifyCommand struct {
 // clusters. Any other value, or no value, keeps the entry required.
 const cosignRequireTransparencyLogInput = "cosignRequireTransparencyLog"
 
+// cosignRekorURLInput is the posture control input that sets the Rekor
+// instance cosign.verify looks up signatures without a Rekor bundle in, like
+// `cosign verify --rekor-url`. No value keeps today's behaviour.
+const cosignRekorURLInput = "cosignRekorURL"
+
 type cosignPolicyKey struct{}
 
 type cosignPolicy struct {
 	ignoreTlog bool
+	rekorURL   string
 }
 
 // withCosignPolicy returns ctx carrying the cosign verification policy read
 // from a rule's posture control inputs. cosign.verify is a process-global Rego
 // builtin, so the evaluation context is how a per-rule setting reaches it.
 func withCosignPolicy(ctx context.Context, postureControlInputs map[string][]string) context.Context {
-	values, ok := postureControlInputs[cosignRequireTransparencyLogInput]
-	if !ok || len(values) == 0 {
+	var policy cosignPolicy
+	if values := postureControlInputs[cosignRequireTransparencyLogInput]; len(values) > 0 {
+		policy.ignoreTlog = strings.EqualFold(strings.TrimSpace(values[0]), "false")
+	}
+	if values := postureControlInputs[cosignRekorURLInput]; len(values) > 0 {
+		policy.rekorURL = strings.TrimSpace(values[0])
+	}
+	if policy == (cosignPolicy{}) {
 		return ctx
 	}
-	return context.WithValue(ctx, cosignPolicyKey{}, cosignPolicy{
-		ignoreTlog: strings.EqualFold(strings.TrimSpace(values[0]), "false"),
-	})
+	return context.WithValue(ctx, cosignPolicyKey{}, policy)
 }
 
 func cosignPolicyFrom(ctx context.Context) cosignPolicy {
@@ -104,13 +115,21 @@ func verify(ctx context.Context, img string, key string) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("resolving attachment type %s for image %s: %w", attachment, img, err)
 	}
-	if cosignPolicyFrom(ctx).ignoreTlog {
+	policy := cosignPolicyFrom(ctx)
+	if policy.ignoreTlog {
 		// No Rekor keys are needed, so an air-gapped cluster does not fail on
 		// fetching them either.
 		co.IgnoreTlog = true
 	} else {
 		if err := ctx.Err(); err != nil {
 			return false, fmt.Errorf("context canceled before Rekor public key retrieval: %w", err)
+		}
+
+		if policy.rekorURL != "" {
+			co.RekorClient, err = rekor.NewClient(policy.rekorURL)
+			if err != nil {
+				return false, fmt.Errorf("creating Rekor client: %w", err)
+			}
 		}
 
 		co.RekorPubKeys, err = cosign.GetRekorPubs(ctx)

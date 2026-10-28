@@ -39,6 +39,21 @@ func TestGetFrameworkCmd(t *testing.T) {
 	expectedErrorMessage = "usage: <framework-0>,<framework-1>"
 	assert.Equal(t, expectedErrorMessage, err.Error())
 
+	err = cmd.Args(&cobra.Command{}, []string{""})
+	assert.Equal(t, "requires at least one framework name", err.Error())
+
+	err = cmd.Args(&cobra.Command{}, []string{"   "})
+	assert.Equal(t, "requires at least one framework name", err.Error())
+
+	err = cmd.Args(&cobra.Command{}, []string{"nsa,   "})
+	assert.Equal(t, expectedErrorMessage, err.Error())
+
+	err = cmd.Args(&cobra.Command{}, []string{"   ,mitre"})
+	assert.Equal(t, expectedErrorMessage, err.Error())
+
+	err = cmd.Args(&cobra.Command{}, []string{"nsa,  ,mitre"})
+	assert.Equal(t, expectedErrorMessage, err.Error())
+
 	err = cmd.RunE(&cobra.Command{}, []string{})
 	expectedErrorMessage = "bad argument: account ID must be a valid UUID"
 	assert.Equal(t, expectedErrorMessage, err.Error())
