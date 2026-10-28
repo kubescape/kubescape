@@ -1446,12 +1446,12 @@ Predict Kubernetes Pod Security Standards (PSS) compliance for workloads in a li
 ### Synopsis
 
 ```bash
-kubescape predict pss [<path>...] [flags]
+kubescape predict pss [<path>.../`-`] [flags]
 ```
 
 ### Description
 
-Evaluates workloads against the official Kubernetes Pod Security Standards (Privileged, Baseline, Restricted) according to PSS v1.37 specifications. When invoked without path arguments, it connects to the cluster and evaluates all workloads in the specified namespace, automatically deduplicating child resources (e.g., ReplicaSets and Pods managed by Deployments). When given file paths or directories, it parses local YAML/JSON manifests and evaluates them directly.
+Evaluates workloads against the official Kubernetes Pod Security Standards (Privileged, Baseline, Restricted) according to PSS v1.37 specifications. When invoked without path arguments, it connects to the cluster and evaluates all workloads in the specified namespace, automatically deduplicating child resources (e.g., ReplicaSets and Pods managed by Deployments). When given file paths or directories, it parses local YAML/JSON manifests and evaluates them directly. A single `-` reads the manifests from stdin; it cannot be combined with other paths.
 
 This answers the critical hardening question: *"What would break if I enforced Baseline or Restricted on this namespace?"*
 
@@ -1480,6 +1480,11 @@ kubescape predict pss -n production --workload Deployment/web-api
 
 # Predict compliance for local YAML manifest files
 kubescape predict pss ./manifests/
+
+# Predict compliance for manifests read from stdin, such as a rendered Helm chart
+# (pipefail makes a failed helm template fail the pipeline)
+set -o pipefail
+helm template ./chart | kubescape predict pss -
 
 # Output machine-readable JSON report
 kubescape predict pss -n production -f json -o pss-report.json

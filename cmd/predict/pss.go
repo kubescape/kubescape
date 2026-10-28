@@ -3,6 +3,9 @@ package predict
 import (
 	"context"
 	"fmt"
+	"io"
+	"os"
+	"slices"
 	"sort"
 	"strings"
 
@@ -20,7 +23,13 @@ type pssFlags struct {
 	format    string
 	output    string
 	verbose   bool
+
+	// stdin supplies the manifests when the only path argument is "-".
+	stdin io.Reader
 }
+
+// stdinPath is the path argument that reads local manifests from stdin.
+const stdinPath = "-"
 
 var pssCmdExamples = fmt.Sprintf(`
   Predict Pod Security Standards compliance for workloads.
@@ -37,6 +46,11 @@ var pssCmdExamples = fmt.Sprintf(`
   # Scan local manifest files
   %[1]s predict pss ./manifests/
 
+  # Scan manifests read from stdin, such as a rendered Helm chart
+  # (pipefail makes a failed helm template fail the pipeline)
+  set -o pipefail
+  helm template ./chart | %[1]s predict pss -
+
   # Scan and output JSON
   %[1]s predict pss -n production -f json -o pss-report.json
 
@@ -51,7 +65,7 @@ func getPSSCmd() *cobra.Command {
 	flags := &pssFlags{}
 
 	pssCmd := &cobra.Command{
-		Use:   "pss [<path>...] [flags]",
+		Use:   "pss [<path>.../`-`] [flags]",
 		Short: "Predict Pod Security Standards (PSS) compliance for workloads",
 		Long: `Evaluate workloads against the Kubernetes Pod Security Standards (Privileged,
 Baseline, Restricted) and report which workloads would fail at the target
@@ -59,13 +73,14 @@ level, what specifically violates, and overall namespace readiness.
 
 When run without positional arguments, scans live cluster workloads in the
 specified namespace. When given file paths or directories, scans local YAML
-manifests instead.
+manifests instead. A single "-" reads the manifests from stdin.
 
 This helps answer: "What would break if I enforced Baseline/Restricted on
 this namespace?" — without touching the cluster's admission configuration.`,
 		Example: pssCmdExamples,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cmd.SilenceUsage = true
+			flags.stdin = cmd.InOrStdin()
 			return runPSS(cmd.Context(), flags, args)
 		},
 	}
@@ -120,7 +135,7 @@ func runPSS(ctx context.Context, flags *pssFlags, args []string) error {
 			return err
 		}
 	} else {
-		workloads, err = pss.ParseLocalWorkloads(args)
+		workloads, err = parseLocalInputs(flags.stdin, args)
 		if err != nil {
 			return err
 		}
@@ -175,6 +190,22 @@ func runPSS(ctx context.Context, flags *pssFlags, args []string) error {
 			result.UnevaluatedWorkloads, result.TotalWorkloads)
 	}
 	return nil
+}
+
+// parseLocalInputs parses the manifests at paths, or reads them from stdin
+// when the only path is "-". Like the scan commands, "-" cannot be combined
+// with other paths.
+func parseLocalInputs(stdin io.Reader, paths []string) ([]unstructured.Unstructured, error) {
+	if !slices.Contains(paths, stdinPath) {
+		return pss.ParseLocalWorkloads(paths)
+	}
+	if len(paths) > 1 {
+		return nil, fmt.Errorf("usage: stdin input '-' cannot be combined with other input paths")
+	}
+	if stdin == nil {
+		stdin = os.Stdin
+	}
+	return pss.ParseLocalWorkloadsFromReader(stdin, "stdin")
 }
 
 // fetchClusterWorkloads connects to the cluster and lists workloads.
