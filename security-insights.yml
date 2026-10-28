@@ -1,7 +1,7 @@
 header:
   schema-version: 2.2.0
-  last-updated: '2026-10-20'
-  last-reviewed: '2026-10-07'
+  last-updated: '2026-10-28'
+  last-reviewed: '2026-10-28'
   url: https://raw.githubusercontent.com/kubescape/kubescape/master/security-insights.yml
 
 project:
@@ -118,3 +118,17 @@ repository:
           release: false
         results: {}
         comment: Runs weekly and on every push to master.
+      - name: OSPS Baseline Action
+        type: other
+        rulesets:
+          - osps-baseline-2026-08
+        integration:
+          adhoc: true
+          ci: true
+          release: false
+        results:
+          ci:
+            name: OSPS Baseline scan
+            predicate-uri: https://github.com/revanite-io/osps-baseline-action
+            location: https://github.com/kubescape/kubescape/actions/workflows/osps-baseline.yml
+        comment: Runs on every push to master and weekly.
