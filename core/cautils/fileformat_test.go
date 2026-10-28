@@ -14,6 +14,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// TestIsYAMLDocumentSeparator checks marker boundaries, including trailing CR and non-marker prefixes.
 func TestIsYAMLDocumentSeparator(t *testing.T) {
 	tests := []struct {
 		name string
@@ -52,6 +53,14 @@ func TestReadFileInlineYAMLDocuments(t *testing.T) {
 	}{
 		{name: "inline flow mapping after block document", input: first + "--- " + second + "\n", want: []string{"first", "second"}},
 		{name: "all inline documents", input: "--- {apiVersion: v1, kind: Pod, metadata: {name: first}}\n--- " + second + "\n", want: []string{"first", "second"}},
+		{name: "version directive before inline document", input: "%YAML 1.1\n--- " + second + "\n", want: []string{"second"}},
+		{name: "inline document after directed document", input: "%YAML 1.1\n--- {apiVersion: v1, kind: Pod, metadata: {name: first}}\n--- " + second + "\n", want: []string{"first", "second"}},
+		{name: "directive header with comments and blanks", input: "# preamble\n%YAML 1.1\n# header comment\n\n--- " + second + "\n", want: []string{"second"}},
+		{name: "tag directive before inline document", input: "%TAG !e! tag:yaml.org,2002:\n--- !e!map " + second + "\n", want: []string{"second"}},
+		{name: "multiple directives before standalone marker", input: "%YAML 1.1\n%TAG !e! tag:yaml.org,2002:\n--- # document\n!e!map " + second + "\n", want: []string{"second"}},
+		{name: "directives after explicit document end", input: first + "...\n# next document\n%YAML 1.1\n%TAG !e! tag:yaml.org,2002:\n--- !e!map " + second + "\n", want: []string{"first", "second"}},
+		{name: "independent directive headers", input: "%TAG !e! tag:yaml.org,2002:\n--- !e!map {apiVersion: v1, kind: Pod, metadata: {name: first}}\n...\n%TAG !e! tag:yaml.org,2002:\n--- !e!map " + second + "\n", want: []string{"first", "second"}},
+		{name: "directive header with CRLF", input: "%YAML 1.1\r\n--- " + second + "\r\n", want: []string{"second"}},
 		{name: "tab after marker", input: first + "---\t" + second + "\n", want: []string{"first", "second"}},
 		{name: "anchor after marker", input: first + "--- &resource " + second + "\n", want: []string{"first", "second"}},
 		{name: "CRLF lines", input: strings.ReplaceAll(first+"--- "+second+"\n", "\n", "\r\n"), want: []string{"first", "second"}},
@@ -120,6 +129,40 @@ func TestReadFileInvalidInlineYAMLDocument(t *testing.T) {
 			assert.Len(t, skipped, 1)
 			require.Len(t, loaded[path], 1)
 			assert.Equal(t, "first", loaded[path][0].GetName())
+		})
+	}
+}
+
+// TestReadFileYAMLDirectiveErrors preserves parser errors and complete earlier documents around malformed headers.
+func TestReadFileYAMLDirectiveErrors(t *testing.T) {
+	first := "apiVersion: v1\nkind: Pod\nmetadata: {name: first}\n...\n"
+	document := "--- {apiVersion: v1, kind: Pod, metadata: {name: second}}\n"
+	tests := []struct {
+		name  string
+		input string
+		count int
+	}{
+		{name: "unsupported version", input: "%YAML 1.2\n" + document},
+		{name: "duplicate version directive", input: "%YAML 1.1\n%YAML 1.1\n" + document},
+		{name: "header without document", input: "%YAML 1.1\n"},
+		{name: "trailing header without document", input: first + "%YAML 1.1\n", count: 1},
+		{name: "malformed body after header", input: first + "%YAML 1.1\n--- {\n", count: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			decoder := yaml.NewDecoder(strings.NewReader(tt.input))
+			var referenceErr error
+			for referenceErr == nil {
+				var document yaml.Node
+				referenceErr = decoder.Decode(&document)
+			}
+			require.NotErrorIs(t, referenceErr, io.EOF, "the reference parser must reject the input")
+			objects, err := ReadFile([]byte(tt.input), YAML_FILE_FORMAT)
+			require.Error(t, err)
+			require.Len(t, objects, tt.count)
+			if tt.count > 0 {
+				assert.Equal(t, "first", objects[0].GetName())
+			}
 		})
 	}
 }
@@ -232,4 +275,17 @@ func TestScanYAMLDocuments_PropagatesReaderError(t *testing.T) {
 	// failure, is still valid and returned; the second was never read and
 	// must not appear as if the file only ever had one document.
 	assert.Len(t, docs, 1)
+}
+
+// TestScanYAMLDocumentsReaderErrorInDirectiveHeader retains an explicitly ended document when its successor's header is truncated.
+func TestScanYAMLDocumentsReaderErrorInDirectiveHeader(t *testing.T) {
+	wantErr := errors.New("read failed in directive header")
+	input := "apiVersion: v1\nkind: Pod\nmetadata: {name: first}\n...\n%YAML 1.1\n"
+	docs, err := scanYAMLDocuments(&erroringReader{data: []byte(input), err: wantErr}, len(input)+1)
+	require.ErrorIs(t, err, wantErr)
+	require.Len(t, docs, 1)
+	objects, err := ReadFile(docs[0], YAML_FILE_FORMAT)
+	require.NoError(t, err)
+	require.Len(t, objects, 1)
+	assert.Equal(t, "first", objects[0].GetName())
 }
