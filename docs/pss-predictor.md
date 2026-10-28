@@ -88,6 +88,8 @@ kubescape predict pss ./manifests/ --workload Deployment/web-api
 kubescape predict pss ./manifests/ -n production
 
 # Read manifests from stdin, such as a rendered Helm chart
+# (pipefail makes a failed helm template fail the pipeline)
+set -o pipefail
 helm template ./chart | kubescape predict pss -
 ```
 

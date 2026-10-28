@@ -47,6 +47,8 @@ var pssCmdExamples = fmt.Sprintf(`
   %[1]s predict pss ./manifests/
 
   # Scan manifests read from stdin, such as a rendered Helm chart
+  # (pipefail makes a failed helm template fail the pipeline)
+  set -o pipefail
   helm template ./chart | %[1]s predict pss -
 
   # Scan and output JSON
