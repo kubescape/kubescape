@@ -3,11 +3,16 @@ package operator
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/prettylogger"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/core"
 	"github.com/kubescape/kubescape/v4/core/mocks"
@@ -18,12 +23,22 @@ import (
 
 func captureLog(t *testing.T, fn func()) string {
 	t.Helper()
+	origLogger := logger.L().LoggerName()
+	origLevel := logger.L().GetLevel()
+	origWriter := logger.L().GetWriter()
+
+	logger.InitLogger(prettylogger.LoggerName)
+	_ = logger.L().SetLevel("debug")
+	t.Cleanup(func() {
+		logger.InitLogger(origLogger)
+		_ = logger.L().SetLevel(origLevel)
+		logger.L().SetWriter(origWriter)
+	})
+
 	buf, err := os.CreateTemp(t.TempDir(), "log-*")
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = buf.Close() })
-	prev := logger.L().GetWriter()
 	logger.L().SetWriter(buf)
-	t.Cleanup(func() { logger.L().SetWriter(prev) })
 
 	fn()
 
@@ -151,4 +166,185 @@ func TestOperatorRemediateCmd_CancellationDiagnostic(t *testing.T) {
 	assert.ErrorIs(t, err, context.Canceled)
 	assert.Contains(t, output, "Remediation submission canceled; submission outcome is unknown")
 	assert.Contains(t, output, "kubectl get events -n default --field-selector reason=KubescapeRemediation")
+}
+
+// TestOperatorRemediateCmd_RunE_InvalidArgsCount verifies error reporting when not exactly one action argument is passed.
+func TestOperatorRemediateCmd_RunE_InvalidArgsCount(t *testing.T) {
+	cmd := getOperatorRemediateCmd(&mocks.MockIKubescape{}, cautils.OperatorInfo{})
+	err := cmd.RunE(&cobra.Command{}, []string{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "for the operator remediate sub-command, you must pass exactly one action")
+
+	err = cmd.RunE(&cobra.Command{}, []string{"annotate", "extra"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "for the operator remediate sub-command, you must pass exactly one action")
+}
+
+// TestOperatorRemediateCmd_PayloadValidationErrors verifies validation error cases for targets and selectors.
+func TestOperatorRemediateCmd_PayloadValidationErrors(t *testing.T) {
+	tests := []struct {
+		name        string
+		args        []string
+		errContains string
+	}{
+		{
+			name:        "no target or selector",
+			args:        []string{"annotate"},
+			errContains: "remediation requires a target",
+		},
+		{
+			name:        "both target and selector",
+			args:        []string{"annotate", "--kind", "Deployment", "--name", "api", "--target-namespace", "default", "--control", "C-0016"},
+			errContains: "mutually exclusive",
+		},
+		{
+			name:        "selector with target-namespace",
+			args:        []string{"quarantine", "--control", "C-0016", "--target-namespace", "default"},
+			errContains: "--target-namespace cannot be combined with --control/--min-severity",
+		},
+		{
+			name:        "unsupported target kind",
+			args:        []string{"annotate", "--kind", "ConfigMap", "--name", "api", "--target-namespace", "default"},
+			errContains: "unsupported target kind",
+		},
+		{
+			name:        "missing target-namespace",
+			args:        []string{"annotate", "--kind", "Deployment", "--name", "api"},
+			errContains: "requires --target-namespace",
+		},
+		{
+			name:        "missing name",
+			args:        []string{"annotate", "--kind", "Deployment", "--target-namespace", "default"},
+			errContains: "remediation target requires --kind and --name",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd := getOperatorRemediateCmd(&mocks.MockIKubescape{}, cautils.OperatorInfo{})
+			cmd.SetArgs(tt.args)
+			cmd.SetOut(io.Discard)
+			cmd.SetErr(io.Discard)
+
+			err := cmd.Execute()
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.errContains)
+		})
+	}
+}
+
+// TestOperatorRemediateCmd_ReasonWarning verifies warning output when --reason is omitted for annotate and quarantine.
+func TestOperatorRemediateCmd_ReasonWarning(t *testing.T) {
+	for _, action := range []string{annotateSubCommand, quarantineSubCommand} {
+		t.Run(action, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusOK)
+			}))
+			defer server.Close()
+
+			host := strings.TrimPrefix(server.URL, "http://")
+			prevAdapter := newOperatorAdapter
+			newOperatorAdapter = func(scanInfo cautils.OperatorScanInfo, _ string, _ ...context.Context) (*core.OperatorAdapter, error) {
+				conn := &stubOperatorConnector{host: host}
+				return core.NewOperatorAdapterWithConnector(scanInfo, conn), nil
+			}
+			t.Cleanup(func() { newOperatorAdapter = prevAdapter })
+
+			cmd := getOperatorRemediateCmd(&mocks.MockIKubescape{}, cautils.OperatorInfo{})
+			cmd.SetArgs([]string{action, "--kind", "Deployment", "--name", "api", "--target-namespace", "default"})
+			cmd.SetOut(io.Discard)
+			cmd.SetErr(io.Discard)
+
+			var err error
+			output := captureLog(t, func() {
+				err = cmd.Execute()
+			})
+
+			require.NoError(t, err)
+			assert.Contains(t, output, fmt.Sprintf("no --reason provided; %s records an audit trail, consider adding --reason to justify the action", action))
+			assert.Contains(t, output, fmt.Sprintf("Previewing remediation %q via Kubescape Operator", action))
+			assert.Contains(t, output, "Submitted remediation (dry-run)")
+			assert.Contains(t, output, "kubectl get events -n default --field-selector reason=KubescapeRemediation")
+		})
+	}
+}
+
+// TestOperatorRemediateCmd_SelectorClusterWideWarningAndEvents verifies cluster-wide warning and events scope for selectors.
+func TestOperatorRemediateCmd_SelectorClusterWideWarningAndEvents(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	host := strings.TrimPrefix(server.URL, "http://")
+	prevAdapter := newOperatorAdapter
+	newOperatorAdapter = func(scanInfo cautils.OperatorScanInfo, _ string, _ ...context.Context) (*core.OperatorAdapter, error) {
+		conn := &stubOperatorConnector{host: host}
+		return core.NewOperatorAdapterWithConnector(scanInfo, conn), nil
+	}
+	t.Cleanup(func() { newOperatorAdapter = prevAdapter })
+
+	cmd := getOperatorRemediateCmd(&mocks.MockIKubescape{}, cautils.OperatorInfo{})
+	cmd.SetArgs([]string{quarantineSubCommand, "--control", "C-0016", "--min-severity", "High", "--confirm"})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+
+	var err error
+	output := captureLog(t, func() {
+		err = cmd.Execute()
+	})
+
+	require.NoError(t, err)
+	assert.Contains(t, output, "applying \"quarantine\" to every workload matching the selector, across all namespaces")
+	assert.Contains(t, output, "Applying remediation \"quarantine\" via Kubescape Operator")
+	assert.Contains(t, output, "Submitted remediation (apply)")
+	assert.Contains(t, output, "kubectl get events --all-namespaces --field-selector reason=KubescapeRemediation")
+}
+
+// TestOperatorRemediateCmd_AdapterCreationError verifies error propagation when adapter creation fails.
+func TestOperatorRemediateCmd_AdapterCreationError(t *testing.T) {
+	prevAdapter := newOperatorAdapter
+	newOperatorAdapter = func(_ cautils.OperatorScanInfo, _ string, _ ...context.Context) (*core.OperatorAdapter, error) {
+		return nil, errors.New("cannot create adapter for remediation")
+	}
+	t.Cleanup(func() { newOperatorAdapter = prevAdapter })
+
+	cmd := getOperatorRemediateCmd(&mocks.MockIKubescape{}, cautils.OperatorInfo{})
+	cmd.SetArgs([]string{revertSubCommand, "--kind", "Deployment", "--name", "api", "--target-namespace", "default"})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "cannot create adapter for remediation")
+}
+
+// TestOperatorRemediateCmd_GenericScanError verifies error reporting when remediation submission returns an error.
+func TestOperatorRemediateCmd_GenericScanError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	host := strings.TrimPrefix(server.URL, "http://")
+	prevAdapter := newOperatorAdapter
+	newOperatorAdapter = func(scanInfo cautils.OperatorScanInfo, _ string, _ ...context.Context) (*core.OperatorAdapter, error) {
+		conn := &stubOperatorConnector{host: host}
+		return core.NewOperatorAdapterWithConnector(scanInfo, conn), nil
+	}
+	t.Cleanup(func() { newOperatorAdapter = prevAdapter })
+
+	cmd := getOperatorRemediateCmd(&mocks.MockIKubescape{}, cautils.OperatorInfo{})
+	cmd.SetArgs([]string{revertSubCommand, "--kind", "Deployment", "--name", "api", "--target-namespace", "default"})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+
+	var err error
+	output := captureLog(t, func() {
+		err = cmd.Execute()
+	})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "http-error: 500")
+	assert.Contains(t, output, "Failed to submit remediation to Kubescape Operator")
 }
