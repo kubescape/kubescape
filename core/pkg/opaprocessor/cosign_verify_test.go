@@ -187,7 +187,7 @@ func pushRandomImage(t *testing.T, repo string) name.Digest {
 func signImageDigest(t *testing.T, signer, logKey *ecdsa.PrivateKey, img name.Digest) oci.Signature {
 	t.Helper()
 	unbundled := signImageDigestWithoutBundle(t, signer, img)
-	rekorPayload, set := rekorEntry(t, signer, logKey, unbundled)
+	rekorPayload, set := rekorEntry(t, signer, logKey, logKey, unbundled)
 	payload, err := unbundled.Payload()
 	require.NoError(t, err)
 	b64Sig, err := unbundled.Base64Signature()
@@ -200,9 +200,9 @@ func signImageDigest(t *testing.T, signer, logKey *ecdsa.PrivateKey, img name.Di
 	return sig
 }
 
-// rekorEntry builds the hashedrekord log entry Rekor would record for sig, and
-// its signed entry timestamp signed by logKey.
-func rekorEntry(t *testing.T, signer, logKey *ecdsa.PrivateKey, sig oci.Signature) (cbundle.RekorPayload, []byte) {
+// rekorEntry builds the hashedrekord log entry Rekor would record for sig in
+// the log identified by logKey, and its signed entry timestamp signed by setKey.
+func rekorEntry(t *testing.T, signer, logKey, setKey *ecdsa.PrivateKey, sig oci.Signature) (cbundle.RekorPayload, []byte) {
 	t.Helper()
 	payload, err := sig.Payload()
 	require.NoError(t, err)
@@ -241,7 +241,7 @@ func rekorEntry(t *testing.T, signer, logKey *ecdsa.PrivateKey, sig oci.Signatur
 	canonical, err := jsoncanonicalizer.Transform(contents)
 	require.NoError(t, err)
 	setHash := sha256.Sum256(canonical)
-	set, err := ecdsa.SignASN1(rand.Reader, logKey, setHash[:])
+	set, err := ecdsa.SignASN1(rand.Reader, setKey, setHash[:])
 	require.NoError(t, err)
 	return rekorPayload, set
 }
@@ -250,9 +250,9 @@ func rekorEntry(t *testing.T, signer, logKey *ecdsa.PrivateKey, sig oci.Signatur
 // /api/v1/log/entries/retrieve with when it holds sig: the entry keyed by its
 // UUID, with its signed entry timestamp and an inclusion proof in a log of one
 // entry, whose root hash is the entry's own RFC 6962 leaf hash.
-func rekorSearchResponse(t *testing.T, signer, logKey *ecdsa.PrivateKey, sig oci.Signature) []byte {
+func rekorSearchResponse(t *testing.T, signer, logKey, setKey *ecdsa.PrivateKey, sig oci.Signature) []byte {
 	t.Helper()
-	rekorPayload, set := rekorEntry(t, signer, logKey, sig)
+	rekorPayload, set := rekorEntry(t, signer, logKey, setKey, sig)
 	body, err := base64.StdEncoding.DecodeString(rekorPayload.Body.(string))
 	require.NoError(t, err)
 	leaf := sha256.Sum256(append([]byte{0}, body...))
@@ -398,8 +398,11 @@ func TestVerify_RekorURL(t *testing.T) {
 	attachSignature(t, img, sig)
 	key := string(publicKeyPEM(t, &signer.PublicKey))
 
-	logged := rekorSearchResponse(t, signer, logKey, sig)
-	loggedByUntrustedKey := rekorSearchResponse(t, signer, untrustedLogKey, sig)
+	logged := rekorSearchResponse(t, signer, logKey, logKey, sig)
+	loggedByUntrustedKey := rekorSearchResponse(t, signer, untrustedLogKey, untrustedLogKey, sig)
+	timestampByUntrustedKey := rekorSearchResponse(t, signer, logKey, untrustedLogKey, sig)
+	b64Sig, err := sig.Base64Signature()
+	require.NoError(t, err)
 
 	tests := []struct {
 		name         string
@@ -439,6 +442,13 @@ func TestVerify_RekorURL(t *testing.T) {
 			wantRequests: []string{"POST /api/v1/log/entries/retrieve"},
 		},
 		{
+			name:         "set rejects a trusted log entry whose timestamp another key signed",
+			inputs:       func(u string) map[string][]string { return map[string][]string{cosignRekorURLInput: {u}} },
+			response:     timestampByUntrustedKey,
+			wantErr:      "unable to verify SET",
+			wantRequests: []string{"POST /api/v1/log/entries/retrieve"},
+		},
+		{
 			name: "ignored when the tlog is not required",
 			inputs: func(u string) map[string][]string {
 				return map[string][]string{
@@ -450,7 +460,7 @@ func TestVerify_RekorURL(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			rekor, requests := fakeRekor(t, tt.response)
+			rekor, requests, bodies := fakeRekor(t, tt.response)
 			ok, err := verify(withCosignPolicy(context.Background(), tt.inputs(rekor.URL)), img.String(), key)
 			if tt.wantErr != "" {
 				require.Error(t, err)
@@ -461,21 +471,28 @@ func TestVerify_RekorURL(t *testing.T) {
 				assert.True(t, ok)
 			}
 			assert.Equal(t, tt.wantRequests, *requests)
+			for _, body := range *bodies {
+				assert.Contains(t, body, b64Sig, "the lookup must search for this signature")
+			}
 		})
 	}
 }
 
-// fakeRekor serves response to every request, and records the requests.
-func fakeRekor(t *testing.T, response []byte) (*httptest.Server, *[]string) {
+// fakeRekor serves response to every request, and records the requests and
+// their bodies.
+func fakeRekor(t *testing.T, response []byte) (*httptest.Server, *[]string, *[]string) {
 	t.Helper()
-	var requests []string
+	var requests, bodies []string
 	rekor := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests = append(requests, r.Method+" "+r.URL.Path)
+		body, err := io.ReadAll(r.Body)
+		assert.NoError(t, err)
+		bodies = append(bodies, string(body))
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write(response)
 	}))
 	t.Cleanup(rekor.Close)
-	return rekor, &requests
+	return rekor, &requests, &bodies
 }
 
 func TestWithCosignPolicy(t *testing.T) {
@@ -732,7 +749,7 @@ func TestEvaluateRule_CosignRekorURLInputNeedsRuleMetadata(t *testing.T) {
 	sig := signImageDigestWithoutBundle(t, signer, img)
 	attachSignature(t, img, sig)
 	key := string(publicKeyPEM(t, &signer.PublicKey))
-	response := rekorSearchResponse(t, signer, logKey, sig)
+	response := rekorSearchResponse(t, signer, logKey, logKey, sig)
 
 	// regolibrary v2.0.38 and earlier do not declare cosignRekorURL.
 	releasedRule := verifyImageSignatureRule(t, trustedKeysInput, requireTlogInput)
@@ -758,7 +775,7 @@ func TestEvaluateRule_CosignRekorURLInputNeedsRuleMetadata(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			rekor, requests := fakeRekor(t, response)
+			rekor, requests, _ := fakeRekor(t, response)
 			sessionObj := cautils.NewOPASessionObjMock()
 			sessionObj.RegoInputData.PostureControlInputs = map[string][]string{"trustedCosignPublicKeys": {key}}
 			if tt.setURL {
