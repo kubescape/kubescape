@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"math"
 	"os"
 	"path/filepath"
@@ -1131,6 +1132,12 @@ func loadUnredactedFromChart(s HelmFixSuggestion, chartCache map[string]map[stri
 	targetName := s.Resource.GetName()
 	targetNamespace := s.Resource.GetNamespace()
 
+	isClusterScoped := isClusterScopedResource(resourceKey{
+		Group:   targetGroup,
+		Version: targetVersion,
+		Kind:    targetKind,
+	})
+
 	var matches []map[string]interface{}
 	for _, workloads := range sourceToWorkloads {
 		for _, w := range workloads {
@@ -1138,21 +1145,33 @@ func loadUnredactedFromChart(s HelmFixSuggestion, chartCache map[string]map[stri
 			candKind := w.GetKind()
 			candName := w.GetName()
 			candNamespace := w.GetNamespace()
-			if candNamespace == "" && s.HelmValueOptions.ReleaseNamespace != "" {
-				candNamespace = s.HelmValueOptions.ReleaseNamespace
+
+			if candGroup != targetGroup || candVersion != targetVersion ||
+				candKind != targetKind || candName != targetName {
+				continue
 			}
 
-			if candGroup == targetGroup && candVersion == targetVersion &&
-				candKind == targetKind && candName == targetName &&
-				candNamespace == targetNamespace {
-				obj := w.GetObject()
-				if localworkload.IsTypeLocalWorkload(obj) {
-					lw := localworkload.NewLocalWorkload(obj)
-					lw.DeletePathEntry()
-					obj = lw.GetObject()
+			if isClusterScoped {
+				// Cluster-scoped resources match on GVK + Name; namespace is ignored.
+			} else {
+				namespaceMatch := candNamespace == targetNamespace
+				if !namespaceMatch && s.HelmValueOptions.ReleaseNamespace != "" {
+					namespaceMatch =
+						(targetNamespace == "" && candNamespace == s.HelmValueOptions.ReleaseNamespace) ||
+							(candNamespace == "" && targetNamespace == s.HelmValueOptions.ReleaseNamespace)
 				}
-				matches = append(matches, deepCopyMap(obj))
+				if !namespaceMatch {
+					continue
+				}
 			}
+
+			obj := w.GetObject()
+			if localworkload.IsTypeLocalWorkload(obj) {
+				lw := localworkload.NewLocalWorkload(obj)
+				lw.DeletePathEntry()
+				obj = lw.GetObject()
+			}
+			matches = append(matches, deepCopyMap(obj))
 		}
 	}
 
@@ -1223,6 +1242,51 @@ func writeRestrictedFile(root *os.Root, filename string, data []byte) error {
 		return err
 	}
 	return file.Close()
+}
+
+// HasEmittableKustomizePatches checks whether any of the suggestions can produce
+// a valid Kustomize patch without being skipped or declined.
+func HasEmittableKustomizePatches(suggestions []HelmFixSuggestion) bool {
+	if len(suggestions) == 0 {
+		return false
+	}
+	chartCache := make(map[string]map[string][]workloadinterface.IMetadata)
+	for _, s := range suggestions {
+		if s.Resource == nil || len(s.FixPaths) == 0 {
+			continue
+		}
+		_, declineReason := resolveBaseObject(s, chartCache)
+		if declineReason == "" {
+			return true
+		}
+	}
+	return false
+}
+
+// restoreBackups moves each entry in backupDir back into dir.
+// It restores an entry only when dir has no entry with that name.
+// It returns an error for every entry it does not restore, including entries skipped
+// because dir already has that name. The caller keeps backupDir when the error is non-nil.
+func restoreBackups(backupDir, dir string) error {
+	entries, err := os.ReadDir(backupDir)
+	if err != nil {
+		return err
+	}
+	var errs []error
+	for _, e := range entries {
+		dst := filepath.Join(dir, e.Name())
+		if _, err := os.Lstat(dst); err == nil {
+			errs = append(errs, fmt.Errorf("cannot restore %q: destination exists", e.Name()))
+			continue
+		} else if !errors.Is(err, fs.ErrNotExist) {
+			errs = append(errs, fmt.Errorf("cannot restore %q: %w", e.Name(), err))
+			continue
+		}
+		if err := os.Rename(filepath.Join(backupDir, e.Name()), dst); err != nil {
+			errs = append(errs, fmt.Errorf("cannot restore %q: %w", e.Name(), err))
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // EmitKustomizePatch writes a kustomization.yaml, base.yaml, and one JSON 6902 patch
@@ -1445,29 +1509,55 @@ func EmitKustomizePatch(suggestions []HelmFixSuggestion, dir string) (*Kustomize
 		baseContent = append(baseContent, p.baseDoc...)
 	}
 
+	// Create an isolated staging directory inside dir before promotion.
+	// Staging protects the destination from write and validation failures before promotion.
+	// If any write or verification fails, stagingDir is wiped without modifying destination files.
+	stagingDir, err := os.MkdirTemp(dir, ".kust-staging-")
+	if err != nil {
+		return nil, fmt.Errorf("failed to create staging directory in %q: %w", dir, err)
+	}
+	keepStaging := false
+	defer func() {
+		if !keepStaging {
+			_ = os.RemoveAll(stagingDir)
+		}
+	}()
+
+	stagingRoot, err := os.OpenRoot(stagingDir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open staging directory %q: %w", stagingDir, err)
+	}
+	defer stagingRoot.Close()
+
+	var stagedFiles []string
+
 	if len(baseContent) > 0 {
 		if _, err := ensureSubpath(dir, "base.yaml"); err != nil {
 			return nil, err
 		}
-		if err := writeRestrictedFile(root, "base.yaml", baseContent); err != nil {
+		if err := writeRestrictedFile(stagingRoot, "base.yaml", baseContent); err != nil {
 			return nil, fmt.Errorf("failed to write base.yaml: %w", err)
 		}
+		stagedFiles = append(stagedFiles, "base.yaml")
 		kust.Resources = append(kust.Resources, "base.yaml")
 	}
 
-	// 3. Write patch files for the planned patches
+	// 3. Write patch files for the planned patches into staging
 	for _, p := range plannedPatches {
-		if err := writeRestrictedFile(root, p.patchFileName, p.patchBytes); err != nil {
+		if _, err := ensureSubpath(dir, p.patchFileName); err != nil {
+			return nil, err
+		}
+		if err := writeRestrictedFile(stagingRoot, p.patchFileName, p.patchBytes); err != nil {
 			return nil, fmt.Errorf("failed to write patch file %q: %w", p.patchFileName, err)
 		}
+		stagedFiles = append(stagedFiles, p.patchFileName)
 		kust.Patches = append(kust.Patches, kustomizePatchEntry{
 			Path:   p.patchFileName,
 			Target: p.target,
 		})
-		result.EmittedResources = append(result.EmittedResources, p.resIdent)
 	}
 
-	// 4. Write kustomization.yaml
+	// 4. Write kustomization.yaml into staging
 	if _, err := ensureSubpath(dir, "kustomization.yaml"); err != nil {
 		return nil, err
 	}
@@ -1476,8 +1566,84 @@ func EmitKustomizePatch(suggestions []HelmFixSuggestion, dir string) (*Kustomize
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal kustomization.yaml: %w", err)
 	}
-	if err := writeRestrictedFile(root, "kustomization.yaml", kustBytes); err != nil {
+	if err := writeRestrictedFile(stagingRoot, "kustomization.yaml", kustBytes); err != nil {
 		return nil, fmt.Errorf("failed to write kustomization.yaml: %w", err)
+	}
+	stagedFiles = append(stagedFiles, "kustomization.yaml")
+
+	_ = stagingRoot.Close()
+
+	// 5. Verify symlink containment on any pre-existing files before moving
+	for _, fName := range stagedFiles {
+		dstPath := filepath.Join(dir, fName)
+		if fi, err := os.Lstat(dstPath); err == nil && (fi.Mode()&os.ModeSymlink != 0) {
+			resolved, err := filepath.EvalSymlinks(dstPath)
+			if err != nil || !isPathContained(dir, resolved) {
+				return nil, fmt.Errorf("pre-existing file %q is a symlink escaping output directory %q", fName, dir)
+			}
+		}
+	}
+
+	// 6. Atomically promote staged files to destination directory with rollback on failure
+	backupDir := filepath.Join(stagingDir, ".backup")
+	if err := os.MkdirAll(backupDir, 0700); err != nil {
+		return nil, fmt.Errorf("failed to create backup directory in %q: %w", stagingDir, err)
+	}
+
+	// Back up existing regular files that will be overwritten
+	for _, fName := range stagedFiles {
+		dstPath := filepath.Join(dir, fName)
+		fi, err := os.Lstat(dstPath)
+		if err == nil && !fi.IsDir() {
+			backupPath := filepath.Join(backupDir, fName)
+			if err := os.Rename(dstPath, backupPath); err != nil {
+				if restoreErr := restoreBackups(backupDir, dir); restoreErr != nil {
+					keepStaging = true
+					return nil, fmt.Errorf("failed to back up %q: %w; backups not restored and kept in %s: %v", fName, err, backupDir, restoreErr)
+				}
+				return nil, fmt.Errorf("failed to back up existing file %q before promotion: %w", fName, err)
+			}
+		} else if err != nil && !errors.Is(err, fs.ErrNotExist) {
+			if restoreErr := restoreBackups(backupDir, dir); restoreErr != nil {
+				keepStaging = true
+				return nil, fmt.Errorf("failed to inspect destination file %q: %w; backups not restored and kept in %s: %v", fName, err, backupDir, restoreErr)
+			}
+			return nil, fmt.Errorf("failed to inspect destination file %q before promotion: %w", fName, err)
+		}
+	}
+
+	var promoted []string
+	var promotionErr error
+	for _, fName := range stagedFiles {
+		srcPath := filepath.Join(stagingDir, fName)
+		dstPath := filepath.Join(dir, fName)
+		if err := os.Rename(srcPath, dstPath); err != nil {
+			promotionErr = err
+			break
+		}
+		promoted = append(promoted, fName)
+	}
+
+	if promotionErr != nil {
+		var removalErrs []error
+		// Roll back partially promoted files
+		for _, fName := range promoted {
+			dstPath := filepath.Join(dir, fName)
+			if err := os.Remove(dstPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
+				removalErrs = append(removalErrs, fmt.Errorf("failed to remove partially promoted file %q: %w", fName, err))
+			}
+		}
+		restoreErr := restoreBackups(backupDir, dir)
+		if len(removalErrs) > 0 || restoreErr != nil {
+			keepStaging = true
+			return nil, fmt.Errorf("failed to promote staged files: %w; rollback incomplete (backups preserved in %s): removal errors: %v; restore errors: %v",
+				promotionErr, backupDir, errors.Join(removalErrs...), restoreErr)
+		}
+		return nil, fmt.Errorf("failed to promote staged file: %w", promotionErr)
+	}
+
+	for _, p := range plannedPatches {
+		result.EmittedResources = append(result.EmittedResources, p.resIdent)
 	}
 	return result, nil
 }

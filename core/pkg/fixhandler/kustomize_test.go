@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/armosec/armoapi-go/armotypes"
+	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/stretchr/testify/assert"
@@ -4009,4 +4010,365 @@ func TestReview4034_CustomResourceDriftRejectedAndRedactionRestricted(t *testing
 	err3 := verifyScannedFieldsMatch(scannedRules, candRulesWithEnvFrom, "")
 	require.Error(t, err3, "added envFrom under non-pod container path spec.rules.containers[0] must be rejected")
 	assert.Contains(t, err3.Error(), "spec.rules.containers[0].envFrom")
+}
+
+// TestKustomize_AtomicStagingRollbackOnFailure verifies that if writing any patch file
+// fails during overlay generation, the staging directory is cleaned up and no partial
+// base.yaml or corrupted files are left in the destination directory.
+func TestKustomize_AtomicStagingRollbackOnFailure(t *testing.T) {
+	outDir := t.TempDir()
+
+	deploy := makeResource("Deployment", "app1")
+	deploy.GetObject()["spec"] = map[string]interface{}{
+		"template": map[string]interface{}{
+			"spec": map[string]interface{}{
+				"containers": []interface{}{
+					map[string]interface{}{"name": "c1"},
+				},
+			},
+		},
+	}
+
+	// Two suggestions: first valid, second has an invalid path that fails ensureSubpath traversal check
+	suggestions := []HelmFixSuggestion{
+		{
+			Resource:           deploy,
+			ChartName:          "chart1",
+			FidelityProvenance: true,
+			FixPaths: []armotypes.FixPath{
+				{Path: "spec.template.spec.containers[0].securityContext.privileged", Value: "false"},
+			},
+		},
+	}
+
+	// Verify that if pre-existing files were not present, a clean run writes base.yaml
+	res, err := EmitKustomizePatch(suggestions, outDir)
+	require.NoError(t, err)
+	require.Len(t, res.EmittedResources, 1)
+	require.FileExists(t, filepath.Join(outDir, "base.yaml"))
+
+	// Force promotion failure by creating a directory where a staged file would be promoted
+	failDir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(failDir, "kustomization.yaml"), 0700))
+	origBaseContent := "ORIGINAL_BASE_CONTENT_PRESERVED"
+	require.NoError(t, os.WriteFile(filepath.Join(failDir, "base.yaml"), []byte(origBaseContent), 0600))
+
+	// Calling EmitKustomizePatch into failDir must fail when promoting kustomization.yaml
+	_, err = EmitKustomizePatch(suggestions, failDir)
+	require.Error(t, err)
+
+	// Verify that destination pre-existing base.yaml was restored and not overwritten
+	currentBase, err := os.ReadFile(filepath.Join(failDir, "base.yaml"))
+	require.NoError(t, err)
+	assert.Equal(t, origBaseContent, string(currentBase), "original base.yaml must be preserved on promotion failure")
+
+	// Verify that staging directory was cleaned up and no .kust-staging-* remains, and no partial patches left
+	entries, readErr := os.ReadDir(failDir)
+	require.NoError(t, readErr)
+	for _, e := range entries {
+		assert.False(t, strings.HasPrefix(e.Name(), ".kust-staging-"), "staging directory must be removed on failure")
+		assert.False(t, strings.HasPrefix(e.Name(), "apps-") || strings.HasPrefix(e.Name(), "patch-"), "partially promoted patch files must be rolled back on failure")
+	}
+}
+
+// TestKustomize_VendoredChartWithOutsideOrMissingFileRepositoryAllowed verifies that
+// a chart declaring a dependency with repository: file://../child is not declined
+// when that original source was removed or lives outside allowedBase, provided the
+// chart dependency is vendored inside charts/ and all chart files are contained.
+func TestKustomize_VendoredChartWithOutsideOrMissingFileRepositoryAllowed(t *testing.T) {
+	allowedBase := t.TempDir()
+	outsideBase := t.TempDir()
+
+	chartDir := filepath.Join(allowedBase, "parent-chart")
+	require.NoError(t, os.MkdirAll(filepath.Join(chartDir, "templates"), 0700))
+	require.NoError(t, os.MkdirAll(filepath.Join(chartDir, "charts", "child", "templates"), 0700))
+
+	// Outside dependency path that does not exist in allowedBase
+	outsideDep := filepath.Join(outsideBase, "missing-child-source")
+	relOutside, err := filepath.Rel(chartDir, outsideDep)
+	require.NoError(t, err)
+
+	parentChartYaml := fmt.Sprintf(`apiVersion: v2
+name: parent-chart
+version: 0.1.0
+dependencies:
+  - name: child
+    version: 0.1.0
+    repository: "file://%s"
+`, relOutside)
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "Chart.yaml"), []byte(parentChartYaml), 0600))
+
+	childChartYaml := `apiVersion: v2
+name: child
+version: 0.1.0
+`
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "charts", "child", "Chart.yaml"), []byte(childChartYaml), 0600))
+
+	childDeploymentYaml := `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: child-workload
+  namespace: default
+spec:
+  template:
+    spec:
+      containers:
+        - name: app
+          image: nginx:1.21
+          securityContext:
+            allowPrivilegeEscalation: true
+`
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "charts", "child", "templates", "deployment.yaml"), []byte(childDeploymentYaml), 0600))
+
+	// Containment validation of the actual chart files passes
+	require.NoError(t, validateChartFilesContainment(chartDir, allowedBase))
+
+	// EmitKustomizePatch must succeed loading and fixing the vendored child chart workload
+	res := makeResource("Deployment", "child-workload")
+	res.SetApiVersion("apps/v1")
+	res.SetNamespace("default")
+
+	sug := []HelmFixSuggestion{
+		{
+			Resource:           res,
+			ChartName:          "parent-chart",
+			ChartPath:          chartDir,
+			AllowedBasePath:    allowedBase,
+			FidelityProvenance: true,
+			FixPaths: []armotypes.FixPath{
+				{Path: "spec.template.spec.containers[0].securityContext.allowPrivilegeEscalation", Value: "false"},
+			},
+		},
+	}
+
+	outDir := filepath.Join(t.TempDir(), "kustomize-out")
+	emitRes, err := EmitKustomizePatch(sug, outDir)
+	require.NoError(t, err, "vendored chart with outside/missing file:// metadata must not be rejected")
+	require.Len(t, emitRes.EmittedResources, 1)
+	require.Empty(t, emitRes.SkippedResources)
+
+	// Verify kustomize build renders the fixed patch
+	k := krusty.MakeKustomizer(krusty.MakeDefaultOptions())
+	fSys := filesys.MakeFsOnDisk()
+	m, err := k.Run(fSys, outDir)
+	require.NoError(t, err)
+	yamlOut, err := m.AsYaml()
+	require.NoError(t, err)
+	assert.Contains(t, string(yamlOut), "allowPrivilegeEscalation: false")
+}
+
+// TestKustomize_ClusterRoleAndNamespacelessServiceMatching verifies that cluster-scoped
+// resources (ClusterRole) and namespace-less services are matched correctly against candidates
+// without namespace mismatch rejections.
+func TestKustomize_ClusterRoleAndNamespacelessServiceMatching(t *testing.T) {
+	outDir := t.TempDir()
+
+	// 1. ClusterRole (cluster-scoped, group rbac.authorization.k8s.io, no namespace)
+	clusterRoleObj := map[string]interface{}{
+		"apiVersion": "rbac.authorization.k8s.io/v1",
+		"kind":       "ClusterRole",
+		"metadata": map[string]interface{}{
+			"name": "secret-reader",
+		},
+		"rules": []interface{}{
+			map[string]interface{}{
+				"apiGroups": []interface{}{""},
+				"resources": []interface{}{"secrets"},
+				"verbs":     []interface{}{"get", "watch", "list"},
+			},
+		},
+	}
+	crRes := reporthandling.Resource{
+		Object: clusterRoleObj,
+		Source: &reporthandling.Source{FileType: reporthandling.SourceTypeHelmChart},
+	}
+
+	// 2. Namespace-less Service (namespaced kind, but metadata has no namespace)
+	svcObj := map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "Service",
+		"metadata": map[string]interface{}{
+			"name": "my-service",
+		},
+		"spec": map[string]interface{}{
+			"selector": map[string]interface{}{"app": "frontend"},
+			"ports": []interface{}{
+				map[string]interface{}{"port": 80},
+			},
+		},
+	}
+	svcRes := reporthandling.Resource{
+		Object: svcObj,
+		Source: &reporthandling.Source{FileType: reporthandling.SourceTypeHelmChart},
+	}
+
+	suggestions := []HelmFixSuggestion{
+		{
+			Resource:           &crRes,
+			ChartName:          "auth-chart",
+			FidelityProvenance: true,
+			UnredactedBase:     deepCopyMap(clusterRoleObj),
+			FixPaths: []armotypes.FixPath{
+				{Path: "metadata.labels.hardened", Value: "true"},
+			},
+		},
+		{
+			Resource:           &svcRes,
+			ChartName:          "auth-chart",
+			FidelityProvenance: true,
+			UnredactedBase:     deepCopyMap(svcObj),
+			FixPaths: []armotypes.FixPath{
+				{Path: "metadata.labels.hardened", Value: "true"},
+			},
+		},
+	}
+
+	res, err := EmitKustomizePatch(suggestions, outDir)
+	require.NoError(t, err)
+	require.Len(t, res.EmittedResources, 2)
+	assert.Contains(t, res.EmittedResources, "ClusterRole/secret-reader")
+	assert.Contains(t, res.EmittedResources, "Service/my-service")
+
+	// Read generated kustomization.yaml to verify target selector rules
+	kustData, err := os.ReadFile(filepath.Join(outDir, "kustomization.yaml"))
+	require.NoError(t, err)
+
+	var kust kustomizationDoc
+	require.NoError(t, yaml.Unmarshal(kustData, &kust))
+	require.Len(t, kust.Patches, 2)
+
+	seen := map[string]bool{}
+	for _, p := range kust.Patches {
+		seen[p.Target.Kind] = true
+		switch p.Target.Kind {
+		case "ClusterRole":
+			assert.Empty(t, p.Target.Namespace, "ClusterRole target must have empty namespace")
+		case "Service":
+			assert.Equal(t, "default", p.Target.Namespace, "Namespaceless Service target must default to default namespace")
+		}
+	}
+	assert.True(t, seen["ClusterRole"] && seen["Service"], "both targets must be present")
+}
+
+// TestKustomize_LoadUnredactedFromChart_ReleaseNamespaceMatching tests that loadUnredactedFromChart
+// correctly matches when target is in ReleaseNamespace and candidate omits metadata.namespace.
+func TestKustomize_LoadUnredactedFromChart_ReleaseNamespaceMatching(t *testing.T) {
+	chartDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "Chart.yaml"), []byte("apiVersion: v2\nname: testchart\nversion: 0.1.0\n"), 0600))
+	require.NoError(t, os.MkdirAll(filepath.Join(chartDir, "templates"), 0700))
+
+	// Template omits metadata.namespace
+	depYaml := `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: namespaceless-app
+spec:
+  template:
+    spec:
+      containers:
+        - name: app
+          image: nginx:latest
+`
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "templates", "deployment.yaml"), []byte(depYaml), 0600))
+
+	// Target resource has namespace "staging"
+	targetObj := map[string]interface{}{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata": map[string]interface{}{
+			"name":      "namespaceless-app",
+			"namespace": "staging",
+		},
+	}
+	targetRes := reporthandling.Resource{
+		Object: targetObj,
+		Source: &reporthandling.Source{FileType: reporthandling.SourceTypeHelmChart},
+	}
+
+	// 1. ReleaseNamespace matches target namespace ("staging") -> candidate matches
+	s1 := HelmFixSuggestion{
+		Resource:        &targetRes,
+		ChartPath:       chartDir,
+		AllowedBasePath: chartDir,
+		HelmValueOptions: cautils.HelmValueOptions{
+			ReleaseNamespace: "staging",
+		},
+	}
+	chartCache := make(map[string]map[string][]workloadinterface.IMetadata)
+	matched, err := loadUnredactedFromChart(s1, chartCache)
+	require.NoError(t, err, "candidate with omitted namespace must match target in ReleaseNamespace")
+	require.NotNil(t, matched)
+	assert.Equal(t, "namespaceless-app", matched["metadata"].(map[string]interface{})["name"])
+
+	// 2. ReleaseNamespace does not match target namespace ("production" != "staging") -> match fails
+	s2 := HelmFixSuggestion{
+		Resource:        &targetRes,
+		ChartPath:       chartDir,
+		AllowedBasePath: chartDir,
+		HelmValueOptions: cautils.HelmValueOptions{
+			ReleaseNamespace: "production",
+		},
+	}
+	_, err = loadUnredactedFromChart(s2, chartCache)
+	require.Error(t, err, "candidate must not match when ReleaseNamespace differs from target namespace")
+	assert.Contains(t, err.Error(), "not found in rendered chart")
+}
+
+// TestKustomize_HasEmittableKustomizePatches verifies that HasEmittableKustomizePatches
+// correctly differentiates emittable suggestions from declined or empty ones.
+func TestKustomize_HasEmittableKustomizePatches(t *testing.T) {
+	assert.False(t, HasEmittableKustomizePatches(nil), "nil suggestions must return false")
+	assert.False(t, HasEmittableKustomizePatches([]HelmFixSuggestion{}), "empty suggestions must return false")
+
+	// Nil resource or no fix paths
+	assert.False(t, HasEmittableKustomizePatches([]HelmFixSuggestion{
+		{Resource: nil},
+	}))
+
+	deploy := makeResource("Deployment", "app1")
+	assert.False(t, HasEmittableKustomizePatches([]HelmFixSuggestion{
+		{Resource: deploy, FixPaths: nil},
+	}))
+
+	// Resource declined (no provenance or unredacted base)
+	assert.False(t, HasEmittableKustomizePatches([]HelmFixSuggestion{
+		{
+			Resource: deploy,
+			FixPaths: []armotypes.FixPath{{Path: "spec.replicas", Value: "2"}},
+		},
+	}))
+
+	// Resource with fidelity provenance is emittable
+	assert.True(t, HasEmittableKustomizePatches([]HelmFixSuggestion{
+		{
+			Resource:           deploy,
+			FidelityProvenance: true,
+			UnredactedBase:     deepCopyMap(deploy.GetObject()),
+			FixPaths:           []armotypes.FixPath{{Path: "spec.replicas", Value: "2"}},
+		},
+	}))
+}
+
+// TestKustomize_RestoreBackups verifies that restoreBackups correctly restores files
+// and returns errors when destination files already exist.
+func TestKustomize_RestoreBackups(t *testing.T) {
+	backupDir := t.TempDir()
+	dstDir := t.TempDir()
+
+	require.NoError(t, os.WriteFile(filepath.Join(backupDir, "base.yaml"), []byte("BACKUP_BASE"), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(backupDir, "kustomization.yaml"), []byte("BACKUP_KUST"), 0600))
+
+	// Clean destination: both files restored
+	err := restoreBackups(backupDir, dstDir)
+	require.NoError(t, err)
+
+	data, err := os.ReadFile(filepath.Join(dstDir, "base.yaml"))
+	require.NoError(t, err)
+	assert.Equal(t, "BACKUP_BASE", string(data))
+
+	// Destination already has base.yaml: returns error
+	require.NoError(t, os.WriteFile(filepath.Join(backupDir, "base.yaml"), []byte("NEW_BACKUP"), 0600))
+	err = restoreBackups(backupDir, dstDir)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "destination exists")
 }

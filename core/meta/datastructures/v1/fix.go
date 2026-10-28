@@ -37,6 +37,14 @@ type FixInfo struct {
 	//
 	// This is opt-in and does not affect the normal fix pipeline.
 	KustomizeDir string
+	// PostRendererDir, when set, writes an executable post-renderer script into this
+	// directory. The script accepts Helm-rendered manifests on stdin, applies the
+	// Kustomize patches from KustomizeDir, and writes the remediated manifests to stdout.
+	// Requires KustomizeDir to also be set.
+	//
+	//   helm install my-release ./chart --post-renderer <PostRendererDir>/renderer.sh
+	//
+	PostRendererDir string
 	// HelmValueOptions carries user-supplied Helm value overrides and release identity
 	// used to reproduce scan-time chart renders during fix generation.
 	HelmValueOptions cautils.HelmValueOptions
