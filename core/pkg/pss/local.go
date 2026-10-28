@@ -13,20 +13,44 @@ import (
 	k8syaml "k8s.io/apimachinery/pkg/util/yaml"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	k8sjson "k8s.io/apimachinery/pkg/util/json"
 )
 
-// supportedKinds is the set of Kubernetes resource kinds whose PodSpec
-// can be extracted and evaluated by the PSS library. Besides the cluster
-// workload targets, local manifests may hold the other pod-template kinds
-// that Pod Security Admission evaluates: ReplicationController and PodTemplate.
+// supportedKinds maps each Kubernetes resource kind whose PodSpec can be
+// extracted and evaluated by the PSS library to its API group. Besides the
+// cluster workload targets, local manifests may hold the other pod-template
+// kinds that Pod Security Admission evaluates: ReplicationController and
+// PodTemplate.
 var supportedKinds = localSupportedKinds()
 
-func localSupportedKinds() map[string]bool {
-	kinds := SupportedKinds()
-	kinds["ReplicationController"] = true
-	kinds["PodTemplate"] = true
+func localSupportedKinds() map[string]string {
+	kinds := make(map[string]string, len(DefaultWorkloadTargets)+2)
+	for _, t := range DefaultWorkloadTargets {
+		kinds[t.Kind] = t.GVR.Group
+	}
+	kinds["ReplicationController"] = ""
+	kinds["PodTemplate"] = ""
 	return kinds
+}
+
+// isSupportedWorkload reports whether u is one of the supported workload
+// kinds. Like Pod Security Admission, it matches the API group as well as the
+// kind: a custom resource that reuses a built-in kind name, such as a Volcano
+// batch.volcano.sh Job, is not that workload and keeps its pod templates
+// elsewhere. A manifest whose apiVersion is missing or does not parse names no
+// group, so it is matched by its kind alone.
+func isSupportedWorkload(u *unstructured.Unstructured) bool {
+	group, ok := supportedKinds[u.GetKind()]
+	if !ok {
+		return false
+	}
+	apiVersion := u.GetAPIVersion()
+	if apiVersion == "" {
+		return true
+	}
+	gv, err := schema.ParseGroupVersion(apiVersion)
+	return err != nil || gv.Group == group
 }
 
 // ParseLocalWorkloads reads YAML/JSON files from the given paths and
@@ -37,8 +61,9 @@ func localSupportedKinds() map[string]bool {
 //
 // Only objects whose Kind is in the supported workload set
 // (Pod, PodTemplate, Deployment, DaemonSet, StatefulSet, ReplicaSet,
-// ReplicationController, Job, CronJob) are returned; other kinds are
-// silently skipped.
+// ReplicationController, Job, CronJob) in its built-in API group are
+// returned; other kinds, and custom resources reusing one of those kind
+// names, are silently skipped.
 func ParseLocalWorkloads(paths []string) ([]unstructured.Unstructured, error) {
 	var results []unstructured.Unstructured
 	for _, p := range paths {
@@ -163,7 +188,7 @@ func parseMultiDoc(data []byte, source string) ([]unstructured.Unstructured, err
 					return nil, fmt.Errorf("document %d record %d in %s: %w", docIndex, recordIndex, source, err)
 				}
 				results = append(results, workloads...)
-			} else if supportedKinds[u.GetKind()] {
+			} else if isSupportedWorkload(&u) {
 				results = append(results, u)
 			}
 		}
@@ -277,7 +302,7 @@ func expandListEnvelope(u *unstructured.Unstructured, listKind string) ([]unstru
 				return nil, fmt.Errorf("%s.items[%d]: %w", listKind, i, err)
 			}
 			results = append(results, nestedWorkloads...)
-		} else if supportedKinds[item.GetKind()] {
+		} else if isSupportedWorkload(&item) {
 			results = append(results, item)
 		}
 	}
