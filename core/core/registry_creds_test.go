@@ -50,7 +50,7 @@ func TestExtractCredsFromAuthsRejectsUnusableCredentials(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			creds, found := extractCredsFromAuths(map[string]dockerAuthConfig{
 				"registry.example.com": tt.auth,
-			}, "registry.example.com")
+			}, "registry.example.com", "team/app")
 
 			assert.False(t, found)
 			assert.Equal(t, imagescan.RegistryCredentials{}, creds)
@@ -77,7 +77,7 @@ func TestExtractCredsFromAuthsPreservesBasicAuth(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			creds, found := extractCredsFromAuths(map[string]dockerAuthConfig{
 				"registry.example.com": tt.auth,
-			}, "registry.example.com")
+			}, "registry.example.com", "team/app")
 
 			require.True(t, found)
 			assert.Equal(t, imagescan.RegistryCredentials{
@@ -87,6 +87,182 @@ func TestExtractCredsFromAuthsPreservesBasicAuth(t *testing.T) {
 			}, creds)
 		})
 	}
+}
+
+func TestExtractCredsFromAuthsFollowsKubeletKeyMatching(t *testing.T) {
+	basic := func(user string) dockerAuthConfig {
+		return dockerAuthConfig{Username: user, Password: "password"}
+	}
+	tests := []struct {
+		name         string
+		auths        map[string]dockerAuthConfig
+		domain       string
+		repository   string
+		expectedUser string
+	}{
+		{
+			name:         "wildcard host label",
+			auths:        map[string]dockerAuthConfig{"*.example.com": basic("wildcard")},
+			domain:       "registry.example.com",
+			repository:   "team/app",
+			expectedUser: "wildcard",
+		},
+		{
+			name:       "wildcard host label does not span labels",
+			auths:      map[string]dockerAuthConfig{"*.example.com": basic("wildcard")},
+			domain:     "eu.registry.example.com",
+			repository: "team/app",
+		},
+		{
+			name:         "literal host is tried before a wildcard host",
+			auths:        map[string]dockerAuthConfig{"*.example.com": basic("wildcard"), "registry.example.com": basic("literal")},
+			domain:       "registry.example.com",
+			repository:   "team/app",
+			expectedUser: "literal",
+		},
+		{
+			name:         "path-scoped key applies to repositories under its path",
+			auths:        map[string]dockerAuthConfig{"registry.example.com/team-a": basic("team-a"), "registry.example.com/team-b": basic("team-b")},
+			domain:       "registry.example.com",
+			repository:   "team-b/app",
+			expectedUser: "team-b",
+		},
+		{
+			name:       "path-scoped key does not apply to other repositories",
+			auths:      map[string]dockerAuthConfig{"registry.example.com/team-a": basic("team-a")},
+			domain:     "registry.example.com",
+			repository: "team-b/app",
+		},
+		{
+			name:         "path-scoped key is tried before the bare host",
+			auths:        map[string]dockerAuthConfig{"registry.example.com": basic("host"), "https://registry.example.com/team": basic("team")},
+			domain:       "registry.example.com",
+			repository:   "team/app",
+			expectedUser: "team",
+		},
+		{
+			name:         "bare host applies outside a path-scoped key",
+			auths:        map[string]dockerAuthConfig{"registry.example.com": basic("host"), "registry.example.com/team": basic("team")},
+			domain:       "registry.example.com",
+			repository:   "other/app",
+			expectedUser: "host",
+		},
+		{
+			name:         "a less specific key is used when the more specific one is unusable",
+			auths:        map[string]dockerAuthConfig{"registry.example.com": basic("host"), "registry.example.com/team": {}},
+			domain:       "registry.example.com",
+			repository:   "team/app",
+			expectedUser: "host",
+		},
+		{
+			name:         "registry API version path is ignored",
+			auths:        map[string]dockerAuthConfig{"https://registry.example.com/v2/": basic("api")},
+			domain:       "registry.example.com",
+			repository:   "team/app",
+			expectedUser: "api",
+		},
+		{
+			name:         "Docker Hub index key",
+			auths:        map[string]dockerAuthConfig{"https://index.docker.io/v1/": basic("hub")},
+			domain:       "docker.io",
+			repository:   "library/nginx",
+			expectedUser: "hub",
+		},
+		{
+			name:         "matching port",
+			auths:        map[string]dockerAuthConfig{"registry.example.com:5000": basic("port")},
+			domain:       "registry.example.com:5000",
+			repository:   "team/app",
+			expectedUser: "port",
+		},
+		{
+			name:       "port mismatch",
+			auths:      map[string]dockerAuthConfig{"registry.example.com:5000": basic("port")},
+			domain:     "registry.example.com",
+			repository: "team/app",
+		},
+		{
+			name:         "IPv6 registry without a port",
+			auths:        map[string]dockerAuthConfig{"[2001:db8::1]": basic("ipv6")},
+			domain:       "[2001:db8::1]",
+			repository:   "team/app",
+			expectedUser: "ipv6",
+		},
+		{
+			name:         "IPv6 registry with a port",
+			auths:        map[string]dockerAuthConfig{"https://[2001:db8::1]:5000": basic("ipv6")},
+			domain:       "[2001:db8::1]:5000",
+			repository:   "team/app",
+			expectedUser: "ipv6",
+		},
+		{
+			name:       "different IPv6 registry",
+			auths:      map[string]dockerAuthConfig{"[2001:db8::2]": basic("ipv6")},
+			domain:     "[2001:db8::1]",
+			repository: "team/app",
+		},
+		{
+			name:       "IPv6 registry port mismatch",
+			auths:      map[string]dockerAuthConfig{"[2001:db8::1]:5000": basic("ipv6")},
+			domain:     "[2001:db8::1]",
+			repository: "team/app",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Map iteration order varies between runs; the selected
+			// credentials must not.
+			for range 20 {
+				creds, found := extractCredsFromAuths(tt.auths, tt.domain, tt.repository)
+				if tt.expectedUser == "" {
+					require.False(t, found)
+					require.Equal(t, imagescan.RegistryCredentials{}, creds)
+					continue
+				}
+				require.True(t, found)
+				require.Equal(t, imagescan.RegistryCredentials{
+					Authority: tt.domain,
+					Username:  tt.expectedUser,
+					Password:  "password",
+				}, creds)
+			}
+		})
+	}
+}
+
+func TestResolveRegistryCredentialsMatchesWildcardKey(t *testing.T) {
+	const namespace = "default"
+	client := fake.NewClientset(&corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "registry-auth", Namespace: namespace},
+		Type:       corev1.SecretTypeDockerConfigJson,
+		Data: map[string][]byte{
+			corev1.DockerConfigJsonKey: []byte(`{"auths":{"*.example.com":{"username":"user","password":"password"}}}`),
+		},
+	})
+	k8sAPI := &k8sinterface.KubernetesApi{KubernetesClient: client}
+	workload := workloadinterface.NewWorkloadObj(map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "Pod",
+		"metadata": map[string]interface{}{
+			"name":      "app",
+			"namespace": namespace,
+		},
+		"spec": map[string]interface{}{
+			"imagePullSecrets": []interface{}{
+				map[string]interface{}{"name": "registry-auth"},
+			},
+		},
+	})
+
+	creds, found := resolveRegistryCredentials(context.Background(), k8sAPI, workload, "registry.example.com/team/app:tag")
+
+	require.True(t, found)
+	assert.Equal(t, imagescan.RegistryCredentials{
+		Authority: "registry.example.com",
+		Username:  "user",
+		Password:  "password",
+	}, creds)
 }
 
 func TestResolveRegistryCredentialsSkipsUnusableSecrets(t *testing.T) {
