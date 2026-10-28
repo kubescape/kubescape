@@ -138,15 +138,16 @@ func TestReadFileYAMLDirectiveErrors(t *testing.T) {
 	first := "apiVersion: v1\nkind: Pod\nmetadata: {name: first}\n...\n"
 	document := "--- {apiVersion: v1, kind: Pod, metadata: {name: second}}\n"
 	tests := []struct {
-		name  string
-		input string
-		count int
+		name    string
+		input   string
+		count   int
+		wantErr string
 	}{
-		{name: "unsupported version", input: "%YAML 1.2\n" + document},
-		{name: "duplicate version directive", input: "%YAML 1.1\n%YAML 1.1\n" + document},
-		{name: "header without document", input: "%YAML 1.1\n"},
-		{name: "trailing header without document", input: first + "%YAML 1.1\n", count: 1},
-		{name: "malformed body after header", input: first + "%YAML 1.1\n--- {\n", count: 1},
+		{name: "unsupported version", input: "%YAML 1.2\n" + document, wantErr: "document 1:"},
+		{name: "duplicate version directive", input: "%YAML 1.1\n%YAML 1.1\n" + document, wantErr: "document 1:"},
+		{name: "header without document", input: "%YAML 1.1\n", wantErr: "document 1:"},
+		{name: "trailing header without document", input: first + "%YAML 1.1\n", count: 1, wantErr: "document 2:"},
+		{name: "malformed body after header", input: first + "%YAML 1.1\n--- {\n", count: 1, wantErr: "document 2:"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -159,6 +160,7 @@ func TestReadFileYAMLDirectiveErrors(t *testing.T) {
 			require.NotErrorIs(t, referenceErr, io.EOF, "the reference parser must reject the input")
 			objects, err := ReadFile([]byte(tt.input), YAML_FILE_FORMAT)
 			require.Error(t, err)
+			require.ErrorContains(t, err, tt.wantErr)
 			require.Len(t, objects, tt.count)
 			if tt.count > 0 {
 				assert.Equal(t, "first", objects[0].GetName())
