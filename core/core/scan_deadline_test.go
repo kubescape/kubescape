@@ -86,22 +86,27 @@ func TestGetInterfaces_StopsWhenTheDeadlinePassesDuringTenantSetup(t *testing.T)
 	assert.Zero(t, nodeLists(clientset), "the cloud provider lookup must not run once the deadline has passed")
 }
 
-// TestScanContext_DoesNotCollectOnceTheDeadlineHasPassed pins that a deadline passing during setup stops the scan before discovery.
+// TestScanContext_DoesNotCollectOnceTheDeadlineHasPassed pins that a deadline passing during setup stops the scan before discovery, dry run included.
 func TestScanContext_DoesNotCollectOnceTheDeadlineHasPassed(t *testing.T) {
-	clientset := fakeCluster(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	// With the version check off, the only node list is the cloud provider lookup at the end of setup.
-	cancelOn(clientset, "list", "nodes", cancel)
-	scanInfo, policyIdentifiers := localPolicyClusterScan(t)
+	for name, dryRun := range map[string]bool{"scan": false, "dry run": true} {
+		t.Run(name, func(t *testing.T) {
+			clientset := fakeCluster(t)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			// With the version check off, the only node list is the cloud provider lookup at the end of setup.
+			cancelOn(clientset, "list", "nodes", cancel)
+			scanInfo, policyIdentifiers := localPolicyClusterScan(t)
+			scanInfo.DryRun = dryRun
 
-	_, err := NewKubescape(context.Background()).ScanContext(ctx, scanInfo, policyIdentifiers)
+			_, err := NewKubescape(context.Background()).ScanContext(ctx, scanInfo, policyIdentifiers)
 
-	require.ErrorIs(t, err, context.Canceled)
-	assert.ErrorContains(t, err, "scan stopped before collecting resources")
-	actions := clientset.Actions()
-	require.NotEmpty(t, actions)
-	assert.True(t, actions[len(actions)-1].Matches("list", "nodes"), "discovery and the API server version take no context, so collection must not start: %v", actions[len(actions)-1])
+			require.ErrorIs(t, err, context.Canceled)
+			assert.ErrorContains(t, err, "scan stopped before collecting resources")
+			actions := clientset.Actions()
+			require.NotEmpty(t, actions)
+			assert.True(t, actions[len(actions)-1].Matches("list", "nodes"), "discovery takes no context, so it must not start: %v", actions[len(actions)-1])
+		})
+	}
 }
 
 // localPolicyClusterScan is a cluster scan whose policies all come from local files, so it needs no network.

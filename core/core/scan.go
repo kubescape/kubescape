@@ -461,6 +461,10 @@ func (ks *Kubescape) ScanContext(ctx context.Context, scanInfo *cautils.ScanInfo
 		return resultsHandling, err
 	}
 
+	// A dry run and collection both start with discovery calls that take no context, so a deadline that already passed stops the scan here.
+	if err := ctx.Err(); err != nil {
+		return resultsHandling, fmt.Errorf("scan stopped before collecting resources: %w", err)
+	}
 	if scanInfo.DryRun {
 		resultsHandling.SetData(scanData)
 		result, err := interfaces.resourceHandler.Preflight(ctx, scanData, scanInfo)
@@ -476,10 +480,6 @@ func (ks *Kubescape) ScanContext(ctx context.Context, scanInfo *cautils.ScanInfo
 	}
 
 	// ===================== resources =====================
-	// Collection starts with discovery calls that take no context, so a deadline that already passed stops the scan here.
-	if err := ctx.Err(); err != nil {
-		return resultsHandling, fmt.Errorf("scan stopped before collecting resources: %w", err)
-	}
 	// Determine if streaming should be enabled
 	enableStreaming := scanInfo.EnableStreaming
 	// Snapshot the pre-scan cluster size before the streaming decision. The
