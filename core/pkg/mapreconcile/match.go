@@ -3,6 +3,8 @@ package mapreconcile
 import (
 	"strings"
 
+	"github.com/kubescape/kubescape/v4/core/pkg/namespaceselector"
+
 	admissionregistrationv1alpha1 "k8s.io/api/admissionregistration/v1alpha1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -46,7 +48,8 @@ type ObjectInfo struct {
 	// NamespaceLabels is the labels of ObjectInfo's own namespace object,
 	// needed for namespaceSelector matching. NamespaceLabelsKnown
 	// distinguishes "this namespace really has no labels" from "the caller
-	// never looked the namespace up" -- the latter must not be treated as a
+	// never looked the namespace up" -- only the immutable namespace-name label
+	// can be inferred then. Unknown custom labels must not be treated as a
 	// confident empty-label-set match against a non-empty selector.
 	NamespaceLabels      map[string]string
 	NamespaceLabelsKnown bool
@@ -254,24 +257,22 @@ func (c *compiledMatchResources) matches(obj ObjectInfo) (matched bool, determin
 	if c.namespaceSelector != nil && !c.namespaceSelector.Empty() {
 		switch {
 		case obj.IsNamespaceObject:
-			// There is no separate containing namespace to look up: the
-			// selector is evaluated against the Namespace object's own
-			// labels, which the caller always has (they are obj.Labels,
-			// not a lookup that can be "unknown").
-			if !c.namespaceSelector.Matches(labels.Set(obj.Labels)) {
+			// Kubernetes supplies the immutable name label even when a local
+			// Namespace manifest omits it. Match on this object's own identity.
+			matched, _ := namespaceselector.Matches(c.namespaceSelector, obj.Name, obj.Labels, true)
+			if !matched {
 				return false, true
 			}
 		case !obj.ClusterScoped:
-			if !obj.NamespaceLabelsKnown {
+			matched, determinable := namespaceselector.Matches(c.namespaceSelector, obj.Namespace, obj.NamespaceLabels, obj.NamespaceLabelsKnown)
+			if !determinable {
 				return false, false
 			}
-			if !c.namespaceSelector.Matches(labels.Set(obj.NamespaceLabels)) {
+			if !matched {
 				return false, true
 			}
 		default:
-			// A cluster-scoped object other than Namespace itself: a
-			// namespaceSelector never skips the policy for it, per
-			// MatchResources' own doc comment.
+			// A namespaceSelector never exempts other cluster-scoped objects.
 		}
 	}
 
