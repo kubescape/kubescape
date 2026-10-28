@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
+	restclient "k8s.io/client-go/rest"
 	k8stesting "k8s.io/client-go/testing"
 )
 
@@ -27,10 +28,13 @@ func fakeCluster(t *testing.T) *fake.Clientset {
 	kubernetesAPIFunc = func() *k8sinterface.KubernetesApi {
 		return &k8sinterface.KubernetesApi{KubernetesClient: clientset, DiscoveryClient: clientset.Discovery(), Context: context.Background()}
 	}
-	connected := k8sinterface.IsConnectedToCluster()
+	// A config must be set, or IsConnectedToCluster loads the machine's kubeconfig and the result depends on where the test runs.
+	config, connected := k8sinterface.K8SConfig, k8sinterface.IsConnectedToCluster()
+	k8sinterface.K8SConfig = &restclient.Config{Host: "https://fake-cluster.test"}
 	k8sinterface.SetConnectedToCluster(true)
 	t.Cleanup(func() {
 		kubernetesAPIFunc = original
+		k8sinterface.K8SConfig = config
 		k8sinterface.SetConnectedToCluster(connected)
 	})
 	return clientset
