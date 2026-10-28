@@ -149,7 +149,7 @@ func TestHostSensorHandlerLifecycleEdges(t *testing.T) {
 
 	assert.NoError(t, handler.TearDown())
 
-	got, err := NewHostSensorHandler(nil, "")
+	got, err := NewHostSensorHandler(context.Background(), nil, "")
 	require.Nil(t, got)
 	require.ErrorContains(t, err, "nil k8s interface received")
 
@@ -157,7 +157,7 @@ func TestHostSensorHandlerLifecycleEdges(t *testing.T) {
 		KubernetesClient: fake.NewSimpleClientset(),
 		Context:          context.Background(),
 	}
-	got2, err2 := NewHostSensorHandler(k8sObj, "")
+	got2, err2 := NewHostSensorHandler(context.Background(), k8sObj, "")
 	require.Nil(t, got2)
 	require.ErrorContains(t, err2, "failed to get nodes list: no nodes to scan")
 }
