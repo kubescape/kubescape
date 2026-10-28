@@ -178,17 +178,15 @@ func (a *GCPAdaptor) getImageScanStatus(ctx context.Context, imageID ContainerIm
 	const maxScanStatusOccurrences = 1000
 	seen := 0
 	for {
-		if seen >= maxScanStatusOccurrences {
-			logger.L().Warning("truncated scan status occurrences", helpers.String("repository", imageID.Repository), helpers.Int("limit", maxScanStatusOccurrences))
-			break
-		}
-
 		occurrence, err := it.Next()
 		if err == iterator.Done {
 			break
 		}
 		if err != nil {
 			return status, fmt.Errorf("failed to query scan status for repository %s: %w", imageID.Repository, err)
+		}
+		if seen >= maxScanStatusOccurrences {
+			return status, fmt.Errorf("scan status for repository %s is incomplete: exceeded the %d-occurrence limit", imageID.Repository, maxScanStatusOccurrences)
 		}
 		seen++
 
@@ -277,8 +275,7 @@ func (a *GCPAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs []Co
 				}
 
 				if len(report.Vulnerabilities) >= maxVulns {
-					logger.L().Warning("truncated vulnerabilities", helpers.String("repository", imageID.Repository), helpers.Int("limit", maxVulns))
-					break
+					return report, errors.Join(discoveryErr, fmt.Errorf("vulnerabilities for repository %s are incomplete: exceeded the %d-finding limit", imageID.Repository, maxVulns))
 				}
 
 				if vulnDetails := occurrence.GetVulnerability(); vulnDetails != nil {
