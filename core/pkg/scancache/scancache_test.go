@@ -175,6 +175,7 @@ func TestVersionKey(t *testing.T) {
 	k3 := VersionKey([]byte("a"), []byte("c"))
 	assert.Equal(t, k1, k2)
 	assert.NotEqual(t, k1, k3)
+	assert.NotEqual(t, VersionKey([]byte("a"), []byte("bc")), VersionKey([]byte("ab"), []byte("c")))
 }
 
 func TestResourceHashReturnsEmptyOnEncodeError(t *testing.T) {
