@@ -11,8 +11,6 @@ import (
 	"testing"
 
 	"github.com/armosec/armoapi-go/apis"
-	"github.com/kubescape/go-logger"
-	"github.com/kubescape/go-logger/prettylogger"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/core"
@@ -147,20 +145,6 @@ func TestOperatorScanVulnerabilitiesCmd_FlagsAndArgs(t *testing.T) {
 	includeNs, err := cmd.PersistentFlags().GetStringSlice("include-namespaces")
 	require.NoError(t, err)
 	assert.Empty(t, includeNs)
-}
-
-func withCapturableLogger(t *testing.T) {
-	t.Helper()
-	origLogger := logger.L().LoggerName()
-	origLevel := logger.L().GetLevel()
-	origWriter := logger.L().GetWriter()
-	logger.InitLogger(prettylogger.LoggerName)
-	_ = logger.L().SetLevel("debug")
-	t.Cleanup(func() {
-		logger.InitLogger(origLogger)
-		_ = logger.L().SetLevel(origLevel)
-		logger.L().SetWriter(origWriter)
-	})
 }
 
 // TestOperatorScanVulnerabilitiesCmd_ExecutionSuccess verifies successful scan triggering, command payload, and confirmation logging.
