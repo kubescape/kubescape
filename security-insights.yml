@@ -126,9 +126,5 @@ repository:
           adhoc: true
           ci: true
           release: false
-        results:
-          ci:
-            name: OSPS Baseline scan
-            predicate-uri: https://github.com/revanite-io/osps-baseline-action
-            location: https://github.com/kubescape/kubescape/actions/workflows/osps-baseline.yml
-        comment: Runs on every push to master and weekly.
+        results: {}
+        comment: Runs on every push to master and weekly in .github/workflows/osps-baseline.yml. Results are in each run's summary and its osps-baseline-results artifact (https://github.com/kubescape/kubescape/actions/workflows/osps-baseline.yml); the action produces reports, not an attestation.
