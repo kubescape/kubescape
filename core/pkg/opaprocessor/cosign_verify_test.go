@@ -186,14 +186,29 @@ func pushRandomImage(t *testing.T, repo string) name.Digest {
 // it in a Rekor bundle signed by logKey, as `cosign sign` would upload it.
 func signImageDigest(t *testing.T, signer, logKey *ecdsa.PrivateKey, img name.Digest) oci.Signature {
 	t.Helper()
-
-	payload := []byte(fmt.Sprintf(
-		`{"critical":{"identity":{"docker-reference":%q},"image":{"docker-manifest-digest":%q},"type":"cosign container image signature"},"optional":null}`,
-		img.Context().String(), img.DigestStr()))
-	payloadHash := sha256.Sum256(payload)
-	rawSig, err := ecdsa.SignASN1(rand.Reader, signer, payloadHash[:])
+	unbundled := signImageDigestWithoutBundle(t, signer, img)
+	rekorPayload, set := rekorEntry(t, signer, logKey, logKey, unbundled)
+	payload, err := unbundled.Payload()
 	require.NoError(t, err)
-	b64Sig := base64.StdEncoding.EncodeToString(rawSig)
+	b64Sig, err := unbundled.Base64Signature()
+	require.NoError(t, err)
+	sig, err := static.NewSignature(payload, b64Sig, static.WithBundle(&cbundle.RekorBundle{
+		SignedEntryTimestamp: set,
+		Payload:              rekorPayload,
+	}))
+	require.NoError(t, err)
+	return sig
+}
+
+// rekorEntry builds the hashedrekord log entry Rekor would record for sig in
+// the log identified by logKey, and its signed entry timestamp signed by setKey.
+func rekorEntry(t *testing.T, signer, logKey, setKey *ecdsa.PrivateKey, sig oci.Signature) (cbundle.RekorPayload, []byte) {
+	t.Helper()
+	payload, err := sig.Payload()
+	require.NoError(t, err)
+	b64Sig, err := sig.Base64Signature()
+	require.NoError(t, err)
+	payloadHash := sha256.Sum256(payload)
 
 	entry, err := json.Marshal(map[string]any{
 		"apiVersion": "0.0.1",
@@ -218,7 +233,7 @@ func signImageDigest(t *testing.T, signer, logKey *ecdsa.PrivateKey, img name.Di
 	rekorPayload := cbundle.RekorPayload{
 		Body:           base64.StdEncoding.EncodeToString(entry),
 		IntegratedTime: time.Now().Unix(),
-		LogIndex:       1,
+		LogIndex:       0,
 		LogID:          hex.EncodeToString(logID[:]),
 	}
 	contents, err := json.Marshal(rekorPayload)
@@ -226,15 +241,42 @@ func signImageDigest(t *testing.T, signer, logKey *ecdsa.PrivateKey, img name.Di
 	canonical, err := jsoncanonicalizer.Transform(contents)
 	require.NoError(t, err)
 	setHash := sha256.Sum256(canonical)
-	set, err := ecdsa.SignASN1(rand.Reader, logKey, setHash[:])
+	set, err := ecdsa.SignASN1(rand.Reader, setKey, setHash[:])
 	require.NoError(t, err)
+	return rekorPayload, set
+}
 
-	sig, err := static.NewSignature(payload, b64Sig, static.WithBundle(&cbundle.RekorBundle{
-		SignedEntryTimestamp: set,
-		Payload:              rekorPayload,
-	}))
+// rekorSearchResponse is the body Rekor answers POST
+// /api/v1/log/entries/retrieve with when it holds sig: the entry keyed by its
+// UUID, with its signed entry timestamp and an inclusion proof in a log of one
+// entry, whose root hash is the entry's own RFC 6962 leaf hash.
+func rekorSearchResponse(t *testing.T, signer, logKey, setKey *ecdsa.PrivateKey, sig oci.Signature) []byte {
+	t.Helper()
+	rekorPayload, set := rekorEntry(t, signer, logKey, setKey, sig)
+	body, err := base64.StdEncoding.DecodeString(rekorPayload.Body.(string))
 	require.NoError(t, err)
-	return sig
+	leaf := sha256.Sum256(append([]byte{0}, body...))
+	leafHash := hex.EncodeToString(leaf[:])
+
+	resp, err := json.Marshal([]map[string]any{{
+		leafHash: map[string]any{
+			"body":           rekorPayload.Body,
+			"integratedTime": rekorPayload.IntegratedTime,
+			"logIndex":       rekorPayload.LogIndex,
+			"logID":          rekorPayload.LogID,
+			"verification": map[string]any{
+				"signedEntryTimestamp": set,
+				"inclusionProof": map[string]any{
+					"logIndex": 0,
+					"treeSize": 1,
+					"rootHash": leafHash,
+					"hashes":   []string{},
+				},
+			},
+		},
+	}})
+	require.NoError(t, err)
+	return resp
 }
 
 // attachSignature stores sig on img's signature tag.
@@ -336,11 +378,14 @@ func TestVerify_IgnoreTlogDoesNotFetchRekorKeys(t *testing.T) {
 
 // TestVerify_RekorURL covers the cosignRekorURL control input: when it is set,
 // a signature without a Rekor bundle is looked up online in that Rekor, like
-// `cosign verify --rekor-url`.
+// `cosign verify --rekor-url`, and the entry it returns must carry a signed
+// entry timestamp from a trusted log key.
 func TestVerify_RekorURL(t *testing.T) {
 	signer, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
 	logKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	untrustedLogKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
 	rekorPub := filepath.Join(t.TempDir(), "rekor.pub")
 	require.NoError(t, os.WriteFile(rekorPub, publicKeyPEM(t, &logKey.PublicKey), 0o600))
@@ -349,43 +394,74 @@ func TestVerify_RekorURL(t *testing.T) {
 	server := httptest.NewServer(registry.New(registry.Logger(log.New(io.Discard, "", 0))))
 	t.Cleanup(server.Close)
 	img := pushRandomImage(t, strings.TrimPrefix(server.URL, "http://")+"/test/signed")
-	attachSignature(t, img, signImageDigestWithoutBundle(t, signer, img))
+	sig := signImageDigestWithoutBundle(t, signer, img)
+	attachSignature(t, img, sig)
 	key := string(publicKeyPEM(t, &signer.PublicKey))
 
-	var rekorRequests []string
-	rekor := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		rekorRequests = append(rekorRequests, r.Method+" "+r.URL.Path)
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = io.WriteString(w, "[]")
-	}))
-	t.Cleanup(rekor.Close)
+	logged := rekorSearchResponse(t, signer, logKey, logKey, sig)
+	loggedByUntrustedKey := rekorSearchResponse(t, signer, untrustedLogKey, untrustedLogKey, sig)
+	timestampByUntrustedKey := rekorSearchResponse(t, signer, logKey, untrustedLogKey, sig)
+	b64Sig, err := sig.Base64Signature()
+	require.NoError(t, err)
 
 	tests := []struct {
 		name         string
-		inputs       map[string][]string
+		inputs       func(rekorURL string) map[string][]string
+		response     []byte
 		wantErr      string
 		wantRequests []string
 	}{
-		{name: "no input keeps the default", inputs: nil, wantErr: "rekor client not provided"},
-		{name: "empty value keeps the default", inputs: map[string][]string{cosignRekorURLInput: {""}}, wantErr: "rekor client not provided"},
+		{
+			name:    "no input keeps the default",
+			inputs:  func(string) map[string][]string { return nil },
+			wantErr: "rekor client not provided",
+		},
+		{
+			name:    "empty value keeps the default",
+			inputs:  func(string) map[string][]string { return map[string][]string{cosignRekorURLInput: {""}} },
+			wantErr: "rekor client not provided",
+		},
 		{
 			name:         "set looks up the signature in that Rekor",
-			inputs:       map[string][]string{cosignRekorURLInput: {rekor.URL}},
+			inputs:       func(u string) map[string][]string { return map[string][]string{cosignRekorURLInput: {u}} },
+			response:     []byte("[]"),
 			wantErr:      "signature not found in transparency log",
 			wantRequests: []string{"POST /api/v1/log/entries/retrieve"},
 		},
 		{
+			name:         "set accepts an entry signed by the trusted log key",
+			inputs:       func(u string) map[string][]string { return map[string][]string{cosignRekorURLInput: {u}} },
+			response:     logged,
+			wantRequests: []string{"POST /api/v1/log/entries/retrieve"},
+		},
+		{
+			name:         "set rejects an entry signed by another log key",
+			inputs:       func(u string) map[string][]string { return map[string][]string{cosignRekorURLInput: {u}} },
+			response:     loggedByUntrustedKey,
+			wantErr:      "rekor log public key not found",
+			wantRequests: []string{"POST /api/v1/log/entries/retrieve"},
+		},
+		{
+			name:         "set rejects a trusted log entry whose timestamp another key signed",
+			inputs:       func(u string) map[string][]string { return map[string][]string{cosignRekorURLInput: {u}} },
+			response:     timestampByUntrustedKey,
+			wantErr:      "unable to verify SET",
+			wantRequests: []string{"POST /api/v1/log/entries/retrieve"},
+		},
+		{
 			name: "ignored when the tlog is not required",
-			inputs: map[string][]string{
-				cosignRekorURLInput:               {rekor.URL},
-				cosignRequireTransparencyLogInput: {"false"},
+			inputs: func(u string) map[string][]string {
+				return map[string][]string{
+					cosignRekorURLInput:               {u},
+					cosignRequireTransparencyLogInput: {"false"},
+				}
 			},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			rekorRequests = nil
-			ok, err := verify(withCosignPolicy(context.Background(), tt.inputs), img.String(), key)
+			rekor, requests, bodies := fakeRekor(t, tt.response)
+			ok, err := verify(withCosignPolicy(context.Background(), tt.inputs(rekor.URL)), img.String(), key)
 			if tt.wantErr != "" {
 				require.Error(t, err)
 				assert.Contains(t, err.Error(), tt.wantErr)
@@ -394,9 +470,29 @@ func TestVerify_RekorURL(t *testing.T) {
 				require.NoError(t, err)
 				assert.True(t, ok)
 			}
-			assert.Equal(t, tt.wantRequests, rekorRequests)
+			assert.Equal(t, tt.wantRequests, *requests)
+			for _, body := range *bodies {
+				assert.Contains(t, body, b64Sig, "the lookup must search for this signature")
+			}
 		})
 	}
+}
+
+// fakeRekor serves response to every request, and records the requests and
+// their bodies.
+func fakeRekor(t *testing.T, response []byte) (*httptest.Server, *[]string, *[]string) {
+	t.Helper()
+	var requests, bodies []string
+	rekor := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests = append(requests, r.Method+" "+r.URL.Path)
+		body, err := io.ReadAll(r.Body)
+		assert.NoError(t, err)
+		bodies = append(bodies, string(body))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(response)
+	}))
+	t.Cleanup(rekor.Close)
+	return rekor, &requests, &bodies
 }
 
 func TestWithCosignPolicy(t *testing.T) {
@@ -551,38 +647,10 @@ func TestEvaluateRule_CosignTransparencyLogInputNeedsRuleMetadata(t *testing.T) 
 	attachSignature(t, img, signImageDigestWithoutBundle(t, signer, img))
 	key := string(publicKeyPEM(t, &signer.PublicKey))
 
-	const trustedKeysInput = `{
-		"path": "settings.postureControlInputs.trustedCosignPublicKeys",
-		"name": "Trusted Cosign public keys",
-		"description": "A list of trusted Cosign public keys that are used for validating container image signatures."
-	}`
-	const requireTlogInput = `{
-		"path": "settings.postureControlInputs.cosignRequireTransparencyLog",
-		"name": "Require Cosign transparency log entry",
-		"description": "Whether a valid signature must also have a transparency log (Rekor) entry."
-	}`
-	ruleFromMetadata := func(configInputs ...string) *reporthandling.PolicyRule {
-		var rule reporthandling.PolicyRule
-		require.NoError(t, json.Unmarshal([]byte(`{
-			"name": "verify-image-signature",
-			"ruleLanguage": "Rego",
-			"match": [{"apiGroups": [""], "apiVersions": ["v1"], "resources": ["Pod"]}],
-			"ruleQuery": "armo_builtins",
-			"controlConfigInputs": [`+strings.Join(configInputs, ",")+`]
-		}`), &rule))
-		rule.Rule = verifyImageSignatureRego
-		return &rule
-	}
 	// regolibrary v2.0.37 and earlier declare only the trusted keys.
-	releasedRule := ruleFromMetadata(trustedKeysInput)
-	companionRule := ruleFromMetadata(trustedKeysInput, requireTlogInput)
-
-	pod := workloadinterface.NewWorkloadObj(map[string]any{
-		"apiVersion": "v1",
-		"kind":       "Pod",
-		"metadata":   map[string]any{"name": "p", "namespace": "default"},
-		"spec":       map[string]any{"containers": []any{map[string]any{"name": "c", "image": img.String()}}},
-	})
+	releasedRule := verifyImageSignatureRule(t, trustedKeysInput)
+	companionRule := verifyImageSignatureRule(t, trustedKeysInput, requireTlogInput)
+	pod := podWithImage(img)
 
 	tests := []struct {
 		name       string
@@ -615,6 +683,114 @@ func TestEvaluateRule_CosignTransparencyLogInputNeedsRuleMetadata(t *testing.T) 
 			} else {
 				assert.Empty(t, responses, "the key-signed image must pass")
 			}
+		})
+	}
+}
+
+const trustedKeysInput = `{
+	"path": "settings.postureControlInputs.trustedCosignPublicKeys",
+	"name": "Trusted Cosign public keys",
+	"description": "A list of trusted Cosign public keys that are used for validating container image signatures."
+}`
+
+const requireTlogInput = `{
+	"path": "settings.postureControlInputs.cosignRequireTransparencyLog",
+	"name": "Require Cosign transparency log entry",
+	"description": "Whether a valid signature must also have a transparency log (Rekor) entry."
+}`
+
+const rekorURLInput = `{
+	"path": "settings.postureControlInputs.cosignRekorURL",
+	"name": "Cosign Rekor URL",
+	"description": "The Rekor instance to look up signatures that have no Rekor bundle in."
+}`
+
+// verifyImageSignatureRule is regolibrary's verify-image-signature rule, with
+// configInputs as the controlConfigInputs its metadata declares.
+func verifyImageSignatureRule(t *testing.T, configInputs ...string) *reporthandling.PolicyRule {
+	t.Helper()
+	var rule reporthandling.PolicyRule
+	require.NoError(t, json.Unmarshal([]byte(`{
+		"name": "verify-image-signature",
+		"ruleLanguage": "Rego",
+		"match": [{"apiGroups": [""], "apiVersions": ["v1"], "resources": ["Pod"]}],
+		"ruleQuery": "armo_builtins",
+		"controlConfigInputs": [`+strings.Join(configInputs, ",")+`]
+	}`), &rule))
+	rule.Rule = verifyImageSignatureRego
+	return &rule
+}
+
+func podWithImage(img name.Digest) workloadinterface.IMetadata {
+	return workloadinterface.NewWorkloadObj(map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Pod",
+		"metadata":   map[string]any{"name": "p", "namespace": "default"},
+		"spec":       map[string]any{"containers": []any{map[string]any{"name": "c", "image": img.String()}}},
+	})
+}
+
+// TestEvaluateRule_CosignRekorURLInputNeedsRuleMetadata runs the scan path
+// from rule metadata to the Rekor lookup: cosignRekorURL reaches cosign.verify
+// only when the rule's controlConfigInputs declare it, and then the image is
+// verified against the entry that Rekor returns.
+func TestEvaluateRule_CosignRekorURLInputNeedsRuleMetadata(t *testing.T) {
+	signer, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	logKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	rekorPub := filepath.Join(t.TempDir(), "rekor.pub")
+	require.NoError(t, os.WriteFile(rekorPub, publicKeyPEM(t, &logKey.PublicKey), 0o600))
+	t.Setenv("SIGSTORE_REKOR_PUBLIC_KEY", rekorPub)
+
+	server := httptest.NewServer(registry.New(registry.Logger(log.New(io.Discard, "", 0))))
+	t.Cleanup(server.Close)
+	img := pushRandomImage(t, strings.TrimPrefix(server.URL, "http://")+"/test/signed")
+	sig := signImageDigestWithoutBundle(t, signer, img)
+	attachSignature(t, img, sig)
+	key := string(publicKeyPEM(t, &signer.PublicKey))
+	response := rekorSearchResponse(t, signer, logKey, logKey, sig)
+
+	// regolibrary v2.0.38 and earlier do not declare cosignRekorURL.
+	releasedRule := verifyImageSignatureRule(t, trustedKeysInput, requireTlogInput)
+	companionRule := verifyImageSignatureRule(t, trustedKeysInput, requireTlogInput, rekorURLInput)
+	pod := podWithImage(img)
+
+	tests := []struct {
+		name         string
+		rule         *reporthandling.PolicyRule
+		setURL       bool
+		wantFailed   bool
+		wantRequests []string
+	}{
+		{name: "released metadata filters out the URL", rule: releasedRule, setURL: true, wantFailed: true},
+		{name: "declared input, unset", rule: companionRule, setURL: false, wantFailed: true},
+		{
+			name:         "declared input, set",
+			rule:         companionRule,
+			setURL:       true,
+			wantFailed:   false,
+			wantRequests: []string{"POST /api/v1/log/entries/retrieve"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rekor, requests, _ := fakeRekor(t, response)
+			sessionObj := cautils.NewOPASessionObjMock()
+			sessionObj.RegoInputData.PostureControlInputs = map[string][]string{"trustedCosignPublicKeys": {key}}
+			if tt.setURL {
+				sessionObj.RegoInputData.PostureControlInputs[cosignRekorURLInput] = []string{rekor.URL}
+			}
+			proc := NewOPAProcessor(sessionObj, &resources.RegoDependenciesData{}, "", "", "", false, nil)
+
+			responses, err := proc.EvaluateRule(context.Background(), tt.rule, []workloadinterface.IMetadata{pod}, "C-0236")
+			require.NoError(t, err)
+			if tt.wantFailed {
+				assert.Len(t, responses, 1, "a signature with no Rekor entry looked up must fail")
+			} else {
+				assert.Empty(t, responses, "the image logged in the configured Rekor must pass")
+			}
+			assert.Equal(t, tt.wantRequests, *requests, "requests to the configured Rekor")
 		})
 	}
 }
