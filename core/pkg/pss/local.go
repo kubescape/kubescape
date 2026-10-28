@@ -62,8 +62,9 @@ func isSupportedWorkload(u *unstructured.Unstructured) bool {
 // Only objects whose Kind is in the supported workload set
 // (Pod, PodTemplate, Deployment, DaemonSet, StatefulSet, ReplicaSet,
 // ReplicationController, Job, CronJob) in its built-in API group are
-// returned; other kinds, and custom resources reusing one of those kind
-// names, are silently skipped.
+// returned (an object whose apiVersion is missing or does not parse is matched
+// by its kind alone); other kinds, and custom resources reusing one of those
+// kind names, are silently skipped.
 func ParseLocalWorkloads(paths []string) ([]unstructured.Unstructured, error) {
 	var results []unstructured.Unstructured
 	for _, p := range paths {
