@@ -13,6 +13,7 @@ import (
 	"io"
 	"log"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -92,8 +93,15 @@ func attachBundle(t *testing.T, img, subject name.Digest, signer *ecdsa.PrivateK
 // format, the `cosign sign` default since v3, for both cosign.verify and
 // cosign.verify_keyless.
 func TestVerify_SigstoreBundle(t *testing.T) {
-	fulcio := newFakeFulcio(t, t.TempDir())
+	fulcio := trustedFakeFulcio(t)
 	useTrustedRoot(t, fulcio.trustedRoot(t))
+	// Failed bundles fall back to the legacy path, which must not reach the
+	// public Rekor.
+	logKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	rekorPub := filepath.Join(t.TempDir(), "rekor.pub")
+	require.NoError(t, os.WriteFile(rekorPub, publicKeyPEM(t, &logKey.PublicKey), 0o600))
+	t.Setenv("SIGSTORE_REKOR_PUBLIC_KEY", rekorPub)
 	untrusted := newFakeFulcio(t, t.TempDir())
 	server := httptest.NewServer(registry.New(registry.Logger(log.New(io.Discard, "", 0))))
 	t.Cleanup(server.Close)
@@ -223,4 +231,62 @@ func TestVerify_SigstoreBundleKeyWithoutTlogNeedsNoTrustedRoot(t *testing.T) {
 	ok, err := verify(ctx, img.String(), string(publicKeyPEM(t, &signer.PublicKey)))
 	require.NoError(t, err)
 	assert.True(t, ok)
+}
+
+// TestVerify_LegacySignatureBesideBundle covers images that have a legacy
+// signature and Sigstore bundles: when no bundle verifies, the legacy
+// signature must still be checked, with its own trust and digest checks.
+func TestVerify_LegacySignatureBesideBundle(t *testing.T) {
+	fulcio := trustedFakeFulcio(t)
+	useTrustedRoot(t, fulcio.trustedRoot(t))
+	untrusted := newFakeFulcio(t, t.TempDir())
+	server := httptest.NewServer(registry.New(registry.Logger(log.New(io.Discard, "", 0))))
+	t.Cleanup(server.Close)
+	repo := strings.TrimPrefix(server.URL, "http://")
+	noTlog := map[string][]string{cosignRequireTransparencyLogInput: {"false"}}
+
+	t.Run("key signature beside a provenance bundle", func(t *testing.T) {
+		signer, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		require.NoError(t, err)
+		img := pushRandomImage(t, repo+"/test/mixed")
+		attachSignature(t, img, signImageDigestWithoutBundle(t, signer, img))
+		attachBundle(t, img, img, signer, nil, "https://slsa.dev/provenance/v1")
+
+		ok, err := verify(withCosignPolicy(context.Background(), noTlog), img.String(), string(publicKeyPEM(t, &signer.PublicKey)))
+		require.NoError(t, err)
+		assert.True(t, ok)
+	})
+
+	t.Run("keyless signature beside an untrusted bundle", func(t *testing.T) {
+		img := pushRandomImage(t, repo+"/test/mixed")
+		attachSignature(t, img, fulcio.signKeyless(t, img, testIdentity, testIssuer, true))
+		signer, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		require.NoError(t, err)
+		attachBundle(t, img, img, signer, untrusted.issue(t, signer, testIdentity, testIssuer, true), types.CosignSignPredicateType)
+
+		ctx := withCosignPolicy(context.Background(), map[string][]string{
+			trustedCosignIdentitiesInput:      {testIssuer + " " + testIdentity},
+			cosignRequireTransparencyLogInput: {"false"},
+		})
+		ok, err := verifyKeyless(ctx, img.String())
+		require.NoError(t, err)
+		assert.True(t, ok)
+	})
+
+	t.Run("legacy signature for another image beside an untrusted bundle", func(t *testing.T) {
+		signer, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		require.NoError(t, err)
+		img := pushRandomImage(t, repo+"/test/mixed")
+		other := pushRandomImage(t, repo+"/test/other")
+		attachSignature(t, img, signImageDigestWithoutBundle(t, signer, other))
+		otherSigner, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		require.NoError(t, err)
+		attachBundle(t, img, img, otherSigner, nil, types.CosignSignPredicateType)
+
+		ok, err := verify(withCosignPolicy(context.Background(), noTlog), img.String(), string(publicKeyPEM(t, &signer.PublicKey)))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "could not verify envelope", "the bundle failure is reported")
+		assert.Contains(t, err.Error(), "invalid or missing digest in claim", "the legacy failure is reported")
+		assert.False(t, ok)
+	})
 }

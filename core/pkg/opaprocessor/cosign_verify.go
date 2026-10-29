@@ -181,8 +181,9 @@ var cosignTrustedRoot = sync.OnceValues(cosign.TrustedRoot)
 
 // verifyImageSignatures verifies img with co, whether it was signed in the
 // Sigstore bundle format that `cosign sign` writes by default since v3, or in
-// the legacy format. Like `cosign verify`, bundles take precedence when the
-// image has any.
+// the legacy format. Bundles are tried first when the image has any; as they
+// include attestations and other signers' bundles, the legacy signature is
+// still checked when none of them verifies.
 func verifyImageSignatures(ctx context.Context, img string, co *cosign.CheckOpts) (bool, error) {
 	var ociremoteOpts []ociremote.Option
 	attachment := ""
@@ -195,10 +196,18 @@ func verifyImageSignatures(ctx context.Context, img string, co *cosign.CheckOpts
 	if err != nil {
 		return false, fmt.Errorf("resolving attachment type %s for image %s: %w", attachment, img, err)
 	}
-	if bundles, _, err := cosign.GetBundles(ctx, ref, co.RegistryClientOpts); err == nil && len(bundles) > 0 {
-		return verifySigstoreBundles(ctx, ref, co)
+	bundles, _, err := cosign.GetBundles(ctx, ref, co.RegistryClientOpts)
+	if err != nil || len(bundles) == 0 {
+		return verifyLegacySignatures(ctx, ref, co)
 	}
-	return verifyLegacySignatures(ctx, ref, co)
+	bundleOpts := *co
+	if ok, bundleErr := verifySigstoreBundles(ctx, ref, &bundleOpts); ok {
+		return true, nil
+	} else if ok, legacyErr := verifyLegacySignatures(ctx, ref, co); ok {
+		return true, nil
+	} else {
+		return false, errors.Join(bundleErr, legacyErr)
+	}
 }
 
 // verifySigstoreBundles verifies the Sigstore bundles attached to ref. Only
