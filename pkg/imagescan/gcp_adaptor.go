@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 
 	containeranalysis "cloud.google.com/go/containeranalysis/apiv1"
 	grafeas "cloud.google.com/go/grafeas/apiv1"
@@ -48,6 +49,9 @@ type gcpAPIFactory func(c *containeranalysis.Client) GCPAPI
 
 // GCPAdaptor implements IContainerImageVulnerabilityAdaptor for Google Cloud Artifact Registry.
 type GCPAdaptor struct {
+	// Readers retain the client and project until their whole batch finishes;
+	// lifecycle writers may then replace or close the owning connection.
+	mu            sync.RWMutex
 	client        GCPAPI
 	owningClient  *containeranalysis.Client
 	projectID     string
@@ -70,7 +74,8 @@ func NewGCPAdaptor() *GCPAdaptor {
 // setOwningClient installs c as the adaptor's owning containeranalysis
 // client, closing any previously held client first. Without this, repeated
 // Login calls on the same adaptor instance would leak the previous client's
-// underlying gRPC connection pool.
+// underlying gRPC connection pool. The caller must hold mu when the adaptor
+// is shared with other goroutines.
 func (a *GCPAdaptor) setOwningClient(c *containeranalysis.Client) {
 	if a.owningClient != nil {
 		if closeErr := a.owningClient.Close(); closeErr != nil {
@@ -86,6 +91,8 @@ func (a *GCPAdaptor) setOwningClient(c *containeranalysis.Client) {
 // Explicit credentials passed via RegistryCredentials are intentionally unsupported
 // as GCP SDK relies heavily on Workload Identity and Application Default Credentials.
 func (a *GCPAdaptor) Login(ctx context.Context, registry string, credentials RegistryCredentials) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	// Drop the previous session before validating the new login, so a failed
 	// re-login does not leave the previous project's client callable.
 	a.client = nil
@@ -147,6 +154,8 @@ func (a *GCPAdaptor) DescribeAdaptor() string {
 
 // GetImagesScanStatus retrieves the scan status for a list of image identifiers.
 func (a *GCPAdaptor) GetImagesScanStatus(ctx context.Context, imageIDs []ContainerImageIdentifier) ([]ContainerImageScanStatus, error) {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
 	if a.client == nil {
 		return nil, fmt.Errorf("gcp client not initialized, call login first")
 	}
@@ -229,6 +238,8 @@ func buildGrafeasFilter(kind string, imageID ContainerImageIdentifier) string {
 
 // GetImagesVulnerabilities retrieves the vulnerability reports for a list of image identifiers.
 func (a *GCPAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs []ContainerImageIdentifier) ([]ContainerImageVulnerabilityReport, error) {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
 	if a.client == nil {
 		return nil, fmt.Errorf("gcp client not initialized, call login first")
 	}
@@ -311,6 +322,8 @@ func (a *GCPAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs []Co
 
 // GetImagesInformation retrieves the BOM and manifest information for a list of image identifiers.
 func (a *GCPAdaptor) GetImagesInformation(ctx context.Context, imageIDs []ContainerImageIdentifier) ([]ContainerImageInformation, error) {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
 	if a.client == nil {
 		return nil, fmt.Errorf("gcp client not initialized, call login first")
 	}
@@ -319,6 +332,8 @@ func (a *GCPAdaptor) GetImagesInformation(ctx context.Context, imageIDs []Contai
 
 // Destroy cleans up any persistent resources used by the adaptor.
 func (a *GCPAdaptor) Destroy() error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	if a.owningClient != nil {
 		err := a.owningClient.Close()
 		a.owningClient = nil
