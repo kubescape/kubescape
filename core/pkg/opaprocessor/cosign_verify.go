@@ -3,10 +3,13 @@ package opaprocessor
 import (
 	"context"
 	"crypto"
+	"errors"
 	"fmt"
 	"strings"
+	"unicode"
 
 	"github.com/google/go-containerregistry/pkg/name"
+	"github.com/sigstore/cosign/v3/cmd/cosign/cli/fulcio"
 	"github.com/sigstore/cosign/v3/cmd/cosign/cli/options"
 	"github.com/sigstore/cosign/v3/cmd/cosign/cli/rekor"
 	"github.com/sigstore/cosign/v3/cmd/cosign/cli/sign"
@@ -56,11 +59,20 @@ const cosignRequireTransparencyLogInput = "cosignRequireTransparencyLog"
 // `cosign verify --rekor-url`. No value keeps today's behaviour.
 const cosignRekorURLInput = "cosignRekorURL"
 
+// trustedCosignIdentitiesInput is the posture control input that lists the
+// keyless (Fulcio) signers cosign.verify_keyless trusts. Each entry is an OIDC
+// issuer regular expression, whitespace, and a certificate identity regular
+// expression, like `cosign verify --certificate-oidc-issuer-regexp
+// --certificate-identity-regexp`. The issuer ends at the first whitespace, so
+// the identity may itself contain spaces. The expressions are not anchored.
+const trustedCosignIdentitiesInput = "trustedCosignIdentities"
+
 type cosignPolicyKey struct{}
 
 type cosignPolicy struct {
 	ignoreTlog bool
 	rekorURL   string
+	identities []cosign.Identity
 }
 
 // withCosignPolicy returns ctx carrying the cosign verification policy read
@@ -74,10 +86,30 @@ func withCosignPolicy(ctx context.Context, postureControlInputs map[string][]str
 	if values := postureControlInputs[cosignRekorURLInput]; len(values) > 0 {
 		policy.rekorURL = strings.TrimSpace(values[0])
 	}
-	if policy == (cosignPolicy{}) {
+	for _, entry := range postureControlInputs[trustedCosignIdentitiesInput] {
+		if identity, ok := parseCosignIdentity(entry); ok {
+			policy.identities = append(policy.identities, identity)
+		}
+	}
+	if !policy.ignoreTlog && policy.rekorURL == "" && len(policy.identities) == 0 {
 		return ctx
 	}
 	return context.WithValue(ctx, cosignPolicyKey{}, policy)
+}
+
+// parseCosignIdentity splits a trustedCosignIdentities entry into its issuer
+// and identity expressions. An entry without both is ignored.
+func parseCosignIdentity(entry string) (cosign.Identity, bool) {
+	entry = strings.TrimSpace(entry)
+	i := strings.IndexFunc(entry, unicode.IsSpace)
+	if i < 0 {
+		return cosign.Identity{}, false
+	}
+	issuer, subject := entry[:i], strings.TrimSpace(entry[i:])
+	if subject == "" {
+		return cosign.Identity{}, false
+	}
+	return cosign.Identity{IssuerRegExp: issuer, SubjectRegExp: subject}, true
 }
 
 func cosignPolicyFrom(ctx context.Context) cosignPolicy {
@@ -95,8 +127,6 @@ func verify(ctx context.Context, img string, key string) (bool, error) {
 		// matching the claim check `cosign verify` performs by default.
 		ClaimVerifier: cosign.SimpleClaimVerifier,
 	}
-	var ociremoteOpts []ociremote.Option
-	attachment := ""
 
 	pubKey, err := sigs.LoadPublicKeyRaw([]byte(key), crypto.SHA256)
 	if err != nil {
@@ -107,6 +137,41 @@ func verify(ctx context.Context, img string, key string) (bool, error) {
 		defer pkcs11Key.Close()
 	}
 	co.SigVerifier = pubKey
+	return verifyImageSignatures(ctx, img, co)
+}
+
+// verifyKeyless verifies img against the Fulcio certificate on its signature:
+// the certificate must chain to the Fulcio roots, carry a valid SCT, and name
+// an issuer and identity from trustedCosignIdentities.
+func verifyKeyless(ctx context.Context, img string) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, fmt.Errorf("context canceled before verification: %w", err)
+	}
+	policy := cosignPolicyFrom(ctx)
+	if len(policy.identities) == 0 {
+		return false, errors.New("no trusted cosign identities configured")
+	}
+	co := &cosign.CheckOpts{
+		ClaimVerifier: cosign.SimpleClaimVerifier,
+		Identities:    policy.identities,
+	}
+	var err error
+	if co.RootCerts, err = fulcio.GetRoots(); err != nil {
+		return false, fmt.Errorf("getting Fulcio roots: %w", err)
+	}
+	if co.IntermediateCerts, err = fulcio.GetIntermediates(); err != nil {
+		return false, fmt.Errorf("getting Fulcio intermediates: %w", err)
+	}
+	if co.CTLogPubKeys, err = cosign.GetCTLogPubs(ctx); err != nil {
+		return false, fmt.Errorf("getting CT log public keys: %w", err)
+	}
+	return verifyImageSignatures(ctx, img, co)
+}
+
+func verifyImageSignatures(ctx context.Context, img string, co *cosign.CheckOpts) (bool, error) {
+	var ociremoteOpts []ociremote.Option
+	attachment := ""
+
 	ref, err := name.ParseReference(img)
 	if err != nil {
 		return false, fmt.Errorf("parsing reference: %w", err)
