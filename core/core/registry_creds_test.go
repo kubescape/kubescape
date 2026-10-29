@@ -496,22 +496,27 @@ func dockerAuths(t *testing.T, entries ...registryAuth) []byte {
 	return encoded
 }
 
-func pullSecretObject(name string, secretType corev1.SecretType, data map[string][]byte) *corev1.Secret {
+func pullSecretObject(name, namespace string, secretType corev1.SecretType, data map[string][]byte) *corev1.Secret {
 	return &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
 		Type:       secretType,
 		Data:       data,
 	}
 }
 
-func dockerConfigSecret(t *testing.T, name string, entries ...registryAuth) runtime.Object {
+func dockerConfigJSON(t *testing.T, entries ...registryAuth) []byte {
 	t.Helper()
 	config, err := json.Marshal(map[string]json.RawMessage{"auths": dockerAuths(t, entries...)})
 	require.NoError(t, err)
-	return pullSecretObject(name, corev1.SecretTypeDockerConfigJson, map[string][]byte{corev1.DockerConfigJsonKey: config})
+	return config
 }
 
-func podPullingImage(name, image string, pullSecrets ...string) workloadinterface.IMetadata {
+func dockerConfigSecret(t *testing.T, name string, entries ...registryAuth) runtime.Object {
+	t.Helper()
+	return pullSecretObject(name, "default", corev1.SecretTypeDockerConfigJson, map[string][]byte{corev1.DockerConfigJsonKey: dockerConfigJSON(t, entries...)})
+}
+
+func podPullingImage(name, namespace, image string, pullSecrets ...string) workloadinterface.IMetadata {
 	refs := make([]interface{}, 0, len(pullSecrets))
 	for _, secret := range pullSecrets {
 		refs = append(refs, map[string]interface{}{"name": secret})
@@ -525,7 +530,7 @@ func podPullingImage(name, image string, pullSecrets ...string) workloadinterfac
 	return workloadinterface.NewWorkloadObj(map[string]interface{}{
 		"apiVersion": "v1",
 		"kind":       "Pod",
-		"metadata":   map[string]interface{}{"name": name, "namespace": "default"},
+		"metadata":   map[string]interface{}{"name": name, "namespace": namespace},
 		"spec":       spec,
 	})
 }
@@ -623,7 +628,7 @@ func TestCollectImageScanTargetsOffersEveryPullSecretCredential(t *testing.T) {
 			k8sAPI := &k8sinterface.KubernetesApi{KubernetesClient: fake.NewClientset(tt.secrets...)}
 			// Map iteration order varies between runs; the offered order must not.
 			for range 20 {
-				credentials := collectPullSecretCredentials(t, k8sAPI, podPullingImage("app", pullSecretTestImage, tt.pullSecrets...))
+				credentials := collectPullSecretCredentials(t, k8sAPI, podPullingImage("app", "default", pullSecretTestImage, tt.pullSecrets...))
 				if tt.wantUsers == nil {
 					require.NotContains(t, credentials, pullSecretTestImage)
 					continue
@@ -644,8 +649,8 @@ func TestCollectImageScanTargetsOrdersCredentialsAcrossWorkloads(t *testing.T) {
 
 	for range 20 {
 		credentials := collectPullSecretCredentials(t, k8sAPI,
-			podPullingImage("org-app", pullSecretTestImage, "org-pull"),
-			podPullingImage("team-app", pullSecretTestImage, "team-a-pull"),
+			podPullingImage("org-app", "default", pullSecretTestImage, "org-pull"),
+			podPullingImage("team-app", "default", pullSecretTestImage, "team-a-pull"),
 		)
 		require.Equal(t, []string{"team", "org"}, registryUsers(credentials[pullSecretTestImage]))
 	}
@@ -655,11 +660,7 @@ func TestCollectImageScanTargetsOrdersCredentialsAcrossWorkloads(t *testing.T) {
 // a key in the other format is ignored.
 func TestCollectImageScanTargetsReadsPullSecretsByType(t *testing.T) {
 	dockercfg := func(entries ...registryAuth) []byte { return dockerAuths(t, entries...) }
-	dockerconfigjson := func(entries ...registryAuth) []byte {
-		config, err := json.Marshal(map[string]json.RawMessage{"auths": dockerAuths(t, entries...)})
-		require.NoError(t, err)
-		return config
-	}
+	dockerconfigjson := func(entries ...registryAuth) []byte { return dockerConfigJSON(t, entries...) }
 
 	tests := []struct {
 		name      string
@@ -668,7 +669,7 @@ func TestCollectImageScanTargetsReadsPullSecretsByType(t *testing.T) {
 	}{
 		{
 			name: "a dockerconfigjson secret ignores a .dockercfg key",
-			secret: pullSecretObject("pull", corev1.SecretTypeDockerConfigJson, map[string][]byte{
+			secret: pullSecretObject("pull", "default", corev1.SecretTypeDockerConfigJson, map[string][]byte{
 				corev1.DockerConfigJsonKey: dockerconfigjson(registryAuth{"registry.example.com/team-a", "json"}),
 				corev1.DockerConfigKey:     dockercfg(registryAuth{"registry.example.com", "cfg"}),
 			}),
@@ -676,14 +677,14 @@ func TestCollectImageScanTargetsReadsPullSecretsByType(t *testing.T) {
 		},
 		{
 			name: "a dockercfg secret reads .dockercfg",
-			secret: pullSecretObject("pull", corev1.SecretTypeDockercfg, map[string][]byte{
+			secret: pullSecretObject("pull", "default", corev1.SecretTypeDockercfg, map[string][]byte{
 				corev1.DockerConfigKey: dockercfg(registryAuth{"registry.example.com", "cfg"}),
 			}),
 			wantUsers: []string{"cfg"},
 		},
 		{
 			name: "a dockercfg secret ignores a .dockerconfigjson key",
-			secret: pullSecretObject("pull", corev1.SecretTypeDockercfg, map[string][]byte{
+			secret: pullSecretObject("pull", "default", corev1.SecretTypeDockercfg, map[string][]byte{
 				corev1.DockerConfigKey:     dockercfg(registryAuth{"registry.example.com", "cfg"}),
 				corev1.DockerConfigJsonKey: dockerconfigjson(registryAuth{"registry.example.com/team-a", "json"}),
 			}),
@@ -691,7 +692,7 @@ func TestCollectImageScanTargetsReadsPullSecretsByType(t *testing.T) {
 		},
 		{
 			name: "a valid key is read next to an invalid one of the other format",
-			secret: pullSecretObject("pull", corev1.SecretTypeDockercfg, map[string][]byte{
+			secret: pullSecretObject("pull", "default", corev1.SecretTypeDockercfg, map[string][]byte{
 				corev1.DockerConfigKey:     dockercfg(registryAuth{"registry.example.com", "cfg"}),
 				corev1.DockerConfigJsonKey: []byte("not json"),
 			}),
@@ -699,7 +700,7 @@ func TestCollectImageScanTargetsReadsPullSecretsByType(t *testing.T) {
 		},
 		{
 			name: "an Opaque secret is not a pull secret",
-			secret: pullSecretObject("pull", corev1.SecretTypeOpaque, map[string][]byte{
+			secret: pullSecretObject("pull", "default", corev1.SecretTypeOpaque, map[string][]byte{
 				corev1.DockerConfigJsonKey: dockerconfigjson(registryAuth{"registry.example.com", "json"}),
 			}),
 		},
@@ -708,7 +709,7 @@ func TestCollectImageScanTargetsReadsPullSecretsByType(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			k8sAPI := &k8sinterface.KubernetesApi{KubernetesClient: fake.NewClientset(tt.secret)}
-			credentials := collectPullSecretCredentials(t, k8sAPI, podPullingImage("app", pullSecretTestImage, "pull"))
+			credentials := collectPullSecretCredentials(t, k8sAPI, podPullingImage("app", "default", pullSecretTestImage, "pull"))
 			if tt.wantUsers == nil {
 				assert.NotContains(t, credentials, pullSecretTestImage)
 				return
@@ -757,8 +758,8 @@ func TestCollectImageScanTargetsReadsEachPullSecretOncePerScan(t *testing.T) {
 	})
 	workloads := []workloadinterface.IMetadata{
 		twoImages,
-		podPullingImage("app", pullSecretTestImage, "org-pull", "team-a-pull"),
-		podPullingImage("org-app", otherImage, "org-pull"),
+		podPullingImage("app", "default", pullSecretTestImage, "org-pull", "team-a-pull"),
+		podPullingImage("org-app", "default", otherImage, "org-pull"),
 	}
 
 	credentials := collectPullSecretCredentials(t, k8sAPI, workloads...)
@@ -775,6 +776,36 @@ func TestCollectImageScanTargetsReadsEachPullSecretOncePerScan(t *testing.T) {
 	assert.Equal(t, 2, secretGets(client), "a new scan reads the pull secrets again")
 	assert.Equal(t, []string{"rotated", "org"}, registryUsers(credentials[pullSecretTestImage]),
 		"a new scan sees the updated pull secret")
+}
+
+// Pull secrets are namespaced: a secret name in one namespace says nothing
+// about a secret with the same name in another, so a workload only gets the
+// credentials of its own namespace's secret.
+func TestCollectImageScanTargetsKeepsPullSecretsPerNamespace(t *testing.T) {
+	const (
+		teamAImage = "registry.example.com/team-a/app:1.0"
+		teamBImage = "registry.example.com/team-b/app:1.0"
+	)
+	pullSecret := func(namespace, username string) runtime.Object {
+		return pullSecretObject("regcred", namespace, corev1.SecretTypeDockerConfigJson, map[string][]byte{
+			corev1.DockerConfigJsonKey: dockerConfigJSON(t, registryAuth{"registry.example.com", username}),
+		})
+	}
+	k8sAPI := &k8sinterface.KubernetesApi{KubernetesClient: fake.NewClientset(
+		pullSecret("team-a", "team-a-user"),
+		pullSecret("team-b", "team-b-user"),
+	)}
+
+	// Map iteration order varies between runs, so either namespace may be
+	// read first; both orders must keep the credentials apart.
+	for range 20 {
+		credentials := collectPullSecretCredentials(t, k8sAPI,
+			podPullingImage("app", "team-a", teamAImage, "regcred"),
+			podPullingImage("app", "team-b", teamBImage, "regcred"),
+		)
+		require.Equal(t, []string{"team-a-user"}, registryUsers(credentials[teamAImage]))
+		require.Equal(t, []string{"team-b-user"}, registryUsers(credentials[teamBImage]))
+	}
 }
 
 // A failed read is not cached, so a later lookup in the same scan tries again.
@@ -847,7 +878,7 @@ func TestImageScanTriesEveryPullSecretCredential(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			k8sAPI := &k8sinterface.KubernetesApi{KubernetesClient: fake.NewClientset(tt.secrets...)}
 			scanData := cautils.NewOPASessionObjMock()
-			workload := podPullingImage("app", pullSecretTestImage, tt.pullSecrets...)
+			workload := podPullingImage("app", "default", pullSecretTestImage, tt.pullSecrets...)
 			scanData.AllResources[workload.GetID()] = workload
 
 			targets, credentials, containerErrors := collectImageScanTargets(
