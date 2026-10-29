@@ -337,7 +337,7 @@ func (gp *GitLabSASTPrinter) printConfigurationScan(ctx context.Context, opaSess
 
 		failed = append(failed, scannedResource{
 			resourceID: resourceID,
-			relPath:    relPath,
+			relPath:    filepath.ToSlash(relPath),
 			absPath:    filepath.Join(effectiveBasePath(resourceSource, basePath), relPath),
 		})
 	}

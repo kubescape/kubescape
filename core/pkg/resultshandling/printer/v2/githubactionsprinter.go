@@ -458,7 +458,7 @@ func (gp *GitHubActionsPrinter) collectAnnotations(ctx context.Context, opaSessi
 
 		failed = append(failed, scannedResource{
 			resourceID: resourceID,
-			relPath:    relPath,
+			relPath:    filepath.ToSlash(relPath),
 			absPath:    filepath.Join(effectiveBasePath(resourceSource, basePath), relPath),
 		})
 	}
