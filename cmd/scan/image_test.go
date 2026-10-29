@@ -450,3 +450,87 @@ func TestGetImageCmd_RunE_ForwardsMixedTarballAndRegistryImages(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, []string{"docker-archive:" + tmpFile.Name(), "nginx:1.27"}, mockKubescape.imgScanInfo.Images)
 }
+
+func TestGetImageCmd_RunE_RejectsPostureFlags(t *testing.T) {
+	testCases := []struct {
+		name     string
+		scanInfo cautils.ScanInfo
+		wantErr  string
+	}{
+		{
+			name:     "exclude-controls is rejected",
+			scanInfo: cautils.ScanInfo{ExcludeControls: []string{"C-0001"}},
+			wantErr:  "--exclude-controls is not supported for image scans: an image scan evaluates vulnerabilities, not posture controls",
+		},
+		{
+			name:     "skip-controls is rejected",
+			scanInfo: cautils.ScanInfo{SkipControls: "C-0001"},
+			wantErr:  "--skip-controls is not supported for image scans: an image scan evaluates vulnerabilities, not posture controls",
+		},
+		{
+			name:     "include-controls is rejected",
+			scanInfo: cautils.ScanInfo{IncludeControls: "C-0001"},
+			wantErr:  "--include-controls is not supported for image scans: an image scan evaluates vulnerabilities, not posture controls",
+		},
+		{
+			name:     "custom-rules is rejected",
+			scanInfo: cautils.ScanInfo{CustomRules: "/path/to/rules"},
+			wantErr:  "--custom-rules is not supported for image scans: an image scan evaluates vulnerabilities, not posture controls",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			mockKubescape := &imageScanCaptureKubescape{}
+			cmd := getImageCmd(mockKubescape, &tc.scanInfo)
+			parentCmd := &cobra.Command{Use: "scan"}
+			parentCmd.PersistentFlags().StringVarP(&tc.scanInfo.Format, "format", "f", "pretty-printer", "")
+			parentCmd.AddCommand(cmd)
+
+			err := cmd.RunE(cmd, []string{"nginx:1.27"})
+			require.EqualError(t, err, tc.wantErr)
+			assert.Nil(t, mockKubescape.imgScanInfo, "image scanner must not be invoked when posture flags are passed")
+		})
+	}
+}
+
+func TestGetScanCommand_RejectsPostureFlagsOnImageScan(t *testing.T) {
+	testCases := []struct {
+		name    string
+		args    []string
+		wantErr string
+	}{
+		{
+			name:    "exclude-controls flag",
+			args:    []string{"image", "--exclude-controls", "C-0001", "nginx:1.27"},
+			wantErr: "--exclude-controls is not supported for image scans: an image scan evaluates vulnerabilities, not posture controls",
+		},
+		{
+			name:    "skip-controls flag",
+			args:    []string{"image", "--skip-controls", "C-0001", "nginx:1.27"},
+			wantErr: "--skip-controls is not supported for image scans: an image scan evaluates vulnerabilities, not posture controls",
+		},
+		{
+			name:    "include-controls flag",
+			args:    []string{"image", "--include-controls", "C-0001", "nginx:1.27"},
+			wantErr: "--include-controls is not supported for image scans: an image scan evaluates vulnerabilities, not posture controls",
+		},
+		{
+			name:    "custom-rules flag",
+			args:    []string{"image", "--custom-rules", "./rules", "nginx:1.27"},
+			wantErr: "--custom-rules is not supported for image scans: an image scan evaluates vulnerabilities, not posture controls",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			mockKubescape := &imageScanCaptureKubescape{}
+			cmd := GetScanCommand(mockKubescape)
+			cmd.SetArgs(tc.args)
+
+			err := cmd.Execute()
+			require.EqualError(t, err, tc.wantErr)
+			assert.Nil(t, mockKubescape.imgScanInfo, "image scanner must not be invoked when posture flags are passed")
+		})
+	}
+}
