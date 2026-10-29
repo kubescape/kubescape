@@ -349,7 +349,8 @@ func TestBuildWorkloadImageScanJobsCredentialSelection(t *testing.T) {
 	cliCreds := imagescan.RegistryCredentials{Authority: "cli.example.com", Username: "cli", Password: containerTypesPlaceholderPassword}
 	targets := mapset.NewSet(ImageScanTarget{Image: resolvedImage}, ImageScanTarget{Image: unresolvedImage})
 	imageToCreds := map[string][]imagescan.RegistryCredentials{
-		// Deliberately unsorted: jobs must carry them in a stable order.
+		// collectImageScanTargets orders them the way the kubelet tries them;
+		// jobs must keep that order rather than re-sort it.
 		resolvedImage: {workloadCreds("user-b"), workloadCreds("user-a")},
 	}
 
@@ -357,8 +358,8 @@ func TestBuildWorkloadImageScanJobsCredentialSelection(t *testing.T) {
 
 	require.Len(t, jobs, 2)
 	assert.Equal(t, resolvedImage, jobs[0].Image)
-	assert.Equal(t, []imagescan.RegistryCredentials{workloadCreds("user-a"), workloadCreds("user-b")}, jobs[0].RegistryCredentials,
-		"workload credentials win over the CLI credentials and are ordered deterministically")
+	assert.Equal(t, []imagescan.RegistryCredentials{workloadCreds("user-b"), workloadCreds("user-a")}, jobs[0].RegistryCredentials,
+		"workload credentials win over the CLI credentials and keep the order they were resolved in")
 	assert.Equal(t, unresolvedImage, jobs[1].Image)
 	assert.Equal(t, []imagescan.RegistryCredentials{cliCreds}, jobs[1].RegistryCredentials,
 		"the CLI credentials are the fallback when no workload credential resolved")
