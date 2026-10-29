@@ -9,7 +9,13 @@ import (
 )
 
 var (
-	ImageVulnResources  = []string{"ImageVulnerabilities"}
+	ImageVulnResources = []string{"ImageVulnerabilities"}
+	// ComponentVulnResources are built by the componentvulns package.
+	ComponentVulnResources = []string{
+		"APIServerVulnerabilities",
+		"KubeletVulnerabilities",
+		"ContainerRuntimeVulnerabilities",
+	}
 	HostSensorResources = []string{"KubeletConfiguration",
 		"KubeletCommandLine",
 		"OsReleaseFile",
@@ -50,6 +56,10 @@ func MapHostResources(externalResourceMap ExternalResources) []string {
 
 func MapImageVulnResources(externalResourceMap ExternalResources) []string {
 	return MapExternalResource(externalResourceMap, ImageVulnResources)
+}
+
+func MapComponentVulnResources(externalResourceMap ExternalResources) []string {
+	return MapExternalResource(externalResourceMap, ComponentVulnResources)
 }
 
 func MapCloudResources(externalResourceMap ExternalResources) []string {
