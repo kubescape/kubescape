@@ -179,7 +179,38 @@ func ValidateCommonScanFlags(cmd *cobra.Command, scanInfo *cautils.ScanInfo, sup
 	if scanInfo.MaxDBAge < 0 {
 		return fmt.Errorf("invalid --max-db-age %q: must be a positive duration (e.g. 120h) or 0 for the default", scanInfo.MaxDBAge)
 	}
+	if err := validateEPSSThreshold(scanInfo.EPSSThreshold); err != nil {
+		return err
+	}
+	if err := validateImageRiskGateScope(scanInfo); err != nil {
+		return err
+	}
 	ApplyDBAgeGatePresence(cmd, scanInfo)
+	return nil
+}
+
+// validateEPSSThreshold returns an error wrapping ErrBadThreshold when
+// --epss-threshold is NaN or outside [0, 1]. EPSS is a probability, so a
+// larger value could never fail a scan.
+func validateEPSSThreshold(threshold float64) error {
+	if math.IsNaN(threshold) || threshold < 0 || threshold > 1 {
+		return fmt.Errorf("%w: --epss-threshold must be between 0 and 1, got %v", ErrBadThreshold, threshold)
+	}
+	return nil
+}
+
+// validateImageRiskGateScope rejects an exploitability gate on a scan that
+// evaluates no images, where it would otherwise pass silently.
+func validateImageRiskGateScope(scanInfo *cautils.ScanInfo) error {
+	if scanInfo.ScanImages || scanInfo.ScanType == cautils.ScanTypeImage {
+		return nil
+	}
+	if scanInfo.FailOnKEV {
+		return fmt.Errorf("--fail-on-kev evaluates image vulnerabilities: use 'kubescape scan image' or add --scan-images")
+	}
+	if scanInfo.EPSSThreshold > 0 {
+		return fmt.Errorf("--epss-threshold evaluates image vulnerabilities: use 'kubescape scan image' or add --scan-images")
+	}
 	return nil
 }
 

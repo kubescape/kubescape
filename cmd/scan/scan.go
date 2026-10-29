@@ -242,7 +242,9 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	scanCmd.PersistentFlags().BoolVar(&scanInfo.FailOnDegradedConfig, "fail-on-degraded-config", false, "Fail the scan (exit code 1) if control configurations or exceptions could not be loaded from their configured source and bundled defaults were used instead")
 
 	scanCmd.PersistentFlags().StringVar(&scanInfo.FailThresholdSeverity, "severity-threshold", "", "Severity threshold is the severity of failed controls at which the command fails and returns exit code 1. Failed controls whose severity is unknown (missing base score) are treated as exceeding any threshold. On image scans, vulnerabilities whose severity cannot be determined are likewise counted as exceeding any threshold")
-	scanCmd.PersistentFlags().BoolVar(&scanInfo.OnlyFixable, "only-fixable", false, "When used with --severity-threshold on image scans, only count CVEs that have an available fix toward the pass/fail decision")
+	scanCmd.PersistentFlags().BoolVar(&scanInfo.OnlyFixable, "only-fixable", false, "When used with --severity-threshold, --fail-on-kev or --epss-threshold on image scans, only count CVEs that have an available fix toward the pass/fail decision")
+	scanCmd.PersistentFlags().BoolVar(&scanInfo.FailOnKEV, "fail-on-kev", false, "Fail image scans (exit code 1) when any vulnerability is listed in the CISA Known Exploited Vulnerabilities catalog, whatever its severity. Applies to 'scan image', 'scan workload' and scans with --scan-images. Image exceptions waive matching vulnerabilities")
+	scanCmd.PersistentFlags().Float64Var(&scanInfo.EPSSThreshold, "epss-threshold", 0, "Fail image scans (exit code 1) when any vulnerability's EPSS score is at or above this value, between 0 and 1 (0 disables the gate). Applies to 'scan image', 'scan workload' and scans with --scan-images. EPSS scores change daily, so pair this with --max-db-age and --fail-on-stale-db, especially with an offline vulnerability database")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.ControlsVersion, "controls-version", "", "Pin the regolibrary release tag used to download controls (see https://github.com/kubescape/regolibrary/releases). If not used will download the latest release. Has no effect when --account is set (cloud backend is used instead)")
 
 	// --fail-threshold was removed as a functioning flag, but its registration must stay so
@@ -466,7 +468,7 @@ func runSecurityScan(ctx context.Context, scanInfo *cautils.ScanInfo, ks meta.IK
 		return results, err
 	}
 	if scanInfo.ScanImages {
-		if err := enforceImageSeverityThresholds(results.ImageScanData, scanInfo); err != nil {
+		if err := enforceImageGates(results.ImageScanData, scanInfo); err != nil {
 			return results, err
 		}
 	}
@@ -514,6 +516,31 @@ func severityLabelOrAll(s string) string {
 		return "all"
 	}
 	return s
+}
+
+// enforceImageGates applies every image vulnerability gate. The severity
+// failure keeps its existing message; a tripped exploitability gate is
+// reported alongside it.
+func enforceImageGates(imageScanData []cautils.ImageScanData, scanInfo *cautils.ScanInfo) error {
+	severityErr := enforceImageSeverityThresholds(imageScanData, scanInfo)
+	riskErr := enforceImageRiskGates(imageScanData, scanInfo)
+	if severityErr == nil {
+		return riskErr
+	}
+	if riskErr == nil {
+		return severityErr
+	}
+	return errors.Join(severityErr, riskErr)
+}
+
+// enforceImageRiskGates fails the scan when --fail-on-kev or --epss-threshold
+// is breached by any scanned image.
+func enforceImageRiskGates(imageScanData []cautils.ImageScanData, scanInfo *cautils.ScanInfo) error {
+	gates := imagescan.RiskGates{FailOnKEV: scanInfo.FailOnKEV, EPSSThreshold: scanInfo.EPSSThreshold}
+	if err := imagescan.CheckRiskGates(gates, imageScanData, scanInfo.OnlyFixable); err != nil {
+		return gateFailure(err)
+	}
+	return nil
 }
 
 func enforceImageSeverityThresholds(imageScanData []cautils.ImageScanData, scanInfo *cautils.ScanInfo) error {

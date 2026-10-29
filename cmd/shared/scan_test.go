@@ -2,6 +2,7 @@ package shared
 
 import (
 	"math"
+	"strings"
 	"testing"
 	"time"
 
@@ -277,6 +278,59 @@ func TestValidateCommonScanFlags(t *testing.T) {
 			} else {
 				assert.Error(t, err)
 				assert.Contains(t, err.Error(), tt.expectedErr)
+			}
+		})
+	}
+}
+
+func TestValidateCommonScanFlagsImageRiskGates(t *testing.T) {
+	tests := []struct {
+		name        string
+		scanInfo    cautils.ScanInfo
+		expectedErr string
+	}{
+		{name: "gates unset on a posture scan", scanInfo: cautils.ScanInfo{}},
+		{name: "KEV gate on an image scan", scanInfo: cautils.ScanInfo{FailOnKEV: true, ScanType: cautils.ScanTypeImage}},
+		{name: "EPSS gate with --scan-images", scanInfo: cautils.ScanInfo{EPSSThreshold: 0.5, ScanImages: true}},
+		{name: "EPSS threshold of 1", scanInfo: cautils.ScanInfo{EPSSThreshold: 1, ScanImages: true}},
+		{name: "EPSS threshold of 0 disables the gate on a posture scan", scanInfo: cautils.ScanInfo{EPSSThreshold: 0}},
+		{
+			name:        "KEV gate on a posture scan without images",
+			scanInfo:    cautils.ScanInfo{FailOnKEV: true},
+			expectedErr: "--fail-on-kev evaluates image vulnerabilities: use 'kubescape scan image' or add --scan-images",
+		},
+		{
+			name:        "EPSS gate on a posture scan without images",
+			scanInfo:    cautils.ScanInfo{EPSSThreshold: 0.3},
+			expectedErr: "--epss-threshold evaluates image vulnerabilities: use 'kubescape scan image' or add --scan-images",
+		},
+		{
+			name:        "EPSS threshold above 1",
+			scanInfo:    cautils.ScanInfo{EPSSThreshold: 1.5, ScanImages: true},
+			expectedErr: "bad argument: out of range threshold: --epss-threshold must be between 0 and 1, got 1.5",
+		},
+		{
+			name:        "negative EPSS threshold",
+			scanInfo:    cautils.ScanInfo{EPSSThreshold: -0.1, ScanImages: true},
+			expectedErr: "bad argument: out of range threshold: --epss-threshold must be between 0 and 1, got -0.1",
+		},
+		{
+			name:        "NaN EPSS threshold",
+			scanInfo:    cautils.ScanInfo{EPSSThreshold: math.NaN(), ScanImages: true},
+			expectedErr: "bad argument: out of range threshold: --epss-threshold must be between 0 and 1, got NaN",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateCommonScanFlags(&cobra.Command{}, &tt.scanInfo, ScanFormats)
+			if tt.expectedErr == "" {
+				assert.NoError(t, err)
+				return
+			}
+			require.EqualError(t, err, tt.expectedErr)
+			if strings.Contains(tt.expectedErr, "out of range") {
+				assert.ErrorIs(t, err, ErrBadThreshold)
 			}
 		})
 	}
