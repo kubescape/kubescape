@@ -1,6 +1,7 @@
 package scan
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -106,15 +107,17 @@ func getImageCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Command 
 			cmd.SilenceUsage = true
 
 			exceedsSeverityThreshold, err := ks.ScanImageContext(ctx, imgScanInfo, scanInfo)
-			if err != nil {
+			if !exceedsSeverityThreshold {
 				return err
 			}
 
-			if exceedsSeverityThreshold {
-				return fmt.Errorf("result exceeds severity threshold: %s", scanInfo.FailThresholdSeverity)
+			// Keep the severity breach visible when an exploitability gate or
+			// another deferred failure is reported alongside it.
+			thresholdErr := fmt.Errorf("result exceeds severity threshold: %s", scanInfo.FailThresholdSeverity)
+			if err == nil {
+				return thresholdErr
 			}
-
-			return nil
+			return errors.Join(err, thresholdErr)
 		},
 	}
 

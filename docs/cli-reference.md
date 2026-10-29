@@ -73,6 +73,8 @@ kubescape scan [target] [flags]
 | `--min-severity <sev>` | Only show controls at or above this severity: `low`, `medium`, `high`, `critical`. Output-only — exit codes are computed on the full unfiltered report | - |
 | `--max-severity <sev>` | Only show controls at or below this severity. Output-only — exit codes are computed on the full unfiltered report | - |
 | `--severity-threshold <sev>` | Fail if findings at or above severity: `low`, `medium`, `high`, `critical`. Failed controls with unknown severity (missing base score) are treated as exceeding any threshold | - |
+| `--fail-on-kev` | Fail image scans when any vulnerability is listed in the CISA Known Exploited Vulnerabilities catalog, whatever its severity. Requires `scan image`, `scan workload` or `--scan-images` — see [failing on exploitable vulnerabilities](image-scanning.md#failing-on-exploitable-vulnerabilities) | `false` |
+| `--epss-threshold <0..1>` | Fail image scans when any vulnerability's EPSS score is at or above this value. `0` disables the gate. Requires `scan image`, `scan workload` or `--scan-images`. Pair with `--max-db-age` and `--fail-on-stale-db` | `0` |
 | `--skip-db-update` | Do not update the vulnerability database before scanning images; uses the locally cached database. Fails if the local database is missing or unusable (run once without this flag to download it). | `false` |
 | `--submit` | Submit results to Kubescape SaaS | `false` |
 | `--use-artifacts-from <path>` | Load artifacts from local directory (offline mode) | - |
@@ -701,7 +703,8 @@ An image that cannot be scanned — an unreachable registry, a bad reference —
 not abort the run: the remaining images are still scanned and reported, the
 failures are summarized at the end, and the command exits non-zero. The severity
 threshold is evaluated across all images, so `--severity-threshold` fails the run
-when any single image crosses it.
+when any single image crosses it. The same holds for `--fail-on-kev` and
+`--epss-threshold`.
 
 Output formats behave as follows for a multi-image run: `json`, `cyclonedx-json`
 and `spdx-json` emit a JSON array with one document per image (a single image
