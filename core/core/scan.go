@@ -89,6 +89,12 @@ func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo, policyIdenti
 		}
 		k8sClient = k8s.KubernetesClient
 	}
+	// Connecting takes no context, so a deadline that passed meanwhile stops the scan here.
+	if err := ctx.Err(); err != nil {
+		err = fmt.Errorf("scan stopped while connecting to the cluster: %w", err)
+		span.RecordError(err)
+		return componentInterfaces{}, err
+	}
 
 	// ================== setup tenant object ======================================
 	var tenantConfig cautils.ITenantConfig
@@ -130,6 +136,12 @@ func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo, policyIdenti
 	}
 
 	// ================== setup host scanner object ======================================
+	// The version check above reads the cluster without the scan's context.
+	if err := ctx.Err(); err != nil {
+		err = fmt.Errorf("scan stopped while setting up: %w", err)
+		span.RecordError(err)
+		return componentInterfaces{}, err
+	}
 	ctxHostScanner, spanHostScanner := otel.Tracer("").Start(ctx, "setup host scanner")
 	hostSensorHandler := getHostSensorHandler(ctx, scanInfo, k8s)
 	if err := hostSensorHandler.Init(ctxHostScanner); err != nil {
@@ -449,6 +461,10 @@ func (ks *Kubescape) ScanContext(ctx context.Context, scanInfo *cautils.ScanInfo
 		return resultsHandling, err
 	}
 
+	// A dry run and collection both start with discovery calls that take no context, so a deadline that already passed stops the scan here.
+	if err := ctx.Err(); err != nil {
+		return resultsHandling, fmt.Errorf("scan stopped before collecting resources: %w", err)
+	}
 	if scanInfo.DryRun {
 		resultsHandling.SetData(scanData)
 		result, err := interfaces.resourceHandler.Preflight(ctx, scanData, scanInfo)
