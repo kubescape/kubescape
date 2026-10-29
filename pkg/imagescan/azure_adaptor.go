@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
@@ -52,6 +53,8 @@ type azureClientFactory func(cred azcore.TokenCredential, options *arm.ClientOpt
 
 // AzureAdaptor implements IContainerImageVulnerabilityAdaptor for Azure Container Registry (ACR).
 type AzureAdaptor struct {
+	loginMu       sync.Mutex
+	mu            sync.RWMutex
 	client        AzureAPI
 	registryHost  string
 	credProvider  azureCredentialProvider
@@ -102,10 +105,14 @@ func resolveAzureCloudConfig(registryHost string) (cloud.Configuration, error) {
 // Explicit credentials passed via RegistryCredentials are intentionally unsupported
 // as Azure SDK relies heavily on Managed Identities and Azure CLI credentials.
 func (a *AzureAdaptor) Login(ctx context.Context, registry string, credentials RegistryCredentials) error {
+	a.loginMu.Lock()
+	defer a.loginMu.Unlock()
 	// A failed login must not leave an earlier identity callable or pair an
 	// old client with a newly requested registry. Publish only after the probe.
+	a.mu.Lock()
 	a.client = nil
 	a.registryHost = ""
+	a.mu.Unlock()
 	if credentials.Username != "" || credentials.Password != "" || credentials.Token != "" {
 		return fmt.Errorf("explicit credentials are intentionally unsupported for Azure; use DefaultAzureCredential")
 	}
@@ -137,6 +144,8 @@ func (a *AzureAdaptor) Login(ctx context.Context, registry string, credentials R
 		return fmt.Errorf("failed azure identity probe: %w", err)
 	}
 
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	a.client = c
 	a.registryHost = strings.ToLower(registry)
 	return nil
@@ -147,9 +156,9 @@ func (a *AzureAdaptor) DescribeAdaptor() string {
 	return "Azure Container Registry (ACR) Vulnerability Adaptor"
 }
 
-func (a *AzureAdaptor) validateImageID(imageID ContainerImageIdentifier) error {
-	if !strings.EqualFold(imageID.Registry, a.registryHost) {
-		return fmt.Errorf("image registry %s does not match logged-in registry %s", imageID.Registry, a.registryHost)
+func validateAzureImageID(imageID ContainerImageIdentifier, registryHost string) error {
+	if !strings.EqualFold(imageID.Registry, registryHost) {
+		return fmt.Errorf("image registry %s does not match logged-in registry %s", imageID.Registry, registryHost)
 	}
 	if !validKQLInputRegex.MatchString(imageID.Registry) || !validKQLInputRegex.MatchString(imageID.Repository) || !validKQLInputRegex.MatchString(imageID.Hash) {
 		return fmt.Errorf("invalid characters in image identifier for KQL query")
@@ -157,23 +166,35 @@ func (a *AzureAdaptor) validateImageID(imageID ContainerImageIdentifier) error {
 	return nil
 }
 
+// getSession keeps client identity and registry validation paired for the entire
+// batch, including pagination and the empty-findings status fallback.
+func (a *AzureAdaptor) getSession() (AzureAPI, string, error) {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	if a.client == nil {
+		return nil, "", fmt.Errorf("azure client not initialized, call Login first")
+	}
+	return a.client, a.registryHost, nil
+}
+
 // GetImagesScanStatus retrieves the scan status for a list of image identifiers.
 func (a *AzureAdaptor) GetImagesScanStatus(ctx context.Context, imageIDs []ContainerImageIdentifier) ([]ContainerImageScanStatus, error) {
-	if a.client == nil {
-		return nil, fmt.Errorf("azure client not initialized, call Login first")
+	client, host, err := a.getSession()
+	if err != nil {
+		return nil, err
 	}
 
-	parts := strings.Split(a.registryHost, ".")
+	parts := strings.Split(host, ".")
 	registryName := parts[0]
 
 	return ProcessImages(imageIDs,
 		func(imageID ContainerImageIdentifier) (ContainerImageScanStatus, error) {
-			return a.getImageScanStatus(ctx, registryName, imageID)
+			return getAzureImageScanStatus(ctx, client, host, registryName, imageID)
 		},
 	)
 }
 
-func (a *AzureAdaptor) getImageScanStatus(ctx context.Context, registryName string, imageID ContainerImageIdentifier) (ContainerImageScanStatus, error) {
+func getAzureImageScanStatus(ctx context.Context, client AzureAPI, host, registryName string, imageID ContainerImageIdentifier) (ContainerImageScanStatus, error) {
 	status := ContainerImageScanStatus{
 		ImageID:         imageID,
 		IsScanAvailable: false,
@@ -184,7 +205,7 @@ func (a *AzureAdaptor) getImageScanStatus(ctx context.Context, registryName stri
 		return status, nil
 	}
 
-	if err := a.validateImageID(imageID); err != nil {
+	if err := validateAzureImageID(imageID, host); err != nil {
 		return status, err
 	}
 
@@ -207,7 +228,7 @@ func (a *AzureAdaptor) getImageScanStatus(ctx context.Context, registryName stri
 		},
 	}
 
-	res, err := a.client.Resources(ctx, req, nil)
+	res, err := client.Resources(ctx, req, nil)
 	if err != nil {
 		return status, fmt.Errorf("failed to query scan status for repository %s: %w", imageID.Repository, err)
 	}
@@ -233,11 +254,12 @@ func (a *AzureAdaptor) getImageScanStatus(ctx context.Context, registryName stri
 
 // GetImagesVulnerabilities retrieves the vulnerability reports for a list of image identifiers.
 func (a *AzureAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs []ContainerImageIdentifier) ([]ContainerImageVulnerabilityReport, error) {
-	if a.client == nil {
-		return nil, fmt.Errorf("azure client not initialized, call Login first")
+	client, host, err := a.getSession()
+	if err != nil {
+		return nil, err
 	}
 
-	parts := strings.Split(a.registryHost, ".")
+	parts := strings.Split(host, ".")
 	registryName := parts[0]
 
 	return ProcessImages(imageIDs,
@@ -251,7 +273,7 @@ func (a *AzureAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs []
 				return report, nil
 			}
 
-			if err := a.validateImageID(imageID); err != nil {
+			if err := validateAzureImageID(imageID, host); err != nil {
 				return report, err
 			}
 
@@ -284,7 +306,7 @@ func (a *AzureAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs []
 					},
 				}
 
-				res, err := a.client.Resources(ctx, req, nil)
+				res, err := client.Resources(ctx, req, nil)
 				if err != nil {
 					return report, fmt.Errorf("failed to query vulnerabilities for repository %s: %w", imageID.Repository, err)
 				}
@@ -357,7 +379,7 @@ func (a *AzureAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs []
 			if len(report.Vulnerabilities) > 0 {
 				report.Status = ScanStatusScanned
 			} else {
-				scanStatus, err := a.getImageScanStatus(ctx, registryName, imageID)
+				scanStatus, err := getAzureImageScanStatus(ctx, client, host, registryName, imageID)
 				if err != nil {
 					return report, err
 				}
@@ -401,8 +423,8 @@ func nextAzureVulnerabilityToken(skipToken *string, seen map[string]struct{}, pa
 
 // GetImagesInformation retrieves the BOM and manifest information for a list of image identifiers.
 func (a *AzureAdaptor) GetImagesInformation(ctx context.Context, imageIDs []ContainerImageIdentifier) ([]ContainerImageInformation, error) {
-	if a.client == nil {
-		return nil, fmt.Errorf("azure client not initialized, call Login first")
+	if _, _, err := a.getSession(); err != nil {
+		return nil, err
 	}
 	return FetchImagesInformation(imageIDs)
 }
