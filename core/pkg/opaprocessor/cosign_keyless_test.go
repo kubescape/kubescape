@@ -211,6 +211,11 @@ func TestWithCosignPolicy_TrustedIdentities(t *testing.T) {
 			want:    []cosign.Identity{{IssuerRegExp: "https://issuer.example", SubjectRegExp: "^build bot <ci@example.com>$"}},
 		},
 		{
+			name:    "invalid expression is ignored",
+			entries: []string{"( b", "a [", "c d"},
+			want:    []cosign.Identity{{IssuerRegExp: "c", SubjectRegExp: "d"}},
+		},
+		{
 			name:    "several",
 			entries: []string{"a b", "c", "d e"},
 			want:    []cosign.Identity{{IssuerRegExp: "a", SubjectRegExp: "b"}, {IssuerRegExp: "d", SubjectRegExp: "e"}},
@@ -261,6 +266,11 @@ func TestVerifyKeyless(t *testing.T) {
 			name:   "trusted identity",
 			img:    signed(fulcio, testIdentity, testIssuer, true),
 			inputs: map[string][]string{trustedCosignIdentitiesInput: trusted, cosignRequireTransparencyLogInput: {"false"}},
+		},
+		{
+			name:   "trusted identity after an invalid entry",
+			img:    signed(fulcio, testIdentity, testIssuer, true),
+			inputs: map[string][]string{trustedCosignIdentitiesInput: append([]string{"( ^https://github\\.com/acme/"}, trusted...), cosignRequireTransparencyLogInput: {"false"}},
 		},
 		{
 			name:    "no identities configured",

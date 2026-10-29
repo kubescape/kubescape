@@ -5,6 +5,7 @@ import (
 	"crypto"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"unicode"
 
@@ -98,7 +99,9 @@ func withCosignPolicy(ctx context.Context, postureControlInputs map[string][]str
 }
 
 // parseCosignIdentity splits a trustedCosignIdentities entry into its issuer
-// and identity expressions. An entry without both is ignored.
+// and identity expressions. An entry without both, or with an expression that
+// does not compile, is ignored: cosign stops at the first invalid expression,
+// so it would otherwise hide the entries after it.
 func parseCosignIdentity(entry string) (cosign.Identity, bool) {
 	entry = strings.TrimSpace(entry)
 	i := strings.IndexFunc(entry, unicode.IsSpace)
@@ -107,6 +110,12 @@ func parseCosignIdentity(entry string) (cosign.Identity, bool) {
 	}
 	issuer, subject := entry[:i], strings.TrimSpace(entry[i:])
 	if subject == "" {
+		return cosign.Identity{}, false
+	}
+	if _, err := regexp.Compile(issuer); err != nil {
+		return cosign.Identity{}, false
+	}
+	if _, err := regexp.Compile(subject); err != nil {
 		return cosign.Identity{}, false
 	}
 	return cosign.Identity{IssuerRegExp: issuer, SubjectRegExp: subject}, true
