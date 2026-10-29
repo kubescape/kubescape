@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
@@ -52,6 +53,8 @@ type azureClientFactory func(cred azcore.TokenCredential, options *arm.ClientOpt
 
 // AzureAdaptor implements IContainerImageVulnerabilityAdaptor for Azure Container Registry (ACR).
 type AzureAdaptor struct {
+	// Keep client and registry identity together for the duration of a batch.
+	mu            sync.RWMutex
 	client        AzureAPI
 	registryHost  string
 	credProvider  azureCredentialProvider
@@ -102,6 +105,8 @@ func resolveAzureCloudConfig(registryHost string) (cloud.Configuration, error) {
 // Explicit credentials passed via RegistryCredentials are intentionally unsupported
 // as Azure SDK relies heavily on Managed Identities and Azure CLI credentials.
 func (a *AzureAdaptor) Login(ctx context.Context, registry string, credentials RegistryCredentials) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	// A failed login must not leave an earlier identity callable or pair an
 	// old client with a newly requested registry. Publish only after the probe.
 	a.client = nil
@@ -159,6 +164,8 @@ func (a *AzureAdaptor) validateImageID(imageID ContainerImageIdentifier) error {
 
 // GetImagesScanStatus retrieves the scan status for a list of image identifiers.
 func (a *AzureAdaptor) GetImagesScanStatus(ctx context.Context, imageIDs []ContainerImageIdentifier) ([]ContainerImageScanStatus, error) {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
 	if a.client == nil {
 		return nil, fmt.Errorf("azure client not initialized, call Login first")
 	}
@@ -233,6 +240,8 @@ func (a *AzureAdaptor) getImageScanStatus(ctx context.Context, registryName stri
 
 // GetImagesVulnerabilities retrieves the vulnerability reports for a list of image identifiers.
 func (a *AzureAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs []ContainerImageIdentifier) ([]ContainerImageVulnerabilityReport, error) {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
 	if a.client == nil {
 		return nil, fmt.Errorf("azure client not initialized, call Login first")
 	}
@@ -401,6 +410,8 @@ func nextAzureVulnerabilityToken(skipToken *string, seen map[string]struct{}, pa
 
 // GetImagesInformation retrieves the BOM and manifest information for a list of image identifiers.
 func (a *AzureAdaptor) GetImagesInformation(ctx context.Context, imageIDs []ContainerImageIdentifier) ([]ContainerImageInformation, error) {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
 	if a.client == nil {
 		return nil, fmt.Errorf("azure client not initialized, call Login first")
 	}
