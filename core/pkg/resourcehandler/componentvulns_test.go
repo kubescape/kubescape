@@ -22,8 +22,10 @@ import (
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/version"
 	fakeclientset "k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 )
 
 const (
@@ -182,4 +184,54 @@ func TestCollectComponentVulnerabilitiesNotSelected(t *testing.T) {
 	handler.collectComponentVulnerabilities(context.Background(), sessionObj, &cautils.ScanInfo{}, map[string]workloadinterface.IMetadata{}, ksResourceMap)
 	assert.Empty(t, sessionObj.PartialGVRFailures)
 	assert.Empty(t, sessionObj.InfoMap)
+}
+
+func TestCollectComponentVulnerabilitiesHonorsKindFilters(t *testing.T) {
+	for _, scanInfo := range []*cautils.ScanInfo{
+		{ExcludeKinds: "ContainerRuntimeVulnerabilities"},
+		{IncludeKinds: "Node,KubeletVulnerabilities"},
+	} {
+		sessionObj, ksResourceMap := componentVulnSession(t, componentVulnControl("C-RUNTIME", "ContainerRuntimeVulnerabilities"))
+		handler := &K8sResourceHandler{
+			k8s: &k8sinterface.KubernetesApi{KubernetesClient: fakeclientset.NewClientset(componentVulnNode("a", "v1.28.4", "containerd://1.7.11"))},
+			componentVulnSources: func(context.Context, *cautils.ScanInfo) (componentVulnSources, error) {
+				t.Fatal("vulnerability database loaded for a kind the filters exclude")
+				return componentVulnSources{}, nil
+			},
+		}
+		handler.collectComponentVulnerabilities(context.Background(), sessionObj, scanInfo, map[string]workloadinterface.IMetadata{}, ksResourceMap)
+		assert.Empty(t, ksResourceMap[runtimeVulnsGVR])
+		assert.Empty(t, sessionObj.InfoMap)
+		assert.Empty(t, sessionObj.PartialGVRFailures)
+	}
+}
+
+func TestCollectComponentVulnerabilitiesNodeListingFails(t *testing.T) {
+	apiServerVulnsGVR := componentvulns.APIVersion + "/APIServerVulnerabilities"
+	sessionObj, ksResourceMap := componentVulnSession(t, componentVulnControl("C-COMPONENTS", "APIServerVulnerabilities", "ContainerRuntimeVulnerabilities"))
+	client := fakeclientset.NewClientset()
+	client.PrependReactor("list", "nodes", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, errors.New("nodes is forbidden")
+	})
+	index, err := k8scveindex.Parse(strings.NewReader(`{"_kubernetes_io":{"updated_at":"2099-01-01T00:00:00Z"},"items":[{"id":"CVE-2024-3177","content_text":""}]}`))
+	require.NoError(t, err)
+	handler := &K8sResourceHandler{
+		k8s: &k8sinterface.KubernetesApi{KubernetesClient: client},
+		componentVulnSources: func(context.Context, *cautils.ScanInfo) (componentVulnSources, error) {
+			return componentVulnSources{matcher: &stubComponentMatcher{}, index: index, dbBuilt: time.Now()}, nil
+		},
+	}
+	allResources := map[string]workloadinterface.IMetadata{}
+	handler.collectComponentVulnerabilities(context.Background(), sessionObj, &cautils.ScanInfo{}, allResources, ksResourceMap)
+
+	require.Len(t, ksResourceMap[apiServerVulnsGVR], 1, "the API server is assessed without nodes")
+	assert.NotContains(t, sessionObj.InfoMap, apiServerVulnsGVR)
+
+	info, ok := sessionObj.InfoMap[runtimeVulnsGVR]
+	require.True(t, ok)
+	assert.Equal(t, apis.StatusSkipped, info.InnerStatus)
+	assert.Contains(t, info.InnerInfo, "forbidden")
+	require.Len(t, sessionObj.PartialGVRFailures, 1)
+	assert.Equal(t, runtimeVulnsGVR, sessionObj.PartialGVRFailures[0].GVR)
+	assert.Equal(t, componentvulns.ClusterSelector, sessionObj.PartialGVRFailures[0].Selector)
 }

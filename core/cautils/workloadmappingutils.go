@@ -1,6 +1,7 @@
 package cautils
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/kubescape/k8s-interface/cloudsupport"
@@ -58,8 +59,16 @@ func MapImageVulnResources(externalResourceMap ExternalResources) []string {
 	return MapExternalResource(externalResourceMap, ImageVulnResources)
 }
 
+// MapComponentVulnResources matches the resource name exactly: a substring
+// match would also pick up kinds such as OtherKubeletVulnerabilities.
 func MapComponentVulnResources(externalResourceMap ExternalResources) []string {
-	return MapExternalResource(externalResourceMap, ComponentVulnResources)
+	var resources []string
+	for k := range externalResourceMap {
+		if slices.Contains(ComponentVulnResources, k[strings.LastIndex(k, "/")+1:]) {
+			resources = append(resources, k)
+		}
+	}
+	return resources
 }
 
 func MapCloudResources(externalResourceMap ExternalResources) []string {

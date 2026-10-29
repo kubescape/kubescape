@@ -232,3 +232,16 @@ func TestMapCloudResources(t *testing.T) {
 		})
 	}
 }
+
+func TestMapComponentVulnResources(t *testing.T) {
+	resources := ExternalResources{
+		"componentvulnerabilities.kubescape.io/v1beta1/KubeletVulnerabilities":      nil,
+		"componentvulnerabilities.kubescape.io/v1beta1/OtherKubeletVulnerabilities": nil,
+		"componentvulnerabilities.kubescape.io/v1beta1/APIServerVulnerabilitiesX":   nil,
+		"/v1/Node": nil,
+	}
+	want := []string{"componentvulnerabilities.kubescape.io/v1beta1/KubeletVulnerabilities"}
+	if got := MapComponentVulnResources(resources); !reflect.DeepEqual(got, want) {
+		t.Errorf("MapComponentVulnResources() = %v, want %v", got, want)
+	}
+}

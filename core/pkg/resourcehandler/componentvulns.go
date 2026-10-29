@@ -59,15 +59,20 @@ func loadComponentVulnSources(ctx context.Context, scanInfo *cautils.ScanInfo) (
 }
 
 // requiredComponentVulnKinds returns the component vulnerability kinds that
-// back an effective selected control, keyed by their resource triplet.
-func requiredComponentVulnKinds(sessionObj *cautils.OPASessionObj, ksResourceMap cautils.ExternalResources) map[componentvulns.Kind]string {
+// back an effective selected control and pass the kind filters, keyed by their
+// resource triplet.
+func requiredComponentVulnKinds(sessionObj *cautils.OPASessionObj, scanInfo *cautils.ScanInfo, ksResourceMap cautils.ExternalResources) map[componentvulns.Kind]string {
 	allowed := effectiveHostGapAllowlist(sessionObj)
+	filters := newKindFilters(scanInfo)
 	kinds := make(map[componentvulns.Kind]string)
 	for _, triplet := range cautils.MapComponentVulnResources(ksResourceMap) {
 		if !allowed[triplet] {
 			continue
 		}
 		_, _, resource := k8sinterface.StringToResourceGroup(triplet)
+		if !filters.allows(resource) {
+			continue
+		}
 		kinds[componentvulns.Kind(resource)] = triplet
 	}
 	return kinds
@@ -78,7 +83,7 @@ func requiredComponentVulnKinds(sessionObj *cautils.OPASessionObj, ksResourceMap
 // recorded as partial pulls, and a kind with no resource at all is marked
 // skipped, so its controls never read as plainly passed.
 func (k8sHandler *K8sResourceHandler) collectComponentVulnerabilities(ctx context.Context, sessionObj *cautils.OPASessionObj, scanInfo *cautils.ScanInfo, allResources map[string]workloadinterface.IMetadata, ksResourceMap cautils.ExternalResources) {
-	kinds := requiredComponentVulnKinds(sessionObj, ksResourceMap)
+	kinds := requiredComponentVulnKinds(sessionObj, scanInfo, ksResourceMap)
 	if len(kinds) == 0 {
 		return
 	}
@@ -89,12 +94,7 @@ func (k8sHandler *K8sResourceHandler) collectComponentVulnerabilities(ctx contex
 	slices.Sort(triplets)
 
 	logger.L().Start("Matching cluster components against the vulnerability database...")
-	inv, err := k8sHandler.componentInventory(ctx, sessionObj.Report.ClusterAPIServerInfo, kinds)
-	if err != nil {
-		logger.L().StopError("Failed to collect cluster components")
-		cautils.SetInfoMapForResources(err.Error(), triplets, sessionObj.InfoMap)
-		return
-	}
+	inv, nodeGaps := k8sHandler.componentInventory(ctx, sessionObj.Report.ClusterAPIServerInfo, kinds)
 
 	load := k8sHandler.componentVulnSources
 	if load == nil {
@@ -125,6 +125,7 @@ func (k8sHandler *K8sResourceHandler) collectComponentVulnerabilities(ctx contex
 		cautils.SetInfoMapForResources(err.Error(), triplets, sessionObj.InfoMap)
 		return
 	}
+	res.Gaps = append(res.Gaps, nodeGaps...)
 
 	built := make(map[string]bool, len(kinds))
 	for _, r := range res.Resources {
@@ -157,17 +158,35 @@ func (k8sHandler *K8sResourceHandler) collectComponentVulnerabilities(ctx contex
 	logger.L().StopSuccess("Matched cluster components against the vulnerability database")
 }
 
-// componentInventory lists nodes only when a per-node kind is selected.
-func (k8sHandler *K8sResourceHandler) componentInventory(ctx context.Context, apiServer *version.Info, kinds map[componentvulns.Kind]string) (clustercomponents.Inventory, error) {
-	_, kubelet := kinds[componentvulns.KubeletVulnerabilities]
-	_, runtime := kinds[componentvulns.ContainerRuntimeVulnerabilities]
-	if !kubelet && !runtime {
+// componentInventory lists nodes only when a per-node kind is selected. A
+// failed listing leaves the API-server inventory intact and reports a gap for
+// each selected per-node kind, since Build sees no nodes to record gaps for.
+func (k8sHandler *K8sResourceHandler) componentInventory(ctx context.Context, apiServer *version.Info, kinds map[componentvulns.Kind]string) (clustercomponents.Inventory, []componentvulns.Gap) {
+	var perNode []componentvulns.Kind
+	for _, kind := range []componentvulns.Kind{componentvulns.KubeletVulnerabilities, componentvulns.ContainerRuntimeVulnerabilities} {
+		if _, ok := kinds[kind]; ok {
+			perNode = append(perNode, kind)
+		}
+	}
+	if len(perNode) == 0 {
 		return clustercomponents.Build(apiServer, nil, nil), nil
 	}
-	if k8sHandler.k8s == nil || k8sHandler.k8s.KubernetesClient == nil {
-		return clustercomponents.Inventory{}, fmt.Errorf("kubernetes client not available")
-	}
 
+	nodes, err := k8sHandler.listNodes(ctx)
+	if err != nil {
+		gaps := make([]componentvulns.Gap, 0, len(perNode))
+		for _, kind := range perNode {
+			gaps = append(gaps, componentvulns.Gap{Kind: kind, Selector: componentvulns.ClusterSelector, Reason: err.Error()})
+		}
+		return clustercomponents.Build(apiServer, nil, nil), gaps
+	}
+	return clustercomponents.Build(apiServer, nodes, nil), nil
+}
+
+func (k8sHandler *K8sResourceHandler) listNodes(ctx context.Context) ([]v1.Node, error) {
+	if k8sHandler.k8s == nil || k8sHandler.k8s.KubernetesClient == nil {
+		return nil, fmt.Errorf("kubernetes client not available")
+	}
 	var nodes []v1.Node
 	err := getter.ListWithPagination(ctx, func(opts metav1.ListOptions) (string, error) {
 		chunk, err := k8sHandler.k8s.KubernetesClient.CoreV1().Nodes().List(ctx, opts)
@@ -178,7 +197,7 @@ func (k8sHandler *K8sResourceHandler) componentInventory(ctx context.Context, ap
 		return chunk.GetContinue(), nil
 	})
 	if err != nil {
-		return clustercomponents.Inventory{}, fmt.Errorf("failed to list nodes: %w", err)
+		return nil, fmt.Errorf("failed to list nodes: %w", err)
 	}
-	return clustercomponents.Build(apiServer, nodes, nil), nil
+	return nodes, nil
 }
