@@ -157,7 +157,9 @@ type ScanInfo struct {
 	FailThreshold             float32                      // DEPRECATED - Failure score threshold
 	ComplianceThreshold       float32                      // Compliance score threshold
 	FailThresholdSeverity     string                       // Severity at and above which the command should fail
-	OnlyFixable               bool                         // Gate the severity threshold to only count CVEs that have an available fix
+	OnlyFixable               bool                         // Gate the image vulnerability thresholds to only count CVEs that have an available fix
+	FailOnKEV                 bool                         // Fail image scans on any vulnerability listed in the CISA Known Exploited Vulnerabilities catalog
+	EPSSThreshold             float64                      // Fail image scans on any vulnerability whose EPSS score is at or above this value (0 = disabled)
 	FailCoverageThreshold     float32                      // Coverage threshold below which the command fails (0 = disabled)
 	FailOnDegradedConfig      bool                         // Fail the scan if control inputs or exceptions could not be loaded and a fallback was used
 	Submit                    BoolPtrFlag                  // Submit results to Kubescape Cloud BE. Get() is nil unless explicitly set by the caller (flag/env/request field)

@@ -162,7 +162,7 @@ func runFrameworkScan(ctx context.Context, scanInfo *cautils.ScanInfo, ks meta.I
 		return results, err
 	}
 	if scanInfo.ScanImages {
-		if err := enforceImageSeverityThresholds(results.ImageScanData, scanInfo); err != nil {
+		if err := enforceImageGates(results.ImageScanData, scanInfo); err != nil {
 			return results, err
 		}
 	}

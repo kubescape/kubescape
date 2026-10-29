@@ -18,11 +18,33 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// TestEnforceImageGatesKeepsSeverityError pins that the severity breach is
+// returned unchanged when no exploitability gate trips.
+func TestEnforceImageGatesKeepsSeverityError(t *testing.T) {
+	critical := match.NewMatches(match.Match{Vulnerability: vulnerability.Vulnerability{
+		Reference: vulnerability.Reference{ID: "CVE-TEST"},
+		Metadata:  &vulnerability.Metadata{Severity: vulnerability.CriticalSeverity.String()},
+	}})
+	data := []cautils.ImageScanData{{Matches: critical}}
+
+	scanInfo := &cautils.ScanInfo{FailThresholdSeverity: "high", FailOnKEV: true}
+	assert.Equal(t, enforceImageSeverityThresholds(data, scanInfo), enforceImageGates(data, scanInfo))
+	assert.NoError(t, enforceImageGates(data, &cautils.ScanInfo{FailOnKEV: true, EPSSThreshold: 0.1}))
+}
+
 // TestGateFailuresAreMarked pins that every gate breach is marked as a gate, with its message unchanged.
 func TestGateFailuresAreMarked(t *testing.T) {
 	critical := match.NewMatches(match.Match{Vulnerability: vulnerability.Vulnerability{
 		Reference: vulnerability.Reference{ID: "CVE-TEST"},
 		Metadata:  &vulnerability.Metadata{Severity: vulnerability.CriticalSeverity.String()},
+	}})
+	knownExploited := match.NewMatches(match.Match{Vulnerability: vulnerability.Vulnerability{
+		Reference: vulnerability.Reference{ID: "CVE-2020-15999"},
+		Metadata: &vulnerability.Metadata{
+			Severity:       vulnerability.MediumSeverity.String(),
+			KnownExploited: []vulnerability.KnownExploited{{CVE: "CVE-2020-15999"}},
+			EPSS:           []vulnerability.EPSS{{CVE: "CVE-2020-15999", EPSS: 0.64}},
+		},
 	}})
 	degraded := cautils.ScanCoverage{PolicyDegradations: []cautils.PolicyDegradation{{Component: "controls", Reason: "cache"}}}
 
@@ -44,6 +66,14 @@ func TestGateFailuresAreMarked(t *testing.T) {
 		"image severity threshold": {
 			err:     enforceImageSeverityThresholds([]cautils.ImageScanData{{Matches: critical}}, &cautils.ScanInfo{FailThresholdSeverity: "high"}),
 			message: "image scan result exceeds severity threshold: high",
+		},
+		"image exploitability gate": {
+			err:     enforceImageGates([]cautils.ImageScanData{{Matches: knownExploited}}, &cautils.ScanInfo{FailOnKEV: true}),
+			message: "image scan result exceeds exploitability gates: 1 vulnerability match(es) listed in CISA KEV",
+		},
+		"image severity and exploitability gates": {
+			err:     enforceImageGates([]cautils.ImageScanData{{Matches: knownExploited}}, &cautils.ScanInfo{FailThresholdSeverity: "low", EPSSThreshold: 0.5}),
+			message: "image scan result exceeds severity threshold: low\nimage scan result exceeds exploitability gates: 1 vulnerability match(es) with an EPSS score at or above 0.5",
 		},
 		"coverage floor": {
 			err:     enforceCoverageThreshold(cautils.ScanCoverage{CoverageScore: 40}, 1, &cautils.ScanInfo{FailCoverageThreshold: 80}),

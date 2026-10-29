@@ -143,7 +143,7 @@ func runControlScan(ctx context.Context, scanInfo *cautils.ScanInfo, ks meta.IKu
 		return results, err
 	}
 	if scanInfo.ScanImages {
-		if err := enforceImageSeverityThresholds(results.ImageScanData, scanInfo); err != nil {
+		if err := enforceImageGates(results.ImageScanData, scanInfo); err != nil {
 			return results, err
 		}
 	}
