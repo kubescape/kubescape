@@ -88,6 +88,30 @@ func TestCorrelate_FiltersBelowMinSeverity(t *testing.T) {
 	}
 }
 
+func TestCorrelate_NegligibleThresholdExcludesUnknownSeverity(t *testing.T) {
+	idx := openIndex(t)
+	w := Workload{Namespace: "prod", Kind: "Deployment", Name: "web"}
+	endpoints := map[Workload]networkpolicy.Endpoint{
+		w: {Namespace: "prod", Name: "web", Labels: map[string]string{"app": "web"}},
+	}
+
+	findings, _ := Correlate(idx, endpoints, map[Workload][]storagev1beta1.Vulnerability{
+		w: {
+			vuln("CVE-UNKNOWN", "", false),
+			vuln("CVE-NEGLIGIBLE", "Negligible", false),
+			vuln("CVE-LOW", "Low", false),
+		},
+	}, SeverityNegligible, nil)
+
+	ids := make(map[string]bool, len(findings))
+	for _, finding := range findings {
+		ids[finding.Vulnerability.ID] = true
+	}
+	if len(ids) != 2 || !ids["CVE-NEGLIGIBLE"] || !ids["CVE-LOW"] {
+		t.Errorf("expected Negligible and Low findings but not Unknown, got %+v", findings)
+	}
+}
+
 func TestCorrelate_CarriesFixAvailable(t *testing.T) {
 	idx := openIndex(t)
 	w := Workload{Namespace: "prod", Kind: "Deployment", Name: "web"}
