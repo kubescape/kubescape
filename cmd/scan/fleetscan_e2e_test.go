@@ -212,10 +212,11 @@ func TestFleetE2E_HealthyFleet(t *testing.T) {
 
 // TestFleetE2E_FailuresAreTold pins that a dead and a refusing cluster each get their own status, and the rest of the fleet is still scanned.
 func TestFleetE2E_FailuresAreTold(t *testing.T) {
+	// The dead address comes last, so no live server started after it can take over its freed port.
 	servers := map[string]string{
 		"prod":     newFakeAPIServer(t, 0, false).URL,
-		"dead":     deadServerURL(t),
 		"badcreds": newFakeAPIServer(t, 0, true).URL,
+		"dead":     deadServerURL(t),
 	}
 
 	run := runFleetE2E(t, servers, "--kube-contexts=prod,dead,badcreds", "--retries=1")
