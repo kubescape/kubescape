@@ -254,6 +254,9 @@ func compileMatchResources(mr *admissionregistrationv1alpha1.MatchResources) (*c
 // a confident non-match. The same policy applies to exclusions: a possible
 // equivalent exclusion prevents an include match from being confirmed.
 func (c *compiledMatchResources) matches(obj ObjectInfo) (matched bool, determinable bool) {
+	// Unknown namespace labels cannot decide the conjunction, but a known
+	// object/rule mismatch still can. Defer uncertainty until after exclusions.
+	namespaceKnown := true
 	if c.namespaceSelector != nil && !c.namespaceSelector.Empty() {
 		switch {
 		case obj.IsNamespaceObject:
@@ -265,10 +268,8 @@ func (c *compiledMatchResources) matches(obj ObjectInfo) (matched bool, determin
 			}
 		case !obj.ClusterScoped:
 			matched, determinable := namespaceselector.Matches(c.namespaceSelector, obj.Namespace, obj.NamespaceLabels, obj.NamespaceLabelsKnown)
-			if !determinable {
-				return false, false
-			}
-			if !matched {
+			namespaceKnown = determinable
+			if determinable && !matched {
 				return false, true
 			}
 		default:
@@ -292,6 +293,9 @@ func (c *compiledMatchResources) matches(obj ObjectInfo) (matched bool, determin
 			// The apiserver applies matchPolicy to exclusions too. Without
 			// its equivalence registry, an exact include cannot prove that
 			// an exclusion naming another group/version will not apply.
+			return false, false
+		}
+		if !namespaceKnown {
 			return false, false
 		}
 		return true, true
