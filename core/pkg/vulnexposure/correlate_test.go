@@ -167,6 +167,35 @@ func TestCorrelate_SortsWidestExposureAndHighestSeverityFirst(t *testing.T) {
 	}
 }
 
+func TestCorrelate_DeterministicallyOrdersEqualPriorityFindings(t *testing.T) {
+	idx := openIndex(t)
+	workloadA := Workload{Namespace: "prod", Kind: "Deployment", Name: "a"}
+	workloadB := Workload{Namespace: "prod", Kind: "Deployment", Name: "b"}
+	endpoints := map[Workload]networkpolicy.Endpoint{
+		workloadA: {Namespace: "prod", Name: "a", Labels: map[string]string{"app": "a"}},
+		workloadB: {Namespace: "prod", Name: "b", Labels: map[string]string{"app": "b"}},
+	}
+
+	findings, _ := Correlate(idx, endpoints, map[Workload][]storagev1beta1.Vulnerability{
+		workloadB: {vuln("CVE-1", "Critical", false)},
+		workloadA: {
+			vuln("CVE-2", "Critical", false),
+			vuln("CVE-1", "Critical", false),
+		},
+	}, SeverityCritical, nil)
+
+	want := []string{"a/CVE-1", "a/CVE-2", "b/CVE-1"}
+	if len(findings) != len(want) {
+		t.Fatalf("expected %d findings, got %d", len(want), len(findings))
+	}
+	for i, finding := range findings {
+		got := finding.Workload.Name + "/" + finding.Vulnerability.ID
+		if got != want[i] {
+			t.Errorf("finding %d: expected %q, got %q", i, want[i], got)
+		}
+	}
+}
+
 func TestCorrelate_ExternalExposureIsAttachedFromTheMap(t *testing.T) {
 	idx := openIndex(t)
 	w := Workload{Namespace: "prod", Kind: "Deployment", Name: "web"}
