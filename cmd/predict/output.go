@@ -5,6 +5,7 @@ import (
 	"encoding/xml"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -358,7 +359,22 @@ type sarifResult struct {
 }
 
 type sarifLocation struct {
+	PhysicalLocation *sarifPhysicalLocation `json:"physicalLocation,omitempty"`
 	LogicalLocations []sarifLogicalLocation `json:"logicalLocations"`
+}
+
+type sarifPhysicalLocation struct {
+	ArtifactLocation sarifArtifactLocation `json:"artifactLocation"`
+	Region           sarifRegion           `json:"region"`
+}
+
+type sarifArtifactLocation struct {
+	URI string `json:"uri"`
+}
+
+type sarifRegion struct {
+	StartLine   int `json:"startLine"`
+	StartColumn int `json:"startColumn"`
 }
 
 type sarifLogicalLocation struct {
@@ -405,6 +421,15 @@ func writeSARIF(w io.Writer, result pss.NamespaceResult) error {
 
 	results := make([]sarifResult, 0)
 	for _, r := range result.FailingResults() {
+		// GitHub Code Scanning rejects a result without a physical location,
+		// so a workload read from a manifest file is located in that file too.
+		var physicalLocation *sarifPhysicalLocation
+		if r.Source != nil {
+			physicalLocation = &sarifPhysicalLocation{
+				ArtifactLocation: sarifArtifactLocation{URI: sarifArtifactURI(r.Source.File)},
+				Region:           sarifRegion{StartLine: r.Source.Line, StartColumn: r.Source.Column},
+			}
+		}
 		for _, v := range r.Violations {
 			ruleID := "PSS/" + v.Check
 			level := "warning"
@@ -421,6 +446,7 @@ func writeSARIF(w io.Writer, result pss.NamespaceResult) error {
 				Level:     level,
 				Message:   sarifMessage{Text: v.Description},
 				Locations: []sarifLocation{{
+					PhysicalLocation: physicalLocation,
 					LogicalLocations: []sarifLogicalLocation{{
 						Name:               r.Name,
 						FullyQualifiedName: fqn,
@@ -452,6 +478,30 @@ func writeSARIF(w io.Writer, result pss.NamespaceResult) error {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	return enc.Encode(report)
+}
+
+// sarifArtifactURI converts a manifest path to a SARIF artifact URI. Code
+// Scanning expects a path relative to the repository root, so a path is kept
+// relative, and an absolute path under the working directory is made relative
+// to it. Any other absolute path becomes a file URI.
+func sarifArtifactURI(path string) string {
+	path = filepath.Clean(path)
+	if filepath.IsAbs(path) {
+		if wd, err := os.Getwd(); err == nil {
+			if rel, err := filepath.Rel(wd, path); err == nil && filepath.IsLocal(rel) {
+				path = rel
+			}
+		}
+	}
+	uri := url.URL{Path: filepath.ToSlash(path)}
+	if filepath.IsAbs(path) {
+		uri.Scheme = "file"
+		if !strings.HasPrefix(uri.Path, "/") {
+			// A Windows drive path, such as C:/manifests/pod.yaml.
+			uri.Path = "/" + uri.Path
+		}
+	}
+	return uri.String()
 }
 
 // --- JUnit formatter ---
