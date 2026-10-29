@@ -135,6 +135,9 @@ func runPSS(ctx context.Context, flags *pssFlags, args []string) error {
 			return err
 		}
 	} else {
+		if err := validatePSSOutput(flags.output, args, flags.stdin); err != nil {
+			return err
+		}
 		workloads, err = parseLocalInputs(flags.stdin, args)
 		if err != nil {
 			return err
