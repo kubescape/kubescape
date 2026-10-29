@@ -29,8 +29,8 @@ sleep 5
 echo 'Get service account email'
 export gcp_service_account=$(gcloud iam service-accounts list --filter="email ~ kubescape@" --format="value(email)")
 
-# Create custome cluster.get role
-echo 'Create custome cluster.get role'
+# Create custom cluster.get role
+echo 'Create custom cluster.get role'
 export custom_role_name=$(gcloud iam roles create kubescape --project=$gcp_project --title='Armo kubernetes' --description='Allow clusters.get to Kubernetes armo service account' --permissions=container.clusters.get --stage=GA  --format='value(name)')
 
 # Attach policies to the service account
