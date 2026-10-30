@@ -76,7 +76,126 @@ func TestRunListPoliciesPrettyListsKnownControl(t *testing.T) {
 
 func TestRunListPoliciesRejectsUnknownFormat(t *testing.T) {
 	err := runListPolicies(&bytes.Buffer{}, "xml", false)
-	require.ErrorContains(t, err, "invalid format")
+	require.ErrorContains(t, err, `invalid format "xml", supported formats: 'pretty-print'/'json'/'yaml'/'csv'`)
+}
+
+func TestRunListPolicies_FormatValidation(t *testing.T) {
+	tests := []struct {
+		name        string
+		format      string
+		wantErr     bool
+		expectedErr string
+	}{
+		{
+			name:    "uppercase format is normalized",
+			format:  "JSON",
+			wantErr: false,
+		},
+		{
+			name:    "padded format is normalized",
+			format:  "  yaml  ",
+			wantErr: false,
+		},
+		{
+			name:    "mixed-case pretty-print is normalized",
+			format:  " Pretty-Print ",
+			wantErr: false,
+		},
+		{
+			name:    "uppercase csv is normalized",
+			format:  "CSV",
+			wantErr: false,
+		},
+		{
+			name:        "empty format is rejected",
+			format:      "",
+			wantErr:     true,
+			expectedErr: "format cannot be empty, supported formats:",
+		},
+		{
+			name:        "whitespace-only format is rejected",
+			format:      "   ",
+			wantErr:     true,
+			expectedErr: "format cannot be empty, supported formats:",
+		},
+		{
+			name:        "unknown format is rejected",
+			format:      "xml",
+			wantErr:     true,
+			expectedErr: `invalid format "xml", supported formats: 'pretty-print'/'json'/'yaml'/'csv'`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			buf := &bytes.Buffer{}
+			err := runListPolicies(buf, tt.format, true)
+			if tt.wantErr {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.expectedErr)
+			} else {
+				require.NoError(t, err)
+				assert.NotEmpty(t, buf.String())
+			}
+		})
+	}
+}
+
+func TestListPoliciesCommand_FormatValidation(t *testing.T) {
+	tests := []struct {
+		name        string
+		args        []string
+		wantErr     bool
+		expectedErr string
+	}{
+		{
+			name:    "uppercase format flag succeeds",
+			args:    []string{"--format", "JSON", "--controls-only"},
+			wantErr: false,
+		},
+		{
+			name:    "padded format flag succeeds",
+			args:    []string{"--format", "  yaml  ", "--controls-only"},
+			wantErr: false,
+		},
+		{
+			name:        "empty format flag is rejected upfront",
+			args:        []string{"--format", "", "--controls-only"},
+			wantErr:     true,
+			expectedErr: "format cannot be empty, supported formats:",
+		},
+		{
+			name:        "whitespace-only format flag is rejected upfront",
+			args:        []string{"--format", "   ", "--controls-only"},
+			wantErr:     true,
+			expectedErr: "format cannot be empty, supported formats:",
+		},
+		{
+			name:        "unknown format flag is rejected upfront",
+			args:        []string{"--format", "invalid", "--controls-only"},
+			wantErr:     true,
+			expectedErr: `invalid format "invalid", supported formats: 'pretty-print'/'json'/'yaml'/'csv'`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd := getListPoliciesCmd()
+			stdout := &bytes.Buffer{}
+			cmd.SetOut(stdout)
+			cmd.SetErr(stdout)
+			cmd.SetArgs(tt.args)
+
+			err := cmd.Execute()
+			if tt.wantErr {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.expectedErr)
+			} else {
+				require.NoError(t, err)
+				assert.NotEmpty(t, stdout.String())
+			}
+		})
+	}
 }
 
 func TestListPoliciesCommandIsRegistered(t *testing.T) {
