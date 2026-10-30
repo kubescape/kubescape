@@ -1660,7 +1660,28 @@ func registerTools(ksServer *KubescapeMcpserver) {
 	createSecretExposureTools(ksServer)
 }
 
+// validateMCPOptions validates and normalizes the transport and port arguments before
+// starting the server or launching background tasks.
+func validateMCPOptions(transport string, port int) (string, error) {
+	normTransport := strings.ToLower(strings.TrimSpace(transport))
+	if port < 1 || port > 65535 {
+		return "", fmt.Errorf("invalid port %d: must be between 1 and 65535", port)
+	}
+	switch normTransport {
+	case "sse", "stdio":
+		return normTransport, nil
+	default:
+		return "", fmt.Errorf("unsupported transport '%s': must be 'sse' or 'stdio'", transport)
+	}
+}
+
 func mcpServerEntrypoint(ctx context.Context, transport string, port int) error {
+	normTransport, err := validateMCPOptions(transport, port)
+	if err != nil {
+		return err
+	}
+	transport = normTransport
+
 	logger.L().Info("Starting MCP server...")
 
 	// ksServer is created below, once the MCP server exists; the lifecycle
@@ -1858,6 +1879,15 @@ func GetMCPServerCmd() *cobra.Command {
 		Use:   "mcpserver",
 		Short: "Start the Kubescape MCP server",
 		Long:  `Start the Kubescape MCP server`,
+		Args:  cobra.NoArgs,
+		PreRunE: func(cmd *cobra.Command, args []string) error {
+			norm, err := validateMCPOptions(transport, port)
+			if err != nil {
+				return err
+			}
+			transport = norm
+			return nil
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// The root command's context is cancelled on the first SIGINT or
 			// SIGTERM (see main.go); SSE shuts down when it ends.
