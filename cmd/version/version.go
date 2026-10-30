@@ -3,6 +3,7 @@ package version
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/kubescape/backend/pkg/versioncheck"
 	"github.com/kubescape/kubescape/v4/core/meta"
@@ -23,8 +24,14 @@ func GetVersionCmd(ks meta.IKubescape, version, commit, date string) *cobra.Comm
 		Use:   "version",
 		Short: "Get current version",
 		Long:  ``,
+		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			switch outputFormat {
+			normalizedFormat := strings.ToLower(strings.TrimSpace(outputFormat))
+			if normalizedFormat == "" {
+				return fmt.Errorf("format cannot be empty, supported formats: text, json, yaml")
+			}
+
+			switch normalizedFormat {
 			case "json":
 				info := versionInfo{
 					Version: version,

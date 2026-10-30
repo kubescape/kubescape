@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"strings"
 	"testing"
 
 	"github.com/kubescape/backend/pkg/versioncheck"
@@ -195,4 +196,48 @@ func TestGetVersionCmd_TextWriterError(t *testing.T) {
 
 	err := cmd.Execute()
 	require.ErrorIs(t, err, wantErr)
+}
+
+func TestGetVersionCmd_RejectsUnexpectedArgs(t *testing.T) {
+	ks := core.NewKubescape(context.Background())
+	cmd := GetVersionCmd(ks, "v3.0.0", "", "")
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+	cmd.SetArgs([]string{"unexpected"})
+
+	err := cmd.Execute()
+	require.Error(t, err)
+}
+
+func TestGetVersionCmd_CaseInsensitiveFormat(t *testing.T) {
+	t.Setenv("KS_SKIP_UPDATE_CHECK", "true")
+
+	formats := []string{"JSON", "Json", "TEXT", "Text", "YAML", "Yaml", " json ", " text ", " yaml "}
+	for _, f := range formats {
+		t.Run("format_"+strings.TrimSpace(f), func(t *testing.T) {
+			ks := core.NewKubescape(context.Background())
+			cmd := GetVersionCmd(ks, "v3.0.0", "abc123", "2026-08-13")
+			var buf bytes.Buffer
+			cmd.SetOut(&buf)
+			cmd.SetArgs([]string{"--format", f})
+			assert.NoError(t, cmd.Execute())
+			assert.NotEmpty(t, buf.String())
+		})
+	}
+}
+
+func TestGetVersionCmd_EmptyFormat(t *testing.T) {
+	t.Setenv("KS_SKIP_UPDATE_CHECK", "true")
+
+	formats := []string{"", "   "}
+	for _, f := range formats {
+		t.Run("format_empty", func(t *testing.T) {
+			ks := core.NewKubescape(context.Background())
+			cmd := GetVersionCmd(ks, "v3.0.0", "", "")
+			cmd.SetArgs([]string{"--format", f})
+			err := cmd.Execute()
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "format cannot be empty, supported formats: text, json, yaml")
+		})
+	}
 }
