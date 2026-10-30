@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jwalton/gchalk"
 	"github.com/kubescape/kubescape/v4/core/pkg/opaprocessor/cel"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -17,6 +18,7 @@ import (
 
 func listOutput(t *testing.T, format string, controlsOnly bool) string {
 	t.Helper()
+	t.Setenv("FORCE_COLOR", "0")
 	out := &bytes.Buffer{}
 	require.NoError(t, runListPolicies(out, format, controlsOnly))
 	return out.String()
@@ -178,4 +180,95 @@ func TestCsvPolicies_NeutralizesFormulaInjection(t *testing.T) {
 		"false",
 		"false",
 	}, records[1])
+}
+
+func TestRunListPolicies_PrettyWithColor(t *testing.T) {
+	if orig, ok := os.LookupEnv("NO_COLOR"); ok {
+		os.Unsetenv("NO_COLOR")
+		t.Cleanup(func() {
+			_ = os.Setenv("NO_COLOR", orig)
+		})
+	}
+	t.Setenv("FORCE_COLOR", "1")
+	prevLevel := gchalk.GetLevel()
+	gchalk.SetLevel(gchalk.LevelAnsi16m)
+	defer gchalk.SetLevel(prevLevel)
+
+	buf := &bytes.Buffer{}
+	require.NoError(t, runListPolicies(buf, formatPretty, false))
+
+	outStr := buf.String()
+	// Assert header colors
+	assert.Contains(t, outStr, gchalk.WithBrightWhite().Bold("Control ID"))
+	assert.Contains(t, outStr, gchalk.WithBrightWhite().Bold("Policy"))
+	assert.Contains(t, outStr, gchalk.WithBrightWhite().Bold("Params"))
+	assert.Contains(t, outStr, gchalk.WithBrightWhite().Bold("On error"))
+	assert.Contains(t, outStr, gchalk.WithBrightWhite().Bold("Resources"))
+
+	// Assert control ID color
+	assert.Contains(t, outStr, gchalk.WithBrightCyan().Bold("C-0016"))
+
+	// Assert parameter badges (green yes, red no)
+	assert.Contains(t, outStr, gchalk.WithGreen().Bold("yes"))
+	assert.Contains(t, outStr, gchalk.WithRed().Bold("no"))
+}
+
+func TestRunListPolicies_PrettyNoColorPrecedence(t *testing.T) {
+	t.Setenv("FORCE_COLOR", "1")
+	t.Setenv("NO_COLOR", "1")
+	prevLevel := gchalk.GetLevel()
+	gchalk.SetLevel(gchalk.LevelAnsi16m)
+	defer gchalk.SetLevel(prevLevel)
+
+	buf := &bytes.Buffer{}
+	require.NoError(t, runListPolicies(buf, formatPretty, true))
+
+	outStr := buf.String()
+	assert.NotContains(t, outStr, "\x1b[", "NO_COLOR must ensure zero ANSI escape sequences")
+	assert.Contains(t, outStr, "Control ID")
+	assert.Contains(t, outStr, "C-0016")
+	assert.Contains(t, outStr, "yes")
+	assert.Contains(t, outStr, "no")
+}
+
+func TestRunListPolicies_PrettyEmptyNoColorTreatedAsUnset(t *testing.T) {
+	if orig, ok := os.LookupEnv("NO_COLOR"); ok {
+		t.Cleanup(func() {
+			_ = os.Setenv("NO_COLOR", orig)
+		})
+	}
+	t.Setenv("NO_COLOR", "")
+	t.Setenv("FORCE_COLOR", "1")
+	prevLevel := gchalk.GetLevel()
+	gchalk.SetLevel(gchalk.LevelAnsi16m)
+	defer gchalk.SetLevel(prevLevel)
+
+	buf := &bytes.Buffer{}
+	require.NoError(t, runListPolicies(buf, formatPretty, true))
+
+	outStr := buf.String()
+	assert.Contains(t, outStr, gchalk.WithBrightWhite().Bold("Control ID"))
+	assert.Contains(t, outStr, gchalk.WithBrightCyan().Bold("C-0016"))
+}
+
+func TestRunListPolicies_StructuredFormatsHaveZeroANSI(t *testing.T) {
+	t.Setenv("FORCE_COLOR", "1")
+	prevLevel := gchalk.GetLevel()
+	gchalk.SetLevel(gchalk.LevelAnsi16m)
+	defer gchalk.SetLevel(prevLevel)
+
+	// JSON format check
+	jsonBuf := &bytes.Buffer{}
+	require.NoError(t, runListPolicies(jsonBuf, formatJSON, true))
+	assert.NotContains(t, jsonBuf.String(), "\x1b[", "JSON output must have zero ANSI codes")
+
+	// YAML format check
+	yamlBuf := &bytes.Buffer{}
+	require.NoError(t, runListPolicies(yamlBuf, formatYAML, true))
+	assert.NotContains(t, yamlBuf.String(), "\x1b[", "YAML output must have zero ANSI codes")
+
+	// CSV format check
+	csvBuf := &bytes.Buffer{}
+	require.NoError(t, runListPolicies(csvBuf, formatCSV, true))
+	assert.NotContains(t, csvBuf.String(), "\x1b[", "CSV output must have zero ANSI codes")
 }
