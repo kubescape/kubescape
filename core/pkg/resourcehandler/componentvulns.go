@@ -21,6 +21,8 @@ import (
 	"k8s.io/apimachinery/pkg/version"
 )
 
+const singleResourceComponentVulnInfo = "cluster components are not assessed when scanning a single resource"
+
 type componentVulnSources struct {
 	matcher componentvulns.Matcher
 	dbBuilt time.Time
@@ -92,6 +94,13 @@ func (k8sHandler *K8sResourceHandler) collectComponentVulnerabilities(ctx contex
 		triplets = append(triplets, triplet)
 	}
 	slices.Sort(triplets)
+
+	// A single-workload scan never lists nodes or opens the vulnerability
+	// DB; the selected kinds are skipped so their controls do not pass.
+	if sessionObj.SingleResourceScan != nil {
+		cautils.SetInfoMapForResources(singleResourceComponentVulnInfo, triplets, sessionObj.InfoMap)
+		return
+	}
 
 	logger.L().Start("Matching cluster components against the vulnerability database...")
 	inv, nodeGaps := k8sHandler.componentInventory(ctx, sessionObj.Report.ClusterAPIServerInfo, kinds)

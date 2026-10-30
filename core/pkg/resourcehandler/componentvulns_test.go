@@ -79,10 +79,10 @@ func componentVulnSession(t *testing.T, controls ...reporthandling.Control) (*ca
 }
 
 func componentVulnControl(id string, kinds ...string) reporthandling.Control {
-	return reporthandling.Control{ControlID: id, Rules: []reporthandling.PolicyRule{{Match: []reporthandling.RuleMatchObjects{
-		{APIGroups: []string{""}, APIVersions: []string{"v1"}, Resources: []string{"Node"}},
-		{APIGroups: []string{componentvulns.Group}, APIVersions: []string{componentvulns.Version}, Resources: kinds},
-	}}}}
+	return reporthandling.Control{ControlID: id, Rules: []reporthandling.PolicyRule{{
+		Match:        []reporthandling.RuleMatchObjects{{APIGroups: []string{""}, APIVersions: []string{"v1"}, Resources: []string{"Node"}}},
+		DynamicMatch: []reporthandling.RuleMatchObjects{{APIGroups: []string{componentvulns.Group}, APIVersions: []string{componentvulns.Version}, Resources: kinds}},
+	}}}
 }
 
 func TestCollectComponentVulnerabilities(t *testing.T) {
@@ -186,6 +186,24 @@ func TestCollectComponentVulnerabilitiesNotSelected(t *testing.T) {
 	assert.Empty(t, sessionObj.InfoMap)
 }
 
+func TestCollectComponentVulnerabilitiesSingleResourceScan(t *testing.T) {
+	sessionObj, ksResourceMap := componentVulnSession(t, componentVulnControl("C-RUNTIME", "ContainerRuntimeVulnerabilities"))
+	sessionObj.SingleResourceScan = workloadinterface.NewWorkloadObj(map[string]any{
+		"apiVersion": "apps/v1", "kind": "Deployment", "metadata": map[string]any{"name": "web", "namespace": "default"},
+	})
+	handler := &K8sResourceHandler{
+		componentVulnSources: func(context.Context, *cautils.ScanInfo) (componentVulnSources, error) {
+			t.Fatal("vulnerability database loaded for a single workload scan")
+			return componentVulnSources{}, nil
+		},
+	}
+	handler.collectComponentVulnerabilities(context.Background(), sessionObj, &cautils.ScanInfo{}, map[string]workloadinterface.IMetadata{}, ksResourceMap)
+	assert.Empty(t, ksResourceMap[runtimeVulnsGVR])
+	require.Contains(t, sessionObj.InfoMap, runtimeVulnsGVR)
+	assert.Equal(t, apis.StatusSkipped, sessionObj.InfoMap[runtimeVulnsGVR].InnerStatus)
+	assert.Equal(t, singleResourceComponentVulnInfo, sessionObj.InfoMap[runtimeVulnsGVR].InnerInfo)
+}
+
 func TestCollectComponentVulnerabilitiesHonorsKindFilters(t *testing.T) {
 	for _, scanInfo := range []*cautils.ScanInfo{
 		{ExcludeKinds: "ContainerRuntimeVulnerabilities"},
@@ -234,4 +252,11 @@ func TestCollectComponentVulnerabilitiesNodeListingFails(t *testing.T) {
 	require.Len(t, sessionObj.PartialGVRFailures, 1)
 	assert.Equal(t, runtimeVulnsGVR, sessionObj.PartialGVRFailures[0].GVR)
 	assert.Equal(t, componentvulns.ClusterSelector, sessionObj.PartialGVRFailures[0].Selector)
+}
+
+func TestComponentVulnAPIVersionMatchesPackage(t *testing.T) {
+	assert.Equal(t, componentvulns.APIVersion, cautils.ComponentVulnAPIVersion)
+	for _, kind := range []componentvulns.Kind{componentvulns.APIServerVulnerabilities, componentvulns.KubeletVulnerabilities, componentvulns.ContainerRuntimeVulnerabilities} {
+		assert.Contains(t, cautils.ComponentVulnResources, string(kind))
+	}
 }

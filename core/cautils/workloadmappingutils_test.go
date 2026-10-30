@@ -235,12 +235,19 @@ func TestMapCloudResources(t *testing.T) {
 
 func TestMapComponentVulnResources(t *testing.T) {
 	resources := ExternalResources{
-		"componentvulnerabilities.kubescape.io/v1beta1/KubeletVulnerabilities":      nil,
-		"componentvulnerabilities.kubescape.io/v1beta1/OtherKubeletVulnerabilities": nil,
-		"componentvulnerabilities.kubescape.io/v1beta1/APIServerVulnerabilitiesX":   nil,
+		ComponentVulnAPIVersion + "/KubeletVulnerabilities":                    nil,
+		ComponentVulnAPIVersion + "/ContainerRuntimeVulnerabilities":           nil,
+		ComponentVulnAPIVersion + "/OtherKubeletVulnerabilities":               nil,
+		ComponentVulnAPIVersion + "/APIServerVulnerabilitiesX":                 nil,
+		"example.com/v1beta0/KubeletVulnerabilities":                           nil,
+		"componentvulns.kubescape.cloud/v1/KubeletVulnerabilities":             nil,
+		"evil.componentvulns.kubescape.cloud/v1beta0/APIServerVulnerabilities": nil,
 		"/v1/Node": nil,
 	}
-	want := []string{"componentvulnerabilities.kubescape.io/v1beta1/KubeletVulnerabilities"}
+	want := []string{
+		ComponentVulnAPIVersion + "/ContainerRuntimeVulnerabilities",
+		ComponentVulnAPIVersion + "/KubeletVulnerabilities",
+	}
 	if got := MapComponentVulnResources(resources); !reflect.DeepEqual(got, want) {
 		t.Errorf("MapComponentVulnResources() = %v, want %v", got, want)
 	}

@@ -9,9 +9,13 @@ import (
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 )
 
+// ComponentVulnAPIVersion is the group/version of the componentvulns package.
+const ComponentVulnAPIVersion = "componentvulns.kubescape.cloud/v1beta0"
+
 var (
 	ImageVulnResources = []string{"ImageVulnerabilities"}
-	// ComponentVulnResources are built by the componentvulns package.
+	// ComponentVulnResources are the kinds built by the componentvulns
+	// package, served under ComponentVulnAPIVersion.
 	ComponentVulnResources = []string{
 		"APIServerVulnerabilities",
 		"KubeletVulnerabilities",
@@ -59,15 +63,18 @@ func MapImageVulnResources(externalResourceMap ExternalResources) []string {
 	return MapExternalResource(externalResourceMap, ImageVulnResources)
 }
 
-// MapComponentVulnResources matches the resource name exactly: a substring
-// match would also pick up kinds such as OtherKubeletVulnerabilities.
+// MapComponentVulnResources matches the complete group/version/kind: a kind
+// or substring match would also pick up a foreign group serving the same kind,
+// or kinds such as OtherKubeletVulnerabilities.
 func MapComponentVulnResources(externalResourceMap ExternalResources) []string {
 	var resources []string
 	for k := range externalResourceMap {
-		if slices.Contains(ComponentVulnResources, k[strings.LastIndex(k, "/")+1:]) {
+		kind, ok := strings.CutPrefix(k, ComponentVulnAPIVersion+"/")
+		if ok && slices.Contains(ComponentVulnResources, kind) {
 			resources = append(resources, k)
 		}
 	}
+	slices.Sort(resources)
 	return resources
 }
 

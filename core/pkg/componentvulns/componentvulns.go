@@ -58,8 +58,6 @@ type Options struct {
 	IndexMaxAge time.Duration
 	DBBuilt     time.Time
 	Now         time.Time
-	// VulnerabilityExceptions are CVE IDs ignored by the matcher.
-	VulnerabilityExceptions []string
 }
 
 type Gap struct {
@@ -108,7 +106,6 @@ func Build(inv clustercomponents.Inventory, m Matcher, opts Options) (Result, er
 	targets, gaps := collectTargets(inv, selected)
 	res.Gaps = gaps
 
-	attribute := opts.Index != nil
 	for _, k := range []Kind{APIServerVulnerabilities, KubeletVulnerabilities} {
 		if !selected[k] {
 			continue
@@ -121,17 +118,19 @@ func Build(inv clustercomponents.Inventory, m Matcher, opts Options) (Result, er
 		}
 	}
 
+	if opts.Index == nil {
+		// Kubernetes CVEs cannot be attributed, so there is nothing to match.
+		targets = slices.DeleteFunc(targets, func(t target) bool { return isKubernetes(t.kind) })
+	}
+
 	if len(targets) > 0 {
-		vulns, err := lookup(targets, m, opts.VulnerabilityExceptions)
+		vulns, err := lookup(targets, m)
 		if err != nil {
 			return Result{}, err
 		}
 		for _, t := range targets {
 			found := vulns[t.pkgID]
 			if isKubernetes(t.kind) {
-				if !attribute {
-					continue
-				}
 				var unattributed []string
 				found, unattributed = applicable(found, opts.Index, t)
 				if len(unattributed) > 0 {
@@ -214,7 +213,7 @@ func modulePath(v clustercomponents.ComponentVersion) string {
 }
 
 // lookup matches each distinct module version once, in a single matcher call.
-func lookup(targets []target, m Matcher, exceptions []string) (map[pkg.ID][]Vulnerability, error) {
+func lookup(targets []target, m Matcher) (map[pkg.ID][]Vulnerability, error) {
 	seen := make(map[pkg.ID]bool)
 	var packages []pkg.Package
 	for _, t := range targets {
@@ -233,7 +232,7 @@ func lookup(targets []target, m Matcher, exceptions []string) (map[pkg.ID][]Vuln
 		})
 	}
 
-	matches, _, err := m.MatchPackages(packages, pkg.Context{}, exceptions, nil)
+	matches, _, err := m.MatchPackages(packages, pkg.Context{}, nil, nil)
 	if err != nil {
 		return nil, fmt.Errorf("match cluster components: %w", err)
 	}
@@ -323,7 +322,7 @@ func merge(a, b Vulnerability) Vulnerability {
 			a.FixedIn = append(a.FixedIn, f)
 		}
 	}
-	if a.FixState != vulnerability.FixStateFixed.String() {
+	if b.FixState == vulnerability.FixStateFixed.String() {
 		a.FixState = b.FixState
 	}
 	slices.Sort(a.Aliases)

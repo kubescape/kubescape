@@ -192,8 +192,10 @@ func TestBuildIndexProblemsAreGaps(t *testing.T) {
 	t.Run("missing index builds no Kubernetes resources", func(t *testing.T) {
 		opts := testOptions(t, APIServerVulnerabilities)
 		opts.Index = nil
-		res, err := Build(inv, &fakeMatcher{advisories: kubernetesAdvisories()}, opts)
+		m := &fakeMatcher{advisories: kubernetesAdvisories()}
+		res, err := Build(inv, m, opts)
 		require.NoError(t, err)
+		assert.Zero(t, m.calls, "nothing to match without the index")
 		assert.Empty(t, res.Resources)
 		require.Len(t, res.Gaps, 1)
 		assert.Equal(t, APIServerVulnerabilities, res.Gaps[0].Kind)
