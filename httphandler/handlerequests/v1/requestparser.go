@@ -80,7 +80,7 @@ type scanRequestParams struct {
 	scanQueryParams   *ScanQueryParams           // request as received from api
 	scanID            string                     // generated scan ID
 	ctx               context.Context
-	resp              chan *utilsmetav1.Response // Respose chan; nil if not interested.
+	resp              chan *utilsmetav1.Response // Response chan; nil if not interested.
 	callbackURL       string                     // validated scan-completion callback URL; empty if not requested.
 	isUserScan        bool                       // true when submitted via the Scan handler, not Metrics
 }

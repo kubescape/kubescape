@@ -381,6 +381,16 @@ func TestGetNormalizedKey(t *testing.T) {
 			key:  "UNKNOWN-KEY_NAME",
 			want: "unknownkeyname",
 		},
+		{
+			name: "surrounding whitespace trimmed",
+			key:  " accountID	",
+			want: "accountid",
+		},
+		{
+			name: "account alias with surrounding whitespace",
+			key:  " account ",
+			want: "accountid",
+		},
 	}
 
 	for _, tt := range tests {
@@ -418,6 +428,14 @@ func TestDeleteCachedConfig_SelectiveKeyDeletion(t *testing.T) {
 			keys: []string{"ACCOUNT-ID"},
 			wantConfig: func(initial cautils.ConfigObj) cautils.ConfigObj {
 				initial.AccountID = ""
+				return initial
+			},
+		},
+		{
+			name: "Delete single key with surrounding whitespace",
+			keys: []string{" access-key "},
+			wantConfig: func(initial cautils.ConfigObj) cautils.ConfigObj {
+				initial.AccessKey = ""
 				return initial
 			},
 		},

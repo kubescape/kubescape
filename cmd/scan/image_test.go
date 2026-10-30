@@ -534,3 +534,21 @@ func TestGetScanCommand_RejectsPostureFlagsOnImageScan(t *testing.T) {
 		})
 	}
 }
+
+func TestGetImageCmd_RunE_RejectsViewFlag(t *testing.T) {
+	mockKubescape := &imageScanCaptureKubescape{}
+	scanInfo := cautils.ScanInfo{}
+
+	cmd := getImageCmd(mockKubescape, &scanInfo)
+	parentCmd := &cobra.Command{Use: "scan"}
+	parentCmd.PersistentFlags().StringVarP(&scanInfo.Format, "format", "f", "pretty-printer", "")
+	parentCmd.PersistentFlags().StringVar(&scanInfo.View, "view", "security", "")
+	parentCmd.AddCommand(cmd)
+
+	err := parentCmd.ParseFlags([]string{"--view", "resource"})
+	require.NoError(t, err)
+
+	err = cmd.RunE(cmd, []string{"nginx:1.27"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "--view is not supported for image scans: an image scan evaluates vulnerabilities, not posture views")
+}

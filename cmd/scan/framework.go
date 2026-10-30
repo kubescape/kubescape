@@ -300,6 +300,12 @@ func enforceSeverityThresholds(summaryDetails *reportsummary.SummaryDetails, sca
 
 // validateFrameworkScanInfo validates the scan info struct for the `scan framework` command
 func validateFrameworkScanInfo(scanInfo *cautils.ScanInfo) error {
+	if scanInfo.View != "" {
+		if err := shared.ValidateView(scanInfo.View); err != nil {
+			return err
+		}
+		scanInfo.View = strings.ToLower(strings.TrimSpace(scanInfo.View))
+	}
 	if scanInfo.View == string(cautils.SecurityViewType) {
 		scanInfo.View = string(cautils.ResourceViewType)
 	}

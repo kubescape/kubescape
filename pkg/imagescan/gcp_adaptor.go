@@ -323,8 +323,9 @@ func (a *GCPAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs []Co
 // GetImagesInformation retrieves the BOM and manifest information for a list of image identifiers.
 func (a *GCPAdaptor) GetImagesInformation(ctx context.Context, imageIDs []ContainerImageIdentifier) ([]ContainerImageInformation, error) {
 	a.mu.RLock()
-	defer a.mu.RUnlock()
-	if a.client == nil {
+	initialized := a.client != nil
+	a.mu.RUnlock()
+	if !initialized {
 		return nil, fmt.Errorf("gcp client not initialized, call login first")
 	}
 	return FetchImagesInformation(imageIDs)
@@ -334,6 +335,8 @@ func (a *GCPAdaptor) GetImagesInformation(ctx context.Context, imageIDs []Contai
 func (a *GCPAdaptor) Destroy() error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	a.client = nil
+	a.projectID = ""
 	if a.owningClient != nil {
 		err := a.owningClient.Close()
 		a.owningClient = nil
