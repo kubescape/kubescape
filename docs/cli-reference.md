@@ -70,8 +70,8 @@ kubescape scan [target] [flags]
 | `--otel-endpoint <endpoint>` | Export scan traces and metrics to an OTLP collector — see [OpenTelemetry export](#opentelemetry-export). Accepts `host:port` (plaintext) or a `http(s)://` URL. | `OTEL_EXPORTER_OTLP_ENDPOINT` |
 | `--scan-images` | Also scan container images for vulnerabilities. Required for `--format cyclonedx-json` and `--format spdx-json` — see [generating an SBOM](#generating-an-sbom) | `false` |
 | `--image-platform <platform>` | OCI platform for workload image scans, such as `linux/amd64`. Overrides platform inferred from Nodes and hard scheduling constraints | inferred |
-| `--min-severity <sev>` | Only show controls at or above this severity: `low`, `medium`, `high`, `critical`. Output-only — exit codes are computed on the full unfiltered report | - |
-| `--max-severity <sev>` | Only show controls at or below this severity. Output-only — exit codes are computed on the full unfiltered report | - |
+| `--min-severity <sev>` | Only show findings at or above this severity: `low`, `medium`, `high`, `critical`. Applies to posture controls and image vulnerabilities. Output-only — exit codes are computed on the full unfiltered report | - |
+| `--max-severity <sev>` | Only show findings at or below this severity. Applies to posture controls and image vulnerabilities. Output-only — exit codes are computed on the full unfiltered report | - |
 | `--severity-threshold <sev>` | Fail if findings at or above severity: `low`, `medium`, `high`, `critical`. Failed controls with unknown severity (missing base score) are treated as exceeding any threshold | - |
 | `--skip-db-update` | Do not update the vulnerability database before scanning images; uses the locally cached database. Fails if the local database is missing or unusable (run once without this flag to download it). | `false` |
 | `--submit` | Submit results to Kubescape SaaS | `false` |
