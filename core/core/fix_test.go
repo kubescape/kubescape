@@ -1389,3 +1389,195 @@ func TestFix_OutputKustomizeNonInteractiveDoesNotRefuseWhenNoPatchesEmitted(t *t
 	})
 	require.NoError(t, err)
 }
+
+func getGeneratedPatchFileName(t *testing.T, reportPath string, valuesFile string) string {
+	tempDir := t.TempDir()
+	ks := &Kubescape{Ctx: context.Background()}
+	err := ks.Fix(&metav1.FixInfo{
+		ReportFile:   reportPath,
+		KustomizeDir: tempDir,
+		NoConfirm:    true,
+		HelmValueOptions: cautils.HelmValueOptions{
+			ValueFiles: []string{valuesFile},
+		},
+	})
+	require.NoError(t, err)
+	entries, err := os.ReadDir(tempDir)
+	require.NoError(t, err)
+	for _, e := range entries {
+		name := e.Name()
+		if name != "base.yaml" && name != "kustomization.yaml" && strings.HasSuffix(name, ".yaml") {
+			return name
+		}
+	}
+	t.Fatalf("no patch file found in %s", tempDir)
+	return ""
+}
+
+// TestFix_OutputKustomizeRefusesNonEmptyDirWithGeneratedPatchWithoutNoConfirm verifies that
+// when a non-empty directory contains a same-named generated patch but neither base.yaml nor
+// kustomization.yaml, Fix refuses to overwrite the patch without --no-confirm.
+func TestFix_OutputKustomizeRefusesNonEmptyDirWithGeneratedPatchWithoutNoConfirm(t *testing.T) {
+	dir := t.TempDir()
+	reportPath := buildFixableHelmReport(t, dir)
+	kustDir := filepath.Join(t.TempDir(), "existing-kust-patch")
+	require.NoError(t, os.MkdirAll(kustDir, 0700))
+
+	patchFileName := getGeneratedPatchFileName(t, reportPath, filepath.Join(dir, "values.yaml"))
+	existingPatchContent := "ORIGINAL_PATCH_CONTENT"
+	patchPath := filepath.Join(kustDir, patchFileName)
+	require.NoError(t, os.WriteFile(patchPath, []byte(existingPatchContent), 0600))
+
+	// Ensure neither base.yaml nor kustomization.yaml exists in kustDir
+	require.NoFileExists(t, filepath.Join(kustDir, "base.yaml"))
+	require.NoFileExists(t, filepath.Join(kustDir, "kustomization.yaml"))
+
+	ks := &Kubescape{Ctx: context.Background()}
+
+	// 1. Without --no-confirm: Fix must refuse to overwrite the existing patch
+	err := ks.Fix(&metav1.FixInfo{
+		ReportFile:   reportPath,
+		KustomizeDir: kustDir,
+		HelmValueOptions: cautils.HelmValueOptions{
+			ValueFiles: []string{filepath.Join(dir, "values.yaml")},
+		},
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "already contains Kustomize files; pass --no-confirm to overwrite them")
+
+	// Ensure original patch file was preserved and no base/kustomization were written
+	content, readErr := os.ReadFile(patchPath)
+	require.NoError(t, readErr)
+	assert.Equal(t, existingPatchContent, string(content))
+	assert.NoFileExists(t, filepath.Join(kustDir, "base.yaml"))
+	assert.NoFileExists(t, filepath.Join(kustDir, "kustomization.yaml"))
+
+	// 2. With --no-confirm: Fix succeeds and overwrites the patch
+	err = ks.Fix(&metav1.FixInfo{
+		ReportFile:   reportPath,
+		KustomizeDir: kustDir,
+		NoConfirm:    true,
+		HelmValueOptions: cautils.HelmValueOptions{
+			ValueFiles: []string{filepath.Join(dir, "values.yaml")},
+		},
+	})
+	require.NoError(t, err)
+
+	content, readErr = os.ReadFile(patchPath)
+	require.NoError(t, readErr)
+	assert.NotEqual(t, existingPatchContent, string(content))
+	assert.FileExists(t, filepath.Join(kustDir, "base.yaml"))
+	assert.FileExists(t, filepath.Join(kustDir, "kustomization.yaml"))
+}
+
+// TestFix_OutputKustomizeInteractivePromptOverwritesWhenConfirmed verifies that
+// when Kustomize patch files exist and stdin is a terminal, answering 'y' overwrites them.
+func TestFix_OutputKustomizeInteractivePromptOverwritesWhenConfirmed(t *testing.T) {
+	prevIsTerminal := isTerminal
+	t.Cleanup(func() { isTerminal = prevIsTerminal })
+	isTerminal = func(uintptr) bool { return true }
+
+	originalStdin := os.Stdin
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	t.Cleanup(func() { os.Stdin = originalStdin })
+	os.Stdin = r
+
+	_, err = w.WriteString("y\n")
+	require.NoError(t, err)
+	require.NoError(t, w.Close())
+
+	dir := t.TempDir()
+	reportPath := buildFixableHelmReport(t, dir)
+	kustDir := filepath.Join(t.TempDir(), "existing-kust-patch")
+	require.NoError(t, os.MkdirAll(kustDir, 0700))
+
+	patchFileName := getGeneratedPatchFileName(t, reportPath, filepath.Join(dir, "values.yaml"))
+	existingPatchContent := "ORIGINAL_PATCH_CONTENT"
+	patchPath := filepath.Join(kustDir, patchFileName)
+	require.NoError(t, os.WriteFile(patchPath, []byte(existingPatchContent), 0600))
+
+	ks := &Kubescape{Ctx: context.Background()}
+	err = ks.Fix(&metav1.FixInfo{
+		ReportFile:   reportPath,
+		KustomizeDir: kustDir,
+		HelmValueOptions: cautils.HelmValueOptions{
+			ValueFiles: []string{filepath.Join(dir, "values.yaml")},
+		},
+	})
+	require.NoError(t, err)
+
+	content, readErr := os.ReadFile(patchPath)
+	require.NoError(t, readErr)
+	assert.NotEqual(t, existingPatchContent, string(content))
+	assert.FileExists(t, filepath.Join(kustDir, "base.yaml"))
+	assert.FileExists(t, filepath.Join(kustDir, "kustomization.yaml"))
+}
+
+// TestFix_OutputKustomizeInteractivePromptCancelsWhenDeclined verifies that
+// when Kustomize patch files exist and stdin is a terminal, answering 'n' cancels generation.
+func TestFix_OutputKustomizeInteractivePromptCancelsWhenDeclined(t *testing.T) {
+	prevIsTerminal := isTerminal
+	t.Cleanup(func() { isTerminal = prevIsTerminal })
+	isTerminal = func(uintptr) bool { return true }
+
+	originalStdin := os.Stdin
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	t.Cleanup(func() { os.Stdin = originalStdin })
+	os.Stdin = r
+
+	_, err = w.WriteString("n\n")
+	require.NoError(t, err)
+	require.NoError(t, w.Close())
+
+	dir := t.TempDir()
+	reportPath := buildFixableHelmReport(t, dir)
+	kustDir := filepath.Join(t.TempDir(), "existing-kust-patch")
+	require.NoError(t, os.MkdirAll(kustDir, 0700))
+
+	patchFileName := getGeneratedPatchFileName(t, reportPath, filepath.Join(dir, "values.yaml"))
+	existingPatchContent := "ORIGINAL_PATCH_CONTENT"
+	patchPath := filepath.Join(kustDir, patchFileName)
+	require.NoError(t, os.WriteFile(patchPath, []byte(existingPatchContent), 0600))
+
+	ks := &Kubescape{Ctx: context.Background()}
+	err = ks.Fix(&metav1.FixInfo{
+		ReportFile:   reportPath,
+		KustomizeDir: kustDir,
+		HelmValueOptions: cautils.HelmValueOptions{
+			ValueFiles: []string{filepath.Join(dir, "values.yaml")},
+		},
+	})
+	require.NoError(t, err)
+
+	content, readErr := os.ReadFile(patchPath)
+	require.NoError(t, readErr)
+	assert.Equal(t, existingPatchContent, string(content))
+	assert.NoFileExists(t, filepath.Join(kustDir, "base.yaml"))
+	assert.NoFileExists(t, filepath.Join(kustDir, "kustomization.yaml"))
+}
+
+// TestFix_OutputKustomizeRefusesNonEmptyDirWithArbitraryFileWithoutNoConfirm verifies that
+// when an output directory contains an arbitrary non-Kustomize file, Fix refuses it without --no-confirm.
+func TestFix_OutputKustomizeRefusesNonEmptyDirWithArbitraryFileWithoutNoConfirm(t *testing.T) {
+	dir := t.TempDir()
+	reportPath := buildFixableHelmReport(t, dir)
+	kustDir := filepath.Join(t.TempDir(), "existing-arbitrary-dir")
+	require.NoError(t, os.MkdirAll(kustDir, 0700))
+	require.NoError(t, os.WriteFile(filepath.Join(kustDir, "my-note.txt"), []byte("preserve me"), 0600))
+
+	ks := &Kubescape{Ctx: context.Background()}
+	err := ks.Fix(&metav1.FixInfo{
+		ReportFile:   reportPath,
+		KustomizeDir: kustDir,
+		HelmValueOptions: cautils.HelmValueOptions{
+			ValueFiles: []string{filepath.Join(dir, "values.yaml")},
+		},
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "is not empty; pass --no-confirm to write into it anyway")
+	assert.FileExists(t, filepath.Join(kustDir, "my-note.txt"))
+	assert.NoFileExists(t, filepath.Join(kustDir, "base.yaml"))
+	assert.NoFileExists(t, filepath.Join(kustDir, "kustomization.yaml"))
+}

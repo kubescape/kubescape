@@ -3,6 +3,7 @@ package fixhandler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/armosec/armoapi-go/armotypes"
+	"github.com/gofrs/flock"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/opa-utils/reporthandling"
@@ -38,11 +40,25 @@ func ptrBool(b bool) *bool {
 	return &b
 }
 
-// makeResource builds a minimal reporthandling.Resource with the given kind and name.
+// makeResource builds a minimal reporthandling.Resource with the given kind and name,
+// using valid Kubernetes apiVersions for standard resources.
 func makeResource(kind, name string) *reporthandling.Resource {
+	apiVersion := "apps/v1"
+	switch kind {
+	case "Service", "ConfigMap", "Secret", "Pod", "ServiceAccount", "PersistentVolumeClaim", "Endpoints", "LimitRange", "ResourceQuota", "Namespace", "Node", "PersistentVolume":
+		apiVersion = "v1"
+	case "ClusterRole", "ClusterRoleBinding", "Role", "RoleBinding":
+		apiVersion = "rbac.authorization.k8s.io/v1"
+	case "Job", "CronJob":
+		apiVersion = "batch/v1"
+	case "Ingress", "NetworkPolicy":
+		apiVersion = "networking.k8s.io/v1"
+	case "CustomResourceDefinition":
+		apiVersion = "apiextensions.k8s.io/v1"
+	}
 	return &reporthandling.Resource{
 		Object: map[string]interface{}{
-			"apiVersion": "apps/v1",
+			"apiVersion": apiVersion,
 			"kind":       kind,
 			"metadata": map[string]interface{}{
 				"name":      name,
@@ -783,7 +799,7 @@ func TestReview4034ExistingOutputPermissions(t *testing.T) {
 		},
 	}
 
-	_, err := EmitKustomizePatch(suggestions, outDir)
+	_, err := EmitKustomizePatch(suggestions, outDir, WithOverwrite(true))
 	require.NoError(t, err)
 
 	dirInfo, err := os.Stat(outDir)
@@ -3830,7 +3846,7 @@ func TestReview4034_ExistingDirectoryPreservesUnrelatedFiles(t *testing.T) {
 		},
 	}
 
-	res, err := EmitKustomizePatch(suggestions, dir)
+	res, err := EmitKustomizePatch(suggestions, dir, WithOverwrite(true))
 	require.NoError(t, err)
 	require.Len(t, res.EmittedResources, 1)
 
@@ -4350,16 +4366,21 @@ func TestKustomize_HasEmittableKustomizePatches(t *testing.T) {
 }
 
 // TestKustomize_RestoreBackups verifies that restoreBackups correctly restores files
-// and returns errors when destination files already exist.
+// under held root and returns errors when destination files already exist.
 func TestKustomize_RestoreBackups(t *testing.T) {
-	backupDir := t.TempDir()
 	dstDir := t.TempDir()
+	backupRelDir := ".backup"
+	require.NoError(t, os.Mkdir(filepath.Join(dstDir, backupRelDir), 0700))
 
-	require.NoError(t, os.WriteFile(filepath.Join(backupDir, "base.yaml"), []byte("BACKUP_BASE"), 0600))
-	require.NoError(t, os.WriteFile(filepath.Join(backupDir, "kustomization.yaml"), []byte("BACKUP_KUST"), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(dstDir, backupRelDir, "base.yaml"), []byte("BACKUP_BASE"), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(dstDir, backupRelDir, "kustomization.yaml"), []byte("BACKUP_KUST"), 0600))
+
+	root, err := os.OpenRoot(dstDir)
+	require.NoError(t, err)
+	defer root.Close()
 
 	// Clean destination: both files restored
-	err := restoreBackups(backupDir, dstDir)
+	err = restoreBackups(root, backupRelDir)
 	require.NoError(t, err)
 
 	data, err := os.ReadFile(filepath.Join(dstDir, "base.yaml"))
@@ -4367,8 +4388,1689 @@ func TestKustomize_RestoreBackups(t *testing.T) {
 	assert.Equal(t, "BACKUP_BASE", string(data))
 
 	// Destination already has base.yaml: returns error
-	require.NoError(t, os.WriteFile(filepath.Join(backupDir, "base.yaml"), []byte("NEW_BACKUP"), 0600))
-	err = restoreBackups(backupDir, dstDir)
+	require.NoError(t, os.WriteFile(filepath.Join(dstDir, backupRelDir, "base.yaml"), []byte("NEW_BACKUP"), 0600))
+	err = restoreBackups(root, backupRelDir)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "destination exists")
+}
+
+// TestFollowup_OutputDirProtection verifies that EmitKustomizePatch refuses a non-empty
+// destination directory unless noConfirm is set to true.
+func TestFollowup_OutputDirProtection(t *testing.T) {
+	dir := t.TempDir()
+
+	// Place an existing file in dir
+	existingFile := filepath.Join(dir, "my-existing-note.txt")
+	require.NoError(t, os.WriteFile(existingFile, []byte("preserve me"), 0600))
+
+	svc := makeResource("Service", "web-svc")
+	svc.GetObject()["spec"] = map[string]interface{}{"type": "ClusterIP"}
+
+	suggestions := []HelmFixSuggestion{
+		{
+			Resource:           svc,
+			ChartName:          "web-chart",
+			FidelityProvenance: true,
+			FixPaths: []armotypes.FixPath{
+				{Path: "metadata.labels.patched", Value: "\"true\""},
+			},
+		},
+	}
+
+	// 1. With WithOverwrite(false), generation must be refused
+	res, err := EmitKustomizePatch(suggestions, dir, WithOverwrite(false))
+	require.Error(t, err, "non-empty directory must be refused when overwrite is false")
+	assert.Contains(t, err.Error(), "is not empty; pass --no-confirm to write into it anyway")
+	assert.Nil(t, res)
+
+	// Ensure no kustomize files were written and existing file preserved
+	assert.NoFileExists(t, filepath.Join(dir, "kustomization.yaml"))
+	assert.NoFileExists(t, filepath.Join(dir, "base.yaml"))
+	assert.FileExists(t, existingFile)
+
+	// 1b. Two-argument call without options must default to refusing non-empty directories and preserve existing output
+	resTwoArg, errTwoArg := EmitKustomizePatch(suggestions, dir)
+	require.Error(t, errTwoArg, "two-argument call on non-empty directory must be refused")
+	assert.Contains(t, errTwoArg.Error(), "is not empty; pass --no-confirm to write into it anyway")
+	assert.Nil(t, resTwoArg)
+	assert.FileExists(t, existingFile)
+
+	// 2. With WithOverwrite(true), generation succeeds into the non-empty directory
+	res2, err2 := EmitKustomizePatch(suggestions, dir, WithOverwrite(true))
+	require.NoError(t, err2)
+	require.NotNil(t, res2)
+	assert.Len(t, res2.EmittedResources, 1)
+
+	assert.FileExists(t, filepath.Join(dir, "kustomization.yaml"))
+	assert.FileExists(t, filepath.Join(dir, "base.yaml"))
+	assert.FileExists(t, existingFile)
+}
+
+// TestFollowup_CoherentPublicationStagingAndRollback verifies that EmitKustomizePatch
+// stages generation and coherently publishes to the destination directory, completely
+// restoring the previous overlay if an injected write error occurs during publication.
+func TestFollowup_CoherentPublicationStagingAndRollback(t *testing.T) {
+	dir := t.TempDir()
+
+	// 1. Create an initial valid overlay in dir
+	initialBase := "apiVersion: v1\nkind: Service\nmetadata:\n  name: initial-svc\n"
+	initialKust := "apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nresources:\n  - base.yaml\n"
+	initialPatch := "[{\"op\": \"add\", \"path\": \"/metadata/labels/test\", \"value\": \"initial\"}]\n"
+	patchFileName := resourcePatchFilename(resourceKey{Kind: "Service", Name: "new-svc"})
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "base.yaml"), []byte(initialBase), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "kustomization.yaml"), []byte(initialKust), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, patchFileName), []byte(initialPatch), 0600))
+
+	// 2. Plan new patches to update the overlay
+	svc := makeResource("Service", "new-svc")
+	svc.GetObject()["spec"] = map[string]interface{}{"type": "ClusterIP"}
+
+	suggestions := []HelmFixSuggestion{
+		{
+			Resource:           svc,
+			ChartName:          "new-chart",
+			FidelityProvenance: true,
+			FixPaths: []armotypes.FixPath{
+				{Path: "metadata.labels.patched", Value: "\"true\""},
+			},
+		},
+	}
+
+	// 3. Inject write failure during publication of kustomization.yaml
+	defer func() { failKustomizeWriteDuringPublication = nil }()
+	failKustomizeWriteDuringPublication = func(filename string) error {
+		if filename == "publish:kustomization.yaml" {
+			return errors.New("simulated disk full during kustomization.yaml publish")
+		}
+		return nil
+	}
+
+	res, err := EmitKustomizePatch(suggestions, dir, WithOverwrite(true))
+	require.Error(t, err, "injected publication failure must return an error")
+	assert.Contains(t, err.Error(), "simulated disk full")
+	assert.Nil(t, res)
+
+	// 4. Verify rollback preserved the previous overlay exactly as it was
+	baseAfter, err := os.ReadFile(filepath.Join(dir, "base.yaml"))
+	require.NoError(t, err)
+	assert.Equal(t, initialBase, string(baseAfter), "base.yaml must remain the previous version after write failure")
+
+	kustAfter, err := os.ReadFile(filepath.Join(dir, "kustomization.yaml"))
+	require.NoError(t, err)
+	assert.Equal(t, initialKust, string(kustAfter), "kustomization.yaml must remain the previous version after write failure")
+
+	patchAfter, err := os.ReadFile(filepath.Join(dir, patchFileName))
+	require.NoError(t, err)
+	assert.Equal(t, initialPatch, string(patchAfter), "patch file must remain the previous version after write failure")
+
+	// Verify no stray patch files or staging directories remained
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+	var names []string
+	for _, e := range entries {
+		if e.Name() != ".kust.lock" {
+			names = append(names, e.Name())
+		}
+	}
+	assert.ElementsMatch(t, []string{"base.yaml", "kustomization.yaml", patchFileName}, names, "pre-existing files must be restored and no uncommitted files left")
+
+	parentEntries, err := os.ReadDir(filepath.Dir(dir))
+	require.NoError(t, err)
+	for _, e := range parentEntries {
+		assert.False(t, strings.HasPrefix(e.Name(), ".kustomize-staging"), "staging directory must not leak")
+	}
+
+	// 5. Clear failure injection and verify generation succeeds
+	failKustomizeWriteDuringPublication = nil
+	res2, err2 := EmitKustomizePatch(suggestions, dir, WithOverwrite(true))
+	require.NoError(t, err2)
+	assert.Len(t, res2.EmittedResources, 1)
+
+	baseSuccess, err := os.ReadFile(filepath.Join(dir, "base.yaml"))
+	require.NoError(t, err)
+	assert.Contains(t, string(baseSuccess), "new-svc")
+}
+
+// TestFollowup_ReleaseNamespaceMatching verifies that loadUnredactedFromChart and EmitKustomizePatch
+// symmetrically normalize release namespaces for namespaced resources while keeping cluster-scoped
+// resources strictly namespace-free.
+func TestFollowup_ReleaseNamespaceMatching(t *testing.T) {
+	chartDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "Chart.yaml"), []byte("apiVersion: v2\nname: test-chart\nversion: 0.1.0\n"), 0600))
+	templatesDir := filepath.Join(chartDir, "templates")
+	require.NoError(t, os.MkdirAll(templatesDir, 0700))
+
+	// Namespaceless Service template
+	svcYaml := "apiVersion: v1\nkind: Service\nmetadata:\n  name: my-service\nspec:\n  type: ClusterIP\n"
+	require.NoError(t, os.WriteFile(filepath.Join(templatesDir, "service.yaml"), []byte(svcYaml), 0600))
+
+	// Cluster-scoped ClusterRole template
+	crYaml := "apiVersion: rbac.authorization.k8s.io/v1\nkind: ClusterRole\nmetadata:\n  name: my-cluster-role\nrules: []\n"
+	require.NoError(t, os.WriteFile(filepath.Join(templatesDir, "clusterrole.yaml"), []byte(crYaml), 0600))
+
+	// CustomResourceDefinition placed in standard Helm crds/ directory with spec.scope: Cluster
+	crdsDir := filepath.Join(chartDir, "crds")
+	require.NoError(t, os.MkdirAll(crdsDir, 0700))
+	crdYaml := `apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: widgets.example.com
+spec:
+  group: example.com
+  scope: Cluster
+  names:
+    kind: Widget
+`
+	require.NoError(t, os.WriteFile(filepath.Join(crdsDir, "crd.yaml"), []byte(crdYaml), 0600))
+
+	// Namespaceless cluster-scoped custom resource Widget template
+	widgetYaml := `apiVersion: example.com/v1
+kind: Widget
+metadata:
+  name: my-widget
+spec:
+  color: blue
+`
+	require.NoError(t, os.WriteFile(filepath.Join(templatesDir, "widget.yaml"), []byte(widgetYaml), 0600))
+
+	chartCache := make(map[string]map[string][]workloadinterface.IMetadata)
+
+	// 1. Namespaceless scanned Service matching rendered chart with ReleaseNamespace set
+	scannedSvc := makeResource("Service", "my-service")
+	scannedSvc.GetObject()["apiVersion"] = "v1"
+	delete(scannedSvc.GetObject()["metadata"].(map[string]interface{}), "namespace")
+	scannedSvc.GetObject()["spec"] = map[string]interface{}{"type": "ClusterIP"}
+
+	svcSuggestion := HelmFixSuggestion{
+		Resource:  scannedSvc,
+		ChartPath: chartDir,
+		ChartName: "test-chart",
+		HelmValueOptions: cautils.HelmValueOptions{
+			ReleaseNamespace: "prod-namespace",
+		},
+		FixPaths: []armotypes.FixPath{{Path: "metadata.labels.patched", Value: "applied"}},
+	}
+
+	candObj, err := loadUnredactedFromChart(svcSuggestion, chartCache)
+	require.NoError(t, err, "namespaceless Service must match candidate when ReleaseNamespace is specified")
+	assert.NotNil(t, candObj)
+
+	// 2. ClusterRole matching rendered chart with ReleaseNamespace set
+	scannedCR := makeResource("ClusterRole", "my-cluster-role")
+	scannedCR.GetObject()["apiVersion"] = "rbac.authorization.k8s.io/v1"
+	delete(scannedCR.GetObject()["metadata"].(map[string]interface{}), "namespace")
+	scannedCR.GetObject()["rules"] = []interface{}{}
+
+	crSuggestion := HelmFixSuggestion{
+		Resource:  scannedCR,
+		ChartPath: chartDir,
+		ChartName: "test-chart",
+		HelmValueOptions: cautils.HelmValueOptions{
+			ReleaseNamespace: "prod-namespace",
+		},
+		FixPaths: []armotypes.FixPath{{Path: "metadata.labels.patched", Value: "applied"}},
+	}
+
+	candCRObj, err := loadUnredactedFromChart(crSuggestion, chartCache)
+	require.NoError(t, err, "ClusterRole must match candidate without substituting ReleaseNamespace")
+	assert.NotNil(t, candCRObj)
+
+	// 3. Cluster-scoped custom resource Widget matching rendered chart with ReleaseNamespace set
+	scannedWidget := makeResource("Widget", "my-widget")
+	scannedWidget.GetObject()["apiVersion"] = "example.com/v1"
+	delete(scannedWidget.GetObject()["metadata"].(map[string]interface{}), "namespace")
+	scannedWidget.GetObject()["spec"] = map[string]interface{}{"color": "blue"}
+
+	widgetSuggestion := HelmFixSuggestion{
+		Resource:  scannedWidget,
+		ChartPath: chartDir,
+		ChartName: "test-chart",
+		HelmValueOptions: cautils.HelmValueOptions{
+			ReleaseNamespace: "prod-namespace",
+		},
+		FixPaths: []armotypes.FixPath{{Path: "metadata.labels.patched", Value: "applied"}},
+	}
+
+	candWidgetObj, err := loadUnredactedFromChart(widgetSuggestion, chartCache)
+	require.NoError(t, err, "cluster-scoped Widget from crds/ must match candidate without substituting ReleaseNamespace")
+	assert.NotNil(t, candWidgetObj)
+
+	// 4. Verify EmitKustomizePatch scopes Service target to ReleaseNamespace and leaves ClusterRole and Widget unscoped
+	outDir := t.TempDir()
+	emitRes, err := EmitKustomizePatch([]HelmFixSuggestion{svcSuggestion, crSuggestion, widgetSuggestion}, outDir, WithOverwrite(true))
+	require.NoError(t, err)
+	assert.Len(t, emitRes.EmittedResources, 3)
+
+	kustContent, err := os.ReadFile(filepath.Join(outDir, "kustomization.yaml"))
+	require.NoError(t, err)
+	var kDoc kustomizationDoc
+	require.NoError(t, yaml.Unmarshal(kustContent, &kDoc))
+
+	foundSvc := false
+	foundCR := false
+	foundWidget := false
+	for _, p := range kDoc.Patches {
+		if strings.Contains(p.Target.Kind, "Service") {
+			foundSvc = true
+			assert.Equal(t, "^($|default|prod-namespace$)", p.Target.Namespace, "Service target must be scoped to ReleaseNamespace and namespaceless input")
+		}
+		if strings.Contains(p.Target.Kind, "ClusterRole") {
+			foundCR = true
+			assert.Empty(t, p.Target.Namespace, "ClusterRole target must remain namespace-free")
+		}
+		if strings.Contains(p.Target.Kind, "Widget") {
+			foundWidget = true
+			assert.Empty(t, p.Target.Namespace, "cluster-scoped Widget target must remain namespace-free")
+		}
+	}
+	assert.True(t, foundSvc)
+	assert.True(t, foundCR)
+	assert.True(t, foundWidget)
+
+	// 5. Verify base.yaml keeps cluster-scoped custom resource Widget namespace-free
+	baseContent, err := os.ReadFile(filepath.Join(outDir, "base.yaml"))
+	require.NoError(t, err)
+	var docs []map[string]interface{}
+	decoder := yaml.NewDecoder(strings.NewReader(string(baseContent)))
+	for {
+		var doc map[string]interface{}
+		if dErr := decoder.Decode(&doc); dErr != nil {
+			break
+		}
+		if doc != nil {
+			docs = append(docs, doc)
+		}
+	}
+	foundBaseWidget := false
+	for _, doc := range docs {
+		if doc["kind"] == "Widget" {
+			foundBaseWidget = true
+			meta, _ := doc["metadata"].(map[string]interface{})
+			assert.Empty(t, meta["namespace"], "base document for cluster-scoped custom resource Widget must remain namespace-free")
+		}
+	}
+	assert.True(t, foundBaseWidget, "base.yaml must contain Widget")
+
+	// 6. Verify krusty build successfully applies patches while keeping cluster-scoped resources namespace-free
+	k := krusty.MakeKustomizer(krusty.MakeDefaultOptions())
+	resMap, err := k.Run(filesys.MakeFsOnDisk(), outDir)
+	require.NoError(t, err, "kustomize build must succeed")
+	outYaml, err := resMap.AsYaml()
+	require.NoError(t, err)
+	assert.Contains(t, string(outYaml), "patched: applied")
+
+	foundBuiltSvc := false
+	foundBuiltWidget := false
+	for _, r := range resMap.Resources() {
+		if r.GetKind() == "Service" {
+			foundBuiltSvc = true
+			assert.Equal(t, "prod-namespace", r.GetNamespace(), "base Service must carry the release namespace")
+			svcYAML, yErr := r.AsYAML()
+			require.NoError(t, yErr)
+			assert.Contains(t, string(svcYAML), "patched: applied", "Service patch must be applied")
+		}
+		if r.GetKind() == "Widget" {
+			foundBuiltWidget = true
+			assert.Empty(t, r.GetNamespace(), "cluster-scoped Widget must remain namespace-free in built output")
+			widgetYAML, yErr := r.AsYAML()
+			require.NoError(t, yErr)
+			assert.Contains(t, string(widgetYAML), "patched: applied", "Widget patch must be applied")
+		}
+	}
+	assert.True(t, foundBuiltSvc, "built output must contain the Service")
+	assert.True(t, foundBuiltWidget, "built output must contain the Widget")
+}
+
+// TestFollowup_ValueConversionParity verifies that parseFixValue retains sequence whitelisting
+// and unsigned 64-bit integer handling identical to the standard fixer contract.
+func TestFollowup_ValueConversionParity(t *testing.T) {
+	// Nested sequence [[1]] must remain a string scalar
+	nestedSeq := parseFixValue("[[1]]")
+	assert.Equal(t, "[[1]]", nestedSeq, "nested sequence [[1]] must remain a string scalar")
+
+	// Sequence of objects [{"key":"value"}] must remain a string scalar
+	mapSeq := parseFixValue(`[{"key":"value"}]`)
+	assert.Equal(t, `[{"key":"value"}]`, mapSeq, "map sequence must remain a string scalar")
+
+	// Scientific notation sequence [1e3] must remain a string scalar
+	expSeq := parseFixValue("[1e3]")
+	assert.Equal(t, "[1e3]", expSeq, "scientific notation sequence must remain a string scalar")
+
+	// MaxUint64 (18446744073709551615) must be parsed as a uint64 integer
+	maxUint := parseFixValue("18446744073709551615")
+	assert.Equal(t, uint64(18446744073709551615), maxUint, "18446744073709551615 must parse as uint64")
+
+	// Valid 1-D flow sequence of plain scalars must decode to []interface{}
+	validSeq := parseFixValue(`["a", "b"]`)
+	assert.Equal(t, []interface{}{"a", "b"}, validSeq, "valid flow sequence must parse to slice")
+
+	// Booleans, standard integers, floats, and octal integers
+	assert.Equal(t, true, parseFixValue("true"))
+	assert.Equal(t, 42, parseFixValue("42"))
+	assert.Equal(t, 3.14, parseFixValue("3.14"))
+	assert.Equal(t, 511, parseFixValue("0777"))
+}
+
+// TestReview_PreservesEscapingSymlinkOnPublicationFailure verifies that when an escaping symlink
+// (e.g. base.yaml -> external file) exists in the output directory, EmitKustomizePatch rejects
+// publication, leaves the external file untouched, and preserves the pre-existing symlink itself
+// without replacing it with a regular file containing external data.
+func TestReview_PreservesEscapingSymlinkOnPublicationFailure(t *testing.T) {
+	tmpDir := t.TempDir()
+	outDir := filepath.Join(tmpDir, "out")
+	outsideDir := filepath.Join(tmpDir, "outside")
+	require.NoError(t, os.MkdirAll(outDir, 0700))
+	require.NoError(t, os.MkdirAll(outsideDir, 0700))
+
+	outsideFile := filepath.Join(outsideDir, "external-target.txt")
+	externalContent := "SENSITIVE_EXTERNAL_TARGET_CONTENT"
+	require.NoError(t, os.WriteFile(outsideFile, []byte(externalContent), 0600))
+
+	// Create symlink base.yaml inside outDir pointing outside to external-target.txt
+	linkPath := filepath.Join(outDir, "base.yaml")
+	require.NoError(t, os.Symlink(outsideFile, linkPath))
+
+	svc := makeResource("Service", "web-svc")
+	svc.GetObject()["spec"] = map[string]interface{}{"type": "ClusterIP"}
+	suggestions := []HelmFixSuggestion{
+		{
+			Resource:           svc,
+			ChartName:          "web-chart",
+			FidelityProvenance: true,
+			FixPaths: []armotypes.FixPath{
+				{Path: "metadata.labels.patched", Value: "\"true\""},
+			},
+		},
+	}
+
+	// EmitKustomizePatch with WithOverwrite(true) must reject the escaping symlink
+	res, err := EmitKustomizePatch(suggestions, outDir, WithOverwrite(true))
+	require.Error(t, err)
+	assert.Nil(t, res)
+
+	// Verify the symlink itself still exists and was not replaced by a regular file
+	fi, lErr := os.Lstat(linkPath)
+	require.NoError(t, lErr, "base.yaml entry must be preserved")
+	assert.True(t, fi.Mode()&os.ModeSymlink != 0, "base.yaml must remain a symlink, not a regular file")
+
+	target, rErr := os.Readlink(linkPath)
+	require.NoError(t, rErr)
+	assert.Equal(t, outsideFile, target, "base.yaml must still point to outside file")
+
+	// Verify outside file was not modified
+	content, rErr := os.ReadFile(outsideFile)
+	require.NoError(t, rErr)
+	assert.Equal(t, externalContent, string(content), "external target content must remain untouched")
+}
+
+// TestReview_PreservesEmptyDirectoryOnPublicationFailure verifies that when an empty directory
+// (e.g. base.yaml) already exists in the output directory, EmitKustomizePatch rejects publication
+// and preserves the pre-existing empty directory without deleting it on rollback.
+func TestReview_PreservesEmptyDirectoryOnPublicationFailure(t *testing.T) {
+	outDir := t.TempDir()
+
+	// Create an empty directory named base.yaml in outDir
+	emptyDir := filepath.Join(outDir, "base.yaml")
+	require.NoError(t, os.Mkdir(emptyDir, 0700))
+
+	svc := makeResource("Service", "web-svc")
+	svc.GetObject()["spec"] = map[string]interface{}{"type": "ClusterIP"}
+	suggestions := []HelmFixSuggestion{
+		{
+			Resource:           svc,
+			ChartName:          "web-chart",
+			FidelityProvenance: true,
+			FixPaths: []armotypes.FixPath{
+				{Path: "metadata.labels.patched", Value: "\"true\""},
+			},
+		},
+	}
+
+	// EmitKustomizePatch with WithOverwrite(true) must reject overwriting the directory
+	res, err := EmitKustomizePatch(suggestions, outDir, WithOverwrite(true))
+	require.Error(t, err)
+	assert.Nil(t, res)
+
+	// Verify the empty directory was preserved and not deleted
+	fi, err := os.Lstat(emptyDir)
+	require.NoError(t, err, "empty base.yaml directory must be preserved on failure")
+	assert.True(t, fi.IsDir(), "base.yaml must remain a directory")
+
+	entries, err := os.ReadDir(emptyDir)
+	require.NoError(t, err)
+	assert.Empty(t, entries, "base.yaml directory must remain empty")
+}
+
+// TestFollowup_ReleaseNamespacePreservesLargeIntegers verifies that injecting a release namespace
+// into caller-supplied UnredactedBase preserves exact integers above 2^53 without float64 precision loss.
+func TestFollowup_ReleaseNamespacePreservesLargeIntegers(t *testing.T) {
+	outDir := t.TempDir()
+
+	svc := makeResource("Service", "large-int-svc")
+	delete(svc.GetObject()["metadata"].(map[string]interface{}), "namespace")
+	svc.GetObject()["spec"] = map[string]interface{}{
+		"type":     "ClusterIP",
+		"largeInt": int64(9007199254740993),
+	}
+	suggestions := []HelmFixSuggestion{
+		{
+			Resource:           svc,
+			ChartName:          "int-chart",
+			FidelityProvenance: true,
+			HelmValueOptions: cautils.HelmValueOptions{
+				ReleaseNamespace: "injected-ns",
+			},
+			FixPaths: []armotypes.FixPath{
+				{Path: "metadata.labels.patched", Value: "\"true\""},
+			},
+		},
+	}
+
+	res, err := EmitKustomizePatch(suggestions, outDir, WithOverwrite(true))
+	require.NoError(t, err)
+	assert.NotNil(t, res)
+
+	baseBytes, err := os.ReadFile(filepath.Join(outDir, "base.yaml"))
+	require.NoError(t, err)
+	assert.Contains(t, string(baseBytes), "namespace: injected-ns", "injected release namespace must appear in base.yaml")
+	assert.Contains(t, string(baseBytes), "9007199254740993", "exact large integer must not be rounded by float64")
+}
+
+// TestResolveBaseObject_ReleaseNamespaceNormalizedBeforeScannedFieldCheck verifies that
+// when a scanned Service has metadata.namespace: prod, but the rendered base omits metadata.namespace,
+// and ReleaseNamespace == "prod", resolveBaseObject normalizes the namespace on a copy of the candidate
+// before verifyScannedFieldsMatch runs, so the Service is not declined or skipped.
+func TestResolveBaseObject_ReleaseNamespaceNormalizedBeforeScannedFieldCheck(t *testing.T) {
+	chartDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "Chart.yaml"), []byte("apiVersion: v2\nname: test-svc\nversion: 0.1.0\n"), 0600))
+	templatesDir := filepath.Join(chartDir, "templates")
+	require.NoError(t, os.MkdirAll(templatesDir, 0755))
+
+	// Template omits metadata.namespace (typical Helm pattern)
+	svcNoNsYaml := `apiVersion: v1
+kind: Service
+metadata:
+  name: web-service
+spec:
+  type: ClusterIP
+  ports:
+  - port: 80
+`
+	require.NoError(t, os.WriteFile(filepath.Join(templatesDir, "service.yaml"), []byte(svcNoNsYaml), 0600))
+
+	// Scanned resource has metadata.namespace: prod
+	scannedSvc := &reporthandling.Resource{
+		Object: map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "Service",
+			"metadata": map[string]interface{}{
+				"name":      "web-service",
+				"namespace": "prod",
+			},
+			"spec": map[string]interface{}{
+				"type": "ClusterIP",
+				"ports": []interface{}{
+					map[string]interface{}{
+						"port": 80,
+					},
+				},
+			},
+		},
+	}
+
+	outDir := t.TempDir()
+	suggestions := []HelmFixSuggestion{
+		{
+			Resource:     scannedSvc,
+			ChartPath:    chartDir,
+			TemplateFile: "templates/service.yaml",
+			HelmValueOptions: cautils.HelmValueOptions{
+				ReleaseNamespace: "prod",
+			},
+			FixPaths: []armotypes.FixPath{
+				{Path: "metadata.labels.patched", Value: "\"true\""},
+			},
+		},
+	}
+
+	res, err := EmitKustomizePatch(suggestions, outDir, WithOverwrite(true))
+	require.NoError(t, err)
+	require.NotNil(t, res)
+	assert.Empty(t, res.SkippedResources, "scanned service with matching ReleaseNamespace must not be declined")
+	assert.Len(t, res.EmittedResources, 1)
+
+	baseBytes, err := os.ReadFile(filepath.Join(outDir, "base.yaml"))
+	require.NoError(t, err)
+	assert.Contains(t, string(baseBytes), "namespace: prod")
+}
+
+// TestResolveBaseObject_ReleaseNamespaceDoesNotMutateCallerUnredactedBase verifies that
+// normalizing the release namespace before verifyScannedFieldsMatch does not mutate caller-owned UnredactedBase.
+func TestResolveBaseObject_ReleaseNamespaceDoesNotMutateCallerUnredactedBase(t *testing.T) {
+	callerUnredacted := map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "Service",
+		"metadata": map[string]interface{}{
+			"name": "unredacted-svc",
+		},
+		"spec": map[string]interface{}{
+			"type": "ClusterIP",
+		},
+	}
+
+	scannedSvc := &reporthandling.Resource{
+		Object: map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "Service",
+			"metadata": map[string]interface{}{
+				"name":      "unredacted-svc",
+				"namespace": "prod",
+			},
+			"spec": map[string]interface{}{
+				"type": "ClusterIP",
+			},
+		},
+	}
+
+	outDir := t.TempDir()
+	suggestions := []HelmFixSuggestion{
+		{
+			Resource:       scannedSvc,
+			UnredactedBase: callerUnredacted,
+			HelmValueOptions: cautils.HelmValueOptions{
+				ReleaseNamespace: "prod",
+			},
+			FixPaths: []armotypes.FixPath{
+				{Path: "metadata.labels.patched", Value: "\"true\""},
+			},
+		},
+	}
+
+	res, err := EmitKustomizePatch(suggestions, outDir, WithOverwrite(true))
+	require.NoError(t, err)
+	require.NotNil(t, res)
+	assert.Empty(t, res.SkippedResources)
+
+	// Caller-owned UnredactedBase must NOT be mutated
+	meta, ok := callerUnredacted["metadata"].(map[string]interface{})
+	require.True(t, ok)
+	_, hasNs := meta["namespace"]
+	assert.False(t, hasNs, "caller-owned UnredactedBase must not be mutated")
+
+	baseBytes, err := os.ReadFile(filepath.Join(outDir, "base.yaml"))
+	require.NoError(t, err)
+	assert.Contains(t, string(baseBytes), "namespace: prod", "emitted base.yaml must have normalized namespace")
+}
+
+// TestResolveBaseObject_ReleaseNamespaceDeclinesWhenMismatched verifies that
+// if ReleaseNamespace does not match the scanned namespace, normalization does not apply and mismatch is reported.
+func TestResolveBaseObject_ReleaseNamespaceDeclinesWhenMismatched(t *testing.T) {
+	callerUnredacted := map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "Service",
+		"metadata": map[string]interface{}{
+			"name": "mismatched-svc",
+		},
+		"spec": map[string]interface{}{
+			"type": "ClusterIP",
+		},
+	}
+
+	scannedSvc := &reporthandling.Resource{
+		Object: map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "Service",
+			"metadata": map[string]interface{}{
+				"name":      "mismatched-svc",
+				"namespace": "prod",
+			},
+			"spec": map[string]interface{}{
+				"type": "ClusterIP",
+			},
+		},
+	}
+
+	outDir := t.TempDir()
+	suggestions := []HelmFixSuggestion{
+		{
+			Resource:       scannedSvc,
+			UnredactedBase: callerUnredacted,
+			HelmValueOptions: cautils.HelmValueOptions{
+				ReleaseNamespace: "staging",
+			},
+			FixPaths: []armotypes.FixPath{
+				{Path: "metadata.labels.patched", Value: "\"true\""},
+			},
+		},
+	}
+
+	res, err := EmitKustomizePatch(suggestions, outDir, WithOverwrite(true))
+	require.NoError(t, err)
+	require.NotNil(t, res)
+	assert.Len(t, res.SkippedResources, 1, "resource must be skipped due to namespace mismatch")
+	assert.Contains(t, res.SkippedResources[0].Reason, "metadata.namespace")
+}
+
+// TestResolveBaseObject_ReleaseNamespaceClusterScopedResourceRemainsNamespaceFree verifies that
+// cluster-scoped resources (such as ClusterRole) remain namespace-free even when ReleaseNamespace is specified.
+func TestResolveBaseObject_ReleaseNamespaceClusterScopedResourceRemainsNamespaceFree(t *testing.T) {
+	callerUnredacted := map[string]interface{}{
+		"apiVersion": "rbac.authorization.k8s.io/v1",
+		"kind":       "ClusterRole",
+		"metadata": map[string]interface{}{
+			"name": "cluster-admin-role",
+		},
+		"rules": []interface{}{
+			map[string]interface{}{
+				"apiGroups": []interface{}{""},
+				"resources": []interface{}{"pods"},
+				"verbs":     []interface{}{"get"},
+			},
+		},
+	}
+
+	scannedRole := &reporthandling.Resource{
+		Object: map[string]interface{}{
+			"apiVersion": "rbac.authorization.k8s.io/v1",
+			"kind":       "ClusterRole",
+			"metadata": map[string]interface{}{
+				"name": "cluster-admin-role",
+			},
+			"rules": []interface{}{
+				map[string]interface{}{
+					"apiGroups": []interface{}{""},
+					"resources": []interface{}{"pods"},
+					"verbs":     []interface{}{"get"},
+				},
+			},
+		},
+	}
+
+	outDir := t.TempDir()
+	suggestions := []HelmFixSuggestion{
+		{
+			Resource:       scannedRole,
+			UnredactedBase: callerUnredacted,
+			HelmValueOptions: cautils.HelmValueOptions{
+				ReleaseNamespace: "prod",
+			},
+			FixPaths: []armotypes.FixPath{
+				{Path: "metadata.labels.patched", Value: "\"true\""},
+			},
+		},
+	}
+
+	res, err := EmitKustomizePatch(suggestions, outDir, WithOverwrite(true))
+	require.NoError(t, err)
+	require.NotNil(t, res)
+	assert.Empty(t, res.SkippedResources)
+
+	baseBytes, err := os.ReadFile(filepath.Join(outDir, "base.yaml"))
+	require.NoError(t, err)
+	assert.NotContains(t, string(baseBytes), "namespace:", "cluster-scoped resource must remain namespace-free")
+}
+
+// TestVerifyScannedFieldsMatch_ExactLargeIntegers verifies that verifyScannedFieldsMatch
+// compares integer types with exact arithmetic instead of float64, catching differences above 2^53.
+func TestVerifyScannedFieldsMatch_ExactLargeIntegers(t *testing.T) {
+	scanned := map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "ConfigMap",
+		"data": map[string]interface{}{
+			"val": int64(9007199254740993),
+		},
+	}
+	// candidate has 9007199254740992, which would equal 9007199254740993 under float64 conversion
+	candidateMismatch := map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "ConfigMap",
+		"data": map[string]interface{}{
+			"val": int64(9007199254740992),
+		},
+	}
+
+	err := verifyScannedFieldsMatch(scanned, candidateMismatch, "")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "value mismatch at data.val: scanned 9007199254740993, rendered 9007199254740992")
+
+	// Same large integer compares equal
+	candidateEqual := map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "ConfigMap",
+		"data": map[string]interface{}{
+			"val": int64(9007199254740993),
+		},
+	}
+	require.NoError(t, verifyScannedFieldsMatch(scanned, candidateEqual, ""))
+}
+
+// TestFollowup_PreloadContainment_ValueFilesAndFileValues verifies that chart preload
+// enforces containment checks on HelmValueOptions.ValueFiles and FileValues before reading them.
+func TestFollowup_PreloadContainment_ValueFilesAndFileValues(t *testing.T) {
+	allowedDir := t.TempDir()
+	outsideDir := t.TempDir()
+
+	chartDir := filepath.Join(allowedDir, "mychart")
+	templatesDir := filepath.Join(chartDir, "templates")
+	require.NoError(t, os.MkdirAll(templatesDir, 0700))
+
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "Chart.yaml"), []byte("apiVersion: v2\nname: mychart\nversion: 0.1.0\n"), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(templatesDir, "service.yaml"), []byte("apiVersion: v1\nkind: Service\nmetadata:\n  name: my-svc\nspec:\n  ports:\n  - port: 80\n"), 0600))
+
+	outsideValues := filepath.Join(outsideDir, "secret-values.yaml")
+	require.NoError(t, os.WriteFile(outsideValues, []byte("foo: secret\n"), 0600))
+
+	svc := makeResource("Service", "my-svc")
+	svc.GetObject()["apiVersion"] = "v1"
+	delete(svc.GetObject()["metadata"].(map[string]interface{}), "namespace")
+	svc.GetObject()["spec"] = map[string]interface{}{
+		"ports": []interface{}{
+			map[string]interface{}{"port": int64(80)},
+		},
+	}
+
+	// 1. Suggestion with ValueFiles outside allowedBasePath
+	s1 := HelmFixSuggestion{
+		Resource:        svc,
+		ChartPath:       chartDir,
+		AllowedBasePath: allowedDir,
+		HelmValueOptions: cautils.HelmValueOptions{
+			ValueFiles: []string{outsideValues},
+		},
+		FixPaths: []armotypes.FixPath{
+			{Path: "metadata.labels.patched", Value: "\"true\""},
+		},
+	}
+
+	outDir := t.TempDir()
+	res, err := EmitKustomizePatch([]HelmFixSuggestion{s1}, outDir, WithOverwrite(true))
+	require.NoError(t, err)
+	require.NotNil(t, res)
+	assert.Empty(t, res.EmittedResources)
+	require.Len(t, res.SkippedResources, 1)
+	assert.Contains(t, res.SkippedResources[0].Reason, "is outside allowed base path")
+
+	// 2. Suggestion with FileValues outside allowedBasePath
+	s2 := HelmFixSuggestion{
+		Resource:        svc,
+		ChartPath:       chartDir,
+		AllowedBasePath: allowedDir,
+		HelmValueOptions: cautils.HelmValueOptions{
+			FileValues: []string{"custom=" + outsideValues},
+		},
+		FixPaths: []armotypes.FixPath{
+			{Path: "metadata.labels.patched", Value: "\"true\""},
+		},
+	}
+
+	outDir2 := t.TempDir()
+	res2, err := EmitKustomizePatch([]HelmFixSuggestion{s2}, outDir2, WithOverwrite(true))
+	require.NoError(t, err)
+	require.NotNil(t, res2)
+	assert.Empty(t, res2.EmittedResources)
+	require.Len(t, res2.SkippedResources, 1)
+	assert.Contains(t, res2.SkippedResources[0].Reason, "is outside allowed base path")
+}
+
+// TestFollowup_CrossChartCRDScopeIsolation verifies that a cluster-scoped CRD in one chart
+// does not pollute or override namespaced custom resources in another chart within the same batch.
+func TestFollowup_CrossChartCRDScopeIsolation(t *testing.T) {
+	baseDir := t.TempDir()
+
+	// Chart A defines a Namespaced Widget
+	chartADir := filepath.Join(baseDir, "chart-a")
+	templatesADir := filepath.Join(chartADir, "templates")
+	require.NoError(t, os.MkdirAll(templatesADir, 0700))
+	require.NoError(t, os.WriteFile(filepath.Join(chartADir, "Chart.yaml"), []byte("apiVersion: v2\nname: chart-a\nversion: 0.1.0\n"), 0600))
+	crdAYaml := `apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: widgets.example.com
+spec:
+  group: example.com
+  scope: Namespaced
+  names:
+    kind: Widget
+`
+	widgetAYaml := `apiVersion: example.com/v1
+kind: Widget
+metadata:
+  name: widget-a
+spec:
+  replicas: 1
+`
+	require.NoError(t, os.WriteFile(filepath.Join(templatesADir, "crd.yaml"), []byte(crdAYaml), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(templatesADir, "widget.yaml"), []byte(widgetAYaml), 0600))
+
+	// Chart B defines a Cluster-scoped Widget
+	chartBDir := filepath.Join(baseDir, "chart-b")
+	templatesBDir := filepath.Join(chartBDir, "templates")
+	require.NoError(t, os.MkdirAll(templatesBDir, 0700))
+	require.NoError(t, os.WriteFile(filepath.Join(chartBDir, "Chart.yaml"), []byte("apiVersion: v2\nname: chart-b\nversion: 0.1.0\n"), 0600))
+	crdBYaml := `apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: widgets.example.com
+spec:
+  group: example.com
+  scope: Cluster
+  names:
+    kind: Widget
+`
+	widgetBYaml := `apiVersion: example.com/v1
+kind: Widget
+metadata:
+  name: widget-b
+spec:
+  replicas: 2
+`
+	require.NoError(t, os.WriteFile(filepath.Join(templatesBDir, "crd.yaml"), []byte(crdBYaml), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(templatesBDir, "widget.yaml"), []byte(widgetBYaml), 0600))
+
+	// Scanned resource for widget-a (namespaced, no explicit metadata.namespace)
+	resA := makeResource("Widget", "widget-a")
+	resA.GetObject()["apiVersion"] = "example.com/v1"
+	delete(resA.GetObject()["metadata"].(map[string]interface{}), "namespace")
+	resA.GetObject()["spec"] = map[string]interface{}{
+		"replicas": int64(1),
+	}
+
+	// Scanned resource for widget-b (cluster-scoped, no explicit metadata.namespace)
+	resB := makeResource("Widget", "widget-b")
+	resB.GetObject()["apiVersion"] = "example.com/v1"
+	delete(resB.GetObject()["metadata"].(map[string]interface{}), "namespace")
+	resB.GetObject()["spec"] = map[string]interface{}{
+		"replicas": int64(2),
+	}
+
+	suggestions := []HelmFixSuggestion{
+		{
+			Resource:           resA,
+			ChartPath:          chartADir,
+			AllowedBasePath:    baseDir,
+			FidelityProvenance: true,
+			HelmValueOptions: cautils.HelmValueOptions{
+				ReleaseNamespace: "tenant-a",
+			},
+			FixPaths: []armotypes.FixPath{
+				{Path: "spec.replicas", Value: "3"},
+			},
+		},
+		{
+			Resource:           resB,
+			ChartPath:          chartBDir,
+			AllowedBasePath:    baseDir,
+			FidelityProvenance: true,
+			FixPaths: []armotypes.FixPath{
+				{Path: "spec.replicas", Value: "4"},
+			},
+		},
+	}
+
+	outDir := t.TempDir()
+	res, err := EmitKustomizePatch(suggestions, outDir, WithOverwrite(true))
+	require.NoError(t, err)
+	require.NotNil(t, res)
+	assert.Empty(t, res.SkippedResources)
+	assert.Len(t, res.EmittedResources, 2)
+
+	// Verify kustomization.yaml targets
+	kustBytes, err := os.ReadFile(filepath.Join(outDir, "kustomization.yaml"))
+	require.NoError(t, err)
+	var kust kustomizationDoc
+	require.NoError(t, yaml.Unmarshal(kustBytes, &kust))
+
+	var targetA, targetB *kustomizeTarget
+	for _, p := range kust.Patches {
+		if strings.Contains(p.Path, "widget-a") {
+			tCopy := p.Target
+			targetA = &tCopy
+		}
+		if strings.Contains(p.Path, "widget-b") {
+			tCopy := p.Target
+			targetB = &tCopy
+		}
+	}
+	require.NotNil(t, targetA, "patch for widget-a must exist")
+	require.NotNil(t, targetB, "patch for widget-b must exist")
+
+	// widget-a belongs to Chart A (Namespaced) and should have target namespace regex matching tenant-a
+	assert.Equal(t, "^($|default|tenant-a$)", targetA.Namespace, "namespaced widget from Chart A must have target namespace")
+
+	// widget-b belongs to Chart B (Cluster) and should have NO target namespace
+	assert.Empty(t, targetB.Namespace, "cluster-scoped widget from Chart B must not have target namespace")
+}
+
+// TestFollowup_HeldRootRenameResilience verifies that restoreBackups operates strictly
+// through the open file descriptor in *os.Root even if the directory path is moved on disk.
+func TestFollowup_HeldRootRenameResilience(t *testing.T) {
+	parent := t.TempDir()
+	origDir := filepath.Join(parent, "orig")
+	require.NoError(t, os.Mkdir(origDir, 0700))
+
+	backupRelDir := ".backup"
+	require.NoError(t, os.Mkdir(filepath.Join(origDir, backupRelDir), 0700))
+	require.NoError(t, os.WriteFile(filepath.Join(origDir, backupRelDir, "base.yaml"), []byte("PRESERVED"), 0600))
+
+	root, err := os.OpenRoot(origDir)
+	require.NoError(t, err)
+	defer root.Close()
+
+	// Simulate origDir being moved or swapped on the filesystem path
+	renamedDir := filepath.Join(parent, "renamed")
+	require.NoError(t, os.Rename(origDir, renamedDir))
+
+	// restoreBackups must succeed using the held root descriptor even though the original path moved
+	err = restoreBackups(root, backupRelDir)
+	require.NoError(t, err)
+
+	restored, err := os.ReadFile(filepath.Join(renamedDir, "base.yaml"))
+	require.NoError(t, err)
+	assert.Equal(t, "PRESERVED", string(restored))
+}
+
+// TestFollowup_LazyChartRenderingAndCacheSharing verifies that:
+//  1. Suggestions with UnredactedBase for built-in kinds do not attempt to render charts.
+//  2. A shared chartCache passed to HasEmittableKustomizePatches, PlannedKustomizeFiles,
+//     and EmitKustomizePatch caches rendered charts and avoids re-rendering.
+func TestFollowup_LazyChartRenderingAndCacheSharing(t *testing.T) {
+	// 1. Suggestion with UnredactedBase for a standard Deployment with non-existent ChartPath
+	scannedDep := makeResource("Deployment", "my-app")
+	scannedDep.GetObject()["apiVersion"] = "apps/v1"
+	scannedDep.GetObject()["spec"] = map[string]interface{}{
+		"replicas": int64(1),
+	}
+	depBase := map[string]interface{}{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata": map[string]interface{}{
+			"name":      "my-app",
+			"namespace": "default",
+		},
+		"spec": map[string]interface{}{
+			"replicas": int64(1),
+		},
+	}
+	depSuggestion := HelmFixSuggestion{
+		Resource:       scannedDep,
+		UnredactedBase: depBase,
+		ChartPath:      filepath.Join(t.TempDir(), "non-existent-chart-dir"),
+		FixPaths: []armotypes.FixPath{
+			{Path: "spec.replicas", Value: "2"},
+		},
+	}
+
+	// This must succeed without error or trying to read the non-existent chart directory
+	outDir1 := t.TempDir()
+	res1, err := EmitKustomizePatch([]HelmFixSuggestion{depSuggestion}, outDir1, WithOverwrite(true))
+	require.NoError(t, err, "built-in resource with UnredactedBase must not render chart")
+	require.NotNil(t, res1)
+	assert.Len(t, res1.EmittedResources, 1)
+
+	// 2. Suggestion that requires chart rendering, sharing chartCache across calls
+	chartDir := filepath.Join(t.TempDir(), "sample-chart")
+	require.NoError(t, os.MkdirAll(filepath.Join(chartDir, "templates"), 0700))
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "Chart.yaml"), []byte("name: sample-chart\nversion: 0.1.0\napiVersion: v2\n"), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "templates", "service.yaml"), []byte(`apiVersion: v1
+kind: Service
+metadata:
+  name: sample-svc
+spec:
+  type: ClusterIP
+`), 0600))
+
+	scannedSvc := makeResource("Service", "sample-svc")
+	scannedSvc.GetObject()["apiVersion"] = "v1"
+	delete(scannedSvc.GetObject()["metadata"].(map[string]interface{}), "namespace")
+	scannedSvc.GetObject()["spec"] = map[string]interface{}{"type": "ClusterIP"}
+
+	chartSuggestion := HelmFixSuggestion{
+		Resource:  scannedSvc,
+		ChartPath: chartDir,
+		ChartName: "sample-chart",
+		HelmValueOptions: cautils.HelmValueOptions{
+			ReleaseNamespace: "test-ns",
+		},
+		FixPaths: []armotypes.FixPath{
+			{Path: "metadata.labels.env", Value: "prod"},
+		},
+	}
+
+	sharedCache := NewChartCache()
+	assert.Empty(t, sharedCache)
+
+	// HasEmittableKustomizePatches populates sharedCache
+	emittable := HasEmittableKustomizePatches([]HelmFixSuggestion{chartSuggestion}, sharedCache)
+	assert.True(t, emittable)
+	assert.NotEmpty(t, sharedCache, "sharedCache must be populated after HasEmittableKustomizePatches")
+
+	// PlannedKustomizeFiles reuses sharedCache
+	files := PlannedKustomizeFiles([]HelmFixSuggestion{chartSuggestion}, sharedCache)
+	assert.Contains(t, files, "base.yaml")
+	assert.Contains(t, files, "kustomization.yaml")
+
+	// EmitKustomizePatch reuses sharedCache
+	outDir2 := t.TempDir()
+	res2, err := EmitKustomizePatch([]HelmFixSuggestion{chartSuggestion}, outDir2, WithOverwrite(true), WithChartCache(sharedCache))
+	require.NoError(t, err)
+	require.NotNil(t, res2)
+	assert.Len(t, res2.EmittedResources, 1)
+}
+
+// TestKustomize_Uint64MaxBuildLevelPreservation verifies that uint64 values up to the maximum safe
+// integer (9007199254740991) are preserved exactly through the final Kustomize build, while values
+// exceeding max safe integer (such as 18446744073709551615) that cannot be preserved exactly without
+// float64 corruption are rejected.
+func TestKustomize_Uint64MaxBuildLevelPreservation(t *testing.T) {
+	outDir := t.TempDir()
+
+	// 1. Verify that 18446744073709551615 is rejected because Kustomize's patch applicator cannot preserve it
+	scannedSvc := &reporthandling.Resource{
+		Object: map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "Service",
+			"metadata": map[string]interface{}{
+				"name":      "max-uint-svc",
+				"namespace": "default",
+			},
+			"spec": map[string]interface{}{
+				"type": "ClusterIP",
+				"ports": []interface{}{
+					map[string]interface{}{
+						"port": int64(80),
+					},
+				},
+			},
+		},
+	}
+	svcBase := map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "Service",
+		"metadata": map[string]interface{}{
+			"name":      "max-uint-svc",
+			"namespace": "default",
+		},
+		"spec": map[string]interface{}{
+			"type": "ClusterIP",
+			"ports": []interface{}{
+				map[string]interface{}{
+					"port": int64(80),
+				},
+			},
+		},
+	}
+
+	suggestions := []HelmFixSuggestion{
+		{
+			Resource:       scannedSvc,
+			UnredactedBase: svcBase,
+			FixPaths: []armotypes.FixPath{
+				{Path: "spec.ports[0].targetPort", Value: "18446744073709551615"},
+			},
+		},
+	}
+
+	res, err := EmitKustomizePatch(suggestions, outDir, WithOverwrite(true))
+	require.NoError(t, err)
+	require.NotNil(t, res)
+	assert.Empty(t, res.EmittedResources, "must not emit patch when value cannot be preserved exactly")
+	require.Len(t, res.SkippedResources, 1)
+	assert.Contains(t, res.SkippedResources[0].Reason, "18446744073709551615")
+	assert.Contains(t, res.SkippedResources[0].Reason, "cannot be preserved exactly")
+
+	// 2. Verify that maximum safe integer 9007199254740991 is preserved end-to-end through krusty
+	outDirSafe := t.TempDir()
+	suggestionsSafe := []HelmFixSuggestion{
+		{
+			Resource:       scannedSvc,
+			UnredactedBase: svcBase,
+			FixPaths: []armotypes.FixPath{
+				{Path: "metadata.labels.counter", Value: "\"9007199254740991\""},
+				{Path: "spec.customCounter", Value: "9007199254740991"},
+			},
+		},
+	}
+	resSafe, err := EmitKustomizePatch(suggestionsSafe, outDirSafe, WithOverwrite(true))
+	require.NoError(t, err)
+	require.NotNil(t, resSafe)
+	assert.Len(t, resSafe.EmittedResources, 1)
+
+	k := krusty.MakeKustomizer(krusty.MakeDefaultOptions())
+	resMap, err := k.Run(filesys.MakeFsOnDisk(), outDirSafe)
+	require.NoError(t, err)
+	yamlBytes, err := resMap.AsYaml()
+	require.NoError(t, err)
+	assert.Contains(t, string(yamlBytes), "9007199254740991", "Kustomize build must preserve exact safe integer value")
+
+	var builtObj map[string]interface{}
+	require.NoError(t, yaml.Unmarshal(yamlBytes, &builtObj))
+	specMap, ok := builtObj["spec"].(map[string]interface{})
+	require.True(t, ok)
+	val, ok := toInt64(specMap["customCounter"])
+	require.True(t, ok, "customCounter must decode as an integer")
+	assert.Equal(t, int64(9007199254740991), val, "customCounter must equal exact safe integer value")
+
+	// 3. Verify sequence member exceeding max safe integer is rejected
+	outDirSeq := t.TempDir()
+	suggestionsSeq := []HelmFixSuggestion{
+		{
+			Resource:       scannedSvc,
+			UnredactedBase: svcBase,
+			FixPaths: []armotypes.FixPath{
+				{Path: "spec.ports[0].targetPort", Value: "[9007199254740993]"},
+			},
+		},
+	}
+	resSeq, err := EmitKustomizePatch(suggestionsSeq, outDirSeq, WithOverwrite(true))
+	require.NoError(t, err)
+	require.NotNil(t, resSeq)
+	assert.Empty(t, resSeq.EmittedResources)
+	require.Len(t, resSeq.SkippedResources, 1)
+	assert.Contains(t, resSeq.SkippedResources[0].Reason, "cannot be preserved exactly")
+}
+
+// TestKustomize_DestinationLocking verifies that EmitKustomizePatch respects an exclusive file lock
+// on .kust.lock and rejects concurrent execution on the same destination directory.
+func TestKustomize_DestinationLocking(t *testing.T) {
+	outDir := t.TempDir()
+	lockPath := filepath.Join(outDir, ".kust.lock")
+	fileLock := flock.New(lockPath)
+	locked, err := fileLock.TryLock()
+	require.NoError(t, err)
+	require.True(t, locked)
+	defer func() { _ = fileLock.Unlock() }()
+
+	svc := makeResource("Service", "locked-svc")
+	sugg := HelmFixSuggestion{
+		Resource:       svc,
+		UnredactedBase: svc.GetObject(),
+		FixPaths:       []armotypes.FixPath{{Path: "metadata.labels.patched", Value: "applied"}},
+	}
+	_, err = EmitKustomizePatch([]HelmFixSuggestion{sugg}, outDir, WithOverwrite(true))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "locked by another operation")
+}
+
+// TestKustomize_ChartLoadingRejectsLargeIntegerPrecisionMismatch verifies that fidelity comparison
+// rejects a scanned value of 9007199254740993 against a rendered chart value of 9007199254740992,
+// which would otherwise compare equal under float64 conversion.
+func TestKustomize_ChartLoadingRejectsLargeIntegerPrecisionMismatch(t *testing.T) {
+	chartDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "Chart.yaml"), []byte("apiVersion: v2\nname: int-mismatch\nversion: 0.1.0\n"), 0600))
+
+	// Define CRD under crds/
+	crdsDir := filepath.Join(chartDir, "crds")
+	require.NoError(t, os.MkdirAll(crdsDir, 0755))
+	crdYaml := `apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: widgets.example.com
+spec:
+  group: example.com
+  scope: Namespaced
+  names:
+    kind: Widget
+`
+	require.NoError(t, os.WriteFile(filepath.Join(crdsDir, "crd.yaml"), []byte(crdYaml), 0600))
+
+	templatesDir := filepath.Join(chartDir, "templates")
+	require.NoError(t, os.MkdirAll(templatesDir, 0755))
+
+	// Rendered chart template has 9007199254740992
+	widgetYaml := `apiVersion: example.com/v1
+kind: Widget
+metadata:
+  name: int-widget
+  namespace: default
+spec:
+  largeInt: 9007199254740992
+`
+	require.NoError(t, os.WriteFile(filepath.Join(templatesDir, "widget.yaml"), []byte(widgetYaml), 0600))
+
+	// Scanned resource has 9007199254740993
+	scannedWidget := &reporthandling.Resource{
+		Object: map[string]interface{}{
+			"apiVersion": "example.com/v1",
+			"kind":       "Widget",
+			"metadata": map[string]interface{}{
+				"name":      "int-widget",
+				"namespace": "default",
+			},
+			"spec": map[string]interface{}{
+				"largeInt": int64(9007199254740993),
+			},
+		},
+	}
+
+	outDir := t.TempDir()
+	suggestions := []HelmFixSuggestion{
+		{
+			Resource:     scannedWidget,
+			ChartPath:    chartDir,
+			TemplateFile: "templates/widget.yaml",
+			FixPaths: []armotypes.FixPath{
+				{Path: "metadata.labels.patched", Value: "\"true\""},
+			},
+		},
+	}
+
+	res, err := EmitKustomizePatch(suggestions, outDir, WithOverwrite(true))
+	require.NoError(t, err)
+	require.NotNil(t, res)
+	assert.Empty(t, res.EmittedResources, "must not emit patch when large integer values mismatch")
+	require.Len(t, res.SkippedResources, 1, "resource must be skipped due to large integer mismatch")
+	assert.Contains(t, res.SkippedResources[0].Reason, "9007199254740993")
+	assert.Contains(t, res.SkippedResources[0].Reason, "9007199254740992")
+}
+
+// TestResolveBaseObject_ScannedWithoutNamespaceMatchesRenderedWithReleaseNamespace verifies that
+// when a scanned resource omits metadata.namespace but its rendered candidate explicitly defines
+// metadata.namespace matching the ReleaseNamespace, bidirectional normalization succeeds and emits.
+func TestResolveBaseObject_ScannedWithoutNamespaceMatchesRenderedWithReleaseNamespace(t *testing.T) {
+	chartDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "Chart.yaml"), []byte("apiVersion: v2\nname: explicit-ns\nversion: 0.1.0\n"), 0600))
+	templatesDir := filepath.Join(chartDir, "templates")
+	require.NoError(t, os.MkdirAll(templatesDir, 0755))
+
+	// Rendered chart template explicitly sets metadata.namespace to prod
+	svcYaml := `apiVersion: v1
+kind: Service
+metadata:
+  name: explicit-ns-svc
+  namespace: prod
+spec:
+  type: ClusterIP
+  ports:
+  - port: 80
+`
+	require.NoError(t, os.WriteFile(filepath.Join(templatesDir, "service.yaml"), []byte(svcYaml), 0600))
+
+	// Scanned resource has NO namespace specified
+	scannedSvc := &reporthandling.Resource{
+		Object: map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "Service",
+			"metadata": map[string]interface{}{
+				"name": "explicit-ns-svc",
+			},
+			"spec": map[string]interface{}{
+				"type": "ClusterIP",
+				"ports": []interface{}{
+					map[string]interface{}{
+						"port": 80,
+					},
+				},
+			},
+		},
+	}
+
+	outDir := t.TempDir()
+	suggestions := []HelmFixSuggestion{
+		{
+			Resource:     scannedSvc,
+			ChartPath:    chartDir,
+			TemplateFile: "templates/service.yaml",
+			HelmValueOptions: cautils.HelmValueOptions{
+				ReleaseNamespace: "prod",
+			},
+			FixPaths: []armotypes.FixPath{
+				{Path: "metadata.labels.patched", Value: "\"true\""},
+			},
+		},
+	}
+
+	res, err := EmitKustomizePatch(suggestions, outDir, WithOverwrite(true))
+	require.NoError(t, err)
+	require.NotNil(t, res)
+	assert.Empty(t, res.SkippedResources, "scanned service without namespace matching rendered ReleaseNamespace must not be declined")
+	assert.Len(t, res.EmittedResources, 1)
+
+	baseBytes, err := os.ReadFile(filepath.Join(outDir, "base.yaml"))
+	require.NoError(t, err)
+	assert.Contains(t, string(baseBytes), "namespace: prod")
+}
+
+// TestFollowup_CRDUnderStandardCrdsAndDependenciesScopeResolved verifies that CRDs placed under
+// a chart's standard crds/ directory and dependency charts/subchart/crds/ directory are properly
+// discovered and resolved when determining whether a resource is cluster-scoped.
+func TestFollowup_CRDUnderStandardCrdsAndDependenciesScopeResolved(t *testing.T) {
+	chartDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "Chart.yaml"), []byte("apiVersion: v2\nname: parent-chart\nversion: 0.1.0\n"), 0600))
+
+	// Chart's standard crds/ directory
+	crdsDir := filepath.Join(chartDir, "crds")
+	require.NoError(t, os.MkdirAll(crdsDir, 0755))
+	parentCRDYaml := `apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: parentclusters.example.com
+spec:
+  group: example.com
+  scope: Cluster
+  names:
+    kind: ParentCluster
+`
+	require.NoError(t, os.WriteFile(filepath.Join(crdsDir, "parent-cluster.yaml"), []byte(parentCRDYaml), 0600))
+
+	// Dependency chart under charts/subchart/crds/
+	subChartCRDDir := filepath.Join(chartDir, "charts", "subchart", "crds")
+	require.NoError(t, os.MkdirAll(subChartCRDDir, 0755))
+	subCRDYaml := `apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: subclusters.example.com
+spec:
+  group: example.com
+  scope: Cluster
+  names:
+    kind: SubCluster
+`
+	require.NoError(t, os.WriteFile(filepath.Join(subChartCRDDir, "sub-cluster.yaml"), []byte(subCRDYaml), 0600))
+
+	// Subchart namespaced CRD
+	subNamespacedCRDYaml := `apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: subnamespaceds.example.com
+spec:
+  group: example.com
+  scope: Namespaced
+  names:
+    kind: SubNamespaced
+`
+	require.NoError(t, os.WriteFile(filepath.Join(subChartCRDDir, "sub-namespaced.yaml"), []byte(subNamespacedCRDYaml), 0600))
+
+	// Workloads using these custom resources
+	parentRes := &reporthandling.Resource{
+		Object: map[string]interface{}{
+			"apiVersion": "example.com/v1",
+			"kind":       "ParentCluster",
+			"metadata": map[string]interface{}{
+				"name": "my-parent-cluster",
+			},
+			"spec": map[string]interface{}{
+				"enabled": true,
+			},
+		},
+	}
+	parentBase := map[string]interface{}{
+		"apiVersion": "example.com/v1",
+		"kind":       "ParentCluster",
+		"metadata": map[string]interface{}{
+			"name": "my-parent-cluster",
+		},
+		"spec": map[string]interface{}{
+			"enabled": true,
+		},
+	}
+
+	subClusterRes := &reporthandling.Resource{
+		Object: map[string]interface{}{
+			"apiVersion": "example.com/v1",
+			"kind":       "SubCluster",
+			"metadata": map[string]interface{}{
+				"name": "my-sub-cluster",
+			},
+			"spec": map[string]interface{}{
+				"replicas": int64(1),
+			},
+		},
+	}
+	subClusterBase := map[string]interface{}{
+		"apiVersion": "example.com/v1",
+		"kind":       "SubCluster",
+		"metadata": map[string]interface{}{
+			"name": "my-sub-cluster",
+		},
+		"spec": map[string]interface{}{
+			"replicas": int64(1),
+		},
+	}
+
+	subNamespacedRes := &reporthandling.Resource{
+		Object: map[string]interface{}{
+			"apiVersion": "example.com/v1",
+			"kind":       "SubNamespaced",
+			"metadata": map[string]interface{}{
+				"name": "my-sub-namespaced",
+			},
+			"spec": map[string]interface{}{
+				"replicas": int64(2),
+			},
+		},
+	}
+	subNamespacedBase := map[string]interface{}{
+		"apiVersion": "example.com/v1",
+		"kind":       "SubNamespaced",
+		"metadata": map[string]interface{}{
+			"name": "my-sub-namespaced",
+		},
+		"spec": map[string]interface{}{
+			"replicas": int64(2),
+		},
+	}
+
+	// Unknown CRD (not declared anywhere)
+	unknownRes := &reporthandling.Resource{
+		Object: map[string]interface{}{
+			"apiVersion": "unknown.example.com/v1",
+			"kind":       "UnknownResource",
+			"metadata": map[string]interface{}{
+				"name": "my-unknown",
+			},
+		},
+	}
+	unknownBase := map[string]interface{}{
+		"apiVersion": "unknown.example.com/v1",
+		"kind":       "UnknownResource",
+		"metadata": map[string]interface{}{
+			"name": "my-unknown",
+		},
+	}
+
+	suggestions := []HelmFixSuggestion{
+		{
+			Resource:       parentRes,
+			UnredactedBase: parentBase,
+			ChartPath:      chartDir,
+			HelmValueOptions: cautils.HelmValueOptions{
+				ReleaseNamespace: "prod",
+			},
+			FixPaths: []armotypes.FixPath{
+				{Path: "metadata.labels.patched", Value: "\"true\""},
+			},
+		},
+		{
+			Resource:       subClusterRes,
+			UnredactedBase: subClusterBase,
+			ChartPath:      chartDir,
+			HelmValueOptions: cautils.HelmValueOptions{
+				ReleaseNamespace: "prod",
+			},
+			FixPaths: []armotypes.FixPath{
+				{Path: "metadata.labels.patched", Value: "\"true\""},
+			},
+		},
+		{
+			Resource:       subNamespacedRes,
+			UnredactedBase: subNamespacedBase,
+			ChartPath:      chartDir,
+			HelmValueOptions: cautils.HelmValueOptions{
+				ReleaseNamespace: "prod",
+			},
+			FixPaths: []armotypes.FixPath{
+				{Path: "metadata.labels.patched", Value: "\"true\""},
+			},
+		},
+		{
+			Resource:       unknownRes,
+			UnredactedBase: unknownBase,
+			ChartPath:      chartDir,
+			HelmValueOptions: cautils.HelmValueOptions{
+				ReleaseNamespace: "prod",
+			},
+			FixPaths: []armotypes.FixPath{
+				{Path: "metadata.labels.patched", Value: "\"true\""},
+			},
+		},
+	}
+
+	outDir := t.TempDir()
+	res, err := EmitKustomizePatch(suggestions, outDir, WithOverwrite(true))
+	require.NoError(t, err)
+	require.NotNil(t, res)
+	assert.Empty(t, res.SkippedResources)
+	assert.Len(t, res.EmittedResources, 4)
+
+	kustBytes, err := os.ReadFile(filepath.Join(outDir, "kustomization.yaml"))
+	require.NoError(t, err)
+	var kust kustomizationDoc
+	require.NoError(t, yaml.Unmarshal(kustBytes, &kust))
+
+	matched := map[string]bool{}
+	for _, p := range kust.Patches {
+		switch {
+		case strings.Contains(p.Path, "ParentCluster"):
+			matched["ParentCluster"] = true
+			// Cluster-scoped from parent crds/ directory -> namespace MUST be empty
+			assert.Empty(t, p.Target.Namespace, "ParentCluster must have empty target namespace")
+		case strings.Contains(p.Path, "SubCluster"):
+			matched["SubCluster"] = true
+			// Cluster-scoped from charts/subchart/crds/ directory -> namespace MUST be empty
+			assert.Empty(t, p.Target.Namespace, "SubCluster must have empty target namespace")
+		case strings.Contains(p.Path, "SubNamespaced"):
+			matched["SubNamespaced"] = true
+			// Namespaced from charts/subchart/crds/ directory -> namespace regex must be present
+			assert.Equal(t, "^($|default|prod$)", p.Target.Namespace, "SubNamespaced must have target namespace regex")
+		case strings.Contains(p.Path, "UnknownResource"):
+			matched["UnknownResource"] = true
+			// Unknown scope defaults safely to namespaced -> namespace regex must be present
+			assert.Equal(t, "^($|default|prod$)", p.Target.Namespace, "UnknownResource must default to namespaced target namespace")
+		}
+	}
+	for _, kind := range []string{"ParentCluster", "SubCluster", "SubNamespaced", "UnknownResource"} {
+		assert.True(t, matched[kind], "no patch matched the %s scope branch", kind)
+	}
+}
+
+func TestKustomize_DetectsAmbiguousOverlappingReleaseNamespaceAndDefaultTarget(t *testing.T) {
+	svcNoNs := &reporthandling.Resource{
+		Object: map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "Service",
+			"metadata": map[string]interface{}{
+				"name": "ambiguous-svc",
+			},
+			"spec": map[string]interface{}{
+				"type": "ClusterIP",
+			},
+		},
+	}
+	svcExplicitDefault := &reporthandling.Resource{
+		Object: map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "Service",
+			"metadata": map[string]interface{}{
+				"name":      "ambiguous-svc",
+				"namespace": "default",
+			},
+			"spec": map[string]interface{}{
+				"type": "ClusterIP",
+			},
+		},
+	}
+
+	suggestions := []HelmFixSuggestion{
+		{
+			Resource:           svcNoNs,
+			FidelityProvenance: true,
+			HelmValueOptions: cautils.HelmValueOptions{
+				ReleaseNamespace: "prod",
+			},
+			FixPaths: []armotypes.FixPath{{Path: "spec.type", Value: "NodePort"}},
+		},
+		{
+			Resource:           svcExplicitDefault,
+			FidelityProvenance: true,
+			FixPaths:           []armotypes.FixPath{{Path: "spec.type", Value: "LoadBalancer"}},
+		},
+	}
+
+	outDir := t.TempDir()
+	_, err := EmitKustomizePatch(suggestions, outDir, WithOverwrite(true))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "ambiguous patch target detected")
+}
+
+func TestKustomize_DetectsAmbiguousMixedClusterAndNamespacedTarget(t *testing.T) {
+	// Setup Chart A (Namespaced CRD) and Chart B (Cluster CRD) for the same GVK
+	tmp := t.TempDir()
+	chartADir := filepath.Join(tmp, "chart-a")
+	chartBDir := filepath.Join(tmp, "chart-b")
+	require.NoError(t, os.MkdirAll(filepath.Join(chartADir, "crds"), 0755))
+	require.NoError(t, os.MkdirAll(filepath.Join(chartBDir, "crds"), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(chartADir, "Chart.yaml"), []byte("apiVersion: v2\nname: chart-a\nversion: 0.1.0\n"), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(chartBDir, "Chart.yaml"), []byte("apiVersion: v2\nname: chart-b\nversion: 0.1.0\n"), 0600))
+
+	crdNamespacedYaml := `apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: widgets.example.com
+spec:
+  group: example.com
+  scope: Namespaced
+  names:
+    kind: Widget
+`
+	require.NoError(t, os.WriteFile(filepath.Join(chartADir, "crds", "widget.yaml"), []byte(crdNamespacedYaml), 0600))
+
+	crdClusterYaml := `apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: widgets.example.com
+spec:
+  group: example.com
+  scope: Cluster
+  names:
+    kind: Widget
+`
+	require.NoError(t, os.WriteFile(filepath.Join(chartBDir, "crds", "widget.yaml"), []byte(crdClusterYaml), 0600))
+
+	widgetBase := map[string]interface{}{
+		"apiVersion": "example.com/v1",
+		"kind":       "Widget",
+		"metadata": map[string]interface{}{
+			"name": "same-widget",
+		},
+		"spec": map[string]interface{}{
+			"foo": "bar",
+		},
+	}
+
+	suggestions := []HelmFixSuggestion{
+		{
+			Resource: &reporthandling.Resource{
+				Object: widgetBase,
+			},
+			UnredactedBase: widgetBase,
+			ChartPath:      chartADir,
+			HelmValueOptions: cautils.HelmValueOptions{
+				ReleaseNamespace: "tenant-a",
+			},
+			FixPaths: []armotypes.FixPath{{Path: "metadata.labels.patched", Value: "\"true\""}},
+		},
+		{
+			Resource: &reporthandling.Resource{
+				Object: widgetBase,
+			},
+			UnredactedBase: widgetBase,
+			ChartPath:      chartBDir,
+			FixPaths:       []armotypes.FixPath{{Path: "metadata.labels.patched", Value: "\"true\""}},
+		},
+	}
+
+	outDir := t.TempDir()
+	_, err := EmitKustomizePatch(suggestions, outDir, WithOverwrite(true))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "ambiguous patch target detected")
 }
