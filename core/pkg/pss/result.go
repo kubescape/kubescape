@@ -76,6 +76,16 @@ func (nr *NamespaceResult) HasFailures() bool {
 //
 // The results are sorted by Kind, Namespace, then Name for deterministic output.
 func Aggregate(namespace string, workloads []unstructured.Unstructured, targetLevel Level) NamespaceResult {
+	local := make([]LocalWorkload, len(workloads))
+	for i := range workloads {
+		local[i].Unstructured = workloads[i]
+	}
+	return AggregateLocal(namespace, local, targetLevel)
+}
+
+// AggregateLocal is Aggregate for workloads read from local manifests. Each
+// WorkloadResult carries the Source of the workload it was evaluated from.
+func AggregateLocal(namespace string, workloads []LocalWorkload, targetLevel Level) NamespaceResult {
 	nr := NamespaceResult{
 		Namespace:             namespace,
 		TargetLevel:           targetLevel,
@@ -102,6 +112,7 @@ func Aggregate(namespace string, workloads []unstructured.Unstructured, targetLe
 			nr.UnevaluatedWorkloads++
 			continue
 		}
+		res.Source = item.Source
 
 		if res.PassesAt < nr.CurrentEffectiveLevel {
 			nr.CurrentEffectiveLevel = res.PassesAt

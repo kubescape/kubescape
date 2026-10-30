@@ -5,6 +5,7 @@ import (
 	"encoding/xml"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/kubescape/backend/pkg/versioncheck"
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/pkg/pss"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer"
 )
@@ -358,7 +360,22 @@ type sarifResult struct {
 }
 
 type sarifLocation struct {
+	PhysicalLocation *sarifPhysicalLocation `json:"physicalLocation,omitempty"`
 	LogicalLocations []sarifLogicalLocation `json:"logicalLocations"`
+}
+
+type sarifPhysicalLocation struct {
+	ArtifactLocation sarifArtifactLocation `json:"artifactLocation"`
+	Region           sarifRegion           `json:"region"`
+}
+
+type sarifArtifactLocation struct {
+	URI string `json:"uri"`
+}
+
+type sarifRegion struct {
+	StartLine   int `json:"startLine"`
+	StartColumn int `json:"startColumn"`
 }
 
 type sarifLogicalLocation struct {
@@ -404,7 +421,24 @@ func writeSARIF(w io.Writer, result pss.NamespaceResult) error {
 	}
 
 	results := make([]sarifResult, 0)
+	// Several workloads often share a file, and each URI looks up the file's
+	// git worktree, so a file's URI is computed once.
+	artifactURIs := make(map[string]string)
 	for _, r := range result.FailingResults() {
+		// GitHub Code Scanning rejects a result without a physical location,
+		// so a workload read from a manifest file is located in that file too.
+		var physicalLocation *sarifPhysicalLocation
+		if r.Source != nil {
+			uri, ok := artifactURIs[r.Source.File]
+			if !ok {
+				uri = sarifArtifactURI(r.Source.File)
+				artifactURIs[r.Source.File] = uri
+			}
+			physicalLocation = &sarifPhysicalLocation{
+				ArtifactLocation: sarifArtifactLocation{URI: uri},
+				Region:           sarifRegion{StartLine: r.Source.Line, StartColumn: r.Source.Column},
+			}
+		}
 		for _, v := range r.Violations {
 			ruleID := "PSS/" + v.Check
 			level := "warning"
@@ -421,6 +455,7 @@ func writeSARIF(w io.Writer, result pss.NamespaceResult) error {
 				Level:     level,
 				Message:   sarifMessage{Text: v.Description},
 				Locations: []sarifLocation{{
+					PhysicalLocation: physicalLocation,
 					LogicalLocations: []sarifLogicalLocation{{
 						Name:               r.Name,
 						FullyQualifiedName: fqn,
@@ -452,6 +487,43 @@ func writeSARIF(w io.Writer, result pss.NamespaceResult) error {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	return enc.Encode(report)
+}
+
+// sarifArtifactURI converts a manifest path to a SARIF artifact URI. Code
+// Scanning resolves a relative URI against the repository root, so a manifest
+// inside a git worktree is made relative to that worktree's root, whichever
+// directory the command runs from. A manifest outside any worktree is made
+// relative to the working directory when it is under it. Any other path
+// becomes a file URI.
+func sarifArtifactURI(path string) string {
+	path = filepath.Clean(path)
+	if abs, err := filepath.Abs(path); err == nil {
+		if rel, err := filepath.Rel(sarifBaseDir(abs), abs); err == nil && filepath.IsLocal(rel) {
+			path = rel
+		} else {
+			path = abs
+		}
+	}
+	uri := url.URL{Path: filepath.ToSlash(path)}
+	if filepath.IsAbs(path) {
+		uri.Scheme = "file"
+		if !strings.HasPrefix(uri.Path, "/") {
+			// A Windows drive path, such as C:/manifests/pod.yaml.
+			uri.Path = "/" + uri.Path
+		}
+	}
+	return uri.String()
+}
+
+// sarifBaseDir returns the directory the artifact URI of the manifest at the
+// absolute path abs is relative to: the root of the git worktree holding it,
+// or else the working directory.
+func sarifBaseDir(abs string) string {
+	if root, err := cautils.GetGitRootDir(filepath.Dir(abs)); err == nil {
+		return root
+	}
+	wd, _ := os.Getwd()
+	return wd
 }
 
 // --- JUnit formatter ---

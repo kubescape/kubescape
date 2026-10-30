@@ -139,7 +139,7 @@ kubescape predict pss ./manifests/ -f sarif -o pss.sarif
 ```
 
 > [!NOTE]
-> SARIF output contains logical workload locations (`<namespace>/<kind>/<name>/<container>`). GitHub Code Scanning ingestion and display have not been validated. Direct inline diff annotations on Pull Requests are unsupported because this output does not include physical source file and line mappings; source locations and integration validation can be addressed in a follow-up.
+> Every SARIF result has a logical workload location (`<namespace>/<kind>/<name>/<container>`). A workload read from a manifest file also has a physical location: the file's path and the line on which the workload's YAML document or JSON object starts. A workload inside a `List` points at the `List`. Code Scanning resolves paths against the repository root, so a file inside a git worktree is given relative to the worktree's root, from whichever directory the command runs. A file outside any worktree is given relative to the working directory when it is under it, and as a `file://` URI otherwise. Workloads read from a live cluster or from stdin have no file to point at, so their results carry only the logical location, and GitHub Code Scanning rejects results without a physical location.
 
 #### CI/CD Test Results (JUnit)
 ```bash
