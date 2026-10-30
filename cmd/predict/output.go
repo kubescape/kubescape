@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/kubescape/backend/pkg/versioncheck"
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/pkg/pss"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer"
 )
@@ -420,13 +421,21 @@ func writeSARIF(w io.Writer, result pss.NamespaceResult) error {
 	}
 
 	results := make([]sarifResult, 0)
+	// Several workloads often share a file, and each URI looks up the file's
+	// git worktree, so a file's URI is computed once.
+	artifactURIs := make(map[string]string)
 	for _, r := range result.FailingResults() {
 		// GitHub Code Scanning rejects a result without a physical location,
 		// so a workload read from a manifest file is located in that file too.
 		var physicalLocation *sarifPhysicalLocation
 		if r.Source != nil {
+			uri, ok := artifactURIs[r.Source.File]
+			if !ok {
+				uri = sarifArtifactURI(r.Source.File)
+				artifactURIs[r.Source.File] = uri
+			}
 			physicalLocation = &sarifPhysicalLocation{
-				ArtifactLocation: sarifArtifactLocation{URI: sarifArtifactURI(r.Source.File)},
+				ArtifactLocation: sarifArtifactLocation{URI: uri},
 				Region:           sarifRegion{StartLine: r.Source.Line, StartColumn: r.Source.Column},
 			}
 		}
@@ -481,16 +490,18 @@ func writeSARIF(w io.Writer, result pss.NamespaceResult) error {
 }
 
 // sarifArtifactURI converts a manifest path to a SARIF artifact URI. Code
-// Scanning expects a path relative to the repository root, so a path is kept
-// relative, and an absolute path under the working directory is made relative
-// to it. Any other absolute path becomes a file URI.
+// Scanning resolves a relative URI against the repository root, so a manifest
+// inside a git worktree is made relative to that worktree's root, whichever
+// directory the command runs from. A manifest outside any worktree is made
+// relative to the working directory when it is under it. Any other path
+// becomes a file URI.
 func sarifArtifactURI(path string) string {
 	path = filepath.Clean(path)
-	if filepath.IsAbs(path) {
-		if wd, err := os.Getwd(); err == nil {
-			if rel, err := filepath.Rel(wd, path); err == nil && filepath.IsLocal(rel) {
-				path = rel
-			}
+	if abs, err := filepath.Abs(path); err == nil {
+		if rel, err := filepath.Rel(sarifBaseDir(abs), abs); err == nil && filepath.IsLocal(rel) {
+			path = rel
+		} else {
+			path = abs
 		}
 	}
 	uri := url.URL{Path: filepath.ToSlash(path)}
@@ -502,6 +513,17 @@ func sarifArtifactURI(path string) string {
 		}
 	}
 	return uri.String()
+}
+
+// sarifBaseDir returns the directory the artifact URI of the manifest at the
+// absolute path abs is relative to: the root of the git worktree holding it,
+// or else the working directory.
+func sarifBaseDir(abs string) string {
+	if root, err := cautils.GetGitRootDir(filepath.Dir(abs)); err == nil {
+		return root
+	}
+	wd, _ := os.Getwd()
+	return wd
 }
 
 // --- JUnit formatter ---
