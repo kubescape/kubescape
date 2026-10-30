@@ -191,6 +191,25 @@ func TestCorrelate_SortsWidestExposureAndHighestSeverityFirst(t *testing.T) {
 	}
 }
 
+func TestCorrelate_SortsHigherSeverityFirstWhenExposureIsEqual(t *testing.T) {
+	idx := openIndex(t)
+	w := Workload{Namespace: "prod", Kind: "Deployment", Name: "web"}
+	endpoints := map[Workload]networkpolicy.Endpoint{
+		w: {Namespace: "prod", Name: "web", Labels: map[string]string{"app": "web"}},
+	}
+
+	findings, _ := Correlate(idx, endpoints, map[Workload][]storagev1beta1.Vulnerability{
+		w: {vuln("AAA-LOW", "Low", false), vuln("ZZZ-CRITICAL", "Critical", false)},
+	}, SeverityLow, nil)
+
+	if len(findings) != 2 {
+		t.Fatalf("expected 2 findings, got %d", len(findings))
+	}
+	if findings[0].Vulnerability.ID != "ZZZ-CRITICAL" {
+		t.Errorf("expected the Critical finding first when exposure is equal, got %+v", findings)
+	}
+}
+
 func TestCorrelate_DeterministicallyOrdersEqualPriorityFindings(t *testing.T) {
 	idx := openIndex(t)
 	workloadA := Workload{Namespace: "prod", Kind: "Deployment", Name: "a"}
