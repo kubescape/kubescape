@@ -11,6 +11,7 @@ import (
 
 	"github.com/jedib0t/go-pretty/v6/table"
 	"github.com/jedib0t/go-pretty/v6/text"
+	"github.com/jwalton/gchalk"
 	"github.com/kubescape/kubescape/v4/core/pkg/opaprocessor/cel"
 	"github.com/spf13/cobra"
 	"sigs.k8s.io/yaml"
@@ -46,15 +47,19 @@ func getListPoliciesCmd() *cobra.Command {
 		Long:  `Lists every policy in the CEL admission policy library embedded in this binary, with the Kubescape control it implements. Use the control IDs with 'vap create-policy-binding --control' and the policy names with '--policy'.`,
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			var rendered bytes.Buffer
-			if err := runListPolicies(&rendered, format, controlsOnly); err != nil {
-				return err
-			}
 			if outputFile != "" {
+				var rendered bytes.Buffer
+				out := &noColorWriter{w: &rendered}
+				if err := runListPolicies(out, format, controlsOnly); err != nil {
+					return err
+				}
 				return writeOutput(rendered.String(), outputFile)
 			}
-			_, err := cmd.OutOrStdout().Write(rendered.Bytes())
-			return err
+			out := &errorRecordingWriter{w: cmd.OutOrStdout()}
+			if err := runListPolicies(out, format, controlsOnly); err != nil {
+				return err
+			}
+			return out.err
 		},
 	}
 
@@ -87,31 +92,44 @@ func runListPolicies(out io.Writer, format string, controlsOnly bool) error {
 		})
 	}
 
+	rec, ok := out.(*errorRecordingWriter)
+	if !ok {
+		rec = &errorRecordingWriter{w: out}
+	}
+
 	switch format {
 	case formatPretty:
-		prettyPrintPolicies(out, entries)
+		prettyPrintPolicies(rec, entries)
 	case formatJSON:
 		encoded, err := json.MarshalIndent(entries, "", "  ")
 		if err != nil {
 			return fmt.Errorf("encode policies: %w", err)
 		}
-		fmt.Fprintf(out, "%s\n", encoded)
+		if _, err := fmt.Fprintf(rec, "%s\n", encoded); err != nil {
+			return err
+		}
 	case formatYAML:
 		encoded, err := yaml.Marshal(entries)
 		if err != nil {
 			return fmt.Errorf("encode policies: %w", err)
 		}
-		fmt.Fprintf(out, "%s", encoded)
+		if _, err := fmt.Fprintf(rec, "%s", encoded); err != nil {
+			return err
+		}
 	case formatCSV:
-		return csvPolicies(out, entries)
+		if err := csvPolicies(rec, entries); err != nil {
+			return err
+		}
 	default:
 		return fmt.Errorf("invalid format %q, supported formats: %s", format, strings.Join(quoted(listPoliciesFormats), "/"))
 	}
 
-	return nil
+	return rec.err
 }
 
 func prettyPrintPolicies(out io.Writer, entries []policyListEntry) {
+	colored := shouldColor(out)
+
 	policyTable := table.NewWriter()
 	policyTable.SetOutputMirror(out)
 
@@ -126,12 +144,41 @@ func prettyPrintPolicies(out io.Writer, entries []policyListEntry) {
 		{Number: 5, WidthMax: 40},
 	})
 
-	policyTable.AppendHeader(table.Row{"Control ID", "Policy", "Params", "On error", "Resources"})
+	if colored {
+		policyTable.AppendHeader(table.Row{
+			gchalk.WithBrightWhite().Bold("Control ID"),
+			gchalk.WithBrightWhite().Bold("Policy"),
+			gchalk.WithBrightWhite().Bold("Params"),
+			gchalk.WithBrightWhite().Bold("On error"),
+			gchalk.WithBrightWhite().Bold("Resources"),
+		})
+	} else {
+		policyTable.AppendHeader(table.Row{"Control ID", "Policy", "Params", "On error", "Resources"})
+	}
+
 	for _, entry := range entries {
+		ctrlID := controlDisplayID(entry)
+		params := yesNo(entry.TakesParams)
+
+		if colored {
+			if entry.ControlID != "" {
+				if entry.DuplicateControl {
+					ctrlID = gchalk.WithBrightCyan().Bold(entry.ControlID) + " (duplicate)"
+				} else {
+					ctrlID = gchalk.WithBrightCyan().Bold(entry.ControlID)
+				}
+			}
+			if entry.TakesParams {
+				params = gchalk.WithGreen().Bold("yes")
+			} else {
+				params = gchalk.WithRed().Bold("no")
+			}
+		}
+
 		policyTable.AppendRow(table.Row{
-			controlDisplayID(entry),
+			ctrlID,
 			policyDisplayName(entry),
-			yesNo(entry.TakesParams),
+			params,
 			orDash(entry.FailurePolicy),
 			orDash(strings.Join(entry.Resources, ", ")),
 		})
@@ -229,3 +276,35 @@ func quoted(values []string) []string {
 	}
 	return out
 }
+
+// errorRecordingWriter keeps the first write error that fmt.Fprintf and go-pretty ignore.
+type errorRecordingWriter struct {
+	w   io.Writer
+	err error
+}
+
+func (e *errorRecordingWriter) Write(p []byte) (int, error) {
+	n, err := e.w.Write(p)
+	if err != nil && e.err == nil {
+		e.err = err
+	}
+	return n, err
+}
+
+// Unwrap lets shouldColor inspect the underlying destination.
+func (e *errorRecordingWriter) Unwrap() io.Writer { return e.w }
+
+// noColorWriter forces styling to be disabled regardless of environment variables.
+type noColorWriter struct {
+	w io.Writer
+}
+
+func (n *noColorWriter) Write(p []byte) (int, error) {
+	return n.w.Write(p)
+}
+
+func (n *noColorWriter) DisableColor() bool {
+	return true
+}
+
+func (n *noColorWriter) Unwrap() io.Writer { return n.w }
