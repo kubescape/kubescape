@@ -38,19 +38,37 @@ kubescape scan [target] [flags]
 |------|-------------|---------|
 | `--account <id>` | Kubescape SaaS account ID | from cache |
 | `--access-key <key>` | Kubescape SaaS access key | from cache |
+| `--cluster-name <name>` | Custom name for the cluster in reports. Not the same as `--kube-context` | - |
 | `--compliance-threshold <float>` | Fail if compliance score is below threshold. Applies to `scan framework`, `scan control`, and `--view resource\|control` — see [score thresholds](#score-thresholds). | `0` |
 | `--controls-config <path>` | Path to controls configuration file | - |
+| `--controls-version <tag>` | Pin the [regolibrary](https://github.com/kubescape/regolibrary/releases) release tag used to download controls. Has no effect when `--account` is set, because the cloud backend is used instead | latest release |
 | `--custom-rules <path>` | Path to user-authored custom rules — see [custom rules](#custom-rules) | - |
+| `--include-controls <ids>` | Scan only these control IDs (comma-separated, case-insensitive); all other controls are skipped. A control's CIS section number is accepted where the control carries one | - |
+| `--skip-controls <ids>` | Skip these control IDs (comma-separated, case-insensitive). A control's CIS section number is accepted where the control carries one | - |
+| `--exclude-controls <ids>` | Leave these control IDs (comma-separated, case-insensitive) out of every framework in the scan. Excluded controls are not evaluated and do not affect the compliance score. A control's CIS section number is accepted where the control carries one | - |
 | `-e, --exclude-namespaces <ns>` | Namespaces to exclude (comma-separated). Cannot be combined with `--include-namespaces` | - |
 | `--encrypt` | Encrypt sensitive report metadata using the master key provided through the `KUBESCAPE_MASTER_KEY` environment variable. Requires `--format json` for reports that will later be decrypted with `kubescape decrypt`. If both `--encrypt` and `--hide` are specified, `--encrypt` takes precedence. | `false` |
 | `--exceptions <path>` | Path to exceptions file | - |
+| `--honor-inline-exceptions` | Honor `kubescape.io/skip-*` annotations as inline exception policies | on for local manifest files, off for live-cluster scans |
 | `--audit-exceptions` | Include exception usage details in supported scan outputs | `false` |
+| `--baseline <path>` | Path to a saved JSON scan report to diff the fresh scan against | - |
+| `--baseline-fail-on-new` | With `--baseline`, exit with code `1` when new failures are found compared with the baseline | `false` |
+| `--baseline-granularity <unit>` | With `--baseline`, the comparison unit: `evidence` or `control` | `evidence` |
+| `--baseline-severity-threshold <sev>` | With `--baseline` and `--baseline-fail-on-new`, count only new failures at or above this severity | - |
 | `--fail-coverage-below <float>` | Fail if the scan coverage score is below threshold (`0` disables). Applies in every view — see [score thresholds](#score-thresholds). | `0` |
+| `--fail-on-degraded-config` | Fail the scan (exit code `1`) if control configurations or exceptions could not be loaded from their configured source and bundled defaults were used instead | `false` |
+| `--scan-contract <path>` | Path to an explicit repository scan contract | - |
+| `--contract <name>` | Named contract to select | `spec.defaultContract` |
 | `-f, --format <format>` | Output format: `pretty-printer`, `json`, `junit`, `prometheus`, `pdf`, `html`, `sarif`, `gitlab-sast`, `github-actions`, `yaml`, `csv`, `markdown`, `policyreport`, `exceptions`, `cyclonedx-json`, `spdx-json` — see [generating an exceptions baseline](#generating-an-exceptions-baseline) and [generating an SBOM](#generating-an-sbom). `github-actions` emits failed High/Critical controls as `::error` workflow commands for inline PR annotations; local file scans only, capped at GitHub's 10-annotations-per-step limit | `pretty-printer` |
 | `--hide` | Replace sensitive report metadata with deterministic pseudonyms. Ignored when `--encrypt` is also specified. | `false` |
 | `--host-scan` | Enable host data collection from cluster nodes for certain controls. When not set, Kubescape auto-detects node-agent CRDs and uses a CRD-based host sensor if available. Use `--host-scan=false` to disable host data collection. See the [Kubescape operator](https://github.com/kubescape/helm-charts/tree/main/charts/kubescape-operator) for a managed alternative. | auto-detect |
 | `--include-namespaces <ns>` | Namespaces to include (comma-separated). Cannot be combined with `--exclude-namespaces` | - |
+| `--include-kinds <kinds>` | Scan only these Kubernetes resource kinds (comma-separated, case-insensitive, kind name only, not group/version qualified), e.g. `Deployment,DaemonSet` | - |
+| `--exclude-kinds <kinds>` | Leave these Kubernetes resource kinds out of the scan (comma-separated, case-insensitive, kind name only, not group/version qualified), e.g. `Job,CronJob` | - |
+| `--exclude-path <pattern>` | Exclude paths from file, directory and repository scans, using gitignore syntax relative to the scan root, e.g. `'test/**'` or `'!test/prod.yaml'`. Repeat for more than one. Combined with the patterns in a `.kubescapeignore` file at the scan root. Helm charts, Kustomize configurations and Terraform modules are excluded as whole directories | - |
+| `--no-ignore-file` | Ignore the `.kubescapeignore` file at the scan root; only `--exclude-path` patterns apply | `false` |
 | `--label-selector <selector>` | Filter collected resources by Kubernetes label selector. Accepts any expression `kubectl -l` supports, e.g. `app=nginx,env!=dev` or `env in (prod,staging)`. Syntax is validated before scanning begins; filtering is applied during live cluster collection and ignored when scanning local files. | - |
+| `--labels-to-copy <labels>` | Workload labels to copy into scan reports for easy identification (comma-separated), e.g. `app,team,environment` | - |
 | `--keep-local` | Don't report results to backend | `false` |
 | `--notify <url>` | POST the scan summary to a webhook URL. Slack incoming webhooks receive Block Kit, Microsoft Teams webhooks an Adaptive Card, and other destinations generic JSON. Repeat for multiple endpoints. Delivery is best-effort and does not affect scan exit status. | - |
 | `--kubeconfig <path>` | Path to kubeconfig file | - |
@@ -70,16 +88,37 @@ kubescape scan [target] [flags]
 | `--otel-endpoint <endpoint>` | Export scan traces and metrics to an OTLP collector — see [OpenTelemetry export](#opentelemetry-export). Accepts `host:port` (plaintext) or a `http(s)://` URL. | `OTEL_EXPORTER_OTLP_ENDPOINT` |
 | `--scan-images` | Also scan container images for vulnerabilities. Required for `--format cyclonedx-json` and `--format spdx-json` — see [generating an SBOM](#generating-an-sbom) | `false` |
 | `--image-platform <platform>` | OCI platform for workload image scans, such as `linux/amd64`. Overrides platform inferred from Nodes and hard scheduling constraints | inferred |
+| `--image-scan-concurrency <n>` | Number of concurrent workers for image scanning | `1` |
+| `--use-default-matchers` | Use the default vulnerability matchers (`true`) or CPE matchers (`false`) for image scanning | `true` |
+| `--grype-db-url <url>` | Grype vulnerability database URL | - |
+| `--registry-username <user>` | Username for image registry login when no docker config or credential helper is available. Also read from `KUBESCAPE_REGISTRY_USERNAME` | - |
+| `--registry-password <password>` | Password for image registry login when no docker config or credential helper is available. Also read from `KUBESCAPE_REGISTRY_PASSWORD` | - |
+| `--registry-token <token>` | Bearer token for image registry login when no docker config or credential helper is available. Also read from `KUBESCAPE_REGISTRY_TOKEN` | - |
+| `--registry-authority <host[:port]>` | Registry `host[:port]` that the `--scan-images` registry credentials apply to | - |
+| `--registry-mapping <from=to>` | Map internal registry hosts to reachable ones, as `host[:port]` without a scheme, e.g. `image-registry.openshift-image-registry.svc:5000=registry.company.com` | - |
 | `--min-severity <sev>` | Only show controls at or above this severity: `low`, `medium`, `high`, `critical`. Output-only — exit codes are computed on the full unfiltered report | - |
 | `--max-severity <sev>` | Only show controls at or below this severity. Output-only — exit codes are computed on the full unfiltered report | - |
 | `--severity-threshold <sev>` | Fail if findings at or above severity: `low`, `medium`, `high`, `critical`. Failed controls with unknown severity (missing base score) are treated as exceeding any threshold | - |
+| `--only-fixable` | With `--severity-threshold` on image scans, count only CVEs that have a fix available toward the pass/fail decision | `false` |
 | `--skip-db-update` | Do not update the vulnerability database before scanning images; uses the locally cached database. Fails if the local database is missing or unusable (run once without this flag to download it). | `false` |
+| `--max-db-age <duration>` | Maximum age of the vulnerability database before it is considered stale, e.g. `120h` or `168h`. Always warns; fails only with `--fail-on-stale-db`. `0` selects the default. An explicitly passed value, even `0`, wins over `KS_MAX_DB_AGE` | `120h` |
+| `--fail-on-stale-db` | Fail image scans when the vulnerability database is older than `--max-db-age` instead of only warning. When the database is updated, failing requires network access for the update check. An explicitly passed value, even `false`, wins over `KS_FAIL_ON_STALE_DB` | `false` |
 | `--submit` | Submit results to Kubescape SaaS | `false` |
 | `--use-artifacts-from <path>` | Load artifacts from local directory (offline mode) | - |
 | `--use-from <path>` | Load specific policy from path | - |
+| `--use-default` | Load the local policy object from the default path instead of downloading the latest | `false` |
 | `--values <path>` | Helm values file or URL to use when scanning a chart. Repeat, or separate with commas, for more than one | - |
 | `-v, --verbose` | Display all resources, not just failed ones | `false` |
+| `-E, --show-evidence` | Show evidence paths with current field values for each failed control (`pretty-printer` only) | `false` |
+| `--show-secrets` | Show secret field values in evidence output instead of redacting them. Only effective with `--show-evidence` | `false` |
 | `--view <type>` | View type: `security`, `control`, `resource` | `security` |
+| `--dry-run` | Check whether the current credentials can list every resource type the requested policies need, without collecting resources or evaluating controls. Cluster scans only | `false` |
+| `--scan-timeout <duration>` | Maximum duration of the scan, e.g. `5m`. When the timeout is reached the scan exits with a non-zero code. `0` means no timeout | `0` |
+| `--control-timeout <duration>` | Maximum duration for evaluating a single control, e.g. `30s`. Controls that exceed it are marked as not evaluated and the scan continues. Must be lower than `--scan-timeout` when both are set. `0` means no timeout | `0` |
+| `--incremental` | Cache each resource's verdict, keyed by a hash of its spec and metadata plus the controls-config version, and skip re-evaluating unchanged resources on the next scan. Scan output is unaffected. The cache is invalidated when the controls-config version changes; clear it with `kubescape config delete cache` | `false` |
+| `--enable-streaming` | Process cluster resources in batches instead of loading them all at once, to reduce memory use on large clusters | `false` (on automatically above 2,500 resources) |
+| `--whole-cluster-policy <policy>` | How to run the whole-cluster controls (C-0261, C-0266, C-0267, C-0272): `projected` (incremental projection of matching resources), `fallback` (materialize the full cluster in memory), `skip` (skip them, for minimum memory) or `verify` (debug check that `projected` and `fallback` agree; a mismatch fails the scan) | `projected` |
+| `--enable-rego-prints` | Send Rego `print` output to the logs; use with `-l debug` | `false` |
 
 ### Framework-scoped exceptions
 
@@ -649,6 +688,7 @@ Unlike `kubectl`'s `TYPE.VERSION.GROUP` (which takes a plural resource), this co
 | `--namespace <ns>` | Namespace of the workload (defaults to `'default'` for live-cluster scans, or pass `'*'` for cluster-wide search which requires cluster-level list permissions. When scanning local files or stdin, an omitted namespace matches manifests across any namespace. Must not conflict with a namespace prefix in the workload argument) |
 | `--file-path <path>` | Path to a manifest that contains the workload |
 | `--chart-path <path>` | Path to the Helm chart the workload is part of. Must be used with `--file-path` |
+| `--api-version <version>` | API version of the workload, e.g. `apps/v1` |
 
 ### Examples
 
@@ -686,7 +726,7 @@ kubescape scan image <image>:<tag> [<image>:<tag>...] [flags]
 | `-p, --password <pass>` | Registry password |
 | `--platform <platform>` | OCI platform to scan, for example `linux/amd64`, `linux/arm64/v8`, or `windows/amd64`. Applies to every image in the run |
 | `-u, --username <user>` | Registry username |
-| `--use-default-matchers` | Use default vulnerability matchers | `true` |
+| `--use-default-matchers` | Use the default vulnerability matchers; `false` uses CPE matchers instead (default `true`) |
 
 ### Scanning several images at once
 
@@ -832,6 +872,7 @@ a config omits, so the live `envFrom` survives.
 | `--output-dir` | Write the fixes into this directory instead of their default destination. Manifest files: fixed copies that mirror the scanned tree, originals untouched. Cluster scans: one patched manifest per resource | *(fix in place / print to stdout)* |
 | `--include-controls` | Remediate only these control IDs (comma-separated, case-insensitive). Disables `--container-profile` drift remediation — see [selecting controls to fix](#selecting-controls-to-fix) | *(all)* |
 | `--skip-controls` | Leave these control IDs untouched (comma-separated, case-insensitive). Takes precedence over `--include-controls`, and disables `--container-profile` drift remediation | - |
+| `--base-path <path>` | Restrict fixes to this directory: the report's recorded scan location must resolve inside it. Use it when the report file comes from a source you don't fully trust, such as a shared CI artifact; without it, the recorded location is trusted as-is | - |
 
 ### Selecting controls to fix
 
@@ -976,8 +1017,11 @@ kubescape patch [flags]
 | `--timeout <duration>` | Patching timeout | `5m` |
 | `--ignore-errors` | Continue on errors | `false` |
 | `--push` | Push the patched image to the source registry | `false` |
+| `--output-mode <mode>` | Output mode for the patched image: `docker`, `image`, `oci` or `local` | `docker` |
+| `--output-path <path>` | Destination path for the `oci` and `local` output modes | - |
 | `-u, --username <user>` | Registry username | - |
 | `-p, --password <pass>` | Registry password | - |
+| `--grype-db-url <url>` | Grype vulnerability database URL | - |
 | `-f, --format <format>` | Output format: `pretty-printer`, `json`, `sarif` | - |
 | `-o, --output <path>` | Output file | stdout |
 | `-v, --verbose` | Verbose output | `false` |
@@ -1173,6 +1217,8 @@ kubescape list <type> [flags]
 | `--access-key <key>` | Access key | - |
 | `--controls-config <path>` | Show the inputs a scan would use with this controls-config file. Only applies to `controls-config` | downloaded |
 | `--format <format>` | Output format: `pretty-print`, `json`, `yaml`, `csv` | `pretty-print` |
+| `--framework <name>` | Only applies to `controls`. List the controls that belong to this framework (case-insensitive) | - |
+| `--search <text>` | Only applies to `controls`. Case-insensitive match against control ID, name or framework | - |
 
 ### Control configuration
 
@@ -1361,6 +1407,13 @@ Deploy the Kubescape CEL admission policy library.
 kubescape vap deploy-library | kubectl apply -f -
 ```
 
+**Flags:**
+
+| Flag | Description | Default |
+|---|---|---|
+| `--from-release <tag>` | Download the library from this [cel-admission-library](https://github.com/kubescape/cel-admission-library/releases) release tag, e.g. `v0.11`, instead of using the copy embedded in the binary | embedded copy |
+| `--timeout <duration>` | HTTP request timeout per download, used only with `--from-release`. `0` disables the timeout | `30s` |
+
 #### create-policy-binding
 
 Create a ValidatingAdmissionPolicyBinding. The same validation is available to
@@ -1378,6 +1431,7 @@ kubescape vap create-policy-binding [flags]
 | `-n, --name <name>` | Binding name | Yes |
 | `-p, --policy <id>` | Policy/control ID | Yes |
 | `--namespace <ns>` | Namespace selector (repeatable) | No |
+| `--resource-rule <group/version/resource>` | Restrict the binding to a group/version/resource the policy already matches, e.g. `apps/v1/deployments` or `/v1/pods` (repeatable). Omit to bind everything the policy matches | No |
 | `--label <k=v>` | Label selector (repeatable) | No |
 | `-a, --action <action>` | Action: `Deny`, `Audit`, `Warn` | No (default: `Deny`) |
 | `-r, --parameter-reference <name>` | Parameter reference | No |
