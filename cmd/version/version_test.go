@@ -25,6 +25,7 @@ func (w errorWriter) Write([]byte) (int, error) {
 
 func TestGetVersionCmd_TextOutput(t *testing.T) {
 	t.Setenv("KS_SKIP_UPDATE_CHECK", "true")
+	t.Setenv("FORCE_COLOR", "0")
 
 	tests := []struct {
 		name        string
