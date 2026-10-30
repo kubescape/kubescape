@@ -71,6 +71,9 @@ type K8sResourceHandler struct {
 	hostSensorHandler hostsensorutils.IHostSensor
 	rbacObjectsAPI    *cautils.RBACObjects
 	storeFactory      func() (partitionstore.Store, error)
+	// componentVulnSources overrides how the vulnerability DB and CVE
+	// applicability index are loaded; nil uses loadComponentVulnSources.
+	componentVulnSources func(context.Context, *cautils.ScanInfo) (componentVulnSources, error)
 	// apiAnswered records whether the API server responded to any List request
 	// in the current collection. A query that succeeded with nothing to collect,
 	// that returned NotFound, or whose response client-go retried past leaves no
@@ -267,6 +270,8 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 			logger.L().Debug("failed to collect cloud data", helpers.Error(err))
 		}
 	}
+
+	k8sHandler.collectComponentVulnerabilities(ctx, sessionObj, scanInfo, allResources, ksResourceMap)
 
 	if scanInfo.GetScanningContext() == cautils.ContextCluster {
 		k8sHandler.collectVAPResources(ctx, sessionObj)
@@ -673,6 +678,8 @@ func (k8sHandler *K8sResourceHandler) collectAndStreamBatches(ctx context.Contex
 			cautils.SetInfoMapForResources(err.Error(), cloudResources, sessionObj.InfoMap)
 		}
 	}
+
+	k8sHandler.collectComponentVulnerabilities(ctx, sessionObj, scanInfo, allResources, ksResourceMap)
 
 	if scanInfo.GetScanningContext() == cautils.ContextCluster {
 		k8sHandler.collectVAPResources(ctx, sessionObj)
