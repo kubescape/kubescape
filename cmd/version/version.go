@@ -53,13 +53,33 @@ func GetVersionCmd(ks meta.IKubescape, version, commit, date string) *cobra.Comm
 				v := versioncheck.NewIVersionCheckHandler(ks.Context())
 				_ = v.CheckLatestVersion(ks.Context(), versioncheck.NewVersionCheckRequest("", version, "", "", "version", nil))
 
-				if _, err := fmt.Fprintf(cmd.OutOrStdout(), "Your current version is: %s\n", version); err != nil {
+				out := cmd.OutOrStdout()
+				colored := shouldColor(out)
+				chalk := colorBuilder(colored)
+
+				verStr := version
+				commitStr := commit
+				dateStr := date
+
+				if colored {
+					if version != "" {
+						verStr = chalk.WithBrightGreen().Bold(version)
+					}
+					if commit != "" {
+						commitStr = chalk.BrightCyan(commit)
+					}
+					if date != "" {
+						dateStr = chalk.BrightWhite(date)
+					}
+				}
+
+				if _, err := fmt.Fprintf(out, "Your current version is: %s\n", verStr); err != nil {
 					return err
 				}
-				if _, err := fmt.Fprintf(cmd.OutOrStdout(), "Build commit: %s\n", commit); err != nil {
+				if _, err := fmt.Fprintf(out, "Build commit: %s\n", commitStr); err != nil {
 					return err
 				}
-				_, err := fmt.Fprintf(cmd.OutOrStdout(), "Build date: %s\n", date)
+				_, err := fmt.Fprintf(out, "Build date: %s\n", dateStr)
 				return err
 			default:
 				return fmt.Errorf("unsupported format %q, supported: text, json, yaml", outputFormat)
