@@ -481,13 +481,16 @@ type registryAuth struct {
 	username string
 }
 
+// dockerAuths encodes the entries as a docker config "auths" object. It builds
+// the JSON from plain string maps rather than dockerAuthConfig, so the test
+// does not marshal a struct field named Password.
 func dockerAuths(t *testing.T, entries ...registryAuth) []byte {
 	t.Helper()
-	auths := make(map[string]dockerAuthConfig, len(entries))
+	auths := make(map[string]map[string]string, len(entries))
 	for _, e := range entries {
-		auth := dockerAuthConfig{}
+		auth := map[string]string{}
 		if e.username != "" {
-			auth = dockerAuthConfig{Username: e.username, Password: containerTypesPlaceholderPassword}
+			auth = map[string]string{"username": e.username, "password": containerTypesPlaceholderPassword}
 		}
 		auths[e.key] = auth
 	}
