@@ -176,3 +176,37 @@ If one cluster fails a gate and another could not be scanned, the run exits
 with `2`, since part of the fleet was never checked. An invalid command line still exits with `1`, as it does for any
 other scan. The fleet report and the summary are still produced for the
 clusters that were scanned.
+
+## Performance
+
+Clusters are scanned one after another, so a fleet scan takes about as long as
+its clusters' scans added together.
+
+Memory depends on whether a fleet report is written. Without `--fleet-report`,
+each cluster's results are released once its own report is written, so memory
+stays about the same however many clusters you scan. With `--fleet-report`,
+each cluster's results are kept until the fleet report is written, minus the
+raw Kubernetes objects, which the fleet report leaves out. Memory then grows
+with the number of clusters.
+
+Measured against fake clusters with 200 pods each, as peak memory of the whole
+process (about 136 MiB of it is the binary itself):
+
+| Clusters | Peak memory with `--fleet-report` | Peak memory without |
+|----------|-----------------------------------|---------------------|
+| 1        | 202 MiB                           | 196 MiB             |
+| 5        | 239 MiB                           | 201 MiB             |
+| 10       | 329 MiB                           | 204 MiB             |
+
+Time grew with the number of clusters, at around half a second to a second
+each: ten clusters took between 5 and 11 seconds across runs on the same
+machine. Real clusters are slower, since every request crosses the network and
+they usually hold more objects, so treat these numbers as a comparison rather
+than a prediction.
+
+To reproduce them, from `cmd/scan`:
+
+```bash
+go test -c -o scan.test .
+/usr/bin/time -v ./scan.test -test.run '^$' -test.bench 'BenchmarkFleetScan/report=true/clusters=10$' -test.benchtime 1x
+```
