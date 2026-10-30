@@ -311,4 +311,4 @@ kubectl krew install kubescape
 
 - [Krew official documentation](https://krew.sigs.k8s.io/docs/developer-guide/)
 - [krew-release-bot repository](https://github.com/rajatjindal/krew-release-bot)
-- [Krew plugin submission guide](https://krew.sigs.k8s.io/docs/developer-guide/develop/plugins/)
+- [Krew plugin submission guide](https://krew.sigs.k8s.io/docs/developer-guide/release/new-plugin/)

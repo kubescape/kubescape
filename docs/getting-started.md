@@ -321,7 +321,7 @@ kubescape scan --format junit --output results.xml
 
 #### SARIF
 
-SARIF is a standard format for the output of static analysis tools. It is supported by many tools, including GitHub Code Scanning and Azure DevOps. [Read more about SARIF](https://docs.github.com/en/code-security/secure-coding/sarif-support-for-code-scanning/about-sarif-support-for-code-scanning).
+SARIF is a standard format for the output of static analysis tools. It is supported by many tools, including GitHub Code Scanning and Azure DevOps. [Read more about SARIF](https://docs.github.com/en/code-security/reference/code-scanning/sarif-files/sarif-support).
 
 ```bash
 kubescape scan --format sarif --output results.sarif
