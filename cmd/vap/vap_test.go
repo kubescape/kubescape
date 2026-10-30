@@ -2255,8 +2255,7 @@ func TestCreatePolicyBindingCmd_RejectsUnexpectedArgs(t *testing.T) {
 	cmd.SilenceErrors = true
 	cmd.SetArgs([]string{"--name", "test-binding", "--control", "C-0009", "--parameter-reference", "basic-control-configuration", "unexpected"})
 	err := cmd.Execute()
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), `unknown command "unexpected" for "create-policy-binding"`)
+	require.EqualError(t, err, `unknown command "unexpected" for "create-policy-binding"`)
 }
 
 func TestDeployLibraryCmd_WritesToCmdOutOrStdout(t *testing.T) {
