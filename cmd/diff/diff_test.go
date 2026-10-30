@@ -25,36 +25,47 @@ func (s *stubKubescape) Diff(info *metav1.DiffInfo) (int, error) {
 
 func TestGetDiffCmd_FormatValidation(t *testing.T) {
 	tests := []struct {
-		name      string
-		format    string
-		wantError bool
+		name        string
+		format      string
+		wantError   bool
+		expectedErr string
+		wantFormat  string
 	}{
-		{"default pretty-printer", "pretty-printer", false},
-		{"summary-json", "summary-json", false},
-		{"summary-yaml", "summary-yaml", false},
-		{"summary-csv", "summary-csv", false},
-		{"json", "json", false},
-		{"yaml", "yaml", false},
-		{"sarif", "sarif", false},
-		{"junit", "junit", false},
-		{"gitlab-sast", "gitlab-sast", false},
-		{"markdown", "markdown", false},
-		{"unsupported format is rejected", "html", true},
-		{"scan report format is rejected", "pdf", true},
-		{"image sbom format is rejected", "spdx-json", true},
-		{"comma-separated multi-format is rejected", "json,pretty-printer", true},
+		{name: "default pretty-printer", format: "pretty-printer", wantFormat: "pretty-printer"},
+		{name: "summary-json", format: "summary-json", wantFormat: "summary-json"},
+		{name: "summary-yaml", format: "summary-yaml", wantFormat: "summary-yaml"},
+		{name: "summary-csv", format: "summary-csv", wantFormat: "summary-csv"},
+		{name: "json", format: "json", wantFormat: "json"},
+		{name: "yaml", format: "yaml", wantFormat: "yaml"},
+		{name: "sarif", format: "sarif", wantFormat: "sarif"},
+		{name: "junit", format: "junit", wantFormat: "junit"},
+		{name: "gitlab-sast", format: "gitlab-sast", wantFormat: "gitlab-sast"},
+		{name: "markdown", format: "markdown", wantFormat: "markdown"},
+		{name: "uppercase format is normalized", format: "JSON", wantFormat: "json"},
+		{name: "padded format is normalized", format: "  yaml  ", wantFormat: "yaml"},
+		{name: "empty format is rejected", format: "", wantError: true, expectedErr: "format cannot be empty, supported formats:"},
+		{name: "whitespace-only format is rejected", format: "   ", wantError: true, expectedErr: "format cannot be empty, supported formats:"},
+		{name: "unsupported format is rejected", format: "html", wantError: true, expectedErr: `invalid format "html"`},
+		{name: "scan report format is rejected", format: "pdf", wantError: true, expectedErr: `invalid format "pdf"`},
+		{name: "image sbom format is rejected", format: "spdx-json", wantError: true, expectedErr: `invalid format "spdx-json"`},
+		{name: "comma-separated multi-format is rejected", format: "json,pretty-printer", wantError: true, expectedErr: `invalid format "json,pretty-printer"`},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			diffCmd := GetDiffCmd(&mocks.MockIKubescape{})
+			stub := &stubKubescape{}
+			diffCmd := GetDiffCmd(stub)
 			diffCmd.SetArgs([]string{"base.json", "head.json", "--format", tt.format})
 
 			err := diffCmd.Execute()
 			if tt.wantError {
-				assert.ErrorContains(t, err, "invalid format")
+				assert.ErrorContains(t, err, tt.expectedErr)
+				assert.Nil(t, stub.received, "validation must happen before invoking core")
 			} else {
 				assert.NoError(t, err)
+				if assert.NotNil(t, stub.received) {
+					assert.Equal(t, tt.wantFormat, stub.received.Format)
+				}
 			}
 		})
 	}
@@ -142,10 +153,11 @@ func TestGetDiffCmd_HelpExplainsEvidenceComparison(t *testing.T) {
 
 func TestGetDiffCmd_FailOnNewAndSeverity(t *testing.T) {
 	tests := []struct {
-		name        string
-		args        []string
-		newFailures int
-		wantErr     string
+		name         string
+		args         []string
+		newFailures  int
+		wantErr      string
+		wantSeverity string
 	}{
 		{
 			name:        "fail-on-new with new failures and empty severity reports all",
@@ -154,10 +166,25 @@ func TestGetDiffCmd_FailOnNewAndSeverity(t *testing.T) {
 			wantErr:     `found 2 new or incomparable failure(s) at or above severity threshold "all"`,
 		},
 		{
-			name:        "fail-on-new with new failures uses the given severity threshold",
-			args:        []string{"base.json", "head.json", "--fail-on-new", "--severity-threshold", "high"},
-			newFailures: 1,
-			wantErr:     `found 1 new or incomparable failure(s) at or above severity threshold "high"`,
+			name:         "fail-on-new with new failures uses the given severity threshold",
+			args:         []string{"base.json", "head.json", "--fail-on-new", "--severity-threshold", "high"},
+			newFailures:  1,
+			wantErr:      `found 1 new or incomparable failure(s) at or above severity threshold "high"`,
+			wantSeverity: "high",
+		},
+		{
+			name:         "fail-on-new with uppercase severity normalizes",
+			args:         []string{"base.json", "head.json", "--fail-on-new", "--severity-threshold", "HIGH"},
+			newFailures:  1,
+			wantErr:      `found 1 new or incomparable failure(s) at or above severity threshold "high"`,
+			wantSeverity: "high",
+		},
+		{
+			name:         "fail-on-new with padded severity normalizes",
+			args:         []string{"base.json", "head.json", "--fail-on-new", "--severity-threshold", "  medium  "},
+			newFailures:  1,
+			wantErr:      `found 1 new or incomparable failure(s) at or above severity threshold "medium"`,
+			wantSeverity: "medium",
 		},
 		{
 			name:        "fail-on-new with no new failures succeeds",
@@ -175,15 +202,17 @@ func TestGetDiffCmd_FailOnNewAndSeverity(t *testing.T) {
 			wantErr: "unknown severity",
 		},
 		{
-			name:        "valid severity without fail-on-new succeeds",
-			args:        []string{"base.json", "head.json", "--severity-threshold", "medium"},
-			newFailures: 3,
+			name:         "valid severity without fail-on-new succeeds",
+			args:         []string{"base.json", "head.json", "--severity-threshold", "medium"},
+			newFailures:  3,
+			wantSeverity: "medium",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			diffCmd := GetDiffCmd(&stubKubescape{newFailures: tt.newFailures})
+			stub := &stubKubescape{newFailures: tt.newFailures}
+			diffCmd := GetDiffCmd(stub)
 			diffCmd.SilenceErrors = true
 			diffCmd.SetArgs(tt.args)
 
@@ -192,6 +221,9 @@ func TestGetDiffCmd_FailOnNewAndSeverity(t *testing.T) {
 				assert.ErrorContains(t, err, tt.wantErr)
 			} else {
 				assert.NoError(t, err)
+			}
+			if tt.wantSeverity != "" && assert.NotNil(t, stub.received) {
+				assert.Equal(t, tt.wantSeverity, stub.received.SeverityThreshold)
 			}
 		})
 	}
@@ -226,6 +258,16 @@ func TestGetDiffCmd_ValidationErrorStillPrintsUsage(t *testing.T) {
 			name:     "invalid format",
 			args:     []string{"base.json", "head.json", "--format", "invalid"},
 			errMatch: "invalid format",
+		},
+		{
+			name:     "empty format",
+			args:     []string{"base.json", "head.json", "--format", ""},
+			errMatch: "format cannot be empty",
+		},
+		{
+			name:     "whitespace format",
+			args:     []string{"base.json", "head.json", "--format", "   "},
+			errMatch: "format cannot be empty",
 		},
 		{
 			name:     "invalid severity",
