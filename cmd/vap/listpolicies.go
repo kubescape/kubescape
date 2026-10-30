@@ -11,6 +11,7 @@ import (
 
 	"github.com/jedib0t/go-pretty/v6/table"
 	"github.com/jedib0t/go-pretty/v6/text"
+	"github.com/jwalton/gchalk"
 	"github.com/kubescape/kubescape/v4/core/pkg/opaprocessor/cel"
 	"github.com/spf13/cobra"
 	"sigs.k8s.io/yaml"
@@ -46,15 +47,14 @@ func getListPoliciesCmd() *cobra.Command {
 		Long:  `Lists every policy in the CEL admission policy library embedded in this binary, with the Kubescape control it implements. Use the control IDs with 'vap create-policy-binding --control' and the policy names with '--policy'.`,
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			var rendered bytes.Buffer
-			if err := runListPolicies(&rendered, format, controlsOnly); err != nil {
-				return err
-			}
 			if outputFile != "" {
+				var rendered bytes.Buffer
+				if err := runListPolicies(&rendered, format, controlsOnly); err != nil {
+					return err
+				}
 				return writeOutput(rendered.String(), outputFile)
 			}
-			_, err := cmd.OutOrStdout().Write(rendered.Bytes())
-			return err
+			return runListPolicies(cmd.OutOrStdout(), format, controlsOnly)
 		},
 	}
 
@@ -112,6 +112,8 @@ func runListPolicies(out io.Writer, format string, controlsOnly bool) error {
 }
 
 func prettyPrintPolicies(out io.Writer, entries []policyListEntry) {
+	colored := shouldColor(out)
+
 	policyTable := table.NewWriter()
 	policyTable.SetOutputMirror(out)
 
@@ -126,12 +128,41 @@ func prettyPrintPolicies(out io.Writer, entries []policyListEntry) {
 		{Number: 5, WidthMax: 40},
 	})
 
-	policyTable.AppendHeader(table.Row{"Control ID", "Policy", "Params", "On error", "Resources"})
+	if colored {
+		policyTable.AppendHeader(table.Row{
+			gchalk.WithBrightWhite().Bold("Control ID"),
+			gchalk.WithBrightWhite().Bold("Policy"),
+			gchalk.WithBrightWhite().Bold("Params"),
+			gchalk.WithBrightWhite().Bold("On error"),
+			gchalk.WithBrightWhite().Bold("Resources"),
+		})
+	} else {
+		policyTable.AppendHeader(table.Row{"Control ID", "Policy", "Params", "On error", "Resources"})
+	}
+
 	for _, entry := range entries {
+		ctrlID := controlDisplayID(entry)
+		params := yesNo(entry.TakesParams)
+
+		if colored {
+			if entry.ControlID != "" {
+				if entry.DuplicateControl {
+					ctrlID = gchalk.WithBrightCyan().Bold(entry.ControlID) + " (duplicate)"
+				} else {
+					ctrlID = gchalk.WithBrightCyan().Bold(entry.ControlID)
+				}
+			}
+			if entry.TakesParams {
+				params = gchalk.WithGreen().Bold("yes")
+			} else {
+				params = gchalk.WithRed().Bold("no")
+			}
+		}
+
 		policyTable.AppendRow(table.Row{
-			controlDisplayID(entry),
+			ctrlID,
 			policyDisplayName(entry),
-			yesNo(entry.TakesParams),
+			params,
 			orDash(entry.FailurePolicy),
 			orDash(strings.Join(entry.Resources, ", ")),
 		})
