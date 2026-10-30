@@ -233,6 +233,33 @@ func TestVerify_SigstoreBundleKeyWithoutTlogNeedsNoTrustedRoot(t *testing.T) {
 	assert.True(t, ok)
 }
 
+// TestTrustedRootCache_RetriesFailedLoad checks a failed trusted root load,
+// such as a TUF fetch during a network outage, is not kept for the life of
+// the process, while a loaded root is reused.
+func TestTrustedRootCache_RetriesFailedLoad(t *testing.T) {
+	tm := &root.BaseTrustedMaterial{}
+	loads := 0
+	cache := &trustedRootCache{load: func() (root.TrustedMaterial, error) {
+		loads++
+		if loads == 1 {
+			return nil, fmt.Errorf("tuf: connection refused")
+		}
+		return tm, nil
+	}}
+
+	_, err := cache.get()
+	require.ErrorContains(t, err, "connection refused")
+
+	got, err := cache.get()
+	require.NoError(t, err)
+	assert.Same(t, tm, got)
+
+	got, err = cache.get()
+	require.NoError(t, err)
+	assert.Same(t, tm, got)
+	assert.Equal(t, 2, loads)
+}
+
 // TestVerify_LegacySignatureBesideBundle covers images that have a legacy
 // signature and Sigstore bundles: when no bundle verifies, the legacy
 // signature must still be checked, with its own trust and digest checks.

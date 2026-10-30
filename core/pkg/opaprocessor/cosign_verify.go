@@ -177,7 +177,28 @@ func verifyKeyless(ctx context.Context, img string) (bool, error) {
 
 // cosignTrustedRoot returns the Sigstore trusted root that signatures in the
 // Sigstore bundle format are verified against.
-var cosignTrustedRoot = sync.OnceValues(cosign.TrustedRoot)
+var cosignTrustedRoot = (&trustedRootCache{load: cosign.TrustedRoot}).get
+
+// trustedRootCache keeps the first trusted root that loads. A failed load,
+// such as a TUF fetch during a network outage, is retried on the next call.
+type trustedRootCache struct {
+	load func() (root.TrustedMaterial, error)
+	mu   sync.Mutex
+	tm   root.TrustedMaterial
+}
+
+func (c *trustedRootCache) get() (root.TrustedMaterial, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.tm == nil {
+		tm, err := c.load()
+		if err != nil {
+			return nil, err
+		}
+		c.tm = tm
+	}
+	return c.tm, nil
+}
 
 // verifyImageSignatures verifies img with co, whether it was signed in the
 // Sigstore bundle format that `cosign sign` writes by default since v3, or in
