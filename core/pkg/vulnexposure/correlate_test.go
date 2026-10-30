@@ -157,14 +157,21 @@ func TestCorrelate_CarriesFixAvailable(t *testing.T) {
 	if len(findings) != len(want) {
 		t.Fatalf("expected %d findings, got %d", len(want), len(findings))
 	}
+	seen := make(map[string]int, len(want))
 	for _, finding := range findings {
 		expected, ok := want[finding.Vulnerability.ID]
 		if !ok {
 			t.Errorf("unexpected finding %s", finding.Vulnerability.ID)
 			continue
 		}
+		seen[finding.Vulnerability.ID]++
 		if finding.FixAvailable != expected {
 			t.Errorf("%s: expected FixAvailable=%t, got %t", finding.Vulnerability.ID, expected, finding.FixAvailable)
+		}
+	}
+	for id := range want {
+		if seen[id] != 1 {
+			t.Errorf("%s: expected exactly one finding, got %d", id, seen[id])
 		}
 	}
 }
