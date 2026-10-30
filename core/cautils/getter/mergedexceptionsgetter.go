@@ -23,10 +23,14 @@ type MergedExceptionsGetter struct {
 	secondary IExceptionsGetter
 }
 
+// NewMergedExceptionsGetter combines primary policies with optional CRD policies,
+// preserving primary precedence wherever their matching scopes overlap.
 func NewMergedExceptionsGetter(primary, secondary IExceptionsGetter) *MergedExceptionsGetter {
 	return &MergedExceptionsGetter{primary: primary, secondary: secondary}
 }
 
+// GetExceptions loads policies and resets primary provenance before merging CRDs.
+// It preserves caller-owned policies and tolerates non-context secondary errors.
 func (g *MergedExceptionsGetter) GetExceptions(ctx context.Context, clusterName string) ([]armotypes.PostureExceptionPolicy, error) {
 	if g == nil || g.primary == nil {
 		return []armotypes.PostureExceptionPolicy{}, nil
