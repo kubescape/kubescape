@@ -119,19 +119,53 @@ func TestCorrelate_CarriesFixAvailable(t *testing.T) {
 		w: {Namespace: "prod", Name: "web", Labels: map[string]string{"app": "web"}},
 	}
 
+	tests := []struct {
+		id        string
+		fix       storagev1beta1.Fix
+		available bool
+	}{
+		{
+			id:        "CVE-FIXED",
+			fix:       storagev1beta1.Fix{State: "fixed", Versions: []string{"1.2.4"}},
+			available: true,
+		},
+		{
+			id:  "CVE-FIXED-NO-VERSIONS",
+			fix: storagev1beta1.Fix{State: "fixed"},
+		},
+		{
+			id:  "CVE-VERSIONS-NOT-FIXED",
+			fix: storagev1beta1.Fix{State: "not-fixed", Versions: []string{"1.2.4"}},
+		},
+		{
+			id: "CVE-UNFIXED",
+		},
+	}
+	vulnerabilities := make([]storagev1beta1.Vulnerability, 0, len(tests))
+	want := make(map[string]bool, len(tests))
+	for _, tt := range tests {
+		v := vuln(tt.id, "Critical", false)
+		v.Fix = tt.fix
+		vulnerabilities = append(vulnerabilities, v)
+		want[tt.id] = tt.available
+	}
+
 	findings, _ := Correlate(idx, endpoints, map[Workload][]storagev1beta1.Vulnerability{
-		w: {vuln("CVE-FIXED", "Critical", true), vuln("CVE-UNFIXED", "Critical", false)},
+		w: vulnerabilities,
 	}, SeverityLow, nil)
 
-	byID := map[string]bool{}
-	for _, f := range findings {
-		byID[f.Vulnerability.ID] = f.FixAvailable
+	if len(findings) != len(want) {
+		t.Fatalf("expected %d findings, got %d", len(want), len(findings))
 	}
-	if !byID["CVE-FIXED"] {
-		t.Error("CVE-FIXED must have FixAvailable = true")
-	}
-	if byID["CVE-UNFIXED"] {
-		t.Error("CVE-UNFIXED must have FixAvailable = false")
+	for _, finding := range findings {
+		expected, ok := want[finding.Vulnerability.ID]
+		if !ok {
+			t.Errorf("unexpected finding %s", finding.Vulnerability.ID)
+			continue
+		}
+		if finding.FixAvailable != expected {
+			t.Errorf("%s: expected FixAvailable=%t, got %t", finding.Vulnerability.ID, expected, finding.FixAvailable)
+		}
 	}
 }
 
