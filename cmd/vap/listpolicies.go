@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -47,16 +48,20 @@ func getListPoliciesCmd() *cobra.Command {
 		Long:  `Lists every policy in the CEL admission policy library embedded in this binary, with the Kubescape control it implements. Use the control IDs with 'vap create-policy-binding --control' and the policy names with '--policy'.`,
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			normalizedFormat, err := validateListPoliciesFormat(format)
+			if err != nil {
+				return err
+			}
 			if outputFile != "" {
 				var rendered bytes.Buffer
 				out := &noColorWriter{w: &rendered}
-				if err := runListPolicies(out, format, controlsOnly); err != nil {
+				if err := runListPolicies(out, normalizedFormat, controlsOnly); err != nil {
 					return err
 				}
 				return writeOutput(rendered.String(), outputFile)
 			}
 			out := &errorRecordingWriter{w: cmd.OutOrStdout()}
-			if err := runListPolicies(out, format, controlsOnly); err != nil {
+			if err := runListPolicies(out, normalizedFormat, controlsOnly); err != nil {
 				return err
 			}
 			return out.err
@@ -70,7 +75,24 @@ func getListPoliciesCmd() *cobra.Command {
 	return cmd
 }
 
+func validateListPoliciesFormat(format string) (string, error) {
+	trimmed := strings.ToLower(strings.TrimSpace(format))
+	supported := strings.Join(quoted(listPoliciesFormats), "/")
+	if trimmed == "" {
+		return "", fmt.Errorf("format cannot be empty, supported formats: %s", supported)
+	}
+	if !slices.Contains(listPoliciesFormats, trimmed) {
+		return "", fmt.Errorf("invalid format %q, supported formats: %s", format, supported)
+	}
+	return trimmed, nil
+}
+
 func runListPolicies(out io.Writer, format string, controlsOnly bool) error {
+	normalizedFormat, err := validateListPoliciesFormat(format)
+	if err != nil {
+		return err
+	}
+
 	policies, err := cel.ListPolicies()
 	if err != nil {
 		return fmt.Errorf("read embedded policy library: %w", err)
@@ -97,7 +119,7 @@ func runListPolicies(out io.Writer, format string, controlsOnly bool) error {
 		rec = &errorRecordingWriter{w: out}
 	}
 
-	switch format {
+	switch normalizedFormat {
 	case formatPretty:
 		prettyPrintPolicies(rec, entries)
 	case formatJSON:
