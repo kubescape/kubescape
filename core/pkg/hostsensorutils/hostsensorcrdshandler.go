@@ -31,7 +31,7 @@ type HostSensorHandler struct {
 }
 
 // NewHostSensorHandler builds a new CRD-based host sensor handler.
-func NewHostSensorHandler(k8sObj *k8sinterface.KubernetesApi, _ string) (*HostSensorHandler, error) {
+func NewHostSensorHandler(ctx context.Context, k8sObj *k8sinterface.KubernetesApi, _ string) (*HostSensorHandler, error) {
 	if k8sObj == nil {
 		return nil, fmt.Errorf("nil k8s interface received")
 	}
@@ -57,7 +57,7 @@ func NewHostSensorHandler(k8sObj *k8sinterface.KubernetesApi, _ string) (*HostSe
 	}
 
 	// Verify we can access nodes (basic sanity check)
-	nodeList, err := k8sObj.KubernetesClient.CoreV1().Nodes().List(k8sObj.Context, metav1.ListOptions{})
+	nodeList, err := k8sObj.KubernetesClient.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
 	if err != nil || len(nodeList.Items) == 0 {
 		if err == nil {
 			err = fmt.Errorf("no nodes to scan")

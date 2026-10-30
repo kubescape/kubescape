@@ -119,6 +119,8 @@ func TestNormalizeDownloadTarget(t *testing.T) {
 		{"artifact", core.TargetArtifacts},
 		{"attack-tracks", core.TargetAttackTracks},
 		{"attack-track", core.TargetAttackTracks},
+		{" control ", core.TargetControl},
+		{"\tframework\t", core.TargetFramework},
 		{"unknown", "unknown"},
 	}
 
@@ -278,8 +280,39 @@ func TestDownloadCmd_EmptyIdentifierValidation(t *testing.T) {
 			expectedErr: "name cannot be empty for control download",
 		},
 		{
+			name:        "framework with whitespace name",
+			args:        []string{"framework", "   "},
+			wantErr:     true,
+			expectedErr: "name cannot be empty for framework download",
+		},
+		{
+			name:        "frameworks alias with whitespace name",
+			args:        []string{"frameworks", "\t  "},
+			wantErr:     true,
+			expectedErr: "name cannot be empty for framework download",
+		},
+		{
+			name:        "control with whitespace name",
+			args:        []string{"control", "   "},
+			wantErr:     true,
+			expectedErr: "name cannot be empty for control download",
+		},
+		{
+			name:        "controls alias with whitespace name",
+			args:        []string{"controls", "   \t  "},
+			wantErr:     true,
+			expectedErr: "name cannot be empty for control download",
+		},
+		{
 			name:       "artifacts with empty identifier",
 			args:       []string{"artifacts", ""},
+			wantErr:    false,
+			wantTarget: core.TargetArtifacts,
+			wantID:     "",
+		},
+		{
+			name:       "artifacts with whitespace identifier",
+			args:       []string{"artifacts", "   "},
 			wantErr:    false,
 			wantTarget: core.TargetArtifacts,
 			wantID:     "",
@@ -292,8 +325,22 @@ func TestDownloadCmd_EmptyIdentifierValidation(t *testing.T) {
 			wantID:     "",
 		},
 		{
+			name:       "exceptions with whitespace identifier",
+			args:       []string{"exceptions", "   "},
+			wantErr:    false,
+			wantTarget: core.TargetExceptions,
+			wantID:     "",
+		},
+		{
 			name:       "controls-inputs with empty identifier",
 			args:       []string{"controls-inputs", ""},
+			wantErr:    false,
+			wantTarget: core.TargetControlsInputs,
+			wantID:     "",
+		},
+		{
+			name:       "controls-inputs with whitespace identifier",
+			args:       []string{"controls-inputs", "   "},
 			wantErr:    false,
 			wantTarget: core.TargetControlsInputs,
 			wantID:     "",
@@ -304,6 +351,27 @@ func TestDownloadCmd_EmptyIdentifierValidation(t *testing.T) {
 			wantErr:    false,
 			wantTarget: core.TargetAttackTracks,
 			wantID:     "",
+		},
+		{
+			name:       "attack-tracks with whitespace identifier",
+			args:       []string{"attack-tracks", "   "},
+			wantErr:    false,
+			wantTarget: core.TargetAttackTracks,
+			wantID:     "",
+		},
+		{
+			name:       "framework with padded name trimmed",
+			args:       []string{"framework", "  nsa  "},
+			wantErr:    false,
+			wantTarget: core.TargetFramework,
+			wantID:     "nsa",
+		},
+		{
+			name:       "control with padded name trimmed",
+			args:       []string{"control", "  C-0001  "},
+			wantErr:    false,
+			wantTarget: core.TargetControl,
+			wantID:     "C-0001",
 		},
 	}
 

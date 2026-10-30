@@ -2,8 +2,10 @@ package cautils
 
 import (
 	"encoding/json"
+	"os"
 	"testing"
 
+	"github.com/jwalton/gchalk"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
@@ -198,6 +200,7 @@ func TestValidateConfig_InvalidCloudReportURL(t *testing.T) {
 }
 
 func TestFormatConfigValidationResultTextFailuresOnlyByDefault(t *testing.T) {
+	t.Setenv("FORCE_COLOR", "0")
 	result := ValidateConfig(&ConfigObj{
 		AccountID:      "6f2c3e1a-9b4d-4c8e-a1f2-3b4c5d6e7f80",
 		AccessKey:      "",
@@ -218,6 +221,7 @@ func TestFormatConfigValidationResultTextFailuresOnlyByDefault(t *testing.T) {
 }
 
 func TestFormatConfigValidationResultTextIncludesPassingChecks(t *testing.T) {
+	t.Setenv("FORCE_COLOR", "0")
 	result := ValidateConfig(validConfigForValidation(), ConfigValidationProfileCloud)
 
 	output, err := FormatConfigValidationResult(result, "text", true)
@@ -297,6 +301,7 @@ func TestFormatConfigValidationResultNormalizesFormat(t *testing.T) {
 }
 
 func TestFormatConfigValidationResultDefaultsToText(t *testing.T) {
+	t.Setenv("FORCE_COLOR", "0")
 	result := ValidateConfig(validConfigForValidation(), ConfigValidationProfileCloud)
 
 	output, err := FormatConfigValidationResult(result, "", false)
@@ -370,4 +375,103 @@ func validationCheckFields(checks []ConfigValidationCheck) []string {
 		fields = append(fields, check.Field)
 	}
 	return fields
+}
+
+func TestFormatConfigValidationResultText_WithColor(t *testing.T) {
+	if orig, ok := os.LookupEnv("NO_COLOR"); ok {
+		os.Unsetenv("NO_COLOR")
+		t.Cleanup(func() {
+			_ = os.Setenv("NO_COLOR", orig)
+		})
+	}
+	t.Setenv("FORCE_COLOR", "1")
+	prevLevel := gchalk.GetLevel()
+	gchalk.SetLevel(gchalk.LevelAnsi16m)
+	defer gchalk.SetLevel(prevLevel)
+
+	// 1. Passing validation result: green valid, cyan fields, green ok
+	passResult := ValidateConfig(validConfigForValidation(), ConfigValidationProfileCloud)
+	passOut, err := FormatConfigValidationResult(passResult, "text", true)
+	require.NoError(t, err)
+
+	passStr := string(passOut)
+	assert.Contains(t, passStr, gchalk.WithGreen().Bold("valid: true"))
+	assert.Contains(t, passStr, "profile: cloud")
+	assert.Contains(t, passStr, gchalk.BrightCyan("accountID"))
+	assert.Contains(t, passStr, gchalk.WithGreen().Bold("ok"))
+	assert.Contains(t, passStr, "account ID is configured")
+
+	// 2. Failing validation result: red valid, red missing, red invalid
+	failResult := ValidateConfig(&ConfigObj{
+		AccountID:      "6f2c3e1a-9b4d-4c8e-a1f2-3b4c5d6e7f80",
+		AccessKey:      "",
+		CloudAPIURL:    "https://api.example.com",
+		CloudReportURL: "ftp://report.example.com",
+	}, ConfigValidationProfileCloud)
+	failOut, err := FormatConfigValidationResult(failResult, "text", false)
+	require.NoError(t, err)
+
+	failStr := string(failOut)
+	assert.Contains(t, failStr, gchalk.WithRed().Bold("valid: false"))
+	assert.Contains(t, failStr, gchalk.BrightCyan("accessKey"))
+	assert.Contains(t, failStr, gchalk.WithRed().Bold("missing"))
+	assert.Contains(t, failStr, gchalk.BrightCyan("cloudReportURL"))
+	assert.Contains(t, failStr, gchalk.WithRed().Bold("invalid"))
+}
+
+func TestFormatConfigValidationResultText_NoColorPrecedence(t *testing.T) {
+	t.Setenv("FORCE_COLOR", "1")
+	t.Setenv("NO_COLOR", "1")
+	prevLevel := gchalk.GetLevel()
+	gchalk.SetLevel(gchalk.LevelAnsi16m)
+	defer gchalk.SetLevel(prevLevel)
+
+	result := ValidateConfig(validConfigForValidation(), ConfigValidationProfileCloud)
+	output, err := FormatConfigValidationResult(result, "text", true)
+	require.NoError(t, err)
+
+	outStr := string(output)
+	assert.NotContains(t, outStr, "\x1b[", "NO_COLOR must ensure zero ANSI escape sequences")
+	assert.Contains(t, outStr, "valid: true")
+	assert.Contains(t, outStr, "profile: cloud")
+	assert.Contains(t, outStr, "accountID: ok - account ID is configured")
+}
+
+func TestFormatConfigValidationResultText_EmptyNoColorTreatedAsUnset(t *testing.T) {
+	if orig, ok := os.LookupEnv("NO_COLOR"); ok {
+		t.Cleanup(func() {
+			_ = os.Setenv("NO_COLOR", orig)
+		})
+	}
+	t.Setenv("NO_COLOR", "")
+	t.Setenv("FORCE_COLOR", "1")
+	prevLevel := gchalk.GetLevel()
+	gchalk.SetLevel(gchalk.LevelAnsi16m)
+	defer gchalk.SetLevel(prevLevel)
+
+	result := ValidateConfig(validConfigForValidation(), ConfigValidationProfileCloud)
+	output, err := FormatConfigValidationResult(result, "text", true)
+	require.NoError(t, err)
+
+	outStr := string(output)
+	assert.Contains(t, outStr, gchalk.WithGreen().Bold("valid: true"))
+	assert.Contains(t, outStr, gchalk.BrightCyan("accountID"))
+	assert.Contains(t, outStr, gchalk.WithGreen().Bold("ok"))
+}
+
+func TestFormatConfigValidationResult_ExportPathsHaveZeroANSI(t *testing.T) {
+	t.Setenv("FORCE_COLOR", "1")
+	prevLevel := gchalk.GetLevel()
+	gchalk.SetLevel(gchalk.LevelAnsi16m)
+	defer gchalk.SetLevel(prevLevel)
+
+	result := ValidateConfig(validConfigForValidation(), ConfigValidationProfileCloud)
+
+	jsonOut, err := FormatConfigValidationResult(result, "json", true)
+	require.NoError(t, err)
+	assert.NotContains(t, string(jsonOut), "\x1b[", "JSON export must have zero ANSI codes")
+
+	yamlOut, err := FormatConfigValidationResult(result, "yaml", true)
+	require.NoError(t, err)
+	assert.NotContains(t, string(yamlOut), "\x1b[", "YAML export must have zero ANSI codes")
 }

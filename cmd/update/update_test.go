@@ -223,7 +223,7 @@ func TestUpdateCommandDoesNotHonorSkipUpdateCheckEnv(t *testing.T) {
 }
 
 func TestGetUpdateCmd_DevelopmentVersion(t *testing.T) {
-	devVersions := []string{"", "v3.0.0-rc.1"}
+	devVersions := []string{"", "dev", "v3.0.0-rc.1"}
 
 	for _, buildNum := range devVersions {
 		testName := buildNum
@@ -273,7 +273,29 @@ func TestGetUpdateCmd_DevelopmentVersion(t *testing.T) {
 	}
 }
 
-func TestGetUpdateCmd_FailedUpdateCheck_JSON(t *testing.T) {
+// A release version without the leading "v" is still a release, not a
+// development build.
+func TestGetUpdateCmd_JSON_ReleaseWithoutVPrefix(t *testing.T) {
+	withVersionCheckHandler(t, &stubVersionCheckHandler{latest: "v3.1.0"})
+	withVersionGlobals(t, "3.0.0", "")
+
+	cmd := GetUpdateCmd(&stubKubescape{ctx: context.Background()})
+	require.NotNil(t, cmd)
+
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetArgs([]string{"--format", "json"})
+	require.NoError(t, cmd.Execute())
+
+	var info UpdateInfo
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &info))
+	assert.Equal(t, "v3.1.0", info.LatestVersion)
+	assert.Empty(t, info.Message)
+}
+
+// The version service names a latest release only when it is newer than the
+// running version, so a successful check without one means nothing to update.
+func TestGetUpdateCmd_JSON_NoNewerRelease(t *testing.T) {
 	withVersionCheckHandler(t, &stubVersionCheckHandler{latest: ""})
 	withVersionGlobals(t, "v3.0.0", "")
 
@@ -287,7 +309,7 @@ func TestGetUpdateCmd_FailedUpdateCheck_JSON(t *testing.T) {
 
 	var info UpdateInfo
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &info))
-	assert.Equal(t, "Failed to check for updates", info.Message)
+	assert.Equal(t, "Nothing to update: you are running the latest version", info.Message)
 	assert.Empty(t, info.LatestVersion)
 }
 
@@ -321,7 +343,7 @@ func TestGetUpdateCmd_Text_AlreadyUpToDate(t *testing.T) {
 	assert.Contains(t, string(out), "Nothing to update: you are running the latest version")
 }
 
-func TestGetUpdateCmd_Text_FailedUpdateCheck(t *testing.T) {
+func TestGetUpdateCmd_Text_NoNewerRelease(t *testing.T) {
 	withVersionCheckHandler(t, &stubVersionCheckHandler{latest: ""})
 	withVersionGlobals(t, "v3.0.0", "")
 
@@ -348,7 +370,7 @@ func TestGetUpdateCmd_Text_FailedUpdateCheck(t *testing.T) {
 	out, err := io.ReadAll(r)
 	require.NoError(t, err)
 
-	assert.Contains(t, string(out), "Failed to check for updates")
+	assert.Contains(t, string(out), "Nothing to update: you are running the latest version")
 }
 
 type failingUpdateWriter struct {
