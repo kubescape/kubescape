@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -46,14 +47,18 @@ func getListPoliciesCmd() *cobra.Command {
 		Long:  `Lists every policy in the CEL admission policy library embedded in this binary, with the Kubescape control it implements. Use the control IDs with 'vap create-policy-binding --control' and the policy names with '--policy'.`,
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			normalizedFormat, err := validateListPoliciesFormat(format)
+			if err != nil {
+				return err
+			}
 			var rendered bytes.Buffer
-			if err := runListPolicies(&rendered, format, controlsOnly); err != nil {
+			if err := runListPolicies(&rendered, normalizedFormat, controlsOnly); err != nil {
 				return err
 			}
 			if outputFile != "" {
 				return writeOutput(rendered.String(), outputFile)
 			}
-			_, err := cmd.OutOrStdout().Write(rendered.Bytes())
+			_, err = cmd.OutOrStdout().Write(rendered.Bytes())
 			return err
 		},
 	}
@@ -65,7 +70,24 @@ func getListPoliciesCmd() *cobra.Command {
 	return cmd
 }
 
+func validateListPoliciesFormat(format string) (string, error) {
+	trimmed := strings.ToLower(strings.TrimSpace(format))
+	supported := strings.Join(quoted(listPoliciesFormats), "/")
+	if trimmed == "" {
+		return "", fmt.Errorf("format cannot be empty, supported formats: %s", supported)
+	}
+	if !slices.Contains(listPoliciesFormats, trimmed) {
+		return "", fmt.Errorf("invalid format %q, supported formats: %s", format, supported)
+	}
+	return trimmed, nil
+}
+
 func runListPolicies(out io.Writer, format string, controlsOnly bool) error {
+	normalizedFormat, err := validateListPoliciesFormat(format)
+	if err != nil {
+		return err
+	}
+
 	policies, err := cel.ListPolicies()
 	if err != nil {
 		return fmt.Errorf("read embedded policy library: %w", err)
@@ -87,7 +109,7 @@ func runListPolicies(out io.Writer, format string, controlsOnly bool) error {
 		})
 	}
 
-	switch format {
+	switch normalizedFormat {
 	case formatPretty:
 		prettyPrintPolicies(out, entries)
 	case formatJSON:
