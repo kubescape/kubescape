@@ -1,6 +1,8 @@
 package vap
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -1251,6 +1253,16 @@ func TestDeployLibraryCmdTimeoutFlag(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, time.Duration(0), got)
 	})
+
+	t.Run("negative timeout is rejected", func(t *testing.T) {
+		cmd := getDeployLibraryCmd()
+		cmd.SilenceUsage = true
+		cmd.SilenceErrors = true
+		cmd.SetArgs([]string{"--timeout", "-5s"})
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "timeout cannot be negative")
+	})
 }
 
 func TestDownloadFileToStringTimeout(t *testing.T) {
@@ -2204,4 +2216,83 @@ func TestWriteOutput(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "target content", string(targetContent))
 	})
+
+	t.Run("empty output path writes to provided writer", func(t *testing.T) {
+		var buf bytes.Buffer
+		err := writeOutput("custom writer content", "", &buf)
+		require.NoError(t, err)
+		assert.Equal(t, "custom writer content", buf.String())
+	})
+
+	t.Run("empty output path propagates writer error", func(t *testing.T) {
+		writeErr := errors.New("write failure")
+		err := writeOutput("fail content", "", failingWriter{err: writeErr})
+		require.ErrorIs(t, err, writeErr)
+	})
+}
+
+type failingWriter struct {
+	err error
+}
+
+func (w failingWriter) Write([]byte) (int, error) {
+	return 0, w.err
+}
+
+func TestDeployLibraryCmd_RejectsUnexpectedArgs(t *testing.T) {
+	cmd := getDeployLibraryCmd()
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+	cmd.SetArgs([]string{"unexpected"})
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `unknown command "unexpected" for "deploy-library"`)
+}
+
+func TestCreatePolicyBindingCmd_RejectsUnexpectedArgs(t *testing.T) {
+	cmd := getCreatePolicyBindingCmd()
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+	cmd.SetArgs([]string{"--name", "test-binding", "--control", "C-0009", "--parameter-reference", "basic-control-configuration", "unexpected"})
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `unknown command "unexpected" for "create-policy-binding"`)
+}
+
+func TestDeployLibraryCmd_WritesToCmdOutOrStdout(t *testing.T) {
+	cmd := getDeployLibraryCmd()
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetArgs([]string{})
+	require.NoError(t, cmd.Execute())
+	assert.Contains(t, buf.String(), "ValidatingAdmissionPolicy")
+}
+
+func TestDeployLibraryCmd_PropagatesWriterError(t *testing.T) {
+	cmd := getDeployLibraryCmd()
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+	writeErr := errors.New("write failure")
+	cmd.SetOut(failingWriter{err: writeErr})
+	cmd.SetArgs([]string{})
+	require.ErrorIs(t, cmd.Execute(), writeErr)
+}
+
+func TestCreatePolicyBindingCmd_WritesToCmdOutOrStdout(t *testing.T) {
+	cmd := getCreatePolicyBindingCmd()
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetArgs([]string{"--name", "test-binding", "--control", "C-0009", "--parameter-reference", "basic-control-configuration"})
+	require.NoError(t, cmd.Execute())
+	assert.Contains(t, buf.String(), "ValidatingAdmissionPolicyBinding")
+}
+
+func TestCreatePolicyBindingCmd_PropagatesWriterError(t *testing.T) {
+	cmd := getCreatePolicyBindingCmd()
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+	writeErr := errors.New("write failure")
+	cmd.SetOut(failingWriter{err: writeErr})
+	cmd.SetArgs([]string{"--name", "test-binding", "--control", "C-0009", "--parameter-reference", "basic-control-configuration"})
+	require.ErrorIs(t, cmd.Execute(), writeErr)
 }
