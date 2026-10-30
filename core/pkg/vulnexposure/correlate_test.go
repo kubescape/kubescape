@@ -72,6 +72,40 @@ func TestCorrelate_SkipsWorkloadWithoutResolvedEndpoint(t *testing.T) {
 	}
 }
 
+func TestCorrelate_SortsSkippedWorkloadsByNamespaceKindAndName(t *testing.T) {
+	idx := openIndex(t)
+	workloads := []Workload{
+		{Namespace: "prod", Kind: "StatefulSet", Name: "web"},
+		{Namespace: "dev", Kind: "Deployment", Name: "zeta"},
+		{Namespace: "dev", Kind: "StatefulSet", Name: "api"},
+		{Namespace: "dev", Kind: "Deployment", Name: "alpha"},
+	}
+	vulnerabilities := make(map[Workload][]storagev1beta1.Vulnerability, len(workloads))
+	for _, workload := range workloads {
+		vulnerabilities[workload] = []storagev1beta1.Vulnerability{vuln("CVE-1", "Critical", false)}
+	}
+
+	findings, skipped := Correlate(idx, nil, vulnerabilities, SeverityLow, nil)
+
+	if len(findings) != 0 {
+		t.Errorf("expected no findings without resolved endpoints, got %+v", findings)
+	}
+	if len(skipped) != len(workloads) {
+		t.Fatalf("expected %d skipped workloads, got %d", len(workloads), len(skipped))
+	}
+	want := []Workload{
+		{Namespace: "dev", Kind: "Deployment", Name: "alpha"},
+		{Namespace: "dev", Kind: "Deployment", Name: "zeta"},
+		{Namespace: "dev", Kind: "StatefulSet", Name: "api"},
+		{Namespace: "prod", Kind: "StatefulSet", Name: "web"},
+	}
+	for i := range want {
+		if skipped[i] != want[i] {
+			t.Errorf("skipped[%d]: expected %+v, got %+v", i, want[i], skipped[i])
+		}
+	}
+}
+
 func TestCorrelate_FiltersBelowMinSeverity(t *testing.T) {
 	idx := openIndex(t)
 	w := Workload{Namespace: "prod", Kind: "Deployment", Name: "web"}
