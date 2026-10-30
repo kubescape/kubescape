@@ -1,7 +1,7 @@
 header:
   schema-version: 2.2.0
-  last-updated: '2026-10-20'
-  last-reviewed: '2026-10-07'
+  last-updated: '2026-10-28'
+  last-reviewed: '2026-10-28'
   url: https://raw.githubusercontent.com/kubescape/kubescape/master/security-insights.yml
 
 project:
@@ -118,3 +118,13 @@ repository:
           release: false
         results: {}
         comment: Runs weekly and on every push to master.
+      - name: OSPS Baseline Action
+        type: other
+        rulesets:
+          - osps-baseline-2026-08
+        integration:
+          adhoc: true
+          ci: true
+          release: false
+        results: {}
+        comment: Runs on every push to master and weekly in .github/workflows/osps-baseline.yml. Results are in each run's summary and its osps-baseline-results artifact (https://github.com/kubescape/kubescape/actions/workflows/osps-baseline.yml); the action produces reports, not an attestation.

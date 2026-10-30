@@ -89,17 +89,17 @@ func TestAzureAdaptor_KQLValidation(t *testing.T) {
 	adaptor.registryHost = "test.azurecr.io"
 
 	// Mixed-case validation test
-	err := adaptor.validateImageID(ContainerImageIdentifier{Registry: "Test.AzureCR.io", Repository: "repo", Hash: "sha256:123"})
+	err := validateAzureImageID(ContainerImageIdentifier{Registry: "Test.AzureCR.io", Repository: "repo", Hash: "sha256:123"}, adaptor.registryHost)
 	assert.NoError(t, err)
 
-	err = adaptor.validateImageID(ContainerImageIdentifier{Registry: "wrong.azurecr.io", Repository: "repo", Hash: "sha256:123"})
+	err = validateAzureImageID(ContainerImageIdentifier{Registry: "wrong.azurecr.io", Repository: "repo", Hash: "sha256:123"}, adaptor.registryHost)
 	assert.ErrorContains(t, err, "does not match logged-in registry")
 
 	// KQL breakout injection test
-	err = adaptor.validateImageID(ContainerImageIdentifier{Registry: "test.azurecr.io", Repository: "repo\" or 1=1", Hash: "sha256:123"})
+	err = validateAzureImageID(ContainerImageIdentifier{Registry: "test.azurecr.io", Repository: "repo\" or 1=1", Hash: "sha256:123"}, adaptor.registryHost)
 	assert.ErrorContains(t, err, "invalid characters")
 
-	err = adaptor.validateImageID(ContainerImageIdentifier{Registry: "test.azurecr.io", Repository: "repo", Hash: "$()"})
+	err = validateAzureImageID(ContainerImageIdentifier{Registry: "test.azurecr.io", Repository: "repo", Hash: "$()"}, adaptor.registryHost)
 	assert.ErrorContains(t, err, "invalid characters")
 }
 

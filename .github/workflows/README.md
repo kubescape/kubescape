@@ -60,6 +60,8 @@ The workflow can also be started manually via `workflow_dispatch`, which exposes
 
 Reusable workflows — the ones invoked by another workflow through `on: workflow_call` — carry an alphabetic prefix (`a-pr-scanner.yaml`). A workflow that invokes one carries a numeric prefix (`00-pr-scanner.yaml`). `02-release.yaml` also carries a numeric prefix, but it invokes nothing: it is an event-triggered entrypoint that does its work inline. Workflows that are neither reusable nor callers, such as `scorecard.yml`, sit outside the convention.
 
+`osps-baseline.yml` is one of those standalone workflows. It runs the OSPS Baseline scanner against this repository on every push to `master`, weekly, and on manual dispatch, using the `osps-baseline-2026-08` catalog. Results appear in the run summary and in the `osps-baseline-results` artifact, kept for 30 days; nothing is published outside the repository. The Security Insights file at the repository root lists it under `repository.security.tools`.
+
 ## Screenshot
 
 <img width="1469" alt="image" src="https://user-images.githubusercontent.com/64066841/212532727-e82ec9e7-263d-408b-b4b0-a8c943f0109a.png">

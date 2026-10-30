@@ -95,7 +95,7 @@ helm template ./chart | kubescape predict pss -
 
 A single `-` reads the manifests from stdin instead of from files. It cannot be combined with other paths.
 
-Local manifests are evaluated when their kind carries a pod spec: `Pod`, `PodTemplate`, `Deployment`, `DaemonSet`, `StatefulSet`, `ReplicaSet`, `ReplicationController`, `Job` and `CronJob`, including inside `List` envelopes. Other kinds are skipped.
+Local manifests are evaluated when their kind carries a pod spec: `Pod`, `PodTemplate`, `Deployment`, `DaemonSet`, `StatefulSet`, `ReplicaSet`, `ReplicationController`, `Job` and `CronJob`, including inside `List` envelopes. As in Pod Security Admission, the object must also be in the kind's built-in API group: the core group (`apiVersion: v1`) for `Pod`, `PodTemplate` and `ReplicationController`, `batch` for `Job` and `CronJob`, and `apps` for the rest. A custom resource that reuses one of these kind names, such as a Volcano `batch.volcano.sh/v1alpha1` `Job`, is skipped like any other kind. A manifest whose `apiVersion` is missing or does not parse names no group, so it is matched by its kind alone.
 
 > [!NOTE]
 > When scanning local manifests without `-n, --namespace`, workloads across all files are aggregated together. If identical `Kind/Name` pairs exist across different manifests/namespaces, use `-n, --namespace` to scope evaluation to a specific namespace and disambiguate resources.

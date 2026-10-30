@@ -51,8 +51,12 @@ type fixReportCache struct {
 // scannedResource is one failed resource paired with the manifest it came from.
 type scannedResource struct {
 	resourceID string
-	relPath    string
-	absPath    string
+	// relPath is the repository-relative path written to reports. The SARIF,
+	// GitHub Actions and GitLab SAST printers store it with "/" separators,
+	// which those formats expect on every OS.
+	relPath string
+	// absPath is the native filesystem path used to read the manifest.
+	absPath string
 }
 
 // groupByManifest orders failed resources so every resource of one manifest is
