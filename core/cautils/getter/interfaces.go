@@ -3,6 +3,7 @@ package getter
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/opa-utils/reporthandling"
@@ -41,7 +42,23 @@ type (
 	ConsumedFileDigester interface {
 		ConsumedFileDigest() (path, digest string, ok bool)
 	}
+
+	// CacheSourcer is implemented by getters whose type alone does not say
+	// which source they read, such as one getter type over different files.
+	CacheSourcer interface {
+		CacheSource() string
+	}
 )
+
+// CacheSourceOf identifies the source a getter reads, so a cache shared by
+// scans with different sources only serves an entry to the source that
+// produced it. Getters without a CacheSource are identified by their type.
+func CacheSourceOf(g any) string {
+	if s, ok := g.(CacheSourcer); ok {
+		return s.CacheSource()
+	}
+	return fmt.Sprintf("%T", g)
+}
 
 // isContextErr reports whether err was caused by context cancellation or a deadline.
 func isContextErr(err error) bool {
