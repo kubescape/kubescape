@@ -125,10 +125,6 @@ func TestPolicyCacheSourceIsolation(t *testing.T) {
 
 		first := collect(t, newScanInfo(), fileExceptions(t, exceptionsPath, true), inputsPath)
 		crdReads.Store(0)
-		// Within the TTL a source keeps serving what it returned first, even
-		// if the file at that path changes.
-		exceptionFile("exceptions-same.json", "same-source-v2")
-		writeFile("controls-inputs-same.json", `{"probe":["same-source-v2"]}`)
 		second := collect(t, newScanInfo(), fileExceptions(t, exceptionsPath, true), inputsPath)
 
 		assert.ElementsMatch(t, []string{"same-source-v1", clusterException}, names(second))
@@ -137,5 +133,29 @@ func TestPolicyCacheSourceIsolation(t *testing.T) {
 		require.NotNil(t, first.Metadata.ScanMetadata.ScanContract)
 		require.Len(t, first.Metadata.ScanMetadata.ScanContract.RunnerInputs, 2)
 		assert.Equal(t, first.Metadata.ScanMetadata.ScanContract.RunnerInputs, second.Metadata.ScanMetadata.ScanContract.RunnerInputs)
+
+		// A file is identified by its contents, so a change is read at once.
+		exceptionFile("exceptions-same.json", "same-source-v2")
+		writeFile("controls-inputs-same.json", `{"probe":["same-source-v2"]}`)
+		third := collect(t, newScanInfo(), fileExceptions(t, exceptionsPath, true), inputsPath)
+
+		assert.ElementsMatch(t, []string{"same-source-v2", clusterException}, names(third))
+		assert.Equal(t, map[string][]string{"probe": {"same-source-v2"}}, third.RegoInputData.PostureControlInputs)
+		assert.NotEqual(t, first.Metadata.ScanMetadata.ScanContract.RunnerInputs, third.Metadata.ScanMetadata.ScanContract.RunnerInputs)
+	})
+
+	t.Run("identical request bodies share the cache", func(t *testing.T) {
+		// Each REST request body is saved to its own temporary file.
+		first := exceptionFile("request-1.json", "shared-body-exception")
+		second := exceptionFile("request-2.json", "shared-body-exception")
+		other := exceptionFile("request-3.json", "other-body-exception")
+
+		assert.ElementsMatch(t, []string{"shared-body-exception", clusterException}, names(collect(t, &cautils.ScanInfo{}, fileExceptions(t, first, true), defaultInputs)))
+		crdReads.Store(0)
+		assert.ElementsMatch(t, []string{"shared-body-exception", clusterException}, names(collect(t, &cautils.ScanInfo{}, fileExceptions(t, second, true), defaultInputs)))
+		assert.Zero(t, crdReads.Load(), "an identical body should be served from the cache")
+
+		assert.ElementsMatch(t, []string{"other-body-exception", clusterException}, names(collect(t, &cautils.ScanInfo{}, fileExceptions(t, other, true), defaultInputs)))
+		assert.Positive(t, crdReads.Load(), "a different body should be read")
 	})
 }

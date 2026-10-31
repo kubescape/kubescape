@@ -44,7 +44,7 @@ type (
 	}
 
 	// CacheSourcer is implemented by getters whose type alone does not say
-	// which source they read, such as one getter type over different files.
+	// which source they read, such as local files or pinned releases.
 	CacheSourcer interface {
 		CacheSource() string
 	}

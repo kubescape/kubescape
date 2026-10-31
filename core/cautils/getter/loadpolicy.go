@@ -368,11 +368,15 @@ func (lp *LoadPolicy) ConsumedFileDigest() (path, digest string, ok bool) {
 }
 
 func (lp *LoadPolicy) recordConsumedFile(path string, contents []byte) {
-	digest := sha256.Sum256(contents)
+	digest := contentDigest(contents)
 	lp.consumedInputMu.Lock()
 	defer lp.consumedInputMu.Unlock()
 	lp.consumedPath = path
-	lp.consumedDigest = fmt.Sprintf("sha256:%x", digest)
+	lp.consumedDigest = digest
+}
+
+func contentDigest(contents []byte) string {
+	return fmt.Sprintf("sha256:%x", sha256.Sum256(contents))
 }
 
 // GetAttackTracks yields the attack tracks from a config file.
@@ -391,11 +395,19 @@ func (lp *LoadPolicy) GetAttackTracks() ([]v1alpha1.AttackTrack, error) {
 	return attackTracks, nil
 }
 
-// CacheSource identifies the file this getter reads. Its contents are not
-// part of the identity, so a cached value read from a path is kept for the
-// cache TTL even if the file changes.
+// CacheSource identifies the contents of the file this getter reads, with
+// the same digest ConsumedFileDigest reports. Files with the same contents,
+// such as identical REST request bodies saved to different temporary paths,
+// share an identity; a file whose contents change gets a new one. A file that
+// cannot be read is identified by its path, and its failed load is never
+// cached.
 func (lp *LoadPolicy) CacheSource() string {
-	return "file:" + filepath.Clean(lp.filePath())
+	filePath := filepath.Clean(lp.filePath())
+	buf, err := os.ReadFile(filePath)
+	if err != nil {
+		return fmt.Sprintf("unreadable-file:%q", filePath)
+	}
+	return "file:" + contentDigest(buf)
 }
 
 // temporary support for a list of files

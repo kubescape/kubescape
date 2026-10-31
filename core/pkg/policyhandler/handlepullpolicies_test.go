@@ -603,6 +603,84 @@ func TestPolicyCacheKeysBySource(t *testing.T) {
 		assert.Equal(t, CachedControlInputs, fromMock)
 	})
 
+	t.Run("same getter type with different sources", func(t *testing.T) {
+		handler := NewRequestScopedPolicyHandler("test-cluster")
+		defer handler.Close()
+		v1, v1Again, v2 := &versionedGetter{version: "v1"}, &versionedGetter{version: "v1"}, &versionedGetter{version: "v2"}
+		scan := func(g *versionedGetter) ([]armotypes.PostureExceptionPolicy, map[string][]string) {
+			exceptions, err := handler.getExceptions(context.Background(), nil, &cautils.Getters{ExceptionsGetter: g})
+			require.NoError(t, err)
+			inputs, err := handler.getControlInputs(context.Background(), nil, &cautils.Getters{ControlsInputsGetter: g})
+			require.NoError(t, err)
+			return exceptions, inputs
+		}
+
+		scan(v1)
+		exceptions, inputs := scan(v2)
+		assert.Equal(t, "v2", exceptions[0].Name)
+		assert.Equal(t, map[string][]string{"version": {"v2"}}, inputs)
+		assert.Equal(t, 2, v2.reads)
+
+		exceptions, inputs = scan(v1Again)
+		assert.Equal(t, "v1", exceptions[0].Name)
+		assert.Equal(t, map[string][]string{"version": {"v1"}}, inputs)
+		_, _ = scan(v1Again)
+		assert.Equal(t, 2, v1Again.reads, "a repeated source should be served from the cache")
+	})
+
+	t.Run("file changed at the same path", func(t *testing.T) {
+		handler := NewRequestScopedPolicyHandler("test-cluster")
+		defer handler.Close()
+		path := writeFile("changing-inputs.json", `{"k":["before"]}`)
+
+		before, err := handler.getControlInputs(context.Background(), nil, &cautils.Getters{ControlsInputsGetter: getter.NewLoadPolicy([]string{path})})
+		require.NoError(t, err)
+		assert.Equal(t, map[string][]string{"k": {"before"}}, before)
+
+		writeFile("changing-inputs.json", `{"k":["after"]}`)
+		after, err := handler.getControlInputs(context.Background(), nil, &cautils.Getters{ControlsInputsGetter: getter.NewLoadPolicy([]string{path})})
+		require.NoError(t, err)
+		assert.Equal(t, map[string][]string{"k": {"after"}}, after)
+	})
+
+	t.Run("same contents at different paths", func(t *testing.T) {
+		handler := NewRequestScopedPolicyHandler("test-cluster")
+		defer handler.Close()
+		first := getter.NewLoadPolicy([]string{writeFile("body-1.json", `[{"name":"same-body"}]`)})
+		second := getter.NewLoadPolicy([]string{writeFile("body-2.json", `[{"name":"same-body"}]`)})
+		different := getter.NewLoadPolicy([]string{writeFile("body-3.json", `[{"name":"other-body"}]`)})
+
+		_, err := handler.getExceptions(context.Background(), nil, &cautils.Getters{ExceptionsGetter: first})
+		require.NoError(t, err)
+		reused, err := handler.getExceptions(context.Background(), nil, &cautils.Getters{ExceptionsGetter: second})
+		require.NoError(t, err)
+		require.Len(t, reused, 1)
+		assert.Equal(t, "same-body", reused[0].Name)
+		_, _, read := second.ConsumedFileDigest()
+		assert.False(t, read, "identical contents should be served from the cache")
+
+		other, err := handler.getExceptions(context.Background(), nil, &cautils.Getters{ExceptionsGetter: different})
+		require.NoError(t, err)
+		require.Len(t, other, 1)
+		assert.Equal(t, "other-body", other[0].Name)
+	})
+
+	t.Run("source changed while it was read is not cached", func(t *testing.T) {
+		handler := NewRequestScopedPolicyHandler("test-cluster")
+		defer handler.Close()
+		changing := &changingSourceGetter{}
+
+		_, err := handler.getExceptions(context.Background(), nil, &cautils.Getters{ExceptionsGetter: changing})
+		require.NoError(t, err)
+		_, err = handler.getControlInputs(context.Background(), nil, &cautils.Getters{ControlsInputsGetter: changing})
+		require.NoError(t, err)
+
+		_, cached := handler.cachedExceptions.Get()
+		assert.False(t, cached)
+		_, cached = handler.cachedControlInputs.Get()
+		assert.False(t, cached)
+	})
+
 	t.Run("missing file is not cached", func(t *testing.T) {
 		handler := NewRequestScopedPolicyHandler("test-cluster")
 		defer handler.Close()
@@ -626,6 +704,42 @@ func TestPolicyCacheKeysBySource(t *testing.T) {
 		_, err = handler.getExceptions(context.Background(), nil, missingGetters)
 		assert.Error(t, err)
 	})
+}
+
+// versionedGetter is one getter type that can read different sources, as a
+// release getter pinned to different versions does.
+type versionedGetter struct {
+	version string
+	reads   int
+}
+
+func (g *versionedGetter) CacheSource() string { return "versioned:" + g.version }
+
+func (g *versionedGetter) GetExceptions(context.Context, string) ([]armotypes.PostureExceptionPolicy, error) {
+	g.reads++
+	return []armotypes.PostureExceptionPolicy{{PortalBase: armotypes.PortalBase{Name: g.version}}}, nil
+}
+
+func (g *versionedGetter) GetControlsInputs(context.Context, string) (map[string][]string, error) {
+	g.reads++
+	return map[string][]string{"version": {g.version}}, nil
+}
+
+// changingSourceGetter reports a new source on every call, like a file that
+// is rewritten while a scan reads it.
+type changingSourceGetter struct{ calls int }
+
+func (g *changingSourceGetter) CacheSource() string {
+	g.calls++
+	return fmt.Sprintf("changing:%d", g.calls)
+}
+
+func (g *changingSourceGetter) GetExceptions(context.Context, string) ([]armotypes.PostureExceptionPolicy, error) {
+	return []armotypes.PostureExceptionPolicy{}, nil
+}
+
+func (g *changingSourceGetter) GetControlsInputs(context.Context, string) (map[string][]string, error) {
+	return map[string][]string{"k": {"v"}}, nil
 }
 
 type DynamicPolicyGetterMock struct{}

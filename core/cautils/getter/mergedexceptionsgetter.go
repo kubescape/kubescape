@@ -2,9 +2,9 @@ package getter
 
 import (
 	"context"
+	"fmt"
 	"regexp"
 	"slices"
-	"strconv"
 	"strings"
 
 	"github.com/armosec/armoapi-go/armotypes"
@@ -70,12 +70,14 @@ func (g *MergedExceptionsGetter) IncludesClusterExceptions() bool {
 }
 
 // CacheSource identifies the primary source and whether the cluster's
-// SecurityException CRDs are merged into it.
+// SecurityException CRDs are merged into it. The primary is quoted so no
+// primary identity can read as another merged identity. A nil getter is
+// identified the same way as no getter at all.
 func (g *MergedExceptionsGetter) CacheSource() string {
 	if g == nil {
 		return CacheSourceOf(nil)
 	}
-	return CacheSourceOf(g.primary) + "+clusterExceptions=" + strconv.FormatBool(g.IncludesClusterExceptions())
+	return fmt.Sprintf("merged(%q,clusterExceptions=%t)", CacheSourceOf(g.primary), g.IncludesClusterExceptions())
 }
 
 // ConsumedFileDigest forwards provenance from the primary local source. CRD

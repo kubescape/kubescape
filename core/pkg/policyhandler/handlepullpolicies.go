@@ -321,7 +321,8 @@ func (policyHandler *PolicyHandler) getExceptions(ctx context.Context, scanInfo 
 	// different sources: an --exceptions file or REST request body, the
 	// release, the backend, with or without the cluster's SecurityException
 	// CRDs. An entry cached from one source is a miss for every other: reusing
-	// it would apply exceptions the scan never selected, or drop its own.
+	// it would apply exceptions the scan never selected, or drop its own. Local
+	// files are identified by their contents (see getter.CacheSourceOf).
 	source := getter.CacheSourceOf(getters.ExceptionsGetter)
 
 	if cachedExceptions, exist := policyHandler.cachedExceptions.Get(); exist && cachedExceptions.source == source {
@@ -333,7 +334,11 @@ func (policyHandler *PolicyHandler) getExceptions(ctx context.Context, scanInfo 
 	exceptions, err := getters.ExceptionsGetter.GetExceptions(ctx, policyHandler.clusterName)
 	if err == nil {
 		runnerInput, _ := cautils.RecordScanContractRunnerInput(scanInfo, "exceptions", getters.ExceptionsGetter)
-		policyHandler.cachedExceptions.Set(cachedExceptionsEntry{exceptions: exceptions, runnerInput: runnerInput, source: source})
+		// A file that changed while it was read may not hold what source
+		// names, so only cache what was read from an unchanged source.
+		if getter.CacheSourceOf(getters.ExceptionsGetter) == source {
+			policyHandler.cachedExceptions.Set(cachedExceptionsEntry{exceptions: exceptions, runnerInput: runnerInput, source: source})
+		}
 	}
 
 	return exceptions, err
@@ -359,6 +364,8 @@ func (policyHandler *PolicyHandler) getControlInputs(ctx context.Context, scanIn
 	}
 
 	runnerInput, _ := cautils.RecordScanContractRunnerInput(scanInfo, "controlsConfig", getters.ControlsInputsGetter)
-	policyHandler.cachedControlInputs.Set(cachedControlInputsEntry{controlInputs: controlInputs, runnerInput: runnerInput, source: source})
+	if getter.CacheSourceOf(getters.ControlsInputsGetter) == source {
+		policyHandler.cachedControlInputs.Set(cachedControlInputsEntry{controlInputs: controlInputs, runnerInput: runnerInput, source: source})
+	}
 	return controlInputs, nil
 }
