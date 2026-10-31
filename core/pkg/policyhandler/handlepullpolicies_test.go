@@ -561,6 +561,73 @@ func TestGetControlInputs_NonNilResultIsCached(t *testing.T) {
 	assert.True(t, cacheHit, "non-nil control inputs should be cached")
 }
 
+// TestPolicyCacheKeysBySource pins that the exceptions and control-input
+// caches only serve an entry to the source that produced it, and that a
+// source which fails to load is never cached.
+func TestPolicyCacheKeysBySource(t *testing.T) {
+	t.Setenv(PoliciesCacheTtlEnvVar, "5m")
+	dir := t.TempDir()
+	writeFile := func(name, content string) string {
+		path := filepath.Join(dir, name)
+		require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+		return path
+	}
+	exceptionsFile := writeFile("exceptions.json", `[{"name":"from-file"}]`)
+	inputsFile := writeFile("controls-inputs.json", `{"from-file":["value"]}`)
+	missing := filepath.Join(dir, "missing.json")
+
+	t.Run("exceptions from another getter type", func(t *testing.T) {
+		handler := NewRequestScopedPolicyHandler("test-cluster")
+		defer handler.Close()
+
+		fromFile, err := handler.getExceptions(context.Background(), nil, &cautils.Getters{ExceptionsGetter: getter.NewLoadPolicy([]string{exceptionsFile})})
+		require.NoError(t, err)
+		require.Len(t, fromFile, 1)
+		assert.Equal(t, "from-file", fromFile[0].Name)
+
+		fromMock, err := handler.getExceptions(context.Background(), nil, &cautils.Getters{ExceptionsGetter: &ExceptionsGetterMock{}})
+		require.NoError(t, err)
+		assert.Equal(t, CachedExceptions, fromMock)
+	})
+
+	t.Run("control inputs from another getter type", func(t *testing.T) {
+		handler := NewRequestScopedPolicyHandler("test-cluster")
+		defer handler.Close()
+
+		fromFile, err := handler.getControlInputs(context.Background(), nil, &cautils.Getters{ControlsInputsGetter: getter.NewLoadPolicy([]string{inputsFile})})
+		require.NoError(t, err)
+		assert.Equal(t, map[string][]string{"from-file": {"value"}}, fromFile)
+
+		fromMock, err := handler.getControlInputs(context.Background(), nil, &cautils.Getters{ControlsInputsGetter: &ControlsInputsGetterMock{}})
+		require.NoError(t, err)
+		assert.Equal(t, CachedControlInputs, fromMock)
+	})
+
+	t.Run("missing file is not cached", func(t *testing.T) {
+		handler := NewRequestScopedPolicyHandler("test-cluster")
+		defer handler.Close()
+		missingGetters := &cautils.Getters{
+			ExceptionsGetter:     getter.NewLoadPolicy([]string{missing}),
+			ControlsInputsGetter: getter.NewLoadPolicy([]string{missing}),
+		}
+
+		_, err := handler.getExceptions(context.Background(), nil, missingGetters)
+		require.Error(t, err)
+		_, err = handler.getControlInputs(context.Background(), nil, missingGetters)
+		require.Error(t, err)
+		_, cached := handler.cachedExceptions.Get()
+		assert.False(t, cached)
+		_, cached = handler.cachedControlInputs.Get()
+		assert.False(t, cached)
+
+		// The same missing source still fails rather than reusing another entry.
+		_, err = handler.getExceptions(context.Background(), nil, &cautils.Getters{ExceptionsGetter: getter.NewLoadPolicy([]string{exceptionsFile})})
+		require.NoError(t, err)
+		_, err = handler.getExceptions(context.Background(), nil, missingGetters)
+		assert.Error(t, err)
+	})
+}
+
 type DynamicPolicyGetterMock struct{}
 
 func (mock *DynamicPolicyGetterMock) GetControl(name string) (*reporthandling.Control, error) {

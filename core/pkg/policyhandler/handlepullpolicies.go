@@ -29,24 +29,20 @@ type cachedPoliciesEntry struct {
 type cachedExceptionsEntry struct {
 	exceptions  []armotypes.PostureExceptionPolicy
 	runnerInput reporthandlingv2.ScanContractRunnerInput
-	// includesClusterExceptions records whether the exceptions were read with
-	// the cluster's SecurityException CRDs merged in.
-	includesClusterExceptions bool
+	// source is the getter.CacheSourceOf the getter the exceptions were read
+	// from, including whether the cluster's SecurityException CRDs were merged in.
+	source string
 }
 
 type cachedControlInputsEntry struct {
 	controlInputs map[string][]string
 	runnerInput   reporthandlingv2.ScanContractRunnerInput
+	// source is the getter.CacheSourceOf the getter the inputs were read from.
+	source string
 }
 
 type policyArtifactPersistence interface {
 	ShouldPersistPolicyArtifacts() bool
-}
-
-// clusterExceptionsSource is implemented by exception getters that can merge the
-// cluster's SecurityException CRDs into the selected source.
-type clusterExceptionsSource interface {
-	IncludesClusterExceptions() bool
 }
 
 // PolicyHandler
@@ -321,17 +317,14 @@ func (policyHandler *PolicyHandler) downloadScanPolicies(ctx context.Context, po
 }
 
 func (policyHandler *PolicyHandler) getExceptions(ctx context.Context, scanInfo *cautils.ScanInfo, getters *cautils.Getters) ([]armotypes.PostureExceptionPolicy, error) {
-	// A scan of local files and a scan of the cluster can resolve the same
-	// cluster name and so share this handler, but only the cluster scan merges
-	// the cluster's SecurityException CRDs. An entry cached by one is a miss for
-	// the other: reusing it would drop the CRDs from a cluster scan, or apply
-	// them to local files.
-	includesClusterExceptions := false
-	if source, ok := getters.ExceptionsGetter.(clusterExceptionsSource); ok {
-		includesClusterExceptions = source.IncludesClusterExceptions()
-	}
+	// Scans that resolve the same cluster name share this handler but can read
+	// different sources: an --exceptions file or REST request body, the
+	// release, the backend, with or without the cluster's SecurityException
+	// CRDs. An entry cached from one source is a miss for every other: reusing
+	// it would apply exceptions the scan never selected, or drop its own.
+	source := getter.CacheSourceOf(getters.ExceptionsGetter)
 
-	if cachedExceptions, exist := policyHandler.cachedExceptions.Get(); exist && cachedExceptions.includesClusterExceptions == includesClusterExceptions {
+	if cachedExceptions, exist := policyHandler.cachedExceptions.Get(); exist && cachedExceptions.source == source {
 		logger.L().Info("Using cached exceptions")
 		cautils.RecordCachedScanContractRunnerInput(scanInfo, cachedExceptions.runnerInput)
 		return cachedExceptions.exceptions, nil
@@ -340,14 +333,18 @@ func (policyHandler *PolicyHandler) getExceptions(ctx context.Context, scanInfo 
 	exceptions, err := getters.ExceptionsGetter.GetExceptions(ctx, policyHandler.clusterName)
 	if err == nil {
 		runnerInput, _ := cautils.RecordScanContractRunnerInput(scanInfo, "exceptions", getters.ExceptionsGetter)
-		policyHandler.cachedExceptions.Set(cachedExceptionsEntry{exceptions: exceptions, runnerInput: runnerInput, includesClusterExceptions: includesClusterExceptions})
+		policyHandler.cachedExceptions.Set(cachedExceptionsEntry{exceptions: exceptions, runnerInput: runnerInput, source: source})
 	}
 
 	return exceptions, err
 }
 
 func (policyHandler *PolicyHandler) getControlInputs(ctx context.Context, scanInfo *cautils.ScanInfo, getters *cautils.Getters) (map[string][]string, error) {
-	if cachedControlInputs, exist := policyHandler.cachedControlInputs.Get(); exist {
+	// As with exceptions, only a scan reading the same source (a
+	// --controls-config file, the ControlInput CRD, the release or the backend)
+	// may reuse the cached inputs.
+	source := getter.CacheSourceOf(getters.ControlsInputsGetter)
+	if cachedControlInputs, exist := policyHandler.cachedControlInputs.Get(); exist && cachedControlInputs.source == source {
 		logger.L().Info("Using cached control inputs")
 		cautils.RecordCachedScanContractRunnerInput(scanInfo, cachedControlInputs.runnerInput)
 		return cachedControlInputs.controlInputs, nil
@@ -362,6 +359,6 @@ func (policyHandler *PolicyHandler) getControlInputs(ctx context.Context, scanIn
 	}
 
 	runnerInput, _ := cautils.RecordScanContractRunnerInput(scanInfo, "controlsConfig", getters.ControlsInputsGetter)
-	policyHandler.cachedControlInputs.Set(cachedControlInputsEntry{controlInputs: controlInputs, runnerInput: runnerInput})
+	policyHandler.cachedControlInputs.Set(cachedControlInputsEntry{controlInputs: controlInputs, runnerInput: runnerInput, source: source})
 	return controlInputs, nil
 }

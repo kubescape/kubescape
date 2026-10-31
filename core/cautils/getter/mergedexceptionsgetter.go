@@ -4,6 +4,7 @@ import (
 	"context"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/armosec/armoapi-go/armotypes"
@@ -66,6 +67,15 @@ func (g *MergedExceptionsGetter) GetExceptions(ctx context.Context, clusterName 
 // cache must not serve one kind of scan with what it stored for the other.
 func (g *MergedExceptionsGetter) IncludesClusterExceptions() bool {
 	return g != nil && g.secondary != nil
+}
+
+// CacheSource identifies the primary source and whether the cluster's
+// SecurityException CRDs are merged into it.
+func (g *MergedExceptionsGetter) CacheSource() string {
+	if g == nil {
+		return CacheSourceOf(nil)
+	}
+	return CacheSourceOf(g.primary) + "+clusterExceptions=" + strconv.FormatBool(g.IncludesClusterExceptions())
 }
 
 // ConsumedFileDigest forwards provenance from the primary local source. CRD

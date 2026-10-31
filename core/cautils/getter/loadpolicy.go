@@ -391,6 +391,13 @@ func (lp *LoadPolicy) GetAttackTracks() ([]v1alpha1.AttackTrack, error) {
 	return attackTracks, nil
 }
 
+// CacheSource identifies the file this getter reads. Its contents are not
+// part of the identity, so a cached value read from a path is kept for the
+// cache TTL even if the file changes.
+func (lp *LoadPolicy) CacheSource() string {
+	return "file:" + filepath.Clean(lp.filePath())
+}
+
 // temporary support for a list of files
 func (lp *LoadPolicy) filePath() string {
 	if len(lp.filePaths) > 0 {
