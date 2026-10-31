@@ -1,6 +1,6 @@
 module github.com/kubescape/kubescape/v4
 
-go 1.26.8
+go 1.27.0
 
 require (
 	cloud.google.com/go/containeranalysis v0.19.0
@@ -64,6 +64,7 @@ require (
 	github.com/matthyx/go-gitlog v0.0.0-20231005131906-9ffabe3c5bcd
 	github.com/mattn/go-isatty v0.0.24
 	github.com/mikefarah/yq/v4 v4.29.1
+	github.com/mitchellh/copystructure v1.2.0
 	github.com/moby/buildkit v0.33.0
 	github.com/open-policy-agent/opa v1.19.0
 	github.com/openvex/go-vex v0.2.7
@@ -118,7 +119,7 @@ require (
 	k8s.io/utils v0.0.0-20260626114624-be93311217bd
 	sigs.k8s.io/controller-runtime v0.24.0
 	sigs.k8s.io/kustomize/api v0.21.1
-	sigs.k8s.io/kustomize/kyaml v0.21.2
+	sigs.k8s.io/kustomize/kyaml v0.21.3
 	sigs.k8s.io/yaml v1.6.0
 )
 
@@ -433,7 +434,6 @@ require (
 	github.com/mikelolasagasti/xz v1.0.1 // indirect
 	github.com/minio/minlz v1.0.1 // indirect
 	github.com/mitchellh/colorstring v0.0.0-20190213212951-d06e56a500db // indirect
-	github.com/mitchellh/copystructure v1.2.0
 	github.com/mitchellh/go-homedir v1.1.0 // indirect
 	github.com/mitchellh/go-wordwrap v1.0.1 // indirect
 	github.com/mitchellh/hashstructure/v2 v2.0.2 // indirect
@@ -616,7 +616,7 @@ require (
 	k8s.io/apiextensions-apiserver v0.36.2 // indirect
 	k8s.io/cli-runtime v0.36.2 // indirect
 	k8s.io/klog/v2 v2.140.0 // indirect
-	k8s.io/kube-openapi v0.0.0-20260721132016-d427ff9ee9ad // indirect
+	k8s.io/kube-openapi v0.0.0-20261001230523-97fa35140926 // indirect
 	k8s.io/kubectl v0.36.2 // indirect
 	modernc.org/libc v1.75.6 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
@@ -628,6 +628,7 @@ require (
 	sigs.k8s.io/randfill v1.0.0 // indirect
 	sigs.k8s.io/release-utils v0.12.4 // indirect
 	sigs.k8s.io/structured-merge-diff/v6 v6.4.2 // indirect
+	sigs.k8s.io/structured-merge-diff/v7 v7.0.0 // indirect
 )
 
 // Fork carrying the image-scanning changes kubescape needs (schema v1 support, ac6c5ca5).
