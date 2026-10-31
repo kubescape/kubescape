@@ -81,14 +81,32 @@ func GetUpdateCmd(ks meta.IKubescape) *cobra.Command {
 			}
 
 			// Checking the user's version of kubescape to the latest release
+			out := cmd.OutOrStdout()
+			useColor := shouldColor(out)
+			chalk := colorBuilder(useColor)
+
 			if isDevelopmentBuild(versioncheck.BuildNumber) {
-				_, err := fmt.Fprintln(cmd.OutOrStdout(), "Nothing to update: you are running the development version")
+				msg := "Nothing to update: you are running the development version"
+				if useColor {
+					msg = fmt.Sprintf("%s: you are running the development version", chalk.BrightYellow("Nothing to update"))
+				}
+				_, err := fmt.Fprintln(out, msg)
 				return err
 			} else if isLatestVersion(versioncheck.BuildNumber, versioncheck.LatestReleaseVersion) {
-				_, err := fmt.Fprintln(cmd.OutOrStdout(), "Nothing to update: you are running the latest version")
+				msg := "Nothing to update: you are running the latest version"
+				if useColor {
+					msg = fmt.Sprintf("%s: you are running the latest version", chalk.BrightYellow("Nothing to update"))
+				}
+				_, err := fmt.Fprintln(out, msg)
 				return err
 			} else {
-				_, err := fmt.Fprintf(cmd.OutOrStdout(), "Version %s is available. Please refer to our installation documentation: %s\n", versioncheck.LatestReleaseVersion, installationLink)
+				verStr := versioncheck.LatestReleaseVersion
+				linkStr := installationLink
+				if useColor {
+					verStr = chalk.WithBrightGreen().Bold(versioncheck.LatestReleaseVersion)
+					linkStr = chalk.BrightCyan(installationLink)
+				}
+				_, err := fmt.Fprintf(out, "Version %s is available. Please refer to our installation documentation: %s\n", verStr, linkStr)
 				return err
 			}
 		},
