@@ -896,9 +896,10 @@ kubescape fix results.json --output-dir ./fixed
 
 # For a Helm chart you cannot modify, write Kustomize JSON 6902 patches and an
 # executable Helm post-renderer script, renderer.sh, that applies them at install
-# time (--output-post-renderer requires --output-kustomize)
-kubescape scan ./my-chart --format json --output results.json
-kubescape fix results.json --output-kustomize ./patches --output-post-renderer ./patches
+# time (--output-post-renderer requires --output-kustomize). Render the chart with
+# the release name you install it as, so the patches target the same resources.
+kubescape scan ./my-chart --release-name my-release --format json --output results.json
+kubescape fix results.json --release-name my-release --output-kustomize ./patches --output-post-renderer ./patches
 helm install my-release ./my-chart --post-renderer ./patches/renderer.sh
 ```
 
@@ -1024,7 +1025,9 @@ apply `--severity-threshold` to the new and incomparable failures they report.
 
 ```bash
 # Scan the base branch, then the PR branch, then compare
+git checkout main
 kubescape scan --format json --output base.json .
+git checkout my-feature
 kubescape scan --format json --output head.json .
 kubescape diff base.json head.json
 
@@ -1483,7 +1486,11 @@ The operator processes the request asynchronously. The outcome is recorded as
 `KubescapeRemediation` Kubernetes Events and in the operator logs:
 
 ```bash
+# One workload named with --kind, --name and --target-namespace
 kubectl get events -n <target-namespace> --field-selector reason=KubescapeRemediation
+
+# Workloads selected with --control and/or --min-severity
+kubectl get events --all-namespaces --field-selector reason=KubescapeRemediation
 ```
 
 **Flags:**
