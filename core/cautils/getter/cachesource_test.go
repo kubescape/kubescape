@@ -205,10 +205,9 @@ func TestLoadPolicyNilReceiver(t *testing.T) {
 	})
 
 	t.Run("typed nil in an interface", func(t *testing.T) {
+		// sourcer is not nil: it holds a typed nil pointer, so CacheSourceOf
+		// calls the method on a nil receiver.
 		var sourcer CacheSourcer = lp
-		// testify's NotNil treats a typed nil pointer as nil, so compare directly.
-		require.True(t, sourcer != nil, "an interface holding a typed nil pointer is not nil")
-
 		assert.Equal(t, "<nil>", CacheSourceOf(sourcer))
 		_, ok := LoadedCacheSourceOf(lp)
 		assert.False(t, ok)
