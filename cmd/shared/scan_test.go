@@ -433,6 +433,17 @@ func TestValidateCommonScanFlagsImageRiskGates(t *testing.T) {
 			scanInfo:    cautils.ScanInfo{EPSSThreshold: 0.3},
 			expectedErr: "--epss-threshold evaluates image vulnerabilities: use 'kubescape scan image' or add --scan-images",
 		},
+		{name: "dry run with --scan-images and gates unset", scanInfo: cautils.ScanInfo{DryRun: true, ScanImages: true}},
+		{
+			name:        "KEV gate on a dry run with --scan-images",
+			scanInfo:    cautils.ScanInfo{DryRun: true, ScanImages: true, FailOnKEV: true},
+			expectedErr: "--fail-on-kev cannot be used with --dry-run: a dry run does not scan images",
+		},
+		{
+			name:        "EPSS gate on a dry run with --scan-images",
+			scanInfo:    cautils.ScanInfo{DryRun: true, ScanImages: true, EPSSThreshold: 0.2},
+			expectedErr: "--epss-threshold cannot be used with --dry-run: a dry run does not scan images",
+		},
 		{
 			name:        "EPSS threshold above 1",
 			scanInfo:    cautils.ScanInfo{EPSSThreshold: 1.5, ScanImages: true},

@@ -136,16 +136,12 @@ func runControlScan(ctx context.Context, scanInfo *cautils.ScanInfo, ks meta.IKu
 	if !scanInfo.VerboseMode {
 		logger.L().Info("Run with '--verbose'/'-v' flag for detailed resources view\n")
 	}
-	if results.GetComplianceScore() < float32(scanInfo.ComplianceThreshold) {
-		return results, gateFailure(fmt.Errorf("scan compliance-score is below permitted threshold: %s (compliance-threshold: %.2f)", cautils.ComplianceScoreToString(results.GetComplianceScore(), 2), scanInfo.ComplianceThreshold))
-	}
-	if err := enforceSeverityThresholds(&results.GetResults().SummaryDetails, scanInfo); err != nil {
+	if err := joinGateErrors(
+		enforceComplianceThreshold(results.GetComplianceScore(), scanInfo),
+		enforceSeverityThresholds(&results.GetResults().SummaryDetails, scanInfo),
+		enforceCombinedImageGates(results, scanInfo),
+	); err != nil {
 		return results, err
-	}
-	if scanInfo.ScanImages {
-		if err := enforceImageGates(results.ImageScanData, scanInfo); err != nil {
-			return results, err
-		}
 	}
 	if err := enforceCoverageThreshold(results.GetData().ScanCoverage, len(results.GetResults().SummaryDetails.Controls), scanInfo); err != nil {
 		return results, err

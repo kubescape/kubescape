@@ -239,8 +239,17 @@ func validateEPSSThreshold(threshold float64) error {
 }
 
 // validateImageRiskGateScope rejects an exploitability gate on a scan that
-// evaluates no images, where it would otherwise pass silently.
+// evaluates no images, where it would otherwise pass silently. A dry run stops
+// after the RBAC preflight, so it never scans images even with --scan-images.
 func validateImageRiskGateScope(scanInfo *cautils.ScanInfo) error {
+	if scanInfo.DryRun {
+		if scanInfo.FailOnKEV {
+			return fmt.Errorf("--fail-on-kev cannot be used with --dry-run: a dry run does not scan images")
+		}
+		if scanInfo.EPSSThreshold > 0 {
+			return fmt.Errorf("--epss-threshold cannot be used with --dry-run: a dry run does not scan images")
+		}
+	}
 	if scanInfo.ScanImages || scanInfo.ScanType == cautils.ScanTypeImage {
 		return nil
 	}

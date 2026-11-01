@@ -167,17 +167,12 @@ func runWorkloadScan(ctx context.Context, scanInfo *cautils.ScanInfo, ks meta.IK
 		return results, err
 	}
 
-	if results.GetComplianceScore() < float32(scanInfo.ComplianceThreshold) {
-		return results, gateFailure(fmt.Errorf("scan compliance-score is below permitted threshold: %s (compliance-threshold: %.2f)", cautils.ComplianceScoreToString(results.GetComplianceScore(), 2), scanInfo.ComplianceThreshold))
-	}
-
-	if err := enforceSeverityThresholds(&results.GetData().Report.SummaryDetails, scanInfo); err != nil {
+	if err := joinGateErrors(
+		enforceComplianceThreshold(results.GetComplianceScore(), scanInfo),
+		enforceSeverityThresholds(&results.GetData().Report.SummaryDetails, scanInfo),
+		enforceCombinedImageGates(results, scanInfo),
+	); err != nil {
 		return results, err
-	}
-	if scanInfo.ScanImages {
-		if err := enforceImageGates(results.ImageScanData, scanInfo); err != nil {
-			return results, err
-		}
 	}
 	if err := enforceCoverageThreshold(results.GetData().ScanCoverage, len(results.GetData().Report.SummaryDetails.Controls), scanInfo); err != nil {
 		return results, err

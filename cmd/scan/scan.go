@@ -464,13 +464,11 @@ func runSecurityScan(ctx context.Context, scanInfo *cautils.ScanInfo, ks meta.IK
 		return results, err
 	}
 
-	if err := enforceSeverityThresholds(&results.GetData().Report.SummaryDetails, scanInfo); err != nil {
+	if err := joinGateErrors(
+		enforceSeverityThresholds(&results.GetData().Report.SummaryDetails, scanInfo),
+		enforceCombinedImageGates(results, scanInfo),
+	); err != nil {
 		return results, err
-	}
-	if scanInfo.ScanImages {
-		if err := enforceImageGates(results.ImageScanData, scanInfo); err != nil {
-			return results, err
-		}
 	}
 	if err := enforceCoverageThreshold(results.GetData().ScanCoverage, len(results.GetData().Report.SummaryDetails.Controls), scanInfo); err != nil {
 		return results, err
@@ -480,6 +478,41 @@ func runSecurityScan(ctx context.Context, scanInfo *cautils.ScanInfo, ks meta.IK
 	}
 
 	return results, enforceBaselineDrift(ctx, results, scanInfo)
+}
+
+// joinGateErrors combines gate failures so one breach does not hide another.
+// A lone failure is returned unchanged.
+func joinGateErrors(errs ...error) error {
+	var failed []error
+	for _, err := range errs {
+		if err != nil {
+			failed = append(failed, err)
+		}
+	}
+	switch len(failed) {
+	case 0:
+		return nil
+	case 1:
+		return failed[0]
+	default:
+		return errors.Join(failed...)
+	}
+}
+
+// enforceComplianceThreshold fails the scan when the compliance score is below --compliance-threshold.
+func enforceComplianceThreshold(score float32, scanInfo *cautils.ScanInfo) error {
+	if score < scanInfo.ComplianceThreshold {
+		return gateFailure(fmt.Errorf("scan compliance-score is below permitted threshold: %s (compliance-threshold: %.2f)", cautils.ComplianceScoreToString(score, 2), scanInfo.ComplianceThreshold))
+	}
+	return nil
+}
+
+// enforceCombinedImageGates applies the image gates when --scan-images is set.
+func enforceCombinedImageGates(results *resultshandling.ResultsHandler, scanInfo *cautils.ScanInfo) error {
+	if !scanInfo.ScanImages {
+		return nil
+	}
+	return enforceImageGates(results.ImageScanData, scanInfo)
 }
 
 func enforceBaselineDrift(ctx context.Context, results *resultshandling.ResultsHandler, scanInfo *cautils.ScanInfo) error {
@@ -522,15 +555,10 @@ func severityLabelOrAll(s string) string {
 // failure keeps its existing message; a tripped exploitability gate is
 // reported alongside it.
 func enforceImageGates(imageScanData []cautils.ImageScanData, scanInfo *cautils.ScanInfo) error {
-	severityErr := enforceImageSeverityThresholds(imageScanData, scanInfo)
-	riskErr := enforceImageRiskGates(imageScanData, scanInfo)
-	if severityErr == nil {
-		return riskErr
-	}
-	if riskErr == nil {
-		return severityErr
-	}
-	return errors.Join(severityErr, riskErr)
+	return joinGateErrors(
+		enforceImageSeverityThresholds(imageScanData, scanInfo),
+		enforceImageRiskGates(imageScanData, scanInfo),
+	)
 }
 
 // enforceImageRiskGates fails the scan when --fail-on-kev or --epss-threshold

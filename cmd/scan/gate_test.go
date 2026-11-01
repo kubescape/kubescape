@@ -119,6 +119,58 @@ func TestComplianceThresholdIsAGate(t *testing.T) {
 	}
 }
 
+// TestPostureBreachDoesNotHideImageGates pins that every runner reports an
+// image gate breach alongside a posture gate breach, not instead of it.
+func TestPostureBreachDoesNotHideImageGates(t *testing.T) {
+	knownExploited := match.NewMatches(match.Match{Vulnerability: vulnerability.Vulnerability{
+		Reference: vulnerability.Reference{ID: "CVE-2020-15999"},
+		Metadata: &vulnerability.Metadata{
+			Severity:       vulnerability.MediumSeverity.String(),
+			KnownExploited: []vulnerability.KnownExploited{{CVE: "CVE-2020-15999"}},
+			EPSS:           []vulnerability.EPSS{{CVE: "CVE-2020-15999", EPSS: 0.64}},
+		},
+	}})
+	const (
+		complianceBreach = "scan compliance-score is below permitted threshold: 50.00 (compliance-threshold: 80.00)"
+		severityBreach   = "compliance result exceeds severity threshold: Low"
+		epssBreach       = "image scan result exceeds exploitability gates: 1 vulnerability match(es) with an EPSS score at or above 0.5"
+	)
+
+	runners := map[string]struct {
+		run  fleetRunner
+		want []string
+	}{
+		"framework": {runFrameworkScan, []string{complianceBreach, severityBreach, epssBreach}},
+		"control":   {runControlScan, []string{complianceBreach, severityBreach, epssBreach}},
+		"workload":  {runWorkloadScan, []string{complianceBreach, severityBreach, epssBreach}},
+		// The security view has no compliance gate.
+		"security": {runSecurityScan, []string{severityBreach, epssBreach}},
+	}
+	for name, tt := range runners {
+		t.Run(name, func(t *testing.T) {
+			ks := &scoredWorkloadKubescape{
+				complianceScore:  50,
+				criticalFailures: 1,
+				imageScanData:    []cautils.ImageScanData{{Matches: knownExploited}},
+			}
+			scanInfo := &cautils.ScanInfo{
+				ComplianceThreshold:   80,
+				FailThresholdSeverity: apis.SeverityLowString,
+				ScanImages:            true,
+				EPSSThreshold:         0.5,
+			}
+
+			_, err := tt.run(context.Background(), scanInfo, ks, nil)
+
+			require.Error(t, err)
+			for _, want := range tt.want {
+				assert.Contains(t, err.Error(), want)
+			}
+			assert.True(t, isGateFailure(err))
+		})
+	}
+}
+
 // TestComplianceThresholdMessageKeepsNearPerfectScoreBelowHundred pins that a score just under a threshold of 100 is not reported as 100.00.
 func TestComplianceThresholdMessageKeepsNearPerfectScoreBelowHundred(t *testing.T) {
 	runners := map[string]fleetRunner{"framework": runFrameworkScan, "control": runControlScan, "workload": runWorkloadScan}
