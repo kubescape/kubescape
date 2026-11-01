@@ -339,6 +339,12 @@ kubescape policy init ./myrules/no-privileged-pods --kind Pod
 and `--description`, `--remediation` and `--force` set the metadata text and
 allow overwriting an existing rule directory.
 
+The generated rule reports the field it flags in `deletePaths`. A scan takes a
+finding's location from a rule's `deletePaths`, `reviewPaths` and `fixPaths`,
+so keep naming the offending field there as you change the rule. The deprecated
+`failedPaths` is not read: a finding that only has `failedPaths` is reported
+without the field, and formats such as SARIF place it at line 1.
+
 Once you change the rule, `--update` rewrites each case's `expected.json` from
 the rule's current output instead of comparing against it, which saves
 hand-writing the matched object into the fixture:

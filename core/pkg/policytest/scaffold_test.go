@@ -3,8 +3,10 @@ package policytest
 import (
 	"context"
 	"encoding/json"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -93,6 +95,38 @@ func TestScaffold_EverySupportedKindProducesPassingCases(t *testing.T) {
 				require.NoError(t, result.Err)
 				assert.True(t, result.Passed, result.Diff)
 			}
+		})
+	}
+}
+
+// The scan locates a finding through the rule's deletePaths, reviewPaths and
+// fixPaths and ignores failedPaths, so a generated rule that only filled in
+// failedPaths had its findings reported at line 1 of the manifest.
+func TestScaffold_FlaggedCaseNamesTheFieldToDelete(t *testing.T) {
+	want := map[string]string{
+		"CronJob":     "spec.jobTemplate.spec.template.spec.containers[0].securityContext.privileged",
+		"DaemonSet":   "spec.template.spec.containers[0].securityContext.privileged",
+		"Deployment":  "spec.template.spec.containers[0].securityContext.privileged",
+		"Job":         "spec.template.spec.containers[0].securityContext.privileged",
+		"Pod":         "spec.containers[0].securityContext.privileged",
+		"StatefulSet": "spec.template.spec.containers[0].securityContext.privileged",
+	}
+	require.ElementsMatch(t, SupportedKinds(), slices.Collect(maps.Keys(want)))
+
+	for kind, path := range want {
+		t.Run(kind, func(t *testing.T) {
+			dir := scaffoldRule(t, "check-"+strings.ToLower(kind), ScaffoldOptions{Kind: kind})
+
+			rules, err := DiscoverPath(dir)
+			require.NoError(t, err)
+			require.Len(t, rules, 1)
+			i := slices.IndexFunc(rules[0].Cases, func(c Case) bool { return c.Name == flaggedCaseName })
+			require.GreaterOrEqual(t, i, 0)
+
+			responses, err := EvaluateCase(context.Background(), rules[0], rules[0].Cases[i])
+			require.NoError(t, err)
+			require.Len(t, responses, 1)
+			assert.Equal(t, []string{path}, responses[0].DeletePaths)
 		})
 	}
 }
