@@ -160,7 +160,8 @@ type fleetRun struct {
 // runFleetE2E runs the real fleet scan against the given contexts and their API servers, and reads back the fleet report.
 func runFleetE2E(t testing.TB, servers map[string]string, args ...string) fleetRun {
 	t.Helper()
-	run, fleetReport := scanFleetE2E(t, servers, args...)
+	fleetReport := prepareFleetE2E(t, servers)
+	run := scanFleetE2E(t, fleetReport, args...)
 	// An explicit empty --fleet-report, given after the default, turns the fleet report off.
 	if !slices.Contains(args, "--fleet-report=") {
 		run.report = readFleetReport(t, fleetReport)
@@ -168,8 +169,8 @@ func runFleetE2E(t testing.TB, servers map[string]string, args ...string) fleetR
 	return run
 }
 
-// scanFleetE2E runs the real fleet scan, with local policies and no backend, and returns where the fleet report was written.
-func scanFleetE2E(t testing.TB, servers map[string]string, args ...string) (fleetRun, string) {
+// prepareFleetE2E points the scan at the servers with a kubeconfig and a scratch home, and returns where the fleet report goes.
+func prepareFleetE2E(t testing.TB, servers map[string]string) string {
 	t.Helper()
 	dir := t.TempDir()
 	t.Setenv("KUBECONFIG", writeE2EKubeconfig(t, dir, servers))
@@ -181,9 +182,14 @@ func scanFleetE2E(t testing.TB, servers map[string]string, args ...string) (flee
 		k8sinterface.SetClusterContextName(previousContext)
 		k8sinterface.SetConnectedToCluster(previousConnected)
 	})
+	return filepath.Join(dir, "fleet.json")
+}
 
+// scanFleetE2E runs the real fleet scan, with local policies and no backend, writing its reports next to fleetReport.
+func scanFleetE2E(t testing.TB, fleetReport string, args ...string) fleetRun {
+	t.Helper()
+	dir := filepath.Dir(fleetReport)
 	policies := filepath.Join("..", "..", "core", "cautils", "getter", "testdata")
-	fleetReport := filepath.Join(dir, "fleet.json")
 	args = append([]string{"framework", "nsa",
 		"--output=" + filepath.Join(dir, "report.json"), "--format=json", "--fleet-report=" + fleetReport,
 		"--keep-local", "--use-from=" + filepath.Join(policies, "NSA.json"),
@@ -199,7 +205,7 @@ func scanFleetE2E(t testing.TB, servers map[string]string, args ...string) (flee
 		run.err = cmd.Execute()
 	})
 	run.exitCode = shared.ExitCode(run.err)
-	return run, fleetReport
+	return run
 }
 
 // readFleetReport decodes the fleet report a scan wrote.
@@ -357,12 +363,11 @@ func benchmarkFleetScan(b *testing.B, clusters int, report bool) {
 	if !report {
 		args = append(args, "--fleet-report=")
 	}
-	var fleetReport string
+	// Every iteration writes over the same reports, so a long run does not pile up files or cleanups.
+	fleetReport := prepareFleetE2E(b, servers)
 	for b.Loop() {
-		var run fleetRun
 		// The report is checked once after the loop, so decoding it is not part of the timed work.
-		run, fleetReport = scanFleetE2E(b, servers, args...)
-		require.NoError(b, run.err)
+		require.NoError(b, scanFleetE2E(b, fleetReport, args...).err)
 	}
 	if report {
 		require.Equal(b, clusters, readFleetReport(b, fleetReport).Compliance.ClustersScored)
