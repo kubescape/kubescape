@@ -3,6 +3,9 @@ package predict
 import (
 	"context"
 	"fmt"
+	"io"
+	"os"
+	"slices"
 	"sort"
 	"strings"
 
@@ -20,7 +23,13 @@ type pssFlags struct {
 	format    string
 	output    string
 	verbose   bool
+
+	// stdin supplies the manifests when the only path argument is "-".
+	stdin io.Reader
 }
+
+// stdinPath is the path argument that reads local manifests from stdin.
+const stdinPath = "-"
 
 var pssCmdExamples = fmt.Sprintf(`
   Predict Pod Security Standards compliance for workloads.
@@ -37,6 +46,11 @@ var pssCmdExamples = fmt.Sprintf(`
   # Scan local manifest files
   %[1]s predict pss ./manifests/
 
+  # Scan manifests read from stdin, such as a rendered Helm chart
+  # (pipefail makes a failed helm template fail the pipeline)
+  set -o pipefail
+  helm template ./chart | %[1]s predict pss -
+
   # Scan and output JSON
   %[1]s predict pss -n production -f json -o pss-report.json
 
@@ -51,7 +65,7 @@ func getPSSCmd() *cobra.Command {
 	flags := &pssFlags{}
 
 	pssCmd := &cobra.Command{
-		Use:   "pss [<path>...] [flags]",
+		Use:   "pss [<path>.../`-`] [flags]",
 		Short: "Predict Pod Security Standards (PSS) compliance for workloads",
 		Long: `Evaluate workloads against the Kubernetes Pod Security Standards (Privileged,
 Baseline, Restricted) and report which workloads would fail at the target
@@ -59,13 +73,14 @@ level, what specifically violates, and overall namespace readiness.
 
 When run without positional arguments, scans live cluster workloads in the
 specified namespace. When given file paths or directories, scans local YAML
-manifests instead.
+manifests instead. A single "-" reads the manifests from stdin.
 
 This helps answer: "What would break if I enforced Baseline/Restricted on
 this namespace?" — without touching the cluster's admission configuration.`,
 		Example: pssCmdExamples,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cmd.SilenceUsage = true
+			flags.stdin = cmd.InOrStdin()
 			return runPSS(cmd.Context(), flags, args)
 		},
 	}
@@ -106,59 +121,56 @@ func runPSS(ctx context.Context, flags *pssFlags, args []string) error {
 	// Determine mode: cluster vs. local
 	isClusterMode := len(args) == 0
 
-	var workloads []unstructured.Unstructured
-	var namespace string
-	var err error
+	var result pss.NamespaceResult
 
 	if isClusterMode {
 		if flags.namespace == "" {
 			return fmt.Errorf("--namespace (-n) is required when scanning a live cluster (no file paths provided)")
 		}
-		namespace = flags.namespace
-		workloads, err = fetchClusterWorkloadsFn(ctx, namespace, flags.workload)
+		workloads, err := fetchClusterWorkloadsFn(ctx, flags.namespace, flags.workload)
 		if err != nil {
 			return err
 		}
+		// Deduplicate in cluster mode (local files rarely have owner refs)
+		if flags.workload == "" {
+			workloads = pss.DeduplicateWorkloads(workloads)
+		}
+		// Sort for deterministic output
+		sort.Slice(workloads, func(i, j int) bool {
+			return workloadLess(&workloads[i], &workloads[j])
+		})
+		result = pss.Aggregate(flags.namespace, workloads, targetLevel)
 	} else {
-		workloads, err = pss.ParseLocalWorkloads(args)
+		if err := validatePSSOutput(flags.output, args, flags.stdin); err != nil {
+			return err
+		}
+		workloads, err := parseLocalInputs(flags.stdin, args)
 		if err != nil {
 			return err
 		}
-		namespace = flags.namespace // may be empty for local scans
+		namespace := flags.namespace // may be empty for local scans
 		if namespace != "" {
-			var scoped []unstructured.Unstructured
-			for _, w := range workloads {
-				if w.GetNamespace() == "" || w.GetNamespace() == namespace {
-					scoped = append(scoped, w)
-				}
-			}
-			workloads = scoped
+			workloads = slices.DeleteFunc(workloads, func(w pss.LocalWorkload) bool {
+				return w.GetNamespace() != "" && w.GetNamespace() != namespace
+			})
 		}
 
 		// Apply workload filter if specified
 		if flags.workload != "" {
-			workloads = filterWorkloads(workloads, flags.workload)
+			workloads = slices.DeleteFunc(workloads, func(w pss.LocalWorkload) bool {
+				return !workloadMatches(&w.Unstructured, flags.workload)
+			})
 			if len(workloads) == 0 {
 				return fmt.Errorf("workload %q not found in the provided manifests", flags.workload)
 			}
 		}
+
+		// Sort for deterministic output
+		sort.Slice(workloads, func(i, j int) bool {
+			return workloadLess(&workloads[i].Unstructured, &workloads[j].Unstructured)
+		})
+		result = pss.AggregateLocal(namespace, workloads, targetLevel)
 	}
-
-	// Deduplicate in cluster mode (local files rarely have owner refs)
-	if isClusterMode && flags.workload == "" {
-		workloads = pss.DeduplicateWorkloads(workloads)
-	}
-
-	// Sort for deterministic output
-	sort.Slice(workloads, func(i, j int) bool {
-		if workloads[i].GetKind() != workloads[j].GetKind() {
-			return workloads[i].GetKind() < workloads[j].GetKind()
-		}
-		return workloads[i].GetName() < workloads[j].GetName()
-	})
-
-	// Aggregate results
-	result := pss.Aggregate(namespace, workloads, targetLevel)
 
 	// Write output
 	if err := writeOutput(result, formatLower, flags.output, flags.verbose); err != nil {
@@ -175,6 +187,22 @@ func runPSS(ctx context.Context, flags *pssFlags, args []string) error {
 			result.UnevaluatedWorkloads, result.TotalWorkloads)
 	}
 	return nil
+}
+
+// parseLocalInputs parses the manifests at paths, or reads them from stdin
+// when the only path is "-". Like the scan commands, "-" cannot be combined
+// with other paths.
+func parseLocalInputs(stdin io.Reader, paths []string) ([]pss.LocalWorkload, error) {
+	if !slices.Contains(paths, stdinPath) {
+		return pss.ParseLocalWorkloadSources(paths)
+	}
+	if len(paths) > 1 {
+		return nil, fmt.Errorf("usage: stdin input '-' cannot be combined with other input paths")
+	}
+	if stdin == nil {
+		stdin = os.Stdin
+	}
+	return pss.ParseLocalWorkloadSourcesFromReader(stdin, "stdin")
 }
 
 // fetchClusterWorkloads connects to the cluster and lists workloads.
@@ -220,6 +248,17 @@ func fetchClusterWorkloads(ctx context.Context, namespace, workloadFilter string
 
 // filterWorkloads filters workloads by a "Kind/Name" or bare "Name" string.
 func filterWorkloads(workloads []unstructured.Unstructured, filter string) []unstructured.Unstructured {
+	var selected []unstructured.Unstructured
+	for i := range workloads {
+		if workloadMatches(&workloads[i], filter) {
+			selected = append(selected, workloads[i])
+		}
+	}
+	return selected
+}
+
+// workloadMatches reports whether w matches a "Kind/Name" or bare "Name" filter.
+func workloadMatches(w *unstructured.Unstructured, filter string) bool {
 	var filterKind, filterName string
 	if strings.Contains(filter, "/") {
 		parts := strings.SplitN(filter, "/", 2)
@@ -229,13 +268,15 @@ func filterWorkloads(workloads []unstructured.Unstructured, filter string) []uns
 		filterName = filter
 	}
 
-	var selected []unstructured.Unstructured
-	for _, w := range workloads {
-		nameMatches := w.GetName() == filterName
-		kindMatches := filterKind == "" || strings.EqualFold(w.GetKind(), filterKind)
-		if nameMatches && kindMatches {
-			selected = append(selected, w)
-		}
+	nameMatches := w.GetName() == filterName
+	kindMatches := filterKind == "" || strings.EqualFold(w.GetKind(), filterKind)
+	return nameMatches && kindMatches
+}
+
+// workloadLess orders workloads by Kind, then Name.
+func workloadLess(a, b *unstructured.Unstructured) bool {
+	if a.GetKind() != b.GetKind() {
+		return a.GetKind() < b.GetKind()
 	}
-	return selected
+	return a.GetName() < b.GetName()
 }

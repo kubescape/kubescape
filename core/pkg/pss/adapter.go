@@ -5,11 +5,13 @@ import (
 	"fmt"
 
 	corev1 "k8s.io/api/core/v1"
+	sigsjson "sigs.k8s.io/json"
 )
 
 // ExtractPodSpec extracts the corev1.PodSpec from an unstructured workload
-// object. Supports Deployment, DaemonSet, StatefulSet, ReplicaSet, Job,
-// CronJob (all at spec.template.spec or spec.jobTemplate.spec.template.spec)
+// object. Supports Deployment, DaemonSet, StatefulSet, ReplicaSet,
+// ReplicationController, Job, CronJob (all at spec.template.spec or
+// spec.jobTemplate.spec.template.spec), PodTemplate (at template.spec)
 // and Pod (at spec).
 //
 // Returns an error if the kind is unsupported or the spec cannot be found or decoded.
@@ -18,7 +20,9 @@ func ExtractPodSpec(kind string, obj map[string]any) (corev1.PodSpec, error) {
 	switch kind {
 	case "Pod":
 		specPath = []string{"spec"}
-	case "Deployment", "DaemonSet", "StatefulSet", "ReplicaSet", "Job":
+	case "PodTemplate":
+		specPath = []string{"template", "spec"}
+	case "Deployment", "DaemonSet", "StatefulSet", "ReplicaSet", "ReplicationController", "Job":
 		specPath = []string{"spec", "template", "spec"}
 	case "CronJob":
 		specPath = []string{"spec", "jobTemplate", "spec", "template", "spec"}
@@ -35,15 +39,18 @@ func ExtractPodSpec(kind string, obj map[string]any) (corev1.PodSpec, error) {
 }
 
 // ExtractPodAnnotations extracts the pod or template annotations from an unstructured
-// workload object. Supports Deployment, DaemonSet, StatefulSet, ReplicaSet, Job,
-// CronJob (at spec.template.metadata.annotations or spec.jobTemplate.spec.template.metadata.annotations)
-// and Pod (at metadata.annotations).
+// workload object. Supports Deployment, DaemonSet, StatefulSet, ReplicaSet,
+// ReplicationController, Job, CronJob (at spec.template.metadata.annotations or
+// spec.jobTemplate.spec.template.metadata.annotations), PodTemplate (at
+// template.metadata.annotations) and Pod (at metadata.annotations).
 func ExtractPodAnnotations(kind string, obj map[string]any) map[string]string {
 	var annotPath []string
 	switch kind {
 	case "Pod":
 		annotPath = []string{"metadata", "annotations"}
-	case "Deployment", "DaemonSet", "StatefulSet", "ReplicaSet", "Job":
+	case "PodTemplate":
+		annotPath = []string{"template", "metadata", "annotations"}
+	case "Deployment", "DaemonSet", "StatefulSet", "ReplicaSet", "ReplicationController", "Job":
 		annotPath = []string{"spec", "template", "metadata", "annotations"}
 	case "CronJob":
 		annotPath = []string{"spec", "jobTemplate", "spec", "template", "metadata", "annotations"}
@@ -110,8 +117,10 @@ func decodePodSpec(raw any) (corev1.PodSpec, error) {
 	if err != nil {
 		return corev1.PodSpec{}, fmt.Errorf("marshal: %w", err)
 	}
+	// Decode case-sensitively, as the API server does: a key that differs from
+	// a field only in case is an unknown field, not that field.
 	var ps corev1.PodSpec
-	if err := json.Unmarshal(b, &ps); err != nil {
+	if err := sigsjson.UnmarshalCaseSensitivePreserveInts(b, &ps); err != nil {
 		return corev1.PodSpec{}, fmt.Errorf("unmarshal: %w", err)
 	}
 	// Without an application container there is no usable workload to

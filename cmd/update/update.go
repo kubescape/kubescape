@@ -12,10 +12,9 @@ import (
 	"github.com/kubescape/kubescape/v4/core/meta"
 
 	"github.com/kubescape/backend/pkg/versioncheck"
-	"github.com/kubescape/go-logger"
-	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/spf13/cobra"
+	"golang.org/x/mod/semver"
 )
 
 const (
@@ -50,8 +49,10 @@ func GetUpdateCmd(ks meta.IKubescape) *cobra.Command {
 		Short:   "Update to latest release version",
 		Long:    ``,
 		Example: updateCmdExamples,
+		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if updateFormat != "text" && updateFormat != "json" {
+			normalizedFormat := strings.ToLower(strings.TrimSpace(updateFormat))
+			if normalizedFormat != "text" && normalizedFormat != "json" {
 				return fmt.Errorf("unsupported format %q, supported: text, json", updateFormat)
 			}
 
@@ -61,13 +62,11 @@ func GetUpdateCmd(ks meta.IKubescape) *cobra.Command {
 				return err
 			}
 
-			if updateFormat == "json" {
+			if normalizedFormat == "json" {
 				info := UpdateInfo{}
-				if versioncheck.BuildNumber == "" || strings.Contains(versioncheck.BuildNumber, "rc") {
+				if isDevelopmentBuild(versioncheck.BuildNumber) {
 					info.Message = "Nothing to update: you are running the development version"
-				} else if versioncheck.LatestReleaseVersion == "" {
-					info.Message = "Failed to check for updates"
-				} else if versioncheck.BuildNumber == versioncheck.LatestReleaseVersion {
+				} else if isLatestVersion(versioncheck.BuildNumber, versioncheck.LatestReleaseVersion) {
 					info.Message = "Nothing to update: you are running the latest version"
 				} else {
 					info.LatestVersion = versioncheck.LatestReleaseVersion
@@ -81,22 +80,38 @@ func GetUpdateCmd(ks meta.IKubescape) *cobra.Command {
 				return err
 			}
 
-			//Checking the user's version of kubescape to the latest release
-			if versioncheck.BuildNumber == "" || strings.Contains(versioncheck.BuildNumber, "rc") {
-				//your version is unknown
-				fmt.Printf("Nothing to update: you are running the development version\n")
-			} else if versioncheck.LatestReleaseVersion == "" {
-				//Failed to check for updates
-				logger.L().Info("Failed to check for updates")
-			} else if versioncheck.BuildNumber == versioncheck.LatestReleaseVersion {
-				//your version == latest version
-				logger.L().Info("Nothing to update: you are running the latest version", helpers.String("Version", versioncheck.BuildNumber))
+			// Checking the user's version of kubescape to the latest release
+			if isDevelopmentBuild(versioncheck.BuildNumber) {
+				_, err := fmt.Fprintln(cmd.OutOrStdout(), "Nothing to update: you are running the development version")
+				return err
+			} else if isLatestVersion(versioncheck.BuildNumber, versioncheck.LatestReleaseVersion) {
+				_, err := fmt.Fprintln(cmd.OutOrStdout(), "Nothing to update: you are running the latest version")
+				return err
 			} else {
-				fmt.Printf("Version %s is available. Please refer to our installation documentation: %s\n", versioncheck.LatestReleaseVersion, installationLink)
+				_, err := fmt.Fprintf(cmd.OutOrStdout(), "Version %s is available. Please refer to our installation documentation: %s\n", versioncheck.LatestReleaseVersion, installationLink)
+				return err
 			}
-			return nil
 		},
 	}
 	updateCmd.Flags().StringVarP(&updateFormat, "format", "f", "text", "Output format. Supported formats: text, json")
 	return updateCmd
+}
+
+// isDevelopmentBuild reports whether buildNumber names no release: unset, the
+// "dev" version of a build from source, any other version that is not semver,
+// or a release candidate.
+func isDevelopmentBuild(buildNumber string) bool {
+	version := buildNumber
+	if version != "" && !strings.HasPrefix(version, "v") {
+		version = "v" + version
+	}
+	return !semver.IsValid(version) || strings.Contains(buildNumber, "rc")
+}
+
+// isLatestVersion reports whether a successful version check found no newer
+// release. CheckLatestVersion fails when the version service cannot be
+// reached, and the service only names a latest release when it is newer than
+// the running version, so no latest release means this one is up to date.
+func isLatestVersion(buildNumber, latest string) bool {
+	return latest == "" || buildNumber == latest
 }

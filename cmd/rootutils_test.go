@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"testing"
 
 	"github.com/kubescape/go-logger/helpers"
@@ -9,6 +10,7 @@ import (
 	"github.com/kubescape/kubescape/v4/core/cautils/getter"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // testCmdWithLoggerFlag mirrors root: logger on PersistentFlags, bound to rootInfo.Logger.
@@ -19,6 +21,7 @@ func testCmdWithLoggerFlag(t *testing.T) *cobra.Command {
 	return c
 }
 
+// TestInitLoggerLevel_KSLoggerPrecedence tests flag and environment variable precedence for logger levels.
 func TestInitLoggerLevel_KSLoggerPrecedence(t *testing.T) {
 	t.Run("KS_LOGGER applies when logger flag not set", func(t *testing.T) {
 		prevLogger := rootInfo.Logger
@@ -102,6 +105,7 @@ func TestInitLoggerLevel_KSLoggerPrecedence(t *testing.T) {
 	})
 }
 
+// TestInitLoggerNameFallback tests terminal detection fallback for the logger name.
 func TestInitLoggerNameFallback(t *testing.T) {
 	t.Run("terminal uses iconlogger", func(t *testing.T) {
 		prevLoggerName := rootInfo.LoggerName
@@ -146,6 +150,7 @@ func testCmdWithCacheDirFlag(t *testing.T) *cobra.Command {
 	return c
 }
 
+// TestInitCacheDir_KSCacheDirPrecedence tests flag and environment variable precedence for the cache directory.
 func TestInitCacheDir_KSCacheDirPrecedence(t *testing.T) {
 	t.Run("KS_CACHE_DIR applies when --cache-dir flag not set", func(t *testing.T) {
 		prevStore := getter.DefaultLocalStore
@@ -255,6 +260,7 @@ func TestInitCacheDir_KSCacheDirPrecedence(t *testing.T) {
 	})
 }
 
+// TestInitLogger_KSLoggerNameEnv tests environment variable precedence for KS_LOGGER_NAME.
 func TestInitLogger_KSLoggerNameEnv(t *testing.T) {
 	t.Run("env sets logger name when empty", func(t *testing.T) {
 		prevLoggerName := rootInfo.LoggerName
@@ -311,5 +317,95 @@ func TestInitLogger_KSLoggerNameEnv(t *testing.T) {
 		initLogger()
 
 		assert.Equal(t, "custom-logger", rootInfo.LoggerName)
+	})
+}
+
+// TestInitLoggerLevel_InvalidLevel verifies that initLoggerLevel returns an error when rootInfo.Logger contains an unsupported level.
+func TestInitLoggerLevel_InvalidLevel(t *testing.T) {
+	prevLogger := rootInfo.Logger
+	prevLoggerName := rootInfo.LoggerName
+	t.Cleanup(func() {
+		rootInfo.Logger = prevLogger
+		rootInfo.LoggerName = prevLoggerName
+	})
+
+	rootInfo.LoggerName = zaplogger.LoggerName
+	initLogger()
+
+	cmd := testCmdWithLoggerFlag(t)
+	rootInfo.Logger = "unsupported-level"
+	err := initLoggerLevel(cmd)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "supported levels:")
+}
+
+// TestInitLoggerLevel_NilCmd verifies that initLoggerLevel falls back to KS_LOGGER when the command is nil.
+func TestInitLoggerLevel_NilCmd(t *testing.T) {
+	prevLogger := rootInfo.Logger
+	prevLoggerName := rootInfo.LoggerName
+	t.Cleanup(func() {
+		rootInfo.Logger = prevLogger
+		rootInfo.LoggerName = prevLoggerName
+	})
+
+	t.Setenv("KS_LOGGER", "warning")
+	rootInfo.Logger = helpers.InfoLevel.String()
+	rootInfo.LoggerName = zaplogger.LoggerName
+	initLogger()
+
+	err := initLoggerLevel(nil)
+	require.NoError(t, err)
+	assert.Equal(t, "warning", rootInfo.Logger)
+}
+
+// TestInitLoggerLevel_ChildCmdWithoutRoot verifies that initLoggerLevel reads the logger flag defined on a standalone child command without root.
+func TestInitLoggerLevel_ChildCmdWithoutRoot(t *testing.T) {
+	prevLogger := rootInfo.Logger
+	t.Cleanup(func() { rootInfo.Logger = prevLogger })
+
+	childCmd := &cobra.Command{Use: "standalone"}
+	childCmd.Flags().StringVar(&rootInfo.Logger, "logger", helpers.InfoLevel.String(), "log level")
+	require.NoError(t, childCmd.ParseFlags([]string{"--logger", helpers.ErrorLevel.String()}))
+
+	err := initLoggerLevel(childCmd)
+	require.NoError(t, err)
+	assert.Equal(t, helpers.ErrorLevel.String(), rootInfo.Logger)
+}
+
+// TestInitCacheDir_ChildCmdWithoutRoot verifies that initCacheDir reads the cache-dir flag defined on a standalone child command without root.
+func TestInitCacheDir_ChildCmdWithoutRoot(t *testing.T) {
+	prevStore := getter.DefaultLocalStore
+	prevCacheDir := rootInfo.CacheDir
+	t.Cleanup(func() {
+		getter.DefaultLocalStore = prevStore
+		rootInfo.CacheDir = prevCacheDir
+	})
+
+	childCmd := &cobra.Command{Use: "standalone"}
+	childCmd.Flags().StringVar(&rootInfo.CacheDir, "cache-dir", getter.DefaultLocalStore, "cache dir")
+	require.NoError(t, childCmd.ParseFlags([]string{"--cache-dir", "/tmp/standalone-cache"}))
+
+	initCacheDir(childCmd)
+	assert.Equal(t, "/tmp/standalone-cache", getter.DefaultLocalStore)
+}
+
+// TestInitEnvironment verifies that initEnvironment returns nil for an empty discovery URL and an error for an invalid URL.
+func TestInitEnvironment(t *testing.T) {
+	t.Run("empty server url returns nil", func(t *testing.T) {
+		prevURL := rootInfo.DiscoveryServerURL
+		t.Cleanup(func() { rootInfo.DiscoveryServerURL = prevURL })
+
+		rootInfo.DiscoveryServerURL = ""
+		assert.NoError(t, initEnvironment(context.Background()))
+	})
+
+	t.Run("invalid server url returns error", func(t *testing.T) {
+		prevURL := rootInfo.DiscoveryServerURL
+		t.Cleanup(func() { rootInfo.DiscoveryServerURL = prevURL })
+
+		rootInfo.DiscoveryServerURL = "://bad-scheme"
+		err := initEnvironment(context.Background())
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to create service discovery client")
 	})
 }

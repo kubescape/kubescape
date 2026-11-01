@@ -32,7 +32,7 @@ func (ks *Kubescape) SetCachedConfig(setConfig *metav1.SetConfig) error {
 }
 
 func getNormalizedKey(key string) string {
-	key = strings.ToLower(key)
+	key = strings.ToLower(strings.TrimSpace(key))
 	key = strings.ReplaceAll(key, "-", "")
 	key = strings.ReplaceAll(key, "_", "")
 	if key == "account" {

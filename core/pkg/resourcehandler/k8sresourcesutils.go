@@ -8,6 +8,7 @@ import (
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/pkg/componentvulns"
 	"github.com/kubescape/kubescape/v4/core/pkg/hostsensorutils"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/reporthandling"
@@ -48,7 +49,11 @@ var (
 		CNIInfo:                      "hostdata.kubescape.cloud/v1beta0",
 	}
 	MapResourceToApiGroupVuln = map[string][]string{
-		ImageVulnerabilities: {"armo.vuln.images/v1", "image.vulnscan.com/v1"}}
+		ImageVulnerabilities:                                   {"armo.vuln.images/v1", "image.vulnscan.com/v1"},
+		string(componentvulns.APIServerVulnerabilities):        {componentvulns.APIVersion},
+		string(componentvulns.KubeletVulnerabilities):          {componentvulns.APIVersion},
+		string(componentvulns.ContainerRuntimeVulnerabilities): {componentvulns.APIVersion},
+	}
 	// MapResourceToApiGroupCloud also holds APIServerInfo: it is built from the
 	// API server's version endpoint, not a cloud provider, but it is selected
 	// and collected together with the cloud resources (cautils.CloudResources).
@@ -88,7 +93,7 @@ func setKSResourceMap(frameworks []reporthandling.Framework, resourceToControl m
 	return externalResources
 }
 
-// [group][versionn][resource]
+// [group][version][resource]
 func setComplexKSResourceMap(frameworks []reporthandling.Framework, resourceToControls map[string][]string, resolver resourceResolver) map[string]map[string]map[string]any {
 	k8sResources := make(map[string]map[string]map[string]any)
 	for _, framework := range frameworks {

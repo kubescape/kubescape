@@ -1072,6 +1072,7 @@ func readYamlFile(yamlFile []byte) (yamlObjs []workloadinterface.IMetadata, err 
 	return yamlObjs, errors.Join(parseErrs...)
 }
 
+// splitYAMLDocuments splits a YAML stream while retaining inline content and directive headers.
 func splitYAMLDocuments(data []byte) ([][]byte, error) {
 	return scanYAMLDocuments(bytes.NewReader(data), len(data)+1)
 }
@@ -1083,17 +1084,46 @@ func splitYAMLDocuments(data []byte) ([][]byte, error) {
 func scanYAMLDocuments(r io.Reader, bufMax int) ([][]byte, error) {
 	var docs [][]byte
 	var current bytes.Buffer
+	flushCurrent := func() {
+		if doc := bytes.TrimSpace(current.Bytes()); len(doc) > 0 {
+			docs = append(docs, append([]byte{}, doc...))
+		}
+		current.Reset()
+	}
+	var hasDocumentContent, documentEnded, directiveHeader bool
 
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, bufio.MaxScanTokenSize), bufMax)
 	for scanner.Scan() {
 		line := scanner.Bytes()
-		if isYAMLDocumentSeparator(line) {
-			if doc := bytes.TrimSpace(current.Bytes()); len(doc) > 0 {
-				docs = append(docs, append([]byte{}, doc...))
+		// Directives belong to the next document. After an explicit end marker,
+		// publish the complete document before buffering its successor's header.
+		if len(line) > 0 && line[0] == '%' && (!hasDocumentContent || documentEnded) {
+			if documentEnded {
+				flushCurrent()
+				hasDocumentContent, documentEnded = false, false
 			}
-			current.Reset()
-			continue
+			directiveHeader = true
+		}
+		if isYAMLDocumentSeparator(line) {
+			keepMarker := directiveHeader
+			if !directiveHeader {
+				flushCurrent()
+			}
+			directiveHeader = false
+			hasDocumentContent, documentEnded = true, false
+			// A document may start on the marker's line. Preserve that line
+			// for the YAML decoder instead of discarding its inline content.
+			if !keepMarker {
+				if rest := bytes.TrimSpace(line[3:]); len(rest) == 0 || rest[0] == '#' {
+					continue
+				}
+			}
+		} else if !directiveHeader {
+			if content := bytes.TrimSpace(line); len(content) > 0 && content[0] != '#' {
+				hasDocumentContent = true
+				documentEnded = isYAMLDocumentEnd(line)
+			}
 		}
 		current.Write(line)
 		current.WriteByte('\n')
@@ -1103,23 +1133,29 @@ func scanYAMLDocuments(r io.Reader, bufMax int) ([][]byte, error) {
 		// still buffered in current belong to a document that was never
 		// fully read; discard them rather than treat a truncated document as
 		// complete. Documents already appended to docs were each terminated
-		// by a real "---" separator and remain valid, but the caller must
-		// still be told the read did not finish.
+		// by a real "---" separator or an explicit "..." before a directive
+		// header and remain valid, but the caller must still be told the read
+		// did not finish.
 		return docs, fmt.Errorf("scanning YAML input: %w", err)
 	}
-	if doc := bytes.TrimSpace(current.Bytes()); len(doc) > 0 {
-		docs = append(docs, append([]byte{}, doc...))
-	}
+	flushCurrent()
 	return docs, nil
 }
 
+// isYAMLDocumentSeparator recognizes column-zero document-start markers, including CRLF input.
 func isYAMLDocumentSeparator(line []byte) bool {
 	line = bytes.TrimRight(line, "\r")
 	if !bytes.HasPrefix(line, []byte("---")) {
 		return false
 	}
-	rest := bytes.TrimLeft(line[3:], " \t")
-	return len(rest) == 0 || rest[0] == '#'
+	return len(line) == 3 || line[3] == ' ' || line[3] == '\t'
+}
+
+// isYAMLDocumentEnd recognizes explicit document ends before a new directive header.
+func isYAMLDocumentEnd(line []byte) bool {
+	line = bytes.TrimRight(line, "\r")
+	return bytes.HasPrefix(line, []byte("...")) &&
+		(len(line) == 3 || line[3] == ' ' || line[3] == '\t')
 }
 
 func readJsonFile(jsonFile []byte) (workloads []workloadinterface.IMetadata, err error) {

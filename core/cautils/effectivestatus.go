@@ -1,6 +1,7 @@
 package cautils
 
 import (
+	"github.com/kubescape/opa-utils/exceptions"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	helpersv1 "github.com/kubescape/opa-utils/reporthandling/helpers/v1"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
@@ -40,8 +41,16 @@ func ControlFilters(summary *reportsummary.SummaryDetails, controlID string) *he
 // Only a control with a matched exception is re-evaluated; any other keeps its
 // recorded status, so results without exceptions are unchanged.
 func ControlStatus(summary *reportsummary.SummaryDetails, control *resourcesresults.ResourceAssociatedControl) apis.IStatus {
-	if !hasException(control) {
+	if !hasException(control) || control.Status.SubStatus == apis.SubStatusNotEvaluated {
 		return control.GetStatus(nil)
+	}
+	// Collection and coverage limits cannot be reconstructed from rule results.
+	if control.Status.InnerStatus != apis.StatusPassed && control.Status.InnerStatus != apis.StatusFailed && (control.Status.InnerStatus != "" || control.Status.InnerInfo != "") {
+		switch control.Status.SubStatus {
+		case apis.SubStatusManualReview, apis.SubStatusRequiresReview, apis.SubStatusConfiguration:
+		default:
+			return control.GetStatus(nil)
+		}
 	}
 	return control.GetStatus(ControlFilters(summary, control.GetID()))
 }
@@ -52,7 +61,10 @@ func RuleStatus(summary *reportsummary.SummaryDetails, controlID string, rule *r
 	if len(rule.Exception) == 0 {
 		return rule.GetStatus(nil)
 	}
-	return rule.GetStatus(ControlFilters(summary, controlID))
+	filters := ControlFilters(summary, controlID)
+	view := *rule
+	view.Exception = exceptions.FilterExceptionsByFrameworks(rule.Exception, filters.FrameworkNames, controlID, rule.GetName())
+	return view.GetStatus(filters)
 }
 
 // FrameworkRuleStatus is the status of one rule evaluated in a single framework,
@@ -66,7 +78,9 @@ func FrameworkRuleStatus(summary *reportsummary.SummaryDetails, frameworkName, c
 	if len(rule.Exception) == 0 {
 		return rule.GetStatus(nil)
 	}
-	return rule.GetStatus(&helpersv1.Filters{FrameworkNames: []string{frameworkName}})
+	view := *rule
+	view.Exception = exceptions.FilterExceptionsByFrameworks(rule.Exception, []string{frameworkName}, controlID, rule.GetName())
+	return view.GetStatus(&helpersv1.Filters{FrameworkNames: []string{frameworkName}})
 }
 
 // ResourceStatus folds the framework-aware status of each control of the

@@ -128,18 +128,29 @@ func TestListValidationFileAndDirectoryAreFailClosed(t *testing.T) {
 }
 
 func TestListValidationTypedListsInheritKindBeforeValidation(t *testing.T) {
-	for _, kind := range []string{"Pod", "Deployment", "StatefulSet", "DaemonSet", "ReplicaSet", "Job", "CronJob"} {
-		t.Run(kind, func(t *testing.T) {
+	for _, tc := range []struct{ kind, apiVersion string }{
+		{"Pod", "v1"},
+		{"Deployment", "apps/v1"},
+		{"StatefulSet", "apps/v1"},
+		{"DaemonSet", "apps/v1"},
+		{"ReplicaSet", "apps/v1"},
+		{"Job", "batch/v1"},
+		{"CronJob", "batch/v1"},
+	} {
+		t.Run(tc.kind, func(t *testing.T) {
 			for _, inherited := range []any{nil, ""} {
 				item := listValidationPod("inherited")
 				item["kind"] = inherited
 				delete(item, "apiVersion")
-				input := listValidationJSON(t, kind+"List", item)
-				objects, err := ParseLocalWorkloadsFromReader(strings.NewReader(input), "typed.json")
+				raw, err := json.Marshal(map[string]any{
+					"apiVersion": tc.apiVersion, "kind": tc.kind + "List", "items": []any{item},
+				})
+				require.NoError(t, err)
+				objects, err := ParseLocalWorkloadsFromReader(strings.NewReader(string(raw)), "typed.json")
 				require.NoError(t, err)
 				require.Len(t, objects, 1)
-				require.Equal(t, kind, objects[0].GetKind())
-				require.Equal(t, "v1", objects[0].GetAPIVersion())
+				require.Equal(t, tc.kind, objects[0].GetKind())
+				require.Equal(t, tc.apiVersion, objects[0].GetAPIVersion())
 			}
 		})
 	}

@@ -62,8 +62,17 @@ func getImageCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Command 
 			if err := shared.ValidateCommonScanFlags(cmd, scanInfo, shared.ImageScanFormats); err != nil {
 				return err
 			}
-			if len(scanInfo.ExcludeControls) > 0 {
+			if len(scanInfo.ExcludeControls) > 0 || commandFlagChanged(cmd, "exclude-controls") {
 				return fmt.Errorf("--exclude-controls is not supported for image scans: an image scan evaluates vulnerabilities, not posture controls")
+			}
+			if scanInfo.SkipControls != "" || commandFlagChanged(cmd, "skip-controls") {
+				return fmt.Errorf("--skip-controls is not supported for image scans: an image scan evaluates vulnerabilities, not posture controls")
+			}
+			if scanInfo.IncludeControls != "" || commandFlagChanged(cmd, "include-controls") {
+				return fmt.Errorf("--include-controls is not supported for image scans: an image scan evaluates vulnerabilities, not posture controls")
+			}
+			if scanInfo.CustomRules != "" || commandFlagChanged(cmd, "custom-rules") {
+				return fmt.Errorf("--custom-rules is not supported for image scans: an image scan evaluates vulnerabilities, not posture controls")
 			}
 			if err := shared.ValidateImageScanAnonymization(scanInfo); err != nil {
 				return err

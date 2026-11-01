@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/jwalton/gchalk"
 	"gopkg.in/yaml.v3"
 )
 
@@ -271,12 +272,35 @@ func configValidationFieldOrder(field string) int {
 }
 
 func formatConfigValidationText(result ConfigValidationResult) []byte {
-	lines := []string{
-		fmt.Sprintf("valid: %t", result.Valid),
-		fmt.Sprintf("profile: %s", result.Profile),
+	colored := shouldColor()
+
+	validStr := fmt.Sprintf("valid: %t", result.Valid)
+	profileStr := fmt.Sprintf("profile: %s", result.Profile)
+
+	if colored {
+		if result.Valid {
+			validStr = gchalk.WithGreen().Bold("valid: true")
+		} else {
+			validStr = gchalk.WithRed().Bold("valid: false")
+		}
 	}
+
+	lines := []string{validStr, profileStr}
 	for _, check := range result.Checks {
-		lines = append(lines, fmt.Sprintf("%s: %s - %s", check.Field, check.Status, check.Message))
+		field := check.Field
+		status := string(check.Status)
+
+		if colored {
+			field = gchalk.BrightCyan(check.Field)
+			switch check.Status {
+			case ConfigValidationStatusOK:
+				status = gchalk.WithGreen().Bold("ok")
+			case ConfigValidationStatusMissing, ConfigValidationStatusInvalid:
+				status = gchalk.WithRed().Bold(string(check.Status))
+			}
+		}
+
+		lines = append(lines, fmt.Sprintf("%s: %s - %s", field, status, check.Message))
 	}
 	return []byte(strings.Join(lines, "\n") + "\n")
 }

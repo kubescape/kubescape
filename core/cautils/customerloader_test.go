@@ -1,10 +1,12 @@
 package cautils
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
 	"os"
+	"path/filepath"
 	"testing"
 
 	v1 "github.com/kubescape/backend/pkg/client/v1"
@@ -588,4 +590,42 @@ func TestUpdateConfigFile_ToleratesDirectoryChmodFailure(t *testing.T) {
 	readBack := &ConfigObj{}
 	require.NoError(t, json.Unmarshal(dat, readBack))
 	assert.Equal(t, configObj.AccountID, readBack.AccountID)
+}
+
+func TestDeleteCachedConfig(t *testing.T) {
+	tenants := map[string]ITenantConfig{
+		"local":   &LocalConfig{configObj: &ConfigObj{}},
+		"cluster": &ClusterConfig{configObj: &ConfigObj{}},
+	}
+
+	for name, tenant := range tenants {
+		t.Run(name, func(t *testing.T) {
+			originalStore := getter.DefaultLocalStore
+			defer func() { getter.DefaultLocalStore = originalStore }()
+
+			t.Run("removes the cached config", func(t *testing.T) {
+				getter.DefaultLocalStore = t.TempDir()
+				require.NoError(t, updateConfigFile(mockConfigObj()))
+
+				require.NoError(t, tenant.DeleteCachedConfig(context.Background()))
+				assert.NoFileExists(t, ConfigFileFullPath())
+			})
+
+			t.Run("missing config is not an error", func(t *testing.T) {
+				getter.DefaultLocalStore = t.TempDir()
+
+				assert.NoError(t, tenant.DeleteCachedConfig(context.Background()))
+			})
+
+			t.Run("failure to remove the config is returned", func(t *testing.T) {
+				getter.DefaultLocalStore = t.TempDir()
+				// os.Remove cannot remove a non-empty directory, even as root.
+				require.NoError(t, os.MkdirAll(filepath.Join(ConfigFileFullPath(), "keep"), 0o700))
+
+				err := tenant.DeleteCachedConfig(context.Background())
+				require.ErrorContains(t, err, "delete cached config")
+				assert.DirExists(t, ConfigFileFullPath())
+			})
+		})
+	}
 }

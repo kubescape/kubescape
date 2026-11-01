@@ -80,6 +80,30 @@ func TestExtractPodSpec_WorkloadKinds(t *testing.T) {
 			},
 		},
 		{
+			kind: "ReplicationController",
+			obj: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "ReplicationController",
+				"metadata":   map[string]any{"name": "my-rc", "namespace": "default"},
+				"spec": map[string]any{
+					"template": map[string]any{
+						"spec": podTemplateSpec,
+					},
+				},
+			},
+		},
+		{
+			kind: "PodTemplate",
+			obj: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "PodTemplate",
+				"metadata":   map[string]any{"name": "my-pt", "namespace": "default"},
+				"template": map[string]any{
+					"spec": podTemplateSpec,
+				},
+			},
+		},
+		{
 			kind: "Job",
 			obj: map[string]any{
 				"apiVersion": "batch/v1",

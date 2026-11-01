@@ -62,6 +62,7 @@ func TestBuildExceptionAudit(t *testing.T) {
 		},
 		exceptions.NewProcessor(),
 		nil,
+		nil, // no framework context
 	)
 
 	require.NotNil(t, audit)
@@ -112,6 +113,7 @@ func TestBuildExceptionAuditCountsManualControlMatches(t *testing.T) {
 		[]manualControlExceptionMatch{
 			{exception: manualOnlyException, controlID: "C-0286"},
 		},
+		nil, // no framework context
 	)
 
 	require.NotNil(t, audit)
@@ -173,6 +175,7 @@ func TestBuildExceptionAuditTreatsRegexControlAsValid(t *testing.T) {
 		},
 		exceptions.NewProcessor(),
 		nil,
+		nil, // no framework context
 	)
 
 	require.NotNil(t, audit)
@@ -198,6 +201,7 @@ func TestBuildExceptionAuditDoesNotCollapseDuplicateNamesWithDifferentGUIDs(t *t
 		},
 		exceptions.NewProcessor(),
 		nil,
+		nil, // no framework context
 	)
 
 	require.NotNil(t, audit)

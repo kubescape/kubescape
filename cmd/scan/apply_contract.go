@@ -195,6 +195,9 @@ func applyContractGateFloors(cmd *cobra.Command, scanInfo *cautils.ScanInfo, con
 }
 
 func commandFlagChanged(cmd *cobra.Command, name string) bool {
+	if cmd == nil {
+		return false
+	}
 	if flag := cmd.Flags().Lookup(name); flag != nil {
 		return flag.Changed
 	}

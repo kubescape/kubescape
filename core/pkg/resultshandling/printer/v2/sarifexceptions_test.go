@@ -365,6 +365,36 @@ func TestSARIFExceptions_MixedControlReportsBothStates(t *testing.T) {
 		"two results at one rule id need distinct fingerprints")
 }
 
+func TestSARIFExceptions_MixedRulesDisableAndAlertOnly(t *testing.T) {
+	reason := "privileged is needed by the CNI"
+	expires := time.Date(2030, 6, 1, 0, 0, 0, 0, time.UTC)
+	ac := sarifExceptionControl(
+		failingRule("privileged", privilegedPath, disableException("cni", &reason)),
+		failingRule("escalation", escalationPath, alertOnlyException("known-escalation", &expires)),
+	)
+	require.True(t, ac.GetStatus(nil).IsFailed())
+
+	raw := renderSARIF(t, NewSARIFPrinter(false), sarifExceptionSession(t, ac))
+	requireValidSARIF(t, raw)
+	results := parseSARIFResults(t, raw)
+
+	require.Len(t, results, 2)
+	visible, suppressed := results[0], results[1]
+
+	// Visible finding describes the alertOnly rule.
+	assert.Empty(t, visible.Suppressions, "alertOnly finding remains unsuppressed")
+	assert.Contains(t, *visible.Message.Text, escalationPath)
+	assert.NotContains(t, *visible.Message.Text, privilegedPath)
+	assert.Equal(t, "alertOnly", visible.Properties["exception-action"])
+	assert.Equal(t, "known-escalation", visible.Properties["exception-names"])
+
+	// Suppressed finding describes the disabled rule.
+	require.Len(t, suppressed.Suppressions, 1)
+	assert.Equal(t, reason, *suppressed.Suppressions[0].Justification)
+	assert.Contains(t, *suppressed.Message.Text, privilegedPath)
+	assert.NotEqual(t, fingerprintOf(t, visible), fingerprintOf(t, suppressed))
+}
+
 func TestSARIFExceptions_SeveralExceptionsGiveOneResult(t *testing.T) {
 	zeroReason := "second"
 	first := disableException("a-first", nil)

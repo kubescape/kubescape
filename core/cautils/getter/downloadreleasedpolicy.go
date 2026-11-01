@@ -182,7 +182,7 @@ func (drp *DownloadReleasedPolicy) ListControls() ([]string, error) {
 		controlsFrameworksList = append(controlsFrameworksList, drp.gs.GetOpaFrameworkListByControlID(control.ControlID))
 	}
 	controlsNamesWithIDsandFrameworksList := make([]string, len(controlsIDsList))
-	// by design all slices have the same lengt
+	// by design all slices have the same length
 	for i := range controlsIDsList {
 		controlsNamesWithIDsandFrameworksList[i] = fmt.Sprintf("%v|%v|%v", controlsIDsList[i], controlsNamesList[i], strings.Join(controlsFrameworksList[i], ", "))
 	}

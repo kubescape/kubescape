@@ -3,7 +3,6 @@ package scan
 import (
 	"context"
 	"fmt"
-	"slices"
 	"strings"
 
 	"github.com/kubescape/go-logger"
@@ -40,15 +39,17 @@ func getControlCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comman
 		Short:   fmt.Sprintf("The controls you wish to use. Run '%[1]s list controls' for the list of supported controls", cautils.ExecName()),
 		Example: controlExample,
 		Args: func(cmd *cobra.Command, args []string) error {
-			if len(args) > 0 {
-				controls := strings.Split(args[0], ",")
-				if len(controls) > 1 {
-					if slices.Contains(controls, "") {
+			if len(args) == 0 {
+				return fmt.Errorf("requires at least one control name")
+			}
+			controls := strings.Split(args[0], ",")
+			for _, c := range controls {
+				if strings.TrimSpace(c) == "" {
+					if len(controls) > 1 {
 						return fmt.Errorf("usage: <control-0>,<control-1>")
 					}
+					return fmt.Errorf("requires at least one control name")
 				}
-			} else {
-				return fmt.Errorf("requires at least one control name")
 			}
 			return nil
 		},
@@ -68,7 +69,14 @@ func getControlCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comman
 			} else { // expected control or list of control separated by ","
 
 				// Read controls from input args
-				policyIdentifiers = cautils.BuildPolicyIdentifiers(strings.Split(args[0], ","), apisv1.KindControl)
+				rawControls := strings.Split(args[0], ",")
+				controls := make([]string, 0, len(rawControls))
+				for _, c := range rawControls {
+					if trimmed := strings.TrimSpace(c); trimmed != "" {
+						controls = append(controls, trimmed)
+					}
+				}
+				policyIdentifiers = cautils.BuildPolicyIdentifiers(controls, apisv1.KindControl)
 
 				cleanup, err := prepareScanLocalInput(cmd.InOrStdin(), args, scanInfo, scanLocalInputOptions{
 					FirstInputArg:    1,

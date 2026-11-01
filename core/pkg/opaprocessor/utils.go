@@ -88,6 +88,24 @@ var cosignVerifySignatureDefinition = func(bctx rego.BuiltinContext, a, b *ast.T
 	return ast.BooleanTerm(result), nil
 }
 
+var cosignVerifyKeylessDeclaration = &rego.Function{
+	Name:    "cosign.verify_keyless",
+	Decl:    types.NewFunction(types.Args(types.S), types.B),
+	Memoize: true,
+}
+var cosignVerifyKeylessDefinition = func(bctx rego.BuiltinContext, a *ast.Term) (*ast.Term, error) {
+	aStr, err := builtins.StringOperand(a.Value, 1)
+	if err != nil {
+		return nil, fmt.Errorf("invalid parameter type: %w", err)
+	}
+	result, err := verifyKeyless(bctx.Context, string(aStr))
+	if err != nil {
+		// Do not change this log from debug level. We might find a lot of images without signature
+		logger.L().Debug("failed to verify keyless signature", helpers.String("image", string(aStr)), helpers.Error(err))
+	}
+	return ast.BooleanTerm(result), nil
+}
+
 var cosignHasSignatureDeclaration = &rego.Function{
 	Name:    "cosign.has_signature",
 	Decl:    types.NewFunction(types.Args(types.S), types.B),

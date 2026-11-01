@@ -50,7 +50,7 @@ The predictor implements full evaluation of the Kubernetes PSS v1.37 controls:
 ### Basic Syntax
 
 ```bash
-kubescape predict pss [<path>...] [flags]
+kubescape predict pss [<path>.../`-`] [flags]
 ```
 
 ### Cluster Mode
@@ -86,7 +86,16 @@ kubescape predict pss ./manifests/ --workload Deployment/web-api
 
 # Scope local manifests to a specific namespace
 kubescape predict pss ./manifests/ -n production
+
+# Read manifests from stdin, such as a rendered Helm chart
+# (pipefail makes a failed helm template fail the pipeline)
+set -o pipefail
+helm template ./chart | kubescape predict pss -
 ```
+
+A single `-` reads the manifests from stdin instead of from files. It cannot be combined with other paths.
+
+Local manifests are evaluated when their kind carries a pod spec: `Pod`, `PodTemplate`, `Deployment`, `DaemonSet`, `StatefulSet`, `ReplicaSet`, `ReplicationController`, `Job` and `CronJob`, including inside `List` envelopes. As in Pod Security Admission, the object must also be in the kind's built-in API group: the core group (`apiVersion: v1`) for `Pod`, `PodTemplate` and `ReplicationController`, `batch` for `Job` and `CronJob`, and `apps` for the rest. A custom resource that reuses one of these kind names, such as a Volcano `batch.volcano.sh/v1alpha1` `Job`, is skipped like any other kind. A manifest whose `apiVersion` is missing or does not parse names no group, so it is matched by its kind alone.
 
 > [!NOTE]
 > When scanning local manifests without `-n, --namespace`, workloads across all files are aggregated together. If identical `Kind/Name` pairs exist across different manifests/namespaces, use `-n, --namespace` to scope evaluation to a specific namespace and disambiguate resources.
@@ -130,7 +139,7 @@ kubescape predict pss ./manifests/ -f sarif -o pss.sarif
 ```
 
 > [!NOTE]
-> SARIF output contains logical workload locations (`<namespace>/<kind>/<name>/<container>`). GitHub Code Scanning ingestion and display have not been validated. Direct inline diff annotations on Pull Requests are unsupported because this output does not include physical source file and line mappings; source locations and integration validation can be addressed in a follow-up.
+> Every SARIF result has a logical workload location (`<namespace>/<kind>/<name>/<container>`). A workload read from a manifest file also has a physical location: the file's path and the line on which the workload's YAML document or JSON object starts. A workload inside a `List` points at the `List`. Code Scanning resolves paths against the repository root, so a file inside a git worktree is given relative to the worktree's root, from whichever directory the command runs. A file outside any worktree is given relative to the working directory when it is under it, and as a `file://` URI otherwise. Workloads read from a live cluster or from stdin have no file to point at, so their results carry only the logical location, and GitHub Code Scanning rejects results without a physical location.
 
 #### CI/CD Test Results (JUnit)
 ```bash
@@ -193,6 +202,6 @@ Add PSS prediction to your CI pipeline to prevent non-compliant workloads from e
 | Capability | CLI (`kubescape predict pss`) | MCP Tool (`predict_pss_compliance`) |
 |------------|--------------------------------|--------------------------------------|
 | **Interface** | Terminal / Shell / CI/CD scripts | AI Assistant prompt (Claude, ChatGPT) |
-| **Local Manifests** | Supported (`kubescape predict pss ./path`) | Cluster only (reads via dynamic client) |
+| **Local Manifests** | Supported (`kubescape predict pss ./path`, or `-` for stdin) | Cluster only (reads via dynamic client) |
 | **Output Formats** | Pretty, Table, JSON, SARIF, JUnit | JSON text payload for AI reasoning |
 | **Automation** | Direct integration into GitOps & GitHub Actions | Conversational hardening planning & audit |

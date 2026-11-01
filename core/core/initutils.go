@@ -227,7 +227,7 @@ func getHostSensorHandler(ctx context.Context, scanInfo *cautils.ScanInfo, k8s *
 		return hostsensorutils.NewHostSensorHandlerMock()
 
 	case hostSensorVal != nil && *hostSensorVal:
-		hostSensorHandler, err := hostsensorutils.NewHostSensorHandler(k8s, scanInfo.HostSensorYamlPath)
+		hostSensorHandler, err := hostsensorutils.NewHostSensorHandler(ctx, k8s, scanInfo.HostSensorYamlPath)
 		if err != nil {
 			logger.L().Ctx(ctx).Warning("failed to create host scanner", helpers.Error(err))
 			scanInfo.HostSensorEnabled.SetBool(false)
@@ -238,7 +238,7 @@ func getHostSensorHandler(ctx context.Context, scanInfo *cautils.ScanInfo, k8s *
 
 	case hostSensorVal == nil && scanInfo.HostSensorEnabledDefault != nil && *scanInfo.HostSensorEnabledDefault:
 		// Auto-detect: if node-agent CRDs are available, use them instead of deploying the host-sensor daemonset.
-		hostSensorHandler, err := hostsensorutils.NewHostSensorHandler(k8s, "")
+		hostSensorHandler, err := hostsensorutils.NewHostSensorHandler(ctx, k8s, "")
 		if err != nil {
 			logger.L().Ctx(ctx).Debug("node-agent not available, host sensor disabled", helpers.Error(err))
 			scanInfo.HostSensorEnabled.SetBool(false)

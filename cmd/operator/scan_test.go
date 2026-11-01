@@ -191,6 +191,7 @@ func TestOperatorScanConfigCmd_ContextCanceled_NoPortForward(t *testing.T) {
 
 type stubOperatorConnector struct {
 	onStart func()
+	host    string
 }
 
 func (s *stubOperatorConnector) StartPortForwarder() error {
@@ -203,6 +204,9 @@ func (s *stubOperatorConnector) StartPortForwarder() error {
 func (s *stubOperatorConnector) StopPortForwarder() {}
 
 func (s *stubOperatorConnector) GetPortForwardLocalhost() string {
+	if s.host != "" {
+		return s.host
+	}
 	return "127.0.0.1:4002"
 }
 

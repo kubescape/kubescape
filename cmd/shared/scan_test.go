@@ -48,6 +48,40 @@ func TestValidateScanFormat(t *testing.T) {
 	}
 }
 
+func TestValidateView(t *testing.T) {
+	testCases := []struct {
+		description string
+		view        string
+		wantErr     bool
+		errMsg      string
+	}{
+		{"valid resource view", "resource", false, ""},
+		{"valid control view", "control", false, ""},
+		{"valid security view", "security", false, ""},
+		{"valid namespace view", "namespace", false, ""},
+		{"valid mixed-case view", "Resource", false, ""},
+		{"valid uppercase view", "CONTROL", false, ""},
+		{"valid padded view", "  security  ", false, ""},
+		{"empty view", "", true, "view cannot be empty"},
+		{"whitespace-only view", "   ", true, "view cannot be empty"},
+		{"plural controls typo", "controls", true, "invalid view \"controls\""},
+		{"plural resources typo", "resources", true, "invalid view \"resources\""},
+		{"unsupported view", "table", true, "invalid view \"table\""},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.description, func(t *testing.T) {
+			err := ValidateView(tc.view)
+			if tc.wantErr {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tc.errMsg)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
+
 func TestValidateSeverity(t *testing.T) {
 	testCases := []struct {
 		Description string
@@ -276,6 +310,101 @@ func TestValidateCommonScanFlags(t *testing.T) {
 				assert.NoError(t, err)
 			} else {
 				assert.Error(t, err)
+				assert.Contains(t, err.Error(), tt.expectedErr)
+			}
+		})
+	}
+}
+
+func TestValidateCommonScanFlags_View(t *testing.T) {
+	tests := []struct {
+		name        string
+		scanType    cautils.ScanTypes
+		view        string
+		viewChanged bool
+		expectedErr string
+		wantView    string
+	}{
+		{
+			name:        "Valid view normalized to lowercase",
+			view:        "Resource",
+			viewChanged: true,
+			wantView:    "resource",
+		},
+		{
+			name:        "Valid security view",
+			view:        "security",
+			viewChanged: true,
+			wantView:    "security",
+		},
+		{
+			name:        "Valid control view",
+			view:        "control",
+			viewChanged: true,
+			wantView:    "control",
+		},
+		{
+			name:        "Valid namespace view",
+			view:        "namespace",
+			viewChanged: true,
+			wantView:    "namespace",
+		},
+		{
+			name:        "Invalid view rejected",
+			view:        "controls",
+			viewChanged: true,
+			expectedErr: "invalid view \"controls\", supported views: resource, control, security, namespace",
+		},
+		{
+			name:        "Explicit empty view rejected",
+			view:        "",
+			viewChanged: true,
+			expectedErr: "view cannot be empty, supported views: resource, control, security, namespace",
+		},
+		{
+			name:        "Explicit whitespace view rejected",
+			view:        "   ",
+			viewChanged: true,
+			expectedErr: "view cannot be empty, supported views: resource, control, security, namespace",
+		},
+		{
+			name:        "View flag on image scan rejected",
+			scanType:    cautils.ScanTypeImage,
+			view:        "resource",
+			viewChanged: true,
+			expectedErr: "--view is not supported for image scans: an image scan evaluates vulnerabilities, not posture views",
+		},
+		{
+			name:        "Default view on image scan accepted when not explicitly changed",
+			scanType:    cautils.ScanTypeImage,
+			view:        "security",
+			viewChanged: false,
+			wantView:    "security",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			scanInfo := &cautils.ScanInfo{
+				ScanType: tt.scanType,
+				View:     tt.view,
+			}
+
+			cmd := &cobra.Command{}
+			cmd.Flags().String("view", "security", "")
+			if tt.viewChanged {
+				cmd.Flags().Set("view", tt.view)
+			}
+
+			err := ValidateCommonScanFlags(cmd, scanInfo, ScanFormats)
+
+			if tt.expectedErr == "" {
+				require.NoError(t, err)
+				if tt.wantView != "" {
+					assert.Equal(t, tt.wantView, scanInfo.View)
+				}
+			} else {
+				require.Error(t, err)
 				assert.Contains(t, err.Error(), tt.expectedErr)
 			}
 		})

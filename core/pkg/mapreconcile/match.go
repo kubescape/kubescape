@@ -3,6 +3,8 @@ package mapreconcile
 import (
 	"strings"
 
+	"github.com/kubescape/kubescape/v4/core/pkg/namespaceselector"
+
 	admissionregistrationv1alpha1 "k8s.io/api/admissionregistration/v1alpha1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -18,6 +20,9 @@ type ObjectInfo struct {
 	Resource  string // plural resource name, e.g. "pods"
 	Name      string // the object's own name, matched against a rule's ResourceNames
 	Namespace string // empty for a cluster-scoped object
+	// Labels is the available object's label set. For UPDATE the other
+	// (old or new) object's labels are unavailable, so a selector miss alone
+	// cannot prove exclusion: admission matches either version of the object.
 	Labels    map[string]string
 	Operation admissionregistrationv1alpha1.OperationType
 
@@ -46,7 +51,8 @@ type ObjectInfo struct {
 	// NamespaceLabels is the labels of ObjectInfo's own namespace object,
 	// needed for namespaceSelector matching. NamespaceLabelsKnown
 	// distinguishes "this namespace really has no labels" from "the caller
-	// never looked the namespace up" -- the latter must not be treated as a
+	// never looked the namespace up" -- only the immutable namespace-name label
+	// can be inferred then. Unknown custom labels must not be treated as a
 	// confident empty-label-set match against a non-empty selector.
 	NamespaceLabels      map[string]string
 	NamespaceLabelsKnown bool
@@ -251,33 +257,38 @@ func compileMatchResources(mr *admissionregistrationv1alpha1.MatchResources) (*c
 // a confident non-match. The same policy applies to exclusions: a possible
 // equivalent exclusion prevents an include match from being confirmed.
 func (c *compiledMatchResources) matches(obj ObjectInfo) (matched bool, determinable bool) {
+	// Unknown namespace labels cannot decide the conjunction, but a known
+	// object/rule mismatch still can. Defer uncertainty until after exclusions.
+	namespaceKnown := true
 	if c.namespaceSelector != nil && !c.namespaceSelector.Empty() {
 		switch {
 		case obj.IsNamespaceObject:
-			// There is no separate containing namespace to look up: the
-			// selector is evaluated against the Namespace object's own
-			// labels, which the caller always has (they are obj.Labels,
-			// not a lookup that can be "unknown").
-			if !c.namespaceSelector.Matches(labels.Set(obj.Labels)) {
+			// Kubernetes supplies the immutable name label even when a local
+			// Namespace manifest omits it. Match on this object's own identity.
+			matched, _ := namespaceselector.Matches(c.namespaceSelector, obj.Name, obj.Labels, true)
+			if !matched {
 				return false, true
 			}
 		case !obj.ClusterScoped:
-			if !obj.NamespaceLabelsKnown {
-				return false, false
-			}
-			if !c.namespaceSelector.Matches(labels.Set(obj.NamespaceLabels)) {
+			matched, determinable := namespaceselector.Matches(c.namespaceSelector, obj.Namespace, obj.NamespaceLabels, obj.NamespaceLabelsKnown)
+			namespaceKnown = determinable
+			if determinable && !matched {
 				return false, true
 			}
 		default:
-			// A cluster-scoped object other than Namespace itself: a
-			// namespaceSelector never skips the policy for it, per
-			// MatchResources' own doc comment.
+			// A namespaceSelector never exempts other cluster-scoped objects.
 		}
 	}
 
+	objectKnown := true
 	if c.objectSelector != nil && !c.objectSelector.Empty() {
 		if !c.objectSelector.Matches(labels.Set(obj.Labels)) {
-			return false, true
+			if obj.Operation != admissionregistrationv1alpha1.Update {
+				return false, true
+			}
+			// UPDATE selectors match old OR new labels. The absent other
+			// object may match, but resource rules can still exclude it.
+			objectKnown = false
 		}
 	}
 
@@ -291,6 +302,9 @@ func (c *compiledMatchResources) matches(obj ObjectInfo) (matched bool, determin
 			// The apiserver applies matchPolicy to exclusions too. Without
 			// its equivalence registry, an exact include cannot prove that
 			// an exclusion naming another group/version will not apply.
+			return false, false
+		}
+		if !namespaceKnown || !objectKnown {
 			return false, false
 		}
 		return true, true

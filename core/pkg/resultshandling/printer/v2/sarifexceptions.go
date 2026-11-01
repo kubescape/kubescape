@@ -75,7 +75,7 @@ func splitSARIFExceptions(summary *reportsummary.SummaryDetails, ac resourcesres
 		}
 		// These are the same exceptions the processor matched, selected with the
 		// same filter it used to decide the rule's status.
-		matched := matchedSARIFExceptions(rule.Exception, frameworkNames, ac.ControlID, rule.GetName())
+		matched := exceptions.FilterExceptionsByFrameworks(rule.Exception, frameworkNames, ac.ControlID, rule.GetName())
 		if effective.IsPassed() {
 			// The rule passes when any matched exception is not alertOnly, so the
 			// matches may mix actions. Only a non-alertOnly exception removed the
@@ -111,20 +111,6 @@ func splitSARIFExceptions(summary *reportsummary.SummaryDetails, ac resourcesres
 	split.suppressedAlertOnlyExceptions = uniqueSortedExceptions(split.suppressedAlertOnlyExceptions)
 	split.alertOnlyExceptions = uniqueSortedExceptions(split.alertOnlyExceptions)
 	return split
-}
-
-// matchedSARIFExceptions selects the exceptions that apply to a rule in the given
-// frameworks. With no framework it selects the framework-agnostic ones, as the
-// processor does; otherwise it gathers those that apply in each framework.
-func matchedSARIFExceptions(list []armotypes.PostureExceptionPolicy, frameworkNames []string, controlID, ruleName string) []armotypes.PostureExceptionPolicy {
-	if len(frameworkNames) == 0 {
-		return exceptions.FilterExceptionsByFrameworks(list, nil, controlID, ruleName)
-	}
-	var matched []armotypes.PostureExceptionPolicy
-	for _, name := range frameworkNames {
-		matched = append(matched, exceptions.FilterExceptionsByFrameworks(list, []string{name}, controlID, ruleName)...)
-	}
-	return matched
 }
 
 // isSARIFSuppressedControl reports whether a disable exception removed at least

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils"
@@ -23,7 +22,7 @@ func LoadCaseInput(dir string) ([]workloadinterface.IMetadata, error) {
 
 	var resources []workloadinterface.IMetadata
 	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".yaml") && !strings.HasSuffix(e.Name(), ".yml") {
+		if e.IsDir() || !cautils.IsYaml(e.Name()) {
 			continue
 		}
 		raw, err := os.ReadFile(filepath.Join(inputDir, e.Name()))

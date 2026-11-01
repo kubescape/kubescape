@@ -259,6 +259,7 @@ func TestGCPPartialFindings_BoundedFindingsStillReturnDiscoveryError(t *testing.
 	a := &GCPAdaptor{client: api, projectID: "project"}
 	reports, err := a.GetImagesVulnerabilities(context.Background(), []ContainerImageIdentifier{partialGCPImage()})
 	require.ErrorIs(t, err, failed)
+	require.ErrorContains(t, err, "incomplete")
 	require.Len(t, reports[0].Vulnerabilities, 1000)
 	require.Equal(t, "CVE-0000", reports[0].Vulnerabilities[0].ID)
 	require.Equal(t, "CVE-0999", reports[0].Vulnerabilities[999].ID)

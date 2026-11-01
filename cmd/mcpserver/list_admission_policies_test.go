@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/kubescape/kubescape/v4/core/pkg/opaprocessor/cel"
 	"github.com/mark3labs/mcp-go/mcp"
@@ -109,6 +110,63 @@ func TestCallTool_ListAdmissionPolicies(t *testing.T) {
 	var entries []admissionPolicyEntry
 	require.NoError(t, json.Unmarshal([]byte(text.Text), &entries))
 	assert.NotEmpty(t, entries)
+}
+
+func TestCallTool_ListAdmissionPolicies_CancelledContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	srv := &KubescapeMcpserver{}
+	res, err := srv.CallTool(ctx, "list_admission_policies", map[string]any{})
+	require.NoError(t, err)
+	te := toolErrorOf(t, res)
+	assert.Equal(t, ErrCodeTimeout, te.Code)
+	assert.Contains(t, te.Message, "failed to list admission policies")
+	assert.Contains(t, te.Message, context.Canceled.Error())
+}
+
+func TestCallTool_ListAdmissionPolicies_DeadlineExceeded(t *testing.T) {
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel()
+
+	srv := &KubescapeMcpserver{}
+	res, err := srv.CallTool(ctx, "list_admission_policies", map[string]any{})
+	require.NoError(t, err)
+	te := toolErrorOf(t, res)
+	assert.Equal(t, ErrCodeTimeout, te.Code)
+	assert.Contains(t, te.Message, "failed to list admission policies")
+	assert.Contains(t, te.Message, context.DeadlineExceeded.Error())
+}
+
+func TestHandleMessage_ListAdmissionPolicies_CancelledContext(t *testing.T) {
+	s := server.NewMCPServer("test", "0.0.1", server.WithToolCapabilities(false))
+	srv := &KubescapeMcpserver{s: s}
+	createPolicyListingTools(srv)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	req := []byte(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_admission_policies","arguments":{}}}`)
+	resp := s.HandleMessage(ctx, req)
+	raw, err := json.Marshal(resp)
+	require.NoError(t, err)
+
+	var parsed struct {
+		Result struct {
+			IsError bool `json:"isError"`
+			Content []struct {
+				Text string `json:"text"`
+			} `json:"content"`
+		} `json:"result"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &parsed))
+	require.True(t, parsed.Result.IsError)
+	require.NotEmpty(t, parsed.Result.Content)
+
+	var te ToolError
+	require.NoError(t, json.Unmarshal([]byte(parsed.Result.Content[0].Text), &te))
+	assert.Equal(t, ErrCodeTimeout, te.Code)
+	assert.Contains(t, te.Message, "failed to list admission policies")
 }
 
 func TestListAdmissionPolicies_ToolRegistration(t *testing.T) {

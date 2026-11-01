@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"testing"
 
+	"github.com/kubescape/backend/pkg/versioncheck"
 	"github.com/kubescape/kubescape/v4/core/pkg/pss"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -187,6 +188,44 @@ func TestWriteSARIF(t *testing.T) {
 	require.NotEmpty(t, run.Results[0].Locations)
 	assert.Equal(t, "failing-app", run.Results[0].Locations[0].LogicalLocations[0].Name)
 	assert.Equal(t, "test-ns/Deployment/failing-app/main", run.Results[0].Locations[0].LogicalLocations[0].FullyQualifiedName)
+}
+
+// TestWriteSARIF_DriverVersion verifies that the SARIF driver reports the
+// running kubescape version, and leaves the optional version out when it is
+// unset.
+func TestWriteSARIF_DriverVersion(t *testing.T) {
+	originalBuildNumber := versioncheck.BuildNumber
+	t.Cleanup(func() { versioncheck.BuildNumber = originalBuildNumber })
+
+	t.Run("release build", func(t *testing.T) {
+		versioncheck.BuildNumber = "v4.0.17"
+
+		var buf bytes.Buffer
+		require.NoError(t, writeSARIF(&buf, sampleResult()))
+
+		var report sarifReport
+		require.NoError(t, json.Unmarshal(buf.Bytes(), &report))
+		require.Len(t, report.Runs, 1)
+		assert.Equal(t, "v4.0.17", report.Runs[0].Tool.Driver.Version)
+	})
+
+	t.Run("unset version", func(t *testing.T) {
+		versioncheck.BuildNumber = ""
+
+		var buf bytes.Buffer
+		require.NoError(t, writeSARIF(&buf, sampleResult()))
+
+		var report struct {
+			Runs []struct {
+				Tool struct {
+					Driver map[string]json.RawMessage `json:"driver"`
+				} `json:"tool"`
+			} `json:"runs"`
+		}
+		require.NoError(t, json.Unmarshal(buf.Bytes(), &report))
+		require.Len(t, report.Runs, 1)
+		assert.NotContains(t, report.Runs[0].Tool.Driver, "version")
+	})
 }
 
 // TestWriteSARIF_DeterministicRuleOrdering verifies that SARIF rules are sorted

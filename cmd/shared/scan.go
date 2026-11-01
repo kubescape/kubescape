@@ -21,6 +21,14 @@ var (
 	ImageScanFormats = printer.ImageFormats
 )
 
+// SupportedViews lists the views supported by the --view flag.
+var SupportedViews = []string{
+	string(cautils.ResourceViewType),
+	string(cautils.ControlViewType),
+	string(cautils.SecurityViewType),
+	string(cautils.NamespaceViewType),
+}
+
 var ErrUnknownSeverity = fmt.Errorf("unknown severity. Supported severities are: %s", strings.Join(reporthandlingapis.GetSupportedSeverities(), ", "))
 
 // ErrBadThreshold is returned when a numeric threshold is outside the valid range [0, 100].
@@ -113,6 +121,18 @@ func ValidateScanFormat(format string, supported []string) error {
 	return nil
 }
 
+// ValidateView returns an error if view is not one of the supported views.
+func ValidateView(view string) error {
+	trimmed := strings.ToLower(strings.TrimSpace(view))
+	if trimmed == "" {
+		return fmt.Errorf("view cannot be empty, supported views: %s", strings.Join(SupportedViews, ", "))
+	}
+	if !slices.Contains(SupportedViews, trimmed) {
+		return fmt.Errorf("invalid view %q, supported views: %s", view, strings.Join(SupportedViews, ", "))
+	}
+	return nil
+}
+
 // ValidateCommonScanFlags validates flags that are common to all scan subcommands
 func ValidateCommonScanFlags(cmd *cobra.Command, scanInfo *cautils.ScanInfo, supportedFormats []string) error {
 	if scanInfo.Submit.GetBool() && scanInfo.Local {
@@ -151,6 +171,25 @@ func ValidateCommonScanFlags(cmd *cobra.Command, scanInfo *cautils.ScanInfo, sup
 	}
 	if err := ValidateScanFormat(scanInfo.Format, supportedFormats); err != nil {
 		return err
+	}
+	fView := cmd.Flags().Lookup("view")
+	if fView == nil {
+		fView = cmd.InheritedFlags().Lookup("view")
+	}
+	if scanInfo.ScanType == cautils.ScanTypeImage {
+		if fView != nil && fView.Changed {
+			return fmt.Errorf("--view is not supported for image scans: an image scan evaluates vulnerabilities, not posture views")
+		}
+	} else {
+		if fView != nil && fView.Changed && strings.TrimSpace(scanInfo.View) == "" {
+			return fmt.Errorf("view cannot be empty, supported views: %s", strings.Join(SupportedViews, ", "))
+		}
+		if scanInfo.View != "" {
+			if err := ValidateView(scanInfo.View); err != nil {
+				return err
+			}
+			scanInfo.View = strings.ToLower(strings.TrimSpace(scanInfo.View))
+		}
 	}
 	if scanInfo.ScanImages && scanInfo.ScanType != cautils.ScanTypeImage {
 		for _, format := range strings.Split(scanInfo.Format, ",") {

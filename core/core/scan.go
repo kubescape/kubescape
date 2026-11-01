@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -89,6 +88,12 @@ func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo, policyIdenti
 		}
 		k8sClient = k8s.KubernetesClient
 	}
+	// Connecting takes no context, so a deadline that passed meanwhile stops the scan here.
+	if err := ctx.Err(); err != nil {
+		err = fmt.Errorf("scan stopped while connecting to the cluster: %w", err)
+		span.RecordError(err)
+		return componentInterfaces{}, err
+	}
 
 	// ================== setup tenant object ======================================
 	var tenantConfig cautils.ITenantConfig
@@ -130,6 +135,12 @@ func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo, policyIdenti
 	}
 
 	// ================== setup host scanner object ======================================
+	// The version check above reads the cluster without the scan's context.
+	if err := ctx.Err(); err != nil {
+		err = fmt.Errorf("scan stopped while setting up: %w", err)
+		span.RecordError(err)
+		return componentInterfaces{}, err
+	}
 	ctxHostScanner, spanHostScanner := otel.Tracer("").Start(ctx, "setup host scanner")
 	hostSensorHandler := getHostSensorHandler(ctx, scanInfo, k8s)
 	if err := hostSensorHandler.Init(ctxHostScanner); err != nil {
@@ -449,6 +460,10 @@ func (ks *Kubescape) ScanContext(ctx context.Context, scanInfo *cautils.ScanInfo
 		return resultsHandling, err
 	}
 
+	// A dry run and collection both start with discovery calls that take no context, so a deadline that already passed stops the scan here.
+	if err := ctx.Err(); err != nil {
+		return resultsHandling, fmt.Errorf("scan stopped before collecting resources: %w", err)
+	}
 	if scanInfo.DryRun {
 		resultsHandling.SetData(scanData)
 		result, err := interfaces.resourceHandler.Preflight(ctx, scanData, scanInfo)
@@ -667,26 +682,15 @@ func scanImages(scanType cautils.ScanTypes, scanData *cautils.OPASessionObj, ctx
 
 // buildWorkloadImageScanJobs turns the collected targets into scan jobs, ordered by
 // image and then platform. Credentials resolved from a workload's
-// imagePullSecrets win; the CLI registry credentials are used only when none
-// resolved for the image.
+// imagePullSecrets win, in the order collectImageScanTargets put them in, which
+// is the order the scan tries them; the CLI registry credentials are used only
+// when none resolved for the image.
 func buildWorkloadImageScanJobs(imagesToScan mapset.Set[ImageScanTarget], imageToCreds map[string][]imagescan.RegistryCredentials, defaultCreds imagescan.RegistryCredentials, registryMapping map[string]string) []ImageScanJob {
 	jobs := make([]ImageScanJob, 0, imagesToScan.Cardinality())
 	for target := range imagesToScan.Iter() {
 		img := target.Image
 		credsList := []imagescan.RegistryCredentials{}
 		if resolvedCreds, ok := imageToCreds[img]; ok {
-			sort.Slice(resolvedCreds, func(i, j int) bool {
-				if resolvedCreds[i].Authority != resolvedCreds[j].Authority {
-					return resolvedCreds[i].Authority < resolvedCreds[j].Authority
-				}
-				if resolvedCreds[i].Username != resolvedCreds[j].Username {
-					return resolvedCreds[i].Username < resolvedCreds[j].Username
-				}
-				if resolvedCreds[i].Password != resolvedCreds[j].Password {
-					return resolvedCreds[i].Password < resolvedCreds[j].Password
-				}
-				return resolvedCreds[i].Token < resolvedCreds[j].Token
-			})
 			credsList = append(credsList, resolvedCreds...)
 		}
 
@@ -751,7 +755,7 @@ func scanImageJobs(ctx context.Context, svc imageScanService, concurrency int, j
 
 func collectImageScanTargets(scanType cautils.ScanTypes, scanData *cautils.OPASessionObj, ctx context.Context, scanningContext cautils.ScanningContext, k8sApi *k8sinterface.KubernetesApi, platformOverride string) (mapset.Set[ImageScanTarget], map[string][]imagescan.RegistryCredentials, []error) {
 	imagesToScan := mapset.NewSet[ImageScanTarget]()
-	imageToCreds := make(map[string][]imagescan.RegistryCredentials)
+	resolvedCreds := make(map[string][]registryCredential)
 	var containerErrors []error
 	nodePlatforms := buildNodePlatformIndexFromCatalog(scanData.GetCatalog())
 	if scanningContext != cautils.ContextCluster {
@@ -760,6 +764,7 @@ func collectImageScanTargets(scanType cautils.ScanTypes, scanData *cautils.OPASe
 		// never grant cluster credentials to an offline image scan.
 		k8sApi = nil
 	}
+	pullSecrets := newPullSecretCache(k8sApi)
 
 	collectWorkload := func(wl *workloadinterface.Workload) {
 		images, workloadContainerErrors := getAllWorkloadImages(wl)
@@ -792,11 +797,7 @@ func collectImageScanTargets(scanType cautils.ScanTypes, scanData *cautils.OPASe
 					Image: image, Platform: platform, SkipUnavailable: skipUnavailable,
 				})
 			}
-			if creds, ok := resolveRegistryCredentials(ctx, k8sApi, wl, image); ok {
-				if !slices.Contains(imageToCreds[image], creds) {
-					imageToCreds[image] = append(imageToCreds[image], creds)
-				}
-			}
+			resolvedCreds[image] = append(resolvedCreds[image], resolveRegistryCredentials(ctx, pullSecrets, wl, image)...)
 		}
 	}
 
@@ -809,6 +810,15 @@ func collectImageScanTargets(scanType cautils.ScanTypes, scanData *cautils.OPASe
 			}
 			return true
 		})
+	}
+
+	// Workloads are visited in map order, so the credentials are ordered only
+	// once every workload has contributed its matches.
+	imageToCreds := make(map[string][]imagescan.RegistryCredentials, len(resolvedCreds))
+	for image, resolved := range resolvedCreds {
+		if len(resolved) > 0 {
+			imageToCreds[image] = orderRegistryCredentials(resolved)
+		}
 	}
 
 	return imagesToScan, imageToCreds, containerErrors

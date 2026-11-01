@@ -101,15 +101,17 @@ func ValidateGranularity(value string) error {
 // the MCP diff tool, ...) share this one dispatch instead of reimplementing
 // it.
 func CompareReports(basePath, headPath string, options Options) (ReportKind, *ChangeSet, *VulnerabilityChangeSet, error) {
-	switch baseKind, headKind := ReportKindOf(basePath), ReportKindOf(headPath); {
-	case baseKind == VulnerabilityReport && headKind == VulnerabilityReport:
+	baseKind, headKind := ReportKindOf(basePath), ReportKindOf(headPath)
+	if baseKind != UnreadableReport && headKind != UnreadableReport && baseKind != headKind {
+		return UnreadableReport, nil, nil, ErrMixedReportKinds
+	}
+
+	if baseKind == VulnerabilityReport || headKind == VulnerabilityReport {
 		cs, err := ComputeVulnerabilities(basePath, headPath)
 		if err != nil {
 			return VulnerabilityReport, nil, nil, err
 		}
 		return VulnerabilityReport, nil, cs, nil
-	case baseKind != UnreadableReport && headKind != UnreadableReport && baseKind != headKind:
-		return UnreadableReport, nil, nil, ErrMixedReportKinds
 	}
 
 	cs, err := ComputeWithOptions(basePath, headPath, options)

@@ -192,7 +192,7 @@ func TestGCPAdaptor_GetImagesScanStatus_Bounded(t *testing.T) {
 	}
 
 	statuses, err := adaptor.GetImagesScanStatus(context.Background(), images)
-	require.NoError(t, err)
+	require.ErrorContains(t, err, "incomplete")
 	require.Len(t, statuses, 1)
 	assert.False(t, statuses[0].IsScanAvailable)
 
@@ -519,9 +519,9 @@ func TestGCPAdaptor_GetImagesVulnerabilities_Cap(t *testing.T) {
 	}
 
 	reports, err := adaptor.GetImagesVulnerabilities(context.Background(), images)
-	assert.NoError(t, err)
+	assert.ErrorContains(t, err, "incomplete")
 	assert.Len(t, reports, 1)
-	assert.Len(t, reports[0].Vulnerabilities, 1000) // Should truncate at 1000 without returning an error
+	assert.Len(t, reports[0].Vulnerabilities, 1000) // Keep the bounded prefix while reporting incomplete retrieval
 }
 
 // newFakeContainerAnalysisClient builds a real *containeranalysis.Client

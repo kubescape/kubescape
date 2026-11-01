@@ -7,6 +7,7 @@ import (
 
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/pkg/securityexception"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	"github.com/stretchr/testify/assert"
@@ -90,7 +91,7 @@ func TestEmitExceptionMatchEvents(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			recorder := record.NewFakeRecorder(1)
-			opap := &OPAProcessor{exceptionEventRecorder: recorder}
+			opap := &OPAProcessor{OPASessionObj: cautils.NewOPASessionObjMock(), exceptionEventRecorder: recorder}
 
 			result := resourcesresults.Result{
 				AssociatedControls: []resourcesresults.ResourceAssociatedControl{
@@ -128,7 +129,7 @@ func TestEmitExceptionMatchEvents_NonCRDExceptionAttachesToScannedResource(t *te
 	require.NoError(t, err)
 
 	recorder := &capturingRecorder{}
-	opap := &OPAProcessor{exceptionEventRecorder: recorder}
+	opap := &OPAProcessor{OPASessionObj: cautils.NewOPASessionObjMock(), exceptionEventRecorder: recorder}
 
 	result := resourcesresults.Result{
 		AssociatedControls: []resourcesresults.ResourceAssociatedControl{
@@ -172,7 +173,7 @@ func TestEmitExceptionMatchEvents_CRDAndNonCRDExceptionsBothEmit(t *testing.T) {
 	fileException := armotypes.PostureExceptionPolicy{}
 
 	recorder := &capturingRecorder{}
-	opap := &OPAProcessor{exceptionEventRecorder: recorder}
+	opap := &OPAProcessor{OPASessionObj: cautils.NewOPASessionObjMock(), exceptionEventRecorder: recorder}
 
 	result := resourcesresults.Result{
 		AssociatedControls: []resourcesresults.ResourceAssociatedControl{

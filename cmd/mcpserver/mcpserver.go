@@ -1592,7 +1592,25 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		if toolErr != nil {
 			return toolErr, nil
 		}
-		result, err := ksServer.ListControls(ctx, framework)
+		limit := defaultControlsListLimit
+		if requestedLimit, set, argErr := mcpIntArg(arguments, "limit"); argErr != nil {
+			return argErr, nil
+		} else if set {
+			if requestedLimit < 1 || requestedLimit > maxControlsListLimit {
+				return mcpToolError(ErrCodeInvalidArgument,
+					fmt.Sprintf("limit must be between 1 and %d", maxControlsListLimit),
+					map[string]any{"argument": "limit"}), nil
+			}
+			limit = requestedLimit
+		}
+		offset, _, toolErr := mcpIntArg(arguments, "offset")
+		if toolErr != nil {
+			return toolErr, nil
+		}
+		if offset < 0 {
+			return mcpToolError(ErrCodeInvalidArgument, "offset must not be negative", map[string]any{"argument": "offset"}), nil
+		}
+		result, err := ksServer.ListControls(ctx, framework, limit, offset)
 		var unknown *unknownFrameworkError
 		if errors.As(err, &unknown) {
 			return mcpToolError(ErrCodeInvalidArgument, err.Error(),
@@ -1605,7 +1623,7 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 	case "list_admission_policies":
 		result, err := ksServer.ListAdmissionPolicies(ctx)
 		if err != nil {
-			return mcpToolError(ErrCodeScanFailed, fmt.Sprintf("failed to list admission policies: %v", err), nil), nil
+			return mcpToolError(classifyScanError(err), fmt.Sprintf("failed to list admission policies: %v", err), nil), nil
 		}
 		return mcp.NewToolResultText(string(result)), nil
 	case "create_admission_policy_binding":
@@ -1642,7 +1660,28 @@ func registerTools(ksServer *KubescapeMcpserver) {
 	createSecretExposureTools(ksServer)
 }
 
+// validateMCPOptions validates and normalizes the transport and port arguments before
+// starting the server or launching background tasks.
+func validateMCPOptions(transport string, port int) (string, error) {
+	normTransport := strings.ToLower(strings.TrimSpace(transport))
+	if port < 1 || port > 65535 {
+		return "", fmt.Errorf("invalid port %d: must be between 1 and 65535", port)
+	}
+	switch normTransport {
+	case "sse", "stdio":
+		return normTransport, nil
+	default:
+		return "", fmt.Errorf("unsupported transport '%s': must be 'sse' or 'stdio'", transport)
+	}
+}
+
 func mcpServerEntrypoint(ctx context.Context, transport string, port int) error {
+	normTransport, err := validateMCPOptions(transport, port)
+	if err != nil {
+		return err
+	}
+	transport = normTransport
+
 	logger.L().Info("Starting MCP server...")
 
 	// ksServer is created below, once the MCP server exists; the lifecycle
@@ -1791,9 +1830,15 @@ func createPolicyListingTools(ksServer *KubescapeMcpserver) {
 	)
 	listControlsTool := mcp.NewTool(
 		"list_controls",
-		mcp.WithDescription("List the available security controls with their IDs, names, and the frameworks they belong to. Pass framework to get only one framework's controls instead of all of them. Use a returned ID as a control_ids value in scan_controls."),
+		mcp.WithDescription("List the available security controls with their IDs, names, and the frameworks they belong to. Returns total, returned, truncated, and controls; pass framework to filter and use next_offset to request the next page. Use a returned ID as a control_ids value in scan_controls."),
 		mcp.WithString("framework",
 			mcp.Description("Only return the controls of this framework, e.g. \"NSA\" (optional, case-insensitive; see list_frameworks)"),
+		),
+		mcp.WithNumber("limit",
+			mcp.Description("Maximum number of controls to return (optional, default 100, maximum 500)"),
+		),
+		mcp.WithNumber("offset",
+			mcp.Description("Number of controls to skip; pass the previous response's next_offset to get the next page (optional, default 0)"),
 		),
 	)
 	listAdmissionPoliciesTool := mcp.NewTool(
@@ -1834,6 +1879,15 @@ func GetMCPServerCmd() *cobra.Command {
 		Use:   "mcpserver",
 		Short: "Start the Kubescape MCP server",
 		Long:  `Start the Kubescape MCP server`,
+		Args:  cobra.NoArgs,
+		PreRunE: func(cmd *cobra.Command, args []string) error {
+			norm, err := validateMCPOptions(transport, port)
+			if err != nil {
+				return err
+			}
+			transport = norm
+			return nil
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// The root command's context is cancelled on the first SIGINT or
 			// SIGTERM (see main.go); SSE shuts down when it ends.

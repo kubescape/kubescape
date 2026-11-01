@@ -64,14 +64,20 @@ Image scan reports ("scan image --format json") are compared by vulnerability in
 
 			// diff honors a single output format, so validate against the exact value rather than scan's comma-separated multi-format set.
 			supportedFormats := diffFormats()
-			if !slices.Contains(supportedFormats, diffInfo.Format) {
+			trimmedFormat := strings.ToLower(strings.TrimSpace(diffInfo.Format))
+			if trimmedFormat == "" {
+				return fmt.Errorf("format cannot be empty, supported formats: %s", strings.Join(supportedFormats, ", "))
+			}
+			if !slices.Contains(supportedFormats, trimmedFormat) {
 				return fmt.Errorf("invalid format %q, supported formats: %s", diffInfo.Format, strings.Join(supportedFormats, ", "))
 			}
+			diffInfo.Format = trimmedFormat
 
 			if diffInfo.SeverityThreshold != "" {
 				if err := shared.ValidateSeverity(diffInfo.SeverityThreshold); err != nil {
 					return err
 				}
+				diffInfo.SeverityThreshold = strings.ToLower(strings.TrimSpace(diffInfo.SeverityThreshold))
 			}
 			if err := resultsdiff.ValidateGranularity(diffInfo.Granularity); err != nil {
 				return err

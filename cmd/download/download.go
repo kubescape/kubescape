@@ -37,7 +37,7 @@ var (
 
 // normalizeDownloadTarget maps plurals and common aliases to canonical download targets.
 func normalizeDownloadTarget(target string) string {
-	switch strings.ToLower(target) {
+	switch strings.ToLower(strings.TrimSpace(target)) {
 	case "controls", "control":
 		return core.TargetControl
 	case "frameworks", "framework":
@@ -87,10 +87,11 @@ func GetDownloadCmd(ks meta.IKubescape) *cobra.Command {
 
 			downloadInfo.Target = normalizeDownloadTarget(args[0])
 			if len(args) >= 2 {
-				if args[1] == "" && (downloadInfo.Target == "framework" || downloadInfo.Target == "control") {
+				identifier := strings.TrimSpace(args[1])
+				if identifier == "" && (downloadInfo.Target == core.TargetFramework || downloadInfo.Target == core.TargetControl) {
 					return fmt.Errorf("name cannot be empty for %s download", downloadInfo.Target)
 				}
-				downloadInfo.Identifier = args[1]
+				downloadInfo.Identifier = identifier
 			}
 			_, err := ks.Download(&downloadInfo)
 			if err != nil {

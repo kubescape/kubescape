@@ -3,10 +3,31 @@ package cautils
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 
+	"github.com/jwalton/gchalk"
+	"github.com/mattn/go-isatty"
 	"gopkg.in/yaml.v3"
 )
+
+var (
+	isTerminal       = isatty.IsTerminal
+	isCygwinTerminal = isatty.IsCygwinTerminal
+)
+
+func shouldColor() bool {
+	if val, set := os.LookupEnv("NO_COLOR"); set && val != "" {
+		return false
+	}
+	if val, set := os.LookupEnv("FORCE_COLOR"); set {
+		return val != "0"
+	}
+	if gchalk.GetLevel() == gchalk.LevelNone {
+		return false
+	}
+	return isTerminal(os.Stdout.Fd()) || isCygwinTerminal(os.Stdout.Fd())
+}
 
 type ConfigOutputField struct {
 	Name  string
@@ -59,10 +80,32 @@ func formatConfigOutputYAML(cfg *ConfigObj, includeEmpty bool) ([]byte, error) {
 
 func formatConfigOutputText(cfg *ConfigObj, includeEmpty bool) ([]byte, error) {
 	var lines []string
+	colored := shouldColor()
+
 	for _, field := range ConfigOutputFields(cfg) {
-		if includeEmpty || field.Value != "" {
-			lines = append(lines, fmt.Sprintf("%s: %s", field.Name, field.Value))
+		if !includeEmpty && field.Value == "" {
+			continue
 		}
+
+		key := field.Name
+		val := field.Value
+		isEmpty := field.Value == ""
+		isSecret := field.Name == "accessKey" && field.Value != ""
+
+		if colored {
+			key = gchalk.WithBrightCyan().Bold(field.Name)
+			if isEmpty {
+				val = gchalk.Yellow("<not set>")
+			} else if isSecret {
+				val = gchalk.Yellow(field.Value)
+			} else {
+				val = gchalk.BrightWhite(field.Value)
+			}
+		} else if isEmpty {
+			val = "<not set>"
+		}
+
+		lines = append(lines, fmt.Sprintf("%s: %s", key, val))
 	}
 	return []byte(strings.Join(lines, "\n") + "\n"), nil
 }

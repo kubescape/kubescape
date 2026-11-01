@@ -371,7 +371,7 @@ responses:
     schema:
       $ref: '#/definitions/Response'
   scanResponseBadRequest:
-    description: A Scan Response that occures after malformed requests
+    description: A Scan Response that occurs after malformed requests
     schema:
       allOf:
       - properties:
@@ -424,7 +424,7 @@ responses:
             x-go-name: Type
         type: object
   scanResponseInternalServerError:
-    description: A Scan Response that occures after malformed requests
+    description: A Scan Response that occurs after malformed requests
     schema:
       allOf:
       - properties:
@@ -486,7 +486,7 @@ responses:
 
       Kubescape generates this response, for example, when results with given ID do not exist.
   scanResponseNotFound:
-    description: A Scan Response that occures when no in-flight scan matches
+    description: A Scan Response that occurs when no in-flight scan matches
       the given ID
     schema:
       allOf:

@@ -72,15 +72,17 @@ func (combinedScanVulnerabilityProvider) VulnerabilityMetadata(ref vulnerability
 func (combinedScanVulnerabilityProvider) Close() error { return nil }
 
 type SpyPrinter struct {
-	ActionPrintCalls int
-	ScoreCalls       int
-	ActionPrintErr   error
+	ActionPrintCalls     int
+	ScoreCalls           int
+	ActionPrintErr       error
+	PrintedImageScanData []cautils.ImageScanData
 }
 
 func (sp *SpyPrinter) SetWriter(_ context.Context, _ string) error { return nil }
 func (sp *SpyPrinter) PrintNextSteps()                             {}
-func (sp *SpyPrinter) ActionPrint(_ context.Context, _ *cautils.OPASessionObj, _ []cautils.ImageScanData) error {
+func (sp *SpyPrinter) ActionPrint(_ context.Context, _ *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
 	sp.ActionPrintCalls += 1
+	sp.PrintedImageScanData = append([]cautils.ImageScanData(nil), imageScanData...)
 	return sp.ActionPrintErr
 }
 func (sp *SpyPrinter) Score(_ float32) {
@@ -254,6 +256,87 @@ func TestResultsHandlerNotifyHonorsImageSeverityFilters(t *testing.T) {
 
 	// Ensure rh.ImageScanData remains unmutated for thresholds
 	assert.Equal(t, 2, handler.ImageScanData[0].Matches.Count())
+}
+
+func TestResultsHandlerImageOutputHonorsMaxSeverityAndExcludesUnknown(t *testing.T) {
+	lowMatch := match.Match{
+		Vulnerability: vulnerability.Vulnerability{
+			Reference: vulnerability.Reference{ID: "CVE-LOW", Namespace: "nvd"},
+			Metadata:  &vulnerability.Metadata{ID: "CVE-LOW", Severity: "Low"},
+		},
+	}
+	mediumMatch := match.Match{
+		Vulnerability: vulnerability.Vulnerability{
+			Reference: vulnerability.Reference{ID: "CVE-MEDIUM", Namespace: "nvd"},
+			Metadata:  &vulnerability.Metadata{ID: "CVE-MEDIUM", Severity: "Medium"},
+		},
+	}
+	highMatch := match.Match{
+		Vulnerability: vulnerability.Vulnerability{
+			Reference: vulnerability.Reference{ID: "CVE-HIGH", Namespace: "nvd"},
+			Metadata:  &vulnerability.Metadata{ID: "CVE-HIGH", Severity: "High"},
+		},
+	}
+	negligibleMatch := match.Match{
+		Vulnerability: vulnerability.Vulnerability{
+			Reference: vulnerability.Reference{ID: "CVE-NEGLIGIBLE", Namespace: "nvd"},
+			Metadata:  &vulnerability.Metadata{ID: "CVE-NEGLIGIBLE", Severity: "Negligible"},
+		},
+	}
+	unknownMatch := match.Match{
+		Vulnerability: vulnerability.Vulnerability{
+			Reference: vulnerability.Reference{ID: "CVE-UNKNOWN", Namespace: "nvd"},
+			Metadata:  &vulnerability.Metadata{ID: "CVE-UNKNOWN", Severity: "Unknown"},
+		},
+	}
+	missingMetadataMatch := match.Match{
+		Vulnerability: vulnerability.Vulnerability{
+			Reference: vulnerability.Reference{ID: "CVE-NO-METADATA", Namespace: "nvd"},
+		},
+	}
+
+	uiPrinter := &SpyPrinter{}
+	handler := NewResultsHandler(nil, nil, uiPrinter)
+	handler.ImageScanData = []cautils.ImageScanData{{
+		Image:   "filtered:latest",
+		Matches: match.NewMatches(lowMatch, mediumMatch, highMatch, negligibleMatch, unknownMatch, missingMetadataMatch),
+	}}
+
+	require.NoError(t, handler.HandleResults(context.Background(), &cautils.ScanInfo{MaxSeverity: "medium"}))
+
+	require.Len(t, uiPrinter.PrintedImageScanData, 1)
+	filteredMatches := uiPrinter.PrintedImageScanData[0].Matches
+	assert.Equal(t, 3, filteredMatches.Count())
+	assert.Equal(t, 6, handler.ImageScanData[0].Matches.Count(), "filtering output must not mutate findings used by thresholds")
+
+	gotIDs := make([]string, 0, filteredMatches.Count())
+	for _, finding := range filteredMatches.Sorted() {
+		gotIDs = append(gotIDs, finding.Vulnerability.ID)
+	}
+	assert.ElementsMatch(t, []string{"CVE-LOW", "CVE-MEDIUM", "CVE-NEGLIGIBLE"}, gotIDs)
+}
+
+func TestResultsHandlerImageOutputResolvesSeverityFromProvider(t *testing.T) {
+	providerMatch := match.Match{
+		Vulnerability: vulnerability.Vulnerability{
+			Reference: vulnerability.Reference{ID: "CVE-COMBINED", Namespace: "nvd"},
+		},
+	}
+
+	uiPrinter := &SpyPrinter{}
+	handler := NewResultsHandler(nil, nil, uiPrinter)
+	handler.ImageScanData = []cautils.ImageScanData{{
+		Image:                 "provider-severity:latest",
+		Matches:               match.NewMatches(providerMatch),
+		VulnerabilityProvider: combinedScanVulnerabilityProvider{},
+	}}
+
+	require.NoError(t, handler.HandleResults(context.Background(), &cautils.ScanInfo{MaxSeverity: "critical"}))
+
+	require.Len(t, uiPrinter.PrintedImageScanData, 1)
+	require.Equal(t, 1, uiPrinter.PrintedImageScanData[0].Matches.Count())
+	assert.Equal(t, "CVE-COMBINED", uiPrinter.PrintedImageScanData[0].Matches.Sorted()[0].Vulnerability.ID)
+	assert.Equal(t, 1, handler.ImageScanData[0].Matches.Count(), "filtering output must preserve original matches")
 }
 
 func TestResultsHandlerHandleResultsReturnsPrinterErrors(t *testing.T) {

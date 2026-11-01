@@ -9,6 +9,7 @@ import (
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/opa-utils/reporthandling"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
+	k8sjson "k8s.io/apimachinery/pkg/util/json"
 )
 
 // rawObject keeps report fields as raw JSON so decrypting a report does not
@@ -266,10 +267,13 @@ func (d *reportDecryptor) decryptResource(resource rawObject, context string) (s
 		return oldID, "", nil
 	}
 
-	workload, err := workloadinterface.NewWorkload(objectRaw)
-	if err != nil {
+	// The metadata helpers need a mutable map, but decoding it through the
+	// workload byte constructor would turn int64 fields into rounded float64s.
+	var object map[string]any
+	if err := k8sjson.Unmarshal(objectRaw, &object); err != nil {
 		return "", "", fmt.Errorf("failed to parse %s.object: %w", context, err)
 	}
+	workload := workloadinterface.NewWorkloadObj(object)
 
 	if err := DecryptResourceMetadata(workload, d.dek); err != nil {
 		return "", "", fmt.Errorf("failed to decrypt %s metadata: %w", context, err)

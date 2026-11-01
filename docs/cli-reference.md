@@ -96,8 +96,8 @@ kubescape scan [target] [flags]
 | `--registry-token <token>` | Bearer token for image registry login when no docker config or credential helper is available. Also read from `KUBESCAPE_REGISTRY_TOKEN` | - |
 | `--registry-authority <host[:port]>` | Registry `host[:port]` that the `--scan-images` registry credentials apply to | - |
 | `--registry-mapping <from=to>` | Map internal registry hosts to reachable ones, as `host[:port]` without a scheme, e.g. `image-registry.openshift-image-registry.svc:5000=registry.company.com` | - |
-| `--min-severity <sev>` | Only show controls at or above this severity: `low`, `medium`, `high`, `critical`. Output-only — exit codes are computed on the full unfiltered report | - |
-| `--max-severity <sev>` | Only show controls at or below this severity. Output-only — exit codes are computed on the full unfiltered report | - |
+| `--min-severity <sev>` | Only show findings at or above this severity: `low`, `medium`, `high`, `critical`. Applies to posture controls and image vulnerabilities. Output-only — exit codes are computed on the full unfiltered report | - |
+| `--max-severity <sev>` | Only show findings at or below this severity. Applies to posture controls and image vulnerabilities. Output-only — exit codes are computed on the full unfiltered report | - |
 | `--severity-threshold <sev>` | Fail if findings at or above severity: `low`, `medium`, `high`, `critical`. Failed controls with unknown severity (missing base score) are treated as exceeding any threshold | - |
 | `--only-fixable` | With `--severity-threshold` on image scans, count only CVEs that have a fix available toward the pass/fail decision | `false` |
 | `--skip-db-update` | Do not update the vulnerability database before scanning images; uses the locally cached database. Fails if the local database is missing or unusable (run once without this flag to download it). | `false` |
@@ -119,6 +119,27 @@ kubescape scan [target] [flags]
 | `--enable-streaming` | Process cluster resources in batches instead of loading them all at once, to reduce memory use on large clusters | `false` (on automatically above 2,500 resources) |
 | `--whole-cluster-policy <policy>` | How to run the whole-cluster controls (C-0261, C-0266, C-0267, C-0272): `projected` (incremental projection of matching resources), `fallback` (materialize the full cluster in memory), `skip` (skip them, for minimum memory) or `verify` (debug check that `projected` and `fallback` agree; a mismatch fails the scan) | `projected` |
 | `--enable-rego-prints` | Send Rego `print` output to the logs; use with `-l debug` | `false` |
+
+### Framework-scoped exceptions
+
+Exceptions scoped to a framework apply only when that framework is selected and
+contains the matching control. For a failed control shared by NSA and MITRE, an
+NSA-only exception makes the NSA view passed with an exception, while the MITRE
+view and the aggregate result remain failed. The aggregate can still carry the
+`w/exceptions` substatus. Audit counts (`--audit-exceptions`) and
+`ExceptionMatched` events include only exceptions applicable to the selected
+frameworks; a partially excepted aggregate can still have a matched exception.
+
+Compatibility note: the scan retains raw rule evaluations and exception policies.
+Raw results embedded in MCP `failedResources` can still carry failed evaluations
+for controls excepted in a framework. Consumers should use `summaryDetails` for
+effective statuses, or `cautils.ControlStatus` with the report summary when
+processing Go result objects. Enriched JSON output carries effective control
+statuses. Reports written by older versions remain readable, but failures
+discarded by older serializers cannot be reconstructed.
+
+A `scan control` invocation has no framework context, so framework-scoped
+exceptions do not apply. Unscoped exceptions continue to apply.
 
 ### Webhook notifications
 
@@ -1479,12 +1500,12 @@ Predict Kubernetes Pod Security Standards (PSS) compliance for workloads in a li
 ### Synopsis
 
 ```bash
-kubescape predict pss [<path>...] [flags]
+kubescape predict pss [<path>.../`-`] [flags]
 ```
 
 ### Description
 
-Evaluates workloads against the official Kubernetes Pod Security Standards (Privileged, Baseline, Restricted) according to PSS v1.37 specifications. When invoked without path arguments, it connects to the cluster and evaluates all workloads in the specified namespace, automatically deduplicating child resources (e.g., ReplicaSets and Pods managed by Deployments). When given file paths or directories, it parses local YAML/JSON manifests and evaluates them directly.
+Evaluates workloads against the official Kubernetes Pod Security Standards (Privileged, Baseline, Restricted) according to PSS v1.37 specifications. When invoked without path arguments, it connects to the cluster and evaluates all workloads in the specified namespace, automatically deduplicating child resources (e.g., ReplicaSets and Pods managed by Deployments). When given file paths or directories, it parses local YAML/JSON manifests and evaluates them directly. A single `-` reads the manifests from stdin; it cannot be combined with other paths.
 
 This answers the critical hardening question: *"What would break if I enforced Baseline or Restricted on this namespace?"*
 
@@ -1513,6 +1534,11 @@ kubescape predict pss -n production --workload Deployment/web-api
 
 # Predict compliance for local YAML manifest files
 kubescape predict pss ./manifests/
+
+# Predict compliance for manifests read from stdin, such as a rendered Helm chart
+# (pipefail makes a failed helm template fail the pipeline)
+set -o pipefail
+helm template ./chart | kubescape predict pss -
 
 # Output machine-readable JSON report
 kubescape predict pss -n production -f json -o pss-report.json

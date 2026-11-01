@@ -316,7 +316,6 @@ func descendantPrefix(rule ignoreRule) string {
 
 // ignoreRoot resolves the directory a scan input is anchored at. A file or a glob is
 // anchored at its parent directory, so patterns stay relative to the same place.
-
 func ignoreRoot(input string) string {
 	if input == "" {
 		return "."
@@ -327,14 +326,20 @@ func ignoreRoot(input string) string {
 	if isDir(input) {
 		return input
 	}
+	// File discovery treats existing files literally, even when an ancestor's
+	// name contains glob characters. Keep their exclusions at the same parent.
+	if isFile(input) {
+		return filepath.Dir(input)
+	}
 	return literalDir(input)
 }
 
-// literalDir returns the deepest ancestor directory of path that carries no glob
-// metadata, so "manifests/**/*.yaml" anchors at "manifests" rather than "manifests/**".
+// literalDir returns the deepest ancestor directory of path that exists or carries
+// no glob metadata. Existing directories preserve literal names such as
+// "manifests[old]", while "manifests/*/nested/*.yaml" anchors at "manifests".
 func literalDir(path string) string {
 	dir := filepath.Dir(path)
-	for hasGlobMeta(filepath.Base(dir)) {
+	for hasGlobMeta(dir) && !isDir(dir) {
 		parent := filepath.Dir(dir)
 		if parent == dir {
 			break
