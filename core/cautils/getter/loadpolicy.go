@@ -410,6 +410,22 @@ func (lp *LoadPolicy) CacheSource() string {
 	return "file:" + contentDigest(buf)
 }
 
+// LoadedCacheSource identifies the exact bytes the last successful
+// GetExceptions or GetControlsInputs consumed, in the form CacheSource uses.
+func (lp *LoadPolicy) LoadedCacheSource() (string, bool) {
+	_, digest, ok := lp.ConsumedFileDigest()
+	if !ok {
+		return "", false
+	}
+	return "file:" + digest, true
+}
+
+// SourceFile returns the file this getter reads.
+func (lp *LoadPolicy) SourceFile() (string, bool) {
+	filePath := lp.filePath()
+	return filePath, filePath != ""
+}
+
 // temporary support for a list of files
 func (lp *LoadPolicy) filePath() string {
 	if len(lp.filePaths) > 0 {

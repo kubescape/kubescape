@@ -322,22 +322,24 @@ func (policyHandler *PolicyHandler) getExceptions(ctx context.Context, scanInfo 
 	// release, the backend, with or without the cluster's SecurityException
 	// CRDs. An entry cached from one source is a miss for every other: reusing
 	// it would apply exceptions the scan never selected, or drop its own. Local
-	// files are identified by their contents (see getter.CacheSourceOf).
-	source := getter.CacheSourceOf(getters.ExceptionsGetter)
-
-	if cachedExceptions, exist := policyHandler.cachedExceptions.Get(); exist && cachedExceptions.source == source {
+	// files are identified by their contents (see getter.CacheSourceOf), so the
+	// source is only computed when there is an entry to compare it with.
+	cache := policyHandler.cachedExceptions
+	if cachedExceptions, exist := cache.Get(); exist && cachedExceptions.source == getter.CacheSourceOf(getters.ExceptionsGetter) {
 		logger.L().Info("Using cached exceptions")
-		cautils.RecordCachedScanContractRunnerInput(scanInfo, cachedExceptions.runnerInput)
+		cautils.RecordCachedScanContractRunnerInputFor(scanInfo, cachedExceptions.runnerInput, getters.ExceptionsGetter)
 		return cachedExceptions.exceptions, nil
 	}
 
 	exceptions, err := getters.ExceptionsGetter.GetExceptions(ctx, policyHandler.clusterName)
 	if err == nil {
 		runnerInput, _ := cautils.RecordScanContractRunnerInput(scanInfo, "exceptions", getters.ExceptionsGetter)
-		// A file that changed while it was read may not hold what source
-		// names, so only cache what was read from an unchanged source.
-		if getter.CacheSourceOf(getters.ExceptionsGetter) == source {
-			policyHandler.cachedExceptions.Set(cachedExceptionsEntry{exceptions: exceptions, runnerInput: runnerInput, source: source})
+		// Key the entry by what the load read, not by the source as it was
+		// before the load: a file can change in between.
+		if cache.enabled() {
+			if source, ok := getter.LoadedCacheSourceOf(getters.ExceptionsGetter); ok {
+				cache.Set(cachedExceptionsEntry{exceptions: exceptions, runnerInput: runnerInput, source: source})
+			}
 		}
 	}
 
@@ -348,10 +350,10 @@ func (policyHandler *PolicyHandler) getControlInputs(ctx context.Context, scanIn
 	// As with exceptions, only a scan reading the same source (a
 	// --controls-config file, the ControlInput CRD, the release or the backend)
 	// may reuse the cached inputs.
-	source := getter.CacheSourceOf(getters.ControlsInputsGetter)
-	if cachedControlInputs, exist := policyHandler.cachedControlInputs.Get(); exist && cachedControlInputs.source == source {
+	cache := policyHandler.cachedControlInputs
+	if cachedControlInputs, exist := cache.Get(); exist && cachedControlInputs.source == getter.CacheSourceOf(getters.ControlsInputsGetter) {
 		logger.L().Info("Using cached control inputs")
-		cautils.RecordCachedScanContractRunnerInput(scanInfo, cachedControlInputs.runnerInput)
+		cautils.RecordCachedScanContractRunnerInputFor(scanInfo, cachedControlInputs.runnerInput, getters.ControlsInputsGetter)
 		return cachedControlInputs.controlInputs, nil
 	}
 
@@ -364,8 +366,10 @@ func (policyHandler *PolicyHandler) getControlInputs(ctx context.Context, scanIn
 	}
 
 	runnerInput, _ := cautils.RecordScanContractRunnerInput(scanInfo, "controlsConfig", getters.ControlsInputsGetter)
-	if getter.CacheSourceOf(getters.ControlsInputsGetter) == source {
-		policyHandler.cachedControlInputs.Set(cachedControlInputsEntry{controlInputs: controlInputs, runnerInput: runnerInput, source: source})
+	if cache.enabled() {
+		if source, ok := getter.LoadedCacheSourceOf(getters.ControlsInputsGetter); ok {
+			cache.Set(cachedControlInputsEntry{controlInputs: controlInputs, runnerInput: runnerInput, source: source})
+		}
 	}
 	return controlInputs, nil
 }

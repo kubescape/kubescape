@@ -48,6 +48,20 @@ type (
 	CacheSourcer interface {
 		CacheSource() string
 	}
+
+	// LoadedCacheSourcer is implemented by getters whose source can change
+	// between computing CacheSource and loading, such as a local file. It
+	// reports the identity of what the last successful load actually read.
+	LoadedCacheSourcer interface {
+		LoadedCacheSource() (string, bool)
+	}
+
+	// SourceFiler is implemented by getters that read a local file. Files
+	// with the same contents share a cache entry, so a cache hit can be
+	// attributed to the file the current scan selected.
+	SourceFiler interface {
+		SourceFile() (string, bool)
+	}
 )
 
 // CacheSourceOf identifies the source a getter reads, so a cache shared by
@@ -58,6 +72,16 @@ func CacheSourceOf(g any) string {
 		return s.CacheSource()
 	}
 	return fmt.Sprintf("%T", g)
+}
+
+// LoadedCacheSourceOf identifies what a getter's last successful load read,
+// in the same form as CacheSourceOf. It reports false when that is unknown,
+// in which case the loaded value must not be cached.
+func LoadedCacheSourceOf(g any) (string, bool) {
+	if s, ok := g.(LoadedCacheSourcer); ok {
+		return s.LoadedCacheSource()
+	}
+	return CacheSourceOf(g), true
 }
 
 // isContextErr reports whether err was caused by context cancellation or a deadline.
