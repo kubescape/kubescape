@@ -558,6 +558,7 @@ func TestMetrics_String_MultiItem_SamplesGroupedPerFamily(t *testing.T) {
 		"kubescape_resource_count_controls_passed",
 		"kubescape_image_count_cve",
 		"kubescape_image_count_cve_fixable",
+		"kubescape_image_count_cve_kev",
 	} {
 		assert.True(t, seen[name], "family %q is missing from the output", name)
 	}

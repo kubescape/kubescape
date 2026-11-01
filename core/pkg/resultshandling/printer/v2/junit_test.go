@@ -445,6 +445,53 @@ func TestImageTestCasesIncludesVEXDetails(t *testing.T) {
 	assert.Contains(t, cases[0].Failure.Contents, "VEX Justification: component_not_present")
 }
 
+func TestImageTestCasesIncludesKEVAndEPSS(t *testing.T) {
+	cases := imageTestCases([]imageprinter.CVE{
+		{
+			ID:       "CVE-2020-15999",
+			Severity: "Medium",
+			Package:  "freetype",
+			Version:  "2.9.1",
+			Image:    "nginx:1.17.0",
+			KEV:      true,
+			EPSS:     &imageprinter.EPSS{Score: 0.639, Percentile: 0.99},
+		},
+		{
+			ID:       "CVE-2026-0003",
+			Severity: "Critical",
+			Package:  "openssl",
+			Version:  "1.0.0",
+			Image:    "nginx:1.17.0",
+		},
+	}, "")
+
+	require.Len(t, cases, 2)
+	assert.Equal(t, "CVE: CVE-2020-15999\nPackage: freetype\nVersion: 2.9.1\nSeverity: Medium\nKEV: yes\nEPSS: 63.9% (99th)\nno fix available",
+		cases[0].Failure.Contents)
+	assert.Contains(t, cases[1].Failure.Contents, "\nKEV: no\nEPSS: N/A\n")
+}
+
+// TestImageTestsSuitesReadsKEVAndEPSSFromMatches pins that the JUnit report
+// takes the exploitability data from the scan's matches.
+func TestImageTestsSuitesReadsKEVAndEPSSFromMatches(t *testing.T) {
+	suites := imageTestsSuites([]cautils.ImageScanData{{
+		Image: "nginx:1.17.0",
+		Matches: match.NewMatches(match.Match{
+			Package: grypepkg.Package{ID: "pkg-1", Name: "freetype", Version: "2.9.1"},
+			Vulnerability: vulnerability.Vulnerability{Metadata: &vulnerability.Metadata{
+				ID:             "CVE-2020-15999",
+				Severity:       "Medium",
+				KnownExploited: []vulnerability.KnownExploited{{CVE: "CVE-2020-15999"}},
+				EPSS:           []vulnerability.EPSS{{CVE: "CVE-2020-15999", EPSS: 0.639, Percentile: 0.99}},
+			}},
+		}),
+	}})
+
+	require.Len(t, suites.Suites, 1)
+	require.Len(t, suites.Suites[0].TestCases, 1)
+	assert.Contains(t, suites.Suites[0].TestCases[0].Failure.Contents, "\nKEV: yes\nEPSS: 63.9% (99th)\n")
+}
+
 func TestListTestSuites(t *testing.T) {
 	// Non empty OPASessionObj
 	results := cautils.NewOPASessionObjMock()

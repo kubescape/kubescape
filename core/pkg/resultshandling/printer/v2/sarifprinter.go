@@ -583,6 +583,7 @@ func (sp *SARIFPrinter) buildImageScanRuns(scanResults []cautils.ImageScanData) 
 		if err := json.Unmarshal(rendered.Bytes(), &sarifReport); err != nil {
 			return nil, err
 		}
+		addImageExploitProperties(sarifReport.Runs, model.Matches)
 
 		// Inject VEX Statuses
 		if len(scan.VexStatuses) > 0 {

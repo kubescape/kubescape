@@ -64,6 +64,19 @@ Both values come from the Grype vulnerability database, including the offline
 database image. EPSS scores change daily, so their accuracy depends on how
 recently the database was built (see `--max-db-age`).
 
+The machine-readable outputs carry the same data:
+
+- **SARIF:** each image result has a `kev` property (`true` or `false`) and,
+  when the vulnerability has a score, `epss` and `epssPercentile`, both from 0
+  to 1.
+- **JUnit:** each vulnerability's failure text has a `KEV: yes|no` line and an
+  `EPSS:` line in the table's format.
+- **Prometheus:** `kubescape_image_count_cve_kev` counts the KEV vulnerabilities
+  per image and severity, alongside `kubescape_image_count_cve`.
+
+Where a vulnerability maps to several CVEs, as a GHSA can, the highest of their
+EPSS scores is reported.
+
 ### Exceptions
 
 If you want to ignore certain vulnerabilities based on an exceptions file, use the `--exceptions` flag:
