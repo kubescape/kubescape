@@ -157,8 +157,19 @@ type fleetRun struct {
 	err      error
 }
 
-// runFleetE2E runs the real fleet scan, with local policies and no backend, against the given contexts and their API servers.
+// runFleetE2E runs the real fleet scan against the given contexts and their API servers, and reads back the fleet report.
 func runFleetE2E(t testing.TB, servers map[string]string, args ...string) fleetRun {
+	t.Helper()
+	run, fleetReport := scanFleetE2E(t, servers, args...)
+	// An explicit empty --fleet-report, given after the default, turns the fleet report off.
+	if !slices.Contains(args, "--fleet-report=") {
+		run.report = readFleetReport(t, fleetReport)
+	}
+	return run
+}
+
+// scanFleetE2E runs the real fleet scan, with local policies and no backend, and returns where the fleet report was written.
+func scanFleetE2E(t testing.TB, servers map[string]string, args ...string) (fleetRun, string) {
 	t.Helper()
 	dir := t.TempDir()
 	t.Setenv("KUBECONFIG", writeE2EKubeconfig(t, dir, servers))
@@ -179,8 +190,6 @@ func runFleetE2E(t testing.TB, servers map[string]string, args ...string) fleetR
 		"--controls-config=" + filepath.Join(policies, "controls-inputs.json"), "--exceptions=" + filepath.Join(policies, "exceptions.json"),
 	}, args...)
 
-	// An explicit empty --fleet-report, given after the default, turns the fleet report off.
-	wantReport := !slices.Contains(args, "--fleet-report=")
 	var run fleetRun
 	run.summary = captureStdout(t, func() {
 		cmd := GetScanCommand(core.NewKubescape(context.Background()))
@@ -190,13 +199,17 @@ func runFleetE2E(t testing.TB, servers map[string]string, args ...string) fleetR
 		run.err = cmd.Execute()
 	})
 	run.exitCode = shared.ExitCode(run.err)
-	if !wantReport {
-		return run
-	}
-	contents, err := os.ReadFile(fleetReport)
+	return run, fleetReport
+}
+
+// readFleetReport decodes the fleet report a scan wrote.
+func readFleetReport(t testing.TB, path string) fleet.FleetReport {
+	t.Helper()
+	contents, err := os.ReadFile(path)
 	require.NoError(t, err, "the fleet report is written whatever happened to the clusters")
-	require.NoError(t, json.Unmarshal(contents, &run.report))
-	return run
+	var report fleet.FleetReport
+	require.NoError(t, json.Unmarshal(contents, &report))
+	return report
 }
 
 // writeE2EKubeconfig writes a kubeconfig with one context per server, each named after its context.
@@ -344,11 +357,14 @@ func benchmarkFleetScan(b *testing.B, clusters int, report bool) {
 	if !report {
 		args = append(args, "--fleet-report=")
 	}
+	var fleetReport string
 	for b.Loop() {
-		run := runFleetE2E(b, servers, args...)
+		var run fleetRun
+		// The report is checked once after the loop, so decoding it is not part of the timed work.
+		run, fleetReport = scanFleetE2E(b, servers, args...)
 		require.NoError(b, run.err)
-		if report {
-			require.Equal(b, clusters, run.report.Compliance.ClustersScored)
-		}
+	}
+	if report {
+		require.Equal(b, clusters, readFleetReport(b, fleetReport).Compliance.ClustersScored)
 	}
 }

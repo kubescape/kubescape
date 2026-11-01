@@ -194,15 +194,15 @@ process (about 136 MiB of it is the binary itself):
 
 | Clusters | Peak memory with `--fleet-report` | Peak memory without |
 |----------|-----------------------------------|---------------------|
-| 1        | 202 MiB                           | 196 MiB             |
-| 5        | 239 MiB                           | 201 MiB             |
-| 10       | 329 MiB                           | 204 MiB             |
+| 1        | 203 MiB                           | 195 MiB             |
+| 5        | 263 MiB                           | 201 MiB             |
+| 10       | 335 MiB                           | 203 MiB             |
 
 Time grew with the number of clusters, at around half a second to a second
-each: ten clusters took between 5 and 11 seconds across runs on the same
-machine. Real clusters are slower, since every request crosses the network and
-they usually hold more objects, so treat these numbers as a comparison rather
-than a prediction.
+each: ten clusters usually took 5 to 10 seconds on the same machine, and longer
+while it was busy. Real clusters are slower, since every request crosses the
+network and they usually hold more objects, so treat these numbers as a
+comparison rather than a prediction.
 
 To reproduce them, from `cmd/scan`:
 
