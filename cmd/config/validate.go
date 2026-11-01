@@ -1,8 +1,6 @@
 package config
 
 import (
-	"os"
-
 	"github.com/kubescape/kubescape/v4/core/meta"
 	v1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
 	"github.com/spf13/cobra"
@@ -13,6 +11,7 @@ func getValidateCmd(ks meta.IKubescape) *cobra.Command {
 		Use:   "validate",
 		Short: "Validate cached configurations",
 		Long:  `Validate cached Kubescape configuration and render diagnostics as text, JSON, or YAML.`,
+		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			outputFormat, _ := cmd.Flags().GetString("format")
 			if !cmd.Flags().Changed("format") && cmd.Flags().Changed("output") {
@@ -20,7 +19,7 @@ func getValidateCmd(ks meta.IKubescape) *cobra.Command {
 			}
 			profile, _ := cmd.Flags().GetString("profile")
 			includeOK, _ := cmd.Flags().GetBool("include-ok")
-			return ks.ValidateCachedConfig(&v1.ValidateConfig{Writer: os.Stdout, Format: outputFormat, Profile: profile, IncludeOK: includeOK})
+			return ks.ValidateCachedConfig(&v1.ValidateConfig{Writer: cmd.OutOrStdout(), Format: outputFormat, Profile: profile, IncludeOK: includeOK})
 		},
 	}
 
