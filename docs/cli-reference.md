@@ -52,13 +52,13 @@ kubescape scan [target] [flags]
 | `--honor-inline-exceptions` | Honor `kubescape.io/skip-*` annotations as inline exception policies | on for local manifest files, off for live-cluster scans |
 | `--audit-exceptions` | Include exception usage details in supported scan outputs | `false` |
 | `--baseline <path>` | Path to a saved JSON scan report to diff the fresh scan against | - |
-| `--baseline-fail-on-new` | With `--baseline`, exit with code `1` when new failures are found compared with the baseline | `false` |
+| `--baseline-fail-on-new` | With `--baseline`, exit with code `1` when new or incomparable failures are found compared with the baseline. A failure is incomparable when a change in scan scope or coverage means it cannot be classified safely | `false` |
 | `--baseline-granularity <unit>` | With `--baseline`, the comparison unit: `evidence` or `control` | `evidence` |
-| `--baseline-severity-threshold <sev>` | With `--baseline` and `--baseline-fail-on-new`, count only new failures at or above this severity | - |
+| `--baseline-severity-threshold <sev>` | With `--baseline` and `--baseline-fail-on-new`, count only new or incomparable failures at or above this severity | - |
 | `--fail-coverage-below <float>` | Fail if the scan coverage score is below threshold (`0` disables). Applies in every view — see [score thresholds](#score-thresholds). | `0` |
 | `--fail-on-degraded-config` | Fail the scan (exit code `1`) if control configurations or exceptions could not be loaded from their configured source and bundled defaults were used instead | `false` |
-| `--scan-contract <path>` | Path to an explicit repository scan contract | - |
-| `--contract <name>` | Named contract to select | `spec.defaultContract` |
+| `--scan-contract <path>` | Path to an explicit repository scan contract. Posture scans only: `scan image` rejects it | - |
+| `--contract <name>` | Named contract to select from the `--scan-contract` file. Requires `--scan-contract` | `spec.defaultContract` |
 | `-f, --format <format>` | Output format: `pretty-printer`, `json`, `junit`, `prometheus`, `pdf`, `html`, `sarif`, `gitlab-sast`, `github-actions`, `yaml`, `csv`, `markdown`, `policyreport`, `exceptions`, `cyclonedx-json`, `spdx-json` — see [generating an exceptions baseline](#generating-an-exceptions-baseline) and [generating an SBOM](#generating-an-sbom). `github-actions` emits failed High/Critical controls as `::error` workflow commands for inline PR annotations; local file scans only, capped at GitHub's 10-annotations-per-step limit | `pretty-printer` |
 | `--hide` | Replace sensitive report metadata with deterministic pseudonyms. Ignored when `--encrypt` is also specified. | `false` |
 | `--host-scan` | Enable host data collection from cluster nodes for certain controls. When not set, Kubescape auto-detects node-agent CRDs and uses a CRD-based host sensor if available. Use `--host-scan=false` to disable host data collection. See the [Kubescape operator](https://github.com/kubescape/helm-charts/tree/main/charts/kubescape-operator) for a managed alternative. | auto-detect |
@@ -117,7 +117,7 @@ kubescape scan [target] [flags]
 | `--control-timeout <duration>` | Maximum duration for evaluating a single control, e.g. `30s`. Controls that exceed it are marked as not evaluated and the scan continues. Must be lower than `--scan-timeout` when both are set. `0` means no timeout | `0` |
 | `--incremental` | Cache each resource's verdict, keyed by a hash of its spec and metadata plus the controls-config version, and skip re-evaluating unchanged resources on the next scan. Scan output is unaffected. The cache is invalidated when the controls-config version changes; clear it with `kubescape config delete cache` | `false` |
 | `--enable-streaming` | Process cluster resources in batches instead of loading them all at once, to reduce memory use on large clusters | `false` (on automatically above 2,500 resources) |
-| `--whole-cluster-policy <policy>` | How to run the whole-cluster controls (C-0261, C-0266, C-0267, C-0272): `projected` (incremental projection of matching resources), `fallback` (materialize the full cluster in memory), `skip` (skip them, for minimum memory) or `verify` (debug check that `projected` and `fallback` agree; a mismatch fails the scan) | `projected` |
+| `--whole-cluster-policy <policy>` | How to run the whole-cluster controls (C-0261, C-0266, C-0267, C-0272): `projected` (incremental projection of matching resources), `fallback` (materialize the full cluster in memory), `skip` (skip them, for minimum memory) or `verify` (debug check that `projected` and `fallback` agree; a mismatch fails the scan). Without the flag, `KUBESCAPE_WHOLE_CLUSTER_POLICY` applies if it is set, and otherwise `KUBESCAPE_WHOLE_CLUSTER_PARITY_CHECK=true` selects `verify` | `projected` |
 | `--enable-rego-prints` | Send Rego `print` output to the logs; use with `-l debug` | `false` |
 
 ### Framework-scoped exceptions
@@ -1016,7 +1016,7 @@ kubescape patch [flags]
 | `-a, --address <address>` | BuildKit daemon address | none (auto-detects local docker daemon, falling back to `unix:///run/buildkit/buildkitd.sock`) |
 | `--timeout <duration>` | Patching timeout | `5m` |
 | `--ignore-errors` | Continue on errors | `false` |
-| `--push` | Push the patched image to the source registry | `false` |
+| `--push` | Push the patched image to the source registry. Sets `--output-mode` to `image`, so it cannot be combined with `--output-mode oci` or `local` | `false` |
 | `--output-mode <mode>` | Output mode for the patched image: `docker`, `image`, `oci` or `local` | `docker` |
 | `--output-path <path>` | Destination path for the `oci` and `local` output modes | - |
 | `-u, --username <user>` | Registry username | - |
