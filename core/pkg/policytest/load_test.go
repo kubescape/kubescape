@@ -113,9 +113,9 @@ func TestRunRuleJSONInput(t *testing.T) {
 			rule := scaffoldedRuleUnderTest(t)
 			c := caseByName(t, rule, flaggedCaseName)
 			input := filepath.Join(c.Dir, "input")
-			manifest, err := os.ReadFile(filepath.Join(input, "resource.yaml"))
-			require.NoError(t, err)
-			converted, err := yaml.YAMLToJSON(manifest)
+			// The same manifest Scaffold wrote as resource.yaml, as JSON.
+			manifest := workloadKinds["Deployment"].manifest(rule.Name, containersBlock(true))
+			converted, err := yaml.YAMLToJSON([]byte(manifest))
 			require.NoError(t, err)
 			require.NoError(t, os.Remove(filepath.Join(input, "resource.yaml")))
 			require.NoError(t, os.WriteFile(filepath.Join(input, "resource.json"), converted, 0o600))
