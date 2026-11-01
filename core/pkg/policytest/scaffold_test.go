@@ -119,6 +119,33 @@ func TestScaffold_RefusesExistingRuleWithoutForce(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestScaffold_RefusesExistingFileWithoutForce(t *testing.T) {
+	for _, existing := range []string{
+		ruledir.RegoFileName,
+		ruledir.MetadataFileName,
+		filepath.Join("test", flaggedCaseName, "input", "resource.yaml"),
+		filepath.Join("test", cleanCaseName, "input", "resource.yaml"),
+	} {
+		t.Run(existing, func(t *testing.T) {
+			dir := filepath.Join(t.TempDir(), "partial-rule")
+			path := filepath.Join(dir, existing)
+			require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+			content := []byte("written by hand\n")
+			require.NoError(t, os.WriteFile(path, content, 0o600))
+
+			_, err := Scaffold(context.Background(), dir, ScaffoldOptions{})
+			require.ErrorContains(t, err, "--force")
+
+			got, err := os.ReadFile(path)
+			require.NoError(t, err)
+			assert.Equal(t, content, got, "an existing file must not be overwritten without --force")
+
+			_, err = Scaffold(context.Background(), dir, ScaffoldOptions{Force: true})
+			require.NoError(t, err)
+		})
+	}
+}
+
 func TestScaffold_UsesSuppliedDescriptionAndRemediation(t *testing.T) {
 	dir := scaffoldRule(t, "custom-text", ScaffoldOptions{
 		Description: "fails when the workload is bad",
