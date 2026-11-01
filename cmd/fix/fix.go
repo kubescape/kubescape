@@ -99,6 +99,11 @@ func GetFixCmd(ks meta.IKubescape) *cobra.Command {
 			if err := validateControlSelection(&fixInfo); err != nil {
 				return err
 			}
+			// The post-renderer only applies the Kustomize patches, so without
+			// them fix would carry on as if the flag had not been passed.
+			if fixInfo.PostRendererDir != "" && fixInfo.KustomizeDir == "" {
+				return errors.New("--output-post-renderer requires --output-kustomize")
+			}
 
 			return ks.Fix(&fixInfo)
 		},

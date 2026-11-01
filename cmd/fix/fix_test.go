@@ -38,6 +38,8 @@ func TestFixCmdArgs(t *testing.T) {
 		{name: "no report", args: []string{}, wantErr: "report output file is required"},
 		{name: "one report", args: []string{"report.json"}},
 		{name: "extra report", args: []string{"a.json", "b.json"}, wantErr: "accepts at most 1 arg(s), received 2"},
+		{name: "post-renderer without kustomize", args: []string{"report.json", "--output-post-renderer", "./patches"}, wantErr: "--output-post-renderer requires --output-kustomize"},
+		{name: "post-renderer with kustomize", args: []string{"report.json", "--output-kustomize", "./patches", "--output-post-renderer", "./patches"}},
 	}
 
 	for _, tt := range tests {
