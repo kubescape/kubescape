@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -95,4 +96,74 @@ func TestPolicyTestUpdate_IsIdempotent(t *testing.T) {
 func TestPolicyTest_ReportsMissingRules(t *testing.T) {
 	_, err := runCmd(t, "policy", "test", t.TempDir())
 	require.ErrorContains(t, err, "no rule directories")
+}
+
+func TestPolicy_RuntimeFailuresDoNotPrintUsage(t *testing.T) {
+	scaffold := func(t *testing.T) string {
+		t.Helper()
+		dir := filepath.Join(t.TempDir(), "no-privileged-containers")
+		_, err := runCmd(t, "policy", "init", dir)
+		require.NoError(t, err)
+		return dir
+	}
+
+	tests := []struct {
+		name    string
+		args    func(t *testing.T) []string
+		wantErr string
+	}{
+		{
+			name: "test with a failing case",
+			args: func(t *testing.T) []string {
+				dir := scaffold(t)
+				require.NoError(t, os.WriteFile(filepath.Join(dir, "test", "flagged", "expected.json"), []byte("[]\n"), 0o600))
+				return []string{"policy", "test", dir}
+			},
+			wantErr: "1 test case(s) failed",
+		},
+		{
+			name: "test --update with a case that cannot be evaluated",
+			args: func(t *testing.T) []string {
+				dir := scaffold(t)
+				require.NoError(t, os.WriteFile(filepath.Join(dir, "test", "flagged", "input", "resource.yaml"), []byte("bad: [yaml\n"), 0o600))
+				return []string{"policy", "test", dir, "--update"}
+			},
+			wantErr: "1 test case(s) could not be evaluated",
+		},
+		{
+			name: "test without rules",
+			args: func(t *testing.T) []string {
+				return []string{"policy", "test", t.TempDir()}
+			},
+			wantErr: "no rule directories",
+		},
+		{
+			name: "init over an existing rule",
+			args: func(t *testing.T) []string {
+				return []string{"policy", "init", scaffold(t)}
+			},
+			wantErr: "--force",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			out, err := runCmd(t, tt.args(t)...)
+			require.ErrorContains(t, err, tt.wantErr)
+			assert.NotContains(t, out, "Usage:")
+		})
+	}
+}
+
+func TestPolicy_ArgumentErrorsPrintUsage(t *testing.T) {
+	for _, args := range [][]string{
+		{"policy", "test"},
+		{"policy", "init"},
+		{"policy", "init", "one", "two"},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			out, err := runCmd(t, args...)
+			require.Error(t, err)
+			assert.Contains(t, out, "Usage:")
+		})
+	}
 }
