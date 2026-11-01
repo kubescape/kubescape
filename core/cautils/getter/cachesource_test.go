@@ -190,3 +190,31 @@ func TestSourceFile(t *testing.T) {
 	_, ok = nilMerged.SourceFile()
 	assert.False(t, ok)
 }
+
+func TestLoadPolicyNilReceiver(t *testing.T) {
+	var lp *LoadPolicy
+
+	t.Run("direct calls", func(t *testing.T) {
+		assert.Equal(t, "<nil>", lp.CacheSource())
+		source, ok := lp.LoadedCacheSource()
+		assert.False(t, ok)
+		assert.Empty(t, source)
+		file, ok := lp.SourceFile()
+		assert.False(t, ok)
+		assert.Empty(t, file)
+	})
+
+	t.Run("typed nil in an interface", func(t *testing.T) {
+		var sourcer CacheSourcer = lp
+		// testify's NotNil treats a typed nil pointer as nil, so compare directly.
+		require.True(t, sourcer != nil, "an interface holding a typed nil pointer is not nil")
+
+		assert.Equal(t, "<nil>", CacheSourceOf(sourcer))
+		_, ok := LoadedCacheSourceOf(lp)
+		assert.False(t, ok)
+		_, ok = NewMergedExceptionsGetter(lp, &exceptionsGetterStub{}).SourceFile()
+		assert.False(t, ok)
+		_, ok = NewMergedExceptionsGetter(lp, nil).LoadedCacheSource()
+		assert.False(t, ok)
+	})
+}

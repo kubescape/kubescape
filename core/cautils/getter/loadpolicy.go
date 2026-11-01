@@ -400,8 +400,11 @@ func (lp *LoadPolicy) GetAttackTracks() ([]v1alpha1.AttackTrack, error) {
 // such as identical REST request bodies saved to different temporary paths,
 // share an identity; a file whose contents change gets a new one. A file that
 // cannot be read is identified by its path, and its failed load is never
-// cached.
+// cached. A nil getter is identified the same way as no getter at all.
 func (lp *LoadPolicy) CacheSource() string {
+	if lp == nil {
+		return CacheSourceOf(nil)
+	}
 	filePath := filepath.Clean(lp.filePath())
 	buf, err := os.ReadFile(filePath)
 	if err != nil {
@@ -413,6 +416,9 @@ func (lp *LoadPolicy) CacheSource() string {
 // LoadedCacheSource identifies the exact bytes the last successful
 // GetExceptions or GetControlsInputs consumed, in the form CacheSource uses.
 func (lp *LoadPolicy) LoadedCacheSource() (string, bool) {
+	if lp == nil {
+		return "", false
+	}
 	_, digest, ok := lp.ConsumedFileDigest()
 	if !ok {
 		return "", false
@@ -422,6 +428,9 @@ func (lp *LoadPolicy) LoadedCacheSource() (string, bool) {
 
 // SourceFile returns the file this getter reads.
 func (lp *LoadPolicy) SourceFile() (string, bool) {
+	if lp == nil {
+		return "", false
+	}
 	filePath := lp.filePath()
 	return filePath, filePath != ""
 }
