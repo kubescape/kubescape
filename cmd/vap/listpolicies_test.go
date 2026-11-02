@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"encoding/csv"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/jwalton/gchalk"
 	"github.com/kubescape/kubescape/v4/core/pkg/opaprocessor/cel"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -17,6 +19,7 @@ import (
 
 func listOutput(t *testing.T, format string, controlsOnly bool) string {
 	t.Helper()
+	t.Setenv("FORCE_COLOR", "0")
 	out := &bytes.Buffer{}
 	require.NoError(t, runListPolicies(out, format, controlsOnly))
 	return out.String()
@@ -178,4 +181,188 @@ func TestCsvPolicies_NeutralizesFormulaInjection(t *testing.T) {
 		"false",
 		"false",
 	}, records[1])
+}
+
+func TestRunListPolicies_PrettyWithColor(t *testing.T) {
+	if orig, ok := os.LookupEnv("NO_COLOR"); ok {
+		os.Unsetenv("NO_COLOR")
+		t.Cleanup(func() {
+			_ = os.Setenv("NO_COLOR", orig)
+		})
+	}
+	t.Setenv("FORCE_COLOR", "1")
+	prevLevel := gchalk.GetLevel()
+	gchalk.SetLevel(gchalk.LevelAnsi16m)
+	defer gchalk.SetLevel(prevLevel)
+
+	buf := &bytes.Buffer{}
+	require.NoError(t, runListPolicies(buf, formatPretty, false))
+
+	outStr := buf.String()
+	// Assert header colors
+	assert.Contains(t, outStr, gchalk.WithBrightWhite().Bold("Control ID"))
+	assert.Contains(t, outStr, gchalk.WithBrightWhite().Bold("Policy"))
+	assert.Contains(t, outStr, gchalk.WithBrightWhite().Bold("Params"))
+	assert.Contains(t, outStr, gchalk.WithBrightWhite().Bold("On error"))
+	assert.Contains(t, outStr, gchalk.WithBrightWhite().Bold("Resources"))
+
+	// Assert control ID color
+	assert.Contains(t, outStr, gchalk.WithBrightCyan().Bold("C-0016"))
+
+	// Assert parameter badges (green yes, red no)
+	assert.Contains(t, outStr, gchalk.WithGreen().Bold("yes"))
+	assert.Contains(t, outStr, gchalk.WithRed().Bold("no"))
+}
+
+func TestRunListPolicies_PrettyNoColorPrecedence(t *testing.T) {
+	t.Setenv("FORCE_COLOR", "1")
+	t.Setenv("NO_COLOR", "1")
+	prevLevel := gchalk.GetLevel()
+	gchalk.SetLevel(gchalk.LevelAnsi16m)
+	defer gchalk.SetLevel(prevLevel)
+
+	buf := &bytes.Buffer{}
+	require.NoError(t, runListPolicies(buf, formatPretty, true))
+
+	outStr := buf.String()
+	assert.NotContains(t, outStr, "\x1b[", "NO_COLOR must ensure zero ANSI escape sequences")
+	assert.Contains(t, outStr, "Control ID")
+	assert.Contains(t, outStr, "C-0016")
+	assert.Contains(t, outStr, "yes")
+	assert.Contains(t, outStr, "no")
+}
+
+func TestRunListPolicies_PrettyEmptyNoColorTreatedAsUnset(t *testing.T) {
+	if orig, ok := os.LookupEnv("NO_COLOR"); ok {
+		t.Cleanup(func() {
+			_ = os.Setenv("NO_COLOR", orig)
+		})
+	}
+	t.Setenv("NO_COLOR", "")
+	t.Setenv("FORCE_COLOR", "1")
+	prevLevel := gchalk.GetLevel()
+	gchalk.SetLevel(gchalk.LevelAnsi16m)
+	defer gchalk.SetLevel(prevLevel)
+
+	buf := &bytes.Buffer{}
+	require.NoError(t, runListPolicies(buf, formatPretty, true))
+
+	outStr := buf.String()
+	assert.Contains(t, outStr, gchalk.WithBrightWhite().Bold("Control ID"))
+	assert.Contains(t, outStr, gchalk.WithBrightCyan().Bold("C-0016"))
+}
+
+func TestRunListPolicies_StructuredFormatsHaveZeroANSI(t *testing.T) {
+	t.Setenv("FORCE_COLOR", "1")
+	prevLevel := gchalk.GetLevel()
+	gchalk.SetLevel(gchalk.LevelAnsi16m)
+	defer gchalk.SetLevel(prevLevel)
+
+	// JSON format check
+	jsonBuf := &bytes.Buffer{}
+	require.NoError(t, runListPolicies(jsonBuf, formatJSON, true))
+	assert.NotContains(t, jsonBuf.String(), "\x1b[", "JSON output must have zero ANSI codes")
+
+	// YAML format check
+	yamlBuf := &bytes.Buffer{}
+	require.NoError(t, runListPolicies(yamlBuf, formatYAML, true))
+	assert.NotContains(t, yamlBuf.String(), "\x1b[", "YAML output must have zero ANSI codes")
+
+	// CSV format check
+	csvBuf := &bytes.Buffer{}
+	require.NoError(t, runListPolicies(csvBuf, formatCSV, true))
+	assert.NotContains(t, csvBuf.String(), "\x1b[", "CSV output must have zero ANSI codes")
+}
+
+type failWriter struct {
+	err error
+}
+
+func (f *failWriter) Write(p []byte) (int, error) {
+	if f.err != nil {
+		return 0, f.err
+	}
+	return 0, errors.New("write failure")
+}
+
+func TestListPoliciesCommand_OutputFile_HasZeroANSI_EvenWithForceColor(t *testing.T) {
+	t.Setenv("FORCE_COLOR", "1")
+	if orig, ok := os.LookupEnv("NO_COLOR"); ok {
+		os.Unsetenv("NO_COLOR")
+		t.Cleanup(func() {
+			_ = os.Setenv("NO_COLOR", orig)
+		})
+	}
+	prevLevel := gchalk.GetLevel()
+	gchalk.SetLevel(gchalk.LevelAnsi16m)
+	defer gchalk.SetLevel(prevLevel)
+
+	formats := []string{formatPretty, formatJSON, formatYAML, formatCSV}
+	for _, fmtType := range formats {
+		t.Run(fmtType, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "policies-"+fmtType+".out")
+			cmd := getListPoliciesCmd()
+			stdout := &bytes.Buffer{}
+			cmd.SetOut(stdout)
+			cmd.SetErr(stdout)
+			cmd.SetArgs([]string{"--format", fmtType, "--controls-only", "--output", path})
+			require.NoError(t, cmd.Execute())
+
+			assert.Empty(t, stdout.String(), "output went to the file, not stdout")
+			raw, err := os.ReadFile(path)
+			require.NoError(t, err)
+			content := string(raw)
+			assert.NotEmpty(t, content)
+			assert.NotContains(t, content, "\x1b[", "%s output file must have zero ANSI escape sequences even with FORCE_COLOR=1", fmtType)
+		})
+	}
+}
+
+func TestRunListPolicies_WriteErrorPropagation(t *testing.T) {
+	expectedErr := errors.New("simulated disk write failure")
+	formats := []string{formatPretty, formatJSON, formatYAML, formatCSV}
+	for _, f := range formats {
+		t.Run(f, func(t *testing.T) {
+			fw := &failWriter{err: expectedErr}
+			err := runListPolicies(fw, f, false)
+			require.Error(t, err, "expected write failure to be returned for format %s", f)
+			assert.ErrorIs(t, err, expectedErr)
+		})
+	}
+}
+
+func TestListPoliciesCommand_StdoutWriteError(t *testing.T) {
+	expectedErr := errors.New("stdout broken pipe")
+	formats := []string{formatPretty, formatJSON, formatYAML, formatCSV}
+	for _, f := range formats {
+		t.Run(f, func(t *testing.T) {
+			cmd := getListPoliciesCmd()
+			cmd.SetOut(&failWriter{err: expectedErr})
+			cmd.SetArgs([]string{"--format", f})
+			err := cmd.Execute()
+			require.Error(t, err, "expected command execution to return error on stdout write failure for format %s", f)
+			assert.ErrorIs(t, err, expectedErr)
+		})
+	}
+}
+
+func TestShouldColor_NoColorWriter_OverridesForceColor(t *testing.T) {
+	t.Setenv("FORCE_COLOR", "1")
+	if orig, ok := os.LookupEnv("NO_COLOR"); ok {
+		os.Unsetenv("NO_COLOR")
+		t.Cleanup(func() {
+			_ = os.Setenv("NO_COLOR", orig)
+		})
+	}
+	buf := &bytes.Buffer{}
+	nc := &noColorWriter{w: buf}
+	assert.False(t, shouldColor(nc), "noColorWriter must disable color even when FORCE_COLOR=1")
+	rec := &errorRecordingWriter{w: nc}
+	assert.False(t, shouldColor(rec), "wrapped noColorWriter must also disable color even when FORCE_COLOR=1")
+}
+
+func TestErrorRecordingWriter_Unwrap(t *testing.T) {
+	buf := &bytes.Buffer{}
+	rec := &errorRecordingWriter{w: buf}
+	assert.Equal(t, buf, rec.Unwrap())
 }
