@@ -2602,6 +2602,7 @@ var opaRegisterOnce sync.Once
 func registerOPABuiltins() {
 	opaRegisterOnce.Do(func() {
 		rego.RegisterBuiltin2(cosignVerifySignatureDeclaration, cosignVerifySignatureDefinition)
+		rego.RegisterBuiltin1(cosignVerifyKeylessDeclaration, cosignVerifyKeylessDefinition)
 		rego.RegisterBuiltin1(cosignHasSignatureDeclaration, cosignHasSignatureDefinition)
 		rego.RegisterBuiltin1(imageNameNormalizeDeclaration, imageNameNormalizeDefinition)
 	})

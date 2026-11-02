@@ -66,7 +66,40 @@ func isSupportedWorkload(u *unstructured.Unstructured) bool {
 // by its kind alone); other kinds, and custom resources reusing one of those
 // kind names, are silently skipped.
 func ParseLocalWorkloads(paths []string) ([]unstructured.Unstructured, error) {
-	var results []unstructured.Unstructured
+	workloads, err := ParseLocalWorkloadSources(paths)
+	if err != nil {
+		return nil, err
+	}
+	return localWorkloadObjects(workloads), nil
+}
+
+// LocalWorkload is a workload read from a local manifest, together with
+// where in that manifest it was found.
+type LocalWorkload struct {
+	unstructured.Unstructured
+
+	// Source is where the workload was read from, or nil when it did not
+	// come from a file (such as manifests read from stdin).
+	Source *Source
+}
+
+// Source locates a workload in a local manifest file.
+type Source struct {
+	// File is the manifest's path: the path that was given, or the path of
+	// a file found in a given directory.
+	File string
+
+	// Line and Column are 1-based and point at the start of the YAML
+	// document or JSON value holding the workload. A workload taken from a
+	// List is located at the List.
+	Line   int
+	Column int
+}
+
+// ParseLocalWorkloadSources is ParseLocalWorkloads, but records the file and
+// position each workload was read from.
+func ParseLocalWorkloadSources(paths []string) ([]LocalWorkload, error) {
+	var results []LocalWorkload
 	for _, p := range paths {
 		objs, err := parseLocalPath(p)
 		if err != nil {
@@ -77,9 +110,20 @@ func ParseLocalWorkloads(paths []string) ([]unstructured.Unstructured, error) {
 	return results, nil
 }
 
+func localWorkloadObjects(workloads []LocalWorkload) []unstructured.Unstructured {
+	if workloads == nil {
+		return nil
+	}
+	objs := make([]unstructured.Unstructured, len(workloads))
+	for i := range workloads {
+		objs[i] = workloads[i].Unstructured
+	}
+	return objs
+}
+
 // parseLocalPath handles a single path: if it's a directory, list YAML/JSON
 // files in it (non-recursive); if it's a file, parse it directly.
-func parseLocalPath(p string) ([]unstructured.Unstructured, error) {
+func parseLocalPath(p string) ([]LocalWorkload, error) {
 	info, err := os.Stat(p)
 	if err != nil {
 		return nil, fmt.Errorf("cannot access %q: %w", p, err)
@@ -93,13 +137,13 @@ func parseLocalPath(p string) ([]unstructured.Unstructured, error) {
 
 // parseDirectory lists YAML and JSON files in a directory (non-recursive)
 // and parses each one.
-func parseDirectory(dir string) ([]unstructured.Unstructured, error) {
+func parseDirectory(dir string) ([]LocalWorkload, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, fmt.Errorf("cannot read directory %q: %w", dir, err)
 	}
 
-	var results []unstructured.Unstructured
+	var results []LocalWorkload
 	for _, entry := range entries {
 		if entry.IsDir() {
 			continue
@@ -119,23 +163,45 @@ func parseDirectory(dir string) ([]unstructured.Unstructured, error) {
 
 // parseFile reads a single file and extracts all YAML/JSON documents from it,
 // filtering to supported workload kinds.
-func parseFile(path string) ([]unstructured.Unstructured, error) {
+func parseFile(path string) ([]LocalWorkload, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("cannot read file %q: %w", path, err)
 	}
-	return parseMultiDoc(data, path)
+	return parseDocuments(data, path, path)
 }
 
 // parseMultiDoc splits data into YAML documents and decodes each one.
 // The source parameter is used only for error messages.
 func parseMultiDoc(data []byte, source string) ([]unstructured.Unstructured, error) {
-	var results []unstructured.Unstructured
+	workloads, err := parseDocuments(data, source, "")
+	if err != nil {
+		return nil, err
+	}
+	return localWorkloadObjects(workloads), nil
+}
 
-	reader := k8syaml.NewYAMLReader(bufio.NewReader(bytes.NewReader(data)))
+// parseDocuments is parseMultiDoc, but records where each workload was found.
+// file is the path the data was read from, recorded as each workload's
+// Source, or empty when the data did not come from a file.
+func parseDocuments(data []byte, source, file string) ([]LocalWorkload, error) {
+	var results []LocalWorkload
+
+	input := bytes.NewReader(data)
+	buffered := bufio.NewReader(input)
+	reader := k8syaml.NewYAMLReader(buffered)
 	docIndex := 0
+	// line is the 1-based line of data the next document starts on, and
+	// consumed the number of bytes of data the reader has read. The reader
+	// hands back every line it consumes, apart from a "---" that ends a
+	// document, so each document starts where the previous read stopped.
+	line, consumed := 1, 0
 	for {
+		docLine := line
 		doc, err := reader.Read()
+		read := len(data) - input.Len() - buffered.Buffered()
+		line += bytes.Count(data[consumed:read], []byte("\n"))
+		consumed = read
 		if err == io.EOF {
 			break
 		}
@@ -153,6 +219,7 @@ func parseMultiDoc(data []byte, source string) ([]unstructured.Unstructured, err
 		decoder := k8syaml.NewYAMLOrJSONDecoder(bytes.NewReader(doc), len(doc))
 		// A YAML reader segment can contain a stream of JSON values. Decode
 		// through EOF so neither later workloads nor trailing errors disappear.
+		searchFrom := 0
 		for recordIndex := 0; ; recordIndex++ {
 			var raw json.RawMessage
 			if err := decoder.Decode(&raw); err == io.EOF {
@@ -162,6 +229,13 @@ func parseMultiDoc(data []byte, source string) ([]unstructured.Unstructured, err
 			}
 			if len(bytes.TrimSpace(raw)) == 0 {
 				continue
+			}
+			var src *Source
+			if file != "" {
+				var offset int
+				offset, searchFrom = recordOffset(doc, raw, searchFrom)
+				src = &Source{File: file}
+				src.Line, src.Column = position(doc, docLine, offset)
 			}
 			var object map[string]any
 			if err := k8sjson.Unmarshal(raw, &object); err != nil {
@@ -188,14 +262,69 @@ func parseMultiDoc(data []byte, source string) ([]unstructured.Unstructured, err
 				if err != nil {
 					return nil, fmt.Errorf("document %d record %d in %s: %w", docIndex, recordIndex, source, err)
 				}
-				results = append(results, workloads...)
+				for _, w := range workloads {
+					results = append(results, LocalWorkload{Unstructured: w, Source: src})
+				}
 			} else if isSupportedWorkload(&u) {
-				results = append(results, u)
+				results = append(results, LocalWorkload{Unstructured: u, Source: src})
 			}
 		}
 		docIndex++
 	}
 	return results, nil
+}
+
+// recordOffset returns the offset in doc of a record the decoder returned as
+// raw, and the offset to search for the next record from. A JSON record is
+// decoded verbatim, so it is found where it starts. A YAML document is
+// converted to JSON first and decodes to a single record, which is placed at
+// the document's first line of content.
+func recordOffset(doc, raw []byte, searchFrom int) (offset, next int) {
+	if i := bytes.Index(doc[searchFrom:], raw); i >= 0 {
+		offset = searchFrom + i
+		return offset, offset + len(raw)
+	}
+	return contentOffset(doc), searchFrom
+}
+
+// contentOffset returns the offset of the first character of doc that is not
+// whitespace and not part of a comment or a "---" document marker line.
+func contentOffset(doc []byte) int {
+	for offset := 0; offset < len(doc); {
+		end := bytes.IndexByte(doc[offset:], '\n')
+		if end < 0 {
+			end = len(doc)
+		} else {
+			end += offset
+		}
+		line := doc[offset:end]
+		content := bytes.TrimLeft(line, " \t\r")
+		if len(content) > 0 && content[0] != '#' && !isDocumentMarker(line) {
+			return end - len(content)
+		}
+		offset = end + 1
+	}
+	return 0
+}
+
+// isDocumentMarker reports whether line is a "---" document marker, as the
+// YAML reader recognizes one: followed by nothing but spaces or a comment.
+func isDocumentMarker(line []byte) bool {
+	rest, found := bytes.CutPrefix(line, []byte("---"))
+	if !found {
+		return false
+	}
+	rest = bytes.TrimSpace(rest)
+	return len(rest) == 0 || rest[0] == '#'
+}
+
+// position converts offset in doc, a document starting on line docLine, to a
+// 1-based line and column.
+func position(doc []byte, docLine, offset int) (line, column int) {
+	before := doc[:offset]
+	line = docLine + bytes.Count(before, []byte("\n"))
+	column = offset - (bytes.LastIndexByte(before, '\n') + 1) + 1
+	return line, column
 }
 
 // listEnvelopeKind recognizes the canonical List kind and typed list
@@ -313,9 +442,20 @@ func expandListEnvelope(u *unstructured.Unstructured, listKind string) ([]unstru
 // ParseLocalWorkloadsFromReader reads YAML/JSON from a reader (e.g., stdin)
 // and returns unstructured objects suitable for PSS evaluation.
 func ParseLocalWorkloadsFromReader(r io.Reader, source string) ([]unstructured.Unstructured, error) {
+	workloads, err := ParseLocalWorkloadSourcesFromReader(r, source)
+	if err != nil {
+		return nil, err
+	}
+	return localWorkloadObjects(workloads), nil
+}
+
+// ParseLocalWorkloadSourcesFromReader is ParseLocalWorkloadsFromReader for
+// callers that also handle file sources. A reader is not a file, so the
+// workloads it returns have no Source.
+func ParseLocalWorkloadSourcesFromReader(r io.Reader, source string) ([]LocalWorkload, error) {
 	data, err := io.ReadAll(r)
 	if err != nil {
 		return nil, fmt.Errorf("reading from %s: %w", source, err)
 	}
-	return parseMultiDoc(data, source)
+	return parseDocuments(data, source, "")
 }

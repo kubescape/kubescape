@@ -3,8 +3,10 @@ package policytest
 import (
 	"context"
 	"encoding/json"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -93,6 +95,49 @@ func TestScaffold_EverySupportedKindProducesPassingCases(t *testing.T) {
 				require.NoError(t, result.Err)
 				assert.True(t, result.Passed, result.Diff)
 			}
+		})
+	}
+}
+
+// The scan locates a finding through the rule's deletePaths, reviewPaths and
+// fixPaths and ignores failedPaths, so a generated rule that only filled in
+// failedPaths had its findings reported at line 1 of the manifest.
+func TestScaffold_FlaggedCaseNamesTheFieldToDelete(t *testing.T) {
+	podSpecPaths := map[string]string{
+		"CronJob":     "spec.jobTemplate.spec.template.spec.",
+		"DaemonSet":   "spec.template.spec.",
+		"Deployment":  "spec.template.spec.",
+		"Job":         "spec.template.spec.",
+		"Pod":         "spec.",
+		"StatefulSet": "spec.template.spec.",
+	}
+	require.ElementsMatch(t, SupportedKinds(), slices.Collect(maps.Keys(podSpecPaths)))
+
+	for kind, podSpec := range podSpecPaths {
+		t.Run(kind, func(t *testing.T) {
+			dir := scaffoldRule(t, "check-"+strings.ToLower(kind), ScaffoldOptions{Kind: kind})
+
+			rules, err := DiscoverPath(dir)
+			require.NoError(t, err)
+			require.Len(t, rules, 1)
+			i := slices.IndexFunc(rules[0].Cases, func(c Case) bool { return c.Name == flaggedCaseName })
+			require.GreaterOrEqual(t, i, 0)
+			flagged := rules[0].Cases[i]
+
+			responses, err := EvaluateCase(context.Background(), rules[0], flagged)
+			require.NoError(t, err)
+			require.Len(t, responses, 1)
+			assert.Equal(t, []string{podSpec + "containers[0].securityContext.privileged"}, responses[0].DeletePaths)
+
+			// The path names the privileged container, not the first one.
+			sidecar := strings.Replace(containersBlock(true), "name: app", "name: sidecar", 1)
+			manifest := workloadKinds[kind].manifest("check-"+strings.ToLower(kind), containersBlock(false)+sidecar)
+			require.NoError(t, os.WriteFile(filepath.Join(flagged.Dir, "input", "resource.yaml"), []byte(manifest), 0o600))
+
+			responses, err = EvaluateCase(context.Background(), rules[0], flagged)
+			require.NoError(t, err)
+			require.Len(t, responses, 1)
+			assert.Equal(t, []string{podSpec + "containers[1].securityContext.privileged"}, responses[0].DeletePaths)
 		})
 	}
 }

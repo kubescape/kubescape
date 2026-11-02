@@ -2,6 +2,7 @@ package shared
 
 import (
 	"math"
+	"strings"
 	"testing"
 	"time"
 
@@ -32,6 +33,9 @@ func TestValidateScanFormat(t *testing.T) {
 		{"junit format is now supported for image scanning", "junit", ScanFormats, false},
 		{"junit is supported for image scanning", "junit", ImageScanFormats, false},
 		{"csv is not supported for image scanning", "csv", ImageScanFormats, true},
+		{"uppercase single format is accepted", "JSON", ScanFormats, false},
+		{"mixed-case comma-separated formats with whitespace", " JSON , Yaml,SARIF ", ScanFormats, false},
+		{"uppercase invalid format is rejected", "XML", ScanFormats, true},
 	}
 
 	for _, testCase := range testCases {
@@ -43,6 +47,62 @@ func TestValidateScanFormat(t *testing.T) {
 				}
 			} else if err != nil {
 				t.Errorf("expected no error for format %q, got: %v", testCase.Format, err)
+			}
+		})
+	}
+}
+
+func TestNormalizeScanFormats(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"empty string", "", ""},
+		{"whitespace only", "   ", ""},
+		{"single lowercase", "json", "json"},
+		{"single uppercase", "JSON", "json"},
+		{"padded uppercase", " YAML ", "yaml"},
+		{"mixed comma-separated with padding", " JSON , Yaml,SARIF ", "json,yaml,sarif"},
+		{"drops empty tokens", "json,,html, ", "json,html"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := NormalizeScanFormats(tt.input)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestValidateView(t *testing.T) {
+	testCases := []struct {
+		description string
+		view        string
+		wantErr     bool
+		errMsg      string
+	}{
+		{"valid resource view", "resource", false, ""},
+		{"valid control view", "control", false, ""},
+		{"valid security view", "security", false, ""},
+		{"valid namespace view", "namespace", false, ""},
+		{"valid mixed-case view", "Resource", false, ""},
+		{"valid uppercase view", "CONTROL", false, ""},
+		{"valid padded view", "  security  ", false, ""},
+		{"empty view", "", true, "view cannot be empty"},
+		{"whitespace-only view", "   ", true, "view cannot be empty"},
+		{"plural controls typo", "controls", true, "invalid view \"controls\""},
+		{"plural resources typo", "resources", true, "invalid view \"resources\""},
+		{"unsupported view", "table", true, "invalid view \"table\""},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.description, func(t *testing.T) {
+			err := ValidateView(tc.view)
+			if tc.wantErr {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tc.errMsg)
+			} else {
+				require.NoError(t, err)
 			}
 		})
 	}
@@ -277,6 +337,165 @@ func TestValidateCommonScanFlags(t *testing.T) {
 			} else {
 				assert.Error(t, err)
 				assert.Contains(t, err.Error(), tt.expectedErr)
+			}
+		})
+	}
+}
+
+func TestValidateCommonScanFlags_View(t *testing.T) {
+	tests := []struct {
+		name        string
+		scanType    cautils.ScanTypes
+		view        string
+		viewChanged bool
+		expectedErr string
+		wantView    string
+	}{
+		{
+			name:        "Valid view normalized to lowercase",
+			view:        "Resource",
+			viewChanged: true,
+			wantView:    "resource",
+		},
+		{
+			name:        "Valid security view",
+			view:        "security",
+			viewChanged: true,
+			wantView:    "security",
+		},
+		{
+			name:        "Valid control view",
+			view:        "control",
+			viewChanged: true,
+			wantView:    "control",
+		},
+		{
+			name:        "Valid namespace view",
+			view:        "namespace",
+			viewChanged: true,
+			wantView:    "namespace",
+		},
+		{
+			name:        "Invalid view rejected",
+			view:        "controls",
+			viewChanged: true,
+			expectedErr: "invalid view \"controls\", supported views: resource, control, security, namespace",
+		},
+		{
+			name:        "Explicit empty view rejected",
+			view:        "",
+			viewChanged: true,
+			expectedErr: "view cannot be empty, supported views: resource, control, security, namespace",
+		},
+		{
+			name:        "Explicit whitespace view rejected",
+			view:        "   ",
+			viewChanged: true,
+			expectedErr: "view cannot be empty, supported views: resource, control, security, namespace",
+		},
+		{
+			name:        "View flag on image scan rejected",
+			scanType:    cautils.ScanTypeImage,
+			view:        "resource",
+			viewChanged: true,
+			expectedErr: "--view is not supported for image scans: an image scan evaluates vulnerabilities, not posture views",
+		},
+		{
+			name:        "Default view on image scan accepted when not explicitly changed",
+			scanType:    cautils.ScanTypeImage,
+			view:        "security",
+			viewChanged: false,
+			wantView:    "security",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			scanInfo := &cautils.ScanInfo{
+				ScanType: tt.scanType,
+				View:     tt.view,
+			}
+
+			cmd := &cobra.Command{}
+			cmd.Flags().String("view", "security", "")
+			if tt.viewChanged {
+				cmd.Flags().Set("view", tt.view)
+			}
+
+			err := ValidateCommonScanFlags(cmd, scanInfo, ScanFormats)
+
+			if tt.expectedErr == "" {
+				require.NoError(t, err)
+				if tt.wantView != "" {
+					assert.Equal(t, tt.wantView, scanInfo.View)
+				}
+			} else {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.expectedErr)
+			}
+		})
+	}
+}
+
+func TestValidateCommonScanFlagsImageRiskGates(t *testing.T) {
+	tests := []struct {
+		name        string
+		scanInfo    cautils.ScanInfo
+		expectedErr string
+	}{
+		{name: "gates unset on a posture scan", scanInfo: cautils.ScanInfo{}},
+		{name: "KEV gate on an image scan", scanInfo: cautils.ScanInfo{FailOnKEV: true, ScanType: cautils.ScanTypeImage}},
+		{name: "EPSS gate with --scan-images", scanInfo: cautils.ScanInfo{EPSSThreshold: 0.5, ScanImages: true}},
+		{name: "EPSS threshold of 1", scanInfo: cautils.ScanInfo{EPSSThreshold: 1, ScanImages: true}},
+		{name: "EPSS threshold of 0 disables the gate on a posture scan", scanInfo: cautils.ScanInfo{EPSSThreshold: 0}},
+		{
+			name:        "KEV gate on a posture scan without images",
+			scanInfo:    cautils.ScanInfo{FailOnKEV: true},
+			expectedErr: "--fail-on-kev evaluates image vulnerabilities: use 'kubescape scan image' or add --scan-images",
+		},
+		{
+			name:        "EPSS gate on a posture scan without images",
+			scanInfo:    cautils.ScanInfo{EPSSThreshold: 0.3},
+			expectedErr: "--epss-threshold evaluates image vulnerabilities: use 'kubescape scan image' or add --scan-images",
+		},
+		{name: "dry run with --scan-images and gates unset", scanInfo: cautils.ScanInfo{DryRun: true, ScanImages: true}},
+		{
+			name:        "KEV gate on a dry run with --scan-images",
+			scanInfo:    cautils.ScanInfo{DryRun: true, ScanImages: true, FailOnKEV: true},
+			expectedErr: "--fail-on-kev cannot be used with --dry-run: a dry run does not scan images",
+		},
+		{
+			name:        "EPSS gate on a dry run with --scan-images",
+			scanInfo:    cautils.ScanInfo{DryRun: true, ScanImages: true, EPSSThreshold: 0.2},
+			expectedErr: "--epss-threshold cannot be used with --dry-run: a dry run does not scan images",
+		},
+		{
+			name:        "EPSS threshold above 1",
+			scanInfo:    cautils.ScanInfo{EPSSThreshold: 1.5, ScanImages: true},
+			expectedErr: "bad argument: out of range threshold: --epss-threshold must be between 0 and 1, got 1.5",
+		},
+		{
+			name:        "negative EPSS threshold",
+			scanInfo:    cautils.ScanInfo{EPSSThreshold: -0.1, ScanImages: true},
+			expectedErr: "bad argument: out of range threshold: --epss-threshold must be between 0 and 1, got -0.1",
+		},
+		{
+			name:        "NaN EPSS threshold",
+			scanInfo:    cautils.ScanInfo{EPSSThreshold: math.NaN(), ScanImages: true},
+			expectedErr: "bad argument: out of range threshold: --epss-threshold must be between 0 and 1, got NaN",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateCommonScanFlags(&cobra.Command{}, &tt.scanInfo, ScanFormats)
+			if tt.expectedErr == "" {
+				assert.NoError(t, err)
+				return
+			}
+			require.EqualError(t, err, tt.expectedErr)
+			if strings.Contains(tt.expectedErr, "out of range") {
+				assert.ErrorIs(t, err, ErrBadThreshold)
 			}
 		})
 	}

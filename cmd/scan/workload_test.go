@@ -538,14 +538,18 @@ func TestGetWorkloadCmd_RejectsLabelSelector(t *testing.T) {
 
 type scoredWorkloadKubescape struct {
 	mocks.MockIKubescape
-	complianceScore float32
+	complianceScore  float32
+	criticalFailures int
+	imageScanData    []cautils.ImageScanData
 }
 
 func (m *scoredWorkloadKubescape) Scan(scanInfo *cautils.ScanInfo, _ []cautils.PolicyIdentifier) (*resultshandling.ResultsHandler, error) {
 	rh := resultshandling.NewResultsHandler(nil, []printer.IPrinter{&fakePrinter{}}, &fakePrinter{})
 	sessionObj := cautils.NewOPASessionObjMock()
 	sessionObj.Report.SummaryDetails.ComplianceScore = m.complianceScore
+	sessionObj.Report.SummaryDetails.ResourcesSeverityCounters.CriticalSeverityCounter = m.criticalFailures
 	rh.SetData(sessionObj)
+	rh.ImageScanData = m.imageScanData
 	return rh, nil
 }
 

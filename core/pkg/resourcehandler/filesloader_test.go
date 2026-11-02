@@ -233,6 +233,59 @@ func TestGetResourcesFromPath_SingleFileRelativePathIsRepositoryRelative(t *test
 	}
 }
 
+// Outside a git repository the scanned file itself was taken as the root for
+// every file type but YAML, so a single JSON or Terraform file got the relative
+// path "." and lost its source. SARIF and GitLab SAST drop results without a
+// source, and fix cannot find the file.
+func TestGetResourcesFromPath_SingleFileOutsideRepositoryKeepsItsSource(t *testing.T) {
+	tests := []struct {
+		name     string
+		file     string
+		contents string
+		fileType string
+	}{
+		{
+			name:     "yaml",
+			file:     "pod.yaml",
+			contents: "apiVersion: v1\nkind: Pod\nmetadata:\n  name: pod\nspec:\n  containers:\n    - name: app\n      image: nginx\n",
+			fileType: reporthandling.SourceTypeYaml,
+		},
+		{
+			name:     "json",
+			file:     "pod.json",
+			contents: `{"apiVersion":"v1","kind":"Pod","metadata":{"name":"pod"},"spec":{"containers":[{"name":"app","image":"nginx"}]}}`,
+			fileType: reporthandling.SourceTypeJson,
+		},
+		{
+			name:     "terraform",
+			file:     "main.tf",
+			contents: terraformPodFixture,
+			fileType: "Terraform",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			// Inside a checkout the root is the repository root instead.
+			if _, err := cautils.GetGitRootDir(dir); err == nil {
+				t.Skip("the temporary directory is inside a git checkout")
+			}
+			path := filepath.Join(dir, tt.file)
+			require.NoError(t, os.WriteFile(path, []byte(tt.contents), 0o600))
+
+			workloadIDToSource, workloads, _, err := getResourcesFromPath(context.Background(), path, cautils.HelmValueOptions{}, nil)
+			require.NoError(t, err)
+			require.Len(t, workloads, 1)
+
+			src, ok := workloadIDToSource[workloads[0].GetID()]
+			require.True(t, ok, "the workload must have a source")
+			assert.Equal(t, dir, src.Path)
+			assert.Equal(t, tt.file, src.RelativePath)
+			assert.Equal(t, tt.fileType, src.FileType)
+		})
+	}
+}
+
 func TestGetResourcesFromPath_SingleManifestDoesNotRenderUnrelatedKustomizeDirectory(t *testing.T) {
 	root := t.TempDir()
 	manifestPath := filepath.Join(root, "manifest.yaml")

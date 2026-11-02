@@ -122,6 +122,11 @@ func Test_validateFrameworkScanInfo(t *testing.T) {
 			&cautils.ScanInfo{AccountID: "not-a-uuid"},
 			nil,
 		},
+		{
+			"Invalid view should be rejected",
+			&cautils.ScanInfo{View: "invalid", AccountID: validAccountID},
+			nil,
+		},
 	}
 
 	for _, tc := range testCases {
@@ -132,7 +137,7 @@ func Test_validateFrameworkScanInfo(t *testing.T) {
 
 				got := validateFrameworkScanInfo(tc.ScanInfo)
 
-				if tc.Description == "Invalid account ID should be rejected" {
+				if tc.Description == "Invalid account ID should be rejected" || tc.Description == "Invalid view should be rejected" {
 					if got == nil {
 						t.Errorf("got: %v, want: error", got)
 					}
@@ -144,6 +149,42 @@ func Test_validateFrameworkScanInfo(t *testing.T) {
 				}
 			},
 		)
+	}
+}
+
+func Test_validateFrameworkScanInfo_Views(t *testing.T) {
+	const validAccountID = "22019933-feac-4012-a8eb-e81461ba6655"
+
+	tests := []struct {
+		name     string
+		view     string
+		wantErr  bool
+		wantView string
+	}{
+		{"control view retained", "control", false, "control"},
+		{"resource view retained", "resource", false, "resource"},
+		{"namespace view retained", "namespace", false, "namespace"},
+		{"security view mutates to resource", "security", false, "resource"},
+		{"Security uppercase mutates to resource", "Security", false, "resource"},
+		{"Resource mixed-case normalized", "Resource", false, "resource"},
+		{"invalid view rejected", "invalid", true, ""},
+		{"controls typo rejected", "controls", true, ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			scanInfo := &cautils.ScanInfo{
+				View:      tt.view,
+				AccountID: validAccountID,
+			}
+			err := validateFrameworkScanInfo(scanInfo)
+			if tt.wantErr {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+				assert.Equal(t, tt.wantView, scanInfo.View)
+			}
+		})
 	}
 }
 

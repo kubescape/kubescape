@@ -17,6 +17,10 @@ func getPolicyTestCmd() *cobra.Command {
 		Long:  `Discovers rule directories (raw.rego + rule.metadata.json, with test cases under test/<case>/{input,expected.json}) under <path>, evaluates every case, and reports which ones match their expected.json.`,
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// The invocation is valid from this point on. A case that fails,
+			// or cannot be evaluated, is a test result and should not print
+			// command usage.
+			cmd.SilenceUsage = true
 			if update {
 				return runPolicyUpdate(cmd, args[0])
 			}

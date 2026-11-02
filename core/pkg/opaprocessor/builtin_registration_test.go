@@ -37,5 +37,6 @@ func TestRegisterOPABuiltins_OnlyRegistersOncePerProcess(t *testing.T) {
 
 	assert.NotNil(t, ast.BuiltinMap[cosignVerifySignatureDeclaration.Name], "cosign.verify must be registered")
 	assert.NotNil(t, ast.BuiltinMap[cosignHasSignatureDeclaration.Name], "cosign.has_signature must be registered")
+	assert.NotNil(t, ast.BuiltinMap[cosignVerifyKeylessDeclaration.Name], "cosign.verify_keyless must be registered")
 	assert.NotNil(t, ast.BuiltinMap[imageNameNormalizeDeclaration.Name], "image.parse_normalized_name must be registered")
 }

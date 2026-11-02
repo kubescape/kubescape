@@ -5,6 +5,7 @@ import (
 
 	"github.com/anchore/grype/grype/match"
 	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/pkg/imagescan"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	helpersv1 "github.com/kubescape/opa-utils/reporthandling/helpers/v1"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
@@ -202,10 +203,11 @@ func filterImageScanDataBySeverity(data []cautils.ImageScanData, minSeverity, ma
 		filtered[i] = item
 		filteredMatches := match.NewMatches()
 		for _, m := range item.Matches.Sorted() {
-			rank := 0
-			if m.Vulnerability.Metadata != nil {
-				rank = severityRankFromString(m.Vulnerability.Metadata.Severity)
+			severity, unknown := imagescan.MatchSeverity(m, item.VulnerabilityProvider)
+			if unknown {
+				continue
 			}
+			rank := severityRankFromString(severity.String())
 			if rank >= minRank && rank <= maxRank {
 				filteredMatches.Add(m)
 			}

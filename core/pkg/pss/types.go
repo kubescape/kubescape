@@ -80,4 +80,7 @@ type WorkloadResult struct {
 	// Privileged if it violates Baseline checks; Baseline if it passes
 	// Baseline but violates Restricted; Restricted if fully compliant.
 	PassesAt Level
+	// Source is where a workload read from a local manifest was found. It is
+	// nil for cluster workloads and for manifests read from stdin.
+	Source *Source
 }

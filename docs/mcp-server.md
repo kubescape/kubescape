@@ -1032,6 +1032,6 @@ kubescape version
 ## Related Documentation
 
 - [Kubescape Operator Installation](https://kubescape.io/docs/operator/)
-- [Vulnerability Scanning](https://kubescape.io/docs/vulnerabilities/)
-- [Configuration Scanning](https://kubescape.io/docs/configuration-scanning/)
+- [Vulnerability Scanning](https://kubescape.io/docs/operator/vulnerabilities/)
+- [Configuration Scanning](https://kubescape.io/docs/scanning/)
 - [MCP Protocol Specification](https://modelcontextprotocol.io/)

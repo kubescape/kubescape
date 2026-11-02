@@ -1,0 +1,12 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: clusterrole-create-validating-binding
+subjects:
+- kind: User
+  name: platform-admin
+  apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: ClusterRole
+  name: clusterrole-create-validating-role
+  apiGroup: rbac.authorization.k8s.io

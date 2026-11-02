@@ -214,7 +214,6 @@ func TestRecordCachedScanContractRunnerInput(t *testing.T) {
 func TestSafeContractRunnerInputSource(t *testing.T) {
 	assert.Equal(t, ".kubescape/controls.json", safeContractRunnerInputSource(".kubescape/controls.json"))
 	assert.Equal(t, "external", safeContractRunnerInputSource("../controls.json"))
-
 	workingDirectory, err := os.Getwd()
 	require.NoError(t, err)
 	assert.Equal(t, "external", safeContractRunnerInputSource(filepath.Join(filepath.Dir(workingDirectory), "controls.json")))

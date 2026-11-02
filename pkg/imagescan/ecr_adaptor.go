@@ -339,5 +339,12 @@ func (a *AWSECRAdaptor) GetImagesInformation(ctx context.Context, imageIDs []Con
 
 // Destroy cleans up any persistent resources used by the adaptor.
 func (a *AWSECRAdaptor) Destroy() error {
+	// Wait for any earlier Login to finish publishing before clearing it.
+	// Active scans retain their client snapshot; new calls require Login.
+	a.loginMu.Lock()
+	defer a.loginMu.Unlock()
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.client = nil
 	return nil
 }

@@ -56,6 +56,15 @@ func (drp *DownloadReleasedPolicy) IsVersionPinned() bool {
 	return drp.version != ""
 }
 
+// CacheSource identifies the release this getter reads: the pinned tag, or
+// the latest release when none is pinned.
+func (drp *DownloadReleasedPolicy) CacheSource() string {
+	if drp == nil {
+		return CacheSourceOf(nil)
+	}
+	return fmt.Sprintf("release:%q", drp.version)
+}
+
 // ShouldPersistPolicyArtifacts reports whether policies fetched by this getter
 // may be published to Kubescape's shared, unversioned disk fallback. A pinned
 // release must not replace that fallback because the flat cache path does not
@@ -182,7 +191,7 @@ func (drp *DownloadReleasedPolicy) ListControls() ([]string, error) {
 		controlsFrameworksList = append(controlsFrameworksList, drp.gs.GetOpaFrameworkListByControlID(control.ControlID))
 	}
 	controlsNamesWithIDsandFrameworksList := make([]string, len(controlsIDsList))
-	// by design all slices have the same lengt
+	// by design all slices have the same length
 	for i := range controlsIDsList {
 		controlsNamesWithIDsandFrameworksList[i] = fmt.Sprintf("%v|%v|%v", controlsIDsList[i], controlsNamesList[i], strings.Join(controlsFrameworksList[i], ", "))
 	}

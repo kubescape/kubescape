@@ -12,8 +12,6 @@ import (
 	"github.com/kubescape/kubescape/v4/core/meta"
 
 	"github.com/kubescape/backend/pkg/versioncheck"
-	"github.com/kubescape/go-logger"
-	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/spf13/cobra"
 	"golang.org/x/mod/semver"
@@ -51,8 +49,10 @@ func GetUpdateCmd(ks meta.IKubescape) *cobra.Command {
 		Short:   "Update to latest release version",
 		Long:    ``,
 		Example: updateCmdExamples,
+		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if updateFormat != "text" && updateFormat != "json" {
+			normalizedFormat := strings.ToLower(strings.TrimSpace(updateFormat))
+			if normalizedFormat != "text" && normalizedFormat != "json" {
 				return fmt.Errorf("unsupported format %q, supported: text, json", updateFormat)
 			}
 
@@ -62,7 +62,7 @@ func GetUpdateCmd(ks meta.IKubescape) *cobra.Command {
 				return err
 			}
 
-			if updateFormat == "json" {
+			if normalizedFormat == "json" {
 				info := UpdateInfo{}
 				if isDevelopmentBuild(versioncheck.BuildNumber) {
 					info.Message = "Nothing to update: you are running the development version"
@@ -80,17 +80,35 @@ func GetUpdateCmd(ks meta.IKubescape) *cobra.Command {
 				return err
 			}
 
-			//Checking the user's version of kubescape to the latest release
+			// Checking the user's version of kubescape to the latest release
+			out := cmd.OutOrStdout()
+			useColor := shouldColor(out)
+			chalk := colorBuilder(useColor)
+
 			if isDevelopmentBuild(versioncheck.BuildNumber) {
-				//your version is unknown
-				fmt.Printf("Nothing to update: you are running the development version\n")
+				msg := "Nothing to update: you are running the development version"
+				if useColor {
+					msg = fmt.Sprintf("%s: you are running the development version", chalk.BrightYellow("Nothing to update"))
+				}
+				_, err := fmt.Fprintln(out, msg)
+				return err
 			} else if isLatestVersion(versioncheck.BuildNumber, versioncheck.LatestReleaseVersion) {
-				//your version is the latest version
-				logger.L().Info("Nothing to update: you are running the latest version", helpers.String("Version", versioncheck.BuildNumber))
+				msg := "Nothing to update: you are running the latest version"
+				if useColor {
+					msg = fmt.Sprintf("%s: you are running the latest version", chalk.BrightYellow("Nothing to update"))
+				}
+				_, err := fmt.Fprintln(out, msg)
+				return err
 			} else {
-				fmt.Printf("Version %s is available. Please refer to our installation documentation: %s\n", versioncheck.LatestReleaseVersion, installationLink)
+				verStr := versioncheck.LatestReleaseVersion
+				linkStr := installationLink
+				if useColor {
+					verStr = chalk.WithBrightGreen().Bold(versioncheck.LatestReleaseVersion)
+					linkStr = chalk.BrightCyan(installationLink)
+				}
+				_, err := fmt.Fprintf(out, "Version %s is available. Please refer to our installation documentation: %s\n", verStr, linkStr)
+				return err
 			}
-			return nil
 		},
 	}
 	updateCmd.Flags().StringVarP(&updateFormat, "format", "f", "text", "Output format. Supported formats: text, json")

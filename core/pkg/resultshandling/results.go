@@ -320,11 +320,12 @@ func (rh *ResultsHandler) HandleResults(ctx context.Context, scanInfo *cautils.S
 		logger.L().Warning("Severity filtering (--min-severity/--max-severity) is output-only and does not affect exit-code thresholds")
 	}
 	ApplySeverityFilters(rh.ScanData, scanInfo.MinSeverity, scanInfo.MaxSeverity)
+	filteredImageData := filterImageScanDataBySeverity(rh.ImageScanData, scanInfo.MinSeverity, scanInfo.MaxSeverity)
 
 	// Display scan results in the UI first to give immediate value.
 	var printErr error
 
-	if err := rh.UiPrinter.ActionPrint(ctx, rh.ScanData, rh.ImageScanData); err != nil {
+	if err := rh.UiPrinter.ActionPrint(ctx, rh.ScanData, filteredImageData); err != nil {
 		printErr = errors.Join(printErr, fmt.Errorf("ui printer: %w", err))
 	}
 
@@ -335,7 +336,7 @@ func (rh *ResultsHandler) HandleResults(ctx context.Context, scanInfo *cautils.S
 
 	// Then print to output files
 	for _, p := range rh.PrinterObjs {
-		if err := p.ActionPrint(ctx, rh.ScanData, rh.ImageScanData); err != nil {
+		if err := p.ActionPrint(ctx, rh.ScanData, filteredImageData); err != nil {
 			printErr = errors.Join(printErr, fmt.Errorf("output printer %T: %w", p, err))
 		}
 		if rh.ScanData != nil {
@@ -366,7 +367,6 @@ func (rh *ResultsHandler) HandleResults(ctx context.Context, scanInfo *cautils.S
 				}
 			}
 		} else if len(rh.ImageScanData) > 0 {
-			filteredImageData := filterImageScanDataBySeverity(rh.ImageScanData, scanInfo.MinSeverity, scanInfo.MaxSeverity)
 			imageSummary := printerv2.BuildImageScanSummary(filteredImageData)
 			client := notification.NewClient(notification.DefaultTimeout)
 			for _, endpoint := range scanInfo.NotifyURLs {

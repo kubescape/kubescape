@@ -368,11 +368,15 @@ func (lp *LoadPolicy) ConsumedFileDigest() (path, digest string, ok bool) {
 }
 
 func (lp *LoadPolicy) recordConsumedFile(path string, contents []byte) {
-	digest := sha256.Sum256(contents)
+	digest := contentDigest(contents)
 	lp.consumedInputMu.Lock()
 	defer lp.consumedInputMu.Unlock()
 	lp.consumedPath = path
-	lp.consumedDigest = fmt.Sprintf("sha256:%x", digest)
+	lp.consumedDigest = digest
+}
+
+func contentDigest(contents []byte) string {
+	return fmt.Sprintf("sha256:%x", sha256.Sum256(contents))
 }
 
 // GetAttackTracks yields the attack tracks from a config file.
@@ -389,6 +393,46 @@ func (lp *LoadPolicy) GetAttackTracks() ([]v1alpha1.AttackTrack, error) {
 	}
 
 	return attackTracks, nil
+}
+
+// CacheSource identifies the contents of the file this getter reads, with
+// the same digest ConsumedFileDigest reports. Files with the same contents,
+// such as identical REST request bodies saved to different temporary paths,
+// share an identity; a file whose contents change gets a new one. A file that
+// cannot be read is identified by its path, and its failed load is never
+// cached. A nil getter is identified the same way as no getter at all.
+func (lp *LoadPolicy) CacheSource() string {
+	if lp == nil {
+		return CacheSourceOf(nil)
+	}
+	filePath := filepath.Clean(lp.filePath())
+	buf, err := os.ReadFile(filePath)
+	if err != nil {
+		return fmt.Sprintf("unreadable-file:%q", filePath)
+	}
+	return "file:" + contentDigest(buf)
+}
+
+// LoadedCacheSource identifies the exact bytes the last successful
+// GetExceptions or GetControlsInputs consumed, in the form CacheSource uses.
+func (lp *LoadPolicy) LoadedCacheSource() (string, bool) {
+	if lp == nil {
+		return "", false
+	}
+	_, digest, ok := lp.ConsumedFileDigest()
+	if !ok {
+		return "", false
+	}
+	return "file:" + digest, true
+}
+
+// SourceFile returns the file this getter reads.
+func (lp *LoadPolicy) SourceFile() (string, bool) {
+	if lp == nil {
+		return "", false
+	}
+	filePath := lp.filePath()
+	return filePath, filePath != ""
 }
 
 // temporary support for a list of files

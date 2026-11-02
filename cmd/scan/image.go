@@ -1,6 +1,7 @@
 package scan
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -74,6 +75,18 @@ func getImageCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Command 
 			if scanInfo.CustomRules != "" || commandFlagChanged(cmd, "custom-rules") {
 				return fmt.Errorf("--custom-rules is not supported for image scans: an image scan evaluates vulnerabilities, not posture controls")
 			}
+			if scanInfo.Baseline != "" || commandFlagChanged(cmd, "baseline") {
+				return fmt.Errorf("--baseline is not supported for image scans: an image scan evaluates vulnerabilities, not posture baseline drift (use 'kubescape diff' to compare image scan reports)")
+			}
+			if scanInfo.BaselineFailOnNew || commandFlagChanged(cmd, "baseline-fail-on-new") {
+				return fmt.Errorf("--baseline-fail-on-new is not supported for image scans: an image scan evaluates vulnerabilities, not posture baseline drift (use 'kubescape diff' to compare image scan reports)")
+			}
+			if scanInfo.BaselineSeverityThreshold != "" || commandFlagChanged(cmd, "baseline-severity-threshold") {
+				return fmt.Errorf("--baseline-severity-threshold is not supported for image scans: an image scan evaluates vulnerabilities, not posture baseline drift (use 'kubescape diff' to compare image scan reports)")
+			}
+			if scanInfo.ComplianceThreshold != 0 || commandFlagChanged(cmd, "compliance-threshold") {
+				return fmt.Errorf("--compliance-threshold is not supported for image scans: an image scan evaluates vulnerabilities, not posture compliance scores (use --severity-threshold instead)")
+			}
 			if err := shared.ValidateImageScanAnonymization(scanInfo); err != nil {
 				return err
 			}
@@ -106,15 +119,17 @@ func getImageCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Command 
 			cmd.SilenceUsage = true
 
 			exceedsSeverityThreshold, err := ks.ScanImageContext(ctx, imgScanInfo, scanInfo)
-			if err != nil {
+			if !exceedsSeverityThreshold {
 				return err
 			}
 
-			if exceedsSeverityThreshold {
-				return fmt.Errorf("result exceeds severity threshold: %s", scanInfo.FailThresholdSeverity)
+			// Keep the severity breach visible when an exploitability gate or
+			// another deferred failure is reported alongside it.
+			thresholdErr := fmt.Errorf("result exceeds severity threshold: %s", scanInfo.FailThresholdSeverity)
+			if err == nil {
+				return thresholdErr
 			}
-
-			return nil
+			return errors.Join(err, thresholdErr)
 		},
 	}
 

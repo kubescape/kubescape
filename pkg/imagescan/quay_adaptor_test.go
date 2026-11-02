@@ -552,7 +552,7 @@ func TestQuayAdaptor_GetImagesVulnerabilities(t *testing.T) {
 		assert.Empty(t, res[0].Vulnerabilities)
 	})
 
-	t.Run("completed scan with null layer returns empty report without error", func(t *testing.T) {
+	t.Run("completed scan with null data returns an incomplete-report error", func(t *testing.T) {
 		path := quayManifestSecurityPath("myorg", "nulllayer", "sha256:nulllayer123", true)
 		mock.responses[path] = []byte(`{
 			"status": "scanned",
@@ -562,9 +562,10 @@ func TestQuayAdaptor_GetImagesVulnerabilities(t *testing.T) {
 		res, err := adaptor.GetImagesVulnerabilities(context.Background(), []ContainerImageIdentifier{
 			{Registry: "quay.io", Repository: "myorg/nulllayer", Hash: "sha256:nulllayer123"},
 		})
-		require.NoError(t, err)
+		require.ErrorContains(t, err, "missing security report data")
 		require.Len(t, res, 1)
 		assert.Empty(t, res[0].Vulnerabilities)
+		assert.NotEqual(t, ScanStatusScanned, res[0].Status)
 	})
 
 	t.Run("single vulnerability parsed accurately", func(t *testing.T) {

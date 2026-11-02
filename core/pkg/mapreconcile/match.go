@@ -20,6 +20,9 @@ type ObjectInfo struct {
 	Resource  string // plural resource name, e.g. "pods"
 	Name      string // the object's own name, matched against a rule's ResourceNames
 	Namespace string // empty for a cluster-scoped object
+	// Labels is the available object's label set. For UPDATE the other
+	// (old or new) object's labels are unavailable, so a selector miss alone
+	// cannot prove exclusion: admission matches either version of the object.
 	Labels    map[string]string
 	Operation admissionregistrationv1alpha1.OperationType
 
@@ -254,6 +257,9 @@ func compileMatchResources(mr *admissionregistrationv1alpha1.MatchResources) (*c
 // a confident non-match. The same policy applies to exclusions: a possible
 // equivalent exclusion prevents an include match from being confirmed.
 func (c *compiledMatchResources) matches(obj ObjectInfo) (matched bool, determinable bool) {
+	// Unknown namespace labels cannot decide the conjunction, but a known
+	// object/rule mismatch still can. Defer uncertainty until after exclusions.
+	namespaceKnown := true
 	if c.namespaceSelector != nil && !c.namespaceSelector.Empty() {
 		switch {
 		case obj.IsNamespaceObject:
@@ -265,10 +271,8 @@ func (c *compiledMatchResources) matches(obj ObjectInfo) (matched bool, determin
 			}
 		case !obj.ClusterScoped:
 			matched, determinable := namespaceselector.Matches(c.namespaceSelector, obj.Namespace, obj.NamespaceLabels, obj.NamespaceLabelsKnown)
-			if !determinable {
-				return false, false
-			}
-			if !matched {
+			namespaceKnown = determinable
+			if determinable && !matched {
 				return false, true
 			}
 		default:
@@ -276,9 +280,15 @@ func (c *compiledMatchResources) matches(obj ObjectInfo) (matched bool, determin
 		}
 	}
 
+	objectKnown := true
 	if c.objectSelector != nil && !c.objectSelector.Empty() {
 		if !c.objectSelector.Matches(labels.Set(obj.Labels)) {
-			return false, true
+			if obj.Operation != admissionregistrationv1alpha1.Update {
+				return false, true
+			}
+			// UPDATE selectors match old OR new labels. The absent other
+			// object may match, but resource rules can still exclude it.
+			objectKnown = false
 		}
 	}
 
@@ -292,6 +302,9 @@ func (c *compiledMatchResources) matches(obj ObjectInfo) (matched bool, determin
 			// The apiserver applies matchPolicy to exclusions too. Without
 			// its equivalence registry, an exact include cannot prove that
 			// an exclusion naming another group/version will not apply.
+			return false, false
+		}
+		if !namespaceKnown || !objectKnown {
 			return false, false
 		}
 		return true, true

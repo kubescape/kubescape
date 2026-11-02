@@ -481,6 +481,25 @@ func TestGetScanCommand_RunE_FormatFlagInvalid(t *testing.T) {
 	assert.EqualError(t, err, errMessage)
 }
 
+func TestGetScanCommand_FormatFlagCaseInsensitive(t *testing.T) {
+	for _, tc := range []struct{ input, want string }{
+		{"JSON", "json"},
+		{"Yaml", "yaml"},
+		{" SARIF ", "sarif"},
+		{"json, YAML", "json,yaml"},
+	} {
+		t.Run("format_"+strings.TrimSpace(tc.input), func(t *testing.T) {
+			cmd := GetScanCommand(&mocks.MockIKubescape{})
+			require.NoError(t, cmd.PersistentFlags().Set("format", tc.input))
+
+			scanInfo := &cautils.ScanInfo{Format: tc.input}
+			err := shared.ValidateCommonScanFlags(cmd, scanInfo, shared.ScanFormats)
+			assert.NoError(t, err)
+			assert.Equal(t, tc.want, scanInfo.Format)
+		})
+	}
+}
+
 type scanCallCounter struct {
 	mocks.MockIKubescape
 	calls int

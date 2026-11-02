@@ -154,17 +154,12 @@ func runFrameworkScan(ctx context.Context, scanInfo *cautils.ScanInfo, ks meta.I
 		return results, err
 	}
 
-	if results.GetComplianceScore() < float32(scanInfo.ComplianceThreshold) {
-		return results, gateFailure(fmt.Errorf("scan compliance-score is below permitted threshold: %s (compliance-threshold: %.2f)", cautils.ComplianceScoreToString(results.GetComplianceScore(), 2), scanInfo.ComplianceThreshold))
-	}
-
-	if err := enforceSeverityThresholds(&results.GetData().Report.SummaryDetails, scanInfo); err != nil {
+	if err := joinGateErrors(
+		enforceComplianceThreshold(results.GetComplianceScore(), scanInfo),
+		enforceSeverityThresholds(&results.GetData().Report.SummaryDetails, scanInfo),
+		enforceCombinedImageGates(results, scanInfo),
+	); err != nil {
 		return results, err
-	}
-	if scanInfo.ScanImages {
-		if err := enforceImageSeverityThresholds(results.ImageScanData, scanInfo); err != nil {
-			return results, err
-		}
 	}
 	if err := enforceCoverageThreshold(results.GetData().ScanCoverage, len(results.GetData().Report.SummaryDetails.Controls), scanInfo); err != nil {
 		return results, err
@@ -300,6 +295,12 @@ func enforceSeverityThresholds(summaryDetails *reportsummary.SummaryDetails, sca
 
 // validateFrameworkScanInfo validates the scan info struct for the `scan framework` command
 func validateFrameworkScanInfo(scanInfo *cautils.ScanInfo) error {
+	if scanInfo.View != "" {
+		if err := shared.ValidateView(scanInfo.View); err != nil {
+			return err
+		}
+		scanInfo.View = strings.ToLower(strings.TrimSpace(scanInfo.View))
+	}
 	if scanInfo.View == string(cautils.SecurityViewType) {
 		scanInfo.View = string(cautils.ResourceViewType)
 	}

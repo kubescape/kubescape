@@ -5,12 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
-	"os"
+	"strings"
 	"testing"
 
 	"github.com/kubescape/backend/pkg/versioncheck"
-	"github.com/kubescape/go-logger"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/meta"
 	metav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
@@ -126,19 +124,12 @@ func TestGetUpdateCmd_ReportsAvailableUpdate(t *testing.T) {
 	cmd := GetUpdateCmd(&stubKubescape{ctx: context.Background()})
 	require.NotNil(t, cmd)
 
-	r, w, err := os.Pipe()
-	require.NoError(t, err)
-	origStdout := os.Stdout
-	os.Stdout = w
-	t.Cleanup(func() { os.Stdout = origStdout })
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
 
 	assert.NoError(t, cmd.RunE(cmd, []string{}))
-	require.NoError(t, w.Close())
-	out, err := io.ReadAll(r)
-	require.NoError(t, err)
-
 	assert.Equal(t, "v3.1.0", versioncheck.LatestReleaseVersion)
-	assert.Contains(t, string(out), "Version v3.1.0 is available.")
+	assert.Contains(t, buf.String(), "Version v3.1.0 is available.")
 }
 
 func TestGetUpdateCmd_UnsupportedFormat(t *testing.T) {
@@ -163,23 +154,14 @@ func TestGetUpdateCmd_JSON_ReportsAvailableUpdate(t *testing.T) {
 	cmd := GetUpdateCmd(&stubKubescape{ctx: context.Background()})
 	require.NotNil(t, cmd)
 
-	err := cmd.Flags().Set("format", "json")
-	require.NoError(t, err)
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetArgs([]string{"--format", "json"})
 
-	r, w, err := os.Pipe()
-	require.NoError(t, err)
-	origStdout := os.Stdout
-	os.Stdout = w
-	t.Cleanup(func() { os.Stdout = origStdout })
-
-	assert.NoError(t, cmd.RunE(cmd, []string{}))
-	require.NoError(t, w.Close())
-	out, err := io.ReadAll(r)
-	require.NoError(t, err)
-
+	assert.NoError(t, cmd.Execute())
 	assert.Equal(t, "v3.1.0", versioncheck.LatestReleaseVersion)
-	assert.Contains(t, string(out), `"latestVersion":"v3.1.0"`)
-	assert.Contains(t, string(out), `"installationLink":"https://kubescape.io/docs/install-cli/"`)
+	assert.Contains(t, buf.String(), `"latestVersion":"v3.1.0"`)
+	assert.Contains(t, buf.String(), `"installationLink":"https://kubescape.io/docs/install-cli/"`)
 }
 
 func TestGetUpdateCmd_JSON_NothingToUpdate(t *testing.T) {
@@ -189,22 +171,13 @@ func TestGetUpdateCmd_JSON_NothingToUpdate(t *testing.T) {
 	cmd := GetUpdateCmd(&stubKubescape{ctx: context.Background()})
 	require.NotNil(t, cmd)
 
-	err := cmd.Flags().Set("format", "json")
-	require.NoError(t, err)
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetArgs([]string{"--format", "json"})
 
-	r, w, err := os.Pipe()
-	require.NoError(t, err)
-	origStdout := os.Stdout
-	os.Stdout = w
-	t.Cleanup(func() { os.Stdout = origStdout })
-
-	assert.NoError(t, cmd.RunE(cmd, []string{}))
-	require.NoError(t, w.Close())
-	out, err := io.ReadAll(r)
-	require.NoError(t, err)
-
+	assert.NoError(t, cmd.Execute())
 	assert.Equal(t, "v3.0.0", versioncheck.LatestReleaseVersion)
-	assert.Contains(t, string(out), `"message":"Nothing to update: you are running the latest version"`)
+	assert.Contains(t, buf.String(), `"message":"Nothing to update: you are running the latest version"`)
 }
 
 func TestUpdateCommandDoesNotHonorSkipUpdateCheckEnv(t *testing.T) {
@@ -238,19 +211,12 @@ func TestGetUpdateCmd_DevelopmentVersion(t *testing.T) {
 			cmd := GetUpdateCmd(&stubKubescape{ctx: context.Background()})
 			require.NotNil(t, cmd)
 
-			r, w, err := os.Pipe()
-			require.NoError(t, err)
-			origStdout := os.Stdout
-			os.Stdout = w
-			t.Cleanup(func() { os.Stdout = origStdout })
-
+			var buf bytes.Buffer
+			cmd.SetOut(&buf)
 			cmd.SetArgs([]string{"--format", "text"})
 			require.NoError(t, cmd.Execute())
-			require.NoError(t, w.Close())
-			out, err := io.ReadAll(r)
-			require.NoError(t, err)
 
-			assert.Contains(t, string(out), "Nothing to update: you are running the development version")
+			assert.Contains(t, buf.String(), "Nothing to update: you are running the development version")
 		})
 
 		t.Run("json_"+testName, func(t *testing.T) {
@@ -320,27 +286,12 @@ func TestGetUpdateCmd_Text_AlreadyUpToDate(t *testing.T) {
 	cmd := GetUpdateCmd(&stubKubescape{ctx: context.Background()})
 	require.NotNil(t, cmd)
 
-	r, w, err := os.Pipe()
-	require.NoError(t, err)
-	origWriter := logger.L().GetWriter()
-	logger.L().SetWriter(w)
-	origStdout := os.Stdout
-	os.Stdout = w
-	origStderr := os.Stderr
-	os.Stderr = w
-	t.Cleanup(func() {
-		logger.L().SetWriter(origWriter)
-		os.Stdout = origStdout
-		os.Stderr = origStderr
-	})
-
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
 	cmd.SetArgs([]string{"--format", "text"})
 	require.NoError(t, cmd.Execute())
-	require.NoError(t, w.Close())
-	out, err := io.ReadAll(r)
-	require.NoError(t, err)
 
-	assert.Contains(t, string(out), "Nothing to update: you are running the latest version")
+	assert.Contains(t, buf.String(), "Nothing to update: you are running the latest version")
 }
 
 func TestGetUpdateCmd_Text_NoNewerRelease(t *testing.T) {
@@ -350,27 +301,12 @@ func TestGetUpdateCmd_Text_NoNewerRelease(t *testing.T) {
 	cmd := GetUpdateCmd(&stubKubescape{ctx: context.Background()})
 	require.NotNil(t, cmd)
 
-	r, w, err := os.Pipe()
-	require.NoError(t, err)
-	origWriter := logger.L().GetWriter()
-	logger.L().SetWriter(w)
-	origStdout := os.Stdout
-	os.Stdout = w
-	origStderr := os.Stderr
-	os.Stderr = w
-	t.Cleanup(func() {
-		logger.L().SetWriter(origWriter)
-		os.Stdout = origStdout
-		os.Stderr = origStderr
-	})
-
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
 	cmd.SetArgs([]string{"--format", "text"})
 	require.NoError(t, cmd.Execute())
-	require.NoError(t, w.Close())
-	out, err := io.ReadAll(r)
-	require.NoError(t, err)
 
-	assert.Contains(t, string(out), "Nothing to update: you are running the latest version")
+	assert.Contains(t, buf.String(), "Nothing to update: you are running the latest version")
 }
 
 type failingUpdateWriter struct {
@@ -394,4 +330,60 @@ func TestGetUpdateCmd_JSON_WriterError(t *testing.T) {
 
 	err := cmd.Execute()
 	require.ErrorIs(t, err, writeErr)
+}
+
+func TestGetUpdateCmd_Text_WriterError(t *testing.T) {
+	writeErr := errors.New("cannot write output")
+
+	scenarios := []struct {
+		name     string
+		buildNum string
+		latest   string
+	}{
+		{"dev_build", "dev", ""},
+		{"already_up_to_date", "v3.0.0", "v3.0.0"},
+		{"update_available", "v3.0.0", "v3.1.0"},
+	}
+
+	for _, s := range scenarios {
+		t.Run(s.name, func(t *testing.T) {
+			withVersionCheckHandler(t, &stubVersionCheckHandler{latest: s.latest})
+			withVersionGlobals(t, s.buildNum, "")
+
+			cmd := GetUpdateCmd(&stubKubescape{ctx: context.Background()})
+			cmd.SilenceUsage = true
+			cmd.SilenceErrors = true
+			cmd.SetArgs([]string{"--format", "text"})
+			cmd.SetOut(failingUpdateWriter{err: writeErr})
+
+			err := cmd.Execute()
+			require.ErrorIs(t, err, writeErr)
+		})
+	}
+}
+
+func TestGetUpdateCmd_CaseInsensitiveFormat(t *testing.T) {
+	withVersionCheckHandler(t, versioncheck.NewVersionCheckHandlerMock())
+	withVersionGlobals(t, "v3.0.0", "")
+
+	formats := []string{"JSON", "Json", "TEXT", "Text", " json ", " text "}
+	for _, f := range formats {
+		t.Run("format_"+strings.TrimSpace(f), func(t *testing.T) {
+			cmd := GetUpdateCmd(&stubKubescape{ctx: context.Background()})
+			var buf bytes.Buffer
+			cmd.SetOut(&buf)
+			cmd.SetArgs([]string{"--format", f})
+			assert.NoError(t, cmd.Execute())
+		})
+	}
+}
+
+func TestGetUpdateCmd_RejectsUnexpectedArgs(t *testing.T) {
+	cmd := GetUpdateCmd(&stubKubescape{ctx: context.Background()})
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+	cmd.SetArgs([]string{"unexpected"})
+
+	err := cmd.Execute()
+	require.Error(t, err)
 }

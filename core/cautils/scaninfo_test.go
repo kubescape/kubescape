@@ -743,6 +743,8 @@ func TestScanInfoFormats(t *testing.T) {
 		{"whitespace around formats", " json , pdf ", []string{"json", "pdf"}},
 		{"duplicates preserved order", "json,pdf,json", []string{"json", "pdf"}},
 		{"duplicates with whitespace", "json, json ,pdf", []string{"json", "pdf"}},
+		{"uppercase formats", "JSON,PDF", []string{"json", "pdf"}},
+		{"mixed-case with whitespace", " Json , YAML ", []string{"json", "yaml"}},
 	}
 
 	for _, tc := range testCases {

@@ -1,6 +1,7 @@
 package cautils
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/kubescape/k8s-interface/cloudsupport"
@@ -8,8 +9,18 @@ import (
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 )
 
+// ComponentVulnAPIVersion is the group/version of the componentvulns package.
+const ComponentVulnAPIVersion = "componentvulns.kubescape.cloud/v1beta0"
+
 var (
-	ImageVulnResources  = []string{"ImageVulnerabilities"}
+	ImageVulnResources = []string{"ImageVulnerabilities"}
+	// ComponentVulnResources are the kinds built by the componentvulns
+	// package, served under ComponentVulnAPIVersion.
+	ComponentVulnResources = []string{
+		"APIServerVulnerabilities",
+		"KubeletVulnerabilities",
+		"ContainerRuntimeVulnerabilities",
+	}
 	HostSensorResources = []string{"KubeletConfiguration",
 		"KubeletCommandLine",
 		"OsReleaseFile",
@@ -50,6 +61,21 @@ func MapHostResources(externalResourceMap ExternalResources) []string {
 
 func MapImageVulnResources(externalResourceMap ExternalResources) []string {
 	return MapExternalResource(externalResourceMap, ImageVulnResources)
+}
+
+// MapComponentVulnResources matches the complete group/version/kind: a kind
+// or substring match would also pick up a foreign group serving the same kind,
+// or kinds such as OtherKubeletVulnerabilities.
+func MapComponentVulnResources(externalResourceMap ExternalResources) []string {
+	var resources []string
+	for k := range externalResourceMap {
+		kind, ok := strings.CutPrefix(k, ComponentVulnAPIVersion+"/")
+		if ok && slices.Contains(ComponentVulnResources, kind) {
+			resources = append(resources, k)
+		}
+	}
+	slices.Sort(resources)
+	return resources
 }
 
 func MapCloudResources(externalResourceMap ExternalResources) []string {

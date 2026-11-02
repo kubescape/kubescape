@@ -477,6 +477,26 @@ func TestGetImageCmd_RunE_RejectsPostureFlags(t *testing.T) {
 			scanInfo: cautils.ScanInfo{CustomRules: "/path/to/rules"},
 			wantErr:  "--custom-rules is not supported for image scans: an image scan evaluates vulnerabilities, not posture controls",
 		},
+		{
+			name:     "baseline is rejected",
+			scanInfo: cautils.ScanInfo{Baseline: "base.json"},
+			wantErr:  "--baseline is not supported for image scans: an image scan evaluates vulnerabilities, not posture baseline drift (use 'kubescape diff' to compare image scan reports)",
+		},
+		{
+			name:     "baseline-fail-on-new is rejected",
+			scanInfo: cautils.ScanInfo{BaselineFailOnNew: true},
+			wantErr:  "--baseline-fail-on-new is not supported for image scans: an image scan evaluates vulnerabilities, not posture baseline drift (use 'kubescape diff' to compare image scan reports)",
+		},
+		{
+			name:     "baseline-severity-threshold is rejected",
+			scanInfo: cautils.ScanInfo{BaselineSeverityThreshold: "high"},
+			wantErr:  "--baseline-severity-threshold is not supported for image scans: an image scan evaluates vulnerabilities, not posture baseline drift (use 'kubescape diff' to compare image scan reports)",
+		},
+		{
+			name:     "compliance-threshold is rejected",
+			scanInfo: cautils.ScanInfo{ComplianceThreshold: 80},
+			wantErr:  "--compliance-threshold is not supported for image scans: an image scan evaluates vulnerabilities, not posture compliance scores (use --severity-threshold instead)",
+		},
 	}
 
 	for _, tc := range testCases {
@@ -520,6 +540,26 @@ func TestGetScanCommand_RejectsPostureFlagsOnImageScan(t *testing.T) {
 			args:    []string{"image", "--custom-rules", "./rules", "nginx:1.27"},
 			wantErr: "--custom-rules is not supported for image scans: an image scan evaluates vulnerabilities, not posture controls",
 		},
+		{
+			name:    "baseline flag",
+			args:    []string{"image", "--baseline", "base.json", "nginx:1.27"},
+			wantErr: "--baseline is not supported for image scans: an image scan evaluates vulnerabilities, not posture baseline drift (use 'kubescape diff' to compare image scan reports)",
+		},
+		{
+			name:    "baseline-fail-on-new flag",
+			args:    []string{"image", "--baseline-fail-on-new", "nginx:1.27"},
+			wantErr: "--baseline-fail-on-new is not supported for image scans: an image scan evaluates vulnerabilities, not posture baseline drift (use 'kubescape diff' to compare image scan reports)",
+		},
+		{
+			name:    "baseline-severity-threshold flag",
+			args:    []string{"image", "--baseline-severity-threshold", "high", "nginx:1.27"},
+			wantErr: "--baseline-severity-threshold is not supported for image scans: an image scan evaluates vulnerabilities, not posture baseline drift (use 'kubescape diff' to compare image scan reports)",
+		},
+		{
+			name:    "compliance-threshold flag",
+			args:    []string{"image", "--compliance-threshold", "80", "nginx:1.27"},
+			wantErr: "--compliance-threshold is not supported for image scans: an image scan evaluates vulnerabilities, not posture compliance scores (use --severity-threshold instead)",
+		},
 	}
 
 	for _, tc := range testCases {
@@ -533,4 +573,22 @@ func TestGetScanCommand_RejectsPostureFlagsOnImageScan(t *testing.T) {
 			assert.Nil(t, mockKubescape.imgScanInfo, "image scanner must not be invoked when posture flags are passed")
 		})
 	}
+}
+
+func TestGetImageCmd_RunE_RejectsViewFlag(t *testing.T) {
+	mockKubescape := &imageScanCaptureKubescape{}
+	scanInfo := cautils.ScanInfo{}
+
+	cmd := getImageCmd(mockKubescape, &scanInfo)
+	parentCmd := &cobra.Command{Use: "scan"}
+	parentCmd.PersistentFlags().StringVarP(&scanInfo.Format, "format", "f", "pretty-printer", "")
+	parentCmd.PersistentFlags().StringVar(&scanInfo.View, "view", "security", "")
+	parentCmd.AddCommand(cmd)
+
+	err := parentCmd.ParseFlags([]string{"--view", "resource"})
+	require.NoError(t, err)
+
+	err = cmd.RunE(cmd, []string{"nginx:1.27"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "--view is not supported for image scans: an image scan evaluates vulnerabilities, not posture views")
 }
