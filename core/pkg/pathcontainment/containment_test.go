@@ -14,7 +14,10 @@ import (
 func skipOnWindowsSymlink(t *testing.T) {
 	t.Helper()
 	if runtime.GOOS == "windows" {
-		t.Skip("symlink tests require SeCreateSymbolicLinkPrivilege on Windows")
+		probe := filepath.Join(t.TempDir(), "probe")
+		if err := os.Symlink(t.TempDir(), probe); err != nil {
+			t.Skip("symlink tests require SeCreateSymbolicLinkPrivilege on Windows")
+		}
 	}
 }
 
@@ -115,6 +118,17 @@ func TestResolveContainedPath_TableDriven(t *testing.T) {
 			},
 		},
 		{
+			name:      "valid multi-level missing tail subpath",
+			baseDir:   base,
+			target:    "manifests/nested/new/service.yaml",
+			expectErr: false,
+			checkResolved: func(t *testing.T, res string) {
+				canonManifests, err := filepath.EvalSymlinks(manifestsDir)
+				require.NoError(t, err)
+				assert.Equal(t, filepath.Join(canonManifests, "nested", "new", "service.yaml"), res)
+			},
+		},
+		{
 			name:          "directory traversal with parent references escapes workspace",
 			baseDir:       base,
 			target:        "../../etc/shadow",
@@ -167,10 +181,15 @@ func TestResolveContainedPath_Symlinks(t *testing.T) {
 	outside := t.TempDir()
 
 	// 1. Symlink inside base pointing outside base
-	outsideTarget := filepath.Join(outside, "victim.yaml")
+	outsideDir := filepath.Join(outside, "dir")
+	require.NoError(t, os.Mkdir(outsideDir, 0o750))
+	outsideTarget := filepath.Join(outsideDir, "victim.yaml")
 	require.NoError(t, os.WriteFile(outsideTarget, []byte("sensitive data"), 0o600))
+	outsideSecret := filepath.Join(outside, "secret.yaml")
+	require.NoError(t, os.WriteFile(outsideSecret, []byte("super secret"), 0o600))
+
 	outsideSymlink := filepath.Join(base, "symlink-outside")
-	require.NoError(t, os.Symlink(outside, outsideSymlink))
+	require.NoError(t, os.Symlink(outsideDir, outsideSymlink))
 
 	t.Run("symlink inside base pointing outside is rejected", func(t *testing.T) {
 		target := filepath.Join(outsideSymlink, "victim.yaml")
@@ -185,11 +204,37 @@ func TestResolveContainedPath_Symlinks(t *testing.T) {
 		assert.True(t, errors.Is(err, ErrPathEscapesWorkspace), "expected ErrPathEscapesWorkspace, got %v", err)
 	})
 
+	// Regression cases for matthyx review: symlink/.. traversal
+	t.Run("relative symlink parent traversal escaping workspace is rejected", func(t *testing.T) {
+		// symlink-outside -> outside/dir, so symlink-outside/../secret.yaml
+		// physically resolves to outside/secret.yaml.
+		// Lexical clean would incorrectly collapse it to secret.yaml inside base.
+		_, err := ResolveContainedPath(base, "symlink-outside/../secret.yaml")
+		require.Error(t, err)
+		assert.True(t, errors.Is(err, ErrPathEscapesWorkspace), "expected ErrPathEscapesWorkspace, got %v", err)
+	})
+
+	t.Run("absolute symlink parent traversal escaping workspace is rejected", func(t *testing.T) {
+		absPath := filepath.Join(base, "symlink-outside") + string(filepath.Separator) + ".." + string(filepath.Separator) + "secret.yaml"
+		_, err := ResolveContainedPath(base, absPath)
+		require.Error(t, err)
+		assert.True(t, errors.Is(err, ErrPathEscapesWorkspace), "expected ErrPathEscapesWorkspace, got %v", err)
+	})
+
+	t.Run("symlink parent traversal with missing tail escaping workspace is rejected", func(t *testing.T) {
+		_, err := ResolveContainedPath(base, "symlink-outside/../missing.yaml")
+		require.Error(t, err)
+		assert.True(t, errors.Is(err, ErrPathEscapesWorkspace), "expected ErrPathEscapesWorkspace, got %v", err)
+	})
+
 	// 2. Symlink inside base pointing back inside base
-	internalDir := filepath.Join(base, "internal")
-	require.NoError(t, os.Mkdir(internalDir, 0o750))
+	internalParent := filepath.Join(base, "internal")
+	internalDir := filepath.Join(internalParent, "sub")
+	require.NoError(t, os.MkdirAll(internalDir, 0o750))
 	internalFile := filepath.Join(internalDir, "app.yaml")
 	require.NoError(t, os.WriteFile(internalFile, []byte("kind: Pod"), 0o600))
+	parentFile := filepath.Join(internalParent, "parent.yaml")
+	require.NoError(t, os.WriteFile(parentFile, []byte("kind: Parent"), 0o600))
 
 	insideSymlink := filepath.Join(base, "symlink-inside")
 	require.NoError(t, os.Symlink(internalDir, insideSymlink))
@@ -200,6 +245,17 @@ func TestResolveContainedPath_Symlinks(t *testing.T) {
 		canonInternal, err := filepath.EvalSymlinks(internalFile)
 		require.NoError(t, err)
 		assert.Equal(t, canonInternal, resolved)
+	})
+
+	t.Run("internal symlink parent traversal resolves to physical parent manifest", func(t *testing.T) {
+		// symlink-inside -> internal/sub
+		// symlink-inside/../parent.yaml should resolve to internal/parent.yaml
+		// (not base/parent.yaml as lexical clean would do)
+		resolved, err := ResolveContainedPath(base, "symlink-inside/../parent.yaml")
+		require.NoError(t, err)
+		canonParent, err := filepath.EvalSymlinks(parentFile)
+		require.NoError(t, err)
+		assert.Equal(t, canonParent, resolved)
 	})
 
 	// 3. Dangling symlink

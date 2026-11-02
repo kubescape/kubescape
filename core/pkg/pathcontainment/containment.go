@@ -18,8 +18,10 @@ var (
 )
 
 // ResolveContainedPath validates and canonicalizes target relative to baseDir.
-// It ensures that target resolves within baseDir, resolving symbolic links and
-// walking existing ancestors if parts of the tail do not yet exist on disk.
+// It ensures that target resolves within baseDir, resolving symbolic links component
+// by component to preserve filesystem semantics before evaluating parent ("..") segments.
+// If intermediate components or the leaf do not exist on disk, it preserves the non-existent
+// tail while asserting containment of the resolved path.
 //
 // Behavior:
 //   - If baseDir is empty (""), unconstrained mode is assumed and filepath.Clean(target) is returned.
@@ -28,7 +30,7 @@ var (
 //   - If target resolves outside baseDir (including via directory traversal or symlinks),
 //     ErrPathEscapesWorkspace is returned.
 //
-// On success, the canonical, absolute path to target is returned.
+// On success with a non-empty baseDir, the canonical, absolute path to target is returned.
 func ResolveContainedPath(baseDir, target string) (string, error) {
 	if target == "" || strings.ContainsRune(target, 0) {
 		return "", ErrInvalidPath
@@ -59,24 +61,17 @@ func ResolveContainedPath(baseDir, target string) (string, error) {
 		return "", fmt.Errorf("baseDir %q is not a directory", baseDir)
 	}
 
-	// Normalize target against canonicalBase
-	var fullTarget string
-	if filepath.IsAbs(target) {
-		fullTarget = filepath.Clean(target)
-	} else {
-		fullTarget = filepath.Join(canonicalBase, target)
-	}
-
-	// Canonicalize target (including symlink resolution and missing tail handling)
-	resolvedTarget, err := resolveSymlinksWithMissingTail(fullTarget)
+	// Resolve target component by component to ensure symlinks are evaluated
+	// before any parent ("..") directory traversal occurs.
+	resolvedTarget, err := resolveComponentsPreservingSymlinks(canonicalBase, target)
 	if err != nil {
-		return "", fmt.Errorf("failed to resolve path %q: %w", target, err)
+		return "", err
 	}
 
 	// Verify containment
 	rel, err := filepath.Rel(canonicalBase, resolvedTarget)
 	if err != nil {
-		return "", fmt.Errorf("failed to calculate relative path: %w", err)
+		return "", fmt.Errorf("%w: failed to calculate relative path between baseDir %q and target %q: %v", ErrPathEscapesWorkspace, canonicalBase, resolvedTarget, err)
 	}
 	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return "", fmt.Errorf("%w: target %q resolves to %q outside baseDir %q", ErrPathEscapesWorkspace, target, resolvedTarget, canonicalBase)
@@ -85,43 +80,72 @@ func ResolveContainedPath(baseDir, target string) (string, error) {
 	return resolvedTarget, nil
 }
 
-// resolveSymlinksWithMissingTail resolves symbolic links in path. If leaf components
-// or subdirectories do not exist yet on disk, it finds the deepest existing ancestor,
-// resolves its symbolic links, and appends the non-existent tail.
-// If an existing component is a broken or dangling symlink, an error is returned.
-func resolveSymlinksWithMissingTail(path string) (string, error) {
-	resolved, err := filepath.EvalSymlinks(path)
-	if err == nil {
-		return resolved, nil
-	}
-	if !errors.Is(err, fs.ErrNotExist) && !os.IsNotExist(err) {
-		return "", err
+// resolveComponentsPreservingSymlinks walks target component by component.
+// Symlinks are evaluated immediately as they are encountered, so that ".." operates
+// on the actual filesystem parent of the resolved directory rather than being
+// lexically collapsed.
+func resolveComponentsPreservingSymlinks(canonicalBase, target string) (string, error) {
+	vol := filepath.VolumeName(target)
+	var cur string
+	var rest string
+
+	if filepath.IsAbs(target) {
+		cur = filepath.Clean(vol + string(filepath.Separator))
+		rest = target[len(vol):]
+	} else {
+		cur = canonicalBase
+		rest = target
 	}
 
-	cur := path
-	var missingParts []string
-	for {
-		_, lstatErr := os.Lstat(cur)
-		if lstatErr == nil {
-			// cur exists. If it is a symlink, EvalSymlinks must resolve;
-			// if EvalSymlinks fails on an existing symlink, it is dangling.
-			resolvedCur, evalErr := filepath.EvalSymlinks(cur)
-			if evalErr != nil {
-				return "", fmt.Errorf("failed to resolve symlink %q: %w", cur, evalErr)
+	parts := strings.FieldsFunc(rest, func(r rune) bool {
+		return r == '/' || r == '\\'
+	})
+
+	var missingTail []string
+
+	for _, seg := range parts {
+		if seg == "" || seg == "." {
+			continue
+		}
+
+		if seg == ".." {
+			if len(missingTail) > 0 {
+				missingTail = missingTail[:len(missingTail)-1]
+			} else {
+				cur = filepath.Dir(cur)
 			}
-			all := append([]string{resolvedCur}, missingParts...)
-			return filepath.Join(all...), nil
-		} else if !errors.Is(lstatErr, fs.ErrNotExist) && !os.IsNotExist(lstatErr) {
-			return "", lstatErr
+			continue
 		}
 
-		parent := filepath.Dir(cur)
-		if parent == cur {
-			return "", err
+		if len(missingTail) > 0 {
+			missingTail = append(missingTail, seg)
+			continue
 		}
-		missingParts = append([]string{filepath.Base(cur)}, missingParts...)
-		cur = parent
+
+		next := filepath.Join(cur, seg)
+		fi, lstatErr := os.Lstat(next)
+		if lstatErr == nil {
+			if fi.Mode()&os.ModeSymlink != 0 {
+				resolvedSymlink, evalErr := filepath.EvalSymlinks(next)
+				if evalErr != nil {
+					return "", fmt.Errorf("failed to resolve symlink %q: %w", next, evalErr)
+				}
+				cur = resolvedSymlink
+			} else {
+				cur = next
+			}
+		} else if errors.Is(lstatErr, fs.ErrNotExist) || os.IsNotExist(lstatErr) {
+			missingTail = append(missingTail, seg)
+		} else {
+			return "", fmt.Errorf("failed to stat path %q: %w", next, lstatErr)
+		}
 	}
+
+	if len(missingTail) > 0 {
+		all := append([]string{cur}, missingTail...)
+		return filepath.Join(all...), nil
+	}
+	return cur, nil
 }
 
 // IsPathContained reports whether target resolves to a path inside base,
