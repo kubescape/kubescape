@@ -53,6 +53,7 @@ func GetPatchCmd(ks meta.IKubescape) *cobra.Command {
 				if err := shared.ValidateScanFormat(scanInfo.Format, shared.ImageScanFormats); err != nil {
 					return err
 				}
+				scanInfo.Format = shared.NormalizeScanFormats(scanInfo.Format)
 			}
 			if err := shared.ValidateImageScanInfo(&scanInfo); err != nil {
 				return err

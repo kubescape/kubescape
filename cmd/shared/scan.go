@@ -104,13 +104,13 @@ func severityOrdinal(severity string) int {
 func ValidateScanFormat(format string, supported []string) error {
 	var entries int
 	for f := range strings.SplitSeq(format, ",") {
-		f = strings.TrimSpace(f)
-		if f == "" {
+		raw := strings.TrimSpace(f)
+		if raw == "" {
 			continue
 		}
 		entries++
-		if !slices.Contains(supported, f) {
-			return fmt.Errorf("invalid format %q, supported formats: %s", f, strings.Join(supported, ", "))
+		if !slices.Contains(supported, strings.ToLower(raw)) {
+			return fmt.Errorf("invalid format %q, supported formats: %s", raw, strings.Join(supported, ", "))
 		}
 	}
 	// Reject separator/whitespace-only input (e.g. "," or " ") that resolves to no format.
@@ -119,6 +119,17 @@ func ValidateScanFormat(format string, supported []string) error {
 		return fmt.Errorf("invalid format %q, supported formats: %s", format, strings.Join(supported, ", "))
 	}
 	return nil
+}
+
+// NormalizeScanFormats converts a comma-separated format string into a trimmed, lowercased, comma-separated string without empty entries.
+func NormalizeScanFormats(format string) string {
+	var entries []string
+	for f := range strings.SplitSeq(format, ",") {
+		if trimmed := strings.ToLower(strings.TrimSpace(f)); trimmed != "" {
+			entries = append(entries, trimmed)
+		}
+	}
+	return strings.Join(entries, ",")
 }
 
 // ValidateView returns an error if view is not one of the supported views.
@@ -171,6 +182,9 @@ func ValidateCommonScanFlags(cmd *cobra.Command, scanInfo *cautils.ScanInfo, sup
 	}
 	if err := ValidateScanFormat(scanInfo.Format, supportedFormats); err != nil {
 		return err
+	}
+	if scanInfo.Format != "" {
+		scanInfo.Format = NormalizeScanFormats(scanInfo.Format)
 	}
 	fView := cmd.Flags().Lookup("view")
 	if fView == nil {

@@ -32,6 +32,9 @@ func TestValidateScanFormat(t *testing.T) {
 		{"junit format is now supported for image scanning", "junit", ScanFormats, false},
 		{"junit is supported for image scanning", "junit", ImageScanFormats, false},
 		{"csv is not supported for image scanning", "csv", ImageScanFormats, true},
+		{"uppercase single format is accepted", "JSON", ScanFormats, false},
+		{"mixed-case comma-separated formats with whitespace", " JSON , Yaml,SARIF ", ScanFormats, false},
+		{"uppercase invalid format is rejected", "XML", ScanFormats, true},
 	}
 
 	for _, testCase := range testCases {
@@ -44,6 +47,28 @@ func TestValidateScanFormat(t *testing.T) {
 			} else if err != nil {
 				t.Errorf("expected no error for format %q, got: %v", testCase.Format, err)
 			}
+		})
+	}
+}
+
+func TestNormalizeScanFormats(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"empty string", "", ""},
+		{"whitespace only", "   ", ""},
+		{"single lowercase", "json", "json"},
+		{"single uppercase", "JSON", "json"},
+		{"padded uppercase", " YAML ", "yaml"},
+		{"mixed comma-separated with padding", " JSON , Yaml,SARIF ", "json,yaml,sarif"},
+		{"drops empty tokens", "json,,html, ", "json,html"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := NormalizeScanFormats(tt.input)
+			assert.Equal(t, tt.want, got)
 		})
 	}
 }
