@@ -2,6 +2,8 @@ package getter
 
 import (
 	"context"
+	stdjson "encoding/json"
+	"maps"
 	"regexp"
 	"slices"
 	"strings"
@@ -12,8 +14,6 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 )
 
-const exceptionKeySeparator = "/"
-
 var _ IExceptionsGetter = &MergedExceptionsGetter{}
 
 // MergedExceptionsGetter combines exceptions from a primary source and a secondary source.
@@ -23,10 +23,14 @@ type MergedExceptionsGetter struct {
 	secondary IExceptionsGetter
 }
 
+// NewMergedExceptionsGetter combines primary policies with optional CRD policies,
+// preserving primary precedence wherever their matching scopes overlap.
 func NewMergedExceptionsGetter(primary, secondary IExceptionsGetter) *MergedExceptionsGetter {
 	return &MergedExceptionsGetter{primary: primary, secondary: secondary}
 }
 
+// GetExceptions loads policies and resets primary provenance before merging CRDs.
+// It preserves caller-owned policies and tolerates non-context secondary errors.
 func (g *MergedExceptionsGetter) GetExceptions(ctx context.Context, clusterName string) ([]armotypes.PostureExceptionPolicy, error) {
 	if g == nil || g.primary == nil {
 		return []armotypes.PostureExceptionPolicy{}, nil
@@ -35,6 +39,17 @@ func (g *MergedExceptionsGetter) GetExceptions(ctx context.Context, clusterName 
 	exceptions, err := g.primary.GetExceptions(ctx, clusterName)
 	if err != nil {
 		return nil, err
+	}
+
+	// Reloaded policies belong to the primary source, even if a saved report
+	// marked them as secondary. Normalize before every secondary-source path,
+	// copying the slice and changed maps so reusable getter results stay intact.
+	exceptions = slices.Clone(exceptions)
+	for i := range exceptions {
+		if _, marked := exceptions[i].Attributes[secondaryExceptionSourceAttribute]; marked {
+			exceptions[i].Attributes = maps.Clone(exceptions[i].Attributes)
+			delete(exceptions[i].Attributes, secondaryExceptionSourceAttribute)
+		}
 	}
 
 	if g.secondary == nil {
@@ -84,7 +99,9 @@ func (g *MergedExceptionsGetter) ConsumedFileDigest() (path, digest string, ok b
 // deduplicateExceptions enforces the design review's precedence rule: cloud/file
 // (primary) exceptions are added first, and a CRD exception is appended only for the
 // control+workload designators not already covered by a primary exception. Partial
-// overlaps keep the non-overlapping designators of the CRD exception.
+// overlaps keep the non-overlapping designators of the CRD exception. Remaining
+// overlaps (including regex API groups) are resolved by FilterMatchedExceptions
+// after workload matching; a broader CRD must retain its non-overlapping scope.
 func deduplicateExceptions(
 	cloudExceptions []armotypes.PostureExceptionPolicy,
 	crdExceptions []armotypes.PostureExceptionPolicy,
@@ -103,6 +120,13 @@ func deduplicateExceptions(
 	matcher := newScopeMatcher()
 
 	for _, crd := range crdExceptions {
+		// Preserve the source boundary for precedence after workload matching.
+		// Copy the map: callers may reuse their original policies on another scan.
+		crd.Attributes = maps.Clone(crd.Attributes)
+		if crd.Attributes == nil {
+			crd.Attributes = make(map[string]any)
+		}
+		crd.Attributes[secondaryExceptionSourceAttribute] = true
 		// Exceptions without resolvable control+workload keys can't be deduped; keep them.
 		if len(crd.Resources) == 0 || len(crd.PosturePolicies) == 0 {
 			merged = append(merged, crd)
@@ -120,9 +144,20 @@ func deduplicateExceptions(
 			}
 			filteredResources := make([]identifiers.PortalDesignator, 0, len(crd.Resources))
 			for _, resource := range crd.Resources {
-				if !matcher.coveredBy(covered[designatorDedupKey(resource)], policy) {
-					filteredResources = append(filteredResources, resource)
+				if matcher.coveredBy(covered[designatorDedupKey(resource)], policy) {
+					continue
 				}
+				// A primary that omits apiGroup covers both core and named groups.
+				// The reverse would discard resources outside the primary's group.
+				if _, hasAPIGroup := resource.Attributes[identifiers.AttributeApiGroup]; hasAPIGroup {
+					unscoped := resource
+					unscoped.Attributes = maps.Clone(resource.Attributes)
+					delete(unscoped.Attributes, identifiers.AttributeApiGroup)
+					if matcher.coveredBy(covered[designatorDedupKey(unscoped)], policy) {
+						continue
+					}
+				}
+				filteredResources = append(filteredResources, resource)
 			}
 			if len(filteredResources) == 0 {
 				continue
@@ -148,6 +183,11 @@ func deduplicateExceptions(
 func coveredPostureScopes(exceptions []armotypes.PostureExceptionPolicy) (covered map[string][]armotypes.PosturePolicy, global []armotypes.PosturePolicy) {
 	covered = make(map[string][]armotypes.PosturePolicy, len(exceptions))
 	for _, exception := range exceptions {
+		// These constraints must be evaluated at scan time. Removing a CRD here
+		// could discard its scope outside the selector or after primary expiry.
+		if exception.ObjectSelector != nil || exception.ExpirationDate != nil {
+			continue
+		}
 		for _, policy := range exception.PosturePolicies {
 			if policy.ControlID == "" {
 				continue
@@ -217,15 +257,12 @@ func (m *scopeMatcher) covers(primary, crd string) bool {
 	return pattern != nil && pattern.MatchString(crd)
 }
 
+// designatorDedupKey identifies the entire resource constraint. JSON preserves
+// API-group presence and all other attributes (including labels and cluster),
+// so static deduplication cannot discard a CRD's broader workload scope.
 func designatorDedupKey(designator identifiers.PortalDesignator) string {
-	apiGroup := ""
-	if designator.Attributes != nil {
-		apiGroup = designator.Attributes[identifiers.AttributeApiGroup]
-	}
-	return strings.Join([]string{
-		designator.GetNamespace(),
-		designator.GetName(),
-		designator.GetKind(),
-		apiGroup,
-	}, exceptionKeySeparator)
+	// PortalDesignator contains only strings and a string map, so marshaling
+	// cannot fail and map keys are ordered deterministically.
+	key, _ := stdjson.Marshal(designator)
+	return string(key)
 }

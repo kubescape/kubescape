@@ -14,6 +14,7 @@ import (
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/cautils/getter"
 	"github.com/kubescape/opa-utils/exceptions"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/reporthandling"
@@ -75,6 +76,21 @@ func (opap *OPAProcessor) updateResults(ctx context.Context) {
 				opap.AllPolicies.Controls, // update status depending on action required
 				resourcesresults.WithExceptionsProcessor(processor),
 			)
+			// Resolve source precedence only after the full workload matcher has
+			// identified the overlap. This leaves broader CRDs effective on other
+			// resources and prevents shadowed matches reaching summaries/audit/events.
+			for ci := range t.AssociatedControls {
+				control := &t.AssociatedControls[ci]
+				hasMatches := false
+				for ri := range control.ResourceAssociatedRules {
+					rule := &control.ResourceAssociatedRules[ri]
+					hasMatches = hasMatches || len(rule.Exception) > 0
+					rule.Exception = getter.FilterMatchedExceptions(rule.Exception)
+				}
+				if hasMatches {
+					control.SetStatus(opap.AllPolicies.Controls[control.GetID()])
+				}
+			}
 			opap.emitExceptionMatchEvents(resource, t)
 		}
 
