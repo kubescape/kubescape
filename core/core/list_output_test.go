@@ -222,8 +222,12 @@ func TestPrintListResult_CustomWriter(t *testing.T) {
 		for _, format := range formats {
 			t.Run(target+"_"+format, func(t *testing.T) {
 				var buf bytes.Buffer
-				err := PrintListResult(context.Background(), result, target, format, &buf)
+				var err error
+				stdout := captureStdout(t, func() {
+					err = PrintListResult(context.Background(), result, target, format, &buf)
+				})
 				require.NoError(t, err)
+				assert.Empty(t, stdout, "output must not be written to stdout when a writer is supplied")
 				assert.NotEmpty(t, buf.String())
 
 				switch target {

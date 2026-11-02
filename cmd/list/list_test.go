@@ -448,7 +448,7 @@ func TestGetListCmd_PropagatesWriterError(t *testing.T) {
 
 	writeErr := errors.New("simulated output write failure")
 
-	formats := []string{"json", "yaml", "csv"}
+	formats := []string{"pretty-print", "json", "yaml", "csv"}
 	targets := []string{"frameworks", "controls", "controls-config"}
 
 	for _, target := range targets {

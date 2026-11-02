@@ -95,7 +95,7 @@ func PrintListResult(ctx context.Context, result *metav1.ListResult, target, for
 	case "controls":
 		switch format {
 		case "pretty-print":
-			prettyPrintControls(ctx, result.Controls, w)
+			return prettyPrintControls(ctx, result.Controls, w)
 		case "json":
 			return jsonControlsFormat(result.Controls, w)
 		case "yaml":
@@ -108,7 +108,7 @@ func PrintListResult(ctx context.Context, result *metav1.ListResult, target, for
 	case "controls-config":
 		switch format {
 		case "pretty-print":
-			prettyPrintControlsConfig(ctx, result.ControlsConfig, w)
+			return prettyPrintControlsConfig(ctx, result.ControlsConfig, w)
 		case "json":
 			return jsonControlsConfigFormat(result.ControlsConfig, w)
 		case "yaml":
@@ -127,14 +127,24 @@ func PrintListResult(ctx context.Context, result *metav1.ListResult, target, for
 	default:
 		return fmt.Errorf("invalid target %q, supported targets: 'controls'/'controls-config'/'frameworks'/'exceptions'", target)
 	}
-	return nil
 }
 
+// resolveWriter returns the first non-nil writer or defaults to os.Stdout.
 func resolveWriter(writers ...io.Writer) io.Writer {
 	if len(writers) > 0 && writers[0] != nil {
 		return writers[0]
 	}
 	return os.Stdout
+}
+
+// renderTable renders a table and writes its content to w, returning any write error.
+func renderTable(tbl table.Writer, w io.Writer) error {
+	outStr := tbl.Render()
+	if len(outStr) > 0 {
+		_, err := fmt.Fprintln(w, outStr)
+		return err
+	}
+	return nil
 }
 func naturalSortPolicies(policies []string) []string {
 	sort.Slice(policies, func(i, j int) bool {
@@ -330,12 +340,12 @@ func shouldColor(w io.Writer) bool {
 	return true
 }
 
+// prettyPrintListFormat renders policy names as a formatted table to the destination writer.
 func prettyPrintListFormat(ctx context.Context, targetPolicy string, policies []string, writers ...io.Writer) error {
 	w := resolveWriter(writers...)
 	colored := shouldColor(w)
 
 	policyTable := table.NewWriter()
-	policyTable.SetOutputMirror(w)
 
 	header := fmt.Sprintf("Supported %s", targetPolicy)
 	headerRow := table.Row{header}
@@ -351,10 +361,10 @@ func prettyPrintListFormat(ctx context.Context, targetPolicy string, policies []
 	policyTable.Style().Box = table.StyleBoxRounded
 
 	policyTable.AppendRows(generatePolicyRows(policies, colored))
-	policyTable.Render()
-	return nil
+	return renderTable(policyTable, w)
 }
 
+// jsonListFormat serializes policy names as formatted JSON to the destination writer.
 func jsonListFormat(_ context.Context, _ string, policies []string, writers ...io.Writer) error {
 	j, err := json.MarshalIndent(policies, "", "  ")
 	if err != nil {
@@ -366,6 +376,7 @@ func jsonListFormat(_ context.Context, _ string, policies []string, writers ...i
 	return err
 }
 
+// jsonControlsFormat serializes control entries as formatted JSON to the destination writer.
 func jsonControlsFormat(entries []metav1.ControlListEntry, writers ...io.Writer) error {
 	j, err := json.MarshalIndent(entries, "", "  ")
 	if err != nil {
@@ -377,6 +388,7 @@ func jsonControlsFormat(entries []metav1.ControlListEntry, writers ...io.Writer)
 	return err
 }
 
+// yamlListFormat serializes policy names as YAML to the destination writer.
 func yamlListFormat(_ context.Context, _ string, policies []string, writers ...io.Writer) error {
 	y, err := yaml.Marshal(policies)
 	if err != nil {
@@ -388,6 +400,7 @@ func yamlListFormat(_ context.Context, _ string, policies []string, writers ...i
 	return err
 }
 
+// yamlControlsFormat serializes control entries as YAML to the destination writer.
 func yamlControlsFormat(entries []metav1.ControlListEntry, writers ...io.Writer) error {
 	y, err := yaml.Marshal(entries)
 	if err != nil {
@@ -427,6 +440,7 @@ func csvSafeRow(row []string) []string {
 	return row
 }
 
+// csvListFormat formats and writes policy names as CSV to the destination writer.
 func csvListFormat(_ context.Context, _ string, policies []string, writers ...io.Writer) error {
 	w := resolveWriter(writers...)
 	writer := csv.NewWriter(w)
@@ -442,6 +456,7 @@ func csvListFormat(_ context.Context, _ string, policies []string, writers ...io
 	return writer.Error()
 }
 
+// csvControlsFormat formats and writes control entries as CSV to the destination writer.
 func csvControlsFormat(entries []metav1.ControlListEntry, writers ...io.Writer) error {
 	w := resolveWriter(writers...)
 	writer := csv.NewWriter(w)
@@ -458,12 +473,12 @@ func csvControlsFormat(entries []metav1.ControlListEntry, writers ...io.Writer) 
 	return writer.Error()
 }
 
-func prettyPrintControls(ctx context.Context, entries []metav1.ControlListEntry, writers ...io.Writer) {
+// prettyPrintControls renders control entries as a formatted table to the destination writer.
+func prettyPrintControls(ctx context.Context, entries []metav1.ControlListEntry, writers ...io.Writer) error {
 	w := resolveWriter(writers...)
 	colored := shouldColor(w)
 
 	controlsTable := table.NewWriter()
-	controlsTable.SetOutputMirror(w)
 
 	controlsTable.Style().Options.SeparateHeader = true
 	controlsTable.Style().Options.SeparateRows = true
@@ -496,7 +511,7 @@ func prettyPrintControls(ctx context.Context, entries []metav1.ControlListEntry,
 	}
 
 	controlsTable.AppendRows(controlRows)
-	controlsTable.Render()
+	return renderTable(controlsTable, w)
 }
 
 func generateControlRows(entries []metav1.ControlListEntry, colored ...bool) []table.Row {
@@ -678,6 +693,7 @@ func sortedKeys(set map[string]struct{}) []string {
 	return keys
 }
 
+// jsonControlsConfigFormat serializes control configuration entries as formatted JSON to the destination writer.
 func jsonControlsConfigFormat(entries []metav1.ControlConfigEntry, writers ...io.Writer) error {
 	j, err := json.MarshalIndent(entries, "", "  ")
 	if err != nil {
@@ -689,6 +705,7 @@ func jsonControlsConfigFormat(entries []metav1.ControlConfigEntry, writers ...io
 	return err
 }
 
+// yamlControlsConfigFormat serializes control configuration entries as YAML to the destination writer.
 func yamlControlsConfigFormat(entries []metav1.ControlConfigEntry, writers ...io.Writer) error {
 	y, err := yaml.Marshal(entries)
 	if err != nil {
@@ -700,6 +717,7 @@ func yamlControlsConfigFormat(entries []metav1.ControlConfigEntry, writers ...io
 	return err
 }
 
+// csvControlsConfigFormat formats and writes control configuration entries as CSV to the destination writer.
 func csvControlsConfigFormat(entries []metav1.ControlConfigEntry, writers ...io.Writer) error {
 	w := resolveWriter(writers...)
 	writer := csv.NewWriter(w)
@@ -721,12 +739,12 @@ func csvControlsConfigFormat(entries []metav1.ControlConfigEntry, writers ...io.
 	return writer.Error()
 }
 
-func prettyPrintControlsConfig(ctx context.Context, entries []metav1.ControlConfigEntry, writers ...io.Writer) {
+// prettyPrintControlsConfig renders control configuration entries as a formatted table to the destination writer.
+func prettyPrintControlsConfig(ctx context.Context, entries []metav1.ControlConfigEntry, writers ...io.Writer) error {
 	w := resolveWriter(writers...)
 	colored := shouldColor(w)
 
 	configTable := table.NewWriter()
-	configTable.SetOutputMirror(w)
 
 	configTable.Style().Options.SeparateHeader = true
 	configTable.Style().Options.SeparateRows = true
@@ -767,5 +785,5 @@ func prettyPrintControlsConfig(ctx context.Context, entries []metav1.ControlConf
 	}
 	configTable.AppendHeader(headerRow)
 	configTable.AppendRows(rows)
-	configTable.Render()
+	return renderTable(configTable, w)
 }
