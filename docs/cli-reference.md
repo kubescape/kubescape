@@ -364,6 +364,10 @@ kubescape policy test ./myrules
 kubescape scan ./manifests --custom-rules ./myrules
 ```
 
+`policy test` reads each test case from a directory under the rule's `test/`:
+an `input/` directory of YAML (`.yaml`, `.yml`) or JSON (`.json`) manifests, and
+the `expected.json` the rule must produce for them.
+
 `kubescape policy init` writes that layout for you, including a flagged and a
 clean test case whose `expected.json` already matches the generated rule, so the
 new rule passes `policy test` before you start editing it:
