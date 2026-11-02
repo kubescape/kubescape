@@ -898,9 +898,16 @@ kubescape fix results.json --output-dir ./fixed
 # executable Helm post-renderer script, renderer.sh, that applies them at install
 # time (--output-post-renderer requires --output-kustomize). Render the chart with
 # the release name you install it as, so the patches target the same resources.
+# Container workloads from ordinary scan reports are declined, because the report
+# redacts their environment configuration. When no patches are written, fix does
+# not create renderer.sh, so only install with it once it exists.
 kubescape scan ./my-chart --release-name my-release --format json --output results.json
 kubescape fix results.json --release-name my-release --output-kustomize ./patches --output-post-renderer ./patches
-helm install my-release ./my-chart --post-renderer ./patches/renderer.sh
+if [ -x ./patches/renderer.sh ]; then
+  helm install my-release ./my-chart --post-renderer ./patches/renderer.sh
+else
+  echo "no Kustomize patches were written; see the declined resources reported by fix"
+fi
 ```
 
 With `--output-dir` the copies recreate the scanned tree, and a multi-document
