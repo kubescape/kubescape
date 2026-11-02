@@ -242,7 +242,9 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	scanCmd.PersistentFlags().BoolVar(&scanInfo.FailOnDegradedConfig, "fail-on-degraded-config", false, "Fail the scan (exit code 1) if control configurations or exceptions could not be loaded from their configured source and bundled defaults were used instead")
 
 	scanCmd.PersistentFlags().StringVar(&scanInfo.FailThresholdSeverity, "severity-threshold", "", "Severity threshold is the severity of failed controls at which the command fails and returns exit code 1. Failed controls whose severity is unknown (missing base score) are treated as exceeding any threshold. On image scans, vulnerabilities whose severity cannot be determined are likewise counted as exceeding any threshold")
-	scanCmd.PersistentFlags().BoolVar(&scanInfo.OnlyFixable, "only-fixable", false, "When used with --severity-threshold on image scans, only count CVEs that have an available fix toward the pass/fail decision")
+	scanCmd.PersistentFlags().BoolVar(&scanInfo.OnlyFixable, "only-fixable", false, "When used with --severity-threshold, --fail-on-kev or --epss-threshold on image scans, only count CVEs that have an available fix toward the pass/fail decision")
+	scanCmd.PersistentFlags().BoolVar(&scanInfo.FailOnKEV, "fail-on-kev", false, "Fail image scans (exit code 1) when any vulnerability is listed in the CISA Known Exploited Vulnerabilities catalog, whatever its severity. Applies to 'scan image', 'scan workload' and scans with --scan-images. Image exceptions waive matching vulnerabilities")
+	scanCmd.PersistentFlags().Float64Var(&scanInfo.EPSSThreshold, "epss-threshold", 0, "Fail image scans (exit code 1) when any vulnerability's EPSS score is at or above this value, between 0 and 1 (0 disables the gate). Applies to 'scan image', 'scan workload' and scans with --scan-images. EPSS scores change daily, so pair this with --max-db-age and --fail-on-stale-db, especially with an offline vulnerability database")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.ControlsVersion, "controls-version", "", "Pin the regolibrary release tag used to download controls (see https://github.com/kubescape/regolibrary/releases). If not used will download the latest release. Has no effect when --account is set (cloud backend is used instead)")
 
 	// --fail-threshold was removed as a functioning flag, but its registration must stay so
@@ -462,13 +464,11 @@ func runSecurityScan(ctx context.Context, scanInfo *cautils.ScanInfo, ks meta.IK
 		return results, err
 	}
 
-	if err := enforceSeverityThresholds(&results.GetData().Report.SummaryDetails, scanInfo); err != nil {
+	if err := joinGateErrors(
+		enforceSeverityThresholds(&results.GetData().Report.SummaryDetails, scanInfo),
+		enforceCombinedImageGates(results, scanInfo),
+	); err != nil {
 		return results, err
-	}
-	if scanInfo.ScanImages {
-		if err := enforceImageSeverityThresholds(results.ImageScanData, scanInfo); err != nil {
-			return results, err
-		}
 	}
 	if err := enforceCoverageThreshold(results.GetData().ScanCoverage, len(results.GetData().Report.SummaryDetails.Controls), scanInfo); err != nil {
 		return results, err
@@ -478,6 +478,41 @@ func runSecurityScan(ctx context.Context, scanInfo *cautils.ScanInfo, ks meta.IK
 	}
 
 	return results, enforceBaselineDrift(ctx, results, scanInfo)
+}
+
+// joinGateErrors combines gate failures so one breach does not hide another.
+// A lone failure is returned unchanged.
+func joinGateErrors(errs ...error) error {
+	var failed []error
+	for _, err := range errs {
+		if err != nil {
+			failed = append(failed, err)
+		}
+	}
+	switch len(failed) {
+	case 0:
+		return nil
+	case 1:
+		return failed[0]
+	default:
+		return errors.Join(failed...)
+	}
+}
+
+// enforceComplianceThreshold fails the scan when the compliance score is below --compliance-threshold.
+func enforceComplianceThreshold(score float32, scanInfo *cautils.ScanInfo) error {
+	if score < scanInfo.ComplianceThreshold {
+		return gateFailure(fmt.Errorf("scan compliance-score is below permitted threshold: %s (compliance-threshold: %.2f)", cautils.ComplianceScoreToString(score, 2), scanInfo.ComplianceThreshold))
+	}
+	return nil
+}
+
+// enforceCombinedImageGates applies the image gates when --scan-images is set.
+func enforceCombinedImageGates(results *resultshandling.ResultsHandler, scanInfo *cautils.ScanInfo) error {
+	if !scanInfo.ScanImages {
+		return nil
+	}
+	return enforceImageGates(results.ImageScanData, scanInfo)
 }
 
 func enforceBaselineDrift(ctx context.Context, results *resultshandling.ResultsHandler, scanInfo *cautils.ScanInfo) error {
@@ -514,6 +549,26 @@ func severityLabelOrAll(s string) string {
 		return "all"
 	}
 	return s
+}
+
+// enforceImageGates applies every image vulnerability gate. The severity
+// failure keeps its existing message; a tripped exploitability gate is
+// reported alongside it.
+func enforceImageGates(imageScanData []cautils.ImageScanData, scanInfo *cautils.ScanInfo) error {
+	return joinGateErrors(
+		enforceImageSeverityThresholds(imageScanData, scanInfo),
+		enforceImageRiskGates(imageScanData, scanInfo),
+	)
+}
+
+// enforceImageRiskGates fails the scan when --fail-on-kev or --epss-threshold
+// is breached by any scanned image.
+func enforceImageRiskGates(imageScanData []cautils.ImageScanData, scanInfo *cautils.ScanInfo) error {
+	gates := imagescan.RiskGates{FailOnKEV: scanInfo.FailOnKEV, EPSSThreshold: scanInfo.EPSSThreshold}
+	if err := imagescan.CheckRiskGates(gates, imageScanData, scanInfo.OnlyFixable); err != nil {
+		return gateFailure(err)
+	}
+	return nil
 }
 
 func enforceImageSeverityThresholds(imageScanData []cautils.ImageScanData, scanInfo *cautils.ScanInfo) error {

@@ -1328,7 +1328,12 @@ func (ks *Kubescape) ScanImageContext(ctx context.Context, imgScanInfo *ksmetav1
 		}
 	}
 
-	return exceedsSeverityThreshold, errors.Join(scanErr, staleDBErr, resultsHandler.HandleResults(ctx, scanInfo))
+	// Like the stale-DB failure, a tripped exploitability gate is returned
+	// after the results are printed, so the user keeps the report.
+	riskGates := imagescan.RiskGates{FailOnKEV: scanInfo.FailOnKEV, EPSSThreshold: scanInfo.EPSSThreshold}
+	riskErr := imagescan.CheckRiskGates(riskGates, resultsHandler.ImageScanData, scanInfo.OnlyFixable)
+
+	return exceedsSeverityThreshold, errors.Join(scanErr, staleDBErr, riskErr, resultsHandler.HandleResults(ctx, scanInfo))
 }
 
 // buildImageScanJobs converts imgScanInfo.Images into per-image scan jobs.
