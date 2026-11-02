@@ -27,6 +27,7 @@ func GetPreReqCmd(ks meta.IKubescape) *cobra.Command {
 	preReqCmd := &cobra.Command{
 		Use:   "prerequisites",
 		Short: "Check prerequisites for installing Kubescape Operator",
+		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runPrerequisites(ks.Context(), *kubeconfigPath)
 		},
