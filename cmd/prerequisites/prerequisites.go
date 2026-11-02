@@ -6,6 +6,7 @@ import (
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/meta"
 	"github.com/kubescape/sizing-checker/pkg/checks/connectivitycheck"
 	"github.com/kubescape/sizing-checker/pkg/checks/ebpfcheck"
@@ -20,16 +21,29 @@ var (
 	collectClusterData = common.CollectClusterData
 )
 
+var prerequisitesCmdExamples = fmt.Sprintf(`
+  # Check prerequisites for installing Kubescape Operator in the current cluster
+  %[1]s prerequisites
+
+  # Check prerequisites using a specific kubeconfig file
+  %[1]s prerequisites --kubeconfig /path/to/kubeconfig
+`, cautils.ExecName())
+
 func GetPreReqCmd(ks meta.IKubescape) *cobra.Command {
 	var kubeconfigPath *string
 
 	// preReqCmd represents the prerequisites command
 	preReqCmd := &cobra.Command{
-		Use:   "prerequisites",
-		Short: "Check prerequisites for installing Kubescape Operator",
-		Args:  cobra.NoArgs,
+		Use:     "prerequisites",
+		Short:   "Check prerequisites for installing Kubescape Operator",
+		Example: prerequisitesCmdExamples,
+		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runPrerequisites(ks.Context(), *kubeconfigPath)
+			ctx := cmd.Context()
+			if ks != nil && ks.Context() != nil {
+				ctx = ks.Context()
+			}
+			return runPrerequisites(ctx, *kubeconfigPath)
 		},
 	}
 
