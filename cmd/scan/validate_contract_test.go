@@ -255,6 +255,91 @@ func TestValidateContractCommandUnsupportedFormatMentionsSARIF(t *testing.T) {
 	assert.EqualError(t, err, `unsupported format "xml", supported: text, json, sarif`)
 }
 
+func TestValidateContractCommandFormatNormalization(t *testing.T) {
+	originalBuildNumber := versioncheck.BuildNumber
+	versioncheck.BuildNumber = "v4.1.0"
+	t.Cleanup(func() { versioncheck.BuildNumber = originalBuildNumber })
+
+	contractPath := filepath.Join(t.TempDir(), "kubescape.yaml")
+	require.NoError(t, os.WriteFile(contractPath, []byte(commandContract), 0o600))
+
+	tests := []struct {
+		name       string
+		format     string
+		wantPrefix string
+	}{
+		{name: "uppercase JSON", format: "JSON", wantPrefix: "{\n"},
+		{name: "uppercase TEXT", format: "TEXT", wantPrefix: `Scan contract "example" is valid`},
+		{name: "uppercase SARIF", format: "SARIF", wantPrefix: "{\n"},
+		{name: "padded json", format: "  json  ", wantPrefix: "{\n"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd := GetScanCommand(core.NewKubescape(context.Background()))
+			output := &bytes.Buffer{}
+			cmd.SetOut(output)
+			cmd.SetErr(output)
+			cmd.SetArgs([]string{"validate-contract", contractPath, "--format", tt.format})
+			require.NoError(t, cmd.Execute())
+			assert.Contains(t, output.String(), tt.wantPrefix)
+		})
+	}
+}
+
+func TestValidateContractCommandEmptyFormatRejected(t *testing.T) {
+	contractPath := filepath.Join(t.TempDir(), "kubescape.yaml")
+	require.NoError(t, os.WriteFile(contractPath, []byte(commandContract), 0o600))
+
+	for _, format := range []string{"", "   ", "\t"} {
+		cmd := GetScanCommand(core.NewKubescape(context.Background()))
+		cmd.SetArgs([]string{"validate-contract", contractPath, "--format", format})
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.EqualError(t, err, "format cannot be empty, supported formats: text, json, sarif")
+	}
+}
+
+func TestValidateContractCommandUnsupportedFormatRejectedUpfrontOnInvalidContract(t *testing.T) {
+	contractPath := filepath.Join(t.TempDir(), "kubescape.yaml")
+	invalid := bytes.Replace([]byte(commandContract), []byte("frameworks"), []byte("frameworkz"), 1)
+	require.NoError(t, os.WriteFile(contractPath, invalid, 0o600))
+
+	cmd := GetScanCommand(core.NewKubescape(context.Background()))
+	cmd.SetArgs([]string{"validate-contract", contractPath, "--format", "xml"})
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.EqualError(t, err, `unsupported format "xml", supported: text, json, sarif`)
+}
+
+func TestValidateContractCommandSARIFUppercaseOnInvalidContract(t *testing.T) {
+	originalBuildNumber := versioncheck.BuildNumber
+	versioncheck.BuildNumber = "v4.1.0"
+	t.Cleanup(func() { versioncheck.BuildNumber = originalBuildNumber })
+
+	contractPath := filepath.Join(t.TempDir(), "kubescape.yaml")
+	invalid := bytes.Replace([]byte(commandContract), []byte("frameworks"), []byte("frameworkz"), 1)
+	require.NoError(t, os.WriteFile(contractPath, invalid, 0o600))
+
+	cmd := GetScanCommand(core.NewKubescape(context.Background()))
+	output := &bytes.Buffer{}
+	cmd.SetOut(output)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"validate-contract", contractPath, "--format", "SARIF"})
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "field frameworkz not found")
+
+	report := decodeValidateContractSARIF(t, output.Bytes())
+	run := report["runs"].([]any)[0].(map[string]any)
+	results := run["results"].([]any)
+	require.Len(t, results, 1)
+	result := results[0].(map[string]any)
+	assert.Equal(t, "kubescape.scan-contract.valid", result["ruleId"])
+	assert.Equal(t, "error", result["level"])
+	assert.Contains(t, result["message"].(map[string]any)["text"], "field frameworkz not found")
+}
+
 func decodeValidateContractSARIF(t *testing.T, data []byte) map[string]any {
 	t.Helper()
 	var report map[string]any
