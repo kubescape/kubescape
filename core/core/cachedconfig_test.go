@@ -76,11 +76,12 @@ func TestViewCachedConfig_KeyedLookup(t *testing.T) {
 	require.NoError(t, ks.SetCachedConfig(setConfig))
 
 	tests := []struct {
-		name    string
-		key     string
-		format  string
-		want    string
-		wantErr string
+		name         string
+		key          string
+		format       string
+		includeEmpty bool
+		want         string
+		wantErr      string
 	}{
 		{
 			name:   "Found key",
@@ -113,6 +114,20 @@ func TestViewCachedConfig_KeyedLookup(t *testing.T) {
 			wantErr: `key "cloudReportURL" is not set`,
 		},
 		{
+			name:         "Unset key with include-empty text",
+			key:          "cloudReportURL",
+			format:       "text",
+			includeEmpty: true,
+			want:         "\n",
+		},
+		{
+			name:         "Unset key with include-empty json",
+			key:          "cloudReportURL",
+			format:       "json",
+			includeEmpty: true,
+			want:         "{\n  \"cloudReportURL\": \"\"\n}",
+		},
+		{
 			name:   "Format JSON",
 			key:    "accountID",
 			format: "json",
@@ -132,6 +147,7 @@ func TestViewCachedConfig_KeyedLookup(t *testing.T) {
 			viewConfig := &metav1.ViewConfig{
 				Key:          tt.key,
 				OutputFormat: tt.format,
+				IncludeEmpty: tt.includeEmpty,
 				Writer:       &buf,
 			}
 
@@ -183,6 +199,20 @@ func TestSetCachedConfig_EmptyFieldsDoNotOverride(t *testing.T) {
 	after := readPersistedConfig(t)
 
 	assert.Equal(t, before, after)
+}
+
+func TestSetCachedConfig_ClusterName(t *testing.T) {
+	isolateCachedConfigTest(t)
+
+	ks := NewKubescape(context.Background())
+	setConfig := &metav1.SetConfig{
+		Account:     "test-account",
+		ClusterName: "production-cluster",
+	}
+
+	require.NoError(t, ks.SetCachedConfig(setConfig))
+	persisted := readPersistedConfig(t)
+	assert.Equal(t, "test-account", persisted.AccountID)
 }
 
 func TestViewCachedConfig_FullJSON(t *testing.T) {

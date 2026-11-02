@@ -30,6 +30,9 @@ func (ks *Kubescape) SetCachedConfig(setConfig *metav1.SetConfig) error {
 	if setConfig.CloudReportURL != "" {
 		tenant.GetConfigObj().CloudReportURL = setConfig.CloudReportURL
 	}
+	if setConfig.ClusterName != "" {
+		tenant.GetConfigObj().ClusterName = setConfig.ClusterName
+	}
 
 	return tenant.UpdateCachedConfig()
 }
@@ -68,7 +71,7 @@ func (ks *Kubescape) ViewCachedConfig(viewConfig *metav1.ViewConfig) error {
 		if foundField == nil {
 			return fmt.Errorf("key %q is not supported", viewConfig.Key)
 		}
-		if foundField.Value == "" {
+		if foundField.Value == "" && !viewConfig.IncludeEmpty {
 			return fmt.Errorf("key %q is not set", viewConfig.Key)
 		}
 
