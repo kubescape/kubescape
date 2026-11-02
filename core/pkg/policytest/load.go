@@ -2,6 +2,7 @@ package policytest
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -60,4 +61,27 @@ func LoadCaseExpected(dir string) ([]reporthandling.RuleResponse, error) {
 		return nil, fmt.Errorf("parse %s: %w", expectedFileName, err)
 	}
 	return expected, nil
+}
+
+// LoadCaseData reads the control inputs in dir/data.json, the same file and
+// shape regolibrary's rule fixtures use:
+//
+//	{"postureControlInputs": {"<input>": ["<value>", ...]},
+//	 "dataControlInputs": {"cloudProvider": "<provider>"}}
+//
+// The file is optional. A case without one is evaluated with no control
+// inputs.
+func LoadCaseData(dir string) (cautils.RegoInputData, error) {
+	raw, err := os.ReadFile(filepath.Join(dir, dataFileName))
+	if errors.Is(err, os.ErrNotExist) {
+		return cautils.RegoInputData{}, nil
+	}
+	if err != nil {
+		return cautils.RegoInputData{}, fmt.Errorf("read %s: %w", dataFileName, err)
+	}
+	var data cautils.RegoInputData
+	if err := json.Unmarshal(raw, &data); err != nil {
+		return cautils.RegoInputData{}, fmt.Errorf("parse %s: %w", dataFileName, err)
+	}
+	return data, nil
 }

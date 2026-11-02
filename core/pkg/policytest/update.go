@@ -13,7 +13,10 @@ import (
 	"github.com/kubescape/opa-utils/resources"
 )
 
-const expectedFileName = "expected.json"
+const (
+	expectedFileName = "expected.json"
+	dataFileName     = "data.json"
+)
 
 // UpdateResult is the outcome of regenerating one case's expected.json.
 type UpdateResult struct {
@@ -32,7 +35,19 @@ func EvaluateCase(ctx context.Context, rule RuleUnderTest, c Case) ([]reporthand
 		return nil, fmt.Errorf("load input: %w", err)
 	}
 
+	data, err := LoadCaseData(c.Dir)
+	if err != nil {
+		return nil, fmt.Errorf("load data: %w", err)
+	}
+
+	// A scan hands the configured control inputs to the processor through
+	// the session, and the processor passes each rule only the inputs its
+	// controlConfigInputs declare. The cloud provider reaches rules as
+	// data.dataControlInputs.cloudProvider from the report, where a scan
+	// records the provider it detected.
 	sessionObj := cautils.NewOPASessionObjMock()
+	sessionObj.RegoInputData = data
+	sessionObj.Report.ClusterCloudProvider = data.DataControlInputs["cloudProvider"]
 	proc := opaprocessor.NewOPAProcessor(sessionObj, &resources.RegoDependenciesData{}, "", "", "", false, nil)
 
 	got, err := proc.EvaluateRule(ctx, &rule.Rule, resourcesToScan, rule.Name)

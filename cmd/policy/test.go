@@ -14,7 +14,7 @@ func getPolicyTestCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "test <path>",
 		Short: "Run a Rego control's test fixtures and report pass/fail",
-		Long:  `Discovers rule directories (raw.rego + rule.metadata.json, with test cases under test/<case>/{input,expected.json}) under <path>, evaluates every case, and reports which ones match their expected.json.`,
+		Long:  `Discovers rule directories (raw.rego + rule.metadata.json, with test cases under test/<case>/{input,expected.json} and an optional data.json of control inputs) under <path>, evaluates every case, and reports which ones match their expected.json.`,
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// The invocation is valid from this point on. A case that fails,

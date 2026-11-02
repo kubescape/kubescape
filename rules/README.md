@@ -10,7 +10,8 @@ does not publish it to users.
 
 Each rule directory contains `raw.rego`, `rule.metadata.json`, and test cases
 under `test/<case>/`. A test case has Kubernetes manifests in `input/` and the
-expected rule responses in `expected.json`.
+expected rule responses in `expected.json`. A rule that reads control inputs
+takes them from an optional `data.json` in the case directory.
 
 Run all in-tree fixtures with:
 
