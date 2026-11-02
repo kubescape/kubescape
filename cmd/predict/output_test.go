@@ -383,13 +383,30 @@ func TestWriteOutput_Dispatch(t *testing.T) {
 
 	for _, format := range []string{"json", "table", "sarif", "junit", "pretty-printer"} {
 		t.Run(format, func(t *testing.T) {
-			err := writeOutput(res, format, "", false)
+			var buf bytes.Buffer
+			err := writeOutput(res, format, "", false, &buf)
 			assert.NoError(t, err)
+			assert.NotEmpty(t, buf.String())
 		})
 	}
 
-	err := writeOutput(res, "unknown-format", "", false)
+	err := writeOutput(res, "unknown-format", "", false, &bytes.Buffer{})
 	assert.Error(t, err)
+}
+
+func TestWriteOutput_CustomWriter(t *testing.T) {
+	res := sampleResult()
+	var buf bytes.Buffer
+	err := writeOutput(res, "json", "", false, &buf)
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), `"namespace": "test-ns"`)
+}
+
+func TestWriteOutput_WriterError(t *testing.T) {
+	res := sampleResult()
+	writeErr := errors.New("write failed")
+	err := writeOutput(res, "json", "", false, &errWriter{err: writeErr})
+	require.ErrorIs(t, err, writeErr)
 }
 
 type errWriter struct {
