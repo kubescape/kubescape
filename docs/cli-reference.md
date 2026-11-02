@@ -401,6 +401,28 @@ kubescape policy test ./myrules --update
 Review the resulting diff before committing it: `--update` records whatever the
 rule currently produces, so it will happily bless a regression.
 
+`policy test` gives a rule that reads
+[control configuration](#control-configuration) its inputs from an optional
+`data.json` in the test case directory, in the format regolibrary's fixtures
+use:
+
+```json
+{
+  "postureControlInputs": {
+    "untrustedRegistries": ["evil.example.com/"]
+  },
+  "dataControlInputs": {
+    "cloudProvider": "eks"
+  }
+}
+```
+
+As in a scan, a posture input reaches the rule only if its
+`rule.metadata.json` lists it in `controlConfigInputs`, for example with the
+path `settings.postureControlInputs.untrustedRegistries`. `cloudProvider` is
+the provider a scan detects for the cluster. A case without `data.json` is
+evaluated with no control inputs.
+
 Pass either the parent directory or a single rule directory. The metadata
 supplies the rule's name, description, remediation and `match` selectors, so the
 rule is only evaluated against the kinds it targets.
