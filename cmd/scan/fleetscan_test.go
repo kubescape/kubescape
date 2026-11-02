@@ -1703,7 +1703,7 @@ func TestFleetScan_RejectsBadReferenceClusterBeforeScanning(t *testing.T) {
 
 // captureStdout runs fn with os.Stdout redirected and returns what it wrote,
 // with the escape sequences stripped so assertions read as words.
-func captureStdout(t *testing.T, fn func()) string {
+func captureStdout(t testing.TB, fn func()) string {
 	t.Helper()
 
 	read, write, err := os.Pipe()

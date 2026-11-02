@@ -63,7 +63,7 @@ func scannedCleanly() (*resultshandling.ResultsHandler, error) {
 }
 
 // noRetryWait removes the wait between attempts, so a test exercises the retry decisions without sleeping.
-func noRetryWait(t *testing.T) {
+func noRetryWait(t testing.TB) {
 	t.Helper()
 	original := fleetRetryDelay
 	fleetRetryDelay = func(int) time.Duration { return 0 }
