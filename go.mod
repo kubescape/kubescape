@@ -59,7 +59,7 @@ require (
 	github.com/kubescape/regolibrary/v2 v2.0.38
 	github.com/kubescape/sizing-checker v0.0.0-20250323151332-73a18561dc73
 	github.com/kubescape/storage v0.0.342
-	github.com/mark3labs/mcp-go v1.0.0
+	github.com/mark3labs/mcp-go v1.4.0
 	github.com/maruel/natural v1.3.0
 	github.com/matthyx/go-gitlog v0.0.0-20231005131906-9ffabe3c5bcd
 	github.com/mattn/go-isatty v0.0.24
@@ -477,7 +477,7 @@ require (
 	github.com/opencontainers/runtime-spec v1.3.0 // indirect
 	github.com/opencontainers/selinux v1.15.1 // indirect
 	github.com/owenrumney/go-sarif v1.1.2-0.20231003122901-1000f5e05554 // indirect
-	github.com/package-url/packageurl-go v0.1.7 // indirect
+	github.com/package-url/packageurl-go v0.1.7
 	github.com/pandatix/go-cvss v0.6.2 // indirect
 	github.com/parthivsaikia/go-pacman-version v0.0.0-20260212091406-8640ae78daee // indirect
 	github.com/pborman/indent v1.2.1 // indirect
