@@ -145,3 +145,23 @@ func TestGetDeleteCacheCmd_RunEReturnsErrorOnFailure(t *testing.T) {
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "inspect incremental scan cache directory for deletion")
 }
+
+func TestGetDeleteCacheCmd_RejectsUnexpectedArgs(t *testing.T) {
+	t.Run("via root", func(t *testing.T) {
+		mock := &capturingDelete{}
+		err := executeDeleteCmd(mock, "cache", "unexpected")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), `unknown command "unexpected" for "config delete cache"`)
+		assert.Nil(t, mock.captured)
+	})
+
+	t.Run("standalone", func(t *testing.T) {
+		cmd := getDeleteCacheCmd()
+		cmd.SilenceUsage = true
+		cmd.SilenceErrors = true
+		cmd.SetArgs([]string{"unexpected"})
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), `unknown command "unexpected" for "cache"`)
+	})
+}
