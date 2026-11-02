@@ -230,6 +230,11 @@ func marshalMetadata(name, kind, description, remediation string) (string, error
 	return string(encoded) + "\n", nil
 }
 
+// regoSource returns the generated rule. It names the offending field in
+// deletePaths, which with reviewPaths and fixPaths is where the scan reads a
+// finding's location from, so SARIF and the other printers point at the
+// field. failedPaths, the deprecated field they replaced, is not read by the
+// scan; it is kept alongside them, as the regolibrary rules do.
 func regoSource(kind string, template workloadKind) string {
 	const source = `package armo_builtins
 
@@ -247,6 +252,7 @@ deny contains msga if {
 		"alertMessage": sprintf("container %v in __KIND__ %v runs as privileged", [container.name, wl.metadata.name]),
 		"packagename": "armo_builtins",
 		"alertScore": 7,
+		"deletePaths": [path],
 		"failedPaths": [path],
 		"fixPaths": [],
 		"alertObject": {"k8sApiObjects": [wl]},
