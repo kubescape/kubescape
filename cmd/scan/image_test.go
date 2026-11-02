@@ -497,6 +497,26 @@ func TestGetImageCmd_RunE_RejectsPostureFlags(t *testing.T) {
 			scanInfo: cautils.ScanInfo{ComplianceThreshold: 80},
 			wantErr:  "--compliance-threshold is not supported for image scans: an image scan evaluates vulnerabilities, not posture compliance scores (use --severity-threshold instead)",
 		},
+		{
+			name:     "baseline-granularity is rejected",
+			scanInfo: cautils.ScanInfo{BaselineGranularity: "control"},
+			wantErr:  "--baseline-granularity is not supported for image scans: an image scan evaluates vulnerabilities, not posture baseline drift (use 'kubescape diff' to compare image scan reports)",
+		},
+		{
+			name:     "fail-coverage-below is rejected",
+			scanInfo: cautils.ScanInfo{FailCoverageThreshold: 80},
+			wantErr:  "--fail-coverage-below is not supported for image scans: an image scan evaluates vulnerabilities, not posture control coverage (use --severity-threshold instead)",
+		},
+		{
+			name:     "fail-on-degraded-config is rejected",
+			scanInfo: cautils.ScanInfo{FailOnDegradedConfig: true},
+			wantErr:  "--fail-on-degraded-config is not supported for image scans: an image scan evaluates vulnerabilities, not posture control configurations",
+		},
+		{
+			name:     "controls-config is rejected",
+			scanInfo: cautils.ScanInfo{ControlsInputs: "/path/to/controls.json"},
+			wantErr:  "--controls-config is not supported for image scans: an image scan evaluates vulnerabilities, not posture controls",
+		},
 	}
 
 	for _, tc := range testCases {
@@ -559,6 +579,31 @@ func TestGetScanCommand_RejectsPostureFlagsOnImageScan(t *testing.T) {
 			name:    "compliance-threshold flag",
 			args:    []string{"image", "--compliance-threshold", "80", "nginx:1.27"},
 			wantErr: "--compliance-threshold is not supported for image scans: an image scan evaluates vulnerabilities, not posture compliance scores (use --severity-threshold instead)",
+		},
+		{
+			name:    "baseline-granularity flag",
+			args:    []string{"image", "--baseline-granularity", "control", "nginx:1.27"},
+			wantErr: "--baseline-granularity is not supported for image scans: an image scan evaluates vulnerabilities, not posture baseline drift (use 'kubescape diff' to compare image scan reports)",
+		},
+		{
+			name:    "baseline-granularity flag with default value",
+			args:    []string{"image", "--baseline-granularity", "evidence", "nginx:1.27"},
+			wantErr: "--baseline-granularity is not supported for image scans: an image scan evaluates vulnerabilities, not posture baseline drift (use 'kubescape diff' to compare image scan reports)",
+		},
+		{
+			name:    "fail-coverage-below flag",
+			args:    []string{"image", "--fail-coverage-below", "80", "nginx:1.27"},
+			wantErr: "--fail-coverage-below is not supported for image scans: an image scan evaluates vulnerabilities, not posture control coverage (use --severity-threshold instead)",
+		},
+		{
+			name:    "fail-on-degraded-config flag",
+			args:    []string{"image", "--fail-on-degraded-config", "nginx:1.27"},
+			wantErr: "--fail-on-degraded-config is not supported for image scans: an image scan evaluates vulnerabilities, not posture control configurations",
+		},
+		{
+			name:    "controls-config flag",
+			args:    []string{"image", "--controls-config", "./controls.json", "nginx:1.27"},
+			wantErr: "--controls-config is not supported for image scans: an image scan evaluates vulnerabilities, not posture controls",
 		},
 	}
 
