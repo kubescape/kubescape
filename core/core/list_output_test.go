@@ -1,6 +1,7 @@
 package core
 
 import (
+	"bytes"
 	"context"
 	"encoding/csv"
 	"io"
@@ -201,4 +202,39 @@ func readCSVRecords(t *testing.T, content string) [][]string {
 	records, err := r.ReadAll()
 	require.NoError(t, err)
 	return records
+}
+
+func TestPrintListResult_CustomWriter(t *testing.T) {
+	result := &metav1.ListResult{
+		Names: []string{"nsa", "mitre"},
+		Controls: []metav1.ControlListEntry{
+			{ID: "C-0001", Name: "Forbidden Registries", Frameworks: []string{"NSA"}},
+		},
+		ControlsConfig: []metav1.ControlConfigEntry{
+			{Name: "imageRepositoryAllowList", Title: "Allowed Images", Values: []string{"quay.io"}, Controls: []string{"C-0001"}, Description: "Desc"},
+		},
+	}
+
+	targets := []string{"frameworks", "controls", "controls-config"}
+	formats := []string{"pretty-print", "json", "yaml", "csv"}
+
+	for _, target := range targets {
+		for _, format := range formats {
+			t.Run(target+"_"+format, func(t *testing.T) {
+				var buf bytes.Buffer
+				err := PrintListResult(context.Background(), result, target, format, &buf)
+				require.NoError(t, err)
+				assert.NotEmpty(t, buf.String())
+
+				switch target {
+				case "frameworks":
+					assert.Contains(t, buf.String(), "nsa")
+				case "controls":
+					assert.Contains(t, buf.String(), "C-0001")
+				case "controls-config":
+					assert.Contains(t, buf.String(), "imageRepositoryAllowList")
+				}
+			})
+		}
+	}
 }
