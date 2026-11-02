@@ -20,7 +20,7 @@ jobs:
       contents: read
     steps:
       - name: Run the OSPS Baseline scanner
-        uses: revanite-io/osps-baseline-action@d0d850b592f1788b2631f1dfdf84d80ea8c720f5 # v1.5.3
+        uses: revanite-io/osps-baseline-action@8417b9d0c0e789c3fe4e93996e47a3a8aafe6965 # v1.5.4
         with:
           owner: ${{ github.repository_owner }}
           repo: ${{ github.event.repository.name }}
