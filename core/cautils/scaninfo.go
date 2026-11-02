@@ -418,7 +418,7 @@ func (scanInfo *ScanInfo) Formats() []string {
 
 	var cleaned []string
 	for f := range strings.SplitSeq(scanInfo.Format, ",") {
-		if v := strings.TrimSpace(f); v != "" {
+		if v := strings.ToLower(strings.TrimSpace(f)); v != "" {
 			cleaned = append(cleaned, v)
 		}
 	}
