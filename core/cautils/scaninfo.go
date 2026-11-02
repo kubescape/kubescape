@@ -925,13 +925,10 @@ func (scanInfo *ScanInfo) getScanningContext(input string) ScanningContext {
 // InputPatterns, registers their cleanup hooks with ScanInfo, and returns
 // an error immediately if cloning fails.
 //
-// The ctx parameter provides pre-clone cancellation: if the context is
-// cancelled or expired, no further clones are attempted and any already-
-// cloned workspaces are cleaned up. Note that CloneGitRepo itself does
-// not accept a context (it delegates to git.PlainClone, not
-// git.PlainCloneContext), so an in-progress clone cannot be interrupted
-// mid-operation. Making the underlying clone context-aware is a possible
-// future improvement outside the scope of this refactor.
+// The ctx parameter provides pre-clone cancellation and propagates to
+// CloneGitRepoContext so that in-progress clones are interrupted if the
+// context is cancelled or expired. Any already-cloned workspaces are
+// cleaned up on error.
 func (scanInfo *ScanInfo) MaterializeRemoteInputs(ctx context.Context) error {
 	for _, candidate := range scanInfo.InputPatterns {
 		if err := ctx.Err(); err != nil {
@@ -944,7 +941,7 @@ func (scanInfo *ScanInfo) MaterializeRemoteInputs(ctx context.Context) error {
 
 		originalInput := candidate
 		depth := scanInfo.EffectiveGitCloneDepth()
-		clonedDir, err := CloneGitRepo(&candidate, depth)
+		clonedDir, err := CloneGitRepoContext(ctx, &candidate, depth)
 		if err != nil {
 			scanInfo.Cleanup()
 			return fmt.Errorf("failed to clone remote git repository %q: %w", originalInput, err)
