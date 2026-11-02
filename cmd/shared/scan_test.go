@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer"
 	"github.com/kubescape/kubescape/v4/pkg/imagescan"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
@@ -743,6 +744,95 @@ func TestValidateLabelSelector(t *testing.T) {
 			} else {
 				assert.Error(t, err)
 				assert.Contains(t, err.Error(), tt.expectedErr)
+			}
+		})
+	}
+}
+
+func TestValidateCommonScanFlags_SBOMFormats(t *testing.T) {
+	tests := []struct {
+		name        string
+		format      string
+		scanType    cautils.ScanTypes
+		scanImages  bool
+		expectedErr string
+	}{
+		{
+			name:        "cyclonedx-json without image scanning is rejected",
+			format:      printer.CycloneDXFormat,
+			scanType:    cautils.ScanTypeCluster,
+			scanImages:  false,
+			expectedErr: "format \"cyclonedx-json\" requires scanned images: add --scan-images, or run \"kubescape scan image\" to scan an image directly",
+		},
+		{
+			name:        "spdx-json without image scanning is rejected",
+			format:      printer.SPDXFormat,
+			scanType:    cautils.ScanTypeCluster,
+			scanImages:  false,
+			expectedErr: "format \"spdx-json\" requires scanned images: add --scan-images, or run \"kubescape scan image\" to scan an image directly",
+		},
+		{
+			name:        "comma-separated formats containing cyclonedx-json without image scanning are rejected",
+			format:      "json,cyclonedx-json",
+			scanType:    cautils.ScanTypeCluster,
+			scanImages:  false,
+			expectedErr: "format \"cyclonedx-json\" requires scanned images: add --scan-images, or run \"kubescape scan image\" to scan an image directly",
+		},
+		{
+			name:        "comma-separated formats containing spdx-json without image scanning are rejected",
+			format:      "spdx-json,yaml",
+			scanType:    cautils.ScanTypeCluster,
+			scanImages:  false,
+			expectedErr: "format \"spdx-json\" requires scanned images: add --scan-images, or run \"kubescape scan image\" to scan an image directly",
+		},
+		{
+			name:        "whitespace-padded sbom format without image scanning is rejected",
+			format:      " json , cyclonedx-json ",
+			scanType:    cautils.ScanTypeCluster,
+			scanImages:  false,
+			expectedErr: "format \"cyclonedx-json\" requires scanned images: add --scan-images, or run \"kubescape scan image\" to scan an image directly",
+		},
+		{
+			name:       "cyclonedx-json on posture scan with --scan-images is accepted",
+			format:     printer.CycloneDXFormat,
+			scanType:   cautils.ScanTypeCluster,
+			scanImages: true,
+		},
+		{
+			name:       "spdx-json on posture scan with --scan-images is accepted",
+			format:     printer.SPDXFormat,
+			scanType:   cautils.ScanTypeCluster,
+			scanImages: true,
+		},
+		{
+			name:       "cyclonedx-json on image scan is accepted",
+			format:     printer.CycloneDXFormat,
+			scanType:   cautils.ScanTypeImage,
+			scanImages: false,
+		},
+		{
+			name:       "spdx-json on image scan is accepted",
+			format:     printer.SPDXFormat,
+			scanType:   cautils.ScanTypeImage,
+			scanImages: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd := &cobra.Command{}
+			cmd.Flags().String("format", "", "")
+			scanInfo := &cautils.ScanInfo{
+				Format:     tt.format,
+				ScanImages: tt.scanImages,
+				ScanType:   tt.scanType,
+			}
+			err := ValidateCommonScanFlags(cmd, scanInfo, ScanFormats)
+			if tt.expectedErr == "" {
+				assert.NoError(t, err)
+			} else {
+				assert.Error(t, err)
+				assert.Equal(t, tt.expectedErr, err.Error())
 			}
 		})
 	}

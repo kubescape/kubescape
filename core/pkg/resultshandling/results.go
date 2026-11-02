@@ -467,7 +467,7 @@ func NewPrinter(ctx context.Context, printFormat string, scanInfo *cautils.ScanI
 	}
 }
 
-func ValidatePrinter(scanType cautils.ScanTypes, scanContext cautils.ScanningContext, printFormat string) (bool, error) {
+func ValidatePrinter(scanType cautils.ScanTypes, scanContext cautils.ScanningContext, printFormat string, scanImages ...bool) (bool, error) {
 	if scanType == cautils.ScanTypeImage {
 		if printFormat == printer.PrettyFormat {
 			return true, nil
@@ -485,6 +485,9 @@ func ValidatePrinter(scanType cautils.ScanTypes, scanContext cautils.ScanningCon
 		default:
 			return false, fmt.Errorf("format \"%s\" is only supported when scanning local files", printFormat)
 		}
+	}
+	if (printFormat == printer.CycloneDXFormat || printFormat == printer.SPDXFormat) && (len(scanImages) == 0 || !scanImages[0]) {
+		return false, fmt.Errorf("format \"%s\" is only supported for image scanning", printFormat)
 	}
 	switch printFormat {
 	case printer.JsonFormat, printer.HtmlFormat, printer.JunitResultFormat, printer.PrometheusFormat, printer.PdfFormat, printer.YamlFormat, printer.CsvFormat, printer.MarkdownFormat, printer.PolicyReportFormat, printer.ExceptionsFormat, printer.CycloneDXFormat, printer.SPDXFormat:
