@@ -16,6 +16,7 @@ import (
 	"strings"
 
 	"github.com/armosec/armoapi-go/armotypes"
+	"github.com/jwalton/gchalk"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
@@ -27,6 +28,7 @@ import (
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	storagev1beta1 "github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
+	"github.com/mattn/go-isatty"
 	"github.com/mikefarah/yq/v4/pkg/yqlib"
 	"gopkg.in/op/go-logging.v1"
 	"gopkg.in/yaml.v3"
@@ -1249,6 +1251,64 @@ func dedupUnfixedControlsForAccounting(controls []UnfixedControl) []UnfixedContr
 	return out
 }
 
+var (
+	isTerminal       = isatty.IsTerminal
+	isCygwinTerminal = isatty.IsCygwinTerminal
+)
+
+// resolveColorLevel determines the ANSI color level to use for fix output.
+// It prioritizes NO_COLOR and FORCE_COLOR per standard specifications,
+// falling back to dual-stream (stdout + stderr) TTY detection.
+func resolveColorLevel() gchalk.ColorLevel {
+	// 1. NO_COLOR standard (https://no-color.org/):
+	// Non-empty NO_COLOR suppresses all color. An empty NO_COLOR="" must be treated as unset.
+	if val, set := os.LookupEnv("NO_COLOR"); set && val != "" {
+		return gchalk.LevelNone
+	}
+
+	// 2. FORCE_COLOR:
+	// Set to non-empty value. Values of "0", "false", or non-positive integers (e.g. "-1") disable color.
+	// Positive integers ("1", "2", "3") or "true" force color.
+	if val, set := os.LookupEnv("FORCE_COLOR"); set && val != "" {
+		if strings.EqualFold(val, "true") {
+			return gchalk.LevelBasic
+		}
+		if strings.EqualFold(val, "false") {
+			return gchalk.LevelNone
+		}
+		if n, err := strconv.Atoi(val); err == nil {
+			if n > 0 {
+				if n >= 3 {
+					return gchalk.LevelAnsi16m
+				} else if n == 2 {
+					return gchalk.LevelAnsi256
+				}
+				return gchalk.LevelBasic
+			}
+			return gchalk.LevelNone
+		}
+		return gchalk.LevelNone
+	}
+
+	// 3. Terminal detection: color is enabled only if both stdout and stderr are attached to a terminal.
+	if (isTerminal(os.Stdout.Fd()) || isCygwinTerminal(os.Stdout.Fd())) &&
+		(isTerminal(os.Stderr.Fd()) || isCygwinTerminal(os.Stderr.Fd())) {
+		return gchalk.LevelBasic
+	}
+
+	return gchalk.LevelNone
+}
+
+// colorBuilder returns a gchalk.Builder whose level matches the resolved color policy,
+// avoiding reliance on gchalk's process-startup global level which disables color if NO_COLOR="" is set.
+func colorBuilder() *gchalk.Builder {
+	return gchalk.New(gchalk.ForceLevel(resolveColorLevel()))
+}
+
+func shouldColor() bool {
+	return resolveColorLevel() != gchalk.LevelNone
+}
+
 // PrintUnfixedControls logs the failed (resource, control) tuples that require
 // manual remediation, deduplicating entries across multiple identical failures.
 // The verb on the summary line reflects phase: "Auto-fixed" only when every
@@ -1256,6 +1316,26 @@ func dedupUnfixedControlsForAccounting(controls []UnfixedControl) []UnfixedContr
 func (h *FixHandler) PrintUnfixedControls(phase Phase) {
 	if len(h.unfixedControls) == 0 {
 		return
+	}
+
+	logger.L().Warning(h.formatUnfixedControls(phase))
+}
+
+func (h *FixHandler) formatUnfixedControls(phase Phase) string {
+	return h.formatUnfixedControlsWithBuilder(phase, colorBuilder())
+}
+
+func (h *FixHandler) formatUnfixedControlsWithColor(phase Phase, colored bool) string {
+	level := gchalk.LevelNone
+	if colored {
+		level = gchalk.LevelBasic
+	}
+	return h.formatUnfixedControlsWithBuilder(phase, gchalk.New(gchalk.ForceLevel(level)))
+}
+
+func (h *FixHandler) formatUnfixedControlsWithBuilder(phase Phase, chalk *gchalk.Builder) string {
+	if len(h.unfixedControls) == 0 {
+		return ""
 	}
 
 	accountingRecords := dedupUnfixedControlsForAccounting(h.unfixedControls)
@@ -1276,44 +1356,98 @@ func (h *FixHandler) PrintUnfixedControls(phase Phase) {
 			location = "<unknown>"
 		}
 		fmt.Fprintf(&sb, "  - %s %s on %s/%s (%s) — %s\n",
-			u.ControlID, u.ControlName, u.ResourceKind, u.ResourceName, location, u.Reason)
+			chalk.WithBrightCyan().Bold(u.ControlID),
+			u.ControlName,
+			u.ResourceKind,
+			u.ResourceName,
+			chalk.Yellow(location),
+			chalk.Red(u.Reason))
 	}
 
-	logger.L().Warning(sb.String())
+	return sb.String()
 }
 
 func (h *FixHandler) PrintExpectedChanges(resourcesToFix []ResourceFixInfo) {
+	logger.L().Info(h.formatExpectedChanges(resourcesToFix))
+}
+
+func (h *FixHandler) formatExpectedChanges(resourcesToFix []ResourceFixInfo) string {
+	return formatExpectedChangesWithBuilder(resourcesToFix, colorBuilder())
+}
+
+func formatExpectedChangesWithColor(resourcesToFix []ResourceFixInfo, colored bool) string {
+	level := gchalk.LevelNone
+	if colored {
+		level = gchalk.LevelBasic
+	}
+	return formatExpectedChangesWithBuilder(resourcesToFix, gchalk.New(gchalk.ForceLevel(level)))
+}
+
+func formatExpectedChangesWithBuilder(resourcesToFix []ResourceFixInfo, chalk *gchalk.Builder) string {
 	var sb strings.Builder
 	sb.WriteString("The following changes will be applied:\n")
 
 	for _, resourceFixInfo := range resourcesToFix {
 		// A cluster resource has no file. Printing an empty "File:" line reads
 		// as a bug, so name where the resource actually came from instead.
-		switch {
-		case resourceFixInfo.inMemory && resourceFixInfo.Resource.GetNamespace() != "":
-			fmt.Fprintf(&sb, "Source: cluster, namespace %s\n", resourceFixInfo.Resource.GetNamespace())
-		case resourceFixInfo.inMemory:
-			sb.WriteString("Source: cluster\n")
-		default:
-			fmt.Fprintf(&sb, "File: %s\n", resourceFixInfo.FilePath)
-			if ns := resourceFixInfo.Resource.GetNamespace(); ns != "" {
-				fmt.Fprintf(&sb, "Namespace: %s\n", ns)
-			}
-			fmt.Fprintf(&sb, "Document index: %d\n", resourceFixInfo.DocumentIndex)
+		var resNamespace string
+		var resName, resKind string
+		if resourceFixInfo.Resource != nil {
+			resNamespace = resourceFixInfo.Resource.GetNamespace()
+			resName = resourceFixInfo.Resource.GetName()
+			resKind = resourceFixInfo.Resource.GetKind()
 		}
-		fmt.Fprintf(&sb, "Resource: %s\n", resourceFixInfo.Resource.GetName())
-		fmt.Fprintf(&sb, "Kind: %s\n", resourceFixInfo.Resource.GetKind())
-		sb.WriteString("Changes:\n")
+
+		switch {
+		case resourceFixInfo.inMemory && resNamespace != "":
+			fmt.Fprintf(&sb, "%s %s\n",
+				chalk.WithBrightCyan().Bold("Source:"),
+				chalk.BrightWhite(fmt.Sprintf("cluster, namespace %s", resNamespace)))
+		case resourceFixInfo.inMemory:
+			fmt.Fprintf(&sb, "%s %s\n",
+				chalk.WithBrightCyan().Bold("Source:"),
+				chalk.BrightWhite("cluster"))
+		default:
+			fmt.Fprintf(&sb, "%s %s\n",
+				chalk.WithBrightCyan().Bold("File:"),
+				chalk.BrightWhite(resourceFixInfo.FilePath))
+			if resNamespace != "" {
+				fmt.Fprintf(&sb, "%s %s\n",
+					chalk.WithBrightCyan().Bold("Namespace:"),
+					chalk.BrightWhite(resNamespace))
+			}
+			fmt.Fprintf(&sb, "%s %s\n",
+				chalk.WithBrightCyan().Bold("Document index:"),
+				chalk.BrightWhite(strconv.Itoa(resourceFixInfo.DocumentIndex)))
+		}
+
+		fmt.Fprintf(&sb, "%s %s\n",
+			chalk.WithBrightCyan().Bold("Resource:"),
+			chalk.BrightWhite(resName))
+		fmt.Fprintf(&sb, "%s %s\n",
+			chalk.WithBrightCyan().Bold("Kind:"),
+			chalk.BrightWhite(resKind))
+		sb.WriteString(chalk.Bold("Changes:") + "\n")
+
+		paths := make([]armotypes.FixPath, 0, len(resourceFixInfo.YamlExpressions))
+		for _, fixPath := range resourceFixInfo.YamlExpressions {
+			paths = append(paths, fixPath)
+		}
+		sort.Slice(paths, func(i, j int) bool {
+			return paths[i].Path < paths[j].Path
+		})
 
 		i := 1
-		for _, fixPath := range resourceFixInfo.YamlExpressions {
-			fmt.Fprintf(&sb, "\t%d) %s = %s\n", i, fixPath.Path, fixPath.Value)
+		for _, fixPath := range paths {
+			fmt.Fprintf(&sb, "\t%d) %s = %s\n", i,
+				chalk.BrightYellow(fixPath.Path),
+				chalk.BrightGreen(fixPath.Value))
 			i++
 		}
 		sb.WriteString("\n------\n")
 	}
 
-	logger.L().Info(sb.String())
+	return sb.String()
 }
 
 // ApplyChanges writes the planned fixes. By default each manifest is rewritten
