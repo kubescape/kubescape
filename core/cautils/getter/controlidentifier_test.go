@@ -18,7 +18,7 @@ func TestNormalizeControlIdentifier(t *testing.T) {
 	}{
 		{name: "already lowercase", id: "c-0286", want: "c-0286"},
 		{name: "uppercase is lowercased", id: "C-0286", want: "c-0286"},
-		{name: "mixed case", id: "C-0286", want: "c-0286"},
+		{name: "mixed case", id: "cIs-3.1.1", want: "cis-3.1.1"},
 		{name: "leading whitespace trimmed", id: "  C-0286", want: "c-0286"},
 		{name: "trailing whitespace trimmed", id: "C-0286  ", want: "c-0286"},
 		{name: "both sides trimmed", id: "  C-0286  ", want: "c-0286"},
@@ -76,6 +76,27 @@ func TestControlMatcherOffer(t *testing.T) {
 			assert.Equal(t, tt.want, got)
 		})
 	}
+}
+
+func TestControlMatcherOfferTrimsCandidateIdentifiers(t *testing.T) {
+	t.Parallel()
+
+	t.Run("ControlID", func(t *testing.T) {
+		t.Parallel()
+		m := newControlMatcher("C-0286")
+		assert.True(t, m.offer(&reporthandling.Control{ControlID: "  C-0286  "}))
+	})
+
+	t.Run("Control_ID", func(t *testing.T) {
+		t.Parallel()
+		m := newControlMatcher("cis-3.1.1")
+		assert.False(t, m.offer(&reporthandling.Control{ControlID: "C-0286", Control_ID: "  CIS-3.1.1  "}))
+
+		control, err := m.bySection()
+		require.NoError(t, err)
+		require.NotNil(t, control)
+		assert.Equal(t, "C-0286", control.ControlID)
+	})
 }
 
 func TestControlMatcherOfferAccumulatesDistinctSections(t *testing.T) {
