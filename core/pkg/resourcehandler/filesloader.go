@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -351,8 +352,10 @@ func getResourcesFromPath(ctx context.Context, path string, helmValueOpts cautil
 	repoRoot, gitRepo := extractGitRepo(path)
 
 	// when scanning a single file, we consider the repository root to be
-	// the directory of the scanned file
-	if cautils.IsYaml(repoRoot) {
+	// the directory of the scanned file. This applies to every file type: a
+	// JSON or Terraform file left as the root makes its own relative path ".",
+	// and the file is then reported without a source.
+	if info, err := os.Stat(repoRoot); err == nil && !info.IsDir() {
 		repoRoot = filepath.Dir(repoRoot)
 	}
 
