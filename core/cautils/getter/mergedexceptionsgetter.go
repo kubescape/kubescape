@@ -2,6 +2,7 @@ package getter
 
 import (
 	"context"
+	"fmt"
 	"regexp"
 	"slices"
 	"strings"
@@ -66,6 +67,43 @@ func (g *MergedExceptionsGetter) GetExceptions(ctx context.Context, clusterName 
 // cache must not serve one kind of scan with what it stored for the other.
 func (g *MergedExceptionsGetter) IncludesClusterExceptions() bool {
 	return g != nil && g.secondary != nil
+}
+
+// CacheSource identifies the primary source and whether the cluster's
+// SecurityException CRDs are merged into it. The primary is quoted so no
+// primary identity can read as another merged identity. A nil getter is
+// identified the same way as no getter at all.
+func (g *MergedExceptionsGetter) CacheSource() string {
+	if g == nil {
+		return CacheSourceOf(nil)
+	}
+	return g.cacheSource(CacheSourceOf(g.primary))
+}
+
+// LoadedCacheSource identifies what the primary source's last load read,
+// combined the way CacheSource combines it.
+func (g *MergedExceptionsGetter) LoadedCacheSource() (string, bool) {
+	if g == nil {
+		return CacheSourceOf(nil), true
+	}
+	primary, ok := LoadedCacheSourceOf(g.primary)
+	return g.cacheSource(primary), ok
+}
+
+func (g *MergedExceptionsGetter) cacheSource(primary string) string {
+	return fmt.Sprintf("merged(%q,clusterExceptions=%t)", primary, g.IncludesClusterExceptions())
+}
+
+// SourceFile forwards the file of the primary source, if it reads one.
+func (g *MergedExceptionsGetter) SourceFile() (string, bool) {
+	if g == nil {
+		return "", false
+	}
+	file, ok := g.primary.(SourceFiler)
+	if !ok {
+		return "", false
+	}
+	return file.SourceFile()
 }
 
 // ConsumedFileDigest forwards provenance from the primary local source. CRD

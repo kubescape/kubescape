@@ -4,12 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"sync"
 	"testing"
 
 	"github.com/armosec/armoapi-go/armotypes"
+	v1 "github.com/kubescape/backend/pkg/client/v1"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/cautils/getter"
 	"github.com/kubescape/kubescape/v4/core/mocks"
@@ -559,6 +562,387 @@ func TestGetControlInputs_NonNilResultIsCached(t *testing.T) {
 
 	_, cacheHit := policyHandler.cachedControlInputs.Get()
 	assert.True(t, cacheHit, "non-nil control inputs should be cached")
+}
+
+// TestPolicyCacheKeysBySource pins that the exceptions and control-input
+// caches only serve an entry to the source that produced it, and that a
+// source which fails to load is never cached.
+func TestPolicyCacheKeysBySource(t *testing.T) {
+	t.Setenv(PoliciesCacheTtlEnvVar, "5m")
+	dir := t.TempDir()
+	writeFile := func(name, content string) string {
+		path := filepath.Join(dir, name)
+		require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+		return path
+	}
+	exceptionsFile := writeFile("exceptions.json", `[{"name":"from-file"}]`)
+	inputsFile := writeFile("controls-inputs.json", `{"from-file":["value"]}`)
+	missing := filepath.Join(dir, "missing.json")
+
+	t.Run("exceptions from another getter type", func(t *testing.T) {
+		handler := NewRequestScopedPolicyHandler("test-cluster")
+		defer handler.Close()
+
+		fromFile, err := handler.getExceptions(context.Background(), nil, &cautils.Getters{ExceptionsGetter: getter.NewLoadPolicy([]string{exceptionsFile})})
+		require.NoError(t, err)
+		require.Len(t, fromFile, 1)
+		assert.Equal(t, "from-file", fromFile[0].Name)
+
+		fromMock, err := handler.getExceptions(context.Background(), nil, &cautils.Getters{ExceptionsGetter: &ExceptionsGetterMock{}})
+		require.NoError(t, err)
+		assert.Equal(t, CachedExceptions, fromMock)
+	})
+
+	t.Run("control inputs from another getter type", func(t *testing.T) {
+		handler := NewRequestScopedPolicyHandler("test-cluster")
+		defer handler.Close()
+
+		fromFile, err := handler.getControlInputs(context.Background(), nil, &cautils.Getters{ControlsInputsGetter: getter.NewLoadPolicy([]string{inputsFile})})
+		require.NoError(t, err)
+		assert.Equal(t, map[string][]string{"from-file": {"value"}}, fromFile)
+
+		fromMock, err := handler.getControlInputs(context.Background(), nil, &cautils.Getters{ControlsInputsGetter: &ControlsInputsGetterMock{}})
+		require.NoError(t, err)
+		assert.Equal(t, CachedControlInputs, fromMock)
+	})
+
+	t.Run("same getter type with different sources", func(t *testing.T) {
+		handler := NewRequestScopedPolicyHandler("test-cluster")
+		defer handler.Close()
+		v1, v1Again, v2 := &versionedGetter{version: "v1"}, &versionedGetter{version: "v1"}, &versionedGetter{version: "v2"}
+		scan := func(g *versionedGetter) ([]armotypes.PostureExceptionPolicy, map[string][]string) {
+			exceptions, err := handler.getExceptions(context.Background(), nil, &cautils.Getters{ExceptionsGetter: g})
+			require.NoError(t, err)
+			inputs, err := handler.getControlInputs(context.Background(), nil, &cautils.Getters{ControlsInputsGetter: g})
+			require.NoError(t, err)
+			return exceptions, inputs
+		}
+
+		scan(v1)
+		exceptions, inputs := scan(v2)
+		assert.Equal(t, "v2", exceptions[0].Name)
+		assert.Equal(t, map[string][]string{"version": {"v2"}}, inputs)
+		assert.Equal(t, 2, v2.reads)
+
+		exceptions, inputs = scan(v1Again)
+		assert.Equal(t, "v1", exceptions[0].Name)
+		assert.Equal(t, map[string][]string{"version": {"v1"}}, inputs)
+		_, _ = scan(v1Again)
+		assert.Equal(t, 2, v1Again.reads, "a repeated source should be served from the cache")
+	})
+
+	t.Run("file changed at the same path", func(t *testing.T) {
+		handler := NewRequestScopedPolicyHandler("test-cluster")
+		defer handler.Close()
+		path := writeFile("changing-inputs.json", `{"k":["before"]}`)
+
+		before, err := handler.getControlInputs(context.Background(), nil, &cautils.Getters{ControlsInputsGetter: getter.NewLoadPolicy([]string{path})})
+		require.NoError(t, err)
+		assert.Equal(t, map[string][]string{"k": {"before"}}, before)
+
+		writeFile("changing-inputs.json", `{"k":["after"]}`)
+		after, err := handler.getControlInputs(context.Background(), nil, &cautils.Getters{ControlsInputsGetter: getter.NewLoadPolicy([]string{path})})
+		require.NoError(t, err)
+		assert.Equal(t, map[string][]string{"k": {"after"}}, after)
+	})
+
+	t.Run("same contents at different paths", func(t *testing.T) {
+		handler := NewRequestScopedPolicyHandler("test-cluster")
+		defer handler.Close()
+		first := getter.NewLoadPolicy([]string{writeFile("body-1.json", `[{"name":"same-body"}]`)})
+		second := getter.NewLoadPolicy([]string{writeFile("body-2.json", `[{"name":"same-body"}]`)})
+		different := getter.NewLoadPolicy([]string{writeFile("body-3.json", `[{"name":"other-body"}]`)})
+
+		_, err := handler.getExceptions(context.Background(), nil, &cautils.Getters{ExceptionsGetter: first})
+		require.NoError(t, err)
+		reused, err := handler.getExceptions(context.Background(), nil, &cautils.Getters{ExceptionsGetter: second})
+		require.NoError(t, err)
+		require.Len(t, reused, 1)
+		assert.Equal(t, "same-body", reused[0].Name)
+		_, _, read := second.ConsumedFileDigest()
+		assert.False(t, read, "identical contents should be served from the cache")
+
+		other, err := handler.getExceptions(context.Background(), nil, &cautils.Getters{ExceptionsGetter: different})
+		require.NoError(t, err)
+		require.Len(t, other, 1)
+		assert.Equal(t, "other-body", other[0].Name)
+	})
+
+	t.Run("load that cannot say what it read is not cached", func(t *testing.T) {
+		handler := NewRequestScopedPolicyHandler("test-cluster")
+		defer handler.Close()
+		unidentified := &unidentifiedLoadGetter{}
+
+		exceptions, err := handler.getExceptions(context.Background(), nil, &cautils.Getters{ExceptionsGetter: unidentified})
+		require.NoError(t, err)
+		inputs, err := handler.getControlInputs(context.Background(), nil, &cautils.Getters{ControlsInputsGetter: unidentified})
+		require.NoError(t, err)
+
+		require.Len(t, exceptions, 1)
+		assert.Equal(t, "unidentified", exceptions[0].Name)
+		assert.Equal(t, map[string][]string{"k": {"v"}}, inputs)
+		_, cached := handler.cachedExceptions.Get()
+		assert.False(t, cached)
+		_, cached = handler.cachedControlInputs.Get()
+		assert.False(t, cached)
+	})
+
+	t.Run("file changed between hashing and loading", func(t *testing.T) {
+		handler := NewRequestScopedPolicyHandler("test-cluster")
+		defer handler.Close()
+		path := writeFile("flipping.json", `[{"name":"a"}]`)
+		other := writeFile("other.json", `[{"name":"other"}]`)
+		getExceptions := func(g getter.IExceptionsGetter) []armotypes.PostureExceptionPolicy {
+			exceptions, err := handler.getExceptions(context.Background(), nil, &cautils.Getters{ExceptionsGetter: g})
+			require.NoError(t, err)
+			require.Len(t, exceptions, 1)
+			return exceptions
+		}
+
+		// An entry for another file makes the next scan hash its own file (A).
+		getExceptions(getter.NewLoadPolicy([]string{other}))
+		// The file then holds B while it is loaded, and A again afterwards.
+		flipping := &rewritingLoadPolicy{LoadPolicy: getter.NewLoadPolicy([]string{path}), path: path, during: `[{"name":"b"}]`, after: `[{"name":"a"}]`}
+		assert.Equal(t, "b", getExceptions(flipping)[0].Name)
+
+		// B was cached as B: a scan of B is served from the cache, and a scan
+		// of A is not served B.
+		withB := getter.NewLoadPolicy([]string{writeFile("holds-b.json", `[{"name":"b"}]`)})
+		assert.Equal(t, "b", getExceptions(withB)[0].Name)
+		_, _, read := withB.ConsumedFileDigest()
+		assert.False(t, read, "a scan of B should be served what was cached for B")
+		assert.Equal(t, "a", getExceptions(getter.NewLoadPolicy([]string{path}))[0].Name)
+	})
+
+	t.Run("caching disabled computes no source", func(t *testing.T) {
+		t.Setenv(PoliciesCacheTtlEnvVar, "0")
+		handler := NewRequestScopedPolicyHandler("test-cluster")
+		defer handler.Close()
+		counting := &countingSourceGetter{}
+
+		for range 2 {
+			exceptions, err := handler.getExceptions(context.Background(), nil, &cautils.Getters{ExceptionsGetter: counting})
+			require.NoError(t, err)
+			require.Len(t, exceptions, 1)
+			inputs, err := handler.getControlInputs(context.Background(), nil, &cautils.Getters{ControlsInputsGetter: counting})
+			require.NoError(t, err)
+			assert.Equal(t, map[string][]string{"k": {"v"}}, inputs)
+		}
+		assert.Zero(t, counting.sources)
+		assert.Equal(t, 4, counting.reads)
+	})
+
+	t.Run("caching enabled reuses a counted source", func(t *testing.T) {
+		handler := NewRequestScopedPolicyHandler("test-cluster")
+		defer handler.Close()
+		counting := &countingSourceGetter{}
+
+		for range 2 {
+			_, err := handler.getExceptions(context.Background(), nil, &cautils.Getters{ExceptionsGetter: counting})
+			require.NoError(t, err)
+			_, err = handler.getControlInputs(context.Background(), nil, &cautils.Getters{ControlsInputsGetter: counting})
+			require.NoError(t, err)
+		}
+		assert.Positive(t, counting.sources)
+		assert.Equal(t, 2, counting.reads, "the second scan should be served from the cache")
+	})
+
+	t.Run("KS Cloud accounts", func(t *testing.T) {
+		requests := map[string]int{}
+		var mu sync.Mutex
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			account := r.URL.Query().Get("customerGUID")
+			mu.Lock()
+			requests[account]++
+			mu.Unlock()
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode([]armotypes.PostureExceptionPolicy{{PortalBase: armotypes.PortalBase{Name: "exception-of-" + account}}})
+		}))
+		defer server.Close()
+		adapter := func(account string) *getter.KSCloudAPIAdapter {
+			api, err := v1.NewKSCloudAPI(server.URL, "", account, "access-key")
+			require.NoError(t, err)
+			return &getter.KSCloudAPIAdapter{KSCloudAPI: api}
+		}
+		handler := NewRequestScopedPolicyHandler("test-cluster")
+		defer handler.Close()
+		scan := func(account string) string {
+			exceptions, err := handler.getExceptions(context.Background(), nil, &cautils.Getters{ExceptionsGetter: adapter(account)})
+			require.NoError(t, err)
+			require.Len(t, exceptions, 1)
+			return exceptions[0].Name
+		}
+
+		assert.Equal(t, "exception-of-account-a", scan("account-a"))
+		assert.Equal(t, "exception-of-account-a", scan("account-a"))
+		assert.Equal(t, "exception-of-account-b", scan("account-b"))
+		mu.Lock()
+		defer mu.Unlock()
+		assert.Equal(t, map[string]int{"account-a": 1, "account-b": 1}, requests, "the same account reuses the cache, another account does not")
+	})
+
+	t.Run("missing file is not cached", func(t *testing.T) {
+		handler := NewRequestScopedPolicyHandler("test-cluster")
+		defer handler.Close()
+		missingGetters := &cautils.Getters{
+			ExceptionsGetter:     getter.NewLoadPolicy([]string{missing}),
+			ControlsInputsGetter: getter.NewLoadPolicy([]string{missing}),
+		}
+
+		_, err := handler.getExceptions(context.Background(), nil, missingGetters)
+		require.Error(t, err)
+		_, err = handler.getControlInputs(context.Background(), nil, missingGetters)
+		require.Error(t, err)
+		_, cached := handler.cachedExceptions.Get()
+		assert.False(t, cached)
+		_, cached = handler.cachedControlInputs.Get()
+		assert.False(t, cached)
+
+		// The same missing source still fails rather than reusing another entry.
+		_, err = handler.getExceptions(context.Background(), nil, &cautils.Getters{ExceptionsGetter: getter.NewLoadPolicy([]string{exceptionsFile})})
+		require.NoError(t, err)
+		_, err = handler.getExceptions(context.Background(), nil, missingGetters)
+		assert.Error(t, err)
+	})
+}
+
+// versionedGetter is one getter type that can read different sources, as a
+// release getter pinned to different versions does.
+type versionedGetter struct {
+	version string
+	reads   int
+}
+
+func (g *versionedGetter) CacheSource() string { return "versioned:" + g.version }
+
+func (g *versionedGetter) GetExceptions(context.Context, string) ([]armotypes.PostureExceptionPolicy, error) {
+	g.reads++
+	return []armotypes.PostureExceptionPolicy{{PortalBase: armotypes.PortalBase{Name: g.version}}}, nil
+}
+
+func (g *versionedGetter) GetControlsInputs(context.Context, string) (map[string][]string, error) {
+	g.reads++
+	return map[string][]string{"version": {g.version}}, nil
+}
+
+// TestPolicyCacheProvenanceNamesTheCurrentFile pins that when two files with
+// the same contents share a cache entry, each scan's runner input names its
+// own file, and replaying it does not change the cached entry.
+func TestPolicyCacheProvenanceNamesTheCurrentFile(t *testing.T) {
+	t.Setenv(PoliciesCacheTtlEnvVar, "5m")
+	// Provenance only records paths inside the working directory.
+	dir, err := os.MkdirTemp(".", "cache-provenance-")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	write := func(name, content string) string {
+		path := filepath.Join(dir, name)
+		require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+		return path
+	}
+	exceptionsA := write("exceptions-a.json", `[{"name":"shared"}]`)
+	exceptionsB := write("exceptions-b.json", `[{"name":"shared"}]`)
+	inputsA := write("controls-inputs-a.json", `{"k":["shared"]}`)
+	inputsB := write("controls-inputs-b.json", `{"k":["shared"]}`)
+	newScanInfo := func() *cautils.ScanInfo {
+		return &cautils.ScanInfo{ScanContract: &reporthandlingv2.ScanContractMetadata{Contract: "ci"}}
+	}
+	inputsByRole := func(scanInfo *cautils.ScanInfo) map[string]reporthandlingv2.ScanContractRunnerInput {
+		out := map[string]reporthandlingv2.ScanContractRunnerInput{}
+		for _, input := range scanInfo.ScanContract.RunnerInputs {
+			out[input.Role] = input
+		}
+		return out
+	}
+	handler := NewRequestScopedPolicyHandler("test-cluster")
+	defer handler.Close()
+	scan := func(exceptionsPath, inputsPath string) (*cautils.ScanInfo, *cautils.Getters) {
+		scanInfo := newScanInfo()
+		getters := &cautils.Getters{
+			ExceptionsGetter:     getter.NewLoadPolicy([]string{exceptionsPath}),
+			ControlsInputsGetter: getter.NewLoadPolicy([]string{inputsPath}),
+		}
+		exceptions, err := handler.getExceptions(context.Background(), scanInfo, getters)
+		require.NoError(t, err)
+		require.Len(t, exceptions, 1)
+		assert.Equal(t, "shared", exceptions[0].Name)
+		inputs, err := handler.getControlInputs(context.Background(), scanInfo, getters)
+		require.NoError(t, err)
+		assert.Equal(t, map[string][]string{"k": {"shared"}}, inputs)
+		return scanInfo, getters
+	}
+
+	first, _ := scan(exceptionsA, inputsA)
+	firstInputs := inputsByRole(first)
+	second, secondGetters := scan(exceptionsB, inputsB)
+	secondInputs := inputsByRole(second)
+
+	for _, g := range []any{secondGetters.ExceptionsGetter, secondGetters.ControlsInputsGetter} {
+		_, _, read := g.(getter.ConsumedFileDigester).ConsumedFileDigest()
+		assert.False(t, read, "the second scan should be served from the cache")
+	}
+	for role, files := range map[string][2]string{
+		"exceptions":     {exceptionsA, exceptionsB},
+		"controlsConfig": {inputsA, inputsB},
+	} {
+		assert.Equal(t, filepath.ToSlash(filepath.Clean(files[0])), firstInputs[role].Source, role)
+		assert.Equal(t, filepath.ToSlash(filepath.Clean(files[1])), secondInputs[role].Source, role)
+		assert.Equal(t, firstInputs[role].Digest, secondInputs[role].Digest, role)
+		assert.NotEmpty(t, secondInputs[role].Digest, role)
+	}
+	assert.Equal(t, firstInputs, inputsByRole(first), "the first scan's provenance is unchanged")
+	cachedExceptions, ok := handler.cachedExceptions.Get()
+	require.True(t, ok)
+	assert.Equal(t, firstInputs["exceptions"], cachedExceptions.runnerInput, "the cached entry is unchanged")
+	cachedInputs, ok := handler.cachedControlInputs.Get()
+	require.True(t, ok)
+	assert.Equal(t, firstInputs["controlsConfig"], cachedInputs.runnerInput, "the cached entry is unchanged")
+}
+
+// unidentifiedLoadGetter loads values but cannot say what it read.
+type unidentifiedLoadGetter struct{}
+
+func (g *unidentifiedLoadGetter) LoadedCacheSource() (string, bool) { return "", false }
+
+func (g *unidentifiedLoadGetter) GetExceptions(context.Context, string) ([]armotypes.PostureExceptionPolicy, error) {
+	return []armotypes.PostureExceptionPolicy{{PortalBase: armotypes.PortalBase{Name: "unidentified"}}}, nil
+}
+
+func (g *unidentifiedLoadGetter) GetControlsInputs(context.Context, string) (map[string][]string, error) {
+	return map[string][]string{"k": {"v"}}, nil
+}
+
+// countingSourceGetter counts how often its source is computed and its
+// values are read.
+type countingSourceGetter struct{ sources, reads int }
+
+func (g *countingSourceGetter) CacheSource() string {
+	g.sources++
+	return "counting"
+}
+
+func (g *countingSourceGetter) GetExceptions(context.Context, string) ([]armotypes.PostureExceptionPolicy, error) {
+	g.reads++
+	return []armotypes.PostureExceptionPolicy{{PortalBase: armotypes.PortalBase{Name: "counted"}}}, nil
+}
+
+func (g *countingSourceGetter) GetControlsInputs(context.Context, string) (map[string][]string, error) {
+	g.reads++
+	return map[string][]string{"k": {"v"}}, nil
+}
+
+// rewritingLoadPolicy writes during to its file just before loading it and
+// after just after, like a file edited while a scan reads it.
+type rewritingLoadPolicy struct {
+	*getter.LoadPolicy
+	path, during, after string
+}
+
+func (g *rewritingLoadPolicy) GetExceptions(ctx context.Context, clusterName string) ([]armotypes.PostureExceptionPolicy, error) {
+	if err := os.WriteFile(g.path, []byte(g.during), 0o600); err != nil {
+		return nil, err
+	}
+	defer func() { _ = os.WriteFile(g.path, []byte(g.after), 0o600) }()
+	return g.LoadPolicy.GetExceptions(ctx, clusterName)
 }
 
 type DynamicPolicyGetterMock struct{}
