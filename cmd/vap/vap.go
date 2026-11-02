@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"regexp"
 	"strings"
 	"time"
@@ -82,12 +83,16 @@ func getDeployLibraryCmd() *cobra.Command {
 		Use:   "deploy-library",
 		Short: "Install Kubescape CEL admission policy library",
 		Long:  ``,
+		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if timeout < 0 {
+				return fmt.Errorf("timeout cannot be negative: %v", timeout)
+			}
 			content, err := deployLibrary(fromRelease, timeout)
 			if err != nil {
 				return err
 			}
-			return writeOutput(content, outputFile)
+			return writeOutput(content, outputFile, cmd.OutOrStdout())
 		},
 	}
 	cmd.Flags().StringVarP(&outputFile, "output", "o", "", "Write output to file instead of stdout")
@@ -112,6 +117,7 @@ func getCreatePolicyBindingCmd() *cobra.Command {
 		Use:   "create-policy-binding",
 		Short: "Create a policy binding",
 		Long:  ``,
+		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			result, err := BuildPolicyBinding(BindingOptions{
 				Name:               policyBindingName,
@@ -128,7 +134,7 @@ func getCreatePolicyBindingCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return writeOutput(result.Manifest, outputFile)
+			return writeOutput(result.Manifest, outputFile, cmd.OutOrStdout())
 		},
 	}
 	// Must specify the name of the policy binding
@@ -401,7 +407,7 @@ func downloadFileToString(url string, timeout time.Duration) (string, error) {
 	return bodyString, nil
 }
 
-func writeOutput(content string, outputFile string) (retErr error) {
+func writeOutput(content string, outputFile string, out ...io.Writer) (retErr error) {
 	if outputFile != "" {
 		w, err := printer.GetWriterNoFallback(outputFile)
 		if err != nil {
@@ -415,8 +421,12 @@ func writeOutput(content string, outputFile string) (retErr error) {
 		_, err = io.WriteString(w, content)
 		return err
 	}
-	fmt.Print(content)
-	return nil
+	var destination io.Writer = os.Stdout
+	if len(out) > 0 && out[0] != nil {
+		destination = out[0]
+	}
+	_, err := io.WriteString(destination, content)
+	return err
 }
 
 func isValidK8sObjectName(name string) error {
