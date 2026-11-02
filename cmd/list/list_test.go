@@ -1,7 +1,9 @@
 package list
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -49,6 +51,9 @@ func TestGetListCmd(t *testing.T) {
 
 	err = listCmd.Args(&cobra.Command{}, []string{"frameworks"})
 	assert.Nil(t, err)
+
+	err = listCmd.Args(&cobra.Command{Use: "list"}, []string{"frameworks", "unexpected"})
+	assert.EqualError(t, err, `unknown command "unexpected" for "list"`)
 
 	err = listCmd.RunE(&cobra.Command{}, []string{"some-value"})
 	assert.ErrorContains(t, err, "invalid target")
@@ -321,5 +326,145 @@ func TestGetListCmd_FormatValidation(t *testing.T) {
 				assert.Equal(t, tt.wantFormat, recorder.received.Format)
 			}
 		})
+	}
+}
+
+func TestGetListCmd_RejectsUnexpectedArgs(t *testing.T) {
+	tests := []struct {
+		name    string
+		args    []string
+		wantErr string
+	}{
+		{
+			name:    "unexpected arg on controls",
+			args:    []string{"controls", "extra"},
+			wantErr: `unknown command "extra" for "list"`,
+		},
+		{
+			name:    "unexpected arg on frameworks",
+			args:    []string{"frameworks", "nsa"},
+			wantErr: `unknown command "nsa" for "list"`,
+		},
+		{
+			name:    "unexpected arg on controls-config",
+			args:    []string{"controls-config", "unexpected"},
+			wantErr: `unknown command "unexpected" for "list"`,
+		},
+		{
+			name:    "unexpected arg on exceptions",
+			args:    []string{"exceptions", "unexpected"},
+			wantErr: `unknown command "unexpected" for "list"`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			listCmd := GetListCmd(&recordingListKubescape{})
+			listCmd.SilenceUsage = true
+			listCmd.SilenceErrors = true
+			listCmd.SetArgs(tt.args)
+
+			err := listCmd.Execute()
+			require.Error(t, err)
+			assert.EqualError(t, err, tt.wantErr)
+		})
+	}
+}
+
+type stubListKubescapeWithData struct {
+	meta.IKubescape
+	result *metav1.ListResult
+}
+
+func (s *stubListKubescapeWithData) Context() context.Context {
+	return context.Background()
+}
+
+func (s *stubListKubescapeWithData) List(listPolicies *metav1.ListPolicies) (*metav1.ListResult, error) {
+	return s.result, nil
+}
+
+type failingListWriter struct {
+	err error
+}
+
+func (w failingListWriter) Write(p []byte) (n int, err error) {
+	return 0, w.err
+}
+
+func TestGetListCmd_HonorsCommandOutputWriter(t *testing.T) {
+	stubData := &metav1.ListResult{
+		Names: []string{"nsa", "mitre"},
+		Controls: []metav1.ControlListEntry{
+			{ID: "C-0001", Name: "Forbidden Registries", Frameworks: []string{"NSA"}},
+		},
+		ControlsConfig: []metav1.ControlConfigEntry{
+			{Name: "imageRepositoryAllowList", Title: "Allowed Images", Values: []string{"quay.io"}, Controls: []string{"C-0001"}, Description: "Desc"},
+		},
+	}
+
+	formats := []string{"pretty-print", "json", "yaml", "csv"}
+	targets := []string{"frameworks", "controls", "controls-config"}
+
+	for _, target := range targets {
+		for _, format := range formats {
+			t.Run(target+"_"+format, func(t *testing.T) {
+				ks := &stubListKubescapeWithData{result: stubData}
+				cmd := GetListCmd(ks)
+				cmd.SilenceUsage = true
+				cmd.SilenceErrors = true
+
+				var buf bytes.Buffer
+				cmd.SetOut(&buf)
+				cmd.SetArgs([]string{target, "--format", format})
+
+				err := cmd.Execute()
+				require.NoError(t, err)
+				assert.NotEmpty(t, buf.String(), "output should be written to configured command writer")
+
+				switch target {
+				case "frameworks":
+					assert.Contains(t, buf.String(), "nsa")
+				case "controls":
+					assert.Contains(t, buf.String(), "C-0001")
+				case "controls-config":
+					assert.Contains(t, buf.String(), "imageRepositoryAllowList")
+				}
+			})
+		}
+	}
+}
+
+func TestGetListCmd_PropagatesWriterError(t *testing.T) {
+	stubData := &metav1.ListResult{
+		Names: []string{"nsa"},
+		Controls: []metav1.ControlListEntry{
+			{ID: "C-0001", Name: "Forbidden Registries", Frameworks: []string{"NSA"}},
+		},
+		ControlsConfig: []metav1.ControlConfigEntry{
+			{Name: "imageRepositoryAllowList", Title: "Allowed Images", Values: []string{"quay.io"}, Controls: []string{"C-0001"}, Description: "Desc"},
+		},
+	}
+
+	writeErr := errors.New("simulated output write failure")
+
+	formats := []string{"pretty-print", "json", "yaml", "csv"}
+	targets := []string{"frameworks", "controls", "controls-config"}
+
+	for _, target := range targets {
+		for _, format := range formats {
+			t.Run(target+"_"+format, func(t *testing.T) {
+				ks := &stubListKubescapeWithData{result: stubData}
+				cmd := GetListCmd(ks)
+				cmd.SilenceUsage = true
+				cmd.SilenceErrors = true
+				cmd.SetOut(failingListWriter{err: writeErr})
+				cmd.SetArgs([]string{target, "--format", format})
+
+				err := cmd.Execute()
+				require.Error(t, err)
+				assert.ErrorIs(t, err, writeErr)
+			})
+		}
 	}
 }

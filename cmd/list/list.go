@@ -51,6 +51,9 @@ func GetListCmd(ks meta.IKubescape) *cobra.Command {
 			if len(args) < 1 {
 				return fmt.Errorf("policy type required, supported: %s", supported)
 			}
+			if len(args) > 1 {
+				return fmt.Errorf("unknown command %q for %q", args[1], cmd.CommandPath())
+			}
 			if !slices.Contains(core.ListSupportActions(), args[0]) {
 				return fmt.Errorf("invalid parameter '%s'. Supported parameters: %s", args[0], supported)
 			}
@@ -74,7 +77,7 @@ func GetListCmd(ks meta.IKubescape) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := core.PrintListResult(ks.Context(), result, listPolicies.Target, listPolicies.Format); err != nil {
+			if err := core.PrintListResult(ks.Context(), result, listPolicies.Target, listPolicies.Format, cmd.OutOrStdout()); err != nil {
 				return err
 			}
 			return nil
