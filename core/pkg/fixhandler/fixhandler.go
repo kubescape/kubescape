@@ -1276,7 +1276,7 @@ func resolveColorLevel() gchalk.ColorLevel {
 		if strings.EqualFold(val, "false") {
 			return gchalk.LevelNone
 		}
-		if n, err := strconv.Atoi(val); err == nil {
+		if n, err := strconv.Atoi(val); err == nil || errors.Is(err, strconv.ErrRange) {
 			if n == 0 {
 				return gchalk.LevelNone
 			}

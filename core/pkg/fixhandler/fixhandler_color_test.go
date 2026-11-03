@@ -335,6 +335,10 @@ func TestShouldColor_EnvPrecedence(t *testing.T) {
 	assert.True(t, shouldColor(), "FORCE_COLOR=2 must enable color")
 	t.Setenv("FORCE_COLOR", "3")
 	assert.True(t, shouldColor(), "FORCE_COLOR=3 must enable color")
+
+	// FORCE_COLOR with integer overflow still forces color
+	t.Setenv("FORCE_COLOR", "9223372036854775808")
+	assert.True(t, shouldColor(), "overflowing nonzero FORCE_COLOR must enable color")
 }
 
 func TestShouldColor_AutoDetectTTY(t *testing.T) {
@@ -402,6 +406,7 @@ func TestColor_Subprocess(t *testing.T) {
 		outChanges := h.formatExpectedChanges(toFix)
 		outUnfixed := h.formatUnfixedControls(PhasePlanned)
 		fmt.Print(outChanges)
+		fmt.Println("---UNFIXED---")
 		fmt.Print(outUnfixed)
 		os.Exit(0)
 	}
@@ -494,7 +499,9 @@ func TestColor_Subprocess(t *testing.T) {
 
 			outStr := string(out)
 			if tc.wantColor {
-				assert.Contains(t, outStr, "\x1b[", "expected ANSI escape sequence in output when color is enabled")
+				_, unfixedOut, found := strings.Cut(outStr, "---UNFIXED---")
+				require.True(t, found, "expected unfixed controls section in subprocess output")
+				assert.Contains(t, unfixedOut, "\x1b[", "expected ANSI escape sequence in unfixed controls output when color is enabled")
 				assert.Contains(t, outStr, "File:")
 				assert.Contains(t, outStr, "C-0012")
 			} else {
