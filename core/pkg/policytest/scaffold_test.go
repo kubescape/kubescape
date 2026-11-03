@@ -164,6 +164,63 @@ func TestScaffold_RefusesExistingRuleWithoutForce(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestScaffold_RefusesExistingFileWithoutForce(t *testing.T) {
+	for _, existing := range []string{
+		ruledir.RegoFileName,
+		ruledir.MetadataFileName,
+		filepath.Join("test", flaggedCaseName, "input", "resource.yaml"),
+		filepath.Join("test", cleanCaseName, "input", "resource.yaml"),
+	} {
+		t.Run(existing, func(t *testing.T) {
+			dir := filepath.Join(t.TempDir(), "partial-rule")
+			path := filepath.Join(dir, existing)
+			require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+			content := []byte("written by hand\n")
+			require.NoError(t, os.WriteFile(path, content, 0o600))
+
+			_, err := Scaffold(context.Background(), dir, ScaffoldOptions{})
+			require.ErrorContains(t, err, "--force")
+
+			got, err := os.ReadFile(path)
+			require.NoError(t, err)
+			assert.Equal(t, content, got, "an existing file must not be overwritten without --force")
+
+			_, err = Scaffold(context.Background(), dir, ScaffoldOptions{Force: true})
+			require.NoError(t, err)
+		})
+	}
+}
+
+func TestScaffold_RefusesExistingExpectationWithoutForce(t *testing.T) {
+	for _, caseName := range []string{flaggedCaseName, cleanCaseName, "extra"} {
+		t.Run(caseName, func(t *testing.T) {
+			dir := filepath.Join(t.TempDir(), "partial-rule")
+			caseDir := filepath.Join(dir, "test", caseName)
+			require.NoError(t, os.MkdirAll(filepath.Join(caseDir, "input"), 0o755))
+			require.NoError(t, os.WriteFile(filepath.Join(caseDir, "input", "resource.yaml"), []byte(extraCaseManifest), 0o600))
+			expected := filepath.Join(caseDir, expectedFileName)
+			content := []byte(`[{"alertMessage": "stale"}]` + "\n")
+			require.NoError(t, os.WriteFile(expected, content, 0o600))
+			if caseName != "extra" {
+				// Leave only the expectation, so the input check cannot be what refuses.
+				require.NoError(t, os.RemoveAll(filepath.Join(caseDir, "input")))
+			}
+
+			_, err := Scaffold(context.Background(), dir, ScaffoldOptions{})
+			require.ErrorContains(t, err, "--force")
+			assert.NoFileExists(t, filepath.Join(dir, ruledir.RegoFileName), "nothing should be written when init refuses")
+
+			got, err := os.ReadFile(expected)
+			require.NoError(t, err)
+			assert.Equal(t, content, got, "an existing expectation must not be overwritten without --force")
+
+			written, err := Scaffold(context.Background(), dir, ScaffoldOptions{Force: true})
+			require.NoError(t, err)
+			assert.Contains(t, written, expected, "--force must rewrite the expectation")
+		})
+	}
+}
+
 func TestScaffold_UsesSuppliedDescriptionAndRemediation(t *testing.T) {
 	dir := scaffoldRule(t, "custom-text", ScaffoldOptions{
 		Description: "fails when the workload is bad",

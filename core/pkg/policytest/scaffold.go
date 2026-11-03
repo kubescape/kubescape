@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -148,6 +150,31 @@ func Scaffold(ctx context.Context, dir string, opts ScaffoldOptions) ([]string, 
 		filepath.Join(dir, ruledir.MetadataFileName):                          metadata,
 		filepath.Join(dir, "test", flaggedCaseName, "input", "resource.yaml"): template.manifest(name, containersBlock(true)),
 		filepath.Join(dir, "test", cleanCaseName, "input", "resource.yaml"):   template.manifest(name, containersBlock(false)),
+	}
+
+	// ruledir.Is only recognizes a complete rule, so a directory holding some
+	// of these files, such as a hand-written raw.rego, is checked file by file.
+	// That includes the expected.json of every case, generated or already
+	// present, since each one is rewritten from the rule's output below.
+	if !opts.Force {
+		protected := slices.Collect(maps.Keys(files))
+		protected = append(protected,
+			filepath.Join(dir, "test", flaggedCaseName, expectedFileName),
+			filepath.Join(dir, "test", cleanCaseName, expectedFileName),
+		)
+		existingCases, err := discoverCases(filepath.Join(dir, "test"))
+		if err != nil {
+			return nil, err
+		}
+		for _, c := range existingCases {
+			protected = append(protected, filepath.Join(c.Dir, expectedFileName))
+		}
+		slices.Sort(protected)
+		for _, path := range slices.Compact(protected) {
+			if _, err := os.Lstat(path); err == nil {
+				return nil, fmt.Errorf("%q already exists, use --force to overwrite", path)
+			}
+		}
 	}
 
 	written := make([]string, 0, len(files))
