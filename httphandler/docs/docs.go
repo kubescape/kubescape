@@ -13,7 +13,14 @@
 //	- application/json
 //
 //	Security:
-//	- basic
+//	- bearer
+//
+//	SecurityDefinitions:
+//	bearer:
+//	     type: apiKey
+//	     name: Authorization
+//	     in: header
+//	     description: Kubernetes service-account token with audience kubescape.io
 //
 // swagger:meta
 package docs

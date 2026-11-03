@@ -541,4 +541,12 @@ responses:
         type: object
 schemes:
 - http
+security:
+- bearer: []
+securityDefinitions:
+  bearer:
+    description: Kubernetes service-account token with audience kubescape.io
+    in: header
+    name: Authorization
+    type: apiKey
 swagger: "2.0"
