@@ -176,7 +176,6 @@ func (hc *HelmChart) GetWorkloads(values map[string]any) (map[string][]workloadi
 
 // GetWorkloadsWithOptions renders chart template using the provided values and Helm release options
 // (release name/namespace), returning a map of source (absolute) file path to its workloads.
-// Charts that reference .Release.Name or .Release.Namespace require these options to render.
 // Equivalent to GetWorkloadsWithCapabilities(values, releaseOpts, HelmCapabilityOptions{}).
 func (hc *HelmChart) GetWorkloadsWithOptions(values map[string]any, releaseOpts helmchartutil.ReleaseOptions) (map[string][]workloadinterface.IMetadata, []error) {
 	return hc.GetWorkloadsWithCapabilities(values, releaseOpts, HelmCapabilityOptions{})
@@ -186,10 +185,23 @@ func (hc *HelmChart) GetWorkloadsWithOptions(values map[string]any, releaseOpts 
 // and the extra API versions that templates read from .Capabilities taken from capOpts.
 // A zero capOpts renders with Helm's library defaults, except for the Kubernetes version of a
 // chart that declares a kubeVersion constraint (see defaultKubeVersion).
+// Unset release options use helm template's installation defaults.
 func (hc *HelmChart) GetWorkloadsWithCapabilities(values map[string]any, releaseOpts helmchartutil.ReleaseOptions, capOpts HelmCapabilityOptions) (map[string][]workloadinterface.IMetadata, []error) {
 	caps, err := hc.capabilities(capOpts)
 	if err != nil {
 		return nil, []error{err}
+	}
+	if releaseOpts.Name == "" {
+		releaseOpts.Name = "release-name"
+	}
+	if releaseOpts.Namespace == "" {
+		releaseOpts.Namespace = "default"
+	}
+	if releaseOpts.Revision == 0 {
+		releaseOpts.Revision = 1
+	}
+	if !releaseOpts.IsInstall && !releaseOpts.IsUpgrade {
+		releaseOpts.IsInstall = true
 	}
 	vals, err := helmchartutil.ToRenderValues(hc.chart, values, releaseOpts, caps)
 	if err != nil {

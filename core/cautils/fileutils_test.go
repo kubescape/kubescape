@@ -414,15 +414,15 @@ func TestLoadResourcesFromHelmCharts(t *testing.T) {
 		case "serviceaccount.yaml":
 			assert.Equal(t, "/v1//ServiceAccount/kubescape-discovery", getRelativePath(w.GetID()))
 		case "clusterrole.yaml":
-			assert.Equal(t, "rbac.authorization.k8s.io/v1//ClusterRole/-kubescape", getRelativePath(w.GetID()))
+			assert.Equal(t, "rbac.authorization.k8s.io/v1//ClusterRole/release-name-kubescape", getRelativePath(w.GetID()))
 		case "cronjob.yaml":
-			assert.Equal(t, "batch/v1//CronJob/-kubescape", getRelativePath(w.GetID()))
+			assert.Equal(t, "batch/v1//CronJob/release-name-kubescape", getRelativePath(w.GetID()))
 		case "role.yaml":
-			assert.Equal(t, "rbac.authorization.k8s.io/v1//Role/-kubescape", getRelativePath(w.GetID()))
+			assert.Equal(t, "rbac.authorization.k8s.io/v1//Role/release-name-kubescape", getRelativePath(w.GetID()))
 		case "rolebinding.yaml":
-			assert.Equal(t, "rbac.authorization.k8s.io/v1//RoleBinding/-kubescape", getRelativePath(w.GetID()))
+			assert.Equal(t, "rbac.authorization.k8s.io/v1//RoleBinding/release-name-kubescape", getRelativePath(w.GetID()))
 		case "clusterrolebinding.yaml":
-			assert.Equal(t, "rbac.authorization.k8s.io/v1//ClusterRoleBinding/-kubescape", getRelativePath(w.GetID()))
+			assert.Equal(t, "rbac.authorization.k8s.io/v1//ClusterRoleBinding/release-name-kubescape", getRelativePath(w.GetID()))
 		default:
 			assert.Failf(t, "missing case for file: %s", filepath.Base(file))
 		}
