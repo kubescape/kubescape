@@ -81,11 +81,19 @@ func (ks *Kubescape) Fix(fixInfo *metav1.FixInfo) error {
 		}
 
 		skipKustomize := false
-		if !fixInfo.NoConfirm && fixhandler.HasEmittableKustomizePatches(helmSuggestions) {
+		kustomizeConfirmed := fixInfo.NoConfirm
+		chartCache := fixhandler.NewChartCache()
+		if !fixInfo.NoConfirm && fixhandler.HasEmittableKustomizePatches(helmSuggestions, chartCache) {
 			if entries, err := os.ReadDir(fixInfo.KustomizeDir); err == nil && len(entries) > 0 {
 				hasKustFile := false
+				plannedFiles := fixhandler.PlannedKustomizeFiles(helmSuggestions, chartCache)
+				plannedMap := make(map[string]bool, len(plannedFiles))
+				for _, pf := range plannedFiles {
+					plannedMap[pf] = true
+				}
 				for _, e := range entries {
-					if e.Name() == "kustomization.yaml" || e.Name() == "base.yaml" {
+					name := e.Name()
+					if name == "kustomization.yaml" || name == "base.yaml" || plannedMap[name] || strings.HasSuffix(name, "-patch.yaml") {
 						hasKustFile = true
 						break
 					}
@@ -98,6 +106,8 @@ func (ks *Kubescape) Fix(fixInfo *metav1.FixInfo) error {
 						if _, err := fmt.Fscanln(os.Stdin, &resp); err != nil || strings.ToLower(strings.TrimSpace(resp)) != "y" {
 							logger.L().Info("Kustomize patch generation cancelled by user.")
 							skipKustomize = true
+						} else {
+							kustomizeConfirmed = true
 						}
 					} else {
 						return fmt.Errorf("directory %q already contains Kustomize files; pass --no-confirm to overwrite them", fixInfo.KustomizeDir)
@@ -107,7 +117,7 @@ func (ks *Kubescape) Fix(fixInfo *metav1.FixInfo) error {
 		}
 
 		if !skipKustomize {
-			emitRes, err := fixhandler.EmitKustomizePatch(helmSuggestions, fixInfo.KustomizeDir)
+			emitRes, err := fixhandler.EmitKustomizePatch(helmSuggestions, fixInfo.KustomizeDir, fixhandler.WithOverwrite(kustomizeConfirmed), fixhandler.WithChartCache(chartCache))
 			if err != nil {
 				logger.L().Error("failed to write Kustomize patches", helpers.Error(err))
 				return fmt.Errorf("failed to write Kustomize patches: %w", err)
