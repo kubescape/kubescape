@@ -70,3 +70,15 @@ func TestRunPrerequisites_CollectClusterDataErrorAborts(t *testing.T) {
 	assert.ErrorContains(t, err, "failed to collect cluster data")
 	assert.ErrorContains(t, err, "pods is forbidden")
 }
+
+func TestGetPreReqCmd_RejectsUnexpectedArgs(t *testing.T) {
+	mockKubescape := &mocks.MockIKubescape{}
+	cmd := GetPreReqCmd(mockKubescape)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+	cmd.SetArgs([]string{"unexpected"})
+
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `unknown command "unexpected" for "prerequisites"`)
+}
