@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -47,6 +48,10 @@ type HTTPHandler struct {
 	scanRequestChan     chan *scanRequestParams
 	workerDone          chan struct{}
 	maxRequestBodyBytes int64
+	// metricsScanSlot admits one /v1/metrics scan at a time. Metrics is
+	// unauthenticated, so this keeps scrapes to one slot of the queue shared
+	// with POST /v1/scan.
+	metricsScanSlot chan struct{}
 }
 
 func NewHTTPHandler(offline bool) *HTTPHandler {
@@ -105,6 +110,17 @@ func (handler *HTTPHandler) enqueueScan(req *scanRequestParams, cancel context.C
 	return err
 }
 
+// tryAcquireMetricsScan takes the metrics scan slot without blocking. On
+// success it returns a release function that is safe to call more than once.
+func (handler *HTTPHandler) tryAcquireMetricsScan() (release func(), ok bool) {
+	select {
+	case handler.metricsScanSlot <- struct{}{}:
+		return sync.OnceFunc(func() { <-handler.metricsScanSlot }), true
+	default:
+		return nil, false
+	}
+}
+
 func (handler *HTTPHandler) writeAdmissionError(w http.ResponseWriter, err error) {
 	status := http.StatusTooManyRequests
 	if errors.Is(err, errShuttingDown) {
@@ -121,6 +137,7 @@ func newHTTPHandler(offline bool, queueCapacity int, maxRequestBodyBytes int64) 
 		scanRequestChan:     make(chan *scanRequestParams, queueCapacity),
 		workerDone:          make(chan struct{}),
 		maxRequestBodyBytes: maxRequestBodyBytes,
+		metricsScanSlot:     make(chan struct{}, 1),
 	}
 	go func() {
 		defer close(handler.workerDone)

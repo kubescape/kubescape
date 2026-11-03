@@ -10,6 +10,9 @@ import (
 var (
 	errShuttingDown  = errors.New("server is shutting down")
 	errScanQueueFull = errors.New("scan queue is full; retry the request later")
+	// errMetricsScanInFlight rejects a scrape while another metrics scan holds
+	// the single metrics admission slot.
+	errMetricsScanInFlight = errors.New("a metrics scan is already running; retry the request later")
 )
 
 type scanEntry struct {
