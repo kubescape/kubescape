@@ -1,6 +1,7 @@
 package download
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
 	"slices"
@@ -78,6 +79,9 @@ func GetDownloadCmd(ks meta.IKubescape) *cobra.Command {
 				if len(args) > 2 {
 					return fmt.Errorf("accepts at most 2 arg(s), received %d", len(args))
 				}
+				if len(args) == 2 && strings.TrimSpace(args[1]) == "" && (target == core.TargetFramework || target == core.TargetControl) {
+					return fmt.Errorf("name cannot be empty for %s download", target)
+				}
 			default:
 				if len(args) > 1 {
 					return fmt.Errorf("accepts at most 1 arg(s) for %s, received %d", args[0], len(args))
@@ -102,6 +106,9 @@ func GetDownloadCmd(ks meta.IKubescape) *cobra.Command {
 					return fmt.Errorf("name cannot be empty for %s download", downloadInfo.Target)
 				}
 				downloadInfo.Identifier = identifier
+			}
+			if ks == nil {
+				return errors.New("uninitialized kubescape interface")
 			}
 			_, err := ks.Download(&downloadInfo)
 			if err != nil {

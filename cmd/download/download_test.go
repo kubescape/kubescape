@@ -469,6 +469,16 @@ func TestDownloadCmd_RejectsUnexpectedArgs(t *testing.T) {
 			args:        []string{"control", "C-0001", "extra"},
 			expectedErr: "accepts at most 2 arg(s), received 3",
 		},
+		{
+			name:        "empty name on framework rejected in args",
+			args:        []string{"framework", ""},
+			expectedErr: "name cannot be empty for framework download",
+		},
+		{
+			name:        "whitespace name on control rejected in args",
+			args:        []string{"control", "   "},
+			expectedErr: "name cannot be empty for control download",
+		},
 	}
 
 	for _, tt := range tests {
@@ -501,4 +511,60 @@ func TestDownloadCmd_ControlsInputsAcceptsCustomPath(t *testing.T) {
 	require.NotNil(t, ks.captured)
 	assert.Equal(t, core.TargetControlsInputs, ks.captured.Target)
 	assert.Equal(t, "./inputs.json", ks.captured.Identifier)
+}
+
+// TestDownloadCmd_PreservesWhitespaceInOutputPath verifies that whitespace
+// in the user-supplied --output path is preserved verbatim without trimming.
+func TestDownloadCmd_PreservesWhitespaceInOutputPath(t *testing.T) {
+	tests := []struct {
+		name         string
+		outputFlag   string
+		wantPath     string
+		wantFileName string
+	}{
+		{
+			name:         "directory with trailing whitespace",
+			outputFlag:   "/tmp/policies ",
+			wantPath:     "/tmp/policies ",
+			wantFileName: "",
+		},
+		{
+			name:         "all-whitespace directory path",
+			outputFlag:   "   ",
+			wantPath:     "   ",
+			wantFileName: "",
+		},
+		{
+			name:         "json file with leading whitespace directory",
+			outputFlag:   "  dir/policy.json",
+			wantPath:     "  dir/",
+			wantFileName: "policy.json",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ks := &recordingDownloadKS{}
+			cmd := GetDownloadCmd(ks)
+			require.NoError(t, cmd.Flags().Set("output", tt.outputFlag))
+
+			require.NoError(t, cmd.RunE(cmd, []string{"framework", "nsa"}))
+
+			require.NotNil(t, ks.captured)
+			assert.Equal(t, tt.wantPath, ks.captured.Path)
+			assert.Equal(t, tt.wantFileName, ks.captured.FileName)
+		})
+	}
+}
+
+// TestGetDownloadCmd_NilKubescape verifies that GetDownloadCmd returns an error
+// when passed an uninitialized (nil) IKubescape instance.
+func TestGetDownloadCmd_NilKubescape(t *testing.T) {
+	cmd := GetDownloadCmd(nil)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+	cmd.SetArgs([]string{"framework", "nsa"})
+
+	err := cmd.Execute()
+	require.EqualError(t, err, "uninitialized kubescape interface")
 }
