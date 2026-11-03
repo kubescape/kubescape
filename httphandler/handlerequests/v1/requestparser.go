@@ -39,6 +39,7 @@ type GetResultsQueryParams struct {
 	// Keep the results in local storage after returning them.
 	//
 	// By default, the Kubescape Microservice will delete scan results.
+	// A GET that deletes them needs the delete verb on scanresults; read-only callers must pass keep=true.
 	//
 	// in: query
 	// default: false

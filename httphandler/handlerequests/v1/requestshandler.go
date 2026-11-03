@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"time"
@@ -323,10 +324,28 @@ func (handler *HTTPHandler) CancelScan(w http.ResponseWriter, r *http.Request) {
 
 // ============================================== RESULTS ========================================================
 
+// DecodeResultsQueryParams decodes /v1/results query parameters. It is the
+// only decoder for them, shared by the handlers and by API authorization, so
+// the two always agree on whether a GET keeps the result.
+func DecodeResultsQueryParams(query url.Values) (*ResultsQueryParams, error) {
+	resultsQueryParams := &ResultsQueryParams{}
+	if err := schema.NewDecoder().Decode(resultsQueryParams, query); err != nil {
+		return nil, err
+	}
+	return resultsQueryParams, nil
+}
+
+// ResultsRequestKeepsResults reports whether GET /v1/results with this query
+// leaves the result in place. It is false when the query does not decode.
+func ResultsRequestKeepsResults(query url.Values) bool {
+	params, err := DecodeResultsQueryParams(query)
+	return err == nil && params.KeepResults
+}
+
 // parseResultsQueryParams extracts query parameters and validates them
 func (handler *HTTPHandler) parseResultsQueryParams(w http.ResponseWriter, r *http.Request) (*ResultsQueryParams, bool) {
-	resultsQueryParams := &ResultsQueryParams{}
-	if err := schema.NewDecoder().Decode(resultsQueryParams, r.URL.Query()); err != nil {
+	resultsQueryParams, err := DecodeResultsQueryParams(r.URL.Query())
+	if err != nil {
 		handler.writeError(w, fmt.Errorf("failed to parse query params, reason: %w", err), "")
 		return nil, false
 	}

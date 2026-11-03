@@ -23,8 +23,19 @@ func TestApiAuthRoute_Table(t *testing.T) {
 		{http.MethodGet, "/v1/scan", true, apiauth.Attributes{Group: "kubescape.io", Resource: "scans", Verb: "get"}},
 		{http.MethodGet, "/v1/status", true, apiauth.Attributes{Group: "kubescape.io", Resource: "scans", Verb: "get"}},
 		{http.MethodPost, "/v1/status", true, apiauth.Attributes{Group: "kubescape.io", Resource: "scans", Verb: "get"}},
-		{http.MethodGet, "/v1/results", true, apiauth.Attributes{Group: "kubescape.io", Resource: "scanresults", Verb: "get"}},
+		// GET /v1/results removes the result unless keep=true, so it needs delete.
+		{http.MethodGet, "/v1/results", true, apiauth.Attributes{Group: "kubescape.io", Resource: "scanresults", Verb: "delete"}},
+		{http.MethodGet, "/v1/results?id=abc", true, apiauth.Attributes{Group: "kubescape.io", Resource: "scanresults", Verb: "delete"}},
+		{http.MethodGet, "/v1/results?id=abc&keep=true", true, apiauth.Attributes{Group: "kubescape.io", Resource: "scanresults", Verb: "get"}},
+		{http.MethodGet, "/v1/results?keep=true", true, apiauth.Attributes{Group: "kubescape.io", Resource: "scanresults", Verb: "get"}},
+		{http.MethodGet, "/v1/results?id=abc&keep=1", true, apiauth.Attributes{Group: "kubescape.io", Resource: "scanresults", Verb: "get"}},
+		{http.MethodGet, "/v1/results?id=abc&keep=false", true, apiauth.Attributes{Group: "kubescape.io", Resource: "scanresults", Verb: "delete"}},
+		{http.MethodGet, "/v1/results?id=abc&keep=", true, apiauth.Attributes{Group: "kubescape.io", Resource: "scanresults", Verb: "delete"}},
+		{http.MethodGet, "/v1/results?id=abc&keep=bogus", true, apiauth.Attributes{Group: "kubescape.io", Resource: "scanresults", Verb: "delete"}},
+		{http.MethodHead, "/v1/results?id=abc", true, apiauth.Attributes{Group: "kubescape.io", Resource: "scanresults", Verb: "delete"}},
+		{http.MethodHead, "/v1/results?id=abc&keep=true", true, apiauth.Attributes{Group: "kubescape.io", Resource: "scanresults", Verb: "get"}},
 		{http.MethodDelete, "/v1/results", true, apiauth.Attributes{Group: "kubescape.io", Resource: "scanresults", Verb: "delete"}},
+		{http.MethodDelete, "/v1/results?id=abc&keep=true", true, apiauth.Attributes{Group: "kubescape.io", Resource: "scanresults", Verb: "delete"}},
 		{http.MethodPost, "/v1/results", true, apiauth.Attributes{Group: "kubescape.io", Resource: "scanresults", Verb: "get"}},
 		{http.MethodGet, "/v1/unknown", true, apiauth.Attributes{Group: "kubescape.io", Resource: "scans", Verb: "get"}},
 		{http.MethodGet, "/v1/metrics", false, apiauth.Attributes{}},
@@ -82,5 +93,24 @@ func TestRouter_MetricsAndProbesOpen_V1Protected(t *testing.T) {
 		rec := httptest.NewRecorder()
 		rtr.ServeHTTP(rec, httptest.NewRequest(tc.method, tc.path, nil))
 		assert.Equal(t, http.StatusUnauthorized, rec.Code, "%s %s must be protected", tc.method, tc.path)
+	}
+}
+
+// The verb chosen for GET /v1/results must agree with whether the handler
+// actually deletes: a query the auth layer treats as "keep" must keep.
+func TestApiAuthRoute_ResultsVerbMatchesHandlerKeep(t *testing.T) {
+	for _, query := range []string{"", "keep=true", "keep=false", "keep=1", "keep=0", "keep=on", "keep=TRUE", "keep=", "keep=yes", "keep=true&keep=false", "keep=false&keep=true"} {
+		t.Run(query, func(t *testing.T) {
+			r := httptest.NewRequest(http.MethodGet, "/v1/results?id=abc&"+query, nil)
+			got, ok := apiAuthRoute(r)
+			require.True(t, ok)
+			params, err := handlerequestsv1.DecodeResultsQueryParams(r.URL.Query())
+			handlerKeeps := err == nil && params.KeepResults
+			if handlerKeeps {
+				assert.Equal(t, "get", got.Verb)
+			} else {
+				assert.Equal(t, "delete", got.Verb)
+			}
+		})
 	}
 }

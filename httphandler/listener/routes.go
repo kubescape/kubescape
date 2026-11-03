@@ -11,6 +11,7 @@ import (
 	"github.com/go-logr/stdr"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/kubescape/v4/httphandler/docs"
+	handlerequestsv1 "github.com/kubescape/kubescape/v4/httphandler/handlerequests/v1"
 	"github.com/kubescape/storage/pkg/apiauth"
 )
 
@@ -49,8 +50,15 @@ func apiAuthRoute(r *http.Request) (apiauth.Attributes, bool) {
 		}
 	case v1PathPrefix + v1ResultsPath:
 		attrs.Resource = resourceScanResult
-		if r.Method == http.MethodDelete {
+		switch r.Method {
+		case http.MethodDelete:
 			attrs.Verb = "delete"
+		case http.MethodGet, http.MethodHead:
+			// GetResults (also served for HEAD) removes the result after
+			// returning it unless keep=true, so a removing read needs delete.
+			if !handlerequestsv1.ResultsRequestKeepsResults(r.URL.Query()) {
+				attrs.Verb = "delete"
+			}
 		}
 	}
 	return attrs, true
