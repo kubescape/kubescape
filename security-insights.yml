@@ -129,3 +129,17 @@ repository:
           release: false
         results: {}
         comment: Runs on every push to master and weekly in .github/workflows/osps-baseline.yml. Results are in each run's summary and its osps-baseline-results artifact (https://github.com/kubescape/kubescape/actions/workflows/osps-baseline.yml); the action produces reports, not an attestation.
+      - name: OSPS Baseline scanner
+        type: other
+        rulesets:
+          - osps-baseline
+        integration:
+          adhoc: true
+          ci: false
+          release: false
+        results:
+          adhoc:
+            name: OSPS Baseline results on grc.store
+            location: https://grc.store/targets/kubescape/kubescape
+            predicate-uri: https://github.com/revanite-io/pvtr-publish-results
+        comment: Evaluated against maturity-1 and maturity-2 applicability and published to grc.store weekly and on demand.
