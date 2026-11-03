@@ -91,10 +91,16 @@ func TestGetDownloadCmd_Args(t *testing.T) {
 	assert.Nil(t, err)
 
 	err = downloadCmd.Args(&cobra.Command{}, []string{"control", "C-0001", "C-0002"})
+	assert.ErrorContains(t, err, "accepts at most 2 arg(s), received 3")
+
+	err = downloadCmd.Args(&cobra.Command{}, []string{"controls-inputs", "./inputs.json"})
 	assert.Nil(t, err)
 
-	err = downloadCmd.RunE(&cobra.Command{}, []string{"control", "C-0001", "C-0002"})
-	assert.Nil(t, err)
+	err = downloadCmd.Args(&cobra.Command{}, []string{"controls-inputs", "./inputs.json", "extra"})
+	assert.ErrorContains(t, err, "accepts at most 2 arg(s), received 3")
+
+	err = downloadCmd.Args(&cobra.Command{}, []string{"artifacts", "unexpected"})
+	assert.ErrorContains(t, err, "accepts at most 1 arg(s) for artifacts, received 2")
 }
 
 // TestNormalizeDownloadTarget tests normalization of target aliases and plurals to canonical targets.
@@ -423,4 +429,76 @@ func TestDownloadCmd_FlagValidationErrorPropagation(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "account ID must be a valid UUID")
 	assert.Nil(t, ks.captured, "Download should not be called when flag validation fails")
+}
+
+// TestDownloadCmd_RejectsUnexpectedArgs asserts that unexpected positional arguments
+// are rejected across singleton and identifier download targets.
+func TestDownloadCmd_RejectsUnexpectedArgs(t *testing.T) {
+	tests := []struct {
+		name        string
+		args        []string
+		expectedErr string
+	}{
+		{
+			name:        "artifacts with trailing argument",
+			args:        []string{"artifacts", "extra"},
+			expectedErr: "accepts at most 1 arg(s) for artifacts, received 2",
+		},
+		{
+			name:        "exceptions with trailing argument",
+			args:        []string{"exceptions", "extra"},
+			expectedErr: "accepts at most 1 arg(s) for exceptions, received 2",
+		},
+		{
+			name:        "controls-inputs with extraneous third argument",
+			args:        []string{"controls-inputs", "./inputs.json", "extra"},
+			expectedErr: "accepts at most 2 arg(s), received 3",
+		},
+		{
+			name:        "attack-tracks with trailing argument",
+			args:        []string{"attack-tracks", "extra"},
+			expectedErr: "accepts at most 1 arg(s) for attack-tracks, received 2",
+		},
+		{
+			name:        "framework with extraneous second identifier",
+			args:        []string{"framework", "nsa", "extra"},
+			expectedErr: "accepts at most 2 arg(s), received 3",
+		},
+		{
+			name:        "control with extraneous second identifier",
+			args:        []string{"control", "C-0001", "extra"},
+			expectedErr: "accepts at most 2 arg(s), received 3",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ks := &recordingDownloadKS{}
+			cmd := GetDownloadCmd(ks)
+			cmd.SilenceUsage = true
+			cmd.SilenceErrors = true
+			cmd.SetArgs(tt.args)
+
+			err := cmd.Execute()
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.expectedErr)
+			assert.Nil(t, ks.captured, "Download should not be called when argument validation fails")
+		})
+	}
+}
+
+// TestDownloadCmd_ControlsInputsAcceptsCustomPath verifies that download controls-inputs
+// accepts an optional second positional argument for specifying a custom input file.
+func TestDownloadCmd_ControlsInputsAcceptsCustomPath(t *testing.T) {
+	ks := &recordingDownloadKS{}
+	cmd := GetDownloadCmd(ks)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+	cmd.SetArgs([]string{"controls-inputs", "./inputs.json"})
+
+	err := cmd.Execute()
+	require.NoError(t, err)
+	require.NotNil(t, ks.captured)
+	assert.Equal(t, core.TargetControlsInputs, ks.captured.Target)
+	assert.Equal(t, "./inputs.json", ks.captured.Identifier)
 }
