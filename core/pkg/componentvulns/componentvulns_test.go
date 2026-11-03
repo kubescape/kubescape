@@ -246,6 +246,102 @@ func TestBuildContainerRuntime(t *testing.T) {
 	assert.Equal(t, Gap{Kind: ContainerRuntimeVulnerabilities, Selector: "d", Reason: `unsupported container runtime "docker"`}, res.Gaps[0])
 }
 
+func TestBuildKernel(t *testing.T) {
+	al2 := func(v string) *clustercomponents.KernelPackage {
+		return &clustercomponents.KernelPackage{Distro: clustercomponents.DistroAmazonLinux, DistroVersion: "2", Type: clustercomponents.PackageTypeRPM, Name: "kernel", Version: v}
+	}
+	inv := clustercomponents.Inventory{
+		Nodes: []clustercomponents.Node{
+			{Name: "a", OperatingSystem: "linux", Kernel: clustercomponents.KernelEvidence{Release: "5.10.205-195.807.amzn2.x86_64"}, KernelPackage: al2("5.10.205-195.807.amzn2")},
+			{Name: "b", OperatingSystem: "linux", Kernel: clustercomponents.KernelEvidence{Release: "5.10.205-195.807.amzn2.aarch64"}, KernelPackage: al2("5.10.205-195.807.amzn2")},
+			{Name: "c", OperatingSystem: "linux", Kernel: clustercomponents.KernelEvidence{Release: "5.10.209-198.858.amzn2.x86_64"}, KernelPackage: al2("5.10.209-198.858.amzn2")},
+			{Name: "d", OperatingSystem: "linux", KernelPackage: &clustercomponents.KernelPackage{Distro: clustercomponents.DistroUbuntu, DistroVersion: "22.04", Type: clustercomponents.PackageTypeDeb, Name: "linux-aws", Version: "5.15.0-1057.63"}},
+			{Name: "e", OperatingSystem: "linux"},
+		},
+		Gaps: []clustercomponents.Gap{{Component: clustercomponents.Kernel, Node: "e", Reason: "KernelVersion host data not found"}},
+	}
+	m := &fakeMatcher{advisories: map[string][]advisory{
+		"kernel@5.10.205-195.807.amzn2": {
+			{id: "CVE-2024-1086", severity: "High", fixedIn: []string{"5.10.209-198.858.amzn2", "5.15.148-97.161.amzn2"}, kev: true},
+		},
+		"kernel@5.10.209-198.858.amzn2": {
+			{id: "CVE-2024-1086", severity: "High", fixedIn: []string{"5.15.148-97.161.amzn2"}, kev: true},
+			{id: "CVE-2024-0002", severity: "Medium"},
+			{id: "CVE-2024-0003", severity: "Low", fixedIn: []string{"5.15.148-97.161.amzn2", "unknown"}},
+		},
+	}}
+
+	res, err := Build(inv, m, testOptions(t, KernelVulnerabilities))
+	require.NoError(t, err)
+
+	require.Equal(t, 1, m.calls)
+	require.Len(t, m.packages, 3, "nodes sharing a kernel package are looked up once")
+	for _, p := range m.packages {
+		require.NotNil(t, p.Distro)
+		switch p.Name {
+		case "kernel":
+			assert.Equal(t, "amazonlinux", string(p.Distro.Type))
+			assert.Equal(t, "2", p.Distro.Version)
+			assert.Equal(t, "rpm", string(p.Type))
+		case "linux-aws":
+			assert.Equal(t, "ubuntu", string(p.Distro.Type))
+			assert.Equal(t, "22.04", p.Distro.Version)
+			assert.Equal(t, "deb", string(p.Type))
+		default:
+			t.Fatalf("unexpected package %s", p.Name)
+		}
+	}
+
+	assert.Equal(t, []string{"CVE-2024-1086"}, vulnIDs(t, res, KernelVulnerabilities, "a"))
+	assert.Equal(t, []string{"CVE-2024-1086"}, vulnIDs(t, res, KernelVulnerabilities, "b"))
+	assert.Equal(t, []string{"CVE-2024-0002", "CVE-2024-0003"}, vulnIDs(t, res, KernelVulnerabilities, "c"), "fixes from another kernel series do not apply; unfixed and unparseable ones stay")
+	assert.Empty(t, vulnIDs(t, res, KernelVulnerabilities, "d"))
+	require.Len(t, res.Resources, 4)
+
+	for _, r := range res.Resources {
+		if r.GetName() != "a" {
+			continue
+		}
+		data := r.GetObject()["data"].(map[string]any)
+		assert.Equal(t, "kernel", data["component"])
+		assert.Equal(t, "kernel", data["package"])
+		assert.Equal(t, "amazonlinux", data["distro"])
+		assert.Equal(t, "2", data["distroVersion"])
+		assert.Equal(t, "5.10.205-195.807.amzn2", data["version"])
+		assert.Equal(t, "5.10.205-195.807.amzn2.x86_64", data["rawVersion"])
+		assert.Equal(t, "verified", data["assessment"])
+		assert.Equal(t, []any{"5.10.209-198.858.amzn2"}, data["vulnerabilities"].([]any)[0].(map[string]any)["fixedIn"])
+		assert.NotContains(t, data, "applicabilityIndexDate")
+	}
+	assert.Equal(t, []Gap{{Kind: KernelVulnerabilities, Selector: "e", Reason: "KernelVersion host data not found"}}, res.Gaps)
+}
+
+func TestKernelSeries(t *testing.T) {
+	for in, want := range map[string]string{
+		"5.10.209-198.858.amzn2":  "5.10",
+		"0:5.14.0-427.13.1.el9_4": "5.14",
+		"5.15.0-1058.64~20.04.1":  "5.15",
+		"6.1.76-1":                "6.1",
+		"6":                       "",
+		"":                        "",
+	} {
+		assert.Equal(t, want, kernelSeries(in), in)
+	}
+}
+
+func TestBuildKernelWithoutIndex(t *testing.T) {
+	inv := clustercomponents.Inventory{Nodes: []clustercomponents.Node{
+		{Name: "a", OperatingSystem: "linux", KernelPackage: &clustercomponents.KernelPackage{Distro: clustercomponents.DistroDebian, DistroVersion: "12", Type: clustercomponents.PackageTypeDeb, Name: "linux", Version: "6.1.76-1"}},
+	}}
+	opts := testOptions(t, KernelVulnerabilities)
+	opts.Index = nil
+
+	res, err := Build(inv, &fakeMatcher{}, opts)
+	require.NoError(t, err)
+	assert.Len(t, res.Resources, 1, "the kernel does not depend on the Kubernetes CVE index")
+	assert.Empty(t, res.Gaps)
+}
+
 func TestBuildOnlySelectedKinds(t *testing.T) {
 	inv := clustercomponents.Inventory{
 		APIServer: version(clustercomponents.APIServer, "1.28.4", clustercomponents.Verified),

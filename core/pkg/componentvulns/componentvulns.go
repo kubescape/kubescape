@@ -1,7 +1,7 @@
 // Package componentvulns matches the cluster component inventory against the
 // vulnerability database and emits one external resource per component, so
-// posture controls can evaluate the API server, kubelet and container runtime
-// the same way they evaluate any other resource. Anything that cannot be
+// posture controls can evaluate the API server, kubelet, container runtime and
+// kernel the same way they evaluate any other resource. Anything that cannot be
 // assessed is returned as a gap instead of a resource, because a resource
 // without findings would be evaluated as passed.
 package componentvulns
@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anchore/grype/grype/distro"
 	"github.com/anchore/grype/grype/match"
 	"github.com/anchore/grype/grype/pkg"
 	"github.com/anchore/grype/grype/vulnerability"
@@ -42,6 +43,7 @@ const (
 	APIServerVulnerabilities        Kind = "APIServerVulnerabilities"
 	KubeletVulnerabilities          Kind = "KubeletVulnerabilities"
 	ContainerRuntimeVulnerabilities Kind = "ContainerRuntimeVulnerabilities"
+	KernelVulnerabilities           Kind = "KernelVulnerabilities"
 )
 
 // Matcher is satisfied by imagescan.Service.
@@ -86,7 +88,8 @@ type target struct {
 	name     string
 	os       string
 	version  clustercomponents.ComponentVersion
-	pkgID    pkg.ID
+	kernel   *clustercomponents.KernelPackage
+	pkg      pkg.Package
 	selector string
 }
 
@@ -129,7 +132,10 @@ func Build(inv clustercomponents.Inventory, m Matcher, opts Options) (Result, er
 			return Result{}, err
 		}
 		for _, t := range targets {
-			found := vulns[t.pkgID]
+			found := vulns[t.pkg.ID]
+			if t.kernel != nil {
+				found = sameKernelSeries(found, t.kernel.Version)
+			}
 			if isKubernetes(t.kind) {
 				var unattributed []string
 				found, unattributed = applicable(found, opts.Index, t)
@@ -178,6 +184,9 @@ func collectTargets(inv clustercomponents.Inventory, selected map[Kind]bool) ([]
 		if selected[ContainerRuntimeVulnerabilities] && n.Runtime != nil {
 			targets = append(targets, newTarget(ContainerRuntimeVulnerabilities, n.Name, n.OperatingSystem, n.Name, *n.Runtime))
 		}
+		if selected[KernelVulnerabilities] && n.KernelPackage != nil {
+			targets = append(targets, newKernelTarget(n.Name, n.OperatingSystem, n.Kernel.Release, *n.KernelPackage))
+		}
 	}
 	return targets, gaps
 }
@@ -190,12 +199,48 @@ func kindOf(c clustercomponents.Component) (Kind, bool) {
 		return KubeletVulnerabilities, true
 	case clustercomponents.Containerd, clustercomponents.CRIO, clustercomponents.ContainerRuntime:
 		return ContainerRuntimeVulnerabilities, true
+	case clustercomponents.Kernel:
+		return KernelVulnerabilities, true
 	}
 	return "", false
 }
 
 func newTarget(k Kind, name, os, selector string, v clustercomponents.ComponentVersion) target {
-	return target{kind: k, name: name, os: os, selector: selector, version: v, pkgID: pkg.ID(modulePath(v) + "@" + v.Version)}
+	module := modulePath(v)
+	return target{kind: k, name: name, os: os, selector: selector, version: v, pkg: pkg.Package{
+		ID:       pkg.ID(module + "@" + v.Version),
+		Name:     module,
+		Version:  "v" + v.Version,
+		Type:     syftPkg.GoModulePkg,
+		Language: syftPkg.Go,
+		PURL:     "pkg:golang/" + module + "@v" + v.Version,
+	}}
+}
+
+// newKernelTarget looks the kernel up as the distro package advisories are
+// keyed to, so distro backports are honoured.
+func newKernelTarget(node, os, release string, k clustercomponents.KernelPackage) target {
+	p := pkg.Package{
+		ID:      pkg.ID(k.Distro + ":" + k.DistroVersion + "/" + k.Name + "@" + k.Version),
+		Name:    k.Name,
+		Version: k.Version,
+		Distro:  distro.New(distro.Type(k.Distro), k.DistroVersion, ""),
+	}
+	switch k.Type {
+	case clustercomponents.PackageTypeRPM:
+		p.Type = syftPkg.RpmPkg
+	case clustercomponents.PackageTypeDeb:
+		p.Type = syftPkg.DebPkg
+	}
+	return target{
+		kind:     KernelVulnerabilities,
+		name:     node,
+		os:       os,
+		selector: node,
+		version:  clustercomponents.ComponentVersion{Component: clustercomponents.Kernel, Version: k.Version, RawVersion: release, Assessment: clustercomponents.Verified},
+		kernel:   &k,
+		pkg:      p,
+	}
 }
 
 func modulePath(v clustercomponents.ComponentVersion) string {
@@ -212,24 +257,16 @@ func modulePath(v clustercomponents.ComponentVersion) string {
 	}
 }
 
-// lookup matches each distinct module version once, in a single matcher call.
+// lookup matches each distinct package once, in a single matcher call.
 func lookup(targets []target, m Matcher) (map[pkg.ID][]Vulnerability, error) {
 	seen := make(map[pkg.ID]bool)
 	var packages []pkg.Package
 	for _, t := range targets {
-		if seen[t.pkgID] {
+		if seen[t.pkg.ID] {
 			continue
 		}
-		seen[t.pkgID] = true
-		name := modulePath(t.version)
-		packages = append(packages, pkg.Package{
-			ID:       t.pkgID,
-			Name:     name,
-			Version:  "v" + t.version.Version,
-			Type:     syftPkg.GoModulePkg,
-			Language: syftPkg.Go,
-			PURL:     "pkg:golang/" + name + "@v" + t.version.Version,
-		})
+		seen[t.pkg.ID] = true
+		packages = append(packages, t.pkg)
 	}
 
 	matches, _, err := m.MatchPackages(packages, pkg.Context{}, nil, nil)
@@ -379,6 +416,55 @@ func applicable(vulns []Vulnerability, ix *k8scveindex.Index, t target) (kept []
 	return kept, unattributed
 }
 
+// sameKernelSeries drops findings whose fixes all belong to another kernel
+// series; a fix version it cannot parse is kept. Amazon
+// Linux 2 publishes its 4.14, 5.10 and 5.15 streams under one package name, so
+// a 5.10 kernel otherwise inherits every advisory fixed in the 5.15 stream.
+func sameKernelSeries(vulns []Vulnerability, installed string) []Vulnerability {
+	series := kernelSeries(installed)
+	if series == "" {
+		return vulns
+	}
+	kept := vulns[:0:0]
+	for _, v := range vulns {
+		if len(v.FixedIn) == 0 {
+			kept = append(kept, v)
+			continue
+		}
+		var fixedIn []string
+		for _, f := range v.FixedIn {
+			if fs := kernelSeries(f); fs == series || fs == "" {
+				fixedIn = append(fixedIn, f)
+			}
+		}
+		if fixedIn != nil {
+			v.FixedIn = fixedIn
+			kept = append(kept, v)
+		}
+	}
+	return kept
+}
+
+// kernelSeries returns the major.minor of a package version such as
+// 0:5.14.0-427.13.1.el9_4.
+func kernelSeries(v string) string {
+	if i := strings.IndexByte(v, ':'); i >= 0 {
+		v = v[i+1:]
+	}
+	major, rest, ok := strings.Cut(v, ".")
+	if !ok || major == "" {
+		return ""
+	}
+	minor := rest
+	if i := strings.IndexFunc(rest, func(r rune) bool { return r < '0' || r > '9' }); i >= 0 {
+		minor = rest[:i]
+	}
+	if minor == "" {
+		return ""
+	}
+	return major + "." + minor
+}
+
 func newResource(t target, vulns []Vulnerability, opts Options) workloadinterface.IMetadata {
 	if vulns == nil {
 		vulns = []Vulnerability{}
@@ -392,6 +478,11 @@ func newResource(t target, vulns []Vulnerability, opts Options) workloadinterfac
 	}
 	if t.os != "" && t.kind != APIServerVulnerabilities {
 		data["operatingSystem"] = t.os
+	}
+	if t.kernel != nil {
+		data["package"] = t.kernel.Name
+		data["distro"] = t.kernel.Distro
+		data["distroVersion"] = t.kernel.DistroVersion
 	}
 	if isKubernetes(t.kind) && opts.Index != nil {
 		data["applicabilityIndexDate"] = opts.Index.Updated.UTC().Format(time.DateOnly)

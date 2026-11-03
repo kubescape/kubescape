@@ -20,6 +20,7 @@ var (
 		"APIServerVulnerabilities",
 		"KubeletVulnerabilities",
 		"ContainerRuntimeVulnerabilities",
+		"KernelVulnerabilities",
 	}
 	HostSensorResources = []string{"KubeletConfiguration",
 		"KubeletCommandLine",

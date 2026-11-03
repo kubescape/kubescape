@@ -27,6 +27,7 @@ type Node struct {
 	Kubelet         *ComponentVersion `json:"kubelet,omitempty"`
 	Runtime         *ComponentVersion `json:"runtime,omitempty"`
 	Kernel          KernelEvidence    `json:"kernel"`
+	KernelPackage   *KernelPackage    `json:"kernelPackage,omitempty"`
 }
 
 // ProcVersion and the OS release fields are only set when the node-agent
@@ -91,6 +92,12 @@ func Build(apiServer *version.Info, nodes []corev1.Node, hostData []hostsensor.H
 			inv.Gaps = append(inv.Gaps, Gap{Component: ContainerRuntime, Node: n.Name, Reason: err.Error()})
 		} else {
 			n.Runtime = &v
+		}
+
+		if p, err := ReconstructKernel(n.Kernel); err != nil {
+			inv.Gaps = append(inv.Gaps, Gap{Component: Kernel, Node: n.Name, Reason: err.Error()})
+		} else {
+			n.KernelPackage = &p
 		}
 
 		inv.Nodes = append(inv.Nodes, n)

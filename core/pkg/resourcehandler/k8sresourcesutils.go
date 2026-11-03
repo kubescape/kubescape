@@ -53,6 +53,7 @@ var (
 		string(componentvulns.APIServerVulnerabilities):        {componentvulns.APIVersion},
 		string(componentvulns.KubeletVulnerabilities):          {componentvulns.APIVersion},
 		string(componentvulns.ContainerRuntimeVulnerabilities): {componentvulns.APIVersion},
+		string(componentvulns.KernelVulnerabilities):           {componentvulns.APIVersion},
 	}
 	// MapResourceToApiGroupCloud also holds APIServerInfo: it is built from the
 	// API server's version endpoint, not a cloud provider, but it is selected
