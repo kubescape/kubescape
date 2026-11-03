@@ -62,15 +62,23 @@ func NewCsvPrinter(showSecrets bool) *CsvPrinter {
 	return &CsvPrinter{showSecrets: showSecrets}
 }
 
-// csvSafeCell neutralizes a cell against spreadsheet formula injection (CWE-1236)
+// CSVSafeCell neutralizes a cell against spreadsheet formula injection (CWE-1236)
 // by delegating to csvsafe.SafeCell.
-func csvSafeCell(cell string) string {
+func CSVSafeCell(cell string) string {
 	return csvsafe.SafeCell(cell)
 }
 
-// csvSafeRow applies csvSafeCell to every cell of a data row.
-func csvSafeRow(row []string) []string {
+func csvSafeCell(cell string) string {
+	return CSVSafeCell(cell)
+}
+
+// CSVSafeRow applies CSVSafeCell to every cell of a data row.
+func CSVSafeRow(row []string) []string {
 	return csvsafe.SafeRow(row)
+}
+
+func csvSafeRow(row []string) []string {
+	return CSVSafeRow(row)
 }
 
 func (cp *CsvPrinter) SetWriter(ctx context.Context, outputFile string) error {
