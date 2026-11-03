@@ -1,9 +1,11 @@
 package predict
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -42,6 +44,12 @@ func TestRunPSS_FlagValidation(t *testing.T) {
 		flags := &pssFlags{level: "Restricted", format: "invalid-fmt"}
 		err := runPSS(ctx, flags, []string{"some/file.yaml"})
 		assert.ErrorContains(t, err, "unsupported format")
+	})
+
+	t.Run("empty format", func(t *testing.T) {
+		flags := &pssFlags{level: "Restricted", format: "   "}
+		err := runPSS(ctx, flags, []string{"some/file.yaml"})
+		assert.ErrorContains(t, err, "format cannot be empty")
 	})
 
 	t.Run("cluster mode without namespace", func(t *testing.T) {
@@ -388,4 +396,59 @@ func TestFilterWorkloads(t *testing.T) {
 	// Non-matching
 	filtered = filterWorkloads(workloads, "non-existent")
 	assert.Empty(t, filtered)
+}
+
+func TestPSSCmd_HonorsCommandOutputWriter(t *testing.T) {
+	tmpDir := t.TempDir()
+	manifest := filepath.Join(tmpDir, "pod.yaml")
+	require.NoError(t, os.WriteFile(manifest, []byte(`
+apiVersion: v1
+kind: Pod
+metadata:
+  name: test-pod
+  namespace: test-ns
+spec:
+  containers:
+  - name: c1
+    image: nginx
+`), 0o600))
+
+	cmd := getPSSCmd()
+	cmd.SilenceErrors = true
+	cmd.SilenceUsage = true
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetArgs([]string{manifest, "-f", "json"})
+
+	_ = cmd.Execute()
+	assert.Contains(t, buf.String(), `"namespace": "test-ns"`)
+}
+
+func TestPSSCmd_FormatNormalization(t *testing.T) {
+	tmpDir := t.TempDir()
+	manifest := filepath.Join(tmpDir, "pod.yaml")
+	require.NoError(t, os.WriteFile(manifest, []byte(`
+apiVersion: v1
+kind: Pod
+metadata:
+  name: test-pod
+spec:
+  containers:
+  - name: c1
+    image: nginx
+`), 0o600))
+
+	formats := []string{"JSON", "Json", " json ", " TABLE ", "table", " Pretty-Printer "}
+	for _, f := range formats {
+		t.Run("format_"+strings.TrimSpace(f), func(t *testing.T) {
+			cmd := getPSSCmd()
+			cmd.SilenceErrors = true
+			cmd.SilenceUsage = true
+			var buf bytes.Buffer
+			cmd.SetOut(&buf)
+			cmd.SetArgs([]string{manifest, "-f", f})
+			_ = cmd.Execute()
+			assert.NotEmpty(t, buf.String())
+		})
+	}
 }

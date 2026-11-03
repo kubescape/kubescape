@@ -22,7 +22,7 @@ import (
 const outputDirPerm = 0o750
 
 // writeOutput dispatches to the appropriate formatter based on format string.
-func writeOutput(result pss.NamespaceResult, format, outputFile string, verbose bool) (retErr error) {
+func writeOutput(result pss.NamespaceResult, format, outputFile string, verbose bool, out ...io.Writer) (retErr error) {
 	var w io.Writer
 	var f *os.File
 	if outputFile != "" {
@@ -60,6 +60,8 @@ func writeOutput(result pss.NamespaceResult, format, outputFile string, verbose 
 			}
 		}()
 		w = f
+	} else if len(out) > 0 && out[0] != nil {
+		w = out[0]
 	} else {
 		w = os.Stdout
 	}
