@@ -97,6 +97,15 @@ func TestReconstructKernel(t *testing.T) {
 			},
 			want: KernelPackage{Distro: DistroDebian, DistroVersion: "12", Type: PackageTypeDeb, Name: "linux", Version: "6.1.119-1"},
 		},
+		{
+			name: "debian 12 backport",
+			in: KernelEvidence{
+				Release:     "6.12.9+bpo-amd64",
+				ProcVersion: "Linux version 6.12.9+bpo-amd64 (debian-kernel@lists.debian.org) #1 SMP PREEMPT_DYNAMIC Debian 6.12.9-1~bpo12+1 (2025-01-19)",
+				OSID:        "debian", OSVersionID: "12",
+			},
+			want: KernelPackage{Distro: DistroDebian, DistroVersion: "12", Type: PackageTypeDeb, Name: "linux", Version: "6.12.9-1~bpo12+1"},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -133,7 +142,8 @@ func TestReconstructKernelGaps(t *testing.T) {
 		{name: "ubuntu backport the flavour does not publish", in: KernelEvidence{Release: "6.2.0-1018-oracle", ProcVersion: "Linux version 6.2.0-1018-oracle (buildd@x) #20~22.04.1-Ubuntu SMP", OSID: "ubuntu", OSVersionID: "22.04"}, reason: `kernel "6.2.0-1018-oracle" does not match a known Ubuntu 22.04 source package`},
 		{name: "ubuntu unknown backport series", in: KernelEvidence{Release: "6.17.0-1002-aws", ProcVersion: "Linux version 6.17.0-1002-aws (buildd@x) #2~24.04.1-Ubuntu SMP", OSID: "ubuntu", OSVersionID: "24.04"}, reason: `kernel "6.17.0-1002-aws" does not match a known Ubuntu 24.04 source package`},
 		{name: "debian on cli", in: KernelEvidence{Release: "6.1.0-18-amd64", OSImage: "Debian GNU/Linux 12 (bookworm)"}, reason: "KernelVersion host data not found"},
-		{name: "debian backports kernel", in: KernelEvidence{Release: "6.12.9+bpo-amd64", ProcVersion: "Linux version 6.12.9+bpo-amd64 #1 SMP PREEMPT_DYNAMIC Debian 6.12.9-1~bpo12+1 (2025-01-19)", OSID: "debian", OSVersionID: "12"}, reason: `Debian kernel package version for "6.12.9+bpo-amd64" not found in /proc/version`},
+		{name: "debian proc version for another kernel", in: KernelEvidence{Release: "6.1.0-28-amd64", ProcVersion: "Linux version 6.1.0-18-amd64 (debian-kernel@lists.debian.org) #1 SMP PREEMPT_DYNAMIC Debian 6.1.76-1 (2024-02-01)", OSID: "debian", OSVersionID: "12"}, reason: `kernel release "6.1.0-28-amd64" not found in /proc/version`},
+		{name: "debian unrecognized package version", in: KernelEvidence{Release: "6.1.0-18-amd64", ProcVersion: "Linux version 6.1.0-18-amd64 (debian-kernel@lists.debian.org) #1 SMP PREEMPT_DYNAMIC Debian 6.1.76 (2024-02-01)", OSID: "debian", OSVersionID: "12"}, reason: `debian kernel package version for "6.1.0-18-amd64" not found in /proc/version`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

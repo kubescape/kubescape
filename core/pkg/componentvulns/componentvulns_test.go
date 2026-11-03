@@ -268,6 +268,8 @@ func TestBuildKernel(t *testing.T) {
 			{id: "CVE-2024-1086", severity: "High", fixedIn: []string{"5.15.148-97.161.amzn2"}, kev: true},
 			{id: "CVE-2024-0002", severity: "Medium"},
 			{id: "CVE-2024-0003", severity: "Low", fixedIn: []string{"5.15.148-97.161.amzn2", "unknown"}},
+			{id: "CVE-2024-0004", severity: "High", fixedIn: []string{"5.15.148-97.161.amzn2"}},
+			{id: "CVE-2024-0004", severity: "High"},
 		},
 	}}
 
@@ -294,7 +296,7 @@ func TestBuildKernel(t *testing.T) {
 
 	assert.Equal(t, []string{"CVE-2024-1086"}, vulnIDs(t, res, KernelVulnerabilities, "a"))
 	assert.Equal(t, []string{"CVE-2024-1086"}, vulnIDs(t, res, KernelVulnerabilities, "b"))
-	assert.Equal(t, []string{"CVE-2024-0002", "CVE-2024-0003"}, vulnIDs(t, res, KernelVulnerabilities, "c"), "fixes from another kernel series do not apply; unfixed and unparseable ones stay")
+	assert.Equal(t, []string{"CVE-2024-0004", "CVE-2024-0002", "CVE-2024-0003"}, vulnIDs(t, res, KernelVulnerabilities, "c"), "fixes from another kernel series do not apply; unfixed and unparseable ones stay, even when another record of the CVE is fixed elsewhere")
 	assert.Empty(t, vulnIDs(t, res, KernelVulnerabilities, "d"))
 	require.Len(t, res.Resources, 4)
 

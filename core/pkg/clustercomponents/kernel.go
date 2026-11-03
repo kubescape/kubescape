@@ -46,7 +46,7 @@ var (
 	ubuntuKernelRelease = regexp.MustCompile(`^(\d+\.\d+)\.(\d+)-(\d+)-([a-z0-9]+)$`)
 	ubuntuBuildTag      = regexp.MustCompile(`#(\d+)(~\d+\.\d+(?:\.\d+)*)?-Ubuntu `)
 
-	debianPackageVersion = regexp.MustCompile(` Debian (\d+\.\d+(?:\.\d+)?-\d+(?:\+deb\d+u\d+)?) \(`)
+	debianPackageVersion = regexp.MustCompile(` Debian (\d+\.\d+(?:\.\d+)?-\d+(?:\+deb\d+u\d+|~bpo\d+\+\d+)?) \(`)
 
 	// Kernel series each Ubuntu release ships as its GA kernel.
 	ubuntuGASeries = map[string]string{
@@ -234,7 +234,8 @@ func ubuntuKernel(k KernelEvidence) (KernelPackage, error) {
 }
 
 // debianKernel reads the package version Debian embeds in /proc/version,
-// e.g. "Debian 6.1.76-1 (2024-02-01)".
+// e.g. "Debian 6.1.76-1 (2024-02-01)" or, for a bookworm backport,
+// "Debian 6.12.9-1~bpo12+1 (2025-01-19)".
 func debianKernel(k KernelEvidence) (KernelPackage, error) {
 	if k.ProcVersion == "" {
 		return KernelPackage{}, errNoKernelVersionData
@@ -242,9 +243,12 @@ func debianKernel(k KernelEvidence) (KernelPackage, error) {
 	if k.OSVersionID == "" {
 		return KernelPackage{}, errNoOSReleaseData
 	}
+	if k.Release == "" || !strings.Contains(k.ProcVersion, " "+k.Release+" ") {
+		return KernelPackage{}, fmt.Errorf("kernel release %q not found in /proc/version", k.Release)
+	}
 	m := debianPackageVersion.FindStringSubmatch(k.ProcVersion)
 	if m == nil {
-		return KernelPackage{}, fmt.Errorf("Debian kernel package version for %q not found in /proc/version", k.Release)
+		return KernelPackage{}, fmt.Errorf("debian kernel package version for %q not found in /proc/version", k.Release)
 	}
 	return KernelPackage{Distro: DistroDebian, DistroVersion: k.OSVersionID, Type: PackageTypeDeb, Name: "linux", Version: m[1]}, nil
 }

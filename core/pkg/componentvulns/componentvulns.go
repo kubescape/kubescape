@@ -133,9 +133,6 @@ func Build(inv clustercomponents.Inventory, m Matcher, opts Options) (Result, er
 		}
 		for _, t := range targets {
 			found := vulns[t.pkg.ID]
-			if t.kernel != nil {
-				found = sameKernelSeries(found, t.kernel.Version)
-			}
 			if isKubernetes(t.kind) {
 				var unattributed []string
 				found, unattributed = applicable(found, opts.Index, t)
@@ -258,8 +255,12 @@ func modulePath(v clustercomponents.ComponentVersion) string {
 }
 
 // lookup matches each distinct package once, in a single matcher call.
+// Kernel matches are filtered to the installed series per advisory record,
+// before records of the same CVE are merged, so an unfixed record is not
+// lost to an other-series fixed record of the same CVE.
 func lookup(targets []target, m Matcher) (map[pkg.ID][]Vulnerability, error) {
 	seen := make(map[pkg.ID]bool)
+	kernels := make(map[pkg.ID]string)
 	var packages []pkg.Package
 	for _, t := range targets {
 		if seen[t.pkg.ID] {
@@ -267,6 +268,9 @@ func lookup(targets []target, m Matcher) (map[pkg.ID][]Vulnerability, error) {
 		}
 		seen[t.pkg.ID] = true
 		packages = append(packages, t.pkg)
+		if t.kernel != nil {
+			kernels[t.pkg.ID] = t.kernel.Version
+		}
 	}
 
 	matches, _, err := m.MatchPackages(packages, pkg.Context{}, nil, nil)
@@ -277,6 +281,13 @@ func lookup(targets []target, m Matcher) (map[pkg.ID][]Vulnerability, error) {
 	byPackage := make(map[pkg.ID]map[string]Vulnerability)
 	for _, mt := range matches.Sorted() {
 		v := toVulnerability(mt)
+		if installed, ok := kernels[mt.Package.ID]; ok {
+			filtered := sameKernelSeries([]Vulnerability{v}, installed)
+			if len(filtered) == 0 {
+				continue
+			}
+			v = filtered[0]
+		}
 		found := byPackage[mt.Package.ID]
 		if found == nil {
 			found = make(map[string]Vulnerability)
