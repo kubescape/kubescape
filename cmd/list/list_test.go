@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"strings"
 	"testing"
 
@@ -467,4 +468,88 @@ func TestGetListCmd_PropagatesWriterError(t *testing.T) {
 			})
 		}
 	}
+}
+
+func TestNormalizeListTarget(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"controls", "controls"},
+		{"control", "controls"},
+		{"Control", "controls"},
+		{" CONTROLS ", "controls"},
+		{"frameworks", "frameworks"},
+		{"framework", "frameworks"},
+		{"FRAMEWORK", "frameworks"},
+		{"  frameworks  ", "frameworks"},
+		{"controls-config", "controls-config"},
+		{"controls-inputs", "controls-config"},
+		{"controls-input", "controls-config"},
+		{"control-inputs", "controls-config"},
+		{"control-input", "controls-config"},
+		{"control-config", "controls-config"},
+		{"CONTROLS-INPUTS", "controls-config"},
+		{"exceptions", "exceptions"},
+		{"exception", "exceptions"},
+		{"EXCEPTION", "exceptions"},
+		{"other", "other"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			assert.Equal(t, tt.expected, normalizeListTarget(tt.input))
+		})
+	}
+}
+
+func TestGetListCmd_NormalizedTargetExecution(t *testing.T) {
+	tests := []struct {
+		name       string
+		arg        string
+		wantTarget string
+	}{
+		{name: "singular framework", arg: "framework", wantTarget: "frameworks"},
+		{name: "uppercase frameworks", arg: "FRAMEWORKS", wantTarget: "frameworks"},
+		{name: "whitespace frameworks", arg: "  frameworks  ", wantTarget: "frameworks"},
+		{name: "singular control", arg: "control", wantTarget: "controls"},
+		{name: "uppercase controls", arg: "CONTROLS", wantTarget: "controls"},
+		{name: "controls-inputs alias", arg: "controls-inputs", wantTarget: "controls-config"},
+		{name: "control-inputs alias", arg: "control-inputs", wantTarget: "controls-config"},
+		{name: "singular exception", arg: "exception", wantTarget: "exceptions"},
+		{name: "uppercase exceptions", arg: "EXCEPTIONS", wantTarget: "exceptions"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			recorder := &recordingListKubescape{}
+			listCmd := GetListCmd(recorder)
+			listCmd.SilenceUsage = true
+			listCmd.SilenceErrors = true
+			listCmd.SetOut(io.Discard)
+			listCmd.SetErr(io.Discard)
+			listCmd.SetArgs([]string{tt.arg})
+
+			err := listCmd.Execute()
+			require.NoError(t, err)
+			require.NotNil(t, recorder.received)
+			assert.Equal(t, tt.wantTarget, recorder.received.Target)
+		})
+	}
+}
+
+func TestGetListCmd_ControlFilterFlagsWithSingularTarget(t *testing.T) {
+	recorder := &recordingListKubescape{}
+	listCmd := GetListCmd(recorder)
+	listCmd.SilenceUsage = true
+	listCmd.SilenceErrors = true
+	listCmd.SetOut(io.Discard)
+	listCmd.SetErr(io.Discard)
+	listCmd.SetArgs([]string{"control", "--framework", "NSA", "--search", "container"})
+
+	require.NoError(t, listCmd.Execute())
+	require.NotNil(t, recorder.received)
+	assert.Equal(t, "controls", recorder.received.Target)
+	assert.Equal(t, "NSA", recorder.received.ControlFilters.Framework)
+	assert.Equal(t, "container", recorder.received.ControlFilters.Search)
 }
