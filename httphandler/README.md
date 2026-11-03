@@ -449,7 +449,7 @@ Deploy Kubescape as a microservice in your cluster for API-driven scanning.
 
 Expose Kubescape metrics for Prometheus scraping.
 
-`GET /v1/metrics` stays unauthenticated and runs one scan at a time: a scrape that arrives while another metrics scan is running receives `429 Too Many Requests` with `Retry-After: 1`. Metrics scans therefore take at most one slot of the scan queue shared with `POST /v1/scan`.
+`GET /v1/metrics` stays unauthenticated and runs one scan at a time: a scrape that arrives while another metrics scan is running receives `429 Too Many Requests` with `Retry-After: 1`. Metrics scans are admitted through their own one-slot lane and never occupy the `POST /v1/scan` queue (`KS_SCAN_QUEUE_CAPACITY`), so scrapes cannot cause `429` for authorized scans. Scans from both lanes still run one at a time.
 
 📖 **[Prometheus Integration Guide →](examples/prometheus/README.md)**
 

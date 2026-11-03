@@ -43,14 +43,18 @@ type ScanResponse struct {
 }
 
 type HTTPHandler struct {
-	offline             bool
-	state               *serverState
-	scanRequestChan     chan *scanRequestParams
+	offline bool
+	state   *serverState
+	// scanRequestChan holds pending POST /v1/scan requests
+	// (KS_SCAN_QUEUE_CAPACITY).
+	scanRequestChan chan *scanRequestParams
+	// metricsRequestChan is the /v1/metrics lane, capacity 1. Metrics is
+	// unauthenticated, so scrapes never occupy the user queue.
+	metricsRequestChan  chan *scanRequestParams
 	workerDone          chan struct{}
 	maxRequestBodyBytes int64
-	// metricsScanSlot admits one /v1/metrics scan at a time. Metrics is
-	// unauthenticated, so this keeps scrapes to one slot of the queue shared
-	// with POST /v1/scan.
+	// metricsScanSlot admits one /v1/metrics scan at a time, from admission
+	// until its response is consumed.
 	metricsScanSlot chan struct{}
 }
 
@@ -60,10 +64,18 @@ func NewHTTPHandler(offline bool) *HTTPHandler {
 	return newHTTPHandler(offline, queueCapacity, maxRequestBody)
 }
 
-// BeginShutdown rejects new scans and closes the queue. Accepted scans continue
-// to drain. It is safe to call more than once, concurrently with admission.
+// BeginShutdown rejects new scans and closes both queues. Accepted scans
+// continue to drain. It is safe to call more than once, concurrently with
+// admission.
 func (handler *HTTPHandler) BeginShutdown() {
-	handler.state.beginShutdown(func() { close(handler.scanRequestChan) })
+	handler.state.beginShutdown(func() {
+		if handler.scanRequestChan != nil {
+			close(handler.scanRequestChan)
+		}
+		if handler.metricsRequestChan != nil {
+			close(handler.metricsRequestChan)
+		}
+	})
 }
 
 // Shutdown drains accepted scans for drainPeriod, then cancels outstanding work.
@@ -94,11 +106,17 @@ func (handler *HTTPHandler) Shutdown(ctx context.Context, drainPeriod time.Durat
 	}
 }
 
-// enqueueScan is the only production path into the queue, for Scan and Metrics.
+// enqueueScan is the only production path into the queues. User scans go to
+// scanRequestChan and metrics scans to their own lane, metricsRequestChan, so
+// an unauthenticated scrape never takes a user queue slot.
 func (handler *HTTPHandler) enqueueScan(req *scanRequestParams, cancel context.CancelFunc) error {
+	queue := handler.metricsRequestChan
+	if req.isUserScan {
+		queue = handler.scanRequestChan
+	}
 	err := handler.state.admitScan(req.scanID, cancel, req.isUserScan, func() bool {
 		select {
-		case handler.scanRequestChan <- req:
+		case queue <- req:
 			return true
 		default:
 			return false
@@ -135,6 +153,7 @@ func newHTTPHandler(offline bool, queueCapacity int, maxRequestBodyBytes int64) 
 		offline:             offline,
 		state:               newServerState(),
 		scanRequestChan:     make(chan *scanRequestParams, queueCapacity),
+		metricsRequestChan:  make(chan *scanRequestParams, 1),
 		workerDone:          make(chan struct{}),
 		maxRequestBodyBytes: maxRequestBodyBytes,
 		metricsScanSlot:     make(chan struct{}, 1),
