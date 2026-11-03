@@ -1,6 +1,7 @@
 package core
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"os"
@@ -517,4 +518,72 @@ func TestDiff_UnreadableReportKeepsLoaderError(t *testing.T) {
 		assert.NotErrorIs(t, err, diff.ErrMixedReportKinds)
 		assert.Contains(t, err.Error(), "loading head report")
 	})
+}
+
+func TestDiff_HonorsDiffInfoWriter(t *testing.T) {
+	base := writeReport(t, `{"results":[],"summaryDetails":{"controls":{}}}`)
+	head := writeReport(t, `{
+		"results":[{"resourceID":"res1","controls":[
+			{"controlID":"C-HIGH","name":"High","status":{"status":"failed"}}
+		]}],
+		"summaryDetails":{"controls":{"C-HIGH":{"scoreFactor":7.0}}}
+	}`)
+
+	ks := NewKubescape(context.Background())
+	var buf bytes.Buffer
+	count, err := ks.Diff(&metav1.DiffInfo{
+		BaseFile: base,
+		HeadFile: head,
+		Format:   "json",
+		Writer:   &buf,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, 1, count)
+	assert.Contains(t, buf.String(), "C-HIGH")
+}
+
+func TestDiff_ExplicitOutputTakesPrecedenceOverWriter(t *testing.T) {
+	base := writeReport(t, `{"results":[],"summaryDetails":{"controls":{}}}`)
+	head := writeReport(t, `{
+		"results":[{"resourceID":"res1","controls":[
+			{"controlID":"C-HIGH","name":"High","status":{"status":"failed"}}
+		]}],
+		"summaryDetails":{"controls":{"C-HIGH":{"scoreFactor":7.0}}}
+	}`)
+
+	ks := NewKubescape(context.Background())
+	var buf bytes.Buffer
+	outFile := filepath.Join(t.TempDir(), "diff.json")
+	count, err := ks.Diff(&metav1.DiffInfo{
+		BaseFile: base,
+		HeadFile: head,
+		Format:   "json",
+		Output:   outFile,
+		Writer:   &buf,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, 1, count)
+	assert.Empty(t, buf.String(), "writer buffer must remain empty when explicit output file is set")
+
+	data, err := os.ReadFile(outFile)
+	require.NoError(t, err)
+	assert.Contains(t, string(data), "C-HIGH")
+}
+
+func TestDiff_VulnerabilityDiffHonorsWriter(t *testing.T) {
+	base := writeReport(t, imageReportBase)
+	head := writeReport(t, imageReportHead)
+
+	ks := NewKubescape(context.Background())
+	var buf bytes.Buffer
+	count, err := ks.Diff(&metav1.DiffInfo{
+		BaseFile: base,
+		HeadFile: head,
+		Format:   "json",
+		Writer:   &buf,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, 2, count)
+	assert.NotEmpty(t, buf.String(), "vulnerability diff must be written to DiffInfo.Writer")
+	assert.Contains(t, buf.String(), "CVE-NEW-HIGH")
 }

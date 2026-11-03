@@ -1,12 +1,14 @@
 package diff
 
 import (
+	"bytes"
 	"strings"
 	"testing"
 
 	metav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
 	"github.com/kubescape/kubescape/v4/core/mocks"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // stubKubescape returns a configurable new-failure count from Diff so the
@@ -296,4 +298,17 @@ func TestGetDiffCmd_ValidationErrorStillPrintsUsage(t *testing.T) {
 			assert.Contains(t, buf.String(), "Usage:", "input validation errors must print command usage")
 		})
 	}
+}
+
+func TestGetDiffCmd_HonorsOutputWriter(t *testing.T) {
+	stub := &stubKubescape{}
+	diffCmd := GetDiffCmd(stub)
+	var buf bytes.Buffer
+	diffCmd.SetOut(&buf)
+	diffCmd.SetArgs([]string{"base.json", "head.json"})
+
+	err := diffCmd.Execute()
+	require.NoError(t, err)
+	require.NotNil(t, stub.received)
+	assert.Same(t, &buf, stub.received.Writer)
 }
