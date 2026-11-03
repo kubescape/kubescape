@@ -24,6 +24,9 @@ jobs:
       # Needed to authenticate to the hub with the job's OIDC token; the hub
       # must list this repository and ref as a trusted publisher.
       id-token: write
+      # Required by revanite-io/pvtr-publish-results@v1 (pinned to 0cbfef2) to
+      # upload SARIF security events until upstream releases a new tag.
+      security-events: write
     uses: revanite-io/pvtr-publish-results/.github/workflows/publish.yml@v1
     with:
       target: kubescape/kubescape@master
@@ -37,6 +40,7 @@ jobs:
               catalogs:
                 - osps-baseline
               applicability:
+                - maturity-1
                 - maturity-2
             vars:
               owner: kubescape
