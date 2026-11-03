@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -158,6 +160,10 @@ type KubescapeMcpserver struct {
 	// work tracks in-flight MCP work so shutdown can drain, cancel and join
 	// it. See workLifecycle.
 	work workLifecycle
+
+	// workspaceDir is the allowed root directory for local file scans.
+	// Empty means unconstrained mode.
+	workspaceDir string
 }
 
 // getPolicyGetter lazily constructs policyGetter on first use, guarded so
@@ -1675,12 +1681,41 @@ func validateMCPOptions(transport string, port int) (string, error) {
 	}
 }
 
-func mcpServerEntrypoint(ctx context.Context, transport string, port int) error {
+func mcpServerEntrypoint(ctx context.Context, transport string, port int, workspaceOpt ...string) error {
 	normTransport, err := validateMCPOptions(transport, port)
 	if err != nil {
 		return err
 	}
 	transport = normTransport
+
+	var workspace string
+	if len(workspaceOpt) > 0 {
+		workspace = strings.TrimSpace(workspaceOpt[0])
+	}
+	if workspace == "" {
+		workspace = strings.TrimSpace(os.Getenv("KUBESCAPE_WORKSPACE_DIR"))
+	}
+	if workspace != "" {
+		canonWorkspace, err := filepath.Abs(workspace)
+		if err != nil {
+			return fmt.Errorf("invalid workspace directory %q: %w", workspace, err)
+		}
+		canonWorkspace, err = filepath.EvalSymlinks(canonWorkspace)
+		if err != nil {
+			return fmt.Errorf("failed to resolve workspace directory %q: %w", workspace, err)
+		}
+		fi, err := os.Stat(canonWorkspace)
+		if err != nil {
+			return fmt.Errorf("failed to stat workspace directory %q: %w", workspace, err)
+		}
+		if !fi.IsDir() {
+			return fmt.Errorf("workspace directory %q is not a directory", workspace)
+		}
+		workspace = canonWorkspace
+		logger.L().Info("Workspace root containment enabled", helpers.String("workspace", workspace))
+	} else {
+		logger.L().Warning("No --workspace configured: local IaC scans will run in unconstrained mode")
+	}
 
 	logger.L().Info("Starting MCP server...")
 
@@ -1707,6 +1742,7 @@ func mcpServerEntrypoint(ctx context.Context, transport string, port int) error 
 	ksServer = &KubescapeMcpserver{
 		s:            s,
 		policyGetter: drp,
+		workspaceDir: workspace,
 	}
 
 	// The policy bundle download can take well over a minute. Load it in the
@@ -1875,6 +1911,7 @@ func createPolicyListingTools(ksServer *KubescapeMcpserver) {
 func GetMCPServerCmd() *cobra.Command {
 	var transport string
 	var port int
+	var workspace string
 	cmd := &cobra.Command{
 		Use:   "mcpserver",
 		Short: "Start the Kubescape MCP server",
@@ -1895,10 +1932,11 @@ func GetMCPServerCmd() *cobra.Command {
 			if ctx == nil {
 				ctx = context.Background()
 			}
-			return mcpServerEntrypoint(ctx, transport, port)
+			return mcpServerEntrypoint(ctx, transport, port, workspace)
 		},
 	}
 	cmd.Flags().StringVarP(&transport, "transport", "t", "stdio", "Transport protocol to use (stdio or sse)")
 	cmd.Flags().IntVarP(&port, "port", "p", 8080, "Port to use for SSE transport")
+	cmd.Flags().StringVar(&workspace, "workspace", "", "Path to the allowed workspace root directory for local IaC scans [$KUBESCAPE_WORKSPACE_DIR]")
 	return cmd
 }

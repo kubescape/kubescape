@@ -8,6 +8,7 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 
 	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/pkg/pathcontainment"
 	"github.com/kubescape/kubescape/v4/core/pkg/resourcehandler"
 	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
@@ -102,6 +103,14 @@ func buildWorkloadScanRequest(workload, namespace, path, frameworkName string) (
 // scanResponse JSON. When path is non-empty the workload is resolved from local
 // manifests, otherwise it is fetched from the live cluster.
 func (ksServer *KubescapeMcpserver) RunWorkloadScan(ctx context.Context, workload, namespace, path, frameworkName string) ([]byte, error) {
+	if strings.TrimSpace(path) != "" {
+		resolvedPath, err := pathcontainment.ResolveContainedPath(ksServer.workspaceDir, strings.TrimSpace(path))
+		if err != nil {
+			return nil, err
+		}
+		path = resolvedPath
+	}
+
 	req, err := buildWorkloadScanRequest(workload, namespace, path, frameworkName)
 	if err != nil {
 		return nil, err

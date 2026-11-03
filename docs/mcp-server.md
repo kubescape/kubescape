@@ -50,10 +50,18 @@ kubescape mcpserver
 
 The server starts and communicates via stdio, making it compatible with MCP-enabled AI tools.
 
+To restrict local file and Infrastructure-as-Code (IaC) scans to an authorized root directory, use the `--workspace` flag or set the `KUBESCAPE_WORKSPACE_DIR` environment variable:
+
+```bash
+kubescape mcpserver --workspace /path/to/project
+```
+
+When workspace containment is enabled, local scanning tools (`scan_local_iac`, `scan_local_iac_controls`, and `scan_workload` with `path`) validate that all scanned files and targets remain within the workspace boundary. Any attempt to traverse out of the workspace via parent directory references (`../`) or escaping symlinks is immediately rejected with an `INVALID_ARGUMENT` error. If omitted, the server operates in unconstrained mode and logs a warning on startup.
+
 To serve clients over HTTP instead, use the SSE transport. It listens on `127.0.0.1` only, on port 8080 unless `--port` says otherwise, and answers `403` to a request whose `Origin` header names another site. Clients that send no `Origin`, such as CLIs, are unaffected:
 
 ```bash
-kubescape mcpserver --transport sse --port 8080
+kubescape mcpserver --transport sse --port 8080 --workspace /path/to/project
 ```
 
 ## Available Tools
@@ -401,6 +409,30 @@ If the policy bundle is still loading, the call fails with a `TIMEOUT` error; re
 }
 ```
 
+### Local IaC Scanning Tools
+
+#### `scan_local_iac`
+
+Scan local Infrastructure-as-Code (Helm charts, Kustomize directories, YAML manifests) for security misconfigurations. When `--workspace` is configured on the server, `path` must resolve within the allowed workspace boundary.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `path` | string | Yes | Absolute or relative path to the local directory or file |
+| `framework` | string | No | Security framework to scan against (optional, e.g., `'nsa'` (default) or `'mitre'`) |
+
+#### `scan_local_iac_controls`
+
+Scan local Infrastructure-as-Code files against specific control IDs rather than an entire framework. When `--workspace` is configured on the server, `path` must resolve within the allowed workspace boundary.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `path` | string | Yes | Path to local directory or manifest file |
+| `control_ids` | array of strings | Yes | Control IDs to check, e.g. `["C-0012", "C-0057"]` |
+
 ### Live Scanning Tools
 
 #### `run_framework_security_scan`
@@ -492,7 +524,7 @@ A workload that is owned by another resource — a Pod belonging to a ReplicaSet
 |-----------|------|----------|-------------|
 | `workload` | string | Yes | Workload identifier as `<kind>[.<version>[.<group>]]/<name>`, optionally namespace-qualified: `"Deployment/nginx"`, `"default/Deployment/nginx"`, or `"Deployment.v1.apps/nginx"` |
 | `namespace` | string | No | Namespace of the workload (optional; defaults to `'default'` for live-cluster scans, or unconstrained when `path` is given). Pass `"*"` to search across all namespaces in a live cluster (requires cluster-wide list permissions). Must not conflict with a namespace prefix in the workload identifier |
-| `path` | string | No | Path to local YAML manifests. When set, the workload is resolved from those files instead of the live cluster |
+| `path` | string | No | Path to local YAML manifests. When set, the workload is resolved from those files instead of the live cluster (must resolve within `--workspace` if configured) |
 | `framework` | string | No | Framework to scan against (optional, defaults to the full workload control set) |
 
 **Example Response:**
@@ -955,7 +987,7 @@ Add to your Claude Desktop configuration (`~/.config/claude/config.json` on Linu
   "mcpServers": {
     "kubescape": {
       "command": "kubescape",
-      "args": ["mcpserver"]
+      "args": ["mcpserver", "--workspace", "/path/to/project"]
     }
   }
 }
