@@ -15,6 +15,8 @@
 //	Security:
 //	- bearer
 //
+//	The open routes (/livez, /readyz, GET /v1/metrics) override this with an empty security list in swagger.yaml.
+//
 //	SecurityDefinitions:
 //	bearer:
 //	     type: apiKey

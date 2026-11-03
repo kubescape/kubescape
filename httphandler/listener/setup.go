@@ -404,6 +404,7 @@ func newRouter(httpHandler *handlerequestsv1.HTTPHandler, openApiHandler http.Ha
 	rtr.Handle("GET "+docs.OpenAPIV2Prefix, openApiHandler)
 
 	v1Handler := func(handlerFunc http.HandlerFunc) http.Handler {
+		// auth wraps outside otelhttp on purpose: rejected requests are not traced.
 		var h http.Handler = otelhttp.NewHandler(handlerFunc, "kubescape-svc")
 		if auth != nil {
 			h = auth(h)

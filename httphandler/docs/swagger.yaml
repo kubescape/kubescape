@@ -190,6 +190,7 @@ paths:
     get:
       description: Returns the liveness status of the Kubescape microservice.
       operationId: getLiveness
+      security: []
       responses:
         "200":
           $ref: '#/responses/livenessProbeOK'
@@ -200,6 +201,7 @@ paths:
     get:
       description: Returns the readiness status of the Kubescape microservice.
       operationId: getReadiness
+      security: []
       responses:
         "200":
           $ref: '#/responses/readinessProbeOK'
@@ -211,6 +213,7 @@ paths:
       description: Enables support for Prometheus metrics, runs a scan and returns
         its result in Prometheus metrics format.
       operationId: getMetrics
+      security: []
       responses:
         "200":
           $ref: '#/responses/enableMetricsResponse'
