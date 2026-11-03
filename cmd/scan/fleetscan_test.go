@@ -1943,3 +1943,21 @@ func TestFleetScan_DevNullForContextAndFleetReports(t *testing.T) {
 		})
 	}
 }
+
+func TestFleetScan_HonorsFleetReportWriter(t *testing.T) {
+	var buf bytes.Buffer
+	SetFleetReportWriter(&buf)
+	defer SetFleetReportWriter(nil)
+
+	scanInfo := cautils.ScanInfo{
+		KubeContexts: []string{"ctx-a"},
+		Output:       os.DevNull,
+		Format:       "json",
+		FleetReport:  filepath.Join(t.TempDir(), "fleet.json"),
+	}
+	ks := &mocks.MockIKubescape{}
+
+	err := fleetScan(scanInfo, ks, nil, scanContextOnlyRunner)
+	require.NoError(t, err)
+	assert.NotEmpty(t, buf.String(), "fleet report summary must be written to fleetReportWriter")
+}

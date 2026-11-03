@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/url"
 	"os"
@@ -454,6 +455,16 @@ func existingFileTarget(path string) (os.FileInfo, bool) {
 // --fleet-report. Failing to write the fleet report is reported through the
 // same error, since a run that scanned everything but could not save the
 // result it was asked for has not done what was asked.
+// fleetReportWriter is the destination writer for the interactive terminal summary.
+// When nil, the summary writes to os.Stdout at print time, preserving stdout redirection.
+var fleetReportWriter io.Writer
+
+// SetFleetReportWriter sets the destination writer for the interactive terminal
+// summary. Pass nil to restore writing to os.Stdout at print time.
+func SetFleetReportWriter(w io.Writer) {
+	fleetReportWriter = w
+}
+
 func fleetScan(baseScanInfo cautils.ScanInfo, ks meta.IKubescape, policyIdentifiers []cautils.PolicyIdentifier, run fleetRunner) error {
 	outputPaths, err := validateFleetScanInvocation(&baseScanInfo)
 	if err != nil {
@@ -531,7 +542,11 @@ func fleetScan(baseScanInfo cautils.ScanInfo, ks meta.IKubescape, policyIdentifi
 		// cluster and then failed to save the result should still tell the
 		// operator what it found, and the summary is the only place they would
 		// otherwise see it.
-		printerv2.PrintFleetReport(os.Stdout, &report)
+		w := fleetReportWriter
+		if w == nil {
+			w = os.Stdout
+		}
+		printerv2.PrintFleetReport(w, &report)
 	}
 
 	// The fleet report is not a context, so its failure is reported beside the
