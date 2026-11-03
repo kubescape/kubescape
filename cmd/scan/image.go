@@ -84,8 +84,20 @@ func getImageCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Command 
 			if scanInfo.BaselineSeverityThreshold != "" || commandFlagChanged(cmd, "baseline-severity-threshold") {
 				return fmt.Errorf("--baseline-severity-threshold is not supported for image scans: an image scan evaluates vulnerabilities, not posture baseline drift (use 'kubescape diff' to compare image scan reports)")
 			}
+			if (scanInfo.BaselineGranularity != "" && scanInfo.BaselineGranularity != "evidence") || commandFlagChanged(cmd, "baseline-granularity") {
+				return fmt.Errorf("--baseline-granularity is not supported for image scans: an image scan evaluates vulnerabilities, not posture baseline drift (use 'kubescape diff' to compare image scan reports)")
+			}
 			if scanInfo.ComplianceThreshold != 0 || commandFlagChanged(cmd, "compliance-threshold") {
 				return fmt.Errorf("--compliance-threshold is not supported for image scans: an image scan evaluates vulnerabilities, not posture compliance scores (use --severity-threshold instead)")
+			}
+			if scanInfo.FailCoverageThreshold != 0 || commandFlagChanged(cmd, "fail-coverage-below") {
+				return fmt.Errorf("--fail-coverage-below is not supported for image scans: an image scan evaluates vulnerabilities, not posture control coverage (use --severity-threshold instead)")
+			}
+			if scanInfo.FailOnDegradedConfig || commandFlagChanged(cmd, "fail-on-degraded-config") {
+				return fmt.Errorf("--fail-on-degraded-config is not supported for image scans: an image scan evaluates vulnerabilities, not posture control configurations")
+			}
+			if scanInfo.ControlsInputs != "" || commandFlagChanged(cmd, "controls-config") {
+				return fmt.Errorf("--controls-config is not supported for image scans: an image scan evaluates vulnerabilities, not posture controls")
 			}
 			if err := shared.ValidateImageScanAnonymization(scanInfo); err != nil {
 				return err
