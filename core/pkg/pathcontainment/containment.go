@@ -44,21 +44,10 @@ func ResolveContainedPath(baseDir, target string) (string, error) {
 		return filepath.Clean(target), nil
 	}
 
-	// Canonicalize baseDir
-	absBase, err := filepath.Abs(baseDir)
+	// Canonicalize baseDir preserving symlink/.. semantics
+	canonicalBase, err := resolveBaseDir(baseDir)
 	if err != nil {
-		return "", fmt.Errorf("failed to determine absolute path for baseDir %q: %w", baseDir, err)
-	}
-	canonicalBase, err := filepath.EvalSymlinks(absBase)
-	if err != nil {
-		return "", fmt.Errorf("failed to resolve symlinks for baseDir %q: %w", baseDir, err)
-	}
-	baseInfo, err := os.Stat(canonicalBase)
-	if err != nil {
-		return "", fmt.Errorf("failed to stat baseDir %q: %w", baseDir, err)
-	}
-	if !baseInfo.IsDir() {
-		return "", fmt.Errorf("baseDir %q is not a directory", baseDir)
+		return "", err
 	}
 
 	// Resolve target component by component to ensure symlinks are evaluated
@@ -80,6 +69,92 @@ func ResolveContainedPath(baseDir, target string) (string, error) {
 	return resolvedTarget, nil
 }
 
+// splitPath splits a path according to platform-specific path separator semantics.
+// On Unix-like systems, only '/' is a separator (preserving backslashes in filenames).
+// On Windows, both '/' and '\' are recognized as separators.
+func splitPath(p string) []string {
+	return strings.FieldsFunc(p, func(r rune) bool {
+		if r > 127 {
+			return false
+		}
+		return os.IsPathSeparator(uint8(r))
+	})
+}
+
+// resolveBaseDir resolves baseDir to a canonical, absolute directory path.
+// It resolves symbolic links component by component so that parent traversal ("..")
+// operates on the physical parent of a symlink target rather than lexically collapsing.
+// All components in baseDir must exist and the final resolved path must be a directory.
+func resolveBaseDir(baseDir string) (string, error) {
+	vol := filepath.VolumeName(baseDir)
+	var cur string
+	var rest string
+
+	if filepath.IsAbs(baseDir) {
+		cur = filepath.Clean(vol + string(filepath.Separator))
+		rest = baseDir[len(vol):]
+	} else {
+		wd, err := os.Getwd()
+		if err != nil {
+			return "", fmt.Errorf("failed to get current working directory: %w", err)
+		}
+		canonWd, err := filepath.EvalSymlinks(wd)
+		if err != nil {
+			return "", fmt.Errorf("failed to resolve symlinks for working directory %q: %w", wd, err)
+		}
+		cur = canonWd
+		rest = baseDir
+	}
+
+	parts := splitPath(rest)
+	for _, seg := range parts {
+		if seg == "" || seg == "." {
+			continue
+		}
+
+		if seg == ".." {
+			fi, statErr := os.Stat(cur)
+			if statErr != nil {
+				return "", fmt.Errorf("failed to stat path %q: %w", cur, statErr)
+			}
+			if !fi.IsDir() {
+				return "", fmt.Errorf("%w: %q is not a directory", ErrInvalidPath, cur)
+			}
+			cur = filepath.Dir(cur)
+			continue
+		}
+
+		next := filepath.Join(cur, seg)
+		fi, lstatErr := os.Lstat(next)
+		if lstatErr != nil {
+			return "", fmt.Errorf("failed to stat baseDir %q: %w", baseDir, lstatErr)
+		}
+		if fi.Mode()&os.ModeSymlink != 0 {
+			resolvedSymlink, evalErr := filepath.EvalSymlinks(next)
+			if evalErr != nil {
+				return "", fmt.Errorf("failed to resolve symlink %q: %w", next, evalErr)
+			}
+			cur = resolvedSymlink
+		} else {
+			cur = next
+		}
+	}
+
+	canonicalBase, err := filepath.EvalSymlinks(cur)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve symlinks for baseDir %q: %w", baseDir, err)
+	}
+	baseInfo, err := os.Stat(canonicalBase)
+	if err != nil {
+		return "", fmt.Errorf("failed to stat baseDir %q: %w", baseDir, err)
+	}
+	if !baseInfo.IsDir() {
+		return "", fmt.Errorf("baseDir %q is not a directory", baseDir)
+	}
+
+	return canonicalBase, nil
+}
+
 // resolveComponentsPreservingSymlinks walks target component by component.
 // Symlinks are evaluated immediately as they are encountered, so that ".." operates
 // on the actual filesystem parent of the resolved directory rather than being
@@ -97,9 +172,7 @@ func resolveComponentsPreservingSymlinks(canonicalBase, target string) (string, 
 		rest = target
 	}
 
-	parts := strings.FieldsFunc(rest, func(r rune) bool {
-		return r == '/' || r == '\\'
-	})
+	parts := splitPath(rest)
 
 	var missingTail []string
 
@@ -112,6 +185,13 @@ func resolveComponentsPreservingSymlinks(canonicalBase, target string) (string, 
 			if len(missingTail) > 0 {
 				missingTail = missingTail[:len(missingTail)-1]
 			} else {
+				fi, statErr := os.Stat(cur)
+				if statErr != nil {
+					return "", fmt.Errorf("failed to stat path %q: %w", cur, statErr)
+				}
+				if !fi.IsDir() {
+					return "", fmt.Errorf("%w: %q is not a directory", ErrInvalidPath, cur)
+				}
 				cur = filepath.Dir(cur)
 			}
 			continue
@@ -154,7 +234,7 @@ func resolveComponentsPreservingSymlinks(canonicalBase, target string) (string, 
 // Returns false if resolution fails (e.g. nonexistent file, dangling symlink,
 // permission error) or if target escapes base.
 func IsPathContained(base, target string) bool {
-	resolvedBase, err := filepath.EvalSymlinks(base)
+	resolvedBase, err := resolveBaseDir(base)
 	if err != nil {
 		return false
 	}
