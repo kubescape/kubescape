@@ -55,7 +55,7 @@ func getValidateContractCmd(scanInfo *cautils.ScanInfo) *cobra.Command {
 			}
 
 			selected, validationErr := contractv1alpha1.LoadFile(args[0], contractv1alpha1.LoadOptions{
-				ContractName:        strings.TrimSpace(contractName),
+				ContractName:        contractName,
 				RunningVersion:      versioncheck.BuildNumber,
 				SupportedFormats:    shared.ScanFormats,
 				SupportedSeverities: reporthandlingapis.GetSupportedSeverities(),
