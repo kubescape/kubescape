@@ -549,12 +549,11 @@ func validateBaselineFlags(cmd *cobra.Command, scanInfo *cautils.ScanInfo) error
 		return nil
 	}
 
-	baseline := strings.TrimSpace(scanInfo.Baseline)
-	if commandFlagChanged(cmd, "baseline") && baseline == "" {
+	if commandFlagChanged(cmd, "baseline") && strings.TrimSpace(scanInfo.Baseline) == "" {
 		return fmt.Errorf("--baseline cannot be empty")
 	}
 
-	if baseline == "" {
+	if strings.TrimSpace(scanInfo.Baseline) == "" {
 		if scanInfo.BaselineFailOnNew || commandFlagChanged(cmd, "baseline-fail-on-new") {
 			return fmt.Errorf("--baseline-fail-on-new requires --baseline")
 		}
@@ -566,8 +565,6 @@ func validateBaselineFlags(cmd *cobra.Command, scanInfo *cautils.ScanInfo) error
 		}
 		return nil
 	}
-
-	scanInfo.Baseline = baseline
 
 	if strings.TrimSpace(scanInfo.BaselineSeverityThreshold) != "" {
 		if err := shared.ValidateSeverity(scanInfo.BaselineSeverityThreshold); err != nil {

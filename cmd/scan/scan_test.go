@@ -3,6 +3,7 @@ package scan
 import (
 	"context"
 	"errors"
+	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -568,7 +569,7 @@ func TestGetScanCommand_PersistentFlagValidation(t *testing.T) {
 }
 
 func TestGetScanCommand_BaselineFlagValidation(t *testing.T) {
-	t.Run("normalizes baseline flags when valid", func(t *testing.T) {
+	t.Run("preserves baseline path and normalizes threshold and granularity", func(t *testing.T) {
 		ks := &scanCallCounter{}
 		cmd := GetScanCommand(ks)
 		cmd.SilenceUsage = true
@@ -583,7 +584,7 @@ func TestGetScanCommand_BaselineFlagValidation(t *testing.T) {
 		require.ErrorContains(t, err, "scan reached")
 		assert.Equal(t, 1, ks.calls)
 		require.NotNil(t, ks.lastScanInfo)
-		assert.Equal(t, "base.json", ks.lastScanInfo.Baseline)
+		assert.Equal(t, "  base.json  ", ks.lastScanInfo.Baseline)
 		assert.True(t, ks.lastScanInfo.BaselineFailOnNew)
 		assert.Equal(t, "high", ks.lastScanInfo.BaselineSeverityThreshold)
 		assert.Equal(t, "control", ks.lastScanInfo.BaselineGranularity)
@@ -680,6 +681,59 @@ func TestGetScanCommand_BaselineFlagValidation(t *testing.T) {
 			})
 		}
 	})
+}
+
+type mockBaselineScanKubescape struct {
+	mocks.MockIKubescape
+}
+
+func (m *mockBaselineScanKubescape) ScanContext(_ context.Context, _ *cautils.ScanInfo, _ []cautils.PolicyIdentifier) (*resultshandlingpkg.ResultsHandler, error) {
+	return resultsFailingOn("res1"), nil
+}
+
+func TestGetScanCommand_BaselinePreservesSpaceBearingPath(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Chdir(tmpDir)
+
+	basePath := "base.json"
+	spaceBasePath := " base.json "
+
+	// base.json has C-0016 failed on res1 matching the mock scan results.
+	// Comparing against base.json produces 0 new failures (unchanged failure).
+	baseContent := `{"results":[{"resourceID":"res1","controls":[{"controlID":"C-0016","name":"Allow privilege escalation","status":{"status":"failed"},"rules":[{"name":"rule","status":"failed"}]}]}],"summaryDetails":{"controls":{"C-0016":{"scoreFactor":5}}}}`
+	require.NoError(t, os.WriteFile(basePath, []byte(baseContent), 0o600))
+
+	// " base.json " has C-0016 passed on res1.
+	// Comparing against " base.json " produces 1 new failure on res1.
+	spaceContent := `{"results":[{"resourceID":"res1","controls":[{"controlID":"C-0016","name":"Allow privilege escalation","status":{"status":"passed"}}]}],"summaryDetails":{"controls":{"C-0016":{"scoreFactor":5}}}}`
+	require.NoError(t, os.WriteFile(spaceBasePath, []byte(spaceContent), 0o600))
+
+	mockKs := &mockBaselineScanKubescape{}
+
+	// When space-bearing filename " base.json " is requested, the application must access
+	// the exact space-bearing file and detect the new failure, tripping the drift gate.
+	cmdSpace := GetScanCommand(mockKs)
+	cmdSpace.SilenceUsage = true
+	cmdSpace.SilenceErrors = true
+	cmdSpace.SetArgs([]string{
+		"--baseline= base.json ",
+		"--baseline-fail-on-new",
+	})
+	errSpace := cmdSpace.Execute()
+	require.Error(t, errSpace)
+	assert.ErrorContains(t, errSpace, "baseline drift: found 1 new failure(s)")
+	assert.True(t, isGateFailure(errSpace))
+
+	// When base.json is requested, the application accesses base.json and passes (0 new failures).
+	cmdBase := GetScanCommand(mockKs)
+	cmdBase.SilenceUsage = true
+	cmdBase.SilenceErrors = true
+	cmdBase.SetArgs([]string{
+		"--baseline=base.json",
+		"--baseline-fail-on-new",
+	})
+	errBase := cmdBase.Execute()
+	require.NoError(t, errBase)
 }
 
 // TestGetScanCommand_KubeContextsRejectedWhereUnsupported is a regression
