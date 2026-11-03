@@ -22,15 +22,15 @@ func TestGetPatchCmd(t *testing.T) {
 
 	assert.Equal(t, "patch --image <image>:<tag> [flags]", cmd.Use)
 
-	err := cmd.Args(&cobra.Command{}, []string{})
+	err := cmd.Args(cmd, []string{})
 	assert.Nil(t, err)
 
-	err = cmd.Args(&cobra.Command{}, []string{"test"})
-	expectedErrorMessage := "the command takes no arguments"
-	assert.Equal(t, expectedErrorMessage, err.Error())
+	err = cmd.Args(cmd, []string{"test"})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), `unknown command "test" for "patch"`)
 
 	err = cmd.RunE(&cobra.Command{}, []string{})
-	expectedErrorMessage = "image tag is required"
+	expectedErrorMessage := "image tag is required"
 	assert.Equal(t, expectedErrorMessage, err.Error())
 
 	err = cmd.RunE(&cobra.Command{}, []string{"patch", "--image", "docker.io/library/nginx:1.22"})
@@ -435,4 +435,15 @@ func TestGetPatchCmd_ValidationErrorStillPrintsUsage(t *testing.T) {
 
 	assert.ErrorContains(t, err, "invalid output mode")
 	assert.Contains(t, buf.String(), "Usage:", "input validation errors must print command usage")
+}
+
+func TestGetPatchCmd_RejectsUnexpectedArgs(t *testing.T) {
+	cmd := GetPatchCmd(&mocks.MockIKubescape{})
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+	cmd.SetArgs([]string{"--image", "docker.io/library/nginx:1.22", "unexpected"})
+
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `unknown command "unexpected" for "patch"`)
 }
