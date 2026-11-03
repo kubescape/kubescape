@@ -74,10 +74,7 @@ func ResolveContainedPath(baseDir, target string) (string, error) {
 // On Windows, both '/' and '\' are recognized as separators.
 func splitPath(p string) []string {
 	return strings.FieldsFunc(p, func(r rune) bool {
-		if r > 127 {
-			return false
-		}
-		return os.IsPathSeparator(uint8(r))
+		return r == '/' || r == filepath.Separator
 	})
 }
 
