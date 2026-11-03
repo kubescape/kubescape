@@ -372,7 +372,9 @@ func TestResolveContainedPath_BackslashInFilenameUnix(t *testing.T) {
 	// Resolving "a\b" must resolve to backslashFile, not nestedFile
 	resolved, err := ResolveContainedPath(base, "a\\b")
 	require.NoError(t, err)
-	assert.Equal(t, backslashFile, resolved)
+	canonBackslash, err := filepath.EvalSymlinks(backslashFile)
+	require.NoError(t, err)
+	assert.Equal(t, canonBackslash, resolved)
 
 	content, err := os.ReadFile(resolved)
 	require.NoError(t, err)
