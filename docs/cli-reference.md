@@ -1019,6 +1019,21 @@ kubescape fix results.json --no-confirm
 
 # Leave the manifests untouched: write the fixed copies to a directory instead
 kubescape fix results.json --output-dir ./fixed
+
+# For a Helm chart you cannot modify, write Kustomize JSON 6902 patches and an
+# executable Helm post-renderer script, renderer.sh, that applies them at install
+# time (--output-post-renderer requires --output-kustomize). Render the chart with
+# the release name you install it as, so the patches target the same resources.
+# Container workloads from ordinary scan reports are declined, because the report
+# redacts their environment configuration. When no patches are written, fix does
+# not create renderer.sh, so only install with it once it exists.
+kubescape scan ./my-chart --release-name my-release --format json --output results.json
+kubescape fix results.json --release-name my-release --output-kustomize ./patches --output-post-renderer ./patches
+if [ -x ./patches/renderer.sh ]; then
+  helm install my-release ./my-chart --post-renderer ./patches/renderer.sh
+else
+  echo "no Kustomize patches were written; see the declined resources reported by fix"
+fi
 ```
 
 With `--output-dir` the copies recreate the scanned tree, and a multi-document
@@ -1080,6 +1095,93 @@ kubectl apply -f ./fixes
 > Kustomize files, Kubescape prompts for confirmation before overwriting; in
 > non-interactive contexts, a non-empty directory is refused unless you pass
 > `--no-confirm`.
+
+---
+
+## kubescape diff
+
+Compare two Kubescape scan JSON reports and show what changed.
+
+### Synopsis
+
+```bash
+kubescape diff <base-report.json> <head-report.json> [flags]
+```
+
+### Description
+
+`kubescape diff` compares a base report, such as a scan of your main branch,
+against a head report, such as a scan of a pull request, and sorts every failure
+into one of these groups:
+
+| Group | Meaning |
+|-------|---------|
+| `new` | Fails in the head report but not in the base report |
+| `resolved` | Failed in the base report and no longer fails in the head report |
+| `unchanged` | Fails in both reports |
+| `incomparable` | Cannot be classified safely, for example because the two reports cover a different scope or a control was not evaluated in one of them. Incomparable failures are never reported as resolved |
+
+By default, failed rules and their failed paths are compared
+(`--granularity evidence`), so a new failure inside a control that was already
+failing is still reported as new. `--granularity control` compares
+resource-and-control pairs instead.
+
+Image scan reports (`kubescape scan image --format json`) are compared by
+vulnerability: a CVE is identified by its ID, package and package type, so
+upgrading a package that still carries the same CVE counts as unchanged.
+Findings from a multi-image report are pooled across all its images. Image
+reports support the `pretty-printer`, `json` and `yaml` formats, and both reports
+must be of the same kind.
+
+### Flags
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `-f, --format <format>` | Output format: `pretty-printer`, `summary-json`, `summary-yaml`, `summary-csv`, `json`, `yaml`, `sarif`, `junit`, `gitlab-sast`, `markdown` | `pretty-printer` |
+| `-o, --output <path>` | Output file. Except for `pretty-printer`, the format's extension is added when the path does not already have it | stdout |
+| `--fail-on-new` | Exit with code `1` when new or incomparable failures are found | `false` |
+| `--severity-threshold <severity>` | With `--fail-on-new`, only count new and incomparable failures at or above this severity: `low`, `medium`, `high`, `critical` | - |
+| `--granularity <unit>` | Comparison unit: `evidence` or `control` | `evidence` |
+
+### Output Formats
+
+| Format | Content |
+|--------|---------|
+| `pretty-printer` | Human-readable summary of every group |
+| `json`, `yaml` | Every group, with the reason for each incomparable failure |
+| `summary-json`, `summary-yaml`, `summary-csv` | Aggregate counts for dashboards and CI annotations |
+| `sarif`, `junit`, `gitlab-sast`, `markdown` | Only the new and incomparable failures, for CI annotations and pull request comments |
+
+The `summary-*`, `sarif`, `junit`, `gitlab-sast` and `markdown` formats also
+apply `--severity-threshold` to the new and incomparable failures they report.
+
+### Examples
+
+```bash
+# Scan the base branch, then the PR branch, then compare
+git checkout main
+kubescape scan --format json --output base.json .
+git checkout my-feature
+kubescape scan --format json --output head.json .
+kubescape diff base.json head.json
+
+# Fail CI when new high-severity or above failures are introduced
+kubescape diff base.json head.json --fail-on-new --severity-threshold high
+
+# Compare resource-and-control aggregates while keeping safety checks
+kubescape diff base.json head.json --granularity control
+
+# Output only new and incomparable regressions as SARIF for GitHub Code Scanning
+kubescape diff base.json head.json --format sarif --output kubescape-diff
+
+# Output aggregate diff counts for dashboards and CI annotations
+kubescape diff base.json head.json --format summary-json --output diff-summary.json
+
+# Compare two image scans and fail when an upgrade introduces high or critical CVEs
+kubescape scan image nginx:1.26 --format json --output base-image.json
+kubescape scan image nginx:1.27 --format json --output head-image.json
+kubescape diff base-image.json head-image.json --fail-on-new --severity-threshold high
+```
 
 ---
 
@@ -1398,7 +1500,44 @@ Manage Kubescape configuration.
 |------------|-------------|
 | `view` | View current configuration |
 | `set` | Set configuration value |
+| `validate` | Validate cached configuration |
 | `delete` | Delete cached configuration |
+| `delete cache` | Delete the incremental scan cache used by `kubescape scan --incremental` |
+
+#### view
+
+View the cached configuration as text, JSON or YAML. Pass a key, such as
+`accountID`, to show only that value.
+
+```bash
+kubescape config view [KEY] [flags]
+```
+
+**Flags:**
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `-f, --format <format>` | Output format: `text`, `json` or `yaml` | `text` |
+| `-o, --output <format>` | Alias for `--format` | `text` |
+| `-e, --include-empty` | Include empty values in the rendered output | `false` |
+
+#### validate
+
+Validate the cached configuration and print a diagnostic for each failing
+check. The command exits with code `1` when the configuration is invalid.
+
+```bash
+kubescape config validate [flags]
+```
+
+**Flags:**
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `-f, --format <format>` | Output format: `text`, `json` or `yaml` | `text` |
+| `-o, --output <format>` | Alias for `--format` | `text` |
+| `--profile <profile>` | Validation profile: `cloud` requires `accountID`, `accessKey`, `cloudAPIURL` and `cloudReportURL`; `offline` treats them as optional and only checks the ones that are set | `cloud` |
+| `--include-ok` | Include passing validation checks in the rendered output | `false` |
 
 ### Examples
 
@@ -1412,14 +1551,26 @@ kubescape config view --format json
 # View configuration as YAML
 kubescape config view -f yaml
 
+# Show unset values too
+kubescape config view --include-empty
+
 # Set account ID
 kubescape config set accountID <account-id>
 
 # Set cloud report URL
 kubescape config set cloudReportURL https://api.example.com
 
+# Check that the configuration is complete for submitting results to the cloud
+kubescape config validate
+
+# Check the configuration for offline use, listing passing checks too
+kubescape config validate --profile offline --include-ok
+
 # Delete configuration
 kubescape config delete
+
+# Delete the incremental scan cache
+kubescape config delete cache
 ```
 
 ---
@@ -1432,6 +1583,7 @@ Interact with the in-cluster Kubescape operator.
 
 ```bash
 kubescape operator scan <type> [flags]
+kubescape operator remediate <action> [flags]
 ```
 
 ### Scan Types
@@ -1441,11 +1593,77 @@ kubescape operator scan <type> [flags]
 | `configurations` | Trigger configuration scan |
 | `vulnerabilities` | Trigger vulnerability scan |
 
+### Scan Flags
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--namespace <ns>` | Namespace of the Kubescape Operator | `kubescape` |
+| `--include-namespaces <ns,...>` | Scan only these namespaces, e.g. `ns-a,ns-b` | - |
+| `--exclude-namespaces <ns,...>` | `configurations` only. Namespaces to exclude from scanning, e.g. `ns-a,ns-b`. Cluster-scoped objects are not scanned when this is set | - |
+| `--frameworks <name,...>` | `configurations` only. Frameworks to scan with | `all` |
+| `--enable-host-scan` | `configurations` only. Deploy the Kubescape host-sensor DaemonSet to collect the node data some controls need; it is deleted right after the data is collected | `false` |
+
+### Remediation
+
+`kubescape operator remediate <action>` asks the Kubescape Operator to act on
+workloads with scan findings:
+
+| Action | Description |
+|--------|-------------|
+| `annotate` | Annotate the workload as remediated |
+| `quarantine` | Create a deny-all NetworkPolicy that isolates the workload's pods |
+| `revert` | Remove the annotation and/or NetworkPolicy that a previous action added |
+
+Every action is a dry-run preview unless you pass `--confirm`. Name one workload
+with `--kind`, `--name` and `--target-namespace`, or select workloads from the
+scan results already stored in the cluster with `--control` and/or
+`--min-severity`. The two are mutually exclusive, and a selector cannot be
+combined with `--target-namespace` because the operator resolves it across all
+namespaces.
+
+The operator processes the request asynchronously. The outcome is recorded as
+`KubescapeRemediation` Kubernetes Events and in the operator logs:
+
+```bash
+# One workload named with --kind, --name and --target-namespace
+kubectl get events -n <target-namespace> --field-selector reason=KubescapeRemediation
+
+# Workloads selected with --control and/or --min-severity
+kubectl get events --all-namespaces --field-selector reason=KubescapeRemediation
+```
+
+**Flags:**
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--confirm` | Perform the real cluster write; without it the action is a dry-run preview | `false` |
+| `--kind <kind>` | Target workload kind: `Deployment`, `StatefulSet`, `DaemonSet` or `Pod` | - |
+| `--name <name>` | Name of the target workload | - |
+| `--target-namespace <ns>` | Namespace of the target workload. Required with `--kind` and `--name` | - |
+| `--control <id>` | Act on workloads failing this control, e.g. `C-0016`, resolved from stored scan results. Mutually exclusive with `--kind`/`--name` | - |
+| `--min-severity <severity>` | Act on workloads with a failing finding at or above this severity: `Critical`, `High`, `Medium`, `Low` or `Unknown`. Mutually exclusive with `--kind`/`--name` | - |
+| `--reason <text>` | Human-readable justification recorded in the audit trail | - |
+| `--finding-ref <ref>` | Scan-result reference that justifies the action, e.g. `workloadconfigurationscansummaries/payments/api` | - |
+| `--namespace <ns>` | Namespace of the Kubescape Operator | `kubescape` |
+
 ### Examples
 
 ```bash
 kubescape operator scan configurations
+kubescape operator scan configurations --frameworks nsa,mitre --include-namespaces payments
 kubescape operator scan vulnerabilities
+
+# Preview annotating a workload as remediated; no changes are made
+kubescape operator remediate annotate --kind Deployment --target-namespace payments --name api --reason "C-0016"
+
+# Quarantine the workload
+kubescape operator remediate quarantine --kind Deployment --target-namespace payments --name api --reason "C-0016" --confirm
+
+# Revert a previously applied action
+kubescape operator remediate revert --kind Deployment --target-namespace payments --name api --confirm
+
+# Preview quarantining every workload failing C-0016 at High or above
+kubescape operator remediate quarantine --control C-0016 --min-severity High
 ```
 
 ---
