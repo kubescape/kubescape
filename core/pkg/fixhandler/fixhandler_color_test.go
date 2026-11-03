@@ -318,9 +318,9 @@ func TestShouldColor_EnvPrecedence(t *testing.T) {
 	t.Setenv("FORCE_COLOR", "0")
 	assert.False(t, shouldColor(), "FORCE_COLOR=0 must disable color")
 
-	// FORCE_COLOR=-1 disables color
+	// FORCE_COLOR=-1 enables color (nonzero integer forces color per #4518)
 	t.Setenv("FORCE_COLOR", "-1")
-	assert.False(t, shouldColor(), "FORCE_COLOR=-1 must disable color")
+	assert.True(t, shouldColor(), "FORCE_COLOR=-1 must enable color")
 
 	// FORCE_COLOR=false disables color
 	t.Setenv("FORCE_COLOR", "false")
@@ -439,12 +439,12 @@ func TestColor_Subprocess(t *testing.T) {
 			wantColor: false,
 		},
 		{
-			name: "FORCE_COLOR=-1 suppresses color in fresh process",
+			name: "FORCE_COLOR=-1 enables color in fresh process",
 			env: map[string]string{
 				"FORCE_COLOR": "-1",
 			},
-			stubTTY:   true,
-			wantColor: false,
+			stubTTY:   false,
+			wantColor: true,
 		},
 		{
 			name: "FORCE_COLOR=0 suppresses color in fresh process",

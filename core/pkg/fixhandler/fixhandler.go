@@ -1267,8 +1267,8 @@ func resolveColorLevel() gchalk.ColorLevel {
 	}
 
 	// 2. FORCE_COLOR:
-	// Set to non-empty value. Values of "0", "false", or non-positive integers (e.g. "-1") disable color.
-	// Positive integers ("1", "2", "3") or "true" force color.
+	// Values of "0" or "false" disable color.
+	// Nonzero integer values (e.g. "1", "2", "3", "-1") or "true" force color.
 	if val, set := os.LookupEnv("FORCE_COLOR"); set && val != "" {
 		if strings.EqualFold(val, "true") {
 			return gchalk.LevelBasic
@@ -1277,15 +1277,15 @@ func resolveColorLevel() gchalk.ColorLevel {
 			return gchalk.LevelNone
 		}
 		if n, err := strconv.Atoi(val); err == nil {
-			if n > 0 {
-				if n >= 3 {
-					return gchalk.LevelAnsi16m
-				} else if n == 2 {
-					return gchalk.LevelAnsi256
-				}
-				return gchalk.LevelBasic
+			if n == 0 {
+				return gchalk.LevelNone
 			}
-			return gchalk.LevelNone
+			if n >= 3 {
+				return gchalk.LevelAnsi16m
+			} else if n == 2 {
+				return gchalk.LevelAnsi256
+			}
+			return gchalk.LevelBasic
 		}
 		return gchalk.LevelNone
 	}
