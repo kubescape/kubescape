@@ -16,6 +16,7 @@ import (
 	"github.com/kubescape/kubescape/v4/core/meta"
 	"github.com/kubescape/kubescape/v4/core/pkg/reportcrypto"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling"
+	resultsdiff "github.com/kubescape/kubescape/v4/core/pkg/resultshandling/diff"
 	contractv1alpha1 "github.com/kubescape/kubescape/v4/core/pkg/scancontract/v1alpha1"
 	"github.com/kubescape/kubescape/v4/core/pkg/telemetry"
 	"github.com/kubescape/kubescape/v4/pkg/imagescan"
@@ -118,10 +119,8 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 					scanInfo.ControlsVersion,
 				)
 			}
-			if scanInfo.Baseline != "" && scanInfo.BaselineSeverityThreshold != "" {
-				if err := shared.ValidateSeverity(scanInfo.BaselineSeverityThreshold); err != nil {
-					return err
-				}
+			if err := validateBaselineFlags(cmd, &scanInfo); err != nil {
+				return err
 			}
 			if err := validateKubeContextsSupported(cmd, &scanInfo); err != nil {
 				return err
@@ -542,6 +541,50 @@ func gateFailure(err error) error { return gateError{err: err} }
 func isGateFailure(err error) bool {
 	var gate gateError
 	return errors.As(err, &gate)
+}
+
+// validateBaselineFlags validates baseline drift gating flags for posture scans.
+func validateBaselineFlags(cmd *cobra.Command, scanInfo *cautils.ScanInfo) error {
+	if cmd != nil && cmd.Name() == "image" {
+		return nil
+	}
+
+	baseline := strings.TrimSpace(scanInfo.Baseline)
+	if commandFlagChanged(cmd, "baseline") && baseline == "" {
+		return fmt.Errorf("--baseline cannot be empty")
+	}
+
+	if baseline == "" {
+		if scanInfo.BaselineFailOnNew || commandFlagChanged(cmd, "baseline-fail-on-new") {
+			return fmt.Errorf("--baseline-fail-on-new requires --baseline")
+		}
+		if strings.TrimSpace(scanInfo.BaselineSeverityThreshold) != "" || commandFlagChanged(cmd, "baseline-severity-threshold") {
+			return fmt.Errorf("--baseline-severity-threshold requires --baseline")
+		}
+		if (scanInfo.BaselineGranularity != "" && scanInfo.BaselineGranularity != "evidence") || commandFlagChanged(cmd, "baseline-granularity") {
+			return fmt.Errorf("--baseline-granularity requires --baseline")
+		}
+		return nil
+	}
+
+	scanInfo.Baseline = baseline
+
+	if strings.TrimSpace(scanInfo.BaselineSeverityThreshold) != "" {
+		if err := shared.ValidateSeverity(scanInfo.BaselineSeverityThreshold); err != nil {
+			return err
+		}
+		scanInfo.BaselineSeverityThreshold = strings.ToLower(strings.TrimSpace(scanInfo.BaselineSeverityThreshold))
+	}
+
+	if err := resultsdiff.ValidateGranularity(scanInfo.BaselineGranularity); err != nil {
+		return err
+	}
+	scanInfo.BaselineGranularity = strings.ToLower(strings.TrimSpace(scanInfo.BaselineGranularity))
+	if scanInfo.BaselineGranularity == "" {
+		scanInfo.BaselineGranularity = string(resultsdiff.GranularityEvidence)
+	}
+
+	return nil
 }
 
 func severityLabelOrAll(s string) string {

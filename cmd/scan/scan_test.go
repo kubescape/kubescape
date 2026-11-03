@@ -502,16 +502,19 @@ func TestGetScanCommand_FormatFlagCaseInsensitive(t *testing.T) {
 
 type scanCallCounter struct {
 	mocks.MockIKubescape
-	calls int
+	calls        int
+	lastScanInfo *cautils.ScanInfo
 }
 
-func (m *scanCallCounter) Scan(_ *cautils.ScanInfo, _ []cautils.PolicyIdentifier) (*resultshandlingpkg.ResultsHandler, error) {
+func (m *scanCallCounter) Scan(scanInfo *cautils.ScanInfo, _ []cautils.PolicyIdentifier) (*resultshandlingpkg.ResultsHandler, error) {
 	m.calls++
+	m.lastScanInfo = scanInfo
 	return nil, errors.New("scan reached")
 }
 
-func (m *scanCallCounter) ScanContext(_ context.Context, _ *cautils.ScanInfo, _ []cautils.PolicyIdentifier) (*resultshandlingpkg.ResultsHandler, error) {
+func (m *scanCallCounter) ScanContext(_ context.Context, scanInfo *cautils.ScanInfo, _ []cautils.PolicyIdentifier) (*resultshandlingpkg.ResultsHandler, error) {
 	m.calls++
+	m.lastScanInfo = scanInfo
 	return nil, errors.New("scan reached")
 }
 
@@ -529,6 +532,13 @@ func TestGetScanCommand_PersistentFlagValidation(t *testing.T) {
 		{name: "rejects negative control timeout", args: []string{"--control-timeout=-1s"}, wantError: "invalid --control-timeout"},
 		{name: "rejects a kube version that is not a version", args: []string{"--kube-version=latest"}, wantError: "invalid --kube-version"},
 		{name: "rejects include and exclude namespaces together", args: []string{"--include-namespaces=a,b", "--exclude-namespaces=b"}, wantError: "cannot be used together"},
+		{name: "rejects baseline-fail-on-new without baseline", args: []string{"--baseline-fail-on-new"}, wantError: "--baseline-fail-on-new requires --baseline"},
+		{name: "rejects baseline-severity-threshold without baseline", args: []string{"--baseline-severity-threshold=high"}, wantError: "--baseline-severity-threshold requires --baseline"},
+		{name: "rejects baseline-granularity without baseline", args: []string{"--baseline-granularity=control"}, wantError: "--baseline-granularity requires --baseline"},
+		{name: "rejects empty baseline flag", args: []string{"--baseline="}, wantError: "--baseline cannot be empty"},
+		{name: "rejects whitespace-only baseline flag", args: []string{"--baseline=   "}, wantError: "--baseline cannot be empty"},
+		{name: "rejects invalid baseline granularity", args: []string{"--baseline=base.json", "--baseline-granularity=invalid"}, wantError: "invalid diff granularity"},
+		{name: "rejects invalid baseline severity threshold", args: []string{"--baseline=base.json", "--baseline-severity-threshold=invalid"}, wantError: "unknown severity"},
 		{name: "accepts include namespaces alone", args: []string{"--include-namespaces=a,b"}, wantCalls: 1, wantError: "scan reached"},
 		{name: "accepts exclude namespaces alone", args: []string{"--exclude-namespaces=b"}, wantCalls: 1, wantError: "scan reached"},
 		{name: "accepts defaults", wantCalls: 1, wantError: "scan reached"},
@@ -537,6 +547,10 @@ func TestGetScanCommand_PersistentFlagValidation(t *testing.T) {
 		{name: "accepts zero timeouts", args: []string{"--scan-timeout=0", "--control-timeout=0"}, wantCalls: 1, wantError: "scan reached"},
 		{name: "accepts positive timeouts", args: []string{"--scan-timeout=2s", "--control-timeout=1s"}, wantCalls: 1, wantError: "scan reached"},
 		{name: "accepts a kube version and api versions", args: []string{"--kube-version=1.31", "--api-versions=gateway.networking.k8s.io/v1,cert-manager.io/v1"}, wantCalls: 1, wantError: "scan reached"},
+		{name: "accepts baseline alone", args: []string{"--baseline=base.json"}, wantCalls: 1, wantError: "scan reached"},
+		{name: "accepts baseline with fail-on-new", args: []string{"--baseline=base.json", "--baseline-fail-on-new"}, wantCalls: 1, wantError: "scan reached"},
+		{name: "accepts baseline with severity threshold", args: []string{"--baseline=base.json", "--baseline-severity-threshold=high"}, wantCalls: 1, wantError: "scan reached"},
+		{name: "accepts baseline with granularity", args: []string{"--baseline=base.json", "--baseline-granularity=control"}, wantCalls: 1, wantError: "scan reached"},
 	}
 
 	for _, tt := range tests {
@@ -551,6 +565,121 @@ func TestGetScanCommand_PersistentFlagValidation(t *testing.T) {
 			assert.Equal(t, tt.wantCalls, ks.calls)
 		})
 	}
+}
+
+func TestGetScanCommand_BaselineFlagValidation(t *testing.T) {
+	t.Run("normalizes baseline flags when valid", func(t *testing.T) {
+		ks := &scanCallCounter{}
+		cmd := GetScanCommand(ks)
+		cmd.SilenceUsage = true
+		cmd.SetArgs([]string{
+			"--baseline=  base.json  ",
+			"--baseline-fail-on-new",
+			"--baseline-severity-threshold=HIGH",
+			"--baseline-granularity=CONTROL",
+		})
+
+		err := cmd.Execute()
+		require.ErrorContains(t, err, "scan reached")
+		assert.Equal(t, 1, ks.calls)
+		require.NotNil(t, ks.lastScanInfo)
+		assert.Equal(t, "base.json", ks.lastScanInfo.Baseline)
+		assert.True(t, ks.lastScanInfo.BaselineFailOnNew)
+		assert.Equal(t, "high", ks.lastScanInfo.BaselineSeverityThreshold)
+		assert.Equal(t, "control", ks.lastScanInfo.BaselineGranularity)
+	})
+
+	t.Run("defaults baseline granularity to evidence", func(t *testing.T) {
+		ks := &scanCallCounter{}
+		cmd := GetScanCommand(ks)
+		cmd.SilenceUsage = true
+		cmd.SetArgs([]string{"--baseline=base.json"})
+
+		err := cmd.Execute()
+		require.ErrorContains(t, err, "scan reached")
+		assert.Equal(t, 1, ks.calls)
+		require.NotNil(t, ks.lastScanInfo)
+		assert.Equal(t, "evidence", ks.lastScanInfo.BaselineGranularity)
+	})
+
+	t.Run("subcommands inherit baseline validation", func(t *testing.T) {
+		tests := []struct {
+			name      string
+			args      []string
+			wantError string
+		}{
+			{
+				name:      "scan framework rejects baseline-fail-on-new without baseline",
+				args:      []string{"framework", "nsa", "--baseline-fail-on-new"},
+				wantError: "--baseline-fail-on-new requires --baseline",
+			},
+			{
+				name:      "scan control rejects baseline-severity-threshold without baseline",
+				args:      []string{"control", "C-0058", "--baseline-severity-threshold=high"},
+				wantError: "--baseline-severity-threshold requires --baseline",
+			},
+			{
+				name:      "scan workload rejects baseline-granularity without baseline",
+				args:      []string{"workload", "Deployment/nginx", "--baseline-granularity=control"},
+				wantError: "--baseline-granularity requires --baseline",
+			},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				ks := &scanCallCounter{}
+				cmd := GetScanCommand(ks)
+				cmd.SilenceUsage = true
+				cmd.SetArgs(tt.args)
+
+				err := cmd.Execute()
+				require.ErrorContains(t, err, tt.wantError)
+				assert.Equal(t, 0, ks.calls)
+			})
+		}
+	})
+
+	t.Run("scan image preserves dedicated error messages", func(t *testing.T) {
+		tests := []struct {
+			name      string
+			args      []string
+			wantError string
+		}{
+			{
+				name:      "scan image rejects --baseline",
+				args:      []string{"image", "nginx:latest", "--baseline=base.json"},
+				wantError: "--baseline is not supported for image scans",
+			},
+			{
+				name:      "scan image rejects --baseline-fail-on-new",
+				args:      []string{"image", "nginx:latest", "--baseline-fail-on-new"},
+				wantError: "--baseline-fail-on-new is not supported for image scans",
+			},
+			{
+				name:      "scan image rejects --baseline-severity-threshold",
+				args:      []string{"image", "nginx:latest", "--baseline-severity-threshold=high"},
+				wantError: "--baseline-severity-threshold is not supported for image scans",
+			},
+			{
+				name:      "scan image rejects --baseline-granularity",
+				args:      []string{"image", "nginx:latest", "--baseline-granularity=control"},
+				wantError: "--baseline-granularity is not supported for image scans",
+			},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				ks := &scanCallCounter{}
+				cmd := GetScanCommand(ks)
+				cmd.SilenceUsage = true
+				cmd.SetArgs(tt.args)
+
+				err := cmd.Execute()
+				require.ErrorContains(t, err, tt.wantError)
+				assert.Equal(t, 0, ks.calls)
+			})
+		}
+	})
 }
 
 // TestGetScanCommand_KubeContextsRejectedWhereUnsupported is a regression
