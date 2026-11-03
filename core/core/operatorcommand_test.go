@@ -114,7 +114,7 @@ func TestWaitForOperatorCommands_ReportsError(t *testing.T) {
 
 	err = WaitForOperatorCommands(context.Background(), dyn, "kubescape", names, 5*time.Second)
 	require.Error(t, err)
-	assert.Equal(t, fmt.Sprintf("operator command %s failed: scan blew up", names[0]), err.Error())
+	assert.Equal(t, fmt.Sprintf("operator command %s (%s) failed: scan blew up", apis.TypeRunKubescape, names[0]), err.Error())
 }
 
 func TestWaitForOperatorCommands_Timeout(t *testing.T) {
@@ -126,4 +126,77 @@ func TestWaitForOperatorCommands_Timeout(t *testing.T) {
 	err = WaitForOperatorCommands(context.Background(), dyn, "kubescape", names, 100*time.Millisecond)
 	require.Error(t, err)
 	assert.True(t, strings.HasPrefix(err.Error(), "timed out after 100ms waiting for operator commands"), err.Error())
+	assert.Contains(t, err.Error(), names[0])
+	assert.Contains(t, err.Error(), "the operator may be down or too old to execute OperatorAPI commands; check the operator pod in namespace kubescape")
+}
+
+func TestWaitForOperatorCommands_TimeoutAfterStarted(t *testing.T) {
+	dyn := newFakeOperatorCommandClient(t)
+	names, err := CreateOperatorCommands(context.Background(), dyn, "kubescape",
+		apis.Commands{Commands: []apis.Command{{CommandName: apis.TypeRunKubescape}}})
+	require.NoError(t, err)
+	setOperatorCommandStatus(t, dyn, "kubescape", names[0], map[string]interface{}{"started": true})
+
+	err = WaitForOperatorCommands(context.Background(), dyn, "kubescape", names, 100*time.Millisecond)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "still pending: "+names[0])
+	assert.Contains(t, err.Error(), "started: "+names[0])
+	assert.NotContains(t, err.Error(), "operator may be down")
+}
+
+func shortPollInterval(t *testing.T) {
+	t.Helper()
+	prev := operatorCommandPollInterval
+	operatorCommandPollInterval = 10 * time.Millisecond
+	t.Cleanup(func() { operatorCommandPollInterval = prev })
+}
+
+func TestWaitForOperatorCommands_PendingThenCompleted(t *testing.T) {
+	shortPollInterval(t)
+	dyn := newFakeOperatorCommandClient(t)
+	names, err := CreateOperatorCommands(context.Background(), dyn, "kubescape",
+		apis.Commands{Commands: []apis.Command{{CommandName: apis.TypeRunKubescape}}})
+	require.NoError(t, err)
+
+	go func() {
+		time.Sleep(60 * time.Millisecond)
+		obj, err := dyn.Resource(operatorCommandGVR).Namespace("kubescape").Get(context.Background(), names[0], metav1.GetOptions{})
+		if err != nil {
+			return
+		}
+		_ = unstructured.SetNestedField(obj.Object, map[string]interface{}{"started": true, "completed": true}, "status")
+		_, _ = dyn.Resource(operatorCommandGVR).Namespace("kubescape").Update(context.Background(), obj, metav1.UpdateOptions{})
+	}()
+
+	require.NoError(t, WaitForOperatorCommands(context.Background(), dyn, "kubescape", names, 5*time.Second))
+}
+
+func TestWaitForOperatorCommands_NotFoundMidWait(t *testing.T) {
+	shortPollInterval(t)
+	dyn := newFakeOperatorCommandClient(t)
+	names, err := CreateOperatorCommands(context.Background(), dyn, "kubescape",
+		apis.Commands{Commands: []apis.Command{{CommandName: apis.TypeRunKubescape}}})
+	require.NoError(t, err)
+	require.NoError(t, dyn.Resource(operatorCommandGVR).Namespace("kubescape").Delete(context.Background(), names[0], metav1.DeleteOptions{}))
+
+	err = WaitForOperatorCommands(context.Background(), dyn, "kubescape", names, 5*time.Second)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), names[0])
+}
+
+func TestWaitForOperatorCommands_CancelMidWait(t *testing.T) {
+	shortPollInterval(t)
+	dyn := newFakeOperatorCommandClient(t)
+	names, err := CreateOperatorCommands(context.Background(), dyn, "kubescape",
+		apis.Commands{Commands: []apis.Command{{CommandName: apis.TypeRunKubescape}}})
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		cancel()
+	}()
+
+	err = WaitForOperatorCommands(ctx, dyn, "kubescape", names, 5*time.Second)
+	require.ErrorIs(t, err, context.Canceled)
 }

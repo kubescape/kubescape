@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/armosec/armoapi-go/apis"
@@ -19,9 +20,11 @@ import (
 	"k8s.io/client-go/dynamic"
 )
 
+// operatorCommandPollInterval is how often WaitForOperatorCommands checks the objects; a variable so tests can shorten it.
+var operatorCommandPollInterval = 2 * time.Second
+
 const (
 	operatorCommandGenerateName = "kubescape-cli-"
-	operatorCommandPollInterval = 2 * time.Second
 	// defaultOperatorCommandTimeout bounds how long the CLI waits for the operator to finish its commands.
 	defaultOperatorCommandTimeout = 10 * time.Minute
 )
@@ -73,6 +76,7 @@ func CreateOperatorCommands(ctx context.Context, dyn dynamic.Interface, ns strin
 // WaitForOperatorCommands polls the named OperatorCommands until all report status.completed. A command
 // reporting status.error fails the wait immediately.
 func WaitForOperatorCommands(ctx context.Context, dyn dynamic.Interface, ns string, names []string, timeout time.Duration) error {
+	started := map[string]bool{}
 	pending := make(map[string]struct{}, len(names))
 	for _, n := range names {
 		pending[n] = struct{}{}
@@ -86,11 +90,15 @@ func WaitForOperatorCommands(ctx context.Context, dyn dynamic.Interface, ns stri
 			if err != nil {
 				return false, fmt.Errorf("failed to get operator command %s: %w", name, err)
 			}
+			if st, _, _ := unstructured.NestedBool(obj.Object, "status", "started"); st {
+				started[name] = true
+			}
+			label := operatorCommandLabel(obj)
 			if msg, found, _ := unstructured.NestedString(obj.Object, "status", "error", "message"); found && msg != "" {
-				return false, fmt.Errorf("operator command %s failed: %s", name, msg)
+				return false, fmt.Errorf("operator command %s failed: %s", label, msg)
 			}
 			if _, hasErr, _ := unstructured.NestedMap(obj.Object, "status", "error"); hasErr {
-				return false, fmt.Errorf("operator command %s failed", name)
+				return false, fmt.Errorf("operator command %s failed", label)
 			}
 			if done, _, _ := unstructured.NestedBool(obj.Object, "status", "completed"); done {
 				delete(pending, name)
@@ -105,7 +113,35 @@ func WaitForOperatorCommands(ctx context.Context, dyn dynamic.Interface, ns stri
 		return ctx.Err()
 	}
 	if wait.Interrupted(err) {
-		return fmt.Errorf("timed out after %s waiting for operator commands", timeout)
+		var stillPending, startedNames []string
+		for _, n := range names {
+			if _, ok := pending[n]; ok {
+				stillPending = append(stillPending, n)
+				if started[n] {
+					startedNames = append(startedNames, n)
+				}
+			}
+		}
+		msg := fmt.Sprintf("timed out after %s waiting for operator commands: still pending: %s", timeout, strings.Join(stillPending, ", "))
+		if len(startedNames) > 0 {
+			return fmt.Errorf("%s; started: %s", msg, strings.Join(startedNames, ", "))
+		}
+		return fmt.Errorf("%s; none of them started: the operator may be down or too old to execute OperatorAPI commands; check the operator pod in namespace %s", msg, ns)
 	}
 	return err
+}
+
+// operatorCommandLabel renders "<CommandName> (<object name>)", reading the command name from spec.body.
+func operatorCommandLabel(obj *unstructured.Unstructured) string {
+	name := obj.GetName()
+	body, _, _ := unstructured.NestedString(obj.Object, "spec", "body")
+	raw, err := base64.StdEncoding.DecodeString(body)
+	if err != nil {
+		return name
+	}
+	var cmd apis.Command
+	if json.Unmarshal(raw, &cmd) != nil || cmd.CommandName == "" {
+		return name
+	}
+	return fmt.Sprintf("%s (%s)", cmd.CommandName, name)
 }
