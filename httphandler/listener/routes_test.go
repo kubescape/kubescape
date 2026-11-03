@@ -23,16 +23,17 @@ func TestApiAuthRoute_Table(t *testing.T) {
 		{http.MethodGet, "/v1/scan", true, apiauth.Attributes{Group: "kubescape.io", Resource: "scans", Verb: "get"}},
 		{http.MethodGet, "/v1/status", true, apiauth.Attributes{Group: "kubescape.io", Resource: "scans", Verb: "get"}},
 		{http.MethodPost, "/v1/status", true, apiauth.Attributes{Group: "kubescape.io", Resource: "scans", Verb: "get"}},
-		// GET /v1/results removes the result unless keep=true, so it needs delete.
-		{http.MethodGet, "/v1/results", true, apiauth.Attributes{Group: "kubescape.io", Resource: "scanresults", Verb: "delete"}},
-		{http.MethodGet, "/v1/results?id=abc", true, apiauth.Attributes{Group: "kubescape.io", Resource: "scanresults", Verb: "delete"}},
+		// GET /v1/results is always get here; resultsDeleteGuard adds delete
+		// when the GET removes the result.
+		{http.MethodGet, "/v1/results", true, apiauth.Attributes{Group: "kubescape.io", Resource: "scanresults", Verb: "get"}},
+		{http.MethodGet, "/v1/results?id=abc", true, apiauth.Attributes{Group: "kubescape.io", Resource: "scanresults", Verb: "get"}},
 		{http.MethodGet, "/v1/results?id=abc&keep=true", true, apiauth.Attributes{Group: "kubescape.io", Resource: "scanresults", Verb: "get"}},
 		{http.MethodGet, "/v1/results?keep=true", true, apiauth.Attributes{Group: "kubescape.io", Resource: "scanresults", Verb: "get"}},
 		{http.MethodGet, "/v1/results?id=abc&keep=1", true, apiauth.Attributes{Group: "kubescape.io", Resource: "scanresults", Verb: "get"}},
-		{http.MethodGet, "/v1/results?id=abc&keep=false", true, apiauth.Attributes{Group: "kubescape.io", Resource: "scanresults", Verb: "delete"}},
-		{http.MethodGet, "/v1/results?id=abc&keep=", true, apiauth.Attributes{Group: "kubescape.io", Resource: "scanresults", Verb: "delete"}},
-		{http.MethodGet, "/v1/results?id=abc&keep=bogus", true, apiauth.Attributes{Group: "kubescape.io", Resource: "scanresults", Verb: "delete"}},
-		{http.MethodHead, "/v1/results?id=abc", true, apiauth.Attributes{Group: "kubescape.io", Resource: "scanresults", Verb: "delete"}},
+		{http.MethodGet, "/v1/results?id=abc&keep=false", true, apiauth.Attributes{Group: "kubescape.io", Resource: "scanresults", Verb: "get"}},
+		{http.MethodGet, "/v1/results?id=abc&keep=", true, apiauth.Attributes{Group: "kubescape.io", Resource: "scanresults", Verb: "get"}},
+		{http.MethodGet, "/v1/results?id=abc&keep=bogus", true, apiauth.Attributes{Group: "kubescape.io", Resource: "scanresults", Verb: "get"}},
+		{http.MethodHead, "/v1/results?id=abc", true, apiauth.Attributes{Group: "kubescape.io", Resource: "scanresults", Verb: "get"}},
 		{http.MethodHead, "/v1/results?id=abc&keep=true", true, apiauth.Attributes{Group: "kubescape.io", Resource: "scanresults", Verb: "get"}},
 		{http.MethodDelete, "/v1/results", true, apiauth.Attributes{Group: "kubescape.io", Resource: "scanresults", Verb: "delete"}},
 		{http.MethodDelete, "/v1/results?id=abc&keep=true", true, apiauth.Attributes{Group: "kubescape.io", Resource: "scanresults", Verb: "delete"}},
@@ -96,21 +97,22 @@ func TestRouter_MetricsAndProbesOpen_V1Protected(t *testing.T) {
 	}
 }
 
-// The verb chosen for GET /v1/results must agree with whether the handler
-// actually deletes: a query the auth layer treats as "keep" must keep.
-func TestApiAuthRoute_ResultsVerbMatchesHandlerKeep(t *testing.T) {
+// removesResults must agree with whether the handler actually deletes: a
+// query the guard treats as "keep" must keep.
+func TestRemovesResults_MatchesHandlerKeep(t *testing.T) {
 	for _, query := range []string{"", "keep=true", "keep=false", "keep=1", "keep=0", "keep=on", "keep=TRUE", "keep=", "keep=yes", "keep=true&keep=false", "keep=false&keep=true"} {
 		t.Run(query, func(t *testing.T) {
 			r := httptest.NewRequest(http.MethodGet, "/v1/results?id=abc&"+query, nil)
-			got, ok := apiAuthRoute(r)
-			require.True(t, ok)
 			params, err := handlerequestsv1.DecodeResultsQueryParams(r.URL.Query())
 			handlerKeeps := err == nil && params.KeepResults
-			if handlerKeeps {
-				assert.Equal(t, "get", got.Verb)
-			} else {
-				assert.Equal(t, "delete", got.Verb)
-			}
+			assert.Equal(t, !handlerKeeps, removesResults(r))
 		})
 	}
+}
+
+func TestRemovesResults_OnlyGetAndHeadOnResults(t *testing.T) {
+	assert.True(t, removesResults(httptest.NewRequest(http.MethodHead, "/v1/results?id=abc", nil)))
+	assert.False(t, removesResults(httptest.NewRequest(http.MethodDelete, "/v1/results?id=abc", nil)))
+	assert.False(t, removesResults(httptest.NewRequest(http.MethodPost, "/v1/results?id=abc", nil)))
+	assert.False(t, removesResults(httptest.NewRequest(http.MethodGet, "/v1/status", nil)))
 }

@@ -41,10 +41,10 @@ Every `/v1/*` route except `/v1/metrics` requires a Kubernetes service-account t
 | `DELETE /v1/scan` | `scans` | `delete` |
 | `GET /v1/status` | `scans` | `get` |
 | `GET /v1/results?keep=true` | `scanresults` | `get` |
-| `GET /v1/results` (without `keep=true`) | `scanresults` | `delete` |
+| `GET /v1/results` (without `keep=true`) | `scanresults` | `get` and `delete` |
 | `DELETE /v1/results` | `scanresults` | `delete` |
 
-`GET /v1/results` removes the result after returning it unless `keep=true`, so a GET that removes the result needs `delete`. Read-only callers, with only `get`, must pass `keep=true`.
+`GET /v1/results` removes the result after returning it unless `keep=true`, so a GET that removes the result needs both `get` and `delete`. Read-only callers, with only `get`, must pass `keep=true`; a caller with only `delete` can use `DELETE /v1/results` but cannot read results.
 
 Missing or invalid tokens get `401`, tokens without the RBAC permission get `403`. `/livez`, `/readyz`, the OpenAPI UI and `/v1/metrics` are open.
 
