@@ -12,7 +12,6 @@ import (
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/core"
 	"github.com/kubescape/kubescape/v4/core/mocks"
-	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -28,12 +27,13 @@ func TestGetOperatorScanConfigCmd(t *testing.T) {
 
 	assert.Equal(t, "configurations", cmd.Use)
 
-	err := cmd.Args(&cobra.Command{}, []string{})
+	err := cmd.Args(cmd, []string{})
 	assert.NoError(t, err)
 	assert.Contains(t, operatorInfo.Subcommands, cautils.OperatorSubCommand("config"))
 
-	err = cmd.Args(&cobra.Command{}, []string{"configurations"})
-	assert.NoError(t, err)
+	err = cmd.Args(cmd, []string{"unexpected"})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), `unknown command "unexpected" for "configurations"`)
 }
 
 // TestGetOperatorScanConfigCmd_FlagsRegistered verifies that required flags are registered and have expected defaults.
@@ -139,4 +139,17 @@ func TestOperatorScanConfigCmd_ScanError(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed: scan blew up")
 	assert.Contains(t, output, "Failed to triggering Kubescape Operator for configuration scanning")
+}
+
+// TestOperatorScanConfigCmd_RejectsUnexpectedArgs verifies that extraneous positional arguments
+// passed to configurations are rejected instead of silently accepted.
+func TestOperatorScanConfigCmd_RejectsUnexpectedArgs(t *testing.T) {
+	cmd := getOperatorScanCmd(&mocks.MockIKubescape{}, &cautils.OperatorInfo{})
+	cmd.SetArgs([]string{"configurations", "unexpected-arg"})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `unknown command "unexpected-arg" for "scan configurations"`)
 }

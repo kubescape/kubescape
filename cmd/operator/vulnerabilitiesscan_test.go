@@ -27,8 +27,13 @@ func TestGetOperatorScanVulnerabilitiesCmd(t *testing.T) {
 
 	assert.Equal(t, "vulnerabilities", cmd.Use)
 
-	err := cmd.Args(&cobra.Command{}, []string{"random-arg"})
-	assert.Nil(t, err)
+	err := cmd.Args(cmd, []string{})
+	assert.NoError(t, err)
+	assert.Contains(t, operatorInfo.Subcommands, cautils.OperatorSubCommand("vulnerabilities"))
+
+	err = cmd.Args(cmd, []string{"random-arg"})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), `unknown command "random-arg" for "vulnerabilities"`)
 }
 
 func TestOperatorScanVulnerabilitiesCmd_ResolvesClusterNameAfterRootPreRun(t *testing.T) {
@@ -124,7 +129,7 @@ func TestOperatorScanVulnerabilitiesCmd_FlagsAndArgs(t *testing.T) {
 	cmd := getOperatorScanVulnerabilitiesCmd(mockKubescape, &operatorInfo)
 	assert.Equal(t, "vulnerabilities", cmd.Use)
 
-	err := cmd.Args(&cobra.Command{}, []string{"test"})
+	err := cmd.Args(cmd, []string{})
 	assert.NoError(t, err)
 	assert.Contains(t, operatorInfo.Subcommands, cautils.OperatorSubCommand("vulnerabilities"))
 
@@ -184,4 +189,17 @@ func TestOperatorScanVulnerabilitiesCmd_ScanError(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed: scan blew up")
 	assert.Contains(t, output, "Failed to trigger the Kubescape Operator for vulnerability scanning")
+}
+
+// TestOperatorScanVulnerabilitiesCmd_RejectsUnexpectedArgs verifies that extraneous positional arguments
+// passed to vulnerabilities are rejected instead of silently accepted.
+func TestOperatorScanVulnerabilitiesCmd_RejectsUnexpectedArgs(t *testing.T) {
+	cmd := getOperatorScanCmd(&mocks.MockIKubescape{}, &cautils.OperatorInfo{})
+	cmd.SetArgs([]string{"vulnerabilities", "unexpected-arg"})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `unknown command "unexpected-arg" for "scan vulnerabilities"`)
 }
