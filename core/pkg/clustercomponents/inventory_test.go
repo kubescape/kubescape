@@ -69,6 +69,7 @@ func TestBuild(t *testing.T) {
 	assert.Equal(t, VendorBuild, al2.Kubelet.Assessment)
 	assert.Equal(t, &ComponentVersion{Component: Containerd, Version: "1.7.11", RawVersion: "containerd://1.7.11-1.amzn2.0.1", Assessment: VendorBuild}, al2.Runtime)
 	assert.Equal(t, KernelEvidence{Release: "5.10.205-195.807.amzn2.x86_64", OSImage: "Amazon Linux 2"}, al2.Kernel)
+	assert.Equal(t, &KernelPackage{Distro: DistroAmazonLinux, DistroVersion: "2", Type: PackageTypeRPM, Name: "kernel", Version: "5.10.205-195.807.amzn2"}, al2.KernelPackage)
 
 	assert.Equal(t, Node{
 		Name:            "ubuntu-1",
@@ -83,6 +84,7 @@ func TestBuild(t *testing.T) {
 			OSID:        "ubuntu",
 			OSVersionID: "22.04",
 		},
+		KernelPackage: &KernelPackage{Distro: DistroUbuntu, DistroVersion: "22.04", Type: PackageTypeDeb, Name: "linux-aws", Version: "5.15.0-1057.63"},
 	}, ubuntu)
 }
 
@@ -90,7 +92,7 @@ func TestBuildRecordsGapForUnrecognizedRuntimeBuilds(t *testing.T) {
 	for _, raw := range []string{"containerd://2.0.0-dev", "containerd://2.0.0-pre.1", "containerd://1.7.11+"} {
 		t.Run(raw, func(t *testing.T) {
 			inv := Build(&version.Info{GitVersion: "v1.30.2"}, []corev1.Node{
-				node("node-1", corev1.NodeSystemInfo{KubeletVersion: "v1.30.2", ContainerRuntimeVersion: raw}),
+				node("node-1", corev1.NodeSystemInfo{KubeletVersion: "v1.30.2", ContainerRuntimeVersion: raw, KernelVersion: "5.10.205-195.807.amzn2.x86_64", OSImage: "Amazon Linux 2"}),
 			}, nil)
 
 			require.Len(t, inv.Nodes, 1)
@@ -132,8 +134,10 @@ func TestBuildRecordsGaps(t *testing.T) {
 		assert.Equal(t, [][2]string{
 			{"", "kube-apiserver"},
 			{"bare-1", "container-runtime"},
+			{"bare-1", "kernel"},
 			{"bare-1", "kubelet"},
 			{"win-1", "container-runtime"},
+			{"win-1", "kernel"},
 			{"win-1", "kubelet"},
 		}, got)
 	}
