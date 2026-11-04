@@ -1232,8 +1232,8 @@ github.com/kubescape/rbac-utils v0.0.22 h1:AxKEU2iK+/yZNleJSh7caWhz4wROnceCCmxT4
 github.com/kubescape/rbac-utils v0.0.22/go.mod h1:t57AhSrjuNGQ+mpZWQM/hBzrCOeKBDHegFoVo4tbikQ=
 github.com/kubescape/regolibrary v1.0.317-0.20240320124840-1d84ac7186ea h1:hLUe+1bdhiBD7xM/jliQozVd1NLYn1afQLxl5trQdPk=
 github.com/kubescape/regolibrary v1.0.317-0.20240320124840-1d84ac7186ea/go.mod h1:RK9dHjllKFnISDmVExQlI1B1z93TlQsAu/Kq9c0mt2U=
-github.com/kubescape/regolibrary/v2 v2.0.38 h1:EdRZHeCSA3r22DfqrvYx/Bvfch77LKAQtGf/CbMMEKA=
-github.com/kubescape/regolibrary/v2 v2.0.38/go.mod h1:sjC2QY4YmQJ1453KoB3fLMKuSZqKlH+DajgYmmNA7Hk=
+github.com/kubescape/regolibrary/v2 v2.0.39 h1:jsnPcnoCYq6/vMx8AMxPa3DEgY7Bx3nzsxqgDZWB2c0=
+github.com/kubescape/regolibrary/v2 v2.0.39/go.mod h1:sjC2QY4YmQJ1453KoB3fLMKuSZqKlH+DajgYmmNA7Hk=
 github.com/kubescape/sizing-checker v0.0.0-20250323151332-73a18561dc73 h1:XEAryANSWXNEytHoPITzlCTOR2S4bpa30keR39qMNRI=
 github.com/kubescape/sizing-checker v0.0.0-20250323151332-73a18561dc73/go.mod h1:raFzO50jkNPNdBCFNTMn2EGQtmAOcBDvzVTJiArQvfo=
 github.com/kubescape/storage v0.0.342 h1:jBqWICOJmQDhwylpGBmQupNDJ9HQgwQk5ZPyfps1+qU=
