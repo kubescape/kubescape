@@ -498,8 +498,8 @@ func TestGetResourcesFromPath_RenderedChartTemplatesLoadedOnce(t *testing.T) {
 
 	// rendered exactly once by helm, never re-scanned as a raw template
 	assert.Equal(t, 1, counts["ServiceAccount/mychart-static"], "static template must be loaded once, by the render")
-	assert.Equal(t, 1, counts["Deployment/-mychart"], "templated deployment must come from the render")
-	assert.Equal(t, 1, counts["Service/-mysubchart"], "subchart template must come from the render")
+	assert.Equal(t, 1, counts["Deployment/release-name-mychart"], "templated deployment must come from the render")
+	assert.Equal(t, 1, counts["Service/release-name-mysubchart"], "subchart template must come from the render")
 	// not rendered by helm, so still plainly scanned
 	assert.Equal(t, 1, counts["CustomResourceDefinition/widgets.example.com"], "crds/ must stay plainly scanned")
 	assert.Equal(t, 1, counts["Pod/plain-outside-chart"], "files outside the chart must stay plainly scanned")

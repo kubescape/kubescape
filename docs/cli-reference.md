@@ -78,8 +78,8 @@ kubescape scan [target] [flags]
 | `--retries <n>` | With `--kube-contexts`, how many more times to try a cluster whose API server never answered, waiting 2s, then 4s, doubling up to 30s. `0` disables retries. | `2` |
 | `--fleet-config <path>` | Read `--kube-contexts`, `--output`, `--fleet-report`, `--reference-cluster` and `--retries` from a `FleetConfig` file. A flag on the command line overrides the file. See [fleet config file](fleet-scanning.md#fleet-config-file). | - |
 | `-o, --output <path>` | Output file path | stdout |
-| `--release-name <name>` | Helm release name made available as `.Release.Name` when rendering a chart | - |
-| `--release-namespace <ns>` | Helm release namespace made available as `.Release.Namespace` when rendering a chart | - |
+| `--release-name <name>` | Helm release name made available as `.Release.Name` when rendering a chart | `release-name` |
+| `--release-namespace <ns>` | Helm release namespace made available as `.Release.Namespace` when rendering a chart | `default` |
 | `--kube-version <version>` | Kubernetes version made available as `.Capabilities.KubeVersion` when rendering a chart, as in `helm template`. A chart whose `kubeVersion` constraint rejects it is not rendered | the newest version the chart's `kubeVersion` allows, up to the Kubernetes version Kubescape is built with; `v1.20` (Helm's library default) when the chart declares none or no such version satisfies it |
 | `--api-versions <group/version,...>` | Kubernetes API versions added to `.Capabilities.APIVersions` when rendering a chart, as in `helm template`. Repeat or separate with commas | built-in APIs only |
 | `--set <key=value>` | Set Helm values when scanning a chart. Repeat for more than one | - |
@@ -121,6 +121,10 @@ kubescape scan [target] [flags]
 | `--enable-streaming` | Process cluster resources in batches instead of loading them all at once, to reduce memory use on large clusters | `false` (on automatically above 2,500 resources) |
 | `--whole-cluster-policy <policy>` | How to run the whole-cluster controls (C-0261, C-0266, C-0267, C-0272): `projected` (incremental projection of matching resources), `fallback` (materialize the full cluster in memory), `skip` (skip them, for minimum memory) or `verify` (debug check that `projected` and `fallback` agree; a mismatch fails the scan). Without the flag, `KUBESCAPE_WHOLE_CLUSTER_POLICY` applies if it is set, and otherwise `KUBESCAPE_WHOLE_CLUSTER_PARITY_CHECK=true` selects `verify` | `projected` |
 | `--enable-rego-prints` | Send Rego `print` output to the logs; use with `-l debug` | `false` |
+
+Helm charts are rendered as a new installation (`.Release.IsInstall` is `true`,
+`.Release.IsUpgrade` is `false`, and `.Release.Revision` is `1`), matching
+`helm template`. This includes installation-only templates in the scan.
 
 ### Framework-scoped exceptions
 
@@ -953,8 +957,8 @@ a config omits, so the live `envFrom` survives.
 | `--set` | Set Helm values on the command line (e.g. `key1=val1,key2=val2`) | - |
 | `--set-string` | Set Helm STRING values on the command line | - |
 | `--set-file` | Set Helm values from respective files specified via the command line | - |
-| `--release-name` | Release name to use when rendering Helm charts | - |
-| `--release-namespace` | Release namespace to use when rendering Helm charts | - |
+| `--release-name` | Release name to use when rendering Helm charts | `release-name` |
+| `--release-namespace` | Release namespace to use when rendering Helm charts | `default` |
 | `--include-controls` | Remediate only these control IDs (comma-separated, case-insensitive). Disables `--container-profile` drift remediation — see [selecting controls to fix](#selecting-controls-to-fix) | *(all)* |
 | `--skip-controls` | Leave these control IDs untouched (comma-separated, case-insensitive). Takes precedence over `--include-controls`, and disables `--container-profile` drift remediation | - |
 | `--base-path <path>` | Restrict fixes to this directory: the report's recorded scan location must resolve inside it. Use it when the report file comes from a source you don't fully trust, such as a shared CI artifact; without it, the recorded location is trusted as-is | - |
