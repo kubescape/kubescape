@@ -173,9 +173,13 @@ func TestTerraformDirectory_WorkspaceContainment(t *testing.T) {
 	require.NoError(t, os.Mkdir(insideDir, 0o755))
 	insideFile := filepath.Join(insideDir, "main.tf")
 	require.NoError(t, os.WriteFile(insideFile, []byte(`
+variable "pod_name" {
+  default = "inside-pod"
+}
+
 resource "kubernetes_pod_v1" "example" {
   metadata {
-    name = "inside-pod"
+    name = var.pod_name
   }
   spec {
     container {
@@ -189,6 +193,10 @@ resource "kubernetes_pod_v1" "example" {
 	outsideDir := t.TempDir()
 	outsideFile := filepath.Join(outsideDir, "outside.tf")
 	require.NoError(t, os.WriteFile(outsideFile, []byte(`
+variable "pod_name" {
+  default = "outside-override-pod"
+}
+
 resource "kubernetes_pod_v1" "outside" {
   metadata {
     name = "outside-pod"
@@ -202,12 +210,18 @@ resource "kubernetes_pod_v1" "outside" {
 }
 `), 0o600))
 
+	td := NewTerraformDirectory(insideDir, ws)
+	workloads, errs := td.GetWorkloads(insideDir)
+	require.Empty(t, errs)
+	require.Len(t, workloads[insideFile], 1)
+	assert.Equal(t, "inside-pod", workloads[insideFile][0].GetName())
+
 	symlinkPath := filepath.Join(insideDir, "symlink.tf")
 	if err := os.Symlink(outsideFile, symlinkPath); err == nil {
-		td := NewTerraformDirectory(insideDir, ws)
-		workloads, errs := td.GetWorkloads(insideDir)
+		workloads, errs = td.GetWorkloads(insideDir)
 		require.Empty(t, errs)
 		require.Len(t, workloads[insideFile], 1)
+		assert.Equal(t, "inside-pod", workloads[insideFile][0].GetName())
 		assert.NotContains(t, workloads, symlinkPath)
 	}
 

@@ -221,10 +221,9 @@ func TestWorkspaceContainment_RunIaCScan(t *testing.T) {
 			workspaceDir: "", // unconstrained
 			policyGetter: getSharedLiveClusterPolicyGetter(t),
 		}
-		_, err := srv.runIaCScan(context.Background(), outsideManifest, "nsa")
-		if err != nil {
-			assert.False(t, errors.Is(err, pathcontainment.ErrPathEscapesWorkspace))
-		}
+		respBytes, err := srv.runIaCScan(context.Background(), outsideManifest, "nsa")
+		require.NoError(t, err)
+		assert.NotEmpty(t, respBytes)
 	})
 }
 
@@ -281,10 +280,9 @@ func TestWorkspaceContainment_RunIaCScanControls(t *testing.T) {
 			workspaceDir: "",
 			policyGetter: getSharedLiveClusterPolicyGetter(t),
 		}
-		_, err := srv.runIaCScanControls(context.Background(), outsideManifest, []string{"C-0012"})
-		if err != nil {
-			assert.False(t, errors.Is(err, pathcontainment.ErrPathEscapesWorkspace))
-		}
+		respBytes, err := srv.runIaCScanControls(context.Background(), outsideManifest, []string{"C-0012"})
+		require.NoError(t, err)
+		assert.NotEmpty(t, respBytes)
 	})
 }
 
@@ -321,10 +319,9 @@ func TestWorkspaceContainment_RunWorkloadScan(t *testing.T) {
 			workspaceDir: "",
 			policyGetter: getSharedLiveClusterPolicyGetter(t),
 		}
-		_, err := srv.RunWorkloadScan(context.Background(), "pod/privileged-pod", "default", outsideManifest, "nsa")
-		if err != nil {
-			assert.False(t, errors.Is(err, pathcontainment.ErrPathEscapesWorkspace))
-		}
+		respBytes, err := srv.RunWorkloadScan(context.Background(), "pod/privileged-pod", "default", outsideManifest, "nsa")
+		require.NoError(t, err)
+		assert.NotEmpty(t, respBytes)
 	})
 }
 

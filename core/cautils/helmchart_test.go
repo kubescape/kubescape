@@ -439,13 +439,13 @@ func (s *HelmChartTestSuite) TestIsHelmDirectory() {
 }
 
 func TestLoadResourcesFromHelmCharts_WorkspaceContainment(t *testing.T) {
-	ws := t.TempDir()
 	outsideDir := t.TempDir()
 	outsideValues := filepath.Join(outsideDir, "values.yaml")
 	require.NoError(t, os.WriteFile(outsideValues, []byte("replicaCount: 2\n"), 0o600))
 
 	o, _ := os.Getwd()
 	chartPath := filepath.Join(filepath.Dir(o), "..", "examples", "helm_chart")
+	ws := filepath.Dir(chartPath)
 
 	// Values file outside workspace is rejected
 	valOpts := HelmValueOptions{ValueFiles: []string{outsideValues}}

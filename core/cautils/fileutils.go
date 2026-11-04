@@ -195,24 +195,11 @@ func loadResourcesFromHelmCharts(ctx context.Context, basePath string, valueOpts
 		}
 
 		if workspaceDir != "" {
-			escaped := false
-			var escapeErr error
-			_ = filepath.Walk(helmDir, func(p string, fi os.FileInfo, err error) error {
-				if err != nil {
-					return err
-				}
-				if !pathcontainment.IsPathContained(workspaceDir, p) {
-					escaped = true
-					escapeErr = fmt.Errorf("%w: Helm chart %q references file %q outside workspace root", pathcontainment.ErrPathEscapesWorkspace, helmDir, p)
-					return filepath.SkipDir
-				}
-				return nil
-			})
-			if escaped {
+			if err := walkTreeContained(workspaceDir, helmDir, "Helm chart", helmDir); err != nil {
 				if explicitHelmInput && helmDir == basePath {
-					return nil, nil, nil, escapeErr
+					return nil, nil, nil, err
 				}
-				logger.L().Ctx(ctx).Warning("Skipping Helm chart with references outside workspace root", helpers.String("path", helmDir), helpers.String("workspace", workspaceDir))
+				logger.L().Ctx(ctx).Warning("Skipping Helm chart with references outside workspace root", helpers.String("path", helmDir), helpers.String("workspace", workspaceDir), helpers.Error(err))
 				continue
 			}
 		}
@@ -629,40 +616,85 @@ func LoadResourcesFromKustomizeDirectories(ctx context.Context, basePath string)
 	return LoadResourcesFromKustomizeDirectoriesFiltered(ctx, basePath, nil)
 }
 
+// walkTreeContained recursively traverses rootDir, following symlinked directories that remain
+// within workspaceDir and checking every regular file and symlink target against workspaceDir.
+// It tracks resolved directories to prevent infinite loops from symlink cycles.
+func walkTreeContained(workspaceDir, rootDir, entityName, input string) error {
+	visitedDirs := make(map[string]bool)
+
+	var walkDir func(currentDir string) error
+	walkDir = func(currentDir string) error {
+		resolvedCur, err := filepath.EvalSymlinks(currentDir)
+		if err != nil {
+			return fmt.Errorf("evaluating symlink %q: %w", currentDir, err)
+		}
+		if visitedDirs[resolvedCur] {
+			return nil
+		}
+		visitedDirs[resolvedCur] = true
+
+		entries, err := os.ReadDir(currentDir)
+		if err != nil {
+			return err
+		}
+
+		for _, entry := range entries {
+			entryPath := filepath.Join(currentDir, entry.Name())
+			if !pathcontainment.IsPathContained(workspaceDir, entryPath) {
+				return fmt.Errorf("%w: %s %q references file %q outside workspace root", pathcontainment.ErrPathEscapesWorkspace, entityName, input, entryPath)
+			}
+
+			isDir := entry.IsDir()
+			if entry.Type()&os.ModeSymlink != 0 {
+				fi, err := os.Stat(entryPath)
+				if err != nil {
+					return fmt.Errorf("%w: %s %q has unresolvable symlink %q: %v", pathcontainment.ErrPathEscapesWorkspace, entityName, input, entryPath, err)
+				}
+				isDir = fi.IsDir()
+			}
+
+			if isDir {
+				if err := walkDir(entryPath); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	}
+
+	return walkDir(rootDir)
+}
+
 func validateChartTreeContained(workspaceDir, chartDir, input string) error {
+	// If the chart directory does not exist yet (e.g. a remote chart not yet pulled by Kustomize),
+	// verify that its planned path and existing ancestors resolve within the workspace.
+	if _, err := os.Stat(chartDir); errors.Is(err, os.ErrNotExist) {
+		if _, err := pathcontainment.ResolveContainedPath(workspaceDir, chartDir); err != nil {
+			return fmt.Errorf("%w: Kustomize configuration %q references Helm chart %q outside workspace root", pathcontainment.ErrPathEscapesWorkspace, input, chartDir)
+		}
+		return nil
+	}
+
 	if !pathcontainment.IsPathContained(workspaceDir, chartDir) {
 		return fmt.Errorf("%w: Kustomize configuration %q references Helm chart %q outside workspace root", pathcontainment.ErrPathEscapesWorkspace, input, chartDir)
 	}
-	var escapeErr error
-	_ = filepath.Walk(chartDir, func(p string, fi os.FileInfo, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if !pathcontainment.IsPathContained(workspaceDir, p) {
-			escapeErr = fmt.Errorf("%w: Kustomize configuration %q references Helm chart file %q outside workspace root", pathcontainment.ErrPathEscapesWorkspace, input, p)
-			return filepath.SkipDir
-		}
-		return nil
-	})
-	return escapeErr
+
+	return walkTreeContained(workspaceDir, chartDir, "Helm chart", input)
 }
 
 func validateCRDTreeContained(workspaceDir, crdDir, input string) error {
+	if _, err := os.Stat(crdDir); errors.Is(err, os.ErrNotExist) {
+		if _, err := pathcontainment.ResolveContainedPath(workspaceDir, crdDir); err != nil {
+			return fmt.Errorf("%w: Kustomize configuration %q references Helm CRD directory %q outside workspace root", pathcontainment.ErrPathEscapesWorkspace, input, crdDir)
+		}
+		return nil
+	}
+
 	if !pathcontainment.IsPathContained(workspaceDir, crdDir) {
 		return fmt.Errorf("%w: Kustomize configuration %q references Helm CRD directory %q outside workspace root", pathcontainment.ErrPathEscapesWorkspace, input, crdDir)
 	}
-	var escapeErr error
-	_ = filepath.Walk(crdDir, func(p string, fi os.FileInfo, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if !pathcontainment.IsPathContained(workspaceDir, p) {
-			escapeErr = fmt.Errorf("%w: Kustomize configuration %q references Helm CRD file %q outside workspace root", pathcontainment.ErrPathEscapesWorkspace, input, p)
-			return filepath.SkipDir
-		}
-		return nil
-	})
-	return escapeErr
+
+	return walkTreeContained(workspaceDir, crdDir, "Helm CRD directory", input)
 }
 
 // LoadResourcesFromKustomizeDirectoriesFiltered behaves like LoadResourcesFromKustomizeDirectories,
@@ -694,7 +726,7 @@ func LoadResourcesFromKustomizeDirectoriesFiltered(ctx context.Context, basePath
 			ownership, err := KustomizeInputOwnershipForPath(ctx, input)
 			if err != nil {
 				if explicitKustomizeInput {
-					return KustomizeRenderResult{}, fmt.Errorf("%w: failed to inspect Kustomization references in %q: %v", pathcontainment.ErrPathEscapesWorkspace, input, err)
+					return KustomizeRenderResult{}, fmt.Errorf("failed to inspect Kustomization references in %q: %w", input, err)
 				}
 				logger.L().Ctx(ctx).Warning("Skipping nested Kustomize configuration with unresolvable references", helpers.String("path", directory), helpers.Error(err))
 				continue
