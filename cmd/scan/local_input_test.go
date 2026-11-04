@@ -105,6 +105,20 @@ func TestPrepareScanLocalInput(t *testing.T) {
 		assert.EqualError(t, err, "usage: stdin input '-' cannot be combined with other input paths")
 		assert.Empty(t, scanInfo.InputPatterns)
 	})
+
+	t.Run("mixed file path and positional inputs are rejected", func(t *testing.T) {
+		scanInfo := cautils.ScanInfo{}
+
+		cleanup, err := prepareScanLocalInput(bytes.NewBufferString(""), []string{"nsa", "manifests/app.yaml"}, &scanInfo, scanLocalInputOptions{
+			FirstInputArg:    1,
+			FilePath:         "manifests/other.yaml",
+			RejectMixedStdin: true,
+		})
+		defer cleanup()
+
+		assert.EqualError(t, err, "usage: use either --file-path or positional input paths, not both")
+		assert.Empty(t, scanInfo.InputPatterns)
+	})
 }
 
 func TestFrameworkCmd_StdinUsesCommandInput(t *testing.T) {

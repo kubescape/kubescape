@@ -1800,3 +1800,21 @@ func TestSecurityViewFrameworksAreDownloaded(t *testing.T) {
 		})
 	}
 }
+
+func TestFrameworkCmd_RejectsConflictingFilePathAndPositionalInputs(t *testing.T) {
+	mockKubescape := &mocks.MockIKubescape{}
+	cmd := GetScanCommand(mockKubescape)
+	cmd.SetArgs([]string{"framework", "nsa", "manifests/app.yaml", "--file-path", "manifests/other.yaml"})
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "usage: use either --file-path or positional input paths, not both")
+}
+
+func TestControlCmd_RejectsConflictingFilePathAndPositionalInputs(t *testing.T) {
+	mockKubescape := &mocks.MockIKubescape{}
+	cmd := GetScanCommand(mockKubescape)
+	cmd.SetArgs([]string{"control", "C-0058", "manifests/app.yaml", "--file-path", "manifests/other.yaml"})
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "usage: use either --file-path or positional input paths, not both")
+}
