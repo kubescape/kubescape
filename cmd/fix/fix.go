@@ -94,7 +94,11 @@ func GetFixCmd(ks meta.IKubescape) *cobra.Command {
 			if len(args) < 1 {
 				return errors.New("report output file is required")
 			}
+			if ks == nil {
+				return errors.New("uninitialized kubescape interface")
+			}
 			fixInfo.ReportFile = args[0]
+			fixInfo.Writer = cmd.OutOrStdout()
 
 			if err := validateControlSelection(&fixInfo); err != nil {
 				return err

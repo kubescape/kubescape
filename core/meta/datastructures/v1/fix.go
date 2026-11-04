@@ -1,6 +1,10 @@
 package v1
 
-import "github.com/kubescape/kubescape/v4/core/cautils"
+import (
+	"io"
+
+	"github.com/kubescape/kubescape/v4/core/cautils"
+)
 
 type FixInfo struct {
 	ReportFile     string // path to report file (mandatory)
@@ -48,4 +52,6 @@ type FixInfo struct {
 	// HelmValueOptions carries user-supplied Helm value overrides and release identity
 	// used to reproduce scan-time chart renders during fix generation.
 	HelmValueOptions cautils.HelmValueOptions
+	// Writer is the destination writer for stdout-directed output (such as cluster fixes); defaults to os.Stdout when nil.
+	Writer io.Writer
 }

@@ -1581,3 +1581,104 @@ func TestFix_OutputKustomizeRefusesNonEmptyDirWithArbitraryFileWithoutNoConfirm(
 	assert.NoFileExists(t, filepath.Join(kustDir, "base.yaml"))
 	assert.NoFileExists(t, filepath.Join(kustDir, "kustomization.yaml"))
 }
+
+func buildClusterReport(t *testing.T, dir string) string {
+	t.Helper()
+
+	obj := map[string]any{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata": map[string]any{
+			"name":      "nginx",
+			"namespace": "default",
+		},
+		"spec": map[string]any{
+			"template": map[string]any{
+				"spec": map[string]any{
+					"containers": []any{
+						map[string]any{
+							"name":            "nginx",
+							"image":           "nginx:latest",
+							"securityContext": map[string]any{"privileged": true},
+						},
+					},
+				},
+			},
+		},
+	}
+	resource := reporthandling.Resource{
+		ResourceID: "/apps/v1/default/Deployment/nginx",
+		Object:     obj,
+	}
+
+	result := resourcesresults.Result{
+		ResourceID:  resource.GetID(),
+		RawResource: &resource,
+		AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+			{
+				ControlID: "C-0057",
+				Name:      "Privileged container",
+				Status:    apis.StatusInfo{InnerStatus: apis.StatusFailed},
+				ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{
+					{
+						Name:   "rule-privileged",
+						Status: apis.StatusFailed,
+						Paths: []armotypes.PosturePaths{
+							{FixPath: armotypes.FixPath{Path: "spec.template.spec.containers[0].securityContext.privileged", Value: "false"}},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	report := &reporthandlingv2.PostureReport{
+		Metadata: reporthandlingv2.Metadata{
+			ScanMetadata: reporthandlingv2.ScanMetadata{ScanningTarget: reporthandlingv2.Cluster},
+			ContextMetadata: reporthandlingv2.ContextMetadata{
+				ClusterContextMetadata: &reporthandlingv2.ClusterMetadata{ContextName: "kind-kind"},
+			},
+		},
+		Results:   []resourcesresults.Result{result},
+		Resources: []reporthandling.Resource{resource},
+	}
+
+	return writeReportFile(t, dir, report)
+}
+
+func TestFix_HonorsWriterForClusterFixes(t *testing.T) {
+	dir := t.TempDir()
+	reportPath := buildClusterReport(t, dir)
+
+	ks := NewKubescape(context.Background())
+	var buf bytes.Buffer
+	err := ks.Fix(&metav1.FixInfo{
+		ReportFile: reportPath,
+		Writer:     &buf,
+	})
+	require.NoError(t, err)
+
+	out := buf.String()
+	assert.Contains(t, out, "# default/Deployment/nginx")
+	assert.Contains(t, out, "privileged: false")
+}
+
+func TestFix_ClusterFixHonorsOutputDirOverWriter(t *testing.T) {
+	dir := t.TempDir()
+	reportPath := buildClusterReport(t, dir)
+
+	outputDir := filepath.Join(dir, "fixes")
+	ks := NewKubescape(context.Background())
+	var buf bytes.Buffer
+	err := ks.Fix(&metav1.FixInfo{
+		ReportFile: reportPath,
+		OutputDir:  outputDir,
+		Writer:     &buf,
+	})
+	require.NoError(t, err)
+
+	assert.Empty(t, buf.String(), "writer buffer must remain empty when output directory is specified")
+	entries, err := os.ReadDir(outputDir)
+	require.NoError(t, err)
+	assert.NotEmpty(t, entries)
+}
