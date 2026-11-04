@@ -25,6 +25,10 @@ func prepareScanLocalInput(stdin io.Reader, args []string, scanInfo *cautils.Sca
 		return cleanup, nil
 	}
 
+	if opts.FilePath != "" {
+		return cleanup, fmt.Errorf("usage: use either --file-path or positional input paths, not both")
+	}
+
 	inputs := args[opts.FirstInputArg:]
 	if opts.RejectMixedStdin && len(inputs) > 1 {
 		for _, input := range inputs {
