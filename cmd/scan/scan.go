@@ -107,6 +107,11 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 			if scanInfo.ControlTimeout < 0 {
 				return fmt.Errorf("invalid --control-timeout %s: must be zero or positive", scanInfo.ControlTimeout)
 			}
+			if cmd != nil && cmd.Name() != "image" {
+				if err := validateControlTimeout(&scanInfo); err != nil {
+					return err
+				}
+			}
 			if err := cautils.ValidateHelmKubeVersion(scanInfo.HelmKubeVersion); err != nil {
 				return fmt.Errorf("invalid --kube-version: %w", err)
 			}

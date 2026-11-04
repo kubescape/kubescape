@@ -75,6 +75,12 @@ func getImageCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Command 
 			if scanInfo.CustomRules != "" || commandFlagChanged(cmd, "custom-rules") {
 				return fmt.Errorf("--custom-rules is not supported for image scans: an image scan evaluates vulnerabilities, not posture controls")
 			}
+			if scanInfo.ControlTimeout != 0 || commandFlagChanged(cmd, "control-timeout") {
+				return fmt.Errorf("--control-timeout is not supported for image scans: an image scan evaluates vulnerabilities, not posture controls")
+			}
+			if scanInfo.ControlsVersion != "" || commandFlagChanged(cmd, "controls-version") {
+				return fmt.Errorf("--controls-version is not supported for image scans: an image scan evaluates vulnerabilities, not posture controls")
+			}
 			if scanInfo.Baseline != "" || commandFlagChanged(cmd, "baseline") {
 				return fmt.Errorf("--baseline is not supported for image scans: an image scan evaluates vulnerabilities, not posture baseline drift (use 'kubescape diff' to compare image scan reports)")
 			}

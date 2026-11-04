@@ -531,6 +531,8 @@ func TestGetScanCommand_PersistentFlagValidation(t *testing.T) {
 		{name: "rejects empty format version", args: []string{"--format-version="}, wantError: "invalid --format-version"},
 		{name: "rejects negative scan timeout", args: []string{"--scan-timeout=-1s"}, wantError: "invalid --scan-timeout"},
 		{name: "rejects negative control timeout", args: []string{"--control-timeout=-1s"}, wantError: "invalid --control-timeout"},
+		{name: "rejects control timeout equal to scan timeout", args: []string{"--scan-timeout=10s", "--control-timeout=10s"}, wantError: "--control-timeout must be lower than --scan-timeout"},
+		{name: "rejects control timeout greater than scan timeout", args: []string{"--scan-timeout=10s", "--control-timeout=20s"}, wantError: "--control-timeout must be lower than --scan-timeout"},
 		{name: "rejects a kube version that is not a version", args: []string{"--kube-version=latest"}, wantError: "invalid --kube-version"},
 		{name: "rejects include and exclude namespaces together", args: []string{"--include-namespaces=a,b", "--exclude-namespaces=b"}, wantError: "cannot be used together"},
 		{name: "rejects baseline-fail-on-new without baseline", args: []string{"--baseline-fail-on-new"}, wantError: "--baseline-fail-on-new requires --baseline"},
