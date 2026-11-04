@@ -201,34 +201,58 @@ func (handler *HTTPHandler) executeScan(scanReq *scanRequestParams) {
 	}
 }
 
-// watchForScan dequeues scan requests and executes them, honoring
-// cancellation that happened while a request was still queued.
+// watchForScan dequeues scan requests from the user queue and the metrics
+// lane and executes them one at a time, honoring cancellation that happened
+// while a request was still queued. It returns once both queues are closed
+// and drained.
 func (handler *HTTPHandler) watchForScan() {
-	for scanReq := range handler.scanRequestChan {
-		logger.L().Info("triggering scan", helpers.String("scanID", scanReq.scanID))
-		if scanReq.isUserScan {
-			handler.state.setRunningUserScanID(scanReq.scanID)
-		}
-		if handler.state.isCancelled(scanReq.scanID) {
-			logger.L().Info("skipping cancelled scan", helpers.String("scanID", scanReq.scanID))
-			if scanReq.resp != nil {
-				select {
-				case scanReq.resp <- &utilsmetav1.Response{
-					ID:       scanReq.scanID,
-					Type:     utilsapisv1.ErrorScanResponseType,
-					Response: fmt.Sprintf("scan '%s' was cancelled", scanReq.scanID),
-				}:
-				default:
-				}
+	userQueue, metricsQueue := handler.scanRequestChan, handler.metricsRequestChan
+	for userQueue != nil || metricsQueue != nil {
+		var scanReq *scanRequestParams
+		var ok bool
+		select {
+		case scanReq, ok = <-userQueue:
+			if !ok {
+				userQueue = nil
+				continue
 			}
-			deliverScanCallback(scanReq, callbackStatusFailed, "scan cancelled")
-			handler.state.releaseCancel(scanReq.scanID)
-			handler.state.setNotBusy(scanReq.scanID)
-			continue
+		case scanReq, ok = <-metricsQueue:
+			if !ok {
+				metricsQueue = nil
+				continue
+			}
 		}
-		handler.executeScan(scanReq)
+		handler.runQueuedScan(scanReq)
 	}
 }
+
+// runQueuedScan executes one dequeued scan, or skips it if it was cancelled
+// while queued.
+func (handler *HTTPHandler) runQueuedScan(scanReq *scanRequestParams) {
+	logger.L().Info("triggering scan", helpers.String("scanID", scanReq.scanID))
+	if scanReq.isUserScan {
+		handler.state.setRunningUserScanID(scanReq.scanID)
+	}
+	if handler.state.isCancelled(scanReq.scanID) {
+		logger.L().Info("skipping cancelled scan", helpers.String("scanID", scanReq.scanID))
+		if scanReq.resp != nil {
+			select {
+			case scanReq.resp <- &utilsmetav1.Response{
+				ID:       scanReq.scanID,
+				Type:     utilsapisv1.ErrorScanResponseType,
+				Response: fmt.Sprintf("scan '%s' was cancelled", scanReq.scanID),
+			}:
+			default:
+			}
+		}
+		deliverScanCallback(scanReq, callbackStatusFailed, "scan cancelled")
+		handler.state.releaseCancel(scanReq.scanID)
+		handler.state.setNotBusy(scanReq.scanID)
+		return
+	}
+	handler.executeScan(scanReq)
+}
+
 func scan(ctx context.Context, scanInfo *cautils.ScanInfo, policyIdentifiers []cautils.PolicyIdentifier, scanID string, skipPersistence bool) (*reporthandlingv2.PostureReport, error) {
 	ctx, spanScan := otel.Tracer("").Start(ctx, "kubescape.scan")
 	defer spanScan.End()

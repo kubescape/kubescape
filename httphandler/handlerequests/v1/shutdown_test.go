@@ -184,7 +184,11 @@ func TestShutdown_CancelsQueueAndReleasesWaiters(t *testing.T) {
 func TestShutdown_AdmissionRace(t *testing.T) {
 	// Exercise both producer kinds without starting a worker: every accepted
 	// request must be present exactly once in the closed queue.
-	h := &HTTPHandler{state: newServerState(), scanRequestChan: make(chan *scanRequestParams, 100)}
+	h := &HTTPHandler{
+		state:              newServerState(),
+		scanRequestChan:    make(chan *scanRequestParams, 100),
+		metricsRequestChan: make(chan *scanRequestParams, 100),
+	}
 	var wg sync.WaitGroup
 	start := make(chan struct{})
 	for i := range 100 {
@@ -204,10 +208,13 @@ func TestShutdown_AdmissionRace(t *testing.T) {
 	wg.Wait()
 	accepted := h.state.len()
 	count := 0
-	for req := range h.scanRequestChan {
-		count++
-		h.state.releaseCancel(req.scanID)
-		h.state.setNotBusy(req.scanID)
+	for _, queue := range []chan *scanRequestParams{h.scanRequestChan, h.metricsRequestChan} {
+		for req := range queue {
+			assert.Equal(t, queue == h.scanRequestChan, req.isUserScan, "each scan must be in its own lane")
+			count++
+			h.state.releaseCancel(req.scanID)
+			h.state.setNotBusy(req.scanID)
+		}
 	}
 	require.Equal(t, accepted, count)
 	require.Zero(t, h.state.len())

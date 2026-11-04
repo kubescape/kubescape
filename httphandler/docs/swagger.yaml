@@ -190,6 +190,7 @@ paths:
     get:
       description: Returns the liveness status of the Kubescape microservice.
       operationId: getLiveness
+      security: []
       responses:
         "200":
           $ref: '#/responses/livenessProbeOK'
@@ -200,6 +201,7 @@ paths:
     get:
       description: Returns the readiness status of the Kubescape microservice.
       operationId: getReadiness
+      security: []
       responses:
         "200":
           $ref: '#/responses/readinessProbeOK'
@@ -211,6 +213,7 @@ paths:
       description: Enables support for Prometheus metrics, runs a scan and returns
         its result in Prometheus metrics format.
       operationId: getMetrics
+      security: []
       responses:
         "200":
           $ref: '#/responses/enableMetricsResponse'
@@ -266,6 +269,7 @@ paths:
           Keep the results in local storage after returning them.
 
           By default, the Kubescape Microservice will delete scan results.
+          A GET that deletes them needs both the get and delete verbs on scanresults; read-only callers must pass keep=true.
         in: query
         name: keep
         type: boolean
@@ -541,4 +545,12 @@ responses:
         type: object
 schemes:
 - http
+security:
+- bearer: []
+securityDefinitions:
+  bearer:
+    description: Kubernetes service-account token with audience kubescape.io
+    in: header
+    name: Authorization
+    type: apiKey
 swagger: "2.0"

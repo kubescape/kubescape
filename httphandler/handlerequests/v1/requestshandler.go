@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -41,11 +43,19 @@ type ScanResponse struct {
 }
 
 type HTTPHandler struct {
-	offline             bool
-	state               *serverState
-	scanRequestChan     chan *scanRequestParams
+	offline bool
+	state   *serverState
+	// scanRequestChan holds pending POST /v1/scan requests
+	// (KS_SCAN_QUEUE_CAPACITY).
+	scanRequestChan chan *scanRequestParams
+	// metricsRequestChan is the /v1/metrics lane, capacity 1. Metrics is
+	// unauthenticated, so scrapes never occupy the user queue.
+	metricsRequestChan  chan *scanRequestParams
 	workerDone          chan struct{}
 	maxRequestBodyBytes int64
+	// metricsScanSlot admits one /v1/metrics scan at a time, from admission
+	// until its response is consumed.
+	metricsScanSlot chan struct{}
 }
 
 func NewHTTPHandler(offline bool) *HTTPHandler {
@@ -54,10 +64,18 @@ func NewHTTPHandler(offline bool) *HTTPHandler {
 	return newHTTPHandler(offline, queueCapacity, maxRequestBody)
 }
 
-// BeginShutdown rejects new scans and closes the queue. Accepted scans continue
-// to drain. It is safe to call more than once, concurrently with admission.
+// BeginShutdown rejects new scans and closes both queues. Accepted scans
+// continue to drain. It is safe to call more than once, concurrently with
+// admission.
 func (handler *HTTPHandler) BeginShutdown() {
-	handler.state.beginShutdown(func() { close(handler.scanRequestChan) })
+	handler.state.beginShutdown(func() {
+		if handler.scanRequestChan != nil {
+			close(handler.scanRequestChan)
+		}
+		if handler.metricsRequestChan != nil {
+			close(handler.metricsRequestChan)
+		}
+	})
 }
 
 // Shutdown drains accepted scans for drainPeriod, then cancels outstanding work.
@@ -88,11 +106,17 @@ func (handler *HTTPHandler) Shutdown(ctx context.Context, drainPeriod time.Durat
 	}
 }
 
-// enqueueScan is the only production path into the queue, for Scan and Metrics.
+// enqueueScan is the only production path into the queues. User scans go to
+// scanRequestChan and metrics scans to their own lane, metricsRequestChan, so
+// an unauthenticated scrape never takes a user queue slot.
 func (handler *HTTPHandler) enqueueScan(req *scanRequestParams, cancel context.CancelFunc) error {
+	queue := handler.metricsRequestChan
+	if req.isUserScan {
+		queue = handler.scanRequestChan
+	}
 	err := handler.state.admitScan(req.scanID, cancel, req.isUserScan, func() bool {
 		select {
-		case handler.scanRequestChan <- req:
+		case queue <- req:
 			return true
 		default:
 			return false
@@ -102,6 +126,17 @@ func (handler *HTTPHandler) enqueueScan(req *scanRequestParams, cancel context.C
 		cancel()
 	}
 	return err
+}
+
+// tryAcquireMetricsScan takes the metrics scan slot without blocking. On
+// success it returns a release function that is safe to call more than once.
+func (handler *HTTPHandler) tryAcquireMetricsScan() (release func(), ok bool) {
+	select {
+	case handler.metricsScanSlot <- struct{}{}:
+		return sync.OnceFunc(func() { <-handler.metricsScanSlot }), true
+	default:
+		return nil, false
+	}
 }
 
 func (handler *HTTPHandler) writeAdmissionError(w http.ResponseWriter, err error) {
@@ -118,8 +153,10 @@ func newHTTPHandler(offline bool, queueCapacity int, maxRequestBodyBytes int64) 
 		offline:             offline,
 		state:               newServerState(),
 		scanRequestChan:     make(chan *scanRequestParams, queueCapacity),
+		metricsRequestChan:  make(chan *scanRequestParams, 1),
 		workerDone:          make(chan struct{}),
 		maxRequestBodyBytes: maxRequestBodyBytes,
+		metricsScanSlot:     make(chan struct{}, 1),
 	}
 	go func() {
 		defer close(handler.workerDone)
@@ -323,10 +360,28 @@ func (handler *HTTPHandler) CancelScan(w http.ResponseWriter, r *http.Request) {
 
 // ============================================== RESULTS ========================================================
 
+// DecodeResultsQueryParams decodes /v1/results query parameters. It is the
+// only decoder for them, shared by the handlers and by API authorization, so
+// the two always agree on whether a GET keeps the result.
+func DecodeResultsQueryParams(query url.Values) (*ResultsQueryParams, error) {
+	resultsQueryParams := &ResultsQueryParams{}
+	if err := schema.NewDecoder().Decode(resultsQueryParams, query); err != nil {
+		return nil, err
+	}
+	return resultsQueryParams, nil
+}
+
+// ResultsRequestKeepsResults reports whether GET /v1/results with this query
+// leaves the result in place. It is false when the query does not decode.
+func ResultsRequestKeepsResults(query url.Values) bool {
+	params, err := DecodeResultsQueryParams(query)
+	return err == nil && params.KeepResults
+}
+
 // parseResultsQueryParams extracts query parameters and validates them
 func (handler *HTTPHandler) parseResultsQueryParams(w http.ResponseWriter, r *http.Request) (*ResultsQueryParams, bool) {
-	resultsQueryParams := &ResultsQueryParams{}
-	if err := schema.NewDecoder().Decode(resultsQueryParams, r.URL.Query()); err != nil {
+	resultsQueryParams, err := DecodeResultsQueryParams(r.URL.Query())
+	if err != nil {
 		handler.writeError(w, fmt.Errorf("failed to parse query params, reason: %w", err), "")
 		return nil, false
 	}

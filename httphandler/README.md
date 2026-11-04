@@ -5,6 +5,7 @@ The HTTP Handler provides a REST API for running Kubescape scans programmaticall
 ## Table of Contents
 
 - [Overview](#overview)
+- [API authentication](#api-authentication)
 - [Graceful shutdown](#graceful-shutdown)
 - [API Reference](#api-reference)
   - [Trigger Scan](#trigger-scan)
@@ -29,6 +30,34 @@ When running Kubescape as a service, it starts a web server on port `8080` that 
 - Managing cached results
 
 ---
+
+## API authentication
+
+Every `/v1/*` route except `/v1/metrics` requires a Kubernetes service-account token in `Authorization: Bearer <token>`. The server validates it with a TokenReview (audience `kubescape.io`, or `KS_API_AUDIENCE`) and authorizes it with a SubjectAccessReview against RBAC in the `kubescape.io` API group:
+
+| Route | Resource | Verb |
+|-------|----------|------|
+| `POST /v1/scan` | `scans` | `create` |
+| `DELETE /v1/scan` | `scans` | `delete` |
+| `GET /v1/status` | `scans` | `get` |
+| `GET /v1/results?keep=true` | `scanresults` | `get` |
+| `GET /v1/results` (without `keep=true`) | `scanresults` | `get` and `delete` |
+| `DELETE /v1/results` | `scanresults` | `delete` |
+
+`GET /v1/results` removes the result after returning it unless `keep=true`, so a GET that removes the result needs both `get` and `delete`. Read-only callers, with only `get`, must pass `keep=true`; a caller with only `delete` can use `DELETE /v1/results` but cannot read results.
+
+Missing or invalid tokens get `401`, tokens without the RBAC permission get `403`. `/livez`, `/readyz`, the OpenAPI UI and `/v1/metrics` are open.
+
+The server's own service account needs permission to create `tokenreviews` and `subjectaccessreviews` (the `system:auth-delegator` ClusterRole); it checks this at startup and exits if it is missing. Set `POD_NAMESPACE` (for example from the downward API) or, to turn authentication off, `KS_API_AUTH_DISABLED=true`.
+
+To call the API by hand:
+
+```bash
+TOKEN=$(kubectl create token <service-account> --audience kubescape.io)
+curl -H "Authorization: Bearer $TOKEN" http://localhost:8080/v1/status
+```
+
+The service account needs a Role or ClusterRole granting the verbs above on `scans` and `scanresults`.
 
 ## Graceful shutdown
 
@@ -334,7 +363,9 @@ Configure the HTTP handler using environment variables:
 | `KS_SCAN_REQUEST_MAX_BYTES` | Maximum size in bytes of a `POST /v1/scan` request body | `1048576` |
 | `KS_PPROF_ENABLED` | Enable the pprof debug server (off by default; binds to loopback only) | `true`, `false` |
 | `KS_PPROF_ADDR` | Address the pprof debug server binds to when enabled | `127.0.0.1:6060` |
-| `KS_API_TOKEN` | Bearer token for `/v1/*` API authentication (optional, off by default). When set, every `/v1/scan`, `/v1/results` and `/v1/status` request must present `Authorization: Bearer <token>` or it gets `401`. Health probes `/livez`/`/readyz` and OpenAPI docs stay open. If you expose `:8080` beyond the cluster, set this to a random value and serve over TLS (`KS_CERT_FILE`/`KS_KEY_FILE`) or a TLS-terminating ingress. | `openssl rand -hex 32` |
+| `KS_API_AUDIENCE` | Audience the service-account token must be issued for (see [API authentication](#api-authentication)) | `kubescape.io` (default) |
+| `KS_API_AUTH_DISABLED` | Turn off `/v1/*` authentication and authorization. Only for clusters where the service is not reachable by untrusted workloads | `true` |
+| `POD_NAMESPACE` | Namespace the server runs in; used for RBAC checks. Required unless `KS_API_AUTH_DISABLED=true`, otherwise the server refuses to start | `kubescape` |
 
 ---
 
@@ -417,6 +448,8 @@ Deploy Kubescape as a microservice in your cluster for API-driven scanning.
 ### Prometheus Integration
 
 Expose Kubescape metrics for Prometheus scraping.
+
+`GET /v1/metrics` stays unauthenticated and runs one scan at a time: a scrape that arrives while another metrics scan is running receives `429 Too Many Requests` with `Retry-After: 1`. Metrics scans are admitted through their own one-slot lane and never occupy the `POST /v1/scan` queue (`KS_SCAN_QUEUE_CAPACITY`), so scrapes cannot cause `429` for authorized scans. Scans from both lanes still run one at a time.
 
 📖 **[Prometheus Integration Guide →](examples/prometheus/README.md)**
 
