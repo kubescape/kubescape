@@ -22,6 +22,7 @@ import (
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	metav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
+	"github.com/kubescape/kubescape/v4/core/pkg/pathcontainment"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
 	"github.com/kubescape/opa-utils/reporthandling"
@@ -1609,19 +1610,7 @@ func (h *FixHandler) OutputPaths(resourcesToFix []ResourceFixInfo) (map[string]s
 // symlink, permission error) is treated as not contained rather than
 // silently allowed.
 func isPathContained(base, target string) bool {
-	resolvedBase, err := filepath.EvalSymlinks(base)
-	if err != nil {
-		return false
-	}
-	resolvedTarget, err := filepath.EvalSymlinks(target)
-	if err != nil {
-		return false
-	}
-	rel, err := filepath.Rel(resolvedBase, resolvedTarget)
-	if err != nil {
-		return false
-	}
-	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+	return pathcontainment.IsPathContained(base, target)
 }
 
 // sanitizeForLog strips ASCII control characters (including \r and \n) from
