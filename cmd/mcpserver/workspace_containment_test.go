@@ -15,6 +15,18 @@ import (
 	"github.com/kubescape/kubescape/v4/core/pkg/pathcontainment"
 )
 
+const outsideLeakManifest = `apiVersion: v1
+kind: Pod
+metadata:
+  name: outside-leak-pod
+spec:
+  containers:
+  - name: myapp
+    image: nginx
+    securityContext:
+      privileged: true
+`
+
 func TestWorkspaceContainment_FlagsAndEnv(t *testing.T) {
 	tempWorkspace := t.TempDir()
 	tempFile := filepath.Join(tempWorkspace, "somefile.txt")
@@ -74,16 +86,18 @@ func TestWorkspaceContainment_FlagsAndEnv(t *testing.T) {
 	t.Run("symlink parent traversal in workspace path resolves correctly", func(t *testing.T) {
 		subDir := filepath.Join(tempWorkspace, "sub")
 		require.NoError(t, os.Mkdir(subDir, 0755))
+		deepDir := filepath.Join(subDir, "deep")
+		require.NoError(t, os.MkdirAll(deepDir, 0755))
 		symlinkTarget := filepath.Join(tempWorkspace, "link")
-		if err := os.Symlink(subDir, symlinkTarget); err != nil {
+		if err := os.Symlink(deepDir, symlinkTarget); err != nil {
 			t.Skipf("skipping symlink test: %v", err)
 		}
-		// link/.. should physically resolve to tempWorkspace, not lexical parent
-		resolved, err := pathcontainment.ResolveBaseDir(filepath.Join(symlinkTarget, ".."))
+		// link/.. should physically resolve to sub, not the lexical parent tempWorkspace
+		resolved, err := pathcontainment.ResolveBaseDir(symlinkTarget + string(filepath.Separator) + "..")
 		require.NoError(t, err)
-		canonWorkspace, err := filepath.EvalSymlinks(tempWorkspace)
+		canonSub, err := filepath.EvalSymlinks(subDir)
 		require.NoError(t, err)
-		assert.Equal(t, canonWorkspace, resolved)
+		assert.Equal(t, canonSub, resolved)
 	})
 }
 
@@ -144,8 +158,11 @@ func TestWorkspaceContainment_RunIaCScan(t *testing.T) {
 		containedFile := filepath.Join(scanSubDir, "valid.yaml")
 		require.NoError(t, os.WriteFile(containedFile, []byte(privilegedPodManifest), 0600))
 
+		outsideLeak := filepath.Join(outsideDir, "outside-leak.yaml")
+		require.NoError(t, os.WriteFile(outsideLeak, []byte(outsideLeakManifest), 0600))
+
 		leakSymlink := filepath.Join(scanSubDir, "leak.yaml")
-		if err := os.Symlink(outsideManifest, leakSymlink); err != nil {
+		if err := os.Symlink(outsideLeak, leakSymlink); err != nil {
 			t.Skipf("skipping symlink test: %v", err)
 		}
 
@@ -157,6 +174,8 @@ func TestWorkspaceContainment_RunIaCScan(t *testing.T) {
 		respBytes, err := srv.runIaCScan(context.Background(), "scandir", "nsa")
 		require.NoError(t, err)
 		assert.NotEmpty(t, respBytes)
+		assert.Contains(t, string(respBytes), "privileged-pod")
+		assert.NotContains(t, string(respBytes), "outside-leak-pod")
 	})
 
 	t.Run("kustomize configuration referencing outside resource is rejected", func(t *testing.T) {

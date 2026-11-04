@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/kubescape/v4/core/pkg/pathcontainment"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/locationresolver"
 	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
 	"github.com/stretchr/testify/assert"
@@ -436,3 +437,20 @@ func (s *HelmChartTestSuite) TestIsHelmDirectory() {
 	s.False(ok)
 	s.Contains(err.Error(), "no Chart.yaml exists in directory")
 }
+
+func TestLoadResourcesFromHelmCharts_WorkspaceContainment(t *testing.T) {
+	ws := t.TempDir()
+	outsideDir := t.TempDir()
+	outsideValues := filepath.Join(outsideDir, "values.yaml")
+	require.NoError(t, os.WriteFile(outsideValues, []byte("replicaCount: 2\n"), 0o600))
+
+	o, _ := os.Getwd()
+	chartPath := filepath.Join(filepath.Dir(o), "..", "examples", "helm_chart")
+
+	// Values file outside workspace is rejected
+	valOpts := HelmValueOptions{ValueFiles: []string{outsideValues}}
+	_, _, _, err := LoadResourcesFromHelmChartsFiltered(context.TODO(), chartPath, valOpts, nil, nil, ws)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, pathcontainment.ErrPathEscapesWorkspace)
+}
+

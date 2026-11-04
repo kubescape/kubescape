@@ -98,12 +98,26 @@ func LoadResourcesFromHelmChartsExcludingDirectories(ctx context.Context, basePa
 }
 
 // LoadResourcesFromHelmChartsFiltered behaves like LoadResourcesFromHelmChartsExcludingDirectories,
-// and never renders a chart filter excludes.
-func LoadResourcesFromHelmChartsFiltered(ctx context.Context, basePath string, valueOpts HelmValueOptions, excludedChartDirectories []string, filter *PathFilter) (map[string][]workloadinterface.IMetadata, map[string]Chart, []string, error) {
-	return loadResourcesFromHelmCharts(ctx, basePath, valueOpts, excludedChartDirectories, filter)
+// and never renders a chart filter excludes. When workspace containment is configured via workspaceOpt,
+// chart directories, values files, and chart contents are verified to remain within the workspace.
+func LoadResourcesFromHelmChartsFiltered(ctx context.Context, basePath string, valueOpts HelmValueOptions, excludedChartDirectories []string, filter *PathFilter, workspaceOpt ...string) (map[string][]workloadinterface.IMetadata, map[string]Chart, []string, error) {
+	return loadResourcesFromHelmCharts(ctx, basePath, valueOpts, excludedChartDirectories, filter, workspaceOpt...)
 }
 
-func loadResourcesFromHelmCharts(ctx context.Context, basePath string, valueOpts HelmValueOptions, excludedChartDirectories []string, filter *PathFilter) (map[string][]workloadinterface.IMetadata, map[string]Chart, []string, error) {
+func loadResourcesFromHelmCharts(ctx context.Context, basePath string, valueOpts HelmValueOptions, excludedChartDirectories []string, filter *PathFilter, workspaceOpt ...string) (map[string][]workloadinterface.IMetadata, map[string]Chart, []string, error) {
+	var workspaceDir string
+	if len(workspaceOpt) > 0 {
+		workspaceDir = workspaceOpt[0]
+	}
+
+	if workspaceDir != "" {
+		for _, vf := range valueOpts.ValueFiles {
+			if !pathcontainment.IsPathContained(workspaceDir, vf) {
+				return nil, nil, nil, fmt.Errorf("%w: Helm values file %q outside workspace root", pathcontainment.ErrPathEscapesWorkspace, vf)
+			}
+		}
+	}
+
 	helmDirectories, discoveryErrs := listHelmChartDirs(basePath, filter)
 	for _, err := range discoveryErrs {
 		logger.L().Ctx(ctx).Warning("Skipping path while discovering Helm charts", helpers.Error(err))
@@ -117,6 +131,18 @@ func loadResourcesFromHelmCharts(ctx context.Context, basePath string, valueOpts
 			}
 		}
 		helmDirectories = remaining
+	}
+
+	if workspaceDir != "" {
+		containedDirs := make([]string, 0, len(helmDirectories))
+		for _, directory := range helmDirectories {
+			if pathcontainment.IsPathContained(workspaceDir, directory) {
+				containedDirs = append(containedDirs, directory)
+			} else {
+				logger.L().Ctx(ctx).Warning("Skipping Helm chart directory outside workspace root", helpers.String("path", directory), helpers.String("workspace", workspaceDir))
+			}
+		}
+		helmDirectories = containedDirs
 	}
 
 	// Parse user-supplied value overrides once; reuse for every chart we render.
@@ -164,6 +190,24 @@ func loadResourcesFromHelmCharts(ctx context.Context, basePath string, valueOpts
 			continue
 		}
 
+		if workspaceDir != "" {
+			escaped := false
+			_ = filepath.Walk(helmDir, func(p string, fi os.FileInfo, err error) error {
+				if err != nil {
+					return err
+				}
+				if !pathcontainment.IsPathContained(workspaceDir, p) {
+					escaped = true
+					return filepath.SkipDir
+				}
+				return nil
+			})
+			if escaped {
+				logger.L().Ctx(ctx).Warning("Skipping Helm chart with references outside workspace root", helpers.String("path", helmDir), helpers.String("workspace", workspaceDir))
+				continue
+			}
+		}
+
 		chart, err := NewHelmChart(helmDir)
 		if err != nil {
 			logger.L().Ctx(ctx).Warning("Failed to load Helm chart", helpers.String("path", helmDir), helpers.Error(err))
@@ -186,6 +230,9 @@ func loadResourcesFromHelmCharts(ctx context.Context, basePath string, valueOpts
 		chartName := chart.GetName()
 		prov := chart.Provenance()
 		for k, v := range wls {
+			if workspaceDir != "" && !pathcontainment.IsPathContained(workspaceDir, k) {
+				continue
+			}
 			sourceToWorkloads[k] = v
 			sourceToChart[k] = Chart{
 				Name:       chartName,
@@ -754,14 +801,23 @@ func LoadResourcesFromTerraform(ctx context.Context, basePath string) (map[strin
 }
 
 // LoadResourcesFromTerraformFiltered behaves like LoadResourcesFromTerraform, leaving out
-// the files and directories filter excludes.
-func LoadResourcesFromTerraformFiltered(ctx context.Context, basePath string, filter *PathFilter) (map[string][]workloadinterface.IMetadata, error) {
+// the files and directories filter excludes. When workspace containment is configured via workspaceOpt,
+// files and directories resolving outside the workspace are contained or skipped.
+func LoadResourcesFromTerraformFiltered(ctx context.Context, basePath string, filter *PathFilter, workspaceOpt ...string) (map[string][]workloadinterface.IMetadata, error) {
+	var workspaceDir string
+	if len(workspaceOpt) > 0 {
+		workspaceDir = workspaceOpt[0]
+	}
+
 	if IsTerraformFile(basePath) {
 		if filter.Excluded(basePath, false) {
 			return nil, nil
 		}
+		if workspaceDir != "" && !pathcontainment.IsPathContained(workspaceDir, basePath) {
+			return nil, fmt.Errorf("%w: Terraform file %q outside workspace root", pathcontainment.ErrPathEscapesWorkspace, basePath)
+		}
 		dir := filepath.Dir(basePath)
-		td := NewTerraformDirectory(dir)
+		td := NewTerraformDirectory(dir, workspaceDir)
 		wls, errs := td.GetWorkloads(dir)
 		if len(errs) > 0 {
 			return wls, fmt.Errorf("failed to render Terraform resources from %q: %w", dir, errors.Join(errs...))
@@ -781,7 +837,14 @@ func LoadResourcesFromTerraformFiltered(ctx context.Context, basePath string, fi
 
 	sourceToWorkloads := map[string][]workloadinterface.IMetadata{}
 	for _, dir := range dirs {
-		td := NewTerraformDirectory(dir)
+		if workspaceDir != "" && !pathcontainment.IsPathContained(workspaceDir, dir) {
+			if explicitTerraformDir && dir == basePath {
+				return nil, fmt.Errorf("%w: Terraform directory %q outside workspace root", pathcontainment.ErrPathEscapesWorkspace, dir)
+			}
+			logger.L().Ctx(ctx).Warning("Skipping Terraform directory outside workspace root", helpers.String("path", dir))
+			continue
+		}
+		td := NewTerraformDirectory(dir, workspaceDir)
 		wls, dirErrs := td.GetWorkloads(dir)
 		if len(dirErrs) > 0 {
 			if explicitTerraformDir && dir == basePath {

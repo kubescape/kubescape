@@ -375,7 +375,7 @@ func getResourcesFromPath(ctx context.Context, path string, helmValueOpts cautil
 
 	// Charts owned by a successful Kustomize build must not also be rendered as
 	// standalone Helm releases. Unreferenced charts remain in generic discovery.
-	helmSourceToWorkloads, helmSourceToChart, renderedCharts, err := cautils.LoadResourcesFromHelmChartsFiltered(ctx, path, helmValueOpts, kustomizeResult.OwnedHelmChartDirectories, pathFilter)
+	helmSourceToWorkloads, helmSourceToChart, renderedCharts, err := cautils.LoadResourcesFromHelmChartsFiltered(ctx, path, helmValueOpts, kustomizeResult.OwnedHelmChartDirectories, pathFilter, workspaceDir)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -391,7 +391,7 @@ func getResourcesFromPath(ctx context.Context, path string, helmValueOpts cautil
 	if err != nil && !errors.Is(err, cautils.ErrNoManifestFiles) {
 		return nil, nil, allSkips, err
 	}
-	terraformSourceToWorkloads, err := cautils.LoadResourcesFromTerraformFiltered(ctx, path, pathFilter)
+	terraformSourceToWorkloads, err := cautils.LoadResourcesFromTerraformFiltered(ctx, path, pathFilter, workspaceDir)
 	if err != nil {
 		return nil, nil, allSkips, err
 	}
