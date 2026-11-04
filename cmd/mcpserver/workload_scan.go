@@ -115,6 +115,7 @@ func (ksServer *KubescapeMcpserver) RunWorkloadScan(ctx context.Context, workloa
 	if err != nil {
 		return nil, err
 	}
+	req.workspaceDir = ksServer.workspaceDir
 	resp, err := runScan(ctx, ksServer, req)
 	if err != nil {
 		if req.namespaceDefaulted && (errors.Is(err, resourcehandler.ErrResourceNotFound) || errors.Is(err, resourcehandler.ErrResourceNotInDiscovery)) {

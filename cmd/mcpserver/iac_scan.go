@@ -33,5 +33,6 @@ func (ksServer *KubescapeMcpserver) runIaCScan(ctx context.Context, path string,
 		wantComplianceScore: true,
 		rsrcHandler:         fileHandler,
 		inputPatterns:       []string{path},
+		workspaceDir:        ksServer.workspaceDir,
 	})
 }

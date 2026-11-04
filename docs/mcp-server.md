@@ -431,7 +431,7 @@ Scan local Infrastructure-as-Code files against specific control IDs rather than
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `path` | string | Yes | Path to local directory or manifest file |
-| `control_ids` | array of strings | Yes | Control IDs to check, e.g. `["C-0012", "C-0057"]` |
+| `control_ids` | string or array of strings | Yes | Control IDs to check, as a comma-separated string or an array, e.g. `"C-0012,C-0057"` or `["C-0012", "C-0057"]` |
 
 ### Live Scanning Tools
 

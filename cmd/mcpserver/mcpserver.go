@@ -8,7 +8,6 @@ import (
 	"net"
 	"net/url"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -27,6 +26,7 @@ import (
 
 	"github.com/kubescape/kubescape/v4/core/cautils/getter"
 	"github.com/kubescape/kubescape/v4/core/pkg/fixhandler"
+	"github.com/kubescape/kubescape/v4/core/pkg/pathcontainment"
 	"golang.org/x/sync/semaphore"
 )
 
@@ -1689,27 +1689,15 @@ func mcpServerEntrypoint(ctx context.Context, transport string, port int, worksp
 	transport = normTransport
 
 	var workspace string
-	if len(workspaceOpt) > 0 {
-		workspace = strings.TrimSpace(workspaceOpt[0])
-	}
-	if workspace == "" {
-		workspace = strings.TrimSpace(os.Getenv("KUBESCAPE_WORKSPACE_DIR"))
+	if len(workspaceOpt) > 0 && strings.TrimSpace(workspaceOpt[0]) != "" {
+		workspace = workspaceOpt[0]
+	} else if envWorkspace := os.Getenv("KUBESCAPE_WORKSPACE_DIR"); strings.TrimSpace(envWorkspace) != "" {
+		workspace = envWorkspace
 	}
 	if workspace != "" {
-		canonWorkspace, err := filepath.Abs(workspace)
-		if err != nil {
-			return fmt.Errorf("invalid workspace directory %q: %w", workspace, err)
-		}
-		canonWorkspace, err = filepath.EvalSymlinks(canonWorkspace)
+		canonWorkspace, err := pathcontainment.ResolveBaseDir(workspace)
 		if err != nil {
 			return fmt.Errorf("failed to resolve workspace directory %q: %w", workspace, err)
-		}
-		fi, err := os.Stat(canonWorkspace)
-		if err != nil {
-			return fmt.Errorf("failed to stat workspace directory %q: %w", workspace, err)
-		}
-		if !fi.IsDir() {
-			return fmt.Errorf("workspace directory %q is not a directory", workspace)
 		}
 		workspace = canonWorkspace
 		logger.L().Info("Workspace root containment enabled", helpers.String("workspace", workspace))

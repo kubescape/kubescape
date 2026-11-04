@@ -25,6 +25,7 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils/helmprovenance"
+	"github.com/kubescape/kubescape/v4/core/pkg/pathcontainment"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
 	"github.com/valyala/fastjson"
@@ -573,8 +574,14 @@ func LoadResourcesFromKustomizeDirectories(ctx context.Context, basePath string)
 }
 
 // LoadResourcesFromKustomizeDirectoriesFiltered behaves like LoadResourcesFromKustomizeDirectories,
-// leaving out the configurations filter excludes.
-func LoadResourcesFromKustomizeDirectoriesFiltered(ctx context.Context, basePath string, filter *PathFilter) (KustomizeRenderResult, error) {
+// leaving out the configurations filter excludes. When workspace containment is configured via workspaceOpt,
+// every file Kustomize can load through resource references is verified to remain within the workspace before building.
+func LoadResourcesFromKustomizeDirectoriesFiltered(ctx context.Context, basePath string, filter *PathFilter, workspaceOpt ...string) (KustomizeRenderResult, error) {
+	var workspaceDir string
+	if len(workspaceOpt) > 0 {
+		workspaceDir = workspaceOpt[0]
+	}
+
 	kustomizeInputs, discoveryErrs := listKustomizeInputs(basePath, filter)
 	explicitKustomizeInput := IsKustomizeFile(basePath) || isKustomizeDirectory(basePath)
 	for _, err := range discoveryErrs {
@@ -589,6 +596,46 @@ func LoadResourcesFromKustomizeDirectoriesFiltered(ctx context.Context, basePath
 		directory := input
 		if IsKustomizeFile(input) {
 			directory = filepath.Dir(input)
+		}
+
+		if workspaceDir != "" {
+			ownership, err := KustomizeInputOwnershipForPath(ctx, input)
+			if err != nil {
+				if explicitKustomizeInput {
+					return KustomizeRenderResult{}, fmt.Errorf("%w: failed to inspect Kustomization references in %q: %v", pathcontainment.ErrPathEscapesWorkspace, input, err)
+				}
+				logger.L().Ctx(ctx).Warning("Skipping nested Kustomize configuration with unresolvable references", helpers.String("path", directory), helpers.Error(err))
+				continue
+			}
+			escaped := false
+			for _, src := range ownership.SourcePaths {
+				if !pathcontainment.IsPathContained(workspaceDir, src) {
+					containErr := fmt.Errorf("%w: Kustomize configuration %q references file %q outside workspace root", pathcontainment.ErrPathEscapesWorkspace, input, src)
+					if explicitKustomizeInput {
+						return KustomizeRenderResult{}, containErr
+					}
+					logger.L().Ctx(ctx).Warning("Skipping nested Kustomize configuration referencing files outside workspace", helpers.String("path", directory), helpers.Error(containErr))
+					escaped = true
+					break
+				}
+			}
+			if escaped {
+				continue
+			}
+			for _, chartDir := range ownership.HelmChartDirectories {
+				if !pathcontainment.IsPathContained(workspaceDir, chartDir) {
+					containErr := fmt.Errorf("%w: Kustomize configuration %q references Helm chart %q outside workspace root", pathcontainment.ErrPathEscapesWorkspace, input, chartDir)
+					if explicitKustomizeInput {
+						return KustomizeRenderResult{}, containErr
+					}
+					logger.L().Ctx(ctx).Warning("Skipping nested Kustomize configuration referencing Helm chart outside workspace", helpers.String("path", directory), helpers.Error(containErr))
+					escaped = true
+					break
+				}
+			}
+			if escaped {
+				continue
+			}
 		}
 
 		workloads, _, err := LoadResourcesFromKustomizeDirectory(ctx, input)
@@ -609,6 +656,14 @@ func LoadResourcesFromKustomizeDirectoriesFiltered(ctx context.Context, basePath
 			}
 			logger.L().Ctx(ctx).Warning("Skipping nested Kustomize configuration with unresolved inputs", helpers.String("path", directory), helpers.Error(err))
 			continue
+		}
+
+		if workspaceDir != "" {
+			for wPath := range workloads {
+				if !pathcontainment.IsPathContained(workspaceDir, wPath) {
+					delete(workloads, wPath)
+				}
+			}
 		}
 
 		maps.Copy(result.SourceToWorkloads, workloads)
@@ -748,11 +803,18 @@ func LoadResourcesFromFiles(ctx context.Context, input, rootPath string, rendere
 }
 
 // LoadResourcesFromFilesFiltered behaves like LoadResourcesFromFiles, leaving out the
-// manifests filter excludes.
-func LoadResourcesFromFilesFiltered(ctx context.Context, input, rootPath string, renderedCharts []string, filter *PathFilter) (map[string][]workloadinterface.IMetadata, []SkippedManifest, error) {
+// manifests filter excludes. When workspace containment is configured via workspaceOpt,
+// files whose symlink targets resolve outside the workspace are skipped while preserving
+// processing for contained files.
+func LoadResourcesFromFilesFiltered(ctx context.Context, input, rootPath string, renderedCharts []string, filter *PathFilter, workspaceOpt ...string) (map[string][]workloadinterface.IMetadata, []SkippedManifest, error) {
 	// skip the plain-YAML glob for a kustomize directory; the kustomize render handles it
 	if isKustomizeDirectory(input) {
 		return nil, nil, nil
+	}
+
+	var workspaceDir string
+	if len(workspaceOpt) > 0 {
+		workspaceDir = workspaceOpt[0]
 	}
 
 	files, errs := listFiles(input, filter)
@@ -779,9 +841,24 @@ func LoadResourcesFromFilesFiltered(ctx context.Context, input, rootPath string,
 	// flagged as skipped manifests.
 	files = excludeHelmChartMetadataFiles(files)
 
-	workloads, skips, errs := loadFiles(rootPath, files)
-	if len(errs) > 0 {
-		loadErr := fmt.Errorf("failed to load one or more manifests from %q: %w", input, errors.Join(errs...))
+	var skips []SkippedManifest
+	if workspaceDir != "" {
+		containedFiles := make([]string, 0, len(files))
+		for _, f := range files {
+			if !pathcontainment.IsPathContained(workspaceDir, f) {
+				logger.L().Ctx(ctx).Warning("Skipping file outside workspace root", helpers.String("path", f), helpers.String("workspace", workspaceDir))
+				skips = append(skips, SkippedManifest{Path: f, Reason: "file or symlink target escapes workspace root"})
+				continue
+			}
+			containedFiles = append(containedFiles, f)
+		}
+		files = containedFiles
+	}
+
+	workloads, loadSkips, loadErrs := loadFiles(rootPath, files)
+	skips = append(skips, loadSkips...)
+	if len(loadErrs) > 0 {
+		loadErr := fmt.Errorf("failed to load one or more manifests from %q: %w", input, errors.Join(loadErrs...))
 		// Directory and glob scans have historically been best effort. Keep the
 		// valid resources from mixed inputs, but make the skipped files visible.
 		// An explicitly requested file, or an input with no usable resources,

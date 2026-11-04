@@ -58,6 +58,7 @@ func (ksServer *KubescapeMcpserver) runIaCScanControls(ctx context.Context, path
 		label:             "Local IaC Control",
 		rsrcHandler:       fileHandler,
 		inputPatterns:     []string{path},
+		workspaceDir:      ksServer.workspaceDir,
 	})
 }
 
@@ -107,6 +108,7 @@ func (ksServer *KubescapeMcpserver) runIaCScanControlsReport(ctx context.Context
 		label:             "Local IaC Remediation",
 		rsrcHandler:       fileHandler,
 		inputPatterns:     []string{path},
+		workspaceDir:      ksServer.workspaceDir,
 	})
 	if err != nil {
 		return nil, err

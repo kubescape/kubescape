@@ -3,6 +3,7 @@ package mcpserver
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -61,6 +62,29 @@ func TestWorkspaceContainment_FlagsAndEnv(t *testing.T) {
 		assert.Equal(t, "", flag.DefValue)
 		assert.Contains(t, flag.Usage, "KUBESCAPE_WORKSPACE_DIR")
 	})
+
+	t.Run("workspace flag is forwarded from cobra command to entrypoint", func(t *testing.T) {
+		cmd := GetMCPServerCmd()
+		cmd.SetArgs([]string{"--workspace", nonExistentDir})
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to resolve workspace directory")
+	})
+
+	t.Run("symlink parent traversal in workspace path resolves correctly", func(t *testing.T) {
+		subDir := filepath.Join(tempWorkspace, "sub")
+		require.NoError(t, os.Mkdir(subDir, 0755))
+		symlinkTarget := filepath.Join(tempWorkspace, "link")
+		if err := os.Symlink(subDir, symlinkTarget); err != nil {
+			t.Skipf("skipping symlink test: %v", err)
+		}
+		// link/.. should physically resolve to tempWorkspace, not lexical parent
+		resolved, err := pathcontainment.ResolveBaseDir(filepath.Join(symlinkTarget, ".."))
+		require.NoError(t, err)
+		canonWorkspace, err := filepath.EvalSymlinks(tempWorkspace)
+		require.NoError(t, err)
+		assert.Equal(t, canonWorkspace, resolved)
+	})
 }
 
 func TestWorkspaceContainment_RunIaCScan(t *testing.T) {
@@ -73,23 +97,14 @@ func TestWorkspaceContainment_RunIaCScan(t *testing.T) {
 	outsideManifest := filepath.Join(outsideDir, "outside.yaml")
 	require.NoError(t, os.WriteFile(outsideManifest, []byte(privilegedPodManifest), 0600))
 
-	// Create symlink inside workspace pointing outside
-	symlinkPath := filepath.Join(tempWorkspace, "symlink-outside.yaml")
-	require.NoError(t, os.Symlink(outsideManifest, symlinkPath))
-
 	t.Run("contained path inside workspace is permitted", func(t *testing.T) {
 		srv := &KubescapeMcpserver{
 			workspaceDir: tempWorkspace,
 			policyGetter: getSharedLiveClusterPolicyGetter(t),
 		}
-		// Manifest in workspace should pass containment and proceed to scan
 		respBytes, err := srv.runIaCScan(context.Background(), "deployment.yaml", "nsa")
-		if err != nil {
-			// Even if scanning encounters an error, it must NOT be a path escape error
-			assert.False(t, errors.Is(err, pathcontainment.ErrPathEscapesWorkspace))
-		} else {
-			assert.NotEmpty(t, respBytes)
-		}
+		require.NoError(t, err)
+		assert.NotEmpty(t, respBytes)
 	})
 
 	t.Run("traversal path escaping workspace is rejected", func(t *testing.T) {
@@ -111,6 +126,10 @@ func TestWorkspaceContainment_RunIaCScan(t *testing.T) {
 	})
 
 	t.Run("symlink escaping workspace is rejected", func(t *testing.T) {
+		symlinkPath := filepath.Join(tempWorkspace, "symlink-outside.yaml")
+		if err := os.Symlink(outsideManifest, symlinkPath); err != nil {
+			t.Skipf("skipping symlink test: %v", err)
+		}
 		srv := &KubescapeMcpserver{
 			workspaceDir: tempWorkspace,
 		}
@@ -119,12 +138,47 @@ func TestWorkspaceContainment_RunIaCScan(t *testing.T) {
 		assert.True(t, errors.Is(err, pathcontainment.ErrPathEscapesWorkspace), "expected ErrPathEscapesWorkspace, got: %v", err)
 	})
 
+	t.Run("directory scan skips symlinks pointing outside workspace", func(t *testing.T) {
+		scanSubDir := filepath.Join(tempWorkspace, "scandir")
+		require.NoError(t, os.Mkdir(scanSubDir, 0755))
+		containedFile := filepath.Join(scanSubDir, "valid.yaml")
+		require.NoError(t, os.WriteFile(containedFile, []byte(privilegedPodManifest), 0600))
+
+		leakSymlink := filepath.Join(scanSubDir, "leak.yaml")
+		if err := os.Symlink(outsideManifest, leakSymlink); err != nil {
+			t.Skipf("skipping symlink test: %v", err)
+		}
+
+		srv := &KubescapeMcpserver{
+			workspaceDir: tempWorkspace,
+			policyGetter: getSharedLiveClusterPolicyGetter(t),
+		}
+		// Directory scan should succeed by scanning contained valid.yaml and skipping leak.yaml
+		respBytes, err := srv.runIaCScan(context.Background(), "scandir", "nsa")
+		require.NoError(t, err)
+		assert.NotEmpty(t, respBytes)
+	})
+
+	t.Run("kustomize configuration referencing outside resource is rejected", func(t *testing.T) {
+		kustDir := filepath.Join(tempWorkspace, "kustomize-leak")
+		require.NoError(t, os.Mkdir(kustDir, 0755))
+		kustContent := fmt.Sprintf("apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nresources:\n- %s\n", outsideManifest)
+		require.NoError(t, os.WriteFile(filepath.Join(kustDir, "kustomization.yaml"), []byte(kustContent), 0600))
+
+		srv := &KubescapeMcpserver{
+			workspaceDir: tempWorkspace,
+			policyGetter: getSharedLiveClusterPolicyGetter(t),
+		}
+		_, err := srv.runIaCScan(context.Background(), "kustomize-leak", "nsa")
+		require.Error(t, err)
+		assert.True(t, errors.Is(err, pathcontainment.ErrPathEscapesWorkspace), "expected ErrPathEscapesWorkspace for escaping Kustomize reference, got: %v", err)
+	})
+
 	t.Run("unconstrained mode allows external path", func(t *testing.T) {
 		srv := &KubescapeMcpserver{
 			workspaceDir: "", // unconstrained
 			policyGetter: getSharedLiveClusterPolicyGetter(t),
 		}
-		// Unconstrained mode does not reject outsideManifest with ErrPathEscapesWorkspace
 		_, err := srv.runIaCScan(context.Background(), outsideManifest, "nsa")
 		if err != nil {
 			assert.False(t, errors.Is(err, pathcontainment.ErrPathEscapesWorkspace))
@@ -159,6 +213,27 @@ func TestWorkspaceContainment_RunIaCScanControls(t *testing.T) {
 		assert.True(t, errors.Is(err, pathcontainment.ErrPathEscapesWorkspace))
 	})
 
+	t.Run("contained path inside workspace is permitted for runIaCScanControls", func(t *testing.T) {
+		srv := &KubescapeMcpserver{
+			workspaceDir: tempWorkspace,
+			policyGetter: getSharedLiveClusterPolicyGetter(t),
+		}
+		respBytes, err := srv.runIaCScanControls(context.Background(), "deployment.yaml", []string{"C-0017"})
+		require.NoError(t, err)
+		assert.NotEmpty(t, respBytes)
+	})
+
+	t.Run("contained path inside workspace is permitted for runIaCScanControlsReport", func(t *testing.T) {
+		srv := &KubescapeMcpserver{
+			workspaceDir: tempWorkspace,
+			policyGetter: getSharedLiveClusterPolicyGetter(t),
+		}
+		outcome, err := srv.runIaCScanControlsReport(context.Background(), "deployment.yaml", []string{"C-0017"})
+		require.NoError(t, err)
+		require.NotNil(t, outcome)
+		assert.NotEmpty(t, outcome.ReportJSON)
+	})
+
 	t.Run("unconstrained mode allows external path in controls scan", func(t *testing.T) {
 		srv := &KubescapeMcpserver{
 			workspaceDir: "",
@@ -173,6 +248,9 @@ func TestWorkspaceContainment_RunIaCScanControls(t *testing.T) {
 
 func TestWorkspaceContainment_RunWorkloadScan(t *testing.T) {
 	tempWorkspace := t.TempDir()
+	manifestPath := filepath.Join(tempWorkspace, "deployment.yaml")
+	require.NoError(t, os.WriteFile(manifestPath, []byte(privilegedPodManifest), 0600))
+
 	outsideDir := t.TempDir()
 	outsideManifest := filepath.Join(outsideDir, "outside.yaml")
 	require.NoError(t, os.WriteFile(outsideManifest, []byte(privilegedPodManifest), 0600))
@@ -184,6 +262,16 @@ func TestWorkspaceContainment_RunWorkloadScan(t *testing.T) {
 		_, err := srv.RunWorkloadScan(context.Background(), "pod/privileged-pod", "default", outsideManifest, "nsa")
 		require.Error(t, err)
 		assert.True(t, errors.Is(err, pathcontainment.ErrPathEscapesWorkspace))
+	})
+
+	t.Run("contained local manifest inside workspace is permitted", func(t *testing.T) {
+		srv := &KubescapeMcpserver{
+			workspaceDir: tempWorkspace,
+			policyGetter: getSharedLiveClusterPolicyGetter(t),
+		}
+		respBytes, err := srv.RunWorkloadScan(context.Background(), "pod/privileged-pod", "default", manifestPath, "nsa")
+		require.NoError(t, err)
+		assert.NotEmpty(t, respBytes)
 	})
 
 	t.Run("unconstrained mode allows external manifest", func(t *testing.T) {
@@ -214,7 +302,7 @@ func TestWorkspaceContainment_ErrorClassification(t *testing.T) {
 	assert.Contains(t, msgInvalid, "invalid or unauthorized path")
 }
 
-func TestWorkspaceContainment_CallTool_ScanLocalIaC(t *testing.T) {
+func TestWorkspaceContainment_CallTool(t *testing.T) {
 	tempWorkspace := t.TempDir()
 	outsideDir := t.TempDir()
 	outsideManifest := filepath.Join(outsideDir, "outside.yaml")
@@ -225,16 +313,46 @@ func TestWorkspaceContainment_CallTool_ScanLocalIaC(t *testing.T) {
 		workspaceDir: tempWorkspace,
 	}
 	createIaCScanningTools(ksServer)
+	createWorkloadScanningTools(ksServer)
 
-	// Call scan_local_iac with an unauthorized path
-	res, err := ksServer.CallTool(context.Background(), "scan_local_iac", map[string]any{
-		"path": outsideManifest,
+	t.Run("scan_local_iac rejects path outside workspace", func(t *testing.T) {
+		res, err := ksServer.CallTool(context.Background(), "scan_local_iac", map[string]any{
+			"path": outsideManifest,
+		})
+		require.NoError(t, err, "path violations should be reported as MCP tool errors")
+		require.NotNil(t, res)
+		assert.True(t, res.IsError, "expected tool error")
+
+		te := toolErrorOf(t, res)
+		assert.Equal(t, ErrCodeInvalidArgument, te.Code)
+		assert.Contains(t, te.Message, "invalid or unauthorized path")
 	})
-	require.NoError(t, err, "path violations should be reported as MCP tool errors")
-	require.NotNil(t, res)
-	assert.True(t, res.IsError, "expected tool error")
 
-	te := toolErrorOf(t, res)
-	assert.Equal(t, ErrCodeInvalidArgument, te.Code)
-	assert.Contains(t, te.Message, "invalid or unauthorized path")
+	t.Run("scan_local_iac_controls rejects path outside workspace", func(t *testing.T) {
+		res, err := ksServer.CallTool(context.Background(), "scan_local_iac_controls", map[string]any{
+			"path":        outsideManifest,
+			"control_ids": "C-0012",
+		})
+		require.NoError(t, err, "path violations should be reported as MCP tool errors")
+		require.NotNil(t, res)
+		assert.True(t, res.IsError, "expected tool error")
+
+		te := toolErrorOf(t, res)
+		assert.Equal(t, ErrCodeInvalidArgument, te.Code)
+		assert.Contains(t, te.Message, "invalid or unauthorized path")
+	})
+
+	t.Run("scan_workload with local manifest rejects path outside workspace", func(t *testing.T) {
+		res, err := ksServer.CallTool(context.Background(), "scan_workload", map[string]any{
+			"workload": "pod/privileged-pod",
+			"path":     outsideManifest,
+		})
+		require.NoError(t, err, "path violations should be reported as MCP tool errors")
+		require.NotNil(t, res)
+		assert.True(t, res.IsError, "expected tool error")
+
+		te := toolErrorOf(t, res)
+		assert.Equal(t, ErrCodeInvalidArgument, te.Code)
+		assert.Contains(t, te.Message, "invalid or unauthorized path")
+	})
 }

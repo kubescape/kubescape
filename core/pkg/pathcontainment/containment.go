@@ -151,6 +151,14 @@ func resolveExistingPath(p string) (string, error) {
 	return canonicalPath, nil
 }
 
+// ResolveBaseDir resolves baseDir to a canonical, absolute directory path.
+// It resolves symbolic links component by component so that parent traversal ("..")
+// operates on the physical parent of a symlink target rather than lexically collapsing.
+// All components in baseDir must exist and the final resolved path must be a directory.
+func ResolveBaseDir(baseDir string) (string, error) {
+	return resolveBaseDir(baseDir)
+}
+
 // resolveBaseDir resolves baseDir to a canonical, absolute directory path.
 // It resolves symbolic links component by component so that parent traversal ("..")
 // operates on the physical parent of a symlink target rather than lexically collapsing.

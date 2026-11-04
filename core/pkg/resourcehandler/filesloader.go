@@ -52,7 +52,7 @@ func (fileHandler *FileResourceHandler) GetResources(ctx context.Context, sessio
 			if filterErr != nil {
 				return nil, allResources, nil, nil, filterErr
 			}
-			workloadIDToSource, workloads, skipped, err = getResourcesFromPath(ctx, scanInfo.InputPatterns[path], helmValueOpts, pathFilter)
+			workloadIDToSource, workloads, skipped, err = getResourcesFromPath(ctx, scanInfo.InputPatterns[path], helmValueOpts, pathFilter, scanInfo.WorkspaceDir)
 		}
 		sessionObj.SkippedManifests = append(sessionObj.SkippedManifests, skipped...)
 		if err != nil {
@@ -336,8 +336,14 @@ func excludeFilesUnderDirectories(sourceToWorkloads map[string][]workloadinterfa
 
 // getResourcesFromPath loads every scannable resource under path, from plain
 // manifests, helm charts and kustomize directories, and maps each workload to the
-// source file it came from.
-func getResourcesFromPath(ctx context.Context, path string, helmValueOpts cautils.HelmValueOptions, pathFilter *cautils.PathFilter) (map[string]reporthandling.Source, []workloadinterface.IMetadata, []cautils.SkippedManifest, error) {
+// source file it came from. When workspace containment is configured via workspaceOpt,
+// external references and symlinks outside the workspace are contained or skipped.
+func getResourcesFromPath(ctx context.Context, path string, helmValueOpts cautils.HelmValueOptions, pathFilter *cautils.PathFilter, workspaceOpt ...string) (map[string]reporthandling.Source, []workloadinterface.IMetadata, []cautils.SkippedManifest, error) {
+	var workspaceDir string
+	if len(workspaceOpt) > 0 {
+		workspaceDir = workspaceOpt[0]
+	}
+
 	workloadIDToSource := make(map[string]reporthandling.Source)
 	var workloads []workloadinterface.IMetadata
 	var allSkips []cautils.SkippedManifest
@@ -362,7 +368,7 @@ func getResourcesFromPath(ctx context.Context, path string, helmValueOpts cautil
 	// A broad directory input may contain Kustomize configurations below its root.
 	// Render them first so the generic Helm and plain-manifest passes can respect
 	// only the configurations whose builds actually succeeded.
-	kustomizeResult, err := cautils.LoadResourcesFromKustomizeDirectoriesFiltered(ctx, path, pathFilter)
+	kustomizeResult, err := cautils.LoadResourcesFromKustomizeDirectoriesFiltered(ctx, path, pathFilter, workspaceDir)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -379,7 +385,7 @@ func getResourcesFromPath(ctx context.Context, path string, helmValueOpts cautil
 	// generic Helm renderer left them alone. CRDs are filtered separately according
 	// to includeCRDs, so an omitted CRD remains available to the raw-file pass.
 	coveredChartDirectories := append(append([]string{}, renderedCharts...), kustomizeResult.OwnedHelmChartDirectories...)
-	sourceToWorkloads, fileSkips, err := cautils.LoadResourcesFromFilesFiltered(ctx, path, repoRoot, coveredChartDirectories, pathFilter)
+	sourceToWorkloads, fileSkips, err := cautils.LoadResourcesFromFilesFiltered(ctx, path, repoRoot, coveredChartDirectories, pathFilter, workspaceDir)
 	allSkips = append(allSkips, fileSkips...)
 	filesErr := err
 	if err != nil && !errors.Is(err, cautils.ErrNoManifestFiles) {
