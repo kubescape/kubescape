@@ -395,3 +395,66 @@ func TestIsPathContained_TableDriven(t *testing.T) {
 	assert.False(t, IsPathContained(base, outsideFile))
 	assert.False(t, IsPathContained(base, filepath.Join(base, "does-not-exist.yaml")))
 }
+
+func TestIsPathContained_RelativePaths(t *testing.T) {
+	tmp := t.TempDir()
+	t.Chdir(tmp)
+
+	baseDir := filepath.Join("base", "nested")
+	require.NoError(t, os.MkdirAll(baseDir, 0o750))
+	validFile := filepath.Join(baseDir, "file.yaml")
+	require.NoError(t, os.WriteFile(validFile, []byte("content"), 0o600))
+
+	outsideDir := "outside"
+	require.NoError(t, os.MkdirAll(outsideDir, 0o750))
+	outsideFile := filepath.Join(outsideDir, "secret.yaml")
+	require.NoError(t, os.WriteFile(outsideFile, []byte("secret"), 0o600))
+
+	absValidFile, err := filepath.Abs(validFile)
+	require.NoError(t, err)
+	absBaseDir, err := filepath.Abs("base")
+	require.NoError(t, err)
+
+	t.Run("relative base and relative target contained", func(t *testing.T) {
+		assert.True(t, IsPathContained("base", validFile))
+		assert.True(t, IsPathContained("base/nested", validFile))
+		assert.True(t, IsPathContained(".", validFile))
+	})
+
+	t.Run("relative base and absolute target contained", func(t *testing.T) {
+		assert.True(t, IsPathContained("base", absValidFile))
+		assert.True(t, IsPathContained(".", absValidFile))
+	})
+
+	t.Run("absolute base and relative target contained", func(t *testing.T) {
+		assert.True(t, IsPathContained(absBaseDir, validFile))
+	})
+
+	t.Run("relative base with parent traversal escaping is rejected", func(t *testing.T) {
+		assert.False(t, IsPathContained("base/nested", "base/nested/../../outside/secret.yaml"))
+		assert.False(t, IsPathContained("base", "base/../outside/secret.yaml"))
+	})
+
+	t.Run("relative base and relative target outside is rejected", func(t *testing.T) {
+		assert.False(t, IsPathContained("base", outsideFile))
+		assert.False(t, IsPathContained("base/nested", "base/file.yaml"))
+	})
+
+	t.Run("relative symlink inside base pointing outside is rejected", func(t *testing.T) {
+		skipOnWindowsSymlink(t)
+		linkPath := filepath.Join("base", "link-outside")
+		require.NoError(t, os.Symlink(outsideDir, linkPath))
+		targetThroughLink := filepath.Join(linkPath, "secret.yaml")
+
+		assert.False(t, IsPathContained("base", targetThroughLink))
+	})
+
+	t.Run("relative symlink inside base pointing inside is accepted", func(t *testing.T) {
+		skipOnWindowsSymlink(t)
+		linkPath := filepath.Join("base", "link-inside")
+		require.NoError(t, os.Symlink("nested", linkPath))
+		targetThroughLink := filepath.Join(linkPath, "file.yaml")
+
+		assert.True(t, IsPathContained("base", targetThroughLink))
+	})
+}

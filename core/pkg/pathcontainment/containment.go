@@ -78,18 +78,21 @@ func splitPath(p string) []string {
 	})
 }
 
-// resolveBaseDir resolves baseDir to a canonical, absolute directory path.
+// resolveExistingPath resolves p to a canonical, absolute filesystem path.
 // It resolves symbolic links component by component so that parent traversal ("..")
 // operates on the physical parent of a symlink target rather than lexically collapsing.
-// All components in baseDir must exist and the final resolved path must be a directory.
-func resolveBaseDir(baseDir string) (string, error) {
-	vol := filepath.VolumeName(baseDir)
+// All components in p must exist on disk.
+func resolveExistingPath(p string) (string, error) {
+	if p == "" || strings.ContainsRune(p, 0) {
+		return "", ErrInvalidPath
+	}
+	vol := filepath.VolumeName(p)
 	var cur string
 	var rest string
 
-	if filepath.IsAbs(baseDir) {
+	if filepath.IsAbs(p) {
 		cur = filepath.Clean(vol + string(filepath.Separator))
-		rest = baseDir[len(vol):]
+		rest = p[len(vol):]
 	} else {
 		wd, err := os.Getwd()
 		if err != nil {
@@ -100,7 +103,7 @@ func resolveBaseDir(baseDir string) (string, error) {
 			return "", fmt.Errorf("failed to resolve symlinks for working directory %q: %w", wd, err)
 		}
 		cur = canonWd
-		rest = baseDir
+		rest = p
 	}
 
 	parts := splitPath(rest)
@@ -124,7 +127,7 @@ func resolveBaseDir(baseDir string) (string, error) {
 		next := filepath.Join(cur, seg)
 		fi, lstatErr := os.Lstat(next)
 		if lstatErr != nil {
-			return "", fmt.Errorf("failed to stat baseDir %q: %w", baseDir, lstatErr)
+			return "", fmt.Errorf("failed to stat path %q: %w", p, lstatErr)
 		}
 		if fi.Mode()&os.ModeSymlink != 0 {
 			resolvedSymlink, evalErr := filepath.EvalSymlinks(next)
@@ -137,9 +140,25 @@ func resolveBaseDir(baseDir string) (string, error) {
 		}
 	}
 
-	canonicalBase, err := filepath.EvalSymlinks(cur)
+	canonicalPath, err := filepath.EvalSymlinks(cur)
 	if err != nil {
-		return "", fmt.Errorf("failed to resolve symlinks for baseDir %q: %w", baseDir, err)
+		return "", fmt.Errorf("failed to resolve symlinks for path %q: %w", p, err)
+	}
+	if _, err := os.Stat(canonicalPath); err != nil {
+		return "", fmt.Errorf("failed to stat path %q: %w", p, err)
+	}
+
+	return canonicalPath, nil
+}
+
+// resolveBaseDir resolves baseDir to a canonical, absolute directory path.
+// It resolves symbolic links component by component so that parent traversal ("..")
+// operates on the physical parent of a symlink target rather than lexically collapsing.
+// All components in baseDir must exist and the final resolved path must be a directory.
+func resolveBaseDir(baseDir string) (string, error) {
+	canonicalBase, err := resolveExistingPath(baseDir)
+	if err != nil {
+		return "", err
 	}
 	baseInfo, err := os.Stat(canonicalBase)
 	if err != nil {
@@ -227,7 +246,8 @@ func resolveComponentsPreservingSymlinks(canonicalBase, target string) (string, 
 
 // IsPathContained reports whether target resolves to a path inside base,
 // preventing an untrusted path from escaping the base directory.
-// Both base and target are canonicalized by evaluating symlinks.
+// Both base and target are canonicalized by resolving symlinks and normalizing
+// operands consistently (relative paths are resolved against the working directory).
 // Returns false if resolution fails (e.g. nonexistent file, dangling symlink,
 // permission error) or if target escapes base.
 func IsPathContained(base, target string) bool {
@@ -235,7 +255,7 @@ func IsPathContained(base, target string) bool {
 	if err != nil {
 		return false
 	}
-	resolvedTarget, err := filepath.EvalSymlinks(target)
+	resolvedTarget, err := resolveExistingPath(target)
 	if err != nil {
 		return false
 	}
