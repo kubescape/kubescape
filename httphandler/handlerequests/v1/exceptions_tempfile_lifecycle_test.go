@@ -40,6 +40,7 @@ func isolateExceptionsTempDir(t *testing.T) string {
 	return dir
 }
 
+// exceptionsTempFiles lists the exceptions temp files currently in dir.
 func exceptionsTempFiles(t *testing.T, dir string) []string {
 	t.Helper()
 	files, err := filepath.Glob(filepath.Join(dir, "kubescape-exceptions-*.json"))
@@ -61,6 +62,8 @@ type coreScanHarness struct {
 	executed []string // UseExceptions paths of requests that reached the scanner
 }
 
+// installCoreScanHarness installs the harness described on coreScanHarness
+// and restores the original scanner seams when the test ends.
 func installCoreScanHarness(t *testing.T) *coreScanHarness {
 	t.Helper()
 	withTempOutputDirs(t)
@@ -93,24 +96,28 @@ func installCoreScanHarness(t *testing.T) *coreScanHarness {
 	return h
 }
 
+// executedCount reports how many requests with exceptions reached the scanner.
 func (h *coreScanHarness) executedCount() int {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return len(h.executed)
 }
 
+// postScan sends POST /v1/scan through the handler and records the response.
 func postScan(handler *HTTPHandler, query, body string) *httptest.ResponseRecorder {
 	w := httptest.NewRecorder()
 	handler.Scan(w, httptest.NewRequest(http.MethodPost, "/v1/scan"+query, bytes.NewBufferString(body)))
 	return w
 }
 
+// cancelScanRequest sends DELETE /v1/scan?id=scanID through the handler.
 func cancelScanRequest(handler *HTTPHandler, scanID string) *httptest.ResponseRecorder {
 	w := httptest.NewRecorder()
 	handler.CancelScan(w, httptest.NewRequest(http.MethodDelete, "/v1/scan?id="+scanID, nil))
 	return w
 }
 
+// responseScanID returns the scan ID from a /v1/scan response.
 func responseScanID(t *testing.T, w *httptest.ResponseRecorder) string {
 	t.Helper()
 	var resp utilsmetav1.Response
@@ -133,6 +140,8 @@ func startBlocker(t *testing.T, handler *HTTPHandler, h *coreScanHarness) string
 	}
 }
 
+// shutdownHandler shuts handler down without a drain period, cancelling
+// queued and running scans, and waits for its worker to exit.
 func shutdownHandler(t *testing.T, handler *HTTPHandler) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -140,6 +149,9 @@ func shutdownHandler(t *testing.T, handler *HTTPHandler) {
 	require.NoError(t, handler.Shutdown(ctx, 0))
 }
 
+// TestExceptionsTempFile_NotLeftWhenRequestIsRejectedAtParse rejects requests with an invalid query
+// parameter or a callback while callbacks are disabled (400) before any
+// exceptions file is written.
 func TestExceptionsTempFile_NotLeftWhenRequestIsRejectedAtParse(t *testing.T) {
 	t.Setenv(callbackEnabledEnv, "")
 	t.Setenv(callbackAllowlistEnv, "")
@@ -163,6 +175,8 @@ func TestExceptionsTempFile_NotLeftWhenRequestIsRejectedAtParse(t *testing.T) {
 	}
 }
 
+// TestExceptionsTempFile_GetScanParamsCreatesNoFileOnError checks that the parser returns no params
+// and writes no exceptions file for a request it rejects.
 func TestExceptionsTempFile_GetScanParamsCreatesNoFileOnError(t *testing.T) {
 	tmp := isolateExceptionsTempDir(t)
 	request := httptest.NewRequest(http.MethodPost, "/v1/scan?wait=notabool", bytes.NewBufferString(exceptionsScanBody))
@@ -174,6 +188,8 @@ func TestExceptionsTempFile_GetScanParamsCreatesNoFileOnError(t *testing.T) {
 	assert.Empty(t, exceptionsTempFiles(t, tmp))
 }
 
+// TestExceptionsTempFile_RemovedWhenQueueIsFull rejects a request with exceptions while the
+// worker is busy and the queue is full (429).
 func TestExceptionsTempFile_RemovedWhenQueueIsFull(t *testing.T) {
 	tmp := isolateExceptionsTempDir(t)
 	h := installCoreScanHarness(t)
@@ -192,6 +208,8 @@ func TestExceptionsTempFile_RemovedWhenQueueIsFull(t *testing.T) {
 	close(h.releaseBlocker)
 }
 
+// TestExceptionsTempFile_RemovedWhenServerIsShuttingDown rejects a request with exceptions once
+// shutdown has begun (503).
 func TestExceptionsTempFile_RemovedWhenServerIsShuttingDown(t *testing.T) {
 	tmp := isolateExceptionsTempDir(t)
 	h := installCoreScanHarness(t)
@@ -206,6 +224,8 @@ func TestExceptionsTempFile_RemovedWhenServerIsShuttingDown(t *testing.T) {
 	shutdownHandler(t, handler)
 }
 
+// TestExceptionsTempFile_RemovedWhenQueuedScanIsCancelled cancels a queued scan with DELETE
+// /v1/scan, so the worker skips it without calling the scanner.
 func TestExceptionsTempFile_RemovedWhenQueuedScanIsCancelled(t *testing.T) {
 	tmp := isolateExceptionsTempDir(t)
 	h := installCoreScanHarness(t)
@@ -228,6 +248,8 @@ func TestExceptionsTempFile_RemovedWhenQueuedScanIsCancelled(t *testing.T) {
 	shutdownHandler(t, handler)
 }
 
+// TestExceptionsTempFile_RemovedWhenShutdownCancelsQueuedScan lets Shutdown cancel a queued scan
+// via cancelAll, so the worker skips it without calling the scanner.
 func TestExceptionsTempFile_RemovedWhenShutdownCancelsQueuedScan(t *testing.T) {
 	tmp := isolateExceptionsTempDir(t)
 	h := installCoreScanHarness(t)
@@ -244,6 +266,8 @@ func TestExceptionsTempFile_RemovedWhenShutdownCancelsQueuedScan(t *testing.T) {
 	assert.Empty(t, exceptionsTempFiles(t, tmp), "a queued scan cancelled by shutdown must not leave its exceptions file behind")
 }
 
+// TestExceptionsTempFile_RemovedWhenExecutedScanFailsInitialization is a control: an executed
+// scan that fails during core initialization is still cleaned up by core.
 func TestExceptionsTempFile_RemovedWhenExecutedScanFailsInitialization(t *testing.T) {
 	tmp := isolateExceptionsTempDir(t)
 	h := installCoreScanHarness(t)
@@ -328,13 +352,33 @@ deny contains {"alertMessage": "privileged container", "alertObject": {"k8sApiOb
 
 	handler := newHTTPHandler(false, 1, defaultMaxScanRequestBodyBytes)
 	t.Cleanup(func() { shutdownHandler(t, handler) })
-	body := `{"targetType":"control","targetNames":["C-TEST"],` + exceptionsScanBody[1:]
+	// A disable exception covers the privileged Pod for C-TEST, so the finding
+	// is only absent if the scan actually read the exceptions file.
+	body := `{"targetType":"control","targetNames":["C-TEST"],"exceptions":[{"name":"accept-web","policyType":"postureExceptionPolicy","actions":["disable"],` +
+		`"resources":[{"designatorType":"Attributes","attributes":{"namespace":"default","kind":"Pod","name":"web"}}],"posturePolicies":[{"controlID":"C-TEST"}]}]}`
 
 	w := postScan(handler, "?wait=true&keep=true", body)
 
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
-	require.Contains(t, w.Body.String(), `"type":"v1results"`, w.Body.String())
-	assert.Contains(t, w.Body.String(), "C-TEST", "the scan must have evaluated the local control")
+	var resp struct {
+		Type     string `json:"type"`
+		Response struct {
+			SummaryDetails struct {
+				Controls map[string]struct {
+					ResourceCounters struct {
+						Failed   int `json:"failedResources"`
+						Passed   int `json:"passedResources"`
+						Excluded int `json:"excludedResources"`
+					} `json:"ResourceCounters"`
+				} `json:"controls"`
+			} `json:"summaryDetails"`
+		} `json:"response"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp), w.Body.String())
+	require.Equal(t, "v1results", resp.Type, w.Body.String())
+	counters := resp.Response.SummaryDetails.Controls["C-TEST"].ResourceCounters
+	assert.Zero(t, counters.Failed, "the disable exception from the request must apply: %+v", counters)
+	assert.Equal(t, 1, counters.Passed+counters.Excluded, "the privileged Pod must still be evaluated: %+v", counters)
 	assert.True(t, exceptionsPresentDuringScan, "the exceptions file must exist while the scan runs")
 	assert.Empty(t, exceptionsTempFiles(t, tmp), "a completed scan must not leave its exceptions file behind")
 }
@@ -351,23 +395,30 @@ func TestExceptionsTempFile_ConcurrentAdmissionAndCancellation(t *testing.T) {
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	statuses := map[int]int{}
+	var admitted []string
 	for i := 0; i < requests; i++ {
 		wg.Add(1)
-		go func(i int) {
+		go func() {
 			defer wg.Done()
 			w := postScan(handler, "", exceptionsScanBody)
-			mu.Lock()
-			statuses[w.Code]++
-			mu.Unlock()
 			var resp utilsmetav1.Response
-			if w.Code == http.StatusOK && i%2 == 0 && json.Unmarshal(w.Body.Bytes(), &resp) == nil {
-				cancelScanRequest(handler, resp.ID)
+			_ = json.Unmarshal(w.Body.Bytes(), &resp)
+			mu.Lock()
+			defer mu.Unlock()
+			statuses[w.Code]++
+			if w.Code == http.StatusOK {
+				admitted = append(admitted, resp.ID)
 			}
-		}(i)
+		}()
 	}
 	wg.Wait()
 	require.Equal(t, requests, statuses[http.StatusOK]+statuses[http.StatusTooManyRequests], "unexpected statuses: %v", statuses)
 	require.Positive(t, statuses[http.StatusTooManyRequests], "the queue must have rejected some requests: %v", statuses)
+	require.NotEmpty(t, admitted, "the queue must have admitted some requests: %v", statuses)
+
+	// Cancel one admitted scan while it is still queued; shutdown cancels the rest.
+	cancelled := cancelScanRequest(handler, admitted[0])
+	require.Equal(t, http.StatusOK, cancelled.Code, cancelled.Body.String())
 
 	close(h.releaseBlocker)
 	shutdownHandler(t, handler)
