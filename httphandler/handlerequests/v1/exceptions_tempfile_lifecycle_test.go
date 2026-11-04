@@ -214,6 +214,7 @@ func TestExceptionsTempFile_RemovedWhenServerIsShuttingDown(t *testing.T) {
 	tmp := isolateExceptionsTempDir(t)
 	h := installCoreScanHarness(t)
 	handler := newHTTPHandler(false, 1, defaultMaxScanRequestBodyBytes)
+	t.Cleanup(func() { shutdownHandler(t, handler) }) // stops the worker even if an assertion fails first
 	handler.BeginShutdown()
 
 	w := postScan(handler, "", exceptionsScanBody)
@@ -230,6 +231,7 @@ func TestExceptionsTempFile_RemovedWhenQueuedScanIsCancelled(t *testing.T) {
 	tmp := isolateExceptionsTempDir(t)
 	h := installCoreScanHarness(t)
 	handler := newHTTPHandler(false, 1, defaultMaxScanRequestBodyBytes)
+	t.Cleanup(func() { shutdownHandler(t, handler) }) // stops the worker even if an assertion fails first
 
 	startBlocker(t, handler, h)
 	queued := postScan(handler, "", exceptionsScanBody)
@@ -254,6 +256,7 @@ func TestExceptionsTempFile_RemovedWhenShutdownCancelsQueuedScan(t *testing.T) {
 	tmp := isolateExceptionsTempDir(t)
 	h := installCoreScanHarness(t)
 	handler := newHTTPHandler(false, 1, defaultMaxScanRequestBodyBytes)
+	t.Cleanup(func() { shutdownHandler(t, handler) }) // stops the worker even if an assertion fails first
 
 	startBlocker(t, handler, h)
 	queued := postScan(handler, "", exceptionsScanBody)
@@ -389,6 +392,7 @@ func TestExceptionsTempFile_ConcurrentAdmissionAndCancellation(t *testing.T) {
 	tmp := isolateExceptionsTempDir(t)
 	h := installCoreScanHarness(t)
 	handler := newHTTPHandler(false, 2, defaultMaxScanRequestBodyBytes)
+	t.Cleanup(func() { shutdownHandler(t, handler) }) // stops the worker even if an assertion fails first
 	startBlocker(t, handler, h)
 
 	const requests = 24
