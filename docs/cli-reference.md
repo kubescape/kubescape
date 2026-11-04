@@ -1441,6 +1441,10 @@ kubescape operator scan <type> [flags]
 | `configurations` | Trigger configuration scan |
 | `vulnerabilities` | Trigger vulnerability scan |
 
+### How it works
+
+The command creates one `OperatorCommand` object (`kubescape.io/v1alpha1`) per scan request in the operator's namespace and waits, for up to 10 minutes, until the operator reports each one completed. It reports an error if the operator marks a command as failed. Your kubeconfig identity needs permission to create and get `operatorcommands.kubescape.io` in that namespace. No port-forward to the operator is used.
+
 ### Examples
 
 ```bash

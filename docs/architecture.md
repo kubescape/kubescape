@@ -289,7 +289,7 @@ Who and what interacts with Kubescape, and what each one does. The interfaces th
 | CI pipeline | The CLI, run non-interactively | The same as a user. Gates on the [exit code](cli-reference.md#exit-codes) and publishes reports such as SARIF or JUnit |
 | AI assistant (MCP client) | `kubescape mcpserver` | Reads the vulnerability and configuration results the operator stores in the cluster, and runs scans through the server's tools |
 | HTTP API client, usually the Kubescape Operator | The REST API of the microservice image | Starts and cancels scans, polls their status, and reads and deletes their results |
-| Kubernetes API server | A kubeconfig, or the pod's service account for the microservice | Serves the resources a cluster scan reads. `kubescape operator` port-forwards through it to the operator |
+| Kubernetes API server | A kubeconfig, or the pod's service account for the microservice | Serves the resources a cluster scan reads. `kubescape operator` creates `OperatorCommand` objects through it, which the operator executes |
 | Container registries | Image references | Serve images for image scanning. `kubescape patch` pushes the patched image to a registry with `--push`, or loads it into the local Docker daemon |
 | Policy source | HTTPS, or a local directory | Provides frameworks, controls, exceptions and control inputs: the [regolibrary](https://github.com/kubescape/regolibrary) GitHub releases by default, or local files given with `--use-from` or `--use-artifacts-from` |
 | Vulnerability database | HTTPS, or the HTTP(S) URL given with `--grype-db-url` | Provides the Grype database for image scanning |

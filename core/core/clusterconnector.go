@@ -1,100 +1,22 @@
 package core
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
-	"fmt"
-	"net/http"
-	"net/url"
 	"time"
 
-	"github.com/armosec/armoapi-go/apis"
-	"github.com/armosec/utils-go/httputils"
-	"github.com/kubescape/k8s-interface/k8sinterface"
+	"github.com/kubescape/go-logger"
 	"github.com/kubescape/kubescape/v4/core/cautils"
-	v1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/dynamic"
 )
 
-const (
-	operatorServicePort string = "4002"
-	operatorTriggerPath string = "v1/triggerAction"
-	kubescapeNamespace  string = "kubescape"
-)
-
+// OperatorAdapter triggers scans in the Kubescape Operator by creating OperatorCommand objects
+// in the cluster and waiting for the operator to execute them.
 type OperatorAdapter struct {
-	httpPostFunc func(context.Context, httputils.IHttpClient, string, map[string]string, []byte) (*http.Response, error)
 	cautils.OperatorScanInfo
-	cautils.OperatorConnector
-}
-
-var errOperatorNotFound = errors.New("could not find the Kubescape Operator chart, please validate that the Kubescape Operator helm chart is installed and running -> https://github.com/kubescape/helm-charts")
-
-func defaultHttpPostWithContext(ctx context.Context, httpClient httputils.IHttpClient, fullURL string, headers map[string]string, body []byte) (*http.Response, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, fullURL, bytes.NewReader(body))
-	if err != nil {
-		return nil, err
-	}
-	for k, v := range headers {
-		req.Header.Set(k, v)
-	}
-	return httpClient.Do(req)
-}
-
-func getOperatorPod(k8sClient *k8sinterface.KubernetesApi, ns string, ctx ...context.Context) (*v1.Pod, error) {
-	if k8sClient == nil || k8sClient.KubernetesClient == nil {
-		return nil, errors.New("kubernetes client is not initialised")
-	}
-	c := k8sClient.Context
-	if len(ctx) > 0 && ctx[0] != nil {
-		c = ctx[0]
-	}
-	if c == nil {
-		c = context.Background()
-	}
-	listOptions := metav1.ListOptions{
-		LabelSelector: "app=operator",
-	}
-	pods, err := k8sClient.KubernetesClient.CoreV1().Pods(ns).List(c, listOptions)
-	if err != nil {
-		return nil, err
-	}
-
-	if len(pods.Items) == 0 {
-		return nil, errOperatorNotFound
-	}
-
-	// More than one operator pod can be present during HA deployments or
-	// rolling upgrades. The operator has no leader election, so any ready
-	// replica can serve v1/triggerAction: picking the first ready pod is a
-	// deliberate choice, not an approximation. A single pod goes through the
-	// same check, so a not-yet-ready lone pod is reported instead of being
-	// handed to CreatePortForwarder.
-	for i := range pods.Items {
-		if isPodReady(&pods.Items[i]) {
-			return &pods.Items[i], nil
-		}
-	}
-	return nil, fmt.Errorf("found %d Kubescape Operator pod(s) in namespace %q, but none are running and ready", len(pods.Items), ns)
-}
-
-func isPodReady(pod *v1.Pod) bool {
-	if pod.DeletionTimestamp != nil {
-		// A terminating pod keeps reporting Ready=True for the whole
-		// termination grace period, so it must not be selected.
-		return false
-	}
-	if pod.Status.Phase != v1.PodRunning {
-		return false
-	}
-	for _, condition := range pod.Status.Conditions {
-		if condition.Type == v1.PodReady {
-			return condition.Status == v1.ConditionTrue
-		}
-	}
-	return false
+	dyn       dynamic.Interface
+	namespace string
+	timeout   time.Duration
 }
 
 func NewOperatorAdapter(scanInfo cautils.OperatorScanInfo, ns string, ctx ...context.Context) (*OperatorAdapter, error) {
@@ -102,86 +24,21 @@ func NewOperatorAdapter(scanInfo cautils.OperatorScanInfo, ns string, ctx ...con
 	if k8sClient == nil || k8sClient.KubernetesClient == nil {
 		return nil, errors.New("could not connect to cluster: set --kubeconfig, $KUBECONFIG, or $KUBERNETES_MASTER")
 	}
-	pod, err := getOperatorPod(k8sClient, ns, ctx...)
-	if err != nil {
-		return nil, err
+	dyn := k8sClient.GetDynamicClient()
+	if dyn == nil {
+		return nil, errors.New("could not create a dynamic Kubernetes client")
 	}
-	operatorConnector, err := cautils.CreatePortForwarder(k8sClient, pod, operatorServicePort, ns)
-	if err != nil {
-		return nil, err
-	}
+	return NewOperatorAdapterWithClient(scanInfo, ns, dyn), nil
+}
 
+// NewOperatorAdapterWithClient builds an adapter on top of the given dynamic client.
+func NewOperatorAdapterWithClient(scanInfo cautils.OperatorScanInfo, ns string, dyn dynamic.Interface) *OperatorAdapter {
 	return &OperatorAdapter{
-		httpPostFunc:      defaultHttpPostWithContext,
-		OperatorScanInfo:  scanInfo,
-		OperatorConnector: operatorConnector,
-	}, nil
-}
-
-func NewOperatorAdapterWithConnector(scanInfo cautils.OperatorScanInfo, connector cautils.OperatorConnector) *OperatorAdapter {
-	return &OperatorAdapter{
-		httpPostFunc:      defaultHttpPostWithContext,
-		OperatorScanInfo:  scanInfo,
-		OperatorConnector: connector,
+		OperatorScanInfo: scanInfo,
+		dyn:              dyn,
+		namespace:        ns,
+		timeout:          defaultOperatorCommandTimeout,
 	}
-}
-
-func (a *OperatorAdapter) StartPortForwarderContext(ctx context.Context) error {
-	if a.OperatorConnector == nil {
-		return errors.New("operator connector is not initialised")
-	}
-	if ctxConn, ok := a.OperatorConnector.(interface{ StartPortForwarderContext(context.Context) error }); ok {
-		return ctxConn.StartPortForwarderContext(ctx)
-	}
-	return a.StartPortForwarder()
-}
-
-func (a *OperatorAdapter) httpPostOperatorScanRequest(ctx context.Context, body apis.Commands) (string, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	if err := ctx.Err(); err != nil {
-		return "", err
-	}
-	reqBody, err := json.Marshal(body)
-	if err != nil {
-		return "", fmt.Errorf("in 'httpPostOperatorScanRequest' failed to json.Marshal, reason: %w", err)
-	}
-
-	err = a.StartPortForwarderContext(ctx)
-	if err != nil {
-		a.StopPortForwarder()
-		return "", err
-	}
-	defer a.StopPortForwarder()
-
-	if err := ctx.Err(); err != nil {
-		return "", err
-	}
-
-	urlQuery := url.URL{
-		Scheme: "http",
-		Host:   a.GetPortForwardLocalhost(),
-		Path:   operatorTriggerPath,
-	}
-
-	postFunc := a.httpPostFunc
-	if postFunc == nil {
-		postFunc = defaultHttpPostWithContext
-	}
-
-	client := &http.Client{
-		Timeout: 30 * time.Second,
-	}
-	resp, err := postFunc(ctx, client, urlQuery.String(), map[string]string{"Content-Type": "application/json"}, reqBody)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("http-error: %d", resp.StatusCode)
-	}
-	return "success", nil
 }
 
 func (a *OperatorAdapter) OperatorScan(ctx ...context.Context) (string, error) {
@@ -193,11 +50,22 @@ func (a *OperatorAdapter) OperatorScan(ctx ...context.Context) (string, error) {
 	if err := a.ValidatePayload(payload); err != nil {
 		return "", err
 	}
-	res, err := a.httpPostOperatorScanRequest(c, *payload)
+	if err := c.Err(); err != nil {
+		return "", err
+	}
+	names, err := CreateOperatorCommands(c, a.dyn, a.namespace, *payload)
 	if err != nil {
 		return "", err
 	}
-	return res, nil
+	timeout := a.timeout
+	if timeout <= 0 {
+		timeout = defaultOperatorCommandTimeout
+	}
+	if err := WaitForOperatorCommands(c, a.dyn, a.namespace, names, timeout); err != nil {
+		return "", err
+	}
+	logger.L().Info("All operator commands completed")
+	return "success", nil
 }
 
 func (a *OperatorAdapter) OperatorScanContext(ctx context.Context) (string, error) {
