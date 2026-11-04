@@ -59,7 +59,7 @@ require (
 	github.com/kubescape/k8s-interface v0.0.221
 	github.com/kubescape/opa-utils v0.0.315
 	github.com/kubescape/rbac-utils v0.0.22
-	github.com/kubescape/regolibrary/v2 v2.0.38
+	github.com/kubescape/regolibrary/v2 v2.0.39
 	github.com/kubescape/sizing-checker v0.0.0-20250323151332-73a18561dc73
 	github.com/kubescape/storage v0.0.342
 	github.com/kubescape/storage/pkg/apiauth v0.1.0
