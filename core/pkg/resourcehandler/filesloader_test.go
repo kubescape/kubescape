@@ -1230,3 +1230,44 @@ func TestHelmValueOptionsFromScanInfo(t *testing.T) {
 		APIVersions:      []string{"gateway.networking.k8s.io/v1"},
 	}, helmValueOptionsFromScanInfo(scanInfo))
 }
+
+func TestSharedRoot(t *testing.T) {
+	abs := func(path string) string {
+		return filepath.Join(string(filepath.Separator), filepath.FromSlash(path))
+	}
+	roots := func(paths ...string) []loadedInput {
+		inputs := make([]loadedInput, len(paths))
+		for i, path := range paths {
+			if path != "" {
+				path = abs(path)
+			}
+			inputs[i] = loadedInput{root: path}
+		}
+		return inputs
+	}
+	for _, tc := range []struct {
+		name   string
+		inputs []loadedInput
+		want   string
+	}{
+		{name: "no inputs", inputs: nil, want: ""},
+		{name: "single root", inputs: roots("w/dev"), want: ""},
+		{name: "one git root for every input", inputs: roots("repo", "repo"), want: ""},
+		{name: "siblings", inputs: roots("w/dev", "w/prod"), want: abs("w")},
+		{name: "nested", inputs: roots("w", "w/apps"), want: abs("w")},
+		{name: "deeper siblings", inputs: roots("w/a/k8s", "w/b/k8s", "w/a/x"), want: abs("w")},
+		{name: "cloned repository ignored", inputs: roots("", "w/dev"), want: ""},
+		{name: "cloned repository beside two roots", inputs: roots("w/dev", "", "w/prod"), want: abs("w")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, sharedRoot(context.Background(), tc.inputs))
+		})
+	}
+
+	t.Run("separate volumes", func(t *testing.T) {
+		if filepath.VolumeName(`C:\`) == "" {
+			t.Skip("volumes exist on Windows only")
+		}
+		assert.Equal(t, "", sharedRoot(context.Background(), []loadedInput{{root: `C:\dev`}, {root: `D:\prod`}}))
+	})
+}
