@@ -122,6 +122,10 @@ func loadResourcesFromHelmCharts(ctx context.Context, basePath string, valueOpts
 	for _, err := range discoveryErrs {
 		logger.L().Ctx(ctx).Warning("Skipping path while discovering Helm charts", helpers.Error(err))
 	}
+	explicitHelmInput, _ := IsHelmDirectory(basePath)
+	if workspaceDir != "" && explicitHelmInput && !pathcontainment.IsPathContained(workspaceDir, basePath) {
+		return nil, nil, nil, fmt.Errorf("%w: Helm chart directory %q outside workspace root", pathcontainment.ErrPathEscapesWorkspace, basePath)
+	}
 	if len(excludedChartDirectories) > 0 {
 		excludedDirectories := newDirSet(normalizePaths(excludedChartDirectories))
 		remaining := make([]string, 0, len(helmDirectories))
@@ -192,17 +196,22 @@ func loadResourcesFromHelmCharts(ctx context.Context, basePath string, valueOpts
 
 		if workspaceDir != "" {
 			escaped := false
+			var escapeErr error
 			_ = filepath.Walk(helmDir, func(p string, fi os.FileInfo, err error) error {
 				if err != nil {
 					return err
 				}
 				if !pathcontainment.IsPathContained(workspaceDir, p) {
 					escaped = true
+					escapeErr = fmt.Errorf("%w: Helm chart %q references file %q outside workspace root", pathcontainment.ErrPathEscapesWorkspace, helmDir, p)
 					return filepath.SkipDir
 				}
 				return nil
 			})
 			if escaped {
+				if explicitHelmInput && helmDir == basePath {
+					return nil, nil, nil, escapeErr
+				}
 				logger.L().Ctx(ctx).Warning("Skipping Helm chart with references outside workspace root", helpers.String("path", helmDir), helpers.String("workspace", workspaceDir))
 				continue
 			}
@@ -620,6 +629,42 @@ func LoadResourcesFromKustomizeDirectories(ctx context.Context, basePath string)
 	return LoadResourcesFromKustomizeDirectoriesFiltered(ctx, basePath, nil)
 }
 
+func validateChartTreeContained(workspaceDir, chartDir, input string) error {
+	if !pathcontainment.IsPathContained(workspaceDir, chartDir) {
+		return fmt.Errorf("%w: Kustomize configuration %q references Helm chart %q outside workspace root", pathcontainment.ErrPathEscapesWorkspace, input, chartDir)
+	}
+	var escapeErr error
+	_ = filepath.Walk(chartDir, func(p string, fi os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if !pathcontainment.IsPathContained(workspaceDir, p) {
+			escapeErr = fmt.Errorf("%w: Kustomize configuration %q references Helm chart file %q outside workspace root", pathcontainment.ErrPathEscapesWorkspace, input, p)
+			return filepath.SkipDir
+		}
+		return nil
+	})
+	return escapeErr
+}
+
+func validateCRDTreeContained(workspaceDir, crdDir, input string) error {
+	if !pathcontainment.IsPathContained(workspaceDir, crdDir) {
+		return fmt.Errorf("%w: Kustomize configuration %q references Helm CRD directory %q outside workspace root", pathcontainment.ErrPathEscapesWorkspace, input, crdDir)
+	}
+	var escapeErr error
+	_ = filepath.Walk(crdDir, func(p string, fi os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if !pathcontainment.IsPathContained(workspaceDir, p) {
+			escapeErr = fmt.Errorf("%w: Kustomize configuration %q references Helm CRD file %q outside workspace root", pathcontainment.ErrPathEscapesWorkspace, input, p)
+			return filepath.SkipDir
+		}
+		return nil
+	})
+	return escapeErr
+}
+
 // LoadResourcesFromKustomizeDirectoriesFiltered behaves like LoadResourcesFromKustomizeDirectories,
 // leaving out the configurations filter excludes. When workspace containment is configured via workspaceOpt,
 // every file Kustomize can load through resource references is verified to remain within the workspace before building.
@@ -670,12 +715,24 @@ func LoadResourcesFromKustomizeDirectoriesFiltered(ctx context.Context, basePath
 				continue
 			}
 			for _, chartDir := range ownership.HelmChartDirectories {
-				if !pathcontainment.IsPathContained(workspaceDir, chartDir) {
-					containErr := fmt.Errorf("%w: Kustomize configuration %q references Helm chart %q outside workspace root", pathcontainment.ErrPathEscapesWorkspace, input, chartDir)
+				if err := validateChartTreeContained(workspaceDir, chartDir, input); err != nil {
 					if explicitKustomizeInput {
-						return KustomizeRenderResult{}, containErr
+						return KustomizeRenderResult{}, err
 					}
-					logger.L().Ctx(ctx).Warning("Skipping nested Kustomize configuration referencing Helm chart outside workspace", helpers.String("path", directory), helpers.Error(containErr))
+					logger.L().Ctx(ctx).Warning("Skipping nested Kustomize configuration referencing Helm chart outside workspace", helpers.String("path", directory), helpers.Error(err))
+					escaped = true
+					break
+				}
+			}
+			if escaped {
+				continue
+			}
+			for _, crdDir := range ownership.HelmCRDDirectories {
+				if err := validateCRDTreeContained(workspaceDir, crdDir, input); err != nil {
+					if explicitKustomizeInput {
+						return KustomizeRenderResult{}, err
+					}
+					logger.L().Ctx(ctx).Warning("Skipping nested Kustomize configuration referencing Helm CRD outside workspace", helpers.String("path", directory), helpers.Error(err))
 					escaped = true
 					break
 				}
@@ -706,6 +763,33 @@ func LoadResourcesFromKustomizeDirectoriesFiltered(ctx context.Context, basePath
 		}
 
 		if workspaceDir != "" {
+			escaped := false
+			for _, chartDir := range ownership.HelmChartDirectories {
+				if err := validateChartTreeContained(workspaceDir, chartDir, input); err != nil {
+					if explicitKustomizeInput {
+						return KustomizeRenderResult{}, err
+					}
+					logger.L().Ctx(ctx).Warning("Skipping nested Kustomize configuration with Helm chart outside workspace", helpers.String("path", directory), helpers.Error(err))
+					escaped = true
+					break
+				}
+			}
+			if escaped {
+				continue
+			}
+			for _, crdDir := range ownership.HelmCRDDirectories {
+				if err := validateCRDTreeContained(workspaceDir, crdDir, input); err != nil {
+					if explicitKustomizeInput {
+						return KustomizeRenderResult{}, err
+					}
+					logger.L().Ctx(ctx).Warning("Skipping nested Kustomize configuration with Helm CRD outside workspace", helpers.String("path", directory), helpers.Error(err))
+					escaped = true
+					break
+				}
+			}
+			if escaped {
+				continue
+			}
 			for wPath := range workloads {
 				if !pathcontainment.IsPathContained(workspaceDir, wPath) {
 					delete(workloads, wPath)

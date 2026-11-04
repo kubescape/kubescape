@@ -14,6 +14,7 @@ import (
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/pkg/pathcontainment"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"k8s.io/apimachinery/pkg/version"
 )
@@ -375,7 +376,17 @@ func getResourcesFromPath(ctx context.Context, path string, helmValueOpts cautil
 
 	// Charts owned by a successful Kustomize build must not also be rendered as
 	// standalone Helm releases. Unreferenced charts remain in generic discovery.
-	helmSourceToWorkloads, helmSourceToChart, renderedCharts, err := cautils.LoadResourcesFromHelmChartsFiltered(ctx, path, helmValueOpts, kustomizeResult.OwnedHelmChartDirectories, pathFilter, workspaceDir)
+	var ownedHelmCharts []string
+	if workspaceDir != "" {
+		for _, d := range kustomizeResult.OwnedHelmChartDirectories {
+			if pathcontainment.IsPathContained(workspaceDir, d) {
+				ownedHelmCharts = append(ownedHelmCharts, d)
+			}
+		}
+	} else {
+		ownedHelmCharts = kustomizeResult.OwnedHelmChartDirectories
+	}
+	helmSourceToWorkloads, helmSourceToChart, renderedCharts, err := cautils.LoadResourcesFromHelmChartsFiltered(ctx, path, helmValueOpts, ownedHelmCharts, pathFilter, workspaceDir)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -384,7 +395,7 @@ func getResourcesFromPath(ctx context.Context, path string, helmValueOpts cautil
 	// Kustomize-owned chart templates are covered by that build even though the
 	// generic Helm renderer left them alone. CRDs are filtered separately according
 	// to includeCRDs, so an omitted CRD remains available to the raw-file pass.
-	coveredChartDirectories := append(append([]string{}, renderedCharts...), kustomizeResult.OwnedHelmChartDirectories...)
+	coveredChartDirectories := append(append([]string{}, renderedCharts...), ownedHelmCharts...)
 	sourceToWorkloads, fileSkips, err := cautils.LoadResourcesFromFilesFiltered(ctx, path, repoRoot, coveredChartDirectories, pathFilter, workspaceDir)
 	allSkips = append(allSkips, fileSkips...)
 	filesErr := err

@@ -69,7 +69,12 @@ func (td *TerraformDirectory) GetWorkloads(path string) (map[string][]workloadin
 			logger.L().Warning("Skipping Terraform file outside workspace root", helpers.String("path", f), helpers.String("workspace", td.workspaceDir))
 			continue
 		}
-		file, diags := parser.ParseHCLFile(f)
+		content, readErr := os.ReadFile(f)
+		if readErr != nil {
+			errs = append(errs, fmt.Errorf("reading %s: %w", f, readErr))
+			continue
+		}
+		file, diags := parser.ParseHCL(content, f)
 		if diags.HasErrors() {
 			errs = append(errs, fmt.Errorf("parsing %s: %w", f, diags))
 			continue

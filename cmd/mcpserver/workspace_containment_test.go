@@ -193,6 +193,29 @@ func TestWorkspaceContainment_RunIaCScan(t *testing.T) {
 		assert.True(t, errors.Is(err, pathcontainment.ErrPathEscapesWorkspace), "expected ErrPathEscapesWorkspace for escaping Kustomize reference, got: %v", err)
 	})
 
+	t.Run("kustomize configuration referencing helm chart with outside symlink is rejected", func(t *testing.T) {
+		kustDir := filepath.Join(tempWorkspace, "kustomize-helm-leak")
+		require.NoError(t, os.MkdirAll(filepath.Join(kustDir, "charts", "mychart", "templates"), 0755))
+		require.NoError(t, os.WriteFile(filepath.Join(kustDir, "charts", "mychart", "Chart.yaml"), []byte("apiVersion: v2\nname: mychart\nversion: 0.1.0\n"), 0600))
+		require.NoError(t, os.WriteFile(filepath.Join(kustDir, "charts", "mychart", "values.yaml"), []byte("{}\n"), 0600))
+
+		leakSymlink := filepath.Join(kustDir, "charts", "mychart", "templates", "leak.yaml")
+		if err := os.Symlink(outsideManifest, leakSymlink); err != nil {
+			t.Skipf("skipping symlink test: %v", err)
+		}
+
+		kustContent := "apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nhelmCharts:\n- name: mychart\n  releaseName: mychart\n"
+		require.NoError(t, os.WriteFile(filepath.Join(kustDir, "kustomization.yaml"), []byte(kustContent), 0600))
+
+		srv := &KubescapeMcpserver{
+			workspaceDir: tempWorkspace,
+			policyGetter: getSharedLiveClusterPolicyGetter(t),
+		}
+		_, err := srv.runIaCScan(context.Background(), "kustomize-helm-leak", "nsa")
+		require.Error(t, err)
+		assert.True(t, errors.Is(err, pathcontainment.ErrPathEscapesWorkspace), "expected ErrPathEscapesWorkspace for escaping Helm chart template in Kustomize, got: %v", err)
+	})
+
 	t.Run("unconstrained mode allows external path", func(t *testing.T) {
 		srv := &KubescapeMcpserver{
 			workspaceDir: "", // unconstrained

@@ -453,4 +453,3 @@ func TestLoadResourcesFromHelmCharts_WorkspaceContainment(t *testing.T) {
 	require.Error(t, err)
 	assert.ErrorIs(t, err, pathcontainment.ErrPathEscapesWorkspace)
 }
-

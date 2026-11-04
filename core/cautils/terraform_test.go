@@ -215,4 +215,3 @@ resource "kubernetes_pod_v1" "outside" {
 	require.Error(t, err)
 	assert.ErrorIs(t, err, pathcontainment.ErrPathEscapesWorkspace)
 }
-
