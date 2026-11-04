@@ -2,6 +2,7 @@ package mcpserver
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -283,6 +284,9 @@ func TestWorkspaceContainment_RunIaCScanControls(t *testing.T) {
 		respBytes, err := srv.runIaCScanControls(context.Background(), outsideManifest, []string{"C-0012"})
 		require.NoError(t, err)
 		assert.NotEmpty(t, respBytes)
+		var resp scanResponse
+		require.NoError(t, json.Unmarshal(respBytes, &resp))
+		assert.Positive(t, resp.TotalControls)
 	})
 }
 

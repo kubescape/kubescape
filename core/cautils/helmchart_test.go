@@ -447,9 +447,30 @@ func TestLoadResourcesFromHelmCharts_WorkspaceContainment(t *testing.T) {
 	chartPath := filepath.Join(filepath.Dir(o), "..", "examples", "helm_chart")
 	ws := filepath.Dir(chartPath)
 
-	// Values file outside workspace is rejected
-	valOpts := HelmValueOptions{ValueFiles: []string{outsideValues}}
-	_, _, _, err := LoadResourcesFromHelmChartsFiltered(context.TODO(), chartPath, valOpts, nil, nil, ws)
-	require.Error(t, err)
-	assert.ErrorIs(t, err, pathcontainment.ErrPathEscapesWorkspace)
+	t.Run("values file outside workspace is rejected", func(t *testing.T) {
+		valOpts := HelmValueOptions{ValueFiles: []string{outsideValues}}
+		_, _, _, err := LoadResourcesFromHelmChartsFiltered(context.TODO(), chartPath, valOpts, nil, nil, ws)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, pathcontainment.ErrPathEscapesWorkspace)
+	})
+
+	t.Run("chart with escaping symlink is rejected", func(t *testing.T) {
+		tempWS := t.TempDir()
+		chartDir := filepath.Join(tempWS, "chart")
+		require.NoError(t, os.MkdirAll(filepath.Join(chartDir, "templates"), 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(chartDir, "Chart.yaml"), []byte("apiVersion: v2\nname: testchart\nversion: 0.1.0\n"), 0o600))
+		require.NoError(t, os.WriteFile(filepath.Join(chartDir, "values.yaml"), []byte("{}\n"), 0o600))
+
+		outsideFile := filepath.Join(outsideDir, "leak.yaml")
+		require.NoError(t, os.WriteFile(outsideFile, []byte("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: leak\n"), 0o600))
+
+		leakSymlink := filepath.Join(chartDir, "templates", "leak.yaml")
+		if err := os.Symlink(outsideFile, leakSymlink); err != nil {
+			t.Skipf("skipping symlink test: %v", err)
+		}
+
+		_, _, _, err := LoadResourcesFromHelmChartsFiltered(context.TODO(), chartDir, HelmValueOptions{}, nil, nil, tempWS)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, pathcontainment.ErrPathEscapesWorkspace)
+	})
 }
