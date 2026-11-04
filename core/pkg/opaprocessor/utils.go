@@ -13,8 +13,11 @@ import (
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/open-policy-agent/opa/v1/ast"
 	"github.com/open-policy-agent/opa/v1/rego"
+	"github.com/open-policy-agent/opa/v1/topdown"
 	"github.com/open-policy-agent/opa/v1/topdown/builtins"
 	"github.com/open-policy-agent/opa/v1/types"
+	"github.com/open-policy-agent/opa/v1/util"
+	"sigs.k8s.io/yaml"
 )
 
 // convertFrameworksToPolicies convert list of frameworks to list of policies
@@ -131,4 +134,35 @@ var imageNameNormalizeDefinition = func(bctx rego.BuiltinContext, a *ast.Term) (
 	}
 	normalizedName, err := cautils.NormalizeImageName(string(aStr))
 	return ast.StringTerm(normalizedName), err
+}
+
+// k8sYAMLUnmarshal implements OPA's yaml.unmarshal builtin using sigs.k8s.io/yaml,
+// matching the YAML-to-JSON conversion used by Kubernetes (k8s.io/apimachinery) and
+// OPA prior to v1.21.0 so that YAML 1.1 boolean scalars (yes/no/on/off) in raw
+// Kubernetes configuration files (such as kubelet config.yaml) are decoded as booleans.
+func k8sYAMLUnmarshal(_ topdown.BuiltinContext, operands []*ast.Term, iter func(*ast.Term) error) error {
+	bs, err := builtins.StringOperandByteSlice(operands[0].Value, 1)
+	if err != nil {
+		return err
+	}
+
+	js, err := yaml.YAMLToJSON(bs)
+	if err != nil {
+		return err
+	}
+
+	reader := ast.BytesReaderPool.Get()
+	defer ast.BytesReaderPool.Put(reader)
+	reader.Reset(js)
+
+	var val any
+	if err = util.NewJSONDecoder(reader).Decode(&val); err != nil {
+		return err
+	}
+
+	v, err := ast.InterfaceToValue(val)
+	if err != nil {
+		return err
+	}
+	return iter(ast.NewTerm(v))
 }
