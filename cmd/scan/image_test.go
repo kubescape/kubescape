@@ -517,6 +517,41 @@ func TestGetImageCmd_RunE_RejectsPostureFlags(t *testing.T) {
 			scanInfo: cautils.ScanInfo{ControlsInputs: "/path/to/controls.json"},
 			wantErr:  "--controls-config is not supported for image scans: an image scan evaluates vulnerabilities, not posture controls",
 		},
+		{
+			name:     "include-namespaces is rejected",
+			scanInfo: cautils.ScanInfo{IncludeNamespaces: "default"},
+			wantErr:  "--include-namespaces is not supported for image scans: an image scan evaluates vulnerabilities, not Kubernetes namespaces",
+		},
+		{
+			name:     "exclude-namespaces is rejected",
+			scanInfo: cautils.ScanInfo{ExcludedNamespaces: "kube-system"},
+			wantErr:  "--exclude-namespaces is not supported for image scans: an image scan evaluates vulnerabilities, not Kubernetes namespaces",
+		},
+		{
+			name:     "include-kinds is rejected",
+			scanInfo: cautils.ScanInfo{IncludeKinds: "Deployment"},
+			wantErr:  "--include-kinds is not supported for image scans: an image scan evaluates vulnerabilities, not Kubernetes resource kinds",
+		},
+		{
+			name:     "exclude-kinds is rejected",
+			scanInfo: cautils.ScanInfo{ExcludeKinds: "Pod"},
+			wantErr:  "--exclude-kinds is not supported for image scans: an image scan evaluates vulnerabilities, not Kubernetes resource kinds",
+		},
+		{
+			name:     "label-selector is rejected",
+			scanInfo: cautils.ScanInfo{LabelSelector: "app=nginx"},
+			wantErr:  "--label-selector is not supported for image scans: an image scan evaluates vulnerabilities, not Kubernetes resource labels",
+		},
+		{
+			name:     "incremental is rejected",
+			scanInfo: cautils.ScanInfo{Incremental: true},
+			wantErr:  "--incremental is not supported for image scans: an image scan evaluates vulnerabilities, not cached resource manifests",
+		},
+		{
+			name:     "dry-run is rejected",
+			scanInfo: cautils.ScanInfo{DryRun: true},
+			wantErr:  "--dry-run is not supported for image scans: an image scan evaluates vulnerabilities, not cluster resource permissions",
+		},
 	}
 
 	for _, tc := range testCases {
@@ -604,6 +639,41 @@ func TestGetScanCommand_RejectsPostureFlagsOnImageScan(t *testing.T) {
 			name:    "controls-config flag",
 			args:    []string{"image", "--controls-config", "./controls.json", "nginx:1.27"},
 			wantErr: "--controls-config is not supported for image scans: an image scan evaluates vulnerabilities, not posture controls",
+		},
+		{
+			name:    "include-namespaces flag",
+			args:    []string{"image", "--include-namespaces", "default", "nginx:1.27"},
+			wantErr: "--include-namespaces is not supported for image scans: an image scan evaluates vulnerabilities, not Kubernetes namespaces",
+		},
+		{
+			name:    "exclude-namespaces flag",
+			args:    []string{"image", "--exclude-namespaces", "kube-system", "nginx:1.27"},
+			wantErr: "--exclude-namespaces is not supported for image scans: an image scan evaluates vulnerabilities, not Kubernetes namespaces",
+		},
+		{
+			name:    "include-kinds flag",
+			args:    []string{"image", "--include-kinds", "Deployment", "nginx:1.27"},
+			wantErr: "--include-kinds is not supported for image scans: an image scan evaluates vulnerabilities, not Kubernetes resource kinds",
+		},
+		{
+			name:    "exclude-kinds flag",
+			args:    []string{"image", "--exclude-kinds", "Pod", "nginx:1.27"},
+			wantErr: "--exclude-kinds is not supported for image scans: an image scan evaluates vulnerabilities, not Kubernetes resource kinds",
+		},
+		{
+			name:    "label-selector flag",
+			args:    []string{"image", "--label-selector", "app=nginx", "nginx:1.27"},
+			wantErr: "--label-selector is not supported for image scans: an image scan evaluates vulnerabilities, not Kubernetes resource labels",
+		},
+		{
+			name:    "incremental flag",
+			args:    []string{"image", "--incremental", "nginx:1.27"},
+			wantErr: "--incremental is not supported for image scans: an image scan evaluates vulnerabilities, not cached resource manifests",
+		},
+		{
+			name:    "dry-run flag",
+			args:    []string{"image", "--dry-run", "nginx:1.27"},
+			wantErr: "--dry-run is not supported for image scans: an image scan evaluates vulnerabilities, not cluster resource permissions",
 		},
 	}
 

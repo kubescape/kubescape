@@ -99,6 +99,27 @@ func getImageCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Command 
 			if scanInfo.ControlsInputs != "" || commandFlagChanged(cmd, "controls-config") {
 				return fmt.Errorf("--controls-config is not supported for image scans: an image scan evaluates vulnerabilities, not posture controls")
 			}
+			if scanInfo.IncludeNamespaces != "" || commandFlagChanged(cmd, "include-namespaces") {
+				return fmt.Errorf("--include-namespaces is not supported for image scans: an image scan evaluates vulnerabilities, not Kubernetes namespaces")
+			}
+			if scanInfo.ExcludedNamespaces != "" || commandFlagChanged(cmd, "exclude-namespaces") {
+				return fmt.Errorf("--exclude-namespaces is not supported for image scans: an image scan evaluates vulnerabilities, not Kubernetes namespaces")
+			}
+			if scanInfo.IncludeKinds != "" || commandFlagChanged(cmd, "include-kinds") {
+				return fmt.Errorf("--include-kinds is not supported for image scans: an image scan evaluates vulnerabilities, not Kubernetes resource kinds")
+			}
+			if scanInfo.ExcludeKinds != "" || commandFlagChanged(cmd, "exclude-kinds") {
+				return fmt.Errorf("--exclude-kinds is not supported for image scans: an image scan evaluates vulnerabilities, not Kubernetes resource kinds")
+			}
+			if scanInfo.LabelSelector != "" || commandFlagChanged(cmd, "label-selector") {
+				return fmt.Errorf("--label-selector is not supported for image scans: an image scan evaluates vulnerabilities, not Kubernetes resource labels")
+			}
+			if scanInfo.Incremental || commandFlagChanged(cmd, "incremental") {
+				return fmt.Errorf("--incremental is not supported for image scans: an image scan evaluates vulnerabilities, not cached resource manifests")
+			}
+			if scanInfo.DryRun || commandFlagChanged(cmd, "dry-run") {
+				return fmt.Errorf("--dry-run is not supported for image scans: an image scan evaluates vulnerabilities, not cluster resource permissions")
+			}
 			if err := shared.ValidateImageScanAnonymization(scanInfo); err != nil {
 				return err
 			}
