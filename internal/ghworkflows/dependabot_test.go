@@ -206,11 +206,16 @@ func TestDependabotCoversEveryGoModule(t *testing.T) {
 func TestDependabotGroupsKubernetesModules(t *testing.T) {
 	config := loadDependabotConfig(t)
 
-	want := []string{
+	wantKubernetes := []string{
 		"k8s.io/api",
 		"k8s.io/apimachinery",
 		"k8s.io/apiserver",
 		"k8s.io/client-go",
+		"k8s.io/component-base",
+		"k8s.io/pod-security-admission",
+	}
+	wantKustomize := []string{
+		"sigs.k8s.io/kustomize/*",
 	}
 
 	for _, update := range config.Updates {
@@ -220,8 +225,13 @@ func TestDependabotGroupsKubernetesModules(t *testing.T) {
 
 		group, ok := update.Groups["kubernetes"]
 		require.True(t, ok, "the root Go module must define a Kubernetes dependency group")
-		assert.ElementsMatch(t, want, group.Patterns,
+		assert.ElementsMatch(t, wantKubernetes, group.Patterns,
 			"Kubernetes staging modules must be updated together to avoid incompatible minor versions")
+
+		kustomizeGroup, ok := update.Groups["kustomize"]
+		require.True(t, ok, "the root Go module must define a Kustomize dependency group")
+		assert.ElementsMatch(t, wantKustomize, kustomizeGroup.Patterns,
+			"Kustomize modules are released in lockstep and must be updated together")
 		return
 	}
 
