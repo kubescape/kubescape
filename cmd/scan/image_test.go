@@ -478,6 +478,16 @@ func TestGetImageCmd_RunE_RejectsPostureFlags(t *testing.T) {
 			wantErr:  "--custom-rules is not supported for image scans: an image scan evaluates vulnerabilities, not posture controls",
 		},
 		{
+			name:     "control-timeout is rejected",
+			scanInfo: cautils.ScanInfo{ControlTimeout: 10 * time.Second},
+			wantErr:  "--control-timeout is not supported for image scans: an image scan evaluates vulnerabilities, not posture controls",
+		},
+		{
+			name:     "controls-version is rejected",
+			scanInfo: cautils.ScanInfo{ControlsVersion: "v1.0.0"},
+			wantErr:  "--controls-version is not supported for image scans: an image scan evaluates vulnerabilities, not posture controls",
+		},
+		{
 			name:     "baseline is rejected",
 			scanInfo: cautils.ScanInfo{Baseline: "base.json"},
 			wantErr:  "--baseline is not supported for image scans: an image scan evaluates vulnerabilities, not posture baseline drift (use 'kubescape diff' to compare image scan reports)",
@@ -594,6 +604,16 @@ func TestGetScanCommand_RejectsPostureFlagsOnImageScan(t *testing.T) {
 			name:    "custom-rules flag",
 			args:    []string{"image", "--custom-rules", "./rules", "nginx:1.27"},
 			wantErr: "--custom-rules is not supported for image scans: an image scan evaluates vulnerabilities, not posture controls",
+		},
+		{
+			name:    "control-timeout flag",
+			args:    []string{"image", "--control-timeout", "10s", "nginx:1.27"},
+			wantErr: "--control-timeout is not supported for image scans: an image scan evaluates vulnerabilities, not posture controls",
+		},
+		{
+			name:    "controls-version flag",
+			args:    []string{"image", "--controls-version", "v1.0.0", "nginx:1.27"},
+			wantErr: "--controls-version is not supported for image scans: an image scan evaluates vulnerabilities, not posture controls",
 		},
 		{
 			name:    "baseline flag",
