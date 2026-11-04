@@ -65,6 +65,10 @@ var approvedGoModReplacements = map[string]string{
 	"github.com/containerd/containerd": "github.com/Retr0-Xd/containerd",
 
 	"github.com/distribution/reference": "github.com/distribution/reference",
+
+	// Holds k8s.io/kube-openapi on structured-merge-diff/v6 until k8s.io/*
+	// moves to v0.38+.
+	"k8s.io/kube-openapi": "k8s.io/kube-openapi",
 }
 
 // replaceProblems reports every replace directive in f that is not approved, or

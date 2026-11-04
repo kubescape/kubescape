@@ -636,7 +636,6 @@ require (
 	sigs.k8s.io/randfill v1.0.0 // indirect
 	sigs.k8s.io/release-utils v0.12.4 // indirect
 	sigs.k8s.io/structured-merge-diff/v6 v6.4.2 // indirect
-	sigs.k8s.io/structured-merge-diff/v7 v7.0.0 // indirect
 )
 
 // Fork carrying the image-scanning changes kubescape needs (schema v1 support, ac6c5ca5).
@@ -655,3 +654,9 @@ replace github.com/containerd/containerd => github.com/Retr0-Xd/containerd v0.0.
 // Holds distribution/reference at v0.5.0; without it the graph selects v0.6.0.
 // Added in #3349 without a recorded reason.
 replace github.com/distribution/reference => github.com/distribution/reference v0.5.0
+
+// Holds k8s.io/kube-openapi at the version k8s.io/apimachinery v0.37.2 builds
+// against (structured-merge-diff/v6); kustomize/kyaml v0.21.3 pulls a newer
+// commit that moved to structured-merge-diff/v7. Drop when k8s.io/* moves to
+// v0.38+.
+replace k8s.io/kube-openapi => k8s.io/kube-openapi v0.0.0-20260721132016-d427ff9ee9ad
