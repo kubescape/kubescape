@@ -36,6 +36,7 @@ import (
 	"github.com/kubescape/opa-utils/resources"
 	"github.com/open-policy-agent/opa/v1/ast"
 	"github.com/open-policy-agent/opa/v1/rego"
+	"github.com/open-policy-agent/opa/v1/topdown"
 	opaprint "github.com/open-policy-agent/opa/v1/topdown/print"
 	"go.opentelemetry.io/otel"
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
@@ -2605,6 +2606,15 @@ func registerOPABuiltins() {
 		rego.RegisterBuiltin1(cosignVerifyKeylessDeclaration, cosignVerifyKeylessDefinition)
 		rego.RegisterBuiltin1(cosignHasSignatureDeclaration, cosignHasSignatureDefinition)
 		rego.RegisterBuiltin1(imageNameNormalizeDeclaration, imageNameNormalizeDefinition)
+		// Preserve Kubernetes-compatible YAML 1.1 boolean semantics (e.g., yes/no/on/off)
+		// for host-config and policy rules that decode raw Kubernetes YAML files via
+		// yaml.unmarshal. OPA 1.21+ switched its default yaml.unmarshal to YAML 1.2
+		// (go.yaml.in/yaml/v3), which decodes unquoted yes/on/no/off as strings,
+		// whereas Kubernetes (k8s.io/apimachinery -> sigs.k8s.io/yaml) still accepts
+		// them as booleans. Overriding the topdown implementation in-place avoids
+		// duplicating ast.YAMLUnmarshal in ast.Builtins while keeping its CanSkipBctx
+		// metadata intact.
+		topdown.RegisterBuiltinFunc(ast.YAMLUnmarshal.Name, k8sYAMLUnmarshal)
 	})
 }
 
