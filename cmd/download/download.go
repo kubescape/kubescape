@@ -73,6 +73,16 @@ func GetDownloadCmd(ks meta.IKubescape) *cobra.Command {
 			if !slices.Contains(core.DownloadSupportCommands(), target) {
 				return fmt.Errorf("invalid parameter '%s'. Supported parameters: %s", args[0], supported)
 			}
+			switch target {
+			case core.TargetFramework, core.TargetControl, core.TargetControlsInputs:
+				if len(args) > 2 {
+					return fmt.Errorf("accepts at most 2 arg(s), received %d", len(args))
+				}
+			default:
+				if len(args) > 1 {
+					return fmt.Errorf("accepts at most 1 arg(s) for %s, received %d", args[0], len(args))
+				}
+			}
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
