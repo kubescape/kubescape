@@ -26,8 +26,8 @@ func getOperatorScanConfigCmd(ks meta.IKubescape, operatorInfo *cautils.Operator
 		Long:    ``,
 		Example: operatorScanConfigExamples,
 		Args: func(cmd *cobra.Command, args []string) error {
-			operatorInfo.Subcommands = append(operatorInfo.Subcommands, "config")
-			return nil
+			operatorInfo.Subcommands = append(operatorInfo.Subcommands, cautils.ScanConfigCommand)
+			return cobra.NoArgs(cmd, args)
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			operatorAdapter, err := newOperatorAdapter(configScanInfo, operatorInfo.Namespace, cmd.Context())
