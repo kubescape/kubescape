@@ -209,7 +209,11 @@ func (ks *Kubescape) emitClusterFixes(handler *fixhandler.FixHandler, resourcesT
 	}
 
 	if fixInfo.OutputDir == "" {
-		if err := printClusterFixes(os.Stdout, rendered); err != nil {
+		w := fixInfo.Writer
+		if w == nil {
+			w = os.Stdout
+		}
+		if err := printClusterFixes(w, rendered); err != nil {
 			return fmt.Errorf("failed to print fixes: %w", err)
 		}
 		logger.L().Info(fmt.Sprintf("Rendered fixes for %d resource(s). Review them, then apply with: %s fix <report> | kubectl apply -f -",

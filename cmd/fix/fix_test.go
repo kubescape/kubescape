@@ -1,6 +1,7 @@
 package fix
 
 import (
+	"bytes"
 	"io"
 	"testing"
 
@@ -8,6 +9,7 @@ import (
 	"github.com/kubescape/kubescape/v4/core/mocks"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestGetFixCmd(t *testing.T) {
@@ -215,4 +217,27 @@ func TestFixCmdControlSelectionFlags(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestGetFixCmd_HonorsOutputWriter(t *testing.T) {
+	spy := &spyKubescape{}
+	fixCmd := GetFixCmd(spy)
+	var buf bytes.Buffer
+	fixCmd.SetOut(&buf)
+	fixCmd.SetArgs([]string{"report.json"})
+
+	err := fixCmd.Execute()
+	require.NoError(t, err)
+	require.NotNil(t, spy.received)
+	assert.Same(t, &buf, spy.received.Writer)
+}
+
+func TestGetFixCmd_NilKubescape(t *testing.T) {
+	fixCmd := GetFixCmd(nil)
+	fixCmd.SilenceUsage = true
+	fixCmd.SilenceErrors = true
+	fixCmd.SetArgs([]string{"report.json"})
+
+	err := fixCmd.Execute()
+	require.EqualError(t, err, "uninitialized kubescape interface")
 }
