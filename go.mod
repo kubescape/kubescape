@@ -78,7 +78,7 @@ require (
 	github.com/prometheus/common v0.70.1
 	github.com/quay/claircore v1.6.1
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
-	github.com/schollz/progressbar/v3 v3.13.0
+	github.com/schollz/progressbar/v3 v3.19.1
 	github.com/secure-systems-lab/go-securesystemslib v0.11.0
 	github.com/sergi/go-diff v1.4.0
 	github.com/sigstore/cosign/v3 v3.0.6
