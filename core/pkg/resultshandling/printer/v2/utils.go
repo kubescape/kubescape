@@ -562,6 +562,7 @@ func extractCVEs(matches match.Matches, image string, vexStatuses map[string]cau
 			}
 			cve.Severity = m.Vulnerability.Metadata.Severity
 			cve.KEV = len(m.Vulnerability.Metadata.KnownExploited) > 0
+			cve.KEVKnown = true
 			cve.EPSS = highestEPSS(m.Vulnerability.Metadata.EPSS)
 		}
 		if vexStatus, ok := vexStatuses[cve.ID]; ok {

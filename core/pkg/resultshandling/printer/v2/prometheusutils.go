@@ -32,6 +32,7 @@ const (
 	metricsImage     metricsName = "image"
 	metricsCVE       metricsName = "cve"
 	metricsFixable   metricsName = "fixable"
+	metricsKEV       metricsName = "kev"
 )
 
 // ============================================ CLUSTER ============================================================
@@ -216,11 +217,13 @@ func (miv *mImageVulnerability) metrics() []string {
 		#### Image vulnerability metrics (image scan only, #2782)
 		kubescape_image_count_cve{image="<image>",platform="<optional-platform>",severity="<severity>"} <counter>
 		kubescape_image_count_cve_fixable{image="<image>",platform="<optional-platform>",severity="<severity>"} <counter>
+		kubescape_image_count_cve_kev{image="<image>",platform="<optional-platform>",severity="<severity>"} <counter>
 	*/
 
 	m := []string{}
 	m = append(m, toRowInMetrics(fmt.Sprintf("%s_%s_%s", miv.prefix(), metricsCount, metricsCVE), miv.labels(), miv.cveCount))
 	m = append(m, toRowInMetrics(fmt.Sprintf("%s_%s_%s_%s", miv.prefix(), metricsCount, metricsCVE, metricsFixable), miv.labels(), miv.fixableCVECount))
+	m = append(m, toRowInMetrics(fmt.Sprintf("%s_%s_%s_%s", miv.prefix(), metricsCount, metricsCVE, metricsKEV), miv.labels(), miv.kevCVECount))
 	return m
 }
 
@@ -373,6 +376,9 @@ type mImageVulnerability struct {
 	severity        string
 	cveCount        int
 	fixableCVECount int
+	// kevCVECount counts the CVEs listed in the CISA Known Exploited
+	// Vulnerabilities catalog.
+	kevCVECount int
 }
 
 type Metrics struct {
@@ -531,6 +537,12 @@ func (m *Metrics) setImageVulnerabilities(imageScanData []cautils.ImageScanData)
 
 		severityToSummary := map[string]*imageprinter.SeveritySummary{}
 		setSeverityToSummaryMap(cves, severityToSummary)
+		severityToKEV := map[string]int{}
+		for _, cve := range cves {
+			if cve.KEV {
+				severityToKEV[cve.Severity]++
+			}
+		}
 
 		// severityToSummary is a map, so its iteration order is randomised.
 		// Emit the severities in sorted order so repeated runs and report
@@ -549,6 +561,7 @@ func (m *Metrics) setImageVulnerabilities(imageScanData []cautils.ImageScanData)
 				severity:        severity,
 				cveCount:        summary.NumberOfCVEs,
 				fixableCVECount: summary.NumberOfFixableCVEs,
+				kevCVECount:     severityToKEV[severity],
 			})
 		}
 	}

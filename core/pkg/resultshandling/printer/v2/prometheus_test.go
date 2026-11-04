@@ -360,6 +360,39 @@ func TestSetResourcesCountersFromCatalog_DeterministicOrder(t *testing.T) {
 	}
 }
 
+// TestImagePrometheusFormat_CountsKEVMatches pins the KEV gauge: per image and
+// severity, how many CVEs are on the CISA KEV catalog, zero included so the
+// series is present for every severity the image has.
+func TestImagePrometheusFormat_CountsKEVMatches(t *testing.T) {
+	newMatch := func(id, severity string, kev bool) match.Match {
+		metadata := &vulnerability.Metadata{ID: id, Severity: severity}
+		if kev {
+			metadata.KnownExploited = []vulnerability.KnownExploited{{CVE: id}}
+		}
+		return match.Match{
+			Package:       grypepkg.Package{ID: grypepkg.ID("pkg-" + id), Name: "pkg-" + id, Version: "1.0.0"},
+			Vulnerability: vulnerability.Vulnerability{Metadata: metadata},
+		}
+	}
+	imageData := []cautils.ImageScanData{{
+		Image:    "nginx:1.17.0",
+		Platform: "linux/amd64",
+		Matches: match.NewMatches(
+			newMatch("CVE-2020-15999", "Medium", true),
+			newMatch("CVE-2026-0001", "Medium", true),
+			newMatch("CVE-2026-0002", "Medium", false),
+			newMatch("CVE-2026-0003", "Critical", false),
+		),
+	}}
+
+	output := NewPrometheusPrinter(false).generateImagePrometheusFormat(imageData).String()
+
+	assert.Contains(t, output, "# TYPE kubescape_image_count_cve_kev gauge\n")
+	assert.Contains(t, output, `kubescape_image_count_cve_kev{image="nginx:1.17.0",platform="linux/amd64",severity="Medium"} 2`+"\n")
+	assert.Contains(t, output, `kubescape_image_count_cve_kev{image="nginx:1.17.0",platform="linux/amd64",severity="Critical"} 0`+"\n")
+	assert.Contains(t, output, `kubescape_image_count_cve{image="nginx:1.17.0",platform="linux/amd64",severity="Medium"} 3`+"\n")
+}
+
 func TestSetImageVulnerabilities_DeterministicSeverityOrder(t *testing.T) {
 	severities := []string{"Critical", "High", "Medium", "Low", "Negligible", "Unknown"}
 	matches := make([]match.Match, 0, len(severities))

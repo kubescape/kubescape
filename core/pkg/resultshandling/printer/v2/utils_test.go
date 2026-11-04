@@ -285,6 +285,7 @@ func TestExtractCVEsAddsKEVAndEPSS(t *testing.T) {
 		"a vulnerability with several CVEs takes its highest EPSS score")
 
 	assert.False(t, byID["CVE-2026-0004"].KEV)
+	assert.True(t, byID["CVE-2026-0004"].KEVKnown)
 	assert.Nil(t, byID["CVE-2026-0004"].EPSS)
 }
 
@@ -363,6 +364,7 @@ func TestExtractCVEsNilMetadata(t *testing.T) {
 	assert.Equal(t, "CVE-2026-9999", nilMetaCVE.ID)
 	assert.Equal(t, "", nilMetaCVE.Severity)
 	assert.False(t, nilMetaCVE.KEV)
+	assert.False(t, nilMetaCVE.KEVKnown, "no metadata means KEV status is unknown")
 	assert.Nil(t, nilMetaCVE.EPSS)
 	assert.Equal(t, "openssl", nilMetaCVE.Package)
 	assert.Equal(t, "1.0.0", nilMetaCVE.Version)
@@ -371,6 +373,7 @@ func TestExtractCVEsNilMetadata(t *testing.T) {
 	assert.Equal(t, "CVE-2026-1111", normalCVE.ID)
 	assert.Equal(t, "High", normalCVE.Severity)
 	assert.True(t, normalCVE.KEV)
+	assert.True(t, normalCVE.KEVKnown)
 }
 
 func TestSetPkgNameToScoreMap(t *testing.T) {

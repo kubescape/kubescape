@@ -402,6 +402,21 @@ func imageTestsSuites(imageScanData []cautils.ImageScanData) *JUnitTestSuites {
 	}
 }
 
+// junitKEV renders whether a CVE is on the CISA Known Exploited
+// Vulnerabilities catalog. Unlike the table marker it spells out "no", so the
+// line reads on its own in a failure message, and says "unknown" when the
+// match had no metadata to check against.
+func junitKEV(cve imageprinter.CVE) string {
+	switch {
+	case cve.KEV:
+		return "yes"
+	case cve.KEVKnown:
+		return "no"
+	default:
+		return "unknown"
+	}
+}
+
 // imageTestCases converts a set of CVEs into failed JUnit test cases, one per CVE.
 func imageTestCases(cves []imageprinter.CVE, platform string) []JUnitTestCase {
 	testCases := make([]JUnitTestCase, 0, len(cves))
@@ -411,8 +426,8 @@ func imageTestCases(cves []imageprinter.CVE, platform string) []JUnitTestCase {
 			fixMsg = fmt.Sprintf("fixed in: %s", strings.Join(cve.FixVersions, ", "))
 		}
 
-		contents := fmt.Sprintf("CVE: %s\nPackage: %s\nVersion: %s\nSeverity: %s\n%s",
-			cve.ID, cve.Package, cve.Version, cve.Severity, fixMsg)
+		contents := fmt.Sprintf("CVE: %s\nPackage: %s\nVersion: %s\nSeverity: %s\nKEV: %s\nEPSS: %s\n%s",
+			cve.ID, cve.Package, cve.Version, cve.Severity, junitKEV(cve), imageprinter.FormatEPSS(cve.EPSS), fixMsg)
 		if cve.VexStatus != "" {
 			contents += "\nVEX Status: " + cve.VexStatus
 		}
