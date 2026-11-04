@@ -61,6 +61,7 @@ Image scan reports ("scan image --format json") are compared by vulnerability in
 		RunE: func(cmd *cobra.Command, args []string) error {
 			diffInfo.BaseFile = args[0]
 			diffInfo.HeadFile = args[1]
+			diffInfo.Writer = cmd.OutOrStdout()
 
 			// diff honors a single output format, so validate against the exact value rather than scan's comma-separated multi-format set.
 			supportedFormats := diffFormats()

@@ -26,14 +26,18 @@ func (ks *Kubescape) Diff(diffInfo *metav1.DiffInfo) (newFailures int, err error
 
 	// A normalized stdout sink writes through the descriptor the process
 	// already has; only a file this function opens itself is closed here.
-	w := os.Stdout
+	var w io.Writer = os.Stdout
+	if diffInfo.Writer != nil {
+		w = diffInfo.Writer
+	}
 	if outputFile, explicit := diffOutputPath(diffInfo.Format, diffInfo.Output); explicit {
-		w, err = printer.GetWriterNoFallback(outputFile)
-		if err != nil {
-			return 0, fmt.Errorf("opening diff output: %w", err)
+		f, fileErr := printer.GetWriterNoFallback(outputFile)
+		if fileErr != nil {
+			return 0, fmt.Errorf("opening diff output: %w", fileErr)
 		}
+		w = f
 		defer func() {
-			err = closeDiffOutput(w, err)
+			err = closeDiffOutput(f, err)
 		}()
 	}
 
@@ -97,14 +101,18 @@ func writeVulnerabilityDiff(diffInfo *metav1.DiffInfo, cs *diff.VulnerabilityCha
 			diffInfo.Format, printer.PrettyFormat, printer.JsonFormat, printer.YamlFormat)
 	}
 
-	w := os.Stdout
+	var w io.Writer = os.Stdout
+	if diffInfo.Writer != nil {
+		w = diffInfo.Writer
+	}
 	if outputFile, explicit := diffOutputPath(diffInfo.Format, diffInfo.Output); explicit {
-		w, err = printer.GetWriterNoFallback(outputFile)
-		if err != nil {
-			return 0, fmt.Errorf("opening diff output: %w", err)
+		f, fileErr := printer.GetWriterNoFallback(outputFile)
+		if fileErr != nil {
+			return 0, fmt.Errorf("opening diff output: %w", fileErr)
 		}
+		w = f
 		defer func() {
-			err = closeDiffOutput(w, err)
+			err = closeDiffOutput(f, err)
 		}()
 	}
 
