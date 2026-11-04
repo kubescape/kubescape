@@ -13,6 +13,7 @@ import (
 	gitv5 "github.com/go-git/go-git/v5"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -1270,4 +1271,76 @@ func TestSharedRoot(t *testing.T) {
 		}
 		assert.Equal(t, "", sharedRoot(context.Background(), []loadedInput{{root: `C:\dev`}, {root: `D:\prod`}}))
 	})
+}
+
+func TestAnchorInputsKeepsRootsApart(t *testing.T) {
+	abs := func(path string) string {
+		return filepath.Join(string(filepath.Separator), filepath.FromSlash(path))
+	}
+	// pods builds an input holding a default/app Pod for each recorded path.
+	pods := func(root, remote string, paths ...string) loadedInput {
+		input := loadedInput{root: root, remote: remote, sources: map[string]reporthandling.Source{}}
+		for _, p := range paths {
+			lw := localworkload.NewLocalWorkload(map[string]interface{}{
+				"apiVersion": "v1", "kind": "Pod",
+				"metadata": map[string]interface{}{"name": "app", "namespace": "default"},
+			})
+			lw.SetPath(filepath.FromSlash(p))
+			input.workloads = append(input.workloads, lw)
+			input.sources[lw.GetID()] = reporthandling.Source{
+				Path: root, RelativePath: filepath.FromSlash(strings.TrimSuffix(p, ":0")), FileType: reporthandling.SourceTypeYaml,
+			}
+		}
+		return input
+	}
+	type entry struct{ path, sourcePath, relativePath string }
+	entries := func(inputs []loadedInput) []entry {
+		var got []entry
+		for _, input := range inputs {
+			for _, w := range input.workloads {
+				lw := w.(*localworkload.LocalWorkload)
+				source, ok := input.sources[lw.GetID()]
+				require.True(t, ok, "every workload keeps its source under its new ID")
+				got = append(got, entry{filepath.ToSlash(lw.GetPath()), source.Path, filepath.ToSlash(source.RelativePath)})
+			}
+		}
+		return got
+	}
+
+	for _, tc := range []struct {
+		name   string
+		inputs []loadedInput
+		want   []entry
+	}{
+		{
+			name:   "local roots share a parent",
+			inputs: []loadedInput{pods(abs("w/dev"), "", "pod.yaml:0"), pods(abs("w/prod"), "", "pod.yaml:0")},
+			want:   []entry{{"dev/pod.yaml:0", abs("w"), "dev/pod.yaml"}, {"prod/pod.yaml:0", abs("w"), "prod/pod.yaml"}},
+		},
+		{
+			name:   "local root beside a cloned repository",
+			inputs: []loadedInput{pods(abs("w"), "", "dev/pod.yaml:0"), pods("", "github.com/o/r", "dev/pod.yaml:0")},
+			want:   []entry{{"dev/pod.yaml:0", abs("w"), "dev/pod.yaml"}, {"github.com/o/r/dev/pod.yaml:0", "", "dev/pod.yaml"}},
+		},
+		{
+			name:   "two cloned repositories",
+			inputs: []loadedInput{pods("", "github.com/o/a", "pod.yaml:0"), pods("", "github.com/o/b", "pod.yaml:0")},
+			want:   []entry{{"github.com/o/a/pod.yaml:0", "", "pod.yaml"}, {"github.com/o/b/pod.yaml:0", "", "pod.yaml"}},
+		},
+		{
+			name:   "one cloned repository read twice",
+			inputs: []loadedInput{pods("", "github.com/o/r", "dev/pod.yaml:0"), pods("", "github.com/o/r", "prod/pod.yaml:0")},
+			want:   []entry{{"dev/pod.yaml:0", "", "dev/pod.yaml"}, {"prod/pod.yaml:0", "", "prod/pod.yaml"}},
+		},
+		{
+			name:   "one local root",
+			inputs: []loadedInput{pods(abs("w"), "", "dev/pod.yaml:0"), pods(abs("w"), "", "prod/pod.yaml:0")},
+			want:   []entry{{"dev/pod.yaml:0", abs("w"), "dev/pod.yaml"}, {"prod/pod.yaml:0", abs("w"), "prod/pod.yaml"}},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			anchorInputs(context.Background(), tc.inputs)
+			assert.Equal(t, tc.want, entries(tc.inputs))
+		})
+	}
 }

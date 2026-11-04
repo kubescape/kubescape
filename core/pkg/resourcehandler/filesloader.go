@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"maps"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 
+	giturl "github.com/kubescape/go-git-url"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
@@ -54,6 +56,7 @@ func (fileHandler *FileResourceHandler) GetResources(ctx context.Context, sessio
 				return nil, allResources, nil, nil, filterErr
 			}
 			input.root, input.sources, input.workloads, skipped, err = getResourcesFromInput(ctx, scanInfo.InputPatterns[path], helmValueOpts, pathFilter)
+			input.remote = remoteName(scanInfo.InputPatterns[path])
 		}
 		sessionObj.SkippedManifests = append(sessionObj.SkippedManifests, skipped...)
 		if err != nil {
@@ -65,7 +68,7 @@ func (fileHandler *FileResourceHandler) GetResources(ctx context.Context, sessio
 		inputs = append(inputs, input)
 	}
 
-	anchorOnSharedRoot(ctx, inputs)
+	anchorInputs(ctx, inputs)
 	for _, input := range inputs {
 		maps.Copy(sessionObj.ResourceSource, input.sources)
 
@@ -125,67 +128,104 @@ func (fileHandler *FileResourceHandler) GetResources(ctx context.Context, sessio
 // of the other inputs.
 type loadedInput struct {
 	root      string // local root its paths are reported against; "" when it has none
+	remote    string // stable name of a cloned remote repository; "" for a local input
 	sources   map[string]reporthandling.Source
 	workloads []workloadinterface.IMetadata
 }
 
-// anchorOnSharedRoot reports the manifests of a scan with several roots
-// relative to the deepest directory those roots share.
+// anchorInputs keeps the resources of a scan with several roots apart.
 //
 // Outside a git repository each input is its own root, and the ID of a plain
 // manifest's resource is derived from its path relative to that root. Scanning
 // dev and prod recorded dev/pod.yaml and prod/pod.yaml both as pod.yaml, so two
 // Pods with the same name got the same ID and one silently replaced the other.
-// Below the shared root they are dev/pod.yaml and prod/pod.yaml: the paths and
-// IDs a scan of their parent directory, or of both inside one git repository,
-// already produces. A scan with a single root is left unchanged.
 //
-// Roots that share no directory, such as two Windows volumes, are left as they
-// are, and resources with the same relative path and identity can still merge.
-func anchorOnSharedRoot(ctx context.Context, inputs []loadedInput) {
-	shared := sharedRoot(ctx, inputs)
-	if shared == "" {
+// Local inputs are therefore reported relative to the deepest directory their
+// roots share: dev/pod.yaml and prod/pod.yaml, the paths and IDs a scan of their
+// parent directory, or of both inside one git repository, already produces. A
+// cloned remote repository is checked out in a random temporary directory, so
+// it is named by its repository instead, which stays the same from run to run.
+// A scan with a single root, local or remote, is left unchanged.
+//
+// Local roots that share no directory, such as two Windows volumes, are left as
+// they are, and resources with the same relative path and identity can still
+// merge.
+func anchorInputs(ctx context.Context, inputs []loadedInput) {
+	anchors := make(map[[2]string]struct{}, len(inputs))
+	for _, input := range inputs {
+		if input.root != "" || input.remote != "" {
+			anchors[[2]string{input.root, input.remote}] = struct{}{}
+		}
+	}
+	if len(anchors) < 2 {
 		return
 	}
+
+	shared := sharedRoot(ctx, inputs)
 	for i := range inputs {
 		input := &inputs[i]
-		if input.root == "" || input.root == shared {
-			continue
-		}
-		prefix, err := filepath.Rel(shared, input.root)
-		if err != nil {
-			continue
-		}
-		rebase := func(source reporthandling.Source) reporthandling.Source {
-			if source.Path == input.root && !filepath.IsAbs(source.RelativePath) {
-				source.Path = shared
-				source.RelativePath = filepath.Join(prefix, source.RelativePath)
-			}
-			return source
-		}
-
-		// Re-keyed entries go into a new map, so a new ID can never overwrite an
-		// old one that is still to be visited.
-		rebased := make(map[string]reporthandling.Source, len(input.sources))
-		for id, source := range input.sources {
-			if !isPlainManifest(source) {
-				rebased[id] = rebase(source)
-			}
-		}
-		for _, w := range input.workloads {
-			lw, ok := w.(*localworkload.LocalWorkload)
-			if !ok {
+		switch {
+		case input.remote != "":
+			// The sources stay relative to their own repository.
+			rekeyPlainManifests(input, input.remote, func(source reporthandling.Source) reporthandling.Source { return source })
+		case shared != "" && input.root != "" && input.root != shared:
+			prefix, err := filepath.Rel(shared, input.root)
+			if err != nil {
 				continue
 			}
-			source, ok := input.sources[lw.GetID()]
-			if !ok || !isPlainManifest(source) {
-				continue
-			}
-			lw.SetPath(filepath.Join(prefix, lw.GetPath()))
-			rebased[lw.GetID()] = rebase(source)
+			root := input.root
+			rekeyPlainManifests(input, prefix, func(source reporthandling.Source) reporthandling.Source {
+				if source.Path == root && !filepath.IsAbs(source.RelativePath) {
+					source.Path = shared
+					source.RelativePath = filepath.Join(prefix, source.RelativePath)
+				}
+				return source
+			})
 		}
-		input.sources = rebased
 	}
+}
+
+// rekeyPlainManifests records the plain manifests of input below prefix, which
+// changes their IDs, and passes every source through rebase.
+func rekeyPlainManifests(input *loadedInput, prefix string, rebase func(reporthandling.Source) reporthandling.Source) {
+	// Re-keyed entries go into a new map, so a new ID can never overwrite an old
+	// one that is still to be visited.
+	rebased := make(map[string]reporthandling.Source, len(input.sources))
+	for id, source := range input.sources {
+		if !isPlainManifest(source) {
+			rebased[id] = rebase(source)
+		}
+	}
+	for _, w := range input.workloads {
+		lw, ok := w.(*localworkload.LocalWorkload)
+		if !ok {
+			continue
+		}
+		source, ok := input.sources[lw.GetID()]
+		if !ok || !isPlainManifest(source) {
+			continue
+		}
+		lw.SetPath(filepath.Join(prefix, lw.GetPath()))
+		rebased[lw.GetID()] = rebase(source)
+	}
+	input.sources = rebased
+}
+
+// remoteName names a cloned remote repository by host, owner, repository and
+// branch. It returns "" for a local input.
+func remoteName(input string) string {
+	if cautils.GetClonedPath(input) == "" {
+		return ""
+	}
+	gitURL, err := giturl.NewGitAPI(input)
+	if err != nil {
+		return ""
+	}
+	name := path.Join(gitURL.GetHostName(), gitURL.GetOwnerName(), gitURL.GetRepoName())
+	if branch := gitURL.GetBranchName(); branch != "" {
+		name += "@" + branch
+	}
+	return name
 }
 
 // isPlainManifest reports whether source is a YAML or JSON file read as is,
