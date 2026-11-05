@@ -223,3 +223,47 @@ func TestParseSetArgs_TrimsValue(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, "value1", setConfig.AccessKey)
 }
+
+func TestGetSetCmd_ArgsValidation(t *testing.T) {
+	tests := []struct {
+		name    string
+		args    []string
+		wantErr string
+	}{
+		{
+			name:    "no arguments is rejected",
+			args:    []string{},
+			wantErr: "accepts between 1 and 2 arg(s), received 0",
+		},
+		{
+			name:    "too many arguments is rejected",
+			args:    []string{"accountID", "foo", "bar"},
+			wantErr: "accepts between 1 and 2 arg(s), received 3",
+		},
+		{
+			name: "single argument accepted",
+			args: []string{"accountID=6f2c3e1a-9b4d-4c8e-a1f2-3b4c5d6e7f80"},
+		},
+		{
+			name: "two arguments accepted",
+			args: []string{"accountID", "6f2c3e1a-9b4d-4c8e-a1f2-3b4c5d6e7f80"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mock := &mocks.MockIKubescape{}
+			cmd := getSetCmd(mock)
+			cmd.SilenceErrors = true
+			cmd.SilenceUsage = true
+			cmd.SetArgs(tt.args)
+
+			err := cmd.Execute()
+			if tt.wantErr != "" {
+				assert.EqualError(t, err, tt.wantErr)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
