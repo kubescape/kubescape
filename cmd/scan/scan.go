@@ -82,6 +82,12 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 		Short:   "Scan a Kubernetes cluster or YAML files for image vulnerabilities and misconfigurations",
 		Long:    `Scan a Kubernetes cluster, YAML files, Helm charts, Kustomize directories, Git repositories, or container images for security misconfigurations and vulnerabilities.`,
 		Example: scanCmdExamples,
+		Args: func(cmd *cobra.Command, args []string) error {
+			if scanInfo.FilePath != "" && len(args) > 0 {
+				return fmt.Errorf("usage: use either --file-path or positional input paths, not both")
+			}
+			return nil
+		},
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			if cmd.Name() == "validate-contract" {
 				return nil
@@ -152,6 +158,12 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if ks == nil {
+				return errors.New("uninitialized kubescape interface")
+			}
+			if scanInfo.FilePath != "" && len(args) > 0 {
+				return fmt.Errorf("usage: use either --file-path or positional input paths, not both")
+			}
 			if err := shared.ValidateCommonScanFlags(cmd, &scanInfo, shared.ScanFormats); err != nil {
 				return err
 			}
@@ -175,6 +187,16 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 			scanInfo.View = requestedView
 
 			if policyIdentifiers := contractPolicyIdentifiers(selectedContract); len(policyIdentifiers) > 0 {
+				cleanup, err := prepareScanLocalInput(cmd.InOrStdin(), args, &scanInfo, scanLocalInputOptions{
+					FirstInputArg:    0,
+					FilePath:         scanInfo.FilePath,
+					RejectMixedStdin: true,
+				})
+				if err != nil {
+					return err
+				}
+				defer cleanup()
+
 				setContractScanTarget(args, &scanInfo)
 				if len(scanInfo.KubeContexts) > 0 {
 					if _, err := validateFleetScanInvocation(&scanInfo); err != nil {
@@ -188,6 +210,16 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 			}
 
 			if scanInfo.View == string(cautils.SecurityViewType) {
+				cleanup, err := prepareScanLocalInput(cmd.InOrStdin(), args, &scanInfo, scanLocalInputOptions{
+					FirstInputArg:    0,
+					FilePath:         scanInfo.FilePath,
+					RejectMixedStdin: true,
+				})
+				if err != nil {
+					return err
+				}
+				defer cleanup()
+
 				policyIdentifiers := setSecurityViewScanInfo(args, &scanInfo)
 				if len(scanInfo.KubeContexts) > 0 {
 					if _, err := validateFleetScanInvocation(&scanInfo); err != nil {
@@ -362,6 +394,8 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	scanCmd.PersistentFlags().StringVar(&scanInfo.BaselineSeverityThreshold, "baseline-severity-threshold", "", "With --baseline, only count new failures at or above this severity when using --baseline-fail-on-new.")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.BaselineGranularity, "baseline-granularity", "evidence", "With --baseline, comparison unit: evidence or control.")
 
+	scanCmd.Flags().StringVar(&scanInfo.FilePath, "file-path", "", "Path to the YAML file.")
+
 	scanCmd.AddCommand(getControlCmd(ks, &scanInfo))
 	scanCmd.AddCommand(getFrameworkCmd(ks, &scanInfo))
 	scanCmd.AddCommand(getWorkloadCmd(ks, &scanInfo))
@@ -376,9 +410,11 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 }
 
 func setContractScanTarget(args []string, scanInfo *cautils.ScanInfo) {
-	if len(args) > 0 {
+	if len(scanInfo.InputPatterns) > 0 || len(args) > 0 {
 		scanInfo.SetScanType(cautils.ScanTypeRepo)
-		scanInfo.InputPatterns = args
+		if len(scanInfo.InputPatterns) == 0 {
+			scanInfo.InputPatterns = args
+		}
 		return
 	}
 	scanInfo.SetScanType(cautils.ScanTypeCluster)
@@ -419,9 +455,11 @@ func applyRegistryCredentialsFromEnv(cmd *cobra.Command, scanInfo *cautils.ScanI
 }
 
 func setSecurityViewScanInfo(args []string, scanInfo *cautils.ScanInfo) []cautils.PolicyIdentifier {
-	if len(args) > 0 {
+	if len(scanInfo.InputPatterns) > 0 || len(args) > 0 {
 		scanInfo.SetScanType(cautils.ScanTypeRepo)
-		scanInfo.InputPatterns = args
+		if len(scanInfo.InputPatterns) == 0 {
+			scanInfo.InputPatterns = args
+		}
 		return cautils.BuildPolicyIdentifiers([]string{"workloadscan", "allcontrols"}, v1.KindFramework)
 	}
 	scanInfo.SetScanType(cautils.ScanTypeCluster)

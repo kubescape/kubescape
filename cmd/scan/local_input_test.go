@@ -180,3 +180,85 @@ func TestWorkloadCmd_StdinUsesCommandInput(t *testing.T) {
 	assert.Equal(t, "Deployment", ks.scanInfo.ScanObject.GetKind())
 	assert.Equal(t, "nginx", ks.scanInfo.ScanObject.GetName())
 }
+
+func TestScanCmd_StdinUsesCommandInput(t *testing.T) {
+	ks := &scanInputCaptureKubescape{}
+	cmd := GetScanCommand(ks)
+	cmd.SetIn(strings.NewReader("apiVersion: v1\nkind: Pod\nmetadata:\n  name: scan-stdin\n"))
+
+	err := cmd.RunE(cmd, []string{"-"})
+
+	require.NoError(t, err)
+	require.NotNil(t, ks.scanInfo)
+	require.Len(t, ks.scanInfo.InputPatterns, 1)
+	assert.Equal(t, filepath.Clean(os.TempDir()), filepath.Dir(ks.scanInfo.InputPatterns[0]))
+	assert.NoFileExists(t, ks.scanInfo.InputPatterns[0])
+	require.Len(t, ks.inputContents, 1)
+	assert.Contains(t, ks.inputContents[0], "scan-stdin")
+	assert.Equal(t, cautils.ScanTypeRepo, ks.scanInfo.ScanType)
+	require.Len(t, ks.policyIdentifiers, 2)
+	assert.Equal(t, "workloadscan", ks.policyIdentifiers[0].Identifier)
+	assert.Equal(t, "allcontrols", ks.policyIdentifiers[1].Identifier)
+}
+
+func TestScanCmd_ExplicitSecurityViewStdin(t *testing.T) {
+	ks := &scanInputCaptureKubescape{}
+	cmd := GetScanCommand(ks)
+	require.NoError(t, cmd.PersistentFlags().Set("view", "security"))
+	cmd.SetIn(strings.NewReader("apiVersion: v1\nkind: Pod\nmetadata:\n  name: security-view-stdin\n"))
+
+	err := cmd.RunE(cmd, []string{"-"})
+
+	require.NoError(t, err)
+	require.NotNil(t, ks.scanInfo)
+	require.Len(t, ks.scanInfo.InputPatterns, 1)
+	assert.Equal(t, filepath.Clean(os.TempDir()), filepath.Dir(ks.scanInfo.InputPatterns[0]))
+	assert.NoFileExists(t, ks.scanInfo.InputPatterns[0])
+	require.Len(t, ks.inputContents, 1)
+	assert.Contains(t, ks.inputContents[0], "security-view-stdin")
+	assert.Equal(t, cautils.ScanTypeRepo, ks.scanInfo.ScanType)
+	require.Len(t, ks.policyIdentifiers, 2)
+	assert.Equal(t, "workloadscan", ks.policyIdentifiers[0].Identifier)
+	assert.Equal(t, "allcontrols", ks.policyIdentifiers[1].Identifier)
+}
+
+func TestScanCmd_RejectsStdinMixedWithOtherInputs(t *testing.T) {
+	ks := &scanInputCaptureKubescape{}
+	cmd := GetScanCommand(ks)
+
+	err := cmd.RunE(cmd, []string{"-", "manifest.yaml"})
+
+	assert.EqualError(t, err, "usage: stdin input '-' cannot be combined with other input paths")
+}
+
+func TestScanCmd_RejectsConflictingFilePathAndPositionalInputs(t *testing.T) {
+	ks := &scanInputCaptureKubescape{}
+	cmd := GetScanCommand(ks)
+	require.NoError(t, cmd.Flags().Set("file-path", "manifests/deployment.yaml"))
+
+	err := cmd.Args(cmd, []string{"./manifests"})
+
+	assert.EqualError(t, err, "usage: use either --file-path or positional input paths, not both")
+}
+
+func TestScanCmd_FilePathAcceptsCustomPath(t *testing.T) {
+	ks := &scanInputCaptureKubescape{}
+	cmd := GetScanCommand(ks)
+	require.NoError(t, cmd.Flags().Set("file-path", "manifests/deployment.yaml"))
+
+	err := cmd.RunE(cmd, []string{})
+
+	require.NoError(t, err)
+	require.NotNil(t, ks.scanInfo)
+	assert.Equal(t, []string{"manifests/deployment.yaml"}, ks.scanInfo.InputPatterns)
+	assert.Equal(t, cautils.ScanTypeRepo, ks.scanInfo.ScanType)
+}
+
+func TestGetScanCommand_NilKubescape(t *testing.T) {
+	cmd := GetScanCommand(nil)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	err := cmd.Execute()
+	require.EqualError(t, err, "uninitialized kubescape interface")
+}
