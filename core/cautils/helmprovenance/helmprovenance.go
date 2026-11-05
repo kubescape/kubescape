@@ -31,6 +31,8 @@ type Provenance struct {
 	// ValuesPaths are dotted .Values.* keys statically referenced by the
 	// template (and by any partials it includes, transitively). Sorted,
 	// deduplicated. Empty when nothing could be statically traced.
+	// Relative paths inside a simple {{ with .Values.foo }} block are
+	// reported under foo.
 	//
 	// Caveat: segments are joined with ".", so an `index .Values` access with
 	// a key that itself contains a literal dot (e.g. {{ index .Values "foo.bar"
@@ -82,6 +84,9 @@ var (
 	// Stops at non-identifier characters, so .Values.foo[0] yields ".foo"
 	// (we cannot safely flatten array indices into a values key anyway).
 	dotValuesRe = regexp.MustCompile(`\.Values((?:\.[A-Za-z_][A-Za-z0-9_]*)+)`)
+	// Relative dot paths inside a {{ with }} block are rooted at that block's
+	// path.
+	relativeDotPathRe = regexp.MustCompile(`\.([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)`)
 	// (index .Values "foo" "bar") — the second-most common access form.
 	indexValuesRe = regexp.MustCompile(`index\s+\.Values((?:\s+"[^"]+")+)`)
 	// Quoted segment inside an `index .Values "x" "y"` chain.
@@ -268,12 +273,81 @@ func valuePathsIn(data []byte) []string {
 		}
 		seen[strings.Join(segs, ".")] = struct{}{}
 	}
+	addWithBlockPaths(data, seen)
 	out := make([]string, 0, len(seen))
 	for p := range seen {
 		out = append(out, p)
 	}
 	sort.Strings(out)
 	return out
+}
+
+func addWithBlockPaths(data []byte, seen map[string]struct{}) {
+	type scopeFrame struct {
+		parent string
+	}
+	var (
+		stack []scopeFrame
+		scope string
+	)
+	for _, action := range actionRe.FindAllSubmatch(data, -1) {
+		body := action[1]
+		kindMatch := actionKindRe.FindSubmatch(body)
+		kind := ""
+		if kindMatch != nil {
+			kind = string(kindMatch[1])
+		}
+		switch kind {
+		case "with":
+			parent := scope
+			pathMatch := dotValuesRe.FindSubmatch(body)
+			if pathMatch != nil {
+				scope = strings.TrimPrefix(string(pathMatch[1]), ".")
+			} else {
+				relativeMatch := relativeDotPathRe.FindSubmatch(body)
+				if relativeMatch != nil && parent != "" {
+					scope = parent + "." + string(relativeMatch[1])
+					seen[scope] = struct{}{}
+				} else {
+					scope = ""
+				}
+			}
+			stack = append(stack, scopeFrame{parent: parent})
+			continue
+		case "if", "range", "block":
+			stack = append(stack, scopeFrame{parent: scope})
+			if kind == "range" || kind == "block" {
+				scope = ""
+			}
+			continue
+		case "end":
+			if len(stack) > 0 {
+				frame := stack[len(stack)-1]
+				stack = stack[:len(stack)-1]
+				scope = frame.parent
+			}
+			continue
+		case "else":
+			if len(stack) > 0 {
+				scope = stack[len(stack)-1].parent
+				if strings.HasPrefix(strings.TrimSpace(string(body[len(kind):])), "if ") {
+					stack = append(stack, scopeFrame{parent: scope})
+				}
+			}
+			continue
+		}
+
+		if scope == "" {
+			continue
+		}
+		for _, match := range relativeDotPathRe.FindAllSubmatch(body, -1) {
+			relative := string(match[1])
+			if relative == "Values" || strings.HasPrefix(relative, "Values.") {
+				continue
+			}
+			seen[scope+"."+relative] = struct{}{}
+		}
+	}
 }
 
 func firstApiVersionLine(data []byte) int {

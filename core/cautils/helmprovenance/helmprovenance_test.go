@@ -230,25 +230,45 @@ func TestFindDefines_UnbalancedDoesNotPanic(t *testing.T) {
 `))
 }
 
-// Documented limitation: {{ with .Values.foo }} rebinds dot, so refs to .bar
-// inside the with block actually resolve to .Values.foo.bar — but our static
-// extractor only sees ".Values.foo". This test pins that behaviour so a
-// future implementation change is a deliberate decision.
-func TestExtract_WithBlockRebinding_DocumentedLimitation(t *testing.T) {
+// A with block rebinds dot, so relative field references are nested below
+// the .Values path used to open the block.
+func TestExtract_WithBlockRebinding(t *testing.T) {
 	c := newChart("app", tmpl("templates/cm.yaml", `
 apiVersion: v1
 kind: ConfigMap
 data:
   {{- with .Values.image }}
   repo: {{ .repo }}
-  tag: {{ .tag }}
+  {{- if .Values.useMirror }}
+  mirror: {{ .mirror }}
+  {{- end }}
+  {{- end }}
+  name: {{ .Values.name }}
+`))
+	got := Extract(c)["app/templates/cm.yaml"]
+	want := []string{"image", "image.mirror", "image.repo", "name", "useMirror"}
+	if !reflect.DeepEqual(got.ValuesPaths, want) {
+		t.Errorf("ValuesPaths = %v, want %v", got.ValuesPaths, want)
+	}
+}
+
+func TestExtract_WithBlockElseRestoresParentScope(t *testing.T) {
+	c := newChart("app", tmpl("templates/cm.yaml", `
+apiVersion: v1
+kind: ConfigMap
+data:
+  {{- with .Values.parent }}
+    {{- with .child }}
+  child: {{ .childField }}
+    {{- else }}
+  parent: {{ .parentField }}
+    {{- end }}
   {{- end }}
 `))
 	got := Extract(c)["app/templates/cm.yaml"]
-	// Only the outer .Values.image is captured; .repo / .tag are not flattened.
-	want := []string{"image"}
+	want := []string{"parent", "parent.child", "parent.child.childField", "parent.parentField"}
 	if !reflect.DeepEqual(got.ValuesPaths, want) {
-		t.Errorf("ValuesPaths = %v, want %v (limitation: with-block rebinding not flattened)", got.ValuesPaths, want)
+		t.Errorf("ValuesPaths = %v, want %v", got.ValuesPaths, want)
 	}
 }
 
