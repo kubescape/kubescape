@@ -536,6 +536,127 @@ func TestGetWorkloadCmd_RejectsLabelSelector(t *testing.T) {
 	assert.ErrorContains(t, err, "--label-selector is not supported for workload scans")
 }
 
+func TestGetWorkloadCmd_RunE_RejectsResourceFilterFlags(t *testing.T) {
+	testCases := []struct {
+		name     string
+		scanInfo cautils.ScanInfo
+		wantErr  string
+	}{
+		{
+			name:     "include-namespaces is rejected",
+			scanInfo: cautils.ScanInfo{IncludeNamespaces: "prod"},
+			wantErr:  "--include-namespaces is not supported for workload scans: the named workload specifies its namespace explicitly, not through namespace inclusion lists",
+		},
+		{
+			name:     "exclude-namespaces is rejected",
+			scanInfo: cautils.ScanInfo{ExcludedNamespaces: "kube-system"},
+			wantErr:  "--exclude-namespaces is not supported for workload scans: the named workload specifies its namespace explicitly, not through namespace exclusion lists",
+		},
+		{
+			name:     "include-kinds is rejected",
+			scanInfo: cautils.ScanInfo{IncludeKinds: "Deployment"},
+			wantErr:  "--include-kinds is not supported for workload scans: the named workload specifies its resource kind explicitly, not through kind inclusion lists",
+		},
+		{
+			name:     "exclude-kinds is rejected",
+			scanInfo: cautils.ScanInfo{ExcludeKinds: "Pod"},
+			wantErr:  "--exclude-kinds is not supported for workload scans: the named workload specifies its resource kind explicitly, not through kind exclusion lists",
+		},
+		{
+			name:     "label-selector is rejected",
+			scanInfo: cautils.ScanInfo{LabelSelector: "app=nginx"},
+			wantErr:  "--label-selector is not supported for workload scans: the named resource is fetched by identity, not by label",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			mockKubescape := &workloadScanCaptureKubescape{}
+			cmd := getWorkloadCmd(mockKubescape, &tc.scanInfo)
+			parentCmd := &cobra.Command{Use: "scan"}
+			parentCmd.PersistentFlags().StringVarP(&tc.scanInfo.Format, "format", "f", "pretty-printer", "")
+			parentCmd.AddCommand(cmd)
+
+			err := cmd.RunE(cmd, []string{"Deployment/my-deploy"})
+			require.EqualError(t, err, tc.wantErr)
+			assert.Nil(t, mockKubescape.scanInfo, "workload scanner must not be invoked when resource filter flags are passed")
+		})
+	}
+}
+
+func TestGetScanCommand_RejectsResourceFilterFlagsOnWorkloadScan(t *testing.T) {
+	testCases := []struct {
+		name    string
+		args    []string
+		wantErr string
+	}{
+		{
+			name:    "include-namespaces flag",
+			args:    []string{"workload", "--include-namespaces", "prod", "Deployment/my-deploy"},
+			wantErr: "--include-namespaces is not supported for workload scans: the named workload specifies its namespace explicitly, not through namespace inclusion lists",
+		},
+		{
+			name:    "include-namespaces flag empty",
+			args:    []string{"workload", "--include-namespaces=", "Deployment/my-deploy"},
+			wantErr: "--include-namespaces is not supported for workload scans: the named workload specifies its namespace explicitly, not through namespace inclusion lists",
+		},
+		{
+			name:    "exclude-namespaces flag",
+			args:    []string{"workload", "--exclude-namespaces", "kube-system", "Deployment/my-deploy"},
+			wantErr: "--exclude-namespaces is not supported for workload scans: the named workload specifies its namespace explicitly, not through namespace exclusion lists",
+		},
+		{
+			name:    "exclude-namespaces flag empty",
+			args:    []string{"workload", "--exclude-namespaces=", "Deployment/my-deploy"},
+			wantErr: "--exclude-namespaces is not supported for workload scans: the named workload specifies its namespace explicitly, not through namespace exclusion lists",
+		},
+		{
+			name:    "include-kinds flag",
+			args:    []string{"workload", "--include-kinds", "Deployment", "Deployment/my-deploy"},
+			wantErr: "--include-kinds is not supported for workload scans: the named workload specifies its resource kind explicitly, not through kind inclusion lists",
+		},
+		{
+			name:    "include-kinds flag empty",
+			args:    []string{"workload", "--include-kinds=", "Deployment/my-deploy"},
+			wantErr: "--include-kinds is not supported for workload scans: the named workload specifies its resource kind explicitly, not through kind inclusion lists",
+		},
+		{
+			name:    "exclude-kinds flag",
+			args:    []string{"workload", "--exclude-kinds", "Pod", "Deployment/my-deploy"},
+			wantErr: "--exclude-kinds is not supported for workload scans: the named workload specifies its resource kind explicitly, not through kind exclusion lists",
+		},
+		{
+			name:    "exclude-kinds flag empty",
+			args:    []string{"workload", "--exclude-kinds=", "Deployment/my-deploy"},
+			wantErr: "--exclude-kinds is not supported for workload scans: the named workload specifies its resource kind explicitly, not through kind exclusion lists",
+		},
+		{
+			name:    "label-selector flag",
+			args:    []string{"workload", "--label-selector", "app=nginx", "Deployment/my-deploy"},
+			wantErr: "--label-selector is not supported for workload scans: the named resource is fetched by identity, not by label",
+		},
+		{
+			name:    "label-selector flag empty",
+			args:    []string{"workload", "--label-selector=", "Deployment/my-deploy"},
+			wantErr: "--label-selector is not supported for workload scans: the named resource is fetched by identity, not by label",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			mockKubescape := &workloadScanCaptureKubescape{}
+			cmd := GetScanCommand(mockKubescape)
+			cmd.SilenceErrors = true
+			cmd.SilenceUsage = true
+			cmd.SetArgs(tc.args)
+
+			err := cmd.Execute()
+			require.EqualError(t, err, tc.wantErr)
+			assert.Nil(t, mockKubescape.scanInfo, "workload scanner must not be invoked when resource filter flags are passed")
+		})
+	}
+}
+
 type scoredWorkloadKubescape struct {
 	mocks.MockIKubescape
 	complianceScore  float32
