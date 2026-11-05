@@ -1,7 +1,7 @@
 header:
   schema-version: 2.2.0
-  last-updated: '2026-11-03'
-  last-reviewed: '2026-11-03'
+  last-updated: '2026-11-05'
+  last-reviewed: '2026-11-05'
   url: https://raw.githubusercontent.com/kubescape/kubescape/master/security-insights.yml
 
 project:
@@ -109,6 +109,16 @@ repository:
           release: false
         results: {}
         comment: Runs through golangci-lint on pull requests.
+      - name: GitGuardian
+        type: secret
+        rulesets:
+          - default
+        integration:
+          adhoc: false
+          ci: true
+          release: false
+        results: {}
+        comment: GitGuardian Security Checks and secret-validator status checks run on pull requests alongside GitHub Secret Scanning and Push Protection.
       - name: OpenSSF Scorecard
         type: other
         rulesets:
