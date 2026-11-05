@@ -77,7 +77,7 @@ kubescape scan [target] [flags]
 | `--reference-cluster <ctx>` | With `--fleet-report`, the context the other clusters are compared against. Must be one of `--kube-contexts`. | - |
 | `--retries <n>` | With `--kube-contexts`, how many more times to try a cluster whose API server never answered, waiting 2s, then 4s, doubling up to 30s. `0` disables retries. | `2` |
 | `--fleet-config <path>` | Read `--kube-contexts`, `--output`, `--fleet-report`, `--reference-cluster` and `--retries` from a `FleetConfig` file. A flag on the command line overrides the file. See [fleet config file](fleet-scanning.md#fleet-config-file). | - |
-| `-o, --output <path>` | Output file path | stdout |
+| `-o, --output <path>` | Output file path. For `scan validate-contract`, the destination must not refer to the input contract, including through symbolic or hard links | stdout |
 | `--release-name <name>` | Helm release name made available as `.Release.Name` when rendering a chart | `release-name` |
 | `--release-namespace <ns>` | Helm release namespace made available as `.Release.Namespace` when rendering a chart | `default` |
 | `--kube-version <version>` | Kubernetes version made available as `.Capabilities.KubeVersion` when rendering a chart, as in `helm template`. A chart whose `kubeVersion` constraint rejects it is not rendered | the newest version the chart's `kubeVersion` allows, up to the Kubernetes version Kubescape is built with; `v1.20` (Helm's library default) when the chart declares none or no such version satisfies it |
