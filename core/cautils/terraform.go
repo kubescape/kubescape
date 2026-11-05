@@ -11,6 +11,7 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/kubescape/v4/core/pkg/pathcontainment"
 	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
 	"github.com/zclconf/go-cty/cty"
 )
@@ -35,10 +36,17 @@ func IsTerraformFile(path string) bool {
 	return filepath.Ext(path) == ".tf"
 }
 
-type TerraformDirectory struct{ path string }
+type TerraformDirectory struct {
+	path         string
+	workspaceDir string
+}
 
-func NewTerraformDirectory(path string) *TerraformDirectory {
-	return &TerraformDirectory{path: path}
+func NewTerraformDirectory(path string, workspaceOpt ...string) *TerraformDirectory {
+	td := &TerraformDirectory{path: path}
+	if len(workspaceOpt) > 0 {
+		td.workspaceDir = workspaceOpt[0]
+	}
+	return td
 }
 
 // GetWorkloads extracts embedded K8s manifests from resource "kubernetes_manifest" blocks.
@@ -57,7 +65,16 @@ func (td *TerraformDirectory) GetWorkloads(path string) (map[string][]workloadin
 	var files []*hcl.File
 	var parsedPaths []string
 	for _, f := range tfFiles {
-		file, diags := parser.ParseHCLFile(f)
+		if td.workspaceDir != "" && !pathcontainment.IsPathContained(td.workspaceDir, f) {
+			logger.L().Warning("Skipping Terraform file outside workspace root", helpers.String("path", f), helpers.String("workspace", td.workspaceDir))
+			continue
+		}
+		content, readErr := os.ReadFile(f)
+		if readErr != nil {
+			errs = append(errs, fmt.Errorf("reading %s: %w", f, readErr))
+			continue
+		}
+		file, diags := parser.ParseHCL(content, f)
 		if diags.HasErrors() {
 			errs = append(errs, fmt.Errorf("parsing %s: %w", f, diags))
 			continue
@@ -93,6 +110,9 @@ func (td *TerraformDirectory) GetWorkloads(path string) (map[string][]workloadin
 				continue
 			}
 			for _, w := range wls {
+				if td.workspaceDir != "" && !pathcontainment.IsPathContained(td.workspaceDir, src) {
+					continue
+				}
 				lw := localworkload.NewLocalWorkload(w.GetObject())
 				lw.SetPath(fmt.Sprintf("%s:%d", src, j))
 				workloads[src] = append(workloads[src], lw)

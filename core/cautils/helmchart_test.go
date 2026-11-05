@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/kubescape/v4/core/pkg/pathcontainment"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/locationresolver"
 	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
 	"github.com/stretchr/testify/assert"
@@ -435,4 +436,41 @@ func (s *HelmChartTestSuite) TestIsHelmDirectory() {
 	ok, err = IsHelmDirectory(nonHelmDir)
 	s.False(ok)
 	s.Contains(err.Error(), "no Chart.yaml exists in directory")
+}
+
+func TestLoadResourcesFromHelmCharts_WorkspaceContainment(t *testing.T) {
+	outsideDir := t.TempDir()
+	outsideValues := filepath.Join(outsideDir, "values.yaml")
+	require.NoError(t, os.WriteFile(outsideValues, []byte("replicaCount: 2\n"), 0o600))
+
+	o, _ := os.Getwd()
+	chartPath := filepath.Join(filepath.Dir(o), "..", "examples", "helm_chart")
+	ws := filepath.Dir(chartPath)
+
+	t.Run("values file outside workspace is rejected", func(t *testing.T) {
+		valOpts := HelmValueOptions{ValueFiles: []string{outsideValues}}
+		_, _, _, err := LoadResourcesFromHelmChartsFiltered(context.TODO(), chartPath, valOpts, nil, nil, ws)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, pathcontainment.ErrPathEscapesWorkspace)
+	})
+
+	t.Run("chart with escaping symlink is rejected", func(t *testing.T) {
+		tempWS := t.TempDir()
+		chartDir := filepath.Join(tempWS, "chart")
+		require.NoError(t, os.MkdirAll(filepath.Join(chartDir, "templates"), 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(chartDir, "Chart.yaml"), []byte("apiVersion: v2\nname: testchart\nversion: 0.1.0\n"), 0o600))
+		require.NoError(t, os.WriteFile(filepath.Join(chartDir, "values.yaml"), []byte("{}\n"), 0o600))
+
+		outsideFile := filepath.Join(outsideDir, "leak.yaml")
+		require.NoError(t, os.WriteFile(outsideFile, []byte("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: leak\n"), 0o600))
+
+		leakSymlink := filepath.Join(chartDir, "templates", "leak.yaml")
+		if err := os.Symlink(outsideFile, leakSymlink); err != nil {
+			t.Skipf("skipping symlink test: %v", err)
+		}
+
+		_, _, _, err := LoadResourcesFromHelmChartsFiltered(context.TODO(), chartDir, HelmValueOptions{}, nil, nil, tempWS)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, pathcontainment.ErrPathEscapesWorkspace)
+	})
 }

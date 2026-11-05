@@ -1,12 +1,14 @@
 package cautils
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/kubescape/v4/core/pkg/pathcontainment"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -163,4 +165,67 @@ func TestTerraformDirectory_GetWorkloads_PreservesLargeIntegerPrecision(t *testi
 		}
 	}
 	assert.True(t, found, "expected to find the big-number annotation in scanned output")
+}
+
+func TestTerraformDirectory_WorkspaceContainment(t *testing.T) {
+	ws := t.TempDir()
+	insideDir := filepath.Join(ws, "inside")
+	require.NoError(t, os.Mkdir(insideDir, 0o755))
+	insideFile := filepath.Join(insideDir, "main.tf")
+	require.NoError(t, os.WriteFile(insideFile, []byte(`
+variable "pod_name" {
+  default = "inside-pod"
+}
+
+resource "kubernetes_pod_v1" "example" {
+  metadata {
+    name = var.pod_name
+  }
+  spec {
+    container {
+      name  = "pause"
+      image = "registry.k8s.io/pause:3.9"
+    }
+  }
+}
+`), 0o600))
+
+	outsideDir := t.TempDir()
+	outsideFile := filepath.Join(outsideDir, "outside.tf")
+	require.NoError(t, os.WriteFile(outsideFile, []byte(`
+variable "pod_name" {
+  default = "outside-override-pod"
+}
+
+resource "kubernetes_pod_v1" "outside" {
+  metadata {
+    name = "outside-pod"
+  }
+  spec {
+    container {
+      name  = "pause"
+      image = "registry.k8s.io/pause:3.9"
+    }
+  }
+}
+`), 0o600))
+
+	td := NewTerraformDirectory(insideDir, ws)
+	workloads, errs := td.GetWorkloads(insideDir)
+	require.Empty(t, errs)
+	require.Len(t, workloads[insideFile], 1)
+	assert.Equal(t, "inside-pod", workloads[insideFile][0].GetName())
+
+	symlinkPath := filepath.Join(insideDir, "symlink.tf")
+	if err := os.Symlink(outsideFile, symlinkPath); err == nil {
+		workloads, errs = td.GetWorkloads(insideDir)
+		require.Empty(t, errs)
+		require.Len(t, workloads[insideFile], 1)
+		assert.Equal(t, "inside-pod", workloads[insideFile][0].GetName())
+		assert.NotContains(t, workloads, symlinkPath)
+	}
+
+	_, err := LoadResourcesFromTerraformFiltered(context.Background(), outsideDir, nil, ws)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, pathcontainment.ErrPathEscapesWorkspace)
 }

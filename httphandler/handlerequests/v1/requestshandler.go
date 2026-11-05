@@ -124,6 +124,9 @@ func (handler *HTTPHandler) enqueueScan(req *scanRequestParams, cancel context.C
 	})
 	if err != nil {
 		cancel()
+		// admitScan fails only when req was not queued, so the worker never
+		// sees it and this goroutine still owns it.
+		req.releaseScanInfo()
 	}
 	return err
 }
