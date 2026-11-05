@@ -221,7 +221,7 @@ func TestIncrementalCacheContextHasExplicitSchemaVersion(t *testing.T) {
 
 	// The constant is deliberately asserted here so a future wire-format
 	// change is visible in review and old entries are invalidated on purpose.
-	assert.Equal(t, "2", original)
+	assert.Equal(t, "3", original)
 	assert.NotEmpty(t, first)
 }
 

@@ -180,3 +180,62 @@ func TestWorkloadCmd_StdinUsesCommandInput(t *testing.T) {
 	assert.Equal(t, "Deployment", ks.scanInfo.ScanObject.GetKind())
 	assert.Equal(t, "nginx", ks.scanInfo.ScanObject.GetName())
 }
+
+func TestScanCmd_SecurityView_StdinUsesCommandInput(t *testing.T) {
+	ks := &scanInputCaptureKubescape{}
+	cmd := GetScanCommand(ks)
+	cmd.SetIn(strings.NewReader("apiVersion: v1\nkind: Pod\nmetadata:\n  name: security-view-stdin\n"))
+	cmd.SetArgs([]string{"--view", "security", "-"})
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	require.NotNil(t, ks.scanInfo)
+	require.Len(t, ks.scanInfo.InputPatterns, 1)
+	assert.Equal(t, filepath.Clean(os.TempDir()), filepath.Dir(ks.scanInfo.InputPatterns[0]))
+	assert.NoFileExists(t, ks.scanInfo.InputPatterns[0])
+	require.Len(t, ks.inputContents, 1)
+	assert.Contains(t, ks.inputContents[0], "security-view-stdin")
+	assert.Equal(t, cautils.ScanTypeRepo, ks.scanInfo.ScanType)
+	require.Len(t, ks.policyIdentifiers, 2)
+	assert.Equal(t, "workloadscan", ks.policyIdentifiers[0].Identifier)
+	assert.Equal(t, "allcontrols", ks.policyIdentifiers[1].Identifier)
+}
+
+func TestScanCmd_SecurityView_RejectsStdinMixedWithOtherInputs(t *testing.T) {
+	ks := &scanInputCaptureKubescape{}
+	cmd := GetScanCommand(ks)
+	cmd.SetArgs([]string{"--view", "security", "-", "manifests/app.yaml"})
+
+	err := cmd.Execute()
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "usage: stdin input '-' cannot be combined with other input paths")
+}
+
+func TestScanCmd_SecurityView_FilePathWithoutPositionalInputs(t *testing.T) {
+	ks := &scanInputCaptureKubescape{}
+	cmd := GetScanCommand(ks)
+	cmd.SetArgs([]string{"--view", "security", "--file-path", "manifests/app.yaml"})
+
+	err := cmd.Execute()
+	require.NoError(t, err)
+	require.NotNil(t, ks.scanInfo)
+	assert.Equal(t, []string{"manifests/app.yaml"}, ks.scanInfo.InputPatterns)
+	assert.Equal(t, cautils.ScanTypeRepo, ks.scanInfo.ScanType)
+	require.Len(t, ks.policyIdentifiers, 2)
+	assert.Equal(t, "workloadscan", ks.policyIdentifiers[0].Identifier)
+	assert.Equal(t, "allcontrols", ks.policyIdentifiers[1].Identifier)
+}
+
+func TestScanCmd_FallbackFramework_FilePathWithoutPositionalInputs(t *testing.T) {
+	ks := &scanInputCaptureKubescape{}
+	cmd := GetScanCommand(ks)
+	cmd.SetArgs([]string{"--view", "resource", "--file-path", "manifests/app.yaml"})
+
+	err := cmd.Execute()
+	require.NoError(t, err)
+	require.NotNil(t, ks.scanInfo)
+	assert.Equal(t, []string{"manifests/app.yaml"}, ks.scanInfo.InputPatterns)
+	assert.Equal(t, cautils.ScanTypeFramework, ks.scanInfo.ScanType)
+}

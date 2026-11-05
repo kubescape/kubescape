@@ -24,7 +24,9 @@
 //
 //   - impersonate: the "impersonate" verb on users/groups/serviceaccounts
 //     lets a subject act as the impersonated identity outright, inheriting
-//     every permission it holds.
+//     every permission it holds. Group impersonation additionally requires
+//     authorization to impersonate a username (a User or ServiceAccount);
+//     Kubernetes checks both parts of the request independently.
 //   - escalate-verb: the "escalate" verb on roles/clusterroles, combined
 //     with update/patch on the same resource, is Kubernetes' own built-in
 //     escape hatch from its RBAC self-escalation prevention -- a subject

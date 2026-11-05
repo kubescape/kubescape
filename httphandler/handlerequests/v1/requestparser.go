@@ -115,26 +115,42 @@ func getScanParamsFromRequest(r *http.Request, scanID string) (*scanRequestParam
 		logger.L().Info("REST API received scan request", helpers.String("scanID", scanID), helpers.String("format", scanRequest.Format))
 	}
 
+	// Validate the whole request before converting it: getScanCommand writes
+	// the request's exceptions to a temp file, so a request rejected here must
+	// not reach it.
+	scanQueryParams := &ScanQueryParams{}
+	if err := schema.NewDecoder().Decode(scanQueryParams, r.URL.Query()); err != nil {
+		return nil, fmt.Errorf("failed to parse query params, reason: %w", err)
+	}
+	if scanQueryParams.CallbackURL != "" {
+		if _, err := validateCallbackURL(scanQueryParams.CallbackURL); err != nil {
+			return nil, err
+		}
+	}
+
 	scanInfo, policyIdentifiers := getScanCommand(scanRequest, scanID)
 	p := &scanRequestParams{
 		scanID:            scanID,
-		scanQueryParams:   &ScanQueryParams{},
+		scanQueryParams:   scanQueryParams,
 		scanInfo:          scanInfo,
 		policyIdentifiers: policyIdentifiers,
+		callbackURL:       scanQueryParams.CallbackURL,
 		isUserScan:        true,
 	}
-	if err := schema.NewDecoder().Decode(p.scanQueryParams, r.URL.Query()); err != nil {
-		return p, fmt.Errorf("failed to parse query params, reason: %w", err)
-	}
-	if p.scanQueryParams.ReturnResults {
+	if scanQueryParams.ReturnResults {
 		p.resp = make(chan *utilsmetav1.Response, 1)
-	}
-	if p.scanQueryParams.CallbackURL != "" {
-		if _, err := validateCallbackURL(p.scanQueryParams.CallbackURL); err != nil {
-			return p, err
-		}
-		p.callbackURL = p.scanQueryParams.CallbackURL
 	}
 
 	return p, nil
+}
+
+// releaseScanInfo runs the cleanups ToScanInfo registered, such as removing
+// the request's exceptions temp file, for a request that will never reach
+// core.Scan, which otherwise runs them. ScanInfo.Cleanup is not safe for
+// concurrent use, so only the request's current owner may call this: the
+// handler until the request is queued, the worker once it has dequeued it.
+func (p *scanRequestParams) releaseScanInfo() {
+	if p != nil && p.scanInfo != nil {
+		p.scanInfo.Cleanup()
+	}
 }

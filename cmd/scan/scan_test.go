@@ -1819,6 +1819,15 @@ func TestControlCmd_RejectsConflictingFilePathAndPositionalInputs(t *testing.T) 
 	assert.Contains(t, err.Error(), "usage: use either --file-path or positional input paths, not both")
 }
 
+func TestScanCmd_RejectsConflictingFilePathAndPositionalInputs(t *testing.T) {
+	mockKubescape := &mocks.MockIKubescape{}
+	cmd := GetScanCommand(mockKubescape)
+	cmd.SetArgs([]string{"manifests/app.yaml", "--file-path", "manifests/other.yaml"})
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "usage: use either --file-path or positional input paths, not both")
+}
+
 func TestGetScanCommand_GitCloneDepthFlagRegistered(t *testing.T) {
 	mockKubescape := &mocks.MockIKubescape{}
 	cmd := GetScanCommand(mockKubescape)

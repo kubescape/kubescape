@@ -900,7 +900,11 @@ func estimateClusterSize(resourceHandler resourcehandler.IResourceHandler, ctx c
 // decision was made from; the OPA processor uses it as its frozen resource
 // count because sessionObj.AllResources is populated asynchronously by the
 // producer goroutine.
-const incrementalCacheSchemaVersion = "2"
+//
+// incrementalCacheSchemaVersion 3: verdicts are only stored for hermetic rules
+// whose findings are attributable per object. Caches written by earlier
+// schemas may hold verdicts of rules that are no longer cacheable.
+const incrementalCacheSchemaVersion = "3"
 
 // incrementalCacheContext contains every scan-wide value that can affect a
 // cache-eligible rule. ResourceHash covers the resource itself; this context

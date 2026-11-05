@@ -68,6 +68,7 @@ func (idx *Index) DirectEscalationEdges(subject Subject, rules []ScopedRule) []E
 // type a Role can meaningfully constrain.
 func (idx *Index) impersonateEdges(rules []ScopedRule) []EscalationEdge {
 	var edges []EscalationEdge
+	usernameAuthorized := canImpersonateUsername(rules)
 	for _, sr := range rules {
 		rule := sr.Rule
 		if !containsOrWildcard(rule.Verbs, "impersonate") || !containsOrWildcard(rule.APIGroups, "") {
@@ -117,6 +118,11 @@ func (idx *Index) impersonateEdges(rules []ScopedRule) []EscalationEdge {
 			}
 		}
 		if containsOrWildcard(rule.Resources, "groups") || containsOrWildcard(rule.Resources, "*") {
+			// Impersonate-Group must accompany an authorized Impersonate-User.
+			// Being the caller already does not authorize impersonating oneself.
+			if !usernameAuthorized {
+				continue
+			}
 			if !restricted {
 				edges = append(edges, EscalationEdge{Primitive: PrimitiveImpersonate, ImpersonatedKind: KindGroup, Detail: "can impersonate any Group (unrestricted impersonate on groups)", Unbounded: true})
 			} else {
