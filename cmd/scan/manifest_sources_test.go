@@ -105,7 +105,7 @@ func writeManifestSource(t *testing.T, path, contents string) {
 
 // The policy is local and deliberately small: discovery, rendering, evaluation,
 // reporting, and the compliance gate all run through the real scan command.
-func scanManifestSources(t *testing.T, root string) (reporthandlingv2.PostureReport, error) {
+func scanManifestSources(t *testing.T, inputs ...string) (reporthandlingv2.PostureReport, error) {
 	t.Helper()
 	// Resolve tenant settings locally so a contributor's kubeconfig is never used.
 	t.Setenv("KS_CLOUD_API_URL", "https://api.example.invalid")
@@ -151,13 +151,12 @@ deny contains {"alertMessage": "privileged container", "alertObject": {"k8sApiOb
 	command := scan.GetScanCommand(core.NewKubescape(context.Background()))
 	command.SetOut(io.Discard)
 	command.SetErr(io.Discard)
-	command.SetArgs([]string{
-		"control", "C-TEST", root,
+	command.SetArgs(append(append([]string{"control", "C-TEST"}, inputs...),
 		"--use-from", policyPath, "--controls-config", inputsPath,
 		"--exceptions", exceptionsPath, "--submit=false", "--keep-local",
 		"--account", "11111111-2222-3333-4444-555555555555", "--access-key", "local-test",
 		"--compliance-threshold", "100", "--format", "json", "--output", outputPath,
-	})
+	))
 	scanErr := command.Execute()
 	data, err := os.ReadFile(outputPath)
 	require.NoError(t, err)
