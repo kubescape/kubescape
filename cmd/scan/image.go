@@ -126,6 +126,33 @@ func getImageCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Command 
 			if scanInfo.DryRun || commandFlagChanged(cmd, "dry-run") {
 				return fmt.Errorf("--dry-run is not supported for image scans: an image scan evaluates vulnerabilities, not cluster resource permissions")
 			}
+			if len(scanInfo.HelmValueFiles) > 0 || commandFlagChanged(cmd, "values") {
+				return fmt.Errorf("--values is not supported for image scans: an image scan evaluates vulnerabilities, not Helm charts")
+			}
+			if len(scanInfo.HelmSetValues) > 0 || commandFlagChanged(cmd, "set") {
+				return fmt.Errorf("--set is not supported for image scans: an image scan evaluates vulnerabilities, not Helm charts")
+			}
+			if len(scanInfo.HelmSetStringValues) > 0 || commandFlagChanged(cmd, "set-string") {
+				return fmt.Errorf("--set-string is not supported for image scans: an image scan evaluates vulnerabilities, not Helm charts")
+			}
+			if len(scanInfo.HelmSetFileValues) > 0 || commandFlagChanged(cmd, "set-file") {
+				return fmt.Errorf("--set-file is not supported for image scans: an image scan evaluates vulnerabilities, not Helm charts")
+			}
+			if scanInfo.HelmReleaseName != "" || commandFlagChanged(cmd, "release-name") {
+				return fmt.Errorf("--release-name is not supported for image scans: an image scan evaluates vulnerabilities, not Helm charts")
+			}
+			if scanInfo.HelmReleaseNamespace != "" || commandFlagChanged(cmd, "release-namespace") {
+				return fmt.Errorf("--release-namespace is not supported for image scans: an image scan evaluates vulnerabilities, not Helm charts")
+			}
+			if scanInfo.HelmKubeVersion != "" || commandFlagChanged(cmd, "kube-version") {
+				return fmt.Errorf("--kube-version is not supported for image scans: an image scan evaluates vulnerabilities, not Helm charts")
+			}
+			if len(scanInfo.HelmAPIVersions) > 0 || commandFlagChanged(cmd, "api-versions") {
+				return fmt.Errorf("--api-versions is not supported for image scans: an image scan evaluates vulnerabilities, not Helm charts")
+			}
+			if scanInfo.FilePath != "" || commandFlagChanged(cmd, "file-path") {
+				return fmt.Errorf("--file-path is not supported for image scans: an image scan evaluates vulnerabilities, not local manifest files")
+			}
 			if err := shared.ValidateImageScanAnonymization(scanInfo); err != nil {
 				return err
 			}
