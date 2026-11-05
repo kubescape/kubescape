@@ -2,6 +2,7 @@ package version
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -26,6 +27,9 @@ func GetVersionCmd(ks meta.IKubescape, version, commit, date string) *cobra.Comm
 		Long:  ``,
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if ks == nil {
+				return errors.New("uninitialized kubescape interface")
+			}
 			normalizedFormat := strings.ToLower(strings.TrimSpace(outputFormat))
 			if normalizedFormat == "" {
 				return fmt.Errorf("format cannot be empty, supported formats: text, json, yaml")
@@ -57,8 +61,12 @@ func GetVersionCmd(ks meta.IKubescape, version, commit, date string) *cobra.Comm
 				_, err = fmt.Fprint(cmd.OutOrStdout(), string(b))
 				return err
 			case "text":
-				v := versioncheck.NewIVersionCheckHandler(ks.Context())
-				_ = v.CheckLatestVersion(ks.Context(), versioncheck.NewVersionCheckRequest("", version, "", "", "version", nil))
+				ctx := cmd.Context()
+				if ks.Context() != nil {
+					ctx = ks.Context()
+				}
+				v := versioncheck.NewIVersionCheckHandler(ctx)
+				_ = v.CheckLatestVersion(ctx, versioncheck.NewVersionCheckRequest("", version, "", "", "version", nil))
 
 				out := cmd.OutOrStdout()
 				colored := shouldColor(out)
