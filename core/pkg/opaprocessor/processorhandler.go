@@ -1246,6 +1246,20 @@ func ruleCacheEligible(control *reporthandling.Control, rule *reporthandling.Pol
 	if rule.RuleLanguage == reporthandling.CELLanguage {
 		return false
 	}
+	// A verdict keyed on the resource's own hash is only reusable when nothing
+	// else the rule can reach affects it: no clock, network, registry or other
+	// external state, including through library functions.
+	if !regoSourceIsHermetic(rule.Rule) {
+		return false
+	}
+	// The enumerator runs over the same input before the rule and decides which
+	// objects the rule may report and which ones pass. It must meet the same
+	// conditions as the rule itself.
+	if enumerator := ruleEnumeratorData(rule); enumerator != "" {
+		if ruleCorrelatesInput(enumerator) || ruleReadsStatus(enumerator) || !regoSourceIsHermetic(enumerator) {
+			return false
+		}
+	}
 	return true
 }
 
@@ -2781,6 +2795,25 @@ func (opap *OPAProcessor) getCompiledRule(ctx context.Context, ruleName, ruleDat
 		return entry.compiler, entry.version, nil
 	}
 
+	compiled, version, err := compileWithRuleDependencies(ctx, ruleName, ruleData, printEnabled)
+	if err != nil {
+		return nil, 0, err
+	}
+	if version == ast.RegoV0 {
+		logger.L().Ctx(ctx).Warning("rule uses deprecated Rego v0 syntax; v0 support will be removed in a future release",
+			helpers.String("rule", ruleName))
+	}
+
+	opap.compiledModules[cacheKey] = compiledRule{compiler: compiled, version: version}
+	return compiled, version, nil
+}
+
+// compileWithRuleDependencies compiles source, registered as moduleName,
+// together with the shared rule dependencies, preferring Rego v1 and falling
+// back to v0 (see getCompiledRule). Rule evaluation and the incremental-cache
+// hermeticity analysis both compile through this function, so the analysis
+// inspects the same assembled module set that evaluation runs.
+func compileWithRuleDependencies(ctx context.Context, moduleName, source string, printEnabled bool) (*ast.Compiler, ast.RegoVersion, error) {
 	baseModules, err := getRuleDependencies(ctx)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to get rule dependencies: %w", err)
@@ -2788,29 +2821,23 @@ func (opap *OPAProcessor) getCompiledRule(ctx context.Context, ruleName, ruleDat
 
 	modules := make(map[string]string, len(baseModules)+1)
 	maps.Copy(modules, baseModules)
-	modules[ruleName] = ruleData
+	modules[moduleName] = source
 
-	version := ast.RegoV1
 	compiled, v1Err := ast.CompileModulesWithOpt(modules, ast.CompileOpts{
 		EnablePrintStatements: printEnabled,
 		ParserOptions:         ast.ParserOptions{RegoVersion: ast.RegoV1},
 	})
-	if v1Err != nil {
-		var v0Err error
-		compiled, v0Err = ast.CompileModulesWithOpt(modules, ast.CompileOpts{
-			EnablePrintStatements: printEnabled,
-			ParserOptions:         ast.ParserOptions{RegoVersion: ast.RegoV0},
-		})
-		if v0Err != nil {
-			return nil, 0, fmt.Errorf("failed to compile rule '%s': %w", ruleName, v1Err)
-		}
-		version = ast.RegoV0
-		logger.L().Ctx(ctx).Warning("rule uses deprecated Rego v0 syntax; v0 support will be removed in a future release",
-			helpers.String("rule", ruleName))
+	if v1Err == nil {
+		return compiled, ast.RegoV1, nil
 	}
-
-	opap.compiledModules[cacheKey] = compiledRule{compiler: compiled, version: version}
-	return compiled, version, nil
+	compiled, v0Err := ast.CompileModulesWithOpt(modules, ast.CompileOpts{
+		EnablePrintStatements: printEnabled,
+		ParserOptions:         ast.ParserOptions{RegoVersion: ast.RegoV0},
+	})
+	if v0Err != nil {
+		return nil, 0, fmt.Errorf("failed to compile rule '%s': %w", moduleName, v1Err)
+	}
+	return compiled, ast.RegoV0, nil
 }
 
 // canonicalDepsKey returns a deterministic, unambiguous JSON representation of RegoDependenciesData.
