@@ -52,6 +52,65 @@ func testOptions() LoadOptions {
 	}
 }
 
+func TestLoadRejectsNullStringListEntries(t *testing.T) {
+	for _, field := range []struct {
+		name string
+		old  string
+		new  string
+	}{
+		{"frameworks", "frameworks: [nsa]", "frameworks: [null]"},
+		{"controls", "frameworks: [nsa]", "controls: [null]"},
+		{"include namespaces", "excludeNamespaces: [kube-system]", "includeNamespaces: [null]"},
+		{"exclude namespaces", "excludeNamespaces: [kube-system]", "excludeNamespaces: [null]"},
+		{"formats", "formats: [pretty-printer]", "formats: [null]"},
+	} {
+		t.Run(field.name, func(t *testing.T) {
+			for _, entry := range []string{"null", "~", "", "json, null", "&empty null, *empty"} {
+				t.Run(entry, func(t *testing.T) {
+					// A blank block-sequence entry is also a YAML null.
+					replacement := strings.Replace(field.new, "[null]", "["+entry+"]", 1)
+					if entry == "" {
+						replacement = strings.Replace(field.new, "[null]", "\n          -", 1)
+					}
+					input := strings.Replace(validContract, field.old, replacement, 1)
+					_, err := Load([]byte(input), testOptions())
+					require.ErrorContains(t, err, "null entry")
+				})
+			}
+		})
+	}
+}
+
+func TestLoadPreservesExplicitEmptyStringLists(t *testing.T) {
+	input := strings.ReplaceAll(validContract, "frameworks: [nsa]", "frameworks: []\n        controls: []")
+	input = strings.ReplaceAll(input, "excludeNamespaces: [kube-system]", "includeNamespaces: []\n        excludeNamespaces: []")
+	input = strings.ReplaceAll(input, "formats: [json, sarif]", "formats: []")
+	options := testOptions()
+	options.ContractName = "ci"
+	selected, err := Load([]byte(input), options)
+	require.NoError(t, err)
+	// Explicit empty lists must remain distinct from omitted fields.
+	require.NotNil(t, selected.Contract.Policy.Frameworks)
+	assert.Empty(t, *selected.Contract.Policy.Frameworks)
+	require.NotNil(t, selected.Contract.Policy.Controls)
+	assert.Empty(t, *selected.Contract.Policy.Controls)
+	require.NotNil(t, selected.Contract.Scope.IncludeNamespaces)
+	assert.Empty(t, *selected.Contract.Scope.IncludeNamespaces)
+	require.NotNil(t, selected.Contract.Scope.ExcludeNamespaces)
+	assert.Empty(t, *selected.Contract.Scope.ExcludeNamespaces)
+	require.NotNil(t, selected.Contract.Output.Formats)
+	assert.Empty(t, *selected.Contract.Output.Formats)
+}
+
+func TestLoadRejectsAliasToNullStringListEntry(t *testing.T) {
+	input := strings.Replace(validContract, "defaultContract: developer", "defaultContract: &empty null", 1)
+	input = strings.Replace(input, "frameworks: [nsa]", "frameworks: [*empty]", 1)
+	options := testOptions()
+	options.ContractName = "developer"
+	_, err := Load([]byte(input), options)
+	require.ErrorContains(t, err, "null entry")
+}
+
 func TestLoadSelectsAndDigestsContract(t *testing.T) {
 	selected, err := Load([]byte(validContract), testOptions())
 	require.NoError(t, err)
@@ -61,7 +120,7 @@ func TestLoadSelectsAndDigestsContract(t *testing.T) {
 	assert.Regexp(t, `^sha256:[0-9a-f]{64}$`, selected.ContractDigest)
 	require.NotNil(t, selected.Contract.Policy)
 	require.NotNil(t, selected.Contract.Policy.Frameworks)
-	assert.Equal(t, []string{"nsa"}, *selected.Contract.Policy.Frameworks)
+	assert.Equal(t, []string{"nsa"}, []string(*selected.Contract.Policy.Frameworks))
 }
 
 func TestLoadContractOverride(t *testing.T) {

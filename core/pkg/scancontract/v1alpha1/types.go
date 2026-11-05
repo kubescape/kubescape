@@ -2,7 +2,10 @@ package v1alpha1
 
 import (
 	"encoding/json"
+	"fmt"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 const (
@@ -41,14 +44,14 @@ type Contract struct {
 }
 
 type Policy struct {
-	Frameworks      *[]string `json:"frameworks,omitempty" yaml:"frameworks,omitempty"`
-	Controls        *[]string `json:"controls,omitempty" yaml:"controls,omitempty"`
-	ControlsVersion *string   `json:"controlsVersion,omitempty" yaml:"controlsVersion,omitempty"`
+	Frameworks      *StringList `json:"frameworks,omitempty" yaml:"frameworks,omitempty"`
+	Controls        *StringList `json:"controls,omitempty" yaml:"controls,omitempty"`
+	ControlsVersion *string     `json:"controlsVersion,omitempty" yaml:"controlsVersion,omitempty"`
 }
 
 type Scope struct {
-	IncludeNamespaces *[]string `json:"includeNamespaces,omitempty" yaml:"includeNamespaces,omitempty"`
-	ExcludeNamespaces *[]string `json:"excludeNamespaces,omitempty" yaml:"excludeNamespaces,omitempty"`
+	IncludeNamespaces *StringList `json:"includeNamespaces,omitempty" yaml:"includeNamespaces,omitempty"`
+	ExcludeNamespaces *StringList `json:"excludeNamespaces,omitempty" yaml:"excludeNamespaces,omitempty"`
 }
 
 type Evaluation struct {
@@ -71,8 +74,34 @@ const (
 )
 
 type Output struct {
-	Formats          *[]string `json:"formats,omitempty" yaml:"formats,omitempty"`
-	OmitRawResources *bool     `json:"omitRawResources,omitempty" yaml:"omitRawResources,omitempty"`
+	Formats          *StringList `json:"formats,omitempty" yaml:"formats,omitempty"`
+	OmitRawResources *bool       `json:"omitRawResources,omitempty" yaml:"omitRawResources,omitempty"`
+}
+
+// StringList preserves explicit empty lists while rejecting null entries,
+// which yaml.v3 would otherwise silently discard when decoding into []string.
+type StringList []string
+
+// UnmarshalYAML checks list entries before decoding so malformed settings
+// cannot become valid empty lists or lose individual values.
+func (l *StringList) UnmarshalYAML(value *yaml.Node) error {
+	if value.Kind != yaml.SequenceNode {
+		return fmt.Errorf("line %d: expected a list of strings", value.Line)
+	}
+	for _, item := range value.Content {
+		if item.Kind == yaml.AliasNode {
+			item = item.Alias
+		}
+		if item.ShortTag() == "!!null" {
+			return fmt.Errorf("line %d: string list contains a null entry", item.Line)
+		}
+	}
+	var values []string
+	if err := value.Decode(&values); err != nil {
+		return err
+	}
+	*l = values
+	return nil
 }
 
 // Duration retains the human-readable contract representation while exposing
