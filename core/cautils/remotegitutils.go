@@ -26,8 +26,8 @@ import (
 const (
 	gitVisibilityCheckTimeout = 10 * time.Second
 
-	// DefaultGitCloneDepth is the default clone depth for remote Git repository scans (0 for full commit history).
-	DefaultGitCloneDepth = 0
+	// DefaultGitCloneDepth is the default shallow clone depth for remote Git repository scans.
+	DefaultGitCloneDepth = 1
 )
 
 var (
@@ -192,7 +192,7 @@ func getProviderError(gitURL giturl.IGitAPI) error {
 }
 
 // cloneRepo clones a repository to a local temporary directory and returns the directory.
-// depthOpt optionally specifies the clone depth (defaults to DefaultGitCloneDepth = 0 for full commit history).
+// depthOpt optionally specifies the clone depth (defaults to DefaultGitCloneDepth = 1 for tip only, 0 for full history).
 func cloneRepo(gitURL giturl.IGitAPI, depthOpt ...int) (string, error) {
 	depth := DefaultGitCloneDepth
 	if len(depthOpt) > 0 {
@@ -367,8 +367,8 @@ func ReleaseClonedRepo(path string, depthOpt ...int) error {
 	return nil
 }
 
-// CloneGitRepo clone git repository with optional depth (defaults to DefaultGitCloneDepth = 0 for full commit history).
-// Set depth to 1 or more for opt-in shallow cloning.
+// CloneGitRepo clone git repository with optional depth (defaults to DefaultGitCloneDepth = 1 for tip only).
+// Set depth to 0 for full commit history.
 func CloneGitRepo(path *string, depthOpt ...int) (string, error) {
 	depth := DefaultGitCloneDepth
 	if len(depthOpt) > 0 {

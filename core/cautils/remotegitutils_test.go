@@ -190,18 +190,18 @@ func TestCloneRepoShallowDepthOptions(t *testing.T) {
 		wantRefBranch string
 	}{
 		{
-			name:          "default depth is 0 for full history without explicit branch",
+			name:          "default depth is 1 with single branch",
 			depthOpt:      nil,
 			url:           "https://github.com/kubescape/kubescape/",
-			wantDepth:     0,
-			wantSingle:    false,
+			wantDepth:     DefaultGitCloneDepth,
+			wantSingle:    true,
 			wantRefBranch: "",
 		},
 		{
-			name:          "default depth with explicit branch enables single branch",
+			name:          "default depth with explicit branch",
 			depthOpt:      nil,
 			url:           "https://github.com/kubescape/kubescape/tree/feature-branch",
-			wantDepth:     0,
+			wantDepth:     DefaultGitCloneDepth,
 			wantSingle:    true,
 			wantRefBranch: "refs/heads/feature-branch",
 		},
@@ -222,7 +222,7 @@ func TestCloneRepoShallowDepthOptions(t *testing.T) {
 			wantRefBranch: "",
 		},
 		{
-			name:          "full history with depth 0",
+			name:          "full history opt out with depth 0",
 			depthOpt:      []int{0},
 			url:           "https://github.com/kubescape/kubescape/",
 			wantDepth:     0,
@@ -234,7 +234,7 @@ func TestCloneRepoShallowDepthOptions(t *testing.T) {
 			depthOpt:      []int{-1},
 			url:           "https://github.com/kubescape/kubescape/",
 			wantDepth:     DefaultGitCloneDepth,
-			wantSingle:    false,
+			wantSingle:    true,
 			wantRefBranch: "",
 		},
 	}

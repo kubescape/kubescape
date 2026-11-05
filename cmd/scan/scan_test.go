@@ -1826,7 +1826,7 @@ func TestGetScanCommand_GitCloneDepthFlagRegistered(t *testing.T) {
 	f := cmd.PersistentFlags().Lookup("git-clone-depth")
 	require.NotNil(t, f, "--git-clone-depth flag must be registered on the scan command")
 	assert.Equal(t, "int", f.Value.Type(), "--git-clone-depth must be an integer flag")
-	assert.Equal(t, "0", f.DefValue, "--git-clone-depth default must be 0 (full history)")
+	assert.Equal(t, "1", f.DefValue, "--git-clone-depth default must be 1 (shallow clone)")
 }
 
 func TestGetScanCommand_GitCloneDepthFlagParsed(t *testing.T) {
@@ -1835,8 +1835,8 @@ func TestGetScanCommand_GitCloneDepthFlagParsed(t *testing.T) {
 		flagVal string
 		want    string
 	}{
-		{"default full history depth", "0", "0"},
-		{"opt-in shallow clone", "1", "1"},
+		{"default shallow depth", "1", "1"},
+		{"full commit history opt-out", "0", "0"},
 		{"custom shallow depth", "5", "5"},
 	}
 
@@ -1881,9 +1881,9 @@ func TestGetScanCommand_GitCloneDepthReachesScanInfo(t *testing.T) {
 		args []string
 		want int
 	}{
-		{name: "default full history depth", args: []string{}, want: 0},
+		{name: "default shallow depth", args: []string{}, want: 1},
 		{name: "explicit shallow depth", args: []string{"--git-clone-depth", "1"}, want: 1},
-		{name: "explicit full history depth", args: []string{"--git-clone-depth", "0"}, want: 0},
+		{name: "full history opt-out", args: []string{"--git-clone-depth", "0"}, want: 0},
 		{name: "custom depth", args: []string{"--git-clone-depth", "5"}, want: 5},
 	}
 
