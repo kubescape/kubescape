@@ -152,6 +152,7 @@ func getImageCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Command 
 				Exceptions:         scanInfo.UseExceptions,
 				UseDefaultMatchers: scanInfo.UseDefaultMatchers,
 			}
+			scanInfo.InputPatterns = args
 
 			// The invocation is valid from this point on. Runtime and result-gate
 			// failures should not print command usage.

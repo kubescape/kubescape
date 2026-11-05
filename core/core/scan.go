@@ -5,7 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
+	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -261,6 +264,17 @@ func GetOutputPrinters(scanInfo *cautils.ScanInfo, ctx context.Context, clusterN
 		formats = append(formats, format)
 	}
 
+	outputPaths := make([]string, 0, len(resolvedPaths))
+	for p := range resolvedPaths {
+		outputPaths = append(outputPaths, p)
+	}
+	slices.Sort(outputPaths)
+	for _, path := range outputPaths {
+		if err := validateScanOutputSafety(path, scanInfo); err != nil {
+			return nil, err
+		}
+	}
+
 	outputPrinters := make([]printer.IPrinter, 0, len(formats))
 	for _, format := range formats {
 		printerHandler := resultshandling.NewPrinter(ctx, format, scanInfo, clusterName)
@@ -303,6 +317,142 @@ func fileExtForFormat(format string) string {
 		return ext
 	}
 	return printer.PrettyOutputExt
+}
+
+// validateScanOutputSafety ensures an output destination does not overwrite an
+// input manifest, baseline report, exceptions file, or controls configuration.
+// SetWriter truncates the destination file immediately on open with O_TRUNC, so
+// an alias to any of these input sources would destroy user data before the scan
+// can read or compare it.
+func validateScanOutputSafety(outputFile string, scanInfo *cautils.ScanInfo) error {
+	if outputFile == "" || outputFile == os.DevNull || scanInfo == nil {
+		return nil
+	}
+	destInfo, err := os.Stat(outputFile)
+	if err != nil {
+		// If the output file does not exist yet (or cannot be stat-ed as an existing file),
+		// it cannot overwrite an existing input or configuration file.
+		return nil
+	}
+
+	check := func(label, inputPath string) error {
+		if strings.TrimSpace(inputPath) == "" {
+			return nil
+		}
+		info, err := os.Stat(inputPath)
+		if err != nil {
+			return nil
+		}
+		if os.SameFile(destInfo, info) {
+			return fmt.Errorf("output path %q would overwrite %s %q; choose a different output file", outputFile, label, inputPath)
+		}
+		return nil
+	}
+
+	if err := check("baseline report", scanInfo.Baseline); err != nil {
+		return err
+	}
+	if err := check("exceptions file", scanInfo.UseExceptions); err != nil {
+		return err
+	}
+	if err := check("controls configuration", scanInfo.ControlsInputs); err != nil {
+		return err
+	}
+	if err := check("input manifest", scanInfo.FilePath); err != nil {
+		return err
+	}
+	if err := check("custom rules", scanInfo.CustomRules); err != nil {
+		return err
+	}
+	if err := check("Helm chart", scanInfo.ChartPath); err != nil {
+		return err
+	}
+	for _, valFile := range scanInfo.HelmValueFiles {
+		if err := check("Helm values file", valFile); err != nil {
+			return err
+		}
+	}
+
+	for _, pattern := range scanInfo.InputPatterns {
+		if strings.TrimSpace(pattern) == "" {
+			continue
+		}
+		rawPath := pattern
+		if strings.HasPrefix(rawPath, "docker-archive:") {
+			rawPath = strings.TrimPrefix(rawPath, "docker-archive:")
+		} else if strings.HasPrefix(rawPath, "oci-archive:") {
+			rawPath = strings.TrimPrefix(rawPath, "oci-archive:")
+		}
+
+		if rawPath == "-" {
+			if file, ok := any(os.Stdin).(*os.File); ok {
+				if stdinInfo, err := file.Stat(); err == nil && !stdinInfo.IsDir() {
+					if os.SameFile(destInfo, stdinInfo) {
+						return fmt.Errorf("output path %q would overwrite stdin input; choose a different output file", outputFile)
+					}
+				}
+			}
+			continue
+		}
+
+		info, err := os.Stat(rawPath)
+		if err == nil {
+			if !info.IsDir() {
+				if os.SameFile(destInfo, info) {
+					label := "input manifest"
+					if scanInfo.ScanType == cautils.ScanTypeImage {
+						label = "input image"
+					}
+					return fmt.Errorf("output path %q would overwrite %s %q; choose a different output file", outputFile, label, pattern)
+				}
+			} else {
+				// Directory input: check if destination is a manifest file within the directory.
+				var foundErr error
+				_ = filepath.WalkDir(rawPath, func(source string, d fs.DirEntry, walkErr error) error {
+					if walkErr != nil || foundErr != nil {
+						return filepath.SkipDir
+					}
+					if d.IsDir() {
+						if d.Name() != "." && strings.HasPrefix(d.Name(), ".") {
+							return filepath.SkipDir
+						}
+						return nil
+					}
+					ext := strings.ToLower(filepath.Ext(d.Name()))
+					if ext != ".yaml" && ext != ".yml" && ext != ".json" {
+						return nil
+					}
+					entryInfo, statErr := d.Info()
+					if statErr != nil {
+						return nil
+					}
+					if os.SameFile(destInfo, entryInfo) {
+						foundErr = fmt.Errorf("output path %q would overwrite input manifest %q; choose a different output file", outputFile, source)
+						return fs.SkipAll
+					}
+					return nil
+				})
+				if foundErr != nil {
+					return foundErr
+				}
+			}
+			continue
+		}
+
+		if strings.ContainsAny(rawPath, "*?[]") {
+			if matches, globErr := filepath.Glob(rawPath); globErr == nil {
+				for _, match := range matches {
+					if matchInfo, err := os.Stat(match); err == nil && !matchInfo.IsDir() {
+						if os.SameFile(destInfo, matchInfo) {
+							return fmt.Errorf("output path %q would overwrite input manifest %q; choose a different output file", outputFile, match)
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return nil
 }
 
 // collectPolicies pins the shared handler for exactly as long as its caches are

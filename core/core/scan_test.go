@@ -558,6 +558,332 @@ func TestGetOutputPrintersRejectsSBOMMultipartExtensionCollisions(t *testing.T) 
 	}
 }
 
+func TestGetOutputPrinters_OutputSafetyRejectsInputManifestOverwrite(t *testing.T) {
+	manifestContent := []byte("apiVersion: v1\nkind: Pod\nmetadata:\n  name: nginx\n")
+
+	t.Run("direct file path", func(t *testing.T) {
+		dir := t.TempDir()
+		manifest := filepath.Join(dir, "pod.yaml")
+		require.NoError(t, os.WriteFile(manifest, manifestContent, 0o600))
+
+		scanInfo := &cautils.ScanInfo{
+			ScanType:      cautils.ScanTypeControl,
+			Format:        printer.YamlFormat,
+			Output:        manifest,
+			InputPatterns: []string{manifest},
+		}
+
+		printers, err := GetOutputPrinters(scanInfo, context.Background(), "test-cluster")
+		require.ErrorContains(t, err, "would overwrite input manifest")
+		assert.Nil(t, printers)
+
+		got, err := os.ReadFile(manifest)
+		require.NoError(t, err)
+		assert.Equal(t, manifestContent, got, "input manifest content must be preserved intact")
+	})
+
+	t.Run("relative path", func(t *testing.T) {
+		dir := t.TempDir()
+		manifest := filepath.Join(dir, "pod.yaml")
+		require.NoError(t, os.WriteFile(manifest, manifestContent, 0o600))
+
+		relPath := filepath.Join(dir, ".", "pod.yaml")
+		scanInfo := &cautils.ScanInfo{
+			ScanType:      cautils.ScanTypeControl,
+			Format:        printer.YamlFormat,
+			Output:        relPath,
+			InputPatterns: []string{manifest},
+		}
+
+		printers, err := GetOutputPrinters(scanInfo, context.Background(), "test-cluster")
+		require.ErrorContains(t, err, "would overwrite input manifest")
+		assert.Nil(t, printers)
+
+		got, err := os.ReadFile(manifest)
+		require.NoError(t, err)
+		assert.Equal(t, manifestContent, got)
+	})
+
+	t.Run("symbolic link", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("skipping symlink test on windows")
+		}
+		dir := t.TempDir()
+		manifest := filepath.Join(dir, "pod.yaml")
+		require.NoError(t, os.WriteFile(manifest, manifestContent, 0o600))
+
+		symlink := filepath.Join(dir, "symlink-pod.yaml")
+		require.NoError(t, os.Symlink(manifest, symlink))
+
+		scanInfo := &cautils.ScanInfo{
+			ScanType:      cautils.ScanTypeControl,
+			Format:        printer.YamlFormat,
+			Output:        symlink,
+			InputPatterns: []string{manifest},
+		}
+
+		printers, err := GetOutputPrinters(scanInfo, context.Background(), "test-cluster")
+		require.ErrorContains(t, err, "would overwrite input manifest")
+		assert.Nil(t, printers)
+
+		got, err := os.ReadFile(manifest)
+		require.NoError(t, err)
+		assert.Equal(t, manifestContent, got)
+	})
+
+	t.Run("hard link", func(t *testing.T) {
+		dir := t.TempDir()
+		manifest := filepath.Join(dir, "pod.yaml")
+		require.NoError(t, os.WriteFile(manifest, manifestContent, 0o600))
+
+		hardlink := filepath.Join(dir, "hardlink-pod.yaml")
+		require.NoError(t, os.Link(manifest, hardlink))
+
+		scanInfo := &cautils.ScanInfo{
+			ScanType:      cautils.ScanTypeControl,
+			Format:        printer.YamlFormat,
+			Output:        hardlink,
+			InputPatterns: []string{manifest},
+		}
+
+		printers, err := GetOutputPrinters(scanInfo, context.Background(), "test-cluster")
+		require.ErrorContains(t, err, "would overwrite input manifest")
+		assert.Nil(t, printers)
+
+		got, err := os.ReadFile(manifest)
+		require.NoError(t, err)
+		assert.Equal(t, manifestContent, got)
+	})
+
+	t.Run("manifest within scanned directory", func(t *testing.T) {
+		dir := t.TempDir()
+		subDir := filepath.Join(dir, "manifests")
+		require.NoError(t, os.MkdirAll(subDir, 0o700))
+		manifest := filepath.Join(subDir, "deploy.yaml")
+		require.NoError(t, os.WriteFile(manifest, manifestContent, 0o600))
+
+		scanInfo := &cautils.ScanInfo{
+			ScanType:      cautils.ScanTypeControl,
+			Format:        printer.YamlFormat,
+			Output:        manifest,
+			InputPatterns: []string{dir},
+		}
+
+		printers, err := GetOutputPrinters(scanInfo, context.Background(), "test-cluster")
+		require.ErrorContains(t, err, "would overwrite input manifest")
+		assert.Nil(t, printers)
+
+		got, err := os.ReadFile(manifest)
+		require.NoError(t, err)
+		assert.Equal(t, manifestContent, got)
+	})
+
+	t.Run("json manifest with json format", func(t *testing.T) {
+		dir := t.TempDir()
+		manifest := filepath.Join(dir, "pod.json")
+		require.NoError(t, os.WriteFile(manifest, []byte(`{"apiVersion":"v1","kind":"Pod"}`), 0o600))
+
+		scanInfo := &cautils.ScanInfo{
+			ScanType:      cautils.ScanTypeControl,
+			Format:        printer.JsonFormat,
+			Output:        manifest,
+			InputPatterns: []string{manifest},
+		}
+
+		printers, err := GetOutputPrinters(scanInfo, context.Background(), "test-cluster")
+		require.ErrorContains(t, err, "would overwrite input manifest")
+		assert.Nil(t, printers)
+	})
+
+	t.Run("via FilePath flag", func(t *testing.T) {
+		dir := t.TempDir()
+		manifest := filepath.Join(dir, "pod.yaml")
+		require.NoError(t, os.WriteFile(manifest, manifestContent, 0o600))
+
+		scanInfo := &cautils.ScanInfo{
+			ScanType: cautils.ScanTypeWorkload,
+			Format:   printer.YamlFormat,
+			Output:   manifest,
+			FilePath: manifest,
+		}
+
+		printers, err := GetOutputPrinters(scanInfo, context.Background(), "test-cluster")
+		require.ErrorContains(t, err, "would overwrite input manifest")
+		assert.Nil(t, printers)
+
+		got, err := os.ReadFile(manifest)
+		require.NoError(t, err)
+		assert.Equal(t, manifestContent, got)
+	})
+}
+
+func TestGetOutputPrinters_OutputSafetyRejectsBaselineOverwrite(t *testing.T) {
+	baselineContent := []byte(`{"baseline":"report"}`)
+
+	t.Run("exact baseline path", func(t *testing.T) {
+		dir := t.TempDir()
+		baseline := filepath.Join(dir, "base.json")
+		require.NoError(t, os.WriteFile(baseline, baselineContent, 0o600))
+
+		scanInfo := &cautils.ScanInfo{
+			ScanType: cautils.ScanTypeFramework,
+			Format:   printer.JsonFormat,
+			Output:   baseline,
+			Baseline: baseline,
+		}
+
+		printers, err := GetOutputPrinters(scanInfo, context.Background(), "test-cluster")
+		require.ErrorContains(t, err, "would overwrite baseline report")
+		assert.Nil(t, printers)
+
+		got, err := os.ReadFile(baseline)
+		require.NoError(t, err)
+		assert.Equal(t, baselineContent, got, "baseline report must remain untouched")
+	})
+
+	t.Run("relative baseline path", func(t *testing.T) {
+		dir := t.TempDir()
+		baseline := filepath.Join(dir, "base.json")
+		require.NoError(t, os.WriteFile(baseline, baselineContent, 0o600))
+
+		relPath := filepath.Join(dir, ".", "base.json")
+		scanInfo := &cautils.ScanInfo{
+			ScanType: cautils.ScanTypeFramework,
+			Format:   printer.JsonFormat,
+			Output:   relPath,
+			Baseline: baseline,
+		}
+
+		printers, err := GetOutputPrinters(scanInfo, context.Background(), "test-cluster")
+		require.ErrorContains(t, err, "would overwrite baseline report")
+		assert.Nil(t, printers)
+
+		got, err := os.ReadFile(baseline)
+		require.NoError(t, err)
+		assert.Equal(t, baselineContent, got)
+	})
+}
+
+func TestGetOutputPrinters_OutputSafetyRejectsExceptionsAndConfigOverwrite(t *testing.T) {
+	content := []byte(`{"config":"data"}`)
+
+	t.Run("exceptions file", func(t *testing.T) {
+		dir := t.TempDir()
+		exc := filepath.Join(dir, "exceptions.json")
+		require.NoError(t, os.WriteFile(exc, content, 0o600))
+
+		scanInfo := &cautils.ScanInfo{
+			ScanType:      cautils.ScanTypeCluster,
+			Format:        printer.JsonFormat,
+			Output:        exc,
+			UseExceptions: exc,
+		}
+
+		printers, err := GetOutputPrinters(scanInfo, context.Background(), "test-cluster")
+		require.ErrorContains(t, err, "would overwrite exceptions file")
+		assert.Nil(t, printers)
+
+		got, err := os.ReadFile(exc)
+		require.NoError(t, err)
+		assert.Equal(t, content, got)
+	})
+
+	t.Run("controls configuration", func(t *testing.T) {
+		dir := t.TempDir()
+		cfg := filepath.Join(dir, "inputs.json")
+		require.NoError(t, os.WriteFile(cfg, content, 0o600))
+
+		scanInfo := &cautils.ScanInfo{
+			ScanType:       cautils.ScanTypeCluster,
+			Format:         printer.JsonFormat,
+			Output:         cfg,
+			ControlsInputs: cfg,
+		}
+
+		printers, err := GetOutputPrinters(scanInfo, context.Background(), "test-cluster")
+		require.ErrorContains(t, err, "would overwrite controls configuration")
+		assert.Nil(t, printers)
+
+		got, err := os.ReadFile(cfg)
+		require.NoError(t, err)
+		assert.Equal(t, content, got)
+	})
+
+	t.Run("Helm values file", func(t *testing.T) {
+		dir := t.TempDir()
+		valFile := filepath.Join(dir, "values.yaml")
+		require.NoError(t, os.WriteFile(valFile, content, 0o600))
+
+		scanInfo := &cautils.ScanInfo{
+			ScanType:       cautils.ScanTypeRepo,
+			Format:         printer.YamlFormat,
+			Output:         valFile,
+			HelmValueFiles: []string{valFile},
+		}
+
+		printers, err := GetOutputPrinters(scanInfo, context.Background(), "test-cluster")
+		require.ErrorContains(t, err, "would overwrite Helm values file")
+		assert.Nil(t, printers)
+
+		got, err := os.ReadFile(valFile)
+		require.NoError(t, err)
+		assert.Equal(t, content, got)
+	})
+}
+
+func TestGetOutputPrinters_OutputSafetyAllowsNonCollidingOutputs(t *testing.T) {
+	manifestContent := []byte("apiVersion: v1\nkind: Pod\nmetadata:\n  name: nginx\n")
+
+	t.Run("new non-existent destination", func(t *testing.T) {
+		dir := t.TempDir()
+		manifest := filepath.Join(dir, "pod.yaml")
+		require.NoError(t, os.WriteFile(manifest, manifestContent, 0o600))
+
+		newOut := filepath.Join(dir, "fresh-report.json")
+		scanInfo := &cautils.ScanInfo{
+			ScanType:      cautils.ScanTypeControl,
+			Format:        printer.JsonFormat,
+			Output:        newOut,
+			InputPatterns: []string{manifest},
+		}
+
+		printers, err := GetOutputPrinters(scanInfo, context.Background(), "test-cluster")
+		require.NoError(t, err)
+		assert.NotEmpty(t, printers)
+		// Clean up writers
+		for _, p := range printers {
+			if closer, ok := p.(interface{ Close() error }); ok {
+				_ = closer.Close()
+			}
+		}
+	})
+
+	t.Run("distinct existing file from past run", func(t *testing.T) {
+		dir := t.TempDir()
+		manifest := filepath.Join(dir, "pod.yaml")
+		require.NoError(t, os.WriteFile(manifest, manifestContent, 0o600))
+
+		oldReport := filepath.Join(dir, "old-report.json")
+		require.NoError(t, os.WriteFile(oldReport, []byte(`{"old":"data"}`), 0o600))
+
+		scanInfo := &cautils.ScanInfo{
+			ScanType:      cautils.ScanTypeControl,
+			Format:        printer.JsonFormat,
+			Output:        oldReport,
+			InputPatterns: []string{manifest},
+		}
+
+		printers, err := GetOutputPrinters(scanInfo, context.Background(), "test-cluster")
+		require.NoError(t, err)
+		assert.NotEmpty(t, printers)
+		for _, p := range printers {
+			if closer, ok := p.(interface{ Close() error }); ok {
+				_ = closer.Close()
+			}
+		}
+	})
+}
+
 func TestIsPrioritizationScanType(t *testing.T) {
 	tests := []struct {
 		name cautils.ScanTypes

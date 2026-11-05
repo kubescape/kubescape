@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -15,6 +16,7 @@ import (
 	"github.com/kubescape/kubescape/v4/cmd/shared"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/cautils/getter"
+	"github.com/kubescape/kubescape/v4/core/core"
 	"github.com/kubescape/kubescape/v4/core/mocks"
 	resultshandlingpkg "github.com/kubescape/kubescape/v4/core/pkg/resultshandling"
 	v1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
@@ -736,6 +738,87 @@ func TestGetScanCommand_BaselinePreservesSpaceBearingPath(t *testing.T) {
 	})
 	errBase := cmdBase.Execute()
 	require.NoError(t, errBase)
+}
+
+func TestGetScanCommand_RejectsOutputOverwritingInputs(t *testing.T) {
+	t.Run("scan manifest with output pointing to same manifest", func(t *testing.T) {
+		dir := t.TempDir()
+		manifest := filepath.Join(dir, "pod.json")
+		require.NoError(t, os.WriteFile(manifest, []byte(`{"apiVersion":"v1","kind":"Pod"}`), 0o600))
+
+		ks := core.NewKubescape(context.Background())
+		cmd := GetScanCommand(ks)
+		cmd.SilenceUsage = true
+		cmd.SilenceErrors = true
+		cmd.SetArgs([]string{"--format", "json", "--output", manifest, manifest})
+
+		err := cmd.Execute()
+		require.ErrorContains(t, err, "would overwrite input manifest")
+
+		content, readErr := os.ReadFile(manifest)
+		require.NoError(t, readErr)
+		assert.NotEmpty(t, content, "input manifest must not be truncated")
+	})
+
+	t.Run("scan with baseline output collision", func(t *testing.T) {
+		dir := t.TempDir()
+		manifest := filepath.Join(dir, "pod.json")
+		require.NoError(t, os.WriteFile(manifest, []byte(`{"apiVersion":"v1","kind":"Pod"}`), 0o600))
+		baseline := filepath.Join(dir, "base.json")
+		baselineData := []byte(`{"baseline":"data"}`)
+		require.NoError(t, os.WriteFile(baseline, baselineData, 0o600))
+
+		ks := core.NewKubescape(context.Background())
+		cmd := GetScanCommand(ks)
+		cmd.SilenceUsage = true
+		cmd.SilenceErrors = true
+		cmd.SetArgs([]string{"--baseline", baseline, "--format", "json", "--output", baseline, manifest})
+
+		err := cmd.Execute()
+		require.ErrorContains(t, err, "would overwrite baseline report")
+
+		content, readErr := os.ReadFile(baseline)
+		require.NoError(t, readErr)
+		assert.Equal(t, baselineData, content, "baseline file must not be modified")
+	})
+
+	t.Run("scan control with output collision", func(t *testing.T) {
+		dir := t.TempDir()
+		manifest := filepath.Join(dir, "pod.json")
+		require.NoError(t, os.WriteFile(manifest, []byte(`{"apiVersion":"v1","kind":"Pod"}`), 0o600))
+
+		ks := core.NewKubescape(context.Background())
+		cmd := GetScanCommand(ks)
+		cmd.SilenceUsage = true
+		cmd.SilenceErrors = true
+		cmd.SetArgs([]string{"control", "C-0001", "--format", "json", "--output", manifest, manifest})
+
+		err := cmd.Execute()
+		require.ErrorContains(t, err, "would overwrite input manifest")
+
+		content, readErr := os.ReadFile(manifest)
+		require.NoError(t, readErr)
+		assert.NotEmpty(t, content)
+	})
+
+	t.Run("scan framework with output collision", func(t *testing.T) {
+		dir := t.TempDir()
+		manifest := filepath.Join(dir, "pod.json")
+		require.NoError(t, os.WriteFile(manifest, []byte(`{"apiVersion":"v1","kind":"Pod"}`), 0o600))
+
+		ks := core.NewKubescape(context.Background())
+		cmd := GetScanCommand(ks)
+		cmd.SilenceUsage = true
+		cmd.SilenceErrors = true
+		cmd.SetArgs([]string{"framework", "nsa", "--format", "json", "--output", manifest, manifest})
+
+		err := cmd.Execute()
+		require.ErrorContains(t, err, "would overwrite input manifest")
+
+		content, readErr := os.ReadFile(manifest)
+		require.NoError(t, readErr)
+		assert.NotEmpty(t, content)
+	})
 }
 
 // TestGetScanCommand_KubeContextsRejectedWhereUnsupported is a regression

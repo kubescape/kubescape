@@ -376,6 +376,20 @@ func TestGetScanCommand_ImageRegistryTokenAndAuthorityReachImageScan(t *testing.
 	assert.Equal(t, []string{"registry.example.com/app:tag"}, mockKubescape.imgScanInfo.Images)
 }
 
+func TestGetScanCommand_ImageScanSetsInputPatterns(t *testing.T) {
+	mockKubescape := &imageScanCaptureKubescape{}
+	cmd := GetScanCommand(mockKubescape)
+	cmd.SetArgs([]string{
+		"image",
+		"nginx:1.27",
+		"redis:7",
+	})
+
+	err := cmd.Execute()
+	assert.NoError(t, err)
+	assert.Equal(t, []string{"nginx:1.27", "redis:7"}, mockKubescape.scanInfo.InputPatterns)
+}
+
 func TestGetImageCmd_RunE_ForwardsLocalTarball(t *testing.T) {
 	mockKubescape := &imageScanCaptureKubescape{}
 	scanInfo := cautils.ScanInfo{}
