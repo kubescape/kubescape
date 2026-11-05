@@ -246,6 +246,9 @@ func (handler *HTTPHandler) runQueuedScan(scanReq *scanRequestParams) {
 			}
 		}
 		deliverScanCallback(scanReq, callbackStatusFailed, "scan cancelled")
+		// The scan never reaches core.Scan, which would otherwise remove its
+		// exceptions temp file. The worker owns the dequeued request.
+		scanReq.releaseScanInfo()
 		handler.state.releaseCancel(scanReq.scanID)
 		handler.state.setNotBusy(scanReq.scanID)
 		return
