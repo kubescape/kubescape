@@ -95,6 +95,23 @@ func TestGetDeleteCmd_RunEReturnsError(t *testing.T) {
 	assert.EqualError(t, err, "delete config failed")
 }
 
+func TestGetDeleteCmd_NilKubescape(t *testing.T) {
+	cmd := getDeleteCmd(nil)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+	cmd.SetArgs([]string{})
+
+	err := cmd.Execute()
+	require.EqualError(t, err, "uninitialized kubescape interface")
+
+	cmdWithKey := getDeleteCmd(nil)
+	cmdWithKey.SilenceUsage = true
+	cmdWithKey.SilenceErrors = true
+	cmdWithKey.SetArgs([]string{"accountID"})
+	err = cmdWithKey.Execute()
+	require.EqualError(t, err, "uninitialized kubescape interface")
+}
+
 func TestGetDeleteCacheCmd(t *testing.T) {
 	cmd := getDeleteCacheCmd()
 
