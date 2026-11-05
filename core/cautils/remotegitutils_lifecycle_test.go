@@ -29,6 +29,7 @@ func resetRepoWorkspaceState(t *testing.T) {
 	}
 	tmpDirPaths = make(map[string]string)
 	tmpDirRefs = make(map[string]int)
+	repoActiveKeys = make(map[string]string)
 	tmpDirPathsMu.Unlock()
 	cloneGroup = singleflight.Group{}
 	for _, path := range paths {
@@ -353,25 +354,31 @@ func TestScanInfoCleanupSequentialIdempotency(t *testing.T) {
 }
 
 func TestMaterializeRemoteInputsForwardsGitCloneDepth(t *testing.T) {
+	intPtr := func(v int) *int { return &v }
 	tests := []struct {
 		name      string
-		depth     int
+		depth     *int
 		wantDepth int
 	}{
 		{
-			name:      "default depth 1",
-			depth:     DefaultGitCloneDepth,
+			name:      "zero value scanInfo with nil depth defaults to 1",
+			depth:     nil,
 			wantDepth: 1,
 		},
 		{
-			name:      "custom depth 4",
-			depth:     4,
-			wantDepth: 4,
+			name:      "explicit default depth 1",
+			depth:     intPtr(DefaultGitCloneDepth),
+			wantDepth: 1,
 		},
 		{
-			name:      "full history depth 0",
-			depth:     0,
+			name:      "explicit full history depth 0",
+			depth:     intPtr(0),
 			wantDepth: 0,
+		},
+		{
+			name:      "custom depth 4",
+			depth:     intPtr(4),
+			wantDepth: 4,
 		},
 	}
 

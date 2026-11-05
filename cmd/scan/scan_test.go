@@ -1874,3 +1874,29 @@ func TestGetScanCommand_GitCloneDepthValidation(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid --git-clone-depth -1: must be zero or positive")
 }
+
+func TestGetScanCommand_GitCloneDepthReachesScanInfo(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want int
+	}{
+		{name: "default shallow depth", args: []string{}, want: 1},
+		{name: "explicit shallow depth", args: []string{"--git-clone-depth", "1"}, want: 1},
+		{name: "full history opt-out", args: []string{"--git-clone-depth", "0"}, want: 0},
+		{name: "custom depth", args: []string{"--git-clone-depth", "5"}, want: 5},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ks := &scanCallCounter{}
+			cmd := GetScanCommand(ks)
+			cmd.SilenceUsage = true
+			cmd.SetArgs(tt.args)
+			err := cmd.Execute()
+			require.ErrorContains(t, err, "scan reached")
+			require.NotNil(t, ks.lastScanInfo)
+			assert.Equal(t, tt.want, ks.lastScanInfo.EffectiveGitCloneDepth())
+		})
+	}
+}

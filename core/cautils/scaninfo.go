@@ -232,7 +232,7 @@ type ScanInfo struct {
 	ReferenceCluster          string                      // --reference-cluster: with --fleet-report, the kube context whose findings the other clusters are read against
 	KubeContextRetries        int                         // --retries: with --kube-contexts, how many more times to try a cluster whose API server never answered
 	WholeClusterPolicy        WholeClusterExecutionPolicy // Execution policy for whole-cluster controls (projected, fallback, skip, verify)
-	GitCloneDepth             int                         // Shallow clone depth for remote Git repository scans (default: 1 for tip only, 0 for full commit history)
+	GitCloneDepth             *int                        // Shallow clone depth for remote Git repository scans (default: 1 for tip only, 0 for full commit history; nil defaults to 1)
 }
 
 type WholeClusterExecutionPolicy string
@@ -301,6 +301,21 @@ func (scanInfo *ScanInfo) GetWholeClusterPolicy() WholeClusterExecutionPolicy {
 		return WholeClusterPolicyProjected
 	}
 	return p
+}
+
+// SetGitCloneDepth sets the shallow clone depth for remote Git repository scans.
+func (scanInfo *ScanInfo) SetGitCloneDepth(depth int) {
+	scanInfo.GitCloneDepth = &depth
+}
+
+// EffectiveGitCloneDepth returns the effective clone depth for remote Git repository scans.
+// When GitCloneDepth is nil (omitted by library callers or zero-value ScanInfo), it defaults
+// to DefaultGitCloneDepth (1). Explicit values, including 0 for full commit history, are preserved.
+func (scanInfo *ScanInfo) EffectiveGitCloneDepth() int {
+	if scanInfo == nil || scanInfo.GitCloneDepth == nil {
+		return DefaultGitCloneDepth
+	}
+	return *scanInfo.GitCloneDepth
 }
 
 type Getters struct {
@@ -624,6 +639,7 @@ func (scanInfo *ScanInfo) CloneForContext(kubeContext, output string) *ScanInfo 
 	clone.HostSensorEnabled = scanInfo.HostSensorEnabled.clone()
 	clone.HostSensorEnabledDefault = clonePtr(scanInfo.HostSensorEnabledDefault)
 	clone.ScanContract = cloneScanContractMetadata(scanInfo.ScanContract)
+	clone.GitCloneDepth = clonePtr(scanInfo.GitCloneDepth)
 
 	clone.ScanID = ""
 	clone.cleanups = nil
@@ -832,7 +848,7 @@ func (scanInfo *ScanInfo) MaterializeRemoteInputs(ctx context.Context) error {
 		}
 
 		originalInput := candidate
-		clonedDir, err := CloneGitRepo(&candidate, scanInfo.GitCloneDepth)
+		clonedDir, err := CloneGitRepo(&candidate, scanInfo.EffectiveGitCloneDepth())
 		if err != nil {
 			scanInfo.Cleanup()
 			return fmt.Errorf("failed to clone remote git repository %q: %w", originalInput, err)

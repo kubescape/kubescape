@@ -6,9 +6,13 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/plumbing/object"
 	giturl "github.com/kubescape/go-git-url"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -274,7 +278,26 @@ func TestCloneRepoCommitSHAFallback(t *testing.T) {
 			var capturedOpts *git.CloneOptions
 			useFakeClone(t, func(path string, _ bool, options *git.CloneOptions) (*git.Repository, error) {
 				capturedOpts = options
-				return initializeCloneWorkspace(path, options)
+				repo, err := initializeCloneWorkspace(path, options)
+				if err != nil {
+					return nil, err
+				}
+				// Add a default-branch tip after the target commit so initial HEAD differs from commitSHA.
+				worktree, err := repo.Worktree()
+				if err != nil {
+					return nil, err
+				}
+				if err := os.WriteFile(filepath.Join(path, "tip.yaml"), []byte("kind: Secret\n"), 0o600); err != nil {
+					return nil, err
+				}
+				if _, err := worktree.Add("tip.yaml"); err != nil {
+					return nil, err
+				}
+				signature := &object.Signature{Name: "test", Email: "test@example.com", When: time.Unix(2, 0)}
+				if _, err := worktree.Commit("default branch tip", &git.CommitOptions{Author: signature, Committer: signature}); err != nil {
+					return nil, err
+				}
+				return repo, nil
 			})
 
 			gitURL := authenticatedGitURL(t, u)
@@ -286,6 +309,13 @@ func TestCloneRepoCommitSHAFallback(t *testing.T) {
 			assert.Equal(t, 0, capturedOpts.Depth, "commit SHA must fall back to full clone Depth=0")
 			assert.False(t, capturedOpts.SingleBranch, "commit SHA must not enforce single branch")
 			assert.Empty(t, capturedOpts.ReferenceName, "commit SHA must not set branch reference name")
+
+			repo, err := git.PlainOpen(tempDir)
+			require.NoError(t, err)
+			openedHead, err := repo.Head()
+			require.NoError(t, err)
+			assert.Equal(t, commitSHA, openedHead.Hash().String(), "worktree HEAD must be checked out at the requested commit")
+
 			require.NoError(t, ReleaseClonedRepo(u))
 		})
 	}
@@ -297,14 +327,41 @@ func TestRepoWorkspaceKeyIsolatesCommitSHAs(t *testing.T) {
 	master := authenticatedGitURL(t, "https://github.com/kubescape/kubescape/tree/master")
 	root := authenticatedGitURL(t, "https://github.com/kubescape/kubescape")
 
-	keyA := repoWorkspaceKey(shaA)
-	keyB := repoWorkspaceKey(shaB)
-	keyMaster := repoWorkspaceKey(master)
-	keyRoot := repoWorkspaceKey(root)
+	keyA := repoWorkspaceKey(shaA, 1)
+	keyB := repoWorkspaceKey(shaB, 1)
+	keyMaster := repoWorkspaceKey(master, 1)
+	keyRoot := repoWorkspaceKey(root, 1)
+	keyRootFull := repoWorkspaceKey(root, 0)
 
 	assert.NotEqual(t, keyA, keyB, "different commit SHAs must have distinct workspace keys")
 	assert.NotEqual(t, keyA, keyMaster, "commit SHA must not share workspace key with master branch")
 	assert.NotEqual(t, keyA, keyRoot, "commit SHA must not share workspace key with root URL")
+	assert.NotEqual(t, keyRoot, keyRootFull, "different clone depths must produce distinct workspace keys")
+}
+
+func TestCloneRepo_DifferentDepthsDoNotReuseWorkspace(t *testing.T) {
+	resetRepoWorkspaceState(t)
+	var cloneCalls int
+	useFakeClone(t, func(path string, _ bool, options *git.CloneOptions) (*git.Repository, error) {
+		cloneCalls++
+		return initializeCloneWorkspace(path, options)
+	})
+
+	gitURL := authenticatedGitURL(t, "https://github.com/kubescape/kubescape/")
+
+	// Clone 1: shallow depth 1
+	path1, err := cloneRepo(gitURL, 1)
+	require.NoError(t, err)
+	assert.Equal(t, 1, cloneCalls)
+
+	// Clone 2: full history depth 0 - must execute a second clone, not reuse depth 1
+	path2, err := cloneRepo(gitURL, 0)
+	require.NoError(t, err)
+	assert.Equal(t, 2, cloneCalls, "different clone depths must not reuse the same workspace")
+	assert.NotEqual(t, path1, path2, "workspaces for different depths must have distinct directories")
+
+	require.NoError(t, ReleaseClonedRepo("https://github.com/kubescape/kubescape/", 1))
+	require.NoError(t, ReleaseClonedRepo("https://github.com/kubescape/kubescape/", 0))
 }
 
 func TestCloneGitRepoPassesDepth(t *testing.T) {

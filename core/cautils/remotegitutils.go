@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/config"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/protocol/packp/capability"
 	"github.com/go-git/go-git/v5/plumbing/transport"
@@ -32,17 +33,20 @@ const (
 var (
 	tmpDirPaths      = make(map[string]string)
 	tmpDirRefs       = make(map[string]int)
+	repoActiveKeys   = make(map[string]string)
 	tmpDirPathsMu    sync.Mutex
 	cloneGroup       singleflight.Group
 	plainClone       = git.PlainClone
 	gitTransportOnce sync.Once
-	hexShaRegex      = regexp.MustCompile(`^[0-9a-fA-F]{40}$|^[0-9a-fA-F]{64}$`)
+	hexShaRegex      = regexp.MustCompile(`^[0-9a-fA-F]{40}$`)
 )
 
+// isCommitSHA checks whether a string is a 40-character hexadecimal Git commit SHA.
 func isCommitSHA(s string) bool {
 	return hexShaRegex.MatchString(s)
 }
 
+// extractCommitSHA extracts the target commit SHA from a giturl API object, if present.
 func extractCommitSHA(gitURL giturl.IGitAPI) string {
 	if gitURL.GetBranchName() == "commit" && isCommitSHA(gitURL.GetPath()) {
 		return gitURL.GetPath()
@@ -60,7 +64,8 @@ func hashRepoURL(repoURL string) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-func repoWorkspaceKey(gitURL giturl.IGitAPI) string {
+// repoBaseKey returns a hash key identifying the repository URL and branch or commit SHA.
+func repoBaseKey(gitURL giturl.IGitAPI) string {
 	cloneURL := gitURL.GetHttpCloneURL()
 	if commitSHA := extractCommitSHA(gitURL); commitSHA != "" {
 		return hashRepoURL(cloneURL + "\x00" + commitSHA)
@@ -69,6 +74,16 @@ func repoWorkspaceKey(gitURL giturl.IGitAPI) string {
 		return hashRepoURL(cloneURL)
 	}
 	return hashRepoURL(cloneURL + "\x00" + gitURL.GetBranchName())
+}
+
+// repoWorkspaceKey returns a hash key identifying the repository, branch/commit, and effective clone depth.
+func repoWorkspaceKey(gitURL giturl.IGitAPI, depthOpt ...int) string {
+	depth := DefaultGitCloneDepth
+	if len(depthOpt) > 0 {
+		depth = depthOpt[0]
+	}
+	baseKey := repoBaseKey(gitURL)
+	return hashRepoURL(fmt.Sprintf("%s\x00depth:%d", baseKey, depth))
 }
 
 func getDirPath(repoURL string) string {
@@ -186,7 +201,16 @@ func cloneRepo(gitURL giturl.IGitAPI, depthOpt ...int) (string, error) {
 	})
 
 	cloneURL := gitURL.GetHttpCloneURL()
-	key := repoWorkspaceKey(gitURL)
+	commitSHA := extractCommitSHA(gitURL)
+	effectiveDepth := depth
+	if commitSHA != "" {
+		effectiveDepth = 0
+	} else if effectiveDepth < 0 {
+		effectiveDepth = DefaultGitCloneDepth
+	}
+
+	key := repoWorkspaceKey(gitURL, effectiveDepth)
+	baseKey := repoBaseKey(gitURL)
 	if path := reserveWorkspace(key); path != "" {
 		return path, nil
 	}
@@ -227,17 +251,13 @@ func cloneRepo(gitURL giturl.IGitAPI, depthOpt ...int) (string, error) {
 		}
 
 		// Clone option
-		commitSHA := extractCommitSHA(gitURL)
 		cloneOpts := git.CloneOptions{URL: cloneURL, Auth: auth}
 		if commitSHA != "" {
 			// Raw commit SHAs cannot be fetched via branch references (refs/heads/<sha>).
 			// Fall back to a full clone (Depth = 0) and check out the commit SHA in the worktree.
 			cloneOpts.Depth = 0
 		} else {
-			if depth < 0 {
-				depth = DefaultGitCloneDepth
-			}
-			cloneOpts.Depth = depth
+			cloneOpts.Depth = effectiveDepth
 			cloneOpts.SingleBranch = true
 			if gitURL.GetBranchName() != "" {
 				cloneOpts.ReferenceName = plumbing.NewBranchReferenceName(gitURL.GetBranchName())
@@ -251,17 +271,33 @@ func cloneRepo(gitURL giturl.IGitAPI, depthOpt ...int) (string, error) {
 		}
 
 		if commitSHA != "" && repo != nil {
+			hash := plumbing.NewHash(commitSHA)
+			if _, err := repo.CommitObject(hash); err != nil {
+				rem, remErr := repo.Remote("origin")
+				if remErr != nil {
+					return "", fmt.Errorf("failed to get origin remote for %s: %w", gitURL.GetRepoName(), remErr)
+				}
+				fetchErr := rem.Fetch(&git.FetchOptions{
+					Auth:     auth,
+					RefSpecs: []config.RefSpec{config.RefSpec(fmt.Sprintf("%s:%s", commitSHA, commitSHA))},
+				})
+				if fetchErr != nil && !errors.Is(fetchErr, git.NoErrAlreadyUpToDate) {
+					return "", fmt.Errorf("failed to fetch commit %s in %s: %w", commitSHA, gitURL.GetRepoName(), fetchErr)
+				}
+			}
+
 			wt, err := repo.Worktree()
 			if err != nil {
 				return "", fmt.Errorf("failed to get worktree for %s: %w", gitURL.GetRepoName(), err)
 			}
-			if err := wt.Checkout(&git.CheckoutOptions{Hash: plumbing.NewHash(commitSHA)}); err != nil {
+			if err := wt.Checkout(&git.CheckoutOptions{Hash: hash}); err != nil {
 				return "", fmt.Errorf("failed to checkout commit %s in %s: %w", commitSHA, gitURL.GetRepoName(), err)
 			}
 		}
 
 		tmpDirPathsMu.Lock()
 		tmpDirPaths[key] = tmpDir
+		repoActiveKeys[baseKey] = key
 		tmpDirPathsMu.Unlock()
 		keepWorkspace = true
 		return tmpDir, nil
@@ -276,14 +312,27 @@ func cloneRepo(gitURL giturl.IGitAPI, depthOpt ...int) (string, error) {
 
 // ReleaseClonedRepo releases one scan's ownership of a cloned repository. The
 // workspace is deleted only after the last scan using it has finished.
-func ReleaseClonedRepo(path string) error {
+func ReleaseClonedRepo(path string, depthOpt ...int) error {
 	gitURL, err := giturl.NewGitAPI(path)
 	if err != nil {
 		return err
 	}
-	key := repoWorkspaceKey(gitURL)
 
 	tmpDirPathsMu.Lock()
+	baseKey := repoBaseKey(gitURL)
+	var key string
+	if len(depthOpt) > 0 {
+		key = repoWorkspaceKey(gitURL, depthOpt[0])
+	} else {
+		key = repoActiveKeys[baseKey]
+		if key == "" {
+			key = repoWorkspaceKey(gitURL, DefaultGitCloneDepth)
+			if tmpDirPaths[key] == "" {
+				key = baseKey
+			}
+		}
+	}
+
 	workspace := tmpDirPaths[key]
 	if workspace == "" {
 		tmpDirPathsMu.Unlock()
@@ -296,6 +345,9 @@ func ReleaseClonedRepo(path string) error {
 	}
 	delete(tmpDirPaths, key)
 	delete(tmpDirRefs, key)
+	if repoActiveKeys[baseKey] == key {
+		delete(repoActiveKeys, baseKey)
+	}
 	tmpDirPathsMu.Unlock()
 
 	if err := os.RemoveAll(workspace); err != nil {
@@ -333,12 +385,34 @@ func CloneGitRepo(path *string, depthOpt ...int) (string, error) {
 	return clonedDir, nil
 }
 
+// GetClonedPath returns the temporary workspace directory for a cloned repository URL.
 func GetClonedPath(path string) string {
-
 	gitURL, err := giturl.NewGitAPI(path)
 	if err != nil {
 		return ""
 	}
 
-	return getDirPathByKey(repoWorkspaceKey(gitURL))
+	tmpDirPathsMu.Lock()
+	defer tmpDirPathsMu.Unlock()
+
+	baseKey := repoBaseKey(gitURL)
+	key := repoActiveKeys[baseKey]
+	if key == "" {
+		key = repoWorkspaceKey(gitURL, DefaultGitCloneDepth)
+		if tmpDirPaths[key] == "" {
+			key = baseKey
+		}
+	}
+
+	p := tmpDirPaths[key]
+	if p == "" {
+		return ""
+	}
+	if info, err := os.Stat(p); err != nil || !info.IsDir() {
+		delete(tmpDirPaths, key)
+		delete(tmpDirRefs, key)
+		delete(repoActiveKeys, baseKey)
+		return ""
+	}
+	return p
 }
