@@ -33,8 +33,38 @@ type cacheWriteState struct {
 	deferred bool
 	// records are the cached rule evaluations to verify.
 	records []ruleEvaluationRecord
+	// lookupHashes holds, by resource ID, the hash every rule of the control
+	// looked the object up with: the hash of the object the rules evaluated
+	// or replayed. "" marks an object looked up with different hashes, or
+	// whose hash could not be computed.
+	lookupHashes map[string]string
 	// candidate is set by processControl when deferred is set.
 	candidate *cacheCandidate
+}
+
+// observeLookup records that the object with resource ID id was looked up in
+// the cache with hash.
+func (s *cacheWriteState) observeLookup(id, hash string) {
+	if s == nil {
+		return
+	}
+	if s.lookupHashes == nil {
+		s.lookupHashes = map[string]string{}
+	}
+	if previous, seen := s.lookupHashes[id]; seen && previous != hash {
+		hash = ""
+	}
+	s.lookupHashes[id] = hash
+}
+
+// lookupHash returns the one hash the object with resource ID id was looked up
+// with, and false if there is none.
+func (s *cacheWriteState) lookupHash(id string) (string, bool) {
+	if s == nil {
+		return "", false
+	}
+	hash := s.lookupHashes[id]
+	return hash, hash != ""
 }
 
 func (s *cacheWriteState) markUnsafe() {
@@ -102,6 +132,9 @@ type cacheCandidate struct {
 	controlID string
 	records   []ruleEvaluationRecord
 	entries   []cacheCandidateEntry
+	// unbound counts the results left out of entries because no hash could
+	// be tied to the object they were computed from.
+	unbound int
 }
 
 type cacheCandidateEntry struct {
@@ -110,18 +143,30 @@ type cacheCandidateEntry struct {
 	verdict    resourcesresults.ResourceAssociatedControl
 }
 
-// newCacheCandidate captures the control's results with each resource's hash
-// as it is when the control finishes, as the cache write always has.
-func (opap *OPAProcessor) newCacheCandidate(controlID string, records []ruleEvaluationRecord, results map[string]resourcesresults.ResourceAssociatedControl) *cacheCandidate {
-	candidate := &cacheCandidate{controlID: controlID, records: records}
+// newCacheCandidate captures the control's results, each under the hash its
+// object was looked up with.
+//
+// A result is a candidate only if that hash is also the hash of the object's
+// catalog entry when the control finishes. The two differ when an
+// enumerator's output, written into the catalog under its own identity,
+// replaced the object with other content, possibly another object's. A
+// verdict computed from one object must never be stored under the hash of
+// another: once the object has that content, it would be replayed with a
+// verdict that was never computed for it. A result with no single lookup hash
+// (never looked up, looked up with different hashes, or unhashable) is left
+// out too.
+func (opap *OPAProcessor) newCacheCandidate(controlID string, cacheWrite *cacheWriteState, results map[string]resourcesresults.ResourceAssociatedControl) *cacheCandidate {
+	candidate := &cacheCandidate{controlID: controlID, records: cacheWrite.records}
 	for resourceID, result := range results {
+		hash, bound := cacheWrite.lookupHash(resourceID)
 		resource, ok := opap.GetResource(resourceID)
-		if !ok {
+		if !bound || !ok || scancache.ResourceHash(resource.GetObject()) != hash {
+			candidate.unbound++
 			continue
 		}
 		candidate.entries = append(candidate.entries, cacheCandidateEntry{
 			resourceID: resourceID,
-			hash:       scancache.ResourceHash(resource.GetObject()),
+			hash:       hash,
 			verdict:    result,
 		})
 	}
@@ -231,22 +276,21 @@ func (opap *OPAProcessor) storeVerifiedCandidate(ctx context.Context, candidate 
 	if candidate == nil || opap.incrementalCache == nil {
 		return
 	}
-	if len(candidate.entries) == 0 {
-		return
-	}
-	vctx, cancel := opap.verificationContext(ctx)
-	defer cancel()
-
-	// Only objects that would be stored need verifying: each object is
-	// verified on its own, so skipping the others changes nothing stored.
-	candidates := make(map[string]struct{}, len(candidate.entries))
-	for _, entry := range candidate.entries {
-		candidates[entry.resourceID] = struct{}{}
-	}
 	unverified := map[string]struct{}{}
-	for _, record := range candidate.records {
-		for id := range opap.verifyRecord(vctx, candidate.controlID, record, candidates) {
-			unverified[id] = struct{}{}
+	if len(candidate.entries) > 0 {
+		vctx, cancel := opap.verificationContext(ctx)
+		defer cancel()
+
+		// Only objects that would be stored need verifying: each object is
+		// verified on its own, so skipping the others changes nothing stored.
+		candidates := make(map[string]string, len(candidate.entries))
+		for _, entry := range candidate.entries {
+			candidates[entry.resourceID] = entry.hash
+		}
+		for _, record := range candidate.records {
+			for id := range opap.verifyRecord(vctx, candidate.controlID, record, candidates) {
+				unverified[id] = struct{}{}
+			}
 		}
 	}
 
@@ -258,18 +302,20 @@ func (opap *OPAProcessor) storeVerifiedCandidate(ctx context.Context, candidate 
 		opap.incrementalCache.Put(candidate.controlID, entry.resourceID, entry.hash, entry.verdict)
 		stored++
 	}
-	if len(unverified) > 0 {
+	if len(unverified) > 0 || candidate.unbound > 0 {
 		logger.L().Ctx(ctx).Debug("incremental cache: objects not stored because their verdicts could not be verified per object",
 			helpers.String("controlID", candidate.controlID),
 			helpers.Int("stored", stored),
-			helpers.Int("notStored", len(unverified)))
+			helpers.Int("notStored", len(unverified)),
+			helpers.Int("notBoundToTheirHash", candidate.unbound))
 	}
 }
 
 // verifyRecord returns the objects of one rule evaluation that must not be
-// stored. Evaluated objects outside candidates are not stored either way and
+// stored. candidates maps the objects to be stored to the hash they would be
+// stored under; evaluated objects outside it are not stored either way and
 // are skipped.
-func (opap *OPAProcessor) verifyRecord(ctx context.Context, controlID string, record ruleEvaluationRecord, candidates map[string]struct{}) map[string]struct{} {
+func (opap *OPAProcessor) verifyRecord(ctx context.Context, controlID string, record ruleEvaluationRecord, candidates map[string]string) map[string]struct{} {
 	rejected := map[string]struct{}{}
 
 	// A verdict for an object that was neither evaluated nor replayed was
@@ -283,7 +329,14 @@ func (opap *OPAProcessor) verifyRecord(ctx context.Context, controlID string, re
 	}
 
 	for id, object := range record.evaluated {
-		if _, wanted := candidates[id]; !wanted {
+		hash, wanted := candidates[id]
+		if !wanted {
+			continue
+		}
+		// The verdict is verified on this object, so it may only be stored
+		// under this object's hash.
+		if scancache.ResourceHash(object) != hash {
+			rejected[id] = struct{}{}
 			continue
 		}
 		if ctx.Err() != nil {

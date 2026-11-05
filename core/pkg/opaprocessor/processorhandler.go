@@ -713,9 +713,9 @@ type evaluationScope struct {
 	residentGroups *residentIndex
 	// cacheWrite collects, for the processControl call evaluating this scope,
 	// what its rule evaluations may contribute to the incremental cache: the
-	// records verification needs, whether a rule's results must not be stored
-	// at all, and the resulting candidate (see cacheWriteState). nil outside
-	// processControl.
+	// hash each object was looked up with, the records verification needs,
+	// whether a rule's results must not be stored at all, and the resulting
+	// candidate (see cacheWriteState). nil outside processControl.
 	cacheWrite *cacheWriteState
 }
 
@@ -1678,7 +1678,7 @@ func (opap *OPAProcessor) processControl(ctx context.Context, control *reporthan
 	}
 
 	if len(ruleErrs) == 0 && opap.incrementalCache != nil && !cacheWrite.isUnsafe() && controlCacheEligible(control) {
-		candidate := opap.newCacheCandidate(control.ControlID, cacheWrite.records, resourcesAssociatedControl)
+		candidate := opap.newCacheCandidate(control.ControlID, cacheWrite, resourcesAssociatedControl)
 		if cacheWrite.deferred {
 			cacheWrite.candidate = candidate
 		} else {
@@ -1773,6 +1773,9 @@ func (opap *OPAProcessor) evaluateRuleOnScope(ctx context.Context, rule *reporth
 				continue
 			}
 			hash := scancache.ResourceHash(r.GetObject())
+			// Recorded for every object, hit or not, before the return below
+			// when everything is a hit: a stored verdict is bound to it.
+			scope.cacheWrite.observeLookup(r.GetID(), hash)
 			if cached, ok := opap.incrementalCache.Get(controlID, r.GetID(), hash); ok {
 				for _, cr := range cached.ResourceAssociatedRules {
 					if cr.Name == rule.Name {
