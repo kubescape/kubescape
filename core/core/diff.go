@@ -14,6 +14,12 @@ import (
 
 // Diff writes the diff between the two scan reports and returns the number of new or incomparable failures at or above the severity threshold; the caller decides whether to exit 1.
 func (ks *Kubescape) Diff(diffInfo *metav1.DiffInfo) (newFailures int, err error) {
+	if outputFile, explicit := diffOutputPath(diffInfo.Format, diffInfo.Output); explicit {
+		if err := validateDiffOutputSafety(outputFile, diffInfo.BaseFile, diffInfo.HeadFile); err != nil {
+			return 0, err
+		}
+	}
+
 	kind, cs, vulnerabilityChangeSet, err := diff.CompareReports(diffInfo.BaseFile, diffInfo.HeadFile, diff.Options{
 		Granularity: diff.Granularity(diffInfo.Granularity),
 	})
@@ -195,4 +201,36 @@ func diffOutputPath(format, outputFile string) (string, bool) {
 		return outputFile, true
 	}
 	return outputFile + ext, true
+}
+
+func validateDiffOutputSafety(outputFile, baseFile, headFile string) error {
+	if outputFile == "" {
+		return nil
+	}
+	destInfo, err := os.Stat(outputFile)
+	if err != nil {
+		// If the destination file does not exist (or cannot be stat-ed as an existing file),
+		// it cannot overwrite the input reports. Any path or creation errors are left to
+		// printer.GetWriterNoFallback to report.
+		return nil
+	}
+	for _, source := range []struct {
+		role string
+		path string
+	}{
+		{"base report", baseFile},
+		{"head report", headFile},
+	} {
+		if strings.TrimSpace(source.path) == "" {
+			continue
+		}
+		sourceInfo, err := os.Stat(source.path)
+		if err != nil {
+			continue
+		}
+		if os.SameFile(destInfo, sourceInfo) {
+			return fmt.Errorf("diff output %q would overwrite %s %q; choose a different output file", outputFile, source.role, source.path)
+		}
+	}
+	return nil
 }
