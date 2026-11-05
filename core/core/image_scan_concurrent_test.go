@@ -357,6 +357,30 @@ func TestScanWithRegistryMappingPreservesPlatformOnFallback(t *testing.T) {
 	assert.Equal(t, []string{"linux/arm64"}, mockSvc.platforms[mapped])
 }
 
+// TestScanWithRegistryMappingPreservesSourceSelector exercises a failed source
+// scan followed by a successful mirror scan without changing provider selection.
+func TestScanWithRegistryMappingPreservesSourceSelector(t *testing.T) {
+	for _, selector := range []string{"registry", "oci-registry", "pull", "image"} {
+		t.Run(selector, func(t *testing.T) {
+			original := selector + ":internal.registry.svc/team/app:v2"
+			mapped := selector + ":registry.example.com/team/app:v2"
+			svc := newMockImageScanService(0)
+			svc.errByImage[original] = &net.DNSError{Err: "no such host", Name: "internal.registry.svc"}
+			svc.dataByImage[mapped] = &cautils.ImageScanData{Image: mapped}
+
+			data, err := scanWithRegistryMapping(context.Background(), svc, original,
+				nil, map[string]string{"internal.registry.svc": "registry.example.com"}, nil, nil, "linux/arm64")
+
+			require.NoError(t, err)
+			require.NotNil(t, data)
+			assert.Equal(t, mapped, data.Image)
+			assert.Equal(t, "linux/arm64", data.Platform)
+			assert.Equal(t, 2, svc.scanCalls, "scan the original and then the mapped image")
+			assert.Equal(t, []string{"linux/arm64"}, svc.platforms[mapped])
+		})
+	}
+}
+
 func TestScanWithRegistryMappingReportsPlatformCapabilityError(t *testing.T) {
 	legacy := &legacyImageScanService{}
 

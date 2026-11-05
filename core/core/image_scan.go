@@ -1069,12 +1069,23 @@ func applyRegistryMapping(imgName string, registryMapping map[string]string) (st
 	if len(registryMapping) == 0 {
 		return imgName, false, nil
 	}
-	// Registry mapping can never match a non-registry input; skip parsing so
-	// archives don't produce confusing mapping errors.
-	if isNonRegistryInput(imgName) {
-		return imgName, false, nil
+	imageReference := strings.TrimSpace(imgName)
+	sourcePrefix := ""
+	if rest, selector, ok := stripRegistrySelectorScheme(imageReference); ok {
+		// Explicit registry/daemon sources bypass local-file detection, as
+		// the scanner does. Preserve the source choice on the mirror attempt.
+		imageReference, sourcePrefix = rest, selector+":"
+	} else {
+		// Registry mapping can never match a non-registry input; skip parsing
+		// so archives don't produce confusing mapping errors.
+		if isNonRegistryInput(imgName) {
+			return imgName, false, nil
+		}
+		if rest, selector := peelGenericImageSelector(imageReference); selector != "" {
+			imageReference, sourcePrefix = rest, selector+":"
+		}
 	}
-	canonicalImageName, err := cautils.NormalizeImageName(imgName)
+	canonicalImageName, err := cautils.NormalizeImageName(imageReference)
 	if err != nil {
 		return "", false, err
 	}
@@ -1086,7 +1097,7 @@ func applyRegistryMapping(imgName string, registryMapping map[string]string) (st
 		if _, err := reference.ParseNormalizedNamed(mappedName); err != nil {
 			return "", false, fmt.Errorf("invalid image reference after applying registry mapping: %w", err)
 		}
-		return mappedName, true, nil
+		return sourcePrefix + mappedName, true, nil
 	}
 	return imgName, false, nil
 }
