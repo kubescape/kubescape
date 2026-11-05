@@ -568,19 +568,30 @@ func (opap *OPAProcessor) processScope(ctx context.Context, policies *cautils.Po
 				var resourcesAssociatedControl map[string]resourcesresults.ResourceAssociatedControl
 				var err error
 
+				// The control's cache candidate is verified and stored after its
+				// timed window, so verification does not count against
+				// ControlTimeout. It still completes before this worker takes
+				// another control, and every control of this scope completes
+				// before the next scope starts, so a later read of the cache never
+				// sees an unverified verdict.
+				cacheWrite := &cacheWriteState{deferred: true}
+				controlScope := scope
+				controlScope.cacheWrite = cacheWrite
+
 				if opap.ControlTimeout > 0 {
 					cctx, cancel := context.WithTimeout(ctx, opap.ControlTimeout)
-					resourcesAssociatedControl, err = opap.processControl(cctx, &control, scope)
+					resourcesAssociatedControl, err = opap.processControl(cctx, &control, controlScope)
 					if cctx.Err() == context.DeadlineExceeded && ctx.Err() == nil {
 						opap.markControlTimedOut(&control, opap.ControlTimeout)
 						// Keep results accumulated from earlier scopes; only discard
 						// the current scope's verdicts since the control did not finish.
 						err = nil
 						resourcesAssociatedControl = nil
+						cacheWrite.candidate = nil
 					}
 					cancel()
 				} else {
-					resourcesAssociatedControl, err = opap.processControl(ctx, &control, scope)
+					resourcesAssociatedControl, err = opap.processControl(ctx, &control, controlScope)
 				}
 
 				if err != nil {
@@ -601,6 +612,10 @@ func (opap *OPAProcessor) processScope(ctx context.Context, policies *cautils.Po
 						opap.ResourcesResult[resourceID] = t
 					}
 					opap.mu.Unlock()
+				}
+
+				if cacheWrite.candidate != nil && ctx.Err() == nil {
+					opap.storeVerifiedCandidate(ctx, cacheWrite.candidate)
 				}
 			}
 		}()
@@ -696,6 +711,12 @@ type evaluationScope struct {
 	batchGroups resourceGroupIndex
 	// residentGroups indexes the resident batch, shared by every scope.
 	residentGroups *residentIndex
+	// cacheWrite collects, for the processControl call evaluating this scope,
+	// what its rule evaluations may contribute to the incremental cache: the
+	// hash each object was looked up with, the records verification needs,
+	// whether a rule's results must not be stored at all, and the resulting
+	// candidate (see cacheWriteState). nil outside processControl.
+	cacheWrite *cacheWriteState
 }
 
 // residentIndex holds the resident batch indexed for matching. Every scope is
@@ -1246,6 +1267,20 @@ func ruleCacheEligible(control *reporthandling.Control, rule *reporthandling.Pol
 	if rule.RuleLanguage == reporthandling.CELLanguage {
 		return false
 	}
+	// A verdict keyed on the resource's own hash is only reusable when nothing
+	// else the rule can reach affects it: no clock, network, registry or other
+	// external state, including through library functions.
+	if !regoSourceIsHermetic(rule.Rule) {
+		return false
+	}
+	// The enumerator runs over the same input before the rule and decides which
+	// objects the rule may report and which ones pass. It must meet the same
+	// conditions as the rule itself.
+	if enumerator := ruleEnumeratorData(rule); enumerator != "" {
+		if ruleCorrelatesInput(enumerator) || ruleReadsStatus(enumerator) || !regoSourceIsHermetic(enumerator) {
+			return false
+		}
+	}
 	return true
 }
 
@@ -1601,6 +1636,14 @@ func (opap *OPAProcessor) loggerDoneScanning() {
 // but returns a map instead, to be merged by the caller.
 func (opap *OPAProcessor) processControl(ctx context.Context, control *reporthandling.Control, scope evaluationScope) (map[string]resourcesresults.ResourceAssociatedControl, error) {
 	resourcesAssociatedControl := make(map[string]resourcesresults.ResourceAssociatedControl)
+	// processScope passes its own state to verify and store the control's
+	// cache candidate after the control's timed window; other callers get one
+	// that is verified and stored before processControl returns.
+	cacheWrite := scope.cacheWrite
+	if cacheWrite == nil {
+		cacheWrite = &cacheWriteState{}
+		scope.cacheWrite = cacheWrite
+	}
 
 	var ruleErrs []error
 	for i := range control.Rules {
@@ -1634,14 +1677,12 @@ func (opap *OPAProcessor) processControl(ctx context.Context, control *reporthan
 		}
 	}
 
-	if len(ruleErrs) == 0 && opap.incrementalCache != nil && controlCacheEligible(control) {
-		for resourceID, result := range resourcesAssociatedControl {
-			resource, ok := opap.GetResource(resourceID)
-			if !ok {
-				continue
-			}
-			hash := scancache.ResourceHash(resource.GetObject())
-			opap.incrementalCache.Put(control.ControlID, resourceID, hash, result)
+	if len(ruleErrs) == 0 && opap.incrementalCache != nil && !cacheWrite.isUnsafe() && controlCacheEligible(control) {
+		candidate := opap.newCacheCandidate(control.ControlID, cacheWrite, resourcesAssociatedControl)
+		if cacheWrite.deferred {
+			cacheWrite.candidate = candidate
+		} else {
+			opap.storeVerifiedCandidate(ctx, candidate)
 		}
 	}
 	return resourcesAssociatedControl, errors.Join(ruleErrs...)
@@ -1667,6 +1708,7 @@ func (opap *OPAProcessor) processRule(ctx context.Context, rule *reporthandling.
 	merged := make(map[string]*resourcesresults.ResourceAssociatedRule)
 	var evalErrs []error
 	for _, s := range opap.evaluationScopes() {
+		s.cacheWrite = scope.cacheWrite
 		scoped, err := opap.processRuleOnScope(ctx, rule, fixedControlInputs, s, control)
 		if err != nil {
 			evalErrs = append(evalErrs, err)
@@ -1680,16 +1722,50 @@ func (opap *OPAProcessor) processRule(ctx context.Context, rule *reporthandling.
 
 // processRuleOnScope evaluates a single policy rule against a single scope,
 // with some extra fixed control inputs.
+//
+// With the incremental cache, the verdicts of unchanged objects are replayed
+// and only the other objects are evaluated. When a finding names an object
+// that was not evaluated (see precheckCacheAttribution), the control's
+// results for this scope are kept out of the cache, and if replayed verdicts
+// were mixed in, the rule alone is evaluated again without the cache. A
+// violation is only reported for an evaluation that returned no error, and
+// such an evaluation writes nothing to InfoMap, so the second evaluation
+// leaves no state of the first one behind. If the second evaluation fails,
+// its error outcome is returned: the first results are never. Otherwise the
+// evaluation is recorded for the per-object verification that decides what is
+// stored (see storeVerifiedCandidate).
 func (opap *OPAProcessor) processRuleOnScope(ctx context.Context, rule *reporthandling.PolicyRule, fixedControlInputs map[string][]string, scope evaluationScope, control *reporthandling.Control) (map[string]*resourcesresults.ResourceAssociatedRule, error) {
+	useCache := opap.incrementalCache != nil && ruleCacheEligible(control, rule)
+	results, attribution, err := opap.evaluateRuleOnScope(ctx, rule, fixedControlInputs, scope, control, useCache)
+	if err != nil || !attribution.unsafe {
+		return results, err
+	}
+
+	scope.cacheWrite.markUnsafe()
+	logCacheAttributionViolation(ctx, control.ControlID, rule, attribution)
+	if attribution.cacheHits == 0 {
+		// Every matched object was evaluated, so the results are exact; only
+		// storing them per object is unsafe.
+		return results, nil
+	}
+	results, _, err = opap.evaluateRuleOnScope(ctx, rule, fixedControlInputs, scope, control, false)
+	return results, err
+}
+
+// evaluateRuleOnScope evaluates a rule against a scope, replaying cached
+// verdicts for unchanged objects when useCache is set and then checking that
+// the evaluated results can be stored per object.
+func (opap *OPAProcessor) evaluateRuleOnScope(ctx context.Context, rule *reporthandling.PolicyRule, fixedControlInputs map[string][]string, scope evaluationScope, control *reporthandling.Control, useCache bool) (map[string]*resourcesresults.ResourceAssociatedRule, ruleAttribution, error) {
 	resources := make(map[string]*resourcesresults.ResourceAssociatedRule)
 	controlID := control.ControlID
+	var attribution ruleAttribution
 
 	ruleRegoDependenciesData := opap.makeRegoDeps(rule.ControlConfigInputs, fixedControlInputs)
 
 	resourceToScan := scope.matchedObjects(rule)
 
 	var cacheHitIDs map[string]struct{}
-	if opap.incrementalCache != nil && ruleCacheEligible(control, rule) {
+	if useCache {
 		var toEvaluate []workloadinterface.IMetadata
 		cacheHitIDs = make(map[string]struct{})
 		for _, r := range resourceToScan {
@@ -1697,6 +1773,9 @@ func (opap *OPAProcessor) processRuleOnScope(ctx context.Context, rule *reportha
 				continue
 			}
 			hash := scancache.ResourceHash(r.GetObject())
+			// Recorded for every object, hit or not, before the return below
+			// when everything is a hit: a stored verdict is bound to it.
+			scope.cacheWrite.observeLookup(r.GetID(), hash)
 			if cached, ok := opap.incrementalCache.Get(controlID, r.GetID(), hash); ok {
 				for _, cr := range cached.ResourceAssociatedRules {
 					if cr.Name == rule.Name {
@@ -1725,8 +1804,9 @@ func (opap *OPAProcessor) processRuleOnScope(ctx context.Context, rule *reportha
 			toEvaluate = append(toEvaluate, r)
 		}
 		resourceToScan = toEvaluate
+		attribution.cacheHits = len(cacheHitIDs)
 		if len(resourceToScan) == 0 {
-			return resources, nil
+			return resources, attribution, nil
 		}
 	}
 	inputResources, err := reporthandling.RegoResourcesAggregator(
@@ -1735,11 +1815,11 @@ func (opap *OPAProcessor) processRuleOnScope(ctx context.Context, rule *reportha
 	)
 	if err != nil {
 		opap.markResourcesSkipped(resources, rule, ruleRegoDependenciesData, resourceToScan, err)
-		return resources, fmt.Errorf("aggregator failed for namespace %q: %w", scope.name, err)
+		return resources, attribution, fmt.Errorf("aggregator failed for namespace %q: %w", scope.name, err)
 	}
 
 	if len(inputResources) == 0 {
-		return resources, nil // no resources found for testing
+		return resources, attribution, nil // no resources found for testing
 	}
 
 	bufPtr := astEvalBufferPool.Get().(*[]map[string]any)
@@ -1759,7 +1839,7 @@ func (opap *OPAProcessor) processRuleOnScope(ctx context.Context, rule *reportha
 	enumeratedData, err := opap.enumerateData(ctx, rule, inputRawResources, controlID)
 	if err != nil {
 		opap.markResourcesSkipped(resources, rule, ruleRegoDependenciesData, inputResources, err)
-		return resources, fmt.Errorf("enumerator failed for namespace %q: %w", scope.name, err)
+		return resources, attribution, fmt.Errorf("enumerator failed for namespace %q: %w", scope.name, err)
 	}
 
 	inputResources = objectsenvelopes.ListMapToMeta(enumeratedData)
@@ -1822,7 +1902,7 @@ func (opap *OPAProcessor) processRuleOnScope(ctx context.Context, rule *reportha
 	ruleResponses, celOut, err := opap.runOPAOnSingleRule(ctx, rule, inputRawResources, ruleData, ruleRegoDependenciesData, controlID)
 	if err != nil {
 		opap.markResourcesSkipped(resources, rule, ruleRegoDependenciesData, inputResources, err)
-		return resources, fmt.Errorf("rego eval failed for namespace %q: %w", scope.name, err)
+		return resources, attribution, fmt.Errorf("rego eval failed for namespace %q: %w", scope.name, err)
 	}
 
 	// Record CEL resources with unknown verdicts as skipped before pass-inference.
@@ -1841,14 +1921,8 @@ func (opap *OPAProcessor) processRuleOnScope(ctx context.Context, rule *reportha
 	// find them and attach paths/status without losing Name/ControlConfigurations.
 	failedIDs := make(map[string]struct{})
 	for _, ruleResponse := range ruleResponses {
-		for _, failedResource := range objectsenvelopes.ListMapToMeta(ruleResponse.GetFailedResources()) {
-			if opap.skipNamespace(failedResource.GetNamespace()) {
-				continue
-			}
+		for _, failedResource := range opap.attributedFailedResources(ruleResponse, enumeratedIDs) {
 			id := failedResource.GetID()
-			if !inEnumeratedScope(enumeratedIDs, failedResource, id) {
-				continue
-			}
 			failedIDs[id] = struct{}{}
 			if _, exists := resources[id]; exists {
 				continue
@@ -1886,14 +1960,7 @@ func (opap *OPAProcessor) processRuleOnScope(ctx context.Context, rule *reportha
 
 	// ruleResponse to ruleResult
 	for _, ruleResponse := range ruleResponses {
-		failedResources := objectsenvelopes.ListMapToMeta(ruleResponse.GetFailedResources())
-		for _, failedResource := range failedResources {
-			if opap.skipNamespace(failedResource.GetNamespace()) {
-				continue
-			}
-			if !inEnumeratedScope(enumeratedIDs, failedResource, failedResource.GetID()) {
-				continue
-			}
+		for _, failedResource := range opap.attributedFailedResources(ruleResponse, enumeratedIDs) {
 			var ruleResult *resourcesresults.ResourceAssociatedRule
 			if r, found := resources[failedResource.GetID()]; found {
 				ruleResult = r
@@ -1923,7 +1990,20 @@ func (opap *OPAProcessor) processRuleOnScope(ctx context.Context, rule *reportha
 			resources[failedResource.GetID()] = ruleResult
 		}
 	}
-	return resources, nil
+
+	if useCache {
+		// inputRawResources is what Rego evaluated: the matched objects without
+		// the cache hits, before the enumerator. The per-object verification
+		// of these results runs later, outside the control's timed window.
+		evaluated, ok, reason := opap.precheckCacheAttribution(inputRawResources, ruleResponses)
+		if ok {
+			scope.cacheWrite.addRecord(newRuleEvaluationRecord(rule, ruleRegoDependenciesData, evaluated, cacheHitIDs, resources))
+		} else {
+			attribution.unsafe = true
+			attribution.reason = reason
+		}
+	}
+	return resources, attribution, nil
 }
 
 // hasUnreachableDependency reports whether controlID depends (per
@@ -2781,6 +2861,25 @@ func (opap *OPAProcessor) getCompiledRule(ctx context.Context, ruleName, ruleDat
 		return entry.compiler, entry.version, nil
 	}
 
+	compiled, version, err := compileWithRuleDependencies(ctx, ruleName, ruleData, printEnabled)
+	if err != nil {
+		return nil, 0, err
+	}
+	if version == ast.RegoV0 {
+		logger.L().Ctx(ctx).Warning("rule uses deprecated Rego v0 syntax; v0 support will be removed in a future release",
+			helpers.String("rule", ruleName))
+	}
+
+	opap.compiledModules[cacheKey] = compiledRule{compiler: compiled, version: version}
+	return compiled, version, nil
+}
+
+// compileWithRuleDependencies compiles source, registered as moduleName,
+// together with the shared rule dependencies, preferring Rego v1 and falling
+// back to v0 (see getCompiledRule). Rule evaluation and the incremental-cache
+// hermeticity analysis both compile through this function, so the analysis
+// inspects the same assembled module set that evaluation runs.
+func compileWithRuleDependencies(ctx context.Context, moduleName, source string, printEnabled bool) (*ast.Compiler, ast.RegoVersion, error) {
 	baseModules, err := getRuleDependencies(ctx)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to get rule dependencies: %w", err)
@@ -2788,29 +2887,23 @@ func (opap *OPAProcessor) getCompiledRule(ctx context.Context, ruleName, ruleDat
 
 	modules := make(map[string]string, len(baseModules)+1)
 	maps.Copy(modules, baseModules)
-	modules[ruleName] = ruleData
+	modules[moduleName] = source
 
-	version := ast.RegoV1
 	compiled, v1Err := ast.CompileModulesWithOpt(modules, ast.CompileOpts{
 		EnablePrintStatements: printEnabled,
 		ParserOptions:         ast.ParserOptions{RegoVersion: ast.RegoV1},
 	})
-	if v1Err != nil {
-		var v0Err error
-		compiled, v0Err = ast.CompileModulesWithOpt(modules, ast.CompileOpts{
-			EnablePrintStatements: printEnabled,
-			ParserOptions:         ast.ParserOptions{RegoVersion: ast.RegoV0},
-		})
-		if v0Err != nil {
-			return nil, 0, fmt.Errorf("failed to compile rule '%s': %w", ruleName, v1Err)
-		}
-		version = ast.RegoV0
-		logger.L().Ctx(ctx).Warning("rule uses deprecated Rego v0 syntax; v0 support will be removed in a future release",
-			helpers.String("rule", ruleName))
+	if v1Err == nil {
+		return compiled, ast.RegoV1, nil
 	}
-
-	opap.compiledModules[cacheKey] = compiledRule{compiler: compiled, version: version}
-	return compiled, version, nil
+	compiled, v0Err := ast.CompileModulesWithOpt(modules, ast.CompileOpts{
+		EnablePrintStatements: printEnabled,
+		ParserOptions:         ast.ParserOptions{RegoVersion: ast.RegoV0},
+	})
+	if v0Err != nil {
+		return nil, 0, fmt.Errorf("failed to compile rule '%s': %w", moduleName, v1Err)
+	}
+	return compiled, ast.RegoV0, nil
 }
 
 // canonicalDepsKey returns a deterministic, unambiguous JSON representation of RegoDependenciesData.
