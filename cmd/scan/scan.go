@@ -75,7 +75,7 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	var scanContractName string
 	var fleetConfigPath string
 	var selectedContract *contractv1alpha1.SelectedContract
-	var gitCloneDepth int = cautils.DefaultGitCloneDepth
+	var gitCloneDepth = cautils.DefaultGitCloneDepth
 	scanInfo.GitCloneDepth = &gitCloneDepth
 
 	// scanCmd represents the scan command
