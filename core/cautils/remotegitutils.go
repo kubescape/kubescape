@@ -7,6 +7,7 @@ import (
 	"fmt"
 	nethttp "net/http"
 	"os"
+	"regexp"
 	"sync"
 	"time"
 
@@ -21,7 +22,12 @@ import (
 	"golang.org/x/sync/singleflight"
 )
 
-const gitVisibilityCheckTimeout = 10 * time.Second
+const (
+	gitVisibilityCheckTimeout = 10 * time.Second
+
+	// DefaultGitCloneDepth is the default shallow clone depth for remote Git repository scans.
+	DefaultGitCloneDepth = 1
+)
 
 var (
 	tmpDirPaths      = make(map[string]string)
@@ -30,7 +36,22 @@ var (
 	cloneGroup       singleflight.Group
 	plainClone       = git.PlainClone
 	gitTransportOnce sync.Once
+	hexShaRegex      = regexp.MustCompile(`^[0-9a-fA-F]{40}$|^[0-9a-fA-F]{64}$`)
 )
+
+func isCommitSHA(s string) bool {
+	return hexShaRegex.MatchString(s)
+}
+
+func extractCommitSHA(gitURL giturl.IGitAPI) string {
+	if gitURL.GetBranchName() == "commit" && isCommitSHA(gitURL.GetPath()) {
+		return gitURL.GetPath()
+	}
+	if isCommitSHA(gitURL.GetBranchName()) {
+		return gitURL.GetBranchName()
+	}
+	return ""
+}
 
 // hashRepoURL returns a hex-encoded SHA-256 digest of the given repository URL.
 func hashRepoURL(repoURL string) string {
@@ -41,6 +62,9 @@ func hashRepoURL(repoURL string) string {
 
 func repoWorkspaceKey(gitURL giturl.IGitAPI) string {
 	cloneURL := gitURL.GetHttpCloneURL()
+	if commitSHA := extractCommitSHA(gitURL); commitSHA != "" {
+		return hashRepoURL(cloneURL + "\x00" + commitSHA)
+	}
 	if gitURL.GetBranchName() == "" {
 		return hashRepoURL(cloneURL)
 	}
@@ -144,8 +168,14 @@ func getProviderError(gitURL giturl.IGitAPI) error {
 	return fmt.Errorf("%w", errors.New("unable to find the host name"))
 }
 
-// cloneRepo clones a repository to a local temporary directory and returns the directory
-func cloneRepo(gitURL giturl.IGitAPI) (string, error) {
+// cloneRepo clones a repository to a local temporary directory and returns the directory.
+// depthOpt optionally specifies the clone depth (defaults to DefaultGitCloneDepth = 1, 0 = full history).
+func cloneRepo(gitURL giturl.IGitAPI, depthOpt ...int) (string, error) {
+	depth := DefaultGitCloneDepth
+	if len(depthOpt) > 0 {
+		depth = depthOpt[0]
+	}
+
 	// This is a process-wide go-git setting. Configure it once before any
 	// clone starts so different repositories can be cloned concurrently
 	// without racing on transport.UnsupportedCapabilities.
@@ -197,15 +227,37 @@ func cloneRepo(gitURL giturl.IGitAPI) (string, error) {
 		}
 
 		// Clone option
+		commitSHA := extractCommitSHA(gitURL)
 		cloneOpts := git.CloneOptions{URL: cloneURL, Auth: auth}
-		if gitURL.GetBranchName() != "" {
-			cloneOpts.ReferenceName = plumbing.NewBranchReferenceName(gitURL.GetBranchName())
+		if commitSHA != "" {
+			// Raw commit SHAs cannot be fetched via branch references (refs/heads/<sha>).
+			// Fall back to a full clone (Depth = 0) and check out the commit SHA in the worktree.
+			cloneOpts.Depth = 0
+		} else {
+			if depth < 0 {
+				depth = DefaultGitCloneDepth
+			}
+			cloneOpts.Depth = depth
 			cloneOpts.SingleBranch = true
+			if gitURL.GetBranchName() != "" {
+				cloneOpts.ReferenceName = plumbing.NewBranchReferenceName(gitURL.GetBranchName())
+			}
 		}
 
 		// Actual clone
-		if _, err = plainClone(tmpDir, false, &cloneOpts); err != nil {
+		repo, err := plainClone(tmpDir, false, &cloneOpts)
+		if err != nil {
 			return "", fmt.Errorf("failed to clone %s: %w", gitURL.GetRepoName(), err)
+		}
+
+		if commitSHA != "" && repo != nil {
+			wt, err := repo.Worktree()
+			if err != nil {
+				return "", fmt.Errorf("failed to get worktree for %s: %w", gitURL.GetRepoName(), err)
+			}
+			if err := wt.Checkout(&git.CheckoutOptions{Hash: plumbing.NewHash(commitSHA)}); err != nil {
+				return "", fmt.Errorf("failed to checkout commit %s in %s: %w", commitSHA, gitURL.GetRepoName(), err)
+			}
 		}
 
 		tmpDirPathsMu.Lock()
@@ -252,8 +304,13 @@ func ReleaseClonedRepo(path string) error {
 	return nil
 }
 
-// CloneGitRepo clone git repository
-func CloneGitRepo(path *string) (string, error) {
+// CloneGitRepo clone git repository with optional depth (defaults to DefaultGitCloneDepth = 1).
+// Set depth to 0 for full commit history.
+func CloneGitRepo(path *string, depthOpt ...int) (string, error) {
+	depth := DefaultGitCloneDepth
+	if len(depthOpt) > 0 {
+		depth = depthOpt[0]
+	}
 	var clonedDir string
 
 	gitURL, err := giturl.NewGitAPI(*path)
@@ -264,7 +321,7 @@ func CloneGitRepo(path *string) (string, error) {
 	// Clone git repository if needed
 	logger.L().Start("cloning", helpers.String("repository url", gitURL.GetURL().String()))
 
-	clonedDir, err = cloneRepo(gitURL)
+	clonedDir, err = cloneRepo(gitURL, depth)
 	if err != nil {
 		logger.L().StopError("failed to clone git repo", helpers.String("url", gitURL.GetURL().String()), helpers.Error(err))
 		return "", fmt.Errorf("failed to clone git repo '%s',  %w", gitURL.GetURL().String(), err)

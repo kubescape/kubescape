@@ -351,3 +351,51 @@ func TestScanInfoCleanupSequentialIdempotency(t *testing.T) {
 	scanInfo.Cleanup()
 	assert.Equal(t, 1, count)
 }
+
+func TestMaterializeRemoteInputsForwardsGitCloneDepth(t *testing.T) {
+	tests := []struct {
+		name      string
+		depth     int
+		wantDepth int
+	}{
+		{
+			name:      "default depth 1",
+			depth:     DefaultGitCloneDepth,
+			wantDepth: 1,
+		},
+		{
+			name:      "custom depth 4",
+			depth:     4,
+			wantDepth: 4,
+		},
+		{
+			name:      "full history depth 0",
+			depth:     0,
+			wantDepth: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resetRepoWorkspaceState(t)
+			t.Setenv("GITHUB_TOKEN", "test-token")
+			var capturedOpts *git.CloneOptions
+			useFakeClone(t, func(path string, _ bool, options *git.CloneOptions) (*git.Repository, error) {
+				capturedOpts = options
+				return initializeCloneWorkspace(path, options)
+			})
+
+			remoteURL := "https://github.com/example/repo"
+			scanInfo := &ScanInfo{
+				InputPatterns: []string{remoteURL},
+				GitCloneDepth: tt.depth,
+			}
+			require.NoError(t, scanInfo.MaterializeRemoteInputs(context.Background()))
+			t.Cleanup(scanInfo.Cleanup)
+
+			require.NotNil(t, capturedOpts)
+			assert.Equal(t, tt.wantDepth, capturedOpts.Depth)
+			assert.True(t, capturedOpts.SingleBranch)
+		})
+	}
+}

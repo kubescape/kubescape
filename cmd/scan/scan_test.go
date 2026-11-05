@@ -1818,3 +1818,59 @@ func TestControlCmd_RejectsConflictingFilePathAndPositionalInputs(t *testing.T) 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "usage: use either --file-path or positional input paths, not both")
 }
+
+func TestGetScanCommand_GitCloneDepthFlagRegistered(t *testing.T) {
+	mockKubescape := &mocks.MockIKubescape{}
+	cmd := GetScanCommand(mockKubescape)
+
+	f := cmd.PersistentFlags().Lookup("git-clone-depth")
+	require.NotNil(t, f, "--git-clone-depth flag must be registered on the scan command")
+	assert.Equal(t, "int", f.Value.Type(), "--git-clone-depth must be an integer flag")
+	assert.Equal(t, "1", f.DefValue, "--git-clone-depth default must be 1 (shallow clone)")
+}
+
+func TestGetScanCommand_GitCloneDepthFlagParsed(t *testing.T) {
+	tests := []struct {
+		name    string
+		flagVal string
+		want    string
+	}{
+		{"default shallow depth", "1", "1"},
+		{"full commit history opt-out", "0", "0"},
+		{"custom shallow depth", "5", "5"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockKubescape := &mocks.MockIKubescape{}
+			cmd := GetScanCommand(mockKubescape)
+
+			err := cmd.PersistentFlags().Set("git-clone-depth", tt.flagVal)
+			require.NoError(t, err)
+
+			f := cmd.PersistentFlags().Lookup("git-clone-depth")
+			assert.Equal(t, tt.want, f.Value.String())
+		})
+	}
+}
+
+func TestGetScanCommand_GitCloneDepthFlagInherited(t *testing.T) {
+	mockKubescape := &mocks.MockIKubescape{}
+	cmd := GetScanCommand(mockKubescape)
+
+	for _, sub := range cmd.Commands() {
+		t.Run(sub.Name(), func(t *testing.T) {
+			f := sub.InheritedFlags().Lookup("git-clone-depth")
+			require.NotNil(t, f, "subcommand %q must inherit --git-clone-depth from the parent scan command", sub.Name())
+		})
+	}
+}
+
+func TestGetScanCommand_GitCloneDepthValidation(t *testing.T) {
+	mockKubescape := &mocks.MockIKubescape{}
+	cmd := GetScanCommand(mockKubescape)
+	cmd.SetArgs([]string{"--git-clone-depth", "-1"})
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid --git-clone-depth -1: must be zero or positive")
+}

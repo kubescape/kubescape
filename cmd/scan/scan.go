@@ -107,6 +107,9 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 			if scanInfo.ControlTimeout < 0 {
 				return fmt.Errorf("invalid --control-timeout %s: must be zero or positive", scanInfo.ControlTimeout)
 			}
+			if scanInfo.GitCloneDepth < 0 {
+				return fmt.Errorf("invalid --git-clone-depth %d: must be zero or positive", scanInfo.GitCloneDepth)
+			}
 			if cmd != nil && cmd.Name() != "image" {
 				if err := validateControlTimeout(&scanInfo); err != nil {
 					return err
@@ -321,6 +324,7 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	scanCmd.PersistentFlags().BoolVar(&scanInfo.DryRun, "dry-run", false, "Check whether the current credentials can list every resource type the requested policies need, without collecting resources or evaluating controls. Cluster scans only.")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.OtelEndpoint, "otel-endpoint", "", fmt.Sprintf("Export scan traces and metrics to an OTLP collector, e.g. --otel-endpoint localhost:4317. Accepts host:port (plaintext) or a http(s):// URL. When unset, the standard %s environment variable is used; when neither is set no telemetry is collected.", telemetry.EnvEndpoint))
 	scanCmd.PersistentFlags().BoolVar(&scanInfo.Incremental, "incremental", false, "Cache the verdict for each resource, keyed by a hash of its spec/metadata plus the controls-config version, and skip re-evaluating unchanged resources on the next scan. Opt-in; scan output is unaffected. Cache automatically invalidates when the controls-config version changes; clear it manually with 'kubescape config delete cache'.")
+	scanCmd.PersistentFlags().IntVar(&scanInfo.GitCloneDepth, "git-clone-depth", cautils.DefaultGitCloneDepth, "Shallow clone depth for remote Git repository scans (default: 1 for tip only, 0 for full commit history)")
 
 	// Helm value override flags. Mirror `helm install` so users can pass overrides through verbatim
 	// when scanning a Helm chart directory. Note: -f is already taken by --format, so --values is long-only.

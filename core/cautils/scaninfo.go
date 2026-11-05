@@ -232,6 +232,7 @@ type ScanInfo struct {
 	ReferenceCluster          string                      // --reference-cluster: with --fleet-report, the kube context whose findings the other clusters are read against
 	KubeContextRetries        int                         // --retries: with --kube-contexts, how many more times to try a cluster whose API server never answered
 	WholeClusterPolicy        WholeClusterExecutionPolicy // Execution policy for whole-cluster controls (projected, fallback, skip, verify)
+	GitCloneDepth             int                         // Shallow clone depth for remote Git repository scans (default: 1 for tip only, 0 for full commit history)
 }
 
 type WholeClusterExecutionPolicy string
@@ -831,7 +832,7 @@ func (scanInfo *ScanInfo) MaterializeRemoteInputs(ctx context.Context) error {
 		}
 
 		originalInput := candidate
-		clonedDir, err := CloneGitRepo(&candidate)
+		clonedDir, err := CloneGitRepo(&candidate, scanInfo.GitCloneDepth)
 		if err != nil {
 			scanInfo.Cleanup()
 			return fmt.Errorf("failed to clone remote git repository %q: %w", originalInput, err)
