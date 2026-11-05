@@ -261,6 +261,7 @@ func TestExceptionsTempFile_RemovedWhenShutdownCancelsQueuedScan(t *testing.T) {
 	startBlocker(t, handler, h)
 	queued := postScan(handler, "", exceptionsScanBody)
 	require.Equal(t, http.StatusOK, queued.Code, queued.Body.String())
+	require.Len(t, exceptionsTempFiles(t, tmp), 1, "the queued scan owns an exceptions file before shutdown")
 
 	// A zero drain period cancels the running and the queued scan at once.
 	shutdownHandler(t, handler)
@@ -419,6 +420,9 @@ func TestExceptionsTempFile_ConcurrentAdmissionAndCancellation(t *testing.T) {
 	require.Equal(t, requests, statuses[http.StatusOK]+statuses[http.StatusTooManyRequests], "unexpected statuses: %v", statuses)
 	require.Positive(t, statuses[http.StatusTooManyRequests], "the queue must have rejected some requests: %v", statuses)
 	require.NotEmpty(t, admitted, "the queue must have admitted some requests: %v", statuses)
+	// Each queued scan owns a file while the worker is busy. Leaks from rejected
+	// requests are caught by the final assertion, not here.
+	require.GreaterOrEqual(t, len(exceptionsTempFiles(t, tmp)), len(admitted), "each queued scan owns an exceptions file while the worker is busy")
 
 	// Cancel one admitted scan while it is still queued; shutdown cancels the rest.
 	cancelled := cancelScanRequest(handler, admitted[0])
