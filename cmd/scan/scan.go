@@ -82,6 +82,7 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 		Short:   "Scan a Kubernetes cluster or YAML files for image vulnerabilities and misconfigurations",
 		Long:    `Scan a Kubernetes cluster, YAML files, Helm charts, Kustomize directories, Git repositories, or container images for security misconfigurations and vulnerabilities.`,
 		Example: scanCmdExamples,
+		Args:    cobra.ArbitraryArgs,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			if cmd.Name() == "validate-contract" {
 				return nil
@@ -175,6 +176,16 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 			scanInfo.View = requestedView
 
 			if policyIdentifiers := contractPolicyIdentifiers(selectedContract); len(policyIdentifiers) > 0 {
+				cleanup, err := prepareScanLocalInput(cmd.InOrStdin(), args, &scanInfo, scanLocalInputOptions{
+					FirstInputArg:    0,
+					FilePath:         scanInfo.FilePath,
+					RejectMixedStdin: true,
+				})
+				if err != nil {
+					return err
+				}
+				defer cleanup()
+
 				setContractScanTarget(args, &scanInfo)
 				if len(scanInfo.KubeContexts) > 0 {
 					if _, err := validateFleetScanInvocation(&scanInfo); err != nil {
@@ -188,6 +199,16 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 			}
 
 			if scanInfo.View == string(cautils.SecurityViewType) {
+				cleanup, err := prepareScanLocalInput(cmd.InOrStdin(), args, &scanInfo, scanLocalInputOptions{
+					FirstInputArg:    0,
+					FilePath:         scanInfo.FilePath,
+					RejectMixedStdin: true,
+				})
+				if err != nil {
+					return err
+				}
+				defer cleanup()
+
 				policyIdentifiers := setSecurityViewScanInfo(args, &scanInfo)
 				if len(scanInfo.KubeContexts) > 0 {
 					if _, err := validateFleetScanInvocation(&scanInfo); err != nil {
@@ -202,10 +223,13 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 					return err
 				}
 			} else {
-				if err := getFrameworkCmd(
+				filePath := scanInfo.FilePath
+				frameworkCmd := getFrameworkCmd(
 					ks,
 					&scanInfo,
-				).RunE(
+				)
+				scanInfo.FilePath = filePath
+				if err := frameworkCmd.RunE(
 					cmd,
 					append(
 						[]string{
@@ -362,6 +386,8 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	scanCmd.PersistentFlags().StringVar(&scanInfo.BaselineSeverityThreshold, "baseline-severity-threshold", "", "With --baseline, only count new failures at or above this severity when using --baseline-fail-on-new.")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.BaselineGranularity, "baseline-granularity", "evidence", "With --baseline, comparison unit: evidence or control.")
 
+	scanCmd.Flags().StringVar(&scanInfo.FilePath, "file-path", "", "Path to the YAML file.")
+
 	scanCmd.AddCommand(getControlCmd(ks, &scanInfo))
 	scanCmd.AddCommand(getFrameworkCmd(ks, &scanInfo))
 	scanCmd.AddCommand(getWorkloadCmd(ks, &scanInfo))
@@ -376,9 +402,11 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 }
 
 func setContractScanTarget(args []string, scanInfo *cautils.ScanInfo) {
-	if len(args) > 0 {
+	if len(scanInfo.InputPatterns) > 0 || len(args) > 0 {
 		scanInfo.SetScanType(cautils.ScanTypeRepo)
-		scanInfo.InputPatterns = args
+		if len(scanInfo.InputPatterns) == 0 {
+			scanInfo.InputPatterns = args
+		}
 		return
 	}
 	scanInfo.SetScanType(cautils.ScanTypeCluster)
@@ -419,9 +447,11 @@ func applyRegistryCredentialsFromEnv(cmd *cobra.Command, scanInfo *cautils.ScanI
 }
 
 func setSecurityViewScanInfo(args []string, scanInfo *cautils.ScanInfo) []cautils.PolicyIdentifier {
-	if len(args) > 0 {
+	if len(scanInfo.InputPatterns) > 0 || len(args) > 0 {
 		scanInfo.SetScanType(cautils.ScanTypeRepo)
-		scanInfo.InputPatterns = args
+		if len(scanInfo.InputPatterns) == 0 {
+			scanInfo.InputPatterns = args
+		}
 		return cautils.BuildPolicyIdentifiers([]string{"workloadscan", "allcontrols"}, v1.KindFramework)
 	}
 	scanInfo.SetScanType(cautils.ScanTypeCluster)
