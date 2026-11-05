@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -1817,4 +1818,74 @@ func TestControlCmd_RejectsConflictingFilePathAndPositionalInputs(t *testing.T) 
 	err := cmd.Execute()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "usage: use either --file-path or positional input paths, not both")
+}
+
+func TestScanSecurityView_RejectsConflictingFilePathAndPositionalInputs(t *testing.T) {
+	mockKubescape := &mocks.MockIKubescape{}
+	root := &cobra.Command{Use: "kubescape", SilenceErrors: true, SilenceUsage: true}
+	root.AddCommand(GetScanCommand(mockKubescape))
+	root.SetArgs([]string{"scan", "--view", "security", "manifests/app.yaml", "--file-path", "manifests/other.yaml"})
+	err := root.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "usage: use either --file-path or positional input paths, not both")
+}
+
+func TestScanSecurityView_RejectsMixedStdinAndPositionalInputs(t *testing.T) {
+	mockKubescape := &mocks.MockIKubescape{}
+	root := &cobra.Command{Use: "kubescape", SilenceErrors: true, SilenceUsage: true}
+	root.AddCommand(GetScanCommand(mockKubescape))
+	root.SetArgs([]string{"scan", "--view", "security", "-", "manifests/app.yaml"})
+	err := root.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "usage: stdin input '-' cannot be combined with other input paths")
+}
+
+func TestScanContract_RejectsConflictingFilePathAndPositionalInputs(t *testing.T) {
+	tempDir := t.TempDir()
+	contractFile := filepath.Join(tempDir, "contract.yaml")
+	require.NoError(t, os.WriteFile(contractFile, []byte(`apiVersion: config.kubescape.io/v1alpha1
+kind: ScanContract
+metadata:
+  name: test-contract
+spec:
+  minimumKubescapeVersion: v0.0.1
+  defaultContract: ci
+  contracts:
+    ci:
+      policy:
+        frameworks: [nsa]
+`), 0o600))
+
+	mockKubescape := &mocks.MockIKubescape{}
+	root := &cobra.Command{Use: "kubescape", SilenceErrors: true, SilenceUsage: true}
+	root.AddCommand(GetScanCommand(mockKubescape))
+	root.SetArgs([]string{"scan", "--scan-contract", contractFile, "--contract", "ci", "manifests/app.yaml", "--file-path", "manifests/other.yaml"})
+	err := root.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "usage: use either --file-path or positional input paths, not both")
+}
+
+func TestScanContract_RejectsMixedStdinAndPositionalInputs(t *testing.T) {
+	tempDir := t.TempDir()
+	contractFile := filepath.Join(tempDir, "contract.yaml")
+	require.NoError(t, os.WriteFile(contractFile, []byte(`apiVersion: config.kubescape.io/v1alpha1
+kind: ScanContract
+metadata:
+  name: test-contract
+spec:
+  minimumKubescapeVersion: v0.0.1
+  defaultContract: ci
+  contracts:
+    ci:
+      policy:
+        frameworks: [nsa]
+`), 0o600))
+
+	mockKubescape := &mocks.MockIKubescape{}
+	root := &cobra.Command{Use: "kubescape", SilenceErrors: true, SilenceUsage: true}
+	root.AddCommand(GetScanCommand(mockKubescape))
+	root.SetArgs([]string{"scan", "--scan-contract", contractFile, "--contract", "ci", "-", "manifests/app.yaml"})
+	err := root.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "usage: stdin input '-' cannot be combined with other input paths")
 }

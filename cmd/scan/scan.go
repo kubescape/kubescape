@@ -175,6 +175,15 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 			scanInfo.View = requestedView
 
 			if policyIdentifiers := contractPolicyIdentifiers(selectedContract); len(policyIdentifiers) > 0 {
+				cleanup, err := prepareScanLocalInput(cmd.InOrStdin(), args, &scanInfo, scanLocalInputOptions{
+					FirstInputArg:    0,
+					FilePath:         scanInfo.FilePath,
+					RejectMixedStdin: true,
+				})
+				if err != nil {
+					return err
+				}
+				defer cleanup()
 				setContractScanTarget(args, &scanInfo)
 				if len(scanInfo.KubeContexts) > 0 {
 					if _, err := validateFleetScanInvocation(&scanInfo); err != nil {
@@ -188,6 +197,15 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 			}
 
 			if scanInfo.View == string(cautils.SecurityViewType) {
+				cleanup, err := prepareScanLocalInput(cmd.InOrStdin(), args, &scanInfo, scanLocalInputOptions{
+					FirstInputArg:    0,
+					FilePath:         scanInfo.FilePath,
+					RejectMixedStdin: true,
+				})
+				if err != nil {
+					return err
+				}
+				defer cleanup()
 				policyIdentifiers := setSecurityViewScanInfo(args, &scanInfo)
 				if len(scanInfo.KubeContexts) > 0 {
 					if _, err := validateFleetScanInvocation(&scanInfo); err != nil {
@@ -226,6 +244,8 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	}
 
 	scanInfo.TriggeredByCLI = true
+
+	scanCmd.Flags().StringVar(&scanInfo.FilePath, "file-path", "", "Path to the YAML file.")
 
 	scanCmd.PersistentFlags().StringVar(&scanContractPath, "scan-contract", "", "Path to an explicit repository scan contract")
 	scanCmd.PersistentFlags().StringVar(&scanContractName, "contract", "", "Named contract to select; defaults to spec.defaultContract")
@@ -376,9 +396,11 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 }
 
 func setContractScanTarget(args []string, scanInfo *cautils.ScanInfo) {
-	if len(args) > 0 {
+	if len(scanInfo.InputPatterns) > 0 || len(args) > 0 {
 		scanInfo.SetScanType(cautils.ScanTypeRepo)
-		scanInfo.InputPatterns = args
+		if len(scanInfo.InputPatterns) == 0 {
+			scanInfo.InputPatterns = args
+		}
 		return
 	}
 	scanInfo.SetScanType(cautils.ScanTypeCluster)
@@ -419,9 +441,11 @@ func applyRegistryCredentialsFromEnv(cmd *cobra.Command, scanInfo *cautils.ScanI
 }
 
 func setSecurityViewScanInfo(args []string, scanInfo *cautils.ScanInfo) []cautils.PolicyIdentifier {
-	if len(args) > 0 {
+	if len(scanInfo.InputPatterns) > 0 || len(args) > 0 {
 		scanInfo.SetScanType(cautils.ScanTypeRepo)
-		scanInfo.InputPatterns = args
+		if len(scanInfo.InputPatterns) == 0 {
+			scanInfo.InputPatterns = args
+		}
 		return cautils.BuildPolicyIdentifiers([]string{"workloadscan", "allcontrols"}, v1.KindFramework)
 	}
 	scanInfo.SetScanType(cautils.ScanTypeCluster)
