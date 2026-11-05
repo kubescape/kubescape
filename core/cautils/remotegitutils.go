@@ -26,8 +26,8 @@ import (
 const (
 	gitVisibilityCheckTimeout = 10 * time.Second
 
-	// DefaultGitCloneDepth is the default shallow clone depth for remote Git repository scans.
-	DefaultGitCloneDepth = 1
+	// DefaultGitCloneDepth is the default clone depth for remote Git repository scans (0 for full commit history).
+	DefaultGitCloneDepth = 0
 )
 
 var (
@@ -82,14 +82,21 @@ func repoWorkspaceKey(gitURL giturl.IGitAPI, depthOpt ...int) string {
 	if len(depthOpt) > 0 {
 		depth = depthOpt[0]
 	}
+	if extractCommitSHA(gitURL) != "" {
+		depth = 0
+	} else if depth < 0 {
+		depth = DefaultGitCloneDepth
+	}
 	baseKey := repoBaseKey(gitURL)
 	return hashRepoURL(fmt.Sprintf("%s\x00depth:%d", baseKey, depth))
 }
 
+// getDirPath returns the path of a cached workspace by repository URL, or empty if not present.
 func getDirPath(repoURL string) string {
 	return getDirPathByKey(hashRepoURL(repoURL))
 }
 
+// getDirPathByKey returns the path of a cached workspace by its key, or empty if not present or stale.
 func getDirPathByKey(key string) string {
 	tmpDirPathsMu.Lock()
 	defer tmpDirPathsMu.Unlock()
@@ -106,6 +113,7 @@ func getDirPathByKey(key string) string {
 	return path
 }
 
+// reserveWorkspace increments the reference count for an existing workspace or reserves a pending slot.
 func reserveWorkspace(key string) string {
 	tmpDirPathsMu.Lock()
 	defer tmpDirPathsMu.Unlock()
@@ -122,6 +130,7 @@ func reserveWorkspace(key string) string {
 	return ""
 }
 
+// cancelWorkspaceReservation decrements or releases a pending workspace reservation when clone fails.
 func cancelWorkspaceReservation(key string) {
 	tmpDirPathsMu.Lock()
 	defer tmpDirPathsMu.Unlock()
@@ -143,8 +152,7 @@ func createTempDir() (string, error) {
 	return tmpDir, nil
 }
 
-// To Check if the given repository is Public(No Authentication needed), send a HTTP GET request to the URL
-// If response code is 200, the repository is Public.
+// isGitRepoPublic checks if the repository is publicly accessible without authentication.
 func isGitRepoPublic(u string) bool {
 	client := &nethttp.Client{Timeout: gitVisibilityCheckTimeout}
 	resp, err := client.Get(u)
@@ -160,7 +168,7 @@ func isGitRepoPublic(u string) bool {
 	return resp.StatusCode == nethttp.StatusOK
 }
 
-// Check if the GITHUB_TOKEN is present
+// isGitTokenPresent checks if an authentication token is configured for the git URL.
 func isGitTokenPresent(gitURL giturl.IGitAPI) bool {
 	if token := gitURL.GetToken(); token == "" {
 		return false
@@ -168,7 +176,7 @@ func isGitTokenPresent(gitURL giturl.IGitAPI) bool {
 	return true
 }
 
-// Get the error message according to the provider
+// getProviderError returns an appropriate missing token error for the git provider.
 func getProviderError(gitURL giturl.IGitAPI) error {
 	switch gitURL.GetProvider() {
 	case "github":
@@ -184,7 +192,7 @@ func getProviderError(gitURL giturl.IGitAPI) error {
 }
 
 // cloneRepo clones a repository to a local temporary directory and returns the directory.
-// depthOpt optionally specifies the clone depth (defaults to DefaultGitCloneDepth = 1, 0 = full history).
+// depthOpt optionally specifies the clone depth (defaults to DefaultGitCloneDepth = 0 for full commit history).
 func cloneRepo(gitURL giturl.IGitAPI, depthOpt ...int) (string, error) {
 	depth := DefaultGitCloneDepth
 	if len(depthOpt) > 0 {
@@ -258,9 +266,12 @@ func cloneRepo(gitURL giturl.IGitAPI, depthOpt ...int) (string, error) {
 			cloneOpts.Depth = 0
 		} else {
 			cloneOpts.Depth = effectiveDepth
-			cloneOpts.SingleBranch = true
+			if cloneOpts.Depth > 0 {
+				cloneOpts.SingleBranch = true
+			}
 			if gitURL.GetBranchName() != "" {
 				cloneOpts.ReferenceName = plumbing.NewBranchReferenceName(gitURL.GetBranchName())
+				cloneOpts.SingleBranch = true
 			}
 		}
 
@@ -356,8 +367,8 @@ func ReleaseClonedRepo(path string, depthOpt ...int) error {
 	return nil
 }
 
-// CloneGitRepo clone git repository with optional depth (defaults to DefaultGitCloneDepth = 1).
-// Set depth to 0 for full commit history.
+// CloneGitRepo clone git repository with optional depth (defaults to DefaultGitCloneDepth = 0 for full commit history).
+// Set depth to 1 or more for opt-in shallow cloning.
 func CloneGitRepo(path *string, depthOpt ...int) (string, error) {
 	depth := DefaultGitCloneDepth
 	if len(depthOpt) > 0 {

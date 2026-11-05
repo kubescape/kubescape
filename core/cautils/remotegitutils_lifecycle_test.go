@@ -361,19 +361,19 @@ func TestMaterializeRemoteInputsForwardsGitCloneDepth(t *testing.T) {
 		wantDepth int
 	}{
 		{
-			name:      "zero value scanInfo with nil depth defaults to 1",
+			name:      "zero value scanInfo with nil depth defaults to 0",
 			depth:     nil,
-			wantDepth: 1,
-		},
-		{
-			name:      "explicit default depth 1",
-			depth:     intPtr(DefaultGitCloneDepth),
-			wantDepth: 1,
-		},
-		{
-			name:      "explicit full history depth 0",
-			depth:     intPtr(0),
 			wantDepth: 0,
+		},
+		{
+			name:      "explicit default depth 0",
+			depth:     intPtr(DefaultGitCloneDepth),
+			wantDepth: 0,
+		},
+		{
+			name:      "explicit shallow depth 1",
+			depth:     intPtr(1),
+			wantDepth: 1,
 		},
 		{
 			name:      "custom depth 4",
@@ -402,7 +402,7 @@ func TestMaterializeRemoteInputsForwardsGitCloneDepth(t *testing.T) {
 
 			require.NotNil(t, capturedOpts)
 			assert.Equal(t, tt.wantDepth, capturedOpts.Depth)
-			assert.True(t, capturedOpts.SingleBranch)
+			assert.Equal(t, tt.wantDepth > 0, capturedOpts.SingleBranch)
 		})
 	}
 }

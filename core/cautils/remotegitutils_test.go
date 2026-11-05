@@ -190,18 +190,18 @@ func TestCloneRepoShallowDepthOptions(t *testing.T) {
 		wantRefBranch string
 	}{
 		{
-			name:          "default depth is 1 with single branch",
+			name:          "default depth is 0 for full history without explicit branch",
 			depthOpt:      nil,
 			url:           "https://github.com/kubescape/kubescape/",
-			wantDepth:     DefaultGitCloneDepth,
-			wantSingle:    true,
+			wantDepth:     0,
+			wantSingle:    false,
 			wantRefBranch: "",
 		},
 		{
-			name:          "default depth with explicit branch",
+			name:          "default depth with explicit branch enables single branch",
 			depthOpt:      nil,
 			url:           "https://github.com/kubescape/kubescape/tree/feature-branch",
-			wantDepth:     DefaultGitCloneDepth,
+			wantDepth:     0,
 			wantSingle:    true,
 			wantRefBranch: "refs/heads/feature-branch",
 		},
@@ -214,11 +214,19 @@ func TestCloneRepoShallowDepthOptions(t *testing.T) {
 			wantRefBranch: "",
 		},
 		{
-			name:          "full history opt out with depth 0",
+			name:          "explicit shallow depth 1",
+			depthOpt:      []int{1},
+			url:           "https://github.com/kubescape/kubescape/",
+			wantDepth:     1,
+			wantSingle:    true,
+			wantRefBranch: "",
+		},
+		{
+			name:          "full history with depth 0",
 			depthOpt:      []int{0},
 			url:           "https://github.com/kubescape/kubescape/",
 			wantDepth:     0,
-			wantSingle:    true,
+			wantSingle:    false,
 			wantRefBranch: "",
 		},
 		{
@@ -226,7 +234,7 @@ func TestCloneRepoShallowDepthOptions(t *testing.T) {
 			depthOpt:      []int{-1},
 			url:           "https://github.com/kubescape/kubescape/",
 			wantDepth:     DefaultGitCloneDepth,
-			wantSingle:    true,
+			wantSingle:    false,
 			wantRefBranch: "",
 		},
 	}
@@ -337,6 +345,13 @@ func TestRepoWorkspaceKeyIsolatesCommitSHAs(t *testing.T) {
 	assert.NotEqual(t, keyA, keyMaster, "commit SHA must not share workspace key with master branch")
 	assert.NotEqual(t, keyA, keyRoot, "commit SHA must not share workspace key with root URL")
 	assert.NotEqual(t, keyRoot, keyRootFull, "different clone depths must produce distinct workspace keys")
+
+	// repoWorkspaceKey normalizes commit SHAs to depth 0 regardless of caller-passed depth
+	assert.Equal(t, repoWorkspaceKey(shaA, 1), repoWorkspaceKey(shaA, 0), "commit URL must normalize to depth 0")
+	assert.Equal(t, repoWorkspaceKey(shaA, 5), repoWorkspaceKey(shaA, 0), "commit URL must normalize to depth 0")
+
+	// repoWorkspaceKey normalizes negative depths to DefaultGitCloneDepth
+	assert.Equal(t, repoWorkspaceKey(root, -1), repoWorkspaceKey(root, DefaultGitCloneDepth), "negative depth must normalize to DefaultGitCloneDepth")
 }
 
 func TestCloneRepo_DifferentDepthsDoNotReuseWorkspace(t *testing.T) {
@@ -382,4 +397,80 @@ func TestCloneGitRepoPassesDepth(t *testing.T) {
 	assert.Equal(t, 3, capturedOpts.Depth)
 	assert.True(t, capturedOpts.SingleBranch)
 	require.NoError(t, ReleaseClonedRepo("https://github.com/kubescape/kubescape"))
+}
+
+func TestGetFileLastCommit_ShallowVsFullClone(t *testing.T) {
+	// Create a real on-disk git repository with two sequential commits touching different files.
+	originDir := t.TempDir()
+	originRepo, err := git.PlainInit(originDir, false)
+	require.NoError(t, err)
+	worktree, err := originRepo.Worktree()
+	require.NoError(t, err)
+
+	// Commit 1: add file1.yaml
+	require.NoError(t, os.WriteFile(filepath.Join(originDir, "file1.yaml"), []byte("kind: Deployment\n"), 0o600))
+	_, err = worktree.Add("file1.yaml")
+	require.NoError(t, err)
+	sig1 := &object.Signature{Name: "Old Author", Email: "old@example.com", When: time.Unix(100, 0)}
+	commit1Hash, err := worktree.Commit("initial file1 commit", &git.CommitOptions{Author: sig1, Committer: sig1})
+	require.NoError(t, err)
+
+	// Commit 2: add file2.yaml (tip commit)
+	require.NoError(t, os.WriteFile(filepath.Join(originDir, "file2.yaml"), []byte("kind: Service\n"), 0o600))
+	_, err = worktree.Add("file2.yaml")
+	require.NoError(t, err)
+	sig2 := &object.Signature{Name: "New Author", Email: "new@example.com", When: time.Unix(200, 0)}
+	commit2Hash, err := worktree.Commit("tip file2 commit", &git.CommitOptions{Author: sig2, Committer: sig2})
+	require.NoError(t, err)
+
+	t.Run("full clone depth 0 preserves per-file commit history", func(t *testing.T) {
+		fullCloneDir := t.TempDir()
+		_, err := git.PlainClone(fullCloneDir, false, &git.CloneOptions{
+			URL:   originDir,
+			Depth: 0,
+		})
+		require.NoError(t, err)
+
+		localRepo, err := NewLocalGitRepository(fullCloneDir)
+		require.NoError(t, err)
+
+		// file1 was touched in commit1: full history accurately attributes it to commit 1
+		commit1, err := localRepo.GetFileLastCommit("file1.yaml")
+		require.NoError(t, err)
+		assert.Equal(t, commit1Hash.String(), commit1.SHA)
+		assert.Equal(t, "Old Author", commit1.Author.Name)
+
+		// file2 was touched in commit2: accurately attributes it to commit 2
+		commit2, err := localRepo.GetFileLastCommit("file2.yaml")
+		require.NoError(t, err)
+		assert.Equal(t, commit2Hash.String(), commit2.SHA)
+		assert.Equal(t, "New Author", commit2.Author.Name)
+	})
+
+	t.Run("shallow clone depth 1 attributes all files to tip commit", func(t *testing.T) {
+		shallowCloneDir := t.TempDir()
+		_, err := git.PlainClone(shallowCloneDir, false, &git.CloneOptions{
+			URL:          originDir,
+			Depth:        1,
+			SingleBranch: true,
+		})
+		require.NoError(t, err)
+
+		localRepo, err := NewLocalGitRepository(shallowCloneDir)
+		require.NoError(t, err)
+
+		// In a depth-1 clone, the tip commit has no parents in the shallow repository,
+		// so git log treats all repository files as introduced by the tip commit.
+		// file1 (originally created in commit 1) is therefore attributed to tip commit 2.
+		commit1, err := localRepo.GetFileLastCommit("file1.yaml")
+		require.NoError(t, err)
+		assert.Equal(t, commit2Hash.String(), commit1.SHA, "shallow clone depth 1 attributes older files to tip commit")
+		assert.Equal(t, "New Author", commit1.Author.Name)
+
+		// file2 was actually touched in the tip commit
+		commit2, err := localRepo.GetFileLastCommit("file2.yaml")
+		require.NoError(t, err)
+		assert.Equal(t, commit2Hash.String(), commit2.SHA)
+		assert.Equal(t, "New Author", commit2.Author.Name)
+	})
 }
