@@ -1061,6 +1061,19 @@ func TestNewFixHandler_MalformedReportishJSON(t *testing.T) {
 	}
 }
 
+func TestNewFixHandler_RejectsOversizedReport(t *testing.T) {
+	dir := t.TempDir()
+	oversizedPath := filepath.Join(dir, "oversized.json")
+	f, err := os.OpenFile(oversizedPath, os.O_CREATE|os.O_WRONLY, 0o600)
+	require.NoError(t, err)
+	require.NoError(t, f.Truncate(maxReportSize+1))
+	require.NoError(t, f.Close())
+
+	_, err = NewFixHandler(&metav1.FixInfo{ReportFile: oversizedPath})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, errReportTooLarge)
+}
+
 func TestNewFixHandler_ClusterReportUnsupportedTarget(t *testing.T) {
 	// Cluster scans are supported now (their resources are patched in memory
 	// and printed), but only when the report carries the cluster context a real
