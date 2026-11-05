@@ -9,14 +9,18 @@ import (
 )
 
 // externalStateBuiltins are builtins whose result can depend on state outside
-// the evaluated object and the scan's policy inputs, but that OPA does not mark
-// Nondeterministic. A verdict that depends on them cannot be reused on the
-// strength of the object's own hash. Audited against OPA v1.19.0.
+// the evaluated object and the scan's policy inputs. A verdict that depends on
+// them cannot be reused on the strength of the object's own hash. The list
+// covers external-state dependencies independently of OPA's Nondeterministic
+// flag, so rejection does not depend on that flag alone. Audited against
+// OPA v1.22.0.
 var externalStateBuiltins = map[string]struct{}{
 	// Validate certificates against the current time.
 	"crypto.x509.parse_and_verify_certificates":              {},
 	"crypto.x509.parse_and_verify_certificates_with_options": {},
-	// Resolve "$ref" schemas over HTTP or from the local filesystem.
+	// Resolve "$ref" schemas over HTTP or from the local filesystem. OPA
+	// marks both Nondeterministic as of v1.22.0; they stay listed so they
+	// are rejected regardless of OPA's flag.
 	"json.match_schema":  {},
 	"json.verify_schema": {},
 	// Kubescape builtins that query an image registry.
