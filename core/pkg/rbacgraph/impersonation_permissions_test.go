@@ -1,6 +1,7 @@
 package rbacgraph
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -207,9 +208,13 @@ func TestUnboundedImpersonationCarriesTargetKind(t *testing.T) {
 	} {
 		t.Run(tc.resource, func(t *testing.T) {
 			idx := NewIndex(nil, nil, nil, nil, nil)
-			edges := idx.DirectEscalationEdges(sa("prod", "caller"), []ScopedRule{{
-				Rule: rule([]string{""}, []string{tc.resource}, []string{"impersonate"}, nil),
-			}})
+			rules := []ScopedRule{{Rule: rule([]string{""}, []string{tc.resource}, []string{"impersonate"}, nil)}}
+			if tc.kind == KindGroup {
+				// A usable group request also needs an authorized username.
+				rules = append(rules, ScopedRule{Rule: rule([]string{""}, []string{"users"}, []string{"impersonate"}, []string{"alice"})})
+			}
+			edges := idx.DirectEscalationEdges(sa("prod", "caller"), rules)
+			edges = slices.DeleteFunc(edges, func(e EscalationEdge) bool { return !e.Unbounded })
 			require.Len(t, edges, 1)
 			require.True(t, edges[0].Unbounded)
 			require.Equal(t, tc.kind, edges[0].ImpersonatedKind)

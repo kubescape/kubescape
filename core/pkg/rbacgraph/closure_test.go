@@ -461,7 +461,7 @@ func TestAnalyzeEscalation_ImpersonateSystemMastersIsImmediateClusterAdmin(t *te
 	// system:masters is hardcoded as an omnipotent superuser by the
 	// authorizer itself -- no RBAC object ever binds it, so the BFS would
 	// otherwise dead-end there and report ClusterAdmin: false.
-	cr := clusterRole("impersonator", rule([]string{""}, []string{"groups"}, []string{"impersonate"}, []string{"system:masters"}))
+	cr := clusterRole("impersonator", rule([]string{""}, []string{"groups", "users"}, []string{"impersonate"}, []string{"system:masters"}))
 	idx := NewIndex(nil, []rbacv1.ClusterRole{cr}, nil, []rbacv1.ClusterRoleBinding{clusterRoleBinding("crb", "impersonator", saSubject("ns", "attacker"))}, nil)
 
 	result := idx.AnalyzeEscalation(sa("ns", "attacker"))
