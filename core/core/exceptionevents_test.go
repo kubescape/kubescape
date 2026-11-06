@@ -20,22 +20,27 @@ import (
 )
 
 // fakeClientWithEventsAccess returns a fake clientset whose access reviews
-// answer allowed, or fail with reviewErr when it is set. It records the
-// attributes of the last review.
-func fakeClientWithEventsAccess(allowed bool, reviewErr error, seen *authorizationv1.ResourceAttributes) *fake.Clientset {
+// answer with status(verb), or fail with reviewErr when it is set. It records
+// the attributes of every review.
+func fakeClientWithEventsAccess(status func(verb string) authorizationv1.SubjectAccessReviewStatus, reviewErr error, seen *[]authorizationv1.ResourceAttributes) *fake.Clientset {
 	client := fake.NewClientset()
 	client.PrependReactor("create", "selfsubjectaccessreviews", func(action k8stesting.Action) (bool, k8sruntime.Object, error) {
 		if reviewErr != nil {
 			return true, nil, reviewErr
 		}
 		review := action.(k8stesting.CreateAction).GetObject().(*authorizationv1.SelfSubjectAccessReview)
-		if seen != nil && review.Spec.ResourceAttributes != nil {
-			*seen = *review.Spec.ResourceAttributes
+		attrs := review.Spec.ResourceAttributes
+		if seen != nil && attrs != nil {
+			*seen = append(*seen, *attrs)
 		}
-		review.Status.Allowed = allowed
+		review.Status = status(attrs.Verb)
 		return true, review, nil
 	})
 	return client
+}
+
+func allowAll(string) authorizationv1.SubjectAccessReviewStatus {
+	return authorizationv1.SubjectAccessReviewStatus{Allowed: true}
 }
 
 // pollGoroutineCount waits until cond returns true, giving the scheduler and
@@ -62,7 +67,7 @@ func pollGoroutineCount(timeout time.Duration, cond func() bool) bool {
 func TestSecurityExceptionEventRecorderShutdownStopsWatcher(t *testing.T) {
 	baseline := runtime.NumGoroutine()
 
-	recorder, shutdown := newSecurityExceptionEventRecorderWithClient(context.Background(), fakeClientWithEventsAccess(true, nil, nil))
+	recorder, shutdown := newSecurityExceptionEventRecorderWithClient(context.Background(), fakeClientWithEventsAccess(allowAll, nil, nil))
 	require.NotNil(t, recorder, "a recorder must be returned for a valid client")
 	require.NotNil(t, shutdown, "a shutdown closure must be returned for a valid client")
 
@@ -88,34 +93,60 @@ func TestSecurityExceptionEventRecorderWithNilClient(t *testing.T) {
 	require.Nil(t, shutdown)
 }
 
-// TestSecurityExceptionEventRecorderReviewsClusterWideEventCreate verifies the
-// recorder is built when events may be created in every namespace, and that it
-// asks for exactly that.
-func TestSecurityExceptionEventRecorderReviewsClusterWideEventCreate(t *testing.T) {
-	var seen authorizationv1.ResourceAttributes
-	recorder, shutdown := newSecurityExceptionEventRecorderWithClient(context.Background(), fakeClientWithEventsAccess(true, nil, &seen))
+// TestSecurityExceptionEventRecorderReviewsClusterWideEventWrite verifies the
+// recorder is built when events may be created and patched in every namespace,
+// and that it asks for exactly that.
+func TestSecurityExceptionEventRecorderReviewsClusterWideEventWrite(t *testing.T) {
+	var seen []authorizationv1.ResourceAttributes
+	recorder, shutdown := newSecurityExceptionEventRecorderWithClient(context.Background(), fakeClientWithEventsAccess(allowAll, nil, &seen))
 	require.NotNil(t, recorder)
 	require.NotNil(t, shutdown)
 	shutdown()
 
-	require.Equal(t, authorizationv1.ResourceAttributes{Verb: "create", Version: "v1", Resource: "events"}, seen)
+	require.Equal(t, []authorizationv1.ResourceAttributes{
+		{Verb: "create", Version: "v1", Resource: "events"},
+		{Verb: "patch", Version: "v1", Resource: "events"},
+	}, seen)
 }
 
 // TestSecurityExceptionEventRecorderDisabledWithoutEventAccess verifies that no
-// recorder is returned when the identity may not create events, or when the
-// access review itself fails.
+// recorder is returned when the identity may not create or may not patch
+// events, or when the access review cannot reach a decision.
 func TestSecurityExceptionEventRecorderDisabledWithoutEventAccess(t *testing.T) {
+	denyVerb := func(denied string) func(string) authorizationv1.SubjectAccessReviewStatus {
+		return func(verb string) authorizationv1.SubjectAccessReviewStatus {
+			return authorizationv1.SubjectAccessReviewStatus{Allowed: verb != denied}
+		}
+	}
 	tests := []struct {
 		name      string
-		allowed   bool
+		status    func(string) authorizationv1.SubjectAccessReviewStatus
 		reviewErr error
+		wantErr   bool
 	}{
-		{name: "denied", allowed: false},
-		{name: "review error", reviewErr: errors.New("connection refused")},
+		{name: "create denied", status: denyVerb("create")},
+		{name: "patch denied", status: denyVerb("patch")},
+		{name: "explicitly denied with evaluation error", status: func(string) authorizationv1.SubjectAccessReviewStatus {
+			return authorizationv1.SubjectAccessReviewStatus{Denied: true, EvaluationError: "webhook said no"}
+		}},
+		{name: "evaluation error without a decision", wantErr: true, status: func(string) authorizationv1.SubjectAccessReviewStatus {
+			return authorizationv1.SubjectAccessReviewStatus{EvaluationError: "webhook timeout"}
+		}},
+		{name: "review error", wantErr: true, reviewErr: errors.New("connection refused")},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			recorder, shutdown := newSecurityExceptionEventRecorderWithClient(context.Background(), fakeClientWithEventsAccess(tt.allowed, tt.reviewErr, nil))
+			client := fakeClientWithEventsAccess(tt.status, tt.reviewErr, nil)
+
+			allowed, _, err := canWriteEvents(context.Background(), client)
+			require.False(t, allowed)
+			if tt.wantErr {
+				require.Error(t, err, "a review without a decision must be reported as a failed check, not a denial")
+			} else {
+				require.NoError(t, err)
+			}
+
+			recorder, shutdown := newSecurityExceptionEventRecorderWithClient(context.Background(), client)
 			require.Nil(t, recorder)
 			require.Nil(t, shutdown)
 		})

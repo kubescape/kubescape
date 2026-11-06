@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/kubescape/go-logger"
@@ -38,23 +39,23 @@ func newSecurityExceptionEventRecorder(ctx context.Context) (record.EventRecorde
 }
 
 // newSecurityExceptionEventRecorderWithClient returns nil when the scanning
-// identity may not create Events. ExceptionMatched events go to the namespace of
+// identity may not create and patch Events. ExceptionMatched events go to the namespace of
 // the excepted resource, so the check is cluster-wide. Without it, every event
 // would be rejected and logged by the broadcaster. The operator chart only grants
-// this permission when risk acceptance is enabled.
+// these permissions when risk acceptance is enabled.
 func newSecurityExceptionEventRecorderWithClient(ctx context.Context, k8sClient kubernetes.Interface) (record.EventRecorder, func()) {
 	if k8sClient == nil {
 		return nil, nil
 	}
 
-	allowed, reason, err := canCreateEvents(ctx, k8sClient)
+	allowed, reason, err := canWriteEvents(ctx, k8sClient)
 	if err != nil {
-		logger.L().Ctx(ctx).Warning("ExceptionMatched events disabled: could not verify permission to create events",
+		logger.L().Ctx(ctx).Warning("ExceptionMatched events disabled: could not verify permission to write events",
 			helpers.Error(err))
 		return nil, nil
 	}
 	if !allowed {
-		logger.L().Ctx(ctx).Info("ExceptionMatched events disabled: the scanning identity cannot create events",
+		logger.L().Ctx(ctx).Info("ExceptionMatched events disabled: the scanning identity cannot create and patch events",
 			helpers.String("reason", reason))
 		return nil, nil
 	}
@@ -64,31 +65,60 @@ func newSecurityExceptionEventRecorderWithClient(ctx context.Context, k8sClient 
 	return broadcaster.NewRecorder(scheme.Scheme, corev1.EventSource{Component: "kubescape"}), broadcaster.Shutdown
 }
 
-// canCreateEvents reports whether the current identity may create core Events
-// in every namespace, with the authorizer's reason when it may not. The caller
-// treats a review that cannot be completed as not allowed: the events are
-// optional, and an emitter that fails on every write is worse than none.
-func canCreateEvents(ctx context.Context, k8sClient kubernetes.Interface) (bool, string, error) {
+// eventVerbs are the verbs the event broadcaster uses: it creates new events
+// and patches existing ones to aggregate repeats.
+var eventVerbs = []string{"create", "patch"}
+
+// canWriteEvents reports whether the current identity may create and patch core
+// Events in every namespace, with the authorizer's reason when it may not. An
+// error means the review could not reach a decision (the request failed, or an
+// authorizer reported an evaluation error without allowing or denying); the
+// caller treats that as not allowed, since the events are optional and an
+// emitter that fails on every write is worse than none.
+func canWriteEvents(ctx context.Context, k8sClient kubernetes.Interface) (bool, string, error) {
+	reviewCtx, cancel := context.WithTimeout(ctx, eventsAccessReviewTimeout)
+	defer cancel()
+	for _, verb := range eventVerbs {
+		allowed, reason, err := reviewEventAccess(reviewCtx, k8sClient, verb)
+		if err != nil || !allowed {
+			return false, reason, err
+		}
+	}
+	return true, "", nil
+}
+
+// reviewEventAccess runs one cluster-wide SelfSubjectAccessReview for verb on
+// core events. Allowed=false with Denied=false and an EvaluationError means an
+// authorizer (typically a webhook) failed rather than denied, so it is returned
+// as an error, as applyAccessReviewStatus does for the scan preflight.
+func reviewEventAccess(ctx context.Context, k8sClient kubernetes.Interface, verb string) (bool, string, error) {
 	ssar := &authorizationv1.SelfSubjectAccessReview{
 		Spec: authorizationv1.SelfSubjectAccessReviewSpec{
 			ResourceAttributes: &authorizationv1.ResourceAttributes{
-				Verb:     "create",
+				Verb:     verb,
 				Version:  "v1",
 				Resource: "events",
 			},
 		},
 	}
-	reviewCtx, cancel := context.WithTimeout(ctx, eventsAccessReviewTimeout)
-	defer cancel()
-	resp, err := k8sClient.AuthorizationV1().SelfSubjectAccessReviews().Create(reviewCtx, ssar, metav1.CreateOptions{})
+	resp, err := k8sClient.AuthorizationV1().SelfSubjectAccessReviews().Create(ctx, ssar, metav1.CreateOptions{})
 	if err != nil {
-		return false, "", err
+		return false, "", fmt.Errorf("%s events: %w", verb, err)
 	}
-	if !resp.Status.Allowed {
-		if resp.Status.Reason != "" {
-			return false, resp.Status.Reason, nil
+	status := resp.Status
+	if status.Allowed {
+		return true, "", nil
+	}
+	if !status.Denied && status.EvaluationError != "" {
+		msg := status.EvaluationError
+		if status.Reason != "" {
+			msg = status.Reason + ": " + msg
 		}
-		return false, "not allowed", nil
+		return false, "", fmt.Errorf("%s events: %s", verb, msg)
 	}
-	return true, "", nil
+	reason := status.Reason
+	if reason == "" {
+		reason = "not allowed"
+	}
+	return false, verb + " events: " + reason, nil
 }
