@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/jwalton/gchalk"
@@ -41,18 +42,62 @@ const windowsNewline = "\r\n"
 const unixNewline = "\n"
 const oldMacNewline = "\r"
 
-func NewFixHandler(fixInfo *metav1.FixInfo) (*FixHandler, error) {
-	if info, err := os.Stat(fixInfo.ReportFile); err == nil && info.IsDir() {
-		return nil, fmt.Errorf("%q is a directory, not a file. Please provide a JSON report file path", fixInfo.ReportFile)
-	}
-	jsonFile, err := os.Open(fixInfo.ReportFile)
+// maxReportSize bounds report files parsed from disk (100 MiB), preventing
+// uncontrolled memory allocation from oversized inputs or decompression bombs (CWE-400).
+const maxReportSize = 100 * 1024 * 1024
+
+var (
+	errReportNotRegular = errors.New("report is not a regular file")
+	errReportTooLarge   = errors.New("report is too large")
+)
+
+// openReport opens path for reading and rejects non-regular files (such as FIFOs,
+// device nodes, or directories). O_NONBLOCK ensures that opening a FIFO without a writer
+// fails or returns immediately rather than blocking the process indefinitely.
+func openReport(path string) (*os.File, error) {
+	file, err := os.OpenFile(filepath.Clean(path), os.O_RDONLY|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		return nil, err
 	}
-	defer jsonFile.Close()
-	byteValue, err := io.ReadAll(jsonFile)
+	info, err := file.Stat()
+	if err != nil {
+		file.Close()
+		return nil, err
+	}
+	if info.IsDir() {
+		file.Close()
+		return nil, fmt.Errorf("%q is a directory, not a file. Please provide a JSON report file path", path)
+	}
+	if !info.Mode().IsRegular() {
+		file.Close()
+		return nil, fmt.Errorf("%w: %q", errReportNotRegular, path)
+	}
+	return file, nil
+}
+
+// readReportFile returns the contents of the report at path, reading at most
+// maxReportSize bytes so that reading remains bounded.
+func readReportFile(path string) ([]byte, error) {
+	file, err := openReport(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	data, err := io.ReadAll(io.LimitReader(file, maxReportSize+1))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read report file: %w", err)
+	}
+	if len(data) > maxReportSize {
+		return nil, fmt.Errorf("%w: %q exceeds the %d byte limit", errReportTooLarge, path, int64(maxReportSize))
+	}
+	return data, nil
+}
+
+func NewFixHandler(fixInfo *metav1.FixInfo) (*FixHandler, error) {
+	byteValue, err := readReportFile(fixInfo.ReportFile)
+	if err != nil {
+		return nil, err
 	}
 
 	var reportObj reporthandlingv2.PostureReport
