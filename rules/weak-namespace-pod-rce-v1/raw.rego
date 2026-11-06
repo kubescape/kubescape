@@ -37,9 +37,13 @@ deny contains msga if {
 	}
 }
 
-# creating the pods/exec subresource attaches to a running pod directly
+# creating the pods/exec subresource attaches to a running pod directly. get does
+# the same over a WebSocket, because the upgrade is a GET request. Kubernetes only
+# requires create as well from v1.35 (AuthorizePodWebsocketUpgradeCreatePermission),
+# and this rule cannot see the cluster version, so get is reported too. That is
+# the same call node-proxy-access-v1 makes for get on nodes/proxy.
 deny contains msga if {
-	verbs := ["create", "*"]
+	verbs := ["create", "get", "*"]
 	api_groups := ["", "*"]
 	resources := ["pods/exec", "*/exec", "*"]
 
