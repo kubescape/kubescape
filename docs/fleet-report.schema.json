@@ -1,0 +1,159 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/kubescape/kubescape/master/docs/fleet-report.schema.json",
+  "title": "Kubescape fleet report",
+  "description": "The combined report written by --fleet-report. Fields not listed here may be added, so consumers should ignore fields they do not recognise.",
+  "type": "object",
+  "required": ["metadata", "clusters", "compliance", "controlMatrix", "divergence"],
+  "properties": {
+    "metadata": { "$ref": "#/$defs/FleetMetadata" },
+    "clusters": {
+      "description": "One entry per requested context, including the ones that could not be scanned.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/ClusterResult" }
+    },
+    "compliance": { "$ref": "#/$defs/ComplianceRollup" },
+    "controlMatrix": { "$ref": "#/$defs/FleetControlMatrix" },
+    "divergence": { "$ref": "#/$defs/FleetDivergence" }
+  },
+  "$defs": {
+    "FleetMetadata": {
+      "description": "The run that produced the report.",
+      "type": "object",
+      "required": ["generatedAt", "contexts"],
+      "properties": {
+        "generatedAt": { "type": "string", "format": "date-time" },
+        "kubescapeVersion": { "type": "string" },
+        "contexts": {
+          "description": "The contexts that were requested, in the order given.",
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "ClusterResult": {
+      "description": "One cluster's outcome.",
+      "type": "object",
+      "required": ["clusterID", "context", "status"],
+      "properties": {
+        "clusterID": { "description": "Identifies the cluster across the report. Currently the context name.", "type": "string" },
+        "context": { "description": "The kubeconfig context the scan ran against.", "type": "string" },
+        "status": { "$ref": "#/$defs/ClusterScanStatus" },
+        "error": { "description": "The failure behind a status other than scanned.", "type": "string" },
+        "complianceScore": { "description": "Absent when the cluster was not measured, which is not the same as 0.", "type": "number" },
+        "coverage": { "description": "How complete the scan was. Its contents are not covered by this schema.", "type": "object" },
+        "duration": { "description": "How long the cluster took, in Go duration format, across every attempt and wait.", "type": "string" },
+        "attempts": { "description": "How many times the cluster was scanned. Absent when the scan never started.", "type": "integer", "minimum": 0 },
+        "report": { "description": "The cluster's own report without its raw resources, present when it was scanned. Its contents are not covered by this schema.", "type": "object" }
+      }
+    },
+    "ClusterScanStatus": {
+      "enum": ["scanned", "unreachable", "error", "cancelled"]
+    },
+    "ComplianceRollup": {
+      "description": "The fleet score and where it came from.",
+      "type": "object",
+      "required": ["clustersScored", "clustersTotal", "minCoverage"],
+      "properties": {
+        "complianceScore": { "description": "The mean across the clusters that counted. Absent when none did.", "type": "number" },
+        "clustersScored": { "type": "integer", "minimum": 0 },
+        "clustersTotal": { "type": "integer", "minimum": 0 },
+        "minCoverage": { "description": "The coverage floor that was applied. 0 means none.", "type": "number" },
+        "frameworks": { "type": "array", "items": { "$ref": "#/$defs/FrameworkRollup" } },
+        "excluded": { "type": "array", "items": { "$ref": "#/$defs/ExcludedCluster" } }
+      }
+    },
+    "FrameworkRollup": {
+      "description": "One framework's score across the fleet.",
+      "type": "object",
+      "required": ["name", "clustersScored", "clustersReporting"],
+      "properties": {
+        "name": { "type": "string" },
+        "complianceScore": { "description": "Absent when no cluster scored this framework.", "type": "number" },
+        "clustersScored": { "type": "integer", "minimum": 0 },
+        "clustersReporting": { "description": "Contributing clusters that ran the framework, including vacuous ones.", "type": "integer", "minimum": 0 },
+        "vacuousIn": {
+          "description": "Clusters where the framework scored 100% only because every control in it was irrelevant.",
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "ExcludedCluster": {
+      "description": "One cluster left out of the fleet score.",
+      "type": "object",
+      "required": ["clusterID", "reason"],
+      "properties": {
+        "clusterID": { "type": "string" },
+        "reason": { "$ref": "#/$defs/ExclusionReason" },
+        "coverage": { "description": "Set only for lowCoverage.", "type": "number" },
+        "complianceScore": { "description": "The score that was not counted. Set only for lowCoverage.", "type": "number" }
+      }
+    },
+    "ExclusionReason": {
+      "enum": ["notScanned", "notScored", "lowCoverage"]
+    },
+    "FleetControlMatrix": {
+      "description": "Every control a scanned cluster reported, and what each of those clusters found.",
+      "type": "object",
+      "required": ["controls"],
+      "properties": {
+        "controls": { "type": "array", "items": { "$ref": "#/$defs/FleetControlRow" } }
+      }
+    },
+    "FleetControlRow": {
+      "description": "One control across the fleet.",
+      "type": "object",
+      "required": ["controlID", "name", "severity", "byCluster"],
+      "properties": {
+        "controlID": { "type": "string" },
+        "name": { "type": "string" },
+        "severity": { "type": "string" },
+        "byCluster": {
+          "description": "Keyed by clusterID. A cluster missing here contributed no data for this control.",
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/ControlStatusCell" }
+        }
+      }
+    },
+    "ControlStatusCell": {
+      "description": "One control's outcome in one cluster.",
+      "type": "object",
+      "required": ["status", "failedResources", "complianceScore"],
+      "properties": {
+        "status": { "$ref": "#/$defs/CellStatus" },
+        "failedResources": { "type": "integer", "minimum": 0 },
+        "complianceScore": { "description": "-1 when the control carries no score.", "type": "number" }
+      }
+    },
+    "CellStatus": {
+      "enum": ["passed", "failed", "skipped", "notEvaluated"]
+    },
+    "FleetDivergence": {
+      "description": "The controls the clusters do not agree on.",
+      "type": "object",
+      "properties": {
+        "referenceCluster": { "type": "string" },
+        "referenceUnavailable": { "description": "A reference cluster was requested but contributed nothing to the control matrix.", "type": "boolean" },
+        "controls": { "type": "array", "items": { "$ref": "#/$defs/ControlDivergence" } }
+      }
+    },
+    "ControlDivergence": {
+      "description": "One control the clusters disagree on, and which clusters landed where.",
+      "type": "object",
+      "required": ["controlID", "name", "severity", "postureDiverges", "coverageGap"],
+      "properties": {
+        "controlID": { "type": "string" },
+        "name": { "type": "string" },
+        "severity": { "type": "string" },
+        "postureDiverges": { "description": "One cluster passed and another failed.", "type": "boolean" },
+        "coverageGap": { "description": "One cluster could not evaluate the control while another produced an outcome.", "type": "boolean" },
+        "referenceStatus": { "$ref": "#/$defs/CellStatus" },
+        "passed": { "type": "array", "items": { "type": "string" } },
+        "failed": { "type": "array", "items": { "type": "string" } },
+        "skipped": { "type": "array", "items": { "type": "string" } },
+        "notEvaluated": { "type": "array", "items": { "type": "string" } }
+      }
+    }
+  }
+}

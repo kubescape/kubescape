@@ -1,6 +1,7 @@
 package scan
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -18,6 +19,7 @@ import (
 	"github.com/kubescape/kubescape/v4/cmd/shared"
 	"github.com/kubescape/kubescape/v4/core/core"
 	"github.com/kubescape/kubescape/v4/core/pkg/fleet"
+	"github.com/santhosh-tekuri/jsonschema/v6"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -208,14 +210,31 @@ func scanFleetE2E(t testing.TB, fleetReport string, args ...string) fleetRun {
 	return run
 }
 
-// readFleetReport decodes the fleet report a scan wrote.
+// readFleetReport decodes the fleet report a scan wrote, after checking it against the published schema.
 func readFleetReport(t testing.TB, path string) fleet.FleetReport {
 	t.Helper()
 	contents, err := os.ReadFile(path)
 	require.NoError(t, err, "the fleet report is written whatever happened to the clusters")
+	requireMatchesFleetSchema(t, contents)
 	var report fleet.FleetReport
 	require.NoError(t, json.Unmarshal(contents, &report))
 	return report
+}
+
+// requireMatchesFleetSchema fails when a real fleet report does not match docs/fleet-report.schema.json.
+func requireMatchesFleetSchema(t testing.TB, report []byte) {
+	t.Helper()
+	contents, err := os.ReadFile(filepath.Join("..", "..", "docs", "fleet-report.schema.json"))
+	require.NoError(t, err)
+	document, err := jsonschema.UnmarshalJSON(bytes.NewReader(contents))
+	require.NoError(t, err)
+	compiler := jsonschema.NewCompiler()
+	require.NoError(t, compiler.AddResource("fleet-report.schema.json", document))
+	schema, err := compiler.Compile("fleet-report.schema.json")
+	require.NoError(t, err)
+	instance, err := jsonschema.UnmarshalJSON(bytes.NewReader(report))
+	require.NoError(t, err)
+	require.NoError(t, schema.Validate(instance), "the report the scan wrote must match the published schema")
 }
 
 // writeE2EKubeconfig writes a kubeconfig with one context per server, each named after its context.

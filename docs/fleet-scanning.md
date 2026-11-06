@@ -152,7 +152,7 @@ Fleet compliance: 80%  (from 2 of 3 clusters)
 | `metadata` | When the report was generated, the Kubescape version, and the contexts that were requested. |
 | `clusters` | One entry per context: `status`, `error`, `complianceScore`, `coverage`, `duration`, `attempts`, and the cluster's own report when it was scanned. |
 | `compliance` | The fleet score, how many clusters it came from, per-framework scores, and every cluster left out with the reason. |
-| `controlMatrix` | Every control against every cluster: passed, failed, skipped or not evaluated. |
+| `controlMatrix` | Every control a scanned cluster reported, and what each of those clusters found: passed, failed, skipped or not evaluated. |
 | `divergence` | The controls the clusters disagree on, which clusters landed where, and what the reference cluster found. |
 
 For example, to list each cluster's status:
@@ -160,6 +160,20 @@ For example, to list each cluster's status:
 ```bash
 jq '.clusters[] | {clusterID, status, attempts}' fleet.json
 ```
+
+### Report format
+
+[`fleet-report.schema.json`](fleet-report.schema.json) is the JSON schema for
+`fleet.json`. Use the copy from the git tag in `metadata.kubescapeVersion`, so
+it matches the release that wrote your report.
+
+The schema leaves out the contents of `coverage` and of each cluster's
+`report`. That `report` is close to the context's own JSON report but not the
+same. For example, it has no `resources` and its controls have no `severity`.
+
+New fields can be added at any time, so ignore the ones you do not recognise.
+Removing or renaming a field, adding a status or exclusion reason, or changing
+what a value means is treated as a breaking change.
 
 ## Exit code
 
