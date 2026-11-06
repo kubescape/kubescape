@@ -39,6 +39,21 @@ spec:
         formats: [json]
 `
 
+func TestValidateContractCommandRejectsNullNamespaces(t *testing.T) {
+	path := writeScanContract(t, `
+      policy:
+        frameworks: [nsa]
+      scope:
+        excludeNamespaces: [null]`)
+	cmd := GetScanCommand(core.NewKubescape(context.Background()))
+	output := &bytes.Buffer{}
+	cmd.SetOut(output)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"validate-contract", path})
+	require.ErrorContains(t, cmd.Execute(), "null entry")
+	assert.NotContains(t, output.String(), `is valid`, "an invalid contract must not be reported as valid")
+}
+
 func TestValidateContractCommand(t *testing.T) {
 	originalBuildNumber := versioncheck.BuildNumber
 	versioncheck.BuildNumber = "v4.1.0"
