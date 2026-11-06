@@ -1,0 +1,28 @@
+name: Kubernetes CVE feed freshness
+permissions:
+  contents: read
+on:
+  workflow_dispatch: {}
+  schedule:
+    - cron: "0 6 * * 1"
+  pull_request:
+    paths:
+      - "core/pkg/k8scveindex/**"
+      - ".github/workflows/k8scveindex-feed.yaml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-embedded-feed:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Check embedded Kubernetes CVE feed freshness
+        env:
+          K8SCVEINDEX_CHECK_FEED_FRESHNESS: "true"
+        run: go test ./core/pkg/k8scveindex -run '^TestEmbeddedFeedFreshness$' -count=1
