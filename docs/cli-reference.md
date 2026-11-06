@@ -136,6 +136,13 @@ view and the aggregate result remain failed. The aggregate can still carry the
 `ExceptionMatched` events include only exceptions applicable to the selected
 frameworks; a partially excepted aggregate can still have a matched exception.
 
+A cluster scan emits `ExceptionMatched` events only when the scanning identity
+can create core `events` in every namespace. Kubescape checks this once per scan
+with a SelfSubjectAccessReview. If the check is denied (info) or cannot complete
+(warning), it logs one message and emits no events, so a scan without that permission does not log
+a rejected event for every matched exception. The Kubescape operator Helm chart
+grants the permission only when `capabilities.riskAcceptance` is enabled.
+
 Compatibility note: the scan retains raw rule evaluations and exception policies.
 Raw results embedded in MCP `failedResources` can still carry failed evaluations
 for controls excepted in a framework. Consumers should use `summaryDetails` for

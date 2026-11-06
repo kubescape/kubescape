@@ -1,14 +1,38 @@
 package core
 
 import (
+	"context"
+	"errors"
 	"runtime"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
+	authorizationv1 "k8s.io/api/authorization/v1"
 	corev1 "k8s.io/api/core/v1"
+	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 )
+
+// fakeClientWithEventsAccess returns a fake clientset whose access reviews
+// answer allowed, or fail with reviewErr when it is set. It records the
+// attributes of the last review.
+func fakeClientWithEventsAccess(allowed bool, reviewErr error, seen *authorizationv1.ResourceAttributes) *fake.Clientset {
+	client := fake.NewClientset()
+	client.PrependReactor("create", "selfsubjectaccessreviews", func(action k8stesting.Action) (bool, k8sruntime.Object, error) {
+		if reviewErr != nil {
+			return true, nil, reviewErr
+		}
+		review := action.(k8stesting.CreateAction).GetObject().(*authorizationv1.SelfSubjectAccessReview)
+		if seen != nil && review.Spec.ResourceAttributes != nil {
+			*seen = *review.Spec.ResourceAttributes
+		}
+		review.Status.Allowed = allowed
+		return true, review, nil
+	})
+	return client
+}
 
 // pollGoroutineCount waits until cond returns true, giving the scheduler and
 // background goroutines time to settle. A plain poll loop is used instead of
@@ -34,7 +58,7 @@ func pollGoroutineCount(timeout time.Duration, cond func() bool) bool {
 func TestSecurityExceptionEventRecorderShutdownStopsWatcher(t *testing.T) {
 	baseline := runtime.NumGoroutine()
 
-	recorder, shutdown := newSecurityExceptionEventRecorderWithClient(fake.NewClientset())
+	recorder, shutdown := newSecurityExceptionEventRecorderWithClient(context.Background(), fakeClientWithEventsAccess(true, nil, nil))
 	require.NotNil(t, recorder, "a recorder must be returned for a valid client")
 	require.NotNil(t, shutdown, "a shutdown closure must be returned for a valid client")
 
@@ -55,7 +79,41 @@ func TestSecurityExceptionEventRecorderShutdownStopsWatcher(t *testing.T) {
 }
 
 func TestSecurityExceptionEventRecorderWithNilClient(t *testing.T) {
-	recorder, shutdown := newSecurityExceptionEventRecorderWithClient(nil)
+	recorder, shutdown := newSecurityExceptionEventRecorderWithClient(context.Background(), nil)
 	require.Nil(t, recorder)
 	require.Nil(t, shutdown)
+}
+
+// TestSecurityExceptionEventRecorderReviewsClusterWideEventCreate verifies the
+// recorder is built when events may be created in every namespace, and that it
+// asks for exactly that.
+func TestSecurityExceptionEventRecorderReviewsClusterWideEventCreate(t *testing.T) {
+	var seen authorizationv1.ResourceAttributes
+	recorder, shutdown := newSecurityExceptionEventRecorderWithClient(context.Background(), fakeClientWithEventsAccess(true, nil, &seen))
+	require.NotNil(t, recorder)
+	require.NotNil(t, shutdown)
+	shutdown()
+
+	require.Equal(t, authorizationv1.ResourceAttributes{Verb: "create", Version: "v1", Resource: "events"}, seen)
+}
+
+// TestSecurityExceptionEventRecorderDisabledWithoutEventAccess verifies that no
+// recorder is returned when the identity may not create events, or when the
+// access review itself fails.
+func TestSecurityExceptionEventRecorderDisabledWithoutEventAccess(t *testing.T) {
+	tests := []struct {
+		name      string
+		allowed   bool
+		reviewErr error
+	}{
+		{name: "denied", allowed: false},
+		{name: "review error", reviewErr: errors.New("connection refused")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			recorder, shutdown := newSecurityExceptionEventRecorderWithClient(context.Background(), fakeClientWithEventsAccess(tt.allowed, tt.reviewErr, nil))
+			require.Nil(t, recorder)
+			require.Nil(t, shutdown)
+		})
+	}
 }
