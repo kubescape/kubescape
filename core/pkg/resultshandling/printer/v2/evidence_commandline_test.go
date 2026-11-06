@@ -147,6 +147,21 @@ func TestRedactCommandLine(t *testing.T) {
 			want: []any{kv("--endpoint", "https://user:"+redactedValue+"@host:8443/path"), "https://u:" + redactedValue + "@h"},
 		},
 		{
+			name: "a URL password containing @ is masked whole",
+			args: []any{"http://jane:p@" + valueA + "@google.com", "https://u:a@b@c@host/p"},
+			want: []any{"http://jane:" + redactedValue + "@google.com", "https://u:" + redactedValue + "@host/p"},
+		},
+		{
+			name: "an @ after the authority is not part of the user information",
+			args: []any{"https://u:" + valueA + "@host/path@x", "https://host:8080?mail=a@b", "https://host:8080/p#a@b"},
+			want: []any{"https://u:" + redactedValue + "@host/path@x", "https://host:8080?mail=a@b", "https://host:8080/p#a@b"},
+		},
+		{
+			name: "several URLs in one argument are each masked",
+			args: []any{"--endpoints=http://a:" + valueA + "@h1,http://b:" + valueB + "@h2"},
+			want: []any{"--endpoints=http://a:" + redactedValue + "@h1,http://b:" + redactedValue + "@h2"},
+		},
+		{
 			name: "a URL without user information is left alone",
 			args: []any{"--endpoint=https://host:8443/path", "http://user@host/"},
 			want: []any{"--endpoint=https://host:8443/path", "http://user@host/"},

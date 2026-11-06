@@ -240,12 +240,16 @@ func isBareCredentialFlag(s string) bool {
 		credentialFlagName(s)
 }
 
-// urlPassword matches the password in a URL's user information.
-var urlPassword = regexp.MustCompile(`(://[^/\s:@]*:)[^/\s@]+(@)`)
+// urlPassword matches a URL's "user:password@" up to the last "@" of its
+// authority. The password may itself contain "@" ("jane:p@ssword@host"), so it
+// is matched greedily and the match ends at the last "@" before the authority
+// ends. The authority ends at "/", "?" or "#", which the password therefore
+// cannot cross: an "@" in a path or query is not part of the user information.
+var urlPassword = regexp.MustCompile(`(://[^/?#\s:@]*:)[^/?#\s]+@`)
 
 // redactArgument masks a credential inside a single argument.
 func redactArgument(s string) string {
-	s = urlPassword.ReplaceAllString(s, "${1}"+redactedValue+"${2}")
+	s = urlPassword.ReplaceAllString(s, "${1}"+redactedValue+"@")
 
 	// "--flag value" written as one element. The space comes before any "=", so
 	// the first "=" belongs to the value, not to the flag.
