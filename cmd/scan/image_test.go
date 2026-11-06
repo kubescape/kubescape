@@ -562,6 +562,51 @@ func TestGetImageCmd_RunE_RejectsPostureFlags(t *testing.T) {
 			scanInfo: cautils.ScanInfo{DryRun: true},
 			wantErr:  "--dry-run is not supported for image scans: an image scan evaluates vulnerabilities, not cluster resource permissions",
 		},
+		{
+			name:     "values is rejected",
+			scanInfo: cautils.ScanInfo{HelmValueFiles: []string{"values.yaml"}},
+			wantErr:  "--values is not supported for image scans: an image scan evaluates vulnerabilities, not Helm charts",
+		},
+		{
+			name:     "set is rejected",
+			scanInfo: cautils.ScanInfo{HelmSetValues: []string{"key=val"}},
+			wantErr:  "--set is not supported for image scans: an image scan evaluates vulnerabilities, not Helm charts",
+		},
+		{
+			name:     "set-string is rejected",
+			scanInfo: cautils.ScanInfo{HelmSetStringValues: []string{"key=val"}},
+			wantErr:  "--set-string is not supported for image scans: an image scan evaluates vulnerabilities, not Helm charts",
+		},
+		{
+			name:     "set-file is rejected",
+			scanInfo: cautils.ScanInfo{HelmSetFileValues: []string{"key=file"}},
+			wantErr:  "--set-file is not supported for image scans: an image scan evaluates vulnerabilities, not Helm charts",
+		},
+		{
+			name:     "release-name is rejected",
+			scanInfo: cautils.ScanInfo{HelmReleaseName: "my-release"},
+			wantErr:  "--release-name is not supported for image scans: an image scan evaluates vulnerabilities, not Helm charts",
+		},
+		{
+			name:     "release-namespace is rejected",
+			scanInfo: cautils.ScanInfo{HelmReleaseNamespace: "prod"},
+			wantErr:  "--release-namespace is not supported for image scans: an image scan evaluates vulnerabilities, not Helm charts",
+		},
+		{
+			name:     "kube-version is rejected",
+			scanInfo: cautils.ScanInfo{HelmKubeVersion: "1.31"},
+			wantErr:  "--kube-version is not supported for image scans: an image scan evaluates vulnerabilities, not Helm charts",
+		},
+		{
+			name:     "api-versions is rejected",
+			scanInfo: cautils.ScanInfo{HelmAPIVersions: []string{"apps/v1"}},
+			wantErr:  "--api-versions is not supported for image scans: an image scan evaluates vulnerabilities, not Helm charts",
+		},
+		{
+			name:     "file-path is rejected",
+			scanInfo: cautils.ScanInfo{FilePath: "manifests/app.yaml"},
+			wantErr:  "--file-path is not supported for image scans: an image scan evaluates vulnerabilities, not local manifest files",
+		},
 	}
 
 	for _, tc := range testCases {
@@ -694,6 +739,46 @@ func TestGetScanCommand_RejectsPostureFlagsOnImageScan(t *testing.T) {
 			name:    "dry-run flag",
 			args:    []string{"image", "--dry-run", "nginx:1.27"},
 			wantErr: "--dry-run is not supported for image scans: an image scan evaluates vulnerabilities, not cluster resource permissions",
+		},
+		{
+			name:    "values flag",
+			args:    []string{"image", "--values", "values.yaml", "nginx:1.27"},
+			wantErr: "--values is not supported for image scans: an image scan evaluates vulnerabilities, not Helm charts",
+		},
+		{
+			name:    "set flag",
+			args:    []string{"image", "--set", "replicaCount=2", "nginx:1.27"},
+			wantErr: "--set is not supported for image scans: an image scan evaluates vulnerabilities, not Helm charts",
+		},
+		{
+			name:    "set-string flag",
+			args:    []string{"image", "--set-string", "tag=1.27", "nginx:1.27"},
+			wantErr: "--set-string is not supported for image scans: an image scan evaluates vulnerabilities, not Helm charts",
+		},
+		{
+			name:    "set-file flag",
+			args:    []string{"image", "--set-file", "config=config.json", "nginx:1.27"},
+			wantErr: "--set-file is not supported for image scans: an image scan evaluates vulnerabilities, not Helm charts",
+		},
+		{
+			name:    "release-name flag",
+			args:    []string{"image", "--release-name", "my-release", "nginx:1.27"},
+			wantErr: "--release-name is not supported for image scans: an image scan evaluates vulnerabilities, not Helm charts",
+		},
+		{
+			name:    "release-namespace flag",
+			args:    []string{"image", "--release-namespace", "prod", "nginx:1.27"},
+			wantErr: "--release-namespace is not supported for image scans: an image scan evaluates vulnerabilities, not Helm charts",
+		},
+		{
+			name:    "kube-version flag",
+			args:    []string{"image", "--kube-version", "1.31", "nginx:1.27"},
+			wantErr: "--kube-version is not supported for image scans: an image scan evaluates vulnerabilities, not Helm charts",
+		},
+		{
+			name:    "api-versions flag",
+			args:    []string{"image", "--api-versions", "apps/v1", "nginx:1.27"},
+			wantErr: "--api-versions is not supported for image scans: an image scan evaluates vulnerabilities, not Helm charts",
 		},
 	}
 
