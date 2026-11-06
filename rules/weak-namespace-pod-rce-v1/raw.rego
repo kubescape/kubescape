@@ -41,7 +41,7 @@ deny contains msga if {
 deny contains msga if {
 	verbs := ["create", "*"]
 	api_groups := ["", "*"]
-	resources := ["pods/exec", "pods/*", "*"]
+	resources := ["pods/exec", "*/exec", "*"]
 
 	subjectVector := input[_]
 	role := subjectVector.relatedObjects[i]

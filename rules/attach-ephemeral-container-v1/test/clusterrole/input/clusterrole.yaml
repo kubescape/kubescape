@@ -4,5 +4,5 @@ metadata:
   name: pod-debugger-cluster
 rules:
 - apiGroups: [""]
-  resources: ["pods/*"]
+  resources: ["pods/ephemeralcontainers"]
   verbs: ["update"]

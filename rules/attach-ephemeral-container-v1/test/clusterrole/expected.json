@@ -57,7 +57,7 @@
                                     ""
                                 ],
                                 "resources": [
-                                    "pods/*"
+                                    "pods/ephemeralcontainers"
                                 ],
                                 "verbs": [
                                     "update"
