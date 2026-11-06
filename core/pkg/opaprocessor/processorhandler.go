@@ -158,11 +158,6 @@ func NewOPAProcessor(sessionObj *cautils.OPASessionObj, regoDependenciesData *re
 		initialResourceCount = sessionObj.ResourceCount()
 	}
 
-	largeClusterSizeThreshold, _ := cautils.ParseIntEnvVar("LARGE_CLUSTER_SIZE", cautils.DefaultLargeClusterSize)
-	if largeClusterSizeThreshold <= 0 {
-		largeClusterSizeThreshold = cautils.DefaultLargeClusterSize
-	}
-
 	return &OPAProcessor{
 		OPASessionObj:               sessionObj,
 		regoDependenciesData:        regoDependenciesData,
@@ -176,7 +171,7 @@ func NewOPAProcessor(sessionObj *cautils.OPASessionObj, regoDependenciesData *re
 		TimedOutControls:            make(map[string]string),
 		initialResourceCount:        initialResourceCount,
 		celNamespaceIndex:           indexNamespaces(sessionObj),
-		largeClusterSizeThreshold:   largeClusterSizeThreshold,
+		largeClusterSizeThreshold:   cautils.LargeClusterSize(),
 		wholeClusterPolicy:          cautils.WholeClusterPolicyProjected,
 		skippedWholeClusterControls: make(map[string]string),
 	}
