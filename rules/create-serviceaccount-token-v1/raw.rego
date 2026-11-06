@@ -5,7 +5,7 @@ import rego.v1
 deny contains msga if {
 	verbs := ["create", "*"]
 	api_groups := ["", "*"]
-	resources := ["serviceaccounts/token", "*"]
+	resources := ["serviceaccounts/token", "*/token", "*"]
 	subjectVector := input[_]
 	role := subjectVector.relatedObjects[i]
 	rolebinding := subjectVector.relatedObjects[j]

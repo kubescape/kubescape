@@ -6,7 +6,7 @@ import rego.v1
 deny contains msga if {
 	verbs := ["update", "patch", "*"]
 	api_groups := ["", "*"]
-	resources := ["pods/ephemeralcontainers", "pods/*", "*"]
+	resources := ["pods/ephemeralcontainers", "*/ephemeralcontainers", "*"]
 	subjectVector := input[_]
 	role := subjectVector.relatedObjects[i]
 	rolebinding := subjectVector.relatedObjects[j]

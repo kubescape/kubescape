@@ -52,7 +52,6 @@ deny contains msga if {
 deny contains msga if {
 	verbs := ["impersonate", "*"]
 	api_groups := ["authentication.k8s.io", "*"]
-	resources := ["uids", "userextras/*", "*"]
 	subjectVector := input[_]
 	role := subjectVector.relatedObjects[i]
 	rolebinding := subjectVector.relatedObjects[j]
@@ -74,7 +73,7 @@ deny contains msga if {
 	count(verb_path) > 0
 	api_groups_path := [sprintf("%s.apiGroups[%d]", [rule_path, a]) | apiGroup = rule.apiGroups[a]; apiGroup in api_groups]
 	count(api_groups_path) > 0
-	resources_path := [sprintf("%s.resources[%d]", [rule_path, l]) | resource = rule.resources[l]; resource in resources]
+	resources_path := [sprintf("%s.resources[%d]", [rule_path, l]) | resource = rule.resources[l]; grants_uid_or_extra(resource)]
 	count(resources_path) > 0
 	path := array.concat(resources_path, verb_path)
 	path2 := array.concat(path, api_groups_path)
@@ -94,6 +93,19 @@ deny contains msga if {
 			"externalObjects": subjectVector,
 		},
 	}
+}
+
+# The API server authorizes impersonating a user extra as a request on the
+# userextras resource with the extra's key as the subresource, so a rule grants
+# it by naming the key ("userextras/scopes"). RBAC has no "userextras/*" form
+# that expands to every key. "*/<key>" also reaches a key, but it is not reported
+# here: it reads as a grant on that subresource of every resource, and with a
+# wildcard group and verb "*/status" would otherwise count as impersonation.
+grants_uid_or_extra(resource) if resource in {"uids", "*"}
+
+grants_uid_or_extra(resource) if {
+	startswith(resource, "userextras/")
+	resource != "userextras/*"
 }
 
 is_same_namespace(role, rolebinding) if {
