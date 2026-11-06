@@ -819,6 +819,30 @@ func TestGetScanCommand_RejectsOutputOverwritingInputs(t *testing.T) {
 		require.NoError(t, readErr)
 		assert.NotEmpty(t, content)
 	})
+
+	t.Run("repeated directory scan with output file inside directory succeeds", func(t *testing.T) {
+		dir := t.TempDir()
+		manifest := filepath.Join(dir, "pod.json")
+		require.NoError(t, os.WriteFile(manifest, []byte(`{"apiVersion":"v1","kind":"Pod","metadata":{"name":"test-pod"}}`), 0o600))
+		resultsFile := filepath.Join(dir, "results.json")
+
+		// Pre-populate results.json with non-manifest output report from previous run
+		require.NoError(t, os.WriteFile(resultsFile, []byte(`{"type":"postureReport","generationTime":"2026-11-06T00:00:00Z"}`), 0o600))
+
+		ks := core.NewKubescape(context.Background())
+		cmd := GetScanCommand(ks)
+		cmd.SilenceUsage = true
+		cmd.SilenceErrors = true
+		cmd.SetArgs([]string{"--format", "json", "--output", resultsFile, dir})
+
+		err := cmd.Execute()
+		require.NoError(t, err, "repeated scan execution must succeed and not treat results.json as an input manifest")
+		require.FileExists(t, resultsFile)
+
+		manifestContent, readErr := os.ReadFile(manifest)
+		require.NoError(t, readErr)
+		assert.NotEmpty(t, manifestContent, "input manifest must be preserved")
+	})
 }
 
 // TestGetScanCommand_KubeContextsRejectedWhereUnsupported is a regression

@@ -882,6 +882,305 @@ func TestGetOutputPrinters_OutputSafetyAllowsNonCollidingOutputs(t *testing.T) {
 			}
 		}
 	})
+
+	t.Run("first and repeated scans with output inside scanned directory", func(t *testing.T) {
+		dir := t.TempDir()
+		manifest := filepath.Join(dir, "pod.yaml")
+		require.NoError(t, os.WriteFile(manifest, manifestContent, 0o600))
+		resultsFile := filepath.Join(dir, "results.json")
+
+		// First execution: results.json does not exist yet
+		scanInfo1 := &cautils.ScanInfo{
+			ScanType:      cautils.ScanTypeControl,
+			Format:        printer.JsonFormat,
+			Output:        resultsFile,
+			InputPatterns: []string{dir},
+		}
+
+		printers1, err := GetOutputPrinters(scanInfo1, context.Background(), "test-cluster")
+		require.NoError(t, err, "first scan with output in scanned directory must succeed")
+		assert.NotEmpty(t, printers1)
+		for _, p := range printers1 {
+			if closer, ok := p.(interface{ Close() error }); ok {
+				_ = closer.Close()
+			}
+		}
+
+		// Simulate scan output report written on first run
+		reportContent := []byte(`{"type":"postureReport","generationTime":"2026-11-06T00:00:00Z","clusterAPIServerInfo":{}}`)
+		require.NoError(t, os.WriteFile(resultsFile, reportContent, 0o600))
+
+		// Second execution: results.json exists with scan report data
+		scanInfo2 := &cautils.ScanInfo{
+			ScanType:      cautils.ScanTypeControl,
+			Format:        printer.JsonFormat,
+			Output:        resultsFile,
+			InputPatterns: []string{dir},
+		}
+
+		printers2, err := GetOutputPrinters(scanInfo2, context.Background(), "test-cluster")
+		require.NoError(t, err, "repeated scan with existing results.json in directory must succeed")
+		assert.NotEmpty(t, printers2)
+		for _, p := range printers2 {
+			if closer, ok := p.(interface{ Close() error }); ok {
+				_ = closer.Close()
+			}
+		}
+	})
+
+	t.Run("non-manifest files inside scanned directory are not treated as manifest collisions", func(t *testing.T) {
+		dir := t.TempDir()
+		manifest := filepath.Join(dir, "pod.yaml")
+		require.NoError(t, os.WriteFile(manifest, manifestContent, 0o600))
+
+		for _, tc := range []struct {
+			filename string
+			content  string
+			format   string
+		}{
+			{"results.yaml", "type: postureReport\ngenerationTime: 2026-11-06\n", printer.YamlFormat},
+			{"package.json", `{"name":"my-app","version":"1.0.0"}`, printer.JsonFormat},
+			{"tsconfig.json", `{"compilerOptions":{"target":"es6"}}`, printer.JsonFormat},
+			{"empty.json", "", printer.JsonFormat},
+			{"empty.yaml", "", printer.YamlFormat},
+		} {
+			filePath := filepath.Join(dir, tc.filename)
+			require.NoError(t, os.WriteFile(filePath, []byte(tc.content), 0o600))
+
+			scanInfo := &cautils.ScanInfo{
+				ScanType:      cautils.ScanTypeControl,
+				Format:        tc.format,
+				Output:        filePath,
+				InputPatterns: []string{dir},
+			}
+
+			printers, err := GetOutputPrinters(scanInfo, context.Background(), "test-cluster")
+			require.NoError(t, err, "output targeting %s must not fail as a manifest collision", tc.filename)
+			assert.NotEmpty(t, printers)
+			for _, p := range printers {
+				if closer, ok := p.(interface{ Close() error }); ok {
+					_ = closer.Close()
+				}
+			}
+		}
+	})
+}
+
+func TestGetOutputPrinters_OutputInsideRecursiveScannedDirectory(t *testing.T) {
+	manifestContent := []byte("apiVersion: v1\nkind: Pod\nmetadata:\n  name: nginx\n")
+
+	t.Run("nested non-manifest report is allowed", func(t *testing.T) {
+		dir := t.TempDir()
+		nestedDir := filepath.Join(dir, "reports", "sub")
+		require.NoError(t, os.MkdirAll(nestedDir, 0o700))
+		reportFile := filepath.Join(nestedDir, "results.json")
+		require.NoError(t, os.WriteFile(reportFile, []byte(`{"type":"postureReport"}`), 0o600))
+
+		scanInfo := &cautils.ScanInfo{
+			ScanType:      cautils.ScanTypeControl,
+			Format:        printer.JsonFormat,
+			Output:        reportFile,
+			InputPatterns: []string{dir},
+		}
+
+		printers, err := GetOutputPrinters(scanInfo, context.Background(), "test-cluster")
+		require.NoError(t, err)
+		assert.NotEmpty(t, printers)
+		for _, p := range printers {
+			if closer, ok := p.(interface{ Close() error }); ok {
+				_ = closer.Close()
+			}
+		}
+	})
+
+	t.Run("nested genuine manifest is rejected", func(t *testing.T) {
+		dir := t.TempDir()
+		nestedDir := filepath.Join(dir, "k8s", "workloads")
+		require.NoError(t, os.MkdirAll(nestedDir, 0o700))
+		manifest := filepath.Join(nestedDir, "pod.yaml")
+		require.NoError(t, os.WriteFile(manifest, manifestContent, 0o600))
+
+		scanInfo := &cautils.ScanInfo{
+			ScanType:      cautils.ScanTypeControl,
+			Format:        printer.YamlFormat,
+			Output:        manifest,
+			InputPatterns: []string{dir},
+		}
+
+		printers, err := GetOutputPrinters(scanInfo, context.Background(), "test-cluster")
+		require.ErrorContains(t, err, "would overwrite input manifest")
+		assert.Nil(t, printers)
+
+		got, err := os.ReadFile(manifest)
+		require.NoError(t, err)
+		assert.Equal(t, manifestContent, got, "nested manifest must not be truncated")
+	})
+}
+
+func TestGetOutputPrinters_SymlinkAndHiddenDirectoryDiscovery(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping symlink tests on windows")
+	}
+
+	manifestContent := []byte("apiVersion: v1\nkind: Pod\nmetadata:\n  name: nginx\n")
+
+	t.Run("symlinked directory input protects manifests inside", func(t *testing.T) {
+		baseDir := t.TempDir()
+		realDir := filepath.Join(baseDir, "real-manifests")
+		require.NoError(t, os.MkdirAll(realDir, 0o700))
+		manifest := filepath.Join(realDir, "pod.yaml")
+		require.NoError(t, os.WriteFile(manifest, manifestContent, 0o600))
+
+		symlinkDir := filepath.Join(baseDir, "symlink-manifests")
+		require.NoError(t, os.Symlink(realDir, symlinkDir))
+
+		scanInfo := &cautils.ScanInfo{
+			ScanType:      cautils.ScanTypeControl,
+			Format:        printer.YamlFormat,
+			Output:        manifest,
+			InputPatterns: []string{symlinkDir},
+		}
+
+		printers, err := GetOutputPrinters(scanInfo, context.Background(), "test-cluster")
+		require.ErrorContains(t, err, "would overwrite input manifest")
+		assert.Nil(t, printers)
+	})
+
+	t.Run("symlinked manifest inside scanned directory is protected", func(t *testing.T) {
+		baseDir := t.TempDir()
+		realManifest := filepath.Join(baseDir, "real-pod.yaml")
+		require.NoError(t, os.WriteFile(realManifest, manifestContent, 0o600))
+
+		scanDir := filepath.Join(baseDir, "scan-target")
+		require.NoError(t, os.MkdirAll(scanDir, 0o700))
+		symlinkManifest := filepath.Join(scanDir, "linked-pod.yaml")
+		require.NoError(t, os.Symlink(realManifest, symlinkManifest))
+
+		scanInfo := &cautils.ScanInfo{
+			ScanType:      cautils.ScanTypeControl,
+			Format:        printer.YamlFormat,
+			Output:        realManifest,
+			InputPatterns: []string{scanDir},
+		}
+
+		printers, err := GetOutputPrinters(scanInfo, context.Background(), "test-cluster")
+		require.ErrorContains(t, err, "would overwrite input manifest")
+		assert.Nil(t, printers)
+	})
+
+	t.Run("explicit hidden directory root is checked", func(t *testing.T) {
+		baseDir := t.TempDir()
+		hiddenDir := filepath.Join(baseDir, ".manifests")
+		require.NoError(t, os.MkdirAll(hiddenDir, 0o700))
+		manifest := filepath.Join(hiddenDir, "pod.yaml")
+		require.NoError(t, os.WriteFile(manifest, manifestContent, 0o600))
+
+		scanInfo := &cautils.ScanInfo{
+			ScanType:      cautils.ScanTypeControl,
+			Format:        printer.YamlFormat,
+			Output:        manifest,
+			InputPatterns: []string{hiddenDir},
+		}
+
+		printers, err := GetOutputPrinters(scanInfo, context.Background(), "test-cluster")
+		require.ErrorContains(t, err, "would overwrite input manifest")
+		assert.Nil(t, printers)
+	})
+
+	t.Run("excluded directory path does not block output write", func(t *testing.T) {
+		baseDir := t.TempDir()
+		ignoredDir := filepath.Join(baseDir, "ignored")
+		require.NoError(t, os.MkdirAll(ignoredDir, 0o700))
+		outputTarget := filepath.Join(ignoredDir, "report.json")
+		require.NoError(t, os.WriteFile(outputTarget, []byte(`{"old":"report"}`), 0o600))
+
+		scanInfo := &cautils.ScanInfo{
+			ScanType:      cautils.ScanTypeControl,
+			Format:        printer.JsonFormat,
+			Output:        outputTarget,
+			InputPatterns: []string{baseDir},
+			ExcludePaths:  []string{"ignored"},
+		}
+
+		printers, err := GetOutputPrinters(scanInfo, context.Background(), "test-cluster")
+		require.NoError(t, err)
+		assert.NotEmpty(t, printers)
+		for _, p := range printers {
+			if closer, ok := p.(interface{ Close() error }); ok {
+				_ = closer.Close()
+			}
+		}
+	})
+}
+
+func TestGetOutputPrinters_GlobDiscoveryCollision(t *testing.T) {
+	manifestContent := []byte("apiVersion: v1\nkind: Pod\nmetadata:\n  name: nginx\n")
+
+	t.Run("glob matching nested manifest rejects output collision", func(t *testing.T) {
+		baseDir := t.TempDir()
+		manifestsDir := filepath.Join(baseDir, "manifests")
+		subDir := filepath.Join(manifestsDir, "sub")
+		require.NoError(t, os.MkdirAll(subDir, 0o700))
+		manifest := filepath.Join(subDir, "deploy.yaml")
+		require.NoError(t, os.WriteFile(manifest, manifestContent, 0o600))
+
+		scanInfo := &cautils.ScanInfo{
+			ScanType:      cautils.ScanTypeControl,
+			Format:        printer.YamlFormat,
+			Output:        manifest,
+			InputPatterns: []string{filepath.Join(manifestsDir, "*.yaml")},
+		}
+
+		printers, err := GetOutputPrinters(scanInfo, context.Background(), "test-cluster")
+		require.ErrorContains(t, err, "would overwrite input manifest")
+		assert.Nil(t, printers)
+	})
+
+	t.Run("glob matching directory rejects manifest collision inside matched directory", func(t *testing.T) {
+		baseDir := t.TempDir()
+		teamDir := filepath.Join(baseDir, "team-alpha")
+		require.NoError(t, os.MkdirAll(teamDir, 0o700))
+		manifest := filepath.Join(teamDir, "pod.yaml")
+		require.NoError(t, os.WriteFile(manifest, manifestContent, 0o600))
+
+		scanInfo := &cautils.ScanInfo{
+			ScanType:      cautils.ScanTypeControl,
+			Format:        printer.YamlFormat,
+			Output:        manifest,
+			InputPatterns: []string{filepath.Join(baseDir, "team-*")},
+		}
+
+		printers, err := GetOutputPrinters(scanInfo, context.Background(), "test-cluster")
+		require.ErrorContains(t, err, "would overwrite input manifest")
+		assert.Nil(t, printers)
+	})
+
+	t.Run("glob does not reject non-manifest output file", func(t *testing.T) {
+		baseDir := t.TempDir()
+		manifestsDir := filepath.Join(baseDir, "manifests")
+		require.NoError(t, os.MkdirAll(manifestsDir, 0o700))
+		podManifest := filepath.Join(manifestsDir, "pod.yaml")
+		require.NoError(t, os.WriteFile(podManifest, manifestContent, 0o600))
+
+		reportFile := filepath.Join(manifestsDir, "results.json")
+		require.NoError(t, os.WriteFile(reportFile, []byte(`{"type":"postureReport"}`), 0o600))
+
+		scanInfo := &cautils.ScanInfo{
+			ScanType:      cautils.ScanTypeControl,
+			Format:        printer.JsonFormat,
+			Output:        reportFile,
+			InputPatterns: []string{filepath.Join(baseDir, "manifests", "*")},
+		}
+
+		printers, err := GetOutputPrinters(scanInfo, context.Background(), "test-cluster")
+		require.NoError(t, err)
+		assert.NotEmpty(t, printers)
+		for _, p := range printers {
+			if closer, ok := p.(interface{ Close() error }); ok {
+				_ = closer.Close()
+			}
+		}
+	})
 }
 
 func TestIsPrioritizationScanType(t *testing.T) {
