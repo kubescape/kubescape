@@ -85,7 +85,19 @@ func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comma
 			if err := validateThresholdsOnly(scanInfo); err != nil {
 				return err
 			}
-			if scanInfo.LabelSelector != "" {
+			if scanInfo.IncludeNamespaces != "" || commandFlagChanged(cmd, "include-namespaces") {
+				return fmt.Errorf("--include-namespaces is not supported for workload scans: the named workload specifies its namespace explicitly, not through namespace inclusion lists")
+			}
+			if scanInfo.ExcludedNamespaces != "" || commandFlagChanged(cmd, "exclude-namespaces") {
+				return fmt.Errorf("--exclude-namespaces is not supported for workload scans: the named workload specifies its namespace explicitly, not through namespace exclusion lists")
+			}
+			if scanInfo.IncludeKinds != "" || commandFlagChanged(cmd, "include-kinds") {
+				return fmt.Errorf("--include-kinds is not supported for workload scans: the named workload specifies its resource kind explicitly, not through kind inclusion lists")
+			}
+			if scanInfo.ExcludeKinds != "" || commandFlagChanged(cmd, "exclude-kinds") {
+				return fmt.Errorf("--exclude-kinds is not supported for workload scans: the named workload specifies its resource kind explicitly, not through kind exclusion lists")
+			}
+			if scanInfo.LabelSelector != "" || commandFlagChanged(cmd, "label-selector") {
 				return fmt.Errorf("--label-selector is not supported for workload scans: the named resource is fetched by identity, not by label")
 			}
 			identNamespace, kind, name, workloadAPIVersion, err := parseWorkloadIdentifierString(args[0])
