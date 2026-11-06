@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	admissionregistrationv1alpha1 "k8s.io/api/admissionregistration/v1alpha1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
 // MutationSummary is one Mutation from a matched policy, reported verbatim --
@@ -121,6 +122,10 @@ func NewIndex(policies []admissionregistrationv1alpha1.MutatingAdmissionPolicy, 
 // resolves at admission cannot be resolved here, spec.matchConditions
 // included; see MatchedPolicy.Determinable.
 func (idx *Index) Matches(obj ObjectInfo) []MatchedPolicy {
+	if isPolicyExempt(obj) {
+		return nil
+	}
+
 	var out []MatchedPolicy
 	for _, cp := range idx.policies {
 		policyMatched, policyDeterminable := cp.matchConstraint.matches(obj)
@@ -167,6 +172,34 @@ func (idx *Index) Matches(obj ObjectInfo) []MatchedPolicy {
 		}
 	}
 	return out
+}
+
+// policyExemptResources are the resources the apiserver never runs a policy
+// read from the API against, in any version and for any subresource:
+//   - the admission policy resources and their bindings, so a policy cannot
+//     rewrite its own configuration (admissionResources in k8s.io/apiserver
+//     pkg/admission/plugin/policy/generic);
+//   - the non-persisted review resources, which kube-apiserver excludes from
+//     every policy because intercepting them may break the cluster
+//     (pkg/kubeapiserver/admission/exclusion in kubernetes/kubernetes).
+var policyExemptResources = map[schema.GroupResource]struct{}{
+	{Group: "admissionregistration.k8s.io", Resource: "validatingadmissionpolicies"}:       {},
+	{Group: "admissionregistration.k8s.io", Resource: "validatingadmissionpolicybindings"}: {},
+	{Group: "admissionregistration.k8s.io", Resource: "mutatingadmissionpolicies"}:         {},
+	{Group: "admissionregistration.k8s.io", Resource: "mutatingadmissionpolicybindings"}:   {},
+	{Group: "authentication.k8s.io", Resource: "selfsubjectreviews"}:                       {},
+	{Group: "authentication.k8s.io", Resource: "tokenreviews"}:                             {},
+	{Group: "authorization.k8s.io", Resource: "localsubjectaccessreviews"}:                 {},
+	{Group: "authorization.k8s.io", Resource: "selfsubjectaccessreviews"}:                  {},
+	{Group: "authorization.k8s.io", Resource: "selfsubjectrulesreviews"}:                   {},
+	{Group: "authorization.k8s.io", Resource: "subjectaccessreviews"}:                      {},
+}
+
+// isPolicyExempt reports whether the apiserver skips every API-defined policy
+// for obj's resource, so no policy can mutate it.
+func isPolicyExempt(obj ObjectInfo) bool {
+	_, ok := policyExemptResources[schema.GroupResource{Group: obj.Group, Resource: obj.Resource}]
+	return ok
 }
 
 func mutationSummaries(mutations []admissionregistrationv1alpha1.Mutation) []MutationSummary {
