@@ -1,14 +1,47 @@
 package core
 
 import (
+	"context"
+	"errors"
+	"net/http"
+	"net/http/httptest"
 	"runtime"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
+	authorizationv1 "k8s.io/api/authorization/v1"
 	corev1 "k8s.io/api/core/v1"
+	k8sruntime "k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/fake"
+	"k8s.io/client-go/rest"
+	k8stesting "k8s.io/client-go/testing"
 )
+
+// fakeClientWithEventsAccess returns a fake clientset whose access reviews
+// answer with status(verb), or fail with reviewErr when it is set. It records
+// the attributes of every review.
+func fakeClientWithEventsAccess(status func(verb string) authorizationv1.SubjectAccessReviewStatus, reviewErr error, seen *[]authorizationv1.ResourceAttributes) *fake.Clientset {
+	client := fake.NewClientset()
+	client.PrependReactor("create", "selfsubjectaccessreviews", func(action k8stesting.Action) (bool, k8sruntime.Object, error) {
+		if reviewErr != nil {
+			return true, nil, reviewErr
+		}
+		review := action.(k8stesting.CreateAction).GetObject().(*authorizationv1.SelfSubjectAccessReview)
+		attrs := review.Spec.ResourceAttributes
+		if seen != nil && attrs != nil {
+			*seen = append(*seen, *attrs)
+		}
+		review.Status = status(attrs.Verb)
+		return true, review, nil
+	})
+	return client
+}
+
+func allowAll(string) authorizationv1.SubjectAccessReviewStatus {
+	return authorizationv1.SubjectAccessReviewStatus{Allowed: true}
+}
 
 // pollGoroutineCount waits until cond returns true, giving the scheduler and
 // background goroutines time to settle. A plain poll loop is used instead of
@@ -34,7 +67,7 @@ func pollGoroutineCount(timeout time.Duration, cond func() bool) bool {
 func TestSecurityExceptionEventRecorderShutdownStopsWatcher(t *testing.T) {
 	baseline := runtime.NumGoroutine()
 
-	recorder, shutdown := newSecurityExceptionEventRecorderWithClient(fake.NewClientset())
+	recorder, shutdown := newSecurityExceptionEventRecorderWithClient(context.Background(), fakeClientWithEventsAccess(allowAll, nil, nil))
 	require.NotNil(t, recorder, "a recorder must be returned for a valid client")
 	require.NotNil(t, shutdown, "a shutdown closure must be returned for a valid client")
 
@@ -55,7 +88,96 @@ func TestSecurityExceptionEventRecorderShutdownStopsWatcher(t *testing.T) {
 }
 
 func TestSecurityExceptionEventRecorderWithNilClient(t *testing.T) {
-	recorder, shutdown := newSecurityExceptionEventRecorderWithClient(nil)
+	recorder, shutdown := newSecurityExceptionEventRecorderWithClient(context.Background(), nil)
 	require.Nil(t, recorder)
 	require.Nil(t, shutdown)
+}
+
+// TestSecurityExceptionEventRecorderReviewsClusterWideEventWrite verifies the
+// recorder is built when events may be created and patched in every namespace,
+// and that it asks for exactly that.
+func TestSecurityExceptionEventRecorderReviewsClusterWideEventWrite(t *testing.T) {
+	var seen []authorizationv1.ResourceAttributes
+	recorder, shutdown := newSecurityExceptionEventRecorderWithClient(context.Background(), fakeClientWithEventsAccess(allowAll, nil, &seen))
+	require.NotNil(t, recorder)
+	require.NotNil(t, shutdown)
+	shutdown()
+
+	require.Equal(t, []authorizationv1.ResourceAttributes{
+		{Verb: "create", Version: "v1", Resource: "events"},
+		{Verb: "patch", Version: "v1", Resource: "events"},
+	}, seen)
+}
+
+// TestSecurityExceptionEventRecorderDisabledWithoutEventAccess verifies that no
+// recorder is returned when the identity may not create or may not patch
+// events, or when the access review cannot reach a decision.
+func TestSecurityExceptionEventRecorderDisabledWithoutEventAccess(t *testing.T) {
+	denyVerb := func(denied string) func(string) authorizationv1.SubjectAccessReviewStatus {
+		return func(verb string) authorizationv1.SubjectAccessReviewStatus {
+			return authorizationv1.SubjectAccessReviewStatus{Allowed: verb != denied}
+		}
+	}
+	tests := []struct {
+		name      string
+		status    func(string) authorizationv1.SubjectAccessReviewStatus
+		reviewErr error
+		wantErr   bool
+	}{
+		{name: "create denied", status: denyVerb("create")},
+		{name: "patch denied", status: denyVerb("patch")},
+		{name: "explicitly denied with evaluation error", status: func(string) authorizationv1.SubjectAccessReviewStatus {
+			return authorizationv1.SubjectAccessReviewStatus{Denied: true, EvaluationError: "webhook said no"}
+		}},
+		{name: "evaluation error without a decision", wantErr: true, status: func(string) authorizationv1.SubjectAccessReviewStatus {
+			return authorizationv1.SubjectAccessReviewStatus{EvaluationError: "webhook timeout"}
+		}},
+		{name: "review error", wantErr: true, reviewErr: errors.New("connection refused")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client := fakeClientWithEventsAccess(tt.status, tt.reviewErr, nil)
+
+			allowed, _, err := canWriteEvents(context.Background(), client)
+			require.False(t, allowed)
+			if tt.wantErr {
+				require.Error(t, err, "a review without a decision must be reported as a failed check, not a denial")
+			} else {
+				require.NoError(t, err)
+			}
+
+			recorder, shutdown := newSecurityExceptionEventRecorderWithClient(context.Background(), client)
+			require.Nil(t, recorder)
+			require.Nil(t, shutdown)
+		})
+	}
+}
+
+// TestSecurityExceptionEventRecorderDisabledWhenAccessReviewHangs verifies that
+// an API server that never answers the access review cannot hold up the scan:
+// the review is abandoned after eventsAccessReviewTimeout and no recorder is
+// returned.
+func TestSecurityExceptionEventRecorderDisabledWhenAccessReviewHangs(t *testing.T) {
+	release := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-r.Context().Done():
+		case <-release:
+		}
+	}))
+	defer server.Close()
+	defer close(release)
+
+	client, err := kubernetes.NewForConfig(&rest.Config{Host: server.URL})
+	require.NoError(t, err)
+
+	previous := eventsAccessReviewTimeout
+	eventsAccessReviewTimeout = 50 * time.Millisecond
+	defer func() { eventsAccessReviewTimeout = previous }()
+
+	start := time.Now()
+	recorder, shutdown := newSecurityExceptionEventRecorderWithClient(context.Background(), client)
+	require.Nil(t, recorder)
+	require.Nil(t, shutdown)
+	require.Less(t, time.Since(start), 5*time.Second, "the access review must be bounded by eventsAccessReviewTimeout")
 }

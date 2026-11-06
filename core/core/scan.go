@@ -524,7 +524,7 @@ func (ks *Kubescape) ScanContext(ctx context.Context, scanInfo *cautils.ScanInfo
 		}
 
 		deps := resources.NewRegoDependenciesData(k8sinterface.GetK8sConfig(), interfaces.tenantConfig.GetContextName())
-		exceptionRecorder, shutdownRecorder := newSecurityExceptionEventRecorder()
+		exceptionRecorder, shutdownRecorder := newSecurityExceptionEventRecorder(ctxOpa)
 		if shutdownRecorder != nil {
 			defer shutdownRecorder()
 		}
@@ -1011,7 +1011,7 @@ func collectAndProcessResourcesWithStreaming(ctx context.Context, resourceHandle
 	// producer does later — the invariant is enforced by ordering rather than by
 	// a comment in the resource handler.
 	deps := resources.NewRegoDependenciesData(k8sinterface.GetK8sConfig(), clusterName)
-	exceptionRecorder, shutdownRecorder := newSecurityExceptionEventRecorder()
+	exceptionRecorder, shutdownRecorder := newSecurityExceptionEventRecorder(ctx)
 	if shutdownRecorder != nil {
 		defer shutdownRecorder()
 	}
