@@ -34,6 +34,14 @@ func (e YAMLTreeEditor) Apply(ctx context.Context, source, expression string) (s
 	return e.apply(ctx, source, expression, nil)
 }
 
+// ApplyFixes verifies the planned resource identities before editing the
+// source. It returns the patched content and the expressions in apply order.
+func (e YAMLTreeEditor) ApplyFixes(ctx context.Context, source string, fixes []ResourceFixInfo) (string, []string, error) {
+	expressions := fileFixExpressions(fixes)
+	patched, err := e.apply(ctx, source, strings.Join(expressions, " | "), fixes)
+	return patched, expressions, err
+}
+
 func (YAMLTreeEditor) apply(ctx context.Context, source, expression string, fixes []ResourceFixInfo) (string, error) {
 	ops, err := parseYAMLOperations(expression)
 	if err != nil {

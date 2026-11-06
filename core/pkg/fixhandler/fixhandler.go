@@ -1732,15 +1732,12 @@ func isFixableSourceType(fileType string) bool {
 // written in. Emitting YAML into a .json manifest would break every tool that
 // reads it back.
 func applyFixToFileContent(ctx context.Context, filePath, content string, fixes []ResourceFixInfo) (string, error) {
-	expressions := make([]string, len(fixes))
-	for i := range fixes {
-		expressions[i] = reduceYamlExpressions(&fixes[i])
-	}
-	yamlExpression := strings.Join(expressions, " | ")
 	if isJSONSource(filePath) {
-		return applyFixToJSONContent(ctx, content, yamlExpression, fixes)
+		expression := strings.Join(fileFixExpressions(fixes), " | ")
+		return applyFixToJSONContent(ctx, content, expression, fixes)
 	}
-	return (YAMLTreeEditor{}).apply(ctx, content, yamlExpression, fixes)
+	patched, _, err := (YAMLTreeEditor{}).ApplyFixes(ctx, content, fixes)
+	return patched, err
 }
 
 // plannedFix is one planned YAML edit's location and the value it writes
@@ -1993,14 +1990,25 @@ func (rfi *ResourceFixInfo) addYamlExpressionsFromResourceAssociatedControl(docu
 	return added, skippedReasons
 }
 
-// reduceYamlExpressions reduces the number of yaml expressions to a single one
+func fileFixExpressions(fixes []ResourceFixInfo) []string {
+	var expressions []string
+	for i := range fixes {
+		expressions = append(expressions, sortedYamlExpressions(&fixes[i])...)
+	}
+	return expressions
+}
+
 func reduceYamlExpressions(resource *ResourceFixInfo) string {
+	return strings.Join(sortedYamlExpressions(resource), " | ")
+}
+
+func sortedYamlExpressions(resource *ResourceFixInfo) []string {
 	expressions := make([]string, 0, len(resource.YamlExpressions))
 	for expr := range resource.YamlExpressions {
 		expressions = append(expressions, expr)
 	}
 	sort.Strings(expressions)
-	return strings.Join(expressions, " | ")
+	return expressions
 }
 
 // safeFixPath matches the subset of yq's expression grammar that a fix path is
