@@ -3,6 +3,8 @@ package core
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"runtime"
 	"testing"
 	"time"
@@ -11,7 +13,9 @@ import (
 	authorizationv1 "k8s.io/api/authorization/v1"
 	corev1 "k8s.io/api/core/v1"
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/fake"
+	"k8s.io/client-go/rest"
 	k8stesting "k8s.io/client-go/testing"
 )
 
@@ -116,4 +120,33 @@ func TestSecurityExceptionEventRecorderDisabledWithoutEventAccess(t *testing.T) 
 			require.Nil(t, shutdown)
 		})
 	}
+}
+
+// TestSecurityExceptionEventRecorderDisabledWhenAccessReviewHangs verifies that
+// an API server that never answers the access review cannot hold up the scan:
+// the review is abandoned after eventsAccessReviewTimeout and no recorder is
+// returned.
+func TestSecurityExceptionEventRecorderDisabledWhenAccessReviewHangs(t *testing.T) {
+	release := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-r.Context().Done():
+		case <-release:
+		}
+	}))
+	defer server.Close()
+	defer close(release)
+
+	client, err := kubernetes.NewForConfig(&rest.Config{Host: server.URL})
+	require.NoError(t, err)
+
+	previous := eventsAccessReviewTimeout
+	eventsAccessReviewTimeout = 50 * time.Millisecond
+	defer func() { eventsAccessReviewTimeout = previous }()
+
+	start := time.Now()
+	recorder, shutdown := newSecurityExceptionEventRecorderWithClient(context.Background(), client)
+	require.Nil(t, recorder)
+	require.Nil(t, shutdown)
+	require.Less(t, time.Since(start), 5*time.Second, "the access review must be bounded by eventsAccessReviewTimeout")
 }

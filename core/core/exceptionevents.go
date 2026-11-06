@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"time"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -15,6 +16,14 @@ import (
 	"k8s.io/client-go/tools/record"
 )
 
+// eventsAccessReviewTimeout bounds the permission check so that a slow or
+// unreachable API server cannot hold up the scan; a check that times out
+// disables the events like any other failed check.
+var eventsAccessReviewTimeout = 10 * time.Second
+
+// newSecurityExceptionEventRecorder returns the ExceptionMatched event recorder
+// for a live cluster scan and the function that shuts it down, or nil for both
+// when not connected to a cluster or not allowed to create events.
 func newSecurityExceptionEventRecorder(ctx context.Context) (record.EventRecorder, func()) {
 	if !k8sinterface.IsConnectedToCluster() {
 		return nil, nil
@@ -69,7 +78,9 @@ func canCreateEvents(ctx context.Context, k8sClient kubernetes.Interface) (bool,
 			},
 		},
 	}
-	resp, err := k8sClient.AuthorizationV1().SelfSubjectAccessReviews().Create(ctx, ssar, metav1.CreateOptions{})
+	reviewCtx, cancel := context.WithTimeout(ctx, eventsAccessReviewTimeout)
+	defer cancel()
+	resp, err := k8sClient.AuthorizationV1().SelfSubjectAccessReviews().Create(reviewCtx, ssar, metav1.CreateOptions{})
 	if err != nil {
 		return false, "", err
 	}
