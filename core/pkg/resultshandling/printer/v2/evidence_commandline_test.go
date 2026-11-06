@@ -18,6 +18,7 @@ const (
 	nameToken  = "tok" + "en"
 	nameKey    = "api" + "-key"
 	nameURL    = "db" + "-url"
+	nameShort  = "sec" + "ret"
 
 	valueA = "placeholder-a"
 	valueB = "placeholder-b"
@@ -104,9 +105,56 @@ func TestRedactCommandLine(t *testing.T) {
 			want: []any{"--" + nameToken, redactedValue, "--verbose"},
 		},
 		{
-			name: "credential flag followed by another flag has no value to hide",
-			args: []any{"--" + nameToken, "--verbose"},
-			want: []any{"--" + nameToken, "--verbose"},
+			// A value can start with "-", and the two readings cannot be told
+			// apart, so the safe reading wins.
+			name: "a dash-prefixed value after a credential flag is masked",
+			args: []any{"--" + nameSecret, "-" + nameShort},
+			want: []any{"--" + nameSecret, redactedValue},
+		},
+		{
+			name: "the masked dash-prefixed element is still read as a flag, so the next value is masked too",
+			args: []any{"--" + nameSecret, "-" + nameShort, valueA, "--port=8080"},
+			want: []any{"--" + nameSecret, redactedValue, redactedValue, "--port=8080"},
+		},
+		{
+			name: "a credential flag followed by a credential flag masks both values",
+			args: []any{"--" + nameSecret, "--" + nameToken, valueA, "--verbose"},
+			want: []any{"--" + nameSecret, redactedValue, redactedValue, "--verbose"},
+		},
+		{
+			name: "a credential flag followed by a plain flag masks that flag",
+			args: []any{"--" + nameToken, "--verbose", "--port=8080"},
+			want: []any{"--" + nameToken, redactedValue, "--port=8080"},
+		},
+		{
+			name: "a flag and its value written as one element",
+			args: []any{"--" + nameSecret + " " + valueA, "--port 8080"},
+			want: []any{"--" + nameSecret + " " + redactedValue, "--port 8080"},
+		},
+		{
+			name: "a one-element flag whose value looks like an assignment",
+			args: []any{"--" + nameSecret + " " + kv("k", valueA)},
+			want: []any{"--" + nameSecret + " " + redactedValue},
+		},
+		{
+			name: "a credential nested in a one-element flag",
+			args: []any{"--env " + kv(envName, valueA), "--env " + kv("LOG_LEVEL", "debug")},
+			want: []any{"--env " + kv(envName, redactedValue), "--env " + kv("LOG_LEVEL", "debug")},
+		},
+		{
+			name: "a password in a URL is masked and the rest kept",
+			args: []any{kv("--endpoint", "https://user:"+valueA+"@host:8443/path"), "https://u:" + valueB + "@h"},
+			want: []any{kv("--endpoint", "https://user:"+redactedValue+"@host:8443/path"), "https://u:" + redactedValue + "@h"},
+		},
+		{
+			name: "a URL without user information is left alone",
+			args: []any{"--endpoint=https://host:8443/path", "http://user@host/"},
+			want: []any{"--endpoint=https://host:8443/path", "http://user@host/"},
+		},
+		{
+			name: "a credential-named flag holding a URL is masked whole",
+			args: []any{kv("--"+nameURL, "postgres://u:"+valueA+"@h/db")},
+			want: []any{kv("--"+nameURL, redactedValue)},
 		},
 		{
 			name: "credential flag last in the list",
@@ -270,6 +318,52 @@ func TestEvidencePathsWithCurrentValues_MaskedValueLookingLikeAssignment(t *test
 
 	got = evidencePathsWithCurrentValues(deletePathControl(valuePath), resource, true)
 	assert.Equal(t, []string{valuePath + " (current: " + kv("k", valueA) + ")"}, got, "--show-secrets reveals it")
+}
+
+// A credential flag followed by a value that starts with "-". Selecting that
+// value by index, and listing the whole command line, must both show the mask.
+func TestEvidencePathsWithCurrentValues_DashPrefixedCredentialValue(t *testing.T) {
+	resource := &mockResource{
+		kind: "Deployment",
+		obj: map[string]any{
+			"spec": map[string]any{
+				"template": map[string]any{
+					"spec": map[string]any{
+						"containers": []any{
+							map[string]any{
+								"name": "api",
+								"args": []any{"--" + nameSecret, "-" + nameShort, "--port=8080"},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	const valuePath = cmdArgs + "[1]"
+	leaked := "-" + nameShort
+
+	for name, got := range map[string][]string{
+		"delete path, indexed value": evidencePathsWithCurrentValues(deletePathControl(valuePath), resource, false),
+		"review path, indexed value": reviewPathsWithCurrentValuesRedacted(makeControlWithPaths(nil, []string{valuePath}), resource),
+	} {
+		t.Run(name, func(t *testing.T) {
+			assert.Equal(t, []string{valuePath + " (current: " + redactedValue + ")"}, got)
+		})
+	}
+
+	t.Run("the full argument list", func(t *testing.T) {
+		got := evidencePathsWithCurrentValues(deletePathControl(cmdArgs), resource, false)
+		require.Len(t, got, 1)
+		assert.Equal(t, cmdArgs+` (current: ["--`+nameSecret+`","[redacted]","[redacted]"])`, got[0],
+			"the value is masked, and so is the flag-shaped element after it, which may itself be a credential flag's value")
+		assert.NotContains(t, got[0], leaked)
+	})
+
+	t.Run("--show-secrets reveals it", func(t *testing.T) {
+		got := evidencePathsWithCurrentValues(deletePathControl(valuePath), resource, true)
+		assert.Equal(t, []string{valuePath + " (current: " + leaked + ")"}, got)
+	})
 }
 
 // Review paths take the same route, so a review path that selects an

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -183,47 +184,86 @@ func credentialFlagName(flag string) bool {
 // values replaced by redactedValue. Field-name redaction cannot see these: the
 // list elements have no names, and the credential is inside the string.
 //
-// Three spellings are covered:
+// Four spellings are covered:
 //   - "--<credential>=<value>" (or KEY=VALUE): the part after the first "="
 //     is replaced when the part before it names a credential.
 //   - "--<flag>=<name>=<value>", as in "--env=KEY=VALUE" or helm's
 //     "--set=a=1,b=2": when the outer flag is not a credential, each
 //     assignment in its value is checked the same way, so the credential
 //     inside is replaced and the rest of the argument is kept.
-//   - "--<credential>", "<value>": the element after a credential flag with
-//     no "=" is replaced, unless it is itself a flag.
+//   - "--<credential> <value>" written as one element: the value is replaced.
+//   - "--<credential>", "<value>" as two elements: the element after a
+//     credential flag with no value of its own is replaced.
 //
-// It does not parse shell. A credential inside a larger string, such as a
-// "sh -c" script, is not recognised.
+// A password in a URL ("scheme://user:<password>@host") is replaced wherever it
+// appears.
+//
+// The element after a bare credential flag is masked even when it starts with
+// "-", because a value can ("--password", "-secret") and the two readings cannot
+// be told apart. That element is then still read as a flag in its own right, so
+// the one after it is masked too. The cost is that a credential-named flag
+// that takes no value hides the flag that follows it.
+//
+// It does not parse shell, so a credential inside a larger string such as a
+// "sh -c" script is not recognised, and it only knows a credential by its name,
+// so an opaque value under a flag that is not named like one is not hidden.
 func redactCommandLine(args []any) []any {
 	out := make([]any, len(args))
 	copy(out, args)
-	// maskedValue is set when the previous element was a credential flag whose
-	// value was just masked. That value is already redacted whole, so it must
-	// not be read again as an assignment of its own: "--token", "a=b" would
-	// otherwise have its mask overwritten with "a=b".
-	maskedValue := false
+	// masked marks an element already replaced whole as the value of the flag
+	// before it. It must not be rewritten from its own text afterwards:
+	// "--token", "a=b" would otherwise have its mask overwritten with "a=b".
+	masked := make([]bool, len(args))
 	for i, arg := range args {
-		if maskedValue {
-			maskedValue = false
-			continue
-		}
 		s, ok := arg.(string)
 		if !ok {
 			continue
 		}
-		if eq := strings.Index(s, "="); eq > 0 {
-			out[i] = redactAssignment(s)
-			continue
+		if !masked[i] {
+			out[i] = redactArgument(s)
 		}
-		if strings.HasPrefix(s, "-") && credentialFlagName(s) && i+1 < len(args) {
-			if next, isString := args[i+1].(string); isString && !strings.HasPrefix(next, "-") {
+		if i+1 < len(args) && isBareCredentialFlag(s) {
+			if _, isString := args[i+1].(string); isString {
 				out[i+1] = redactedValue
-				maskedValue = true
+				masked[i+1] = true
 			}
 		}
 	}
 	return out
+}
+
+// isBareCredentialFlag reports whether s is a credential-named flag that has no
+// value of its own, so the next element is its value.
+func isBareCredentialFlag(s string) bool {
+	return strings.HasPrefix(s, "-") &&
+		!strings.ContainsAny(s, "= \t") &&
+		credentialFlagName(s)
+}
+
+// urlPassword matches the password in a URL's user information.
+var urlPassword = regexp.MustCompile(`(://[^/\s:@]*:)[^/\s@]+(@)`)
+
+// redactArgument masks a credential inside a single argument.
+func redactArgument(s string) string {
+	s = urlPassword.ReplaceAllString(s, "${1}"+redactedValue+"${2}")
+
+	// "--flag value" written as one element. The space comes before any "=", so
+	// the first "=" belongs to the value, not to the flag.
+	if strings.HasPrefix(s, "-") {
+		sp := strings.IndexAny(s, " \t")
+		eq := strings.Index(s, "=")
+		if sp > 0 && (eq < 0 || sp < eq) {
+			flag, value := s[:sp], strings.TrimLeft(s[sp:], " \t")
+			if credentialFlagName(flag) {
+				return flag + " " + redactedValue
+			}
+			return flag + " " + redactAssignment(value)
+		}
+	}
+	if strings.Index(s, "=") > 0 {
+		return redactAssignment(s)
+	}
+	return s
 }
 
 // redactAssignment masks the credential in a "name=value" string. When the
