@@ -14,6 +14,12 @@ deny contains msga if {
 	rolebinding.roleRef.kind == role.kind
 	rolebinding.roleRef.name == role.metadata.name
 	is_same_namespace(role, rolebinding)
+
+	# PersistentVolumes are cluster scoped, so only a ClusterRoleBinding carries
+	# this grant. A RoleBinding confines the role to one namespace, where a rule
+	# about PersistentVolumes matches nothing.
+	rolebinding.kind == "ClusterRoleBinding"
+
 	rule := role.rules[p]
 	subject := rolebinding.subjects[k]
 	is_same_subjects(subjectVector, subject)
