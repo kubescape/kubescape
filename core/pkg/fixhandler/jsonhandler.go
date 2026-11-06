@@ -16,10 +16,24 @@ const defaultJSONIndent = 2
 // re-encodes the document. The YAML path splices the fixed lines back into the
 // original text to keep comments and layout; JSON carries neither, so
 // re-encoding loses nothing but the original whitespace.
-func applyFixToJSONContent(ctx context.Context, jsonAsString, yamlExpression string) (string, error) {
+func applyFixToJSONContent(ctx context.Context, jsonAsString, yamlExpression string, fixes []ResourceFixInfo) (string, error) {
 	documents, err := readDocuments(ctx, strings.NewReader(jsonAsString), yqlib.NewJSONDecoder())
 	if err != nil {
 		return "", err
+	}
+
+	if len(fixes) > 0 {
+		if documents.Len() != 1 {
+			return "", fmt.Errorf("expected one document in the JSON manifest; re-scan and use the new report")
+		}
+		var obj map[string]any
+		doc := documents.Front().Value.(*yqlib.CandidateNode).Node
+		if err := doc.Decode(&obj); err != nil {
+			return "", fmt.Errorf("expected a single resource in the JSON manifest; re-scan and use the new report")
+		}
+		if err := verifyFixTargets(fixes, []manifestDocument{{identity: manifestIdentityOf(obj)}}); err != nil {
+			return "", err
+		}
 	}
 
 	allDocuments := list.New()

@@ -199,9 +199,10 @@ func TestYAMLTreeEditor_NonWorkloadClassification(t *testing.T) {
 			require.Equal(t, false, resource["spec"].(map[string]any)["hostNetwork"])
 
 			// Without any workload, generic documents retain their fallback index.
-			indices, err := yamlWorkloadDocuments(docs[:1])
+			documents, err := yamlWorkloadDocuments(docs[:1])
 			require.NoError(t, err)
-			require.Equal(t, []int{0}, indices)
+			require.Len(t, documents, 1)
+			require.Zero(t, documents[0].sourceIndex)
 		})
 	}
 }
@@ -281,13 +282,13 @@ func TestYAMLTreeEditor_Errors(t *testing.T) {
 func TestYAMLTreeEditor_FileFailureIsAtomic(t *testing.T) {
 	dir := t.TempDir()
 	bad, good := filepath.Join(dir, "bad.yaml"), filepath.Join(dir, "good.yaml")
-	input := "spec:\n  target: true\n  args: [one]\n"
+	input := "apiVersion: v1\nkind: Pod\nmetadata: {name: atomic}\nspec:\n  target: true\n  args: [one]\n"
 	for _, p := range []string{bad, good} {
 		require.NoError(t, os.WriteFile(p, []byte(input), 0o600))
 	}
 	resources := []ResourceFixInfo{
-		{FilePath: bad, YamlExpressions: map[string]armotypes.FixPath{`select(di==0).spec.target |= false | select(di==0).spec.args[5] |= "bad"`: {}}},
-		{FilePath: good, YamlExpressions: map[string]armotypes.FixPath{`select(di==0).spec.target |= false`: {}}},
+		{Resource: podResource("atomic"), FilePath: bad, YamlExpressions: map[string]armotypes.FixPath{`select(di==0).spec.target |= false | select(di==0).spec.args[5] |= "bad"`: {}}},
+		{Resource: podResource("atomic"), FilePath: good, YamlExpressions: map[string]armotypes.FixPath{`select(di==0).spec.target |= false`: {}}},
 	}
 	h, err := NewFixHandlerMock()
 	require.NoError(t, err)

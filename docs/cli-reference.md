@@ -852,6 +852,14 @@ usual case, is left alone in either format: the fix paths would resolve against
 the wrapper rather than the resources they belong to. Multi-document YAML is
 fixed normally, each document there being a resource in its own right.
 
+Before writing a file or a fixed copy, Kubescape checks that the scanned
+resource still has the same API version, kind, namespace and name at the
+recorded document position. If the resource moved or changed identity,
+Kubescape leaves the file untouched. Re-scan the manifest and use the new
+report. If the same identity appears more than once, remove the duplicate
+before re-scanning. An in-place fix also refuses to overwrite a manifest
+that was replaced while the fix was being prepared.
+
 Helm charts are reported as suggestions rather than edited, because a rendered
 resource's fix path does not map reliably back to a template line. Resources
 from any other source are listed as unfixed with the reason. To generate machine-applicable

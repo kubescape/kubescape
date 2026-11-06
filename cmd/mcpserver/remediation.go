@@ -515,10 +515,8 @@ func runRemediation(ctx context.Context, reportBytes []byte, req remediationRequ
 		}
 		sort.Slice(rendered, func(i, j int) bool { return rendered[i].ResourceID < rendered[j].ResourceID })
 	} else {
-		// Group expressions per file and apply them in memory. Mirrors
-		// getFileYamlExpressions/reduceYamlExpressions (fixhandler.go:818, :989)
-		// without their disk write. Each key is already scoped with
-		// select(di==N), so multi-document files compose under one " | " pipeline.
+		// Compose each file's document-scoped expressions into one pipeline
+		// and apply it in memory. This preview does not write the manifest.
 		fileExprs := make(map[string][]string)
 		for _, rfi := range resourcesToFix {
 			exprs := make([]string, 0, len(rfi.YamlExpressions))

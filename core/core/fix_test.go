@@ -170,7 +170,7 @@ func buildFixableReportAt(t *testing.T, dir, manifestName string) string {
 	obj := map[string]any{
 		"apiVersion": "apps/v1",
 		"kind":       "Deployment",
-		"metadata":   map[string]any{"name": "demo", "namespace": "default"},
+		"metadata":   map[string]any{"name": "demo"},
 		"spec": map[string]any{
 			"template": map[string]any{
 				"spec": map[string]any{},
@@ -253,7 +253,7 @@ func buildTwoInputReport(t *testing.T, dir string) string {
 		lw := localworkload.NewLocalWorkload(map[string]any{
 			"apiVersion": "apps/v1",
 			"kind":       "Deployment",
-			"metadata":   map[string]any{"name": input.name, "namespace": "default"},
+			"metadata":   map[string]any{"name": input.name},
 			"spec":       map[string]any{"template": map[string]any{"spec": map[string]any{}}},
 		})
 		lw.SetPath("deploy.yaml:0")
