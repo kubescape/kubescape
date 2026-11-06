@@ -97,6 +97,87 @@ func TestValidateContractCommandWritesOutputFile(t *testing.T) {
 	assert.Equal(t, "developer", selected.ContractName)
 }
 
+func TestValidateContractCommandRejectsOutputOverwritingInput(t *testing.T) {
+	originalBuildNumber := versioncheck.BuildNumber
+	versioncheck.BuildNumber = "v4.1.0"
+	t.Cleanup(func() { versioncheck.BuildNumber = originalBuildNumber })
+
+	for _, scenario := range []struct {
+		name    string
+		format  string
+		invalid bool
+	}{
+		{name: "text", format: "text"},
+		{name: "json", format: "json"},
+		{name: "sarif", format: "sarif"},
+		{name: "invalid contract sarif", format: "sarif", invalid: true},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			for _, alias := range []string{"same path", "relative path", "output symlink", "input symlink", "hard link"} {
+				t.Run(alias, func(t *testing.T) {
+					directory := t.TempDir()
+					inputPath := filepath.Join(directory, "kubescape.yaml")
+					original := []byte(commandContract)
+					if scenario.invalid {
+						original = bytes.Replace(original, []byte("frameworks"), []byte("frameworkz"), 1)
+					}
+					require.NoError(t, os.WriteFile(inputPath, original, 0o600))
+					outputPath := inputPath
+					switch alias {
+					case "relative path":
+						// Keep input and output in different path forms without changing the working directory.
+						workingDirectory, err := os.Getwd()
+						require.NoError(t, err)
+						outputPath, err = filepath.Rel(workingDirectory, inputPath)
+						require.NoError(t, err)
+					case "output symlink":
+						outputPath = filepath.Join(directory, "output.yaml")
+						require.NoError(t, os.Symlink(inputPath, outputPath))
+					case "input symlink":
+						inputPath = filepath.Join(directory, "input.yaml")
+						require.NoError(t, os.Symlink(outputPath, inputPath))
+					case "hard link":
+						outputPath = filepath.Join(directory, "output.yaml")
+						require.NoError(t, os.Link(inputPath, outputPath))
+					}
+
+					cmd := GetScanCommand(core.NewKubescape(context.Background()))
+					cmd.SetOut(io.Discard)
+					cmd.SetErr(io.Discard)
+					cmd.SetArgs([]string{"validate-contract", inputPath, "--format", scenario.format, "--output", outputPath})
+					require.ErrorContains(t, cmd.Execute(), "would overwrite input contract")
+
+					for _, path := range []string{inputPath, outputPath} {
+						contents, err := os.ReadFile(path)
+						require.NoError(t, err)
+						assert.Equal(t, original, contents, "contract must remain unchanged at %s", path)
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestValidateContractCommandSARIFMissingInputWritesExistingOutput(t *testing.T) {
+	directory := t.TempDir()
+	inputPath := filepath.Join(directory, "missing.yaml")
+	outputPath := filepath.Join(directory, "validation.sarif")
+	require.NoError(t, os.WriteFile(outputPath, []byte("previous output"), 0o600))
+
+	cmd := GetScanCommand(core.NewKubescape(context.Background()))
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"validate-contract", inputPath, "--format", "sarif", "--output", outputPath})
+	require.ErrorIs(t, cmd.Execute(), os.ErrNotExist)
+
+	contents, err := os.ReadFile(outputPath)
+	require.NoError(t, err)
+	report := decodeValidateContractSARIF(t, contents)
+	run := report["runs"].([]any)[0].(map[string]any)
+	assert.Len(t, run["results"].([]any), 1)
+	assert.NoFileExists(t, inputPath)
+}
+
 func TestValidateContractCommandReportsStrictErrors(t *testing.T) {
 	originalBuildNumber := versioncheck.BuildNumber
 	versioncheck.BuildNumber = "v4.1.0"

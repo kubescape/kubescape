@@ -82,6 +82,9 @@ func getValidateContractCmd(scanInfo *cautils.ScanInfo) *cobra.Command {
 			}
 
 			if scanInfo.Output != "" {
+				if err := validateContractOutput(args[0], scanInfo.Output); err != nil {
+					return err
+				}
 				if err := os.WriteFile(scanInfo.Output, output, 0o600); err != nil {
 					return fmt.Errorf("write validation output: %w", err)
 				}
@@ -112,6 +115,29 @@ func getValidateContractCmd(scanInfo *cautils.ScanInfo) *cobra.Command {
 		"  kubescape scan validate-contract kubescape.yaml --format sarif",
 	}, "\n")
 	return cmd
+}
+
+func validateContractOutput(input, output string) error {
+	destination, err := os.Stat(output)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("inspect validation output %q: %w", output, err)
+	}
+	source, err := os.Stat(input)
+	if os.IsNotExist(err) {
+		// SARIF can report a missing input file to an existing output file.
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("inspect input contract %q: %w", input, err)
+	}
+	// Compare file identities so symlinks, hard links, and alternate path spellings are covered.
+	if os.SameFile(source, destination) {
+		return fmt.Errorf("validation output %q would overwrite input contract %q; choose a different output file", output, input)
+	}
+	return nil
 }
 
 type validateContractSARIFReport struct {
