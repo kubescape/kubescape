@@ -1459,6 +1459,81 @@ func TestGetOutputPrinters_OutputSafetyFilesystemErrorHandling(t *testing.T) {
 	assert.Nil(t, printers)
 }
 
+func TestHasKubernetesManifestSignatures_MultiDocumentAndIndentation(t *testing.T) {
+	tests := []struct {
+		name     string
+		data     string
+		isJson   bool
+		expected bool
+	}{
+		{
+			name:     "single yaml manifest at column 0",
+			data:     "apiVersion: v1\nkind: Pod\n",
+			expected: true,
+		},
+		{
+			name:     "indented apiVersion in yaml report rawResources must not match",
+			data:     "type: postureReport\nrawResources:\n  - object:\n      apiVersion: apps/v1\n      kind: Deployment\n",
+			expected: false,
+		},
+		{
+			name:     "multi-document yaml: doc 1 non-manifest, doc 2 valid manifest",
+			data:     "# comment\nname: test\n---\napiVersion: v1\nkind: Service\n",
+			expected: true,
+		},
+		{
+			name:     "multi-document yaml: doc 1 valid manifest, doc 2 non-manifest",
+			data:     "apiVersion: v1\nkind: Service\n---\nname: not-a-manifest\n",
+			expected: true,
+		},
+		{
+			name:     "multi-document yaml: split keys across documents must not match",
+			data:     "apiVersion: v1\n---\nkind: Pod\n",
+			expected: false,
+		},
+		{
+			name:     "json manifest with items list",
+			data:     `{"apiVersion":"v1","items":[{"kind":"Pod"}]}`,
+			isJson:   true,
+			expected: true,
+		},
+		{
+			name:     "json manifest array of objects",
+			data:     `[{"apiVersion":"v1","kind":"Pod"}]`,
+			isJson:   true,
+			expected: true,
+		},
+		{
+			name:     "json scan report without document-level manifest keys",
+			data:     `{"type":"postureReport","summaryDetails":{"resources":1}}`,
+			isJson:   true,
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, hasKubernetesManifestSignatures([]byte(tt.data), tt.isJson))
+		})
+	}
+}
+
+func TestIsGenuineManifest_Classification(t *testing.T) {
+	dir := t.TempDir()
+
+	tfFile := filepath.Join(dir, "main.tf")
+	require.NoError(t, os.WriteFile(tfFile, []byte(`resource "kubernetes_pod" "test" {}`), 0o600))
+	assert.True(t, isGenuineManifest(tfFile), "terraform file should be recognized as a genuine manifest input")
+
+	emptyFile := filepath.Join(dir, "empty.yaml")
+	require.NoError(t, os.WriteFile(emptyFile, []byte(""), 0o600))
+	assert.False(t, isGenuineManifest(emptyFile), "empty file should not be treated as a genuine manifest")
+
+	reportYaml := filepath.Join(dir, "results.yaml")
+	require.NoError(t, os.WriteFile(reportYaml, []byte("type: postureReport\nrawResources:\n  - apiVersion: v1\n"), 0o600))
+	assert.False(t, isGenuineManifest(reportYaml), "yaml posture report should not be treated as a genuine manifest")
+}
+
 func TestIsPrioritizationScanType(t *testing.T) {
 	tests := []struct {
 		name cautils.ScanTypes
