@@ -198,7 +198,16 @@ func credentialFlagName(flag string) bool {
 func redactCommandLine(args []any) []any {
 	out := make([]any, len(args))
 	copy(out, args)
+	// maskedValue is set when the previous element was a credential flag whose
+	// value was just masked. That value is already redacted whole, so it must
+	// not be read again as an assignment of its own: "--token", "a=b" would
+	// otherwise have its mask overwritten with "a=b".
+	maskedValue := false
 	for i, arg := range args {
+		if maskedValue {
+			maskedValue = false
+			continue
+		}
 		s, ok := arg.(string)
 		if !ok {
 			continue
@@ -210,6 +219,7 @@ func redactCommandLine(args []any) []any {
 		if strings.HasPrefix(s, "-") && credentialFlagName(s) && i+1 < len(args) {
 			if next, isString := args[i+1].(string); isString && !strings.HasPrefix(next, "-") {
 				out[i+1] = redactedValue
+				maskedValue = true
 			}
 		}
 	}

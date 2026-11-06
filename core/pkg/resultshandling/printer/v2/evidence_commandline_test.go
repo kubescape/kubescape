@@ -114,6 +114,16 @@ func TestRedactCommandLine(t *testing.T) {
 			want: []any{"--" + nameToken},
 		},
 		{
+			name: "a masked value that itself contains = stays masked",
+			args: []any{"--" + nameToken, kv("k", valueA)},
+			want: []any{"--" + nameToken, redactedValue},
+		},
+		{
+			name: "a masked value is skipped, and the next argument is still checked",
+			args: []any{"--" + nameToken, kv("k", valueA), kv("--"+nameSecret, valueB)},
+			want: []any{"--" + nameToken, redactedValue, kv("--"+nameSecret, redactedValue)},
+		},
+		{
 			name: "single-dash flag",
 			args: []any{"-" + nameToken, valueA},
 			want: []any{"-" + nameToken, redactedValue},
@@ -224,6 +234,42 @@ func TestEvidencePathsWithCurrentValues_CommandLineCredentials(t *testing.T) {
 			cmdNestedArg + " (current: " + kv("--env", kv(envName, valueD)) + ")",
 		}, got)
 	})
+}
+
+// A credential flag's value can itself look like an assignment. Selecting it
+// by path must still show the mask, not the original text.
+func TestEvidencePathsWithCurrentValues_MaskedValueLookingLikeAssignment(t *testing.T) {
+	resource := &mockResource{
+		kind: "Deployment",
+		obj: map[string]any{
+			"spec": map[string]any{
+				"template": map[string]any{
+					"spec": map[string]any{
+						"containers": []any{
+							map[string]any{
+								"name": "api",
+								"args": []any{"--" + nameToken, kv("k", valueA)},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	const valuePath = cmdArgs + "[1]"
+
+	got := evidencePathsWithCurrentValues(deletePathControl(valuePath), resource, false)
+	assert.Equal(t, []string{valuePath + " (current: " + redactedValue + ")"}, got)
+
+	got = reviewPathsWithCurrentValuesRedacted(makeControlWithPaths(nil, []string{valuePath}), resource)
+	assert.Equal(t, []string{valuePath + " (current: " + redactedValue + ")"}, got)
+
+	got = evidencePathsWithCurrentValues(deletePathControl(cmdArgs), resource, false)
+	require.Len(t, got, 1)
+	assert.NotContains(t, got[0], valueA)
+
+	got = evidencePathsWithCurrentValues(deletePathControl(valuePath), resource, true)
+	assert.Equal(t, []string{valuePath + " (current: " + kv("k", valueA) + ")"}, got, "--show-secrets reveals it")
 }
 
 // Review paths take the same route, so a review path that selects an
