@@ -4,11 +4,13 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	k8syaml "k8s.io/apimachinery/pkg/util/yaml"
 
@@ -161,10 +163,67 @@ func parseDirectory(dir string) ([]LocalWorkload, error) {
 	return results, nil
 }
 
+// maxWorkloadBytes bounds manifest bytes read from a reader or file (32 MiB),
+// preventing uncontrolled memory allocation from oversized inputs or infinite streams (CWE-400).
+const maxWorkloadBytes = 32 << 20 // 32 MiB
+
+var (
+	ErrWorkloadNotRegular = errors.New("workload manifest is not a regular file")
+	ErrWorkloadTooLarge   = errors.New("workload manifest exceeds maximum size limit")
+)
+
+// openWorkloadFile opens path for reading and rejects anything but a regular file.
+// O_NONBLOCK keeps opening a FIFO from waiting for a writer, and the check is
+// made on the opened descriptor so a path swapped afterwards cannot slip past.
+func openWorkloadFile(path string) (*os.File, error) {
+	file, err := os.OpenFile(filepath.Clean(path), os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return nil, err
+	}
+	info, err := file.Stat()
+	if err != nil {
+		file.Close()
+		return nil, err
+	}
+	if info.IsDir() {
+		file.Close()
+		return nil, fmt.Errorf("%q is a directory, not a file", path)
+	}
+	if !info.Mode().IsRegular() {
+		file.Close()
+		return nil, fmt.Errorf("%w: %q", ErrWorkloadNotRegular, path)
+	}
+	return file, nil
+}
+
+// readWorkloadFile returns the contents of the file at path, reading at most
+// maxWorkloadBytes bytes so that reading remains bounded.
+func readWorkloadFile(path string) ([]byte, error) {
+	file, err := openWorkloadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	info, err := file.Stat()
+	if err == nil && info.Size() > maxWorkloadBytes {
+		return nil, fmt.Errorf("%w: %q exceeds the %d byte limit", ErrWorkloadTooLarge, path, int64(maxWorkloadBytes))
+	}
+
+	data, err := io.ReadAll(io.LimitReader(file, maxWorkloadBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > maxWorkloadBytes {
+		return nil, fmt.Errorf("%w: %q exceeds the %d byte limit", ErrWorkloadTooLarge, path, int64(maxWorkloadBytes))
+	}
+	return data, nil
+}
+
 // parseFile reads a single file and extracts all YAML/JSON documents from it,
 // filtering to supported workload kinds.
 func parseFile(path string) ([]LocalWorkload, error) {
-	data, err := os.ReadFile(path)
+	data, err := readWorkloadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("cannot read file %q: %w", path, err)
 	}
@@ -453,9 +512,12 @@ func ParseLocalWorkloadsFromReader(r io.Reader, source string) ([]unstructured.U
 // callers that also handle file sources. A reader is not a file, so the
 // workloads it returns have no Source.
 func ParseLocalWorkloadSourcesFromReader(r io.Reader, source string) ([]LocalWorkload, error) {
-	data, err := io.ReadAll(r)
+	data, err := io.ReadAll(io.LimitReader(r, maxWorkloadBytes+1))
 	if err != nil {
 		return nil, fmt.Errorf("reading from %s: %w", source, err)
+	}
+	if int64(len(data)) > maxWorkloadBytes {
+		return nil, fmt.Errorf("%w: reading from %s exceeded the %d byte limit", ErrWorkloadTooLarge, source, int64(maxWorkloadBytes))
 	}
 	return parseDocuments(data, source, "")
 }
