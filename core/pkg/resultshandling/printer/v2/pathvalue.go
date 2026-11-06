@@ -636,20 +636,89 @@ func reviewPathsWithCurrentValuesUnredacted(control *resourcesresults.ResourceAs
 }
 
 func AssistedRemediationPathsWithCurrentValuesFiltered(control *resourcesresults.ResourceAssociatedControl, resource workloadinterface.IMetadata, showSecrets bool) []string {
+	return assistedRemediationPaths(control, resource, showSecrets, false)
+}
+
+// evidencePathsWithCurrentValues is AssistedRemediationPathsWithCurrentValuesFiltered
+// for the terminal --show-evidence view, which additionally reports the
+// current value of each delete path. A delete path names the field that made
+// the control fail, so leaving it bare printed the path an auditor needs to
+// check without the value they need to check it against.
+//
+// It is separate from the exported function on purpose: that one also feeds
+// the HTML, SARIF, GitLab SAST and GitHub Actions printers, and changing it
+// would change four report formats to improve one table.
+func evidencePathsWithCurrentValues(control *resourcesresults.ResourceAssociatedControl, resource workloadinterface.IMetadata, showSecrets bool) []string {
+	return assistedRemediationPaths(control, resource, showSecrets, true)
+}
+
+// assistedRemediationPaths renders a control's fix, delete and review paths as
+// one deduplicated list. deleteValues appends the current value to each delete
+// path; review paths always carry theirs.
+func assistedRemediationPaths(control *resourcesresults.ResourceAssociatedControl, resource workloadinterface.IMetadata, showSecrets, deleteValues bool) []string {
 	kind := resource.GetKind()
-	if showSecrets {
-		// extract values for all paths including sensitive ones — caller explicitly opted in
-		fixPaths := fixPathsToStringFiltered(control, kind, true)
-		deletePaths := deletePathsToString(control)
-		enrichedReview := reviewPathsWithCurrentValuesUnredacted(control, resource)
-		paths := append(fixPaths, append(deletePaths, enrichedReview...)...)
-		return deduplicatePaths(paths)
-	}
-	fixPaths := fixPathsToStringFiltered(control, kind, false)
+	// showSecrets extracts values for all paths including sensitive ones - the
+	// caller explicitly opted in.
+	fixPaths := fixPathsToStringFiltered(control, kind, showSecrets)
 	deletePaths := deletePathsToString(control)
-	enrichedReview := reviewPathsWithCurrentValuesRedacted(control, resource)
+	if deleteValues {
+		deletePaths = deletePathsWithCurrentValues(control, resource, showSecrets)
+	}
+	var enrichedReview []string
+	if showSecrets {
+		enrichedReview = reviewPathsWithCurrentValuesUnredacted(control, resource)
+	} else {
+		enrichedReview = reviewPathsWithCurrentValuesRedacted(control, resource)
+	}
 	paths := append(fixPaths, append(deletePaths, enrichedReview...)...)
 	return deduplicatePaths(paths)
+}
+
+// deletePathsWithCurrentValues is deletePathsToString with " (current: <value>)"
+// appended to each delete path that resolves against the resource's object.
+//
+// Redaction follows the rest of the evidence output. A path that is sensitive
+// by name shows redactedValue, but only when it resolves: an absent field has
+// no value to hide, and "[redacted]" on it would claim one. Any other path is
+// read with extractRedactedValueAtPath, so a delete path that selects an
+// object or list (a whole securityContext, say) has its credential-shaped
+// descendants masked rather than printed. A path that does not resolve stays
+// bare, as it did before.
+func deletePathsWithCurrentValues(control *resourcesresults.ResourceAssociatedControl, resource workloadinterface.IMetadata, showSecrets bool) []string {
+	var paths []string
+	obj := normalizeForPathExtraction(resource.GetObject())
+	kind := resource.GetKind()
+	for j := range control.ResourceAssociatedRules {
+		for k := range control.ResourceAssociatedRules[j].Paths {
+			p := control.ResourceAssociatedRules[j].Paths[k].DeletePath
+			if p == "" {
+				continue
+			}
+			paths = append(paths, p+currentValueSuffix(kind, obj, p, showSecrets))
+		}
+	}
+	return paths
+}
+
+// currentValueSuffix returns " (current: <value>)" for path, or "" when the
+// path does not resolve.
+func currentValueSuffix(kind string, obj map[string]any, path string, showSecrets bool) string {
+	if showSecrets {
+		if val, ok := extractValueAtPath(obj, path); ok {
+			return " (current: " + val + ")"
+		}
+		return ""
+	}
+	if isSensitivePath(kind, path) {
+		if _, ok := extractValueAtPath(obj, path); ok {
+			return " (current: " + redactedValue + ")"
+		}
+		return ""
+	}
+	if val, ok := extractRedactedValueAtPath(kind, obj, path); ok {
+		return " (current: " + val + ")"
+	}
+	return ""
 }
 
 func enrichedPathsForFieldRedacted(control *resourcesresults.ResourceAssociatedControl, resource workloadinterface.IMetadata, getPath func(armotypes.PosturePaths) string) []string {
