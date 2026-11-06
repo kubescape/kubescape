@@ -1,0 +1,13 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: dev-admin-rb
+  namespace: dev
+subjects:
+- kind: ServiceAccount
+  name: impersonator-sa
+  namespace: dev
+roleRef:
+  kind: Role
+  name: dev-admin
+  apiGroup: rbac.authorization.k8s.io

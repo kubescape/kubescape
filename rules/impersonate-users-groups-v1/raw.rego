@@ -5,7 +5,6 @@ import rego.v1
 deny contains msga if {
 	verbs := ["impersonate", "*"]
 	api_groups := ["", "*"]
-	resources := ["users", "groups", "serviceaccounts", "*"]
 	subjectVector := input[_]
 	role := subjectVector.relatedObjects[i]
 	rolebinding := subjectVector.relatedObjects[j]
@@ -14,6 +13,7 @@ deny contains msga if {
 	rolebinding.roleRef.kind == role.kind
 	rolebinding.roleRef.name == role.metadata.name
 	is_same_namespace(role, rolebinding)
+	resources := core_identity_resources(rolebinding)
 	rule := role.rules[p]
 
 	# a rule restricted to named identities cannot be used to impersonate an arbitrary identity
@@ -60,6 +60,11 @@ deny contains msga if {
 	rolebinding.roleRef.kind == role.kind
 	rolebinding.roleRef.name == role.metadata.name
 	is_same_namespace(role, rolebinding)
+
+	# Impersonating a uid or a user extra is a request with no namespace, so only
+	# a ClusterRoleBinding carries it.
+	rolebinding.kind == "ClusterRoleBinding"
+
 	rule := role.rules[p]
 
 	# a rule restricted to named identities cannot be used to impersonate an arbitrary identity
@@ -93,6 +98,19 @@ deny contains msga if {
 			"externalObjects": subjectVector,
 		},
 	}
+}
+
+# The authorizer only visits RoleBindings for a request that has a namespace.
+# Impersonating a user or group is a request without one, so only a
+# ClusterRoleBinding carries it. Impersonating a service account is a request in
+# that account's namespace, so a RoleBinding does grant it there, and a "*" entry
+# in a RoleBinding reaches it the same way.
+core_identity_resources(rolebinding) := ["users", "groups", "serviceaccounts", "*"] if {
+	rolebinding.kind == "ClusterRoleBinding"
+}
+
+core_identity_resources(rolebinding) := ["serviceaccounts", "*"] if {
+	rolebinding.kind == "RoleBinding"
 }
 
 # The API server authorizes impersonating a user extra as a request on the

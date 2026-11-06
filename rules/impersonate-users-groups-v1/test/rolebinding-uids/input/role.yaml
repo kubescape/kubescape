@@ -1,0 +1,9 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: dev-impersonate-uids
+  namespace: dev
+rules:
+- apiGroups: ["authentication.k8s.io"]
+  resources: ["uids", "userextras/scopes"]
+  verbs: ["impersonate"]
