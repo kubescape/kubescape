@@ -86,7 +86,9 @@ var (
 	dotValuesRe = regexp.MustCompile(`\.Values((?:\.[A-Za-z_][A-Za-z0-9_]*)+)`)
 	// Relative dot paths inside a {{ with }} block are rooted at that block's
 	// path.
-	relativeDotPathRe = regexp.MustCompile(`\.([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)`)
+	relativeDotPathRe  = regexp.MustCompile(`\.([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)`)
+	withValuesPathRe   = regexp.MustCompile(`^\.Values((?:\.[A-Za-z_][A-Za-z0-9_]*)+)$`)
+	withRelativePathRe = regexp.MustCompile(`^\.(?:([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*))?$`)
 	// (index .Values "foo" "bar") — the second-most common access form.
 	indexValuesRe = regexp.MustCompile(`index\s+\.Values((?:\s+"[^"]+")+)`)
 	// Quoted segment inside an `index .Values "x" "y"` chain.
@@ -297,17 +299,27 @@ func addWithBlockPaths(data []byte, seen map[string]struct{}) {
 		if kindMatch != nil {
 			kind = string(kindMatch[1])
 		}
+		if kind != "with" && kind != "else" {
+			addRelativePaths(body, scope, seen)
+		}
 		switch kind {
 		case "with":
 			parent := scope
-			pathMatch := dotValuesRe.FindSubmatch(body)
-			if pathMatch != nil {
-				scope = strings.TrimPrefix(string(pathMatch[1]), ".")
+			operand := strings.TrimSpace(string(body[len("with"):]))
+			if pathMatch := withValuesPathRe.FindStringSubmatch(operand); pathMatch != nil {
+				scope = strings.TrimPrefix(pathMatch[1], ".")
 			} else {
-				relativeMatch := relativeDotPathRe.FindSubmatch(body)
-				if relativeMatch != nil && parent != "" {
-					scope = parent + "." + string(relativeMatch[1])
-					seen[scope] = struct{}{}
+				relativeMatch := withRelativePathRe.FindStringSubmatch(operand)
+				if relativeMatch != nil {
+					switch {
+					case operand == ".":
+						scope = parent
+					case relativeMatch[1] != "" && parent != "":
+						scope = parent + "." + relativeMatch[1]
+						seen[scope] = struct{}{}
+					default:
+						scope = ""
+					}
 				} else {
 					scope = ""
 				}
@@ -330,24 +342,63 @@ func addWithBlockPaths(data []byte, seen map[string]struct{}) {
 		case "else":
 			if len(stack) > 0 {
 				scope = stack[len(stack)-1].parent
-				if strings.HasPrefix(strings.TrimSpace(string(body[len(kind):])), "if ") {
-					stack = append(stack, scopeFrame{parent: scope})
+				if elseIf := strings.TrimSpace(string(body[len(kind):])); strings.HasPrefix(elseIf, "if ") {
+					addRelativePaths([]byte(strings.TrimSpace(strings.TrimPrefix(elseIf, "if "))), scope, seen)
 				}
 			}
 			continue
 		}
 
-		if scope == "" {
-			continue
-		}
-		for _, match := range relativeDotPathRe.FindAllSubmatch(body, -1) {
-			relative := string(match[1])
-			if relative == "Values" || strings.HasPrefix(relative, "Values.") {
+	}
+}
+
+func addRelativePaths(body []byte, scope string, seen map[string]struct{}) {
+	if scope == "" {
+		return
+	}
+	body = withoutQuotedStrings(body)
+	for _, match := range relativeDotPathRe.FindAllSubmatchIndex(body, -1) {
+		start := match[0]
+		if start > 0 {
+			previous := body[start-1]
+			if previous == '$' || previous == '_' || previous >= 'A' && previous <= 'Z' || previous >= 'a' && previous <= 'z' || previous >= '0' && previous <= '9' {
 				continue
 			}
-			seen[scope+"."+relative] = struct{}{}
+		}
+		relative := string(body[match[2]:match[3]])
+		if relative == "Values" || strings.HasPrefix(relative, "Values.") {
+			continue
+		}
+		seen[scope+"."+relative] = struct{}{}
+	}
+}
+
+func withoutQuotedStrings(body []byte) []byte {
+	clean := append([]byte(nil), body...)
+	for i := 0; i < len(clean); {
+		quote := clean[i]
+		if quote != '"' && quote != '\'' && quote != '`' {
+			i++
+			continue
+		}
+		start := i
+		i++
+		for i < len(clean) {
+			if clean[i] == '\\' && quote != '`' && i+1 < len(clean) {
+				i += 2
+				continue
+			}
+			if clean[i] == quote {
+				i++
+				break
+			}
+			i++
+		}
+		for j := start; j < i; j++ {
+			clean[j] = ' '
 		}
 	}
+	return clean
 }
 
 func firstApiVersionLine(data []byte) int {

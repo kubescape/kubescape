@@ -239,7 +239,7 @@ kind: ConfigMap
 data:
   {{- with .Values.image }}
   repo: {{ .repo }}
-  {{- if .Values.useMirror }}
+  {{- if $.Values.useMirror }}
   mirror: {{ .mirror }}
   {{- end }}
   {{- end }}
@@ -267,6 +267,49 @@ data:
 `))
 	got := Extract(c)["app/templates/cm.yaml"]
 	want := []string{"parent", "parent.child", "parent.child.childField", "parent.parentField"}
+	if !reflect.DeepEqual(got.ValuesPaths, want) {
+		t.Errorf("ValuesPaths = %v, want %v", got.ValuesPaths, want)
+	}
+}
+
+func TestExtract_WithBlockDoesNotLeakScopeThroughElseIf(t *testing.T) {
+	c := newChart("app", tmpl("templates/cm.yaml", `
+apiVersion: v1
+kind: ConfigMap
+data:
+  {{- with .Values.image }}
+    {{- if .enabled }}a{{- else if .fallback }}b{{- end }}
+  {{- end }}
+  release: {{ $.Release.Name }}
+  other: {{ $other.repo }}
+`))
+	got := Extract(c)["app/templates/cm.yaml"]
+	want := []string{"image", "image.enabled", "image.fallback"}
+	if !reflect.DeepEqual(got.ValuesPaths, want) {
+		t.Errorf("ValuesPaths = %v, want %v", got.ValuesPaths, want)
+	}
+}
+
+func TestExtract_WithBlockScopeOperands(t *testing.T) {
+	c := newChart("app", tmpl("templates/cm.yaml", `
+apiVersion: v1
+kind: ConfigMap
+data:
+  {{- with .Values.image }}
+    {{- with . }}
+  same: {{ .same }}
+    {{- end }}
+    {{- with dict "key" .Values.other }}
+  repo: {{ .repo }}
+    {{- end }}
+    {{- with index .Values.nested "image" }}
+  tag: {{ .tag }}
+    {{- end }}
+  text: {{ printf "dotted.string" .quoted }}
+  {{- end }}
+`))
+	got := Extract(c)["app/templates/cm.yaml"]
+	want := []string{"image", "image.quoted", "image.same", "nested", "other"}
 	if !reflect.DeepEqual(got.ValuesPaths, want) {
 		t.Errorf("ValuesPaths = %v, want %v", got.ValuesPaths, want)
 	}
