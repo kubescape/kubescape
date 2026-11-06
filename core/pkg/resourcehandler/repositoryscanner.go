@@ -2,6 +2,7 @@ package resourcehandler
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -209,6 +210,14 @@ func (g *GitHubRepository) getHeaders() map[string]string {
 	}
 	return map[string]string{"Authorization": fmt.Sprintf("token %s", g.token)}
 }
+
+// maxHTTPResponseBody bounds success response bodies read from git API endpoints (25 MiB).
+// GitHub's recursive git tree API returns at most 100,000 entries (~7 MiB), and repository
+// metadata is smaller; bounding prevents uncontrolled memory allocation or DoS (CWE-400).
+const maxHTTPResponseBody = 25 * 1024 * 1024
+
+var errResponseBodyTooLarge = errors.New("response body exceeds maximum size limit")
+
 func httpGet(client *http.Client, url string, headers map[string]string) ([]byte, error) {
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
@@ -232,7 +241,14 @@ func httpGet(client *http.Client, url string, headers map[string]string) ([]byte
 		return nil, fmt.Errorf("request to %q failed with status %q: %s", url, resp.Status, strings.ToValidUTF8(string(body), ""))
 	}
 
-	return io.ReadAll(resp.Body)
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxHTTPResponseBody+1))
+	if err != nil {
+		return nil, fmt.Errorf("reading response from %q: %w", url, err)
+	}
+	if len(data) > maxHTTPResponseBody {
+		return nil, fmt.Errorf("%w: response from %q exceeded the %d byte limit", errResponseBodyTooLarge, url, maxHTTPResponseBody)
+	}
+	return data, nil
 }
 func (g *GitHubRepository) setTree() error {
 	if g.isFile {
