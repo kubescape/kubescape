@@ -192,6 +192,8 @@ func validateImageArgs(args []string) error {
 	return nil
 }
 
+// normalizeImageArgs trims whitespace, deduplicates image scan targets, and canonicalizes
+// paths to local tarball archives with their expected source prefix.
 func normalizeImageArgs(args []string) []string {
 	images := make([]string, 0, len(args))
 	seen := make(map[string]struct{}, len(args))
@@ -206,6 +208,8 @@ func normalizeImageArgs(args []string) []string {
 	return images
 }
 
+// localArchiveReference checks whether image names an existing local .tar archive file
+// without an explicit archive scheme prefix, canonicalizing it to "docker-archive:<path>".
 func localArchiveReference(image string) string {
 	if !strings.HasSuffix(image, ".tar") || strings.HasPrefix(image, "docker-archive:") || strings.HasPrefix(image, "oci-archive:") {
 		return image

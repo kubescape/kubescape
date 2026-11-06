@@ -13,6 +13,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 
 	mapset "github.com/deckarep/golang-set/v2"
@@ -230,6 +231,9 @@ func validateSBOMOutput(scanInfo *cautils.ScanInfo, format string) error {
 	return nil
 }
 
+// GetOutputPrinters constructs and validates result printers for each requested format.
+// It verifies printer compatibility, checks for output path collisions across formats,
+// and validates destination path safety against all scan input sources before opening any writers.
 func GetOutputPrinters(scanInfo *cautils.ScanInfo, ctx context.Context, clusterName string) ([]printer.IPrinter, error) {
 	// Validate every format and check every output path before opening any
 	// writer: SetWriter truncates the file it opens, so a collision found after
@@ -290,9 +294,24 @@ func GetOutputPrinters(scanInfo *cautils.ScanInfo, ctx context.Context, clusterN
 	return outputPrinters, nil
 }
 
+// resolvedOutputPath returns the target filesystem path for a given format and
+// outputFile argument. When outputFile is blank, formats that write to default
+// files by default (HTML, PDF, Markdown) resolve to their standard default report
+// file path ("report.html", "report.pdf", "report.md"). Standard sinks such as
+// stdout and /dev/null return an empty string to indicate no file collision check
+// is required.
 func resolvedOutputPath(format, outputFile string) string {
 	if outputFile == "" {
-		return ""
+		switch format {
+		case printer.HtmlFormat:
+			return printer.ResolveDefaultOutputFile(printer.HtmlFormat, "report")
+		case printer.PdfFormat:
+			return printer.ResolveDefaultOutputFile(printer.PdfFormat, "report")
+		case printer.MarkdownFormat:
+			return printer.ResolveDefaultOutputFile(printer.MarkdownFormat, "report")
+		default:
+			return ""
+		}
 	}
 	baseName := printer.DefaultBaseNameForFormat(format)
 	resolvedFormat := format
@@ -353,7 +372,7 @@ func isGenuineManifest(filePath string) bool {
 		format = cautils.JSON_FILE_FORMAT
 	}
 
-	workloads, err := cautils.ReadFile(data, format)
+	workloads, _ := cautils.ReadFile(data, format)
 	if len(workloads) > 0 {
 		return true
 	}
@@ -361,9 +380,11 @@ func isGenuineManifest(filePath string) bool {
 	return hasKubernetesManifestSignatures(data, isJson)
 }
 
-// hasKubernetesManifestSignatures checks if the data contains top-level Kubernetes
+// hasKubernetesManifestSignatures checks if the data contains document-level Kubernetes
 // manifest signatures (apiVersion and kind/items), distinguishing attempted or templated
 // Kubernetes manifests from non-manifest JSON/YAML files such as scan reports.
+// For YAML documents, apiVersion and kind/items must appear at column 0 (unindented) so
+// raw resources embedded inside YAML posture reports are not misidentified as manifests.
 func hasKubernetesManifestSignatures(data []byte, isJson bool) bool {
 	if isJson {
 		var m map[string]any
@@ -392,17 +413,18 @@ func hasKubernetesManifestSignatures(data []byte, isJson bool) bool {
 		return false
 	}
 
-	// For YAML: check if document contains top-level apiVersion and kind or items.
-	// Lines are scanned ignoring comments.
+	// For YAML: check if document contains document-level (column-zero, unindented)
+	// apiVersion and kind or items keys.
 	scanner := bufio.NewScanner(bytes.NewReader(data))
 	hasAPIVersion := false
 	hasKindOrItems := false
 	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if strings.HasPrefix(line, "#") {
+		rawLine := scanner.Text()
+		trimmed := strings.TrimSpace(rawLine)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
 			continue
 		}
-		if line == "---" {
+		if trimmed == "---" {
 			if hasAPIVersion && hasKindOrItems {
 				return true
 			}
@@ -410,10 +432,16 @@ func hasKubernetesManifestSignatures(data []byte, isJson bool) bool {
 			hasKindOrItems = false
 			continue
 		}
-		if strings.HasPrefix(line, "apiVersion:") || strings.HasPrefix(line, "apiVersion ") {
+		// Document-level keys must start at column 0 (no leading whitespace).
+		// Nested keys such as raw resources inside YAML scan reports are indented
+		// and must not be mistaken for manifest document signatures.
+		if len(rawLine) > 0 && (rawLine[0] == ' ' || rawLine[0] == '\t') {
+			continue
+		}
+		if strings.HasPrefix(trimmed, "apiVersion:") || strings.HasPrefix(trimmed, "apiVersion ") {
 			hasAPIVersion = true
 		}
-		if strings.HasPrefix(line, "kind:") || strings.HasPrefix(line, "kind ") || strings.HasPrefix(line, "items:") {
+		if strings.HasPrefix(trimmed, "kind:") || strings.HasPrefix(trimmed, "kind ") || strings.HasPrefix(trimmed, "items:") {
 			hasKindOrItems = true
 		}
 		if hasAPIVersion && hasKindOrItems {
@@ -425,6 +453,8 @@ func hasKubernetesManifestSignatures(data []byte, isJson bool) bool {
 
 // checkDirectoryCollision recursively inspects a directory input to verify that the
 // output destination does not alias any genuine manifest file within the directory.
+// It respects scanner path exclusion filters, prevents symlink cycles, and fails closed
+// if directory traversal encounters an unexpected error.
 func checkDirectoryCollision(dirPath string, scanInfo *cautils.ScanInfo, destInfo fs.FileInfo, outputFile string, visitedDirs map[any]bool) error {
 	resolvedDir, err := filepath.EvalSymlinks(dirPath)
 	if err != nil {
@@ -447,9 +477,12 @@ func checkDirectoryCollision(dirPath string, scanInfo *cautils.ScanInfo, destInf
 	pathFilter, _ := cautils.NewScanPathFilter(dirPath, scanInfo.ExcludePaths, !scanInfo.NoIgnoreFile)
 
 	var collisionErr error
-	_ = filepath.WalkDir(resolvedDir, func(source string, d fs.DirEntry, walkErr error) error {
-		if walkErr != nil || collisionErr != nil {
-			return filepath.SkipDir
+	walkErr := filepath.WalkDir(resolvedDir, func(source string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if collisionErr != nil {
+			return fs.SkipAll
 		}
 
 		if d.IsDir() {
@@ -465,7 +498,7 @@ func checkDirectoryCollision(dirPath string, scanInfo *cautils.ScanInfo, destInf
 
 		targetInfo, statErr := os.Stat(source)
 		if statErr != nil {
-			return nil
+			return statErr
 		}
 
 		if targetInfo.IsDir() {
@@ -493,11 +526,19 @@ func checkDirectoryCollision(dirPath string, scanInfo *cautils.ScanInfo, destInf
 		return nil
 	})
 
-	return collisionErr
+	if collisionErr != nil {
+		return collisionErr
+	}
+	if walkErr != nil && !errors.Is(walkErr, fs.SkipAll) {
+		return fmt.Errorf("failed walking directory %q: %w", resolvedDir, walkErr)
+	}
+	return nil
 }
 
 // checkGlobCollision verifies that an output destination does not alias manifests
 // matched by a glob pattern, checking both directly matched files and nested directories.
+// Bare relative glob patterns without a directory prefix (e.g. "*.yaml") search the
+// current directory recursively while honoring scanner exclusion rules.
 func checkGlobCollision(rawPath string, scanInfo *cautils.ScanInfo, destInfo fs.FileInfo, outputFile string) error {
 	if matches, globErr := filepath.Glob(rawPath); globErr == nil {
 		for _, match := range matches {
@@ -520,17 +561,30 @@ func checkGlobCollision(rawPath string, scanInfo *cautils.ScanInfo, destInfo fs.
 	}
 
 	root, pattern := filepath.Split(rawPath)
-	if root != "" && strings.ContainsAny(pattern, "*?[]") {
+	if root == "" {
+		root = "."
+	}
+	if strings.ContainsAny(pattern, "*?[]") {
 		if rootInfo, err := os.Stat(root); err == nil && rootInfo.IsDir() {
+			pathFilter, _ := cautils.NewScanPathFilter(root, scanInfo.ExcludePaths, !scanInfo.NoIgnoreFile)
 			var collisionErr error
-			_ = filepath.WalkDir(root, func(source string, d fs.DirEntry, walkErr error) error {
-				if walkErr != nil || collisionErr != nil {
-					return filepath.SkipDir
+			walkErr := filepath.WalkDir(root, func(source string, d fs.DirEntry, walkErr error) error {
+				if walkErr != nil {
+					return walkErr
+				}
+				if collisionErr != nil {
+					return fs.SkipAll
 				}
 				if d.IsDir() {
 					if source != root && strings.HasPrefix(d.Name(), ".") {
 						return filepath.SkipDir
 					}
+					if pathFilter != nil && pathFilter.Excluded(source, true) {
+						return filepath.SkipDir
+					}
+					return nil
+				}
+				if pathFilter != nil && pathFilter.Excluded(source, false) {
 					return nil
 				}
 				if matched, _ := filepath.Match(pattern, d.Name()); matched {
@@ -546,28 +600,35 @@ func checkGlobCollision(rawPath string, scanInfo *cautils.ScanInfo, destInfo fs.
 			if collisionErr != nil {
 				return collisionErr
 			}
+			if walkErr != nil && !errors.Is(walkErr, fs.SkipAll) {
+				return fmt.Errorf("failed walking glob root %q: %w", root, walkErr)
+			}
 		}
 	}
 	return nil
 }
 
 // validateScanOutputSafety ensures an output destination does not overwrite an
-// input manifest, baseline report, exceptions file, or controls configuration.
-// SetWriter truncates the destination file immediately on open with O_TRUNC, so
-// an alias to any of these input sources would destroy user data before the scan
-// can read or compare it.
+// input manifest, baseline report, exceptions file, framework definition, or controls
+// configuration. SetWriter truncates the destination file immediately on open with
+// O_TRUNC, so an alias to any of these input sources would destroy user data before the
+// scan can read or compare it.
 func validateScanOutputSafety(outputFile string, scanInfo *cautils.ScanInfo) error {
 	if outputFile == "" || outputFile == os.DevNull || scanInfo == nil {
 		return nil
 	}
 	destInfo, err := os.Stat(outputFile)
 	if err != nil {
-		// If the output file does not exist yet (or cannot be stat-ed as an existing file),
+		// If the output file does not exist yet (or a parent path component is not a directory),
 		// it cannot overwrite an existing input or configuration file.
-		if os.IsNotExist(err) || errors.Is(err, fs.ErrNotExist) {
+		if os.IsNotExist(err) || errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
 			return nil
 		}
-		return nil
+		return fmt.Errorf("unable to verify safety of output path %q: %w", outputFile, err)
+	}
+
+	if scanInfo.OriginalStdinInfo != nil && os.SameFile(destInfo, scanInfo.OriginalStdinInfo) {
+		return fmt.Errorf("output path %q would overwrite stdin input; choose a different output file", outputFile)
 	}
 
 	checkFile := func(label, inputPath string) error {
@@ -608,6 +669,17 @@ func validateScanOutputSafety(outputFile string, scanInfo *cautils.ScanInfo) err
 	if err := checkFile("attack-tracks file", scanInfo.AttackTracks); err != nil {
 		return err
 	}
+	if err := checkFile("artifacts directory", scanInfo.UseArtifactsFrom); err != nil {
+		return err
+	}
+	if err := checkFile("host sensor file", scanInfo.HostSensorYamlPath); err != nil {
+		return err
+	}
+	for _, useFrom := range scanInfo.UseFrom {
+		if err := checkFile("framework file", useFrom); err != nil {
+			return err
+		}
+	}
 	for _, valFile := range scanInfo.HelmValueFiles {
 		if err := checkFile("Helm values file", valFile); err != nil {
 			return err
@@ -633,12 +705,20 @@ func validateScanOutputSafety(outputFile string, scanInfo *cautils.ScanInfo) err
 			rawPath = strings.TrimPrefix(rawPath, "docker-archive:")
 		} else if strings.HasPrefix(rawPath, "oci-archive:") {
 			rawPath = strings.TrimPrefix(rawPath, "oci-archive:")
+		} else if strings.HasPrefix(rawPath, "oci-dir:") {
+			rawPath = strings.TrimPrefix(rawPath, "oci-dir:")
+		} else if strings.HasPrefix(rawPath, "dir:") {
+			rawPath = strings.TrimPrefix(rawPath, "dir:")
 		} else if strings.HasPrefix(rawPath, "sbom:") {
 			rawPath = strings.TrimPrefix(rawPath, "sbom:")
 		}
 
 		if rawPath == "-" {
-			if file, ok := any(os.Stdin).(*os.File); ok {
+			if scanInfo.OriginalStdinInfo != nil {
+				if os.SameFile(destInfo, scanInfo.OriginalStdinInfo) {
+					return fmt.Errorf("output path %q would overwrite stdin input; choose a different output file", outputFile)
+				}
+			} else if file, ok := any(os.Stdin).(*os.File); ok {
 				if stdinInfo, err := file.Stat(); err == nil && !stdinInfo.IsDir() {
 					if os.SameFile(destInfo, stdinInfo) {
 						return fmt.Errorf("output path %q would overwrite stdin input; choose a different output file", outputFile)

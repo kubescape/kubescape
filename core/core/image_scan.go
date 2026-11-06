@@ -14,6 +14,7 @@ import (
 	pathpkg "path"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -1309,6 +1310,11 @@ func (ks *Kubescape) ScanImageContext(ctx context.Context, imgScanInfo *ksmetav1
 	logger.L().StopSuccess(imageScanSuccessMessage(images, resultsHandler.ImageScanData))
 
 	scanInfo.SetScanType(cautils.ScanTypeImage)
+
+	// Ensure scanInfo knows about the image targets for output safety checks
+	if len(scanInfo.InputPatterns) == 0 && len(imgScanInfo.Images) > 0 {
+		scanInfo.InputPatterns = slices.Clone(imgScanInfo.Images)
+	}
 
 	// Printers open their output files on construction, so they are built only
 	// once at least one image has produced results.

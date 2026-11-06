@@ -741,29 +741,32 @@ func TestGetScanCommand_BaselinePreservesSpaceBearingPath(t *testing.T) {
 }
 
 func TestGetScanCommand_RejectsOutputOverwritingInputs(t *testing.T) {
+	t.Setenv("KUBESCAPE_SKIP_UPDATE_CHECK", "true")
+	manifestData := []byte(`{"apiVersion":"v1","kind":"Pod","metadata":{"name":"test-pod"}}`)
+
 	t.Run("scan manifest with output pointing to same manifest", func(t *testing.T) {
 		dir := t.TempDir()
 		manifest := filepath.Join(dir, "pod.json")
-		require.NoError(t, os.WriteFile(manifest, []byte(`{"apiVersion":"v1","kind":"Pod"}`), 0o600))
+		require.NoError(t, os.WriteFile(manifest, manifestData, 0o600))
 
 		ks := core.NewKubescape(context.Background())
 		cmd := GetScanCommand(ks)
 		cmd.SilenceUsage = true
 		cmd.SilenceErrors = true
-		cmd.SetArgs([]string{"--format", "json", "--output", manifest, manifest})
+		cmd.SetArgs([]string{"--submit=false", "--format", "json", "--output", manifest, manifest})
 
 		err := cmd.Execute()
 		require.ErrorContains(t, err, "would overwrite input manifest")
 
 		content, readErr := os.ReadFile(manifest)
 		require.NoError(t, readErr)
-		assert.NotEmpty(t, content, "input manifest must not be truncated")
+		assert.Equal(t, manifestData, content, "input manifest must not be truncated or modified")
 	})
 
 	t.Run("scan with baseline output collision", func(t *testing.T) {
 		dir := t.TempDir()
 		manifest := filepath.Join(dir, "pod.json")
-		require.NoError(t, os.WriteFile(manifest, []byte(`{"apiVersion":"v1","kind":"Pod"}`), 0o600))
+		require.NoError(t, os.WriteFile(manifest, manifestData, 0o600))
 		baseline := filepath.Join(dir, "base.json")
 		baselineData := []byte(`{"baseline":"data"}`)
 		require.NoError(t, os.WriteFile(baseline, baselineData, 0o600))
@@ -772,7 +775,7 @@ func TestGetScanCommand_RejectsOutputOverwritingInputs(t *testing.T) {
 		cmd := GetScanCommand(ks)
 		cmd.SilenceUsage = true
 		cmd.SilenceErrors = true
-		cmd.SetArgs([]string{"--baseline", baseline, "--format", "json", "--output", baseline, manifest})
+		cmd.SetArgs([]string{"--submit=false", "--baseline", baseline, "--format", "json", "--output", baseline, manifest})
 
 		err := cmd.Execute()
 		require.ErrorContains(t, err, "would overwrite baseline report")
@@ -785,45 +788,45 @@ func TestGetScanCommand_RejectsOutputOverwritingInputs(t *testing.T) {
 	t.Run("scan control with output collision", func(t *testing.T) {
 		dir := t.TempDir()
 		manifest := filepath.Join(dir, "pod.json")
-		require.NoError(t, os.WriteFile(manifest, []byte(`{"apiVersion":"v1","kind":"Pod"}`), 0o600))
+		require.NoError(t, os.WriteFile(manifest, manifestData, 0o600))
 
 		ks := core.NewKubescape(context.Background())
 		cmd := GetScanCommand(ks)
 		cmd.SilenceUsage = true
 		cmd.SilenceErrors = true
-		cmd.SetArgs([]string{"control", "C-0001", "--format", "json", "--output", manifest, manifest})
+		cmd.SetArgs([]string{"control", "C-0001", "--submit=false", "--format", "json", "--output", manifest, manifest})
 
 		err := cmd.Execute()
 		require.ErrorContains(t, err, "would overwrite input manifest")
 
 		content, readErr := os.ReadFile(manifest)
 		require.NoError(t, readErr)
-		assert.NotEmpty(t, content)
+		assert.Equal(t, manifestData, content, "input manifest must not be modified")
 	})
 
 	t.Run("scan framework with output collision", func(t *testing.T) {
 		dir := t.TempDir()
 		manifest := filepath.Join(dir, "pod.json")
-		require.NoError(t, os.WriteFile(manifest, []byte(`{"apiVersion":"v1","kind":"Pod"}`), 0o600))
+		require.NoError(t, os.WriteFile(manifest, manifestData, 0o600))
 
 		ks := core.NewKubescape(context.Background())
 		cmd := GetScanCommand(ks)
 		cmd.SilenceUsage = true
 		cmd.SilenceErrors = true
-		cmd.SetArgs([]string{"framework", "nsa", "--format", "json", "--output", manifest, manifest})
+		cmd.SetArgs([]string{"framework", "nsa", "--submit=false", "--format", "json", "--output", manifest, manifest})
 
 		err := cmd.Execute()
 		require.ErrorContains(t, err, "would overwrite input manifest")
 
 		content, readErr := os.ReadFile(manifest)
 		require.NoError(t, readErr)
-		assert.NotEmpty(t, content)
+		assert.Equal(t, manifestData, content, "input manifest must not be modified")
 	})
 
 	t.Run("repeated directory scan with output file inside directory succeeds", func(t *testing.T) {
 		dir := t.TempDir()
 		manifest := filepath.Join(dir, "pod.json")
-		require.NoError(t, os.WriteFile(manifest, []byte(`{"apiVersion":"v1","kind":"Pod","metadata":{"name":"test-pod"}}`), 0o600))
+		require.NoError(t, os.WriteFile(manifest, manifestData, 0o600))
 		resultsFile := filepath.Join(dir, "results.json")
 
 		// Pre-populate results.json with non-manifest output report from previous run
@@ -833,7 +836,7 @@ func TestGetScanCommand_RejectsOutputOverwritingInputs(t *testing.T) {
 		cmd := GetScanCommand(ks)
 		cmd.SilenceUsage = true
 		cmd.SilenceErrors = true
-		cmd.SetArgs([]string{"--format", "json", "--output", resultsFile, dir})
+		cmd.SetArgs([]string{"--submit=false", "--format", "json", "--output", resultsFile, dir})
 
 		err := cmd.Execute()
 		require.NoError(t, err, "repeated scan execution must succeed and not treat results.json as an input manifest")
@@ -841,7 +844,7 @@ func TestGetScanCommand_RejectsOutputOverwritingInputs(t *testing.T) {
 
 		manifestContent, readErr := os.ReadFile(manifest)
 		require.NoError(t, readErr)
-		assert.NotEmpty(t, manifestContent, "input manifest must be preserved")
+		assert.Equal(t, manifestData, manifestContent, "input manifest must be preserved byte-for-byte")
 	})
 }
 
