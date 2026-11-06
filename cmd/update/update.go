@@ -6,6 +6,7 @@ package update
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -51,14 +52,25 @@ func GetUpdateCmd(ks meta.IKubescape) *cobra.Command {
 		Example: updateCmdExamples,
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if ks == nil {
+				return errors.New("uninitialized kubescape interface")
+			}
 			normalizedFormat := strings.ToLower(strings.TrimSpace(updateFormat))
+			if normalizedFormat == "" {
+				return fmt.Errorf("format cannot be empty, supported formats: text, json")
+			}
 			if normalizedFormat != "text" && normalizedFormat != "json" {
-				return fmt.Errorf("unsupported format %q, supported: text, json", updateFormat)
+				return fmt.Errorf("unsupported format %q, supported formats: text, json", updateFormat)
+			}
+
+			ctx := cmd.Context()
+			if ks.Context() != nil {
+				ctx = ks.Context()
 			}
 
 			v := newVersionCheckHandler()
 			versionCheckRequest := versioncheck.NewVersionCheckRequest("", versioncheck.BuildNumber, "", "", "update", nil)
-			if err := v.CheckLatestVersion(ks.Context(), versionCheckRequest); err != nil {
+			if err := v.CheckLatestVersion(ctx, versionCheckRequest); err != nil {
 				return err
 			}
 
