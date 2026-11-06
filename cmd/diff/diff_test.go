@@ -2,9 +2,13 @@ package diff
 
 import (
 	"bytes"
+	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/kubescape/kubescape/v4/core/core"
 	metav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
 	"github.com/kubescape/kubescape/v4/core/mocks"
 	"github.com/stretchr/testify/assert"
@@ -257,6 +261,26 @@ func TestGetDiffCmd_ValidationErrorStillPrintsUsage(t *testing.T) {
 			errMatch: "accepts 2 arg(s), received 1",
 		},
 		{
+			name:     "empty base report path",
+			args:     []string{"", "head.json"},
+			errMatch: "base report file path cannot be empty",
+		},
+		{
+			name:     "whitespace-only base report path",
+			args:     []string{"   ", "head.json"},
+			errMatch: "base report file path cannot be empty",
+		},
+		{
+			name:     "empty head report path",
+			args:     []string{"base.json", ""},
+			errMatch: "head report file path cannot be empty",
+		},
+		{
+			name:     "whitespace-only head report path",
+			args:     []string{"base.json", "   "},
+			errMatch: "head report file path cannot be empty",
+		},
+		{
 			name:     "invalid format",
 			args:     []string{"base.json", "head.json", "--format", "invalid"},
 			errMatch: "invalid format",
@@ -311,4 +335,108 @@ func TestGetDiffCmd_HonorsOutputWriter(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, stub.received)
 	assert.Same(t, &buf, stub.received.Writer)
+}
+
+func TestGetDiffCmd_NilKubescape(t *testing.T) {
+	diffCmd := GetDiffCmd(nil)
+	diffCmd.SilenceErrors = true
+	diffCmd.SetArgs([]string{"base.json", "head.json"})
+
+	err := diffCmd.Execute()
+	require.Error(t, err)
+	assert.EqualError(t, err, "uninitialized kubescape interface")
+}
+
+func TestGetDiffCmd_DirectRunE_Validations(t *testing.T) {
+	t.Run("nil interface returns error", func(t *testing.T) {
+		cmd := GetDiffCmd(nil)
+		err := cmd.RunE(cmd, []string{"base.json", "head.json"})
+		require.EqualError(t, err, "uninitialized kubescape interface")
+	})
+
+	t.Run("empty base report path returns error", func(t *testing.T) {
+		stub := &stubKubescape{}
+		cmd := GetDiffCmd(stub)
+		err := cmd.RunE(cmd, []string{"", "head.json"})
+		require.EqualError(t, err, "base report file path cannot be empty")
+	})
+
+	t.Run("whitespace-only base report path returns error", func(t *testing.T) {
+		stub := &stubKubescape{}
+		cmd := GetDiffCmd(stub)
+		err := cmd.RunE(cmd, []string{"   ", "head.json"})
+		require.EqualError(t, err, "base report file path cannot be empty")
+	})
+
+	t.Run("empty head report path returns error", func(t *testing.T) {
+		stub := &stubKubescape{}
+		cmd := GetDiffCmd(stub)
+		err := cmd.RunE(cmd, []string{"base.json", ""})
+		require.EqualError(t, err, "head report file path cannot be empty")
+	})
+
+	t.Run("whitespace-only head report path returns error", func(t *testing.T) {
+		stub := &stubKubescape{}
+		cmd := GetDiffCmd(stub)
+		err := cmd.RunE(cmd, []string{"base.json", "   "})
+		require.EqualError(t, err, "head report file path cannot be empty")
+	})
+}
+
+func TestGetDiffCmd_OutputSafety_RejectsOverwrite(t *testing.T) {
+	const baseContent = `{"results":[],"summaryDetails":{"controls":{}}}`
+	const headContent = `{"results":[{"resourceID":"res1","controls":[{"controlID":"C-HIGH","name":"High","status":{"status":"failed"}}]}],"summaryDetails":{"controls":{"C-HIGH":{"scoreFactor":7.0}}}}`
+
+	tempDir := t.TempDir()
+	basePath := filepath.Join(tempDir, "base.json")
+	headPath := filepath.Join(tempDir, "head.json")
+	require.NoError(t, os.WriteFile(basePath, []byte(baseContent), 0o600))
+	require.NoError(t, os.WriteFile(headPath, []byte(headContent), 0o600))
+
+	ks := core.NewKubescape(context.Background())
+
+	t.Run("output matching base report is rejected and preserves file", func(t *testing.T) {
+		cmd := GetDiffCmd(ks)
+		cmd.SilenceErrors = true
+		cmd.SilenceUsage = true
+		cmd.SetArgs([]string{basePath, headPath, "--format", "json", "--output", basePath})
+
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "would overwrite base report")
+
+		content, readErr := os.ReadFile(basePath)
+		require.NoError(t, readErr)
+		assert.Equal(t, baseContent, string(content), "base report must not be modified")
+	})
+
+	t.Run("output matching head report is rejected and preserves file", func(t *testing.T) {
+		cmd := GetDiffCmd(ks)
+		cmd.SilenceErrors = true
+		cmd.SilenceUsage = true
+		cmd.SetArgs([]string{basePath, headPath, "--format", "json", "--output", headPath})
+
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "would overwrite head report")
+
+		content, readErr := os.ReadFile(headPath)
+		require.NoError(t, readErr)
+		assert.Equal(t, headContent, string(content), "head report must not be modified")
+	})
+
+	t.Run("distinct output file succeeds", func(t *testing.T) {
+		outFile := filepath.Join(tempDir, "diff_out.json")
+		cmd := GetDiffCmd(ks)
+		cmd.SilenceErrors = true
+		cmd.SilenceUsage = true
+		cmd.SetArgs([]string{basePath, headPath, "--format", "json", "--output", outFile})
+
+		err := cmd.Execute()
+		require.NoError(t, err)
+
+		content, readErr := os.ReadFile(outFile)
+		require.NoError(t, readErr)
+		assert.Contains(t, string(content), "C-HIGH")
+	})
 }

@@ -587,3 +587,163 @@ func TestDiff_VulnerabilityDiffHonorsWriter(t *testing.T) {
 	assert.NotEmpty(t, buf.String(), "vulnerability diff must be written to DiffInfo.Writer")
 	assert.Contains(t, buf.String(), "CVE-NEW-HIGH")
 }
+
+func TestDiff_OutputSafety(t *testing.T) {
+	const baseContent = `{"results":[],"summaryDetails":{"controls":{}}}`
+	const headContent = `{"results":[{"resourceID":"res1","controls":[{"controlID":"C-HIGH","name":"High","status":{"status":"failed"}}]}],"summaryDetails":{"controls":{"C-HIGH":{"scoreFactor":7.0}}}}`
+
+	ks := NewKubescape(context.Background())
+
+	t.Run("output matching base report is rejected and preserves file", func(t *testing.T) {
+		base := writeReport(t, baseContent)
+		head := writeReport(t, headContent)
+
+		count, err := ks.Diff(&metav1.DiffInfo{
+			BaseFile: base,
+			HeadFile: head,
+			Format:   "json",
+			Output:   base,
+		})
+		require.Error(t, err)
+		assert.Equal(t, 0, count)
+		assert.Contains(t, err.Error(), "would overwrite base report")
+
+		content, readErr := os.ReadFile(base)
+		require.NoError(t, readErr)
+		assert.Equal(t, baseContent, string(content), "base report must not be truncated or overwritten")
+	})
+
+	t.Run("output matching head report is rejected and preserves file", func(t *testing.T) {
+		base := writeReport(t, baseContent)
+		head := writeReport(t, headContent)
+
+		count, err := ks.Diff(&metav1.DiffInfo{
+			BaseFile: base,
+			HeadFile: head,
+			Format:   "json",
+			Output:   head,
+		})
+		require.Error(t, err)
+		assert.Equal(t, 0, count)
+		assert.Contains(t, err.Error(), "would overwrite head report")
+
+		content, readErr := os.ReadFile(head)
+		require.NoError(t, readErr)
+		assert.Equal(t, headContent, string(content), "head report must not be truncated or overwritten")
+	})
+
+	t.Run("output matching head report via relative path is rejected", func(t *testing.T) {
+		tempDir := t.TempDir()
+		basePath := filepath.Join(tempDir, "base.json")
+		headPath := filepath.Join(tempDir, "head.json")
+		require.NoError(t, os.WriteFile(basePath, []byte(baseContent), 0o600))
+		require.NoError(t, os.WriteFile(headPath, []byte(headContent), 0o600))
+
+		relHead := filepath.Join(tempDir, ".", "head.json")
+		count, err := ks.Diff(&metav1.DiffInfo{
+			BaseFile: basePath,
+			HeadFile: headPath,
+			Format:   "json",
+			Output:   relHead,
+		})
+		require.Error(t, err)
+		assert.Equal(t, 0, count)
+		assert.Contains(t, err.Error(), "would overwrite head report")
+
+		content, readErr := os.ReadFile(headPath)
+		require.NoError(t, readErr)
+		assert.Equal(t, headContent, string(content))
+	})
+
+	t.Run("output resolving to head report without extension is rejected", func(t *testing.T) {
+		tempDir := t.TempDir()
+		basePath := filepath.Join(tempDir, "base.json")
+		headPath := filepath.Join(tempDir, "head.json")
+		require.NoError(t, os.WriteFile(basePath, []byte(baseContent), 0o600))
+		require.NoError(t, os.WriteFile(headPath, []byte(headContent), 0o600))
+
+		// Without extension, Format "json" appends ".json"
+		noExtHead := filepath.Join(tempDir, "head")
+		count, err := ks.Diff(&metav1.DiffInfo{
+			BaseFile: basePath,
+			HeadFile: headPath,
+			Format:   "json",
+			Output:   noExtHead,
+		})
+		require.Error(t, err)
+		assert.Equal(t, 0, count)
+		assert.Contains(t, err.Error(), "would overwrite head report")
+	})
+
+	t.Run("output matching head report via symlink is rejected", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("symlinks require admin privileges on windows")
+		}
+		tempDir := t.TempDir()
+		basePath := filepath.Join(tempDir, "base.json")
+		headPath := filepath.Join(tempDir, "head.json")
+		require.NoError(t, os.WriteFile(basePath, []byte(baseContent), 0o600))
+		require.NoError(t, os.WriteFile(headPath, []byte(headContent), 0o600))
+
+		symlinkPath := filepath.Join(tempDir, "symlink_head.json")
+		require.NoError(t, os.Symlink(headPath, symlinkPath))
+
+		count, err := ks.Diff(&metav1.DiffInfo{
+			BaseFile: basePath,
+			HeadFile: headPath,
+			Format:   "json",
+			Output:   symlinkPath,
+		})
+		require.Error(t, err)
+		assert.Equal(t, 0, count)
+		assert.Contains(t, err.Error(), "would overwrite head report")
+
+		content, readErr := os.ReadFile(headPath)
+		require.NoError(t, readErr)
+		assert.Equal(t, headContent, string(content))
+	})
+
+	t.Run("output matching base report via hardlink is rejected", func(t *testing.T) {
+		tempDir := t.TempDir()
+		basePath := filepath.Join(tempDir, "base.json")
+		headPath := filepath.Join(tempDir, "head.json")
+		require.NoError(t, os.WriteFile(basePath, []byte(baseContent), 0o600))
+		require.NoError(t, os.WriteFile(headPath, []byte(headContent), 0o600))
+
+		hardlinkPath := filepath.Join(tempDir, "hardlink_base.json")
+		require.NoError(t, os.Link(basePath, hardlinkPath))
+
+		count, err := ks.Diff(&metav1.DiffInfo{
+			BaseFile: basePath,
+			HeadFile: headPath,
+			Format:   "json",
+			Output:   hardlinkPath,
+		})
+		require.Error(t, err)
+		assert.Equal(t, 0, count)
+		assert.Contains(t, err.Error(), "would overwrite base report")
+
+		content, readErr := os.ReadFile(basePath)
+		require.NoError(t, readErr)
+		assert.Equal(t, baseContent, string(content))
+	})
+
+	t.Run("vulnerability report diff matching head report is rejected", func(t *testing.T) {
+		base := writeReport(t, imageReportBase)
+		head := writeReport(t, imageReportHead)
+
+		count, err := ks.Diff(&metav1.DiffInfo{
+			BaseFile: base,
+			HeadFile: head,
+			Format:   "json",
+			Output:   head,
+		})
+		require.Error(t, err)
+		assert.Equal(t, 0, count)
+		assert.Contains(t, err.Error(), "would overwrite head report")
+
+		content, readErr := os.ReadFile(head)
+		require.NoError(t, readErr)
+		assert.Equal(t, imageReportHead, string(content))
+	})
+}
