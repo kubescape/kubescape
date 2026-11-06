@@ -381,6 +381,12 @@ func downloadLibrary(tag string, timeout time.Duration) (string, error) {
 	return strings.Join(parts, "\n---\n") + "\n", nil
 }
 
+// maxCELPolicyDownloadBytes bounds policy library files downloaded from remote URLs (10 MiB),
+// preventing uncontrolled memory allocation from oversized responses or decompression bombs (CWE-400).
+const maxCELPolicyDownloadBytes = 10 * 1024 * 1024
+
+var errDownloadBodyTooLarge = errors.New("downloaded file exceeds maximum size limit")
+
 func downloadFileToString(url string, timeout time.Duration) (string, error) {
 	client := &http.Client{
 		Timeout: timeout,
@@ -396,10 +402,13 @@ func downloadFileToString(url string, timeout time.Duration) (string, error) {
 		return "", fmt.Errorf("failed to download file: %s", response.Status)
 	}
 
-	// Read the response body
-	bodyBytes, err := io.ReadAll(response.Body)
+	// Read the response body with an upper bound to prevent OOM
+	bodyBytes, err := io.ReadAll(io.LimitReader(response.Body, maxCELPolicyDownloadBytes+1))
 	if err != nil {
 		return "", err // Return an empty string and the error if reading fails
+	}
+	if len(bodyBytes) > maxCELPolicyDownloadBytes {
+		return "", fmt.Errorf("%w: response from %q exceeded the %d byte limit", errDownloadBodyTooLarge, url, maxCELPolicyDownloadBytes)
 	}
 
 	// Convert the byte slice to a string
