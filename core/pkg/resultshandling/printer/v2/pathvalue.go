@@ -138,7 +138,106 @@ func extractRedactedValueAtPath(kind string, obj map[string]any, path string) (s
 	if !ok {
 		return "", false
 	}
+	// A path naming one element of args or command reads a single string, but
+	// whether that string is a credential can depend on the element before it
+	// ("--token" followed by its value), so it is redacted in the context of its
+	// list.
+	if last := segments[len(segments)-1]; last.Index >= 0 && isCommandLineSegment(last) {
+		parent := slices.Clone(segments)
+		parent[len(parent)-1].Index = -1
+		if list, found := resolveSegments(obj, parent); found {
+			if args, isList := list.([]any); isList && last.Index < len(args) {
+				cur = redactCommandLine(args)[last.Index]
+			}
+		}
+	}
 	return anyToString(redactSensitiveDescendants(kind, segments, cur))
+}
+
+// isCommandLineSegment reports whether a path segment names a container's args
+// or command: the fields that hold a command line, where a credential is
+// written into the value ("--<name>=<value>") rather than under a field named
+// for it.
+func isCommandLineSegment(seg pathSegment) bool {
+	return seg.Key == "args" || seg.Key == "command"
+}
+
+// credentialFlagName reports whether a command-line flag or KEY=VALUE key
+// names a credential. It reads the name the way isSensitiveSegments reads a
+// field name: separators and leading dashes are dropped, so --db-url, -token
+// and API_KEY all classify like dbUrl, token and apiKey.
+func credentialFlagName(flag string) bool {
+	name := normalizeFieldName(strings.TrimLeft(flag, "-"))
+	if name == "" {
+		return false
+	}
+	for _, pattern := range secretFieldPatterns {
+		if strings.Contains(name, pattern) {
+			return true
+		}
+	}
+	return false
+}
+
+// redactCommandLine returns a copy of an args or command list with credential
+// values replaced by redactedValue. Field-name redaction cannot see these: the
+// list elements have no names, and the credential is inside the string.
+//
+// Three spellings are covered:
+//   - "--<credential>=<value>" (or KEY=VALUE): the part after the first "="
+//     is replaced when the part before it names a credential.
+//   - "--<flag>=<name>=<value>", as in "--env=KEY=VALUE" or helm's
+//     "--set=a=1,b=2": when the outer flag is not a credential, each
+//     assignment in its value is checked the same way, so the credential
+//     inside is replaced and the rest of the argument is kept.
+//   - "--<credential>", "<value>": the element after a credential flag with
+//     no "=" is replaced, unless it is itself a flag.
+//
+// It does not parse shell. A credential inside a larger string, such as a
+// "sh -c" script, is not recognised.
+func redactCommandLine(args []any) []any {
+	out := make([]any, len(args))
+	copy(out, args)
+	for i, arg := range args {
+		s, ok := arg.(string)
+		if !ok {
+			continue
+		}
+		if eq := strings.Index(s, "="); eq > 0 {
+			out[i] = redactAssignment(s)
+			continue
+		}
+		if strings.HasPrefix(s, "-") && credentialFlagName(s) && i+1 < len(args) {
+			if next, isString := args[i+1].(string); isString && !strings.HasPrefix(next, "-") {
+				out[i+1] = redactedValue
+			}
+		}
+	}
+	return out
+}
+
+// redactAssignment masks the credential in a "name=value" string. When the
+// name is a credential the whole value goes. Otherwise the value may itself
+// hold assignments ("--env=KEY=VALUE", "--set=a=1,b=2"), so each comma-separated
+// part is checked in turn and only a credential-named one is replaced.
+// Every recursive call is on a strictly shorter string, so it terminates.
+func redactAssignment(s string) string {
+	eq := strings.Index(s, "=")
+	if eq <= 0 {
+		return s
+	}
+	name, value := s[:eq], s[eq+1:]
+	if credentialFlagName(name) {
+		return name + "=" + redactedValue
+	}
+	if !strings.Contains(value, "=") {
+		return s
+	}
+	parts := strings.Split(value, ",")
+	for i, part := range parts {
+		parts[i] = redactAssignment(part)
+	}
+	return name + "=" + strings.Join(parts, ",")
 }
 
 // redactSensitiveDescendants returns a copy of v, the value found at segments,
@@ -163,6 +262,9 @@ func redactSensitiveDescendants(kind string, segments []pathSegment, v any) any 
 		}
 		return out
 	case []any:
+		if last := len(segments) - 1; last >= 0 && segments[last].Index < 0 && isCommandLineSegment(segments[last]) {
+			val = redactCommandLine(val)
+		}
 		out := make([]any, len(val))
 		for i, child := range val {
 			childPath := slices.Clone(segments)
@@ -731,15 +833,7 @@ func enrichedPathsForFieldRedacted(control *resourcesresults.ResourceAssociatedC
 			if p == "" {
 				continue
 			}
-			if isSensitivePath(kind, p) {
-				paths = append(paths, p+" (current: "+redactedValue+")")
-				continue
-			}
-			if val, ok := extractValueAtPath(obj, p); ok {
-				paths = append(paths, p+" (current: "+val+")")
-				continue
-			}
-			paths = append(paths, p)
+			paths = append(paths, p+currentValueSuffix(kind, obj, p, false))
 		}
 	}
 	return paths
