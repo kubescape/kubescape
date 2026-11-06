@@ -31,17 +31,30 @@ func normalize(responses []reporthandling.RuleResponse) []reporthandling.RuleRes
 			}
 			return left.Value < right.Value
 		})
-		// A nil slice and an empty slice both mean "no k8s objects"; the
-		// evaluator and expected.json fixtures don't agree on which one they
-		// use, so treat them as equal rather than flagging a false diff.
-		if len(out[i].AlertObject.K8SApiObjects) == 0 {
-			out[i].AlertObject.K8SApiObjects = nil
-		}
+		// A nil slice and an empty slice both mean "none". A rule that writes
+		// "fixPaths": [] produces an empty one and a fixture that leaves the
+		// field out produces nil, so treat them as equal rather than flagging
+		// a false diff. The sort key below depends on this too, because the
+		// two forms marshal differently.
+		out[i].FailedPaths = nilIfEmpty(out[i].FailedPaths)
+		out[i].ReviewPaths = nilIfEmpty(out[i].ReviewPaths)
+		out[i].DeletePaths = nilIfEmpty(out[i].DeletePaths)
+		out[i].FixPaths = nilIfEmpty(out[i].FixPaths)
+		out[i].RelatedObjects = nilIfEmpty(out[i].RelatedObjects)
+		out[i].Context = nilIfEmpty(out[i].Context)
+		out[i].AlertObject.K8SApiObjects = nilIfEmpty(out[i].AlertObject.K8SApiObjects)
 	}
 	sort.Slice(out, func(i, j int) bool {
 		return sortKey(out[i]) < sortKey(out[j])
 	})
 	return out
+}
+
+func nilIfEmpty[T any](list []T) []T {
+	if len(list) == 0 {
+		return nil
+	}
+	return list
 }
 
 // sortKey serializes the entire normalized response to JSON. Two responses
