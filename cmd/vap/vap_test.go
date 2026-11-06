@@ -158,6 +158,22 @@ func TestDownloadFileToString(t *testing.T) {
 		require.NoError(t, err)
 		assert.Empty(t, result)
 	})
+
+	t.Run("oversized response body is rejected", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			chunk := make([]byte, 32*1024)
+			for written := 0; written <= maxCELPolicyDownloadBytes; written += len(chunk) {
+				_, _ = w.Write(chunk)
+			}
+		}))
+		defer server.Close()
+
+		_, err := downloadFileToString(server.URL, 0)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, errDownloadBodyTooLarge)
+		assert.Contains(t, err.Error(), server.URL)
+	})
 }
 
 // redirectTransport redirects all HTTP requests to a local test server
