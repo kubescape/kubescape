@@ -61,7 +61,7 @@ deny contains msga if {
 	finalpath := matched_paths(rule, i, j, k, p, verbs, api_groups, resources)
 
 	msga := {
-		"alertMessage": sprintf("Subject: %s-%s can exec into pods in unprivileged namespace %s", [subjectVector.kind, subjectVector.name, rolebinding.metadata.namespace]),
+		"alertMessage": sprintf("Subject: %s-%s can exec into pods in unprivileged namespace %s%s", [subjectVector.kind, subjectVector.name, rolebinding.metadata.namespace, exec_alert_suffix(rule)]),
 		"alertScore": 5,
 		"packagename": "armo_builtins",
 		"reviewPaths": finalpath,
@@ -72,6 +72,21 @@ deny contains msga if {
 			"externalObjects": subjectVector,
 		},
 	}
+}
+
+# get without create only opens exec where the
+# AuthorizePodWebsocketUpgradeCreatePermission gate is off, so the alert says so.
+exec_alert_suffix(rule) := "" if {
+	allows_exec_create(rule)
+}
+
+exec_alert_suffix(rule) := ", unless the AuthorizePodWebsocketUpgradeCreatePermission feature gate is on" if {
+	not allows_exec_create(rule)
+}
+
+allows_exec_create(rule) if {
+	some verb in rule.verbs
+	verb in {"create", "*"}
 }
 
 # Kubernetes draws no distinction between an absent resourceNames and an

@@ -1,19 +1,19 @@
 [
     {
-        "alertMessage": "Subject: User-dave can exec into pods in unprivileged namespace dev",
+        "alertMessage": "Subject: User-dave can exec into pods in unprivileged namespace dev, unless the AuthorizePodWebsocketUpgradeCreatePermission feature gate is on",
         "failedPaths": [
-            "relatedObjects[1].rules[0].resources[0]",
-            "relatedObjects[1].rules[0].verbs[0]",
-            "relatedObjects[1].rules[0].apiGroups[0]",
             "relatedObjects[0].roleRef.name",
-            "relatedObjects[0].subjects[0]"
+            "relatedObjects[0].subjects[0]",
+            "relatedObjects[1].rules[0].apiGroups[0]",
+            "relatedObjects[1].rules[0].resources[0]",
+            "relatedObjects[1].rules[0].verbs[0]"
         ],
         "reviewPaths": [
-            "relatedObjects[1].rules[0].resources[0]",
-            "relatedObjects[1].rules[0].verbs[0]",
-            "relatedObjects[1].rules[0].apiGroups[0]",
             "relatedObjects[0].roleRef.name",
-            "relatedObjects[0].subjects[0]"
+            "relatedObjects[0].subjects[0]",
+            "relatedObjects[1].rules[0].apiGroups[0]",
+            "relatedObjects[1].rules[0].resources[0]",
+            "relatedObjects[1].rules[0].verbs[0]"
         ],
         "deletePaths": null,
         "fixPaths": [],
