@@ -191,6 +191,8 @@ The array is left out of a control when none of its values resolve, and `--show-
 
 The SARIF, HTML, CSV, GitLab SAST and GitHub Actions outputs read the same path kinds.
 
+**Fix values are not redacted in JSON.** The rule results of both JSON formats carry each fix-path value exactly as the rule wrote it: `results[].controls[].rules[].paths[].fixPath.value` in v2 and `fixPaths[].value` in v1. The `evidence` array is the filtered part. These fields are not, and `--show-secrets` plays no part in them. A fix value that contains a credential would therefore appear in a JSON report, so a rule must never put one there. JSON reports also include the scanned resources unless `--omit-raw-resources` is set, so a credential in a field that the scrub below does not overwrite appears there too. Check a report before sharing it.
+
 ### File and line
 
 | Source of the resource | What is shown |
@@ -203,7 +205,15 @@ The SARIF, HTML, CSV, GitLab SAST and GitHub Actions outputs read the same path 
 
 ### Redaction and scrubbing
 
-Evidence is meant to be shared, so values are redacted by default. `--show-evidence` applies to the terminal output, and `--show-secrets` shows redacted values there; it only has an effect together with `--show-evidence`. Neither flag changes the JSON `evidence` array, which is described below.
+Evidence is meant to be shared, so values are redacted by default. `--show-secrets` shows them instead, but where it takes effect depends on the output:
+
+| Output | Effect of `--show-secrets` |
+|--------|----------------------------|
+| Terminal | Reveals redacted values wherever paths are printed: with `--show-evidence`, and in the control view (`--view control`) also with `--verbose`. On its own it changes nothing |
+| SARIF, HTML, CSV and GitLab SAST | Reveals them on its own. `--show-evidence` is not needed |
+| JSON | None. The `evidence` array always omits credential-shaped values, and fix values are never redacted (see [Values](#values)) |
+
+A report made with `--show-secrets` contains real values, so check it before sharing it.
 
 A value is redacted when:
 
@@ -277,6 +287,7 @@ A Pod and a Deployment need different roots, so test every kind the rule covers.
 - [ ] Indexes are substituted with the loop variable, and there are no wildcards.
 - [ ] A field that must be added is a `fixPaths` entry with its value. A field that is wrong is a `reviewPaths` or `deletePaths` entry.
 - [ ] If the finding is a credential, a path to the field that names it is emitted as well as the one to its value.
+- [ ] No `fixPaths` value contains a credential. Fix values are copied into JSON reports as written.
 - [ ] The rule was run with `--show-evidence` against a manifest, and each path shows the expected line.
 
 ---
