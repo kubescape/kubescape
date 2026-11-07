@@ -282,6 +282,12 @@ func (c *compiledMatchResources) matches(obj ObjectInfo) (matched bool, determin
 
 	objectKnown := true
 	if c.objectSelector != nil && !c.objectSelector.Empty() {
+		if obj.Operation == admissionregistrationv1alpha1.Connect {
+			// A CONNECT request carries its options object (e.g.
+			// PodExecOptions) and no old object. Neither can have labels, so
+			// the selector never matches, whatever labels obj itself has.
+			return false, true
+		}
 		if !c.objectSelector.Matches(labels.Set(obj.Labels)) {
 			if obj.Operation != admissionregistrationv1alpha1.Update {
 				return false, true
