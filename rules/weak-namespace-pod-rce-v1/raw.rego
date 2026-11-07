@@ -37,9 +37,13 @@ deny contains msga if {
 	}
 }
 
-# creating the pods/exec subresource attaches to a running pod directly
+# creating the pods/exec subresource attaches to a running pod directly. get does
+# the same over a WebSocket, because the upgrade is a GET request. Kubernetes only
+# requires create as well from v1.35 (AuthorizePodWebsocketUpgradeCreatePermission),
+# and this rule cannot see the cluster version, so get is reported too. That is
+# the same call node-proxy-access-v1 makes for get on nodes/proxy.
 deny contains msga if {
-	verbs := ["create", "*"]
+	verbs := ["create", "get", "*"]
 	api_groups := ["", "*"]
 	resources := ["pods/exec", "*/exec", "*"]
 
@@ -57,7 +61,7 @@ deny contains msga if {
 	finalpath := matched_paths(rule, i, j, k, p, verbs, api_groups, resources)
 
 	msga := {
-		"alertMessage": sprintf("Subject: %s-%s can exec into pods in unprivileged namespace %s", [subjectVector.kind, subjectVector.name, rolebinding.metadata.namespace]),
+		"alertMessage": sprintf("Subject: %s-%s can exec into pods in unprivileged namespace %s%s", [subjectVector.kind, subjectVector.name, rolebinding.metadata.namespace, exec_alert_suffix(rule)]),
 		"alertScore": 5,
 		"packagename": "armo_builtins",
 		"reviewPaths": finalpath,
@@ -68,6 +72,23 @@ deny contains msga if {
 			"externalObjects": subjectVector,
 		},
 	}
+}
+
+# get without create only opens exec where the
+# AuthorizePodWebsocketUpgradeCreatePermission gate is off, so the alert says so.
+# RBAC grants add up and another rule can supply the create, which raises its
+# own alert, so this text describes the grant and not the subject's whole access.
+exec_alert_suffix(rule) := "" if {
+	allows_exec_create(rule)
+}
+
+exec_alert_suffix(rule) := " through get on pods/exec, which also needs create when the AuthorizePodWebsocketUpgradeCreatePermission feature gate is on" if {
+	not allows_exec_create(rule)
+}
+
+allows_exec_create(rule) if {
+	some verb in rule.verbs
+	verb in {"create", "*"}
 }
 
 # Kubernetes draws no distinction between an absent resourceNames and an

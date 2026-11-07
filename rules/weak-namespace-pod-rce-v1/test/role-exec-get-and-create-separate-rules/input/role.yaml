@@ -1,0 +1,12 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: dev-pod-exec-separate-rules
+  namespace: dev
+rules:
+- apiGroups: [""]
+  resources: ["pods/exec"]
+  verbs: ["get"]
+- apiGroups: [""]
+  resources: ["pods/exec"]
+  verbs: ["create"]
