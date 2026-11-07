@@ -434,3 +434,28 @@ func TestCorrelate_MultipleExternalExposureSourcesDoNotOverwriteEachOther(t *tes
 		t.Errorf("expected workload b to keep its own Ingress exposure, got %+v", byWorkload["b"])
 	}
 }
+
+func TestCorrelate_NilIndexIsDefaultAllow(t *testing.T) {
+	w := Workload{Namespace: "prod", Kind: "Deployment", Name: "web"}
+	endpoints := map[Workload]networkpolicy.Endpoint{
+		w: {Namespace: "prod", Name: "web-pod", Labels: map[string]string{"app": "web"}},
+	}
+	vulns := map[Workload][]storagev1beta1.Vulnerability{
+		w: {vuln("CVE-2023-1234", "High", true)},
+	}
+
+	findings, skipped := Correlate(nil, endpoints, vulns, SeverityLow, nil)
+	if len(skipped) != 0 {
+		t.Fatalf("expected 0 skipped workloads, got %d", len(skipped))
+	}
+	if len(findings) != 1 {
+		t.Fatalf("expected 1 finding, got %d", len(findings))
+	}
+	f := findings[0]
+	if f.Exposure.Level != networkpolicy.ExposureOpen {
+		t.Errorf("expected ExposureOpen for nil index, got %v", f.Exposure.Level)
+	}
+	if f.Exposure.Reason != "no NetworkPolicy selects this endpoint for ingress; default allow" {
+		t.Errorf("unexpected exposure reason: %q", f.Exposure.Reason)
+	}
+}
