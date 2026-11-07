@@ -159,6 +159,9 @@ func runFrameworkScan(ctx context.Context, scanInfo *cautils.ScanInfo, ks meta.I
 	if err != nil {
 		return nil, err
 	}
+	if scanInfo.DryRun {
+		return results, nil
+	}
 
 	if err = results.HandleResults(ctx, scanInfo); err != nil {
 		return results, err

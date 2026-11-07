@@ -141,6 +141,9 @@ func runControlScan(ctx context.Context, scanInfo *cautils.ScanInfo, ks meta.IKu
 	if err != nil {
 		return nil, err
 	}
+	if scanInfo.DryRun {
+		return results, nil
+	}
 	if err := results.HandleResults(ctx, scanInfo); err != nil {
 		return results, err
 	}
