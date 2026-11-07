@@ -194,3 +194,26 @@ func TestAnalyzeEscalation_RewriteBindingExplanationIsDeterministic(t *testing.T
 		slices.Reverse(bindings)
 	}
 }
+
+func TestDirectEscalationEdges_PreservesUnrestrictedRewriteCapability(t *testing.T) {
+	editor := clusterRole("editor", rule([]string{rbacv1.GroupName}, []string{"roles"}, []string{"escalate", "patch"}, nil))
+	idx := NewIndex([]rbacv1.Role{role("prod", "owned"), role("prod", "unbound")}, []rbacv1.ClusterRole{editor},
+		[]rbacv1.RoleBinding{roleBinding("prod", "owned", "Role", "owned", saSubject("dev", "attacker"))},
+		[]rbacv1.ClusterRoleBinding{clusterRoleBinding("editor", "editor", saSubject("dev", "attacker"))}, nil)
+	subject := sa("dev", "attacker")
+	capability, acquired := false, false
+	for _, edge := range idx.DirectEscalationEdges(subject, idx.DirectRules(subject)) {
+		if edge.Primitive != PrimitiveEscalateVerb || edge.Target == nil {
+			continue
+		}
+		if edge.Target.Covers("Role", "prod", "unbound") && edge.PermissionsUnconfirmed {
+			capability = true
+		}
+		if edge.Target.Covers("Role", "prod", "owned") && !edge.PermissionsUnconfirmed && edge.Scope == "prod" {
+			acquired = true
+		}
+	}
+	if !capability || !acquired {
+		t.Fatalf("rewrite capability=%v, acquired permissions=%v, want both", capability, acquired)
+	}
+}

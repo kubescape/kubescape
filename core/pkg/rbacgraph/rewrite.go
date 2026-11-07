@@ -52,7 +52,9 @@ func (idx *Index) rewriteEdges(subject Subject, rules []ScopedRule, rewrites []r
 				}
 			}
 		}
-		if !acquired && rewrite.subject == subject {
+		// An unrestricted rewrite still covers targets outside the collected
+		// binding paths, even when some concrete roles granted permissions.
+		if rewrite.subject == subject && (!acquired || (e.Target != nil && e.Target.Name == "")) {
 			e.PermissionsUnconfirmed = true
 			e.Detail += "; no usable binding to acquire the rewritten permissions was established"
 			edges = append(edges, e)

@@ -913,8 +913,8 @@ func TestDirectRules_UserSubjectWithAnotherServiceAccountUsernameGrantsNothing(t
 	}
 }
 
-// roleEscalationFindings returns the Scope of every escalate-verb finding on
-// Roles, sorted.
+// roleEscalationFindings returns the distinct scopes of escalate-verb
+// findings on Roles, including both capabilities and acquired permissions.
 func roleEscalationFindings(result EscalationResult) []string {
 	var scopes []string
 	for _, f := range result.Unbounded {
@@ -923,7 +923,7 @@ func roleEscalationFindings(result EscalationResult) []string {
 		}
 	}
 	sort.Strings(scopes)
-	return scopes
+	return slices.Compact(scopes)
 }
 
 func TestAnalyzeEscalation_ClusterWideEscalateCombinesWithNamespacedUpdate(t *testing.T) {
