@@ -79,8 +79,9 @@ type Exposure struct {
 // This is the signal a vulnerability-prioritization consumer wants: a
 // critical CVE on a pod that is ExposureOpen or ExposureExternalCIDR is a
 // materially different risk than the same CVE on an ExposureRestricted pod.
+// If idx is nil, the endpoint is not isolated and ExposureOpen is returned.
 func (idx *Index) IngressExposure(ep Endpoint) Exposure {
-	if !idx.IsIsolated(ep, Ingress) {
+	if idx == nil || !idx.IsIsolated(ep, Ingress) {
 		return Exposure{Level: ExposureOpen, Reason: "no NetworkPolicy selects this endpoint for ingress; default allow"}
 	}
 	if ep.HostNetwork {

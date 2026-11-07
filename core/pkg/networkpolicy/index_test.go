@@ -153,3 +153,45 @@ func namedPort(name string) []networkingv1.NetworkPolicyPort {
 	p := intstr.FromString(name)
 	return []networkingv1.NetworkPolicyPort{{Port: &p}}
 }
+
+func TestNilIndex_SafeReceiverMethods(t *testing.T) {
+	var idx *Index
+	src := Endpoint{Namespace: "default", Name: "client", Labels: map[string]string{"app": "client"}}
+	dst := Endpoint{Namespace: "default", Name: "server", Labels: map[string]string{"app": "server"}}
+
+	if policies := idx.matchingPolicies(src); policies != nil {
+		t.Errorf("matchingPolicies on nil index = %v, want nil", policies)
+	}
+
+	if idx.IsIsolated(src, Ingress) {
+		t.Errorf("IsIsolated(Ingress) on nil index = true, want false")
+	}
+	if idx.IsIsolated(src, Egress) {
+		t.Errorf("IsIsolated(Egress) on nil index = true, want false")
+	}
+
+	exposure := idx.IngressExposure(dst)
+	if exposure.Level != ExposureOpen {
+		t.Errorf("IngressExposure on nil index = %v, want ExposureOpen", exposure.Level)
+	}
+
+	ingressDec := idx.AllowsIngress(src, dst, portSpec(80))
+	if ingressDec.Verdict != Allowed {
+		t.Errorf("AllowsIngress on nil index = %v, want Allowed", ingressDec.Verdict)
+	}
+
+	egressDec := idx.AllowsEgress(src, dst, portSpec(80))
+	if egressDec.Verdict != Allowed {
+		t.Errorf("AllowsEgress on nil index = %v, want Allowed", egressDec.Verdict)
+	}
+
+	v, egress, ingress := idx.Reaches(src, dst, portSpec(80))
+	if v != Allowed || egress.Verdict != Allowed || ingress.Verdict != Allowed {
+		t.Errorf("Reaches with port on nil index = (%v, %v, %v), want all Allowed", v, egress.Verdict, ingress.Verdict)
+	}
+
+	vNilPort, egressNilPort, ingressNilPort := idx.Reaches(src, dst, nil)
+	if vNilPort != Allowed || egressNilPort.Verdict != Allowed || ingressNilPort.Verdict != Allowed {
+		t.Errorf("Reaches with nil port on nil index = (%v, %v, %v), want all Allowed", vNilPort, egressNilPort.Verdict, ingressNilPort.Verdict)
+	}
+}
