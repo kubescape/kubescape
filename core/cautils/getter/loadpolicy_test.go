@@ -469,6 +469,75 @@ func TestLoadPolicyMultiPathFallback(t *testing.T) {
 	})
 }
 
+func TestLoadPolicy_OversizedFileRejected(t *testing.T) {
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "oversized.json")
+	f, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY, 0o600)
+	require.NoError(t, err)
+	require.NoError(t, f.Truncate(maxPolicyFileBytes+1))
+	require.NoError(t, f.Close())
+
+	t.Run("GetControl", func(t *testing.T) {
+		p := NewLoadPolicy([]string{filePath})
+		_, err := p.GetControl("C-0001")
+		require.Error(t, err)
+		require.ErrorIs(t, err, ErrPolicyTooLarge)
+	})
+
+	t.Run("GetExceptions", func(t *testing.T) {
+		p := NewLoadPolicy([]string{filePath})
+		_, err := p.GetExceptions(context.Background(), "")
+		require.Error(t, err)
+		require.ErrorIs(t, err, ErrPolicyTooLarge)
+	})
+
+	t.Run("GetAttackTracks", func(t *testing.T) {
+		p := NewLoadPolicy([]string{filePath})
+		_, err := p.GetAttackTracks()
+		require.Error(t, err)
+		require.ErrorIs(t, err, ErrPolicyTooLarge)
+	})
+
+	t.Run("CacheSource", func(t *testing.T) {
+		p := NewLoadPolicy([]string{filePath})
+		require.Equal(t, fmt.Sprintf("unreadable-file:%q", filePath), p.CacheSource())
+	})
+
+	t.Run("fileDigest", func(t *testing.T) {
+		_, err := fileDigest(filePath)
+		require.Error(t, err)
+		require.ErrorIs(t, err, ErrPolicyTooLarge)
+	})
+}
+
+func TestLoadPolicy_NonRegularFileRejected(t *testing.T) {
+	// /dev/null is a character device, not a regular file
+	if _, err := os.Stat("/dev/null"); err == nil {
+		p := NewLoadPolicy([]string{"/dev/null"})
+
+		t.Run("GetControl", func(t *testing.T) {
+			_, err := p.GetControl("C-0001")
+			require.Error(t, err)
+			require.ErrorIs(t, err, ErrPolicyNotRegular)
+		})
+
+		t.Run("GetExceptions", func(t *testing.T) {
+			_, err := p.GetExceptions(context.Background(), "")
+			require.Error(t, err)
+			require.ErrorIs(t, err, ErrPolicyNotRegular)
+		})
+	}
+}
+
+func TestLoadPolicy_DirectoryRejected(t *testing.T) {
+	dir := t.TempDir()
+	p := NewLoadPolicy([]string{dir})
+
+	_, err := p.GetExceptions(context.Background(), "")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "is a directory, not a file")
+}
+
 func writeTempJSONControlInputs(t testing.TB) (string, map[string][]string) {
 	fileName := testFrameworkFile("control-inputs")
 	mock := map[string][]string{

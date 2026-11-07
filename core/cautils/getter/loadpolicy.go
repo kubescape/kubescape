@@ -5,11 +5,13 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
+	"syscall"
 
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/go-logger"
@@ -21,6 +23,11 @@ import (
 // =======================================================================================================================
 // ============================================== LoadPolicy =============================================================
 // =======================================================================================================================
+// maxPolicyFileBytes is the maximum allowed size for local policy files (32 MiB),
+// matching cautils.DefaultMaxFileSize to prevent uncontrolled resource consumption
+// from oversized inputs or decompression bombs (CWE-400).
+const maxPolicyFileBytes int64 = 32 * 1024 * 1024
+
 var (
 	DefaultLocalStore = getCacheDir()
 
@@ -35,7 +42,89 @@ var (
 	// could be read as a control or a framework with controls, so nothing can
 	// be said about whether a control exists.
 	ErrCatalogUnavailable = errors.New("no usable local policy catalog")
+
+	// ErrPolicyNotRegular is returned when a policy file is not a regular file.
+	ErrPolicyNotRegular = errors.New("policy file is not a regular file")
+	// ErrPolicyTooLarge is returned when a policy file exceeds the maximum allowed size.
+	ErrPolicyTooLarge = errors.New("policy file exceeds maximum size limit")
 )
+
+// openPolicyFile opens path for reading and rejects anything but a regular file.
+// O_NONBLOCK keeps opening a FIFO from waiting for a writer, and the check is
+// made on the opened descriptor so a path swapped afterwards cannot slip past.
+func openPolicyFile(path string) (*os.File, error) {
+	if strings.TrimSpace(path) == "" {
+		return nil, os.ErrNotExist
+	}
+	file, err := os.OpenFile(filepath.Clean(path), os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return nil, err
+	}
+	info, err := file.Stat()
+	if err != nil {
+		file.Close()
+		return nil, err
+	}
+	if info.IsDir() {
+		file.Close()
+		return nil, fmt.Errorf("%q is a directory, not a file", path)
+	}
+	if !info.Mode().IsRegular() {
+		file.Close()
+		return nil, fmt.Errorf("%w: %q", ErrPolicyNotRegular, path)
+	}
+	return file, nil
+}
+
+// readPolicyFile returns the contents of the policy file at path, reading at most
+// maxPolicyFileBytes bytes so that reading remains bounded.
+func readPolicyFile(path string) ([]byte, error) {
+	file, err := openPolicyFile(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	info, err := file.Stat()
+	if err == nil && info.Size() > maxPolicyFileBytes {
+		return nil, fmt.Errorf("%w: %q exceeds the %d byte limit", ErrPolicyTooLarge, path, maxPolicyFileBytes)
+	}
+
+	data, err := io.ReadAll(io.LimitReader(file, maxPolicyFileBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > maxPolicyFileBytes {
+		return nil, fmt.Errorf("%w: %q exceeds the %d byte limit", ErrPolicyTooLarge, path, maxPolicyFileBytes)
+	}
+	return data, nil
+}
+
+// fileDigest streams path into a SHA-256 hash, rejecting non-regular files and
+// files exceeding maxPolicyFileBytes without buffering the full contents into memory.
+func fileDigest(path string) (string, error) {
+	file, err := openPolicyFile(path)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+
+	info, err := file.Stat()
+	if err == nil && info.Size() > maxPolicyFileBytes {
+		return "", fmt.Errorf("%w: %q exceeds the %d byte limit", ErrPolicyTooLarge, path, maxPolicyFileBytes)
+	}
+
+	hasher := sha256.New()
+	n, err := io.Copy(hasher, io.LimitReader(file, maxPolicyFileBytes+1))
+	if err != nil {
+		return "", err
+	}
+	if n > maxPolicyFileBytes {
+		return "", fmt.Errorf("%w: %q exceeds the %d byte limit", ErrPolicyTooLarge, path, maxPolicyFileBytes)
+	}
+
+	return fmt.Sprintf("sha256:%x", hasher.Sum(nil)), nil
+}
 
 var (
 	_ IPolicyGetter         = &LoadPolicy{}
@@ -90,7 +179,7 @@ func (lp *LoadPolicy) GetControl(controlID string) (*reporthandling.Control, err
 	var firstFailure error // why the first unusable file was skipped
 
 	for _, filePath := range lp.filePaths {
-		buf, err := os.ReadFile(filepath.Clean(filePath))
+		buf, err := readPolicyFile(filePath)
 		if err != nil {
 			if firstFailure == nil {
 				firstFailure = err
@@ -150,7 +239,7 @@ func (lp *LoadPolicy) GetFramework(frameworkName string) (*reporthandling.Framew
 	}
 
 	for _, filePath := range lp.filePaths {
-		buf, err := os.ReadFile(filepath.Clean(filePath))
+		buf, err := readPolicyFile(filePath)
 		if err != nil {
 			logger.L().Debug("skipping unreadable policy file", helpers.String("path", filePath), helpers.Error(err))
 			continue
@@ -176,7 +265,7 @@ func (lp *LoadPolicy) GetFrameworks() ([]reporthandling.Framework, error) {
 	seenFws := make(map[string]struct{})
 
 	for _, f := range lp.filePaths {
-		buf, err := os.ReadFile(filepath.Clean(f))
+		buf, err := readPolicyFile(f)
 		if err != nil {
 			logger.L().Debug("skipping unreadable policy file", helpers.String("path", f), helpers.Error(err))
 			continue
@@ -206,7 +295,7 @@ func (lp *LoadPolicy) ListFrameworks() ([]string, error) {
 	frameworkNames := make([]string, 0, 10)
 
 	for _, f := range lp.filePaths {
-		buf, err := os.ReadFile(filepath.Clean(f))
+		buf, err := readPolicyFile(f)
 		if err != nil {
 			logger.L().Debug("skipping unreadable policy file", helpers.String("path", f), helpers.Error(err))
 			continue
@@ -239,7 +328,7 @@ func (lp *LoadPolicy) ListControls() ([]string, error) {
 	var orderedIDs []string
 
 	for _, filePath := range lp.filePaths {
-		buf, err := os.ReadFile(filepath.Clean(filePath))
+		buf, err := readPolicyFile(filePath)
 		if err != nil {
 			continue
 		}
@@ -307,7 +396,7 @@ func (lp *LoadPolicy) GetExceptions(_ context.Context, _ /* clusterName */ strin
 	// NOTE: this assumes that the first path contains a valid exceptions descriptor
 	filePath := lp.filePath()
 
-	buf, err := os.ReadFile(filepath.Clean(filePath))
+	buf, err := readPolicyFile(filePath)
 	if err != nil {
 		return nil, err
 	}
@@ -329,7 +418,7 @@ func (lp *LoadPolicy) GetControlsInputs(_ context.Context, _ /* clusterName */ s
 	filePath := lp.filePath()
 	fileName := filepath.Base(filePath)
 
-	buf, err := os.ReadFile(filepath.Clean(filePath))
+	buf, err := readPolicyFile(filePath)
 	if err != nil {
 		formattedError := fmt.Errorf(
 			`error opening %s file, "controls-config" will be downloaded from ARMO management portal`,
@@ -383,7 +472,7 @@ func contentDigest(contents []byte) string {
 func (lp *LoadPolicy) GetAttackTracks() ([]v1alpha1.AttackTrack, error) {
 	attackTracks := make([]v1alpha1.AttackTrack, 0, 20)
 
-	buf, err := os.ReadFile(filepath.Clean(lp.filePath()))
+	buf, err := readPolicyFile(lp.filePath())
 	if err != nil {
 		return nil, err
 	}
@@ -406,11 +495,11 @@ func (lp *LoadPolicy) CacheSource() string {
 		return CacheSourceOf(nil)
 	}
 	filePath := filepath.Clean(lp.filePath())
-	buf, err := os.ReadFile(filePath)
+	digest, err := fileDigest(filePath)
 	if err != nil {
 		return fmt.Sprintf("unreadable-file:%q", filePath)
 	}
-	return "file:" + contentDigest(buf)
+	return "file:" + digest
 }
 
 // LoadedCacheSource identifies the exact bytes the last successful
