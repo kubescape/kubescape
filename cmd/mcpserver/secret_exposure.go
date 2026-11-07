@@ -711,11 +711,27 @@ func scanWorkload(
 	}
 
 	checkContainerEnv := func(cName string, envList []corev1.EnvVar, envFromList []corev1.EnvFromSource) {
+		// An env entry replaces the envFrom value of the same name, except that
+		// the kubelet skips an optional configMapKeyRef or secretKeyRef whose
+		// object or key is missing, leaving the envFrom value in place. The
+		// ConfigMaps are known; Secrets are not read, so an optional
+		// secretKeyRef only may override.
 		explicitEnvNames := make(map[string]struct{}, len(envList))
+		optionalSecretEnvRefs := make(map[string][]string)
 		for _, env := range envList {
-			if env.Name != "" {
-				explicitEnvNames[env.Name] = struct{}{}
+			if env.Name == "" {
+				continue
 			}
+			if env.ValueFrom != nil {
+				if ref := env.ValueFrom.ConfigMapKeyRef; ref != nil && ref.Optional != nil && *ref.Optional && !configMapHasDataKey(configMapsByName, ref.Name, ref.Key) {
+					continue
+				}
+				if ref := env.ValueFrom.SecretKeyRef; ref != nil && ref.Optional != nil && *ref.Optional {
+					optionalSecretEnvRefs[env.Name] = append(optionalSecretEnvRefs[env.Name], ref.Name)
+					continue
+				}
+			}
+			explicitEnvNames[env.Name] = struct{}{}
 		}
 
 		// 1. Scan plain env
@@ -886,6 +902,15 @@ func scanWorkload(
 							h.Write([]byte("\n"))
 						}
 						exposedValueDigest = hex.EncodeToString(h.Sum(nil))
+						// Env entries apply after every envFrom source.
+						for _, entry := range exposedEntries {
+							for _, secName := range optionalSecretEnvRefs[entry.effectiveKey] {
+								if _, seen := seenLaterSecrets[secName]; !seen && secName != "" {
+									seenLaterSecrets[secName] = struct{}{}
+									laterSecretRefs = append(laterSecretRefs, secName)
+								}
+							}
+						}
 					}
 				}
 
@@ -979,6 +1004,18 @@ func deduplicateWorkloadFindings(findings []SecretFinding, workloads []unstructu
 	}
 
 	return deduped
+}
+
+// configMapHasDataKey reports whether a configMapKeyRef resolves: the kubelet
+// reads it from the ConfigMap's data only, never binaryData.
+func configMapHasDataKey(configMapsByName map[string]*unstructured.Unstructured, name, key string) bool {
+	cm, exists := configMapsByName[name]
+	if !exists {
+		return false
+	}
+	data, _, _ := unstructured.NestedStringMap(cm.Object, "data")
+	_, found := data[key]
+	return found
 }
 
 func makeWorkloadKey(kind, name string) string {
