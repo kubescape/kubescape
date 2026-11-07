@@ -90,5 +90,3 @@ func TestFleetScan_DryRun(t *testing.T) {
 	err := fleetScan(scanInfo, ks, nil, runSecurityScan)
 	require.NoError(t, err)
 }
-
-
