@@ -140,6 +140,12 @@ type OPAProcessor struct {
 	wholeClusterPolicy cautils.WholeClusterExecutionPolicy
 	// skippedWholeClusterControls tracks whole-cluster controls skipped by policy
 	skippedWholeClusterControls map[string]string
+	// cleanedResourcesMu guards cleanedResources independently of mu to prevent deadlocks
+	cleanedResourcesMu sync.Mutex
+	// cleanedResources tracks cleaned resources by ID and object reference to bound memory while ensuring replacements are cleaned
+	cleanedResources        map[string]workloadinterface.IMetadata
+	onBatchProcessed        func(batch *cautils.ResourceBatch)
+	onWholeClusterProcessed func(projectedBatch *cautils.ResourceBatch)
 }
 
 // NewOPAProcessor snapshots len(sessionObj.AllResources) at construction for
@@ -174,6 +180,7 @@ func NewOPAProcessor(sessionObj *cautils.OPASessionObj, regoDependenciesData *re
 		largeClusterSizeThreshold:   cautils.LargeClusterSize(),
 		wholeClusterPolicy:          cautils.WholeClusterPolicyProjected,
 		skippedWholeClusterControls: make(map[string]string),
+		cleanedResources:            make(map[string]workloadinterface.IMetadata),
 	}
 }
 
@@ -457,6 +464,25 @@ haveResident:
 				appendProjectedResources(batch.K8SResources, nil, batch.AllResources, wholeClusterMatchers, projectedBatch)
 			}
 
+			// Early cleanup: strip raw metadata and sensitive payloads from
+			// namespace resources whose rule evaluation is finished and that are not
+			// needed for deferred whole-cluster controls.
+			if projectedBatch != nil {
+				for id, res := range batch.AllResources {
+					if _, needed := projectedBatch.AllResources[id]; !needed {
+						opap.cleanProcessedResource(id, res)
+					}
+				}
+			} else if policy == cautils.WholeClusterPolicySkip || len(wholeClusterControlIDs) == 0 {
+				for id, res := range batch.AllResources {
+					opap.cleanProcessedResource(id, res)
+				}
+			}
+
+			if opap.onBatchProcessed != nil {
+				opap.onBatchProcessed(batch)
+			}
+
 		case err, ok := <-errChan:
 			if !ok {
 				errChan = nil
@@ -489,6 +515,16 @@ done:
 		if err := opap.evaluateWholeClusterControls(ctx, opap.AllPolicies, wholeClusterControlIDs, projectedBatch, progressListener); err != nil {
 			return err
 		}
+	}
+
+	// Once whole-cluster controls have completed, clean remaining projected resources.
+	if projectedBatch != nil {
+		for id, res := range projectedBatch.AllResources {
+			opap.cleanProcessedResource(id, res)
+		}
+	}
+	if opap.onWholeClusterProcessed != nil {
+		opap.onWholeClusterProcessed(projectedBatch)
 	}
 
 	// Rebuild scan coverage
@@ -814,6 +850,20 @@ func (opap *OPAProcessor) snapshotAllResources() map[string]workloadinterface.IM
 // SetWholeClusterPolicy configures the execution policy for whole-cluster controls.
 func (opap *OPAProcessor) SetWholeClusterPolicy(policy cautils.WholeClusterExecutionPolicy) {
 	opap.wholeClusterPolicy = policy
+}
+
+// SetResource stores or updates a resource in the session's catalog, invalidating
+// any prior early-cleanup record for this resource ID so replacement objects
+// are stripped of sensitive fields before report publication.
+func (opap *OPAProcessor) SetResource(resource workloadinterface.IMetadata) {
+	if resource != nil {
+		opap.cleanedResourcesMu.Lock()
+		if opap.cleanedResources != nil {
+			delete(opap.cleanedResources, resource.GetID())
+		}
+		opap.cleanedResourcesMu.Unlock()
+	}
+	opap.OPASessionObj.SetResource(resource)
 }
 
 // GetWholeClusterPolicy returns the configured WholeClusterExecutionPolicy,

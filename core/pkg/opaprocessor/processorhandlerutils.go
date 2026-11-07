@@ -39,14 +39,9 @@ func (opap *OPAProcessor) updateResults(ctx context.Context) {
 	cautils.StartSpinner()
 	defer cautils.StopSpinner()
 
-	// remove data from all objects
+	// remove data from any remaining objects (such as resident resources)
 	opap.GetCatalog().ForEach(func(i string, res workloadinterface.IMetadata) bool {
-		if refsByContainer := removeData(res); len(refsByContainer) > 0 {
-			if opap.EnvVarSecretRefs == nil {
-				opap.EnvVarSecretRefs = make(map[string]map[string]map[string]struct{})
-			}
-			opap.EnvVarSecretRefs[i] = refsByContainer
-		}
+		opap.cleanProcessedResource(i, res)
 		return true
 	})
 
@@ -735,6 +730,45 @@ func getRuleDependencies(ctx context.Context) (map[string]string, error) {
 		logger.L().Ctx(ctx).Warning("failed to load rule dependencies")
 	}
 	return modules, nil
+}
+
+// cleanProcessedResource strips sensitive and oversized fields (such as managedFields,
+// last-applied-configuration, and sensitive data/env values via removeData) from obj as soon
+// as its OPA rule evaluation is completed, bounding heap footprint during large cluster scans.
+// It is thread-safe and idempotent; each distinct resource object is cleaned at most once.
+func (opap *OPAProcessor) cleanProcessedResource(resourceID string, res workloadinterface.IMetadata) {
+	if res == nil {
+		return
+	}
+	opap.cleanedResourcesMu.Lock()
+	if opap.cleanedResources == nil {
+		opap.cleanedResources = make(map[string]workloadinterface.IMetadata)
+	}
+	if cleaned, ok := opap.cleanedResources[resourceID]; ok && cleaned == res {
+		opap.cleanedResourcesMu.Unlock()
+		return
+	}
+	opap.cleanedResources[resourceID] = res
+	opap.cleanedResourcesMu.Unlock()
+
+	if refsByContainer := removeData(res); len(refsByContainer) > 0 {
+		opap.mu.Lock()
+		if opap.EnvVarSecretRefs == nil {
+			opap.EnvVarSecretRefs = make(map[string]map[string]map[string]struct{})
+		}
+		opap.EnvVarSecretRefs[resourceID] = refsByContainer
+		opap.mu.Unlock()
+	}
+}
+
+func (opap *OPAProcessor) isResourceCleaned(resourceID string) bool {
+	opap.cleanedResourcesMu.Lock()
+	defer opap.cleanedResourcesMu.Unlock()
+	if opap.cleanedResources == nil {
+		return false
+	}
+	_, ok := opap.cleanedResources[resourceID]
+	return ok
 }
 
 // removeData strips sensitive data from obj before it reaches results
