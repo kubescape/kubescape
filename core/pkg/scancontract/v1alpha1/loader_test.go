@@ -1,6 +1,8 @@
 package v1alpha1
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -254,5 +256,52 @@ func TestLoadRejectsInvalidContractValues(t *testing.T) {
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), tt.want)
 		})
+	}
+}
+
+func TestLoadFile_Valid(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "contract.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(validContract), 0o600))
+
+	selected, err := LoadFile(path, testOptions())
+	require.NoError(t, err)
+	require.NotNil(t, selected)
+	assert.Equal(t, "payments-service", selected.Metadata.Name)
+	assert.Equal(t, "developer", selected.ContractName)
+}
+
+func TestLoadFile_EmptyFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "empty.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(""), 0o600))
+
+	_, err := LoadFile(path, testOptions())
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "contract document is empty")
+}
+
+func TestLoadFile_OversizedFileRejected(t *testing.T) {
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "oversized.yaml")
+	f, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY, 0o600)
+	require.NoError(t, err)
+	require.NoError(t, f.Truncate(maxContractBytes+1))
+	require.NoError(t, f.Close())
+
+	_, err = LoadFile(filePath, testOptions())
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrContractTooLarge)
+}
+
+func TestLoadFile_DirectoryRejected(t *testing.T) {
+	_, err := LoadFile(t.TempDir(), testOptions())
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "is a directory, not a file")
+}
+
+func TestLoadFile_NonRegularFileRejected(t *testing.T) {
+	if _, err := os.Stat("/dev/null"); err == nil {
+		_, err := LoadFile("/dev/null", testOptions())
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrContractNotRegular)
 	}
 }
