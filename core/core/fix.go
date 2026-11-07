@@ -357,4 +357,3 @@ func isAffirmative(resp string) bool {
 		return false
 	}
 }
-

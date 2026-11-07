@@ -1766,4 +1766,3 @@ func TestFix_OutputKustomizeInteractiveDeclineNo(t *testing.T) {
 	assert.Equal(t, string(origKust), string(content))
 	assert.NoFileExists(t, filepath.Join(kustDir, "base.yaml"))
 }
-
