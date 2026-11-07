@@ -8,6 +8,9 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 
 	"github.com/kubescape/kubescape/v4/core/cautils"
@@ -20,7 +23,8 @@ import (
 
 // TestSanitizeImageRefForFilename pins the cross-platform filename guarantee:
 // image references legally contain ':', '/', '@' and whitespace, all of which
-// are illegal or hazardous in filenames on at least one supported OS.
+// are illegal or hazardous in filenames on at least one supported OS. It also
+// verifies filesystem-reserved characters (*, \, ?, <, >, |, ") are replaced.
 func TestSanitizeImageRefForFilename(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -33,6 +37,8 @@ func TestSanitizeImageRefForFilename(t *testing.T) {
 		{name: "registry with port", image: "registry.example.com:8443/myapp:3.1", want: "registry.example.com-8443-myapp-3.1"},
 		{name: "digest-pinned reference", image: "myrepo/myapp@sha256:9f86d081", want: "myrepo-myapp-sha256-9f86d081"},
 		{name: "surrounding whitespace trimmed", image: "  nginx:1.22  ", want: "nginx-1.22"},
+		{name: "wildcard and backslash sanitized", image: `my*repo\app:1.0`, want: "my-repo-app-1.0"},
+		{name: "windows reserved characters sanitized", image: `app<?>|"*:v1`, want: "app-------v1"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -41,6 +47,13 @@ func TestSanitizeImageRefForFilename(t *testing.T) {
 			assert.NotContains(t, got, ":")
 			assert.NotContains(t, got, "/")
 			assert.NotContains(t, got, "@")
+			assert.NotContains(t, got, "*")
+			assert.NotContains(t, got, "\\")
+			assert.NotContains(t, got, "?")
+			assert.NotContains(t, got, "<")
+			assert.NotContains(t, got, ">")
+			assert.NotContains(t, got, "|")
+			assert.NotContains(t, got, "\"")
 		})
 	}
 }
@@ -408,23 +421,15 @@ func TestRunWithCopaLoggerMuted_RestoresActualPriorLogrusWriter(t *testing.T) {
 }
 
 // TestPatchIntermediateFileCleanup verifies that intermediate scan files
-// created for copacetic are closed and deleted via deferred cleanup on both error and success paths.
+// created for copacetic via createIntermediateScanFile are closed and deleted via
+// deferred cleanup on both error and success paths.
 func TestPatchIntermediateFileCleanup(t *testing.T) {
-	tmpDir := t.TempDir()
-	origWD, err := os.Getwd()
-	require.NoError(t, err)
-	require.NoError(t, os.Chdir(tmpDir))
-	t.Cleanup(func() { _ = os.Chdir(origWD) })
-
-	// Mirror the sanitized scheme Patch() now uses for its intermediate name.
-	fileName := fmt.Sprintf("%s.json", sanitizeImageRefForFilename("test-image:1.0"))
-
-	// Simulate the file creation and deferred cleanup pattern used in Patch()
 	cleanupFn := func(simulateFailure bool) error {
-		f, createErr := os.Create(fileName)
+		f, createErr := createIntermediateScanFile("test-image:1.0")
 		if createErr != nil {
 			return createErr
 		}
+		fileName := f.Name()
 		defer func() {
 			if remErr := os.Remove(fileName); remErr != nil && !errors.Is(remErr, os.ErrNotExist) {
 				t.Errorf("failed to remove intermediate file: %v", remErr)
@@ -444,14 +449,154 @@ func TestPatchIntermediateFileCleanup(t *testing.T) {
 	t.Run("cleanup on success", func(t *testing.T) {
 		err := cleanupFn(false)
 		assert.NoError(t, err)
-		_, statErr := os.Stat(fileName)
-		assert.True(t, os.IsNotExist(statErr), "intermediate file must be cleaned up on success")
 	})
 
 	t.Run("cleanup on error", func(t *testing.T) {
 		err := cleanupFn(true)
 		assert.Error(t, err)
-		_, statErr := os.Stat(fileName)
-		assert.True(t, os.IsNotExist(statErr), "intermediate file must be cleaned up even if downstream error occurs")
 	})
+}
+
+// TestCreateIntermediateScanFile_LocationAndPermissions verifies that intermediate scan files
+// are created in the OS temporary directory with secure 0600 permissions.
+func TestCreateIntermediateScanFile_LocationAndPermissions(t *testing.T) {
+	f, err := createIntermediateScanFile("nginx:1.22")
+	require.NoError(t, err)
+	path := f.Name()
+	defer func() { _ = os.Remove(path) }()
+	require.NoError(t, f.Close())
+
+	// Ensure the file is inside the OS temp directory
+	tempDir := os.TempDir()
+	rel, err := filepath.Rel(tempDir, path)
+	require.NoError(t, err)
+	assert.False(t, strings.HasPrefix(rel, ".."), "file %q must reside inside temp dir %q", path, tempDir)
+
+	// Ensure prefix and suffix
+	base := filepath.Base(path)
+	assert.True(t, strings.HasPrefix(base, "kubescape-patch-nginx-1.22-"), "expected prefix in %q", base)
+	assert.True(t, strings.HasSuffix(base, ".json"), "expected .json suffix in %q", base)
+
+	// Verify permissions are 0600 (owner read-write only)
+	info, err := os.Stat(path)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm(), "file permissions must be 0600")
+}
+
+// TestCreateIntermediateScanFile_LeavesUserWorkingDirectoryUntouched guards against
+// data loss: existing files in the current working directory must never be truncated,
+// overwritten, or deleted by intermediate patch file creation and cleanup.
+func TestCreateIntermediateScanFile_LeavesUserWorkingDirectoryUntouched(t *testing.T) {
+	tmpDir := t.TempDir()
+	origWD, err := os.Getwd()
+	require.NoError(t, err)
+	require.NoError(t, os.Chdir(tmpDir))
+	t.Cleanup(func() { _ = os.Chdir(origWD) })
+
+	// Pre-create user files in the working directory that would have collided under
+	// the legacy scheme (e.g. nginx-1.22.json).
+	userContent := []byte(`{"important_user_manifest": true}`)
+	legacyName := fmt.Sprintf("%s.json", sanitizeImageRefForFilename("nginx:1.22"))
+	require.NoError(t, os.WriteFile(legacyName, userContent, 0o644))
+
+	// Also create a file matching the new temp pattern prefix in cwd to be extra thorough
+	cwdPatternFile := "kubescape-patch-nginx-1.22-local.json"
+	require.NoError(t, os.WriteFile(cwdPatternFile, userContent, 0o644))
+
+	// Create and clean up the intermediate scan file
+	f, err := createIntermediateScanFile("nginx:1.22")
+	require.NoError(t, err)
+	path := f.Name()
+	_, err = f.WriteString(`{"scan": "intermediate"}`)
+	require.NoError(t, err)
+	require.NoError(t, f.Close())
+
+	// Simulate cleanup
+	require.NoError(t, os.Remove(path))
+
+	// Verify pre-existing user files in cwd are completely intact and untouched
+	gotLegacy, err := os.ReadFile(legacyName)
+	require.NoError(t, err, "pre-existing cwd file must not be deleted")
+	assert.Equal(t, userContent, gotLegacy, "pre-existing cwd file content must not be modified or truncated")
+
+	gotPattern, err := os.ReadFile(cwdPatternFile)
+	require.NoError(t, err, "cwd file matching pattern prefix must not be deleted")
+	assert.Equal(t, userContent, gotPattern, "cwd file content must not be modified or truncated")
+}
+
+// TestCreateIntermediateScanFile_WorksInReadOnlyWorkingDirectory verifies that
+// patch intermediate file creation succeeds even if the current working directory is read-only.
+func TestCreateIntermediateScanFile_WorksInReadOnlyWorkingDirectory(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("skipping read-only directory test when running as root")
+	}
+
+	tmpDir := t.TempDir()
+	roDir := filepath.Join(tmpDir, "readonly")
+	require.NoError(t, os.Mkdir(roDir, 0o755))
+
+	origWD, err := os.Getwd()
+	require.NoError(t, err)
+	require.NoError(t, os.Chdir(roDir))
+	t.Cleanup(func() {
+		_ = os.Chmod(roDir, 0o755)
+		_ = os.Chdir(origWD)
+	})
+
+	// Make the directory read-only
+	require.NoError(t, os.Chmod(roDir, 0o555))
+
+	// Confirm writing to cwd fails
+	_, err = os.Create("test.txt")
+	require.Error(t, err, "creating file in read-only directory must fail")
+
+	// Creating intermediate file must succeed because it uses os.TempDir()
+	f, err := createIntermediateScanFile("nginx:1.22")
+	require.NoError(t, err, "createIntermediateScanFile must succeed even when cwd is read-only")
+	path := f.Name()
+	defer func() { _ = os.Remove(path) }()
+	require.NoError(t, f.Close())
+}
+
+// TestCreateIntermediateScanFile_ConcurrentInvocations verifies that parallel
+// invocations create unique files without race conditions or collisions.
+func TestCreateIntermediateScanFile_ConcurrentInvocations(t *testing.T) {
+	const count = 20
+	var wg sync.WaitGroup
+	files := make([]string, count)
+	errs := make([]error, count)
+
+	for i := 0; i < count; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			f, err := createIntermediateScanFile("nginx:1.22")
+			if err != nil {
+				errs[idx] = err
+				return
+			}
+			files[idx] = f.Name()
+			_, _ = f.WriteString(fmt.Sprintf(`{"worker": %d}`, idx))
+			_ = f.Close()
+		}(i)
+	}
+	wg.Wait()
+
+	seen := make(map[string]bool)
+	for i := 0; i < count; i++ {
+		require.NoError(t, errs[i], "worker %d failed to create intermediate file", i)
+		assert.False(t, seen[files[i]], "duplicate file created across concurrent workers: %q", files[i])
+		seen[files[i]] = true
+		_ = os.Remove(files[i])
+	}
+}
+
+// TestCreateIntermediateScanFile_LongImageRef verifies that long image references
+// do not exceed filesystem filename limits.
+func TestCreateIntermediateScanFile_LongImageRef(t *testing.T) {
+	longImage := "registry.example.com:5000/very/deep/repository/path/with/lots/of/subnamespaces/and/components/my-service:" + strings.Repeat("a", 150)
+	f, err := createIntermediateScanFile(longImage)
+	require.NoError(t, err)
+	defer func() { _ = os.Remove(f.Name()) }()
+	require.NoError(t, f.Close())
 }
