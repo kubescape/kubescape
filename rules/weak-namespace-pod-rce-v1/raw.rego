@@ -76,11 +76,13 @@ deny contains msga if {
 
 # get without create only opens exec where the
 # AuthorizePodWebsocketUpgradeCreatePermission gate is off, so the alert says so.
+# RBAC grants add up and another rule can supply the create, which raises its
+# own alert, so this text describes the grant and not the subject's whole access.
 exec_alert_suffix(rule) := "" if {
 	allows_exec_create(rule)
 }
 
-exec_alert_suffix(rule) := ", unless the AuthorizePodWebsocketUpgradeCreatePermission feature gate is on" if {
+exec_alert_suffix(rule) := " through get on pods/exec, which also needs create when the AuthorizePodWebsocketUpgradeCreatePermission feature gate is on" if {
 	not allows_exec_create(rule)
 }
 

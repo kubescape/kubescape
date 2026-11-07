@@ -1,6 +1,6 @@
 [
     {
-        "alertMessage": "Subject: User-dave can exec into pods in unprivileged namespace dev, unless the AuthorizePodWebsocketUpgradeCreatePermission feature gate is on",
+        "alertMessage": "Subject: User-dave can exec into pods in unprivileged namespace dev through get on pods/exec, which also needs create when the AuthorizePodWebsocketUpgradeCreatePermission feature gate is on",
         "failedPaths": [
             "relatedObjects[0].roleRef.name",
             "relatedObjects[0].subjects[0]",
