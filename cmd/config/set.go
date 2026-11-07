@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"net/url"
 	"sort"
@@ -23,6 +24,9 @@ func getSetCmd(ks meta.IKubescape) *cobra.Command {
 		ValidArgs: stringKeysToSlice(supportConfigSet),
 		Args:      cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if ks == nil {
+				return errors.New("uninitialized kubescape interface")
+			}
 			setConfig, err := parseSetArgs(args)
 			if err != nil {
 				return err

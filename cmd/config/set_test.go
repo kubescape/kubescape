@@ -267,3 +267,13 @@ func TestGetSetCmd_ArgsValidation(t *testing.T) {
 		})
 	}
 }
+
+func TestGetSetCmd_NilKubescape(t *testing.T) {
+	cmd := getSetCmd(nil)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+	cmd.SetArgs([]string{"accountID=6f2c3e1a-9b4d-4c8e-a1f2-3b4c5d6e7f80"})
+
+	err := cmd.Execute()
+	assert.EqualError(t, err, "uninitialized kubescape interface")
+}
