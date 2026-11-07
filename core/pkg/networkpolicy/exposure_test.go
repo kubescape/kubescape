@@ -206,3 +206,30 @@ func TestExposureLevel_String(t *testing.T) {
 		}
 	}
 }
+
+func TestIngressExposure_FullyExcludedIPBlockIsRestricted(t *testing.T) {
+	tests := []struct {
+		name   string
+		block  *networkingv1.IPBlock
+		expect ExposureLevel
+	}{
+		{"two halves cover v4", &networkingv1.IPBlock{CIDR: "10.0.0.0/24", Except: []string{"10.0.0.0/25", "10.0.0.128/25"}}, ExposureRestricted},
+		{"four quarters cover v4", &networkingv1.IPBlock{CIDR: "10.0.0.0/24", Except: []string{"10.0.0.0/26", "10.0.0.64/26", "10.0.0.128/26", "10.0.0.192/26"}}, ExposureRestricted},
+		{"two halves cover v6", &networkingv1.IPBlock{CIDR: "fd00::/64", Except: []string{"fd00::/65", "fd00:0:0:0:8000::/65"}}, ExposureRestricted},
+		{"partial exclusion", &networkingv1.IPBlock{CIDR: "10.0.0.0/24", Except: []string{"10.0.0.0/25"}}, ExposureExternalCIDR},
+		{"gap left", &networkingv1.IPBlock{CIDR: "10.0.0.0/24", Except: []string{"10.0.0.0/26", "10.0.0.128/25"}}, ExposureExternalCIDR},
+		{"invalid except ignored", &networkingv1.IPBlock{CIDR: "10.0.0.0/24", Except: []string{"10.0.0.0/25", "bogus"}}, ExposureExternalCIDR},
+		{"no except", &networkingv1.IPBlock{CIDR: "10.0.0.0/24"}, ExposureExternalCIDR},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			p := policy("prod", "p", metav1.LabelSelector{}, []networkingv1.PolicyType{networkingv1.PolicyTypeIngress},
+				[]networkingv1.NetworkPolicyIngressRule{ingressRule(networkingv1.NetworkPolicyPeer{IPBlock: tc.block})}, nil)
+			idx, _ := NewIndex([]*networkingv1.NetworkPolicy{p}, nil)
+			got := idx.IngressExposure(Endpoint{Namespace: "prod"})
+			if got.Level != tc.expect {
+				t.Fatalf("level = %s, want %s (%s)", got.Level, tc.expect, got.Reason)
+			}
+		})
+	}
+}

@@ -2,6 +2,7 @@ package networkpolicy
 
 import (
 	"fmt"
+	"net/netip"
 
 	networkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -156,6 +157,9 @@ func classifyPeers(peers []networkingv1.NetworkPolicyPeer) (ExposureLevel, strin
 // namespaceSelector only ever reaches pods in the policy's own namespace.
 func classifyPeer(peer networkingv1.NetworkPolicyPeer) (ExposureLevel, string) {
 	if peer.IPBlock != nil {
+		if ipBlockFullyExcluded(peer.IPBlock) {
+			return ExposureRestricted, fmt.Sprintf("ipBlock %s admits no addresses: its except entries cover the whole CIDR", peer.IPBlock.CIDR)
+		}
 		return ExposureExternalCIDR, fmt.Sprintf("ipBlock %s admits peers by IP, not pod/namespace identity", peer.IPBlock.CIDR)
 	}
 	if peer.NamespaceSelector != nil {
@@ -166,4 +170,53 @@ func classifyPeer(peer networkingv1.NetworkPolicyPeer) (ExposureLevel, string) {
 		return ExposureRestricted, "namespaceSelector scopes peers to specific namespaces"
 	}
 	return ExposureRestricted, "podSelector only ever matches pods in this endpoint's own namespace"
+}
+
+// ipBlockFullyExcluded reports whether block.Except collectively covers all of
+// block.CIDR, so the block admits no address. Unparseable entries are ignored,
+// as ipBlockMatches does, so a malformed block is never treated as excluded.
+func ipBlockFullyExcluded(block *networkingv1.IPBlock) bool {
+	cidr, err := netip.ParsePrefix(block.CIDR)
+	if err != nil {
+		return false
+	}
+	var excepts []netip.Prefix
+	for _, e := range block.Except {
+		p, err := netip.ParsePrefix(e)
+		if err != nil || p.Addr().Is4() != cidr.Addr().Is4() {
+			continue
+		}
+		excepts = append(excepts, p.Masked())
+	}
+	return prefixCovered(cidr.Masked(), excepts)
+}
+
+// prefixCovered reports whether the union of excepts contains every address of p.
+func prefixCovered(p netip.Prefix, excepts []netip.Prefix) bool {
+	var inside []netip.Prefix
+	for _, e := range excepts {
+		if e.Bits() <= p.Bits() && e.Contains(p.Addr()) {
+			return true
+		}
+		if e.Bits() > p.Bits() && p.Contains(e.Addr()) {
+			inside = append(inside, e)
+		}
+	}
+	if len(inside) == 0 || p.Bits() >= p.Addr().BitLen() {
+		return false
+	}
+	// Split p into its two halves; both must be fully covered.
+	bits := p.Bits() + 1
+	lo := netip.PrefixFrom(p.Addr(), bits)
+	hi := p.Addr().As16()
+	idx := bits - 1
+	if p.Addr().Is4() {
+		idx += 96
+	}
+	hi[idx/8] |= 0x80 >> (idx % 8)
+	hiAddr := netip.AddrFrom16(hi)
+	if p.Addr().Is4() {
+		hiAddr = hiAddr.Unmap()
+	}
+	return prefixCovered(lo, inside) && prefixCovered(netip.PrefixFrom(hiAddr, bits), inside)
 }
