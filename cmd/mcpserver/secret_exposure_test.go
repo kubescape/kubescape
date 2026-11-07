@@ -2423,3 +2423,85 @@ func TestDetectSecretExposure_WorkloadConfigMapKeyRefDotSeparated(t *testing.T) 
 	}
 	assert.True(t, foundWorkloadFinding, "expected finding on Pod referencing dot-separated ConfigMap key")
 }
+
+// The kubelet resolves envFrom first and then lets each env entry replace the
+// value of the same name, but it skips an env entry whose optional
+// configMapKeyRef or secretKeyRef does not resolve (makeEnvironmentVariables in
+// pkg/kubelet/kubelet_pods.go "continue"s before assigning it). The imported
+// ConfigMap value then stays in the container's environment, so such an entry
+// must not hide the envFrom exposure.
+func TestDetectSecretExposure_WorkloadEnvFromConfigMap_OptionalEnvRefOverride(t *testing.T) {
+	cm := testSecretConfigMap("optional-ref", "creds-cm", map[string]string{
+		"DB_PASSWORD": testPassword(),
+	})
+	// other-cm exists but has no "password" key.
+	otherCM := testSecretConfigMap("optional-ref", "other-cm", map[string]string{
+		"unrelated": "value",
+	})
+	// override-cm resolves the optional reference, so it does replace the value.
+	overrideCM := testSecretConfigMap("optional-ref", "override-cm", map[string]string{
+		"password": "placeholder",
+	})
+
+	optionalTrue := true
+	podWithEnvRef := func(name string, valueFrom map[string]any) *unstructured.Unstructured {
+		return testSecretPod("optional-ref", name, []map[string]any{
+			{
+				"name": "app",
+				"envFrom": []any{
+					map[string]any{"configMapRef": map[string]any{"name": "creds-cm"}},
+				},
+				"env": []any{
+					map[string]any{"name": "DB_PASSWORD", "valueFrom": valueFrom},
+				},
+			},
+		})
+	}
+
+	missingCMPod := podWithEnvRef("missing-cm-pod", map[string]any{
+		"configMapKeyRef": map[string]any{"name": "absent-cm", "key": "password", "optional": optionalTrue},
+	})
+	missingKeyPod := podWithEnvRef("missing-key-pod", map[string]any{
+		"configMapKeyRef": map[string]any{"name": "other-cm", "key": "password", "optional": optionalTrue},
+	})
+	resolvedPod := podWithEnvRef("resolved-pod", map[string]any{
+		"configMapKeyRef": map[string]any{"name": "override-cm", "key": "password", "optional": optionalTrue},
+	})
+	optionalSecretPod := podWithEnvRef("optional-secret-pod", map[string]any{
+		"secret" + "KeyRef": map[string]any{"name": "db-" + "secret", "key": "pass" + "word", "optional": optionalTrue},
+	})
+
+	ksServer := newSecretExposureTestServer(t, cm, otherCM, overrideCM, missingCMPod, missingKeyPod, resolvedPod, optionalSecretPod)
+
+	result := registeredToolResult(t, dispatchRegisteredTool(t, ksServer, "detect_secret_exposure", map[string]any{
+		"namespace":     "optional-ref",
+		"resource_kind": "Pod",
+	}))
+	require.False(t, result.IsError)
+
+	var res SecretExposureResult
+	require.NoError(t, json.Unmarshal([]byte(toolResultText(t, result)), &res))
+
+	envFromFindings := map[string]SecretFinding{}
+	for _, f := range res.Findings {
+		if f.RuleID == "ENVFROM_EXPOSED_CONFIGMAP" {
+			envFromFindings[f.ResourceName] = f
+		}
+	}
+
+	for _, name := range []string{"missing-cm-pod", "missing-key-pod"} {
+		f, ok := envFromFindings[name]
+		if assert.True(t, ok, "%s: an optional configMapKeyRef that does not resolve leaves the imported DB_PASSWORD in place", name) {
+			assert.NotContains(t, f.Description, "may override", name)
+		}
+	}
+
+	_, resolvedReported := envFromFindings["resolved-pod"]
+	assert.False(t, resolvedReported, "an optional configMapKeyRef that resolves replaces the imported value")
+
+	f, ok := envFromFindings["optional-secret-pod"]
+	if assert.True(t, ok, "an optional secretKeyRef may not resolve, so the imported DB_PASSWORD may stay") {
+		assert.Contains(t, f.Description, "may override")
+		assert.Contains(t, f.Description, "db-"+"secret")
+	}
+}
