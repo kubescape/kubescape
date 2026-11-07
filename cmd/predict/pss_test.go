@@ -3,6 +3,7 @@ package predict
 import (
 	"bytes"
 	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -29,6 +30,58 @@ func TestGetPredictCmd(t *testing.T) {
 	assert.NotNil(t, pssSubCmd.Flags().Lookup("format"))
 	assert.NotNil(t, pssSubCmd.Flags().Lookup("output"))
 	assert.NotNil(t, pssSubCmd.Flags().Lookup("verbose"))
+}
+
+func TestGetPredictCmd_RejectsUnexpectedArgs(t *testing.T) {
+	cmd := GetPredictCmd()
+	cmd.SilenceErrors = true
+	cmd.SilenceUsage = true
+
+	// No arguments should pass Args validation
+	require.NoError(t, cmd.Args(cmd, []string{}))
+
+	// Extraneous arguments should be rejected by Args validation
+	err := cmd.Args(cmd, []string{"unexpected"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `unknown command "unexpected" for "predict"`)
+
+	// Execution with no arguments should display help without error
+	var helpBuf bytes.Buffer
+	cmdNoArgs := GetPredictCmd()
+	cmdNoArgs.SetArgs([]string{})
+	cmdNoArgs.SetOut(&helpBuf)
+	require.NoError(t, cmdNoArgs.Execute())
+	assert.Contains(t, helpBuf.String(), "Predict which workloads would fail or break under security policy")
+
+	// Execution with unexpected arguments should fail
+	cmdUnexpected := GetPredictCmd()
+	cmdUnexpected.SilenceErrors = true
+	cmdUnexpected.SilenceUsage = true
+	cmdUnexpected.SetArgs([]string{"unexpected"})
+	cmdUnexpected.SetOut(io.Discard)
+	cmdUnexpected.SetErr(io.Discard)
+	err = cmdUnexpected.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `unknown command "unexpected" for "predict"`)
+
+	// Execution with multiple unexpected arguments should fail on the first unknown command
+	cmdMultiple := GetPredictCmd()
+	cmdMultiple.SilenceErrors = true
+	cmdMultiple.SilenceUsage = true
+	cmdMultiple.SetArgs([]string{"foo", "bar"})
+	cmdMultiple.SetOut(io.Discard)
+	cmdMultiple.SetErr(io.Discard)
+	err = cmdMultiple.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `unknown command "foo" for "predict"`)
+
+	// Valid subcommands like "pss --help" should continue to route normally
+	var pssHelpBuf bytes.Buffer
+	cmdPSS := GetPredictCmd()
+	cmdPSS.SetArgs([]string{"pss", "--help"})
+	cmdPSS.SetOut(&pssHelpBuf)
+	require.NoError(t, cmdPSS.Execute())
+	assert.Contains(t, pssHelpBuf.String(), "predict pss [<path>.../`-`] [flags]")
 }
 
 func TestRunPSS_FlagValidation(t *testing.T) {
