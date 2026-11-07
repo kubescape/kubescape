@@ -3,6 +3,8 @@ package exposure
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
+	"slices"
 
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	corev1 "k8s.io/api/core/v1"
@@ -19,8 +21,16 @@ import (
 // or Namespace object that fails to decode is skipped, with its error
 // appended to errs, rather than aborting the whole conversion over one bad
 // object.
+//
+// Resources are visited in resource-ID order rather than map order, as in
+// rbacgraph.FromResources: the order of the returned slices is the order of
+// the paths ServiceExposure reports, and map iteration order is randomized,
+// so the same snapshot would otherwise be reported in a different order on
+// different runs. FromUnstructuredGatewayAPI and
+// FromUnstructuredReferenceGrants do the same.
 func FromResources(resources map[string]workloadinterface.IMetadata) (services []corev1.Service, ingresses []networkingv1.Ingress, namespaces []NamespaceInfo, errs []error) {
-	for _, resource := range resources {
+	for _, id := range slices.Sorted(maps.Keys(resources)) {
+		resource := resources[id]
 		if resource == nil {
 			continue
 		}
@@ -58,7 +68,8 @@ func FromResources(resources map[string]workloadinterface.IMetadata) (services [
 // object of any of these kinds is skipped, with its error appended to
 // errs, same as FromResources.
 func FromUnstructuredGatewayAPI(resources map[string]workloadinterface.IMetadata) (routes []gatewayRoute, gateways []gateway, errs []error) {
-	for _, resource := range resources {
+	for _, id := range slices.Sorted(maps.Keys(resources)) {
+		resource := resources[id]
 		if resource == nil {
 			continue
 		}
@@ -95,7 +106,8 @@ func FromUnstructuredGatewayAPI(resources map[string]workloadinterface.IMetadata
 // have authorized a reference, so a caller that sees any error here must treat
 // authorization as undetermined rather than as denied.
 func FromUnstructuredReferenceGrants(resources map[string]workloadinterface.IMetadata) (grants []referenceGrant, errs []error) {
-	for _, resource := range resources {
+	for _, id := range slices.Sorted(maps.Keys(resources)) {
+		resource := resources[id]
 		if resource == nil || resource.GetKind() != "ReferenceGrant" {
 			continue
 		}
