@@ -179,11 +179,15 @@ For a field that the rule says must be added, the line points at the enclosing b
 
 ### Values
 
-Review paths are printed with the field's current value, as `path (current: value)`. Fix paths are printed as `path=value` with the value the rule wants. JSON output carries the same paths in each rule's results, and also an `evidence` array of `path`/`value` pairs for the delete and review paths of each failed control:
+Review paths are printed with the field's current value, as `path (current: value)`. Fix paths are printed as `path=value` with the value the rule wants.
+
+The default JSON format carries the same paths in each rule's results, and also an `evidence` array of `path`/`value` pairs for the delete and review paths of each failed control:
 
 ```json
 "evidence": [{"path": "spec.hostNetwork", "value": "true"}]
 ```
+
+The array is left out of a control when none of its values resolve, and `--show-evidence` is not needed for it to appear. It does not exist in the older v1 format (`--format-version v1`). There, each rule response in `controlReports[].ruleReports[].ruleResponses[]` lists its paths as `reviewPaths`, `deletePaths` and `fixPaths` arrays, without values, and `failedPaths` comes back empty.
 
 The SARIF, HTML, CSV, GitLab SAST and GitHub Actions outputs read the same path kinds.
 
@@ -199,7 +203,7 @@ The SARIF, HTML, CSV, GitLab SAST and GitHub Actions outputs read the same path 
 
 ### Redaction and scrubbing
 
-Evidence is meant to be shared, so values are redacted by default. `--show-secrets` shows them instead, and only has an effect together with `--show-evidence`.
+Evidence is meant to be shared, so values are redacted by default. `--show-evidence` applies to the terminal output, and `--show-secrets` shows redacted values there; it only has an effect together with `--show-evidence`. Neither flag changes the JSON `evidence` array, which is described below.
 
 A value is redacted when:
 
@@ -209,7 +213,7 @@ A value is redacted when:
 
 A few Kubernetes fields whose names contain one of these words but hold no credential, such as `automountServiceAccountToken`, are exempt at their documented location.
 
-A redacted value is printed as `[redacted]`. The JSON `evidence` array leaves such entries out. For C-0012 in the first example it lists only the variable's name:
+A redacted value is printed as `[redacted]`. The JSON `evidence` array leaves such entries out, whatever flags are set. For C-0012 in the first example it lists only the variable's name:
 
 ```json
 "evidence": [{"path": "spec.containers[0].env[1].name", "value": "DB_PASSWORD"}]
@@ -256,7 +260,7 @@ kubescape scan control C-0041 pod.yaml --custom-rules ./my-rules --show-evidence
 
 `./my-rules` can hold a bare `.rego` file, or a rule directory with `raw.rego` and `rule.metadata.json`. For each path in the output, check that:
 
-- the line is the field's own line, and not the start of an enclosing block;
+- a path to a field that exists points at that field's own line, not at an enclosing block (a fix path to a field that has to be added is the exception: it points at the enclosing block by design, see [absent fields](#absent-fields));
 - a review path shows `(current: ...)`;
 - a fix path shows the value the policy requires;
 - no `XXXXXX` stands in for something the user needs to read.
