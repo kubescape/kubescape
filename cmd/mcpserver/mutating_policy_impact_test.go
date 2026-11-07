@@ -684,6 +684,27 @@ func TestAnalyzeMutatingAdmissionPolicyImpact_InvalidArgumentTypes(t *testing.T)
 	}
 }
 
+// TestAnalyzeMutatingAdmissionPolicyImpact_ResourceWithSubresourceIsRejected
+// keeps a subresource out of resource, where the API read and the rule
+// matching would disagree about what the request targets.
+func TestAnalyzeMutatingAdmissionPolicyImpact_ResourceWithSubresourceIsRejected(t *testing.T) {
+	for _, args := range []map[string]any{
+		{"namespace": "prod", "name": "server", "api_version": "v1", "resource": "pods/status"},
+		{"name": "status", "api_group": "admissionregistration.k8s.io", "api_version": "v1", "resource": "validatingadmissionpolicies/status", "cluster_scoped": true},
+	} {
+		t.Run(args["resource"].(string), func(t *testing.T) {
+			ksServer := newMutatingPolicyTestServer(t)
+			result := registeredToolResult(t, dispatchRegisteredTool(t, ksServer, "analyze_mutating_admission_policy_impact", args))
+			require.True(t, result.IsError)
+			var toolErr ToolError
+			require.NoError(t, json.Unmarshal([]byte(toolResultText(t, result)), &toolErr))
+			require.Equal(t, ErrCodeInvalidArgument, toolErr.Code)
+			require.Equal(t, "resource", toolErr.Details["argument"])
+			require.Empty(t, ksServer.k8sClient.DynamicClient.(*dynamicfake.FakeDynamicClient).Actions())
+		})
+	}
+}
+
 // TestAnalyzeMutatingAdmissionPolicyImpact_EmptyRequiredArguments rejects
 // whitespace-only resource identifiers rather than issuing a Kubernetes request.
 func TestAnalyzeMutatingAdmissionPolicyImpact_EmptyRequiredArguments(t *testing.T) {
