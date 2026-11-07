@@ -243,6 +243,38 @@ func TestListPoliciesCommandWritesToStdoutByDefault(t *testing.T) {
 	assert.Contains(t, stdout.String(), "C-0016")
 }
 
+func TestListPoliciesCommand_OutputFlagValidation(t *testing.T) {
+	t.Run("empty output flag is rejected upfront", func(t *testing.T) {
+		cmd := getListPoliciesCmd()
+		cmd.SilenceUsage = true
+		cmd.SilenceErrors = true
+		cmd.SetArgs([]string{"--output", ""})
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "output file path cannot be empty")
+	})
+
+	t.Run("whitespace-only output flag is rejected upfront", func(t *testing.T) {
+		cmd := getListPoliciesCmd()
+		cmd.SilenceUsage = true
+		cmd.SilenceErrors = true
+		cmd.SetArgs([]string{"-o", "   "})
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "output file path cannot be empty")
+	})
+
+	t.Run("directory output flag is rejected upfront", func(t *testing.T) {
+		cmd := getListPoliciesCmd()
+		cmd.SilenceUsage = true
+		cmd.SilenceErrors = true
+		cmd.SetArgs([]string{"--output", t.TempDir()})
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "is a directory, not a file")
+	})
+}
+
 // TestCsvSafeCell_VAP verifies that cells starting with spreadsheet formula
 // prefix characters (=, +, -, @, \t, \r, \n) are prepended with a single quote.
 func TestCsvSafeCell_VAP(t *testing.T) {

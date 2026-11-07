@@ -88,11 +88,15 @@ func getDeployLibraryCmd() *cobra.Command {
 			if timeout < 0 {
 				return fmt.Errorf("timeout cannot be negative: %v", timeout)
 			}
+			outPath, err := validateOutputFile(outputFile, cmd.Flags().Changed("output"))
+			if err != nil {
+				return err
+			}
 			content, err := deployLibrary(fromRelease, timeout)
 			if err != nil {
 				return err
 			}
-			return writeOutput(content, outputFile, cmd.OutOrStdout())
+			return writeOutput(content, outPath, cmd.OutOrStdout())
 		},
 	}
 	cmd.Flags().StringVarP(&outputFile, "output", "o", "", "Write output to file instead of stdout")
@@ -119,6 +123,10 @@ func getCreatePolicyBindingCmd() *cobra.Command {
 		Long:  ``,
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			outPath, err := validateOutputFile(outputFile, cmd.Flags().Changed("output"))
+			if err != nil {
+				return err
+			}
 			result, err := BuildPolicyBinding(BindingOptions{
 				Name:               policyBindingName,
 				PolicyName:         policyName,
@@ -134,7 +142,7 @@ func getCreatePolicyBindingCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return writeOutput(result.Manifest, outputFile, cmd.OutOrStdout())
+			return writeOutput(result.Manifest, outPath, cmd.OutOrStdout())
 		},
 	}
 	// Must specify the name of the policy binding
@@ -416,8 +424,28 @@ func downloadFileToString(url string, timeout time.Duration) (string, error) {
 	return bodyString, nil
 }
 
+func validateOutputFile(outputFile string, flagChanged bool) (string, error) {
+	if !flagChanged {
+		return "", nil
+	}
+	trimmed := strings.TrimSpace(outputFile)
+	if trimmed == "" {
+		return "", errors.New("output file path cannot be empty")
+	}
+	fi, err := os.Stat(trimmed)
+	if err == nil && fi.IsDir() {
+		return "", fmt.Errorf("output path %q is a directory, not a file", trimmed)
+	}
+	return trimmed, nil
+}
+
 func writeOutput(content string, outputFile string, out ...io.Writer) (retErr error) {
+	outputFile = strings.TrimSpace(outputFile)
 	if outputFile != "" {
+		fi, err := os.Stat(outputFile)
+		if err == nil && fi.IsDir() {
+			return fmt.Errorf("output path %q is a directory, not a file", outputFile)
+		}
 		w, err := printer.GetWriterNoFallback(outputFile)
 		if err != nil {
 			return err
