@@ -191,7 +191,7 @@ The array is left out of a control when none of its values resolve, and `--show-
 
 The SARIF, HTML, CSV, GitLab SAST and GitHub Actions outputs read the same path kinds.
 
-**Fix values are not redacted in JSON.** The rule results of both JSON formats carry each fix-path value exactly as the rule wrote it: `results[].controls[].rules[].paths[].fixPath.value` in v2 and `fixPaths[].value` in v1. The `evidence` array is the filtered part. These fields are not, and `--show-secrets` plays no part in them. A fix value that contains a credential would therefore appear in a JSON report, so a rule must never put one there. JSON reports also include the scanned resources unless `--omit-raw-resources` is set, so a credential in a field that the scrub below does not overwrite appears there too. Check a report before sharing it.
+**Fix values are not redacted in JSON.** The rule results of both JSON formats carry each fix-path value exactly as the rule wrote it: `results[].controls[].rules[].paths[].fixPath.value` in v2 and `fixPaths[].value` in v1. The `evidence` array is the filtered part. These fields are not, and `--show-secrets` plays no part in them. A fix value that contains a credential would therefore appear in a JSON report, so a rule must never put one there. JSON reports also include the scanned resources, so a credential in a field that the scrub below does not overwrite appears there too. In v2, `--omit-raw-resources` removes them. In v1 it does not remove everything: each failed resource is still copied into its rule response's `alertObject.k8sApiObjects`, without its `spec` but with its `metadata`, so an annotation that holds a credential still appears. Check a report before sharing it, and in v1 inspect the alert objects as well.
 
 ### File and line
 
@@ -238,7 +238,7 @@ This has a consequence for rules. C-0012 emits two paths for a hardcoded variabl
 Two flags interact with evidence, and Kubescape prints a warning for each:
 
 - `--hide` and `--encrypt` remove line numbers, as above.
-- `--omit-raw-resources` keeps the scanned resources out of the report, but evidence reads those same resources, so field values still reach the terminal.
+- `--omit-raw-resources` keeps the scanned resources out of the report, but evidence reads those same resources, so field values still reach the terminal. In v1 JSON it does not keep every resource out, as described under [Values](#values).
 
 ---
 
