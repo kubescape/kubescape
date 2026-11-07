@@ -194,6 +194,9 @@ func buildUnboundedSummaries(findings []rbacgraph.UnboundedFinding) []map[string
 			"scope":         scope,
 			"scope_unknown": f.Edge.ScopeUnknown,
 		}
+		if f.Edge.PermissionsUnconfirmed {
+			summary["permissions_unconfirmed"] = true
+		}
 		if f.Edge.ImpersonatedKind != "" {
 			summary["impersonated_kind"] = string(f.Edge.ImpersonatedKind)
 		}
