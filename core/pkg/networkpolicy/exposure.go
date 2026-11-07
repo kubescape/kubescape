@@ -141,10 +141,14 @@ func classifyPeers(peers []networkingv1.NetworkPolicyPeer) (ExposureLevel, strin
 
 	best := ExposureRestricted
 	reason := "matches only specific, scoped peers"
-	for _, peer := range peers {
+	for i, peer := range peers {
 		level, r := classifyPeer(peer)
 		if level > best {
 			best, reason = level, r
+		} else if i == 0 && len(peers) == 1 {
+			// A lone peer's own explanation (e.g. a fully excluded
+			// ipBlock) is more specific than the generic default.
+			reason = r
 		}
 	}
 	return best, reason

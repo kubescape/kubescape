@@ -1,6 +1,7 @@
 package networkpolicy
 
 import (
+	"strings"
 	"testing"
 
 	networkingv1 "k8s.io/api/networking/v1"
@@ -231,5 +232,28 @@ func TestIngressExposure_FullyExcludedIPBlockIsRestricted(t *testing.T) {
 				t.Fatalf("level = %s, want %s (%s)", got.Level, tc.expect, got.Reason)
 			}
 		})
+	}
+}
+
+func TestIngressExposure_FullyExcludedIPBlockReasonIsSurfaced(t *testing.T) {
+	excluded := &networkingv1.IPBlock{CIDR: "10.0.0.0/24", Except: []string{"10.0.0.0/25", "10.0.0.128/25"}}
+	p := policy("prod", "p", metav1.LabelSelector{}, []networkingv1.PolicyType{networkingv1.PolicyTypeIngress},
+		[]networkingv1.NetworkPolicyIngressRule{ingressRule(networkingv1.NetworkPolicyPeer{IPBlock: excluded})}, nil)
+	idx, _ := NewIndex([]*networkingv1.NetworkPolicy{p}, nil)
+	got := idx.IngressExposure(Endpoint{Namespace: "prod"})
+	if got.Level != ExposureRestricted || !strings.Contains(got.Reason, "admits no addresses") {
+		t.Fatalf("got %s %q, want restricted with the ipBlock exclusion reason", got.Level, got.Reason)
+	}
+}
+
+func TestIngressExposure_FullyExcludedIPBlockDoesNotMaskActiveCIDR(t *testing.T) {
+	excluded := &networkingv1.IPBlock{CIDR: "10.0.0.0/24", Except: []string{"10.0.0.0/25", "10.0.0.128/25"}}
+	active := &networkingv1.IPBlock{CIDR: "192.168.0.0/16"}
+	p := policy("prod", "p", metav1.LabelSelector{}, []networkingv1.PolicyType{networkingv1.PolicyTypeIngress},
+		[]networkingv1.NetworkPolicyIngressRule{ingressRule(networkingv1.NetworkPolicyPeer{IPBlock: excluded}, networkingv1.NetworkPolicyPeer{IPBlock: active})}, nil)
+	idx, _ := NewIndex([]*networkingv1.NetworkPolicy{p}, nil)
+	got := idx.IngressExposure(Endpoint{Namespace: "prod"})
+	if got.Level != ExposureExternalCIDR {
+		t.Fatalf("level = %s, want %s", got.Level, ExposureExternalCIDR)
 	}
 }
