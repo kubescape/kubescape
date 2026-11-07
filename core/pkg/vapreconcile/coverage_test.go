@@ -166,7 +166,12 @@ func TestBuildCoverage_ClusterScopedResourceIsNeverExemptedByNamespaceSelector(t
 		makeVAPBScoped("binding-a", "policy-a", matchLabels("env", "prod"), nil),
 	}
 	failing := map[string][]ResourceInfo{
-		"C-0001": {{ResourceID: "res-1", APIVersion: "rbac.authorization.k8s.io/v1", Kind: "ClusterRole"}},
+		"C-0001": {
+			{ResourceID: "res-1", APIVersion: "rbac.authorization.k8s.io/v1", Kind: "ClusterRole"},
+			{ResourceID: "res-2", APIVersion: "networking.k8s.io/v1beta1", Kind: "ServiceCIDR"},
+			{ResourceID: "res-3", APIVersion: "networking.k8s.io/v1beta1", Kind: "IPAddress"},
+			{ResourceID: "res-4", APIVersion: "cert-manager.io/v1", Kind: "ClusterIssuer"},
+		},
 	}
 
 	coverage := BuildCoverage(policies, bindings, failing, nil)
@@ -174,6 +179,11 @@ func TestBuildCoverage_ClusterScopedResourceIsNeverExemptedByNamespaceSelector(t
 	c := coverage["C-0001"]
 	require.NotNil(t, c)
 	assert.True(t, c.FullyCovered(), "the apiserver enforces the binding on a cluster-scoped resource whatever the namespaceSelector says")
+	require.Len(t, c.Resources, 4)
+	for _, res := range c.Resources {
+		assert.True(t, res.Covered)
+		assert.Empty(t, res.Reason)
+	}
 }
 
 func TestBuildCoverage_ClusterScopedResourceStillHonorsObjectSelector(t *testing.T) {
@@ -645,4 +655,60 @@ func TestCollectFailingResourcesByControl_FrameworkScopedException(t *testing.T)
 	byControlNil := CollectFailingResourcesByControl(nil, resourcesResult, allResources)
 	assert.Contains(t, byControlNil, controlID)
 	assert.Contains(t, byControlNil, otherControlID)
+}
+
+func TestBuildCoverage_NamespacedResourceWithoutNamespaceNotCoveredByNamespaceSelector(t *testing.T) {
+	policies := []unstructured.Unstructured{makeVAP("policy-a", "C-0001")}
+	bindings := []unstructured.Unstructured{
+		makeVAPBScoped("binding-a", "policy-a", matchLabels("env", "prod"), nil),
+	}
+	failing := map[string][]ResourceInfo{
+		"C-0001": {
+			{ResourceID: "deploy-1", APIVersion: "apps/v1", Kind: "Deployment", Name: "my-deploy", Namespace: ""},
+			{ResourceID: "pod-1", APIVersion: "v1", Kind: "Pod", Name: "my-pod", Namespace: ""},
+			{ResourceID: "service-1", APIVersion: "v1", Kind: "Service", Name: "my-svc", Namespace: ""},
+			{ResourceID: "custom-1", APIVersion: "example.com/v1", Kind: "Widget", Name: "my-widget", Namespace: ""},
+		},
+	}
+	nsLabels := map[string]map[string]string{
+		"prod": {"env": "prod"},
+	}
+
+	coverage := BuildCoverage(policies, bindings, failing, nsLabels)
+
+	c := coverage["C-0001"]
+	require.NotNil(t, c)
+	assert.True(t, c.Bound)
+	assert.False(t, c.FullyCovered())
+	assert.False(t, c.PartiallyCovered())
+	require.Len(t, c.Resources, 4)
+
+	for i := 0; i < 3; i++ {
+		assert.False(t, c.Resources[i].Covered)
+		assert.Equal(t, "namespaceSelector is set but namespaced resource has no namespace specified", c.Resources[i].Reason)
+	}
+	assert.False(t, c.Resources[3].Covered)
+	assert.Equal(t, "namespaceSelector is set but the resource's scope could not be determined and it has no namespace", c.Resources[3].Reason)
+}
+
+func TestBuildCoverage_NamespacedResourceWithoutNamespaceCoveredWhenNoNamespaceSelector(t *testing.T) {
+	policies := []unstructured.Unstructured{makeVAP("policy-a", "C-0001")}
+	bindings := []unstructured.Unstructured{
+		makeVAPBScoped("binding-a", "policy-a", nil, nil),
+	}
+	failing := map[string][]ResourceInfo{
+		"C-0001": {
+			{ResourceID: "deploy-1", APIVersion: "apps/v1", Kind: "Deployment", Name: "my-deploy", Namespace: ""},
+		},
+	}
+
+	coverage := BuildCoverage(policies, bindings, failing, nil)
+
+	c := coverage["C-0001"]
+	require.NotNil(t, c)
+	assert.True(t, c.Bound)
+	assert.True(t, c.FullyCovered())
+	require.Len(t, c.Resources, 1)
+	assert.True(t, c.Resources[0].Covered)
+	assert.Empty(t, c.Resources[0].Reason)
 }
