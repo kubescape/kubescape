@@ -22,6 +22,7 @@ Welcome to the Kubescape documentation. This directory contains detailed guides 
 | [CLI Reference](cli-reference.md) | Complete command-line reference for all Kubescape commands |
 | [Architecture](architecture.md) | Technical architecture of Kubescape CLI and Operator |
 | [CEL Rule Engine](cel-engine.md) | Evaluating ValidatingAdmissionPolicy rules offline, and how scan and admission stay equivalent |
+| [Evidence of Finding](evidence-contract.md) | What a rule must emit for `--show-evidence` to show a path, a value and a line, and the ways evidence goes missing |
 
 ### Features
 
@@ -89,6 +90,7 @@ We welcome contributions to improve our documentation! Please see the [Contribut
 | [ics-ot-workloads.md](ics-ot-workloads.md) | ✅ Current | Scanning ICS/OT workloads on Kubernetes |
 | [cel-engine.md](cel-engine.md) | ✅ Current | CEL rule engine: offline VAP evaluation and scan/admission equivalence |
 | [image-scanning.md](image-scanning.md) | ✅ Current | Scanning container images for vulnerabilities |
+| [evidence-contract.md](evidence-contract.md) | ✅ Current | Evidence of Finding: path kinds, syntax, resolution and redaction for rule authors |
 | [security/self-assessment.md](security/self-assessment.md) | 🟡 Incomplete | Security self-assessment pending maintainer review |
 
 ---
