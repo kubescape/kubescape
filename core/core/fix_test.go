@@ -1682,3 +1682,88 @@ func TestFix_ClusterFixHonorsOutputDirOverWriter(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotEmpty(t, entries)
 }
+
+func TestIsAffirmative(t *testing.T) {
+	tests := []struct {
+		input string
+		want  bool
+	}{
+		{"y", true},
+		{"Y", true},
+		{"yes", true},
+		{"YES", true},
+		{"Yes", true},
+		{"  yes  ", true},
+		{"  y  ", true},
+		{"n", false},
+		{"no", false},
+		{"NO", false},
+		{"", false},
+		{"   ", false},
+		{"random", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			assert.Equal(t, tt.want, isAffirmative(tt.input))
+		})
+	}
+}
+
+// TestFix_OutputKustomizeInteractiveConfirmYes verifies that entering "yes" at the interactive
+// confirmation prompt allows overwriting existing Kustomize files.
+func TestFix_OutputKustomizeInteractiveConfirmYes(t *testing.T) {
+	for _, affirmative := range []string{"yes", "y", "YES", "Y"} {
+		t.Run(affirmative, func(t *testing.T) {
+			dir := t.TempDir()
+			reportPath := buildFixableHelmReport(t, dir)
+			kustDir := filepath.Join(t.TempDir(), "existing-kust")
+			require.NoError(t, os.MkdirAll(kustDir, 0700))
+			origKust := []byte("apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\n# original\n")
+			require.NoError(t, os.WriteFile(filepath.Join(kustDir, "kustomization.yaml"), origKust, 0600))
+
+			ks := &Kubescape{Ctx: context.Background()}
+			withStdin(t, affirmative+"\n", func() {
+				err := ks.Fix(&metav1.FixInfo{
+					ReportFile:   reportPath,
+					KustomizeDir: kustDir,
+					HelmValueOptions: cautils.HelmValueOptions{
+						ValueFiles: []string{filepath.Join(dir, "values.yaml")},
+					},
+				})
+				require.NoError(t, err)
+			})
+
+			assert.FileExists(t, filepath.Join(kustDir, "base.yaml"))
+			assert.FileExists(t, filepath.Join(kustDir, "kustomization.yaml"))
+		})
+	}
+}
+
+// TestFix_OutputKustomizeInteractiveDeclineNo verifies that entering "no" at the interactive
+// confirmation prompt cancels Kustomize patch generation without error or modifying existing files.
+func TestFix_OutputKustomizeInteractiveDeclineNo(t *testing.T) {
+	dir := t.TempDir()
+	reportPath := buildFixableHelmReport(t, dir)
+	kustDir := filepath.Join(t.TempDir(), "existing-kust")
+	require.NoError(t, os.MkdirAll(kustDir, 0700))
+	origKust := []byte("apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\n# original\n")
+	require.NoError(t, os.WriteFile(filepath.Join(kustDir, "kustomization.yaml"), origKust, 0600))
+
+	ks := &Kubescape{Ctx: context.Background()}
+	withStdin(t, "no\n", func() {
+		err := ks.Fix(&metav1.FixInfo{
+			ReportFile:   reportPath,
+			KustomizeDir: kustDir,
+			HelmValueOptions: cautils.HelmValueOptions{
+				ValueFiles: []string{filepath.Join(dir, "values.yaml")},
+			},
+		})
+		require.NoError(t, err)
+	})
+
+	content, err := os.ReadFile(filepath.Join(kustDir, "kustomization.yaml"))
+	require.NoError(t, err)
+	assert.Equal(t, string(origKust), string(content))
+	assert.NoFileExists(t, filepath.Join(kustDir, "base.yaml"))
+}
+
