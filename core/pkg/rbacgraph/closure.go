@@ -51,7 +51,7 @@ type EscalationResult struct {
 	EffectiveRules []ScopedRule
 	// ClusterAdmin is true when EffectiveRules includes a cluster-wide
 	// */*/* rule, an Unbounded finding covers the whole cluster
-	// (Scope == "" and !ScopeUnknown, excluding User/ServiceAccount target
+	// (Scope == "" and !ScopeUnknown and !PermissionsUnconfirmed, excluding User/ServiceAccount target
 	// enumeration warnings), or a superuser group (system:masters)
 	// was reached via impersonation -- however it was actually reached. Once true, the BFS
 	// stops expanding further: cluster-admin-equivalent power already
@@ -96,7 +96,9 @@ type GrantedFinding struct {
 }
 
 // grantKey identifies one grant an escalate-verb or bind-verb edge gives a
-// subject. Scope is part of the identity and is not left to Detail to carry:
+// subject. Rewrite grants use their target and scope, not a binding-path
+// explanation that can change as permissions grow. Scope is part of the
+// identity and is not left to Detail to carry:
 // Detail is prose for a reader, and two edges that differ only in the
 // namespace they apply to (the same unrestricted grant reaching two
 // namespaces) share it word for word.
@@ -104,10 +106,21 @@ type grantKey struct {
 	primitive EscalationPrimitive
 	scope     string
 	detail    string
+	target    RoleTarget
 }
 
 func grantKeyOf(e EscalationEdge) grantKey {
-	return grantKey{primitive: e.Primitive, scope: e.Scope, detail: e.Detail}
+	key := grantKey{primitive: e.Primitive, scope: e.Scope, detail: e.Detail}
+	if e.Primitive == PrimitiveEscalateVerb && e.Target != nil {
+		// The same rewrite may gain another binding path after rules grow.
+		// That changes its explanation, not the acquired permission or target.
+		key.target = *e.Target
+		key.detail = "acquired rewritten role"
+		if e.PermissionsUnconfirmed {
+			key.detail = "unconfirmed role rewrite"
+		}
+	}
+	return key
 }
 
 // unboundedKey identifies one UnboundedFinding: a grant and who holds it.
@@ -152,6 +165,8 @@ func (idx *Index) AnalyzeEscalation(start Subject) EscalationResult {
 	var granted []GrantedFinding
 	clusterAdmin := IsClusterAdminEquivalent(subjectRules[start]) || superuserGroups[start.Name] && start.Kind == KindGroup
 
+	var rewrites []roleRewrite
+	rewriteSeen := map[RoleTarget]bool{}
 	worklist := []Subject{start}
 	truncated := false
 	for i := 0; len(worklist) > 0 && !clusterAdmin; i++ {
@@ -162,7 +177,25 @@ func (idx *Index) AnalyzeEscalation(start Subject) EscalationResult {
 		s := worklist[0]
 		worklist = worklist[1:]
 
-		edges := idx.DirectEscalationEdges(s, subjectRules[s])
+		// A rewrite can benefit identities reached before or after its owner.
+		// Revisit known identities only when a genuinely new target is learned.
+		learnedRewrite := false
+		for _, edge := range idx.escalateVerbEdges(subjectRules[s]) {
+			if edge.Target == nil || rewriteSeen[*edge.Target] {
+				continue
+			}
+			rewriteSeen[*edge.Target] = true
+			rewrites = append(rewrites, roleRewrite{subject: s, edge: edge})
+			learnedRewrite = true
+		}
+		if learnedRewrite {
+			for _, known := range append([]Subject{start}, order...) {
+				if known != s && !slices.Contains(worklist, known) {
+					worklist = append(worklist, known)
+				}
+			}
+		}
+		edges := idx.directEscalationEdges(s, subjectRules[s], rewrites)
 		grew := false
 		for _, e := range edges {
 			switch {
@@ -199,7 +232,7 @@ func (idx *Index) AnalyzeEscalation(start Subject) EscalationResult {
 					// identities remain a risk finding without granting wildcard rules.
 					continue
 				}
-				if e.ScopeUnknown {
+				if e.ScopeUnknown || e.PermissionsUnconfirmed {
 					continue // report uncertainty, never synthesize permissions from it
 				}
 				if e.Scope == "" {

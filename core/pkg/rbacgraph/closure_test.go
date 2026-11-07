@@ -626,24 +626,17 @@ func TestAnalyzeEscalation_ScopedUnboundedEdgeIsReQueuedForMultiHopEscalation(t 
 	}
 }
 
-func TestAnalyzeEscalation_EscalateTargetNotInIndexFallsBackToScopeUnbounded(t *testing.T) {
-	// Concrete scenario from review: escalate+update on clusterroles,
-	// cluster-wide, restricted to a resourceName that resolves to no
-	// object this Index actually collected (stale name, or a partial/
-	// paginated collection gap). Silently emitting nothing here would be a
-	// regression from the pre-name-correlation behavior, which reported a
-	// scope-level Unbounded (cluster-wide -> ClusterAdmin) in this case --
-	// failing toward risk, not silence, matches this package's own
-	// documented trust model.
+func TestAnalyzeEscalation_MissingEscalateTargetWarnsWithoutGrantingPermissions(t *testing.T) {
+	// A missing role remains a risk warning, but neither a target object nor
+	// a binding path has been established, so administrator access is unproven.
 	cr := clusterRole("escalator", rule([]string{"rbac.authorization.k8s.io"}, []string{"clusterroles"}, []string{"escalate", "update"}, []string{"does-not-exist"}))
 	idx := NewIndex(nil, []rbacv1.ClusterRole{cr}, nil, []rbacv1.ClusterRoleBinding{clusterRoleBinding("crb", "escalator", saSubject("ns", "attacker"))}, nil)
-
 	result := idx.AnalyzeEscalation(sa("ns", "attacker"))
-	if !result.ClusterAdmin {
-		t.Error("ClusterAdmin = false, want true: an unresolvable escalate+update target must fall back to a scope-level Unbounded finding, not silence")
+	if result.ClusterAdmin || len(result.Unbounded) != 1 || !result.Unbounded[0].Edge.PermissionsUnconfirmed {
+		t.Fatalf("missing target should warn without confirming permissions: %+v", result)
 	}
-	if len(result.Unbounded) == 0 {
-		t.Error("Unbounded = empty, want the fallback finding recorded")
+	if len(result.EffectiveRules) != 1 {
+		t.Fatalf("warning fabricated permissions: %+v", result.EffectiveRules)
 	}
 }
 
@@ -920,8 +913,8 @@ func TestDirectRules_UserSubjectWithAnotherServiceAccountUsernameGrantsNothing(t
 	}
 }
 
-// roleEscalationFindings returns the Scope of every escalate-verb finding on
-// Roles, sorted.
+// roleEscalationFindings returns the distinct scopes of escalate-verb
+// findings on Roles, including both capabilities and acquired permissions.
 func roleEscalationFindings(result EscalationResult) []string {
 	var scopes []string
 	for _, f := range result.Unbounded {
@@ -930,7 +923,7 @@ func roleEscalationFindings(result EscalationResult) []string {
 		}
 	}
 	sort.Strings(scopes)
-	return scopes
+	return slices.Compact(scopes)
 }
 
 func TestAnalyzeEscalation_ClusterWideEscalateCombinesWithNamespacedUpdate(t *testing.T) {
@@ -1238,8 +1231,8 @@ func TestDirectEscalationEdges_BindAndEscalateEdgesNameTheirTarget(t *testing.T)
 	}
 
 	for _, want := range []key{
-		// Unrestricted escalate + update on clusterroles: every ClusterRole.
-		{PrimitiveEscalateVerb, RoleTarget{Kind: "ClusterRole"}, ""},
+		// An actual collected ClusterRole with a usable cluster-wide binding.
+		{PrimitiveEscalateVerb, RoleTarget{Kind: "ClusterRole", Name: "power"}, ""},
 		// escalate + patch on the Role named editable, in dev.
 		{PrimitiveEscalateVerb, RoleTarget{Kind: "Role", Namespace: "dev", Name: "editable"}, "dev"},
 		// A ClusterRole bound by a ClusterRoleBinding, and by a RoleBinding in dev.
