@@ -118,7 +118,7 @@ func (idx *Index) ServiceExposure(ref ServiceRef) (paths []ExposurePath, unclear
 	case corev1.ServiceTypeNodePort:
 		paths = append(paths, ExposurePath{Kind: ExposureNodePort, Source: fmt.Sprintf("%s/%s", ref.Namespace, ref.Name)})
 	}
-	if len(svc.Spec.ExternalIPs) > 0 {
+	if len(svc.Spec.ExternalIPs) > 0 && isProxiedService(svc) {
 		paths = append(paths, ExposurePath{Kind: ExposureExternalIP, Source: fmt.Sprintf("%s/%s", ref.Namespace, ref.Name)})
 	}
 
@@ -152,6 +152,14 @@ func (idx *Index) ServiceExposure(ref ServiceRef) (paths []ExposurePath, unclear
 	}
 
 	return paths, unclear
+}
+
+// isProxiedService reports whether kube-proxy programs svc at all. It skips
+// ExternalName and headless (clusterIP: None) Services entirely, so their
+// spec.externalIPs are never programmed on any node. An unset clusterIP is
+// one the API server has yet to allocate (a manifest scan), not a headless one.
+func isProxiedService(svc *corev1.Service) bool {
+	return svc.Spec.Type != corev1.ServiceTypeExternalName && svc.Spec.ClusterIP != corev1.ClusterIPNone
 }
 
 // routeNamespacesFor lists the namespaces holding routes, ref's own first.

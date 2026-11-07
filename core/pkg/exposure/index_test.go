@@ -69,6 +69,30 @@ func TestServiceExposure_ExternalIPsAlongsideLoadBalancerReportsBothPaths(t *tes
 	}
 }
 
+// kube-proxy never builds proxy rules for a headless or ExternalName Service
+// (pkg/proxy/util ShouldSkipService), so spec.externalIPs on either is never
+// programmed on any node. The API server still accepts such a Service.
+func TestServiceExposure_ExternalIPsOnUnproxiedServiceIsNotExposure(t *testing.T) {
+	headless := svc("ns", "headless", corev1.ServiceTypeClusterIP)
+	headless.Spec.ClusterIP = corev1.ClusterIPNone
+	headless.Spec.ClusterIPs = []string{corev1.ClusterIPNone}
+	headless.Spec.ExternalIPs = []string{"203.0.113.10"}
+
+	externalName := svc("ns", "external-name", corev1.ServiceTypeExternalName)
+	externalName.Spec.ExternalName = "db.example.com"
+	externalName.Spec.ExternalIPs = []string{"203.0.113.11"}
+
+	idx := NewIndex([]corev1.Service{headless, externalName}, nil, nil, nil, nil)
+	for _, name := range []string{"headless", "external-name"} {
+		t.Run(name, func(t *testing.T) {
+			paths, unclear := idx.ServiceExposure(ref("ns", name))
+			if len(paths) != 0 || unclear {
+				t.Errorf("paths = %+v, unclear = %v; want none: kube-proxy skips headless and ExternalName Services, so their externalIPs are never programmed", paths, unclear)
+			}
+		})
+	}
+}
+
 func TestServiceExposure_NoExternalIPsDoesNotAddAPath(t *testing.T) {
 	idx := NewIndex([]corev1.Service{svc("ns", "app", corev1.ServiceTypeClusterIP)}, nil, nil, nil, nil)
 	paths, _ := idx.ServiceExposure(ref("ns", "app"))

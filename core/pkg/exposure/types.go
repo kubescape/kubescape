@@ -47,9 +47,10 @@ const (
 	// this package's concern.
 	ExposureGRPCRoute
 	// ExposureExternalIP means the Service has one or more spec.externalIPs
-	// set. kube-proxy programs these on every node regardless of
-	// spec.type, so a ClusterIP Service with externalIPs set is reachable
-	// from off-cluster the same as a NodePort Service -- this is the
+	// set. kube-proxy programs these on every node for every Service it
+	// proxies (all but headless and ExternalName Services), so a ClusterIP
+	// Service with externalIPs set is reachable from off-cluster the same
+	// as a NodePort Service -- this is the
 	// mechanism behind CVE-2020-8554 (arbitrary externalIPs hijack via a
 	// Service create/update in a namespace an attacker controls).
 	ExposureExternalIP
