@@ -253,7 +253,7 @@ func (pp *PrettyPrinter) printResources(summary *reportsummary.SummaryDetails, c
 	// then never consulted on this path, so `kubescape scan -E --view control`
 	// printed exactly what a bare scan printed.
 	if pp.verboseMode || pp.showEvidence {
-		attachAssistedRemediation(summary, workloadsSummary, controlSummary.GetID(), resourcesResult, pp.showSecrets)
+		attachAssistedRemediation(summary, workloadsSummary, controlSummary.GetID(), resourcesResult, pp.showSecrets, pp.showEvidence)
 	}
 
 	failedWorkloads := groupByNamespaceOrKind(workloadsSummary, workloadSummaryFailed)
@@ -283,7 +283,11 @@ func (pp *PrettyPrinter) printResources(summary *reportsummary.SummaryDetails, c
 
 }
 
-func attachAssistedRemediation(summary *reportsummary.SummaryDetails, workloads []WorkloadSummary, controlID string, resourcesResult map[string]resourcesresults.Result, showSecrets bool) {
+// attachAssistedRemediation fills each failed workload's evidence text. This
+// runs under --verbose as well as --show-evidence, and showEvidence is what
+// opts in to the extra detail: delete paths carry their current value only
+// then, so a bare --verbose prints what it always has.
+func attachAssistedRemediation(summary *reportsummary.SummaryDetails, workloads []WorkloadSummary, controlID string, resourcesResult map[string]resourcesresults.Result, showSecrets, showEvidence bool) {
 	for i := range workloads {
 		workload := &workloads[i]
 		if workload.status != apis.StatusFailed {
@@ -301,7 +305,12 @@ func attachAssistedRemediation(summary *reportsummary.SummaryDetails, workloads 
 				continue
 			}
 			displayed := cautils.EvidenceControl(summary, result.AssociatedControls[j])
-			paths := AssistedRemediationPathsWithCurrentValuesFiltered(&displayed, workload.resource, showSecrets)
+			var paths []string
+			if showEvidence {
+				paths = evidencePathsWithCurrentValues(&displayed, workload.resource, showSecrets)
+			} else {
+				paths = AssistedRemediationPathsWithCurrentValuesFiltered(&displayed, workload.resource, showSecrets)
+			}
 			if len(paths) > 0 {
 				workload.assistedRemediation = strings.Join(paths, ", ")
 			}
