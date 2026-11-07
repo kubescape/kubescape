@@ -120,7 +120,7 @@ func GetDownloadCmd(ks meta.IKubescape) *cobra.Command {
 
 	downloadCmd.PersistentFlags().StringVarP(&downloadInfo.AccountID, "account", "", "", "Kubescape SaaS account ID. Default will load account ID from cache")
 	downloadCmd.PersistentFlags().StringVarP(&downloadInfo.AccessKey, "access-key", "", "", "Kubescape SaaS access key. Default will load access key from cache")
-	downloadCmd.Flags().StringVarP(&downloadInfo.Path, "output", "o", "", "Output file. If not specified, will save in `~/.kubescape/<policy name>.json`")
+	downloadCmd.Flags().StringVarP(&downloadInfo.Path, "output", "o", "", "Output file. If not specified, will save in ~/.kubescape/<policy name>.json")
 
 	return downloadCmd
 }
