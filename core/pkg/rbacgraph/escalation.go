@@ -29,9 +29,17 @@ var superuserGroups = map[string]bool{
 // a ServiceAccount "assign" its own identity) are filtered out -- they
 // don't represent an escalation.
 func (idx *Index) DirectEscalationEdges(subject Subject, rules []ScopedRule) []EscalationEdge {
+	var rewrites []roleRewrite
+	for _, edge := range idx.escalateVerbEdges(rules) {
+		rewrites = append(rewrites, roleRewrite{subject: subject, edge: edge})
+	}
+	return idx.directEscalationEdges(subject, rules, rewrites)
+}
+
+func (idx *Index) directEscalationEdges(subject Subject, rules []ScopedRule, rewrites []roleRewrite) []EscalationEdge {
 	var edges []EscalationEdge
 	edges = append(edges, idx.impersonateEdges(rules)...)
-	edges = append(edges, idx.escalateVerbEdges(rules)...)
+	edges = append(edges, idx.rewriteEdges(subject, rules, rewrites)...)
 	edges = append(edges, idx.bindVerbEdges(rules)...)
 	edges = append(edges, idx.assignServiceAccountEdges(rules)...)
 	edges = append(edges, idx.mintServiceAccountTokenEdges(rules)...)
@@ -223,7 +231,9 @@ func coverageScopes(a, b map[string]*roleCoverage) []string {
 // Role/ClusterRole rules it doesn't already itself hold, unless the
 // subject also holds the "escalate" verb on that resource type -- combined
 // with update/patch (needed to actually modify the object), that's a
-// documented built-in bypass. The escalate grant and the update/patch grant
+// documented built-in bypass for rewriting the role. These are rewrite
+// capabilities; rewriteEdges separately establishes how their rules can be
+// acquired through bindings. The escalate grant and the update/patch grant
 // must actually cover the *same* role -- two independent resourceNames-
 // restricted grants for different roles (escalate on role-a, update on
 // role-b) don't combine into anything exploitable, so this correlates them
@@ -337,7 +347,7 @@ func (idx *Index) escalateVerbEdges(rules []ScopedRule) []EscalationEdge {
 				for _, cr := range matched {
 					edges = append(edges, EscalationEdge{
 						Primitive: PrimitiveEscalateVerb,
-						Detail:    fmt.Sprintf("holds escalate + update/patch on ClusterRole %q: can rewrite it to grant itself anything", cr.Name),
+						Detail:    fmt.Sprintf("holds escalate + update/patch on ClusterRole %q: can rewrite its rules", cr.Name),
 						Unbounded: true,
 						Scope:     "",
 						Target:    &RoleTarget{Kind: "ClusterRole", Name: cr.Name},
@@ -372,7 +382,7 @@ func (idx *Index) escalateVerbEdges(rules []ScopedRule) []EscalationEdge {
 			for _, r := range roles {
 				edges = append(edges, EscalationEdge{
 					Primitive: PrimitiveEscalateVerb,
-					Detail:    fmt.Sprintf("holds escalate + update/patch on Role %q in namespace %q: can rewrite it to grant itself anything", r.Name, r.Namespace),
+					Detail:    fmt.Sprintf("holds escalate + update/patch on Role %q in namespace %q: can rewrite its rules", r.Name, r.Namespace),
 					Unbounded: true,
 					Scope:     r.Namespace,
 					Target:    &RoleTarget{Kind: "Role", Namespace: r.Namespace, Name: r.Name},
