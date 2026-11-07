@@ -694,7 +694,7 @@ func newClusterResult(kubeContext string, results *resultshandling.ResultsHandle
 		Duration:  elapsed.String(),
 	}
 
-	if results == nil {
+	if results == nil || results.GetResults() == nil {
 		cluster.Status = failureStatus(err)
 		if err != nil {
 			cluster.Error = err.Error()

@@ -174,6 +174,9 @@ func runWorkloadScan(ctx context.Context, scanInfo *cautils.ScanInfo, ks meta.IK
 		}
 		return nil, err
 	}
+	if scanInfo.DryRun {
+		return results, nil
+	}
 
 	if err = results.HandleResults(ctx, scanInfo); err != nil {
 		return results, err
