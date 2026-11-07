@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -376,6 +377,20 @@ func TestGetScanCommand_ImageRegistryTokenAndAuthorityReachImageScan(t *testing.
 	assert.Equal(t, []string{"registry.example.com/app:tag"}, mockKubescape.imgScanInfo.Images)
 }
 
+func TestGetScanCommand_ImageScanSetsInputPatterns(t *testing.T) {
+	mockKubescape := &imageScanCaptureKubescape{}
+	cmd := GetScanCommand(mockKubescape)
+	cmd.SetArgs([]string{
+		"image",
+		"nginx:1.27",
+		"redis:7",
+	})
+
+	err := cmd.Execute()
+	assert.NoError(t, err)
+	assert.Equal(t, []string{"nginx:1.27", "redis:7"}, mockKubescape.scanInfo.InputPatterns)
+}
+
 func TestGetImageCmd_RunE_ForwardsLocalTarball(t *testing.T) {
 	mockKubescape := &imageScanCaptureKubescape{}
 	scanInfo := cautils.ScanInfo{}
@@ -394,6 +409,28 @@ func TestGetImageCmd_RunE_ForwardsLocalTarball(t *testing.T) {
 	err = cmd.RunE(cmd, []string{tmpFile.Name()})
 	assert.NoError(t, err)
 	assert.Equal(t, []string{"docker-archive:" + tmpFile.Name()}, mockKubescape.imgScanInfo.Images)
+	assert.Equal(t, []string{"docker-archive:" + tmpFile.Name()}, mockKubescape.scanInfo.InputPatterns)
+}
+
+func TestGetImageCmd_RunE_ArchivesPreservedInInputPatterns(t *testing.T) {
+	mockKubescape := &imageScanCaptureKubescape{}
+	scanInfo := cautils.ScanInfo{}
+
+	cmd := getImageCmd(mockKubescape, &scanInfo)
+	parentCmd := &cobra.Command{Use: "scan"}
+	parentCmd.PersistentFlags().StringVarP(&scanInfo.Format, "format", "f", "pretty-printer", "")
+	parentCmd.AddCommand(cmd)
+
+	tmpDir := t.TempDir()
+	dockerTar := filepath.Join(tmpDir, "docker-img.tar")
+	require.NoError(t, os.WriteFile(dockerTar, []byte("dummy-docker-tar"), 0o600))
+	ociTar := filepath.Join(tmpDir, "oci-img.tar")
+	require.NoError(t, os.WriteFile(ociTar, []byte("dummy-oci-tar"), 0o600))
+
+	err := cmd.RunE(cmd, []string{"docker-archive:" + dockerTar, "oci-archive:" + ociTar})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"docker-archive:" + dockerTar, "oci-archive:" + ociTar}, mockKubescape.imgScanInfo.Images)
+	assert.Equal(t, []string{"docker-archive:" + dockerTar, "oci-archive:" + ociTar}, mockKubescape.scanInfo.InputPatterns)
 }
 
 func TestGetImageCmd_ArgsAcceptsSeveralImages(t *testing.T) {

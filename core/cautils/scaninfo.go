@@ -187,6 +187,7 @@ type ScanInfo struct {
 	ScanTimeout               time.Duration // Maximum duration for the entire scan (0 = no timeout)
 	ControlTimeout            time.Duration // Maximum duration for evaluating a single control (0 = no timeout)
 	EnableStreaming           bool          // Enable resource streaming for large clusters to keep the evaluation input bounded
+	OriginalStdinInfo         os.FileInfo   // Preserved FileInfo of stdin regular file before preparation
 	Incremental               bool          // Cache verdicts per resource, keyed by resource hash + controls-config version, and skip re-evaluating unchanged resources
 	DryRun                    bool          // Check RBAC access for the resources the scan would need, without collecting or evaluating anything
 	OtelEndpoint              string        // OTLP collector endpoint for exporting scan traces and metrics (empty = telemetry disabled)
