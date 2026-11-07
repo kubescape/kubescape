@@ -1116,7 +1116,7 @@ func (h *FixHandler) dropWrappedResources(ctx context.Context, resourcesToFix []
 		h.withdrawFixedControls(rfi.fixedControls)
 		h.withdrawPartialControls(rfi.failedControls)
 		for _, unfixed := range rfi.failedControls {
-			unfixed.Reason = "skipped: the file declares several resources in one document"
+			unfixed.Reason = "skipped: the file declares several resources in one document or changed since the scan; re-scan if it changed"
 			h.unfixedControls = append(h.unfixedControls, unfixed)
 		}
 	}
@@ -1518,38 +1518,62 @@ func (h *FixHandler) ApplyChanges(ctx context.Context, resourcesToFix []Resource
 		defer output.close()
 	}
 
-	fileYamlExpressions := h.getFileYamlExpressions(resourcesToFix)
+	fixesByFile := make(map[string][]ResourceFixInfo)
+	for _, fix := range resourcesToFix {
+		if !fix.inMemory {
+			fixesByFile[fix.FilePath] = append(fixesByFile[fix.FilePath], fix)
+		}
+	}
 
-	for filepath, yamlExpression := range fileYamlExpressions {
-		fileAsString, err := GetFileString(filepath)
-
-		if err != nil {
-			errors = append(errors, err)
+	for path, fixes := range fixesByFile {
+		if err := applyFileChanges(ctx, path, fixes, output, outputPaths[path]); err != nil {
+			errors = append(errors, fmt.Errorf("failed to fix file %s: %w", path, err))
 			continue
 		}
-
-		fixedContent, err := applyFixToFileContent(ctx, filepath, fileAsString, yamlExpression)
-
-		if err != nil {
-			errors = append(errors, fmt.Errorf("failed to fix file %s: %w ", filepath, err))
-			continue
-		}
-
-		if output != nil {
-			err = output.write(filepath, outputPaths[filepath], fixedContent)
-		} else {
-			err = writeFixesToFile(filepath, fixedContent)
-		}
-		if err != nil {
-			logger.L().Ctx(ctx).Warning(fmt.Sprintf("Failed to write fixes to file %s, %v", filepath, err.Error()))
-			errors = append(errors, err)
-			continue
-		}
-
-		updatedFiles[filepath] = true
+		updatedFiles[path] = true
 	}
 
 	return len(updatedFiles), errors
+}
+
+func applyFileChanges(ctx context.Context, path string, fixes []ResourceFixInfo, output *outputTree, destination string) (err error) {
+	flags := os.O_RDONLY
+	if output == nil {
+		flags = os.O_RDWR
+	}
+	file, err := os.OpenFile(filepath.Clean(path), flags|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return fmt.Errorf("error opening manifest: %w", err)
+	}
+	defer func() {
+		if closeErr := file.Close(); err == nil && closeErr != nil {
+			err = fmt.Errorf("error closing manifest: %w", closeErr)
+		}
+	}()
+
+	snapshot, err := file.Stat()
+	if err != nil {
+		return fmt.Errorf("error checking manifest: %w", err)
+	}
+	if !snapshot.Mode().IsRegular() {
+		return fmt.Errorf("manifest is not a regular file")
+	}
+	content, err := io.ReadAll(file)
+	if err != nil {
+		return fmt.Errorf("error reading manifest: %w", err)
+	}
+
+	fixedContent, err := applyFixToFileContent(ctx, path, string(content), fixes)
+	if err != nil {
+		return err
+	}
+	if output == nil {
+		return writeFixesToFile(file, snapshot, fixedContent)
+	}
+	if err := verifyManifestSnapshot(file, snapshot); err != nil {
+		return err
+	}
+	return output.write(destination, fixedContent, snapshot.Mode().Perm())
 }
 
 // OutputPaths maps every manifest ApplyChanges would rewrite to the path its
@@ -1707,37 +1731,13 @@ func isFixableSourceType(fileType string) bool {
 // applyFixToFileContent rewrites one file, keeping it in the format it was
 // written in. Emitting YAML into a .json manifest would break every tool that
 // reads it back.
-func applyFixToFileContent(ctx context.Context, filePath, content, yamlExpression string) (string, error) {
+func applyFixToFileContent(ctx context.Context, filePath, content string, fixes []ResourceFixInfo) (string, error) {
 	if isJSONSource(filePath) {
-		return applyFixToJSONContent(ctx, content, yamlExpression)
+		expression := strings.Join(fileFixExpressions(fixes), " | ")
+		return applyFixToJSONContent(ctx, content, expression, fixes)
 	}
-	return ApplyFixToContent(ctx, content, yamlExpression)
-}
-
-func (h *FixHandler) getFileYamlExpressions(resourcesToFix []ResourceFixInfo) map[string]string {
-	fileYamlExpressions := make(map[string]string, 0)
-	for _, toPin := range resourcesToFix {
-		resourceToFix := toPin
-
-		// An in-memory resource has no FilePath. Grouping it here would collapse
-		// every cluster resource under the empty key and hand ApplyChanges a
-		// file to write that does not exist.
-		if resourceToFix.inMemory {
-			continue
-		}
-
-		singleExpression := reduceYamlExpressions(&resourceToFix)
-		resourceFilePath := resourceToFix.FilePath
-
-		if _, pathExistsInMap := fileYamlExpressions[resourceFilePath]; !pathExistsInMap {
-			fileYamlExpressions[resourceFilePath] = singleExpression
-		} else {
-			fileYamlExpressions[resourceFilePath] = joinStrings(fileYamlExpressions[resourceFilePath], " | ", singleExpression)
-		}
-
-	}
-
-	return fileYamlExpressions
+	patched, _, err := (YAMLTreeEditor{}).ApplyFixes(ctx, content, fixes)
+	return patched, err
 }
 
 // plannedFix is one planned YAML edit's location and the value it writes
@@ -1990,14 +1990,25 @@ func (rfi *ResourceFixInfo) addYamlExpressionsFromResourceAssociatedControl(docu
 	return added, skippedReasons
 }
 
-// reduceYamlExpressions reduces the number of yaml expressions to a single one
+func fileFixExpressions(fixes []ResourceFixInfo) []string {
+	var expressions []string
+	for i := range fixes {
+		expressions = append(expressions, sortedYamlExpressions(&fixes[i])...)
+	}
+	return expressions
+}
+
 func reduceYamlExpressions(resource *ResourceFixInfo) string {
+	return strings.Join(sortedYamlExpressions(resource), " | ")
+}
+
+func sortedYamlExpressions(resource *ResourceFixInfo) []string {
 	expressions := make([]string, 0, len(resource.YamlExpressions))
 	for expr := range resource.YamlExpressions {
 		expressions = append(expressions, expr)
 	}
 	sort.Strings(expressions)
-	return strings.Join(expressions, " | ")
+	return expressions
 }
 
 // safeFixPath matches the subset of yq's expression grammar that a fix path is
@@ -2057,10 +2068,6 @@ func FixPathToValidYamlExpression(fixPath, value string, documentIndexInYaml int
 	return fmt.Sprintf("select(di==%d).%s |= %s", documentIndexInYaml, fixPath, value)
 }
 
-func joinStrings(inputStrings ...string) string {
-	return strings.Join(inputStrings, "")
-}
-
 func GetFileString(path string) (string, error) {
 	bytes, err := os.ReadFile(filepath.Clean(path))
 
@@ -2071,20 +2078,49 @@ func GetFileString(path string) (string, error) {
 	return string(bytes), nil
 }
 
-func writeFixesToFile(path, content string) error {
-	perm := os.FileMode(0644)
-	if info, err := os.Stat(filepath.Clean(path)); err == nil {
-		perm = info.Mode().Perm()
-	} else if !os.IsNotExist(err) {
-		return fmt.Errorf("error reading file permissions: %w", err)
-	}
+var errManifestChanged = errors.New("manifest changed while applying fixes; re-scan and use the new report")
 
-	file, err := os.OpenFile(filepath.Clean(path), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, perm)
+func verifyManifestSnapshot(file *os.File, snapshot os.FileInfo) error {
+	current, err := file.Stat()
 	if err != nil {
+		return fmt.Errorf("error checking manifest before writing: %w", err)
+	}
+	if snapshot.Mode() != current.Mode() || snapshot.Size() != current.Size() ||
+		!snapshot.ModTime().Equal(current.ModTime()) {
+		return errManifestChanged
+	}
+	return verifyManifestPath(file, snapshot)
+}
+
+func verifyManifestPath(file *os.File, snapshot os.FileInfo) error {
+	current, err := os.Stat(file.Name())
+	if err != nil {
+		return fmt.Errorf("cannot verify the manifest path: %w; re-scan and use the new report", err)
+	}
+	if !os.SameFile(snapshot, current) {
+		return errManifestChanged
+	}
+	return nil
+}
+
+// Write through the file we read so a rename after the path check cannot
+// redirect the write to the replacement. Check the path again after writing
+// so a fix written to a detached file does not count as applied.
+func writeFixesToFile(file *os.File, snapshot os.FileInfo, content string) error {
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return fmt.Errorf("error positioning manifest for writing: %w", err)
+	}
+	if err := verifyManifestSnapshot(file, snapshot); err != nil {
+		return err
+	}
+	if err := file.Truncate(0); err != nil {
+		return fmt.Errorf("error truncating manifest: %w", err)
+	}
+	if _, err := file.WriteString(content); err != nil {
 		return fmt.Errorf("error writing fixes to file: %w", err)
 	}
 
-	return writeAndClose(file, content)
+	return verifyManifestPath(file, snapshot)
 }
 
 // outputTree writes fixed copies under --output-dir.
@@ -2118,18 +2154,9 @@ func (o *outputTree) close() {
 	_ = o.root.Close()
 }
 
-// write writes the fixed content of source to destination, a path under the
-// output directory, creating the directories in between. The copy takes the
-// source's permissions: it is the same manifest, and a fixed copy of a private
-// file should not come out more readable than the original.
-func (o *outputTree) write(source, destination, content string) error {
-	perm := os.FileMode(0644)
-	if info, err := os.Stat(filepath.Clean(source)); err == nil {
-		perm = info.Mode().Perm()
-	} else if !os.IsNotExist(err) {
-		return fmt.Errorf("error reading file permissions: %w", err)
-	}
-
+// write writes the fixed content to destination under the output directory,
+// creating directories as needed and preserving the source's permissions.
+func (o *outputTree) write(destination, content string, perm os.FileMode) error {
 	relativePath, err := filepath.Rel(o.dir, filepath.Clean(destination))
 	if err != nil {
 		return fmt.Errorf("error writing fixes to file: %w", err)

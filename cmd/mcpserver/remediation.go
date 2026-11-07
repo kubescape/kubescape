@@ -515,40 +515,30 @@ func runRemediation(ctx context.Context, reportBytes []byte, req remediationRequ
 		}
 		sort.Slice(rendered, func(i, j int) bool { return rendered[i].ResourceID < rendered[j].ResourceID })
 	} else {
-		// Group expressions per file and apply them in memory. Mirrors
-		// getFileYamlExpressions/reduceYamlExpressions (fixhandler.go:818, :989)
-		// without their disk write. Each key is already scoped with
-		// select(di==N), so multi-document files compose under one " | " pipeline.
-		fileExprs := make(map[string][]string)
+		fileFixes := make(map[string][]fixhandler.ResourceFixInfo)
 		for _, rfi := range resourcesToFix {
-			exprs := make([]string, 0, len(rfi.YamlExpressions))
-			for expr := range rfi.YamlExpressions {
-				exprs = append(exprs, expr)
-			}
-			sort.Strings(exprs) // map iteration order is random; output must be stable
-			fileExprs[rfi.FilePath] = append(fileExprs[rfi.FilePath], exprs...)
+			fileFixes[rfi.FilePath] = append(fileFixes[rfi.FilePath], rfi)
 		}
 
-		filePaths := make([]string, 0, len(fileExprs))
-		for fp := range fileExprs {
+		filePaths := make([]string, 0, len(fileFixes))
+		for fp := range fileFixes {
 			filePaths = append(filePaths, fp)
 		}
 		sort.Strings(filePaths)
 
 		for _, fp := range filePaths {
-			joined := strings.Join(fileExprs[fp], " | ")
 			fileAsString, err := fixhandler.GetFileString(fp)
 			if err != nil {
 				return nil, err
 			}
-			patched, err := fixhandler.ApplyFixToContent(ctx, fileAsString, joined)
+			patched, expressions, err := (fixhandler.YAMLTreeEditor{}).ApplyFixes(ctx, fileAsString, fileFixes[fp])
 			if err != nil {
 				return nil, fmt.Errorf("failed to compute fix for %s: %w", fp, err)
 			}
 			files = append(files, remediationFileResult{
 				FilePath:           fp,
 				PatchedYAML:        patched,
-				AppliedExpressions: fileExprs[fp],
+				AppliedExpressions: expressions,
 			})
 		}
 	}

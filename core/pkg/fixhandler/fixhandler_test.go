@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/armosec/armoapi-go/armotypes"
 	gitv5 "github.com/go-git/go-git/v5"
@@ -487,47 +489,6 @@ func TestApplyFixToContent_CraftedFixPathLeaksNothing(t *testing.T) {
 	got, err := ApplyFixToContent(context.Background(), yamlContent, reduceYamlExpressions(rfi))
 	require.NoError(t, err)
 	assert.NotContains(t, got, "super-secret-token")
-}
-
-func TestJoinStrings(t *testing.T) {
-	tests := []struct {
-		name string
-		args []string
-		want string
-	}{
-		{
-			name: "nil array",
-			args: nil,
-			want: "",
-		},
-		{
-			name: "empty array",
-			args: []string{},
-			want: "",
-		},
-		{
-			name: "single element",
-			args: []string{"a"},
-			want: "a",
-		},
-		{
-			name: "two elements",
-			args: []string{"a", "b"},
-			want: "ab",
-		},
-		{
-			name: "three elements",
-			args: []string{"a", "b", "c"},
-			want: "abc",
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := joinStrings(tt.args...); got != tt.want {
-				t.Errorf("joinStrings() = %v, want %v", got, tt.want)
-			}
-		})
-	}
 }
 
 func TestGetFileString(t *testing.T) {
@@ -1384,16 +1345,68 @@ func TestWriteAndClose_Success(t *testing.T) {
 	assert.True(t, f.closed)
 }
 
-func TestWriteFixesToFile_PropagatesCloseError(t *testing.T) {
-	// End-to-end regression against the real function callers actually use:
-	// a genuine *os.File satisfies writeStringCloser, so the fix must not
-	// have narrowed the interface in a way that only compiles for the fake.
-	dir := t.TempDir()
-	path := filepath.Join(dir, "fixed.yaml")
-
-	require.NoError(t, writeFixesToFile(path, "fixed: true\n"))
-
-	got, err := os.ReadFile(path)
+func TestWriteFixesToFile_RewritesOpenedFile(t *testing.T) {
+	path := writeManifest(t, t.TempDir(), "fixed.yaml", "fixed: false # keep no trailing bytes\n")
+	file, err := os.OpenFile(path, os.O_RDWR, 0)
 	require.NoError(t, err)
-	assert.Equal(t, "fixed: true\n", string(got))
+	t.Cleanup(func() { _ = file.Close() })
+	snapshot, err := file.Stat()
+	require.NoError(t, err)
+	_, err = io.ReadAll(file)
+	require.NoError(t, err)
+
+	require.NoError(t, writeFixesToFile(file, snapshot, "fixed: true\n"))
+
+	assert.Equal(t, "fixed: true\n", fileContentOf(t, path))
+}
+
+func TestWriteFixesToFile_RejectsChangedManifest(t *testing.T) {
+	for _, name := range []string{"replaced", "edited in place", "permissions changed"} {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			if name == "permissions changed" && runtime.GOOS == "windows" {
+				t.Skip("POSIX permission changes are not portable on Windows")
+			}
+			path := writeManifest(t, dir, "deploy.yaml", "kind: Deployment\n")
+			stamp := time.Unix(1700000000, 0)
+			require.NoError(t, os.Chtimes(path, stamp, stamp))
+			file, err := os.OpenFile(path, os.O_RDWR, 0)
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = file.Close() })
+			snapshot, err := file.Stat()
+			require.NoError(t, err)
+			before, err := io.ReadAll(file)
+			require.NoError(t, err)
+
+			changed := "kind: Deployment\nmetadata: {name: new}\n"
+			switch name {
+			case "replaced":
+				// A replacement can preserve the bytes, size, mode, and mtime.
+				changed = string(before)
+				replacement := writeManifest(t, dir, "replacement.yaml", changed)
+				require.NoError(t, os.Chtimes(replacement, stamp, stamp))
+				err := os.Rename(replacement, path)
+				if err != nil && runtime.GOOS == "windows" {
+					t.Skipf("Windows does not allow replacing this open file: %v", err)
+				}
+				require.NoError(t, err)
+			case "permissions changed":
+				changed = string(before)
+				require.NoError(t, os.Chmod(path, 0400))
+			default:
+				require.NoError(t, os.WriteFile(path, []byte(changed), 0600))
+			}
+
+			err = writeFixesToFile(file, snapshot, "kind: Deployment\nspec: {replicas: 2}\n")
+			require.ErrorContains(t, err, "manifest changed while applying fixes")
+			assert.Equal(t, changed, fileContentOf(t, path))
+			if name == "replaced" {
+				_, err := file.Seek(0, io.SeekStart)
+				require.NoError(t, err)
+				held, err := io.ReadAll(file)
+				require.NoError(t, err)
+				assert.Equal(t, before, held, "the detached file must not be written after a detected replacement")
+			}
+		})
+	}
 }

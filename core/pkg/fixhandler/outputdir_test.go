@@ -28,7 +28,12 @@ func outputDirHandler(baseDir, outputDir string) *FixHandler {
 // imageFix pins the image of the pod in document documentIndex of source.
 func imageFix(source, relativePath string, documentIndex int) ResourceFixInfo {
 	expression := "select(di==" + strconv.Itoa(documentIndex) + ").spec.containers[0].image |= \"nginx:1.25\""
+	name := "first"
+	if documentIndex == 1 {
+		name = "second"
+	}
 	return ResourceFixInfo{
+		Resource:      podResource(name),
 		FilePath:      source,
 		relativePath:  relativePath,
 		DocumentIndex: documentIndex,
@@ -258,6 +263,14 @@ func podManifest(name string) string {
 	return "apiVersion: v1\nkind: Pod\nmetadata:\n  name: " + name + "\nspec:\n  containers:\n  - name: c\n    image: nginx\n"
 }
 
+func podResource(name string) *reporthandling.Resource {
+	return reporthandling.NewResource(map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Pod",
+		"metadata":   map[string]any{"name": name},
+	})
+}
+
 // fixImage is a failed control whose fix pins the Pod's image.
 func fixImage() resourcesresults.ResourceAssociatedControl {
 	return failedControl("C-0057", "Privileged", failedRuleWithFix("spec.containers[0].image", "nginx:1.25"))
@@ -284,7 +297,14 @@ func reportOf(t *testing.T, inputs []manifestInput) *FixHandler {
 			count = 1
 		}
 		for i := 0; i < count; i++ {
-			resource := buildResource(t, in.root, filepath.ToSlash(in.relativePath), "Pod", in.name+strconv.Itoa(i), 0)
+			name := in.name
+			if count > 1 {
+				name += strconv.Itoa(i)
+			}
+			resource := buildResource(t, in.root, filepath.ToSlash(in.relativePath), "Pod", name, 0)
+			resource.SetApiVersion("v1")
+			resource.SetNamespace("")
+			resource.ResourceID = resource.GetID()
 			resources = append(resources, *resource)
 			results = append(results, resourcesresults.Result{
 				ResourceID:         resource.GetID(),

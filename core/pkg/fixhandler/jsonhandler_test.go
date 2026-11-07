@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -37,7 +38,7 @@ const jsonDeployment = `{
 const privilegeEscalationFix = `select(di==0) | .spec.template.spec.containers[0].securityContext.allowPrivilegeEscalation |= false`
 
 func TestApplyFixToJSONContentRewritesTheValue(t *testing.T) {
-	fixed, err := applyFixToJSONContent(context.Background(), jsonDeployment, privilegeEscalationFix)
+	fixed, err := applyFixToJSONContent(context.Background(), jsonDeployment, privilegeEscalationFix, nil)
 	require.NoError(t, err)
 
 	var decoded map[string]any
@@ -50,7 +51,7 @@ func TestApplyFixToJSONContentRewritesTheValue(t *testing.T) {
 
 func TestApplyFixToJSONContentAddsAMissingField(t *testing.T) {
 	fixed, err := applyFixToJSONContent(context.Background(), jsonDeployment,
-		`select(di==0) | .spec.template.spec.automountServiceAccountToken |= false`)
+		`select(di==0) | .spec.template.spec.automountServiceAccountToken |= false`, nil)
 	require.NoError(t, err)
 
 	var decoded map[string]any
@@ -64,7 +65,7 @@ func TestApplyFixToJSONContentAddsAMissingField(t *testing.T) {
 func TestApplyFixToJSONContentKeepsTheOriginalIndent(t *testing.T) {
 	fourSpace := strings.ReplaceAll(jsonDeployment, "  ", "    ")
 
-	fixed, err := applyFixToJSONContent(context.Background(), fourSpace, privilegeEscalationFix)
+	fixed, err := applyFixToJSONContent(context.Background(), fourSpace, privilegeEscalationFix, nil)
 	require.NoError(t, err)
 
 	require.Contains(t, fixed, "\n    \"apiVersion\"")
@@ -72,7 +73,7 @@ func TestApplyFixToJSONContentKeepsTheOriginalIndent(t *testing.T) {
 }
 
 func TestApplyFixToJSONContentRejectsMalformedInput(t *testing.T) {
-	_, err := applyFixToJSONContent(context.Background(), `{"kind": `, privilegeEscalationFix)
+	_, err := applyFixToJSONContent(context.Background(), `{"kind": `, privilegeEscalationFix, nil)
 	assert.Error(t, err)
 }
 
@@ -116,13 +117,20 @@ func TestIsFixableSourceType(t *testing.T) {
 // exists: emitting YAML into a .json manifest would break every tool that reads
 // it back.
 func TestApplyFixToFileContentPreservesTheSourceFormat(t *testing.T) {
-	fixedJSON, err := applyFixToFileContent(context.Background(), "/tmp/deploy.json", jsonDeployment, privilegeEscalationFix)
+	var scanned map[string]any
+	require.NoError(t, json.Unmarshal([]byte(jsonDeployment), &scanned))
+	fixes := []ResourceFixInfo{{
+		Resource:        reporthandling.NewResource(scanned),
+		YamlExpressions: map[string]armotypes.FixPath{privilegeEscalationFix: {}},
+	}}
+	fixedJSON, err := applyFixToFileContent(context.Background(), "/tmp/deploy.json", jsonDeployment, fixes)
 	require.NoError(t, err)
 	assert.NoError(t, json.Unmarshal([]byte(fixedJSON), &map[string]any{}))
+	assert.Contains(t, fixedJSON, "\"allowPrivilegeEscalation\": false")
 
 	yamlDeployment := "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: api\nspec:\n  template:\n    spec:\n      containers:\n        - name: app\n          securityContext:\n            allowPrivilegeEscalation: true\n"
 
-	fixedYAML, err := applyFixToFileContent(context.Background(), "/tmp/deploy.yaml", yamlDeployment, privilegeEscalationFix)
+	fixedYAML, err := applyFixToFileContent(context.Background(), "/tmp/deploy.yaml", yamlDeployment, fixes)
 	require.NoError(t, err)
 	assert.Contains(t, fixedYAML, "allowPrivilegeEscalation: false")
 	assert.Error(t, json.Unmarshal([]byte(fixedYAML), &map[string]any{}), "the YAML path must not emit JSON")

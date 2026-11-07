@@ -30,7 +30,19 @@ type yamlSource struct {
 // Apply preserves pipeline order. Each operation is resolved against a fresh
 // tree, so insertions cannot leave stale offsets for subsequent operations.
 // All work is in memory: an error returns no partially remediated content.
-func (YAMLTreeEditor) Apply(ctx context.Context, source, expression string) (string, error) {
+func (e YAMLTreeEditor) Apply(ctx context.Context, source, expression string) (string, error) {
+	return e.apply(ctx, source, expression, nil)
+}
+
+// ApplyFixes verifies the planned resource identities before editing the
+// source. It returns the patched content and the expressions in apply order.
+func (e YAMLTreeEditor) ApplyFixes(ctx context.Context, source string, fixes []ResourceFixInfo) (string, []string, error) {
+	expressions := fileFixExpressions(fixes)
+	patched, err := e.apply(ctx, source, strings.Join(expressions, " | "), fixes)
+	return patched, expressions, err
+}
+
+func (YAMLTreeEditor) apply(ctx context.Context, source, expression string, fixes []ResourceFixInfo) (string, error) {
 	ops, err := parseYAMLOperations(expression)
 	if err != nil {
 		return "", err
@@ -42,14 +54,19 @@ func (YAMLTreeEditor) Apply(ctx context.Context, source, expression string) (str
 	if len(ops) == 0 {
 		return source, nil
 	}
-	indices, err := yamlWorkloadDocuments(docs)
+	targets, err := yamlWorkloadDocuments(docs)
 	if err != nil {
 		return "", err
+	}
+	if len(fixes) > 0 {
+		if err := verifyFixTargets(fixes, targets); err != nil {
+			return "", err
+		}
 	}
 	var expanded []yamlOperation
 	for _, op := range ops {
 		if op.document < 0 {
-			for i := range indices {
+			for i := range targets {
 				copy := op
 				copy.document = i
 				expanded = append(expanded, copy)
@@ -63,11 +80,11 @@ func (YAMLTreeEditor) Apply(ctx context.Context, source, expression string) (str
 		if err := ctx.Err(); err != nil {
 			return "", err
 		}
-		if op.document >= len(indices) {
+		if op.document >= len(targets) {
 			return "", fmt.Errorf("YAML edit %d: document index %d out of range", i+1, op.document)
 		}
 		s := newYAMLSource(source, docs)
-		root := docs[indices[op.document]].Content[0]
+		root := docs[targets[op.document].sourceIndex].Content[0]
 		edits, err := s.walk(root, op.path, op)
 		if err != nil {
 			return "", fmt.Errorf("YAML edit %d in document %d: %w", i+1, op.document, err)
@@ -92,8 +109,8 @@ func (YAMLTreeEditor) Apply(ctx context.Context, source, expression string) (str
 // Scanner paths index the workloads produced by a file, not empty documents.
 // Keep this translation within remediation. Generic YAML remains supported
 // for the public editor's existing callers and fixtures when no workload exists.
-func yamlWorkloadDocuments(docs []yaml.Node) ([]int, error) {
-	var workloads, nonempty []int
+func yamlWorkloadDocuments(docs []yaml.Node) ([]manifestDocument, error) {
+	var workloads, nonempty []manifestDocument
 	for i := range docs {
 		if len(docs[i].Content) == 0 {
 			continue
@@ -102,26 +119,24 @@ func yamlWorkloadDocuments(docs []yaml.Node) ([]int, error) {
 		if n.Tag == "!!null" {
 			continue
 		}
-		nonempty = append(nonempty, i)
-		if n.Kind != yaml.MappingNode {
-			continue
-		}
+		doc := manifestDocument{sourceIndex: i}
 		var obj map[string]any
-		if err := n.Decode(&obj); err != nil {
-			// Classification requires string keys, but valid non-workload YAML
-			// may use complex keys. Keep it in nonempty without blocking workloads.
-			continue
+		// Valid non-workload YAML may use complex keys. Keep it in nonempty
+		// without blocking workload documents.
+		if n.Kind == yaml.MappingNode && n.Decode(&obj) == nil {
+			kind, _ := obj["kind"].(string)
+			metadata, _ := obj["metadata"].(map[string]any)
+			name, _ := metadata["name"].(string)
+			generateName, _ := metadata["generateName"].(string)
+			if kind == "List" || (strings.HasSuffix(kind, "List") && name == "" && generateName == "") {
+				return nil, fmt.Errorf("unsupported YAML edit: resources inside a List wrapper")
+			}
+			if objectsenvelopes.NewObject(obj) != nil {
+				doc.identity = manifestIdentityOf(obj)
+				workloads = append(workloads, doc)
+			}
 		}
-		kind, _ := obj["kind"].(string)
-		metadata, _ := obj["metadata"].(map[string]any)
-		name, _ := metadata["name"].(string)
-		generateName, _ := metadata["generateName"].(string)
-		if kind == "List" || (strings.HasSuffix(kind, "List") && name == "" && generateName == "") {
-			return nil, fmt.Errorf("unsupported YAML edit: resources inside a List wrapper")
-		}
-		if objectsenvelopes.NewObject(obj) != nil {
-			workloads = append(workloads, i)
-		}
+		nonempty = append(nonempty, doc)
 	}
 	if len(workloads) > 0 {
 		return workloads, nil
