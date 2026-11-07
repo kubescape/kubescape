@@ -29,6 +29,7 @@ func resetRepoWorkspaceState(t *testing.T) {
 	}
 	tmpDirPaths = make(map[string]string)
 	tmpDirRefs = make(map[string]int)
+	repoActiveKeys = make(map[string]string)
 	tmpDirPathsMu.Unlock()
 	cloneGroup = singleflight.Group{}
 	for _, path := range paths {
@@ -350,4 +351,58 @@ func TestScanInfoCleanupSequentialIdempotency(t *testing.T) {
 	assert.Equal(t, 1, count)
 	scanInfo.Cleanup()
 	assert.Equal(t, 1, count)
+}
+
+func TestMaterializeRemoteInputsForwardsGitCloneDepth(t *testing.T) {
+	intPtr := func(v int) *int { return &v }
+	tests := []struct {
+		name      string
+		depth     *int
+		wantDepth int
+	}{
+		{
+			name:      "zero value scanInfo with nil depth defaults to 1",
+			depth:     nil,
+			wantDepth: 1,
+		},
+		{
+			name:      "explicit default depth 1",
+			depth:     intPtr(DefaultGitCloneDepth),
+			wantDepth: 1,
+		},
+		{
+			name:      "explicit full history depth 0",
+			depth:     intPtr(0),
+			wantDepth: 0,
+		},
+		{
+			name:      "custom depth 4",
+			depth:     intPtr(4),
+			wantDepth: 4,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resetRepoWorkspaceState(t)
+			t.Setenv("GITHUB_TOKEN", "test-token")
+			var capturedOpts *git.CloneOptions
+			useFakeClone(t, func(path string, _ bool, options *git.CloneOptions) (*git.Repository, error) {
+				capturedOpts = options
+				return initializeCloneWorkspace(path, options)
+			})
+
+			remoteURL := "https://github.com/example/repo"
+			scanInfo := &ScanInfo{
+				InputPatterns: []string{remoteURL},
+				GitCloneDepth: tt.depth,
+			}
+			require.NoError(t, scanInfo.MaterializeRemoteInputs(context.Background()))
+			t.Cleanup(scanInfo.Cleanup)
+
+			require.NotNil(t, capturedOpts)
+			assert.Equal(t, tt.wantDepth, capturedOpts.Depth)
+			assert.Equal(t, tt.wantDepth > 0, capturedOpts.SingleBranch)
+		})
+	}
 }
