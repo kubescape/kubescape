@@ -41,6 +41,8 @@ const testFeed = `{
   ]
 }`
 
+const embeddedFeedMaxAge = 30 * 24 * time.Hour
+
 func TestLookup(t *testing.T) {
 	ix, err := Parse(strings.NewReader(testFeed))
 	require.NoError(t, err)
@@ -94,6 +96,11 @@ func TestParseRejectsInvalidFeeds(t *testing.T) {
 func TestEmbeddedFeed(t *testing.T) {
 	ix, err := Parse(bytes.NewReader(embeddedFeed))
 	require.NoError(t, err)
+
+	age := time.Since(ix.Updated)
+	require.True(t, age >= 0 && age <= embeddedFeedMaxAge,
+		"embedded Kubernetes CVE feed is %s old (updated %s); run go generate ./core/pkg/k8scveindex",
+		age.Round(time.Hour), ix.Updated.Format(time.RFC3339))
 
 	assert.Equal(t, Applicable, ix.Lookup("CVE-2024-3177", "kube-apiserver", "1.28.4", "linux"))
 	assert.Equal(t, NotApplicable, ix.Lookup("CVE-2024-3177", "kubelet", "1.28.4", "linux"))
