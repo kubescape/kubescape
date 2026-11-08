@@ -23,12 +23,13 @@ func TestNewOpenAPIUIHandler(t *testing.T) {
 	handler := NewOpenAPIUIHandler()
 
 	tests := []struct {
-		name string
-		path string
+		name     string
+		path     string
+		uiMarker string
 	}{
-		{name: "ReDoc", path: OpenAPIV2Prefix + OpenAPIDocsEndpoint},
-		{name: "RapiDoc", path: OpenAPIV2Prefix + OpenAPIRapiEndpoint},
-		{name: "Swagger UI", path: OpenAPIV2Prefix + OpenAPISwaggerUIEndpoint},
+		{name: "ReDoc", path: OpenAPIV2Prefix + OpenAPIDocsEndpoint, uiMarker: "<redoc"},
+		{name: "RapiDoc", path: OpenAPIV2Prefix + OpenAPIRapiEndpoint, uiMarker: "<rapi-doc"},
+		{name: "Swagger UI", path: OpenAPIV2Prefix + OpenAPISwaggerUIEndpoint, uiMarker: "swagger-ui"},
 	}
 
 	for _, test := range tests {
@@ -39,6 +40,7 @@ func TestNewOpenAPIUIHandler(t *testing.T) {
 			handler.ServeHTTP(response, request)
 
 			require.Equal(t, http.StatusOK, response.Code)
+			assert.Contains(t, response.Body.String(), test.uiMarker)
 			assert.Contains(t, response.Body.String(), OpenAPIswaggerJSONEndpoint)
 		})
 	}
