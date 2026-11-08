@@ -31,7 +31,7 @@ func TestCollectorAccessorsWhileExportsArrive(t *testing.T) {
 		go func(exporter int) {
 			defer wg.Done()
 			for i := 0; i < exports; i++ {
-				spanID := []byte{byte(exporter + 1), byte(i + 1)}
+				spanID := []byte(fmt.Sprintf("%08d", exporter*exports+i+1))
 				traceRequest := &collectortrace.ExportTraceServiceRequest{
 					ResourceSpans: []*tracepb.ResourceSpans{
 						{
@@ -221,6 +221,7 @@ func TestCloseDrainsInFlightExport(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { server.Stop() })
 	collector := &Collector{server: server, endpoint: listener.Addr().String()}
 	collectortrace.RegisterTraceServiceServer(server, collector)
 	collectormetrics.RegisterMetricsServiceServer(server, metricsService{collector: collector})
