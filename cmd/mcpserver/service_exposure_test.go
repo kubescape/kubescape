@@ -495,3 +495,44 @@ func TestAnalyzeServiceExposure_CrossNamespaceBackendRefIsFlaggedUnclear(t *test
 	require.Empty(t, findingPaths(t, services, "app"), "this package does not confirm cross-namespace backendRefs into a path")
 	require.True(t, findingIsUnclear(t, services, "app"), "an empty result here must not be read as a confirmed all-clear")
 }
+
+func TestAnalyzeServiceExposure_BackendRedirectDoesNotExposeService(t *testing.T) {
+	for _, redirect := range []bool{false, true} {
+		name := "forward"
+		if redirect {
+			name = "redirect"
+		}
+		t.Run(name, func(t *testing.T) {
+			svc := unstructuredService("prod", "app", "ClusterIP")
+			svc.Object["spec"].(map[string]any)["ports"] = []any{map[string]any{"port": int64(80)}}
+			backend := map[string]any{"name": "app", "port": int64(80)}
+			if redirect {
+				backend["filters"] = []any{map[string]any{"type": "RequestRedirect", "requestRedirect": map[string]any{"hostname": "public.example.com", "statusCode": int64(302)}}}
+			}
+			route := &unstructured.Unstructured{Object: map[string]any{
+				"apiVersion": "gateway.networking.k8s.io/v1", "kind": "HTTPRoute",
+				"metadata": map[string]any{"name": "route", "namespace": "prod"},
+				"spec":     map[string]any{"parentRefs": []any{map[string]any{"name": "gw"}}, "rules": []any{map[string]any{"backendRefs": []any{backend}}}},
+			}}
+			gw := &unstructured.Unstructured{Object: map[string]any{
+				"apiVersion": "gateway.networking.k8s.io/v1", "kind": "Gateway",
+				"metadata": map[string]any{"name": "gw", "namespace": "prod"},
+				"spec":     map[string]any{"listeners": []any{map[string]any{"name": "http", "protocol": "HTTP", "port": int64(80)}}},
+			}}
+			ksServer := newServiceExposureTestServer(t, svc, route)
+			_, err := ksServer.k8sClient.DynamicClient.Resource(gatewayGVR).Namespace("prod").Create(context.Background(), gw, metav1.CreateOptions{})
+			require.NoError(t, err)
+			result := registeredToolResult(t, dispatchRegisteredTool(t, ksServer, "analyze_service_exposure", map[string]any{"namespace": "prod", "service_name": "app"}))
+			require.False(t, result.IsError)
+			var parsed map[string]any
+			require.NoError(t, json.Unmarshal([]byte(toolResultText(t, result)), &parsed))
+			services := parsed["services"].(map[string]any)
+			require.False(t, findingIsUnclear(t, services, "app"))
+			if redirect {
+				require.Empty(t, findingPaths(t, services, "app"))
+			} else {
+				require.Len(t, findingPaths(t, services, "app"), 1)
+			}
+		})
+	}
+}
