@@ -271,7 +271,12 @@ func decodeGatewayRoute(kind string, obj map[string]any) (gatewayRoute, error) {
 	for _, rule := range wire.Spec.Rules {
 		var backends []backendRef
 		for _, b := range rule.BackendRefs {
-			backends = append(backends, b.reference())
+			// A backend-scoped HTTP redirect is a terminal response, not a
+			// request to the referenced Service. Keep processing mirrors separately:
+			// request copies may still reach their own targets.
+			if kind != "HTTPRoute" || !redirectsRequest(b.Filters) {
+				backends = append(backends, b.reference())
+			}
 			// Backend filters apply only when traffic is sent to that backend.
 			if b.Weight == nil || *b.Weight > 0 {
 				parent := b.reference()
