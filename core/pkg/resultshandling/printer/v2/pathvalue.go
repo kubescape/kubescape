@@ -115,7 +115,7 @@ func extractValueAtPath(obj map[string]any, path string) (string, bool) {
 	if !ok {
 		return "", false
 	}
-	return anyToString(cur)
+	return anyToString(maskScrubbed(cur))
 }
 
 // extractRedactedValueAtPath is extractValueAtPath for output that must not
@@ -152,7 +152,44 @@ func extractRedactedValueAtPath(kind string, obj map[string]any, path string) (s
 			}
 		}
 	}
-	return anyToString(redactSensitiveDescendants(kind, segments, cur))
+	return anyToString(redactSensitiveDescendants(kind, segments, maskScrubbed(cur)))
+}
+
+// scrubbedPlaceholder is the text the scan writes over the contents of Secret
+// and ConfigMap data and over container environment variable values before any
+// output is built. The original is gone by then, so a path that resolves to it
+// has no value to show, and printing the placeholder would present it as the
+// field's real value. The literal is repeated here, and not imported, so the
+// printer does not depend on the scan code that writes it.
+const scrubbedPlaceholder = "XXXXXX"
+
+// maskScrubbed returns v with every scrubbedPlaceholder string replaced by
+// redactedValue, so evidence reads "[redacted]" where the scan removed a value.
+// Maps and lists are copied, not modified, because the object belongs to the scan.
+// It applies with --show-secrets too: that flag cannot bring back a value the
+// scan has already removed.
+func maskScrubbed(v any) any {
+	switch val := v.(type) {
+	case string:
+		if val == scrubbedPlaceholder {
+			return redactedValue
+		}
+		return val
+	case map[string]any:
+		out := make(map[string]any, len(val))
+		for key, child := range val {
+			out[key] = maskScrubbed(child)
+		}
+		return out
+	case []any:
+		out := make([]any, len(val))
+		for i, child := range val {
+			out[i] = maskScrubbed(child)
+		}
+		return out
+	default:
+		return v
+	}
 }
 
 // isCommandLineSegment reports whether a path segment names a container's args
