@@ -948,3 +948,33 @@ func TestIsResolutionError(t *testing.T) {
 		})
 	}
 }
+
+func TestGetImageExceptionsFromFile_OversizedFileRejected(t *testing.T) {
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "oversized_exceptions.json")
+	f, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY, 0o600)
+	require.NoError(t, err)
+	require.NoError(t, f.Truncate(maxImageExceptionsBytes+1))
+	require.NoError(t, f.Close())
+
+	_, err = GetImageExceptionsFromFile(filePath)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrImageExceptionsTooLarge)
+}
+
+func TestGetImageExceptionsFromFile_NonRegularFileRejected(t *testing.T) {
+	// /dev/null is a character device, not a regular file
+	if _, err := os.Stat("/dev/null"); err == nil {
+		_, err := GetImageExceptionsFromFile("/dev/null")
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrImageExceptionsNotRegular)
+	}
+}
+
+func TestGetImageExceptionsFromFile_DirectoryRejected(t *testing.T) {
+	dir := t.TempDir()
+	_, err := GetImageExceptionsFromFile(dir)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrImageExceptionsNotRegular)
+	assert.Contains(t, err.Error(), "is a directory, not a file")
+}
