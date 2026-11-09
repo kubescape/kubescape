@@ -203,9 +203,15 @@ func (b *builder) addExposureEdges(from, to NodeID, paths []exposurepkg.Exposure
 	})
 	for _, ep := range paths {
 		switch ep.Kind {
-		case exposurepkg.ExposureIngress, exposurepkg.ExposureHTTPRoute, exposurepkg.ExposureGRPCRoute:
+		case exposurepkg.ExposureIngress:
 			ingressLike = true
 			b.g.addEdge(Edge{From: from, To: to, Kind: EdgeExposes, Evidence: exposureEvidence(ep), Certain: true})
+		case exposurepkg.ExposureHTTPRoute, exposurepkg.ExposureGRPCRoute:
+			ingressLike = true
+			// Gateway attachment is intentionally included when the parent Gateway
+			// is uncollected (exposure/index.go:344–347). Without the Gateway
+			// object the attachment cannot be verified, so the edge is uncertain.
+			b.g.addEdge(Edge{From: from, To: to, Kind: EdgeExposes, Evidence: exposureEvidence(ep) + " (Gateway attachment unverified)", Certain: false})
 		default:
 			otherExposure = true
 			b.g.addEdge(Edge{
@@ -289,10 +295,12 @@ func (b *builder) networkHop(svc *corev1.Service, ref WorkloadRef, ingressLike b
 	if !ok {
 		return hopUnknown, "backend pod labels could not be resolved"
 	}
-	if !b.npIdx.IsIsolated(dst, networkpolicy.Ingress) {
+	// Resolve controllers before the ingress-isolation check so that an
+	// unrestricted backend still gets an egress verdict from the controller.
+	controllers := b.controllerEndpoints()
+	if !b.npIdx.IsIsolated(dst, networkpolicy.Ingress) && len(controllers) == 0 {
 		return hopAllowed, "no NetworkPolicy isolates the backend for ingress; every source is admitted"
 	}
-	controllers := b.controllerEndpoints()
 	if len(controllers) == 0 {
 		return hopUnknown, "backend is ingress-isolated by NetworkPolicy and the ingress controller is not identified (BuildOptions.IngressControllers)"
 	}
@@ -377,7 +385,18 @@ func (b *builder) namedContainerPort(ref WorkloadRef, name string, proto corev1.
 	if err != nil || !found || !isMap {
 		return 0, false
 	}
-	containers, _ := containersOf(spec, "containers", "initContainers")
+	regularContainers, _ := containersOf(spec, "containers")
+	allInitContainers, _ := containersOf(spec, "initContainers")
+	// Kubernetes FindPort resolves named ports from regular containers and only
+	// init containers with restartPolicy=Always (sidecar containers).
+	// Ordinary setup init containers are excluded.
+	// See k8s.io/endpointslice/utils.go (k8s v1.37+).
+	containers := slices.Clone(regularContainers)
+	for _, c := range allInitContainers {
+		if rp, _ := c["restartPolicy"].(string); rp == "Always" {
+			containers = append(containers, c)
+		}
+	}
 	for _, c := range containers {
 		ports, _ := c["ports"].([]any)
 		for _, item := range ports {

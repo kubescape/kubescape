@@ -13,10 +13,10 @@ var (
 )
 
 func fxNodeKind(id NodeID) NodeKind {
-	switch {
-	case id == fxInternet:
+	switch id {
+	case fxInternet:
 		return NodeInternet
-	case id == fxAdmin:
+	case fxAdmin:
 		return NodeClusterAdmin
 	default:
 		return NodeWorkload
