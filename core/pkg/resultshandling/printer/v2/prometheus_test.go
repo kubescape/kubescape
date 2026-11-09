@@ -393,6 +393,38 @@ func TestImagePrometheusFormat_CountsKEVMatches(t *testing.T) {
 	assert.Contains(t, output, `kubescape_image_count_cve{image="nginx:1.17.0",platform="linux/amd64",severity="Medium"} 3`+"\n")
 }
 
+// TestImagePrometheusFormat_CountsFixableMatches pins the fixable gauge: per
+// image and severity, only CVEs whose fix state is "fixed" count. not-fixed,
+// wont-fix and unknown must stay out, so the gauge is not just the CVE total.
+func TestImagePrometheusFormat_CountsFixableMatches(t *testing.T) {
+	newMatch := func(id, severity string, state vulnerability.FixState) match.Match {
+		return match.Match{
+			Package: grypepkg.Package{ID: grypepkg.ID("pkg-" + id), Name: "pkg-" + id, Version: "1.0.0"},
+			Vulnerability: vulnerability.Vulnerability{
+				Fix:      vulnerability.Fix{State: state},
+				Metadata: &vulnerability.Metadata{ID: id, Severity: severity},
+			},
+		}
+	}
+	imageData := []cautils.ImageScanData{{
+		Image:    "nginx:1.17.0",
+		Platform: "linux/amd64",
+		Matches: match.NewMatches(
+			newMatch("CVE-2026-0001", "High", vulnerability.FixStateFixed),
+			newMatch("CVE-2026-0002", "High", vulnerability.FixStateNotFixed),
+			newMatch("CVE-2026-0003", "High", vulnerability.FixStateWontFix),
+			newMatch("CVE-2026-0004", "High", vulnerability.FixStateUnknown),
+			newMatch("CVE-2026-0005", "Low", vulnerability.FixStateNotFixed),
+		),
+	}}
+
+	output := NewPrometheusPrinter(false).generateImagePrometheusFormat(imageData).String()
+
+	assert.Contains(t, output, `kubescape_image_count_cve{image="nginx:1.17.0",platform="linux/amd64",severity="High"} 4`+"\n")
+	assert.Contains(t, output, `kubescape_image_count_cve_fixable{image="nginx:1.17.0",platform="linux/amd64",severity="High"} 1`+"\n")
+	assert.Contains(t, output, `kubescape_image_count_cve_fixable{image="nginx:1.17.0",platform="linux/amd64",severity="Low"} 0`+"\n")
+}
+
 func TestSetImageVulnerabilities_DeterministicSeverityOrder(t *testing.T) {
 	severities := []string{"Critical", "High", "Medium", "Low", "Negligible", "Unknown"}
 	matches := make([]match.Match, 0, len(severities))
