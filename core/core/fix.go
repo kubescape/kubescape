@@ -103,7 +103,7 @@ func (ks *Kubescape) Fix(fixInfo *metav1.FixInfo) error {
 					if isTerminal(fd) || isCygwinTerminal(fd) {
 						fmt.Fprintf(os.Stderr, "Directory %q already contains Kustomize files. Overwrite? [y/N]: ", fixInfo.KustomizeDir)
 						var resp string
-						if _, err := fmt.Fscanln(os.Stdin, &resp); err != nil || strings.ToLower(strings.TrimSpace(resp)) != "y" {
+						if _, err := fmt.Fscanln(os.Stdin, &resp); err != nil || !isAffirmative(resp) {
 							logger.L().Info("Kustomize patch generation cancelled by user.")
 							skipKustomize = true
 						} else {
@@ -346,4 +346,14 @@ func confirm(in io.Reader) bool {
 
 	logger.L().Warning("no valid confirmation received after repeated attempts; treating as declined and applying no changes")
 	return false
+}
+
+// isAffirmative reports whether resp is an affirmative confirmation ("y" or "yes", case-insensitive).
+func isAffirmative(resp string) bool {
+	switch strings.ToLower(strings.TrimSpace(resp)) {
+	case "y", "yes":
+		return true
+	default:
+		return false
+	}
 }
