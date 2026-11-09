@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"testing"
@@ -734,11 +735,15 @@ func TestVerifyRemediation_RealScanNeverInfersFixFromAbsence(t *testing.T) {
 	}
 	snapshot := func() map[string]string {
 		out := map[string]string{}
-		require.NoError(t, filepath.Walk(dir, func(p string, info os.FileInfo, err error) error {
-			if err != nil || info.IsDir() {
+		root, err := os.OpenRoot(dir)
+		require.NoError(t, err)
+		defer root.Close()
+		fsys := root.FS()
+		require.NoError(t, fs.WalkDir(fsys, ".", func(p string, d fs.DirEntry, err error) error {
+			if err != nil || d.IsDir() {
 				return err
 			}
-			b, rerr := os.ReadFile(p)
+			b, rerr := fs.ReadFile(fsys, p)
 			out[p] = string(b)
 			return rerr
 		}))
