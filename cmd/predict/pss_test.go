@@ -3,7 +3,6 @@ package predict
 import (
 	"bytes"
 	"context"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -33,55 +32,104 @@ func TestGetPredictCmd(t *testing.T) {
 }
 
 func TestGetPredictCmd_RejectsUnexpectedArgs(t *testing.T) {
-	cmd := GetPredictCmd()
-	cmd.SilenceErrors = true
-	cmd.SilenceUsage = true
+	t.Run("args validation", func(t *testing.T) {
+		tests := []struct {
+			name        string
+			args        []string
+			wantErr     bool
+			errContains string
+		}{
+			{
+				name:    "no arguments is accepted",
+				args:    []string{},
+				wantErr: false,
+			},
+			{
+				name:        "unexpected single argument is rejected",
+				args:        []string{"unexpected"},
+				wantErr:     true,
+				errContains: `unknown command "unexpected" for "predict"`,
+			},
+			{
+				name:        "multiple unexpected arguments rejected on first unknown command",
+				args:        []string{"foo", "bar"},
+				wantErr:     true,
+				errContains: `unknown command "foo" for "predict"`,
+			},
+		}
 
-	// No arguments should pass Args validation
-	require.NoError(t, cmd.Args(cmd, []string{}))
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				cmd := GetPredictCmd()
+				err := cmd.Args(cmd, tt.args)
+				if tt.wantErr {
+					require.Error(t, err)
+					assert.Contains(t, err.Error(), tt.errContains)
+				} else {
+					require.NoError(t, err)
+				}
+			})
+		}
+	})
 
-	// Extraneous arguments should be rejected by Args validation
-	err := cmd.Args(cmd, []string{"unexpected"})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), `unknown command "unexpected" for "predict"`)
+	t.Run("command execution", func(t *testing.T) {
+		tests := []struct {
+			name        string
+			args        []string
+			wantErr     bool
+			errContains string
+			outContains string
+		}{
+			{
+				name:        "no arguments displays help without error",
+				args:        []string{},
+				wantErr:     false,
+				outContains: "Predict which workloads would fail or break under security policy",
+			},
+			{
+				name:        "unexpected argument fails execution",
+				args:        []string{"unexpected"},
+				wantErr:     true,
+				errContains: `unknown command "unexpected" for "predict"`,
+			},
+			{
+				name:        "multiple unexpected arguments fail execution",
+				args:        []string{"foo", "bar"},
+				wantErr:     true,
+				errContains: `unknown command "foo" for "predict"`,
+			},
+			{
+				name:        "valid subcommand pss routes normally",
+				args:        []string{"pss", "--help"},
+				wantErr:     false,
+				outContains: "predict pss [<path>.../`-`] [flags]",
+			},
+		}
 
-	// Execution with no arguments should display help without error
-	var helpBuf bytes.Buffer
-	cmdNoArgs := GetPredictCmd()
-	cmdNoArgs.SetArgs([]string{})
-	cmdNoArgs.SetOut(&helpBuf)
-	require.NoError(t, cmdNoArgs.Execute())
-	assert.Contains(t, helpBuf.String(), "Predict which workloads would fail or break under security policy")
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				cmd := GetPredictCmd()
+				cmd.SilenceErrors = true
+				cmd.SilenceUsage = true
 
-	// Execution with unexpected arguments should fail
-	cmdUnexpected := GetPredictCmd()
-	cmdUnexpected.SilenceErrors = true
-	cmdUnexpected.SilenceUsage = true
-	cmdUnexpected.SetArgs([]string{"unexpected"})
-	cmdUnexpected.SetOut(io.Discard)
-	cmdUnexpected.SetErr(io.Discard)
-	err = cmdUnexpected.Execute()
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), `unknown command "unexpected" for "predict"`)
+				var out bytes.Buffer
+				cmd.SetArgs(tt.args)
+				cmd.SetOut(&out)
+				cmd.SetErr(&out)
 
-	// Execution with multiple unexpected arguments should fail on the first unknown command
-	cmdMultiple := GetPredictCmd()
-	cmdMultiple.SilenceErrors = true
-	cmdMultiple.SilenceUsage = true
-	cmdMultiple.SetArgs([]string{"foo", "bar"})
-	cmdMultiple.SetOut(io.Discard)
-	cmdMultiple.SetErr(io.Discard)
-	err = cmdMultiple.Execute()
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), `unknown command "foo" for "predict"`)
-
-	// Valid subcommands like "pss --help" should continue to route normally
-	var pssHelpBuf bytes.Buffer
-	cmdPSS := GetPredictCmd()
-	cmdPSS.SetArgs([]string{"pss", "--help"})
-	cmdPSS.SetOut(&pssHelpBuf)
-	require.NoError(t, cmdPSS.Execute())
-	assert.Contains(t, pssHelpBuf.String(), "predict pss [<path>.../`-`] [flags]")
+				err := cmd.Execute()
+				if tt.wantErr {
+					require.Error(t, err)
+					assert.Contains(t, err.Error(), tt.errContains)
+				} else {
+					require.NoError(t, err)
+					if tt.outContains != "" {
+						assert.Contains(t, out.String(), tt.outContains)
+					}
+				}
+			})
+		}
+	})
 }
 
 func TestRunPSS_FlagValidation(t *testing.T) {
