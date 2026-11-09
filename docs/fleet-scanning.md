@@ -174,11 +174,13 @@ same. For example, it has no `resources` and its controls have no `severity`.
 
 The report format may still change while fleet scanning is in alpha. New fields
 can be added at any time, so ignore the ones you do not recognise. New cluster
-`status` and exclusion `reason` values can also appear, so treat a value you do
-not recognise as a cluster that was not scanned. A control status you do not
-recognise, in `controlMatrix` or in `divergence.controls[].referenceStatus`,
-counts as `notEvaluated`. Removing or renaming a field, or changing what a value
-means, will be called out in the release notes.
+`status` values can also appear, so treat a status you do not recognise as a
+cluster that was not scanned. A new exclusion `reason` still means the cluster
+was left out of the fleet score, and its `status` in `clusters` says whether it
+was scanned. A control status you do not recognise, in `controlMatrix` or in
+`divergence.controls[].referenceStatus`, counts as `notEvaluated`. Removing or
+renaming a field, or changing what a value means, will be called out in the
+release notes.
 
 ## Exit code
 
