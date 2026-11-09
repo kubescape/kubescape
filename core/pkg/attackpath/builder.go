@@ -209,8 +209,8 @@ func (b *builder) addExposureEdges(from, to NodeID, paths []exposurepkg.Exposure
 		case exposurepkg.ExposureHTTPRoute, exposurepkg.ExposureGRPCRoute:
 			ingressLike = true
 			// Gateway attachment is intentionally included when the parent Gateway
-			// is uncollected (exposure/index.go:344–347). Without the Gateway
-			// object the attachment cannot be verified, so the edge is uncertain.
+			// is uncollected (exposure/index.go:344–347). ExposurePath carries no
+			// per-path certainty signal, so all Gateway routes are marked uncertain.
 			b.g.addEdge(Edge{From: from, To: to, Kind: EdgeExposes, Evidence: exposureEvidence(ep) + " (Gateway attachment unverified)", Certain: false})
 		default:
 			otherExposure = true
@@ -299,6 +299,11 @@ func (b *builder) networkHop(svc *corev1.Service, ref WorkloadRef, ingressLike b
 	// unrestricted backend still gets an egress verdict from the controller.
 	controllers := b.controllerEndpoints()
 	if !b.npIdx.IsIsolated(dst, networkpolicy.Ingress) && len(controllers) == 0 {
+		if b.controllersPartial {
+			// Controllers were configured but none resolved; we cannot verify
+			// egress, so the hop is uncertain even though ingress is open.
+			return hopUnknown, "ingress controllers configured but could not be resolved; egress cannot be verified"
+		}
 		return hopAllowed, "no NetworkPolicy isolates the backend for ingress; every source is admitted"
 	}
 	if len(controllers) == 0 {
@@ -585,20 +590,26 @@ func (b *builder) workloadNode(ref WorkloadRef) Node {
 // (highest severity, fix available if any copy has one), sorted by severity
 // descending then ID.
 func collectVulnerabilities(vulns []storagev1beta1.Vulnerability, minSeverity vulnexposure.Severity) []Vulnerability {
-	byID := make(map[string]Vulnerability)
+	// First pass: merge all copies of each CVE across all severity levels so a
+	// lower-severity copy that carries a fix is not discarded before it can set
+	// FixAvailable on a higher-severity copy of the same CVE.
+	merged := make(map[string]Vulnerability)
 	for _, v := range vulns {
 		sev := vulnexposure.ParseSeverity(v.Severity)
-		if sev < minSeverity {
-			continue
-		}
 		fix := vulnexposure.FixAvailable(v)
-		if cur, seen := byID[v.ID]; seen {
+		if cur, seen := merged[v.ID]; seen {
 			sev = max(sev, vulnexposure.ParseSeverity(cur.Severity))
 			fix = fix || cur.FixAvailable
 		}
-		byID[v.ID] = Vulnerability{ID: v.ID, Severity: sev.String(), FixAvailable: fix}
+		merged[v.ID] = Vulnerability{ID: v.ID, Severity: sev.String(), FixAvailable: fix}
 	}
-	out := slices.Collect(maps.Values(byID))
+	// Second pass: apply severity threshold.
+	var out []Vulnerability
+	for _, v := range merged {
+		if vulnexposure.ParseSeverity(v.Severity) >= minSeverity {
+			out = append(out, v)
+		}
+	}
 	slices.SortFunc(out, func(a, c Vulnerability) int {
 		if r := cmp.Compare(vulnexposure.ParseSeverity(c.Severity), vulnexposure.ParseSeverity(a.Severity)); r != 0 {
 			return r
