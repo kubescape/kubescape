@@ -231,14 +231,19 @@ func validateSBOMOutput(scanInfo *cautils.ScanInfo, format string) error {
 	return nil
 }
 
-// GetOutputPrinters constructs and validates result printers for each requested format.
-// It verifies printer compatibility, checks for output path collisions across formats,
-// and validates destination path safety against all scan input sources before opening any writers.
-func GetOutputPrinters(scanInfo *cautils.ScanInfo, ctx context.Context, clusterName string) ([]printer.IPrinter, error) {
-	// Validate every format and check every output path before opening any
-	// writer: SetWriter truncates the file it opens, so a collision found after
-	// an earlier format's writer was set up would already have emptied a report
-	// left there by a previous run.
+// ValidateOutputPrinters validates printer compatibility, multi-format path collisions,
+// and destination path safety against all scan input sources without opening any writers.
+// For image scans, recursive directory traversal is deferred to GetOutputPrinters so that
+// large image rootfs directories are traversed only once.
+func ValidateOutputPrinters(scanInfo *cautils.ScanInfo) error {
+	traverseDirs := scanInfo == nil || scanInfo.ScanType != cautils.ScanTypeImage
+	_, err := validateAndResolvePrinters(scanInfo, traverseDirs)
+	return err
+}
+
+// validateAndResolvePrinters checks printer compatibility, resolves output paths,
+// and validates safety against input sources, optionally skipping recursive directory traversal.
+func validateAndResolvePrinters(scanInfo *cautils.ScanInfo, traverseDirs bool) ([]string, error) {
 	requested := scanInfo.Formats()
 	formats := make([]string, 0, len(requested))
 	containPrettyPrinter := false
@@ -276,9 +281,21 @@ func GetOutputPrinters(scanInfo *cautils.ScanInfo, ctx context.Context, clusterN
 	}
 	slices.Sort(outputPaths)
 	for _, path := range outputPaths {
-		if err := validateScanOutputSafety(path, scanInfo); err != nil {
+		if err := validateScanOutputSafety(path, scanInfo, traverseDirs); err != nil {
 			return nil, err
 		}
+	}
+
+	return formats, nil
+}
+
+// GetOutputPrinters constructs and validates result printers for each requested format.
+// It verifies printer compatibility, checks for output path collisions across formats,
+// and performs a fresh destination path safety check against all scan input sources before opening any writers.
+func GetOutputPrinters(scanInfo *cautils.ScanInfo, ctx context.Context, clusterName string) ([]printer.IPrinter, error) {
+	formats, err := validateAndResolvePrinters(scanInfo, true)
+	if err != nil {
+		return nil, err
 	}
 
 	outputPrinters := make([]printer.IPrinter, 0, len(formats))
@@ -612,8 +629,9 @@ func checkGlobCollision(rawPath string, scanInfo *cautils.ScanInfo, destInfo fs.
 // input manifest, baseline report, exceptions file, framework definition, or controls
 // configuration. SetWriter truncates the destination file immediately on open with
 // O_TRUNC, so an alias to any of these input sources would destroy user data before the
-// scan can read or compare it.
-func validateScanOutputSafety(outputFile string, scanInfo *cautils.ScanInfo) error {
+// scan can read or compare it. When traverseDirs is false, recursive directory traversal is
+// deferred to GetOutputPrinters.
+func validateScanOutputSafety(outputFile string, scanInfo *cautils.ScanInfo, traverseDirs bool) error {
 	if outputFile == "" || outputFile == os.DevNull || scanInfo == nil {
 		return nil
 	}
@@ -640,7 +658,13 @@ func validateScanOutputSafety(outputFile string, scanInfo *cautils.ScanInfo) err
 			return nil
 		}
 		if info.IsDir() {
-			return checkDirectoryCollision(inputPath, scanInfo, destInfo, outputFile, nil)
+			if os.SameFile(destInfo, info) {
+				return fmt.Errorf("output path %q would overwrite %s %q; choose a different output file", outputFile, label, inputPath)
+			}
+			if traverseDirs {
+				return checkDirectoryCollision(inputPath, scanInfo, destInfo, outputFile, nil)
+			}
+			return nil
 		}
 		if os.SameFile(destInfo, info) {
 			return fmt.Errorf("output path %q would overwrite %s %q; choose a different output file", outputFile, label, inputPath)
@@ -701,7 +725,12 @@ func validateScanOutputSafety(outputFile string, scanInfo *cautils.ScanInfo) err
 			continue
 		}
 		rawPath := pattern
-		if strings.HasPrefix(rawPath, "docker-archive:") {
+		if rest, _ := peelGenericImageSelector(rawPath); rest != "" {
+			rawPath = rest
+		}
+		if scheme := detectScheme(rawPath); scheme != "" {
+			rawPath = strings.TrimPrefix(rawPath, scheme+":")
+		} else if strings.HasPrefix(rawPath, "docker-archive:") {
 			rawPath = strings.TrimPrefix(rawPath, "docker-archive:")
 		} else if strings.HasPrefix(rawPath, "oci-archive:") {
 			rawPath = strings.TrimPrefix(rawPath, "oci-archive:")
@@ -739,8 +768,17 @@ func validateScanOutputSafety(outputFile string, scanInfo *cautils.ScanInfo) err
 					return fmt.Errorf("output path %q would overwrite %s %q; choose a different output file", outputFile, label, pattern)
 				}
 			} else {
-				if err := checkDirectoryCollision(rawPath, scanInfo, destInfo, outputFile, nil); err != nil {
-					return err
+				if os.SameFile(destInfo, info) {
+					label := "input manifest"
+					if scanInfo.ScanType == cautils.ScanTypeImage {
+						label = "input image"
+					}
+					return fmt.Errorf("output path %q would overwrite %s %q; choose a different output file", outputFile, label, pattern)
+				}
+				if traverseDirs {
+					if err := checkDirectoryCollision(rawPath, scanInfo, destInfo, outputFile, nil); err != nil {
+						return err
+					}
 				}
 			}
 			continue
