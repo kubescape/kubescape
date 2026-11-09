@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/anchore/grype/grype/match"
@@ -15,6 +16,7 @@ import (
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer"
+	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
@@ -351,7 +353,7 @@ func TestSetResourcesCountersFromCatalog_DeterministicOrder(t *testing.T) {
 	catalog := cautils.NewMapResourceCatalog(resources)
 	for i := 0; i < 50; i++ {
 		m := &Metrics{}
-		m.setResourcesCountersFromCatalog(catalog, results, &reportsummary.SummaryDetails{})
+		m.setResourcesCountersFromCatalog(catalog, results, &reportsummary.SummaryDetails{}, nil)
 		got := make([]string, 0, len(m.listResources))
 		for _, r := range m.listResources {
 			got = append(got, r.name)
@@ -541,4 +543,82 @@ func TestSetImageVulnerabilities_DeterministicMultiImageOrder(t *testing.T) {
 		}
 		require.Equal(t, want, got, "multi-image metrics must follow canonical (image, platform, severity) sorted order")
 	}
+}
+
+// duplicateSeries returns every series (metric name plus label set) that occurs
+// more than once in a Prometheus text exposition. Prometheus keeps only one of
+// them and Pushgateway rejects the whole push, while expfmt parses it without
+// complaint, so a parse alone cannot catch this.
+func duplicateSeries(output string) []string {
+	seen := map[string]bool{}
+	var dups []string
+	for _, line := range strings.Split(output, "\n") {
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		series, _, _ := strings.Cut(line, "} ")
+		if seen[series] {
+			dups = append(dups, series+"}")
+		}
+		seen[series] = true
+	}
+	return dups
+}
+
+// TestResourceMetrics_SameObjectInTwoFilesStaysDistinct pins that one object
+// declared in two manifest files (kustomize base and overlay, one copy per
+// environment) yields two distinct series. Both are separate resources in the
+// scan, and without a path label they shared apiVersion, kind, namespace and name.
+func TestResourceMetrics_SameObjectInTwoFilesStaysDistinct(t *testing.T) {
+	newObj := func() workloadinterface.IMetadata {
+		return workloadinterface.NewWorkloadObj(map[string]any{
+			"apiVersion": "apps/v1", "kind": "Deployment",
+			"metadata": map[string]any{"name": "web"},
+		})
+	}
+	control := func(id string, status apis.ScanningStatus) resourcesresults.ResourceAssociatedControl {
+		return resourcesresults.ResourceAssociatedControl{ControlID: id, Status: apis.StatusInfo{InnerStatus: status}}
+	}
+	base := "path=2210625388/api=apps/v1//Deployment/web"
+	prod := "path=1572516384/api=apps/v1//Deployment/web"
+	catalog := cautils.NewMapResourceCatalog(map[string]workloadinterface.IMetadata{base: newObj(), prod: newObj()})
+	results := map[string]resourcesresults.Result{
+		base: {ResourceID: base, AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+			control("C-0057", apis.StatusFailed), control("C-0013", apis.StatusFailed)}},
+		prod: {ResourceID: prod, AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+			control("C-0057", apis.StatusPassed), control("C-0013", apis.StatusPassed)}},
+	}
+	sources := map[string]reporthandling.Source{
+		base: {RelativePath: "base/web.yaml"},
+		prod: {RelativePath: "overlays/prod/web.yaml"},
+	}
+
+	m := &Metrics{}
+	m.setResourcesCountersFromCatalog(catalog, results, &reportsummary.SummaryDetails{}, sources)
+	output := m.String()
+
+	assert.Empty(t, duplicateSeries(output), "output:\n%s", output)
+	assert.Contains(t, output, `kubescape_resource_count_controls_failed{apiVersion="apps/v1",kind="Deployment",namespace="",name="web",path="base/web.yaml"} 2`+"\n")
+	assert.Contains(t, output, `kubescape_resource_count_controls_failed{apiVersion="apps/v1",kind="Deployment",namespace="",name="web",path="overlays/prod/web.yaml"} 0`+"\n")
+	assert.Contains(t, output, `kubescape_resource_count_controls_passed{apiVersion="apps/v1",kind="Deployment",namespace="",name="web",path="overlays/prod/web.yaml"} 2`+"\n")
+}
+
+// TestResourceMetrics_ClusterScanKeepsLabels pins that a scan without source
+// paths, as a live cluster scan is, keeps its resource labels unchanged.
+func TestResourceMetrics_ClusterScanKeepsLabels(t *testing.T) {
+	id := "apps/v1/default/Deployment/web"
+	catalog := cautils.NewMapResourceCatalog(map[string]workloadinterface.IMetadata{
+		id: workloadinterface.NewWorkloadObj(map[string]any{
+			"apiVersion": "apps/v1", "kind": "Deployment",
+			"metadata": map[string]any{"name": "web", "namespace": "default"},
+		}),
+	})
+	results := map[string]resourcesresults.Result{id: {ResourceID: id}}
+
+	m := &Metrics{}
+	m.setResourcesCountersFromCatalog(catalog, results, &reportsummary.SummaryDetails{}, nil)
+	output := m.String()
+
+	assert.Contains(t, output, `kubescape_resource_count_controls_failed{apiVersion="apps/v1",kind="Deployment",namespace="default",name="web"} 0`+"\n")
+	assert.NotContains(t, output, "path=")
 }

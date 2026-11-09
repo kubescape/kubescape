@@ -8,6 +8,7 @@ import (
 
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
+	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
@@ -205,6 +206,9 @@ func (mrc *mResources) labels() string {
 	r += fmt.Sprintf("kind=\"%s\"", escapePrometheusLabelValue(mrc.kind)) + ","
 	r += fmt.Sprintf("namespace=\"%s\"", escapePrometheusLabelValue(mrc.namespace)) + ","
 	r += fmt.Sprintf("name=\"%s\"", escapePrometheusLabelValue(mrc.name))
+	if mrc.withPath {
+		r += "," + fmt.Sprintf("path=\"%s\"", escapePrometheusLabelValue(mrc.path))
+	}
 	return r
 }
 func (mrc *mResources) prefix() string {
@@ -362,10 +366,18 @@ type mFrameworkComplianceScore struct {
 }
 
 type mResources struct {
-	name                 string
-	namespace            string
-	apiVersion           string
-	kind                 string
+	name       string
+	namespace  string
+	apiVersion string
+	kind       string
+	// path is the manifest file the resource was read from. It tells apart the
+	// same object declared in several files (kustomize base and overlays, one
+	// copy per environment), which would otherwise share all four labels above.
+	path string
+	// withPath is set on every resource of a scan that has at least one source
+	// path, so all series of a family carry the same label names. A cluster scan
+	// has no source paths and keeps its labels unchanged.
+	withPath             bool
 	controlsCountPassed  int
 	controlsCountFailed  int
 	controlsCountSkipped int
@@ -490,7 +502,8 @@ func resourceControlStatusCounters(summary *reportsummary.SummaryDetails, result
 func (m *Metrics) setResourcesCountersFromCatalog(
 	catalog cautils.ResourceCatalog,
 	results map[string]resourcesresults.Result,
-	summaryDetails *reportsummary.SummaryDetails) {
+	summaryDetails *reportsummary.SummaryDetails,
+	sources map[string]reporthandling.Source) {
 
 	if catalog == nil {
 		return
@@ -518,6 +531,7 @@ func (m *Metrics) setResourcesCountersFromCatalog(
 		mrc.namespace = r.GetNamespace()
 		mrc.kind = r.GetKind()
 		mrc.name = r.GetName()
+		mrc.path = BestSourcePath(sources[resourceID])
 
 		// append
 		mrc.controlsCountPassed = passed
@@ -527,6 +541,18 @@ func (m *Metrics) setResourcesCountersFromCatalog(
 		m.listResources = append(m.listResources, mrc)
 	}
 
+	// Two files can declare the same object, and each is its own resource in the
+	// scan, but apiVersion, kind, namespace and name would be identical. Prometheus
+	// rejects a scrape or a push with repeated series, or keeps only one of them,
+	// so a file scan labels every resource with its path.
+	for i := range m.listResources {
+		if m.listResources[i].path != "" {
+			for j := range m.listResources {
+				m.listResources[j].withPath = true
+			}
+			break
+		}
+	}
 }
 
 // setImageVulnerabilities builds per-image, per-severity CVE counters for an image scan (#2782)
