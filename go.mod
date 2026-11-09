@@ -15,7 +15,7 @@ require (
 	github.com/anchore/stereoscope v0.1.22
 	github.com/anchore/syft v1.42.3
 	github.com/anubhav06/copa-grype v1.0.4-alpha.1
-	github.com/armosec/armoapi-go v0.0.760
+	github.com/armosec/armoapi-go v0.0.774
 	github.com/armosec/utils-go v0.0.58
 	github.com/armosec/utils-k8s-go v0.0.35
 	github.com/aws/aws-sdk-go-v2 v1.47.3
@@ -451,7 +451,7 @@ require (
 	github.com/moby/docker-image-spec v1.3.1 // indirect
 	github.com/moby/go-archive v0.3.0 // indirect
 	github.com/moby/locker v1.0.1 // indirect
-	github.com/moby/moby/api v1.55.0 // indirect
+	github.com/moby/moby/api v1.56.0 // indirect
 	github.com/moby/moby/client v0.5.0 // indirect
 	github.com/moby/patternmatcher v0.6.1 // indirect
 	github.com/moby/policy-helpers v0.0.0-20260901142052-72f704e6cdb6 // indirect
