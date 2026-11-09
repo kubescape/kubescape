@@ -126,17 +126,50 @@ func TestScrubbedPlaceholderIsMaskedOnlyWhereTheScanWritesIt(t *testing.T) {
 		}
 	}
 
-	t.Run("a field outside a container that reads the same is kept with --show-secrets", func(t *testing.T) {
-		// "env[0].value" is redacted by name wherever it appears, so only
-		// --show-secrets can show whether the scrub logic itself treats it as
-		// scrubbed. It must not: a custom resource's env is not a container's.
-		widget := &mockResource{kind: "Widget", obj: map[string]any{
-			"spec": map[string]any{"env": []any{map[string]any{"name": "A", "value": x}}},
-		}}
-		const path = "spec.env[0].value"
-		got := evidencePathsWithCurrentValues(deletePathControl(path), widget, true)
-		assert.Equal(t, []string{path + " (current: " + x + ")"}, got)
-	})
+	// "env[0].value" is redacted by name wherever it appears, so only
+	// --show-secrets can show whether the scrub logic itself treats the field as
+	// scrubbed. The scan scrubs a container's env at the PodSpec location of its
+	// kind and nowhere else, so a field that merely ends the same way is genuine.
+	notScrubbed := []struct {
+		name string
+		kind string
+		path string
+		obj  map[string]any
+	}{
+		{
+			"a custom resource's nested containers",
+			"Widget", "spec.history.containers[0].env[0].value",
+			map[string]any{"spec": map[string]any{"history": map[string]any{"containers": []any{
+				map[string]any{"env": []any{map[string]any{"name": "A", "value": x}}},
+			}}}},
+		},
+		{
+			"a custom resource's env",
+			"Widget", "spec.env[0].value",
+			map[string]any{"spec": map[string]any{"env": []any{map[string]any{"name": "A", "value": x}}}},
+		},
+		{
+			"a known kind with the containers one level too deep",
+			"Deployment", "spec.history.containers[0].env[0].value",
+			map[string]any{"spec": map[string]any{"history": map[string]any{"containers": []any{
+				map[string]any{"env": []any{map[string]any{"name": "A", "value": x}}},
+			}}}},
+		},
+		{
+			"a Deployment with the Pod's location",
+			"Deployment", "spec.containers[0].env[0].value",
+			map[string]any{"spec": map[string]any{"containers": []any{
+				map[string]any{"env": []any{map[string]any{"name": "A", "value": x}}},
+			}}},
+		},
+	}
+	for _, tt := range notScrubbed {
+		t.Run(tt.name+" is kept with --show-secrets", func(t *testing.T) {
+			resource := &mockResource{kind: tt.kind, obj: tt.obj}
+			got := evidencePathsWithCurrentValues(deletePathControl(tt.path), resource, true)
+			assert.Equal(t, []string{tt.path + " (current: " + x + ")"}, got)
+		})
+	}
 }
 
 func TestMaskScrubbedDoesNotCopyUnchangedSubtrees(t *testing.T) {
@@ -189,4 +222,24 @@ func TestIsScrubbedLocation(t *testing.T) {
 	assert.False(t, isScrubbedLocation("Widget", env("sidecars")))
 	assert.False(t, isScrubbedLocation("Pod", seg("spec", "image")))
 	assert.False(t, isScrubbedLocation("Pod", nil))
+
+	// The PodSpec location differs by kind, and the whole path has to match.
+	at := func(prefix []string, list string) []pathSegment {
+		out := make([]pathSegment, 0, len(prefix)+3)
+		for _, key := range prefix {
+			out = append(out, pathSegment{Key: key, Index: -1})
+		}
+		return append(out, pathSegment{Key: list, Index: 0}, pathSegment{Key: "env", Index: 1}, pathSegment{Key: "value", Index: -1})
+	}
+	template := []string{"spec", "template", "spec"}
+	assert.True(t, isScrubbedLocation("Deployment", at(template, "containers")))
+	assert.True(t, isScrubbedLocation("StatefulSet", at(template, "initContainers")))
+	assert.True(t, isScrubbedLocation("Job", at(template, "ephemeralContainers")))
+	assert.True(t, isScrubbedLocation("CronJob", at([]string{"spec", "jobTemplate", "spec", "template", "spec"}, "containers")))
+	assert.False(t, isScrubbedLocation("Deployment", at([]string{"spec"}, "containers")), "a Deployment's containers are under the template")
+	assert.False(t, isScrubbedLocation("Pod", at(template, "containers")), "a Pod's containers are directly under spec")
+	assert.False(t, isScrubbedLocation("Deployment", at([]string{"spec", "history", "spec"}, "containers")))
+	assert.False(t, isScrubbedLocation("Pod", at([]string{"spec", "history"}, "containers")), "one level too deep")
+	assert.False(t, isScrubbedLocation("Widget", at(template, "containers")), "a kind with no known PodSpec location")
+	assert.False(t, isScrubbedLocation("Pod", at(nil, "containers")), "no prefix at all")
 }

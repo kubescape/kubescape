@@ -197,7 +197,14 @@ const scrubbedPlaceholder = "XXXXXX"
 //   - every entry of a Secret's data and stringData;
 //   - every entry of a ConfigMap's data and binaryData;
 //   - the value of a container, init container or ephemeral container
-//     environment variable, in a pod or in the pod template of a workload.
+//     environment variable, at the PodSpec location of the kind: spec for a
+//     Pod, spec.template.spec for a Deployment, and so on (podSpecPrefixes).
+//
+// The environment variable has to sit at that exact location. The scan finds a
+// pod's containers by the kind's PodSpec path, so a field that only ends in
+// containers[N].env[N].value, such as a custom resource's
+// spec.history.containers[0].env[0].value, is not scrubbed and holds a genuine
+// value. A kind that podSpecPrefixes does not list is left unmasked.
 func isScrubbedLocation(kind string, segments []pathSegment) bool {
 	switch kind {
 	case "Secret":
@@ -205,12 +212,13 @@ func isScrubbedLocation(kind string, segments []pathSegment) bool {
 	case "ConfigMap":
 		return len(segments) >= 2 && (segments[0].Key == "data" || segments[0].Key == "binaryData")
 	}
-	if !isContainerEnvValue(segments) || len(segments) < 3 {
+	prefix, ok := podSpecPrefixes[kind]
+	if !ok || len(segments) != len(prefix)+3 || !equalParentPath(segments[:len(prefix)], prefix) {
 		return false
 	}
-	switch segments[len(segments)-3].Key {
+	switch containers := segments[len(prefix)]; containers.Key {
 	case "containers", "initContainers", "ephemeralContainers":
-		return true
+		return containers.Index >= 0 && isContainerEnvValue(segments)
 	}
 	return false
 }
