@@ -334,3 +334,41 @@ deny[{"alertMessage": msg}] { msg := "from the bare file" }`), 0o600))
 	assert.Contains(t, err.Error(), "no-host-network")
 	assert.Contains(t, err.Error(), "defined twice")
 }
+
+func TestLoadCustomRules_OversizedFileRejected(t *testing.T) {
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "oversized.rego")
+	f, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY, 0o600)
+	require.NoError(t, err)
+	require.NoError(t, f.Truncate(maxPolicyFileBytes+1))
+	require.NoError(t, f.Close())
+
+	t.Run("single file", func(t *testing.T) {
+		fw, err := LoadCustomRules(filePath)
+		require.Error(t, err)
+		assert.Nil(t, fw)
+		assert.ErrorIs(t, err, ErrPolicyTooLarge)
+	})
+
+	t.Run("directory containing oversized file", func(t *testing.T) {
+		fw, err := LoadCustomRules(dir)
+		require.Error(t, err)
+		assert.Nil(t, fw)
+		assert.ErrorIs(t, err, ErrPolicyTooLarge)
+	})
+}
+
+func TestLoadCustomRules_NonRegularFileRejected(t *testing.T) {
+	if _, err := os.Stat("/dev/null"); err != nil {
+		t.Skip("skipping test: /dev/null unavailable")
+	}
+	dir := t.TempDir()
+	deviceSymlink := filepath.Join(dir, "device.rego")
+	if err := os.Symlink("/dev/null", deviceSymlink); err != nil {
+		t.Skipf("skipping test: failed to create symlink: %v", err)
+	}
+	fw, err := LoadCustomRules(deviceSymlink)
+	require.Error(t, err)
+	assert.Nil(t, fw)
+	assert.ErrorIs(t, err, ErrPolicyNotRegular)
+}
