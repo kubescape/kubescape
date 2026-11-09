@@ -497,11 +497,11 @@ func TestCreateIntermediateScanFile_LeavesUserWorkingDirectoryUntouched(t *testi
 	// the legacy scheme (e.g. nginx-1.22.json).
 	userContent := []byte(`{"important_user_manifest": true}`)
 	legacyName := fmt.Sprintf("%s.json", sanitizeImageRefForFilename("nginx:1.22"))
-	require.NoError(t, os.WriteFile(legacyName, userContent, 0o644))
+	require.NoError(t, os.WriteFile(legacyName, userContent, 0o600))
 
 	// Also create a file matching the new temp pattern prefix in cwd to be extra thorough
 	cwdPatternFile := "kubescape-patch-nginx-1.22-local.json"
-	require.NoError(t, os.WriteFile(cwdPatternFile, userContent, 0o644))
+	require.NoError(t, os.WriteFile(cwdPatternFile, userContent, 0o600))
 
 	// Create and clean up the intermediate scan file
 	f, err := createIntermediateScanFile("nginx:1.22")
@@ -576,7 +576,7 @@ func TestCreateIntermediateScanFile_ConcurrentInvocations(t *testing.T) {
 				return
 			}
 			files[idx] = f.Name()
-			_, _ = f.WriteString(fmt.Sprintf(`{"worker": %d}`, idx))
+			_, _ = fmt.Fprintf(f, `{"worker": %d}`, idx)
 			_ = f.Close()
 		}(i)
 	}
