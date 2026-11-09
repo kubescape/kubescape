@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strings"
 
+	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v4/core/pkg/namespaceselector"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
@@ -35,10 +37,63 @@ const (
 	namespaceKind       = "Namespace"
 )
 
+// knownClusterScopedKinds holds Kubernetes built-in and common ecosystem
+// cluster-scoped kinds that may be absent from bundled discovery data.
+var knownClusterScopedKinds = map[string]struct{}{
+	"ServiceCIDR":                      {},
+	"IPAddress":                        {},
+	"ClusterCIDR":                      {},
+	"ValidatingAdmissionPolicy":        {},
+	"ValidatingAdmissionPolicyBinding": {},
+	"MutatingAdmissionPolicy":          {},
+	"MutatingAdmissionPolicyBinding":   {},
+	"SelfSubjectReview":                {},
+	"ClusterIssuer":                    {},
+}
+
 // isNamespace reports whether the resource is a Namespace object. It carries
 // no metadata.namespace of its own, so scope has to be decided on the kind.
 func (r ResourceInfo) isNamespace() bool {
 	return r.APIVersion == namespaceAPIVersion && r.Kind == namespaceKind
+}
+
+// isNamespaced reports whether the resource belongs to a namespace. An object with
+// an explicit Namespace is namespaced; a Namespace or cluster-scoped object is not;
+// otherwise scope is determined from its Kind using Kubernetes resource mappings.
+func (r ResourceInfo) isNamespaced() bool {
+	if r.Namespace != "" {
+		return true
+	}
+	if r.isNamespace() || r.isClusterScoped() {
+		return false
+	}
+	if r.Kind != "" {
+		return k8sinterface.IsResourceInNamespaceScope(r.Kind)
+	}
+	return false
+}
+
+// isClusterScoped reports whether the resource is known to be cluster-scoped.
+// A Namespace object is cluster-scoped, as are standard Kubernetes kinds that
+// are confirmed not to be in namespace scope, kinds prefixed with "Cluster",
+// and built-in cluster-scoped kinds missing from bundled discovery data.
+func (r ResourceInfo) isClusterScoped() bool {
+	if r.Namespace != "" {
+		return false
+	}
+	if r.isNamespace() {
+		return true
+	}
+	if r.Kind == "" {
+		return false
+	}
+	if _, ok := knownClusterScopedKinds[r.Kind]; ok {
+		return true
+	}
+	if strings.HasPrefix(r.Kind, "Cluster") {
+		return true
+	}
+	return k8sinterface.IsKindKubernetes(r.Kind) && !k8sinterface.IsResourceInNamespaceScope(r.Kind)
 }
 
 // ResourceCoverage reports whether one specific resource that failed a
@@ -151,12 +206,18 @@ func (s *bindingScope) matches(res ResourceInfo, namespaceLabels map[string]stri
 			return true, ""
 		}
 		if res.Namespace == "" {
-			// A cluster-scoped resource has no namespace whose labels the
-			// selector could be read against, and the apiserver does not
-			// exempt it for that: its namespace matcher returns "matches"
-			// before it ever parses the selector. Reporting it uncovered
-			// understated the reach of every binding scoped by namespace.
-			return true, ""
+			if res.isClusterScoped() {
+				// A cluster-scoped resource has no namespace whose labels the
+				// selector could be read against, and the apiserver does not
+				// exempt it for that: its namespace matcher returns "matches"
+				// before it ever parses the selector. Reporting it uncovered
+				// understated the reach of every binding scoped by namespace.
+				return true, ""
+			}
+			if res.isNamespaced() {
+				return false, "namespaceSelector is set but namespaced resource has no namespace specified"
+			}
+			return false, "namespaceSelector is set but the resource's scope could not be determined and it has no namespace"
 		}
 		matched, determinable := namespaceselector.Matches(s.namespaceSelector, res.Namespace, namespaceLabels, namespaceLabelsKnown)
 		if !determinable {
