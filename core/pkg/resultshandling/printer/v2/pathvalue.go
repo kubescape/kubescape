@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"reflect"
 	"regexp"
 	"slices"
@@ -100,7 +101,17 @@ func normalizeForPathExtraction(obj map[string]any) map[string]any {
 	return normalized
 }
 
+// extractValueAtPath is extractValue for an object that carries its own kind,
+// as every scanned Kubernetes object does.
 func extractValueAtPath(obj map[string]any, path string) (string, bool) {
+	kind, _ := obj["kind"].(string)
+	return extractValue(kind, obj, path)
+}
+
+// extractValue resolves path against obj and returns the value as text. A value
+// the scan scrubbed reads as redactedValue (see maskScrubbed); nothing else is
+// changed, so this is the variant for output where --show-secrets is set.
+func extractValue(kind string, obj map[string]any, path string) (string, bool) {
 	if len(obj) == 0 || path == "" {
 		return "", false
 	}
@@ -115,7 +126,22 @@ func extractValueAtPath(obj map[string]any, path string) (string, bool) {
 	if !ok {
 		return "", false
 	}
-	return anyToString(maskScrubbed(cur))
+	masked, _ := maskScrubbed(kind, segments, cur)
+	return anyToString(masked)
+}
+
+// pathResolves reports whether path selects something in obj, without reading
+// the value. It is for callers that only need to know the field exists.
+func pathResolves(obj map[string]any, path string) bool {
+	if len(obj) == 0 || path == "" {
+		return false
+	}
+	segments, err := pathparse.ParsePath(path)
+	if err != nil || len(segments) == 0 {
+		return false
+	}
+	_, ok := resolveSegments(obj, segments)
+	return ok
 }
 
 // extractRedactedValueAtPath is extractValueAtPath for output that must not
@@ -152,7 +178,7 @@ func extractRedactedValueAtPath(kind string, obj map[string]any, path string) (s
 			}
 		}
 	}
-	return anyToString(redactSensitiveDescendants(kind, segments, maskScrubbed(cur)))
+	return anyToString(redactSensitiveDescendants(kind, segments, cur))
 }
 
 // scrubbedPlaceholder is the text the scan writes over the contents of Secret
@@ -163,32 +189,89 @@ func extractRedactedValueAtPath(kind string, obj map[string]any, path string) (s
 // printer does not depend on the scan code that writes it.
 const scrubbedPlaceholder = "XXXXXX"
 
-// maskScrubbed returns v with every scrubbedPlaceholder string replaced by
-// redactedValue, so evidence reads "[redacted]" where the scan removed a value.
-// Maps and lists are copied, not modified, because the object belongs to the scan.
-// It applies with --show-secrets too: that flag cannot bring back a value the
-// scan has already removed.
-func maskScrubbed(v any) any {
+// isScrubbedLocation reports whether the scan writes scrubbedPlaceholder at the
+// field that segments select within an object of the given kind. The text alone
+// is not enough to call a value scrubbed: an annotation, a label or an image
+// can hold it too, and that is a genuine value that must be shown. The places
+// are the ones the scan scrubs:
+//   - every entry of a Secret's data and stringData;
+//   - every entry of a ConfigMap's data and binaryData;
+//   - the value of a container, init container or ephemeral container
+//     environment variable, in a pod or in the pod template of a workload.
+func isScrubbedLocation(kind string, segments []pathSegment) bool {
+	switch kind {
+	case "Secret":
+		return len(segments) >= 2 && (segments[0].Key == "data" || segments[0].Key == "stringData")
+	case "ConfigMap":
+		return len(segments) >= 2 && (segments[0].Key == "data" || segments[0].Key == "binaryData")
+	}
+	if !isContainerEnvValue(segments) || len(segments) < 3 {
+		return false
+	}
+	switch segments[len(segments)-3].Key {
+	case "containers", "initContainers", "ephemeralContainers":
+		return true
+	}
+	return false
+}
+
+// maskScrubbed returns v with each scrubbedPlaceholder that the scan wrote
+// replaced by redactedValue, so evidence reads "[redacted]" where a value was
+// removed, and reports whether it changed anything. segments is where v sits in
+// the object of the given kind. It applies with --show-secrets too: that flag
+// cannot bring back a value the scan has already removed.
+//
+// The object belongs to the scan, so it is never modified. A subtree with
+// nothing to mask is returned as it is, not copied, so a path that selects a
+// large subtree costs a read of it and no allocation unless something changes.
+func maskScrubbed(kind string, segments []pathSegment, v any) (any, bool) {
 	switch val := v.(type) {
 	case string:
-		if val == scrubbedPlaceholder {
-			return redactedValue
+		if val == scrubbedPlaceholder && isScrubbedLocation(kind, segments) {
+			return redactedValue, true
 		}
-		return val
+		return v, false
 	case map[string]any:
-		out := make(map[string]any, len(val))
+		var out map[string]any
 		for key, child := range val {
-			out[key] = maskScrubbed(child)
+			childPath := append(slices.Clone(segments), pathSegment{Key: key, Index: -1})
+			masked, changed := maskScrubbed(kind, childPath, child)
+			if !changed {
+				continue
+			}
+			if out == nil {
+				out = maps.Clone(val)
+			}
+			out[key] = masked
 		}
-		return out
+		if out == nil {
+			return v, false
+		}
+		return out, true
 	case []any:
-		out := make([]any, len(val))
+		var out []any
 		for i, child := range val {
-			out[i] = maskScrubbed(child)
+			childPath := slices.Clone(segments)
+			if last := len(childPath) - 1; last >= 0 && childPath[last].Index < 0 {
+				childPath[last].Index = i
+			} else {
+				childPath = append(childPath, pathSegment{Index: i})
+			}
+			masked, changed := maskScrubbed(kind, childPath, child)
+			if !changed {
+				continue
+			}
+			if out == nil {
+				out = slices.Clone(val)
+			}
+			out[i] = masked
 		}
-		return out
+		if out == nil {
+			return v, false
+		}
+		return out, true
 	default:
-		return v
+		return v, false
 	}
 }
 
@@ -373,6 +456,13 @@ func redactSensitiveDescendants(kind string, segments []pathSegment, v any) any 
 			out[i] = redactSensitiveDescendants(kind, childPath, child)
 		}
 		return out
+	case string:
+		// The scrub is applied in this traversal and not in a second one, so a
+		// path that selects a large subtree is read and copied once.
+		if val == scrubbedPlaceholder && isScrubbedLocation(kind, segments) {
+			return redactedValue
+		}
+		return v
 	default:
 		return v
 	}
@@ -761,7 +851,7 @@ func enrichedPathsForField(control *resourcesresults.ResourceAssociatedControl, 
 				continue
 			}
 			if !isSensitivePath(kind, p) {
-				if val, ok := extractValueAtPath(obj, p); ok {
+				if val, ok := extractValue(kind, obj, p); ok {
 					paths = append(paths, p+" (current: "+val+")")
 					continue
 				}
@@ -808,13 +898,14 @@ func fixPathsToStringFiltered(control *resourcesresults.ResourceAssociatedContro
 func enrichedPathsForFieldUnredacted(control *resourcesresults.ResourceAssociatedControl, resource workloadinterface.IMetadata, getPath func(armotypes.PosturePaths) string) []string {
 	var paths []string
 	obj := normalizeForPathExtraction(resource.GetObject())
+	kind := resource.GetKind()
 	for j := range control.ResourceAssociatedRules {
 		for k := range control.ResourceAssociatedRules[j].Paths {
 			p := getPath(control.ResourceAssociatedRules[j].Paths[k])
 			if p == "" {
 				continue
 			}
-			if val, ok := extractValueAtPath(obj, p); ok {
+			if val, ok := extractValue(kind, obj, p); ok {
 				paths = append(paths, p+" (current: "+val+")")
 				continue
 			}
@@ -897,13 +988,13 @@ func deletePathsWithCurrentValues(control *resourcesresults.ResourceAssociatedCo
 // path does not resolve.
 func currentValueSuffix(kind string, obj map[string]any, path string, showSecrets bool) string {
 	if showSecrets {
-		if val, ok := extractValueAtPath(obj, path); ok {
+		if val, ok := extractValue(kind, obj, path); ok {
 			return " (current: " + val + ")"
 		}
 		return ""
 	}
 	if isSensitivePath(kind, path) {
-		if _, ok := extractValueAtPath(obj, path); ok {
+		if pathResolves(obj, path) {
 			return " (current: " + redactedValue + ")"
 		}
 		return ""
