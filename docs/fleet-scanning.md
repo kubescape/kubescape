@@ -165,15 +165,20 @@ jq '.clusters[] | {clusterID, status, attempts}' fleet.json
 
 [`fleet-report.schema.json`](fleet-report.schema.json) is the JSON schema for
 `fleet.json`. Use the copy from the git tag in `metadata.kubescapeVersion`, so
-it matches the release that wrote your report.
+it matches the release that wrote your report. The schema's `$id` points at
+`master`, but it is only an identifier.
 
 The schema leaves out the contents of `coverage` and of each cluster's
 `report`. That `report` is close to the context's own JSON report but not the
 same. For example, it has no `resources` and its controls have no `severity`.
 
-New fields can be added at any time, so ignore the ones you do not recognise.
-Removing or renaming a field, adding a status or exclusion reason, or changing
-what a value means is treated as a breaking change.
+The report format may still change while fleet scanning is in alpha. New fields
+can be added at any time, so ignore the ones you do not recognise. New cluster
+`status` and exclusion `reason` values can also appear, so treat a value you do
+not recognise as a cluster that was not scanned. A control status you do not
+recognise, in `controlMatrix` or in `divergence.controls[].referenceStatus`,
+counts as `notEvaluated`. Removing or renaming a field, or changing what a value
+means, will be called out in the release notes.
 
 ## Exit code
 

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/kubescape/kubescape/master/docs/fleet-report.schema.json",
   "title": "Kubescape fleet report",
-  "description": "The combined report written by --fleet-report. Fields not listed here may be added, so consumers should ignore fields they do not recognise.",
+  "description": "The combined report written by --fleet-report. The format may still change while fleet scanning is in alpha, and later releases may add fields and status or exclusion reason values. See docs/fleet-scanning.md for how to handle them.",
   "type": "object",
   "required": ["metadata", "clusters", "compliance", "controlMatrix", "divergence"],
   "properties": {
