@@ -7,4 +7,4 @@ rules:
 - apiGroups: [""]
   resources: ["secrets"]
   resourceNames: ["forged-token"]
-  verbs: ["create", "list"]
+  verbs: ["create"]
