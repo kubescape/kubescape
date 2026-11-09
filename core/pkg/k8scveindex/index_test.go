@@ -41,6 +41,13 @@ const testFeed = `{
   ]
 }`
 
+const embeddedFeedMaxAge = 30 * 24 * time.Hour
+
+func embeddedFeedFresh(updatedAt, now time.Time) (time.Duration, bool) {
+	age := now.Sub(updatedAt)
+	return age, age >= 0 && age <= embeddedFeedMaxAge
+}
+
 func TestLookup(t *testing.T) {
 	ix, err := Parse(strings.NewReader(testFeed))
 	require.NoError(t, err)
@@ -110,6 +117,45 @@ func TestEmbeddedFeed(t *testing.T) {
 	assert.Equal(t, Applicable, ix.Lookup("CVE-2026-3288", "ingress-nginx", "1.14.3", "linux"))
 	assert.Equal(t, NotApplicable, ix.Lookup("CVE-2026-3288", "ingress-nginx", "1.14.4", "linux"))
 	assert.Equal(t, NotApplicable, ix.Lookup("CVE-2026-3288", "ingress-nginx", "1.15.0", "linux"))
+}
+
+func TestEmbeddedFeedFreshness(t *testing.T) {
+	if os.Getenv("K8SCVEINDEX_CHECK_FEED_FRESHNESS") != "true" {
+		t.Skip("set K8SCVEINDEX_CHECK_FEED_FRESHNESS=true to check embedded feed freshness")
+	}
+
+	ix, err := Parse(bytes.NewReader(embeddedFeed))
+	require.NoError(t, err)
+
+	now := time.Now()
+	age, fresh := embeddedFeedFresh(ix.Updated, now)
+	require.True(t, fresh,
+		"embedded Kubernetes CVE feed is %s old (updated %s); run go generate ./core/pkg/k8scveindex; if the upstream updated_at is also stale, wait for an upstream update",
+		age, ix.Updated.Format(time.RFC3339))
+
+	futureAge, futureFresh := embeddedFeedFresh(now.Add(time.Second), now)
+	assert.False(t, futureFresh, "future-dated feed should fail freshness check (age %s)", futureAge)
+}
+
+func TestEmbeddedFeedFreshnessDecision(t *testing.T) {
+	now := time.Date(2026, 11, 7, 0, 0, 0, 0, time.UTC)
+
+	tests := []struct {
+		name      string
+		updatedAt time.Time
+		wantFresh bool
+	}{
+		{name: "current", updatedAt: now, wantFresh: true},
+		{name: "maximum age", updatedAt: now.Add(-embeddedFeedMaxAge), wantFresh: true},
+		{name: "stale", updatedAt: now.Add(-embeddedFeedMaxAge - time.Second), wantFresh: false},
+		{name: "future", updatedAt: now.Add(time.Second), wantFresh: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, fresh := embeddedFeedFresh(tt.updatedAt, now)
+			assert.Equal(t, tt.wantFresh, fresh)
+		})
+	}
 }
 
 func TestStale(t *testing.T) {

@@ -16,6 +16,8 @@ Two GitHub Apps report alongside it: the DCO check, which requires a `Signed-off
 
 A PR that touches `core/pkg/rbacgraph/`, `go.mod` or `go.sum` also triggers `rbac-parity.yaml`. It downloads the `kube-apiserver` and `etcd` releases pinned in `core/pkg/rbacgraph/parity/reference.env`, verifies their checksums, and runs `go test -tags rbacparity ./core/pkg/rbacgraph/parity/...`, which checks the Kubernetes answer recorded in every RBAC parity fixture against that server. It uses a `paths` allow-list rather than a deny-list because the fixtures are YAML, which `00-pr-scanner.yaml` ignores. It needs no secrets, so it runs on PRs from forks, and it runs again on the push to `master`. See `core/pkg/rbacgraph/parity/README.md`.
 
+A weekly run of `k8scveindex-feed.yaml` checks that the embedded Kubernetes CVE feed's `updated_at` timestamp is not in the future or more than 30 days old. The same check runs on PRs that touch the CVE index package or its workflow, and reports the `go generate ./core/pkg/k8scveindex` command when the check fails. If the upstream timestamp is also more than 30 days old, regenerating will not make the check pass. This time-sensitive check is opt-in and does not fail the regular package tests.
+
 ### Reviewing a PR
 
 The E2E system tests do not live in this repository. `00-pr-scanner.yaml` dispatches them to a private repository and polls for the result.
