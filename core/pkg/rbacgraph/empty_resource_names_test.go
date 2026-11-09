@@ -58,7 +58,7 @@ func TestEmptyResourceName_CoversNoNamedRole(t *testing.T) {
 	})
 	t.Run("a real name that was not collected keeps its warning", func(t *testing.T) {
 		result := clusterWide("clusterroles", "", "missing").AnalyzeEscalation(sa("prod", "attacker"))
-		if !result.ClusterAdmin || len(result.Unbounded) != 1 {
+		if result.ClusterAdmin || len(result.Unbounded) != 1 || !result.Unbounded[0].Edge.PermissionsUnconfirmed {
 			t.Fatalf("ClusterAdmin = %v, Unbounded = %+v, want the partial-collection fallback for \"missing\" only", result.ClusterAdmin, result.Unbounded)
 		}
 	})

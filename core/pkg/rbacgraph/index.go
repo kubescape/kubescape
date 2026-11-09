@@ -18,6 +18,10 @@ type Index struct {
 	clusterRoles        map[string]*rbacv1.ClusterRole
 	roleBindings        []*rbacv1.RoleBinding
 	clusterRoleBindings []*rbacv1.ClusterRoleBinding
+	// Binding lookups for concrete rewrite targets avoid rescanning every
+	// binding for every role and every reachable identity.
+	roleBindingsByRole        map[RoleTarget][]*rbacv1.RoleBinding
+	clusterRoleBindingsByRole map[string][]*rbacv1.ClusterRoleBinding
 	// serviceAccountsByNS lists every ServiceAccount name collected per
 	// namespace, needed to enumerate targets for assign-serviceaccount and
 	// mint-serviceaccount-token edges when the granting rule has no
@@ -30,9 +34,11 @@ type Index struct {
 // collected," not an error.
 func NewIndex(roles []rbacv1.Role, clusterRoles []rbacv1.ClusterRole, roleBindings []rbacv1.RoleBinding, clusterRoleBindings []rbacv1.ClusterRoleBinding, serviceAccounts []corev1.ServiceAccount) *Index {
 	idx := &Index{
-		roles:               make(map[string]*rbacv1.Role, len(roles)),
-		clusterRoles:        make(map[string]*rbacv1.ClusterRole, len(clusterRoles)),
-		serviceAccountsByNS: make(map[string][]string),
+		roles:                     make(map[string]*rbacv1.Role, len(roles)),
+		roleBindingsByRole:        make(map[RoleTarget][]*rbacv1.RoleBinding),
+		clusterRoleBindingsByRole: make(map[string][]*rbacv1.ClusterRoleBinding),
+		clusterRoles:              make(map[string]*rbacv1.ClusterRole, len(clusterRoles)),
+		serviceAccountsByNS:       make(map[string][]string),
 	}
 	for i := range roles {
 		r := &roles[i]
@@ -43,10 +49,20 @@ func NewIndex(roles []rbacv1.Role, clusterRoles []rbacv1.ClusterRole, roleBindin
 		idx.clusterRoles[cr.Name] = cr
 	}
 	for i := range roleBindings {
-		idx.roleBindings = append(idx.roleBindings, &roleBindings[i])
+		binding := &roleBindings[i]
+		idx.roleBindings = append(idx.roleBindings, binding)
+		target := RoleTarget{Kind: binding.RoleRef.Kind, Name: binding.RoleRef.Name}
+		if target.Kind == "Role" {
+			target.Namespace = binding.Namespace
+		}
+		idx.roleBindingsByRole[target] = append(idx.roleBindingsByRole[target], binding)
 	}
 	for i := range clusterRoleBindings {
-		idx.clusterRoleBindings = append(idx.clusterRoleBindings, &clusterRoleBindings[i])
+		binding := &clusterRoleBindings[i]
+		idx.clusterRoleBindings = append(idx.clusterRoleBindings, binding)
+		if binding.RoleRef.Kind == "ClusterRole" {
+			idx.clusterRoleBindingsByRole[binding.RoleRef.Name] = append(idx.clusterRoleBindingsByRole[binding.RoleRef.Name], binding)
+		}
 	}
 	for _, sa := range serviceAccounts {
 		idx.serviceAccountsByNS[sa.Namespace] = append(idx.serviceAccountsByNS[sa.Namespace], sa.Name)
