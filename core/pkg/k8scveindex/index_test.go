@@ -130,8 +130,8 @@ func TestEmbeddedFeedFreshness(t *testing.T) {
 	now := time.Now()
 	age, fresh := embeddedFeedFresh(ix.Updated, now)
 	require.True(t, fresh,
-		"embedded Kubernetes CVE feed is %s old (updated %s); run go generate ./core/pkg/k8scveindex",
-		age.Round(time.Hour), ix.Updated.Format(time.RFC3339))
+		"embedded Kubernetes CVE feed is %s old (updated %s); run go generate ./core/pkg/k8scveindex; if the upstream updated_at is also stale, wait for an upstream update",
+		age, ix.Updated.Format(time.RFC3339))
 
 	futureAge, futureFresh := embeddedFeedFresh(now.Add(time.Second), now)
 	assert.False(t, futureFresh, "future-dated feed should fail freshness check (age %s)", futureAge)
