@@ -412,6 +412,28 @@ func TestReaches_NamespaceSelectorWithUncollectedNamespaceIsUnknown(t *testing.T
 	}
 }
 
+func TestReaches_CombinedSelectorWithUncollectedNamespaceAndPodMismatchIsDenied(t *testing.T) {
+	allow := policy("ns", "allow-from-prod-client", selector("app", "server"),
+		[]networkingv1.PolicyType{networkingv1.PolicyTypeIngress},
+		[]networkingv1.NetworkPolicyIngressRule{
+			{From: []networkingv1.NetworkPolicyPeer{{
+				NamespaceSelector: namespaceSelectorPtr(selector("env", "prod")),
+				PodSelector:       podSelectorPtr(selector("app", "client")),
+			}}},
+		}, nil)
+	idx, _ := NewIndex([]*networkingv1.NetworkPolicy{allow}, nil)
+	dst := Endpoint{Namespace: "ns", Name: "server", Labels: map[string]string{"app": "server"}}
+	src := Endpoint{Namespace: "unknown-ns", Name: "other", Labels: map[string]string{"app": "other"}}
+
+	v, _, ingress := idx.Reaches(src, dst, nil)
+	if v != Denied {
+		t.Errorf("verdict = %v, want Denied (pod selector already does not match)", v)
+	}
+	if ingress.Verdict != Denied {
+		t.Errorf("ingress decision = %v, want Denied", ingress.Verdict)
+	}
+}
+
 func TestReaches_EmptyNamespaceSelectorMatchesEverythingEvenIfUncollected(t *testing.T) {
 	allow := policy("ns", "allow-from-any-ns", selector("app", "server"),
 		[]networkingv1.PolicyType{networkingv1.PolicyTypeIngress},
