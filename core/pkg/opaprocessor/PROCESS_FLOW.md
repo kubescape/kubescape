@@ -1,150 +1,115 @@
-# OPA/Rego Evaluation Flow
+# OPA and CEL Evaluation Flow
 
-This document traces the OPA/Rego rule-evaluation pipeline in `core/pkg/opaprocessor/`. It is intended as an onboarding guide for contributors who want to understand how Kubescape turns scanned Kubernetes objects into misconfiguration results.
+This document describes how `core/pkg/opaprocessor/` evaluates policy rules against collected resources and turns their verdicts into scan results. The processor supports both Rego rules and Kubernetes ValidatingAdmissionPolicy (VAP) rules written in CEL.
 
 ## Key concepts
 
-- **Framework** — a security benchmark (CIS, NSA-CISA, MITRE) that contains `Controls`.
-- **Control** — a group of one or more `PolicyRule` objects plus metadata.
-- **PolicyRule** — a single rule; for Rego this is a raw Rego module string plus matching metadata.
-- **OPASessionObj** — the session state that holds resources, policies, report objects, and exception policies.
-- **RegoDependenciesData** — the `data` and `input` values passed to every rule (cloud provider, control inputs).
-- **RuleResponse** — the structured output produced by `reporthandling.ParseRegoResult` from an OPA `resultSet`.
-- **ResourceAssociatedRule / ResourceAssociatedControl** — Kubescape's result structs after OPA results are merged.
+- **Framework** — a benchmark containing controls.
+- **Control** — a group of policy rules and their reporting metadata.
+- **PolicyRule** — a Rego or CEL rule with resource-matching metadata.
+- **ResourceCatalog** — the thread-safe catalog of collected and synthesized resources. The processor uses it for resource lookups, updates, iteration, and scope snapshots.
+- **Evaluation scope** — a resident batch of cluster-scoped and external resources, optionally combined with one namespace batch. Whole-cluster controls are handled separately after the scoped pass.
+- **Rego dependencies** — posture control inputs and data such as the cloud provider passed to Rego.
+- **VAP** — a ValidatingAdmissionPolicy loaded from the embedded policy bundle. It supplies CEL variables, match constraints, match conditions, validations, and parameter configuration.
+- **RuleResponse / `celOutcome`** — the common failure-response shape, plus CEL-specific skipped and excluded resources. Excluded CEL resources are outside admission scope; skipped resources have no definitive verdict.
+- **ResourceAssociatedRule / ResourceAssociatedControl** — Kubescape's per-resource rule and control results.
 
 ## End-to-end flow
 
 ```mermaid
 graph TD
-    A[OPAProcessor.ProcessRulesListener] --> B[convertFrameworksToPolicies]
-    A --> C[ConvertFrameworksToSummaryDetails]
-    A --> D[OPAProcessor.Process]
-    D --> E[processControl]
-    E --> F[processRule]
-    F --> G[getAllSupportedObjects]
-    G --> H[RegoResourcesAggregator]
-    H --> I[enumerateData]
-    I --> J[runOPAOnSingleRule]
-    J --> K{RuleLanguage}
-    K -->|Rego| L[runRegoOnK8s]
-    L --> M[getCompiledRule]
-    L --> N[regoEval]
-    N --> O[ParseRegoResult]
-    K -->|CEL| P[runCELOnK8s stub]
-    O --> Q[build failed & passed ResourceAssociatedRule maps]
-    D --> R[BuildScanCoverage/ComputeCoverageScore]
-    R --> S[updateResults]
-    S --> T[markTimedOutControlsSkipped]
-    T --> U[scorewrapper.Calculate]
-    U --> V[reweightComplianceScores]
+    A[Resource collection] --> B[ResourceCatalog and resource batches]
+    B --> C{Processor entry point}
+    C -->|Eager| D[ProcessRulesListener]
+    C -->|Streaming| E[ProcessWithStreaming]
+    D --> F[effectivePolicies and report summaries]
+    E --> F
+    F --> G[Process: evaluationScopes]
+    F --> H[Streaming: resident then namespace batches]
+    G --> I[processScope]
+    H --> I
+    I --> J[processControl]
+    J --> K[processRuleOnScope]
+    K --> L[evaluationScope.matchedObjects]
+    L --> M[RegoResourcesAggregator]
+    M --> N[enumerateData when a Rego ResourceEnumerator exists]
+    N --> O[runOPAOnSingleRule]
+    O --> P{RuleLanguage}
+    P -->|Rego| Q[runRegoOnK8s]
+    Q --> R[prepared query and dependencies]
+    R --> S[OPA eval and ParseRegoResult]
+    P -->|CEL| T[load VAP and binding parameters]
+    T --> U[match constraints and match conditions]
+    U --> V[CEL validations]
+    S --> W[Merge failures, skips, exclusions, and passes]
+    V --> W
+    W --> X[ResourceAssociatedRule and ResourceAssociatedControl]
+    G --> Y[Whole-cluster controls]
+    H --> Y
+    X --> Z[Coverage and updateResults]
+    Y --> Z
+    Z --> AA[Exceptions, summaries, scoring]
 ```
 
-## Call-chain details
+## Processor entry points and scopes
 
-### `OPAProcessor` and `NewOPAProcessor`
+`ProcessRulesListener` is the eager entry point. It applies the control filters, converts the selected frameworks to policies, initializes report summaries, and calls `Process`.
 
-`processorhandler.go` defines `OPAProcessor` and `NewOPAProcessor`. The struct holds the compiled-module cache (`compiledModules`), per-control timeout state (`ControlTimeout`, `TimedOutControls`), namespace filters, and the `OPASessionObj` that everything is recorded into.
+`Process` partitions collected Kubernetes and external resources into evaluation scopes. The resident scope runs first, followed by namespace scopes in deterministic order. Each scope runs its controls through `processScope`; controls are processed by workers, with the configured timeout applied independently per control and scope. Whole-cluster controls run after the scoped pass according to the configured whole-cluster execution policy.
 
-### `ProcessRulesListener`
+`ProcessWithStreaming` receives a resident resource batch first, then namespace batches. It evaluates each namespace batch together with the resident resources as it arrives, adding resources to the session catalog for later result processing. Whole-cluster controls are deferred until the batches are available. Streaming bounds the evaluation input to the resident batch plus one namespace batch; resources are still retained in the catalog for downstream stages.
 
-The public entry point in `processorhandler.go`:
+Both entry points initialize policies and summaries before evaluation and then build scan coverage, update results, mark not-evaluated controls, calculate scores, and build namespace summaries.
 
-1. Converts frameworks to `cautils.Policies` via `convertFrameworksToPolicies`.
-2. Seeds report summary objects via `ConvertFrameworksToSummaryDetails`.
-3. Calls `Process` to run the controls.
-4. Calls `BuildScanCoverage` and `ComputeCoverageScore` after `Process` returns.
-5. Calls `updateResults` to apply exceptions and update summaries.
-6. Calls `markTimedOutControlsSkipped` to mark controls that timed out.
-7. Calls `scorewrapper.Calculate` to compute the posture score.
-8. Calls `reweightComplianceScores` to reweight compliance scores.
+## Rule evaluation
 
-### `Process`
+`processScope` dispatches controls to workers. `processControl` evaluates each rule in a control and combines the returned per-resource rule results into control results.
 
-The main control loop in `processorhandler.go`. For every `Control` in the policy set:
+`processRuleOnScope` obtains matching resources from `evaluationScope.matchedObjects`. Matching uses the indexes built for the scope's Kubernetes, external, and resident resources. `RegoResourcesAggregator` may combine or synthesize the rule's input objects. If the Rego rule declares a `ResourceEnumerator`, `enumerateData` runs that pre-pass and limits which resources can be reported; it does not replace the full aggregated input used by the rule. CEL rules must not declare a `ResourceEnumerator`, because their scope comes from the VAP's match constraints.
 
-1. Checks for context cancellation.
-2. Wraps evaluation in a `context.WithTimeout` when `ControlTimeout` is configured; if the deadline is exceeded, the control is marked via `markControlTimedOut` and recorded as not evaluated.
-3. Calls `processControl` for the actual rule evaluation.
-4. Merges the returned `resourcesAssociatedControl` map into `opap.ResourcesResult`.
+`runOPAOnSingleRule` dispatches by `PolicyRule.RuleLanguage`:
 
-### `processControl`
+### Rego
 
-Iterates over the rules in a control and calls `processRule` for each. If a rule returns a non-empty `ResourceAssociatedRule` map, it builds a `ResourceAssociatedControl` and sets its status from the overall control definition.
+`runRegoOnK8s` obtains the rule module and asks `getPreparedQuery` for its compiled, cached OPA query. The query receives the resource input and the rule's Rego dependencies. `regoEval` evaluates it and `reporthandling.ParseRegoResult` converts the result set into `RuleResponse` values.
 
-### `processRule`
+### CEL
 
-This is where per-rule, per-namespace work happens:
+`runCELOnK8s` loads the control's VAP and the shared CEL evaluator. It resolves any applicable live binding and parameter object, then checks the policy's match constraints and match conditions before running validations. The evaluator applies the policy's variables, failure policy, and cost budget to each object.
 
-1. `getAllSupportedObjects` selects Kubernetes and external resources that match the rule's `Match` / `DynamicMatch` constraints.
-2. `RegoResourcesAggregator` assembles the objects the rule will see as input.
-3. `enumerateData` optionally narrows the list using a rule's `ResourceEnumerator` (a Rego snippet that filters the input set).
-4. `runOPAOnSingleRule` dispatches to `runRegoOnK8s` or the CEL stub based on `rule.RuleLanguage`.
-5. After Rego returns `RuleResponse` objects, the function performs a two-pass merge:
-   - First, it pre-seeds `failedIDs` and creates `ResourceAssociatedRule` entries for failed resources.
-   - Second, it marks every non-failed input resource as `StatusPassed`.
-6. Finally, it attaches remediation paths and related objects to each failed `ResourceAssociatedRule`.
+CEL outcomes distinguish:
 
-### `runRegoOnK8s` and `regoEval`
+- **Violation** — converted to a failed `RuleResponse`.
+- **Excluded** — the object is outside the policy's match scope and is omitted from results.
+- **Skipped** — an evaluation error prevents a definitive verdict, so the object must not be inferred as passing.
+- **Pass** — no failure or skip was recorded for an in-scope object.
 
-`runRegoOnK8s` in `processorhandler.go`:
+An expression error under `failurePolicy: Fail` is a violation, consistent with admission. Offline-only errors such as exhausted evaluation budget remain unknown and are reported as skipped.
 
-1. Registers custom Rego builtins (`cosign.verify`, `cosign.has_signature`, `image.parse_normalized_name`) once via `sync.Once`.
-2. Fetches rule source with `getRuleData`.
-3. Compiles the rule through `getCompiledRule`, which caches the `*ast.Compiler` by rule name + source.
-4. Builds an OPA `storage.Store` from `ruleRegoDependenciesData`.
-5. Calls `regoEval` to run OPA with the compiled module, the store, and the K8s objects as `input`.
-6. Parses the OPA `resultSet` into `[]reporthandling.RuleResponse`.
+## Merging verdicts and building the report
 
-`regoEval` uses `rego.New` with a fixed query `data.armo_builtins`, `ast.RegoV0`, and `rego.Input(inputObj)`.
+After a successful rule evaluation, `processRuleOnScope` seeds failed resources from `RuleResponse` values, records CEL skips, omits CEL exclusions, and infers passes only for remaining in-scope inputs. It attaches remediation paths and related-resource IDs to failures. Incomplete dependency coverage is carried on inferred pass results rather than treated as a definitive complete scan.
 
-### `updateResults`
+`processControl` combines rules for each resource into `ResourceAssociatedControl` entries. The caller merges those results across scopes. Whole-cluster controls may use projected inputs, a full-memory fallback, skip behavior, or verification mode, depending on the configured policy.
 
-`processorhandlerutils.go`:
-
-1. Removes sensitive fields from `AllResources` (`removeData`).
-2. Applies exception policies to each `ResourcesResult` entry.
-3. Emits exception match events.
-4. Appends resource results to the summary.
-5. Initializes the final summary resources map.
-
-## Data transformations
-
-### Kubernetes object → Rego `input`
-
-1. `workloadinterface.IMetadata` objects are collected into `[]workloadinterface.IMetadata` per namespace.
-2. `RegoResourcesAggregator` optionally aggregates/filters the `[]workloadinterface.IMetadata` list (e.g. subject/role aggregation for RBAC rules) while keeping it as `[]workloadinterface.IMetadata`.
-3. `workloadinterface.ListMetaToMap` converts the `[]workloadinterface.IMetadata` into the raw `[]map[string]any` slice.
-4. `regoEval` passes this slice to OPA as `rego.Input(inputObj)`.
-
-### OPA result → Kubescape result
-
-1. OPA's `rego.Eval` returns a `rego.ResultSet`.
-2. `reporthandling.ParseRegoResult` converts it to `[]reporthandling.RuleResponse`.
-3. `processRule` maps each failed resource to a `*resourcesresults.ResourceAssociatedRule` with `StatusFailed`, paths, and related objects.
-4. Resources that are not in the failed set are marked `StatusPassed`.
-5. `processControl` wraps rule results in `resourcesresults.ResourceAssociatedControl`.
-6. `updateResults` applies exceptions and pushes the final data into `opap.Report`.
-
-## CEL and the future
-
-`runOPAOnSingleRule` currently dispatches to `runCELOnK8s`, which is a stub that returns an error. The CEL evaluator under `core/pkg/opaprocessor/cel/` is intended to become the second rule language. The rest of `processorhandler.go` is already structured to treat `RuleResponse` as a language-agnostic result.
+After evaluation, `updateResults` walks the `ResourceCatalog` to remove sensitive data, applies exception policies, emits exception-match events, and appends resource results to the report summary. The processor then marks controls that were not evaluated, calculates posture scores, builds namespace summaries from the catalog, and reweights scores where needed.
 
 ## Where to add tests
 
-The package already has useful tests that exercise this flow:
+The package has focused tests for the evaluation and reporting paths, including:
 
-- `processorhandler_test.go` — `TestProcessRule`, `TestProcessResourcesResult`
-- `processorhandler_timeout_test.go` — `TestProcess_ControlTimeout`
-- `processorhandler_clusterscope_test.go` — `TestProcessRule_ClusterScopedPathsAcrossNamespaces`
+- `processorhandler_test.go` and `processorhandler_timeout_test.go` — rule processing and timeouts.
+- `cel_error_reporting_test.go` and `cel_namespace_context_test.go` — CEL verdict handling and namespace context.
+- `processorhandler_streaming_test.go` and `wholecluster_missing_control_test.go` — streaming and whole-cluster behavior.
+- `incremental_cache_*_test.go` — cache replay, attribution, and result merging.
 
-Good follow-up contributions include:
-
-- Unit tests for `markResourcesSkipped` error paths.
-- Unit tests for `getCompiledRule` cache behavior.
-- A table-driven test for `regoEval` with a tiny inline Rego module.
+Prefer adding a regression test next to the behavior under change. CEL evaluator, VAP loading, matching, and cost-budget tests live under `core/pkg/opaprocessor/cel/`.
 
 ## See also
 
+- `core/cautils/catalog.go` — the `ResourceCatalog` abstraction.
+- `core/cautils/resourcebatch.go` — the resource-batch model used by streaming evaluation.
+- `core/pkg/opaprocessor/cel/` — VAP loading, CEL evaluation, matching, and parameter resolution.
 - `core/pkg/policyhandler/` — where frameworks and controls are loaded before evaluation.
-- `github.com/kubescape/regolibrary` — the actual Rego rules (not in this repo).
-- `github.com/kubescape/opa-utils/reporthandling` — `PolicyRule`, `RuleResponse`, and `RegoResourcesAggregator`.
+- `github.com/kubescape/regolibrary` — the Rego rules.
+- `github.com/kubescape/opa-utils/reporthandling` — policy and result types shared with the processor.
