@@ -53,7 +53,9 @@ func runPolicyUpdate(cmd *cobra.Command, path string) error {
 			if colored {
 				msg = fmt.Sprintf("%s: %s\n", gchalk.WithBrightCyan().Bold(rule.Name), gchalk.BrightYellow("no test cases"))
 			}
-			fmt.Fprint(out, msg)
+			if _, err := fmt.Fprint(out, msg); err != nil {
+				return fmt.Errorf("write policy test output: %w", err)
+			}
 			continue
 		}
 		for _, result := range policytest.UpdateRule(ctx, rule) {
@@ -69,7 +71,9 @@ func runPolicyUpdate(cmd *cobra.Command, path string) error {
 					badge = gchalk.WithBrightRed().Bold("ERROR")
 					ruleCase = gchalk.WithBrightCyan().Bold(ruleCase)
 				}
-				fmt.Fprintf(out, "%s %s: %v\n", badge, ruleCase, result.Err)
+				if _, err := fmt.Fprintf(out, "%s %s: %v\n", badge, ruleCase, result.Err); err != nil {
+					return fmt.Errorf("write policy test output: %w", err)
+				}
 			case result.Changed:
 				changed++
 				badge := "UPDATED"
@@ -77,14 +81,18 @@ func runPolicyUpdate(cmd *cobra.Command, path string) error {
 					badge = gchalk.WithBrightYellow().Bold("UPDATED")
 					ruleCase = gchalk.WithBrightCyan().Bold(ruleCase)
 				}
-				fmt.Fprintf(out, "%s %s\n", badge, ruleCase)
+				if _, err := fmt.Fprintf(out, "%s %s\n", badge, ruleCase); err != nil {
+					return fmt.Errorf("write policy test output: %w", err)
+				}
 			default:
 				badge := "UNCHANGED"
 				if colored {
 					badge = gchalk.Bold("UNCHANGED")
 					ruleCase = gchalk.WithBrightCyan().Bold(ruleCase)
 				}
-				fmt.Fprintf(out, "%s %s\n", badge, ruleCase)
+				if _, err := fmt.Fprintf(out, "%s %s\n", badge, ruleCase); err != nil {
+					return fmt.Errorf("write policy test output: %w", err)
+				}
 			}
 		}
 	}
@@ -94,9 +102,13 @@ func runPolicyUpdate(cmd *cobra.Command, path string) error {
 		if changed > 0 {
 			changedStr = gchalk.WithBrightYellow().Bold(fmt.Sprintf("%d", changed))
 		}
-		fmt.Fprintf(out, "\n%s case(s) updated\n", changedStr)
+		if _, err := fmt.Fprintf(out, "\n%s case(s) updated\n", changedStr); err != nil {
+			return fmt.Errorf("write policy test output: %w", err)
+		}
 	} else {
-		fmt.Fprintf(out, "\n%d case(s) updated\n", changed)
+		if _, err := fmt.Fprintf(out, "\n%d case(s) updated\n", changed); err != nil {
+			return fmt.Errorf("write policy test output: %w", err)
+		}
 	}
 	if failed > 0 {
 		return fmt.Errorf("%d test case(s) could not be evaluated", failed)
@@ -135,7 +147,9 @@ func runPolicyTest(cmd *cobra.Command, path string) error {
 			if colored {
 				msg = fmt.Sprintf("%s: %s\n", gchalk.WithBrightCyan().Bold(rule.Name), gchalk.BrightYellow("no test cases"))
 			}
-			fmt.Fprint(out, msg)
+			if _, err := fmt.Fprint(out, msg); err != nil {
+				return fmt.Errorf("write policy test output: %w", err)
+			}
 			continue
 		}
 		for _, result := range policytest.RunRule(ctx, rule) {
@@ -152,7 +166,9 @@ func runPolicyTest(cmd *cobra.Command, path string) error {
 					badge = gchalk.WithBrightRed().Bold("FAIL")
 					ruleCase = gchalk.WithBrightCyan().Bold(ruleCase)
 				}
-				fmt.Fprintf(out, "%s %s: %v\n", badge, ruleCase, result.Err)
+				if _, err := fmt.Fprintf(out, "%s %s: %v\n", badge, ruleCase, result.Err); err != nil {
+					return fmt.Errorf("write policy test output: %w", err)
+				}
 			case !result.Passed:
 				failed++
 				badge := "FAIL"
@@ -160,14 +176,18 @@ func runPolicyTest(cmd *cobra.Command, path string) error {
 					badge = gchalk.WithBrightRed().Bold("FAIL")
 					ruleCase = gchalk.WithBrightCyan().Bold(ruleCase)
 				}
-				fmt.Fprintf(out, "%s %s\n%s\n", badge, ruleCase, result.Diff)
+				if _, err := fmt.Fprintf(out, "%s %s\n%s\n", badge, ruleCase, result.Diff); err != nil {
+					return fmt.Errorf("write policy test output: %w", err)
+				}
 			default:
 				badge := "PASS"
 				if colored {
 					badge = gchalk.WithBrightGreen().Bold("PASS")
 					ruleCase = gchalk.WithBrightCyan().Bold(ruleCase)
 				}
-				fmt.Fprintf(out, "%s %s\n", badge, ruleCase)
+				if _, err := fmt.Fprintf(out, "%s %s\n", badge, ruleCase); err != nil {
+					return fmt.Errorf("write policy test output: %w", err)
+				}
 			}
 		}
 	}
@@ -179,9 +199,13 @@ func runPolicyTest(cmd *cobra.Command, path string) error {
 			passedStr = gchalk.WithBrightRed().Bold(fmt.Sprintf("%d", passedCount))
 		}
 		totalStr := gchalk.Bold(fmt.Sprintf("%d", total))
-		fmt.Fprintf(out, "\n%s/%s cases passed\n", passedStr, totalStr)
+		if _, err := fmt.Fprintf(out, "\n%s/%s cases passed\n", passedStr, totalStr); err != nil {
+			return fmt.Errorf("write policy test output: %w", err)
+		}
 	} else {
-		fmt.Fprintf(out, "\n%d/%d cases passed\n", passedCount, total)
+		if _, err := fmt.Fprintf(out, "\n%d/%d cases passed\n", passedCount, total); err != nil {
+			return fmt.Errorf("write policy test output: %w", err)
+		}
 	}
 	if failed > 0 {
 		return fmt.Errorf("%d test case(s) failed", failed)
