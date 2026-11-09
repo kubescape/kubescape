@@ -246,6 +246,8 @@ func TestLoadRejectsInvalidContractValues(t *testing.T) {
 		{"unknown format", "formats: [json, sarif]", "formats: [json, xml]", "unsupported format"},
 		{"unknown severity", "severityAtLeast: high", "severityAtLeast: urgent", "unsupported; supported severities"},
 		{"negative timeout", "controlTimeout: 30s", "controlTimeout: -1s", "must be zero or positive"},
+		{"control timeout equals scan timeout", "scanTimeout: 10m\n        controlTimeout: 30s", "scanTimeout: 10m\n        controlTimeout: 10m", "controlTimeout must be lower than scanTimeout"},
+		{"control timeout exceeds scan timeout", "scanTimeout: 10m\n        controlTimeout: 30s", "scanTimeout: 10m\n        controlTimeout: 11m", "controlTimeout must be lower than scanTimeout"},
 		{"both namespace scopes", "excludeNamespaces: [kube-system]", "includeNamespaces: [default]\n        excludeNamespaces: [kube-system]", "cannot both be set"},
 		{"unknown degradation mode", "degradedPolicyInput: fail", "degradedPolicyInput: warn", "supported values: allow, fail"},
 	}
