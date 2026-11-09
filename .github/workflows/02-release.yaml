@@ -191,7 +191,7 @@ jobs:
           ls -laR test-results/system-tests || true
 
       - name: System Tests Report
-        uses: mikepenz/action-junit-report@8a133bfa3ecb0ea9024c1e2ae788b4c25f6cdb9d # v6.6.2
+        uses: mikepenz/action-junit-report@a16be3a69023e9bd7e748ede768b3282ea7b30ce # v6.7.1
         if: always()
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
