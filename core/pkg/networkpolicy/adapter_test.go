@@ -116,3 +116,37 @@ func TestEndpointFromResource_NilResourceIsSafe(t *testing.T) {
 		t.Errorf("expected a zero-value Endpoint for a nil resource, got %+v", ep)
 	}
 }
+
+// When several policies admit the same connection, the Decision names the
+// first one in resource-ID order, so the same snapshot names the same policy
+// on every run instead of whichever one map iteration happens to yield first.
+func TestFromResources_MatchedPolicyIsTheSameOnEveryRun(t *testing.T) {
+	resources := map[string]workloadinterface.IMetadata{}
+	for _, name := range []string{"allow-a", "allow-b", "allow-c", "allow-d"} {
+		np := workloadinterface.NewWorkloadObj(map[string]any{
+			"apiVersion": "networking.k8s.io/v1",
+			"kind":       "NetworkPolicy",
+			"metadata":   map[string]any{"name": name, "namespace": "prod"},
+			"spec": map[string]any{
+				"podSelector": map[string]any{},
+				"policyTypes": []any{"Ingress"},
+				"ingress":     []any{map[string]any{}},
+			},
+		})
+		resources[np.GetID()] = np
+	}
+	src := Endpoint{Namespace: "prod", Name: "client", Labels: map[string]string{"app": "client"}}
+	dst := Endpoint{Namespace: "prod", Name: "server", Labels: map[string]string{"app": "server"}}
+
+	for run := 0; run < 50; run++ {
+		policies, namespaces, errs := FromResources(resources)
+		if len(errs) != 0 {
+			t.Fatalf("unexpected decode errors: %v", errs)
+		}
+		idx, _ := NewIndex(policies, namespaces)
+		_, _, ingress := idx.Reaches(src, dst, nil)
+		if ingress.MatchedPolicy != "prod/allow-a" {
+			t.Fatalf("run %d: ingress MatchedPolicy = %q, want %q (the first admitting policy by resource ID)", run, ingress.MatchedPolicy, "prod/allow-a")
+		}
+	}
+}
