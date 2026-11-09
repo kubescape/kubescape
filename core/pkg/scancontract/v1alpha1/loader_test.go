@@ -162,6 +162,15 @@ func TestLoadRejectsNewerMinimumVersion(t *testing.T) {
 	assert.Contains(t, err.Error(), "requires Kubescape v4.1.0 or newer")
 }
 
+func TestLoadAcceptsMinimumVersionEqualToRunningVersion(t *testing.T) {
+	options := testOptions()
+	input := strings.Replace(validContract, "v4.0.0", options.RunningVersion, 1)
+
+	selected, err := Load([]byte(input), options)
+	require.NoError(t, err)
+	assert.Equal(t, options.RunningVersion, selected.MinimumKubescapeVersion)
+}
+
 func TestLoadSkipsCompatibilityForNonReleaseBuilds(t *testing.T) {
 	for _, runningVersion := range []string{"", "dev", "unknown", "(devel)"} {
 		t.Run(runningVersion, func(t *testing.T) {
