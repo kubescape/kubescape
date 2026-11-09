@@ -52,13 +52,17 @@ func getListPoliciesCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if outputFile != "" {
+			outPath, err := validateOutputFile(outputFile, cmd.Flags().Changed("output"))
+			if err != nil {
+				return err
+			}
+			if outPath != "" {
 				var rendered bytes.Buffer
 				out := &noColorWriter{w: &rendered}
 				if err := runListPolicies(out, normalizedFormat, controlsOnly); err != nil {
 					return err
 				}
-				return writeOutput(rendered.String(), outputFile)
+				return writeOutput(rendered.String(), outPath, cmd.OutOrStdout())
 			}
 			out := &errorRecordingWriter{w: cmd.OutOrStdout()}
 			if err := runListPolicies(out, normalizedFormat, controlsOnly); err != nil {

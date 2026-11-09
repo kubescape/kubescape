@@ -2311,3 +2311,98 @@ func TestCreatePolicyBindingCmd_PropagatesWriterError(t *testing.T) {
 	cmd.SetArgs([]string{"--name", "test-binding", "--control", "C-0009", "--parameter-reference", "basic-control-configuration"})
 	require.ErrorIs(t, cmd.Execute(), writeErr)
 }
+
+func TestValidateOutputFile(t *testing.T) {
+	t.Run("flag not changed returns empty path and no error", func(t *testing.T) {
+		path, err := validateOutputFile("", false)
+		require.NoError(t, err)
+		assert.Empty(t, path)
+	})
+
+	t.Run("empty path when changed returns error", func(t *testing.T) {
+		_, err := validateOutputFile("", true)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "output file path cannot be empty")
+	})
+
+	t.Run("whitespace-only path when changed returns error", func(t *testing.T) {
+		_, err := validateOutputFile("   \t\n", true)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "output file path cannot be empty")
+	})
+
+	t.Run("existing directory path returns directory error", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		_, err := validateOutputFile(tmpDir, true)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "is a directory, not a file")
+	})
+
+	t.Run("valid file path returns trimmed path", func(t *testing.T) {
+		target := filepath.Join(t.TempDir(), "manifest.yaml")
+		path, err := validateOutputFile("  "+target+"  ", true)
+		require.NoError(t, err)
+		assert.Equal(t, target, path)
+	})
+}
+
+func TestWriteOutput_RejectsDirectory(t *testing.T) {
+	tmpDir := t.TempDir()
+	err := writeOutput("content", tmpDir)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "is a directory, not a file")
+}
+
+func TestDeployLibraryCmd_OutputFlagValidation(t *testing.T) {
+	t.Run("empty output flag is rejected", func(t *testing.T) {
+		cmd := getDeployLibraryCmd()
+		cmd.SilenceUsage = true
+		cmd.SilenceErrors = true
+		cmd.SetArgs([]string{"--output", ""})
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "output file path cannot be empty")
+	})
+
+	t.Run("whitespace-only output flag is rejected", func(t *testing.T) {
+		cmd := getDeployLibraryCmd()
+		cmd.SilenceUsage = true
+		cmd.SilenceErrors = true
+		cmd.SetArgs([]string{"-o", "   "})
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "output file path cannot be empty")
+	})
+
+	t.Run("directory output flag is rejected", func(t *testing.T) {
+		cmd := getDeployLibraryCmd()
+		cmd.SilenceUsage = true
+		cmd.SilenceErrors = true
+		cmd.SetArgs([]string{"--output", t.TempDir()})
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "is a directory, not a file")
+	})
+}
+
+func TestCreatePolicyBindingCmd_OutputFlagValidation(t *testing.T) {
+	t.Run("empty output flag is rejected", func(t *testing.T) {
+		cmd := getCreatePolicyBindingCmd()
+		cmd.SilenceUsage = true
+		cmd.SilenceErrors = true
+		cmd.SetArgs([]string{"--name", "test-binding", "--control", "C-0009", "--parameter-reference", "basic-control-configuration", "--output", ""})
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "output file path cannot be empty")
+	})
+
+	t.Run("directory output flag is rejected", func(t *testing.T) {
+		cmd := getCreatePolicyBindingCmd()
+		cmd.SilenceUsage = true
+		cmd.SilenceErrors = true
+		cmd.SetArgs([]string{"--name", "test-binding", "--control", "C-0009", "--parameter-reference", "basic-control-configuration", "-o", t.TempDir()})
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "is a directory, not a file")
+	})
+}
