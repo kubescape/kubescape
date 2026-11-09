@@ -139,6 +139,37 @@ func loadedUnpackedDependency(parent *helmchart.Chart, directory string) *helmch
 	return nil
 }
 
+// copyChartTree copies c and its dependencies deeply enough for
+// chartutil.ProcessDependenciesWithMerge to work on the copy. That function
+// replaces each chart's dependency list and Values, and edits the entries of
+// Metadata.Dependencies (Name for an alias, Enabled, ImportValues), so those
+// are copied. Templates, files and the values maps themselves are only read,
+// and stay shared with c.
+func copyChartTree(c *helmchart.Chart) *helmchart.Chart {
+	out := *c
+	if c.Metadata != nil {
+		metadata := *c.Metadata
+		// Keep a nil list nil: Helm skips a chart whose list is nil.
+		if c.Metadata.Dependencies != nil {
+			metadata.Dependencies = make([]*helmchart.Dependency, len(c.Metadata.Dependencies))
+			for i, dependency := range c.Metadata.Dependencies {
+				if dependency != nil {
+					dependencyCopy := *dependency
+					metadata.Dependencies[i] = &dependencyCopy
+				}
+			}
+		}
+		out.Metadata = &metadata
+	}
+	dependencies := make([]*helmchart.Chart, 0, len(c.Dependencies()))
+	for _, dependency := range c.Dependencies() {
+		dependencies = append(dependencies, copyChartTree(dependency))
+	}
+	// SetDependencies also points each copied dependency's parent at out.
+	out.SetDependencies(dependencies...)
+	return &out
+}
+
 func (hc *HelmChart) GetDefaultValues() map[string]any {
 	return hc.chart.Values
 }
@@ -203,11 +234,21 @@ func (hc *HelmChart) GetWorkloadsWithCapabilities(values map[string]any, release
 	if !releaseOpts.IsInstall && !releaseOpts.IsUpgrade {
 		releaseOpts.IsInstall = true
 	}
-	vals, err := helmchartutil.ToRenderValues(hc.chart, values, releaseOpts, caps)
+	// Like helm template, resolve the dependencies against the values before
+	// rendering: drop subcharts that a condition or tag disables, render each
+	// alias as its own subchart reading the values under its alias, and apply
+	// import-values. Helm does this by editing the chart, so edit a copy:
+	// ownsUnpackedDependency and Provenance need hc.chart to keep matching
+	// the charts/ tree on disk.
+	chart := copyChartTree(hc.chart)
+	if err := helmchartutil.ProcessDependenciesWithMerge(chart, values); err != nil {
+		return nil, []error{err}
+	}
+	vals, err := helmchartutil.ToRenderValues(chart, values, releaseOpts, caps)
 	if err != nil {
 		return nil, []error{err}
 	}
-	sourceToFile, err := helmengine.Render(hc.chart, vals)
+	sourceToFile, err := helmengine.Render(chart, vals)
 	if err != nil {
 		return nil, []error{err}
 	}
