@@ -64,10 +64,73 @@ type VulnerabilitiesIgnorePolicy struct {
 	Severities      []string `json:"severities"`
 }
 
+// maxImageExceptionsBytes is the maximum allowed size for image exception files (32 MiB),
+// matching cautils.DefaultMaxFileSize to prevent uncontrolled resource consumption
+// from oversized inputs or decompression bombs (CWE-400).
+const maxImageExceptionsBytes int64 = 32 * 1024 * 1024
+
+var (
+	// ErrImageExceptionsNotRegular is returned when an image exceptions file is not a regular file.
+	ErrImageExceptionsNotRegular = errors.New("image exceptions file is not a regular file")
+	// ErrImageExceptionsTooLarge is returned when an image exceptions file exceeds the maximum allowed size.
+	ErrImageExceptionsTooLarge = errors.New("image exceptions file exceeds maximum size limit")
+)
+
+// openImageExceptionsFile opens path for reading and rejects anything but a regular file.
+// O_NONBLOCK keeps opening a FIFO from waiting for a writer, and the check is
+// made on the opened descriptor so a path swapped afterwards cannot slip past.
+func openImageExceptionsFile(path string) (*os.File, error) {
+	if strings.TrimSpace(path) == "" {
+		return nil, os.ErrNotExist
+	}
+	file, err := os.OpenFile(filepath.Clean(path), os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return nil, err
+	}
+	info, err := file.Stat()
+	if err != nil {
+		file.Close()
+		return nil, err
+	}
+	if info.IsDir() {
+		file.Close()
+		return nil, fmt.Errorf("%q is a directory, not a file: %w", path, ErrImageExceptionsNotRegular)
+	}
+	if !info.Mode().IsRegular() {
+		file.Close()
+		return nil, fmt.Errorf("%w: %q", ErrImageExceptionsNotRegular, path)
+	}
+	return file, nil
+}
+
+// readImageExceptionsFile returns the contents of the image exceptions file at path,
+// reading at most maxImageExceptionsBytes bytes so that reading remains bounded.
+func readImageExceptionsFile(path string) ([]byte, error) {
+	file, err := openImageExceptionsFile(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	info, err := file.Stat()
+	if err == nil && info.Size() > maxImageExceptionsBytes {
+		return nil, fmt.Errorf("%w: %q exceeds the %d byte limit", ErrImageExceptionsTooLarge, path, maxImageExceptionsBytes)
+	}
+
+	data, err := io.ReadAll(io.LimitReader(file, maxImageExceptionsBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > maxImageExceptionsBytes {
+		return nil, fmt.Errorf("%w: %q exceeds the %d byte limit", ErrImageExceptionsTooLarge, path, maxImageExceptionsBytes)
+	}
+	return data, nil
+}
+
 // Loads exception policies from exceptions json object.
 func GetImageExceptionsFromFile(filePath string) ([]VulnerabilitiesIgnorePolicy, error) {
 	// Read the JSON file
-	jsonFile, err := os.ReadFile(filepath.Clean(filePath))
+	jsonFile, err := readImageExceptionsFile(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("error reading exceptions file: %w", err)
 	}
