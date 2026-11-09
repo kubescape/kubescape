@@ -75,7 +75,7 @@ require (
 	github.com/owenrumney/go-sarif/v2 v2.3.3
 	github.com/package-url/packageurl-go v0.1.7
 	github.com/project-copacetic/copacetic v0.15.0
-	github.com/prometheus/common v0.70.1
+	github.com/prometheus/common v0.73.1
 	github.com/quay/claircore v1.6.1
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
 	github.com/schollz/progressbar/v3 v3.19.1
@@ -485,6 +485,7 @@ require (
 	github.com/opencontainers/runtime-spec v1.3.0 // indirect
 	github.com/opencontainers/selinux v1.15.1 // indirect
 	github.com/owenrumney/go-sarif v1.1.2-0.20231003122901-1000f5e05554 // indirect
+	github.com/pandatix/go-abnf v0.5.3 // indirect
 	github.com/pandatix/go-cvss v0.6.2 // indirect
 	github.com/parthivsaikia/go-pacman-version v0.0.0-20260212091406-8640ae78daee // indirect
 	github.com/pborman/indent v1.2.1 // indirect
