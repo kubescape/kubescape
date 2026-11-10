@@ -3,13 +3,16 @@ package cautils
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/google/uuid"
@@ -375,8 +378,11 @@ func (scanInfo *ScanInfo) setUseArtifactsFrom(ctx context.Context) error {
 	}
 	framework := &reporthandling.Framework{}
 	for _, f := range files {
+		if f.IsDir() {
+			continue
+		}
 		filePath := filepath.Join(scanInfo.UseArtifactsFrom, f.Name())
-		file, err := os.ReadFile(filepath.Clean(filePath))
+		file, err := readArtifactFile(filePath)
 		if err == nil {
 			if err := json.Unmarshal(file, framework); err == nil {
 				scanInfo.UseFrom = append(scanInfo.UseFrom, filepath.Join(scanInfo.UseArtifactsFrom, f.Name()))
@@ -397,6 +403,64 @@ func (scanInfo *ScanInfo) setUseArtifactsFrom(ctx context.Context) error {
 		scanInfo.AttackTracks = filepath.Join(scanInfo.UseArtifactsFrom, LocalAttackTracksFilename)
 	}
 	return nil
+}
+
+var (
+	// ErrArtifactFileNotRegular is returned when an artifact file is not a regular file.
+	ErrArtifactFileNotRegular = errors.New("artifact file is not a regular file")
+	// ErrArtifactFileTooLarge is returned when an artifact file exceeds the maximum allowed size.
+	ErrArtifactFileTooLarge = errors.New("artifact file exceeds maximum size limit")
+)
+
+// readArtifactFile opens path with O_NONBLOCK, verifies that it is a regular file,
+// and reads at most getMaxFileSize() bytes (configurable via KUBESCAPE_MAX_FILE_SIZE,
+// defaulting to DefaultMaxFileSize) so reading remains bounded.
+func readArtifactFile(path string) ([]byte, error) {
+	if strings.TrimSpace(path) == "" {
+		return nil, os.ErrNotExist
+	}
+	cleaned := filepath.Clean(path)
+	statInfo, err := os.Stat(cleaned)
+	if err != nil {
+		return nil, err
+	}
+	if statInfo.IsDir() {
+		return nil, fmt.Errorf("%q is a directory, not a file: %w", path, ErrArtifactFileNotRegular)
+	}
+	if !statInfo.Mode().IsRegular() {
+		return nil, fmt.Errorf("%w: %q", ErrArtifactFileNotRegular, path)
+	}
+
+	file, err := os.OpenFile(cleaned, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	info, err := file.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if info.IsDir() {
+		return nil, fmt.Errorf("%q is a directory, not a file: %w", path, ErrArtifactFileNotRegular)
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("%w: %q", ErrArtifactFileNotRegular, path)
+	}
+
+	limit := getMaxFileSize()
+	if info.Size() > limit {
+		return nil, fmt.Errorf("%w: %q exceeds maximum size limit of %d bytes", ErrArtifactFileTooLarge, path, limit)
+	}
+
+	data, err := io.ReadAll(io.LimitReader(file, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > limit {
+		return nil, fmt.Errorf("%w: %q exceeds maximum size limit of %d bytes", ErrArtifactFileTooLarge, path, limit)
+	}
+	return data, nil
 }
 
 func (scanInfo *ScanInfo) setUseFrom(policyIdentifiers []PolicyIdentifier) {
