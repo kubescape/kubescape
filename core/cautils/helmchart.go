@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -514,6 +515,80 @@ func isListEnvelope(doc []byte) bool {
 	return isList || err != nil
 }
 
+var (
+	// ErrHelmTemplateNotRegular is returned when a Helm template file is not a regular file.
+	ErrHelmTemplateNotRegular = errors.New("helm template file is not a regular file")
+	// ErrHelmTemplateTooLarge is returned when a Helm template file exceeds the maximum allowed size.
+	ErrHelmTemplateTooLarge = errors.New("helm template file exceeds maximum size limit")
+)
+
+// openHelmTemplateFile opens path for reading and rejects anything but a regular file.
+// A pre-open stat check prevents opening device nodes (e.g. tape or character devices).
+// O_NONBLOCK keeps opening a FIFO from waiting for a writer, and descriptor-based
+// validation ensures a path swapped after stat cannot slip past.
+func openHelmTemplateFile(path string) (*os.File, error) {
+	if strings.TrimSpace(path) == "" {
+		return nil, os.ErrNotExist
+	}
+	cleaned := filepath.Clean(path)
+	statInfo, err := os.Stat(cleaned)
+	if err != nil {
+		return nil, err
+	}
+	if statInfo.IsDir() {
+		return nil, fmt.Errorf("%q is a directory, not a file: %w", path, ErrHelmTemplateNotRegular)
+	}
+	if !statInfo.Mode().IsRegular() {
+		return nil, fmt.Errorf("%w: %q", ErrHelmTemplateNotRegular, path)
+	}
+
+	file, err := os.OpenFile(cleaned, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return nil, err
+	}
+	info, err := file.Stat()
+	if err != nil {
+		file.Close()
+		return nil, err
+	}
+	if info.IsDir() {
+		file.Close()
+		return nil, fmt.Errorf("%q is a directory, not a file: %w", path, ErrHelmTemplateNotRegular)
+	}
+	if !info.Mode().IsRegular() {
+		file.Close()
+		return nil, fmt.Errorf("%w: %q", ErrHelmTemplateNotRegular, path)
+	}
+	return file, nil
+}
+
+// readHelmTemplateFile returns the contents of the Helm template file at path, reading at most
+// getMaxFileSize() bytes (configurable via KUBESCAPE_MAX_FILE_SIZE, defaulting to
+// DefaultMaxFileSize) so that reading remains bounded.
+func readHelmTemplateFile(path string) ([]byte, error) {
+	file, err := openHelmTemplateFile(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	limit := getMaxFileSize()
+
+	info, err := file.Stat()
+	if err == nil && info.Size() > limit {
+		return nil, fmt.Errorf("%w: %q exceeds the %d byte limit", ErrHelmTemplateTooLarge, path, limit)
+	}
+
+	data, err := io.ReadAll(io.LimitReader(file, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > limit {
+		return nil, fmt.Errorf("%w: %q exceeds the %d byte limit", ErrHelmTemplateTooLarge, path, limit)
+	}
+	return data, nil
+}
+
 // isStaticTemplate reports whether the file at absPath contains no Go template
 // action delimiter ("{{"), i.e. Helm's render passed it through byte-for-byte.
 // This is deliberately conservative: a literal "{{" that is not really a
@@ -524,7 +599,7 @@ func isListEnvelope(doc []byte) bool {
 // path once evidence is requested, so if that is going to fail, failing safe
 // here is consistent with failing safe there.
 func isStaticTemplate(absPath string) (bool, error) {
-	content, err := os.ReadFile(absPath)
+	content, err := readHelmTemplateFile(absPath)
 	if err != nil {
 		return false, err
 	}
