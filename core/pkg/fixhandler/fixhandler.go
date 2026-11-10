@@ -1740,6 +1740,20 @@ func applyFixToFileContent(ctx context.Context, filePath, content string, fixes 
 	return patched, err
 }
 
+// ApplyFixesInPlace patches content, read from filePath, in memory and returns
+// it with the expressions in apply order. The source is edited in place, so
+// untouched text stays byte for byte. A JSON manifest stays JSON: when an edit
+// adds a field, the in-place editor writes YAML flow syntax (unquoted keys and
+// strings), and the document is then re-encoded as JSON instead.
+func ApplyFixesInPlace(ctx context.Context, filePath, content string, fixes []ResourceFixInfo) (string, []string, error) {
+	patched, expressions, err := (YAMLTreeEditor{}).ApplyFixes(ctx, content, fixes)
+	if err != nil || !isJSONSource(filePath) || json.Valid([]byte(patched)) {
+		return patched, expressions, err
+	}
+	patched, err = applyFixToJSONContent(ctx, content, strings.Join(expressions, " | "), fixes)
+	return patched, expressions, err
+}
+
 // plannedFix is one planned YAML edit's location and the value it writes
 // there, kept together so a caller can tell not just that a planned edit
 // touches a given path, but whether it writes the value another control's
