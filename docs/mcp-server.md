@@ -749,6 +749,99 @@ A report file does not carry the `truncated` flag of the `run_framework_security
 
 **Errors:** `INVALID_ARGUMENT` for a missing, conflicting, unreadable, oversized or non-report input, or a report whose recorded scan location is outside `base_path`. A single resource whose manifest resolves outside `base_path` is not an error: it is skipped and reported as `manual`.
 
+#### `verify_remediation`
+
+Check whether the findings listed by `apply_remediation` are fixed, after the caller has applied the changes to local IaC. It scans `path` once, in memory, for the controls in `items`, and returns one verdict per item. It is read-only: it does not apply patches and does not modify any file. Local IaC only; cluster resources are not supported.
+
+**Parameters:**
+
+| Parameter | Type   | Required | Description                                                                                                                     |
+| --------- | ------ | -------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `path`    | string | Yes      | The same file or directory root that was passed to `apply_remediation`, now holding the applied changes                         |
+| `items`   | array  | Yes      | The `items` array returned by `apply_remediation`, unchanged. Only `resource_id` and `control.id` are read, the rest is ignored |
+
+An item that is not an object, or lacks a string `resource_id` or a non-empty `control.id`, fails the whole call with `INVALID_ARGUMENT` and names the item, so the results always line up with the input. A `not_evaluated` item has an empty `resource_id`; it is accepted and comes back `unverified`. An empty `items` array returns an empty result without scanning.
+
+**Response fields:**
+
+| Field      | Description                                                                                                                         |
+| ---------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `results`  | One entry per input item, in input order: `index`, `resource_id`, `control_id`, `verdict`, `reason`, and `message` for `unverified` |
+| `summary`  | Count of `resolved`, `still_failing` and `unverified` verdicts                                                                      |
+| `degraded` | The fresh scan did not fully complete or carries no coverage information. No item is `resolved` then                                |
+
+**`verdict`:**
+
+| Value           | Meaning                                                                                                                                 |
+| --------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `resolved`      | The resource is in the fresh scan, exactly one result for the control is reported `passed` with no sub-status, and the scan is complete |
+| `still_failing` | The resource is in the fresh scan and the control is reported `failed`                                                                  |
+| `unverified`    | Neither can be established; `reason` says why                                                                                           |
+
+**`reason`:** `control_passed` and `control_failed` accompany the first two verdicts. For `unverified`:
+
+| Value                        | Meaning                                                                                             |
+| ---------------------------- | --------------------------------------------------------------------------------------------------- |
+| `resource_id_missing`        | The item has no `resource_id`                                                                       |
+| `resource_not_found`         | The `resource_id` is not in the fresh scan                                                          |
+| `ambiguous_resource`         | More than one result has the `resource_id`                                                          |
+| `control_not_found`          | The resource is in the scan but the control was not reported for it                                 |
+| `ambiguous_control`          | The control is reported more than once for the resource                                             |
+| `control_not_evaluated`      | The control was skipped, is marked not evaluated, or is listed in the scan's not-evaluated controls |
+| `control_substatus_present`  | The control passed with a sub-status such as an exception, which is not a conclusive pass           |
+| `control_status_unknown`     | The control has a status other than `passed`, `failed` or `skipped`                                 |
+| `scan_coverage_insufficient` | The scan is degraded, skipped manifests, pulled resources partially, or has no coverage information |
+
+**Example request** (`items` is copied from the `apply_remediation` response; extra fields are ignored):
+
+```json
+{
+  "path": "/workspace/manifests",
+  "items": [
+    {
+      "resource_id": "path=1529290419/api=apps/v1/default/Deployment/nginx",
+      "control": { "id": "C-0057", "name": "Privileged container" },
+      "classification": "patch_available"
+    }
+  ]
+}
+```
+
+**Example response:**
+
+```json
+{
+  "results": [
+    {
+      "index": 0,
+      "resource_id": "path=1529290419/api=apps/v1/default/Deployment/nginx",
+      "control_id": "C-0057",
+      "verdict": "resolved",
+      "reason": "control_passed"
+    }
+  ],
+  "summary": { "resolved": 1, "still_failing": 0, "unverified": 0 },
+  "degraded": false
+}
+```
+
+A `still_failing` entry has `"reason": "control_failed"`. An `unverified` entry adds a `message`:
+
+```json
+{
+  "index": 0,
+  "resource_id": "path=1529290419/api=apps/v1/default/Deployment/nginx",
+  "control_id": "C-0057",
+  "verdict": "unverified",
+  "reason": "resource_not_found",
+  "message": "the resource_id is not in the fresh scan; the resource may have been renamed, moved, reordered or deleted, or path is a different root than the original scan, so this does not show the finding is fixed"
+}
+```
+
+A missing resource, a missing control or the absence of a finding is never treated as a fix. IaC resource IDs include a hash of the file path relative to the scan root and the document's position in its file, so a renamed or moved file, a reordered document, a different `path` root, or an edit to the resource's name, namespace, kind or API version all come back as `resource_not_found`. The tool cannot tell these apart from a deletion, and does not try.
+
+**Errors:** `INVALID_ARGUMENT` for malformed arguments. A failed scan, or a report that cannot be parsed, is a tool error (`SCAN_EXECUTION_FAILED`, `TIMEOUT`, ...), never a list of `unverified` verdicts.
+
 ### Admission Policy Tools
 
 Both tools read only the CEL admission policy library embedded in the Kubescape binary. They make no cluster, file or network access, and neither applies anything to a cluster. Kubescape's ValidatingAdmissionPolicy support is experimental.

@@ -920,6 +920,37 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 			return mcpToolError(code, msg, nil), nil
 		}
 		return mcp.NewToolResultText(string(v.([]byte))), nil
+	case "verify_remediation":
+		path, toolErr := mcpRequiredStringArg(arguments, "path")
+		if toolErr != nil {
+			return toolErr, nil
+		}
+		items, toolErr := parseVerifyItems(arguments)
+		if toolErr != nil {
+			return toolErr, nil
+		}
+		if len(items) == 0 {
+			// Nothing to verify, so there is nothing to scan for.
+			resBytes, err := json.MarshalIndent(verifyResponse{Results: []verifyResult{}}, "", "  ")
+			if err != nil {
+				return mcpToolError(ErrCodeMarshalError, fmt.Sprintf("failed to marshal result: %v", err), nil), nil
+			}
+			return mcp.NewToolResultText(string(resBytes)), nil
+		}
+		controlIDs := verifyControlIDs(items)
+		v, err := ksServer.doScanChan(ctx, verifyScanKey(path, controlIDs), func(scanCtx context.Context) (interface{}, error) {
+			return iacScanReportFn(ksServer, scanCtx, path, controlIDs)
+		})
+		if err != nil {
+			code := classifyScanError(err)
+			msg := fmt.Sprintf("failed to rescan for verification: %v", err)
+			return mcpToolError(code, msg, nil), nil
+		}
+		resBytes, err := verifyRemediationReport(v.(*iacScanOutcome), items)
+		if err != nil {
+			return mcpToolError(ErrCodeScanFailed, err.Error(), nil), nil
+		}
+		return mcp.NewToolResultText(string(resBytes)), nil
 	case "run_network_security_scan":
 		namespace, err := mcpScanNamespace(arguments)
 		if err != nil {
@@ -1659,6 +1690,7 @@ func registerTools(ksServer *KubescapeMcpserver) {
 	createIaCScanningTools(ksServer)
 	createIaCControlScanningTool(ksServer)
 	createRemediationTools(ksServer)
+	createVerifyRemediationTools(ksServer)
 	createControlScanningTools(ksServer)
 	createWorkloadScanningTools(ksServer)
 	createPolicyListingTools(ksServer)
