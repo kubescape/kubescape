@@ -231,7 +231,7 @@ A redacted value is printed as `[redacted]`. The JSON `evidence` array leaves su
 
 Redaction goes mainly by field name and by a few known locations. A rule that points at a free-form field should not assume a credential inside it will be hidden.
 
-Separately, before results are printed, Kubescape overwrites the contents of some fields with the text `XXXXXX`, so that scan results do not carry them: `data` and `stringData` of a `Secret`, `data` and `binaryData` of a `ConfigMap`, and the `value` of every environment variable in a container, init container or ephemeral container. A path that points inside these fields can only ever show `XXXXXX`, with or without `--show-secrets`.
+Separately, before results are printed, Kubescape overwrites the contents of some fields with the text `XXXXXX`, so that scan results do not carry them: `data` and `stringData` of a `Secret`, `data` and `binaryData` of a `ConfigMap`, and the `value` of every environment variable in a container, init container or ephemeral container. The original value is gone by then, so a path that points inside these fields shows `[redacted]`, with or without `--show-secrets`. Only these locations are treated this way: a genuine value that happens to read `XXXXXX` elsewhere, in a label or an image for example, is shown as it is.
 
 This has a consequence for rules. C-0012 emits two paths for a hardcoded variable: the variable's `name` and its `value`. The name path is the one that tells the user which variable to look at. When a rule's finding is a credential, emit a path to the field that names it.
 
@@ -255,7 +255,7 @@ None of these produce an error. The control fails as usual, and the evidence is 
 | The path is written for the wrong kind | A nearby line, no value | See [A wrong root does not fail loudly](#a-wrong-root-does-not-fail-loudly) |
 | The path is malformed | No line, and no value from the resource | `spec.containers[*].image` |
 | An index is left unsubstituted | No line, and no value from the resource | `spec.containers[container_ndx].image` |
-| The value was scrubbed | `XXXXXX` is shown, or the entry is left out | A path into a ConfigMap's `data` |
+| The value was scrubbed | `[redacted]` is shown, or the entry is left out | A path into a ConfigMap's `data` |
 | The resource comes from a templated Helm file | The path, but no line | A template containing `{{ .Values.x }}` |
 
 ---
@@ -273,7 +273,7 @@ kubescape scan control C-0041 pod.yaml --custom-rules ./my-rules --show-evidence
 - a path to a field that exists points at that field's own line, not at an enclosing block (a fix path to a field that has to be added is the exception: it points at the enclosing block by design, see [absent fields](#absent-fields));
 - a review path shows `(current: ...)`;
 - a fix path shows the value the policy requires;
-- no `XXXXXX` stands in for something the user needs to read.
+- no `[redacted]` stands in for something the user needs to read, such as the field that names a credential.
 
 A Pod and a Deployment need different roots, so test every kind the rule covers.
 
