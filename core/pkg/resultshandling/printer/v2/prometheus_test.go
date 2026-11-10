@@ -654,3 +654,61 @@ func TestResourceMetrics_ClusterScanKeepsLabels(t *testing.T) {
 	assert.Contains(t, output, `kubescape_resource_count_controls_failed{apiVersion="apps/v1",kind="Deployment",namespace="default",name="web"} 0`+"\n")
 	assert.NotContains(t, output, "path=")
 }
+
+// TestResourceMetrics_SubjectWithSeveralBindingsIsOneSeries pins that an RBAC
+// subject granted roles through several bindings yields one series. The scan
+// keeps one resource per subject, binding and role, but the labels only name the
+// subject, and a cluster scan has no path label to tell them apart. Every
+// Kubernetes cluster has such a subject: system:authenticated is bound by the
+// default system:basic-user and system:discovery ClusterRoleBindings.
+func TestResourceMetrics_SubjectWithSeveralBindingsIsOneSeries(t *testing.T) {
+	const rbacGroup = "rbac.authorization.k8s.io"
+	role := func(name string) workloadinterface.IMetadata {
+		return workloadinterface.NewWorkloadObj(map[string]any{
+			"apiVersion": rbacGroup + "/v1", "kind": "ClusterRole",
+			"metadata": map[string]any{"name": name},
+		})
+	}
+	binding := func(name string) workloadinterface.IMetadata {
+		return workloadinterface.NewWorkloadObj(map[string]any{
+			"apiVersion": rbacGroup + "/v1", "kind": "ClusterRoleBinding",
+			"metadata": map[string]any{"name": name},
+			"roleRef":  map[string]any{"apiGroup": rbacGroup, "kind": "ClusterRole", "name": name},
+			"subjects": []any{map[string]any{"apiGroup": rbacGroup, "kind": "Group", "name": "system:authenticated"}},
+		})
+	}
+	vectors, err := reporthandling.AggregateResourcesBySubjects([]workloadinterface.IMetadata{
+		role("system:basic-user"), binding("system:basic-user"),
+		role("system:discovery"), binding("system:discovery"),
+	})
+	require.NoError(t, err)
+	require.Len(t, vectors, 2)
+	require.NotEqual(t, vectors[0].GetID(), vectors[1].GetID(), "the scan must hold them as two resources")
+
+	control := func(id string, status apis.ScanningStatus) resourcesresults.ResourceAssociatedControl {
+		return resourcesresults.ResourceAssociatedControl{ControlID: id, Status: apis.StatusInfo{InnerStatus: status}}
+	}
+	catalog := cautils.NewMapResourceCatalog(map[string]workloadinterface.IMetadata{
+		vectors[0].GetID(): vectors[0],
+		vectors[1].GetID(): vectors[1],
+	})
+	results := map[string]resourcesresults.Result{
+		vectors[0].GetID(): {ResourceID: vectors[0].GetID(), AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+			control("C-0001", apis.StatusFailed), control("C-0002", apis.StatusFailed),
+		}},
+		vectors[1].GetID(): {ResourceID: vectors[1].GetID(), AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+			control("C-0001", apis.StatusFailed), control("C-0002", apis.StatusPassed),
+		}},
+	}
+
+	m := &Metrics{}
+	m.setResourcesCountersFromCatalog(catalog, results, &reportsummary.SummaryDetails{}, nil)
+	output := m.String()
+
+	assert.Empty(t, duplicateSeries(output), "output:\n%s", output)
+	labels := `{apiVersion="` + rbacGroup + `",kind="Group",namespace="",name="system:authenticated"}`
+	// C-0001 fails through both bindings and C-0002 through one, so the subject
+	// fails two controls and passes none.
+	assert.Contains(t, output, "kubescape_resource_count_controls_failed"+labels+" 2\n")
+	assert.Contains(t, output, "kubescape_resource_count_controls_passed"+labels+" 0\n")
+}
