@@ -1762,6 +1762,73 @@ func TestPrintImageScan_MultipleImagesAggregatesRuns(t *testing.T) {
 	}
 }
 
+// TestSARIFMultipleImageRunsHaveDistinctCategories pins what GitHub Code Scanning
+// requires of a file with several runs: since July 2025 it rejects an upload in
+// which two runs share a tool and a category. Every image run has the same driver
+// name, so each needs its own automationDetails.id. The trailing slash makes the
+// whole id the category; without it GitHub reads the last segment as a run ID.
+func TestSARIFMultipleImageRunsHaveDistinctCategories(t *testing.T) {
+	imageA, imageB := buildSeverityExceptionImageScanData(), buildSeverityExceptionImageScanData()
+	imageA.Image = "registry.example.com/team/api:1.0"
+	imageB.Image = "registry.example.com/team/web:1.0"
+
+	cases := []struct {
+		name    string
+		session *cautils.OPASessionObj
+		// imageRuns is the part of the report the images occupy.
+		firstImageRun int
+	}{
+		{name: "image scan"},
+		{name: "combined scan", session: configurationOutputFixture(t, 1), firstImageRun: 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tmp, err := os.CreateTemp(t.TempDir(), "sarif-categories-*.sarif")
+			require.NoError(t, err)
+			sp := NewSARIFPrinter(false)
+			sp.writer = tmp
+			require.NoError(t, sp.ActionPrint(context.Background(), tc.session, []cautils.ImageScanData{imageA, imageB}))
+			require.NoError(t, tmp.Close())
+
+			raw, err := os.ReadFile(tmp.Name())
+			require.NoError(t, err)
+			requireValidSARIF(t, raw)
+
+			var report sarif.Report
+			require.NoError(t, json.Unmarshal(raw, &report))
+			require.Len(t, report.Runs, tc.firstImageRun+2)
+
+			seen := map[string]bool{}
+			for _, run := range report.Runs[tc.firstImageRun:] {
+				require.NotNil(t, run.AutomationDetails, "run for an image has no category, so it collides with the other image run")
+				require.NotNil(t, run.AutomationDetails.ID)
+				id := *run.AutomationDetails.ID
+				assert.True(t, strings.HasSuffix(id, "/"), "id %q would be split into a category and a run ID", id)
+				assert.False(t, seen[id], "two runs share category %q", id)
+				seen[id] = true
+			}
+		})
+	}
+}
+
+// TestSARIFSingleImageRunHasNoCategory pins that a report GitHub already accepts
+// is left alone, so upload-sarif's own category input keeps applying to it.
+func TestSARIFSingleImageRunHasNoCategory(t *testing.T) {
+	tmp, err := os.CreateTemp(t.TempDir(), "sarif-single-*.sarif")
+	require.NoError(t, err)
+	sp := NewSARIFPrinter(false)
+	sp.writer = tmp
+	require.NoError(t, sp.ActionPrint(context.Background(), nil, []cautils.ImageScanData{buildSeverityExceptionImageScanData()}))
+	require.NoError(t, tmp.Close())
+
+	raw, err := os.ReadFile(tmp.Name())
+	require.NoError(t, err)
+	var report sarif.Report
+	require.NoError(t, json.Unmarshal(raw, &report))
+	require.Len(t, report.Runs, 1)
+	assert.Nil(t, report.Runs[0].AutomationDetails)
+}
+
 func TestConfigurationSARIFStreamingStructureAndOrdering(t *testing.T) {
 	for _, count := range []int{0, 1, 3} {
 		t.Run(fmt.Sprint(count), func(t *testing.T) {

@@ -630,10 +630,24 @@ func (sp *SARIFPrinter) buildImageScanRuns(scanResults []cautils.ImageScanData) 
 				run.Tool.Driver.Name = "Kubescape"
 			}
 			addImageSARIFFingerprints(run)
+			// GitHub Code Scanning rejects a file in which two runs share a tool and
+			// a category, and every image run has the same driver name. A lone run
+			// keeps no category, so one given at upload time still applies to it.
+			if len(scanResults) > 1 {
+				run.WithAutomationDetails(sarifImageRunCategory(sanitizedScan))
+			}
 			runs = append(runs, run)
 		}
 	}
 	return runs, nil
+}
+
+// sarifImageRunCategory names a run's category after its image. GitHub reads
+// whatever follows the last slash of the id as a run ID, and an image reference
+// has slashes of its own, so the trailing slash keeps the whole id the category.
+func sarifImageRunCategory(scan cautils.ImageScanData) *sarif.RunAutomationDetails {
+	id := "kubescape-image/" + scan.Target() + "/"
+	return &sarif.RunAutomationDetails{ID: &id}
 }
 
 // printImageScan renders standalone container image vulnerability scan results
