@@ -60,7 +60,7 @@ func TestComputeFromJSONRejectsWhatLoadReportRejects(t *testing.T) {
 	}{
 		{"empty", ``},
 		{"not an object", `[]`},
-		{"missing results", `{"summaryDetails":{"controls":{}}}`},
+		{"missing results and summary", `{}`},
 		{"null results", `{"results":null,"summaryDetails":{"controls":{}}}`},
 		{"missing summary", `{"results":[]}`},
 		{"empty resource id", `{"results":[{"resourceID":"","controls":[]}],"summaryDetails":{"controls":{}}}`},
