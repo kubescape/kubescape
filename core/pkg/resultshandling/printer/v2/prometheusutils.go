@@ -481,24 +481,6 @@ func (m *Metrics) setCoverageScore(coverage cautils.ScanCoverage) {
 	m.coverage.coverageScore = cautils.Float32ToIntFloor(coverage.CoverageScore)
 }
 
-// return -> (passed, skipped, failed)
-func resourceControlStatusCounters(summary *reportsummary.SummaryDetails, result *resourcesresults.Result) (int, int, int) {
-	failed := 0
-	skipped := 0
-	passed := 0
-	for i := range result.ListControls() {
-		switch cautils.ControlStatus(summary, &result.AssociatedControls[i]).Status() {
-		case apis.StatusSkipped:
-			skipped++
-		case apis.StatusFailed:
-			failed++
-		case apis.StatusPassed:
-			passed++
-		}
-	}
-	return passed, skipped, failed
-}
-
 func (m *Metrics) setResourcesCountersFromCatalog(
 	catalog cautils.ResourceCatalog,
 	results map[string]resourcesresults.Result,
@@ -518,13 +500,22 @@ func (m *Metrics) setResourcesCountersFromCatalog(
 	}
 	sort.Strings(resourceIDs)
 
+	// The scan keeps an RBAC subject as one resource per binding and role that
+	// reach it, and only the subject shows up in the labels, so those resources
+	// would share a series. A series may appear only once, so they are merged
+	// into one, in which each control counts once with the most significant of
+	// its statuses (apis.Compare: failed, then skipped, then passed).
+	type seriesKey struct{ apiVersion, kind, namespace, name, path string }
+	seriesIndex := make(map[seriesKey]int, len(resourceIDs))
+	controlStatuses := make([]map[string]apis.ScanningStatus, 0, len(resourceIDs))
+	first := len(m.listResources)
+
 	for _, resourceID := range resourceIDs {
 		result := results[resourceID]
 		r, ok := catalog.Get(resourceID)
 		if !ok || r == nil {
 			continue
 		}
-		passed, skipped, failed := resourceControlStatusCounters(summaryDetails, &result)
 
 		mrc := mResources{}
 		mrc.apiVersion = r.GetApiVersion()
@@ -533,12 +524,36 @@ func (m *Metrics) setResourcesCountersFromCatalog(
 		mrc.name = r.GetName()
 		mrc.path = BestSourcePath(sources[resourceID])
 
-		// append
-		mrc.controlsCountPassed = passed
-		mrc.controlsCountFailed = failed
-		mrc.controlsCountSkipped = skipped
+		key := seriesKey{mrc.apiVersion, mrc.kind, mrc.namespace, mrc.name, mrc.path}
+		i, seen := seriesIndex[key]
+		if !seen {
+			i = len(controlStatuses)
+			seriesIndex[key] = i
+			m.listResources = append(m.listResources, mrc)
+			controlStatuses = append(controlStatuses, make(map[string]apis.ScanningStatus, len(result.AssociatedControls)))
+		}
+		for j := range result.AssociatedControls {
+			control := &result.AssociatedControls[j]
+			status := cautils.ControlStatus(summaryDetails, control).Status()
+			if previous, found := controlStatuses[i][control.ControlID]; found {
+				status = apis.Compare(previous, status)
+			}
+			controlStatuses[i][control.ControlID] = status
+		}
+	}
 
-		m.listResources = append(m.listResources, mrc)
+	for i, statuses := range controlStatuses {
+		mrc := &m.listResources[first+i]
+		for _, status := range statuses {
+			switch status {
+			case apis.StatusSkipped:
+				mrc.controlsCountSkipped++
+			case apis.StatusFailed:
+				mrc.controlsCountFailed++
+			case apis.StatusPassed:
+				mrc.controlsCountPassed++
+			}
+		}
 	}
 
 	// Two files can declare the same object, and each is its own resource in the
