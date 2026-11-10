@@ -160,6 +160,9 @@ func TestBuildCoverage_UnknownNamespaceTreatedAsNotCovered(t *testing.T) {
 	assert.Contains(t, c.Resources[0].Reason, "not collected")
 }
 
+// TestBuildCoverage_ClusterScopedResourceIsNeverExemptedByNamespaceSelector asserts that
+// standard Kubernetes cluster-scoped kinds (ClusterRole, ServiceCIDR, IPAddress, ClusterIssuer,
+// ClusterTrustBundle, ClusterRoleBinding) are always covered regardless of namespaceSelector.
 func TestBuildCoverage_ClusterScopedResourceIsNeverExemptedByNamespaceSelector(t *testing.T) {
 	policies := []unstructured.Unstructured{makeVAP("policy-a", "C-0001")}
 	bindings := []unstructured.Unstructured{
@@ -171,6 +174,8 @@ func TestBuildCoverage_ClusterScopedResourceIsNeverExemptedByNamespaceSelector(t
 			{ResourceID: "res-2", APIVersion: "networking.k8s.io/v1beta1", Kind: "ServiceCIDR"},
 			{ResourceID: "res-3", APIVersion: "networking.k8s.io/v1beta1", Kind: "IPAddress"},
 			{ResourceID: "res-4", APIVersion: "cert-manager.io/v1", Kind: "ClusterIssuer"},
+			{ResourceID: "res-5", APIVersion: "certificates.k8s.io/v1alpha1", Kind: "ClusterTrustBundle"},
+			{ResourceID: "res-6", APIVersion: "rbac.authorization.k8s.io/v1", Kind: "ClusterRoleBinding"},
 		},
 	}
 
@@ -179,11 +184,118 @@ func TestBuildCoverage_ClusterScopedResourceIsNeverExemptedByNamespaceSelector(t
 	c := coverage["C-0001"]
 	require.NotNil(t, c)
 	assert.True(t, c.FullyCovered(), "the apiserver enforces the binding on a cluster-scoped resource whatever the namespaceSelector says")
-	require.Len(t, c.Resources, 4)
+	require.Len(t, c.Resources, 6)
 	for _, res := range c.Resources {
 		assert.True(t, res.Covered)
 		assert.Empty(t, res.Reason)
 	}
+}
+
+// TestBuildCoverage_EcosystemClusterScopedKinds_CoveredUnderNamespaceSelector asserts that
+// common ecosystem cluster-scoped CRDs (Kyverno ClusterPolicy, ExternalSecrets ClusterExternalSecret/
+// ClusterSecretStore, Tekton ClusterTask/ClusterInterceptor, SPIRE ClusterSPIFFEID, and Policy WG
+// ClusterPolicyReport) remain covered under namespaceSelector.
+func TestBuildCoverage_EcosystemClusterScopedKinds_CoveredUnderNamespaceSelector(t *testing.T) {
+	policies := []unstructured.Unstructured{makeVAP("policy-a", "C-0001")}
+	bindings := []unstructured.Unstructured{
+		makeVAPBScoped("binding-a", "policy-a", matchLabels("env", "prod"), nil),
+	}
+	failing := map[string][]ResourceInfo{
+		"C-0001": {
+			{ResourceID: "kp-1", APIVersion: "kyverno.io/v1", Kind: "ClusterPolicy"},
+			{ResourceID: "ces-1", APIVersion: "external-secrets.io/v1beta1", Kind: "ClusterExternalSecret"},
+			{ResourceID: "css-1", APIVersion: "external-secrets.io/v1beta1", Kind: "ClusterSecretStore"},
+			{ResourceID: "ct-1", APIVersion: "tekton.dev/v1beta1", Kind: "ClusterTask"},
+			{ResourceID: "ci-1", APIVersion: "triggers.tekton.dev/v1alpha1", Kind: "ClusterInterceptor"},
+			{ResourceID: "cspiffe-1", APIVersion: "spiffeid.spiffe.io/v1beta1", Kind: "ClusterSPIFFEID"},
+			{ResourceID: "cpr-1", APIVersion: "wgpolicyk8s.io/v1alpha2", Kind: "ClusterPolicyReport"},
+		},
+	}
+
+	coverage := BuildCoverage(policies, bindings, failing, nil)
+
+	c := coverage["C-0001"]
+	require.NotNil(t, c)
+	assert.True(t, c.FullyCovered(), "ecosystem cluster-scoped CRDs must remain covered under a namespaceSelector")
+	require.Len(t, c.Resources, 7)
+	for _, res := range c.Resources {
+		assert.True(t, res.Covered, "resource %s of kind should be covered", res.ResourceID)
+		assert.Empty(t, res.Reason)
+	}
+}
+
+// TestBuildCoverage_UncatalogedClusterPrefixedKind_ScopeUndetermined asserts that an
+// uncataloged CRD whose Kind starts with "Cluster" but is not in knownClusterScopedKinds
+// has an undetermined scope when metadata.namespace is omitted, and is reported as uncovered
+// rather than falsely assumed to be cluster-scoped.
+func TestBuildCoverage_UncatalogedClusterPrefixedKind_ScopeUndetermined(t *testing.T) {
+	policies := []unstructured.Unstructured{makeVAP("policy-a", "C-0001")}
+	bindings := []unstructured.Unstructured{
+		makeVAPBScoped("binding-a", "policy-a", matchLabels("env", "prod"), nil),
+	}
+	failing := map[string][]ResourceInfo{
+		"C-0001": {
+			{ResourceID: "cgeneric-1", APIVersion: "custom.io/v1", Kind: "ClusterCustomResource"},
+		},
+	}
+
+	coverage := BuildCoverage(policies, bindings, failing, nil)
+
+	c := coverage["C-0001"]
+	require.NotNil(t, c)
+	assert.False(t, c.FullyCovered())
+	require.Len(t, c.Resources, 1)
+	assert.False(t, c.Resources[0].Covered)
+	assert.Equal(t, "namespaceSelector is set but the resource's scope could not be determined and it has no namespace", c.Resources[0].Reason)
+}
+
+// TestBuildCoverage_ClusterPrefixedNamespacedCRDs_NotOverCredited asserts that namespaced CRDs
+// whose Kind begins with or equals "Cluster" (such as ClusterServiceVersion and Cluster)
+// are not falsely over-credited as cluster-scoped when metadata.namespace is omitted.
+func TestBuildCoverage_ClusterPrefixedNamespacedCRDs_NotOverCredited(t *testing.T) {
+	policies := []unstructured.Unstructured{makeVAP("policy-a", "C-0001")}
+	bindings := []unstructured.Unstructured{
+		makeVAPBScoped("binding-a", "policy-a", matchLabels("env", "prod"), nil),
+	}
+	failing := map[string][]ResourceInfo{
+		"C-0001": {
+			// Namespaced CRDs lacking metadata.namespace: must NOT be treated as cluster-scoped
+			{ResourceID: "csv-1", APIVersion: "operators.coreos.com/v1alpha1", Kind: "ClusterServiceVersion", Name: "my-operator.v1.0.0", Namespace: ""},
+			{ResourceID: "cnpg-1", APIVersion: "postgresql.cnpg.io/v1", Kind: "Cluster", Name: "pg-cluster", Namespace: ""},
+			{ResourceID: "capi-1", APIVersion: "cluster.x-k8s.io/v1beta1", Kind: "Cluster", Name: "k8s-cluster", Namespace: ""},
+			// Same resources with matching explicit namespace: must be covered
+			{ResourceID: "csv-prod", APIVersion: "operators.coreos.com/v1alpha1", Kind: "ClusterServiceVersion", Name: "my-operator.v1.0.0", Namespace: "prod"},
+			// Same resources with non-matching explicit namespace: must be uncovered with selector mismatch
+			{ResourceID: "csv-dev", APIVersion: "operators.coreos.com/v1alpha1", Kind: "ClusterServiceVersion", Name: "my-operator.v1.0.0", Namespace: "dev"},
+		},
+	}
+	nsLabels := map[string]map[string]string{
+		"prod": {"env": "prod"},
+		"dev":  {"env": "dev"},
+	}
+
+	coverage := BuildCoverage(policies, bindings, failing, nsLabels)
+
+	c := coverage["C-0001"]
+	require.NotNil(t, c)
+	assert.True(t, c.Bound)
+	assert.False(t, c.FullyCovered())
+	assert.True(t, c.PartiallyCovered())
+	require.Len(t, c.Resources, 5)
+
+	// csv-1, cnpg-1, capi-1: recognized as namespaced CRDs lacking namespace, must not be over-credited as cluster-scoped
+	for i := 0; i < 3; i++ {
+		assert.False(t, c.Resources[i].Covered, "namespaced CRD %s lacking namespace must not be over-credited", c.Resources[i].ResourceID)
+		assert.Equal(t, "namespaceSelector is set but namespaced resource has no namespace specified", c.Resources[i].Reason)
+	}
+
+	// csv-prod: matching namespace -> covered
+	assert.True(t, c.Resources[3].Covered)
+	assert.Empty(t, c.Resources[3].Reason)
+
+	// csv-dev: non-matching namespace -> uncovered with selector mismatch
+	assert.False(t, c.Resources[4].Covered)
+	assert.Contains(t, c.Resources[4].Reason, "namespaceSelector does not match")
 }
 
 func TestBuildCoverage_ClusterScopedResourceStillHonorsObjectSelector(t *testing.T) {
