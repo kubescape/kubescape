@@ -248,6 +248,13 @@ dependency—for example, a library providing a required template helper—can
 prevent the entire chart from rendering, leaving it without rendered workloads
 to scan.
 
+Vendored dependencies are rendered the way `helm template` renders them: a
+dependency that its `condition` or `tags` disable in the values is not rendered
+or scanned, a dependency with an `alias` is rendered under that alias and reads
+the values under the alias's key, and `import-values` are applied. Resources
+rendered for an alias are reported against the dependency's template file in
+`charts/`.
+
 To include dependencies, review their sources and explicitly prepare the chart
 with Helm before scanning, for example `helm dependency build /path/to/chart/`.
 That Helm command can access the network and modify the chart directory.
