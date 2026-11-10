@@ -9,6 +9,7 @@ import (
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v4/core/pkg/namespaceselector"
+	"github.com/kubescape/kubescape/v4/core/pkg/opaprocessor/cel"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	helpersv1 "github.com/kubescape/opa-utils/reporthandling/helpers/v1"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
@@ -28,6 +29,35 @@ type ResourceInfo struct {
 	Name       string // object name; Namespace objects use it for the immutable namespace-name label
 	Namespace  string
 	Labels     map[string]string
+	// Object is the scanned resource itself, when the caller has it. A
+	// binding's resourceRules and excludeResourceRules are matched against
+	// it; without it they are matched against an object rebuilt from the
+	// identity fields above.
+	Object map[string]any
+}
+
+// ruleObject returns the object a binding's resource rules are matched
+// against: the scanned resource when it was collected, otherwise one rebuilt
+// from the identity fields, which is all the rule matcher reads.
+func (r ResourceInfo) ruleObject() map[string]any {
+	if r.Object != nil {
+		return r.Object
+	}
+	metadata := map[string]any{}
+	if r.Name != "" {
+		metadata["name"] = r.Name
+	}
+	if r.Namespace != "" {
+		metadata["namespace"] = r.Namespace
+	}
+	if len(r.Labels) > 0 {
+		objLabels := make(map[string]any, len(r.Labels))
+		for k, v := range r.Labels {
+			objLabels[k] = v
+		}
+		metadata["labels"] = objLabels
+	}
+	return map[string]any{"apiVersion": r.APIVersion, "kind": r.Kind, "metadata": metadata}
 }
 
 // The core/v1 Namespace identity, which a namespaceSelector reads
@@ -176,6 +206,12 @@ func (c *ControlCoverage) PartiallyCovered() bool {
 type bindingScope struct {
 	namespaceSelector labels.Selector
 	objectSelector    labels.Selector
+	// rules holds a binding's resourceRules, excludeResourceRules and
+	// matchPolicy, matched by the CEL engine's binding matcher so coverage
+	// and the scan agree on which objects a binding binds. Nil when the
+	// binding narrows no resources (and always for a policy's
+	// matchConstraints, whose rules are not evaluated here).
+	rules *cel.BindingScope
 }
 
 // matches reports whether a resource falls within this binding's scope. It
@@ -191,6 +227,26 @@ type bindingScope struct {
 // silently over-crediting a binding's coverage would defeat the point of
 // this check.
 func (s *bindingScope) matches(res ResourceInfo, namespaceLabels map[string]string, namespaceLabelsKnown bool) (bool, string) {
+	if ok, whyNot := s.selectorsMatch(res, namespaceLabels, namespaceLabelsKnown); !ok {
+		return false, whyNot
+	}
+	if s.rules != nil {
+		// The rules-only scope carries no selectors, so no namespace object
+		// is needed: selectorsMatch has already decided them.
+		covered, err := s.rules.Covers(res.ruleObject(), nil)
+		if err != nil {
+			return false, "binding resource rules could not be evaluated: " + err.Error()
+		}
+		if !covered {
+			return false, "binding resourceRules/excludeResourceRules do not match the resource"
+		}
+	}
+	return true, ""
+}
+
+// selectorsMatch decides the namespaceSelector and objectSelector half of
+// matches.
+func (s *bindingScope) selectorsMatch(res ResourceInfo, namespaceLabels map[string]string, namespaceLabelsKnown bool) (bool, string) {
 	if !s.objectSelector.Empty() && !s.objectSelector.Matches(labels.Set(res.Labels)) {
 		return false, "objectSelector does not match the resource's labels"
 	}
@@ -256,13 +312,57 @@ func parseSelector(raw any) (labels.Selector, error) {
 }
 
 // resolveBindingScope extracts and compiles one binding's
-// matchResources.namespaceSelector/objectSelector. A binding with no
+// matchResources: its namespaceSelector/objectSelector, and its
+// resourceRules/excludeResourceRules/matchPolicy. A binding with no
 // matchResources at all (or no spec, which should not happen for a real
 // object but is handled rather than assumed) has no additional scoping
 // beyond its policy's own matchConstraints, so it resolves to a scope that
 // matches everything.
 func resolveBindingScope(binding unstructured.Unstructured) (*bindingScope, error) {
-	return resolveSelectorScope(binding, "matchResources")
+	scope, err := resolveSelectorScope(binding, "matchResources")
+	if err != nil {
+		return nil, err
+	}
+	scope.rules, err = resolveBindingRules(binding)
+	if err != nil {
+		return nil, fmt.Errorf("matchResources %q: %w", binding.GetName(), err)
+	}
+	return scope, nil
+}
+
+// resolveBindingRules parses the resource-narrowing part of a binding's
+// matchResources with the CEL engine's binding matcher, so coverage uses the
+// same rule matching as the scan does when it applies the binding. The
+// selectors are left out: resolveSelectorScope already handles them, and
+// keeping them in one place keeps their existing behavior unchanged. It
+// returns nil when the binding narrows no resources, because an empty
+// resourceRules covers everything the policy matches and matchPolicy only
+// affects how rules are compared.
+func resolveBindingRules(binding unstructured.Unstructured) (*cel.BindingScope, error) {
+	matchResources, _, err := unstructured.NestedMap(binding.Object, "spec", "matchResources")
+	if err != nil || matchResources == nil {
+		return nil, err
+	}
+	rulesOnly := map[string]any{}
+	for _, field := range []string{"resourceRules", "excludeResourceRules"} {
+		rules, present := matchResources[field]
+		if !present || rules == nil {
+			continue
+		}
+		if list, ok := rules.([]any); ok && len(list) == 0 {
+			continue
+		}
+		// Anything else, a malformed value included, goes to the parser,
+		// which rejects what it cannot decode rather than dropping it.
+		rulesOnly[field] = rules
+	}
+	if len(rulesOnly) == 0 {
+		return nil, nil
+	}
+	if matchPolicy, ok := matchResources["matchPolicy"]; ok {
+		rulesOnly["matchPolicy"] = matchPolicy
+	}
+	return cel.ParseBindingScope(map[string]any{"spec": map[string]any{"matchResources": rulesOnly}})
 }
 
 // resolveSelectorScope shares selector parsing between policies and bindings.
@@ -339,12 +439,13 @@ func indexBindingsByPolicy(bindings []unstructured.Unstructured, controlByPolicy
 // present with Bound=false has a policy but no binding names it -- both
 // match BuildIndex's own reporting for the same inputs.
 //
-// resourceRules, excludeResourceRules and matchPolicy on the binding are not
-// evaluated: a binding's scope is assumed to cover every GVR/operation its
-// policy's matchConstraints admits. This can overstate coverage for a
-// binding that further narrows the GVRs/operations from what its policy
-// covers, but never understates it, and namespaceSelector/objectSelector are
-// by far the more commonly used per-binding scoping mechanism.
+// A binding's resourceRules, excludeResourceRules and matchPolicy are
+// matched with the CEL engine's binding matcher (cel.BindingScope.Covers).
+// When that match depends on something the scan cannot establish -- the
+// resource's scope, or which API versions the cluster treats as equivalent
+// under matchPolicy Equivalent -- the resource is reported uncovered with
+// the reason, never optimistically covered. The resourceRules of a policy's
+// own matchConstraints are not evaluated.
 func BuildCoverage(
 	policies, bindings []unstructured.Unstructured,
 	failingByControl map[string][]ResourceInfo,
@@ -545,6 +646,7 @@ func CollectFailingResourcesByControlFromCatalog(
 			Name:       resource.GetName(),
 			Namespace:  resource.GetNamespace(),
 			Labels:     resourceLabels(resource),
+			Object:     resource.GetObject(),
 		}
 		for i := range result.AssociatedControls {
 			ac := &result.AssociatedControls[i]
