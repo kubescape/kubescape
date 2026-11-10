@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/kubescape/k8s-interface/k8sinterface"
@@ -21,6 +22,10 @@ func isolateCachedConfigTest(t *testing.T) {
 	originalStore := getter.DefaultLocalStore
 	getter.DefaultLocalStore = t.TempDir()
 	t.Cleanup(func() { getter.DefaultLocalStore = originalStore })
+
+	// Never read the host's in-cluster services discovery file, which would
+	// override the URLs under test.
+	t.Cleanup(cautils.SetServicesConfigPath(filepath.Join(t.TempDir(), "services.json")))
 
 	originalConnector := getter.GetKSCloudAPIConnector()
 	getter.SetKSCloudAPIConnector(nil)

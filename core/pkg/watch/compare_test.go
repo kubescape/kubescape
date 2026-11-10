@@ -485,6 +485,23 @@ func TestCompareUnidentifiableResourceNeverProducesNewOrRemoved(t *testing.T) {
 	})
 }
 
+// A scan in which no control matched any resource omits the results key, as
+// PostureReport's results,omitempty tag does; it compares as an empty scan.
+func TestCompareTreatsMissingResultsAsEmptyScan(t *testing.T) {
+	valid := buildReport(t, []fixtureResource{deployment("path=1/web", "a.yaml", "web", "C-0001")})
+	empty := withResultsField(t, valid, "")
+
+	got, err := Compare(empty, valid, diff.Options{})
+	require.NoError(t, err)
+	require.Len(t, got.ChangeSet.New, 1)
+	assert.Empty(t, got.ChangeSet.Resolved)
+
+	got, err = Compare(valid, empty, diff.Options{})
+	require.NoError(t, err)
+	require.Len(t, got.ChangeSet.Resolved, 1)
+	assert.Empty(t, got.ChangeSet.New)
+}
+
 const apiID2 = "a.yaml::apps/v1::default::Deployment::api"
 
 // withResultsField returns report with its results field replaced by raw JSON,
@@ -511,7 +528,6 @@ func TestCompareRejectsMalformedResults(t *testing.T) {
 		results string // raw JSON, or "" to omit the field
 		wantErr string
 	}{
-		{"missing", "", "missing required results field"},
 		{"null", `null`, "results must be an array, not null"},
 		{"string", `"x"`, "invalid report results"},
 		{"object", `{}`, "invalid report results"},
