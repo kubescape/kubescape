@@ -26,7 +26,6 @@ import (
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	ksmetav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling"
-	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer"
 	"github.com/kubescape/kubescape/v4/pkg/imagescan"
 	"github.com/moby/buildkit/client"
 	"github.com/moby/buildkit/client/llb"
@@ -102,28 +101,29 @@ func (ks *Kubescape) Patch(patchInfo *ksmetav1.PatchInfo, scanInfo *cautils.Scan
 	// Save the scan results to a file in json format
 	pres := grypejson.NewPresenter(models.PresenterConfig{Document: model, SBOM: scanResults.SBOM})
 
-	// The intermediate name must be filesystem-safe on every OS: image
-	// references legally contain ':' (tags, registry ports) and '@'
-	// (digests), which are reserved filename characters on Windows.
-	fileName := fmt.Sprintf("%s.json", sanitizeImageRefForFilename(patchInfo.Image))
-
-	writer, err := printer.GetWriterNoFallback(fileName)
+	// Save the intermediate scan results to a temporary file in JSON format.
+	// Using createIntermediateScanFile ensures the intermediate file is placed
+	// in the OS temp directory with 0600 permissions, preventing working directory
+	// pollution, collisions between concurrent patch operations, failures in
+	// read-only workspaces, and accidental truncation/deletion of user files.
+	tempFile, err := createIntermediateScanFile(patchInfo.Image)
 	if err != nil {
 		return false, fmt.Errorf("creating intermediate scan results file: %w", err)
 	}
+	fileName := tempFile.Name()
 	defer func() {
 		if err := os.Remove(fileName); err != nil && !errors.Is(err, os.ErrNotExist) {
 			logger.L().Warning(fmt.Sprintf("failed to remove residual file: %v", fileName), helpers.Error(err))
 		}
 	}()
 
-	if err = pres.Present(writer); err != nil {
-		if closeErr := writer.Close(); closeErr != nil {
+	if err = pres.Present(tempFile); err != nil {
+		if closeErr := tempFile.Close(); closeErr != nil {
 			return false, errors.Join(err, fmt.Errorf("closing intermediate scan results file: %w", closeErr))
 		}
 		return false, err
 	}
-	if closeErr := writer.Close(); closeErr != nil {
+	if closeErr := tempFile.Close(); closeErr != nil {
 		return false, fmt.Errorf("closing intermediate scan results file: %w", closeErr)
 	}
 	logger.L().StopSuccess(fmt.Sprintf("Successfully scanned image: %s", patchInfo.Image))
@@ -196,13 +196,40 @@ func buildPatchedImageName(image, patchedTag string) (string, error) {
 	return fmt.Sprintf("%s:%s", ref.Name(), patchedTag), nil
 }
 
+// createIntermediateScanFile creates a temporary JSON file in the OS temp directory
+// for storing intermediate Grype scan results for Copacetic.
+// Using os.CreateTemp ensures the file has secure 0600 permissions, does not
+// collide with concurrent patch executions, does not fail in read-only working
+// directories, and never overwrites or deletes pre-existing user files in the
+// current working directory.
+func createIntermediateScanFile(image string) (*os.File, error) {
+	sanitizedImage := sanitizeImageRefForFilename(image)
+	if len(sanitizedImage) > 64 {
+		sanitizedImage = sanitizedImage[:64]
+	}
+	pattern := fmt.Sprintf("kubescape-patch-%s-*.json", sanitizedImage)
+	return os.CreateTemp("", pattern)
+}
+
 // sanitizeImageRefForFilename converts an image reference into a filename
 // component that is safe on every supported OS. Image references legally
 // contain ':' (tag separators, registry ports), '/' (repository paths) and '@'
-// (digests); ':' is a reserved character on Windows, where os.Create on such a
-// name fails outright.
+// (digests); ':', '*', '?', '<', '>', '|', '"', and '\' are reserved filename
+// characters on Windows and other filesystems, where os.Create on such names fails.
 func sanitizeImageRefForFilename(image string) string {
-	replacer := strings.NewReplacer(":", "-", "/", "-", "@", "-", " ", "-")
+	replacer := strings.NewReplacer(
+		":", "-",
+		"/", "-",
+		"@", "-",
+		" ", "-",
+		"*", "-",
+		"\\", "-",
+		"?", "-",
+		"<", "-",
+		">", "-",
+		"|", "-",
+		"\"", "-",
+	)
 	return replacer.Replace(strings.TrimSpace(image))
 }
 
