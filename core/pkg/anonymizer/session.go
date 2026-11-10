@@ -100,6 +100,12 @@ func cloneSessionForTransform(session *cautils.OPASessionObj) (*sessionTransform
 	}
 	working.NamespaceSummaries = namespaceSummaries
 
+	exceptionAudit, err := cloneJSON(session.ExceptionAudit)
+	if err != nil {
+		return nil, fmt.Errorf("clone exception audit: %w", err)
+	}
+	working.ExceptionAudit = exceptionAudit
+
 	resources, originalByClone, err := cloneCatalog(session.GetCatalog())
 	if err != nil {
 		return nil, err
@@ -243,6 +249,7 @@ func commitTransformedSession(session *cautils.OPASessionObj, transaction *sessi
 	session.Metadata = working.Metadata
 	session.Report = working.Report
 	session.NamespaceSummaries = working.NamespaceSummaries
+	session.ExceptionAudit = working.ExceptionAudit
 	return nil
 }
 
@@ -362,6 +369,10 @@ func transformSessionInPlace(session *cautils.OPASessionObj, transformer Transfo
 		newResourcesResult[newID] = result
 	}
 	session.ResourcesResult = newResourcesResult
+
+	if err := transformExceptionAudit(session.ExceptionAudit, exceptionAnonymizer, transformer, idMapping); err != nil {
+		return err
+	}
 
 	newResourceSource := make(map[string]reporthandling.Source, len(session.ResourceSource))
 
@@ -484,6 +495,43 @@ func remapControlResourceIDs(controls reportsummary.ControlSummaries, transforme
 
 		control.ResourceIDs = remappedResourceIDs
 		controls[controlID] = control
+	}
+	return nil
+}
+
+// transformExceptionAudit anonymizes the --audit-exceptions report. Each item
+// names an exception and lists the resources it matched by ID, namespace and
+// name, which is the identity the rest of the session hides. The exception
+// name goes through the same memoized transformer as the exceptions attached
+// to rules, so an item and the exception it audits keep the same value, and
+// each resource ID is remapped through idMapping so it still points at the
+// resource's result. Status, counts, kinds and control and rule IDs carry no
+// identity and are kept.
+func transformExceptionAudit(audit *cautils.ExceptionAudit, exceptions *exceptionTransformer, transformer Transformer, idMapping map[string]string) error {
+	if audit == nil {
+		return nil
+	}
+	for i := range audit.Items {
+		item := &audit.Items[i]
+		name, err := exceptions.transform("exception", item.Name)
+		if err != nil {
+			return err
+		}
+		item.Name = name
+		for j := range item.MatchedResources {
+			match := &item.MatchedResources[j]
+			if match.ResourceID != "" {
+				if match.ResourceID, err = resolveMappedID(transformer, idMapping, match.ResourceID, "ref"); err != nil {
+					return err
+				}
+			}
+			if match.Namespace, err = transformValue(transformer, "ns", match.Namespace); err != nil {
+				return err
+			}
+			if match.Name, err = transformValue(transformer, "res", match.Name); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }

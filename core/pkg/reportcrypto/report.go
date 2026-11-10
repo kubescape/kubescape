@@ -75,6 +75,10 @@ func DecryptReport(data, masterKey []byte) ([]byte, error) {
 	if err := decryptor.decryptNamespaceSummaries(); err != nil {
 		return nil, err
 	}
+
+	if err := decryptor.decryptExceptionAudit(); err != nil {
+		return nil, err
+	}
 	if err := decryptor.validateNoEncryptedValues(); err != nil {
 		return nil, err
 	}
@@ -564,6 +568,82 @@ func (d *reportDecryptor) decryptRuleExceptions(rule rawObject, context string) 
 	rule["exception"], err = json.Marshal(exceptions)
 	if err != nil {
 		return fmt.Errorf("failed to marshal %s: %w", exceptionsContext, err)
+	}
+	return nil
+}
+
+// decryptExceptionAudit restores the --audit-exceptions report: each item's
+// exception name, and the ID, namespace and name of every resource it
+// matched. Resource IDs go through the report-wide mapping, so an audited
+// resource points at its decrypted result again. Fields unknown to this
+// version are kept at every level.
+func (d *reportDecryptor) decryptExceptionAudit() error {
+	audit, ok, err := optionalObject(d.report, "exceptionAudit", "exceptionAudit")
+	if err != nil || !ok {
+		return err
+	}
+	itemsRaw, ok := audit["items"]
+	if !ok || isJSONNull(itemsRaw) {
+		return nil
+	}
+	items, err := decodeObjectArray(itemsRaw, "exceptionAudit.items")
+	if err != nil {
+		return err
+	}
+
+	for i := range items {
+		itemContext := fmt.Sprintf("exceptionAudit.items[%d]", i)
+		if err := d.decryptStringField(items[i], "name", itemContext+".name", decryptEmbeddedCiphertexts); err != nil {
+			return err
+		}
+
+		matchesRaw, ok := items[i]["matchedResources"]
+		if !ok || isJSONNull(matchesRaw) {
+			continue
+		}
+		matchesContext := itemContext + ".matchedResources"
+		matches, err := decodeObjectArray(matchesRaw, matchesContext)
+		if err != nil {
+			return err
+		}
+		for j := range matches {
+			matchContext := fmt.Sprintf("%s[%d]", matchesContext, j)
+			if err := d.remapStringField(matches[j], "resourceID", matchContext+".resourceID"); err != nil {
+				return err
+			}
+			for _, field := range []string{"namespace", "name"} {
+				if err := d.decryptStringField(matches[j], field, matchContext+"."+field, decryptIfEncrypted); err != nil {
+					return err
+				}
+			}
+		}
+		if items[i]["matchedResources"], err = json.Marshal(matches); err != nil {
+			return fmt.Errorf("failed to marshal %s: %w", matchesContext, err)
+		}
+	}
+
+	if audit["items"], err = json.Marshal(items); err != nil {
+		return fmt.Errorf("failed to marshal exceptionAudit.items: %w", err)
+	}
+	if d.report["exceptionAudit"], err = json.Marshal(audit); err != nil {
+		return fmt.Errorf("failed to marshal exceptionAudit: %w", err)
+	}
+	return nil
+}
+
+// decryptStringField restores one optional string field of object in place
+// with decrypt.
+func (d *reportDecryptor) decryptStringField(object rawObject, field, context string, decrypt func(string, *ReportKey) (string, error)) error {
+	value, ok, err := optionalString(object, field, context)
+	if err != nil || !ok {
+		return err
+	}
+	restored, err := decrypt(value, d.dek)
+	if err != nil {
+		return fmt.Errorf("failed to decrypt %s: %w", context, err)
+	}
+	if object[field], err = json.Marshal(restored); err != nil {
+		return fmt.Errorf("failed to marshal %s: %w", context, err)
 	}
 	return nil
 }
