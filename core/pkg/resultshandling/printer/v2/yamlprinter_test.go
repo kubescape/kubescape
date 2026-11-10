@@ -159,6 +159,85 @@ func TestActionPrint_Yaml(t *testing.T) {
 	assert.Equal(t, gotJson, gotYaml)
 }
 
+// TestActionPrint_YamlIncludesSessionSections covers the sections the JSON
+// report writes from the session rather than from the posture report. The
+// YAML report has to carry them as well.
+func TestActionPrint_YamlIncludesSessionSections(t *testing.T) {
+	tests := []struct {
+		name      string
+		key       string
+		configure func(*cautils.OPASessionObj)
+	}{
+		{
+			name: "exception audit",
+			key:  "exceptionAudit",
+			configure: func(s *cautils.OPASessionObj) {
+				s.ExceptionAudit = &cautils.ExceptionAudit{
+					Generated: true,
+					Summary: cautils.ExceptionAuditSummary{
+						Total:   1,
+						Active:  1,
+						Matched: 1,
+					},
+					Items: []cautils.ExceptionAuditItem{
+						{
+							Name:       "matched-exception",
+							Status:     "matched",
+							MatchCount: 1,
+							ControlIDs: []string{"C-0001"},
+						},
+					},
+				}
+			},
+		},
+		{
+			name: "namespace summaries",
+			key:  "namespaceSummaries",
+			configure: func(s *cautils.OPASessionObj) {
+				s.NamespaceSummaries = cautils.NamespaceSummaries{{Namespace: "default", ComplianceScore: 50, NonCompliantControls: 1, TotalControls: 2, ResourceCount: 1}}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			session := cautils.NewOPASessionObjMock()
+			tt.configure(session)
+
+			// YAML first: FinalizeResults stamps the generation time on the
+			// session, and the JSON printer then reuses it.
+			gotYaml := yamlPrinterOutput(t, session)
+			gotJson := jsonPrinterOutput(t, session)
+
+			require.Contains(t, gotJson, tt.key)
+			assert.Contains(t, gotYaml, tt.key)
+			assert.Equal(t, gotJson, gotYaml)
+		})
+	}
+}
+
+func yamlPrinterOutput(t *testing.T, session *cautils.OPASessionObj) map[string]any {
+	t.Helper()
+
+	tmpYaml, err := os.CreateTemp("", "yaml-session-sections-*.yaml")
+	require.NoError(t, err)
+	defer func() {
+		_ = os.Remove(tmpYaml.Name())
+	}()
+
+	yp := NewYamlPrinter()
+	yp.writer = tmpYaml
+	require.NoError(t, yp.ActionPrint(context.Background(), session, nil))
+	require.NoError(t, tmpYaml.Close())
+
+	rawYaml, err := os.ReadFile(tmpYaml.Name())
+	require.NoError(t, err)
+
+	var got map[string]any
+	require.NoError(t, yaml.Unmarshal(rawYaml, &got))
+	return got
+}
+
 func TestActionPrint_ImageScan_Yaml(t *testing.T) {
 	// A populated []cautils.ImageScanData
 	imageScanData := []cautils.ImageScanData{buildSeverityExceptionImageScanData()}

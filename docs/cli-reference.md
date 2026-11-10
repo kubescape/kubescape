@@ -474,7 +474,7 @@ determined is treated as exceeding every `--severity-threshold`.
 
 ### Exception Audit
 
-Use `--audit-exceptions --format json` to include an `exceptionAudit` object in scan output. The audit contains:
+Use `--audit-exceptions` with `--format json` or `--format yaml` to include an `exceptionAudit` object in scan output. The audit contains:
 
 | Field | Description |
 |-------|-------------|
