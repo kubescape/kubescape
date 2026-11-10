@@ -231,7 +231,63 @@ func TestCanonicalizeExcludesDuplicateIdentities(t *testing.T) {
 	assert.Contains(t, canonical.Ambiguous[dup], "2 resources")
 	assert.NotContains(t, canonical.Resources, dup)
 	assert.Contains(t, canonical.Resources, "a.yaml::apps/v1::default::Deployment::api")
-	assert.NotContains(t, string(canonical.JSON), `"web"`, "neither duplicate may stay in the report")
+	assert.NotContains(t, string(canonical.JSON), `"web"`, "neither duplicate may stay among the resources")
+
+	// Their results are kept, each under an ID no other report can share.
+	require.Len(t, canonical.Withheld, 2)
+	for id, reason := range canonical.Withheld {
+		assert.Contains(t, id, dup)
+		assert.Contains(t, reason, "2 resources")
+		assert.Contains(t, string(canonical.JSON), id)
+	}
+}
+
+func TestCanonicalizeKeepsEveryResultOfDuplicateIdentities(t *testing.T) {
+	data := buildReport(t, []fixtureResource{
+		deployment("path=1/web", "a.yaml", "web", "C-0001", "C-0002"),
+		deployment("path=2/web", "a.yaml", "web", "C-0001"),
+	})
+
+	canonical, err := Canonicalize(data)
+	require.NoError(t, err)
+
+	var doc struct {
+		Results []struct {
+			ResourceID string `json:"resourceID"`
+			Controls   []struct {
+				ControlID string `json:"controlID"`
+				Status    struct {
+					Status string `json:"status"`
+				} `json:"status"`
+			} `json:"controls"`
+		} `json:"results"`
+	}
+	require.NoError(t, json.Unmarshal(canonical.JSON, &doc))
+	require.Len(t, doc.Results, 2, "no result is dropped or merged")
+	assert.NotEqual(t, doc.Results[0].ResourceID, doc.Results[1].ResourceID)
+	failed := 0
+	for _, result := range doc.Results {
+		for _, control := range result.Controls {
+			if control.Status.Status == "failed" {
+				failed++
+			}
+		}
+	}
+	assert.Equal(t, 3, failed, "every failing control of both duplicates survives")
+}
+
+func TestCanonicalizeCountsResourcesWithoutResultsAsPresent(t *testing.T) {
+	data := withoutResult(t, buildReport(t, []fixtureResource{
+		deployment("path=1/web", "a.yaml", "web"),
+		deployment("path=2/api", "a.yaml", "api", "C-0002"),
+	}), "path=1/web")
+
+	canonical, err := Canonicalize(data)
+	require.NoError(t, err)
+
+	assert.Contains(t, canonical.Resources, "a.yaml::apps/v1::default::Deployment::web", "a resource with no results is still in the scan")
+	assert.Contains(t, canonical.Resources, "a.yaml::apps/v1::default::Deployment::api")
+	assert.Empty(t, canonical.Ambiguous)
 }
 
 func TestCanonicalizeExcludesUnidentifiableResources(t *testing.T) {
@@ -245,6 +301,12 @@ func TestCanonicalizeExcludesUnidentifiableResources(t *testing.T) {
 	require.Contains(t, canonical.Ambiguous, "path=1/web")
 	assert.Contains(t, canonical.Resources, "a.yaml::apps/v1::default::Deployment::api")
 	assert.Len(t, canonical.Resources, 1)
+
+	// The result is kept under an ID of its own, and its control is recorded.
+	require.Len(t, canonical.Withheld, 1)
+	assert.Contains(t, canonical.Withheld, "unidentified#path=1/web")
+	assert.Contains(t, canonical.UnidentifiedControls, "C-0001")
+	assert.Contains(t, string(canonical.JSON), "unidentified#path=1/web")
 }
 
 func TestCanonicalizeExcludesResourceWithUnidentifiedEvidence(t *testing.T) {

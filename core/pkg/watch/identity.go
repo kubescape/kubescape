@@ -23,6 +23,11 @@ const (
 	// emptyNamespace stands in for an object without metadata.namespace. It is
 	// not a valid namespace name, so it cannot collide with a real one.
 	emptyNamespace = "_"
+	// withheldMarker joins the identity and the original resource ID of a
+	// result that cannot be matched, and unidentifiedPrefix names one whose
+	// identity is unknown. Neither can equal the identity of a real resource.
+	withheldMarker     = "#"
+	unidentifiedPrefix = "unidentified#"
 )
 
 // ErrNoResourceIdentity is returned when a report holds results but none of the
@@ -32,15 +37,24 @@ var ErrNoResourceIdentity = errors.New("report has no resources to derive stable
 // CanonicalReport is a scan report whose resource IDs have been replaced by
 // stable identities.
 type CanonicalReport struct {
-	// JSON is the report with every resource ID rewritten. Resources whose
-	// identity is ambiguous are left out of it entirely.
+	// JSON is the report with every resource ID rewritten. The results of a
+	// resource that cannot be matched safely stay in it, under an ID listed in
+	// Withheld that no other report can share, so no finding is lost.
 	JSON []byte
-	// Resources is the set of stable identities present in JSON.
+	// Resources is the set of stable identities of the resources in the report
+	// that can be matched, whether or not they have results.
 	Resources map[string]struct{}
 	// Ambiguous maps an identity that could not be matched safely to the
 	// reason. For a resource that could not be identified at all the key is
 	// its original resource ID.
 	Ambiguous map[string]string
+	// Withheld maps the result ID under which each set-aside result stays in
+	// JSON to the reason it cannot be matched.
+	Withheld map[string]string
+	// UnidentifiedControls holds the controls of results whose resource could
+	// not be identified. A finding for one of them in another report may be the
+	// same finding, so it cannot be called new or resolved.
+	UnidentifiedControls map[string]struct{}
 }
 
 // Identity returns the stable identity of a resource, or "" when the report
@@ -68,8 +82,9 @@ func Identity(relativePath string, object map[string]any) string {
 // stable identities. Resource IDs are rewritten everywhere they feed finding
 // comparison: results[].resourceID, resources[].resourceID, the evidence
 // paths and the related-resource lists. Resources that share an identity, or
-// whose identity or evidence cannot be established, are removed from the
-// result and reported in Ambiguous, never matched arbitrarily.
+// whose identity or evidence cannot be established, are taken out of the
+// matching set and reported in Ambiguous, never matched arbitrarily. Their
+// results are kept, under IDs listed in Withheld, rather than discarded.
 func Canonicalize(reportJSON []byte) (*CanonicalReport, error) {
 	var doc map[string]any
 	decoder := json.NewDecoder(bytes.NewReader(reportJSON))
@@ -107,32 +122,51 @@ func Canonicalize(reportJSON []byte) (*CanonicalReport, error) {
 		identityIDs[identity] = append(identityIDs[identity], id)
 	}
 
-	out := &CanonicalReport{Resources: map[string]struct{}{}, Ambiguous: map[string]string{}}
-	excluded := map[string]struct{}{} // original IDs left out of the output
+	out := &CanonicalReport{
+		Resources:            map[string]struct{}{},
+		Ambiguous:            map[string]string{},
+		Withheld:             map[string]string{},
+		UnidentifiedControls: map[string]struct{}{},
+	}
+	excluded := map[string]struct{}{} // original IDs that cannot be matched
+	setAside := map[string]string{}   // original ID to why its results are withheld
 	for identity, ids := range identityIDs {
 		if len(ids) > 1 {
-			out.Ambiguous[identity] = fmt.Sprintf("%d resources in the scan share this identity", len(ids))
+			reason := fmt.Sprintf("%d resources in the scan share this identity", len(ids))
+			out.Ambiguous[identity] = reason
 			for _, id := range ids {
 				excluded[id] = struct{}{}
+				setAside[id] = reason
 			}
 		}
 	}
 
 	keptResults := make([]any, 0, len(results))
+	var withheld []map[string]any // results set aside, kept for the comparison
 	for _, raw := range results {
 		result, _ := raw.(map[string]any)
 		id, _ := result["resourceID"].(string)
 		if _, skip := excluded[id]; skip {
+			withheld = append(withheld, result)
 			continue
 		}
 		if _, known := idToIdentity[id]; !known {
-			out.Ambiguous[id] = "the report does not identify the file and object of this resource"
+			reason := "the report does not identify the file and object of this resource"
+			out.Ambiguous[id] = reason
 			excluded[id] = struct{}{}
+			setAside[id] = reason
+			withheld = append(withheld, result)
+			for _, control := range resultControlIDs(result) {
+				out.UnidentifiedControls[control] = struct{}{}
+			}
 			continue
 		}
 		if unknown := unidentifiedEvidenceID(result, idToIdentity, excluded); unknown != "" {
-			out.Ambiguous[idToIdentity[id]] = fmt.Sprintf("its evidence refers to %q, which the report does not identify", unknown)
+			reason := fmt.Sprintf("its evidence refers to %q, which the report does not identify", unknown)
+			out.Ambiguous[idToIdentity[id]] = reason
 			excluded[id] = struct{}{}
+			setAside[id] = reason
+			withheld = append(withheld, result)
 			continue
 		}
 		keptResults = append(keptResults, result)
@@ -146,8 +180,11 @@ func Canonicalize(reportJSON []byte) (*CanonicalReport, error) {
 			result := raw.(map[string]any)
 			id, _ := result["resourceID"].(string)
 			if unknown := unidentifiedEvidenceID(result, idToIdentity, excluded); unknown != "" {
-				out.Ambiguous[idToIdentity[id]] = fmt.Sprintf("its evidence refers to %q, which was left out as ambiguous", unknown)
+				reason := fmt.Sprintf("its evidence refers to %q, which was left out as ambiguous", unknown)
+				out.Ambiguous[idToIdentity[id]] = reason
 				excluded[id] = struct{}{}
+				setAside[id] = reason
+				withheld = append(withheld, result)
 				changed = true
 				continue
 			}
@@ -156,11 +193,32 @@ func Canonicalize(reportJSON []byte) (*CanonicalReport, error) {
 		keptResults = remaining
 	}
 
+	// A set-aside result must not match anything in the other report, so it
+	// takes an ID of its own; the others take their identity.
+	finalIDs := make(map[string]string, len(idToIdentity))
+	for id, identity := range idToIdentity {
+		finalIDs[id] = identity
+		if _, skip := excluded[id]; skip {
+			finalIDs[id] = identity + withheldMarker + id
+		}
+	}
+	for _, result := range withheld {
+		id, _ := result["resourceID"].(string)
+		if _, known := idToIdentity[id]; !known {
+			finalIDs[id] = unidentifiedPrefix + id
+		}
+	}
+
+	allResults := make([]any, 0, len(keptResults)+len(withheld))
 	for _, raw := range keptResults {
-		result := raw.(map[string]any)
-		rewriteIDs(result, idToIdentity)
-		identity, _ := result["resourceID"].(string)
-		out.Resources[identity] = struct{}{}
+		rewriteIDs(raw, finalIDs)
+		allResults = append(allResults, raw)
+	}
+	for _, result := range withheld {
+		id, _ := result["resourceID"].(string)
+		rewriteIDs(result, finalIDs)
+		out.Withheld[finalIDs[id]] = setAside[id]
+		allResults = append(allResults, result)
 	}
 	keptResources := make([]any, 0, len(resources))
 	for _, raw := range resources {
@@ -172,9 +230,10 @@ func Canonicalize(reportJSON []byte) (*CanonicalReport, error) {
 		if identity, ok := idToIdentity[id]; ok {
 			resource["resourceID"] = identity
 			keptResources = append(keptResources, resource)
+			out.Resources[identity] = struct{}{}
 		}
 	}
-	doc["results"] = keptResults
+	doc["results"] = allResults
 	doc["resources"] = keptResources
 
 	encoded, err := json.Marshal(doc)
@@ -183,6 +242,25 @@ func Canonicalize(reportJSON []byte) (*CanonicalReport, error) {
 	}
 	out.JSON = encoded
 	return out, nil
+}
+
+// resultControlIDs lists the controls of a result that could carry a finding:
+// those that did not simply pass, or that hold rule evidence, as a control with
+// exceptions can pass while its rules still failed.
+func resultControlIDs(result map[string]any) []string {
+	var ids []string
+	controls, _ := result["controls"].([]any)
+	for _, raw := range controls {
+		control, _ := raw.(map[string]any)
+		id, _ := control["controlID"].(string)
+		status, _ := control["status"].(map[string]any)
+		state, _ := status["status"].(string)
+		rules, _ := control["rules"].([]any)
+		if id != "" && (state != "passed" || len(rules) > 0) {
+			ids = append(ids, id)
+		}
+	}
+	return ids
 }
 
 // unidentifiedEvidenceID returns the first resource ID that a result's

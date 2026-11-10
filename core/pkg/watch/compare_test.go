@@ -1,8 +1,10 @@
 package watch
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/diff"
@@ -166,10 +168,16 @@ func TestCompareDuplicateIdentityIsIncomparable(t *testing.T) {
 			assert.Equal(t, []string{apiID}, resourceIDs(cs.Unchanged), "the unambiguous neighbour is still compared")
 			require.NotEmpty(t, cs.Warnings)
 			assert.Contains(t, cs.Warnings[0], webID)
-			if tt.name != "duplicate in both scans" {
-				// The resource exists on one side with findings, so they are reported, not dropped.
-				require.Contains(t, resourceIDs(cs.Incomparable), webID)
-				assert.NotEmpty(t, cs.Incomparable[0].Reason)
+			// The findings of the ambiguous resource are reported, not dropped, in every case.
+			var onWeb []string
+			for _, id := range resourceIDs(cs.Incomparable) {
+				if strings.HasPrefix(id, webID) {
+					onWeb = append(onWeb, id)
+				}
+			}
+			require.NotEmpty(t, onWeb)
+			for _, change := range cs.Incomparable {
+				assert.NotEmpty(t, change.Reason)
 			}
 		})
 	}
@@ -336,3 +344,145 @@ func TestCompareRealReportsDuplicateIdentity(t *testing.T) {
 	assert.Empty(t, got.ChangeSet.Resolved)
 	assert.Equal(t, 10, countControls(got.ChangeSet.Unchanged, "dup.yaml::apps/v1::default::Deployment::backend"))
 }
+
+// withoutResult drops the result entry of one resource and keeps the resource.
+func withoutResult(t *testing.T, report []byte, id string) []byte {
+	t.Helper()
+	var doc map[string]any
+	require.NoError(t, json.Unmarshal(report, &doc))
+	var kept []any
+	for _, raw := range doc["results"].([]any) {
+		if raw.(map[string]any)["resourceID"] != id {
+			kept = append(kept, raw)
+		}
+	}
+	doc["results"] = kept
+	data, err := json.Marshal(doc)
+	require.NoError(t, err)
+	return data
+}
+
+func TestCompareDuplicateIdentityKeepsEveryFinding(t *testing.T) {
+	duplicated := []fixtureResource{
+		deployment("path=1/web", "multi.yaml", "web", "C-0001", "C-0002"),
+		deployment("path=2/web", "multi.yaml", "web", "C-0001"),
+		deployment("path=3/api", "multi.yaml", "api", "C-0002"),
+	}
+
+	for _, tt := range []struct {
+		name       string
+		base, head []fixtureResource
+		want       int
+	}{
+		{"in both scans", duplicated, duplicated, 3},
+		{"only in the head scan", duplicated[2:], duplicated, 3},
+		{"only in the base scan", duplicated, duplicated[2:], 3},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got := compare(t, buildReport(t, tt.base), buildReport(t, tt.head))
+			cs := got.ChangeSet
+
+			var onWeb []diff.ControlChange
+			for _, change := range cs.Incomparable {
+				if strings.HasPrefix(change.ResourceID, webID) {
+					onWeb = append(onWeb, change)
+				}
+			}
+			assert.Len(t, onWeb, tt.want, "every finding of both duplicates is kept, none overwritten")
+			assert.Len(t, resourceIDs(onWeb), 2, "each duplicate keeps its own findings")
+			for _, bucket := range [][]diff.ControlChange{cs.New, cs.Resolved, cs.Unchanged, got.Removed} {
+				for _, change := range bucket {
+					assert.NotContains(t, change.ResourceID, "web", "an ambiguous finding is in no other bucket")
+				}
+			}
+			assert.Equal(t, []string{apiID}, resourceIDs(append(append([]diff.ControlChange{}, cs.Unchanged...), cs.New...)),
+				"the unambiguous neighbour is still compared")
+		})
+	}
+}
+
+func TestCompareResourceWithoutResultsIsStillPresent(t *testing.T) {
+	// api keeps C-0001 failing, so the control stays in scope for the head scan.
+	base := buildReport(t, []fixtureResource{
+		deployment("path=1/web", "a.yaml", "web", "C-0001"),
+		deployment("path=2/api", "a.yaml", "api", "C-0001"),
+	})
+	head := withoutResult(t, buildReport(t, []fixtureResource{
+		deployment("path=1/web", "a.yaml", "web"),
+		deployment("path=2/api", "a.yaml", "api", "C-0001"),
+	}), "path=1/web")
+
+	got := compare(t, base, head)
+
+	assert.Empty(t, got.Removed, "web is still in the scan, so it was not removed")
+	assert.NotContains(t, resourceIDs(got.ChangeSet.Incomparable), "a.yaml::apps/v1::default::Deployment::web")
+	assert.Equal(t, []string{"a.yaml::apps/v1::default::Deployment::web"}, resourceIDs(got.ChangeSet.Resolved))
+	assert.Equal(t, []string{"a.yaml::apps/v1::default::Deployment::api"}, resourceIDs(got.ChangeSet.Unchanged))
+}
+
+func TestCompareUnidentifiableResourceNeverProducesNewOrRemoved(t *testing.T) {
+	const web = "a.yaml::apps/v1::default::Deployment::web"
+	identified := []fixtureResource{
+		deployment("path=1/web", "a.yaml", "web", "C-0001"),
+		deployment("path=2/api", "a.yaml", "api", "C-0002"),
+	}
+	unidentified := []fixtureResource{
+		deployment("path=1/web", "", "web", "C-0001"), // the report does not say which file
+		deployment("path=2/api", "a.yaml", "api", "C-0002"),
+	}
+
+	t.Run("in the base scan", func(t *testing.T) {
+		got := compare(t, buildReport(t, unidentified), buildReport(t, identified))
+		cs := got.ChangeSet
+
+		assert.Empty(t, cs.New, "the head's web finding may be the base's unplaced one")
+		assert.Empty(t, got.Removed)
+		assert.Empty(t, cs.Resolved)
+		assert.Equal(t, []string{apiID2}, resourceIDs(cs.Unchanged))
+		require.Len(t, cs.Incomparable, 2, "the head finding and the base finding that could not be placed")
+		for _, change := range cs.Incomparable {
+			assert.Equal(t, "C-0001", change.ControlID)
+			assert.NotEmpty(t, change.Reason)
+		}
+		assert.Contains(t, resourceIDs(cs.Incomparable), web)
+	})
+
+	t.Run("in the head scan", func(t *testing.T) {
+		got := compare(t, buildReport(t, identified), buildReport(t, unidentified))
+		cs := got.ChangeSet
+
+		assert.Empty(t, got.Removed, "the base's web finding may be the head's unplaced one")
+		assert.Empty(t, cs.Resolved)
+		assert.Empty(t, cs.New)
+		assert.Equal(t, []string{apiID2}, resourceIDs(cs.Unchanged))
+		require.Len(t, cs.Incomparable, 2)
+		for _, change := range cs.Incomparable {
+			assert.Equal(t, "C-0001", change.ControlID)
+			assert.NotEmpty(t, change.Reason)
+		}
+		assert.Contains(t, resourceIDs(cs.Incomparable), web)
+	})
+
+	t.Run("a finding for another control is still classified", func(t *testing.T) {
+		head := []fixtureResource{
+			deployment("path=1/web", "", "web", "C-0001"),
+			deployment("path=2/api", "a.yaml", "api", "C-0002", "C-0001"),
+		}
+		got := compare(t, buildReport(t, unidentified), buildReport(t, head))
+
+		// api's new C-0001 is held back, as the unplaced web finding is also C-0001.
+		assert.Empty(t, got.ChangeSet.New)
+		assert.Contains(t, resourceIDs(got.ChangeSet.Incomparable), apiID2)
+
+		other := []fixtureResource{
+			deployment("path=1/web", "", "web", "C-0001"),
+			deployment("path=2/api", "a.yaml", "api"),
+			deployment("path=3/db", "a.yaml", "db", "C-0002"),
+		}
+		got = compare(t, buildReport(t, unidentified), buildReport(t, other))
+		require.Len(t, got.ChangeSet.New, 1, "C-0002 on db cannot be the unplaced C-0001 finding")
+		assert.Equal(t, "C-0002", got.ChangeSet.New[0].ControlID)
+	})
+}
+
+const apiID2 = "a.yaml::apps/v1::default::Deployment::api"

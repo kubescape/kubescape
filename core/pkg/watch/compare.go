@@ -52,10 +52,37 @@ func Compare(baseJSON, headJSON []byte, options diff.Options) (*Comparison, erro
 		changeSet.Warnings = append(changeSet.Warnings, fmt.Sprintf("resource %q cannot be compared: %s", identity, reasons[identity]))
 	}
 
+	// A result that was set aside stays in the compared reports under an ID of
+	// its own, so its findings land here instead of vanishing.
+	withheld := map[string]string{}
+	for id, reason := range base.Withheld {
+		withheld[id] = "base scan: " + reason
+	}
+	for id, reason := range head.Withheld {
+		if previous, both := withheld[id]; both {
+			reason = previous + "; head scan: " + reason
+		} else {
+			reason = "head scan: " + reason
+		}
+		withheld[id] = reason
+	}
+
 	comparison := &Comparison{ChangeSet: changeSet}
-	reclassify := func(changes []diff.ControlChange) (kept []diff.ControlChange) {
+	// reclassify moves to Incomparable the changes that cannot be trusted:
+	// those on an ambiguous or set-aside resource, and those whose control also
+	// has a finding, in the other report, on a resource that could not be
+	// identified and so may be the very same finding.
+	reclassify := func(changes []diff.ControlChange, unidentified map[string]struct{}, side string) (kept []diff.ControlChange) {
 		for _, change := range changes {
-			if reason, ambiguous := reasons[change.ResourceID]; ambiguous {
+			reason, incomparable := reasons[change.ResourceID]
+			if !incomparable {
+				reason, incomparable = withheld[change.ResourceID]
+			}
+			if _, maybeSame := unidentified[change.ControlID]; !incomparable && maybeSame {
+				reason = side + " scan has a finding for this control on a resource it could not identify, which may be this one"
+				incomparable = true
+			}
+			if incomparable {
 				change.Reason = reason
 				changeSet.Incomparable = append(changeSet.Incomparable, change)
 				continue
@@ -64,9 +91,11 @@ func Compare(baseJSON, headJSON []byte, options diff.Options) (*Comparison, erro
 		}
 		return kept
 	}
-	changeSet.New = reclassify(changeSet.New)
-	changeSet.Unchanged = reclassify(changeSet.Unchanged)
-	resolved := reclassify(changeSet.Resolved)
+	// A new finding may be a base finding the base scan could not place, and a
+	// resolved one may be a head finding the head scan could not place.
+	changeSet.New = reclassify(changeSet.New, base.UnidentifiedControls, "base")
+	changeSet.Unchanged = reclassify(changeSet.Unchanged, nil, "")
+	resolved := reclassify(changeSet.Resolved, head.UnidentifiedControls, "head")
 	changeSet.Resolved = nil
 	for _, change := range resolved {
 		if _, present := head.Resources[change.ResourceID]; present {
