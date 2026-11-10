@@ -134,6 +134,12 @@ func posturePolicy(policyType, controlID string, workloads ...map[string]string)
 	}
 }
 
+func scopedPolicy(policyType string, policy armotypes.PosturePolicy, workloads ...map[string]string) armotypes.PostureExceptionPolicy {
+	exception := posturePolicy(policyType, policy.ControlID, workloads...)
+	exception.PosturePolicies = []armotypes.PosturePolicy{policy}
+	return exception
+}
+
 func nginx(namespace string) map[string]string {
 	return map[string]string{
 		identifiers.AttributeNamespace: namespace,
@@ -323,6 +329,39 @@ func TestMergedExceptionsGetter_Deduplication(t *testing.T) {
 				posturePolicy("crd", "C-0035", nginx("production")),
 			},
 		},
+		{
+			// The primary rule name is an alternation. It has to match the whole
+			// CRD rule name, so it does not reach the -v1 rule and the CRD
+			// exception must be kept.
+			name:  "rule name alternation does not cover a longer CRD rule name",
+			cloud: []armotypes.PostureExceptionPolicy{scopedPolicy("cloud", armotypes.PosturePolicy{ControlID: "C-0078", RuleName: "container-image-repository|rule-identify-blocklisted-image-registries"}, nginx("production"))},
+			crd:   []armotypes.PostureExceptionPolicy{scopedPolicy("crd", armotypes.PosturePolicy{ControlID: "C-0078", RuleName: "container-image-repository-v1"}, nginx("production"))},
+			want: []armotypes.PostureExceptionPolicy{
+				scopedPolicy("cloud", armotypes.PosturePolicy{ControlID: "C-0078", RuleName: "container-image-repository|rule-identify-blocklisted-image-registries"}, nginx("production")),
+				scopedPolicy("crd", armotypes.PosturePolicy{ControlID: "C-0078", RuleName: "container-image-repository-v1"}, nginx("production")),
+			},
+		},
+		{
+			name:  "rule name alternation covers each of its alternatives",
+			cloud: []armotypes.PostureExceptionPolicy{scopedPolicy("cloud", armotypes.PosturePolicy{ControlID: "C-0078", RuleName: "container-image-repository|rule-identify-blocklisted-image-registries"}, nginx("production"))},
+			crd:   []armotypes.PostureExceptionPolicy{scopedPolicy("crd", armotypes.PosturePolicy{ControlID: "C-0078", RuleName: "rule-identify-blocklisted-image-registries"}, nginx("production"))},
+			want:  []armotypes.PostureExceptionPolicy{scopedPolicy("cloud", armotypes.PosturePolicy{ControlID: "C-0078", RuleName: "container-image-repository|rule-identify-blocklisted-image-registries"}, nginx("production"))},
+		},
+		{
+			name:  "control ID alternation does not cover a control that only starts with one of them",
+			cloud: []armotypes.PostureExceptionPolicy{posturePolicy("cloud", "C-001|C-0034", nginx("production"))},
+			crd:   []armotypes.PostureExceptionPolicy{posturePolicy("crd", "C-0012", nginx("production"))},
+			want: []armotypes.PostureExceptionPolicy{
+				posturePolicy("cloud", "C-001|C-0034", nginx("production")),
+				posturePolicy("crd", "C-0012", nginx("production")),
+			},
+		},
+		{
+			name:  "bare wildcard framework name still covers any framework",
+			cloud: []armotypes.PostureExceptionPolicy{scopedPolicy("cloud", armotypes.PosturePolicy{FrameworkName: "*", ControlID: "C-0034"}, nginx("production"))},
+			crd:   []armotypes.PostureExceptionPolicy{scopedPolicy("crd", armotypes.PosturePolicy{FrameworkName: "NSA", ControlID: "C-0034"}, nginx("production"))},
+			want:  []armotypes.PostureExceptionPolicy{scopedPolicy("cloud", armotypes.PosturePolicy{FrameworkName: "*", ControlID: "C-0034"}, nginx("production"))},
+		},
 	}
 
 	for _, tc := range tests {
@@ -334,6 +373,39 @@ func TestMergedExceptionsGetter_Deduplication(t *testing.T) {
 			got, err := getter.GetExceptions(context.TODO(), "cluster-a")
 			require.NoError(t, err)
 			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+// TestScopeMatcherAgreesWithProcessor checks that the merge treats a primary scope
+// field as covering a CRD one exactly when the exception processor would apply the
+// primary exception to that value at evaluation time.
+func TestScopeMatcherAgreesWithProcessor(t *testing.T) {
+	cases := []struct {
+		primary string
+		crd     string
+		want    bool
+	}{
+		{primary: "container-image-repository", crd: "container-image-repository", want: true},
+		{primary: "Container-Image-Repository", crd: "container-image-repository", want: true},
+		{primary: "container-image-repository", crd: "container-image-repository-v1", want: false},
+		{primary: "container-image-repository.*", crd: "container-image-repository-v1", want: true},
+		{primary: "container-image-repository|rule-identify-blocklisted-image-registries", crd: "container-image-repository", want: true},
+		{primary: "container-image-repository|rule-identify-blocklisted-image-registries", crd: "rule-identify-blocklisted-image-registries", want: true},
+		{primary: "container-image-repository|rule-identify-blocklisted-image-registries", crd: "container-image-repository-v1", want: false},
+		{primary: "container-image-repository|rule-identify-blocklisted-image-registries", crd: "legacy-rule-identify-blocklisted-image-registries", want: false},
+		{primary: "*", crd: "any-rule", want: true},
+		{primary: "(", crd: "(", want: true},
+		{primary: "(", crd: "any-rule", want: false},
+	}
+
+	matcher := newScopeMatcher()
+	for _, tc := range cases {
+		t.Run(fmt.Sprintf("%s vs %s", tc.primary, tc.crd), func(t *testing.T) {
+			primary := []armotypes.PostureExceptionPolicy{{PosturePolicies: []armotypes.PosturePolicy{{RuleName: tc.primary}}}}
+			applies := len(matcher.processor.ListRuleExceptions(primary, "", "", tc.crd)) > 0
+			require.Equal(t, tc.want, applies, "processor")
+			assert.Equal(t, tc.want, matcher.covers(tc.primary, tc.crd), "scopeMatcher")
 		})
 	}
 }
