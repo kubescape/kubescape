@@ -38,7 +38,8 @@ func buildReport(t *testing.T, resources []fixtureResource, opts ...func(*fixtur
 		opt(&o)
 	}
 	controls := map[string]any{"C-0001": map[string]any{"scoreFactor": 7.0}, "C-0002": map[string]any{"scoreFactor": 3.0}}
-	var results, resourceList []any
+	// Empty, not nil: a nil slice would marshal as "results": null, which is not a valid scan.
+	results, resourceList := []any{}, []any{}
 	for _, r := range resources {
 		var associated []any
 		for _, id := range []string{"C-0001", "C-0002"} {

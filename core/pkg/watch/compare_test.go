@@ -486,3 +486,65 @@ func TestCompareUnidentifiableResourceNeverProducesNewOrRemoved(t *testing.T) {
 }
 
 const apiID2 = "a.yaml::apps/v1::default::Deployment::api"
+
+// withResultsField returns report with its results field replaced by raw JSON,
+// or removed when raw is empty, leaving everything else valid.
+func withResultsField(t *testing.T, report []byte, raw string) []byte {
+	t.Helper()
+	var doc map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(report, &doc))
+	if raw == "" {
+		delete(doc, "results")
+	} else {
+		doc["results"] = json.RawMessage(raw)
+	}
+	data, err := json.Marshal(doc)
+	require.NoError(t, err)
+	return data
+}
+
+func TestCompareRejectsMalformedResults(t *testing.T) {
+	valid := buildReport(t, []fixtureResource{deployment("path=1/web", "a.yaml", "web", "C-0001")})
+
+	for _, tt := range []struct {
+		name    string
+		results string // raw JSON, or "" to omit the field
+		wantErr string
+	}{
+		{"missing", "", "missing required results field"},
+		{"null", `null`, "results must be an array, not null"},
+		{"string", `"x"`, "invalid report results"},
+		{"object", `{}`, "invalid report results"},
+		{"number", `1`, "invalid report results"},
+	} {
+		malformed := withResultsField(t, valid, tt.results)
+
+		t.Run("base "+tt.name, func(t *testing.T) {
+			got, err := Compare(malformed, valid, diff.Options{})
+
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "loading base report")
+			assert.Contains(t, err.Error(), tt.wantErr)
+			assert.Nil(t, got, "an invalid report must not yield a comparison")
+		})
+
+		t.Run("head "+tt.name, func(t *testing.T) {
+			got, err := Compare(valid, malformed, diff.Options{})
+
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "loading head report")
+			assert.Contains(t, err.Error(), tt.wantErr)
+			assert.Nil(t, got, "a truncated scan must not be read as every resource removed")
+		})
+	}
+}
+
+func TestCompareEmptyResultsArrayIsAValidEmptyScan(t *testing.T) {
+	base := buildReport(t, []fixtureResource{deployment("path=1/web", "a.yaml", "web", "C-0001")})
+	head := []byte(`{"results":[],"summaryDetails":{"controls":{"C-0001":{"scoreFactor":7}}}}`)
+
+	got, err := Compare(base, head, diff.Options{})
+
+	require.NoError(t, err)
+	assert.Equal(t, []string{"a.yaml::apps/v1::default::Deployment::web"}, resourceIDs(got.Removed))
+}

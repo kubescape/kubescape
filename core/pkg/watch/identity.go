@@ -95,7 +95,7 @@ func Canonicalize(reportJSON []byte) (*CanonicalReport, error) {
 	if doc == nil {
 		return nil, errors.New("invalid report: expected a JSON object")
 	}
-	results, _ := doc["results"].([]any)
+	results, resultsAreAnArray := doc["results"].([]any)
 	resources, _ := doc["resources"].([]any)
 	if len(results) > 0 && len(resources) == 0 {
 		return nil, ErrNoResourceIdentity
@@ -233,7 +233,11 @@ func Canonicalize(reportJSON []byte) (*CanonicalReport, error) {
 			out.Resources[identity] = struct{}{}
 		}
 	}
-	doc["results"] = allResults
+	// A missing, null or non-array results is left as it is, so the diff
+	// engine rejects the report instead of reading it as a scan with no findings.
+	if resultsAreAnArray {
+		doc["results"] = allResults
+	}
 	doc["resources"] = keptResources
 
 	encoded, err := json.Marshal(doc)
