@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
-	"strings"
 
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
@@ -79,6 +78,25 @@ var knownClusterScopedKinds = map[string]struct{}{
 	"MutatingAdmissionPolicyBinding":   {},
 	"SelfSubjectReview":                {},
 	"ClusterIssuer":                    {},
+	"ClusterRole":                      {},
+	"ClusterRoleBinding":               {},
+	"ClusterTrustBundle":               {},
+	"ClusterWorkflowTemplate":          {},
+	"ClusterQueue":                     {},
+	"ClusterPolicy":                    {}, // Kyverno (kyverno.io)
+	"ClusterExternalSecret":            {}, // External Secrets (external-secrets.io)
+	"ClusterSecretStore":               {}, // External Secrets (external-secrets.io)
+	"ClusterTask":                      {}, // Tekton Pipelines (tekton.dev)
+	"ClusterInterceptor":               {}, // Tekton Triggers (tekton.dev)
+	"ClusterSPIFFEID":                  {}, // SPIRE (spiffe.io)
+	"ClusterPolicyReport":              {}, // Policy Working Group (wg-policy-k8s.io)
+}
+
+// knownNamespacedClusterKinds holds Custom Resource kinds that begin with or
+// are named "Cluster" but are strictly namespace-scoped in the Kubernetes ecosystem.
+var knownNamespacedClusterKinds = map[string]struct{}{
+	"Cluster":               {}, // CloudNativePG (postgresql.cnpg.io), Cluster API (cluster.x-k8s.io)
+	"ClusterServiceVersion": {}, // Operator Lifecycle Manager (operators.coreos.com)
 }
 
 // isNamespace reports whether the resource is a Namespace object. It carries
@@ -89,13 +107,17 @@ func (r ResourceInfo) isNamespace() bool {
 
 // isNamespaced reports whether the resource belongs to a namespace. An object with
 // an explicit Namespace is namespaced; a Namespace or cluster-scoped object is not;
-// otherwise scope is determined from its Kind using Kubernetes resource mappings.
+// otherwise scope is determined from its Kind using Kubernetes resource mappings or
+// the knownNamespacedClusterKinds catalog.
 func (r ResourceInfo) isNamespaced() bool {
 	if r.Namespace != "" {
 		return true
 	}
 	if r.isNamespace() || r.isClusterScoped() {
 		return false
+	}
+	if _, ok := knownNamespacedClusterKinds[r.Kind]; ok {
+		return true
 	}
 	if r.Kind != "" {
 		return k8sinterface.IsResourceInNamespaceScope(r.Kind)
@@ -105,8 +127,8 @@ func (r ResourceInfo) isNamespaced() bool {
 
 // isClusterScoped reports whether the resource is known to be cluster-scoped.
 // A Namespace object is cluster-scoped, as are standard Kubernetes kinds that
-// are confirmed not to be in namespace scope, kinds prefixed with "Cluster",
-// and built-in cluster-scoped kinds missing from bundled discovery data.
+// are confirmed not to be in namespace scope, and built-in or common ecosystem
+// cluster-scoped kinds cataloged in knownClusterScopedKinds.
 func (r ResourceInfo) isClusterScoped() bool {
 	if r.Namespace != "" {
 		return false
@@ -117,10 +139,10 @@ func (r ResourceInfo) isClusterScoped() bool {
 	if r.Kind == "" {
 		return false
 	}
-	if _, ok := knownClusterScopedKinds[r.Kind]; ok {
-		return true
+	if _, ok := knownNamespacedClusterKinds[r.Kind]; ok {
+		return false
 	}
-	if strings.HasPrefix(r.Kind, "Cluster") {
+	if _, ok := knownClusterScopedKinds[r.Kind]; ok {
 		return true
 	}
 	return k8sinterface.IsKindKubernetes(r.Kind) && !k8sinterface.IsResourceInNamespaceScope(r.Kind)
