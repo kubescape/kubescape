@@ -1,7 +1,9 @@
 package v1
 
 import (
+	"errors"
 	"io"
+	"strings"
 
 	"github.com/kubescape/kubescape/v4/core/cautils"
 )
@@ -33,6 +35,11 @@ type FixInfo struct {
 	// report, which has no manifests to rewrite, one patched manifest per
 	// resource is written there instead of being printed to stdout.
 	OutputDir string
+	// OutputPatch, when set, receives the fixes of a file-based report as one
+	// unified diff, instead of the manifests being rewritten. No manifest is
+	// modified, and an existing file at the path is replaced only with NoConfirm.
+	// It is applied from the scan's root with `git apply` or `patch -p1`.
+	OutputPatch string
 	// KustomizeDir, when set, writes a kustomization.yaml and JSON 6902
 	// patch files for Helm-rendered resources into this directory.
 	// The patches can be applied via:
@@ -54,4 +61,26 @@ type FixInfo struct {
 	HelmValueOptions cautils.HelmValueOptions
 	// Writer is the destination writer for stdout-directed output (such as cluster fixes); defaults to os.Stdout when nil.
 	Writer io.Writer
+}
+
+// ValidateOutputPatch refuses the combinations in which OutputPatch would do
+// less than it says. OutputDir and DryRun already stop the manifests from being
+// rewritten, so combining either with it leaves unclear which one decides the
+// outcome, and silently honouring one of them would hide that. It is checked by
+// the command and again by Kubescape.Fix, so a caller of the core API is held to
+// the same rules. It is nil when OutputPatch is empty.
+func (f *FixInfo) ValidateOutputPatch() error {
+	if f.OutputPatch == "" {
+		return nil
+	}
+	if strings.TrimSpace(f.OutputPatch) == "" {
+		return errors.New("--output-patch needs a file path")
+	}
+	if f.OutputDir != "" {
+		return errors.New("--output-patch cannot be combined with --output-dir: choose a patch or fixed copies")
+	}
+	if f.DryRun {
+		return errors.New("--output-patch cannot be combined with --dry-run: exporting a patch already leaves the manifests untouched")
+	}
+	return nil
 }

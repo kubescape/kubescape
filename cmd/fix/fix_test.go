@@ -241,3 +241,59 @@ func TestGetFixCmd_NilKubescape(t *testing.T) {
 	err := fixCmd.Execute()
 	require.EqualError(t, err, "uninitialized kubescape interface")
 }
+
+func TestFixCmdOutputPatchFlag(t *testing.T) {
+	tests := []struct {
+		name      string
+		args      []string
+		wantErr   string
+		wantPatch string
+	}{
+		{name: "not given", args: []string{"report.json"}},
+		{name: "a patch file", args: []string{"report.json", "--output-patch", "remediation.patch"}, wantPatch: "remediation.patch"},
+		{name: "with no-confirm", args: []string{"report.json", "--output-patch", "remediation.patch", "--no-confirm"}, wantPatch: "remediation.patch"},
+		{name: "with interactive", args: []string{"report.json", "--output-patch", "remediation.patch", "-i"}, wantPatch: "remediation.patch"},
+		{name: "with control selection", args: []string{"report.json", "--output-patch", "remediation.patch", "--include-controls", "C-0016"}, wantPatch: "remediation.patch"},
+		{name: "with output-kustomize", args: []string{"report.json", "--output-patch", "remediation.patch", "--output-kustomize", "./patches"}, wantPatch: "remediation.patch"},
+		{name: "blank path", args: []string{"report.json", "--output-patch", " "}, wantErr: "--output-patch needs a file path"},
+		// An unset shell variable gives an empty path. Treated as "not given" it
+		// would fix the manifests in place, which --no-confirm would not stop.
+		{name: "empty path", args: []string{"report.json", "--output-patch", ""}, wantErr: "--output-patch needs a file path"},
+		{name: "empty path with equals", args: []string{"report.json", "--output-patch="}, wantErr: "--output-patch needs a file path"},
+		{name: "empty path with no-confirm", args: []string{"report.json", "--no-confirm", "--output-patch", ""}, wantErr: "--output-patch needs a file path"},
+		{name: "with output-dir", args: []string{"report.json", "--output-patch", "remediation.patch", "--output-dir", "./fixed"}, wantErr: "--output-patch cannot be combined with --output-dir: choose a patch or fixed copies"},
+		{name: "with dry-run", args: []string{"report.json", "--output-patch", "remediation.patch", "--dry-run"}, wantErr: "--output-patch cannot be combined with --dry-run: exporting a patch already leaves the manifests untouched"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			spy := &spyKubescape{}
+			cmd := GetFixCmd(spy)
+			cmd.SetArgs(tt.args)
+			cmd.SetOut(io.Discard)
+			cmd.SetErr(io.Discard)
+
+			err := cmd.Execute()
+
+			if tt.wantErr != "" {
+				assert.EqualError(t, err, tt.wantErr)
+				assert.False(t, spy.fixCalled, "a refused combination must not reach IKubescape.Fix")
+				return
+			}
+			require.NoError(t, err)
+			require.True(t, spy.fixCalled)
+			assert.Equal(t, tt.wantPatch, spy.received.OutputPatch)
+		})
+	}
+}
+
+func TestFixCmdOutputPatchIsDocumented(t *testing.T) {
+	cmd := GetFixCmd(&mocks.MockIKubescape{})
+
+	flag := cmd.PersistentFlags().Lookup("output-patch")
+	require.NotNil(t, flag, "the flag must be registered")
+	assert.Contains(t, flag.Usage, "unified diff")
+	assert.Contains(t, flag.Usage, "never modified")
+	assert.Contains(t, cmd.Example, "--output-patch remediation.patch")
+	assert.Contains(t, cmd.Example, "git apply")
+}

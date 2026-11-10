@@ -1640,15 +1640,9 @@ func (h *FixHandler) OutputPaths(resourcesToFix []ResourceFixInfo) (map[string]s
 			continue
 		}
 
-		relativePath := resource.relativePath
-		if sharedRoot != "" {
-			rel, err := filepath.Rel(sharedRoot, source)
-			if err != nil || !isLexicallyWithin(sharedRoot, source) {
-				return nil, fmt.Errorf("cannot place %q below the scanned inputs' shared directory %q", sanitizeForLog(source), sharedRoot)
-			}
-			relativePath = rel
-		} else if relativePath == "" {
-			relativePath = filepath.Base(source)
+		relativePath, err := manifestRelativePath(resource, sharedRoot)
+		if err != nil {
+			return nil, err
 		}
 		destination := filepath.Join(outputDir, relativePath)
 
@@ -1666,6 +1660,24 @@ func (h *FixHandler) OutputPaths(resourcesToFix []ResourceFixInfo) (map[string]s
 		claimedBy[destination] = source
 	}
 	return destinations, nil
+}
+
+// manifestRelativePath is where a manifest sits in the tree OutputPaths
+// recreates, and in an exported patch: below the scan's shared root when it has
+// one, otherwise the path the report recorded for it.
+func manifestRelativePath(resource *ResourceFixInfo, sharedRoot string) (string, error) {
+	source := resource.FilePath
+	if sharedRoot != "" {
+		rel, err := filepath.Rel(sharedRoot, source)
+		if err != nil || !isLexicallyWithin(sharedRoot, source) {
+			return "", fmt.Errorf("cannot place %q below the scanned inputs' shared directory %q", sanitizeForLog(source), sharedRoot)
+		}
+		return rel, nil
+	}
+	if resource.relativePath == "" {
+		return filepath.Base(source), nil
+	}
+	return resource.relativePath, nil
 }
 
 // isPathContained reports whether target resolves to a path inside base,
