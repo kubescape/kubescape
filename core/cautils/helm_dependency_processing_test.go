@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
 	"github.com/stretchr/testify/require"
 )
 
@@ -104,23 +106,33 @@ func TestLoadResourcesFromHelmCharts_RendersAliasedSubcharts(t *testing.T) {
 			"  - name: child\n    version: 0.1.0\n    alias: session\n",
 		"cache:\n  port: 443\nsession:\n  port: 8443\n",
 	)
+	servicePath := filepath.Join(childRoot, "templates", "service.yaml")
 
-	workloads, charts, renderedCharts, err := LoadResourcesFromHelmCharts(
-		context.Background(), parentRoot, HelmValueOptions{},
-	)
+	for name, workspace := range map[string]string{"without workspace": "", "inside workspace": parentRoot} {
+		t.Run(name, func(t *testing.T) {
+			workloads, charts, renderedCharts, err := LoadResourcesFromHelmChartsFiltered(
+				context.Background(), parentRoot, HelmValueOptions{}, nil, nil, workspace,
+			)
 
-	require.NoError(t, err)
-	require.ElementsMatch(t, []string{parentRoot, childRoot}, renderedCharts)
-	// Helm renders each alias as its own subchart, named after the alias and
-	// reading the values under the alias's key.
-	for alias, port := range map[string]int{"cache": 443, "session": 8443} {
-		sourcePath := filepath.Join(parentRoot, "charts", alias, "templates", "service.yaml")
-		requireServicePort(t, workloads, sourcePath, port)
-		require.Equal(t, alias, workloads[sourcePath][0].GetName())
-		require.Equal(t, parentRoot, charts[sourcePath].Path)
+			require.NoError(t, err)
+			require.ElementsMatch(t, []string{parentRoot, childRoot}, renderedCharts)
+			// Helm renders each alias as its own subchart, named after the
+			// alias and reading the values under the alias's key. Both renders
+			// come from the template on disk, so they are reported against it.
+			require.Len(t, workloads, 1)
+			require.Len(t, workloads[servicePath], 2)
+			wantPorts := map[string]int{"cache": 443, "session": 8443}
+			for _, workload := range workloads[servicePath] {
+				require.Contains(t, wantPorts, workload.GetName())
+				require.Equal(t, servicePath, workload.(*localworkload.LocalWorkload).GetPath())
+				requireServicePort(t, map[string][]workloadinterface.IMetadata{servicePath: {workload}},
+					servicePath, wantPorts[workload.GetName()])
+				delete(wantPorts, workload.GetName())
+			}
+			require.Equal(t, parentRoot, charts[servicePath].Path)
+			require.Equal(t, "templates/service.yaml", charts[servicePath].Provenance.TemplateFile)
+		})
 	}
-	require.NotContains(t, workloads, filepath.Join(childRoot, "templates", "service.yaml"),
-		"an aliased dependency is only rendered under its aliases")
 }
 
 func TestLoadResourcesFromHelmCharts_AppliesSubchartImportValues(t *testing.T) {
@@ -154,7 +166,6 @@ func TestHelmChartGetWorkloads_DoesNotModifyLoadedChart(t *testing.T) {
 		"child:\n  enabled: true\n",
 	)
 	servicePath := filepath.Join(childRoot, "templates", "service.yaml")
-	aliasPath := filepath.Join(parentRoot, "charts", "cache", "templates", "service.yaml")
 
 	chart, err := NewHelmChart(parentRoot)
 	require.NoError(t, err)
@@ -162,16 +173,17 @@ func TestHelmChartGetWorkloads_DoesNotModifyLoadedChart(t *testing.T) {
 	disabled := map[string]any{"child": map[string]any{"enabled": false}}
 	workloads, errs := chart.GetWorkloads(disabled)
 	require.Empty(t, errs)
-	require.NotContains(t, workloads, servicePath)
-	requireServicePort(t, workloads, aliasPath, 80)
+	requireServicePort(t, workloads, servicePath, 80)
+	require.Equal(t, "cache", workloads[servicePath][0].GetName())
 
 	// A render must not leave the chart with its disabled dependency removed
 	// or its dependencies renamed: the next render, ownership checks and
 	// provenance all read the chart as it was loaded.
 	workloads, errs = chart.GetWorkloadsWithDefaultValues()
 	require.Empty(t, errs)
-	requireServicePort(t, workloads, servicePath, 80)
-	requireServicePort(t, workloads, aliasPath, 80)
+	require.Len(t, workloads[servicePath], 2)
+	require.ElementsMatch(t, []string{"child", "cache"},
+		[]string{workloads[servicePath][0].GetName(), workloads[servicePath][1].GetName()})
 	require.True(t, chart.ownsUnpackedDependency(childRoot))
 	require.Contains(t, chart.Provenance(), servicePath)
 	require.Len(t, chart.chart.Dependencies(), 1)
