@@ -10,8 +10,21 @@ import (
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/opa-utils/reporthandling"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
+
+// workloadHasParent reports whether a workload is left to its owner rather
+// than scanned on its own. k8sinterface.WorkloadHasParent also treats a Pod as
+// owned when it only carries a pod-template-hash label, and
+// workloadinterface.GetOwnerReferences invents a ReplicaSet owner from that
+// label. But the label is not ownership: it survives
+// `kubectl delete rs --cascade=orphan` and anyone can set it, so such a Pod
+// would never be scanned. Only a recorded ownerReference counts.
+func workloadHasParent(obj map[string]any) bool {
+	owners, _, _ := unstructured.NestedSlice(obj, "metadata", "ownerReferences")
+	return len(owners) > 0 && k8sinterface.WorkloadHasParent(workloadinterface.NewWorkloadObj(obj))
+}
 
 // utils which are common to all resource handlers
 func addSingleResourceToResourceMaps(k8sResources cautils.K8SResources, allResources map[string]workloadinterface.IMetadata, wl workloadinterface.IWorkload, resolver resourceResolver) {
