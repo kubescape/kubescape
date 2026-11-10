@@ -726,25 +726,32 @@ func validateScanOutputSafety(outputFile string, scanInfo *cautils.ScanInfo, tra
 	}
 
 	for _, pattern := range scanInfo.InputPatterns {
-		if strings.TrimSpace(pattern) == "" {
+		rawPath := strings.TrimSpace(pattern)
+		if rawPath == "" {
 			continue
 		}
-		rawPath := pattern
-		if rest, _ := peelGenericImageSelector(rawPath); rest != "" {
-			rawPath = rest
-		}
-		if scheme := detectScheme(rawPath); scheme != "" {
-			rawPath = strings.TrimPrefix(rawPath, scheme+":")
-		} else if strings.HasPrefix(rawPath, "docker-archive:") {
-			rawPath = strings.TrimPrefix(rawPath, "docker-archive:")
-		} else if strings.HasPrefix(rawPath, "oci-archive:") {
-			rawPath = strings.TrimPrefix(rawPath, "oci-archive:")
-		} else if strings.HasPrefix(rawPath, "oci-dir:") {
-			rawPath = strings.TrimPrefix(rawPath, "oci-dir:")
-		} else if strings.HasPrefix(rawPath, "dir:") {
-			rawPath = strings.TrimPrefix(rawPath, "dir:")
-		} else if strings.HasPrefix(rawPath, "sbom:") {
-			rawPath = strings.TrimPrefix(rawPath, "sbom:")
+		// Stat the literal path first so that a manifest or directory literally
+		// named e.g. "file:pod.yaml" or "dir:my-chart" is not mistakenly stripped.
+		// If the literal path does not exist, attempt to peel image selectors and schemes.
+		if rawPath != "-" {
+			if _, err := os.Stat(rawPath); err != nil {
+				if rest, _ := peelGenericImageSelector(rawPath); rest != "" {
+					rawPath = rest
+				}
+				if scheme := detectScheme(rawPath); scheme != "" {
+					rawPath = strings.TrimPrefix(rawPath, scheme+":")
+				} else if strings.HasPrefix(rawPath, "docker-archive:") {
+					rawPath = strings.TrimPrefix(rawPath, "docker-archive:")
+				} else if strings.HasPrefix(rawPath, "oci-archive:") {
+					rawPath = strings.TrimPrefix(rawPath, "oci-archive:")
+				} else if strings.HasPrefix(rawPath, "oci-dir:") {
+					rawPath = strings.TrimPrefix(rawPath, "oci-dir:")
+				} else if strings.HasPrefix(rawPath, "dir:") {
+					rawPath = strings.TrimPrefix(rawPath, "dir:")
+				} else if strings.HasPrefix(rawPath, "sbom:") {
+					rawPath = strings.TrimPrefix(rawPath, "sbom:")
+				}
+			}
 		}
 
 		if rawPath == "-" {

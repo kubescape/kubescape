@@ -1286,17 +1286,6 @@ func (ks *Kubescape) ScanImage(imgScanInfo *ksmetav1.ImageScanInfo, scanInfo *ca
 	return ks.ScanImageContext(ks.Context(), imgScanInfo, scanInfo)
 }
 
-// ScanImageContext scans every image in imgScanInfo.Images bound to the given
-// ctx for its complete execution, rather than re-reading ks.Context() at each
-// stage as ScanImage's predecessor did (matching Kubescape.Scan's own
-// ScanContext migration, #3237). Callers that need a deadline or cancellation
-// should derive ctx themselves and pass it in directly, instead of calling
-// ks.SetContext beforehand: mutating the shared *Kubescape's context is not
-// safe if the instance is reused or another operation could run
-// concurrently against it. The images share one vulnerability database load
-// and the worker pool the cluster scan already uses, so an image that fails
-// never hides the results of the ones that succeeded.
-//
 // onBeforeImageScanServiceInit is an internal test hook invoked right before image scanner service initialization.
 var onBeforeImageScanServiceInit func()
 
@@ -1326,6 +1315,19 @@ func resolveLocalImageTarget(image string) (string, bool) {
 	return "", false
 }
 
+// ScanImageContext scans every image in imgScanInfo.Images using the given ctx
+// for scan jobs and output setup, rather than re-reading ks.Context() at each
+// stage as ScanImage's predecessor did (matching Kubescape.Scan's own
+// ScanContext migration, #3237). Scanner initialization, including vulnerability
+// database loading, is not bound to ctx and may continue after cancellation.
+// Callers that need a deadline or cancellation
+// should derive ctx themselves and pass it in directly, instead of calling
+// ks.SetContext beforehand: mutating the shared *Kubescape's context is not
+// safe if the instance is reused or another operation could run
+// concurrently against it. The images share one vulnerability database load
+// and the worker pool the cluster scan already uses, so an image that fails
+// never hides the results of the ones that succeeded.
+//
 // Image exceptions (--exceptions) require registry references. A non-registry
 // input (archive, local directory, SBOM) combined with exceptions is reported
 // as a per-image "Image Exceptions/Unsupported Input" error: siblings still

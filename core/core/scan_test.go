@@ -2223,6 +2223,30 @@ func TestValidateOutputPrinters_OutputSafetyCollision(t *testing.T) {
 		// ValidateOutputPrinters must not create the output file
 		assert.NoFileExists(t, safeOutput, "ValidateOutputPrinters must not open or create output files")
 	})
+
+	t.Run("literal manifest named with scheme prefix like file:pod.yaml detects collision", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("literal colon filenames are not supported on Windows")
+		}
+		dir := t.TempDir()
+		t.Chdir(dir)
+		manifest := "file:pod.yaml"
+		require.NoError(t, os.WriteFile(manifest, manifestContent, 0o600))
+
+		scanInfo := &cautils.ScanInfo{
+			ScanType:      cautils.ScanTypeControl,
+			Format:        printer.YamlFormat,
+			Output:        manifest,
+			InputPatterns: []string{manifest},
+		}
+
+		err := ValidateOutputPrinters(scanInfo)
+		require.ErrorContains(t, err, "would overwrite input manifest")
+
+		content, err := os.ReadFile(manifest)
+		require.NoError(t, err)
+		assert.Equal(t, manifestContent, content, "input manifest must be preserved byte-for-byte")
+	})
 }
 
 func TestScanImageContext_EarlyValidationRejectsCollisionBeforeScan(t *testing.T) {
