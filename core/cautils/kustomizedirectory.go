@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -16,6 +18,80 @@ import (
 	"sigs.k8s.io/kustomize/api/types"
 	"sigs.k8s.io/kustomize/kyaml/filesys"
 )
+
+var (
+	// ErrKustomizationFileNotRegular is returned when a Kustomization file is not a regular file.
+	ErrKustomizationFileNotRegular = errors.New("kustomization file is not a regular file")
+	// ErrKustomizationFileTooLarge is returned when a Kustomization file exceeds the maximum allowed size.
+	ErrKustomizationFileTooLarge = errors.New("kustomization file exceeds maximum size limit")
+)
+
+// openKustomizationFile opens path for reading and rejects anything but a regular file.
+// A pre-open stat check prevents opening device nodes (e.g. tape or character devices).
+// O_NONBLOCK keeps opening a FIFO from waiting for a writer, and descriptor-based
+// validation ensures a path swapped after stat cannot slip past.
+func openKustomizationFile(path string) (*os.File, error) {
+	if strings.TrimSpace(path) == "" {
+		return nil, os.ErrNotExist
+	}
+	cleaned := filepath.Clean(path)
+	statInfo, err := os.Stat(cleaned)
+	if err != nil {
+		return nil, err
+	}
+	if statInfo.IsDir() {
+		return nil, fmt.Errorf("%q is a directory, not a file: %w", path, ErrKustomizationFileNotRegular)
+	}
+	if !statInfo.Mode().IsRegular() {
+		return nil, fmt.Errorf("%w: %q", ErrKustomizationFileNotRegular, path)
+	}
+
+	file, err := os.OpenFile(cleaned, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return nil, err
+	}
+	info, err := file.Stat()
+	if err != nil {
+		file.Close()
+		return nil, err
+	}
+	if info.IsDir() {
+		file.Close()
+		return nil, fmt.Errorf("%q is a directory, not a file: %w", path, ErrKustomizationFileNotRegular)
+	}
+	if !info.Mode().IsRegular() {
+		file.Close()
+		return nil, fmt.Errorf("%w: %q", ErrKustomizationFileNotRegular, path)
+	}
+	return file, nil
+}
+
+// readKustomizationFile returns the contents of the Kustomization file at path, reading at most
+// getMaxFileSize() bytes (configurable via KUBESCAPE_MAX_FILE_SIZE, defaulting to
+// DefaultMaxFileSize) so that reading remains bounded.
+func readKustomizationFile(path string) ([]byte, error) {
+	file, err := openKustomizationFile(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	limit := getMaxFileSize()
+
+	info, err := file.Stat()
+	if err == nil && info.Size() > limit {
+		return nil, fmt.Errorf("%w: %q exceeds the %d byte limit", ErrKustomizationFileTooLarge, path, limit)
+	}
+
+	data, err := io.ReadAll(io.LimitReader(file, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > limit {
+		return nil, fmt.Errorf("%w: %q exceeds the %d byte limit", ErrKustomizationFileTooLarge, path, limit)
+	}
+	return data, nil
+}
 
 type KustomizeDirectory struct {
 	path        string
@@ -148,7 +224,7 @@ func collectKustomizeInputOwnership(
 	seenKustomizations[absKustomizationPath] = struct{}{}
 	appendUniquePath(absKustomizationPath, seenSourcePaths, &ownership.SourcePaths)
 
-	contents, err := os.ReadFile(filepath.Clean(absKustomizationPath))
+	contents, err := readKustomizationFile(absKustomizationPath)
 	if err != nil {
 		return fmt.Errorf("failed to read Kustomization %q: %w", absKustomizationPath, err)
 	}
