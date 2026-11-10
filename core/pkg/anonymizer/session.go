@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"strconv"
 	"strings"
 
 	"github.com/kubescape/k8s-interface/workloadinterface"
@@ -105,6 +106,19 @@ func cloneSessionForTransform(session *cautils.OPASessionObj) (*sessionTransform
 		return nil, fmt.Errorf("clone exception audit: %w", err)
 	}
 	working.ExceptionAudit = exceptionAudit
+
+	skippedManifests, err := cloneJSON(session.SkippedManifests)
+	if err != nil {
+		return nil, fmt.Errorf("clone skipped manifests: %w", err)
+	}
+	working.SkippedManifests = skippedManifests
+
+	// ScanCoverage is a value; only its skipped manifests are transformed, so
+	// a copy with its own slice is enough to keep the caller untouched.
+	working.ScanCoverage = session.ScanCoverage
+	if working.ScanCoverage.SkippedManifests, err = cloneJSON(session.ScanCoverage.SkippedManifests); err != nil {
+		return nil, fmt.Errorf("clone scan coverage skipped manifests: %w", err)
+	}
 
 	resources, originalByClone, err := cloneCatalog(session.GetCatalog())
 	if err != nil {
@@ -250,6 +264,8 @@ func commitTransformedSession(session *cautils.OPASessionObj, transaction *sessi
 	session.Report = working.Report
 	session.NamespaceSummaries = working.NamespaceSummaries
 	session.ExceptionAudit = working.ExceptionAudit
+	session.SkippedManifests = working.SkippedManifests
+	session.ScanCoverage.SkippedManifests = working.ScanCoverage.SkippedManifests
 	return nil
 }
 
@@ -475,6 +491,37 @@ func transformSessionInPlace(session *cautils.OPASessionObj, transformer Transfo
 		return err
 	}
 
+	if err := transformSkippedManifests(session.SkippedManifests, transformer); err != nil {
+		return err
+	}
+	if err := transformSkippedManifests(session.ScanCoverage.SkippedManifests, transformer); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// transformSkippedManifests anonymizes the manifests the scan could not load.
+// Their paths are absolute local paths (home directory, project name), so
+// each gets the "src" pseudonym manifest source paths get: deterministic
+// under --hide, so entries stay distinguishable and a file keeps one name
+// across the report. The loader's reasons embed the same path, raw (an
+// os.PathError) or %q-quoted, so the path is replaced inside the reason too
+// and the rest of the diagnostic is kept.
+func transformSkippedManifests(skipped []cautils.SkippedManifest, transformer Transformer) error {
+	for i := range skipped {
+		original := skipped[i].Path
+		if original == "" {
+			continue
+		}
+		transformed, err := transformValue(transformer, "src", original)
+		if err != nil {
+			return err
+		}
+		skipped[i].Path = transformed
+		reason := strings.ReplaceAll(skipped[i].Reason, strconv.Quote(original), strconv.Quote(transformed))
+		skipped[i].Reason = strings.ReplaceAll(reason, original, transformed)
+	}
 	return nil
 }
 
