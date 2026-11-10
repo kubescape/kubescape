@@ -111,6 +111,12 @@ type grantKey struct {
 
 func grantKeyOf(e EscalationEdge) grantKey {
 	key := grantKey{primitive: e.Primitive, scope: e.Scope, detail: e.Detail}
+	if e.Primitive == PrimitiveBindVerb && e.Target != nil {
+		// Likewise, adopting the bound role's rules is one grant however many
+		// bindings can carry it.
+		key.target = *e.Target
+		key.detail = "adopted bound role"
+	}
 	if e.Primitive == PrimitiveEscalateVerb && e.Target != nil {
 		// The same rewrite may gain another binding path after rules grow.
 		// That changes its explanation, not the acquired permission or target.

@@ -33,7 +33,8 @@
 //     with both can rewrite the target role; acquiring its rules also
 //     requires an existing or authorized new/edited binding.
 //   - bind-verb: the "bind" verb on roles/clusterroles, combined with
-//     create on rolebindings/clusterrolebindings, lets a subject attach any
+//     create on rolebindings/clusterrolebindings or update/patch on an
+//     existing binding of that role, lets a subject attach any
 //     Role/ClusterRole they can bind to a subject of their choosing
 //     (typically themselves), adopting its rules without ever having held
 //     them directly.
