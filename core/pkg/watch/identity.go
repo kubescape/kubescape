@@ -229,14 +229,14 @@ func rewriteIDs(node any, idToIdentity map[string]string) {
 	switch value := node.(type) {
 	case map[string]any:
 		for key, child := range value {
-			switch {
-			case key == "resourceID":
+			switch key {
+			case "resourceID":
 				if id, ok := child.(string); ok {
 					if identity, known := idToIdentity[id]; known {
 						value[key] = identity
 					}
 				}
-			case key == "relatedResourcesIDs":
+			case "relatedResourcesIDs":
 				if list, ok := child.([]any); ok {
 					for i, rawID := range list {
 						if id, ok := rawID.(string); ok {
