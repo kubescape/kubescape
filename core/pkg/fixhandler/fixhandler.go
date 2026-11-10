@@ -846,7 +846,7 @@ func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInf
 
 	var containerProfile *storagev1beta1.ContainerProfile
 	if h.fixInfo != nil && h.fixInfo.ContainerProfilePath != "" {
-		profileData, err := os.ReadFile(h.fixInfo.ContainerProfilePath)
+		profileData, err := readManifestFile(h.fixInfo.ContainerProfilePath)
 		if err == nil {
 			var cp storagev1beta1.ContainerProfile
 			if err := json.Unmarshal(profileData, &cp); err == nil {
@@ -2082,11 +2082,97 @@ func FixPathToValidYamlExpression(fixPath, value string, documentIndexInYaml int
 	return fmt.Sprintf("select(di==%d).%s |= %s", documentIndexInYaml, fixPath, value)
 }
 
-func GetFileString(path string) (string, error) {
-	bytes, err := os.ReadFile(filepath.Clean(path))
+var (
+	// ErrManifestNotRegular is returned when a manifest file is not a regular file.
+	ErrManifestNotRegular = errors.New("manifest file is not a regular file")
+	// ErrManifestTooLarge is returned when a manifest file exceeds the maximum allowed size.
+	ErrManifestTooLarge = errors.New("manifest file exceeds maximum size limit")
+)
 
+func getMaxManifestSize() int64 {
+	if v, ok := os.LookupEnv(cautils.MaxFileSizeEnvVar); ok {
+		trimmed := strings.TrimSpace(v)
+		if trimmed != "" {
+			if parsed, err := strconv.ParseInt(trimmed, 10, 64); err == nil && parsed > 0 && parsed != math.MaxInt64 {
+				return parsed
+			}
+			logger.L().Warning("invalid KUBESCAPE_MAX_FILE_SIZE, using default", helpers.String("value", v), helpers.Int("default", int(cautils.DefaultMaxFileSize)))
+		}
+	}
+	return cautils.DefaultMaxFileSize
+}
+
+// openManifestFile opens path for reading and rejects anything but a regular file.
+// A pre-open stat check prevents opening device nodes (e.g. tape or character devices).
+// O_NONBLOCK keeps opening a FIFO from waiting for a writer, and descriptor-based
+// validation ensures a path swapped after stat cannot slip past.
+func openManifestFile(path string) (*os.File, error) {
+	if strings.TrimSpace(path) == "" {
+		return nil, os.ErrNotExist
+	}
+	cleaned := filepath.Clean(path)
+	statInfo, err := os.Stat(cleaned)
 	if err != nil {
-		return "", fmt.Errorf("error reading file %s", path)
+		return nil, err
+	}
+	if statInfo.IsDir() {
+		return nil, fmt.Errorf("%q is a directory, not a file: %w", path, ErrManifestNotRegular)
+	}
+	if !statInfo.Mode().IsRegular() {
+		return nil, fmt.Errorf("%w: %q", ErrManifestNotRegular, path)
+	}
+
+	file, err := os.OpenFile(cleaned, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return nil, err
+	}
+	info, err := file.Stat()
+	if err != nil {
+		file.Close()
+		return nil, err
+	}
+	if info.IsDir() {
+		file.Close()
+		return nil, fmt.Errorf("%q is a directory, not a file: %w", path, ErrManifestNotRegular)
+	}
+	if !info.Mode().IsRegular() {
+		file.Close()
+		return nil, fmt.Errorf("%w: %q", ErrManifestNotRegular, path)
+	}
+	return file, nil
+}
+
+// readManifestFile returns the contents of the manifest file at path, reading at most
+// getMaxManifestSize() bytes (configurable via KUBESCAPE_MAX_FILE_SIZE, defaulting to
+// cautils.DefaultMaxFileSize) so that reading remains bounded.
+func readManifestFile(path string) ([]byte, error) {
+	file, err := openManifestFile(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	limit := getMaxManifestSize()
+
+	info, err := file.Stat()
+	if err == nil && info.Size() > limit {
+		return nil, fmt.Errorf("%w: %q exceeds the %d byte limit", ErrManifestTooLarge, path, limit)
+	}
+
+	data, err := io.ReadAll(io.LimitReader(file, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > limit {
+		return nil, fmt.Errorf("%w: %q exceeds the %d byte limit", ErrManifestTooLarge, path, limit)
+	}
+	return data, nil
+}
+
+func GetFileString(path string) (string, error) {
+	bytes, err := readManifestFile(path)
+	if err != nil {
+		return "", fmt.Errorf("error reading file %s: %w", path, err)
 	}
 
 	return string(bytes), nil

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -15,6 +16,7 @@ import (
 	"github.com/armosec/armoapi-go/armotypes"
 	gitv5 "github.com/go-git/go-git/v5"
 	"github.com/kubescape/go-logger"
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	metav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
 	"github.com/kubescape/kubescape/v4/internal/testutils"
 	"github.com/kubescape/opa-utils/reporthandling"
@@ -545,6 +547,72 @@ spec:
 			}
 		})
 	}
+}
+
+func TestGetFileString_OversizedFileRejected(t *testing.T) {
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "manifest.yaml")
+	f, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY, 0o600)
+	require.NoError(t, err)
+	require.NoError(t, f.Truncate(cautils.DefaultMaxFileSize+1))
+	require.NoError(t, f.Close())
+
+	_, err = GetFileString(filePath)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrManifestTooLarge)
+}
+
+func TestGetFileString_NonRegularFileRejected(t *testing.T) {
+	if _, err := os.Stat("/dev/null"); err == nil {
+		_, err := GetFileString("/dev/null")
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrManifestNotRegular)
+	}
+}
+
+func TestGetFileString_DirectoryRejected(t *testing.T) {
+	dir := t.TempDir()
+	_, err := GetFileString(dir)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrManifestNotRegular)
+	assert.Contains(t, err.Error(), "is a directory, not a file")
+}
+
+func TestGetFileString_MaxFileSizeEnvVar(t *testing.T) {
+	t.Run("lower override", func(t *testing.T) {
+		t.Setenv(cautils.MaxFileSizeEnvVar, "100")
+
+		dir := t.TempDir()
+		overLimitFile := filepath.Join(dir, "manifest.yaml")
+		require.NoError(t, os.WriteFile(overLimitFile, make([]byte, 200), 0o600))
+
+		_, err := GetFileString(overLimitFile)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrManifestTooLarge)
+
+		underLimitFile := filepath.Join(dir, "valid_manifest.yaml")
+		require.NoError(t, os.WriteFile(underLimitFile, []byte("valid content"), 0o600))
+
+		data, err := GetFileString(underLimitFile)
+		require.NoError(t, err)
+		assert.Equal(t, "valid content", data)
+	})
+
+	t.Run("higher override", func(t *testing.T) {
+		raisedLimit := cautils.DefaultMaxFileSize + 1024
+		t.Setenv(cautils.MaxFileSizeEnvVar, fmt.Sprintf("%d", raisedLimit))
+
+		dir := t.TempDir()
+		overDefaultFile := filepath.Join(dir, "manifest.yaml")
+		f, err := os.OpenFile(overDefaultFile, os.O_CREATE|os.O_WRONLY, 0o600)
+		require.NoError(t, err)
+		require.NoError(t, f.Truncate(cautils.DefaultMaxFileSize+100))
+		require.NoError(t, f.Close())
+
+		data, err := GetFileString(overDefaultFile)
+		require.NoError(t, err)
+		assert.Len(t, data, int(cautils.DefaultMaxFileSize+100))
+	})
 }
 
 func TestDetermineNewlineSeparator(t *testing.T) {

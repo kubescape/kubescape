@@ -1,4 +1,4 @@
-//go:build unix
+//go:build unix && !aix && !illumos && !solaris
 
 package fixhandler
 
@@ -9,15 +9,14 @@ import (
 	"testing"
 	"time"
 
-	metav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 // A FIFO with no writer blocks a plain open forever, so the call runs under a
 // deadline, and the FIFO is released on cleanup in case a regression hangs it.
-func TestNewFixHandler_FIFOWithoutWriterIsRejectedPromptly(t *testing.T) {
-	fifo := filepath.Join(t.TempDir(), "report.fifo")
+func TestGetFileString_FIFOWithoutWriterIsRejectedPromptly(t *testing.T) {
+	fifo := filepath.Join(t.TempDir(), "manifest.yaml")
 	require.NoError(t, syscall.Mkfifo(fifo, 0o600))
 	t.Cleanup(func() {
 		if f, err := os.OpenFile(fifo, os.O_RDWR|syscall.O_NONBLOCK, 0); err == nil {
@@ -27,15 +26,15 @@ func TestNewFixHandler_FIFOWithoutWriterIsRejectedPromptly(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		_, err := NewFixHandler(&metav1.FixInfo{ReportFile: fifo})
+		_, err := GetFileString(fifo)
 		done <- err
 	}()
 
 	select {
 	case err := <-done:
 		require.Error(t, err)
-		assert.ErrorIs(t, err, errReportNotRegular)
+		assert.ErrorIs(t, err, ErrManifestNotRegular)
 	case <-time.After(5 * time.Second):
-		t.Fatal("NewFixHandler blocked on a FIFO with no writer")
+		t.Fatal("GetFileString blocked on a FIFO with no writer")
 	}
 }
