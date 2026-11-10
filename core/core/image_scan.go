@@ -1297,6 +1297,35 @@ func (ks *Kubescape) ScanImage(imgScanInfo *ksmetav1.ImageScanInfo, scanInfo *ca
 // and the worker pool the cluster scan already uses, so an image that fails
 // never hides the results of the ones that succeeded.
 //
+// onBeforeImageScanServiceInit is an internal test hook invoked right before image scanner service initialization.
+var onBeforeImageScanServiceInit func()
+
+// onBeforeImageScanJobs is an internal test hook invoked right before image scan jobs begin.
+var onBeforeImageScanJobs func()
+
+// resolveLocalImageTarget checks if an image target specifies a local file or directory
+// via a supported local selector (docker-archive:, oci-archive:, oci-dir:, dir:, file:,
+// local-file:, local-directory:, singularity:, snap:, sbom:, purl:) or an explicit archive file.
+// It returns the underlying filesystem path and true if it identifies a local target.
+func resolveLocalImageTarget(image string) (string, bool) {
+	trimmed := strings.TrimSpace(image)
+	if trimmed == "" {
+		return "", false
+	}
+	if rest, _ := peelGenericImageSelector(trimmed); rest != "" {
+		trimmed = rest
+	}
+	if scheme := detectScheme(trimmed); scheme != "" {
+		rawPath := strings.TrimPrefix(trimmed, scheme+":")
+		return strings.TrimSpace(rawPath), true
+	}
+	lower := strings.ToLower(trimmed)
+	if strings.HasSuffix(lower, ".tar") || strings.HasSuffix(lower, ".tar.gz") || strings.HasSuffix(lower, ".tgz") || strings.HasSuffix(lower, ".sif") {
+		return trimmed, true
+	}
+	return "", false
+}
+
 // Image exceptions (--exceptions) require registry references. A non-registry
 // input (archive, local directory, SBOM) combined with exceptions is reported
 // as a per-image "Image Exceptions/Unsupported Input" error: siblings still
@@ -1306,6 +1335,26 @@ func (ks *Kubescape) ScanImageContext(ctx context.Context, imgScanInfo *ksmetav1
 	images := imgScanInfo.Images
 	if len(images) == 0 {
 		return false, fmt.Errorf("no image provided to scan")
+	}
+
+	scanInfo.SetScanType(cautils.ScanTypeImage)
+
+	// Ensure scanInfo knows about every image target and underlying local file for output safety checks,
+	// while preserving any existing input patterns.
+	for _, img := range imgScanInfo.Images {
+		if !slices.Contains(scanInfo.InputPatterns, img) {
+			scanInfo.InputPatterns = append(scanInfo.InputPatterns, img)
+		}
+		if localPath, isLocal := resolveLocalImageTarget(img); isLocal && localPath != "" {
+			if !slices.Contains(scanInfo.InputPatterns, localPath) {
+				scanInfo.InputPatterns = append(scanInfo.InputPatterns, localPath)
+			}
+		}
+	}
+
+	// Validate output printer configuration and destination safety upfront before pulls and scans start.
+	if err := ValidateOutputPrinters(scanInfo); err != nil {
+		return false, err
 	}
 
 	logger.L().Start(imageScanStartMessage(images))
@@ -1361,6 +1410,9 @@ func (ks *Kubescape) ScanImageContext(ctx context.Context, imgScanInfo *ksmetav1
 		logger.L().StopError(fmt.Sprintf("Invalid Grype database URL '%s': %v", scanInfo.ListingURL, err))
 		return false, err
 	}
+	if onBeforeImageScanServiceInit != nil {
+		onBeforeImageScanServiceInit()
+	}
 	svc, err := imagescan.NewScanServiceWithMatchersAndSources(distCfg, installCfg, imgScanInfo.UseDefaultMatchers, nil, shouldUpdate)
 	if err != nil {
 		logger.L().StopError(fmt.Sprintf("Failed to initialize image scanner: %s", err))
@@ -1375,6 +1427,9 @@ func (ks *Kubescape) ScanImageContext(ctx context.Context, imgScanInfo *ksmetav1
 	jobs := buildImageScanJobs(imgScanInfo, scanInfo, exceptionPolicies)
 
 	resultsHandler := resultshandling.NewResultsHandler(nil, nil, nil)
+	if onBeforeImageScanJobs != nil {
+		onBeforeImageScanJobs()
+	}
 	scanErr := scanImageJobs(ctx, svc, scanInfo.ImageScanConcurrency, jobs, resultsHandler)
 	scanErr = unwrapSingleImageError(scanErr)
 	if len(resultsHandler.ImageScanData) == 0 {
@@ -1382,13 +1437,6 @@ func (ks *Kubescape) ScanImageContext(ctx context.Context, imgScanInfo *ksmetav1
 		return false, scanErr
 	}
 	logger.L().StopSuccess(imageScanSuccessMessage(images, resultsHandler.ImageScanData))
-
-	scanInfo.SetScanType(cautils.ScanTypeImage)
-
-	// Ensure scanInfo knows about the image targets for output safety checks
-	if len(scanInfo.InputPatterns) == 0 && len(imgScanInfo.Images) > 0 {
-		scanInfo.InputPatterns = slices.Clone(imgScanInfo.Images)
-	}
 
 	// Printers open their output files on construction, so they are built only
 	// once at least one image has produced results.

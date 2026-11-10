@@ -13,6 +13,7 @@ import (
 
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils"
+	ksmetav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
 	"github.com/kubescape/kubescape/v4/core/pkg/resourcehandler"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer"
@@ -2178,4 +2179,159 @@ func TestScanContext_SpanLifecycle_SuccessWithPrioritization(t *testing.T) {
 	require.NotNil(t, prioSpan)
 	assert.True(t, !initSpan.EndTime().After(resourcesSpan.StartTime()), "initialization must finish before resource collection starts")
 	assert.True(t, !resourcesSpan.EndTime().After(prioSpan.StartTime()), "resources must finish before prioritization starts")
+}
+
+func TestValidateOutputPrinters_OutputSafetyCollision(t *testing.T) {
+	manifestContent := []byte("apiVersion: v1\nkind: Pod\nmetadata:\n  name: nginx\n")
+
+	t.Run("validates collision without creating or opening output files", func(t *testing.T) {
+		dir := t.TempDir()
+		manifest := filepath.Join(dir, "pod.yaml")
+		require.NoError(t, os.WriteFile(manifest, manifestContent, 0o600))
+
+		scanInfo := &cautils.ScanInfo{
+			ScanType:      cautils.ScanTypeControl,
+			Format:        printer.YamlFormat,
+			Output:        manifest,
+			InputPatterns: []string{manifest},
+		}
+
+		err := ValidateOutputPrinters(scanInfo)
+		require.ErrorContains(t, err, "would overwrite input manifest")
+
+		content, err := os.ReadFile(manifest)
+		require.NoError(t, err)
+		assert.Equal(t, manifestContent, content, "input manifest must be preserved byte-for-byte")
+	})
+
+	t.Run("succeeds for safe non-colliding output without creating file", func(t *testing.T) {
+		dir := t.TempDir()
+		manifest := filepath.Join(dir, "pod.yaml")
+		require.NoError(t, os.WriteFile(manifest, manifestContent, 0o600))
+		safeOutput := filepath.Join(dir, "results.yaml")
+
+		scanInfo := &cautils.ScanInfo{
+			ScanType:      cautils.ScanTypeControl,
+			Format:        printer.YamlFormat,
+			Output:        safeOutput,
+			InputPatterns: []string{manifest},
+		}
+
+		err := ValidateOutputPrinters(scanInfo)
+		require.NoError(t, err)
+
+		// ValidateOutputPrinters must not create the output file
+		assert.NoFileExists(t, safeOutput, "ValidateOutputPrinters must not open or create output files")
+	})
+}
+
+func TestScanImageContext_EarlyValidationRejectsCollisionBeforeScan(t *testing.T) {
+	var scanServiceInitCalled, scanWorkCalled bool
+	origOnInit := onBeforeImageScanServiceInit
+	origOnJobs := onBeforeImageScanJobs
+	onBeforeImageScanServiceInit = func() {
+		scanServiceInitCalled = true
+	}
+	onBeforeImageScanJobs = func() {
+		scanWorkCalled = true
+	}
+	t.Cleanup(func() {
+		onBeforeImageScanServiceInit = origOnInit
+		onBeforeImageScanJobs = origOnJobs
+	})
+
+	t.Run("docker-archive collision aborts before scanner initialization or scan work", func(t *testing.T) {
+		scanServiceInitCalled = false
+		scanWorkCalled = false
+
+		tmpDir := t.TempDir()
+		archiveFile := filepath.Join(tmpDir, "image.tar.json")
+		archiveContent := []byte("dummy-tar-archive-content")
+		require.NoError(t, os.WriteFile(archiveFile, archiveContent, 0o600))
+
+		scanInfo := &cautils.ScanInfo{
+			Format: printer.JsonFormat,
+			Output: archiveFile,
+		}
+		imgScanInfo := &ksmetav1.ImageScanInfo{
+			Images: []string{"docker-archive:" + archiveFile},
+		}
+
+		ks := NewKubescape(context.Background())
+		exceeds, err := ks.ScanImageContext(context.Background(), imgScanInfo, scanInfo)
+		assert.False(t, exceeds)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "would overwrite input image")
+
+		// Assert that collision validation precedes scanner initialization and scan work
+		assert.False(t, scanServiceInitCalled, "image scanner initialization must not be invoked for colliding output")
+		assert.False(t, scanWorkCalled, "image scan work must not be invoked for colliding output")
+
+		// Ensure the archive was preserved and not truncated
+		content, readErr := os.ReadFile(archiveFile)
+		require.NoError(t, readErr)
+		assert.Equal(t, archiveContent, content, "colliding archive file must not be modified or truncated")
+	})
+
+	t.Run("singularity selector resolves to underlying file and aborts before scan", func(t *testing.T) {
+		scanServiceInitCalled = false
+		scanWorkCalled = false
+
+		tmpDir := t.TempDir()
+		sifFile := filepath.Join(tmpDir, "image.sif.json")
+		sifContent := []byte("dummy-sif-content")
+		require.NoError(t, os.WriteFile(sifFile, sifContent, 0o600))
+
+		scanInfo := &cautils.ScanInfo{
+			Format: printer.JsonFormat,
+			Output: sifFile,
+		}
+		imgScanInfo := &ksmetav1.ImageScanInfo{
+			Images: []string{"singularity:" + sifFile},
+		}
+
+		ks := NewKubescape(context.Background())
+		exceeds, err := ks.ScanImageContext(context.Background(), imgScanInfo, scanInfo)
+		assert.False(t, exceeds)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "would overwrite input image")
+
+		assert.False(t, scanServiceInitCalled, "image scanner initialization must not be invoked for colliding output")
+		assert.False(t, scanWorkCalled, "image scan work must not be invoked for colliding output")
+
+		content, readErr := os.ReadFile(sifFile)
+		require.NoError(t, readErr)
+		assert.Equal(t, sifContent, content, "colliding singularity sif file must not be modified or truncated")
+	})
+
+	t.Run("preserves existing non-empty InputPatterns while adding image targets", func(t *testing.T) {
+		scanServiceInitCalled = false
+		scanWorkCalled = false
+
+		tmpDir := t.TempDir()
+		archiveFile := filepath.Join(tmpDir, "image.tar.json")
+		archiveContent := []byte("dummy-tar-archive-content")
+		require.NoError(t, os.WriteFile(archiveFile, archiveContent, 0o600))
+
+		scanInfo := &cautils.ScanInfo{
+			Format:        printer.JsonFormat,
+			Output:        archiveFile,
+			InputPatterns: []string{"existing-manifest.yaml"},
+		}
+		imgScanInfo := &ksmetav1.ImageScanInfo{
+			Images: []string{"docker-archive:" + archiveFile},
+		}
+
+		ks := NewKubescape(context.Background())
+		exceeds, err := ks.ScanImageContext(context.Background(), imgScanInfo, scanInfo)
+		assert.False(t, exceeds)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "would overwrite input image")
+
+		assert.False(t, scanServiceInitCalled)
+		assert.False(t, scanWorkCalled)
+
+		// Assert existing patterns were retained
+		assert.Contains(t, scanInfo.InputPatterns, "existing-manifest.yaml", "pre-existing input patterns must be preserved")
+	})
 }
