@@ -531,7 +531,7 @@ func runRemediation(ctx context.Context, reportBytes []byte, req remediationRequ
 			if err != nil {
 				return nil, err
 			}
-			patched, expressions, err := (fixhandler.YAMLTreeEditor{}).ApplyFixes(ctx, fileAsString, fileFixes[fp])
+			patched, expressions, err := fixhandler.ApplyFixesInPlace(ctx, fp, fileAsString, fileFixes[fp])
 			if err != nil {
 				return nil, fmt.Errorf("failed to compute fix for %s: %w", fp, err)
 			}
