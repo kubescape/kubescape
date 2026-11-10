@@ -71,4 +71,12 @@ func TestCalculateKeepsScoringAfterUnscorableFramework(t *testing.T) {
 	passingSummary := report.SummaryDetails.Controls["C-0003"]
 	require.NotNil(t, passingSummary.ComplianceScore, "passing control has no compliance score")
 	assert.Equal(t, float32(100), passingSummary.GetComplianceScore())
+
+	// The scan builds the namespace summaries from these compliance scores
+	// right after scoring. A control without a score would count as 100 there.
+	summaries := cautils.BuildNamespaceSummariesFromCatalog(report.SummaryDetails.Controls, opaSessionObj.GetCatalog())
+	require.Len(t, summaries, 1)
+	assert.Equal(t, "default", summaries[0].Namespace)
+	// failing 0, skipped 0, passing 100
+	assert.InDelta(t, 100.0/3, summaries[0].ComplianceScore, 0.0001)
 }
