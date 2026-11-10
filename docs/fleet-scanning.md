@@ -9,7 +9,7 @@ clusters disagree on, and which clusters it could not scan and why.
 ```bash
 kubescape scan framework nsa \
   --kube-contexts prod,staging,dr \
-  --output report.json \
+  --output report.json --format json \
   --fleet-report fleet.json
 ```
 
@@ -56,7 +56,7 @@ spec:
 ```
 
 ```bash
-kubescape scan framework nsa --fleet-config fleet.yaml
+kubescape scan framework nsa --format json --fleet-config fleet.yaml
 ```
 
 Each field sets the matching flag: `contexts` is `--kube-contexts`,
