@@ -187,6 +187,13 @@ func loadReport(path string) (*scanReport, error) {
 	if err != nil {
 		return nil, err
 	}
+	return parseReport(data)
+}
+
+// parseReport validates and parses the JSON bytes of one scan report. It is
+// the shared tail of loadReport and ComputeFromJSON, so a report held in memory
+// is held to exactly the checks a report file is.
+func parseReport(data []byte) (*scanReport, error) {
 	trimmed := bytes.TrimSpace(data)
 	if len(trimmed) == 0 || trimmed[0] != '{' {
 		return nil, fmt.Errorf("invalid report: expected a JSON object")
