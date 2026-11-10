@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/armosec/armoapi-go/armotypes"
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	metav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
@@ -328,6 +329,45 @@ func TestFix_OutputPatchInvalidDestinationLeavesNothing(t *testing.T) {
 	require.NoError(t, readErr)
 	assert.Empty(t, entries)
 	assert.Equal(t, before, manifestContent(t, dir))
+}
+
+// TestFix_OutputPatchInvalidDestinationIsRefusedBeforeKustomizeWrites: a report
+// with a fixable manifest and a Helm resource, exported with both
+// --output-kustomize and --output-patch, must refuse an unusable patch path
+// before the Kustomize directory is written, not after.
+func TestFix_OutputPatchInvalidDestinationIsRefusedBeforeKustomizeWrites(t *testing.T) {
+	stubNonInteractiveStdin(t)
+	dir := t.TempDir()
+	helmReport := readReportFile(t, buildFixableHelmReport(t, dir))
+	manifestReport := readReportFile(t, buildFixableReport(t, dir))
+	manifestReport.Resources = append(manifestReport.Resources, helmReport.Resources...)
+	manifestReport.Results = append(manifestReport.Results, helmReport.Results...)
+	reportPath := writeReportFile(t, dir, manifestReport)
+	before := manifestContent(t, dir)
+	kustDir := filepath.Join(t.TempDir(), "kust-output")
+	patchPath := filepath.Join(t.TempDir(), "missing", "remediation.patch")
+
+	ks := &Kubescape{Ctx: context.Background()}
+	err := ks.Fix(&metav1.FixInfo{
+		ReportFile:       reportPath,
+		KustomizeDir:     kustDir,
+		OutputPatch:      patchPath,
+		NoConfirm:        true,
+		HelmValueOptions: cautils.HelmValueOptions{ValueFiles: []string{filepath.Join(dir, "values.yaml")}},
+	})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "cannot write the patch")
+	assert.NoDirExists(t, kustDir, "the Kustomize output must not be written when the patch path is unusable")
+	assert.NoFileExists(t, patchPath)
+	assert.Equal(t, before, manifestContent(t, dir))
+}
+
+func readReportFile(t *testing.T, path string) *reporthandlingv2.PostureReport {
+	t.Helper()
+	var report reporthandlingv2.PostureReport
+	require.NoError(t, json.Unmarshal([]byte(fileContent(t, path)), &report))
+	return &report
 }
 
 // TestFix_OutputPatchManifestGoneSinceTheScan: the planner skips a manifest

@@ -65,6 +65,16 @@ func (ks *Kubescape) Fix(fixInfo *metav1.FixInfo) error {
 	// path below, since we do not auto-edit chart templates or values.yaml.
 	handler.PrintHelmSuggestions(helmSuggestions)
 
+	// A report can hold both manifests and Helm resources, so the Kustomize
+	// output below can be written before writePatch runs. Refuse an unusable
+	// patch destination first, so nothing is written when the export is going
+	// to fail. writePatch checks it again; it does not rely on this.
+	if fixInfo.OutputPatch != "" && len(resourcesToFix) > 0 && !handler.IsClusterReport() {
+		if err := handler.CheckPatchDestination(fixInfo.OutputPatch, resourcesToFix, fixInfo.NoConfirm); err != nil {
+			return err
+		}
+	}
+
 	// Emit Kustomize JSON 6902 patches when --output-kustomize is given.
 	// This is a machine-applicable companion to PrintHelmSuggestions: the
 	// generated patches can be applied via:

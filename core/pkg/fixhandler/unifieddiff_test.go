@@ -35,7 +35,7 @@ func applyWithGit(t *testing.T, dir, patch string) {
 // applyWithPatch applies patch inside dir with patch -p1.
 func applyWithPatch(t *testing.T, dir, patch string) {
 	t.Helper()
-	cmd := exec.Command("patch", "-p1", "--no-backup-if-mismatch")
+	cmd := exec.Command("patch", "-p1")
 	cmd.Dir = dir
 	cmd.Stdin = strings.NewReader(patch)
 	out, err := cmd.CombinedOutput()
