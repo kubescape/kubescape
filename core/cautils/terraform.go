@@ -2,9 +2,13 @@ package cautils
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
+	"syscall"
 
 	"github.com/hashicorp/hcl/v2"
 	"github.com/hashicorp/hcl/v2/hclparse"
@@ -15,6 +19,85 @@ import (
 	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
 	"github.com/zclconf/go-cty/cty"
 )
+
+const (
+	// maxTerraformFileBytes is the default fallback limit matching DefaultMaxFileSize.
+	maxTerraformFileBytes = DefaultMaxFileSize
+)
+
+var (
+	// ErrTerraformFileNotRegular is returned when a Terraform file is not a regular file.
+	ErrTerraformFileNotRegular = errors.New("terraform file is not a regular file")
+	// ErrTerraformFileTooLarge is returned when a Terraform file exceeds the maximum allowed size.
+	ErrTerraformFileTooLarge = errors.New("terraform file exceeds maximum size limit")
+)
+
+// openTerraformFile opens path for reading and rejects anything but a regular file.
+// A pre-open stat check prevents opening device nodes (e.g. tape or character devices).
+// O_NONBLOCK keeps opening a FIFO from waiting for a writer, and descriptor-based
+// validation ensures a path swapped after stat cannot slip past.
+func openTerraformFile(path string) (*os.File, error) {
+	if strings.TrimSpace(path) == "" {
+		return nil, os.ErrNotExist
+	}
+	cleaned := filepath.Clean(path)
+	statInfo, err := os.Stat(cleaned)
+	if err != nil {
+		return nil, err
+	}
+	if statInfo.IsDir() {
+		return nil, fmt.Errorf("%q is a directory, not a file: %w", path, ErrTerraformFileNotRegular)
+	}
+	if !statInfo.Mode().IsRegular() {
+		return nil, fmt.Errorf("%w: %q", ErrTerraformFileNotRegular, path)
+	}
+
+	file, err := os.OpenFile(cleaned, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return nil, err
+	}
+	info, err := file.Stat()
+	if err != nil {
+		file.Close()
+		return nil, err
+	}
+	if info.IsDir() {
+		file.Close()
+		return nil, fmt.Errorf("%q is a directory, not a file: %w", path, ErrTerraformFileNotRegular)
+	}
+	if !info.Mode().IsRegular() {
+		file.Close()
+		return nil, fmt.Errorf("%w: %q", ErrTerraformFileNotRegular, path)
+	}
+	return file, nil
+}
+
+// readTerraformFile returns the contents of the Terraform file at path, reading at most
+// getMaxFileSize() bytes (configurable via KUBESCAPE_MAX_FILE_SIZE, defaulting to
+// DefaultMaxFileSize) so that reading remains bounded.
+func readTerraformFile(path string) ([]byte, error) {
+	file, err := openTerraformFile(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	limit := getMaxFileSize()
+
+	info, err := file.Stat()
+	if err == nil && info.Size() > limit {
+		return nil, fmt.Errorf("%w: %q exceeds the %d byte limit", ErrTerraformFileTooLarge, path, limit)
+	}
+
+	data, err := io.ReadAll(io.LimitReader(file, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > limit {
+		return nil, fmt.Errorf("%w: %q exceeds the %d byte limit", ErrTerraformFileTooLarge, path, limit)
+	}
+	return data, nil
+}
 
 func isTerraformDirectory(path string) bool {
 	if !isDir(path) {
@@ -69,7 +152,7 @@ func (td *TerraformDirectory) GetWorkloads(path string) (map[string][]workloadin
 			logger.L().Warning("Skipping Terraform file outside workspace root", helpers.String("path", f), helpers.String("workspace", td.workspaceDir))
 			continue
 		}
-		content, readErr := os.ReadFile(f)
+		content, readErr := readTerraformFile(f)
 		if readErr != nil {
 			errs = append(errs, fmt.Errorf("reading %s: %w", f, readErr))
 			continue
