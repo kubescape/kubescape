@@ -3,7 +3,6 @@ package getter
 import (
 	"context"
 	"fmt"
-	"regexp"
 	"slices"
 	"strings"
 
@@ -11,6 +10,7 @@ import (
 	"github.com/armosec/armoapi-go/identifiers"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/opa-utils/exceptions"
 )
 
 const exceptionKeySeparator = "/"
@@ -208,14 +208,15 @@ func coveredPostureScopes(exceptions []armotypes.PostureExceptionPolicy) (covere
 }
 
 // scopeMatcher compares posture-policy scopes the way the exception processor does
-// at evaluation time: a case-insensitive literal or anchored case-insensitive
-// pattern. Compiled patterns are reused across the whole merge.
+// at evaluation time: a case-insensitive literal or a case-insensitive pattern that
+// has to match the whole value. It uses the processor's own comparison, which also
+// caches compiled patterns across the whole merge.
 type scopeMatcher struct {
-	patterns map[string]*regexp.Regexp
+	processor *exceptions.Processor
 }
 
 func newScopeMatcher() *scopeMatcher {
-	return &scopeMatcher{patterns: make(map[string]*regexp.Regexp)}
+	return &scopeMatcher{processor: exceptions.NewProcessor()}
 }
 
 // coveredBy reports whether any primary scope already applies everywhere policy does.
@@ -242,17 +243,10 @@ func (m *scopeMatcher) covers(primary, crd string) bool {
 	if crd == "" {
 		return false
 	}
-	if strings.EqualFold(primary, crd) {
-		return true
-	}
-	pattern, compiled := m.patterns[primary]
-	if !compiled {
-		// A pattern that does not compile is cached as nil and read as a
-		// non-match, which is how the exception processor treats it.
-		pattern, _ = regexp.Compile("(?i)^" + primary + "$")
-		m.patterns[primary] = pattern
-	}
-	return pattern != nil && pattern.MatchString(crd)
+	// Use the processor's own comparison (it is not specific to control IDs) so a
+	// primary scope only covers a CRD one it also matches at evaluation time. The
+	// whole value has to match: "a|b" covers "a" and "b" but not "a-v1".
+	return strings.EqualFold(primary, crd) || m.processor.RegexCompareControlID(primary, crd)
 }
 
 func designatorDedupKey(designator identifiers.PortalDesignator) string {

@@ -1227,8 +1227,8 @@ github.com/kubescape/k8s-interface v0.0.221 h1:la69jLhCkEcOokffXGR5WUQU9N7Cv2zmk
 github.com/kubescape/k8s-interface v0.0.221/go.mod h1:sOZm48DJn8QO1cWRbuNsPPsk0TxLzm13Ws85EkiH0X0=
 github.com/kubescape/kubescape/v3 v3.0.4 h1:gZ5d8QMxLYZQ6Yz9wRvGcDQlBUIV+v/Y/41g56/YDy8=
 github.com/kubescape/kubescape/v3 v3.0.4/go.mod h1:upPCVTCRT3+LuZ1bawGtjreRmr/Xa+LT0fHtPzlylRU=
-github.com/kubescape/opa-utils v0.0.315 h1:43b6beRDo74nMztOFUBLWV0Vr2T0Ugap7/goU3JPe0Q=
-github.com/kubescape/opa-utils v0.0.315/go.mod h1:dWNcjmiTwGYlNmclXvDvgH7UlLdpDvmEc9T7ACTqLo0=
+github.com/kubescape/opa-utils v0.0.317 h1:2vdsA5gEJ3/NwRjhTtzC+gM5yhBAZx6W7G8Ok5kowoU=
+github.com/kubescape/opa-utils v0.0.317/go.mod h1:dWNcjmiTwGYlNmclXvDvgH7UlLdpDvmEc9T7ACTqLo0=
 github.com/kubescape/rbac-utils v0.0.22 h1:AxKEU2iK+/yZNleJSh7caWhz4wROnceCCmxT4riQlmY=
 github.com/kubescape/rbac-utils v0.0.22/go.mod h1:t57AhSrjuNGQ+mpZWQM/hBzrCOeKBDHegFoVo4tbikQ=
 github.com/kubescape/regolibrary v1.0.317-0.20240320124840-1d84ac7186ea h1:hLUe+1bdhiBD7xM/jliQozVd1NLYn1afQLxl5trQdPk=
