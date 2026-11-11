@@ -1,0 +1,13 @@
+# create is narrowed to a name. A plain create is authorized with an empty
+# name, which the list does not hold, and nothing grants patch, so server-side
+# apply cannot create the volume either. The subject cannot create any
+# PersistentVolume.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: named-pv-creator
+rules:
+- apiGroups: [""]
+  resources: ["persistentvolumes"]
+  resourceNames: ["data-pv"]
+  verbs: ["create", "get"]

@@ -21,6 +21,7 @@ deny contains msga if {
 	rolebinding.kind == "ClusterRoleBinding"
 
 	rule := role.rules[p]
+	creates_through(rule, role)
 	subject := rolebinding.subjects[k]
 	is_same_subjects(subjectVector, subject)
 	rule_path := sprintf("relatedObjects[%d].rules[%d]", [i, p])
@@ -48,6 +49,24 @@ deny contains msga if {
 			"externalObjects": subjectVector,
 		},
 	}
+}
+
+# A plain create carries no object name when the authorizer runs, and
+# ResourceNameMatches compares a non-empty resourceNames list with that empty
+# name, so an entry narrowed to real names does not authorize it. Server-side
+# apply is the exception: it creates a missing object through a patch, and the
+# API server authorizes that create with the object's name, so the narrowed
+# entry still creates the named PersistentVolume when the role can also patch
+# PersistentVolumes.
+creates_through(rule, _) if count(object.get(rule, "resourceNames", [])) == 0
+
+creates_through(rule, _) if "" in rule.resourceNames
+
+creates_through(_, role) if {
+	patch_rule := role.rules[_]
+	patch_rule.apiGroups[_] in {"", "*"}
+	patch_rule.resources[_] in {"persistentvolumes", "*"}
+	patch_rule.verbs[_] in {"patch", "*"}
 }
 
 is_same_namespace(role, rolebinding) if {
