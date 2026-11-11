@@ -76,19 +76,11 @@ func (ks *Kubescape) rescanForVerification(ctx context.Context, req verifyRescan
 		verifyScanInfoHook(scanInfo)
 	}
 
-	results, err := ks.ScanContext(ctx, scanInfo, cautils.BuildPolicyIdentifiers(req.ControlIDs, apisv1.KindControl))
+	report, err := ks.ScanToReport(ctx, scanInfo, cautils.BuildPolicyIdentifiers(req.ControlIDs, apisv1.KindControl))
 	if err != nil {
 		return verifyRescanResult{}, err
 	}
-	// Not results.ToJson(), which leaves the coverage out when the scan was
-	// clean: the verifier needs it to tell a complete scan from one that says
-	// nothing about itself.
-	coverage := &results.GetData().ScanCoverage
-	reportJSON, err := remediationverify.ReportJSON(results.GetResults(), coverage)
-	if err != nil {
-		return verifyRescanResult{}, fmt.Errorf("failed to serialize the rescan report: %w", err)
-	}
-	return verifyRescanResult{ReportJSON: reportJSON, Degraded: coverage.Degraded}, nil
+	return verifyRescanResult{ReportJSON: report.JSON, Degraded: report.Degraded}, nil
 }
 
 // verificationItems are the findings the fixer remediated, each once, and how
