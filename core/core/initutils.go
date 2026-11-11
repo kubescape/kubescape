@@ -495,7 +495,9 @@ func GetUIPrinter(ctx context.Context, scanInfo *cautils.ScanInfo, clusterName s
 	if helpers.ToLevel(logger.L().GetLevel()) >= helpers.WarningLevel || (scanInfo.Format != "" && scanInfo.Output == "") {
 		p = &printerv2.SilentPrinter{}
 	} else {
-		p = printerv2.NewPrettyPrinter(scanInfo.VerboseMode, scanInfo.FormatVersion, scanInfo.PrintAttackTree, cautils.ViewTypes(scanInfo.View), scanInfo.ScanType, scanInfo.InputPatterns, clusterName, scanInfo.ShowEvidence, scanInfo.ShowSecrets)
+		prettyPrinter := printerv2.NewPrettyPrinter(scanInfo.VerboseMode, scanInfo.FormatVersion, scanInfo.PrintAttackTree, cautils.ViewTypes(scanInfo.View), scanInfo.ScanType, scanInfo.InputPatterns, clusterName, scanInfo.ShowEvidence, scanInfo.ShowSecrets)
+		prettyPrinter.SetAnonymized(scanInfo.Hide || scanInfo.EncryptionEnabled)
+		p = prettyPrinter
 		if err := p.SetWriter(ctx, os.Stdout.Name()); err != nil {
 			logger.L().Ctx(ctx).Warning("failed to configure terminal output", helpers.Error(err))
 			return &printerv2.SilentPrinter{}

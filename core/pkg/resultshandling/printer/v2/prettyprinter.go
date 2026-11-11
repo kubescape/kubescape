@@ -40,6 +40,9 @@ type PrettyPrinter struct {
 	printAttackTree bool
 	showEvidence    bool
 	showSecrets     bool
+	// anonymized is set when --hide or --encrypt replaced the names in the session,
+	// so a name printed from it no longer exists on the cluster.
+	anonymized bool
 }
 
 func NewPrettyPrinter(verboseMode bool, formatVersion string, attackTree bool, viewType cautils.ViewTypes, scanType cautils.ScanTypes, inputPatterns []string, clusterName string, showEvidence bool, showSecrets bool) *PrettyPrinter {
@@ -56,6 +59,13 @@ func NewPrettyPrinter(verboseMode bool, formatVersion string, attackTree bool, v
 	}
 
 	return prettyPrinter
+}
+
+// SetAnonymized tells the printer that the session was anonymized by --hide or
+// --encrypt, so resource names, namespaces and the context name in it are
+// pseudonyms and cannot be put in a kubectl command.
+func (pp *PrettyPrinter) SetAnonymized(anonymized bool) {
+	pp.anonymized = anonymized
 }
 
 func (pp *PrettyPrinter) SetMainPrinter() {

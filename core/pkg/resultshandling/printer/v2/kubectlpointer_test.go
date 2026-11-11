@@ -2,9 +2,11 @@ package printer
 
 import (
 	"bytes"
+	"os"
 	"testing"
 
 	"github.com/armosec/armoapi-go/armotypes"
+	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/pathparse"
@@ -293,7 +295,7 @@ func TestResourceTableKubectlPointers(t *testing.T) {
 		}
 		s.Metadata = &v2.Metadata{}
 		s.Metadata.ScanMetadata.ScanningTarget = v2.Cluster
-		s.Metadata.ClusterMetadata.ContextName = "minikube"
+		s.Metadata.ContextMetadata.ClusterContextMetadata = &v2.ClusterMetadata{ContextName: "minikube"}
 		return s
 	}
 
@@ -302,6 +304,41 @@ func TestResourceTableKubectlPointers(t *testing.T) {
 		assert.Contains(t, out, "To see the current values on the cluster:")
 		assert.Contains(t, out, want)
 		assert.Contains(t, out, fixPath, "the path itself is still in the table")
+	})
+
+	t.Run("a cluster scan whose names were anonymized", func(t *testing.T) {
+		f, err := os.CreateTemp(t.TempDir(), "anonymized-*.txt")
+		require.NoError(t, err)
+		pp := &PrettyPrinter{writer: f, showEvidence: true}
+		pp.SetAnonymized(true)
+		pp.resourceTable(clusterSession(t))
+		require.NoError(t, f.Close())
+		out, err := os.ReadFile(f.Name())
+		require.NoError(t, err)
+		assert.NotContains(t, string(out), "kubectl", "a pseudonym is not a name on the cluster")
+	})
+
+	t.Run("the context the scan recorded, not the ambient one", func(t *testing.T) {
+		previous := k8sinterface.GetContextName()
+		k8sinterface.SetClusterContextName("ambient")
+		t.Cleanup(func() { k8sinterface.SetClusterContextName(previous) })
+
+		out := renderResourceTable(t, clusterSession(t), true)
+		assert.Contains(t, out, "--context minikube")
+		assert.NotContains(t, out, "--context ambient")
+	})
+
+	t.Run("the deprecated context field is not read", func(t *testing.T) {
+		previous := k8sinterface.GetContextName()
+		k8sinterface.SetClusterContextName("ambient")
+		t.Cleanup(func() { k8sinterface.SetClusterContextName(previous) })
+
+		s := clusterSession(t)
+		s.Metadata.ContextMetadata.ClusterContextMetadata = nil
+		s.Metadata.ClusterMetadata.ContextName = "deprecated"
+		out := renderResourceTable(t, s, true)
+		assert.Contains(t, out, "--context ambient", "without a recorded context the global one is the fallback")
+		assert.NotContains(t, out, "deprecated")
 	})
 
 	t.Run("a cluster scan without --show-evidence", func(t *testing.T) {

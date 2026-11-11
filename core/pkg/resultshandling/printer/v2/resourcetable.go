@@ -127,11 +127,10 @@ func (prettyPrinter *PrettyPrinter) resourceTable(opaSessionObj *cautils.OPASess
 
 		// A cluster scan has no manifest to point into, so each path gets the
 		// command that prints it on the cluster instead of a file and line.
-		if prettyPrinter.showEvidence && isClusterScan(opaSessionObj) {
-			var kubeContext string
-			if opaSessionObj.Metadata != nil {
-				kubeContext = opaSessionObj.Metadata.ClusterMetadata.ContextName
-			}
+		// Under --hide and --encrypt the names are pseudonyms, so there is nothing
+		// on the cluster to point at.
+		if prettyPrinter.showEvidence && !prettyPrinter.anonymized && isClusterScan(opaSessionObj) {
+			kubeContext := scanContextName(opaSessionObj)
 			if commands := kubectlPointers(result.ListControls(), &opaSessionObj.Report.SummaryDetails, resource, kubeContext, prettyPrinter.showSecrets); len(commands) > 0 {
 				fmt.Fprintf(prettyPrinter.writer, "\nTo see the current values on the cluster:\n")
 				for _, command := range commands {
