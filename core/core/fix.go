@@ -39,6 +39,18 @@ var (
 )
 
 func (ks *Kubescape) Fix(fixInfo *metav1.FixInfo) error {
+	if fixInfo == nil {
+		return errors.New("uninitialized fix parameters")
+	}
+	if strings.TrimSpace(fixInfo.ReportFile) == "" {
+		return errors.New("report output file is required")
+	}
+	if err := fixInfo.ValidateOutputDir(); err != nil {
+		return err
+	}
+	if err := fixInfo.ValidateKustomizeDir(); err != nil {
+		return err
+	}
 	// Before anything is read: a patch or a verification combined with another
 	// output mode must fail, not quietly do one of the two.
 	if err := fixInfo.ValidateOutputPatch(); err != nil {
@@ -47,6 +59,16 @@ func (ks *Kubescape) Fix(fixInfo *metav1.FixInfo) error {
 	if err := fixInfo.ValidateVerify(); err != nil {
 		return err
 	}
+
+	fixInfo.ReportFile = strings.TrimSpace(fixInfo.ReportFile)
+	fixInfo.OutputDir = strings.TrimSpace(fixInfo.OutputDir)
+	fixInfo.OutputPatch = strings.TrimSpace(fixInfo.OutputPatch)
+	fixInfo.KustomizeDir = strings.TrimSpace(fixInfo.KustomizeDir)
+	fixInfo.PostRendererDir = strings.TrimSpace(fixInfo.PostRendererDir)
+	fixInfo.BasePath = strings.TrimSpace(fixInfo.BasePath)
+	fixInfo.ContainerProfilePath = strings.TrimSpace(fixInfo.ContainerProfilePath)
+	fixInfo.ControlsConfig = strings.TrimSpace(fixInfo.ControlsConfig)
+
 	logger.L().Info("Reading report file...")
 	handler, err := fixhandler.NewFixHandler(fixInfo)
 	if err != nil {

@@ -127,26 +127,68 @@ func GetFixCmd(ks meta.IKubescape) *cobra.Command {
 			if len(args) < 1 {
 				return errors.New("report output file is required")
 			}
+			if strings.TrimSpace(args[0]) == "" {
+				return errors.New("report output file cannot be empty")
+			}
 			if ks == nil {
 				return errors.New("uninitialized kubescape interface")
 			}
-			fixInfo.ReportFile = args[0]
+			fixInfo.ReportFile = strings.TrimSpace(args[0])
 			fixInfo.Writer = cmd.OutOrStdout()
 
 			if err := validateControlSelection(&fixInfo); err != nil {
 				return err
+			}
+			if cmd.Flags().Changed("output-dir") {
+				trimmed := strings.TrimSpace(fixInfo.OutputDir)
+				if trimmed == "" {
+					return errors.New("--output-dir needs a directory path")
+				}
+				fixInfo.OutputDir = trimmed
+			}
+			if cmd.Flags().Changed("output-kustomize") {
+				trimmed := strings.TrimSpace(fixInfo.KustomizeDir)
+				if trimmed == "" {
+					return errors.New("--output-kustomize needs a directory path")
+				}
+				fixInfo.KustomizeDir = trimmed
+			}
+			if cmd.Flags().Changed("output-post-renderer") {
+				trimmed := strings.TrimSpace(fixInfo.PostRendererDir)
+				if trimmed == "" {
+					return errors.New("--output-post-renderer needs a directory path")
+				}
+				fixInfo.PostRendererDir = trimmed
 			}
 			// The post-renderer only applies the Kustomize patches, so without
 			// them fix would carry on as if the flag had not been passed.
 			if fixInfo.PostRendererDir != "" && fixInfo.KustomizeDir == "" {
 				return errors.New("--output-post-renderer requires --output-kustomize")
 			}
+			if cmd.Flags().Changed("base-path") {
+				trimmed := strings.TrimSpace(fixInfo.BasePath)
+				if trimmed == "" {
+					return errors.New("--base-path needs a directory path")
+				}
+				fixInfo.BasePath = trimmed
+			}
+			if cmd.Flags().Changed("container-profile") {
+				trimmed := strings.TrimSpace(fixInfo.ContainerProfilePath)
+				if trimmed == "" {
+					return errors.New("--container-profile needs a file path")
+				}
+				fixInfo.ContainerProfilePath = trimmed
+			}
 			if err := validateOutputPatch(&fixInfo, cmd.Flags().Changed("output-patch")); err != nil {
 				return err
 			}
 
-			if cmd.Flags().Changed("controls-config") && strings.TrimSpace(fixInfo.ControlsConfig) == "" {
-				return errors.New("--controls-config needs a file path")
+			if cmd.Flags().Changed("controls-config") {
+				trimmed := strings.TrimSpace(fixInfo.ControlsConfig)
+				if trimmed == "" {
+					return errors.New("--controls-config needs a file path")
+				}
+				fixInfo.ControlsConfig = trimmed
 			}
 			if err := fixInfo.ValidateVerify(); err != nil {
 				return err
@@ -186,8 +228,12 @@ func GetFixCmd(ks meta.IKubescape) *cobra.Command {
 // PATCH unset. Taken as "not given" it would fall through to fixing the
 // manifests in place, the opposite of what was asked for.
 func validateOutputPatch(fixInfo *metav1.FixInfo, flagPassed bool) error {
-	if flagPassed && strings.TrimSpace(fixInfo.OutputPatch) == "" {
-		return errors.New("--output-patch needs a file path")
+	if flagPassed {
+		trimmed := strings.TrimSpace(fixInfo.OutputPatch)
+		if trimmed == "" {
+			return errors.New("--output-patch needs a file path")
+		}
+		fixInfo.OutputPatch = trimmed
 	}
 	return fixInfo.ValidateOutputPatch()
 }

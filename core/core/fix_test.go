@@ -569,6 +569,29 @@ func TestFix_OutputDirDryRunWritesNothing(t *testing.T) {
 	assert.NoDirExists(t, outputDir)
 	assert.Equal(t, before, manifestContent(t, dir))
 }
+
+func TestFix_WhitespaceOutputDirRefused(t *testing.T) {
+	dir := t.TempDir()
+	reportPath := buildFixableReport(t, dir)
+	before := manifestContent(t, dir)
+
+	ks := &Kubescape{Ctx: context.Background()}
+	err := ks.Fix(&metav1.FixInfo{ReportFile: reportPath, OutputDir: "   "})
+	require.Error(t, err)
+	assert.EqualError(t, err, "--output-dir needs a directory path")
+	assert.Equal(t, before, manifestContent(t, dir), "the scanned manifest must not be modified")
+}
+
+func TestFix_EmptyReportFileRefused(t *testing.T) {
+	ks := &Kubescape{Ctx: context.Background()}
+	err := ks.Fix(&metav1.FixInfo{ReportFile: "   "})
+	require.Error(t, err)
+	assert.EqualError(t, err, "report output file is required")
+
+	err = ks.Fix(nil)
+	require.Error(t, err)
+	assert.EqualError(t, err, "uninitialized fix parameters")
+}
 func buildMixedFixableReport(t *testing.T, dir string) string {
 	t.Helper()
 

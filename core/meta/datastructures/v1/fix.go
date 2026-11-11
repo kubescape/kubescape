@@ -96,6 +96,30 @@ func (f *FixInfo) ValidateOutputPatch() error {
 	return nil
 }
 
+// ValidateOutputDir refuses empty or blank directory paths when OutputDir is set.
+// It is nil when OutputDir is empty.
+func (f *FixInfo) ValidateOutputDir() error {
+	if f.OutputDir == "" {
+		return nil
+	}
+	if strings.TrimSpace(f.OutputDir) == "" {
+		return errors.New("--output-dir needs a directory path")
+	}
+	return nil
+}
+
+// ValidateKustomizeDir refuses empty or blank directory paths when KustomizeDir is set.
+// It is nil when KustomizeDir is empty.
+func (f *FixInfo) ValidateKustomizeDir() error {
+	if f.KustomizeDir == "" {
+		return nil
+	}
+	if strings.TrimSpace(f.KustomizeDir) == "" {
+		return errors.New("--output-kustomize needs a directory path")
+	}
+	return nil
+}
+
 // ValidateVerify refuses the combinations in which Verify has nothing to
 // verify: DryRun, OutputDir and OutputPatch all leave the manifests as they
 // were, so a rescan would find every finding as it was and say nothing about the

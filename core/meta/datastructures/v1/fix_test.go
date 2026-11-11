@@ -56,3 +56,84 @@ func TestFixInfoOutputPatchAndVerifyAreRefusedFromBothSides(t *testing.T) {
 	assert.NoError(t, info.ValidateOutputPatch(), "a patch on its own is valid")
 	assert.Error(t, info.ValidateVerify(), "but not together with --verify")
 }
+
+func TestFixInfoValidateOutputDir(t *testing.T) {
+	tests := []struct {
+		name      string
+		outputDir string
+		wantErr   string
+	}{
+		{name: "empty output-dir is allowed when not set", outputDir: ""},
+		{name: "valid output-dir", outputDir: "/tmp/fixed"},
+		{name: "relative output-dir", outputDir: "./fixed"},
+		{name: "whitespace output-dir is refused", outputDir: "   ", wantErr: "--output-dir needs a directory path"},
+		{name: "tab whitespace output-dir is refused", outputDir: "\t", wantErr: "--output-dir needs a directory path"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			info := FixInfo{OutputDir: tt.outputDir}
+			err := info.ValidateOutputDir()
+			if tt.wantErr == "" {
+				assert.NoError(t, err)
+			} else {
+				require.EqualError(t, err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestFixInfoValidateKustomizeDir(t *testing.T) {
+	tests := []struct {
+		name         string
+		kustomizeDir string
+		wantErr      string
+	}{
+		{name: "empty kustomize-dir is allowed when not set", kustomizeDir: ""},
+		{name: "valid kustomize-dir", kustomizeDir: "/tmp/kust"},
+		{name: "relative kustomize-dir", kustomizeDir: "./kust"},
+		{name: "whitespace kustomize-dir is refused", kustomizeDir: "   ", wantErr: "--output-kustomize needs a directory path"},
+		{name: "tab whitespace kustomize-dir is refused", kustomizeDir: "\t", wantErr: "--output-kustomize needs a directory path"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			info := FixInfo{KustomizeDir: tt.kustomizeDir}
+			err := info.ValidateKustomizeDir()
+			if tt.wantErr == "" {
+				assert.NoError(t, err)
+			} else {
+				require.EqualError(t, err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestFixInfoValidateOutputPatch(t *testing.T) {
+	tests := []struct {
+		name    string
+		info    FixInfo
+		wantErr string
+	}{
+		{name: "empty patch is allowed when not set", info: FixInfo{}},
+		{name: "valid patch", info: FixInfo{OutputPatch: "remediation.patch"}},
+		{name: "whitespace patch is refused", info: FixInfo{OutputPatch: "   "}, wantErr: "--output-patch needs a file path"},
+		{name: "patch combined with output-dir", info: FixInfo{OutputPatch: "remediation.patch", OutputDir: "./fixed"},
+			wantErr: "--output-patch cannot be combined with --output-dir: choose a patch or fixed copies"},
+		{name: "patch combined with whitespace output-dir", info: FixInfo{OutputPatch: "remediation.patch", OutputDir: "  "},
+			wantErr: "--output-patch cannot be combined with --output-dir: choose a patch or fixed copies"},
+		{name: "patch combined with dry-run", info: FixInfo{OutputPatch: "remediation.patch", DryRun: true},
+			wantErr: "--output-patch cannot be combined with --dry-run: exporting a patch already leaves the manifests untouched"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.info.ValidateOutputPatch()
+			if tt.wantErr == "" {
+				assert.NoError(t, err)
+			} else {
+				require.EqualError(t, err, tt.wantErr)
+			}
+		})
+	}
+}

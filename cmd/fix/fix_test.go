@@ -40,10 +40,30 @@ func TestFixCmdArgs(t *testing.T) {
 	}{
 		// Non-nil: SetArgs(nil) makes Execute fall back to os.Args.
 		{name: "no report", args: []string{}, wantErr: "report output file is required"},
+		{name: "empty report", args: []string{""}, wantErr: "report output file cannot be empty"},
+		{name: "blank report", args: []string{"   "}, wantErr: "report output file cannot be empty"},
 		{name: "one report", args: []string{"report.json"}},
 		{name: "extra report", args: []string{"a.json", "b.json"}, wantErr: "accepts at most 1 arg(s), received 2"},
 		{name: "post-renderer without kustomize", args: []string{"report.json", "--output-post-renderer", "./patches"}, wantErr: "--output-post-renderer requires --output-kustomize"},
 		{name: "post-renderer with kustomize", args: []string{"report.json", "--output-kustomize", "./patches", "--output-post-renderer", "./patches"}},
+		{name: "empty output-dir", args: []string{"report.json", "--output-dir", ""}, wantErr: "--output-dir needs a directory path"},
+		{name: "blank output-dir", args: []string{"report.json", "--output-dir", "   "}, wantErr: "--output-dir needs a directory path"},
+		{name: "empty output-dir with equals", args: []string{"report.json", "--output-dir="}, wantErr: "--output-dir needs a directory path"},
+		{name: "empty output-kustomize", args: []string{"report.json", "--output-kustomize", ""}, wantErr: "--output-kustomize needs a directory path"},
+		{name: "blank output-kustomize", args: []string{"report.json", "--output-kustomize", "   "}, wantErr: "--output-kustomize needs a directory path"},
+		{name: "empty output-kustomize with equals", args: []string{"report.json", "--output-kustomize="}, wantErr: "--output-kustomize needs a directory path"},
+		{name: "empty output-post-renderer", args: []string{"report.json", "--output-post-renderer", ""}, wantErr: "--output-post-renderer needs a directory path"},
+		{name: "blank output-post-renderer", args: []string{"report.json", "--output-post-renderer", "   "}, wantErr: "--output-post-renderer needs a directory path"},
+		{name: "empty output-post-renderer with equals", args: []string{"report.json", "--output-post-renderer="}, wantErr: "--output-post-renderer needs a directory path"},
+		{name: "empty base-path", args: []string{"report.json", "--base-path", ""}, wantErr: "--base-path needs a directory path"},
+		{name: "blank base-path", args: []string{"report.json", "--base-path", "   "}, wantErr: "--base-path needs a directory path"},
+		{name: "empty base-path with equals", args: []string{"report.json", "--base-path="}, wantErr: "--base-path needs a directory path"},
+		{name: "empty container-profile", args: []string{"report.json", "--container-profile", ""}, wantErr: "--container-profile needs a file path"},
+		{name: "blank container-profile", args: []string{"report.json", "--container-profile", "   "}, wantErr: "--container-profile needs a file path"},
+		{name: "empty container-profile with equals", args: []string{"report.json", "--container-profile="}, wantErr: "--container-profile needs a file path"},
+		{name: "empty output-patch", args: []string{"report.json", "--output-patch", ""}, wantErr: "--output-patch needs a file path"},
+		{name: "blank output-patch", args: []string{"report.json", "--output-patch", "   "}, wantErr: "--output-patch needs a file path"},
+		{name: "empty output-patch with equals", args: []string{"report.json", "--output-patch="}, wantErr: "--output-patch needs a file path"},
 	}
 
 	for _, tt := range tests {
@@ -437,4 +457,25 @@ func TestFixCmdControlsConfigIsDocumented(t *testing.T) {
 	assert.Contains(t, flag.Usage, "--verify")
 	assert.Contains(t, flag.Usage, "refuses")
 	assert.Contains(t, cmd.Example, "--controls-config")
+}
+
+func TestFixCmdPathTrimming(t *testing.T) {
+	spy := &spyKubescape{}
+	cmd := GetFixCmd(spy)
+	cmd.SetArgs([]string{
+		"  report.json  ",
+		"--output-dir", "  /tmp/fixed  ",
+		"--base-path", "  /tmp/base  ",
+		"--container-profile", "  /tmp/profile.json  ",
+	})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+
+	err := cmd.Execute()
+	require.NoError(t, err)
+	require.True(t, spy.fixCalled)
+	assert.Equal(t, "report.json", spy.received.ReportFile)
+	assert.Equal(t, "/tmp/fixed", spy.received.OutputDir)
+	assert.Equal(t, "/tmp/base", spy.received.BasePath)
+	assert.Equal(t, "/tmp/profile.json", spy.received.ContainerProfilePath)
 }
