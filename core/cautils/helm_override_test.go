@@ -159,8 +159,8 @@ func TestLoadResourcesFromHelmCharts_RendersUnrelatedTopLevelCharts(t *testing.T
 	}
 }
 
-func TestLoadResourcesFromHelmCharts_RendersChildAfterParentRenderFailure(t *testing.T) {
-	parentRoot, childRoot, servicePath := writeParentWithUnpackedChild(
+func TestLoadResourcesFromHelmCharts_FailsWhenParentRenderFails(t *testing.T) {
+	parentRoot, _, _ := writeParentWithUnpackedChild(
 		t,
 		"child:\n  port: 443\n",
 		"port: 80\n",
@@ -180,12 +180,11 @@ spec:
 		context.Background(), parentRoot, HelmValueOptions{},
 	)
 
-	require.NoError(t, err)
-	require.Equal(t, []string{childRoot}, renderedCharts,
-		"a failed parent must not claim ownership of its child fallback")
-	requireServicePort(t, workloads, servicePath, 80)
-	require.Equal(t, "child", charts[servicePath].Name)
-	require.Equal(t, childRoot, charts[servicePath].Path)
+	require.ErrorIs(t, err, ErrHelmRenderFailed,
+		"a parent that fails to render must fail the load even when its child renders")
+	require.Nil(t, workloads)
+	require.Nil(t, charts)
+	require.Nil(t, renderedCharts)
 }
 
 func TestLoadResourcesFromHelmCharts_RendersChildExcludedFromParentByHelmignore(t *testing.T) {
