@@ -730,30 +730,6 @@ func validateScanOutputSafety(outputFile string, scanInfo *cautils.ScanInfo, tra
 		if rawPath == "" {
 			continue
 		}
-		// Stat the literal path first so that a manifest or directory literally
-		// named e.g. "file:pod.yaml" or "dir:my-chart" is not mistakenly stripped.
-		// If the literal path does not exist, attempt to peel image selectors and schemes.
-		if rawPath != "-" {
-			if _, err := os.Stat(rawPath); err != nil {
-				if rest, _ := peelGenericImageSelector(rawPath); rest != "" {
-					rawPath = rest
-				}
-				if scheme := detectScheme(rawPath); scheme != "" {
-					rawPath = strings.TrimPrefix(rawPath, scheme+":")
-				} else if strings.HasPrefix(rawPath, "docker-archive:") {
-					rawPath = strings.TrimPrefix(rawPath, "docker-archive:")
-				} else if strings.HasPrefix(rawPath, "oci-archive:") {
-					rawPath = strings.TrimPrefix(rawPath, "oci-archive:")
-				} else if strings.HasPrefix(rawPath, "oci-dir:") {
-					rawPath = strings.TrimPrefix(rawPath, "oci-dir:")
-				} else if strings.HasPrefix(rawPath, "dir:") {
-					rawPath = strings.TrimPrefix(rawPath, "dir:")
-				} else if strings.HasPrefix(rawPath, "sbom:") {
-					rawPath = strings.TrimPrefix(rawPath, "sbom:")
-				}
-			}
-		}
-
 		if rawPath == "-" {
 			if scanInfo.OriginalStdinInfo != nil {
 				if os.SameFile(destInfo, scanInfo.OriginalStdinInfo) {
@@ -769,36 +745,64 @@ func validateScanOutputSafety(outputFile string, scanInfo *cautils.ScanInfo, tra
 			continue
 		}
 
-		info, err := os.Stat(rawPath)
-		if err == nil {
-			if !info.IsDir() {
-				if os.SameFile(destInfo, info) {
-					label := "input manifest"
-					if scanInfo.ScanType == cautils.ScanTypeImage {
-						label = "input image"
-					}
-					return fmt.Errorf("output path %q would overwrite %s %q; choose a different output file", outputFile, label, pattern)
-				}
-			} else {
-				if os.SameFile(destInfo, info) {
-					label := "input manifest"
-					if scanInfo.ScanType == cautils.ScanTypeImage {
-						label = "input image"
-					}
-					return fmt.Errorf("output path %q would overwrite %s %q; choose a different output file", outputFile, label, pattern)
-				}
-				if traverseDirs {
-					if err := checkDirectoryCollision(rawPath, scanInfo, destInfo, outputFile, nil); err != nil {
-						return err
-					}
-				}
-			}
-			continue
+		// Check both the literal path (e.g. literal manifest named "file:pod.yaml")
+		// and the selector-resolved path (e.g. "image.tar" from "docker-archive:image.tar")
+		// so neither input source can be truncated if both paths exist on disk.
+		candidates := []string{rawPath}
+		resolved := rawPath
+		if rest, _ := peelGenericImageSelector(resolved); rest != "" {
+			resolved = rest
+		}
+		if scheme := detectScheme(resolved); scheme != "" {
+			resolved = strings.TrimPrefix(resolved, scheme+":")
+		} else if strings.HasPrefix(resolved, "docker-archive:") {
+			resolved = strings.TrimPrefix(resolved, "docker-archive:")
+		} else if strings.HasPrefix(resolved, "oci-archive:") {
+			resolved = strings.TrimPrefix(resolved, "oci-archive:")
+		} else if strings.HasPrefix(resolved, "oci-dir:") {
+			resolved = strings.TrimPrefix(resolved, "oci-dir:")
+		} else if strings.HasPrefix(resolved, "dir:") {
+			resolved = strings.TrimPrefix(resolved, "dir:")
+		} else if strings.HasPrefix(resolved, "sbom:") {
+			resolved = strings.TrimPrefix(resolved, "sbom:")
+		}
+		resolved = strings.TrimSpace(resolved)
+		if resolved != "" && resolved != rawPath {
+			candidates = append(candidates, resolved)
 		}
 
-		if strings.ContainsAny(rawPath, "*?[]") {
-			if err := checkGlobCollision(rawPath, scanInfo, destInfo, outputFile); err != nil {
-				return err
+		for _, candidate := range candidates {
+			info, err := os.Stat(candidate)
+			if err == nil {
+				if !info.IsDir() {
+					if os.SameFile(destInfo, info) {
+						label := "input manifest"
+						if scanInfo.ScanType == cautils.ScanTypeImage {
+							label = "input image"
+						}
+						return fmt.Errorf("output path %q would overwrite %s %q; choose a different output file", outputFile, label, pattern)
+					}
+				} else {
+					if os.SameFile(destInfo, info) {
+						label := "input manifest"
+						if scanInfo.ScanType == cautils.ScanTypeImage {
+							label = "input image"
+						}
+						return fmt.Errorf("output path %q would overwrite %s %q; choose a different output file", outputFile, label, pattern)
+					}
+					if traverseDirs {
+						if err := checkDirectoryCollision(candidate, scanInfo, destInfo, outputFile, nil); err != nil {
+							return err
+						}
+					}
+				}
+				continue
+			}
+
+			if strings.ContainsAny(candidate, "*?[]") {
+				if err := checkGlobCollision(candidate, scanInfo, destInfo, outputFile); err != nil {
+					return err
+				}
 			}
 		}
 	}

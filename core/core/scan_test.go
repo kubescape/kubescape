@@ -2247,6 +2247,33 @@ func TestValidateOutputPrinters_OutputSafetyCollision(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, manifestContent, content, "input manifest must be preserved byte-for-byte")
 	})
+
+	t.Run("both literal prefixed file and underlying archive exist detects collision", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("literal colon filenames are not supported on Windows")
+		}
+		dir := t.TempDir()
+		t.Chdir(dir)
+		literalPrefixed := "docker-archive:image.tar.json"
+		underlyingArchive := "image.tar.json"
+		archiveContent := []byte("tar-content")
+		require.NoError(t, os.WriteFile(literalPrefixed, []byte("dummy-prefixed-file"), 0o600))
+		require.NoError(t, os.WriteFile(underlyingArchive, archiveContent, 0o600))
+
+		scanInfo := &cautils.ScanInfo{
+			ScanType:      cautils.ScanTypeImage,
+			Format:        printer.JsonFormat,
+			Output:        underlyingArchive,
+			InputPatterns: []string{literalPrefixed},
+		}
+
+		err := ValidateOutputPrinters(scanInfo)
+		require.ErrorContains(t, err, "would overwrite input image")
+
+		content, err := os.ReadFile(underlyingArchive)
+		require.NoError(t, err)
+		assert.Equal(t, archiveContent, content, "underlying archive must be preserved byte-for-byte")
+	})
 }
 
 func TestScanImageContext_EarlyValidationRejectsCollisionBeforeScan(t *testing.T) {
