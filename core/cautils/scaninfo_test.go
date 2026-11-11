@@ -1098,3 +1098,102 @@ func TestEvidenceFlagWarnings(t *testing.T) {
 		})
 	}
 }
+
+func TestReadArtifactFile_OversizedFileRejected(t *testing.T) {
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "oversized.json")
+	f, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY, 0o600)
+	require.NoError(t, err)
+	require.NoError(t, f.Truncate(DefaultMaxFileSize+1))
+	require.NoError(t, f.Close())
+
+	_, err = readArtifactFile(filePath)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrArtifactFileTooLarge)
+}
+
+func TestReadArtifactFile_NonRegularFileRejected(t *testing.T) {
+	if _, err := os.Stat("/dev/null"); err == nil {
+		_, err := readArtifactFile("/dev/null")
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrArtifactFileNotRegular)
+	}
+}
+
+func TestReadArtifactFile_DirectoryRejected(t *testing.T) {
+	dir := t.TempDir()
+	_, err := readArtifactFile(dir)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrArtifactFileNotRegular)
+	assert.Contains(t, err.Error(), "is a directory, not a file")
+}
+
+func TestReadArtifactFile_MaxFileSizeEnvVar(t *testing.T) {
+	t.Run("lower override", func(t *testing.T) {
+		t.Setenv(MaxFileSizeEnvVar, "100")
+
+		dir := t.TempDir()
+		overLimitFile := filepath.Join(dir, "over.json")
+		require.NoError(t, os.WriteFile(overLimitFile, make([]byte, 200), 0o600))
+
+		_, err := readArtifactFile(overLimitFile)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrArtifactFileTooLarge)
+
+		underLimitFile := filepath.Join(dir, "under.json")
+		require.NoError(t, os.WriteFile(underLimitFile, make([]byte, 50), 0o600))
+
+		data, err := readArtifactFile(underLimitFile)
+		require.NoError(t, err)
+		assert.Len(t, data, 50)
+	})
+
+	t.Run("higher override", func(t *testing.T) {
+		raisedLimit := DefaultMaxFileSize + 1024
+		t.Setenv(MaxFileSizeEnvVar, fmt.Sprintf("%d", raisedLimit))
+
+		dir := t.TempDir()
+		overDefaultFile := filepath.Join(dir, "over_default.json")
+		f, err := os.OpenFile(overDefaultFile, os.O_CREATE|os.O_WRONLY, 0o600)
+		require.NoError(t, err)
+		require.NoError(t, f.Truncate(DefaultMaxFileSize+100))
+		require.NoError(t, f.Close())
+
+		data, err := readArtifactFile(overDefaultFile)
+		require.NoError(t, err)
+		assert.Len(t, data, int(DefaultMaxFileSize+100))
+	})
+}
+
+func TestSetUseArtifactsFrom_SkipsOversizedAndNonRegularFiles(t *testing.T) {
+	dir := t.TempDir()
+
+	validFramework := `{"name":"custom-fw","controls":[]}`
+	validFile := filepath.Join(dir, "framework.json")
+	require.NoError(t, os.WriteFile(validFile, []byte(validFramework), 0o600))
+
+	oversizedFile := filepath.Join(dir, "oversized.json")
+	f, err := os.OpenFile(oversizedFile, os.O_CREATE|os.O_WRONLY, 0o600)
+	require.NoError(t, err)
+	require.NoError(t, f.Truncate(DefaultMaxFileSize+1))
+	require.NoError(t, f.Close())
+
+	subDir := filepath.Join(dir, "nested")
+	require.NoError(t, os.Mkdir(subDir, 0o755))
+
+	var devNullLink string
+	if _, err := os.Stat("/dev/null"); err == nil {
+		devNullLink = filepath.Join(dir, "dev_null.json")
+		require.NoError(t, os.Symlink("/dev/null", devNullLink))
+	}
+
+	scanInfo := &ScanInfo{UseArtifactsFrom: dir}
+	require.NoError(t, scanInfo.setUseArtifactsFrom(context.Background()))
+
+	assert.Contains(t, scanInfo.UseFrom, validFile)
+	assert.NotContains(t, scanInfo.UseFrom, oversizedFile)
+	assert.NotContains(t, scanInfo.UseFrom, subDir)
+	if devNullLink != "" {
+		assert.NotContains(t, scanInfo.UseFrom, devNullLink)
+	}
+}
