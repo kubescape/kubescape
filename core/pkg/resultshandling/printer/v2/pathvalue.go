@@ -945,8 +945,10 @@ func evidencePathsWithCurrentValues(control *resourcesresults.ResourceAssociated
 }
 
 // assistedRemediationPaths renders a control's fix, delete and review paths as
-// one deduplicated list. deleteValues appends the current value to each delete
-// path; review paths always carry theirs.
+// one deduplicated list. deleteValues is the terminal --show-evidence view: it
+// appends the current value to each delete path, and marks any delete or review
+// path that does not resolve as unresolved. Review paths carry their value in
+// every view.
 func assistedRemediationPaths(control *resourcesresults.ResourceAssociatedControl, resource workloadinterface.IMetadata, showSecrets, deleteValues bool) []string {
 	kind := resource.GetKind()
 	// showSecrets extracts values for all paths including sensitive ones - the
@@ -957,9 +959,12 @@ func assistedRemediationPaths(control *resourcesresults.ResourceAssociatedContro
 		deletePaths = deletePathsWithCurrentValues(control, resource, showSecrets)
 	}
 	var enrichedReview []string
-	if showSecrets {
+	switch {
+	case deleteValues:
+		enrichedReview = reviewPathsForEvidence(control, resource, showSecrets)
+	case showSecrets:
 		enrichedReview = reviewPathsWithCurrentValuesUnredacted(control, resource)
-	} else {
+	default:
 		enrichedReview = reviewPathsWithCurrentValuesRedacted(control, resource)
 	}
 	paths := append(fixPaths, append(deletePaths, enrichedReview...)...)
@@ -974,8 +979,8 @@ func assistedRemediationPaths(control *resourcesresults.ResourceAssociatedContro
 // no value to hide, and "[redacted]" on it would claim one. Any other path is
 // read with extractRedactedValueAtPath, so a delete path that selects an
 // object or list (a whole securityContext, say) has its credential-shaped
-// descendants masked rather than printed. A path that does not resolve stays
-// bare, as it did before.
+// descendants masked rather than printed. A path that does not resolve is
+// marked unresolvedValue (see evidenceSuffix).
 func deletePathsWithCurrentValues(control *resourcesresults.ResourceAssociatedControl, resource workloadinterface.IMetadata, showSecrets bool) []string {
 	var paths []string
 	obj := normalizeForPathExtraction(resource.GetObject())
@@ -986,7 +991,7 @@ func deletePathsWithCurrentValues(control *resourcesresults.ResourceAssociatedCo
 			if p == "" {
 				continue
 			}
-			paths = append(paths, p+currentValueSuffix(kind, obj, p, showSecrets))
+			paths = append(paths, p+evidenceSuffix(kind, obj, p, showSecrets))
 		}
 	}
 	return paths
@@ -1011,6 +1016,47 @@ func currentValueSuffix(kind string, obj map[string]any, path string, showSecret
 		return " (current: " + val + ")"
 	}
 	return ""
+}
+
+// unresolvedValue is what the terminal evidence view prints for a path that
+// selects nothing in the resource. A bare path could not be told apart from one
+// that was never looked up, so the output says it was and that nothing was
+// there. "[redacted]" would claim a value that is being hidden; this claims none.
+const unresolvedValue = "<unresolved>"
+
+// evidenceSuffix is currentValueSuffix for the terminal evidence view: where
+// that returns "" because the path does not resolve, this returns the
+// unresolved marker. A path that resolves but has no printable value still
+// gets no suffix, since it is not unresolved.
+func evidenceSuffix(kind string, obj map[string]any, path string, showSecrets bool) string {
+	if suffix := currentValueSuffix(kind, obj, path, showSecrets); suffix != "" {
+		return suffix
+	}
+	if !pathResolves(obj, path) {
+		return " (current: " + unresolvedValue + ")"
+	}
+	return ""
+}
+
+// reviewPathsForEvidence is the review paths of a control for the terminal
+// evidence view: each with its current value, redacted unless showSecrets is
+// set, and marked unresolved when the path selects nothing. The other outputs
+// keep reviewPathsWithCurrentValuesRedacted and its Unredacted twin, which
+// leave such a path bare.
+func reviewPathsForEvidence(control *resourcesresults.ResourceAssociatedControl, resource workloadinterface.IMetadata, showSecrets bool) []string {
+	var paths []string
+	obj := normalizeForPathExtraction(resource.GetObject())
+	kind := resource.GetKind()
+	for j := range control.ResourceAssociatedRules {
+		for k := range control.ResourceAssociatedRules[j].Paths {
+			p := control.ResourceAssociatedRules[j].Paths[k].ReviewPath
+			if p == "" {
+				continue
+			}
+			paths = append(paths, p+evidenceSuffix(kind, obj, p, showSecrets))
+		}
+	}
+	return paths
 }
 
 func enrichedPathsForFieldRedacted(control *resourcesresults.ResourceAssociatedControl, resource workloadinterface.IMetadata, getPath func(armotypes.PosturePaths) string) []string {
