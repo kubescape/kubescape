@@ -34,6 +34,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/kubernetes/scheme"
+	sigsyaml "sigs.k8s.io/yaml"
 )
 
 var (
@@ -1314,7 +1315,16 @@ func readYamlFile(yamlFile []byte) (yamlObjs []workloadinterface.IMetadata, err 
 			continue
 		}
 		if obj, ok := j.(map[string]any); ok {
-			if validationErr := validateManifestAgainstScheme(obj); validationErr != nil {
+			validationErr := validateManifestAgainstScheme(obj)
+			if validationErr != nil {
+				// yaml.v3 reads YAML 1.2, kubectl reads YAML 1.1, so a bare
+				// yes/no/on/off is a string here and a boolean for the cluster.
+				// Only a document that is already broken gets a second look.
+				if reparsed, ok := reparseAsYAML11(doc); ok && validateManifestAgainstScheme(reparsed) == nil {
+					obj, validationErr = reparsed, nil
+				}
+			}
+			if validationErr != nil {
 				parseErrs = append(parseErrs, fmt.Errorf("document %d: %w", i+1, validationErr))
 			}
 			objects, objectErr := manifestObjectToWorkloads(obj)
@@ -1326,6 +1336,17 @@ func readYamlFile(yamlFile []byte) (yamlObjs []workloadinterface.IMetadata, err 
 	}
 
 	return yamlObjs, errors.Join(parseErrs...)
+}
+
+// reparseAsYAML11 reads one document the way kubectl does (sigs.k8s.io/yaml,
+// YAML 1.1 booleans). It reports false if the document does not parse into a
+// mapping.
+func reparseAsYAML11(doc []byte) (map[string]any, bool) {
+	var obj map[string]any
+	if err := sigsyaml.Unmarshal(doc, &obj); err != nil || obj == nil {
+		return nil, false
+	}
+	return obj, true
 }
 
 // splitYAMLDocuments splits a YAML stream while retaining inline content and directive headers.
