@@ -108,12 +108,20 @@ func kubectlResource(apiVersion, kind string) (string, bool) {
 	return resource, true
 }
 
+// kubectlCluster names the cluster a command reads: the kubeconfig file the scan
+// was given and the context it ran against. A scan that used --kubeconfig reads
+// a cluster the ambient kubeconfig may not know, so the command carries both.
+// Either may be empty, which leaves the flag out.
+type kubectlCluster struct {
+	kubeconfig string
+	context    string
+}
+
 // kubectlGetCommand returns the command that prints the field at path on the
-// cluster. kubeContext names the cluster the scan ran against, so the command
-// reads the same one even when it is not the current context; empty leaves the
-// context out. It reports false when the resource or the path cannot be put on a
+// cluster. cluster names the one the scan ran against, so the command reads the
+// same one even when it is not the current context. It reports false when the resource or the path cannot be put on a
 // command line safely.
-func kubectlGetCommand(resource workloadinterface.IMetadata, kubeContext, path string) (string, bool) {
+func kubectlGetCommand(resource workloadinterface.IMetadata, cluster kubectlCluster, path string) (string, bool) {
 	segments, err := pathparse.ParsePath(path)
 	if err != nil {
 		return "", false
@@ -134,8 +142,11 @@ func kubectlGetCommand(resource workloadinterface.IMetadata, kubeContext, path s
 		}
 		words = append(words, "-n", namespace)
 	}
-	if kubeContext != "" {
-		words = append(words, "--context", shellWord(kubeContext))
+	if cluster.kubeconfig != "" {
+		words = append(words, "--kubeconfig", shellWord(cluster.kubeconfig))
+	}
+	if cluster.context != "" {
+		words = append(words, "--context", shellWord(cluster.context))
 	}
 	words = append(words, "-o", "jsonpath="+shellQuote(expr))
 	return strings.Join(words, " "), true
@@ -146,7 +157,7 @@ func kubectlGetCommand(resource workloadinterface.IMetadata, kubeContext, path s
 // that holds a credential gets no command unless showSecrets is set: the
 // command itself is harmless, but evidence is written to be shared, and a line
 // that tells a reader how to print a credential does not belong in it.
-func kubectlPointers(controls []resourcesresults.ResourceAssociatedControl, summary *reportsummary.SummaryDetails, resource workloadinterface.IMetadata, kubeContext string, showSecrets bool) []string {
+func kubectlPointers(controls []resourcesresults.ResourceAssociatedControl, summary *reportsummary.SummaryDetails, resource workloadinterface.IMetadata, cluster kubectlCluster, showSecrets bool) []string {
 	kind := resource.GetKind()
 	var commands []string
 	seen := map[string]struct{}{}
@@ -162,7 +173,7 @@ func kubectlPointers(controls []resourcesresults.ResourceAssociatedControl, summ
 		if !showSecrets && isSensitivePath(kind, path) {
 			return
 		}
-		if command, ok := kubectlGetCommand(resource, kubeContext, path); ok {
+		if command, ok := kubectlGetCommand(resource, cluster, path); ok {
 			commands = append(commands, command)
 		}
 	}

@@ -450,6 +450,7 @@ func NewPrinter(ctx context.Context, printFormat string, scanInfo *cautils.ScanI
 		}
 		prettyPrinter := printerv2.NewPrettyPrinter(scanInfo.VerboseMode, scanInfo.FormatVersion, scanInfo.PrintAttackTree, cautils.ViewTypes(scanInfo.View), scanInfo.ScanType, scanInfo.InputPatterns, clusterName, scanInfo.ShowEvidence, scanInfo.ShowSecrets)
 		prettyPrinter.SetAnonymized(scanInfo.Hide || scanInfo.EncryptionEnabled)
+		prettyPrinter.SetKubeconfig(scanInfo.GetKubeconfigPath())
 		return prettyPrinter
 	}
 }

@@ -136,11 +136,12 @@ func TestKubectlGetCommand(t *testing.T) {
 	const hostNetwork = "spec.template.spec.hostNetwork"
 
 	tests := []struct {
-		name     string
-		resource *workloadinterface.Workload
-		context  string
-		path     string
-		want     string
+		name       string
+		resource   *workloadinterface.Workload
+		context    string
+		kubeconfig string
+		path       string
+		want       string
 	}{
 		{
 			name:     "a namespaced workload in an API group",
@@ -166,6 +167,21 @@ func TestKubectlGetCommand(t *testing.T) {
 			context:  "minikube",
 			path:     "spec.hostNetwork",
 			want:     "kubectl get pod demo -n default --context minikube -o jsonpath='{.spec.hostNetwork}'",
+		},
+		{
+			name:       "the kubeconfig the scan was given",
+			resource:   kubectlWorkload("v1", "Pod", "demo", "default"),
+			kubeconfig: "/home/me/.kube/prod.yaml",
+			context:    "prod",
+			path:       "spec.hostNetwork",
+			want:       "kubectl get pod demo -n default --kubeconfig /home/me/.kube/prod.yaml --context prod -o jsonpath='{.spec.hostNetwork}'",
+		},
+		{
+			name:       "a kubeconfig path with a space or a quote is quoted for the shell",
+			resource:   kubectlWorkload("v1", "Pod", "demo", "default"),
+			kubeconfig: "/home/my user/it's.yaml",
+			path:       "spec.hostNetwork",
+			want:       `kubectl get pod demo -n default --kubeconfig '/home/my user/it'\''s.yaml' -o jsonpath='{.spec.hostNetwork}'`,
 		},
 		{
 			name:     "a context that is a plain word list needs no quotes",
@@ -196,7 +212,7 @@ func TestKubectlGetCommand(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, ok := kubectlGetCommand(tt.resource, tt.context, tt.path)
+			got, ok := kubectlGetCommand(tt.resource, kubectlCluster{kubeconfig: tt.kubeconfig, context: tt.context}, tt.path)
 			require.True(t, ok)
 			assert.Equal(t, tt.want, got)
 		})
@@ -218,7 +234,7 @@ func TestKubectlGetCommand(t *testing.T) {
 	}
 	for _, tt := range refused {
 		t.Run("no command for "+tt.name, func(t *testing.T) {
-			got, ok := kubectlGetCommand(tt.resource, "", tt.path)
+			got, ok := kubectlGetCommand(tt.resource, kubectlCluster{}, tt.path)
 			assert.False(t, ok)
 			assert.Empty(t, got)
 		})
@@ -242,7 +258,7 @@ func TestKubectlPointers(t *testing.T) {
 	)
 	resource := kubectlWorkload("apps/v1", "Deployment", "demo", "default")
 	command := func(path string) string {
-		got, ok := kubectlGetCommand(resource, "", path)
+		got, ok := kubectlGetCommand(resource, kubectlCluster{}, path)
 		require.True(t, ok)
 		return got
 	}
@@ -263,19 +279,19 @@ func TestKubectlPointers(t *testing.T) {
 	controls := []resourcesresults.ResourceAssociatedControl{*failing, *repeated, *passing}
 
 	t.Run("a command for each path, once, in order, without credential values", func(t *testing.T) {
-		got := kubectlPointers(controls, summary, resource, "", false)
+		got := kubectlPointers(controls, summary, resource, kubectlCluster{}, false)
 		assert.Equal(t, []string{command(hostNetwork), command(readOnlyFS), command(envName)}, got,
 			"the repeated path appears once, the passing control is ignored, and the env value is left out")
 	})
 
 	t.Run("--show-secrets includes the credential-shaped path", func(t *testing.T) {
-		got := kubectlPointers(controls, summary, resource, "", true)
+		got := kubectlPointers(controls, summary, resource, kubectlCluster{}, true)
 		assert.Equal(t, []string{command(hostNetwork), command(readOnlyFS), command(envName), command(envValue)}, got)
 	})
 
 	t.Run("nothing for a control with no paths", func(t *testing.T) {
 		none := shapeControl()
-		assert.Empty(t, kubectlPointers([]resourcesresults.ResourceAssociatedControl{*none}, kubectlSummary(none), resource, "", false))
+		assert.Empty(t, kubectlPointers([]resourcesresults.ResourceAssociatedControl{*none}, kubectlSummary(none), resource, kubectlCluster{}, false))
 	})
 }
 
@@ -339,6 +355,18 @@ func TestResourceTableKubectlPointers(t *testing.T) {
 		out := renderResourceTable(t, s, true)
 		assert.Contains(t, out, "--context ambient", "without a recorded context the global one is the fallback")
 		assert.NotContains(t, out, "deprecated")
+	})
+
+	t.Run("a scan given --kubeconfig", func(t *testing.T) {
+		f, err := os.CreateTemp(t.TempDir(), "kubeconfig-*.txt")
+		require.NoError(t, err)
+		pp := &PrettyPrinter{writer: f, showEvidence: true}
+		pp.SetKubeconfig("/home/me/prod.yaml")
+		pp.resourceTable(clusterSession(t))
+		require.NoError(t, f.Close())
+		out, err := os.ReadFile(f.Name())
+		require.NoError(t, err)
+		assert.Contains(t, string(out), "--kubeconfig /home/me/prod.yaml --context minikube")
 	})
 
 	t.Run("a cluster scan without --show-evidence", func(t *testing.T) {

@@ -755,6 +755,12 @@ func (scanInfo *ScanInfo) ResolveClusterContextName() error {
 	return nil
 }
 
+// GetKubeconfigPath returns the kubeconfig file selected with --kubeconfig, or
+// empty when the scan used the default one.
+func (scanInfo *ScanInfo) GetKubeconfigPath() string {
+	return scanInfo.kubeconfigPath
+}
+
 // GetClusterContextName returns the context resolved from the CLI kubeconfig
 // and context selection, falling back to k8s-interface when neither was
 // resolved by this scan.
