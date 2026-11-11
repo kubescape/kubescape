@@ -258,7 +258,10 @@ func cloneResourceEnvelope(original workloadinterface.IMetadata, object map[stri
 	case *cloudsupportv1.CloudProviderPolicyVersion:
 		cloned, err = decodeEnvelope[cloudsupportv1.CloudProviderPolicyVersion](object)
 	case *cloudsupport.ApiServerInfo:
-		cloned, err = decodeEnvelope[cloudsupport.ApiServerInfo](object)
+		var decoded workloadinterface.IMetadata
+		if decoded, err = decodeEnvelope[cloudsupport.ApiServerInfo](object); err == nil {
+			cloned = &apiServerInfoClone{ApiServerInfo: decoded.(*cloudsupport.ApiServerInfo)}
+		}
 	default:
 		cloned = workloadinterface.NewWorkloadObj(object)
 	}
@@ -309,13 +312,46 @@ func commitResourceEnvelope(original, transformed workloadinterface.IMetadata) (
 	case *cloudsupportv1.CloudProviderPolicyVersion:
 		return assignEnvelope(target, transformed)
 	case *cloudsupport.ApiServerInfo:
-		return assignEnvelope(target, transformed)
+		source, ok := transformed.(*apiServerInfoClone)
+		if !ok {
+			return nil, fmt.Errorf("transformed resource is a %T, not a %T", transformed, source)
+		}
+		if source.err != nil {
+			return nil, fmt.Errorf("rebuild its %T envelope: %w", original, source.err)
+		}
+		return func() { *target = *source.ApiServerInfo }, nil
 	}
 	object, err := cloneResourceObject(transformed.GetObject())
 	if err != nil {
 		return nil, err
 	}
 	return func() { original.SetObject(object) }, nil
+}
+
+// apiServerInfoClone is the working copy of an ApiServerInfo. Unlike the
+// other typed envelopes, ApiServerInfo.SetObject stores the object it is given
+// as its data, so each transform helper's GetObject/SetObject round trip
+// nested the whole object one level deeper under data, leaving copies of the
+// encrypted name at paths such as data.data.metadata.name that DecryptReport
+// does not restore. SetObject here decodes the object back into the fields
+// instead, so the report keeps the envelope's own layout, with its name at
+// metadata.name. SetObject cannot return an error, so the first one is kept
+// and fails the commit.
+type apiServerInfoClone struct {
+	*cloudsupport.ApiServerInfo
+	err error
+}
+
+func (c *apiServerInfoClone) SetObject(object map[string]any) {
+	if c.err != nil {
+		return
+	}
+	decoded, err := decodeEnvelope[cloudsupport.ApiServerInfo](object)
+	if err != nil {
+		c.err = err
+		return
+	}
+	*c.ApiServerInfo = *decoded.(*cloudsupport.ApiServerInfo)
 }
 
 func assignEnvelope[T any, P interface {

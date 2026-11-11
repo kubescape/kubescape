@@ -39,7 +39,10 @@ const (
 	identityOtherFile   = "/home/alice/acme-payroll-repo/deploy/ledger.yaml"
 )
 
-// Values a hidden or encrypted report must not contain in any form.
+// The resource names, namespaces and manifest paths these tests anonymize,
+// which a hidden or encrypted report must not contain in any form. The names
+// of an RBAC subject's relatedObjects (the "admins" binding in rbacSubject)
+// are not anonymized yet, so they are deliberately not listed here.
 var identitySecrets = []string{"alice", "acme-payroll-repo", "payroll-api", "payroll-worker", "ledger-api", "acme-finance", "gke-acme-prod", "node-acme-1", "eks-acme-prod", "mallory@acme.example"}
 
 func localDeployment(name, path string) *localworkload.LocalWorkload {
@@ -229,7 +232,11 @@ func TestCloneCatalogKeepsResourceEnvelopeAndID(t *testing.T) {
 			assert.Same(t, original, originalByClone[cloned])
 			assert.Equal(t, id, cloned.GetID(), "the clone must have the original's ID")
 			if _, isBase := original.(*workloadinterface.BaseObject); !isBase {
-				assert.IsType(t, original, cloned, "the clone must keep the original's envelope")
+				envelope := cloned
+				if working, ok := cloned.(*apiServerInfoClone); ok {
+					envelope = working.ApiServerInfo
+				}
+				assert.IsType(t, original, envelope, "the clone must keep the original's envelope")
 			}
 
 			cloned.SetName("changed")
@@ -416,9 +423,10 @@ func TestTransformSessionRollsBackFileScanSession(t *testing.T) {
 
 // API server info keeps its fields in a typed envelope whose ID has no
 // namespace segment, so a generic copy changed its ID and its result no longer
-// resolved. The transform helpers' SetObject wraps its object inside its data,
-// as it did before transactional anonymization; this only checks what the
-// result association depends on.
+// resolved. Its SetObject stores what it is given as its data, so the
+// transform helpers' GetObject/SetObject round trips must not nest the object
+// inside its own data: the report keeps the name at metadata.name only, where
+// DecryptReport restores it.
 func TestAnonymizationKeepsAPIServerInfoResolvable(t *testing.T) {
 	for _, mode := range anonymizationModes {
 		t.Run(mode.name, func(t *testing.T) {
@@ -434,11 +442,33 @@ func TestAnonymizationKeepsAPIServerInfoResolvable(t *testing.T) {
 			assert.Equal(t, cloudsupport.ApiServerInfoApiVersion, info.GetApiVersion())
 			assert.Equal(t, "APIServerInfo", info.GetKind())
 			assert.NotEqual(t, "version", info.GetName(), "the name is anonymized")
-			encoded, err := json.Marshal(info.GetObject())
-			require.NoError(t, err)
-			assert.Contains(t, string(encoded), `"gitVersion":"v1.30.2"`)
+			object := info.GetObject()
+			assert.Equal(t, map[string]any{"name": info.GetName()}, object["metadata"])
+			data, ok := object["data"].(map[string]any)
+			require.True(t, ok, "data is %T", object["data"])
+			assert.Equal(t, "v1.30.2", data["gitVersion"])
+			assert.NotContains(t, data, "metadata", "the object is not nested inside its own data")
+			assert.NotContains(t, data, "data", "the object is not nested inside its own data")
 		})
 	}
+}
+
+// SetObject cannot return an error, so an object the API server info working
+// copy cannot decode is kept and fails the commit before anything is written.
+func TestCommitRefusesAPIServerInfoItCouldNotDecode(t *testing.T) {
+	original := apiServerInfo()
+	cloned, err := cloneResourceEnvelope(original, original.GetObject())
+	require.NoError(t, err)
+	working, ok := cloned.(*apiServerInfoClone)
+	require.True(t, ok, "the working copy is a %T", cloned)
+
+	working.SetObject(map[string]any{"metadata": "not an object"})
+	working.SetName("changed")
+
+	write, err := commitResourceEnvelope(original, working)
+	require.Error(t, err)
+	assert.Nil(t, write)
+	assert.Equal(t, "version", original.GetName(), "the original is not changed")
 }
 
 // The printers below read resources through the catalog, keyed by result ID.
