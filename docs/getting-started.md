@@ -465,8 +465,9 @@ kubescape fix results.json
 |------|-------------|
 | `--dry-run` | Preview changes without applying them |
 | `--no-confirm` | Apply fixes without confirmation prompts |
-| `-i`, `--interactive` | Show each resource's changes and ask before fixing it. With `--dry-run`, `--no-confirm`, `--output-dir` or a cluster scan, the changes are shown without asking |
+| `-i`, `--interactive` | Show each resource's changes and ask before fixing it. With `--dry-run`, `--no-confirm`, `--output-dir`, `--output-patch` or a cluster scan, the changes are shown without asking |
 | `--output-dir` | Write the fixes into this directory instead: fixed copies of the manifest files (originals untouched), or one patched manifest per resource for a cluster scan |
+| `--output-patch` | Write the fixes for manifest files to this file as one unified diff instead of changing them. Apply it with `git apply` from the scanned directory. The manifests are never modified |
 | `--skip-user-values` | Skip changes that require user-defined values (default: true) |
 
 ### Example
@@ -477,6 +478,10 @@ kubescape fix results.json --dry-run
 
 # Apply fixes without prompts (useful for CI/CD)
 kubescape fix results.json --no-confirm
+
+# Export the fixes as a patch to review first, leaving the manifests untouched
+kubescape fix results.json --output-patch remediation.patch
+git apply remediation.patch
 ```
 
 You can also fix a cluster scan. There are no manifests to rewrite in that case,

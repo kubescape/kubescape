@@ -964,10 +964,11 @@ a config omits, so the live `envFrom` survives.
 |------|-------------|---------|
 | `--dry-run` | Preview changes without applying | `false` |
 | `--no-confirm` | Apply without confirmation | `false` |
-| `-i`, `--interactive` | Show each resource's changes and ask before fixing it, instead of one prompt for the whole run. Only manifest files fixed in place are asked about: with `--dry-run`, `--no-confirm`, `--output-dir` or a cluster scan, the changes are shown without asking | `false` |
+| `-i`, `--interactive` | Show each resource's changes and ask before fixing it, instead of one prompt for the whole run. Only manifest files fixed in place are asked about: with `--dry-run`, `--no-confirm`, `--output-dir`, `--output-patch` or a cluster scan, the changes are shown without asking | `false` |
 | `--skip-user-values` | Skip changes requiring user values | `true` |
 | `--base-path` | Restrict fixes to this directory: the report's own recorded scan location must resolve inside it | - |
 | `--output-dir` | Write the fixes into this directory instead of their default destination. Manifest files: fixed copies that mirror the scanned tree, originals untouched. Cluster scans: one patched manifest per resource. A non-empty directory is refused unless `--no-confirm` is passed | *(fix in place / print to stdout)* |
+| `--output-patch` | Write the fixes for manifest files to this file as one unified diff instead of changing the manifests. Apply it from the scanned directory with `git apply` or `patch -p1`. The manifests are never modified, and an existing file is replaced only with `--no-confirm`. Not for cluster scans; cannot be combined with `--output-dir` or `--dry-run` | - |
 | `--output-kustomize` | Write a `kustomization.yaml` and JSON 6902 patch files for Helm-rendered resources into this directory. A non-empty directory is refused unless `--no-confirm` is passed | - |
 | `-f`, `--values` | Specify Helm values in a YAML file (can specify multiple) | - |
 | `--set` | Set Helm values on the command line (e.g. `key1=val1,key2=val2`) | - |
@@ -1039,6 +1040,9 @@ kubescape fix results.json --no-confirm
 
 # Leave the manifests untouched: write the fixed copies to a directory instead
 kubescape fix results.json --output-dir ./fixed
+
+# Leave the manifests untouched: export the fixes as a patch to review and apply
+kubescape fix results.json --output-patch remediation.patch
 ```
 
 With `--output-dir` the copies recreate the scanned tree, and a multi-document
@@ -1071,6 +1075,90 @@ place outside it, and to replace a copy it has already written in the same run
 under another name, as two names differing only in case are on a
 case-insensitive filesystem.
 
+### Exporting the fixes as a patch
+
+`--output-patch` writes the fixes as one unified diff instead of changing any
+manifest. Generating the fixes, exporting them and applying them become three
+separate steps, so the changes can be reviewed, committed through your usual
+review process, or applied by someone else:
+
+```bash
+kubescape scan /path/to/manifests --format json --output results.json
+kubescape fix results.json --output-patch remediation.patch
+
+# Review remediation.patch, then from the repository root (inside a git
+# repository) or from the scanned directory (outside one):
+git apply --check remediation.patch   # does it apply cleanly?
+git apply remediation.patch
+# or, without git:
+patch -p1 < remediation.patch
+```
+
+Paths in the patch start where the `--output-dir` layout starts (see the table
+above): the repository root inside git, the scanned directory for a single
+input, and the directory the inputs share for several. Apply the patch from
+that directory. Inside a git repository `git apply` reads the paths from the
+repository root, and skips a patch whose paths are not under the directory it
+runs in while still exiting 0, so use `git apply -v` to see what it did. Some
+`patch` implementations, such as the BSD one that ships with macOS, cannot read
+file names that git has to quote (those with a `"`, a tab or a `\`); use
+`git apply` for those.
+
+The patch holds exactly the edits `kubescape fix` would make in place: the same
+fixer runs on the same manifests, and applying the patch to a clean copy gives
+the same files `--output-dir` writes. Where the other modes write the fixed
+files, this one writes the difference, so the changes show up in a code review
+and a patch for several files is one file to hand over.
+
+**Format.** A standard unified diff, with one `diff --git a/<path> b/<path>`
+section for each manifest that changes, in path order, and three lines of
+context around each change. Paths are relative and laid out as `--output-dir`
+lays out its copies, so a patch made on one machine applies on another, and it
+holds no timestamps, user names or absolute paths. A manifest the fixes leave
+as it is has no section. A file that does not end with a newline is marked as
+`diff` marks it.
+
+**Safety.** No manifest is modified, and there is no confirmation prompt, since
+nothing is edited in place. The patch is written to a temporary file and moved
+into place, so the file is either complete or not there. It is created readable
+by its owner only, because it contains the manifests' content. Before any work
+is done, `--output-patch` refuses a path that:
+
+- is a scanned manifest or the report being fixed, even with `--no-confirm`
+  (including through a hard link or symlink);
+- is a directory, or sits in a directory that does not exist;
+- already exists, unless `--no-confirm` is passed.
+
+**Partial remediation.** A patch is a proposal and not a statement that the
+findings are resolved. The summary says how many files and resources the patch
+changes and how many of the flagged control instances it covers, and lists the
+controls that cannot be fixed automatically, which need manual work as they do
+with every other mode:
+
+```
+Wrote a patch changing 2 file(s) and 3 resource(s) to remediation.patch, covering 5 of 9 flagged control instances. The original files were not modified.
+```
+
+**When there is nothing to export.** If no manifest would change, no file is
+written, and the run says so. An existing patch file is left as it was. If a
+manifest cannot be read or fixed, the whole export fails and no patch is
+written, since a patch that left a file out would read as complete.
+
+**Limitations.**
+
+- A change inside a line replaces the whole line in the patch.
+- YAML is edited in place, so comments, key order and the formatting of the
+  lines that are not fixed are kept. A JSON manifest is re-encoded with standard
+  indentation, as it is when fixed in place, so a manifest formatted another way
+  appears as changed throughout.
+- It is for manifest files. A cluster scan has no manifests to patch; use
+  `--output-dir` to write one patched manifest per resource.
+- It cannot be combined with `--output-dir`, which also leaves the manifests
+  untouched, or with `--dry-run`, which writes nothing.
+- The patch is made against the manifests as they are on disk when it is
+  written. If they change afterwards, check it with `git apply --check` before
+  applying it, or scan again.
+
 Fixing a cluster scan:
 
 ```bash
@@ -1095,7 +1183,8 @@ kubectl apply -f ./fixes
 > `--no-confirm` to apply fixes in non-interactive contexts.
 >
 > The in-place file modification confirmation prompt does not apply to cluster
-> scans or `--output-dir` (which write manifests to stdout or separate files).
+> scans, `--output-dir` or `--output-patch` (which write manifests to stdout,
+> separate files or a patch file).
 > However, with `--output-kustomize`, if the target directory already contains
 > Kustomize files, Kubescape prompts for confirmation before overwriting; in
 > non-interactive contexts, a non-empty directory is refused unless you pass

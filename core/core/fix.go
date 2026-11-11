@@ -39,6 +39,11 @@ var (
 )
 
 func (ks *Kubescape) Fix(fixInfo *metav1.FixInfo) error {
+	// Before anything is read: a patch combined with another output mode must
+	// fail, not quietly do one of the two.
+	if err := fixInfo.ValidateOutputPatch(); err != nil {
+		return err
+	}
 	logger.L().Info("Reading report file...")
 	handler, err := fixhandler.NewFixHandler(fixInfo)
 	if err != nil {
@@ -59,6 +64,16 @@ func (ks *Kubescape) Fix(fixInfo *metav1.FixInfo) error {
 	// Helm guidance is print-only — applied to none of the apply/confirm
 	// path below, since we do not auto-edit chart templates or values.yaml.
 	handler.PrintHelmSuggestions(helmSuggestions)
+
+	// A report can hold both manifests and Helm resources, so the Kustomize
+	// output below can be written before writePatch runs. Refuse an unusable
+	// patch destination first, so nothing is written when the export is going
+	// to fail. writePatch checks it again; it does not rely on this.
+	if fixInfo.OutputPatch != "" && len(resourcesToFix) > 0 && !handler.IsClusterReport() {
+		if err := handler.CheckPatchDestination(fixInfo.OutputPatch, resourcesToFix, fixInfo.NoConfirm); err != nil {
+			return err
+		}
+	}
 
 	// Emit Kustomize JSON 6902 patches when --output-kustomize is given.
 	// This is a machine-applicable companion to PrintHelmSuggestions: the
@@ -181,6 +196,9 @@ func (ks *Kubescape) Fix(fixInfo *metav1.FixInfo) error {
 	// confirmation prompt, which exists to guard in-place edits that this path
 	// never makes.
 	if handler.IsClusterReport() {
+		if fixInfo.OutputPatch != "" {
+			return errors.New("--output-patch exports changes to manifest files, and a cluster scan has none; use --output-dir to write one patched manifest per resource")
+		}
 		if fixInfo.Interactive {
 			handler.PrintExpectedChanges(resourcesToFix)
 		}
@@ -195,6 +213,15 @@ func (ks *Kubescape) Fix(fixInfo *metav1.FixInfo) error {
 			handler.PrintExpectedChanges(resourcesToFix)
 		}
 		return ks.writeFixedCopies(handler, resourcesToFix, fixInfo)
+	}
+
+	// --output-patch exports the same fixes as one unified diff. It sits before
+	// the confirmation prompt for the same reason: no manifest is edited.
+	if fixInfo.OutputPatch != "" {
+		if fixInfo.Interactive {
+			handler.PrintExpectedChanges(resourcesToFix)
+		}
+		return ks.writePatch(handler, resourcesToFix, fixInfo)
 	}
 
 	if fixInfo.Interactive && !fixInfo.NoConfirm {
@@ -304,6 +331,43 @@ func (ks *Kubescape) writeFixedCopies(handler *fixhandler.FixHandler, resourcesT
 		return fmt.Errorf("failed to fix some resources, check the logs for more details")
 	}
 
+	return nil
+}
+
+// writePatch exports the fixes of a file-based report to --output-patch as one
+// unified diff, leaving every manifest as it is. The destination is checked
+// before the fixes are computed and again before the write, and nothing is
+// written when no manifest would change or when any one fails to be fixed.
+func (ks *Kubescape) writePatch(handler *fixhandler.FixHandler, resourcesToFix []fixhandler.ResourceFixInfo, fixInfo *metav1.FixInfo) error {
+	if err := handler.CheckPatchDestination(fixInfo.OutputPatch, resourcesToFix, fixInfo.NoConfirm); err != nil {
+		return err
+	}
+
+	result, err := handler.BuildPatch(ks.Context(), resourcesToFix)
+	if err != nil {
+		return fmt.Errorf("no patch was written: %w", err)
+	}
+
+	// PhasePlanned, not PhaseApplied: a patch is a proposal. The manifests are
+	// unchanged, and saying "auto-fixed" would claim otherwise.
+	if result.Patch == "" {
+		logger.L().Info("No manifest would change, so no patch was written.")
+		handler.PrintUnfixedControls(fixhandler.PhasePlanned)
+		return nil
+	}
+
+	if err := handler.CheckPatchDestination(fixInfo.OutputPatch, resourcesToFix, fixInfo.NoConfirm); err != nil {
+		return err
+	}
+	if err := fixhandler.WritePatch(fixInfo.OutputPatch, result.Patch); err != nil {
+		return err
+	}
+
+	plannedControls := handler.FixedControlsCount()
+	totalFailed := plannedControls + len(handler.UnfixedControls())
+	logger.L().Info(fmt.Sprintf("Wrote a patch changing %d file(s) and %d resource(s) to %s, covering %d of %d flagged control instances. The original files were not modified.\n  Review it, then apply it from the scanned directory (the repository root inside git) with: git apply %s",
+		result.Files, result.Resources, fixInfo.OutputPatch, plannedControls, totalFailed, fixInfo.OutputPatch))
+	handler.PrintUnfixedControls(fixhandler.PhasePlanned)
 	return nil
 }
 
