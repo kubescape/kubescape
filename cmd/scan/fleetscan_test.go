@@ -277,6 +277,18 @@ func TestFleetScan_RequiresOutput(t *testing.T) {
 	require.ErrorContains(t, err, "--output")
 }
 
+func TestFleetScan_RejectsDryRunBeforeScanningAny(t *testing.T) {
+	scanInfo := cautils.ScanInfo{
+		DryRun:       true,
+		KubeContexts: []string{"ctx-a"},
+		Output:       "report.json",
+	}
+
+	err := fleetScan(scanInfo, &mocks.MockIKubescape{}, nil, scanContextOnlyRunner)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "--dry-run cannot be combined with fleet scanning")
+}
+
 // fleetTrackingKubescape is a test-local IKubescape recording, per
 // ScanContext call, the output path it was given (which encodes the
 // context, via perContextOutputPath) - and optionally failing for

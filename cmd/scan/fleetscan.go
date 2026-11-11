@@ -64,6 +64,9 @@ func validateKubeContextsSupported(cmd *cobra.Command, scanInfo *cautils.ScanInf
 	if len(scanInfo.KubeContexts) == 0 {
 		return nil
 	}
+	if scanInfo.DryRun {
+		return fmt.Errorf("--dry-run cannot be combined with fleet scanning")
+	}
 	switch cmd.Name() {
 	case "scan":
 		if scanInfo.View != string(cautils.SecurityViewType) {
@@ -250,6 +253,9 @@ func printerDestinations(outputPath string, formats []string) []string {
 func validateFleetScanInvocation(scanInfo *cautils.ScanInfo) (map[string]string, error) {
 	if scanInfo.GetScanningContext() != cautils.ContextCluster {
 		return nil, fmt.Errorf("--kube-contexts requires a live-cluster scan: it selects which cluster to connect to, so it can't be combined with scanning local files/directories")
+	}
+	if scanInfo.DryRun {
+		return nil, fmt.Errorf("--dry-run cannot be combined with fleet scanning")
 	}
 	if strings.TrimSpace(scanInfo.Output) == "" {
 		return nil, fmt.Errorf("--kube-contexts requires --output: each context's report is written to its own file, derived from --output, since only one context's results can be printed to stdout at a time")
@@ -694,7 +700,7 @@ func newClusterResult(kubeContext string, results *resultshandling.ResultsHandle
 		Duration:  elapsed.String(),
 	}
 
-	if results == nil {
+	if results == nil || results.GetData() == nil || results.GetData().Report == nil {
 		cluster.Status = failureStatus(err)
 		if err != nil {
 			cluster.Error = err.Error()
