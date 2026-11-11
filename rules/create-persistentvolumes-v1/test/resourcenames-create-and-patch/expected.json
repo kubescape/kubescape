@@ -1,0 +1,76 @@
+[
+    {
+        "alertMessage": "Subject: User-storage-bot can create arbitrary PersistentVolumes, including hostPath volumes",
+        "failedPaths": [
+            "relatedObjects[1].rules[0].resources[0]",
+            "relatedObjects[1].rules[0].verbs[0]",
+            "relatedObjects[1].rules[0].apiGroups[0]",
+            "relatedObjects[0].roleRef.name",
+            "relatedObjects[0].subjects[0]"
+        ],
+        "reviewPaths": [
+            "relatedObjects[1].rules[0].resources[0]",
+            "relatedObjects[1].rules[0].verbs[0]",
+            "relatedObjects[1].rules[0].apiGroups[0]",
+            "relatedObjects[0].roleRef.name",
+            "relatedObjects[0].subjects[0]"
+        ],
+        "deletePaths": null,
+        "fixPaths": [],
+        "ruleStatus": "",
+        "packagename": "armo_builtins",
+        "alertScore": 7,
+        "alertObject": {
+            "externalObjects": {
+                "apiGroup": "rbac.authorization.k8s.io",
+                "kind": "User",
+                "name": "storage-bot",
+                "relatedObjects": [
+                    {
+                        "apiVersion": "rbac.authorization.k8s.io/v1",
+                        "kind": "ClusterRoleBinding",
+                        "metadata": {
+                            "name": "named-pv-applier-crb"
+                        },
+                        "roleRef": {
+                            "apiGroup": "rbac.authorization.k8s.io",
+                            "kind": "ClusterRole",
+                            "name": "named-pv-applier"
+                        },
+                        "subjects": [
+                            {
+                                "apiGroup": "rbac.authorization.k8s.io",
+                                "kind": "User",
+                                "name": "storage-bot"
+                            }
+                        ]
+                    },
+                    {
+                        "apiVersion": "rbac.authorization.k8s.io/v1",
+                        "kind": "ClusterRole",
+                        "metadata": {
+                            "name": "named-pv-applier"
+                        },
+                        "rules": [
+                            {
+                                "apiGroups": [
+                                    ""
+                                ],
+                                "resourceNames": [
+                                    "data-pv"
+                                ],
+                                "resources": [
+                                    "persistentvolumes"
+                                ],
+                                "verbs": [
+                                    "create",
+                                    "patch"
+                                ]
+                            }
+                        ]
+                    }
+                ]
+            }
+        }
+    }
+]

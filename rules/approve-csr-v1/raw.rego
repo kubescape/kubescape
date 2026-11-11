@@ -85,15 +85,38 @@ can_create_and_approve_csrs(role) if {
 	can_approve_signers(role)
 }
 
-# resourceNames does not restrict create: the object has no name at
-# authorization time, so Kubernetes ignores the field for this verb. A rule
-# carrying resourceNames still creates any CSR.
+# A plain create carries no object name when the authorizer runs, and
+# ResourceNameMatches compares a non-empty resourceNames list with that empty
+# name, so an entry narrowed to real names does not authorize it at all.
+# Server-side apply is the exception: it creates a missing object through a
+# patch, and the API server authorizes that create with the object's name, so
+# create and patch on CSRs reach a named CSR even when both are narrowed (the
+# same route issue-token-secrets-v1 accepts for secrets).
 can_create_csrs(role) if {
 	rule := role.rules[_]
 	certificates_api_group(rule)
 	targets(rule, "certificatesigningrequests")
+	grants_unnamed_requests(rule)
 	verb_or_wildcard(rule.verbs, "create")
 }
+
+can_create_csrs(role) if {
+	grants_csr_verb(role, "create")
+	grants_csr_verb(role, "patch")
+}
+
+grants_csr_verb(role, verb) if {
+	rule := role.rules[_]
+	certificates_api_group(rule)
+	targets(rule, "certificatesigningrequests")
+	verb_or_wildcard(rule.verbs, verb)
+}
+
+# An omitted or empty resourceNames list is unrestricted, and "" is the name a
+# plain create is authorized with.
+grants_unnamed_requests(rule) if count(object.get(rule, "resourceNames", [])) == 0
+
+grants_unnamed_requests(rule) if "" in rule.resourceNames
 
 can_retrieve_csrs(role) if {
 	rule := role.rules[_]
