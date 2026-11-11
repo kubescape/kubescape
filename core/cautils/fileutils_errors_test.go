@@ -178,6 +178,43 @@ func TestHelmRenderedYAMLParseFailureFailsLoad(t *testing.T) {
 	assert.Contains(t, err.Error(), `chart "broken"`)
 }
 
+// writeUnloadableChart writes a chart under dir whose values.yaml is a YAML list,
+// which Helm refuses to load, so it is never rendered.
+func writeUnloadableChart(t *testing.T, dir string) {
+	t.Helper()
+	writeManifestFixture(t, dir, "Chart.yaml", "apiVersion: v2\nname: unloadable\nversion: 0.1.0\n")
+	writeManifestFixture(t, dir, "values.yaml", "- a\n- b\n")
+	templates := filepath.Join(dir, "templates")
+	require.NoError(t, os.Mkdir(templates, 0o700))
+	writeManifestFixture(t, templates, "sa.yaml", "apiVersion: v1\nkind: ServiceAccount\nmetadata:\n  name: sa\n")
+}
+
+func TestHelmChartLoadFailureFailsLoad(t *testing.T) {
+	dir := t.TempDir()
+	writeUnloadableChart(t, dir)
+	_, loadErr := NewHelmChart(dir)
+	require.Error(t, loadErr)
+
+	_, _, _, err := LoadResourcesFromHelmCharts(context.Background(), dir, HelmValueOptions{})
+
+	require.ErrorIs(t, err, ErrHelmLoadFailed)
+	assert.Contains(t, err.Error(), strconv.Quote(dir), "the error names the chart")
+	assert.Contains(t, err.Error(), loadErr.Error(), "the error carries the cause")
+}
+
+func TestNestedHelmChartLoadFailureIsSkipped(t *testing.T) {
+	dir := t.TempDir()
+	chartDir := filepath.Join(dir, "chart")
+	require.NoError(t, os.Mkdir(chartDir, 0o700))
+	writeUnloadableChart(t, chartDir)
+
+	workloads, _, renderedCharts, err := LoadResourcesFromHelmCharts(context.Background(), dir, HelmValueOptions{})
+
+	require.NoError(t, err, "a broken chart inside a broader scan must not fail the scan")
+	assert.Empty(t, workloads)
+	assert.Empty(t, renderedCharts)
+}
+
 func TestLoadResourcesFromKustomizeDirectoryPropagatesBuildFailure(t *testing.T) {
 	dir := t.TempDir()
 	writeManifestFixture(t, dir, "kustomization.yaml", `apiVersion: kustomize.config.k8s.io/v1beta1

@@ -408,6 +408,43 @@ func TestGetResourcesFromPath_FailsWhenScannedChartFailsToRender(t *testing.T) {
 	assert.Contains(t, err.Error(), "brokenchart")
 }
 
+// A chart Helm cannot load is never rendered. When it is the scanned input, the
+// scan fails with the cause rather than as an input with no resources.
+func TestGetResourcesFromPath_FailsWhenScannedChartFailsToLoad(t *testing.T) {
+	chartDir := filepath.Join(t.TempDir(), "chart")
+	require.NoError(t, os.MkdirAll(filepath.Join(chartDir, "templates"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "Chart.yaml"), []byte("apiVersion: v2\nname: unloadable\nversion: 0.1.0\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "values.yaml"), []byte("- a\n- b\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "templates", "sa.yaml"), []byte("apiVersion: v1\nkind: ServiceAccount\nmetadata:\n  name: sa\n"), 0o600))
+
+	_, _, _, err := getResourcesFromPath(context.TODO(), chartDir, cautils.HelmValueOptions{}, nil)
+
+	require.ErrorIs(t, err, cautils.ErrHelmLoadFailed)
+	assert.NotErrorIs(t, err, cautils.ErrNoManifestFiles)
+	assert.Contains(t, err.Error(), "values.yaml", "the cause is in the error, not only in a warning")
+}
+
+func TestGetResourcesFromPath_SkipsTemplatesOfNestedChartThatFailedToLoad(t *testing.T) {
+	dir := t.TempDir()
+	chartDir := filepath.Join(dir, "chart")
+	require.NoError(t, os.MkdirAll(filepath.Join(chartDir, "templates"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "Chart.yaml"), []byte("apiVersion: v2\nname: unloadable\nversion: 0.1.0\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "values.yaml"), []byte("- a\n- b\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "templates", "sa.yaml"), []byte("apiVersion: v1\nkind: ServiceAccount\nmetadata:\n  name: sa\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "pod.yaml"), []byte("apiVersion: v1\nkind: Pod\nmetadata:\n  name: plain\nspec:\n  containers:\n    - name: c\n      image: nginx\n"), 0o600))
+
+	_, workloads, skips, err := getResourcesFromPath(context.TODO(), dir, cautils.HelmValueOptions{}, nil)
+	require.NoError(t, err, "a broken chart inside a broader scan must not fail the scan")
+
+	names := make([]string, 0, len(workloads))
+	for _, w := range workloads {
+		names = append(names, w.GetName())
+	}
+	assert.Equal(t, []string{"plain"}, names, "templates of a chart that failed to load must not be scanned as plain YAML")
+	require.Len(t, skips, 1)
+	assert.Equal(t, "unrendered Helm template: its chart was not rendered", skips[0].Reason)
+}
+
 func TestGetResourcesFromPath_SkipsTemplatesOfNestedChartThatFailedToRender(t *testing.T) {
 	dir := t.TempDir()
 	chartDir := filepath.Join(dir, "chart")
