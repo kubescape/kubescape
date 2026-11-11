@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -47,6 +48,48 @@ func TestDiscoverPath_DirectoryOfRules(t *testing.T) {
 	rules, err := DiscoverPath(rulesRoot(t))
 	require.NoError(t, err)
 	assert.Greater(t, len(rules), 1)
+}
+
+func TestFilterCases(t *testing.T) {
+	rules := []RuleUnderTest{
+		{Name: "rule-a", Cases: []Case{{Name: "clean"}, {Name: "flagged"}}},
+		{Name: "rule-b", Cases: []Case{{Name: "flagged"}}},
+		{Name: "rule-c"},
+	}
+
+	names := func(filtered []RuleUnderTest) []string {
+		var out []string
+		for _, r := range filtered {
+			for _, c := range r.Cases {
+				out = append(out, r.Name+"/"+c.Name)
+			}
+		}
+		return out
+	}
+
+	tests := []struct {
+		name    string
+		pattern string
+		want    []string
+	}{
+		{name: "rule name selects all its cases", pattern: "^rule-a/", want: []string{"rule-a/clean", "rule-a/flagged"}},
+		{name: "case name selects across rules", pattern: "/flagged$", want: []string{"rule-a/flagged", "rule-b/flagged"}},
+		{name: "full name selects one case", pattern: "^rule-b/flagged$", want: []string{"rule-b/flagged"}},
+		{name: "unanchored pattern matches a substring", pattern: "lea", want: []string{"rule-a/clean"}},
+		{name: "rule without cases is dropped", pattern: "rule-c", want: nil},
+		{name: "no match", pattern: "missing", want: nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := FilterCases(rules, regexp.MustCompile(tt.pattern))
+			assert.Equal(t, tt.want, names(got))
+			for _, r := range got {
+				assert.NotEmpty(t, r.Cases, "rule %s: a rule without matching cases must be dropped", r.Name)
+			}
+		})
+	}
+
+	assert.Len(t, rules[0].Cases, 2, "FilterCases must not modify its input")
 }
 
 func TestRunRule_KnownGoodCasePasses(t *testing.T) {

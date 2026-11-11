@@ -413,6 +413,19 @@ kubescape policy test ./myrules --update
 Review the resulting diff before committing it: `--update` records whatever the
 rule currently produces, so it will happily bless a regression.
 
+`--run` narrows a run to the cases whose `<rule>/<case>` name, as printed next to
+each case's result, matches a regular expression. The pattern is not
+anchored, so `--run flagged` selects every case with `flagged` in its name, and
+`^no-privileged-containers/flagged$` selects exactly one. Rules without a
+matching case are left out of the run, and a pattern that matches no case at all
+is an error rather than an empty pass. Combined with `--update`, it rewrites the
+`expected.json` of the selected cases only and leaves the others as they are:
+
+```bash
+kubescape policy test ./myrules --run '^no-privileged-containers/flagged$'
+kubescape policy test ./myrules --run '/flagged$' --update
+```
+
 `policy test` gives a rule that reads
 [control configuration](#control-configuration) its inputs from an optional
 `data.json` in the test case directory, in the format regolibrary's fixtures

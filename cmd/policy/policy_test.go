@@ -93,6 +93,78 @@ func TestPolicyTestUpdate_IsIdempotent(t *testing.T) {
 	assert.Contains(t, out, "0 case(s) updated")
 }
 
+func TestPolicyTest_RunSelectsMatchingCases(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "no-privileged-containers")
+	_, err := runCmd(t, "policy", "init", dir)
+	require.NoError(t, err)
+	// Break the case --run leaves out, so the first run only passes if it is skipped.
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "test", "flagged", "expected.json"), []byte("[]\n"), 0o600))
+
+	out, err := runCmd(t, "policy", "test", dir, "--run", "^no-privileged-containers/clean$")
+	require.NoError(t, err, out)
+	assert.Contains(t, out, "PASS no-privileged-containers/clean")
+	assert.NotContains(t, out, "flagged")
+	assert.Contains(t, out, "1/1 cases passed")
+
+	out, err = runCmd(t, "policy", "test", dir, "--run", "flagged")
+	require.ErrorContains(t, err, "1 test case(s) failed")
+	assert.Contains(t, out, "FAIL no-privileged-containers/flagged")
+	assert.NotContains(t, out, "/clean")
+}
+
+func TestPolicyTestUpdate_RunRewritesOnlyMatchingCases(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "no-privileged-containers")
+	_, err := runCmd(t, "policy", "init", dir)
+	require.NoError(t, err)
+
+	flagged := filepath.Join(dir, "test", "flagged", "expected.json")
+	clean := filepath.Join(dir, "test", "clean", "expected.json")
+	require.NoError(t, os.WriteFile(flagged, []byte("[]\n"), 0o600))
+	require.NoError(t, os.WriteFile(clean, []byte("not json\n"), 0o600))
+
+	out, err := runCmd(t, "policy", "test", dir, "--update", "--run", "/flagged$")
+	require.NoError(t, err, out)
+	assert.Contains(t, out, "UPDATED no-privileged-containers/flagged")
+	assert.NotContains(t, out, "/clean")
+	assert.Contains(t, out, "1 case(s) updated")
+
+	got, err := os.ReadFile(clean)
+	require.NoError(t, err)
+	assert.Equal(t, "not json\n", string(got), "a case --run does not select must be left untouched")
+
+	_, err = runCmd(t, "policy", "test", dir, "--run", "/flagged$")
+	require.NoError(t, err)
+}
+
+func TestPolicyTest_RunWithoutMatchesReturnsError(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "no-privileged-containers")
+	_, err := runCmd(t, "policy", "init", dir)
+	require.NoError(t, err)
+
+	for _, args := range [][]string{
+		{"policy", "test", dir, "--run", "no-such-case"},
+		{"policy", "test", dir, "--run", "no-such-case", "--update"},
+	} {
+		t.Run(strings.Join(args[3:], " "), func(t *testing.T) {
+			out, err := runCmd(t, args...)
+			require.ErrorContains(t, err, `match --run "no-such-case"`)
+			assert.NotContains(t, out, "Usage:")
+			assert.NotContains(t, out, "cases passed")
+			assert.NotContains(t, out, "case(s) updated")
+		})
+	}
+}
+
+func TestPolicyTest_RejectsInvalidRunPattern(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "no-privileged-containers")
+	_, err := runCmd(t, "policy", "init", dir)
+	require.NoError(t, err)
+
+	out, err := runCmd(t, "policy", "test", dir, "--run", "flagged(")
+	require.ErrorContains(t, err, "invalid --run pattern")
+	assert.Contains(t, out, "Usage:")
+}
+
 func TestPolicyTest_ReportsMissingRules(t *testing.T) {
 	_, err := runCmd(t, "policy", "test", t.TempDir())
 	require.ErrorContains(t, err, "no rule directories")
