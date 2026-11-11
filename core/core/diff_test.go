@@ -288,6 +288,17 @@ func TestDiffOutputPath(t *testing.T) {
 // TestDiffOutputPath_DirectoryThroughSymlinkParent: "link/../" must resolve on
 // the filesystem, through the symlink, not be cleaned lexically to the
 // directory that holds the link.
+func TestDiffOutputPath_ExistingDirectoryWithoutTrailingSlash(t *testing.T) {
+	dir := t.TempDir()
+	got, explicit := diffOutputPath("json", dir)
+	require.True(t, explicit)
+	assert.Equal(t, filepath.Join(dir, "diff.json"), got)
+
+	gotYaml, explicitYaml := diffOutputPath("summary-yaml", dir)
+	require.True(t, explicitYaml)
+	assert.Equal(t, filepath.Join(dir, "diff.yaml"), gotYaml)
+}
+
 func TestDiffOutputPath_DirectoryThroughSymlinkParent(t *testing.T) {
 	root := t.TempDir()
 	storage := filepath.Join(root, "storage")

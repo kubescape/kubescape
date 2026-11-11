@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	metav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
@@ -163,12 +164,14 @@ func diffOutputPath(format, outputFile string) (string, bool) {
 	if outputFile == os.DevNull {
 		return outputFile, true
 	}
-	// A trailing separator names a directory: write a "diff" file inside it
+	// A trailing separator or existing directory names a directory: write a "diff" file inside it
 	// rather than a hidden file such as "out/.json" (or failing to open "out/").
 	// Append instead of filepath.Join, which would clean "link/../" lexically
 	// and pick a different directory than the filesystem does through a symlink.
 	if os.IsPathSeparator(outputFile[len(outputFile)-1]) {
 		outputFile += diffOutputBaseName
+	} else if fi, err := os.Stat(outputFile); err == nil && fi.IsDir() {
+		outputFile += string(filepath.Separator) + diffOutputBaseName
 	}
 	if format == printer.PrettyFormat {
 		return outputFile, true

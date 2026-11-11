@@ -440,3 +440,62 @@ func TestGetDiffCmd_OutputSafety_RejectsOverwrite(t *testing.T) {
 		assert.Contains(t, string(content), "C-HIGH")
 	})
 }
+
+func TestGetDiffCmd_OutputValidation(t *testing.T) {
+	tests := []struct {
+		name        string
+		outputArg   []string
+		wantError   bool
+		expectedErr string
+		wantOutput  string
+	}{
+		{
+			name:       "output not specified defaults to empty",
+			outputArg:  nil,
+			wantOutput: "",
+		},
+		{
+			name:       "valid output path is trimmed",
+			outputArg:  []string{"--output", "  out.json  "},
+			wantOutput: "out.json",
+		},
+		{
+			name:        "empty output flag is rejected",
+			outputArg:   []string{"--output", ""},
+			wantError:   true,
+			expectedErr: "output file path cannot be empty",
+		},
+		{
+			name:        "whitespace-only output flag is rejected",
+			outputArg:   []string{"-o", "   \t\n"},
+			wantError:   true,
+			expectedErr: "output file path cannot be empty",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stub := &stubKubescape{}
+			cmd := GetDiffCmd(stub)
+			cmd.SilenceErrors = true
+			cmd.SilenceUsage = true
+			args := []string{"base.json", "head.json"}
+			if tt.outputArg != nil {
+				args = append(args, tt.outputArg...)
+			}
+			cmd.SetArgs(args)
+
+			err := cmd.Execute()
+			if tt.wantError {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.expectedErr)
+				assert.Nil(t, stub.received, "validation must fail before invoking core")
+			} else {
+				require.NoError(t, err)
+				if assert.NotNil(t, stub.received) {
+					assert.Equal(t, tt.wantOutput, stub.received.Output)
+				}
+			}
+		})
+	}
+}
