@@ -550,6 +550,8 @@ spec:
 }
 
 func TestGetFileString_OversizedFileRejected(t *testing.T) {
+	t.Setenv(cautils.MaxFileSizeEnvVar, "") // empty falls back to DefaultMaxFileSize
+
 	dir := t.TempDir()
 	filePath := filepath.Join(dir, "manifest.yaml")
 	f, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY, 0o600)

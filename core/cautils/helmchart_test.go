@@ -476,6 +476,8 @@ func TestLoadResourcesFromHelmCharts_WorkspaceContainment(t *testing.T) {
 }
 
 func TestReadHelmTemplateFile_OversizedFileRejected(t *testing.T) {
+	t.Setenv(MaxFileSizeEnvVar, "") // empty falls back to DefaultMaxFileSize
+
 	dir := t.TempDir()
 	filePath := filepath.Join(dir, "template.yaml")
 	f, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY, 0o600)
@@ -542,6 +544,8 @@ func TestReadHelmTemplateFile_MaxFileSizeEnvVar(t *testing.T) {
 }
 
 func TestIsStaticTemplate_OversizedFileTreatedAsNonStatic(t *testing.T) {
+	t.Setenv(MaxFileSizeEnvVar, "") // empty falls back to DefaultMaxFileSize
+
 	dir := t.TempDir()
 	filePath := filepath.Join(dir, "oversized.yaml")
 	f, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY, 0o600)

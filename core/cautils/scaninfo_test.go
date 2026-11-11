@@ -1100,6 +1100,8 @@ func TestEvidenceFlagWarnings(t *testing.T) {
 }
 
 func TestReadArtifactFile_OversizedFileRejected(t *testing.T) {
+	t.Setenv(MaxFileSizeEnvVar, "") // empty falls back to DefaultMaxFileSize
+
 	dir := t.TempDir()
 	filePath := filepath.Join(dir, "oversized.json")
 	f, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY, 0o600)
@@ -1166,6 +1168,8 @@ func TestReadArtifactFile_MaxFileSizeEnvVar(t *testing.T) {
 }
 
 func TestSetUseArtifactsFrom_SkipsOversizedAndNonRegularFiles(t *testing.T) {
+	t.Setenv(MaxFileSizeEnvVar, "") // empty falls back to DefaultMaxFileSize
+
 	dir := t.TempDir()
 
 	validFramework := `{"name":"custom-fw","controls":[]}`

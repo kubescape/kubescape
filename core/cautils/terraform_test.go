@@ -232,6 +232,8 @@ resource "kubernetes_pod_v1" "outside" {
 }
 
 func TestReadTerraformFile_OversizedFileRejected(t *testing.T) {
+	t.Setenv(MaxFileSizeEnvVar, "") // empty falls back to DefaultMaxFileSize
+
 	dir := t.TempDir()
 	filePath := filepath.Join(dir, "oversized.tf")
 	f, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY, 0o600)
@@ -261,6 +263,8 @@ func TestReadTerraformFile_DirectoryRejected(t *testing.T) {
 }
 
 func TestTerraformDirectory_GetWorkloads_OversizedFileRejected(t *testing.T) {
+	t.Setenv(MaxFileSizeEnvVar, "") // empty falls back to DefaultMaxFileSize
+
 	dir := t.TempDir()
 	filePath := filepath.Join(dir, "oversized.tf")
 	f, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY, 0o600)
