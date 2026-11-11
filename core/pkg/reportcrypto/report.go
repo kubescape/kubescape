@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/reporthandling"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	k8sjson "k8s.io/apimachinery/pkg/util/json"
@@ -280,7 +281,7 @@ func (d *reportDecryptor) decryptResource(resource rawObject, context string) (s
 	if err := k8sjson.Unmarshal(objectRaw, &object); err != nil {
 		return "", "", fmt.Errorf("failed to parse %s.object: %w", context, err)
 	}
-	workload := workloadinterface.NewWorkloadObj(object)
+	workload := resourceEnvelope(object)
 
 	if err := DecryptResourceMetadata(workload, d.dek); err != nil {
 		return "", "", fmt.Errorf("failed to decrypt %s metadata: %w", context, err)
@@ -324,6 +325,18 @@ func (d *reportDecryptor) decryptResource(resource rawObject, context string) (s
 	}
 
 	return oldID, newID, nil
+}
+
+// resourceEnvelope wraps a report resource object in the envelope whose
+// SetName and SetNamespace the anonymizer encrypted it through, so the same
+// fields are restored. An RBAC subject (a Rego response vector object) keeps
+// its name and namespace at the top level of the object, beside its
+// relatedObjects; every other resource keeps them under metadata.
+func resourceEnvelope(object map[string]any) workloadinterface.IMetadata {
+	if objectsenvelopes.IsTypeRegoResponseVector(object) {
+		return objectsenvelopes.NewRegoResponseVectorObject(object)
+	}
+	return workloadinterface.NewWorkloadObj(object)
 }
 
 // decryptSource restores a resource source without discarding unknown fields.
