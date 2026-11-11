@@ -1,0 +1,79 @@
+{
+  "results": [
+    {
+      "index": 0,
+      "resource_id": "path=111/api=apps/v1/default/Deployment/a",
+      "control_id": "C-0017",
+      "verdict": "resolved",
+      "reason": "control_passed"
+    },
+    {
+      "index": 1,
+      "resource_id": "path=111/api=apps/v1/default/Deployment/a",
+      "control_id": "c-0017",
+      "verdict": "resolved",
+      "reason": "control_passed"
+    },
+    {
+      "index": 2,
+      "resource_id": "path=111/api=apps/v1/default/Deployment/a",
+      "control_id": "C-0001",
+      "verdict": "still_failing",
+      "reason": "control_failed"
+    },
+    {
+      "index": 3,
+      "resource_id": "path=111/api=apps/v1/default/Deployment/a",
+      "control_id": "C-0044",
+      "verdict": "unverified",
+      "reason": "control_not_evaluated",
+      "message": "the control was skipped or not fully evaluated in the fresh scan"
+    },
+    {
+      "index": 4,
+      "resource_id": "path=111/api=apps/v1/default/Deployment/a",
+      "control_id": "C-9999",
+      "verdict": "unverified",
+      "reason": "control_not_found",
+      "message": "the resource is in the fresh scan but the control was not reported for it"
+    },
+    {
+      "index": 5,
+      "resource_id": "path=222/api=apps/v1/default/Deployment/b",
+      "control_id": "C-0017",
+      "verdict": "unverified",
+      "reason": "control_substatus_present",
+      "message": "the control passed with a sub-status, which is not a conclusive pass"
+    },
+    {
+      "index": 6,
+      "resource_id": "path=333/api=v1/default/Pod/c",
+      "control_id": "C-0017",
+      "verdict": "unverified",
+      "reason": "ambiguous_control",
+      "message": "the fresh scan reports this control more than once for the resource"
+    },
+    {
+      "index": 7,
+      "resource_id": "path=999/api=v1/default/Pod/gone",
+      "control_id": "C-0017",
+      "verdict": "unverified",
+      "reason": "resource_not_found",
+      "message": "the resource_id is not in the fresh scan; the resource may have been renamed, moved, reordered or deleted, or path is a different root than the original scan, so this does not show the finding is fixed"
+    },
+    {
+      "index": 8,
+      "resource_id": "",
+      "control_id": "C-0017",
+      "verdict": "unverified",
+      "reason": "resource_id_missing",
+      "message": "the item has no resource_id, so there is no resource to look up"
+    }
+  ],
+  "summary": {
+    "resolved": 2,
+    "still_failing": 1,
+    "unverified": 6
+  },
+  "degraded": false
+}

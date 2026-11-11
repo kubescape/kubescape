@@ -2,9 +2,11 @@ package fix
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"testing"
 
+	"github.com/kubescape/kubescape/v4/cmd/shared"
 	metav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
 	"github.com/kubescape/kubescape/v4/core/mocks"
 	"github.com/spf13/cobra"
@@ -263,6 +265,7 @@ func TestFixCmdOutputPatchFlag(t *testing.T) {
 		{name: "empty path with no-confirm", args: []string{"report.json", "--no-confirm", "--output-patch", ""}, wantErr: "--output-patch needs a file path"},
 		{name: "with output-dir", args: []string{"report.json", "--output-patch", "remediation.patch", "--output-dir", "./fixed"}, wantErr: "--output-patch cannot be combined with --output-dir: choose a patch or fixed copies"},
 		{name: "with dry-run", args: []string{"report.json", "--output-patch", "remediation.patch", "--dry-run"}, wantErr: "--output-patch cannot be combined with --dry-run: exporting a patch already leaves the manifests untouched"},
+		{name: "with verify", args: []string{"report.json", "--output-patch", "remediation.patch", "--verify"}, wantErr: "--verify cannot be combined with --output-patch: the manifests are not changed, so a rescan would find every finding as it was"},
 	}
 
 	for _, tt := range tests {
@@ -296,4 +299,142 @@ func TestFixCmdOutputPatchIsDocumented(t *testing.T) {
 	assert.Contains(t, flag.Usage, "never modified")
 	assert.Contains(t, cmd.Example, "--output-patch remediation.patch")
 	assert.Contains(t, cmd.Example, "git apply")
+}
+
+func TestFixCmdVerifyFlag(t *testing.T) {
+	tests := []struct {
+		name       string
+		args       []string
+		wantErr    string
+		wantVerify bool
+	}{
+		{name: "not given", args: []string{"report.json"}},
+		{name: "given", args: []string{"report.json", "--verify"}, wantVerify: true},
+		{name: "explicitly off", args: []string{"report.json", "--verify=false"}},
+		{name: "with no-confirm", args: []string{"report.json", "--verify", "--no-confirm"}, wantVerify: true},
+		{name: "with interactive", args: []string{"report.json", "--verify", "-i"}, wantVerify: true},
+		{name: "with control selection", args: []string{"report.json", "--verify", "--include-controls", "C-0016"}, wantVerify: true},
+		{name: "with output-kustomize", args: []string{"report.json", "--verify", "--output-kustomize", "./patches"}, wantVerify: true},
+		{name: "with dry-run", args: []string{"report.json", "--verify", "--dry-run"}, wantErr: "--verify cannot be combined with --dry-run: no fix is applied, so there is nothing to verify"},
+		{name: "with output-dir", args: []string{"report.json", "--verify", "--output-dir", "./fixed"}, wantErr: "--verify cannot be combined with --output-dir: the manifests are not changed, so a rescan would find every finding as it was"},
+		{name: "with output-patch", args: []string{"report.json", "--verify", "--output-patch", "remediation.patch"}, wantErr: "--verify cannot be combined with --output-patch: the manifests are not changed, so a rescan would find every finding as it was"},
+		{name: "with output-patch, either order", args: []string{"report.json", "--output-patch", "remediation.patch", "--verify"}, wantErr: "--verify cannot be combined with --output-patch: the manifests are not changed, so a rescan would find every finding as it was"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			spy := &spyKubescape{}
+			cmd := GetFixCmd(spy)
+			cmd.SetArgs(tt.args)
+			cmd.SetOut(io.Discard)
+			cmd.SetErr(io.Discard)
+
+			err := cmd.Execute()
+
+			if tt.wantErr != "" {
+				assert.EqualError(t, err, tt.wantErr)
+				assert.False(t, spy.fixCalled, "a refused combination must not reach IKubescape.Fix")
+				return
+			}
+			require.NoError(t, err)
+			require.True(t, spy.fixCalled)
+			assert.Equal(t, tt.wantVerify, spy.received.Verify)
+		})
+	}
+}
+
+// failingKubescape is a Fix that fails the way a verification that could not
+// confirm every fix does.
+type failingKubescape struct {
+	mocks.MockIKubescape
+	err error
+}
+
+func (f *failingKubescape) Fix(*metav1.FixInfo) error { return f.err }
+
+// TestFixCmdVerifyFailureIsANonZeroExit: the command hands Fix's error on
+// unchanged, and an error is what ends the process with exit code 1.
+func TestFixCmdVerifyFailureIsANonZeroExit(t *testing.T) {
+	failure := errors.New("verification did not confirm every fix: 1 still failing, 1 unverified")
+	cmd := GetFixCmd(&failingKubescape{err: failure})
+	cmd.SetArgs([]string{"report.json", "--verify"})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+
+	err := cmd.Execute()
+
+	require.ErrorIs(t, err, failure)
+	assert.Equal(t, 1, shared.ExitCode(err))
+
+	spy := &spyKubescape{}
+	ok := GetFixCmd(spy)
+	ok.SetArgs([]string{"report.json", "--verify"})
+	ok.SetOut(io.Discard)
+	ok.SetErr(io.Discard)
+	assert.Equal(t, 0, shared.ExitCode(ok.Execute()), "a verification that confirmed everything exits 0")
+}
+
+func TestFixCmdVerifyIsDocumented(t *testing.T) {
+	cmd := GetFixCmd(&mocks.MockIKubescape{})
+
+	flag := cmd.PersistentFlags().Lookup("verify")
+	require.NotNil(t, flag, "the flag must be registered")
+	assert.Equal(t, "false", flag.DefValue)
+	assert.Contains(t, flag.Usage, "rescan")
+	assert.Contains(t, flag.Usage, "never a resolution")
+	assert.Contains(t, flag.Usage, "exceptions", "the settings the rescan cannot reproduce are named")
+	assert.Contains(t, cmd.Example, "--verify")
+}
+
+func TestFixCmdControlsConfigFlag(t *testing.T) {
+	tests := []struct {
+		name     string
+		args     []string
+		wantErr  string
+		wantPath string
+	}{
+		{name: "with verify", args: []string{"report.json", "--verify", "--controls-config", "config.json"}, wantPath: "config.json"},
+		{name: "with verify, equals form", args: []string{"report.json", "--verify", "--controls-config=config.json"}, wantPath: "config.json"},
+		{name: "not given", args: []string{"report.json", "--verify"}},
+		{name: "without verify", args: []string{"report.json", "--controls-config", "config.json"},
+			wantErr: "--controls-config only applies to --verify: it is the controls configuration the verification rescan uses"},
+		// An unset shell variable gives an empty path. Taken as "not given" the
+		// rescan would run under another configuration than the one asked for.
+		{name: "empty path", args: []string{"report.json", "--verify", "--controls-config", ""}, wantErr: "--controls-config needs a file path"},
+		{name: "empty path with equals", args: []string{"report.json", "--verify", "--controls-config="}, wantErr: "--controls-config needs a file path"},
+		{name: "blank path", args: []string{"report.json", "--verify", "--controls-config", "  "}, wantErr: "--controls-config needs a file path"},
+		{name: "empty path without verify", args: []string{"report.json", "--controls-config", ""}, wantErr: "--controls-config needs a file path"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			spy := &spyKubescape{}
+			cmd := GetFixCmd(spy)
+			cmd.SetArgs(tt.args)
+			cmd.SetOut(io.Discard)
+			cmd.SetErr(io.Discard)
+
+			err := cmd.Execute()
+
+			if tt.wantErr != "" {
+				assert.EqualError(t, err, tt.wantErr)
+				assert.False(t, spy.fixCalled, "a refused combination must not reach IKubescape.Fix")
+				return
+			}
+			require.NoError(t, err)
+			require.True(t, spy.fixCalled)
+			assert.Equal(t, tt.wantPath, spy.received.ControlsConfig)
+			assert.True(t, spy.received.Verify)
+		})
+	}
+}
+
+func TestFixCmdControlsConfigIsDocumented(t *testing.T) {
+	cmd := GetFixCmd(&mocks.MockIKubescape{})
+
+	flag := cmd.PersistentFlags().Lookup("controls-config")
+	require.NotNil(t, flag, "the flag must be registered")
+	assert.Contains(t, flag.Usage, "--verify")
+	assert.Contains(t, flag.Usage, "refuses")
+	assert.Contains(t, cmd.Example, "--controls-config")
 }

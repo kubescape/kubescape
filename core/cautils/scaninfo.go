@@ -172,6 +172,7 @@ type ScanInfo struct {
 	HostSensorEnabledDefault  *bool                        // Default fallback when HostSensorEnabled is unset (injected via ScanInfo defaults)
 	HostSensorYamlPath        string                       // Path to hostsensor file
 	Local                     bool                         // Do not submit results
+	NoClusterAccess           bool                         // Never contact a cluster, whatever the kubeconfig says. For a scan of local manifests, which a kubeconfig whose server is down would otherwise stall
 	AccountID                 string                       // account ID
 	AccessKey                 string                       // access key
 	FrameworkScan             bool                         // false if scanning control

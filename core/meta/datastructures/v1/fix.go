@@ -59,6 +59,17 @@ type FixInfo struct {
 	// HelmValueOptions carries user-supplied Helm value overrides and release identity
 	// used to reproduce scan-time chart renders during fix generation.
 	HelmValueOptions cautils.HelmValueOptions
+	// Verify, when set, rescans the manifests once the fixes have been applied in
+	// place and reports, for each fixed control, whether the finding is gone. It
+	// needs the manifests to have been changed, so it cannot be combined with
+	// DryRun or OutputDir, and a cluster report has none to rescan.
+	Verify bool
+	// ControlsConfig, with Verify, is the controls configuration file the
+	// verification rescan uses instead of the one the report records. A rescan has
+	// to judge a control by the configuration the finding was raised under, and
+	// the report records only the path of that file: when it can no longer be read,
+	// this is the way to say where it is now.
+	ControlsConfig string
 	// Writer is the destination writer for stdout-directed output (such as cluster fixes); defaults to os.Stdout when nil.
 	Writer io.Writer
 }
@@ -81,6 +92,33 @@ func (f *FixInfo) ValidateOutputPatch() error {
 	}
 	if f.DryRun {
 		return errors.New("--output-patch cannot be combined with --dry-run: exporting a patch already leaves the manifests untouched")
+	}
+	return nil
+}
+
+// ValidateVerify refuses the combinations in which Verify has nothing to
+// verify: DryRun, OutputDir and OutputPatch all leave the manifests as they
+// were, so a rescan would find every finding as it was and say nothing about the
+// fixes. It is checked by the command and again by Kubescape.Fix, so a caller of
+// the core API is held to the same rules. It is nil when Verify is not set.
+func (f *FixInfo) ValidateVerify() error {
+	if !f.Verify {
+		if f.ControlsConfig != "" {
+			return errors.New("--controls-config only applies to --verify: it is the controls configuration the verification rescan uses")
+		}
+		return nil
+	}
+	if f.ControlsConfig != "" && strings.TrimSpace(f.ControlsConfig) == "" {
+		return errors.New("--controls-config needs a file path")
+	}
+	if f.DryRun {
+		return errors.New("--verify cannot be combined with --dry-run: no fix is applied, so there is nothing to verify")
+	}
+	if f.OutputDir != "" {
+		return errors.New("--verify cannot be combined with --output-dir: the manifests are not changed, so a rescan would find every finding as it was")
+	}
+	if f.OutputPatch != "" {
+		return errors.New("--verify cannot be combined with --output-patch: the manifests are not changed, so a rescan would find every finding as it was")
 	}
 	return nil
 }
