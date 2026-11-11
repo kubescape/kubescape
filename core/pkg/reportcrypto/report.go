@@ -79,6 +79,9 @@ func DecryptReport(data, masterKey []byte) ([]byte, error) {
 	if err := decryptor.decryptExceptionAudit(); err != nil {
 		return nil, err
 	}
+	if err := decryptor.decryptSkippedManifests(); err != nil {
+		return nil, err
+	}
 	if err := decryptor.validateNoEncryptedValues(); err != nil {
 		return nil, err
 	}
@@ -644,6 +647,42 @@ func (d *reportDecryptor) decryptStringField(object rawObject, field, context st
 	}
 	if object[field], err = json.Marshal(restored); err != nil {
 		return fmt.Errorf("failed to marshal %s: %w", context, err)
+	}
+	return nil
+}
+
+// decryptSkippedManifests restores scanCoverage.skippedManifests: each path,
+// and the ciphertext of that path embedded in its reason. Fields unknown to
+// this version are kept in the coverage block and in every entry.
+func (d *reportDecryptor) decryptSkippedManifests() error {
+	coverage, ok, err := optionalObject(d.report, "scanCoverage", "scanCoverage")
+	if err != nil || !ok {
+		return err
+	}
+	skippedRaw, ok := coverage["skippedManifests"]
+	if !ok || isJSONNull(skippedRaw) {
+		return nil
+	}
+	skipped, err := decodeObjectArray(skippedRaw, "scanCoverage.skippedManifests")
+	if err != nil {
+		return err
+	}
+
+	for i := range skipped {
+		context := fmt.Sprintf("scanCoverage.skippedManifests[%d]", i)
+		if err := d.decryptStringField(skipped[i], "path", context+".path", decryptIfEncrypted); err != nil {
+			return err
+		}
+		if err := d.decryptStringField(skipped[i], "reason", context+".reason", decryptEmbeddedCiphertexts); err != nil {
+			return err
+		}
+	}
+
+	if coverage["skippedManifests"], err = json.Marshal(skipped); err != nil {
+		return fmt.Errorf("failed to marshal scanCoverage.skippedManifests: %w", err)
+	}
+	if d.report["scanCoverage"], err = json.Marshal(coverage); err != nil {
+		return fmt.Errorf("failed to marshal scanCoverage: %w", err)
 	}
 	return nil
 }
