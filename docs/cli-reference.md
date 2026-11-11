@@ -968,7 +968,9 @@ a config omits, so the live `envFrom` survives.
 | `--skip-user-values` | Skip changes requiring user values | `true` |
 | `--base-path` | Restrict fixes to this directory: the report's own recorded scan location must resolve inside it | - |
 | `--output-dir` | Write the fixes into this directory instead of their default destination. Manifest files: fixed copies that mirror the scanned tree, originals untouched. Cluster scans: one patched manifest per resource. A non-empty directory is refused unless `--no-confirm` is passed | *(fix in place / print to stdout)* |
-| `--output-patch` | Write the fixes for manifest files to this file as one unified diff instead of changing the manifests. Apply it from the scanned directory with `git apply` or `patch -p1`. The manifests are never modified, and an existing file is replaced only with `--no-confirm`. Not for cluster scans; cannot be combined with `--output-dir` or `--dry-run` | - |
+| `--output-patch` | Write the fixes for manifest files to this file as one unified diff instead of changing the manifests. Apply it from the scanned directory with `git apply` or `patch -p1`. The manifests are never modified, and an existing file is replaced only with `--no-confirm`. Not for cluster scans; cannot be combined with `--output-dir`, `--dry-run` or `--verify` | - |
+| `--verify` | After the fixes are applied in place, rescan the scanned directories and report, for each fixed control, whether the finding is `resolved`, `still failing` or `unverified`. Exits with an error unless every fix is resolved. Cannot be combined with `--dry-run`, `--output-dir` or `--output-patch`; not for cluster scans | `false` |
+| `--controls-config` | With `--verify`, the controls-config file the rescan uses instead of the one the report records. `--verify` refuses to run, before anything is changed, if the recorded file cannot be read. Only applies to `--verify` | - |
 | `--output-kustomize` | Write a `kustomization.yaml` and JSON 6902 patch files for Helm-rendered resources into this directory. A non-empty directory is refused unless `--no-confirm` is passed | - |
 | `-f`, `--values` | Specify Helm values in a YAML file (can specify multiple) | - |
 | `--set` | Set Helm values on the command line (e.g. `key1=val1,key2=val2`) | - |
@@ -1043,6 +1045,8 @@ kubescape fix results.json --output-dir ./fixed
 
 # Leave the manifests untouched: export the fixes as a patch to review and apply
 kubescape fix results.json --output-patch remediation.patch
+# Apply the fixes, then rescan to check that each one resolved its finding
+kubescape fix results.json --no-confirm --verify
 ```
 
 With `--output-dir` the copies recreate the scanned tree, and a multi-document
@@ -1154,10 +1158,81 @@ written, since a patch that left a file out would read as complete.
 - It is for manifest files. A cluster scan has no manifests to patch; use
   `--output-dir` to write one patched manifest per resource.
 - It cannot be combined with `--output-dir`, which also leaves the manifests
-  untouched, or with `--dry-run`, which writes nothing.
+  untouched, with `--dry-run`, which writes nothing, or with `--verify`, which
+  rescans manifests that have to have been changed.
 - The patch is made against the manifests as they are on disk when it is
   written. If they change afterwards, check it with `git apply --check` before
   applying it, or scan again.
+
+### Verifying the fixes
+
+`--verify` answers the question a fix leaves open: did it work. After the fixes
+are written in place, it rescans the scanned directories and judges every
+control that was fixed, one finding at a time:
+
+```
+Verification: 3 resolved, 1 still failing, 1 unverified
+  Deployment/web: C-0057 still_failing (control_failed): the control is still reported as failed in the fresh scan
+  Pod/db: C-0017 unverified (resource_not_found): the resource_id is not in the fresh scan; ...
+```
+
+| Verdict | Meaning |
+|---------|---------|
+| `resolved` | The resource is in the rescan, exactly one result for the control is `passed` with no sub-status, and the rescan completed with nothing skipped or degraded |
+| `still_failing` | The resource is in the rescan and the control is reported as failed |
+| `unverified` | Anything else, each with a reason: the resource or control is missing or reported twice, the control was not evaluated or passed with an exception, or the rescan was incomplete |
+
+The same rules decide the `verify_remediation` tool of the MCP server. A finding
+is never resolved by absence: a resource ID depends on the file's path under the
+scan root and on the document's position, so a renamed, moved or reordered
+resource, or one that was deleted, is not found and so is `unverified`. A
+rescan that skipped a manifest or did not fully complete resolves nothing.
+
+**Exit status.** The command exits `0` only when every fixed control is
+resolved, and `1` when any is `still failing` or `unverified`, or when the
+rescan itself could not run. A rescan that fails is an error, not a verdict.
+When some fixes could not be applied, verification is skipped and the existing
+failure is reported. A control that has no automatic fix, or a fix that was
+only partial, is not rescanned; it stays in the list of what needs manual
+work. When no fix was applied, there is nothing to verify and the command says
+so without scanning.
+
+**What the rescan covers.** It reads the manifests through the same roots the
+original scan did, which are the scanned directories (the repository root inside
+git, so a scan of one subdirectory of a repository rescans the whole
+repository). It checks only the controls that were fixed.
+
+**The configuration a verdict holds for.** What a control demands depends on the
+controls configuration, so a rescan under another is not a check of the fix: a
+default more lenient than the original would call resolved a finding the
+original configuration still fails. The report records the path of the
+controls-config file of the scan that made it, and the rescan uses that file.
+It is never replaced by the default: if the recorded file can no longer be read,
+`--verify` stops before it changes anything and asks for the file with
+`--controls-config`, which is also how to point the rescan at a different one.
+The output names the configuration used every time, and says when the report was
+made by another Kubescape version, whose policies may judge a control
+differently.
+
+**What the report does not record.** The exceptions the scan used, its controls
+version, where its policies came from, and filters such as `--include-kinds`, so
+the rescan takes the defaults for those, and the command says so each time. A
+verdict holds for that configuration; if your scan used other settings, scan
+again with them to confirm the result. Exceptions are the setting with the least
+reach, which is why there is no `--exceptions` option. An exception attaches to
+a finding that is still there: if the fix worked there is nothing for it to
+attach to and the control is `resolved` as before, and if the finding persists,
+an exception the original scan did not have makes it `still failing` (an
+`alertOnly` exception) or `unverified` (any other), never `resolved`.
+
+**No cluster is contacted.** The rescan reads manifests only. It does not reach
+for the cluster in your kubeconfig, so a kubeconfig whose server is down does not
+stall it.
+
+`--verify` needs the manifests to have been changed, so it cannot be combined
+with `--dry-run`, `--output-dir` or `--output-patch`, and a cluster scan has no
+manifests to rescan. Helm-rendered resources are only suggested, never applied, so they are
+not verified.
 
 Fixing a cluster scan:
 

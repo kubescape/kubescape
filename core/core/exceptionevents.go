@@ -8,6 +8,7 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	authorizationv1 "k8s.io/api/authorization/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -21,6 +22,16 @@ import (
 // unreachable API server cannot hold up the scan; a check that times out
 // disables the events like any other failed check.
 var eventsAccessReviewTimeout = 10 * time.Second
+
+// scanExceptionRecorder is the event recorder of a scan: none for a scan that
+// is not to contact a cluster, otherwise the one newSecurityExceptionEventRecorder
+// makes.
+func scanExceptionRecorder(ctx context.Context, scanInfo *cautils.ScanInfo) (record.EventRecorder, func()) {
+	if scanInfo.NoClusterAccess {
+		return nil, nil
+	}
+	return newSecurityExceptionEventRecorder(ctx)
+}
 
 // newSecurityExceptionEventRecorder returns the ExceptionMatched event recorder
 // for a live cluster scan and the function that shuts it down, or nil for both

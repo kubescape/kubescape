@@ -751,7 +751,7 @@ A report file does not carry the `truncated` flag of the `run_framework_security
 
 #### `verify_remediation`
 
-Check whether the findings listed by `apply_remediation` are fixed, after the caller has applied the changes to local IaC. It scans `path` once, in memory, for the controls in `items`, and returns one verdict per item. It is read-only: it does not apply patches and does not modify any file. Local IaC only; cluster resources are not supported.
+Check whether the findings listed by `apply_remediation` are fixed, after the caller has applied the changes to local IaC. It scans `path` once, in memory, for the controls in `items`, and returns one verdict per item. It is read-only: it does not apply patches and does not modify any file. Local IaC only; cluster resources are not supported. The verdict rules are shared with `kubescape fix --verify`, which applies them to fixes the CLI writes itself, so the two cannot disagree about what counts as resolved.
 
 **Parameters:**
 

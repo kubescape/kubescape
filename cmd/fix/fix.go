@@ -82,6 +82,21 @@ var fixCmdExamples = fmt.Sprintf(`
   2) %[1]s fix output.json --output-kustomize ./patches --output-post-renderer ./patches
   Apply: helm install my-release ./my-chart --post-renderer ./patches/renderer.sh
 
+  # Apply the fixes, then rescan to check each fixed finding is resolved
+  %[1]s fix output.json --verify
+
+  --verify rescans the scanned directories after the fixes are written in place
+  and reports, for each fixed control, resolved, still failing or unverified. It
+  exits with an error unless every fix is resolved, so it can gate a pipeline. A
+  resource that is missing from the rescan, or a rescan that did not fully
+  complete, is unverified, never resolved. The rescan uses the controls
+  configuration the report records, or the file given with --controls-config,
+  and refuses to run, before anything is changed, if the recorded file cannot be
+  read. It uses the defaults for what the report does not record (exceptions,
+  controls version, policy sources), so scan again with your own settings if
+  the original scan used others. It needs the manifests changed, so it cannot be
+  combined with --dry-run, --output-dir or --output-patch, and a cluster scan has none.
+
   The manifests reflect the cluster as it was scanned, not a live read: a
   resource that changed since the scan should be re-scanned before applying.
 
@@ -130,6 +145,13 @@ func GetFixCmd(ks meta.IKubescape) *cobra.Command {
 				return err
 			}
 
+			if cmd.Flags().Changed("controls-config") && strings.TrimSpace(fixInfo.ControlsConfig) == "" {
+				return errors.New("--controls-config needs a file path")
+			}
+			if err := fixInfo.ValidateVerify(); err != nil {
+				return err
+			}
+
 			return ks.Fix(&fixInfo)
 		},
 	}
@@ -143,7 +165,9 @@ func GetFixCmd(ks meta.IKubescape) *cobra.Command {
 	fixCmd.PersistentFlags().StringSliceVar(&fixInfo.IncludeControls, "include-controls", nil, "Remediate only these control IDs (comma-separated, case-insensitive). Controls outside the list are left untouched and are not reported as unfixed; disables --container-profile drift remediation")
 	fixCmd.PersistentFlags().StringSliceVar(&fixInfo.SkipControls, "skip-controls", nil, "Leave these control IDs untouched (comma-separated, case-insensitive). Takes precedence over --include-controls; disables --container-profile drift remediation")
 	fixCmd.PersistentFlags().StringVar(&fixInfo.OutputDir, "output-dir", "", "Write the fixes into this directory instead of their default destination. For manifest files: fixed copies that mirror the scanned tree, leaving the originals untouched instead of fixing them in place. For cluster scans: one patched manifest per resource, instead of printing them to stdout. A non-empty directory is refused unless --no-confirm is passed")
-	fixCmd.PersistentFlags().StringVar(&fixInfo.OutputPatch, "output-patch", "", "Write the fixes for manifest files to this file as one unified diff instead of changing the manifests. Apply it from the scanned directory with: git apply <file> (or patch -p1 < <file>). The manifests are never modified, and an existing file is replaced only with --no-confirm. Not for cluster scans; cannot be combined with --output-dir or --dry-run")
+	fixCmd.PersistentFlags().StringVar(&fixInfo.OutputPatch, "output-patch", "", "Write the fixes for manifest files to this file as one unified diff instead of changing the manifests. Apply it from the scanned directory with: git apply <file> (or patch -p1 < <file>). The manifests are never modified, and an existing file is replaced only with --no-confirm. Not for cluster scans; cannot be combined with --output-dir, --dry-run or --verify")
+	fixCmd.PersistentFlags().BoolVar(&fixInfo.Verify, "verify", false, "After the fixes are applied in place, rescan the manifests and report for each fixed control whether the finding is resolved, still failing or could not be verified. Exits with an error unless every fix is resolved. A missing resource or a degraded rescan is never a resolution. The rescan uses the controls configuration the report records and the defaults for what it does not (exceptions, controls version, policy sources). Cannot be combined with --dry-run, --output-dir or --output-patch, and does not apply to cluster scans (default false)")
+	fixCmd.PersistentFlags().StringVar(&fixInfo.ControlsConfig, "controls-config", "", "With --verify, the controls-config file the rescan uses instead of the one the report records. The report records only its path, and a rescan under another configuration could judge a control differently, so --verify refuses to run when the recorded file cannot be read; give the file here. Only applies to --verify")
 	fixCmd.PersistentFlags().StringVar(&fixInfo.KustomizeDir, "output-kustomize", "", "Write a kustomization.yaml and JSON 6902 patch files for Helm-rendered resources into this directory. Apply with: kustomize build <dir> | kubectl apply -f -. Note: container resources from ordinary scan reports are declined because environment configuration is redacted and programmatic scan-time provenance is not supplied through the ordinary producer")
 	fixCmd.PersistentFlags().StringVar(&fixInfo.PostRendererDir, "output-post-renderer", "", "Write an executable Helm --post-renderer script into this directory. Requires --output-kustomize to also be set. Apply with: helm install <release> <chart> --post-renderer <dir>/renderer.sh")
 	fixCmd.PersistentFlags().StringSliceVarP(&fixInfo.HelmValueOptions.ValueFiles, "values", "f", nil, "Specify values in a YAML file (can specify multiple)")

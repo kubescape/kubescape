@@ -107,7 +107,7 @@ func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo, policyIdenti
 		tenantConfig = cautils.GetTenantConfig(ctx, scanInfo.AccountID, scanInfo.AccessKey, scanInfo.GetClusterContextName(), scanInfo.CustomClusterName, k8s)
 	} else {
 		localTenantConfig := cautils.NewLocalConfig(scanInfo.AccountID, scanInfo.AccessKey, scanInfo.GetClusterContextName(), scanInfo.CustomClusterName)
-		if hasResolvedTenantConfig(scanInfo, localTenantConfig) {
+		if scanInfo.NoClusterAccess || hasResolvedTenantConfig(scanInfo, localTenantConfig) {
 			tenantConfig = localTenantConfig
 		} else {
 			k8sForTenant := kubernetesAPIFunc()
@@ -1029,8 +1029,12 @@ func (ks *Kubescape) ScanContext(ctx context.Context, scanInfo *cautils.ScanInfo
 			return resultsHandling, err
 		}
 
-		deps := resources.NewRegoDependenciesData(k8sinterface.GetK8sConfig(), interfaces.tenantConfig.GetContextName())
-		exceptionRecorder, shutdownRecorder := newSecurityExceptionEventRecorder(ctxOpa)
+		k8sConfig := k8sinterface.GetK8sConfig()
+		if scanInfo.NoClusterAccess {
+			k8sConfig = nil
+		}
+		deps := resources.NewRegoDependenciesData(k8sConfig, interfaces.tenantConfig.GetContextName())
+		exceptionRecorder, shutdownRecorder := scanExceptionRecorder(ctxOpa, scanInfo)
 		if shutdownRecorder != nil {
 			defer shutdownRecorder()
 		}

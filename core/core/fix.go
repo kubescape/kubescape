@@ -39,15 +39,21 @@ var (
 )
 
 func (ks *Kubescape) Fix(fixInfo *metav1.FixInfo) error {
-	// Before anything is read: a patch combined with another output mode must
-	// fail, not quietly do one of the two.
+	// Before anything is read: a patch or a verification combined with another
+	// output mode must fail, not quietly do one of the two.
 	if err := fixInfo.ValidateOutputPatch(); err != nil {
+		return err
+	}
+	if err := fixInfo.ValidateVerify(); err != nil {
 		return err
 	}
 	logger.L().Info("Reading report file...")
 	handler, err := fixhandler.NewFixHandler(fixInfo)
 	if err != nil {
 		return err
+	}
+	if fixInfo.Verify && handler.IsClusterReport() {
+		return errors.New("--verify rescans manifest files, and a cluster scan has none; fix the manifests that created the resources and scan them again")
 	}
 
 	resourcesToFix := handler.PrepareResourcesToFix(ks.Context())
@@ -58,6 +64,7 @@ func (ks *Kubescape) Fix(fixInfo *metav1.FixInfo) error {
 		// Without this a report whose resources were all skipped reads as a
 		// clean bill of health rather than a set of findings nothing handled.
 		handler.PrintUnfixedControls(fixhandler.PhasePlanned)
+		skipVerification(fixInfo)
 		return nil
 	}
 
@@ -174,7 +181,16 @@ func (ks *Kubescape) Fix(fixInfo *metav1.FixInfo) error {
 		logger.L().Info(noResourcesToFix)
 		// Even with nothing to auto-fix, surface controls that still need manual remediation.
 		handler.PrintUnfixedControls(fixhandler.PhasePlanned)
+		skipVerification(fixInfo)
 		return nil
+	}
+
+	// A verification that could not run as the original scan did must say so
+	// before the manifests are changed, not after.
+	if fixInfo.Verify {
+		if _, _, err := verificationConfig(handler.RecordedControlsInputs(), fixInfo.ControlsConfig); err != nil {
+			return err
+		}
 	}
 
 	if !fixInfo.Interactive {
@@ -241,6 +257,7 @@ func (ks *Kubescape) Fix(fixInfo *metav1.FixInfo) error {
 		if len(acceptedResources) == 0 {
 			logger.L().Info(noChangesApplied)
 			handler.PrintUnfixedControls(fixhandler.PhasePlanned)
+			skipVerification(fixInfo)
 			return nil
 		}
 		resourcesToFix = acceptedResources
@@ -251,6 +268,7 @@ func (ks *Kubescape) Fix(fixInfo *metav1.FixInfo) error {
 		if !fixInfo.NoConfirm && !userConfirmed() {
 			logger.L().Info(noChangesApplied)
 			handler.PrintUnfixedControls(fixhandler.PhasePlanned)
+			skipVerification(fixInfo)
 			return nil
 		}
 	}
@@ -284,10 +302,23 @@ func (ks *Kubescape) Fix(fixInfo *metav1.FixInfo) error {
 		for _, err := range errors {
 			logger.L().Ctx(ks.Context()).Warning("failed to fix resource", helpers.Error(err))
 		}
+		if fixInfo.Verify {
+			logger.L().Info("Verification skipped: not every fix was applied.")
+		}
 		return fmt.Errorf("failed to fix some resources, check the logs for more details")
 	}
 
+	if fixInfo.Verify {
+		return ks.verifyFixes(handler, fixInfo)
+	}
 	return nil
+}
+
+// skipVerification says why --verify did nothing when no fix was applied.
+func skipVerification(fixInfo *metav1.FixInfo) {
+	if fixInfo.Verify {
+		logger.L().Info(noFixesToVerify)
+	}
 }
 
 // writeFixedCopies fixes a file-based report into --output-dir instead of in

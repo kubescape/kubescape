@@ -17,6 +17,7 @@ import (
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	ksmetav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
 	"github.com/kubescape/kubescape/v4/core/pkg/fixhandler"
+	"github.com/kubescape/kubescape/v4/core/pkg/remediationverify"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
@@ -183,7 +184,7 @@ func newRemediationInputError(format string, args ...any) error {
 // spelled them: parseControlIDs only trims, so "c-0013" must still match the
 // report's "C-0013".
 func normalizeControlID(id string) string {
-	return strings.ToUpper(strings.TrimSpace(id))
+	return remediationverify.NormalizeControlID(id)
 }
 
 // reportedControlIDs collects every control the scan actually accounted for,
