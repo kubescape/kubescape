@@ -568,6 +568,8 @@ metadata:
 }
 
 func TestReadKustomizationFile_OversizedFileRejected(t *testing.T) {
+	t.Setenv(MaxFileSizeEnvVar, "") // empty falls back to DefaultMaxFileSize
+
 	dir := t.TempDir()
 	filePath := filepath.Join(dir, "kustomization.yaml")
 	f, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY, 0o600)
@@ -634,6 +636,8 @@ func TestReadKustomizationFile_MaxFileSizeEnvVar(t *testing.T) {
 }
 
 func TestKustomizeInputOwnershipForPath_OversizedFileRejected(t *testing.T) {
+	t.Setenv(MaxFileSizeEnvVar, "") // empty falls back to DefaultMaxFileSize
+
 	dir := t.TempDir()
 	filePath := filepath.Join(dir, "kustomization.yaml")
 	f, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY, 0o600)
