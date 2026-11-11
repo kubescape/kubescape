@@ -168,7 +168,10 @@ func diffOutputPath(format, outputFile string) (string, bool) {
 	// rather than a hidden file such as "out/.json" (or failing to open "out/").
 	// Append instead of filepath.Join, which would clean "link/../" lexically
 	// and pick a different directory than the filesystem does through a symlink.
-	if os.IsPathSeparator(outputFile[len(outputFile)-1]) {
+	if outputFile == filepath.VolumeName(outputFile) && strings.HasSuffix(outputFile, ":") {
+		// A bare Windows drive is relative to that drive's current directory.
+		outputFile += diffOutputBaseName
+	} else if os.IsPathSeparator(outputFile[len(outputFile)-1]) {
 		outputFile += diffOutputBaseName
 	} else if fi, err := os.Stat(outputFile); err == nil && fi.IsDir() {
 		outputFile += string(filepath.Separator) + diffOutputBaseName
