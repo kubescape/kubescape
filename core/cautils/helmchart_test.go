@@ -474,3 +474,83 @@ func TestLoadResourcesFromHelmCharts_WorkspaceContainment(t *testing.T) {
 		assert.ErrorIs(t, err, pathcontainment.ErrPathEscapesWorkspace)
 	})
 }
+
+func TestReadHelmTemplateFile_OversizedFileRejected(t *testing.T) {
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "template.yaml")
+	f, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY, 0o600)
+	require.NoError(t, err)
+	require.NoError(t, f.Truncate(DefaultMaxFileSize+1))
+	require.NoError(t, f.Close())
+
+	_, err = readHelmTemplateFile(filePath)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrHelmTemplateTooLarge)
+}
+
+func TestReadHelmTemplateFile_NonRegularFileRejected(t *testing.T) {
+	if _, err := os.Stat("/dev/null"); err == nil {
+		_, err := readHelmTemplateFile("/dev/null")
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrHelmTemplateNotRegular)
+	}
+}
+
+func TestReadHelmTemplateFile_DirectoryRejected(t *testing.T) {
+	dir := t.TempDir()
+	_, err := readHelmTemplateFile(dir)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrHelmTemplateNotRegular)
+	assert.Contains(t, err.Error(), "is a directory, not a file")
+}
+
+func TestReadHelmTemplateFile_MaxFileSizeEnvVar(t *testing.T) {
+	t.Run("lower override", func(t *testing.T) {
+		t.Setenv(MaxFileSizeEnvVar, "100")
+
+		dir := t.TempDir()
+		overLimitFile := filepath.Join(dir, "template.yaml")
+		require.NoError(t, os.WriteFile(overLimitFile, make([]byte, 200), 0o600))
+
+		_, err := readHelmTemplateFile(overLimitFile)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrHelmTemplateTooLarge)
+
+		underLimitFile := filepath.Join(dir, "valid_template.yaml")
+		require.NoError(t, os.WriteFile(underLimitFile, make([]byte, 50), 0o600))
+
+		data, err := readHelmTemplateFile(underLimitFile)
+		require.NoError(t, err)
+		assert.Len(t, data, 50)
+	})
+
+	t.Run("higher override", func(t *testing.T) {
+		raisedLimit := DefaultMaxFileSize + 1024
+		t.Setenv(MaxFileSizeEnvVar, fmt.Sprintf("%d", raisedLimit))
+
+		dir := t.TempDir()
+		overDefaultFile := filepath.Join(dir, "template.yaml")
+		f, err := os.OpenFile(overDefaultFile, os.O_CREATE|os.O_WRONLY, 0o600)
+		require.NoError(t, err)
+		require.NoError(t, f.Truncate(DefaultMaxFileSize+100))
+		require.NoError(t, f.Close())
+
+		data, err := readHelmTemplateFile(overDefaultFile)
+		require.NoError(t, err)
+		assert.Len(t, data, int(DefaultMaxFileSize+100))
+	})
+}
+
+func TestIsStaticTemplate_OversizedFileTreatedAsNonStatic(t *testing.T) {
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "oversized.yaml")
+	f, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY, 0o600)
+	require.NoError(t, err)
+	require.NoError(t, f.Truncate(DefaultMaxFileSize+1))
+	require.NoError(t, f.Close())
+
+	static, err := isStaticTemplate(filePath)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrHelmTemplateTooLarge)
+	assert.False(t, static)
+}
