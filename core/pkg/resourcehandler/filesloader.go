@@ -47,17 +47,18 @@ func (fileHandler *FileResourceHandler) GetResources(ctx context.Context, sessio
 		var skipped []cautils.SkippedManifest
 		var err error
 
+		cloneDepth := scanInfo.EffectiveGitCloneDepth()
 		helmValueOpts := helmValueOptionsFromScanInfo(scanInfo)
 		if scanInfo.ChartPath != "" && scanInfo.FilePath != "" {
 			// A chart-and-file input names one workload, leaving nothing to narrow.
-			input.sources, input.workloads, err = getWorkloadFromHelmChart(ctx, scanInfo.InputPatterns[path], scanInfo.ChartPath, scanInfo.FilePath, helmValueOpts)
+			input.sources, input.workloads, err = getWorkloadFromHelmChart(ctx, scanInfo.InputPatterns[path], scanInfo.ChartPath, scanInfo.FilePath, helmValueOpts, cloneDepth)
 		} else {
 			pathFilter, filterErr := pathFilterFromScanInfo(ctx, scanInfo.InputPatterns[path], scanInfo)
 			if filterErr != nil {
 				return nil, allResources, nil, nil, filterErr
 			}
-			input.root, input.sources, input.workloads, skipped, err = getResourcesFromInput(ctx, scanInfo.InputPatterns[path], helmValueOpts, pathFilter, scanInfo.WorkspaceDir)
-			input.remote = remoteName(scanInfo.InputPatterns[path])
+			input.root, input.sources, input.workloads, skipped, err = getResourcesFromInput(ctx, scanInfo.InputPatterns[path], helmValueOpts, pathFilter, cloneDepth, scanInfo.WorkspaceDir)
+			input.remote = remoteName(scanInfo.InputPatterns[path], cloneDepth)
 		}
 		sessionObj.SkippedManifests = append(sessionObj.SkippedManifests, skipped...)
 		if err != nil {
@@ -214,8 +215,8 @@ func rekeyPlainManifests(input *loadedInput, prefix string, rebase func(reportha
 
 // remoteName names a cloned remote repository by host, owner, repository and
 // branch. It returns "" for a local input.
-func remoteName(input string) string {
-	if cautils.GetClonedPath(input) == "" {
+func remoteName(input string, depthOpt ...int) string {
+	if cautils.GetClonedPath(input, depthOpt...) == "" {
 		return ""
 	}
 	gitURL, err := giturl.NewGitAPI(input)
@@ -367,7 +368,7 @@ func pathFilterFromScanInfo(ctx context.Context, input string, scanInfo *cautils
 		return nil, nil
 	}
 
-	filter, err := cautils.NewScanPathFilter(input, scanInfo.ExcludePaths, !scanInfo.NoIgnoreFile)
+	filter, err := cautils.NewScanPathFilter(input, scanInfo.ExcludePaths, !scanInfo.NoIgnoreFile, scanInfo.EffectiveGitCloneDepth())
 	if err != nil {
 		return nil, err
 	}
@@ -381,8 +382,8 @@ func pathFilterFromScanInfo(ctx context.Context, input string, scanInfo *cautils
 	return filter, nil
 }
 
-func getWorkloadFromHelmChart(ctx context.Context, path, helmPath, workloadPath string, helmValueOpts cautils.HelmValueOptions) (map[string]reporthandling.Source, []workloadinterface.IMetadata, error) {
-	clonedRepo := cautils.GetClonedPath(path)
+func getWorkloadFromHelmChart(ctx context.Context, path, helmPath, workloadPath string, helmValueOpts cautils.HelmValueOptions, depthOpt ...int) (map[string]reporthandling.Source, []workloadinterface.IMetadata, error) {
+	clonedRepo := cautils.GetClonedPath(path, depthOpt...)
 
 	if clonedRepo != "" {
 		// if the repo was cloned, add the workload path to the cloned repo
@@ -494,14 +495,14 @@ func excludeFilesUnderDirectories(sourceToWorkloads map[string][]workloadinterfa
 // source file it came from. When workspace containment is configured via workspaceOpt,
 // external references and symlinks outside the workspace are contained or skipped.
 func getResourcesFromPath(ctx context.Context, path string, helmValueOpts cautils.HelmValueOptions, pathFilter *cautils.PathFilter, workspaceOpt ...string) (map[string]reporthandling.Source, []workloadinterface.IMetadata, []cautils.SkippedManifest, error) {
-	_, workloadIDToSource, workloads, skips, err := getResourcesFromInput(ctx, path, helmValueOpts, pathFilter, workspaceOpt...)
+	_, workloadIDToSource, workloads, skips, err := getResourcesFromInput(ctx, path, helmValueOpts, pathFilter, cautils.DefaultGitCloneDepth, workspaceOpt...)
 	return workloadIDToSource, workloads, skips, err
 }
 
 // getResourcesFromInput loads one scan input. It also returns the local root the
 // input's paths are reported against, or "" for a cloned remote repository, whose
 // temporary checkout must not leak into resource IDs.
-func getResourcesFromInput(ctx context.Context, path string, helmValueOpts cautils.HelmValueOptions, pathFilter *cautils.PathFilter, workspaceOpt ...string) (string, map[string]reporthandling.Source, []workloadinterface.IMetadata, []cautils.SkippedManifest, error) {
+func getResourcesFromInput(ctx context.Context, path string, helmValueOpts cautils.HelmValueOptions, pathFilter *cautils.PathFilter, cloneDepth int, workspaceOpt ...string) (string, map[string]reporthandling.Source, []workloadinterface.IMetadata, []cautils.SkippedManifest, error) {
 	var workspaceDir string
 	if len(workspaceOpt) > 0 {
 		workspaceDir = workspaceOpt[0]
@@ -511,7 +512,7 @@ func getResourcesFromInput(ctx context.Context, path string, helmValueOpts cauti
 	var workloads []workloadinterface.IMetadata
 	var allSkips []cautils.SkippedManifest
 
-	clonedRepo := cautils.GetClonedPath(path)
+	clonedRepo := cautils.GetClonedPath(path, cloneDepth)
 	if clonedRepo != "" {
 		// if the repo was cloned, add the workload path to the cloned repo
 		path = clonedRepo

@@ -351,3 +351,101 @@ func TestScanInfoCleanupSequentialIdempotency(t *testing.T) {
 	scanInfo.Cleanup()
 	assert.Equal(t, 1, count)
 }
+
+func TestMaterializeRemoteInputsForwardsGitCloneDepth(t *testing.T) {
+	intPtr := func(v int) *int { return &v }
+	tests := []struct {
+		name      string
+		depth     *int
+		wantDepth int
+	}{
+		{
+			name:      "zero value scanInfo with nil depth defaults to 0",
+			depth:     nil,
+			wantDepth: 0,
+		},
+		{
+			name:      "explicit default depth 0",
+			depth:     intPtr(DefaultGitCloneDepth),
+			wantDepth: 0,
+		},
+		{
+			name:      "opt-in shallow depth 1",
+			depth:     intPtr(1),
+			wantDepth: 1,
+		},
+		{
+			name:      "custom depth 4",
+			depth:     intPtr(4),
+			wantDepth: 4,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resetRepoWorkspaceState(t)
+			t.Setenv("GITHUB_TOKEN", "test-token")
+			var capturedOpts *git.CloneOptions
+			useFakeClone(t, func(path string, _ bool, options *git.CloneOptions) (*git.Repository, error) {
+				capturedOpts = options
+				return initializeCloneWorkspace(path, options)
+			})
+
+			remoteURL := "https://github.com/example/repo"
+			scanInfo := &ScanInfo{
+				InputPatterns: []string{remoteURL},
+				GitCloneDepth: tt.depth,
+			}
+			require.NoError(t, scanInfo.MaterializeRemoteInputs(context.Background()))
+			t.Cleanup(scanInfo.Cleanup)
+
+			require.NotNil(t, capturedOpts)
+			assert.Equal(t, tt.wantDepth, capturedOpts.Depth)
+			assert.Equal(t, tt.wantDepth > 0, capturedOpts.SingleBranch)
+		})
+	}
+}
+
+func TestMaterializeRemoteInputsConcurrentDifferentDepths(t *testing.T) {
+	resetRepoWorkspaceState(t)
+	t.Setenv("GITHUB_TOKEN", "test-token")
+	useFakeClone(t, func(path string, _ bool, options *git.CloneOptions) (*git.Repository, error) {
+		return initializeCloneWorkspace(path, options)
+	})
+
+	remoteURL := "https://github.com/example/shared-repo"
+	intPtr := func(v int) *int { return &v }
+
+	// Scan 1: shallow clone (depth 1)
+	scan1 := &ScanInfo{
+		InputPatterns: []string{remoteURL},
+		GitCloneDepth: intPtr(1),
+	}
+	require.NoError(t, scan1.MaterializeRemoteInputs(context.Background()))
+	dir1 := GetClonedPath(remoteURL, 1)
+	require.NotEmpty(t, dir1)
+	assert.DirExists(t, dir1)
+
+	// Scan 2: full history clone (depth 0) on the same repository URL
+	scan2 := &ScanInfo{
+		InputPatterns: []string{remoteURL},
+		GitCloneDepth: intPtr(0),
+	}
+	require.NoError(t, scan2.MaterializeRemoteInputs(context.Background()))
+	dir2 := GetClonedPath(remoteURL, 0)
+	require.NotEmpty(t, dir2)
+	assert.DirExists(t, dir2)
+	assert.NotEqual(t, dir1, dir2, "concurrent scans with different depths must isolate workspaces")
+
+	// Cleaning up scan1 must delete ONLY dir1 and must not touch dir2
+	scan1.Cleanup()
+	assert.NoDirExists(t, dir1)
+	assert.Empty(t, GetClonedPath(remoteURL, 1))
+	assert.DirExists(t, dir2, "cleaning up depth 1 scan must not delete active depth 0 workspace")
+	assert.Equal(t, dir2, GetClonedPath(remoteURL, 0))
+
+	// Cleaning up scan2 releases dir2 cleanly
+	scan2.Cleanup()
+	assert.NoDirExists(t, dir2)
+	assert.Empty(t, GetClonedPath(remoteURL, 0))
+}

@@ -76,8 +76,8 @@ func NewPathFilter(root string, patterns []string) (*PathFilter, error) {
 // NewScanPathFilter builds the filter for a scan of input, combining the ignore file at
 // the scan root with the patterns given on the command line. Command line patterns are
 // applied last so they can re-include what the ignore file excluded.
-func NewScanPathFilter(input string, patterns []string, useIgnoreFile bool) (*PathFilter, error) {
-	root := ignoreRoot(input)
+func NewScanPathFilter(input string, patterns []string, useIgnoreFile bool, depthOpt ...int) (*PathFilter, error) {
+	root := ignoreRoot(input, depthOpt...)
 
 	var combined []string
 	if useIgnoreFile {
@@ -316,11 +316,11 @@ func descendantPrefix(rule ignoreRule) string {
 
 // ignoreRoot resolves the directory a scan input is anchored at. A file or a glob is
 // anchored at its parent directory, so patterns stay relative to the same place.
-func ignoreRoot(input string) string {
+func ignoreRoot(input string, depthOpt ...int) string {
 	if input == "" {
 		return "."
 	}
-	if clonedRepo := GetClonedPath(input); clonedRepo != "" {
+	if clonedRepo := GetClonedPath(input, depthOpt...); clonedRepo != "" {
 		input = clonedRepo
 	}
 	if isDir(input) {
