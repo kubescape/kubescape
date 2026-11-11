@@ -200,7 +200,7 @@ The SARIF, HTML, CSV, GitLab SAST and GitHub Actions outputs read the same path 
 | A YAML file | The file and the line |
 | A Helm chart | The template file. The line is shown only if the template contains no template actions (`{{`), because otherwise the rendered output no longer matches the file, and Kubescape prefers no line to a wrong one |
 | A Kustomize directory | The directory only. The output is composed from a base and overlays, so no single source line exists |
-| A live cluster | No file or line |
+| A live cluster | No file or line. With `--show-evidence` the terminal output prints, under each resource's table, a `kubectl get ... -o jsonpath=...` command per path, including `--context` for the cluster that was scanned. It prints nothing for a credential-shaped path unless `--show-secrets` is set, and for a fix path the command prints nothing when the field is absent |
 | Any source, with `--hide` or `--encrypt` | The path and value, but no line. Source paths are replaced by pseudonyms and cannot be read, and Kubescape warns about it |
 
 ### Redaction and scrubbing

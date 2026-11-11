@@ -40,6 +40,12 @@ type PrettyPrinter struct {
 	printAttackTree bool
 	showEvidence    bool
 	showSecrets     bool
+	// anonymized is set when --hide or --encrypt replaced the names in the session,
+	// so a name printed from it no longer exists on the cluster.
+	anonymized bool
+	// kubeconfig is the file the scan was told to read with --kubeconfig, empty
+	// when it used the default.
+	kubeconfig string
 }
 
 func NewPrettyPrinter(verboseMode bool, formatVersion string, attackTree bool, viewType cautils.ViewTypes, scanType cautils.ScanTypes, inputPatterns []string, clusterName string, showEvidence bool, showSecrets bool) *PrettyPrinter {
@@ -56,6 +62,19 @@ func NewPrettyPrinter(verboseMode bool, formatVersion string, attackTree bool, v
 	}
 
 	return prettyPrinter
+}
+
+// SetKubeconfig records the kubeconfig file the scan was given, so a command
+// printed for a live cluster reads the same cluster from the same file.
+func (pp *PrettyPrinter) SetKubeconfig(path string) {
+	pp.kubeconfig = path
+}
+
+// SetAnonymized tells the printer that the session was anonymized by --hide or
+// --encrypt, so resource names, namespaces and the context name in it are
+// pseudonyms and cannot be put in a kubectl command.
+func (pp *PrettyPrinter) SetAnonymized(anonymized bool) {
+	pp.anonymized = anonymized
 }
 
 func (pp *PrettyPrinter) SetMainPrinter() {
