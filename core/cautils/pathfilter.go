@@ -2,11 +2,14 @@ package cautils
 
 import (
 	"bufio"
+	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"github.com/bmatcuk/doublestar/v4"
 )
@@ -124,20 +127,93 @@ func ValidateCommandLinePatterns(patterns []string) error {
 	return nil
 }
 
+var (
+	// ErrIgnoreFileNotRegular is returned when an ignore file is not a regular file.
+	ErrIgnoreFileNotRegular = errors.New("ignore file is not a regular file")
+	// ErrIgnoreFileTooLarge is returned when an ignore file exceeds the maximum allowed size.
+	ErrIgnoreFileTooLarge = errors.New("ignore file exceeds maximum size limit")
+)
+
+// openIgnoreFile opens path for reading and rejects anything but a regular file.
+// A pre-open stat check prevents opening device nodes (e.g. tape or character devices).
+// O_NONBLOCK keeps opening a FIFO from waiting for a writer, and descriptor-based
+// validation ensures a path swapped after stat cannot slip past.
+func openIgnoreFile(path string) (*os.File, error) {
+	if strings.TrimSpace(path) == "" {
+		return nil, os.ErrNotExist
+	}
+	cleaned := filepath.Clean(path)
+	statInfo, err := os.Stat(cleaned)
+	if err != nil {
+		return nil, err
+	}
+	if statInfo.IsDir() {
+		return nil, fmt.Errorf("%q is a directory, not a file: %w", path, ErrIgnoreFileNotRegular)
+	}
+	if !statInfo.Mode().IsRegular() {
+		return nil, fmt.Errorf("%w: %q", ErrIgnoreFileNotRegular, path)
+	}
+
+	file, err := os.OpenFile(cleaned, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return nil, err
+	}
+	info, err := file.Stat()
+	if err != nil {
+		file.Close()
+		return nil, err
+	}
+	if info.IsDir() {
+		file.Close()
+		return nil, fmt.Errorf("%q is a directory, not a file: %w", path, ErrIgnoreFileNotRegular)
+	}
+	if !info.Mode().IsRegular() {
+		file.Close()
+		return nil, fmt.Errorf("%w: %q", ErrIgnoreFileNotRegular, path)
+	}
+	return file, nil
+}
+
+// readIgnoreFile returns the contents of the ignore file at path, reading at most
+// getMaxFileSize() bytes (configurable via KUBESCAPE_MAX_FILE_SIZE, defaulting to
+// DefaultMaxFileSize) so that reading remains bounded.
+func readIgnoreFile(path string) ([]byte, error) {
+	file, err := openIgnoreFile(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	limit := getMaxFileSize()
+
+	info, err := file.Stat()
+	if err == nil && info.Size() > limit {
+		return nil, fmt.Errorf("%w: %q exceeds the %d byte limit", ErrIgnoreFileTooLarge, path, limit)
+	}
+
+	data, err := io.ReadAll(io.LimitReader(file, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > limit {
+		return nil, fmt.Errorf("%w: %q exceeds the %d byte limit", ErrIgnoreFileTooLarge, path, limit)
+	}
+	return data, nil
+}
+
 // LoadIgnoreFilePatterns reads the ignore file at root. A missing file is not an error.
 func LoadIgnoreFilePatterns(root string) ([]string, error) {
 	path := filepath.Join(root, IgnoreFileName)
-	file, err := os.Open(path) // #nosec G304 -- the path is the ignore file at the user's own scan root
+	content, err := readIgnoreFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("failed to read %s: %w", path, err)
 	}
-	defer file.Close()
 
 	var patterns []string
-	scanner := bufio.NewScanner(file)
+	scanner := bufio.NewScanner(bytes.NewReader(content))
 	for scanner.Scan() {
 		patterns = append(patterns, scanner.Text())
 	}
