@@ -34,6 +34,7 @@ func TestSnakeToCamel(t *testing.T) {
 		{"single word", "spec", "spec"},
 		{"empty segment from double underscore is skipped", "host__alias", "hostAlias"},
 		{"trailing underscore segment is dropped", "trailing_", "trailing"},
+		{"leading and trailing underscores are dropped", "_init_container_", "InitContainer"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -201,18 +202,18 @@ resource "kubernetes_pod" "explicit-name" {
 resource "kubernetes_role_binding" "rb" {
 }
 
-resource "kubernetes_foo_bar" "unsupported" {
-  name = "skip-me"
+resource "kubernetes_deployment" "legacy-web" {
+  replicas = 2
 }
 
-not_a_resource {
-  label = "ignored"
+resource "kubernetes_foo_bar" "unsupported" {
+  name = "skip-me"
 }
 `
 	manifests, errs := extractTypedResources(parseTypedHCL(t, src), &hcl.EvalContext{})
 
 	require.Empty(t, errs)
-	require.Len(t, manifests, 3, "unsupported and non-resource blocks must be skipped")
+	require.Len(t, manifests, 4, "unsupported resource types must be skipped")
 
 	assert.Equal(t, "apps/v1", manifests[0]["apiVersion"])
 	assert.Equal(t, "Deployment", manifests[0]["kind"])
@@ -226,6 +227,30 @@ not_a_resource {
 	assert.Equal(t, "rbac.authorization.k8s.io/v1", manifests[2]["apiVersion"])
 	assert.Equal(t, "RoleBinding", manifests[2]["kind"])
 	assert.Equal(t, map[string]interface{}{"name": "rb"}, manifests[2]["metadata"])
+
+	assert.Equal(t, "apps/v1", manifests[3]["apiVersion"])
+	assert.Equal(t, "Deployment", manifests[3]["kind"])
+	assert.Equal(t, json.Number("2"), manifests[3]["replicas"])
+	assert.Equal(t, map[string]interface{}{"name": "legacy-web"}, manifests[3]["metadata"])
+}
+
+func TestExtractTypedResourcesSkipsInvalidBlocks(t *testing.T) {
+	cases := []struct {
+		name string
+		src  string
+	}{
+		{"non-resource block with two labels", `not_a_resource "kubernetes_deployment" "ignored" {}`},
+		{"resource block with no labels", `resource {}`},
+		{"resource block with one label", `resource "kubernetes_deployment" {}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			manifests, errs := extractTypedResources(parseTypedHCL(t, tc.src), &hcl.EvalContext{})
+
+			assert.Empty(t, errs)
+			assert.Empty(t, manifests)
+		})
+	}
 }
 
 func TestExtractTypedResourcesCollectsUnresolvableAttributes(t *testing.T) {
