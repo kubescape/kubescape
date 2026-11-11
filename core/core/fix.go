@@ -68,6 +68,16 @@ func (ks *Kubescape) Fix(fixInfo *metav1.FixInfo) error {
 		return nil
 	}
 
+	// A verification that could not run as the original scan did must say so
+	// before anything is written, not after: before the manifests are changed,
+	// and before the Kustomize output below. Without a fix to apply there is
+	// nothing to verify, so nothing is refused.
+	if fixInfo.Verify && len(resourcesToFix) > 0 {
+		if _, _, err := verificationConfig(handler.RecordedControlsInputs(), fixInfo.ControlsConfig); err != nil {
+			return err
+		}
+	}
+
 	// Helm guidance is print-only — applied to none of the apply/confirm
 	// path below, since we do not auto-edit chart templates or values.yaml.
 	handler.PrintHelmSuggestions(helmSuggestions)
@@ -183,14 +193,6 @@ func (ks *Kubescape) Fix(fixInfo *metav1.FixInfo) error {
 		handler.PrintUnfixedControls(fixhandler.PhasePlanned)
 		skipVerification(fixInfo)
 		return nil
-	}
-
-	// A verification that could not run as the original scan did must say so
-	// before the manifests are changed, not after.
-	if fixInfo.Verify {
-		if _, _, err := verificationConfig(handler.RecordedControlsInputs(), fixInfo.ControlsConfig); err != nil {
-			return err
-		}
 	}
 
 	if !fixInfo.Interactive {
