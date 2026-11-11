@@ -9,6 +9,7 @@ import (
 
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/pkg/ruledir"
 	"github.com/kubescape/opa-utils/reporthandling"
 )
 
@@ -36,7 +37,7 @@ func LoadCaseInput(dir string) ([]workloadinterface.IMetadata, error) {
 		default:
 			continue
 		}
-		raw, err := os.ReadFile(filepath.Join(inputDir, e.Name()))
+		raw, err := ruledir.ReadFile(filepath.Join(inputDir, e.Name()))
 		if err != nil {
 			return nil, fmt.Errorf("read %s: %w", e.Name(), err)
 		}
@@ -52,7 +53,7 @@ func LoadCaseInput(dir string) ([]workloadinterface.IMetadata, error) {
 // LoadCaseExpected reads dir/expected.json as the RuleResponse list the rule
 // must produce for this case's input.
 func LoadCaseExpected(dir string) ([]reporthandling.RuleResponse, error) {
-	raw, err := os.ReadFile(filepath.Join(dir, expectedFileName))
+	raw, err := ruledir.ReadFile(filepath.Join(dir, expectedFileName))
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", expectedFileName, err)
 	}
@@ -72,7 +73,7 @@ func LoadCaseExpected(dir string) ([]reporthandling.RuleResponse, error) {
 // The file is optional. A case without one is evaluated with no control
 // inputs.
 func LoadCaseData(dir string) (cautils.RegoInputData, error) {
-	raw, err := os.ReadFile(filepath.Join(dir, dataFileName))
+	raw, err := ruledir.ReadFile(filepath.Join(dir, dataFileName))
 	if errors.Is(err, os.ErrNotExist) {
 		return cautils.RegoInputData{}, nil
 	}

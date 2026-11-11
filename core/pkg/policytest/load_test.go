@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/kubescape/kubescape/v4/core/pkg/ruledir"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"sigs.k8s.io/yaml"
@@ -156,5 +157,79 @@ func TestRunRuleUppercaseYAMLInput(t *testing.T) {
 				})
 			}
 		})
+	}
+}
+
+func TestLoadCaseInput_OversizedFileRejected(t *testing.T) {
+	dir := t.TempDir()
+	inputDir := filepath.Join(dir, "input")
+	require.NoError(t, os.MkdirAll(inputDir, 0o750))
+
+	f, err := os.OpenFile(filepath.Join(inputDir, "manifest.yaml"), os.O_CREATE|os.O_WRONLY, 0o600)
+	require.NoError(t, err)
+	require.NoError(t, f.Truncate(32*1024*1024+1))
+	require.NoError(t, f.Close())
+
+	_, err = LoadCaseInput(dir)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ruledir.ErrFileTooLarge)
+}
+
+func TestLoadCaseInput_NonRegularFileRejected(t *testing.T) {
+	if _, err := os.Stat("/dev/null"); err == nil {
+		dir := t.TempDir()
+		inputDir := filepath.Join(dir, "input")
+		require.NoError(t, os.MkdirAll(inputDir, 0o750))
+		require.NoError(t, os.Symlink("/dev/null", filepath.Join(inputDir, "dev_null.yaml")))
+
+		_, err := LoadCaseInput(dir)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ruledir.ErrNotRegularFile)
+	}
+}
+
+func TestLoadCaseExpected_OversizedFileRejected(t *testing.T) {
+	dir := t.TempDir()
+	f, err := os.OpenFile(filepath.Join(dir, expectedFileName), os.O_CREATE|os.O_WRONLY, 0o600)
+	require.NoError(t, err)
+	require.NoError(t, f.Truncate(32*1024*1024+1))
+	require.NoError(t, f.Close())
+
+	_, err = LoadCaseExpected(dir)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ruledir.ErrFileTooLarge)
+}
+
+func TestLoadCaseExpected_NonRegularFileRejected(t *testing.T) {
+	if _, err := os.Stat("/dev/null"); err == nil {
+		dir := t.TempDir()
+		require.NoError(t, os.Symlink("/dev/null", filepath.Join(dir, expectedFileName)))
+
+		_, err := LoadCaseExpected(dir)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ruledir.ErrNotRegularFile)
+	}
+}
+
+func TestLoadCaseData_OversizedFileRejected(t *testing.T) {
+	dir := t.TempDir()
+	f, err := os.OpenFile(filepath.Join(dir, dataFileName), os.O_CREATE|os.O_WRONLY, 0o600)
+	require.NoError(t, err)
+	require.NoError(t, f.Truncate(32*1024*1024+1))
+	require.NoError(t, f.Close())
+
+	_, err = LoadCaseData(dir)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ruledir.ErrFileTooLarge)
+}
+
+func TestLoadCaseData_NonRegularFileRejected(t *testing.T) {
+	if _, err := os.Stat("/dev/null"); err == nil {
+		dir := t.TempDir()
+		require.NoError(t, os.Symlink("/dev/null", filepath.Join(dir, dataFileName)))
+
+		_, err := LoadCaseData(dir)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ruledir.ErrNotRegularFile)
 	}
 }
