@@ -960,10 +960,18 @@ func isIrreversibleResourceID(id string) bool {
 }
 
 // hasUsableWorkloadID guards against degenerate IDs such as "////" produced by
-// malformed or non-Kubernetes JSON objects.
+// malformed or non-Kubernetes JSON objects. A RegoResponseVectorObject (for
+// example an RBAC User or Group) may omit apiVersion while still identifying
+// itself via kind, name, and relatedObjects.
 func hasUsableWorkloadID(workload workloadinterface.IMetadata) bool {
-	return workload != nil &&
-		strings.TrimSpace(workload.GetApiVersion()) != "" &&
+	if workload == nil {
+		return false
+	}
+	if _, ok := workload.(*objectsenvelopes.RegoResponseVectorObject); ok {
+		return strings.TrimSpace(workload.GetKind()) != "" &&
+			strings.TrimSpace(workload.GetName()) != ""
+	}
+	return strings.TrimSpace(workload.GetApiVersion()) != "" &&
 		strings.TrimSpace(workload.GetKind()) != "" &&
 		strings.TrimSpace(workload.GetName()) != ""
 }
