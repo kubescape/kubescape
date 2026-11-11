@@ -25,6 +25,13 @@ To iterate on one rule, pass its directory instead:
 go run . policy test ./rules/<rule-name>
 ```
 
+To run only some cases, pass `--run` a regular expression for the
+`<rule>/<case>` names the command prints:
+
+```sh
+go run . policy test ./rules --run '^<rule-name>/<case>$'
+```
+
 The Go test suite runs the full-directory command, so a pull request fails CI
 when an in-tree rule no longer matches its fixtures.
 

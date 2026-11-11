@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 
 	"github.com/kubescape/kubescape/v4/core/pkg/ruledir"
@@ -65,6 +66,28 @@ func withCases(dirs []ruledir.Rule) ([]RuleUnderTest, error) {
 		})
 	}
 	return rules, nil
+}
+
+// FilterCases keeps only the cases whose "<rule>/<case>" name, the name policy
+// test reports each case under, matches pattern. Rules left without a matching
+// case are dropped, so a rule that has no cases at all is dropped as well. The
+// input slice is not modified.
+func FilterCases(rules []RuleUnderTest, pattern *regexp.Regexp) []RuleUnderTest {
+	filtered := make([]RuleUnderTest, 0, len(rules))
+	for _, rule := range rules {
+		var cases []Case
+		for _, c := range rule.Cases {
+			if pattern.MatchString(rule.Name + "/" + c.Name) {
+				cases = append(cases, c)
+			}
+		}
+		if len(cases) == 0 {
+			continue
+		}
+		rule.Cases = cases
+		filtered = append(filtered, rule)
+	}
+	return filtered
 }
 
 func discoverCases(testDir string) ([]Case, error) {
