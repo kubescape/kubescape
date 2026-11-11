@@ -190,11 +190,11 @@ func TestCloneRepoShallowDepthOptions(t *testing.T) {
 		wantRefBranch string
 	}{
 		{
-			name:          "default depth is 1 with single branch",
+			name:          "default depth is 0 (full history) with single branch false",
 			depthOpt:      nil,
 			url:           "https://github.com/kubescape/kubescape/",
 			wantDepth:     DefaultGitCloneDepth,
-			wantSingle:    true,
+			wantSingle:    false,
 			wantRefBranch: "",
 		},
 		{
@@ -214,7 +214,7 @@ func TestCloneRepoShallowDepthOptions(t *testing.T) {
 			wantRefBranch: "",
 		},
 		{
-			name:          "explicit shallow depth 1",
+			name:          "opt-in shallow depth 1",
 			depthOpt:      []int{1},
 			url:           "https://github.com/kubescape/kubescape/",
 			wantDepth:     1,
@@ -222,7 +222,7 @@ func TestCloneRepoShallowDepthOptions(t *testing.T) {
 			wantRefBranch: "",
 		},
 		{
-			name:          "full history opt out with depth 0",
+			name:          "explicit full history depth 0",
 			depthOpt:      []int{0},
 			url:           "https://github.com/kubescape/kubescape/",
 			wantDepth:     0,
@@ -234,7 +234,7 @@ func TestCloneRepoShallowDepthOptions(t *testing.T) {
 			depthOpt:      []int{-1},
 			url:           "https://github.com/kubescape/kubescape/",
 			wantDepth:     DefaultGitCloneDepth,
-			wantSingle:    true,
+			wantSingle:    false,
 			wantRefBranch: "",
 		},
 	}
@@ -396,7 +396,10 @@ func TestCloneGitRepoPassesDepth(t *testing.T) {
 	require.NotNil(t, capturedOpts)
 	assert.Equal(t, 3, capturedOpts.Depth)
 	assert.True(t, capturedOpts.SingleBranch)
-	require.NoError(t, ReleaseClonedRepo("https://github.com/kubescape/kubescape"))
+	assert.Equal(t, clonedDir, GetClonedPath("https://github.com/kubescape/kubescape", 3))
+	require.NoError(t, ReleaseClonedRepo("https://github.com/kubescape/kubescape", 3))
+	assert.NoDirExists(t, clonedDir)
+	assert.Empty(t, GetClonedPath("https://github.com/kubescape/kubescape", 3))
 }
 
 func TestGetFileLastCommit_ShallowVsFullClone(t *testing.T) {

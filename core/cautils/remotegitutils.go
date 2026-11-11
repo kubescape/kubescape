@@ -26,14 +26,14 @@ import (
 const (
 	gitVisibilityCheckTimeout = 10 * time.Second
 
-	// DefaultGitCloneDepth is the default shallow clone depth for remote Git repository scans.
-	DefaultGitCloneDepth = 1
+	// DefaultGitCloneDepth is the default clone depth for remote Git repository scans
+	// (0 = full commit history to preserve per-file commit attribution; set > 0 e.g. 1 for shallow CI runs).
+	DefaultGitCloneDepth = 0
 )
 
 var (
 	tmpDirPaths      = make(map[string]string)
 	tmpDirRefs       = make(map[string]int)
-	repoActiveKeys   = make(map[string]string)
 	tmpDirPathsMu    sync.Mutex
 	cloneGroup       singleflight.Group
 	plainClone       = git.PlainClone
@@ -192,7 +192,7 @@ func getProviderError(gitURL giturl.IGitAPI) error {
 }
 
 // cloneRepo clones a repository to a local temporary directory and returns the directory.
-// depthOpt optionally specifies the clone depth (defaults to DefaultGitCloneDepth = 1 for tip only, 0 for full history).
+// depthOpt optionally specifies the clone depth (defaults to DefaultGitCloneDepth = 0 for full history; set > 0 e.g. 1 for shallow tip-only clones).
 func cloneRepo(gitURL giturl.IGitAPI, depthOpt ...int) (string, error) {
 	depth := DefaultGitCloneDepth
 	if len(depthOpt) > 0 {
@@ -218,7 +218,6 @@ func cloneRepo(gitURL giturl.IGitAPI, depthOpt ...int) (string, error) {
 	}
 
 	key := repoWorkspaceKey(gitURL, effectiveDepth)
-	baseKey := repoBaseKey(gitURL)
 	if path := reserveWorkspace(key); path != "" {
 		return path, nil
 	}
@@ -308,7 +307,6 @@ func cloneRepo(gitURL giturl.IGitAPI, depthOpt ...int) (string, error) {
 
 		tmpDirPathsMu.Lock()
 		tmpDirPaths[key] = tmpDir
-		repoActiveKeys[baseKey] = key
 		tmpDirPathsMu.Unlock()
 		keepWorkspace = true
 		return tmpDir, nil
@@ -329,18 +327,17 @@ func ReleaseClonedRepo(path string, depthOpt ...int) error {
 		return err
 	}
 
-	tmpDirPathsMu.Lock()
-	baseKey := repoBaseKey(gitURL)
-	var key string
+	depth := DefaultGitCloneDepth
 	if len(depthOpt) > 0 {
-		key = repoWorkspaceKey(gitURL, depthOpt[0])
-	} else {
-		key = repoActiveKeys[baseKey]
-		if key == "" {
-			key = repoWorkspaceKey(gitURL, DefaultGitCloneDepth)
-			if tmpDirPaths[key] == "" {
-				key = baseKey
-			}
+		depth = depthOpt[0]
+	}
+
+	tmpDirPathsMu.Lock()
+	key := repoWorkspaceKey(gitURL, depth)
+	if tmpDirPaths[key] == "" && len(depthOpt) == 0 {
+		baseKey := repoBaseKey(gitURL)
+		if tmpDirPaths[baseKey] != "" {
+			key = baseKey
 		}
 	}
 
@@ -356,9 +353,6 @@ func ReleaseClonedRepo(path string, depthOpt ...int) error {
 	}
 	delete(tmpDirPaths, key)
 	delete(tmpDirRefs, key)
-	if repoActiveKeys[baseKey] == key {
-		delete(repoActiveKeys, baseKey)
-	}
 	tmpDirPathsMu.Unlock()
 
 	if err := os.RemoveAll(workspace); err != nil {
@@ -367,8 +361,8 @@ func ReleaseClonedRepo(path string, depthOpt ...int) error {
 	return nil
 }
 
-// CloneGitRepo clone git repository with optional depth (defaults to DefaultGitCloneDepth = 1 for tip only).
-// Set depth to 0 for full commit history.
+// CloneGitRepo clone git repository with optional depth (defaults to DefaultGitCloneDepth = 0 for full commit history).
+// Set depth > 0 (e.g. 1) for shallow tip-only clones.
 func CloneGitRepo(path *string, depthOpt ...int) (string, error) {
 	depth := DefaultGitCloneDepth
 	if len(depthOpt) > 0 {
@@ -397,32 +391,39 @@ func CloneGitRepo(path *string, depthOpt ...int) (string, error) {
 }
 
 // GetClonedPath returns the temporary workspace directory for a cloned repository URL.
-func GetClonedPath(path string) string {
+func GetClonedPath(path string, depthOpt ...int) string {
 	gitURL, err := giturl.NewGitAPI(path)
 	if err != nil {
 		return ""
 	}
 
+	depth := DefaultGitCloneDepth
+	if len(depthOpt) > 0 {
+		depth = depthOpt[0]
+	}
+	key := repoWorkspaceKey(gitURL, depth)
+
 	tmpDirPathsMu.Lock()
 	defer tmpDirPathsMu.Unlock()
 
-	baseKey := repoBaseKey(gitURL)
-	key := repoActiveKeys[baseKey]
-	if key == "" {
-		key = repoWorkspaceKey(gitURL, DefaultGitCloneDepth)
-		if tmpDirPaths[key] == "" {
+	p := tmpDirPaths[key]
+	if p == "" && (len(depthOpt) == 0 || depth == DefaultGitCloneDepth) {
+		baseKey := repoBaseKey(gitURL)
+		if candidate := tmpDirPaths[baseKey]; candidate != "" {
 			key = baseKey
+			p = candidate
+		} else if candidate := tmpDirPaths[hashRepoURL(path)]; candidate != "" {
+			key = hashRepoURL(path)
+			p = candidate
 		}
 	}
 
-	p := tmpDirPaths[key]
 	if p == "" {
 		return ""
 	}
 	if info, err := os.Stat(p); err != nil || !info.IsDir() {
 		delete(tmpDirPaths, key)
 		delete(tmpDirRefs, key)
-		delete(repoActiveKeys, baseKey)
 		return ""
 	}
 	return p
