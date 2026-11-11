@@ -105,6 +105,14 @@ Image scan reports ("scan image --format json") are compared by vulnerability in
 				return err
 			}
 
+			if cmd.Flags().Changed("output") {
+				trimmedOutput := strings.TrimSpace(diffInfo.Output)
+				if trimmedOutput == "" {
+					return errors.New("output file path cannot be empty")
+				}
+				diffInfo.Output = trimmedOutput
+			}
+
 			// The invocation is valid from this point on. Runtime and result-gate
 			// failures should not print command usage.
 			cmd.SilenceUsage = true
