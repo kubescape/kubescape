@@ -699,11 +699,14 @@ metadata:
 	require.NoError(t, err)
 
 	counts := map[string]int{}
-	var renderedDeployment workloadinterface.IMetadata
+	var renderedDeployment, renderedShared workloadinterface.IMetadata
 	for _, workload := range workloads {
 		counts[workload.GetKind()+"/"+workload.GetName()]++
 		if workload.GetKind() == "Deployment" && workload.GetName() == "prod-app" {
 			renderedDeployment = workload
+		}
+		if workload.GetKind() == "ConfigMap" && workload.GetName() == "prod-shared" {
+			renderedShared = workload
 		}
 	}
 
@@ -719,8 +722,16 @@ metadata:
 	source, ok := sources[renderedDeployment.GetID()]
 	require.True(t, ok)
 	assert.Equal(t, reporthandling.SourceTypeKustomizeDirectory, source.FileType)
-	assert.Equal(t, "app", filepath.ToSlash(source.RelativePath))
-	assert.Equal(t, appDir, source.KustomizeDirectoryName)
+	assert.Equal(t, "app/deployment.yaml", filepath.ToSlash(source.RelativePath),
+		"a rendered resource is attributed to the file Kustomize read it from, not only to the directory")
+	assert.Equal(t, appDir, source.KustomizeDirectoryName, "the directory is still recorded")
+
+	require.NotNil(t, renderedShared)
+	sharedSource, ok := sources[renderedShared.GetID()]
+	require.True(t, ok)
+	assert.Equal(t, "shared.yaml", filepath.ToSlash(sharedSource.RelativePath),
+		"a source outside the Kustomize directory is attributed to that file")
+	assert.Equal(t, appDir, sharedSource.KustomizeDirectoryName)
 }
 
 func TestGetResourcesFromPath_NestedKustomizeOwnsReferencedHelmChart(t *testing.T) {

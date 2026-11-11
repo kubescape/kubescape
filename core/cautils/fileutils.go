@@ -567,10 +567,18 @@ func mergeMaps(base, override map[string]any) map[string]any {
 // If the contents at given path is a Kustomize Directory, LoadResourcesFromKustomizeDirectory will
 // generate yaml files using "Kustomize" & renders a map of workloads from those yaml files
 func LoadResourcesFromKustomizeDirectory(ctx context.Context, basePath string) (map[string][]workloadinterface.IMetadata, string, error) {
+	workloads, directoryName, _, err := loadKustomizeDirectory(ctx, basePath)
+	return workloads, directoryName, err
+}
+
+// loadKustomizeDirectory is LoadResourcesFromKustomizeDirectory that also
+// returns, keyed by workload ID, the local file each rendered workload came from
+// where Kustomize could tell.
+func loadKustomizeDirectory(ctx context.Context, basePath string) (map[string][]workloadinterface.IMetadata, string, map[string]string, error) {
 	isKustomizeDirectory := isKustomizeDirectory(basePath)
 	isKustomizeFile := IsKustomizeFile(basePath)
 	if ok := isKustomizeDirectory || isKustomizeFile; !ok {
-		return nil, "", nil
+		return nil, "", nil, nil
 	}
 
 	sourceToWorkloads := map[string][]workloadinterface.IMetadata{}
@@ -592,18 +600,23 @@ func LoadResourcesFromKustomizeDirectory(ctx context.Context, basePath string) (
 	if len(errs) > 0 {
 		err := fmt.Errorf("failed to render Kustomize resources from %q: %w", newBasePath, errors.Join(errs...))
 		logger.L().Ctx(ctx).Error("Rendering yaml from Kustomize failed", helpers.Error(err))
-		return nil, kustomizeDirectoryName, err
+		return nil, kustomizeDirectoryName, nil, err
 	}
 
 	maps.Copy(sourceToWorkloads, wls)
-	return sourceToWorkloads, kustomizeDirectoryName, nil
+	return sourceToWorkloads, kustomizeDirectoryName, kustomizeDirectory.OriginFiles(), nil
 }
 
 // KustomizeRenderResult records the successful Kustomize renders and the input
 // paths they own. Ownership is claimed only after a build succeeds, so a broken
 // nested configuration remains available to the plain-manifest fallback.
 type KustomizeRenderResult struct {
-	SourceToWorkloads         map[string][]workloadinterface.IMetadata
+	SourceToWorkloads map[string][]workloadinterface.IMetadata
+	// OriginFiles maps a rendered workload's ID to the local file Kustomize read
+	// it from, for the workloads where that is known. A workload that is not
+	// listed, such as one from a remote base, is attributed to its Kustomize
+	// directory.
+	OriginFiles               map[string]string
 	OwnedSourcePaths          []string
 	OwnedHelmChartDirectories []string
 	OwnedHelmCRDDirectories   []string
@@ -731,7 +744,7 @@ func LoadResourcesFromKustomizeDirectoriesFiltered(ctx context.Context, basePath
 		logger.L().Ctx(ctx).Warning("Skipping path while discovering Kustomize configurations", helpers.Error(err))
 	}
 
-	result := KustomizeRenderResult{SourceToWorkloads: map[string][]workloadinterface.IMetadata{}}
+	result := KustomizeRenderResult{SourceToWorkloads: map[string][]workloadinterface.IMetadata{}, OriginFiles: map[string]string{}}
 	seenOwnedSourcePaths := map[string]struct{}{}
 	seenOwnedCharts := map[string]struct{}{}
 	seenOwnedCRDs := map[string]struct{}{}
@@ -793,7 +806,7 @@ func LoadResourcesFromKustomizeDirectoriesFiltered(ctx context.Context, basePath
 			}
 		}
 
-		workloads, _, err := LoadResourcesFromKustomizeDirectory(ctx, input)
+		workloads, _, originFiles, err := loadKustomizeDirectory(ctx, input)
 		if err != nil {
 			if explicitKustomizeInput {
 				return KustomizeRenderResult{}, err
@@ -849,6 +862,7 @@ func LoadResourcesFromKustomizeDirectoriesFiltered(ctx context.Context, basePath
 		}
 
 		maps.Copy(result.SourceToWorkloads, workloads)
+		maps.Copy(result.OriginFiles, originFiles)
 		appendUniquePaths(&result.OwnedSourcePaths, seenOwnedSourcePaths, ownership.SourcePaths...)
 		appendUniquePaths(&result.OwnedHelmChartDirectories, seenOwnedCharts, ownership.HelmChartDirectories...)
 		appendUniquePaths(&result.OwnedHelmCRDDirectories, seenOwnedCRDs, ownership.HelmCRDDirectories...)

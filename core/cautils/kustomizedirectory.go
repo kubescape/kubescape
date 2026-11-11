@@ -96,6 +96,17 @@ func readKustomizationFile(path string) ([]byte, error) {
 type KustomizeDirectory struct {
 	path        string
 	helmCommand string
+	// origins maps the ID of each rendered workload to the local file it came
+	// from, as far as Kustomize could tell. It is filled by GetWorkloads.
+	origins map[string]string
+}
+
+// OriginFiles returns, for the workloads the last GetWorkloads call rendered,
+// the local file each one came from, keyed by the workload's ID. A workload that
+// is not in the map has no known file, for example because it came from a remote
+// base, and is attributed to the Kustomize directory.
+func (kd *KustomizeDirectory) OriginFiles() map[string]string {
+	return kd.origins
 }
 
 // Used for checking if there is "Kustomization" file in the given Directory
@@ -512,17 +523,22 @@ func (kd *KustomizeDirectory) GetWorkloads(kustomizeDirectoryPath string) (map[s
 		helmCommand = kd.helmCommand
 	}
 	opts.PluginConfig.HelmConfig.Command = helmCommand
-	kustomizer := krusty.MakeKustomizer(opts)
-	resmap, err := kustomizer.Run(fSys, kustomizeDirectoryPath)
+	newKustomizer := func() *krusty.Kustomizer { return krusty.MakeKustomizer(opts) }
 
-	if err != nil {
-		return nil, []error{err}
-	}
-
-	yml, err := resmap.AsYaml()
-
-	if err != nil {
-		return nil, []error{err}
+	// Render through a wrapper that makes Kustomize record where each resource
+	// came from, so a finding can name the file. If that is not possible, or the
+	// build fails, render exactly as before: the attribution is an addition and
+	// must not be able to break a scan that worked without it.
+	yml, originBase, withOrigins := originRenderer(newKustomizer, kustomizeDirectoryPath)
+	if !withOrigins {
+		resmap, err := newKustomizer().Run(fSys, kustomizeDirectoryPath)
+		if err != nil {
+			return nil, []error{err}
+		}
+		yml, err = resmap.AsYaml()
+		if err != nil {
+			return nil, []error{err}
+		}
 	}
 
 	workloads := make(map[string][]workloadinterface.IMetadata, 0)
@@ -534,11 +550,23 @@ func (kd *KustomizeDirectory) GetWorkloads(kustomizeDirectoryPath string) (map[s
 		errs = append(errs, e)
 	}
 
+	kd.origins = map[string]string{}
 	if len(wls) != 0 {
 		workloads[kustomizeDirectoryPath] = []workloadinterface.IMetadata{}
 		for i := range wls {
+			// The annotation is Kubescape's own request, so it is removed from
+			// the resource whether or not it names a usable file.
+			var originFile string
+			if withOrigins {
+				originFile = takeKustomizeOrigin(wls[i].GetObject(), originBase)
+			}
 			lw := localworkload.NewLocalWorkload(wls[i].GetObject())
+			// The workload's own path stays the directory: other code, such as the
+			// fix command, reads it, and the file is reported separately.
 			lw.SetPath(kustomizeDirectoryPath)
+			if originFile != "" {
+				kd.origins[lw.GetID()] = originFile
+			}
 			workloads[kustomizeDirectoryPath] = append(workloads[kustomizeDirectoryPath], lw)
 		}
 	}
