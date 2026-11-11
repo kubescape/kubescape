@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/opa-utils/reporthandling"
@@ -23,9 +24,41 @@ var (
 )
 
 // Use gitregostore to get policies from github release
+//
+// A DownloadReleasedPolicy may be shared by scans that run one after another or
+// at the same time. The release is downloaded into a store of its own, which
+// replaces the one the getters read only once the whole release has arrived, so
+// a reader sees all of the release or none of it, never the part that has
+// arrived so far. At most one download is in progress at a time, and the scans
+// that need the release meanwhile wait for it.
 type DownloadReleasedPolicy struct {
-	gs      *gitregostore.GitRegoStore
 	version string
+
+	// mu guards gs and loading. It is never held while a download runs.
+	mu sync.RWMutex
+	// gs is the store every read goes to. It is empty until a download has
+	// completed and is never written to after that: a download fills another
+	// store and swaps it in.
+	gs *gitregostore.GitRegoStore
+	// loading is the download in progress, if any.
+	loading *releaseLoad
+}
+
+// releaseLoad is one download of the release, which every scan that needs the
+// release while it runs waits for.
+type releaseLoad struct {
+	done chan struct{}
+	// err is the outcome. It is set before done is closed.
+	err error
+}
+
+// store returns the store to read from. A caller makes one call per operation
+// and reads everything from what it got, so that an operation never mixes two
+// stores.
+func (drp *DownloadReleasedPolicy) store() *gitregostore.GitRegoStore {
+	drp.mu.RLock()
+	defer drp.mu.RUnlock()
+	return drp.gs
 }
 
 func NewDownloadReleasedPolicy() *DownloadReleasedPolicy {
@@ -86,7 +119,18 @@ func (drp *DownloadReleasedPolicy) ShouldPersistPolicyArtifacts() bool {
 // is pinned, a download failure is not an error but requests a fallback
 // (fallback=true, err=nil), preserving the existing latest-release behavior.
 func (drp *DownloadReleasedPolicy) SetRegoObjectsWithFallback() (fallback bool, err error) {
-	if err := drp.SetRegoObjects(); err != nil {
+	return drp.SetRegoObjectsWithFallbackContext(context.Background())
+}
+
+// SetRegoObjectsWithFallbackContext is SetRegoObjectsWithFallback for a caller
+// that can be stopped while it waits for the download. A stopped caller gets the
+// context's error and no request to fall back: a scan that was cancelled is not
+// one that should carry on with the cache.
+func (drp *DownloadReleasedPolicy) SetRegoObjectsWithFallbackContext(ctx context.Context) (fallback bool, err error) {
+	if err := drp.SetRegoObjectsContext(ctx); err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil && errors.Is(err, ctxErr) {
+			return false, err
+		}
 		if drp.version != "" {
 			return false, err
 		}
@@ -110,7 +154,8 @@ func (drp *DownloadReleasedPolicy) GetControl(ID string) (*reporthandling.Contro
 		return nil, ErrIDRequired
 	}
 
-	control, err := drp.gs.GetOPAControlByID(id)
+	gs := drp.store()
+	control, err := gs.GetOPAControlByID(id)
 	if err == nil {
 		return control, nil
 	}
@@ -119,7 +164,7 @@ func (drp *DownloadReleasedPolicy) GetControl(ID string) (*reporthandling.Contro
 		return nil, err
 	}
 
-	controls, err := drp.gs.GetOPAControls()
+	controls, err := gs.GetOPAControls()
 	if err != nil {
 		return nil, err
 	}
@@ -138,12 +183,13 @@ func (drp *DownloadReleasedPolicy) GetControl(ID string) (*reporthandling.Contro
 }
 
 func (drp *DownloadReleasedPolicy) GetFramework(name string) (*reporthandling.Framework, error) {
-	framework, err := drp.gs.GetOPAFrameworkByName(name)
+	gs := drp.store()
+	framework, err := gs.GetOPAFrameworkByName(name)
 	if err != nil {
 		return nil, err
 	}
 	if framework != nil && strings.EqualFold(framework.Name, "allcontrols") {
-		controls, err := drp.gs.GetOPAControls()
+		controls, err := gs.GetOPAControls()
 		if err != nil {
 			return nil, err
 		}
@@ -153,13 +199,14 @@ func (drp *DownloadReleasedPolicy) GetFramework(name string) (*reporthandling.Fr
 }
 
 func (drp *DownloadReleasedPolicy) GetFrameworks() ([]reporthandling.Framework, error) {
-	frameworks, err := drp.gs.GetOPAFrameworks()
+	gs := drp.store()
+	frameworks, err := gs.GetOPAFrameworks()
 	if err != nil {
 		return nil, err
 	}
 	for i := range frameworks {
 		if strings.EqualFold(frameworks[i].Name, "allcontrols") {
-			controls, err := drp.gs.GetOPAControls()
+			controls, err := gs.GetOPAControls()
 			if err != nil {
 				return nil, err
 			}
@@ -170,25 +217,26 @@ func (drp *DownloadReleasedPolicy) GetFrameworks() ([]reporthandling.Framework, 
 }
 
 func (drp *DownloadReleasedPolicy) ListFrameworks() ([]string, error) {
-	return drp.gs.GetOPAFrameworksNamesList()
+	return drp.store().GetOPAFrameworksNamesList()
 }
 
 func (drp *DownloadReleasedPolicy) ListControls() ([]string, error) {
-	controlsIDsList, err := drp.gs.GetOPAControlsIDsList()
+	gs := drp.store()
+	controlsIDsList, err := gs.GetOPAControlsIDsList()
 	if err != nil {
 		return []string{}, err
 	}
-	controlsNamesList, err := drp.gs.GetOPAControlsNamesList()
+	controlsNamesList, err := gs.GetOPAControlsNamesList()
 	if err != nil {
 		return []string{}, err
 	}
-	controls, err := drp.gs.GetOPAControls()
+	controls, err := gs.GetOPAControls()
 	if err != nil {
 		return []string{}, err
 	}
 	var controlsFrameworksList [][]string
 	for _, control := range controls {
-		controlsFrameworksList = append(controlsFrameworksList, drp.gs.GetOpaFrameworkListByControlID(control.ControlID))
+		controlsFrameworksList = append(controlsFrameworksList, gs.GetOpaFrameworkListByControlID(control.ControlID))
 	}
 	controlsNamesWithIDsandFrameworksList := make([]string, len(controlsIDsList))
 	// by design all slices have the same length
@@ -199,7 +247,7 @@ func (drp *DownloadReleasedPolicy) ListControls() ([]string, error) {
 }
 
 func (drp *DownloadReleasedPolicy) GetControlsInputs(ctx context.Context, clusterName string) (map[string][]string, error) {
-	defaultConfigInputs, err := drp.gs.GetDefaultConfigInputs()
+	defaultConfigInputs, err := drp.store().GetDefaultConfigInputs()
 	if err != nil {
 		return nil, err
 	}
@@ -212,7 +260,7 @@ func (drp *DownloadReleasedPolicy) GetControlsInputs(ctx context.Context, cluste
 }
 
 func (drp *DownloadReleasedPolicy) GetAttackTracks() ([]v1alpha1.AttackTrack, error) {
-	attackTracks, err := drp.gs.GetAttackTracks()
+	attackTracks, err := drp.store().GetAttackTracks()
 	if err != nil {
 		return nil, err
 	}
@@ -220,21 +268,73 @@ func (drp *DownloadReleasedPolicy) GetAttackTracks() ([]v1alpha1.AttackTrack, er
 }
 
 func (drp *DownloadReleasedPolicy) SetRegoObjects() error {
-	fwNames, err := drp.gs.GetOPAFrameworksNamesList()
-	if len(fwNames) != 0 && err == nil {
-		return nil
-	}
-	if err := drp.gs.SetRegoObjects(); err != nil {
-		if drp.version != "" {
-			return fmt.Errorf("failed to download controls for pinned version %q: %w", drp.version, err)
-		}
+	return drp.SetRegoObjectsContext(context.Background())
+}
+
+// SetRegoObjectsContext makes sure the release is loaded, downloading it when it
+// is not. The download is shared: a caller that arrives while one is running
+// waits for it and gets its outcome, and a failed one is not remembered, so the
+// next caller downloads again. A caller whose ctx ends stops waiting and gets the
+// context's error; the download itself is not stopped, since the files it needs
+// are fetched without a context, and it ends by loading the release for the next
+// caller or by failing.
+func (drp *DownloadReleasedPolicy) SetRegoObjectsContext(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
 		return err
 	}
-	return nil
+
+	drp.mu.Lock()
+	if loaded(drp.gs) {
+		drp.mu.Unlock()
+		return nil
+	}
+	load := drp.loading
+	if load == nil {
+		load = &releaseLoad{done: make(chan struct{})}
+		drp.loading = load
+		go drp.download(load, drp.gs)
+	}
+	drp.mu.Unlock()
+
+	select {
+	case <-load.done:
+		return load.err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// loaded reports whether the store holds the release.
+func loaded(gs *gitregostore.GitRegoStore) bool {
+	fwNames, err := gs.GetOPAFrameworksNamesList()
+	return len(fwNames) != 0 && err == nil
+}
+
+// download fetches the release into a store of its own, configured like base, and
+// swaps it in for the one the getters read when, and only when, all of it has
+// arrived. A download that fails leaves what the getters read as it was.
+func (drp *DownloadReleasedPolicy) download(load *releaseLoad, base *gitregostore.GitRegoStore) {
+	candidate := gitregostore.NewGitRegoStore(base.BaseUrl, base.Owner, base.Repository, base.Path, base.Tag, base.Branch, base.FrequencyPullFromGitMinutes)
+	candidate.URL = base.URL
+
+	err := candidate.SetRegoObjects()
+	if err != nil && drp.version != "" {
+		err = fmt.Errorf("failed to download controls for pinned version %q: %w", drp.version, err)
+	}
+
+	drp.mu.Lock()
+	if err == nil {
+		drp.gs = candidate
+	}
+	drp.loading = nil
+	drp.mu.Unlock()
+
+	load.err = err
+	close(load.done)
 }
 
 func (drp *DownloadReleasedPolicy) GetExceptions(ctx context.Context, clusterName string) ([]armotypes.PostureExceptionPolicy, error) {
-	exceptions, err := drp.gs.GetSystemPostureExceptionPolicies()
+	exceptions, err := drp.store().GetSystemPostureExceptionPolicies()
 	if err != nil {
 		return nil, err
 	}
