@@ -402,17 +402,37 @@ spec:
 // best-effort and drops the whole chart on any template error, so excluding templates/ unconditionally
 // would make those resources reach neither loader and vanish silently. Regression guard for the #2501
 // review: templates/ is excluded only for charts that rendered without errors.
-func TestGetResourcesFromPath_ScansTemplatesOfChartThatFailedToRender(t *testing.T) {
-	_, workloads, _, err := getResourcesFromPath(context.TODO(), "../../cautils/testdata/helm_chart_broken", cautils.HelmValueOptions{}, nil)
-	require.NoError(t, err)
+func TestGetResourcesFromPath_FailsWhenScannedChartFailsToRender(t *testing.T) {
+	_, _, _, err := getResourcesFromPath(context.TODO(), "../../cautils/testdata/helm_chart_broken/brokenchart", cautils.HelmValueOptions{}, nil)
+	require.ErrorIs(t, err, cautils.ErrHelmRenderFailed)
+	assert.Contains(t, err.Error(), "brokenchart")
+}
 
-	var found bool
+func TestGetResourcesFromPath_SkipsTemplatesOfNestedChartThatFailedToRender(t *testing.T) {
+	dir := t.TempDir()
+	chartDir := filepath.Join(dir, "chart")
+	require.NoError(t, os.MkdirAll(filepath.Join(chartDir, "templates"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "Chart.yaml"), []byte("apiVersion: v2\nname: broken\nversion: 0.1.0\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "templates", "sa.yaml"), []byte(`apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ required "name is required" .Values.name }}
+`), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "templates", "static.yaml"), []byte("apiVersion: v1\nkind: ServiceAccount\nmetadata:\n  name: static-sa\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "pod.yaml"), []byte("apiVersion: v1\nkind: Pod\nmetadata:\n  name: plain\nspec:\n  containers:\n    - name: c\n      image: nginx\n"), 0o600))
+
+	_, workloads, skips, err := getResourcesFromPath(context.TODO(), dir, cautils.HelmValueOptions{}, nil)
+	require.NoError(t, err, "a broken chart inside a broader scan must not fail the scan")
+
+	names := make([]string, 0, len(workloads))
 	for _, w := range workloads {
-		if w.GetKind() == "ServiceAccount" && w.GetName() == "important-sa" {
-			found = true
-		}
+		names = append(names, w.GetName())
 	}
-	assert.True(t, found, "a static template of a chart that failed to render must still be scanned")
+	assert.Equal(t, []string{"plain"}, names, "templates of a chart that failed to render must not be scanned as plain YAML")
+	require.Len(t, skips, 2)
+	for _, skip := range skips {
+		assert.Equal(t, "unrendered Helm template: its chart was not rendered", skip.Reason)
+	}
 }
 
 func createMockGitRepo(t *testing.T, hasOrigin bool) string {

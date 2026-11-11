@@ -44,6 +44,12 @@ var (
 	// while another supported loader examines the same input.
 	ErrNoManifestFiles = errors.New("no YAML or JSON manifest files found")
 
+	// unrenderedHelmTemplateReason marks a chart template skipped because its chart was not rendered.
+	unrenderedHelmTemplateReason = "unrendered Helm template: its chart was not rendered"
+
+	// ErrHelmRenderFailed is returned when a discovered Helm chart cannot be rendered.
+	ErrHelmRenderFailed = errors.New("failed to render Helm chart")
+
 	// ErrFileTooLarge is returned when a manifest file exceeds the configured per-file size limit.
 	ErrFileTooLarge = errors.New("file too large")
 
@@ -185,10 +191,15 @@ func loadResourcesFromHelmCharts(ctx context.Context, basePath string, valueOpts
 	// renderedCharts holds chart directories covered by a successful Helm render. It includes
 	// dependencies rendered through a successful parent, even when the dependency intentionally
 	// emitted no resources. Callers use this list to keep those templates out of the plain-YAML
-	// fallback. A chart below a failed parent remains eligible for a standalone fallback render.
+	// fallback. A chart below a failed parent remains eligible for a standalone render.
 	renderedCharts := make([]string, 0, len(helmDirectories))
 	successfulCharts := make([]*HelmChart, 0, len(helmDirectories))
+	explicitChartDir := ""
+	if explicitHelmInput {
+		explicitChartDir = normalizePath(basePath)
+	}
 	for _, helmDir := range helmDirectories {
+		isExplicitChart := explicitHelmInput && normalizePath(helmDir) == explicitChartDir
 		if helmChartOwnedByAny(helmDir, successfulCharts) {
 			renderedCharts = append(renderedCharts, helmDir)
 			continue
@@ -196,7 +207,7 @@ func loadResourcesFromHelmCharts(ctx context.Context, basePath string, valueOpts
 
 		if workspaceDir != "" {
 			if err := walkTreeContained(workspaceDir, helmDir, "Helm chart", helmDir); err != nil {
-				if explicitHelmInput && helmDir == basePath {
+				if isExplicitChart {
 					return nil, nil, nil, err
 				}
 				logger.L().Ctx(ctx).Warning("Skipping Helm chart with references outside workspace root", helpers.String("path", helmDir), helpers.String("workspace", workspaceDir), helpers.Error(err))
@@ -218,7 +229,14 @@ func loadResourcesFromHelmCharts(ctx context.Context, basePath string, valueOpts
 		}
 		wls, errs := chart.GetWorkloadsWithCapabilities(values, releaseOpts, capOpts)
 		if len(errs) > 0 {
-			logger.L().Ctx(ctx).Warning(fmt.Sprintf("Rendering of Helm chart template '%s', failed: %v", chart.GetName(), errs))
+			renderErr := fmt.Errorf("%w %q at %q: %w", ErrHelmRenderFailed, chart.GetName(), helmDir, errors.Join(errs...))
+			// The chart the user asked to scan fails the scan, as an explicit Kustomize
+			// input does. A chart found inside a broader scan is skipped with a warning
+			// so one broken chart does not block the rest of the repository.
+			if isExplicitChart {
+				return nil, nil, nil, renderErr
+			}
+			logger.L().Ctx(ctx).Warning("Skipping Helm chart that failed to render", helpers.Error(renderErr))
 			continue
 		}
 		renderedCharts = append(renderedCharts, helmDir)
@@ -1011,8 +1029,7 @@ func LoadResourcesFromFilesFiltered(ctx context.Context, input, rootPath string,
 		return nil, nil, fmt.Errorf("%w for input %q", ErrNoManifestFiles, input)
 	}
 
-	// skip the plain-YAML glob for the templates of charts the helm render already covered; a chart
-	// whose render failed is absent from renderedCharts, so its templates stay plainly scanned.
+	// skip the plain-YAML glob for the templates of charts the helm render already covered.
 	files = excludeHelmTemplateFiles(files, renderedCharts)
 
 	// chart metadata files (Chart.yaml, Chart.lock) are not manifests and carry
@@ -1032,6 +1049,22 @@ func LoadResourcesFromFilesFiltered(ctx context.Context, input, rootPath string,
 			containedFiles = append(containedFiles, f)
 		}
 		files = containedFiles
+	}
+
+	// excludeHelmTemplateFiles already dropped the templates of every rendered chart, so a
+	// template still here belongs to a chart that was not rendered. Scanning it as plain YAML
+	// would report it without its values or chart context. Symlink targets are checked too,
+	// as excludeHelmTemplateFiles does. A template named as the input is still scanned.
+	if !isFile(input) {
+		manifestFiles := files[:0]
+		for _, f := range files {
+			if slices.ContainsFunc(pathAliases(f), isUnrenderedHelmTemplate) {
+				skips = append(skips, SkippedManifest{Path: f, Reason: unrenderedHelmTemplateReason})
+				continue
+			}
+			manifestFiles = append(manifestFiles, f)
+		}
+		files = manifestFiles
 	}
 
 	workloads, loadSkips, loadErrs := loadFiles(rootPath, files)
@@ -1087,18 +1120,8 @@ func loadFiles(rootPath string, filePaths []string) (map[string][]workloadinterf
 		}
 
 		if e != nil {
-			// Only chart-owned templates/ files reach this loader unrendered —
-			// excludeHelmTemplateFiles drops the templates of every chart whose
-			// render succeeded — and their Go-template actions are not valid
-			// YAML, so record the drop without treating it as manifest
-			// corruption. Any other parse failure is always reported: "{{" in a
-			// comment, label value or string is not evidence of a template.
-			if isUnrenderedHelmTemplate(filePaths[i]) {
-				skips = append(skips, SkippedManifest{Path: filePaths[i], Reason: "unrendered Helm template: " + e.Error()})
-			} else {
-				errs = append(errs, fmt.Errorf("failed to parse %q: %w", filePaths[i], e))
-				skips = append(skips, SkippedManifest{Path: filePaths[i], Reason: "parse error: " + e.Error()})
-			}
+			errs = append(errs, fmt.Errorf("failed to parse %q: %w", filePaths[i], e))
+			skips = append(skips, SkippedManifest{Path: filePaths[i], Reason: "parse error: " + e.Error()})
 		}
 		if len(w) != 0 {
 			path := filePaths[i]
@@ -1123,11 +1146,11 @@ func loadFiles(rootPath string, filePaths []string) (map[string][]workloadinterf
 
 // isUnrenderedHelmTemplate reports whether path lives below the templates/
 // directory of a Helm chart, detected with the same chart-directory check
-// chart discovery uses. excludeHelmTemplateFiles removes the templates of
-// every chart whose render succeeded, so a chart-owned file parsed here
-// belongs to a chart whose render failed; its Go-template actions are
-// expected to be unparseable as plain YAML.
+// chart discovery uses.
 func isUnrenderedHelmTemplate(path string) bool {
+	if !strings.Contains(filepath.ToSlash(path), "/templates/") {
+		return false
+	}
 	dir := filepath.Dir(path)
 	for {
 		if filepath.Base(dir) == "templates" {
