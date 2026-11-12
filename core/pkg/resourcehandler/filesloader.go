@@ -720,6 +720,29 @@ func getResourcesFromInput(ctx context.Context, path string, helmValueOpts cauti
 		logger.L().Debug("helm templates found in local storage", helpers.Int("helmTemplates", len(helmSourceToWorkloads)), helpers.Int("workloads", len(workloads)))
 	}
 
+	// lastCommitOf looks each file up once: several resources can come from one.
+	commits := map[string]reporthandling.LastCommit{}
+	lastCommitOf := func(file string) reporthandling.LastCommit {
+		if commit, ok := commits[file]; ok {
+			return commit
+		}
+		var lastCommit reporthandling.LastCommit
+		if gitRepo != nil {
+			commitInfo, _ := gitRepo.GetFileLastCommit(file)
+			if commitInfo != nil {
+				lastCommit = reporthandling.LastCommit{
+					Hash:           commitInfo.SHA,
+					Date:           commitInfo.Author.Date,
+					CommitterName:  commitInfo.Author.Name,
+					CommitterEmail: commitInfo.Author.Email,
+					Message:        commitInfo.Message,
+				}
+			}
+		}
+		commits[file] = lastCommit
+		return lastCommit
+	}
+
 	// update workloads and workloadIDToSource with workloads from Kustomize directories
 	for source, ws := range kustomizeResult.SourceToWorkloads {
 		workloads = append(workloads, ws...)
@@ -733,20 +756,6 @@ func getResourcesFromInput(ctx context.Context, path string, helmValueOpts cauti
 			source = relSource
 		}
 
-		var lastCommit reporthandling.LastCommit
-		if gitRepo != nil {
-			commitInfo, _ := gitRepo.GetFileLastCommit(source)
-			if commitInfo != nil {
-				lastCommit = reporthandling.LastCommit{
-					Hash:           commitInfo.SHA,
-					Date:           commitInfo.Author.Date,
-					CommitterName:  commitInfo.Author.Name,
-					CommitterEmail: commitInfo.Author.Email,
-					Message:        commitInfo.Message,
-				}
-			}
-		}
-
 		// Path carries the root RelativePath was computed against, so consumers can
 		// resolve the file without guessing at the scan's base
 		workloadSource := reporthandling.Source{
@@ -754,11 +763,12 @@ func getResourcesFromInput(ctx context.Context, path string, helmValueOpts cauti
 			RelativePath:           source,
 			FileType:               reporthandling.SourceTypeKustomizeDirectory,
 			KustomizeDirectoryName: kustomizeDirectoryName,
-			LastCommit:             lastCommit,
+			LastCommit:             lastCommitOf(source),
 		}
 
 		for i := range ws {
-			workloadIDToSource[ws[i].GetID()] = workloadSource
+			id := ws[i].GetID()
+			workloadIDToSource[id] = kustomizeWorkloadSource(workloadSource, kustomizeResult.OriginFiles[id], repoRoot, lastCommitOf)
 		}
 	}
 
@@ -773,6 +783,39 @@ func getResourcesFromInput(ctx context.Context, path string, helmValueOpts cauti
 		inputRoot = ""
 	}
 	return inputRoot, workloadIDToSource, workloads, allSkips, nil
+}
+
+// kustomizeWorkloadSource returns the source to report for one resource that a
+// Kustomize directory rendered. The directory is the fallback: it names the
+// build the resource came out of. When Kustomize recorded the file the resource
+// was read from, that file is reported instead, with its own last commit,
+// because it is the file a person would open to change the resource. The line
+// stays unreported on purpose: the rendered resource is the composition of a
+// base and its overlays, so no line in any one file is the line of a field.
+//
+// Only a file inside the scan root is used, after symlinks are resolved. One
+// outside it would make a path that is relative to the root escape it, which
+// printers that refuse such a location would then drop.
+func kustomizeWorkloadSource(directorySource reporthandling.Source, originFile, repoRoot string, lastCommitOf func(string) reporthandling.LastCommit) reporthandling.Source {
+	if originFile == "" || repoRoot == "" {
+		return directorySource
+	}
+	relative, err := filepath.Rel(repoRoot, originFile)
+	if err != nil || !filepath.IsLocal(relative) {
+		return directorySource
+	}
+	// IsLocal reads the text of the path only. A symlink inside the root whose
+	// target is outside it passes that test, and Kustomize reads through it, so
+	// the file it names would be one the scan has no business attributing a
+	// resource to. The check that follows symlinks decides; the path reported is
+	// still the one the repository shows.
+	if _, err := pathcontainment.ResolveContainedPath(repoRoot, originFile); err != nil {
+		return directorySource
+	}
+	source := directorySource
+	source.RelativePath = relative
+	source.LastCommit = lastCommitOf(relative)
+	return source
 }
 
 // extractGitRepo returns the root every reported path for this scan is relative to,

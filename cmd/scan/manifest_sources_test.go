@@ -50,7 +50,7 @@ func TestScanPreservesIndependentManifestSources(t *testing.T) {
 	assert.ErrorContains(t, err, "scan compliance-score is below permitted threshold")
 	assert.Equal(t, map[string]string{
 		"prod/deployment.yaml": "failed",
-		"dev":                  "passed",
+		"dev/deployment.yaml":  "passed",
 	}, manifestSourceStatuses(t, report))
 	assert.Equal(t, float32(50), report.SummaryDetails.ComplianceScore)
 }
@@ -67,7 +67,7 @@ func TestScanPreservesRawFallbackBesideIndependentKustomize(t *testing.T) {
 	assert.ErrorContains(t, err, "scan compliance-score is below permitted threshold")
 	assert.Equal(t, map[string]string{
 		"prod/deployment.yaml": "failed",
-		"dev":                  "passed",
+		"dev/deployment.yaml":  "passed",
 	}, manifestSourceStatuses(t, report))
 }
 
@@ -92,7 +92,7 @@ func TestScanCountsRenderedManifestOnce(t *testing.T) {
 			} else {
 				assert.NoError(t, err)
 			}
-			assert.Equal(t, map[string]string{"dev": tc.status}, manifestSourceStatuses(t, report))
+			assert.Equal(t, map[string]string{"dev/deployment.yaml": tc.status}, manifestSourceStatuses(t, report))
 		})
 	}
 }

@@ -96,6 +96,17 @@ func readKustomizationFile(path string) ([]byte, error) {
 type KustomizeDirectory struct {
 	path        string
 	helmCommand string
+	// origins maps the ID of each rendered workload to the local file it came
+	// from, as far as Kustomize could tell. It is filled by GetWorkloads.
+	origins map[string]string
+}
+
+// OriginFiles returns, for the workloads the last GetWorkloads call rendered,
+// the local file each one came from, keyed by the workload's ID. A workload that
+// is not in the map has no known file, for example because it came from a remote
+// base, and is attributed to the Kustomize directory.
+func (kd *KustomizeDirectory) OriginFiles() map[string]string {
+	return kd.origins
 }
 
 // Used for checking if there is "Kustomization" file in the given Directory
@@ -512,15 +523,15 @@ func (kd *KustomizeDirectory) GetWorkloads(kustomizeDirectoryPath string) (map[s
 		helmCommand = kd.helmCommand
 	}
 	opts.PluginConfig.HelmConfig.Command = helmCommand
-	kustomizer := krusty.MakeKustomizer(opts)
-	resmap, err := kustomizer.Run(fSys, kustomizeDirectoryPath)
+	newKustomizer := func() *krusty.Kustomizer { return krusty.MakeKustomizer(opts) }
 
+	// The plain build is what the scan evaluates, always: it is exactly what the
+	// scanned kustomization renders.
+	resmap, err := newKustomizer().Run(fSys, kustomizeDirectoryPath)
 	if err != nil {
 		return nil, []error{err}
 	}
-
 	yml, err := resmap.AsYaml()
-
 	if err != nil {
 		return nil, []error{err}
 	}
@@ -534,11 +545,25 @@ func (kd *KustomizeDirectory) GetWorkloads(kustomizeDirectoryPath string) (map[s
 		errs = append(errs, e)
 	}
 
+	// Learn which file each resource came from, so a finding can name it. This
+	// only ever adds information: it never changes a resource, and it must happen
+	// before the workloads are built below, which add to the objects.
+	var originFiles []string
+	if e == nil {
+		originFiles = originFilesFor(newKustomizer, kustomizeDirectoryPath, originModeFor(kustomizeDirectoryPath), wls)
+	}
+
+	kd.origins = map[string]string{}
 	if len(wls) != 0 {
 		workloads[kustomizeDirectoryPath] = []workloadinterface.IMetadata{}
 		for i := range wls {
 			lw := localworkload.NewLocalWorkload(wls[i].GetObject())
+			// The workload's own path stays the directory: other code, such as the
+			// fix command, reads it, and the file is reported separately.
 			lw.SetPath(kustomizeDirectoryPath)
+			if originFiles != nil && originFiles[i] != "" {
+				kd.origins[lw.GetID()] = originFiles[i]
+			}
 			workloads[kustomizeDirectoryPath] = append(workloads[kustomizeDirectoryPath], lw)
 		}
 	}
