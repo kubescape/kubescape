@@ -525,39 +525,15 @@ func (kd *KustomizeDirectory) GetWorkloads(kustomizeDirectoryPath string) (map[s
 	opts.PluginConfig.HelmConfig.Command = helmCommand
 	newKustomizer := func() *krusty.Kustomizer { return krusty.MakeKustomizer(opts) }
 
-	// Make Kustomize record where each resource came from, so a finding can name
-	// the file, without changing what the scanned kustomization renders. If that
-	// is not possible, or the build fails, render exactly as before: the
-	// attribution is an addition and must not be able to break a scan that
-	// worked without it.
-	var (
-		yml        []byte
-		originBase string
-		haveOrigin bool
-		// removeOrigin is set when the annotation is Kubescape's own request and
-		// has to come off again. It stays on when the kustomization asked for it.
-		removeOrigin bool
-	)
-	plan := originModeFor(kustomizeDirectoryPath)
-	if plan.mode == originWrapper {
-		if rendered, base, ok := originRenderer(newKustomizer, kustomizeDirectoryPath, plan.preserved); ok {
-			yml, originBase, haveOrigin, removeOrigin = rendered, base, true, true
-		}
+	// The plain build is what the scan evaluates, always: it is exactly what the
+	// scanned kustomization renders.
+	resmap, err := newKustomizer().Run(fSys, kustomizeDirectoryPath)
+	if err != nil {
+		return nil, []error{err}
 	}
-	if yml == nil {
-		resmap, err := newKustomizer().Run(fSys, kustomizeDirectoryPath)
-		if err != nil {
-			return nil, []error{err}
-		}
-		yml, err = resmap.AsYaml()
-		if err != nil {
-			return nil, []error{err}
-		}
-		// The plain build of a kustomization that asked for origin annotations
-		// carries them, relative to the directory.
-		if plan.mode == originOwn {
-			originBase, haveOrigin = kustomizeDirectoryPath, true
-		}
+	yml, err := resmap.AsYaml()
+	if err != nil {
+		return nil, []error{err}
 	}
 
 	workloads := make(map[string][]workloadinterface.IMetadata, 0)
@@ -569,22 +545,24 @@ func (kd *KustomizeDirectory) GetWorkloads(kustomizeDirectoryPath string) (map[s
 		errs = append(errs, e)
 	}
 
+	// Learn which file each resource came from, so a finding can name it. This
+	// only ever adds information: it never changes a resource, and it must happen
+	// before the workloads are built below, which add to the objects.
+	var originFiles []string
+	if e == nil {
+		originFiles = originFilesFor(newKustomizer, kustomizeDirectoryPath, originModeFor(kustomizeDirectoryPath), wls)
+	}
+
 	kd.origins = map[string]string{}
 	if len(wls) != 0 {
 		workloads[kustomizeDirectoryPath] = []workloadinterface.IMetadata{}
 		for i := range wls {
-			// An annotation that Kubescape asked for is removed from the resource
-			// whether or not it names a usable file.
-			var originFile string
-			if haveOrigin {
-				originFile = takeKustomizeOrigin(wls[i].GetObject(), originBase, removeOrigin)
-			}
 			lw := localworkload.NewLocalWorkload(wls[i].GetObject())
 			// The workload's own path stays the directory: other code, such as the
 			// fix command, reads it, and the file is reported separately.
 			lw.SetPath(kustomizeDirectoryPath)
-			if originFile != "" {
-				kd.origins[lw.GetID()] = originFile
+			if originFiles != nil && originFiles[i] != "" {
+				kd.origins[lw.GetID()] = originFiles[i]
 			}
 			workloads[kustomizeDirectoryPath] = append(workloads[kustomizeDirectoryPath], lw)
 		}

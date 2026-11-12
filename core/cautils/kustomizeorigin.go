@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 
+	"github.com/kubescape/k8s-interface/workloadinterface"
 	"sigs.k8s.io/kustomize/api/krusty"
 	"sigs.k8s.io/kustomize/api/types"
 	"sigs.k8s.io/kustomize/kyaml/filesys"
@@ -158,6 +160,57 @@ func renderWithOrigins(newKustomizer func() *krusty.Kustomizer, directory string
 		return nil, "", false
 	}
 	return yml, wrapperDir, true
+}
+
+// originFilesFor returns, for each of the plain build's resources in order, the
+// local file it was read from, with "" where that is not known. It returns nil
+// when nothing can be attributed.
+//
+// The plain build stays the authority on what a resource is. The wrapper's build
+// is a different build: its annotations are present while Kustomize runs the
+// transformers, so a patch that selects on them, such as
+// annotationSelector: "!config.kubernetes.io/origin", selects different
+// resources, and removing the annotation afterwards cannot undo that. So the
+// wrapper's output is used for the file names only, and only if, with the
+// annotation removed, it is the same as the plain build's resource for resource.
+// Otherwise nothing is attributed and the resources are reported against their
+// directory, exactly as the plain build alone would have.
+func originFilesFor(newKustomizer func() *krusty.Kustomizer, directory string, plan originPlan, plain []workloadinterface.IMetadata) []string {
+	switch plan.mode {
+	case originOwn:
+		// The kustomization asked for origin annotations, so the plain build
+		// carries them, relative to the directory. They stay where they are.
+		files := make([]string, len(plain))
+		for i := range plain {
+			files[i] = takeKustomizeOrigin(plain[i].GetObject(), directory, false)
+		}
+		return files
+	case originWrapper:
+		return wrapperOriginFiles(newKustomizer, directory, plan.preserved, plain)
+	}
+	return nil
+}
+
+// wrapperOriginFiles is originFilesFor for a kustomization that did not ask for
+// origin annotations: render it through the wrapper, take the files from there,
+// and trust them only if the wrapper rendered the same resources.
+func wrapperOriginFiles(newKustomizer func() *krusty.Kustomizer, directory string, preserved []string, plain []workloadinterface.IMetadata) []string {
+	rendered, base, ok := originRenderer(newKustomizer, directory, preserved)
+	if !ok {
+		return nil
+	}
+	annotated, err := ReadFile(rendered, YAML_FILE_FORMAT)
+	if err != nil || len(annotated) != len(plain) {
+		return nil
+	}
+	files := make([]string, len(annotated))
+	for i := range annotated {
+		files[i] = takeKustomizeOrigin(annotated[i].GetObject(), base, true)
+		if !reflect.DeepEqual(annotated[i].GetObject(), plain[i].GetObject()) {
+			return nil
+		}
+	}
+	return files
 }
 
 // takeKustomizeOrigin returns the local file that Kustomize's origin annotation

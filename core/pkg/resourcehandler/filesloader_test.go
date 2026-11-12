@@ -752,7 +752,7 @@ metadata:
 		if workload.GetKind() == "Deployment" && workload.GetName() == "prod-app" {
 			renderedDeployment = workload
 		}
-		if workload.GetKind() == "ConfigMap" && workload.GetName() == "prod-shared" {
+		if workload.GetKind() == "ConfigMap" && workload.GetName() == "prod-base-shared" {
 			renderedShared = workload
 		}
 	}
@@ -777,7 +777,7 @@ metadata:
 	require.NotNil(t, renderedShared)
 	sharedSource, ok := sources[renderedShared.GetID()]
 	require.True(t, ok)
-	assert.Equal(t, "shared.yaml", filepath.ToSlash(sharedSource.RelativePath),
+	assert.Equal(t, "shared/shared.yaml", filepath.ToSlash(sharedSource.RelativePath),
 		"a source outside the Kustomize directory is attributed to that file")
 	assert.Equal(t, appDir, sharedSource.KustomizeDirectoryName)
 }

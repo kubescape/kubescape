@@ -354,3 +354,38 @@ func TestKustomizeWithTransformerAnnotationsIsRenderedAsBefore(t *testing.T) {
 	assert.Empty(t, origins, "and the resources are attributed to the directory")
 	assert.Contains(t, byName, "Deployment/demo")
 }
+
+// A patch can select on the very annotation the wrapper adds. The wrapper's
+// build would then skip it, and removing the annotation afterwards cannot bring
+// the patch back. The plain build is what the scan evaluates, so the resource
+// must come out patched, and with no attribution since the wrapper disagreed.
+func TestKustomizePlainBuildStaysAuthoritativeWhenTheOriginAnnotationChangesPatchSelection(t *testing.T) {
+	root := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(root, "deployment.yaml"),
+		[]byte("apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: demo\nspec:\n  replicas: 1\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "kustomization.yaml"), []byte(`resources:
+- deployment.yaml
+patches:
+- patch: |-
+    - op: replace
+      path: /spec/replicas
+      value: 3
+  target:
+    kind: Deployment
+    annotationSelector: "!config.kubernetes.io/origin"
+`), 0o600))
+
+	// The scenario is real: the wrapper's own build skips the patch.
+	newKustomizer := func() *krusty.Kustomizer { return krusty.MakeKustomizer(krusty.MakeDefaultOptions()) }
+	rendered, _, ok := renderWithOrigins(newKustomizer, root, nil)
+	require.True(t, ok)
+	wrapped, err := ReadFile(rendered, YAML_FILE_FORMAT)
+	require.NoError(t, err)
+	require.Len(t, wrapped, 1)
+	require.Equal(t, int64(1), replicasOf(t, wrapped[0]), "the wrapper's build does not apply this patch")
+
+	// The scan uses the plain build.
+	byName, origins := renderedKustomizeWorkloads(t, root)
+	assert.Equal(t, int64(3), replicasOf(t, byName["Deployment/demo"]), "the patch applies, as it does without Kubescape")
+	assert.Empty(t, origins, "the wrapper rendered something else, so none of its file names is trusted")
+}
