@@ -146,10 +146,18 @@ func TestBindingScopeMatchesApiserver(t *testing.T) {
 		"pods":             {rule("", "v1", "pods")},
 		"deployments":      {rule("apps", "v1", "deployments")},
 		"everything":       {rule("*", "*", "*")},
+		// A "<resource>/*" entry names every subresource of the resource and,
+		// because "*" also matches the empty subresource, the resource itself.
+		"pods and their subresources": {rule("", "v1", "pods/*")},
+		"every subresource":           {rule("*", "*", "*/*")},
+		"only scale subresources":     {rule("*", "*", "*/scale")},
+		"only pod status":             {rule("", "v1", "pods/status")},
 	}
 	excludeRules := map[string][]admissionregistrationv1.NamedRuleWithOperations{
-		"no exclusions":  nil,
-		"excluding pods": {rule("", "v1", "pods")},
+		"no exclusions":                   nil,
+		"excluding pods":                  {rule("", "v1", "pods")},
+		"excluding pods and subresources": {rule("", "v1", "pods/*")},
+		"excluding only pod status":       {rule("", "v1", "pods/status")},
 	}
 
 	equivalent := admissionregistrationv1.Equivalent
@@ -191,7 +199,7 @@ func TestBindingScopeMatchesApiserver(t *testing.T) {
 			}
 		}
 	}
-	assert.Equal(t, 240, cases)
+	assert.Equal(t, 960, cases)
 }
 
 // TestBindingScopeUncollectedNamespace covers the one input the scan may lack:

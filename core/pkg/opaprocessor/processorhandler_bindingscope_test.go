@@ -162,6 +162,48 @@ func TestRunCELOnK8sBindingScope(t *testing.T) {
 		assert.ElementsMatch(t, []string{"app"}, failedNames(responses))
 	})
 
+	t.Run("resourceRules naming pods/* bind the pods themselves", func(t *testing.T) {
+		// The apiserver reads "pods/*" as pods and all their subresources, so
+		// the binding's params reach the pod at admission and must here too.
+		opap := processor(t, scopedBinding(t, "C-0046", map[string]any{
+			"resourceRules": []any{map[string]any{
+				"apiGroups": []any{""}, "apiVersions": []any{"v1"},
+				"resources": []any{"pods/*"}, "operations": []any{"CREATE"},
+			}},
+		}))
+
+		responses, outcome, err := opap.runCELOnK8s(context.Background(), rule, []map[string]any{pod("app", "default", nil)}, nil, "C-0046")
+		require.NoError(t, err)
+		assert.Empty(t, outcome.skipped)
+		assert.Empty(t, failedNames(responses), "the binding's params allow SETPCAP")
+	})
+
+	t.Run("excludeResourceRules naming pods/* drop the pods themselves", func(t *testing.T) {
+		opap := processor(t, scopedBinding(t, "C-0046", map[string]any{
+			"excludeResourceRules": []any{map[string]any{
+				"apiGroups": []any{""}, "apiVersions": []any{"v1"},
+				"resources": []any{"pods/*"}, "operations": []any{"*"},
+			}},
+		}))
+
+		responses, _, err := opap.runCELOnK8s(context.Background(), rule, []map[string]any{pod("app", "default", nil)}, nil, "C-0046")
+		require.NoError(t, err)
+		assert.ElementsMatch(t, []string{"app"}, failedNames(responses), "an excluded pod is checked against the bundled defaults")
+	})
+
+	t.Run("excluding only a pod subresource keeps the pod bound", func(t *testing.T) {
+		opap := processor(t, scopedBinding(t, "C-0046", map[string]any{
+			"excludeResourceRules": []any{map[string]any{
+				"apiGroups": []any{""}, "apiVersions": []any{"v1"},
+				"resources": []any{"pods/ephemeralcontainers"}, "operations": []any{"*"},
+			}},
+		}))
+
+		responses, _, err := opap.runCELOnK8s(context.Background(), rule, []map[string]any{pod("app", "default", nil)}, nil, "C-0046")
+		require.NoError(t, err)
+		assert.Empty(t, failedNames(responses), "the binding's params still reach the pod")
+	})
+
 	t.Run("a paramless control with a scoped binding is evaluated", func(t *testing.T) {
 		opap := processor(t, scopedBinding(t, "C-0017", map[string]any{
 			"namespaceSelector": map[string]any{"matchLabels": map[string]any{"env": "prod"}},
