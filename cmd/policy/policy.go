@@ -27,6 +27,9 @@ var policyCmdExamples = fmt.Sprintf(`
 
   # Rewrite the fixtures' expected.json from the rule's current output
   %[1]s policy test ./rules/my-custom-rule --update
+
+  # Also write the results as a JUnit XML report for a CI system
+  %[1]s policy test ./rules --junit-report policy-test.xml
 `, cautils.ExecName())
 
 func GetPolicyCmd() *cobra.Command {
