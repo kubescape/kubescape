@@ -1,0 +1,13 @@
+# an unrestricted create reaches the one name the patch is narrowed to.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: secret-writer
+rules:
+- apiGroups: [""]
+  resources: ["secrets"]
+  verbs: ["create"]
+- apiGroups: [""]
+  resources: ["secrets"]
+  resourceNames: ["b"]
+  verbs: ["patch"]

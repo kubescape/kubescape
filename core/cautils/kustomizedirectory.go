@@ -506,10 +506,10 @@ func (kd *KustomizeDirectory) GetWorkloads(kustomizeDirectoryPath string) (map[s
 	kustomizeDirectoryPath = lexicalAbsPath(kustomizeDirectoryPath)
 
 	fSys := filesys.MakeFsOnDisk()
-	// Use LoadRestrictionsNone to allow loading resources from outside the kustomize directory.
-	// This is necessary for overlays that reference base configurations in parent directories.
 	opts := krusty.MakeDefaultOptions()
-	opts.LoadRestrictions = types.LoadRestrictionsNone
+	// Restrict individual files to their Kustomization root. References to base
+	// directories outside that root (e.g. ../base) still get their own loader.
+	opts.LoadRestrictions = types.LoadRestrictionsRootOnly
 	// Builtin plugins only, plus Helm: the equivalent of `kustomize build
 	// --enable-helm`. The Kustomization being rendered comes from the scanned
 	// repository, so allowing other plugins (EnabledPluginConfig, i.e.

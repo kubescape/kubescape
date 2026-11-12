@@ -78,9 +78,9 @@ func TestEvidencePathsWithCurrentValues_DeletePath(t *testing.T) {
 			want: hostNetwork + " (current: true)",
 		},
 		{
-			name: "a field absent from the object stays bare",
+			name: "a field absent from the object is marked unresolved",
 			path: absent,
-			want: absent,
+			want: absent + " (current: " + unresolvedValue + ")",
 		},
 		{
 			name:        "a credential-shaped path is redacted",
@@ -123,10 +123,10 @@ func TestEvidencePathsWithCurrentValues_DeletePath(t *testing.T) {
 
 	t.Run("an absent credential-shaped path is not reported as redacted", func(t *testing.T) {
 		// "[redacted]" claims there is a value to hide. A field the object
-		// does not have has none.
+		// does not have has none, so it is unresolved.
 		missing := "spec.template.spec.containers[0].env[5].value"
 		got := evidencePathsWithCurrentValues(deletePathControl(missing), resource, false)
-		assert.Equal(t, []string{missing}, got)
+		assert.Equal(t, []string{missing + " (current: " + unresolvedValue + ")"}, got)
 	})
 
 	t.Run("a path both deleted and reviewed is listed once", func(t *testing.T) {

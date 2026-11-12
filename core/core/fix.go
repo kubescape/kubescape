@@ -39,6 +39,27 @@ var (
 )
 
 func (ks *Kubescape) Fix(fixInfo *metav1.FixInfo) error {
+	if fixInfo == nil {
+		return errors.New("uninitialized fix parameters")
+	}
+	if strings.TrimSpace(fixInfo.ReportFile) == "" {
+		return errors.New("report output file is required")
+	}
+	if err := fixInfo.ValidateOutputDir(); err != nil {
+		return err
+	}
+	if err := fixInfo.ValidateKustomizeDir(); err != nil {
+		return err
+	}
+	if err := fixInfo.ValidateBasePath(); err != nil {
+		return err
+	}
+	if err := fixInfo.ValidatePostRendererDir(); err != nil {
+		return err
+	}
+	if err := fixInfo.ValidateContainerProfilePath(); err != nil {
+		return err
+	}
 	// Before anything is read: a patch or a verification combined with another
 	// output mode must fail, not quietly do one of the two.
 	if err := fixInfo.ValidateOutputPatch(); err != nil {
@@ -47,6 +68,16 @@ func (ks *Kubescape) Fix(fixInfo *metav1.FixInfo) error {
 	if err := fixInfo.ValidateVerify(); err != nil {
 		return err
 	}
+
+	fixInfo.ReportFile = strings.TrimSpace(fixInfo.ReportFile)
+	fixInfo.OutputDir = strings.TrimSpace(fixInfo.OutputDir)
+	fixInfo.OutputPatch = strings.TrimSpace(fixInfo.OutputPatch)
+	fixInfo.KustomizeDir = strings.TrimSpace(fixInfo.KustomizeDir)
+	fixInfo.PostRendererDir = strings.TrimSpace(fixInfo.PostRendererDir)
+	fixInfo.BasePath = strings.TrimSpace(fixInfo.BasePath)
+	fixInfo.ContainerProfilePath = strings.TrimSpace(fixInfo.ContainerProfilePath)
+	fixInfo.ControlsConfig = strings.TrimSpace(fixInfo.ControlsConfig)
+
 	logger.L().Info("Reading report file...")
 	handler, err := fixhandler.NewFixHandler(fixInfo)
 	if err != nil {
@@ -66,6 +97,16 @@ func (ks *Kubescape) Fix(fixInfo *metav1.FixInfo) error {
 		handler.PrintUnfixedControls(fixhandler.PhasePlanned)
 		skipVerification(fixInfo)
 		return nil
+	}
+
+	// A verification that could not run as the original scan did must say so
+	// before anything is written, not after: before the manifests are changed,
+	// and before the Kustomize output below. Without a fix to apply there is
+	// nothing to verify, so nothing is refused.
+	if fixInfo.Verify && len(resourcesToFix) > 0 {
+		if _, _, err := verificationConfig(handler.RecordedControlsInputs(), fixInfo.ControlsConfig); err != nil {
+			return err
+		}
 	}
 
 	// Helm guidance is print-only — applied to none of the apply/confirm
@@ -183,14 +224,6 @@ func (ks *Kubescape) Fix(fixInfo *metav1.FixInfo) error {
 		handler.PrintUnfixedControls(fixhandler.PhasePlanned)
 		skipVerification(fixInfo)
 		return nil
-	}
-
-	// A verification that could not run as the original scan did must say so
-	// before the manifests are changed, not after.
-	if fixInfo.Verify {
-		if _, _, err := verificationConfig(handler.RecordedControlsInputs(), fixInfo.ControlsConfig); err != nil {
-			return err
-		}
 	}
 
 	if !fixInfo.Interactive {

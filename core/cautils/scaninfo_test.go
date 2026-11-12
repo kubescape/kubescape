@@ -1,6 +1,7 @@
 package cautils
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -1176,10 +1177,27 @@ func TestSetUseArtifactsFrom_SkipsOversizedAndNonRegularFiles(t *testing.T) {
 	validFile := filepath.Join(dir, "framework.json")
 	require.NoError(t, os.WriteFile(validFile, []byte(validFramework), 0o600))
 
+	oversizedFramework := `{"name":"oversized-fw","controls":[]}`
 	oversizedFile := filepath.Join(dir, "oversized.json")
 	f, err := os.OpenFile(oversizedFile, os.O_CREATE|os.O_WRONLY, 0o600)
 	require.NoError(t, err)
-	require.NoError(t, f.Truncate(DefaultMaxFileSize+1))
+	_, err = f.WriteString(oversizedFramework)
+	require.NoError(t, err)
+
+	// Write trailing whitespace padding so the file contains syntactically valid JSON
+	// exceeding DefaultMaxFileSize. This ensures it is rejected exclusively by the size
+	// check in readArtifactFile rather than by JSON unmarshaling.
+	padding := DefaultMaxFileSize + 1 - int64(len(oversizedFramework))
+	chunk := bytes.Repeat([]byte(" "), 64*1024)
+	for padding > 0 {
+		toWrite := int64(len(chunk))
+		if toWrite > padding {
+			toWrite = padding
+		}
+		_, err = f.Write(chunk[:toWrite])
+		require.NoError(t, err)
+		padding -= toWrite
+	}
 	require.NoError(t, f.Close())
 
 	subDir := filepath.Join(dir, "nested")
@@ -1200,4 +1218,13 @@ func TestSetUseArtifactsFrom_SkipsOversizedAndNonRegularFiles(t *testing.T) {
 	if devNullLink != "" {
 		assert.NotContains(t, scanInfo.UseFrom, devNullLink)
 	}
+
+	// Verify that the oversized file is syntactically valid JSON by verifying it is
+	// loaded when the file size limit is elevated past DefaultMaxFileSize.
+	t.Run("oversized file is valid JSON when size limit is elevated", func(t *testing.T) {
+		t.Setenv(MaxFileSizeEnvVar, fmt.Sprintf("%d", DefaultMaxFileSize+1024*1024))
+		elevatedScanInfo := &ScanInfo{UseArtifactsFrom: dir}
+		require.NoError(t, elevatedScanInfo.setUseArtifactsFrom(context.Background()))
+		assert.Contains(t, elevatedScanInfo.UseFrom, oversizedFile)
+	})
 }

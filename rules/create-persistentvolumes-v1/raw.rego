@@ -21,7 +21,7 @@ deny contains msga if {
 	rolebinding.kind == "ClusterRoleBinding"
 
 	rule := role.rules[p]
-	creates_through(rule, role)
+	creates_through(rule, subjectVector)
 	subject := rolebinding.subjects[k]
 	is_same_subjects(subjectVector, subject)
 	rule_path := sprintf("relatedObjects[%d].rules[%d]", [i, p])
@@ -55,18 +55,71 @@ deny contains msga if {
 # ResourceNameMatches compares a non-empty resourceNames list with that empty
 # name, so an entry narrowed to real names does not authorize it. Server-side
 # apply is the exception: it creates a missing object through a patch, and the
-# API server authorizes that create with the object's name, so the narrowed
-# entry still creates the named PersistentVolume when the role can also patch
-# PersistentVolumes.
+# API server authorizes that create with the object's name, so a narrowed create
+# entry still creates the named PersistentVolume when the subject can also patch
+# that same name.
 creates_through(rule, _) if count(object.get(rule, "resourceNames", [])) == 0
 
 creates_through(rule, _) if "" in rule.resourceNames
 
-creates_through(_, role) if {
-	patch_rule := role.rules[_]
+# RBAC is additive, so the patch may come from any ClusterRole the same subject
+# holds through a ClusterRoleBinding, not only the role that carries the create.
+# The aggregator emits one subject vector per binding and role, so the subject's
+# other grants are the other vectors of input that describe the same subject.
+# PersistentVolumes are cluster scoped, so a RoleBinding contributes nothing.
+creates_through(rule, subjectVector) if {
+	other := input[_]
+	is_same_subjects(subjectVector, other)
+
+	binding := other.relatedObjects[_]
+	binding.kind == "ClusterRoleBinding"
+	binding.roleRef.kind == "ClusterRole"
+	subject := binding.subjects[_]
+	is_same_subjects(subjectVector, subject)
+
+	patch_role := other.relatedObjects[_]
+	patch_role.kind == "ClusterRole"
+	patch_role.metadata.name == binding.roleRef.name
+
+	patch_rule := patch_role.rules[_]
 	patch_rule.apiGroups[_] in {"", "*"}
 	patch_rule.resources[_] in {"persistentvolumes", "*"}
 	patch_rule.verbs[_] in {"patch", "*"}
+	names_overlap(rule, patch_rule)
+}
+
+# A create and a patch reach a common object when either is not narrowed to
+# names, or when both name the same object. The names are literal: RBAC has no
+# wildcard form for resourceNames. An empty name is the one a plain create is
+# authorized with and is not an object that apply could create, so it never
+# counts as the common name.
+names_overlap(create_rule, patch_rule) if {
+	unnamed(create_rule)
+	unnamed(patch_rule)
+}
+
+names_overlap(create_rule, patch_rule) if {
+	unnamed(create_rule)
+	names_an_object(patch_rule)
+}
+
+names_overlap(create_rule, patch_rule) if {
+	names_an_object(create_rule)
+	unnamed(patch_rule)
+}
+
+names_overlap(create_rule, patch_rule) if {
+	name := create_rule.resourceNames[_]
+	name != ""
+	name in patch_rule.resourceNames
+}
+
+# Kubernetes treats an absent and an empty resourceNames alike: neither narrows.
+unnamed(rule) if count(object.get(rule, "resourceNames", [])) == 0
+
+names_an_object(rule) if {
+	name := rule.resourceNames[_]
+	name != ""
 }
 
 is_same_namespace(role, rolebinding) if {
@@ -88,4 +141,17 @@ is_same_subjects(subjectVector, subject) if {
 	subjectVector.kind == subject.kind
 	subjectVector.name == subject.name
 	subjectVector.apiGroup == subject.apiGroup
+}
+
+# A subject can carry neither qualifier. A ServiceAccount subject of a
+# RoleBinding may leave out its namespace, which the authorizer then reads as
+# the binding's own, and its apiGroup is empty, so the API server returns the
+# subject with neither field set. A User or Group manifest may also leave out
+# apiGroup, which the API server defaults. Both clauses above need one of the
+# fields to be present, so read them with a default here instead.
+is_same_subjects(subjectVector, subject) if {
+	subjectVector.kind == subject.kind
+	subjectVector.name == subject.name
+	object.get(subjectVector, "namespace", "") == object.get(subject, "namespace", "")
+	object.get(subjectVector, "apiGroup", "") == object.get(subject, "apiGroup", "")
 }

@@ -105,8 +105,12 @@ func NewIndex(services []corev1.Service, ingresses []networkingv1.Ingress, route
 // ReferenceGrants (see WithReferenceGrants), so whether that reference is
 // authorized is genuinely unknown. With grants supplied, an authorized
 // cross-namespace reference is a path like any other and an unauthorized one
-// is not exposure, so unclear is never set.
+// is not exposure, so unclear is never set. A nil idx safely returns (nil, true)
+// to signal that exposure is undetermined/unavailable (not confirmed unexposed).
 func (idx *Index) ServiceExposure(ref ServiceRef) (paths []ExposurePath, unclear bool) {
+	if idx == nil {
+		return nil, true
+	}
 	svc, ok := idx.services[ref]
 	if !ok {
 		return nil, false
@@ -164,6 +168,9 @@ func isProxiedService(svc *corev1.Service) bool {
 
 // routeNamespacesFor lists the namespaces holding routes, ref's own first.
 func (idx *Index) routeNamespacesFor(ref ServiceRef) []string {
+	if idx == nil {
+		return nil
+	}
 	namespaces := make([]string, 0, len(idx.routesByNS))
 	for ns := range idx.routesByNS {
 		if ns != ref.Namespace {
@@ -230,6 +237,9 @@ func backendNamesService(backend *networkingv1.IngressBackend, svc *corev1.Servi
 // name matches). A backendRef with no Namespace defaults to the route's own
 // namespace, per Gateway API's own defaulting rules.
 func (idx *Index) routeReferencesService(route *gatewayRoute, ref ServiceRef, svc *corev1.Service) (permitted, undetermined bool) {
+	if idx == nil {
+		return false, false
+	}
 	for _, rule := range route.Rules {
 		for _, backend := range rule.BackendRefs {
 			if !isServiceBackendRef(backend) || (backend.Weight != nil && *backend.Weight == 0) {
@@ -279,6 +289,9 @@ const (
 // another namespace is permitted only by a ReferenceGrant in the target's
 // namespace, and the Service merely existing authorizes nothing.
 func (idx *Index) authorizeServiceReference(route *gatewayRoute, target ServiceRef) referenceVerdict {
+	if idx == nil {
+		return referenceUndetermined
+	}
 	if route.Namespace == target.Namespace {
 		return referencePermitted
 	}
@@ -318,6 +331,9 @@ func (idx *Index) authorizeServiceReference(route *gatewayRoute, target ServiceR
 // not exist -- so it gets the same conservative treatment rather than
 // being silently treated as a non-match.
 func (idx *Index) routeAttachesToAGateway(route *gatewayRoute) bool {
+	if idx == nil {
+		return false
+	}
 	return len(idx.attachedRouteHostnames(route)) > 0
 }
 
@@ -326,6 +342,9 @@ func (idx *Index) routeAttachesToAGateway(route *gatewayRoute) bool {
 // slice means no collected listener can accept the route. Missing Gateway
 // data retains the existing conservative possible-exposure behavior.
 func (idx *Index) attachedRouteHostnames(route *gatewayRoute) []string {
+	if idx == nil {
+		return nil
+	}
 	var hosts []string
 	add := func(candidates []string) {
 		for _, host := range candidates {
@@ -398,6 +417,9 @@ func (idx *Index) listenerAdmitsRouteKind(l listener, routeKind string) bool {
 // Selector's target needs namespace labels this Index was not given -- the
 // same "determinable" pattern core/pkg/networkpolicy's peer matching uses.
 func (idx *Index) gatewayAdmitsRouteNamespace(l listener, routeNamespace, gatewayNamespace string) (admits bool, determinable bool) {
+	if idx == nil {
+		return false, false
+	}
 	if l.AllowedRoutes == nil || l.AllowedRoutes.Namespaces == nil {
 		return routeNamespace == gatewayNamespace, true // default: Same
 	}

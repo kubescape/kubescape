@@ -426,6 +426,19 @@ kubescape policy test ./myrules --run '^no-privileged-containers/flagged$'
 kubescape policy test ./myrules --run '/flagged$' --update
 ```
 
+`--junit-report <file>` also writes the results to `<file>` as a JUnit XML
+report, which CI systems such as GitLab, Jenkins and Azure Pipelines can display
+as test results. Each rule that has test cases is a test suite and each of its
+cases a test case. A case whose output differs from its `expected.json` is a
+failure that carries the diff, and a case that could not be loaded or evaluated
+is an error. The report is written whether or not every case passes, so a
+failing case still fails the command; a report that cannot be written fails it
+too. It cannot be combined with `--update`:
+
+```bash
+kubescape policy test ./myrules --junit-report policy-test.xml
+```
+
 `policy test` gives a rule that reads
 [control configuration](#control-configuration) its inputs from an optional
 `data.json` in the test case directory, in the format regolibrary's fixtures
@@ -983,7 +996,7 @@ a config omits, so the live `envFrom` survives.
 | `--output-dir` | Write the fixes into this directory instead of their default destination. Manifest files: fixed copies that mirror the scanned tree, originals untouched. Cluster scans: one patched manifest per resource. A non-empty directory is refused unless `--no-confirm` is passed | *(fix in place / print to stdout)* |
 | `--output-patch` | Write the fixes for manifest files to this file as one unified diff instead of changing the manifests. Apply it from the scanned directory with `git apply` or `patch -p1`. The manifests are never modified, and an existing file is replaced only with `--no-confirm`. Not for cluster scans; cannot be combined with `--output-dir`, `--dry-run` or `--verify` | - |
 | `--verify` | After the fixes are applied in place, rescan the scanned directories and report, for each fixed control, whether the finding is `resolved`, `still failing` or `unverified`. Exits with an error unless every fix is resolved. Cannot be combined with `--dry-run`, `--output-dir` or `--output-patch`; not for cluster scans | `false` |
-| `--controls-config` | With `--verify`, the controls-config file the rescan uses instead of the one the report records. `--verify` refuses to run, before anything is changed, if the recorded file cannot be read. Only applies to `--verify` | - |
+| `--controls-config` | With `--verify`, the controls-config file the rescan uses instead of the one the report records. `--verify` refuses to run, before anything is changed or written, if the file it would use cannot be read or holds no control inputs. Only applies to `--verify` | - |
 | `--output-kustomize` | Write a `kustomization.yaml` and JSON 6902 patch files for Helm-rendered resources into this directory. A non-empty directory is refused unless `--no-confirm` is passed | - |
 | `-f`, `--values` | Specify Helm values in a YAML file (can specify multiple) | - |
 | `--set` | Set Helm values on the command line (e.g. `key1=val1,key2=val2`) | - |
@@ -1184,10 +1197,15 @@ are written in place, it rescans the scanned directories and judges every
 control that was fixed, one finding at a time:
 
 ```
-Verification: 3 resolved, 1 still failing, 1 unverified
+Verification: 2 resolved, 1 still failing, 1 unverified
+  Deployment/web: C-0016 resolved (control_passed): the control passed in the fresh scan, which completed
   Deployment/web: C-0057 still_failing (control_failed): the control is still reported as failed in the fresh scan
+  Deployment/api: C-0057 resolved (control_passed): the control passed in the fresh scan, which completed
   Pod/db: C-0017 unverified (resource_not_found): the resource_id is not in the fresh scan; ...
 ```
+
+Every fixed control gets a line with its verdict and the reason for it, and
+the ones that are not `resolved` are printed as warnings.
 
 | Verdict | Meaning |
 |---------|---------|
@@ -1221,8 +1239,11 @@ default more lenient than the original would call resolved a finding the
 original configuration still fails. The report records the path of the
 controls-config file of the scan that made it, and the rescan uses that file.
 It is never replaced by the default: if the recorded file can no longer be read,
-`--verify` stops before it changes anything and asks for the file with
+or no longer holds a controls configuration (a JSON object with at least one
+control input), `--verify` stops before it changes or writes anything, the
+`--output-kustomize` files included, and asks for the file with
 `--controls-config`, which is also how to point the rescan at a different one.
+A file given with `--controls-config` is checked the same way.
 The output names the configuration used every time, and says when the report was
 made by another Kubescape version, whose policies may judge a control
 differently.

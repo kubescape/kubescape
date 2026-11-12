@@ -575,3 +575,45 @@ func TestServiceExposure_HTTPRouteIndeterminateAdmissionStillReportsPath(t *test
 func ptrBackend(b networkingv1.IngressBackend) *networkingv1.IngressBackend {
 	return &b
 }
+
+func TestNilIndex_SafeReceiverMethods(t *testing.T) {
+	var idx *Index
+	target := ref("ns", "app")
+
+	paths, unclear := idx.ServiceExposure(target)
+	if paths != nil || !unclear {
+		t.Errorf("ServiceExposure on nil index = (%v, %v), want (nil, true)", paths, unclear)
+	}
+
+	if ns := idx.routeNamespacesFor(target); ns != nil {
+		t.Errorf("routeNamespacesFor on nil index = %v, want nil", ns)
+	}
+
+	route := &gatewayRoute{Kind: "HTTPRoute", Namespace: "ns", Name: "route"}
+	s := &corev1.Service{}
+	permitted, undetermined := idx.routeReferencesService(route, target, s)
+	if permitted || undetermined {
+		t.Errorf("routeReferencesService on nil index = (%v, %v), want (false, false)", permitted, undetermined)
+	}
+
+	if verdict := idx.authorizeServiceReference(route, target); verdict != referenceUndetermined {
+		t.Errorf("authorizeServiceReference on nil index = %v, want referenceUndetermined", verdict)
+	}
+
+	if attaches := idx.routeAttachesToAGateway(route); attaches {
+		t.Errorf("routeAttachesToAGateway on nil index = true, want false")
+	}
+
+	if hostnames := idx.attachedRouteHostnames(route); hostnames != nil {
+		t.Errorf("attachedRouteHostnames on nil index = %v, want nil", hostnames)
+	}
+
+	admits, determinable := idx.gatewayAdmitsRouteNamespace(listener{}, "ns", "gw-ns")
+	if admits || determinable {
+		t.Errorf("gatewayAdmitsRouteNamespace on nil index = (%v, %v), want (false, false)", admits, determinable)
+	}
+
+	if canForward := idx.mirrorParentCanForward(backendRef{}, route); canForward {
+		t.Errorf("mirrorParentCanForward on nil index = true, want false")
+	}
+}

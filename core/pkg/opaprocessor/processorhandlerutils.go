@@ -726,6 +726,9 @@ func appendProjectedResources(sourceK8s cautils.K8SResources, sourceExternal cau
 
 func getRuleDependencies(ctx context.Context) (map[string]string, error) {
 	modules := resources.LoadRegoModules()
+	// OPA type-checks even unused modules. This API client uses http.send,
+	// which is unavailable to control Rego.
+	delete(modules, "kubernetes.api.client")
 	if len(modules) == 0 {
 		logger.L().Ctx(ctx).Warning("failed to load rule dependencies")
 	}
@@ -787,6 +790,7 @@ func removeData(obj workloadinterface.IMetadata) map[string]map[string]struct{} 
 		return nil // remove data only from kubernetes objects
 	}
 	workload := workloadinterface.NewWorkloadObj(obj.GetObject())
+	redactAnnotations(workload)
 	switch workload.GetKind() {
 	case "Secret":
 		removeSecretData(workload)
@@ -899,6 +903,8 @@ func removeContainersData(containers []corev1.Container) map[string]map[string]s
 			container.Env[j].ValueFrom = nil
 		}
 		container.EnvFrom = nil
+		redactContainerSecrets(container.Command, container.Args, container.Lifecycle,
+			container.LivenessProbe, container.ReadinessProbe, container.StartupProbe)
 		if len(refs) > 0 {
 			if refsByContainer == nil {
 				refsByContainer = make(map[string]map[string]struct{})
@@ -926,6 +932,8 @@ func removeEphemeralContainersData(containers []corev1.EphemeralContainer) map[s
 			container.Env[j].ValueFrom = nil
 		}
 		container.EnvFrom = nil
+		redactContainerSecrets(container.Command, container.Args, container.Lifecycle,
+			container.LivenessProbe, container.ReadinessProbe, container.StartupProbe)
 		if len(refs) > 0 {
 			if refsByContainer == nil {
 				refsByContainer = make(map[string]map[string]struct{})

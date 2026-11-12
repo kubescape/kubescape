@@ -1,0 +1,10 @@
+# repeated names change nothing: a is common to both.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: pv-create
+rules:
+- apiGroups: [""]
+  resources: ["persistentvolumes"]
+  resourceNames: ["a", "a"]
+  verbs: ["create"]

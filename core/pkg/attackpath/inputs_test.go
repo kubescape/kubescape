@@ -578,3 +578,17 @@ func TestCollectInputsDroppedIngressUnavailable(t *testing.T) {
 		t.Fatalf("exposure decode failure not isolated: %+v", inputs)
 	}
 }
+
+func TestCollectInputs_NilExposureIndexIsSafe(t *testing.T) {
+	inputs := CollectInputs(makeResources(
+		resource(map[string]any{"apiVersion": "v1", "kind": "Service", "metadata": map[string]any{"name": "app", "namespace": "apps"}, "spec": map[string]any{"ports": []any{map[string]any{"port": 80}}}}),
+		resource(map[string]any{"apiVersion": "networking.k8s.io/v1", "kind": "Ingress", "metadata": map[string]any{"name": "bad", "namespace": "apps"}, "spec": map[string]any{"rules": "invalid"}}),
+	))
+	if inputs.ExposureIndex != nil {
+		t.Fatalf("expected nil ExposureIndex, got %+v", inputs.ExposureIndex)
+	}
+	paths, unclear := inputs.ExposureIndex.ServiceExposure(exposurepkg.ServiceRef{Namespace: "apps", Name: "app"})
+	if paths != nil || !unclear {
+		t.Errorf("ServiceExposure on nil index = (%v, %v), want (nil, true)", paths, unclear)
+	}
+}

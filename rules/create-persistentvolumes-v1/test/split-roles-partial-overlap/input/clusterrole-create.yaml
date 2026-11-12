@@ -1,0 +1,10 @@
+# the name lists share b, so the subject can apply b and create it.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: pv-create
+rules:
+- apiGroups: [""]
+  resources: ["persistentvolumes"]
+  resourceNames: ["a", "b"]
+  verbs: ["create"]

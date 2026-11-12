@@ -1,0 +1,10 @@
+# a patch on every resource and group includes patch on PersistentVolume a.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: pv-create
+rules:
+- apiGroups: [""]
+  resources: ["persistentvolumes"]
+  resourceNames: ["a"]
+  verbs: ["create"]

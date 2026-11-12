@@ -408,6 +408,43 @@ func TestGetResourcesFromPath_FailsWhenScannedChartFailsToRender(t *testing.T) {
 	assert.Contains(t, err.Error(), "brokenchart")
 }
 
+// A chart Helm cannot load is never rendered. When it is the scanned input, the
+// scan fails with the cause rather than as an input with no resources.
+func TestGetResourcesFromPath_FailsWhenScannedChartFailsToLoad(t *testing.T) {
+	chartDir := filepath.Join(t.TempDir(), "chart")
+	require.NoError(t, os.MkdirAll(filepath.Join(chartDir, "templates"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "Chart.yaml"), []byte("apiVersion: v2\nname: unloadable\nversion: 0.1.0\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "values.yaml"), []byte("- a\n- b\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "templates", "sa.yaml"), []byte("apiVersion: v1\nkind: ServiceAccount\nmetadata:\n  name: sa\n"), 0o600))
+
+	_, _, _, err := getResourcesFromPath(context.TODO(), chartDir, cautils.HelmValueOptions{}, nil)
+
+	require.ErrorIs(t, err, cautils.ErrHelmLoadFailed)
+	assert.NotErrorIs(t, err, cautils.ErrNoManifestFiles)
+	assert.Contains(t, err.Error(), "values.yaml", "the cause is in the error, not only in a warning")
+}
+
+func TestGetResourcesFromPath_SkipsTemplatesOfNestedChartThatFailedToLoad(t *testing.T) {
+	dir := t.TempDir()
+	chartDir := filepath.Join(dir, "chart")
+	require.NoError(t, os.MkdirAll(filepath.Join(chartDir, "templates"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "Chart.yaml"), []byte("apiVersion: v2\nname: unloadable\nversion: 0.1.0\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "values.yaml"), []byte("- a\n- b\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "templates", "sa.yaml"), []byte("apiVersion: v1\nkind: ServiceAccount\nmetadata:\n  name: sa\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "pod.yaml"), []byte("apiVersion: v1\nkind: Pod\nmetadata:\n  name: plain\nspec:\n  containers:\n    - name: c\n      image: nginx\n"), 0o600))
+
+	_, workloads, skips, err := getResourcesFromPath(context.TODO(), dir, cautils.HelmValueOptions{}, nil)
+	require.NoError(t, err, "a broken chart inside a broader scan must not fail the scan")
+
+	names := make([]string, 0, len(workloads))
+	for _, w := range workloads {
+		names = append(names, w.GetName())
+	}
+	assert.Equal(t, []string{"plain"}, names, "templates of a chart that failed to load must not be scanned as plain YAML")
+	require.Len(t, skips, 1)
+	assert.Equal(t, "unrendered Helm template: its chart was not rendered", skips[0].Reason)
+}
+
 func TestGetResourcesFromPath_SkipsTemplatesOfNestedChartThatFailedToRender(t *testing.T) {
 	dir := t.TempDir()
 	chartDir := filepath.Join(dir, "chart")
@@ -654,13 +691,23 @@ esac
 func TestGetResourcesFromPath_RendersNestedKustomizeDirectoryWithPreciseOwnership(t *testing.T) {
 	repoRoot := t.TempDir()
 	appDir := filepath.Join(repoRoot, "app")
+	sharedDir := filepath.Join(repoRoot, "shared")
 	require.NoError(t, os.MkdirAll(appDir, 0o750))
+	require.NoError(t, os.MkdirAll(sharedDir, 0o750))
+	// External resources must be referenced through a base directory with its
+	// own Kustomization, rather than loading an individual file outside appDir.
+	require.NoError(t, os.WriteFile(filepath.Join(sharedDir, "kustomization.yaml"), []byte(`apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namePrefix: base-
+resources:
+  - shared.yaml
+`), 0o600))
 	require.NoError(t, os.WriteFile(filepath.Join(appDir, "kustomization.yaml"), []byte(`apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namePrefix: prod-
 resources:
   - deployment.yaml
-  - ../shared.yaml
+  - ../shared
 `), 0o600))
 	require.NoError(t, os.WriteFile(filepath.Join(appDir, "deployment.yaml"), []byte(`apiVersion: apps/v1
 kind: Deployment
@@ -679,7 +726,7 @@ spec:
         - name: app
           image: nginx:1.27
 `), 0o600))
-	require.NoError(t, os.WriteFile(filepath.Join(repoRoot, "shared.yaml"), []byte(`apiVersion: v1
+	require.NoError(t, os.WriteFile(filepath.Join(sharedDir, "shared.yaml"), []byte(`apiVersion: v1
 kind: ConfigMap
 metadata:
   name: shared
@@ -712,7 +759,8 @@ metadata:
 
 	assert.Equal(t, 1, counts["Deployment/prod-app"], "the nested Kustomize output must be scanned")
 	assert.Zero(t, counts["Deployment/app"], "the untransformed source manifest must not also be scanned")
-	assert.Equal(t, 1, counts["ConfigMap/prod-shared"], "a referenced source outside the Kustomize directory must be owned by the render")
+	assert.Equal(t, 1, counts["ConfigMap/prod-base-shared"], "a referenced base outside the Kustomize directory must be included in the render")
+	assert.Equal(t, 1, counts["ConfigMap/base-shared"], "the sibling base is also independently discovered during a broad scan")
 	assert.Zero(t, counts["ConfigMap/shared"], "the external source must not also be scanned raw")
 	assert.Zero(t, counts["Kustomization/"], "the Kustomization file is build input, not a workload")
 	assert.Equal(t, 1, counts["ConfigMap/unreferenced"], "an unreferenced manifest beside the Kustomization must remain")
@@ -790,7 +838,7 @@ func TestGetResourcesFromPath_NestedKustomizeHelmCRDOwnershipFollowsIncludeCRDs(
 
 			repoRoot := t.TempDir()
 			appDir := filepath.Join(repoRoot, "app")
-			chartDir := filepath.Join(repoRoot, "vendor", "charts", "app")
+			chartDir := filepath.Join(appDir, "vendor", "charts", "app")
 			require.NoError(t, os.MkdirAll(filepath.Join(chartDir, "templates"), 0o750))
 			require.NoError(t, os.MkdirAll(filepath.Join(chartDir, "crds"), 0o750))
 			require.NoError(t, os.WriteFile(filepath.Join(chartDir, "Chart.yaml"), []byte("apiVersion: v2\nname: app\nversion: 0.1.0\n"), 0o600))
@@ -818,7 +866,7 @@ spec:
 			require.NoError(t, os.WriteFile(filepath.Join(appDir, "kustomization.yaml"), []byte(fmt.Sprintf(`apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 helmGlobals:
-  chartHome: ../vendor/charts
+  chartHome: vendor/charts
 helmCharts:
   - name: app
     releaseName: app

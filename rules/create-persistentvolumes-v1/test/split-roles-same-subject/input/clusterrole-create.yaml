@@ -1,0 +1,11 @@
+# create and patch on data-pv come from two ClusterRoles bound to the same
+# subject. RBAC is additive, so the subject can apply data-pv and create it.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: pv-create
+rules:
+- apiGroups: [""]
+  resources: ["persistentvolumes"]
+  resourceNames: ["data-pv"]
+  verbs: ["create"]

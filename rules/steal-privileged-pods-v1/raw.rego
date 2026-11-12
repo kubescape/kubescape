@@ -235,6 +235,19 @@ is_same_subjects(subjectVector, subject) if {
 	subjectVector.apiGroup == subject.apiGroup
 }
 
+# A subject can carry neither qualifier. A ServiceAccount subject of a
+# RoleBinding may leave out its namespace, which the authorizer then reads as
+# the binding's own, and its apiGroup is empty, so the API server returns the
+# subject with neither field set. A User or Group manifest may also leave out
+# apiGroup, which the API server defaults. Both clauses above need one of the
+# fields to be present, so read them with a default here instead.
+is_same_subjects(subjectVector, subject) if {
+	subjectVector.kind == subject.kind
+	subjectVector.name == subject.name
+	object.get(subjectVector, "namespace", "") == object.get(subject, "namespace", "")
+	object.get(subjectVector, "apiGroup", "") == object.get(subject, "apiGroup", "")
+}
+
 # Unlike is_same_subjects above, this compares two aggregated elements rather
 # than an element against a subject entry, so it cannot fall back to matching on
 # apiGroup alone: two ServiceAccounts of the same name in different namespaces

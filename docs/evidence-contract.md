@@ -115,7 +115,7 @@ A path is a dot-separated list of keys. A list element is selected with a numeri
 
 An unquoted key holds only letters, digits, `_`, `-` and `/`, plus `.` when it is inside brackets. A quoted key can hold anything else.
 
-Paths outside this syntax are rejected rather than approximated, because a guess would point at a line the rule never named. Rejected forms include a wildcard (`spec.containers[*].image`), an empty segment (`spec..image`), an unclosed bracket or quote, and a second index on one key (`a[0][1]`). A rejected path gets no line and no value from the resource.
+Paths outside this syntax are rejected rather than approximated, because a guess would point at a line the rule never named. Rejected forms include a wildcard (`spec.containers[*].image`), an empty segment (`spec..image`), an unclosed bracket or quote, and a second index on one key (`a[0][1]`). A rejected path gets no line, and is marked `<unresolved>` in place of a value.
 
 Always substitute indexes into the path, the way the library's rules do:
 
@@ -123,7 +123,7 @@ Always substitute indexes into the path, the way the library's rules do:
 path := sprintf("spec.containers[%v].env[%v].name", [i, j])
 ```
 
-A bracket that is not a number is read as a map key. An index left as a placeholder, such as `spec.containers[container_ndx]`, names a key that does not exist, so it gets no line and no value.
+A bracket that is not a number is read as a map key. An index left as a placeholder, such as `spec.containers[container_ndx]`, names a key that does not exist, so it gets no line and is marked `<unresolved>`.
 
 ### The root depends on the kind
 
@@ -164,10 +164,10 @@ the output is:
 
 ```
 spec.hostNetwork (current: true) (line 9)
-spec.template.spec.hostNetwork (line 6)
+spec.template.spec.hostNetwork (current: <unresolved>) (line 6)
 ```
 
-The right path shows the current value and points at line 9. The wrong one shows no value and points at line 6, the first line inside the enclosing `spec`. A review path with no `(current: ...)` has usually not resolved.
+The right path shows the current value and points at line 9. The wrong one shows `<unresolved>` in place of a value and points at line 6, the first line inside the enclosing `spec`. A review or delete path marked `<unresolved>` selects nothing in the resource.
 
 ### Absent fields
 
@@ -179,7 +179,7 @@ For a field that the rule says must be added, the line points at the enclosing b
 
 ### Values
 
-Review paths are printed with the field's current value, as `path (current: value)`. Fix paths are printed as `path=value` with the value the rule wants.
+Review paths are printed with the field's current value, as `path (current: value)`. Delete paths get the same suffix. A review or delete path that selects nothing in the resource is printed as `path (current: <unresolved>)`, so it can be told apart from a path that was never looked up. Fix paths are printed as `path=value` with the value the rule wants, and are not marked, because the field they name is expected to be absent. The marker is part of the terminal `--show-evidence` output only: the other formats print such a path bare, as before.
 
 The default JSON format carries the same paths in each rule's results, and also an `evidence` array of `path`/`value` pairs for the delete and review paths of each failed control:
 
@@ -252,9 +252,9 @@ None of these produce an error. The control fails as usual, and the evidence is 
 | The rule emits no path at all | The control fails and names the resource, with nothing to point at | `naked-pods` (C-0073) emits `"failedPaths": [], "fixPaths": []`. On the example Pod, C-0030, C-0073 and C-0260 fail with no path of any kind |
 | Only a fix path, for a field that is absent | The path and the wanted value are shown, at the enclosing block's line. There is no current value, because there is none | `immutable-container-filesystem` (C-0017) |
 | Some `deny` blocks have paths and others do not | Evidence appears for some resource shapes only | The ephemeral-container block of `immutable-container-filesystem` emits `"fixPaths": []`, while its Pod and init-container blocks emit a fix path |
-| The path is written for the wrong kind | A nearby line, no value | See [A wrong root does not fail loudly](#a-wrong-root-does-not-fail-loudly) |
-| The path is malformed | No line, and no value from the resource | `spec.containers[*].image` |
-| An index is left unsubstituted | No line, and no value from the resource | `spec.containers[container_ndx].image` |
+| The path is written for the wrong kind | A nearby line, marked `<unresolved>` | See [A wrong root does not fail loudly](#a-wrong-root-does-not-fail-loudly) |
+| The path is malformed | No line, marked `<unresolved>` | `spec.containers[*].image` |
+| An index is left unsubstituted | No line, marked `<unresolved>` | `spec.containers[container_ndx].image` |
 | The value was scrubbed | `[redacted]` is shown, or the entry is left out | A path into a ConfigMap's `data` |
 | The resource comes from a templated Helm file | The path, but no line | A template containing `{{ .Values.x }}` |
 
@@ -271,7 +271,7 @@ kubescape scan control C-0041 pod.yaml --custom-rules ./my-rules --show-evidence
 `./my-rules` can hold a bare `.rego` file, or a rule directory with `raw.rego` and `rule.metadata.json`. For each path in the output, check that:
 
 - a path to a field that exists points at that field's own line, not at an enclosing block (a fix path to a field that has to be added is the exception: it points at the enclosing block by design, see [absent fields](#absent-fields));
-- a review path shows `(current: ...)`;
+- a review path shows `(current: ...)` and not `<unresolved>`;
 - a fix path shows the value the policy requires;
 - no `[redacted]` stands in for something the user needs to read, such as the field that names a credential.
 

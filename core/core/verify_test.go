@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -76,6 +77,10 @@ func verifyReportJSON(t *testing.T, results []resourcesresults.Result, coverage 
 	return raw
 }
 
+// verifyControlsConfig is a controls configuration the rescan can load: a JSON
+// object holding at least one control input.
+const verifyControlsConfig = `{"insecureCapabilities":["SYS_ADMIN"]}`
+
 func verifyComplete() *cautils.ScanCoverage {
 	return &cautils.ScanCoverage{EvaluatedControls: 1, TotalControls: 1}
 }
@@ -122,6 +127,7 @@ func TestFix_VerifyResolved(t *testing.T) {
 	assert.Contains(t, manifestContent(t, dir), "privileged: false", "the fix was applied before it was verified")
 	log := readLog()
 	assert.Contains(t, log, "Verification: 1 resolved, 0 still failing, 0 unverified")
+	assert.Contains(t, log, "Deployment/demo: C-0057 resolved (control_passed): the control passed in the fresh scan", "a resolved finding is named as well as one that is not")
 	assert.Contains(t, log, "controls configuration", "the settings the rescan used are said, not assumed")
 	require.Len(t, *calls, 1)
 	assert.Equal(t, []string{"C-0057"}, (*calls)[0].ControlIDs)
@@ -439,7 +445,7 @@ func TestFix_VerifyUsesTheControlsConfigurationTheReportRecords(t *testing.T) {
 
 	t.Run("a recorded file is used and named", func(t *testing.T) {
 		inputs := filepath.Join(t.TempDir(), "controls-inputs.json")
-		require.NoError(t, os.WriteFile(inputs, []byte(`{}`), 0o600))
+		require.NoError(t, os.WriteFile(inputs, []byte(verifyControlsConfig), 0o600))
 		reportPath := setup(t, inputs)
 		calls := resolved(t, reportPath)
 		readLog := verifyCaptureLog(t)
@@ -462,7 +468,7 @@ func TestFix_VerifyUsesTheControlsConfigurationTheReportRecords(t *testing.T) {
 
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "cannot verify")
-		assert.Contains(t, err.Error(), "cannot be read")
+		assert.Contains(t, err.Error(), "cannot be used")
 		assert.Contains(t, err.Error(), "--controls-config", "the way forward is named")
 		assert.Equal(t, before, manifestContent(t, manifestDir), "the manifest must not be changed by a run that could not be verified")
 	})
@@ -854,7 +860,7 @@ func TestFix_VerifyControlsConfigOverride(t *testing.T) {
 	}
 	writeConfig := func(t *testing.T) string {
 		path := filepath.Join(t.TempDir(), "config.json")
-		require.NoError(t, os.WriteFile(path, []byte(`{}`), 0o600))
+		require.NoError(t, os.WriteFile(path, []byte(verifyControlsConfig), 0o600))
 		return path
 	}
 	run := func(t *testing.T, reportPath, override string) error {
@@ -905,7 +911,7 @@ func TestFix_VerifyControlsConfigOverride(t *testing.T) {
 
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "--controls-config")
-		assert.Contains(t, err.Error(), "cannot be read")
+		assert.Contains(t, err.Error(), "cannot be used")
 		assert.Equal(t, before, manifestContent(t, dir))
 	})
 	t.Run("a directory is not a configuration", func(t *testing.T) {
@@ -916,9 +922,84 @@ func TestFix_VerifyControlsConfigOverride(t *testing.T) {
 		err := run(t, reportPath, t.TempDir())
 
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "not a regular file")
+		assert.Contains(t, err.Error(), "is a directory")
 		assert.Equal(t, before, manifestContent(t, dir))
 	})
+	// The rescan would load such a file, fail, and go on with the default
+	// configuration as a degraded scan, so every fix would be unverified only
+	// after the manifests were changed.
+	for _, tt := range []struct {
+		name, content, wantErr string
+	}{
+		{"a file that is not JSON is refused before anything is changed", "insecureCapabilities: [SYS_ADMIN]\n", "cannot be used"},
+		{"a file that is not an object of control inputs is refused before anything is changed", `["SYS_ADMIN"]`, "cannot be used"},
+		{"a file that holds no control inputs is refused before anything is changed", `{}`, "holds no control inputs"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			reportPath, dir := setup(t, "")
+			before := manifestContent(t, dir)
+			override := filepath.Join(t.TempDir(), "config.json")
+			require.NoError(t, os.WriteFile(override, []byte(tt.content), 0o600))
+			verifyNeverRescans(t)
+
+			err := run(t, reportPath, override)
+
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "--controls-config")
+			assert.Contains(t, err.Error(), tt.wantErr)
+			assert.Equal(t, before, manifestContent(t, dir))
+		})
+	}
+	t.Run("a file that is there but cannot be opened is refused before anything is changed", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("file modes do not take read access away on Windows")
+		}
+		if os.Geteuid() == 0 {
+			t.Skip("root can read a file whatever its mode")
+		}
+		reportPath, dir := setup(t, "")
+		before := manifestContent(t, dir)
+		override := writeConfig(t)
+		require.NoError(t, os.Chmod(override, 0))
+		verifyNeverRescans(t)
+
+		err := run(t, reportPath, override)
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "--controls-config")
+		assert.ErrorIs(t, err, os.ErrPermission)
+		assert.Equal(t, before, manifestContent(t, dir))
+	})
+}
+
+// TestFix_VerifyRefusalComesBeforeTheKustomizeOutput: the Kustomize patches of a
+// report's Helm resources are written before its manifests are fixed, so a
+// verification that cannot run must be refused before them too.
+func TestFix_VerifyRefusalComesBeforeTheKustomizeOutput(t *testing.T) {
+	dir := t.TempDir()
+	var manifests, helm reporthandlingv2.PostureReport
+	require.NoError(t, json.Unmarshal([]byte(fileContent(t, buildFixableReport(t, dir))), &manifests))
+	require.NoError(t, json.Unmarshal([]byte(fileContent(t, buildFixableHelmReport(t, dir))), &helm))
+	manifests.Resources = append(manifests.Resources, helm.Resources...)
+	manifests.Results = append(manifests.Results, helm.Results...)
+	manifests.Metadata.ScanMetadata.ControlsInputs = filepath.Join(t.TempDir(), "gone.json")
+	reportPath := writeReportFile(t, dir, &manifests)
+	before := manifestContent(t, dir)
+	kustDir := filepath.Join(t.TempDir(), "kust-output")
+	verifyNeverRescans(t)
+
+	err := (&Kubescape{Ctx: context.Background()}).Fix(&metav1.FixInfo{
+		ReportFile:       reportPath,
+		KustomizeDir:     kustDir,
+		NoConfirm:        true,
+		Verify:           true,
+		HelmValueOptions: cautils.HelmValueOptions{ValueFiles: []string{filepath.Join(dir, "values.yaml")}},
+	})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "cannot verify")
+	assert.NoDirExists(t, kustDir, "no Kustomize output is written by a run that could not be verified")
+	assert.Equal(t, before, manifestContent(t, dir))
 }
 
 func TestFix_ControlsConfigWithoutVerifyIsRefused(t *testing.T) {

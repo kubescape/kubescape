@@ -230,6 +230,19 @@ func TestNewFixHandler_BasePathFlag_InvalidBasePathErrors(t *testing.T) {
 	assert.ErrorContains(t, err, "invalid --base-path")
 }
 
+func TestNewFixHandler_BasePathFlag_WhitespaceBasePathErrors(t *testing.T) {
+	reportDir := t.TempDir()
+	scannedDir := t.TempDir()
+	reportFile := buildDirectoryReport(t, reportDir, scannedDir)
+
+	for _, blank := range []string{"   ", "\t", "\n"} {
+		h, err := NewFixHandler(&metav1.FixInfo{ReportFile: reportFile, BasePath: blank})
+		require.Error(t, err)
+		assert.Nil(t, h)
+		assert.EqualError(t, err, "--base-path needs a directory path")
+	}
+}
+
 // TestPrepareResourcesToFix_SymlinkEscapeIsSkipped reproduces the second
 // review bypass: a symlink inside the scanned directory pointing outside it.
 // Before the isPathContained fix, this was accepted as "contained" (lexical

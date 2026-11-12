@@ -27,7 +27,7 @@ deny contains msga if {
 	verb_path := sort([sprintf("relatedObjects[%d].rules[%d].verbs[%d]", [i, p, l]) |
 		some p
 		rule := role.rules[p]
-		csr_related(rule)
+		csr_evidence(role, rule)
 		verb := rule.verbs[l]
 		verb in {"create", "get", "list", "watch", "update", "patch", "approve", "*"}
 	])
@@ -35,7 +35,7 @@ deny contains msga if {
 	resources_path := sort([sprintf("relatedObjects[%d].rules[%d].resources[%d]", [i, p, l]) |
 		some p
 		rule := role.rules[p]
-		csr_related(rule)
+		csr_evidence(role, rule)
 		resource := rule.resources[l]
 		resource in {
 			"certificatesigningrequests",
@@ -49,7 +49,7 @@ deny contains msga if {
 	api_groups_path := sort([sprintf("relatedObjects[%d].rules[%d].apiGroups[%d]", [i, p, a]) |
 		some p
 		rule := role.rules[p]
-		csr_related(rule)
+		csr_evidence(role, rule)
 		apiGroup := rule.apiGroups[a]
 		apiGroup in {"certificates.k8s.io", "*"}
 	])
@@ -92,29 +92,75 @@ can_create_and_approve_csrs(role) if {
 # patch, and the API server authorizes that create with the object's name, so
 # create and patch on CSRs reach a named CSR even when both are narrowed (the
 # same route issue-token-secrets-v1 accepts for secrets).
-can_create_csrs(role) if {
+can_create_csrs(role) if plain_create(role)
+
+can_create_csrs(role) if ssa_create(role)
+
+plain_create(role) if {
 	rule := role.rules[_]
+	csr_create_rule(rule)
+	grants_unnamed_requests(rule)
+}
+
+# The create and the patch have to reach one common CSR name: create on "a" and
+# patch on "b" cannot create either object. Either side may be unrestricted.
+ssa_create(role) if {
+	create_rule := role.rules[_]
+	csr_create_rule(create_rule)
+	patch_rule := role.rules[_]
+	csr_patch_rule(patch_rule)
+	names_overlap(create_rule, patch_rule)
+}
+
+csr_create_rule(rule) if {
 	certificates_api_group(rule)
 	targets(rule, "certificatesigningrequests")
-	grants_unnamed_requests(rule)
 	verb_or_wildcard(rule.verbs, "create")
 }
 
-can_create_csrs(role) if {
-	grants_csr_verb(role, "create")
-	grants_csr_verb(role, "patch")
-}
-
-grants_csr_verb(role, verb) if {
-	rule := role.rules[_]
+csr_patch_rule(rule) if {
 	certificates_api_group(rule)
 	targets(rule, "certificatesigningrequests")
-	verb_or_wildcard(rule.verbs, verb)
+	verb_or_wildcard(rule.verbs, "patch")
+}
+
+# A create and a patch reach a common object when either is not narrowed to names,
+# or when both name the same object. The names are literal: RBAC has no wildcard
+# form for resourceNames. An empty name is the one a plain create is authorized
+# with and is not an object that apply could create, so it never counts as the
+# common name.
+names_overlap(create_rule, patch_rule) if {
+	unnamed(create_rule)
+	unnamed(patch_rule)
+}
+
+names_overlap(create_rule, patch_rule) if {
+	unnamed(create_rule)
+	names_an_object(patch_rule)
+}
+
+names_overlap(create_rule, patch_rule) if {
+	names_an_object(create_rule)
+	unnamed(patch_rule)
+}
+
+names_overlap(create_rule, patch_rule) if {
+	name := create_rule.resourceNames[_]
+	name != ""
+	name in patch_rule.resourceNames
+}
+
+# Kubernetes treats an absent and an empty resourceNames alike: neither narrows.
+unnamed(rule) if count(object.get(rule, "resourceNames", [])) == 0
+
+names_an_object(rule) if {
+	name := rule.resourceNames[_]
+	name != ""
 }
 
 # An omitted or empty resourceNames list is unrestricted, and "" is the name a
 # plain create is authorized with.
-grants_unnamed_requests(rule) if count(object.get(rule, "resourceNames", [])) == 0
+grants_unnamed_requests(rule) if unnamed(rule)
 
 grants_unnamed_requests(rule) if "" in rule.resourceNames
 
@@ -159,6 +205,20 @@ dangerous_signer_names(rule) if {
 }
 # An entry contributes to the reported paths when it participates in any leg of
 # the chain, so the alert points at every grant that made the subject dangerous.
+csr_evidence(_, rule) if csr_related(rule)
+
+# A patch-only entry is not a leg of its own, but when the create is reached
+# through server-side apply it is what enables that create, so it is evidence
+# too. With a plain create in the role the patch enables nothing, and a patch
+# that shares no name with a create is not part of the chain.
+csr_evidence(role, rule) if {
+	not plain_create(role)
+	csr_patch_rule(rule)
+	create_rule := role.rules[_]
+	csr_create_rule(create_rule)
+	names_overlap(create_rule, rule)
+}
+
 csr_related(rule) if {
 	certificates_api_group(rule)
 	targets(rule, "certificatesigningrequests")
@@ -218,4 +278,17 @@ is_same_subjects(subjectVector, subject) if {
 	subjectVector.kind == subject.kind
 	subjectVector.name == subject.name
 	subjectVector.apiGroup == subject.apiGroup
+}
+
+# A subject can carry neither qualifier. A ServiceAccount subject of a
+# RoleBinding may leave out its namespace, which the authorizer then reads as
+# the binding's own, and its apiGroup is empty, so the API server returns the
+# subject with neither field set. A User or Group manifest may also leave out
+# apiGroup, which the API server defaults. Both clauses above need one of the
+# fields to be present, so read them with a default here instead.
+is_same_subjects(subjectVector, subject) if {
+	subjectVector.kind == subject.kind
+	subjectVector.name == subject.name
+	object.get(subjectVector, "namespace", "") == object.get(subject, "namespace", "")
+	object.get(subjectVector, "apiGroup", "") == object.get(subject, "apiGroup", "")
 }
