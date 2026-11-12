@@ -60,6 +60,16 @@ func Test_validateImagePatchInfo_EmptyImage(t *testing.T) {
 	assert.Equal(t, "image tag is required", err.Error())
 }
 
+func Test_validateImagePatchInfo_WhitespaceImage(t *testing.T) {
+	patchInfo := &metav1.PatchInfo{
+		Image:      "   ",
+		OutputMode: "docker",
+	}
+	err := validateImagePatchInfo(patchInfo)
+	assert.Error(t, err)
+	assert.Equal(t, "image tag is required", err.Error())
+}
+
 func Test_validateImagePatchInfo_Image(t *testing.T) {
 	patchInfo := &metav1.PatchInfo{
 		Image:      "testing",
@@ -360,7 +370,46 @@ func Test_validateImagePatchInfo_DigestOnlyReturnsError(t *testing.T) {
 	err := validateImagePatchInfo(patchInfo)
 
 	assert.Error(t, err)
-	assert.Equal(t, "unexpected error while parsing image tag", err.Error())
+	assert.Equal(t, "--tag is required when patching an image referenced by digest", err.Error())
+}
+
+func Test_validateImagePatchInfo_DigestRefWithWhitespaceTag(t *testing.T) {
+	patchInfo := &metav1.PatchInfo{
+		Image:           "nginx@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		PatchedImageTag: "   ",
+		OutputMode:      "docker",
+	}
+
+	err := validateImagePatchInfo(patchInfo)
+
+	assert.Error(t, err)
+	assert.Equal(t, "tag cannot be empty or whitespace", err.Error())
+}
+
+func Test_validateImagePatchInfo_WhitespaceTag(t *testing.T) {
+	patchInfo := &metav1.PatchInfo{
+		Image:           "nginx:1.22",
+		PatchedImageTag: "   ",
+		OutputMode:      "docker",
+	}
+
+	err := validateImagePatchInfo(patchInfo)
+
+	assert.Error(t, err)
+	assert.Equal(t, "tag cannot be empty or whitespace", err.Error())
+}
+
+func Test_validateImagePatchInfo_PaddedTagTrimmed(t *testing.T) {
+	patchInfo := &metav1.PatchInfo{
+		Image:           "nginx:1.22",
+		PatchedImageTag: "  custom-tag  ",
+		OutputMode:      "docker",
+	}
+
+	err := validateImagePatchInfo(patchInfo)
+
+	assert.NoError(t, err)
+	assert.Equal(t, "custom-tag", patchInfo.PatchedImageTag)
 }
 
 func Test_validateImagePatchInfo_OutputModeValidation(t *testing.T) {
@@ -381,6 +430,26 @@ func Test_validateImagePatchInfo_OutputModeValidation(t *testing.T) {
 	err = validateImagePatchInfo(patchInfoOciNoPath)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "output-path is required when output-mode is oci")
+
+	// Whitespace output-path for oci
+	patchInfoOciWhitespacePath := &metav1.PatchInfo{
+		Image:      "nginx",
+		OutputMode: "oci",
+		OutputPath: "   ",
+	}
+	err = validateImagePatchInfo(patchInfoOciWhitespacePath)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "output-path is required when output-mode is oci")
+
+	// Whitespace output-path for local
+	patchInfoLocalWhitespacePath := &metav1.PatchInfo{
+		Image:      "nginx",
+		OutputMode: "local",
+		OutputPath: "   ",
+	}
+	err = validateImagePatchInfo(patchInfoLocalWhitespacePath)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "output-path is required when output-mode is local")
 
 	// Push overrides to image when output-mode is default (docker)
 	patchInfoPush := &metav1.PatchInfo{
@@ -446,4 +515,71 @@ func TestGetPatchCmd_RejectsUnexpectedArgs(t *testing.T) {
 	err := cmd.Execute()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), `unknown command "unexpected" for "patch"`)
+}
+
+func TestGetPatchCmd_WhitespaceFlags(t *testing.T) {
+	mockKubescape := &mocks.MockIKubescape{}
+
+	t.Run("rejects_whitespace_image", func(t *testing.T) {
+		cmd := GetPatchCmd(mockKubescape)
+		cmd.SetArgs([]string{"--image", "   "})
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.Equal(t, "image tag is required", err.Error())
+	})
+
+	t.Run("rejects_digest_without_tag", func(t *testing.T) {
+		cmd := GetPatchCmd(mockKubescape)
+		cmd.SetArgs([]string{"--image", "nginx@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"})
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.Equal(t, "--tag is required when patching an image referenced by digest", err.Error())
+	})
+
+	t.Run("rejects_digest_with_whitespace_tag", func(t *testing.T) {
+		cmd := GetPatchCmd(mockKubescape)
+		cmd.SetArgs([]string{"--image", "nginx@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "--tag", "   "})
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.Equal(t, "--tag cannot be empty or whitespace", err.Error())
+	})
+
+	t.Run("rejects_explicitly_whitespace_tag_on_tagged_image", func(t *testing.T) {
+		cmd := GetPatchCmd(mockKubescape)
+		cmd.SetArgs([]string{"--image", "nginx:1.22", "--tag", "   "})
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.Equal(t, "--tag cannot be empty or whitespace", err.Error())
+	})
+
+	t.Run("rejects_explicitly_empty_tag", func(t *testing.T) {
+		cmd := GetPatchCmd(mockKubescape)
+		cmd.SetArgs([]string{"--image", "nginx:1.22", "--tag", ""})
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.Equal(t, "--tag cannot be empty or whitespace", err.Error())
+	})
+
+	t.Run("retains_default_when_tag_is_omitted", func(t *testing.T) {
+		cmd := GetPatchCmd(mockKubescape)
+		require.NoError(t, cmd.ParseFlags([]string{"--image", "nginx:1.22"}))
+		require.True(t, cmd.Flags().Lookup("image").Changed)
+		require.False(t, cmd.Flags().Lookup("tag").Changed)
+	})
+
+	t.Run("rejects_whitespace_output_path_for_oci", func(t *testing.T) {
+		cmd := GetPatchCmd(mockKubescape)
+		cmd.SetArgs([]string{"--image", "nginx:1.22", "--output-mode", "oci", "--output-path", "   "})
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.Equal(t, "output-path is required when output-mode is oci", err.Error())
+	})
+
+	t.Run("rejects_whitespace_output_path_for_local", func(t *testing.T) {
+		cmd := GetPatchCmd(mockKubescape)
+		cmd.SetArgs([]string{"--image", "nginx:1.22", "--output-mode", "local", "--output-path", "   "})
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.Equal(t, "output-path is required when output-mode is local", err.Error())
+	})
 }
