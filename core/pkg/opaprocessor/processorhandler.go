@@ -2318,7 +2318,12 @@ func (opap *OPAProcessor) runCELOnK8s(ctx context.Context, rule *reporthandling.
 		return nil, celOutcome{}, fmt.Errorf("rule: '%s', %w", rule.Name, err)
 	}
 
-	vap, err := cel.LoadVAP(controlID)
+	var vap *cel.VAP
+	if rule.Rule != "" {
+		vap, err = cel.ParseVAP([]byte(rule.Rule))
+	} else {
+		vap, err = cel.LoadVAP(controlID)
+	}
 	if err != nil {
 		return nil, celOutcome{}, fmt.Errorf("rule: '%s', %w", rule.Name, err)
 	}

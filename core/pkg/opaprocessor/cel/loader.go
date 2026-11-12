@@ -248,6 +248,24 @@ func LoadVAP(controlID string) (*VAP, error) {
 	return vap, nil
 }
 
+// ParseVAP parses a standalone ValidatingAdmissionPolicy from raw YAML/JSON data,
+// validating its Kind and APIVersion and enforcing offline evaluation compatibility.
+func ParseVAP(data []byte) (*VAP, error) {
+	decoder := k8syaml.NewYAMLOrJSONDecoder(bytes.NewReader(data), 4096)
+	var policy admissionregistrationv1.ValidatingAdmissionPolicy
+	if err := decoder.Decode(&policy); err != nil {
+		return nil, fmt.Errorf("decode ValidatingAdmissionPolicy: %w", err)
+	}
+	if policy.Kind != vapKind || policy.APIVersion != vapAPIVersion {
+		return nil, fmt.Errorf("expected %s %s, got %s %s", vapAPIVersion, vapKind, policy.APIVersion, policy.Kind)
+	}
+	vap := newVAP(&policy)
+	if err := vap.requireNamespaceSelectorSupported(); err != nil {
+		return nil, err
+	}
+	return vap, nil
+}
+
 // ErrParamNotFound signals that a binding's paramRef points to an object that
 // is not present in the scanned input. The caller applies the binding's
 // parameterNotFoundAction: Allow means the object is admitted, Deny/empty means

@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/kubescape/kubescape/v4/core/pkg/ruledir"
+	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -395,4 +396,123 @@ func TestLoadCustomRules_RuleDirWithDirectoryAsRuleFileIsNotARule(t *testing.T) 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no custom rules found")
 	assert.Nil(t, fw)
+}
+
+func TestLoadCustomRules_FromSingleYAMLFile(t *testing.T) {
+	f := filepath.Join(t.TempDir(), "disallow-host-ipc.yaml")
+	content := `apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: disallow-host-ipc
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE"]
+        resources: ["pods"]
+  validations:
+    - expression: "!has(object.spec.hostIPC) || !object.spec.hostIPC"
+      message: "hostIPC must not be enabled"
+`
+	require.NoError(t, os.WriteFile(f, []byte(content), 0o600))
+
+	fw, err := LoadCustomRules(f)
+	require.NoError(t, err)
+	require.NotNil(t, fw)
+	require.Len(t, fw.Controls, 1)
+
+	control := fw.Controls[0]
+	assert.Equal(t, "custom-disallow-host-ipc", control.ControlID)
+	assert.Equal(t, float32(defaultCustomRuleBaseScore), control.BaseScore)
+	require.Len(t, control.Rules, 1)
+	assert.Equal(t, reporthandling.CELLanguage, control.Rules[0].RuleLanguage)
+	assert.Contains(t, control.Rules[0].Rule, "disallow-host-ipc")
+}
+
+func TestLoadCustomRules_FromSingleYAMLFile_WithBaseScore(t *testing.T) {
+	f := filepath.Join(t.TempDir(), "check.yaml")
+	content := `# @baseScore 8.5
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: high-sev-check
+spec:
+  validations:
+    - expression: "true"
+`
+	require.NoError(t, os.WriteFile(f, []byte(content), 0o600))
+
+	fw, err := LoadCustomRules(f)
+	require.NoError(t, err)
+	require.NotNil(t, fw)
+	require.Len(t, fw.Controls, 1)
+	assert.Equal(t, float32(8.5), fw.Controls[0].BaseScore)
+}
+
+func TestLoadCustomRules_FromDirectory_MixedRegoAndYAML(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "no-root.rego"), []byte(`package armo_builtins
+deny[{"alertMessage": msg}] { msg := "root user found" }`), 0o600))
+
+	vapContent := `apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: disallow-host-network
+spec:
+  validations:
+    - expression: "!has(object.spec.hostNetwork) || !object.spec.hostNetwork"
+`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "host-net.yaml"), []byte(vapContent), 0o600))
+
+	fw, err := LoadCustomRules(dir)
+	require.NoError(t, err)
+	require.NotNil(t, fw)
+	require.Len(t, fw.Controls, 2)
+
+	languages := map[reporthandling.RuleLanguages]bool{}
+	for _, c := range fw.Controls {
+		require.Len(t, c.Rules, 1)
+		languages[c.Rules[0].RuleLanguage] = true
+	}
+	assert.True(t, languages[reporthandling.RegoLanguage], "should include Rego rule")
+	assert.True(t, languages[reporthandling.CELLanguage], "should include CEL rule")
+}
+
+func TestLoadCustomRules_DuplicateNameAcrossRegoAndYAMLIsRejected(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "duplicate-check.rego"), []byte(`package armo_builtins
+deny[{"alertMessage": msg}] { msg := "from rego" }`), 0o600))
+
+	vapContent := `apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: duplicate-check
+spec:
+  validations:
+    - expression: "true"
+`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "duplicate-check.yaml"), []byte(vapContent), 0o600))
+
+	fw, err := LoadCustomRules(dir)
+	require.Error(t, err)
+	assert.Nil(t, fw)
+	assert.Contains(t, err.Error(), "duplicate-check")
+	assert.Contains(t, err.Error(), "defined twice")
+}
+
+func TestLoadCustomRules_InvalidVAP_Rejected(t *testing.T) {
+	f := filepath.Join(t.TempDir(), "not-a-vap.yaml")
+	content := `apiVersion: v1
+kind: Pod
+metadata:
+  name: just-a-pod
+`
+	require.NoError(t, os.WriteFile(f, []byte(content), 0o600))
+
+	fw, err := LoadCustomRules(f)
+	require.Error(t, err)
+	assert.Nil(t, fw)
+	assert.Contains(t, err.Error(), "expected admissionregistration.k8s.io/v1 ValidatingAdmissionPolicy")
 }
