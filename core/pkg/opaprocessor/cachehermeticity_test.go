@@ -83,26 +83,6 @@ func TestRegoSourceIsHermetic(t *testing.T) {
 			hermetic: false,
 		},
 		{
-			name:     "a library function through an import alias",
-			source:   regoModule("import data.kubernetes.api.client as k8s\n\ndeny contains msga if {\n\tpod := input[_]\n\tk8s.query_all(\"pods\").status_code == 200\n\tmsga := {\"alertObject\": {\"k8sApiObjects\": [pod]}}\n}"),
-			hermetic: false,
-		},
-		{
-			name:     "a library function through its full reference",
-			source:   regoModule("deny contains msga if {\n\tpod := input[_]\n\tdata.kubernetes.api.client.query_all(\"pods\").status_code == 200\n\tmsga := {\"alertObject\": {\"k8sApiObjects\": [pod]}}\n}"),
-			hermetic: false,
-		},
-		{
-			name:     "a library function inside a comprehension",
-			source:   regoModule("deny contains msga if {\n\tpod := input[_]\n\tr := [s | s := data.kubernetes.api.client.query_all(\"pods\")]\n\tcount(r) > 0\n\tmsga := {\"alertObject\": {\"k8sApiObjects\": [pod]}}\n}"),
-			hermetic: false,
-		},
-		{
-			name:     "a dynamic reference into a library package",
-			source:   regoModule("deny contains msga if {\n\tpod := input[_]\n\tsome k\n\tdata.kubernetes.api[k]\n\tmsga := {\"alertObject\": {\"k8sApiObjects\": [pod]}}\n}"),
-			hermetic: false,
-		},
-		{
 			name:     "a fully dynamic data reference",
 			source:   regoModule("deny contains msga if {\n\tpod := input[_]\n\tsome a, b\n\tdata[a][b]\n\tmsga := {\"alertObject\": {\"k8sApiObjects\": [pod]}}\n}"),
 			hermetic: false,
@@ -129,7 +109,7 @@ func TestRegoSourceIsHermetic(t *testing.T) {
 		},
 		{
 			name:     "a with modifier substituting a builtin",
-			source:   regoModule("f(x) := count(x)\n\ndeny contains msga if {\n\tpod := input[_]\n\tf([1]) with count as http.send\n\tmsga := {\"alertObject\": {\"k8sApiObjects\": [pod]}}\n}"),
+			source:   regoModule("f(x) := count(x)\n\ndeny contains msga if {\n\tpod := input[_]\n\tf([1]) with count as sum\n\tmsga := {\"alertObject\": {\"k8sApiObjects\": [pod]}}\n}"),
 			hermetic: false,
 		},
 		{
@@ -162,6 +142,25 @@ func TestRegoSourceIsHermetic(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			assert.Equal(t, tt.hermetic, regoSourceIsHermetic(tt.source))
+		})
+	}
+}
+
+// Use a test library with an allowed, nondeterministic builtin so these
+// cases exercise the dependency graph of a successfully compiled rule.
+func TestCompiledModuleIsHermeticAcrossLibraryReferences(t *testing.T) {
+	const library = `package library.clock
+	now(_) := time.now_ns()`
+	for name, body := range map[string]string{
+		"import alias":      "import data.library.clock as c\nallow if c.now(input) > 0",
+		"full reference":    "allow if data.library.clock.now(input) > 0",
+		"comprehension":     "allow if count([n | n := data.library.clock.now(input)]) > 0",
+		"dynamic reference": "allow if { some k; data.library[k] }",
+	} {
+		t.Run(name, func(t *testing.T) {
+			compiled, err := ast.CompileModules(map[string]string{"clock": library, "control": regoModule(body)})
+			require.NoError(t, err)
+			assert.False(t, compiledModuleIsHermetic(compiled, "control"))
 		})
 	}
 }
