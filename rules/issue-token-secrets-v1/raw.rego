@@ -75,22 +75,12 @@ deny contains msga if {
 # unknown at authorization time), so the create has to come from an entry that
 # is unrestricted or lists "". The read may be name restricted — the subject
 # simply creates the secret under that name and reads it back (a narrowed list
-# or watch needs a metadata.name field selector to match).
+# or watch needs a metadata.name field selector to match). The read has to admit
+# a real name, though: "" is never the name of a secret.
 can_issue_token_secret(role) if {
 	grants_unnamed(role, "create")
-	can_read_back(role)
-}
-
-# A get carries the secret's real name, which is never empty, so it has to come
-# from an entry that is unrestricted or names a secret.
-can_read_back(role) if grants_readable(role, "get")
-
-# A list or watch without a metadata.name field selector is authorized with the
-# empty name and returns every secret, so an entry that lists only "" reads the
-# token as well.
-can_read_back(role) if {
-	some verb in {"list", "watch"}
-	grants(role, verb)
+	some verb in {"get", "list", "watch"}
+	grants_readable(role, verb)
 }
 
 # create + patch: server side apply can bring the secret into existence even
@@ -150,14 +140,8 @@ can_issue_token_secret(role) if {
 	grants_unrestricted(role, "patch")
 }
 
-# true if any entry in the role grants @verb over secrets
-grants(role, verb) if {
-	rule := role.rules[_]
-	targets_secrets(rule)
-	rule.verbs[_] in {verb, "*"}
-}
-
-# as above, but only from entries that are not narrowed with resourceNames
+# true if an entry in the role that is not narrowed with resourceNames grants
+# @verb over secrets
 grants_unrestricted(role, verb) if {
 	rule := role.rules[_]
 	targets_secrets(rule)
