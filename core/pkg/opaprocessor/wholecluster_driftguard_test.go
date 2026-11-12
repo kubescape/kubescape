@@ -81,21 +81,18 @@ func isString(term *ast.Term, want string) bool {
 	return ok && string(s) == want
 }
 
-// ruleIsCrossNamespaceCandidate is true for a rule that needs more than one
-// resource kind (so it can join objects), is not already handled by a
-// resourcesAggregator, and reads a namespace field as described above.
+// ruleIsCrossNamespaceCandidate is true for a rule that is not already handled
+// by a resourcesAggregator and reads a namespace field as described above. The
+// number of matched kinds is deliberately not part of the test: a rule that
+// matches a single kind can still resolve another object of that kind through a
+// namespace reference (a Widget naming the namespace of a target Widget), and
+// namespace-partitioned streaming splits those objects just the same.
 func ruleIsCrossNamespaceCandidate(t *testing.T, rule *reporthandling.PolicyRule) bool {
 	t.Helper()
 	if _, aggregated := rule.Attributes["resourcesAggregator"]; aggregated {
 		return false
 	}
-	kinds := map[string]struct{}{}
-	for _, match := range rule.Match {
-		for _, resource := range match.Resources {
-			kinds[resource] = struct{}{}
-		}
-	}
-	return len(kinds) >= 2 && regoReadsNamespaceField(t, rule.Name, rule.Rule)
+	return regoReadsNamespaceField(t, rule.Name, rule.Rule)
 }
 
 // uncoveredCandidates returns, sorted, the candidate control IDs that are
@@ -177,6 +174,17 @@ deny contains msga if {
 	pod.metadata.namespace == "default"
 	msga := {}
 }`
+	const sameKindCrossRef = `package armo_builtins
+import rego.v1
+deny contains msga if {
+	widget := input[_]
+	widget.kind == "Widget"
+	target := input[_]
+	target.kind == "Widget"
+	target.metadata.namespace == widget.spec.target.namespace
+	target.metadata.name == widget.spec.target.name
+	msga := {}
+}`
 	match := func(kinds ...string) []reporthandling.RuleMatchObjects {
 		return []reporthandling.RuleMatchObjects{{Resources: kinds}}
 	}
@@ -188,7 +196,12 @@ deny contains msga if {
 	}{
 		{"namespace from a reference field across two kinds", reporthandling.PolicyRule{Rule: crossRef, Match: match("HTTPRoute", "Service")}, true},
 		{"metadata.namespace only", reporthandling.PolicyRule{Rule: sameNamespaceOnly, Match: match("Pod", "Service")}, false},
-		{"single kind cannot join", reporthandling.PolicyRule{Rule: crossRef, Match: match("HTTPRoute")}, false},
+		{"namespace from a reference field within a single kind", reporthandling.PolicyRule{Rule: sameKindCrossRef, Match: match("Widget")}, true},
+		{"namespace from a reference field, one kind per match entry", reporthandling.PolicyRule{
+			Rule:  crossRef,
+			Match: []reporthandling.RuleMatchObjects{{Resources: []string{"HTTPRoute"}}, {Resources: []string{"Service"}}},
+		}, true},
+		{"metadata.namespace only, single kind", reporthandling.PolicyRule{Rule: sameNamespaceOnly, Match: match("Pod")}, false},
 		{"already aggregated", reporthandling.PolicyRule{
 			Rule: crossRef, Match: match("HTTPRoute", "Service"),
 			Attributes: map[string]interface{}{"resourcesAggregator": "x"},

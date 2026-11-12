@@ -11,11 +11,12 @@ import (
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/opa-utils/reporthandling"
+	"github.com/kubescape/opa-utils/reporthandling/apis"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/kubescape/opa-utils/resources"
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/discovery/fake"
+	fakediscovery "k8s.io/client-go/discovery/fake"
 )
 
 const (
@@ -29,7 +30,7 @@ const (
 // without it the route would be treated as cluster-scoped and land in the
 // resident batch instead of its own namespace's batch.
 type gatewayDiscovery struct {
-	fake.FakeDiscovery
+	fakediscovery.FakeDiscovery
 }
 
 func (gatewayDiscovery) ServerPreferredResources() ([]*metav1.APIResourceList, error) {
@@ -96,7 +97,9 @@ func c0302Frameworks(t *testing.T) []reporthandling.Framework {
 	return []reporthandling.Framework{{Controls: []reporthandling.Control{control}}}
 }
 
-func c0302RouteFailed(t *testing.T, opap *OPAProcessor) bool {
+// c0302RouteStatus returns the exact C-0302 status of the HTTPRoute, so a test
+// can tell "passed" apart from skipped, unknown or any other non-failed status.
+func c0302RouteStatus(t *testing.T, opap *OPAProcessor) apis.ScanningStatus {
 	t.Helper()
 	var routeID string
 	for id := range opap.ResourcesResult {
@@ -108,11 +111,11 @@ func c0302RouteFailed(t *testing.T, opap *OPAProcessor) bool {
 	result := opap.ResourcesResult[routeID]
 	for _, control := range result.AssociatedControls {
 		if control.GetID() == "C-0302" {
-			return control.GetStatus(nil).IsFailed()
+			return control.GetStatus(nil).Status()
 		}
 	}
 	t.Fatalf("C-0302 has no result for %s", routeID)
-	return false
+	return apis.StatusUnknown
 }
 
 func keysOf[V any](m map[string]V) []string {
@@ -124,7 +127,7 @@ func keysOf[V any](m map[string]V) []string {
 	return keys
 }
 
-func c0302Eager(t *testing.T, serviceExists bool) bool {
+func c0302Eager(t *testing.T, serviceExists bool) apis.ScanningStatus {
 	t.Helper()
 	frameworks := c0302Frameworks(t)
 	policies := convertFrameworksToPolicies(frameworks, nil, reporthandling.ScopeCluster)
@@ -138,10 +141,10 @@ func c0302Eager(t *testing.T, serviceExists bool) bool {
 	opap := NewOPAProcessor(sessionObj, resources.NewRegoDependenciesDataMock(), "test", "", "", false, nil)
 	opap.AllPolicies = policies
 	require.NoError(t, opap.Process(context.Background(), policies, nil))
-	return c0302RouteFailed(t, opap)
+	return c0302RouteStatus(t, opap)
 }
 
-func c0302Streaming(t *testing.T, serviceExists bool) bool {
+func c0302Streaming(t *testing.T, serviceExists bool) apis.ScanningStatus {
 	t.Helper()
 	// A threshold of 1 forces every namespace into its own batch.
 	t.Setenv("LARGE_CLUSTER_SIZE", "1")
@@ -184,7 +187,7 @@ func c0302Streaming(t *testing.T, serviceExists bool) bool {
 	close(batchChan)
 
 	require.NoError(t, opap.ProcessWithStreaming(context.Background(), batchChan, errChan, cautils.NewProgressHandler(""), len(batches)))
-	return c0302RouteFailed(t, opap)
+	return c0302RouteStatus(t, opap)
 }
 
 // TestC0302_CrossNamespaceBackendEagerStreamingParity runs the real C-0302
@@ -197,18 +200,18 @@ func TestC0302_CrossNamespaceBackendEagerStreamingParity(t *testing.T) {
 	tests := []struct {
 		name          string
 		serviceExists bool
-		wantFailed    bool
+		wantStatus    apis.ScanningStatus
 	}{
-		{name: "cross-namespace service exists", serviceExists: true, wantFailed: false},
-		{name: "cross-namespace service missing", serviceExists: false, wantFailed: true},
+		{name: "cross-namespace service exists", serviceExists: true, wantStatus: apis.StatusPassed},
+		{name: "cross-namespace service missing", serviceExists: false, wantStatus: apis.StatusFailed},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Run("eager", func(t *testing.T) {
-				require.Equal(t, tt.wantFailed, c0302Eager(t, tt.serviceExists))
+				require.Equal(t, tt.wantStatus, c0302Eager(t, tt.serviceExists))
 			})
 			t.Run("streaming", func(t *testing.T) {
-				require.Equal(t, tt.wantFailed, c0302Streaming(t, tt.serviceExists))
+				require.Equal(t, tt.wantStatus, c0302Streaming(t, tt.serviceExists))
 			})
 		})
 	}
