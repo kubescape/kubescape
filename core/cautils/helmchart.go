@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -139,6 +140,76 @@ func loadedUnpackedDependency(parent *helmchart.Chart, directory string) *helmch
 	return nil
 }
 
+// copyChartTree copies c and its dependencies deeply enough for
+// chartutil.ProcessDependenciesWithMerge to work on the copy. That function
+// replaces each chart's dependency list and Values, and edits the entries of
+// Metadata.Dependencies (Name for an alias, Enabled, ImportValues), so those
+// are copied. Templates, files and the values maps themselves are only read,
+// and stay shared with c.
+func copyChartTree(c *helmchart.Chart) *helmchart.Chart {
+	out := *c
+	if c.Metadata != nil {
+		metadata := *c.Metadata
+		// Keep a nil list nil: Helm skips a chart whose list is nil.
+		if c.Metadata.Dependencies != nil {
+			metadata.Dependencies = make([]*helmchart.Dependency, len(c.Metadata.Dependencies))
+			for i, dependency := range c.Metadata.Dependencies {
+				if dependency != nil {
+					dependencyCopy := *dependency
+					metadata.Dependencies[i] = &dependencyCopy
+				}
+			}
+		}
+		out.Metadata = &metadata
+	}
+	dependencies := make([]*helmchart.Chart, 0, len(c.Dependencies()))
+	for _, dependency := range c.Dependencies() {
+		dependencies = append(dependencies, copyChartTree(dependency))
+	}
+	// SetDependencies also points each copied dependency's parent at out.
+	out.SetDependencies(dependencies...)
+	return &out
+}
+
+// templateSourcePaths maps the engine path of each template in processed, a
+// copy of original that chartutil.ProcessDependenciesWithMerge has worked on,
+// to the engine path of the same template in original. An aliased dependency
+// renders under charts/<alias>, which does not exist on disk; its templates
+// are read from the dependency it was copied from, so the workloads they
+// render keep the source file, provenance and evidence of that dependency.
+// Two aliases of one dependency both map to it.
+func templateSourcePaths(original, processed *helmchart.Chart, out map[string]string) {
+	originalPath, processedPath := original.ChartFullPath(), processed.ChartFullPath()
+	for _, template := range processed.Templates {
+		out[processedPath+"/"+template.Name] = originalPath + "/" + template.Name
+	}
+	for _, dependency := range processed.Dependencies() {
+		if source := sourceDependency(original, dependency); source != nil {
+			templateSourcePaths(source, dependency, out)
+		}
+	}
+}
+
+// sourceDependency returns the dependency of original that processed, a
+// dependency of its processed copy, was copied from. Helm renames an aliased
+// copy, so it is matched on the files it was loaded from, which every copy
+// keeps.
+func sourceDependency(original, processed *helmchart.Chart) *helmchart.Chart {
+	for _, dependency := range original.Dependencies() {
+		if sameFiles(dependency.Raw, processed.Raw) {
+			return dependency
+		}
+	}
+	return nil
+}
+
+// sameFiles reports whether a and b hold the same files in the same order.
+func sameFiles(a, b []*helmchart.File) bool {
+	return slices.EqualFunc(a, b, func(x, y *helmchart.File) bool {
+		return x.Name == y.Name && bytes.Equal(x.Data, y.Data)
+	})
+}
+
 func (hc *HelmChart) GetDefaultValues() map[string]any {
 	return hc.chart.Values
 }
@@ -176,7 +247,6 @@ func (hc *HelmChart) GetWorkloads(values map[string]any) (map[string][]workloadi
 
 // GetWorkloadsWithOptions renders chart template using the provided values and Helm release options
 // (release name/namespace), returning a map of source (absolute) file path to its workloads.
-// Charts that reference .Release.Name or .Release.Namespace require these options to render.
 // Equivalent to GetWorkloadsWithCapabilities(values, releaseOpts, HelmCapabilityOptions{}).
 func (hc *HelmChart) GetWorkloadsWithOptions(values map[string]any, releaseOpts helmchartutil.ReleaseOptions) (map[string][]workloadinterface.IMetadata, []error) {
 	return hc.GetWorkloadsWithCapabilities(values, releaseOpts, HelmCapabilityOptions{})
@@ -186,19 +256,44 @@ func (hc *HelmChart) GetWorkloadsWithOptions(values map[string]any, releaseOpts 
 // and the extra API versions that templates read from .Capabilities taken from capOpts.
 // A zero capOpts renders with Helm's library defaults, except for the Kubernetes version of a
 // chart that declares a kubeVersion constraint (see defaultKubeVersion).
+// Unset release options use helm template's installation defaults.
 func (hc *HelmChart) GetWorkloadsWithCapabilities(values map[string]any, releaseOpts helmchartutil.ReleaseOptions, capOpts HelmCapabilityOptions) (map[string][]workloadinterface.IMetadata, []error) {
 	caps, err := hc.capabilities(capOpts)
 	if err != nil {
 		return nil, []error{err}
 	}
-	vals, err := helmchartutil.ToRenderValues(hc.chart, values, releaseOpts, caps)
+	if releaseOpts.Name == "" {
+		releaseOpts.Name = "release-name"
+	}
+	if releaseOpts.Namespace == "" {
+		releaseOpts.Namespace = "default"
+	}
+	if releaseOpts.Revision == 0 {
+		releaseOpts.Revision = 1
+	}
+	if !releaseOpts.IsInstall && !releaseOpts.IsUpgrade {
+		releaseOpts.IsInstall = true
+	}
+	// Like helm template, resolve the dependencies against the values before
+	// rendering: drop subcharts that a condition or tag disables, render each
+	// alias as its own subchart reading the values under its alias, and apply
+	// import-values. Helm does this by editing the chart, so edit a copy:
+	// ownsUnpackedDependency and Provenance need hc.chart to keep matching
+	// the charts/ tree on disk.
+	chart := copyChartTree(hc.chart)
+	if err := helmchartutil.ProcessDependenciesWithMerge(chart, values); err != nil {
+		return nil, []error{err}
+	}
+	vals, err := helmchartutil.ToRenderValues(chart, values, releaseOpts, caps)
 	if err != nil {
 		return nil, []error{err}
 	}
-	sourceToFile, err := helmengine.Render(hc.chart, vals)
+	sourceToFile, err := helmengine.Render(chart, vals)
 	if err != nil {
 		return nil, []error{err}
 	}
+	sourcePaths := make(map[string]string)
+	templateSourcePaths(hc.chart, chart, sourcePaths)
 
 	workloads := make(map[string][]workloadinterface.IMetadata)
 	var errs []error
@@ -208,11 +303,15 @@ func (hc *HelmChart) GetWorkloadsWithCapabilities(values map[string]any, release
 			continue
 		}
 
-		firstPathSeparatorIndex := strings.Index(path, "/")
+		sourcePath := path
+		if source, ok := sourcePaths[path]; ok {
+			sourcePath = source
+		}
+		firstPathSeparatorIndex := strings.Index(sourcePath, "/")
 		if firstPathSeparatorIndex == -1 {
 			continue
 		}
-		absPath := filepath.Join(hc.path, path[firstPathSeparatorIndex:])
+		absPath := filepath.Join(hc.path, sourcePath[firstPathSeparatorIndex:])
 
 		// The resolver (locationresolver.go, via getDocIndex/ResolveLocation)
 		// reads its line numbers from the source *template* file on disk at
@@ -313,7 +412,9 @@ func (hc *HelmChart) GetWorkloadsWithCapabilities(values map[string]any, release
 			continue
 		}
 
-		workloads[absPath] = []workloadinterface.IMetadata{}
+		// Each alias of a dependency renders its templates again, so
+		// several rendered files can share one source file: keep the
+		// workloads of every render.
 		for i := range wls {
 			lw := localworkload.NewLocalWorkload(wls[i].GetObject())
 			// i is the workload ordinal, and indexable[i] is only set where
@@ -414,6 +515,80 @@ func isListEnvelope(doc []byte) bool {
 	return isList || err != nil
 }
 
+var (
+	// ErrHelmTemplateNotRegular is returned when a Helm template file is not a regular file.
+	ErrHelmTemplateNotRegular = errors.New("helm template file is not a regular file")
+	// ErrHelmTemplateTooLarge is returned when a Helm template file exceeds the maximum allowed size.
+	ErrHelmTemplateTooLarge = errors.New("helm template file exceeds maximum size limit")
+)
+
+// openHelmTemplateFile opens path for reading and rejects anything but a regular file.
+// A pre-open stat check prevents opening device nodes (e.g. tape or character devices).
+// O_NONBLOCK keeps opening a FIFO from waiting for a writer, and descriptor-based
+// validation ensures a path swapped after stat cannot slip past.
+func openHelmTemplateFile(path string) (*os.File, error) {
+	if strings.TrimSpace(path) == "" {
+		return nil, os.ErrNotExist
+	}
+	cleaned := filepath.Clean(path)
+	statInfo, err := os.Stat(cleaned)
+	if err != nil {
+		return nil, err
+	}
+	if statInfo.IsDir() {
+		return nil, fmt.Errorf("%q is a directory, not a file: %w", path, ErrHelmTemplateNotRegular)
+	}
+	if !statInfo.Mode().IsRegular() {
+		return nil, fmt.Errorf("%w: %q", ErrHelmTemplateNotRegular, path)
+	}
+
+	file, err := os.OpenFile(cleaned, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return nil, err
+	}
+	info, err := file.Stat()
+	if err != nil {
+		file.Close()
+		return nil, err
+	}
+	if info.IsDir() {
+		file.Close()
+		return nil, fmt.Errorf("%q is a directory, not a file: %w", path, ErrHelmTemplateNotRegular)
+	}
+	if !info.Mode().IsRegular() {
+		file.Close()
+		return nil, fmt.Errorf("%w: %q", ErrHelmTemplateNotRegular, path)
+	}
+	return file, nil
+}
+
+// readHelmTemplateFile returns the contents of the Helm template file at path, reading at most
+// getMaxFileSize() bytes (configurable via KUBESCAPE_MAX_FILE_SIZE, defaulting to
+// DefaultMaxFileSize) so that reading remains bounded.
+func readHelmTemplateFile(path string) ([]byte, error) {
+	file, err := openHelmTemplateFile(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	limit := getMaxFileSize()
+
+	info, err := file.Stat()
+	if err == nil && info.Size() > limit {
+		return nil, fmt.Errorf("%w: %q exceeds the %d byte limit", ErrHelmTemplateTooLarge, path, limit)
+	}
+
+	data, err := io.ReadAll(io.LimitReader(file, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > limit {
+		return nil, fmt.Errorf("%w: %q exceeds the %d byte limit", ErrHelmTemplateTooLarge, path, limit)
+	}
+	return data, nil
+}
+
 // isStaticTemplate reports whether the file at absPath contains no Go template
 // action delimiter ("{{"), i.e. Helm's render passed it through byte-for-byte.
 // This is deliberately conservative: a literal "{{" that is not really a
@@ -424,7 +599,7 @@ func isListEnvelope(doc []byte) bool {
 // path once evidence is requested, so if that is going to fail, failing safe
 // here is consistent with failing safe there.
 func isStaticTemplate(absPath string) (bool, error) {
-	content, err := os.ReadFile(absPath)
+	content, err := readHelmTemplateFile(absPath)
 	if err != nil {
 		return false, err
 	}

@@ -141,3 +141,76 @@ func TestDiscoverRepositoryRules(t *testing.T) {
 		assert.NotEmpty(t, rule.Rule.Name, "rule %s: metadata must carry a name", rule.Name)
 	}
 }
+
+func TestIsRejectsRuleFilesThatAreNotRegular(t *testing.T) {
+	parent := t.TempDir()
+
+	for _, name := range []string{RegoFileName, MetadataFileName} {
+		dir := completeRule(t, parent, "dir-"+name)
+		require.NoError(t, os.Remove(filepath.Join(dir, name)))
+		require.NoError(t, os.Mkdir(filepath.Join(dir, name), 0o750))
+
+		assert.False(t, Is(dir), "a directory named %s is not a rule file", name)
+	}
+}
+
+func TestReadFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "file")
+	require.NoError(t, os.WriteFile(path, []byte("package armo_builtins"), 0o600))
+
+	data, err := ReadFile(path)
+
+	require.NoError(t, err)
+	assert.Equal(t, "package armo_builtins", string(data))
+}
+
+func TestReadFileMissing(t *testing.T) {
+	_, err := ReadFile(filepath.Join(t.TempDir(), "missing"))
+
+	assert.ErrorIs(t, err, os.ErrNotExist)
+}
+
+func TestReadFileRejectsDirectory(t *testing.T) {
+	_, err := ReadFile(t.TempDir())
+
+	assert.ErrorIs(t, err, ErrNotRegularFile)
+}
+
+func TestReadFileSizeLimit(t *testing.T) {
+	sized := func(t *testing.T, size int64) string {
+		t.Helper()
+		path := filepath.Join(t.TempDir(), "file")
+		f, err := os.Create(path)
+		require.NoError(t, err)
+		require.NoError(t, f.Truncate(size))
+		require.NoError(t, f.Close())
+		return path
+	}
+
+	t.Run("a file of exactly the limit is read in full", func(t *testing.T) {
+		data, err := ReadFile(sized(t, maxRuleFileBytes))
+
+		require.NoError(t, err)
+		assert.Len(t, data, int(maxRuleFileBytes))
+	})
+
+	t.Run("a file one byte over the limit is rejected, not truncated", func(t *testing.T) {
+		data, err := ReadFile(sized(t, maxRuleFileBytes+1))
+
+		assert.ErrorIs(t, err, ErrFileTooLarge)
+		assert.Nil(t, data)
+	})
+}
+
+func TestLoadOversizedRuleFile(t *testing.T) {
+	for _, name := range []string{RegoFileName, MetadataFileName} {
+		dir := completeRule(t, t.TempDir(), "big")
+		require.NoError(t, os.Truncate(filepath.Join(dir, name), maxRuleFileBytes+1))
+
+		_, _, err := Load(dir)
+
+		require.ErrorIs(t, err, ErrFileTooLarge, name)
+		assert.Contains(t, err.Error(), name)
+	}
+}

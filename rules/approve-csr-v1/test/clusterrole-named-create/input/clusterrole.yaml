@@ -1,3 +1,6 @@
+# create is narrowed to a name and nothing grants patch on CSRs, so neither a
+# plain create (authorized with an empty name) nor a server-side apply (which
+# needs patch) can create one: the chain is incomplete.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:

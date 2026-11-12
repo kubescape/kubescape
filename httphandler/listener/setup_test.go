@@ -108,7 +108,7 @@ func TestSetupHTTPListener(t *testing.T) {
 		t.Setenv("KS_CERT_FILE", "cert.pem")
 		t.Setenv("KS_KEY_FILE", "")
 
-		err := SetupHTTPListener(context.Background())
+		err := SetupHTTPListener(context.Background(), nil)
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "KS_CERT_FILE and KS_KEY_FILE")
 	})
@@ -121,7 +121,7 @@ func TestSetupHTTPListener(t *testing.T) {
 		t.Setenv("KS_KEY_FILE", "")
 		t.Setenv("KS_PORT", port)
 
-		err := SetupHTTPListener(context.Background())
+		err := SetupHTTPListener(context.Background(), nil)
 		// The specific errno isn't portable (syscall.EADDRINUSE doesn't map
 		// to Windows' WSAEADDRINUSE); the point of this test is that
 		// SetupHTTPListener propagates the ListenAndServe(TLS) error instead
@@ -138,7 +138,7 @@ func TestSetupHTTPListener(t *testing.T) {
 		t.Setenv("KS_KEY_FILE", keyFile)
 		t.Setenv("KS_PORT", port)
 
-		err := SetupHTTPListener(context.Background())
+		err := SetupHTTPListener(context.Background(), nil)
 		// The specific errno isn't portable (syscall.EADDRINUSE doesn't map
 		// to Windows' WSAEADDRINUSE); the point of this test is that
 		// SetupHTTPListener propagates the ListenAndServe(TLS) error instead
@@ -165,7 +165,7 @@ func TestSetupHTTPListener(t *testing.T) {
 
 		serverErr := make(chan error, 1)
 		go func() {
-			serverErr <- SetupHTTPListener(ctx)
+			serverErr <- SetupHTTPListener(ctx, nil)
 		}()
 
 		getPeerCertCN := func() (string, error) {

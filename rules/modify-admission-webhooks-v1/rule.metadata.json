@@ -1,0 +1,29 @@
+{
+  "name": "modify-admission-webhooks-v1",
+  "attributes": {
+    "m$K8sThreatMatrix": "Persistence::Malicious admission controller",
+    "resourcesAggregator": "subject-role-rolebinding",
+    "useFromKubescapeVersion": "v4.0.11"
+  },
+  "ruleLanguage": "Rego",
+  "match": [
+    {
+      "apiGroups": [
+        "rbac.authorization.k8s.io"
+      ],
+      "apiVersions": [
+        "v1"
+      ],
+      "resources": [
+        "RoleBinding",
+        "ClusterRoleBinding",
+        "Role",
+        "ClusterRole"
+      ]
+    }
+  ],
+  "ruleDependencies": [],
+  "description": "determines which subjects can create, update, patch or delete ValidatingWebhookConfigurations or MutatingWebhookConfigurations, letting them send admission requests to a server they control to read or rewrite any object admitted to the cluster, or remove the webhooks that enforce admission policy",
+  "remediation": "Grant create, update, patch and delete on validatingwebhookconfigurations and mutatingwebhookconfigurations only to the controllers that manage admission webhooks, and restrict update and patch to the configurations they own with resourceNames. Avoid wildcard verbs, resources and API groups in cluster roles bound to workloads or users.",
+  "ruleQuery": "armo_builtins"
+}

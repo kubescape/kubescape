@@ -2,6 +2,7 @@ package policy
 
 import (
 	"fmt"
+	"regexp"
 
 	"github.com/jwalton/gchalk"
 	"github.com/kubescape/kubescape/v4/core/pkg/policytest"
@@ -9,28 +10,43 @@ import (
 )
 
 func getPolicyTestCmd() *cobra.Command {
-	var update bool
+	var (
+		update bool
+		run    string
+	)
 
 	cmd := &cobra.Command{
 		Use:   "test <path>",
 		Short: "Run a Rego control's test fixtures and report pass/fail",
-		Long:  `Discovers rule directories (raw.rego + rule.metadata.json, with test cases under test/<case>/{input,expected.json}) under <path>, evaluates every case, and reports which ones match their expected.json.`,
+		Long:  `Discovers rule directories (raw.rego + rule.metadata.json, with test cases under test/<case>/{input,expected.json} and an optional data.json of control inputs) under <path>, evaluates every case, and reports which ones match their expected.json.`,
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if update {
-				return runPolicyUpdate(cmd, args[0])
+			var pattern *regexp.Regexp
+			if run != "" {
+				var err error
+				if pattern, err = regexp.Compile(run); err != nil {
+					return fmt.Errorf("invalid --run pattern: %w", err)
+				}
 			}
-			return runPolicyTest(cmd, args[0])
+			// The invocation is valid from this point on. A case that fails,
+			// or cannot be evaluated, is a test result and should not print
+			// command usage.
+			cmd.SilenceUsage = true
+			if update {
+				return runPolicyUpdate(cmd, args[0], pattern)
+			}
+			return runPolicyTest(cmd, args[0], pattern)
 		},
 	}
 
 	cmd.Flags().BoolVar(&update, "update", false, "Rewrite each case's expected.json from the rule's current output instead of comparing against it")
+	cmd.Flags().StringVar(&run, "run", "", "Only run the cases whose <rule>/<case> name matches this regular expression")
 
 	return cmd
 }
 
-func runPolicyUpdate(cmd *cobra.Command, path string) error {
-	rules, err := discoverRules(path)
+func runPolicyUpdate(cmd *cobra.Command, path string, pattern *regexp.Regexp) error {
+	rules, err := discoverRules(path, pattern)
 	if err != nil {
 		return err
 	}
@@ -49,7 +65,9 @@ func runPolicyUpdate(cmd *cobra.Command, path string) error {
 			if colored {
 				msg = fmt.Sprintf("%s: %s\n", gchalk.WithBrightCyan().Bold(rule.Name), gchalk.BrightYellow("no test cases"))
 			}
-			fmt.Fprint(out, msg)
+			if _, err := fmt.Fprint(out, msg); err != nil {
+				return fmt.Errorf("write policy test output: %w", err)
+			}
 			continue
 		}
 		for _, result := range policytest.UpdateRule(ctx, rule) {
@@ -65,7 +83,9 @@ func runPolicyUpdate(cmd *cobra.Command, path string) error {
 					badge = gchalk.WithBrightRed().Bold("ERROR")
 					ruleCase = gchalk.WithBrightCyan().Bold(ruleCase)
 				}
-				fmt.Fprintf(out, "%s %s: %v\n", badge, ruleCase, result.Err)
+				if _, err := fmt.Fprintf(out, "%s %s: %v\n", badge, ruleCase, result.Err); err != nil {
+					return fmt.Errorf("write policy test output: %w", err)
+				}
 			case result.Changed:
 				changed++
 				badge := "UPDATED"
@@ -73,14 +93,18 @@ func runPolicyUpdate(cmd *cobra.Command, path string) error {
 					badge = gchalk.WithBrightYellow().Bold("UPDATED")
 					ruleCase = gchalk.WithBrightCyan().Bold(ruleCase)
 				}
-				fmt.Fprintf(out, "%s %s\n", badge, ruleCase)
+				if _, err := fmt.Fprintf(out, "%s %s\n", badge, ruleCase); err != nil {
+					return fmt.Errorf("write policy test output: %w", err)
+				}
 			default:
 				badge := "UNCHANGED"
 				if colored {
 					badge = gchalk.Bold("UNCHANGED")
 					ruleCase = gchalk.WithBrightCyan().Bold(ruleCase)
 				}
-				fmt.Fprintf(out, "%s %s\n", badge, ruleCase)
+				if _, err := fmt.Fprintf(out, "%s %s\n", badge, ruleCase); err != nil {
+					return fmt.Errorf("write policy test output: %w", err)
+				}
 			}
 		}
 	}
@@ -90,9 +114,13 @@ func runPolicyUpdate(cmd *cobra.Command, path string) error {
 		if changed > 0 {
 			changedStr = gchalk.WithBrightYellow().Bold(fmt.Sprintf("%d", changed))
 		}
-		fmt.Fprintf(out, "\n%s case(s) updated\n", changedStr)
+		if _, err := fmt.Fprintf(out, "\n%s case(s) updated\n", changedStr); err != nil {
+			return fmt.Errorf("write policy test output: %w", err)
+		}
 	} else {
-		fmt.Fprintf(out, "\n%d case(s) updated\n", changed)
+		if _, err := fmt.Fprintf(out, "\n%d case(s) updated\n", changed); err != nil {
+			return fmt.Errorf("write policy test output: %w", err)
+		}
 	}
 	if failed > 0 {
 		return fmt.Errorf("%d test case(s) could not be evaluated", failed)
@@ -100,7 +128,9 @@ func runPolicyUpdate(cmd *cobra.Command, path string) error {
 	return nil
 }
 
-func discoverRules(path string) ([]policytest.RuleUnderTest, error) {
+// discoverRules finds the rules under path and, when pattern is set, narrows
+// them to the cases it selects.
+func discoverRules(path string, pattern *regexp.Regexp) ([]policytest.RuleUnderTest, error) {
 	rules, err := policytest.DiscoverPath(path)
 	if err != nil {
 		return nil, fmt.Errorf("discover rules: %w", err)
@@ -108,11 +138,20 @@ func discoverRules(path string) ([]policytest.RuleUnderTest, error) {
 	if len(rules) == 0 {
 		return nil, fmt.Errorf("no rule directories (raw.rego + rule.metadata.json) found under %q", path)
 	}
+	if pattern == nil {
+		return rules, nil
+	}
+	rules = policytest.FilterCases(rules, pattern)
+	if len(rules) == 0 {
+		// Report it rather than printing 0/0 cases passed, so a mistyped
+		// pattern cannot turn a CI run into a silent success.
+		return nil, fmt.Errorf("no test cases under %q match --run %q", path, pattern.String())
+	}
 	return rules, nil
 }
 
-func runPolicyTest(cmd *cobra.Command, path string) error {
-	rules, err := discoverRules(path)
+func runPolicyTest(cmd *cobra.Command, path string, pattern *regexp.Regexp) error {
+	rules, err := discoverRules(path, pattern)
 	if err != nil {
 		return err
 	}
@@ -131,7 +170,9 @@ func runPolicyTest(cmd *cobra.Command, path string) error {
 			if colored {
 				msg = fmt.Sprintf("%s: %s\n", gchalk.WithBrightCyan().Bold(rule.Name), gchalk.BrightYellow("no test cases"))
 			}
-			fmt.Fprint(out, msg)
+			if _, err := fmt.Fprint(out, msg); err != nil {
+				return fmt.Errorf("write policy test output: %w", err)
+			}
 			continue
 		}
 		for _, result := range policytest.RunRule(ctx, rule) {
@@ -148,7 +189,9 @@ func runPolicyTest(cmd *cobra.Command, path string) error {
 					badge = gchalk.WithBrightRed().Bold("FAIL")
 					ruleCase = gchalk.WithBrightCyan().Bold(ruleCase)
 				}
-				fmt.Fprintf(out, "%s %s: %v\n", badge, ruleCase, result.Err)
+				if _, err := fmt.Fprintf(out, "%s %s: %v\n", badge, ruleCase, result.Err); err != nil {
+					return fmt.Errorf("write policy test output: %w", err)
+				}
 			case !result.Passed:
 				failed++
 				badge := "FAIL"
@@ -156,14 +199,18 @@ func runPolicyTest(cmd *cobra.Command, path string) error {
 					badge = gchalk.WithBrightRed().Bold("FAIL")
 					ruleCase = gchalk.WithBrightCyan().Bold(ruleCase)
 				}
-				fmt.Fprintf(out, "%s %s\n%s\n", badge, ruleCase, result.Diff)
+				if _, err := fmt.Fprintf(out, "%s %s\n%s\n", badge, ruleCase, result.Diff); err != nil {
+					return fmt.Errorf("write policy test output: %w", err)
+				}
 			default:
 				badge := "PASS"
 				if colored {
 					badge = gchalk.WithBrightGreen().Bold("PASS")
 					ruleCase = gchalk.WithBrightCyan().Bold(ruleCase)
 				}
-				fmt.Fprintf(out, "%s %s\n", badge, ruleCase)
+				if _, err := fmt.Fprintf(out, "%s %s\n", badge, ruleCase); err != nil {
+					return fmt.Errorf("write policy test output: %w", err)
+				}
 			}
 		}
 	}
@@ -175,9 +222,13 @@ func runPolicyTest(cmd *cobra.Command, path string) error {
 			passedStr = gchalk.WithBrightRed().Bold(fmt.Sprintf("%d", passedCount))
 		}
 		totalStr := gchalk.Bold(fmt.Sprintf("%d", total))
-		fmt.Fprintf(out, "\n%s/%s cases passed\n", passedStr, totalStr)
+		if _, err := fmt.Fprintf(out, "\n%s/%s cases passed\n", passedStr, totalStr); err != nil {
+			return fmt.Errorf("write policy test output: %w", err)
+		}
 	} else {
-		fmt.Fprintf(out, "\n%d/%d cases passed\n", passedCount, total)
+		if _, err := fmt.Fprintf(out, "\n%d/%d cases passed\n", passedCount, total); err != nil {
+			return fmt.Errorf("write policy test output: %w", err)
+		}
 	}
 	if failed > 0 {
 		return fmt.Errorf("%d test case(s) failed", failed)

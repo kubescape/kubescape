@@ -146,18 +146,50 @@ func TestLoadResourcesFromFiles_SkipsHelmTemplatesOfScannedChart(t *testing.T) {
 	assert.Equal(t, 1, len(workloads))
 }
 
-// TestLoadResourcesFromFiles_ScansTemplatesOfUnrenderedChart asserts the safety net: when a chart
-// is absent from renderedCharts (its helm render failed), its templates are plainly scanned rather
-// than dropped, so its static manifests still reach the scan.
-func TestLoadResourcesFromFiles_ScansTemplatesOfUnrenderedChart(t *testing.T) {
+// TestLoadResourcesFromFiles_SkipsTemplatesOfUnrenderedChart asserts that when a chart is absent
+// from renderedCharts (its helm render failed), its templates are recorded as skipped instead of
+// being scanned as plain YAML without the chart's values.
+func TestLoadResourcesFromFiles_SkipsTemplatesOfUnrenderedChart(t *testing.T) {
 	testDir := filepath.Join(helmChartLayoutPath(), "mychart")
-	// no charts rendered successfully, so nothing may be excluded
-	workloads, _, err := LoadResourcesFromFiles(context.Background(), testDir, testDir, nil)
+	workloads, skips, err := LoadResourcesFromFiles(context.Background(), testDir, testDir, nil)
 	require.NoError(t, err)
 
 	staticTemplate := filepath.Join(testDir, "templates", "serviceaccount.yaml")
-	_, ok := workloads[staticTemplate]
-	assert.Truef(t, ok, "expected the static template %s to be scanned when its chart did not render", staticTemplate)
+	assert.NotContains(t, workloads, staticTemplate)
+	assert.Contains(t, skips, SkippedManifest{Path: staticTemplate, Reason: unrenderedHelmTemplateReason})
+}
+
+// TestLoadResourcesFromFiles_SkipsSymlinkToUnrenderedTemplate asserts that a manifest symlinked
+// from outside templates/ into the template of an unrendered chart is skipped, not scanned.
+func TestLoadResourcesFromFiles_SkipsSymlinkToUnrenderedTemplate(t *testing.T) {
+	dir := t.TempDir()
+	chart := filepath.Join(dir, "chart")
+	require.NoError(t, os.MkdirAll(filepath.Join(chart, "templates"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(chart, "Chart.yaml"), []byte("apiVersion: v2\nname: chart\nversion: 0.1.0\n"), 0o600))
+	template := filepath.Join(chart, "templates", "sa.yaml")
+	require.NoError(t, os.WriteFile(template, []byte("apiVersion: v1\nkind: ServiceAccount\nmetadata:\n  name: sa\n"), 0o600))
+	link := filepath.Join(dir, "linked.yaml")
+	if err := os.Symlink(template, link); err != nil {
+		t.Skipf("symlinks are unavailable: %v", err)
+	}
+
+	workloads, skips, err := LoadResourcesFromFiles(context.Background(), dir, dir, nil)
+	require.NoError(t, err)
+
+	assert.Empty(t, workloads)
+	assert.Contains(t, skips, SkippedManifest{Path: link, Reason: unrenderedHelmTemplateReason})
+}
+
+// TestLoadResourcesFromFiles_ScansTemplateNamedAsInput asserts that a template file passed as the
+// input itself is still scanned, even though its chart was not rendered.
+func TestLoadResourcesFromFiles_ScansTemplateNamedAsInput(t *testing.T) {
+	testDir := filepath.Join(helmChartLayoutPath(), "mychart")
+	staticTemplate := filepath.Join(testDir, "templates", "serviceaccount.yaml")
+	workloads, skips, err := LoadResourcesFromFiles(context.Background(), staticTemplate, testDir, nil)
+	require.NoError(t, err)
+
+	assert.Contains(t, workloads, staticTemplate)
+	assert.Empty(t, skips)
 }
 
 // TestExcludeHelmTemplateFiles asserts that only the templates of a detected chart are excluded.
@@ -414,15 +446,15 @@ func TestLoadResourcesFromHelmCharts(t *testing.T) {
 		case "serviceaccount.yaml":
 			assert.Equal(t, "/v1//ServiceAccount/kubescape-discovery", getRelativePath(w.GetID()))
 		case "clusterrole.yaml":
-			assert.Equal(t, "rbac.authorization.k8s.io/v1//ClusterRole/-kubescape", getRelativePath(w.GetID()))
+			assert.Equal(t, "rbac.authorization.k8s.io/v1//ClusterRole/release-name-kubescape", getRelativePath(w.GetID()))
 		case "cronjob.yaml":
-			assert.Equal(t, "batch/v1//CronJob/-kubescape", getRelativePath(w.GetID()))
+			assert.Equal(t, "batch/v1//CronJob/release-name-kubescape", getRelativePath(w.GetID()))
 		case "role.yaml":
-			assert.Equal(t, "rbac.authorization.k8s.io/v1//Role/-kubescape", getRelativePath(w.GetID()))
+			assert.Equal(t, "rbac.authorization.k8s.io/v1//Role/release-name-kubescape", getRelativePath(w.GetID()))
 		case "rolebinding.yaml":
-			assert.Equal(t, "rbac.authorization.k8s.io/v1//RoleBinding/-kubescape", getRelativePath(w.GetID()))
+			assert.Equal(t, "rbac.authorization.k8s.io/v1//RoleBinding/release-name-kubescape", getRelativePath(w.GetID()))
 		case "clusterrolebinding.yaml":
-			assert.Equal(t, "rbac.authorization.k8s.io/v1//ClusterRoleBinding/-kubescape", getRelativePath(w.GetID()))
+			assert.Equal(t, "rbac.authorization.k8s.io/v1//ClusterRoleBinding/release-name-kubescape", getRelativePath(w.GetID()))
 		default:
 			assert.Failf(t, "missing case for file: %s", filepath.Base(file))
 		}

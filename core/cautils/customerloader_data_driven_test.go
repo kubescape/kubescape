@@ -28,6 +28,8 @@ func useTemporaryConfigStore(t *testing.T) {
 	original := getter.DefaultLocalStore
 	getter.DefaultLocalStore = t.TempDir()
 	t.Cleanup(func() { getter.DefaultLocalStore = original })
+	// Never read the host's in-cluster services discovery file.
+	useTemporaryServicesConfigPath(t, filepath.Join(t.TempDir(), "services.json"))
 }
 
 func TestTenantConfigCacheLifecycleDataDriven(t *testing.T) {

@@ -12,6 +12,7 @@ import (
 	"github.com/kubescape/backend/pkg/versioncheck"
 	"github.com/kubescape/kubescape/v4/core/core"
 	contractv1alpha1 "github.com/kubescape/kubescape/v4/core/pkg/scancontract/v1alpha1"
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -37,6 +38,21 @@ spec:
       output:
         formats: [json]
 `
+
+func TestValidateContractCommandRejectsNullNamespaces(t *testing.T) {
+	path := writeScanContract(t, `
+      policy:
+        frameworks: [nsa]
+      scope:
+        excludeNamespaces: [null]`)
+	cmd := GetScanCommand(core.NewKubescape(context.Background()))
+	output := &bytes.Buffer{}
+	cmd.SetOut(output)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"validate-contract", path})
+	require.ErrorContains(t, cmd.Execute(), "null entry")
+	assert.NotContains(t, output.String(), `is valid`, "an invalid contract must not be reported as valid")
+}
 
 func TestValidateContractCommand(t *testing.T) {
 	originalBuildNumber := versioncheck.BuildNumber
@@ -94,6 +110,87 @@ func TestValidateContractCommandWritesOutputFile(t *testing.T) {
 	var selected contractv1alpha1.SelectedContract
 	require.NoError(t, json.Unmarshal(contents, &selected))
 	assert.Equal(t, "developer", selected.ContractName)
+}
+
+func TestValidateContractCommandRejectsOutputOverwritingInput(t *testing.T) {
+	originalBuildNumber := versioncheck.BuildNumber
+	versioncheck.BuildNumber = "v4.1.0"
+	t.Cleanup(func() { versioncheck.BuildNumber = originalBuildNumber })
+
+	for _, scenario := range []struct {
+		name    string
+		format  string
+		invalid bool
+	}{
+		{name: "text", format: "text"},
+		{name: "json", format: "json"},
+		{name: "sarif", format: "sarif"},
+		{name: "invalid contract sarif", format: "sarif", invalid: true},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			for _, alias := range []string{"same path", "relative path", "output symlink", "input symlink", "hard link"} {
+				t.Run(alias, func(t *testing.T) {
+					directory := t.TempDir()
+					inputPath := filepath.Join(directory, "kubescape.yaml")
+					original := []byte(commandContract)
+					if scenario.invalid {
+						original = bytes.Replace(original, []byte("frameworks"), []byte("frameworkz"), 1)
+					}
+					require.NoError(t, os.WriteFile(inputPath, original, 0o600))
+					outputPath := inputPath
+					switch alias {
+					case "relative path":
+						// Keep input and output in different path forms without changing the working directory.
+						workingDirectory, err := os.Getwd()
+						require.NoError(t, err)
+						outputPath, err = filepath.Rel(workingDirectory, inputPath)
+						require.NoError(t, err)
+					case "output symlink":
+						outputPath = filepath.Join(directory, "output.yaml")
+						require.NoError(t, os.Symlink(inputPath, outputPath))
+					case "input symlink":
+						inputPath = filepath.Join(directory, "input.yaml")
+						require.NoError(t, os.Symlink(outputPath, inputPath))
+					case "hard link":
+						outputPath = filepath.Join(directory, "output.yaml")
+						require.NoError(t, os.Link(inputPath, outputPath))
+					}
+
+					cmd := GetScanCommand(core.NewKubescape(context.Background()))
+					cmd.SetOut(io.Discard)
+					cmd.SetErr(io.Discard)
+					cmd.SetArgs([]string{"validate-contract", inputPath, "--format", scenario.format, "--output", outputPath})
+					require.ErrorContains(t, cmd.Execute(), "would overwrite input contract")
+
+					for _, path := range []string{inputPath, outputPath} {
+						contents, err := os.ReadFile(path)
+						require.NoError(t, err)
+						assert.Equal(t, original, contents, "contract must remain unchanged at %s", path)
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestValidateContractCommandSARIFMissingInputWritesExistingOutput(t *testing.T) {
+	directory := t.TempDir()
+	inputPath := filepath.Join(directory, "missing.yaml")
+	outputPath := filepath.Join(directory, "validation.sarif")
+	require.NoError(t, os.WriteFile(outputPath, []byte("previous output"), 0o600))
+
+	cmd := GetScanCommand(core.NewKubescape(context.Background()))
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"validate-contract", inputPath, "--format", "sarif", "--output", outputPath})
+	require.ErrorIs(t, cmd.Execute(), os.ErrNotExist)
+
+	contents, err := os.ReadFile(outputPath)
+	require.NoError(t, err)
+	report := decodeValidateContractSARIF(t, contents)
+	run := report["runs"].([]any)[0].(map[string]any)
+	assert.Len(t, run["results"].([]any), 1)
+	assert.NoFileExists(t, inputPath)
 }
 
 func TestValidateContractCommandReportsStrictErrors(t *testing.T) {
@@ -253,6 +350,137 @@ func TestValidateContractCommandUnsupportedFormatMentionsSARIF(t *testing.T) {
 	err := cmd.Execute()
 	require.Error(t, err)
 	assert.EqualError(t, err, `unsupported format "xml", supported: text, json, sarif`)
+}
+
+func TestValidateContractCommandFormatNormalization(t *testing.T) {
+	originalBuildNumber := versioncheck.BuildNumber
+	versioncheck.BuildNumber = "v4.1.0"
+	t.Cleanup(func() { versioncheck.BuildNumber = originalBuildNumber })
+
+	contractPath := filepath.Join(t.TempDir(), "kubescape.yaml")
+	require.NoError(t, os.WriteFile(contractPath, []byte(commandContract), 0o600))
+
+	tests := []struct {
+		name       string
+		format     string
+		wantPrefix string
+	}{
+		{name: "uppercase JSON", format: "JSON", wantPrefix: "{\n"},
+		{name: "uppercase TEXT", format: "TEXT", wantPrefix: `Scan contract "example" is valid`},
+		{name: "uppercase SARIF", format: "SARIF", wantPrefix: "{\n"},
+		{name: "padded json", format: "  json  ", wantPrefix: "{\n"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd := GetScanCommand(core.NewKubescape(context.Background()))
+			output := &bytes.Buffer{}
+			cmd.SetOut(output)
+			cmd.SetErr(output)
+			cmd.SetArgs([]string{"validate-contract", contractPath, "--format", tt.format})
+			require.NoError(t, cmd.Execute())
+			assert.Contains(t, output.String(), tt.wantPrefix)
+		})
+	}
+}
+
+func TestValidateContractCommandEmptyFormatRejected(t *testing.T) {
+	contractPath := filepath.Join(t.TempDir(), "kubescape.yaml")
+	require.NoError(t, os.WriteFile(contractPath, []byte(commandContract), 0o600))
+
+	for _, format := range []string{"", "   ", "\t"} {
+		cmd := GetScanCommand(core.NewKubescape(context.Background()))
+		cmd.SetArgs([]string{"validate-contract", contractPath, "--format", format})
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.EqualError(t, err, "format cannot be empty, supported formats: text, json, sarif")
+	}
+}
+
+func TestValidateContractCommandUnsupportedFormatRejectedUpfrontOnInvalidContract(t *testing.T) {
+	contractPath := filepath.Join(t.TempDir(), "kubescape.yaml")
+	invalid := bytes.Replace([]byte(commandContract), []byte("frameworks"), []byte("frameworkz"), 1)
+	require.NoError(t, os.WriteFile(contractPath, invalid, 0o600))
+
+	cmd := GetScanCommand(core.NewKubescape(context.Background()))
+	cmd.SetArgs([]string{"validate-contract", contractPath, "--format", "xml"})
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.EqualError(t, err, `unsupported format "xml", supported: text, json, sarif`)
+}
+
+func TestValidateContractCommandSARIFUppercaseOnInvalidContract(t *testing.T) {
+	originalBuildNumber := versioncheck.BuildNumber
+	versioncheck.BuildNumber = "v4.1.0"
+	t.Cleanup(func() { versioncheck.BuildNumber = originalBuildNumber })
+
+	contractPath := filepath.Join(t.TempDir(), "kubescape.yaml")
+	invalid := bytes.Replace([]byte(commandContract), []byte("frameworks"), []byte("frameworkz"), 1)
+	require.NoError(t, os.WriteFile(contractPath, invalid, 0o600))
+
+	cmd := GetScanCommand(core.NewKubescape(context.Background()))
+	output := &bytes.Buffer{}
+	cmd.SetOut(output)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"validate-contract", contractPath, "--format", "SARIF"})
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "field frameworkz not found")
+
+	report := decodeValidateContractSARIF(t, output.Bytes())
+	run := report["runs"].([]any)[0].(map[string]any)
+	results := run["results"].([]any)
+	require.Len(t, results, 1)
+	result := results[0].(map[string]any)
+	assert.Equal(t, "kubescape.scan-contract.valid", result["ruleId"])
+	assert.Equal(t, "error", result["level"])
+	assert.Contains(t, result["message"].(map[string]any)["text"], "field frameworkz not found")
+}
+
+func TestValidateContractCommandRejectsPaddedAndWhitespaceContractNames(t *testing.T) {
+	originalBuildNumber := versioncheck.BuildNumber
+	versioncheck.BuildNumber = "v4.1.0"
+	t.Cleanup(func() { versioncheck.BuildNumber = originalBuildNumber })
+
+	contractPath := filepath.Join(t.TempDir(), "kubescape.yaml")
+	require.NoError(t, os.WriteFile(contractPath, []byte(commandContract), 0o600))
+
+	tests := []struct {
+		name         string
+		contractName string
+		wantErr      string
+	}{
+		{
+			name:         "padded contract name is rejected and not trimmed",
+			contractName: " ci ",
+			wantErr:      `contract " ci " does not exist`,
+		},
+		{
+			name:         "whitespace-only contract name is rejected and does not fall back to default",
+			contractName: "   ",
+			wantErr:      `contract "   " does not exist`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// validate-contract path
+			validateCmd := GetScanCommand(core.NewKubescape(context.Background()))
+			validateCmd.SetArgs([]string{"validate-contract", contractPath, "--contract", tt.contractName})
+			validateErr := validateCmd.Execute()
+			require.Error(t, validateErr)
+			assert.Contains(t, validateErr.Error(), tt.wantErr)
+
+			// scan path (verifying parity: validation does not select a different contract from the scan path)
+			scanCmd := GetScanCommand(core.NewKubescape(context.Background()))
+			root := &cobra.Command{Use: "kubescape", SilenceErrors: true, SilenceUsage: true}
+			root.AddCommand(scanCmd)
+			root.SetArgs([]string{"scan", ".", "--scan-contract", contractPath, "--contract", tt.contractName})
+			scanErr := root.Execute()
+			require.Error(t, scanErr)
+			assert.Contains(t, scanErr.Error(), tt.wantErr)
+		})
+	}
 }
 
 func decodeValidateContractSARIF(t *testing.T, data []byte) map[string]any {

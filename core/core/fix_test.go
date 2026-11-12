@@ -170,7 +170,7 @@ func buildFixableReportAt(t *testing.T, dir, manifestName string) string {
 	obj := map[string]any{
 		"apiVersion": "apps/v1",
 		"kind":       "Deployment",
-		"metadata":   map[string]any{"name": "demo", "namespace": "default"},
+		"metadata":   map[string]any{"name": "demo"},
 		"spec": map[string]any{
 			"template": map[string]any{
 				"spec": map[string]any{},
@@ -253,7 +253,7 @@ func buildTwoInputReport(t *testing.T, dir string) string {
 		lw := localworkload.NewLocalWorkload(map[string]any{
 			"apiVersion": "apps/v1",
 			"kind":       "Deployment",
-			"metadata":   map[string]any{"name": input.name, "namespace": "default"},
+			"metadata":   map[string]any{"name": input.name},
 			"spec":       map[string]any{"template": map[string]any{"spec": map[string]any{}}},
 		})
 		lw.SetPath("deploy.yaml:0")
@@ -1388,4 +1388,381 @@ func TestFix_OutputKustomizeNonInteractiveDoesNotRefuseWhenNoPatchesEmitted(t *t
 		},
 	})
 	require.NoError(t, err)
+}
+
+func getGeneratedPatchFileName(t *testing.T, reportPath string, valuesFile string) string {
+	tempDir := t.TempDir()
+	ks := &Kubescape{Ctx: context.Background()}
+	err := ks.Fix(&metav1.FixInfo{
+		ReportFile:   reportPath,
+		KustomizeDir: tempDir,
+		NoConfirm:    true,
+		HelmValueOptions: cautils.HelmValueOptions{
+			ValueFiles: []string{valuesFile},
+		},
+	})
+	require.NoError(t, err)
+	entries, err := os.ReadDir(tempDir)
+	require.NoError(t, err)
+	for _, e := range entries {
+		name := e.Name()
+		if name != "base.yaml" && name != "kustomization.yaml" && strings.HasSuffix(name, ".yaml") {
+			return name
+		}
+	}
+	t.Fatalf("no patch file found in %s", tempDir)
+	return ""
+}
+
+// TestFix_OutputKustomizeRefusesNonEmptyDirWithGeneratedPatchWithoutNoConfirm verifies that
+// when a non-empty directory contains a same-named generated patch but neither base.yaml nor
+// kustomization.yaml, Fix refuses to overwrite the patch without --no-confirm.
+func TestFix_OutputKustomizeRefusesNonEmptyDirWithGeneratedPatchWithoutNoConfirm(t *testing.T) {
+	dir := t.TempDir()
+	reportPath := buildFixableHelmReport(t, dir)
+	kustDir := filepath.Join(t.TempDir(), "existing-kust-patch")
+	require.NoError(t, os.MkdirAll(kustDir, 0700))
+
+	patchFileName := getGeneratedPatchFileName(t, reportPath, filepath.Join(dir, "values.yaml"))
+	existingPatchContent := "ORIGINAL_PATCH_CONTENT"
+	patchPath := filepath.Join(kustDir, patchFileName)
+	require.NoError(t, os.WriteFile(patchPath, []byte(existingPatchContent), 0600))
+
+	// Ensure neither base.yaml nor kustomization.yaml exists in kustDir
+	require.NoFileExists(t, filepath.Join(kustDir, "base.yaml"))
+	require.NoFileExists(t, filepath.Join(kustDir, "kustomization.yaml"))
+
+	ks := &Kubescape{Ctx: context.Background()}
+
+	// 1. Without --no-confirm: Fix must refuse to overwrite the existing patch
+	err := ks.Fix(&metav1.FixInfo{
+		ReportFile:   reportPath,
+		KustomizeDir: kustDir,
+		HelmValueOptions: cautils.HelmValueOptions{
+			ValueFiles: []string{filepath.Join(dir, "values.yaml")},
+		},
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "already contains Kustomize files; pass --no-confirm to overwrite them")
+
+	// Ensure original patch file was preserved and no base/kustomization were written
+	content, readErr := os.ReadFile(patchPath)
+	require.NoError(t, readErr)
+	assert.Equal(t, existingPatchContent, string(content))
+	assert.NoFileExists(t, filepath.Join(kustDir, "base.yaml"))
+	assert.NoFileExists(t, filepath.Join(kustDir, "kustomization.yaml"))
+
+	// 2. With --no-confirm: Fix succeeds and overwrites the patch
+	err = ks.Fix(&metav1.FixInfo{
+		ReportFile:   reportPath,
+		KustomizeDir: kustDir,
+		NoConfirm:    true,
+		HelmValueOptions: cautils.HelmValueOptions{
+			ValueFiles: []string{filepath.Join(dir, "values.yaml")},
+		},
+	})
+	require.NoError(t, err)
+
+	content, readErr = os.ReadFile(patchPath)
+	require.NoError(t, readErr)
+	assert.NotEqual(t, existingPatchContent, string(content))
+	assert.FileExists(t, filepath.Join(kustDir, "base.yaml"))
+	assert.FileExists(t, filepath.Join(kustDir, "kustomization.yaml"))
+}
+
+// TestFix_OutputKustomizeInteractivePromptOverwritesWhenConfirmed verifies that
+// when Kustomize patch files exist and stdin is a terminal, answering 'y' overwrites them.
+func TestFix_OutputKustomizeInteractivePromptOverwritesWhenConfirmed(t *testing.T) {
+	prevIsTerminal := isTerminal
+	t.Cleanup(func() { isTerminal = prevIsTerminal })
+	isTerminal = func(uintptr) bool { return true }
+
+	originalStdin := os.Stdin
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	t.Cleanup(func() { os.Stdin = originalStdin })
+	os.Stdin = r
+
+	_, err = w.WriteString("y\n")
+	require.NoError(t, err)
+	require.NoError(t, w.Close())
+
+	dir := t.TempDir()
+	reportPath := buildFixableHelmReport(t, dir)
+	kustDir := filepath.Join(t.TempDir(), "existing-kust-patch")
+	require.NoError(t, os.MkdirAll(kustDir, 0700))
+
+	patchFileName := getGeneratedPatchFileName(t, reportPath, filepath.Join(dir, "values.yaml"))
+	existingPatchContent := "ORIGINAL_PATCH_CONTENT"
+	patchPath := filepath.Join(kustDir, patchFileName)
+	require.NoError(t, os.WriteFile(patchPath, []byte(existingPatchContent), 0600))
+
+	ks := &Kubescape{Ctx: context.Background()}
+	err = ks.Fix(&metav1.FixInfo{
+		ReportFile:   reportPath,
+		KustomizeDir: kustDir,
+		HelmValueOptions: cautils.HelmValueOptions{
+			ValueFiles: []string{filepath.Join(dir, "values.yaml")},
+		},
+	})
+	require.NoError(t, err)
+
+	content, readErr := os.ReadFile(patchPath)
+	require.NoError(t, readErr)
+	assert.NotEqual(t, existingPatchContent, string(content))
+	assert.FileExists(t, filepath.Join(kustDir, "base.yaml"))
+	assert.FileExists(t, filepath.Join(kustDir, "kustomization.yaml"))
+}
+
+// TestFix_OutputKustomizeInteractivePromptCancelsWhenDeclined verifies that
+// when Kustomize patch files exist and stdin is a terminal, answering 'n' cancels generation.
+func TestFix_OutputKustomizeInteractivePromptCancelsWhenDeclined(t *testing.T) {
+	prevIsTerminal := isTerminal
+	t.Cleanup(func() { isTerminal = prevIsTerminal })
+	isTerminal = func(uintptr) bool { return true }
+
+	originalStdin := os.Stdin
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	t.Cleanup(func() { os.Stdin = originalStdin })
+	os.Stdin = r
+
+	_, err = w.WriteString("n\n")
+	require.NoError(t, err)
+	require.NoError(t, w.Close())
+
+	dir := t.TempDir()
+	reportPath := buildFixableHelmReport(t, dir)
+	kustDir := filepath.Join(t.TempDir(), "existing-kust-patch")
+	require.NoError(t, os.MkdirAll(kustDir, 0700))
+
+	patchFileName := getGeneratedPatchFileName(t, reportPath, filepath.Join(dir, "values.yaml"))
+	existingPatchContent := "ORIGINAL_PATCH_CONTENT"
+	patchPath := filepath.Join(kustDir, patchFileName)
+	require.NoError(t, os.WriteFile(patchPath, []byte(existingPatchContent), 0600))
+
+	ks := &Kubescape{Ctx: context.Background()}
+	err = ks.Fix(&metav1.FixInfo{
+		ReportFile:   reportPath,
+		KustomizeDir: kustDir,
+		HelmValueOptions: cautils.HelmValueOptions{
+			ValueFiles: []string{filepath.Join(dir, "values.yaml")},
+		},
+	})
+	require.NoError(t, err)
+
+	content, readErr := os.ReadFile(patchPath)
+	require.NoError(t, readErr)
+	assert.Equal(t, existingPatchContent, string(content))
+	assert.NoFileExists(t, filepath.Join(kustDir, "base.yaml"))
+	assert.NoFileExists(t, filepath.Join(kustDir, "kustomization.yaml"))
+}
+
+// TestFix_OutputKustomizeRefusesNonEmptyDirWithArbitraryFileWithoutNoConfirm verifies that
+// when an output directory contains an arbitrary non-Kustomize file, Fix refuses it without --no-confirm.
+func TestFix_OutputKustomizeRefusesNonEmptyDirWithArbitraryFileWithoutNoConfirm(t *testing.T) {
+	dir := t.TempDir()
+	reportPath := buildFixableHelmReport(t, dir)
+	kustDir := filepath.Join(t.TempDir(), "existing-arbitrary-dir")
+	require.NoError(t, os.MkdirAll(kustDir, 0700))
+	require.NoError(t, os.WriteFile(filepath.Join(kustDir, "my-note.txt"), []byte("preserve me"), 0600))
+
+	ks := &Kubescape{Ctx: context.Background()}
+	err := ks.Fix(&metav1.FixInfo{
+		ReportFile:   reportPath,
+		KustomizeDir: kustDir,
+		HelmValueOptions: cautils.HelmValueOptions{
+			ValueFiles: []string{filepath.Join(dir, "values.yaml")},
+		},
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "is not empty; pass --no-confirm to write into it anyway")
+	assert.FileExists(t, filepath.Join(kustDir, "my-note.txt"))
+	assert.NoFileExists(t, filepath.Join(kustDir, "base.yaml"))
+	assert.NoFileExists(t, filepath.Join(kustDir, "kustomization.yaml"))
+}
+
+func buildClusterReport(t *testing.T, dir string) string {
+	t.Helper()
+
+	obj := map[string]any{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata": map[string]any{
+			"name":      "nginx",
+			"namespace": "default",
+		},
+		"spec": map[string]any{
+			"template": map[string]any{
+				"spec": map[string]any{
+					"containers": []any{
+						map[string]any{
+							"name":            "nginx",
+							"image":           "nginx:latest",
+							"securityContext": map[string]any{"privileged": true},
+						},
+					},
+				},
+			},
+		},
+	}
+	resource := reporthandling.Resource{
+		ResourceID: "/apps/v1/default/Deployment/nginx",
+		Object:     obj,
+	}
+
+	result := resourcesresults.Result{
+		ResourceID:  resource.GetID(),
+		RawResource: &resource,
+		AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+			{
+				ControlID: "C-0057",
+				Name:      "Privileged container",
+				Status:    apis.StatusInfo{InnerStatus: apis.StatusFailed},
+				ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{
+					{
+						Name:   "rule-privileged",
+						Status: apis.StatusFailed,
+						Paths: []armotypes.PosturePaths{
+							{FixPath: armotypes.FixPath{Path: "spec.template.spec.containers[0].securityContext.privileged", Value: "false"}},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	report := &reporthandlingv2.PostureReport{
+		Metadata: reporthandlingv2.Metadata{
+			ScanMetadata: reporthandlingv2.ScanMetadata{ScanningTarget: reporthandlingv2.Cluster},
+			ContextMetadata: reporthandlingv2.ContextMetadata{
+				ClusterContextMetadata: &reporthandlingv2.ClusterMetadata{ContextName: "kind-kind"},
+			},
+		},
+		Results:   []resourcesresults.Result{result},
+		Resources: []reporthandling.Resource{resource},
+	}
+
+	return writeReportFile(t, dir, report)
+}
+
+func TestFix_HonorsWriterForClusterFixes(t *testing.T) {
+	dir := t.TempDir()
+	reportPath := buildClusterReport(t, dir)
+
+	ks := NewKubescape(context.Background())
+	var buf bytes.Buffer
+	err := ks.Fix(&metav1.FixInfo{
+		ReportFile: reportPath,
+		Writer:     &buf,
+	})
+	require.NoError(t, err)
+
+	out := buf.String()
+	assert.Contains(t, out, "# default/Deployment/nginx")
+	assert.Contains(t, out, "privileged: false")
+}
+
+func TestFix_ClusterFixHonorsOutputDirOverWriter(t *testing.T) {
+	dir := t.TempDir()
+	reportPath := buildClusterReport(t, dir)
+
+	outputDir := filepath.Join(dir, "fixes")
+	ks := NewKubescape(context.Background())
+	var buf bytes.Buffer
+	err := ks.Fix(&metav1.FixInfo{
+		ReportFile: reportPath,
+		OutputDir:  outputDir,
+		Writer:     &buf,
+	})
+	require.NoError(t, err)
+
+	assert.Empty(t, buf.String(), "writer buffer must remain empty when output directory is specified")
+	entries, err := os.ReadDir(outputDir)
+	require.NoError(t, err)
+	assert.NotEmpty(t, entries)
+}
+
+func TestIsAffirmative(t *testing.T) {
+	tests := []struct {
+		input string
+		want  bool
+	}{
+		{"y", true},
+		{"Y", true},
+		{"yes", true},
+		{"YES", true},
+		{"Yes", true},
+		{"  yes  ", true},
+		{"  y  ", true},
+		{"n", false},
+		{"no", false},
+		{"NO", false},
+		{"", false},
+		{"   ", false},
+		{"random", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			assert.Equal(t, tt.want, isAffirmative(tt.input))
+		})
+	}
+}
+
+// TestFix_OutputKustomizeInteractiveConfirmYes verifies that entering "yes" at the interactive
+// confirmation prompt allows overwriting existing Kustomize files.
+func TestFix_OutputKustomizeInteractiveConfirmYes(t *testing.T) {
+	for _, affirmative := range []string{"yes", "y", "YES", "Y"} {
+		t.Run(affirmative, func(t *testing.T) {
+			dir := t.TempDir()
+			reportPath := buildFixableHelmReport(t, dir)
+			kustDir := filepath.Join(t.TempDir(), "existing-kust")
+			require.NoError(t, os.MkdirAll(kustDir, 0700))
+			origKust := []byte("apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\n# original\n")
+			require.NoError(t, os.WriteFile(filepath.Join(kustDir, "kustomization.yaml"), origKust, 0600))
+
+			ks := &Kubescape{Ctx: context.Background()}
+			withStdin(t, affirmative+"\n", func() {
+				err := ks.Fix(&metav1.FixInfo{
+					ReportFile:   reportPath,
+					KustomizeDir: kustDir,
+					HelmValueOptions: cautils.HelmValueOptions{
+						ValueFiles: []string{filepath.Join(dir, "values.yaml")},
+					},
+				})
+				require.NoError(t, err)
+			})
+
+			assert.FileExists(t, filepath.Join(kustDir, "base.yaml"))
+			assert.FileExists(t, filepath.Join(kustDir, "kustomization.yaml"))
+		})
+	}
+}
+
+// TestFix_OutputKustomizeInteractiveDeclineNo verifies that entering "no" at the interactive
+// confirmation prompt cancels Kustomize patch generation without error or modifying existing files.
+func TestFix_OutputKustomizeInteractiveDeclineNo(t *testing.T) {
+	dir := t.TempDir()
+	reportPath := buildFixableHelmReport(t, dir)
+	kustDir := filepath.Join(t.TempDir(), "existing-kust")
+	require.NoError(t, os.MkdirAll(kustDir, 0700))
+	origKust := []byte("apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\n# original\n")
+	require.NoError(t, os.WriteFile(filepath.Join(kustDir, "kustomization.yaml"), origKust, 0600))
+
+	ks := &Kubescape{Ctx: context.Background()}
+	withStdin(t, "no\n", func() {
+		err := ks.Fix(&metav1.FixInfo{
+			ReportFile:   reportPath,
+			KustomizeDir: kustDir,
+			HelmValueOptions: cautils.HelmValueOptions{
+				ValueFiles: []string{filepath.Join(dir, "values.yaml")},
+			},
+		})
+		require.NoError(t, err)
+	})
+
+	content, err := os.ReadFile(filepath.Join(kustDir, "kustomization.yaml"))
+	require.NoError(t, err)
+	assert.Equal(t, string(origKust), string(content))
+	assert.NoFileExists(t, filepath.Join(kustDir, "base.yaml"))
 }

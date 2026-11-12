@@ -2,7 +2,6 @@ package listener
 
 import (
 	"context"
-	"crypto/subtle"
 	"crypto/tls"
 	"errors"
 	"fmt"
@@ -37,16 +36,12 @@ const (
 	// healthcheck paths
 	livePath  = "/livez"
 	readyPath = "/readyz"
-
-	// authTokenEnv gates optional bearer-token auth for /v1/*. When set, every
-	// /v1/* request must present `Authorization: Bearer <token>`. When unset the
-	// listener remains unauthenticated for backward compatibility (in-cluster only).
-	authTokenEnv = "KS_API_TOKEN"
 )
 
 // SetupHTTPListener serves requests until ctx is cancelled or serving fails.
 // Successful shutdown drains HTTP requests and joins the scan worker.
-func SetupHTTPListener(ctx context.Context) error {
+// auth wraps every /v1/* route except /v1/metrics; nil means no wrapping.
+func SetupHTTPListener(ctx context.Context, auth func(http.Handler) http.Handler) error {
 	tlsReloader, err := newTLSReloader(getCertFile(), getKeyFile())
 	if err != nil {
 		return err
@@ -77,53 +72,7 @@ func SetupHTTPListener(ctx context.Context) error {
 	// Setup the OpenAPI UI handler
 	openApiHandler := docs.NewOpenAPIUIHandler()
 
-	rtr := http.NewServeMux()
-
-	// Health probes are intentionally unauthenticated — kubelet needs them without credentials.
-	rtr.HandleFunc("GET "+livePath, httpHandler.Live)
-	rtr.HandleFunc("GET "+readyPath, httpHandler.Ready)
-	rtr.Handle("GET "+docs.OpenAPIV2Prefix, openApiHandler)
-
-	// -------------------------------------------------------------------------
-	// Trust boundary for /v1/* (scan trigger + results):
-	// By default the listener is unauthenticated and intended to be reachable
-	// only inside the cluster (ClusterIP / port-forward). This matches the
-	// historical in-cluster microservice deployment and preserves backward
-	// compatibility.
-	//
-	// If the operator exposes :8080 beyond the cluster (LoadBalancer, Ingress,
-	// NodePort on a public node), set KS_API_TOKEN to a cryptographically
-	// random bearer token. When set, every /v1/* request must present
-	// `Authorization: Bearer <token>`; otherwise 401 is returned. This is
-	// opt-in so existing in-cluster installs do not break on upgrade — see
-	// getAuthToken / bearerAuthMiddleware below. Unlike pprof (servePprof),
-	// which is off by default, the scan API is on by default because it is
-	// the product surface; the hardening is therefore additive and env-gated.
-	//
-	// Rate limiting is intentionally not added here: scan admission already
-	// enforces bounded queue depth (KS_SCAN_QUEUE_CAPACITY, default 10) with
-	// 429 + Retry-After and a 1 MiB body cap (KS_SCAN_REQUEST_MAX_BYTES).
-	// External L7 rate limiting should be done at the Ingress if needed.
-	// -------------------------------------------------------------------------
-	if tok := getAuthToken(); tok != "" {
-		logger.L().Info("API token authentication enabled for /v1/* endpoints", helpers.String("env", authTokenEnv))
-	} else {
-		logger.L().Warning("API token not configured — /v1/* endpoints are unauthenticated; ensure the service is not exposed beyond the cluster", helpers.String("env", authTokenEnv))
-	}
-
-	v1Handler := func(handlerFunc http.HandlerFunc) http.Handler {
-		var h http.Handler = handlerFunc
-		h = bearerAuthMiddleware(h)
-		h = otelhttp.NewHandler(h, "kubescape-svc")
-		return h
-	}
-
-	rtr.Handle("GET "+v1PathPrefix+v1PrometheusMetricsPath, v1Handler(httpHandler.Metrics)) // deprecated
-	rtr.Handle("POST "+v1PathPrefix+v1ScanPath, v1Handler(httpHandler.Scan))
-	rtr.Handle("DELETE "+v1PathPrefix+v1ScanPath, v1Handler(httpHandler.CancelScan))
-	rtr.Handle("GET "+v1PathPrefix+v1StatusPath, v1Handler(httpHandler.Status))
-	rtr.Handle("GET "+v1PathPrefix+v1ResultsPath, v1Handler(httpHandler.GetResults))
-	rtr.Handle("DELETE "+v1PathPrefix+v1ResultsPath, v1Handler(httpHandler.DeleteResults))
+	rtr := newRouter(httpHandler, openApiHandler, auth)
 
 	// OpenTelemetry metrics initialization
 	metrics.Init()
@@ -379,38 +328,6 @@ func getPprofAddr() string {
 	return "127.0.0.1:6060"
 }
 
-func getAuthToken() string {
-	return strings.TrimSpace(os.Getenv(authTokenEnv))
-}
-
-// bearerAuthMiddleware enforces `Authorization: Bearer <token>` when KS_API_TOKEN is set.
-// When the env var is unset/empty it is a no-op for backward compatibility.
-// It uses subtle.ConstantTimeCompare to avoid timing side-channels and accepts
-// the Bearer scheme case-insensitively per RFC 7235 (e.g. `bearer` is valid).
-func bearerAuthMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		expected := getAuthToken()
-		if expected == "" {
-			next.ServeHTTP(w, r)
-			return
-		}
-		hdr := r.Header.Get("Authorization")
-		scheme, token, ok := strings.Cut(hdr, " ")
-		if !ok || !strings.EqualFold(scheme, "Bearer") {
-			w.Header().Set("WWW-Authenticate", `Bearer realm="kubescape"`)
-			http.Error(w, `{"error":"missing or invalid Authorization header"}`, http.StatusUnauthorized)
-			return
-		}
-		got := strings.TrimSpace(token)
-		if got == "" || subtle.ConstantTimeCompare([]byte(got), []byte(expected)) != 1 {
-			w.Header().Set("WWW-Authenticate", `Bearer realm="kubescape"`)
-			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-
 // servePprof starts the net/http/pprof debug server, but only when
 // explicitly opted into via KS_PPROF_ENABLED=true. It used to start
 // automatically whenever the logger level was "debug", which is the
@@ -467,4 +384,39 @@ func newPprofServer(addr string) *http.Server {
 		Handler:           mux,
 		ReadHeaderTimeout: 10 * time.Second, // same slowloris guard as the main server
 	}
+}
+
+// newRouter builds the production mux.
+//
+// Every /v1/* route except /v1/metrics requires a Kubernetes service-account
+// token checked by TokenReview and authorized by RBAC (scans, scanresults in
+// kubescape.io), via apiauth. KS_API_AUTH_DISABLED=true turns it off. Health
+// probes, the OpenAPI UI and metrics are open.
+//
+// Rate limiting is intentionally not added here: scan admission already
+// enforces bounded queue depth (KS_SCAN_QUEUE_CAPACITY, default 10) with
+// 429 + Retry-After and a 1 MiB body cap (KS_SCAN_REQUEST_MAX_BYTES).
+func newRouter(httpHandler *handlerequestsv1.HTTPHandler, openApiHandler http.Handler, auth func(http.Handler) http.Handler) *http.ServeMux {
+	rtr := http.NewServeMux()
+
+	rtr.HandleFunc("GET "+livePath, httpHandler.Live)
+	rtr.HandleFunc("GET "+readyPath, httpHandler.Ready)
+	rtr.Handle("GET "+docs.OpenAPIV2Prefix, openApiHandler)
+
+	v1Handler := func(handlerFunc http.HandlerFunc) http.Handler {
+		// auth wraps outside otelhttp on purpose: rejected requests are not traced.
+		h := otelhttp.NewHandler(handlerFunc, "kubescape-svc")
+		if auth != nil {
+			h = auth(h)
+		}
+		return h
+	}
+
+	rtr.Handle("GET "+v1PathPrefix+v1PrometheusMetricsPath, otelhttp.NewHandler(http.HandlerFunc(httpHandler.Metrics), "kubescape-svc")) // deprecated, open
+	rtr.Handle("POST "+v1PathPrefix+v1ScanPath, v1Handler(httpHandler.Scan))
+	rtr.Handle("DELETE "+v1PathPrefix+v1ScanPath, v1Handler(httpHandler.CancelScan))
+	rtr.Handle("GET "+v1PathPrefix+v1StatusPath, v1Handler(httpHandler.Status))
+	rtr.Handle("GET "+v1PathPrefix+v1ResultsPath, v1Handler(httpHandler.GetResults))
+	rtr.Handle("DELETE "+v1PathPrefix+v1ResultsPath, v1Handler(httpHandler.DeleteResults))
+	return rtr
 }

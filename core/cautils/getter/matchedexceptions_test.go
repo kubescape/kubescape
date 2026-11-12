@@ -55,3 +55,20 @@ func TestFilterMatchedExceptionsScopes(t *testing.T) {
 	require.Len(t, got, 1)
 	assert.Equal(t, "crd", got[0].Name)
 }
+
+func TestFilterMatchedExceptionsKeepsOverlappingFrameworkPatterns(t *testing.T) {
+	primary := armotypes.PostureExceptionPolicy{PosturePolicies: []armotypes.PosturePolicy{
+		{ControlID: "C-0001", FrameworkName: "CIS.*"},
+	}}
+	secondary := armotypes.PostureExceptionPolicy{
+		PortalBase: armotypes.PortalBase{Attributes: map[string]any{secondaryExceptionSourceAttribute: true}},
+		PosturePolicies: []armotypes.PosturePolicy{
+			{ControlID: "C-0001", FrameworkName: "CIS-Benchmark"},
+			{ControlID: "C-0001", FrameworkName: "CIS.*|NSA"},
+		},
+	}
+
+	got := FilterMatchedExceptions([]armotypes.PostureExceptionPolicy{primary, secondary})
+	require.Len(t, got, 2)
+	assert.Equal(t, secondary.PosturePolicies[1:], got[1].PosturePolicies)
+}

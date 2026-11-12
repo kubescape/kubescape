@@ -112,6 +112,9 @@ func (idx *Index) peerMatches(peer networkingv1.NetworkPolicyPeer, policyNamespa
 // the immutable namespace-name label can be inferred from the endpoint.
 // Requirements on other labels still need a collected namespace.
 func (idx *Index) namespaceSelectorMatches(nsSel labels.Selector, namespace string) (matched bool, determinable bool) {
+	if idx == nil {
+		return false, false
+	}
 	nsInfo, collected := idx.namespaces[namespace]
 	return namespaceselector.Matches(nsSel, namespace, nsInfo.Labels, collected)
 }

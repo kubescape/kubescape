@@ -7,6 +7,7 @@ import (
 	"github.com/kubescape/kubescape/v4/core/mocks"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestGetControlCmd(t *testing.T) {
@@ -77,6 +78,38 @@ func TestGetControlCmd_RunERejectsStdinMixedWithOtherInputs(t *testing.T) {
 	err := cmd.RunE(cmd, []string{"C-0058", "-", "manifests/app.yaml"})
 
 	assert.EqualError(t, err, "usage: stdin input '-' cannot be combined with other input paths")
+}
+
+func TestGetControlCmd_RejectsFilePathWithPositionalInputPath(t *testing.T) {
+	mockKubescape := &mocks.MockIKubescape{}
+	scanInfo := cautils.ScanInfo{}
+
+	cmd := getControlCmd(mockKubescape, &scanInfo)
+	require.NoError(t, cmd.PersistentFlags().Set("file-path", "manifests/deployment.yaml"))
+
+	err := cmd.Args(cmd, []string{"C-0058", "./manifests"})
+
+	assert.EqualError(t, err, "usage: use either --file-path or positional input paths, not both")
+}
+
+func TestGetControlCmd_ArgsRejectsAmbiguousFilePathAndPositionalInputs(t *testing.T) {
+	scanInfo := cautils.ScanInfo{}
+	cmd := getControlCmd(&mocks.MockIKubescape{}, &scanInfo)
+	scanInfo.FilePath = "manifests/app.yaml"
+
+	err := cmd.Args(cmd, []string{"C-0058", "manifests"})
+
+	assert.EqualError(t, err, "usage: use either --file-path or positional input paths, not both")
+}
+
+func TestGetControlCmd_RunERejectsAmbiguousFilePathAndPositionalInputs(t *testing.T) {
+	scanInfo := cautils.ScanInfo{}
+	cmd := getControlCmd(&mocks.MockIKubescape{}, &scanInfo)
+	scanInfo.FilePath = "manifests/app.yaml"
+
+	err := cmd.RunE(cmd, []string{"C-0058", "manifests"})
+
+	assert.EqualError(t, err, "usage: use either --file-path or positional input paths, not both")
 }
 
 // TestControlCmdHasCoverageFlag ensures scan control registers --fail-coverage-below

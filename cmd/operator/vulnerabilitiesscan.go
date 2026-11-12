@@ -27,8 +27,8 @@ func getOperatorScanVulnerabilitiesCmd(ks meta.IKubescape, operatorInfo *cautils
 		Long:    ``,
 		Example: operatorScanVulnerabilitiesExamples,
 		Args: func(cmd *cobra.Command, args []string) error {
-			operatorInfo.Subcommands = append(operatorInfo.Subcommands, "vulnerabilities")
-			return nil
+			operatorInfo.Subcommands = append(operatorInfo.Subcommands, cautils.ScanVulnerabilitiesCommand)
+			return cobra.NoArgs(cmd, args)
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			vulnerabilitiesScanInfo.ClusterName = k8sinterface.GetContextName()

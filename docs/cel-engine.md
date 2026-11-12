@@ -292,6 +292,14 @@ Several pieces hold this up:
   same rules using the field types from the client-go scheme. Custom resources are
   left as written, since their schema may declare a field nullable, and so are
   fields the Go type does not declare
+- file scans read manifests like kubectl. The loader parses YAML 1.2 (yaml.v3),
+  where a bare `yes`, `no`, `on` or `off` is a string, while kubectl reads YAML 1.1
+  and takes them as booleans. A document that fails the scheme check is parsed a
+  second time with `sigs.k8s.io/yaml` (kubectl's reading) and checked again. If
+  that reading is valid, it is the one scanned, so `privileged: yes` is a
+  privileged container. Documents that already pass the first time are never
+  re-read, and one that is still invalid after the second reading is scanned as
+  before and reported as a skipped manifest
 
 An expression that errors, or returns a non-boolean, sets an error on the result
 rather than passing. An unknown verdict is never reported as a pass.

@@ -1,6 +1,7 @@
 package exposure
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/kubescape/k8s-interface/workloadinterface"
@@ -246,5 +247,45 @@ func TestFromUnstructuredGatewayAPI_MalformedHTTPRouteIsSkippedNotFatal(t *testi
 	}
 	if len(errs) != 1 {
 		t.Fatalf("expected exactly one decode error, got %d: %v", len(errs), errs)
+	}
+}
+
+// ServiceExposure reports paths in the order FromResources returns the
+// objects, so that order must not follow map iteration.
+func TestFromResources_PathOrderIsTheSameOnEveryRun(t *testing.T) {
+	resources := map[string]workloadinterface.IMetadata{}
+	svc := unstructuredResource(map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Service",
+		"metadata":   map[string]any{"name": "app", "namespace": "ns"},
+		"spec":       map[string]any{"type": "ClusterIP"},
+	})
+	resources[svc.GetID()] = svc
+	for _, name := range []string{"ing-a", "ing-b", "ing-c", "ing-d"} {
+		ing := unstructuredResource(map[string]any{
+			"apiVersion": "networking.k8s.io/v1",
+			"kind":       "Ingress",
+			"metadata":   map[string]any{"name": name, "namespace": "ns"},
+			"spec": map[string]any{
+				"defaultBackend": map[string]any{"service": map[string]any{"name": "app"}},
+			},
+		})
+		resources[ing.GetID()] = ing
+	}
+	want := []string{"ns/ing-a", "ns/ing-b", "ns/ing-c", "ns/ing-d"}
+
+	for run := 0; run < 50; run++ {
+		services, ingresses, namespaces, errs := FromResources(resources)
+		if len(errs) != 0 {
+			t.Fatalf("unexpected decode errors: %v", errs)
+		}
+		paths, _ := NewIndex(services, ingresses, nil, nil, namespaces).ServiceExposure(ServiceRef{Namespace: "ns", Name: "app"})
+		got := make([]string, 0, len(paths))
+		for _, p := range paths {
+			got = append(got, p.Source)
+		}
+		if !slices.Equal(got, want) {
+			t.Fatalf("run %d: path sources = %v, want %v", run, got, want)
+		}
 	}
 }

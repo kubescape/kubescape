@@ -674,3 +674,52 @@ func TestGetInterfaces_NonClusterScan_ConnectorFallbackWhenClusterDisconnected(t
 	setSubmitBehavior(submitScanInfo, interfaces.tenantConfig)
 	assert.True(t, submitScanInfo.Submit.GetBool(), "explicit submission must remain enabled with connector-fallback report URL")
 }
+
+// A dry run produces no report, but getInterfaces used to open every output
+// printer anyway, and opening one truncates its file: `--dry-run -o
+// results.json` emptied the report a previous scan left there.
+func TestGetInterfaces_DryRunDoesNotOpenOutputFile(t *testing.T) {
+	isolateCachedConfigTest(t)
+
+	fakeK8s := &k8sinterface.KubernetesApi{
+		KubernetesClient: fake.NewSimpleClientset(),
+	}
+	originalKubernetesAPIFunc := kubernetesAPIFunc
+	kubernetesAPIFunc = func() *k8sinterface.KubernetesApi { return fakeK8s }
+	t.Cleanup(func() { kubernetesAPIFunc = originalKubernetesAPIFunc })
+
+	originalConnected := k8sinterface.IsConnectedToCluster()
+	t.Cleanup(func() { k8sinterface.SetConnectedToCluster(originalConnected) })
+	k8sinterface.SetConnectedToCluster(true)
+
+	const previousReport = `{"previous":"report"}`
+	for _, tt := range []struct {
+		name         string
+		dryRun       bool
+		wantPrinters bool
+		wantContent  string
+	}{
+		{name: "dry run leaves the file alone", dryRun: true, wantContent: previousReport},
+		{name: "scan opens and truncates the file", dryRun: false, wantPrinters: true, wantContent: ""},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			output := filepath.Join(t.TempDir(), "results.json")
+			require.NoError(t, os.WriteFile(output, []byte(previousReport), 0o600))
+
+			scanInfo := &cautils.ScanInfo{
+				Local:  true,
+				DryRun: tt.dryRun,
+				Format: "json",
+				Output: output,
+			}
+			interfaces, err := getInterfaces(context.Background(), scanInfo, nil)
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = interfaces.closePrinters() })
+
+			assert.Equal(t, tt.wantPrinters, len(interfaces.outputPrinters) > 0)
+			content, err := os.ReadFile(output)
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantContent, string(content))
+		})
+	}
+}

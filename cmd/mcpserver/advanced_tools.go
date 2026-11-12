@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/google/cel-go/cel"
 	"github.com/mark3labs/mcp-go/mcp"
@@ -40,11 +41,12 @@ func createAdvancedTools(ksServer *KubescapeMcpserver) {
 	// Tool 1: scan_resource_slice
 	scanResourceSliceTool := mcp.NewTool(
 		"scan_resource_slice",
-		mcp.WithDescription("Scan a slice of resources to support granular, token-budgeted chunks. Used to avoid overloading context windows for large clusters."),
+		mcp.WithDescription("Scan a slice of resources to support granular, token-budgeted chunks. Returns simplified objects with name, namespace, labels, annotations, creationTimestamp, ownerReferences, and spec. Used to avoid overloading context windows for large clusters."),
 		mcp.WithString("resource_kind", mcp.Required(), mcp.Description("Kind of resource (e.g. pods, deployments)")),
 		mcp.WithString("namespace", mcp.Description("Namespace (optional, defaults to all)")),
 		mcp.WithNumber("limit", mcp.Description("Number of resources to fetch in this slice (default 10)")),
 		mcp.WithString("continue", mcp.Description("Continue token for pagination (optional)")),
+		mcp.WithBoolean("include_status", mcp.Description("Include status section of each resource (optional, defaults to false; increases response size)")),
 	)
 
 	ksServer.s.AddTool(scanResourceSliceTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -76,6 +78,11 @@ func createAdvancedTools(ksServer *KubescapeMcpserver) {
 		}
 
 		continueToken, toolErr := mcpStringArg(args, "continue")
+		if toolErr != nil {
+			return toolErr, nil
+		}
+
+		includeStatus, toolErr := mcpBoolArg(args, "include_status")
 		if toolErr != nil {
 			return toolErr, nil
 		}
@@ -135,15 +142,42 @@ func createAdvancedTools(ksServer *KubescapeMcpserver) {
 		// reject a null.
 		simplifiedItems := make([]map[string]any, 0, len(list.Items))
 		for _, item := range list.Items {
-			simplifiedItems = append(simplifiedItems, map[string]any{
+			metadata := map[string]any{
+				"name":      item.GetName(),
+				"namespace": item.GetNamespace(),
+			}
+			if labels := item.GetLabels(); len(labels) > 0 {
+				metadata["labels"] = labels
+			}
+			if rawAnnotations := item.GetAnnotations(); len(rawAnnotations) > 0 {
+				filtered := make(map[string]string, len(rawAnnotations))
+				for k, v := range rawAnnotations {
+					if k != "kubectl.kubernetes.io/last-applied-configuration" {
+						filtered[k] = v
+					}
+				}
+				if len(filtered) > 0 {
+					metadata["annotations"] = filtered
+				}
+			}
+			if ts := item.GetCreationTimestamp(); !ts.IsZero() {
+				metadata["creationTimestamp"] = ts.Time.UTC().Format(time.RFC3339)
+			}
+			if ownerRefs := item.GetOwnerReferences(); len(ownerRefs) > 0 {
+				metadata["ownerReferences"] = ownerRefs
+			}
+			simplified := map[string]any{
 				"apiVersion": item.GetAPIVersion(),
 				"kind":       item.GetKind(),
-				"metadata": map[string]any{
-					"name":      item.GetName(),
-					"namespace": item.GetNamespace(),
-				},
-				"spec": item.Object["spec"],
-			})
+				"metadata":   metadata,
+				"spec":       item.Object["spec"],
+			}
+			if includeStatus {
+				if status, ok := item.Object["status"]; ok && status != nil {
+					simplified["status"] = status
+				}
+			}
+			simplifiedItems = append(simplifiedItems, simplified)
 		}
 
 		result := map[string]any{

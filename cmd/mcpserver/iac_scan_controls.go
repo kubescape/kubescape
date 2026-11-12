@@ -2,15 +2,15 @@ package mcpserver
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 
 	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/pkg/pathcontainment"
+	"github.com/kubescape/kubescape/v4/core/pkg/remediationverify"
 	"github.com/kubescape/kubescape/v4/core/pkg/resourcehandler"
 	printerv2 "github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer/v2"
 	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
-	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 )
 
 // iacControlPolicyIdentifiers validates the tool arguments and builds the
@@ -38,6 +38,15 @@ func iacControlPolicyIdentifiers(path string, controlIDs []string) ([]cautils.Po
 // runIaCScanControls scans local IaC at path against the given control IDs and
 // returns the summarized scanResponse JSON used by the MCP scan tools.
 func (ksServer *KubescapeMcpserver) runIaCScanControls(ctx context.Context, path string, controlIDs []string) ([]byte, error) {
+	if strings.TrimSpace(path) == "" {
+		return nil, fmt.Errorf("path is required")
+	}
+	resolvedPath, err := pathcontainment.ResolveContainedPath(ksServer.workspaceDir, path)
+	if err != nil {
+		return nil, err
+	}
+	path = resolvedPath
+
 	policyIdentifiers, err := iacControlPolicyIdentifiers(path, controlIDs)
 	if err != nil {
 		return nil, err
@@ -48,6 +57,7 @@ func (ksServer *KubescapeMcpserver) runIaCScanControls(ctx context.Context, path
 		label:             "Local IaC Control",
 		rsrcHandler:       fileHandler,
 		inputPatterns:     []string{path},
+		workspaceDir:      ksServer.workspaceDir,
 	})
 }
 
@@ -78,6 +88,15 @@ type iacScanOutcome struct {
 // requested control before it is ever evaluated, and the caller has to be able
 // to see that.
 func (ksServer *KubescapeMcpserver) runIaCScanControlsReport(ctx context.Context, path string, controlIDs []string) (*iacScanOutcome, error) {
+	if strings.TrimSpace(path) == "" {
+		return nil, fmt.Errorf("path is required")
+	}
+	resolvedPath, err := pathcontainment.ResolveContainedPath(ksServer.workspaceDir, path)
+	if err != nil {
+		return nil, err
+	}
+	path = resolvedPath
+
 	policyIdentifiers, err := iacControlPolicyIdentifiers(path, controlIDs)
 	if err != nil {
 		return nil, err
@@ -88,6 +107,7 @@ func (ksServer *KubescapeMcpserver) runIaCScanControlsReport(ctx context.Context
 		label:             "Local IaC Remediation",
 		rsrcHandler:       fileHandler,
 		inputPatterns:     []string{path},
+		workspaceDir:      ksServer.workspaceDir,
 	})
 	if err != nil {
 		return nil, err
@@ -98,16 +118,10 @@ func (ksServer *KubescapeMcpserver) runIaCScanControlsReport(ctx context.Context
 	// `kubescape scan --format json` writes does carry it: ResultsHandler.ToJson
 	// embeds the PostureReport and adds a top-level scanCoverage key. Mirror that
 	// shape so the coverage gaps travel with the report rather than being
-	// dropped. NewFixHandler unmarshals into reporthandlingv2.PostureReport,
-	// which ignores the extra key.
-	output := struct {
-		*reporthandlingv2.PostureReport
-		ScanCoverage *cautils.ScanCoverage `json:"scanCoverage,omitempty"`
-	}{
-		PostureReport: report,
-		ScanCoverage:  &scanData.ScanCoverage,
-	}
-	reportJSON, err := json.Marshal(&output)
+	// dropped, and always carry it, which ToJson does not when the scan was
+	// clean. NewFixHandler unmarshals into reporthandlingv2.PostureReport, which
+	// ignores the extra key.
+	reportJSON, err := remediationverify.ReportJSON(report, &scanData.ScanCoverage)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal posture report: %w", err)
 	}

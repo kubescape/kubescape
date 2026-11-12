@@ -2,12 +2,8 @@ package operator
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"io"
-	"net/http"
-	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"github.com/armosec/armoapi-go/apis"
@@ -16,7 +12,6 @@ import (
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/core"
 	"github.com/kubescape/kubescape/v4/core/mocks"
-	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -32,12 +27,13 @@ func TestGetOperatorScanConfigCmd(t *testing.T) {
 
 	assert.Equal(t, "configurations", cmd.Use)
 
-	err := cmd.Args(&cobra.Command{}, []string{})
+	err := cmd.Args(cmd, []string{})
 	assert.NoError(t, err)
 	assert.Contains(t, operatorInfo.Subcommands, cautils.OperatorSubCommand("config"))
 
-	err = cmd.Args(&cobra.Command{}, []string{"configurations"})
-	assert.NoError(t, err)
+	err = cmd.Args(cmd, []string{"unexpected"})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), `unknown command "unexpected" for "configurations"`)
 }
 
 // TestGetOperatorScanConfigCmd_FlagsRegistered verifies that required flags are registered and have expected defaults.
@@ -84,27 +80,8 @@ func withCapturableLogger(t *testing.T) {
 func TestOperatorScanConfigCmd_ExecutionSuccess(t *testing.T) {
 	withCapturableLogger(t)
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, "/v1/triggerAction", r.URL.Path)
-		assert.Equal(t, http.MethodPost, r.Method)
-
-		var payload apis.Commands
-		err := json.NewDecoder(r.Body).Decode(&payload)
-		assert.NoError(t, err)
-		require.Len(t, payload.Commands, 1)
-		assert.Equal(t, apis.TypeRunKubescape, payload.Commands[0].CommandName)
-
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer server.Close()
-
-	host := strings.TrimPrefix(server.URL, "http://")
-	prevAdapter := newOperatorAdapter
-	newOperatorAdapter = func(scanInfo cautils.OperatorScanInfo, _ string, _ ...context.Context) (*core.OperatorAdapter, error) {
-		conn := &stubOperatorConnector{host: host}
-		return core.NewOperatorAdapterWithConnector(scanInfo, conn), nil
-	}
-	t.Cleanup(func() { newOperatorAdapter = prevAdapter })
+	op := newFakeOperator(t, "")
+	op.install(t)
 
 	cmd := getOperatorScanCmd(&mocks.MockIKubescape{}, &cautils.OperatorInfo{})
 	cmd.SetArgs([]string{"configurations", "--include-namespaces", "test-ns", "--enable-host-scan=true"})
@@ -117,6 +94,9 @@ func TestOperatorScanConfigCmd_ExecutionSuccess(t *testing.T) {
 	})
 
 	require.NoError(t, err)
+	cmds := op.commands(t)
+	require.Len(t, cmds, 1)
+	assert.Equal(t, apis.TypeRunKubescape, cmds[0].CommandName)
 	assert.Contains(t, output, "Kubescape Operator Triggering for configuration scanning")
 	assert.Contains(t, output, "Triggered Kubescape Operator for configuration scanning")
 }
@@ -139,22 +119,12 @@ func TestOperatorScanConfigCmd_AdapterCreationError(t *testing.T) {
 	assert.Contains(t, err.Error(), "failed to connect to cluster operator")
 }
 
-// TestOperatorScanConfigCmd_ScanError verifies error reporting when triggerAction returns an error.
+// TestOperatorScanConfigCmd_ScanError verifies error reporting when the operator fails the command.
 func TestOperatorScanConfigCmd_ScanError(t *testing.T) {
 	withCapturableLogger(t)
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusInternalServerError)
-	}))
-	defer server.Close()
-
-	host := strings.TrimPrefix(server.URL, "http://")
-	prevAdapter := newOperatorAdapter
-	newOperatorAdapter = func(scanInfo cautils.OperatorScanInfo, _ string, _ ...context.Context) (*core.OperatorAdapter, error) {
-		conn := &stubOperatorConnector{host: host}
-		return core.NewOperatorAdapterWithConnector(scanInfo, conn), nil
-	}
-	t.Cleanup(func() { newOperatorAdapter = prevAdapter })
+	op := newFakeOperator(t, "scan blew up")
+	op.install(t)
 
 	cmd := getOperatorScanCmd(&mocks.MockIKubescape{}, &cautils.OperatorInfo{})
 	cmd.SetArgs([]string{"configurations"})
@@ -167,6 +137,19 @@ func TestOperatorScanConfigCmd_ScanError(t *testing.T) {
 	})
 
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "http-error: 500")
+	assert.Contains(t, err.Error(), "failed: scan blew up")
 	assert.Contains(t, output, "Failed to triggering Kubescape Operator for configuration scanning")
+}
+
+// TestOperatorScanConfigCmd_RejectsUnexpectedArgs verifies that extraneous positional arguments
+// passed to configurations are rejected instead of silently accepted.
+func TestOperatorScanConfigCmd_RejectsUnexpectedArgs(t *testing.T) {
+	cmd := getOperatorScanCmd(&mocks.MockIKubescape{}, &cautils.OperatorInfo{})
+	cmd.SetArgs([]string{"configurations", "unexpected-arg"})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `unknown command "unexpected-arg" for "scan configurations"`)
 }

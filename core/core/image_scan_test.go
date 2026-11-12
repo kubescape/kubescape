@@ -828,6 +828,52 @@ func TestApplyRegistryMapping(t *testing.T) {
 	}
 }
 
+// TestApplyRegistryMappingSourceSelectors verifies reference normalization and
+// source preservation for explicit providers, including unchanged local inputs.
+func TestApplyRegistryMappingSourceSelectors(t *testing.T) {
+	for _, selector := range []string{"docker", "podman", "containerd", "oci-registry", "oci-model", "registry", "daemon", "pull", "image"} {
+		t.Run(selector, func(t *testing.T) {
+			input := selector + ":nginx:alpine"
+			mapped, matched, err := applyRegistryMapping(input, map[string]string{"docker.io": "mirror.example.com"})
+			require.NoError(t, err)
+			assert.True(t, matched)
+			assert.Equal(t, selector+":mirror.example.com/library/nginx:alpine", mapped)
+
+			unchanged, matched, err := applyRegistryMapping(input, map[string]string{"quay.io": "mirror.example.com"})
+			require.NoError(t, err)
+			assert.False(t, matched)
+			assert.Equal(t, input, unchanged)
+		})
+	}
+	for _, input := range []string{"oci-archive:nginx.tar", "docker-archive:nginx.tar", "dir:nginx", "sbom:nginx.json"} {
+		t.Run(input, func(t *testing.T) {
+			unchanged, matched, err := applyRegistryMapping(input, map[string]string{"docker.io": "mirror.example.com"})
+			require.NoError(t, err)
+			assert.False(t, matched)
+			assert.Equal(t, input, unchanged)
+		})
+	}
+}
+
+// TestApplyRegistryMappingSelectorReferenceDetails keeps tags, digests and
+// registry ports intact while stripping only the outer source selector.
+func TestApplyRegistryMappingSelectorReferenceDetails(t *testing.T) {
+	digest := "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	for _, tt := range []struct {
+		input, source, want string
+	}{
+		{"registry:internal.example:5000/team/app:v2@" + digest, "internal.example:5000", "registry:mirror.example.com/team/app:v2@" + digest},
+		{"image:dir:latest", "docker.io", "image:mirror.example.com/library/dir:latest"},
+	} {
+		t.Run(tt.input, func(t *testing.T) {
+			mapped, matched, err := applyRegistryMapping(tt.input, map[string]string{tt.source: "mirror.example.com"})
+			require.NoError(t, err)
+			assert.True(t, matched)
+			assert.Equal(t, tt.want, mapped)
+		})
+	}
+}
+
 func TestIsResolutionError(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -901,4 +947,34 @@ func TestIsResolutionError(t *testing.T) {
 			assert.Equal(t, tt.expected, isResolutionError(tt.err))
 		})
 	}
+}
+
+func TestGetImageExceptionsFromFile_OversizedFileRejected(t *testing.T) {
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "oversized_exceptions.json")
+	f, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY, 0o600)
+	require.NoError(t, err)
+	require.NoError(t, f.Truncate(maxImageExceptionsBytes+1))
+	require.NoError(t, f.Close())
+
+	_, err = GetImageExceptionsFromFile(filePath)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrImageExceptionsTooLarge)
+}
+
+func TestGetImageExceptionsFromFile_NonRegularFileRejected(t *testing.T) {
+	// /dev/null is a character device, not a regular file
+	if _, err := os.Stat("/dev/null"); err == nil {
+		_, err := GetImageExceptionsFromFile("/dev/null")
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrImageExceptionsNotRegular)
+	}
+}
+
+func TestGetImageExceptionsFromFile_DirectoryRejected(t *testing.T) {
+	dir := t.TempDir()
+	_, err := GetImageExceptionsFromFile(dir)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrImageExceptionsNotRegular)
+	assert.Contains(t, err.Error(), "is a directory, not a file")
 }

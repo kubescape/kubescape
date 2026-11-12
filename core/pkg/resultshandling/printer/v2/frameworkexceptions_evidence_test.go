@@ -138,7 +138,7 @@ func TestEvidence_ControlViewAndCSVOmitExceptedRulePaths(t *testing.T) {
 
 	// control view (--show-evidence)
 	workloads := []WorkloadSummary{{resource: resource, status: apis.StatusFailed}}
-	attachAssistedRemediation(summary, workloads, testHostNetworkControl, session.ResourcesResult, false)
+	attachAssistedRemediation(summary, workloads, testHostNetworkControl, session.ResourcesResult, false, true)
 	require.NotContains(t, workloads[0].assistedRemediation, exceptedEvidencePath)
 	require.Contains(t, workloads[0].assistedRemediation, failingEvidencePath)
 

@@ -1,8 +1,8 @@
 package config
 
 import (
+	"bytes"
 	"fmt"
-	"os"
 	"testing"
 
 	metav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
@@ -87,6 +87,8 @@ func TestGetValidateCmd_RunEPassesFlags(t *testing.T) {
 			cmd := getValidateCmd(ks)
 			cmd.SilenceUsage = true
 			cmd.SilenceErrors = true
+			var buf bytes.Buffer
+			cmd.SetOut(&buf)
 			cmd.SetArgs(tt.args)
 
 			err := cmd.Execute()
@@ -97,9 +99,22 @@ func TestGetValidateCmd_RunEPassesFlags(t *testing.T) {
 			assert.Equal(t, tt.wantFormat, ks.got.Format)
 			assert.Equal(t, tt.wantProfile, ks.got.Profile)
 			assert.Equal(t, tt.wantOK, ks.got.IncludeOK)
-			assert.Equal(t, os.Stdout, ks.got.Writer)
+			assert.Equal(t, &buf, ks.got.Writer)
 		})
 	}
+}
+
+func TestGetValidateCmd_RejectsUnexpectedArgs(t *testing.T) {
+	ks := &capturingValidate{}
+	cmd := getValidateCmd(ks)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+	cmd.SetArgs([]string{"unexpected"})
+
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `unknown command "unexpected" for "validate"`)
+	assert.Nil(t, ks.got)
 }
 
 func TestGetValidateCmd_RunEReturnsValidationError(t *testing.T) {

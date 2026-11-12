@@ -72,6 +72,18 @@ func IsExpressionError(err error) bool {
 	return errors.As(err, &ee)
 }
 
+// variableCompileError is a variable whose expression did not compile. It
+// reaches the validation that reads it as an eval error, since variables
+// compile lazily on first use, but it is a compile failure like any other and
+// stays an unknown verdict, the same as a validation that does not compile.
+type variableCompileError struct {
+	name string
+	err  error
+}
+
+func (e *variableCompileError) Error() string { return fmt.Sprintf("variable %q: %v", e.name, e.err) }
+func (e *variableCompileError) Unwrap() error { return e.err }
+
 // isContextError reports whether a validation's evaluation error came from a
 // cancelled or expired context rather than from the expression itself. The
 // apiserver never reaches a verdict on a request it did not finish evaluating,
@@ -348,7 +360,7 @@ func (e *Evaluator) lazyVariables(ctx context.Context, variables []Variable, act
 			// report, not a missing cost report to complain about.
 			prog, err := e.programs.get(v.Expression)
 			if err != nil {
-				return types.NewErr("variable %q: %v", v.Name, err)
+				return types.WrapErr(&variableCompileError{name: v.Name, err: err})
 			}
 			out, details, evalErr := e.run(ctx, prog, activation)
 			if reportErr := budget.reportDetails(details); reportErr != nil {
@@ -494,6 +506,12 @@ func (e *Evaluator) evalExpression(ctx context.Context, expr string, activation 
 	}
 	if evalErr != nil {
 		if isContextError(ctx, evalErr) {
+			return nil, evalErr
+		}
+		// A variable that never compiled is the same unknown verdict as an
+		// expression that never compiled, not an error the expression produced.
+		var compileErr *variableCompileError
+		if errors.As(evalErr, &compileErr) {
 			return nil, evalErr
 		}
 		return nil, &expressionError{evalErr}

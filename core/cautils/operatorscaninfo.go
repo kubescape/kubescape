@@ -39,12 +39,6 @@ type OperatorInfo struct {
 	Subcommands []OperatorSubCommand
 }
 
-type OperatorConnector interface {
-	StartPortForwarder() error
-	StopPortForwarder()
-	GetPortForwardLocalhost() string
-}
-
 type OperatorScanInfo interface {
 	GetRequestPayload() *apis.Commands
 	ValidatePayload(*apis.Commands) error
@@ -135,8 +129,8 @@ func isSupportedRemediationSeverity(severity string) bool {
 
 // RemediationInfo carries a single `kubescape operator remediate <action>`
 // invocation. It implements OperatorScanInfo so it reuses the existing
-// OperatorAdapter transport (POST apis.Commands to v1/triggerAction) — a
-// remediation is a new verb on that pipeline, not a new endpoint.
+// OperatorAdapter transport (one OperatorCommand object per apis.Command) — a
+// remediation is a new verb on that pipeline, not a new mechanism.
 //
 // Supported actions: `annotate`, `quarantine` and `revert`; the `cordon` action
 // arrives in a later phase. A target is given either explicitly (--kind/--name)

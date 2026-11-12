@@ -87,6 +87,38 @@ func TestGetFrameworkCmd_RunERejectsStdinMixedWithOtherInputs(t *testing.T) {
 	assert.EqualError(t, err, "usage: stdin input '-' cannot be combined with other input paths")
 }
 
+func TestGetFrameworkCmd_RejectsFilePathWithPositionalInputPath(t *testing.T) {
+	mockKubescape := &mocks.MockIKubescape{}
+	scanInfo := cautils.ScanInfo{}
+
+	cmd := getFrameworkCmd(mockKubescape, &scanInfo)
+	require.NoError(t, cmd.PersistentFlags().Set("file-path", "manifests/deployment.yaml"))
+
+	err := cmd.Args(cmd, []string{"nsa", "./manifests"})
+
+	assert.EqualError(t, err, "usage: use either --file-path or positional input paths, not both")
+}
+
+func TestGetFrameworkCmd_ArgsRejectsAmbiguousFilePathAndPositionalInputs(t *testing.T) {
+	scanInfo := cautils.ScanInfo{}
+	cmd := getFrameworkCmd(&mocks.MockIKubescape{}, &scanInfo)
+	scanInfo.FilePath = "manifests/app.yaml"
+
+	err := cmd.Args(cmd, []string{"nsa", "manifests"})
+
+	assert.EqualError(t, err, "usage: use either --file-path or positional input paths, not both")
+}
+
+func TestGetFrameworkCmd_RunERejectsAmbiguousFilePathAndPositionalInputs(t *testing.T) {
+	scanInfo := cautils.ScanInfo{}
+	cmd := getFrameworkCmd(&mocks.MockIKubescape{}, &scanInfo)
+	scanInfo.FilePath = "manifests/app.yaml"
+
+	err := cmd.RunE(cmd, []string{"nsa", "manifests"})
+
+	assert.EqualError(t, err, "usage: use either --file-path or positional input paths, not both")
+}
+
 // Regression: a --custom-rules control carried no base score, so it summarized
 // as "Unknown" severity, which enforceSeverityThresholds counts as exceeding
 // every threshold. Any failing custom rule then failed a

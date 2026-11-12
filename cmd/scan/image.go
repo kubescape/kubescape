@@ -1,6 +1,7 @@
 package scan
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -74,6 +75,84 @@ func getImageCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Command 
 			if scanInfo.CustomRules != "" || commandFlagChanged(cmd, "custom-rules") {
 				return fmt.Errorf("--custom-rules is not supported for image scans: an image scan evaluates vulnerabilities, not posture controls")
 			}
+			if scanInfo.ControlTimeout != 0 || commandFlagChanged(cmd, "control-timeout") {
+				return fmt.Errorf("--control-timeout is not supported for image scans: an image scan evaluates vulnerabilities, not posture controls")
+			}
+			if scanInfo.ControlsVersion != "" || commandFlagChanged(cmd, "controls-version") {
+				return fmt.Errorf("--controls-version is not supported for image scans: an image scan evaluates vulnerabilities, not posture controls")
+			}
+			if scanInfo.Baseline != "" || commandFlagChanged(cmd, "baseline") {
+				return fmt.Errorf("--baseline is not supported for image scans: an image scan evaluates vulnerabilities, not posture baseline drift (use 'kubescape diff' to compare image scan reports)")
+			}
+			if scanInfo.BaselineFailOnNew || commandFlagChanged(cmd, "baseline-fail-on-new") {
+				return fmt.Errorf("--baseline-fail-on-new is not supported for image scans: an image scan evaluates vulnerabilities, not posture baseline drift (use 'kubescape diff' to compare image scan reports)")
+			}
+			if scanInfo.BaselineSeverityThreshold != "" || commandFlagChanged(cmd, "baseline-severity-threshold") {
+				return fmt.Errorf("--baseline-severity-threshold is not supported for image scans: an image scan evaluates vulnerabilities, not posture baseline drift (use 'kubescape diff' to compare image scan reports)")
+			}
+			if (scanInfo.BaselineGranularity != "" && scanInfo.BaselineGranularity != "evidence") || commandFlagChanged(cmd, "baseline-granularity") {
+				return fmt.Errorf("--baseline-granularity is not supported for image scans: an image scan evaluates vulnerabilities, not posture baseline drift (use 'kubescape diff' to compare image scan reports)")
+			}
+			if scanInfo.ComplianceThreshold != 0 || commandFlagChanged(cmd, "compliance-threshold") {
+				return fmt.Errorf("--compliance-threshold is not supported for image scans: an image scan evaluates vulnerabilities, not posture compliance scores (use --severity-threshold instead)")
+			}
+			if scanInfo.FailCoverageThreshold != 0 || commandFlagChanged(cmd, "fail-coverage-below") {
+				return fmt.Errorf("--fail-coverage-below is not supported for image scans: an image scan evaluates vulnerabilities, not posture control coverage (use --severity-threshold instead)")
+			}
+			if scanInfo.FailOnDegradedConfig || commandFlagChanged(cmd, "fail-on-degraded-config") {
+				return fmt.Errorf("--fail-on-degraded-config is not supported for image scans: an image scan evaluates vulnerabilities, not posture control configurations")
+			}
+			if scanInfo.ControlsInputs != "" || commandFlagChanged(cmd, "controls-config") {
+				return fmt.Errorf("--controls-config is not supported for image scans: an image scan evaluates vulnerabilities, not posture controls")
+			}
+			if scanInfo.IncludeNamespaces != "" || commandFlagChanged(cmd, "include-namespaces") {
+				return fmt.Errorf("--include-namespaces is not supported for image scans: an image scan evaluates vulnerabilities, not Kubernetes namespaces")
+			}
+			if scanInfo.ExcludedNamespaces != "" || commandFlagChanged(cmd, "exclude-namespaces") {
+				return fmt.Errorf("--exclude-namespaces is not supported for image scans: an image scan evaluates vulnerabilities, not Kubernetes namespaces")
+			}
+			if scanInfo.IncludeKinds != "" || commandFlagChanged(cmd, "include-kinds") {
+				return fmt.Errorf("--include-kinds is not supported for image scans: an image scan evaluates vulnerabilities, not Kubernetes resource kinds")
+			}
+			if scanInfo.ExcludeKinds != "" || commandFlagChanged(cmd, "exclude-kinds") {
+				return fmt.Errorf("--exclude-kinds is not supported for image scans: an image scan evaluates vulnerabilities, not Kubernetes resource kinds")
+			}
+			if scanInfo.LabelSelector != "" || commandFlagChanged(cmd, "label-selector") {
+				return fmt.Errorf("--label-selector is not supported for image scans: an image scan evaluates vulnerabilities, not Kubernetes resource labels")
+			}
+			if scanInfo.Incremental || commandFlagChanged(cmd, "incremental") {
+				return fmt.Errorf("--incremental is not supported for image scans: an image scan evaluates vulnerabilities, not cached resource manifests")
+			}
+			if scanInfo.DryRun || commandFlagChanged(cmd, "dry-run") {
+				return fmt.Errorf("--dry-run is not supported for image scans: an image scan evaluates vulnerabilities, not cluster resource permissions")
+			}
+			if len(scanInfo.HelmValueFiles) > 0 || commandFlagChanged(cmd, "values") {
+				return fmt.Errorf("--values is not supported for image scans: an image scan evaluates vulnerabilities, not Helm charts")
+			}
+			if len(scanInfo.HelmSetValues) > 0 || commandFlagChanged(cmd, "set") {
+				return fmt.Errorf("--set is not supported for image scans: an image scan evaluates vulnerabilities, not Helm charts")
+			}
+			if len(scanInfo.HelmSetStringValues) > 0 || commandFlagChanged(cmd, "set-string") {
+				return fmt.Errorf("--set-string is not supported for image scans: an image scan evaluates vulnerabilities, not Helm charts")
+			}
+			if len(scanInfo.HelmSetFileValues) > 0 || commandFlagChanged(cmd, "set-file") {
+				return fmt.Errorf("--set-file is not supported for image scans: an image scan evaluates vulnerabilities, not Helm charts")
+			}
+			if scanInfo.HelmReleaseName != "" || commandFlagChanged(cmd, "release-name") {
+				return fmt.Errorf("--release-name is not supported for image scans: an image scan evaluates vulnerabilities, not Helm charts")
+			}
+			if scanInfo.HelmReleaseNamespace != "" || commandFlagChanged(cmd, "release-namespace") {
+				return fmt.Errorf("--release-namespace is not supported for image scans: an image scan evaluates vulnerabilities, not Helm charts")
+			}
+			if scanInfo.HelmKubeVersion != "" || commandFlagChanged(cmd, "kube-version") {
+				return fmt.Errorf("--kube-version is not supported for image scans: an image scan evaluates vulnerabilities, not Helm charts")
+			}
+			if len(scanInfo.HelmAPIVersions) > 0 || commandFlagChanged(cmd, "api-versions") {
+				return fmt.Errorf("--api-versions is not supported for image scans: an image scan evaluates vulnerabilities, not Helm charts")
+			}
+			if scanInfo.FilePath != "" || commandFlagChanged(cmd, "file-path") {
+				return fmt.Errorf("--file-path is not supported for image scans: an image scan evaluates vulnerabilities, not local manifest files")
+			}
 			if err := shared.ValidateImageScanAnonymization(scanInfo); err != nil {
 				return err
 			}
@@ -100,21 +179,24 @@ func getImageCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Command 
 				Exceptions:         scanInfo.UseExceptions,
 				UseDefaultMatchers: scanInfo.UseDefaultMatchers,
 			}
+			scanInfo.InputPatterns = normalizeImageArgs(args)
 
 			// The invocation is valid from this point on. Runtime and result-gate
 			// failures should not print command usage.
 			cmd.SilenceUsage = true
 
 			exceedsSeverityThreshold, err := ks.ScanImageContext(ctx, imgScanInfo, scanInfo)
-			if err != nil {
+			if !exceedsSeverityThreshold {
 				return err
 			}
 
-			if exceedsSeverityThreshold {
-				return fmt.Errorf("result exceeds severity threshold: %s", scanInfo.FailThresholdSeverity)
+			// Keep the severity breach visible when an exploitability gate or
+			// another deferred failure is reported alongside it.
+			thresholdErr := fmt.Errorf("result exceeds severity threshold: %s", scanInfo.FailThresholdSeverity)
+			if err == nil {
+				return thresholdErr
 			}
-
-			return nil
+			return errors.Join(err, thresholdErr)
 		},
 	}
 
@@ -137,6 +219,8 @@ func validateImageArgs(args []string) error {
 	return nil
 }
 
+// normalizeImageArgs trims whitespace, deduplicates image scan targets, and canonicalizes
+// paths to local tarball archives with their expected source prefix.
 func normalizeImageArgs(args []string) []string {
 	images := make([]string, 0, len(args))
 	seen := make(map[string]struct{}, len(args))
@@ -151,6 +235,8 @@ func normalizeImageArgs(args []string) []string {
 	return images
 }
 
+// localArchiveReference checks whether image names an existing local .tar archive file
+// without an explicit archive scheme prefix, canonicalizing it to "docker-archive:<path>".
 func localArchiveReference(image string) string {
 	if !strings.HasSuffix(image, ".tar") || strings.HasPrefix(image, "docker-archive:") || strings.HasPrefix(image, "oci-archive:") {
 		return image

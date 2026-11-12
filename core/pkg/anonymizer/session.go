@@ -5,10 +5,16 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"strconv"
 	"strings"
 
+	"github.com/kubescape/k8s-interface/cloudsupport"
+	cloudsupportv1 "github.com/kubescape/k8s-interface/cloudsupport/v1"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/opa-utils/objectsenvelopes"
+	"github.com/kubescape/opa-utils/objectsenvelopes/hostsensor"
+	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/attacktrack/v1alpha1"
@@ -100,6 +106,25 @@ func cloneSessionForTransform(session *cautils.OPASessionObj) (*sessionTransform
 	}
 	working.NamespaceSummaries = namespaceSummaries
 
+	exceptionAudit, err := cloneJSON(session.ExceptionAudit)
+	if err != nil {
+		return nil, fmt.Errorf("clone exception audit: %w", err)
+	}
+	working.ExceptionAudit = exceptionAudit
+
+	skippedManifests, err := cloneJSON(session.SkippedManifests)
+	if err != nil {
+		return nil, fmt.Errorf("clone skipped manifests: %w", err)
+	}
+	working.SkippedManifests = skippedManifests
+
+	// ScanCoverage is a value; only its skipped manifests are transformed, so
+	// a copy with its own slice is enough to keep the caller untouched.
+	working.ScanCoverage = session.ScanCoverage
+	if working.ScanCoverage.SkippedManifests, err = cloneJSON(session.ScanCoverage.SkippedManifests); err != nil {
+		return nil, fmt.Errorf("clone scan coverage skipped manifests: %w", err)
+	}
+
 	resources, originalByClone, err := cloneCatalog(session.GetCatalog())
 	if err != nil {
 		return nil, err
@@ -128,12 +153,12 @@ func clonePostureReport(report *reporthandlingv2.PostureReport) (*reporthandling
 	if err != nil || report == nil {
 		return cloned, err
 	}
-	cloneControlResourceIDs(report.SummaryDetails.Controls, cloned.SummaryDetails.Controls)
+	restoreControlSummaryFields(report.SummaryDetails.Controls, cloned.SummaryDetails.Controls)
 	for frameworkIndex, originalFramework := range report.SummaryDetails.Frameworks {
 		if frameworkIndex >= len(cloned.SummaryDetails.Frameworks) {
 			continue
 		}
-		cloneControlResourceIDs(
+		restoreControlSummaryFields(
 			originalFramework.Controls,
 			cloned.SummaryDetails.Frameworks[frameworkIndex].Controls,
 		)
@@ -141,9 +166,13 @@ func clonePostureReport(report *reporthandlingv2.PostureReport) (*reporthandling
 	return cloned, nil
 }
 
-// cloneControlResourceIDs restores AllLists after JSON cloning. AllLists has
-// an unexported backing map, so encoding/json cannot retain its entries.
-func cloneControlResourceIDs(original, cloned reportsummary.ControlSummaries) {
+// restoreControlSummaryFields restores what JSON cloning drops from control
+// summaries. AllLists has an unexported backing map, so encoding/json cannot
+// retain its entries, and Description and Remediation are tagged json:"-".
+// The printers read the last two from the summary, the CSV remediation column
+// and the PolicyReport result message among them. They are control library
+// text, not resource data, so they are kept as they are.
+func restoreControlSummaryFields(original, cloned reportsummary.ControlSummaries) {
 	for controlID, originalControl := range original {
 		clonedControl, ok := cloned[controlID]
 		if !ok {
@@ -155,6 +184,8 @@ func cloneControlResourceIDs(original, cloned reportsummary.ControlSummaries) {
 			resourceIDs.Append(status, resourceID)
 		}
 		clonedControl.ResourceIDs = resourceIDs
+		clonedControl.Description = originalControl.Description
+		clonedControl.Remediation = originalControl.Remediation
 		cloned[controlID] = clonedControl
 	}
 }
@@ -181,7 +212,11 @@ func cloneCatalog(catalog cautils.ResourceCatalog) (map[string]workloadinterface
 			cloneErr = fmt.Errorf("clone resource %q: %w", resourceID, err)
 			return false
 		}
-		cloned := workloadinterface.NewWorkloadObj(clonedObject)
+		cloned, err := cloneResourceEnvelope(resource, clonedObject)
+		if err != nil {
+			cloneErr = fmt.Errorf("clone resource %q: %w", resourceID, err)
+			return false
+		}
 		resources[resourceID] = cloned
 		originalByClone[cloned] = resource
 		return true
@@ -190,6 +225,144 @@ func cloneCatalog(catalog cautils.ResourceCatalog) (map[string]workloadinterface
 		return nil, nil, cloneErr
 	}
 	return resources, originalByClone, nil
+}
+
+// cloneResourceEnvelope wraps a cloned object in the same envelope type as the
+// original, so the clone is transformed the way the resource itself would be.
+// The envelope decides where the name and namespace live and how the resource
+// ID is built: a file-scan LocalWorkload prefixes the ID with its source path
+// hash, host-sensor, cloud-provider and API server data leave out the
+// namespace segment, and an RBAC subject keeps its name at the top level. The
+// transformed clone's ID becomes the resource's key in the results and the
+// committed original is stored under its own ID, so a clone that does not
+// report the original's ID would leave results that resolve to no resource;
+// cloning fails instead.
+func cloneResourceEnvelope(original workloadinterface.IMetadata, object map[string]any) (workloadinterface.IMetadata, error) {
+	var cloned workloadinterface.IMetadata
+	var err error
+	switch original.(type) {
+	case *localworkload.LocalWorkload:
+		if envelope := localworkload.NewLocalWorkload(object); envelope != nil {
+			cloned = envelope
+		}
+	case *objectsenvelopes.RegoResponseVectorObject:
+		cloned = objectsenvelopes.NewRegoResponseVectorObject(object)
+	case *hostsensor.HostSensorDataEnvelope:
+		cloned, err = decodeEnvelope[hostsensor.HostSensorDataEnvelope](object)
+	case *cloudsupportv1.CloudProviderDescribe:
+		cloned, err = decodeEnvelope[cloudsupportv1.CloudProviderDescribe](object)
+	case *cloudsupportv1.CloudProviderDescribeRepositories:
+		cloned, err = decodeEnvelope[cloudsupportv1.CloudProviderDescribeRepositories](object)
+	case *cloudsupportv1.CloudProviderListEntitiesForPolicies:
+		cloned, err = decodeEnvelope[cloudsupportv1.CloudProviderListEntitiesForPolicies](object)
+	case *cloudsupportv1.CloudProviderPolicyVersion:
+		cloned, err = decodeEnvelope[cloudsupportv1.CloudProviderPolicyVersion](object)
+	case *cloudsupport.ApiServerInfo:
+		var decoded workloadinterface.IMetadata
+		if decoded, err = decodeEnvelope[cloudsupport.ApiServerInfo](object); err == nil {
+			cloned = &apiServerInfoClone{ApiServerInfo: decoded.(*cloudsupport.ApiServerInfo)}
+		}
+	default:
+		cloned = workloadinterface.NewWorkloadObj(object)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("rebuild its %T envelope: %w", original, err)
+	}
+	if cloned == nil || cloned.GetID() != original.GetID() {
+		return nil, fmt.Errorf("cannot copy its %T envelope without changing its ID", original)
+	}
+	return cloned, nil
+}
+
+// decodeEnvelope rebuilds an envelope that keeps its object in typed fields.
+// Such an envelope's GetObject is the envelope itself marshaled to JSON, so
+// decoding the object back is the exact inverse; their SetObject is not
+// always (ApiServerInfo stores whatever it is given as its data).
+func decodeEnvelope[T any, P interface {
+	*T
+	workloadinterface.IMetadata
+}](object map[string]any) (workloadinterface.IMetadata, error) {
+	raw, err := json.Marshal(object)
+	if err != nil {
+		return nil, err
+	}
+	envelope := P(new(T))
+	if err := k8sjson.Unmarshal(raw, envelope); err != nil {
+		return nil, err
+	}
+	return envelope, nil
+}
+
+// commitResourceEnvelope returns the write that gives original the transformed
+// clone's content, keeping the original's pointer so every other holder of it
+// sees the anonymized values. It runs nothing itself, so the caller can
+// prepare every write before making any. Envelopes with typed fields take the
+// clone's fields, for the reason decodeEnvelope gives; the others take a copy
+// of its object through SetObject.
+func commitResourceEnvelope(original, transformed workloadinterface.IMetadata) (func(), error) {
+	switch target := original.(type) {
+	case *hostsensor.HostSensorDataEnvelope:
+		return assignEnvelope(target, transformed)
+	case *cloudsupportv1.CloudProviderDescribe:
+		return assignEnvelope(target, transformed)
+	case *cloudsupportv1.CloudProviderDescribeRepositories:
+		return assignEnvelope(target, transformed)
+	case *cloudsupportv1.CloudProviderListEntitiesForPolicies:
+		return assignEnvelope(target, transformed)
+	case *cloudsupportv1.CloudProviderPolicyVersion:
+		return assignEnvelope(target, transformed)
+	case *cloudsupport.ApiServerInfo:
+		source, ok := transformed.(*apiServerInfoClone)
+		if !ok {
+			return nil, fmt.Errorf("transformed resource is a %T, not a %T", transformed, source)
+		}
+		if source.err != nil {
+			return nil, fmt.Errorf("rebuild its %T envelope: %w", original, source.err)
+		}
+		return func() { *target = *source.ApiServerInfo }, nil
+	}
+	object, err := cloneResourceObject(transformed.GetObject())
+	if err != nil {
+		return nil, err
+	}
+	return func() { original.SetObject(object) }, nil
+}
+
+// apiServerInfoClone is the working copy of an ApiServerInfo. Unlike the
+// other typed envelopes, ApiServerInfo.SetObject stores the object it is given
+// as its data, so each transform helper's GetObject/SetObject round trip
+// nested the whole object one level deeper under data, leaving copies of the
+// encrypted name at paths such as data.data.metadata.name that DecryptReport
+// does not restore. SetObject here decodes the object back into the fields
+// instead, so the report keeps the envelope's own layout, with its name at
+// metadata.name. SetObject cannot return an error, so the first one is kept
+// and fails the commit.
+type apiServerInfoClone struct {
+	*cloudsupport.ApiServerInfo
+	err error
+}
+
+func (c *apiServerInfoClone) SetObject(object map[string]any) {
+	if c.err != nil {
+		return
+	}
+	decoded, err := decodeEnvelope[cloudsupport.ApiServerInfo](object)
+	if err != nil {
+		c.err = err
+		return
+	}
+	*c.ApiServerInfo = *decoded.(*cloudsupport.ApiServerInfo)
+}
+
+func assignEnvelope[T any, P interface {
+	*T
+	workloadinterface.IMetadata
+}](original P, transformed workloadinterface.IMetadata) (func(), error) {
+	source, ok := transformed.(P)
+	if !ok {
+		return nil, fmt.Errorf("transformed resource is a %T, not a %T", transformed, original)
+	}
+	return func() { *original = *source }, nil
 }
 
 // cloneResourceObject uses JSON as a representation-safe deep copy. Unlike
@@ -208,7 +381,7 @@ func commitTransformedSession(session *cautils.OPASessionObj, transaction *sessi
 	working := transaction.working
 	type committedResource struct {
 		original workloadinterface.IMetadata
-		object   map[string]any
+		write    func()
 	}
 	updates := make([]committedResource, 0, len(transaction.originalByClone))
 	var commitErr error
@@ -217,12 +390,12 @@ func commitTransformedSession(session *cautils.OPASessionObj, transaction *sessi
 		if !ok {
 			return true
 		}
-		object, err := cloneResourceObject(transformed.GetObject())
+		write, err := commitResourceEnvelope(original, transformed)
 		if err != nil {
 			commitErr = fmt.Errorf("prepare transformed resource for commit: %w", err)
 			return false
 		}
-		updates = append(updates, committedResource{original: original, object: object})
+		updates = append(updates, committedResource{original: original, write: write})
 		return true
 	})
 	if commitErr != nil {
@@ -231,7 +404,7 @@ func commitTransformedSession(session *cautils.OPASessionObj, transaction *sessi
 
 	committedResources := make(map[string]workloadinterface.IMetadata, len(transaction.originalByClone))
 	for _, update := range updates {
-		update.original.SetObject(update.object)
+		update.write()
 		committedResources[update.original.GetID()] = update.original
 	}
 	session.SetCatalog(cautils.NewMapResourceCatalog(committedResources))
@@ -243,6 +416,9 @@ func commitTransformedSession(session *cautils.OPASessionObj, transaction *sessi
 	session.Metadata = working.Metadata
 	session.Report = working.Report
 	session.NamespaceSummaries = working.NamespaceSummaries
+	session.ExceptionAudit = working.ExceptionAudit
+	session.SkippedManifests = working.SkippedManifests
+	session.ScanCoverage.SkippedManifests = working.ScanCoverage.SkippedManifests
 	return nil
 }
 
@@ -363,6 +539,10 @@ func transformSessionInPlace(session *cautils.OPASessionObj, transformer Transfo
 	}
 	session.ResourcesResult = newResourcesResult
 
+	if err := transformExceptionAudit(session.ExceptionAudit, exceptionAnonymizer, transformer, idMapping); err != nil {
+		return err
+	}
+
 	newResourceSource := make(map[string]reporthandling.Source, len(session.ResourceSource))
 
 	for oldID, source := range session.ResourceSource {
@@ -464,6 +644,37 @@ func transformSessionInPlace(session *cautils.OPASessionObj, transformer Transfo
 		return err
 	}
 
+	if err := transformSkippedManifests(session.SkippedManifests, transformer); err != nil {
+		return err
+	}
+	if err := transformSkippedManifests(session.ScanCoverage.SkippedManifests, transformer); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// transformSkippedManifests anonymizes the manifests the scan could not load.
+// Their paths are absolute local paths (home directory, project name), so
+// each gets the "src" pseudonym manifest source paths get: deterministic
+// under --hide, so entries stay distinguishable and a file keeps one name
+// across the report. The loader's reasons embed the same path, raw (an
+// os.PathError) or %q-quoted, so the path is replaced inside the reason too
+// and the rest of the diagnostic is kept.
+func transformSkippedManifests(skipped []cautils.SkippedManifest, transformer Transformer) error {
+	for i := range skipped {
+		original := skipped[i].Path
+		if original == "" {
+			continue
+		}
+		transformed, err := transformValue(transformer, "src", original)
+		if err != nil {
+			return err
+		}
+		skipped[i].Path = transformed
+		reason := strings.ReplaceAll(skipped[i].Reason, strconv.Quote(original), strconv.Quote(transformed))
+		skipped[i].Reason = strings.ReplaceAll(reason, original, transformed)
+	}
 	return nil
 }
 
@@ -484,6 +695,43 @@ func remapControlResourceIDs(controls reportsummary.ControlSummaries, transforme
 
 		control.ResourceIDs = remappedResourceIDs
 		controls[controlID] = control
+	}
+	return nil
+}
+
+// transformExceptionAudit anonymizes the --audit-exceptions report. Each item
+// names an exception and lists the resources it matched by ID, namespace and
+// name, which is the identity the rest of the session hides. The exception
+// name goes through the same memoized transformer as the exceptions attached
+// to rules, so an item and the exception it audits keep the same value, and
+// each resource ID is remapped through idMapping so it still points at the
+// resource's result. Status, counts, kinds and control and rule IDs carry no
+// identity and are kept.
+func transformExceptionAudit(audit *cautils.ExceptionAudit, exceptions *exceptionTransformer, transformer Transformer, idMapping map[string]string) error {
+	if audit == nil {
+		return nil
+	}
+	for i := range audit.Items {
+		item := &audit.Items[i]
+		name, err := exceptions.transform("exception", item.Name)
+		if err != nil {
+			return err
+		}
+		item.Name = name
+		for j := range item.MatchedResources {
+			match := &item.MatchedResources[j]
+			if match.ResourceID != "" {
+				if match.ResourceID, err = resolveMappedID(transformer, idMapping, match.ResourceID, "ref"); err != nil {
+					return err
+				}
+			}
+			if match.Namespace, err = transformValue(transformer, "ns", match.Namespace); err != nil {
+				return err
+			}
+			if match.Name, err = transformValue(transformer, "res", match.Name); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }

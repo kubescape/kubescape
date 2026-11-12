@@ -16,6 +16,7 @@ import (
 	"github.com/kubescape/kubescape/v4/core/pkg/componentvulns"
 	"github.com/kubescape/kubescape/v4/core/pkg/k8scveindex"
 	"github.com/kubescape/kubescape/v4/pkg/imagescan"
+	"github.com/kubescape/opa-utils/objectsenvelopes/hostsensor"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/version"
@@ -103,7 +104,7 @@ func (k8sHandler *K8sResourceHandler) collectComponentVulnerabilities(ctx contex
 	}
 
 	logger.L().Start("Matching cluster components against the vulnerability database...")
-	inv, nodeGaps := k8sHandler.componentInventory(ctx, sessionObj.Report.ClusterAPIServerInfo, kinds)
+	inv, nodeGaps := k8sHandler.componentInventory(ctx, sessionObj.Report.ClusterAPIServerInfo, kinds, allResources)
 
 	load := k8sHandler.componentVulnSources
 	if load == nil {
@@ -170,9 +171,11 @@ func (k8sHandler *K8sResourceHandler) collectComponentVulnerabilities(ctx contex
 // componentInventory lists nodes only when a per-node kind is selected. A
 // failed listing leaves the API-server inventory intact and reports a gap for
 // each selected per-node kind, since Build sees no nodes to record gaps for.
-func (k8sHandler *K8sResourceHandler) componentInventory(ctx context.Context, apiServer *version.Info, kinds map[componentvulns.Kind]string) (clustercomponents.Inventory, []componentvulns.Gap) {
+// Kernel evidence from /proc/version and os-release is taken from the host
+// data already collected for the scan, when there is any.
+func (k8sHandler *K8sResourceHandler) componentInventory(ctx context.Context, apiServer *version.Info, kinds map[componentvulns.Kind]string, allResources map[string]workloadinterface.IMetadata) (clustercomponents.Inventory, []componentvulns.Gap) {
 	var perNode []componentvulns.Kind
-	for _, kind := range []componentvulns.Kind{componentvulns.KubeletVulnerabilities, componentvulns.ContainerRuntimeVulnerabilities} {
+	for _, kind := range []componentvulns.Kind{componentvulns.KubeletVulnerabilities, componentvulns.ContainerRuntimeVulnerabilities, componentvulns.KernelVulnerabilities} {
 		if _, ok := kinds[kind]; ok {
 			perNode = append(perNode, kind)
 		}
@@ -189,7 +192,23 @@ func (k8sHandler *K8sResourceHandler) componentInventory(ctx context.Context, ap
 		}
 		return clustercomponents.Build(apiServer, nil, nil), gaps
 	}
-	return clustercomponents.Build(apiServer, nodes, nil), nil
+	var hostData []hostsensor.HostSensorDataEnvelope
+	if _, ok := kinds[componentvulns.KernelVulnerabilities]; ok {
+		hostData = kernelHostData(allResources)
+	}
+	return clustercomponents.Build(apiServer, nodes, hostData), nil
+}
+
+func kernelHostData(allResources map[string]workloadinterface.IMetadata) []hostsensor.HostSensorDataEnvelope {
+	var envelopes []hostsensor.HostSensorDataEnvelope
+	for _, r := range allResources {
+		e, ok := r.(*hostsensor.HostSensorDataEnvelope)
+		if !ok || (e.GetKind() != KernelVersion && e.GetKind() != OsReleaseFile) {
+			continue
+		}
+		envelopes = append(envelopes, *e)
+	}
+	return envelopes
 }
 
 func (k8sHandler *K8sResourceHandler) listNodes(ctx context.Context) ([]v1.Node, error) {

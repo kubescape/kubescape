@@ -1381,10 +1381,12 @@ func (a *QuayAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs []C
 	scanStatusSwitch:
 		switch strings.ToLower(payload.Status) {
 		case "scanned":
-			report.Status = ScanStatusScanned
+			// A completion status without the requested report is not a
+			// clean scan. Only a present Layer can supply an empty result.
 			if payload.Data == nil || payload.Data.Layer == nil {
-				return report, nil
+				return report, fmt.Errorf("missing security report data for %s/%s@%s", org, repo, manifestRef)
 			}
+			report.Status = ScanStatusScanned
 		case "unsupported":
 			// If unsupported, target digest might be a manifest list / OCI index that was not resolved upfront.
 			// Try resolving to platform child and retrying the security query.
@@ -1407,10 +1409,10 @@ func (a *QuayAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs []C
 				}
 				switch strings.ToLower(retryPayload.Status) {
 				case "scanned":
-					report.Status = ScanStatusScanned
 					if retryPayload.Data == nil || retryPayload.Data.Layer == nil {
-						return report, nil
+						return report, fmt.Errorf("missing security report data for child manifest %s/%s@%s", org, repo, childDigest)
 					}
+					report.Status = ScanStatusScanned
 					payload = retryPayload
 					break scanStatusSwitch
 				case "failed":

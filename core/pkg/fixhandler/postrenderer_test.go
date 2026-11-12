@@ -10,8 +10,12 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/armosec/armoapi-go/armotypes"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v3"
 )
 
 func TestPostRenderer_Validation(t *testing.T) {
@@ -515,5 +519,190 @@ spec:
 		assert.Contains(t, out, "privileged: false", "Kustomize patch must remediate privileged to false")
 		assert.Contains(t, out, "nginx-svc", "Non-patched Service must pass through unmodified")
 		assert.Contains(t, out, longSecretToken, "Long line (>8 KiB) in manifest must not be truncated or dropped by stdin streaming")
+	}
+}
+
+// TestPostRenderer_NamespacelessHelmInputWithReleaseNamespace verifies that patches emitted
+// with a non-default ReleaseNamespace apply via post-renderer to namespaceless Helm stdin manifests,
+// without matching same-named resources in other namespaces.
+func TestPostRenderer_NamespacelessHelmInputWithReleaseNamespace(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Skipping bash script execution test on Windows")
+	}
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash executable not found in PATH")
+	}
+	if _, err := exec.LookPath("kustomize"); err != nil {
+		t.Skip("kustomize executable not found in PATH")
+	}
+
+	kustDir := t.TempDir()
+	outDir := filepath.Join(kustDir, "renderer")
+
+	// Emit Kustomize patches for namespaceless Service with ReleaseNamespace: "prod"
+	svc := &reporthandling.Resource{
+		Object: map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "Service",
+			"metadata": map[string]interface{}{
+				"name": "my-service",
+			},
+			"spec": map[string]interface{}{
+				"type": "ClusterIP",
+			},
+		},
+	}
+	s := HelmFixSuggestion{
+		Resource:           svc,
+		FidelityProvenance: true,
+		HelmValueOptions: cautils.HelmValueOptions{
+			ReleaseNamespace: "prod",
+		},
+		FixPaths: []armotypes.FixPath{
+			{Path: "metadata.labels.patched", Value: "applied"},
+		},
+	}
+
+	emitRes, err := EmitKustomizePatch([]HelmFixSuggestion{s}, kustDir, WithOverwrite(true))
+	require.NoError(t, err)
+	require.Len(t, emitRes.EmittedResources, 1)
+
+	err = EmitPostRenderer(kustDir, outDir)
+	require.NoError(t, err)
+
+	shPath := filepath.Join(outDir, "renderer.sh")
+	require.FileExists(t, shPath)
+
+	// Helm stdin input has:
+	// 1. Service my-service without namespace (namespaceless Helm template)
+	// 2. Service my-service in namespace other-ns
+	helmStdinInput := `apiVersion: v1
+kind: Service
+metadata:
+  name: my-service
+spec:
+  type: ClusterIP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: my-service
+  namespace: other-ns
+spec:
+  type: ClusterIP
+`
+
+	cmd := exec.Command(shPath)
+	cmd.Stdin = strings.NewReader(helmStdinInput)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err = cmd.Run()
+	require.NoError(t, err, "post-renderer execution failed: %s", stderr.String())
+
+	outStr := stdout.String()
+
+	// Parse multi-document output
+	decoder := yaml.NewDecoder(strings.NewReader(outStr))
+	var docs []map[string]interface{}
+	for {
+		var doc map[string]interface{}
+		if err := decoder.Decode(&doc); err != nil {
+			break
+		}
+		if doc != nil {
+			docs = append(docs, doc)
+		}
+	}
+	require.Len(t, docs, 2, "expected two service documents in output")
+
+	var namespaces []string
+	for _, doc := range docs {
+		meta, _ := doc["metadata"].(map[string]interface{})
+		ns, _ := meta["namespace"].(string)
+		namespaces = append(namespaces, ns)
+	}
+	assert.ElementsMatch(t, []string{"", "other-ns"}, namespaces, "output must contain one namespaceless and one other-ns Service")
+
+	for _, doc := range docs {
+		meta, ok := doc["metadata"].(map[string]interface{})
+		require.True(t, ok)
+		ns, _ := meta["namespace"].(string)
+		labels, _ := meta["labels"].(map[string]interface{})
+		switch ns {
+		case "":
+			// Namespaceless service (targeted by release namespace prod) MUST have the patch
+			require.NotNil(t, labels, "namespaceless service should have labels")
+			assert.Equal(t, "applied", labels["patched"], "namespaceless service must receive the patch")
+		case "other-ns":
+			// other-ns service MUST NOT have the patch
+			if labels != nil {
+				assert.Empty(t, labels["patched"], "other-ns service must NOT receive the patch")
+			}
+		}
+	}
+
+	// Verify that an explicit default-namespace Service also matches the selector alternative and receives the patch.
+	// Note: Kustomize internally assigns default namespace to namespaceless resources,
+	// so a namespaceless and explicit default resource with identical name cannot reside in the same stream.
+	helmStdinDefaultNs := `apiVersion: v1
+kind: Service
+metadata:
+  name: my-service
+  namespace: default
+spec:
+  type: ClusterIP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: my-service
+  namespace: other-ns
+spec:
+  type: ClusterIP
+`
+	cmdDefault := exec.Command(shPath)
+	cmdDefault.Stdin = strings.NewReader(helmStdinDefaultNs)
+	var stdoutDef, stderrDef bytes.Buffer
+	cmdDefault.Stdout = &stdoutDef
+	cmdDefault.Stderr = &stderrDef
+	err = cmdDefault.Run()
+	require.NoError(t, err, "post-renderer execution for default-ns failed: %s", stderrDef.String())
+
+	decDefault := yaml.NewDecoder(strings.NewReader(stdoutDef.String()))
+	var docsDefault []map[string]interface{}
+	for {
+		var doc map[string]interface{}
+		if err := decDefault.Decode(&doc); err != nil {
+			break
+		}
+		if doc != nil {
+			docsDefault = append(docsDefault, doc)
+		}
+	}
+	require.Len(t, docsDefault, 2, "expected two service documents in default-ns output")
+
+	var namespacesDefault []string
+	for _, doc := range docsDefault {
+		meta, _ := doc["metadata"].(map[string]interface{})
+		ns, _ := meta["namespace"].(string)
+		namespacesDefault = append(namespacesDefault, ns)
+	}
+	assert.ElementsMatch(t, []string{"default", "other-ns"}, namespacesDefault, "default-ns output must contain one default and one other-ns Service")
+
+	for _, doc := range docsDefault {
+		meta, ok := doc["metadata"].(map[string]interface{})
+		require.True(t, ok)
+		ns, _ := meta["namespace"].(string)
+		labels, _ := meta["labels"].(map[string]interface{})
+		switch ns {
+		case "default":
+			require.NotNil(t, labels, "default-namespace service should have labels")
+			assert.Equal(t, "applied", labels["patched"], "default-namespace service must receive the patch")
+		case "other-ns":
+			if labels != nil {
+				assert.Empty(t, labels["patched"], "other-ns service must NOT receive the patch")
+			}
+		}
 	}
 }

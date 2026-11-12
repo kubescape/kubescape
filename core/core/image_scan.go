@@ -14,6 +14,7 @@ import (
 	pathpkg "path"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -63,10 +64,73 @@ type VulnerabilitiesIgnorePolicy struct {
 	Severities      []string `json:"severities"`
 }
 
+// maxImageExceptionsBytes is the maximum allowed size for image exception files (32 MiB),
+// matching cautils.DefaultMaxFileSize to prevent uncontrolled resource consumption
+// from oversized inputs or decompression bombs (CWE-400).
+const maxImageExceptionsBytes int64 = 32 * 1024 * 1024
+
+var (
+	// ErrImageExceptionsNotRegular is returned when an image exceptions file is not a regular file.
+	ErrImageExceptionsNotRegular = errors.New("image exceptions file is not a regular file")
+	// ErrImageExceptionsTooLarge is returned when an image exceptions file exceeds the maximum allowed size.
+	ErrImageExceptionsTooLarge = errors.New("image exceptions file exceeds maximum size limit")
+)
+
+// openImageExceptionsFile opens path for reading and rejects anything but a regular file.
+// O_NONBLOCK keeps opening a FIFO from waiting for a writer, and the check is
+// made on the opened descriptor so a path swapped afterwards cannot slip past.
+func openImageExceptionsFile(path string) (*os.File, error) {
+	if strings.TrimSpace(path) == "" {
+		return nil, os.ErrNotExist
+	}
+	file, err := os.OpenFile(filepath.Clean(path), os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return nil, err
+	}
+	info, err := file.Stat()
+	if err != nil {
+		file.Close()
+		return nil, err
+	}
+	if info.IsDir() {
+		file.Close()
+		return nil, fmt.Errorf("%q is a directory, not a file: %w", path, ErrImageExceptionsNotRegular)
+	}
+	if !info.Mode().IsRegular() {
+		file.Close()
+		return nil, fmt.Errorf("%w: %q", ErrImageExceptionsNotRegular, path)
+	}
+	return file, nil
+}
+
+// readImageExceptionsFile returns the contents of the image exceptions file at path,
+// reading at most maxImageExceptionsBytes bytes so that reading remains bounded.
+func readImageExceptionsFile(path string) ([]byte, error) {
+	file, err := openImageExceptionsFile(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	info, err := file.Stat()
+	if err == nil && info.Size() > maxImageExceptionsBytes {
+		return nil, fmt.Errorf("%w: %q exceeds the %d byte limit", ErrImageExceptionsTooLarge, path, maxImageExceptionsBytes)
+	}
+
+	data, err := io.ReadAll(io.LimitReader(file, maxImageExceptionsBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > maxImageExceptionsBytes {
+		return nil, fmt.Errorf("%w: %q exceeds the %d byte limit", ErrImageExceptionsTooLarge, path, maxImageExceptionsBytes)
+	}
+	return data, nil
+}
+
 // Loads exception policies from exceptions json object.
 func GetImageExceptionsFromFile(filePath string) ([]VulnerabilitiesIgnorePolicy, error) {
 	// Read the JSON file
-	jsonFile, err := os.ReadFile(filepath.Clean(filePath))
+	jsonFile, err := readImageExceptionsFile(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("error reading exceptions file: %w", err)
 	}
@@ -1069,12 +1133,23 @@ func applyRegistryMapping(imgName string, registryMapping map[string]string) (st
 	if len(registryMapping) == 0 {
 		return imgName, false, nil
 	}
-	// Registry mapping can never match a non-registry input; skip parsing so
-	// archives don't produce confusing mapping errors.
-	if isNonRegistryInput(imgName) {
-		return imgName, false, nil
+	imageReference := strings.TrimSpace(imgName)
+	sourcePrefix := ""
+	if rest, selector, ok := stripRegistrySelectorScheme(imageReference); ok {
+		// Explicit registry/daemon sources bypass local-file detection, as
+		// the scanner does. Preserve the source choice on the mirror attempt.
+		imageReference, sourcePrefix = rest, selector+":"
+	} else {
+		// Registry mapping can never match a non-registry input; skip parsing
+		// so archives don't produce confusing mapping errors.
+		if isNonRegistryInput(imgName) {
+			return imgName, false, nil
+		}
+		if rest, selector := peelGenericImageSelector(imageReference); selector != "" {
+			imageReference, sourcePrefix = rest, selector+":"
+		}
 	}
-	canonicalImageName, err := cautils.NormalizeImageName(imgName)
+	canonicalImageName, err := cautils.NormalizeImageName(imageReference)
 	if err != nil {
 		return "", false, err
 	}
@@ -1086,7 +1161,7 @@ func applyRegistryMapping(imgName string, registryMapping map[string]string) (st
 		if _, err := reference.ParseNormalizedNamed(mappedName); err != nil {
 			return "", false, fmt.Errorf("invalid image reference after applying registry mapping: %w", err)
 		}
-		return mappedName, true, nil
+		return sourcePrefix + mappedName, true, nil
 	}
 	return imgName, false, nil
 }
@@ -1211,10 +1286,41 @@ func (ks *Kubescape) ScanImage(imgScanInfo *ksmetav1.ImageScanInfo, scanInfo *ca
 	return ks.ScanImageContext(ks.Context(), imgScanInfo, scanInfo)
 }
 
-// ScanImageContext scans every image in imgScanInfo.Images bound to the given
-// ctx for its complete execution, rather than re-reading ks.Context() at each
+// onBeforeImageScanServiceInit is an internal test hook invoked right before image scanner service initialization.
+var onBeforeImageScanServiceInit func()
+
+// onBeforeImageScanJobs is an internal test hook invoked right before image scan jobs begin.
+var onBeforeImageScanJobs func()
+
+// resolveLocalImageTarget checks if an image target specifies a local file or directory
+// via a supported local selector (docker-archive:, oci-archive:, oci-dir:, dir:, file:,
+// local-file:, local-directory:, singularity:, snap:, sbom:, purl:) or an explicit archive file.
+// It returns the underlying filesystem path and true if it identifies a local target.
+func resolveLocalImageTarget(image string) (string, bool) {
+	trimmed := strings.TrimSpace(image)
+	if trimmed == "" {
+		return "", false
+	}
+	if rest, _ := peelGenericImageSelector(trimmed); rest != "" {
+		trimmed = rest
+	}
+	if scheme := detectScheme(trimmed); scheme != "" {
+		rawPath := strings.TrimPrefix(trimmed, scheme+":")
+		return strings.TrimSpace(rawPath), true
+	}
+	lower := strings.ToLower(trimmed)
+	if strings.HasSuffix(lower, ".tar") || strings.HasSuffix(lower, ".tar.gz") || strings.HasSuffix(lower, ".tgz") || strings.HasSuffix(lower, ".sif") {
+		return trimmed, true
+	}
+	return "", false
+}
+
+// ScanImageContext scans every image in imgScanInfo.Images using the given ctx
+// for scan jobs and output setup, rather than re-reading ks.Context() at each
 // stage as ScanImage's predecessor did (matching Kubescape.Scan's own
-// ScanContext migration, #3237). Callers that need a deadline or cancellation
+// ScanContext migration, #3237). Scanner initialization, including vulnerability
+// database loading, is not bound to ctx and may continue after cancellation.
+// Callers that need a deadline or cancellation
 // should derive ctx themselves and pass it in directly, instead of calling
 // ks.SetContext beforehand: mutating the shared *Kubescape's context is not
 // safe if the instance is reused or another operation could run
@@ -1231,6 +1337,26 @@ func (ks *Kubescape) ScanImageContext(ctx context.Context, imgScanInfo *ksmetav1
 	images := imgScanInfo.Images
 	if len(images) == 0 {
 		return false, fmt.Errorf("no image provided to scan")
+	}
+
+	scanInfo.SetScanType(cautils.ScanTypeImage)
+
+	// Ensure scanInfo knows about every image target and underlying local file for output safety checks,
+	// while preserving any existing input patterns.
+	for _, img := range imgScanInfo.Images {
+		if !slices.Contains(scanInfo.InputPatterns, img) {
+			scanInfo.InputPatterns = append(scanInfo.InputPatterns, img)
+		}
+		if localPath, isLocal := resolveLocalImageTarget(img); isLocal && localPath != "" {
+			if !slices.Contains(scanInfo.InputPatterns, localPath) {
+				scanInfo.InputPatterns = append(scanInfo.InputPatterns, localPath)
+			}
+		}
+	}
+
+	// Validate output printer configuration and destination safety upfront before pulls and scans start.
+	if err := ValidateOutputPrinters(scanInfo); err != nil {
+		return false, err
 	}
 
 	logger.L().Start(imageScanStartMessage(images))
@@ -1286,6 +1412,9 @@ func (ks *Kubescape) ScanImageContext(ctx context.Context, imgScanInfo *ksmetav1
 		logger.L().StopError(fmt.Sprintf("Invalid Grype database URL '%s': %v", scanInfo.ListingURL, err))
 		return false, err
 	}
+	if onBeforeImageScanServiceInit != nil {
+		onBeforeImageScanServiceInit()
+	}
 	svc, err := imagescan.NewScanServiceWithMatchersAndSources(distCfg, installCfg, imgScanInfo.UseDefaultMatchers, nil, shouldUpdate)
 	if err != nil {
 		logger.L().StopError(fmt.Sprintf("Failed to initialize image scanner: %s", err))
@@ -1300,6 +1429,9 @@ func (ks *Kubescape) ScanImageContext(ctx context.Context, imgScanInfo *ksmetav1
 	jobs := buildImageScanJobs(imgScanInfo, scanInfo, exceptionPolicies)
 
 	resultsHandler := resultshandling.NewResultsHandler(nil, nil, nil)
+	if onBeforeImageScanJobs != nil {
+		onBeforeImageScanJobs()
+	}
 	scanErr := scanImageJobs(ctx, svc, scanInfo.ImageScanConcurrency, jobs, resultsHandler)
 	scanErr = unwrapSingleImageError(scanErr)
 	if len(resultsHandler.ImageScanData) == 0 {
@@ -1307,8 +1439,6 @@ func (ks *Kubescape) ScanImageContext(ctx context.Context, imgScanInfo *ksmetav1
 		return false, scanErr
 	}
 	logger.L().StopSuccess(imageScanSuccessMessage(images, resultsHandler.ImageScanData))
-
-	scanInfo.SetScanType(cautils.ScanTypeImage)
 
 	// Printers open their output files on construction, so they are built only
 	// once at least one image has produced results.
@@ -1328,7 +1458,12 @@ func (ks *Kubescape) ScanImageContext(ctx context.Context, imgScanInfo *ksmetav1
 		}
 	}
 
-	return exceedsSeverityThreshold, errors.Join(scanErr, staleDBErr, resultsHandler.HandleResults(ctx, scanInfo))
+	// Like the stale-DB failure, a tripped exploitability gate is returned
+	// after the results are printed, so the user keeps the report.
+	riskGates := imagescan.RiskGates{FailOnKEV: scanInfo.FailOnKEV, EPSSThreshold: scanInfo.EPSSThreshold}
+	riskErr := imagescan.CheckRiskGates(riskGates, resultsHandler.ImageScanData, scanInfo.OnlyFixable)
+
+	return exceedsSeverityThreshold, errors.Join(scanErr, staleDBErr, riskErr, resultsHandler.HandleResults(ctx, scanInfo))
 }
 
 // buildImageScanJobs converts imgScanInfo.Images into per-image scan jobs.

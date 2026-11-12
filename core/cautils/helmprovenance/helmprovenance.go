@@ -31,6 +31,8 @@ type Provenance struct {
 	// ValuesPaths are dotted .Values.* keys statically referenced by the
 	// template (and by any partials it includes, transitively). Sorted,
 	// deduplicated. Empty when nothing could be statically traced.
+	// Relative paths inside a simple {{ with .Values.foo }} block are
+	// reported under foo.
 	//
 	// Caveat: segments are joined with ".", so an `index .Values` access with
 	// a key that itself contains a literal dot (e.g. {{ index .Values "foo.bar"
@@ -82,6 +84,11 @@ var (
 	// Stops at non-identifier characters, so .Values.foo[0] yields ".foo"
 	// (we cannot safely flatten array indices into a values key anyway).
 	dotValuesRe = regexp.MustCompile(`\.Values((?:\.[A-Za-z_][A-Za-z0-9_]*)+)`)
+	// Relative dot paths inside a {{ with }} block are rooted at that block's
+	// path.
+	relativeDotPathRe  = regexp.MustCompile(`\.([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)`)
+	withValuesPathRe   = regexp.MustCompile(`^\.Values((?:\.[A-Za-z_][A-Za-z0-9_]*)+)$`)
+	withRelativePathRe = regexp.MustCompile(`^\.(?:([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*))?$`)
 	// (index .Values "foo" "bar") — the second-most common access form.
 	indexValuesRe = regexp.MustCompile(`index\s+\.Values((?:\s+"[^"]+")+)`)
 	// Quoted segment inside an `index .Values "x" "y"` chain.
@@ -268,12 +275,130 @@ func valuePathsIn(data []byte) []string {
 		}
 		seen[strings.Join(segs, ".")] = struct{}{}
 	}
+	addWithBlockPaths(data, seen)
 	out := make([]string, 0, len(seen))
 	for p := range seen {
 		out = append(out, p)
 	}
 	sort.Strings(out)
 	return out
+}
+
+func addWithBlockPaths(data []byte, seen map[string]struct{}) {
+	type scopeFrame struct {
+		parent string
+	}
+	var (
+		stack []scopeFrame
+		scope string
+	)
+	for _, action := range actionRe.FindAllSubmatch(data, -1) {
+		body := action[1]
+		kindMatch := actionKindRe.FindSubmatch(body)
+		kind := ""
+		if kindMatch != nil {
+			kind = string(kindMatch[1])
+		}
+		if kind != "with" && kind != "else" {
+			addRelativePaths(body, scope, seen)
+		}
+		switch kind {
+		case "with":
+			parent := scope
+			operand := strings.TrimSpace(string(body[len("with"):]))
+			if pathMatch := withValuesPathRe.FindStringSubmatch(operand); pathMatch != nil {
+				scope = strings.TrimPrefix(pathMatch[1], ".")
+			} else {
+				relativeMatch := withRelativePathRe.FindStringSubmatch(operand)
+				if relativeMatch != nil {
+					switch {
+					case operand == ".":
+						scope = parent
+					case relativeMatch[1] != "" && parent != "":
+						scope = parent + "." + relativeMatch[1]
+						seen[scope] = struct{}{}
+					default:
+						scope = ""
+					}
+				} else {
+					scope = ""
+				}
+			}
+			stack = append(stack, scopeFrame{parent: parent})
+			continue
+		case "if", "range", "block":
+			stack = append(stack, scopeFrame{parent: scope})
+			if kind == "range" || kind == "block" {
+				scope = ""
+			}
+			continue
+		case "end":
+			if len(stack) > 0 {
+				frame := stack[len(stack)-1]
+				stack = stack[:len(stack)-1]
+				scope = frame.parent
+			}
+			continue
+		case "else":
+			if len(stack) > 0 {
+				scope = stack[len(stack)-1].parent
+				if elseIf := strings.TrimSpace(string(body[len(kind):])); strings.HasPrefix(elseIf, "if ") {
+					addRelativePaths([]byte(strings.TrimSpace(strings.TrimPrefix(elseIf, "if "))), scope, seen)
+				}
+			}
+			continue
+		}
+
+	}
+}
+
+func addRelativePaths(body []byte, scope string, seen map[string]struct{}) {
+	if scope == "" {
+		return
+	}
+	body = withoutQuotedStrings(body)
+	for _, match := range relativeDotPathRe.FindAllSubmatchIndex(body, -1) {
+		start := match[0]
+		if start > 0 {
+			previous := body[start-1]
+			if previous == '$' || previous == '_' || previous >= 'A' && previous <= 'Z' || previous >= 'a' && previous <= 'z' || previous >= '0' && previous <= '9' {
+				continue
+			}
+		}
+		relative := string(body[match[2]:match[3]])
+		if relative == "Values" || strings.HasPrefix(relative, "Values.") {
+			continue
+		}
+		seen[scope+"."+relative] = struct{}{}
+	}
+}
+
+func withoutQuotedStrings(body []byte) []byte {
+	clean := append([]byte(nil), body...)
+	for i := 0; i < len(clean); {
+		quote := clean[i]
+		if quote != '"' && quote != '\'' && quote != '`' {
+			i++
+			continue
+		}
+		start := i
+		i++
+		for i < len(clean) {
+			if clean[i] == '\\' && quote != '`' && i+1 < len(clean) {
+				i += 2
+				continue
+			}
+			if clean[i] == quote {
+				i++
+				break
+			}
+			i++
+		}
+		for j := start; j < i; j++ {
+			clean[j] = ' '
+		}
+	}
+	return clean
 }
 
 func firstApiVersionLine(data []byte) int {

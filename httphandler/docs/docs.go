@@ -13,7 +13,16 @@
 //	- application/json
 //
 //	Security:
-//	- basic
+//	- bearer
+//
+//	The open routes (/livez, /readyz, GET /v1/metrics) override this with an empty security list in swagger.yaml.
+//
+//	SecurityDefinitions:
+//	bearer:
+//	     type: apiKey
+//	     name: Authorization
+//	     in: header
+//	     description: Kubernetes service-account token with audience kubescape.io
 //
 // swagger:meta
 package docs

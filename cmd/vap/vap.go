@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"regexp"
 	"strings"
 	"time"
@@ -82,12 +83,20 @@ func getDeployLibraryCmd() *cobra.Command {
 		Use:   "deploy-library",
 		Short: "Install Kubescape CEL admission policy library",
 		Long:  ``,
+		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if timeout < 0 {
+				return fmt.Errorf("timeout cannot be negative: %v", timeout)
+			}
+			outPath, err := validateOutputFile(outputFile, cmd.Flags().Changed("output"))
+			if err != nil {
+				return err
+			}
 			content, err := deployLibrary(fromRelease, timeout)
 			if err != nil {
 				return err
 			}
-			return writeOutput(content, outputFile)
+			return writeOutput(content, outPath, cmd.OutOrStdout())
 		},
 	}
 	cmd.Flags().StringVarP(&outputFile, "output", "o", "", "Write output to file instead of stdout")
@@ -112,7 +121,12 @@ func getCreatePolicyBindingCmd() *cobra.Command {
 		Use:   "create-policy-binding",
 		Short: "Create a policy binding",
 		Long:  ``,
+		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			outPath, err := validateOutputFile(outputFile, cmd.Flags().Changed("output"))
+			if err != nil {
+				return err
+			}
 			result, err := BuildPolicyBinding(BindingOptions{
 				Name:               policyBindingName,
 				PolicyName:         policyName,
@@ -128,7 +142,7 @@ func getCreatePolicyBindingCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return writeOutput(result.Manifest, outputFile)
+			return writeOutput(result.Manifest, outPath, cmd.OutOrStdout())
 		},
 	}
 	// Must specify the name of the policy binding
@@ -375,6 +389,12 @@ func downloadLibrary(tag string, timeout time.Duration) (string, error) {
 	return strings.Join(parts, "\n---\n") + "\n", nil
 }
 
+// maxCELPolicyDownloadBytes bounds policy library files downloaded from remote URLs (10 MiB),
+// preventing uncontrolled memory allocation from oversized responses or decompression bombs (CWE-400).
+const maxCELPolicyDownloadBytes = 10 * 1024 * 1024
+
+var errDownloadBodyTooLarge = errors.New("downloaded file exceeds maximum size limit")
+
 func downloadFileToString(url string, timeout time.Duration) (string, error) {
 	client := &http.Client{
 		Timeout: timeout,
@@ -390,10 +410,13 @@ func downloadFileToString(url string, timeout time.Duration) (string, error) {
 		return "", fmt.Errorf("failed to download file: %s", response.Status)
 	}
 
-	// Read the response body
-	bodyBytes, err := io.ReadAll(response.Body)
+	// Read the response body with an upper bound to prevent OOM
+	bodyBytes, err := io.ReadAll(io.LimitReader(response.Body, maxCELPolicyDownloadBytes+1))
 	if err != nil {
 		return "", err // Return an empty string and the error if reading fails
+	}
+	if len(bodyBytes) > maxCELPolicyDownloadBytes {
+		return "", fmt.Errorf("%w: response from %q exceeded the %d byte limit", errDownloadBodyTooLarge, url, maxCELPolicyDownloadBytes)
 	}
 
 	// Convert the byte slice to a string
@@ -401,8 +424,28 @@ func downloadFileToString(url string, timeout time.Duration) (string, error) {
 	return bodyString, nil
 }
 
-func writeOutput(content string, outputFile string) (retErr error) {
+func validateOutputFile(outputFile string, flagChanged bool) (string, error) {
+	if !flagChanged {
+		return "", nil
+	}
+	trimmed := strings.TrimSpace(outputFile)
+	if trimmed == "" {
+		return "", errors.New("output file path cannot be empty")
+	}
+	fi, err := os.Stat(trimmed)
+	if err == nil && fi.IsDir() {
+		return "", fmt.Errorf("output path %q is a directory, not a file", trimmed)
+	}
+	return trimmed, nil
+}
+
+func writeOutput(content string, outputFile string, out ...io.Writer) (retErr error) {
+	outputFile = strings.TrimSpace(outputFile)
 	if outputFile != "" {
+		fi, err := os.Stat(outputFile)
+		if err == nil && fi.IsDir() {
+			return fmt.Errorf("output path %q is a directory, not a file", outputFile)
+		}
 		w, err := printer.GetWriterNoFallback(outputFile)
 		if err != nil {
 			return err
@@ -415,8 +458,12 @@ func writeOutput(content string, outputFile string) (retErr error) {
 		_, err = io.WriteString(w, content)
 		return err
 	}
-	fmt.Print(content)
-	return nil
+	var destination io.Writer = os.Stdout
+	if len(out) > 0 && out[0] != nil {
+		destination = out[0]
+	}
+	_, err := io.WriteString(destination, content)
+	return err
 }
 
 func isValidK8sObjectName(name string) error {

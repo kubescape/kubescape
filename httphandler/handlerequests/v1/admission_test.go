@@ -36,7 +36,7 @@ func decodeScanResponse(t *testing.T, recorder *httptest.ResponseRecorder) utils
 }
 
 func handlerStateIsDrained(handler *HTTPHandler) bool {
-	return handler.state.len() == 0 && len(handler.scanRequestChan) == 0
+	return handler.state.len() == 0 && len(handler.scanRequestChan) == 0 && len(handler.metricsRequestChan) == 0
 }
 
 func TestScanQueueRejectsRequestsWhenCapacityIsExhausted(t *testing.T) {

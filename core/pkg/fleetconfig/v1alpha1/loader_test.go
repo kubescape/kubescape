@@ -89,3 +89,50 @@ func TestLoadFileNamesTheFile(t *testing.T) {
 	_, err = LoadFile(filepath.Join(t.TempDir(), "missing.yaml"))
 	assert.ErrorContains(t, err, "read fleet config")
 }
+
+func TestLoadFile_Valid(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "fleet.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(fullConfig), 0o600))
+
+	doc, err := LoadFile(path)
+	require.NoError(t, err)
+	require.NotNil(t, doc)
+	require.NotNil(t, doc.Spec.Contexts)
+	assert.Equal(t, ContextList{"prod", "staging", "dr"}, *doc.Spec.Contexts)
+}
+
+func TestLoadFile_EmptyFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "empty.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(""), 0o600))
+
+	_, err := LoadFile(path)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "document is empty")
+}
+
+func TestLoadFile_OversizedFileRejected(t *testing.T) {
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "oversized.yaml")
+	f, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY, 0o600)
+	require.NoError(t, err)
+	require.NoError(t, f.Truncate(maxFleetConfigBytes+1))
+	require.NoError(t, f.Close())
+
+	_, err = LoadFile(filePath)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrFleetConfigTooLarge)
+}
+
+func TestLoadFile_DirectoryRejected(t *testing.T) {
+	_, err := LoadFile(t.TempDir())
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "is a directory, not a file")
+}
+
+func TestLoadFile_NonRegularFileRejected(t *testing.T) {
+	if _, err := os.Stat("/dev/null"); err == nil {
+		_, err := LoadFile("/dev/null")
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrFleetConfigNotRegular)
+	}
+}

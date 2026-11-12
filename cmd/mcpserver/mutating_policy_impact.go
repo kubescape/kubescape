@@ -64,6 +64,13 @@ func createMutatingAdmissionPolicyTools(ksServer *KubescapeMcpserver) {
 		if toolErr != nil {
 			return toolErr, nil
 		}
+		// A resource is one path segment as well. "validatingadmissionpolicies/status"
+		// would be read from the API as the status of the object named by name,
+		// but matched as a resource of that literal name, so it would match the
+		// wrong rules and miss the resources no policy is ever run against.
+		if strings.Contains(resource, "/") {
+			return mcpToolError(ErrCodeInvalidArgument, fmt.Sprintf("resource must name one resource; pass its subresource separately (got %q, want e.g. resource %q and subresource %q)", resource, "pods", "status"), map[string]any{"argument": "resource"}), nil
+		}
 		apiGroup, argErr := optionalStringArg(args, "api_group")
 		if argErr != nil {
 			return mcpToolError(ErrCodeInvalidArgument, argErr.Error(), map[string]any{"argument": "api_group"}), nil

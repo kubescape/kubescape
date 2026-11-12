@@ -39,10 +39,21 @@ var (
 )
 
 func (ks *Kubescape) Fix(fixInfo *metav1.FixInfo) error {
+	// Before anything is read: a patch or a verification combined with another
+	// output mode must fail, not quietly do one of the two.
+	if err := fixInfo.ValidateOutputPatch(); err != nil {
+		return err
+	}
+	if err := fixInfo.ValidateVerify(); err != nil {
+		return err
+	}
 	logger.L().Info("Reading report file...")
 	handler, err := fixhandler.NewFixHandler(fixInfo)
 	if err != nil {
 		return err
+	}
+	if fixInfo.Verify && handler.IsClusterReport() {
+		return errors.New("--verify rescans manifest files, and a cluster scan has none; fix the manifests that created the resources and scan them again")
 	}
 
 	resourcesToFix := handler.PrepareResourcesToFix(ks.Context())
@@ -53,12 +64,33 @@ func (ks *Kubescape) Fix(fixInfo *metav1.FixInfo) error {
 		// Without this a report whose resources were all skipped reads as a
 		// clean bill of health rather than a set of findings nothing handled.
 		handler.PrintUnfixedControls(fixhandler.PhasePlanned)
+		skipVerification(fixInfo)
 		return nil
+	}
+
+	// A verification that could not run as the original scan did must say so
+	// before anything is written, not after: before the manifests are changed,
+	// and before the Kustomize output below. Without a fix to apply there is
+	// nothing to verify, so nothing is refused.
+	if fixInfo.Verify && len(resourcesToFix) > 0 {
+		if _, _, err := verificationConfig(handler.RecordedControlsInputs(), fixInfo.ControlsConfig); err != nil {
+			return err
+		}
 	}
 
 	// Helm guidance is print-only — applied to none of the apply/confirm
 	// path below, since we do not auto-edit chart templates or values.yaml.
 	handler.PrintHelmSuggestions(helmSuggestions)
+
+	// A report can hold both manifests and Helm resources, so the Kustomize
+	// output below can be written before writePatch runs. Refuse an unusable
+	// patch destination first, so nothing is written when the export is going
+	// to fail. writePatch checks it again; it does not rely on this.
+	if fixInfo.OutputPatch != "" && len(resourcesToFix) > 0 && !handler.IsClusterReport() {
+		if err := handler.CheckPatchDestination(fixInfo.OutputPatch, resourcesToFix, fixInfo.NoConfirm); err != nil {
+			return err
+		}
+	}
 
 	// Emit Kustomize JSON 6902 patches when --output-kustomize is given.
 	// This is a machine-applicable companion to PrintHelmSuggestions: the
@@ -81,11 +113,19 @@ func (ks *Kubescape) Fix(fixInfo *metav1.FixInfo) error {
 		}
 
 		skipKustomize := false
-		if !fixInfo.NoConfirm && fixhandler.HasEmittableKustomizePatches(helmSuggestions) {
+		kustomizeConfirmed := fixInfo.NoConfirm
+		chartCache := fixhandler.NewChartCache()
+		if !fixInfo.NoConfirm && fixhandler.HasEmittableKustomizePatches(helmSuggestions, chartCache) {
 			if entries, err := os.ReadDir(fixInfo.KustomizeDir); err == nil && len(entries) > 0 {
 				hasKustFile := false
+				plannedFiles := fixhandler.PlannedKustomizeFiles(helmSuggestions, chartCache)
+				plannedMap := make(map[string]bool, len(plannedFiles))
+				for _, pf := range plannedFiles {
+					plannedMap[pf] = true
+				}
 				for _, e := range entries {
-					if e.Name() == "kustomization.yaml" || e.Name() == "base.yaml" {
+					name := e.Name()
+					if name == "kustomization.yaml" || name == "base.yaml" || plannedMap[name] || strings.HasSuffix(name, "-patch.yaml") {
 						hasKustFile = true
 						break
 					}
@@ -95,9 +135,11 @@ func (ks *Kubescape) Fix(fixInfo *metav1.FixInfo) error {
 					if isTerminal(fd) || isCygwinTerminal(fd) {
 						fmt.Fprintf(os.Stderr, "Directory %q already contains Kustomize files. Overwrite? [y/N]: ", fixInfo.KustomizeDir)
 						var resp string
-						if _, err := fmt.Fscanln(os.Stdin, &resp); err != nil || strings.ToLower(strings.TrimSpace(resp)) != "y" {
+						if _, err := fmt.Fscanln(os.Stdin, &resp); err != nil || !isAffirmative(resp) {
 							logger.L().Info("Kustomize patch generation cancelled by user.")
 							skipKustomize = true
+						} else {
+							kustomizeConfirmed = true
 						}
 					} else {
 						return fmt.Errorf("directory %q already contains Kustomize files; pass --no-confirm to overwrite them", fixInfo.KustomizeDir)
@@ -107,7 +149,7 @@ func (ks *Kubescape) Fix(fixInfo *metav1.FixInfo) error {
 		}
 
 		if !skipKustomize {
-			emitRes, err := fixhandler.EmitKustomizePatch(helmSuggestions, fixInfo.KustomizeDir)
+			emitRes, err := fixhandler.EmitKustomizePatch(helmSuggestions, fixInfo.KustomizeDir, fixhandler.WithOverwrite(kustomizeConfirmed), fixhandler.WithChartCache(chartCache))
 			if err != nil {
 				logger.L().Error("failed to write Kustomize patches", helpers.Error(err))
 				return fmt.Errorf("failed to write Kustomize patches: %w", err)
@@ -149,6 +191,7 @@ func (ks *Kubescape) Fix(fixInfo *metav1.FixInfo) error {
 		logger.L().Info(noResourcesToFix)
 		// Even with nothing to auto-fix, surface controls that still need manual remediation.
 		handler.PrintUnfixedControls(fixhandler.PhasePlanned)
+		skipVerification(fixInfo)
 		return nil
 	}
 
@@ -171,6 +214,9 @@ func (ks *Kubescape) Fix(fixInfo *metav1.FixInfo) error {
 	// confirmation prompt, which exists to guard in-place edits that this path
 	// never makes.
 	if handler.IsClusterReport() {
+		if fixInfo.OutputPatch != "" {
+			return errors.New("--output-patch exports changes to manifest files, and a cluster scan has none; use --output-dir to write one patched manifest per resource")
+		}
 		if fixInfo.Interactive {
 			handler.PrintExpectedChanges(resourcesToFix)
 		}
@@ -185,6 +231,15 @@ func (ks *Kubescape) Fix(fixInfo *metav1.FixInfo) error {
 			handler.PrintExpectedChanges(resourcesToFix)
 		}
 		return ks.writeFixedCopies(handler, resourcesToFix, fixInfo)
+	}
+
+	// --output-patch exports the same fixes as one unified diff. It sits before
+	// the confirmation prompt for the same reason: no manifest is edited.
+	if fixInfo.OutputPatch != "" {
+		if fixInfo.Interactive {
+			handler.PrintExpectedChanges(resourcesToFix)
+		}
+		return ks.writePatch(handler, resourcesToFix, fixInfo)
 	}
 
 	if fixInfo.Interactive && !fixInfo.NoConfirm {
@@ -204,6 +259,7 @@ func (ks *Kubescape) Fix(fixInfo *metav1.FixInfo) error {
 		if len(acceptedResources) == 0 {
 			logger.L().Info(noChangesApplied)
 			handler.PrintUnfixedControls(fixhandler.PhasePlanned)
+			skipVerification(fixInfo)
 			return nil
 		}
 		resourcesToFix = acceptedResources
@@ -214,6 +270,7 @@ func (ks *Kubescape) Fix(fixInfo *metav1.FixInfo) error {
 		if !fixInfo.NoConfirm && !userConfirmed() {
 			logger.L().Info(noChangesApplied)
 			handler.PrintUnfixedControls(fixhandler.PhasePlanned)
+			skipVerification(fixInfo)
 			return nil
 		}
 	}
@@ -247,10 +304,23 @@ func (ks *Kubescape) Fix(fixInfo *metav1.FixInfo) error {
 		for _, err := range errors {
 			logger.L().Ctx(ks.Context()).Warning("failed to fix resource", helpers.Error(err))
 		}
+		if fixInfo.Verify {
+			logger.L().Info("Verification skipped: not every fix was applied.")
+		}
 		return fmt.Errorf("failed to fix some resources, check the logs for more details")
 	}
 
+	if fixInfo.Verify {
+		return ks.verifyFixes(handler, fixInfo)
+	}
 	return nil
+}
+
+// skipVerification says why --verify did nothing when no fix was applied.
+func skipVerification(fixInfo *metav1.FixInfo) {
+	if fixInfo.Verify {
+		logger.L().Info(noFixesToVerify)
+	}
 }
 
 // writeFixedCopies fixes a file-based report into --output-dir instead of in
@@ -297,6 +367,43 @@ func (ks *Kubescape) writeFixedCopies(handler *fixhandler.FixHandler, resourcesT
 	return nil
 }
 
+// writePatch exports the fixes of a file-based report to --output-patch as one
+// unified diff, leaving every manifest as it is. The destination is checked
+// before the fixes are computed and again before the write, and nothing is
+// written when no manifest would change or when any one fails to be fixed.
+func (ks *Kubescape) writePatch(handler *fixhandler.FixHandler, resourcesToFix []fixhandler.ResourceFixInfo, fixInfo *metav1.FixInfo) error {
+	if err := handler.CheckPatchDestination(fixInfo.OutputPatch, resourcesToFix, fixInfo.NoConfirm); err != nil {
+		return err
+	}
+
+	result, err := handler.BuildPatch(ks.Context(), resourcesToFix)
+	if err != nil {
+		return fmt.Errorf("no patch was written: %w", err)
+	}
+
+	// PhasePlanned, not PhaseApplied: a patch is a proposal. The manifests are
+	// unchanged, and saying "auto-fixed" would claim otherwise.
+	if result.Patch == "" {
+		logger.L().Info("No manifest would change, so no patch was written.")
+		handler.PrintUnfixedControls(fixhandler.PhasePlanned)
+		return nil
+	}
+
+	if err := handler.CheckPatchDestination(fixInfo.OutputPatch, resourcesToFix, fixInfo.NoConfirm); err != nil {
+		return err
+	}
+	if err := fixhandler.WritePatch(fixInfo.OutputPatch, result.Patch); err != nil {
+		return err
+	}
+
+	plannedControls := handler.FixedControlsCount()
+	totalFailed := plannedControls + len(handler.UnfixedControls())
+	logger.L().Info(fmt.Sprintf("Wrote a patch changing %d file(s) and %d resource(s) to %s, covering %d of %d flagged control instances. The original files were not modified.\n  Review it, then apply it from the scanned directory (the repository root inside git) with: git apply %s",
+		result.Files, result.Resources, fixInfo.OutputPatch, plannedControls, totalFailed, fixInfo.OutputPatch))
+	handler.PrintUnfixedControls(fixhandler.PhasePlanned)
+	return nil
+}
+
 func userConfirmed() bool {
 	fd := os.Stdin.Fd()
 	if !isTerminal(fd) && !isCygwinTerminal(fd) {
@@ -336,4 +443,14 @@ func confirm(in io.Reader) bool {
 
 	logger.L().Warning("no valid confirmation received after repeated attempts; treating as declined and applying no changes")
 	return false
+}
+
+// isAffirmative reports whether resp is an affirmative confirmation ("y" or "yes", case-insensitive).
+func isAffirmative(resp string) bool {
+	switch strings.ToLower(strings.TrimSpace(resp)) {
+	case "y", "yes":
+		return true
+	default:
+		return false
+	}
 }

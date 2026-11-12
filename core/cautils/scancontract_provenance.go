@@ -161,6 +161,19 @@ func RecordCachedScanContractRunnerInput(scanInfo *ScanInfo, input reporthandlin
 	})
 }
 
+// RecordCachedScanContractRunnerInputFor replays a cached input for the
+// current scan's getter. Local files with the same contents share a cache
+// entry, so the replayed input names the file this scan selected rather than
+// the one that filled the cache. The digest is the shared contents' digest.
+func RecordCachedScanContractRunnerInputFor(scanInfo *ScanInfo, input reporthandlingv2.ScanContractRunnerInput, source any) {
+	if file, ok := source.(getter.SourceFiler); ok && input.Digest != "" {
+		if path, ok := file.SourceFile(); ok {
+			input.Source = safeContractRunnerInputSource(path)
+		}
+	}
+	RecordCachedScanContractRunnerInput(scanInfo, input)
+}
+
 func safeContractRunnerInputSource(path string) string {
 	clean := filepath.Clean(path)
 	if filepath.IsAbs(clean) {

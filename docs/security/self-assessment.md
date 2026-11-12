@@ -101,11 +101,11 @@ Sources: [scan flags and report handling](https://github.com/kubescape/kubescape
 
 ### ksserver API
 
-ksserver exposes HTTP API routes for integrations. `KS_API_TOKEN` enables optional bearer-token authentication; the in-cluster deployment can run without it. TLS is configured when both `KS_CERT_FILE` and `KS_KEY_FILE` are supplied. Health and OpenAPI endpoints have their own exposure behavior.
+ksserver exposes HTTP API routes for integrations. Every `/v1/*` route except `/v1/metrics` requires a Kubernetes service-account token, validated with a TokenReview and authorized by RBAC; `KS_API_AUTH_DISABLED=true` turns this off. TLS is configured when both `KS_CERT_FILE` and `KS_KEY_FILE` are supplied. Health and OpenAPI endpoints have their own exposure behavior.
 
-**Threat assessment:** An accidentally network-reachable instance without a token or TLS can expose API operations and data to callers on that network. Likelihood depends on service, ingress, and network policy configuration. Impact depends on reachable routes and the service account's cluster access.
+**Threat assessment:** An accidentally network-reachable instance without TLS, or with authentication disabled, can expose API operations and data to callers on that network. Likelihood depends on service, ingress, and network policy configuration. Impact depends on reachable routes and the service account's cluster access.
 
-**Controls and residual risk:** Restrict network reachability and Kubernetes permissions. Configure a token and TLS when callers cross a boundary that requires them, and verify ingress termination, health paths, and documentation routes in the actual deployment. Optional authentication and TLS do not establish that all routes or upstream proxies are correctly protected.
+**Controls and residual risk:** Restrict network reachability and Kubernetes permissions. Callers must present a Kubernetes service-account token that the RBAC rules for `scans` and `scanresults` authorize; keep `KS_API_AUTH_DISABLED` unset unless the service is unreachable by untrusted workloads. TLS remains a follow-up: configure it when callers cross a boundary that requires it, and verify ingress termination, health paths, and documentation routes in the actual deployment. Authentication and TLS do not establish that upstream proxies are correctly protected, and the open routes (probes, OpenAPI UI, `/v1/metrics`) stay reachable without a token.
 
 Sources: [ksserver setup](https://github.com/kubescape/kubescape/blob/db78f2539b02eca751f7aaa155443f28a31f6de5/httphandler/listener/setup.go), [ksserver trust boundary documentation](https://github.com/kubescape/kubescape/blob/db78f2539b02eca751f7aaa155443f28a31f6de5/httphandler/README.md), [authentication change #3461](https://github.com/kubescape/kubescape/pull/3461).
 

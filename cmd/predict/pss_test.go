@@ -1,9 +1,11 @@
 package predict
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -29,6 +31,107 @@ func TestGetPredictCmd(t *testing.T) {
 	assert.NotNil(t, pssSubCmd.Flags().Lookup("verbose"))
 }
 
+func TestGetPredictCmd_RejectsUnexpectedArgs(t *testing.T) {
+	t.Run("args validation", func(t *testing.T) {
+		tests := []struct {
+			name        string
+			args        []string
+			wantErr     bool
+			errContains string
+		}{
+			{
+				name:    "no arguments is accepted",
+				args:    []string{},
+				wantErr: false,
+			},
+			{
+				name:        "unexpected single argument is rejected",
+				args:        []string{"unexpected"},
+				wantErr:     true,
+				errContains: `unknown command "unexpected" for "predict"`,
+			},
+			{
+				name:        "multiple unexpected arguments rejected on first unknown command",
+				args:        []string{"foo", "bar"},
+				wantErr:     true,
+				errContains: `unknown command "foo" for "predict"`,
+			},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				cmd := GetPredictCmd()
+				err := cmd.Args(cmd, tt.args)
+				if tt.wantErr {
+					require.Error(t, err)
+					assert.Contains(t, err.Error(), tt.errContains)
+				} else {
+					require.NoError(t, err)
+				}
+			})
+		}
+	})
+
+	t.Run("command execution", func(t *testing.T) {
+		tests := []struct {
+			name        string
+			args        []string
+			wantErr     bool
+			errContains string
+			outContains string
+		}{
+			{
+				name:        "no arguments displays help without error",
+				args:        []string{},
+				wantErr:     false,
+				outContains: "Predict which workloads would fail or break under security policy",
+			},
+			{
+				name:        "unexpected argument fails execution",
+				args:        []string{"unexpected"},
+				wantErr:     true,
+				errContains: `unknown command "unexpected" for "predict"`,
+			},
+			{
+				name:        "multiple unexpected arguments fail execution",
+				args:        []string{"foo", "bar"},
+				wantErr:     true,
+				errContains: `unknown command "foo" for "predict"`,
+			},
+			{
+				name:        "valid subcommand pss routes normally",
+				args:        []string{"pss", "--help"},
+				wantErr:     false,
+				outContains: "predict pss [<path>.../`-`] [flags]",
+			},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				cmd := GetPredictCmd()
+				cmd.SilenceErrors = true
+				cmd.SilenceUsage = true
+
+				var out bytes.Buffer
+				cmd.SetArgs(tt.args)
+				cmd.SetOut(&out)
+				cmd.SetErr(&out)
+
+				err := cmd.Execute()
+				if tt.wantErr {
+					require.Error(t, err)
+					assert.Contains(t, err.Error(), tt.errContains)
+				} else {
+					require.NoError(t, err)
+					if tt.outContains != "" {
+						assert.Contains(t, out.String(), tt.outContains)
+					}
+				}
+			})
+		}
+	})
+}
+
 func TestRunPSS_FlagValidation(t *testing.T) {
 	ctx := context.Background()
 
@@ -42,6 +145,12 @@ func TestRunPSS_FlagValidation(t *testing.T) {
 		flags := &pssFlags{level: "Restricted", format: "invalid-fmt"}
 		err := runPSS(ctx, flags, []string{"some/file.yaml"})
 		assert.ErrorContains(t, err, "unsupported format")
+	})
+
+	t.Run("empty format", func(t *testing.T) {
+		flags := &pssFlags{level: "Restricted", format: "   "}
+		err := runPSS(ctx, flags, []string{"some/file.yaml"})
+		assert.ErrorContains(t, err, "format cannot be empty")
 	})
 
 	t.Run("cluster mode without namespace", func(t *testing.T) {
@@ -388,4 +497,59 @@ func TestFilterWorkloads(t *testing.T) {
 	// Non-matching
 	filtered = filterWorkloads(workloads, "non-existent")
 	assert.Empty(t, filtered)
+}
+
+func TestPSSCmd_HonorsCommandOutputWriter(t *testing.T) {
+	tmpDir := t.TempDir()
+	manifest := filepath.Join(tmpDir, "pod.yaml")
+	require.NoError(t, os.WriteFile(manifest, []byte(`
+apiVersion: v1
+kind: Pod
+metadata:
+  name: test-pod
+  namespace: test-ns
+spec:
+  containers:
+  - name: c1
+    image: nginx
+`), 0o600))
+
+	cmd := getPSSCmd()
+	cmd.SilenceErrors = true
+	cmd.SilenceUsage = true
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetArgs([]string{manifest, "-f", "json"})
+
+	_ = cmd.Execute()
+	assert.Contains(t, buf.String(), `"namespace": "test-ns"`)
+}
+
+func TestPSSCmd_FormatNormalization(t *testing.T) {
+	tmpDir := t.TempDir()
+	manifest := filepath.Join(tmpDir, "pod.yaml")
+	require.NoError(t, os.WriteFile(manifest, []byte(`
+apiVersion: v1
+kind: Pod
+metadata:
+  name: test-pod
+spec:
+  containers:
+  - name: c1
+    image: nginx
+`), 0o600))
+
+	formats := []string{"JSON", "Json", " json ", " TABLE ", "table", " Pretty-Printer "}
+	for _, f := range formats {
+		t.Run("format_"+strings.TrimSpace(f), func(t *testing.T) {
+			cmd := getPSSCmd()
+			cmd.SilenceErrors = true
+			cmd.SilenceUsage = true
+			var buf bytes.Buffer
+			cmd.SetOut(&buf)
+			cmd.SetArgs([]string{manifest, "-f", f})
+			_ = cmd.Execute()
+			assert.NotEmpty(t, buf.String())
+		})
+	}
 }

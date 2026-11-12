@@ -24,8 +24,9 @@ import (
 type Collector struct {
 	collectortrace.UnimplementedTraceServiceServer
 
-	server   *grpc.Server
-	endpoint string
+	server    *grpc.Server
+	endpoint  string
+	closeOnce sync.Once
 
 	mu                 sync.Mutex
 	spans              []*tracepb.Span
@@ -58,13 +59,23 @@ func Start() (*Collector, error) {
 // Endpoint is the host:port to pass to --otel-endpoint.
 func (c *Collector) Endpoint() string { return c.endpoint }
 
-func (c *Collector) Close() { c.server.Stop() }
+// Close gracefully stops the server and waits for in-flight exports to finish.
+func (c *Collector) Close() { c.closeOnce.Do(c.server.GracefulStop) }
+
+// Reset clears all collected spans, metrics, and resource attributes.
+func (c *Collector) Reset() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.spans = nil
+	c.metrics = nil
+	c.resourceAttributes = nil
+}
 
 func (c *Collector) Export(_ context.Context, req *collectortrace.ExportTraceServiceRequest) (*collectortrace.ExportTraceServiceResponse, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	for _, resourceSpans := range req.GetResourceSpans() {
-		c.resourceAttributes = resourceSpans.GetResource().GetAttributes()
+		c.setResourceAttributes(resourceSpans.GetResource().GetAttributes())
 		for _, scopeSpans := range resourceSpans.GetScopeSpans() {
 			c.spans = append(c.spans, scopeSpans.GetSpans()...)
 		}
@@ -76,12 +87,16 @@ func (c *Collector) addMetrics(req *collectormetrics.ExportMetricsServiceRequest
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	for _, resourceMetrics := range req.GetResourceMetrics() {
-		if len(c.resourceAttributes) == 0 {
-			c.resourceAttributes = resourceMetrics.GetResource().GetAttributes()
-		}
+		c.setResourceAttributes(resourceMetrics.GetResource().GetAttributes())
 		for _, scopeMetrics := range resourceMetrics.GetScopeMetrics() {
 			c.metrics = append(c.metrics, scopeMetrics.GetMetrics()...)
 		}
+	}
+}
+
+func (c *Collector) setResourceAttributes(attributes []*commonpb.KeyValue) {
+	if len(c.resourceAttributes) == 0 && len(attributes) > 0 {
+		c.resourceAttributes = append([]*commonpb.KeyValue(nil), attributes...)
 	}
 }
 
@@ -187,8 +202,8 @@ func (c *Collector) HistogramSum(name string, want map[string]string) (uint64, f
 	return count, sum
 }
 
-// ResourceAttribute returns a string-valued resource attribute, or "" when the
-// exported resource did not carry it.
+// ResourceAttribute returns a string-valued attribute from the first non-empty
+// resource received, or "" when no exported resource carried it.
 func (c *Collector) ResourceAttribute(key string) string {
 	c.mu.Lock()
 	defer c.mu.Unlock()

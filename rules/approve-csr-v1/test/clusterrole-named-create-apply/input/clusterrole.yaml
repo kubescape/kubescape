@@ -1,0 +1,18 @@
+# create and patch are both narrowed to one name, which is enough to create
+# that CSR through server-side apply: the API server authorizes the create it
+# performs with the object's name.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: named-csr-apply
+rules:
+- apiGroups: ["certificates.k8s.io"]
+  resources: ["certificatesigningrequests"]
+  resourceNames: ["minted"]
+  verbs: ["create", "patch", "get"]
+- apiGroups: ["certificates.k8s.io"]
+  resources: ["certificatesigningrequests/approval"]
+  verbs: ["update"]
+- apiGroups: ["certificates.k8s.io"]
+  resources: ["signers"]
+  verbs: ["approve"]

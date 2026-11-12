@@ -1,6 +1,8 @@
 package v1alpha1
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -52,6 +54,65 @@ func testOptions() LoadOptions {
 	}
 }
 
+func TestLoadRejectsNullStringListEntries(t *testing.T) {
+	for _, field := range []struct {
+		name string
+		old  string
+		new  string
+	}{
+		{"frameworks", "frameworks: [nsa]", "frameworks: [null]"},
+		{"controls", "frameworks: [nsa]", "controls: [null]"},
+		{"include namespaces", "excludeNamespaces: [kube-system]", "includeNamespaces: [null]"},
+		{"exclude namespaces", "excludeNamespaces: [kube-system]", "excludeNamespaces: [null]"},
+		{"formats", "formats: [pretty-printer]", "formats: [null]"},
+	} {
+		t.Run(field.name, func(t *testing.T) {
+			for _, entry := range []string{"null", "~", "", "json, null", "&empty null, *empty"} {
+				t.Run(entry, func(t *testing.T) {
+					// A blank block-sequence entry is also a YAML null.
+					replacement := strings.Replace(field.new, "[null]", "["+entry+"]", 1)
+					if entry == "" {
+						replacement = strings.Replace(field.new, "[null]", "\n          -", 1)
+					}
+					input := strings.Replace(validContract, field.old, replacement, 1)
+					_, err := Load([]byte(input), testOptions())
+					require.ErrorContains(t, err, "null entry")
+				})
+			}
+		})
+	}
+}
+
+func TestLoadPreservesExplicitEmptyStringLists(t *testing.T) {
+	input := strings.ReplaceAll(validContract, "frameworks: [nsa]", "frameworks: []\n        controls: []")
+	input = strings.ReplaceAll(input, "excludeNamespaces: [kube-system]", "includeNamespaces: []\n        excludeNamespaces: []")
+	input = strings.ReplaceAll(input, "formats: [json, sarif]", "formats: []")
+	options := testOptions()
+	options.ContractName = "ci"
+	selected, err := Load([]byte(input), options)
+	require.NoError(t, err)
+	// Explicit empty lists must remain distinct from omitted fields.
+	require.NotNil(t, selected.Contract.Policy.Frameworks)
+	assert.Empty(t, *selected.Contract.Policy.Frameworks)
+	require.NotNil(t, selected.Contract.Policy.Controls)
+	assert.Empty(t, *selected.Contract.Policy.Controls)
+	require.NotNil(t, selected.Contract.Scope.IncludeNamespaces)
+	assert.Empty(t, *selected.Contract.Scope.IncludeNamespaces)
+	require.NotNil(t, selected.Contract.Scope.ExcludeNamespaces)
+	assert.Empty(t, *selected.Contract.Scope.ExcludeNamespaces)
+	require.NotNil(t, selected.Contract.Output.Formats)
+	assert.Empty(t, *selected.Contract.Output.Formats)
+}
+
+func TestLoadRejectsAliasToNullStringListEntry(t *testing.T) {
+	input := strings.Replace(validContract, "defaultContract: developer", "defaultContract: &empty null", 1)
+	input = strings.Replace(input, "frameworks: [nsa]", "frameworks: [*empty]", 1)
+	options := testOptions()
+	options.ContractName = "developer"
+	_, err := Load([]byte(input), options)
+	require.ErrorContains(t, err, "null entry")
+}
+
 func TestLoadSelectsAndDigestsContract(t *testing.T) {
 	selected, err := Load([]byte(validContract), testOptions())
 	require.NoError(t, err)
@@ -61,7 +122,7 @@ func TestLoadSelectsAndDigestsContract(t *testing.T) {
 	assert.Regexp(t, `^sha256:[0-9a-f]{64}$`, selected.ContractDigest)
 	require.NotNil(t, selected.Contract.Policy)
 	require.NotNil(t, selected.Contract.Policy.Frameworks)
-	assert.Equal(t, []string{"nsa"}, *selected.Contract.Policy.Frameworks)
+	assert.Equal(t, []string{"nsa"}, []string(*selected.Contract.Policy.Frameworks))
 }
 
 func TestLoadContractOverride(t *testing.T) {
@@ -99,6 +160,15 @@ func TestLoadRejectsNewerMinimumVersion(t *testing.T) {
 	_, err := Load([]byte(input), options)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "requires Kubescape v4.1.0 or newer")
+}
+
+func TestLoadAcceptsMinimumVersionEqualToRunningVersion(t *testing.T) {
+	options := testOptions()
+	input := strings.Replace(validContract, "v4.0.0", options.RunningVersion, 1)
+
+	selected, err := Load([]byte(input), options)
+	require.NoError(t, err)
+	assert.Equal(t, options.RunningVersion, selected.MinimumKubescapeVersion)
 }
 
 func TestLoadSkipsCompatibilityForNonReleaseBuilds(t *testing.T) {
@@ -185,6 +255,8 @@ func TestLoadRejectsInvalidContractValues(t *testing.T) {
 		{"unknown format", "formats: [json, sarif]", "formats: [json, xml]", "unsupported format"},
 		{"unknown severity", "severityAtLeast: high", "severityAtLeast: urgent", "unsupported; supported severities"},
 		{"negative timeout", "controlTimeout: 30s", "controlTimeout: -1s", "must be zero or positive"},
+		{"control timeout equals scan timeout", "scanTimeout: 10m\n        controlTimeout: 30s", "scanTimeout: 10m\n        controlTimeout: 10m", "controlTimeout must be lower than scanTimeout"},
+		{"control timeout exceeds scan timeout", "scanTimeout: 10m\n        controlTimeout: 30s", "scanTimeout: 10m\n        controlTimeout: 11m", "controlTimeout must be lower than scanTimeout"},
 		{"both namespace scopes", "excludeNamespaces: [kube-system]", "includeNamespaces: [default]\n        excludeNamespaces: [kube-system]", "cannot both be set"},
 		{"unknown degradation mode", "degradedPolicyInput: fail", "degradedPolicyInput: warn", "supported values: allow, fail"},
 	}
@@ -195,5 +267,52 @@ func TestLoadRejectsInvalidContractValues(t *testing.T) {
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), tt.want)
 		})
+	}
+}
+
+func TestLoadFile_Valid(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "contract.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(validContract), 0o600))
+
+	selected, err := LoadFile(path, testOptions())
+	require.NoError(t, err)
+	require.NotNil(t, selected)
+	assert.Equal(t, "payments-service", selected.Metadata.Name)
+	assert.Equal(t, "developer", selected.ContractName)
+}
+
+func TestLoadFile_EmptyFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "empty.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(""), 0o600))
+
+	_, err := LoadFile(path, testOptions())
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "contract document is empty")
+}
+
+func TestLoadFile_OversizedFileRejected(t *testing.T) {
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "oversized.yaml")
+	f, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY, 0o600)
+	require.NoError(t, err)
+	require.NoError(t, f.Truncate(maxContractBytes+1))
+	require.NoError(t, f.Close())
+
+	_, err = LoadFile(filePath, testOptions())
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrContractTooLarge)
+}
+
+func TestLoadFile_DirectoryRejected(t *testing.T) {
+	_, err := LoadFile(t.TempDir(), testOptions())
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "is a directory, not a file")
+}
+
+func TestLoadFile_NonRegularFileRejected(t *testing.T) {
+	if _, err := os.Stat("/dev/null"); err == nil {
+		_, err := LoadFile("/dev/null", testOptions())
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrContractNotRegular)
 	}
 }

@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"reflect"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -99,7 +101,17 @@ func normalizeForPathExtraction(obj map[string]any) map[string]any {
 	return normalized
 }
 
+// extractValueAtPath is extractValue for an object that carries its own kind,
+// as every scanned Kubernetes object does.
 func extractValueAtPath(obj map[string]any, path string) (string, bool) {
+	kind, _ := obj["kind"].(string)
+	return extractValue(kind, obj, path)
+}
+
+// extractValue resolves path against obj and returns the value as text. A value
+// the scan scrubbed reads as redactedValue (see maskScrubbed); nothing else is
+// changed, so this is the variant for output where --show-secrets is set.
+func extractValue(kind string, obj map[string]any, path string) (string, bool) {
 	if len(obj) == 0 || path == "" {
 		return "", false
 	}
@@ -114,7 +126,22 @@ func extractValueAtPath(obj map[string]any, path string) (string, bool) {
 	if !ok {
 		return "", false
 	}
-	return anyToString(cur)
+	masked, _ := maskScrubbed(kind, segments, cur)
+	return anyToString(masked)
+}
+
+// pathResolves reports whether path selects something in obj, without reading
+// the value. It is for callers that only need to know the field exists.
+func pathResolves(obj map[string]any, path string) bool {
+	if len(obj) == 0 || path == "" {
+		return false
+	}
+	segments, err := pathparse.ParsePath(path)
+	if err != nil || len(segments) == 0 {
+		return false
+	}
+	_, ok := resolveSegments(obj, segments)
+	return ok
 }
 
 // extractRedactedValueAtPath is extractValueAtPath for output that must not
@@ -138,7 +165,261 @@ func extractRedactedValueAtPath(kind string, obj map[string]any, path string) (s
 	if !ok {
 		return "", false
 	}
+	// A path naming one element of args or command reads a single string, but
+	// whether that string is a credential can depend on the element before it
+	// ("--token" followed by its value), so it is redacted in the context of its
+	// list.
+	if last := segments[len(segments)-1]; last.Index >= 0 && isCommandLineSegment(last) {
+		parent := slices.Clone(segments)
+		parent[len(parent)-1].Index = -1
+		if list, found := resolveSegments(obj, parent); found {
+			if args, isList := list.([]any); isList && last.Index < len(args) {
+				cur = redactCommandLine(args)[last.Index]
+			}
+		}
+	}
 	return anyToString(redactSensitiveDescendants(kind, segments, cur))
+}
+
+// scrubbedPlaceholder is the text the scan writes over the contents of Secret
+// and ConfigMap data and over container environment variable values before any
+// output is built. The original is gone by then, so a path that resolves to it
+// has no value to show, and printing the placeholder would present it as the
+// field's real value. The literal is repeated here, and not imported, so the
+// printer does not depend on the scan code that writes it.
+const scrubbedPlaceholder = "XXXXXX"
+
+// isScrubbedLocation reports whether the scan writes scrubbedPlaceholder at the
+// field that segments select within an object of the given kind. The text alone
+// is not enough to call a value scrubbed: an annotation, a label or an image
+// can hold it too, and that is a genuine value that must be shown. The places
+// are the ones the scan scrubs:
+//   - every entry of a Secret's data and stringData;
+//   - every entry of a ConfigMap's data and binaryData;
+//   - the value of a container, init container or ephemeral container
+//     environment variable, at the PodSpec location of the kind: spec for a
+//     Pod, spec.template.spec for a Deployment, and so on (podSpecPrefixes).
+//
+// The environment variable has to sit at that exact location. The scan finds a
+// pod's containers by the kind's PodSpec path, so a field that only ends in
+// containers[N].env[N].value, such as a custom resource's
+// spec.history.containers[0].env[0].value, is not scrubbed and holds a genuine
+// value. A kind that podSpecPrefixes does not list is left unmasked.
+func isScrubbedLocation(kind string, segments []pathSegment) bool {
+	switch kind {
+	case "Secret":
+		return len(segments) >= 2 && (segments[0].Key == "data" || segments[0].Key == "stringData")
+	case "ConfigMap":
+		return len(segments) >= 2 && (segments[0].Key == "data" || segments[0].Key == "binaryData")
+	}
+	prefix, ok := podSpecPrefixes[kind]
+	if !ok || len(segments) != len(prefix)+3 || !equalParentPath(segments[:len(prefix)], prefix) {
+		return false
+	}
+	switch containers := segments[len(prefix)]; containers.Key {
+	case "containers", "initContainers", "ephemeralContainers":
+		return containers.Index >= 0 && isContainerEnvValue(segments)
+	}
+	return false
+}
+
+// maskScrubbed returns v with each scrubbedPlaceholder that the scan wrote
+// replaced by redactedValue, so evidence reads "[redacted]" where a value was
+// removed, and reports whether it changed anything. segments is where v sits in
+// the object of the given kind. It applies with --show-secrets too: that flag
+// cannot bring back a value the scan has already removed.
+//
+// The object belongs to the scan, so it is never modified. A subtree with
+// nothing to mask is returned as it is, not copied, so a path that selects a
+// large subtree costs a read of it and no allocation unless something changes.
+func maskScrubbed(kind string, segments []pathSegment, v any) (any, bool) {
+	switch val := v.(type) {
+	case string:
+		if val == scrubbedPlaceholder && isScrubbedLocation(kind, segments) {
+			return redactedValue, true
+		}
+		return v, false
+	case map[string]any:
+		var out map[string]any
+		for key, child := range val {
+			childPath := append(slices.Clone(segments), pathSegment{Key: key, Index: -1})
+			masked, changed := maskScrubbed(kind, childPath, child)
+			if !changed {
+				continue
+			}
+			if out == nil {
+				out = maps.Clone(val)
+			}
+			out[key] = masked
+		}
+		if out == nil {
+			return v, false
+		}
+		return out, true
+	case []any:
+		var out []any
+		for i, child := range val {
+			childPath := slices.Clone(segments)
+			if last := len(childPath) - 1; last >= 0 && childPath[last].Index < 0 {
+				childPath[last].Index = i
+			} else {
+				childPath = append(childPath, pathSegment{Index: i})
+			}
+			masked, changed := maskScrubbed(kind, childPath, child)
+			if !changed {
+				continue
+			}
+			if out == nil {
+				out = slices.Clone(val)
+			}
+			out[i] = masked
+		}
+		if out == nil {
+			return v, false
+		}
+		return out, true
+	default:
+		return v, false
+	}
+}
+
+// isCommandLineSegment reports whether a path segment names a container's args
+// or command: the fields that hold a command line, where a credential is
+// written into the value ("--<name>=<value>") rather than under a field named
+// for it.
+func isCommandLineSegment(seg pathSegment) bool {
+	return seg.Key == "args" || seg.Key == "command"
+}
+
+// credentialFlagName reports whether a command-line flag or KEY=VALUE key
+// names a credential. It reads the name the way isSensitiveSegments reads a
+// field name: separators and leading dashes are dropped, so --db-url, -token
+// and API_KEY all classify like dbUrl, token and apiKey.
+func credentialFlagName(flag string) bool {
+	name := normalizeFieldName(strings.TrimLeft(flag, "-"))
+	if name == "" {
+		return false
+	}
+	for _, pattern := range secretFieldPatterns {
+		if strings.Contains(name, pattern) {
+			return true
+		}
+	}
+	return false
+}
+
+// redactCommandLine returns a copy of an args or command list with credential
+// values replaced by redactedValue. Field-name redaction cannot see these: the
+// list elements have no names, and the credential is inside the string.
+//
+// Four spellings are covered:
+//   - "--<credential>=<value>" (or KEY=VALUE): the part after the first "="
+//     is replaced when the part before it names a credential.
+//   - "--<flag>=<name>=<value>", as in "--env=KEY=VALUE" or helm's
+//     "--set=a=1,b=2": when the outer flag is not a credential, each
+//     assignment in its value is checked the same way, so the credential
+//     inside is replaced and the rest of the argument is kept.
+//   - "--<credential> <value>" written as one element: the value is replaced.
+//   - "--<credential>", "<value>" as two elements: the element after a
+//     credential flag with no value of its own is replaced.
+//
+// A password in a URL ("scheme://user:<password>@host") is replaced wherever it
+// appears.
+//
+// The element after a bare credential flag is masked even when it starts with
+// "-", because a value can ("--password", "-secret") and the two readings cannot
+// be told apart. That element is then still read as a flag in its own right, so
+// the one after it is masked too. The cost is that a credential-named flag
+// that takes no value hides the flag that follows it.
+//
+// It does not parse shell, so a credential inside a larger string such as a
+// "sh -c" script is not recognised, and it only knows a credential by its name,
+// so an opaque value under a flag that is not named like one is not hidden.
+func redactCommandLine(args []any) []any {
+	out := make([]any, len(args))
+	copy(out, args)
+	// masked marks an element already replaced whole as the value of the flag
+	// before it. It must not be rewritten from its own text afterwards:
+	// "--token", "a=b" would otherwise have its mask overwritten with "a=b".
+	masked := make([]bool, len(args))
+	for i, arg := range args {
+		s, ok := arg.(string)
+		if !ok {
+			continue
+		}
+		if !masked[i] {
+			out[i] = redactArgument(s)
+		}
+		if i+1 < len(args) && isBareCredentialFlag(s) {
+			if _, isString := args[i+1].(string); isString {
+				out[i+1] = redactedValue
+				masked[i+1] = true
+			}
+		}
+	}
+	return out
+}
+
+// isBareCredentialFlag reports whether s is a credential-named flag that has no
+// value of its own, so the next element is its value.
+func isBareCredentialFlag(s string) bool {
+	return strings.HasPrefix(s, "-") &&
+		!strings.ContainsAny(s, "= \t") &&
+		credentialFlagName(s)
+}
+
+// urlPassword matches a URL's "user:password@" up to the last "@" of its
+// authority. The password may itself contain "@" ("jane:p@ssword@host"), so it
+// is matched greedily and the match ends at the last "@" before the authority
+// ends. The authority ends at "/", "?" or "#", which the password therefore
+// cannot cross: an "@" in a path or query is not part of the user information.
+var urlPassword = regexp.MustCompile(`(://[^/?#\s:@]*:)[^/?#\s]+@`)
+
+// redactArgument masks a credential inside a single argument.
+func redactArgument(s string) string {
+	s = urlPassword.ReplaceAllString(s, "${1}"+redactedValue+"@")
+
+	// "--flag value" written as one element. The space comes before any "=", so
+	// the first "=" belongs to the value, not to the flag.
+	if strings.HasPrefix(s, "-") {
+		sp := strings.IndexAny(s, " \t")
+		eq := strings.Index(s, "=")
+		if sp > 0 && (eq < 0 || sp < eq) {
+			flag, value := s[:sp], strings.TrimLeft(s[sp:], " \t")
+			if credentialFlagName(flag) {
+				return flag + " " + redactedValue
+			}
+			return flag + " " + redactAssignment(value)
+		}
+	}
+	if strings.Index(s, "=") > 0 {
+		return redactAssignment(s)
+	}
+	return s
+}
+
+// redactAssignment masks the credential in a "name=value" string. When the
+// name is a credential the whole value goes. Otherwise the value may itself
+// hold assignments ("--env=KEY=VALUE", "--set=a=1,b=2"), so each comma-separated
+// part is checked in turn and only a credential-named one is replaced.
+// Every recursive call is on a strictly shorter string, so it terminates.
+func redactAssignment(s string) string {
+	eq := strings.Index(s, "=")
+	if eq <= 0 {
+		return s
+	}
+	name, value := s[:eq], s[eq+1:]
+	if credentialFlagName(name) {
+		return name + "=" + redactedValue
+	}
+	if !strings.Contains(value, "=") {
+		return s
+	}
+	parts := strings.Split(value, ",")
+	for i, part := range parts {
+		parts[i] = redactAssignment(part)
+	}
+	return name + "=" + strings.Join(parts, ",")
 }
 
 // redactSensitiveDescendants returns a copy of v, the value found at segments,
@@ -163,6 +444,9 @@ func redactSensitiveDescendants(kind string, segments []pathSegment, v any) any 
 		}
 		return out
 	case []any:
+		if last := len(segments) - 1; last >= 0 && segments[last].Index < 0 && isCommandLineSegment(segments[last]) {
+			val = redactCommandLine(val)
+		}
 		out := make([]any, len(val))
 		for i, child := range val {
 			childPath := slices.Clone(segments)
@@ -180,6 +464,13 @@ func redactSensitiveDescendants(kind string, segments []pathSegment, v any) any 
 			out[i] = redactSensitiveDescendants(kind, childPath, child)
 		}
 		return out
+	case string:
+		// The scrub is applied in this traversal and not in a second one, so a
+		// path that selects a large subtree is read and copied once.
+		if val == scrubbedPlaceholder && isScrubbedLocation(kind, segments) {
+			return redactedValue
+		}
+		return v
 	default:
 		return v
 	}
@@ -568,7 +859,7 @@ func enrichedPathsForField(control *resourcesresults.ResourceAssociatedControl, 
 				continue
 			}
 			if !isSensitivePath(kind, p) {
-				if val, ok := extractValueAtPath(obj, p); ok {
+				if val, ok := extractValue(kind, obj, p); ok {
 					paths = append(paths, p+" (current: "+val+")")
 					continue
 				}
@@ -615,13 +906,14 @@ func fixPathsToStringFiltered(control *resourcesresults.ResourceAssociatedContro
 func enrichedPathsForFieldUnredacted(control *resourcesresults.ResourceAssociatedControl, resource workloadinterface.IMetadata, getPath func(armotypes.PosturePaths) string) []string {
 	var paths []string
 	obj := normalizeForPathExtraction(resource.GetObject())
+	kind := resource.GetKind()
 	for j := range control.ResourceAssociatedRules {
 		for k := range control.ResourceAssociatedRules[j].Paths {
 			p := getPath(control.ResourceAssociatedRules[j].Paths[k])
 			if p == "" {
 				continue
 			}
-			if val, ok := extractValueAtPath(obj, p); ok {
+			if val, ok := extractValue(kind, obj, p); ok {
 				paths = append(paths, p+" (current: "+val+")")
 				continue
 			}
@@ -636,20 +928,89 @@ func reviewPathsWithCurrentValuesUnredacted(control *resourcesresults.ResourceAs
 }
 
 func AssistedRemediationPathsWithCurrentValuesFiltered(control *resourcesresults.ResourceAssociatedControl, resource workloadinterface.IMetadata, showSecrets bool) []string {
+	return assistedRemediationPaths(control, resource, showSecrets, false)
+}
+
+// evidencePathsWithCurrentValues is AssistedRemediationPathsWithCurrentValuesFiltered
+// for the terminal --show-evidence view, which additionally reports the
+// current value of each delete path. A delete path names the field that made
+// the control fail, so leaving it bare printed the path an auditor needs to
+// check without the value they need to check it against.
+//
+// It is separate from the exported function on purpose: that one also feeds
+// the HTML, SARIF, GitLab SAST and GitHub Actions printers, and changing it
+// would change four report formats to improve one table.
+func evidencePathsWithCurrentValues(control *resourcesresults.ResourceAssociatedControl, resource workloadinterface.IMetadata, showSecrets bool) []string {
+	return assistedRemediationPaths(control, resource, showSecrets, true)
+}
+
+// assistedRemediationPaths renders a control's fix, delete and review paths as
+// one deduplicated list. deleteValues appends the current value to each delete
+// path; review paths always carry theirs.
+func assistedRemediationPaths(control *resourcesresults.ResourceAssociatedControl, resource workloadinterface.IMetadata, showSecrets, deleteValues bool) []string {
 	kind := resource.GetKind()
-	if showSecrets {
-		// extract values for all paths including sensitive ones — caller explicitly opted in
-		fixPaths := fixPathsToStringFiltered(control, kind, true)
-		deletePaths := deletePathsToString(control)
-		enrichedReview := reviewPathsWithCurrentValuesUnredacted(control, resource)
-		paths := append(fixPaths, append(deletePaths, enrichedReview...)...)
-		return deduplicatePaths(paths)
-	}
-	fixPaths := fixPathsToStringFiltered(control, kind, false)
+	// showSecrets extracts values for all paths including sensitive ones - the
+	// caller explicitly opted in.
+	fixPaths := fixPathsToStringFiltered(control, kind, showSecrets)
 	deletePaths := deletePathsToString(control)
-	enrichedReview := reviewPathsWithCurrentValuesRedacted(control, resource)
+	if deleteValues {
+		deletePaths = deletePathsWithCurrentValues(control, resource, showSecrets)
+	}
+	var enrichedReview []string
+	if showSecrets {
+		enrichedReview = reviewPathsWithCurrentValuesUnredacted(control, resource)
+	} else {
+		enrichedReview = reviewPathsWithCurrentValuesRedacted(control, resource)
+	}
 	paths := append(fixPaths, append(deletePaths, enrichedReview...)...)
 	return deduplicatePaths(paths)
+}
+
+// deletePathsWithCurrentValues is deletePathsToString with " (current: <value>)"
+// appended to each delete path that resolves against the resource's object.
+//
+// Redaction follows the rest of the evidence output. A path that is sensitive
+// by name shows redactedValue, but only when it resolves: an absent field has
+// no value to hide, and "[redacted]" on it would claim one. Any other path is
+// read with extractRedactedValueAtPath, so a delete path that selects an
+// object or list (a whole securityContext, say) has its credential-shaped
+// descendants masked rather than printed. A path that does not resolve stays
+// bare, as it did before.
+func deletePathsWithCurrentValues(control *resourcesresults.ResourceAssociatedControl, resource workloadinterface.IMetadata, showSecrets bool) []string {
+	var paths []string
+	obj := normalizeForPathExtraction(resource.GetObject())
+	kind := resource.GetKind()
+	for j := range control.ResourceAssociatedRules {
+		for k := range control.ResourceAssociatedRules[j].Paths {
+			p := control.ResourceAssociatedRules[j].Paths[k].DeletePath
+			if p == "" {
+				continue
+			}
+			paths = append(paths, p+currentValueSuffix(kind, obj, p, showSecrets))
+		}
+	}
+	return paths
+}
+
+// currentValueSuffix returns " (current: <value>)" for path, or "" when the
+// path does not resolve.
+func currentValueSuffix(kind string, obj map[string]any, path string, showSecrets bool) string {
+	if showSecrets {
+		if val, ok := extractValue(kind, obj, path); ok {
+			return " (current: " + val + ")"
+		}
+		return ""
+	}
+	if isSensitivePath(kind, path) {
+		if pathResolves(obj, path) {
+			return " (current: " + redactedValue + ")"
+		}
+		return ""
+	}
+	if val, ok := extractRedactedValueAtPath(kind, obj, path); ok {
+		return " (current: " + val + ")"
+	}
+	return ""
 }
 
 func enrichedPathsForFieldRedacted(control *resourcesresults.ResourceAssociatedControl, resource workloadinterface.IMetadata, getPath func(armotypes.PosturePaths) string) []string {
@@ -662,15 +1023,7 @@ func enrichedPathsForFieldRedacted(control *resourcesresults.ResourceAssociatedC
 			if p == "" {
 				continue
 			}
-			if isSensitivePath(kind, p) {
-				paths = append(paths, p+" (current: "+redactedValue+")")
-				continue
-			}
-			if val, ok := extractValueAtPath(obj, p); ok {
-				paths = append(paths, p+" (current: "+val+")")
-				continue
-			}
-			paths = append(paths, p)
+			paths = append(paths, p+currentValueSuffix(kind, obj, p, false))
 		}
 	}
 	return paths

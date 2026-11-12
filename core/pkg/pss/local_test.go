@@ -1,6 +1,7 @@
 package pss
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -155,6 +156,47 @@ spec:
 	require.Len(t, objs, 1)
 	assert.Equal(t, "Job", objs[0].GetKind())
 	assert.Equal(t, "batch-job", objs[0].GetName())
+}
+
+type repeatingByteReader struct {
+	byteVal byte
+}
+
+func (r repeatingByteReader) Read(p []byte) (n int, err error) {
+	for i := range p {
+		p[i] = r.byteVal
+	}
+	return len(p), nil
+}
+
+func TestParseLocalWorkloadsFromReader_OversizedInputRejected(t *testing.T) {
+	reader := io.LimitReader(repeatingByteReader{byteVal: ' '}, maxWorkloadBytes+10)
+	_, err := ParseLocalWorkloadsFromReader(reader, "stdin")
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrWorkloadTooLarge)
+	assert.Contains(t, err.Error(), "stdin")
+}
+
+func TestParseLocalWorkloads_OversizedFileRejected(t *testing.T) {
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "oversized.yaml")
+	f, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY, 0o600)
+	require.NoError(t, err)
+	require.NoError(t, f.Truncate(maxWorkloadBytes+1))
+	require.NoError(t, f.Close())
+
+	_, err = ParseLocalWorkloads([]string{filePath})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrWorkloadTooLarge)
+}
+
+func TestParseLocalWorkloads_NonRegularFileRejected(t *testing.T) {
+	// /dev/null is a character device, not a regular file
+	if _, err := os.Stat("/dev/null"); err == nil {
+		_, err := ParseLocalWorkloads([]string{"/dev/null"})
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrWorkloadNotRegular)
+	}
 }
 
 func TestParseLocalWorkloads_ListEnvelopes(t *testing.T) {

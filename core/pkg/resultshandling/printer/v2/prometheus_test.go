@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/anchore/grype/grype/match"
@@ -15,6 +16,7 @@ import (
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer"
+	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
@@ -351,13 +353,78 @@ func TestSetResourcesCountersFromCatalog_DeterministicOrder(t *testing.T) {
 	catalog := cautils.NewMapResourceCatalog(resources)
 	for i := 0; i < 50; i++ {
 		m := &Metrics{}
-		m.setResourcesCountersFromCatalog(catalog, results, &reportsummary.SummaryDetails{})
+		m.setResourcesCountersFromCatalog(catalog, results, &reportsummary.SummaryDetails{}, nil)
 		got := make([]string, 0, len(m.listResources))
 		for _, r := range m.listResources {
 			got = append(got, r.name)
 		}
 		require.Equal(t, want, got, "resource metrics must follow sorted resource ID order")
 	}
+}
+
+// TestImagePrometheusFormat_CountsKEVMatches pins the KEV gauge: per image and
+// severity, how many CVEs are on the CISA KEV catalog, zero included so the
+// series is present for every severity the image has.
+func TestImagePrometheusFormat_CountsKEVMatches(t *testing.T) {
+	newMatch := func(id, severity string, kev bool) match.Match {
+		metadata := &vulnerability.Metadata{ID: id, Severity: severity}
+		if kev {
+			metadata.KnownExploited = []vulnerability.KnownExploited{{CVE: id}}
+		}
+		return match.Match{
+			Package:       grypepkg.Package{ID: grypepkg.ID("pkg-" + id), Name: "pkg-" + id, Version: "1.0.0"},
+			Vulnerability: vulnerability.Vulnerability{Metadata: metadata},
+		}
+	}
+	imageData := []cautils.ImageScanData{{
+		Image:    "nginx:1.17.0",
+		Platform: "linux/amd64",
+		Matches: match.NewMatches(
+			newMatch("CVE-2020-15999", "Medium", true),
+			newMatch("CVE-2026-0001", "Medium", true),
+			newMatch("CVE-2026-0002", "Medium", false),
+			newMatch("CVE-2026-0003", "Critical", false),
+		),
+	}}
+
+	output := NewPrometheusPrinter(false).generateImagePrometheusFormat(imageData).String()
+
+	assert.Contains(t, output, "# TYPE kubescape_image_count_cve_kev gauge\n")
+	assert.Contains(t, output, `kubescape_image_count_cve_kev{image="nginx:1.17.0",platform="linux/amd64",severity="Medium"} 2`+"\n")
+	assert.Contains(t, output, `kubescape_image_count_cve_kev{image="nginx:1.17.0",platform="linux/amd64",severity="Critical"} 0`+"\n")
+	assert.Contains(t, output, `kubescape_image_count_cve{image="nginx:1.17.0",platform="linux/amd64",severity="Medium"} 3`+"\n")
+}
+
+// TestImagePrometheusFormat_CountsFixableMatches pins the fixable gauge: per
+// image and severity, only CVEs whose fix state is "fixed" count. not-fixed,
+// wont-fix and unknown must stay out, so the gauge is not just the CVE total.
+func TestImagePrometheusFormat_CountsFixableMatches(t *testing.T) {
+	newMatch := func(id, severity string, state vulnerability.FixState) match.Match {
+		return match.Match{
+			Package: grypepkg.Package{ID: grypepkg.ID("pkg-" + id), Name: "pkg-" + id, Version: "1.0.0"},
+			Vulnerability: vulnerability.Vulnerability{
+				Fix:      vulnerability.Fix{State: state},
+				Metadata: &vulnerability.Metadata{ID: id, Severity: severity},
+			},
+		}
+	}
+	imageData := []cautils.ImageScanData{{
+		Image:    "nginx:1.17.0",
+		Platform: "linux/amd64",
+		Matches: match.NewMatches(
+			newMatch("CVE-2026-0001", "High", vulnerability.FixStateFixed),
+			newMatch("CVE-2026-0002", "High", vulnerability.FixStateNotFixed),
+			newMatch("CVE-2026-0003", "High", vulnerability.FixStateWontFix),
+			newMatch("CVE-2026-0004", "High", vulnerability.FixStateUnknown),
+			newMatch("CVE-2026-0005", "Low", vulnerability.FixStateNotFixed),
+		),
+	}}
+
+	output := NewPrometheusPrinter(false).generateImagePrometheusFormat(imageData).String()
+
+	assert.Contains(t, output, `kubescape_image_count_cve{image="nginx:1.17.0",platform="linux/amd64",severity="High"} 4`+"\n")
+	assert.Contains(t, output, `kubescape_image_count_cve_fixable{image="nginx:1.17.0",platform="linux/amd64",severity="High"} 1`+"\n")
+	assert.Contains(t, output, `kubescape_image_count_cve_fixable{image="nginx:1.17.0",platform="linux/amd64",severity="Low"} 0`+"\n")
 }
 
 func TestSetImageVulnerabilities_DeterministicSeverityOrder(t *testing.T) {
@@ -508,4 +575,140 @@ func TestSetImageVulnerabilities_DeterministicMultiImageOrder(t *testing.T) {
 		}
 		require.Equal(t, want, got, "multi-image metrics must follow canonical (image, platform, severity) sorted order")
 	}
+}
+
+// duplicateSeries returns every series (metric name plus label set) that occurs
+// more than once in a Prometheus text exposition. Prometheus keeps only one of
+// them and Pushgateway rejects the whole push, while expfmt parses it without
+// complaint, so a parse alone cannot catch this.
+func duplicateSeries(output string) []string {
+	seen := map[string]bool{}
+	var dups []string
+	for _, line := range strings.Split(output, "\n") {
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		series, _, _ := strings.Cut(line, "} ")
+		if seen[series] {
+			dups = append(dups, series+"}")
+		}
+		seen[series] = true
+	}
+	return dups
+}
+
+// TestResourceMetrics_SameObjectInTwoFilesStaysDistinct pins that one object
+// declared in two manifest files (kustomize base and overlay, one copy per
+// environment) yields two distinct series. Both are separate resources in the
+// scan, and without a path label they shared apiVersion, kind, namespace and name.
+func TestResourceMetrics_SameObjectInTwoFilesStaysDistinct(t *testing.T) {
+	newObj := func() workloadinterface.IMetadata {
+		return workloadinterface.NewWorkloadObj(map[string]any{
+			"apiVersion": "apps/v1", "kind": "Deployment",
+			"metadata": map[string]any{"name": "web"},
+		})
+	}
+	control := func(id string, status apis.ScanningStatus) resourcesresults.ResourceAssociatedControl {
+		return resourcesresults.ResourceAssociatedControl{ControlID: id, Status: apis.StatusInfo{InnerStatus: status}}
+	}
+	base := "path=2210625388/api=apps/v1//Deployment/web"
+	prod := "path=1572516384/api=apps/v1//Deployment/web"
+	catalog := cautils.NewMapResourceCatalog(map[string]workloadinterface.IMetadata{base: newObj(), prod: newObj()})
+	results := map[string]resourcesresults.Result{
+		base: {ResourceID: base, AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+			control("C-0057", apis.StatusFailed), control("C-0013", apis.StatusFailed)}},
+		prod: {ResourceID: prod, AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+			control("C-0057", apis.StatusPassed), control("C-0013", apis.StatusPassed)}},
+	}
+	sources := map[string]reporthandling.Source{
+		base: {RelativePath: "base/web.yaml"},
+		prod: {RelativePath: "overlays/prod/web.yaml"},
+	}
+
+	m := &Metrics{}
+	m.setResourcesCountersFromCatalog(catalog, results, &reportsummary.SummaryDetails{}, sources)
+	output := m.String()
+
+	assert.Empty(t, duplicateSeries(output), "output:\n%s", output)
+	assert.Contains(t, output, `kubescape_resource_count_controls_failed{apiVersion="apps/v1",kind="Deployment",namespace="",name="web",path="base/web.yaml"} 2`+"\n")
+	assert.Contains(t, output, `kubescape_resource_count_controls_failed{apiVersion="apps/v1",kind="Deployment",namespace="",name="web",path="overlays/prod/web.yaml"} 0`+"\n")
+	assert.Contains(t, output, `kubescape_resource_count_controls_passed{apiVersion="apps/v1",kind="Deployment",namespace="",name="web",path="overlays/prod/web.yaml"} 2`+"\n")
+}
+
+// TestResourceMetrics_ClusterScanKeepsLabels pins that a scan without source
+// paths, as a live cluster scan is, keeps its resource labels unchanged.
+func TestResourceMetrics_ClusterScanKeepsLabels(t *testing.T) {
+	id := "apps/v1/default/Deployment/web"
+	catalog := cautils.NewMapResourceCatalog(map[string]workloadinterface.IMetadata{
+		id: workloadinterface.NewWorkloadObj(map[string]any{
+			"apiVersion": "apps/v1", "kind": "Deployment",
+			"metadata": map[string]any{"name": "web", "namespace": "default"},
+		}),
+	})
+	results := map[string]resourcesresults.Result{id: {ResourceID: id}}
+
+	m := &Metrics{}
+	m.setResourcesCountersFromCatalog(catalog, results, &reportsummary.SummaryDetails{}, nil)
+	output := m.String()
+
+	assert.Contains(t, output, `kubescape_resource_count_controls_failed{apiVersion="apps/v1",kind="Deployment",namespace="default",name="web"} 0`+"\n")
+	assert.NotContains(t, output, "path=")
+}
+
+// TestResourceMetrics_SubjectWithSeveralBindingsIsOneSeries pins that an RBAC
+// subject granted roles through several bindings yields one series. The scan
+// keeps one resource per subject, binding and role, but the labels only name the
+// subject, and a cluster scan has no path label to tell them apart. Every
+// Kubernetes cluster has such a subject: system:authenticated is bound by the
+// default system:basic-user and system:discovery ClusterRoleBindings.
+func TestResourceMetrics_SubjectWithSeveralBindingsIsOneSeries(t *testing.T) {
+	const rbacGroup = "rbac.authorization.k8s.io"
+	role := func(name string) workloadinterface.IMetadata {
+		return workloadinterface.NewWorkloadObj(map[string]any{
+			"apiVersion": rbacGroup + "/v1", "kind": "ClusterRole",
+			"metadata": map[string]any{"name": name},
+		})
+	}
+	binding := func(name string) workloadinterface.IMetadata {
+		return workloadinterface.NewWorkloadObj(map[string]any{
+			"apiVersion": rbacGroup + "/v1", "kind": "ClusterRoleBinding",
+			"metadata": map[string]any{"name": name},
+			"roleRef":  map[string]any{"apiGroup": rbacGroup, "kind": "ClusterRole", "name": name},
+			"subjects": []any{map[string]any{"apiGroup": rbacGroup, "kind": "Group", "name": "system:authenticated"}},
+		})
+	}
+	vectors, err := reporthandling.AggregateResourcesBySubjects([]workloadinterface.IMetadata{
+		role("system:basic-user"), binding("system:basic-user"),
+		role("system:discovery"), binding("system:discovery"),
+	})
+	require.NoError(t, err)
+	require.Len(t, vectors, 2)
+	require.NotEqual(t, vectors[0].GetID(), vectors[1].GetID(), "the scan must hold them as two resources")
+
+	control := func(id string, status apis.ScanningStatus) resourcesresults.ResourceAssociatedControl {
+		return resourcesresults.ResourceAssociatedControl{ControlID: id, Status: apis.StatusInfo{InnerStatus: status}}
+	}
+	catalog := cautils.NewMapResourceCatalog(map[string]workloadinterface.IMetadata{
+		vectors[0].GetID(): vectors[0],
+		vectors[1].GetID(): vectors[1],
+	})
+	results := map[string]resourcesresults.Result{
+		vectors[0].GetID(): {ResourceID: vectors[0].GetID(), AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+			control("C-0001", apis.StatusFailed), control("C-0002", apis.StatusFailed),
+		}},
+		vectors[1].GetID(): {ResourceID: vectors[1].GetID(), AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+			control("C-0001", apis.StatusFailed), control("C-0002", apis.StatusPassed),
+		}},
+	}
+
+	m := &Metrics{}
+	m.setResourcesCountersFromCatalog(catalog, results, &reportsummary.SummaryDetails{}, nil)
+	output := m.String()
+
+	assert.Empty(t, duplicateSeries(output), "output:\n%s", output)
+	labels := `{apiVersion="` + rbacGroup + `",kind="Group",namespace="",name="system:authenticated"}`
+	// C-0001 fails through both bindings and C-0002 through one, so the subject
+	// fails two controls and passes none.
+	assert.Contains(t, output, "kubescape_resource_count_controls_failed"+labels+" 2\n")
+	assert.Contains(t, output, "kubescape_resource_count_controls_passed"+labels+" 0\n")
 }

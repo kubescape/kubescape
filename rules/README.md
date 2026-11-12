@@ -10,7 +10,8 @@ does not publish it to users.
 
 Each rule directory contains `raw.rego`, `rule.metadata.json`, and test cases
 under `test/<case>/`. A test case has Kubernetes manifests in `input/` and the
-expected rule responses in `expected.json`.
+expected rule responses in `expected.json`. A rule that reads control inputs
+takes them from an optional `data.json` in the case directory.
 
 Run all in-tree fixtures with:
 
@@ -22,6 +23,13 @@ To iterate on one rule, pass its directory instead:
 
 ```sh
 go run . policy test ./rules/<rule-name>
+```
+
+To run only some cases, pass `--run` a regular expression for the
+`<rule>/<case>` names the command prints:
+
+```sh
+go run . policy test ./rules --run '^<rule-name>/<case>$'
 ```
 
 The Go test suite runs the full-directory command, so a pull request fails CI

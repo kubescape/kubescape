@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/url"
 	"os"
@@ -62,6 +63,9 @@ func validateKubeContextsSupported(cmd *cobra.Command, scanInfo *cautils.ScanInf
 	}
 	if len(scanInfo.KubeContexts) == 0 {
 		return nil
+	}
+	if scanInfo.DryRun {
+		return fmt.Errorf("--dry-run cannot be combined with fleet scanning")
 	}
 	switch cmd.Name() {
 	case "scan":
@@ -249,6 +253,9 @@ func printerDestinations(outputPath string, formats []string) []string {
 func validateFleetScanInvocation(scanInfo *cautils.ScanInfo) (map[string]string, error) {
 	if scanInfo.GetScanningContext() != cautils.ContextCluster {
 		return nil, fmt.Errorf("--kube-contexts requires a live-cluster scan: it selects which cluster to connect to, so it can't be combined with scanning local files/directories")
+	}
+	if scanInfo.DryRun {
+		return nil, fmt.Errorf("--dry-run cannot be combined with fleet scanning")
 	}
 	if strings.TrimSpace(scanInfo.Output) == "" {
 		return nil, fmt.Errorf("--kube-contexts requires --output: each context's report is written to its own file, derived from --output, since only one context's results can be printed to stdout at a time")
@@ -454,6 +461,16 @@ func existingFileTarget(path string) (os.FileInfo, bool) {
 // --fleet-report. Failing to write the fleet report is reported through the
 // same error, since a run that scanned everything but could not save the
 // result it was asked for has not done what was asked.
+// fleetReportWriter is the destination writer for the interactive terminal summary.
+// When nil, the summary writes to os.Stdout at print time, preserving stdout redirection.
+var fleetReportWriter io.Writer
+
+// SetFleetReportWriter sets the destination writer for the interactive terminal
+// summary. Pass nil to restore writing to os.Stdout at print time.
+func SetFleetReportWriter(w io.Writer) {
+	fleetReportWriter = w
+}
+
 func fleetScan(baseScanInfo cautils.ScanInfo, ks meta.IKubescape, policyIdentifiers []cautils.PolicyIdentifier, run fleetRunner) error {
 	outputPaths, err := validateFleetScanInvocation(&baseScanInfo)
 	if err != nil {
@@ -531,7 +548,11 @@ func fleetScan(baseScanInfo cautils.ScanInfo, ks meta.IKubescape, policyIdentifi
 		// cluster and then failed to save the result should still tell the
 		// operator what it found, and the summary is the only place they would
 		// otherwise see it.
-		printerv2.PrintFleetReport(os.Stdout, &report)
+		w := fleetReportWriter
+		if w == nil {
+			w = os.Stdout
+		}
+		printerv2.PrintFleetReport(w, &report)
 	}
 
 	// The fleet report is not a context, so its failure is reported beside the
@@ -679,7 +700,7 @@ func newClusterResult(kubeContext string, results *resultshandling.ResultsHandle
 		Duration:  elapsed.String(),
 	}
 
-	if results == nil {
+	if results == nil || results.GetData() == nil || results.GetData().Report == nil {
 		cluster.Status = failureStatus(err)
 		if err != nil {
 			cluster.Error = err.Error()

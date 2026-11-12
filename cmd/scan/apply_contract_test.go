@@ -68,6 +68,16 @@ func executeCapturedScan(t *testing.T, contractBody string, args ...string) (*ca
 	return ks.captured, ks.policies, err
 }
 
+func TestScanContractRejectsNullNamespaces(t *testing.T) {
+	scanInfo, _, err := executeCapturedScan(t, `
+      policy:
+        frameworks: [nsa]
+      scope:
+        excludeNamespaces: [null]`, ".")
+	require.ErrorContains(t, err, "null entry")
+	assert.Nil(t, scanInfo, "invalid namespace settings must fail before scanning")
+}
+
 func TestScanContractAppliesOrdinarySettings(t *testing.T) {
 	scanInfo, policies, err := executeCapturedScan(t, `
       policy:

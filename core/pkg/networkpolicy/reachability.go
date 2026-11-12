@@ -36,7 +36,7 @@ func (idx *Index) ruleVerdict(policyNamespace string, peers []networkingv1.Netwo
 
 // AllowsIngress reports whether dst's combined ingress policies allow
 // traffic from src on port. If dst is not ingress-isolated at all (no
-// policy selects it and declares Ingress), the connection is allowed by
+// policy selects it and declares Ingress) or idx is nil, the connection is allowed by
 // default -- NetworkPolicy is opt-in per pod.
 //
 // When dst is isolated, its matching policies' ingress rules are combined
@@ -44,7 +44,7 @@ func (idx *Index) ruleVerdict(policyNamespace string, peers []networkingv1.Netwo
 // enough to allow the connection) -- this is how multiple NetworkPolicy
 // objects selecting the same pod compose in the real API.
 func (idx *Index) AllowsIngress(src, dst Endpoint, port *PortSpec) Decision {
-	if !idx.IsIsolated(dst, Ingress) {
+	if idx == nil || !idx.IsIsolated(dst, Ingress) {
 		return allow("destination is not ingress-isolated by any NetworkPolicy (default allow)", "")
 	}
 
@@ -72,7 +72,7 @@ func (idx *Index) AllowsIngress(src, dst Endpoint, port *PortSpec) Decision {
 
 // AllowsEgress mirrors AllowsIngress for the source's egress policies.
 func (idx *Index) AllowsEgress(src, dst Endpoint, port *PortSpec) Decision {
-	if !idx.IsIsolated(src, Egress) {
+	if idx == nil || !idx.IsIsolated(src, Egress) {
 		return allow("source is not egress-isolated by any NetworkPolicy (default allow)", "")
 	}
 
@@ -164,6 +164,11 @@ func (idx *Index) Reaches(src, dst Endpoint, port *PortSpec) (Verdict, Decision,
 	if d, none := noCommonIPFamily(src, dst); none {
 		return d.Verdict, d, d
 	}
+	if idx == nil {
+		egress := allow("source is not egress-isolated by any NetworkPolicy (default allow)", "")
+		ingress := allow("destination is not ingress-isolated by any NetworkPolicy (default allow)", "")
+		return Allowed, egress, ingress
+	}
 	if pairs := sameFamilyPairs(src, dst); len(pairs) > 0 {
 		return idx.reachesAnyFamily(pairs, port)
 	}
@@ -189,6 +194,9 @@ func (idx *Index) Reaches(src, dst Endpoint, port *PortSpec) (Verdict, Decision,
 // without exhaustively checking all 65535 ports.
 func (idx *Index) reachabilityPorts(src, dst Endpoint) []int32 {
 	ports := []int32{1}
+	if idx == nil {
+		return ports
+	}
 	add := func(boundary int32) {
 		if boundary >= 1 && boundary <= 65535 {
 			ports = append(ports, boundary)

@@ -14,6 +14,11 @@ updates:
           - "k8s.io/apimachinery"
           - "k8s.io/apiserver"
           - "k8s.io/client-go"
+          - "k8s.io/component-base"
+          - "k8s.io/pod-security-admission"
+      kustomize:
+        patterns:
+          - "sigs.k8s.io/kustomize/*"
 
   - package-ecosystem: "github-actions"
     directory: "/"

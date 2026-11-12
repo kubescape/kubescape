@@ -6,8 +6,10 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/kubescape/kubescape/v4/core/pkg/ruledir"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"sigs.k8s.io/yaml"
 )
 
 // TestLoadCaseInputYAMLExtensions verifies that fixture discovery accepts the same YAML suffixes as normal manifest scans.
@@ -52,6 +54,84 @@ func TestLoadCaseInputYAMLExtensions(t *testing.T) {
 	}
 }
 
+// TestLoadCaseInputJSON verifies that fixture discovery reads JSON manifests,
+// which a scan of local files accepts too, instead of skipping them.
+func TestLoadCaseInputJSON(t *testing.T) {
+	const manifest = `{"apiVersion": "v1", "kind": "Pod", "metadata": {"name": "fixture"}}`
+	tests := []struct {
+		name    string
+		content string
+		names   []string
+		wantErr bool
+	}{
+		{name: "resource.json", content: manifest, names: []string{"fixture"}},
+		{name: "resource.JSON", content: manifest, names: []string{"fixture"}},
+		{
+			name:    "array.json",
+			content: `[{"apiVersion": "v1", "kind": "Pod", "metadata": {"name": "first"}}, {"apiVersion": "v1", "kind": "Pod", "metadata": {"name": "second"}}]`,
+			names:   []string{"first", "second"},
+		},
+		{
+			name:    "list.json",
+			content: `{"apiVersion": "v1", "kind": "List", "items": [{"apiVersion": "v1", "kind": "Pod", "metadata": {"name": "item"}}]}`,
+			names:   []string{"item"},
+		},
+		{name: "resource.json.bak", content: manifest},
+		{name: "broken.json", content: `{"apiVersion": "v1",`, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			input := filepath.Join(root, "input")
+			require.NoError(t, os.MkdirAll(input, 0o750))
+			require.NoError(t, os.WriteFile(filepath.Join(input, tt.name), []byte(tt.content), 0o600))
+
+			resources, err := LoadCaseInput(root)
+			if tt.wantErr {
+				require.Error(t, err)
+				assert.ErrorContains(t, err, tt.name)
+				return
+			}
+			require.NoError(t, err)
+			var names []string
+			for _, r := range resources {
+				names = append(names, r.GetName())
+			}
+			assert.Equal(t, tt.names, names)
+		})
+	}
+}
+
+// TestRunRuleJSONInput verifies real rule evaluation of a JSON fixture and
+// that an empty expectation cannot pass over it.
+func TestRunRuleJSONInput(t *testing.T) {
+	for _, emptyExpected := range []bool{false, true} {
+		name := "matching expectations"
+		if emptyExpected {
+			name = "empty expectations must fail"
+		}
+		t.Run(name, func(t *testing.T) {
+			rule := scaffoldedRuleUnderTest(t)
+			c := caseByName(t, rule, flaggedCaseName)
+			input := filepath.Join(c.Dir, "input")
+			// The same manifest Scaffold wrote as resource.yaml, as JSON.
+			manifest := workloadKinds["Deployment"].manifest(rule.Name, containersBlock(true))
+			converted, err := yaml.YAMLToJSON([]byte(manifest))
+			require.NoError(t, err)
+			require.NoError(t, os.Remove(filepath.Join(input, "resource.yaml")))
+			require.NoError(t, os.WriteFile(filepath.Join(input, "resource.json"), converted, 0o600))
+			if emptyExpected {
+				require.NoError(t, os.WriteFile(filepath.Join(c.Dir, expectedFileName), []byte("[]\n"), 0o600))
+			}
+			rule.Cases = []Case{c}
+			results := RunRule(context.Background(), rule)
+			require.Len(t, results, 1)
+			require.NoError(t, results[0].Err)
+			assert.Equal(t, !emptyExpected, results[0].Passed, results[0].Diff)
+		})
+	}
+}
+
 // TestRunRuleUppercaseYAMLInput verifies real rule evaluation and prevents empty expectations from passing over ignored input.
 func TestRunRuleUppercaseYAMLInput(t *testing.T) {
 	for _, extension := range []string{".YAML", ".YML", ".YaMl"} {
@@ -77,5 +157,79 @@ func TestRunRuleUppercaseYAMLInput(t *testing.T) {
 				})
 			}
 		})
+	}
+}
+
+func TestLoadCaseInput_OversizedFileRejected(t *testing.T) {
+	dir := t.TempDir()
+	inputDir := filepath.Join(dir, "input")
+	require.NoError(t, os.MkdirAll(inputDir, 0o750))
+
+	f, err := os.OpenFile(filepath.Join(inputDir, "manifest.yaml"), os.O_CREATE|os.O_WRONLY, 0o600)
+	require.NoError(t, err)
+	require.NoError(t, f.Truncate(32*1024*1024+1))
+	require.NoError(t, f.Close())
+
+	_, err = LoadCaseInput(dir)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ruledir.ErrFileTooLarge)
+}
+
+func TestLoadCaseInput_NonRegularFileRejected(t *testing.T) {
+	if _, err := os.Stat("/dev/null"); err == nil {
+		dir := t.TempDir()
+		inputDir := filepath.Join(dir, "input")
+		require.NoError(t, os.MkdirAll(inputDir, 0o750))
+		require.NoError(t, os.Symlink("/dev/null", filepath.Join(inputDir, "dev_null.yaml")))
+
+		_, err := LoadCaseInput(dir)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ruledir.ErrNotRegularFile)
+	}
+}
+
+func TestLoadCaseExpected_OversizedFileRejected(t *testing.T) {
+	dir := t.TempDir()
+	f, err := os.OpenFile(filepath.Join(dir, expectedFileName), os.O_CREATE|os.O_WRONLY, 0o600)
+	require.NoError(t, err)
+	require.NoError(t, f.Truncate(32*1024*1024+1))
+	require.NoError(t, f.Close())
+
+	_, err = LoadCaseExpected(dir)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ruledir.ErrFileTooLarge)
+}
+
+func TestLoadCaseExpected_NonRegularFileRejected(t *testing.T) {
+	if _, err := os.Stat("/dev/null"); err == nil {
+		dir := t.TempDir()
+		require.NoError(t, os.Symlink("/dev/null", filepath.Join(dir, expectedFileName)))
+
+		_, err := LoadCaseExpected(dir)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ruledir.ErrNotRegularFile)
+	}
+}
+
+func TestLoadCaseData_OversizedFileRejected(t *testing.T) {
+	dir := t.TempDir()
+	f, err := os.OpenFile(filepath.Join(dir, dataFileName), os.O_CREATE|os.O_WRONLY, 0o600)
+	require.NoError(t, err)
+	require.NoError(t, f.Truncate(32*1024*1024+1))
+	require.NoError(t, f.Close())
+
+	_, err = LoadCaseData(dir)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ruledir.ErrFileTooLarge)
+}
+
+func TestLoadCaseData_NonRegularFileRejected(t *testing.T) {
+	if _, err := os.Stat("/dev/null"); err == nil {
+		dir := t.TempDir()
+		require.NoError(t, os.Symlink("/dev/null", filepath.Join(dir, dataFileName)))
+
+		_, err := LoadCaseData(dir)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ruledir.ErrNotRegularFile)
 	}
 }

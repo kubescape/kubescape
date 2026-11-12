@@ -16,6 +16,7 @@ import (
 	"github.com/kubescape/kubescape/v4/core/meta"
 	"github.com/kubescape/kubescape/v4/core/pkg/reportcrypto"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling"
+	resultsdiff "github.com/kubescape/kubescape/v4/core/pkg/resultshandling/diff"
 	contractv1alpha1 "github.com/kubescape/kubescape/v4/core/pkg/scancontract/v1alpha1"
 	"github.com/kubescape/kubescape/v4/core/pkg/telemetry"
 	"github.com/kubescape/kubescape/v4/pkg/imagescan"
@@ -74,6 +75,8 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	var scanContractName string
 	var fleetConfigPath string
 	var selectedContract *contractv1alpha1.SelectedContract
+	var gitCloneDepth = cautils.DefaultGitCloneDepth
+	scanInfo.GitCloneDepth = &gitCloneDepth
 
 	// scanCmd represents the scan command
 	scanCmd := &cobra.Command{
@@ -81,6 +84,7 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 		Short:   "Scan a Kubernetes cluster or YAML files for image vulnerabilities and misconfigurations",
 		Long:    `Scan a Kubernetes cluster, YAML files, Helm charts, Kustomize directories, Git repositories, or container images for security misconfigurations and vulnerabilities.`,
 		Example: scanCmdExamples,
+		Args:    cobra.ArbitraryArgs,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			if cmd.Name() == "validate-contract" {
 				return nil
@@ -106,6 +110,15 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 			if scanInfo.ControlTimeout < 0 {
 				return fmt.Errorf("invalid --control-timeout %s: must be zero or positive", scanInfo.ControlTimeout)
 			}
+			if gitCloneDepth < 0 {
+				return fmt.Errorf("invalid --git-clone-depth %d: must be zero or positive", gitCloneDepth)
+			}
+			scanInfo.GitCloneDepth = &gitCloneDepth
+			if cmd != nil && cmd.Name() != "image" {
+				if err := validateControlTimeout(&scanInfo); err != nil {
+					return err
+				}
+			}
 			if err := cautils.ValidateHelmKubeVersion(scanInfo.HelmKubeVersion); err != nil {
 				return fmt.Errorf("invalid --kube-version: %w", err)
 			}
@@ -118,10 +131,8 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 					scanInfo.ControlsVersion,
 				)
 			}
-			if scanInfo.Baseline != "" && scanInfo.BaselineSeverityThreshold != "" {
-				if err := shared.ValidateSeverity(scanInfo.BaselineSeverityThreshold); err != nil {
-					return err
-				}
+			if err := validateBaselineFlags(cmd, &scanInfo); err != nil {
+				return err
 			}
 			if err := validateKubeContextsSupported(cmd, &scanInfo); err != nil {
 				return err
@@ -171,6 +182,16 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 			scanInfo.View = requestedView
 
 			if policyIdentifiers := contractPolicyIdentifiers(selectedContract); len(policyIdentifiers) > 0 {
+				cleanup, err := prepareScanLocalInput(cmd.InOrStdin(), args, &scanInfo, scanLocalInputOptions{
+					FirstInputArg:    0,
+					FilePath:         scanInfo.FilePath,
+					RejectMixedStdin: true,
+				})
+				if err != nil {
+					return err
+				}
+				defer cleanup()
+
 				setContractScanTarget(args, &scanInfo)
 				if len(scanInfo.KubeContexts) > 0 {
 					if _, err := validateFleetScanInvocation(&scanInfo); err != nil {
@@ -184,6 +205,16 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 			}
 
 			if scanInfo.View == string(cautils.SecurityViewType) {
+				cleanup, err := prepareScanLocalInput(cmd.InOrStdin(), args, &scanInfo, scanLocalInputOptions{
+					FirstInputArg:    0,
+					FilePath:         scanInfo.FilePath,
+					RejectMixedStdin: true,
+				})
+				if err != nil {
+					return err
+				}
+				defer cleanup()
+
 				policyIdentifiers := setSecurityViewScanInfo(args, &scanInfo)
 				if len(scanInfo.KubeContexts) > 0 {
 					if _, err := validateFleetScanInvocation(&scanInfo); err != nil {
@@ -198,10 +229,13 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 					return err
 				}
 			} else {
-				if err := getFrameworkCmd(
+				filePath := scanInfo.FilePath
+				frameworkCmd := getFrameworkCmd(
 					ks,
 					&scanInfo,
-				).RunE(
+				)
+				scanInfo.FilePath = filePath
+				if err := frameworkCmd.RunE(
 					cmd,
 					append(
 						[]string{
@@ -233,7 +267,7 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	scanCmd.PersistentFlags().BoolVar(&scanInfo.AuditExceptions, "audit-exceptions", false, "Include an exception usage audit in supported scan outputs")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.UseArtifactsFrom, "use-artifacts-from", "", "Load artifacts from local directory. If not used will download them")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.CustomRules, "custom-rules", "", "Path to user-authored custom rules: a rule directory holding raw.rego and rule.metadata.json (the layout used by 'kubescape policy test'), a directory of such rule directories, or a directory of bare *.rego files. A rule's declared match selectors are honoured; a bare .rego file is matched against every resource kind. A custom rule is medium severity unless its Rego declares '# @baseScore <1-10>'")
-	scanCmd.PersistentFlags().StringVarP(&scanInfo.ExcludedNamespaces, "exclude-namespaces", "e", "", "Namespaces to exclude from scanning. e.g: --exclude-namespaces ns-a,ns-b. Cannot be used together with --include-namespaces. Notice, when running with `exclude-namespace` kubescape does not scan cluster-scoped objects.")
+	scanCmd.PersistentFlags().StringVarP(&scanInfo.ExcludedNamespaces, "exclude-namespaces", "e", "", "Namespaces to exclude from scanning. e.g: --exclude-namespaces ns-a,ns-b. Cannot be used together with --include-namespaces. Notice, when running with --exclude-namespaces kubescape does not scan cluster-scoped objects.")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.MinSeverity, "min-severity", "", "Only include findings at or above this severity (low, medium, high, critical) in the output. Applies to posture controls and image vulnerabilities. Does not affect exit codes, which are computed on the full unfiltered report")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.MaxSeverity, "max-severity", "", "Only include findings at or below this severity (low, medium, high, critical) in the output. Applies to posture controls and image vulnerabilities. Does not affect exit codes, which are computed on the full unfiltered report")
 
@@ -242,7 +276,9 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	scanCmd.PersistentFlags().BoolVar(&scanInfo.FailOnDegradedConfig, "fail-on-degraded-config", false, "Fail the scan (exit code 1) if control configurations or exceptions could not be loaded from their configured source and bundled defaults were used instead")
 
 	scanCmd.PersistentFlags().StringVar(&scanInfo.FailThresholdSeverity, "severity-threshold", "", "Severity threshold is the severity of failed controls at which the command fails and returns exit code 1. Failed controls whose severity is unknown (missing base score) are treated as exceeding any threshold. On image scans, vulnerabilities whose severity cannot be determined are likewise counted as exceeding any threshold")
-	scanCmd.PersistentFlags().BoolVar(&scanInfo.OnlyFixable, "only-fixable", false, "When used with --severity-threshold on image scans, only count CVEs that have an available fix toward the pass/fail decision")
+	scanCmd.PersistentFlags().BoolVar(&scanInfo.OnlyFixable, "only-fixable", false, "When used with --severity-threshold, --fail-on-kev or --epss-threshold on image scans, only count CVEs that have an available fix toward the pass/fail decision")
+	scanCmd.PersistentFlags().BoolVar(&scanInfo.FailOnKEV, "fail-on-kev", false, "Fail image scans (exit code 1) when any vulnerability is listed in the CISA Known Exploited Vulnerabilities catalog, whatever its severity. Applies to 'scan image', 'scan workload' and scans with --scan-images. Image exceptions waive matching vulnerabilities")
+	scanCmd.PersistentFlags().Float64Var(&scanInfo.EPSSThreshold, "epss-threshold", 0, "Fail image scans (exit code 1) when any vulnerability's EPSS score is at or above this value, between 0 and 1 (0 disables the gate). Applies to 'scan image', 'scan workload' and scans with --scan-images. EPSS scores change daily, so pair this with --max-db-age and --fail-on-stale-db, especially with an offline vulnerability database")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.ControlsVersion, "controls-version", "", "Pin the regolibrary release tag used to download controls (see https://github.com/kubescape/regolibrary/releases). If not used will download the latest release. Has no effect when --account is set (cloud backend is used instead)")
 
 	// --fail-threshold was removed as a functioning flag, but its registration must stay so
@@ -315,6 +351,7 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	scanCmd.PersistentFlags().BoolVar(&scanInfo.DryRun, "dry-run", false, "Check whether the current credentials can list every resource type the requested policies need, without collecting resources or evaluating controls. Cluster scans only.")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.OtelEndpoint, "otel-endpoint", "", fmt.Sprintf("Export scan traces and metrics to an OTLP collector, e.g. --otel-endpoint localhost:4317. Accepts host:port (plaintext) or a http(s):// URL. When unset, the standard %s environment variable is used; when neither is set no telemetry is collected.", telemetry.EnvEndpoint))
 	scanCmd.PersistentFlags().BoolVar(&scanInfo.Incremental, "incremental", false, "Cache the verdict for each resource, keyed by a hash of its spec/metadata plus the controls-config version, and skip re-evaluating unchanged resources on the next scan. Opt-in; scan output is unaffected. Cache automatically invalidates when the controls-config version changes; clear it manually with 'kubescape config delete cache'.")
+	scanCmd.PersistentFlags().IntVar(&gitCloneDepth, "git-clone-depth", cautils.DefaultGitCloneDepth, "Clone depth for remote Git repository scans (default: 0 for full commit history; e.g. 1 for shallow tip-only clone)")
 
 	// Helm value override flags. Mirror `helm install` so users can pass overrides through verbatim
 	// when scanning a Helm chart directory. Note: -f is already taken by --format, so --values is long-only.
@@ -356,6 +393,8 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	scanCmd.PersistentFlags().StringVar(&scanInfo.BaselineSeverityThreshold, "baseline-severity-threshold", "", "With --baseline, only count new failures at or above this severity when using --baseline-fail-on-new.")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.BaselineGranularity, "baseline-granularity", "evidence", "With --baseline, comparison unit: evidence or control.")
 
+	scanCmd.Flags().StringVar(&scanInfo.FilePath, "file-path", "", "Path to the YAML file.")
+
 	scanCmd.AddCommand(getControlCmd(ks, &scanInfo))
 	scanCmd.AddCommand(getFrameworkCmd(ks, &scanInfo))
 	scanCmd.AddCommand(getWorkloadCmd(ks, &scanInfo))
@@ -370,9 +409,11 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 }
 
 func setContractScanTarget(args []string, scanInfo *cautils.ScanInfo) {
-	if len(args) > 0 {
+	if len(scanInfo.InputPatterns) > 0 || len(args) > 0 {
 		scanInfo.SetScanType(cautils.ScanTypeRepo)
-		scanInfo.InputPatterns = args
+		if len(scanInfo.InputPatterns) == 0 {
+			scanInfo.InputPatterns = args
+		}
 		return
 	}
 	scanInfo.SetScanType(cautils.ScanTypeCluster)
@@ -413,9 +454,11 @@ func applyRegistryCredentialsFromEnv(cmd *cobra.Command, scanInfo *cautils.ScanI
 }
 
 func setSecurityViewScanInfo(args []string, scanInfo *cautils.ScanInfo) []cautils.PolicyIdentifier {
-	if len(args) > 0 {
+	if len(scanInfo.InputPatterns) > 0 || len(args) > 0 {
 		scanInfo.SetScanType(cautils.ScanTypeRepo)
-		scanInfo.InputPatterns = args
+		if len(scanInfo.InputPatterns) == 0 {
+			scanInfo.InputPatterns = args
+		}
 		return cautils.BuildPolicyIdentifiers([]string{"workloadscan", "allcontrols"}, v1.KindFramework)
 	}
 	scanInfo.SetScanType(cautils.ScanTypeCluster)
@@ -457,18 +500,21 @@ func runSecurityScan(ctx context.Context, scanInfo *cautils.ScanInfo, ks meta.IK
 	if err != nil {
 		return nil, err
 	}
+	if scanInfo.DryRun {
+		// The preflight verdict is already printed and nothing was evaluated:
+		// there is no report to write or submit and no threshold to enforce.
+		return results, nil
+	}
 
 	if err = results.HandleResults(ctx, scanInfo); err != nil {
 		return results, err
 	}
 
-	if err := enforceSeverityThresholds(&results.GetData().Report.SummaryDetails, scanInfo); err != nil {
+	if err := joinGateErrors(
+		enforceSeverityThresholds(&results.GetData().Report.SummaryDetails, scanInfo),
+		enforceCombinedImageGates(results, scanInfo),
+	); err != nil {
 		return results, err
-	}
-	if scanInfo.ScanImages {
-		if err := enforceImageSeverityThresholds(results.ImageScanData, scanInfo); err != nil {
-			return results, err
-		}
 	}
 	if err := enforceCoverageThreshold(results.GetData().ScanCoverage, len(results.GetData().Report.SummaryDetails.Controls), scanInfo); err != nil {
 		return results, err
@@ -478,6 +524,41 @@ func runSecurityScan(ctx context.Context, scanInfo *cautils.ScanInfo, ks meta.IK
 	}
 
 	return results, enforceBaselineDrift(ctx, results, scanInfo)
+}
+
+// joinGateErrors combines gate failures so one breach does not hide another.
+// A lone failure is returned unchanged.
+func joinGateErrors(errs ...error) error {
+	var failed []error
+	for _, err := range errs {
+		if err != nil {
+			failed = append(failed, err)
+		}
+	}
+	switch len(failed) {
+	case 0:
+		return nil
+	case 1:
+		return failed[0]
+	default:
+		return errors.Join(failed...)
+	}
+}
+
+// enforceComplianceThreshold fails the scan when the compliance score is below --compliance-threshold.
+func enforceComplianceThreshold(score float32, scanInfo *cautils.ScanInfo) error {
+	if score < scanInfo.ComplianceThreshold {
+		return gateFailure(fmt.Errorf("scan compliance-score is below permitted threshold: %s (compliance-threshold: %.2f)", cautils.ComplianceScoreToString(score, 2), scanInfo.ComplianceThreshold))
+	}
+	return nil
+}
+
+// enforceCombinedImageGates applies the image gates when --scan-images is set.
+func enforceCombinedImageGates(results *resultshandling.ResultsHandler, scanInfo *cautils.ScanInfo) error {
+	if !scanInfo.ScanImages {
+		return nil
+	}
+	return enforceImageGates(results.ImageScanData, scanInfo)
 }
 
 func enforceBaselineDrift(ctx context.Context, results *resultshandling.ResultsHandler, scanInfo *cautils.ScanInfo) error {
@@ -509,11 +590,72 @@ func isGateFailure(err error) bool {
 	return errors.As(err, &gate)
 }
 
+// validateBaselineFlags validates baseline drift gating flags for posture scans.
+func validateBaselineFlags(cmd *cobra.Command, scanInfo *cautils.ScanInfo) error {
+	if cmd != nil && cmd.Name() == "image" {
+		return nil
+	}
+
+	if commandFlagChanged(cmd, "baseline") && strings.TrimSpace(scanInfo.Baseline) == "" {
+		return fmt.Errorf("--baseline cannot be empty")
+	}
+
+	if strings.TrimSpace(scanInfo.Baseline) == "" {
+		if scanInfo.BaselineFailOnNew || commandFlagChanged(cmd, "baseline-fail-on-new") {
+			return fmt.Errorf("--baseline-fail-on-new requires --baseline")
+		}
+		if strings.TrimSpace(scanInfo.BaselineSeverityThreshold) != "" || commandFlagChanged(cmd, "baseline-severity-threshold") {
+			return fmt.Errorf("--baseline-severity-threshold requires --baseline")
+		}
+		if (scanInfo.BaselineGranularity != "" && scanInfo.BaselineGranularity != "evidence") || commandFlagChanged(cmd, "baseline-granularity") {
+			return fmt.Errorf("--baseline-granularity requires --baseline")
+		}
+		return nil
+	}
+
+	if strings.TrimSpace(scanInfo.BaselineSeverityThreshold) != "" {
+		if err := shared.ValidateSeverity(scanInfo.BaselineSeverityThreshold); err != nil {
+			return err
+		}
+		scanInfo.BaselineSeverityThreshold = strings.ToLower(strings.TrimSpace(scanInfo.BaselineSeverityThreshold))
+	}
+
+	if err := resultsdiff.ValidateGranularity(scanInfo.BaselineGranularity); err != nil {
+		return err
+	}
+	scanInfo.BaselineGranularity = strings.ToLower(strings.TrimSpace(scanInfo.BaselineGranularity))
+	if scanInfo.BaselineGranularity == "" {
+		scanInfo.BaselineGranularity = string(resultsdiff.GranularityEvidence)
+	}
+
+	return nil
+}
+
 func severityLabelOrAll(s string) string {
 	if s == "" {
 		return "all"
 	}
 	return s
+}
+
+// enforceImageGates applies every image vulnerability gate. The severity
+// failure keeps its existing message; a tripped exploitability gate is
+// reported alongside it.
+func enforceImageGates(imageScanData []cautils.ImageScanData, scanInfo *cautils.ScanInfo) error {
+	return joinGateErrors(
+		enforceImageSeverityThresholds(imageScanData, scanInfo),
+		enforceImageRiskGates(imageScanData, scanInfo),
+	)
+}
+
+// enforceImageRiskGates fails the scan when --fail-on-kev or --epss-threshold
+// is breached by any scanned image.
+func enforceImageRiskGates(imageScanData []cautils.ImageScanData, scanInfo *cautils.ScanInfo) error {
+	gates := imagescan.RiskGates{FailOnKEV: scanInfo.FailOnKEV, EPSSThreshold: scanInfo.EPSSThreshold}
+	if err := imagescan.CheckRiskGates(gates, imageScanData, scanInfo.OnlyFixable); err != nil {
+		return gateFailure(err)
+	}
+	return nil
 }
 
 func enforceImageSeverityThresholds(imageScanData []cautils.ImageScanData, scanInfo *cautils.ScanInfo) error {

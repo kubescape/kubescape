@@ -107,6 +107,7 @@ func createRBACEscalationTools(ksServer *KubescapeMcpserver) {
 				"cluster_admin_equivalent": result.ClusterAdmin,
 				"reached":                  buildReachedSummaries(result.Reached),
 				"unbounded_findings":       buildUnboundedSummaries(result.Unbounded),
+				"grants":                   grantSummaries(result.Granted),
 			}
 			if result.Truncated {
 				out["truncated"] = "the search hit its safety bound before confirming cluster_admin_equivalent one way or the other -- this result may be an incomplete negative, not a confirmed one"
@@ -193,6 +194,9 @@ func buildUnboundedSummaries(findings []rbacgraph.UnboundedFinding) []map[string
 			"detail":        f.Edge.Detail,
 			"scope":         scope,
 			"scope_unknown": f.Edge.ScopeUnknown,
+		}
+		if f.Edge.PermissionsUnconfirmed {
+			summary["permissions_unconfirmed"] = true
 		}
 		if f.Edge.ImpersonatedKind != "" {
 			summary["impersonated_kind"] = string(f.Edge.ImpersonatedKind)

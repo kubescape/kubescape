@@ -8,6 +8,7 @@ import (
 
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
+	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
@@ -32,6 +33,7 @@ const (
 	metricsImage     metricsName = "image"
 	metricsCVE       metricsName = "cve"
 	metricsFixable   metricsName = "fixable"
+	metricsKEV       metricsName = "kev"
 )
 
 // ============================================ CLUSTER ============================================================
@@ -204,6 +206,9 @@ func (mrc *mResources) labels() string {
 	r += fmt.Sprintf("kind=\"%s\"", escapePrometheusLabelValue(mrc.kind)) + ","
 	r += fmt.Sprintf("namespace=\"%s\"", escapePrometheusLabelValue(mrc.namespace)) + ","
 	r += fmt.Sprintf("name=\"%s\"", escapePrometheusLabelValue(mrc.name))
+	if mrc.withPath {
+		r += "," + fmt.Sprintf("path=\"%s\"", escapePrometheusLabelValue(mrc.path))
+	}
 	return r
 }
 func (mrc *mResources) prefix() string {
@@ -216,11 +221,13 @@ func (miv *mImageVulnerability) metrics() []string {
 		#### Image vulnerability metrics (image scan only, #2782)
 		kubescape_image_count_cve{image="<image>",platform="<optional-platform>",severity="<severity>"} <counter>
 		kubescape_image_count_cve_fixable{image="<image>",platform="<optional-platform>",severity="<severity>"} <counter>
+		kubescape_image_count_cve_kev{image="<image>",platform="<optional-platform>",severity="<severity>"} <counter>
 	*/
 
 	m := []string{}
 	m = append(m, toRowInMetrics(fmt.Sprintf("%s_%s_%s", miv.prefix(), metricsCount, metricsCVE), miv.labels(), miv.cveCount))
 	m = append(m, toRowInMetrics(fmt.Sprintf("%s_%s_%s_%s", miv.prefix(), metricsCount, metricsCVE, metricsFixable), miv.labels(), miv.fixableCVECount))
+	m = append(m, toRowInMetrics(fmt.Sprintf("%s_%s_%s_%s", miv.prefix(), metricsCount, metricsCVE, metricsKEV), miv.labels(), miv.kevCVECount))
 	return m
 }
 
@@ -359,10 +366,18 @@ type mFrameworkComplianceScore struct {
 }
 
 type mResources struct {
-	name                 string
-	namespace            string
-	apiVersion           string
-	kind                 string
+	name       string
+	namespace  string
+	apiVersion string
+	kind       string
+	// path is the manifest file the resource was read from. It tells apart the
+	// same object declared in several files (kustomize base and overlays, one
+	// copy per environment), which would otherwise share all four labels above.
+	path string
+	// withPath is set on every resource of a scan that has at least one source
+	// path, so all series of a family carry the same label names. A cluster scan
+	// has no source paths and keeps its labels unchanged.
+	withPath             bool
 	controlsCountPassed  int
 	controlsCountFailed  int
 	controlsCountSkipped int
@@ -373,6 +388,9 @@ type mImageVulnerability struct {
 	severity        string
 	cveCount        int
 	fixableCVECount int
+	// kevCVECount counts the CVEs listed in the CISA Known Exploited
+	// Vulnerabilities catalog.
+	kevCVECount int
 }
 
 type Metrics struct {
@@ -463,28 +481,11 @@ func (m *Metrics) setCoverageScore(coverage cautils.ScanCoverage) {
 	m.coverage.coverageScore = cautils.Float32ToIntFloor(coverage.CoverageScore)
 }
 
-// return -> (passed, skipped, failed)
-func resourceControlStatusCounters(summary *reportsummary.SummaryDetails, result *resourcesresults.Result) (int, int, int) {
-	failed := 0
-	skipped := 0
-	passed := 0
-	for i := range result.ListControls() {
-		switch cautils.ControlStatus(summary, &result.AssociatedControls[i]).Status() {
-		case apis.StatusSkipped:
-			skipped++
-		case apis.StatusFailed:
-			failed++
-		case apis.StatusPassed:
-			passed++
-		}
-	}
-	return passed, skipped, failed
-}
-
 func (m *Metrics) setResourcesCountersFromCatalog(
 	catalog cautils.ResourceCatalog,
 	results map[string]resourcesresults.Result,
-	summaryDetails *reportsummary.SummaryDetails) {
+	summaryDetails *reportsummary.SummaryDetails,
+	sources map[string]reporthandling.Source) {
 
 	if catalog == nil {
 		return
@@ -499,28 +500,74 @@ func (m *Metrics) setResourcesCountersFromCatalog(
 	}
 	sort.Strings(resourceIDs)
 
+	// The scan keeps an RBAC subject as one resource per binding and role that
+	// reach it, and only the subject shows up in the labels, so those resources
+	// would share a series. A series may appear only once, so they are merged
+	// into one, in which each control counts once with the most significant of
+	// its statuses (apis.Compare: failed, then skipped, then passed).
+	type seriesKey struct{ apiVersion, kind, namespace, name, path string }
+	seriesIndex := make(map[seriesKey]int, len(resourceIDs))
+	controlStatuses := make([]map[string]apis.ScanningStatus, 0, len(resourceIDs))
+	first := len(m.listResources)
+
 	for _, resourceID := range resourceIDs {
 		result := results[resourceID]
 		r, ok := catalog.Get(resourceID)
 		if !ok || r == nil {
 			continue
 		}
-		passed, skipped, failed := resourceControlStatusCounters(summaryDetails, &result)
 
 		mrc := mResources{}
 		mrc.apiVersion = r.GetApiVersion()
 		mrc.namespace = r.GetNamespace()
 		mrc.kind = r.GetKind()
 		mrc.name = r.GetName()
+		mrc.path = BestSourcePath(sources[resourceID])
 
-		// append
-		mrc.controlsCountPassed = passed
-		mrc.controlsCountFailed = failed
-		mrc.controlsCountSkipped = skipped
-
-		m.listResources = append(m.listResources, mrc)
+		key := seriesKey{mrc.apiVersion, mrc.kind, mrc.namespace, mrc.name, mrc.path}
+		i, seen := seriesIndex[key]
+		if !seen {
+			i = len(controlStatuses)
+			seriesIndex[key] = i
+			m.listResources = append(m.listResources, mrc)
+			controlStatuses = append(controlStatuses, make(map[string]apis.ScanningStatus, len(result.AssociatedControls)))
+		}
+		for j := range result.AssociatedControls {
+			control := &result.AssociatedControls[j]
+			status := cautils.ControlStatus(summaryDetails, control).Status()
+			if previous, found := controlStatuses[i][control.ControlID]; found {
+				status = apis.Compare(previous, status)
+			}
+			controlStatuses[i][control.ControlID] = status
+		}
 	}
 
+	for i, statuses := range controlStatuses {
+		mrc := &m.listResources[first+i]
+		for _, status := range statuses {
+			switch status {
+			case apis.StatusSkipped:
+				mrc.controlsCountSkipped++
+			case apis.StatusFailed:
+				mrc.controlsCountFailed++
+			case apis.StatusPassed:
+				mrc.controlsCountPassed++
+			}
+		}
+	}
+
+	// Two files can declare the same object, and each is its own resource in the
+	// scan, but apiVersion, kind, namespace and name would be identical. Prometheus
+	// rejects a scrape or a push with repeated series, or keeps only one of them,
+	// so a file scan labels every resource with its path.
+	for i := range m.listResources {
+		if m.listResources[i].path != "" {
+			for j := range m.listResources {
+				m.listResources[j].withPath = true
+			}
+			break
+		}
+	}
 }
 
 // setImageVulnerabilities builds per-image, per-severity CVE counters for an image scan (#2782)
@@ -531,6 +578,12 @@ func (m *Metrics) setImageVulnerabilities(imageScanData []cautils.ImageScanData)
 
 		severityToSummary := map[string]*imageprinter.SeveritySummary{}
 		setSeverityToSummaryMap(cves, severityToSummary)
+		severityToKEV := map[string]int{}
+		for _, cve := range cves {
+			if cve.KEV {
+				severityToKEV[cve.Severity]++
+			}
+		}
 
 		// severityToSummary is a map, so its iteration order is randomised.
 		// Emit the severities in sorted order so repeated runs and report
@@ -549,6 +602,7 @@ func (m *Metrics) setImageVulnerabilities(imageScanData []cautils.ImageScanData)
 				severity:        severity,
 				cveCount:        summary.NumberOfCVEs,
 				fixableCVECount: summary.NumberOfFixableCVEs,
+				kevCVECount:     severityToKEV[severity],
 			})
 		}
 	}

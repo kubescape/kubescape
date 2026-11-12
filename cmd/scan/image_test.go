@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -376,6 +377,20 @@ func TestGetScanCommand_ImageRegistryTokenAndAuthorityReachImageScan(t *testing.
 	assert.Equal(t, []string{"registry.example.com/app:tag"}, mockKubescape.imgScanInfo.Images)
 }
 
+func TestGetScanCommand_ImageScanSetsInputPatterns(t *testing.T) {
+	mockKubescape := &imageScanCaptureKubescape{}
+	cmd := GetScanCommand(mockKubescape)
+	cmd.SetArgs([]string{
+		"image",
+		"nginx:1.27",
+		"redis:7",
+	})
+
+	err := cmd.Execute()
+	assert.NoError(t, err)
+	assert.Equal(t, []string{"nginx:1.27", "redis:7"}, mockKubescape.scanInfo.InputPatterns)
+}
+
 func TestGetImageCmd_RunE_ForwardsLocalTarball(t *testing.T) {
 	mockKubescape := &imageScanCaptureKubescape{}
 	scanInfo := cautils.ScanInfo{}
@@ -394,6 +409,28 @@ func TestGetImageCmd_RunE_ForwardsLocalTarball(t *testing.T) {
 	err = cmd.RunE(cmd, []string{tmpFile.Name()})
 	assert.NoError(t, err)
 	assert.Equal(t, []string{"docker-archive:" + tmpFile.Name()}, mockKubescape.imgScanInfo.Images)
+	assert.Equal(t, []string{"docker-archive:" + tmpFile.Name()}, mockKubescape.scanInfo.InputPatterns)
+}
+
+func TestGetImageCmd_RunE_ArchivesPreservedInInputPatterns(t *testing.T) {
+	mockKubescape := &imageScanCaptureKubescape{}
+	scanInfo := cautils.ScanInfo{}
+
+	cmd := getImageCmd(mockKubescape, &scanInfo)
+	parentCmd := &cobra.Command{Use: "scan"}
+	parentCmd.PersistentFlags().StringVarP(&scanInfo.Format, "format", "f", "pretty-printer", "")
+	parentCmd.AddCommand(cmd)
+
+	tmpDir := t.TempDir()
+	dockerTar := filepath.Join(tmpDir, "docker-img.tar")
+	require.NoError(t, os.WriteFile(dockerTar, []byte("dummy-docker-tar"), 0o600))
+	ociTar := filepath.Join(tmpDir, "oci-img.tar")
+	require.NoError(t, os.WriteFile(ociTar, []byte("dummy-oci-tar"), 0o600))
+
+	err := cmd.RunE(cmd, []string{"docker-archive:" + dockerTar, "oci-archive:" + ociTar})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"docker-archive:" + dockerTar, "oci-archive:" + ociTar}, mockKubescape.imgScanInfo.Images)
+	assert.Equal(t, []string{"docker-archive:" + dockerTar, "oci-archive:" + ociTar}, mockKubescape.scanInfo.InputPatterns)
 }
 
 func TestGetImageCmd_ArgsAcceptsSeveralImages(t *testing.T) {
@@ -477,6 +514,136 @@ func TestGetImageCmd_RunE_RejectsPostureFlags(t *testing.T) {
 			scanInfo: cautils.ScanInfo{CustomRules: "/path/to/rules"},
 			wantErr:  "--custom-rules is not supported for image scans: an image scan evaluates vulnerabilities, not posture controls",
 		},
+		{
+			name:     "control-timeout is rejected",
+			scanInfo: cautils.ScanInfo{ControlTimeout: 10 * time.Second},
+			wantErr:  "--control-timeout is not supported for image scans: an image scan evaluates vulnerabilities, not posture controls",
+		},
+		{
+			name:     "controls-version is rejected",
+			scanInfo: cautils.ScanInfo{ControlsVersion: "v1.0.0"},
+			wantErr:  "--controls-version is not supported for image scans: an image scan evaluates vulnerabilities, not posture controls",
+		},
+		{
+			name:     "baseline is rejected",
+			scanInfo: cautils.ScanInfo{Baseline: "base.json"},
+			wantErr:  "--baseline is not supported for image scans: an image scan evaluates vulnerabilities, not posture baseline drift (use 'kubescape diff' to compare image scan reports)",
+		},
+		{
+			name:     "baseline-fail-on-new is rejected",
+			scanInfo: cautils.ScanInfo{BaselineFailOnNew: true},
+			wantErr:  "--baseline-fail-on-new is not supported for image scans: an image scan evaluates vulnerabilities, not posture baseline drift (use 'kubescape diff' to compare image scan reports)",
+		},
+		{
+			name:     "baseline-severity-threshold is rejected",
+			scanInfo: cautils.ScanInfo{BaselineSeverityThreshold: "high"},
+			wantErr:  "--baseline-severity-threshold is not supported for image scans: an image scan evaluates vulnerabilities, not posture baseline drift (use 'kubescape diff' to compare image scan reports)",
+		},
+		{
+			name:     "compliance-threshold is rejected",
+			scanInfo: cautils.ScanInfo{ComplianceThreshold: 80},
+			wantErr:  "--compliance-threshold is not supported for image scans: an image scan evaluates vulnerabilities, not posture compliance scores (use --severity-threshold instead)",
+		},
+		{
+			name:     "baseline-granularity is rejected",
+			scanInfo: cautils.ScanInfo{BaselineGranularity: "control"},
+			wantErr:  "--baseline-granularity is not supported for image scans: an image scan evaluates vulnerabilities, not posture baseline drift (use 'kubescape diff' to compare image scan reports)",
+		},
+		{
+			name:     "fail-coverage-below is rejected",
+			scanInfo: cautils.ScanInfo{FailCoverageThreshold: 80},
+			wantErr:  "--fail-coverage-below is not supported for image scans: an image scan evaluates vulnerabilities, not posture control coverage (use --severity-threshold instead)",
+		},
+		{
+			name:     "fail-on-degraded-config is rejected",
+			scanInfo: cautils.ScanInfo{FailOnDegradedConfig: true},
+			wantErr:  "--fail-on-degraded-config is not supported for image scans: an image scan evaluates vulnerabilities, not posture control configurations",
+		},
+		{
+			name:     "controls-config is rejected",
+			scanInfo: cautils.ScanInfo{ControlsInputs: "/path/to/controls.json"},
+			wantErr:  "--controls-config is not supported for image scans: an image scan evaluates vulnerabilities, not posture controls",
+		},
+		{
+			name:     "include-namespaces is rejected",
+			scanInfo: cautils.ScanInfo{IncludeNamespaces: "default"},
+			wantErr:  "--include-namespaces is not supported for image scans: an image scan evaluates vulnerabilities, not Kubernetes namespaces",
+		},
+		{
+			name:     "exclude-namespaces is rejected",
+			scanInfo: cautils.ScanInfo{ExcludedNamespaces: "kube-system"},
+			wantErr:  "--exclude-namespaces is not supported for image scans: an image scan evaluates vulnerabilities, not Kubernetes namespaces",
+		},
+		{
+			name:     "include-kinds is rejected",
+			scanInfo: cautils.ScanInfo{IncludeKinds: "Deployment"},
+			wantErr:  "--include-kinds is not supported for image scans: an image scan evaluates vulnerabilities, not Kubernetes resource kinds",
+		},
+		{
+			name:     "exclude-kinds is rejected",
+			scanInfo: cautils.ScanInfo{ExcludeKinds: "Pod"},
+			wantErr:  "--exclude-kinds is not supported for image scans: an image scan evaluates vulnerabilities, not Kubernetes resource kinds",
+		},
+		{
+			name:     "label-selector is rejected",
+			scanInfo: cautils.ScanInfo{LabelSelector: "app=nginx"},
+			wantErr:  "--label-selector is not supported for image scans: an image scan evaluates vulnerabilities, not Kubernetes resource labels",
+		},
+		{
+			name:     "incremental is rejected",
+			scanInfo: cautils.ScanInfo{Incremental: true},
+			wantErr:  "--incremental is not supported for image scans: an image scan evaluates vulnerabilities, not cached resource manifests",
+		},
+		{
+			name:     "dry-run is rejected",
+			scanInfo: cautils.ScanInfo{DryRun: true},
+			wantErr:  "--dry-run is not supported for image scans: an image scan evaluates vulnerabilities, not cluster resource permissions",
+		},
+		{
+			name:     "values is rejected",
+			scanInfo: cautils.ScanInfo{HelmValueFiles: []string{"values.yaml"}},
+			wantErr:  "--values is not supported for image scans: an image scan evaluates vulnerabilities, not Helm charts",
+		},
+		{
+			name:     "set is rejected",
+			scanInfo: cautils.ScanInfo{HelmSetValues: []string{"key=val"}},
+			wantErr:  "--set is not supported for image scans: an image scan evaluates vulnerabilities, not Helm charts",
+		},
+		{
+			name:     "set-string is rejected",
+			scanInfo: cautils.ScanInfo{HelmSetStringValues: []string{"key=val"}},
+			wantErr:  "--set-string is not supported for image scans: an image scan evaluates vulnerabilities, not Helm charts",
+		},
+		{
+			name:     "set-file is rejected",
+			scanInfo: cautils.ScanInfo{HelmSetFileValues: []string{"key=file"}},
+			wantErr:  "--set-file is not supported for image scans: an image scan evaluates vulnerabilities, not Helm charts",
+		},
+		{
+			name:     "release-name is rejected",
+			scanInfo: cautils.ScanInfo{HelmReleaseName: "my-release"},
+			wantErr:  "--release-name is not supported for image scans: an image scan evaluates vulnerabilities, not Helm charts",
+		},
+		{
+			name:     "release-namespace is rejected",
+			scanInfo: cautils.ScanInfo{HelmReleaseNamespace: "prod"},
+			wantErr:  "--release-namespace is not supported for image scans: an image scan evaluates vulnerabilities, not Helm charts",
+		},
+		{
+			name:     "kube-version is rejected",
+			scanInfo: cautils.ScanInfo{HelmKubeVersion: "1.31"},
+			wantErr:  "--kube-version is not supported for image scans: an image scan evaluates vulnerabilities, not Helm charts",
+		},
+		{
+			name:     "api-versions is rejected",
+			scanInfo: cautils.ScanInfo{HelmAPIVersions: []string{"apps/v1"}},
+			wantErr:  "--api-versions is not supported for image scans: an image scan evaluates vulnerabilities, not Helm charts",
+		},
+		{
+			name:     "file-path is rejected",
+			scanInfo: cautils.ScanInfo{FilePath: "manifests/app.yaml"},
+			wantErr:  "--file-path is not supported for image scans: an image scan evaluates vulnerabilities, not local manifest files",
+		},
 	}
 
 	for _, tc := range testCases {
@@ -519,6 +686,136 @@ func TestGetScanCommand_RejectsPostureFlagsOnImageScan(t *testing.T) {
 			name:    "custom-rules flag",
 			args:    []string{"image", "--custom-rules", "./rules", "nginx:1.27"},
 			wantErr: "--custom-rules is not supported for image scans: an image scan evaluates vulnerabilities, not posture controls",
+		},
+		{
+			name:    "control-timeout flag",
+			args:    []string{"image", "--control-timeout", "10s", "nginx:1.27"},
+			wantErr: "--control-timeout is not supported for image scans: an image scan evaluates vulnerabilities, not posture controls",
+		},
+		{
+			name:    "controls-version flag",
+			args:    []string{"image", "--controls-version", "v1.0.0", "nginx:1.27"},
+			wantErr: "--controls-version is not supported for image scans: an image scan evaluates vulnerabilities, not posture controls",
+		},
+		{
+			name:    "baseline flag",
+			args:    []string{"image", "--baseline", "base.json", "nginx:1.27"},
+			wantErr: "--baseline is not supported for image scans: an image scan evaluates vulnerabilities, not posture baseline drift (use 'kubescape diff' to compare image scan reports)",
+		},
+		{
+			name:    "baseline-fail-on-new flag",
+			args:    []string{"image", "--baseline-fail-on-new", "nginx:1.27"},
+			wantErr: "--baseline-fail-on-new is not supported for image scans: an image scan evaluates vulnerabilities, not posture baseline drift (use 'kubescape diff' to compare image scan reports)",
+		},
+		{
+			name:    "baseline-severity-threshold flag",
+			args:    []string{"image", "--baseline-severity-threshold", "high", "nginx:1.27"},
+			wantErr: "--baseline-severity-threshold is not supported for image scans: an image scan evaluates vulnerabilities, not posture baseline drift (use 'kubescape diff' to compare image scan reports)",
+		},
+		{
+			name:    "compliance-threshold flag",
+			args:    []string{"image", "--compliance-threshold", "80", "nginx:1.27"},
+			wantErr: "--compliance-threshold is not supported for image scans: an image scan evaluates vulnerabilities, not posture compliance scores (use --severity-threshold instead)",
+		},
+		{
+			name:    "baseline-granularity flag",
+			args:    []string{"image", "--baseline-granularity", "control", "nginx:1.27"},
+			wantErr: "--baseline-granularity is not supported for image scans: an image scan evaluates vulnerabilities, not posture baseline drift (use 'kubescape diff' to compare image scan reports)",
+		},
+		{
+			name:    "baseline-granularity flag with default value",
+			args:    []string{"image", "--baseline-granularity", "evidence", "nginx:1.27"},
+			wantErr: "--baseline-granularity is not supported for image scans: an image scan evaluates vulnerabilities, not posture baseline drift (use 'kubescape diff' to compare image scan reports)",
+		},
+		{
+			name:    "fail-coverage-below flag",
+			args:    []string{"image", "--fail-coverage-below", "80", "nginx:1.27"},
+			wantErr: "--fail-coverage-below is not supported for image scans: an image scan evaluates vulnerabilities, not posture control coverage (use --severity-threshold instead)",
+		},
+		{
+			name:    "fail-on-degraded-config flag",
+			args:    []string{"image", "--fail-on-degraded-config", "nginx:1.27"},
+			wantErr: "--fail-on-degraded-config is not supported for image scans: an image scan evaluates vulnerabilities, not posture control configurations",
+		},
+		{
+			name:    "controls-config flag",
+			args:    []string{"image", "--controls-config", "./controls.json", "nginx:1.27"},
+			wantErr: "--controls-config is not supported for image scans: an image scan evaluates vulnerabilities, not posture controls",
+		},
+		{
+			name:    "include-namespaces flag",
+			args:    []string{"image", "--include-namespaces", "default", "nginx:1.27"},
+			wantErr: "--include-namespaces is not supported for image scans: an image scan evaluates vulnerabilities, not Kubernetes namespaces",
+		},
+		{
+			name:    "exclude-namespaces flag",
+			args:    []string{"image", "--exclude-namespaces", "kube-system", "nginx:1.27"},
+			wantErr: "--exclude-namespaces is not supported for image scans: an image scan evaluates vulnerabilities, not Kubernetes namespaces",
+		},
+		{
+			name:    "include-kinds flag",
+			args:    []string{"image", "--include-kinds", "Deployment", "nginx:1.27"},
+			wantErr: "--include-kinds is not supported for image scans: an image scan evaluates vulnerabilities, not Kubernetes resource kinds",
+		},
+		{
+			name:    "exclude-kinds flag",
+			args:    []string{"image", "--exclude-kinds", "Pod", "nginx:1.27"},
+			wantErr: "--exclude-kinds is not supported for image scans: an image scan evaluates vulnerabilities, not Kubernetes resource kinds",
+		},
+		{
+			name:    "label-selector flag",
+			args:    []string{"image", "--label-selector", "app=nginx", "nginx:1.27"},
+			wantErr: "--label-selector is not supported for image scans: an image scan evaluates vulnerabilities, not Kubernetes resource labels",
+		},
+		{
+			name:    "incremental flag",
+			args:    []string{"image", "--incremental", "nginx:1.27"},
+			wantErr: "--incremental is not supported for image scans: an image scan evaluates vulnerabilities, not cached resource manifests",
+		},
+		{
+			name:    "dry-run flag",
+			args:    []string{"image", "--dry-run", "nginx:1.27"},
+			wantErr: "--dry-run is not supported for image scans: an image scan evaluates vulnerabilities, not cluster resource permissions",
+		},
+		{
+			name:    "values flag",
+			args:    []string{"image", "--values", "values.yaml", "nginx:1.27"},
+			wantErr: "--values is not supported for image scans: an image scan evaluates vulnerabilities, not Helm charts",
+		},
+		{
+			name:    "set flag",
+			args:    []string{"image", "--set", "replicaCount=2", "nginx:1.27"},
+			wantErr: "--set is not supported for image scans: an image scan evaluates vulnerabilities, not Helm charts",
+		},
+		{
+			name:    "set-string flag",
+			args:    []string{"image", "--set-string", "tag=1.27", "nginx:1.27"},
+			wantErr: "--set-string is not supported for image scans: an image scan evaluates vulnerabilities, not Helm charts",
+		},
+		{
+			name:    "set-file flag",
+			args:    []string{"image", "--set-file", "config=config.json", "nginx:1.27"},
+			wantErr: "--set-file is not supported for image scans: an image scan evaluates vulnerabilities, not Helm charts",
+		},
+		{
+			name:    "release-name flag",
+			args:    []string{"image", "--release-name", "my-release", "nginx:1.27"},
+			wantErr: "--release-name is not supported for image scans: an image scan evaluates vulnerabilities, not Helm charts",
+		},
+		{
+			name:    "release-namespace flag",
+			args:    []string{"image", "--release-namespace", "prod", "nginx:1.27"},
+			wantErr: "--release-namespace is not supported for image scans: an image scan evaluates vulnerabilities, not Helm charts",
+		},
+		{
+			name:    "kube-version flag",
+			args:    []string{"image", "--kube-version", "1.31", "nginx:1.27"},
+			wantErr: "--kube-version is not supported for image scans: an image scan evaluates vulnerabilities, not Helm charts",
+		},
+		{
+			name:    "api-versions flag",
+			args:    []string{"image", "--api-versions", "apps/v1", "nginx:1.27"},
+			wantErr: "--api-versions is not supported for image scans: an image scan evaluates vulnerabilities, not Helm charts",
 		},
 	}
 

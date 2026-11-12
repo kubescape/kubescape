@@ -2,17 +2,20 @@ package policytest
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/pkg/ruledir"
 	"github.com/kubescape/opa-utils/reporthandling"
 )
 
-// LoadCaseInput reads every YAML manifest in dir/input and returns the
-// parsed Kubernetes resources.
+// LoadCaseInput reads every YAML and JSON manifest in dir/input and returns
+// the parsed Kubernetes resources. Like a scan of local files, it tells the
+// two formats apart by extension.
 func LoadCaseInput(dir string) ([]workloadinterface.IMetadata, error) {
 	inputDir := filepath.Join(dir, "input")
 	entries, err := os.ReadDir(inputDir)
@@ -22,14 +25,23 @@ func LoadCaseInput(dir string) ([]workloadinterface.IMetadata, error) {
 
 	var resources []workloadinterface.IMetadata
 	for _, e := range entries {
-		if e.IsDir() || !cautils.IsYaml(e.Name()) {
+		if e.IsDir() {
 			continue
 		}
-		raw, err := os.ReadFile(filepath.Join(inputDir, e.Name()))
+		var format cautils.FileFormat
+		switch {
+		case cautils.IsYaml(e.Name()):
+			format = cautils.YAML_FILE_FORMAT
+		case cautils.IsJson(e.Name()):
+			format = cautils.JSON_FILE_FORMAT
+		default:
+			continue
+		}
+		raw, err := ruledir.ReadFile(filepath.Join(inputDir, e.Name()))
 		if err != nil {
 			return nil, fmt.Errorf("read %s: %w", e.Name(), err)
 		}
-		objs, err := cautils.ReadFile(raw, cautils.YAML_FILE_FORMAT)
+		objs, err := cautils.ReadFile(raw, format)
 		if err != nil {
 			return nil, fmt.Errorf("parse %s: %w", e.Name(), err)
 		}
@@ -41,7 +53,7 @@ func LoadCaseInput(dir string) ([]workloadinterface.IMetadata, error) {
 // LoadCaseExpected reads dir/expected.json as the RuleResponse list the rule
 // must produce for this case's input.
 func LoadCaseExpected(dir string) ([]reporthandling.RuleResponse, error) {
-	raw, err := os.ReadFile(filepath.Join(dir, expectedFileName))
+	raw, err := ruledir.ReadFile(filepath.Join(dir, expectedFileName))
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", expectedFileName, err)
 	}
@@ -50,4 +62,27 @@ func LoadCaseExpected(dir string) ([]reporthandling.RuleResponse, error) {
 		return nil, fmt.Errorf("parse %s: %w", expectedFileName, err)
 	}
 	return expected, nil
+}
+
+// LoadCaseData reads the control inputs in dir/data.json, the same file and
+// shape regolibrary's rule fixtures use:
+//
+//	{"postureControlInputs": {"<input>": ["<value>", ...]},
+//	 "dataControlInputs": {"cloudProvider": "<provider>"}}
+//
+// The file is optional. A case without one is evaluated with no control
+// inputs.
+func LoadCaseData(dir string) (cautils.RegoInputData, error) {
+	raw, err := ruledir.ReadFile(filepath.Join(dir, dataFileName))
+	if errors.Is(err, os.ErrNotExist) {
+		return cautils.RegoInputData{}, nil
+	}
+	if err != nil {
+		return cautils.RegoInputData{}, fmt.Errorf("read %s: %w", dataFileName, err)
+	}
+	var data cautils.RegoInputData
+	if err := json.Unmarshal(raw, &data); err != nil {
+		return cautils.RegoInputData{}, fmt.Errorf("parse %s: %w", dataFileName, err)
+	}
+	return data, nil
 }

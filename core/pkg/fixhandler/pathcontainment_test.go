@@ -58,6 +58,16 @@ func TestIsPathContained(t *testing.T) {
 		assert.True(t, isPathContained(base, base))
 	})
 
+	t.Run("relative base and target are accepted when contained", func(t *testing.T) {
+		tmp := t.TempDir()
+		t.Chdir(tmp)
+		require.NoError(t, os.MkdirAll("base/sub", 0o750))
+		require.NoError(t, os.WriteFile("base/sub/file.yaml", []byte("x"), 0o600))
+
+		assert.True(t, isPathContained("base", "base/sub/file.yaml"))
+		assert.False(t, isPathContained("base/sub", "base/file.yaml"))
+	})
+
 	t.Run("nonexistent target is rejected, not silently allowed", func(t *testing.T) {
 		base := t.TempDir()
 		assert.False(t, isPathContained(base, filepath.Join(base, "ghost.yaml")))

@@ -115,9 +115,8 @@ func getOperatorRemediateCmd(ks meta.IKubescape, operatorInfo cautils.OperatorIn
 			if !remediationInfo.IsDryRun() {
 				verb = "Applying"
 			}
-			// The operator processes the command asynchronously (the triggerAction
-			// endpoint acknowledges receipt and queues the work), so the outcome is
-			// not returned here. It is emitted as a "KubescapeRemediation" Kubernetes
+			// The CLI creates an OperatorCommand and waits for the operator to mark it
+			// completed, but the remediation result itself is not returned here. It is emitted as a "KubescapeRemediation" Kubernetes
 			// Event on the target namespace and recorded in the operator logs.
 			// A selector resolves targets across namespaces, so its audit Events are
 			// not confined to the one namespace an explicit target would name.

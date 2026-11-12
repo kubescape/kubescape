@@ -3,6 +3,7 @@ package getter
 import (
 	"context"
 	stdjson "encoding/json"
+	"fmt"
 	"maps"
 	"regexp"
 	"slices"
@@ -12,6 +13,7 @@ import (
 	"github.com/armosec/armoapi-go/identifiers"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/opa-utils/exceptions"
 )
 
 var _ IExceptionsGetter = &MergedExceptionsGetter{}
@@ -81,6 +83,43 @@ func (g *MergedExceptionsGetter) GetExceptions(ctx context.Context, clusterName 
 // cache must not serve one kind of scan with what it stored for the other.
 func (g *MergedExceptionsGetter) IncludesClusterExceptions() bool {
 	return g != nil && g.secondary != nil
+}
+
+// CacheSource identifies the primary source and whether the cluster's
+// SecurityException CRDs are merged into it. The primary is quoted so no
+// primary identity can read as another merged identity. A nil getter is
+// identified the same way as no getter at all.
+func (g *MergedExceptionsGetter) CacheSource() string {
+	if g == nil {
+		return CacheSourceOf(nil)
+	}
+	return g.cacheSource(CacheSourceOf(g.primary))
+}
+
+// LoadedCacheSource identifies what the primary source's last load read,
+// combined the way CacheSource combines it.
+func (g *MergedExceptionsGetter) LoadedCacheSource() (string, bool) {
+	if g == nil {
+		return CacheSourceOf(nil), true
+	}
+	primary, ok := LoadedCacheSourceOf(g.primary)
+	return g.cacheSource(primary), ok
+}
+
+func (g *MergedExceptionsGetter) cacheSource(primary string) string {
+	return fmt.Sprintf("merged(%q,clusterExceptions=%t)", primary, g.IncludesClusterExceptions())
+}
+
+// SourceFile forwards the file of the primary source, if it reads one.
+func (g *MergedExceptionsGetter) SourceFile() (string, bool) {
+	if g == nil {
+		return "", false
+	}
+	file, ok := g.primary.(SourceFiler)
+	if !ok {
+		return "", false
+	}
+	return file.SourceFile()
 }
 
 // ConsumedFileDigest forwards provenance from the primary local source. CRD
@@ -210,14 +249,15 @@ func coveredPostureScopes(exceptions []armotypes.PostureExceptionPolicy) (covere
 }
 
 // scopeMatcher compares posture-policy scopes the way the exception processor does
-// at evaluation time: a case-insensitive literal or anchored case-insensitive
-// pattern. Compiled patterns are reused across the whole merge.
+// at evaluation time: a case-insensitive literal or a case-insensitive pattern that
+// has to match the whole value. It uses the processor's own comparison, which also
+// caches compiled patterns across the whole merge.
 type scopeMatcher struct {
-	patterns map[string]*regexp.Regexp
+	processor *exceptions.Processor
 }
 
 func newScopeMatcher() *scopeMatcher {
-	return &scopeMatcher{patterns: make(map[string]*regexp.Regexp)}
+	return &scopeMatcher{processor: exceptions.NewProcessor()}
 }
 
 // coveredBy reports whether any primary scope already applies everywhere policy does.
@@ -244,17 +284,15 @@ func (m *scopeMatcher) covers(primary, crd string) bool {
 	if crd == "" {
 		return false
 	}
-	if strings.EqualFold(primary, crd) {
+	if primary == crd || primary == "*" {
 		return true
 	}
-	pattern, compiled := m.patterns[primary]
-	if !compiled {
-		// A pattern that does not compile is cached as nil and read as a
-		// non-match, which is how the exception processor treats it.
-		pattern, _ = regexp.Compile("(?i)^" + primary + "$")
-		m.patterns[primary] = pattern
+	// Matching the text of a secondary pattern does not cover its alternatives.
+	// Compare against a concrete value only when the secondary scope is literal.
+	if regexp.QuoteMeta(crd) != crd {
+		return false
 	}
-	return pattern != nil && pattern.MatchString(crd)
+	return strings.EqualFold(primary, crd) || m.processor.RegexCompareControlID(primary, crd)
 }
 
 // designatorDedupKey identifies the entire resource constraint. JSON preserves

@@ -2,16 +2,27 @@ package operator
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
+	"sync/atomic"
 	"testing"
 
+	"github.com/armosec/armoapi-go/apis"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/core"
 	"github.com/kubescape/kubescape/v4/core/mocks"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	dynamicfake "k8s.io/client-go/dynamic/fake"
+	clienttesting "k8s.io/client-go/testing"
 )
 
 func TestGetOperatorScanCmd(t *testing.T) {
@@ -164,16 +175,9 @@ func TestOperatorScanConfigCmd_ContextCanceled(t *testing.T) {
 	assert.Equal(t, ctx, capturedCtx, "constructor must receive the command context")
 }
 
-func TestOperatorScanConfigCmd_ContextCanceled_NoPortForward(t *testing.T) {
-	var startForwarderCalled bool
-	prevAdapter := newOperatorAdapter
-	newOperatorAdapter = func(scanInfo cautils.OperatorScanInfo, _ string, ctx ...context.Context) (*core.OperatorAdapter, error) {
-		conn := &stubOperatorConnector{
-			onStart: func() { startForwarderCalled = true },
-		}
-		return core.NewOperatorAdapterWithConnector(scanInfo, conn), nil
-	}
-	t.Cleanup(func() { newOperatorAdapter = prevAdapter })
+func TestOperatorScanConfigCmd_ContextCanceled_NoCommandsCreated(t *testing.T) {
+	op := newFakeOperator(t, "")
+	op.install(t)
 
 	cmd := getOperatorScanCmd(&mocks.MockIKubescape{}, &cautils.OperatorInfo{})
 	cmd.SetArgs([]string{"configurations"})
@@ -186,28 +190,65 @@ func TestOperatorScanConfigCmd_ContextCanceled_NoPortForward(t *testing.T) {
 	err := cmd.ExecuteContext(ctx)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, context.Canceled)
-	assert.False(t, startForwarderCalled, "must not attempt to start port forwarding when context is canceled")
+	assert.Empty(t, op.created(t), "must not create operator commands when context is canceled")
 }
 
-type stubOperatorConnector struct {
-	onStart func()
-	host    string
+// fakeOperator stands in for the Kubescape Operator: it serves the OperatorCommand
+// resource from a fake dynamic client, completes each command as it is created (or
+// fails it with failMessage) and records what the CLI created.
+type fakeOperator struct {
+	dyn *dynamicfake.FakeDynamicClient
 }
 
-func (s *stubOperatorConnector) StartPortForwarder() error {
-	if s.onStart != nil {
-		s.onStart()
+func newFakeOperator(t *testing.T, failMessage string) *fakeOperator {
+	t.Helper()
+	gvr := schema.GroupVersionResource{Group: "kubescape.io", Version: "v1alpha1", Resource: "operatorcommands"}
+	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(),
+		map[schema.GroupVersionResource]string{gvr: "OperatorCommandList"})
+	var counter int64
+	dyn.PrependReactor("create", "operatorcommands", func(action clienttesting.Action) (bool, runtime.Object, error) {
+		obj := action.(clienttesting.CreateAction).GetObject().(*unstructured.Unstructured)
+		obj.SetName(fmt.Sprintf("%s%d", obj.GetGenerateName(), atomic.AddInt64(&counter, 1)))
+		status := map[string]interface{}{"started": true, "completed": true}
+		if failMessage != "" {
+			status = map[string]interface{}{"started": true, "error": map[string]interface{}{"reason": "Failed", "message": failMessage}}
+		}
+		_ = unstructured.SetNestedField(obj.Object, status, "status")
+		return false, nil, nil
+	})
+	return &fakeOperator{dyn: dyn}
+}
+
+// install makes the commands under test talk to this fake operator.
+func (f *fakeOperator) install(t *testing.T) {
+	t.Helper()
+	prev := newOperatorAdapter
+	newOperatorAdapter = func(scanInfo cautils.OperatorScanInfo, ns string, _ ...context.Context) (*core.OperatorAdapter, error) {
+		return core.NewOperatorAdapterWithClient(scanInfo, ns, f.dyn), nil
 	}
-	return nil
+	t.Cleanup(func() { newOperatorAdapter = prev })
 }
 
-func (s *stubOperatorConnector) StopPortForwarder() {}
+// created returns the OperatorCommand objects created so far.
+func (f *fakeOperator) created(t *testing.T) []unstructured.Unstructured {
+	t.Helper()
+	gvr := schema.GroupVersionResource{Group: "kubescape.io", Version: "v1alpha1", Resource: "operatorcommands"}
+	list, err := f.dyn.Resource(gvr).Namespace(metav1.NamespaceAll).List(context.Background(), metav1.ListOptions{})
+	require.NoError(t, err)
+	return list.Items
+}
 
-func (s *stubOperatorConnector) GetPortForwardLocalhost() string {
-	if s.host != "" {
-		return s.host
+// commands decodes the apis.Command carried in spec.body of each created object.
+func (f *fakeOperator) commands(t *testing.T) []apis.Command {
+	t.Helper()
+	var cmds []apis.Command
+	for _, obj := range f.created(t) {
+		body, _, _ := unstructured.NestedString(obj.Object, "spec", "body")
+		raw, err := base64.StdEncoding.DecodeString(body)
+		require.NoError(t, err)
+		var cmd apis.Command
+		require.NoError(t, json.Unmarshal(raw, &cmd))
+		cmds = append(cmds, cmd)
 	}
-	return "127.0.0.1:4002"
+	return cmds
 }
-
-var _ cautils.OperatorConnector = (*stubOperatorConnector)(nil)

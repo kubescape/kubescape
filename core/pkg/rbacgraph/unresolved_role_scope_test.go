@@ -74,7 +74,7 @@ func TestAnalyzeEscalation_RoleFallbackPreservesKnownScope(t *testing.T) {
 	}{
 		{"collected namespaced Role", "roles", "", "reader", "prod", false},
 		{"missing Role in known namespace", "roles", "prod", "missing", "prod", false},
-		{"missing ClusterRole", "clusterroles", "", "missing", "", true},
+		{"missing ClusterRole", "clusterroles", "", "missing", "", false},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			grant := rule([]string{"rbac.authorization.k8s.io"}, []string{tt.resource}, []string{"escalate", "update"}, []string{tt.targetName})

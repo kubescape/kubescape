@@ -38,19 +38,37 @@ kubescape scan [target] [flags]
 |------|-------------|---------|
 | `--account <id>` | Kubescape SaaS account ID | from cache |
 | `--access-key <key>` | Kubescape SaaS access key | from cache |
+| `--cluster-name <name>` | Custom name for the cluster in reports. Not the same as `--kube-context` | - |
 | `--compliance-threshold <float>` | Fail if compliance score is below threshold. Applies to `scan framework`, `scan control`, and `--view resource\|control` — see [score thresholds](#score-thresholds). | `0` |
 | `--controls-config <path>` | Path to controls configuration file | - |
+| `--controls-version <tag>` | Pin the [regolibrary](https://github.com/kubescape/regolibrary/releases) release tag used to download controls. Has no effect when `--account` is set, because the cloud backend is used instead | latest release |
 | `--custom-rules <path>` | Path to user-authored custom rules — see [custom rules](#custom-rules) | - |
+| `--include-controls <ids>` | Scan only these control IDs (comma-separated, case-insensitive); all other controls are skipped. A control's CIS section number is accepted where the control carries one | - |
+| `--skip-controls <ids>` | Skip these control IDs (comma-separated, case-insensitive). A control's CIS section number is accepted where the control carries one | - |
+| `--exclude-controls <ids>` | Leave these control IDs (comma-separated, case-insensitive) out of every framework in the scan. Excluded controls are not evaluated and do not affect the compliance score. A control's CIS section number is accepted where the control carries one | - |
 | `-e, --exclude-namespaces <ns>` | Namespaces to exclude (comma-separated). Cannot be combined with `--include-namespaces` | - |
 | `--encrypt` | Encrypt sensitive report metadata using the master key provided through the `KUBESCAPE_MASTER_KEY` environment variable. Requires `--format json` for reports that will later be decrypted with `kubescape decrypt`. If both `--encrypt` and `--hide` are specified, `--encrypt` takes precedence. | `false` |
 | `--exceptions <path>` | Path to exceptions file | - |
+| `--honor-inline-exceptions` | Honor `kubescape.io/skip-*` annotations as inline exception policies | on for local manifest files, off for live-cluster scans |
 | `--audit-exceptions` | Include exception usage details in supported scan outputs | `false` |
+| `--baseline <path>` | Path to a saved JSON scan report to diff the fresh scan against | - |
+| `--baseline-fail-on-new` | With `--baseline`, exit with code `1` when new or incomparable failures are found compared with the baseline. A failure is incomparable when a change in scan scope or coverage means it cannot be classified safely | `false` |
+| `--baseline-granularity <unit>` | With `--baseline`, the comparison unit: `evidence` or `control` | `evidence` |
+| `--baseline-severity-threshold <sev>` | With `--baseline` and `--baseline-fail-on-new`, count only new or incomparable failures at or above this severity | - |
 | `--fail-coverage-below <float>` | Fail if the scan coverage score is below threshold (`0` disables). Applies in every view — see [score thresholds](#score-thresholds). | `0` |
+| `--fail-on-degraded-config` | Fail the scan (exit code `1`) if control configurations or exceptions could not be loaded from their configured source and bundled defaults were used instead | `false` |
+| `--scan-contract <path>` | Path to an explicit repository scan contract. Posture scans only: `scan image` rejects it | - |
+| `--contract <name>` | Named contract to select from the `--scan-contract` file. Requires `--scan-contract` | `spec.defaultContract` |
 | `-f, --format <format>` | Output format: `pretty-printer`, `json`, `junit`, `prometheus`, `pdf`, `html`, `sarif`, `gitlab-sast`, `github-actions`, `yaml`, `csv`, `markdown`, `policyreport`, `exceptions`, `cyclonedx-json`, `spdx-json` — see [generating an exceptions baseline](#generating-an-exceptions-baseline) and [generating an SBOM](#generating-an-sbom). `github-actions` emits failed High/Critical controls as `::error` workflow commands for inline PR annotations; local file scans only, capped at GitHub's 10-annotations-per-step limit | `pretty-printer` |
 | `--hide` | Replace sensitive report metadata with deterministic pseudonyms. Ignored when `--encrypt` is also specified. | `false` |
 | `--host-scan` | Enable host data collection from cluster nodes for certain controls. When not set, Kubescape auto-detects node-agent CRDs and uses a CRD-based host sensor if available. Use `--host-scan=false` to disable host data collection. See the [Kubescape operator](https://github.com/kubescape/helm-charts/tree/main/charts/kubescape-operator) for a managed alternative. | auto-detect |
 | `--include-namespaces <ns>` | Namespaces to include (comma-separated). Cannot be combined with `--exclude-namespaces` | - |
+| `--include-kinds <kinds>` | Scan only these Kubernetes resource kinds (comma-separated, case-insensitive, kind name only, not group/version qualified), e.g. `Deployment,DaemonSet` | - |
+| `--exclude-kinds <kinds>` | Leave these Kubernetes resource kinds out of the scan (comma-separated, case-insensitive, kind name only, not group/version qualified), e.g. `Job,CronJob` | - |
+| `--exclude-path <pattern>` | Exclude paths from file, directory and repository scans, using gitignore syntax relative to the scan root, e.g. `'test/**'` or `'!test/prod.yaml'`. Repeat for more than one. Combined with the patterns in a `.kubescapeignore` file at the scan root. Helm charts, Kustomize configurations and Terraform modules are excluded as whole directories | - |
+| `--no-ignore-file` | Ignore the `.kubescapeignore` file at the scan root; only `--exclude-path` patterns apply | `false` |
 | `--label-selector <selector>` | Filter collected resources by Kubernetes label selector. Accepts any expression `kubectl -l` supports, e.g. `app=nginx,env!=dev` or `env in (prod,staging)`. Syntax is validated before scanning begins; filtering is applied during live cluster collection and ignored when scanning local files. | - |
+| `--labels-to-copy <labels>` | Workload labels to copy into scan reports for easy identification (comma-separated), e.g. `app,team,environment` | - |
 | `--keep-local` | Don't report results to backend | `false` |
 | `--notify <url>` | POST the scan summary to a webhook URL. Slack incoming webhooks receive Block Kit, Microsoft Teams webhooks an Adaptive Card, and other destinations generic JSON. Repeat for multiple endpoints. Delivery is best-effort and does not affect scan exit status. | - |
 | `--kubeconfig <path>` | Path to kubeconfig file | - |
@@ -59,9 +77,9 @@ kubescape scan [target] [flags]
 | `--reference-cluster <ctx>` | With `--fleet-report`, the context the other clusters are compared against. Must be one of `--kube-contexts`. | - |
 | `--retries <n>` | With `--kube-contexts`, how many more times to try a cluster whose API server never answered, waiting 2s, then 4s, doubling up to 30s. `0` disables retries. | `2` |
 | `--fleet-config <path>` | Read `--kube-contexts`, `--output`, `--fleet-report`, `--reference-cluster` and `--retries` from a `FleetConfig` file. A flag on the command line overrides the file. See [fleet config file](fleet-scanning.md#fleet-config-file). | - |
-| `-o, --output <path>` | Output file path | stdout |
-| `--release-name <name>` | Helm release name made available as `.Release.Name` when rendering a chart | - |
-| `--release-namespace <ns>` | Helm release namespace made available as `.Release.Namespace` when rendering a chart | - |
+| `-o, --output <path>` | Output file path. For `scan validate-contract`, the destination must not refer to the input contract, including through symbolic or hard links | stdout |
+| `--release-name <name>` | Helm release name made available as `.Release.Name` when rendering a chart | `release-name` |
+| `--release-namespace <ns>` | Helm release namespace made available as `.Release.Namespace` when rendering a chart | `default` |
 | `--kube-version <version>` | Kubernetes version made available as `.Capabilities.KubeVersion` when rendering a chart, as in `helm template`. A chart whose `kubeVersion` constraint rejects it is not rendered | the newest version the chart's `kubeVersion` allows, up to the Kubernetes version Kubescape is built with; `v1.20` (Helm's library default) when the chart declares none or no such version satisfies it |
 | `--api-versions <group/version,...>` | Kubernetes API versions added to `.Capabilities.APIVersions` when rendering a chart, as in `helm template`. Repeat or separate with commas | built-in APIs only |
 | `--set <key=value>` | Set Helm values when scanning a chart. Repeat for more than one | - |
@@ -70,16 +88,43 @@ kubescape scan [target] [flags]
 | `--otel-endpoint <endpoint>` | Export scan traces and metrics to an OTLP collector — see [OpenTelemetry export](#opentelemetry-export). Accepts `host:port` (plaintext) or a `http(s)://` URL. | `OTEL_EXPORTER_OTLP_ENDPOINT` |
 | `--scan-images` | Also scan container images for vulnerabilities. Required for `--format cyclonedx-json` and `--format spdx-json` — see [generating an SBOM](#generating-an-sbom) | `false` |
 | `--image-platform <platform>` | OCI platform for workload image scans, such as `linux/amd64`. Overrides platform inferred from Nodes and hard scheduling constraints | inferred |
+| `--image-scan-concurrency <n>` | Number of concurrent workers for image scanning | `1` |
+| `--use-default-matchers` | Use the default vulnerability matchers (`true`) or CPE matchers (`false`) for image scanning | `true` |
+| `--grype-db-url <url>` | Grype vulnerability database URL | - |
+| `--registry-username <user>` | Username for image registry login when no docker config or credential helper is available. Also read from `KUBESCAPE_REGISTRY_USERNAME` | - |
+| `--registry-password <password>` | Password for image registry login when no docker config or credential helper is available. Also read from `KUBESCAPE_REGISTRY_PASSWORD` | - |
+| `--registry-token <token>` | Bearer token for image registry login when no docker config or credential helper is available. Also read from `KUBESCAPE_REGISTRY_TOKEN` | - |
+| `--registry-authority <host[:port]>` | Registry `host[:port]` that the `--scan-images` registry credentials apply to | - |
+| `--registry-mapping <from=to>` | Map internal registry hosts to reachable ones, as `host[:port]` without a scheme, e.g. `image-registry.openshift-image-registry.svc:5000=registry.company.com` | - |
 | `--min-severity <sev>` | Only show findings at or above this severity: `low`, `medium`, `high`, `critical`. Applies to posture controls and image vulnerabilities. Output-only — exit codes are computed on the full unfiltered report | - |
 | `--max-severity <sev>` | Only show findings at or below this severity. Applies to posture controls and image vulnerabilities. Output-only — exit codes are computed on the full unfiltered report | - |
 | `--severity-threshold <sev>` | Fail if findings at or above severity: `low`, `medium`, `high`, `critical`. Failed controls with unknown severity (missing base score) are treated as exceeding any threshold | - |
+| `--fail-on-kev` | Fail image scans when any vulnerability is listed in the CISA Known Exploited Vulnerabilities catalog, whatever its severity. Requires `scan image`, `scan workload` or `--scan-images` — see [failing on exploitable vulnerabilities](image-scanning.md#failing-on-exploitable-vulnerabilities) | `false` |
+| `--epss-threshold <0..1>` | Fail image scans when any vulnerability's EPSS score is at or above this value. `0` disables the gate. Requires `scan image`, `scan workload` or `--scan-images`. Pair with `--max-db-age` and `--fail-on-stale-db` | `0` |
+| `--only-fixable` | With `--severity-threshold` on image scans, count only CVEs that have a fix available toward the pass/fail decision | `false` |
 | `--skip-db-update` | Do not update the vulnerability database before scanning images; uses the locally cached database. Fails if the local database is missing or unusable (run once without this flag to download it). | `false` |
+| `--max-db-age <duration>` | Maximum age of the vulnerability database before it is considered stale, e.g. `120h` or `168h`. Always warns; fails only with `--fail-on-stale-db`. `0` selects the default. An explicitly passed value, even `0`, wins over `KS_MAX_DB_AGE` | `120h` |
+| `--fail-on-stale-db` | Fail image scans when the vulnerability database is older than `--max-db-age` instead of only warning. When the database is updated, failing requires network access for the update check. An explicitly passed value, even `false`, wins over `KS_FAIL_ON_STALE_DB` | `false` |
 | `--submit` | Submit results to Kubescape SaaS | `false` |
 | `--use-artifacts-from <path>` | Load artifacts from local directory (offline mode) | - |
 | `--use-from <path>` | Load specific policy from path | - |
+| `--use-default` | Load the local policy object from the default path instead of downloading the latest | `false` |
 | `--values <path>` | Helm values file or URL to use when scanning a chart. Repeat, or separate with commas, for more than one | - |
 | `-v, --verbose` | Display all resources, not just failed ones | `false` |
+| `-E, --show-evidence` | Show evidence paths with current field values for each failed control (`pretty-printer` only) | `false` |
+| `--show-secrets` | Show secret field values in evidence output instead of redacting them. Only effective with `--show-evidence` | `false` |
 | `--view <type>` | View type: `security`, `control`, `resource` | `security` |
+| `--dry-run` | Check whether the current credentials can list every resource type the requested policies need, without collecting resources or evaluating controls. Cluster scans only | `false` |
+| `--scan-timeout <duration>` | Maximum duration of the scan, e.g. `5m`. When the timeout is reached the scan exits with a non-zero code. `0` means no timeout | `0` |
+| `--control-timeout <duration>` | Maximum duration for evaluating a single control, e.g. `30s`. Controls that exceed it are marked as not evaluated and the scan continues. Must be lower than `--scan-timeout` when both are set. `0` means no timeout | `0` |
+| `--incremental` | Cache each resource's verdict, keyed by a hash of its spec and metadata plus the controls-config version, and skip re-evaluating unchanged resources on the next scan. Scan output is unaffected. The cache is invalidated when the controls-config version changes; clear it with `kubescape config delete cache` | `false` |
+| `--enable-streaming` | Process cluster resources in batches instead of loading them all at once, to reduce memory use on large clusters | `false` (on automatically above 2,500 resources) |
+| `--whole-cluster-policy <policy>` | How to run the whole-cluster controls (C-0261, C-0266, C-0267, C-0272): `projected` (incremental projection of matching resources), `fallback` (materialize the full cluster in memory), `skip` (skip them, for minimum memory) or `verify` (debug check that `projected` and `fallback` agree; a mismatch fails the scan). Without the flag, `KUBESCAPE_WHOLE_CLUSTER_POLICY` applies if it is set, and otherwise `KUBESCAPE_WHOLE_CLUSTER_PARITY_CHECK=true` selects `verify` | `projected` |
+| `--enable-rego-prints` | Send Rego `print` output to the logs; use with `-l debug` | `false` |
+
+Helm charts are rendered as a new installation (`.Release.IsInstall` is `true`,
+`.Release.IsUpgrade` is `false`, and `.Release.Revision` is `1`), matching
+`helm template`. This includes installation-only templates in the scan.
 
 ### Framework-scoped exceptions
 
@@ -90,6 +135,14 @@ view and the aggregate result remain failed. The aggregate can still carry the
 `w/exceptions` substatus. Audit counts (`--audit-exceptions`) and
 `ExceptionMatched` events include only exceptions applicable to the selected
 frameworks; a partially excepted aggregate can still have a matched exception.
+
+A cluster scan emits `ExceptionMatched` events only when the scanning identity
+can create and patch core `events` in every namespace. Kubescape checks this once
+per scan with SelfSubjectAccessReviews. If the check is denied (info) or cannot
+reach a decision (warning), it logs one message and emits no events, so a scan
+without that permission does not log a rejected event for every matched
+exception. The Kubescape operator Helm chart grants these permissions only when
+`capabilities.riskAcceptance` is enabled.
 
 Compatibility note: the scan retains raw rule evaluations and exception policies.
 Raw results embedded in MCP `failedResources` can still carry failed evaluations
@@ -325,6 +378,10 @@ kubescape policy test ./myrules
 kubescape scan ./manifests --custom-rules ./myrules
 ```
 
+`policy test` reads each test case from a directory under the rule's `test/`:
+an `input/` directory of YAML (`.yaml`, `.yml`) or JSON (`.json`) manifests, and
+the `expected.json` the rule must produce for them.
+
 `kubescape policy init` writes that layout for you, including a flagged and a
 clean test case whose `expected.json` already matches the generated rule, so the
 new rule passes `policy test` before you start editing it:
@@ -339,6 +396,12 @@ kubescape policy init ./myrules/no-privileged-pods --kind Pod
 and `--description`, `--remediation` and `--force` set the metadata text and
 allow overwriting an existing rule directory.
 
+The generated rule reports the field it flags in `deletePaths`. A scan takes a
+finding's location from a rule's `deletePaths`, `reviewPaths` and `fixPaths`,
+so keep naming the offending field there as you change the rule. The deprecated
+`failedPaths` is not read: a finding that only has `failedPaths` is reported
+without the field, and formats such as SARIF place it at line 1.
+
 Once you change the rule, `--update` rewrites each case's `expected.json` from
 the rule's current output instead of comparing against it, which saves
 hand-writing the matched object into the fixture:
@@ -349,6 +412,41 @@ kubescape policy test ./myrules --update
 
 Review the resulting diff before committing it: `--update` records whatever the
 rule currently produces, so it will happily bless a regression.
+
+`--run` narrows a run to the cases whose `<rule>/<case>` name, as printed next to
+each case's result, matches a regular expression. The pattern is not
+anchored, so `--run flagged` selects every case with `flagged` in its name, and
+`^no-privileged-containers/flagged$` selects exactly one. Rules without a
+matching case are left out of the run, and a pattern that matches no case at all
+is an error rather than an empty pass. Combined with `--update`, it rewrites the
+`expected.json` of the selected cases only and leaves the others as they are:
+
+```bash
+kubescape policy test ./myrules --run '^no-privileged-containers/flagged$'
+kubescape policy test ./myrules --run '/flagged$' --update
+```
+
+`policy test` gives a rule that reads
+[control configuration](#control-configuration) its inputs from an optional
+`data.json` in the test case directory, in the format regolibrary's fixtures
+use:
+
+```json
+{
+  "postureControlInputs": {
+    "untrustedRegistries": ["evil.example.com/"]
+  },
+  "dataControlInputs": {
+    "cloudProvider": "eks"
+  }
+}
+```
+
+As in a scan, a posture input reaches the rule only if its
+`rule.metadata.json` lists it in `controlConfigInputs`, for example with the
+path `settings.postureControlInputs.untrustedRegistries`. `cloudProvider` is
+the provider a scan detects for the cluster. A case without `data.json` is
+evaluated with no control inputs.
 
 Pass either the parent directory or a single rule directory. The metadata
 supplies the rule's name, description, remediation and `match` selectors, so the
@@ -413,7 +511,7 @@ unscoped CRD with `Disable` can still suppress findings in named API groups.
 
 ### Exception Audit
 
-Use `--audit-exceptions --format json` to include an `exceptionAudit` object in scan output. The audit contains:
+Use `--audit-exceptions` with `--format json` or `--format yaml` to include an `exceptionAudit` object in scan output. The audit contains:
 
 | Field | Description |
 |-------|-------------|
@@ -673,6 +771,7 @@ Unlike `kubectl`'s `TYPE.VERSION.GROUP` (which takes a plural resource), this co
 | `--namespace <ns>` | Namespace of the workload (defaults to `'default'` for live-cluster scans, or pass `'*'` for cluster-wide search which requires cluster-level list permissions. When scanning local files or stdin, an omitted namespace matches manifests across any namespace. Must not conflict with a namespace prefix in the workload argument) |
 | `--file-path <path>` | Path to a manifest that contains the workload |
 | `--chart-path <path>` | Path to the Helm chart the workload is part of. Must be used with `--file-path` |
+| `--api-version <version>` | API version of the workload, e.g. `apps/v1` |
 
 ### Examples
 
@@ -710,7 +809,7 @@ kubescape scan image <image>:<tag> [<image>:<tag>...] [flags]
 | `-p, --password <pass>` | Registry password |
 | `--platform <platform>` | OCI platform to scan, for example `linux/amd64`, `linux/arm64/v8`, or `windows/amd64`. Applies to every image in the run |
 | `-u, --username <user>` | Registry username |
-| `--use-default-matchers` | Use default vulnerability matchers | `true` |
+| `--use-default-matchers` | Use the default vulnerability matchers; `false` uses CPE matchers instead (default `true`) |
 
 ### Scanning several images at once
 
@@ -725,7 +824,8 @@ An image that cannot be scanned — an unreachable registry, a bad reference —
 not abort the run: the remaining images are still scanned and reported, the
 failures are summarized at the end, and the command exits non-zero. The severity
 threshold is evaluated across all images, so `--severity-threshold` fails the run
-when any single image crosses it.
+when any single image crosses it. The same holds for `--fail-on-kev` and
+`--epss-threshold`.
 
 Output formats behave as follows for a multi-image run: `json`, `cyclonedx-json`
 and `spdx-json` emit a JSON array with one document per image (a single image
@@ -789,9 +889,59 @@ usual case, is left alone in either format: the fix paths would resolve against
 the wrapper rather than the resources they belong to. Multi-document YAML is
 fixed normally, each document there being a resource in its own right.
 
+Before writing a file or a fixed copy, Kubescape checks that the scanned
+resource still has the same API version, kind, namespace and name at the
+recorded document position. If the resource moved or changed identity,
+Kubescape leaves the file untouched. Re-scan the manifest and use the new
+report. If the same identity appears more than once, remove the duplicate
+before re-scanning. An in-place fix also refuses to overwrite a manifest
+that was replaced while the fix was being prepared.
+
 Helm charts are reported as suggestions rather than edited, because a rendered
 resource's fix path does not map reliably back to a template line. Resources
-from any other source are listed as unfixed with the reason.
+from any other source are listed as unfixed with the reason. To generate machine-applicable
+Kustomize JSON 6902 patches for Helm-rendered resources, use `--output-kustomize`.
+
+### Helm-rendered resources and Kustomize overlays
+
+When Helm charts cannot be modified in place (for example, third-party charts or GitOps pipelines),
+pass `--output-kustomize <dir>` to generate a machine-applicable overlay consisting of
+a `kustomization.yaml`, a `base.yaml` snapshot of rendered resources, and RFC 6902 JSON patch
+files targeting each remediated resource.
+
+#### Usage
+
+```bash
+# Scan a local Helm chart directory
+kubescape scan ./my-chart --format json --output output.json
+
+# Generate Kustomize patch overlay
+kubescape fix output.json --output-kustomize ./patches --values ./my-chart/values.yaml
+
+# Build and apply the overlay
+kustomize build ./patches | kubectl apply -f -
+```
+
+#### Directory protection and staging
+
+Writing to `--output-kustomize` follows the output directory protection policy:
+- Generation is staged in a temporary directory and promoted to the target directory under exclusive file locking. If writing a file fails, the operation attempts a best-effort rollback. If the process is abruptly terminated or killed during publication, partial output or leftover staging directories (`.kust-staging-*`) may remain on disk:
+  - Backups of original pre-existing files that were replaced are held under `.kust-staging-*/.backup` within the output directory; inspect and manually restore or remove them as appropriate before retrying.
+  - Because leftover staging directories make the output directory non-empty, retrying `kubescape fix` against the directory will require `--no-confirm`.
+- When overwrite is confirmed or `--no-confirm` is passed, files that the command generates (`base.yaml`, `kustomization.yaml`, and the generated patch files) overwrite same-named files. Other files in the directory are left in place, but the new `kustomization.yaml` does not reference them.
+- Exclusive file locking (`.kust.lock`) coordinates concurrent Kubescape emitters. External readers such as `kustomize build` must not run against the destination directory during an overwrite, as the emitter lock does not protect readers from observing partially promoted overlay files while staged files are being moved into place.
+
+#### Applicable Helm options
+
+When resolving and rendering chart templates for Kustomize overlays, you can supply Helm value options to match scan-time parameters:
+- `-f`, `--values`: Provide one or more YAML values files.
+- `--set`, `--set-string`, `--set-file`: Override specific chart values.
+- `--release-name`: Release name used during rendering.
+- `--release-namespace`: Release namespace used during rendering. Namespaced resources without an explicit template namespace are scoped to this namespace, while cluster-scoped resources remain namespace-free.
+
+#### Container workload refusal
+
+Container workloads from ordinary scan reports are declined under `--output-kustomize`. Ordinary scan reports redact container environment configuration (substituting `XXXXXX` and stripping `envFrom`), and ordinary report producers do not supply scan-time provenance (`UnredactedBase` or `FidelityProvenance`). Generating patches from redacted reports could drop production environment variables. Eligible non-container Helm resources (such as `Service`) are emitted normally.
 
 ### Cluster scans
 
@@ -851,11 +1001,23 @@ a config omits, so the live `envFrom` survives.
 |------|-------------|---------|
 | `--dry-run` | Preview changes without applying | `false` |
 | `--no-confirm` | Apply without confirmation | `false` |
-| `-i`, `--interactive` | Show each resource's changes and ask before fixing it, instead of one prompt for the whole run. Only manifest files fixed in place are asked about: with `--dry-run`, `--no-confirm`, `--output-dir` or a cluster scan, the changes are shown without asking | `false` |
+| `-i`, `--interactive` | Show each resource's changes and ask before fixing it, instead of one prompt for the whole run. Only manifest files fixed in place are asked about: with `--dry-run`, `--no-confirm`, `--output-dir`, `--output-patch` or a cluster scan, the changes are shown without asking | `false` |
 | `--skip-user-values` | Skip changes requiring user values | `true` |
-| `--output-dir` | Write the fixes into this directory instead of their default destination. Manifest files: fixed copies that mirror the scanned tree, originals untouched. Cluster scans: one patched manifest per resource | *(fix in place / print to stdout)* |
+| `--base-path` | Restrict fixes to this directory: the report's own recorded scan location must resolve inside it | - |
+| `--output-dir` | Write the fixes into this directory instead of their default destination. Manifest files: fixed copies that mirror the scanned tree, originals untouched. Cluster scans: one patched manifest per resource. A non-empty directory is refused unless `--no-confirm` is passed | *(fix in place / print to stdout)* |
+| `--output-patch` | Write the fixes for manifest files to this file as one unified diff instead of changing the manifests. Apply it from the scanned directory with `git apply` or `patch -p1`. The manifests are never modified, and an existing file is replaced only with `--no-confirm`. Not for cluster scans; cannot be combined with `--output-dir`, `--dry-run` or `--verify` | - |
+| `--verify` | After the fixes are applied in place, rescan the scanned directories and report, for each fixed control, whether the finding is `resolved`, `still failing` or `unverified`. Exits with an error unless every fix is resolved. Cannot be combined with `--dry-run`, `--output-dir` or `--output-patch`; not for cluster scans | `false` |
+| `--controls-config` | With `--verify`, the controls-config file the rescan uses instead of the one the report records. `--verify` refuses to run, before anything is changed or written, if the file it would use cannot be read or holds no control inputs. Only applies to `--verify` | - |
+| `--output-kustomize` | Write a `kustomization.yaml` and JSON 6902 patch files for Helm-rendered resources into this directory. A non-empty directory is refused unless `--no-confirm` is passed | - |
+| `-f`, `--values` | Specify Helm values in a YAML file (can specify multiple) | - |
+| `--set` | Set Helm values on the command line (e.g. `key1=val1,key2=val2`) | - |
+| `--set-string` | Set Helm STRING values on the command line | - |
+| `--set-file` | Set Helm values from respective files specified via the command line | - |
+| `--release-name` | Release name to use when rendering Helm charts | `release-name` |
+| `--release-namespace` | Release namespace to use when rendering Helm charts | `default` |
 | `--include-controls` | Remediate only these control IDs (comma-separated, case-insensitive). Disables `--container-profile` drift remediation — see [selecting controls to fix](#selecting-controls-to-fix) | *(all)* |
 | `--skip-controls` | Leave these control IDs untouched (comma-separated, case-insensitive). Takes precedence over `--include-controls`, and disables `--container-profile` drift remediation | - |
+| `--base-path <path>` | Restrict fixes to this directory: the report's recorded scan location must resolve inside it. Use it when the report file comes from a source you don't fully trust, such as a shared CI artifact; without it, the recorded location is trusted as-is | - |
 
 ### Selecting controls to fix
 
@@ -917,6 +1079,11 @@ kubescape fix results.json --no-confirm
 
 # Leave the manifests untouched: write the fixed copies to a directory instead
 kubescape fix results.json --output-dir ./fixed
+
+# Leave the manifests untouched: export the fixes as a patch to review and apply
+kubescape fix results.json --output-patch remediation.patch
+# Apply the fixes, then rescan to check that each one resolved its finding
+kubescape fix results.json --no-confirm --verify
 ```
 
 With `--output-dir` the copies recreate the scanned tree, and a multi-document
@@ -949,6 +1116,169 @@ place outside it, and to replace a copy it has already written in the same run
 under another name, as two names differing only in case are on a
 case-insensitive filesystem.
 
+### Exporting the fixes as a patch
+
+`--output-patch` writes the fixes as one unified diff instead of changing any
+manifest. Generating the fixes, exporting them and applying them become three
+separate steps, so the changes can be reviewed, committed through your usual
+review process, or applied by someone else:
+
+```bash
+kubescape scan /path/to/manifests --format json --output results.json
+kubescape fix results.json --output-patch remediation.patch
+
+# Review remediation.patch, then from the repository root (inside a git
+# repository) or from the scanned directory (outside one):
+git apply --check remediation.patch   # does it apply cleanly?
+git apply remediation.patch
+# or, without git:
+patch -p1 < remediation.patch
+```
+
+Paths in the patch start where the `--output-dir` layout starts (see the table
+above): the repository root inside git, the scanned directory for a single
+input, and the directory the inputs share for several. Apply the patch from
+that directory. Inside a git repository `git apply` reads the paths from the
+repository root, and skips a patch whose paths are not under the directory it
+runs in while still exiting 0, so use `git apply -v` to see what it did. Some
+`patch` implementations, such as the BSD one that ships with macOS, cannot read
+file names that git has to quote (those with a `"`, a tab or a `\`); use
+`git apply` for those.
+
+The patch holds exactly the edits `kubescape fix` would make in place: the same
+fixer runs on the same manifests, and applying the patch to a clean copy gives
+the same files `--output-dir` writes. Where the other modes write the fixed
+files, this one writes the difference, so the changes show up in a code review
+and a patch for several files is one file to hand over.
+
+**Format.** A standard unified diff, with one `diff --git a/<path> b/<path>`
+section for each manifest that changes, in path order, and three lines of
+context around each change. Paths are relative and laid out as `--output-dir`
+lays out its copies, so a patch made on one machine applies on another, and it
+holds no timestamps, user names or absolute paths. A manifest the fixes leave
+as it is has no section. A file that does not end with a newline is marked as
+`diff` marks it.
+
+**Safety.** No manifest is modified, and there is no confirmation prompt, since
+nothing is edited in place. The patch is written to a temporary file and moved
+into place, so the file is either complete or not there. It is created readable
+by its owner only, because it contains the manifests' content. Before any work
+is done, `--output-patch` refuses a path that:
+
+- is a scanned manifest or the report being fixed, even with `--no-confirm`
+  (including through a hard link or symlink);
+- is a directory, or sits in a directory that does not exist;
+- already exists, unless `--no-confirm` is passed.
+
+**Partial remediation.** A patch is a proposal and not a statement that the
+findings are resolved. The summary says how many files and resources the patch
+changes and how many of the flagged control instances it covers, and lists the
+controls that cannot be fixed automatically, which need manual work as they do
+with every other mode:
+
+```
+Wrote a patch changing 2 file(s) and 3 resource(s) to remediation.patch, covering 5 of 9 flagged control instances. The original files were not modified.
+```
+
+**When there is nothing to export.** If no manifest would change, no file is
+written, and the run says so. An existing patch file is left as it was. If a
+manifest cannot be read or fixed, the whole export fails and no patch is
+written, since a patch that left a file out would read as complete.
+
+**Limitations.**
+
+- A change inside a line replaces the whole line in the patch.
+- YAML is edited in place, so comments, key order and the formatting of the
+  lines that are not fixed are kept. A JSON manifest is re-encoded with standard
+  indentation, as it is when fixed in place, so a manifest formatted another way
+  appears as changed throughout.
+- It is for manifest files. A cluster scan has no manifests to patch; use
+  `--output-dir` to write one patched manifest per resource.
+- It cannot be combined with `--output-dir`, which also leaves the manifests
+  untouched, with `--dry-run`, which writes nothing, or with `--verify`, which
+  rescans manifests that have to have been changed.
+- The patch is made against the manifests as they are on disk when it is
+  written. If they change afterwards, check it with `git apply --check` before
+  applying it, or scan again.
+
+### Verifying the fixes
+
+`--verify` answers the question a fix leaves open: did it work. After the fixes
+are written in place, it rescans the scanned directories and judges every
+control that was fixed, one finding at a time:
+
+```
+Verification: 2 resolved, 1 still failing, 1 unverified
+  Deployment/web: C-0016 resolved (control_passed): the control passed in the fresh scan, which completed
+  Deployment/web: C-0057 still_failing (control_failed): the control is still reported as failed in the fresh scan
+  Deployment/api: C-0057 resolved (control_passed): the control passed in the fresh scan, which completed
+  Pod/db: C-0017 unverified (resource_not_found): the resource_id is not in the fresh scan; ...
+```
+
+Every fixed control gets a line with its verdict and the reason for it, and
+the ones that are not `resolved` are printed as warnings.
+
+| Verdict | Meaning |
+|---------|---------|
+| `resolved` | The resource is in the rescan, exactly one result for the control is `passed` with no sub-status, and the rescan completed with nothing skipped or degraded |
+| `still_failing` | The resource is in the rescan and the control is reported as failed |
+| `unverified` | Anything else, each with a reason: the resource or control is missing or reported twice, the control was not evaluated or passed with an exception, or the rescan was incomplete |
+
+The same rules decide the `verify_remediation` tool of the MCP server. A finding
+is never resolved by absence: a resource ID depends on the file's path under the
+scan root and on the document's position, so a renamed, moved or reordered
+resource, or one that was deleted, is not found and so is `unverified`. A
+rescan that skipped a manifest or did not fully complete resolves nothing.
+
+**Exit status.** The command exits `0` only when every fixed control is
+resolved, and `1` when any is `still failing` or `unverified`, or when the
+rescan itself could not run. A rescan that fails is an error, not a verdict.
+When some fixes could not be applied, verification is skipped and the existing
+failure is reported. A control that has no automatic fix, or a fix that was
+only partial, is not rescanned; it stays in the list of what needs manual
+work. When no fix was applied, there is nothing to verify and the command says
+so without scanning.
+
+**What the rescan covers.** It reads the manifests through the same roots the
+original scan did, which are the scanned directories (the repository root inside
+git, so a scan of one subdirectory of a repository rescans the whole
+repository). It checks only the controls that were fixed.
+
+**The configuration a verdict holds for.** What a control demands depends on the
+controls configuration, so a rescan under another is not a check of the fix: a
+default more lenient than the original would call resolved a finding the
+original configuration still fails. The report records the path of the
+controls-config file of the scan that made it, and the rescan uses that file.
+It is never replaced by the default: if the recorded file can no longer be read,
+or no longer holds a controls configuration (a JSON object with at least one
+control input), `--verify` stops before it changes or writes anything, the
+`--output-kustomize` files included, and asks for the file with
+`--controls-config`, which is also how to point the rescan at a different one.
+A file given with `--controls-config` is checked the same way.
+The output names the configuration used every time, and says when the report was
+made by another Kubescape version, whose policies may judge a control
+differently.
+
+**What the report does not record.** The exceptions the scan used, its controls
+version, where its policies came from, and filters such as `--include-kinds`, so
+the rescan takes the defaults for those, and the command says so each time. A
+verdict holds for that configuration; if your scan used other settings, scan
+again with them to confirm the result. Exceptions are the setting with the least
+reach, which is why there is no `--exceptions` option. An exception attaches to
+a finding that is still there: if the fix worked there is nothing for it to
+attach to and the control is `resolved` as before, and if the finding persists,
+an exception the original scan did not have makes it `still failing` (an
+`alertOnly` exception) or `unverified` (any other), never `resolved`.
+
+**No cluster is contacted.** The rescan reads manifests only. It does not reach
+for the cluster in your kubeconfig, so a kubeconfig whose server is down does not
+stall it.
+
+`--verify` needs the manifests to have been changed, so it cannot be combined
+with `--dry-run`, `--output-dir` or `--output-patch`, and a cluster scan has no
+manifests to rescan. Helm-rendered resources are only suggested, never applied, so they are
+not verified.
+
 Fixing a cluster scan:
 
 ```bash
@@ -972,10 +1302,12 @@ kubectl apply -f ./fixes
 > context — the prompt is skipped and no changes are applied. Use
 > `--no-confirm` to apply fixes in non-interactive contexts.
 >
-> The prompt does not apply to cluster scans, or to manifest files fixed with
-> `--output-dir`: neither path edits anything in place, so there is nothing to
-> confirm. `--interactive` shows the changes on those paths without asking. With
-> `--output-dir`, a non-empty directory is refused unless you pass
+> The in-place file modification confirmation prompt does not apply to cluster
+> scans, `--output-dir` or `--output-patch` (which write manifests to stdout,
+> separate files or a patch file).
+> However, with `--output-kustomize`, if the target directory already contains
+> Kustomize files, Kubescape prompts for confirmation before overwriting; in
+> non-interactive contexts, a non-empty directory is refused unless you pass
 > `--no-confirm`.
 
 ---
@@ -999,9 +1331,12 @@ kubescape patch [flags]
 | `-a, --address <address>` | BuildKit daemon address | none (auto-detects local docker daemon, falling back to `unix:///run/buildkit/buildkitd.sock`) |
 | `--timeout <duration>` | Patching timeout | `5m` |
 | `--ignore-errors` | Continue on errors | `false` |
-| `--push` | Push the patched image to the source registry | `false` |
+| `--push` | Push the patched image to the source registry. Sets `--output-mode` to `image`, so it cannot be combined with `--output-mode oci` or `local` | `false` |
+| `--output-mode <mode>` | Output mode for the patched image: `docker`, `image`, `oci` or `local` | `docker` |
+| `--output-path <path>` | Destination path for the `oci` and `local` output modes | - |
 | `-u, --username <user>` | Registry username | - |
 | `-p, --password <pass>` | Registry password | - |
+| `--grype-db-url <url>` | Grype vulnerability database URL | - |
 | `-f, --format <format>` | Output format: `pretty-printer`, `json`, `sarif` | - |
 | `-o, --output <path>` | Output file | stdout |
 | `-v, --verbose` | Verbose output | `false` |
@@ -1197,6 +1532,8 @@ kubescape list <type> [flags]
 | `--access-key <key>` | Access key | - |
 | `--controls-config <path>` | Show the inputs a scan would use with this controls-config file. Only applies to `controls-config` | downloaded |
 | `--format <format>` | Output format: `pretty-print`, `json`, `yaml`, `csv` | `pretty-print` |
+| `--framework <name>` | Only applies to `controls`. List the controls that belong to this framework (case-insensitive) | - |
+| `--search <text>` | Only applies to `controls`. Case-insensitive match against control ID, name or framework | - |
 
 ### Control configuration
 
@@ -1333,6 +1670,10 @@ kubescape operator scan <type> [flags]
 | `configurations` | Trigger configuration scan |
 | `vulnerabilities` | Trigger vulnerability scan |
 
+### How it works
+
+The command creates one `OperatorCommand` object (`kubescape.io/v1alpha1`) per scan request in the operator's namespace and waits, for up to 10 minutes, until the operator reports each one completed. It reports an error if the operator marks a command as failed. Your kubeconfig identity needs permission to create and get `operatorcommands.kubescape.io` in that namespace. No port-forward to the operator is used.
+
 ### Examples
 
 ```bash
@@ -1385,6 +1726,13 @@ Deploy the Kubescape CEL admission policy library.
 kubescape vap deploy-library | kubectl apply -f -
 ```
 
+**Flags:**
+
+| Flag | Description | Default |
+|---|---|---|
+| `--from-release <tag>` | Download the library from this [cel-admission-library](https://github.com/kubescape/cel-admission-library/releases) release tag, e.g. `v0.11`, instead of using the copy embedded in the binary | embedded copy |
+| `--timeout <duration>` | HTTP request timeout per download, used only with `--from-release`. `0` disables the timeout | `30s` |
+
 #### create-policy-binding
 
 Create a ValidatingAdmissionPolicyBinding. The same validation is available to
@@ -1402,6 +1750,7 @@ kubescape vap create-policy-binding [flags]
 | `-n, --name <name>` | Binding name | Yes |
 | `-p, --policy <id>` | Policy/control ID | Yes |
 | `--namespace <ns>` | Namespace selector (repeatable) | No |
+| `--resource-rule <group/version/resource>` | Restrict the binding to a group/version/resource the policy already matches, e.g. `apps/v1/deployments` or `/v1/pods` (repeatable). Omit to bind everything the policy matches | No |
 | `--label <k=v>` | Label selector (repeatable) | No |
 | `-a, --action <action>` | Action: `Deny`, `Audit`, `Warn` | No (default: `Deny`) |
 | `-r, --parameter-reference <name>` | Parameter reference | No |

@@ -14,19 +14,23 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 
 	"github.com/armosec/armoapi-go/armotypes"
+	"github.com/jwalton/gchalk"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	metav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
+	"github.com/kubescape/kubescape/v4/core/pkg/pathcontainment"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	storagev1beta1 "github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
+	"github.com/mattn/go-isatty"
 	"github.com/mikefarah/yq/v4/pkg/yqlib"
 	"gopkg.in/op/go-logging.v1"
 	"gopkg.in/yaml.v3"
@@ -38,18 +42,62 @@ const windowsNewline = "\r\n"
 const unixNewline = "\n"
 const oldMacNewline = "\r"
 
-func NewFixHandler(fixInfo *metav1.FixInfo) (*FixHandler, error) {
-	if info, err := os.Stat(fixInfo.ReportFile); err == nil && info.IsDir() {
-		return nil, fmt.Errorf("%q is a directory, not a file. Please provide a JSON report file path", fixInfo.ReportFile)
-	}
-	jsonFile, err := os.Open(fixInfo.ReportFile)
+// maxReportSize bounds report files parsed from disk (100 MiB), preventing
+// uncontrolled memory allocation from oversized inputs or decompression bombs (CWE-400).
+const maxReportSize = 100 * 1024 * 1024
+
+var (
+	errReportNotRegular = errors.New("report is not a regular file")
+	errReportTooLarge   = errors.New("report is too large")
+)
+
+// openReport opens path for reading and rejects non-regular files (such as FIFOs,
+// device nodes, or directories). O_NONBLOCK ensures that opening a FIFO without a writer
+// fails or returns immediately rather than blocking the process indefinitely.
+func openReport(path string) (*os.File, error) {
+	file, err := os.OpenFile(filepath.Clean(path), os.O_RDONLY|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		return nil, err
 	}
-	defer jsonFile.Close()
-	byteValue, err := io.ReadAll(jsonFile)
+	info, err := file.Stat()
+	if err != nil {
+		file.Close()
+		return nil, err
+	}
+	if info.IsDir() {
+		file.Close()
+		return nil, fmt.Errorf("%q is a directory, not a file. Please provide a JSON report file path", path)
+	}
+	if !info.Mode().IsRegular() {
+		file.Close()
+		return nil, fmt.Errorf("%w: %q", errReportNotRegular, path)
+	}
+	return file, nil
+}
+
+// readReportFile returns the contents of the report at path, reading at most
+// maxReportSize bytes so that reading remains bounded.
+func readReportFile(path string) ([]byte, error) {
+	file, err := openReport(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	data, err := io.ReadAll(io.LimitReader(file, maxReportSize+1))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read report file: %w", err)
+	}
+	if len(data) > maxReportSize {
+		return nil, fmt.Errorf("%w: %q exceeds the %d byte limit", errReportTooLarge, path, int64(maxReportSize))
+	}
+	return data, nil
+}
+
+func NewFixHandler(fixInfo *metav1.FixInfo) (*FixHandler, error) {
+	byteValue, err := readReportFile(fixInfo.ReportFile)
+	if err != nil {
+		return nil, err
 	}
 
 	var reportObj reporthandlingv2.PostureReport
@@ -798,7 +846,7 @@ func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInf
 
 	var containerProfile *storagev1beta1.ContainerProfile
 	if h.fixInfo != nil && h.fixInfo.ContainerProfilePath != "" {
-		profileData, err := os.ReadFile(h.fixInfo.ContainerProfilePath)
+		profileData, err := readManifestFile(h.fixInfo.ContainerProfilePath)
 		if err == nil {
 			var cp storagev1beta1.ContainerProfile
 			if err := json.Unmarshal(profileData, &cp); err == nil {
@@ -1068,7 +1116,7 @@ func (h *FixHandler) dropWrappedResources(ctx context.Context, resourcesToFix []
 		h.withdrawFixedControls(rfi.fixedControls)
 		h.withdrawPartialControls(rfi.failedControls)
 		for _, unfixed := range rfi.failedControls {
-			unfixed.Reason = "skipped: the file declares several resources in one document"
+			unfixed.Reason = "skipped: the file declares several resources in one document or changed since the scan; re-scan if it changed"
 			h.unfixedControls = append(h.unfixedControls, unfixed)
 		}
 	}
@@ -1249,6 +1297,64 @@ func dedupUnfixedControlsForAccounting(controls []UnfixedControl) []UnfixedContr
 	return out
 }
 
+var (
+	isTerminal       = isatty.IsTerminal
+	isCygwinTerminal = isatty.IsCygwinTerminal
+)
+
+// resolveColorLevel determines the ANSI color level to use for fix output.
+// It prioritizes NO_COLOR and FORCE_COLOR per standard specifications,
+// falling back to dual-stream (stdout + stderr) TTY detection.
+func resolveColorLevel() gchalk.ColorLevel {
+	// 1. NO_COLOR standard (https://no-color.org/):
+	// Non-empty NO_COLOR suppresses all color. An empty NO_COLOR="" must be treated as unset.
+	if val, set := os.LookupEnv("NO_COLOR"); set && val != "" {
+		return gchalk.LevelNone
+	}
+
+	// 2. FORCE_COLOR:
+	// Values of "0" or "false" disable color.
+	// Nonzero integer values (e.g. "1", "2", "3", "-1") or "true" force color.
+	if val, set := os.LookupEnv("FORCE_COLOR"); set && val != "" {
+		if strings.EqualFold(val, "true") {
+			return gchalk.LevelBasic
+		}
+		if strings.EqualFold(val, "false") {
+			return gchalk.LevelNone
+		}
+		if n, err := strconv.Atoi(val); err == nil || errors.Is(err, strconv.ErrRange) {
+			if n == 0 {
+				return gchalk.LevelNone
+			}
+			if n >= 3 {
+				return gchalk.LevelAnsi16m
+			} else if n == 2 {
+				return gchalk.LevelAnsi256
+			}
+			return gchalk.LevelBasic
+		}
+		return gchalk.LevelNone
+	}
+
+	// 3. Terminal detection: color is enabled only if both stdout and stderr are attached to a terminal.
+	if (isTerminal(os.Stdout.Fd()) || isCygwinTerminal(os.Stdout.Fd())) &&
+		(isTerminal(os.Stderr.Fd()) || isCygwinTerminal(os.Stderr.Fd())) {
+		return gchalk.LevelBasic
+	}
+
+	return gchalk.LevelNone
+}
+
+// colorBuilder returns a gchalk.Builder whose level matches the resolved color policy,
+// avoiding reliance on gchalk's process-startup global level which disables color if NO_COLOR="" is set.
+func colorBuilder() *gchalk.Builder {
+	return gchalk.New(gchalk.ForceLevel(resolveColorLevel()))
+}
+
+func shouldColor() bool {
+	return resolveColorLevel() != gchalk.LevelNone
+}
+
 // PrintUnfixedControls logs the failed (resource, control) tuples that require
 // manual remediation, deduplicating entries across multiple identical failures.
 // The verb on the summary line reflects phase: "Auto-fixed" only when every
@@ -1256,6 +1362,26 @@ func dedupUnfixedControlsForAccounting(controls []UnfixedControl) []UnfixedContr
 func (h *FixHandler) PrintUnfixedControls(phase Phase) {
 	if len(h.unfixedControls) == 0 {
 		return
+	}
+
+	logger.L().Warning(h.formatUnfixedControls(phase))
+}
+
+func (h *FixHandler) formatUnfixedControls(phase Phase) string {
+	return h.formatUnfixedControlsWithBuilder(phase, colorBuilder())
+}
+
+func (h *FixHandler) formatUnfixedControlsWithColor(phase Phase, colored bool) string {
+	level := gchalk.LevelNone
+	if colored {
+		level = gchalk.LevelBasic
+	}
+	return h.formatUnfixedControlsWithBuilder(phase, gchalk.New(gchalk.ForceLevel(level)))
+}
+
+func (h *FixHandler) formatUnfixedControlsWithBuilder(phase Phase, chalk *gchalk.Builder) string {
+	if len(h.unfixedControls) == 0 {
+		return ""
 	}
 
 	accountingRecords := dedupUnfixedControlsForAccounting(h.unfixedControls)
@@ -1276,44 +1402,98 @@ func (h *FixHandler) PrintUnfixedControls(phase Phase) {
 			location = "<unknown>"
 		}
 		fmt.Fprintf(&sb, "  - %s %s on %s/%s (%s) — %s\n",
-			u.ControlID, u.ControlName, u.ResourceKind, u.ResourceName, location, u.Reason)
+			chalk.WithBrightCyan().Bold(u.ControlID),
+			u.ControlName,
+			u.ResourceKind,
+			u.ResourceName,
+			chalk.Yellow(location),
+			chalk.Red(u.Reason))
 	}
 
-	logger.L().Warning(sb.String())
+	return sb.String()
 }
 
 func (h *FixHandler) PrintExpectedChanges(resourcesToFix []ResourceFixInfo) {
+	logger.L().Info(h.formatExpectedChanges(resourcesToFix))
+}
+
+func (h *FixHandler) formatExpectedChanges(resourcesToFix []ResourceFixInfo) string {
+	return formatExpectedChangesWithBuilder(resourcesToFix, colorBuilder())
+}
+
+func formatExpectedChangesWithColor(resourcesToFix []ResourceFixInfo, colored bool) string {
+	level := gchalk.LevelNone
+	if colored {
+		level = gchalk.LevelBasic
+	}
+	return formatExpectedChangesWithBuilder(resourcesToFix, gchalk.New(gchalk.ForceLevel(level)))
+}
+
+func formatExpectedChangesWithBuilder(resourcesToFix []ResourceFixInfo, chalk *gchalk.Builder) string {
 	var sb strings.Builder
 	sb.WriteString("The following changes will be applied:\n")
 
 	for _, resourceFixInfo := range resourcesToFix {
 		// A cluster resource has no file. Printing an empty "File:" line reads
 		// as a bug, so name where the resource actually came from instead.
-		switch {
-		case resourceFixInfo.inMemory && resourceFixInfo.Resource.GetNamespace() != "":
-			fmt.Fprintf(&sb, "Source: cluster, namespace %s\n", resourceFixInfo.Resource.GetNamespace())
-		case resourceFixInfo.inMemory:
-			sb.WriteString("Source: cluster\n")
-		default:
-			fmt.Fprintf(&sb, "File: %s\n", resourceFixInfo.FilePath)
-			if ns := resourceFixInfo.Resource.GetNamespace(); ns != "" {
-				fmt.Fprintf(&sb, "Namespace: %s\n", ns)
-			}
-			fmt.Fprintf(&sb, "Document index: %d\n", resourceFixInfo.DocumentIndex)
+		var resNamespace string
+		var resName, resKind string
+		if resourceFixInfo.Resource != nil {
+			resNamespace = resourceFixInfo.Resource.GetNamespace()
+			resName = resourceFixInfo.Resource.GetName()
+			resKind = resourceFixInfo.Resource.GetKind()
 		}
-		fmt.Fprintf(&sb, "Resource: %s\n", resourceFixInfo.Resource.GetName())
-		fmt.Fprintf(&sb, "Kind: %s\n", resourceFixInfo.Resource.GetKind())
-		sb.WriteString("Changes:\n")
+
+		switch {
+		case resourceFixInfo.inMemory && resNamespace != "":
+			fmt.Fprintf(&sb, "%s %s\n",
+				chalk.WithBrightCyan().Bold("Source:"),
+				chalk.BrightWhite(fmt.Sprintf("cluster, namespace %s", resNamespace)))
+		case resourceFixInfo.inMemory:
+			fmt.Fprintf(&sb, "%s %s\n",
+				chalk.WithBrightCyan().Bold("Source:"),
+				chalk.BrightWhite("cluster"))
+		default:
+			fmt.Fprintf(&sb, "%s %s\n",
+				chalk.WithBrightCyan().Bold("File:"),
+				chalk.BrightWhite(resourceFixInfo.FilePath))
+			if resNamespace != "" {
+				fmt.Fprintf(&sb, "%s %s\n",
+					chalk.WithBrightCyan().Bold("Namespace:"),
+					chalk.BrightWhite(resNamespace))
+			}
+			fmt.Fprintf(&sb, "%s %s\n",
+				chalk.WithBrightCyan().Bold("Document index:"),
+				chalk.BrightWhite(strconv.Itoa(resourceFixInfo.DocumentIndex)))
+		}
+
+		fmt.Fprintf(&sb, "%s %s\n",
+			chalk.WithBrightCyan().Bold("Resource:"),
+			chalk.BrightWhite(resName))
+		fmt.Fprintf(&sb, "%s %s\n",
+			chalk.WithBrightCyan().Bold("Kind:"),
+			chalk.BrightWhite(resKind))
+		sb.WriteString(chalk.Bold("Changes:") + "\n")
+
+		paths := make([]armotypes.FixPath, 0, len(resourceFixInfo.YamlExpressions))
+		for _, fixPath := range resourceFixInfo.YamlExpressions {
+			paths = append(paths, fixPath)
+		}
+		sort.Slice(paths, func(i, j int) bool {
+			return paths[i].Path < paths[j].Path
+		})
 
 		i := 1
-		for _, fixPath := range resourceFixInfo.YamlExpressions {
-			fmt.Fprintf(&sb, "\t%d) %s = %s\n", i, fixPath.Path, fixPath.Value)
+		for _, fixPath := range paths {
+			fmt.Fprintf(&sb, "\t%d) %s = %s\n", i,
+				chalk.BrightYellow(fixPath.Path),
+				chalk.BrightGreen(fixPath.Value))
 			i++
 		}
 		sb.WriteString("\n------\n")
 	}
 
-	logger.L().Info(sb.String())
+	return sb.String()
 }
 
 // ApplyChanges writes the planned fixes. By default each manifest is rewritten
@@ -1338,38 +1518,62 @@ func (h *FixHandler) ApplyChanges(ctx context.Context, resourcesToFix []Resource
 		defer output.close()
 	}
 
-	fileYamlExpressions := h.getFileYamlExpressions(resourcesToFix)
+	fixesByFile := make(map[string][]ResourceFixInfo)
+	for _, fix := range resourcesToFix {
+		if !fix.inMemory {
+			fixesByFile[fix.FilePath] = append(fixesByFile[fix.FilePath], fix)
+		}
+	}
 
-	for filepath, yamlExpression := range fileYamlExpressions {
-		fileAsString, err := GetFileString(filepath)
-
-		if err != nil {
-			errors = append(errors, err)
+	for path, fixes := range fixesByFile {
+		if err := applyFileChanges(ctx, path, fixes, output, outputPaths[path]); err != nil {
+			errors = append(errors, fmt.Errorf("failed to fix file %s: %w", path, err))
 			continue
 		}
-
-		fixedContent, err := applyFixToFileContent(ctx, filepath, fileAsString, yamlExpression)
-
-		if err != nil {
-			errors = append(errors, fmt.Errorf("failed to fix file %s: %w ", filepath, err))
-			continue
-		}
-
-		if output != nil {
-			err = output.write(filepath, outputPaths[filepath], fixedContent)
-		} else {
-			err = writeFixesToFile(filepath, fixedContent)
-		}
-		if err != nil {
-			logger.L().Ctx(ctx).Warning(fmt.Sprintf("Failed to write fixes to file %s, %v", filepath, err.Error()))
-			errors = append(errors, err)
-			continue
-		}
-
-		updatedFiles[filepath] = true
+		updatedFiles[path] = true
 	}
 
 	return len(updatedFiles), errors
+}
+
+func applyFileChanges(ctx context.Context, path string, fixes []ResourceFixInfo, output *outputTree, destination string) (err error) {
+	flags := os.O_RDONLY
+	if output == nil {
+		flags = os.O_RDWR
+	}
+	file, err := os.OpenFile(filepath.Clean(path), flags|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return fmt.Errorf("error opening manifest: %w", err)
+	}
+	defer func() {
+		if closeErr := file.Close(); err == nil && closeErr != nil {
+			err = fmt.Errorf("error closing manifest: %w", closeErr)
+		}
+	}()
+
+	snapshot, err := file.Stat()
+	if err != nil {
+		return fmt.Errorf("error checking manifest: %w", err)
+	}
+	if !snapshot.Mode().IsRegular() {
+		return fmt.Errorf("manifest is not a regular file")
+	}
+	content, err := io.ReadAll(file)
+	if err != nil {
+		return fmt.Errorf("error reading manifest: %w", err)
+	}
+
+	fixedContent, err := applyFixToFileContent(ctx, path, string(content), fixes)
+	if err != nil {
+		return err
+	}
+	if output == nil {
+		return writeFixesToFile(file, snapshot, fixedContent)
+	}
+	if err := verifyManifestSnapshot(file, snapshot); err != nil {
+		return err
+	}
+	return output.write(destination, fixedContent, snapshot.Mode().Perm())
 }
 
 // OutputPaths maps every manifest ApplyChanges would rewrite to the path its
@@ -1436,15 +1640,9 @@ func (h *FixHandler) OutputPaths(resourcesToFix []ResourceFixInfo) (map[string]s
 			continue
 		}
 
-		relativePath := resource.relativePath
-		if sharedRoot != "" {
-			rel, err := filepath.Rel(sharedRoot, source)
-			if err != nil || !isLexicallyWithin(sharedRoot, source) {
-				return nil, fmt.Errorf("cannot place %q below the scanned inputs' shared directory %q", sanitizeForLog(source), sharedRoot)
-			}
-			relativePath = rel
-		} else if relativePath == "" {
-			relativePath = filepath.Base(source)
+		relativePath, err := manifestRelativePath(resource, sharedRoot)
+		if err != nil {
+			return nil, err
 		}
 		destination := filepath.Join(outputDir, relativePath)
 
@@ -1464,6 +1662,24 @@ func (h *FixHandler) OutputPaths(resourcesToFix []ResourceFixInfo) (map[string]s
 	return destinations, nil
 }
 
+// manifestRelativePath is where a manifest sits in the tree OutputPaths
+// recreates, and in an exported patch: below the scan's shared root when it has
+// one, otherwise the path the report recorded for it.
+func manifestRelativePath(resource *ResourceFixInfo, sharedRoot string) (string, error) {
+	source := resource.FilePath
+	if sharedRoot != "" {
+		rel, err := filepath.Rel(sharedRoot, source)
+		if err != nil || !isLexicallyWithin(sharedRoot, source) {
+			return "", fmt.Errorf("cannot place %q below the scanned inputs' shared directory %q", sanitizeForLog(source), sharedRoot)
+		}
+		return rel, nil
+	}
+	if resource.relativePath == "" {
+		return filepath.Base(source), nil
+	}
+	return resource.relativePath, nil
+}
+
 // isPathContained reports whether target resolves to a path inside base,
 // preventing a resource path from the (untrusted) scan report from escaping
 // the local scan directory. Both operands are resolved with
@@ -1475,19 +1691,7 @@ func (h *FixHandler) OutputPaths(resourcesToFix []ResourceFixInfo) (map[string]s
 // symlink, permission error) is treated as not contained rather than
 // silently allowed.
 func isPathContained(base, target string) bool {
-	resolvedBase, err := filepath.EvalSymlinks(base)
-	if err != nil {
-		return false
-	}
-	resolvedTarget, err := filepath.EvalSymlinks(target)
-	if err != nil {
-		return false
-	}
-	rel, err := filepath.Rel(resolvedBase, resolvedTarget)
-	if err != nil {
-		return false
-	}
-	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+	return pathcontainment.IsPathContained(base, target)
 }
 
 // sanitizeForLog strips ASCII control characters (including \r and \n) from
@@ -1539,37 +1743,27 @@ func isFixableSourceType(fileType string) bool {
 // applyFixToFileContent rewrites one file, keeping it in the format it was
 // written in. Emitting YAML into a .json manifest would break every tool that
 // reads it back.
-func applyFixToFileContent(ctx context.Context, filePath, content, yamlExpression string) (string, error) {
+func applyFixToFileContent(ctx context.Context, filePath, content string, fixes []ResourceFixInfo) (string, error) {
 	if isJSONSource(filePath) {
-		return applyFixToJSONContent(ctx, content, yamlExpression)
+		expression := strings.Join(fileFixExpressions(fixes), " | ")
+		return applyFixToJSONContent(ctx, content, expression, fixes)
 	}
-	return ApplyFixToContent(ctx, content, yamlExpression)
+	patched, _, err := (YAMLTreeEditor{}).ApplyFixes(ctx, content, fixes)
+	return patched, err
 }
 
-func (h *FixHandler) getFileYamlExpressions(resourcesToFix []ResourceFixInfo) map[string]string {
-	fileYamlExpressions := make(map[string]string, 0)
-	for _, toPin := range resourcesToFix {
-		resourceToFix := toPin
-
-		// An in-memory resource has no FilePath. Grouping it here would collapse
-		// every cluster resource under the empty key and hand ApplyChanges a
-		// file to write that does not exist.
-		if resourceToFix.inMemory {
-			continue
-		}
-
-		singleExpression := reduceYamlExpressions(&resourceToFix)
-		resourceFilePath := resourceToFix.FilePath
-
-		if _, pathExistsInMap := fileYamlExpressions[resourceFilePath]; !pathExistsInMap {
-			fileYamlExpressions[resourceFilePath] = singleExpression
-		} else {
-			fileYamlExpressions[resourceFilePath] = joinStrings(fileYamlExpressions[resourceFilePath], " | ", singleExpression)
-		}
-
+// ApplyFixesInPlace patches content, read from filePath, in memory and returns
+// it with the expressions in apply order. The source is edited in place, so
+// untouched text stays byte for byte. A JSON manifest stays JSON: when an edit
+// adds a field, the in-place editor writes YAML flow syntax (unquoted keys and
+// strings), and the document is then re-encoded as JSON instead.
+func ApplyFixesInPlace(ctx context.Context, filePath, content string, fixes []ResourceFixInfo) (string, []string, error) {
+	patched, expressions, err := (YAMLTreeEditor{}).ApplyFixes(ctx, content, fixes)
+	if err != nil || !isJSONSource(filePath) || json.Valid([]byte(patched)) {
+		return patched, expressions, err
 	}
-
-	return fileYamlExpressions
+	patched, err = applyFixToJSONContent(ctx, content, strings.Join(expressions, " | "), fixes)
+	return patched, expressions, err
 }
 
 // plannedFix is one planned YAML edit's location and the value it writes
@@ -1822,14 +2016,25 @@ func (rfi *ResourceFixInfo) addYamlExpressionsFromResourceAssociatedControl(docu
 	return added, skippedReasons
 }
 
-// reduceYamlExpressions reduces the number of yaml expressions to a single one
+func fileFixExpressions(fixes []ResourceFixInfo) []string {
+	var expressions []string
+	for i := range fixes {
+		expressions = append(expressions, sortedYamlExpressions(&fixes[i])...)
+	}
+	return expressions
+}
+
 func reduceYamlExpressions(resource *ResourceFixInfo) string {
+	return strings.Join(sortedYamlExpressions(resource), " | ")
+}
+
+func sortedYamlExpressions(resource *ResourceFixInfo) []string {
 	expressions := make([]string, 0, len(resource.YamlExpressions))
 	for expr := range resource.YamlExpressions {
 		expressions = append(expressions, expr)
 	}
 	sort.Strings(expressions)
-	return strings.Join(expressions, " | ")
+	return expressions
 }
 
 // safeFixPath matches the subset of yq's expression grammar that a fix path is
@@ -1889,34 +2094,145 @@ func FixPathToValidYamlExpression(fixPath, value string, documentIndexInYaml int
 	return fmt.Sprintf("select(di==%d).%s |= %s", documentIndexInYaml, fixPath, value)
 }
 
-func joinStrings(inputStrings ...string) string {
-	return strings.Join(inputStrings, "")
+var (
+	// ErrManifestNotRegular is returned when a manifest file is not a regular file.
+	ErrManifestNotRegular = errors.New("manifest file is not a regular file")
+	// ErrManifestTooLarge is returned when a manifest file exceeds the maximum allowed size.
+	ErrManifestTooLarge = errors.New("manifest file exceeds maximum size limit")
+)
+
+func getMaxManifestSize() int64 {
+	if v, ok := os.LookupEnv(cautils.MaxFileSizeEnvVar); ok {
+		trimmed := strings.TrimSpace(v)
+		if trimmed != "" {
+			if parsed, err := strconv.ParseInt(trimmed, 10, 64); err == nil && parsed > 0 && parsed != math.MaxInt64 {
+				return parsed
+			}
+			logger.L().Warning("invalid KUBESCAPE_MAX_FILE_SIZE, using default", helpers.String("value", v), helpers.Int("default", int(cautils.DefaultMaxFileSize)))
+		}
+	}
+	return cautils.DefaultMaxFileSize
+}
+
+// openManifestFile opens path for reading and rejects anything but a regular file.
+// A pre-open stat check prevents opening device nodes (e.g. tape or character devices).
+// O_NONBLOCK keeps opening a FIFO from waiting for a writer, and descriptor-based
+// validation ensures a path swapped after stat cannot slip past.
+func openManifestFile(path string) (*os.File, error) {
+	if strings.TrimSpace(path) == "" {
+		return nil, os.ErrNotExist
+	}
+	cleaned := filepath.Clean(path)
+	statInfo, err := os.Stat(cleaned)
+	if err != nil {
+		return nil, err
+	}
+	if statInfo.IsDir() {
+		return nil, fmt.Errorf("%q is a directory, not a file: %w", path, ErrManifestNotRegular)
+	}
+	if !statInfo.Mode().IsRegular() {
+		return nil, fmt.Errorf("%w: %q", ErrManifestNotRegular, path)
+	}
+
+	file, err := os.OpenFile(cleaned, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return nil, err
+	}
+	info, err := file.Stat()
+	if err != nil {
+		file.Close()
+		return nil, err
+	}
+	if info.IsDir() {
+		file.Close()
+		return nil, fmt.Errorf("%q is a directory, not a file: %w", path, ErrManifestNotRegular)
+	}
+	if !info.Mode().IsRegular() {
+		file.Close()
+		return nil, fmt.Errorf("%w: %q", ErrManifestNotRegular, path)
+	}
+	return file, nil
+}
+
+// readManifestFile returns the contents of the manifest file at path, reading at most
+// getMaxManifestSize() bytes (configurable via KUBESCAPE_MAX_FILE_SIZE, defaulting to
+// cautils.DefaultMaxFileSize) so that reading remains bounded.
+func readManifestFile(path string) ([]byte, error) {
+	file, err := openManifestFile(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	limit := getMaxManifestSize()
+
+	info, err := file.Stat()
+	if err == nil && info.Size() > limit {
+		return nil, fmt.Errorf("%w: %q exceeds the %d byte limit", ErrManifestTooLarge, path, limit)
+	}
+
+	data, err := io.ReadAll(io.LimitReader(file, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > limit {
+		return nil, fmt.Errorf("%w: %q exceeds the %d byte limit", ErrManifestTooLarge, path, limit)
+	}
+	return data, nil
 }
 
 func GetFileString(path string) (string, error) {
-	bytes, err := os.ReadFile(filepath.Clean(path))
-
+	bytes, err := readManifestFile(path)
 	if err != nil {
-		return "", fmt.Errorf("error reading file %s", path)
+		return "", fmt.Errorf("error reading file %s: %w", path, err)
 	}
 
 	return string(bytes), nil
 }
 
-func writeFixesToFile(path, content string) error {
-	perm := os.FileMode(0644)
-	if info, err := os.Stat(filepath.Clean(path)); err == nil {
-		perm = info.Mode().Perm()
-	} else if !os.IsNotExist(err) {
-		return fmt.Errorf("error reading file permissions: %w", err)
-	}
+var errManifestChanged = errors.New("manifest changed while applying fixes; re-scan and use the new report")
 
-	file, err := os.OpenFile(filepath.Clean(path), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, perm)
+func verifyManifestSnapshot(file *os.File, snapshot os.FileInfo) error {
+	current, err := file.Stat()
 	if err != nil {
+		return fmt.Errorf("error checking manifest before writing: %w", err)
+	}
+	if snapshot.Mode() != current.Mode() || snapshot.Size() != current.Size() ||
+		!snapshot.ModTime().Equal(current.ModTime()) {
+		return errManifestChanged
+	}
+	return verifyManifestPath(file, snapshot)
+}
+
+func verifyManifestPath(file *os.File, snapshot os.FileInfo) error {
+	current, err := os.Stat(file.Name())
+	if err != nil {
+		return fmt.Errorf("cannot verify the manifest path: %w; re-scan and use the new report", err)
+	}
+	if !os.SameFile(snapshot, current) {
+		return errManifestChanged
+	}
+	return nil
+}
+
+// Write through the file we read so a rename after the path check cannot
+// redirect the write to the replacement. Check the path again after writing
+// so a fix written to a detached file does not count as applied.
+func writeFixesToFile(file *os.File, snapshot os.FileInfo, content string) error {
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return fmt.Errorf("error positioning manifest for writing: %w", err)
+	}
+	if err := verifyManifestSnapshot(file, snapshot); err != nil {
+		return err
+	}
+	if err := file.Truncate(0); err != nil {
+		return fmt.Errorf("error truncating manifest: %w", err)
+	}
+	if _, err := file.WriteString(content); err != nil {
 		return fmt.Errorf("error writing fixes to file: %w", err)
 	}
 
-	return writeAndClose(file, content)
+	return verifyManifestPath(file, snapshot)
 }
 
 // outputTree writes fixed copies under --output-dir.
@@ -1950,18 +2266,9 @@ func (o *outputTree) close() {
 	_ = o.root.Close()
 }
 
-// write writes the fixed content of source to destination, a path under the
-// output directory, creating the directories in between. The copy takes the
-// source's permissions: it is the same manifest, and a fixed copy of a private
-// file should not come out more readable than the original.
-func (o *outputTree) write(source, destination, content string) error {
-	perm := os.FileMode(0644)
-	if info, err := os.Stat(filepath.Clean(source)); err == nil {
-		perm = info.Mode().Perm()
-	} else if !os.IsNotExist(err) {
-		return fmt.Errorf("error reading file permissions: %w", err)
-	}
-
+// write writes the fixed content to destination under the output directory,
+// creating directories as needed and preserving the source's permissions.
+func (o *outputTree) write(destination, content string, perm os.FileMode) error {
 	relativePath, err := filepath.Rel(o.dir, filepath.Clean(destination))
 	if err != nil {
 		return fmt.Errorf("error writing fixes to file: %w", err)

@@ -95,7 +95,13 @@ func run(ctx context.Context) error {
 	initializeStorage(clusterName, cfg)
 	// traces will be created by otelmux.Middleware in SetupHTTPListener()
 
-	return listener.SetupHTTPListener(ctx)
+	auth, err := listener.NewAPIAuth(ctx)
+	if err != nil {
+		logger.L().Fatal("API auth initialization error", helpers.Error(err))
+		return err
+	}
+
+	return listener.SetupHTTPListener(ctx, auth)
 }
 
 func flushOtel(ctx context.Context, shutdown func(context.Context)) {

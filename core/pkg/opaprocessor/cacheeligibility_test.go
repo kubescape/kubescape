@@ -24,7 +24,7 @@ func TestRuleCacheEligibleStatusReadingRule(t *testing.T) {
 	}{
 		{
 			name: "spec-only rule stays cacheable",
-			rego: "deny contains msga if {\n\tpod := input[_]\n\tpod.spec.hostPID == true\n}",
+			rego: "deny contains msga if {\n\tpod := input[_]\n\tpod.spec.hostPID == true\n\tmsga := {\"alertObject\": {\"k8sApiObjects\": [pod]}}\n}",
 			want: true,
 		},
 		{
@@ -64,7 +64,7 @@ func TestRuleCacheEligibleStatusReadingRule(t *testing.T) {
 		},
 		{
 			name: "status as object.get default is not a read",
-			rego: "deny contains msga if {\n\tnode := input[_]\n\tobject.get(node, \"spec\", \"status\") != {}\n}",
+			rego: "deny contains msga if {\n\tnode := input[_]\n\tobject.get(node, \"spec\", \"status\") != {}\n\tmsga := {\"alertObject\": {\"k8sApiObjects\": [node]}}\n}",
 			want: true,
 		},
 		{
@@ -94,7 +94,7 @@ func TestRuleCacheEligibleStatusReadingRule(t *testing.T) {
 		},
 		{
 			name: "an unrelated alias leaves the rule cacheable",
-			rego: "deny contains msga if {\n\tpod := input[_]\n\tkey := \"spec\"\n\tpod[key].hostPID == true\n}",
+			rego: "deny contains msga if {\n\tpod := input[_]\n\tkey := \"spec\"\n\tpod[key].hostPID == true\n\tmsga := {\"alertObject\": {\"k8sApiObjects\": [pod]}}\n}",
 			want: true,
 		},
 		{
@@ -145,17 +145,17 @@ func TestRuleCacheEligibleCorrelatedInputRule(t *testing.T) {
 	}{
 		{
 			name: "one iteration per body stays cacheable",
-			rego: "deny contains msga if {\n\tpod := input[_]\n\tpod.spec.hostPID == true\n}",
+			rego: "deny contains msga if {\n\tpod := input[_]\n\tpod.spec.hostPID == true\n\tmsga := {\"alertObject\": {\"k8sApiObjects\": [pod]}}\n}",
 			want: true,
 		},
 		{
 			name: "separate bodies each iterating once stay cacheable",
-			rego: "deny contains msga if {\n\tpod := input[_]\n\tpod.spec.hostPID == true\n}\n\ndeny contains msga if {\n\tpod := input[_]\n\tpod.spec.hostIPC == true\n}",
+			rego: "deny contains msga if {\n\tpod := input[_]\n\tpod.spec.hostPID == true\n\tmsga := {\"alertObject\": {\"k8sApiObjects\": [pod]}}\n}\n\ndeny contains msga if {\n\tpod := input[_]\n\tpod.spec.hostIPC == true\n\tmsga := {\"alertObject\": {\"k8sApiObjects\": [pod]}}\n}",
 			want: true,
 		},
 		{
 			name: "helper function on the bound element stays cacheable",
-			rego: "deny contains msga if {\n\tpod := input[_]\n\tshares_host(pod)\n}\n\nshares_host(pod) if pod.spec.hostPID == true",
+			rego: "deny contains msga if {\n\tpod := input[_]\n\tshares_host(pod)\n\tmsga := {\"alertObject\": {\"k8sApiObjects\": [pod]}}\n}\n\nshares_host(pod) if pod.spec.hostPID == true",
 			want: true,
 		},
 		{
@@ -170,7 +170,7 @@ func TestRuleCacheEligibleCorrelatedInputRule(t *testing.T) {
 		},
 		{
 			name: "some x in input binds one element and stays cacheable",
-			rego: "deny contains msga if {\n\tsome pod in input\n\tpod.spec.hostPID == true\n}",
+			rego: "deny contains msga if {\n\tsome pod in input\n\tpod.spec.hostPID == true\n\tmsga := {\"alertObject\": {\"k8sApiObjects\": [pod]}}\n}",
 			want: true,
 		},
 		{
@@ -250,7 +250,7 @@ func TestRuleCacheEligibleCorrelatedInputRule(t *testing.T) {
 		},
 		{
 			name: "imports outside input leave the rule cacheable",
-			rego: "import data.settings as settings\nimport future.keywords.in\n\ndeny contains msga if {\n\tpod := input[_]\n\tpod.spec.hostPID == settings.hostPID\n}",
+			rego: "import data.settings as settings\nimport future.keywords.in\n\ndeny contains msga if {\n\tpod := input[_]\n\tpod.spec.hostPID == settings.hostPID\n\tmsga := {\"alertObject\": {\"k8sApiObjects\": [pod]}}\n}",
 			want: true,
 		},
 		{

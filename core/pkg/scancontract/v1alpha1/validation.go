@@ -135,7 +135,7 @@ func validateContract(name string, contract Contract, options LoadOptions) error
 	return nil
 }
 
-func validateStringList(path string, values *[]string) error {
+func validateStringList(path string, values *StringList) error {
 	if values == nil {
 		return nil
 	}

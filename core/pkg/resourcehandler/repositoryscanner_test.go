@@ -332,6 +332,38 @@ func TestHttpGet_SuccessReturnsBody(t *testing.T) {
 	assert.Equal(t, `{"default_branch":"main"}`, string(body))
 }
 
+type repeatingByteReader struct{}
+
+func (r *repeatingByteReader) Read(p []byte) (int, error) {
+	for i := range p {
+		p[i] = 'a'
+	}
+	return len(p), nil
+}
+
+// TestHttpGet_SuccessEnforcesSizeLimit guards against unbounded memory allocation
+// when reading an upstream response (CWE-400): a response larger than maxHTTPResponseBody
+// must return errResponseBodyTooLarge rather than buffering indefinitely.
+func TestHttpGet_SuccessEnforcesSizeLimit(t *testing.T) {
+	client := &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				Status:     "200 OK",
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(io.LimitReader(&repeatingByteReader{}, maxHTTPResponseBody+100)),
+				Header:     make(http.Header),
+			}, nil
+		}),
+	}
+
+	const url = "https://api.github.com/repos/owner/repo"
+	body, err := httpGet(client, url, nil)
+	assert.Error(t, err)
+	assert.Nil(t, body)
+	assert.ErrorIs(t, err, errResponseBodyTooLarge)
+	assert.Contains(t, err.Error(), url)
+}
+
 func TestGetFilesFromTree(t *testing.T) {
 	tests := []struct {
 		name            string

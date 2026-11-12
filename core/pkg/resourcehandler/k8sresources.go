@@ -829,7 +829,7 @@ func (k8sHandler *K8sResourceHandler) findScanObjectResource(ctx context.Context
 					return nil, fmt.Errorf("resource %s was not found: %w", k8sinterface.GetReadableID(resource), ErrResourceNotFound)
 				}
 			}
-			if isTypeWorkload(uObj.Object) && k8sinterface.WorkloadHasParent(workloadinterface.NewWorkloadObj(uObj.Object)) {
+			if isTypeWorkload(uObj.Object) && workloadHasParent(uObj.Object) {
 				// mcpserver-sentinel: ErrResourceHasParent — do not change without updating cmd/mcpserver/mcperror_classify.go
 				return nil, fmt.Errorf("resource %s has a parent and cannot be scanned: %w", k8sinterface.GetReadableID(resource), ErrResourceHasParent)
 			}
@@ -1414,7 +1414,7 @@ func (k8sHandler *K8sResourceHandler) pullSingleResourceInto(ctx context.Context
 			uObject := obj.(*unstructured.Unstructured)
 
 			if k8sinterface.IsTypeWorkload(uObject.Object) &&
-				k8sinterface.WorkloadHasParent(workloadinterface.NewWorkloadObj(uObject.Object)) {
+				workloadHasParent(uObject.Object) {
 
 				logger.L().Debug(
 					"Skipping resource with parent",

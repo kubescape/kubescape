@@ -1,8 +1,6 @@
 package config
 
 import (
-	"os"
-
 	"github.com/kubescape/kubescape/v4/core/meta"
 	v1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
 	"github.com/spf13/cobra"
@@ -27,7 +25,7 @@ func getViewCmd(ks meta.IKubescape) *cobra.Command {
 			}
 
 			return ks.ViewCachedConfig(&v1.ViewConfig{
-				Writer:       os.Stdout,
+				Writer:       cmd.OutOrStdout(),
 				OutputFormat: outputFormat,
 				IncludeEmpty: includeEmpty,
 				Key:          key,

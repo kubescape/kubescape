@@ -8,6 +8,7 @@ import (
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/cautils/getter"
 	"github.com/kubescape/kubescape/v4/core/pkg/mapreconcile"
+	"github.com/kubescape/kubescape/v4/core/pkg/pathcontainment"
 	"github.com/kubescape/kubescape/v4/core/pkg/resourcehandler"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 )
@@ -45,7 +46,9 @@ func classifyScanError(err error) ErrorCode {
 	// An unknown or ambiguous control is the caller's selection, not a failure
 	// of the scan. Catalog failures never match these sentinels.
 	case errors.Is(err, getter.ErrControlNotFound),
-		errors.Is(err, getter.ErrControlAmbiguous):
+		errors.Is(err, getter.ErrControlAmbiguous),
+		errors.Is(err, pathcontainment.ErrPathEscapesWorkspace),
+		errors.Is(err, pathcontainment.ErrInvalidPath):
 		return ErrCodeInvalidArgument
 
 	// mapreconcile.ErrForbidden is a sentinel that replaces the apiserver's
@@ -89,6 +92,9 @@ func classifyScanErrorMessage(code ErrorCode, label string, err error) string {
 	case ErrCodeSecretScanDenied:
 		return fmt.Sprintf("scanning Secret resources is not supported: %v", err)
 	case ErrCodeInvalidArgument:
+		if errors.Is(err, pathcontainment.ErrPathEscapesWorkspace) || errors.Is(err, pathcontainment.ErrInvalidPath) {
+			return fmt.Sprintf("invalid or unauthorized path: %v", err)
+		}
 		return fmt.Sprintf("invalid control selection: %v", err)
 	case ErrCodeRBACDenied:
 		return fmt.Sprintf("insufficient permissions: %v", err)

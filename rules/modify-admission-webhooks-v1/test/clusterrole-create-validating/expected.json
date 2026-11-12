@@ -1,0 +1,72 @@
+[
+    {
+        "alertMessage": "Subject: User-platform-admin can create, modify or delete admission webhook configurations, and so read or mutate any object admitted to the cluster or switch off admission policy",
+        "failedPaths": [
+            "relatedObjects[1].rules[0].apiGroups[0]",
+            "relatedObjects[1].rules[0].resources[0]",
+            "relatedObjects[1].rules[0].verbs[0]",
+            "relatedObjects[0].roleRef.name",
+            "relatedObjects[0].subjects[0]"
+        ],
+        "reviewPaths": [
+            "relatedObjects[1].rules[0].apiGroups[0]",
+            "relatedObjects[1].rules[0].resources[0]",
+            "relatedObjects[1].rules[0].verbs[0]",
+            "relatedObjects[0].roleRef.name",
+            "relatedObjects[0].subjects[0]"
+        ],
+        "deletePaths": null,
+        "fixPaths": [],
+        "ruleStatus": "",
+        "packagename": "armo_builtins",
+        "alertScore": 8,
+        "alertObject": {
+            "externalObjects": {
+                "apiGroup": "rbac.authorization.k8s.io",
+                "kind": "User",
+                "name": "platform-admin",
+                "relatedObjects": [
+                    {
+                        "apiVersion": "rbac.authorization.k8s.io/v1",
+                        "kind": "ClusterRoleBinding",
+                        "metadata": {
+                            "name": "clusterrole-create-validating-binding"
+                        },
+                        "roleRef": {
+                            "apiGroup": "rbac.authorization.k8s.io",
+                            "kind": "ClusterRole",
+                            "name": "clusterrole-create-validating-role"
+                        },
+                        "subjects": [
+                            {
+                                "apiGroup": "rbac.authorization.k8s.io",
+                                "kind": "User",
+                                "name": "platform-admin"
+                            }
+                        ]
+                    },
+                    {
+                        "apiVersion": "rbac.authorization.k8s.io/v1",
+                        "kind": "ClusterRole",
+                        "metadata": {
+                            "name": "clusterrole-create-validating-role"
+                        },
+                        "rules": [
+                            {
+                                "apiGroups": [
+                                    "admissionregistration.k8s.io"
+                                ],
+                                "resources": [
+                                    "validatingwebhookconfigurations"
+                                ],
+                                "verbs": [
+                                    "create"
+                                ]
+                            }
+                        ]
+                    }
+                ]
+            }
+        }
+    }
+]

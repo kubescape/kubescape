@@ -21,6 +21,7 @@ func getSetCmd(ks meta.IKubescape) *cobra.Command {
 		Short:     fmt.Sprintf("Set configurations, supported: %s", strings.Join(stringKeysToSlice(supportConfigSet), "/")),
 		Example:   setConfigExample,
 		ValidArgs: stringKeysToSlice(supportConfigSet),
+		Args:      cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			setConfig, err := parseSetArgs(args)
 			if err != nil {

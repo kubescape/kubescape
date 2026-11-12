@@ -2,6 +2,7 @@ package resourcehandler
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -15,6 +16,7 @@ import (
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/pkg/componentvulns"
 	"github.com/kubescape/kubescape/v4/core/pkg/k8scveindex"
+	"github.com/kubescape/opa-utils/objectsenvelopes/hostsensor"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	reportv2 "github.com/kubescape/opa-utils/reporthandling/v2"
@@ -31,6 +33,7 @@ import (
 const (
 	kubeletVulnsGVR = componentvulns.APIVersion + "/KubeletVulnerabilities"
 	runtimeVulnsGVR = componentvulns.APIVersion + "/ContainerRuntimeVulnerabilities"
+	kernelVulnsGVR  = componentvulns.APIVersion + "/KernelVulnerabilities"
 )
 
 type stubComponentMatcher struct{ calls int }
@@ -49,8 +52,35 @@ func (s *stubComponentMatcher) MatchPackages(packages []pkg.Package, _ pkg.Conte
 				},
 			})
 		}
+		if p.Name == "linux-aws" && p.Version == "5.15.0-1057.63" {
+			matches.Add(match.Match{
+				Package: p,
+				Vulnerability: vulnerability.Vulnerability{
+					Reference: vulnerability.Reference{ID: "CVE-2024-1086"},
+					Fix:       vulnerability.Fix{Versions: []string{"5.15.0-1058.64"}, State: vulnerability.FixStateFixed},
+					Metadata:  &vulnerability.Metadata{ID: "CVE-2024-1086", Severity: "High"},
+				},
+			})
+		}
 	}
 	return matches, nil, nil
+}
+
+func kernelNode(name, kernel, osImage string) *corev1.Node {
+	n := componentVulnNode(name, "v1.28.4", "containerd://1.7.27")
+	n.Status.NodeInfo.KernelVersion = kernel
+	n.Status.NodeInfo.OSImage = osImage
+	return n
+}
+
+func kernelHostEnvelope(t *testing.T, kind, node, content string) *hostsensor.HostSensorDataEnvelope {
+	t.Helper()
+	raw, err := json.Marshal(map[string]string{"content": content})
+	require.NoError(t, err)
+	e := &hostsensor.HostSensorDataEnvelope{Kind: kind, Data: raw}
+	e.SetApiVersion("hostdata.kubescape.cloud/v1beta0")
+	e.SetName(node)
+	return e
 }
 
 func componentVulnNode(name, kubelet, runtime string) *corev1.Node {
@@ -254,9 +284,80 @@ func TestCollectComponentVulnerabilitiesNodeListingFails(t *testing.T) {
 	assert.Equal(t, componentvulns.ClusterSelector, sessionObj.PartialGVRFailures[0].Selector)
 }
 
+func TestCollectKernelVulnerabilities(t *testing.T) {
+	sessionObj, ksResourceMap := componentVulnSession(t, componentVulnControl("C-KERNEL", "KernelVulnerabilities"))
+	require.Contains(t, ksResourceMap, kernelVulnsGVR)
+
+	stub := &stubComponentMatcher{}
+	handler := &K8sResourceHandler{
+		k8s: &k8sinterface.KubernetesApi{KubernetesClient: fakeclientset.NewClientset(
+			kernelNode("ubuntu-1", "5.15.0-1057-aws", "Ubuntu 22.04.4 LTS"),
+			kernelNode("ubuntu-2", "5.15.0-1057-aws", "Ubuntu 22.04.4 LTS"),
+			kernelNode("al2-1", "5.10.209-198.858.amzn2.x86_64", "Amazon Linux 2"),
+			kernelNode("br-1", "6.1.72", "Bottlerocket OS 1.19.0 (aws-k8s-1.29)"),
+		)},
+		componentVulnSources: func(context.Context, *cautils.ScanInfo) (componentVulnSources, error) {
+			return componentVulnSources{matcher: stub, dbBuilt: time.Now()}, nil
+		},
+	}
+
+	allResources := map[string]workloadinterface.IMetadata{}
+	for _, e := range []*hostsensor.HostSensorDataEnvelope{
+		kernelHostEnvelope(t, KernelVersion, "ubuntu-1", "Linux version 5.15.0-1057-aws (buildd@lcy02-amd64-033) #63-Ubuntu SMP Mon Mar 25 10:27:19 UTC 2024\n"),
+		kernelHostEnvelope(t, OsReleaseFile, "ubuntu-1", "NAME=\"Ubuntu\"\nVERSION_ID=\"22.04\"\nID=ubuntu\n"),
+		kernelHostEnvelope(t, LinuxKernelVariables, "ubuntu-2", "ignored"),
+	} {
+		allResources[e.GetID()] = e
+	}
+	handler.collectComponentVulnerabilities(context.Background(), sessionObj, &cautils.ScanInfo{}, allResources, ksResourceMap)
+
+	assert.Equal(t, 1, stub.calls)
+	require.Len(t, ksResourceMap[kernelVulnsGVR], 2)
+	byNode := map[string][]any{}
+	for _, id := range ksResourceMap[kernelVulnsGVR] {
+		r := allResources[id]
+		require.NotNil(t, r)
+		byNode[r.GetName()] = r.GetObject()["data"].(map[string]any)["vulnerabilities"].([]any)
+	}
+	require.Len(t, byNode["ubuntu-1"], 1)
+	assert.Equal(t, "CVE-2024-1086", byNode["ubuntu-1"][0].(map[string]any)["id"])
+	assert.Empty(t, byNode["al2-1"])
+
+	gaps := map[string]string{}
+	for _, g := range sessionObj.PartialGVRFailures {
+		assert.Equal(t, kernelVulnsGVR, g.GVR)
+		gaps[g.Selector] = g.Error
+	}
+	assert.Equal(t, map[string]string{
+		"br-1":     `unsupported kernel "6.1.72" on "Bottlerocket OS 1.19.0 (aws-k8s-1.29)"`,
+		"ubuntu-2": "KernelVersion host data not found",
+	}, gaps)
+	assert.NotContains(t, sessionObj.InfoMap, kernelVulnsGVR)
+}
+
+func TestCollectKernelVulnerabilitiesNoNodeAssessable(t *testing.T) {
+	sessionObj, ksResourceMap := componentVulnSession(t, componentVulnControl("C-KERNEL", "KernelVulnerabilities"))
+	handler := &K8sResourceHandler{
+		k8s: &k8sinterface.KubernetesApi{KubernetesClient: fakeclientset.NewClientset(
+			kernelNode("ubuntu-1", "5.15.0-1057-aws", "Ubuntu 22.04.4 LTS"),
+		)},
+		componentVulnSources: func(context.Context, *cautils.ScanInfo) (componentVulnSources, error) {
+			return componentVulnSources{matcher: &stubComponentMatcher{}, dbBuilt: time.Now()}, nil
+		},
+	}
+	allResources := map[string]workloadinterface.IMetadata{}
+	handler.collectComponentVulnerabilities(context.Background(), sessionObj, &cautils.ScanInfo{}, allResources, ksResourceMap)
+
+	assert.Empty(t, ksResourceMap[kernelVulnsGVR])
+	info, ok := sessionObj.InfoMap[kernelVulnsGVR]
+	require.True(t, ok)
+	assert.Equal(t, apis.StatusSkipped, info.InnerStatus)
+	assert.Equal(t, "KernelVersion host data not found", info.InnerInfo)
+}
+
 func TestComponentVulnAPIVersionMatchesPackage(t *testing.T) {
 	assert.Equal(t, componentvulns.APIVersion, cautils.ComponentVulnAPIVersion)
-	for _, kind := range []componentvulns.Kind{componentvulns.APIServerVulnerabilities, componentvulns.KubeletVulnerabilities, componentvulns.ContainerRuntimeVulnerabilities} {
+	for _, kind := range []componentvulns.Kind{componentvulns.APIServerVulnerabilities, componentvulns.KubeletVulnerabilities, componentvulns.ContainerRuntimeVulnerabilities, componentvulns.KernelVulnerabilities} {
 		assert.Contains(t, cautils.ComponentVulnResources, string(kind))
 	}
 }

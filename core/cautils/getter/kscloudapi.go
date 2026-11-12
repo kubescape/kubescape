@@ -3,6 +3,7 @@ package getter
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"sync"
@@ -40,6 +41,15 @@ func GetKSCloudAPIAdapter() *KSCloudAPIAdapter {
 
 func (a *KSCloudAPIAdapter) GetExceptions(ctx context.Context, clusterName string) ([]armotypes.PostureExceptionPolicy, error) {
 	return a.GetExceptionsWithContext(ctx, clusterName)
+}
+
+// CacheSource identifies the backend and account whose data this adapter
+// reads. It never includes the access key.
+func (a *KSCloudAPIAdapter) CacheSource() string {
+	if a == nil || a.KSCloudAPI == nil {
+		return CacheSourceOf(nil)
+	}
+	return fmt.Sprintf("kscloud(%q,%q)", a.GetCloudAPIURL(), a.GetAccountID())
 }
 
 func (a *KSCloudAPIAdapter) GetControlsInputs(ctx context.Context, clusterName string) (map[string][]string, error) {

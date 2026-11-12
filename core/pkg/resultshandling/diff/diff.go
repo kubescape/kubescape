@@ -84,6 +84,33 @@ func ComputeWithOptions(basePath, headPath string, options Options) (*ChangeSet,
 	return compareReports(base, head, granularity), nil
 }
 
+// ComputeFromJSON compares two scan reports that are already in memory, such as
+// the output of ResultsHandler.ToJson, without writing them to disk. The
+// reports are validated and compared exactly as ComputeWithOptions does for
+// report files.
+func ComputeFromJSON(baseJSON, headJSON []byte, options Options) (*ChangeSet, error) {
+	granularity, err := normalizeGranularity(options.Granularity)
+	if err != nil {
+		return nil, err
+	}
+	for name, data := range map[string][]byte{"base": baseJSON, "head": headJSON} {
+		if len(data) > maxReportSize {
+			return nil, fmt.Errorf("%s report: %w: exceeds the %d byte limit", name, errReportTooLarge, int64(maxReportSize))
+		}
+	}
+
+	base, err := parseReport(baseJSON)
+	if err != nil {
+		return nil, fmt.Errorf("loading base report: %w", err)
+	}
+	head, err := parseReport(headJSON)
+	if err != nil {
+		return nil, fmt.Errorf("loading head report: %w", err)
+	}
+
+	return compareReports(base, head, granularity), nil
+}
+
 // ValidateGranularity validates a CLI/API value without reading reports.
 func ValidateGranularity(value string) error {
 	_, err := normalizeGranularity(Granularity(value))

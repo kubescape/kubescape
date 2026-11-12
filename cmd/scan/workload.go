@@ -85,7 +85,19 @@ func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comma
 			if err := validateThresholdsOnly(scanInfo); err != nil {
 				return err
 			}
-			if scanInfo.LabelSelector != "" {
+			if scanInfo.IncludeNamespaces != "" || commandFlagChanged(cmd, "include-namespaces") {
+				return fmt.Errorf("--include-namespaces is not supported for workload scans: the named workload specifies its namespace explicitly, not through namespace inclusion lists")
+			}
+			if scanInfo.ExcludedNamespaces != "" || commandFlagChanged(cmd, "exclude-namespaces") {
+				return fmt.Errorf("--exclude-namespaces is not supported for workload scans: the named workload specifies its namespace explicitly, not through namespace exclusion lists")
+			}
+			if scanInfo.IncludeKinds != "" || commandFlagChanged(cmd, "include-kinds") {
+				return fmt.Errorf("--include-kinds is not supported for workload scans: the named workload specifies its resource kind explicitly, not through kind inclusion lists")
+			}
+			if scanInfo.ExcludeKinds != "" || commandFlagChanged(cmd, "exclude-kinds") {
+				return fmt.Errorf("--exclude-kinds is not supported for workload scans: the named workload specifies its resource kind explicitly, not through kind exclusion lists")
+			}
+			if scanInfo.LabelSelector != "" || commandFlagChanged(cmd, "label-selector") {
 				return fmt.Errorf("--label-selector is not supported for workload scans: the named resource is fetched by identity, not by label")
 			}
 			identNamespace, kind, name, workloadAPIVersion, err := parseWorkloadIdentifierString(args[0])
@@ -162,22 +174,22 @@ func runWorkloadScan(ctx context.Context, scanInfo *cautils.ScanInfo, ks meta.IK
 		}
 		return nil, err
 	}
+	if scanInfo.DryRun {
+		// The preflight verdict is already printed and nothing was evaluated:
+		// there is no report to write or submit and no threshold to enforce.
+		return results, nil
+	}
 
 	if err = results.HandleResults(ctx, scanInfo); err != nil {
 		return results, err
 	}
 
-	if results.GetComplianceScore() < float32(scanInfo.ComplianceThreshold) {
-		return results, gateFailure(fmt.Errorf("scan compliance-score is below permitted threshold: %s (compliance-threshold: %.2f)", cautils.ComplianceScoreToString(results.GetComplianceScore(), 2), scanInfo.ComplianceThreshold))
-	}
-
-	if err := enforceSeverityThresholds(&results.GetData().Report.SummaryDetails, scanInfo); err != nil {
+	if err := joinGateErrors(
+		enforceComplianceThreshold(results.GetComplianceScore(), scanInfo),
+		enforceSeverityThresholds(&results.GetData().Report.SummaryDetails, scanInfo),
+		enforceCombinedImageGates(results, scanInfo),
+	); err != nil {
 		return results, err
-	}
-	if scanInfo.ScanImages {
-		if err := enforceImageSeverityThresholds(results.ImageScanData, scanInfo); err != nil {
-			return results, err
-		}
 	}
 	if err := enforceCoverageThreshold(results.GetData().ScanCoverage, len(results.GetData().Report.SummaryDetails.Controls), scanInfo); err != nil {
 		return results, err

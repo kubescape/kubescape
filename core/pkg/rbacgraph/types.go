@@ -24,13 +24,17 @@
 //
 //   - impersonate: the "impersonate" verb on users/groups/serviceaccounts
 //     lets a subject act as the impersonated identity outright, inheriting
-//     every permission it holds.
+//     every permission it holds. Group impersonation additionally requires
+//     authorization to impersonate a username (a User or ServiceAccount);
+//     Kubernetes checks both parts of the request independently.
 //   - escalate-verb: the "escalate" verb on roles/clusterroles, combined
 //     with update/patch on the same resource, is Kubernetes' own built-in
 //     escape hatch from its RBAC self-escalation prevention -- a subject
-//     with both can grant themselves arbitrary rules directly.
+//     with both can rewrite the target role; acquiring its rules also
+//     requires an existing or authorized new/edited binding.
 //   - bind-verb: the "bind" verb on roles/clusterroles, combined with
-//     create on rolebindings/clusterrolebindings, lets a subject attach any
+//     create on rolebindings/clusterrolebindings or update/patch on an
+//     existing binding of that role, lets a subject attach any
 //     Role/ClusterRole they can bind to a subject of their choosing
 //     (typically themselves), adopting its rules without ever having held
 //     them directly.
@@ -182,13 +186,16 @@ type EscalationEdge struct {
 	// Unbounded marks either an unrestricted permission grant or an identity
 	// set that cannot be fully enumerated. ImpersonatedKind distinguishes the
 	// latter: choosing any User/ServiceAccount does not create new permissions.
-	// An unrestricted bind or
-	// escalate rule (no resourceNames) is not confined to the
-	// Roles/ClusterRoles this package happened to collect; it covers any
-	// Role/ClusterRole that could ever exist in that scope. It also records
+	// A role rewrite can grant arbitrary rules through a usable binding.
+	// Unconfirmed rewrite capabilities remain warnings rather than grants
+	// (see PermissionsUnconfirmed). This field also records
 	// conservative missing-target warnings; ScopeUnknown distinguishes an
 	// unresolved namespaced Role from a cluster-wide permission grant.
 	Unbounded bool
+	// PermissionsUnconfirmed marks a role-rewrite capability for which no
+	// usable binding was established. Keep the risk visible without treating
+	// it as acquired permissions or confirmed administrator access.
+	PermissionsUnconfirmed bool
 	// ImpersonatedKind identifies an unbounded set of possible identities, not
 	// an unbounded permission grant. Users and ServiceAccounts contribute only
 	// their actual collected rules. Unrestricted Groups include system:masters.

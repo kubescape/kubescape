@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -386,4 +387,73 @@ func TestGetUpdateCmd_RejectsUnexpectedArgs(t *testing.T) {
 
 	err := cmd.Execute()
 	require.Error(t, err)
+}
+
+func TestGetUpdateCmd_NilKubescape(t *testing.T) {
+	cmd := GetUpdateCmd(nil)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+	cmd.SetArgs([]string{})
+
+	err := cmd.Execute()
+	require.EqualError(t, err, "uninitialized kubescape interface")
+}
+
+func TestGetUpdateCmd_NilContextFallback(t *testing.T) {
+	withVersionCheckHandler(t, versioncheck.NewVersionCheckHandlerMock())
+	withVersionGlobals(t, "v3.0.0", "v3.0.0")
+
+	// stubKubescape with nil context falls back safely to cmd.Context()
+	cmd := GetUpdateCmd(&stubKubescape{ctx: nil})
+	require.NotNil(t, cmd)
+
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetArgs([]string{"--format", "text"})
+	require.NoError(t, cmd.Execute())
+	assert.Contains(t, buf.String(), "Nothing to update: you are running the latest version")
+}
+
+func TestGetUpdateCmd_EmptyFormat(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{"empty flag value", []string{"--format", ""}},
+		{"whitespace flag value", []string{"--format", "   "}},
+		{"empty short flag", []string{"-f", ""}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd := GetUpdateCmd(&stubKubescape{ctx: context.Background()})
+			cmd.SilenceUsage = true
+			cmd.SilenceErrors = true
+			cmd.SetArgs(tt.args)
+
+			err := cmd.Execute()
+			require.EqualError(t, err, "format cannot be empty, supported formats: text, json")
+		})
+	}
+}
+
+func TestGetUpdateCmd_UnsupportedFormatTable(t *testing.T) {
+	tests := []struct {
+		format string
+	}{
+		{"yaml"},
+		{"xml"},
+		{"html"},
+		{"csv"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.format, func(t *testing.T) {
+			cmd := GetUpdateCmd(&stubKubescape{ctx: context.Background()})
+			cmd.SilenceUsage = true
+			cmd.SilenceErrors = true
+			cmd.SetArgs([]string{"--format", tt.format})
+
+			err := cmd.Execute()
+			require.EqualError(t, err, fmt.Sprintf("unsupported format %q, supported formats: text, json", tt.format))
+		})
+	}
 }

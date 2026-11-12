@@ -47,7 +47,7 @@ var (
 
 func getFrameworkCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Command {
 
-	return &cobra.Command{
+	frameworkCmd := &cobra.Command{
 		Use:     "framework <framework names list> [`<glob pattern>`/`-`] [flags]",
 		Short:   fmt.Sprintf("The framework you wish to use. Run '%[1]s list frameworks' for the list of supported frameworks", cautils.ExecName()),
 		Example: frameworkExample,
@@ -65,9 +65,15 @@ func getFrameworkCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comm
 					return fmt.Errorf("requires at least one framework name")
 				}
 			}
+			if scanInfo.FilePath != "" && len(args) > 1 {
+				return fmt.Errorf("usage: use either --file-path or positional input paths, not both")
+			}
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if scanInfo.FilePath != "" && len(args) > 1 {
+				return fmt.Errorf("usage: use either --file-path or positional input paths, not both")
+			}
 			if err := shared.ValidateCommonScanFlags(cmd, scanInfo, shared.ScanFormats); err != nil {
 				return err
 			}
@@ -102,6 +108,7 @@ func getFrameworkCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comm
 				}
 				cleanup, err := prepareScanLocalInput(cmd.InOrStdin(), args, scanInfo, scanLocalInputOptions{
 					FirstInputArg:    1,
+					FilePath:         scanInfo.FilePath,
 					RejectMixedStdin: true,
 				})
 				if err != nil {
@@ -137,6 +144,9 @@ func getFrameworkCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comm
 		},
 	}
 
+	frameworkCmd.PersistentFlags().StringVar(&scanInfo.FilePath, "file-path", "", "Path to the YAML file.")
+
+	return frameworkCmd
 }
 
 // runFrameworkScan runs one cluster's framework scan to completion: Scan,
@@ -149,22 +159,22 @@ func runFrameworkScan(ctx context.Context, scanInfo *cautils.ScanInfo, ks meta.I
 	if err != nil {
 		return nil, err
 	}
+	if scanInfo.DryRun {
+		// The preflight verdict is already printed and nothing was evaluated:
+		// there is no report to write or submit and no threshold to enforce.
+		return results, nil
+	}
 
 	if err = results.HandleResults(ctx, scanInfo); err != nil {
 		return results, err
 	}
 
-	if results.GetComplianceScore() < float32(scanInfo.ComplianceThreshold) {
-		return results, gateFailure(fmt.Errorf("scan compliance-score is below permitted threshold: %s (compliance-threshold: %.2f)", cautils.ComplianceScoreToString(results.GetComplianceScore(), 2), scanInfo.ComplianceThreshold))
-	}
-
-	if err := enforceSeverityThresholds(&results.GetData().Report.SummaryDetails, scanInfo); err != nil {
+	if err := joinGateErrors(
+		enforceComplianceThreshold(results.GetComplianceScore(), scanInfo),
+		enforceSeverityThresholds(&results.GetData().Report.SummaryDetails, scanInfo),
+		enforceCombinedImageGates(results, scanInfo),
+	); err != nil {
 		return results, err
-	}
-	if scanInfo.ScanImages {
-		if err := enforceImageSeverityThresholds(results.ImageScanData, scanInfo); err != nil {
-			return results, err
-		}
 	}
 	if err := enforceCoverageThreshold(results.GetData().ScanCoverage, len(results.GetData().Report.SummaryDetails.Controls), scanInfo); err != nil {
 		return results, err

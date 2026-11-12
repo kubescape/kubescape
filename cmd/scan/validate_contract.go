@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/kubescape/backend/pkg/versioncheck"
@@ -21,6 +22,24 @@ const (
 	validateContractFormatSARIF = "sarif"
 )
 
+var validateContractSupportedFormats = []string{
+	validateContractFormatText,
+	validateContractFormatJSON,
+	validateContractFormatSARIF,
+}
+
+func validateContractFormat(outputFormat string) (string, error) {
+	trimmed := strings.ToLower(strings.TrimSpace(outputFormat))
+	supported := strings.Join(validateContractSupportedFormats, ", ")
+	if trimmed == "" {
+		return "", fmt.Errorf("format cannot be empty, supported formats: %s", supported)
+	}
+	if !slices.Contains(validateContractSupportedFormats, trimmed) {
+		return "", fmt.Errorf("unsupported format %q, supported: %s", outputFormat, supported)
+	}
+	return trimmed, nil
+}
+
 func getValidateContractCmd(scanInfo *cautils.ScanInfo) *cobra.Command {
 	var contractName string
 	var outputFormat string
@@ -30,19 +49,23 @@ func getValidateContractCmd(scanInfo *cautils.ScanInfo) *cobra.Command {
 		Short: "Validate and select a repository scan contract without running a scan",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			normalizedFormat, err := validateContractFormat(outputFormat)
+			if err != nil {
+				return err
+			}
+
 			selected, validationErr := contractv1alpha1.LoadFile(args[0], contractv1alpha1.LoadOptions{
 				ContractName:        contractName,
 				RunningVersion:      versioncheck.BuildNumber,
 				SupportedFormats:    shared.ScanFormats,
 				SupportedSeverities: reporthandlingapis.GetSupportedSeverities(),
 			})
-			if validationErr != nil && outputFormat != validateContractFormatSARIF {
+			if validationErr != nil && normalizedFormat != validateContractFormatSARIF {
 				return validationErr
 			}
 
 			var output []byte
-			var err error
-			switch outputFormat {
+			switch normalizedFormat {
 			case validateContractFormatText:
 				output = []byte(fmt.Sprintf("Scan contract %q is valid\nSelected contract: %s\nContract digest: %s\n", selected.Metadata.Name, selected.ContractName, selected.ContractDigest))
 			case validateContractFormatJSON:
@@ -56,15 +79,16 @@ func getValidateContractCmd(scanInfo *cautils.ScanInfo) *cobra.Command {
 				if err != nil {
 					return err
 				}
-			default:
-				return fmt.Errorf("unsupported format %q, supported: text, json, sarif", outputFormat)
 			}
 
 			if scanInfo.Output != "" {
+				if err := validateContractOutput(args[0], scanInfo.Output); err != nil {
+					return err
+				}
 				if err := os.WriteFile(scanInfo.Output, output, 0o600); err != nil {
 					return fmt.Errorf("write validation output: %w", err)
 				}
-				if outputFormat == validateContractFormatSARIF && validationErr != nil {
+				if normalizedFormat == validateContractFormatSARIF && validationErr != nil {
 					cmd.SilenceUsage = true
 					cmd.SilenceErrors = true
 					return validationErr
@@ -74,7 +98,7 @@ func getValidateContractCmd(scanInfo *cautils.ScanInfo) *cobra.Command {
 			if _, err = cmd.OutOrStdout().Write(output); err != nil {
 				return err
 			}
-			if outputFormat == validateContractFormatSARIF && validationErr != nil {
+			if normalizedFormat == validateContractFormatSARIF && validationErr != nil {
 				cmd.SilenceUsage = true
 				cmd.SilenceErrors = true
 				return validationErr
@@ -91,6 +115,29 @@ func getValidateContractCmd(scanInfo *cautils.ScanInfo) *cobra.Command {
 		"  kubescape scan validate-contract kubescape.yaml --format sarif",
 	}, "\n")
 	return cmd
+}
+
+func validateContractOutput(input, output string) error {
+	destination, err := os.Stat(output)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("inspect validation output %q: %w", output, err)
+	}
+	source, err := os.Stat(input)
+	if os.IsNotExist(err) {
+		// SARIF can report a missing input file to an existing output file.
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("inspect input contract %q: %w", input, err)
+	}
+	// Compare file identities so symlinks, hard links, and alternate path spellings are covered.
+	if os.SameFile(source, destination) {
+		return fmt.Errorf("validation output %q would overwrite input contract %q; choose a different output file", output, input)
+	}
+	return nil
 }
 
 type validateContractSARIFReport struct {

@@ -158,7 +158,7 @@ func TestListHelmChartDirsReportsMetadataIOErrorsAndKeepsValidCharts(t *testing.
 	assert.Contains(t, errors.Join(errs...).Error(), chartFile)
 }
 
-func TestHelmRenderedYAMLParseFailureMarksChartUnrendered(t *testing.T) {
+func TestHelmRenderedYAMLParseFailureFailsLoad(t *testing.T) {
 	dir := t.TempDir()
 	writeManifestFixture(t, dir, "Chart.yaml", "apiVersion: v2\nname: broken\nversion: 0.1.0\n")
 	templates := filepath.Join(dir, "templates")
@@ -173,9 +173,9 @@ func TestHelmRenderedYAMLParseFailureMarksChartUnrendered(t *testing.T) {
 	require.NotEmpty(t, renderErrs)
 	assert.Contains(t, errors.Join(renderErrs...).Error(), "failed to parse rendered Helm template")
 
-	_, _, renderedCharts, err := LoadResourcesFromHelmCharts(context.Background(), dir, HelmValueOptions{})
-	require.NoError(t, err)
-	assert.Empty(t, renderedCharts, "a chart with invalid rendered YAML must remain available to the plain-file fallback")
+	_, _, _, err = LoadResourcesFromHelmCharts(context.Background(), dir, HelmValueOptions{})
+	require.ErrorIs(t, err, ErrHelmRenderFailed)
+	assert.Contains(t, err.Error(), `chart "broken"`)
 }
 
 func TestLoadResourcesFromKustomizeDirectoryPropagatesBuildFailure(t *testing.T) {
@@ -389,19 +389,19 @@ func TestLoadResourcesFromFilesTreatsTemplateSyntaxOutsideChartsAsCorruption(t *
 	assert.Contains(t, skips[0].Reason, "parse error")
 }
 
-// The plain-file fallback for a chart whose render failed must keep its drops
-// visible: templated templates are recorded as unrendered Helm templates,
-// while static siblings are still scanned.
+// Every template of a chart whose render failed is recorded as skipped, static
+// or not, while plain manifests and CRDs around it are still scanned.
 func TestLoadResourcesFromFilesRecordsUnrenderedChartTemplatesAsSkips(t *testing.T) {
 	testDir := helmChartLayoutPath()
 
 	workloads, skips, err := LoadResourcesFromFiles(context.Background(), testDir, testDir, nil)
 
 	require.NoError(t, err)
-	staticTemplate := filepath.Join(testDir, "mychart", "templates", "serviceaccount.yaml")
-	require.Contains(t, workloads, staticTemplate, "static templates must still be scanned when their chart did not render")
+	assert.Contains(t, workloads, filepath.Join(testDir, "plain-pod.yaml"))
+	assert.Contains(t, workloads, filepath.Join(testDir, "mychart", "crds", "widget.yaml"))
+	assert.NotContains(t, workloads, filepath.Join(testDir, "mychart", "templates", "serviceaccount.yaml"))
 
-	require.Len(t, skips, 2)
+	require.Len(t, skips, 8)
 	for _, skip := range skips {
 		assert.True(t, strings.HasPrefix(skip.Reason, "unrendered Helm template"), "unexpected skip reason %q", skip.Reason)
 		assert.Contains(t, skip.Path, filepath.Join("templates"), "templated files outside templates/ must not be classified as unrendered")

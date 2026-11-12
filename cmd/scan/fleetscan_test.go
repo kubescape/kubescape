@@ -277,6 +277,18 @@ func TestFleetScan_RequiresOutput(t *testing.T) {
 	require.ErrorContains(t, err, "--output")
 }
 
+func TestFleetScan_RejectsDryRunBeforeScanningAny(t *testing.T) {
+	scanInfo := cautils.ScanInfo{
+		DryRun:       true,
+		KubeContexts: []string{"ctx-a"},
+		Output:       "report.json",
+	}
+
+	err := fleetScan(scanInfo, &mocks.MockIKubescape{}, nil, scanContextOnlyRunner)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "--dry-run cannot be combined with fleet scanning")
+}
+
 // fleetTrackingKubescape is a test-local IKubescape recording, per
 // ScanContext call, the output path it was given (which encodes the
 // context, via perContextOutputPath) - and optionally failing for
@@ -1703,7 +1715,7 @@ func TestFleetScan_RejectsBadReferenceClusterBeforeScanning(t *testing.T) {
 
 // captureStdout runs fn with os.Stdout redirected and returns what it wrote,
 // with the escape sequences stripped so assertions read as words.
-func captureStdout(t *testing.T, fn func()) string {
+func captureStdout(t testing.TB, fn func()) string {
 	t.Helper()
 
 	read, write, err := os.Pipe()
@@ -1942,4 +1954,22 @@ func TestFleetScan_DevNullForContextAndFleetReports(t *testing.T) {
 			assert.Equal(t, []string{os.DevNull, os.DevNull}, ks.callsOutputs)
 		})
 	}
+}
+
+func TestFleetScan_HonorsFleetReportWriter(t *testing.T) {
+	var buf bytes.Buffer
+	SetFleetReportWriter(&buf)
+	defer SetFleetReportWriter(nil)
+
+	scanInfo := cautils.ScanInfo{
+		KubeContexts: []string{"ctx-a"},
+		Output:       os.DevNull,
+		Format:       "json",
+		FleetReport:  filepath.Join(t.TempDir(), "fleet.json"),
+	}
+	ks := &mocks.MockIKubescape{}
+
+	err := fleetScan(scanInfo, ks, nil, scanContextOnlyRunner)
+	require.NoError(t, err)
+	assert.NotEmpty(t, buf.String(), "fleet report summary must be written to fleetReportWriter")
 }

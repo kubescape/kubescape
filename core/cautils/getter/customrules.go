@@ -180,7 +180,7 @@ func controlFromRuleDir(rule ruledir.Rule) (reporthandling.Control, error) {
 }
 
 func controlFromRegoFile(file string) (reporthandling.Control, error) {
-	raw, err := os.ReadFile(file)
+	raw, err := ruledir.ReadFile(file)
 	if err != nil {
 		return reporthandling.Control{}, fmt.Errorf("read custom rule %q: %w", file, err)
 	}

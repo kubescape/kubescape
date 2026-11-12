@@ -188,8 +188,11 @@ func policyTypesFor(p *networkingv1.NetworkPolicy) (ingress, egress bool) {
 }
 
 // matchingPolicies returns every compiled policy in ep's namespace whose
-// podSelector selects ep.
+// podSelector selects ep. If idx is nil, it returns nil.
 func (idx *Index) matchingPolicies(ep Endpoint) []*compiledPolicy {
+	if idx == nil {
+		return nil
+	}
 	var out []*compiledPolicy
 	for _, cp := range idx.byNamespace[ep.Namespace] {
 		if cp.podSelector.Matches(labels.Set(ep.Labels)) {
@@ -204,8 +207,11 @@ func (idx *Index) matchingPolicies(ep Endpoint) []*compiledPolicy {
 // exact defaulting rules). An endpoint that is not isolated for a direction
 // allows all traffic in that direction, regardless of what any policy that
 // does not select it says -- NetworkPolicy is opt-in per pod, not
-// cluster-wide default-deny.
+// cluster-wide default-deny. A nil idx reports false (no isolating policies).
 func (idx *Index) IsIsolated(ep Endpoint, dir Direction) bool {
+	if idx == nil {
+		return false
+	}
 	for _, cp := range idx.matchingPolicies(ep) {
 		if dir == Ingress && cp.hasIngress {
 			return true

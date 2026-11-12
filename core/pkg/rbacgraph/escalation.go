@@ -29,9 +29,17 @@ var superuserGroups = map[string]bool{
 // a ServiceAccount "assign" its own identity) are filtered out -- they
 // don't represent an escalation.
 func (idx *Index) DirectEscalationEdges(subject Subject, rules []ScopedRule) []EscalationEdge {
+	var rewrites []roleRewrite
+	for _, edge := range idx.escalateVerbEdges(rules) {
+		rewrites = append(rewrites, roleRewrite{subject: subject, edge: edge})
+	}
+	return idx.directEscalationEdges(subject, rules, rewrites)
+}
+
+func (idx *Index) directEscalationEdges(subject Subject, rules []ScopedRule, rewrites []roleRewrite) []EscalationEdge {
 	var edges []EscalationEdge
 	edges = append(edges, idx.impersonateEdges(rules)...)
-	edges = append(edges, idx.escalateVerbEdges(rules)...)
+	edges = append(edges, idx.rewriteEdges(subject, rules, rewrites)...)
 	edges = append(edges, idx.bindVerbEdges(rules)...)
 	edges = append(edges, idx.assignServiceAccountEdges(rules)...)
 	edges = append(edges, idx.mintServiceAccountTokenEdges(rules)...)
@@ -68,6 +76,7 @@ func (idx *Index) DirectEscalationEdges(subject Subject, rules []ScopedRule) []E
 // type a Role can meaningfully constrain.
 func (idx *Index) impersonateEdges(rules []ScopedRule) []EscalationEdge {
 	var edges []EscalationEdge
+	usernameAuthorized := canImpersonateUsername(rules)
 	for _, sr := range rules {
 		rule := sr.Rule
 		if !containsOrWildcard(rule.Verbs, "impersonate") || !containsOrWildcard(rule.APIGroups, "") {
@@ -117,6 +126,11 @@ func (idx *Index) impersonateEdges(rules []ScopedRule) []EscalationEdge {
 			}
 		}
 		if containsOrWildcard(rule.Resources, "groups") || containsOrWildcard(rule.Resources, "*") {
+			// Impersonate-Group must accompany an authorized Impersonate-User.
+			// Being the caller already does not authorize impersonating oneself.
+			if !usernameAuthorized {
+				continue
+			}
 			if !restricted {
 				edges = append(edges, EscalationEdge{Primitive: PrimitiveImpersonate, ImpersonatedKind: KindGroup, Detail: "can impersonate any Group (unrestricted impersonate on groups)", Unbounded: true})
 			} else {
@@ -217,7 +231,9 @@ func coverageScopes(a, b map[string]*roleCoverage) []string {
 // Role/ClusterRole rules it doesn't already itself hold, unless the
 // subject also holds the "escalate" verb on that resource type -- combined
 // with update/patch (needed to actually modify the object), that's a
-// documented built-in bypass. The escalate grant and the update/patch grant
+// documented built-in bypass for rewriting the role. These are rewrite
+// capabilities; rewriteEdges separately establishes how their rules can be
+// acquired through bindings. The escalate grant and the update/patch grant
 // must actually cover the *same* role -- two independent resourceNames-
 // restricted grants for different roles (escalate on role-a, update on
 // role-b) don't combine into anything exploitable, so this correlates them
@@ -331,7 +347,7 @@ func (idx *Index) escalateVerbEdges(rules []ScopedRule) []EscalationEdge {
 				for _, cr := range matched {
 					edges = append(edges, EscalationEdge{
 						Primitive: PrimitiveEscalateVerb,
-						Detail:    fmt.Sprintf("holds escalate + update/patch on ClusterRole %q: can rewrite it to grant itself anything", cr.Name),
+						Detail:    fmt.Sprintf("holds escalate + update/patch on ClusterRole %q: can rewrite its rules", cr.Name),
 						Unbounded: true,
 						Scope:     "",
 						Target:    &RoleTarget{Kind: "ClusterRole", Name: cr.Name},
@@ -366,7 +382,7 @@ func (idx *Index) escalateVerbEdges(rules []ScopedRule) []EscalationEdge {
 			for _, r := range roles {
 				edges = append(edges, EscalationEdge{
 					Primitive: PrimitiveEscalateVerb,
-					Detail:    fmt.Sprintf("holds escalate + update/patch on Role %q in namespace %q: can rewrite it to grant itself anything", r.Name, r.Namespace),
+					Detail:    fmt.Sprintf("holds escalate + update/patch on Role %q in namespace %q: can rewrite its rules", r.Name, r.Namespace),
 					Unbounded: true,
 					Scope:     r.Namespace,
 					Target:    &RoleTarget{Kind: "Role", Namespace: r.Namespace, Name: r.Name},
@@ -380,7 +396,8 @@ func (idx *Index) escalateVerbEdges(rules []ScopedRule) []EscalationEdge {
 // bindVerbEdges implements the bind-verb primitive: the "bind" verb on a
 // Role/ClusterRole is RBAC's other documented self-escalation-prevention
 // bypass -- combined with the ability to create a RoleBinding or
-// ClusterRoleBinding, a subject can attach any Role/ClusterRole they can
+// ClusterRoleBinding, or to update an existing binding of that role, a subject
+// can attach any Role/ClusterRole they can
 // bind to a subject of their choosing (in practice, themselves), adopting
 // its rules without ever having held them directly. A cluster-wide grant of
 // either half (bind, or create rolebindings/clusterrolebindings) is treated
@@ -403,11 +420,15 @@ func (idx *Index) bindVerbEdges(rules []ScopedRule) []EscalationEdge {
 		// otherwise (BindingAuthorized in Kubernetes' pkg/registry/rbac).
 		// A bind grant confined to one namespace therefore authorizes
 		// neither a ClusterRoleBinding nor a RoleBinding anywhere else.
-		if sr.Namespace == "" && idx.hasClusterWideCreate(rules, "clusterrolebindings") {
+		if sr.Namespace == "" {
 			for _, cr := range targets {
+				via := idx.clusterRoleBindingPath(rules, cr.Name)
+				if via == "" {
+					continue
+				}
 				edges = append(edges, EscalationEdge{
 					Primitive:    PrimitiveBindVerb,
-					Detail:       fmt.Sprintf("can bind ClusterRole %q cluster-wide via a new ClusterRoleBinding", cr.Name),
+					Detail:       fmt.Sprintf("can bind ClusterRole %q cluster-wide via %s", cr.Name, via),
 					GrantedRules: scopeRules(cr.Rules, ""),
 					Target:       &RoleTarget{Kind: "ClusterRole", Name: cr.Name},
 				})
@@ -417,13 +438,14 @@ func (idx *Index) bindVerbEdges(rules []ScopedRule) []EscalationEdge {
 			if sr.Namespace != "" && sr.Namespace != ns {
 				continue
 			}
-			if !idx.canCreateRoleBindingsIn(rules, ns) {
-				continue
-			}
 			for _, cr := range targets {
+				via := idx.roleBindingPath(rules, ns, RoleTarget{Kind: "ClusterRole", Name: cr.Name})
+				if via == "" {
+					continue
+				}
 				edges = append(edges, EscalationEdge{
 					Primitive:    PrimitiveBindVerb,
-					Detail:       fmt.Sprintf("can bind ClusterRole %q within namespace %q via a new RoleBinding", cr.Name, ns),
+					Detail:       fmt.Sprintf("can bind ClusterRole %q within namespace %q via %s", cr.Name, ns, via),
 					GrantedRules: scopeRules(cr.Rules, ns),
 					Scope:        ns,
 					Target:       &RoleTarget{Kind: "ClusterRole", Name: cr.Name},
@@ -444,12 +466,13 @@ func (idx *Index) bindVerbEdges(rules []ScopedRule) []EscalationEdge {
 			candidates = idx.matchingRoles(sr.Namespace, names, restricted)
 		}
 		for _, r := range candidates {
-			if !idx.canCreateRoleBindingsIn(rules, r.Namespace) {
+			via := idx.roleBindingPath(rules, r.Namespace, RoleTarget{Kind: "Role", Namespace: r.Namespace, Name: r.Name})
+			if via == "" {
 				continue
 			}
 			edges = append(edges, EscalationEdge{
 				Primitive:    PrimitiveBindVerb,
-				Detail:       fmt.Sprintf("can bind Role %q within namespace %q via a new RoleBinding", r.Name, r.Namespace),
+				Detail:       fmt.Sprintf("can bind Role %q within namespace %q via %s", r.Name, r.Namespace, via),
 				GrantedRules: scopeRules(r.Rules, r.Namespace),
 				Scope:        r.Namespace,
 				Target:       &RoleTarget{Kind: "Role", Namespace: r.Namespace, Name: r.Name},
@@ -728,6 +751,48 @@ func (idx *Index) hasCreateInNamespace(rules []ScopedRule, resource, namespace s
 // namespace, or a cluster-wide grant (covers every namespace).
 func (idx *Index) canCreateRoleBindingsIn(rules []ScopedRule, ns string) bool {
 	return idx.hasCreateInNamespace(rules, "rolebindings", ns) || idx.hasClusterWideCreate(rules, "rolebindings")
+}
+
+// clusterRoleBindingPath describes how rules let the subject attach a
+// ClusterRole it may bind to itself cluster-wide, or returns "" if they do not.
+// The API server makes the same bind check on an update as on a create (see
+// Kubernetes' pkg/registry/rbac/clusterrolebinding/policybased), and although a
+// binding's roleRef is immutable its subjects are not, so update or patch of an
+// existing binding of this role serves as well as creating one.
+func (idx *Index) clusterRoleBindingPath(rules []ScopedRule, clusterRole string) string {
+	if idx.hasClusterWideCreate(rules, "clusterrolebindings") {
+		return "a new ClusterRoleBinding"
+	}
+	var editable []string
+	for _, binding := range idx.clusterRoleBindingsByRole[clusterRole] {
+		if canEditBinding(rules, "clusterrolebindings", "", binding.Name) {
+			editable = append(editable, binding.Name)
+		}
+	}
+	return bindingEditPath("ClusterRoleBinding", editable)
+}
+
+// roleBindingPath is clusterRoleBindingPath for a RoleBinding in namespace.
+func (idx *Index) roleBindingPath(rules []ScopedRule, namespace string, target RoleTarget) string {
+	if idx.canCreateRoleBindingsIn(rules, namespace) {
+		return "a new RoleBinding"
+	}
+	var editable []string
+	for _, binding := range idx.roleBindingsByRole[target] {
+		if binding.Namespace == namespace && canEditBinding(rules, "rolebindings", namespace, binding.Name) {
+			editable = append(editable, binding.Name)
+		}
+	}
+	return bindingEditPath("RoleBinding", editable)
+}
+
+// bindingEditPath names the first editable binding, so the explanation does
+// not depend on the order the bindings were collected in.
+func bindingEditPath(kind string, editable []string) string {
+	if len(editable) == 0 {
+		return ""
+	}
+	return "an update to " + kind + " " + slices.Min(editable)
 }
 
 func scopeRules(rules []rbacv1.PolicyRule, namespace string) []ScopedRule {

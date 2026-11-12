@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/kubescape/kubescape/v4/internal/testutils"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -466,6 +467,121 @@ func TestLoadPolicyMultiPathFallback(t *testing.T) {
 		names, err := p.ListFrameworks()
 		require.NoError(t, err)
 		require.Contains(t, names, "MyFramework")
+	})
+}
+
+func TestLoadPolicy_OversizedFileRejected(t *testing.T) {
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "oversized.json")
+	f, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY, 0o600)
+	require.NoError(t, err)
+	require.NoError(t, f.Truncate(maxPolicyFileBytes+1))
+	require.NoError(t, f.Close())
+
+	t.Run("GetControl", func(t *testing.T) {
+		p := NewLoadPolicy([]string{filePath})
+		_, err := p.GetControl("C-0001")
+		require.Error(t, err)
+		require.ErrorIs(t, err, ErrPolicyTooLarge)
+	})
+
+	t.Run("GetExceptions", func(t *testing.T) {
+		p := NewLoadPolicy([]string{filePath})
+		_, err := p.GetExceptions(context.Background(), "")
+		require.Error(t, err)
+		require.ErrorIs(t, err, ErrPolicyTooLarge)
+	})
+
+	t.Run("GetAttackTracks", func(t *testing.T) {
+		p := NewLoadPolicy([]string{filePath})
+		_, err := p.GetAttackTracks()
+		require.Error(t, err)
+		require.ErrorIs(t, err, ErrPolicyTooLarge)
+	})
+
+	t.Run("CacheSource", func(t *testing.T) {
+		p := NewLoadPolicy([]string{filePath})
+		require.Equal(t, fmt.Sprintf("unreadable-file:%q", filePath), p.CacheSource())
+	})
+
+	t.Run("fileDigest", func(t *testing.T) {
+		_, err := fileDigest(filePath)
+		require.Error(t, err)
+		require.ErrorIs(t, err, ErrPolicyTooLarge)
+	})
+}
+
+func TestLoadPolicy_NonRegularFileRejected(t *testing.T) {
+	// /dev/null is a character device, not a regular file
+	if _, err := os.Stat("/dev/null"); err == nil {
+		p := NewLoadPolicy([]string{"/dev/null"})
+
+		t.Run("GetControl", func(t *testing.T) {
+			_, err := p.GetControl("C-0001")
+			require.Error(t, err)
+			require.ErrorIs(t, err, ErrPolicyNotRegular)
+		})
+
+		t.Run("GetExceptions", func(t *testing.T) {
+			_, err := p.GetExceptions(context.Background(), "")
+			require.Error(t, err)
+			require.ErrorIs(t, err, ErrPolicyNotRegular)
+		})
+	}
+}
+
+func TestLoadPolicy_DirectoryRejected(t *testing.T) {
+	dir := t.TempDir()
+	p := NewLoadPolicy([]string{dir})
+
+	_, err := p.GetExceptions(context.Background(), "")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "is a directory, not a file")
+}
+
+// TestReadControlsInputsFile: the file is held to the rules GetControlsInputs
+// applies, and every refusal keeps its cause.
+func TestReadControlsInputsFile(t *testing.T) {
+	write := func(t *testing.T, content string) string {
+		path := filepath.Join(t.TempDir(), "controls-inputs.json")
+		require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+		return path
+	}
+
+	t.Run("a JSON object of control inputs is decoded", func(t *testing.T) {
+		inputs, err := ReadControlsInputsFile(write(t, `{"key1":["val1","val2"],"key2":[]}`))
+
+		require.NoError(t, err)
+		assert.Equal(t, map[string][]string{"key1": {"val1", "val2"}, "key2": {}}, inputs)
+	})
+	t.Run("an empty object decodes to no inputs", func(t *testing.T) {
+		inputs, err := ReadControlsInputsFile(write(t, `{}`))
+
+		require.NoError(t, err)
+		assert.Empty(t, inputs)
+	})
+	t.Run("a missing file", func(t *testing.T) {
+		_, err := ReadControlsInputsFile(filepath.Join(t.TempDir(), "missing.json"))
+
+		require.ErrorIs(t, err, os.ErrNotExist)
+	})
+	t.Run("a file that is not a JSON object of control inputs", func(t *testing.T) {
+		_, err := ReadControlsInputsFile(write(t, `["key1"]`))
+
+		require.Error(t, err)
+	})
+	t.Run("a directory", func(t *testing.T) {
+		_, err := ReadControlsInputsFile(t.TempDir())
+
+		require.ErrorContains(t, err, "is a directory, not a file")
+	})
+	t.Run("an oversized file", func(t *testing.T) {
+		path := write(t, "")
+		require.NoError(t, os.Truncate(path, maxPolicyFileBytes+1))
+
+		_, err := ReadControlsInputsFile(path)
+
+		require.ErrorIs(t, err, ErrPolicyTooLarge)
 	})
 }
 

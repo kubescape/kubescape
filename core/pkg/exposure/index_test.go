@@ -69,6 +69,30 @@ func TestServiceExposure_ExternalIPsAlongsideLoadBalancerReportsBothPaths(t *tes
 	}
 }
 
+// kube-proxy never builds proxy rules for a headless or ExternalName Service
+// (pkg/proxy/util ShouldSkipService), so spec.externalIPs on either is never
+// programmed on any node. The API server still accepts such a Service.
+func TestServiceExposure_ExternalIPsOnUnproxiedServiceIsNotExposure(t *testing.T) {
+	headless := svc("ns", "headless", corev1.ServiceTypeClusterIP)
+	headless.Spec.ClusterIP = corev1.ClusterIPNone
+	headless.Spec.ClusterIPs = []string{corev1.ClusterIPNone}
+	headless.Spec.ExternalIPs = []string{"203.0.113.10"}
+
+	externalName := svc("ns", "external-name", corev1.ServiceTypeExternalName)
+	externalName.Spec.ExternalName = "db.example.com"
+	externalName.Spec.ExternalIPs = []string{"203.0.113.11"}
+
+	idx := NewIndex([]corev1.Service{headless, externalName}, nil, nil, nil, nil)
+	for _, name := range []string{"headless", "external-name"} {
+		t.Run(name, func(t *testing.T) {
+			paths, unclear := idx.ServiceExposure(ref("ns", name))
+			if len(paths) != 0 || unclear {
+				t.Errorf("paths = %+v, unclear = %v; want none: kube-proxy skips headless and ExternalName Services, so their externalIPs are never programmed", paths, unclear)
+			}
+		})
+	}
+}
+
 func TestServiceExposure_NoExternalIPsDoesNotAddAPath(t *testing.T) {
 	idx := NewIndex([]corev1.Service{svc("ns", "app", corev1.ServiceTypeClusterIP)}, nil, nil, nil, nil)
 	paths, _ := idx.ServiceExposure(ref("ns", "app"))
@@ -550,4 +574,46 @@ func TestServiceExposure_HTTPRouteIndeterminateAdmissionStillReportsPath(t *test
 
 func ptrBackend(b networkingv1.IngressBackend) *networkingv1.IngressBackend {
 	return &b
+}
+
+func TestNilIndex_SafeReceiverMethods(t *testing.T) {
+	var idx *Index
+	target := ref("ns", "app")
+
+	paths, unclear := idx.ServiceExposure(target)
+	if paths != nil || !unclear {
+		t.Errorf("ServiceExposure on nil index = (%v, %v), want (nil, true)", paths, unclear)
+	}
+
+	if ns := idx.routeNamespacesFor(target); ns != nil {
+		t.Errorf("routeNamespacesFor on nil index = %v, want nil", ns)
+	}
+
+	route := &gatewayRoute{Kind: "HTTPRoute", Namespace: "ns", Name: "route"}
+	s := &corev1.Service{}
+	permitted, undetermined := idx.routeReferencesService(route, target, s)
+	if permitted || undetermined {
+		t.Errorf("routeReferencesService on nil index = (%v, %v), want (false, false)", permitted, undetermined)
+	}
+
+	if verdict := idx.authorizeServiceReference(route, target); verdict != referenceUndetermined {
+		t.Errorf("authorizeServiceReference on nil index = %v, want referenceUndetermined", verdict)
+	}
+
+	if attaches := idx.routeAttachesToAGateway(route); attaches {
+		t.Errorf("routeAttachesToAGateway on nil index = true, want false")
+	}
+
+	if hostnames := idx.attachedRouteHostnames(route); hostnames != nil {
+		t.Errorf("attachedRouteHostnames on nil index = %v, want nil", hostnames)
+	}
+
+	admits, determinable := idx.gatewayAdmitsRouteNamespace(listener{}, "ns", "gw-ns")
+	if admits || determinable {
+		t.Errorf("gatewayAdmitsRouteNamespace on nil index = (%v, %v), want (false, false)", admits, determinable)
+	}
+
+	if canForward := idx.mirrorParentCanForward(backendRef{}, route); canForward {
+		t.Errorf("mirrorParentCanForward on nil index = true, want false")
+	}
 }

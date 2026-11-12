@@ -26,6 +26,9 @@ type pssFlags struct {
 
 	// stdin supplies the manifests when the only path argument is "-".
 	stdin io.Reader
+
+	// stdout receives formatted output when --output is unset.
+	stdout io.Writer
 }
 
 // stdinPath is the path argument that reads local manifests from stdin.
@@ -81,6 +84,7 @@ this namespace?" — without touching the cluster's admission configuration.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cmd.SilenceUsage = true
 			flags.stdin = cmd.InOrStdin()
+			flags.stdout = cmd.OutOrStdout()
 			return runPSS(cmd.Context(), flags, args)
 		},
 	}
@@ -106,7 +110,11 @@ func runPSS(ctx context.Context, flags *pssFlags, args []string) error {
 	}
 
 	// Validate format
-	formatLower := strings.ToLower(flags.format)
+	trimmedFormat := strings.TrimSpace(flags.format)
+	if trimmedFormat == "" {
+		return fmt.Errorf("format cannot be empty; supported: %s", strings.Join(pssFormats, ", "))
+	}
+	formatLower := strings.ToLower(trimmedFormat)
 	validFormat := false
 	for _, f := range pssFormats {
 		if formatLower == f {
@@ -173,7 +181,7 @@ func runPSS(ctx context.Context, flags *pssFlags, args []string) error {
 	}
 
 	// Write output
-	if err := writeOutput(result, formatLower, flags.output, flags.verbose); err != nil {
+	if err := writeOutput(result, formatLower, flags.output, flags.verbose, flags.stdout); err != nil {
 		return err
 	}
 

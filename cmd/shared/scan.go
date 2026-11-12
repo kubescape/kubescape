@@ -104,13 +104,13 @@ func severityOrdinal(severity string) int {
 func ValidateScanFormat(format string, supported []string) error {
 	var entries int
 	for f := range strings.SplitSeq(format, ",") {
-		f = strings.TrimSpace(f)
-		if f == "" {
+		raw := strings.TrimSpace(f)
+		if raw == "" {
 			continue
 		}
 		entries++
-		if !slices.Contains(supported, f) {
-			return fmt.Errorf("invalid format %q, supported formats: %s", f, strings.Join(supported, ", "))
+		if !slices.Contains(supported, strings.ToLower(raw)) {
+			return fmt.Errorf("invalid format %q, supported formats: %s", raw, strings.Join(supported, ", "))
 		}
 	}
 	// Reject separator/whitespace-only input (e.g. "," or " ") that resolves to no format.
@@ -119,6 +119,17 @@ func ValidateScanFormat(format string, supported []string) error {
 		return fmt.Errorf("invalid format %q, supported formats: %s", format, strings.Join(supported, ", "))
 	}
 	return nil
+}
+
+// NormalizeScanFormats converts a comma-separated format string into a trimmed, lowercased, comma-separated string without empty entries.
+func NormalizeScanFormats(format string) string {
+	var entries []string
+	for f := range strings.SplitSeq(format, ",") {
+		if trimmed := strings.ToLower(strings.TrimSpace(f)); trimmed != "" {
+			entries = append(entries, trimmed)
+		}
+	}
+	return strings.Join(entries, ",")
 }
 
 // ValidateView returns an error if view is not one of the supported views.
@@ -172,6 +183,9 @@ func ValidateCommonScanFlags(cmd *cobra.Command, scanInfo *cautils.ScanInfo, sup
 	if err := ValidateScanFormat(scanInfo.Format, supportedFormats); err != nil {
 		return err
 	}
+	if scanInfo.Format != "" {
+		scanInfo.Format = NormalizeScanFormats(scanInfo.Format)
+	}
 	fView := cmd.Flags().Lookup("view")
 	if fView == nil {
 		fView = cmd.InheritedFlags().Lookup("view")
@@ -218,7 +232,47 @@ func ValidateCommonScanFlags(cmd *cobra.Command, scanInfo *cautils.ScanInfo, sup
 	if scanInfo.MaxDBAge < 0 {
 		return fmt.Errorf("invalid --max-db-age %q: must be a positive duration (e.g. 120h) or 0 for the default", scanInfo.MaxDBAge)
 	}
+	if err := validateEPSSThreshold(scanInfo.EPSSThreshold); err != nil {
+		return err
+	}
+	if err := validateImageRiskGateScope(scanInfo); err != nil {
+		return err
+	}
 	ApplyDBAgeGatePresence(cmd, scanInfo)
+	return nil
+}
+
+// validateEPSSThreshold returns an error wrapping ErrBadThreshold when
+// --epss-threshold is NaN or outside [0, 1]. EPSS is a probability, so a
+// larger value could never fail a scan.
+func validateEPSSThreshold(threshold float64) error {
+	if math.IsNaN(threshold) || threshold < 0 || threshold > 1 {
+		return fmt.Errorf("%w: --epss-threshold must be between 0 and 1, got %v", ErrBadThreshold, threshold)
+	}
+	return nil
+}
+
+// validateImageRiskGateScope rejects an exploitability gate on a scan that
+// evaluates no images, where it would otherwise pass silently. A dry run stops
+// after the RBAC preflight, so it never scans images even with --scan-images.
+func validateImageRiskGateScope(scanInfo *cautils.ScanInfo) error {
+	if scanInfo.DryRun {
+		if scanInfo.FailOnKEV {
+			return fmt.Errorf("--fail-on-kev cannot be used with --dry-run: a dry run does not scan images")
+		}
+		if scanInfo.EPSSThreshold > 0 {
+			return fmt.Errorf("--epss-threshold cannot be used with --dry-run: a dry run does not scan images")
+		}
+	}
+	if scanInfo.ScanImages || scanInfo.ScanType == cautils.ScanTypeImage {
+		return nil
+	}
+	if scanInfo.FailOnKEV {
+		return fmt.Errorf("--fail-on-kev evaluates image vulnerabilities: use 'kubescape scan image' or add --scan-images")
+	}
+	if scanInfo.EPSSThreshold > 0 {
+		return fmt.Errorf("--epss-threshold evaluates image vulnerabilities: use 'kubescape scan image' or add --scan-images")
+	}
 	return nil
 }
 

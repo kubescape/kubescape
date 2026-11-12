@@ -93,15 +93,19 @@ deny contains msga if {
 # The verbs over secrets that hand a subject a token, and which of them survive
 # a resourceNames restriction.
 #
+# list and watch return whole Secret objects, data included, so they reveal a
+# token just as get does.
+#
 # get, update and patch address a secret by name, so a narrowed entry still
 # authorizes them against the named secret, and that secret may well be a
-# service account token secret. list and top-level create carry no object name
-# when the authorizer runs, so ResourceNameMatches never matches and a narrowed
-# entry authorizes neither; reporting them there would flag a permission the
-# subject does not hold.
-token_verbs(rule) := {"get", "update", "patch", "*"} if not unrestricted_rule(rule)
+# service account token secret. A narrowed list or watch is authorized too when
+# the request carries a metadata.name field selector for the named secret, which
+# reads that secret the same way. Only top-level create carries no object name
+# when the authorizer runs, so a narrowed entry never authorizes it; reporting it
+# there would flag a permission the subject does not hold.
+token_verbs(rule) := {"get", "list", "watch", "update", "patch", "*"} if not unrestricted_rule(rule)
 
-token_verbs(rule) := {"get", "list", "create", "update", "patch", "*"} if unrestricted_rule(rule)
+token_verbs(rule) := {"get", "list", "watch", "create", "update", "patch", "*"} if unrestricted_rule(rule)
 
 targets_secrets(rule) if {
 	core_api_group(rule)

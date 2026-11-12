@@ -14,8 +14,11 @@ type gatewayBackendWire struct {
 }
 
 type gatewayFilterWire struct {
-	Type          string             `json:"type"`
-	RequestMirror *requestMirrorWire `json:"requestMirror,omitempty"`
+	Type string `json:"type"`
+	// Only presence matters: a redirect responds without forwarding to the
+	// selected backend, regardless of its destination or status code.
+	RequestRedirect *struct{}          `json:"requestRedirect,omitempty"`
+	RequestMirror   *requestMirrorWire `json:"requestMirror,omitempty"`
 }
 
 type requestMirrorWire struct {
@@ -68,6 +71,9 @@ func mirrorBackends(filters []gatewayFilterWire) []backendRef {
 // receives no requests, so its filters never run either; an undetermined
 // reference stays possible.
 func (idx *Index) mirrorParentCanForward(mirror backendRef, route *gatewayRoute) bool {
+	if idx == nil {
+		return false
+	}
 	parent := mirror.Parent
 	if parent == nil {
 		return true
@@ -88,4 +94,15 @@ func (idx *Index) mirrorParentCanForward(mirror backendRef, route *gatewayRoute)
 	}
 	service := idx.services[parentRef]
 	return gatewayBackendPortMatches(*parent, service)
+}
+
+// redirectsRequest recognizes a configured HTTP RequestRedirect, rather than
+// treating an incomplete filter or an unrelated filter payload as a redirect.
+func redirectsRequest(filters []gatewayFilterWire) bool {
+	for _, filter := range filters {
+		if filter.Type == "RequestRedirect" && filter.RequestRedirect != nil {
+			return true
+		}
+	}
+	return false
 }

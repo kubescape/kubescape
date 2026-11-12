@@ -37,6 +37,22 @@ var (
 `, cautils.ExecName())
 )
 
+// normalizeListTarget maps singular forms, aliases, and case variations to canonical list targets.
+func normalizeListTarget(target string) string {
+	switch strings.ToLower(strings.TrimSpace(target)) {
+	case "controls", "control":
+		return "controls"
+	case "frameworks", "framework":
+		return "frameworks"
+	case "controls-config", "controls-inputs", "controls-input", "control-inputs", "control-input", "control-config":
+		return "controls-config"
+	case "exceptions", "exception":
+		return "exceptions"
+	default:
+		return target
+	}
+}
+
 func GetListCmd(ks meta.IKubescape) *cobra.Command {
 	var listPolicies = v1.ListPolicies{}
 
@@ -51,7 +67,11 @@ func GetListCmd(ks meta.IKubescape) *cobra.Command {
 			if len(args) < 1 {
 				return fmt.Errorf("policy type required, supported: %s", supported)
 			}
-			if !slices.Contains(core.ListSupportActions(), args[0]) {
+			if len(args) > 1 {
+				return fmt.Errorf("unknown command %q for %q", args[1], cmd.CommandPath())
+			}
+			target := normalizeListTarget(args[0])
+			if !slices.Contains(core.ListSupportActions(), target) {
 				return fmt.Errorf("invalid parameter '%s'. Supported parameters: %s", args[0], supported)
 			}
 			return nil
@@ -62,7 +82,7 @@ func GetListCmd(ks meta.IKubescape) *cobra.Command {
 				return err
 			}
 
-			listPolicies.Target = args[0]
+			listPolicies.Target = normalizeListTarget(args[0])
 			if err := validateControlListFilters(listPolicies.Target, listPolicies.ControlFilters); err != nil {
 				return err
 			}
@@ -74,7 +94,7 @@ func GetListCmd(ks meta.IKubescape) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := core.PrintListResult(ks.Context(), result, listPolicies.Target, listPolicies.Format); err != nil {
+			if err := core.PrintListResult(ks.Context(), result, listPolicies.Target, listPolicies.Format, cmd.OutOrStdout()); err != nil {
 				return err
 			}
 			return nil

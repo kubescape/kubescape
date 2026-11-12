@@ -686,3 +686,22 @@ func TestCorrelateIdentity_DuplicateSeveritiesDoNotAlterTheCallersInput(t *testi
 		t.Errorf("caller's slice was modified: %+v", in)
 	}
 }
+
+func TestCorrelateIdentity_UnboundRoleRewriteDoesNotInventPermissions(t *testing.T) {
+	idx := rbacgraph.NewIndex(nil, []rbacv1.ClusterRole{
+		clusterRole("editor", rule([]string{"rbac.authorization.k8s.io"}, []string{"clusterroles"}, []string{"escalate", "patch"}, []string{"editable"})),
+		clusterRole("editable"),
+	}, nil, []rbacv1.ClusterRoleBinding{clusterRoleBinding("editor", "editor", saSubject("prod", "api"))}, []corev1.ServiceAccount{saObj("prod", "api")})
+	w := wl("prod", "Deployment", "api")
+	got := correlateOne(t, IdentityInput{
+		Workloads:  []WorkloadVulns{{Workload: w, Vulnerabilities: []VulnerabilityRef{critical("CVE-1")}}},
+		Identities: map[vulnexposure.Workload]WorkloadIdentity{w: explicit("prod", "api")}, RBAC: completeRBAC(idx),
+	})
+	p := got.Permissions
+	if p.ClusterAdmin || p.PermissionGain || len(p.GainedRules) != 0 {
+		t.Fatalf("role edit became acquired privileges: %+v", p)
+	}
+	if !p.Unbounded || p.NoAdditionalReachabilityFound {
+		t.Fatalf("role-rewrite risk was hidden: %+v", p)
+	}
+}

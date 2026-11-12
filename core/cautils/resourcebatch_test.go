@@ -8,6 +8,29 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestLargeClusterSize(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+		want  int
+	}{
+		{name: "custom threshold", value: "100", want: 100},
+		{name: "zero falls back to default", value: "0", want: DefaultLargeClusterSize},
+		{name: "negative falls back to default", value: "-1", want: DefaultLargeClusterSize},
+		{name: "unparsable falls back to default", value: "abc", want: DefaultLargeClusterSize},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("LARGE_CLUSTER_SIZE", tt.value)
+			if got := LargeClusterSize(); got != tt.want {
+				t.Errorf("LargeClusterSize() = %d, want %d", got, tt.want)
+			}
+			assert.False(t, IsLargeCluster(tt.want))
+			assert.True(t, IsLargeCluster(tt.want+1))
+		})
+	}
+}
+
 func TestIsLargeCluster(t *testing.T) {
 	t.Setenv("LARGE_CLUSTER_SIZE", "2500")
 

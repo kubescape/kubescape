@@ -370,7 +370,7 @@ func writeFileReportFixture(t *testing.T) (dir, reportPath string, res *reportha
 	res = remediationResource(dir, "deploy.yaml", "Deployment", "demo", 0)
 	report := remediationReport(dir, res,
 		remediationFailedControl("C-0057", "Privileged container",
-			remediationFailedRuleWithFix("spec.containers[0].securityContext.privileged", "false")),
+			remediationFailedRuleWithFix(privilegedFixPath, "false")),
 	)
 	reportPath = writeRemediationReport(t, t.TempDir(), report, nil)
 	return dir, reportPath, res
@@ -405,6 +405,54 @@ func TestApplyRemediation_FileReportWithBasePathUsesFilesNotRenderedManifests(t 
 	after, err := os.ReadFile(filepath.Join(dir, "deploy.yaml"))
 	require.NoError(t, err)
 	assert.Equal(t, string(before), string(after), "planning must not write the manifest")
+}
+
+func TestApplyRemediation_FileReportRejectsStaleTarget(t *testing.T) {
+	forbidScan(t)
+	dir, reportPath, _ := writeFileReportFixture(t)
+	path := filepath.Join(dir, "deploy.yaml")
+	inserted := strings.Replace(deploymentNoSecurityContext, "name: demo", "name: inserted", 1)
+	stale := inserted + "---\n" + deploymentNoSecurityContext
+	require.NoError(t, os.WriteFile(path, []byte(stale), 0o600))
+
+	msg := callReportError(t, map[string]any{"report_path": reportPath, "base_path": dir, "control_ids": "C-0057"})
+	assert.Contains(t, msg, "document index 0 no longer matches the scan report")
+	assert.Contains(t, msg, "re-scan and use the new report")
+
+	after, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.Equal(t, stale, string(after))
+}
+
+func TestApplyRemediation_JSONFileReportPreservesUntouchedValues(t *testing.T) {
+	forbidScan(t)
+	dir := t.TempDir()
+	const manifest = `{
+  "apiVersion": "apps/v1",
+  "kind": "Deployment",
+  "metadata": {"name": "demo", "namespace": "default", "generation": 9007199254740993},
+  "spec": {
+    "template": {
+      "spec": {
+        "containers": [{"name": "app", "securityContext": {"privileged": true}}]
+      }
+    }
+  }
+}
+`
+	path := filepath.Join(dir, "deploy.json")
+	require.NoError(t, os.WriteFile(path, []byte(manifest), 0o600))
+	res := remediationResource(dir, "deploy.json", "Deployment", "demo", 0)
+	res.Source.FileType = reporthandling.SourceTypeJson
+	report := remediationReport(dir, res,
+		remediationFailedControl("C-0057", "Privileged container",
+			remediationFailedRuleWithFix(privilegedFixPath, "false")),
+	)
+	reportPath := writeRemediationReport(t, t.TempDir(), report, nil)
+
+	resp := callReport(t, map[string]any{"report_path": reportPath, "base_path": dir, "control_ids": "C-0057"})
+	require.Len(t, resp.Files, 1)
+	assert.Equal(t, strings.Replace(manifest, `"privileged": true`, `"privileged": false`, 1), resp.Files[0].PatchedYAML)
 }
 
 func TestApplyRemediation_FileReportOutsideBasePathIsRejected(t *testing.T) {

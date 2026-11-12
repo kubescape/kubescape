@@ -5,10 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
-	"net/http/httptest"
 	"os"
-	"strings"
 	"testing"
 
 	"github.com/kubescape/go-logger"
@@ -117,16 +114,9 @@ func TestOperatorRemediateCmd_ContextCanceled(t *testing.T) {
 	assert.Equal(t, ctx, capturedCtx, "constructor must receive the command context")
 }
 
-func TestOperatorRemediateCmd_ContextCanceled_NoPortForward(t *testing.T) {
-	var startForwarderCalled bool
-	prevAdapter := newOperatorAdapter
-	newOperatorAdapter = func(scanInfo cautils.OperatorScanInfo, _ string, ctx ...context.Context) (*core.OperatorAdapter, error) {
-		conn := &stubOperatorConnector{
-			onStart: func() { startForwarderCalled = true },
-		}
-		return core.NewOperatorAdapterWithConnector(scanInfo, conn), nil
-	}
-	t.Cleanup(func() { newOperatorAdapter = prevAdapter })
+func TestOperatorRemediateCmd_ContextCanceled_NoCommandsCreated(t *testing.T) {
+	op := newFakeOperator(t, "")
+	op.install(t)
 
 	cmd := getOperatorRemediateCmd(&mocks.MockIKubescape{}, cautils.OperatorInfo{})
 	cmd.SetArgs([]string{annotateSubCommand, "--kind", "Deployment", "--name", "test-app", "--target-namespace", "default"})
@@ -139,16 +129,12 @@ func TestOperatorRemediateCmd_ContextCanceled_NoPortForward(t *testing.T) {
 	err := cmd.ExecuteContext(ctx)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, context.Canceled)
-	assert.False(t, startForwarderCalled, "must not attempt to start port forwarding when context is canceled")
+	assert.Empty(t, op.created(t), "must not create operator commands when context is canceled")
 }
 
 func TestOperatorRemediateCmd_CancellationDiagnostic(t *testing.T) {
-	prevAdapter := newOperatorAdapter
-	newOperatorAdapter = func(scanInfo cautils.OperatorScanInfo, _ string, ctx ...context.Context) (*core.OperatorAdapter, error) {
-		conn := &stubOperatorConnector{}
-		return core.NewOperatorAdapterWithConnector(scanInfo, conn), nil
-	}
-	t.Cleanup(func() { newOperatorAdapter = prevAdapter })
+	op := newFakeOperator(t, "")
+	op.install(t)
 
 	cmd := getOperatorRemediateCmd(&mocks.MockIKubescape{}, cautils.OperatorInfo{})
 	cmd.SetArgs([]string{annotateSubCommand, "--kind", "Deployment", "--name", "test-app", "--target-namespace", "default"})
@@ -237,18 +223,8 @@ func TestOperatorRemediateCmd_PayloadValidationErrors(t *testing.T) {
 func TestOperatorRemediateCmd_ReasonWarning(t *testing.T) {
 	for _, action := range []string{annotateSubCommand, quarantineSubCommand} {
 		t.Run(action, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				w.WriteHeader(http.StatusOK)
-			}))
-			defer server.Close()
-
-			host := strings.TrimPrefix(server.URL, "http://")
-			prevAdapter := newOperatorAdapter
-			newOperatorAdapter = func(scanInfo cautils.OperatorScanInfo, _ string, _ ...context.Context) (*core.OperatorAdapter, error) {
-				conn := &stubOperatorConnector{host: host}
-				return core.NewOperatorAdapterWithConnector(scanInfo, conn), nil
-			}
-			t.Cleanup(func() { newOperatorAdapter = prevAdapter })
+			op := newFakeOperator(t, "")
+			op.install(t)
 
 			cmd := getOperatorRemediateCmd(&mocks.MockIKubescape{}, cautils.OperatorInfo{})
 			cmd.SetArgs([]string{action, "--kind", "Deployment", "--name", "api", "--target-namespace", "default"})
@@ -271,18 +247,8 @@ func TestOperatorRemediateCmd_ReasonWarning(t *testing.T) {
 
 // TestOperatorRemediateCmd_SelectorClusterWideWarningAndEvents verifies cluster-wide warning and events scope for selectors.
 func TestOperatorRemediateCmd_SelectorClusterWideWarningAndEvents(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer server.Close()
-
-	host := strings.TrimPrefix(server.URL, "http://")
-	prevAdapter := newOperatorAdapter
-	newOperatorAdapter = func(scanInfo cautils.OperatorScanInfo, _ string, _ ...context.Context) (*core.OperatorAdapter, error) {
-		conn := &stubOperatorConnector{host: host}
-		return core.NewOperatorAdapterWithConnector(scanInfo, conn), nil
-	}
-	t.Cleanup(func() { newOperatorAdapter = prevAdapter })
+	op := newFakeOperator(t, "")
+	op.install(t)
 
 	cmd := getOperatorRemediateCmd(&mocks.MockIKubescape{}, cautils.OperatorInfo{})
 	cmd.SetArgs([]string{quarantineSubCommand, "--control", "C-0016", "--min-severity", "High", "--confirm"})
@@ -321,18 +287,8 @@ func TestOperatorRemediateCmd_AdapterCreationError(t *testing.T) {
 
 // TestOperatorRemediateCmd_GenericScanError verifies error reporting when remediation submission returns an error.
 func TestOperatorRemediateCmd_GenericScanError(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusInternalServerError)
-	}))
-	defer server.Close()
-
-	host := strings.TrimPrefix(server.URL, "http://")
-	prevAdapter := newOperatorAdapter
-	newOperatorAdapter = func(scanInfo cautils.OperatorScanInfo, _ string, _ ...context.Context) (*core.OperatorAdapter, error) {
-		conn := &stubOperatorConnector{host: host}
-		return core.NewOperatorAdapterWithConnector(scanInfo, conn), nil
-	}
-	t.Cleanup(func() { newOperatorAdapter = prevAdapter })
+	op := newFakeOperator(t, "scan blew up")
+	op.install(t)
 
 	cmd := getOperatorRemediateCmd(&mocks.MockIKubescape{}, cautils.OperatorInfo{})
 	cmd.SetArgs([]string{revertSubCommand, "--kind", "Deployment", "--name", "api", "--target-namespace", "default"})
@@ -345,6 +301,6 @@ func TestOperatorRemediateCmd_GenericScanError(t *testing.T) {
 	})
 
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "http-error: 500")
+	assert.Contains(t, err.Error(), "failed: scan blew up")
 	assert.Contains(t, output, "Failed to submit remediation to Kubescape Operator")
 }

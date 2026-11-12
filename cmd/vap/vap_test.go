@@ -1,6 +1,8 @@
 package vap
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -155,6 +157,22 @@ func TestDownloadFileToString(t *testing.T) {
 		result, err := downloadFileToString(server.URL, 0)
 		require.NoError(t, err)
 		assert.Empty(t, result)
+	})
+
+	t.Run("oversized response body is rejected", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			chunk := make([]byte, 32*1024)
+			for written := 0; written <= maxCELPolicyDownloadBytes; written += len(chunk) {
+				_, _ = w.Write(chunk)
+			}
+		}))
+		defer server.Close()
+
+		_, err := downloadFileToString(server.URL, 0)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, errDownloadBodyTooLarge)
+		assert.Contains(t, err.Error(), server.URL)
 	})
 }
 
@@ -1251,6 +1269,16 @@ func TestDeployLibraryCmdTimeoutFlag(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, time.Duration(0), got)
 	})
+
+	t.Run("negative timeout is rejected", func(t *testing.T) {
+		cmd := getDeployLibraryCmd()
+		cmd.SilenceUsage = true
+		cmd.SilenceErrors = true
+		cmd.SetArgs([]string{"--timeout", "-5s"})
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "timeout cannot be negative")
+	})
 }
 
 func TestDownloadFileToStringTimeout(t *testing.T) {
@@ -2203,5 +2231,178 @@ func TestWriteOutput(t *testing.T) {
 		targetContent, err := os.ReadFile(targetFile)
 		require.NoError(t, err)
 		assert.Equal(t, "target content", string(targetContent))
+	})
+
+	t.Run("empty output path writes to provided writer", func(t *testing.T) {
+		var buf bytes.Buffer
+		err := writeOutput("custom writer content", "", &buf)
+		require.NoError(t, err)
+		assert.Equal(t, "custom writer content", buf.String())
+	})
+
+	t.Run("empty output path propagates writer error", func(t *testing.T) {
+		writeErr := errors.New("write failure")
+		err := writeOutput("fail content", "", failingWriter{err: writeErr})
+		require.ErrorIs(t, err, writeErr)
+	})
+}
+
+type failingWriter struct {
+	err error
+}
+
+func (w failingWriter) Write([]byte) (int, error) {
+	return 0, w.err
+}
+
+func TestDeployLibraryCmd_RejectsUnexpectedArgs(t *testing.T) {
+	cmd := getDeployLibraryCmd()
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+	cmd.SetArgs([]string{"unexpected"})
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `unknown command "unexpected" for "deploy-library"`)
+}
+
+func TestCreatePolicyBindingCmd_RejectsUnexpectedArgs(t *testing.T) {
+	cmd := getCreatePolicyBindingCmd()
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+	cmd.SetArgs([]string{"--name", "test-binding", "--control", "C-0009", "--parameter-reference", "basic-control-configuration", "unexpected"})
+	err := cmd.Execute()
+	require.EqualError(t, err, `unknown command "unexpected" for "create-policy-binding"`)
+}
+
+func TestDeployLibraryCmd_WritesToCmdOutOrStdout(t *testing.T) {
+	cmd := getDeployLibraryCmd()
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetArgs([]string{})
+	require.NoError(t, cmd.Execute())
+	assert.Contains(t, buf.String(), "ValidatingAdmissionPolicy")
+}
+
+func TestDeployLibraryCmd_PropagatesWriterError(t *testing.T) {
+	cmd := getDeployLibraryCmd()
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+	writeErr := errors.New("write failure")
+	cmd.SetOut(failingWriter{err: writeErr})
+	cmd.SetArgs([]string{})
+	require.ErrorIs(t, cmd.Execute(), writeErr)
+}
+
+func TestCreatePolicyBindingCmd_WritesToCmdOutOrStdout(t *testing.T) {
+	cmd := getCreatePolicyBindingCmd()
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetArgs([]string{"--name", "test-binding", "--control", "C-0009", "--parameter-reference", "basic-control-configuration"})
+	require.NoError(t, cmd.Execute())
+	assert.Contains(t, buf.String(), "ValidatingAdmissionPolicyBinding")
+}
+
+func TestCreatePolicyBindingCmd_PropagatesWriterError(t *testing.T) {
+	cmd := getCreatePolicyBindingCmd()
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+	writeErr := errors.New("write failure")
+	cmd.SetOut(failingWriter{err: writeErr})
+	cmd.SetArgs([]string{"--name", "test-binding", "--control", "C-0009", "--parameter-reference", "basic-control-configuration"})
+	require.ErrorIs(t, cmd.Execute(), writeErr)
+}
+
+func TestValidateOutputFile(t *testing.T) {
+	t.Run("flag not changed returns empty path and no error", func(t *testing.T) {
+		path, err := validateOutputFile("", false)
+		require.NoError(t, err)
+		assert.Empty(t, path)
+	})
+
+	t.Run("empty path when changed returns error", func(t *testing.T) {
+		_, err := validateOutputFile("", true)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "output file path cannot be empty")
+	})
+
+	t.Run("whitespace-only path when changed returns error", func(t *testing.T) {
+		_, err := validateOutputFile("   \t\n", true)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "output file path cannot be empty")
+	})
+
+	t.Run("existing directory path returns directory error", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		_, err := validateOutputFile(tmpDir, true)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "is a directory, not a file")
+	})
+
+	t.Run("valid file path returns trimmed path", func(t *testing.T) {
+		target := filepath.Join(t.TempDir(), "manifest.yaml")
+		path, err := validateOutputFile("  "+target+"  ", true)
+		require.NoError(t, err)
+		assert.Equal(t, target, path)
+	})
+}
+
+func TestWriteOutput_RejectsDirectory(t *testing.T) {
+	tmpDir := t.TempDir()
+	err := writeOutput("content", tmpDir)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "is a directory, not a file")
+}
+
+func TestDeployLibraryCmd_OutputFlagValidation(t *testing.T) {
+	t.Run("empty output flag is rejected", func(t *testing.T) {
+		cmd := getDeployLibraryCmd()
+		cmd.SilenceUsage = true
+		cmd.SilenceErrors = true
+		cmd.SetArgs([]string{"--output", ""})
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "output file path cannot be empty")
+	})
+
+	t.Run("whitespace-only output flag is rejected", func(t *testing.T) {
+		cmd := getDeployLibraryCmd()
+		cmd.SilenceUsage = true
+		cmd.SilenceErrors = true
+		cmd.SetArgs([]string{"-o", "   "})
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "output file path cannot be empty")
+	})
+
+	t.Run("directory output flag is rejected", func(t *testing.T) {
+		cmd := getDeployLibraryCmd()
+		cmd.SilenceUsage = true
+		cmd.SilenceErrors = true
+		cmd.SetArgs([]string{"--output", t.TempDir()})
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "is a directory, not a file")
+	})
+}
+
+func TestCreatePolicyBindingCmd_OutputFlagValidation(t *testing.T) {
+	t.Run("empty output flag is rejected", func(t *testing.T) {
+		cmd := getCreatePolicyBindingCmd()
+		cmd.SilenceUsage = true
+		cmd.SilenceErrors = true
+		cmd.SetArgs([]string{"--name", "test-binding", "--control", "C-0009", "--parameter-reference", "basic-control-configuration", "--output", ""})
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "output file path cannot be empty")
+	})
+
+	t.Run("directory output flag is rejected", func(t *testing.T) {
+		cmd := getCreatePolicyBindingCmd()
+		cmd.SilenceUsage = true
+		cmd.SilenceErrors = true
+		cmd.SetArgs([]string{"--name", "test-binding", "--control", "C-0009", "--parameter-reference", "basic-control-configuration", "-o", t.TempDir()})
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "is a directory, not a file")
 	})
 }

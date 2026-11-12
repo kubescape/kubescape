@@ -124,6 +124,10 @@ func printConfigurationsScanningYaml(opaSessionObj *cautils.OPASessionObj, image
 	// Convert to PostureReportWithSeverity to add severity field to controls,
 	// extract specified labels from workloads, and attach scan coverage gaps.
 	reportWithSeverity := ConvertToPostureReportWithSeverityLabelsAndCoverageFromCatalog(finalizedReport, opaSessionObj.LabelsToCopy, opaSessionObj.GetCatalog(), &opaSessionObj.ScanCoverage)
+	// The exception audit and the per-namespace rollup live on the session, not
+	// on the posture report, so copy them in as the JSON report does.
+	reportWithSeverity.ExceptionAudit = opaSessionObj.ExceptionAudit
+	reportWithSeverity.NamespaceSummaries = opaSessionObj.NamespaceSummaries
 
 	r, err := yaml.Marshal(reportWithSeverity)
 	if err != nil {

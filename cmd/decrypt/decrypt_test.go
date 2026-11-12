@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/kubescape/kubescape/v4/core/pkg/reportcrypto"
@@ -523,7 +525,7 @@ func TestDecryptCommandReturnsWriteError(t *testing.T) {
 	dek, err := reportcrypto.GenerateDEK()
 	require.NoError(t, err)
 	masterKey := []byte("12345678901234567890123456789012")
-	wrappedDEK, err := reportcrypto.WrapDEK(dek, masterKey)
+	wrappedDEK, err := reportcrypto.WrapReportKey(reportcrypto.UnboundReportKey(dek), masterKey)
 	require.NoError(t, err)
 
 	report := map[string]any{
@@ -552,4 +554,135 @@ func TestDecryptCommandReturnsWriteError(t *testing.T) {
 	require.Error(t, err)
 	assert.ErrorIs(t, err, wantErr)
 	assert.Contains(t, err.Error(), "failed to write decrypted report")
+}
+
+func TestDecryptCommandRejectsOversizedReport(t *testing.T) {
+	dir := t.TempDir()
+	oversizedPath := filepath.Join(dir, "oversized.json")
+	f, err := os.OpenFile(oversizedPath, os.O_CREATE|os.O_WRONLY, 0o600)
+	require.NoError(t, err)
+	require.NoError(t, f.Truncate(DefaultMaxReportSize+1))
+	require.NoError(t, f.Close())
+
+	cmd := GetDecryptCommand()
+	err = cmd.RunE(cmd, []string{oversizedPath})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, errReportTooLarge)
+}
+
+func TestDecryptCommandHonorsMaxReportSizeFlag(t *testing.T) {
+	dek, err := reportcrypto.GenerateDEK()
+	require.NoError(t, err)
+	masterKey := []byte("12345678901234567890123456789012")
+	wrappedDEK, err := reportcrypto.WrapReportKey(reportcrypto.UnboundReportKey(dek), masterKey)
+	require.NoError(t, err)
+
+	report := map[string]any{
+		"metadata": map[string]any{
+			"encryptionMetadata": map[string]any{
+				"encryptedDEK": wrappedDEK,
+			},
+		},
+	}
+	data, err := json.Marshal(report)
+	require.NoError(t, err)
+
+	dir := t.TempDir()
+	reportPath := filepath.Join(dir, "report.json")
+	require.NoError(t, os.WriteFile(reportPath, data, 0o600))
+
+	t.Setenv("KUBESCAPE_MASTER_KEY", string(masterKey))
+
+	// Rejects when --max-report-size is smaller than report
+	cmdSmall := GetDecryptCommand()
+	require.NoError(t, cmdSmall.Flags().Set("max-report-size", fmt.Sprintf("%d", len(data)-1)))
+	err = cmdSmall.RunE(cmdSmall, []string{reportPath})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, errReportTooLarge)
+
+	// Accepts when --max-report-size is larger than report
+	cmdLarge := GetDecryptCommand()
+	require.NoError(t, cmdLarge.Flags().Set("max-report-size", fmt.Sprintf("%d", len(data)+1000)))
+	var out bytes.Buffer
+	cmdLarge.SetOut(&out)
+	err = cmdLarge.RunE(cmdLarge, []string{reportPath})
+	require.NoError(t, err)
+	assert.NotEmpty(t, out.String())
+}
+
+func TestDecryptCommandHonorsMaxReportSizeEnvVar(t *testing.T) {
+	dek, err := reportcrypto.GenerateDEK()
+	require.NoError(t, err)
+	masterKey := []byte("12345678901234567890123456789012")
+	wrappedDEK, err := reportcrypto.WrapReportKey(reportcrypto.UnboundReportKey(dek), masterKey)
+	require.NoError(t, err)
+
+	report := map[string]any{
+		"metadata": map[string]any{
+			"encryptionMetadata": map[string]any{
+				"encryptedDEK": wrappedDEK,
+			},
+		},
+	}
+	data, err := json.Marshal(report)
+	require.NoError(t, err)
+
+	dir := t.TempDir()
+	reportPath := filepath.Join(dir, "report.json")
+	require.NoError(t, os.WriteFile(reportPath, data, 0o600))
+
+	t.Setenv("KUBESCAPE_MASTER_KEY", string(masterKey))
+
+	// Rejects when KUBESCAPE_MAX_REPORT_SIZE is smaller than report
+	t.Setenv(MaxReportSizeEnvVar, fmt.Sprintf("%d", len(data)-1))
+	cmdSmall := GetDecryptCommand()
+	err = cmdSmall.RunE(cmdSmall, []string{reportPath})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, errReportTooLarge)
+
+	// Accepts when KUBESCAPE_MAX_REPORT_SIZE is larger than report
+	t.Setenv(MaxReportSizeEnvVar, fmt.Sprintf("%d", len(data)+1000))
+	cmdLarge := GetDecryptCommand()
+	var out bytes.Buffer
+	cmdLarge.SetOut(&out)
+	err = cmdLarge.RunE(cmdLarge, []string{reportPath})
+	require.NoError(t, err)
+	assert.NotEmpty(t, out.String())
+}
+
+func TestDecryptCommandRejectsInvalidMaxReportSize(t *testing.T) {
+	dir := t.TempDir()
+	reportPath := filepath.Join(dir, "report.json")
+	require.NoError(t, os.WriteFile(reportPath, []byte("{}"), 0o600))
+
+	// Negative flag value
+	cmd := GetDecryptCommand()
+	require.NoError(t, cmd.Flags().Set("max-report-size", "-10"))
+	err := cmd.RunE(cmd, []string{reportPath})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "must be greater than 0")
+
+	// Invalid env var
+	t.Setenv(MaxReportSizeEnvVar, "not-a-number")
+	cmdEnv := GetDecryptCommand()
+	err = cmdEnv.RunE(cmdEnv, []string{reportPath})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "must be a positive integer")
+}
+
+func TestDecryptCommandRejectsNonRegularFile(t *testing.T) {
+	if _, err := os.Stat("/dev/null"); err == nil {
+		cmd := GetDecryptCommand()
+		err = cmd.RunE(cmd, []string{"/dev/null"})
+		require.Error(t, err)
+		assert.ErrorIs(t, err, errReportNotRegular)
+	}
+}
+
+func TestDecryptCommandRejectsDirectory(t *testing.T) {
+	dir := t.TempDir()
+	cmd := GetDecryptCommand()
+	err := cmd.RunE(cmd, []string{dir})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "is a directory, not a file")
 }

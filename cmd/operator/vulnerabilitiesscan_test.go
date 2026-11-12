@@ -2,12 +2,8 @@ package operator
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"io"
-	"net/http"
-	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"github.com/armosec/armoapi-go/apis"
@@ -31,8 +27,13 @@ func TestGetOperatorScanVulnerabilitiesCmd(t *testing.T) {
 
 	assert.Equal(t, "vulnerabilities", cmd.Use)
 
-	err := cmd.Args(&cobra.Command{}, []string{"random-arg"})
-	assert.Nil(t, err)
+	err := cmd.Args(cmd, []string{})
+	assert.NoError(t, err)
+	assert.Contains(t, operatorInfo.Subcommands, cautils.OperatorSubCommand("vulnerabilities"))
+
+	err = cmd.Args(cmd, []string{"random-arg"})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), `unknown command "random-arg" for "vulnerabilities"`)
 }
 
 func TestOperatorScanVulnerabilitiesCmd_ResolvesClusterNameAfterRootPreRun(t *testing.T) {
@@ -101,16 +102,9 @@ func TestOperatorScanVulnerabilitiesCmd_ContextCanceled(t *testing.T) {
 	assert.Equal(t, ctx, capturedCtx, "constructor must receive the command context")
 }
 
-func TestOperatorScanVulnerabilitiesCmd_ContextCanceled_NoPortForward(t *testing.T) {
-	var startForwarderCalled bool
-	prevAdapter := newOperatorAdapter
-	newOperatorAdapter = func(scanInfo cautils.OperatorScanInfo, _ string, ctx ...context.Context) (*core.OperatorAdapter, error) {
-		conn := &stubOperatorConnector{
-			onStart: func() { startForwarderCalled = true },
-		}
-		return core.NewOperatorAdapterWithConnector(scanInfo, conn), nil
-	}
-	t.Cleanup(func() { newOperatorAdapter = prevAdapter })
+func TestOperatorScanVulnerabilitiesCmd_ContextCanceled_NoCommandsCreated(t *testing.T) {
+	op := newFakeOperator(t, "")
+	op.install(t)
 
 	cmd := getOperatorScanVulnerabilitiesCmd(&mocks.MockIKubescape{}, &cautils.OperatorInfo{})
 	cmd.SetOut(io.Discard)
@@ -122,7 +116,7 @@ func TestOperatorScanVulnerabilitiesCmd_ContextCanceled_NoPortForward(t *testing
 	err := cmd.ExecuteContext(ctx)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, context.Canceled)
-	assert.False(t, startForwarderCalled, "must not attempt to start port forwarding when context is canceled")
+	assert.Empty(t, op.created(t), "must not create operator commands when context is canceled")
 }
 
 // TestOperatorScanVulnerabilitiesCmd_FlagsAndArgs verifies command use string, subcommand tracking, and flag registration.
@@ -135,7 +129,7 @@ func TestOperatorScanVulnerabilitiesCmd_FlagsAndArgs(t *testing.T) {
 	cmd := getOperatorScanVulnerabilitiesCmd(mockKubescape, &operatorInfo)
 	assert.Equal(t, "vulnerabilities", cmd.Use)
 
-	err := cmd.Args(&cobra.Command{}, []string{"test"})
+	err := cmd.Args(cmd, []string{})
 	assert.NoError(t, err)
 	assert.Contains(t, operatorInfo.Subcommands, cautils.OperatorSubCommand("vulnerabilities"))
 
@@ -151,30 +145,8 @@ func TestOperatorScanVulnerabilitiesCmd_FlagsAndArgs(t *testing.T) {
 func TestOperatorScanVulnerabilitiesCmd_ExecutionSuccess(t *testing.T) {
 	withCapturableLogger(t)
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, "/v1/triggerAction", r.URL.Path)
-		assert.Equal(t, http.MethodPost, r.Method)
-
-		var payload apis.Commands
-		err := json.NewDecoder(r.Body).Decode(&payload)
-		assert.NoError(t, err)
-		require.Len(t, payload.Commands, 2)
-		assert.Equal(t, apis.TypeScanImages, payload.Commands[0].CommandName)
-		assert.Contains(t, payload.Commands[0].WildWlid, "namespace-dev")
-		assert.Equal(t, apis.TypeScanImages, payload.Commands[1].CommandName)
-		assert.Contains(t, payload.Commands[1].WildWlid, "namespace-staging")
-
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer server.Close()
-
-	host := strings.TrimPrefix(server.URL, "http://")
-	prevAdapter := newOperatorAdapter
-	newOperatorAdapter = func(scanInfo cautils.OperatorScanInfo, _ string, _ ...context.Context) (*core.OperatorAdapter, error) {
-		conn := &stubOperatorConnector{host: host}
-		return core.NewOperatorAdapterWithConnector(scanInfo, conn), nil
-	}
-	t.Cleanup(func() { newOperatorAdapter = prevAdapter })
+	op := newFakeOperator(t, "")
+	op.install(t)
 
 	cmd := getOperatorScanCmd(&mocks.MockIKubescape{}, &cautils.OperatorInfo{})
 	cmd.SetArgs([]string{"vulnerabilities", "--include-namespaces", "dev,staging"})
@@ -187,6 +159,12 @@ func TestOperatorScanVulnerabilitiesCmd_ExecutionSuccess(t *testing.T) {
 	})
 
 	require.NoError(t, err)
+	cmds := op.commands(t)
+	require.Len(t, cmds, 2)
+	assert.Equal(t, apis.TypeScanImages, cmds[0].CommandName)
+	assert.Contains(t, cmds[0].WildWlid, "namespace-dev")
+	assert.Equal(t, apis.TypeScanImages, cmds[1].CommandName)
+	assert.Contains(t, cmds[1].WildWlid, "namespace-staging")
 	assert.Contains(t, output, "Triggering the Kubescape Operator for vulnerability scanning")
 	assert.Contains(t, output, "Triggered Kubescape Operator for vulnerability scanning")
 }
@@ -195,18 +173,8 @@ func TestOperatorScanVulnerabilitiesCmd_ExecutionSuccess(t *testing.T) {
 func TestOperatorScanVulnerabilitiesCmd_ScanError(t *testing.T) {
 	withCapturableLogger(t)
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusInternalServerError)
-	}))
-	defer server.Close()
-
-	host := strings.TrimPrefix(server.URL, "http://")
-	prevAdapter := newOperatorAdapter
-	newOperatorAdapter = func(scanInfo cautils.OperatorScanInfo, _ string, _ ...context.Context) (*core.OperatorAdapter, error) {
-		conn := &stubOperatorConnector{host: host}
-		return core.NewOperatorAdapterWithConnector(scanInfo, conn), nil
-	}
-	t.Cleanup(func() { newOperatorAdapter = prevAdapter })
+	op := newFakeOperator(t, "scan blew up")
+	op.install(t)
 
 	cmd := getOperatorScanCmd(&mocks.MockIKubescape{}, &cautils.OperatorInfo{})
 	cmd.SetArgs([]string{"vulnerabilities"})
@@ -219,6 +187,19 @@ func TestOperatorScanVulnerabilitiesCmd_ScanError(t *testing.T) {
 	})
 
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "http-error: 500")
+	assert.Contains(t, err.Error(), "failed: scan blew up")
 	assert.Contains(t, output, "Failed to trigger the Kubescape Operator for vulnerability scanning")
+}
+
+// TestOperatorScanVulnerabilitiesCmd_RejectsUnexpectedArgs verifies that extraneous positional arguments
+// passed to vulnerabilities are rejected instead of silently accepted.
+func TestOperatorScanVulnerabilitiesCmd_RejectsUnexpectedArgs(t *testing.T) {
+	cmd := getOperatorScanCmd(&mocks.MockIKubescape{}, &cautils.OperatorInfo{})
+	cmd.SetArgs([]string{"vulnerabilities", "unexpected-arg"})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `unknown command "unexpected-arg" for "scan vulnerabilities"`)
 }

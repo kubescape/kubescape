@@ -5,7 +5,7 @@ import rego.v1
 deny contains msga if {
 	verbs := ["get", "create", "update", "patch", "*"]
 	api_groups := ["", "*"]
-	resources := ["nodes/proxy", "*"]
+	resources := ["nodes/proxy", "*/proxy", "*"]
 	subjectVector := input[_]
 	role := subjectVector.relatedObjects[i]
 	rolebinding := subjectVector.relatedObjects[j]
@@ -14,6 +14,12 @@ deny contains msga if {
 	rolebinding.roleRef.kind == role.kind
 	rolebinding.roleRef.name == role.metadata.name
 	is_same_namespace(role, rolebinding)
+
+	# Nodes are cluster scoped, so only a ClusterRoleBinding carries this grant.
+	# A RoleBinding confines the role to one namespace, where a rule about nodes
+	# matches nothing.
+	rolebinding.kind == "ClusterRoleBinding"
+
 	rule := role.rules[p]
 
 	# a rule restricted to named nodes cannot be pointed at an arbitrary node's proxy subresource

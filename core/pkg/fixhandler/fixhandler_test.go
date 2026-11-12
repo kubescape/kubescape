@@ -4,15 +4,19 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/armosec/armoapi-go/armotypes"
 	gitv5 "github.com/go-git/go-git/v5"
 	"github.com/kubescape/go-logger"
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	metav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
 	"github.com/kubescape/kubescape/v4/internal/testutils"
 	"github.com/kubescape/opa-utils/reporthandling"
@@ -489,47 +493,6 @@ func TestApplyFixToContent_CraftedFixPathLeaksNothing(t *testing.T) {
 	assert.NotContains(t, got, "super-secret-token")
 }
 
-func TestJoinStrings(t *testing.T) {
-	tests := []struct {
-		name string
-		args []string
-		want string
-	}{
-		{
-			name: "nil array",
-			args: nil,
-			want: "",
-		},
-		{
-			name: "empty array",
-			args: []string{},
-			want: "",
-		},
-		{
-			name: "single element",
-			args: []string{"a"},
-			want: "a",
-		},
-		{
-			name: "two elements",
-			args: []string{"a", "b"},
-			want: "ab",
-		},
-		{
-			name: "three elements",
-			args: []string{"a", "b", "c"},
-			want: "abc",
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := joinStrings(tt.args...); got != tt.want {
-				t.Errorf("joinStrings() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
 func TestGetFileString(t *testing.T) {
 	type args struct {
 		filePath string
@@ -584,6 +547,74 @@ spec:
 			}
 		})
 	}
+}
+
+func TestGetFileString_OversizedFileRejected(t *testing.T) {
+	t.Setenv(cautils.MaxFileSizeEnvVar, "") // empty falls back to DefaultMaxFileSize
+
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "manifest.yaml")
+	f, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY, 0o600)
+	require.NoError(t, err)
+	require.NoError(t, f.Truncate(cautils.DefaultMaxFileSize+1))
+	require.NoError(t, f.Close())
+
+	_, err = GetFileString(filePath)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrManifestTooLarge)
+}
+
+func TestGetFileString_NonRegularFileRejected(t *testing.T) {
+	if _, err := os.Stat("/dev/null"); err == nil {
+		_, err := GetFileString("/dev/null")
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrManifestNotRegular)
+	}
+}
+
+func TestGetFileString_DirectoryRejected(t *testing.T) {
+	dir := t.TempDir()
+	_, err := GetFileString(dir)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrManifestNotRegular)
+	assert.Contains(t, err.Error(), "is a directory, not a file")
+}
+
+func TestGetFileString_MaxFileSizeEnvVar(t *testing.T) {
+	t.Run("lower override", func(t *testing.T) {
+		t.Setenv(cautils.MaxFileSizeEnvVar, "100")
+
+		dir := t.TempDir()
+		overLimitFile := filepath.Join(dir, "manifest.yaml")
+		require.NoError(t, os.WriteFile(overLimitFile, make([]byte, 200), 0o600))
+
+		_, err := GetFileString(overLimitFile)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrManifestTooLarge)
+
+		underLimitFile := filepath.Join(dir, "valid_manifest.yaml")
+		require.NoError(t, os.WriteFile(underLimitFile, []byte("valid content"), 0o600))
+
+		data, err := GetFileString(underLimitFile)
+		require.NoError(t, err)
+		assert.Equal(t, "valid content", data)
+	})
+
+	t.Run("higher override", func(t *testing.T) {
+		raisedLimit := cautils.DefaultMaxFileSize + 1024
+		t.Setenv(cautils.MaxFileSizeEnvVar, fmt.Sprintf("%d", raisedLimit))
+
+		dir := t.TempDir()
+		overDefaultFile := filepath.Join(dir, "manifest.yaml")
+		f, err := os.OpenFile(overDefaultFile, os.O_CREATE|os.O_WRONLY, 0o600)
+		require.NoError(t, err)
+		require.NoError(t, f.Truncate(cautils.DefaultMaxFileSize+100))
+		require.NoError(t, f.Close())
+
+		data, err := GetFileString(overDefaultFile)
+		require.NoError(t, err)
+		assert.Len(t, data, int(cautils.DefaultMaxFileSize+100))
+	})
 }
 
 func TestDetermineNewlineSeparator(t *testing.T) {
@@ -1061,6 +1092,19 @@ func TestNewFixHandler_MalformedReportishJSON(t *testing.T) {
 	}
 }
 
+func TestNewFixHandler_RejectsOversizedReport(t *testing.T) {
+	dir := t.TempDir()
+	oversizedPath := filepath.Join(dir, "oversized.json")
+	f, err := os.OpenFile(oversizedPath, os.O_CREATE|os.O_WRONLY, 0o600)
+	require.NoError(t, err)
+	require.NoError(t, f.Truncate(maxReportSize+1))
+	require.NoError(t, f.Close())
+
+	_, err = NewFixHandler(&metav1.FixInfo{ReportFile: oversizedPath})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, errReportTooLarge)
+}
+
 func TestNewFixHandler_ClusterReportUnsupportedTarget(t *testing.T) {
 	// Cluster scans are supported now (their resources are patched in memory
 	// and printed), but only when the report carries the cluster context a real
@@ -1371,16 +1415,68 @@ func TestWriteAndClose_Success(t *testing.T) {
 	assert.True(t, f.closed)
 }
 
-func TestWriteFixesToFile_PropagatesCloseError(t *testing.T) {
-	// End-to-end regression against the real function callers actually use:
-	// a genuine *os.File satisfies writeStringCloser, so the fix must not
-	// have narrowed the interface in a way that only compiles for the fake.
-	dir := t.TempDir()
-	path := filepath.Join(dir, "fixed.yaml")
-
-	require.NoError(t, writeFixesToFile(path, "fixed: true\n"))
-
-	got, err := os.ReadFile(path)
+func TestWriteFixesToFile_RewritesOpenedFile(t *testing.T) {
+	path := writeManifest(t, t.TempDir(), "fixed.yaml", "fixed: false # keep no trailing bytes\n")
+	file, err := os.OpenFile(path, os.O_RDWR, 0)
 	require.NoError(t, err)
-	assert.Equal(t, "fixed: true\n", string(got))
+	t.Cleanup(func() { _ = file.Close() })
+	snapshot, err := file.Stat()
+	require.NoError(t, err)
+	_, err = io.ReadAll(file)
+	require.NoError(t, err)
+
+	require.NoError(t, writeFixesToFile(file, snapshot, "fixed: true\n"))
+
+	assert.Equal(t, "fixed: true\n", fileContentOf(t, path))
+}
+
+func TestWriteFixesToFile_RejectsChangedManifest(t *testing.T) {
+	for _, name := range []string{"replaced", "edited in place", "permissions changed"} {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			if name == "permissions changed" && runtime.GOOS == "windows" {
+				t.Skip("POSIX permission changes are not portable on Windows")
+			}
+			path := writeManifest(t, dir, "deploy.yaml", "kind: Deployment\n")
+			stamp := time.Unix(1700000000, 0)
+			require.NoError(t, os.Chtimes(path, stamp, stamp))
+			file, err := os.OpenFile(path, os.O_RDWR, 0)
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = file.Close() })
+			snapshot, err := file.Stat()
+			require.NoError(t, err)
+			before, err := io.ReadAll(file)
+			require.NoError(t, err)
+
+			changed := "kind: Deployment\nmetadata: {name: new}\n"
+			switch name {
+			case "replaced":
+				// A replacement can preserve the bytes, size, mode, and mtime.
+				changed = string(before)
+				replacement := writeManifest(t, dir, "replacement.yaml", changed)
+				require.NoError(t, os.Chtimes(replacement, stamp, stamp))
+				err := os.Rename(replacement, path)
+				if err != nil && runtime.GOOS == "windows" {
+					t.Skipf("Windows does not allow replacing this open file: %v", err)
+				}
+				require.NoError(t, err)
+			case "permissions changed":
+				changed = string(before)
+				require.NoError(t, os.Chmod(path, 0400))
+			default:
+				require.NoError(t, os.WriteFile(path, []byte(changed), 0600))
+			}
+
+			err = writeFixesToFile(file, snapshot, "kind: Deployment\nspec: {replicas: 2}\n")
+			require.ErrorContains(t, err, "manifest changed while applying fixes")
+			assert.Equal(t, changed, fileContentOf(t, path))
+			if name == "replaced" {
+				_, err := file.Seek(0, io.SeekStart)
+				require.NoError(t, err)
+				held, err := io.ReadAll(file)
+				require.NoError(t, err)
+				assert.Equal(t, before, held, "the detached file must not be written after a detected replacement")
+			}
+		})
+	}
 }

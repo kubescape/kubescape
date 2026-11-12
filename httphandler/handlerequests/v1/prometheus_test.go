@@ -118,6 +118,7 @@ func TestMetrics_ClientDisconnectCancelsScan(t *testing.T) {
 		assert.NoError(t, h.Shutdown(context.Background(), time.Second))
 		// Join response cleanup before the next test changes the output directories.
 		synctest.Wait()
+		assert.Zero(t, len(h.metricsScanSlot), "an abandoned scrape must release the metrics slot once its scan ends")
 	})
 }
 
@@ -184,6 +185,7 @@ func TestMetrics_ClientDisconnectSkipsQueuedScan(t *testing.T) {
 		synctest.Wait()
 
 		assert.False(t, secondScanInvoked.Load(), "queued metrics scan must be skipped when client disconnected")
+		assert.Zero(t, len(h.metricsScanSlot), "a skipped metrics scan must release the metrics slot")
 	})
 }
 
@@ -400,81 +402,178 @@ func TestMetrics_NonGetMethodReturns405WithoutScanning(t *testing.T) {
 	}
 }
 
-func TestMetricsQueueRejectsRequestsWhenCapacityIsExhausted(t *testing.T) {
-	withTempOutputDirs(t)
-
-	originalScanImpl := scanImpl
-	started := make(chan struct{})
-	release := make(chan struct{})
-	var once sync.Once
-	var releaseOnce sync.Once
-	releaseScans := func() { releaseOnce.Do(func() { close(release) }) }
+// blockFirstScan makes the first scan block until release is called; every
+// scan writes a Prometheus results file so metrics requests can complete.
+func blockFirstScan(t *testing.T) (started <-chan struct{}, release func()) {
+	t.Helper()
+	startedCh := make(chan struct{})
+	releaseCh := make(chan struct{})
+	var startOnce, releaseOnce sync.Once
+	original := scanImpl
 	scanImpl = func(_ context.Context, scanInfo *cautils.ScanInfo, _ []cautils.PolicyIdentifier, _ string, _ bool) (*reporthandlingv2.PostureReport, error) {
-		once.Do(func() { close(started) })
-		<-release
-		resolved, _ := printer.ResolveOutputFile(printer.PrometheusFormat, scanInfo.Output, "")
-		require.NoError(t, os.WriteFile(resolved, []byte("# metrics\n"), 0o600))
+		first := false
+		startOnce.Do(func() { first = true; close(startedCh) })
+		if first {
+			<-releaseCh
+		}
+		if scanInfo.Output != "" {
+			resolved, _ := printer.ResolveOutputFile(printer.PrometheusFormat, scanInfo.Output, "")
+			_ = os.WriteFile(resolved, []byte("# metrics\n"), 0o600)
+		}
 		return nil, nil
 	}
-	handler := newHTTPHandler(false, 1, defaultMaxScanRequestBodyBytes)
+	t.Cleanup(func() { scanImpl = original })
+	return startedCh, func() { releaseOnce.Do(func() { close(releaseCh) }) }
+}
+
+func waitClosed(t *testing.T, ch <-chan struct{}, what string) {
+	t.Helper()
+	select {
+	case <-ch:
+	case <-time.After(2 * time.Second):
+		t.Fatal(what)
+	}
+}
+
+func performMetricsRequest(handler *HTTPHandler) *httptest.ResponseRecorder {
+	recorder := httptest.NewRecorder()
+	handler.Metrics(recorder, httptest.NewRequest(http.MethodGet, "/v1/metrics", nil))
+	return recorder
+}
+
+// TestMetricsScansAreSingleFlight checks that unauthenticated scrapes hold at
+// most one scan admission at a time, so they cannot crowd out POST /v1/scan.
+func TestMetricsScansAreSingleFlight(t *testing.T) {
+	withTempOutputDirs(t)
+	started, release := blockFirstScan(t)
+	handler := newHTTPHandler(false, 2, defaultMaxScanRequestBodyBytes)
 	t.Cleanup(func() {
-		releaseScans()
+		release()
 		require.Eventually(t, func() bool { return handlerStateIsDrained(handler) }, time.Second, 10*time.Millisecond)
-		scanImpl = originalScanImpl
 	})
 
 	firstDone := make(chan struct{})
+	var first *httptest.ResponseRecorder
 	go func() {
-		recorder := httptest.NewRecorder()
-		handler.Metrics(recorder, httptest.NewRequest(http.MethodGet, "/v1/metrics", nil))
+		first = performMetricsRequest(handler)
 		close(firstDone)
 	}()
-	select {
-	case <-started:
-	case <-time.After(2 * time.Second):
-		t.Fatal("first metrics scan did not start")
-	}
+	waitClosed(t, started, "first metrics scan did not start")
 
-	secondQueued := make(chan struct{})
+	// Without the guard this scrape would queue and block on the first one.
 	secondDone := make(chan struct{})
+	var second *httptest.ResponseRecorder
 	go func() {
-		recorder := httptest.NewRecorder()
-		handler.Metrics(recorder, httptest.NewRequest(http.MethodGet, "/v1/metrics", nil))
+		second = performMetricsRequest(handler)
 		close(secondDone)
 	}()
-	require.Eventually(t, func() bool {
-		if len(handler.scanRequestChan) == 1 {
-			close(secondQueued)
-			return true
-		}
-		return false
-	}, time.Second, 10*time.Millisecond)
+	waitClosed(t, secondDone, "a concurrent scrape must be rejected, not queued")
+	assert.Equal(t, http.StatusTooManyRequests, second.Code)
+	assert.Equal(t, "1", second.Header().Get("Retry-After"))
+	response := decodeScanResponse(t, second)
+	assert.Equal(t, utilsapisv1.ErrorScanResponseType, response.Type)
+	assert.Contains(t, fmt.Sprint(response.Response), "a metrics scan is already running")
+	assert.Zero(t, len(handler.scanRequestChan), "a rejected scrape must not take a queue slot")
+	assert.Equal(t, 1, handler.state.len(), "a rejected scrape must not be registered")
 
-	rejected := httptest.NewRecorder()
-	handler.Metrics(rejected, httptest.NewRequest(http.MethodGet, "/v1/metrics", nil))
+	// An authenticated scan is still admitted while the metrics scan runs.
+	userScan := performAsyncScanRequest(t, handler, `{"account":"test"}`)
+	assert.Equal(t, http.StatusOK, userScan.Code)
+	assert.Equal(t, 1, len(handler.scanRequestChan), "the user scan should wait in the user queue")
 
+	release()
+	waitClosed(t, firstDone, "first metrics request did not complete")
+	assert.Equal(t, http.StatusOK, first.Code)
+
+	third := performMetricsRequest(handler)
+	assert.Equal(t, http.StatusOK, third.Code, "a scrape after the in-flight one finished must be admitted")
+	assert.Equal(t, "# metrics\n", third.Body.String())
+}
+
+// TestMetricsQueueFullReleasesSlot checks that a scrape rejected by a full
+// metrics lane gets the queue-full error and does not keep the metrics slot.
+func TestMetricsQueueFullReleasesSlot(t *testing.T) {
+	withTempOutputDirs(t)
+	// No worker: the pre-filled metrics lane stays full.
+	handler := &HTTPHandler{
+		state:              newServerState(),
+		scanRequestChan:    make(chan *scanRequestParams, 1),
+		metricsRequestChan: make(chan *scanRequestParams, 1),
+		metricsScanSlot:    make(chan struct{}, 1),
+	}
+	handler.metricsRequestChan <- &scanRequestParams{}
+
+	rejected := performMetricsRequest(handler)
 	assert.Equal(t, http.StatusTooManyRequests, rejected.Code)
 	assert.Equal(t, "1", rejected.Header().Get("Retry-After"))
-	response := decodeScanResponse(t, rejected)
-	assert.Equal(t, utilsapisv1.ErrorScanResponseType, response.Type)
-	assert.Contains(t, fmt.Sprint(response.Response), "scan queue is full")
+	assert.Contains(t, fmt.Sprint(decodeScanResponse(t, rejected).Response), "scan queue is full")
+	assert.Zero(t, len(handler.metricsScanSlot), "a scrape rejected by the queue must release the metrics slot")
+	assert.Zero(t, len(handler.scanRequestChan), "a scrape must never enter the user queue")
+	assert.Zero(t, handler.state.len())
+}
 
-	releaseScans()
-	select {
-	case <-firstDone:
-	case <-time.After(2 * time.Second):
-		t.Fatal("first metrics request did not complete")
-	}
-	select {
-	case <-secondQueued:
-	default:
-		t.Fatal("second metrics request was not queued")
-	}
-	select {
-	case <-secondDone:
-	case <-time.After(2 * time.Second):
-		t.Fatal("second metrics request did not complete")
-	}
+// With KS_SCAN_QUEUE_CAPACITY=1 and a user scan running, a pending scrape
+// must not take the only user queue slot.
+func TestPendingMetricsScanDoesNotBlockUserScan(t *testing.T) {
+	withTempOutputDirs(t)
+	started, release := blockFirstScan(t)
+	handler := newHTTPHandler(false, 1, defaultMaxScanRequestBodyBytes)
+	t.Cleanup(func() {
+		release()
+		require.Eventually(t, func() bool { return handlerStateIsDrained(handler) }, time.Second, 10*time.Millisecond)
+	})
+
+	body := `{"account":"test"}`
+	require.Equal(t, http.StatusOK, performAsyncScanRequest(t, handler, body).Code)
+	waitClosed(t, started, "first scan did not start")
+
+	metricsDone := make(chan struct{})
+	var metrics *httptest.ResponseRecorder
+	go func() {
+		metrics = performMetricsRequest(handler)
+		close(metricsDone)
+	}()
+	require.Eventually(t, func() bool { return len(handler.metricsRequestChan) == 1 }, 2*time.Second, 5*time.Millisecond,
+		"the scrape should be pending in the metrics lane")
+
+	userScan := performAsyncScanRequest(t, handler, body)
+	assert.Equal(t, http.StatusOK, userScan.Code, "a pending scrape must not fill the user queue")
+	assert.Equal(t, 1, len(handler.scanRequestChan))
+
+	release()
+	waitClosed(t, metricsDone, "metrics request did not complete")
+	assert.Equal(t, http.StatusOK, metrics.Code)
+}
+
+// With KS_SCAN_QUEUE_CAPACITY=1, a running and a pending user scan must not
+// keep a scrape from being admitted.
+func TestPendingUserScanDoesNotBlockMetricsScan(t *testing.T) {
+	withTempOutputDirs(t)
+	started, release := blockFirstScan(t)
+	handler := newHTTPHandler(false, 1, defaultMaxScanRequestBodyBytes)
+	t.Cleanup(func() {
+		release()
+		require.Eventually(t, func() bool { return handlerStateIsDrained(handler) }, time.Second, 10*time.Millisecond)
+	})
+
+	body := `{"account":"test"}`
+	require.Equal(t, http.StatusOK, performAsyncScanRequest(t, handler, body).Code)
+	waitClosed(t, started, "first scan did not start")
+	require.Equal(t, http.StatusOK, performAsyncScanRequest(t, handler, body).Code)
+	require.Equal(t, 1, len(handler.scanRequestChan))
+
+	metricsDone := make(chan struct{})
+	var metrics *httptest.ResponseRecorder
+	go func() {
+		metrics = performMetricsRequest(handler)
+		close(metricsDone)
+	}()
+	require.Eventually(t, func() bool { return len(handler.metricsRequestChan) == 1 }, 2*time.Second, 5*time.Millisecond,
+		"the scrape should be admitted while the user queue is full")
+
+	release()
+	waitClosed(t, metricsDone, "metrics request did not complete")
+	assert.Equal(t, http.StatusOK, metrics.Code)
 }
 
 func TestSplitAndTrim(t *testing.T) {

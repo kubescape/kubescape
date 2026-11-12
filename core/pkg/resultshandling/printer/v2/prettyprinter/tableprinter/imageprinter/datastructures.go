@@ -30,6 +30,9 @@ type CVE struct {
 	// KEV is true when the vulnerability is on the CISA Known Exploited
 	// Vulnerabilities catalog.
 	KEV bool
+	// KEVKnown is false when the match carried no vulnerability metadata, so
+	// whether it is on the KEV catalog is unknown rather than "no".
+	KEVKnown bool
 	// EPSS is nil when the vulnerability database has no EPSS score for it.
 	EPSS *EPSS
 }

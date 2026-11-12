@@ -48,6 +48,21 @@ func (handler *HTTPHandler) Metrics(w http.ResponseWriter, r *http.Request) {
 		handler.writeError(w, fmt.Errorf("failed to parse query params, reason: %w", err), scanID)
 		return
 	}
+	// One metrics scan at a time: the slot is held until the scan's response
+	// is consumed, by this handler or, after a client disconnect, by the
+	// cleanup goroutine.
+	releaseSlot, ok := handler.tryAcquireMetricsScan()
+	if !ok {
+		handler.writeAdmissionError(w, errMetricsScanInFlight)
+		return
+	}
+	slotHandedOff := false
+	defer func() {
+		if !slotHandedOff {
+			releaseSlot()
+		}
+	}()
+
 	resultsFile := filepath.Join(OutputDir, scanID)
 	scanInfo, policyIdentifiers := getPrometheusDefaultScanCommand(scanID, resultsFile, metricsQueryParams.Frameworks)
 
@@ -76,11 +91,15 @@ func (handler *HTTPHandler) Metrics(w http.ResponseWriter, r *http.Request) {
 	var results *utilsmetav1.Response
 	select {
 	case results = <-scanParams.resp:
+		releaseSlot()
 	case <-r.Context().Done():
 		handler.state.cancel(scanID)
 		cancel()
-		// Wait for the worker to finish writing before removing abandoned results.
+		// Wait for the worker to finish writing before removing abandoned
+		// results; the scan holds the metrics slot until then.
+		slotHandedOff = true
 		go func() {
+			defer releaseSlot()
 			<-scanParams.resp
 			removeResultsFile(scanID)
 			os.Remove(resultsFile)

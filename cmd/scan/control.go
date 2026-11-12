@@ -34,7 +34,7 @@ var (
 
 // controlCmd represents the control command
 func getControlCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Command {
-	return &cobra.Command{
+	controlCmd := &cobra.Command{
 		Use:     "control <control names list>/<control ids list>",
 		Short:   fmt.Sprintf("The controls you wish to use. Run '%[1]s list controls' for the list of supported controls", cautils.ExecName()),
 		Example: controlExample,
@@ -51,9 +51,15 @@ func getControlCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comman
 					return fmt.Errorf("requires at least one control name")
 				}
 			}
+			if scanInfo.FilePath != "" && len(args) > 1 {
+				return fmt.Errorf("usage: use either --file-path or positional input paths, not both")
+			}
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if scanInfo.FilePath != "" && len(args) > 1 {
+				return fmt.Errorf("usage: use either --file-path or positional input paths, not both")
+			}
 			if err := shared.ValidateCommonScanFlags(cmd, scanInfo, shared.ScanFormats); err != nil {
 				return err
 			}
@@ -80,6 +86,7 @@ func getControlCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comman
 
 				cleanup, err := prepareScanLocalInput(cmd.InOrStdin(), args, scanInfo, scanLocalInputOptions{
 					FirstInputArg:    1,
+					FilePath:         scanInfo.FilePath,
 					RejectMixedStdin: true,
 				})
 				if err != nil {
@@ -118,6 +125,10 @@ func getControlCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comman
 			return err
 		},
 	}
+
+	controlCmd.PersistentFlags().StringVar(&scanInfo.FilePath, "file-path", "", "Path to the YAML file.")
+
+	return controlCmd
 }
 
 // runControlScan runs one cluster's control scan to completion: Scan,
@@ -130,22 +141,23 @@ func runControlScan(ctx context.Context, scanInfo *cautils.ScanInfo, ks meta.IKu
 	if err != nil {
 		return nil, err
 	}
+	if scanInfo.DryRun {
+		// The preflight verdict is already printed and nothing was evaluated:
+		// there is no report to write or submit and no threshold to enforce.
+		return results, nil
+	}
 	if err := results.HandleResults(ctx, scanInfo); err != nil {
 		return results, err
 	}
 	if !scanInfo.VerboseMode {
 		logger.L().Info("Run with '--verbose'/'-v' flag for detailed resources view\n")
 	}
-	if results.GetComplianceScore() < float32(scanInfo.ComplianceThreshold) {
-		return results, gateFailure(fmt.Errorf("scan compliance-score is below permitted threshold: %s (compliance-threshold: %.2f)", cautils.ComplianceScoreToString(results.GetComplianceScore(), 2), scanInfo.ComplianceThreshold))
-	}
-	if err := enforceSeverityThresholds(&results.GetResults().SummaryDetails, scanInfo); err != nil {
+	if err := joinGateErrors(
+		enforceComplianceThreshold(results.GetComplianceScore(), scanInfo),
+		enforceSeverityThresholds(&results.GetResults().SummaryDetails, scanInfo),
+		enforceCombinedImageGates(results, scanInfo),
+	); err != nil {
 		return results, err
-	}
-	if scanInfo.ScanImages {
-		if err := enforceImageSeverityThresholds(results.ImageScanData, scanInfo); err != nil {
-			return results, err
-		}
 	}
 	if err := enforceCoverageThreshold(results.GetData().ScanCoverage, len(results.GetResults().SummaryDetails.Controls), scanInfo); err != nil {
 		return results, err

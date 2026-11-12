@@ -21,6 +21,10 @@ levels, and migration readiness.`,
 
   # Predict PSS compliance for local manifest files
   ` + cautils.ExecName() + ` predict pss ./manifests/`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return cmd.Help()
+		},
 	}
 
 	predictCmd.AddCommand(getPSSCmd())

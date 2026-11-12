@@ -25,8 +25,15 @@ const DefaultLargeClusterSize = 2500
 // The threshold is overridable through the LARGE_CLUSTER_SIZE environment
 // variable.
 func IsLargeCluster(clusterSize int) bool {
-	largeClusterSize, _ := ParseIntEnvVar("LARGE_CLUSTER_SIZE", DefaultLargeClusterSize)
-	return clusterSize > largeClusterSize
+	return clusterSize > LargeClusterSize()
+}
+
+func LargeClusterSize() int {
+	size, _ := ParseIntEnvVar("LARGE_CLUSTER_SIZE", DefaultLargeClusterSize)
+	if size <= 0 {
+		return DefaultLargeClusterSize
+	}
+	return size
 }
 
 // ResourceScope returns the scope a resource belongs to: its namespace for

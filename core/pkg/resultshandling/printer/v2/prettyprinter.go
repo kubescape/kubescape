@@ -40,6 +40,12 @@ type PrettyPrinter struct {
 	printAttackTree bool
 	showEvidence    bool
 	showSecrets     bool
+	// anonymized is set when --hide or --encrypt replaced the names in the session,
+	// so a name printed from it no longer exists on the cluster.
+	anonymized bool
+	// kubeconfig is the file the scan was told to read with --kubeconfig, empty
+	// when it used the default.
+	kubeconfig string
 }
 
 func NewPrettyPrinter(verboseMode bool, formatVersion string, attackTree bool, viewType cautils.ViewTypes, scanType cautils.ScanTypes, inputPatterns []string, clusterName string, showEvidence bool, showSecrets bool) *PrettyPrinter {
@@ -56,6 +62,19 @@ func NewPrettyPrinter(verboseMode bool, formatVersion string, attackTree bool, v
 	}
 
 	return prettyPrinter
+}
+
+// SetKubeconfig records the kubeconfig file the scan was given, so a command
+// printed for a live cluster reads the same cluster from the same file.
+func (pp *PrettyPrinter) SetKubeconfig(path string) {
+	pp.kubeconfig = path
+}
+
+// SetAnonymized tells the printer that the session was anonymized by --hide or
+// --encrypt, so resource names, namespaces and the context name in it are
+// pseudonyms and cannot be put in a kubectl command.
+func (pp *PrettyPrinter) SetAnonymized(anonymized bool) {
+	pp.anonymized = anonymized
 }
 
 func (pp *PrettyPrinter) SetMainPrinter() {
@@ -253,7 +272,7 @@ func (pp *PrettyPrinter) printResources(summary *reportsummary.SummaryDetails, c
 	// then never consulted on this path, so `kubescape scan -E --view control`
 	// printed exactly what a bare scan printed.
 	if pp.verboseMode || pp.showEvidence {
-		attachAssistedRemediation(summary, workloadsSummary, controlSummary.GetID(), resourcesResult, pp.showSecrets)
+		attachAssistedRemediation(summary, workloadsSummary, controlSummary.GetID(), resourcesResult, pp.showSecrets, pp.showEvidence)
 	}
 
 	failedWorkloads := groupByNamespaceOrKind(workloadsSummary, workloadSummaryFailed)
@@ -283,7 +302,11 @@ func (pp *PrettyPrinter) printResources(summary *reportsummary.SummaryDetails, c
 
 }
 
-func attachAssistedRemediation(summary *reportsummary.SummaryDetails, workloads []WorkloadSummary, controlID string, resourcesResult map[string]resourcesresults.Result, showSecrets bool) {
+// attachAssistedRemediation fills each failed workload's evidence text. This
+// runs under --verbose as well as --show-evidence, and showEvidence is what
+// opts in to the extra detail: delete paths carry their current value only
+// then, so a bare --verbose prints what it always has.
+func attachAssistedRemediation(summary *reportsummary.SummaryDetails, workloads []WorkloadSummary, controlID string, resourcesResult map[string]resourcesresults.Result, showSecrets, showEvidence bool) {
 	for i := range workloads {
 		workload := &workloads[i]
 		if workload.status != apis.StatusFailed {
@@ -301,7 +324,12 @@ func attachAssistedRemediation(summary *reportsummary.SummaryDetails, workloads 
 				continue
 			}
 			displayed := cautils.EvidenceControl(summary, result.AssociatedControls[j])
-			paths := AssistedRemediationPathsWithCurrentValuesFiltered(&displayed, workload.resource, showSecrets)
+			var paths []string
+			if showEvidence {
+				paths = evidencePathsWithCurrentValues(&displayed, workload.resource, showSecrets)
+			} else {
+				paths = AssistedRemediationPathsWithCurrentValuesFiltered(&displayed, workload.resource, showSecrets)
+			}
 			if len(paths) > 0 {
 				workload.assistedRemediation = strings.Join(paths, ", ")
 			}

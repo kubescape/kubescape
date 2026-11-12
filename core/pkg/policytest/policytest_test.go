@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -49,6 +50,48 @@ func TestDiscoverPath_DirectoryOfRules(t *testing.T) {
 	assert.Greater(t, len(rules), 1)
 }
 
+func TestFilterCases(t *testing.T) {
+	rules := []RuleUnderTest{
+		{Name: "rule-a", Cases: []Case{{Name: "clean"}, {Name: "flagged"}}},
+		{Name: "rule-b", Cases: []Case{{Name: "flagged"}}},
+		{Name: "rule-c"},
+	}
+
+	names := func(filtered []RuleUnderTest) []string {
+		var out []string
+		for _, r := range filtered {
+			for _, c := range r.Cases {
+				out = append(out, r.Name+"/"+c.Name)
+			}
+		}
+		return out
+	}
+
+	tests := []struct {
+		name    string
+		pattern string
+		want    []string
+	}{
+		{name: "rule name selects all its cases", pattern: "^rule-a/", want: []string{"rule-a/clean", "rule-a/flagged"}},
+		{name: "case name selects across rules", pattern: "/flagged$", want: []string{"rule-a/flagged", "rule-b/flagged"}},
+		{name: "full name selects one case", pattern: "^rule-b/flagged$", want: []string{"rule-b/flagged"}},
+		{name: "unanchored pattern matches a substring", pattern: "lea", want: []string{"rule-a/clean"}},
+		{name: "rule without cases is dropped", pattern: "rule-c", want: nil},
+		{name: "no match", pattern: "missing", want: nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := FilterCases(rules, regexp.MustCompile(tt.pattern))
+			assert.Equal(t, tt.want, names(got))
+			for _, r := range got {
+				assert.NotEmpty(t, r.Cases, "rule %s: a rule without matching cases must be dropped", r.Name)
+			}
+		})
+	}
+
+	assert.Len(t, rules[0].Cases, 2, "FilterCases must not modify its input")
+}
+
 func TestRunRule_KnownGoodCasePasses(t *testing.T) {
 	dir := filepath.Join(rulesRoot(t), "modify-node-status-v1")
 	rules, err := DiscoverPath(dir)
@@ -83,6 +126,54 @@ func TestCompare_IgnoresPathOrderAndResponseOrder(t *testing.T) {
 	want := []reporthandling.RuleResponse{a, b}
 
 	assert.Empty(t, Compare(got, want), "response order and path order must not affect equality")
+}
+
+// TestCompare_TreatsNilAndEmptyListsAsEqual covers each list a rule's response
+// can carry: a rule that writes "fixPaths": [] produces an empty list, while a
+// fixture that leaves the field out produces nil.
+func TestCompare_TreatsNilAndEmptyListsAsEqual(t *testing.T) {
+	tests := []struct {
+		name  string
+		empty reporthandling.RuleResponse
+	}{
+		{"failedPaths", reporthandling.RuleResponse{AssistedRemediation: reporthandling.AssistedRemediation{FailedPaths: []string{}}}},
+		{"reviewPaths", reporthandling.RuleResponse{AssistedRemediation: reporthandling.AssistedRemediation{ReviewPaths: []string{}}}},
+		{"deletePaths", reporthandling.RuleResponse{AssistedRemediation: reporthandling.AssistedRemediation{DeletePaths: []string{}}}},
+		{"fixPaths", reporthandling.RuleResponse{AssistedRemediation: reporthandling.AssistedRemediation{FixPaths: []armotypes.FixPath{}}}},
+		{"relatedObjects", reporthandling.RuleResponse{RelatedObjects: []reporthandling.RelatedObject{}}},
+		{"context", reporthandling.RuleResponse{Context: []string{}}},
+		{"k8sApiObjects", reporthandling.RuleResponse{AlertObject: reporthandling.AlertObject{K8SApiObjects: []map[string]any{}}}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			empty := []reporthandling.RuleResponse{tt.empty}
+			absent := []reporthandling.RuleResponse{{}}
+
+			assert.Empty(t, Compare(empty, absent))
+			assert.Empty(t, Compare(absent, empty))
+		})
+	}
+}
+
+// TestCompare_NilAndEmptyListsSortTogether proves that the two forms of an
+// empty list do not change where a response sorts: x and y are tied up to
+// failedPaths, which they carry in different forms, and only differ after it.
+func TestCompare_NilAndEmptyListsSortTogether(t *testing.T) {
+	response := func(failedPaths []string, reviewPath string) reporthandling.RuleResponse {
+		return reporthandling.RuleResponse{
+			AlertMessage: "same alert",
+			AssistedRemediation: reporthandling.AssistedRemediation{
+				FailedPaths: failedPaths,
+				ReviewPaths: []string{reviewPath},
+			},
+		}
+	}
+
+	got := []reporthandling.RuleResponse{response(nil, "spec.b"), response([]string{}, "spec.a")}
+	want := []reporthandling.RuleResponse{response(nil, "spec.a"), response([]string{}, "spec.b")}
+
+	assert.Empty(t, Compare(got, want))
 }
 
 func TestCompare_ReportsRealDifference(t *testing.T) {

@@ -147,6 +147,37 @@ func TestWriteExpected_LeavesCosmeticallyDifferentFixtureAlone(t *testing.T) {
 	assert.Equal(t, string(compact), string(raw), "the file must be left byte-for-byte alone")
 }
 
+// A fixture may leave out a list the rule writes as empty, as a hand-written
+// expected.json usually does. The scaffolded rule writes "fixPaths": [].
+func TestFixtureOmittingEmptyListMatchesRuleOutput(t *testing.T) {
+	rule := scaffoldedRuleUnderTest(t)
+	c := caseByName(t, rule, flaggedCaseName)
+	path := filepath.Join(c.Dir, expectedFileName)
+
+	raw, err := os.ReadFile(path)
+	require.NoError(t, err)
+	var fixture []map[string]any
+	require.NoError(t, json.Unmarshal(raw, &fixture))
+	require.Len(t, fixture, 1)
+	require.Empty(t, fixture[0]["fixPaths"], "precondition: the rule must write an empty fixPaths")
+	require.Contains(t, fixture[0], "fixPaths")
+	delete(fixture[0], "fixPaths")
+	omitted, err := json.Marshal(fixture)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(path, omitted, 0o600))
+
+	for _, result := range RunRule(context.Background(), rule) {
+		require.NoError(t, result.Err)
+		assert.True(t, result.Passed, result.Diff)
+	}
+
+	responses, err := EvaluateCase(context.Background(), rule, c)
+	require.NoError(t, err)
+	changed, err := WriteExpected(c, responses)
+	require.NoError(t, err)
+	assert.False(t, changed, "--update must not rewrite the fixture over an omitted empty list")
+}
+
 func TestUpdateRule_IsNoOpForInTreeRules(t *testing.T) {
 	rules, err := Discover(rulesRoot(t))
 	require.NoError(t, err)

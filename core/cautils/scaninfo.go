@@ -3,13 +3,16 @@ package cautils
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/google/uuid"
@@ -152,12 +155,15 @@ type ScanInfo struct {
 	NoIgnoreFile              bool                         // do not read the .kubescapeignore file at the scan root
 	Namespace                 string                       // target namespace for workload scans
 	NamespaceDefaulted        bool                         // true when target namespace for workload scans was defaulted to "default"
+	WorkspaceDir              string                       // Workspace root directory for containment enforcement
 	InputPatterns             []string                     // Yaml files input patterns
 	Silent                    bool                         // Silent mode - Do not print progress logs
 	FailThreshold             float32                      // DEPRECATED - Failure score threshold
 	ComplianceThreshold       float32                      // Compliance score threshold
 	FailThresholdSeverity     string                       // Severity at and above which the command should fail
-	OnlyFixable               bool                         // Gate the severity threshold to only count CVEs that have an available fix
+	OnlyFixable               bool                         // Gate the image vulnerability thresholds to only count CVEs that have an available fix
+	FailOnKEV                 bool                         // Fail image scans on any vulnerability listed in the CISA Known Exploited Vulnerabilities catalog
+	EPSSThreshold             float64                      // Fail image scans on any vulnerability whose EPSS score is at or above this value (0 = disabled)
 	FailCoverageThreshold     float32                      // Coverage threshold below which the command fails (0 = disabled)
 	FailOnDegradedConfig      bool                         // Fail the scan if control inputs or exceptions could not be loaded and a fallback was used
 	Submit                    BoolPtrFlag                  // Submit results to Kubescape Cloud BE. Get() is nil unless explicitly set by the caller (flag/env/request field)
@@ -166,6 +172,7 @@ type ScanInfo struct {
 	HostSensorEnabledDefault  *bool                        // Default fallback when HostSensorEnabled is unset (injected via ScanInfo defaults)
 	HostSensorYamlPath        string                       // Path to hostsensor file
 	Local                     bool                         // Do not submit results
+	NoClusterAccess           bool                         // Never contact a cluster, whatever the kubeconfig says. For a scan of local manifests, which a kubeconfig whose server is down would otherwise stall
 	AccountID                 string                       // account ID
 	AccessKey                 string                       // access key
 	FrameworkScan             bool                         // false if scanning control
@@ -184,6 +191,7 @@ type ScanInfo struct {
 	ScanTimeout               time.Duration // Maximum duration for the entire scan (0 = no timeout)
 	ControlTimeout            time.Duration // Maximum duration for evaluating a single control (0 = no timeout)
 	EnableStreaming           bool          // Enable resource streaming for large clusters to keep the evaluation input bounded
+	OriginalStdinInfo         os.FileInfo   // Preserved FileInfo of stdin regular file before preparation
 	Incremental               bool          // Cache verdicts per resource, keyed by resource hash + controls-config version, and skip re-evaluating unchanged resources
 	DryRun                    bool          // Check RBAC access for the resources the scan would need, without collecting or evaluating anything
 	OtelEndpoint              string        // OTLP collector endpoint for exporting scan traces and metrics (empty = telemetry disabled)
@@ -230,6 +238,7 @@ type ScanInfo struct {
 	ReferenceCluster          string                      // --reference-cluster: with --fleet-report, the kube context whose findings the other clusters are read against
 	KubeContextRetries        int                         // --retries: with --kube-contexts, how many more times to try a cluster whose API server never answered
 	WholeClusterPolicy        WholeClusterExecutionPolicy // Execution policy for whole-cluster controls (projected, fallback, skip, verify)
+	GitCloneDepth             *int                        // Clone depth for remote Git repository scans (default: 0 for full commit history; set > 0 e.g. 1 for shallow tip-only clone; nil defaults to 0)
 }
 
 type WholeClusterExecutionPolicy string
@@ -298,6 +307,21 @@ func (scanInfo *ScanInfo) GetWholeClusterPolicy() WholeClusterExecutionPolicy {
 		return WholeClusterPolicyProjected
 	}
 	return p
+}
+
+// SetGitCloneDepth sets the shallow clone depth for remote Git repository scans.
+func (scanInfo *ScanInfo) SetGitCloneDepth(depth int) {
+	scanInfo.GitCloneDepth = &depth
+}
+
+// EffectiveGitCloneDepth returns the effective clone depth for remote Git repository scans.
+// When GitCloneDepth is nil (omitted by library callers or zero-value ScanInfo), it defaults
+// to DefaultGitCloneDepth (0 for full commit history). Explicit values, including > 0 for shallow clones, are preserved.
+func (scanInfo *ScanInfo) EffectiveGitCloneDepth() int {
+	if scanInfo == nil || scanInfo.GitCloneDepth == nil {
+		return DefaultGitCloneDepth
+	}
+	return *scanInfo.GitCloneDepth
 }
 
 type Getters struct {
@@ -371,8 +395,11 @@ func (scanInfo *ScanInfo) setUseArtifactsFrom(ctx context.Context) error {
 	}
 	framework := &reporthandling.Framework{}
 	for _, f := range files {
+		if f.IsDir() {
+			continue
+		}
 		filePath := filepath.Join(scanInfo.UseArtifactsFrom, f.Name())
-		file, err := os.ReadFile(filepath.Clean(filePath))
+		file, err := readArtifactFile(filePath)
 		if err == nil {
 			if err := json.Unmarshal(file, framework); err == nil {
 				scanInfo.UseFrom = append(scanInfo.UseFrom, filepath.Join(scanInfo.UseArtifactsFrom, f.Name()))
@@ -393,6 +420,64 @@ func (scanInfo *ScanInfo) setUseArtifactsFrom(ctx context.Context) error {
 		scanInfo.AttackTracks = filepath.Join(scanInfo.UseArtifactsFrom, LocalAttackTracksFilename)
 	}
 	return nil
+}
+
+var (
+	// ErrArtifactFileNotRegular is returned when an artifact file is not a regular file.
+	ErrArtifactFileNotRegular = errors.New("artifact file is not a regular file")
+	// ErrArtifactFileTooLarge is returned when an artifact file exceeds the maximum allowed size.
+	ErrArtifactFileTooLarge = errors.New("artifact file exceeds maximum size limit")
+)
+
+// readArtifactFile opens path with O_NONBLOCK, verifies that it is a regular file,
+// and reads at most getMaxFileSize() bytes (configurable via KUBESCAPE_MAX_FILE_SIZE,
+// defaulting to DefaultMaxFileSize) so reading remains bounded.
+func readArtifactFile(path string) ([]byte, error) {
+	if strings.TrimSpace(path) == "" {
+		return nil, os.ErrNotExist
+	}
+	cleaned := filepath.Clean(path)
+	statInfo, err := os.Stat(cleaned)
+	if err != nil {
+		return nil, err
+	}
+	if statInfo.IsDir() {
+		return nil, fmt.Errorf("%q is a directory, not a file: %w", path, ErrArtifactFileNotRegular)
+	}
+	if !statInfo.Mode().IsRegular() {
+		return nil, fmt.Errorf("%w: %q", ErrArtifactFileNotRegular, path)
+	}
+
+	file, err := os.OpenFile(cleaned, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	info, err := file.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if info.IsDir() {
+		return nil, fmt.Errorf("%q is a directory, not a file: %w", path, ErrArtifactFileNotRegular)
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("%w: %q", ErrArtifactFileNotRegular, path)
+	}
+
+	limit := getMaxFileSize()
+	if info.Size() > limit {
+		return nil, fmt.Errorf("%w: %q exceeds maximum size limit of %d bytes", ErrArtifactFileTooLarge, path, limit)
+	}
+
+	data, err := io.ReadAll(io.LimitReader(file, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > limit {
+		return nil, fmt.Errorf("%w: %q exceeds maximum size limit of %d bytes", ErrArtifactFileTooLarge, path, limit)
+	}
+	return data, nil
 }
 
 func (scanInfo *ScanInfo) setUseFrom(policyIdentifiers []PolicyIdentifier) {
@@ -418,7 +503,7 @@ func (scanInfo *ScanInfo) Formats() []string {
 
 	var cleaned []string
 	for f := range strings.SplitSeq(scanInfo.Format, ",") {
-		if v := strings.TrimSpace(f); v != "" {
+		if v := strings.ToLower(strings.TrimSpace(f)); v != "" {
 			cleaned = append(cleaned, v)
 		}
 	}
@@ -621,6 +706,7 @@ func (scanInfo *ScanInfo) CloneForContext(kubeContext, output string) *ScanInfo 
 	clone.HostSensorEnabled = scanInfo.HostSensorEnabled.clone()
 	clone.HostSensorEnabledDefault = clonePtr(scanInfo.HostSensorEnabledDefault)
 	clone.ScanContract = cloneScanContractMetadata(scanInfo.ScanContract)
+	clone.GitCloneDepth = clonePtr(scanInfo.GitCloneDepth)
 
 	clone.ScanID = ""
 	clone.cleanups = nil
@@ -751,6 +837,12 @@ func (scanInfo *ScanInfo) ResolveClusterContextName() error {
 	return nil
 }
 
+// GetKubeconfigPath returns the kubeconfig file selected with --kubeconfig, or
+// empty when the scan used the default one.
+func (scanInfo *ScanInfo) GetKubeconfigPath() string {
+	return scanInfo.kubeconfigPath
+}
+
 // GetClusterContextName returns the context resolved from the CLI kubeconfig
 // and context selection, falling back to k8s-interface when neither was
 // resolved by this scan.
@@ -829,14 +921,15 @@ func (scanInfo *ScanInfo) MaterializeRemoteInputs(ctx context.Context) error {
 		}
 
 		originalInput := candidate
-		clonedDir, err := CloneGitRepo(&candidate)
+		depth := scanInfo.EffectiveGitCloneDepth()
+		clonedDir, err := CloneGitRepo(&candidate, depth)
 		if err != nil {
 			scanInfo.Cleanup()
 			return fmt.Errorf("failed to clone remote git repository %q: %w", originalInput, err)
 		}
 
 		if _, err := NewLocalGitRepository(clonedDir); err != nil {
-			if releaseErr := ReleaseClonedRepo(originalInput); releaseErr != nil {
+			if releaseErr := ReleaseClonedRepo(originalInput, depth); releaseErr != nil {
 				logger.L().Warning("failed to clean up invalid cloned repository", helpers.String("url", originalInput), helpers.Error(releaseErr))
 			}
 			scanInfo.Cleanup()
@@ -844,7 +937,7 @@ func (scanInfo *ScanInfo) MaterializeRemoteInputs(ctx context.Context) error {
 		}
 
 		scanInfo.AddCleanup(func() {
-			if err := ReleaseClonedRepo(originalInput); err != nil {
+			if err := ReleaseClonedRepo(originalInput, depth); err != nil {
 				logger.L().Warning("failed to clean up cloned repository", helpers.String("url", originalInput), helpers.Error(err))
 			}
 		})
@@ -900,7 +993,7 @@ func (scanInfo *ScanInfo) setContextMetadata(ctx context.Context, contextMetadat
 		contextMetadata.RepoContextMetadata = repoContext
 	case ContextGitRemote:
 		// remote
-		repoContext, err := metadataGitLocal(GetClonedPath(input))
+		repoContext, err := metadataGitLocal(GetClonedPath(input, scanInfo.EffectiveGitCloneDepth()))
 		if err != nil {
 			logger.L().Ctx(ctx).Warning("in setContextMetadata", helpers.Interface("case", ContextGitRemote), helpers.Error(err))
 		}

@@ -1,12 +1,15 @@
 package cautils
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/kubescape/v4/core/pkg/pathcontainment"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -163,4 +166,194 @@ func TestTerraformDirectory_GetWorkloads_PreservesLargeIntegerPrecision(t *testi
 		}
 	}
 	assert.True(t, found, "expected to find the big-number annotation in scanned output")
+}
+
+func TestTerraformDirectory_WorkspaceContainment(t *testing.T) {
+	ws := t.TempDir()
+	insideDir := filepath.Join(ws, "inside")
+	require.NoError(t, os.Mkdir(insideDir, 0o755))
+	insideFile := filepath.Join(insideDir, "main.tf")
+	require.NoError(t, os.WriteFile(insideFile, []byte(`
+variable "pod_name" {
+  default = "inside-pod"
+}
+
+resource "kubernetes_pod_v1" "example" {
+  metadata {
+    name = var.pod_name
+  }
+  spec {
+    container {
+      name  = "pause"
+      image = "registry.k8s.io/pause:3.9"
+    }
+  }
+}
+`), 0o600))
+
+	outsideDir := t.TempDir()
+	outsideFile := filepath.Join(outsideDir, "outside.tf")
+	require.NoError(t, os.WriteFile(outsideFile, []byte(`
+variable "pod_name" {
+  default = "outside-override-pod"
+}
+
+resource "kubernetes_pod_v1" "outside" {
+  metadata {
+    name = "outside-pod"
+  }
+  spec {
+    container {
+      name  = "pause"
+      image = "registry.k8s.io/pause:3.9"
+    }
+  }
+}
+`), 0o600))
+
+	td := NewTerraformDirectory(insideDir, ws)
+	workloads, errs := td.GetWorkloads(insideDir)
+	require.Empty(t, errs)
+	require.Len(t, workloads[insideFile], 1)
+	assert.Equal(t, "inside-pod", workloads[insideFile][0].GetName())
+
+	symlinkPath := filepath.Join(insideDir, "symlink.tf")
+	if err := os.Symlink(outsideFile, symlinkPath); err == nil {
+		workloads, errs = td.GetWorkloads(insideDir)
+		require.Empty(t, errs)
+		require.Len(t, workloads[insideFile], 1)
+		assert.Equal(t, "inside-pod", workloads[insideFile][0].GetName())
+		assert.NotContains(t, workloads, symlinkPath)
+	}
+
+	_, err := LoadResourcesFromTerraformFiltered(context.Background(), outsideDir, nil, ws)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, pathcontainment.ErrPathEscapesWorkspace)
+}
+
+func TestReadTerraformFile_OversizedFileRejected(t *testing.T) {
+	t.Setenv(MaxFileSizeEnvVar, "") // empty falls back to DefaultMaxFileSize
+
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "oversized.tf")
+	f, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY, 0o600)
+	require.NoError(t, err)
+	require.NoError(t, f.Truncate(maxTerraformFileBytes+1))
+	require.NoError(t, f.Close())
+
+	_, err = readTerraformFile(filePath)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrTerraformFileTooLarge)
+}
+
+func TestReadTerraformFile_NonRegularFileRejected(t *testing.T) {
+	if _, err := os.Stat("/dev/null"); err == nil {
+		_, err := readTerraformFile("/dev/null")
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrTerraformFileNotRegular)
+	}
+}
+
+func TestReadTerraformFile_DirectoryRejected(t *testing.T) {
+	dir := t.TempDir()
+	_, err := readTerraformFile(dir)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrTerraformFileNotRegular)
+	assert.Contains(t, err.Error(), "is a directory, not a file")
+}
+
+func TestTerraformDirectory_GetWorkloads_OversizedFileRejected(t *testing.T) {
+	t.Setenv(MaxFileSizeEnvVar, "") // empty falls back to DefaultMaxFileSize
+
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "oversized.tf")
+	f, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY, 0o600)
+	require.NoError(t, err)
+	require.NoError(t, f.Truncate(maxTerraformFileBytes+1))
+	require.NoError(t, f.Close())
+
+	td := NewTerraformDirectory(dir)
+	_, errs := td.GetWorkloads(dir)
+	require.NotEmpty(t, errs)
+	found := false
+	for _, e := range errs {
+		if errors.Is(e, ErrTerraformFileTooLarge) {
+			found = true
+			break
+		}
+	}
+	assert.True(t, found, "expected ErrTerraformFileTooLarge in errs: %v", errs)
+}
+
+func TestTerraformDirectory_GetWorkloads_NonRegularFileRejected(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := os.Stat("/dev/null"); err == nil {
+		target := filepath.Join(dir, "dev_null.tf")
+		if err := os.Symlink("/dev/null", target); err == nil {
+			td := NewTerraformDirectory(dir)
+			_, errs := td.GetWorkloads(dir)
+			require.NotEmpty(t, errs)
+			found := false
+			for _, e := range errs {
+				if errors.Is(e, ErrTerraformFileNotRegular) {
+					found = true
+					break
+				}
+			}
+			assert.True(t, found, "expected ErrTerraformFileNotRegular in errs: %v", errs)
+		}
+	}
+}
+
+func TestTerraformDirectory_GetWorkloads_DirectoryRejected(t *testing.T) {
+	dir := t.TempDir()
+	subDir := filepath.Join(dir, "sub.tf")
+	require.NoError(t, os.Mkdir(subDir, 0o755))
+
+	td := NewTerraformDirectory(dir)
+	_, errs := td.GetWorkloads(dir)
+	require.NotEmpty(t, errs)
+	found := false
+	for _, e := range errs {
+		if errors.Is(e, ErrTerraformFileNotRegular) {
+			found = true
+			break
+		}
+	}
+	assert.True(t, found, "expected ErrTerraformFileNotRegular in errs: %v", errs)
+}
+
+func TestReadTerraformFile_MaxFileSizeEnvVar_LowerOverride(t *testing.T) {
+	t.Setenv(MaxFileSizeEnvVar, "100")
+
+	dir := t.TempDir()
+	overLimitFile := filepath.Join(dir, "over.tf")
+	require.NoError(t, os.WriteFile(overLimitFile, make([]byte, 200), 0o600))
+
+	_, err := readTerraformFile(overLimitFile)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrTerraformFileTooLarge)
+
+	underLimitFile := filepath.Join(dir, "under.tf")
+	require.NoError(t, os.WriteFile(underLimitFile, make([]byte, 50), 0o600))
+
+	data, err := readTerraformFile(underLimitFile)
+	require.NoError(t, err)
+	assert.Len(t, data, 50)
+}
+
+func TestReadTerraformFile_MaxFileSizeEnvVar_HigherOverride(t *testing.T) {
+	raisedLimit := DefaultMaxFileSize + 1024
+	t.Setenv(MaxFileSizeEnvVar, fmt.Sprintf("%d", raisedLimit))
+
+	dir := t.TempDir()
+	overDefaultFile := filepath.Join(dir, "over_default.tf")
+	f, err := os.OpenFile(overDefaultFile, os.O_CREATE|os.O_WRONLY, 0o600)
+	require.NoError(t, err)
+	require.NoError(t, f.Truncate(DefaultMaxFileSize+100))
+	require.NoError(t, f.Close())
+
+	data, err := readTerraformFile(overDefaultFile)
+	require.NoError(t, err)
+	assert.Len(t, data, int(DefaultMaxFileSize+100))
 }

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/reporthandling"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	k8sjson "k8s.io/apimachinery/pkg/util/json"
@@ -73,6 +74,13 @@ func DecryptReport(data, masterKey []byte) ([]byte, error) {
 	}
 
 	if err := decryptor.decryptNamespaceSummaries(); err != nil {
+		return nil, err
+	}
+
+	if err := decryptor.decryptExceptionAudit(); err != nil {
+		return nil, err
+	}
+	if err := decryptor.decryptSkippedManifests(); err != nil {
 		return nil, err
 	}
 	if err := decryptor.validateNoEncryptedValues(); err != nil {
@@ -273,7 +281,7 @@ func (d *reportDecryptor) decryptResource(resource rawObject, context string) (s
 	if err := k8sjson.Unmarshal(objectRaw, &object); err != nil {
 		return "", "", fmt.Errorf("failed to parse %s.object: %w", context, err)
 	}
-	workload := workloadinterface.NewWorkloadObj(object)
+	workload := resourceEnvelope(object)
 
 	if err := DecryptResourceMetadata(workload, d.dek); err != nil {
 		return "", "", fmt.Errorf("failed to decrypt %s metadata: %w", context, err)
@@ -317,6 +325,18 @@ func (d *reportDecryptor) decryptResource(resource rawObject, context string) (s
 	}
 
 	return oldID, newID, nil
+}
+
+// resourceEnvelope wraps a report resource object in the envelope whose
+// SetName and SetNamespace the anonymizer encrypted it through, so the same
+// fields are restored. An RBAC subject (a Rego response vector object) keeps
+// its name and namespace at the top level of the object, beside its
+// relatedObjects; every other resource keeps them under metadata.
+func resourceEnvelope(object map[string]any) workloadinterface.IMetadata {
+	if objectsenvelopes.IsTypeRegoResponseVector(object) {
+		return objectsenvelopes.NewRegoResponseVectorObject(object)
+	}
+	return workloadinterface.NewWorkloadObj(object)
 }
 
 // decryptSource restores a resource source without discarding unknown fields.
@@ -564,6 +584,118 @@ func (d *reportDecryptor) decryptRuleExceptions(rule rawObject, context string) 
 	rule["exception"], err = json.Marshal(exceptions)
 	if err != nil {
 		return fmt.Errorf("failed to marshal %s: %w", exceptionsContext, err)
+	}
+	return nil
+}
+
+// decryptExceptionAudit restores the --audit-exceptions report: each item's
+// exception name, and the ID, namespace and name of every resource it
+// matched. Resource IDs go through the report-wide mapping, so an audited
+// resource points at its decrypted result again. Fields unknown to this
+// version are kept at every level.
+func (d *reportDecryptor) decryptExceptionAudit() error {
+	audit, ok, err := optionalObject(d.report, "exceptionAudit", "exceptionAudit")
+	if err != nil || !ok {
+		return err
+	}
+	itemsRaw, ok := audit["items"]
+	if !ok || isJSONNull(itemsRaw) {
+		return nil
+	}
+	items, err := decodeObjectArray(itemsRaw, "exceptionAudit.items")
+	if err != nil {
+		return err
+	}
+
+	for i := range items {
+		itemContext := fmt.Sprintf("exceptionAudit.items[%d]", i)
+		if err := d.decryptStringField(items[i], "name", itemContext+".name", decryptEmbeddedCiphertexts); err != nil {
+			return err
+		}
+
+		matchesRaw, ok := items[i]["matchedResources"]
+		if !ok || isJSONNull(matchesRaw) {
+			continue
+		}
+		matchesContext := itemContext + ".matchedResources"
+		matches, err := decodeObjectArray(matchesRaw, matchesContext)
+		if err != nil {
+			return err
+		}
+		for j := range matches {
+			matchContext := fmt.Sprintf("%s[%d]", matchesContext, j)
+			if err := d.remapStringField(matches[j], "resourceID", matchContext+".resourceID"); err != nil {
+				return err
+			}
+			for _, field := range []string{"namespace", "name"} {
+				if err := d.decryptStringField(matches[j], field, matchContext+"."+field, decryptIfEncrypted); err != nil {
+					return err
+				}
+			}
+		}
+		if items[i]["matchedResources"], err = json.Marshal(matches); err != nil {
+			return fmt.Errorf("failed to marshal %s: %w", matchesContext, err)
+		}
+	}
+
+	if audit["items"], err = json.Marshal(items); err != nil {
+		return fmt.Errorf("failed to marshal exceptionAudit.items: %w", err)
+	}
+	if d.report["exceptionAudit"], err = json.Marshal(audit); err != nil {
+		return fmt.Errorf("failed to marshal exceptionAudit: %w", err)
+	}
+	return nil
+}
+
+// decryptStringField restores one optional string field of object in place
+// with decrypt.
+func (d *reportDecryptor) decryptStringField(object rawObject, field, context string, decrypt func(string, *ReportKey) (string, error)) error {
+	value, ok, err := optionalString(object, field, context)
+	if err != nil || !ok {
+		return err
+	}
+	restored, err := decrypt(value, d.dek)
+	if err != nil {
+		return fmt.Errorf("failed to decrypt %s: %w", context, err)
+	}
+	if object[field], err = json.Marshal(restored); err != nil {
+		return fmt.Errorf("failed to marshal %s: %w", context, err)
+	}
+	return nil
+}
+
+// decryptSkippedManifests restores scanCoverage.skippedManifests: each path,
+// and the ciphertext of that path embedded in its reason. Fields unknown to
+// this version are kept in the coverage block and in every entry.
+func (d *reportDecryptor) decryptSkippedManifests() error {
+	coverage, ok, err := optionalObject(d.report, "scanCoverage", "scanCoverage")
+	if err != nil || !ok {
+		return err
+	}
+	skippedRaw, ok := coverage["skippedManifests"]
+	if !ok || isJSONNull(skippedRaw) {
+		return nil
+	}
+	skipped, err := decodeObjectArray(skippedRaw, "scanCoverage.skippedManifests")
+	if err != nil {
+		return err
+	}
+
+	for i := range skipped {
+		context := fmt.Sprintf("scanCoverage.skippedManifests[%d]", i)
+		if err := d.decryptStringField(skipped[i], "path", context+".path", decryptIfEncrypted); err != nil {
+			return err
+		}
+		if err := d.decryptStringField(skipped[i], "reason", context+".reason", decryptEmbeddedCiphertexts); err != nil {
+			return err
+		}
+	}
+
+	if coverage["skippedManifests"], err = json.Marshal(skipped); err != nil {
+		return fmt.Errorf("failed to marshal scanCoverage.skippedManifests: %w", err)
+	}
+	if d.report["scanCoverage"], err = json.Marshal(coverage); err != nil {
+		return fmt.Errorf("failed to marshal scanCoverage: %w", err)
 	}
 	return nil
 }

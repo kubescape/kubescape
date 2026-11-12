@@ -1,6 +1,7 @@
 package scan
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -8,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -17,6 +19,7 @@ import (
 	"github.com/kubescape/kubescape/v4/cmd/shared"
 	"github.com/kubescape/kubescape/v4/core/core"
 	"github.com/kubescape/kubescape/v4/core/pkg/fleet"
+	"github.com/santhosh-tekuri/jsonschema/v6"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -26,14 +29,26 @@ type fakeAPIServer struct {
 	*httptest.Server
 	delay        time.Duration
 	unauthorized bool
+	pods         int
 	mu           sync.Mutex
 	paths        []string
 }
 
 // newFakeAPIServer starts a fake cluster; delay slows every answer and unauthorized rejects every request.
-func newFakeAPIServer(t *testing.T, delay time.Duration, unauthorized bool) *fakeAPIServer {
+func newFakeAPIServer(t testing.TB, delay time.Duration, unauthorized bool) *fakeAPIServer {
 	t.Helper()
-	server := &fakeAPIServer{delay: delay, unauthorized: unauthorized}
+	return startFakeAPIServer(t, &fakeAPIServer{delay: delay, unauthorized: unauthorized})
+}
+
+// newFakeAPIServerWithPods starts a healthy fake cluster serving the given number of pods.
+func newFakeAPIServerWithPods(t testing.TB, pods int) *fakeAPIServer {
+	t.Helper()
+	return startFakeAPIServer(t, &fakeAPIServer{pods: pods})
+}
+
+// startFakeAPIServer serves the configured fake cluster; it is configured first, since its handler reads the settings.
+func startFakeAPIServer(t testing.TB, server *fakeAPIServer) *fakeAPIServer {
+	t.Helper()
 	server.Server = httptest.NewServer(http.HandlerFunc(server.serve))
 	t.Cleanup(server.Close)
 	return server
@@ -60,7 +75,7 @@ func (s *fakeAPIServer) serve(w http.ResponseWriter, r *http.Request) {
 		items      []map[string]any
 	}{
 		"namespaces":      {kind: "Namespace", items: []map[string]any{{"apiVersion": "v1", "kind": "Namespace", "metadata": map[string]any{"name": "default", "uid": "ns-1"}}}},
-		"pods":            {kind: "Pod", namespaced: true, items: []map[string]any{{"apiVersion": "v1", "kind": "Pod", "metadata": map[string]any{"name": "web", "namespace": "default", "uid": "pod-1"}, "spec": map[string]any{"containers": []map[string]any{{"name": "web", "image": "nginx:1.27"}}}}}},
+		"pods":            {kind: "Pod", namespaced: true, items: s.podItems()},
 		"nodes":           {kind: "Node"},
 		"serviceaccounts": {kind: "ServiceAccount", namespaced: true},
 		"configmaps":      {kind: "ConfigMap", namespaced: true},
@@ -93,6 +108,20 @@ func (s *fakeAPIServer) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusNotFound, map[string]any{"kind": "Status", "apiVersion": "v1", "status": "Failure", "reason": "NotFound", "code": 404})
+}
+
+// podItems is the cluster's pods: one by default, or s.pods of them for measuring larger clusters.
+func (s *fakeAPIServer) podItems() []map[string]any {
+	count := max(s.pods, 1)
+	items := make([]map[string]any, 0, count)
+	for i := range count {
+		name := "web"
+		if i > 0 {
+			name = fmt.Sprintf("web-%d", i)
+		}
+		items = append(items, map[string]any{"apiVersion": "v1", "kind": "Pod", "metadata": map[string]any{"name": name, "namespace": "default", "uid": fmt.Sprintf("pod-%d", i+1)}, "spec": map[string]any{"containers": []map[string]any{{"name": "web", "image": "nginx:1.27"}}}})
+	}
+	return items
 }
 
 // asked reports whether the server received a request for the path.
@@ -130,8 +159,20 @@ type fleetRun struct {
 	err      error
 }
 
-// runFleetE2E runs the real fleet scan, with local policies and no backend, against the given contexts and their API servers.
-func runFleetE2E(t *testing.T, servers map[string]string, args ...string) fleetRun {
+// runFleetE2E runs the real fleet scan against the given contexts and their API servers, and reads back the fleet report.
+func runFleetE2E(t testing.TB, servers map[string]string, args ...string) fleetRun {
+	t.Helper()
+	fleetReport := prepareFleetE2E(t, servers)
+	run := scanFleetE2E(t, fleetReport, args...)
+	// An explicit empty --fleet-report, given after the default, turns the fleet report off.
+	if !slices.Contains(args, "--fleet-report=") {
+		run.report = readFleetReport(t, fleetReport)
+	}
+	return run
+}
+
+// prepareFleetE2E points the scan at the servers with a kubeconfig and a scratch home, and returns where the fleet report goes.
+func prepareFleetE2E(t testing.TB, servers map[string]string) string {
 	t.Helper()
 	dir := t.TempDir()
 	t.Setenv("KUBECONFIG", writeE2EKubeconfig(t, dir, servers))
@@ -143,9 +184,14 @@ func runFleetE2E(t *testing.T, servers map[string]string, args ...string) fleetR
 		k8sinterface.SetClusterContextName(previousContext)
 		k8sinterface.SetConnectedToCluster(previousConnected)
 	})
+	return filepath.Join(dir, "fleet.json")
+}
 
+// scanFleetE2E runs the real fleet scan, with local policies and no backend, writing its reports next to fleetReport.
+func scanFleetE2E(t testing.TB, fleetReport string, args ...string) fleetRun {
+	t.Helper()
+	dir := filepath.Dir(fleetReport)
 	policies := filepath.Join("..", "..", "core", "cautils", "getter", "testdata")
-	fleetReport := filepath.Join(dir, "fleet.json")
 	args = append([]string{"framework", "nsa",
 		"--output=" + filepath.Join(dir, "report.json"), "--format=json", "--fleet-report=" + fleetReport,
 		"--keep-local", "--use-from=" + filepath.Join(policies, "NSA.json"),
@@ -161,14 +207,38 @@ func runFleetE2E(t *testing.T, servers map[string]string, args ...string) fleetR
 		run.err = cmd.Execute()
 	})
 	run.exitCode = shared.ExitCode(run.err)
-	contents, err := os.ReadFile(fleetReport)
-	require.NoError(t, err, "the fleet report is written whatever happened to the clusters")
-	require.NoError(t, json.Unmarshal(contents, &run.report))
 	return run
 }
 
+// readFleetReport decodes the fleet report a scan wrote, after checking it against the published schema.
+func readFleetReport(t testing.TB, path string) fleet.FleetReport {
+	t.Helper()
+	contents, err := os.ReadFile(path)
+	require.NoError(t, err, "the fleet report is written whatever happened to the clusters")
+	requireMatchesFleetSchema(t, contents)
+	var report fleet.FleetReport
+	require.NoError(t, json.Unmarshal(contents, &report))
+	return report
+}
+
+// requireMatchesFleetSchema fails when a real fleet report does not match docs/fleet-report.schema.json.
+func requireMatchesFleetSchema(t testing.TB, report []byte) {
+	t.Helper()
+	contents, err := os.ReadFile(filepath.Join("..", "..", "docs", "fleet-report.schema.json"))
+	require.NoError(t, err)
+	document, err := jsonschema.UnmarshalJSON(bytes.NewReader(contents))
+	require.NoError(t, err)
+	compiler := jsonschema.NewCompiler()
+	require.NoError(t, compiler.AddResource("fleet-report.schema.json", document))
+	schema, err := compiler.Compile("fleet-report.schema.json")
+	require.NoError(t, err)
+	instance, err := jsonschema.UnmarshalJSON(bytes.NewReader(report))
+	require.NoError(t, err)
+	require.NoError(t, schema.Validate(instance), "the report the scan wrote must match the published schema")
+}
+
 // writeE2EKubeconfig writes a kubeconfig with one context per server, each named after its context.
-func writeE2EKubeconfig(t *testing.T, dir string, servers map[string]string) string {
+func writeE2EKubeconfig(t testing.TB, dir string, servers map[string]string) string {
 	t.Helper()
 	var clusters, contexts strings.Builder
 	for name, url := range servers {
@@ -286,4 +356,39 @@ func TestFleetE2E_FleetConfigFile(t *testing.T) {
 	dead := clusterNamed(t, run.report, "dead")
 	assert.Equal(t, fleet.ClusterUnreachable, dead.Status)
 	assert.Equal(t, 1, dead.Attempts, "retries: 0 from the file means a single attempt")
+}
+
+// BenchmarkFleetScan measures a real fleet scan of 1, 5 and 10 fake clusters with 200 pods each, with and without the fleet report.
+func BenchmarkFleetScan(b *testing.B) {
+	for _, report := range []bool{true, false} {
+		for _, clusters := range []int{1, 5, 10} {
+			b.Run(fmt.Sprintf("report=%t/clusters=%d", report, clusters), func(b *testing.B) {
+				benchmarkFleetScan(b, clusters, report)
+			})
+		}
+	}
+}
+
+// benchmarkFleetScan runs one fleet scan of clusters fake clusters per iteration.
+func benchmarkFleetScan(b *testing.B, clusters int, report bool) {
+	servers := map[string]string{}
+	names := make([]string, 0, clusters)
+	for i := range clusters {
+		name := fmt.Sprintf("cluster-%d", i+1)
+		servers[name] = newFakeAPIServerWithPods(b, 200).URL
+		names = append(names, name)
+	}
+	args := []string{"--kube-contexts=" + strings.Join(names, ",")}
+	if !report {
+		args = append(args, "--fleet-report=")
+	}
+	// Every iteration writes over the same reports, so a long run does not pile up files or cleanups.
+	fleetReport := prepareFleetE2E(b, servers)
+	for b.Loop() {
+		// The report is checked once after the loop, so decoding it is not part of the timed work.
+		require.NoError(b, scanFleetE2E(b, fleetReport, args...).err)
+	}
+	if report {
+		require.Equal(b, clusters, readFleetReport(b, fleetReport).Compliance.ClustersScored)
+	}
 }

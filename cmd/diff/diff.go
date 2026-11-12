@@ -1,6 +1,7 @@
 package diff
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -57,10 +58,31 @@ func GetDiffCmd(ks meta.IKubescape) *cobra.Command {
 
 Image scan reports ("scan image --format json") are compared by vulnerability instead: a CVE is identified by its ID, package and package type, so upgrading a package that still carries the same CVE counts as unchanged. Findings from a multi-image report are pooled across all its images, so --fail-on-new does not flag a CVE that spreads to another image when any base image already had it. Image reports support the pretty-printer, json and yaml formats, and both reports must be of the same kind.`,
 		Example: diffCmdExamples,
-		Args:    cobra.ExactArgs(2),
+		Args: func(cmd *cobra.Command, args []string) error {
+			if len(args) != 2 {
+				return fmt.Errorf("accepts 2 arg(s), received %d", len(args))
+			}
+			if strings.TrimSpace(args[0]) == "" {
+				return errors.New("base report file path cannot be empty")
+			}
+			if strings.TrimSpace(args[1]) == "" {
+				return errors.New("head report file path cannot be empty")
+			}
+			return nil
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if ks == nil {
+				return errors.New("uninitialized kubescape interface")
+			}
+			if len(args) < 2 || strings.TrimSpace(args[0]) == "" {
+				return errors.New("base report file path cannot be empty")
+			}
+			if strings.TrimSpace(args[1]) == "" {
+				return errors.New("head report file path cannot be empty")
+			}
 			diffInfo.BaseFile = args[0]
 			diffInfo.HeadFile = args[1]
+			diffInfo.Writer = cmd.OutOrStdout()
 
 			// diff honors a single output format, so validate against the exact value rather than scan's comma-separated multi-format set.
 			supportedFormats := diffFormats()
@@ -81,6 +103,14 @@ Image scan reports ("scan image --format json") are compared by vulnerability in
 			}
 			if err := resultsdiff.ValidateGranularity(diffInfo.Granularity); err != nil {
 				return err
+			}
+
+			if cmd.Flags().Changed("output") {
+				trimmedOutput := strings.TrimSpace(diffInfo.Output)
+				if trimmedOutput == "" {
+					return errors.New("output file path cannot be empty")
+				}
+				diffInfo.Output = trimmedOutput
 			}
 
 			// The invocation is valid from this point on. Runtime and result-gate

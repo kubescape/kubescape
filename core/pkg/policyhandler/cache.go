@@ -48,6 +48,12 @@ func NewTimedCache[T any](ttl time.Duration) *TimedCache[T] {
 	return cache
 }
 
+// enabled reports whether the cache can hold a value at all. ttl is fixed at
+// construction, so this needs no lock.
+func (c *TimedCache[T]) enabled() bool {
+	return c.ttl > 0
+}
+
 func (c *TimedCache[T]) Set(value T) {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()

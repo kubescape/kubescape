@@ -10,6 +10,7 @@ import (
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer"
+	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 )
@@ -64,18 +65,19 @@ func (pp *PrometheusPrinter) generatePrometheusFormat(
 	results map[string]resourcesresults.Result,
 	summaryDetails *reportsummary.SummaryDetails,
 	coverage cautils.ScanCoverage) *Metrics {
-	return pp.generatePrometheusFormatFromCatalog(cautils.NewMapResourceCatalog(resources), results, summaryDetails, coverage)
+	return pp.generatePrometheusFormatFromCatalog(cautils.NewMapResourceCatalog(resources), results, summaryDetails, coverage, nil)
 }
 
 func (pp *PrometheusPrinter) generatePrometheusFormatFromCatalog(
 	catalog cautils.ResourceCatalog,
 	results map[string]resourcesresults.Result,
 	summaryDetails *reportsummary.SummaryDetails,
-	coverage cautils.ScanCoverage) *Metrics {
+	coverage cautils.ScanCoverage,
+	sources map[string]reporthandling.Source) *Metrics {
 
 	m := &Metrics{}
 	m.setComplianceScores(summaryDetails)
-	m.setResourcesCountersFromCatalog(catalog, results, summaryDetails)
+	m.setResourcesCountersFromCatalog(catalog, results, summaryDetails, sources)
 	m.setCoverageScore(coverage)
 
 	return m
@@ -97,7 +99,7 @@ func (pp *PrometheusPrinter) ActionPrint(ctx context.Context, opaSessionObj *cau
 		if opaSessionObj.Report != nil {
 			summaryDetails = &opaSessionObj.Report.SummaryDetails
 		}
-		metrics = pp.generatePrometheusFormatFromCatalog(opaSessionObj.GetCatalog(), opaSessionObj.ResourcesResult, summaryDetails, opaSessionObj.ScanCoverage)
+		metrics = pp.generatePrometheusFormatFromCatalog(opaSessionObj.GetCatalog(), opaSessionObj.ResourcesResult, summaryDetails, opaSessionObj.ScanCoverage, opaSessionObj.ResourceSource)
 		if len(imageScanData) > 0 {
 			metrics.setImageVulnerabilities(imageScanData)
 		}

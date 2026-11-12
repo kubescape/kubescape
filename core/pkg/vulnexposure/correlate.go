@@ -128,7 +128,9 @@ func exposureRank(f Finding) int {
 // Correlate joins each workload's known vulnerabilities (at or above
 // minSeverity) with how reachable it is: its NetworkPolicy ingress exposure,
 // plus whatever external exposure the caller already computed for it via
-// core/pkg/exposure. A workload with vulnerabilities but no entry in
+// core/pkg/exposure. A nil idx is treated as an empty index (no NetworkPolicies
+// in the cluster), so all workloads are evaluated as default-allow (ExposureOpen).
+// A workload with vulnerabilities but no entry in
 // endpoints is skipped, not guessed at: this package never assumes an
 // exposure level for a workload it was not given a resolved Endpoint for
 // (e.g. because its kind could not be mapped to a concrete pod template, or

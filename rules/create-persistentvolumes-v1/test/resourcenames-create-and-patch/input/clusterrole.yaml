@@ -1,0 +1,13 @@
+# create and patch are narrowed to one name. Server-side apply creates the
+# missing volume through a patch, and the API server authorizes that create
+# with the object's name, so the subject can create data-pv with any spec,
+# a hostPath included.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: named-pv-applier
+rules:
+- apiGroups: [""]
+  resources: ["persistentvolumes"]
+  resourceNames: ["data-pv"]
+  verbs: ["create", "patch"]

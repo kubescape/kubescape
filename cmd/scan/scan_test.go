@@ -3,6 +3,8 @@ package scan
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -14,6 +16,7 @@ import (
 	"github.com/kubescape/kubescape/v4/cmd/shared"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/cautils/getter"
+	"github.com/kubescape/kubescape/v4/core/core"
 	"github.com/kubescape/kubescape/v4/core/mocks"
 	resultshandlingpkg "github.com/kubescape/kubescape/v4/core/pkg/resultshandling"
 	v1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
@@ -481,18 +484,40 @@ func TestGetScanCommand_RunE_FormatFlagInvalid(t *testing.T) {
 	assert.EqualError(t, err, errMessage)
 }
 
-type scanCallCounter struct {
-	mocks.MockIKubescape
-	calls int
+func TestGetScanCommand_FormatFlagCaseInsensitive(t *testing.T) {
+	for _, tc := range []struct{ input, want string }{
+		{"JSON", "json"},
+		{"Yaml", "yaml"},
+		{" SARIF ", "sarif"},
+		{"json, YAML", "json,yaml"},
+	} {
+		t.Run("format_"+strings.TrimSpace(tc.input), func(t *testing.T) {
+			cmd := GetScanCommand(&mocks.MockIKubescape{})
+			require.NoError(t, cmd.PersistentFlags().Set("format", tc.input))
+
+			scanInfo := &cautils.ScanInfo{Format: tc.input}
+			err := shared.ValidateCommonScanFlags(cmd, scanInfo, shared.ScanFormats)
+			assert.NoError(t, err)
+			assert.Equal(t, tc.want, scanInfo.Format)
+		})
+	}
 }
 
-func (m *scanCallCounter) Scan(_ *cautils.ScanInfo, _ []cautils.PolicyIdentifier) (*resultshandlingpkg.ResultsHandler, error) {
+type scanCallCounter struct {
+	mocks.MockIKubescape
+	calls        int
+	lastScanInfo *cautils.ScanInfo
+}
+
+func (m *scanCallCounter) Scan(scanInfo *cautils.ScanInfo, _ []cautils.PolicyIdentifier) (*resultshandlingpkg.ResultsHandler, error) {
 	m.calls++
+	m.lastScanInfo = scanInfo
 	return nil, errors.New("scan reached")
 }
 
-func (m *scanCallCounter) ScanContext(_ context.Context, _ *cautils.ScanInfo, _ []cautils.PolicyIdentifier) (*resultshandlingpkg.ResultsHandler, error) {
+func (m *scanCallCounter) ScanContext(_ context.Context, scanInfo *cautils.ScanInfo, _ []cautils.PolicyIdentifier) (*resultshandlingpkg.ResultsHandler, error) {
 	m.calls++
+	m.lastScanInfo = scanInfo
 	return nil, errors.New("scan reached")
 }
 
@@ -508,8 +533,17 @@ func TestGetScanCommand_PersistentFlagValidation(t *testing.T) {
 		{name: "rejects empty format version", args: []string{"--format-version="}, wantError: "invalid --format-version"},
 		{name: "rejects negative scan timeout", args: []string{"--scan-timeout=-1s"}, wantError: "invalid --scan-timeout"},
 		{name: "rejects negative control timeout", args: []string{"--control-timeout=-1s"}, wantError: "invalid --control-timeout"},
+		{name: "rejects control timeout equal to scan timeout", args: []string{"--scan-timeout=10s", "--control-timeout=10s"}, wantError: "--control-timeout must be lower than --scan-timeout"},
+		{name: "rejects control timeout greater than scan timeout", args: []string{"--scan-timeout=10s", "--control-timeout=20s"}, wantError: "--control-timeout must be lower than --scan-timeout"},
 		{name: "rejects a kube version that is not a version", args: []string{"--kube-version=latest"}, wantError: "invalid --kube-version"},
 		{name: "rejects include and exclude namespaces together", args: []string{"--include-namespaces=a,b", "--exclude-namespaces=b"}, wantError: "cannot be used together"},
+		{name: "rejects baseline-fail-on-new without baseline", args: []string{"--baseline-fail-on-new"}, wantError: "--baseline-fail-on-new requires --baseline"},
+		{name: "rejects baseline-severity-threshold without baseline", args: []string{"--baseline-severity-threshold=high"}, wantError: "--baseline-severity-threshold requires --baseline"},
+		{name: "rejects baseline-granularity without baseline", args: []string{"--baseline-granularity=control"}, wantError: "--baseline-granularity requires --baseline"},
+		{name: "rejects empty baseline flag", args: []string{"--baseline="}, wantError: "--baseline cannot be empty"},
+		{name: "rejects whitespace-only baseline flag", args: []string{"--baseline=   "}, wantError: "--baseline cannot be empty"},
+		{name: "rejects invalid baseline granularity", args: []string{"--baseline=base.json", "--baseline-granularity=invalid"}, wantError: "invalid diff granularity"},
+		{name: "rejects invalid baseline severity threshold", args: []string{"--baseline=base.json", "--baseline-severity-threshold=invalid"}, wantError: "unknown severity"},
 		{name: "accepts include namespaces alone", args: []string{"--include-namespaces=a,b"}, wantCalls: 1, wantError: "scan reached"},
 		{name: "accepts exclude namespaces alone", args: []string{"--exclude-namespaces=b"}, wantCalls: 1, wantError: "scan reached"},
 		{name: "accepts defaults", wantCalls: 1, wantError: "scan reached"},
@@ -518,6 +552,10 @@ func TestGetScanCommand_PersistentFlagValidation(t *testing.T) {
 		{name: "accepts zero timeouts", args: []string{"--scan-timeout=0", "--control-timeout=0"}, wantCalls: 1, wantError: "scan reached"},
 		{name: "accepts positive timeouts", args: []string{"--scan-timeout=2s", "--control-timeout=1s"}, wantCalls: 1, wantError: "scan reached"},
 		{name: "accepts a kube version and api versions", args: []string{"--kube-version=1.31", "--api-versions=gateway.networking.k8s.io/v1,cert-manager.io/v1"}, wantCalls: 1, wantError: "scan reached"},
+		{name: "accepts baseline alone", args: []string{"--baseline=base.json"}, wantCalls: 1, wantError: "scan reached"},
+		{name: "accepts baseline with fail-on-new", args: []string{"--baseline=base.json", "--baseline-fail-on-new"}, wantCalls: 1, wantError: "scan reached"},
+		{name: "accepts baseline with severity threshold", args: []string{"--baseline=base.json", "--baseline-severity-threshold=high"}, wantCalls: 1, wantError: "scan reached"},
+		{name: "accepts baseline with granularity", args: []string{"--baseline=base.json", "--baseline-granularity=control"}, wantCalls: 1, wantError: "scan reached"},
 	}
 
 	for _, tt := range tests {
@@ -532,6 +570,282 @@ func TestGetScanCommand_PersistentFlagValidation(t *testing.T) {
 			assert.Equal(t, tt.wantCalls, ks.calls)
 		})
 	}
+}
+
+func TestGetScanCommand_BaselineFlagValidation(t *testing.T) {
+	t.Run("preserves baseline path and normalizes threshold and granularity", func(t *testing.T) {
+		ks := &scanCallCounter{}
+		cmd := GetScanCommand(ks)
+		cmd.SilenceUsage = true
+		cmd.SetArgs([]string{
+			"--baseline=  base.json  ",
+			"--baseline-fail-on-new",
+			"--baseline-severity-threshold=HIGH",
+			"--baseline-granularity=CONTROL",
+		})
+
+		err := cmd.Execute()
+		require.ErrorContains(t, err, "scan reached")
+		assert.Equal(t, 1, ks.calls)
+		require.NotNil(t, ks.lastScanInfo)
+		assert.Equal(t, "  base.json  ", ks.lastScanInfo.Baseline)
+		assert.True(t, ks.lastScanInfo.BaselineFailOnNew)
+		assert.Equal(t, "high", ks.lastScanInfo.BaselineSeverityThreshold)
+		assert.Equal(t, "control", ks.lastScanInfo.BaselineGranularity)
+	})
+
+	t.Run("defaults baseline granularity to evidence", func(t *testing.T) {
+		ks := &scanCallCounter{}
+		cmd := GetScanCommand(ks)
+		cmd.SilenceUsage = true
+		cmd.SetArgs([]string{"--baseline=base.json"})
+
+		err := cmd.Execute()
+		require.ErrorContains(t, err, "scan reached")
+		assert.Equal(t, 1, ks.calls)
+		require.NotNil(t, ks.lastScanInfo)
+		assert.Equal(t, "evidence", ks.lastScanInfo.BaselineGranularity)
+	})
+
+	t.Run("subcommands inherit baseline validation", func(t *testing.T) {
+		tests := []struct {
+			name      string
+			args      []string
+			wantError string
+		}{
+			{
+				name:      "scan framework rejects baseline-fail-on-new without baseline",
+				args:      []string{"framework", "nsa", "--baseline-fail-on-new"},
+				wantError: "--baseline-fail-on-new requires --baseline",
+			},
+			{
+				name:      "scan control rejects baseline-severity-threshold without baseline",
+				args:      []string{"control", "C-0058", "--baseline-severity-threshold=high"},
+				wantError: "--baseline-severity-threshold requires --baseline",
+			},
+			{
+				name:      "scan workload rejects baseline-granularity without baseline",
+				args:      []string{"workload", "Deployment/nginx", "--baseline-granularity=control"},
+				wantError: "--baseline-granularity requires --baseline",
+			},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				ks := &scanCallCounter{}
+				cmd := GetScanCommand(ks)
+				cmd.SilenceUsage = true
+				cmd.SetArgs(tt.args)
+
+				err := cmd.Execute()
+				require.ErrorContains(t, err, tt.wantError)
+				assert.Equal(t, 0, ks.calls)
+			})
+		}
+	})
+
+	t.Run("scan image preserves dedicated error messages", func(t *testing.T) {
+		tests := []struct {
+			name      string
+			args      []string
+			wantError string
+		}{
+			{
+				name:      "scan image rejects --baseline",
+				args:      []string{"image", "nginx:latest", "--baseline=base.json"},
+				wantError: "--baseline is not supported for image scans",
+			},
+			{
+				name:      "scan image rejects --baseline-fail-on-new",
+				args:      []string{"image", "nginx:latest", "--baseline-fail-on-new"},
+				wantError: "--baseline-fail-on-new is not supported for image scans",
+			},
+			{
+				name:      "scan image rejects --baseline-severity-threshold",
+				args:      []string{"image", "nginx:latest", "--baseline-severity-threshold=high"},
+				wantError: "--baseline-severity-threshold is not supported for image scans",
+			},
+			{
+				name:      "scan image rejects --baseline-granularity",
+				args:      []string{"image", "nginx:latest", "--baseline-granularity=control"},
+				wantError: "--baseline-granularity is not supported for image scans",
+			},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				ks := &scanCallCounter{}
+				cmd := GetScanCommand(ks)
+				cmd.SilenceUsage = true
+				cmd.SetArgs(tt.args)
+
+				err := cmd.Execute()
+				require.ErrorContains(t, err, tt.wantError)
+				assert.Equal(t, 0, ks.calls)
+			})
+		}
+	})
+}
+
+type mockBaselineScanKubescape struct {
+	mocks.MockIKubescape
+}
+
+func (m *mockBaselineScanKubescape) ScanContext(_ context.Context, _ *cautils.ScanInfo, _ []cautils.PolicyIdentifier) (*resultshandlingpkg.ResultsHandler, error) {
+	return resultsFailingOn("res1"), nil
+}
+
+func TestGetScanCommand_BaselinePreservesSpaceBearingPath(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Chdir(tmpDir)
+
+	basePath := "base.json"
+	spaceBasePath := " base.json "
+
+	// base.json has C-0016 failed on res1 matching the mock scan results.
+	// Comparing against base.json produces 0 new failures (unchanged failure).
+	baseContent := `{"results":[{"resourceID":"res1","controls":[{"controlID":"C-0016","name":"Allow privilege escalation","status":{"status":"failed"},"rules":[{"name":"rule","status":"failed"}]}]}],"summaryDetails":{"controls":{"C-0016":{"scoreFactor":5}}}}`
+	require.NoError(t, os.WriteFile(basePath, []byte(baseContent), 0o600))
+
+	// " base.json " has C-0016 passed on res1.
+	// Comparing against " base.json " produces 1 new failure on res1.
+	spaceContent := `{"results":[{"resourceID":"res1","controls":[{"controlID":"C-0016","name":"Allow privilege escalation","status":{"status":"passed"}}]}],"summaryDetails":{"controls":{"C-0016":{"scoreFactor":5}}}}`
+	require.NoError(t, os.WriteFile(spaceBasePath, []byte(spaceContent), 0o600))
+
+	mockKs := &mockBaselineScanKubescape{}
+
+	// When space-bearing filename " base.json " is requested, the application must access
+	// the exact space-bearing file and detect the new failure, tripping the drift gate.
+	cmdSpace := GetScanCommand(mockKs)
+	cmdSpace.SilenceUsage = true
+	cmdSpace.SilenceErrors = true
+	cmdSpace.SetArgs([]string{
+		"--baseline= base.json ",
+		"--baseline-fail-on-new",
+	})
+	errSpace := cmdSpace.Execute()
+	require.Error(t, errSpace)
+	assert.ErrorContains(t, errSpace, "baseline drift: found 1 new failure(s)")
+	assert.True(t, isGateFailure(errSpace))
+
+	// When base.json is requested, the application accesses base.json and passes (0 new failures).
+	cmdBase := GetScanCommand(mockKs)
+	cmdBase.SilenceUsage = true
+	cmdBase.SilenceErrors = true
+	cmdBase.SetArgs([]string{
+		"--baseline=base.json",
+		"--baseline-fail-on-new",
+	})
+	errBase := cmdBase.Execute()
+	require.NoError(t, errBase)
+}
+
+func TestGetScanCommand_RejectsOutputOverwritingInputs(t *testing.T) {
+	t.Setenv("KUBESCAPE_SKIP_UPDATE_CHECK", "true")
+	manifestData := []byte(`{"apiVersion":"v1","kind":"Pod","metadata":{"name":"test-pod"}}`)
+
+	t.Run("scan manifest with output pointing to same manifest", func(t *testing.T) {
+		dir := t.TempDir()
+		manifest := filepath.Join(dir, "pod.json")
+		require.NoError(t, os.WriteFile(manifest, manifestData, 0o600))
+
+		ks := core.NewKubescape(context.Background())
+		cmd := GetScanCommand(ks)
+		cmd.SilenceUsage = true
+		cmd.SilenceErrors = true
+		cmd.SetArgs([]string{"--submit=false", "--format", "json", "--output", manifest, manifest})
+
+		err := cmd.Execute()
+		require.ErrorContains(t, err, "would overwrite input manifest")
+
+		content, readErr := os.ReadFile(manifest)
+		require.NoError(t, readErr)
+		assert.Equal(t, manifestData, content, "input manifest must not be truncated or modified")
+	})
+
+	t.Run("scan with baseline output collision", func(t *testing.T) {
+		dir := t.TempDir()
+		manifest := filepath.Join(dir, "pod.json")
+		require.NoError(t, os.WriteFile(manifest, manifestData, 0o600))
+		baseline := filepath.Join(dir, "base.json")
+		baselineData := []byte(`{"baseline":"data"}`)
+		require.NoError(t, os.WriteFile(baseline, baselineData, 0o600))
+
+		ks := core.NewKubescape(context.Background())
+		cmd := GetScanCommand(ks)
+		cmd.SilenceUsage = true
+		cmd.SilenceErrors = true
+		cmd.SetArgs([]string{"--submit=false", "--baseline", baseline, "--format", "json", "--output", baseline, manifest})
+
+		err := cmd.Execute()
+		require.ErrorContains(t, err, "would overwrite baseline report")
+
+		content, readErr := os.ReadFile(baseline)
+		require.NoError(t, readErr)
+		assert.Equal(t, baselineData, content, "baseline file must not be modified")
+	})
+
+	t.Run("scan control with output collision", func(t *testing.T) {
+		dir := t.TempDir()
+		manifest := filepath.Join(dir, "pod.json")
+		require.NoError(t, os.WriteFile(manifest, manifestData, 0o600))
+
+		ks := core.NewKubescape(context.Background())
+		cmd := GetScanCommand(ks)
+		cmd.SilenceUsage = true
+		cmd.SilenceErrors = true
+		cmd.SetArgs([]string{"control", "C-0001", "--submit=false", "--format", "json", "--output", manifest, manifest})
+
+		err := cmd.Execute()
+		require.ErrorContains(t, err, "would overwrite input manifest")
+
+		content, readErr := os.ReadFile(manifest)
+		require.NoError(t, readErr)
+		assert.Equal(t, manifestData, content, "input manifest must not be modified")
+	})
+
+	t.Run("scan framework with output collision", func(t *testing.T) {
+		dir := t.TempDir()
+		manifest := filepath.Join(dir, "pod.json")
+		require.NoError(t, os.WriteFile(manifest, manifestData, 0o600))
+
+		ks := core.NewKubescape(context.Background())
+		cmd := GetScanCommand(ks)
+		cmd.SilenceUsage = true
+		cmd.SilenceErrors = true
+		cmd.SetArgs([]string{"framework", "nsa", "--submit=false", "--format", "json", "--output", manifest, manifest})
+
+		err := cmd.Execute()
+		require.ErrorContains(t, err, "would overwrite input manifest")
+
+		content, readErr := os.ReadFile(manifest)
+		require.NoError(t, readErr)
+		assert.Equal(t, manifestData, content, "input manifest must not be modified")
+	})
+
+	t.Run("repeated directory scan with output file inside directory succeeds", func(t *testing.T) {
+		dir := t.TempDir()
+		manifest := filepath.Join(dir, "pod.json")
+		require.NoError(t, os.WriteFile(manifest, manifestData, 0o600))
+		resultsFile := filepath.Join(dir, "results.json")
+
+		// Pre-populate results.json with non-manifest output report from previous run
+		require.NoError(t, os.WriteFile(resultsFile, []byte(`{"type":"postureReport","generationTime":"2026-11-06T00:00:00Z"}`), 0o600))
+
+		ks := core.NewKubescape(context.Background())
+		cmd := GetScanCommand(ks)
+		cmd.SilenceUsage = true
+		cmd.SilenceErrors = true
+		cmd.SetArgs([]string{"--submit=false", "--format", "json", "--output", resultsFile, dir})
+
+		err := cmd.Execute()
+		require.NoError(t, err, "repeated scan execution must succeed and not treat results.json as an input manifest")
+		require.FileExists(t, resultsFile)
+
+		manifestContent, readErr := os.ReadFile(manifest)
+		require.NoError(t, readErr)
+		assert.Equal(t, manifestData, manifestContent, "input manifest must be preserved byte-for-byte")
+	})
 }
 
 // TestGetScanCommand_KubeContextsRejectedWhereUnsupported is a regression
@@ -1593,6 +1907,115 @@ func TestSecurityViewFrameworksAreDownloaded(t *testing.T) {
 				assert.Equal(t, v1.KindFramework, policy.Kind)
 				assert.Contains(t, downloaded, policy.Identifier)
 			}
+		})
+	}
+}
+
+func TestFrameworkCmd_RejectsConflictingFilePathAndPositionalInputs(t *testing.T) {
+	mockKubescape := &mocks.MockIKubescape{}
+	cmd := GetScanCommand(mockKubescape)
+	cmd.SetArgs([]string{"framework", "nsa", "manifests/app.yaml", "--file-path", "manifests/other.yaml"})
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "usage: use either --file-path or positional input paths, not both")
+}
+
+func TestControlCmd_RejectsConflictingFilePathAndPositionalInputs(t *testing.T) {
+	mockKubescape := &mocks.MockIKubescape{}
+	cmd := GetScanCommand(mockKubescape)
+	cmd.SetArgs([]string{"control", "C-0058", "manifests/app.yaml", "--file-path", "manifests/other.yaml"})
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "usage: use either --file-path or positional input paths, not both")
+}
+
+func TestScanCmd_RejectsConflictingFilePathAndPositionalInputs(t *testing.T) {
+	mockKubescape := &mocks.MockIKubescape{}
+	cmd := GetScanCommand(mockKubescape)
+	cmd.SetArgs([]string{"manifests/app.yaml", "--file-path", "manifests/other.yaml"})
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "usage: use either --file-path or positional input paths, not both")
+}
+
+func TestGetScanCommand_GitCloneDepthFlagRegistered(t *testing.T) {
+	mockKubescape := &mocks.MockIKubescape{}
+	cmd := GetScanCommand(mockKubescape)
+
+	f := cmd.PersistentFlags().Lookup("git-clone-depth")
+	require.NotNil(t, f, "--git-clone-depth flag must be registered on the scan command")
+	assert.Equal(t, "int", f.Value.Type(), "--git-clone-depth must be an integer flag")
+	assert.Equal(t, "0", f.DefValue, "--git-clone-depth default must be 0 (full history by default, opt-in shallow)")
+}
+
+func TestGetScanCommand_GitCloneDepthFlagParsed(t *testing.T) {
+	tests := []struct {
+		name    string
+		flagVal string
+		want    string
+	}{
+		{"opt-in shallow depth", "1", "1"},
+		{"default full commit history", "0", "0"},
+		{"custom shallow depth", "5", "5"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockKubescape := &mocks.MockIKubescape{}
+			cmd := GetScanCommand(mockKubescape)
+
+			err := cmd.PersistentFlags().Set("git-clone-depth", tt.flagVal)
+			require.NoError(t, err)
+
+			f := cmd.PersistentFlags().Lookup("git-clone-depth")
+			assert.Equal(t, tt.want, f.Value.String())
+		})
+	}
+}
+
+func TestGetScanCommand_GitCloneDepthFlagInherited(t *testing.T) {
+	mockKubescape := &mocks.MockIKubescape{}
+	cmd := GetScanCommand(mockKubescape)
+
+	for _, sub := range cmd.Commands() {
+		t.Run(sub.Name(), func(t *testing.T) {
+			f := sub.InheritedFlags().Lookup("git-clone-depth")
+			require.NotNil(t, f, "subcommand %q must inherit --git-clone-depth from the parent scan command", sub.Name())
+		})
+	}
+}
+
+func TestGetScanCommand_GitCloneDepthValidation(t *testing.T) {
+	mockKubescape := &mocks.MockIKubescape{}
+	cmd := GetScanCommand(mockKubescape)
+	cmd.SetArgs([]string{"--git-clone-depth", "-1"})
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid --git-clone-depth -1: must be zero or positive")
+}
+
+func TestGetScanCommand_GitCloneDepthReachesScanInfo(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want int
+	}{
+		{name: "default full history depth", args: []string{}, want: 0},
+		{name: "opt-in shallow depth", args: []string{"--git-clone-depth", "1"}, want: 1},
+		{name: "explicit full history", args: []string{"--git-clone-depth", "0"}, want: 0},
+		{name: "custom depth", args: []string{"--git-clone-depth", "5"}, want: 5},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ks := &scanCallCounter{}
+			cmd := GetScanCommand(ks)
+			cmd.SilenceUsage = true
+			cmd.SetArgs(tt.args)
+			err := cmd.Execute()
+			require.ErrorContains(t, err, "scan reached")
+			require.NotNil(t, ks.lastScanInfo)
+			assert.Equal(t, tt.want, ks.lastScanInfo.EffectiveGitCloneDepth())
 		})
 	}
 }

@@ -9,7 +9,7 @@ clusters disagree on, and which clusters it could not scan and why.
 ```bash
 kubescape scan framework nsa \
   --kube-contexts prod,staging,dr \
-  --output report.json \
+  --output report.json --format json \
   --fleet-report fleet.json
 ```
 
@@ -56,7 +56,7 @@ spec:
 ```
 
 ```bash
-kubescape scan framework nsa --fleet-config fleet.yaml
+kubescape scan framework nsa --format json --fleet-config fleet.yaml
 ```
 
 Each field sets the matching flag: `contexts` is `--kube-contexts`,
@@ -152,7 +152,7 @@ Fleet compliance: 80%  (from 2 of 3 clusters)
 | `metadata` | When the report was generated, the Kubescape version, and the contexts that were requested. |
 | `clusters` | One entry per context: `status`, `error`, `complianceScore`, `coverage`, `duration`, `attempts`, and the cluster's own report when it was scanned. |
 | `compliance` | The fleet score, how many clusters it came from, per-framework scores, and every cluster left out with the reason. |
-| `controlMatrix` | Every control against every cluster: passed, failed, skipped or not evaluated. |
+| `controlMatrix` | Every control a scanned cluster reported, and what each of those clusters found: passed, failed, skipped or not evaluated. |
 | `divergence` | The controls the clusters disagree on, which clusters landed where, and what the reference cluster found. |
 
 For example, to list each cluster's status:
@@ -160,6 +160,27 @@ For example, to list each cluster's status:
 ```bash
 jq '.clusters[] | {clusterID, status, attempts}' fleet.json
 ```
+
+### Report format
+
+[`fleet-report.schema.json`](fleet-report.schema.json) is the JSON schema for
+`fleet.json`. Use the copy from the git tag in `metadata.kubescapeVersion`, so
+it matches the release that wrote your report. The schema's `$id` points at
+`master`, but it is only an identifier.
+
+The schema leaves out the contents of `coverage` and of each cluster's
+`report`. That `report` is close to the context's own JSON report but not the
+same. For example, it has no `resources` and its controls have no `severity`.
+
+The report format may still change while fleet scanning is in alpha. New fields
+can be added at any time, so ignore the ones you do not recognise. New cluster
+`status` values can also appear, so treat a status you do not recognise as a
+cluster that was not scanned. A new exclusion `reason` still means the cluster
+was left out of the fleet score, and its `status` in `clusters` says whether it
+was scanned. A control status you do not recognise, in `controlMatrix` or in
+`divergence.controls[].referenceStatus`, counts as `notEvaluated`. Removing or
+renaming a field, or changing what a value means, will be called out in the
+release notes.
 
 ## Exit code
 
@@ -176,3 +197,37 @@ If one cluster fails a gate and another could not be scanned, the run exits
 with `2`, since part of the fleet was never checked. An invalid command line still exits with `1`, as it does for any
 other scan. The fleet report and the summary are still produced for the
 clusters that were scanned.
+
+## Performance
+
+Clusters are scanned one after another, so a fleet scan takes about as long as
+its clusters' scans added together.
+
+Memory depends on whether a fleet report is written. Without `--fleet-report`,
+each cluster's results are released once its own report is written, so memory
+stays about the same however many clusters you scan. With `--fleet-report`,
+each cluster's results are kept until the fleet report is written, minus the
+raw Kubernetes objects, which the fleet report leaves out. Memory then grows
+with the number of clusters.
+
+Measured against fake clusters with 200 pods each, as peak memory of the whole
+process (about 136 MiB of it is the binary itself):
+
+| Clusters | Peak memory with `--fleet-report` | Peak memory without |
+|----------|-----------------------------------|---------------------|
+| 1        | 203 MiB                           | 195 MiB             |
+| 5        | 263 MiB                           | 201 MiB             |
+| 10       | 335 MiB                           | 203 MiB             |
+
+Time grew with the number of clusters, at around half a second to a second
+each: ten clusters usually took 5 to 10 seconds on the same machine, and longer
+while it was busy. Real clusters are slower, since every request crosses the
+network and they usually hold more objects, so treat these numbers as a
+comparison rather than a prediction.
+
+To reproduce them, from `cmd/scan`:
+
+```bash
+go test -c -o scan.test .
+/usr/bin/time -v ./scan.test -test.run '^$' -test.bench 'BenchmarkFleetScan/report=true/clusters=10$' -test.benchtime 1x
+```

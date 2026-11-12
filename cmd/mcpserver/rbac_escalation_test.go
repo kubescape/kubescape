@@ -449,3 +449,18 @@ func TestListRBACResources_PreservesErrorIdentity(t *testing.T) {
 	require.Equal(t, ErrCodeRBACDenied, classifyScanError(err))
 	require.NotEmpty(t, fmt.Sprint(err))
 }
+
+func TestAnalyzeRBACEscalationPaths_UnboundRewriteDoesNotConfirmAdmin(t *testing.T) {
+	editor := unstructuredClusterRole("editor", unstructuredPolicyRule([]string{"rbac.authorization.k8s.io"}, []string{"clusterroles"}, []string{"escalate", "patch"}, []string{"editable"}))
+	editable := unstructuredClusterRole("editable")
+	ksServer := newRBACEscalationTestServer(t, editor, editable, unstructuredClusterRoleBinding("editor", "editor", "dev", "attacker"))
+	result := registeredToolResult(t, dispatchRegisteredTool(t, ksServer, "analyze_rbac_escalation_paths", map[string]any{"subject_kind": "ServiceAccount", "namespace": "dev", "name": "attacker"}))
+	require.False(t, result.IsError)
+	var parsed map[string]any
+	require.NoError(t, json.Unmarshal([]byte(toolResultText(t, result)), &parsed))
+	require.Equal(t, false, parsed["cluster_admin_equivalent"])
+	findings := parsed["unbounded_findings"].([]any)
+	require.Len(t, findings, 1)
+	require.Equal(t, true, findings[0].(map[string]any)["permissions_unconfirmed"])
+	require.Empty(t, parsed["reached"])
+}

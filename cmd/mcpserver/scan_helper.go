@@ -73,6 +73,8 @@ type scanRequest struct {
 	// so it needs no plumbing beyond reaching ScanInfo. A nil value leaves every
 	// other scan path unchanged.
 	scanObject *objectsenvelopes.ScanObject
+	// workspaceDir, when non-empty, confines local scans to files within this directory.
+	workspaceDir string
 }
 
 func runControlScan(ctx context.Context, ksServer *KubescapeMcpserver, namespace string, controlIDs []string, label string) ([]byte, error) {
@@ -257,6 +259,7 @@ func buildScanInfo(req scanRequest) *cautils.ScanInfo {
 		ScanTimeout:       timeout,
 		InputPatterns:     req.inputPatterns,
 		ScanObject:        req.scanObject,
+		WorkspaceDir:      req.workspaceDir,
 	}
 }
 

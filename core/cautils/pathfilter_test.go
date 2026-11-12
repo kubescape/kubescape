@@ -584,3 +584,73 @@ func TestNewScanPathFilterAnchorsARepositoryInputAtItsClone(t *testing.T) {
 	assert.True(t, filter.Excluded(filepath.Join(clone, "testdata", "pod.yaml"), false))
 	assert.False(t, filter.Excluded(filepath.Join(clone, "pod.yaml"), false))
 }
+
+func TestLoadIgnoreFilePatterns_OversizedFileRejected(t *testing.T) {
+	t.Setenv(MaxFileSizeEnvVar, "")
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, IgnoreFileName)
+	f, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY, 0o600)
+	require.NoError(t, err)
+	require.NoError(t, f.Truncate(DefaultMaxFileSize+1))
+	require.NoError(t, f.Close())
+
+	_, err = LoadIgnoreFilePatterns(dir)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrIgnoreFileTooLarge)
+}
+
+func TestLoadIgnoreFilePatterns_NonRegularFileRejected(t *testing.T) {
+	if _, err := os.Stat("/dev/null"); err == nil {
+		dir := t.TempDir()
+		require.NoError(t, os.Symlink("/dev/null", filepath.Join(dir, IgnoreFileName)))
+
+		_, err := LoadIgnoreFilePatterns(dir)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrIgnoreFileNotRegular)
+	}
+}
+
+func TestLoadIgnoreFilePatterns_DirectoryRejected(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.Mkdir(filepath.Join(dir, IgnoreFileName), 0o755))
+
+	_, err := LoadIgnoreFilePatterns(dir)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrIgnoreFileNotRegular)
+	assert.Contains(t, err.Error(), "is a directory, not a file")
+}
+
+func TestLoadIgnoreFilePatterns_MaxFileSizeEnvVar(t *testing.T) {
+	t.Run("lower override", func(t *testing.T) {
+		t.Setenv(MaxFileSizeEnvVar, "100")
+
+		dir := t.TempDir()
+		overLimitFile := filepath.Join(dir, IgnoreFileName)
+		require.NoError(t, os.WriteFile(overLimitFile, make([]byte, 200), 0o600))
+
+		_, err := LoadIgnoreFilePatterns(dir)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrIgnoreFileTooLarge)
+
+		underLimitDir := t.TempDir()
+		underLimitFile := filepath.Join(underLimitDir, IgnoreFileName)
+		require.NoError(t, os.WriteFile(underLimitFile, []byte("node_modules/\n"), 0o600))
+
+		patterns, err := LoadIgnoreFilePatterns(underLimitDir)
+		require.NoError(t, err)
+		assert.Equal(t, []string{"node_modules/"}, patterns)
+	})
+
+	t.Run("higher override", func(t *testing.T) {
+		t.Setenv(MaxFileSizeEnvVar, "1000")
+
+		dir := t.TempDir()
+		file := filepath.Join(dir, IgnoreFileName)
+		content := strings.Repeat("test/\n", 50) // 300 bytes, > 100 and < 1000
+		require.NoError(t, os.WriteFile(file, []byte(content), 0o600))
+
+		patterns, err := LoadIgnoreFilePatterns(dir)
+		require.NoError(t, err)
+		assert.Len(t, patterns, 50)
+	})
+}

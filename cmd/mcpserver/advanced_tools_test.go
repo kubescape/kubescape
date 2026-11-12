@@ -53,6 +53,218 @@ func TestScanResourceSlice_EmptyResultMarshalsAsEmptyArray(t *testing.T) {
 	require.JSONEq(t, `{"resources":[],"continue":"","count":0}`, raw)
 }
 
+// TestScanResourceSlice_PropagatesLabelsAnnotationsAndCreationTimestamp verifies
+// that simplified items preserve labels, annotations, creationTimestamp, and
+// ownerReferences, while stripping noisy annotations like last-applied-configuration,
+// so downstream security analysis tools have the necessary metadata.
+func TestScanResourceSlice_PropagatesLabelsAnnotationsAndCreationTimestamp(t *testing.T) {
+	listKinds := map[schema.GroupVersionResource]string{
+		{Group: "", Version: "v1", Resource: "pods"}:            "PodList",
+		{Group: "apps", Version: "v1", Resource: "deployments"}: "DeploymentList",
+	}
+
+	podWithMeta := &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "v1",
+			"kind":       "Pod",
+			"metadata": map[string]any{
+				"name":      "security-pod",
+				"namespace": "prod",
+				"labels":    map[string]any{"app": "web", "tier": "frontend"},
+				"annotations": map[string]any{
+					"kubescape.io/skip-controls":                       "C-0001",
+					"kubectl.kubernetes.io/last-applied-configuration": `{"apiVersion":"v1","kind":"Pod"}`,
+				},
+				"creationTimestamp": "2026-01-01T00:00:00Z",
+				"ownerReferences": []any{
+					map[string]any{
+						"apiVersion": "apps/v1",
+						"kind":       "ReplicaSet",
+						"name":       "web-rs",
+						"uid":        "1234-5678",
+					},
+				},
+				"managedFields": []any{"noisy"},
+			},
+			"spec": map[string]any{
+				"containers": []any{
+					map[string]any{"name": "nginx", "image": "nginx:1.25"},
+				},
+			},
+			"status": map[string]any{
+				"phase": "Running",
+			},
+		},
+	}
+
+	podWithoutMeta := &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "v1",
+			"kind":       "Pod",
+			"metadata": map[string]any{
+				"name":      "plain-pod",
+				"namespace": "prod",
+				"annotations": map[string]any{
+					"kubectl.kubernetes.io/last-applied-configuration": `{"apiVersion":"v1","kind":"Pod"}`,
+				},
+			},
+			"spec": map[string]any{
+				"containers": []any{
+					map[string]any{"name": "busybox", "image": "busybox:latest"},
+				},
+			},
+		},
+	}
+
+	deployment := &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "apps/v1",
+			"kind":       "Deployment",
+			"metadata": map[string]any{
+				"name":              "web-deploy",
+				"namespace":         "prod",
+				"labels":            map[string]any{"app": "web"},
+				"creationTimestamp": "2026-01-01T00:00:00Z",
+			},
+			"spec": map[string]any{
+				"replicas": float64(3),
+				"template": map[string]any{
+					"metadata": map[string]any{
+						"labels": map[string]any{"app": "web"},
+					},
+				},
+			},
+			"status": map[string]any{
+				"readyReplicas": float64(3),
+			},
+		},
+	}
+
+	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), listKinds, podWithMeta, podWithoutMeta, deployment)
+	ksServer := newTestMCPServerWithK8s(&k8sinterface.KubernetesApi{DynamicClient: dyn})
+
+	// 1. Pods without include_status (default: false)
+	result := registeredToolResult(t, dispatchRegisteredTool(t, ksServer, "scan_resource_slice", map[string]any{
+		"resource_kind": "pods",
+		"namespace":     "prod",
+	}))
+	require.False(t, result.IsError)
+
+	var parsed map[string]any
+	require.NoError(t, json.Unmarshal([]byte(toolResultText(t, result)), &parsed))
+	require.Equal(t, float64(2), parsed["count"])
+
+	resources, ok := parsed["resources"].([]any)
+	require.True(t, ok)
+	require.Len(t, resources, 2)
+
+	var secPod, plainPod map[string]any
+	for _, r := range resources {
+		rm, isMap := r.(map[string]any)
+		require.True(t, isMap)
+		meta, isMeta := rm["metadata"].(map[string]any)
+		require.True(t, isMeta)
+		switch meta["name"] {
+		case "security-pod":
+			secPod = rm
+		case "plain-pod":
+			plainPod = rm
+		}
+	}
+	require.NotNil(t, secPod, "security-pod must be found in resources")
+	require.NotNil(t, plainPod, "plain-pod must be found in resources")
+
+	// First pod has labels, real annotation, creationTimestamp, ownerReferences;
+	// last-applied-configuration, status, and managedFields stripped
+	require.Equal(t, "v1", secPod["apiVersion"])
+	require.Equal(t, "Pod", secPod["kind"])
+	require.NotNil(t, secPod["spec"])
+	require.Nil(t, secPod["status"], "status must be excluded when include_status is omitted")
+
+	secMeta := secPod["metadata"].(map[string]any)
+	require.Equal(t, "security-pod", secMeta["name"])
+	require.Equal(t, "prod", secMeta["namespace"])
+	require.Equal(t, map[string]any{"app": "web", "tier": "frontend"}, secMeta["labels"])
+	require.Equal(t, map[string]any{"kubescape.io/skip-controls": "C-0001"}, secMeta["annotations"])
+	require.Equal(t, "2026-01-01T00:00:00Z", secMeta["creationTimestamp"])
+	require.NotNil(t, secMeta["ownerReferences"])
+	ownerRefs, ok := secMeta["ownerReferences"].([]any)
+	require.True(t, ok)
+	require.Len(t, ownerRefs, 1)
+	ownerRef0 := ownerRefs[0].(map[string]any)
+	require.Equal(t, "web-rs", ownerRef0["name"])
+	require.Equal(t, "ReplicaSet", ownerRef0["kind"])
+	require.Nil(t, secMeta["managedFields"], "managedFields should be stripped")
+
+	// Plain pod had only last-applied-configuration; ensure annotations, labels, timestamp, ownerRefs are omitted
+	plainMeta := plainPod["metadata"].(map[string]any)
+	require.Equal(t, "plain-pod", plainMeta["name"])
+	require.Equal(t, "prod", plainMeta["namespace"])
+	_, hasLabels := plainMeta["labels"]
+	require.False(t, hasLabels, "labels should be omitted when absent")
+	_, hasAnnotations := plainMeta["annotations"]
+	require.False(t, hasAnnotations, "annotations should be omitted when only last-applied-configuration existed")
+	_, hasTimestamp := plainMeta["creationTimestamp"]
+	require.False(t, hasTimestamp, "creationTimestamp should be omitted when absent")
+	_, hasOwnerRefs := plainMeta["ownerReferences"]
+	require.False(t, hasOwnerRefs, "ownerReferences should be omitted when absent")
+
+	// 2. include_status: null behaves as false
+	resultNullStatus := registeredToolResult(t, dispatchRegisteredTool(t, ksServer, "scan_resource_slice", map[string]any{
+		"resource_kind":  "pods",
+		"namespace":      "prod",
+		"include_status": nil,
+	}))
+	require.False(t, resultNullStatus.IsError)
+	var parsedNullStatus map[string]any
+	require.NoError(t, json.Unmarshal([]byte(toolResultText(t, resultNullStatus)), &parsedNullStatus))
+	for _, r := range parsedNullStatus["resources"].([]any) {
+		require.Nil(t, r.(map[string]any)["status"], "status must be omitted when include_status is null")
+	}
+
+	// 3. With include_status: true
+	resultStatus := registeredToolResult(t, dispatchRegisteredTool(t, ksServer, "scan_resource_slice", map[string]any{
+		"resource_kind":  "pods",
+		"namespace":      "prod",
+		"include_status": true,
+	}))
+	require.False(t, resultStatus.IsError)
+
+	var parsedStatus map[string]any
+	require.NoError(t, json.Unmarshal([]byte(toolResultText(t, resultStatus)), &parsedStatus))
+	resourcesStatus := parsedStatus["resources"].([]any)
+	var secPodWithStatus map[string]any
+	for _, r := range resourcesStatus {
+		rm := r.(map[string]any)
+		meta := rm["metadata"].(map[string]any)
+		if meta["name"] == "security-pod" {
+			secPodWithStatus = rm
+		}
+	}
+	require.NotNil(t, secPodWithStatus)
+	require.Equal(t, map[string]any{"phase": "Running"}, secPodWithStatus["status"])
+
+	// 4. Test controller kind (Deployment)
+	resultDeploy := registeredToolResult(t, dispatchRegisteredTool(t, ksServer, "scan_resource_slice", map[string]any{
+		"resource_kind":  "deployments",
+		"namespace":      "prod",
+		"include_status": true,
+	}))
+	require.False(t, resultDeploy.IsError)
+
+	var parsedDeploy map[string]any
+	require.NoError(t, json.Unmarshal([]byte(toolResultText(t, resultDeploy)), &parsedDeploy))
+	require.Equal(t, float64(1), parsedDeploy["count"])
+	deployRes := parsedDeploy["resources"].([]any)[0].(map[string]any)
+	require.Equal(t, "apps/v1", deployRes["apiVersion"])
+	require.Equal(t, "Deployment", deployRes["kind"])
+	deployMeta := deployRes["metadata"].(map[string]any)
+	require.Equal(t, "web-deploy", deployMeta["name"])
+	require.Equal(t, map[string]any{"app": "web"}, deployMeta["labels"])
+	require.Equal(t, "2026-01-01T00:00:00Z", deployMeta["creationTimestamp"])
+	require.Equal(t, map[string]any{"readyReplicas": float64(3)}, deployRes["status"])
+}
+
 // TestScanResourceSlice_UnsupportedKindReturnsError guards against a silent
 // fallback to core/v1 for resource kinds the tool does not explicitly map
 // (e.g. "services"). Falling back would send a request to the wrong API group and
@@ -167,6 +379,12 @@ func TestScanResourceSlice_ArgumentValidation(t *testing.T) {
 			arguments:    map[string]any{"resource_kind": "pods", "limit": 2.5},
 			expectedCode: ErrCodeInvalidArgument,
 			expectedArg:  "limit",
+		},
+		{
+			name:         "invalid include_status type",
+			arguments:    map[string]any{"resource_kind": "pods", "include_status": "not-a-boolean"},
+			expectedCode: ErrCodeInvalidArgument,
+			expectedArg:  "include_status",
 		},
 	}
 

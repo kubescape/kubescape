@@ -237,6 +237,7 @@ func TestMapComponentVulnResources(t *testing.T) {
 	resources := ExternalResources{
 		ComponentVulnAPIVersion + "/KubeletVulnerabilities":                    nil,
 		ComponentVulnAPIVersion + "/ContainerRuntimeVulnerabilities":           nil,
+		ComponentVulnAPIVersion + "/KernelVulnerabilities":                     nil,
 		ComponentVulnAPIVersion + "/OtherKubeletVulnerabilities":               nil,
 		ComponentVulnAPIVersion + "/APIServerVulnerabilitiesX":                 nil,
 		"example.com/v1beta0/KubeletVulnerabilities":                           nil,
@@ -246,6 +247,7 @@ func TestMapComponentVulnResources(t *testing.T) {
 	}
 	want := []string{
 		ComponentVulnAPIVersion + "/ContainerRuntimeVulnerabilities",
+		ComponentVulnAPIVersion + "/KernelVulnerabilities",
 		ComponentVulnAPIVersion + "/KubeletVulnerabilities",
 	}
 	if got := MapComponentVulnResources(resources); !reflect.DeepEqual(got, want) {

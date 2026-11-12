@@ -560,6 +560,7 @@ func TestApplyChanges_OnlyCountsSuccessfulWrites(t *testing.T) {
 
 	h := &FixHandler{fixInfo: &metav1.FixInfo{}, reportObj: &reporthandlingv2.PostureReport{}, localBasePath: dir}
 	rfi := ResourceFixInfo{
+		Resource:        podResource("x"),
 		FilePath:        manifest,
 		YamlExpressions: map[string]armotypes.FixPath{},
 		DocumentIndex:   0,

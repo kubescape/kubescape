@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/kubescape/kubescape/v4/core/pkg/ruledir"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -333,4 +334,65 @@ deny[{"alertMessage": msg}] { msg := "from the bare file" }`), 0o600))
 	assert.Nil(t, fw)
 	assert.Contains(t, err.Error(), "no-host-network")
 	assert.Contains(t, err.Error(), "defined twice")
+}
+
+func TestLoadCustomRules_OversizedRegoFileIsRejected(t *testing.T) {
+	size := int64(32*1024*1024 + 1)
+
+	t.Run("bare file", func(t *testing.T) {
+		f := filepath.Join(t.TempDir(), "big.rego")
+		require.NoError(t, os.WriteFile(f, []byte("package armo_builtins"), 0o600))
+		require.NoError(t, os.Truncate(f, size))
+
+		fw, err := LoadCustomRules(f)
+
+		require.ErrorIs(t, err, ruledir.ErrFileTooLarge)
+		assert.Nil(t, fw)
+	})
+
+	t.Run("rule directory", func(t *testing.T) {
+		dir := writeRuleDir(t, t.TempDir(), "big", rbacRuleMetadata)
+		require.NoError(t, os.Truncate(filepath.Join(dir, "raw.rego"), size))
+
+		fw, err := LoadCustomRules(dir)
+
+		require.ErrorIs(t, err, ruledir.ErrFileTooLarge)
+		assert.Nil(t, fw)
+	})
+}
+
+func TestLoadCustomRules_RegoFileAtSizeLimitIsLoaded(t *testing.T) {
+	f := filepath.Join(t.TempDir(), "limit.rego")
+	require.NoError(t, os.WriteFile(f, []byte("package armo_builtins\n"), 0o600))
+	// Padding past the content keeps the file valid Rego, and sparse.
+	require.NoError(t, os.Truncate(f, 32*1024*1024))
+
+	fw, err := LoadCustomRules(f)
+
+	require.NoError(t, err)
+	require.Len(t, fw.Controls, 1)
+	assert.Len(t, fw.Controls[0].Rules[0].Rule, 32*1024*1024)
+}
+
+func TestLoadCustomRules_MissingRegoFile(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "gone.rego")
+
+	// controlFromRegoFile is what a path vanishing after discovery reaches.
+	_, err := controlFromRegoFile(f)
+
+	require.ErrorIs(t, err, os.ErrNotExist)
+	assert.Contains(t, err.Error(), f)
+}
+
+func TestLoadCustomRules_RuleDirWithDirectoryAsRuleFileIsNotARule(t *testing.T) {
+	dir := writeRuleDir(t, t.TempDir(), "odd", rbacRuleMetadata)
+	require.NoError(t, os.Remove(filepath.Join(dir, "raw.rego")))
+	require.NoError(t, os.Mkdir(filepath.Join(dir, "raw.rego"), 0o750))
+
+	fw, err := LoadCustomRules(dir)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no custom rules found")
+	assert.Nil(t, fw)
 }

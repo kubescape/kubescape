@@ -22,6 +22,10 @@ The directory name becomes the rule name, and 'scan --custom-rules' picks it up 
 			"flagged", "clean"),
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// The invocation is valid from this point on. Scaffold's errors,
+			// such as an existing rule without --force, say what is wrong and
+			// should not print command usage.
+			cmd.SilenceUsage = true
 			return runPolicyInit(cmd, args[0], opts)
 		},
 	}

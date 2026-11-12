@@ -176,7 +176,7 @@ type gitlabVulnerabilityNode struct {
 type gitlabGraphQLResponse struct {
 	Data struct {
 		Project *struct {
-			Vulnerabilities struct {
+			Vulnerabilities *struct {
 				PageInfo struct {
 					HasNextPage bool   `json:"hasNextPage"`
 					EndCursor   string `json:"endCursor"`
@@ -284,6 +284,14 @@ func (a *GitlabAdaptor) GetImagesScanStatus(ctx context.Context, imageIDs []Cont
 			fetchErr := fmt.Errorf("project not found or permission denied (project is null)")
 			logger.L().Warning("image scan status error, result may be incomplete", helpers.Error(fetchErr))
 			cache[fullPath] = scanCacheEntry{isAvailable: false, err: fetchErr}
+			aggErr = errors.Join(aggErr, fetchErr)
+			statuses = append(statuses, status)
+			continue
+		}
+
+		if resp.Data.Project.Vulnerabilities == nil {
+			fetchErr := fmt.Errorf("missing vulnerability connection for repository %s", fullPath)
+			cache[fullPath] = scanCacheEntry{err: fetchErr}
 			aggErr = errors.Join(aggErr, fetchErr)
 			statuses = append(statuses, status)
 			continue
@@ -423,7 +431,7 @@ func (a *GitlabAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs [
 					// Execution errors may accompany usable partial data. Keep
 					// this page's findings, but stop and return the error so the
 					// result cannot be mistaken for a complete scan.
-					if resp.Data.Project != nil {
+					if resp.Data.Project != nil && resp.Data.Project.Vulnerabilities != nil {
 						for _, node := range resp.Data.Project.Vulnerabilities.Nodes {
 							if node.Title != "" {
 								projectNodes = append(projectNodes, node)
@@ -438,6 +446,13 @@ func (a *GitlabAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs [
 				if resp.Data.Project == nil {
 					fetchErr = fmt.Errorf("project not found or permission denied (project is null)")
 					logger.L().Warning("failed to fetch vulnerabilities due to missing project, result may be incomplete", helpers.Error(fetchErr))
+					break
+				}
+
+				// A null connection may mean the report is inaccessible. Keep
+				// earlier pages, but never silently treat it as the final page.
+				if resp.Data.Project.Vulnerabilities == nil {
+					fetchErr = fmt.Errorf("missing vulnerability connection for repository %s", fullPath)
 					break
 				}
 

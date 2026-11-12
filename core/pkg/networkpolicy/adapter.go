@@ -3,6 +3,8 @@ package networkpolicy
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
+	"slices"
 
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	networkingv1 "k8s.io/api/networking/v1"
@@ -14,8 +16,15 @@ import (
 // that fails to decode into its typed shape is skipped, with its error
 // appended to errs, rather than aborting the whole conversion over one bad
 // object.
+//
+// Resources are visited in resource-ID order rather than map order, as in
+// rbacgraph.FromResources: the order of the returned policies decides which
+// policy a Decision or Exposure names when more than one applies, and map
+// iteration order is randomized, so the same snapshot would otherwise name a
+// different policy on different runs.
 func FromResources(resources map[string]workloadinterface.IMetadata) (policies []*networkingv1.NetworkPolicy, namespaces []NamespaceInfo, errs []error) {
-	for _, resource := range resources {
+	for _, id := range slices.Sorted(maps.Keys(resources)) {
+		resource := resources[id]
 		if resource == nil {
 			continue
 		}

@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/open-policy-agent/opa/v1/ast"
+	"github.com/open-policy-agent/opa/v1/topdown"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -39,4 +40,5 @@ func TestRegisterOPABuiltins_OnlyRegistersOncePerProcess(t *testing.T) {
 	assert.NotNil(t, ast.BuiltinMap[cosignHasSignatureDeclaration.Name], "cosign.has_signature must be registered")
 	assert.NotNil(t, ast.BuiltinMap[cosignVerifyKeylessDeclaration.Name], "cosign.verify_keyless must be registered")
 	assert.NotNil(t, ast.BuiltinMap[imageNameNormalizeDeclaration.Name], "image.parse_normalized_name must be registered")
+	assert.NotNil(t, topdown.GetBuiltin(ast.YAMLUnmarshal.Name), "yaml.unmarshal must be registered")
 }

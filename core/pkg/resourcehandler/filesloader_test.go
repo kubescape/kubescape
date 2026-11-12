@@ -13,6 +13,7 @@ import (
 	gitv5 "github.com/go-git/go-git/v5"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -233,6 +234,59 @@ func TestGetResourcesFromPath_SingleFileRelativePathIsRepositoryRelative(t *test
 	}
 }
 
+// Outside a git repository the scanned file itself was taken as the root for
+// every file type but YAML, so a single JSON or Terraform file got the relative
+// path "." and lost its source. SARIF and GitLab SAST drop results without a
+// source, and fix cannot find the file.
+func TestGetResourcesFromPath_SingleFileOutsideRepositoryKeepsItsSource(t *testing.T) {
+	tests := []struct {
+		name     string
+		file     string
+		contents string
+		fileType string
+	}{
+		{
+			name:     "yaml",
+			file:     "pod.yaml",
+			contents: "apiVersion: v1\nkind: Pod\nmetadata:\n  name: pod\nspec:\n  containers:\n    - name: app\n      image: nginx\n",
+			fileType: reporthandling.SourceTypeYaml,
+		},
+		{
+			name:     "json",
+			file:     "pod.json",
+			contents: `{"apiVersion":"v1","kind":"Pod","metadata":{"name":"pod"},"spec":{"containers":[{"name":"app","image":"nginx"}]}}`,
+			fileType: reporthandling.SourceTypeJson,
+		},
+		{
+			name:     "terraform",
+			file:     "main.tf",
+			contents: terraformPodFixture,
+			fileType: "Terraform",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			// Inside a checkout the root is the repository root instead.
+			if _, err := cautils.GetGitRootDir(dir); err == nil {
+				t.Skip("the temporary directory is inside a git checkout")
+			}
+			path := filepath.Join(dir, tt.file)
+			require.NoError(t, os.WriteFile(path, []byte(tt.contents), 0o600))
+
+			workloadIDToSource, workloads, _, err := getResourcesFromPath(context.Background(), path, cautils.HelmValueOptions{}, nil)
+			require.NoError(t, err)
+			require.Len(t, workloads, 1)
+
+			src, ok := workloadIDToSource[workloads[0].GetID()]
+			require.True(t, ok, "the workload must have a source")
+			assert.Equal(t, dir, src.Path)
+			assert.Equal(t, tt.file, src.RelativePath)
+			assert.Equal(t, tt.fileType, src.FileType)
+		})
+	}
+}
+
 func TestGetResourcesFromPath_SingleManifestDoesNotRenderUnrelatedKustomizeDirectory(t *testing.T) {
 	root := t.TempDir()
 	manifestPath := filepath.Join(root, "manifest.yaml")
@@ -348,17 +402,37 @@ spec:
 // best-effort and drops the whole chart on any template error, so excluding templates/ unconditionally
 // would make those resources reach neither loader and vanish silently. Regression guard for the #2501
 // review: templates/ is excluded only for charts that rendered without errors.
-func TestGetResourcesFromPath_ScansTemplatesOfChartThatFailedToRender(t *testing.T) {
-	_, workloads, _, err := getResourcesFromPath(context.TODO(), "../../cautils/testdata/helm_chart_broken", cautils.HelmValueOptions{}, nil)
-	require.NoError(t, err)
+func TestGetResourcesFromPath_FailsWhenScannedChartFailsToRender(t *testing.T) {
+	_, _, _, err := getResourcesFromPath(context.TODO(), "../../cautils/testdata/helm_chart_broken/brokenchart", cautils.HelmValueOptions{}, nil)
+	require.ErrorIs(t, err, cautils.ErrHelmRenderFailed)
+	assert.Contains(t, err.Error(), "brokenchart")
+}
 
-	var found bool
+func TestGetResourcesFromPath_SkipsTemplatesOfNestedChartThatFailedToRender(t *testing.T) {
+	dir := t.TempDir()
+	chartDir := filepath.Join(dir, "chart")
+	require.NoError(t, os.MkdirAll(filepath.Join(chartDir, "templates"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "Chart.yaml"), []byte("apiVersion: v2\nname: broken\nversion: 0.1.0\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "templates", "sa.yaml"), []byte(`apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ required "name is required" .Values.name }}
+`), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "templates", "static.yaml"), []byte("apiVersion: v1\nkind: ServiceAccount\nmetadata:\n  name: static-sa\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "pod.yaml"), []byte("apiVersion: v1\nkind: Pod\nmetadata:\n  name: plain\nspec:\n  containers:\n    - name: c\n      image: nginx\n"), 0o600))
+
+	_, workloads, skips, err := getResourcesFromPath(context.TODO(), dir, cautils.HelmValueOptions{}, nil)
+	require.NoError(t, err, "a broken chart inside a broader scan must not fail the scan")
+
+	names := make([]string, 0, len(workloads))
 	for _, w := range workloads {
-		if w.GetKind() == "ServiceAccount" && w.GetName() == "important-sa" {
-			found = true
-		}
+		names = append(names, w.GetName())
 	}
-	assert.True(t, found, "a static template of a chart that failed to render must still be scanned")
+	assert.Equal(t, []string{"plain"}, names, "templates of a chart that failed to render must not be scanned as plain YAML")
+	require.Len(t, skips, 2)
+	for _, skip := range skips {
+		assert.Equal(t, "unrendered Helm template: its chart was not rendered", skip.Reason)
+	}
 }
 
 func createMockGitRepo(t *testing.T, hasOrigin bool) string {
@@ -445,8 +519,8 @@ func TestGetResourcesFromPath_RenderedChartTemplatesLoadedOnce(t *testing.T) {
 
 	// rendered exactly once by helm, never re-scanned as a raw template
 	assert.Equal(t, 1, counts["ServiceAccount/mychart-static"], "static template must be loaded once, by the render")
-	assert.Equal(t, 1, counts["Deployment/-mychart"], "templated deployment must come from the render")
-	assert.Equal(t, 1, counts["Service/-mysubchart"], "subchart template must come from the render")
+	assert.Equal(t, 1, counts["Deployment/release-name-mychart"], "templated deployment must come from the render")
+	assert.Equal(t, 1, counts["Service/release-name-mysubchart"], "subchart template must come from the render")
 	// not rendered by helm, so still plainly scanned
 	assert.Equal(t, 1, counts["CustomResourceDefinition/widgets.example.com"], "crds/ must stay plainly scanned")
 	assert.Equal(t, 1, counts["Pod/plain-outside-chart"], "files outside the chart must stay plainly scanned")
@@ -1176,4 +1250,117 @@ func TestHelmValueOptionsFromScanInfo(t *testing.T) {
 		KubeVersion:      "1.31",
 		APIVersions:      []string{"gateway.networking.k8s.io/v1"},
 	}, helmValueOptionsFromScanInfo(scanInfo))
+}
+
+func TestSharedRoot(t *testing.T) {
+	abs := func(path string) string {
+		return filepath.Join(string(filepath.Separator), filepath.FromSlash(path))
+	}
+	roots := func(paths ...string) []loadedInput {
+		inputs := make([]loadedInput, len(paths))
+		for i, path := range paths {
+			if path != "" {
+				path = abs(path)
+			}
+			inputs[i] = loadedInput{root: path}
+		}
+		return inputs
+	}
+	for _, tc := range []struct {
+		name   string
+		inputs []loadedInput
+		want   string
+	}{
+		{name: "no inputs", inputs: nil, want: ""},
+		{name: "single root", inputs: roots("w/dev"), want: ""},
+		{name: "one git root for every input", inputs: roots("repo", "repo"), want: ""},
+		{name: "siblings", inputs: roots("w/dev", "w/prod"), want: abs("w")},
+		{name: "nested", inputs: roots("w", "w/apps"), want: abs("w")},
+		{name: "deeper siblings", inputs: roots("w/a/k8s", "w/b/k8s", "w/a/x"), want: abs("w")},
+		{name: "cloned repository ignored", inputs: roots("", "w/dev"), want: ""},
+		{name: "cloned repository beside two roots", inputs: roots("w/dev", "", "w/prod"), want: abs("w")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, sharedRoot(context.Background(), tc.inputs))
+		})
+	}
+
+	t.Run("separate volumes", func(t *testing.T) {
+		if filepath.VolumeName(`C:\`) == "" {
+			t.Skip("volumes exist on Windows only")
+		}
+		assert.Equal(t, "", sharedRoot(context.Background(), []loadedInput{{root: `C:\dev`}, {root: `D:\prod`}}))
+	})
+}
+
+func TestAnchorInputsKeepsRootsApart(t *testing.T) {
+	abs := func(path string) string {
+		return filepath.Join(string(filepath.Separator), filepath.FromSlash(path))
+	}
+	// pods builds an input holding a default/app Pod for each recorded path.
+	pods := func(root, remote string, paths ...string) loadedInput {
+		input := loadedInput{root: root, remote: remote, sources: map[string]reporthandling.Source{}}
+		for _, p := range paths {
+			lw := localworkload.NewLocalWorkload(map[string]interface{}{
+				"apiVersion": "v1", "kind": "Pod",
+				"metadata": map[string]interface{}{"name": "app", "namespace": "default"},
+			})
+			lw.SetPath(filepath.FromSlash(p))
+			input.workloads = append(input.workloads, lw)
+			input.sources[lw.GetID()] = reporthandling.Source{
+				Path: root, RelativePath: filepath.FromSlash(strings.TrimSuffix(p, ":0")), FileType: reporthandling.SourceTypeYaml,
+			}
+		}
+		return input
+	}
+	type entry struct{ path, sourcePath, relativePath string }
+	entries := func(inputs []loadedInput) []entry {
+		var got []entry
+		for _, input := range inputs {
+			for _, w := range input.workloads {
+				lw := w.(*localworkload.LocalWorkload)
+				source, ok := input.sources[lw.GetID()]
+				require.True(t, ok, "every workload keeps its source under its new ID")
+				got = append(got, entry{filepath.ToSlash(lw.GetPath()), source.Path, filepath.ToSlash(source.RelativePath)})
+			}
+		}
+		return got
+	}
+
+	for _, tc := range []struct {
+		name   string
+		inputs []loadedInput
+		want   []entry
+	}{
+		{
+			name:   "local roots share a parent",
+			inputs: []loadedInput{pods(abs("w/dev"), "", "pod.yaml:0"), pods(abs("w/prod"), "", "pod.yaml:0")},
+			want:   []entry{{"dev/pod.yaml:0", abs("w"), "dev/pod.yaml"}, {"prod/pod.yaml:0", abs("w"), "prod/pod.yaml"}},
+		},
+		{
+			name:   "local root beside a cloned repository",
+			inputs: []loadedInput{pods(abs("w"), "", "dev/pod.yaml:0"), pods("", "github.com/o/r", "dev/pod.yaml:0")},
+			want:   []entry{{"dev/pod.yaml:0", abs("w"), "dev/pod.yaml"}, {"github.com/o/r/dev/pod.yaml:0", "", "dev/pod.yaml"}},
+		},
+		{
+			name:   "two cloned repositories",
+			inputs: []loadedInput{pods("", "github.com/o/a", "pod.yaml:0"), pods("", "github.com/o/b", "pod.yaml:0")},
+			want:   []entry{{"github.com/o/a/pod.yaml:0", "", "pod.yaml"}, {"github.com/o/b/pod.yaml:0", "", "pod.yaml"}},
+		},
+		{
+			name:   "one cloned repository read twice",
+			inputs: []loadedInput{pods("", "github.com/o/r", "dev/pod.yaml:0"), pods("", "github.com/o/r", "prod/pod.yaml:0")},
+			want:   []entry{{"dev/pod.yaml:0", "", "dev/pod.yaml"}, {"prod/pod.yaml:0", "", "prod/pod.yaml"}},
+		},
+		{
+			name:   "one local root",
+			inputs: []loadedInput{pods(abs("w"), "", "dev/pod.yaml:0"), pods(abs("w"), "", "prod/pod.yaml:0")},
+			want:   []entry{{"dev/pod.yaml:0", abs("w"), "dev/pod.yaml"}, {"prod/pod.yaml:0", abs("w"), "prod/pod.yaml"}},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			anchorInputs(context.Background(), tc.inputs)
+			assert.Equal(t, tc.want, entries(tc.inputs))
+		})
+	}
 }
