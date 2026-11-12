@@ -375,3 +375,96 @@ func TestScanToReportSeriesDownloadsTheReleaseOnce(t *testing.T) {
 		assert.Empty(t, comparison.ChangeSet.Resolved, "scan %d", i)
 	}
 }
+
+// An image scan keeps its failure for the results handler and the report holds
+// posture results only, so it is refused before anything is scanned: the error is
+// ours and not the missing policy file's the scan would have stopped on.
+func TestScanToReportRefusesAnImageScanBeforeScanning(t *testing.T) {
+	dir := t.TempDir()
+	writeManifest(t, dir, "pod.yaml", podManifest("web", false))
+	template := localScanTemplate(t, dir)
+	template.ScanImages = true
+	template.UseFrom = []string{filepath.Join(t.TempDir(), "missing-policy.json")}
+	before := *template
+	before.UseFrom = slices.Clone(template.UseFrom)
+	before.InputPatterns = slices.Clone(template.InputPatterns)
+	ks := &Kubescape{Ctx: context.Background()}
+
+	report, err := ks.ScanToReport(context.Background(), template, readOnlyRootFilesystem)
+
+	require.ErrorContains(t, err, "image scan")
+	assert.NotContains(t, err.Error(), "missing-policy")
+	assert.Nil(t, report)
+	assert.Equal(t, before, *template)
+	assert.Empty(t, template.ScanID, "no scan was started")
+
+	template.ScanImages = false
+	_, err = ks.ScanToReport(context.Background(), template, readOnlyRootFilesystem)
+	require.Error(t, err, "without ScanImages the scan reaches the missing policy file")
+	assert.NotContains(t, err.Error(), "image scan")
+}
+
+// failedResources lists the resources a report shows C-0017 failing for.
+func failedResources(t *testing.T, reportJSON []byte) []string {
+	t.Helper()
+	var document struct {
+		Results []struct {
+			ResourceID string `json:"resourceID"`
+			Controls   []struct {
+				ControlID string `json:"controlID"`
+				Status    struct {
+					Status string `json:"status"`
+				} `json:"status"`
+			} `json:"controls"`
+		} `json:"results"`
+	}
+	require.NoError(t, json.Unmarshal(reportJSON, &document))
+	var failed []string
+	for _, result := range document.Results {
+		for _, control := range result.Controls {
+			if control.ControlID == "C-0017" && control.Status.Status == "failed" {
+				failed = append(failed, result.ResourceID)
+			}
+		}
+	}
+	return failed
+}
+
+// MinSeverity and MaxSeverity filter what is written when results are handled,
+// which a report does not go through, so the report holds the findings whatever
+// they are set to, and the caller's ScanInfo keeps its settings. ScanContext does
+// not read the filters today, so this pins the outcome and not the copy, which
+// ScanToReport clears so that it carries no output setting.
+func TestScanToReportIgnoresTheOutputSeverityFilters(t *testing.T) {
+	dir := t.TempDir()
+	writeManifest(t, dir, "pod.yaml", podManifest("web", false))
+	ks := &Kubescape{Ctx: context.Background()}
+
+	unfiltered, err := ks.ScanToReport(context.Background(), localScanTemplate(t, dir), readOnlyRootFilesystem)
+	require.NoError(t, err)
+	want := failedResources(t, unfiltered.JSON)
+	require.Len(t, want, 1, "the fixture has one failing resource")
+
+	for _, tt := range []struct{ name, min, max string }{
+		{"minimum above the finding", "critical", ""},
+		{"maximum below the finding", "", "low"},
+		{"both, leaving no severity", "critical", "low"},
+		{"both, around the finding", "low", "critical"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			template := localScanTemplate(t, dir)
+			template.MinSeverity, template.MaxSeverity = tt.min, tt.max
+			before := *template
+			before.UseFrom = slices.Clone(template.UseFrom)
+			before.InputPatterns = slices.Clone(template.InputPatterns)
+
+			report, err := ks.ScanToReport(context.Background(), template, readOnlyRootFilesystem)
+
+			require.NoError(t, err)
+			assert.Equal(t, want, failedResources(t, report.JSON))
+			assert.Equal(t, tt.min, template.MinSeverity)
+			assert.Equal(t, tt.max, template.MaxSeverity)
+			assert.Equal(t, before, *template, "nothing else of the caller's ScanInfo changed")
+		})
+	}
+}

@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -488,4 +490,117 @@ func TestStoreWithTheReleaseAlreadyLoadedIsNotDownloadedAgain(t *testing.T) {
 
 	assert.Same(t, loadedStore, p.store(), "the store was not replaced")
 	assert.Equal(t, 1, r.count("checksums.txt"))
+}
+
+// fetchesInProgress counts the goroutines that are inside a store's download.
+func fetchesInProgress() int {
+	buf := make([]byte, 1<<22)
+	buf = buf[:runtime.Stack(buf, true)]
+	return strings.Count(string(buf), "gitregostore.(*GitRegoStore).SetRegoObjects")
+}
+
+// A server that takes a request and never answers must not hold the store for
+// good: the download ends at its limit with an error that says so, the store is
+// free for another, and what the abandoned fetch brings in later is not
+// published. Not parallel: it counts the fetches running in the process.
+func TestStalledDownloadTimesOutAndTheStoreCanRetry(t *testing.T) {
+	before := fetchesInProgress()
+	r := newRelease(t, "nsa")
+	p := r.store()
+	p.downloadTimeout = 150 * time.Millisecond
+	open := r.hold("controls")
+	defer open()
+
+	start := time.Now()
+	err := p.SetRegoObjectsContext(t.Context())
+	require.ErrorIs(t, err, errDownloadTimedOut)
+	assert.Less(t, time.Since(start), 10*time.Second)
+
+	p.mu.RLock()
+	idle := p.loading == nil
+	p.mu.RUnlock()
+	assert.True(t, idle, "the timed-out download still holds the store")
+	require.NoError(t, holdsNone(p))
+	assert.Equal(t, 1, r.count("controls"))
+
+	// The abandoned fetch gets its answer and finishes its work. It fills the
+	// store of its own, which nobody reads.
+	open()
+	require.Eventually(t, func() bool { return fetchesInProgress() <= before }, 10*time.Second, 10*time.Millisecond,
+		"the abandoned fetch never ended")
+	require.NoError(t, holdsNone(p), "a timed-out download published the release")
+
+	p.downloadTimeout = 0
+	require.NoError(t, p.SetRegoObjectsContext(t.Context()))
+	require.NoError(t, holdsAll(p, "nsa"))
+	assert.Equal(t, 2, r.count("controls"), "the retry downloaded the release again")
+}
+
+// Scans that wait together for a stalled download share its one timeout: the
+// server is asked once, every waiter gets the error, and the next scan starts
+// the one new download.
+func TestWaitersOfAStalledDownloadShareItsTimeout(t *testing.T) {
+	t.Parallel()
+	r := newRelease(t, "nsa")
+	p := r.store()
+	p.downloadTimeout = 150 * time.Millisecond
+	open := r.hold("controls")
+	defer open()
+
+	const scans = 8
+	errs := make([]error, scans)
+	var wg sync.WaitGroup
+	for i := 0; i < scans; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errs[i] = p.SetRegoObjectsContext(t.Context())
+		}()
+	}
+	wg.Wait()
+	for i, err := range errs {
+		require.ErrorIs(t, err, errDownloadTimedOut, "scan %d", i)
+	}
+	assert.Equal(t, 1, r.count("controls"), "the scans did not share one download")
+
+	open()
+	require.NoError(t, p.SetRegoObjectsContext(t.Context()))
+	require.NoError(t, holdsAll(p, "nsa"))
+	assert.Equal(t, 2, r.count("controls"))
+}
+
+// A scan that gives up while the download is stalled does not wait for the
+// limit, and the limit still frees the store for the next scan.
+func TestCancelledWaiterOfAStalledDownloadLeavesTheStoreRecoverable(t *testing.T) {
+	t.Parallel()
+	r := newRelease(t, "nsa")
+	p := r.store()
+	p.downloadTimeout = 300 * time.Millisecond
+	open := r.hold("controls")
+	defer open()
+
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Millisecond)
+	defer cancel()
+	require.ErrorIs(t, p.SetRegoObjectsContext(ctx), context.DeadlineExceeded)
+
+	waitIdle(t, p)
+	require.NoError(t, holdsNone(p))
+	open()
+	require.NoError(t, p.SetRegoObjectsContext(t.Context()))
+	require.NoError(t, holdsAll(p, "nsa"))
+}
+
+// A pinned release says which one timed out, and the cause can still be found.
+func TestPinnedReleaseTimeoutKeepsItsCause(t *testing.T) {
+	t.Parallel()
+	r := newRelease(t, "nsa")
+	p := NewDownloadReleasedPolicyWithVersion("v2.0.301")
+	p.gs.URL = r.URL + "/download"
+	p.downloadTimeout = 100 * time.Millisecond
+	open := r.hold("controls")
+	defer open()
+
+	err := p.SetRegoObjectsContext(t.Context())
+	require.ErrorIs(t, err, errDownloadTimedOut)
+	assert.Contains(t, err.Error(), `"v2.0.301"`)
 }

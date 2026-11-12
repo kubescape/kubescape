@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/opa-utils/reporthandling"
@@ -42,7 +43,20 @@ type DownloadReleasedPolicy struct {
 	gs *gitregostore.GitRegoStore
 	// loading is the download in progress, if any.
 	loading *releaseLoad
+	// downloadTimeout bounds one download; zero means defaultDownloadTimeout.
+	downloadTimeout time.Duration
 }
+
+// defaultDownloadTimeout bounds one download of a release. The files of a
+// release come to a few megabytes in about a dozen requests, and the store makes
+// them without a deadline of its own, so a server that accepts a request and
+// never answers would otherwise hold the download, and every scan that joins it,
+// for good. The limit is for the whole download rather than for a request, which
+// the store does not let us set, and is generous enough for a slow link.
+const defaultDownloadTimeout = 2 * time.Minute
+
+// errDownloadTimedOut is what a download that ran past its limit ends with.
+var errDownloadTimedOut = errors.New("downloading the release timed out")
 
 // releaseLoad is one download of the release, which every scan that needs the
 // release while it runs waits for.
@@ -277,7 +291,9 @@ func (drp *DownloadReleasedPolicy) SetRegoObjects() error {
 // next caller downloads again. A caller whose ctx ends stops waiting and gets the
 // context's error; the download itself is not stopped, since the files it needs
 // are fetched without a context, and it ends by loading the release for the next
-// caller or by failing.
+// caller or by failing. A download that outlasts its time limit fails with
+// errDownloadTimedOut for every caller waiting on it, and the next caller starts
+// a new one.
 func (drp *DownloadReleasedPolicy) SetRegoObjectsContext(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -317,7 +333,24 @@ func (drp *DownloadReleasedPolicy) download(load *releaseLoad, base *gitregostor
 	candidate := gitregostore.NewGitRegoStore(base.BaseUrl, base.Owner, base.Repository, base.Path, base.Tag, base.Branch, base.FrequencyPullFromGitMinutes)
 	candidate.URL = base.URL
 
-	err := candidate.SetRegoObjects()
+	// The store cannot be given a context, so its fetch runs on a goroutine that
+	// the limit can walk away from. The channel has room for its result so that it
+	// can finish, and be collected, whenever its request returns. What it was
+	// filling is the candidate, which a timed-out download does not publish.
+	timeout := drp.downloadTimeout
+	if timeout <= 0 {
+		timeout = defaultDownloadTimeout
+	}
+	fetched := make(chan error, 1)
+	go func() { fetched <- candidate.SetRegoObjects() }()
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	var err error
+	select {
+	case err = <-fetched:
+	case <-timer.C:
+		err = fmt.Errorf("%w after %s", errDownloadTimedOut, timeout)
+	}
 	if err != nil && drp.version != "" {
 		err = fmt.Errorf("failed to download controls for pinned version %q: %w", drp.version, err)
 	}

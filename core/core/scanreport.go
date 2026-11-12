@@ -28,11 +28,19 @@ type ScanReport struct {
 //
 // It does not change scanInfo: every call scans a copy, so one ScanInfo can
 // serve a series of scans, or scans running at the same time. The copy is
-// stripped of its output settings and, as with ScanInfo.CloneForContext, its
-// kube-context override; this is for scans of local manifests, and a scan of a
-// cluster is refused. A scan of local manifests that is not to touch a cluster
-// or the network sets NoClusterAccess and Local. A series of scans sets
-// ReleasedPolicyStore to download the released policies once.
+// stripped of its output settings (the format and the severity filters, which
+// are applied only when results are handled) and, as with
+// ScanInfo.CloneForContext, its kube-context override; this is for scans of
+// local manifests, and a scan of a cluster is refused, as is an image scan,
+// whose results this report does not carry.
+//
+// NoClusterAccess keeps a scan away from the cluster and Local skips the check
+// for a newer version. Neither stops the released policies from being
+// downloaded, which is a network request. A series of scans sets
+// ReleasedPolicyStore to download them once. A caller that needs a scan with no
+// network access must also point it at local policy sources (UseFrom, plus the
+// exceptions and controls configuration it reads) that hold everything the scan
+// needs.
 //
 // The report holds the resources the scan read unless scanInfo omits them
 // (OmitRawResources), in which case it has none, and a reader that identifies
@@ -55,8 +63,19 @@ func (ks *Kubescape) ScanToReport(ctx context.Context, scanInfo *cautils.ScanInf
 		return nil, errors.New("an encrypted scan cannot be returned as an in-memory report")
 	}
 
+	if scanInfo.ScanImages {
+		// ScanContext records an image scan's failure for the results handler to
+		// report and returns no error, and this report holds posture results only,
+		// so a failed image scan would come back as a report that looks complete.
+		return nil, errors.New("an image scan cannot be returned as an in-memory report")
+	}
+
 	scan := scanInfo.CloneForContext("", "")
 	scan.Format = ""
+	// Output filters, applied only when results are handled. The report holds
+	// every finding the scan made, as with `--format json` of an unfiltered scan.
+	scan.MinSeverity = ""
+	scan.MaxSeverity = ""
 	// Asked of the copy: working out the scanning context remembers it in the
 	// ScanInfo, which for the caller's, shared by scans that run at once, would
 	// be a write.
