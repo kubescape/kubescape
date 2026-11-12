@@ -365,11 +365,20 @@ func extractResourceLabelsForResource(resource workloadinterface.IMetadata, labe
 // process-global k8sinterface.GetContextName() instead would label the report
 // with the ambient context, which differs whenever --kubeconfig or
 // --kube-context points somewhere else. The global remains the fallback for
-// sessions that carry no cluster context metadata.
+// cluster scans that carry no cluster context metadata.
+//
+// File, directory and repository scans never talk to a cluster, so they have
+// no context to report. Falling back to the ambient context there would label
+// the report with whatever cluster the user's kubeconfig happens to select,
+// and that name bypasses --hide and --encrypt, which only transform the
+// cluster metadata a scan recorded.
 func scanContextName(data *cautils.OPASessionObj) string {
 	if data.Metadata != nil {
 		if cluster := data.Metadata.ContextMetadata.ClusterContextMetadata; cluster != nil && cluster.ContextName != "" {
 			return cluster.ContextName
+		}
+		if data.Metadata.ScanMetadata.ScanningTarget != reporthandlingv2.Cluster {
+			return ""
 		}
 	}
 	return k8sinterface.GetContextName()
