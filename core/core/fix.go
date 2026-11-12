@@ -51,6 +51,15 @@ func (ks *Kubescape) Fix(fixInfo *metav1.FixInfo) error {
 	if err := fixInfo.ValidateKustomizeDir(); err != nil {
 		return err
 	}
+	if err := fixInfo.ValidateBasePath(); err != nil {
+		return err
+	}
+	if err := fixInfo.ValidatePostRendererDir(); err != nil {
+		return err
+	}
+	if err := fixInfo.ValidateContainerProfilePath(); err != nil {
+		return err
+	}
 	// Before anything is read: a patch or a verification combined with another
 	// output mode must fail, not quietly do one of the two.
 	if err := fixInfo.ValidateOutputPatch(); err != nil {

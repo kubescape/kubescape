@@ -592,6 +592,115 @@ func TestFix_EmptyReportFileRefused(t *testing.T) {
 	require.Error(t, err)
 	assert.EqualError(t, err, "uninitialized fix parameters")
 }
+
+func TestFix_BasePathValidation(t *testing.T) {
+	dir := t.TempDir()
+	reportPath := buildFixableReport(t, dir)
+	before := manifestContent(t, dir)
+	ks := &Kubescape{Ctx: context.Background()}
+
+	// Whitespace-only BasePath values must be rejected before any fix operation occurs
+	for _, blank := range []string{"   ", "\t", "\n", " \t \n "} {
+		err := ks.Fix(&metav1.FixInfo{ReportFile: reportPath, BasePath: blank, NoConfirm: true})
+		require.Error(t, err)
+		assert.EqualError(t, err, "--base-path needs a directory path")
+		assert.Equal(t, before, manifestContent(t, dir), "no manifest modification must occur when BasePath is invalid")
+	}
+
+	// Genuinely empty BasePath preserves existing behavior
+	err := ks.Fix(&metav1.FixInfo{ReportFile: reportPath, BasePath: "", DryRun: true})
+	require.NoError(t, err, "empty BasePath preserves existing behavior")
+
+	// Valid non-empty BasePath containing the scanned directory succeeds
+	err = ks.Fix(&metav1.FixInfo{ReportFile: reportPath, BasePath: dir, DryRun: true})
+	require.NoError(t, err, "valid containing BasePath succeeds")
+
+	// Valid non-empty BasePath outside the scanned directory is rejected by containment
+	outsideDir := t.TempDir()
+	err = ks.Fix(&metav1.FixInfo{ReportFile: reportPath, BasePath: outsideDir, DryRun: true})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "outside --base-path")
+}
+
+func TestFix_PostRendererDirValidation(t *testing.T) {
+	dir := t.TempDir()
+	reportPath := buildFixableReport(t, dir)
+	before := manifestContent(t, dir)
+	ks := &Kubescape{Ctx: context.Background()}
+
+	// Whitespace-only PostRendererDir values must be rejected before any fix operation occurs
+	for _, blank := range []string{"   ", "\t", "\n"} {
+		err := ks.Fix(&metav1.FixInfo{
+			ReportFile:      reportPath,
+			PostRendererDir: blank,
+			NoConfirm:       true,
+		})
+		require.Error(t, err)
+		assert.EqualError(t, err, "--output-post-renderer needs a directory path")
+		assert.Equal(t, before, manifestContent(t, dir), "no manifest modification must occur when PostRendererDir is invalid")
+	}
+
+	// Genuinely empty PostRendererDir preserves existing behavior
+	err := ks.Fix(&metav1.FixInfo{
+		ReportFile:      reportPath,
+		PostRendererDir: "",
+		DryRun:          true,
+	})
+	require.NoError(t, err, "empty PostRendererDir preserves existing behavior")
+
+	// Valid PostRendererDir with KustomizeDir succeeds and writes scripts
+	helmDir := t.TempDir()
+	helmReportPath := buildFixableHelmReport(t, helmDir)
+	kustDir := filepath.Join(t.TempDir(), "kust-output")
+	postDir := filepath.Join(t.TempDir(), "post-output")
+	err = ks.Fix(&metav1.FixInfo{
+		ReportFile:      helmReportPath,
+		KustomizeDir:    kustDir,
+		PostRendererDir: postDir,
+		HelmValueOptions: cautils.HelmValueOptions{
+			ValueFiles: []string{filepath.Join(helmDir, "values.yaml")},
+		},
+	})
+	require.NoError(t, err, "valid PostRendererDir succeeds")
+	assert.FileExists(t, filepath.Join(postDir, "renderer.sh"))
+}
+
+func TestFix_ContainerProfilePathValidation(t *testing.T) {
+	dir := t.TempDir()
+	reportPath := buildFixableReport(t, dir)
+	before := manifestContent(t, dir)
+	ks := &Kubescape{Ctx: context.Background()}
+
+	// Whitespace-only ContainerProfilePath values must be rejected before any fix operation occurs
+	for _, blank := range []string{"   ", "\t", "\n"} {
+		err := ks.Fix(&metav1.FixInfo{
+			ReportFile:           reportPath,
+			ContainerProfilePath: blank,
+			NoConfirm:            true,
+		})
+		require.Error(t, err)
+		assert.EqualError(t, err, "--container-profile needs a file path")
+		assert.Equal(t, before, manifestContent(t, dir), "no manifest modification must occur when ContainerProfilePath is invalid")
+	}
+
+	// Genuinely empty ContainerProfilePath preserves existing behavior
+	err := ks.Fix(&metav1.FixInfo{
+		ReportFile:           reportPath,
+		ContainerProfilePath: "",
+		DryRun:               true,
+	})
+	require.NoError(t, err, "empty ContainerProfilePath preserves existing behavior")
+
+	// Valid ContainerProfilePath with a valid profile file succeeds
+	profileFile := filepath.Join(t.TempDir(), "profile.json")
+	require.NoError(t, os.WriteFile(profileFile, []byte(`{"apiVersion":"spdx.softwarecomposition.kubescape.io/v1beta1","kind":"ContainerProfile"}`), 0o600))
+	err = ks.Fix(&metav1.FixInfo{
+		ReportFile:           reportPath,
+		ContainerProfilePath: profileFile,
+		DryRun:               true,
+	})
+	require.NoError(t, err, "valid ContainerProfilePath succeeds")
+}
 func buildMixedFixableReport(t *testing.T, dir string) string {
 	t.Helper()
 

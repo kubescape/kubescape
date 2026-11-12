@@ -137,3 +137,82 @@ func TestFixInfoValidateOutputPatch(t *testing.T) {
 		})
 	}
 }
+
+func TestFixInfoValidateBasePath(t *testing.T) {
+	tests := []struct {
+		name     string
+		basePath string
+		wantErr  string
+	}{
+		{name: "empty base-path is allowed when not set", basePath: ""},
+		{name: "valid base-path", basePath: "/tmp/base"},
+		{name: "relative base-path", basePath: "./base"},
+		{name: "whitespace base-path is refused", basePath: "   ", wantErr: "--base-path needs a directory path"},
+		{name: "tab whitespace base-path is refused", basePath: "\t", wantErr: "--base-path needs a directory path"},
+		{name: "newline whitespace base-path is refused", basePath: "\n", wantErr: "--base-path needs a directory path"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			info := FixInfo{BasePath: tt.basePath}
+			err := info.ValidateBasePath()
+			if tt.wantErr == "" {
+				assert.NoError(t, err)
+			} else {
+				require.EqualError(t, err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestFixInfoValidatePostRendererDir(t *testing.T) {
+	tests := []struct {
+		name            string
+		postRendererDir string
+		wantErr         string
+	}{
+		{name: "empty post-renderer-dir is allowed when not set", postRendererDir: ""},
+		{name: "valid post-renderer-dir", postRendererDir: "/tmp/renderer"},
+		{name: "relative post-renderer-dir", postRendererDir: "./renderer"},
+		{name: "whitespace post-renderer-dir is refused", postRendererDir: "   ", wantErr: "--output-post-renderer needs a directory path"},
+		{name: "tab whitespace post-renderer-dir is refused", postRendererDir: "\t", wantErr: "--output-post-renderer needs a directory path"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			info := FixInfo{PostRendererDir: tt.postRendererDir}
+			err := info.ValidatePostRendererDir()
+			if tt.wantErr == "" {
+				assert.NoError(t, err)
+			} else {
+				require.EqualError(t, err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestFixInfoValidateContainerProfilePath(t *testing.T) {
+	tests := []struct {
+		name                 string
+		containerProfilePath string
+		wantErr              string
+	}{
+		{name: "empty container-profile is allowed when not set", containerProfilePath: ""},
+		{name: "valid container-profile", containerProfilePath: "/tmp/profile.json"},
+		{name: "relative container-profile", containerProfilePath: "./profile.json"},
+		{name: "whitespace container-profile is refused", containerProfilePath: "   ", wantErr: "--container-profile needs a file path"},
+		{name: "tab whitespace container-profile is refused", containerProfilePath: "\t", wantErr: "--container-profile needs a file path"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			info := FixInfo{ContainerProfilePath: tt.containerProfilePath}
+			err := info.ValidateContainerProfilePath()
+			if tt.wantErr == "" {
+				assert.NoError(t, err)
+			} else {
+				require.EqualError(t, err, tt.wantErr)
+			}
+		})
+	}
+}

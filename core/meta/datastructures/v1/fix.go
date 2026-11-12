@@ -120,6 +120,42 @@ func (f *FixInfo) ValidateKustomizeDir() error {
 	return nil
 }
 
+// ValidateBasePath refuses empty or blank directory paths when BasePath is set.
+// It is nil when BasePath is empty.
+func (f *FixInfo) ValidateBasePath() error {
+	if f.BasePath == "" {
+		return nil
+	}
+	if strings.TrimSpace(f.BasePath) == "" {
+		return errors.New("--base-path needs a directory path")
+	}
+	return nil
+}
+
+// ValidatePostRendererDir refuses empty or blank directory paths when PostRendererDir is set.
+// It is nil when PostRendererDir is empty.
+func (f *FixInfo) ValidatePostRendererDir() error {
+	if f.PostRendererDir == "" {
+		return nil
+	}
+	if strings.TrimSpace(f.PostRendererDir) == "" {
+		return errors.New("--output-post-renderer needs a directory path")
+	}
+	return nil
+}
+
+// ValidateContainerProfilePath refuses empty or blank file paths when ContainerProfilePath is set.
+// It is nil when ContainerProfilePath is empty.
+func (f *FixInfo) ValidateContainerProfilePath() error {
+	if f.ContainerProfilePath == "" {
+		return nil
+	}
+	if strings.TrimSpace(f.ContainerProfilePath) == "" {
+		return errors.New("--container-profile needs a file path")
+	}
+	return nil
+}
+
 // ValidateVerify refuses the combinations in which Verify has nothing to
 // verify: DryRun, OutputDir and OutputPatch all leave the manifests as they
 // were, so a rescan would find every finding as it was and say nothing about the
