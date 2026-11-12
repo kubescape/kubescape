@@ -4,12 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/kubescape/backend/pkg/versioncheck"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/cautils/getter"
 	metav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
 	"github.com/kubescape/kubescape/v4/core/pkg/fixhandler"
 	"github.com/kubescape/kubescape/v4/core/pkg/remediationverify"
@@ -128,34 +128,40 @@ func resourceLabel(o fixhandler.ControlOutcome) string {
 // default that is more lenient than the original would call a finding resolved
 // that the original configuration still fails. It is therefore never
 // substituted. The file given with --controls-config is used, otherwise the one
-// the report records, and when that cannot be read this is an error, not a
+// the report records, and when that cannot be used this is an error, not a
 // fallback to the default.
 func verificationConfig(recorded, override string) (path, used string, err error) {
 	switch {
 	case override != "":
-		if err := readableFile(override); err != nil {
-			return "", "", fmt.Errorf("cannot verify: the --controls-config file %q cannot be read: %w", override, err)
+		if err := loadableControlsConfig(override); err != nil {
+			return "", "", fmt.Errorf("cannot verify: the --controls-config file %q cannot be used: %w", override, err)
 		}
 		if recorded != "" && recorded != override {
 			return override, fmt.Sprintf("the controls configuration given with --controls-config (%q) in place of the one the report records (%q)", override, recorded), nil
 		}
 		return override, fmt.Sprintf("the controls configuration given with --controls-config (%q)", override), nil
 	case recorded != "":
-		if err := readableFile(recorded); err != nil {
-			return "", "", fmt.Errorf("cannot verify: the controls configuration the report records (%q) cannot be read (%w), and a rescan under another could judge a control differently. Pass the file with --controls-config, or run without --verify", recorded, err)
+		if err := loadableControlsConfig(recorded); err != nil {
+			return "", "", fmt.Errorf("cannot verify: the controls configuration the report records (%q) cannot be used (%w), and a rescan under another could judge a control differently. Pass the file with --controls-config, or run without --verify", recorded, err)
 		}
 		return recorded, fmt.Sprintf("the controls configuration the report records (%q)", recorded), nil
 	}
 	return "", "the default controls configuration, since the report records none", nil
 }
 
-func readableFile(path string) error {
-	info, err := os.Stat(path)
+// loadableControlsConfig is nil when the rescan can use path as its controls
+// configuration. The file is read and decoded the way the scan loads it, not
+// only looked up: one that is there but cannot be opened, is not a JSON object
+// of control inputs or holds none would make the rescan fall back to the
+// default configuration and report itself degraded, leaving every fix
+// unverified after the manifests were changed.
+func loadableControlsConfig(path string) error {
+	inputs, err := getter.ReadControlsInputsFile(path)
 	if err != nil {
 		return err
 	}
-	if !info.Mode().IsRegular() {
-		return errors.New("not a regular file")
+	if len(inputs) == 0 {
+		return errors.New("it holds no control inputs")
 	}
 	return nil
 }
@@ -215,8 +221,9 @@ func (ks *Kubescape) verifyFixes(handler *fixhandler.FixHandler, fixInfo *metav1
 	return nil
 }
 
-// printVerification prints the counts and, for each finding that is not
-// resolved, which it is and why.
+// printVerification prints the counts and then, for each fixed finding, its
+// verdict and why, so a resolved finding is named as well as one that is not.
+// Only a finding that is not resolved is a warning.
 func printVerification(resp remediationverify.Response, items []remediationverify.Item, labels map[remediationverify.Item]string) {
 	logger.L().Info(fmt.Sprintf("Verification: %d resolved, %d still failing, %d unverified",
 		resp.Summary.Resolved, resp.Summary.StillFailing, resp.Summary.Unverified))
@@ -224,10 +231,12 @@ func printVerification(resp remediationverify.Response, items []remediationverif
 		logger.L().Warning("The rescan did not fully complete or reports no coverage information, so no fix can be confirmed.")
 	}
 	for _, result := range resp.Results {
-		if result.Verdict == remediationverify.VerdictResolved {
-			continue
-		}
 		label := labels[items[result.Index]]
-		logger.L().Warning(fmt.Sprintf("  %s: %s %s (%s): %s", label, result.ControlID, result.Verdict, result.Reason, remediationverify.Explanation(result.Reason)))
+		line := fmt.Sprintf("  %s: %s %s (%s): %s", label, result.ControlID, result.Verdict, result.Reason, remediationverify.Explanation(result.Reason))
+		if result.Verdict == remediationverify.VerdictResolved {
+			logger.L().Info(line)
+		} else {
+			logger.L().Warning(line)
+		}
 	}
 }

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/kubescape/kubescape/v4/internal/testutils"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -536,6 +537,52 @@ func TestLoadPolicy_DirectoryRejected(t *testing.T) {
 	_, err := p.GetExceptions(context.Background(), "")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "is a directory, not a file")
+}
+
+// TestReadControlsInputsFile: the file is held to the rules GetControlsInputs
+// applies, and every refusal keeps its cause.
+func TestReadControlsInputsFile(t *testing.T) {
+	write := func(t *testing.T, content string) string {
+		path := filepath.Join(t.TempDir(), "controls-inputs.json")
+		require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+		return path
+	}
+
+	t.Run("a JSON object of control inputs is decoded", func(t *testing.T) {
+		inputs, err := ReadControlsInputsFile(write(t, `{"key1":["val1","val2"],"key2":[]}`))
+
+		require.NoError(t, err)
+		assert.Equal(t, map[string][]string{"key1": {"val1", "val2"}, "key2": {}}, inputs)
+	})
+	t.Run("an empty object decodes to no inputs", func(t *testing.T) {
+		inputs, err := ReadControlsInputsFile(write(t, `{}`))
+
+		require.NoError(t, err)
+		assert.Empty(t, inputs)
+	})
+	t.Run("a missing file", func(t *testing.T) {
+		_, err := ReadControlsInputsFile(filepath.Join(t.TempDir(), "missing.json"))
+
+		require.ErrorIs(t, err, os.ErrNotExist)
+	})
+	t.Run("a file that is not a JSON object of control inputs", func(t *testing.T) {
+		_, err := ReadControlsInputsFile(write(t, `["key1"]`))
+
+		require.Error(t, err)
+	})
+	t.Run("a directory", func(t *testing.T) {
+		_, err := ReadControlsInputsFile(t.TempDir())
+
+		require.ErrorContains(t, err, "is a directory, not a file")
+	})
+	t.Run("an oversized file", func(t *testing.T) {
+		path := write(t, "")
+		require.NoError(t, os.Truncate(path, maxPolicyFileBytes+1))
+
+		_, err := ReadControlsInputsFile(path)
+
+		require.ErrorIs(t, err, ErrPolicyTooLarge)
+	})
 }
 
 func writeTempJSONControlInputs(t testing.TB) (string, map[string][]string) {

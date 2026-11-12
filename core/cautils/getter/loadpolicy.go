@@ -428,8 +428,8 @@ func (lp *LoadPolicy) GetControlsInputs(_ context.Context, _ /* clusterName */ s
 		return nil, formattedError
 	}
 
-	controlInputs := make(map[string][]string, 100) // from armotypes.Settings.PostureControlInputs
-	if err = json.Unmarshal(buf, &controlInputs); err != nil {
+	controlInputs, err := decodeControlsInputs(buf)
+	if err != nil {
 		formattedError := fmt.Errorf(
 			`error reading %s file, %v, "controls-config" will be downloaded from ARMO management portal`,
 			fileName, err,
@@ -441,6 +441,27 @@ func (lp *LoadPolicy) GetControlsInputs(_ context.Context, _ /* clusterName */ s
 		lp.recordConsumedFile(filePath, buf)
 	}
 
+	return controlInputs, nil
+}
+
+// ReadControlsInputsFile reads and decodes the controls configuration file at
+// path under the rules GetControlsInputs applies: a regular file within the size
+// limit, holding a JSON object of control inputs. Unlike GetControlsInputs, whose
+// errors are worded for a scan that goes on with another source, it returns the
+// cause, for a caller that has to refuse an unusable file before it acts.
+func ReadControlsInputsFile(path string) (map[string][]string, error) {
+	buf, err := readPolicyFile(path)
+	if err != nil {
+		return nil, err
+	}
+	return decodeControlsInputs(buf)
+}
+
+func decodeControlsInputs(buf []byte) (map[string][]string, error) {
+	controlInputs := make(map[string][]string, 100) // from armotypes.Settings.PostureControlInputs
+	if err := json.Unmarshal(buf, &controlInputs); err != nil {
+		return nil, err
+	}
 	return controlInputs, nil
 }
 
