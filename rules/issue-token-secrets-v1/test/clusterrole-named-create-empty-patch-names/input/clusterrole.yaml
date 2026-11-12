@@ -1,0 +1,14 @@
+# the empty name is a plain create's name, not an object apply could create.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: secret-writer
+rules:
+- apiGroups: [""]
+  resources: ["secrets"]
+  resourceNames: ["a"]
+  verbs: ["create"]
+- apiGroups: [""]
+  resources: ["secrets"]
+  resourceNames: [""]
+  verbs: ["patch"]
