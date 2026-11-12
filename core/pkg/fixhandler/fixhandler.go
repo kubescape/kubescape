@@ -139,14 +139,18 @@ func NewFixHandler(fixInfo *metav1.FixInfo) (*FixHandler, error) {
 		// --base-path, though, require the report's claimed location to actually resolve
 		// inside it before accepting it as the fix root.
 		if fixInfo.BasePath != "" {
-			if strings.TrimSpace(fixInfo.BasePath) == "" {
+			// normalized once, here: resourceBasePath checks every resource's source path
+			// against the stored value, and a padded one fails that check and falls back
+			// to the report-wide root
+			fixInfo.BasePath = strings.TrimSpace(fixInfo.BasePath)
+			if fixInfo.BasePath == "" {
 				return nil, errors.New("--base-path needs a directory path")
 			}
 			resolvedLocalPath, err := filepath.EvalSymlinks(localPath)
 			if err != nil {
 				return nil, fmt.Errorf("failed to resolve report's scan path %q: %w", localPath, err)
 			}
-			resolvedBasePath, err := filepath.EvalSymlinks(strings.TrimSpace(fixInfo.BasePath))
+			resolvedBasePath, err := filepath.EvalSymlinks(fixInfo.BasePath)
 			if err != nil {
 				return nil, fmt.Errorf("invalid --base-path %q: %w", fixInfo.BasePath, err)
 			}
