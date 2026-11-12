@@ -896,6 +896,15 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		case path != "" && basePath != "":
 			return mcpToolError(ErrCodeInvalidArgument, "base_path applies only with report_path", map[string]any{"argument": "base_path"}), nil
 		}
+		// path is confined to the workspace by the scan it runs. report_path is
+		// read here instead, and base_path is where the files the report names
+		// are read from and returned patched, so both need the same boundary.
+		if reportPath, toolErr = ksServer.containToWorkspace("report_path", reportPath); toolErr != nil {
+			return toolErr, nil
+		}
+		if basePath, toolErr = ksServer.containToWorkspace("base_path", basePath); toolErr != nil {
+			return toolErr, nil
+		}
 		rawControlIDs, hasControlIDs := arguments["control_ids"]
 		controlIDs, toolErr := parseControlIDs(rawControlIDs, hasControlIDs)
 		if toolErr != nil {
