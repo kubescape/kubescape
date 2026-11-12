@@ -1,0 +1,16 @@
+# A ServiceAccount subject of a RoleBinding may leave out its namespace: the
+# authorizer then reads it as the binding's own namespace, so this grants
+# team-a/debugger-sa. A ServiceAccount subject has no apiGroup either, so the
+# API server returns the subject with neither field set.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: debugger-rb
+  namespace: team-a
+subjects:
+- kind: ServiceAccount
+  name: debugger-sa
+roleRef:
+  kind: ClusterRole
+  name: ephemeral-debugger
+  apiGroup: rbac.authorization.k8s.io
