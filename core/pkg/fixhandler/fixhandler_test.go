@@ -1480,3 +1480,34 @@ func TestWriteFixesToFile_RejectsChangedManifest(t *testing.T) {
 		})
 	}
 }
+
+// TestNewFixHandler_PaddedBasePath: a valid --base-path with surrounding whitespace is
+// accepted (the CLI trims it, direct callers may not), and the stored value is the
+// trimmed one, so a resource below it keeps its own source path instead of falling
+// back to the report-wide root.
+func TestNewFixHandler_PaddedBasePath(t *testing.T) {
+	trusted, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
+	report := reporthandlingv2.PostureReport{
+		Metadata: reporthandlingv2.Metadata{
+			ScanMetadata: reporthandlingv2.ScanMetadata{ScanningTarget: reporthandlingv2.Directory},
+			ContextMetadata: reporthandlingv2.ContextMetadata{
+				DirectoryContextMetadata: &reporthandlingv2.DirectoryContextMetadata{BasePath: trusted},
+			},
+		},
+	}
+	raw, err := json.Marshal(report)
+	require.NoError(t, err)
+	reportFile := filepath.Join(trusted, "report.json")
+	require.NoError(t, os.WriteFile(reportFile, raw, 0o600))
+
+	fixInfo := &metav1.FixInfo{ReportFile: reportFile, BasePath: "  " + trusted + "\t"}
+	handler, err := NewFixHandler(fixInfo)
+	require.NoError(t, err)
+	assert.Equal(t, trusted, handler.fixInfo.BasePath)
+
+	sourcePath := filepath.Join(trusted, "deploy.yaml")
+	require.NoError(t, os.WriteFile(sourcePath, []byte("kind: Deployment\n"), 0o600))
+	resource := &reporthandling.Resource{Source: &reporthandling.Source{Path: sourcePath}}
+	assert.Equal(t, sourcePath, handler.resourceBasePath(resource), "a resource below the padded base path must keep its source path")
+}
