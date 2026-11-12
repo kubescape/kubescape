@@ -92,12 +92,23 @@ func createDiffReportsTools(ksServer *KubescapeMcpserver) {
 			return toolErr, nil
 		}
 
-		kind, postureChangeSet, vulnerabilityChangeSet, err := diff.CompareReports(baseReport, headReport, diff.Options{})
+		// Both reports are read from disk, so they are confined to the
+		// workspace like every other path a tool reads.
+		baseReportPath, toolErr := ksServer.containToWorkspace("base_report", baseReport)
+		if toolErr != nil {
+			return toolErr, nil
+		}
+		headReportPath, toolErr := ksServer.containToWorkspace("head_report", headReport)
+		if toolErr != nil {
+			return toolErr, nil
+		}
+
+		kind, postureChangeSet, vulnerabilityChangeSet, err := diff.CompareReports(baseReportPath, headReportPath, diff.Options{})
 		if err != nil {
 			if errors.Is(err, diff.ErrMixedReportKinds) {
 				return mcpToolError(ErrCodeInvalidArgument, err.Error(), map[string]any{
-					"base_report_kind": reportKindLabel(diff.ReportKindOf(baseReport)),
-					"head_report_kind": reportKindLabel(diff.ReportKindOf(headReport)),
+					"base_report_kind": reportKindLabel(diff.ReportKindOf(baseReportPath)),
+					"head_report_kind": reportKindLabel(diff.ReportKindOf(headReportPath)),
 				}), nil
 			}
 			return mcpToolError(ErrCodeInvalidArgument, fmt.Sprintf("failed to compare reports: %v", err), nil), nil
