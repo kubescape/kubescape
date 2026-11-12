@@ -32,5 +32,11 @@ spec:
                     type: array
                     items:
                       type: string
+                  properties:
+                    trustedCosignPublicKeys:
+                      type: array
+                      items:
+                        type: string
+                      description: "Public keys used for Cosign signature verification (may be empty)."
               required:
                 - controls
