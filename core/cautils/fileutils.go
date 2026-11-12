@@ -48,6 +48,9 @@ var (
 	// unrenderedHelmTemplateReason marks a chart template skipped because its chart was not rendered.
 	unrenderedHelmTemplateReason = "unrendered Helm template: its chart was not rendered"
 
+	// ErrHelmLoadFailed is returned when a discovered Helm chart cannot be loaded.
+	ErrHelmLoadFailed = errors.New("failed to load Helm chart")
+
 	// ErrHelmRenderFailed is returned when a discovered Helm chart cannot be rendered.
 	ErrHelmRenderFailed = errors.New("failed to render Helm chart")
 
@@ -218,7 +221,13 @@ func loadResourcesFromHelmCharts(ctx context.Context, basePath string, valueOpts
 
 		chart, err := NewHelmChart(helmDir)
 		if err != nil {
-			logger.L().Ctx(ctx).Warning("Failed to load Helm chart", helpers.String("path", helmDir), helpers.Error(err))
+			loadErr := fmt.Errorf("%w at %q: %w", ErrHelmLoadFailed, helmDir, err)
+			// As with a render failure below: the chart the user asked to scan fails
+			// the scan with the cause, and a chart found inside a broader scan is skipped.
+			if isExplicitChart {
+				return nil, nil, nil, loadErr
+			}
+			logger.L().Ctx(ctx).Warning("Skipping Helm chart that failed to load", helpers.Error(loadErr))
 			continue
 		}
 		values := chart.GetDefaultValues()
