@@ -4,9 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
+	"unsafe"
 
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/opa-utils/reporthandling"
@@ -45,14 +48,18 @@ type DownloadReleasedPolicy struct {
 	loading *releaseLoad
 	// downloadTimeout bounds one download; zero means defaultDownloadTimeout.
 	downloadTimeout time.Duration
+	// downloadContext, when set, makes the context a download runs under, in
+	// place of one that ends after downloadTimeout. It lets a test decide when
+	// a download's time is up.
+	downloadContext func() (context.Context, context.CancelFunc)
 }
 
 // defaultDownloadTimeout bounds one download of a release. The files of a
 // release come to a few megabytes in about a dozen requests, and the store makes
 // them without a deadline of its own, so a server that accepts a request and
 // never answers would otherwise hold the download, and every scan that joins it,
-// for good. The limit is for the whole download rather than for a request, which
-// the store does not let us set, and is generous enough for a slow link.
+// for good. The limit is for the whole download and is generous enough for a
+// slow link.
 const defaultDownloadTimeout = 2 * time.Minute
 
 // errDownloadTimedOut is what a download that ran past its limit ends with.
@@ -62,6 +69,9 @@ var errDownloadTimedOut = errors.New("downloading the release timed out")
 // release while it runs waits for.
 type releaseLoad struct {
 	done chan struct{}
+	// waiters counts the callers that have joined this download, the one that
+	// started it included. It is guarded by the store's mu.
+	waiters int
 	// err is the outcome. It is set before done is closed.
 	err error
 }
@@ -289,11 +299,11 @@ func (drp *DownloadReleasedPolicy) SetRegoObjects() error {
 // is not. The download is shared: a caller that arrives while one is running
 // waits for it and gets its outcome, and a failed one is not remembered, so the
 // next caller downloads again. A caller whose ctx ends stops waiting and gets the
-// context's error; the download itself is not stopped, since the files it needs
-// are fetched without a context, and it ends by loading the release for the next
-// caller or by failing. A download that outlasts its time limit fails with
-// errDownloadTimedOut for every caller waiting on it, and the next caller starts
-// a new one.
+// context's error; the download itself is not stopped, since another caller may
+// be waiting for it, and it ends by loading the release for the next caller or by
+// failing. A download that outlasts its time limit has its requests ended and
+// fails with errDownloadTimedOut for every caller waiting on it, and the next
+// caller starts a new one.
 func (drp *DownloadReleasedPolicy) SetRegoObjectsContext(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -310,6 +320,7 @@ func (drp *DownloadReleasedPolicy) SetRegoObjectsContext(ctx context.Context) er
 		drp.loading = load
 		go drp.download(load, drp.gs)
 	}
+	load.waiters++
 	drp.mu.Unlock()
 
 	select {
@@ -333,23 +344,25 @@ func (drp *DownloadReleasedPolicy) download(load *releaseLoad, base *gitregostor
 	candidate := gitregostore.NewGitRegoStore(base.BaseUrl, base.Owner, base.Repository, base.Path, base.Tag, base.Branch, base.FrequencyPullFromGitMinutes)
 	candidate.URL = base.URL
 
-	// The store cannot be given a context, so its fetch runs on a goroutine that
-	// the limit can walk away from. The channel has room for its result so that it
-	// can finish, and be collected, whenever its request returns. What it was
-	// filling is the candidate, which a timed-out download does not publish.
-	timeout := drp.downloadTimeout
-	if timeout <= 0 {
-		timeout = defaultDownloadTimeout
-	}
+	ctx, cancel := drp.newDownloadContext()
+	defer cancel()
+	// The store makes its requests without a context. Handing its client a
+	// transport that carries ctx is what ends them, in flight or not yet sent,
+	// when the download's time is up, so that no request outlives the download.
+	// Should the store stop having a client we can reach, the wait below still
+	// ends at the limit, and what the fetch brings in later goes to the
+	// candidate, which a timed-out download does not publish.
+	bindRequests(candidate, ctx)
 	fetched := make(chan error, 1)
 	go func() { fetched <- candidate.SetRegoObjects() }()
-	timer := time.NewTimer(timeout)
-	defer timer.Stop()
 	var err error
 	select {
 	case err = <-fetched:
-	case <-timer.C:
-		err = fmt.Errorf("%w after %s", errDownloadTimedOut, timeout)
+		if err != nil && ctx.Err() != nil {
+			err = fmt.Errorf("%w: %v", errDownloadTimedOut, err)
+		}
+	case <-ctx.Done():
+		err = errDownloadTimedOut
 	}
 	if err != nil && drp.version != "" {
 		err = fmt.Errorf("failed to download controls for pinned version %q: %w", drp.version, err)
@@ -364,6 +377,51 @@ func (drp *DownloadReleasedPolicy) download(load *releaseLoad, base *gitregostor
 
 	load.err = err
 	close(load.done)
+}
+
+func (drp *DownloadReleasedPolicy) newDownloadContext() (context.Context, context.CancelFunc) {
+	if drp.downloadContext != nil {
+		return drp.downloadContext()
+	}
+	timeout := drp.downloadTimeout
+	if timeout <= 0 {
+		timeout = defaultDownloadTimeout
+	}
+	return context.WithTimeout(context.Background(), timeout)
+}
+
+// contextTransport sends every request under ctx.
+type contextTransport struct {
+	ctx  context.Context
+	next http.RoundTripper
+}
+
+func (t contextTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	return t.next.RoundTrip(req.WithContext(t.ctx))
+}
+
+// bindRequests makes the requests of gs end with ctx. gitregostore keeps its
+// HTTP client in a field it does not export and offers no option for a client, a
+// timeout or a context (v2.0.39 is the latest release), so this reaches the
+// client by reflection and gives it a transport that carries ctx. It reports
+// whether it could; a test pins that it can for the version in use.
+func bindRequests(gs *gitregostore.GitRegoStore, ctx context.Context) bool {
+	field := reflect.ValueOf(gs).Elem().FieldByName("httpClient")
+	if !field.IsValid() || field.Type() != reflect.TypeOf((*http.Client)(nil)) {
+		return false
+	}
+	// The one place an unexported field of the dependency is touched, for want of
+	// an option for it.
+	client := (**http.Client)(unsafe.Pointer(field.UnsafeAddr()))
+	if *client == nil {
+		*client = &http.Client{}
+	}
+	next := (*client).Transport
+	if next == nil {
+		next = http.DefaultTransport
+	}
+	(*client).Transport = contextTransport{ctx: ctx, next: next}
+	return true
 }
 
 func (drp *DownloadReleasedPolicy) GetExceptions(ctx context.Context, clusterName string) ([]armotypes.PostureExceptionPolicy, error) {

@@ -28,6 +28,8 @@ type release struct {
 	requests map[string]int
 	failing  map[string]bool
 	gates    map[string]chan struct{}
+	arrivals map[string]chan struct{}
+	aborted  map[string]int
 }
 
 func newRelease(t *testing.T, framework string) *release {
@@ -37,6 +39,8 @@ func newRelease(t *testing.T, framework string) *release {
 		requests:  map[string]int{},
 		failing:   map[string]bool{},
 		gates:     map[string]chan struct{}{},
+		arrivals:  map[string]chan struct{}{},
+		aborted:   map[string]int{},
 	}
 	r.Server = httptest.NewServer(http.HandlerFunc(r.serve))
 	t.Cleanup(r.Close)
@@ -47,16 +51,28 @@ func (r *release) serve(w http.ResponseWriter, req *http.Request) {
 	file := req.URL.Path[len("/download/"):]
 	r.mu.Lock()
 	r.requests[file]++
-	fail, gate := r.failing[file], r.gates[file]
+	gate := r.gates[file]
+	select {
+	case <-r.arrival(file):
+	default:
+		close(r.arrival(file))
+	}
 	r.mu.Unlock()
 
 	if gate != nil {
 		select {
 		case <-gate:
 		case <-req.Context().Done():
+			// the client ended the request: it was not left waiting
+			r.mu.Lock()
+			r.aborted[file]++
+			r.mu.Unlock()
 			return
 		}
 	}
+	r.mu.Lock()
+	fail := r.failing[file] // read once the request is let go, so a test can fail a held one
+	r.mu.Unlock()
 	if fail {
 		http.Error(w, "unavailable", http.StatusInternalServerError)
 		return
@@ -77,6 +93,31 @@ func (r *release) serve(w http.ResponseWriter, req *http.Request) {
 	default:
 		http.NotFound(w, req)
 	}
+}
+
+// arrival is closed when the first request for file reaches the server. The
+// caller holds r.mu.
+func (r *release) arrival(file string) chan struct{} {
+	if r.arrivals[file] == nil {
+		r.arrivals[file] = make(chan struct{})
+	}
+	return r.arrivals[file]
+}
+
+// arrived returns a channel that is closed once a request for file has reached
+// the server, which is how a test knows that the request is the one in flight.
+func (r *release) arrived(file string) <-chan struct{} {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.arrival(file)
+}
+
+// abortedRequests counts the requests for file that the client ended before the
+// server answered.
+func (r *release) abortedRequests(file string) int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.aborted[file]
 }
 
 func (r *release) count(file string) int {
@@ -499,51 +540,102 @@ func fetchesInProgress() int {
 	return strings.Count(string(buf), "gitregostore.(*GitRegoStore).SetRegoObjects")
 }
 
-// A server that takes a request and never answers must not hold the store for
-// good: the download ends at its limit with an error that says so, the store is
-// free for another, and what the abandoned fetch brings in later is not
-// published. Not parallel: it counts the fetches running in the process.
-func TestStalledDownloadTimesOutAndTheStoreCanRetry(t *testing.T) {
+// endsAt makes the store's download run under a context that the test ends.
+func endsAt(p *DownloadReleasedPolicy) (end func()) {
+	ctx, cancel := context.WithCancel(context.Background())
+	p.downloadContext = func() (context.Context, context.CancelFunc) { return ctx, func() {} }
+	return cancel
+}
+
+func isLoading(p *DownloadReleasedPolicy) bool {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.loading != nil
+}
+
+// waitersOf waits until n callers have joined the download in progress.
+func waitersOf(t *testing.T, p *DownloadReleasedPolicy, n int) {
+	t.Helper()
+	require.Eventually(t, func() bool {
+		p.mu.RLock()
+		defer p.mu.RUnlock()
+		return p.loading != nil && p.loading.waiters == n
+	}, 10*time.Second, time.Millisecond, "%d callers did not join the download", n)
+}
+
+// The store keeps the client it makes its requests with to itself, and the
+// download's time limit works through it. A version of the store that changes
+// that fails here, and not by letting a request run on unbounded.
+func TestStoreRequestsCanBeBound(t *testing.T) {
+	t.Parallel()
+	assert.True(t, bindRequests(NewDownloadReleasedPolicy().gs, t.Context()))
+}
+
+// A server that takes the request and never answers must not hold the download:
+// when its time is up the request itself is ended, which the server sees as the
+// client going away, and nothing of the download is left running. The store is
+// free for another, nothing was published, and the retry loads the release.
+// Not parallel: it counts the fetches running in the process.
+func TestStalledRequestIsEndedWhenTheDownloadTimesOut(t *testing.T) {
 	before := fetchesInProgress()
 	r := newRelease(t, "nsa")
 	p := r.store()
-	p.downloadTimeout = 150 * time.Millisecond
+	end := endsAt(p)
 	open := r.hold("controls")
 	defer open()
 
-	start := time.Now()
-	err := p.SetRegoObjectsContext(t.Context())
-	require.ErrorIs(t, err, errDownloadTimedOut)
-	assert.Less(t, time.Since(start), 10*time.Second)
+	result := make(chan error, 1)
+	go func() { result <- p.SetRegoObjectsContext(t.Context()) }()
+	<-r.arrived("controls")
+	assert.Equal(t, 0, r.abortedRequests("controls"), "the request was ended before its time was up")
+	end()
 
-	p.mu.RLock()
-	idle := p.loading == nil
-	p.mu.RUnlock()
-	assert.True(t, idle, "the timed-out download still holds the store")
+	require.ErrorIs(t, <-result, errDownloadTimedOut)
+	assert.False(t, isLoading(p), "the timed-out download still holds the store")
 	require.NoError(t, holdsNone(p))
-	assert.Equal(t, 1, r.count("controls"))
 
-	// The abandoned fetch gets its answer and finishes its work. It fills the
-	// store of its own, which nobody reads.
-	open()
-	require.Eventually(t, func() bool { return fetchesInProgress() <= before }, 10*time.Second, 10*time.Millisecond,
-		"the abandoned fetch never ended")
+	// The gate is still shut: only the client ending the request lets the handler go.
+	require.Eventually(t, func() bool { return r.abortedRequests("controls") == 1 }, 10*time.Second, time.Millisecond,
+		"the request was left open")
+	require.Eventually(t, func() bool { return fetchesInProgress() <= before }, 10*time.Second, time.Millisecond,
+		"the download's fetch did not end")
 	require.NoError(t, holdsNone(p), "a timed-out download published the release")
 
-	p.downloadTimeout = 0
+	p.downloadContext = nil
+	open()
 	require.NoError(t, p.SetRegoObjectsContext(t.Context()))
 	require.NoError(t, holdsAll(p, "nsa"))
 	assert.Equal(t, 2, r.count("controls"), "the retry downloaded the release again")
 }
 
-// Scans that wait together for a stalled download share its one timeout: the
-// server is asked once, every waiter gets the error, and the next scan starts
-// the one new download.
+// The limit is also a real one: with no test in charge of it, a download that
+// stalls ends at it, for a caller whose own context does not.
+func TestStalledDownloadEndsAtItsTimeLimit(t *testing.T) {
+	t.Parallel()
+	r := newRelease(t, "nsa")
+	p := r.store()
+	p.downloadTimeout = 200 * time.Millisecond
+	open := r.hold("controls")
+	defer open()
+
+	require.ErrorIs(t, p.SetRegoObjectsContext(t.Context()), errDownloadTimedOut)
+	assert.False(t, isLoading(p))
+	require.NoError(t, holdsNone(p))
+
+	p.downloadTimeout = 0
+	open()
+	require.NoError(t, p.SetRegoObjectsContext(t.Context()))
+	require.NoError(t, holdsAll(p, "nsa"))
+}
+
+// Scans that wait together for a stalled download share its timeout. The
+// download is not allowed to time out until every scan has joined it, so each
+// gets the one outcome of the one download the server was asked for.
 func TestWaitersOfAStalledDownloadShareItsTimeout(t *testing.T) {
 	t.Parallel()
 	r := newRelease(t, "nsa")
 	p := r.store()
-	p.downloadTimeout = 150 * time.Millisecond
+	end := endsAt(p)
 	open := r.hold("controls")
 	defer open()
 
@@ -557,37 +649,53 @@ func TestWaitersOfAStalledDownloadShareItsTimeout(t *testing.T) {
 			errs[i] = p.SetRegoObjectsContext(t.Context())
 		}()
 	}
+	waitersOf(t, p, scans)
+	<-r.arrived("controls")
+	end()
 	wg.Wait()
+
 	for i, err := range errs {
 		require.ErrorIs(t, err, errDownloadTimedOut, "scan %d", i)
 	}
 	assert.Equal(t, 1, r.count("controls"), "the scans did not share one download")
+	assert.False(t, isLoading(p))
 
+	p.downloadContext = nil
 	open()
 	require.NoError(t, p.SetRegoObjectsContext(t.Context()))
 	require.NoError(t, holdsAll(p, "nsa"))
 	assert.Equal(t, 2, r.count("controls"))
 }
 
-// A scan that gives up while the download is stalled does not wait for the
-// limit, and the limit still frees the store for the next scan.
-func TestCancelledWaiterOfAStalledDownloadLeavesTheStoreRecoverable(t *testing.T) {
+// A scan that gives up while the download is in flight stops waiting at once
+// and leaves the download running for the others, which is not duplicated. When
+// that download then fails the store is free and the next scan retries.
+func TestCancelledWaiterLeavesTheDownloadAndTheStoreRecoverable(t *testing.T) {
 	t.Parallel()
 	r := newRelease(t, "nsa")
 	p := r.store()
-	p.downloadTimeout = 300 * time.Millisecond
 	open := r.hold("controls")
 	defer open()
 
-	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Millisecond)
-	defer cancel()
-	require.ErrorIs(t, p.SetRegoObjectsContext(ctx), context.DeadlineExceeded)
+	ctx, cancel := context.WithCancel(t.Context())
+	result := make(chan error, 1)
+	go func() { result <- p.SetRegoObjectsContext(ctx) }()
+	<-r.arrived("controls")
+	cancel()
 
+	require.ErrorIs(t, <-result, context.Canceled)
+	assert.True(t, isLoading(p), "the download others may wait for was dropped")
+	assert.Equal(t, 0, r.abortedRequests("controls"), "a waiter leaving ended the request")
+
+	// The download then fails, and the store can be used again.
+	r.fail("controls", true)
+	open()
 	waitIdle(t, p)
 	require.NoError(t, holdsNone(p))
-	open()
+	r.fail("controls", false)
 	require.NoError(t, p.SetRegoObjectsContext(t.Context()))
 	require.NoError(t, holdsAll(p, "nsa"))
+	assert.Equal(t, 2, r.count("controls"))
 }
 
 // A pinned release says which one timed out, and the cause can still be found.
@@ -596,11 +704,16 @@ func TestPinnedReleaseTimeoutKeepsItsCause(t *testing.T) {
 	r := newRelease(t, "nsa")
 	p := NewDownloadReleasedPolicyWithVersion("v2.0.301")
 	p.gs.URL = r.URL + "/download"
-	p.downloadTimeout = 100 * time.Millisecond
+	end := endsAt(p)
 	open := r.hold("controls")
 	defer open()
 
-	err := p.SetRegoObjectsContext(t.Context())
+	result := make(chan error, 1)
+	go func() { result <- p.SetRegoObjectsContext(t.Context()) }()
+	<-r.arrived("controls")
+	end()
+
+	err := <-result
 	require.ErrorIs(t, err, errDownloadTimedOut)
 	assert.Contains(t, err.Error(), `"v2.0.301"`)
 }
