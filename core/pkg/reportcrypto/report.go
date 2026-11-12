@@ -4,10 +4,15 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 
+	"github.com/kubescape/k8s-interface/cloudsupport"
+	"github.com/kubescape/k8s-interface/cloudsupport/apis"
+	cloudsupportv1 "github.com/kubescape/k8s-interface/cloudsupport/v1"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
+	"github.com/kubescape/opa-utils/objectsenvelopes/hostsensor"
 	"github.com/kubescape/opa-utils/reporthandling"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	k8sjson "k8s.io/apimachinery/pkg/util/json"
@@ -327,16 +332,72 @@ func (d *reportDecryptor) decryptResource(resource rawObject, context string) (s
 	return oldID, newID, nil
 }
 
+type apiServerInfoEnvelope struct {
+	*cloudsupport.ApiServerInfo
+}
+
+func newApiServerInfoEnvelope(object map[string]any) (*apiServerInfoEnvelope, error) {
+	raw, err := json.Marshal(object)
+	if err != nil {
+		return nil, err
+	}
+	var info cloudsupport.ApiServerInfo
+	if err := k8sjson.Unmarshal(raw, &info); err != nil {
+		return nil, err
+	}
+	return &apiServerInfoEnvelope{ApiServerInfo: &info}, nil
+}
+
+func (c *apiServerInfoEnvelope) SetObject(object map[string]any) {
+	raw, err := json.Marshal(object)
+	if err != nil {
+		return
+	}
+	_ = k8sjson.Unmarshal(raw, c.ApiServerInfo)
+}
+
 // resourceEnvelope wraps a report resource object in the envelope whose
 // SetName and SetNamespace the anonymizer encrypted it through, so the same
-// fields are restored. An RBAC subject (a Rego response vector object) keeps
-// its name and namespace at the top level of the object, beside its
-// relatedObjects; every other resource keeps them under metadata.
+// fields and exact resource IDs are restored.
+// Typed envelopes (host sensor, cloud provider, API server, and
+// Rego response vector) reconstruct their specific resource ID formats; all other
+// Kubernetes workloads fall back to standard WorkloadObj so their labels,
+// annotations, and containers can be decrypted.
 func resourceEnvelope(object map[string]any) workloadinterface.IMetadata {
 	if objectsenvelopes.IsTypeRegoResponseVector(object) {
 		return objectsenvelopes.NewRegoResponseVectorObject(object)
 	}
+	if hostsensor.IsTypeTypeHostSensor(object) {
+		if env := hostsensor.NewHostSensorDataEnvelope(object); !isNilEnvelope(env) {
+			return env
+		}
+	}
+	if apis.IsTypeDescriptiveInfoFromCloudProvider(object) {
+		if env := cloudsupportv1.NewDescriptiveInfoFromCloudProvider(object); !isNilEnvelope(env) {
+			return env
+		}
+	}
+	if object["kind"] == "APIServerInfo" || object["apiVersion"] == cloudsupport.ApiServerInfoApiVersion {
+		if env, err := newApiServerInfoEnvelope(object); err == nil {
+			return env
+		}
+	}
 	return workloadinterface.NewWorkloadObj(object)
+}
+
+// isNilEnvelope reports whether NewObject returned a nil pointer held in a
+// non-nil interface. The host sensor and cloud provider constructors do that
+// when an object carries their apiVersion but does not decode into their struct.
+func isNilEnvelope(o workloadinterface.IMetadata) bool {
+	if o == nil {
+		return true
+	}
+	switch v := reflect.ValueOf(o); v.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return v.IsNil()
+	default:
+		return false
+	}
 }
 
 // decryptSource restores a resource source without discarding unknown fields.

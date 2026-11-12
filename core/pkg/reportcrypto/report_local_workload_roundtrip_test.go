@@ -325,7 +325,7 @@ func TestEncryptedEnvelopeReportRoundTrip(t *testing.T) {
 
 			decryptedID, object, _ := soleResource(t, decryptedJSON)
 			assert.Equal(t, name, stringAt(t, object, tc.namePath))
-			assert.True(t, strings.HasSuffix(decryptedID, "/"+name) || strings.Contains(decryptedID, "/"+name+"/"), decryptedID)
+			assert.Equal(t, tc.resource().GetID(), decryptedID)
 			tc.check(t, object)
 		})
 	}
