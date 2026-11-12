@@ -1,20 +1,88 @@
 package locationresolver
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 
 	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/pathparse"
 	"github.com/mikefarah/yq/v4/pkg/yqlib"
 	"gopkg.in/op/go-logging.v1"
 	"gopkg.in/yaml.v3"
 )
+
+const (
+	// defaultMaxFileSize bounds manifest files parsed from disk (32 MiB), preventing
+	// uncontrolled memory allocation from oversized inputs or decompression bombs (CWE-400).
+	defaultMaxFileSize = 32 * 1024 * 1024
+	maxFileSizeEnvVar  = "KUBESCAPE_MAX_FILE_SIZE"
+)
+
+var (
+	// ErrManifestNotRegular is returned when a manifest file is not a regular file (e.g. FIFO, directory, device).
+	ErrManifestNotRegular = errors.New("manifest is not a regular file")
+	// ErrManifestTooLarge is returned when a manifest file exceeds the maximum allowed size limit.
+	ErrManifestTooLarge = errors.New("manifest exceeds maximum size limit")
+)
+
+// getMaxFileSize returns the maximum allowed size in bytes for a manifest file,
+// configurable via KUBESCAPE_MAX_FILE_SIZE, defaulting to defaultMaxFileSize (32 MiB).
+// math.MaxInt64 is rejected to avoid integer overflow in limit+1 calculations.
+func getMaxFileSize() int64 {
+	if v, ok := os.LookupEnv(maxFileSizeEnvVar); ok {
+		trimmed := strings.TrimSpace(v)
+		if trimmed != "" {
+			if parsed, err := strconv.ParseInt(trimmed, 10, 64); err == nil && parsed > 0 && parsed != math.MaxInt64 {
+				return parsed
+			}
+			logger.L().Warning("invalid KUBESCAPE_MAX_FILE_SIZE, using default", helpers.String("value", v), helpers.Int("default", int(defaultMaxFileSize)))
+		}
+	}
+	return defaultMaxFileSize
+}
+
+func openManifestFile(path string) (*os.File, error) {
+	cleanPath := filepath.Clean(path)
+	preStat, err := os.Stat(cleanPath)
+	if err != nil {
+		return nil, err
+	}
+	if preStat.IsDir() {
+		return nil, fmt.Errorf("%q is a directory, not a file: %w", path, ErrManifestNotRegular)
+	}
+	if !preStat.Mode().IsRegular() {
+		return nil, fmt.Errorf("%w: %q", ErrManifestNotRegular, path)
+	}
+
+	file, err := os.OpenFile(cleanPath, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return nil, err
+	}
+
+	info, err := file.Stat()
+	if err != nil {
+		_ = file.Close()
+		return nil, err
+	}
+	if info.IsDir() {
+		_ = file.Close()
+		return nil, fmt.Errorf("%q is a directory, not a file: %w", path, ErrManifestNotRegular)
+	}
+	if !info.Mode().IsRegular() {
+		_ = file.Close()
+		return nil, fmt.Errorf("%w: %q", ErrManifestNotRegular, path)
+	}
+	return file, nil
+}
 
 // PathLocationResolver finds where in a manifest a rule's path points. It
 // decodes every document in the file once and resolves paths against a chosen
@@ -48,15 +116,34 @@ type Location struct {
 }
 
 func NewPathLocationResolver(yamlPath string) (*PathLocationResolver, error) {
-	file, err := os.Open(filepath.Clean(yamlPath))
+	file, err := openManifestFile(yamlPath)
 	if err != nil {
 		return nil, err
 	}
 	defer file.Close()
 
+	limit := getMaxFileSize()
+	info, err := file.Stat()
+	if err == nil && info.Size() > limit {
+		return nil, fmt.Errorf("%w: %q exceeds the %d byte limit", ErrManifestTooLarge, yamlPath, limit)
+	}
+
+	readLimit := limit
+	if readLimit < math.MaxInt64 {
+		readLimit++
+	}
+
+	data, err := io.ReadAll(io.LimitReader(file, readLimit))
+	if err != nil {
+		return nil, fmt.Errorf("error reading manifest %s: %w", yamlPath, err)
+	}
+	if int64(len(data)) > limit {
+		return nil, fmt.Errorf("%w: %q exceeds the %d byte limit", ErrManifestTooLarge, yamlPath, limit)
+	}
+
 	yamlNodes := make([]*yaml.Node, 0)
 
-	yamlDecoder := yaml.NewDecoder(file)
+	yamlDecoder := yaml.NewDecoder(bytes.NewReader(data))
 	for {
 		var yamlNode yaml.Node
 		err = yamlDecoder.Decode(&yamlNode)
