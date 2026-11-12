@@ -130,7 +130,7 @@ func TestKustomizeWorkloadsMatchThePlainBuild(t *testing.T) {
 
 	original := originRenderer
 	t.Cleanup(func() { originRenderer = original })
-	originRenderer = func(func() *krusty.Kustomizer, string) ([]byte, string, bool) { return nil, "", false }
+	originRenderer = func(func() *krusty.Kustomizer, string, []string) ([]byte, string, bool) { return nil, "", false }
 	plain, origins := renderedKustomizeWorkloads(t, overlay)
 
 	assert.Empty(t, origins, "the plain build records no origin")
@@ -217,7 +217,7 @@ func TestTakeKustomizeOrigin(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, takeKustomizeOrigin(tt.obj, base))
+			assert.Equal(t, tt.want, takeKustomizeOrigin(tt.obj, base, true))
 
 			metadata, _ := tt.obj["metadata"].(map[string]any)
 			annotations, _ := metadata["annotations"].(map[string]any)
@@ -227,11 +227,11 @@ func TestTakeKustomizeOrigin(t *testing.T) {
 
 	t.Run("other annotations survive and the annotation map is dropped when empty", func(t *testing.T) {
 		obj := annotated("path: deploy.yaml\n", "team")
-		require.Equal(t, file, takeKustomizeOrigin(obj, base))
+		require.Equal(t, file, takeKustomizeOrigin(obj, base, true))
 		assert.Equal(t, map[string]any{"team": "kept"}, obj["metadata"].(map[string]any)["annotations"])
 
 		only := annotated("path: deploy.yaml\n")
-		require.Equal(t, file, takeKustomizeOrigin(only, base))
+		require.Equal(t, file, takeKustomizeOrigin(only, base, true))
 		assert.NotContains(t, only["metadata"], "annotations")
 	})
 }
@@ -241,6 +241,116 @@ func TestTakeKustomizeOrigin(t *testing.T) {
 func TestRenderWithOriginsReportsFailureInsteadOfGuessing(t *testing.T) {
 	newKustomizer := func() *krusty.Kustomizer { return krusty.MakeKustomizer(krusty.MakeDefaultOptions()) }
 
-	_, _, ok := renderWithOrigins(newKustomizer, filepath.Join(t.TempDir(), "does-not-exist"))
+	_, _, ok := renderWithOrigins(newKustomizer, filepath.Join(t.TempDir(), "does-not-exist"), nil)
 	assert.False(t, ok, "a directory that is not there cannot be rendered")
+}
+
+// The wrapper must not replace what the scanned kustomization asked Kustomize to
+// add to its resources. Kustomize hands the outermost kustomization's
+// buildMetadata to everything below it, so a wrapper with a list of its own would.
+func TestOriginModeFollowsTheScannedBuildMetadata(t *testing.T) {
+	tests := []struct {
+		name          string
+		buildMetadata string
+		want          originMode
+		preserved     []string
+	}{
+		{"nothing requested", "", originWrapper, nil},
+		{"only the managed-by label", "buildMetadata: [managedByLabel]\n", originWrapper, []string{"managedByLabel"}},
+		{"origin annotations", "buildMetadata: [originAnnotations]\n", originOwn, nil},
+		{"origin annotations and the managed-by label", "buildMetadata: [managedByLabel, originAnnotations]\n", originOwn, nil},
+		{"transformer annotations", "buildMetadata: [transformerAnnotations]\n", originUnavailable, nil},
+		{"transformer and origin annotations", "buildMetadata: [transformerAnnotations, originAnnotations]\n", originOwn, nil},
+		{"transformer annotations and the managed-by label", "buildMetadata: [managedByLabel, transformerAnnotations]\n", originUnavailable, nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			require.NoError(t, os.WriteFile(filepath.Join(dir, "kustomization.yaml"), []byte("resources:\n- d.yaml\n"+tt.buildMetadata), 0o600))
+
+			plan := originModeFor(dir)
+
+			assert.Equal(t, tt.want, plan.mode)
+			assert.Equal(t, tt.preserved, plan.preserved)
+		})
+	}
+
+	t.Run("no kustomization to read", func(t *testing.T) {
+		assert.Equal(t, originUnavailable, originModeFor(t.TempDir()).mode)
+	})
+	t.Run("a kustomization that is not YAML", func(t *testing.T) {
+		dir := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "kustomization.yaml"), []byte("resources: [unclosed\n"), 0o600))
+		assert.Equal(t, originUnavailable, originModeFor(dir).mode)
+	})
+}
+
+// kustomizeBuildMetadataFixture is a single-resource kustomization that asks for
+// the given buildMetadata.
+func kustomizeBuildMetadataFixture(t *testing.T, buildMetadata string) string {
+	t.Helper()
+	root := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "app"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "app", "deployment.yaml"),
+		[]byte("apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: demo\n  annotations:\n    team: platform\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "app", "kustomization.yaml"),
+		[]byte("resources:\n- deployment.yaml\n"+buildMetadata), 0o600))
+	return filepath.Join(root, "app")
+}
+
+func TestKustomizeKeepsTheManagedByLabelItAsked(t *testing.T) {
+	dir := kustomizeBuildMetadataFixture(t, "buildMetadata: [managedByLabel]\n")
+
+	byName, origins := renderedKustomizeWorkloads(t, dir)
+	deployment := byName["Deployment/demo"]
+	metadata, _ := deployment.GetObject()["metadata"].(map[string]any)
+	labels, _ := metadata["labels"].(map[string]any)
+
+	assert.Contains(t, labels, "app.kubernetes.io/managed-by", "the label the kustomization asked for is still added")
+	assert.NotContains(t, annotationsOf(deployment), kustomizeOriginAnnotation, "the annotation Kubescape asked for is removed")
+	assert.Equal(t, filepath.Join(dir, "deployment.yaml"), origins[deployment.GetID()], "and the origin is still found")
+
+	// Identical to what the plain build gives.
+	original := originRenderer
+	t.Cleanup(func() { originRenderer = original })
+	originRenderer = func(func() *krusty.Kustomizer, string, []string) ([]byte, string, bool) { return nil, "", false }
+	plain, _ := renderedKustomizeWorkloads(t, dir)
+	assert.Equal(t, plain["Deployment/demo"].GetObject(), deployment.GetObject())
+}
+
+// A kustomization that asked for origin annotations gets them, as it did before.
+func TestKustomizeKeepsTheOriginAnnotationItAsked(t *testing.T) {
+	dir := kustomizeBuildMetadataFixture(t, "buildMetadata: [originAnnotations]\n")
+
+	byName, origins := renderedKustomizeWorkloads(t, dir)
+	deployment := byName["Deployment/demo"]
+
+	assert.Contains(t, annotationsOf(deployment), kustomizeOriginAnnotation, "the user asked for it, so a rule can read it")
+	assert.Equal(t, "platform", annotationsOf(deployment)["team"])
+	assert.Equal(t, filepath.Join(dir, "deployment.yaml"), origins[deployment.GetID()],
+		"the origin is read from the annotation the plain build already carries")
+
+	// The annotation is the one the plain build writes: relative to the scanned
+	// directory, not to a wrapper.
+	assert.Equal(t, "path: deployment.yaml\n", annotationsOf(deployment)[kustomizeOriginAnnotation])
+}
+
+// transformerAnnotations records paths relative to the build's root, which a
+// wrapper would change, so such a kustomization is rendered as it always was.
+func TestKustomizeWithTransformerAnnotationsIsRenderedAsBefore(t *testing.T) {
+	dir := kustomizeBuildMetadataFixture(t, "buildMetadata: [transformerAnnotations]\n")
+
+	called := false
+	original := originRenderer
+	t.Cleanup(func() { originRenderer = original })
+	originRenderer = func(func() *krusty.Kustomizer, string, []string) ([]byte, string, bool) {
+		called = true
+		return nil, "", false
+	}
+
+	byName, origins := renderedKustomizeWorkloads(t, dir)
+
+	assert.False(t, called, "no wrapper is built for it")
+	assert.Empty(t, origins, "and the resources are attributed to the directory")
+	assert.Contains(t, byName, "Deployment/demo")
 }

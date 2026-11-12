@@ -1,11 +1,13 @@
 package resourcehandler
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestKustomizeWorkloadSource(t *testing.T) {
@@ -50,5 +52,31 @@ func TestKustomizeWorkloadSource(t *testing.T) {
 
 	t.Run("an unknown root keeps the directory", func(t *testing.T) {
 		assert.Equal(t, directory, kustomizeWorkloadSource(directory, filepath.Join(root, "base", "deployment.yaml"), "", lastCommitOf))
+	})
+
+	t.Run("a symlink inside the root that leads outside keeps the directory", func(t *testing.T) {
+		// Kustomize reads through the link, so the file exists and its path is
+		// lexically inside the root. It is still not a file of this scan.
+		outside := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(outside, "deployment.yaml"), []byte("kind: Deployment\n"), 0o600))
+		if err := os.Symlink(outside, filepath.Join(root, "linked")); err != nil {
+			t.Skipf("cannot create a symlink here: %v", err)
+		}
+
+		got := kustomizeWorkloadSource(directory, filepath.Join(root, "linked", "deployment.yaml"), root, lastCommitOf)
+
+		assert.Equal(t, directory, got, "the resource is attributed to the directory, not to a file outside the scan")
+	})
+
+	t.Run("a symlink inside the root that leads to a file inside it is reported as it appears", func(t *testing.T) {
+		require.NoError(t, os.MkdirAll(filepath.Join(root, "shared"), 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(root, "shared", "deployment.yaml"), []byte("kind: Deployment\n"), 0o600))
+		if err := os.Symlink(filepath.Join(root, "shared"), filepath.Join(root, "alias")); err != nil {
+			t.Skipf("cannot create a symlink here: %v", err)
+		}
+
+		got := kustomizeWorkloadSource(directory, filepath.Join(root, "alias", "deployment.yaml"), root, lastCommitOf)
+
+		assert.Equal(t, filepath.Join("alias", "deployment.yaml"), got.RelativePath)
 	})
 }

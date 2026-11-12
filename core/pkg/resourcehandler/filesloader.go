@@ -793,15 +793,23 @@ func getResourcesFromInput(ctx context.Context, path string, helmValueOpts cauti
 // stays unreported on purpose: the rendered resource is the composition of a
 // base and its overlays, so no line in any one file is the line of a field.
 //
-// Only a file inside the scan root is used. One outside it would make a path
-// that is relative to the root escape it, which printers that refuse such a
-// location would then drop.
+// Only a file inside the scan root is used, after symlinks are resolved. One
+// outside it would make a path that is relative to the root escape it, which
+// printers that refuse such a location would then drop.
 func kustomizeWorkloadSource(directorySource reporthandling.Source, originFile, repoRoot string, lastCommitOf func(string) reporthandling.LastCommit) reporthandling.Source {
 	if originFile == "" || repoRoot == "" {
 		return directorySource
 	}
 	relative, err := filepath.Rel(repoRoot, originFile)
 	if err != nil || !filepath.IsLocal(relative) {
+		return directorySource
+	}
+	// IsLocal reads the text of the path only. A symlink inside the root whose
+	// target is outside it passes that test, and Kustomize reads through it, so
+	// the file it names would be one the scan has no business attributing a
+	// resource to. The check that follows symlinks decides; the path reported is
+	// still the one the repository shows.
+	if _, err := pathcontainment.ResolveContainedPath(repoRoot, originFile); err != nil {
 		return directorySource
 	}
 	source := directorySource
