@@ -7,6 +7,7 @@ import (
 
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/pathparse"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func onlineBoutiquePath() string {
@@ -163,4 +164,80 @@ func TestPathLocationResolver_InvalidYaml(t *testing.T) {
 	resolver, err := NewPathLocationResolver(yamlFilePath)
 	assert.Nil(t, resolver)
 	assert.NotNil(t, err)
+}
+
+func TestNewPathLocationResolver_OversizedManifestRejected(t *testing.T) {
+	t.Setenv(maxFileSizeEnvVar, "")
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "oversized.yaml")
+	f, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY, 0o600)
+	require.NoError(t, err)
+	require.NoError(t, f.Truncate(defaultMaxFileSize+1))
+	require.NoError(t, f.Close())
+
+	resolver, err := NewPathLocationResolver(filePath)
+	assert.Nil(t, resolver)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrManifestTooLarge)
+}
+
+func TestNewPathLocationResolver_NonRegularManifestRejected(t *testing.T) {
+	if _, err := os.Stat("/dev/null"); err == nil {
+		dir := t.TempDir()
+		symlink := filepath.Join(dir, "dev_null.yaml")
+		require.NoError(t, os.Symlink("/dev/null", symlink))
+
+		resolver, err := NewPathLocationResolver(symlink)
+		assert.Nil(t, resolver)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrManifestNotRegular)
+	}
+}
+
+func TestNewPathLocationResolver_DirectoryRejected(t *testing.T) {
+	dir := t.TempDir()
+	resolver, err := NewPathLocationResolver(dir)
+	assert.Nil(t, resolver)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrManifestNotRegular)
+}
+
+func TestNewPathLocationResolver_MaxFileSizeEnvVar(t *testing.T) {
+	const validYAML = "apiVersion: v1\nkind: Pod\nmetadata:\n  name: test\n"
+
+	t.Run("lower override rejects manifest", func(t *testing.T) {
+		t.Setenv(maxFileSizeEnvVar, "10")
+		dir := t.TempDir()
+		filePath := filepath.Join(dir, "test.yaml")
+		require.NoError(t, os.WriteFile(filePath, []byte(validYAML), 0o600)) // len > 10
+
+		resolver, err := NewPathLocationResolver(filePath)
+		assert.Nil(t, resolver)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrManifestTooLarge)
+	})
+
+	t.Run("higher override permits manifest", func(t *testing.T) {
+		t.Setenv(maxFileSizeEnvVar, "1000")
+		dir := t.TempDir()
+		filePath := filepath.Join(dir, "test.yaml")
+		require.NoError(t, os.WriteFile(filePath, []byte(validYAML), 0o600))
+
+		resolver, err := NewPathLocationResolver(filePath)
+		require.NoError(t, err)
+		assert.NotNil(t, resolver)
+	})
+}
+
+func TestNewPathLocationResolver_MaxInt64FallsBackToDefault(t *testing.T) {
+	t.Setenv(maxFileSizeEnvVar, "9223372036854775807")
+	assert.Equal(t, int64(defaultMaxFileSize), getMaxFileSize(), "math.MaxInt64 must fall back to default to avoid overflow")
+
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "valid.yaml")
+	require.NoError(t, os.WriteFile(filePath, []byte("apiVersion: v1\nkind: Pod\nmetadata:\n  name: test\n"), 0o600))
+
+	resolver, err := NewPathLocationResolver(filePath)
+	require.NoError(t, err)
+	assert.NotNil(t, resolver)
 }
