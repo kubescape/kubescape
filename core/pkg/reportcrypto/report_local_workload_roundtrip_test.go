@@ -341,6 +341,49 @@ func TestEncryptedRBACSubjectReportRestoresItsID(t *testing.T) {
 	assert.Equal(t, "//User/mallory@acme.example/rbac.authorization.k8s.io/v1//ClusterRoleBinding/admins", id)
 }
 
+func TestEncryptedRBACRelatedObjectsWithNamespaceAndSourcePathRoundTrip(t *testing.T) {
+	sourcePath := "/home/alice/acme-payroll-repo/deploy/rbac.yaml:4"
+	subject := objectsenvelopes.NewRegoResponseVectorObject(map[string]any{
+		"apiVersion": "",
+		"kind":       "User",
+		"name":       "mallory@acme.example",
+		"namespace":  "",
+		"relatedObjects": []any{
+			map[string]any{
+				"apiVersion": "rbac.authorization.k8s.io/v1",
+				"kind":       "ClusterRoleBinding",
+				"metadata":   map[string]any{"name": "admins"},
+			},
+			map[string]any{
+				"apiVersion": "rbac.authorization.k8s.io/v1",
+				"kind":       "RoleBinding",
+				"sourcePath": sourcePath,
+				"metadata":   map[string]any{"name": "viewers", "namespace": "acme-sec"},
+			},
+		},
+	})
+	originalID := subject.GetID()
+
+	encryptedJSON := encryptedReport(t, subject)
+	for _, secret := range []string{"mallory@acme.example", "admins", "viewers", "acme-sec", "alice", "acme-payroll-repo", "rbac.yaml"} {
+		assert.NotContains(t, resourceSections(t, encryptedJSON), secret)
+	}
+
+	decryptedJSON, err := reportcrypto.DecryptReport(encryptedJSON, []byte(exceptionTestMasterKey))
+	require.NoError(t, err)
+	assert.NotContains(t, resourceSections(t, decryptedJSON), "ENC[")
+
+	decryptedID, object, _ := soleResource(t, decryptedJSON)
+	assert.Equal(t, originalID, decryptedID)
+	related := object["relatedObjects"].([]any)
+	require.Len(t, related, 2)
+	rb := related[1].(map[string]any)
+	assert.Equal(t, sourcePath, rb["sourcePath"])
+	meta := rb["metadata"].(map[string]any)
+	assert.Equal(t, "viewers", meta["name"])
+	assert.Equal(t, "acme-sec", meta["namespace"])
+}
+
 func TestDecryptReportRejectsTamperedEnvelopeName(t *testing.T) {
 	for _, tc := range envelopeCases {
 		t.Run(tc.name, func(t *testing.T) {

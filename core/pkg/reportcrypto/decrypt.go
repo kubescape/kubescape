@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/reporthandling"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 )
@@ -566,6 +567,62 @@ func DecryptResourceMetadata(
 		resource.SetNamespace(namespace)
 	}
 
+	return decryptRegoRelatedObjects(resource, func(obj workloadinterface.IMetadata) error {
+		return DecryptResourceMetadata(obj, dek)
+	})
+}
+
+// decryptRegoRelatedObjects applies decryptFn to each related object of a
+// RegoResponseVectorObject and writes any updated object map back to the slice.
+func decryptRegoRelatedObjects(
+	resource workloadinterface.IMetadata,
+	decryptFn func(workloadinterface.IMetadata) error,
+) error {
+	regoObj, ok := resource.(*objectsenvelopes.RegoResponseVectorObject)
+	if !ok {
+		return nil
+	}
+
+	rawRelated, ok := regoObj.GetObject()[objectsenvelopes.RelatedObjectsKey]
+	if !ok || rawRelated == nil {
+		return nil
+	}
+
+	decryptEntry := func(m map[string]any) (map[string]any, error) {
+		obj := objectsenvelopes.NewObject(m)
+		if obj == nil {
+			return m, nil
+		}
+		if err := decryptFn(obj); err != nil {
+			return nil, err
+		}
+		if updated := obj.GetObject(); updated != nil {
+			return updated, nil
+		}
+		return m, nil
+	}
+
+	switch relatedList := rawRelated.(type) {
+	case []map[string]any:
+		for i, item := range relatedList {
+			updated, err := decryptEntry(item)
+			if err != nil {
+				return err
+			}
+			relatedList[i] = updated
+		}
+	case []any:
+		for i, item := range relatedList {
+			if m, ok := item.(map[string]any); ok {
+				updated, err := decryptEntry(m)
+				if err != nil {
+					return err
+				}
+				relatedList[i] = updated
+			}
+		}
+	}
+
 	return nil
 }
 
@@ -753,40 +810,34 @@ func decryptAnnotationMap(obj map[string]any, dek *ReportKey) error {
 }
 
 // DecryptResourceObjectSourcePath restores object.sourcePath while
-// preserving trailing line-number context.
+// preserving trailing line-number context, including relatedObjects on
+// RegoResponseVectorObject instances.
 func DecryptResourceObjectSourcePath(resource workloadinterface.IMetadata, dek *ReportKey) error {
 
 	if resource == nil {
 		return nil
 	}
 
-	obj := resource.GetObject()
-	if obj == nil {
-		return nil
+	if obj := resource.GetObject(); obj != nil {
+		if rawSourcePath, ok := obj["sourcePath"]; ok {
+			if sourcePath, ok := rawSourcePath.(string); ok && sourcePath != "" {
+				decryptedPath, err := decryptSourcePath(
+					sourcePath,
+					dek,
+				)
+				if err != nil {
+					return err
+				}
+
+				obj["sourcePath"] = decryptedPath
+				resource.SetObject(obj)
+			}
+		}
 	}
 
-	rawSourcePath, ok := obj["sourcePath"]
-	if !ok {
-		return nil
-	}
-
-	sourcePath, ok := rawSourcePath.(string)
-	if !ok || sourcePath == "" {
-		return nil
-	}
-
-	decryptedPath, err := decryptSourcePath(
-		sourcePath,
-		dek,
-	)
-	if err != nil {
-		return err
-	}
-
-	obj["sourcePath"] = decryptedPath
-	resource.SetObject(obj)
-
-	return nil
+	return decryptRegoRelatedObjects(resource, func(obj workloadinterface.IMetadata) error {
+		return DecryptResourceObjectSourcePath(obj, dek)
+	})
 }
 
 // decryptSourcePath restores the path portion of a sourcePath while
