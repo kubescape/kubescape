@@ -57,7 +57,7 @@ Kubescape addresses this by treating scan coverage as a first-class metric along
 
 - **Total Controls**: The number of unique controls in scope for the selected framework(s) or scan target. If zero controls are in scope, the coverage score is reported as 0%.
 - **Evaluated Controls**: The number of controls that were actually evaluated (`TotalControls - len(NotEvaluatedControls)`).
-- **Skipped / Unevaluated Controls**: Controls that were bypassed due to missing resources, configuration settings, execution policy, or manual-review requirements.
+- **Skipped / Unevaluated Controls**: Controls that were bypassed due to missing resources, configuration settings, execution policy, or manual-review requirements. A control whose evaluation timed out (`--control-timeout`) or whose rule failed to evaluate (for example a Rego rule that does not compile, or a CEL control with no policy in the embedded bundle) is also not evaluated. The scan carries on, and the control is reported as `skipped` / `notEvaluated` with the error as its reason.
 - **Coverage Score**: Calculated by `ComputeCoverageScore` using the baseline ratio of evaluated controls to total controls, discounted by penalties for data collection degradations:
 
 $$\text{Base Score} = \frac{\text{Evaluated Controls}}{\text{Total Controls}} \times 100$$

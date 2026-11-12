@@ -347,7 +347,7 @@ func TestAppendSkippedWholeClusterControlsToCoverage_DeterministicOrder(t *testi
 	assert.Equal(t, "C-0272", opap.ScanCoverage.NotEvaluatedControls[3].ControlID)
 }
 
-func TestVerifyWholeClusterControl_ReturnsEvaluationErrors(t *testing.T) {
+func TestVerifyWholeClusterControl_SkipsControlOnEvaluationError(t *testing.T) {
 	deployment := mocks.MockDevelopmentWithHostpath()
 	k8sResources := make(cautils.K8SResources)
 	k8sResources["apps/v1/deployments"] = workloadinterface.ListMetaIDs([]workloadinterface.IMetadata{deployment})
@@ -389,7 +389,8 @@ func TestVerifyWholeClusterControl_ReturnsEvaluationErrors(t *testing.T) {
 	opap.SetWholeClusterPolicy(cautils.WholeClusterPolicyVerify)
 
 	err := opap.Process(context.Background(), policies, nil)
-	require.Error(t, err, "verify mode must propagate evaluation errors")
+	require.NoError(t, err, "a rule error in verify mode must skip the control, not fail the scan")
+	assert.Contains(t, opap.ErroredControls, controlID)
 }
 
 func TestVerifyWholeCluster_MismatchDetection(t *testing.T) {

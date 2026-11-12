@@ -152,7 +152,8 @@ type PartialGVRPull struct {
 // NotEvaluatedControl records a control that was not evaluated, either
 // because every GVR it depends on failed to pull (MissingGVRs is set) or
 // because its evaluation was aborted during the OPA processing phase, e.g.
-// by exceeding --control-timeout (Reason is set).
+// by exceeding --control-timeout or by a rule that failed to evaluate
+// (Reason is set).
 type NotEvaluatedControl struct {
 	ControlID   string   `json:"controlID"`
 	MissingGVRs []string `json:"missingGVRs,omitempty"`

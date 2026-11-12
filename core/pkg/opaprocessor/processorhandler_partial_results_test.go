@@ -13,10 +13,44 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// ProcessRulesListener deliberately finalizes the eager session even when a
-// rule fails. Kubescape.Scan relies on this invariant before exposing the
+// A broken rule no longer fails the scan: the control is reported as not
+// evaluated, with the rule's error as the reason, and the rest of the session
+// is finalized as usual.
+func TestProcessRulesListener_BrokenRuleSkipsControlWithReason(t *testing.T) {
+	session, control := brokenRuleSession()
+	processor := NewOPAProcessor(session, resources.NewRegoDependenciesDataMock(), "test", "", "", false, nil)
+
+	err := processor.ProcessRulesListener(context.Background(), nil)
+
+	require.NoError(t, err)
+	controlSummary := session.Report.SummaryDetails.Controls[control.ControlID]
+	assert.Equal(t, apis.StatusSkipped, controlSummary.GetStatus().Status())
+	assert.Equal(t, apis.SubStatusNotEvaluated, controlSummary.GetStatus().GetSubStatus())
+	assert.Contains(t, controlSummary.GetStatus().Info(), "broken-rule")
+	require.Len(t, session.ScanCoverage.NotEvaluatedControls, 1)
+	assert.Equal(t, control.ControlID, session.ScanCoverage.NotEvaluatedControls[0].ControlID)
+	assert.Equal(t, 1, session.ScanCoverage.TotalControls)
+	assert.Equal(t, 0, session.ScanCoverage.EvaluatedControls)
+}
+
+// ProcessRulesListener deliberately finalizes the eager session even when the
+// scan fails. Kubescape.Scan relies on this invariant before exposing the
 // session alongside the processing error.
 func TestProcessRulesListener_FinalizesPartialResultsBeforeReturningError(t *testing.T) {
+	session, control := brokenRuleSession()
+	processor := NewOPAProcessor(session, resources.NewRegoDependenciesDataMock(), "test", "", "", false, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := processor.ProcessRulesListener(ctx, nil)
+
+	require.ErrorIs(t, err, context.Canceled)
+	_, inSummary := session.Report.SummaryDetails.Controls[control.ControlID]
+	assert.True(t, inSummary, "the summary must be built before the error is returned")
+	assert.Equal(t, 1, session.ScanCoverage.TotalControls)
+}
+
+func brokenRuleSession() (*cautils.OPASessionObj, reporthandling.Control) {
 	pod := workloadinterface.NewWorkloadObj(map[string]any{
 		"apiVersion": "v1",
 		"kind":       "Pod",
@@ -44,14 +78,5 @@ func TestProcessRulesListener_FinalizesPartialResultsBeforeReturningError(t *tes
 	session.Policies = []reporthandling.Framework{framework}
 	session.K8SResources = cautils.K8SResources{"/v1/pods": {pod.GetID()}}
 	session.AllResources[pod.GetID()] = pod
-	processor := NewOPAProcessor(session, resources.NewRegoDependenciesDataMock(), "test", "", "", false, nil)
-
-	err := processor.ProcessRulesListener(context.Background(), nil)
-
-	require.ErrorContains(t, err, "broken-rule")
-	require.Len(t, session.ResourcesResult, 1)
-	controlSummary := session.Report.SummaryDetails.Controls[control.ControlID]
-	assert.Equal(t, apis.StatusSkipped, controlSummary.GetStatus().Status())
-	assert.Equal(t, 1, session.Report.SummaryDetails.NumberOfResources().Skipped())
-	assert.Equal(t, 1, session.ScanCoverage.TotalControls)
+	return session, control
 }
