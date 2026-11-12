@@ -377,7 +377,7 @@ func resourceEnvelope(object map[string]any) workloadinterface.IMetadata {
 			return env
 		}
 	}
-	if object["kind"] == "APIServerInfo" || object["apiVersion"] == cloudsupport.ApiServerInfoApiVersion {
+	if object["kind"] == "APIServerInfo" && object["apiVersion"] == cloudsupport.ApiServerInfoApiVersion {
 		if env, err := newApiServerInfoEnvelope(object); err == nil {
 			return env
 		}
