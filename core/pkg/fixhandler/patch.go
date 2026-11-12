@@ -4,13 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path"
 	"path/filepath"
 	"sort"
 	"strings"
-	"syscall"
 )
 
 // maxResourceTrials is the most documents of one manifest changedResources
@@ -172,26 +170,14 @@ func (h *FixHandler) patchNames(resourcesToFix []ResourceFixInfo) (map[string]st
 }
 
 // readManifest reads a manifest for patching. It opens the file read-only, and
-// without waiting on a FIFO, as applyFileChanges does for --output-dir.
+// without waiting on a FIFO, as applyFileChanges does for --output-dir, bounding
+// reads up to getMaxManifestSize() to prevent resource exhaustion.
 func readManifest(source string) (string, error) {
-	file, err := os.OpenFile(filepath.Clean(source), os.O_RDONLY|syscall.O_NONBLOCK, 0)
-	if err != nil {
-		return "", fmt.Errorf("error opening manifest: %w", err)
-	}
-	defer file.Close()
-
-	info, err := file.Stat()
-	if err != nil {
-		return "", fmt.Errorf("error checking manifest: %w", err)
-	}
-	if !info.Mode().IsRegular() {
-		return "", errors.New("manifest is not a regular file")
-	}
-	content, err := io.ReadAll(file)
+	bytes, err := readManifestFile(source)
 	if err != nil {
 		return "", fmt.Errorf("error reading manifest: %w", err)
 	}
-	return string(content), nil
+	return string(bytes), nil
 }
 
 // CheckPatchDestination refuses a patch file that could not be written without
