@@ -459,3 +459,54 @@ func TestCorrelate_NilIndexIsDefaultAllow(t *testing.T) {
 		t.Errorf("unexpected exposure reason: %q", f.Exposure.Reason)
 	}
 }
+
+func TestCorrelate_RanksANamespaceSelectorThatAdmitsNewNamespacesAboveALabeledOne(t *testing.T) {
+	// Both policies use a namespaceSelector, but only the second one needs a
+	// label an administrator added: "team NotIn (untrusted)" also matches any
+	// namespace created without a team label, so its workload is reachable
+	// from far more of the cluster and its finding has to come first.
+	ingressFrom := func(name string, appLabel string, nsSel metav1.LabelSelector) *networkingv1.NetworkPolicy {
+		return &networkingv1.NetworkPolicy{
+			ObjectMeta: metav1.ObjectMeta{Namespace: "prod", Name: name},
+			Spec: networkingv1.NetworkPolicySpec{
+				PodSelector: metav1.LabelSelector{MatchLabels: map[string]string{"app": appLabel}},
+				PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeIngress},
+				Ingress: []networkingv1.NetworkPolicyIngressRule{{
+					From: []networkingv1.NetworkPolicyPeer{{NamespaceSelector: &nsSel}},
+				}},
+			},
+		}
+	}
+	openEnded := ingressFrom("allow-not-untrusted", "billing", metav1.LabelSelector{
+		MatchExpressions: []metav1.LabelSelectorRequirement{{Key: "team", Operator: metav1.LabelSelectorOpNotIn, Values: []string{"untrusted"}}},
+	})
+	labeled := ingressFrom("allow-payments", "ledger", metav1.LabelSelector{
+		MatchLabels: map[string]string{"team": "payments"},
+	})
+	idx, errs := networkpolicy.NewIndex([]*networkingv1.NetworkPolicy{labeled, openEnded}, nil)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+
+	billing := Workload{Namespace: "prod", Kind: "Deployment", Name: "billing"}
+	ledger := Workload{Namespace: "prod", Kind: "Deployment", Name: "ledger"}
+	endpoints := map[Workload]networkpolicy.Endpoint{
+		billing: {Namespace: "prod", Name: "billing", Labels: map[string]string{"app": "billing"}},
+		ledger:  {Namespace: "prod", Name: "ledger", Labels: map[string]string{"app": "ledger"}},
+	}
+
+	findings, _ := Correlate(idx, endpoints, map[Workload][]storagev1beta1.Vulnerability{
+		billing: {vuln("CVE-BILLING", "High", true)},
+		ledger:  {vuln("CVE-LEDGER", "Critical", true)},
+	}, SeverityLow, nil)
+
+	if len(findings) != 2 {
+		t.Fatalf("expected 2 findings, got %d", len(findings))
+	}
+	if findings[0].Vulnerability.ID != "CVE-BILLING" || findings[0].Exposure.Level != networkpolicy.ExposureAnyNamespace {
+		t.Errorf("first finding = %s at %v, want CVE-BILLING at any-namespace", findings[0].Vulnerability.ID, findings[0].Exposure.Level)
+	}
+	if findings[1].Exposure.Level != networkpolicy.ExposureRestricted {
+		t.Errorf("second finding exposure = %v, want restricted", findings[1].Exposure.Level)
+	}
+}
