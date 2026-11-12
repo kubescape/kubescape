@@ -426,6 +426,19 @@ kubescape policy test ./myrules --run '^no-privileged-containers/flagged$'
 kubescape policy test ./myrules --run '/flagged$' --update
 ```
 
+`--junit-report <file>` also writes the results to `<file>` as a JUnit XML
+report, which CI systems such as GitLab, Jenkins and Azure Pipelines can display
+as test results. Each rule that has test cases is a test suite and each of its
+cases a test case. A case whose output differs from its `expected.json` is a
+failure that carries the diff, and a case that could not be loaded or evaluated
+is an error. The report is written whether or not every case passes, so a
+failing case still fails the command; a report that cannot be written fails it
+too. It cannot be combined with `--update`:
+
+```bash
+kubescape policy test ./myrules --junit-report policy-test.xml
+```
+
 `policy test` gives a rule that reads
 [control configuration](#control-configuration) its inputs from an optional
 `data.json` in the test case directory, in the format regolibrary's fixtures

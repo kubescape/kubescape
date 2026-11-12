@@ -3,16 +3,19 @@ package policy
 import (
 	"fmt"
 	"regexp"
+	"strings"
 
 	"github.com/jwalton/gchalk"
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/pkg/policytest"
 	"github.com/spf13/cobra"
 )
 
 func getPolicyTestCmd() *cobra.Command {
 	var (
-		update bool
-		run    string
+		update      bool
+		run         string
+		junitReport string
 	)
 
 	cmd := &cobra.Command{
@@ -28,6 +31,14 @@ func getPolicyTestCmd() *cobra.Command {
 					return fmt.Errorf("invalid --run pattern: %w", err)
 				}
 			}
+			if cmd.Flags().Changed("junit-report") {
+				if strings.TrimSpace(junitReport) == "" {
+					return fmt.Errorf("--junit-report requires a file path")
+				}
+				if update {
+					return fmt.Errorf("--junit-report cannot be used with --update: --update rewrites fixtures instead of testing them")
+				}
+			}
 			// The invocation is valid from this point on. A case that fails,
 			// or cannot be evaluated, is a test result and should not print
 			// command usage.
@@ -35,12 +46,13 @@ func getPolicyTestCmd() *cobra.Command {
 			if update {
 				return runPolicyUpdate(cmd, args[0], pattern)
 			}
-			return runPolicyTest(cmd, args[0], pattern)
+			return runPolicyTest(cmd, args[0], pattern, junitReport)
 		},
 	}
 
 	cmd.Flags().BoolVar(&update, "update", false, "Rewrite each case's expected.json from the rule's current output instead of comparing against it")
 	cmd.Flags().StringVar(&run, "run", "", "Only run the cases whose <rule>/<case> name matches this regular expression")
+	cmd.Flags().StringVar(&junitReport, "junit-report", "", "Also write the results to this file as a JUnit XML report, for CI systems that display test results")
 
 	return cmd
 }
@@ -150,7 +162,7 @@ func discoverRules(path string, pattern *regexp.Regexp) ([]policytest.RuleUnderT
 	return rules, nil
 }
 
-func runPolicyTest(cmd *cobra.Command, path string, pattern *regexp.Regexp) error {
+func runPolicyTest(cmd *cobra.Command, path string, pattern *regexp.Regexp, junitReport string) error {
 	rules, err := discoverRules(path, pattern)
 	if err != nil {
 		return err
@@ -160,6 +172,7 @@ func runPolicyTest(cmd *cobra.Command, path string, pattern *regexp.Regexp) erro
 	total, failed := 0, 0
 	out := cmd.OutOrStdout()
 	colored := shouldColor(out)
+	var results []policytest.CaseResult
 
 	for _, rule := range rules {
 		if err := ctx.Err(); err != nil {
@@ -180,6 +193,7 @@ func runPolicyTest(cmd *cobra.Command, path string, pattern *regexp.Regexp) erro
 				return err
 			}
 			total++
+			results = append(results, result)
 			ruleCase := fmt.Sprintf("%s/%s", result.RuleName, result.CaseName)
 			switch {
 			case result.Err != nil:
@@ -230,8 +244,26 @@ func runPolicyTest(cmd *cobra.Command, path string, pattern *regexp.Regexp) erro
 			return fmt.Errorf("write policy test output: %w", err)
 		}
 	}
+	// The report is written whether or not every case passed: a CI system
+	// reads it to show which cases failed.
+	if junitReport != "" {
+		if err := writeJUnitReport(junitReport, results); err != nil {
+			return err
+		}
+	}
 	if failed > 0 {
 		return fmt.Errorf("%d test case(s) failed", failed)
+	}
+	return nil
+}
+
+func writeJUnitReport(path string, results []policytest.CaseResult) error {
+	report, err := policytest.JUnitReport(results)
+	if err != nil {
+		return fmt.Errorf("write JUnit report: %w", err)
+	}
+	if err := cautils.WriteFileAtomically(path, report, 0o600); err != nil {
+		return fmt.Errorf("write JUnit report: %w", err)
 	}
 	return nil
 }
