@@ -1,0 +1,14 @@
+# The subject leaves out apiGroup. The API server defaults it to
+# rbac.authorization.k8s.io for a User, so applying this manifest grants
+# ci-bot the role, but the file itself carries neither apiGroup nor namespace.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: impersonator-crb
+subjects:
+- kind: User
+  name: ci-bot
+roleRef:
+  kind: ClusterRole
+  name: impersonator
+  apiGroup: rbac.authorization.k8s.io
