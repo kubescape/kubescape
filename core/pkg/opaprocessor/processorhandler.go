@@ -2919,6 +2919,16 @@ func (opap *OPAProcessor) getCompiledRule(ctx context.Context, ruleName, ruleDat
 	return compiled, version, nil
 }
 
+// controlCapabilities keeps the registered Kubescape builtins and the language
+// features for this Rego version while limiting what control policies can call.
+func controlCapabilities(version ast.RegoVersion) *ast.Capabilities {
+	caps := ast.CapabilitiesForThisVersion(ast.CapabilitiesRegoVersion(version))
+	caps.Builtins = slices.DeleteFunc(caps.Builtins, func(b *ast.Builtin) bool {
+		return b.Name == "http.send" || strings.HasPrefix(b.Name, "net.") || b.Name == "opa.runtime"
+	})
+	return caps
+}
+
 // compileWithRuleDependencies compiles source, registered as moduleName,
 // together with the shared rule dependencies, preferring Rego v1 and falling
 // back to v0 (see getCompiledRule). Rule evaluation and the incremental-cache
@@ -2934,17 +2944,17 @@ func compileWithRuleDependencies(ctx context.Context, moduleName, source string,
 	maps.Copy(modules, baseModules)
 	modules[moduleName] = source
 
-	compiled, v1Err := ast.CompileModulesWithOpt(modules, ast.CompileOpts{
-		EnablePrintStatements: printEnabled,
-		ParserOptions:         ast.ParserOptions{RegoVersion: ast.RegoV1},
-	})
+	compile := func(version ast.RegoVersion) (*ast.Compiler, error) {
+		return ast.CompileModulesWithOpt(modules, ast.CompileOpts{
+			EnablePrintStatements: printEnabled,
+			ParserOptions:         ast.ParserOptions{RegoVersion: version, Capabilities: controlCapabilities(version)},
+		})
+	}
+	compiled, v1Err := compile(ast.RegoV1)
 	if v1Err == nil {
 		return compiled, ast.RegoV1, nil
 	}
-	compiled, v0Err := ast.CompileModulesWithOpt(modules, ast.CompileOpts{
-		EnablePrintStatements: printEnabled,
-		ParserOptions:         ast.ParserOptions{RegoVersion: ast.RegoV0},
-	})
+	compiled, v0Err := compile(ast.RegoV0)
 	if v0Err != nil {
 		return nil, 0, fmt.Errorf("failed to compile rule '%s': %w", moduleName, v1Err)
 	}
@@ -3008,6 +3018,7 @@ func (opap *OPAProcessor) getPreparedQuery(ctx context.Context, ruleName, ruleDa
 		rego.SetRegoVersion(regoVersion),
 		rego.Query("data.armo_builtins"),
 		rego.Compiler(compiled),
+		rego.Capabilities(compiled.Capabilities()),
 		rego.Store(store),
 		rego.EnablePrintStatements(opap.printEnabled),
 		rego.PrintHook(opap),

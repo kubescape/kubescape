@@ -726,6 +726,9 @@ func appendProjectedResources(sourceK8s cautils.K8SResources, sourceExternal cau
 
 func getRuleDependencies(ctx context.Context) (map[string]string, error) {
 	modules := resources.LoadRegoModules()
+	// OPA type-checks even unused modules. This API client uses http.send,
+	// which is unavailable to control Rego.
+	delete(modules, "kubernetes.api.client")
 	if len(modules) == 0 {
 		logger.L().Ctx(ctx).Warning("failed to load rule dependencies")
 	}

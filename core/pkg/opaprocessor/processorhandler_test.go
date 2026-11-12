@@ -28,6 +28,7 @@ import (
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/kubescape/opa-utils/resources"
 	"github.com/open-policy-agent/opa/v1/ast"
+	"github.com/open-policy-agent/opa/v1/rego"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -780,6 +781,46 @@ func TestRunOPAOnSingleRuleDispatch(t *testing.T) {
 		assert.Contains(t, err.Error(), "not supported")
 		assert.Contains(t, err.Error(), "mystery-rule")
 	})
+}
+
+func TestControlRegoRejectsRestrictedBuiltins(t *testing.T) {
+	// These assignments are valid in both Rego versions, so an unrestricted
+	// v0 fallback would incorrectly accept a rule rejected by the v1 compiler.
+	for name, call := range map[string]string{
+		"http.send":          "http.send(input)",
+		"net.lookup_ip_addr": "net.lookup_ip_addr(input)",
+		"net.cidr_contains":  "net.cidr_contains(input, input)",
+		"opa.runtime":        "opa.runtime()",
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, _, err := compileWithRuleDependencies(t.Context(), "control", "package armo_builtins\nresult := "+call, false)
+			require.ErrorContains(t, err, "undefined function "+name)
+		})
+	}
+}
+
+func TestControlRegoEvaluationCapabilities(t *testing.T) {
+	opap := &OPAProcessor{compiledModules: make(map[string]compiledRule)}
+	// A legacy rule importing a future keyword needs v0-specific capabilities.
+	source := `package armo_builtins
+import future.keywords.in
+allowed { "pod" in ["pod"] }`
+	query, err := opap.getPreparedQuery(t.Context(), "legacy", source, resources.RegoDependenciesData{})
+	require.NoError(t, err)
+	var capabilities *ast.Capabilities
+	results, err := query.Eval(t.Context(), func(ctx *rego.EvalContext) {
+		capabilities = ctx.Capabilities()
+	})
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	require.Equal(t, map[string]any{"allowed": true}, results[0].Expressions[0].Value)
+	require.NotNil(t, capabilities)
+	for _, name := range []string{"http.send", "net.lookup_ip_addr", "net.cidr_contains", "opa.runtime"} {
+		assert.False(t, capabilities.ContainsBuiltin(name), name)
+	}
+	for _, name := range []string{"cosign.verify", "cosign.verify_keyless", "cosign.has_signature", "image.parse_normalized_name"} {
+		assert.True(t, capabilities.ContainsBuiltin(name), name)
+	}
 }
 
 // TestGetCompiledRule_RegoV0Fallback locks in backward compatibility for
