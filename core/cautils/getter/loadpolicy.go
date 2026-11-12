@@ -50,13 +50,26 @@ var (
 )
 
 // openPolicyFile opens path for reading and rejects anything but a regular file.
-// O_NONBLOCK keeps opening a FIFO from waiting for a writer, and the check is
-// made on the opened descriptor so a path swapped afterwards cannot slip past.
+// A pre-open stat check prevents opening device nodes (e.g. tape or character devices).
+// O_NONBLOCK keeps opening a FIFO from waiting for a writer, and descriptor-based
+// validation ensures a path swapped after stat cannot slip past. The original path
+// is passed directly to preserve symlink traversal semantics.
 func openPolicyFile(path string) (*os.File, error) {
 	if strings.TrimSpace(path) == "" {
 		return nil, os.ErrNotExist
 	}
-	file, err := os.OpenFile(filepath.Clean(path), os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	statInfo, err := os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+	if statInfo.IsDir() {
+		return nil, fmt.Errorf("%q is a directory, not a file", path)
+	}
+	if !statInfo.Mode().IsRegular() {
+		return nil, fmt.Errorf("%w: %q", ErrPolicyNotRegular, path)
+	}
+
+	file, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -98,6 +111,12 @@ func readPolicyFile(path string) ([]byte, error) {
 		return nil, fmt.Errorf("%w: %q exceeds the %d byte limit", ErrPolicyTooLarge, path, maxPolicyFileBytes)
 	}
 	return data, nil
+}
+
+// ReadPolicyFile returns the contents of the policy file at path, reading at most
+// maxPolicyFileBytes bytes so that reading remains bounded (CWE-400).
+func ReadPolicyFile(path string) ([]byte, error) {
+	return readPolicyFile(path)
 }
 
 // fileDigest streams path into a SHA-256 hash, rejecting non-regular files and

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -46,6 +47,11 @@ import (
 // Kubernetes API server. Callers embedding Kubescape.Scan can test for it with
 // errors.Is to distinguish an unreachable cluster from other scan failures.
 var ErrClusterConnection = errors.New("failed connecting to Kubernetes cluster")
+
+// ErrManifestTooLargeToClassify is returned when a candidate file exceeds the
+// maximum size limit and cannot be safely loaded into memory to determine if it
+// is a genuine manifest.
+var ErrManifestTooLargeToClassify = errors.New("manifest exceeds maximum size limit for classification")
 
 type componentInterfaces struct {
 	tenantConfig      cautils.ITenantConfig
@@ -367,26 +373,56 @@ func fileExtForFormat(format string) string {
 // Non-manifest files such as scan output reports (results.json, results.yaml),
 // build metadata (package.json, tsconfig.json), and empty files are not genuine
 // manifest inputs and therefore do not block output file reuse.
-func isGenuineManifest(filePath string) bool {
-	info, err := os.Stat(filePath)
-	if err != nil || info.IsDir() || info.Size() == 0 {
-		return false
+// If the candidate file exceeds cautils.DefaultMaxFileSize, ErrManifestTooLargeToClassify
+// is returned to prevent memory exhaustion while avoiding treating oversized manifests
+// as safe to overwrite.
+func isGenuineManifest(filePath string) (bool, error) {
+	if strings.TrimSpace(filePath) == "" {
+		return false, nil
+	}
+	statInfo, err := os.Stat(filePath)
+	if err != nil || statInfo.IsDir() || !statInfo.Mode().IsRegular() || statInfo.Size() == 0 {
+		return false, nil
 	}
 
 	ext := strings.ToLower(filepath.Ext(filePath))
 	if ext == ".tf" {
-		return true
+		return true, nil
 	}
 
 	isYaml := cautils.IsYaml(filePath) || ext == ".yaml" || ext == ".yml"
 	isJson := cautils.IsJson(filePath) || ext == ".json"
 	if !isYaml && !isJson {
-		return false
+		return false, nil
 	}
 
-	data, err := os.ReadFile(filePath)
-	if err != nil || len(bytes.TrimSpace(data)) == 0 {
-		return false
+	if statInfo.Size() > cautils.DefaultMaxFileSize {
+		return false, fmt.Errorf("%w: %q exceeds %d byte limit", ErrManifestTooLargeToClassify, filePath, cautils.DefaultMaxFileSize)
+	}
+
+	file, err := os.OpenFile(filePath, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return false, nil
+	}
+	defer file.Close()
+
+	info, err := file.Stat()
+	if err != nil || info.IsDir() || !info.Mode().IsRegular() || info.Size() == 0 {
+		return false, nil
+	}
+	if info.Size() > cautils.DefaultMaxFileSize {
+		return false, fmt.Errorf("%w: %q exceeds %d byte limit", ErrManifestTooLargeToClassify, filePath, cautils.DefaultMaxFileSize)
+	}
+
+	data, err := io.ReadAll(io.LimitReader(file, cautils.DefaultMaxFileSize+1))
+	if err != nil {
+		return false, nil
+	}
+	if int64(len(data)) > cautils.DefaultMaxFileSize {
+		return false, fmt.Errorf("%w: %q exceeds %d byte limit", ErrManifestTooLargeToClassify, filePath, cautils.DefaultMaxFileSize)
+	}
+	if len(bytes.TrimSpace(data)) == 0 {
+		return false, nil
 	}
 
 	format := cautils.YAML_FILE_FORMAT
@@ -396,10 +432,10 @@ func isGenuineManifest(filePath string) bool {
 
 	workloads, _ := cautils.ReadFile(data, format)
 	if len(workloads) > 0 {
-		return true
+		return true, nil
 	}
 
-	return hasKubernetesManifestSignatures(data, isJson)
+	return hasKubernetesManifestSignatures(data, isJson), nil
 }
 
 // hasKubernetesManifestSignatures checks if the data contains document-level Kubernetes
@@ -540,7 +576,8 @@ func checkDirectoryCollision(dirPath string, scanInfo *cautils.ScanInfo, destInf
 		}
 
 		if os.SameFile(destInfo, targetInfo) {
-			if isGenuineManifest(source) {
+			isManifest, manifestErr := isGenuineManifest(source)
+			if isManifest || errors.Is(manifestErr, ErrManifestTooLargeToClassify) {
 				collisionErr = fmt.Errorf("output path %q would overwrite input manifest %q; choose a different output file", outputFile, source)
 				return fs.SkipAll
 			}
@@ -574,7 +611,8 @@ func checkGlobCollision(rawPath string, scanInfo *cautils.ScanInfo, destInfo fs.
 				}
 			} else {
 				if os.SameFile(destInfo, matchInfo) {
-					if isGenuineManifest(match) {
+					isManifest, manifestErr := isGenuineManifest(match)
+					if isManifest || errors.Is(manifestErr, ErrManifestTooLargeToClassify) {
 						return fmt.Errorf("output path %q would overwrite input manifest %q; choose a different output file", outputFile, match)
 					}
 				}
@@ -611,7 +649,8 @@ func checkGlobCollision(rawPath string, scanInfo *cautils.ScanInfo, destInfo fs.
 				}
 				if matched, _ := filepath.Match(pattern, d.Name()); matched {
 					if entryInfo, err := os.Stat(source); err == nil && os.SameFile(destInfo, entryInfo) {
-						if isGenuineManifest(source) {
+						isManifest, manifestErr := isGenuineManifest(source)
+						if isManifest || errors.Is(manifestErr, ErrManifestTooLargeToClassify) {
 							collisionErr = fmt.Errorf("output path %q would overwrite input manifest %q; choose a different output file", outputFile, source)
 							return fs.SkipAll
 						}
@@ -1479,7 +1518,7 @@ func incrementalCacheVersion(scanInfo *cautils.ScanInfo, scanData *cautils.OPASe
 		regoInputBytes,
 	}
 	if scanInfo.ControlsInputs != "" {
-		localConfig, readErr := os.ReadFile(scanInfo.ControlsInputs)
+		localConfig, readErr := getter.ReadPolicyFile(scanInfo.ControlsInputs)
 		if readErr != nil {
 			return "", fmt.Errorf("read controls inputs for cache version: %w", readErr)
 		}
