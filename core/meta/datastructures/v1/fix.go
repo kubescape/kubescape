@@ -96,6 +96,66 @@ func (f *FixInfo) ValidateOutputPatch() error {
 	return nil
 }
 
+// ValidateOutputDir refuses empty or blank directory paths when OutputDir is set.
+// It is nil when OutputDir is empty.
+func (f *FixInfo) ValidateOutputDir() error {
+	if f.OutputDir == "" {
+		return nil
+	}
+	if strings.TrimSpace(f.OutputDir) == "" {
+		return errors.New("--output-dir needs a directory path")
+	}
+	return nil
+}
+
+// ValidateKustomizeDir refuses empty or blank directory paths when KustomizeDir is set.
+// It is nil when KustomizeDir is empty.
+func (f *FixInfo) ValidateKustomizeDir() error {
+	if f.KustomizeDir == "" {
+		return nil
+	}
+	if strings.TrimSpace(f.KustomizeDir) == "" {
+		return errors.New("--output-kustomize needs a directory path")
+	}
+	return nil
+}
+
+// ValidateBasePath refuses empty or blank directory paths when BasePath is set.
+// It is nil when BasePath is empty.
+func (f *FixInfo) ValidateBasePath() error {
+	if f.BasePath == "" {
+		return nil
+	}
+	if strings.TrimSpace(f.BasePath) == "" {
+		return errors.New("--base-path needs a directory path")
+	}
+	return nil
+}
+
+// ValidatePostRendererDir refuses empty or blank directory paths when PostRendererDir is set.
+// It is nil when PostRendererDir is empty.
+func (f *FixInfo) ValidatePostRendererDir() error {
+	if f.PostRendererDir == "" {
+		return nil
+	}
+	if strings.TrimSpace(f.PostRendererDir) == "" {
+		return errors.New("--output-post-renderer needs a directory path")
+	}
+	return nil
+}
+
+// ValidateContainerProfilePath refuses empty or blank file paths when ContainerProfilePath is set.
+// It is nil when ContainerProfilePath is empty.
+func (f *FixInfo) ValidateContainerProfilePath() error {
+	if f.ContainerProfilePath == "" {
+		return nil
+	}
+	if strings.TrimSpace(f.ContainerProfilePath) == "" {
+		return errors.New("--container-profile needs a file path")
+	}
+	return nil
+}
+
 // ValidateVerify refuses the combinations in which Verify has nothing to
 // verify: DryRun, OutputDir and OutputPatch all leave the manifests as they
 // were, so a rescan would find every finding as it was and say nothing about the
