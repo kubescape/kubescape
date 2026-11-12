@@ -508,6 +508,12 @@ func transformSessionInPlace(session *cautils.OPASessionObj, transformer Transfo
 				rule.Exception = anonymizedExceptions
 
 				for pathIndex := range rule.Paths {
+					// An empty ResourceID means the path is on this resource
+					// itself; transforming "" would name a resource that
+					// does not exist.
+					if rule.Paths[pathIndex].ResourceID == "" {
+						continue
+					}
 					mappedID, err := resolveMappedID(
 						transformer,
 						idMapping,
