@@ -71,6 +71,9 @@ func mirrorBackends(filters []gatewayFilterWire) []backendRef {
 // receives no requests, so its filters never run either; an undetermined
 // reference stays possible.
 func (idx *Index) mirrorParentCanForward(mirror backendRef, route *gatewayRoute) bool {
+	if idx == nil {
+		return false
+	}
 	parent := mirror.Parent
 	if parent == nil {
 		return true
