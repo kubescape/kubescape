@@ -91,35 +91,45 @@ metadata:
 	return scanInfo, policyIdentifiers, control
 }
 
-func TestScan_ReturnsFinalizedPartialDataOnOPAError(t *testing.T) {
+// requireBrokenControlNotEvaluated checks that a control whose rule could not
+// be evaluated is reported as not evaluated, with the rule's error as the
+// reason, instead of failing the scan.
+func requireBrokenControlNotEvaluated(t *testing.T, results *resultshandling.ResultsHandler, control reporthandling.Control) {
+	t.Helper()
+	require.NotNil(t, results)
+	require.NotNil(t, results.GetData())
+	controlSummary := results.GetData().Report.SummaryDetails.Controls[control.ControlID]
+	assert.Equal(t, apis.StatusSkipped, controlSummary.GetStatus().Status())
+	assert.Equal(t, apis.SubStatusNotEvaluated, controlSummary.GetStatus().GetSubStatus())
+	assert.Contains(t, controlSummary.GetStatus().Info(), "broken-rule")
+	coverage := results.GetData().ScanCoverage
+	require.Len(t, coverage.NotEvaluatedControls, 1)
+	assert.Equal(t, control.ControlID, coverage.NotEvaluatedControls[0].ControlID)
+}
+
+// A rule that cannot be evaluated costs only its own control: the scan
+// still succeeds and returns its report.
+func TestScan_BrokenRuleSkipsControlAndReturnsReport(t *testing.T) {
 	scanInfo, policyIdentifiers, control := buildBrokenRuleScanInfo(t)
 
 	results, err := NewKubescape(context.Background()).Scan(scanInfo, policyIdentifiers)
 
-	require.ErrorContains(t, err, "broken-rule")
-	require.NotNil(t, results)
-	require.NotNil(t, results.GetData(), "the finalized partial session must remain available alongside the scan error")
-	require.Len(t, results.GetData().ResourcesResult, 1)
-	controlSummary := results.GetData().Report.SummaryDetails.Controls[control.ControlID]
-	assert.Equal(t, apis.StatusSkipped, controlSummary.GetStatus().Status())
+	require.NoError(t, err)
+	requireBrokenControlNotEvaluated(t, results, control)
 }
 
-// TestScanContext_ReturnsFinalizedPartialDataOnOPAError exercises the new
+// TestScanContext_BrokenRuleSkipsControlAndReturnsReport exercises the
 // explicit-context entry point directly (#3237), mirroring
-// TestScan_ReturnsFinalizedPartialDataOnOPAError's assertions to confirm
-// ScanContext behaves identically to Scan when called with ks.Context().
-func TestScanContext_ReturnsFinalizedPartialDataOnOPAError(t *testing.T) {
+// TestScan_BrokenRuleSkipsControlAndReturnsReport to confirm ScanContext
+// behaves identically to Scan when called with ks.Context().
+func TestScanContext_BrokenRuleSkipsControlAndReturnsReport(t *testing.T) {
 	scanInfo, policyIdentifiers, control := buildBrokenRuleScanInfo(t)
 	ks := NewKubescape(context.Background())
 
 	results, err := ks.ScanContext(ks.Context(), scanInfo, policyIdentifiers)
 
-	require.ErrorContains(t, err, "broken-rule")
-	require.NotNil(t, results)
-	require.NotNil(t, results.GetData(), "the finalized partial session must remain available alongside the scan error")
-	require.Len(t, results.GetData().ResourcesResult, 1)
-	controlSummary := results.GetData().Report.SummaryDetails.Controls[control.ControlID]
-	assert.Equal(t, apis.StatusSkipped, controlSummary.GetStatus().Status())
+	require.NoError(t, err)
+	requireBrokenControlNotEvaluated(t, results, control)
 }
 
 // TestScanContext_DoesNotMutateSharedKubescapeContext is a regression test
@@ -146,11 +156,8 @@ func TestScanContext_DoesNotMutateSharedKubescapeContext(t *testing.T) {
 
 	results, err := ks.ScanContext(operationCtx, scanInfo, policyIdentifiers)
 
-	require.ErrorContains(t, err, "broken-rule")
-	require.NotNil(t, results)
-	require.NotNil(t, results.GetData())
-	controlSummary := results.GetData().Report.SummaryDetails.Controls[control.ControlID]
-	assert.Equal(t, apis.StatusSkipped, controlSummary.GetStatus().Status())
+	require.NoError(t, err)
+	requireBrokenControlNotEvaluated(t, results, control)
 
 	assert.Equal(t, context.Background(), ks.Context(), "ScanContext must not call SetContext or otherwise mutate ks's own context")
 }
@@ -2025,6 +2032,9 @@ func findEndedSpan(sr *tracetest.SpanRecorder, name string) sdktrace.ReadOnlySpa
 func TestScanContext_SpanLifecycle_OPAError(t *testing.T) {
 	sr := setupSpanRecorder(t)
 	scanInfo, policyIdentifiers, _ := buildBrokenRuleScanInfo(t)
+	// A broken rule no longer fails the scan, so fail it at the OPA stage
+	// with a control filter that leaves nothing to scan.
+	scanInfo.IncludeControls = "C-DOES-NOT-EXIST"
 	ks := NewKubescape(context.Background())
 
 	results, err := ks.ScanContext(context.Background(), scanInfo, policyIdentifiers)
@@ -2044,17 +2054,19 @@ func TestScanContext_SpanLifecycle_OPAError(t *testing.T) {
 // TestScanContext_SpanLifecycle_StreamingError is the direct regression test
 // for M-05: "scan.go leaks the spanInit when streaming errors". It forces the
 // streaming branch (EnableStreaming=true) and causes
-// collectAndProcessResourcesWithStreaming to return an error via a broken Rego
-// rule. Before the fix, both spanInit and spanResources were leaked on this
+// collectAndProcessResourcesWithStreaming to return an error via a control
+// filter that leaves nothing to scan (a broken rule no longer fails the
+// scan). Before the fix, both spanInit and spanResources were leaked on this
 // path.
 func TestScanContext_SpanLifecycle_StreamingError(t *testing.T) {
 	sr := setupSpanRecorder(t)
 	scanInfo, policyIdentifiers, _ := buildBrokenRuleScanInfo(t)
 	scanInfo.EnableStreaming = true
+	scanInfo.IncludeControls = "C-DOES-NOT-EXIST"
 	ks := NewKubescape(context.Background())
 
 	results, err := ks.ScanContext(context.Background(), scanInfo, policyIdentifiers)
-	require.Error(t, err, "streaming with a broken rule must return an error")
+	require.Error(t, err, "streaming with a scan-level OPA error must return an error")
 	require.NotNil(t, results)
 
 	assertSpansEnded(t, sr, "initialization", "policies", "resources")

@@ -108,6 +108,10 @@ type OPAProcessor struct {
 	// TimedOutControls maps controlID to the reason its evaluation was
 	// aborted after exceeding ControlTimeout.
 	TimedOutControls map[string]string
+	// ErroredControls maps controlID to the error that stopped its
+	// evaluation. Like a timed-out control, such a control is reported as not
+	// evaluated instead of failing the whole scan.
+	ErroredControls map[string]string
 	// celEvaluator is the CEL engine shared across the whole scan, built once
 	// via celEvaluatorOnce. One evaluator (and its compiled-program cache) is
 	// reused for every control and object because building the CEL env is far
@@ -176,6 +180,7 @@ func NewOPAProcessor(sessionObj *cautils.OPASessionObj, regoDependenciesData *re
 		compiledModules:             make(map[string]compiledRule),
 		preparedQueries:             make(map[string]rego.PreparedEvalQuery),
 		TimedOutControls:            make(map[string]string),
+		ErroredControls:             make(map[string]string),
 		initialResourceCount:        initialResourceCount,
 		celNamespaceIndex:           indexNamespaces(sessionObj),
 		largeClusterSizeThreshold:   cautils.LargeClusterSize(),
@@ -285,10 +290,10 @@ func (opap *OPAProcessor) ProcessRulesListener(ctx context.Context, progressList
 		logger.L().Ctx(ctx).Warning(processErr.Error())
 	}
 
-	// rebuild ScanCoverage so controls that timed out during evaluation
-	// (recorded in TimedOutControls by markControlTimedOut) are reflected in
-	// NotEvaluatedControls alongside any collection-phase failures
-	opap.ScanCoverage = cautils.BuildScanCoverage(opap.InfoMap, opap.ResourceToControlsMap, opap.TimedOutControls, opap.PartialGVRFailures, opap.PolicyDegradations, opap.SkippedManifests, opap.inScopeControlIDs())
+	// rebuild ScanCoverage so controls that timed out or errored during
+	// evaluation (recorded by markControlTimedOut and markControlErrored) are
+	// reflected in NotEvaluatedControls alongside any collection-phase failures
+	opap.ScanCoverage = cautils.BuildScanCoverage(opap.InfoMap, opap.ResourceToControlsMap, opap.notEvaluatedReasons(), opap.PartialGVRFailures, opap.PolicyDegradations, opap.SkippedManifests, opap.inScopeControlIDs())
 	opap.appendSkippedWholeClusterControlsToCoverage()
 	opap.ScanCoverage.ComputeCoverageScore(len(opap.Report.SummaryDetails.Controls))
 
@@ -529,7 +534,7 @@ done:
 	}
 
 	// Rebuild scan coverage
-	opap.ScanCoverage = cautils.BuildScanCoverage(opap.InfoMap, opap.ResourceToControlsMap, opap.TimedOutControls, opap.PartialGVRFailures, opap.PolicyDegradations, opap.SkippedManifests, opap.inScopeControlIDs())
+	opap.ScanCoverage = cautils.BuildScanCoverage(opap.InfoMap, opap.ResourceToControlsMap, opap.notEvaluatedReasons(), opap.PartialGVRFailures, opap.PolicyDegradations, opap.SkippedManifests, opap.inScopeControlIDs())
 	opap.appendSkippedWholeClusterControlsToCoverage()
 	opap.ScanCoverage.ComputeCoverageScore(len(opap.Report.SummaryDetails.Controls))
 
@@ -588,10 +593,7 @@ func (opap *OPAProcessor) processScope(ctx context.Context, policies *cautils.Po
 					opap.mu.Unlock()
 				}
 
-				opap.mu.Lock()
-				_, timedOut := opap.TimedOutControls[controlID]
-				opap.mu.Unlock()
-				if timedOut {
+				if opap.controlNotEvaluated(controlID) {
 					continue
 				}
 
@@ -627,9 +629,21 @@ func (opap *OPAProcessor) processScope(ctx context.Context, policies *cautils.Po
 				}
 
 				if err != nil {
-					processErrsMu.Lock()
-					processErrs = append(processErrs, fmt.Errorf("control %q: %w", control.ControlID, err))
-					processErrsMu.Unlock()
+					if ctx.Err() != nil {
+						// The scan itself was cancelled: that still fails the scan.
+						processErrsMu.Lock()
+						processErrs = append(processErrs, fmt.Errorf("control %q: %w", control.ControlID, err))
+						processErrsMu.Unlock()
+					} else {
+						// One control could not be evaluated: record why and keep
+						// scanning, the same way a timed-out control is handled.
+						logger.L().Ctx(ctx).Warning("control not evaluated",
+							helpers.String("controlID", control.ControlID),
+							helpers.Error(err))
+						opap.markControlErrored(&control, err)
+						resourcesAssociatedControl = nil
+						cacheWrite.candidate = nil
+					}
 				}
 
 				// Update resources with latest results
@@ -1093,10 +1107,15 @@ func (opap *OPAProcessor) verifyAndProcessWholeCluster(
 		resFallback, errF := evalScope(fallbackScope)
 
 		if errP != nil || errF != nil {
+			evalErr := errors.Join(errP, errF)
+			if ctx.Err() != nil {
+				return errors.Join(append(verifyErrs, evalErr)...)
+			}
 			logger.L().Ctx(ctx).Warning("Whole-cluster evaluation error during verification",
 				helpers.String("controlID", controlID),
-				helpers.Error(errors.Join(errP, errF)))
-			return errors.Join(append(verifyErrs, errors.Join(errP, errF))...)
+				helpers.Error(evalErr))
+			opap.markControlErrored(&control, evalErr)
+			continue
 		}
 
 		opap.mu.Lock()
@@ -1948,7 +1967,7 @@ func (opap *OPAProcessor) evaluateRuleOnScope(ctx context.Context, rule *reporth
 	ruleResponses, celOut, err := opap.runOPAOnSingleRule(ctx, rule, inputRawResources, ruleData, ruleRegoDependenciesData, controlID)
 	if err != nil {
 		opap.markResourcesSkipped(resources, rule, ruleRegoDependenciesData, inputResources, err)
-		return resources, attribution, fmt.Errorf("rego eval failed for namespace %q: %w", scope.name, err)
+		return resources, attribution, fmt.Errorf("%s eval failed for namespace %q: %w", ruleEvalLanguage(rule), scope.name, err)
 	}
 
 	// Record CEL resources with unknown verdicts as skipped before pass-inference.
@@ -2194,13 +2213,14 @@ func (opap *OPAProcessor) markTimedOutControlsSkipped() {
 }
 
 func (opap *OPAProcessor) reweightComplianceScores() {
-	if len(opap.TimedOutControls) == 0 {
+	notEvaluated := opap.notEvaluatedReasons()
+	if len(notEvaluated) == 0 {
 		return
 	}
 	var sum float32
 	var count int
 	for ctrlID := range opap.Report.SummaryDetails.Controls {
-		if _, ok := opap.TimedOutControls[ctrlID]; !ok {
+		if _, ok := notEvaluated[ctrlID]; !ok {
 			ctrl := opap.Report.SummaryDetails.Controls.GetControl(reportsummary.EControlCriteriaID, ctrlID)
 			sum += ctrl.GetComplianceScore()
 		}
@@ -2215,7 +2235,7 @@ func (opap *OPAProcessor) reweightComplianceScores() {
 		var fsum float32
 		var fcount int
 		for ctrlID := range opap.Report.SummaryDetails.Frameworks[i].Controls {
-			if _, ok := opap.TimedOutControls[ctrlID]; !ok {
+			if _, ok := notEvaluated[ctrlID]; !ok {
 				ctrl := opap.Report.SummaryDetails.Frameworks[i].Controls.GetControl(reportsummary.EControlCriteriaID, ctrlID)
 				fsum += ctrl.GetComplianceScore()
 			}
@@ -2239,6 +2259,51 @@ func (opap *OPAProcessor) markControlTimedOut(control *reporthandling.Control, t
 		opap.TimedOutControls = make(map[string]string)
 	}
 	opap.TimedOutControls[control.ControlID] = fmt.Sprintf("control evaluation timed out after %s", timeout)
+}
+
+// markControlErrored records in opap.ErroredControls that a control's
+// evaluation returned an error, so it is reported as not evaluated with that
+// error as the reason instead of failing the whole scan. The first error
+// recorded for a control is kept, and a control that already timed out keeps
+// its timeout reason.
+func (opap *OPAProcessor) markControlErrored(control *reporthandling.Control, err error) {
+	opap.mu.Lock()
+	defer opap.mu.Unlock()
+	if _, timedOut := opap.TimedOutControls[control.ControlID]; timedOut {
+		return
+	}
+	if opap.ErroredControls == nil {
+		opap.ErroredControls = make(map[string]string)
+	}
+	if _, ok := opap.ErroredControls[control.ControlID]; ok {
+		return
+	}
+	opap.ErroredControls[control.ControlID] = fmt.Sprintf("control evaluation failed: %s", err)
+}
+
+// controlNotEvaluated reports whether a control already timed out or errored
+// in an earlier scope, so later scopes do not evaluate it again.
+func (opap *OPAProcessor) controlNotEvaluated(controlID string) bool {
+	opap.mu.Lock()
+	defer opap.mu.Unlock()
+	_, timedOut := opap.TimedOutControls[controlID]
+	_, errored := opap.ErroredControls[controlID]
+	return timedOut || errored
+}
+
+// notEvaluatedReasons merges the timed-out and errored controls, keyed by
+// control ID. A control in both keeps its timeout reason.
+func (opap *OPAProcessor) notEvaluatedReasons() map[string]string {
+	opap.mu.Lock()
+	defer opap.mu.Unlock()
+	merged := make(map[string]string, len(opap.TimedOutControls)+len(opap.ErroredControls))
+	for id, reason := range opap.ErroredControls {
+		merged[id] = reason
+	}
+	for id, reason := range opap.TimedOutControls {
+		merged[id] = reason
+	}
+	return merged
 }
 
 // appendPaths appends the failedPaths, fixPaths and fixCommand to the paths slice with the resourceID
@@ -2269,6 +2334,14 @@ func (opap *OPAProcessor) runOPAOnSingleRule(ctx context.Context, rule *reportha
 	default:
 		return nil, celOutcome{}, fmt.Errorf("rule: '%s', language '%v' not supported", rule.Name, rule.RuleLanguage)
 	}
+}
+
+// ruleEvalLanguage names the engine that evaluated rule, for error messages.
+func ruleEvalLanguage(rule *reporthandling.PolicyRule) string {
+	if rule.RuleLanguage == reporthandling.CELLanguage {
+		return "cel"
+	}
+	return "rego"
 }
 
 // celOutcome carries the per-resource results of a CEL rule that are not
@@ -2309,9 +2382,10 @@ type skippedCELResource struct {
 //     never inferred as a pass;
 //   - anything else passes (no entry; processRule infers it).
 //
-// A control-wide failure (the evaluator or policy will not load) is the only
-// rule-level error: every object hits it identically, so the whole rule is
-// skipped, the same path a Rego eval error takes.
+// A control-wide failure (the evaluator or policy will not load, or a live
+// binding the offline engine refuses) is returned as a rule-level error. The
+// processor then reports the whole control as not evaluated, with the error
+// as the reason, and the rest of the scan carries on.
 func (opap *OPAProcessor) runCELOnK8s(ctx context.Context, rule *reporthandling.PolicyRule, k8sObjects []map[string]any, _ func(*reporthandling.PolicyRule) string, controlID string) ([]reporthandling.RuleResponse, celOutcome, error) {
 	evaluator, err := opap.getCELEvaluator()
 	if err != nil {

@@ -261,9 +261,9 @@ The distinction that governs it: a `matchConstraints` knob whose input the scann
 object carries is evaluated; one whose input the scan cannot guarantee to have is
 refused.
 
-Refusal is not free. A load failure makes the whole control error, which marks
-every resource skipped for that control across the scan. So the refusal set is kept
-as small as correctness allows.
+Refusal is not free. A load failure makes the whole control error, so the control
+is reported as not evaluated, with the error as the reason, and the rest of the scan
+carries on. So the refusal set is kept as small as correctness allows.
 
 ## The equivalence guarantee
 

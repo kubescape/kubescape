@@ -601,6 +601,14 @@ threshold — for example, a single silent failed GVR pull yields a score of 97.
 > meaning may now fail on scans that previously passed. Re-check your threshold
 > if you rely on this flag in CI.
 
+A rule that fails to evaluate (for example a Rego rule that does not compile,
+or a CEL control with no policy in the embedded bundle) does not fail the scan.
+Its control is reported as not evaluated, with the error as the reason, and
+the coverage score drops. To fail the run whenever any control could not be
+evaluated, pass `--fail-coverage-below 100`: the report is still written. This
+is stricter than failing on rule errors alone, since every penalty above and
+every timed-out control also take the score below 100.
+
 ### Scan coverage reporting across output formats
 
 Scan coverage gaps (skipped or unevaluated controls, missing GVR permissions, partial query results, and degraded policy inputs) are consistently surfaced across output formats (#3884):
