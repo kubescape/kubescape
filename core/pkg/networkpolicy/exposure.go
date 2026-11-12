@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/netip"
 
+	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -23,13 +24,17 @@ type ExposureLevel int
 const (
 	// ExposureRestricted means every ingress rule that selects this endpoint
 	// scopes its peers: a podSelector (always same-namespace-only, per
-	// NetworkPolicy's own semantics) or a namespaceSelector with actual
-	// matchLabels/matchExpressions.
+	// NetworkPolicy's own semantics) or a namespaceSelector that only matches
+	// namespaces carrying a label someone had to add on purpose, or ones it
+	// names explicitly.
 	ExposureRestricted ExposureLevel = iota
-	// ExposureAnyNamespace means some ingress rule's namespaceSelector is
-	// empty (matches every namespace, present and future), so the endpoint
-	// is reachable from any pod in the cluster regardless of which
-	// namespace it runs in.
+	// ExposureAnyNamespace means some ingress rule's namespaceSelector matches
+	// a namespace that has no labels of its own, only the
+	// kubernetes.io/metadata.name label Kubernetes sets on every namespace.
+	// That covers an empty selector, which matches every namespace, as well
+	// as selectors built only from Exists on the name label, NotIn, or
+	// DoesNotExist: any namespace created from now on is admitted, so the
+	// endpoint is reachable from pods in namespaces nobody chose to trust.
 	ExposureAnyNamespace
 	// ExposureExternalCIDR means some ingress rule admits an ipBlock peer:
 	// reachable by IP address rather than by pod/namespace identity at all,
@@ -169,12 +174,53 @@ func classifyPeer(peer networkingv1.NetworkPolicyPeer) (ExposureLevel, string) {
 	}
 	if peer.NamespaceSelector != nil {
 		sel, err := metav1.LabelSelectorAsSelector(peer.NamespaceSelector)
-		if err == nil && sel.Empty() {
+		switch {
+		case err != nil:
+			return ExposureRestricted, "namespaceSelector scopes peers to specific namespaces"
+		case sel.Empty():
 			return ExposureAnyNamespace, "namespaceSelector is empty, matching every namespace"
+		case admitsUnlabeledNamespace(sel):
+			return ExposureAnyNamespace, fmt.Sprintf("namespaceSelector %q matches a namespace with no labels of its own, so it admits any newly created namespace", sel.String())
 		}
 		return ExposureRestricted, "namespaceSelector scopes peers to specific namespaces"
 	}
 	return ExposureRestricted, "podSelector only ever matches pods in this endpoint's own namespace"
+}
+
+// admitsUnlabeledNamespace reports whether sel matches a namespace whose only
+// label is kubernetes.io/metadata.name, which the API server sets on every
+// namespace to its name, under a name sel does not list. Anyone who can create
+// a namespace gets one like that without asking, so such a selector does not
+// limit peers to namespaces an administrator labeled: Exists on the name
+// label, NotIn and DoesNotExist all match it. A selector needs In or Exists on
+// some other label, or In on the name label, to rule it out.
+func admitsUnlabeledNamespace(sel labels.Selector) bool {
+	requirements, selectable := sel.Requirements()
+	if !selectable {
+		return false
+	}
+	name := unlistedNamespaceName(requirements)
+	return sel.Matches(labels.Set{corev1.LabelMetadataName: name})
+}
+
+// unlistedNamespaceName returns a valid namespace name that none of
+// requirements mentions as a value of the name label, so evaluating them
+// against it stands in for a namespace nobody has created yet.
+func unlistedNamespaceName(requirements labels.Requirements) string {
+	listed := map[string]bool{}
+	for _, r := range requirements {
+		if r.Key() != corev1.LabelMetadataName {
+			continue
+		}
+		for value := range r.Values() {
+			listed[value] = true
+		}
+	}
+	name := "new-namespace"
+	for i := 1; listed[name]; i++ {
+		name = fmt.Sprintf("new-namespace-%d", i)
+	}
+	return name
 }
 
 // ipBlockFullyExcluded reports whether block.Except collectively covers all of
