@@ -1,0 +1,12 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: csr-chain-crb
+subjects:
+- kind: User
+  name: ci-bot
+  apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: ClusterRole
+  name: csr-chain
+  apiGroup: rbac.authorization.k8s.io

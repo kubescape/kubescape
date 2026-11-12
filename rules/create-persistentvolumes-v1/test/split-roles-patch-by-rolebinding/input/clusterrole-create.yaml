@@ -1,0 +1,11 @@
+# a RoleBinding confines the patch role to one namespace, where it matches
+# nothing about the cluster-scoped PersistentVolumes.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: pv-create
+rules:
+- apiGroups: [""]
+  resources: ["persistentvolumes"]
+  resourceNames: ["a"]
+  verbs: ["create"]

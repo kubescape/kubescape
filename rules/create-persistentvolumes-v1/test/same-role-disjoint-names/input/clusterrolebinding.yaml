@@ -1,0 +1,12 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: pv-both-crb
+subjects:
+- kind: User
+  name: storage-bot
+  apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: ClusterRole
+  name: pv-both
+  apiGroup: rbac.authorization.k8s.io

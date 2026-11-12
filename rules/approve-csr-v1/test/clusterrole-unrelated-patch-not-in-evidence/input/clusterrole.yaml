@@ -1,0 +1,33 @@
+# only the patch on x enables the create. A patch on y, on pods, or in another
+# API group is not evidence.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: csr-chain
+rules:
+- apiGroups: ["certificates.k8s.io"]
+  resources: ["certificatesigningrequests"]
+  resourceNames: ["x"]
+  verbs: ["create","get"]
+- apiGroups: ["certificates.k8s.io"]
+  resources: ["certificatesigningrequests"]
+  resourceNames: ["x"]
+  verbs: ["patch"]
+- apiGroups: ["certificates.k8s.io"]
+  resources: ["certificatesigningrequests"]
+  resourceNames: ["y"]
+  verbs: ["patch"]
+- apiGroups: [""]
+  resources: ["pods"]
+  resourceNames: ["x"]
+  verbs: ["patch"]
+- apiGroups: ["apps"]
+  resources: ["certificatesigningrequests"]
+  resourceNames: ["x"]
+  verbs: ["patch"]
+- apiGroups: ["certificates.k8s.io"]
+  resources: ["certificatesigningrequests/approval"]
+  verbs: ["update"]
+- apiGroups: ["certificates.k8s.io"]
+  resources: ["signers"]
+  verbs: ["approve"]

@@ -1,0 +1,10 @@
+# an unrestricted patch reaches the one name the create is narrowed to.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: pv-create
+rules:
+- apiGroups: [""]
+  resources: ["persistentvolumes"]
+  resourceNames: ["a"]
+  verbs: ["create"]

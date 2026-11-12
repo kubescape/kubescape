@@ -1,0 +1,14 @@
+# create on a and patch on b in the same role share no name.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: pv-both
+rules:
+- apiGroups: [""]
+  resources: ["persistentvolumes"]
+  resourceNames: ["a"]
+  verbs: ["create"]
+- apiGroups: [""]
+  resources: ["persistentvolumes"]
+  resourceNames: ["b"]
+  verbs: ["patch"]

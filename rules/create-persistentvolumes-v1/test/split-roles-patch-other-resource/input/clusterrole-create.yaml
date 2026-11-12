@@ -1,0 +1,11 @@
+# patch on another resource, or on a same-named resource of another API
+# group, does not patch PersistentVolumes.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: pv-create
+rules:
+- apiGroups: [""]
+  resources: ["persistentvolumes"]
+  resourceNames: ["a"]
+  verbs: ["create"]

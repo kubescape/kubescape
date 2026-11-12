@@ -84,10 +84,47 @@ can_issue_token_secret(role) if {
 
 # create + patch: server side apply can bring the secret into existence even
 # when every entry is restricted with resourceNames, which is what makes a named
-# create reachable at all.
+# create reachable at all. The create and the patch have to reach one common
+# secret name: create on "a" and patch on "b" cannot create either secret.
 can_issue_token_secret(role) if {
-	grants(role, "create")
-	grants(role, "patch")
+	create_rule := role.rules[_]
+	targets_secrets(create_rule)
+	create_rule.verbs[_] in {"create", "*"}
+	patch_rule := role.rules[_]
+	targets_secrets(patch_rule)
+	patch_rule.verbs[_] in {"patch", "*"}
+	names_overlap(create_rule, patch_rule)
+}
+
+# A create and a patch reach a common object when either is not narrowed to
+# names, or when both name the same object. The names are literal: RBAC has no
+# wildcard form for resourceNames. An empty name is the one a plain create is
+# authorized with and is not an object that apply could create, so it never
+# counts as the common name.
+names_overlap(create_rule, patch_rule) if {
+	unrestricted_rule(create_rule)
+	unrestricted_rule(patch_rule)
+}
+
+names_overlap(create_rule, patch_rule) if {
+	unrestricted_rule(create_rule)
+	names_an_object(patch_rule)
+}
+
+names_overlap(create_rule, patch_rule) if {
+	names_an_object(create_rule)
+	unrestricted_rule(patch_rule)
+}
+
+names_overlap(create_rule, patch_rule) if {
+	name := create_rule.resourceNames[_]
+	name != ""
+	name in patch_rule.resourceNames
+}
+
+names_an_object(rule) if {
+	name := rule.resourceNames[_]
+	name != ""
 }
 
 # blanket update or patch over unnamed secrets: overwrite an existing secret and
