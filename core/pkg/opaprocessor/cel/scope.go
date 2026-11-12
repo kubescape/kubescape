@@ -293,10 +293,13 @@ func matchesValue(allowed []string, want string) bool {
 	return false
 }
 
-// matchesResource is matchesValue for resources, also accepting the "*/*"
-// subresource wildcard. It matches when the rule names any of the object's
-// candidate resource names. A "resource/subresource" entry never matches a bare
-// resource, which is correct: the scan does not evaluate subresources.
+// matchesResource is matchesValue for resources. It matches when the rule names
+// any of the object's candidate resource names. Each entry is split into its
+// resource and subresource halves and both are compared, as the apiserver's
+// rule matcher does (rules.Matcher.resource in k8s.io/apiserver). The scan only
+// evaluates objects themselves, whose subresource is empty, so a named
+// subresource such as "pods/status" or "*/scale" never matches, while a "*"
+// subresource does: "pods/*" reaches pods and "*/*" reaches everything.
 //
 // A rule resource differing from a candidate only in separators still matches: a
 // CRD may register "worker-pools" for kind WorkerPool, which pluralizing renders
@@ -305,11 +308,15 @@ func matchesValue(allowed []string, want string) bool {
 // candidates than that still needs the resource-plural annotation.
 func matchesResource(allowed, wants []string) bool {
 	for _, a := range allowed {
-		if a == "*" || a == "*/*" {
+		resource, subresource, _ := strings.Cut(a, "/")
+		if subresource != "" && subresource != "*" {
+			continue
+		}
+		if resource == "*" {
 			return true
 		}
 		for _, want := range wants {
-			if want != "" && normalizePlural(a) == normalizePlural(want) {
+			if want != "" && normalizePlural(resource) == normalizePlural(want) {
 				return true
 			}
 		}
