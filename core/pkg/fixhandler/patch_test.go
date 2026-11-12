@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/armosec/armoapi-go/armotypes"
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	metav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/stretchr/testify/assert"
@@ -284,7 +285,44 @@ func TestBuildPatch_NotARegularFile(t *testing.T) {
 	result, err := patchHandler(baseDir, "").BuildPatch(context.Background(), []ResourceFixInfo{imageFix(dir, "dir.yaml", 0)})
 
 	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrManifestNotRegular)
 	assert.Nil(t, result)
+}
+
+func TestBuildPatch_OversizedManifestRejected(t *testing.T) {
+	t.Setenv(cautils.MaxFileSizeEnvVar, "")
+	baseDir := t.TempDir()
+	source := filepath.Join(baseDir, "pod.yaml")
+	f, err := os.OpenFile(source, os.O_CREATE|os.O_WRONLY, 0o600)
+	require.NoError(t, err)
+	require.NoError(t, f.Truncate(cautils.DefaultMaxFileSize+1))
+	require.NoError(t, f.Close())
+
+	result, err := patchHandler(baseDir, "").BuildPatch(context.Background(), []ResourceFixInfo{imageFix(source, "pod.yaml", 0)})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrManifestTooLarge)
+	assert.Nil(t, result)
+}
+
+func TestBuildPatch_MaxFileSizeEnvVar(t *testing.T) {
+	t.Run("lower override rejects manifest", func(t *testing.T) {
+		t.Setenv(cautils.MaxFileSizeEnvVar, "100")
+		baseDir := t.TempDir()
+		source := writeManifest(t, baseDir, "pod.yaml", twoPods)
+		result, err := patchHandler(baseDir, "").BuildPatch(context.Background(), []ResourceFixInfo{imageFix(source, "pod.yaml", 0)})
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrManifestTooLarge)
+		assert.Nil(t, result)
+	})
+
+	t.Run("higher override permits manifest", func(t *testing.T) {
+		t.Setenv(cautils.MaxFileSizeEnvVar, "10000")
+		baseDir := t.TempDir()
+		source := writeManifest(t, baseDir, "pod.yaml", twoPods)
+		result, err := patchHandler(baseDir, "").BuildPatch(context.Background(), []ResourceFixInfo{imageFix(source, "pod.yaml", 0)})
+		require.NoError(t, err)
+		assert.NotNil(t, result)
+	})
 }
 
 func TestBuildPatch_Cancelled(t *testing.T) {

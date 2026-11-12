@@ -1544,7 +1544,19 @@ func applyFileChanges(ctx context.Context, path string, fixes []ResourceFixInfo,
 	if output == nil {
 		flags = os.O_RDWR
 	}
-	file, err := os.OpenFile(filepath.Clean(path), flags|syscall.O_NONBLOCK, 0)
+	cleanPath := filepath.Clean(path)
+	preStat, err := os.Stat(cleanPath)
+	if err != nil {
+		return fmt.Errorf("error opening manifest: %w", err)
+	}
+	if preStat.IsDir() {
+		return fmt.Errorf("%q is a directory, not a file: %w", path, ErrManifestNotRegular)
+	}
+	if !preStat.Mode().IsRegular() {
+		return fmt.Errorf("%w: %q", ErrManifestNotRegular, path)
+	}
+
+	file, err := os.OpenFile(cleanPath, flags|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		return fmt.Errorf("error opening manifest: %w", err)
 	}
@@ -1558,12 +1570,24 @@ func applyFileChanges(ctx context.Context, path string, fixes []ResourceFixInfo,
 	if err != nil {
 		return fmt.Errorf("error checking manifest: %w", err)
 	}
-	if !snapshot.Mode().IsRegular() {
-		return fmt.Errorf("manifest is not a regular file")
+	if snapshot.IsDir() {
+		return fmt.Errorf("%q is a directory, not a file: %w", path, ErrManifestNotRegular)
 	}
-	content, err := io.ReadAll(file)
+	if !snapshot.Mode().IsRegular() {
+		return fmt.Errorf("%w: %q", ErrManifestNotRegular, path)
+	}
+
+	limit := getMaxManifestSize()
+	if snapshot.Size() > limit {
+		return fmt.Errorf("%w: %q exceeds the %d byte limit", ErrManifestTooLarge, path, limit)
+	}
+
+	content, err := io.ReadAll(io.LimitReader(file, limit+1))
 	if err != nil {
 		return fmt.Errorf("error reading manifest: %w", err)
+	}
+	if int64(len(content)) > limit {
+		return fmt.Errorf("%w: %q exceeds the %d byte limit", ErrManifestTooLarge, path, limit)
 	}
 
 	fixedContent, err := applyFixToFileContent(ctx, path, string(content), fixes)

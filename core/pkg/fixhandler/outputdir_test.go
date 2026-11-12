@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/armosec/armoapi-go/armotypes"
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	metav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
@@ -623,4 +624,62 @@ func fileContentOf(t *testing.T, path string) string {
 	b, err := os.ReadFile(path)
 	require.NoError(t, err)
 	return string(b)
+}
+
+func TestApplyChanges_OversizedManifestRejected(t *testing.T) {
+	t.Setenv(cautils.MaxFileSizeEnvVar, "")
+	baseDir := t.TempDir()
+	source := filepath.Join(baseDir, "pod.yaml")
+	f, err := os.OpenFile(source, os.O_CREATE|os.O_WRONLY, 0o600)
+	require.NoError(t, err)
+	require.NoError(t, f.Truncate(cautils.DefaultMaxFileSize+1))
+	require.NoError(t, f.Close())
+
+	h := outputDirHandler(baseDir, t.TempDir())
+	fixes := []ResourceFixInfo{imageFix(source, "pod.yaml", 0)}
+	fixed, errs := h.ApplyChanges(context.Background(), fixes)
+	assert.Equal(t, 0, fixed)
+	require.NotEmpty(t, errs)
+	assert.ErrorIs(t, errs[0], ErrManifestTooLarge)
+}
+
+func TestApplyChanges_NonRegularManifestRejected(t *testing.T) {
+	baseDir := t.TempDir()
+	dir := filepath.Join(baseDir, "dir.yaml")
+	require.NoError(t, os.Mkdir(dir, 0o750))
+
+	h := outputDirHandler(baseDir, t.TempDir())
+	fixes := []ResourceFixInfo{imageFix(dir, "dir.yaml", 0)}
+	fixed, errs := h.ApplyChanges(context.Background(), fixes)
+	assert.Equal(t, 0, fixed)
+	require.NotEmpty(t, errs)
+	assert.ErrorIs(t, errs[0], ErrManifestNotRegular)
+}
+
+func TestApplyChanges_MaxFileSizeEnvVar(t *testing.T) {
+	t.Run("lower override rejects manifest", func(t *testing.T) {
+		t.Setenv(cautils.MaxFileSizeEnvVar, "100")
+		baseDir := t.TempDir()
+		source := writeManifest(t, baseDir, "pod.yaml", twoPods) // len(twoPods) > 100
+
+		h := outputDirHandler(baseDir, t.TempDir())
+		fixes := []ResourceFixInfo{imageFix(source, "pod.yaml", 0)}
+		fixed, errs := h.ApplyChanges(context.Background(), fixes)
+		assert.Equal(t, 0, fixed)
+		require.NotEmpty(t, errs)
+		assert.ErrorIs(t, errs[0], ErrManifestTooLarge)
+	})
+
+	t.Run("higher override permits manifest", func(t *testing.T) {
+		t.Setenv(cautils.MaxFileSizeEnvVar, "10000")
+		baseDir := t.TempDir()
+		outputDir := t.TempDir()
+		source := writeManifest(t, baseDir, "pod.yaml", twoPods)
+
+		h := outputDirHandler(baseDir, outputDir)
+		fixes := []ResourceFixInfo{imageFix(source, "pod.yaml", 0)}
+		fixed, errs := h.ApplyChanges(context.Background(), fixes)
+		assert.Equal(t, 1, fixed)
+		require.Empty(t, errs)
+	})
 }
