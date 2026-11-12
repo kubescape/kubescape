@@ -1,0 +1,10 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: clusterrole-empty-name-deployment-update
+rules:
+# no existing object has the empty name, so this update reaches nothing.
+- apiGroups: ["apps"]
+  resources: ["deployments"]
+  resourceNames: [""]
+  verbs: ["update", "patch"]

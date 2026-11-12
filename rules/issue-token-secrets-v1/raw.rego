@@ -71,13 +71,13 @@ deny contains msga if {
 
 # create + get, list or watch: create the token secret, then read the minted
 # token back. list and watch return the Secret's data just as get does.
-# RBAC cannot authorize a top-level create through an entry carrying
-# resourceNames (the object name is unknown at authorization time), so the
-# create has to come from an unrestricted entry. The read may be name restricted
-# — the subject simply creates the secret under that name and reads it back
-# (a narrowed list or watch needs a metadata.name field selector to match).
+# A top-level create is authorized with the empty name (the object name is
+# unknown at authorization time), so the create has to come from an entry that
+# is unrestricted or lists "". The read may be name restricted — the subject
+# simply creates the secret under that name and reads it back (a narrowed list
+# or watch needs a metadata.name field selector to match).
 can_issue_token_secret(role) if {
-	grants_unrestricted(role, "create")
+	grants_unnamed(role, "create")
 	some verb in {"get", "list", "watch"}
 	grants(role, verb)
 }
@@ -100,14 +100,15 @@ can_issue_token_secret(role) if {
 # names, or when both name the same object. The names are literal: RBAC has no
 # wildcard form for resourceNames. An empty name is the one a plain create is
 # authorized with and is not an object that apply could create, so it never
-# counts as the common name.
+# counts as the common name. A create entry that lists "" is a plain create
+# under any name, so it reaches whatever object the patch names.
 names_overlap(create_rule, patch_rule) if {
-	unrestricted_rule(create_rule)
+	grants_unnamed_requests(create_rule)
 	unrestricted_rule(patch_rule)
 }
 
 names_overlap(create_rule, patch_rule) if {
-	unrestricted_rule(create_rule)
+	grants_unnamed_requests(create_rule)
 	names_an_object(patch_rule)
 }
 
@@ -153,6 +154,15 @@ grants_unrestricted(role, verb) if {
 	rule.verbs[_] in {verb, "*"}
 }
 
+# as above, but from entries that admit the empty name a create is authorized
+# with: an unrestricted entry, or one whose resourceNames lists ""
+grants_unnamed(role, verb) if {
+	rule := role.rules[_]
+	targets_secrets(rule)
+	grants_unnamed_requests(rule)
+	rule.verbs[_] in {verb, "*"}
+}
+
 # Kubernetes draws no distinction between an absent resourceNames and an
 # explicitly empty one: ResourceNameMatches returns true as soon as the list is
 # empty, so both mean the rule is not narrowed to named objects. Testing
@@ -161,6 +171,12 @@ grants_unrestricted(role, verb) if {
 unrestricted_rule(rule) if {
 	count(object.get(rule, "resourceNames", [])) == 0
 }
+
+# A create, like a list or watch across a collection, is authorized with the
+# empty name, so resourceNames: [""] grants it as an unrestricted entry does.
+grants_unnamed_requests(rule) if unrestricted_rule(rule)
+
+grants_unnamed_requests(rule) if "" in rule.resourceNames
 
 targets_secrets(rule) if {
 	rule.resources[_] in {"secrets", "*"}
