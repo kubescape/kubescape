@@ -673,8 +673,8 @@ func TestResourceTable_ManyControlsKeepOneLinePerPath(t *testing.T) {
 
 	assert.Equal(t, 3*controlCount, strings.Count(out, "(line "), "one annotation per path per control")
 	assert.Equal(t, controlCount, strings.Count(out, "privileged=false (line 14)"))
-	assert.Equal(t, controlCount, strings.Count(out, "spec.template.spec.hostNetwork (line 8)"))
-	assert.Equal(t, controlCount, strings.Count(out, "spec.template.spec.automountServiceAccountToken (line 9)"))
+	assert.Equal(t, controlCount, strings.Count(out, "spec.template.spec.hostNetwork (current: "+unresolvedValue+") (line 8)"))
+	assert.Equal(t, controlCount, strings.Count(out, "spec.template.spec.automountServiceAccountToken (current: "+unresolvedValue+") (line 9)"))
 	for _, line := range strings.Split(out, "\n") {
 		assert.LessOrEqual(t, strings.Count(line, "(line "), 1, "no path annotated twice: %q", line)
 	}

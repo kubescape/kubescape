@@ -163,8 +163,8 @@ func TestEvidenceRuleShapes(t *testing.T) {
 	}
 }
 
-// A path that cannot be resolved has to degrade to the bare path: no value
-// invented for it, no line, and above all no panic, whatever the object holds.
+// A path that cannot be resolved is printed as unresolved: no value invented
+// for it, no line, and above all no panic, whatever the object holds.
 func TestEvidenceDegradesGracefully(t *testing.T) {
 	pod := shapePod(map[string]any{
 		"hostNetwork": true,
@@ -202,7 +202,7 @@ func TestEvidenceDegradesGracefully(t *testing.T) {
 				var cell string
 				require.NotPanics(t, func() { cell = shapeCell(t, control, tt.resource, nil) })
 
-				assert.Equal(t, "@ pod.yaml\n"+tt.path, cell, "the bare path, with nothing added")
+				assert.Equal(t, "@ pod.yaml\n"+tt.path+" (current: "+unresolvedValue+")", cell, "the path, marked unresolved, with nothing else added")
 				assert.Empty(t, failedPathValues(control, tt.resource))
 			})
 		}
