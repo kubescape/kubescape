@@ -152,8 +152,11 @@ func (drp *DownloadReleasedPolicy) SetRegoObjectsWithFallback() (fallback bool, 
 // one that should carry on with the cache.
 func (drp *DownloadReleasedPolicy) SetRegoObjectsWithFallbackContext(ctx context.Context) (fallback bool, err error) {
 	if err := drp.SetRegoObjectsContext(ctx); err != nil {
-		if ctxErr := ctx.Err(); ctxErr != nil && errors.Is(err, ctxErr) {
-			return false, err
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			if errors.Is(err, ctxErr) {
+				return false, err
+			}
+			return false, ctxErr
 		}
 		if drp.version != "" {
 			return false, err
@@ -325,6 +328,12 @@ func (drp *DownloadReleasedPolicy) SetRegoObjectsContext(ctx context.Context) er
 
 	select {
 	case <-load.done:
+		// When the caller was stopped as the download ended, select may have
+		// picked either: the caller's own error comes first, so that a stopped
+		// scan is never given an outcome that lets it fall back to the cache.
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		return load.err
 	case <-ctx.Done():
 		return ctx.Err()
@@ -359,7 +368,9 @@ func (drp *DownloadReleasedPolicy) download(load *releaseLoad, base *gitregostor
 	select {
 	case err = <-fetched:
 		if err != nil && ctx.Err() != nil {
-			err = fmt.Errorf("%w: %v", errDownloadTimedOut, err)
+			// Both stay in the chain: a failure that is also a timeout must still
+			// be found for what it is, a checksum failure above all.
+			err = fmt.Errorf("%w: %w", errDownloadTimedOut, err)
 		}
 	case <-ctx.Done():
 		err = errDownloadTimedOut

@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kubescape/regolibrary/v2/gitregostore"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -30,6 +31,9 @@ type release struct {
 	gates    map[string]chan struct{}
 	arrivals map[string]chan struct{}
 	aborted  map[string]int
+	// badSignature makes the release serve a checksum manifest whose signature
+	// does not verify, which the store reports as ErrChecksumVerification.
+	badSignature bool
 }
 
 func newRelease(t *testing.T, framework string) *release {
@@ -79,6 +83,13 @@ func (r *release) serve(w http.ResponseWriter, req *http.Request) {
 	}
 	switch file {
 	case "checksums.txt", "checksums.sigstore.json":
+		r.mu.Lock()
+		bad := r.badSignature
+		r.mu.Unlock()
+		if bad {
+			fmt.Fprint(w, "not a valid signature")
+			return
+		}
 		http.NotFound(w, req) // an unsigned release: the store takes the files as they are
 	case "frameworks":
 		fmt.Fprintf(w, `[{"name":%q,"typeTags":["compliance"]}]`, r.framework)
@@ -716,4 +727,173 @@ func TestPinnedReleaseTimeoutKeepsItsCause(t *testing.T) {
 	err := <-result
 	require.ErrorIs(t, err, errDownloadTimedOut)
 	assert.Contains(t, err.Error(), `"v2.0.301"`)
+}
+
+// endsLate is a context that reads as live until the test ends it, and whose
+// Done channel never closes. It puts a download at the point where its fetch has
+// already returned an error and the download's time is found to be up, which a
+// real deadline cannot be made to hit on purpose.
+type endsLate struct {
+	context.Context
+	ended atomic.Bool
+}
+
+func (c *endsLate) Err() error {
+	if c.ended.Load() {
+		return context.DeadlineExceeded
+	}
+	return c.Context.Err()
+}
+
+// A download whose checksum verification failed as its time ran out is still a
+// checksum failure: the error keeps both causes, and the unpinned store does not
+// fall back to the cache, which would serve policies that were never verified
+// against the release (#3791).
+func TestChecksumFailureAtTheTimeLimitStaysAHardFailure(t *testing.T) {
+	t.Parallel()
+	r := newRelease(t, "nsa")
+	r.mu.Lock()
+	r.badSignature = true
+	r.mu.Unlock()
+	p := r.store()
+	ctx := &endsLate{Context: context.Background()}
+	p.downloadContext = func() (context.Context, context.CancelFunc) { return ctx, func() {} }
+	open := r.hold("checksums.sigstore.json")
+	defer open()
+
+	type outcome struct {
+		fallback bool
+		err      error
+	}
+	result := make(chan outcome, 1)
+	go func() {
+		fallback, err := p.SetRegoObjectsWithFallbackContext(t.Context())
+		result <- outcome{fallback, err}
+	}()
+	// The signature is requested once the manifest has arrived. The time is up
+	// while it is held back, and the response then fails verification.
+	<-r.arrived("checksums.sigstore.json")
+	ctx.ended.Store(true)
+	open()
+
+	got := <-result
+	require.Error(t, got.err)
+	assert.ErrorIs(t, got.err, gitregostore.ErrChecksumVerification, "the checksum failure was turned into text")
+	assert.ErrorIs(t, got.err, errDownloadTimedOut, "the timeout was lost")
+	assert.False(t, got.fallback, "a checksum failure must not fall back to the cache")
+	assert.NoError(t, holdsNone(p))
+	waitIdle(t, p)
+}
+
+// pastEntry is a context that is live when a caller enters the wait for a
+// download and ended by the time the wait begins, and whose Done channel is
+// already closed. A caller that stops at the same moment as the download it
+// waits for is then deterministic, with both ready, not left to timing.
+type pastEntry struct {
+	context.Context
+	err   error
+	calls atomic.Int32
+}
+
+var closedChan = func() <-chan struct{} {
+	c := make(chan struct{})
+	close(c)
+	return c
+}()
+
+func (c *pastEntry) Done() <-chan struct{} { return closedChan }
+
+func (c *pastEntry) Err() error {
+	if c.calls.Add(1) == 1 {
+		return nil // the check on entry
+	}
+	return c.err
+}
+
+// timedOutLoad puts p in the middle of a download that has just timed out.
+func timedOutLoad(p *DownloadReleasedPolicy) {
+	done := make(chan struct{})
+	close(done)
+	p.mu.Lock()
+	p.loading = &releaseLoad{done: done, err: errDownloadTimedOut}
+	p.mu.Unlock()
+}
+
+// A caller that has been stopped is told so, also when the download it waited
+// for timed out at the same moment: select picks at random among ready cases, so
+// this is repeated enough for a version that does not give the caller priority
+// to be found.
+func TestStoppedCallerGetsItsOwnErrorOverTheDownloadsTimeout(t *testing.T) {
+	t.Parallel()
+	for _, want := range []error{context.Canceled, context.DeadlineExceeded} {
+		t.Run(want.Error(), func(t *testing.T) {
+			for i := 0; i < 64; i++ {
+				p := NewDownloadReleasedPolicyWithVersion("")
+				timedOutLoad(p)
+
+				err := p.SetRegoObjectsContext(&pastEntry{Context: context.Background(), err: want})
+
+				require.ErrorIs(t, err, want, "round %d", i)
+				assert.NotErrorIs(t, err, errDownloadTimedOut, "round %d", i)
+			}
+		})
+	}
+}
+
+// A stopped caller is not asked to fall back to the cache, whatever the
+// download it waited for ended with.
+func TestStoppedCallerIsNotAskedToFallBackAfterATimeout(t *testing.T) {
+	t.Parallel()
+	for _, want := range []error{context.Canceled, context.DeadlineExceeded} {
+		t.Run(want.Error(), func(t *testing.T) {
+			for i := 0; i < 64; i++ {
+				p := NewDownloadReleasedPolicyWithVersion("")
+				timedOutLoad(p)
+
+				fallback, err := p.SetRegoObjectsWithFallbackContext(&pastEntry{Context: context.Background(), err: want})
+
+				require.ErrorIs(t, err, want, "round %d", i)
+				assert.False(t, fallback, "round %d: a stopped scan was asked to fall back to the cache", i)
+			}
+		})
+	}
+}
+
+// A caller that has not been stopped still gets the download's timeout, and an
+// unpinned store still falls back to the cache for it, as for any download that
+// fails; a pinned one reports the failure.
+func TestActiveCallerStillGetsTheTimeoutAndItsFallback(t *testing.T) {
+	t.Parallel()
+	for _, version := range []string{"", "v2.0.301"} {
+		t.Run("version "+version, func(t *testing.T) {
+			r := newRelease(t, "nsa")
+			p := NewDownloadReleasedPolicyWithVersion(version)
+			p.gs.URL = r.URL + "/download"
+			end := endsAt(p)
+			open := r.hold("controls")
+			defer open()
+
+			type outcome struct {
+				fallback bool
+				err      error
+			}
+			result := make(chan outcome, 1)
+			go func() {
+				fallback, err := p.SetRegoObjectsWithFallbackContext(t.Context())
+				result <- outcome{fallback, err}
+			}()
+			<-r.arrived("controls")
+			end()
+
+			got := <-result
+			if version == "" {
+				assert.NoError(t, got.err)
+				assert.True(t, got.fallback, "an unpinned store falls back to the cache when the download times out")
+			} else {
+				require.ErrorIs(t, got.err, errDownloadTimedOut)
+				assert.False(t, got.fallback)
+			}
+			waitIdle(t, p)
+		})
+	}
 }
