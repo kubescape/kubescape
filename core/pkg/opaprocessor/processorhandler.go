@@ -70,6 +70,7 @@ var wholeClusterControlIDsFallback = map[string]struct{}{
 	"C-0266": {}, // Exposure to internet via Gateway API or Istio Ingress (Gateway/Service/VirtualService across namespaces)
 	"C-0267": {}, // Workload with cluster takeover roles (RoleBinding -> ServiceAccount in another namespace)
 	"C-0272": {}, // Workload with administrative roles (RoleBinding -> ServiceAccount in another namespace)
+	"C-0302": {}, // Dangling Gateway API backend (HTTPRoute backendRef.namespace -> Service in another namespace)
 }
 
 type IJobProgressNotificationClient interface {
