@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/kubescape/kubescape/v4/core/cautils"
+	ksmetav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
 	"github.com/moby/buildkit/client"
 	"github.com/project-copacetic/copacetic/pkg/types/unversioned"
 	log "github.com/sirupsen/logrus"
@@ -599,4 +600,22 @@ func TestCreateIntermediateScanFile_LongImageRef(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = os.Remove(f.Name()) }()
 	require.NoError(t, f.Close())
+}
+
+func TestPatch_NilParametersReturnsError(t *testing.T) {
+	ks := NewKubescape(context.Background())
+	patched, err := ks.Patch(nil, &cautils.ScanInfo{})
+	assert.Error(t, err)
+	assert.EqualError(t, err, "uninitialized patch parameters")
+	assert.False(t, patched)
+
+	patched, err = ks.Patch(&ksmetav1.PatchInfo{}, nil)
+	assert.Error(t, err)
+	assert.EqualError(t, err, "uninitialized scan parameters")
+	assert.False(t, patched)
+
+	patched, err = ks.Patch(nil, nil)
+	assert.Error(t, err)
+	assert.EqualError(t, err, "uninitialized patch parameters")
+	assert.False(t, patched)
 }

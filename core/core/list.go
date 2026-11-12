@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/csv"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -52,6 +53,10 @@ func ListSupportFormats() []string {
 }
 
 func (ks *Kubescape) List(listPolicies *metav1.ListPolicies) (*metav1.ListResult, error) {
+	if listPolicies == nil {
+		return nil, errors.New("uninitialized list parameters")
+	}
+
 	if listPolicies.Target == "controls" {
 		entries, err := listControls(ks.Context(), listPolicies)
 		if err != nil {

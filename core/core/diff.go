@@ -15,6 +15,10 @@ import (
 
 // Diff writes the diff between the two scan reports and returns the number of new or incomparable failures at or above the severity threshold; the caller decides whether to exit 1.
 func (ks *Kubescape) Diff(diffInfo *metav1.DiffInfo) (newFailures int, err error) {
+	if diffInfo == nil {
+		return 0, errors.New("uninitialized diff parameters")
+	}
+
 	if outputFile, explicit := diffOutputPath(diffInfo.Format, diffInfo.Output); explicit {
 		if err := validateDiffOutputSafety(outputFile, diffInfo.BaseFile, diffInfo.HeadFile); err != nil {
 			return 0, err
