@@ -428,3 +428,45 @@ resource "kubernetes_pod_v1" "app" {
 	assert.Contains(t, errs[0].Error(), `"args"`)
 	assert.NotContains(t, terraformFirstContainer(t, obj), "args")
 }
+
+func TestTerraformDirectory_GetWorkloads_LocalsTotalSizeLimit(t *testing.T) {
+	// Each local is well under the per-local limit, but together they exceed
+	// the aggregate budget, so the later ones must not be evaluated or retained.
+	const localSize = 1 << 19
+	count := maxTerraformLocalsTotalSize/localSize + 2
+	require.Less(t, localSize, maxTerraformLocalSize)
+
+	var locals strings.Builder
+	locals.WriteString("locals {\n")
+	for i := 0; i < count; i++ {
+		fmt.Fprintf(&locals, "  l%03d = format(\"%%0%dd\", %d)\n", i, localSize, i)
+	}
+	locals.WriteString("}\n")
+	last := fmt.Sprintf("l%03d", count-1)
+
+	dir := t.TempDir()
+	writeTerraformFiles(t, dir, map[string]string{
+		"locals.tf": locals.String(),
+		"main.tf": `
+resource "kubernetes_pod_v1" "app" {
+  metadata {
+    name = "app"
+  }
+  spec {
+    container {
+      name    = "app"
+      image   = format("nginx:%d", length(local.l000))
+      command = [format("%d", length(local.` + last + `))]
+    }
+  }
+}
+`,
+	})
+
+	obj, errs := terraformObject(t, dir)
+	container := terraformFirstContainer(t, obj)
+	assert.Equal(t, fmt.Sprintf("nginx:%d", localSize), container["image"])
+	assert.NotContains(t, container, "command")
+	require.Len(t, errs, 1)
+	assert.Contains(t, errs[0].Error(), `"command"`)
+}

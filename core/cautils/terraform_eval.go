@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"unicode/utf8"
 
@@ -86,7 +87,14 @@ var terraformFunctions = map[string]function.Function{
 	"zipmap":          stdlib.ZipmapFunc,
 }
 
-const maxTerraformLocalSize = 1 << 20
+const (
+	// maxTerraformLocalSize caps the size of a single resolved local.
+	maxTerraformLocalSize = 1 << 20
+	// maxTerraformLocalsTotalSize caps the combined size of every local value
+	// evaluated for one module, including values rejected for being too large,
+	// so that many individually small locals cannot exhaust memory.
+	maxTerraformLocalsTotalSize = 16 << 20
+)
 
 var coalesceFunc = function.New(&function.Spec{
 	VarParam: &function.Parameter{Name: "vals", Type: cty.DynamicPseudoType, AllowNull: true, AllowDynamicType: true},
@@ -339,6 +347,7 @@ func resolveLocals(files []*hcl.File, vars map[string]cty.Value) map[string]cty.
 	}
 
 	resolved := map[string]cty.Value{}
+	budget := maxTerraformLocalsTotalSize
 	for len(pending) > 0 {
 		var ready []string
 		for name, expr := range pending {
@@ -349,14 +358,24 @@ func resolveLocals(files []*hcl.File, vars map[string]cty.Value) map[string]cty.
 		if len(ready) == 0 {
 			break
 		}
+		// Evaluate in a stable order so the locals kept under the budget are deterministic.
+		sort.Strings(ready)
 		evalCtx := newTerraformEvalContext(vars, resolved)
 		for _, name := range ready {
+			if budget <= 0 {
+				logger.L().Warning("Skipping remaining Terraform locals: total size limit reached",
+					helpers.Int("skipped", len(pending)))
+				return resolved
+			}
 			val, diags := pending[name].Value(evalCtx)
 			delete(pending, name)
 			if diags.HasErrors() {
 				continue
 			}
-			if terraformValueSize(val, maxTerraformLocalSize) > maxTerraformLocalSize {
+			limit := min(maxTerraformLocalSize, budget)
+			size := terraformValueSize(val, limit)
+			budget -= size
+			if size > limit {
 				logger.L().Warning("Skipping Terraform local that exceeds the size limit", helpers.String("local", name))
 				continue
 			}
