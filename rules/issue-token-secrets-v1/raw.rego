@@ -78,7 +78,18 @@ deny contains msga if {
 # or watch needs a metadata.name field selector to match).
 can_issue_token_secret(role) if {
 	grants_unnamed(role, "create")
-	some verb in {"get", "list", "watch"}
+	can_read_back(role)
+}
+
+# A get carries the secret's real name, which is never empty, so it has to come
+# from an entry that is unrestricted or names a secret.
+can_read_back(role) if grants_readable(role, "get")
+
+# A list or watch without a metadata.name field selector is authorized with the
+# empty name and returns every secret, so an entry that lists only "" reads the
+# token as well.
+can_read_back(role) if {
+	some verb in {"list", "watch"}
 	grants(role, verb)
 }
 
@@ -162,6 +173,20 @@ grants_unnamed(role, verb) if {
 	grants_unnamed_requests(rule)
 	rule.verbs[_] in {verb, "*"}
 }
+
+# as above, but from entries that can reach an existing secret by its name,
+# which is never empty: an unrestricted entry, or one that names a secret.
+# An entry whose resourceNames lists only "" reaches no secret this way.
+grants_readable(role, verb) if {
+	rule := role.rules[_]
+	targets_secrets(rule)
+	reaches_existing_secret(rule)
+	rule.verbs[_] in {verb, "*"}
+}
+
+reaches_existing_secret(rule) if unrestricted_rule(rule)
+
+reaches_existing_secret(rule) if names_an_object(rule)
 
 # Kubernetes draws no distinction between an absent resourceNames and an
 # explicitly empty one: ResourceNameMatches returns true as soon as the list is
