@@ -8,6 +8,7 @@ import (
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/reporthandling"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
+	rbacv1 "k8s.io/api/rbac/v1"
 )
 
 // DEKFromMetadata extracts and unwraps the DEK stored in
@@ -879,4 +880,137 @@ func decryptSourcePath(sourcePath string, dek *ReportKey) (string, error) {
 	}
 
 	return decryptedPath + linePart, nil
+}
+
+// isRBACBindingKind reports whether kind names a Kubernetes RBAC binding resource.
+func isRBACBindingKind(kind string) bool {
+	return kind == "RoleBinding" || kind == "ClusterRoleBinding"
+}
+
+// DecryptRBACBindingReferences restores encrypted subject names/namespaces and
+// roleRef names on RoleBinding and ClusterRoleBinding objects, including
+// bindings embedded in RegoResponseVectorObject relatedObjects.
+func DecryptRBACBindingReferences(resource workloadinterface.IMetadata, dek *ReportKey) error {
+	if resource == nil {
+		return nil
+	}
+
+	if isRBACBindingKind(resource.GetKind()) {
+		if obj := resource.GetObject(); obj != nil {
+			if err := decryptRBACSubjects(obj, dek); err != nil {
+				return err
+			}
+			if err := decryptRBACRoleRef(obj, dek); err != nil {
+				return err
+			}
+			resource.SetObject(obj)
+		}
+	}
+
+	return decryptRegoRelatedObjects(resource, func(obj workloadinterface.IMetadata) error {
+		return DecryptRBACBindingReferences(obj, dek)
+	})
+}
+
+// decryptRBACSubjects restores encrypted name and namespace fields across
+// unstructured and typed RBAC binding subject slices.
+func decryptRBACSubjects(obj map[string]any, dek *ReportKey) error {
+	rawSubjects, ok := obj["subjects"]
+	if !ok || rawSubjects == nil {
+		return nil
+	}
+
+	switch subjects := rawSubjects.(type) {
+	case []map[string]any:
+		for _, subject := range subjects {
+			if err := decryptRBACSubjectMap(subject, dek); err != nil {
+				return err
+			}
+		}
+	case []any:
+		for _, item := range subjects {
+			subject, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			if err := decryptRBACSubjectMap(subject, dek); err != nil {
+				return err
+			}
+		}
+	case []rbacv1.Subject:
+		for i := range subjects {
+			if err := decryptStringField(&subjects[i].Name, "RBAC subject name", dek); err != nil {
+				return err
+			}
+			if err := decryptStringField(&subjects[i].Namespace, "RBAC subject namespace", dek); err != nil {
+				return err
+			}
+		}
+		obj["subjects"] = subjects
+	}
+
+	return nil
+}
+
+// decryptRBACSubjectMap restores encrypted name and namespace fields on an
+// unstructured RBAC subject map.
+func decryptRBACSubjectMap(subject map[string]any, dek *ReportKey) error {
+	if err := decryptMapStringField(subject, "name", "RBAC subject name", dek); err != nil {
+		return err
+	}
+	return decryptMapStringField(subject, "namespace", "RBAC subject namespace", dek)
+}
+
+// decryptRBACRoleRef restores the encrypted role name on an RBAC binding's
+// roleRef field.
+func decryptRBACRoleRef(obj map[string]any, dek *ReportKey) error {
+	rawRoleRef, ok := obj["roleRef"]
+	if !ok || rawRoleRef == nil {
+		return nil
+	}
+
+	switch roleRef := rawRoleRef.(type) {
+	case map[string]any:
+		return decryptMapStringField(roleRef, "name", "RBAC roleRef name", dek)
+	case rbacv1.RoleRef:
+		if err := decryptStringField(&roleRef.Name, "RBAC roleRef name", dek); err != nil {
+			return err
+		}
+		obj["roleRef"] = roleRef
+	case *rbacv1.RoleRef:
+		if roleRef != nil {
+			return decryptStringField(&roleRef.Name, "RBAC roleRef name", dek)
+		}
+	}
+
+	return nil
+}
+
+// decryptMapStringField restores a non-empty encrypted string field at key in m.
+func decryptMapStringField(m map[string]any, key, fieldDesc string, dek *ReportKey) error {
+	if m == nil {
+		return nil
+	}
+	val, ok := m[key].(string)
+	if !ok || val == "" {
+		return nil
+	}
+	if err := decryptStringField(&val, fieldDesc, dek); err != nil {
+		return err
+	}
+	m[key] = val
+	return nil
+}
+
+// decryptStringField restores a non-empty encrypted *string in place.
+func decryptStringField(target *string, fieldDesc string, dek *ReportKey) error {
+	if target == nil || *target == "" {
+		return nil
+	}
+	decrypted, err := decryptIfEncrypted(*target, dek)
+	if err != nil {
+		return fmt.Errorf("failed to decrypt %s: %w", fieldDesc, err)
+	}
+	*target = decrypted
+	return nil
 }

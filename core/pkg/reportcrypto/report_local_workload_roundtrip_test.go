@@ -353,19 +353,35 @@ func TestEncryptedRBACRelatedObjectsWithNamespaceAndSourcePathRoundTrip(t *testi
 				"apiVersion": "rbac.authorization.k8s.io/v1",
 				"kind":       "ClusterRoleBinding",
 				"metadata":   map[string]any{"name": "admins"},
+				"subjects": []any{
+					map[string]any{"kind": "User", "name": "alice"},
+				},
+				"roleRef": map[string]any{
+					"apiGroup": "rbac.authorization.k8s.io",
+					"kind":     "ClusterRole",
+					"name":     "privileged-role",
+				},
 			},
 			map[string]any{
 				"apiVersion": "rbac.authorization.k8s.io/v1",
 				"kind":       "RoleBinding",
 				"sourcePath": sourcePath,
 				"metadata":   map[string]any{"name": "viewers", "namespace": "acme-sec"},
+				"subjects": []any{
+					map[string]any{"kind": "ServiceAccount", "name": "payroll-worker", "namespace": "acme-sec"},
+				},
+				"roleRef": map[string]any{
+					"apiGroup": "rbac.authorization.k8s.io",
+					"kind":     "Role",
+					"name":     "viewer-role",
+				},
 			},
 		},
 	})
 	originalID := subject.GetID()
 
 	encryptedJSON := encryptedReport(t, subject)
-	for _, secret := range []string{"mallory@acme.example", "admins", "viewers", "acme-sec", "alice", "acme-payroll-repo", "rbac.yaml"} {
+	for _, secret := range []string{"mallory@acme.example", "admins", "viewers", "acme-sec", "alice", "acme-payroll-repo", "rbac.yaml", "privileged-role", "viewer-role", "payroll-worker"} {
 		assert.NotContains(t, resourceSections(t, encryptedJSON), secret)
 	}
 
@@ -377,11 +393,61 @@ func TestEncryptedRBACRelatedObjectsWithNamespaceAndSourcePathRoundTrip(t *testi
 	assert.Equal(t, originalID, decryptedID)
 	related := object["relatedObjects"].([]any)
 	require.Len(t, related, 2)
+
+	crb := related[0].(map[string]any)
+	crbMeta := crb["metadata"].(map[string]any)
+	assert.Equal(t, "admins", crbMeta["name"])
+	crbSubjects := crb["subjects"].([]any)
+	require.Len(t, crbSubjects, 1)
+	assert.Equal(t, "alice", crbSubjects[0].(map[string]any)["name"])
+	assert.Equal(t, "privileged-role", crb["roleRef"].(map[string]any)["name"])
+
 	rb := related[1].(map[string]any)
 	assert.Equal(t, sourcePath, rb["sourcePath"])
 	meta := rb["metadata"].(map[string]any)
 	assert.Equal(t, "viewers", meta["name"])
 	assert.Equal(t, "acme-sec", meta["namespace"])
+	rbSubjects := rb["subjects"].([]any)
+	require.Len(t, rbSubjects, 1)
+	assert.Equal(t, "payroll-worker", rbSubjects[0].(map[string]any)["name"])
+	assert.Equal(t, "acme-sec", rbSubjects[0].(map[string]any)["namespace"])
+	assert.Equal(t, "viewer-role", rb["roleRef"].(map[string]any)["name"])
+}
+
+func TestEncryptedTopLevelRoleBindingRoundTrip(t *testing.T) {
+	binding := workloadinterface.NewWorkloadObj(map[string]any{
+		"apiVersion": "rbac.authorization.k8s.io/v1",
+		"kind":       "RoleBinding",
+		"metadata":   map[string]any{"name": "viewers", "namespace": "acme-sec"},
+		"subjects": []any{
+			map[string]any{"kind": "User", "name": "alice"},
+			map[string]any{"kind": "ServiceAccount", "name": "payroll-worker", "namespace": "acme-sec"},
+		},
+		"roleRef": map[string]any{
+			"apiGroup": "rbac.authorization.k8s.io",
+			"kind":     "Role",
+			"name":     "viewer-role",
+		},
+	})
+	originalID := binding.GetID()
+
+	encryptedJSON := encryptedReport(t, binding)
+	for _, secret := range []string{"viewers", "acme-sec", "alice", "payroll-worker", "viewer-role"} {
+		assert.NotContains(t, resourceSections(t, encryptedJSON), secret)
+	}
+
+	decryptedJSON, err := reportcrypto.DecryptReport(encryptedJSON, []byte(exceptionTestMasterKey))
+	require.NoError(t, err)
+	assert.NotContains(t, resourceSections(t, decryptedJSON), "ENC[")
+
+	decryptedID, object, _ := soleResource(t, decryptedJSON)
+	assert.Equal(t, originalID, decryptedID)
+	subjects := object["subjects"].([]any)
+	require.Len(t, subjects, 2)
+	assert.Equal(t, "alice", subjects[0].(map[string]any)["name"])
+	assert.Equal(t, "payroll-worker", subjects[1].(map[string]any)["name"])
+	assert.Equal(t, "acme-sec", subjects[1].(map[string]any)["namespace"])
+	assert.Equal(t, "viewer-role", object["roleRef"].(map[string]any)["name"])
 }
 
 func TestDecryptReportRejectsTamperedEnvelopeName(t *testing.T) {

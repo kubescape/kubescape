@@ -41,7 +41,7 @@ const (
 
 // The resource names, namespaces and manifest paths these tests anonymize,
 // which a hidden or encrypted report must not contain in any form.
-var identitySecrets = []string{"alice", "acme-payroll-repo", "payroll-api", "payroll-worker", "ledger-api", "acme-finance", "gke-acme-prod", "node-acme-1", "eks-acme-prod", "mallory@acme.example", "admins", "viewers", "acme-sec"}
+var identitySecrets = []string{"alice", "acme-payroll-repo", "payroll-api", "payroll-worker", "ledger-api", "acme-finance", "gke-acme-prod", "node-acme-1", "eks-acme-prod", "mallory@acme.example", "admins", "viewers", "acme-sec", "privileged-role", "viewer-role"}
 
 func localDeployment(name, path string) *localworkload.LocalWorkload {
 	return localworkload.NewLocalWorkload(map[string]any{
@@ -105,17 +105,38 @@ func rbacSubject() workloadinterface.IMetadata {
 				"apiVersion": "rbac.authorization.k8s.io/v1",
 				"kind":       "ClusterRoleBinding",
 				"metadata":   map[string]any{"name": "admins"},
+				"subjects": []any{
+					map[string]any{"kind": "User", "name": "alice"},
+				},
+				"roleRef": map[string]any{
+					"kind": "ClusterRole",
+					"name": "privileged-role",
+				},
 			},
 			map[string]any{
 				"apiVersion": "rbac.authorization.k8s.io/v1",
 				"kind":       "RoleBinding",
 				"metadata":   map[string]any{"name": "viewers", "namespace": "acme-sec"},
+				"subjects": []any{
+					map[string]any{"kind": "ServiceAccount", "name": "payroll-worker", "namespace": "acme-sec"},
+				},
+				"roleRef": map[string]any{
+					"kind": "Role",
+					"name": "viewer-role",
+				},
 			},
 			map[string]any{
 				"apiVersion": "rbac.authorization.k8s.io/v1",
 				"kind":       "RoleBinding",
 				"sourcePath": identityManifest + ":4",
 				"metadata":   map[string]any{"name": "viewers", "namespace": "acme-sec"},
+				"subjects": []any{
+					map[string]any{"kind": "User", "name": "alice"},
+				},
+				"roleRef": map[string]any{
+					"kind": "Role",
+					"name": "viewer-role",
+				},
 			},
 		},
 	})
@@ -314,10 +335,21 @@ func TestAnonymizationKeepsResultsResolvable(t *testing.T) {
 					require.Len(t, related, 3, "related objects remain present")
 					for _, rel := range related {
 						assert.NotEmpty(t, rel.GetName(), "related object has transformed name")
+						relObj := rel.GetObject()
+						rawSubjects := relObj["subjects"].([]any)
+						require.NotEmpty(t, rawSubjects, "related binding subjects remain present")
+						subjectMap := rawSubjects[0].(map[string]any)
+						roleRefMap := relObj["roleRef"].(map[string]any)
+
 						if mode.name == "hide" {
 							assert.True(t, strings.HasPrefix(rel.GetName(), "res-"), "related object name is transformed")
+							assert.True(t, strings.HasPrefix(subjectMap["name"].(string), "res-"), "related subject name is transformed")
+							assert.True(t, strings.HasPrefix(roleRefMap["name"].(string), "res-"), "related roleRef name is transformed")
 							if rel.GetKind() == "RoleBinding" {
 								assert.True(t, strings.HasPrefix(rel.GetNamespace(), "ns-"), "related object namespace is transformed")
+							}
+							if ns, ok := subjectMap["namespace"].(string); ok && ns != "" {
+								assert.True(t, strings.HasPrefix(ns, "ns-"), "related subject namespace is transformed")
 							}
 							if lw, isLW := rel.(*localworkload.LocalWorkload); isLW {
 								assert.True(t, strings.HasPrefix(lw.GetPath(), "src-"), "related local workload sourcePath is transformed")
@@ -325,8 +357,13 @@ func TestAnonymizationKeepsResultsResolvable(t *testing.T) {
 							}
 						} else {
 							assert.True(t, strings.HasPrefix(rel.GetName(), "ENC["), "related object name is encrypted")
+							assert.True(t, strings.HasPrefix(subjectMap["name"].(string), "ENC["), "related subject name is encrypted")
+							assert.True(t, strings.HasPrefix(roleRefMap["name"].(string), "ENC["), "related roleRef name is encrypted")
 							if rel.GetKind() == "RoleBinding" {
 								assert.True(t, strings.HasPrefix(rel.GetNamespace(), "ENC["), "related object namespace is encrypted")
+							}
+							if ns, ok := subjectMap["namespace"].(string); ok && ns != "" {
+								assert.True(t, strings.HasPrefix(ns, "ENC["), "related subject namespace is encrypted")
 							}
 							if lw, isLW := rel.(*localworkload.LocalWorkload); isLW {
 								assert.True(t, strings.HasPrefix(lw.GetPath(), "ENC["), "related local workload sourcePath is encrypted")
@@ -615,4 +652,86 @@ func printIdentityReports(t *testing.T, session *cautils.OPASessionObj) map[stri
 		outputs[format] = string(data)
 	}
 	return outputs
+}
+
+func TestAnonymizationHidesRBACBindingReferencesConsistently(t *testing.T) {
+	subject := objectsenvelopes.NewRegoResponseVectorObject(map[string]any{
+		"apiVersion": "",
+		"kind":       "User",
+		"name":       "alice",
+		"namespace":  "",
+		"relatedObjects": []any{
+			map[string]any{
+				"apiVersion": "rbac.authorization.k8s.io/v1",
+				"kind":       "Role",
+				"metadata":   map[string]any{"name": "viewer-role", "namespace": "acme-sec"},
+			},
+			map[string]any{
+				"apiVersion": "rbac.authorization.k8s.io/v1",
+				"kind":       "RoleBinding",
+				"metadata":   map[string]any{"name": "viewers", "namespace": "acme-sec"},
+				"subjects": []any{
+					map[string]any{"kind": "User", "name": "alice"},
+					map[string]any{"kind": "ServiceAccount", "name": "payroll-worker", "namespace": "acme-sec"},
+				},
+				"roleRef": map[string]any{
+					"apiGroup": "rbac.authorization.k8s.io",
+					"kind":     "Role",
+					"name":     "viewer-role",
+				},
+			},
+		},
+	})
+	topLevelBinding := workloadinterface.NewWorkloadObj(map[string]any{
+		"apiVersion": "rbac.authorization.k8s.io/v1",
+		"kind":       "ClusterRoleBinding",
+		"metadata":   map[string]any{"name": "admins"},
+		"subjects": []any{
+			map[string]any{"kind": "User", "name": "alice"},
+		},
+		"roleRef": map[string]any{
+			"apiGroup": "rbac.authorization.k8s.io",
+			"kind":     "ClusterRole",
+			"name":     "privileged-role",
+		},
+	})
+
+	session := identitySession(subject, topLevelBinding)
+	require.NoError(t, Apply(&resultshandling.ResultsHandler{ScanData: session}))
+
+	jsonOut := printIdentityReports(t, session)["json"]
+	for _, secret := range []string{"alice", "viewer-role", "viewers", "acme-sec", "payroll-worker", "admins", "privileged-role"} {
+		assert.NotContains(t, jsonOut, secret)
+	}
+
+	var anonSubject *objectsenvelopes.RegoResponseVectorObject
+	var anonTopBinding workloadinterface.IMetadata
+	for _, res := range session.GetCatalog().All() {
+		switch res.GetKind() {
+		case "User":
+			anonSubject = res.(*objectsenvelopes.RegoResponseVectorObject)
+		case "ClusterRoleBinding":
+			anonTopBinding = res
+		}
+	}
+	require.NotNil(t, anonSubject)
+	require.NotNil(t, anonTopBinding)
+
+	related := anonSubject.GetRelatedObjects()
+	require.Len(t, related, 2)
+	anonRole := related[0]
+	anonBinding := related[1]
+
+	bindingObj := anonBinding.GetObject()
+	subjects := bindingObj["subjects"].([]any)
+	require.Len(t, subjects, 2)
+	assert.Equal(t, anonSubject.GetName(), subjects[0].(map[string]any)["name"])
+	assert.Equal(t, anonRole.GetNamespace(), subjects[1].(map[string]any)["namespace"])
+	assert.Equal(t, anonRole.GetName(), bindingObj["roleRef"].(map[string]any)["name"])
+
+	topObj := anonTopBinding.GetObject()
+	topSubjects := topObj["subjects"].([]any)
+	require.Len(t, topSubjects, 1)
+	assert.Equal(t, anonSubject.GetName(), topSubjects[0].(map[string]any)["name"])
+	assert.True(t, strings.HasPrefix(topObj["roleRef"].(map[string]any)["name"].(string), "res-"))
 }
