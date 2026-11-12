@@ -91,6 +91,58 @@ func TestDefaultScanInfo_KS_SUBMIT_ParsedValues(t *testing.T) {
 	}
 }
 
+func TestDefaultScanInfo_KS_ENABLE_HOST_SCANNER_UnsetLeavesAutoDetect(t *testing.T) {
+	// An unset KS_ENABLE_HOST_SCANNER must leave HostSensorEnabled nil so that
+	// getHostSensorHandler auto-detects node-agent CRDs.
+	unsetEnvForTest(t, "KS_ENABLE_HOST_SCANNER")
+
+	s := defaultScanInfo()
+
+	assert.Nil(t, s.HostSensorEnabled.Get())
+}
+
+func TestDefaultScanInfo_KS_ENABLE_HOST_SCANNER_UnparsableValueIgnored(t *testing.T) {
+	// Regression test: like KS_SUBMIT, KS_ENABLE_HOST_SCANNER is presence-checked,
+	// so an unparsable value (including "", which Helm commonly renders for an
+	// unset value) must not become an explicit false that silently disables
+	// node-agent auto-detection - see https://github.com/kubescape/kubescape/issues/2555.
+	for _, v := range []string{"", " ", "yes", "no", "on", "off", "enabled"} {
+		t.Run("value="+v, func(t *testing.T) {
+			t.Setenv("KS_ENABLE_HOST_SCANNER", v)
+			s := defaultScanInfo()
+			assert.Nil(t, s.HostSensorEnabled.Get(), "unparsable KS_ENABLE_HOST_SCANNER=%q must not mark HostSensorEnabled as explicitly set", v)
+		})
+	}
+}
+
+func TestDefaultScanInfo_KS_ENABLE_HOST_SCANNER_ParsedValues(t *testing.T) {
+	tests := []struct {
+		raw  string
+		want bool
+	}{
+		{"true", true},
+		{"1", true},
+		{"TRUE", true},
+		{"tRuE", true},  // StringToBool accepted any casing of true; keep accepting it
+		{"TRUE ", true}, // tolerated: surrounding whitespace
+		{"t", true},
+		{"false", false},
+		{"0", false},
+		{"FALSE", false},
+		{"fAlSe", false},
+		{" False", false},
+		{"f", false},
+	}
+	for _, tt := range tests {
+		t.Run("value="+tt.raw, func(t *testing.T) {
+			t.Setenv("KS_ENABLE_HOST_SCANNER", tt.raw)
+			s := defaultScanInfo()
+			require.NotNil(t, s.HostSensorEnabled.Get())
+			assert.Equal(t, tt.want, s.HostSensorEnabled.GetBool())
+		})
+	}
+}
+
 func TestGetScanCommand(t *testing.T) {
 	unsetEnvForTest(t, "KS_SUBMIT")
 
