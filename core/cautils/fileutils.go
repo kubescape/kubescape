@@ -1363,13 +1363,51 @@ func readYamlFile(yamlFile []byte) (yamlObjs []workloadinterface.IMetadata, err 
 
 // reparseAsYAML11 reads one document the way kubectl does (sigs.k8s.io/yaml,
 // YAML 1.1 booleans). It reports false if the document does not parse into a
-// mapping.
+// mapping. Numbers are decoded as json.Number and then given the types the
+// primary reading gives them, because decoding them as float64 would round an
+// integer above 2^53.
 func reparseAsYAML11(doc []byte) (map[string]any, bool) {
 	var obj map[string]any
-	if err := sigsyaml.Unmarshal(doc, &obj); err != nil || obj == nil {
+	err := sigsyaml.Unmarshal(doc, &obj, func(d *json.Decoder) *json.Decoder {
+		d.UseNumber()
+		return d
+	})
+	if err != nil || obj == nil {
 		return nil, false
 	}
+	for k, v := range obj {
+		obj[k] = numbersToGoTypes(v)
+	}
 	return obj, true
+}
+
+// numbersToGoTypes replaces every json.Number below v with an int, a uint64
+// or a float64, as yaml.v3 decodes them, without passing an integer through
+// float64. Integers up to the uint64 range keep every digit. Beyond it the YAML
+// library has already rounded the value, and it becomes a float64 as it does in
+// the primary reading.
+func numbersToGoTypes(v any) any {
+	switch x := v.(type) {
+	case map[string]any:
+		for k, e := range x {
+			x[k] = numbersToGoTypes(e)
+		}
+	case []any:
+		for i, e := range x {
+			x[i] = numbersToGoTypes(e)
+		}
+	case json.Number:
+		if i, err := strconv.ParseInt(string(x), 10, 0); err == nil {
+			return int(i)
+		}
+		if u, err := strconv.ParseUint(string(x), 10, 64); err == nil {
+			return u
+		}
+		if f, err := strconv.ParseFloat(string(x), 64); err == nil {
+			return f
+		}
+	}
+	return v
 }
 
 // splitYAMLDocuments splits a YAML stream while retaining inline content and directive headers.
