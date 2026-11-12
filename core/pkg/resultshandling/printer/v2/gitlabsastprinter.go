@@ -275,15 +275,29 @@ func toGitLabImageVulnerability(image, platform string, cve imageprinter.CVE) gi
 				Version: cve.Version,
 			},
 		},
-		Identifiers: []gitLabIdentifier{
-			{
-				Type:  gitLabCVEIDType,
-				Name:  cve.ID,
-				Value: cve.ID,
-				URL:   fmt.Sprintf("https://nvd.nist.gov/vuln/detail/%s", cve.ID),
-			},
-		},
+		Identifiers: []gitLabIdentifier{gitLabAdvisoryIdentifier(cve.ID)},
 	}
+}
+
+// gitLabAdvisoryIdentifier types a vulnerability ID by its prefix. Grype reports
+// a GitHub advisory (GHSA-...) or a distro advisory (ALAS-..., ELSA-...) when it
+// has no CVE for a match, and GitLab shows the identifier type and links its URL,
+// so only a CVE ID is typed "cve" and linked to NVD.
+func gitLabAdvisoryIdentifier(id string) gitLabIdentifier {
+	identifier := gitLabIdentifier{Type: gitLabCVEIDType, Name: id, Value: id}
+	prefix, _, found := strings.Cut(id, "-")
+	switch {
+	case !found || prefix == "":
+		identifier.Type = "advisory"
+	case strings.EqualFold(prefix, "CVE"):
+		identifier.URL = fmt.Sprintf("https://nvd.nist.gov/vuln/detail/%s", id)
+	case strings.EqualFold(prefix, "GHSA"):
+		identifier.Type = "ghsa"
+		identifier.URL = fmt.Sprintf("https://github.com/advisories/%s", id)
+	default:
+		identifier.Type = strings.ToLower(prefix)
+	}
+	return identifier
 }
 
 // gitLabImageVulnerabilityID returns a stable id so GitLab can track a CVE finding across scans for triage and dismissal.
