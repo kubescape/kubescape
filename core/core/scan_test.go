@@ -1524,15 +1524,65 @@ func TestIsGenuineManifest_Classification(t *testing.T) {
 
 	tfFile := filepath.Join(dir, "main.tf")
 	require.NoError(t, os.WriteFile(tfFile, []byte(`resource "kubernetes_pod" "test" {}`), 0o600))
-	assert.True(t, isGenuineManifest(tfFile), "terraform file should be recognized as a genuine manifest input")
+	isManifest, err := isGenuineManifest(tfFile)
+	require.NoError(t, err)
+	assert.True(t, isManifest, "terraform file should be recognized as a genuine manifest input")
 
 	emptyFile := filepath.Join(dir, "empty.yaml")
 	require.NoError(t, os.WriteFile(emptyFile, []byte(""), 0o600))
-	assert.False(t, isGenuineManifest(emptyFile), "empty file should not be treated as a genuine manifest")
+	isManifest, err = isGenuineManifest(emptyFile)
+	require.NoError(t, err)
+	assert.False(t, isManifest, "empty file should not be treated as a genuine manifest")
 
 	reportYaml := filepath.Join(dir, "results.yaml")
 	require.NoError(t, os.WriteFile(reportYaml, []byte("type: postureReport\nrawResources:\n  - apiVersion: v1\n"), 0o600))
-	assert.False(t, isGenuineManifest(reportYaml), "yaml posture report should not be treated as a genuine manifest")
+	isManifest, err = isGenuineManifest(reportYaml)
+	require.NoError(t, err)
+	assert.False(t, isManifest, "yaml posture report should not be treated as a genuine manifest")
+}
+
+func TestIsGenuineManifest_RejectsNonRegularAndOversized(t *testing.T) {
+	dir := t.TempDir()
+
+	isManifest, err := isGenuineManifest(dir)
+	require.NoError(t, err)
+	assert.False(t, isManifest, "directory should not be treated as a genuine manifest")
+
+	if runtime.GOOS != "windows" {
+		isManifest, err = isGenuineManifest("/dev/null")
+		require.NoError(t, err)
+		assert.False(t, isManifest, "character device should not be treated as a genuine manifest")
+	}
+
+	oversizedYaml := filepath.Join(dir, "large.yaml")
+	f, err := os.Create(oversizedYaml)
+	require.NoError(t, err)
+	_, err = f.WriteAt([]byte("apiVersion: v1\nkind: Pod\n"), cautils.DefaultMaxFileSize+10)
+	require.NoError(t, err)
+	require.NoError(t, f.Close())
+
+	isManifest, err = isGenuineManifest(oversizedYaml)
+	assert.False(t, isManifest)
+	assert.ErrorIs(t, err, ErrManifestTooLargeToClassify)
+}
+
+func TestValidateScanOutputSafety_RejectsOversizedInputManifestCollision(t *testing.T) {
+	dir := t.TempDir()
+	oversizedManifest := filepath.Join(dir, "large_manifest.yaml")
+	f, err := os.Create(oversizedManifest)
+	require.NoError(t, err)
+	_, err = f.Write([]byte("apiVersion: v1\nkind: Pod\nmetadata:\n  name: large-pod\n"))
+	require.NoError(t, err)
+	require.NoError(t, f.Truncate(cautils.DefaultMaxFileSize+1024))
+	require.NoError(t, f.Close())
+
+	scanInfo := &cautils.ScanInfo{
+		FilePath: dir,
+	}
+
+	err = validateScanOutputSafety(oversizedManifest, scanInfo, true)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "would overwrite input manifest")
 }
 
 func TestIsPrioritizationScanType(t *testing.T) {

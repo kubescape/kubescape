@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/cautils/getter"
 	"github.com/kubescape/kubescape/v4/core/pkg/scancache"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
@@ -176,6 +177,29 @@ func TestIncrementalCacheVersionFailsClosedWhenControlsInputDisappears(t *testin
 	assert.Empty(t, version)
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "read controls inputs for cache version")
+}
+
+func TestIncrementalCacheVersionRejectsNonRegularControlsInputs(t *testing.T) {
+	scanInfo, scanData := cacheVersionFixture()
+	scanInfo.ControlsInputs = t.TempDir()
+
+	version, err := incrementalCacheVersion(scanInfo, scanData, testRuntimeVersion)
+	assert.Empty(t, version)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "is a directory, not a file")
+}
+
+func TestIncrementalCacheVersionRejectsOversizedControlsInputs(t *testing.T) {
+	scanInfo, scanData := cacheVersionFixture()
+	oversizedPath := filepath.Join(t.TempDir(), "large-controls.json")
+	require.NoError(t, os.WriteFile(oversizedPath, []byte("{}"), 0o600))
+	require.NoError(t, os.Truncate(oversizedPath, 32*1024*1024+1))
+
+	scanInfo.ControlsInputs = oversizedPath
+	version, err := incrementalCacheVersion(scanInfo, scanData, testRuntimeVersion)
+	assert.Empty(t, version)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, getter.ErrPolicyTooLarge)
 }
 
 func TestIncrementalCacheVersionRejectsMissingInputs(t *testing.T) {

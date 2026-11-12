@@ -585,6 +585,36 @@ func TestReadControlsInputsFile(t *testing.T) {
 	})
 }
 
+func TestReadPolicyFile(t *testing.T) {
+	write := func(t *testing.T, body string) string {
+		t.Helper()
+		p := filepath.Join(t.TempDir(), "policy.json")
+		require.NoError(t, os.WriteFile(p, []byte(body), 0o600))
+		return p
+	}
+
+	t.Run("a valid file", func(t *testing.T) {
+		content := `{"key1":["val1","val2"]}`
+		data, err := ReadPolicyFile(write(t, content))
+		require.NoError(t, err)
+		assert.Equal(t, []byte(content), data)
+	})
+	t.Run("a missing file", func(t *testing.T) {
+		_, err := ReadPolicyFile(filepath.Join(t.TempDir(), "missing.json"))
+		require.Error(t, err)
+	})
+	t.Run("a directory", func(t *testing.T) {
+		_, err := ReadPolicyFile(t.TempDir())
+		require.ErrorContains(t, err, "is a directory, not a file")
+	})
+	t.Run("an oversized file", func(t *testing.T) {
+		path := write(t, "")
+		require.NoError(t, os.Truncate(path, maxPolicyFileBytes+1))
+		_, err := ReadPolicyFile(path)
+		require.ErrorIs(t, err, ErrPolicyTooLarge)
+	})
+}
+
 func writeTempJSONControlInputs(t testing.TB) (string, map[string][]string) {
 	fileName := testFrameworkFile("control-inputs")
 	mock := map[string][]string{
