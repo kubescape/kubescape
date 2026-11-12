@@ -311,6 +311,94 @@ func TestKustomizeBaseDirectory(t *testing.T) {
 	assert.NotEmpty(t, workloads, "should have workloads from base directory")
 }
 
+func TestKustomizeGeneratorFileRestrictions(t *testing.T) {
+	for _, generator := range []string{"configMapGenerator", "secretGenerator"} {
+		t.Run(generator, func(t *testing.T) {
+			for _, location := range []string{"local", "parent", "absolute", "symlink"} {
+				t.Run(location, func(t *testing.T) {
+					parent := resolvedTempDir(t)
+					root := filepath.Join(parent, "scan")
+					require.NoError(t, os.Mkdir(root, 0o700))
+					outside := writeManifestFixture(t, parent, "outside.txt", "outside-root")
+					file := "inside.txt"
+					switch location {
+					case "local":
+						writeManifestFixture(t, root, file, "inside-root")
+					case "parent":
+						file = "../outside.txt"
+					case "absolute":
+						file = filepath.ToSlash(outside)
+					case "symlink":
+						if err := os.Symlink(outside, filepath.Join(root, file)); err != nil {
+							t.Skipf("symlinks are unavailable: %v", err)
+						}
+					}
+					writeManifestFixture(t, root, "kustomization.yaml", fmt.Sprintf(`apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+generatorOptions:
+  disableNameSuffixHash: true
+%s:
+- name: generated
+  files:
+  - %q
+`, generator, "payload="+file))
+
+					workloads, errs := NewKustomizeDirectory(root).GetWorkloads(root)
+					if location != "local" {
+						require.Len(t, errs, 1)
+						assert.Contains(t, errs[0].Error(), "is not in or below")
+						assert.Empty(t, workloads, "a rejected file must not produce workloads")
+						return
+					}
+					require.Empty(t, errs)
+					require.Len(t, workloads[root], 1)
+					wl := workloads[root][0]
+					assert.Equal(t, "generated", wl.GetName())
+					if generator == "secretGenerator" {
+						assert.Equal(t, "Secret", wl.GetKind())
+						assert.Equal(t, map[string]any{"payload": "aW5zaWRlLXJvb3Q="}, wl.GetObject()["data"])
+					} else {
+						assert.Equal(t, "ConfigMap", wl.GetKind())
+						assert.Equal(t, map[string]any{"payload": "inside-root"}, wl.GetObject()["data"])
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestKustomizeOverlayWithBaseGenerator(t *testing.T) {
+	parent := resolvedTempDir(t)
+	base := filepath.Join(parent, "base")
+	overlay := filepath.Join(parent, "overlay")
+	require.NoError(t, os.Mkdir(base, 0o700))
+	require.NoError(t, os.Mkdir(overlay, 0o700))
+	writeManifestFixture(t, base, "settings.txt", "from-base")
+	writeManifestFixture(t, base, "kustomization.yaml", `apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+generatorOptions:
+  disableNameSuffixHash: true
+configMapGenerator:
+- name: settings
+  files:
+  - settings.txt
+`)
+	writeManifestFixture(t, overlay, "kustomization.yaml", `apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+- ../base
+namePrefix: prod-
+`)
+
+	workloads, errs := NewKustomizeDirectory(overlay).GetWorkloads(overlay)
+	require.Empty(t, errs, "a base directory outside the overlay must retain its own file-loading root")
+	require.Len(t, workloads[overlay], 1)
+	wl := workloads[overlay][0]
+	assert.Equal(t, "ConfigMap", wl.GetKind())
+	assert.Equal(t, "prod-settings", wl.GetName())
+	assert.Equal(t, map[string]any{"settings.txt": "from-base"}, wl.GetObject()["data"])
+}
+
 // TestKustomizeGetWorkloads_PathIsNormalized covers the evidence pointer this
 // deliverable is about: since a Kustomize build composes a base plus its
 // overlays, no single source file matches the output document-for-document

@@ -691,13 +691,23 @@ esac
 func TestGetResourcesFromPath_RendersNestedKustomizeDirectoryWithPreciseOwnership(t *testing.T) {
 	repoRoot := t.TempDir()
 	appDir := filepath.Join(repoRoot, "app")
+	sharedDir := filepath.Join(repoRoot, "shared")
 	require.NoError(t, os.MkdirAll(appDir, 0o750))
+	require.NoError(t, os.MkdirAll(sharedDir, 0o750))
+	// External resources must be referenced through a base directory with its
+	// own Kustomization, rather than loading an individual file outside appDir.
+	require.NoError(t, os.WriteFile(filepath.Join(sharedDir, "kustomization.yaml"), []byte(`apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namePrefix: base-
+resources:
+  - shared.yaml
+`), 0o600))
 	require.NoError(t, os.WriteFile(filepath.Join(appDir, "kustomization.yaml"), []byte(`apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namePrefix: prod-
 resources:
   - deployment.yaml
-  - ../shared.yaml
+  - ../shared
 `), 0o600))
 	require.NoError(t, os.WriteFile(filepath.Join(appDir, "deployment.yaml"), []byte(`apiVersion: apps/v1
 kind: Deployment
@@ -716,7 +726,7 @@ spec:
         - name: app
           image: nginx:1.27
 `), 0o600))
-	require.NoError(t, os.WriteFile(filepath.Join(repoRoot, "shared.yaml"), []byte(`apiVersion: v1
+	require.NoError(t, os.WriteFile(filepath.Join(sharedDir, "shared.yaml"), []byte(`apiVersion: v1
 kind: ConfigMap
 metadata:
   name: shared
@@ -746,7 +756,8 @@ metadata:
 
 	assert.Equal(t, 1, counts["Deployment/prod-app"], "the nested Kustomize output must be scanned")
 	assert.Zero(t, counts["Deployment/app"], "the untransformed source manifest must not also be scanned")
-	assert.Equal(t, 1, counts["ConfigMap/prod-shared"], "a referenced source outside the Kustomize directory must be owned by the render")
+	assert.Equal(t, 1, counts["ConfigMap/prod-base-shared"], "a referenced base outside the Kustomize directory must be included in the render")
+	assert.Equal(t, 1, counts["ConfigMap/base-shared"], "the sibling base is also independently discovered during a broad scan")
 	assert.Zero(t, counts["ConfigMap/shared"], "the external source must not also be scanned raw")
 	assert.Zero(t, counts["Kustomization/"], "the Kustomization file is build input, not a workload")
 	assert.Equal(t, 1, counts["ConfigMap/unreferenced"], "an unreferenced manifest beside the Kustomization must remain")
@@ -816,7 +827,7 @@ func TestGetResourcesFromPath_NestedKustomizeHelmCRDOwnershipFollowsIncludeCRDs(
 
 			repoRoot := t.TempDir()
 			appDir := filepath.Join(repoRoot, "app")
-			chartDir := filepath.Join(repoRoot, "vendor", "charts", "app")
+			chartDir := filepath.Join(appDir, "vendor", "charts", "app")
 			require.NoError(t, os.MkdirAll(filepath.Join(chartDir, "templates"), 0o750))
 			require.NoError(t, os.MkdirAll(filepath.Join(chartDir, "crds"), 0o750))
 			require.NoError(t, os.WriteFile(filepath.Join(chartDir, "Chart.yaml"), []byte("apiVersion: v2\nname: app\nversion: 0.1.0\n"), 0o600))
@@ -844,7 +855,7 @@ spec:
 			require.NoError(t, os.WriteFile(filepath.Join(appDir, "kustomization.yaml"), []byte(fmt.Sprintf(`apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 helmGlobals:
-  chartHome: ../vendor/charts
+  chartHome: vendor/charts
 helmCharts:
   - name: app
     releaseName: app
