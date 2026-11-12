@@ -95,7 +95,7 @@ To scan a container image for vulnerabilities, add a separate step:
     command: kubescape scan image nginx:latest
 ```
 
-> **Note:** Kubescape pulls images directly from the registry using Syft/Grype and does not require a Docker daemon for registry-hosted images. `--format junit` is not supported for image scans — use `pretty-printer`, `json`, or `sarif` instead.
+> **Note:** Kubescape pulls images directly from the registry using Syft/Grype and does not require a Docker daemon for registry-hosted images. `--format junit` is supported for image scans; CircleCI can collect the resulting XML with [`store_test_results`](https://circleci.com/docs/collect-test-data/).
 
 ### Step 6 — Save Scan Results as Artifacts
 
@@ -162,7 +162,7 @@ Kubescape behaviour is controlled via CLI flags passed to the `kubescape scan` c
 | Flag | Default | Description |
 |---|---|---|
 | `--compliance-threshold` | `0` | Minimum compliance score (0–100). The job fails if the score is below this value. |
-| `--format` | `pretty-printer` | Output format for manifest scans. Accepted values: `pretty-printer`, `json`, `junit`, `sarif`. Image scans support `pretty-printer`, `json`, and `sarif` only (no `junit`). |
+| `--format` | `pretty-printer` | Output format for manifest and image scans. Both accept `pretty-printer`, `json`, `junit`, and `sarif`; see the [CLI reference](cli-reference.md) for more formats. |
 | `--output` | stdout | Path to write the scan results file. |
 | `--severity-threshold` | (unset) | Fail the job if any vulnerability at or above this severity is found. Accepted values: `low`, `medium`, `high`, `critical`. |
 | `--exceptions` | — | Path to an exceptions file to suppress known findings. |

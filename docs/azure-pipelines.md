@@ -88,7 +88,7 @@ To scan a container image for vulnerabilities, add a separate step:
   displayName: Scan container image
 ```
 
-> **Note:** Kubescape pulls images directly from the registry using Syft/Grype and does not require a Docker daemon for registry-hosted images. `--format junit` is not supported for image scans — use `pretty-printer`, `json`, or `sarif` instead.
+> **Note:** Kubescape pulls images directly from the registry using Syft/Grype and does not require a Docker daemon for registry-hosted images. `--format junit` is supported for image scans; Azure Pipelines can publish the resulting XML with the [`PublishTestResults`](https://learn.microsoft.com/azure/devops/pipelines/tasks/reference/publish-test-results-v2) task.
 
 ### Step 6 — Save Scan Results as Pipeline Artifacts
 
@@ -151,7 +151,7 @@ Kubescape behaviour is controlled via CLI flags passed to the `kubescape scan` c
 | Flag | Default | Description |
 |---|---|---|
 | `--compliance-threshold` | `0` | Minimum compliance score (0–100). The pipeline fails if the score is below this value. |
-| `--format` | `pretty-printer` | Output format for manifest/framework scans. Accepted values: `pretty-printer`, `json`, `junit`, `sarif`, `html`, `pdf`, `prometheus`. Image scans support `pretty-printer`, `json`, and `sarif` only (no `junit`). |
+| `--format` | `pretty-printer` | Output format for manifest/framework and image scans. Both accept `pretty-printer`, `json`, `junit`, `sarif`, `html`, `pdf`, and `prometheus`; see the [CLI reference](cli-reference.md) for more formats. |
 | `--output` | stdout | Path to write the scan results file. |
 | `--severity-threshold` | (unset) | Fail the pipeline if any control failure at or above this severity is found. Accepted values: `low`, `medium`, `high`, `critical`. |
 | `--exceptions` | — | Path to an exceptions file to suppress known findings. |
