@@ -452,4 +452,39 @@ patches:
 		_, ownOrigins := renderedKustomizeWorkloads(t, ownDir)
 		assert.Empty(t, ownOrigins)
 	})
+
+	t.Run("a patch renames a resource to the name of a deleted one", func(t *testing.T) {
+		renameDir := t.TempDir()
+		for _, name := range []string{"a", "b"} {
+			require.NoError(t, os.WriteFile(filepath.Join(renameDir, name+".yaml"),
+				[]byte("apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: "+name+"\n"), 0o600))
+		}
+		require.NoError(t, os.WriteFile(filepath.Join(renameDir, "kustomization.yaml"), []byte(`resources:
+- a.yaml
+- b.yaml
+buildMetadata: [originAnnotations]
+patches:
+- patch: |-
+    $patch: delete
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: b
+- patch: |-
+    - op: replace
+      path: /metadata/name
+      value: b
+    - op: replace
+      path: /metadata/annotations/config.kubernetes.io~1origin
+      value: |
+        path: b.yaml
+  target:
+    kind: Deployment
+    name: a
+`), 0o600))
+
+		byName, renamedOrigins := renderedKustomizeWorkloads(t, renameDir)
+		require.Contains(t, byName, "Deployment/b")
+		assert.Empty(t, renamedOrigins)
+	})
 }

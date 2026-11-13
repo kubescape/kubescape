@@ -181,7 +181,7 @@ func originFilesFor(newKustomizer func() *krusty.Kustomizer, directory string, p
 		// The kustomization asked for origin annotations, so the plain build
 		// carries them, relative to the directory. They stay where they are.
 		untransformed := untransformedOriginFiles(newKustomizer, directory)
-		if untransformed == nil {
+		if untransformed == nil || !sameResources(plain, untransformed) {
 			return nil
 		}
 		files := make([]string, len(plain))
@@ -210,7 +210,7 @@ func wrapperOriginFiles(newKustomizer func() *krusty.Kustomizer, directory strin
 		return nil
 	}
 	untransformed := untransformedOriginFiles(newKustomizer, directory)
-	if untransformed == nil {
+	if untransformed == nil || !sameResources(plain, untransformed) {
 		return nil
 	}
 	files := make([]string, len(annotated))
@@ -273,11 +273,21 @@ func untransformedOriginFiles(newKustomizer func() *krusty.Kustomizer, directory
 	}
 	origins := make(map[string]string, len(workloads))
 	for i := range workloads {
-		if file := takeKustomizeOrigin(workloads[i].GetObject(), directory, true); file != "" {
-			origins[workloads[i].GetID()] = file
-		}
+		origins[workloads[i].GetID()] = takeKustomizeOrigin(workloads[i].GetObject(), directory, true)
 	}
 	return origins
+}
+
+func sameResources(plain []workloadinterface.IMetadata, untransformed map[string]string) bool {
+	if len(plain) != len(untransformed) {
+		return false
+	}
+	for i := range plain {
+		if _, ok := untransformed[plain[i].GetID()]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 // takeKustomizeOrigin returns the local file that Kustomize's origin annotation
