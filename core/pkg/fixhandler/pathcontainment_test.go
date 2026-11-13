@@ -282,3 +282,25 @@ func TestPrepareResourcesToFix_SymlinkEscapeIsSkipped(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, victimContent, string(unchanged), "file outside the scanned directory must not be modified")
 }
+
+func TestGetFileStringWithRootRejectsPathReplacement(t *testing.T) {
+	skipOnWindowsSymlink(t)
+	workspace := t.TempDir()
+	manifests := filepath.Join(workspace, "manifests")
+	require.NoError(t, os.Mkdir(manifests, 0o700))
+	manifest := filepath.Join(manifests, "deploy.yaml")
+	require.NoError(t, os.WriteFile(manifest, []byte("inside"), 0o600))
+
+	root, err := os.OpenRoot(workspace)
+	require.NoError(t, err)
+	defer root.Close()
+	h := &FixHandler{sourceRoot: root}
+
+	outside := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(outside, "deploy.yaml"), []byte("outside-secret"), 0o600))
+	require.NoError(t, os.Rename(manifests, filepath.Join(workspace, "manifests-original")))
+	require.NoError(t, os.Symlink(outside, manifests))
+
+	_, err = h.GetFileString(manifest)
+	require.Error(t, err, "the rooted fixer read must reject an outside symlink installed after path validation")
+}

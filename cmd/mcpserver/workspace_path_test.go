@@ -169,3 +169,28 @@ func TestDiffReports_ReportsConfinedToWorkspace(t *testing.T) {
 		assert.Equal(t, "base.json", structured.BaseReport, "the result echoes the path as the caller gave it")
 	})
 }
+
+func TestWorkspaceRootRejectsPathReplacedByOutsideSymlink(t *testing.T) {
+	workspace := t.TempDir()
+	inside := filepath.Join(workspace, "reports")
+	require.NoError(t, os.Mkdir(inside, 0o700))
+	report := filepath.Join(inside, "report.json")
+	require.NoError(t, os.WriteFile(report, []byte(`{"results":[]}`), 0o600))
+	resolved, err := pathcontainment.ResolveContainedPath(workspace, report)
+	require.NoError(t, err)
+
+	root, err := os.OpenRoot(workspace)
+	require.NoError(t, err)
+	defer root.Close()
+
+	outside := t.TempDir()
+	secret := filepath.Join(outside, "report.json")
+	require.NoError(t, os.WriteFile(secret, []byte(outsideWorkspaceMarker), 0o600))
+	require.NoError(t, os.Rename(inside, filepath.Join(workspace, "reports-original")))
+	require.NoError(t, os.Symlink(outside, inside))
+
+	_, err = readFileUnderRoot(root, resolved, 1024)
+	require.Error(t, err, "a path replaced after containment must not reach the outside file")
+	_, err = readRemediationReportWithRoot(resolved, root)
+	require.Error(t, err, "report_path reads must use the same anchored root")
+}

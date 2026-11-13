@@ -148,6 +148,31 @@ func CompareReports(basePath, headPath string, options Options) (ReportKind, *Ch
 	return PostureReport, cs, nil, nil
 }
 
+// CompareReportsFromJSON compares reports already read by the caller. This is
+// useful when file access must be anchored to a directory descriptor: the
+// comparison consumes the exact bytes that were safely opened, without
+// resolving and reopening their paths.
+func CompareReportsFromJSON(baseJSON, headJSON []byte, options Options) (ReportKind, *ChangeSet, *VulnerabilityChangeSet, error) {
+	baseKind, headKind := ReportKindOfJSON(baseJSON), ReportKindOfJSON(headJSON)
+	if baseKind != UnreadableReport && headKind != UnreadableReport && baseKind != headKind {
+		return UnreadableReport, nil, nil, ErrMixedReportKinds
+	}
+
+	if baseKind == VulnerabilityReport || headKind == VulnerabilityReport {
+		cs, err := ComputeVulnerabilitiesFromJSON(baseJSON, headJSON)
+		if err != nil {
+			return VulnerabilityReport, nil, nil, err
+		}
+		return VulnerabilityReport, nil, cs, nil
+	}
+
+	cs, err := ComputeFromJSON(baseJSON, headJSON, options)
+	if err != nil {
+		return PostureReport, nil, nil, err
+	}
+	return PostureReport, cs, nil, nil
+}
+
 func normalizeGranularity(value Granularity) (Granularity, error) {
 	if value == "" {
 		return GranularityEvidence, nil

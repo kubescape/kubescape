@@ -135,8 +135,10 @@ type notEvaluatedControl struct {
 	Reason    string `json:"reason,omitempty"`
 }
 
-// maxReportSize bounds how many bytes of a report file are read.
-const maxReportSize = 64 << 20 // 64 MiB
+// MaxReportSize bounds how many bytes of a report are read.
+const MaxReportSize = 64 << 20 // 64 MiB
+
+const maxReportSize = MaxReportSize
 
 var (
 	errReportNotRegular = errors.New("report is not a regular file")

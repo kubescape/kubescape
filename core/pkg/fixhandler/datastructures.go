@@ -1,6 +1,7 @@
 package fixhandler
 
 import (
+	"os"
 	"sort"
 	"strings"
 
@@ -16,7 +17,10 @@ type FixHandler struct {
 	fixInfo       *metav1.FixInfo
 	reportObj     *reporthandlingv2.PostureReport
 	localBasePath string
-	controls      controlSelector
+	// sourceRoot, when set by an embedded caller, anchors manifest reads to a
+	// directory descriptor instead of reopening report-supplied paths by name.
+	sourceRoot *os.Root
+	controls   controlSelector
 
 	// unfixedControls is populated by PrepareResourcesToFix with every failed
 	// (resource, control) tuple that the fixer cannot or will not auto-remediate.

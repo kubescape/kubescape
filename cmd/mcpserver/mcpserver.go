@@ -163,7 +163,8 @@ type KubescapeMcpserver struct {
 
 	// workspaceDir is the allowed root directory for local file scans.
 	// Empty means unconstrained mode.
-	workspaceDir string
+	workspaceDir  string
+	workspaceRoot *os.Root
 }
 
 // getPolicyGetter lazily constructs policyGetter on first use, guarded so
@@ -896,6 +897,11 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		case path != "" && basePath != "":
 			return mcpToolError(ErrCodeInvalidArgument, "base_path applies only with report_path", map[string]any{"argument": "base_path"}), nil
 		}
+		workspaceRoot, closeWorkspaceRoot, err := ksServer.openWorkspaceRoot()
+		if err != nil {
+			return mcpToolError(ErrCodeInvalidArgument, fmt.Sprintf("cannot open workspace root: %v", err), nil), nil
+		}
+		defer closeWorkspaceRoot()
 		// path is confined to the workspace by the scan it runs. report_path is
 		// read here instead, and base_path is where the files the report names
 		// are read from and returned patched, so both need the same boundary.
@@ -915,9 +921,9 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		key := remediationKey(path, reportPath, basePath, controlIDs)
 		v, err := ksServer.doScanChan(ctx, key, func(scanCtx context.Context) (interface{}, error) {
 			if reportPath != "" {
-				return runApplyRemediationFromReport(scanCtx, reportPath, basePath, controlIDs)
+				return runApplyRemediationFromReport(scanCtx, reportPath, basePath, controlIDs, workspaceRoot)
 			}
-			return ksServer.runApplyRemediation(scanCtx, path, controlIDs)
+			return ksServer.runApplyRemediation(scanCtx, path, controlIDs, workspaceRoot)
 		})
 		if err != nil {
 			var inputErr *remediationInputError
@@ -1730,6 +1736,7 @@ func mcpServerEntrypoint(ctx context.Context, transport string, port int, worksp
 	transport = normTransport
 
 	var workspace string
+	var workspaceRoot *os.Root
 	if len(workspaceOpt) > 0 && strings.TrimSpace(workspaceOpt[0]) != "" {
 		workspace = workspaceOpt[0]
 	} else if envWorkspace := os.Getenv("KUBESCAPE_WORKSPACE_DIR"); strings.TrimSpace(envWorkspace) != "" {
@@ -1741,6 +1748,11 @@ func mcpServerEntrypoint(ctx context.Context, transport string, port int, worksp
 			return fmt.Errorf("failed to resolve workspace directory %q: %w", workspace, err)
 		}
 		workspace = canonWorkspace
+		workspaceRoot, err = os.OpenRoot(workspace)
+		if err != nil {
+			return fmt.Errorf("failed to open workspace directory %q: %w", workspace, err)
+		}
+		defer workspaceRoot.Close()
 		logger.L().Info("Workspace root containment enabled", helpers.String("workspace", workspace))
 	} else {
 		logger.L().Warning("No --workspace configured: local IaC scans will run in unconstrained mode")
@@ -1769,9 +1781,10 @@ func mcpServerEntrypoint(ctx context.Context, transport string, port int, worksp
 	drp := getter.NewDownloadReleasedPolicy()
 
 	ksServer = &KubescapeMcpserver{
-		s:            s,
-		policyGetter: drp,
-		workspaceDir: workspace,
+		s:             s,
+		policyGetter:  drp,
+		workspaceDir:  workspace,
+		workspaceRoot: workspaceRoot,
 	}
 
 	// The policy bundle download can take well over a minute. Load it in the

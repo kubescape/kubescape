@@ -287,7 +287,8 @@ func remediationKey(path, reportPath, basePath string, controlIDs []string) stri
 
 // remediationRequest carries what runRemediation needs beyond the report.
 type remediationRequest struct {
-	controlIDs []string
+	controlIDs    []string
+	workspaceRoot *os.Root
 	// basePath, when set, is handed to the fixer as FixInfo.BasePath.
 	basePath string
 	// selectControls narrows the fixer to controlIDs. A scan already limited to
@@ -307,14 +308,19 @@ type remediationRequest struct {
 	report *reporthandlingv2.PostureReport
 }
 
-func (ksServer *KubescapeMcpserver) runApplyRemediation(ctx context.Context, path string, controlIDs []string) ([]byte, error) {
+func (ksServer *KubescapeMcpserver) runApplyRemediation(ctx context.Context, path string, controlIDs []string, workspaceRoots ...*os.Root) ([]byte, error) {
 	// 1. Scan in memory.
 	outcome, err := iacScanReportFn(ksServer, ctx, path, controlIDs)
 	if err != nil {
 		return nil, err
 	}
+	var workspaceRoot *os.Root
+	if len(workspaceRoots) > 0 {
+		workspaceRoot = workspaceRoots[0]
+	}
 	return runRemediation(ctx, outcome.ReportJSON, remediationRequest{
 		controlIDs:     controlIDs,
+		workspaceRoot:  workspaceRoot,
 		degraded:       outcome.Degraded,
 		notEvaluated:   outcome.NotEvaluatedControls,
 		useScanOutcome: true,
@@ -325,8 +331,12 @@ func (ksServer *KubescapeMcpserver) runApplyRemediation(ctx context.Context, pat
 // produced elsewhere. It reads at most maxRemediationReportLen bytes, once, and
 // works from that copy, so the file cannot change between the checks and the
 // use.
-func runApplyRemediationFromReport(ctx context.Context, reportPath, basePath string, controlIDs []string) ([]byte, error) {
-	raw, err := readRemediationReport(reportPath)
+func runApplyRemediationFromReport(ctx context.Context, reportPath, basePath string, controlIDs []string, workspaceRoots ...*os.Root) ([]byte, error) {
+	var workspaceRoot *os.Root
+	if len(workspaceRoots) > 0 {
+		workspaceRoot = workspaceRoots[0]
+	}
+	raw, err := readRemediationReportWithRoot(reportPath, workspaceRoot)
 	if err != nil {
 		return nil, err
 	}
@@ -352,12 +362,39 @@ func runApplyRemediationFromReport(ctx context.Context, reportPath, basePath str
 		}
 		req.basePath = resolved
 	}
+	req.workspaceRoot = workspaceRoot
 	return runRemediation(ctx, raw, req)
 }
 
 // readRemediationReport reads a report file, refusing anything that is not a
 // regular file or is larger than maxRemediationReportLen.
 func readRemediationReport(reportPath string) ([]byte, error) {
+	return readRemediationReportWithRoot(reportPath, nil)
+}
+
+func readRemediationReportWithRoot(reportPath string, root *os.Root) ([]byte, error) {
+	if root != nil {
+		f, err := openFileUnderRoot(root, reportPath)
+		if err != nil {
+			return nil, newRemediationInputError("report_path %q cannot be read: %v", reportPath, err)
+		}
+		defer f.Close()
+		info, err := f.Stat()
+		if err != nil {
+			return nil, newRemediationInputError("report_path %q cannot be read: %v", reportPath, err)
+		}
+		if info.Size() > maxRemediationReportLen {
+			return nil, newRemediationInputError("report_path %q is %d bytes, larger than the %d byte limit", reportPath, info.Size(), int64(maxRemediationReportLen))
+		}
+		raw, err := io.ReadAll(io.LimitReader(f, maxRemediationReportLen+1))
+		if err != nil {
+			return nil, newRemediationInputError("report_path %q cannot be read: %v", reportPath, err)
+		}
+		if len(raw) > maxRemediationReportLen {
+			return nil, newRemediationInputError("report_path %q is larger than the %d byte limit", reportPath, int64(maxRemediationReportLen))
+		}
+		return raw, nil
+	}
 	abs, err := filepath.Abs(reportPath)
 	if err != nil {
 		return nil, newRemediationInputError("report_path %q is not a usable path: %v", reportPath, err)
@@ -473,7 +510,7 @@ func runRemediation(ctx context.Context, reportBytes []byte, req remediationRequ
 	if req.selectControls {
 		fixInfo.IncludeControls = req.controlIDs
 	}
-	handler, err := fixhandler.NewFixHandler(fixInfo)
+	handler, err := fixhandler.NewFixHandlerWithRoot(fixInfo, req.workspaceRoot)
 	if err != nil {
 		if req.inputErrors {
 			return nil, newRemediationInputError("report_path is not usable as a remediation report: %v", err)
@@ -528,7 +565,7 @@ func runRemediation(ctx context.Context, reportBytes []byte, req remediationRequ
 		sort.Strings(filePaths)
 
 		for _, fp := range filePaths {
-			fileAsString, err := fixhandler.GetFileString(fp)
+			fileAsString, err := handler.GetFileString(fp)
 			if err != nil {
 				return nil, err
 			}
