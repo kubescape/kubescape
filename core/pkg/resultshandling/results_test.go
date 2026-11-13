@@ -434,6 +434,7 @@ func TestValidatePrinter(t *testing.T) {
 		scanType    cautils.ScanTypes
 		scanContext cautils.ScanningContext
 		format      string
+		scanImages  bool
 		expectErr   error
 	}{
 		{
@@ -602,16 +603,30 @@ func TestValidatePrinter(t *testing.T) {
 			expectErr: nil,
 		},
 		{
-			name:      "cyclonedx-json format for cluster scan should not return error",
+			name:      "cyclonedx-json format for cluster scan without image scanning should return error",
 			scanType:  cautils.ScanTypeCluster,
 			format:    printer.CycloneDXFormat,
-			expectErr: nil,
+			expectErr: errors.New("format \"cyclonedx-json\" is only supported for image scanning"),
 		},
 		{
-			name:      "spdx-json format for cluster scan should not return error",
+			name:      "spdx-json format for cluster scan without image scanning should return error",
 			scanType:  cautils.ScanTypeCluster,
 			format:    printer.SPDXFormat,
-			expectErr: nil,
+			expectErr: errors.New("format \"spdx-json\" is only supported for image scanning"),
+		},
+		{
+			name:       "cyclonedx-json format for cluster scan with image scanning should not return error",
+			scanType:   cautils.ScanTypeCluster,
+			format:     printer.CycloneDXFormat,
+			scanImages: true,
+			expectErr:  nil,
+		},
+		{
+			name:       "spdx-json format for cluster scan with image scanning should not return error",
+			scanType:   cautils.ScanTypeCluster,
+			format:     printer.SPDXFormat,
+			scanImages: true,
+			expectErr:  nil,
 		},
 		{
 			name:      "markdown format for cluster scan should not return error",
@@ -629,7 +644,7 @@ func TestValidatePrinter(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, got := ValidatePrinter(tt.scanType, tt.scanContext, tt.format)
+			_, got := ValidatePrinter(tt.scanType, tt.scanContext, tt.format, tt.scanImages)
 
 			assert.Equal(t, tt.expectErr, got)
 		})

@@ -277,6 +277,83 @@ func TestGetOutputPrinters(t *testing.T) {
 	assert.Equal(t, 3, len(outputPrinters))
 }
 
+func TestGetOutputPrinters_SBOMFormats(t *testing.T) {
+	ctx := context.Background()
+
+	tests := []struct {
+		name       string
+		scanType   cautils.ScanTypes
+		format     string
+		scanImages bool
+		wantErr    bool
+		errSubstr  string
+	}{
+		{
+			name:       "cyclonedx-json posture scan without image scanning returns error",
+			scanType:   cautils.ScanTypeCluster,
+			format:     printer.CycloneDXFormat,
+			scanImages: false,
+			wantErr:    true,
+			errSubstr:  "format \"cyclonedx-json\" is only supported for image scanning",
+		},
+		{
+			name:       "spdx-json posture scan without image scanning returns error",
+			scanType:   cautils.ScanTypeCluster,
+			format:     printer.SPDXFormat,
+			scanImages: false,
+			wantErr:    true,
+			errSubstr:  "format \"spdx-json\" is only supported for image scanning",
+		},
+		{
+			name:       "cyclonedx-json posture scan with image scanning succeeds",
+			scanType:   cautils.ScanTypeCluster,
+			format:     printer.CycloneDXFormat,
+			scanImages: true,
+			wantErr:    false,
+		},
+		{
+			name:       "spdx-json posture scan with image scanning succeeds",
+			scanType:   cautils.ScanTypeCluster,
+			format:     printer.SPDXFormat,
+			scanImages: true,
+			wantErr:    false,
+		},
+		{
+			name:       "cyclonedx-json image scan succeeds",
+			scanType:   cautils.ScanTypeImage,
+			format:     printer.CycloneDXFormat,
+			scanImages: false,
+			wantErr:    false,
+		},
+		{
+			name:       "spdx-json image scan succeeds",
+			scanType:   cautils.ScanTypeImage,
+			format:     printer.SPDXFormat,
+			scanImages: false,
+			wantErr:    false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			scanInfo := &cautils.ScanInfo{
+				ScanType:   tt.scanType,
+				Format:     tt.format,
+				ScanImages: tt.scanImages,
+			}
+
+			outputPrinters, err := GetOutputPrinters(scanInfo, ctx, "test-cluster")
+			if tt.wantErr {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.errSubstr)
+			} else {
+				require.NoError(t, err)
+				assert.NotEmpty(t, outputPrinters)
+			}
+		})
+	}
+}
+
 func TestScanClosesOutputPrinterWhenPolicyLoadingFails(t *testing.T) {
 	if _, err := os.Stat("/proc/self/fd"); err != nil {
 		t.Skip("requires /proc/self/fd")
