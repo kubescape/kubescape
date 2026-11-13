@@ -108,18 +108,23 @@ func TestLoadFiles_OversizedSingleFileIsHardError(t *testing.T) {
 
 func TestGetMaxFileSize_EnvVarOverride(t *testing.T) {
 	t.Setenv(MaxFileSizeEnvVar, "67108864")
+	assert.Equal(t, int64(67108864), GetMaxFileSize())
 	assert.Equal(t, int64(67108864), getMaxFileSize())
 
 	t.Setenv(MaxFileSizeEnvVar, "invalid")
+	assert.Equal(t, DefaultMaxFileSize, GetMaxFileSize(), "invalid value must fall back to default")
 	assert.Equal(t, DefaultMaxFileSize, getMaxFileSize(), "invalid value must fall back to default")
 
 	t.Setenv(MaxFileSizeEnvVar, "-5")
+	assert.Equal(t, DefaultMaxFileSize, GetMaxFileSize(), "non-positive must fall back to default")
 	assert.Equal(t, DefaultMaxFileSize, getMaxFileSize(), "non-positive must fall back to default")
 
 	t.Setenv(MaxFileSizeEnvVar, "9223372036854775807")
+	assert.Equal(t, DefaultMaxFileSize, GetMaxFileSize(), "math.MaxInt64 must fall back to default to avoid overflow")
 	assert.Equal(t, DefaultMaxFileSize, getMaxFileSize(), "math.MaxInt64 must fall back to default to avoid overflow")
 
 	t.Setenv(MaxFileSizeEnvVar, "")
+	assert.Equal(t, DefaultMaxFileSize, GetMaxFileSize())
 	assert.Equal(t, DefaultMaxFileSize, getMaxFileSize())
 }
 

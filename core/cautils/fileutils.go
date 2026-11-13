@@ -1190,11 +1190,11 @@ func isUnrenderedHelmTemplate(path string) bool {
 	}
 }
 
-// getMaxFileSize returns the configured per-file size limit in bytes.
+// GetMaxFileSize returns the configured per-file size limit in bytes.
 // It reads MaxFileSizeEnvVar as decimal bytes when set, otherwise defaults to
 // DefaultMaxFileSize. Non-positive, unparsable, or math.MaxInt64 values fall
 // back to the default so the scan stays bounded and limit+1 does not overflow.
-func getMaxFileSize() int64 {
+func GetMaxFileSize() int64 {
 	if v, ok := os.LookupEnv(MaxFileSizeEnvVar); ok {
 		trimmed := strings.TrimSpace(v)
 		if trimmed != "" {
@@ -1205,6 +1205,10 @@ func getMaxFileSize() int64 {
 		}
 	}
 	return DefaultMaxFileSize
+}
+
+func getMaxFileSize() int64 {
+	return GetMaxFileSize()
 }
 
 // loadFile returns the contents of filePath. mapped reports whether data is a

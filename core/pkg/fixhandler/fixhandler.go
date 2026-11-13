@@ -2133,16 +2133,7 @@ var (
 )
 
 func getMaxManifestSize() int64 {
-	if v, ok := os.LookupEnv(cautils.MaxFileSizeEnvVar); ok {
-		trimmed := strings.TrimSpace(v)
-		if trimmed != "" {
-			if parsed, err := strconv.ParseInt(trimmed, 10, 64); err == nil && parsed > 0 && parsed != math.MaxInt64 {
-				return parsed
-			}
-			logger.L().Warning("invalid KUBESCAPE_MAX_FILE_SIZE, using default", helpers.String("value", v), helpers.Int("default", int(cautils.DefaultMaxFileSize)))
-		}
-	}
-	return cautils.DefaultMaxFileSize
+	return cautils.GetMaxFileSize()
 }
 
 // openManifestFile opens path for reading and rejects anything but a regular file.
