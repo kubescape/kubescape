@@ -786,6 +786,10 @@ func (opap *OPAProcessor) isResourceCleaned(resourceID string) bool {
 // since a name shared by an ordinary env var in one container and a
 // reference-backed one in another must not anonymize the ordinary one.
 func removeData(obj workloadinterface.IMetadata) map[string]map[string]struct{} {
+	if objectsenvelopes.IsTypeRegoResponseVector(obj.GetObject()) {
+		removeRelatedObjectsData(obj.GetObject())
+		return nil
+	}
 	if !k8sinterface.IsTypeWorkload(obj.GetObject()) {
 		return nil // remove data only from kubernetes objects
 	}
@@ -800,6 +804,30 @@ func removeData(obj workloadinterface.IMetadata) map[string]map[string]struct{} 
 		return nil
 	default:
 		return removePodData(workload)
+	}
+}
+
+// removeRelatedObjectsData cleans the objects a RegoResponseVectorObject
+// carries under relatedObjects, such as the Service that exposes a workload or
+// the roles and bindings of an RBAC subject. They are copies made by the rule,
+// not the catalog's own objects, and are written to the report with the
+// vector, so each is cleaned as removeData cleans a reported object. Rules
+// attach either one object or a list of them, and a related object may itself
+// be a vector.
+func removeRelatedObjectsData(vector map[string]any) {
+	switch related := vector[objectsenvelopes.RelatedObjectsKey].(type) {
+	case map[string]any:
+		removeData(workloadinterface.NewWorkloadObj(related))
+	case []map[string]any:
+		for _, object := range related {
+			removeData(workloadinterface.NewWorkloadObj(object))
+		}
+	case []any:
+		for _, item := range related {
+			if object, ok := item.(map[string]any); ok {
+				removeData(workloadinterface.NewWorkloadObj(object))
+			}
+		}
 	}
 }
 
