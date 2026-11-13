@@ -341,8 +341,9 @@ func TestWaitersOfAFailedDownloadShareItsFailure(t *testing.T) {
 			fallbacks[i], errs[i] = p.SetRegoObjectsWithFallbackContext(t.Context())
 		}()
 	}
-	require.Eventually(t, func() bool { return r.count("controls") >= 1 }, 10*time.Second, 5*time.Millisecond)
-	time.Sleep(50 * time.Millisecond)
+	// Every scan has joined the download before it is let go: one that came
+	// after it failed would start a download of its own.
+	waitersOf(t, p, scans)
 	open()
 	finished.Wait()
 
