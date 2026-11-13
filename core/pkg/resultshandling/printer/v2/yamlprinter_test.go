@@ -366,3 +366,14 @@ func findArtifactVersion(t *testing.T, doc interface{}, packageName string) stri
 	t.Fatalf("package %q not found in matches", packageName)
 	return ""
 }
+
+func TestPrintConfigurationsScanningYaml_NilReportReturnsError(t *testing.T) {
+	yp := NewYamlPrinter()
+	err := printConfigurationsScanningYaml(nil, nil, yp)
+	assert.Error(t, err)
+	assert.EqualError(t, err, "no data provided for YAML output")
+
+	err = printConfigurationsScanningYaml(&cautils.OPASessionObj{Report: nil}, nil, yp)
+	assert.Error(t, err)
+	assert.EqualError(t, err, "no data provided for YAML output")
+}

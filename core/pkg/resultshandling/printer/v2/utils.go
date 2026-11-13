@@ -386,6 +386,9 @@ func scanContextName(data *cautils.OPASessionObj) string {
 
 // FinalizeResults finalize the results objects by copying data from map to lists
 func FinalizeResults(data *cautils.OPASessionObj) *reporthandlingv2.PostureReport {
+	if data == nil || data.Report == nil {
+		return nil
+	}
 	if data.Report.ReportGenerationTime.IsZero() {
 		data.Report.ReportGenerationTime = time.Now().UTC()
 	}

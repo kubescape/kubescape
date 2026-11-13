@@ -1440,3 +1440,60 @@ func TestResultsHandlerHandleResultsRestoresFrameworkControls(t *testing.T) {
 	assert.Equal(t, 3, scanData.Report.SummaryDetails.Frameworks[0].StatusCounters.Failed())
 	assert.Equal(t, apis.StatusFailed, scanData.Report.SummaryDetails.Frameworks[0].Status)
 }
+
+func TestGetComplianceScore_NilSafety(t *testing.T) {
+	var nilRH *ResultsHandler
+	assert.Equal(t, float32(0), nilRH.GetComplianceScore())
+
+	rhNoData := NewResultsHandler(nil, nil, nil)
+	assert.Equal(t, float32(0), rhNoData.GetComplianceScore())
+
+	rhNoReport := &ResultsHandler{
+		ScanData: &cautils.OPASessionObj{
+			Report: nil,
+		},
+	}
+	assert.Equal(t, float32(0), rhNoReport.GetComplianceScore())
+}
+
+func TestGetRiskScore_NilSafety(t *testing.T) {
+	var nilRH *ResultsHandler
+	assert.Equal(t, float32(0), nilRH.GetRiskScore())
+
+	rhNoData := NewResultsHandler(nil, nil, nil)
+	assert.Equal(t, float32(0), rhNoData.GetRiskScore())
+
+	rhNoReport := &ResultsHandler{
+		ScanData: &cautils.OPASessionObj{
+			Report: nil,
+		},
+	}
+	assert.Equal(t, float32(0), rhNoReport.GetRiskScore())
+}
+
+func TestGetResults_NilSafety(t *testing.T) {
+	var nilRH *ResultsHandler
+	assert.Nil(t, nilRH.GetResults())
+
+	rhNoData := NewResultsHandler(nil, nil, nil)
+	assert.Nil(t, rhNoData.GetResults())
+
+	rhNoReport := &ResultsHandler{
+		ScanData: &cautils.OPASessionObj{
+			Report: nil,
+		},
+	}
+	assert.Nil(t, rhNoReport.GetResults())
+}
+
+func TestWriteJsonAndToJson_NilReportReturnsError(t *testing.T) {
+	rh := NewResultsHandler(nil, nil, nil)
+	err := rh.WriteJson(io.Discard)
+	assert.Error(t, err)
+	assert.EqualError(t, err, "no data provided for JSON output")
+
+	data, err := rh.ToJson()
+	assert.Error(t, err)
+	assert.EqualError(t, err, "no data provided for JSON output")
+	assert.Nil(t, data)
+}
