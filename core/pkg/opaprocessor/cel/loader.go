@@ -1,6 +1,7 @@
 package cel
 
 import (
+	"bufio"
 	"bytes"
 	"embed"
 	"errors"
@@ -242,6 +243,49 @@ func LoadVAP(controlID string) (*VAP, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := vap.requireNamespaceSelectorSupported(); err != nil {
+		return nil, err
+	}
+	return vap, nil
+}
+
+// ParseVAP parses a standalone ValidatingAdmissionPolicy from raw YAML/JSON data,
+// validating its Kind, APIVersion, and non-empty validations, enforcing offline evaluation
+// compatibility, and rejecting multi-document streams and duplicate mapping keys.
+func ParseVAP(data []byte) (*VAP, error) {
+	reader := k8syaml.NewYAMLReader(bufio.NewReader(bytes.NewReader(data)))
+	var firstDoc []byte
+	for {
+		doc, err := reader.Read()
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			return nil, fmt.Errorf("read YAML document: %w", err)
+		}
+		if len(bytes.TrimSpace(doc)) == 0 {
+			continue
+		}
+		if firstDoc != nil {
+			return nil, fmt.Errorf("expected exactly one ValidatingAdmissionPolicy document, but found multiple documents")
+		}
+		firstDoc = doc
+	}
+	if firstDoc == nil {
+		return nil, fmt.Errorf("decode ValidatingAdmissionPolicy: empty document")
+	}
+
+	var policy admissionregistrationv1.ValidatingAdmissionPolicy
+	if err := k8syaml.UnmarshalStrict(firstDoc, &policy); err != nil {
+		return nil, fmt.Errorf("decode ValidatingAdmissionPolicy: %w", err)
+	}
+	if policy.Kind != vapKind || policy.APIVersion != vapAPIVersion {
+		return nil, fmt.Errorf("expected %s %s, got %s %s", vapAPIVersion, vapKind, policy.APIVersion, policy.Kind)
+	}
+	if len(policy.Spec.Validations) == 0 {
+		return nil, fmt.Errorf("ValidatingAdmissionPolicy %q declares no validations; refusing it rather than producing no verdict", policy.Name)
+	}
+	vap := newVAP(&policy)
 	if err := vap.requireNamespaceSelectorSupported(); err != nil {
 		return nil, err
 	}

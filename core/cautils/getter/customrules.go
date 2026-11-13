@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/armosec/armoapi-go/armotypes"
+	"github.com/kubescape/kubescape/v4/core/pkg/opaprocessor/cel"
 	"github.com/kubescape/kubescape/v4/core/pkg/ruledir"
 	"github.com/kubescape/opa-utils/reporthandling"
 )
@@ -51,8 +52,16 @@ func LoadCustomRules(path string) (*reporthandling.Framework, error) {
 	}
 
 	if !info.IsDir() {
+		ext := strings.ToLower(filepath.Ext(path))
+		if ext == ".yaml" || ext == ".yml" {
+			control, err := controlFromYAMLFile(path)
+			if err != nil {
+				return nil, err
+			}
+			return customFramework([]reporthandling.Control{control}), nil
+		}
 		if !strings.HasSuffix(path, ".rego") {
-			return nil, fmt.Errorf("custom rules path %q is not a .rego file or directory", path)
+			return nil, fmt.Errorf("custom rules path %q is not a .rego, .yaml, or .yml file or directory", path)
 		}
 		control, err := controlFromRegoFile(path)
 		if err != nil {
@@ -99,8 +108,20 @@ func LoadCustomRules(path string) (*reporthandling.Framework, error) {
 		controls = append(controls, control)
 	}
 
+	yamlFiles, err := yamlFilesIn(path)
+	if err != nil {
+		return nil, err
+	}
+	for _, file := range yamlFiles {
+		control, err := controlFromYAMLFile(file)
+		if err != nil {
+			return nil, err
+		}
+		controls = append(controls, control)
+	}
+
 	if len(controls) == 0 {
-		return nil, fmt.Errorf("no custom rules found in %q: expected .rego files, or rule directories containing %s and %s",
+		return nil, fmt.Errorf("no custom rules found in %q: expected .rego or .yaml/.yml files, or rule directories containing %s and %s",
 			path, ruledir.RegoFileName, ruledir.MetadataFileName)
 	}
 	if err := rejectDuplicateControls(controls); err != nil {
@@ -110,17 +131,15 @@ func LoadCustomRules(path string) (*reporthandling.Framework, error) {
 	return customFramework(controls), nil
 }
 
-// rejectDuplicateControls guards the one collision the two layouts allow: a
-// rule directory and a .rego file sharing a name resolve to the same control
-// ID, and results are keyed by that ID, so one rule would be dropped from the
-// report without a word.
+// rejectDuplicateControls guards the one collision the layouts allow: multiple
+// rules sharing a name resolve to the same control ID, and results are keyed by
+// that ID, so one rule would be dropped from the report without a word.
 func rejectDuplicateControls(controls []reporthandling.Control) error {
 	seen := make(map[string]struct{}, len(controls))
 	for _, control := range controls {
 		if _, duplicate := seen[control.ControlID]; duplicate {
 			name := strings.TrimPrefix(control.ControlID, customControlPrefix)
-			return fmt.Errorf("custom rule %q is defined twice: as a %s/%s directory and as %s.rego; rename one of them",
-				name, name, ruledir.RegoFileName, name)
+			return fmt.Errorf("custom rule %q is defined twice; rename one of them", name)
 		}
 		seen[control.ControlID] = struct{}{}
 	}
@@ -144,6 +163,29 @@ func regoFilesIn(dir string) ([]string, error) {
 	}
 
 	// ReadDir is unordered; sort for stable control IDs and reports.
+	sort.Strings(files)
+	return files, nil
+}
+
+// yamlFilesIn lists the bare .yaml and .yml files directly under dir.
+func yamlFilesIn(dir string) ([]string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, fmt.Errorf("read custom rules directory %q: %w", dir, err)
+	}
+
+	var files []string
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		ext := strings.ToLower(filepath.Ext(entry.Name()))
+		if ext != ".yaml" && ext != ".yml" {
+			continue
+		}
+		files = append(files, filepath.Join(dir, entry.Name()))
+	}
+
 	sort.Strings(files)
 	return files, nil
 }
@@ -198,6 +240,50 @@ func controlFromRegoFile(file string) (reporthandling.Control, error) {
 		Rule:         string(raw),
 		Match:        matchAllKinds(),
 		RuleLanguage: reporthandling.RegoLanguage,
+		Description:  description,
+		PortalBase: armotypes.PortalBase{
+			Name: name,
+		},
+	}
+
+	return reporthandling.Control{
+		ControlID:   controlID,
+		Description: description,
+		Rules:       []reporthandling.PolicyRule{rule},
+		BaseScore:   baseScore,
+		PortalBase: armotypes.PortalBase{
+			Name: controlID,
+		},
+	}, nil
+}
+
+func controlFromYAMLFile(file string) (reporthandling.Control, error) {
+	raw, err := ruledir.ReadFile(file)
+	if err != nil {
+		return reporthandling.Control{}, fmt.Errorf("read custom rule %q: %w", file, err)
+	}
+
+	vap, err := cel.ParseVAP(raw)
+	if err != nil {
+		return reporthandling.Control{}, fmt.Errorf("custom rule %q: %w", file, err)
+	}
+
+	baseScore, err := baseScoreFromRego(string(raw))
+	if err != nil {
+		return reporthandling.Control{}, fmt.Errorf("custom rule %q: %w", file, err)
+	}
+
+	name := vap.PolicyName
+	if name == "" {
+		name = strings.TrimSuffix(filepath.Base(file), filepath.Ext(file))
+	}
+	controlID := customControlPrefix + name
+	description := fmt.Sprintf("User-authored custom CEL rule from %s", file)
+
+	rule := reporthandling.PolicyRule{
+		Rule:         string(raw),
+		Match:        matchAllKinds(),
+		RuleLanguage: reporthandling.CELLanguage,
 		Description:  description,
 		PortalBase: armotypes.PortalBase{
 			Name: name,

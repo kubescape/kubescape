@@ -538,3 +538,106 @@ func TestResolveParamObjectPrefersResourceNamespace(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, namespaced, params)
 }
+
+func TestParseVAP_Valid(t *testing.T) {
+	doc := []byte(`apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: test-policy
+spec:
+  failurePolicy: Fail
+  validations:
+    - expression: "true"
+      message: "must be true"
+`)
+	vap, err := ParseVAP(doc)
+	require.NoError(t, err)
+	require.NotNil(t, vap)
+	assert.Equal(t, "test-policy", vap.PolicyName)
+	require.Len(t, vap.Validations, 1)
+	assert.Equal(t, "true", vap.Validations[0].Expression)
+}
+
+func TestParseVAP_TrailingEmptyDocumentsAccepted(t *testing.T) {
+	doc := []byte(`apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: test-policy
+spec:
+  validations:
+    - expression: "true"
+---
+   
+---
+`)
+	vap, err := ParseVAP(doc)
+	require.NoError(t, err)
+	require.NotNil(t, vap)
+	assert.Equal(t, "test-policy", vap.PolicyName)
+}
+
+func TestParseVAP_RejectsMultipleDocuments(t *testing.T) {
+	doc := []byte(`apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: test-policy-1
+spec:
+  validations:
+    - expression: "true"
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: test-policy-2
+spec:
+  validations:
+    - expression: "false"
+`)
+	vap, err := ParseVAP(doc)
+	require.Error(t, err)
+	assert.Nil(t, vap)
+	assert.Contains(t, err.Error(), "expected exactly one ValidatingAdmissionPolicy document, but found multiple documents")
+}
+
+func TestParseVAP_RejectsDuplicateKeys(t *testing.T) {
+	doc := []byte(`apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: test-policy
+spec:
+  validations:
+    - expression: "true"
+  validations:
+    - expression: "false"
+`)
+	vap, err := ParseVAP(doc)
+	require.Error(t, err)
+	assert.Nil(t, vap)
+	assert.Contains(t, err.Error(), "already set in map")
+}
+
+func TestParseVAP_RejectsNoValidations(t *testing.T) {
+	doc := []byte(`apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: empty-policy
+spec:
+  failurePolicy: Fail
+`)
+	vap, err := ParseVAP(doc)
+	require.Error(t, err)
+	assert.Nil(t, vap)
+	assert.Contains(t, err.Error(), "declares no validations")
+}
+
+func TestParseVAP_RejectsWrongKind(t *testing.T) {
+	doc := []byte(`apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: some-config
+`)
+	vap, err := ParseVAP(doc)
+	require.Error(t, err)
+	assert.Nil(t, vap)
+	assert.Contains(t, err.Error(), "expected admissionregistration.k8s.io/v1 ValidatingAdmissionPolicy")
+}
