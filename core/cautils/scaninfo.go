@@ -135,6 +135,7 @@ type ScanInfo struct {
 	UseDefault                bool                                   // Load framework from cached file (instead of download). Use when running offline
 	UseArtifactsFrom          string                                 // Load artifacts from local path. Use when running offline
 	ControlsVersion           string                                 // Pin the regolibrary release used to download policies (e.g. "v2.0.301"). Empty uses the latest release
+	ReleasedPolicyStore       *getter.DownloadReleasedPolicy         // Optional. A store of the released policies that the caller keeps across a series of scans, so that they, the control configuration, the exceptions and the attack tracks are downloaded once for the series and not once per scan. Used only by a scan of the release ControlsVersion names; any other scan makes its own
 	ScanContract              *reporthandlingv2.ScanContractMetadata // Selected repository scan contract provenance, populated only when --scan-contract is used
 	VerboseMode               bool                                   // Display all the input resources and not only failed resources
 	Hide                      bool                                   // Hide sensitive identifiers (names, namespaces, images) in results

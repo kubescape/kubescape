@@ -404,7 +404,7 @@ func getConfigInputsGetterForTarget(ctx context.Context, ControlsInputs string, 
 	if downloadReleasedPolicy == nil {
 		downloadReleasedPolicy = getter.NewDownloadReleasedPolicy()
 	}
-	if fallback, err := downloadReleasedPolicy.SetRegoObjectsWithFallback(); err != nil {
+	if fallback, err := downloadReleasedPolicy.SetRegoObjectsWithFallbackContext(ctx); err != nil {
 		// pinned version: hard error, surface it instead of silently degrading
 		return nil, false, err
 	} else if fallback { // if failed to pull config inputs, fallback to cache
@@ -414,8 +414,22 @@ func getConfigInputsGetterForTarget(ctx context.Context, ControlsInputs string, 
 	return downloadReleasedPolicy, false, nil
 }
 
+// releasedPolicyStoreFor returns the store a scan reads the released policies
+// from. A store the caller kept for a series of scans is used when it reads the
+// release this scan asks for, so the series downloads the release once; the
+// store is safe for scans to share. Without one, or for another release, the
+// scan makes a store of its own as it always did, and nothing is kept between
+// scans.
+func releasedPolicyStoreFor(scanInfo *cautils.ScanInfo) *getter.DownloadReleasedPolicy {
+	own := getter.NewDownloadReleasedPolicyWithVersion(scanInfo.ControlsVersion)
+	if shared := scanInfo.ReleasedPolicyStore; shared != nil && shared.CacheSource() == own.CacheSource() {
+		return shared
+	}
+	return own
+}
+
 func getDownloadReleasedPolicy(ctx context.Context, downloadReleasedPolicy *getter.DownloadReleasedPolicy) (getter.IPolicyGetter, error) {
-	if fallback, err := downloadReleasedPolicy.SetRegoObjectsWithFallback(); err != nil {
+	if fallback, err := downloadReleasedPolicy.SetRegoObjectsWithFallbackContext(ctx); err != nil {
 		// pinned version: hard error, do not silently serve cached policies
 		return nil, err
 	} else if fallback { // if failed to pull policy, fallback to cache
@@ -479,7 +493,7 @@ func getAttackTracksGetter(ctx context.Context, attackTracks, accountID string, 
 		downloadReleasedPolicy = getter.NewDownloadReleasedPolicy()
 	}
 
-	if fallback, err := downloadReleasedPolicy.SetRegoObjectsWithFallback(); err != nil {
+	if fallback, err := downloadReleasedPolicy.SetRegoObjectsWithFallbackContext(ctx); err != nil {
 		// pinned version: hard error, do not silently serve cached attack tracks
 		return nil, err
 	} else if fallback { // if failed to pull attack tracks, fallback to cache

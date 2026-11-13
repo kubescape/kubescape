@@ -935,7 +935,7 @@ func (ks *Kubescape) ScanContext(ctx context.Context, scanInfo *cautils.ScanInfo
 			// network access
 			downloadReleasedPolicy = nil
 		} else {
-			downloadReleasedPolicy = getter.NewDownloadReleasedPolicyWithVersion(scanInfo.ControlsVersion) // download config inputs from github release
+			downloadReleasedPolicy = releasedPolicyStoreFor(scanInfo) // download config inputs from github release
 		}
 
 		// set policy getter only after setting the customerGUID
