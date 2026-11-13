@@ -516,3 +516,20 @@ metadata:
 	assert.Nil(t, fw)
 	assert.Contains(t, err.Error(), "expected admissionregistration.k8s.io/v1 ValidatingAdmissionPolicy")
 }
+
+func TestLoadCustomRules_VAPWithNoValidations_Rejected(t *testing.T) {
+	f := filepath.Join(t.TempDir(), "no-val.yaml")
+	content := `apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: no-validations
+spec:
+  failurePolicy: Fail
+`
+	require.NoError(t, os.WriteFile(f, []byte(content), 0o600))
+
+	fw, err := LoadCustomRules(f)
+	require.Error(t, err)
+	assert.Nil(t, fw)
+	assert.Contains(t, err.Error(), "declares no validations")
+}
