@@ -180,9 +180,15 @@ func originFilesFor(newKustomizer func() *krusty.Kustomizer, directory string, p
 	case originOwn:
 		// The kustomization asked for origin annotations, so the plain build
 		// carries them, relative to the directory. They stay where they are.
+		untransformed := untransformedOriginFiles(newKustomizer, directory)
+		if untransformed == nil {
+			return nil
+		}
 		files := make([]string, len(plain))
 		for i := range plain {
-			files[i] = takeKustomizeOrigin(plain[i].GetObject(), directory, false)
+			if file := takeKustomizeOrigin(plain[i].GetObject(), directory, false); file == untransformed[plain[i].GetID()] {
+				files[i] = file
+			}
 		}
 		return files
 	case originWrapper:
@@ -203,14 +209,75 @@ func wrapperOriginFiles(newKustomizer func() *krusty.Kustomizer, directory strin
 	if err != nil || len(annotated) != len(plain) {
 		return nil
 	}
+	untransformed := untransformedOriginFiles(newKustomizer, directory)
+	if untransformed == nil {
+		return nil
+	}
 	files := make([]string, len(annotated))
 	for i := range annotated {
 		files[i] = takeKustomizeOrigin(annotated[i].GetObject(), base, true)
 		if !reflect.DeepEqual(annotated[i].GetObject(), plain[i].GetObject()) {
 			return nil
 		}
+		if files[i] != untransformed[plain[i].GetID()] {
+			return nil
+		}
 	}
 	return files
+}
+
+type untransformedOriginFS struct {
+	filesys.FileSystem
+}
+
+func (f untransformedOriginFS) ReadFile(path string) ([]byte, error) {
+	content, err := f.FileSystem.ReadFile(path)
+	if err != nil || !IsKustomizeFile(path) {
+		return content, err
+	}
+	var k types.Kustomization
+	if err := k.Unmarshal(content); err != nil {
+		return content, nil
+	}
+	k.Patches = nil
+	k.PatchesStrategicMerge = nil //nolint:staticcheck
+	k.PatchesJson6902 = nil       //nolint:staticcheck
+	k.CommonAnnotations = nil
+	k.Labels = nil
+	k.Replacements = nil
+	k.Transformers = nil
+	k.Configurations = nil
+	k.Vars = nil //nolint:staticcheck
+	if !slices.Contains(k.BuildMetadata, types.OriginAnnotations) {
+		k.BuildMetadata = append(slices.Clone(k.BuildMetadata), types.OriginAnnotations)
+	}
+	stripped, err := json.Marshal(k)
+	if err != nil {
+		return content, nil
+	}
+	return stripped, nil
+}
+
+func untransformedOriginFiles(newKustomizer func() *krusty.Kustomizer, directory string) map[string]string {
+	resMap, err := newKustomizer().Run(untransformedOriginFS{FileSystem: filesys.MakeFsOnDisk()}, directory)
+	if err != nil {
+		return nil
+	}
+	yml, err := resMap.AsYaml()
+	if err != nil {
+		return nil
+	}
+	workloads, err := ReadFile(yml, YAML_FILE_FORMAT)
+	if err != nil {
+		return nil
+	}
+	origins := make(map[string]string, len(workloads))
+	for i := range workloads {
+		if file := takeKustomizeOrigin(workloads[i].GetObject(), directory, true); file != "" {
+			origins[workloads[i].GetID()] = file
+		}
+	}
+	return origins
 }
 
 // takeKustomizeOrigin returns the local file that Kustomize's origin annotation

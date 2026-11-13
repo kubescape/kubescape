@@ -389,3 +389,67 @@ patches:
 	assert.Equal(t, int64(3), replicasOf(t, byName["Deployment/demo"]), "the patch applies, as it does without Kubescape")
 	assert.Empty(t, origins, "the wrapper rendered something else, so none of its file names is trusted")
 }
+
+func TestKustomizeDoesNotTrustPatchedOriginAnnotation(t *testing.T) {
+	root := t.TempDir()
+	deploymentFile := filepath.Join(root, "deployment.yaml")
+	decoyFile := filepath.Join(root, "service.yaml")
+	require.NoError(t, os.WriteFile(deploymentFile,
+		[]byte("apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: demo\nspec:\n  replicas: 1\n"), 0o600))
+	require.NoError(t, os.WriteFile(decoyFile,
+		[]byte("apiVersion: v1\nkind: Service\nmetadata:\n  name: demo\n"), 0o600))
+
+	relFromTemp, err := filepath.Rel(os.TempDir(), decoyFile)
+	require.NoError(t, err)
+	forgedOriginPath := filepath.ToSlash(filepath.Join("..", relFromTemp))
+
+	require.NoError(t, os.WriteFile(filepath.Join(root, "kustomization.yaml"), []byte(`resources:
+- deployment.yaml
+patches:
+- patch: |-
+    - op: replace
+      path: /metadata/annotations/config.kubernetes.io~1origin
+      value: |
+        path: `+forgedOriginPath+`
+  target:
+    kind: Deployment
+    annotationSelector: config.kubernetes.io/origin
+`), 0o600))
+
+	newKustomizer := func() *krusty.Kustomizer { return krusty.MakeKustomizer(krusty.MakeDefaultOptions()) }
+	rendered, base, ok := renderWithOrigins(newKustomizer, root, nil)
+	require.True(t, ok)
+	wrapped, err := ReadFile(rendered, YAML_FILE_FORMAT)
+	require.NoError(t, err)
+	require.Len(t, wrapped, 1)
+	require.Equal(t, decoyFile, takeKustomizeOrigin(wrapped[0].GetObject(), base, true))
+
+	byName, origins := renderedKustomizeWorkloads(t, root)
+	require.Contains(t, byName, "Deployment/demo")
+	assert.NotContains(t, annotationsOf(byName["Deployment/demo"]), kustomizeOriginAnnotation)
+	assert.Empty(t, origins)
+
+	t.Run("originAnnotations requested in buildMetadata", func(t *testing.T) {
+		ownDir := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(ownDir, "deployment.yaml"),
+			[]byte("apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: demo\n"), 0o600))
+		require.NoError(t, os.WriteFile(filepath.Join(ownDir, "service.yaml"),
+			[]byte("apiVersion: v1\nkind: Service\nmetadata:\n  name: demo\n"), 0o600))
+		require.NoError(t, os.WriteFile(filepath.Join(ownDir, "kustomization.yaml"), []byte(`resources:
+- deployment.yaml
+buildMetadata: [originAnnotations]
+patches:
+- patch: |-
+    - op: replace
+      path: /metadata/annotations/config.kubernetes.io~1origin
+      value: |
+        path: service.yaml
+  target:
+    kind: Deployment
+    annotationSelector: config.kubernetes.io/origin
+`), 0o600))
+
+		_, ownOrigins := renderedKustomizeWorkloads(t, ownDir)
+		assert.Empty(t, ownOrigins)
+	})
+}
