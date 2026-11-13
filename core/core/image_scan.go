@@ -353,6 +353,9 @@ func isImageRemainderLocal(rest string) bool {
 	if info.IsDir() {
 		return isOCILayoutDir(rest)
 	}
+	if !info.Mode().IsRegular() {
+		return false
+	}
 	return isTarballFile(rest) || isSIFFile(rest) || isOCILayoutTarball(rest)
 }
 
@@ -402,9 +405,15 @@ func isOCILayoutDir(path string) bool {
 	if err := json.Unmarshal(configBody, &config); err != nil {
 		return false
 	}
+	limit := filesizelimit.GetMaxFileSize()
 	for _, layer := range desc.Layers {
 		f, err := openLocalRegularFile(filepath.Join(path, "blobs", digestPath(layer.Digest)))
 		if err != nil {
+			return false
+		}
+		info, err := f.Stat()
+		if err != nil || info.Size() > limit {
+			_ = f.Close()
 			return false
 		}
 		err = validateLayerStream(f)
@@ -751,6 +760,9 @@ func streamTarEntryBodies(path, rel string, fn func(io.Reader) error) error {
 		}
 		if entryRel != rel || hdr.Typeflag != tar.TypeReg {
 			continue
+		}
+		if hdr.Size > filesizelimit.GetMaxFileSize() {
+			return fmt.Errorf("%w: entry %q exceeds the limit", ErrImageBlobTooLarge, hdr.Name)
 		}
 		if err := fn(tr); err != nil {
 			return err
