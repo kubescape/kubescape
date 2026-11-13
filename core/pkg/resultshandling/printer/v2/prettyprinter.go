@@ -102,7 +102,7 @@ func (pp *PrettyPrinter) PrintImageScan(imageScanData []cautils.ImageScanData) e
 }
 
 func (pp *PrettyPrinter) ActionPrint(_ context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
-	if opaSessionObj != nil {
+	if opaSessionObj != nil && opaSessionObj.Report != nil {
 		if isPrintSeparatorType(pp.scanType) {
 			fmt.Fprintf(pp.writer, "\n%s\n\n",
 				gchalk.WithAnsi256(238).Bold(strings.Repeat("─", 50)))

@@ -1513,6 +1513,24 @@ func TestJunitActionPrintComplianceScore(t *testing.T) {
 	}
 }
 
+func TestJunitActionPrintNilReport(t *testing.T) {
+	jp := NewJunitPrinter(false)
+	tmp, err := os.CreateTemp("", "junit-nil-*.xml")
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_ = tmp.Close()
+		_ = os.Remove(tmp.Name())
+	})
+	jp.writer = tmp
+
+	session := &cautils.OPASessionObj{Report: nil}
+	assert.NotPanics(t, func() {
+		err := jp.ActionPrint(context.Background(), session, nil)
+		assert.Error(t, err)
+		assert.Equal(t, "failed to print results, missing data", err.Error())
+	})
+}
+
 func TestJunitActionPrintMissingResourceNoPanic(t *testing.T) {
 	session := cautils.NewOPASessionObjMock()
 

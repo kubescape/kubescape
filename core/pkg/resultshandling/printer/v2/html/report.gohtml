@@ -98,7 +98,7 @@
   <body>
     <img class="logo" src="{{ .LogoDataURI }}">
     <h1>Kubescape Scan Report</h1>
-    {{ if .OPASessionObj }}
+    {{ if and .OPASessionObj .OPASessionObj.Report }}
     {{ with .OPASessionObj.Report.SummaryDetails }}
     </br>
     <h2>Summary:</h2>

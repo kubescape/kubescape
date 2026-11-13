@@ -652,6 +652,25 @@ func TestGitLabSASTPrintConfigurationScan_SolutionFieldPopulated(t *testing.T) {
 	assert.Contains(t, vuln.Solution, "spec.template.spec.containers[0].securityContext.privileged")
 }
 
+func TestGitLabSASTActionPrintNilReport(t *testing.T) {
+	tmp, err := os.CreateTemp("", "gitlab-sast-nil-*.json")
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_ = tmp.Close()
+		_ = os.Remove(tmp.Name())
+	})
+
+	gp := NewGitLabSASTPrinter(false)
+	gp.writer = tmp
+
+	session := &cautils.OPASessionObj{Report: nil}
+	assert.NotPanics(t, func() {
+		err := gp.ActionPrint(context.Background(), session, nil)
+		assert.Error(t, err)
+		assert.Equal(t, "failed to write results in GitLab SAST format: no data provided", err.Error())
+	})
+}
+
 // TestGitLabSASTPrintConfigurationScan_NilResourceDoesNotPanic verifies that a resourceID
 // present in ResourcesResult but absent from AllResources degrades gracefully.
 // The vulnerability must still be emitted and the solution key must be absent

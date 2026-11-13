@@ -1762,6 +1762,24 @@ func TestPrintImageScan_MultipleImagesAggregatesRuns(t *testing.T) {
 	}
 }
 
+func TestSARIFActionPrintNilReport(t *testing.T) {
+	sp := NewSARIFPrinter(false)
+	tmp, err := os.CreateTemp("", "sarif-nil-*.json")
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_ = tmp.Close()
+		_ = os.Remove(tmp.Name())
+	})
+	sp.writer = tmp
+
+	session := &cautils.OPASessionObj{Report: nil}
+	assert.NotPanics(t, func() {
+		err := sp.ActionPrint(context.Background(), session, nil)
+		assert.Error(t, err)
+		assert.Equal(t, "failed to write results in sarif format: no data provided", err.Error())
+	})
+}
+
 // TestSARIFMultipleImageRunsHaveDistinctCategories pins what GitHub Code Scanning
 // requires of a file with several runs: since July 2025 it rejects an upload in
 // which two runs share a tool and a category. Every image run has the same driver
