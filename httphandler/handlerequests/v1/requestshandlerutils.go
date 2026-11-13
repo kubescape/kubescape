@@ -526,9 +526,16 @@ func defaultScanInfo() *cautils.ScanInfo {
 	scanInfo.Local = envToBool("KS_KEEP_LOCAL", false)           // do not publish results to Kubescape SaaS
 	scanInfo.EnableRegoPrint = envToBool("KS_REGO_PRINT", false) // print rego rules
 	// Only set HostSensorEnabled when explicitly configured; leaving it nil allows
-	// auto-detection of node-agent CRDs in getHostSensorHandler.
-	if val, ok := os.LookupEnv("KS_ENABLE_HOST_SCANNER"); ok {
-		scanInfo.HostSensorEnabled.SetBool(boolutils.StringToBool(val))
+	// auto-detection of node-agent CRDs in getHostSensorHandler. Like KS_SUBMIT,
+	// an unparsable value must not become an explicit false that silently disables
+	// auto-detection - warn and leave it unset instead. Lower-casing keeps every
+	// casing of "true" that boolutils.StringToBool accepted.
+	if raw, ok := os.LookupEnv("KS_ENABLE_HOST_SCANNER"); ok {
+		if v, err := strconv.ParseBool(strings.ToLower(strings.TrimSpace(raw))); err == nil {
+			scanInfo.HostSensorEnabled.SetBool(v)
+		} else {
+			logger.L().Warning("ignoring unparsable KS_ENABLE_HOST_SCANNER value", helpers.String("value", raw))
+		}
 	}
 	if !envToBool("KS_DOWNLOAD_ARTIFACTS", false) {
 		scanInfo.UseArtifactsFrom = getter.DefaultLocalStore // Load files from cache (this will prevent kubescape fom downloading the artifacts every time)
