@@ -31,6 +31,7 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	ksmetav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
+	"github.com/kubescape/kubescape/v4/core/pkg/filesizelimit"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling"
 	"github.com/kubescape/kubescape/v4/pkg/imagescan"
 )
@@ -73,7 +74,63 @@ var (
 	ErrImageExceptionsNotRegular = errors.New("image exceptions file is not a regular file")
 	// ErrImageExceptionsTooLarge is returned when an image exceptions file exceeds the maximum allowed size.
 	ErrImageExceptionsTooLarge = errors.New("image exceptions file exceeds maximum size limit")
+	// ErrImageInputNotRegular is returned when an image input, archive, or blob file is not a regular file.
+	ErrImageInputNotRegular = errors.New("image input file is not a regular file")
+	// ErrImageBlobTooLarge is returned when an image blob or archive entry exceeds the maximum allowed size.
+	ErrImageBlobTooLarge = errors.New("image blob exceeds maximum size limit")
 )
+
+// openLocalRegularFile opens path for reading and rejects anything but a regular file.
+// O_NONBLOCK keeps opening a FIFO from waiting for a writer, and descriptor validation
+// ensures named pipes, character/block devices, and directories are rejected promptly.
+// Path is passed directly to preserve symlink traversal semantics.
+func openLocalRegularFile(path string) (*os.File, error) {
+	if strings.TrimSpace(path) == "" {
+		return nil, os.ErrNotExist
+	}
+	file, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return nil, err
+	}
+	info, err := file.Stat()
+	if err != nil {
+		_ = file.Close()
+		return nil, err
+	}
+	if info.IsDir() {
+		_ = file.Close()
+		return nil, fmt.Errorf("%q is a directory, not a file: %w", path, ErrImageInputNotRegular)
+	}
+	if !info.Mode().IsRegular() {
+		_ = file.Close()
+		return nil, fmt.Errorf("%w: %q", ErrImageInputNotRegular, path)
+	}
+	return file, nil
+}
+
+// readBoundedBlob reads at most filesizelimit.GetMaxFileSize() bytes from blobPath.
+func readBoundedBlob(blobPath string) ([]byte, error) {
+	f, err := openLocalRegularFile(blobPath)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = f.Close() }()
+
+	limit := filesizelimit.GetMaxFileSize()
+	info, err := f.Stat()
+	if err == nil && info.Size() > limit {
+		return nil, fmt.Errorf("%w: %q exceeds the %d byte limit", ErrImageBlobTooLarge, blobPath, limit)
+	}
+
+	data, err := io.ReadAll(io.LimitReader(f, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > limit {
+		return nil, fmt.Errorf("%w: %q exceeds the %d byte limit", ErrImageBlobTooLarge, blobPath, limit)
+	}
+	return data, nil
+}
 
 // openImageExceptionsFile opens path for reading and rejects anything but a regular file.
 // O_NONBLOCK keeps opening a FIFO from waiting for a writer, and the check is
@@ -185,12 +242,12 @@ func isRawSBOMInput(trimmed string) bool {
 	if err != nil {
 		return false
 	}
-	f, err := os.Open(expandedPath)
+	f, err := openLocalRegularFile(expandedPath)
 	if err != nil {
 		return false
 	}
 	defer func() { _ = f.Close() }()
-	mType, err := mimetype.DetectReader(f)
+	mType, err := mimetype.DetectReader(io.LimitReader(f, filesizelimit.GetMaxFileSize()))
 	if err != nil {
 		return false
 	}
@@ -337,7 +394,7 @@ func isOCILayoutDir(path string) bool {
 	if err := json.Unmarshal(raw, &desc); err != nil {
 		return false
 	}
-	configBody, err := os.ReadFile(filepath.Join(path, "blobs", digestPath(desc.Config.Digest)))
+	configBody, err := readBoundedBlob(filepath.Join(path, "blobs", digestPath(desc.Config.Digest)))
 	if err != nil {
 		return false
 	}
@@ -346,7 +403,7 @@ func isOCILayoutDir(path string) bool {
 		return false
 	}
 	for _, layer := range desc.Layers {
-		f, err := os.Open(filepath.Join(path, "blobs", digestPath(layer.Digest)))
+		f, err := openLocalRegularFile(filepath.Join(path, "blobs", digestPath(layer.Digest)))
 		if err != nil {
 			return false
 		}
@@ -545,11 +602,12 @@ func overlayNoTruncate(cur, body []byte) []byte {
 // and the provider reads the extracted index.json whole, so no size cap
 // applies here either.
 func walkTarEntries(path string) (indexBody []byte, ok bool) {
-	f, err := os.Open(path)
+	f, err := openLocalRegularFile(path)
 	if err != nil {
 		return nil, false
 	}
 	defer func() { _ = f.Close() }()
+	limit := filesizelimit.GetMaxFileSize()
 	tr := tar.NewReader(f)
 	for {
 		hdr, err := tr.Next()
@@ -573,8 +631,11 @@ func walkTarEntries(path string) (indexBody []byte, ok bool) {
 		if rel != "index.json" {
 			continue
 		}
-		body, err := io.ReadAll(tr)
-		if err != nil {
+		if hdr.Size > limit {
+			return nil, false
+		}
+		body, err := io.ReadAll(io.LimitReader(tr, limit+1))
+		if err != nil || int64(len(body)) > limit {
 			return nil, false
 		}
 		indexBody = overlayNoTruncate(indexBody, body)
@@ -591,10 +652,14 @@ func walkTarEntries(path string) (indexBody []byte, ok bool) {
 func overlayTarEntryBody(path, rel string) ([]byte, error) {
 	var final []byte
 	found := false
+	limit := filesizelimit.GetMaxFileSize()
 	err := streamTarEntryBodies(path, rel, func(body io.Reader) error {
-		chunk, err := io.ReadAll(body)
+		chunk, err := io.ReadAll(io.LimitReader(body, limit+1))
 		if err != nil {
 			return err
+		}
+		if int64(len(chunk)) > limit {
+			return fmt.Errorf("%w: entry %q exceeds the %d byte limit", ErrImageBlobTooLarge, rel, limit)
 		}
 		final = overlayNoTruncate(final, chunk)
 		found = true
@@ -654,7 +719,7 @@ func validateTarLayer(path, rel string) error {
 	if err != nil {
 		return err
 	}
-	f, err := os.Open(tmpName)
+	f, err := openLocalRegularFile(tmpName)
 	if err != nil {
 		return err
 	}
@@ -666,7 +731,7 @@ func validateTarLayer(path, rel string) error {
 // occurrence of rel in order, mirroring the same cleaning and rejection
 // walkTarEntries applies. Bodies stream bounded by their entries.
 func streamTarEntryBodies(path, rel string, fn func(io.Reader) error) error {
-	f, err := os.Open(path)
+	f, err := openLocalRegularFile(path)
 	if err != nil {
 		return err
 	}

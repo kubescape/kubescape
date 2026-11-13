@@ -1,6 +1,8 @@
 package core
 
 import (
+	"archive/tar"
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -977,4 +979,74 @@ func TestGetImageExceptionsFromFile_DirectoryRejected(t *testing.T) {
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrImageExceptionsNotRegular)
 	assert.Contains(t, err.Error(), "is a directory, not a file")
+}
+
+func TestOpenLocalRegularFile_DirectoryRejected(t *testing.T) {
+	dir := t.TempDir()
+	f, err := openLocalRegularFile(dir)
+	if f != nil {
+		_ = f.Close()
+	}
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrImageInputNotRegular)
+	assert.Contains(t, err.Error(), "is a directory, not a file")
+}
+
+func TestOpenLocalRegularFile_NonRegularFileRejected(t *testing.T) {
+	if _, err := os.Stat("/dev/null"); err == nil {
+		f, err := openLocalRegularFile("/dev/null")
+		if f != nil {
+			_ = f.Close()
+		}
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrImageInputNotRegular)
+	}
+}
+
+func TestOpenLocalRegularFile_EmptyPath(t *testing.T) {
+	_, err := openLocalRegularFile("   ")
+	require.Error(t, err)
+	assert.ErrorIs(t, err, os.ErrNotExist)
+}
+
+func TestReadBoundedBlob_OversizedRejected(t *testing.T) {
+	t.Setenv("KUBESCAPE_MAX_FILE_SIZE", "100")
+	dir := t.TempDir()
+	blobPath := filepath.Join(dir, "oversized_blob")
+	require.NoError(t, os.WriteFile(blobPath, bytes.Repeat([]byte("a"), 150), 0o600))
+
+	_, err := readBoundedBlob(blobPath)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrImageBlobTooLarge)
+}
+
+func TestIsRawSBOMInput_DirectoryReturnsFalse(t *testing.T) {
+	dir := t.TempDir()
+	assert.False(t, isRawSBOMInput(dir))
+}
+
+func TestOverlayTarEntryBody_OversizedRejected(t *testing.T) {
+	t.Setenv("KUBESCAPE_MAX_FILE_SIZE", "100")
+	dir := t.TempDir()
+	tarPath := filepath.Join(dir, "oversized.tar")
+
+	f, err := os.Create(tarPath)
+	require.NoError(t, err)
+	tw := tar.NewWriter(f)
+
+	payload := bytes.Repeat([]byte("x"), 150)
+	hdr := &tar.Header{
+		Name: "blobs/layer.tar",
+		Mode: 0o600,
+		Size: int64(len(payload)),
+	}
+	require.NoError(t, tw.WriteHeader(hdr))
+	_, err = tw.Write(payload)
+	require.NoError(t, err)
+	require.NoError(t, tw.Close())
+	require.NoError(t, f.Close())
+
+	_, err = overlayTarEntryBody(tarPath, "blobs/layer.tar")
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrImageBlobTooLarge)
 }
