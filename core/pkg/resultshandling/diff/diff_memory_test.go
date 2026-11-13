@@ -109,3 +109,29 @@ func TestComputeFromJSONDoesNotTouchTheFilesystem(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, entries)
 }
+
+func TestCompareReportsFromJSONMatchesPathDispatcher(t *testing.T) {
+	postureBase := writeTempReport(t, makeReport())
+	postureHead := writeTempReport(t, makeReport())
+	imageBase := writeJSONReport(t, imageDocument("app:1", testMatch{"CVE-1", "High", "openssl", "3.0", "apk", nil}))
+	imageHead := writeJSONReport(t, imageDocument("app:2", testMatch{"CVE-2", "Low", "curl", "8.0", "apk", nil}))
+	read := func(path string) []byte {
+		t.Helper()
+		data, err := os.ReadFile(path)
+		require.NoError(t, err)
+		return data
+	}
+
+	for _, paths := range [][2]string{{postureBase, postureHead}, {imageBase, imageHead}} {
+		wantKind, wantPosture, wantVulnerability, err := CompareReports(paths[0], paths[1], Options{})
+		require.NoError(t, err)
+		gotKind, gotPosture, gotVulnerability, err := CompareReportsFromJSON(read(paths[0]), read(paths[1]), Options{})
+		require.NoError(t, err)
+		assert.Equal(t, wantKind, gotKind)
+		assert.Equal(t, wantPosture, gotPosture)
+		assert.Equal(t, wantVulnerability, gotVulnerability)
+	}
+
+	_, _, _, err := CompareReportsFromJSON(read(postureBase), read(imageBase), Options{})
+	assert.ErrorIs(t, err, ErrMixedReportKinds)
+}

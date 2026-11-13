@@ -5,6 +5,7 @@ import (
 	"container/list"
 	"context"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/mikefarah/yq/v4/pkg/yqlib"
@@ -95,7 +96,21 @@ func countDocuments(ctx context.Context, filePath string) (int, error) {
 	if err != nil {
 		return 0, err
 	}
+	return countDocumentsInString(ctx, filePath, content)
+}
 
+func countDocumentsWithRoot(ctx context.Context, filePath string, root *os.Root) (int, error) {
+	if root == nil {
+		return countDocuments(ctx, filePath)
+	}
+	content, err := readManifestFileFromRoot(root, filePath)
+	if err != nil {
+		return 0, fmt.Errorf("error reading file %s: %w", filePath, err)
+	}
+	return countDocumentsInString(ctx, filePath, string(content))
+}
+
+func countDocumentsInString(ctx context.Context, filePath, content string) (int, error) {
 	decoder := yqlib.NewYamlDecoder(yqlib.ConfiguredYamlPreferences)
 	if isJSONSource(filePath) {
 		decoder = yqlib.NewJSONDecoder()

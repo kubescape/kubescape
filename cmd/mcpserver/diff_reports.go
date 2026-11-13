@@ -91,6 +91,11 @@ func createDiffReportsTools(ksServer *KubescapeMcpserver) {
 		if toolErr != nil {
 			return toolErr, nil
 		}
+		workspaceRoot, closeWorkspaceRoot, err := ksServer.openWorkspaceRoot()
+		if err != nil {
+			return mcpToolError(ErrCodeInvalidArgument, fmt.Sprintf("cannot open workspace root: %v", err), nil), nil
+		}
+		defer closeWorkspaceRoot()
 
 		// Both reports are read from disk, so they are confined to the
 		// workspace like every other path a tool reads.
@@ -103,12 +108,30 @@ func createDiffReportsTools(ksServer *KubescapeMcpserver) {
 			return toolErr, nil
 		}
 
-		kind, postureChangeSet, vulnerabilityChangeSet, err := diff.CompareReports(baseReportPath, headReportPath, diff.Options{})
+		var kind diff.ReportKind
+		var postureChangeSet *diff.ChangeSet
+		var vulnerabilityChangeSet *diff.VulnerabilityChangeSet
+		var baseKind, headKind diff.ReportKind
+		if workspaceRoot != nil {
+			baseJSON, readErr := readFileUnderRoot(workspaceRoot, baseReportPath, diff.MaxReportSize)
+			if readErr != nil {
+				return mcpToolError(ErrCodeInvalidArgument, fmt.Sprintf("failed to read base_report: %v", readErr), map[string]any{"argument": "base_report"}), nil
+			}
+			headJSON, readErr := readFileUnderRoot(workspaceRoot, headReportPath, diff.MaxReportSize)
+			if readErr != nil {
+				return mcpToolError(ErrCodeInvalidArgument, fmt.Sprintf("failed to read head_report: %v", readErr), map[string]any{"argument": "head_report"}), nil
+			}
+			baseKind, headKind = diff.ReportKindOfJSON(baseJSON), diff.ReportKindOfJSON(headJSON)
+			kind, postureChangeSet, vulnerabilityChangeSet, err = diff.CompareReportsFromJSON(baseJSON, headJSON, diff.Options{})
+		} else {
+			kind, postureChangeSet, vulnerabilityChangeSet, err = diff.CompareReports(baseReportPath, headReportPath, diff.Options{})
+			baseKind, headKind = diff.ReportKindOf(baseReportPath), diff.ReportKindOf(headReportPath)
+		}
 		if err != nil {
 			if errors.Is(err, diff.ErrMixedReportKinds) {
 				return mcpToolError(ErrCodeInvalidArgument, err.Error(), map[string]any{
-					"base_report_kind": reportKindLabel(diff.ReportKindOf(baseReportPath)),
-					"head_report_kind": reportKindLabel(diff.ReportKindOf(headReportPath)),
+					"base_report_kind": reportKindLabel(baseKind),
+					"head_report_kind": reportKindLabel(headKind),
 				}), nil
 			}
 			return mcpToolError(ErrCodeInvalidArgument, fmt.Sprintf("failed to compare reports: %v", err), nil), nil
