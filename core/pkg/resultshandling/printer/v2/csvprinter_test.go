@@ -1396,3 +1396,40 @@ func TestActionPrint_Csv_NeutralizesFormulaInjection(t *testing.T) {
 	require.True(t, found, "expected the injected resource row")
 	require.True(t, foundSkipped, "expected the injected skipped-control row")
 }
+
+// TestActionPrint_Csv_NilReportReturnsError is a regression for a missing
+// posture report. FinalizeResults returns nil, and the printer used to read
+// SummaryDetails from that nil value.
+func TestActionPrint_Csv_NilReportReturnsError(t *testing.T) {
+	cp := NewCsvPrinter(false)
+
+	err := cp.ActionPrint(context.Background(), nil, nil)
+	require.EqualError(t, err, "no data provided for CSV output")
+
+	err = cp.ActionPrint(context.Background(), &cautils.OPASessionObj{}, nil)
+	require.EqualError(t, err, "no data provided for CSV output")
+}
+
+// TestActionPrint_Csv_EmptyReportStillWritesHeader distinguishes a real scan
+// that found nothing from a missing report. The empty report still has a
+// header row and does not error.
+func TestActionPrint_Csv_EmptyReportStillWritesHeader(t *testing.T) {
+	tmpCsv, err := os.CreateTemp("", "csv-empty-report-*.csv")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = os.Remove(tmpCsv.Name()) })
+
+	cp := NewCsvPrinter(false)
+	cp.writer = tmpCsv
+	require.NoError(t, cp.ActionPrint(context.Background(), cautils.NewOPASessionObjMock(), nil))
+	require.NoError(t, cp.CloseWriter())
+
+	f, err := os.Open(tmpCsv.Name())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = f.Close() })
+
+	records, err := csv.NewReader(f).ReadAll()
+	require.NoError(t, err)
+	require.Len(t, records, 1)
+	assert.Equal(t, "Control Name", records[0][0])
+	assert.Equal(t, "Control ID", records[0][1])
+}

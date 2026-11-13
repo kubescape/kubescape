@@ -99,13 +99,17 @@ func (cp *CsvPrinter) Score(score float32) {
 
 // ActionPrint outputs scan results in CSV format, including resource-level
 // control evaluations, skipped resource findings with diagnostic reasons, and
-// cluster-wide skipped or unevaluated controls.
+// cluster-wide skipped or unevaluated controls. A missing session or posture
+// report returns an error instead of reading a nil report.
 func (cp *CsvPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) (err error) {
-	if opaSessionObj == nil {
+	if opaSessionObj == nil || opaSessionObj.Report == nil {
 		return fmt.Errorf("no data provided for CSV output")
 	}
 
 	finalizedReport := FinalizeResults(opaSessionObj)
+	if finalizedReport == nil {
+		return fmt.Errorf("no data provided for CSV output")
+	}
 	reportWithSeverity := ConvertToPostureReportWithSeverityLabelsAndCoverageFromCatalog(finalizedReport, opaSessionObj.LabelsToCopy, opaSessionObj.GetCatalog(), &opaSessionObj.ScanCoverage)
 
 	summaryControls := finalizedReport.SummaryDetails.Controls
