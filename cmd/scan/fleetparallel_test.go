@@ -10,8 +10,10 @@ import (
 	"testing"
 
 	"github.com/kubescape/kubescape/v4/cmd/shared"
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/core"
 	"github.com/kubescape/kubescape/v4/core/pkg/fleet"
+	"github.com/spf13/pflag"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -165,23 +167,29 @@ func TestValidateParallel(t *testing.T) {
 	}
 }
 
-// TestFleetChildArgs pins how the user's command is repeated for one context.
-func TestFleetChildArgs(t *testing.T) {
+// frameworkInvocation is "scan framework nsa" parsed with the given flags, as the user would have run it.
+func frameworkInvocation(t *testing.T, flags ...string) fleetCommandLine {
+	t.Helper()
 	cmd := GetScanCommand(core.NewKubescape(context.Background()))
-	var invocation fleetCommandLine
+	invocation := fleetCommandLine{args: []string{"nsa"}}
 	for _, sub := range cmd.Commands() {
 		if sub.Name() == "framework" {
 			invocation.cmd = sub
 		}
 	}
 	require.NotNil(t, invocation.cmd)
-	require.NoError(t, invocation.cmd.ParseFlags([]string{
+	require.NoError(t, invocation.cmd.ParseFlags(flags))
+	return invocation
+}
+
+// TestFleetChildArgs pins how the user's command is repeated for one context.
+func TestFleetChildArgs(t *testing.T) {
+	invocation := frameworkInvocation(t,
 		"--kube-contexts=prod,staging", "--fleet-report=fleet.json", "--retries=3", "--parallel=2", "--output=report.json",
 		"--format=json", "--exclude-namespaces=kube-system,kube-public", "--exclude-controls=C-0001,C-0002",
 		"--notify=https://a.example", "--notify=https://b.example", "--registry-mapping=a.io=b.io,c.io=d.io",
 		"--submit=false", "--compliance-threshold=80",
-	}))
-	invocation.args = []string{"nsa"}
+	)
 
 	args := fleetChildArgs(fleetChildBaseArgs(invocation), invocation.args, "prod", "report.json", "/tmp/0.json", 3)
 
@@ -196,4 +204,56 @@ func TestFleetChildArgs(t *testing.T) {
 	assert.NotContains(t, args, "--kube-contexts=prod,staging")
 	assert.NotContains(t, args, "--fleet-report=fleet.json", "the child's result is internal, so the user's fleet report checks do not apply to it")
 	assert.Equal(t, []string{"--", "nsa"}, args[len(args)-2:])
+}
+
+// TestFleetChildArgsRoundTrip pins that the child parses back the same values the user gave, commas and quotes included.
+func TestFleetChildArgsRoundTrip(t *testing.T) {
+	invocation := frameworkInvocation(t,
+		`--use-from="policies/team,a.json",b.json`, `--values="charts/a,b.yaml"`, `--api-versions=""`,
+		"--exclude-path=a,b", `--exclude-path=say "hi"`,
+		"--registry-mapping=a.io=b,c", `--registry-mapping="k=a=b,c"`, `--registry-mapping=q.io=x"y`,
+	)
+
+	args := fleetChildArgs(fleetChildBaseArgs(invocation), invocation.args, "prod,eu", "report.json", "/tmp/0.json", 0)
+	child := frameworkInvocation(t, args[1:len(args)-2]...)
+
+	parent, parsed := invocation.cmd.Flags(), child.cmd.Flags()
+	// GetSlice, since GetStringSlice reads an empty value back as no value.
+	values := func(flags *pflag.FlagSet, name string) []string {
+		return flags.Lookup(name).Value.(pflag.SliceValue).GetSlice()
+	}
+	assert.Equal(t, []string{"policies/team,a.json", "b.json"}, values(parent, "use-from"))
+	assert.Equal(t, []string{"charts/a,b.yaml"}, values(parent, "values"))
+	assert.Equal(t, []string{""}, values(parent, "api-versions"))
+	assert.Equal(t, []string{"a,b", `say "hi"`}, values(parent, "exclude-path"))
+	for _, name := range []string{"use-from", "values", "api-versions", "exclude-path"} {
+		assert.Equal(t, values(parent, name), values(parsed, name), name)
+	}
+	assert.Equal(t, []string{"prod,eu"}, values(parsed, "kube-contexts"))
+	wantMap, _ := parent.GetStringToString("registry-mapping")
+	gotMap, _ := parsed.GetStringToString("registry-mapping")
+	assert.Equal(t, map[string]string{"a.io": "b,c", "k": "a=b,c", "q.io": `x"y`}, wantMap)
+	assert.Equal(t, wantMap, gotMap)
+}
+
+// TestFleetParallelKeepsReportsOnlyForFleetReport pins that the parent holds each child's report only when a fleet report reads it.
+func TestFleetParallelKeepsReportsOnlyForFleetReport(t *testing.T) {
+	useTestBinaryForChildren(t)
+	fleetReport := prepareFleetE2E(t, map[string]string{"alpha": newFakeAPIServerWithPods(t, 3).URL})
+	policies := filepath.Join("..", "..", "core", "cautils", "getter", "testdata")
+	previous := fleetInvocation
+	t.Cleanup(func() { fleetInvocation = previous })
+	fleetInvocation = frameworkInvocation(t, "--format=json", "--keep-local", "--use-from="+filepath.Join(policies, "NSA.json"),
+		"--controls-config="+filepath.Join(policies, "controls-inputs.json"), "--exceptions="+filepath.Join(policies, "exceptions.json"))
+
+	for name, report := range map[string]string{"without a fleet report": "", "with a fleet report": fleetReport} {
+		t.Run(name, func(t *testing.T) {
+			scanInfo := &cautils.ScanInfo{KubeContexts: []string{"alpha"}, KubeContextParallel: 2, Output: filepath.Join(filepath.Dir(fleetReport), "report.json"), FleetReport: report}
+			outcomes := scanFleetInProcesses(context.Background(), scanInfo, nil)
+			require.Len(t, outcomes, 1)
+			require.NoError(t, outcomes[0].err)
+			assert.True(t, outcomes[0].scanned, "the status is kept either way")
+			assert.Equal(t, report != "", outcomes[0].cluster.Report != nil)
+		})
+	}
 }

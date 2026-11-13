@@ -3,6 +3,7 @@ package scan
 import (
 	"bufio"
 	"context"
+	"encoding/csv"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -77,6 +78,10 @@ func fleetChildBaseArgs(invocation fleetCommandLine) []string {
 		}
 		if values, ok := flag.Value.(pflag.SliceValue); ok {
 			for _, value := range values.GetSlice() {
+				// A string array takes its value as is; the other slices read theirs as CSV.
+				if flag.Value.Type() != "stringArray" {
+					value = csvField(value)
+				}
 				args = append(args, "--"+flag.Name+"="+value)
 			}
 			return
@@ -84,7 +89,12 @@ func fleetChildBaseArgs(invocation fleetCommandLine) []string {
 		// A map flag prints as "[k=v]", which does not parse back, so each entry is passed on its own.
 		if pairs, err := invocation.cmd.Flags().GetStringToString(flag.Name); err == nil {
 			for _, key := range slices.Sorted(maps.Keys(pairs)) {
-				args = append(args, "--"+flag.Name+"="+key+"="+pairs[key])
+				pair := key + "=" + pairs[key]
+				// pflag reads an entry with one "=" as is, and one with more as CSV.
+				if strings.Count(pair, "=") > 1 {
+					pair = csvField(pair)
+				}
+				args = append(args, "--"+flag.Name+"="+pair)
 			}
 			return
 		}
@@ -96,7 +106,7 @@ func fleetChildBaseArgs(invocation fleetCommandLine) []string {
 // fleetChildArgs adds one context's fleet settings and the user's positional arguments to the base arguments.
 func fleetChildArgs(base, positional []string, kubeContext, output, result string, retries int) []string {
 	args := slices.Clone(base)
-	args = append(args, "--kube-contexts="+kubeContext, "--output="+output, "--fleet-child-result="+result, fmt.Sprintf("--retries=%d", retries))
+	args = append(args, "--kube-contexts="+csvField(kubeContext), "--output="+output, "--fleet-child-result="+result, fmt.Sprintf("--retries=%d", retries))
 	return append(append(args, "--"), positional...)
 }
 
@@ -157,6 +167,10 @@ func runFleetChild(ctx context.Context, kubeContext string, scanInfo *cautils.Sc
 		return failedOutcome(kubeContext, fmt.Errorf("the scan wrote no result (%v): %s", runErr, lastLines(logPath, 3)), time.Since(started))
 	}
 	outcome := fleetOutcome{cluster: cluster, scanned: cluster.Scanned(), attempts: cluster.Attempts}
+	// Only a fleet report or a child result reads the cluster's report, so without one it is not kept until every child is done.
+	if !fleetReportRequested(scanInfo.FleetReport) && scanInfo.FleetChildResult == "" {
+		outcome.cluster.Report = nil
+	}
 	if runErr == nil {
 		return outcome
 	}
@@ -212,6 +226,18 @@ func childFailure(logPath, kubeContext string) string {
 		}
 	}
 	return "the scan failed: " + lastLines(logPath, 3)
+}
+
+// csvField quotes a value so that pflag, which reads comma-separated flags as CSV, gets it back whole.
+func csvField(value string) string {
+	if value == "" {
+		return `""`
+	}
+	var b strings.Builder
+	w := csv.NewWriter(&b)
+	_ = w.Write([]string{value})
+	w.Flush()
+	return strings.TrimSuffix(b.String(), "\n")
 }
 
 // lastLines returns the end of a child's log, for errors that left no report behind.
