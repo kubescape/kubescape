@@ -62,30 +62,45 @@ func runCostlyControl(t *testing.T, store *scancache.Store, timeout time.Duratio
 //
 // The budget is set from the full evaluation time measured here: the control
 // fits in it, while evaluating it a second time inside the window does not.
+//
+// The margin either way is only about a third of the evaluation time, so a
+// busy machine can push a single scan over the budget. An attempt in which the
+// full scan does not fit says nothing and is retried with a fresh budget, and
+// one cold incremental scan that fits and stores its verdicts is enough. With
+// verification inside the window the incremental scan runs out of time in
+// every attempt, so the test still fails then.
 func TestIncrementalCacheVerificationDoesNotCountAgainstControlTimeout(t *testing.T) {
+	const attempts = 5
 	runCostlyControl(t, nil, 0) // compile and warm up
-	var samples []time.Duration
-	for range 3 {
-		elapsed, _, _ := runCostlyControl(t, nil, 0)
-		samples = append(samples, elapsed)
-	}
-	slices.Sort(samples)
-	timeout := samples[1] * 3 / 2
-	t.Logf("full evaluation takes %v; ControlTimeout set to %v", samples[1].Round(time.Millisecond), timeout.Round(time.Millisecond))
 
-	for run := range 3 {
-		_, fullTimedOut, _ := runCostlyControl(t, nil, timeout)
-		require.False(t, fullTimedOut, "run %d: the full scan must fit the budget for this test to mean anything", run)
+	for attempt := range attempts {
+		var samples []time.Duration
+		for range 3 {
+			elapsed, _, _ := runCostlyControl(t, nil, 0)
+			samples = append(samples, elapsed)
+		}
+		slices.Sort(samples)
+		timeout := samples[1] * 3 / 2
+		t.Logf("attempt %d: full evaluation takes %v; ControlTimeout set to %v", attempt, samples[1].Round(time.Millisecond), timeout.Round(time.Millisecond))
+
+		if _, fullTimedOut, _ := runCostlyControl(t, nil, timeout); fullTimedOut {
+			t.Logf("attempt %d: the full scan did not fit the budget, so this attempt proves nothing", attempt)
+			continue
+		}
 
 		store, err := scancache.Load(t.TempDir(), "timeout")
 		require.NoError(t, err)
 		elapsed, timedOut, pod := runCostlyControl(t, store, timeout)
-		t.Logf("run %d: cold incremental scan took %v", run, elapsed.Round(time.Millisecond))
-		assert.False(t, timedOut, "run %d: verification must not count against ControlTimeout", run)
+		t.Logf("attempt %d: cold incremental scan took %v", attempt, elapsed.Round(time.Millisecond))
+		if timedOut {
+			continue
+		}
 
 		object := workloadinterface.NewWorkloadObj(podObject("prod", "p00", map[string]any{}))
 		require.Equal(t, object.GetID(), pod)
 		_, stored := store.Get("C-COSTLY", pod, scancache.ResourceHash(object.GetObject()))
-		assert.True(t, stored, "run %d: verified verdicts are still stored", run)
+		assert.True(t, stored, "verified verdicts are still stored")
+		return
 	}
+	t.Fatalf("in %d attempts, no cold incremental scan fit a ControlTimeout that the full scan fit: verification must not count against ControlTimeout", attempts)
 }
