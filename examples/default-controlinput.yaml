@@ -7,19 +7,7 @@ metadata:
     app.kubernetes.io/component: operator
 spec:
   controls:
-    unclassified_cipher:
-      - TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384
-      - TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
-      - TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256
-      - TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
-      - TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA384
-      - TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA384
-      - TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256
-      - TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256
-      - TLS_RSA_WITH_AES_256_GCM_SHA384
-      - TLS_RSA_WITH_AES_128_GCM_SHA256
-      - TLS_RSA_WITH_AES_256_CBC_SHA256
-      - TLS_RSA_WITH_AES_128_CBC_SHA256
+    # Sensitive data detection
     sensitiveKeyNames:
       - aws_access_key_id
       - aws_secret_access_key
@@ -36,13 +24,13 @@ spec:
       - bearer
       - credential
     sensitiveValues:
-      - BEGIN \w+ PRIVATE KEY
-      - PRIVATE KEY
-      - eyJhbGciO
-      - JWT
-      - Bearer
-      - _key_
-      - _secret_
+      - "BEGIN \\w+ PRIVATE KEY"
+      - "PRIVATE KEY"
+      - "eyJhbGciO"
+      - "JWT"
+      - "Bearer"
+      - "_key_"
+      - "_secret_"
     insecureCapabilities:
       - SETPCAP
       - NET_ADMIN
@@ -128,28 +116,32 @@ spec:
       - kubernetes-dashboard
       - jenkins
       - prometheus-deployment
-    cpuLimitMin:
+    # Resource limits & requests (snake_case)
+    cpu_limit_min:
       - "0.5"
-    cpuLimitMax:
+    cpu_limit_max:
       - "5"
-    cpuRequestMin:
+    cpu_request_min:
       - "0.1"
-    cpuRequestMax:
+    cpu_request_max:
       - "5"
-    memoryLimitMin:
+    memory_limit_min:
       - 0.25Gi
-    memoryLimitMax:
+    memory_limit_max:
       - 4Gi
-    memoryRequestMin:
+    memory_request_min:
       - 0.125Gi
-    memoryRequestMax:
+    memory_request_max:
       - 4Gi
     maxCriticalVulnerabilities:
       - "5"
     maxHighVulnerabilities:
       - "10"
-    cloudProvider:
-      - ""
+    # Empty placeholder for the dataControlInput `cloudProvider`
+    cloudProvider: []
+    # New field added per issue #3956
+    trustedCosignPublicKeys: []
+    # Allow lists (currently empty)
     sensitiveKeyNamesAllowed: []
     sensitiveValuesAllowed:
       - ''
