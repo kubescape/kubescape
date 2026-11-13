@@ -1,0 +1,11 @@
+# a wildcard verb includes list and watch, which the empty name authorizes.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: empty-name-secret-wildcard
+  namespace: build
+rules:
+- apiGroups: [""]
+  resources: ["secrets"]
+  resourceNames: [""]
+  verbs: ["*"]
