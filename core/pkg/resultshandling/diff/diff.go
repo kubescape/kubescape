@@ -170,7 +170,7 @@ func compareReports(base, head *scanReport, granularity Granularity) *ChangeSet 
 
 	if reasons := incompatibleScopeReasons(base, head); len(reasons) > 0 {
 		cs.Warnings = append(cs.Warnings, reasons...)
-		markAllFailuresIncomparable(cs, base, head, granularity, reasons[0])
+		markAllFailuresIncomparable(cs, baseMap, headMap, baseSeverity, headSeverity, granularity, reasons[0])
 		sortChangeSet(cs)
 		return cs
 	}
@@ -336,29 +336,56 @@ func unionKeys(base, head map[key]controlEntry) []key {
 	return keys
 }
 
-func markAllFailuresIncomparable(cs *ChangeSet, base, head *scanReport, granularity Granularity, reason string) {
-	seen := make(map[findingFingerprint]struct{})
-	for _, side := range []struct {
-		report     *scanReport
-		baseStatus string
-		headStatus string
-	}{
-		{base, string(apis.StatusFailed), statusAbsent},
-		{head, statusAbsent, string(apis.StatusFailed)},
-	} {
-		severity := buildSeverityMap(side.report)
-		for controlKey, control := range buildMap(side.report) {
-			if control.Status.InnerStatus != string(apis.StatusFailed) {
-				continue
-			}
-			for _, finding := range findingsForControl(controlKey, control, severity[controlKey.controlID], granularity) {
-				if _, exists := seen[finding.fingerprint]; exists {
-					continue
-				}
-				seen[finding.fingerprint] = struct{}{}
-				cs.Incomparable = append(cs.Incomparable, finding.change(side.baseStatus, side.headStatus, reason))
-			}
+func markAllFailuresIncomparable(cs *ChangeSet, baseMap, headMap map[key]controlEntry, baseSeverity, headSeverity map[string]string, granularity Granularity, reason string) {
+	baseFindings := make(map[findingFingerprint]finding)
+	for controlKey, control := range baseMap {
+		if control.Status.InnerStatus != string(apis.StatusFailed) {
+			continue
 		}
+		for _, f := range findingsForControl(controlKey, control, baseSeverity[controlKey.controlID], granularity) {
+			baseFindings[f.fingerprint] = f
+		}
+	}
+
+	headFindings := make(map[findingFingerprint]finding)
+	for controlKey, control := range headMap {
+		if control.Status.InnerStatus != string(apis.StatusFailed) {
+			continue
+		}
+		for _, f := range findingsForControl(controlKey, control, headSeverity[controlKey.controlID], granularity) {
+			headFindings[f.fingerprint] = f
+		}
+	}
+
+	seen := make(map[findingFingerprint]struct{})
+	for fp, finding := range baseFindings {
+		seen[fp] = struct{}{}
+		baseStatus := string(apis.StatusFailed)
+		var headStatus string
+		if headFinding, existsInHeadFailures := headFindings[fp]; existsInHeadFailures {
+			headStatus = string(apis.StatusFailed)
+			finding = headFinding
+		} else {
+			headControl, inHead := headMap[key{resourceID: fp.resourceID, controlID: fp.controlID}]
+			headStatus = statusOf(headControl, inHead)
+		}
+		cs.Incomparable = append(cs.Incomparable, finding.change(baseStatus, headStatus, reason))
+	}
+
+	for fp, finding := range headFindings {
+		if _, exists := seen[fp]; exists {
+			continue
+		}
+		seen[fp] = struct{}{}
+		headStatus := string(apis.StatusFailed)
+		var baseStatus string
+		if _, existsInBaseFailures := baseFindings[fp]; existsInBaseFailures {
+			baseStatus = string(apis.StatusFailed)
+		} else {
+			baseControl, inBase := baseMap[key{resourceID: fp.resourceID, controlID: fp.controlID}]
+			baseStatus = statusOf(baseControl, inBase)
+		}
+		cs.Incomparable = append(cs.Incomparable, finding.change(baseStatus, headStatus, reason))
 	}
 }
 
