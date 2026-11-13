@@ -23,6 +23,7 @@ import (
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	metav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
+	"github.com/kubescape/kubescape/v4/core/pkg/filesizelimit"
 	"github.com/kubescape/kubescape/v4/core/pkg/pathcontainment"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
@@ -2133,7 +2134,7 @@ var (
 )
 
 func getMaxManifestSize() int64 {
-	return cautils.GetMaxFileSize()
+	return filesizelimit.GetMaxFileSize()
 }
 
 // openManifestFile opens path for reading and rejects anything but a regular file.

@@ -13,7 +13,7 @@ import (
 	"syscall"
 
 	"github.com/kubescape/go-logger"
-	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/kubescape/v4/core/pkg/filesizelimit"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/pathparse"
 	"github.com/mikefarah/yq/v4/pkg/yqlib"
 	"gopkg.in/op/go-logging.v1"
@@ -23,8 +23,8 @@ import (
 const (
 	// defaultMaxFileSize bounds manifest files parsed from disk (32 MiB), preventing
 	// uncontrolled memory allocation from oversized inputs or decompression bombs (CWE-400).
-	defaultMaxFileSize = 32 * 1024 * 1024
-	maxFileSizeEnvVar  = "KUBESCAPE_MAX_FILE_SIZE"
+	defaultMaxFileSize = filesizelimit.DefaultMaxFileSize
+	maxFileSizeEnvVar  = filesizelimit.MaxFileSizeEnvVar
 )
 
 var (
@@ -38,16 +38,7 @@ var (
 // configurable via KUBESCAPE_MAX_FILE_SIZE, defaulting to defaultMaxFileSize (32 MiB).
 // math.MaxInt64 is rejected to avoid integer overflow in limit+1 calculations.
 func getMaxFileSize() int64 {
-	if v, ok := os.LookupEnv(maxFileSizeEnvVar); ok {
-		trimmed := strings.TrimSpace(v)
-		if trimmed != "" {
-			if parsed, err := strconv.ParseInt(trimmed, 10, 64); err == nil && parsed > 0 && parsed != math.MaxInt64 {
-				return parsed
-			}
-			logger.L().Warning("invalid KUBESCAPE_MAX_FILE_SIZE, using default", helpers.String("value", v), helpers.Int("default", int(defaultMaxFileSize)))
-		}
-	}
-	return defaultMaxFileSize
+	return filesizelimit.GetMaxFileSize()
 }
 
 func openManifestFile(path string) (*os.File, error) {

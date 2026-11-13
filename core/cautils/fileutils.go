@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"maps"
-	"math"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -25,6 +24,7 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils/helmprovenance"
+	"github.com/kubescape/kubescape/v4/core/pkg/filesizelimit"
 	"github.com/kubescape/kubescape/v4/core/pkg/pathcontainment"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
@@ -72,11 +72,11 @@ const (
 	// 32 MiB is large enough for any legitimate manifest (the largest chart in the
 	// wild is <5 MiB) but stops a single attacker-supplied multi-GB YAML from OOMing
 	// a CI runner. Override via KUBESCAPE_MAX_FILE_SIZE env var (bytes).
-	DefaultMaxFileSize int64 = 32 << 20 // 32 MiB
+	DefaultMaxFileSize = filesizelimit.DefaultMaxFileSize
 
 	// MaxFileSizeEnvVar is the env var that overrides DefaultMaxFileSize.
 	// Value is parsed as decimal bytes (e.g. "33554432" or "67108864" for 64 MiB).
-	MaxFileSizeEnvVar = "KUBESCAPE_MAX_FILE_SIZE"
+	MaxFileSizeEnvVar = filesizelimit.MaxFileSizeEnvVar
 )
 
 type Chart struct {
@@ -1195,20 +1195,11 @@ func isUnrenderedHelmTemplate(path string) bool {
 // DefaultMaxFileSize. Non-positive, unparsable, or math.MaxInt64 values fall
 // back to the default so the scan stays bounded and limit+1 does not overflow.
 func GetMaxFileSize() int64 {
-	if v, ok := os.LookupEnv(MaxFileSizeEnvVar); ok {
-		trimmed := strings.TrimSpace(v)
-		if trimmed != "" {
-			if parsed, err := strconv.ParseInt(trimmed, 10, 64); err == nil && parsed > 0 && parsed != math.MaxInt64 {
-				return parsed
-			}
-			logger.L().Warning("invalid KUBESCAPE_MAX_FILE_SIZE, using default", helpers.String("value", v), helpers.Int("default", int(DefaultMaxFileSize)))
-		}
-	}
-	return DefaultMaxFileSize
+	return filesizelimit.GetMaxFileSize()
 }
 
 func getMaxFileSize() int64 {
-	return GetMaxFileSize()
+	return filesizelimit.GetMaxFileSize()
 }
 
 // loadFile returns the contents of filePath. mapped reports whether data is a
