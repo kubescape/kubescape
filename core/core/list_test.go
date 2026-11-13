@@ -802,3 +802,11 @@ func TestPrintListResult_NormalizesFormat(t *testing.T) {
 	assert.NoError(t, PrintListResult(context.Background(), result, "frameworks", " JSON "))
 	assert.NoError(t, PrintListResult(context.Background(), result, "frameworks", "Pretty-Print"))
 }
+
+func TestList_NilListPoliciesReturnsError(t *testing.T) {
+	ks := &Kubescape{}
+	res, err := ks.List(nil)
+	assert.Error(t, err)
+	assert.EqualError(t, err, "uninitialized list parameters")
+	assert.Nil(t, res)
+}

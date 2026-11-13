@@ -758,3 +758,11 @@ func TestDiff_OutputSafety(t *testing.T) {
 		assert.Equal(t, imageReportHead, string(content))
 	})
 }
+
+func TestDiff_NilDiffInfoReturnsError(t *testing.T) {
+	ks := NewKubescape(context.Background())
+	failures, err := ks.Diff(nil)
+	assert.Error(t, err)
+	assert.EqualError(t, err, "uninitialized diff parameters")
+	assert.Equal(t, 0, failures)
+}

@@ -81,6 +81,10 @@ func DownloadSupportCommands() []string {
 }
 
 func (ks *Kubescape) Download(downloadInfo *metav1.DownloadInfo) (*metav1.DownloadResult, error) {
+	if downloadInfo == nil {
+		return nil, errors.New("uninitialized download parameters")
+	}
+
 	setPathAndFilename(downloadInfo)
 	if err := os.MkdirAll(downloadInfo.Path, downloadDirPerm); err != nil {
 		return nil, fmt.Errorf("failed to create download directory %q: %w", downloadInfo.Path, err)

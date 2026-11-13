@@ -47,6 +47,12 @@ const (
 )
 
 func (ks *Kubescape) Patch(patchInfo *ksmetav1.PatchInfo, scanInfo *cautils.ScanInfo) (bool, error) {
+	if patchInfo == nil {
+		return false, errors.New("uninitialized patch parameters")
+	}
+	if scanInfo == nil {
+		return false, errors.New("uninitialized scan parameters")
+	}
 
 	// ===================== Scan the image =====================
 	logger.L().Start(fmt.Sprintf("Scanning image: %s", patchInfo.Image))

@@ -1109,3 +1109,11 @@ func readJSONFile(t *testing.T, path string, v any) {
 	require.NoError(t, err)
 	require.NoError(t, json.Unmarshal(data, v))
 }
+
+func TestDownload_NilDownloadInfoReturnsError(t *testing.T) {
+	ks := NewKubescape(context.Background())
+	res, err := ks.Download(nil)
+	assert.Error(t, err)
+	assert.EqualError(t, err, "uninitialized download parameters")
+	assert.Nil(t, res)
+}
