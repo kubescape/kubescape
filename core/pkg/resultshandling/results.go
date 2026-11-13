@@ -46,11 +46,17 @@ func NewResultsHandler(reporterObj reporter.IReport, printerObjs []printer.IPrin
 
 // GetRiskScore returns the result’s risk score
 func (rh *ResultsHandler) GetRiskScore() float32 {
+	if rh == nil || rh.ScanData == nil || rh.ScanData.Report == nil {
+		return 0
+	}
 	return rh.ScanData.Report.SummaryDetails.Score
 }
 
 // GetComplianceScore returns the result’s compliance score
 func (rh *ResultsHandler) GetComplianceScore() float32 {
+	if rh == nil || rh.ScanData == nil || rh.ScanData.Report == nil {
+		return 0
+	}
 	return rh.ScanData.Report.SummaryDetails.ComplianceScore
 }
 
@@ -86,6 +92,9 @@ func (rh *ResultsHandler) GetReporter() reporter.IReport {
 // WriteJson streams the results in JSON format directly to the given writer
 func (rh *ResultsHandler) WriteJson(w io.Writer) error {
 	finalizedReport := printerv2.FinalizeResults(rh.ScanData)
+	if finalizedReport == nil {
+		return fmt.Errorf("no data provided for JSON output")
+	}
 	enrichedReport := printerv2.ConvertToPostureReportWithSeverityLabelsAndCoverageFromCatalog(
 		finalizedReport,
 		rh.ScanData.LabelsToCopy,
@@ -151,6 +160,9 @@ func (rh *ResultsHandler) ToJson() ([]byte, error) {
 
 // GetResults returns the results
 func (rh *ResultsHandler) GetResults() *reporthandlingv2.PostureReport {
+	if rh == nil || rh.ScanData == nil {
+		return nil
+	}
 	return printerv2.FinalizeResults(rh.ScanData)
 }
 

@@ -112,6 +112,9 @@ func printConfigurationsScanningYaml(opaSessionObj *cautils.OPASessionObj, image
 	// shared session here would also change the posture payload submitted after
 	// local output has finished.
 	finalizedReport := FinalizeResults(opaSessionObj)
+	if finalizedReport == nil {
+		return fmt.Errorf("no data provided for YAML output")
+	}
 
 	if imageScanData != nil {
 		imageScanSummary := buildMachineImageScanSummary(imageScanData)
