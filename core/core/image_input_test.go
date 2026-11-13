@@ -690,12 +690,8 @@ func TestImageRemainderOCIDuplicateEntries(t *testing.T) {
 	}
 }
 
-// TestImageRemainderOCIParentDirectories pins the extractor's parent rule:
-// regular members land only where a directory was materialized, because the
-// extractor opens them without creating parents. An otherwise valid archive
-// without blob directory headers is rejected by the provider and must be
-// rejected here — under both absolute and registry-parseable relative names,
-// since Syft falls through to the registry for such a local file.
+// TestImageRemainderOCIParentDirectories verifies parity with the provider,
+// which creates missing parent directories while extracting regular files.
 func TestImageRemainderOCIParentDirectories(t *testing.T) {
 	dir := t.TempDir()
 	index, _, _, manifestDigest, _, blobs := ociLayoutContentWithLayers()
@@ -715,12 +711,10 @@ func TestImageRemainderOCIParentDirectories(t *testing.T) {
 
 	requireArchiveProviderVerdict(t, withDirs, true)
 	assert.True(t, isOCILayoutTarball(withDirs))
-	requireArchiveProviderVerdict(t, parentless, false)
-	assert.False(t, isOCILayoutTarball(parentless),
-		"parentless blob members fail extraction, so the classifier must fall through")
+	requireArchiveProviderVerdict(t, parentless, true)
+	assert.True(t, isOCILayoutTarball(parentless))
 
-	// Relative collision names: the parentless file resolves registry (the
-	// scan Syft actually performs), the headed one stays local.
+	// Both archive forms retain local identity under relative collision names.
 	relDir := t.TempDir()
 	writeTarMembers(t, filepath.Join(relDir, "headed"), members, true)
 	writeTarMembers(t, filepath.Join(relDir, "parentless"), members, false)
@@ -730,7 +724,7 @@ func TestImageRemainderOCIParentDirectories(t *testing.T) {
 	assert.False(t, registry)
 	assert.NoError(t, err)
 	registry, _, err = classifyImageInput("image:parentless", osStatExists)
-	assert.True(t, registry, "parentless archive must fall through to registry")
+	assert.False(t, registry, "parentless archive must retain local identity")
 	assert.NoError(t, err)
 }
 

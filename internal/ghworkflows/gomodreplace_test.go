@@ -62,7 +62,6 @@ var approvedGoModReplacements = map[string]string{
 
 	// Load-bearing until the stereoscope fork stops pulling in containerd v1;
 	// see #3940.
-	"github.com/containerd/containerd": "github.com/Retr0-Xd/containerd",
 
 	"github.com/distribution/reference": "github.com/distribution/reference",
 
