@@ -11,7 +11,6 @@ import (
 	"io"
 	"net"
 	"os"
-	pathpkg "path"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -541,9 +540,7 @@ func overlayNoTruncate(cur, body []byte) []byte {
 // plain-tar stream — duplicates overlaid with the extractor's no-truncate
 // semantics, so the first entry never wins by position. ok is false when the
 // stream is not a readable tar, an entry would escape the extraction root
-// (the provider hard-fails the whole extraction on those), a regular file
-// lands where no directory was materialized (the extractor opens regular
-// entries without creating parents, so the whole extraction fails), or no
+// (the provider hard-fails the whole extraction on those), or no
 // index.json is present. The index entry is bounded by the archive itself
 // and the provider reads the extracted index.json whole, so no size cap
 // applies here either.
@@ -553,10 +550,6 @@ func walkTarEntries(path string) (indexBody []byte, ok bool) {
 		return nil, false
 	}
 	defer func() { _ = f.Close() }()
-	// Materialized directories in walk order, starting at the extraction
-	// root: the provider creates exactly the listed directories (parents
-	// included, at that point in the stream) and nothing else.
-	dirs := map[string]bool{".": true}
 	tr := tar.NewReader(f)
 	for {
 		hdr, err := tr.Next()
@@ -571,27 +564,9 @@ func walkTarEntries(path string) (indexBody []byte, ok bool) {
 			return nil, false
 		}
 		switch hdr.Typeflag {
-		case tar.TypeDir:
-			// MkdirAll: the directory and every ancestor below the root
-			// exist from here on.
-			for dir := rel; ; {
-				dirs[dir] = true
-				parent := pathpkg.Dir(dir)
-				if parent == "." || parent == dir {
-					break
-				}
-				dir = parent
-			}
-			continue
 		case tar.TypeReg:
-			// Only regular files are materialized by the provider's
-			// extraction switch (links are skipped, other types dropped),
-			// and only when their immediate parent was materialized:
-			// OpenFile creates no parents, so a parentless member fails
-			// the whole extraction.
-			if !dirs[pathpkg.Dir(rel)] {
-				return nil, false
-			}
+			// The provider creates parent directories for regular files,
+			// so explicit directory headers are optional.
 		default:
 			continue
 		}
