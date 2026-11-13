@@ -1,0 +1,95 @@
+[
+    {
+        "alertMessage": "Subject: User-judy can write secrets in privileged namespaces and issue service account tokens",
+        "failedPaths": [
+            "relatedObjects[0].roleRef.name",
+            "relatedObjects[0].subjects[0]",
+            "relatedObjects[1].rules[0].apiGroups[0]",
+            "relatedObjects[1].rules[0].resources[0]",
+            "relatedObjects[1].rules[0].verbs[0]",
+            "relatedObjects[1].rules[1].apiGroups[0]",
+            "relatedObjects[1].rules[1].resources[0]",
+            "relatedObjects[1].rules[1].verbs[0]"
+        ],
+        "reviewPaths": [
+            "relatedObjects[0].roleRef.name",
+            "relatedObjects[0].subjects[0]",
+            "relatedObjects[1].rules[0].apiGroups[0]",
+            "relatedObjects[1].rules[0].resources[0]",
+            "relatedObjects[1].rules[0].verbs[0]",
+            "relatedObjects[1].rules[1].apiGroups[0]",
+            "relatedObjects[1].rules[1].resources[0]",
+            "relatedObjects[1].rules[1].verbs[0]"
+        ],
+        "deletePaths": null,
+        "fixPaths": [],
+        "ruleStatus": "",
+        "packagename": "armo_builtins",
+        "alertScore": 9,
+        "alertObject": {
+            "externalObjects": {
+                "apiGroup": "rbac.authorization.k8s.io",
+                "kind": "User",
+                "name": "judy",
+                "relatedObjects": [
+                    {
+                        "apiVersion": "rbac.authorization.k8s.io/v1",
+                        "kind": "ClusterRoleBinding",
+                        "metadata": {
+                            "name": "clusterrole-empty-name-create-named-get-crb"
+                        },
+                        "roleRef": {
+                            "apiGroup": "rbac.authorization.k8s.io",
+                            "kind": "ClusterRole",
+                            "name": "clusterrole-empty-name-create-named-get"
+                        },
+                        "subjects": [
+                            {
+                                "apiGroup": "rbac.authorization.k8s.io",
+                                "kind": "User",
+                                "name": "judy"
+                            }
+                        ]
+                    },
+                    {
+                        "apiVersion": "rbac.authorization.k8s.io/v1",
+                        "kind": "ClusterRole",
+                        "metadata": {
+                            "name": "clusterrole-empty-name-create-named-get"
+                        },
+                        "rules": [
+                            {
+                                "apiGroups": [
+                                    ""
+                                ],
+                                "resourceNames": [
+                                    ""
+                                ],
+                                "resources": [
+                                    "secrets"
+                                ],
+                                "verbs": [
+                                    "create"
+                                ]
+                            },
+                            {
+                                "apiGroups": [
+                                    ""
+                                ],
+                                "resourceNames": [
+                                    "sa-token"
+                                ],
+                                "resources": [
+                                    "secrets"
+                                ],
+                                "verbs": [
+                                    "get"
+                                ]
+                            }
+                        ]
+                    }
+                ]
+            }
+        }
+    }
+]

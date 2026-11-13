@@ -17,11 +17,11 @@ deny contains msga if {
 
 	rule := role.rules[p]
 
-	# RBAC cannot authorize a top-level create through an entry carrying
-	# resourceNames, since the object has no name at authorization time, so such
-	# an entry grants no pod creation at all. Updating an existing pod is no
-	# substitute: spec.serviceAccountName is immutable once the pod exists.
-	unrestricted_rule(rule)
+	# A top-level create is authorized with the empty name, since the object has
+	# no name at authorization time, so an entry narrowed to other names grants no
+	# pod creation at all. Updating an existing pod is no substitute:
+	# spec.serviceAccountName is immutable once the pod exists.
+	grants_unnamed_requests(rule)
 
 	subject := rolebinding.subjects[k]
 	is_same_subjects(subjectVector, subject)
@@ -85,15 +85,23 @@ deny contains msga if {
 # Narrowing an entry with resourceNames does not protect the named controller:
 # update/patch on it still reach spec.template.spec.serviceAccountName, so the
 # subject can repoint an existing Deployment/DaemonSet/Job at an
-# admin-equivalent SA. Only create drops out, because RBAC cannot authorize a
-# top-level create through an entry carrying resourceNames.
-controller_write_verbs(rule) := ["create", "update", "patch", "*"] if {
-	unrestricted_rule(rule)
+# admin-equivalent SA. create is reachable only when the entry admits the empty
+# name a top-level create is authorized with, and update/patch only when it
+# admits the name of an object, which is never empty.
+controller_write_verbs(rule) := {verb |
+	some verb in ["create", "update", "patch", "*"]
+	controller_verb_reachable(rule, verb)
 }
 
-controller_write_verbs(rule) := ["update", "patch", "*"] if {
-	not unrestricted_rule(rule)
-}
+controller_verb_reachable(rule, "create") if grants_unnamed_requests(rule)
+
+controller_verb_reachable(rule, "update") if names_any_object(rule)
+
+controller_verb_reachable(rule, "patch") if names_any_object(rule)
+
+controller_verb_reachable(rule, "*") if grants_unnamed_requests(rule)
+
+controller_verb_reachable(rule, "*") if names_any_object(rule)
 
 # Kubernetes draws no distinction between an absent resourceNames and an
 # explicitly empty one: ResourceNameMatches returns true as soon as the list is
@@ -102,6 +110,20 @@ controller_write_verbs(rule) := ["update", "patch", "*"] if {
 # scoped and skip a subject that in fact holds unrestricted access.
 unrestricted_rule(rule) if {
 	count(object.get(rule, "resourceNames", [])) == 0
+}
+
+# A create, like a list or watch across a collection, is authorized with the
+# empty name, so resourceNames: [""] grants it as an unrestricted entry does.
+grants_unnamed_requests(rule) if unrestricted_rule(rule)
+
+grants_unnamed_requests(rule) if "" in rule.resourceNames
+
+# Requests on an existing object carry its name, which is never empty.
+names_any_object(rule) if unrestricted_rule(rule)
+
+names_any_object(rule) if {
+	some name in rule.resourceNames
+	name != ""
 }
 
 # A ClusterRoleBinding grants the role in every namespace, a RoleBinding only in

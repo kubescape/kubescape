@@ -1,0 +1,15 @@
+# the subject creates the token secret as sa-token and lists it back with a
+# metadata.name field selector.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: clusterrole-empty-name-create-named-list
+rules:
+- apiGroups: [""]
+  resources: ["secrets"]
+  resourceNames: [""]
+  verbs: ["create"]
+- apiGroups: [""]
+  resources: ["secrets"]
+  resourceNames: ["sa-token"]
+  verbs: ["list"]

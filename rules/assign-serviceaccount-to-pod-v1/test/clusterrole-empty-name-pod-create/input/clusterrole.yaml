@@ -1,0 +1,10 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: clusterrole-empty-name-pod-create
+rules:
+# create carries the empty name, so resourceNames: [""] authorizes it.
+- apiGroups: [""]
+  resources: ["pods"]
+  resourceNames: [""]
+  verbs: ["create"]
