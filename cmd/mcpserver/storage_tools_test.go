@@ -105,3 +105,29 @@ func TestStorageToolsClientError(t *testing.T) {
 		})
 	}
 }
+
+// String arguments are trimmed, as for the CLI's other tools: a padded name
+// still finds its object, and a blank required one is missing.
+func TestStorageToolsTrimStringArguments(t *testing.T) {
+	ks := &KubescapeMcpserver{ksClient: storagefake.NewClientset(&storagev1beta1.VulnerabilityManifest{
+		ObjectMeta: objectMeta("kubescape", "nginx"),
+		Spec: storagev1beta1.VulnerabilityManifestSpec{Payload: storagev1beta1.GrypeDocument{Matches: []storagev1beta1.Match{
+			vulnMatch("CVE-2026-0001", "High", "openssl", "3.0.2", "fixed", "3.0.7"),
+		}}},
+	}).SpdxV1beta1()}
+
+	result, err := ks.CallTool(context.Background(), "list_vulnerability_matches_for_cve",
+		map[string]any{"namespace": " kubescape ", "manifest_name": " nginx\n", "cve_id": "\tCVE-2026-0001 "})
+	require.NoError(t, err)
+	require.False(t, result.IsError, toolResultText(t, result))
+	var page struct {
+		Total int `json:"total"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(toolResultText(t, result)), &page))
+	assert.Equal(t, 1, page.Total)
+
+	result, err = ks.CallTool(context.Background(), "list_vulnerabilities_in_manifest", map[string]any{"manifest_name": "   "})
+	require.NoError(t, err)
+	require.True(t, result.IsError)
+	assert.Contains(t, toolResultText(t, result), "manifest_name is required")
+}
