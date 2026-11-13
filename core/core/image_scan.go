@@ -1350,32 +1350,103 @@ var onBeforeImageScanServiceInit func()
 // onBeforeImageScanJobs is an internal test hook invoked right before image scan jobs begin.
 var onBeforeImageScanJobs func()
 
+// isUnambiguousLocalPath reports whether a path is unambiguously a local filesystem path
+// (absolute, dot-relative, parent-relative, or home-relative) which can never be a valid
+// registry reference format.
+func isUnambiguousLocalPath(p string) bool {
+	if filepath.IsAbs(p) || strings.HasPrefix(p, "/") || strings.HasPrefix(p, "\\") {
+		return true
+	}
+	if strings.HasPrefix(p, "./") || strings.HasPrefix(p, ".\\") ||
+		strings.HasPrefix(p, "../") || strings.HasPrefix(p, "..\\") {
+		return true
+	}
+	if strings.HasPrefix(p, "~/") || strings.HasPrefix(p, "~\\") || p == "~" {
+		return true
+	}
+	return false
+}
+
 // resolveLocalImageTarget checks if an image target specifies a local file or directory
 // via a supported local selector (docker-archive:, oci-archive:, oci-dir:, dir:, file:,
-// local-file:, local-directory:, singularity:, snap:, sbom:, purl:), an explicit archive file,
-// or a file/directory path that exists on disk.
+// local-file:, local-directory:, singularity:, snap:, sbom:, purl:), an unambiguous local
+// filesystem path, or an existing file/directory on disk.
 // It returns the underlying filesystem path and true if it identifies a local target.
+// Registry references (including those with tags or repository names ending in .tar, .tgz,
+// .tar.gz, or .sif, or explicit registry selectors like registry: or docker:) return "", false.
 func resolveLocalImageTarget(image string) (string, bool) {
 	trimmed := strings.TrimSpace(image)
 	if trimmed == "" {
 		return "", false
 	}
-	if rest, _ := peelGenericImageSelector(trimmed); rest != "" {
-		trimmed = rest
-	}
-	if scheme := detectScheme(trimmed); scheme != "" {
-		rawPath := strings.TrimPrefix(trimmed, scheme+":")
-		return strings.TrimSpace(rawPath), true
-	}
-	lower := strings.ToLower(trimmed)
-	if strings.HasSuffix(lower, ".tar") || strings.HasSuffix(lower, ".tar.gz") || strings.HasSuffix(lower, ".tgz") || strings.HasSuffix(lower, ".sif") {
+
+	// Raw SBOM content (an existing text/plain SBOM file) decodes as a local source.
+	if isRawSBOMInput(trimmed) {
+		expanded, err := homedir.Expand(trimmed)
+		if err == nil {
+			return expanded, true
+		}
 		return trimmed, true
 	}
+
+	// Explicit registry selectors (docker:, podman:, containerd:, oci-registry:, oci-model:,
+	// registry:, daemon:, pull:) always denote registry/daemon sources, never local files.
+	if _, _, ok := stripRegistrySelectorScheme(trimmed); ok {
+		return "", false
+	}
+
+	// Syft's generic "image:" prefix: peel once, then evaluate remainder.
+	if rest, _ := peelGenericImageSelector(trimmed); rest != "" {
+		trimmed = rest
+		if _, _, ok := stripRegistrySelectorScheme(trimmed); ok {
+			return "", false
+		}
+	}
+
+	// Explicit local scheme (docker-archive:, oci-archive:, oci-dir:, dir:, file:, sbom:, etc.)
+	// always indicates an intended local file or directory.
+	if scheme := detectScheme(trimmed); scheme != "" {
+		rawPath := strings.TrimSpace(strings.TrimPrefix(trimmed, scheme+":"))
+		if expanded, err := homedir.Expand(rawPath); err == nil {
+			return expanded, true
+		}
+		return rawPath, true
+	}
+
+	// If the exact path exists on disk, it is a local target.
+	// (Raw input matching an existing path beats registry interpretation).
 	if expanded, err := homedir.Expand(trimmed); err == nil {
 		if _, err := os.Stat(expanded); err == nil {
 			return expanded, true
 		}
 	}
+
+	// If the input does not exist on disk, check whether it is an unambiguous local filesystem path
+	// (starts with '/', './', '../', '~', or Windows drive/backslash).
+	// Unambiguous paths cannot be registry references.
+	if isUnambiguousLocalPath(trimmed) {
+		expanded, err := homedir.Expand(trimmed)
+		if err == nil {
+			return expanded, true
+		}
+		return trimmed, true
+	}
+
+	// Suffix-only references that do not exist on disk:
+	// A reference such as "registry.example/team/app:release.tar" or "nginx:release.tar"
+	// parses as a valid normalized registry reference and must not be classified as a local archive.
+	if _, err := reference.ParseNormalizedNamed(trimmed); err == nil {
+		return "", false
+	}
+
+	lower := strings.ToLower(trimmed)
+	if strings.HasSuffix(lower, ".tar") || strings.HasSuffix(lower, ".tar.gz") || strings.HasSuffix(lower, ".tgz") || strings.HasSuffix(lower, ".sif") {
+		if expanded, err := homedir.Expand(trimmed); err == nil {
+			return expanded, true
+		}
+		return trimmed, true
+	}
+
 	return "", false
 }
 

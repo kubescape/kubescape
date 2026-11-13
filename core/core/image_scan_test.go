@@ -1129,3 +1129,60 @@ func TestValidateLocalImageInput_DirectoryHandling(t *testing.T) {
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrImageInputNotRegular)
 }
+
+func TestResolveLocalImageTarget_RegistryReferencesWithTarSuffixNotClassifiedAsLocal(t *testing.T) {
+	// Registry references with tags or repo names ending in .tar, .tgz, .tar.gz, .sif
+	// must NOT be classified as local files when they do not exist on disk.
+	tests := []struct {
+		image string
+	}{
+		{"registry.example/team/app:release.tar"},
+		{"registry.example:5000/team/app:release.tar"},
+		{"myregistry.io/org/repo:archive.tgz"},
+		{"myregistry.io/org/repo:model.sif"},
+		{"registry:registry.example/team/app:release.tar"},
+		{"docker:registry.example/team/app:release.tar"},
+		{"image:registry.example/team/app:release.tar"},
+		{"nginx:release.tar"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.image, func(t *testing.T) {
+			path, isLocal := resolveLocalImageTarget(tt.image)
+			assert.False(t, isLocal, "expected %q to not be classified as a local target, got path %q", tt.image, path)
+			assert.Empty(t, path)
+
+			// validateLocalImageInput must return nil for registry references
+			err := validateLocalImageInput(tt.image)
+			assert.NoError(t, err, "expected validateLocalImageInput to succeed for registry reference %q", tt.image)
+		})
+	}
+}
+
+func TestResolveLocalImageTarget_MissingLocalArchivesFailFast(t *testing.T) {
+	// Explicit local selectors and unambiguous filesystem paths MUST be classified as local
+	// targets, and fail with ErrNotExist if the file is missing.
+	tests := []struct {
+		image string
+	}{
+		{"docker-archive:/nonexistent/path/archive.tar"},
+		{"docker-archive:release.tar"},
+		{"oci-archive:/nonexistent/path/archive.tar"},
+		{"/nonexistent/absolute/path/archive.tar"},
+		{"./nonexistent/relative/path/archive.tar"},
+		{"../nonexistent/relative/path/archive.tar"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.image, func(t *testing.T) {
+			path, isLocal := resolveLocalImageTarget(tt.image)
+			assert.True(t, isLocal, "expected %q to be classified as a local target", tt.image)
+			assert.NotEmpty(t, path)
+
+			// validateLocalImageInput must fail with not exist
+			err := validateLocalImageInput(tt.image)
+			require.Error(t, err, "expected validateLocalImageInput to fail for missing local archive %q", tt.image)
+			assert.ErrorIs(t, err, os.ErrNotExist)
+		})
+	}
+}
