@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/zclconf/go-cty/cty"
+	"github.com/zclconf/go-cty/cty/function"
 )
 
 // The limit used by these tests is small, so that if a bound ever regressed
@@ -175,6 +176,11 @@ func TestBoundedTerraformFunctions_RejectBeforeConversionAndTyping(t *testing.T)
 		{"object keys", `format("%[1]v%[1]v", local.bigkey)`, "would exceed"},
 		// go-cty allocates the padding even when there is no newline.
 		{"indent without newline", "indent(1048576, \"x\")", "would exceed"},
+		// A short string converts to a compact number with a huge exponent;
+		// ceil and floor would materialize its integer part.
+		{"string converted to a huge number for ceil", `ceil("1e100000")`, "arguments exceed"},
+		{"string converted to a huge number for floor", `floor("-1e100000")`, "arguments exceed"},
+		{"variadic number conversion", `max(1, "1e100000")`, "arguments exceed"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -215,4 +221,30 @@ func TestTerraformValueSize_CountsKeys(t *testing.T) {
 	m := cty.MapVal(map[string]cty.Value{key: cty.True})
 	assert.Greater(t, terraformValueSize(obj, maxTerraformLocalSize), len(key))
 	assert.Greater(t, terraformValueSize(m, maxTerraformLocalSize), len(key))
+}
+
+// TestBoundedTerraformFunctions_CheckConvertedArguments confirms that an
+// argument which only becomes oversized once converted to the parameter type
+// is refused without invoking the underlying function.
+func TestBoundedTerraformFunctions_CheckConvertedArguments(t *testing.T) {
+	calls := 0
+	spy := function.New(&function.Spec{
+		Params: []function.Parameter{{Name: "num", Type: cty.Number}},
+		Type:   function.StaticReturnType(cty.Number),
+		Impl: func(args []cty.Value, _ cty.Type) (cty.Value, error) {
+			calls++
+			return args[0], nil
+		},
+	})
+	bounded := boundTerraformFunction("spy", spy, nil, testTerraformFunctionLimit)
+
+	_, err := bounded.Call([]cty.Value{cty.StringVal("1e100000")})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "arguments exceed")
+	assert.Zero(t, calls, "the underlying function must not run")
+
+	got, err := bounded.Call([]cty.Value{cty.StringVal("12")})
+	require.NoError(t, err)
+	assert.True(t, got.RawEquals(cty.NumberIntVal(12)))
+	assert.Equal(t, 1, calls)
 }

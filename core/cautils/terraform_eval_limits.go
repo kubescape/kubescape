@@ -117,8 +117,15 @@ func boundTerraformFunction(name string, fn function.Function, bound terraformOu
 	}
 	// convertArgs performs the conversion HCL would otherwise have done. It
 	// only runs after checkArgs, and terraformValueSize counts numbers by their
-	// decimal length, so the conversions are bounded by the limit.
+	// decimal length, so producing the converted values is bounded by the
+	// limit. The converted values are checked again before they are returned:
+	// a conversion can turn a short value into one that is expensive to
+	// operate on, such as the string "1e500000000" into a number whose integer
+	// part has 500 million digits, which ceil or floor would then materialize.
 	convertArgs := func(args []cty.Value) ([]cty.Value, error) {
+		if err := checkArgs(args); err != nil {
+			return nil, err
+		}
 		converted := make([]cty.Value, len(args))
 		for i, arg := range args {
 			ty := paramType(i)
@@ -132,12 +139,12 @@ func boundTerraformFunction(name string, fn function.Function, bound terraformOu
 			}
 			converted[i] = val
 		}
+		if err := checkArgs(converted); err != nil {
+			return nil, err
+		}
 		return converted, nil
 	}
 	spec.Type = func(args []cty.Value) (cty.Type, error) {
-		if err := checkArgs(args); err != nil {
-			return cty.NilType, err
-		}
 		converted, err := convertArgs(args)
 		if err != nil {
 			return cty.NilType, err
