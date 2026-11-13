@@ -260,7 +260,7 @@ func validateAndResolvePrinters(scanInfo *cautils.ScanInfo, traverseDirs bool) (
 	containPrettyPrinter := false
 	resolvedPaths := make(map[string]string)
 	for _, format := range requested {
-		usesPrettyPrinter, err := resultshandling.ValidatePrinter(scanInfo.ScanType, scanInfo.GetScanningContext(), format)
+		usesPrettyPrinter, err := resultshandling.ValidatePrinter(scanInfo.ScanType, scanInfo.GetScanningContext(), format, scanInfo.ScanImages)
 		if err != nil {
 			return nil, err
 		}
