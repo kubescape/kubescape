@@ -350,6 +350,18 @@ Configure the HTTP handler using environment variables:
 
 | Variable | Description | Example |
 |----------|-------------|---------|
+| `KS_PORT` | Port the HTTP listener binds to | `8080` |
+| `KS_CERT_FILE` | TLS certificate file for the HTTPS listener | `/etc/tls/tls.crt` |
+| `KS_KEY_FILE` | TLS private key file for the HTTPS listener | `/etc/tls/tls.key` |
+| `KS_OFFLINE` | Run in offline mode (no artifact downloads) | `true`, `false` |
+| `KS_CREDENTIALS_SECRET_PATH` | Path to the credentials file holding the account ID and access key | `/etc/credentials` |
+| `KS_SERVICE_DISCOVERY_FILE_PATH` | Optional JSON file supplying service-discovery endpoints | `/etc/services.json` |
+| `KS_CONTEXT` | Kubernetes context/cluster name override | `my-cluster` |
+| `CLUSTER_NAME` | Cluster name used for telemetry and scan identity | `my-cluster` |
+| `NAMESPACE` | Namespace the server runs in (fallback when `POD_NAMESPACE` is unset) | `kubescape` |
+| `KS_SWEEP_ORPHANED_POSTURE_RESULTS` | Enable sweeping of orphaned posture results | `true`, `false` |
+| `OTEL_COLLECTOR_SVC` | OpenTelemetry collector endpoint (host:port) enabling OTLP export | `otel-collector:4317` |
+| `KS_SUBMIT` | Submit scan results to the Kubescape SaaS backend | `true`, `false` |
 | `KS_ACCOUNT_ID` | Kubescape SaaS account ID used for every scan | `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx` |
 | `KS_ACCESS_KEY` | Kubescape SaaS access key used for every scan | `your-access-key` |
 | `KS_EXCLUDE_NAMESPACES` | Default namespaces to exclude | `kube-system,kube-public` |
