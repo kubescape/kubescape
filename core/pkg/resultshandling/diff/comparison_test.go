@@ -899,3 +899,91 @@ func TestFilterBySeverity_DoesNotMutateInput(t *testing.T) {
 	assert.Equal(t, original, input)
 	assert.Equal(t, []ControlChange{original[0], original[2]}, filtered)
 }
+
+func TestComputeEvidence_IncompatibleScopePreservesTrueStatus(t *testing.T) {
+	// When scopes differ (e.g. cluster contexts differ), all failures are marked incomparable.
+	// For a failure present and failing in BOTH base and head, HeadStatus must be "failed", not "absent".
+	base := reportWithPath("$.spec.hostPID")
+	head := reportWithPath("$.spec.hostPID")
+	base.Metadata.TargetMetadata.Cluster = &clusterContext{ContextName: "development"}
+	head.Metadata.TargetMetadata.Cluster = &clusterContext{ContextName: "production"}
+
+	changes := computeReports(t, base, head)
+
+	require.Len(t, changes.Incomparable, 1)
+	assert.Equal(t, "failed", changes.Incomparable[0].BaseStatus)
+	assert.Equal(t, "failed", changes.Incomparable[0].HeadStatus)
+}
+
+func TestComputeEvidence_IncompatibleScopePreservesPassedAndAbsentStatus(t *testing.T) {
+	t.Run("failing in base and passed in head", func(t *testing.T) {
+		base := reportWithPath("$.spec.hostPID")
+		head := reportWithPath("$.spec.hostPID")
+		head.Results[0].AssociatedControls[0].Status = statusInfo{InnerStatus: "passed"}
+		head.Results[0].AssociatedControls[0].Rules = nil
+		base.Metadata.TargetMetadata.Cluster = &clusterContext{ContextName: "development"}
+		head.Metadata.TargetMetadata.Cluster = &clusterContext{ContextName: "production"}
+
+		changes := computeReports(t, base, head)
+
+		require.Len(t, changes.Incomparable, 1)
+		assert.Equal(t, "failed", changes.Incomparable[0].BaseStatus)
+		assert.Equal(t, "passed", changes.Incomparable[0].HeadStatus)
+	})
+
+	t.Run("passed in base and failing in head", func(t *testing.T) {
+		base := reportWithPath("$.spec.hostPID")
+		base.Results[0].AssociatedControls[0].Status = statusInfo{InnerStatus: "passed"}
+		base.Results[0].AssociatedControls[0].Rules = nil
+		head := reportWithPath("$.spec.hostPID")
+		base.Metadata.TargetMetadata.Cluster = &clusterContext{ContextName: "development"}
+		head.Metadata.TargetMetadata.Cluster = &clusterContext{ContextName: "production"}
+
+		changes := computeReports(t, base, head)
+
+		require.Len(t, changes.Incomparable, 1)
+		assert.Equal(t, "passed", changes.Incomparable[0].BaseStatus)
+		assert.Equal(t, "failed", changes.Incomparable[0].HeadStatus)
+	})
+
+	t.Run("failing in base and absent in head", func(t *testing.T) {
+		base := reportWithPath("$.spec.hostPID")
+		head := reportWithPath("$.spec.hostPID")
+		head.Results = nil
+		base.Metadata.TargetMetadata.Cluster = &clusterContext{ContextName: "development"}
+		head.Metadata.TargetMetadata.Cluster = &clusterContext{ContextName: "production"}
+
+		changes := computeReports(t, base, head)
+
+		require.Len(t, changes.Incomparable, 1)
+		assert.Equal(t, "failed", changes.Incomparable[0].BaseStatus)
+		assert.Equal(t, "absent", changes.Incomparable[0].HeadStatus)
+	})
+
+	t.Run("absent in base and failing in head", func(t *testing.T) {
+		base := reportWithPath("$.spec.hostPID")
+		base.Results = nil
+		head := reportWithPath("$.spec.hostPID")
+		base.Metadata.TargetMetadata.Cluster = &clusterContext{ContextName: "development"}
+		head.Metadata.TargetMetadata.Cluster = &clusterContext{ContextName: "production"}
+
+		changes := computeReports(t, base, head)
+
+		require.Len(t, changes.Incomparable, 1)
+		assert.Equal(t, "absent", changes.Incomparable[0].BaseStatus)
+		assert.Equal(t, "failed", changes.Incomparable[0].HeadStatus)
+	})
+
+	t.Run("granularity control preserves statuses under incompatible scope", func(t *testing.T) {
+		base := reportWithPath("$.spec.hostPID")
+		head := reportWithPath("$.spec.hostPID")
+		base.Metadata.TargetMetadata.Cluster = &clusterContext{ContextName: "development"}
+		head.Metadata.TargetMetadata.Cluster = &clusterContext{ContextName: "production"}
+
+		changes := compareReports(&base, &head, GranularityControl)
+
+		require.Len(t, changes.Incomparable, 1)
+		assert.Equal(t, "failed", changes.Incomparable[0].BaseStatus)
+		assert.Equal(t, "failed", changes.Incomparable[0].HeadStatus)
+	})
+}
