@@ -13,7 +13,6 @@ import (
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/resources"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -65,12 +64,14 @@ func runCostlyControl(t *testing.T, store *scancache.Store, timeout time.Duratio
 //
 // The margin either way is only about a third of the evaluation time, so a
 // busy machine can push a single scan over the budget. An attempt in which the
-// full scan does not fit says nothing and is retried with a fresh budget, and
-// one cold incremental scan that fits and stores its verdicts is enough. With
-// verification inside the window the incremental scan runs out of time in
-// every attempt, so the test still fails then.
+// full scan does not fit says nothing and is retried with a fresh budget, as
+// is one in which verification, which has a budget of its own, ran out of time
+// and stored nothing. One cold incremental scan that fits and stores its
+// verdicts is enough. With verification inside the window the incremental scan
+// runs out of time in every attempt, so the test still fails then.
 func TestIncrementalCacheVerificationDoesNotCountAgainstControlTimeout(t *testing.T) {
 	const attempts = 5
+	failure := ""
 	runCostlyControl(t, nil, 0) // compile and warm up
 
 	for attempt := range attempts {
@@ -93,14 +94,22 @@ func TestIncrementalCacheVerificationDoesNotCountAgainstControlTimeout(t *testin
 		elapsed, timedOut, pod := runCostlyControl(t, store, timeout)
 		t.Logf("attempt %d: cold incremental scan took %v", attempt, elapsed.Round(time.Millisecond))
 		if timedOut {
+			failure = "verification must not count against ControlTimeout"
 			continue
 		}
 
 		object := workloadinterface.NewWorkloadObj(podObject("prod", "p00", map[string]any{}))
 		require.Equal(t, object.GetID(), pod)
 		_, stored := store.Get("C-COSTLY", pod, scancache.ResourceHash(object.GetObject()))
-		assert.True(t, stored, "verified verdicts are still stored")
+		if !stored {
+			failure = "verified verdicts are still stored"
+			t.Logf("attempt %d: no verdict was stored", attempt)
+			continue
+		}
 		return
 	}
-	t.Fatalf("in %d attempts, no cold incremental scan fit a ControlTimeout that the full scan fit: verification must not count against ControlTimeout", attempts)
+	if failure == "" {
+		failure = "the full scan must fit the budget for this test to mean anything"
+	}
+	t.Fatalf("no attempt out of %d succeeded: %s", attempts, failure)
 }
