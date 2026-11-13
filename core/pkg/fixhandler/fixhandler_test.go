@@ -617,6 +617,33 @@ func TestGetFileString_MaxFileSizeEnvVar(t *testing.T) {
 	})
 }
 
+func TestGetMaxManifestSize_DefaultsAndFallbacks(t *testing.T) {
+	t.Run("default limit when unset", func(t *testing.T) {
+		require.NoError(t, os.Unsetenv(cautils.MaxFileSizeEnvVar))
+		assert.Equal(t, cautils.DefaultMaxFileSize, getMaxManifestSize())
+	})
+
+	t.Run("valid override", func(t *testing.T) {
+		t.Setenv(cautils.MaxFileSizeEnvVar, "1234567")
+		assert.Equal(t, int64(1234567), getMaxManifestSize())
+	})
+
+	t.Run("invalid value falls back to default", func(t *testing.T) {
+		t.Setenv(cautils.MaxFileSizeEnvVar, "invalid")
+		assert.Equal(t, cautils.DefaultMaxFileSize, getMaxManifestSize())
+	})
+
+	t.Run("negative value falls back to default", func(t *testing.T) {
+		t.Setenv(cautils.MaxFileSizeEnvVar, "-50")
+		assert.Equal(t, cautils.DefaultMaxFileSize, getMaxManifestSize())
+	})
+
+	t.Run("math.MaxInt64 falls back to default", func(t *testing.T) {
+		t.Setenv(cautils.MaxFileSizeEnvVar, "9223372036854775807")
+		assert.Equal(t, cautils.DefaultMaxFileSize, getMaxManifestSize())
+	})
+}
+
 func TestDetermineNewlineSeparator(t *testing.T) {
 	type args struct {
 		fileString string

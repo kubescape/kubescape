@@ -241,3 +241,20 @@ func TestNewPathLocationResolver_MaxInt64FallsBackToDefault(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotNil(t, resolver)
 }
+
+func TestGetMaxFileSize_InvalidFallback(t *testing.T) {
+	t.Run("non-numeric value falls back to default", func(t *testing.T) {
+		t.Setenv(maxFileSizeEnvVar, "invalid")
+		assert.Equal(t, int64(defaultMaxFileSize), getMaxFileSize())
+	})
+
+	t.Run("negative value falls back to default", func(t *testing.T) {
+		t.Setenv(maxFileSizeEnvVar, "-100")
+		assert.Equal(t, int64(defaultMaxFileSize), getMaxFileSize())
+	})
+
+	t.Run("zero value falls back to default", func(t *testing.T) {
+		t.Setenv(maxFileSizeEnvVar, "0")
+		assert.Equal(t, int64(defaultMaxFileSize), getMaxFileSize())
+	})
+}
