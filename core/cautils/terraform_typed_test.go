@@ -271,6 +271,73 @@ resource "kubernetes_pod_v1" "host" {
 	assert.Equal(t, "0.0.0.0", ports[0].(map[string]interface{})["hostIP"])
 }
 
+func TestExtractTypedResourcesVersionedRBAC(t *testing.T) {
+	src := `
+resource "kubernetes_role_v1" "reader" {
+  metadata {
+    namespace = "apps"
+  }
+  rule {
+    api_groups = [""]
+    resources  = ["secrets"]
+    verbs      = ["get", "list"]
+  }
+}
+
+resource "kubernetes_role_binding_v1" "reader" {
+  metadata {
+    namespace = "apps"
+  }
+  role_ref {
+    api_group = "rbac.authorization.k8s.io"
+    kind      = "Role"
+    name      = "reader"
+  }
+  subject {
+    kind      = "ServiceAccount"
+    name      = "ci"
+    namespace = "apps"
+  }
+}
+
+resource "kubernetes_cluster_role_v1" "admin" {
+}
+
+resource "kubernetes_cluster_role_binding_v1" "admin" {
+}
+`
+	manifests, errs := extractTypedResources(parseTypedHCL(t, src), &hcl.EvalContext{})
+
+	require.Empty(t, errs)
+	require.Len(t, manifests, 4)
+
+	assert.Equal(t, map[string]interface{}{
+		"apiVersion": "rbac.authorization.k8s.io/v1",
+		"kind":       "Role",
+		"metadata":   map[string]interface{}{"name": "reader", "namespace": "apps"},
+		"rules": []interface{}{
+			map[string]interface{}{
+				"apiGroups": []interface{}{""},
+				"resources": []interface{}{"secrets"},
+				"verbs":     []interface{}{"get", "list"},
+			},
+		},
+	}, manifests[0])
+
+	assert.Equal(t, map[string]interface{}{
+		"apiVersion": "rbac.authorization.k8s.io/v1",
+		"kind":       "RoleBinding",
+		"metadata":   map[string]interface{}{"name": "reader", "namespace": "apps"},
+		"roleRef":    map[string]interface{}{"apiGroup": "rbac.authorization.k8s.io", "kind": "Role", "name": "reader"},
+		"subjects": []interface{}{
+			map[string]interface{}{"kind": "ServiceAccount", "name": "ci", "namespace": "apps"},
+		},
+	}, manifests[1])
+
+	assert.Equal(t, "ClusterRole", manifests[2]["kind"])
+	assert.Equal(t, "ClusterRoleBinding", manifests[3]["kind"])
+}
+
 func TestExtractTypedResourcesSkipsInvalidBlocks(t *testing.T) {
 	cases := []struct {
 		name string

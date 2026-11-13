@@ -40,6 +40,11 @@ var typedResourceGVK = map[string]struct{ apiVersion, kind string }{
 	"kubernetes_role_binding":         {"rbac.authorization.k8s.io/v1", "RoleBinding"},
 	"kubernetes_cluster_role":         {"rbac.authorization.k8s.io/v1", "ClusterRole"},
 	"kubernetes_cluster_role_binding": {"rbac.authorization.k8s.io/v1", "ClusterRoleBinding"},
+
+	"kubernetes_role_v1":                 {"rbac.authorization.k8s.io/v1", "Role"},
+	"kubernetes_role_binding_v1":         {"rbac.authorization.k8s.io/v1", "RoleBinding"},
+	"kubernetes_cluster_role_v1":         {"rbac.authorization.k8s.io/v1", "ClusterRole"},
+	"kubernetes_cluster_role_binding_v1": {"rbac.authorization.k8s.io/v1", "ClusterRoleBinding"},
 }
 
 // pluralOverrides maps an HCL block label to the K8s array field name it must
