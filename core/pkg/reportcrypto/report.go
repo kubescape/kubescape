@@ -303,6 +303,9 @@ func (d *reportDecryptor) decryptResource(resource rawObject, context string) (s
 	if err := DecryptContainerMetadata(workload, d.dek); err != nil {
 		return "", "", fmt.Errorf("failed to decrypt %s containers: %w", context, err)
 	}
+	if err := DecryptRBACBindingReferences(workload, d.dek); err != nil {
+		return "", "", fmt.Errorf("failed to decrypt %s rbac references: %w", context, err)
+	}
 
 	updatedObject, err := json.Marshal(workload.GetWorkload())
 	if err != nil {
