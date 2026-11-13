@@ -493,6 +493,10 @@ func TestFileWatcherRelevantFile(t *testing.T) {
 		{"DEPLOY.YAML", true}, {"Deploy.Yml", true}, {"a.b.yaml", true},
 		{".hidden.yaml", true}, // a hidden manifest is still one a scan loads
 		{"kustomization.yaml", true},
+		// Terraform and Helm files a directory scan renders
+		{"main.tf", true}, {"terraform.tfvars", true}, {"prod.auto.tfvars", true},
+		{"terraform.tfvars.json", true}, {"_helpers.tpl", true},
+		{"main.tf.bak", false}, {".terraform.lock.hcl", false},
 		{"notes.txt", false}, {"deploy", false}, {"deploy.yaml.bak", false},
 		{".deploy.yaml.swp", false}, {"deploy.yaml~", false}, {"#deploy.yaml#", false},
 		{".#deploy.yaml", false}, // an Emacs lock file, named like the file it guards

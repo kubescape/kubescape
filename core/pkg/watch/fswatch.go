@@ -57,7 +57,8 @@ type FileWatcherOptions struct {
 //
 // The watched input is either a directory, watched recursively, or one file.
 // For a directory, the files that signal are those a scan would load, by their
-// extension (.yaml, .yml, .json), less editors' lock files. For a single file,
+// extension (.yaml, .yml, .json manifests, .tf and .tfvars Terraform files, and
+// .tpl Helm template helpers), less editors' lock files. For a single file,
 // that file signals whatever its extension, and its siblings do not.
 //
 // Changes are signalled on a channel of capacity one that is sent to without
@@ -503,10 +504,26 @@ func (w *FileWatcher) relevantFile(path string) bool {
 	if strings.HasPrefix(filepath.Base(path), ".#") {
 		return false
 	}
-	if !cautils.IsYaml(path) && !cautils.IsJson(path) {
+	if !cautils.IsYaml(path) && !cautils.IsJson(path) && !isTerraformOrHelmFile(path) {
 		return false
 	}
 	return w.opts.Exclude == nil || !w.opts.Exclude(path, false)
+}
+
+// isTerraformOrHelmFile reports whether a directory scan reads path besides
+// the manifests: a Terraform configuration (.tf), the variable values it is
+// evaluated with (terraform.tfvars and *.auto.tfvars; any .tfvars counts, to
+// err towards yes), or a Helm template helper (_helpers.tpl and the like)
+// that the chart's templates include.
+func isTerraformOrHelmFile(path string) bool {
+	if cautils.IsTerraformFile(path) {
+		return true
+	}
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".tfvars", ".tpl":
+		return true
+	}
+	return false
 }
 
 // notify signals a change without ever waiting for the reader.
