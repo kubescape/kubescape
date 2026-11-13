@@ -386,6 +386,8 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	scanCmd.PersistentFlags().StringVar(&fleetConfigPath, "fleet-config", "", "Path to a fleet config file (kind FleetConfig) with the contexts to scan and where the reports go: contexts, output, fleetReport, referenceCluster and retries. A flag given on the command line overrides the same setting in the file.")
 
 	scanCmd.PersistentFlags().IntVar(&scanInfo.KubeContextParallel, "parallel", 1, "With --kube-contexts, how many contexts to scan at once. Above 1, each context is scanned in its own kubescape process, since one process can only talk to one cluster at a time.")
+	scanCmd.PersistentFlags().StringVar(&scanInfo.FleetChildResult, "fleet-child-result", "", "Internal: where a --parallel child process writes its context's result for the parent.")
+	_ = scanCmd.PersistentFlags().MarkHidden("fleet-child-result") // #nosec G104 -- flag defined on this command; MarkHidden only errors for an unknown flag
 	scanCmd.PersistentFlags().IntVar(&scanInfo.KubeContextRetries, "retries", 2, "With --kube-contexts, how many more times to try a cluster whose API server never answered, waiting 2s, then 4s, doubling up to 30s between attempts. A cluster that answered with an error, or whose scan was cancelled, is not retried. 0 disables retries.")
 
 	scanCmd.PersistentFlags().StringVar(&scanInfo.ReferenceCluster, "reference-cluster", "", "With --fleet-report, the kube context whose findings the other clusters are read against, so the combined report shows what that cluster found on every control they disagree on. Must be one of --kube-contexts. Without it the report simply says where the clusters disagree.")

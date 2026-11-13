@@ -51,7 +51,7 @@ type fleetOutcome struct {
 // fleetOnlyFlags are set per child, or only make sense for the whole run.
 var fleetOnlyFlags = map[string]bool{
 	"kube-contexts": true, "fleet-report": true, "reference-cluster": true,
-	"retries": true, "fleet-config": true, "parallel": true, "output": true,
+	"retries": true, "fleet-config": true, "parallel": true, "output": true, "fleet-child-result": true,
 }
 
 // validateParallel rejects an explicit --parallel below 1, and one without --kube-contexts.
@@ -94,9 +94,9 @@ func fleetChildBaseArgs(invocation fleetCommandLine) []string {
 }
 
 // fleetChildArgs adds one context's fleet settings and the user's positional arguments to the base arguments.
-func fleetChildArgs(base, positional []string, kubeContext, output, fleetReport string, retries int) []string {
+func fleetChildArgs(base, positional []string, kubeContext, output, result string, retries int) []string {
 	args := slices.Clone(base)
-	args = append(args, "--kube-contexts="+kubeContext, "--output="+output, "--fleet-report="+fleetReport, fmt.Sprintf("--retries=%d", retries))
+	args = append(args, "--kube-contexts="+kubeContext, "--output="+output, "--fleet-child-result="+result, fmt.Sprintf("--retries=%d", retries))
 	return append(append(args, "--"), positional...)
 }
 
@@ -130,14 +130,14 @@ func scanFleetInProcesses(ctx context.Context, scanInfo *cautils.ScanInfo, outpu
 	return outcomes
 }
 
-// runFleetChild scans one context in a child process and reads its outcome back from the child's fleet report.
+// runFleetChild scans one context in a child process and reads its outcome back from the result the child writes.
 func runFleetChild(ctx context.Context, kubeContext string, scanInfo *cautils.ScanInfo, baseArgs []string, base string) fleetOutcome {
 	started := time.Now()
 	if err := ctx.Err(); err != nil {
 		return failedOutcome(kubeContext, interruptedError{err: err}, time.Since(started))
 	}
-	reportPath, logPath := base+".json", base+".log"
-	command, err := fleetChildCommand(ctx, fleetChildArgs(baseArgs, fleetInvocation.args, kubeContext, scanInfo.Output, reportPath, scanInfo.KubeContextRetries))
+	resultPath, logPath := base+".json", base+".log"
+	command, err := fleetChildCommand(ctx, fleetChildArgs(baseArgs, fleetInvocation.args, kubeContext, scanInfo.Output, resultPath, scanInfo.KubeContextRetries))
 	if err != nil {
 		return failedOutcome(kubeContext, fmt.Errorf("start the scan: %w", err), time.Since(started))
 	}
@@ -152,9 +152,9 @@ func runFleetChild(ctx context.Context, kubeContext string, scanInfo *cautils.Sc
 	if ctx.Err() != nil {
 		return failedOutcome(kubeContext, interruptedError{err: ctx.Err()}, time.Since(started))
 	}
-	cluster, readErr := readChildCluster(reportPath, kubeContext)
+	cluster, readErr := readChildCluster(resultPath, kubeContext)
 	if readErr != nil {
-		return failedOutcome(kubeContext, fmt.Errorf("the scan wrote no fleet report (%v): %s", runErr, lastLines(logPath, 3)), time.Since(started))
+		return failedOutcome(kubeContext, fmt.Errorf("the scan wrote no result (%v): %s", runErr, lastLines(logPath, 3)), time.Since(started))
 	}
 	outcome := fleetOutcome{cluster: cluster, scanned: cluster.Scanned(), attempts: cluster.Attempts}
 	if runErr == nil {
@@ -175,7 +175,7 @@ func failedOutcome(kubeContext string, err error, elapsed time.Duration) fleetOu
 	return fleetOutcome{cluster: newClusterResult(kubeContext, nil, err, elapsed), err: err}
 }
 
-// readChildCluster reads the one cluster a child's fleet report holds.
+// readChildCluster reads the one cluster a child's result holds.
 func readChildCluster(path, kubeContext string) (fleet.ClusterResult, error) {
 	contents, err := os.ReadFile(path)
 	if err != nil {
@@ -222,4 +222,11 @@ func lastLines(path string, n int) string {
 	}
 	lines := strings.Split(strings.TrimSpace(string(contents)), "\n")
 	return strings.Join(lines[max(0, len(lines)-n):], " | ")
+}
+
+// writeFleetChildResult saves a child's result for the parent; under --hide or --encrypt the scan already protected it.
+func writeFleetChildResult(path string, clusters []fleet.ClusterResult) {
+	if err := writeFleetReport(path, &fleet.FleetReport{Clusters: clusters}); err != nil {
+		logger.L().Error("fleet scan: result for the parent not written", helpers.Error(err))
+	}
 }

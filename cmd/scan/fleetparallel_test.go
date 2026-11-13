@@ -124,6 +124,28 @@ func TestFleetE2E_ParallelKeepsExitCodes(t *testing.T) {
 	})
 }
 
+// TestFleetE2E_ParallelKeepsPrivacyModes pins that --hide and --encrypt work with --parallel when no fleet report is asked for.
+func TestFleetE2E_ParallelKeepsPrivacyModes(t *testing.T) {
+	for _, mode := range []string{"--hide", "--encrypt"} {
+		t.Run(mode, func(t *testing.T) {
+			started := useTestBinaryForChildren(t)
+			t.Setenv("KUBESCAPE_MASTER_KEY", "0123456789abcdef0123456789abcdef")
+			t.Setenv("KUBESCAPE_MASTER_KEY_HEX", "")
+			servers := map[string]string{"alpha": newFakeAPIServerWithPods(t, 3).URL, "beta": newFakeAPIServerWithPods(t, 11).URL}
+			fleetReport := prepareFleetE2E(t, servers)
+
+			run := scanFleetE2E(t, fleetReport, "--kube-contexts=alpha,beta", "--parallel=2", "--retries=0", "--fleet-report=", mode)
+
+			require.NoError(t, run.err)
+			assert.Equal(t, int32(2), started.Load())
+			for _, name := range []string{"alpha", "beta"} {
+				assert.FileExists(t, filepath.Join(filepath.Dir(fleetReport), "report."+name+".json"))
+			}
+			assert.NoFileExists(t, fleetReport)
+		})
+	}
+}
+
 // TestValidateParallel pins the --parallel values that are rejected.
 func TestValidateParallel(t *testing.T) {
 	servers := map[string]string{"alpha": newFakeAPIServerWithPods(t, 3).URL}
@@ -168,9 +190,10 @@ func TestFleetChildArgs(t *testing.T) {
 		"--format=json", "--exclude-namespaces=kube-system,kube-public", "--exclude-controls=C-0001", "--exclude-controls=C-0002",
 		"--notify=https://a.example", "--notify=https://b.example",
 		"--registry-mapping=a.io=b.io", "--registry-mapping=c.io=d.io", "--submit=false", "--compliance-threshold=80",
-		"--kube-contexts=prod", "--output=report.json", "--fleet-report=/tmp/0.json", "--retries=3",
+		"--kube-contexts=prod", "--output=report.json", "--fleet-child-result=/tmp/0.json", "--retries=3",
 	})
 	assert.NotContains(t, args, "--parallel=2", "the child scans one context, so it never starts children of its own")
 	assert.NotContains(t, args, "--kube-contexts=prod,staging")
+	assert.NotContains(t, args, "--fleet-report=fleet.json", "the child's result is internal, so the user's fleet report checks do not apply to it")
 	assert.Equal(t, []string{"--", "nsa"}, args[len(args)-2:])
 }

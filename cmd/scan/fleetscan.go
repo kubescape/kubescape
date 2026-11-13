@@ -480,11 +480,12 @@ func fleetScan(baseScanInfo cautils.ScanInfo, ks meta.IKubescape, policyIdentifi
 	// A plain --kube-contexts run keeps its memory profile: each context's
 	// results are released as soon as that context is done, exactly as before.
 	wantFleetReport := fleetReportRequested(baseScanInfo.FleetReport)
+	keepClusters := wantFleetReport || baseScanInfo.FleetChildResult != ""
 
 	var failed []string
 	incomplete := false
 	var clusters []fleet.ClusterResult
-	if wantFleetReport {
+	if keepClusters {
 		clusters = make([]fleet.ClusterResult, 0, len(baseScanInfo.KubeContexts))
 	}
 	var outcomes []fleetOutcome
@@ -500,14 +501,14 @@ func fleetScan(baseScanInfo cautils.ScanInfo, ks meta.IKubescape, policyIdentifi
 			logger.L().Info("fleet scan: scanning context", helpers.String("context", kubeContext), helpers.String("output", outputPath))
 			results, elapsed, attempts, err := scanFleetContext(kubeContext, outputPath, &baseScanInfo, ks, policyIdentifiers, run)
 			outcome = fleetOutcome{scanned: results != nil, attempts: attempts, err: err}
-			if wantFleetReport {
+			if keepClusters {
 				outcome.cluster = newClusterResult(kubeContext, results, err, elapsed)
 				outcome.cluster.Attempts = attempts
 			}
 		}
 		attempts, err := outcome.attempts, outcome.err
 
-		if wantFleetReport {
+		if keepClusters {
 			clusters = append(clusters, outcome.cluster)
 		}
 
@@ -523,6 +524,10 @@ func fleetScan(baseScanInfo cautils.ScanInfo, ks meta.IKubescape, policyIdentifi
 			continue
 		}
 		logger.L().Success("fleet scan: context completed", helpers.String("context", kubeContext))
+	}
+
+	if baseScanInfo.FleetChildResult != "" {
+		writeFleetChildResult(baseScanInfo.FleetChildResult, clusters)
 	}
 
 	var fleetReportErr error
