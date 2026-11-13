@@ -133,8 +133,9 @@ func NewTerraformDirectory(path string, workspaceOpt ...string) *TerraformDirect
 }
 
 // GetWorkloads extracts embedded K8s manifests from resource "kubernetes_manifest" blocks.
-// Only literal values and var.x references with a same-module default are resolved —
-// deliberately not a full Terraform evaluator (see LoadResourcesFromTerraform doc).
+// Literals, built-in functions, locals, and var.x references resolved from a
+// same-module default or an auto-loaded tfvars file are evaluated — deliberately
+// not a full Terraform evaluator (see LoadResourcesFromTerraform doc).
 func (td *TerraformDirectory) GetWorkloads(path string) (map[string][]workloadinterface.IMetadata, []error) {
 	parser := hclparse.NewParser()
 	var errs []error
@@ -145,6 +146,7 @@ func (td *TerraformDirectory) GetWorkloads(path string) (map[string][]workloadin
 	}
 
 	varDefaults := map[string]cty.Value{}
+	declared := map[string]terraformVariable{}
 	var files []*hcl.File
 	var parsedPaths []string
 	for _, f := range tfFiles {
@@ -164,12 +166,13 @@ func (td *TerraformDirectory) GetWorkloads(path string) (map[string][]workloadin
 		}
 		files = append(files, file)
 		parsedPaths = append(parsedPaths, f)
-		collectVariableDefaults(file.Body, varDefaults)
+		collectVariableDefaults(file.Body, varDefaults, declared)
 	}
 
-	evalCtx := &hcl.EvalContext{
-		Variables: map[string]cty.Value{"var": cty.ObjectVal(varDefaults)},
+	if len(files) > 0 {
+		errs = append(errs, applyTerraformVarFiles(parser, path, td.workspaceDir, declared, varDefaults)...)
 	}
+	evalCtx := newTerraformEvalContext(varDefaults, resolveLocals(files, varDefaults))
 
 	workloads := map[string][]workloadinterface.IMetadata{}
 	for i, file := range files {
@@ -207,8 +210,9 @@ func (td *TerraformDirectory) GetWorkloads(path string) (map[string][]workloadin
 
 // collectVariableDefaults walks top-level `variable "x" { default = ... }` blocks
 // and records the default so resource blocks can resolve var.x references.
-// Variables with no default are intentionally skipped — they stay unresolved.
-func collectVariableDefaults(body hcl.Body, defaults map[string]cty.Value) {
+// Every declared variable is recorded with its type constraint so tfvars values
+// are only accepted for declared variables and converted the way Terraform does.
+func collectVariableDefaults(body hcl.Body, defaults map[string]cty.Value, declared map[string]terraformVariable) {
 	schema := &hcl.BodySchema{
 		Blocks: []hcl.BlockHeaderSchema{
 			{Type: "variable", LabelNames: []string{"name"}},
@@ -221,9 +225,11 @@ func collectVariableDefaults(body hcl.Body, defaults map[string]cty.Value) {
 		}
 		name := block.Labels[0]
 		attrSchema := &hcl.BodySchema{
-			Attributes: []hcl.AttributeSchema{{Name: "default"}},
+			Attributes: []hcl.AttributeSchema{{Name: "default"}, {Name: "type"}},
 		}
 		attrContent, _, _ := block.Body.PartialContent(attrSchema)
+		variable := newTerraformVariable(attrContent.Attributes["type"])
+		declared[name] = variable
 		attr, ok := attrContent.Attributes["default"]
 		if !ok {
 			continue
@@ -232,7 +238,9 @@ func collectVariableDefaults(body hcl.Body, defaults map[string]cty.Value) {
 		if diags.HasErrors() {
 			continue
 		}
-		defaults[name] = val
+		if val, err := variable.convert(val); err == nil {
+			defaults[name] = val
+		}
 	}
 }
 
