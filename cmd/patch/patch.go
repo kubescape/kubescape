@@ -41,6 +41,14 @@ func GetPatchCmd(ks meta.IKubescape) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			applyRegistryCredentialsFromEnv(cmd, &patchInfo)
 
+			if cmd.Flags().Changed("tag") {
+				trimmed := strings.TrimSpace(patchInfo.PatchedImageTag)
+				if trimmed == "" {
+					return errors.New("--tag cannot be empty or whitespace")
+				}
+				patchInfo.PatchedImageTag = trimmed
+			}
+
 			if f := cmd.Flags().Lookup("format"); f != nil && f.Changed && strings.TrimSpace(scanInfo.Format) == "" {
 				return fmt.Errorf("format cannot be empty, supported formats: %s", strings.Join(shared.ImageScanFormats, ", "))
 			}
@@ -131,6 +139,7 @@ func applyRegistryCredentialsFromEnv(cmd *cobra.Command, patchInfo *metav1.Patch
 // validateImagePatchInfo validates the image patch info for the `patch` command
 func validateImagePatchInfo(patchInfo *metav1.PatchInfo) error {
 
+	patchInfo.Image = strings.TrimSpace(patchInfo.Image)
 	if patchInfo.Image == "" {
 		return errors.New("image tag is required")
 	}
@@ -147,6 +156,7 @@ func validateImagePatchInfo(patchInfo *metav1.PatchInfo) error {
 		return fmt.Errorf("invalid output mode %q, supported modes: docker, image, oci, local", patchInfo.OutputMode)
 	}
 
+	patchInfo.OutputPath = strings.TrimSpace(patchInfo.OutputPath)
 	if (patchInfo.OutputMode == "oci" || patchInfo.OutputMode == "local") && patchInfo.OutputPath == "" {
 		return fmt.Errorf("output-path is required when output-mode is %s", patchInfo.OutputMode)
 	}
@@ -177,11 +187,22 @@ func validateImagePatchInfo(patchInfo *metav1.PatchInfo) error {
 		patchInfo.ImageTag = taggedName.Tag()
 	}
 
+	if patchInfo.PatchedImageTag != "" {
+		trimmed := strings.TrimSpace(patchInfo.PatchedImageTag)
+		if trimmed == "" {
+			return errors.New("tag cannot be empty or whitespace")
+		}
+		patchInfo.PatchedImageTag = trimmed
+	}
+
 	// If no patched image tag is provided, default to '<image-tag>-patched'
 	if patchInfo.PatchedImageTag == "" {
 
 		taggedName, ok := named.(reference.Tagged)
 		if !ok {
+			if _, ok := named.(reference.Digested); ok {
+				return errors.New("--tag is required when patching an image referenced by digest")
+			}
 			return errors.New("unexpected error while parsing image tag")
 		}
 
