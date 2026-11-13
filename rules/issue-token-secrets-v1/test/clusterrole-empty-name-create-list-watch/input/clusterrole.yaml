@@ -1,5 +1,5 @@
-# a list or watch narrowed to "" only matches through a metadata.name field
-# selector, which no real secret's name satisfies, so it is not a read grant.
+# an unfiltered list or watch is authorized with the empty name, so "" reads
+# every secret, the minted token included.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:

@@ -75,8 +75,9 @@ deny contains msga if {
 # unknown at authorization time), so the create has to come from an entry that
 # is unrestricted or lists "". The read may be name restricted — the subject
 # simply creates the secret under that name and reads it back (a narrowed list
-# or watch needs a metadata.name field selector to match). The read has to admit
-# a real name, though: "" is never the name of a secret.
+# or watch needs a metadata.name field selector to match). A get has to admit a
+# real name, as "" is never the name of a secret, while an unfiltered list or
+# watch is authorized with "" itself.
 can_issue_token_secret(role) if {
 	grants_unnamed(role, "create")
 	some verb in {"get", "list", "watch"}
@@ -165,6 +166,17 @@ grants_readable(role, verb) if {
 	rule := role.rules[_]
 	targets_secrets(rule)
 	reaches_existing_secret(rule)
+	rule.verbs[_] in {verb, "*"}
+}
+
+# A list or watch without a metadata.name field selector is authorized with the
+# empty name and returns every secret, so an entry that lists "" reads the
+# token through the collection.
+grants_readable(role, verb) if {
+	verb in {"list", "watch"}
+	rule := role.rules[_]
+	targets_secrets(rule)
+	"" in rule.resourceNames
 	rule.verbs[_] in {verb, "*"}
 }
 
