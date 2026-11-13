@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,6 +12,8 @@ import (
 	"syscall"
 	"testing"
 
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	ksmetav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -977,4 +980,41 @@ func TestGetImageExceptionsFromFile_DirectoryRejected(t *testing.T) {
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrImageExceptionsNotRegular)
 	assert.Contains(t, err.Error(), "is a directory, not a file")
+}
+
+func TestScanImage_NilParametersReturnsError(t *testing.T) {
+	ks := NewKubescape(context.Background())
+	exceeds, err := ks.ScanImage(nil, &cautils.ScanInfo{})
+	assert.Error(t, err)
+	assert.EqualError(t, err, "uninitialized image scan parameters")
+	assert.False(t, exceeds)
+
+	exceeds, err = ks.ScanImage(&ksmetav1.ImageScanInfo{}, nil)
+	assert.Error(t, err)
+	assert.EqualError(t, err, "uninitialized scan parameters")
+	assert.False(t, exceeds)
+
+	exceeds, err = ks.ScanImage(nil, nil)
+	assert.Error(t, err)
+	assert.EqualError(t, err, "uninitialized image scan parameters")
+	assert.False(t, exceeds)
+}
+
+func TestScanImageContext_NilParametersReturnsError(t *testing.T) {
+	ks := NewKubescape(context.Background())
+	exceeds, err := ks.ScanImageContext(context.Background(), nil, &cautils.ScanInfo{})
+	assert.Error(t, err)
+	assert.EqualError(t, err, "uninitialized image scan parameters")
+	assert.False(t, exceeds)
+
+	exceeds, err = ks.ScanImageContext(context.Background(), &ksmetav1.ImageScanInfo{}, nil)
+	assert.Error(t, err)
+	assert.EqualError(t, err, "uninitialized scan parameters")
+	assert.False(t, exceeds)
+
+	var nilKS *Kubescape
+	exceeds, err = nilKS.ScanImageContext(context.Background(), nil, nil)
+	assert.Error(t, err)
+	assert.EqualError(t, err, "uninitialized image scan parameters")
+	assert.False(t, exceeds)
 }
