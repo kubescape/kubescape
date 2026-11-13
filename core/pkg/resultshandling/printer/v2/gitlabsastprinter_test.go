@@ -530,6 +530,38 @@ func TestGitLabImageScan_LocationHasFile(t *testing.T) {
 		"a platform-specific finding must not share an id with an unspecified one")
 }
 
+// A match without a CVE carries the GitHub or distro advisory ID instead. GitLab
+// shows the identifier type and links its URL, so those must not be typed "cve"
+// and linked to an NVD page that doesn't exist.
+func TestGitLabImageScan_IdentifierFollowsAdvisoryType(t *testing.T) {
+	withID := func(id string) match.Match {
+		return match.Match{
+			Package: grypepkg.Package{ID: grypepkg.ID("pkg-" + id), Name: "lib-" + id, Version: "1.0.0"},
+			Vulnerability: vulnerability.Vulnerability{
+				Metadata: &vulnerability.Metadata{ID: id, Severity: "High"},
+			},
+		}
+	}
+	imageScanData := []cautils.ImageScanData{{
+		Image:   "nginx:1.25",
+		Matches: match.NewMatches(withID("CVE-2026-0001"), withID("GHSA-abcd-efgh-ijkl"), withID("ALAS-2026-1234")),
+	}}
+
+	report := gitLabImageReportFor(t, imageScanData)
+	require.Len(t, report.Vulnerabilities, 3)
+	got := map[string]gitLabIdentifier{}
+	for _, v := range report.Vulnerabilities {
+		require.Len(t, v.Identifiers, 1)
+		got[v.Identifiers[0].Value] = v.Identifiers[0]
+	}
+
+	assert.Equal(t, gitLabIdentifier{Type: "cve", Name: "CVE-2026-0001", Value: "CVE-2026-0001",
+		URL: "https://nvd.nist.gov/vuln/detail/CVE-2026-0001"}, got["CVE-2026-0001"])
+	assert.Equal(t, gitLabIdentifier{Type: "ghsa", Name: "GHSA-abcd-efgh-ijkl", Value: "GHSA-abcd-efgh-ijkl",
+		URL: "https://github.com/advisories/GHSA-abcd-efgh-ijkl"}, got["GHSA-abcd-efgh-ijkl"])
+	assert.Equal(t, gitLabIdentifier{Type: "alas", Name: "ALAS-2026-1234", Value: "ALAS-2026-1234"}, got["ALAS-2026-1234"])
+}
+
 // TestGitLabImageScan_VersionKeyAlwaysPresent guards against #2782's schema violation:
 // location.dependency.version is required, but omitempty silently drops it when a
 // package has no version string. Emitting "version": "" is valid; omitting the key isn't.
