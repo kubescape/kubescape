@@ -217,6 +217,12 @@ var replaceFunc = function.New(&function.Spec{
 type terraformVariable struct {
 	ty       cty.Type
 	defaults *typeexpr.Defaults
+	// nonNullable is set by nullable = false. Terraform then replaces a null
+	// value with the default, and rejects it when there is none
+	// (PrepareFinalInputVariableValue).
+	nonNullable bool
+	// defaultVal is the converted default, cty.NilVal without one.
+	defaultVal cty.Value
 }
 
 func newTerraformVariable(typeAttr *hcl.Attribute) terraformVariable {
@@ -336,6 +342,13 @@ func applyTerraformVarFiles(parser *hclparse.Parser, dir, workspaceDir string, d
 			if err != nil {
 				errs = append(errs, fmt.Errorf("%s: variable %q: %w", f, name, err))
 				continue
+			}
+			if val.IsNull() && variable.nonNullable {
+				if variable.defaultVal == cty.NilVal {
+					errs = append(errs, fmt.Errorf("%s: variable %q: the variable is not nullable and has no default, so it may not be set to null", f, name))
+					continue
+				}
+				val = variable.defaultVal
 			}
 			values[name] = val
 		}
