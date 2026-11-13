@@ -373,7 +373,7 @@ func (drp *DownloadReleasedPolicy) download(load *releaseLoad, base *gitregostor
 			err = fmt.Errorf("%w: %w", errDownloadTimedOut, err)
 		}
 	case <-ctx.Done():
-		err = errDownloadTimedOut
+		err = timedOutDownload(fetched)
 	}
 	if err != nil && drp.version != "" {
 		err = fmt.Errorf("failed to download controls for pinned version %q: %w", drp.version, err)
@@ -388,6 +388,23 @@ func (drp *DownloadReleasedPolicy) download(load *releaseLoad, base *gitregostor
 
 	load.err = err
 	close(load.done)
+}
+
+// timedOutDownload is how a download ends when its time is up before the fetch
+// has been taken from fetched. A fetch that has already failed keeps its error
+// beside the timeout, as when the fetch is seen first: select picks at random
+// when both are ready, and a checksum failure must not be lost to that. It never
+// waits: a fetch still running is not part of the outcome, and what it brings in
+// later goes to a candidate that is not published.
+func timedOutDownload(fetched <-chan error) error {
+	select {
+	case err := <-fetched:
+		if err != nil {
+			return fmt.Errorf("%w: %w", errDownloadTimedOut, err)
+		}
+	default:
+	}
+	return errDownloadTimedOut
 }
 
 func (drp *DownloadReleasedPolicy) newDownloadContext() (context.Context, context.CancelFunc) {

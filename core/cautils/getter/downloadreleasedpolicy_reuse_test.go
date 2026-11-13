@@ -898,3 +898,76 @@ func TestActiveCallerStillGetsTheTimeoutAndItsFallback(t *testing.T) {
 		})
 	}
 }
+
+// When the download's time is up while a fetch that failed is already waiting to
+// be taken, the outcome keeps that failure beside the timeout. select picks at
+// random when both are ready, so the timeout branch is exercised here directly,
+// with the fetch's result already in place and the time up.
+func TestTimedOutDownloadKeepsAFetchFailureThatIsAlreadyThere(t *testing.T) {
+	t.Parallel()
+	checksum := fmt.Errorf("%w: error verifying checksums.txt", gitregostore.ErrChecksumVerification)
+	fetched := make(chan error, 1)
+	fetched <- checksum
+
+	err := timedOutDownload(fetched)
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, errDownloadTimedOut, "the timeout was lost")
+	assert.ErrorIs(t, err, gitregostore.ErrChecksumVerification, "the checksum failure was lost")
+	assert.ErrorIs(t, err, checksum)
+	assert.Empty(t, fetched, "the result was left in the channel")
+}
+
+// With no result to take the outcome is the timeout alone, and getting it does
+// not wait for a fetch that is still running. A fetch that had succeeded is not
+// an outcome either: a download that timed out publishes nothing.
+func TestTimedOutDownloadWithoutAFailedFetchIsTheTimeout(t *testing.T) {
+	t.Parallel()
+	t.Run("fetch still running", func(t *testing.T) {
+		running := make(chan error) // nothing is ever sent: a read that waited would hang
+		assert.Equal(t, errDownloadTimedOut, timedOutDownload(running))
+	})
+	t.Run("fetch succeeded", func(t *testing.T) {
+		done := make(chan error, 1)
+		done <- nil
+		assert.Equal(t, errDownloadTimedOut, timedOutDownload(done))
+	})
+}
+
+// A checksum failure that comes with the timeout is still a hard failure for an
+// unpinned store: it is not asked to fall back to the cache (#3791). Any other
+// failure that comes with it is as it was, and is asked to.
+func TestTimedOutDownloadChecksumFailureIsNotAskedToFallBack(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name         string
+		failure      error
+		wantFallback bool
+	}{
+		{"checksum failure", fmt.Errorf("%w: error verifying checksums.txt", gitregostore.ErrChecksumVerification), false},
+		{"other failure", errors.New("connection reset"), true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := NewDownloadReleasedPolicyWithVersion("")
+			fetched := make(chan error, 1)
+			fetched <- tt.failure
+			done := make(chan struct{})
+			close(done)
+			p.mu.Lock()
+			p.loading = &releaseLoad{done: done, err: timedOutDownload(fetched)}
+			p.mu.Unlock()
+
+			fallback, err := p.SetRegoObjectsWithFallbackContext(t.Context())
+
+			assert.Equal(t, tt.wantFallback, fallback)
+			if tt.wantFallback {
+				assert.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			assert.ErrorIs(t, err, gitregostore.ErrChecksumVerification)
+			assert.ErrorIs(t, err, errDownloadTimedOut)
+		})
+	}
+}
