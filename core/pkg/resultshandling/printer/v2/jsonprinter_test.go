@@ -28,7 +28,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
-
 // TestSetWriter_Json_CaseInsensitiveExtension guards against the extension
 // check regressing to a case-sensitive comparison: an outputFile whose
 // extension already matches --output's target extension in a different case
@@ -913,4 +912,19 @@ func TestConfigurationJSONCoverageMatchesConversion(t *testing.T) {
 			require.JSONEq(t, string(want), output.String())
 		})
 	}
+}
+
+// TestWriteConfigurationJSON_NilReportReturnsError is a regression for a
+// missing posture report. The writer used to copy session.Report and panic.
+func TestWriteConfigurationJSON_NilReportReturnsError(t *testing.T) {
+	err := writeConfigurationJSON(io.Discard, nil, nil)
+	require.EqualError(t, err, "no data provided for JSON output")
+
+	err = writeConfigurationJSON(io.Discard, &cautils.OPASessionObj{}, []cautils.ImageScanData{{}})
+	require.EqualError(t, err, "no data provided for JSON output")
+
+	jp := NewJsonPrinter()
+	err = jp.ActionPrint(context.Background(), &cautils.OPASessionObj{}, nil)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "no data provided for JSON output")
 }

@@ -118,9 +118,15 @@ func printConfigurationsScanning(opaSessionObj *cautils.OPASessionObj, imageScan
 	return writeConfigurationJSON(jp.writer, opaSessionObj, imageScanData)
 }
 
+// writeConfigurationJSON streams one posture report as JSON. A missing session
+// or posture report returns an error instead of panicking on the report copy.
+// The header is finalized on a local value: FinalizeResults would allocate
+// complete result and resource slices and sort shared controls in place.
 func writeConfigurationJSON(w io.Writer, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
-	// Finalize only the header on a local value. FinalizeResults would allocate
-	// complete result/resource slices and sort shared controls in place.
+	if opaSessionObj == nil || opaSessionObj.Report == nil {
+		return fmt.Errorf("no data provided for JSON output")
+	}
+
 	finalizedReport := *opaSessionObj.Report
 	finalizedReport.Results = nil
 	finalizedReport.Resources = nil
