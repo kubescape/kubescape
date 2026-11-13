@@ -22,7 +22,9 @@ import (
 	"github.com/zclconf/go-cty/cty/function/stdlib"
 )
 
-var terraformFunctions = map[string]function.Function{
+// unboundedTerraformFunctions are the functions available to Terraform expressions
+// before size limits are applied; see terraformFunctions.
+var unboundedTerraformFunctions = map[string]function.Function{
 	"abs":             stdlib.AbsoluteFunc,
 	"base64decode":    base64DecodeFunc,
 	"base64encode":    base64EncodeFunc,
@@ -250,6 +252,8 @@ func terraformValueSize(val cty.Value, budget int) int {
 			size += terraformValueSize(elem, budget-size)
 		}
 		return size
+	case ty == cty.Number:
+		return terraformNumberSize(val)
 	default:
 		return 1
 	}
