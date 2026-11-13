@@ -1266,6 +1266,9 @@ func scanImageForPlatform(
 	vulnExceptions, sevExceptions []string,
 	platform string,
 ) (*cautils.ImageScanData, error) {
+	if err := validateLocalImageInput(img); err != nil {
+		return nil, err
+	}
 	if platform == "" {
 		return svc.Scan(ctx, img, creds, vulnExceptions, sevExceptions)
 	}
@@ -1288,6 +1291,9 @@ func scanWithRegistryMapping(
 	vulnExceptions, sevExceptions []string,
 	platform string,
 ) (*cautils.ImageScanData, error) {
+	if err := validateLocalImageInput(img); err != nil {
+		return nil, err
+	}
 	if len(credsList) == 0 {
 		credsList = []imagescan.RegistryCredentials{{}}
 	}
@@ -1346,7 +1352,8 @@ var onBeforeImageScanJobs func()
 
 // resolveLocalImageTarget checks if an image target specifies a local file or directory
 // via a supported local selector (docker-archive:, oci-archive:, oci-dir:, dir:, file:,
-// local-file:, local-directory:, singularity:, snap:, sbom:, purl:) or an explicit archive file.
+// local-file:, local-directory:, singularity:, snap:, sbom:, purl:), an explicit archive file,
+// or a file/directory path that exists on disk.
 // It returns the underlying filesystem path and true if it identifies a local target.
 func resolveLocalImageTarget(image string) (string, bool) {
 	trimmed := strings.TrimSpace(image)
@@ -1364,7 +1371,93 @@ func resolveLocalImageTarget(image string) (string, bool) {
 	if strings.HasSuffix(lower, ".tar") || strings.HasSuffix(lower, ".tar.gz") || strings.HasSuffix(lower, ".tgz") || strings.HasSuffix(lower, ".sif") {
 		return trimmed, true
 	}
+	if expanded, err := homedir.Expand(trimmed); err == nil {
+		if _, err := os.Stat(expanded); err == nil {
+			return expanded, true
+		}
+	}
 	return "", false
+}
+
+// validateLocalImageInput verifies that local image inputs (archives, directories, SBOMs,
+// or local files) exist, are regular files (or valid directories for directory schemes),
+// and do not exceed the configured maximum file size limit (CWE-400).
+// Returns nil for registry image references.
+func validateLocalImageInput(image string) error {
+	trimmed := strings.TrimSpace(image)
+	if trimmed == "" {
+		return fmt.Errorf("image name cannot be empty")
+	}
+
+	localPath, isLocal := resolveLocalImageTarget(trimmed)
+	if !isLocal || localPath == "" {
+		return nil
+	}
+
+	if rest, _ := peelGenericImageSelector(trimmed); rest != "" {
+		trimmed = rest
+	}
+
+	scheme := strings.ToLower(detectScheme(trimmed))
+	isDirScheme := scheme == "dir" || scheme == "oci-dir" || scheme == "local-directory"
+
+	expanded, err := homedir.Expand(localPath)
+	if err == nil {
+		localPath = expanded
+	}
+
+	if isDirScheme {
+		info, err := os.Stat(localPath)
+		if err != nil {
+			return err
+		}
+		if !info.IsDir() {
+			return fmt.Errorf("%q is not a directory: %w", localPath, ErrImageInputNotRegular)
+		}
+		if scheme == "oci-dir" {
+			if !isOCILayoutDir(localPath) {
+				return fmt.Errorf("invalid OCI layout directory: %q", localPath)
+			}
+		}
+		return nil
+	}
+
+	f, err := openLocalRegularFile(localPath)
+	if err != nil {
+		// If an existing directory was passed without an explicit directory scheme, accept valid directories
+		if info, statErr := os.Stat(localPath); statErr == nil && info.IsDir() {
+			return nil
+		}
+		return err
+	}
+	defer func() { _ = f.Close() }()
+
+	info, err := f.Stat()
+	if err != nil {
+		return err
+	}
+	limit := filesizelimit.GetMaxFileSize()
+	if info.Size() > limit {
+		return fmt.Errorf("%w: %q exceeds the %d byte limit", ErrImageBlobTooLarge, localPath, limit)
+	}
+
+	lower := strings.ToLower(localPath)
+	if strings.HasSuffix(lower, ".tar") || scheme == "docker-archive" || scheme == "oci-archive" {
+		if _, seekErr := f.Seek(0, io.SeekStart); seekErr == nil {
+			tr := tar.NewReader(f)
+			for {
+				hdr, nextErr := tr.Next()
+				if nextErr != nil {
+					break
+				}
+				if hdr.Size > limit {
+					return fmt.Errorf("%w: entry %q in %q exceeds the %d byte limit", ErrImageBlobTooLarge, hdr.Name, localPath, limit)
+				}
+			}
+		}
+	}
+
+	return nil
 }
 
 // ScanImageContext scans every image in imgScanInfo.Images using the given ctx
@@ -1458,6 +1551,35 @@ func (ks *Kubescape) ScanImageContext(ctx context.Context, imgScanInfo *ksmetav1
 		}
 	}
 
+	// Fail fast before scanner initialization and Grype DB download when every
+	// image fails local input validation (e.g. non-regular FIFO, oversized archive, or missing local file).
+	if len(images) > 0 {
+		allLocalInputErr := true
+		var firstLocalErr error
+		for _, image := range images {
+			if err := validateLocalImageInput(image); err != nil {
+				if firstLocalErr == nil {
+					firstLocalErr = err
+				}
+			} else {
+				allLocalInputErr = false
+				break
+			}
+		}
+		if allLocalInputErr && firstLocalErr != nil {
+			errs := make([]error, 0, len(images))
+			for _, image := range images {
+				errs = append(errs, fmt.Errorf("failed to scan image %s: %w", image, validateLocalImageInput(image)))
+			}
+			err := errors.Join(errs...)
+			logger.L().StopError(err.Error())
+			if len(images) == 1 {
+				return false, fmt.Errorf("failed to scan image %s: %w", images[0], firstLocalErr)
+			}
+			return false, err
+		}
+	}
+
 	failOnStale, maxDBAge := imagescan.ResolveDBAgeGate(scanInfo.FailOnStaleDB, scanInfo.FailOnStaleDBSet, scanInfo.MaxDBAge, scanInfo.MaxDBAgeSet)
 	distCfg, installCfg, shouldUpdate, err := imagescan.NewDefaultDBConfig(scanInfo.ListingURL, scanInfo.SkipDBUpdate, failOnStale)
 	if err != nil {
@@ -1546,6 +1668,10 @@ func buildImageScanJobs(imgScanInfo *ksmetav1.ImageScanInfo, scanInfo *cautils.S
 				exceptionErr = fmt.Errorf("%w (exceptions from %q)", exceptionErr, imgScanInfo.Exceptions)
 			}
 		}
+		var inputErr error
+		if err := validateLocalImageInput(image); err != nil {
+			inputErr = err
+		}
 		jobs = append(jobs, ImageScanJob{
 			Image:                   image,
 			Platform:                imgScanInfo.Platform,
@@ -1553,6 +1679,7 @@ func buildImageScanJobs(imgScanInfo *ksmetav1.ImageScanInfo, scanInfo *cautils.S
 			VulnerabilityExceptions: vulnerabilityExceptions,
 			SeverityExceptions:      severityExceptions,
 			RegistryMapping:         scanInfo.RegistryMapping,
+			InputErr:                inputErr,
 			ExceptionErr:            exceptionErr,
 		})
 	}
@@ -1730,6 +1857,18 @@ func (a *ScanErrorAggregator) SingleError() (CategorizedScanError, bool) {
 	return a.Errors[0], true
 }
 
+// Unwrap returns the underlying slice of collected errors, enabling
+// standard errors.Is and errors.As traversal across aggregated scan failures.
+func (a *ScanErrorAggregator) Unwrap() []error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	errs := make([]error, 0, len(a.Errors))
+	for _, e := range a.Errors {
+		errs = append(errs, e.Err)
+	}
+	return errs
+}
+
 // HasErrors indicates whether any scan errors occurred.
 func (a *ScanErrorAggregator) HasErrors() bool {
 	a.mu.Lock()
@@ -1768,6 +1907,9 @@ type ImageScanJob struct {
 	VulnerabilityExceptions []string
 	SeverityExceptions      []string
 	RegistryMapping         map[string]string
+	// InputErr carries a local input validation error (non-regular file,
+	// oversized archive, etc.). Workers surface it without scanner dispatch.
+	InputErr error
 	// ExceptionErr carries a per-image exception-resolution failure (e.g.
 	// exceptions requested for a non-registry input). Workers surface it as
 	// the job result without invoking the scanner.
@@ -1849,6 +1991,21 @@ func (o *ImageScanOrchestrator) ScanImages(ctx context.Context, jobs []ImageScan
 						Image:    job.Image,
 						Platform: job.Platform,
 						Error:    formatExceptionUnsupportedError(job.ExceptionErr),
+					}
+					continue
+				}
+				inputErr := job.InputErr
+				if inputErr == nil {
+					inputErr = validateLocalImageInput(job.Image)
+				}
+				if inputErr != nil {
+					if o.errorAggregator != nil {
+						o.errorAggregator.Add(target, inputErr)
+					}
+					resultChan <- ImageScanResult{
+						Image:    job.Image,
+						Platform: job.Platform,
+						Error:    inputErr,
 					}
 					continue
 				}

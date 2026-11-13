@@ -3,12 +3,16 @@
 package core
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"syscall"
 	"testing"
 	"time"
 
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	ksmetav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -108,5 +112,88 @@ func TestWalkTarEntries_FIFOWithoutWriterIsRejectedPromptly(t *testing.T) {
 		assert.False(t, ok)
 	case <-time.After(5 * time.Second):
 		t.Fatal("walkTarEntries blocked on a FIFO with no writer")
+	}
+}
+
+func TestScanImageJobs_FIFOWithoutExceptionsIsRejectedPromptly(t *testing.T) {
+	fifo := filepath.Join(t.TempDir(), "archive.fifo")
+	require.NoError(t, syscall.Mkfifo(fifo, 0o600))
+	t.Cleanup(func() {
+		if f, err := os.OpenFile(fifo, os.O_RDWR|syscall.O_NONBLOCK, 0); err == nil {
+			_ = f.Close()
+		}
+	})
+
+	mockSvc := newMockImageScanService(0)
+	results := &resultshandling.ResultsHandler{}
+	jobs := []ImageScanJob{
+		{Image: "docker-archive:" + fifo},
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		err := scanImageJobs(context.Background(), mockSvc, 1, jobs, results)
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrImageInputNotRegular)
+		assert.Equal(t, 0, mockSvc.scanCalls, "scanner should not be dispatched for FIFO input")
+	case <-time.After(5 * time.Second):
+		t.Fatal("scanImageJobs blocked on a FIFO input with no writer")
+	}
+}
+
+func TestBuildImageScanJobs_FIFOWithoutExceptionsSetsInputErr(t *testing.T) {
+	fifo := filepath.Join(t.TempDir(), "archive.fifo")
+	require.NoError(t, syscall.Mkfifo(fifo, 0o600))
+	t.Cleanup(func() {
+		if f, err := os.OpenFile(fifo, os.O_RDWR|syscall.O_NONBLOCK, 0); err == nil {
+			_ = f.Close()
+		}
+	})
+
+	info := &ksmetav1.ImageScanInfo{
+		Images: []string{"docker-archive:" + fifo},
+	}
+	jobs := buildImageScanJobs(info, &cautils.ScanInfo{}, nil)
+	require.Len(t, jobs, 1)
+	assert.ErrorIs(t, jobs[0].InputErr, ErrImageInputNotRegular)
+}
+
+func TestScanWithRegistryMapping_FIFOWithoutExceptionsIsRejected(t *testing.T) {
+	fifo := filepath.Join(t.TempDir(), "archive.fifo")
+	require.NoError(t, syscall.Mkfifo(fifo, 0o600))
+	t.Cleanup(func() {
+		if f, err := os.OpenFile(fifo, os.O_RDWR|syscall.O_NONBLOCK, 0); err == nil {
+			_ = f.Close()
+		}
+	})
+
+	mockSvc := newMockImageScanService(0)
+	done := make(chan error, 1)
+	go func() {
+		_, err := scanWithRegistryMapping(
+			context.Background(),
+			mockSvc,
+			"docker-archive:"+fifo,
+			nil,
+			nil,
+			nil,
+			nil,
+			"",
+		)
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrImageInputNotRegular)
+		assert.Equal(t, 0, mockSvc.scanCalls, "scanner should not be called for FIFO input")
+	case <-time.After(5 * time.Second):
+		t.Fatal("scanWithRegistryMapping blocked on a FIFO input with no writer")
 	}
 }

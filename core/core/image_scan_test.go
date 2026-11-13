@@ -3,6 +3,7 @@ package core
 import (
 	"archive/tar"
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,6 +14,9 @@ import (
 	"syscall"
 	"testing"
 
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	ksmetav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -1049,4 +1053,79 @@ func TestOverlayTarEntryBody_OversizedRejected(t *testing.T) {
 	_, err = overlayTarEntryBody(tarPath, "blobs/layer.tar")
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrImageBlobTooLarge)
+}
+
+func TestBuildImageScanJobs_LocalInputValidationWithoutExceptions(t *testing.T) {
+	t.Setenv("KUBESCAPE_MAX_FILE_SIZE", "100")
+	dir := t.TempDir()
+	tarPath := filepath.Join(dir, "oversized.tar")
+	require.NoError(t, os.WriteFile(tarPath, bytes.Repeat([]byte("x"), 200), 0o600))
+
+	info := &ksmetav1.ImageScanInfo{
+		Images: []string{"docker-archive:" + tarPath},
+	}
+	jobs := buildImageScanJobs(info, &cautils.ScanInfo{}, nil)
+	require.Len(t, jobs, 1)
+	assert.ErrorIs(t, jobs[0].InputErr, ErrImageBlobTooLarge)
+}
+
+func TestScanImageJobs_OversizedArchiveWithoutExceptionsIsRejected(t *testing.T) {
+	t.Setenv("KUBESCAPE_MAX_FILE_SIZE", "100")
+	dir := t.TempDir()
+	tarPath := filepath.Join(dir, "oversized.tar")
+	require.NoError(t, os.WriteFile(tarPath, bytes.Repeat([]byte("x"), 200), 0o600))
+
+	mockSvc := newMockImageScanService(0)
+	results := &resultshandling.ResultsHandler{}
+	jobs := []ImageScanJob{
+		{Image: "docker-archive:" + tarPath},
+	}
+
+	err := scanImageJobs(context.Background(), mockSvc, 1, jobs, results)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrImageBlobTooLarge)
+	assert.Equal(t, 0, mockSvc.scanCalls, "scanner should not be dispatched for oversized archive")
+}
+
+func TestScanWithRegistryMapping_OversizedArchiveIsRejected(t *testing.T) {
+	t.Setenv("KUBESCAPE_MAX_FILE_SIZE", "100")
+	dir := t.TempDir()
+	tarPath := filepath.Join(dir, "oversized.tar")
+	require.NoError(t, os.WriteFile(tarPath, bytes.Repeat([]byte("x"), 200), 0o600))
+
+	mockSvc := newMockImageScanService(0)
+	_, err := scanWithRegistryMapping(
+		context.Background(),
+		mockSvc,
+		"docker-archive:"+tarPath,
+		nil,
+		nil,
+		nil,
+		nil,
+		"",
+	)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrImageBlobTooLarge)
+	assert.Equal(t, 0, mockSvc.scanCalls, "scanner should not be called for oversized archive")
+}
+
+func TestValidateLocalImageInput_RegistryImageIsAllowed(t *testing.T) {
+	assert.NoError(t, validateLocalImageInput("alpine:latest"))
+	assert.NoError(t, validateLocalImageInput("quay.io/kubescape/kubescape:v3.0.0"))
+	assert.NoError(t, validateLocalImageInput("image:nginx:latest"))
+}
+
+func TestValidateLocalImageInput_DirectoryHandling(t *testing.T) {
+	dir := t.TempDir()
+	// Plain directory without scheme should be recognized as valid dir
+	assert.NoError(t, validateLocalImageInput(dir))
+	// Scheme dir: on actual dir
+	assert.NoError(t, validateLocalImageInput("dir:"+dir))
+
+	// Scheme dir: on a file should fail
+	filePath := filepath.Join(dir, "file.txt")
+	require.NoError(t, os.WriteFile(filePath, []byte("content"), 0o600))
+	err := validateLocalImageInput("dir:" + filePath)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrImageInputNotRegular)
 }
