@@ -246,9 +246,15 @@ func terraformValueSize(val cty.Value, budget int) int {
 	case ty == cty.String:
 		return 1 + len(val.AsString())
 	case ty.IsObjectType() || ty.IsMapType() || ty.IsTupleType() || ty.IsListType() || ty.IsSetType():
+		// Object and map keys are counted too: they are retained with the
+		// value and written out whenever it is serialized.
+		keyed := ty.IsObjectType() || ty.IsMapType()
 		size := 1
 		for it := val.ElementIterator(); it.Next() && size <= budget; {
-			_, elem := it.Element()
+			key, elem := it.Element()
+			if keyed {
+				size += 1 + len(key.AsString())
+			}
 			size += terraformValueSize(elem, budget-size)
 		}
 		return size

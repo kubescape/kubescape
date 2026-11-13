@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/hashicorp/hcl/v2"
+	"github.com/hashicorp/hcl/v2/hclsyntax"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/zclconf/go-cty/cty"
@@ -131,4 +133,86 @@ func repeatNumbers(n int) []cty.Value {
 		vals[i] = cty.NumberIntVal(int64(i))
 	}
 	return vals
+}
+
+// evalBoundedTerraformExpr evaluates expr through HCL, as the scanner does, so
+// that HCL's own argument conversion and go-cty's return-type calculation are
+// exercised, with functions bounded by testTerraformFunctionLimit.
+func evalBoundedTerraformExpr(t *testing.T, expr string, locals map[string]cty.Value) (cty.Value, hcl.Diagnostics) {
+	t.Helper()
+	parsed, diags := hclsyntax.ParseExpression([]byte(expr), "test.tf", hcl.InitialPos)
+	require.False(t, diags.HasErrors(), diags.Error())
+	ctx := &hcl.EvalContext{
+		Variables: map[string]cty.Value{"local": cty.ObjectVal(locals)},
+		Functions: boundTerraformFunctions(unboundedTerraformFunctions, testTerraformFunctionLimit),
+	}
+	return parsed.Value(ctx)
+}
+
+func TestBoundedTerraformFunctions_RejectBeforeConversionAndTyping(t *testing.T) {
+	bools := make([]cty.Value, testTerraformFunctionLimit*3/4)
+	for i := range bools {
+		bools[i] = cty.True
+	}
+	locals := map[string]cty.Value{
+		"bools":  cty.TupleVal(bools),
+		"bigkey": cty.ObjectVal(map[string]cty.Value{strings.Repeat("k", testTerraformFunctionLimit/2): cty.True}),
+	}
+	tests := []struct {
+		name, expr, want string
+	}{
+		// HCL would render the number as a decimal string to match upper's
+		// string parameter before the function runs.
+		{"number to string conversion", "upper(1e100000)", "arguments exceed"},
+		{"number to string conversion in a list", `join(",", [1e100000])`, "arguments exceed"},
+		// concat computes the full tuple type of its result while type checking.
+		{"return type of large tuples", "concat(local.bools, local.bools)", "arguments exceed"},
+		// go-cty converts the string to a number and prints every digit.
+		{"numeric verb on a string", `format("%d", "1e100000")`, "would exceed"},
+		{"binary verb on a string", `format("%b", "1e10000")`, "would exceed"},
+		{"numeric verb in formatlist", `formatlist("%x", ["1e100000"])`, "would exceed"},
+		// The key is serialized every time the object is formatted.
+		{"object keys", `format("%[1]v%[1]v", local.bigkey)`, "would exceed"},
+		// go-cty allocates the padding even when there is no newline.
+		{"indent without newline", "indent(1048576, \"x\")", "would exceed"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, diags := evalBoundedTerraformExpr(t, tt.expr, locals)
+			require.True(t, diags.HasErrors())
+			assert.Contains(t, diags.Error(), tt.want)
+		})
+	}
+}
+
+func TestBoundedTerraformFunctions_KeepHCLConversions(t *testing.T) {
+	tests := []struct {
+		expr string
+		want cty.Value
+	}{
+		{"upper(12)", cty.StringVal("12")},
+		{`join(",", [1, true, "a"])`, cty.StringVal("1,true,a")},
+		{`format("%d-%s", "42", 7)`, cty.StringVal("42-7")},
+		{`indent("2", "a\nb")`, cty.StringVal("a\n  b")},
+		{"length([1, 2, 3])", cty.NumberIntVal(3)},
+		{"concat([1], [2])", cty.TupleVal([]cty.Value{cty.NumberIntVal(1), cty.NumberIntVal(2)})},
+		{`lookup({a = 1}, "a")`, cty.NumberIntVal(1)},
+		{"coalesce(null, \"x\")", cty.StringVal("x")},
+		{"try(local.missing, \"fallback\")", cty.StringVal("fallback")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.expr, func(t *testing.T) {
+			got, diags := evalBoundedTerraformExpr(t, tt.expr, map[string]cty.Value{})
+			require.False(t, diags.HasErrors(), diags.Error())
+			assert.True(t, got.RawEquals(tt.want), "got %#v", got)
+		})
+	}
+}
+
+func TestTerraformValueSize_CountsKeys(t *testing.T) {
+	key := strings.Repeat("k", 100)
+	obj := cty.ObjectVal(map[string]cty.Value{key: cty.True})
+	m := cty.MapVal(map[string]cty.Value{key: cty.True})
+	assert.Greater(t, terraformValueSize(obj, maxTerraformLocalSize), len(key))
+	assert.Greater(t, terraformValueSize(m, maxTerraformLocalSize), len(key))
 }

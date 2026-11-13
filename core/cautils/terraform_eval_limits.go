@@ -2,11 +2,13 @@ package cautils
 
 import (
 	"fmt"
+	"math"
 	"regexp"
 	"strings"
 	"unicode/utf8"
 
 	"github.com/zclconf/go-cty/cty"
+	"github.com/zclconf/go-cty/cty/convert"
 	"github.com/zclconf/go-cty/cty/function"
 )
 
@@ -68,39 +70,104 @@ func boundTerraformFunctions(funcs map[string]function.Function, limit int) map[
 	return bounded
 }
 
+// boundTerraformFunction wraps fn so that oversized calls are refused before
+// any work proportional to the output is done.
+//
+// HCL converts arguments to the declared parameter types before calling a
+// function, and go-cty computes the return type before running it. Both steps
+// can allocate in proportion to the result (rendering 1e500000000 as a string
+// for upper, building the tuple type of a concat of many large tuples), so the
+// wrapper declares every parameter as dynamic, checks the size of the raw
+// arguments while computing the return type, and only then converts the
+// arguments itself and delegates to fn.
 func boundTerraformFunction(name string, fn function.Function, bound terraformOutputBound, limit int) function.Function {
-	return function.New(&function.Spec{
+	params := fn.Params()
+	varParam := fn.VarParam()
+	paramType := func(i int) cty.Type {
+		if i < len(params) {
+			return params[i].Type
+		}
+		return varParam.Type
+	}
+	dynamic := func(p function.Parameter) function.Parameter {
+		p.Type = cty.DynamicPseudoType
+		p.AllowDynamicType = true
+		return p
+	}
+	spec := &function.Spec{
 		Description: fn.Description(),
-		Params:      fn.Params(),
-		VarParam:    fn.VarParam(),
-		Type:        fn.ReturnTypeForValues,
-		Impl: func(args []cty.Value, retType cty.Type) (cty.Value, error) {
-			size := 0
-			for _, arg := range args {
-				size = saturatingAdd(size, terraformValueSize(arg, limit-size), limit)
+		Params:      make([]function.Parameter, len(params)),
+	}
+	for i, p := range params {
+		spec.Params[i] = dynamic(p)
+	}
+	if varParam != nil {
+		vp := dynamic(*varParam)
+		spec.VarParam = &vp
+	}
+	checkArgs := func(args []cty.Value) error {
+		size := 0
+		for _, arg := range args {
+			size = saturatingAdd(size, terraformValueSize(arg, limit-size), limit)
+		}
+		if size > limit {
+			return fmt.Errorf("%s: arguments exceed the size limit of %d bytes", name, limit)
+		}
+		return nil
+	}
+	// convertArgs performs the conversion HCL would otherwise have done. It
+	// only runs after checkArgs, and terraformValueSize counts numbers by their
+	// decimal length, so the conversions are bounded by the limit.
+	convertArgs := func(args []cty.Value) ([]cty.Value, error) {
+		converted := make([]cty.Value, len(args))
+		for i, arg := range args {
+			ty := paramType(i)
+			if ty == cty.DynamicPseudoType {
+				converted[i] = arg
+				continue
 			}
-			if size > limit {
-				return cty.UnknownVal(retType), fmt.Errorf("%s: arguments exceed the size limit of %d bytes", name, limit)
-			}
-			if bound != nil {
-				estimate, err := bound(args, limit)
-				if err != nil {
-					return cty.UnknownVal(retType), err
-				}
-				if estimate > limit {
-					return cty.UnknownVal(retType), fmt.Errorf("%s: result would exceed the size limit of %d bytes", name, limit)
-				}
-			}
-			val, err := fn.Call(args)
+			val, err := convert.Convert(arg, ty)
 			if err != nil {
-				return val, err
+				return nil, function.NewArgError(i, err)
 			}
-			if terraformValueSize(val, limit) > limit {
-				return cty.UnknownVal(retType), fmt.Errorf("%s: result exceeds the size limit of %d bytes", name, limit)
+			converted[i] = val
+		}
+		return converted, nil
+	}
+	spec.Type = func(args []cty.Value) (cty.Type, error) {
+		if err := checkArgs(args); err != nil {
+			return cty.NilType, err
+		}
+		converted, err := convertArgs(args)
+		if err != nil {
+			return cty.NilType, err
+		}
+		return fn.ReturnTypeForValues(converted)
+	}
+	spec.Impl = func(args []cty.Value, retType cty.Type) (cty.Value, error) {
+		converted, err := convertArgs(args)
+		if err != nil {
+			return cty.UnknownVal(retType), err
+		}
+		if bound != nil {
+			estimate, err := bound(converted, limit)
+			if err != nil {
+				return cty.UnknownVal(retType), err
 			}
-			return val, nil
-		},
-	})
+			if estimate > limit {
+				return cty.UnknownVal(retType), fmt.Errorf("%s: result would exceed the size limit of %d bytes", name, limit)
+			}
+		}
+		val, err := fn.Call(converted)
+		if err != nil {
+			return cty.UnknownVal(retType), err
+		}
+		if terraformValueSize(val, limit) > limit {
+			return cty.UnknownVal(retType), fmt.Errorf("%s: result exceeds the size limit of %d bytes", name, limit)
+		}
+		return val, nil
+	}
+	return function.New(spec)
 }
 
 // saturatingAdd returns a+b, or limit+1 when the sum exceeds limit, so that
@@ -126,6 +193,13 @@ func saturatingMul(a, b, limit int) int {
 // representation, which for very large or very small exponents (1e100000000)
 // is far larger than the literal that produced it.
 func terraformNumberSize(val cty.Value) int {
+	return terraformNumberSizeInBase(val, math.Log2(10))
+}
+
+// terraformNumberSizeInBase approximates the length of a number written with
+// digits that each carry bitsPerDigit bits (1 for binary, 4 for hex, log2(10)
+// for decimal).
+func terraformNumberSizeInBase(val cty.Value, bitsPerDigit float64) int {
 	bf := val.AsBigFloat()
 	if bf.IsInf() {
 		return 4
@@ -134,8 +208,16 @@ func terraformNumberSize(val cty.Value) int {
 	if exp < 0 {
 		exp = -exp
 	}
-	// log10(2) ≈ 0.30103; add room for sign, point and the mantissa digits.
-	return 160 + int(float64(exp)*0.30103)
+	// Add room for the sign, the point and the digits of the 512-bit mantissa.
+	return 160 + int(float64(exp)/bitsPerDigit)
+}
+
+func isASCIILetter(c byte) bool {
+	return 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z'
+}
+
+func isSequenceType(ty cty.Type) bool {
+	return ty.IsListType() || ty.IsTupleType() || ty.IsSetType()
 }
 
 // formatVerbSpec is one verb of a format string, following the grammar of
@@ -189,7 +271,7 @@ func parseFormatVerbs(format string, limit int) ([]formatVerbSpec, int) {
 			}
 			i++
 		}
-		if i >= len(format) || !(format[i] >= 'a' && format[i] <= 'z' || format[i] >= 'A' && format[i] <= 'Z') {
+		if i >= len(format) || !isASCIILetter(format[i]) {
 			return verbs, literal
 		}
 		verb.mode = format[i]
@@ -202,9 +284,21 @@ func parseFormatVerbs(format string, limit int) ([]formatVerbSpec, int) {
 
 // formattedValueSize bounds the size of one value rendered by a format verb.
 func formattedValueSize(verb formatVerbSpec, val cty.Value, limit int) int {
-	switch {
-	case val.IsNull() || !val.IsKnown():
+	if val.IsNull() || !val.IsKnown() {
 		return 8
+	}
+	if bitsPerDigit, numeric := formatNumericVerbs[verb.mode]; numeric {
+		// go-cty converts the argument to a number before formatting it, so a
+		// short string such as "1e500000000" can expand to a huge integer.
+		// Parsing the number is cheap; its rendering is what must be bounded.
+		num, err := convert.Convert(val, cty.Number)
+		if err != nil || num.IsNull() || !num.IsKnown() {
+			// Reported by the function itself.
+			return 8
+		}
+		return terraformNumberSizeInBase(num, bitsPerDigit)
+	}
+	switch {
 	case val.Type() == cty.String && (verb.mode == 's' || verb.mode == 'v' && !verb.sharp):
 		return len(val.AsString())
 	case val.Type() == cty.Number:
@@ -212,6 +306,15 @@ func formattedValueSize(verb formatVerbSpec, val cty.Value, limit int) int {
 	default:
 		return saturatingMul(terraformValueSize(val, limit), terraformEncodingExpansion, limit)
 	}
+}
+
+// formatNumericVerbs are the verbs for which go-cty converts the argument to a
+// number, with the number of bits carried by each digit they print. Decimal is
+// used for the floating-point verbs, which can print every integer digit.
+var formatNumericVerbs = map[byte]float64{
+	'b': 1, 'o': 3, 'x': 4, 'X': 4,
+	'd': math.Log2(10), 'e': math.Log2(10), 'E': math.Log2(10),
+	'f': math.Log2(10), 'g': math.Log2(10), 'G': math.Log2(10),
 }
 
 func formatOutputBoundFor(format string, argSize func(verb formatVerbSpec) int, limit int) int {
@@ -240,7 +343,7 @@ func formatListOutputBound(args []cty.Value, limit int) (int, error) {
 	format, rest := args[0].AsString(), args[1:]
 	iterations := 1
 	for _, arg := range rest {
-		if ty := arg.Type(); arg.IsKnown() && !arg.IsNull() && (ty.IsListType() || ty.IsTupleType() || ty.IsSetType()) {
+		if arg.IsKnown() && !arg.IsNull() && isSequenceType(arg.Type()) {
 			iterations = max(iterations, arg.LengthInt())
 		}
 	}
@@ -249,7 +352,7 @@ func formatListOutputBound(args []cty.Value, limit int) (int, error) {
 			return 0
 		}
 		arg := rest[verb.argNum-1]
-		if ty := arg.Type(); !arg.IsKnown() || arg.IsNull() || !(ty.IsListType() || ty.IsTupleType() || ty.IsSetType()) {
+		if !arg.IsKnown() || arg.IsNull() || !isSequenceType(arg.Type()) {
 			return formattedValueSize(verb, arg, limit)
 		}
 		largest := 0
@@ -273,8 +376,11 @@ func indentOutputBound(args []cty.Value, limit int) (int, error) {
 			spaces = int(n)
 		}
 	}
+	// go-cty builds the padding string before looking for newlines, so the
+	// padding is allocated even when the input has none.
 	str := args[1].AsString()
-	return saturatingAdd(len(str), saturatingMul(strings.Count(str, "\n"), spaces, limit), limit), nil
+	padded := saturatingMul(strings.Count(str, "\n"), spaces, limit)
+	return saturatingAdd(saturatingAdd(len(str), spaces, limit), padded, limit), nil
 }
 
 func joinOutputBound(args []cty.Value, limit int) (int, error) {
