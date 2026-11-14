@@ -682,6 +682,7 @@ func TestAnonymizationHidesRBACBindingReferencesConsistently(t *testing.T) {
 			},
 		},
 	})
+
 	topLevelBinding := workloadinterface.NewWorkloadObj(map[string]any{
 		"apiVersion": "rbac.authorization.k8s.io/v1",
 		"kind":       "ClusterRoleBinding",
@@ -696,7 +697,19 @@ func TestAnonymizationHidesRBACBindingReferencesConsistently(t *testing.T) {
 		},
 	})
 
-	session := identitySession(subject, topLevelBinding)
+	serviceAccount := workloadinterface.NewWorkloadObj(map[string]any{
+		"apiVersion": "v1",
+		"kind":       "ServiceAccount",
+		"metadata":   map[string]any{"name": "payroll-worker", "namespace": "acme-sec"},
+	})
+
+	clusterRole := workloadinterface.NewWorkloadObj(map[string]any{
+		"apiVersion": "rbac.authorization.k8s.io/v1",
+		"kind":       "ClusterRole",
+		"metadata":   map[string]any{"name": "privileged-role"},
+	})
+
+	session := identitySession(subject, topLevelBinding, serviceAccount, clusterRole)
 	require.NoError(t, Apply(&resultshandling.ResultsHandler{ScanData: session}))
 
 	jsonOut := printIdentityReports(t, session)["json"]
@@ -706,16 +719,26 @@ func TestAnonymizationHidesRBACBindingReferencesConsistently(t *testing.T) {
 
 	var anonSubject *objectsenvelopes.RegoResponseVectorObject
 	var anonTopBinding workloadinterface.IMetadata
+	var anonServiceAccount workloadinterface.IMetadata
+	var anonClusterRole workloadinterface.IMetadata
+
 	for _, res := range session.GetCatalog().All() {
 		switch res.GetKind() {
 		case "User":
 			anonSubject = res.(*objectsenvelopes.RegoResponseVectorObject)
 		case "ClusterRoleBinding":
 			anonTopBinding = res
+		case "ServiceAccount":
+			anonServiceAccount = res
+		case "ClusterRole":
+			anonClusterRole = res
 		}
 	}
+
 	require.NotNil(t, anonSubject)
 	require.NotNil(t, anonTopBinding)
+	require.NotNil(t, anonServiceAccount)
+	require.NotNil(t, anonClusterRole)
 
 	related := anonSubject.GetRelatedObjects()
 	require.Len(t, related, 2)
@@ -725,13 +748,16 @@ func TestAnonymizationHidesRBACBindingReferencesConsistently(t *testing.T) {
 	bindingObj := anonBinding.GetObject()
 	subjects := bindingObj["subjects"].([]any)
 	require.Len(t, subjects, 2)
+
 	assert.Equal(t, anonSubject.GetName(), subjects[0].(map[string]any)["name"])
-	assert.Equal(t, anonRole.GetNamespace(), subjects[1].(map[string]any)["namespace"])
+	assert.Equal(t, anonServiceAccount.GetName(), subjects[1].(map[string]any)["name"])
+	assert.Equal(t, anonServiceAccount.GetNamespace(), subjects[1].(map[string]any)["namespace"])
 	assert.Equal(t, anonRole.GetName(), bindingObj["roleRef"].(map[string]any)["name"])
 
 	topObj := anonTopBinding.GetObject()
 	topSubjects := topObj["subjects"].([]any)
 	require.Len(t, topSubjects, 1)
+
 	assert.Equal(t, anonSubject.GetName(), topSubjects[0].(map[string]any)["name"])
-	assert.True(t, strings.HasPrefix(topObj["roleRef"].(map[string]any)["name"].(string), "res-"))
+	assert.Equal(t, anonClusterRole.GetName(), topObj["roleRef"].(map[string]any)["name"])
 }

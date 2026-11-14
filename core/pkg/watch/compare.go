@@ -30,7 +30,12 @@ func Compare(baseJSON, headJSON []byte, options diff.Options) (*Comparison, erro
 	if err != nil {
 		return nil, fmt.Errorf("head report: %w", err)
 	}
+	return compareCanonical(base, head, options)
+}
 
+// compareCanonical is Compare for reports that have been canonicalized, so that
+// a caller comparing many scans with one base need not canonicalize it again.
+func compareCanonical(base, head *CanonicalReport, options diff.Options) (*Comparison, error) {
 	changeSet, err := diff.ComputeFromJSON(base.JSON, head.JSON, options)
 	if err != nil {
 		return nil, err

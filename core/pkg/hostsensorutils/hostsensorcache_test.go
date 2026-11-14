@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -303,4 +304,102 @@ func TestLoadFromCache_BoundedDecompressionRead(t *testing.T) {
 
 	_, err = loadFromCache("kubernetes-admin@kubernetes", "KubeletInfo")
 	assert.Error(t, err)
+}
+
+func TestSanitizeCacheKeyComponent(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		component  string
+		defaultVal string
+		want       string
+	}{
+		{
+			name:       "normal component",
+			component:  "KubeletInfo",
+			defaultVal: "unknown",
+			want:       "KubeletInfo",
+		},
+		{
+			name:       "component with slashes and backslashes",
+			component:  "foo/bar\\baz:qux",
+			defaultVal: "unknown",
+			want:       "foo_bar_baz_qux",
+		},
+		{
+			name:       "component with path traversal sequence",
+			component:  "../../../../tmp/evil",
+			defaultVal: "unknown",
+			want:       "tmp_evil",
+		},
+		{
+			name:       "component with internal traversal",
+			component:  "cluster/../name",
+			defaultVal: "default",
+			want:       "cluster_name",
+		},
+		{
+			name:       "empty component uses default",
+			component:  "",
+			defaultVal: "default",
+			want:       "default",
+		},
+		{
+			name:       "dot component uses default",
+			component:  ".",
+			defaultVal: "default",
+			want:       "default",
+		},
+		{
+			name:       "double dot only uses default",
+			component:  "..",
+			defaultVal: "default",
+			want:       "default",
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := sanitizeCacheKeyComponent(tt.component, tt.defaultVal)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestGetCacheFilePath_PathTraversalPrevention(t *testing.T) {
+	withTempCacheDir(t)
+	withK8sHost(t, "https://cluster-a.example.com")
+
+	// Traversal in resourceName must be contained within cache directory
+	path, err := getCacheFilePath("cluster-prod", "../../../../../tmp/evil")
+	require.NoError(t, err)
+	cleanCacheDir := filepath.Clean(DefaultCacheDir)
+	cleanPath := filepath.Clean(path)
+	rel, err := filepath.Rel(cleanCacheDir, cleanPath)
+	require.NoError(t, err)
+	assert.False(t, strings.HasPrefix(rel, ".."), "path must not escape cache directory: %s", path)
+	assert.Equal(t, cleanCacheDir, filepath.Dir(cleanPath))
+
+	// Traversal in clusterName must be contained within cache directory
+	pathCluster, err := getCacheFilePath("../../../../../etc", "KubeletInfo")
+	require.NoError(t, err)
+	cleanPathCluster := filepath.Clean(pathCluster)
+	relCluster, err := filepath.Rel(cleanCacheDir, cleanPathCluster)
+	require.NoError(t, err)
+	assert.False(t, strings.HasPrefix(relCluster, ".."), "path must not escape cache directory: %s", pathCluster)
+	assert.Equal(t, cleanCacheDir, filepath.Dir(cleanPathCluster))
+
+	// Full roundtrip with saveToCache and loadFromCache using traversal input
+	t.Setenv(HostSensorCacheTtlEnvVar, "1h")
+	env := hostsensor.HostSensorDataEnvelope{}
+	env.SetName("traversal-node")
+	require.NoError(t, saveToCache("../../../../../evil-cluster", "../../../../../evil-resource", []hostsensor.HostSensorDataEnvelope{env}))
+
+	got, err := loadFromCache("../../../../../evil-cluster", "../../../../../evil-resource")
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	assert.Equal(t, "traversal-node", got[0].GetName())
 }
