@@ -15,7 +15,7 @@ import (
 
 // ScanFormats and ImageScanFormats are derived from printer.AllFormats and
 // printer.ImageFormats to keep a single source of truth — see printresults.go
-// for why the two lists differ (not every printer supports image scans, e.g. CSV).
+// for why the two lists differ (not every printer supports image scans, e.g. github-actions).
 var (
 	ScanFormats      = printer.AllFormats
 	ImageScanFormats = printer.ImageFormats

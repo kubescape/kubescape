@@ -42,6 +42,27 @@ To see the full vulnerability report, use the `-v` (verbose) flag:
 kubescape scan image "nginx" -v
 ```
 
+### CSV Export
+
+`--format csv` writes one row per vulnerability, ready for a spreadsheet or a
+ticketing import:
+
+```bash
+kubescape scan image nginx:1.27 redis:7 --format csv --output images.csv
+```
+
+The columns are `Image`, `Platform`, `Severity`, `Vulnerability`, `Package`,
+`Version`, `Fix State`, `Fixed In`, `KEV`, `EPSS Score`, `EPSS Percentile`,
+`VEX Status` and `VEX Justification`. Rows are grouped by image and ordered by
+risk within each image. `KEV` is `true` or `false`, and blank when the database
+has no metadata for the match; the EPSS columns are raw values from 0 to 1 and
+blank when there is no score.
+
+A posture scan with `--scan-images --format csv --output results.csv` keeps the
+posture report in `results.csv` and writes the image vulnerabilities to
+`results-vulnerabilities.csv` next to it. When the report goes to stdout or a
+pipe, only the posture report is written and a warning is logged.
+
 ### Exploitability: KEV and EPSS
 
 The vulnerability table in the pretty, HTML, Markdown and PDF outputs has two
