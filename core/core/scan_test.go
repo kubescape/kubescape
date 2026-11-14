@@ -600,6 +600,7 @@ func TestGetOutputPrintersAllowsMarkdownAlongsideTextFormats(t *testing.T) {
 			outputPrinters, err := GetOutputPrinters(scanInfo, context.Background(), "")
 			require.NoError(t, err)
 			assert.Len(t, outputPrinters, 2)
+			_ = closePrinters(outputPrinters...)
 		})
 	}
 }
@@ -1070,12 +1071,7 @@ func TestGetOutputPrinters_OutputSafetyAllowsNonCollidingOutputs(t *testing.T) {
 		printers, err := GetOutputPrinters(scanInfo, context.Background(), "test-cluster")
 		require.NoError(t, err)
 		assert.NotEmpty(t, printers)
-		// Clean up writers
-		for _, p := range printers {
-			if closer, ok := p.(interface{ Close() error }); ok {
-				_ = closer.Close()
-			}
-		}
+		_ = closePrinters(printers...)
 	})
 
 	t.Run("distinct existing file from past run", func(t *testing.T) {
@@ -1096,11 +1092,7 @@ func TestGetOutputPrinters_OutputSafetyAllowsNonCollidingOutputs(t *testing.T) {
 		printers, err := GetOutputPrinters(scanInfo, context.Background(), "test-cluster")
 		require.NoError(t, err)
 		assert.NotEmpty(t, printers)
-		for _, p := range printers {
-			if closer, ok := p.(interface{ Close() error }); ok {
-				_ = closer.Close()
-			}
-		}
+		_ = closePrinters(printers...)
 	})
 
 	t.Run("first and repeated scans with output inside scanned directory", func(t *testing.T) {
@@ -1120,11 +1112,7 @@ func TestGetOutputPrinters_OutputSafetyAllowsNonCollidingOutputs(t *testing.T) {
 		printers1, err := GetOutputPrinters(scanInfo1, context.Background(), "test-cluster")
 		require.NoError(t, err, "first scan with output in scanned directory must succeed")
 		assert.NotEmpty(t, printers1)
-		for _, p := range printers1 {
-			if closer, ok := p.(interface{ Close() error }); ok {
-				_ = closer.Close()
-			}
-		}
+		_ = closePrinters(printers1...)
 
 		// Simulate scan output report written on first run
 		reportContent := []byte(`{"type":"postureReport","generationTime":"2026-11-06T00:00:00Z","clusterAPIServerInfo":{}}`)
@@ -1141,11 +1129,7 @@ func TestGetOutputPrinters_OutputSafetyAllowsNonCollidingOutputs(t *testing.T) {
 		printers2, err := GetOutputPrinters(scanInfo2, context.Background(), "test-cluster")
 		require.NoError(t, err, "repeated scan with existing results.json in directory must succeed")
 		assert.NotEmpty(t, printers2)
-		for _, p := range printers2 {
-			if closer, ok := p.(interface{ Close() error }); ok {
-				_ = closer.Close()
-			}
-		}
+		_ = closePrinters(printers2...)
 	})
 
 	t.Run("non-manifest files inside scanned directory are not treated as manifest collisions", func(t *testing.T) {
@@ -1177,11 +1161,7 @@ func TestGetOutputPrinters_OutputSafetyAllowsNonCollidingOutputs(t *testing.T) {
 			printers, err := GetOutputPrinters(scanInfo, context.Background(), "test-cluster")
 			require.NoError(t, err, "output targeting %s must not fail as a manifest collision", tc.filename)
 			assert.NotEmpty(t, printers)
-			for _, p := range printers {
-				if closer, ok := p.(interface{ Close() error }); ok {
-					_ = closer.Close()
-				}
-			}
+			_ = closePrinters(printers...)
 		}
 	})
 }
@@ -1206,11 +1186,7 @@ func TestGetOutputPrinters_OutputInsideRecursiveScannedDirectory(t *testing.T) {
 		printers, err := GetOutputPrinters(scanInfo, context.Background(), "test-cluster")
 		require.NoError(t, err)
 		assert.NotEmpty(t, printers)
-		for _, p := range printers {
-			if closer, ok := p.(interface{ Close() error }); ok {
-				_ = closer.Close()
-			}
-		}
+		_ = closePrinters(printers...)
 	})
 
 	t.Run("nested genuine manifest is rejected", func(t *testing.T) {
@@ -1325,11 +1301,7 @@ func TestGetOutputPrinters_SymlinkAndHiddenDirectoryDiscovery(t *testing.T) {
 		printers, err := GetOutputPrinters(scanInfo, context.Background(), "test-cluster")
 		require.NoError(t, err)
 		assert.NotEmpty(t, printers)
-		for _, p := range printers {
-			if closer, ok := p.(interface{ Close() error }); ok {
-				_ = closer.Close()
-			}
-		}
+		_ = closePrinters(printers...)
 	})
 }
 
@@ -1395,11 +1367,7 @@ func TestGetOutputPrinters_GlobDiscoveryCollision(t *testing.T) {
 		printers, err := GetOutputPrinters(scanInfo, context.Background(), "test-cluster")
 		require.NoError(t, err)
 		assert.NotEmpty(t, printers)
-		for _, p := range printers {
-			if closer, ok := p.(interface{ Close() error }); ok {
-				_ = closer.Close()
-			}
-		}
+		_ = closePrinters(printers...)
 	})
 
 	t.Run("bare relative glob pattern *.yaml detects nested collision", func(t *testing.T) {

@@ -5,6 +5,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -52,6 +53,9 @@ func TestBuildPatchExportLocal(t *testing.T) {
 }
 
 func TestDockerLoad(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping shell script wrapper test on Windows")
+	}
 	tests := []struct {
 		name       string
 		scriptBody string
