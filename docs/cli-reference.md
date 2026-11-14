@@ -618,7 +618,7 @@ Scan coverage gaps (skipped or unevaluated controls, missing GVR permissions, pa
 - **SARIF (`--format sarif`):** Emits unevaluated controls and runtime gaps through tool execution notifications and invocation descriptor properties.
 - **GitHub Actions (`--format github-actions`):** Emits workflow warnings for degraded scan coverage and annotates skipped controls with their failure or skip reasons.
 - **PDF (`--format pdf`):** Displays scan coverage metrics alongside the resource summary and appends a `Skipped controls` section detailing severity, control reference, control name, and skip reasons (omitted on 100% clean scans).
-- **CSV (`--format csv`):** Emits unevaluated and skipped controls as rows with status `skipped`, populating remediation with the diagnostic reason.
+- **CSV (`--format csv`):** Emits unevaluated and skipped controls as rows with status `skipped`, populating remediation with the diagnostic reason. With `--scan-images` and `--output`, image vulnerabilities go to a `<name>-vulnerabilities.csv` file next to the report.
 
 ### OpenTelemetry export
 
@@ -801,7 +801,7 @@ kubescape scan image <image>:<tag> [<image>:<tag>...] [flags]
 | Flag | Description |
 |------|-------------|
 | `--exceptions <path>` | Path to exceptions file. Targets are matched per image, so one file can carry rules for every image in the run |
-| `-f, --format <format>` | Output format: `pretty-printer`, `json`, `junit`, `prometheus`, `pdf`, `html`, `sarif`, `gitlab-sast`, `yaml`, `markdown`, `cyclonedx-json`, `spdx-json` |
+| `-f, --format <format>` | Output format: `pretty-printer`, `json`, `junit`, `prometheus`, `pdf`, `html`, `sarif`, `gitlab-sast`, `yaml`, `csv`, `markdown`, `cyclonedx-json`, `spdx-json` — see [CSV export](image-scanning.md#csv-export) |
 | `--image-scan-concurrency <n>` | Number of images scanned in parallel (default `1`) |
 | `-p, --password <pass>` | Registry password |
 | `--platform <platform>` | OCI platform to scan, for example `linux/amd64`, `linux/arm64/v8`, or `windows/amd64`. Applies to every image in the run |
@@ -826,8 +826,9 @@ when any single image crosses it. The same holds for `--fail-on-kev` and
 
 Output formats behave as follows for a multi-image run: `json`, `cyclonedx-json`
 and `spdx-json` emit a JSON array with one document per image (a single image
-keeps the bare document shape), while the table, HTML, PDF, markdown, SARIF,
-GitLab SAST, JUnit and Prometheus outputs report every image in one document.
+keeps the bare document shape), while the table, HTML, PDF, markdown, CSV,
+SARIF, GitLab SAST, JUnit and Prometheus outputs report every image in one
+document.
 
 GitLab reports require separate posture and image scans. Combining
 `--scan-images` with `--format gitlab-sast` is rejected because a SAST artifact

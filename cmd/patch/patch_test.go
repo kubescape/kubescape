@@ -80,8 +80,8 @@ func Test_validateImagePatchInfo_Image(t *testing.T) {
 }
 
 // TestPatchCmd_FormatFlagValidation verifies --format accepts every format supported for image
-// scans (shared.ImageScanFormats) and rejects formats that are not (e.g. csv, which requires posture
-// scan data that patch's image-only results never populate), plus the empty-value case.
+// scans (shared.ImageScanFormats) and rejects formats that are not (e.g. github-actions, which
+// annotates posture findings that patch's image-only results never populate), plus the empty-value case.
 func TestPatchCmd_FormatFlagValidation(t *testing.T) {
 	mockKubescape := &mocks.MockIKubescape{}
 
@@ -109,18 +109,18 @@ func TestPatchCmd_FormatFlagValidation(t *testing.T) {
 
 	t.Run("rejects_comma_separated_with_invalid_entry", func(t *testing.T) {
 		cmd := GetPatchCmd(mockKubescape)
-		cmd.SetArgs([]string{"--image", "nginx:1.23", "--format", "json,csv"})
+		cmd.SetArgs([]string{"--image", "nginx:1.23", "--format", "json,github-actions"})
 		err := cmd.Execute()
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), `invalid format "csv"`)
+		assert.Contains(t, err.Error(), `invalid format "github-actions"`)
 	})
 
-	t.Run("rejects_csv", func(t *testing.T) {
+	t.Run("rejects_github_actions", func(t *testing.T) {
 		cmd := GetPatchCmd(mockKubescape)
-		cmd.SetArgs([]string{"--image", "nginx:1.23", "--format", "csv"})
+		cmd.SetArgs([]string{"--image", "nginx:1.23", "--format", "github-actions"})
 		err := cmd.Execute()
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), `invalid format "csv"`)
+		assert.Contains(t, err.Error(), `invalid format "github-actions"`)
 		assert.Contains(t, err.Error(), "pretty-printer")
 	})
 

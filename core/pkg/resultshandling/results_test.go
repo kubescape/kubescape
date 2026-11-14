@@ -579,10 +579,16 @@ func TestValidatePrinter(t *testing.T) {
 			expectErr: nil,
 		},
 		{
-			name:      "csv format for image scan should return error",
+			name:      "csv format for image scan should not return error",
 			scanType:  cautils.ScanTypeImage,
 			format:    printer.CsvFormat,
-			expectErr: errors.New("format \"csv\" is not supported for image scanning"),
+			expectErr: nil,
+		},
+		{
+			name:      "github-actions format for image scan should return error",
+			scanType:  cautils.ScanTypeImage,
+			format:    printer.GitHubActionsFormat,
+			expectErr: errors.New("format \"github-actions\" is not supported for image scanning"),
 		},
 		{
 			name:      "pdf format for cluster scan should not return error",
@@ -1008,7 +1014,7 @@ func TestGetComplianceScoreAndRiskScoreAreIndependent(t *testing.T) {
 
 // TestValidatePrinter_ImageFormatsInvariant pins the invariant itself: every
 // format in printer.ImageFormats must be accepted for image scans, and every
-// format in printer.AllFormats that is NOT in printer.ImageFormats (e.g. csv)
+// format in printer.AllFormats that is NOT in printer.ImageFormats (e.g. github-actions)
 // must be rejected. This is what stops a future format from silently
 // inheriting image-scan support just by being added to AllFormats (#2782 review).
 func TestValidatePrinter_ImageFormatsInvariant(t *testing.T) {

@@ -278,6 +278,9 @@ func validateAndResolvePrinters(scanInfo *cautils.ScanInfo, traverseDirs bool) (
 				return nil, fmt.Errorf("output path collision: formats %q and %q both resolve to %q; specify distinct output paths or use format-specific file extensions", existing, format, path)
 			}
 			resolvedPaths[path] = format
+			if format == printer.CsvFormat && scanInfo.ScanImages {
+				resolvedPaths[printer.CsvImageCompanionPath(path)] = format
+			}
 		}
 
 		if usesPrettyPrinter {

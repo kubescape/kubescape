@@ -443,6 +443,28 @@ func TestGetOutputPrintersCollisionReturnsError(t *testing.T) {
 	assert.Contains(t, err.Error(), "output path collision")
 }
 
+func TestValidateAndResolvePrinters_CsvImageCompanionMustNotOverwriteInputs(t *testing.T) {
+	dir := t.TempDir()
+	output := filepath.Join(dir, "results.csv")
+	baseline := filepath.Join(dir, "results-vulnerabilities.csv")
+	require.NoError(t, os.WriteFile(baseline, []byte("{}"), 0o600))
+
+	scanInfo := &cautils.ScanInfo{
+		ScanType:   cautils.ScanTypeFramework,
+		Format:     printer.CsvFormat,
+		Output:     output,
+		Baseline:   baseline,
+		ScanImages: true,
+	}
+	_, err := validateAndResolvePrinters(scanInfo, false)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "would overwrite baseline report")
+
+	scanInfo.ScanImages = false
+	_, err = validateAndResolvePrinters(scanInfo, false)
+	assert.NoError(t, err)
+}
+
 // A collision must be rejected before any writer is opened: opening an output
 // file truncates it, so detecting the collision afterwards would empty a report
 // left by a previous run.

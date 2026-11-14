@@ -4,13 +4,16 @@ import (
 	"context"
 	"encoding/csv"
 	"fmt"
+	"io"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
 	reporthandling "github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
@@ -20,6 +23,22 @@ import (
 const (
 	csvOutputFile = "report"
 )
+
+var csvImageHeader = []string{
+	"Image",
+	"Platform",
+	"Severity",
+	"Vulnerability",
+	"Package",
+	"Version",
+	"Fix State",
+	"Fixed In",
+	"KEV",
+	"EPSS Score",
+	"EPSS Percentile",
+	"VEX Status",
+	"VEX Justification",
+}
 
 var _ printer.IPrinter = &CsvPrinter{}
 
@@ -102,6 +121,13 @@ func (cp *CsvPrinter) Score(score float32) {
 // cluster-wide skipped or unevaluated controls. A missing session or posture
 // report returns an error instead of reading a nil report.
 func (cp *CsvPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) (err error) {
+	if opaSessionObj == nil && len(imageScanData) > 0 {
+		if err := writeImageScanCSV(cp.writer, imageScanData); err != nil {
+			return err
+		}
+		printer.LogOutputFile(cp.writer.Name())
+		return nil
+	}
 	if opaSessionObj == nil || opaSessionObj.Report == nil {
 		return fmt.Errorf("no data provided for CSV output")
 	}
@@ -295,7 +321,86 @@ func (cp *CsvPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OP
 		}
 	}
 
+	return cp.writeImageScanCompanion(ctx, imageScanData)
+}
+
+func (cp *CsvPrinter) writeImageScanCompanion(ctx context.Context, imageScanData []cautils.ImageScanData) error {
+	if len(imageScanData) == 0 || cp.writer.Name() == os.DevNull {
+		return nil
+	}
+	postureInfo, err := cp.writer.Stat()
+	if cp.writer == os.Stdout || err != nil || !postureInfo.Mode().IsRegular() {
+		logger.L().Ctx(ctx).Warning("CSV image vulnerabilities are written next to the posture report, set --output to a file to save them")
+		return nil
+	}
+	companionPath := printer.CsvImageCompanionPath(cp.writer.Name())
+	if companionInfo, err := os.Stat(companionPath); err == nil && os.SameFile(postureInfo, companionInfo) {
+		return fmt.Errorf("CSV vulnerabilities file %q is the same file as the posture report %q (hard link or symlink); remove it or choose a different --output", companionPath, cp.writer.Name())
+	}
+	f, err := printer.GetWriterNoFallback(companionPath)
+	if err != nil {
+		return err
+	}
+	if err := writeImageScanCSV(f, imageScanData); err != nil {
+		_ = f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("failed to close CSV vulnerabilities file: %w", err)
+	}
+	printer.LogOutputFile(f.Name())
 	return nil
+}
+
+func writeImageScanCSV(w io.Writer, imageScanData []cautils.ImageScanData) error {
+	csvWriter := csv.NewWriter(w)
+	if err := csvWriter.Write(csvImageHeader); err != nil {
+		return fmt.Errorf("failed to write CSV header: %w", err)
+	}
+	for i := range imageScanData {
+		cves := extractCVEs(imageScanData[i].Matches, imageScanData[i].Image, imageScanData[i].VexStatuses)
+		imageprinter.SortCVEs(cves)
+		for _, cve := range cves {
+			if err := csvWriter.Write(csvSafeRow(csvImageRow(cve, imageScanData[i].Platform))); err != nil {
+				return fmt.Errorf("failed to write CSV row: %w", err)
+			}
+		}
+	}
+	csvWriter.Flush()
+	if err := csvWriter.Error(); err != nil {
+		return fmt.Errorf("failed to flush CSV writer: %w", err)
+	}
+	return nil
+}
+
+func csvImageRow(cve imageprinter.CVE, platform string) []string {
+	severity := cve.Severity
+	if severity == "" {
+		severity = "Unknown"
+	}
+	var kev, epssScore, epssPercentile string
+	if cve.KEVKnown {
+		kev = strconv.FormatBool(cve.KEV)
+	}
+	if cve.EPSS != nil {
+		epssScore = strconv.FormatFloat(cve.EPSS.Score, 'f', -1, 64)
+		epssPercentile = strconv.FormatFloat(cve.EPSS.Percentile, 'f', -1, 64)
+	}
+	return []string{
+		cve.Image,
+		platform,
+		severity,
+		cve.ID,
+		cve.Package,
+		cve.Version,
+		cve.FixedState,
+		strings.Join(cve.FixVersions, "; "),
+		kev,
+		epssScore,
+		epssPercentile,
+		cve.VexStatus,
+		cve.VexJustification,
+	}
 }
 
 func (cp *CsvPrinter) PrintNextSteps() {
