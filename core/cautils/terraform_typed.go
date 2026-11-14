@@ -97,10 +97,25 @@ var resourceMetaBlocks = map[string]bool{
 	"connection":  true,
 }
 
+var fieldInitialisms = map[string]string{
+	"id":   "ID",
+	"ip":   "IP",
+	"ipc":  "IPC",
+	"ips":  "IPs",
+	"pid":  "PID",
+	"uri":  "URI",
+	"urls": "URLs",
+	"uuid": "UUID",
+}
+
 func snakeToCamel(s string) string {
 	parts := strings.Split(s, "_")
 	for i := 1; i < len(parts); i++ {
 		if parts[i] == "" {
+			continue
+		}
+		if initialism, ok := fieldInitialisms[parts[i]]; ok {
+			parts[i] = initialism
 			continue
 		}
 		parts[i] = strings.ToUpper(parts[i][:1]) + parts[i][1:]
