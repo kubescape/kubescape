@@ -102,3 +102,76 @@ func TestGetViewCmd_RejectsUnexpectedArgs(t *testing.T) {
 	assert.Contains(t, err.Error(), "accepts at most 1 arg(s), received 2")
 	assert.Nil(t, ks.got)
 }
+
+func TestGetViewCmd_NilKubescape(t *testing.T) {
+	cmd := getViewCmd(nil)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+	cmd.SetArgs([]string{})
+
+	err := cmd.Execute()
+	require.EqualError(t, err, "uninitialized kubescape interface")
+
+	cmdWithKey := getViewCmd(nil)
+	cmdWithKey.SilenceUsage = true
+	cmdWithKey.SilenceErrors = true
+	cmdWithKey.SetArgs([]string{"accountID"})
+	err = cmdWithKey.Execute()
+	require.EqualError(t, err, "uninitialized kubescape interface")
+}
+
+func TestGetViewCmd_RejectsEmptyFormat(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{"empty format flag", []string{"--format", ""}},
+		{"whitespace format flag", []string{"--format", "   "}},
+		{"empty short format flag", []string{"-f", ""}},
+		{"empty output alias", []string{"--output", ""}},
+		{"whitespace output alias", []string{"--output", "   "}},
+		{"empty short output alias", []string{"-o", ""}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ks := &capturingView{}
+			cmd := getViewCmd(ks)
+			cmd.SilenceUsage = true
+			cmd.SilenceErrors = true
+			cmd.SetArgs(tt.args)
+
+			err := cmd.Execute()
+			require.EqualError(t, err, "format cannot be empty, supported formats: text, json, yaml")
+			assert.Nil(t, ks.got)
+		})
+	}
+}
+
+func TestGetViewCmd_RejectsUnsupportedFormat(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{"unsupported format flag", []string{"--format", "xml"}},
+		{"unsupported short format flag", []string{"-f", "csv"}},
+		{"unsupported output alias", []string{"--output", "html"}},
+		{"unsupported short output alias", []string{"-o", "pdf"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ks := &capturingView{}
+			cmd := getViewCmd(ks)
+			cmd.SilenceUsage = true
+			cmd.SilenceErrors = true
+			cmd.SetArgs(tt.args)
+
+			err := cmd.Execute()
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "unsupported format")
+			assert.Contains(t, err.Error(), "supported formats: text, json, yaml")
+			assert.Nil(t, ks.got)
+		})
+	}
+}

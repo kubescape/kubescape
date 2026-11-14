@@ -130,3 +130,69 @@ func TestGetValidateCmd_RunEReturnsValidationError(t *testing.T) {
 	require.NotNil(t, ks.got)
 	assert.Equal(t, "json", ks.got.Format)
 }
+
+func TestGetValidateCmd_NilKubescape(t *testing.T) {
+	cmd := getValidateCmd(nil)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+	cmd.SetArgs([]string{})
+
+	err := cmd.Execute()
+	require.EqualError(t, err, "uninitialized kubescape interface")
+}
+
+func TestGetValidateCmd_RejectsEmptyFormat(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{"empty format flag", []string{"--format", ""}},
+		{"whitespace format flag", []string{"--format", "   "}},
+		{"empty short format flag", []string{"-f", ""}},
+		{"empty output alias", []string{"--output", ""}},
+		{"whitespace output alias", []string{"--output", "   "}},
+		{"empty short output alias", []string{"-o", ""}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ks := &capturingValidate{}
+			cmd := getValidateCmd(ks)
+			cmd.SilenceUsage = true
+			cmd.SilenceErrors = true
+			cmd.SetArgs(tt.args)
+
+			err := cmd.Execute()
+			require.EqualError(t, err, "format cannot be empty, supported formats: text, json, yaml")
+			assert.Nil(t, ks.got)
+		})
+	}
+}
+
+func TestGetValidateCmd_RejectsUnsupportedFormat(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{"unsupported format flag", []string{"--format", "xml"}},
+		{"unsupported short format flag", []string{"-f", "csv"}},
+		{"unsupported output alias", []string{"--output", "html"}},
+		{"unsupported short output alias", []string{"-o", "pdf"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ks := &capturingValidate{}
+			cmd := getValidateCmd(ks)
+			cmd.SilenceUsage = true
+			cmd.SilenceErrors = true
+			cmd.SetArgs(tt.args)
+
+			err := cmd.Execute()
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "unsupported format")
+			assert.Contains(t, err.Error(), "supported formats: text, json, yaml")
+			assert.Nil(t, ks.got)
+		})
+	}
+}
