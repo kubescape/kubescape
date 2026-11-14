@@ -55,7 +55,7 @@ deny contains msga if {
 # pods still allows rewriting the status of the named pod. However, an
 # entry naming only "" or "*" admits no object, because requests on existing
 # objects carry their real name, "" is never that name, and resourceNames has no
-# wildcard. An omitted or empty resourceNames list is unrestricted.
+# wildcard. An omitted, null, or empty resourceNames list is unrestricted.
 modifies_pod_status(rule) if {
 	core_api_group(rule)
 	targets_subresource(rule, "pods/status")
@@ -63,10 +63,19 @@ modifies_pod_status(rule) if {
 	admits_objects(rule)
 }
 
-admits_objects(rule) if count(object.get(rule, "resourceNames", [])) == 0
+# An omitted, null, or empty resourceNames list is unrestricted.
+admits_objects(rule) if object.get(rule, "resourceNames", null) == null
 
 admits_objects(rule) if {
-	some name in rule.resourceNames
+	names := rule.resourceNames
+	names != null
+	count(names) == 0
+}
+
+admits_objects(rule) if {
+	names := rule.resourceNames
+	names != null
+	some name in names
 	not name in {"", "*"}
 }
 

@@ -59,7 +59,7 @@ deny contains msga if {
 # nodes still allows relabeling the named node. However, an entry naming only
 # "" or "*" admits no object, because requests on existing objects carry their
 # real name, "" is never that name, and resourceNames has no wildcard. An
-# omitted or empty resourceNames list is unrestricted.
+# omitted, null, or empty resourceNames list is unrestricted.
 modifies_node_status(rule, rolebinding) if {
 	rolebinding.kind == "ClusterRoleBinding"
 	core_api_group(rule)
@@ -68,10 +68,19 @@ modifies_node_status(rule, rolebinding) if {
 	admits_objects(rule)
 }
 
-admits_objects(rule) if count(object.get(rule, "resourceNames", [])) == 0
+# An omitted, null, or empty resourceNames list is unrestricted.
+admits_objects(rule) if object.get(rule, "resourceNames", null) == null
 
 admits_objects(rule) if {
-	some name in rule.resourceNames
+	names := rule.resourceNames
+	names != null
+	count(names) == 0
+}
+
+admits_objects(rule) if {
+	names := rule.resourceNames
+	names != null
+	some name in names
 	not name in {"", "*"}
 }
 
