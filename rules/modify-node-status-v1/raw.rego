@@ -55,14 +55,24 @@ deny contains msga if {
 # RoleBinding confines the role to one namespace, where a rule about nodes
 # matches nothing.
 #
-# resourceNames is deliberately not consulted. It narrows the grant to named
-# nodes, but the attack relabels the very node that is named, so a restricted
-# entry still moves workloads onto or off that node.
+# resourceNames is not required to be empty: narrowing the grant to named
+# nodes still allows relabeling the named node. However, an entry naming only
+# "" or "*" admits no object, because requests on existing objects carry their
+# real name, "" is never that name, and resourceNames has no wildcard. An
+# omitted or empty resourceNames list is unrestricted.
 modifies_node_status(rule, rolebinding) if {
 	rolebinding.kind == "ClusterRoleBinding"
 	core_api_group(rule)
 	targets_subresource(rule, "nodes/status")
 	update_patch_or_wildcard(rule.verbs)
+	admits_objects(rule)
+}
+
+admits_objects(rule) if count(object.get(rule, "resourceNames", [])) == 0
+
+admits_objects(rule) if {
+	some name in rule.resourceNames
+	not name in {"", "*"}
 }
 
 # RBAC has no "nodes/*" form, so a wildcard that reaches a subresource is

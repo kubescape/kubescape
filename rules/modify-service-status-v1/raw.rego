@@ -51,13 +51,23 @@ deny contains msga if {
 	}
 }
 
-# resourceNames is deliberately not consulted. It narrows the grant to named
-# services, but the attack rewrites the status of the very service that is
-# named, so a restricted entry still hands over every client of that service.
+# resourceNames is not required to be empty: narrowing the grant to named
+# services still allows rewriting the status of the named service. However, an
+# entry naming only "" or "*" admits no object, because requests on existing
+# objects carry their real name, "" is never that name, and resourceNames has no
+# wildcard. An omitted or empty resourceNames list is unrestricted.
 modifies_service_status(rule) if {
 	core_api_group(rule)
 	targets_subresource(rule, "services/status")
 	update_patch_or_wildcard(rule.verbs)
+	admits_objects(rule)
+}
+
+admits_objects(rule) if count(object.get(rule, "resourceNames", [])) == 0
+
+admits_objects(rule) if {
+	some name in rule.resourceNames
+	not name in {"", "*"}
 }
 
 # RBAC has no "services/*" form, so a wildcard that reaches a subresource is
