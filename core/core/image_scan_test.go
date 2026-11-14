@@ -1103,15 +1103,19 @@ func TestIsOCILayoutDir_LayerBlobLargerThanLimitAccepted(t *testing.T) {
 	t.Setenv("KUBESCAPE_MAX_FILE_SIZE", "500")
 	dir := t.TempDir()
 
-	// Create a layer blob with 2000 bytes of payload (exceeding the 500 byte limit)
+	// Create an incompressible layer blob payload whose compressed size exceeds the 500 byte limit
 	var buf bytes.Buffer
 	tw := tar.NewWriter(&buf)
-	payload := bytes.Repeat([]byte("a"), 2000)
+	payload := make([]byte, 50000)
+	for i := range payload {
+		payload[i] = byte((i*37 + 13) % 256)
+	}
 	require.NoError(t, tw.WriteHeader(&tar.Header{Name: "large.bin", Mode: 0o600, Size: int64(len(payload))}))
 	_, err := tw.Write(payload)
 	require.NoError(t, err)
 	require.NoError(t, tw.Close())
 	largeLayerCompressed := gzipBytes(t, buf.Bytes())
+	require.Greater(t, len(largeLayerCompressed), 500, "compressed layer blob must exceed limit")
 
 	goodIndex, _, _, _, _, goodBlobs := ociLayoutContentWithLayers(largeLayerCompressed)
 	goodDir := filepath.Join(dir, "goodlayerdir")
@@ -1131,15 +1135,19 @@ func TestIsOCILayoutTarball_LayerEntryLargerThanLimitAccepted(t *testing.T) {
 	t.Setenv("KUBESCAPE_MAX_FILE_SIZE", "500")
 	dir := t.TempDir()
 
-	// Create a layer blob with 2000 bytes of payload (exceeding the 500 byte limit)
+	// Create an incompressible layer blob payload whose compressed size exceeds the 500 byte limit
 	var buf bytes.Buffer
 	tw := tar.NewWriter(&buf)
-	payload := bytes.Repeat([]byte("a"), 2000)
+	payload := make([]byte, 50000)
+	for i := range payload {
+		payload[i] = byte((i*37 + 13) % 256)
+	}
 	require.NoError(t, tw.WriteHeader(&tar.Header{Name: "large.bin", Mode: 0o600, Size: int64(len(payload))}))
 	_, err := tw.Write(payload)
 	require.NoError(t, err)
 	require.NoError(t, tw.Close())
 	largeLayerCompressed := gzipBytes(t, buf.Bytes())
+	require.Greater(t, len(largeLayerCompressed), 500, "compressed layer blob must exceed limit")
 
 	goodIndex, _, _, _, _, goodBlobs := ociLayoutContentWithLayers(largeLayerCompressed)
 	goodArchive := filepath.Join(dir, "goodlayer.tar")
