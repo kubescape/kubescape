@@ -426,12 +426,18 @@ const csvFormulaPrefixes = "=+-@\t\r\n"
 // csvSafeCell neutralizes a cell against spreadsheet formula injection (CWE-1236)
 // by prepending a single quote, the standard mitigation: spreadsheets treat a
 // leading apostrophe as literal text and do not execute or display it, while
-// other CSV consumers see an inert string.
+// other CSV consumers see an inert string. Leading whitespace (spaces, tabs,
+// newlines, carriage returns) is handled so formulas prefixed with whitespace
+// cannot bypass the prefix check.
 func csvSafeCell(cell string) string {
 	if cell == "" {
 		return cell
 	}
 	if strings.ContainsRune(csvFormulaPrefixes, rune(cell[0])) {
+		return "'" + cell
+	}
+	trimmed := strings.TrimLeft(cell, " \t\r\n\v\f")
+	if trimmed != "" && strings.ContainsRune("=+-@", rune(trimmed[0])) {
 		return "'" + cell
 	}
 	return cell
