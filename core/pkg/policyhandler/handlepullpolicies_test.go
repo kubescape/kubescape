@@ -300,9 +300,17 @@ func TestGetExceptions_CacheKeepsClusterExceptionsApart(t *testing.T) {
 
 	const clusterName = "test-cluster"
 	primaryException := armotypes.PostureExceptionPolicy{PortalBase: armotypes.PortalBase{Name: "from-primary"}}
-	clusterException := armotypes.PostureExceptionPolicy{PortalBase: armotypes.PortalBase{Name: "from-cluster"}}
+	clusterException := func() armotypes.PostureExceptionPolicy {
+		return armotypes.PostureExceptionPolicy{PortalBase: armotypes.PortalBase{
+			Name:       "from-cluster",
+			Attributes: map[string]any{"owner": "cluster-team"},
+		}}
+	}
 	withoutCluster := []armotypes.PostureExceptionPolicy{primaryException}
-	withCluster := []armotypes.PostureExceptionPolicy{primaryException, clusterException}
+	// Cached merged policies retain their source for scan-time precedence.
+	mergedClusterException := clusterException()
+	mergedClusterException.Attributes["kubescape.io/secondary-exception-source"] = true
+	withCluster := []armotypes.PostureExceptionPolicy{primaryException, mergedClusterException}
 
 	type scan struct {
 		clusterScan bool
@@ -326,7 +334,7 @@ func TestGetExceptions_CacheKeepsClusterExceptionsApart(t *testing.T) {
 			defer handler.Close()
 
 			primary := &recordingExceptionsGetter{exceptions: withoutCluster}
-			cluster := &recordingExceptionsGetter{exceptions: []armotypes.PostureExceptionPolicy{clusterException}}
+			cluster := &recordingExceptionsGetter{exceptions: []armotypes.PostureExceptionPolicy{clusterException()}}
 
 			for i, scan := range tc.scans {
 				// Each scan builds its own getter, as core does.
@@ -343,6 +351,8 @@ func TestGetExceptions_CacheKeepsClusterExceptionsApart(t *testing.T) {
 
 			assert.Len(t, primary.clusterNames, tc.wantPrimaryReads)
 			assert.Len(t, cluster.clusterNames, tc.wantClusterReads)
+			assert.Equal(t, withoutCluster, primary.exceptions)
+			assert.Equal(t, []armotypes.PostureExceptionPolicy{clusterException()}, cluster.exceptions)
 			for _, got := range append(primary.clusterNames, cluster.clusterNames...) {
 				assert.Equal(t, clusterName, got)
 			}
