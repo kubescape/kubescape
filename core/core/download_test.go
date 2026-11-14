@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"testing"
 
@@ -328,8 +329,10 @@ func TestDownload_CreatesOutputDirectoryWithRestrictivePermissions(t *testing.T)
 
 	info, err := os.Stat(path)
 	require.NoError(t, err)
-	mode := info.Mode().Perm()
-	assert.Zerof(t, mode&0o077, "directory %s has mode %o, more permissive than 0700", path, mode)
+	if runtime.GOOS != "windows" {
+		mode := info.Mode().Perm()
+		assert.Zerof(t, mode&0o077, "directory %s has mode %o, more permissive than 0700", path, mode)
+	}
 }
 
 func TestDownload_CreatesNestedCustomOutputDirectory(t *testing.T) {
@@ -358,8 +361,10 @@ func TestDownload_CreatesNestedCustomOutputDirectory(t *testing.T) {
 	info, err := os.Stat(nestedTargetDir)
 	require.NoError(t, err)
 	assert.True(t, info.IsDir())
-	mode := info.Mode().Perm()
-	assert.Zerof(t, mode&0o077, "directory %s has mode %o, more permissive than 0700", nestedTargetDir, mode)
+	if runtime.GOOS != "windows" {
+		mode := info.Mode().Perm()
+		assert.Zerof(t, mode&0o077, "directory %s has mode %o, more permissive than 0700", nestedTargetDir, mode)
+	}
 }
 
 func TestDownload_DirectoryCreationErrorWrapped(t *testing.T) {

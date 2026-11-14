@@ -87,3 +87,28 @@ jobs:
           version: v2.15.0
           args: --timeout 10m
           only-new-issues: true
+
+  windows-tests:
+    if: ${{ github.actor != 'kubescape' && !inputs.SKIP }}
+    name: Windows core tests
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        name: Installing go
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Test Windows core package suite
+        run: go test -v -count=1 ./core/core
+
+      - name: Test Windows fixhandler locks
+        run: go test -v -count=1 ./core/pkg/fixhandler -run '^TestWindowsLock_'
+
+      - name: Test Windows partitionstore disk errors
+        run: go test -v -count=1 ./core/pkg/resourcehandler/partitionstore -run '^TestIsDiskFull_WindowsErrors$'
