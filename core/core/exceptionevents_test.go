@@ -93,6 +93,12 @@ func TestSecurityExceptionEventRecorderWithNilClient(t *testing.T) {
 	require.Nil(t, shutdown)
 }
 
+func TestScanExceptionRecorderWithNilScanInfo(t *testing.T) {
+	recorder, shutdown := scanExceptionRecorder(context.Background(), nil)
+	require.Nil(t, recorder)
+	require.Nil(t, shutdown)
+}
+
 // TestSecurityExceptionEventRecorderReviewsClusterWideEventWrite verifies the
 // recorder is built when events may be created and patched in every namespace,
 // and that it asks for exactly that.
