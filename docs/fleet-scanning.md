@@ -268,8 +268,10 @@ same machine answers at once and the scan is then limited by CPU.
 
 Things to keep in mind:
 
-- each process peaks at about 225 MiB, so `--parallel n` adds up to `n` times
-  that on top of the main process
+- each process uses about as much memory as scanning its cluster on its own,
+  so `--parallel n` adds up to `n` of those on top of the main process; in the
+  200 pod test above each one peaked at about 200 MiB, and larger clusters
+  need more
 - each process loads the policies on its own
 - each process's log goes to a temporary file that is deleted when the run
   ends, but a failed cluster's error is still shown at the end of the run
