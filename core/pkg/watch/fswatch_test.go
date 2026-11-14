@@ -251,6 +251,29 @@ func TestFileWatcherSignalsForChangesToManifests(t *testing.T) {
 		write(t, file, "kind: Pod\nmetadata:\n  name: deep\n")
 		rec.waitFor(t, file, is(file))
 	})
+
+	t.Run("Terraform and Helm files, in nested directories too", func(t *testing.T) {
+		t.Parallel()
+		root := t.TempDir()
+		existing := []string{
+			filepath.Join(root, "main.tf"),
+			filepath.Join(root, "modules", "net", "main.tf"),
+			filepath.Join(root, "envs", "prod", "prod.auto.tfvars"),
+			filepath.Join(root, "chart", "templates", "_helpers.tpl"),
+		}
+		for _, path := range existing {
+			write(t, path, "# v1")
+		}
+		_, rec := startWatcher(t, root, FileWatcherOptions{})
+
+		for _, path := range existing {
+			write(t, path, "# v2")
+			rec.waitFor(t, path, is(path))
+		}
+		// a nested directory made after the watch started
+		made := filepath.Join(root, "modules", "dns", "main.tf")
+		rec.retryUntilSignalled(t, made, func(attempt int) { write(t, made, fmt.Sprintf("# %d", attempt)) }, is(made))
+	})
 }
 
 func TestFileWatcherWatchesNewDirectories(t *testing.T) {
@@ -493,6 +516,10 @@ func TestFileWatcherRelevantFile(t *testing.T) {
 		{"DEPLOY.YAML", true}, {"Deploy.Yml", true}, {"a.b.yaml", true},
 		{".hidden.yaml", true}, // a hidden manifest is still one a scan loads
 		{"kustomization.yaml", true},
+		// Terraform and Helm files a directory scan renders
+		{"main.tf", true}, {"terraform.tfvars", true}, {"prod.auto.tfvars", true},
+		{"terraform.tfvars.json", true}, {"_helpers.tpl", true},
+		{"main.tf.bak", false}, {".terraform.lock.hcl", false},
 		{"notes.txt", false}, {"deploy", false}, {"deploy.yaml.bak", false},
 		{".deploy.yaml.swp", false}, {"deploy.yaml~", false}, {"#deploy.yaml#", false},
 		{".#deploy.yaml", false}, // an Emacs lock file, named like the file it guards
