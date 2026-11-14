@@ -152,12 +152,12 @@ func TestListSBOMPackages_InvalidArguments(t *testing.T) {
 		args map[string]any
 		want string
 	}{
-		{name: "missing sbom_name", args: map[string]any{}, want: "sbom_name argument is required"},
-		{name: "name type", args: map[string]any{"sbom_name": "nginx-1.21", "name": 7}, want: "name argument must be a string"},
-		{name: "package_type type", args: map[string]any{"sbom_name": "nginx-1.21", "package_type": true}, want: "package_type argument must be a string"},
+		{name: "missing sbom_name", args: map[string]any{}, want: "sbom_name is required"},
+		{name: "name type", args: map[string]any{"sbom_name": "nginx-1.21", "name": 7}, want: "name must be a string"},
+		{name: "package_type type", args: map[string]any{"sbom_name": "nginx-1.21", "package_type": true}, want: "package_type must be a string"},
 		{name: "limit zero", args: map[string]any{"sbom_name": "nginx-1.21", "limit": float64(0)}, want: "limit must be between 1 and 500"},
 		{name: "limit too large", args: map[string]any{"sbom_name": "nginx-1.21", "limit": float64(501)}, want: "limit must be between 1 and 500"},
-		{name: "limit fraction", args: map[string]any{"sbom_name": "nginx-1.21", "limit": 1.5}, want: "limit argument must be an integer"},
+		{name: "limit fraction", args: map[string]any{"sbom_name": "nginx-1.21", "limit": 1.5}, want: "limit must be an integer"},
 		{name: "negative offset", args: map[string]any{"sbom_name": "nginx-1.21", "offset": float64(-1)}, want: "offset must not be negative"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -175,7 +175,7 @@ func TestListSBOMPackages_NotFound(t *testing.T) {
 	require.True(t, result.IsError)
 	text := toolResultText(t, result)
 	assert.Contains(t, text, string(ErrCodeResourceNotFound))
-	assert.Contains(t, text, "failed to get SBOM")
+	assert.Contains(t, text, `\"missing\" not found`)
 }
 
 func TestListSBOMPackages_PackageIdentity(t *testing.T) {
@@ -256,7 +256,7 @@ func TestListSBOMs(t *testing.T) {
 	result, err = ks.CallTool(context.Background(), "list_sboms", map[string]any{"continue": 3})
 	require.NoError(t, err)
 	require.True(t, result.IsError)
-	assert.Contains(t, toolResultText(t, result), "continue argument must be a string")
+	assert.Contains(t, toolResultText(t, result), "continue must be a string")
 }
 
 func TestListSBOMs_Continue(t *testing.T) {
