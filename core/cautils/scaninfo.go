@@ -238,6 +238,8 @@ type ScanInfo struct {
 	FleetReport               string                      // --fleet-report: with --kube-contexts, also write one combined JSON report across every context to this path
 	ReferenceCluster          string                      // --reference-cluster: with --fleet-report, the kube context whose findings the other clusters are read against
 	KubeContextRetries        int                         // --retries: with --kube-contexts, how many more times to try a cluster whose API server never answered
+	KubeContextParallel       int                         // --parallel: with --kube-contexts, how many contexts to scan at once, each in its own process
+	FleetChildResult          string                      // internal: where a --parallel child writes its context's result for the parent to read back
 	WholeClusterPolicy        WholeClusterExecutionPolicy // Execution policy for whole-cluster controls (projected, fallback, skip, verify)
 	GitCloneDepth             *int                        // Clone depth for remote Git repository scans (default: 0 for full commit history; set > 0 e.g. 1 for shallow tip-only clone; nil defaults to 0)
 }
