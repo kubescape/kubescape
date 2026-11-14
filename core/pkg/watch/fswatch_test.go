@@ -480,6 +480,52 @@ func TestFileWatcherOnASingleFile(t *testing.T) {
 	})
 }
 
+// The watcher registers new directories (fsnotify Add and Remove) from the
+// goroutine that reads fsnotify's Events. On Windows Add and Remove wait for
+// fsnotify's reader thread, which blocks delivering events once the Events
+// buffer (50) is full, so a burst of events while a directory is registered
+// must not leave each waiting on the other: Close would never return.
+func TestFileWatcherSurvivesAnEventBurstWhileRegisteringDirectories(t *testing.T) {
+	root := t.TempDir()
+	w, err := newFileWatcher(root, FileWatcherOptions{})
+	require.NoError(t, err)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	w.start(ctx)
+
+	stop := make(chan struct{})
+	burst := make(chan struct{})
+	go func() {
+		defer close(burst)
+		for i := 0; ; i++ {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			dir := filepath.Join(root, fmt.Sprintf("d%03d", i%200))
+			_ = os.MkdirAll(dir, 0o755)
+			for j := 0; j < 5; j++ {
+				_ = os.WriteFile(filepath.Join(dir, fmt.Sprintf("f%d.yaml", j)), []byte("kind: Pod"), 0o600)
+			}
+		}
+	}()
+	time.Sleep(time.Second)
+	close(stop)
+	<-burst
+
+	closed := make(chan struct{})
+	go func() {
+		_ = w.Close()
+		close(closed)
+	}()
+	select {
+	case <-closed:
+	case <-time.After(10 * time.Second):
+		t.Fatal("Close did not return: the watcher's goroutine is stuck")
+	}
+}
+
 func TestFileWatcherRelevantFile(t *testing.T) {
 	t.Parallel()
 	w := &FileWatcher{opts: FileWatcherOptions{Exclude: func(path string, isDir bool) bool {

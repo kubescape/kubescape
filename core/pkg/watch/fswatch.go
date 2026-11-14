@@ -101,6 +101,17 @@ type FileWatcher struct {
 	cancel context.CancelFunc
 	done   chan struct{} // closed once the goroutine has exited
 
+	// queue holds what the backend delivered, in order, for run to handle.
+	// pump, a goroutine of its own, keeps reading the backend's channels into
+	// it, because run also calls the backend's Add and Remove: on Windows
+	// those wait for fsnotify's reader thread, which blocks delivering events
+	// once the Events buffer is full, so with run as the only reader a burst
+	// of events during an Add left each waiting on the other.
+	qmu    sync.Mutex
+	queue  []backendItem
+	queued chan struct{} // capacity one: the queue may have items
+	pumped chan struct{} // closed once pump has exited
+
 	mu  sync.Mutex
 	err error // why it ended, if not asked to; set before changes is closed
 
@@ -147,6 +158,8 @@ func newFileWatcher(root string, opts FileWatcherOptions) (*FileWatcher, error) 
 		pending: make(map[string]struct{}),
 		changes: make(chan struct{}, 1),
 		done:    make(chan struct{}),
+		queued:  make(chan struct{}, 1),
+		pumped:  make(chan struct{}),
 	}
 
 	if info.IsDir() {
@@ -168,7 +181,72 @@ func newFileWatcher(root string, opts FileWatcherOptions) (*FileWatcher, error) 
 
 func (w *FileWatcher) start(ctx context.Context) {
 	ctx, w.cancel = context.WithCancel(ctx)
+	go w.pump(ctx)
 	go w.run(ctx)
+}
+
+// backendItem is one thing the backend delivered: an event, an error, or the
+// unexpected close of one of its channels (closed names it).
+type backendItem struct {
+	event  fsnotify.Event
+	err    error
+	closed string
+}
+
+// pump moves what the backend delivers into the queue, in order, so the
+// backend is never left waiting for run (see queue). It ends when ctx is done
+// or both backend channels are closed.
+func (w *FileWatcher) pump(ctx context.Context) {
+	defer close(w.pumped)
+	events, failures := w.fs.Events, w.fs.Errors
+	for events != nil || failures != nil {
+		var item backendItem
+		select {
+		case <-ctx.Done():
+			return
+		case event, ok := <-events:
+			if !ok {
+				events, item = nil, backendItem{closed: "event"}
+			} else {
+				item = backendItem{event: event}
+			}
+		case failure, ok := <-failures:
+			if !ok {
+				failures, item = nil, backendItem{closed: "error"}
+			} else {
+				item = backendItem{err: failure}
+			}
+		}
+		w.qmu.Lock()
+		w.queue = append(w.queue, item)
+		w.qmu.Unlock()
+		select {
+		case w.queued <- struct{}{}:
+		default:
+		}
+	}
+}
+
+// takeQueue returns what pump queued since the last call.
+func (w *FileWatcher) takeQueue() []backendItem {
+	w.qmu.Lock()
+	defer w.qmu.Unlock()
+	items := w.queue
+	w.queue = nil
+	return items
+}
+
+// handleItem handles one thing the backend delivered. Its error ends the
+// watcher.
+func (w *FileWatcher) handleItem(item backendItem) error {
+	switch {
+	case item.closed != "":
+		return fmt.Errorf("watch: the %s channel was closed unexpectedly", item.closed)
+	case item.err != nil:
+		return w.handleError(item.err)
+	default:
+		return w.handle(item.event)
+	}
 }
 
 // Changes returns the channel on which a change is signalled. It is closed when
@@ -205,6 +283,7 @@ func (w *FileWatcher) run(ctx context.Context) {
 		w.err = err
 		w.mu.Unlock()
 		w.cancel()
+		<-w.pumped
 		close(w.changes)
 		close(w.done)
 	}()
@@ -213,21 +292,11 @@ func (w *FileWatcher) run(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case event, ok := <-w.fs.Events:
-			if !ok {
-				err = errors.New("watch: the event channel was closed unexpectedly")
-				return
-			}
-			if err = w.handle(event); err != nil {
-				return
-			}
-		case failure, ok := <-w.fs.Errors:
-			if !ok {
-				err = errors.New("watch: the error channel was closed unexpectedly")
-				return
-			}
-			if err = w.handleError(failure); err != nil {
-				return
+		case <-w.queued:
+			for _, item := range w.takeQueue() {
+				if err = w.handleItem(item); err != nil {
+					return
+				}
 			}
 		case <-w.settleC:
 			if err = w.settled(); err != nil {
