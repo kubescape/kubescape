@@ -1,0 +1,13 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: clusterrole-wildcard-deployment-update-crb
+subjects:
+- kind: User
+  name: ivan
+  apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: ClusterRole
+  name: clusterrole-wildcard-deployment-update
+  apiGroup: rbac.authorization.k8s.io
+

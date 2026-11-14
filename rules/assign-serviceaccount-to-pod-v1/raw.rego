@@ -103,27 +103,38 @@ controller_verb_reachable(rule, "*") if grants_unnamed_requests(rule)
 
 controller_verb_reachable(rule, "*") if names_any_object(rule)
 
-# Kubernetes draws no distinction between an absent resourceNames and an
-# explicitly empty one: ResourceNameMatches returns true as soon as the list is
-# empty, so both mean the rule is not narrowed to named objects. Testing
-# definedness alone (not rule.resourceNames) would treat resourceNames: [] as
-# scoped and skip a subject that in fact holds unrestricted access.
+# Kubernetes draws no distinction between an absent resourceNames, a null one,
+# and an explicitly empty one: ResourceNameMatches returns true as soon as the
+# list is empty or absent, so all mean the rule is not narrowed to named objects.
+# Testing definedness alone (not rule.resourceNames) would treat resourceNames: []
+# as scoped and skip a subject that in fact holds unrestricted access.
+unrestricted_rule(rule) if object.get(rule, "resourceNames", null) == null
+
 unrestricted_rule(rule) if {
-	count(object.get(rule, "resourceNames", [])) == 0
+	names := rule.resourceNames
+	names != null
+	count(names) == 0
 }
 
 # A create, like a list or watch across a collection, is authorized with the
 # empty name, so resourceNames: [""] grants it as an unrestricted entry does.
 grants_unnamed_requests(rule) if unrestricted_rule(rule)
 
-grants_unnamed_requests(rule) if "" in rule.resourceNames
+grants_unnamed_requests(rule) if {
+	names := rule.resourceNames
+	names != null
+	"" in names
+}
 
-# Requests on an existing object carry its name, which is never empty.
+# Requests on an existing object carry its name, which is never empty and never
+# a wildcard (RBAC does not expand wildcards in resourceNames).
 names_any_object(rule) if unrestricted_rule(rule)
 
 names_any_object(rule) if {
-	some name in rule.resourceNames
-	name != ""
+	names := rule.resourceNames
+	names != null
+	some name in names
+	not name in {"", "*"}
 }
 
 # A ClusterRoleBinding grants the role in every namespace, a RoleBinding only in
