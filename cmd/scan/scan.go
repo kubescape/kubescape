@@ -73,6 +73,7 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	var scanInfo cautils.ScanInfo
 	var scanContractPath string
 	var scanContractName string
+	var scanContractAllow []string
 	var fleetConfigPath string
 	var selectedContract *contractv1alpha1.SelectedContract
 	var gitCloneDepth = cautils.DefaultGitCloneDepth
@@ -93,7 +94,7 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 				return fmt.Errorf("--scan-contract is supported for posture scans, not image scans")
 			}
 			var err error
-			selectedContract, err = loadAndApplyScanContract(cmd, &scanInfo, scanContractPath, scanContractName)
+			selectedContract, err = loadAndApplyScanContract(cmd, &scanInfo, scanContractPath, scanContractName, scanContractAllow)
 			if err != nil {
 				return err
 			}
@@ -260,6 +261,7 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 
 	scanCmd.PersistentFlags().StringVar(&scanContractPath, "scan-contract", "", "Path to an explicit repository scan contract")
 	scanCmd.PersistentFlags().StringVar(&scanContractName, "contract", "", "Named contract to select; defaults to spec.defaultContract")
+	scanCmd.PersistentFlags().StringArrayVar(&scanContractAllow, "contract-allow", nil, "Comma-separated list of contract sections allowed to take effect: policy, scope, evaluation, failure, output (defaults to all)")
 
 	scanCmd.PersistentFlags().StringVarP(&scanInfo.AccountID, "account", "", "", "Kubescape SaaS account ID. Default will load account ID from cache")
 	scanCmd.PersistentFlags().StringVarP(&scanInfo.AccessKey, "access-key", "", "", "Kubescape SaaS access key. Default will load access key from cache")
