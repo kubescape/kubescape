@@ -127,6 +127,21 @@ func (d scanDoc) copied(t *testing.T, from, to, name string, shift int) scanDoc 
 	return doc
 }
 
+// withoutResults drops the result entries of the given resource IDs, as a
+// scan whose resources carry no findings does.
+func (d scanDoc) withoutResults(t *testing.T, ids map[string]bool) scanDoc {
+	t.Helper()
+	doc := decodeScan(t, d.encode(t))
+	var results []any
+	for _, raw := range doc["results"].([]any) {
+		if !ids[raw.(map[string]any)["resourceID"].(string)] {
+			results = append(results, raw)
+		}
+	}
+	doc["results"] = results
+	return doc
+}
+
 // without is the scan after file was deleted.
 func (d scanDoc) without(t *testing.T, file string) scanDoc {
 	t.Helper()
@@ -546,6 +561,28 @@ func TestClassifyRenamesAreNotLookedForWhenAResourceCannotBeIdentified(t *testin
 	assert.Empty(t, result.Removed)
 	assert.Empty(t, result.New)
 	assert.NotZero(t, findingsOn(result.Incomparable, frontendInA)+findingsOn(result.Incomparable, frontendMoved))
+}
+
+func TestClassifyRenamesAreNotLookedForWhenAnUnidentifiedResourceHasNoResult(t *testing.T) {
+	t.Parallel()
+	base := loadScan(t, "two_files")
+	// The backend's resource no longer says which file it came from, in either
+	// scan, and it has no result entry either, so Canonicalize never records
+	// it as ambiguous: the snapshot must still treat the scan as unidentified,
+	// or the frontend's move is reported as a rename it may not be.
+	backendIDs := map[string]bool{}
+	for _, resource := range base.resourcesAt("b.yaml") {
+		backendIDs[resource["resourceID"].(string)] = true
+		delete(resource, "source")
+	}
+	base = base.withoutResults(t, backendIDs)
+	head := decodeScan(t, base.encode(t)).renamed(t, "a.yaml", "renamed.yaml")
+
+	result := classifyDocs(t, base, head)
+
+	assert.Empty(t, result.Renames, "the result-free unidentified resource may be the one that moved")
+	assert.Empty(t, result.Renamed)
+	assert.Contains(t, strings.Join(result.Warnings, "\n"), "renamed files were not looked for")
 }
 
 func TestClassifyChangedFinding(t *testing.T) {
