@@ -251,6 +251,29 @@ func TestFileWatcherSignalsForChangesToManifests(t *testing.T) {
 		write(t, file, "kind: Pod\nmetadata:\n  name: deep\n")
 		rec.waitFor(t, file, is(file))
 	})
+
+	t.Run("Terraform and Helm files, in nested directories too", func(t *testing.T) {
+		t.Parallel()
+		root := t.TempDir()
+		existing := []string{
+			filepath.Join(root, "main.tf"),
+			filepath.Join(root, "modules", "net", "main.tf"),
+			filepath.Join(root, "envs", "prod", "prod.auto.tfvars"),
+			filepath.Join(root, "chart", "templates", "_helpers.tpl"),
+		}
+		for _, path := range existing {
+			write(t, path, "# v1")
+		}
+		_, rec := startWatcher(t, root, FileWatcherOptions{})
+
+		for _, path := range existing {
+			write(t, path, "# v2")
+			rec.waitFor(t, path, is(path))
+		}
+		// a nested directory made after the watch started
+		made := filepath.Join(root, "modules", "dns", "main.tf")
+		rec.retryUntilSignalled(t, made, func(attempt int) { write(t, made, fmt.Sprintf("# %d", attempt)) }, is(made))
+	})
 }
 
 func TestFileWatcherWatchesNewDirectories(t *testing.T) {
