@@ -76,6 +76,12 @@ func (s *LocalScanner) Scan(ctx context.Context, in LocalInput) (*ScanResult, er
 	}
 	scan := s.base.CloneForContext("", "")
 	scan.InputPatterns = slices.Clone(paths)
+	if len(in.Paths) > 0 {
+		// The context worked out for the base, which may have had other inputs or
+		// none, was copied with it. These paths are what is scanned, so it is
+		// worked out again for the copy; the base keeps its own.
+		scan.ResetScanningContext()
+	}
 
 	results, err := s.ks.scanLocal(ctx, scan, s.ids)
 	if err != nil {

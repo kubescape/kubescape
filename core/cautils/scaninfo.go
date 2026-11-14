@@ -665,6 +665,13 @@ func (scanInfo *ScanInfo) GetScanningContext() ScanningContext {
 	return *scanInfo.scanningContext
 }
 
+// ResetScanningContext forgets the scanning context GetScanningContext worked
+// out, so that the next call works it out again from the current inputs. It is
+// for a ScanInfo whose inputs were replaced after it was asked.
+func (scanInfo *ScanInfo) ResetScanningContext() {
+	scanInfo.scanningContext = nil
+}
+
 // SetKubeconfigSelection records the CLI kubeconfig selection without loading
 // it. Loading is deferred until Kubescape knows that the target is a live
 // cluster, so an irrelevant kubeconfig cannot break an offline manifest scan.

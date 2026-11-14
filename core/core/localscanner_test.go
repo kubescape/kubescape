@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/diff"
 	"github.com/kubescape/kubescape/v4/core/pkg/watch"
 	"github.com/stretchr/testify/assert"
@@ -233,4 +234,87 @@ func TestLocalScannerWritesNothingToStdout(t *testing.T) {
 
 	require.NoError(t, scanErr)
 	assert.Empty(t, string(<-captured))
+}
+
+// A ScanInfo asked for its scanning context before it had inputs has cached the
+// cluster as it. The scanner's copy is told the paths it scans, and works the
+// context out from them; the caller's keeps what it cached.
+func TestLocalScannerWorksOutTheScanningContextFromThePathsItScans(t *testing.T) {
+	dir := t.TempDir()
+	writeManifest(t, dir, "pod.yaml", podManifest("web", false))
+	template := localScanTemplate(t, dir)
+	template.InputPatterns = nil
+	require.Equal(t, cautils.ContextCluster, template.GetScanningContext(), "the base caches the cluster as its context")
+	scanner, err := (&Kubescape{Ctx: context.Background()}).NewLocalScanner(template, readOnlyRootFilesystem)
+	require.NoError(t, err)
+
+	result, err := scanner.Scan(context.Background(), LocalInput{Paths: []string{dir}})
+
+	require.NoError(t, err)
+	require.NotErrorIs(t, err, ErrUnsupportedScan)
+	reportJSON, err := result.JSON()
+	require.NoError(t, err)
+	assert.NotEmpty(t, failedResources(t, reportJSON), "the manifest was scanned")
+	assert.Equal(t, cautils.ContextCluster, template.GetScanningContext(), "the caller's ScanInfo keeps its cache")
+	assert.Empty(t, template.InputPatterns)
+}
+
+// A scan that streams its resources reaches for the cluster as the eager scan
+// does unless it is told not to: it hands the kubeconfig to the rules and asks
+// the API server whether it may create events.
+func TestStreamingScanHonorsNoClusterAccess(t *testing.T) {
+	for _, tc := range []struct {
+		name            string
+		noClusterAccess bool
+		reachesCluster  bool
+	}{
+		{"no cluster access", true, false},
+		{"cluster access", false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var requests atomic.Int32
+			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests.Add(1)
+				http.NotFound(w, r)
+			}))
+			t.Cleanup(server.Close)
+			pointKubeconfigAt(t, server.URL)
+			scanInfo := &cautils.ScanInfo{NoClusterAccess: tc.noClusterAccess}
+
+			err := collectAndProcessResourcesWithStreaming(context.Background(), &streamingCancelMock{}, cautils.NewOPASessionObjMock(), scanInfo, "cluster", "", "", false, time.Second, 10)
+
+			require.NoError(t, err)
+			if tc.reachesCluster {
+				assert.NotZero(t, requests.Load(), "the check reaches the fake API server, so the other case proves something")
+			} else {
+				assert.Zero(t, requests.Load(), "the scan did not reach the cluster")
+			}
+		})
+	}
+}
+
+// The scanner keeps its promise of no cluster when it streams.
+func TestLocalScannerWithStreamingDoesNotContactTheCluster(t *testing.T) {
+	var requests atomic.Int32
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		http.NotFound(w, r)
+	}))
+	t.Cleanup(server.Close)
+	pointKubeconfigAt(t, server.URL)
+	dir := t.TempDir()
+	writeManifest(t, dir, "pod.yaml", podManifest("web", false))
+	template := localScanTemplate(t, dir)
+	template.NoClusterAccess = false // the scanner sets it itself
+	template.EnableStreaming = true
+	scanner, err := (&Kubescape{Ctx: context.Background()}).NewLocalScanner(template, readOnlyRootFilesystem)
+	require.NoError(t, err)
+
+	result, err := scanner.Scan(context.Background(), LocalInput{})
+
+	require.NoError(t, err)
+	reportJSON, err := result.JSON()
+	require.NoError(t, err)
+	assert.NotEmpty(t, failedResources(t, reportJSON))
+	assert.Zero(t, requests.Load(), "the scan did not reach the cluster")
 }
