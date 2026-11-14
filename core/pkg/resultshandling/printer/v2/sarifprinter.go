@@ -971,34 +971,26 @@ func sortedSARIFControls(controls []resourcesresults.ResourceAssociatedControl) 
 
 // resolveFixLocation resolves a failed control's location in the manifest, falling back to line 1. Shared by the SARIF and GitLab SAST printers
 func resolveFixLocation(opaSessionObj *cautils.OPASessionObj, locationResolver *locationresolver.PathLocationResolver, ac *resourcesresults.ResourceAssociatedControl, resourceID string) locationresolver.Location {
-	defaultLocation := locationresolver.Location{Line: 1, Column: 1}
+	if location, ok := lookupFixLocation(opaSessionObj, locationResolver, ac, resourceID); ok {
+		return location
+	}
+	return locationresolver.Location{Line: 1, Column: 1}
+}
+
+func lookupFixLocation(opaSessionObj *cautils.OPASessionObj, locationResolver *locationresolver.PathLocationResolver, ac *resourcesresults.ResourceAssociatedControl, resourceID string) (locationresolver.Location, bool) {
 	if locationResolver == nil {
-		return defaultLocation
+		return locationresolver.Location{}, false
 	}
-
 	fixPaths := AssistedRemediationPathsToString(ac)
-	var fixPath string
-	if len(fixPaths) > 0 {
-		fixPath = fixPaths[0]
+	if len(fixPaths) == 0 || fixPaths[0] == "" {
+		return locationresolver.Location{}, false
 	}
-
-	var location locationresolver.Location
-	if fixPath == "" {
-		return defaultLocation
-	}
-
 	docIndex, ok := getDocIndex(opaSessionObj, resourceID)
-
 	if !ok {
-		return defaultLocation
+		return locationresolver.Location{}, false
 	}
-
-	location, _ = locationResolver.ResolveLocation(fixPath, docIndex)
-	if location.Line == 0 {
-		return defaultLocation
-	}
-
-	return location
+	location, _ := locationResolver.ResolveLocation(fixPaths[0], docIndex)
+	return location, location.Line > 0
 }
 
 func addFix(result *sarif.Result, filepath string, startLine, startColumn, endLine, endColumn int, text string) {

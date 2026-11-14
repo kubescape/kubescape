@@ -638,6 +638,7 @@ func TestDefaultBaseNameForFormat(t *testing.T) {
 	assert.Equal(t, "sbom", DefaultBaseNameForFormat(SPDXFormat))
 	assert.Equal(t, "exceptions", DefaultBaseNameForFormat(ExceptionsFormat))
 	assert.Equal(t, "github-actions", DefaultBaseNameForFormat(GitHubActionsFormat))
+	assert.Equal(t, "gl-code-quality-report", DefaultBaseNameForFormat(GitLabCodeQualityFormat))
 	assert.Equal(t, "report", DefaultBaseNameForFormat(JsonFormat))
 	assert.Equal(t, "report", DefaultBaseNameForFormat(PrettyFormat))
 	assert.Equal(t, "report", DefaultBaseNameForFormat("unknown"))
