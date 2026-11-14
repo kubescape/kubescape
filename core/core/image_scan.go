@@ -31,6 +31,7 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	ksmetav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
+	"github.com/kubescape/kubescape/v4/core/pkg/filesizelimit"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling"
 	"github.com/kubescape/kubescape/v4/pkg/imagescan"
 )
@@ -73,7 +74,63 @@ var (
 	ErrImageExceptionsNotRegular = errors.New("image exceptions file is not a regular file")
 	// ErrImageExceptionsTooLarge is returned when an image exceptions file exceeds the maximum allowed size.
 	ErrImageExceptionsTooLarge = errors.New("image exceptions file exceeds maximum size limit")
+	// ErrImageInputNotRegular is returned when an image input, archive, or blob file is not a regular file.
+	ErrImageInputNotRegular = errors.New("image input file is not a regular file")
+	// ErrImageBlobTooLarge is returned when an image blob or archive entry exceeds the maximum allowed size.
+	ErrImageBlobTooLarge = errors.New("image blob exceeds maximum size limit")
 )
+
+// openLocalRegularFile opens path for reading and rejects anything but a regular file.
+// O_NONBLOCK keeps opening a FIFO from waiting for a writer, and descriptor validation
+// ensures named pipes, character/block devices, and directories are rejected promptly.
+// Path is passed directly to preserve symlink traversal semantics.
+func openLocalRegularFile(path string) (*os.File, error) {
+	if strings.TrimSpace(path) == "" {
+		return nil, os.ErrNotExist
+	}
+	file, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return nil, err
+	}
+	info, err := file.Stat()
+	if err != nil {
+		_ = file.Close()
+		return nil, err
+	}
+	if info.IsDir() {
+		_ = file.Close()
+		return nil, fmt.Errorf("%q is a directory, not a file: %w", path, ErrImageInputNotRegular)
+	}
+	if !info.Mode().IsRegular() {
+		_ = file.Close()
+		return nil, fmt.Errorf("%w: %q", ErrImageInputNotRegular, path)
+	}
+	return file, nil
+}
+
+// readBoundedBlob reads at most filesizelimit.GetMaxFileSize() bytes from blobPath.
+func readBoundedBlob(blobPath string) ([]byte, error) {
+	f, err := openLocalRegularFile(blobPath)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = f.Close() }()
+
+	limit := filesizelimit.GetMaxFileSize()
+	info, err := f.Stat()
+	if err == nil && info.Size() > limit {
+		return nil, fmt.Errorf("%w: %q exceeds the %d byte limit", ErrImageBlobTooLarge, blobPath, limit)
+	}
+
+	data, err := io.ReadAll(io.LimitReader(f, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > limit {
+		return nil, fmt.Errorf("%w: %q exceeds the %d byte limit", ErrImageBlobTooLarge, blobPath, limit)
+	}
+	return data, nil
+}
 
 // openImageExceptionsFile opens path for reading and rejects anything but a regular file.
 // O_NONBLOCK keeps opening a FIFO from waiting for a writer, and the check is
@@ -185,12 +242,12 @@ func isRawSBOMInput(trimmed string) bool {
 	if err != nil {
 		return false
 	}
-	f, err := os.Open(expandedPath)
+	f, err := openLocalRegularFile(expandedPath)
 	if err != nil {
 		return false
 	}
 	defer func() { _ = f.Close() }()
-	mType, err := mimetype.DetectReader(f)
+	mType, err := mimetype.DetectReader(io.LimitReader(f, filesizelimit.GetMaxFileSize()))
 	if err != nil {
 		return false
 	}
@@ -296,6 +353,9 @@ func isImageRemainderLocal(rest string) bool {
 	if info.IsDir() {
 		return isOCILayoutDir(rest)
 	}
+	if !info.Mode().IsRegular() {
+		return false
+	}
 	return isTarballFile(rest) || isSIFFile(rest) || isOCILayoutTarball(rest)
 }
 
@@ -337,7 +397,7 @@ func isOCILayoutDir(path string) bool {
 	if err := json.Unmarshal(raw, &desc); err != nil {
 		return false
 	}
-	configBody, err := os.ReadFile(filepath.Join(path, "blobs", digestPath(desc.Config.Digest)))
+	configBody, err := readBoundedBlob(filepath.Join(path, "blobs", digestPath(desc.Config.Digest)))
 	if err != nil {
 		return false
 	}
@@ -346,7 +406,7 @@ func isOCILayoutDir(path string) bool {
 		return false
 	}
 	for _, layer := range desc.Layers {
-		f, err := os.Open(filepath.Join(path, "blobs", digestPath(layer.Digest)))
+		f, err := openLocalRegularFile(filepath.Join(path, "blobs", digestPath(layer.Digest)))
 		if err != nil {
 			return false
 		}
@@ -545,11 +605,12 @@ func overlayNoTruncate(cur, body []byte) []byte {
 // and the provider reads the extracted index.json whole, so no size cap
 // applies here either.
 func walkTarEntries(path string) (indexBody []byte, ok bool) {
-	f, err := os.Open(path)
+	f, err := openLocalRegularFile(path)
 	if err != nil {
 		return nil, false
 	}
 	defer func() { _ = f.Close() }()
+	limit := filesizelimit.GetMaxFileSize()
 	tr := tar.NewReader(f)
 	for {
 		hdr, err := tr.Next()
@@ -573,8 +634,11 @@ func walkTarEntries(path string) (indexBody []byte, ok bool) {
 		if rel != "index.json" {
 			continue
 		}
-		body, err := io.ReadAll(tr)
-		if err != nil {
+		if hdr.Size > limit {
+			return nil, false
+		}
+		body, err := io.ReadAll(io.LimitReader(tr, limit+1))
+		if err != nil || int64(len(body)) > limit {
 			return nil, false
 		}
 		indexBody = overlayNoTruncate(indexBody, body)
@@ -591,10 +655,14 @@ func walkTarEntries(path string) (indexBody []byte, ok bool) {
 func overlayTarEntryBody(path, rel string) ([]byte, error) {
 	var final []byte
 	found := false
+	limit := filesizelimit.GetMaxFileSize()
 	err := streamTarEntryBodies(path, rel, func(body io.Reader) error {
-		chunk, err := io.ReadAll(body)
+		chunk, err := io.ReadAll(io.LimitReader(body, limit+1))
 		if err != nil {
 			return err
+		}
+		if int64(len(chunk)) > limit {
+			return fmt.Errorf("%w: entry %q exceeds the %d byte limit", ErrImageBlobTooLarge, rel, limit)
 		}
 		final = overlayNoTruncate(final, chunk)
 		found = true
@@ -654,7 +722,7 @@ func validateTarLayer(path, rel string) error {
 	if err != nil {
 		return err
 	}
-	f, err := os.Open(tmpName)
+	f, err := openLocalRegularFile(tmpName)
 	if err != nil {
 		return err
 	}
@@ -666,7 +734,7 @@ func validateTarLayer(path, rel string) error {
 // occurrence of rel in order, mirroring the same cleaning and rejection
 // walkTarEntries applies. Bodies stream bounded by their entries.
 func streamTarEntryBodies(path, rel string, fn func(io.Reader) error) error {
-	f, err := os.Open(path)
+	f, err := openLocalRegularFile(path)
 	if err != nil {
 		return err
 	}
@@ -1189,6 +1257,9 @@ func scanImageForPlatform(
 	vulnExceptions, sevExceptions []string,
 	platform string,
 ) (*cautils.ImageScanData, error) {
+	if err := validateLocalImageInput(img); err != nil {
+		return nil, err
+	}
 	if platform == "" {
 		return svc.Scan(ctx, img, creds, vulnExceptions, sevExceptions)
 	}
@@ -1211,6 +1282,9 @@ func scanWithRegistryMapping(
 	vulnExceptions, sevExceptions []string,
 	platform string,
 ) (*cautils.ImageScanData, error) {
+	if err := validateLocalImageInput(img); err != nil {
+		return nil, err
+	}
 	if len(credsList) == 0 {
 		credsList = []imagescan.RegistryCredentials{{}}
 	}
@@ -1267,27 +1341,161 @@ var onBeforeImageScanServiceInit func()
 // onBeforeImageScanJobs is an internal test hook invoked right before image scan jobs begin.
 var onBeforeImageScanJobs func()
 
+// isUnambiguousLocalPath reports whether a path is unambiguously a local filesystem path
+// (absolute, dot-relative, parent-relative, or home-relative) which can never be a valid
+// registry reference format.
+func isUnambiguousLocalPath(p string) bool {
+	if filepath.IsAbs(p) || strings.HasPrefix(p, "/") || strings.HasPrefix(p, "\\") {
+		return true
+	}
+	if strings.HasPrefix(p, "./") || strings.HasPrefix(p, ".\\") ||
+		strings.HasPrefix(p, "../") || strings.HasPrefix(p, "..\\") {
+		return true
+	}
+	if strings.HasPrefix(p, "~/") || strings.HasPrefix(p, "~\\") || p == "~" {
+		return true
+	}
+	return false
+}
+
 // resolveLocalImageTarget checks if an image target specifies a local file or directory
 // via a supported local selector (docker-archive:, oci-archive:, oci-dir:, dir:, file:,
-// local-file:, local-directory:, singularity:, snap:, sbom:, purl:) or an explicit archive file.
+// local-file:, local-directory:, singularity:, snap:, sbom:, purl:), an unambiguous local
+// filesystem path, or an existing file/directory on disk.
 // It returns the underlying filesystem path and true if it identifies a local target.
+// Registry references (including those with tags or repository names ending in .tar, .tgz,
+// .tar.gz, or .sif, or explicit registry selectors like registry: or docker:) return "", false.
 func resolveLocalImageTarget(image string) (string, bool) {
 	trimmed := strings.TrimSpace(image)
 	if trimmed == "" {
 		return "", false
 	}
+
+	// Raw SBOM content (an existing text/plain SBOM file) decodes as a local source.
+	if isRawSBOMInput(trimmed) {
+		expanded, err := homedir.Expand(trimmed)
+		if err == nil {
+			return expanded, true
+		}
+		return trimmed, true
+	}
+
+	// Explicit registry selectors (docker:, podman:, containerd:, oci-registry:, oci-model:,
+	// registry:, daemon:, pull:) always denote registry/daemon sources, never local files.
+	if _, _, ok := stripRegistrySelectorScheme(trimmed); ok {
+		return "", false
+	}
+
+	// Syft's generic "image:" prefix: peel once, then evaluate remainder.
+	if rest, _ := peelGenericImageSelector(trimmed); rest != "" {
+		trimmed = rest
+		if _, _, ok := stripRegistrySelectorScheme(trimmed); ok {
+			return "", false
+		}
+	}
+
+	// Explicit local scheme (docker-archive:, oci-archive:, oci-dir:, dir:, file:, sbom:, etc.)
+	// always indicates an intended local file or directory.
+	if scheme := detectScheme(trimmed); scheme != "" {
+		rawPath := strings.TrimSpace(strings.TrimPrefix(trimmed, scheme+":"))
+		if expanded, err := homedir.Expand(rawPath); err == nil {
+			return expanded, true
+		}
+		return rawPath, true
+	}
+
+	// If the exact path exists on disk, it is a local target.
+	// (Raw input matching an existing path beats registry interpretation).
+	if expanded, err := homedir.Expand(trimmed); err == nil {
+		if _, err := os.Stat(expanded); err == nil {
+			return expanded, true
+		}
+	}
+
+	// If the input does not exist on disk, check whether it is an unambiguous local filesystem path
+	// (starts with '/', './', '../', '~', or Windows drive/backslash).
+	// Unambiguous paths cannot be registry references.
+	if isUnambiguousLocalPath(trimmed) {
+		expanded, err := homedir.Expand(trimmed)
+		if err == nil {
+			return expanded, true
+		}
+		return trimmed, true
+	}
+
+	// Suffix-only references that do not exist on disk:
+	// A reference such as "registry.example/team/app:release.tar" or "nginx:release.tar"
+	// parses as a valid normalized registry reference and must not be classified as a local archive.
+	if _, err := reference.ParseNormalizedNamed(trimmed); err == nil {
+		return "", false
+	}
+
+	lower := strings.ToLower(trimmed)
+	if strings.HasSuffix(lower, ".tar") || strings.HasSuffix(lower, ".tar.gz") || strings.HasSuffix(lower, ".tgz") || strings.HasSuffix(lower, ".sif") {
+		if expanded, err := homedir.Expand(trimmed); err == nil {
+			return expanded, true
+		}
+		return trimmed, true
+	}
+
+	return "", false
+}
+
+// validateLocalImageInput verifies that local image inputs (archives, directories, SBOMs,
+// or local files) exist and are regular files (or valid directories for directory schemes).
+// Non-blocking regular-file checks reject special files (FIFOs, devices) without imposing
+// a whole-file size limit on streaming image archives.
+// Returns nil for registry image references.
+func validateLocalImageInput(image string) error {
+	trimmed := strings.TrimSpace(image)
+	if trimmed == "" {
+		return fmt.Errorf("image name cannot be empty")
+	}
+
+	localPath, isLocal := resolveLocalImageTarget(trimmed)
+	if !isLocal || localPath == "" {
+		return nil
+	}
+
 	if rest, _ := peelGenericImageSelector(trimmed); rest != "" {
 		trimmed = rest
 	}
-	if scheme := detectScheme(trimmed); scheme != "" {
-		rawPath := strings.TrimPrefix(trimmed, scheme+":")
-		return strings.TrimSpace(rawPath), true
+
+	scheme := strings.ToLower(detectScheme(trimmed))
+	isDirScheme := scheme == "dir" || scheme == "oci-dir" || scheme == "local-directory"
+
+	expanded, err := homedir.Expand(localPath)
+	if err == nil {
+		localPath = expanded
 	}
-	lower := strings.ToLower(trimmed)
-	if strings.HasSuffix(lower, ".tar") || strings.HasSuffix(lower, ".tar.gz") || strings.HasSuffix(lower, ".tgz") || strings.HasSuffix(lower, ".sif") {
-		return trimmed, true
+
+	if isDirScheme {
+		info, err := os.Stat(localPath)
+		if err != nil {
+			return err
+		}
+		if !info.IsDir() {
+			return fmt.Errorf("%q is not a directory: %w", localPath, ErrImageInputNotRegular)
+		}
+		if scheme == "oci-dir" {
+			if !isOCILayoutDir(localPath) {
+				return fmt.Errorf("invalid OCI layout directory: %q", localPath)
+			}
+		}
+		return nil
 	}
-	return "", false
+
+	f, err := openLocalRegularFile(localPath)
+	if err != nil {
+		// If an existing directory was passed without an explicit directory scheme, accept valid directories
+		if info, statErr := os.Stat(localPath); statErr == nil && info.IsDir() {
+			return nil
+		}
+		return err
+	}
+	_ = f.Close()
+
+	return nil
 }
 
 // ScanImageContext scans every image in imgScanInfo.Images using the given ctx
@@ -1388,6 +1596,35 @@ func (ks *Kubescape) ScanImageContext(ctx context.Context, imgScanInfo *ksmetav1
 		}
 	}
 
+	// Fail fast before scanner initialization and Grype DB download when every
+	// image fails local input validation (e.g. non-regular FIFO, oversized archive, or missing local file).
+	if len(images) > 0 {
+		allLocalInputErr := true
+		var firstLocalErr error
+		for _, image := range images {
+			if err := validateLocalImageInput(image); err != nil {
+				if firstLocalErr == nil {
+					firstLocalErr = err
+				}
+			} else {
+				allLocalInputErr = false
+				break
+			}
+		}
+		if allLocalInputErr && firstLocalErr != nil {
+			errs := make([]error, 0, len(images))
+			for _, image := range images {
+				errs = append(errs, fmt.Errorf("failed to scan image %s: %w", image, validateLocalImageInput(image)))
+			}
+			err := errors.Join(errs...)
+			logger.L().StopError(err.Error())
+			if len(images) == 1 {
+				return false, fmt.Errorf("failed to scan image %s: %w", images[0], firstLocalErr)
+			}
+			return false, err
+		}
+	}
+
 	failOnStale, maxDBAge := imagescan.ResolveDBAgeGate(scanInfo.FailOnStaleDB, scanInfo.FailOnStaleDBSet, scanInfo.MaxDBAge, scanInfo.MaxDBAgeSet)
 	distCfg, installCfg, shouldUpdate, err := imagescan.NewDefaultDBConfig(scanInfo.ListingURL, scanInfo.SkipDBUpdate, failOnStale)
 	if err != nil {
@@ -1476,6 +1713,10 @@ func buildImageScanJobs(imgScanInfo *ksmetav1.ImageScanInfo, scanInfo *cautils.S
 				exceptionErr = fmt.Errorf("%w (exceptions from %q)", exceptionErr, imgScanInfo.Exceptions)
 			}
 		}
+		var inputErr error
+		if err := validateLocalImageInput(image); err != nil {
+			inputErr = err
+		}
 		jobs = append(jobs, ImageScanJob{
 			Image:                   image,
 			Platform:                imgScanInfo.Platform,
@@ -1483,6 +1724,7 @@ func buildImageScanJobs(imgScanInfo *ksmetav1.ImageScanInfo, scanInfo *cautils.S
 			VulnerabilityExceptions: vulnerabilityExceptions,
 			SeverityExceptions:      severityExceptions,
 			RegistryMapping:         scanInfo.RegistryMapping,
+			InputErr:                inputErr,
 			ExceptionErr:            exceptionErr,
 		})
 	}
@@ -1660,6 +1902,18 @@ func (a *ScanErrorAggregator) SingleError() (CategorizedScanError, bool) {
 	return a.Errors[0], true
 }
 
+// Unwrap returns the underlying slice of collected errors, enabling
+// standard errors.Is and errors.As traversal across aggregated scan failures.
+func (a *ScanErrorAggregator) Unwrap() []error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	errs := make([]error, 0, len(a.Errors))
+	for _, e := range a.Errors {
+		errs = append(errs, e.Err)
+	}
+	return errs
+}
+
 // HasErrors indicates whether any scan errors occurred.
 func (a *ScanErrorAggregator) HasErrors() bool {
 	a.mu.Lock()
@@ -1698,6 +1952,9 @@ type ImageScanJob struct {
 	VulnerabilityExceptions []string
 	SeverityExceptions      []string
 	RegistryMapping         map[string]string
+	// InputErr carries a local input validation error (non-regular file,
+	// oversized archive, etc.). Workers surface it without scanner dispatch.
+	InputErr error
 	// ExceptionErr carries a per-image exception-resolution failure (e.g.
 	// exceptions requested for a non-registry input). Workers surface it as
 	// the job result without invoking the scanner.
@@ -1779,6 +2036,21 @@ func (o *ImageScanOrchestrator) ScanImages(ctx context.Context, jobs []ImageScan
 						Image:    job.Image,
 						Platform: job.Platform,
 						Error:    formatExceptionUnsupportedError(job.ExceptionErr),
+					}
+					continue
+				}
+				inputErr := job.InputErr
+				if inputErr == nil {
+					inputErr = validateLocalImageInput(job.Image)
+				}
+				if inputErr != nil {
+					if o.errorAggregator != nil {
+						o.errorAggregator.Add(target, inputErr)
+					}
+					resultChan <- ImageScanResult{
+						Image:    job.Image,
+						Platform: job.Platform,
+						Error:    inputErr,
 					}
 					continue
 				}

@@ -1,6 +1,8 @@
 package core
 
 import (
+	"archive/tar"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -980,6 +982,263 @@ func TestGetImageExceptionsFromFile_DirectoryRejected(t *testing.T) {
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrImageExceptionsNotRegular)
 	assert.Contains(t, err.Error(), "is a directory, not a file")
+}
+
+func TestOpenLocalRegularFile_DirectoryRejected(t *testing.T) {
+	dir := t.TempDir()
+	f, err := openLocalRegularFile(dir)
+	if f != nil {
+		_ = f.Close()
+	}
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrImageInputNotRegular)
+	assert.Contains(t, err.Error(), "is a directory, not a file")
+}
+
+func TestOpenLocalRegularFile_NonRegularFileRejected(t *testing.T) {
+	if _, err := os.Stat("/dev/null"); err == nil {
+		f, err := openLocalRegularFile("/dev/null")
+		if f != nil {
+			_ = f.Close()
+		}
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrImageInputNotRegular)
+	}
+}
+
+func TestOpenLocalRegularFile_EmptyPath(t *testing.T) {
+	_, err := openLocalRegularFile("   ")
+	require.Error(t, err)
+	assert.ErrorIs(t, err, os.ErrNotExist)
+}
+
+func TestReadBoundedBlob_OversizedRejected(t *testing.T) {
+	t.Setenv("KUBESCAPE_MAX_FILE_SIZE", "100")
+	dir := t.TempDir()
+	blobPath := filepath.Join(dir, "oversized_blob")
+	require.NoError(t, os.WriteFile(blobPath, bytes.Repeat([]byte("a"), 150), 0o600))
+
+	_, err := readBoundedBlob(blobPath)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrImageBlobTooLarge)
+}
+
+func TestIsRawSBOMInput_DirectoryReturnsFalse(t *testing.T) {
+	dir := t.TempDir()
+	assert.False(t, isRawSBOMInput(dir))
+}
+
+func TestOverlayTarEntryBody_OversizedRejected(t *testing.T) {
+	t.Setenv("KUBESCAPE_MAX_FILE_SIZE", "100")
+	dir := t.TempDir()
+	tarPath := filepath.Join(dir, "oversized.tar")
+
+	f, err := os.Create(tarPath)
+	require.NoError(t, err)
+	tw := tar.NewWriter(f)
+
+	payload := bytes.Repeat([]byte("x"), 150)
+	hdr := &tar.Header{
+		Name: "blobs/layer.tar",
+		Mode: 0o600,
+		Size: int64(len(payload)),
+	}
+	require.NoError(t, tw.WriteHeader(hdr))
+	_, err = tw.Write(payload)
+	require.NoError(t, err)
+	require.NoError(t, tw.Close())
+	require.NoError(t, f.Close())
+
+	_, err = overlayTarEntryBody(tarPath, "blobs/layer.tar")
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrImageBlobTooLarge)
+}
+
+func TestValidateLocalImageInput_ValidArchiveLargerThanLimitAccepted(t *testing.T) {
+	// Preserve streaming local-image support: whole archives larger than GetMaxFileSize()
+	// must be accepted so the scanner can stream them.
+	t.Setenv("KUBESCAPE_MAX_FILE_SIZE", "100")
+	dir := t.TempDir()
+	tarPath := filepath.Join(dir, "large.tar")
+	require.NoError(t, os.WriteFile(tarPath, bytes.Repeat([]byte("x"), 200), 0o600))
+
+	assert.NoError(t, validateLocalImageInput("docker-archive:"+tarPath))
+	assert.NoError(t, validateLocalImageInput("oci-archive:"+tarPath))
+	assert.NoError(t, validateLocalImageInput(tarPath))
+
+	info := &ksmetav1.ImageScanInfo{
+		Images: []string{"docker-archive:" + tarPath},
+	}
+	jobs := buildImageScanJobs(info, &cautils.ScanInfo{}, nil)
+	require.Len(t, jobs, 1)
+	assert.NoError(t, jobs[0].InputErr)
+}
+
+func TestScanWithRegistryMapping_ArchiveLargerThanLimitStreamsToScanner(t *testing.T) {
+	// Preserves streaming local-image support: archives exceeding GetMaxFileSize()
+	// must not be rejected prior to scanner dispatch.
+	t.Setenv("KUBESCAPE_MAX_FILE_SIZE", "100")
+	dir := t.TempDir()
+	tarPath := filepath.Join(dir, "large.tar")
+	require.NoError(t, os.WriteFile(tarPath, bytes.Repeat([]byte("x"), 200), 0o600))
+
+	mockSvc := newMockImageScanService(0)
+	_, err := scanWithRegistryMapping(
+		context.Background(),
+		mockSvc,
+		"docker-archive:"+tarPath,
+		nil,
+		nil,
+		nil,
+		nil,
+		"",
+	)
+	require.NoError(t, err)
+	assert.Equal(t, 1, mockSvc.scanCalls, "scanner should be dispatched for valid archive larger than limit")
+}
+
+func TestIsOCILayoutDir_LayerBlobLargerThanLimitAccepted(t *testing.T) {
+	// OCI layout directory with layer blobs larger than GetMaxFileSize() must be accepted
+	// and streamed rather than rejected based on blob size.
+	t.Setenv("KUBESCAPE_MAX_FILE_SIZE", "500")
+	dir := t.TempDir()
+
+	// Create an incompressible layer blob payload whose compressed size exceeds the 500 byte limit
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	payload := make([]byte, 50000)
+	for i := range payload {
+		payload[i] = byte((i*37 + 13) % 256)
+	}
+	require.NoError(t, tw.WriteHeader(&tar.Header{Name: "large.bin", Mode: 0o600, Size: int64(len(payload))}))
+	_, err := tw.Write(payload)
+	require.NoError(t, err)
+	require.NoError(t, tw.Close())
+	largeLayerCompressed := gzipBytes(t, buf.Bytes())
+	require.Greater(t, len(largeLayerCompressed), 500, "compressed layer blob must exceed limit")
+
+	goodIndex, _, _, _, _, goodBlobs := ociLayoutContentWithLayers(largeLayerCompressed)
+	goodDir := filepath.Join(dir, "goodlayerdir")
+	require.NoError(t, os.MkdirAll(goodDir, 0o755))
+	for digest, body := range goodBlobs {
+		writeBlob(t, goodDir, digest, body)
+	}
+	require.NoError(t, os.WriteFile(filepath.Join(goodDir, "index.json"), goodIndex, 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(goodDir, "oci-layout"), []byte(`{"imageLayoutVersion":"1.0.0"}`), 0o600))
+
+	assert.True(t, isOCILayoutDir(goodDir), "OCI layout with layer larger than limit must be accepted")
+}
+
+func TestIsOCILayoutTarball_LayerEntryLargerThanLimitAccepted(t *testing.T) {
+	// OCI layout tarball with layer entries larger than GetMaxFileSize() must be accepted
+	// and streamed rather than rejected based on blob size.
+	t.Setenv("KUBESCAPE_MAX_FILE_SIZE", "500")
+	dir := t.TempDir()
+
+	// Create an incompressible layer blob payload whose compressed size exceeds the 500 byte limit
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	payload := make([]byte, 50000)
+	for i := range payload {
+		payload[i] = byte((i*37 + 13) % 256)
+	}
+	require.NoError(t, tw.WriteHeader(&tar.Header{Name: "large.bin", Mode: 0o600, Size: int64(len(payload))}))
+	_, err := tw.Write(payload)
+	require.NoError(t, err)
+	require.NoError(t, tw.Close())
+	largeLayerCompressed := gzipBytes(t, buf.Bytes())
+	require.Greater(t, len(largeLayerCompressed), 500, "compressed layer blob must exceed limit")
+
+	goodIndex, _, _, _, _, goodBlobs := ociLayoutContentWithLayers(largeLayerCompressed)
+	goodArchive := filepath.Join(dir, "goodlayer.tar")
+	goodMembers := []tarMember{
+		{name: "oci-layout", body: []byte(`{"imageLayoutVersion":"1.0.0"}`)},
+		{name: "index.json", body: goodIndex},
+	}
+	for digest, body := range goodBlobs {
+		goodMembers = append(goodMembers, tarMember{name: blobEntry(digest), body: body})
+	}
+	writeTarOrdered(t, goodArchive, goodMembers)
+
+	assert.True(t, isOCILayoutTarball(goodArchive), "OCI layout tarball with layer entry larger than limit must be accepted")
+}
+
+func TestValidateLocalImageInput_RegistryImageIsAllowed(t *testing.T) {
+	assert.NoError(t, validateLocalImageInput("alpine:latest"))
+	assert.NoError(t, validateLocalImageInput("quay.io/kubescape/kubescape:v3.0.0"))
+	assert.NoError(t, validateLocalImageInput("image:nginx:latest"))
+}
+
+func TestValidateLocalImageInput_DirectoryHandling(t *testing.T) {
+	dir := t.TempDir()
+	// Plain directory without scheme should be recognized as valid dir
+	assert.NoError(t, validateLocalImageInput(dir))
+	// Scheme dir: on actual dir
+	assert.NoError(t, validateLocalImageInput("dir:"+dir))
+
+	// Scheme dir: on a file should fail
+	filePath := filepath.Join(dir, "file.txt")
+	require.NoError(t, os.WriteFile(filePath, []byte("content"), 0o600))
+	err := validateLocalImageInput("dir:" + filePath)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrImageInputNotRegular)
+}
+
+func TestResolveLocalImageTarget_RegistryReferencesWithTarSuffixNotClassifiedAsLocal(t *testing.T) {
+	// Registry references with tags or repo names ending in .tar, .tgz, .tar.gz, .sif
+	// must NOT be classified as local files when they do not exist on disk.
+	tests := []struct {
+		image string
+	}{
+		{"registry.example/team/app:release.tar"},
+		{"registry.example:5000/team/app:release.tar"},
+		{"myregistry.io/org/repo:archive.tgz"},
+		{"myregistry.io/org/repo:model.sif"},
+		{"registry:registry.example/team/app:release.tar"},
+		{"docker:registry.example/team/app:release.tar"},
+		{"image:registry.example/team/app:release.tar"},
+		{"nginx:release.tar"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.image, func(t *testing.T) {
+			path, isLocal := resolveLocalImageTarget(tt.image)
+			assert.False(t, isLocal, "expected %q to not be classified as a local target, got path %q", tt.image, path)
+			assert.Empty(t, path)
+
+			// validateLocalImageInput must return nil for registry references
+			err := validateLocalImageInput(tt.image)
+			assert.NoError(t, err, "expected validateLocalImageInput to succeed for registry reference %q", tt.image)
+		})
+	}
+}
+
+func TestResolveLocalImageTarget_MissingLocalArchivesFailFast(t *testing.T) {
+	// Explicit local selectors and unambiguous filesystem paths MUST be classified as local
+	// targets, and fail with ErrNotExist if the file is missing.
+	tests := []struct {
+		image string
+	}{
+		{"docker-archive:/nonexistent/path/archive.tar"},
+		{"docker-archive:release.tar"},
+		{"oci-archive:/nonexistent/path/archive.tar"},
+		{"/nonexistent/absolute/path/archive.tar"},
+		{"./nonexistent/relative/path/archive.tar"},
+		{"../nonexistent/relative/path/archive.tar"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.image, func(t *testing.T) {
+			path, isLocal := resolveLocalImageTarget(tt.image)
+			assert.True(t, isLocal, "expected %q to be classified as a local target", tt.image)
+			assert.NotEmpty(t, path)
+
+			// validateLocalImageInput must fail with not exist
+			err := validateLocalImageInput(tt.image)
+			require.Error(t, err, "expected validateLocalImageInput to fail for missing local archive %q", tt.image)
+			assert.ErrorIs(t, err, os.ErrNotExist)
+		})
+	}
 }
 
 func TestScanImage_NilParametersReturnsError(t *testing.T) {
