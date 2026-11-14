@@ -1,6 +1,7 @@
 package cautils
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -132,12 +133,12 @@ func isSupportedRemediationSeverity(severity string) bool {
 // OperatorAdapter transport (one OperatorCommand object per apis.Command) — a
 // remediation is a new verb on that pipeline, not a new mechanism.
 //
-// Supported actions: `annotate`, `quarantine` and `revert`; the `cordon` action
+// Supported actions: `annotate`, `patch`, `quarantine` and `revert`; the `cordon` action
 // arrives in a later phase. A target is given either explicitly (--kind/--name)
 // or as a findings-driven selector (--control/--min-severity) that the operator
 // resolves against the scan results already stored in the cluster.
 type RemediationInfo struct {
-	// Action is the operation to perform: "annotate", "quarantine" or "revert".
+	// Action is the operation to perform: "annotate", "patch", "quarantine" or "revert".
 	Action string
 	// Target (explicit).
 	Kind      string
@@ -148,6 +149,10 @@ type RemediationInfo struct {
 	// exclusive with the explicit target above.
 	Control     string
 	MinSeverity string
+	// Patch is the raw JSON patch body for the "patch" action.
+	Patch string
+	// PatchType selects the patch type: "strategic" (default) or "merge".
+	PatchType string
 	// Audit metadata.
 	Reason     string
 	FindingRef string
@@ -176,12 +181,38 @@ func (r *RemediationInfo) IsDryRun() bool {
 
 func (r *RemediationInfo) ValidatePayload(*apis.Commands) error {
 	switch apis.OperatorActionType(r.Action) {
-	case apis.OperatorActionAnnotate, apis.OperatorActionQuarantine, apis.OperatorActionRevert:
-		// supported: annotate + revert (Phase 1), quarantine (Phase 2)
+	case apis.OperatorActionAnnotate, apis.OperatorActionPatch, apis.OperatorActionQuarantine, apis.OperatorActionRevert:
+		// supported: annotate + revert (Phase 1), quarantine (Phase 2), patch
 	case apis.OperatorActionCordon:
-		return fmt.Errorf("remediation action %q is not supported yet (planned for a later phase); supported: annotate, quarantine, revert", r.Action)
+		return fmt.Errorf("remediation action %q is not supported yet (planned for a later phase); supported: annotate, patch, quarantine, revert", r.Action)
 	default:
-		return fmt.Errorf("unknown remediation action %q (supported: annotate, quarantine, revert)", r.Action)
+		return fmt.Errorf("unknown remediation action %q (supported: annotate, patch, quarantine, revert)", r.Action)
+	}
+
+	if apis.OperatorActionType(r.Action) == apis.OperatorActionPatch {
+		if strings.TrimSpace(r.Patch) == "" {
+			return errors.New("patch remediation requires --patch")
+		}
+		var patchMap map[string]any
+		if err := json.Unmarshal([]byte(r.Patch), &patchMap); err != nil || patchMap == nil {
+			if err != nil {
+				return fmt.Errorf("invalid --patch: must be a valid JSON object: %w", err)
+			}
+			return errors.New("invalid --patch: must be a valid JSON object: got null")
+		}
+		if r.PatchType != "" {
+			pt := strings.ToLower(strings.TrimSpace(r.PatchType))
+			if pt != "strategic" && pt != "merge" {
+				return fmt.Errorf("unsupported --patch-type %q (supported: strategic, merge)", r.PatchType)
+			}
+		}
+	} else {
+		if r.Patch != "" {
+			return fmt.Errorf("--patch is only supported with the \"patch\" action")
+		}
+		if r.PatchType != "" {
+			return fmt.Errorf("--patch-type is only supported with the \"patch\" action")
+		}
 	}
 
 	// A remediation is aimed either at one named object or at whatever the
@@ -238,6 +269,12 @@ func (r *RemediationInfo) GetRequestPayload() *apis.Commands {
 		Reason:     r.Reason,
 		FindingRef: r.FindingRef,
 		DryRun:     &dryRun,
+	}
+	if apis.OperatorActionType(r.Action) == apis.OperatorActionPatch {
+		args.Patch = apis.OperatorActionPatchBody(r.Patch)
+		if r.PatchType != "" {
+			args.PatchType = strings.ToLower(strings.TrimSpace(r.PatchType))
+		}
 	}
 	// ValidatePayload guarantees exactly one of the two is set. Emit them
 	// independently anyway so an unvalidated call cannot ship an empty Target,
