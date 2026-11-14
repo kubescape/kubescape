@@ -16,7 +16,6 @@ import (
 
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	ksmetav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
-	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -1055,42 +1054,32 @@ func TestOverlayTarEntryBody_OversizedRejected(t *testing.T) {
 	assert.ErrorIs(t, err, ErrImageBlobTooLarge)
 }
 
-func TestBuildImageScanJobs_LocalInputValidationWithoutExceptions(t *testing.T) {
+func TestValidateLocalImageInput_ValidArchiveLargerThanLimitAccepted(t *testing.T) {
+	// Preserve streaming local-image support: whole archives larger than GetMaxFileSize()
+	// must be accepted so the scanner can stream them.
 	t.Setenv("KUBESCAPE_MAX_FILE_SIZE", "100")
 	dir := t.TempDir()
-	tarPath := filepath.Join(dir, "oversized.tar")
+	tarPath := filepath.Join(dir, "large.tar")
 	require.NoError(t, os.WriteFile(tarPath, bytes.Repeat([]byte("x"), 200), 0o600))
+
+	assert.NoError(t, validateLocalImageInput("docker-archive:"+tarPath))
+	assert.NoError(t, validateLocalImageInput("oci-archive:"+tarPath))
+	assert.NoError(t, validateLocalImageInput(tarPath))
 
 	info := &ksmetav1.ImageScanInfo{
 		Images: []string{"docker-archive:" + tarPath},
 	}
 	jobs := buildImageScanJobs(info, &cautils.ScanInfo{}, nil)
 	require.Len(t, jobs, 1)
-	assert.ErrorIs(t, jobs[0].InputErr, ErrImageBlobTooLarge)
+	assert.NoError(t, jobs[0].InputErr)
 }
 
-func TestScanImageJobs_OversizedArchiveWithoutExceptionsIsRejected(t *testing.T) {
+func TestScanWithRegistryMapping_ArchiveLargerThanLimitStreamsToScanner(t *testing.T) {
+	// Preserves streaming local-image support: archives exceeding GetMaxFileSize()
+	// must not be rejected prior to scanner dispatch.
 	t.Setenv("KUBESCAPE_MAX_FILE_SIZE", "100")
 	dir := t.TempDir()
-	tarPath := filepath.Join(dir, "oversized.tar")
-	require.NoError(t, os.WriteFile(tarPath, bytes.Repeat([]byte("x"), 200), 0o600))
-
-	mockSvc := newMockImageScanService(0)
-	results := &resultshandling.ResultsHandler{}
-	jobs := []ImageScanJob{
-		{Image: "docker-archive:" + tarPath},
-	}
-
-	err := scanImageJobs(context.Background(), mockSvc, 1, jobs, results)
-	require.Error(t, err)
-	assert.ErrorIs(t, err, ErrImageBlobTooLarge)
-	assert.Equal(t, 0, mockSvc.scanCalls, "scanner should not be dispatched for oversized archive")
-}
-
-func TestScanWithRegistryMapping_OversizedArchiveIsRejected(t *testing.T) {
-	t.Setenv("KUBESCAPE_MAX_FILE_SIZE", "100")
-	dir := t.TempDir()
-	tarPath := filepath.Join(dir, "oversized.tar")
+	tarPath := filepath.Join(dir, "large.tar")
 	require.NoError(t, os.WriteFile(tarPath, bytes.Repeat([]byte("x"), 200), 0o600))
 
 	mockSvc := newMockImageScanService(0)
@@ -1104,9 +1093,66 @@ func TestScanWithRegistryMapping_OversizedArchiveIsRejected(t *testing.T) {
 		nil,
 		"",
 	)
-	require.Error(t, err)
-	assert.ErrorIs(t, err, ErrImageBlobTooLarge)
-	assert.Equal(t, 0, mockSvc.scanCalls, "scanner should not be called for oversized archive")
+	require.NoError(t, err)
+	assert.Equal(t, 1, mockSvc.scanCalls, "scanner should be dispatched for valid archive larger than limit")
+}
+
+func TestIsOCILayoutDir_LayerBlobLargerThanLimitAccepted(t *testing.T) {
+	// OCI layout directory with layer blobs larger than GetMaxFileSize() must be accepted
+	// and streamed rather than rejected based on blob size.
+	t.Setenv("KUBESCAPE_MAX_FILE_SIZE", "500")
+	dir := t.TempDir()
+
+	// Create a layer blob with 2000 bytes of payload (exceeding the 500 byte limit)
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	payload := bytes.Repeat([]byte("a"), 2000)
+	require.NoError(t, tw.WriteHeader(&tar.Header{Name: "large.bin", Mode: 0o600, Size: int64(len(payload))}))
+	_, err := tw.Write(payload)
+	require.NoError(t, err)
+	require.NoError(t, tw.Close())
+	largeLayerCompressed := gzipBytes(t, buf.Bytes())
+
+	goodIndex, _, _, _, _, goodBlobs := ociLayoutContentWithLayers(largeLayerCompressed)
+	goodDir := filepath.Join(dir, "goodlayerdir")
+	require.NoError(t, os.MkdirAll(goodDir, 0o755))
+	for digest, body := range goodBlobs {
+		writeBlob(t, goodDir, digest, body)
+	}
+	require.NoError(t, os.WriteFile(filepath.Join(goodDir, "index.json"), goodIndex, 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(goodDir, "oci-layout"), []byte(`{"imageLayoutVersion":"1.0.0"}`), 0o600))
+
+	assert.True(t, isOCILayoutDir(goodDir), "OCI layout with layer larger than limit must be accepted")
+}
+
+func TestIsOCILayoutTarball_LayerEntryLargerThanLimitAccepted(t *testing.T) {
+	// OCI layout tarball with layer entries larger than GetMaxFileSize() must be accepted
+	// and streamed rather than rejected based on blob size.
+	t.Setenv("KUBESCAPE_MAX_FILE_SIZE", "500")
+	dir := t.TempDir()
+
+	// Create a layer blob with 2000 bytes of payload (exceeding the 500 byte limit)
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	payload := bytes.Repeat([]byte("a"), 2000)
+	require.NoError(t, tw.WriteHeader(&tar.Header{Name: "large.bin", Mode: 0o600, Size: int64(len(payload))}))
+	_, err := tw.Write(payload)
+	require.NoError(t, err)
+	require.NoError(t, tw.Close())
+	largeLayerCompressed := gzipBytes(t, buf.Bytes())
+
+	goodIndex, _, _, _, _, goodBlobs := ociLayoutContentWithLayers(largeLayerCompressed)
+	goodArchive := filepath.Join(dir, "goodlayer.tar")
+	goodMembers := []tarMember{
+		{name: "oci-layout", body: []byte(`{"imageLayoutVersion":"1.0.0"}`)},
+		{name: "index.json", body: goodIndex},
+	}
+	for digest, body := range goodBlobs {
+		goodMembers = append(goodMembers, tarMember{name: blobEntry(digest), body: body})
+	}
+	writeTarOrdered(t, goodArchive, goodMembers)
+
+	assert.True(t, isOCILayoutTarball(goodArchive), "OCI layout tarball with layer entry larger than limit must be accepted")
 }
 
 func TestValidateLocalImageInput_RegistryImageIsAllowed(t *testing.T) {

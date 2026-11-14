@@ -405,15 +405,9 @@ func isOCILayoutDir(path string) bool {
 	if err := json.Unmarshal(configBody, &config); err != nil {
 		return false
 	}
-	limit := filesizelimit.GetMaxFileSize()
 	for _, layer := range desc.Layers {
 		f, err := openLocalRegularFile(filepath.Join(path, "blobs", digestPath(layer.Digest)))
 		if err != nil {
-			return false
-		}
-		info, err := f.Stat()
-		if err != nil || info.Size() > limit {
-			_ = f.Close()
 			return false
 		}
 		err = validateLayerStream(f)
@@ -760,9 +754,6 @@ func streamTarEntryBodies(path, rel string, fn func(io.Reader) error) error {
 		}
 		if entryRel != rel || hdr.Typeflag != tar.TypeReg {
 			continue
-		}
-		if hdr.Size > filesizelimit.GetMaxFileSize() {
-			return fmt.Errorf("%w: entry %q exceeds the limit", ErrImageBlobTooLarge, hdr.Name)
 		}
 		if err := fn(tr); err != nil {
 			return err
@@ -1451,8 +1442,9 @@ func resolveLocalImageTarget(image string) (string, bool) {
 }
 
 // validateLocalImageInput verifies that local image inputs (archives, directories, SBOMs,
-// or local files) exist, are regular files (or valid directories for directory schemes),
-// and do not exceed the configured maximum file size limit (CWE-400).
+// or local files) exist and are regular files (or valid directories for directory schemes).
+// Non-blocking regular-file checks reject special files (FIFOs, devices) without imposing
+// a whole-file size limit on streaming image archives.
 // Returns nil for registry image references.
 func validateLocalImageInput(image string) error {
 	trimmed := strings.TrimSpace(image)
@@ -1501,32 +1493,7 @@ func validateLocalImageInput(image string) error {
 		}
 		return err
 	}
-	defer func() { _ = f.Close() }()
-
-	info, err := f.Stat()
-	if err != nil {
-		return err
-	}
-	limit := filesizelimit.GetMaxFileSize()
-	if info.Size() > limit {
-		return fmt.Errorf("%w: %q exceeds the %d byte limit", ErrImageBlobTooLarge, localPath, limit)
-	}
-
-	lower := strings.ToLower(localPath)
-	if strings.HasSuffix(lower, ".tar") || scheme == "docker-archive" || scheme == "oci-archive" {
-		if _, seekErr := f.Seek(0, io.SeekStart); seekErr == nil {
-			tr := tar.NewReader(f)
-			for {
-				hdr, nextErr := tr.Next()
-				if nextErr != nil {
-					break
-				}
-				if hdr.Size > limit {
-					return fmt.Errorf("%w: entry %q in %q exceeds the %d byte limit", ErrImageBlobTooLarge, hdr.Name, localPath, limit)
-				}
-			}
-		}
-	}
+	_ = f.Close()
 
 	return nil
 }
