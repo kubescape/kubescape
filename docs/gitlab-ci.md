@@ -108,7 +108,7 @@ scan_code_quality:
       codequality: gl-code-quality-report.json
 ```
 
-Kubescape severities map to Code Quality severities as Critical → `critical`, High → `major`, Medium → `minor`, and Low → `info`. Each finding carries a fingerprint built from the control, the resource and the file, so GitLab tracks it across pipelines and only reports it as new when one of those changes. Like `gitlab-sast`, the format only covers local file, directory and repository scans, and resources with no path inside the repository are left out with a warning. Image vulnerabilities have no file to anchor to, so `--scan-images` and `scan image` are rejected with this format.
+Kubescape severities map to Code Quality severities as Critical → `critical`, High → `major`, Medium → `minor`, and Low → `info`. Each finding carries a fingerprint built from the control, the resource's kind, namespace and name, and the file, so GitLab tracks it across pipelines and only reports it as new when one of those changes. Moving the resource within its file, or scanning from another checkout directory, does not change it. Like `gitlab-sast`, the format only covers local file, directory and repository scans, and resources with no path inside the repository are left out with a warning. Image vulnerabilities have no file to anchor to, so `--scan-images` and `scan image` are rejected with this format.
 
 Troubleshooting
 
