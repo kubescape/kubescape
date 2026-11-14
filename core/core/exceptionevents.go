@@ -27,7 +27,7 @@ var eventsAccessReviewTimeout = 10 * time.Second
 // is not to contact a cluster, otherwise the one newSecurityExceptionEventRecorder
 // makes.
 func scanExceptionRecorder(ctx context.Context, scanInfo *cautils.ScanInfo) (record.EventRecorder, func()) {
-	if scanInfo.NoClusterAccess {
+	if scanInfo == nil || scanInfo.NoClusterAccess {
 		return nil, nil
 	}
 	return newSecurityExceptionEventRecorder(ctx)

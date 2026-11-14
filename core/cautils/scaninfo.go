@@ -362,6 +362,9 @@ func (scanInfo *ScanInfo) Init(ctx context.Context, policyIdentifiers []PolicyId
 // partial clones, and the outer scan lifecycle (defer scanInfo.Cleanup()) may
 // call it again on return. This method is not safe for concurrent use.
 func (scanInfo *ScanInfo) Cleanup() {
+	if scanInfo == nil {
+		return
+	}
 	cleanups := scanInfo.cleanups
 	scanInfo.cleanups = nil
 	for _, cleanup := range cleanups {
@@ -370,6 +373,9 @@ func (scanInfo *ScanInfo) Cleanup() {
 }
 
 func (scanInfo *ScanInfo) AddCleanup(cleanup func()) {
+	if scanInfo == nil {
+		return
+	}
 	scanInfo.cleanups = append(scanInfo.cleanups, cleanup)
 }
 
@@ -498,7 +504,7 @@ func (scanInfo *ScanInfo) setUseFrom(policyIdentifiers []PolicyIdentifier) {
 // Empty entries and surrounding whitespace are dropped so that inputs like
 // "json,,pdf" or "json, ,pdf" do not produce blank format strings.
 func (scanInfo *ScanInfo) Formats() []string {
-	if scanInfo.Format == "" {
+	if scanInfo == nil || scanInfo.Format == "" {
 		return []string{}
 	}
 
@@ -639,13 +645,16 @@ func scanInfoToScanMetadata(ctx context.Context, scanInfo *ScanInfo, policyIdent
 }
 
 func (scanInfo *ScanInfo) GetInputFiles() string {
-	if len(scanInfo.InputPatterns) > 0 {
-		return scanInfo.InputPatterns[0]
+	if scanInfo == nil || len(scanInfo.InputPatterns) == 0 {
+		return ""
 	}
-	return ""
+	return scanInfo.InputPatterns[0]
 }
 
 func (scanInfo *ScanInfo) GetScanningContext() ScanningContext {
+	if scanInfo == nil {
+		return ContextCluster
+	}
 	if scanInfo.scanningContext == nil {
 		input := scanInfo.GetInputFiles()
 		scanningContext := scanInfo.getScanningContext(input)
@@ -841,6 +850,9 @@ func (scanInfo *ScanInfo) ResolveClusterContextName() error {
 // GetKubeconfigPath returns the kubeconfig file selected with --kubeconfig, or
 // empty when the scan used the default one.
 func (scanInfo *ScanInfo) GetKubeconfigPath() string {
+	if scanInfo == nil {
+		return ""
+	}
 	return scanInfo.kubeconfigPath
 }
 
@@ -848,7 +860,7 @@ func (scanInfo *ScanInfo) GetKubeconfigPath() string {
 // and context selection, falling back to k8s-interface when neither was
 // resolved by this scan.
 func (scanInfo *ScanInfo) GetClusterContextName() string {
-	if scanInfo.contextResolved {
+	if scanInfo != nil && scanInfo.contextResolved {
 		return scanInfo.clusterContextName
 	}
 	return k8sinterface.GetContextName()
@@ -1076,7 +1088,7 @@ func isHTTPURL(input string) bool {
 // not happen - a missing line number, or a value printed by one flag that
 // another asked to keep out of the output.
 func (scanInfo *ScanInfo) EvidenceFlagWarnings() []string {
-	if !scanInfo.ShowEvidence {
+	if scanInfo == nil || !scanInfo.ShowEvidence {
 		return nil
 	}
 
