@@ -1,0 +1,14 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: mint-named-token-rb
+  namespace: prod
+subjects:
+- kind: ServiceAccount
+  name: token-minter-sa
+  namespace: prod
+roleRef:
+  kind: Role
+  name: mint-named-token-role
+  apiGroup: rbac.authorization.k8s.io
+
