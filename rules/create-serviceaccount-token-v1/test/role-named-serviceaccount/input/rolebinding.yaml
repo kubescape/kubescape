@@ -11,4 +11,3 @@ roleRef:
   kind: Role
   name: mint-named-token-role
   apiGroup: rbac.authorization.k8s.io
-

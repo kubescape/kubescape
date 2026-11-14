@@ -6,5 +6,4 @@ rules:
 - apiGroups: [""]
   resources: ["serviceaccounts/token"]
   verbs: ["create"]
-  resourceNames: ["ci-runner"]
-
+  resourceNames: ["admin-sa"]

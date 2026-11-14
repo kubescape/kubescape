@@ -7,4 +7,3 @@ rules:
   resources: ["serviceaccounts/token"]
   verbs: ["create"]
   resourceNames: [""]
-

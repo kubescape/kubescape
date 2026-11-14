@@ -10,4 +10,3 @@ roleRef:
   kind: ClusterRole
   name: mint-empty-name-token
   apiGroup: rbac.authorization.k8s.io
-
