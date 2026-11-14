@@ -60,6 +60,7 @@ func TestFieldNameFor(t *testing.T) {
 	}{
 		{"plural override wins for container", "container", "containers"},
 		{"plural override for init_container", "init_container", "initContainers"},
+		{"plural override for path", "path", "paths"},
 		{"plural override for sysctl", "sysctl", "sysctls"},
 		{"plural override for http_header", "http_header", "httpHeaders"},
 		{"non-overridden label falls back to camelCase", "metadata", "metadata"},
@@ -68,6 +69,141 @@ func TestFieldNameFor(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			assert.Equal(t, tc.want, fieldNameFor(tc.in))
+		})
+	}
+}
+
+func TestAttributeNameFor(t *testing.T) {
+	assert.Equal(t, "port", attributeNameFor("port"))
+	assert.Equal(t, "containerPort", attributeNameFor("container_port"))
+	assert.Equal(t, "protocol", attributeNameFor("protocol"))
+}
+
+func TestAttributeValueFor(t *testing.T) {
+	cases := []struct {
+		name     string
+		path     string
+		attrName string
+		in       interface{}
+		want     interface{}
+	}{
+		{
+			name:     "quoted numeric port in network policy ingress ports converts to json.Number",
+			path:     "kubernetes_network_policy.np.spec.ingress.ports",
+			attrName: "port",
+			in:       "8125",
+			want:     json.Number("8125"),
+		},
+		{
+			name:     "quoted numeric port with leading zeros in network policy ingress canonicalizes without leading zeros",
+			path:     "kubernetes_network_policy.np.spec.ingress.ports",
+			attrName: "port",
+			in:       "080",
+			want:     json.Number("80"),
+		},
+		{
+			name:     "all-zero numeric port in network policy ingress canonicalizes to zero",
+			path:     "kubernetes_network_policy.np.spec.ingress.ports",
+			attrName: "port",
+			in:       "00",
+			want:     json.Number("0"),
+		},
+		{
+			name:     "single zero numeric port in network policy ingress preserved as zero",
+			path:     "kubernetes_network_policy.np.spec.ingress.ports",
+			attrName: "port",
+			in:       "0",
+			want:     json.Number("0"),
+		},
+		{
+			name:     "quoted numeric port in network policy egress ports converts to json.Number",
+			path:     "kubernetes_network_policy_v1.np.spec.egress.ports",
+			attrName: "port",
+			in:       "53",
+			want:     json.Number("53"),
+		},
+		{
+			name:     "quoted numeric end_port in network policy converts to json.Number",
+			path:     "kubernetes_network_policy.np.spec.ingress.ports",
+			attrName: "end_port",
+			in:       "8200",
+			want:     json.Number("8200"),
+		},
+		{
+			name:     "unquoted numeric port already json.Number passes through",
+			path:     "kubernetes_network_policy.np.spec.ingress.ports",
+			attrName: "port",
+			in:       json.Number("8080"),
+			want:     json.Number("8080"),
+		},
+		{
+			name:     "named port in network policy preserved as string",
+			path:     "kubernetes_network_policy.np.spec.ingress.ports",
+			attrName: "port",
+			in:       "http",
+			want:     "http",
+		},
+		{
+			name:     "kebab-case named port preserved as string",
+			path:     "kubernetes_network_policy.np.spec.ingress.ports",
+			attrName: "port",
+			in:       "dns-tcp",
+			want:     "dns-tcp",
+		},
+		{
+			name:     "quoted numeric service_port in legacy ingress backend converts to json.Number",
+			path:     "kubernetes_ingress.web.spec.rules.http.paths.backend",
+			attrName: "service_port",
+			in:       "8080",
+			want:     json.Number("8080"),
+		},
+		{
+			name:     "quoted numeric service_port with leading zero in legacy ingress backend canonicalizes to json.Number",
+			path:     "kubernetes_ingress.web.spec.rules.http.paths.backend",
+			attrName: "service_port",
+			in:       "08080",
+			want:     json.Number("8080"),
+		},
+		{
+			name:     "named service_port in legacy ingress backend preserved as string",
+			path:     "kubernetes_ingress.web.spec.rules.http.paths.backend",
+			attrName: "service_port",
+			in:       "http",
+			want:     "http",
+		},
+		{
+			name:     "service_port in non-legacy ingress v1 untouched",
+			path:     "kubernetes_ingress_v1.web.spec.backend",
+			attrName: "service_port",
+			in:       "8080",
+			want:     "8080",
+		},
+		{
+			name:     "non-port attribute in ports block untouched",
+			path:     "kubernetes_network_policy.np.spec.ingress.ports",
+			attrName: "protocol",
+			in:       "UDP",
+			want:     "UDP",
+		},
+		{
+			name:     "quoted numeric port in non-networkpolicy block untouched",
+			path:     "kubernetes_deployment.app.spec.template.spec.containers.ports",
+			attrName: "port",
+			in:       "80",
+			want:     "80",
+		},
+		{
+			name:     "empty string untouched",
+			path:     "kubernetes_network_policy.np.spec.ingress.ports",
+			attrName: "port",
+			in:       "",
+			want:     "",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, attributeValueFor(tc.path, tc.attrName, tc.in))
 		})
 	}
 }
@@ -318,4 +454,215 @@ func TestExtractTypedResourcesNonHclBody(t *testing.T) {
 
 	assert.Nil(t, manifests)
 	assert.Nil(t, errs)
+}
+
+func TestExtractTypedResourcesNetworkPolicyAndUnversionedAliases(t *testing.T) {
+	src := `
+resource "kubernetes_daemon_set" "ds" {
+  metadata {
+    name      = "fluentd"
+    namespace = "kube-system"
+  }
+}
+
+resource "kubernetes_cron_job" "cj" {
+  metadata {
+    name = "backup"
+  }
+}
+
+resource "kubernetes_ingress" "ing" {
+  metadata {
+    name = "web-ingress"
+  }
+  spec {
+    rule {
+      host = "example.com"
+      http {
+        path {
+          path = "/api"
+          backend {
+            service_name = "api-svc"
+            service_port = "8080"
+          }
+        }
+        path {
+          path = "/named"
+          backend {
+            service_name = "named-svc"
+            service_port = "http"
+          }
+        }
+      }
+    }
+    tls {
+      hosts = ["example.com"]
+      secret_name = "example-tls"
+    }
+  }
+}
+
+resource "kubernetes_network_policy" "np" {
+  metadata {
+    name      = "default-deny-ingress"
+    namespace = "prod"
+  }
+  spec {
+    pod_selector {
+      match_labels = {
+        app = "backend"
+      }
+    }
+    policy_types = ["Ingress", "Egress"]
+    ingress {
+      from {
+        namespace_selector {
+          match_labels = {
+            env = "prod"
+          }
+        }
+      }
+      ports {
+        port     = 8080
+        protocol = "TCP"
+      }
+      ports {
+        port     = "8125"
+        protocol = "UDP"
+      }
+      ports {
+        port     = "080"
+        protocol = "TCP"
+      }
+      ports {
+        port     = "http"
+        protocol = "TCP"
+      }
+    }
+    egress {
+      to {
+        ip_block {
+          cidr = "10.0.0.0/8"
+        }
+      }
+    }
+  }
+}
+
+resource "kubernetes_network_policy_v1" "np_v1" {
+  metadata {
+    name = "allow-dns"
+  }
+  spec {
+    policy_types = ["Egress"]
+  }
+}
+`
+	manifests, errs := extractTypedResources(parseTypedHCL(t, src), &hcl.EvalContext{})
+
+	require.Empty(t, errs)
+	require.Len(t, manifests, 5)
+
+	assert.Equal(t, "apps/v1", manifests[0]["apiVersion"])
+	assert.Equal(t, "DaemonSet", manifests[0]["kind"])
+	assert.Equal(t, map[string]interface{}{"name": "fluentd", "namespace": "kube-system"}, manifests[0]["metadata"])
+
+	assert.Equal(t, "batch/v1", manifests[1]["apiVersion"])
+	assert.Equal(t, "CronJob", manifests[1]["kind"])
+	assert.Equal(t, map[string]interface{}{"name": "backup"}, manifests[1]["metadata"])
+
+	assert.Equal(t, "networking.k8s.io/v1beta1", manifests[2]["apiVersion"])
+	assert.Equal(t, "Ingress", manifests[2]["kind"])
+	assert.Equal(t, map[string]interface{}{"name": "web-ingress"}, manifests[2]["metadata"])
+
+	ingSpec, ok := manifests[2]["spec"].(map[string]interface{})
+	require.True(t, ok)
+	rulesSlice, ok := ingSpec["rules"].([]interface{})
+	require.True(t, ok, "spec.rules must be a slice")
+	require.Len(t, rulesSlice, 1)
+
+	httpRule, ok := rulesSlice[0].(map[string]interface{})["http"].(map[string]interface{})
+	require.True(t, ok)
+	pathsSlice, ok := httpRule["paths"].([]interface{})
+	require.True(t, ok, "http.paths must be a slice")
+	require.Len(t, pathsSlice, 2)
+
+	path0, ok := pathsSlice[0].(map[string]interface{})
+	require.True(t, ok)
+	backend0, ok := path0["backend"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, json.Number("8080"), backend0["servicePort"], "quoted numeric service_port in legacy ingress backend must be normalized to json.Number")
+
+	path1, ok := pathsSlice[1].(map[string]interface{})
+	require.True(t, ok)
+	backend1, ok := path1["backend"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "http", backend1["servicePort"], "named service_port in legacy ingress backend must be preserved as string")
+
+	tlsSlice, ok := ingSpec["tls"].([]interface{})
+	require.True(t, ok, "spec.tls must be a slice")
+	require.Len(t, tlsSlice, 1)
+
+	assert.Equal(t, "networking.k8s.io/v1", manifests[3]["apiVersion"])
+	assert.Equal(t, "NetworkPolicy", manifests[3]["kind"])
+	assert.Equal(t, map[string]interface{}{"name": "default-deny-ingress", "namespace": "prod"}, manifests[3]["metadata"])
+
+	spec, ok := manifests[3]["spec"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, []interface{}{"Ingress", "Egress"}, spec["policyTypes"])
+
+	ingressSlice, ok := spec["ingress"].([]interface{})
+	require.True(t, ok, "spec.ingress must be a slice")
+	require.Len(t, ingressSlice, 1)
+
+	ingressRule, ok := ingressSlice[0].(map[string]interface{})
+	require.True(t, ok)
+	fromSlice, ok := ingressRule["from"].([]interface{})
+	require.True(t, ok, "ingress.from must be a slice")
+	require.Len(t, fromSlice, 1)
+
+	portsSlice, ok := ingressRule["ports"].([]interface{})
+	require.True(t, ok, "ingress.ports must be a slice")
+	require.Len(t, portsSlice, 4)
+
+	portEntry0, ok := portsSlice[0].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, json.Number("8080"), portEntry0["port"])
+	assert.Equal(t, "TCP", portEntry0["protocol"])
+	assert.NotContains(t, portEntry0, "ports", "scalar port attribute must not be pluralized to ports")
+
+	portEntry1, ok := portsSlice[1].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, json.Number("8125"), portEntry1["port"], "quoted numeric port must be normalized to json.Number")
+	assert.Equal(t, "UDP", portEntry1["protocol"])
+
+	portEntry2, ok := portsSlice[2].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, json.Number("80"), portEntry2["port"], "quoted numeric port with leading zeros must be canonicalized to json.Number")
+	assert.Equal(t, "TCP", portEntry2["protocol"])
+
+	portEntry3, ok := portsSlice[3].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "http", portEntry3["port"], "named port must be preserved as string")
+	assert.Equal(t, "TCP", portEntry3["protocol"])
+
+	egressSlice, ok := spec["egress"].([]interface{})
+	require.True(t, ok, "spec.egress must be a slice")
+	require.Len(t, egressSlice, 1)
+
+	egressRule, ok := egressSlice[0].(map[string]interface{})
+	require.True(t, ok)
+	toSlice, ok := egressRule["to"].([]interface{})
+	require.True(t, ok, "egress.to must be a slice")
+	require.Len(t, toSlice, 1)
+
+	assert.Equal(t, "networking.k8s.io/v1", manifests[4]["apiVersion"])
+	assert.Equal(t, "NetworkPolicy", manifests[4]["kind"])
+	assert.Equal(t, map[string]interface{}{"name": "allow-dns"}, manifests[4]["metadata"])
+
+	for i, m := range manifests {
+		data, err := json.Marshal(m)
+		require.NoError(t, err, "manifest %d must marshal cleanly to valid JSON without error", i)
+		assert.NotEmpty(t, data)
+	}
 }

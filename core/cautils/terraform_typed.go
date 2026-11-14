@@ -1,6 +1,7 @@
 package cautils
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -19,6 +20,7 @@ var typedResourceGVK = map[string]struct{ apiVersion, kind string }{
 	"kubernetes_stateful_set":         {"apps/v1", "StatefulSet"},
 	"kubernetes_stateful_set_v1":      {"apps/v1", "StatefulSet"},
 	"kubernetes_daemonset":            {"apps/v1", "DaemonSet"},
+	"kubernetes_daemon_set":           {"apps/v1", "DaemonSet"},
 	"kubernetes_daemon_set_v1":        {"apps/v1", "DaemonSet"},
 	"kubernetes_pod":                  {"v1", "Pod"},
 	"kubernetes_pod_v1":               {"v1", "Pod"},
@@ -34,8 +36,12 @@ var typedResourceGVK = map[string]struct{ apiVersion, kind string }{
 	"kubernetes_service_account_v1":   {"v1", "ServiceAccount"},
 	"kubernetes_job":                  {"batch/v1", "Job"},
 	"kubernetes_job_v1":               {"batch/v1", "Job"},
+	"kubernetes_cron_job":             {"batch/v1", "CronJob"},
 	"kubernetes_cron_job_v1":          {"batch/v1", "CronJob"},
+	"kubernetes_ingress":              {"networking.k8s.io/v1beta1", "Ingress"},
 	"kubernetes_ingress_v1":           {"networking.k8s.io/v1", "Ingress"},
+	"kubernetes_network_policy":       {"networking.k8s.io/v1", "NetworkPolicy"},
+	"kubernetes_network_policy_v1":    {"networking.k8s.io/v1", "NetworkPolicy"},
 	"kubernetes_role":                 {"rbac.authorization.k8s.io/v1", "Role"},
 	"kubernetes_role_binding":         {"rbac.authorization.k8s.io/v1", "RoleBinding"},
 	"kubernetes_cluster_role":         {"rbac.authorization.k8s.io/v1", "ClusterRole"},
@@ -56,6 +62,7 @@ var pluralOverrides = map[string]string{
 	"toleration":            "tolerations",
 	"host_alias":            "hostAliases",
 	"rule":                  "rules",
+	"path":                  "paths",
 	"subject":               "subjects",
 	"image_pull_secrets":    "imagePullSecrets",
 	"match_expressions":     "matchExpressions",
@@ -69,10 +76,11 @@ var pluralOverrides = map[string]string{
 // but the K8s field underneath (e.g. spec.containers) is always a list.
 var repeatableBlocks = map[string]bool{
 	"container": true, "init_container": true, "volume": true, "volume_mount": true,
-	"env": true, "env_from": true, "port": true, "toleration": true,
+	"env": true, "env_from": true, "port": true, "ports": true, "toleration": true,
 	"host_alias": true, "rule": true, "subject": true, "image_pull_secrets": true,
 	"match_expressions": true, "volume_claim_template": true, "http_header": true,
-	"sysctl": true,
+	"sysctl": true, "ingress": true, "egress": true, "from": true, "to": true,
+	"path": true, "tls": true,
 }
 
 // resourceMetaAttributes are Terraform meta-argument attributes valid on any
@@ -123,11 +131,74 @@ func snakeToCamel(s string) string {
 	return strings.Join(parts, "")
 }
 
-func fieldNameFor(blockOrAttr string) string {
-	if v, ok := pluralOverrides[blockOrAttr]; ok {
+func fieldNameFor(blockType string) string {
+	if v, ok := pluralOverrides[blockType]; ok {
 		return v
 	}
-	return snakeToCamel(blockOrAttr)
+	return snakeToCamel(blockType)
+}
+
+func attributeNameFor(name string) string {
+	return snakeToCamel(name)
+}
+
+func isDigitOnly(s string) bool {
+	if len(s) == 0 {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+func canonicalizeNumericString(s string) string {
+	trimmed := strings.TrimLeft(s, "0")
+	if trimmed == "" {
+		return "0"
+	}
+	return trimmed
+}
+
+func isNetworkPolicyPortField(path, name string) bool {
+	if name != "port" && name != "end_port" {
+		return false
+	}
+	if !strings.HasSuffix(path, ".ports") && path != "ports" {
+		return false
+	}
+	// If path includes a resource type, ensure it is NetworkPolicy.
+	if strings.Contains(path, "kubernetes_") && !strings.HasPrefix(path, "kubernetes_network_policy") {
+		return false
+	}
+	return true
+}
+
+func isLegacyIngressBackendPortField(path, name string) bool {
+	if name != "service_port" {
+		return false
+	}
+	if !strings.HasSuffix(path, ".backend") && path != "backend" {
+		return false
+	}
+	// Only kubernetes_ingress (legacy v1beta1), not kubernetes_ingress_v1.
+	if strings.Contains(path, "kubernetes_") && (!strings.HasPrefix(path, "kubernetes_ingress") || strings.HasPrefix(path, "kubernetes_ingress_v1")) {
+		return false
+	}
+	return true
+}
+
+func isConvertiblePortField(path, name string) bool {
+	return isNetworkPolicyPortField(path, name) || isLegacyIngressBackendPortField(path, name)
+}
+
+func attributeValueFor(path, name string, val interface{}) interface{} {
+	if s, ok := val.(string); ok && isConvertiblePortField(path, name) && isDigitOnly(s) {
+		return json.Number(canonicalizeNumericString(s))
+	}
+	return val
 }
 
 // hclBodyToMap walks a raw hclsyntax.Body — no schema declaration needed —
@@ -145,7 +216,7 @@ func hclBodyToMap(body *hclsyntax.Body, evalCtx *hcl.EvalContext, errs *[]error,
 			*errs = append(*errs, fmt.Errorf("%s: attribute %q: %w", path, name, diags))
 			continue
 		}
-		out[fieldNameFor(name)] = ctyToGo(val)
+		out[attributeNameFor(name)] = attributeValueFor(path, name, ctyToGo(val))
 	}
 
 	grouped := map[string][]*hclsyntax.Block{}
@@ -193,7 +264,7 @@ func hclResourceBodyToMap(body *hclsyntax.Body, evalCtx *hcl.EvalContext, errs *
 			*errs = append(*errs, fmt.Errorf("%s: attribute %q: %w", path, name, diags))
 			continue
 		}
-		out[fieldNameFor(name)] = ctyToGo(val)
+		out[attributeNameFor(name)] = attributeValueFor(path, name, ctyToGo(val))
 	}
 
 	grouped := map[string][]*hclsyntax.Block{}
