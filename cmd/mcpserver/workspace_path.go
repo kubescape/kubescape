@@ -55,6 +55,17 @@ func openFileUnderRoot(root *os.Root, path string) (*os.File, error) {
 	if err != nil {
 		return nil, fmt.Errorf("cannot resolve workspace root: %w", err)
 	}
+	rootStat, err := root.Stat(".")
+	if err != nil {
+		return nil, fmt.Errorf("cannot stat workspace root: %w", err)
+	}
+	rootPathStat, err := os.Stat(rootPath)
+	if err != nil {
+		return nil, fmt.Errorf("cannot stat resolved workspace root: %w", err)
+	}
+	if !os.SameFile(rootStat, rootPathStat) {
+		return nil, fmt.Errorf("%w: workspace root %q no longer identifies opened directory", pathcontainment.ErrPathEscapesWorkspace, root.Name())
+	}
 	rel, err := filepath.Rel(rootPath, resolved)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
 		return nil, fmt.Errorf("%w: %q", pathcontainment.ErrPathEscapesWorkspace, path)

@@ -260,3 +260,44 @@ func TestOpenFileUnderRoot_SymlinkedRoot(t *testing.T) {
 	require.NoError(t, err, "openFileUnderRoot must resolve symlinked path under symlinked root")
 	require.NoError(t, f.Close())
 }
+
+func TestOpenFileUnderRoot_RejectsReplacedWorkspaceRoot(t *testing.T) {
+	tempDir := t.TempDir()
+	workDir := filepath.Join(tempDir, "work")
+	require.NoError(t, os.Mkdir(workDir, 0o700))
+
+	oldReport := filepath.Join(workDir, "report.json")
+	require.NoError(t, os.WriteFile(oldReport, []byte(`{"content":"old"}`), 0o600))
+
+	root, err := os.OpenRoot(workDir)
+	require.NoError(t, err)
+	defer root.Close()
+
+	oldDir := filepath.Join(tempDir, "old")
+	if err := os.Rename(workDir, oldDir); err != nil {
+		t.Skipf("renaming open directory not supported: %v", err)
+	}
+
+	newDir := filepath.Join(tempDir, "new")
+	require.NoError(t, os.Mkdir(newDir, 0o700))
+	newReport := filepath.Join(newDir, "report.json")
+	require.NoError(t, os.WriteFile(newReport, []byte(`{"content":"new"}`), 0o600))
+
+	if err := os.Symlink(newDir, workDir); err != nil {
+		t.Skipf("symlinks not supported: %v", err)
+	}
+
+	// Canonical request for new/report.json must be rejected because root holds the old directory descriptor
+	_, err = openFileUnderRoot(root, newReport)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, pathcontainment.ErrPathEscapesWorkspace)
+
+	// Requesting via work/report.json must also be rejected rather than opening old/report.json
+	_, err = openFileUnderRoot(root, filepath.Join(workDir, "report.json"))
+	require.Error(t, err)
+	assert.ErrorIs(t, err, pathcontainment.ErrPathEscapesWorkspace)
+
+	// Ensure readRemediationReportWithRoot does not silently return the old report
+	_, err = readRemediationReportWithRoot(filepath.Join(workDir, "report.json"), root)
+	require.Error(t, err)
+}
