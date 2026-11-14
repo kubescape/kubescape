@@ -21,6 +21,9 @@ func TestValidateCommonScanFlags_GitLabMixedScan(t *testing.T) {
 		{name: "whitespace", format: " json , gitlab-sast ", scanImages: true, wantError: true},
 		{name: "posture only", format: "gitlab-sast"},
 		{name: "image only", format: "gitlab-sast", scanType: cautils.ScanTypeImage},
+		{name: "combined Code Quality", format: "gitlab-codequality", scanImages: true, wantError: true},
+		{name: "Code Quality among formats", format: "sarif, gitlab-codequality", scanImages: true, wantError: true},
+		{name: "Code Quality posture only", format: "gitlab-codequality"},
 		{name: "combined SARIF", format: "sarif", scanImages: true},
 		{name: "combined JSON", format: "json", scanImages: true},
 	} {
@@ -29,7 +32,7 @@ func TestValidateCommonScanFlags_GitLabMixedScan(t *testing.T) {
 				Format: tc.format, ScanImages: tc.scanImages, ScanType: tc.scanType,
 			}, ScanFormats)
 			if tc.wantError {
-				require.ErrorContains(t, err, "separate")
+				require.ErrorContains(t, err, "--scan-images")
 			} else {
 				require.NoError(t, err)
 			}

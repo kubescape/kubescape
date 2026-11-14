@@ -480,7 +480,7 @@ func TestGetScanCommand_RunE_FormatFlagInvalid(t *testing.T) {
 	require.NoError(t, cmd.PersistentFlags().Set("format", "xml"))
 
 	err := cmd.RunE(cmd, []string{"."})
-	errMessage := "invalid format \"xml\", supported formats: pretty-printer, json, junit, prometheus, pdf, html, sarif, gitlab-sast, github-actions, yaml, csv, markdown, cyclonedx-json, spdx-json, policyreport, exceptions"
+	errMessage := "invalid format \"xml\", supported formats: pretty-printer, json, junit, prometheus, pdf, html, sarif, gitlab-sast, gitlab-codequality, github-actions, yaml, csv, markdown, cyclonedx-json, spdx-json, policyreport, exceptions"
 	assert.EqualError(t, err, errMessage)
 }
 

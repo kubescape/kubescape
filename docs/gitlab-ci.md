@@ -86,6 +86,30 @@ scan_nsa_framework:
 ```
 Supported frameworks: nsa, mitre, cis-v1.23-t1.0.1. Run kubescape list frameworks for the full list.
 
+Show Findings in Merge Requests with Code Quality
+
+The `gitlab-codequality` format writes failed controls as a GitLab Code Quality report. GitLab compares it with the report from the target branch and lists the findings a merge request introduces or resolves in the merge request widget, which is available on every GitLab tier. Each finding points at the file and line of the failing field.
+
+```yaml
+stages:
+  - scan
+
+scan_code_quality:
+  stage: scan
+  image: alpine:latest
+  script:
+    - apk add --no-cache bash curl gcompat
+    - curl -s https://raw.githubusercontent.com/kubescape/kubescape/master/install.sh | /bin/bash
+    - export PATH=$PATH:$HOME/.kubescape/bin
+    - kubescape scan framework nsa . --format gitlab-codequality --output gl-code-quality-report.json
+  artifacts:
+    when: always
+    reports:
+      codequality: gl-code-quality-report.json
+```
+
+Kubescape severities map to Code Quality severities as Critical → `critical`, High → `major`, Medium → `minor`, and Low → `info`. Each finding carries a fingerprint built from the control, the resource and the file, so GitLab tracks it across pipelines and only reports it as new when one of those changes. Like `gitlab-sast`, the format only covers local file, directory and repository scans, and resources with no path inside the repository are left out with a warning. Image vulnerabilities have no file to anchor to, so `--scan-images` and `scan image` are rejected with this format.
+
 Troubleshooting
 
 kubescape: command not found

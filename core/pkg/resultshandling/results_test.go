@@ -567,6 +567,30 @@ func TestValidatePrinter(t *testing.T) {
 			expectErr:   nil,
 		},
 		{
+			name:        "gitlab-codequality format for cluster context should return error",
+			scanContext: cautils.ContextCluster,
+			format:      printer.GitLabCodeQualityFormat,
+			expectErr:   errors.New("format \"gitlab-codequality\" is only supported when scanning local files"),
+		},
+		{
+			name:        "gitlab-codequality format for local dir context should not return error",
+			scanContext: cautils.ContextDir,
+			format:      printer.GitLabCodeQualityFormat,
+			expectErr:   nil,
+		},
+		{
+			name:        "gitlab-codequality format for remote git context should not return error",
+			scanContext: cautils.ContextGitRemote,
+			format:      printer.GitLabCodeQualityFormat,
+			expectErr:   nil,
+		},
+		{
+			name:      "gitlab-codequality format for image scan should return error",
+			scanType:  cautils.ScanTypeImage,
+			format:    printer.GitLabCodeQualityFormat,
+			expectErr: errors.New("format \"gitlab-codequality\" is not supported for image scanning"),
+		},
+		{
 			name:      "gitlab-sast format for image scan should not return error",
 			scanType:  cautils.ScanTypeImage,
 			format:    printer.GitLabSASTFormat,
@@ -665,6 +689,14 @@ func TestNewPrinter_MarkdownFormat(t *testing.T) {
 	assert.True(t, ok, "NewPrinter(MarkdownFormat) must return a *MarkdownPrinter")
 }
 
+func TestNewPrinter_GitLabCodeQualityFormat(t *testing.T) {
+	scanInfo := &cautils.ScanInfo{Format: printer.GitLabCodeQualityFormat}
+	p := NewPrinter(context.TODO(), printer.GitLabCodeQualityFormat, scanInfo, "")
+	require.NotNil(t, p)
+	_, ok := p.(*printerv2.GitLabCodeQualityPrinter)
+	assert.True(t, ok, "NewPrinter(GitLabCodeQualityFormat) must return a *GitLabCodeQualityPrinter")
+}
+
 func TestNewPrinter(t *testing.T) {
 	defaultVersion := "v2"
 	ctx := context.Background()
@@ -725,6 +757,12 @@ func TestNewPrinter(t *testing.T) {
 		{
 			name:     "GitLab SAST printer",
 			format:   "gitlab-sast",
+			viewType: "resource",
+			version:  defaultVersion,
+		},
+		{
+			name:     "GitLab Code Quality printer",
+			format:   "gitlab-codequality",
 			viewType: "resource",
 			version:  defaultVersion,
 		},
