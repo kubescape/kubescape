@@ -98,7 +98,7 @@ func (hp *HtmlPrinter) SetWriter(ctx context.Context, outputFile string) error {
 	}
 	if explicitOutput {
 		var err error
-		hp.writer, err = printer.GetWriterNoFallback(outputFile)
+		hp.writer, err = printer.GetPrinterWriterNoFallback(outputFile)
 		return err
 	}
 	// Preserve the temp-file fallback for the implicit HTML destination.
@@ -167,6 +167,9 @@ func sortHTMLControlsBySeverityName(controlSummaries map[string]reportsummary.Co
 }
 
 func (hp *HtmlPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
+	if err := printer.PrepareOutput(hp.writer); err != nil {
+		return err
+	}
 	hasReport := opaSessionObj != nil && opaSessionObj.Report != nil
 	if !hasReport && len(imageScanData) == 0 {
 		return fmt.Errorf("failed to print results, missing data")
@@ -273,7 +276,7 @@ func buildResourceControlResultTable(resourceControls []resourcesresults.Resourc
 // CloseWriter closes the HTML output writer, returning any error from flushing or closing.
 func (p *HtmlPrinter) CloseWriter() error {
 	if p.writer != nil && p.writer != os.Stdout {
-		return p.writer.Close()
+		return printer.CloseOutput(p.writer)
 	}
 	return nil
 }

@@ -700,7 +700,7 @@ func TestGetInterfaces_DryRunDoesNotOpenOutputFile(t *testing.T) {
 		wantContent  string
 	}{
 		{name: "dry run leaves the file alone", dryRun: true, wantContent: previousReport},
-		{name: "scan opens and truncates the file", dryRun: false, wantPrinters: true, wantContent: ""},
+		{name: "scan opens the file but keeps the old report until it has a new one", dryRun: false, wantPrinters: true, wantContent: previousReport},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			output := filepath.Join(t.TempDir(), "results.json")

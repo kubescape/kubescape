@@ -43,7 +43,7 @@ func (jp *JsonPrinter) SetWriter(ctx context.Context, outputFile string) error {
 	outputFile, explicitOutput := printer.ResolveOutputFile(printer.JsonFormat, outputFile, jsonOutputFile)
 	if explicitOutput {
 		var err error
-		jp.writer, err = printer.GetWriterNoFallback(outputFile)
+		jp.writer, err = printer.GetPrinterWriterNoFallback(outputFile)
 		return err
 	}
 	jp.writer = printer.GetWriter(ctx, outputFile)
@@ -62,6 +62,9 @@ func (jp *JsonPrinter) Score(score float32) {
 
 }
 func (jp *JsonPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
+	if err := printer.PrepareOutput(jp.writer); err != nil {
+		return err
+	}
 	var err error
 
 	if opaSessionObj != nil && opaSessionObj.Report != nil {
@@ -315,7 +318,7 @@ func (jp *JsonPrinter) PrintNextSteps() {
 // CloseWriter closes the JSON output writer, returning any error from flushing or closing.
 func (p *JsonPrinter) CloseWriter() error {
 	if p.writer != nil && p.writer != os.Stdout {
-		return p.writer.Close()
+		return printer.CloseOutput(p.writer)
 	}
 	return nil
 }
