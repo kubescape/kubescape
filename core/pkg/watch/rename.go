@@ -100,6 +100,34 @@ func newSnapshot(reportJSON []byte) (*snapshot, error) {
 		snap.keys[info.key]++
 	}
 
+	// A resource with no result entry never reaches Canonicalize's ambiguity
+	// reporting: it has no result to set aside, so it is simply omitted, and
+	// the snapshot never learns it could not be identified. It may still be
+	// the resource that moved, so inspect the original resource list and mark
+	// the snapshot unidentified whenever any resource cannot be assigned a
+	// stable identity, regardless of whether it has findings.
+	var original struct {
+		Resources []struct {
+			ResourceID string `json:"resourceID"`
+			Source     struct {
+				RelativePath string `json:"relativePath"`
+			} `json:"source"`
+			Object map[string]any `json:"object"`
+		} `json:"resources"`
+	}
+	if err := json.Unmarshal(reportJSON, &original); err != nil {
+		return nil, fmt.Errorf("read the original resources: %w", err)
+	}
+	for _, resource := range original.Resources {
+		if resource.ResourceID == "" {
+			continue
+		}
+		if Identity(resource.Source.RelativePath, resource.Object) == "" {
+			snap.unidentified = true
+			break
+		}
+	}
+
 	// Resources set aside as ambiguous are not matched, but they are still
 	// resources with a name: several can share one, so they count towards how
 	// many bear it.
