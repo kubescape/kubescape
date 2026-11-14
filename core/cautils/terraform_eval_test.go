@@ -413,6 +413,42 @@ variable "privileged" {
 		require.NotEmpty(t, errs)
 		assert.Contains(t, errs[0].Error(), "not nullable and has no default")
 	})
+	t.Run("a later file's value overrides an earlier null", func(t *testing.T) {
+		dir := t.TempDir()
+		writeTerraformFiles(t, dir, map[string]string{
+			"main.tf": terraformPodUsingVars,
+			"variables.tf": vars + `
+variable "privileged" {
+  type     = bool
+  nullable = false
+}
+`,
+			"terraform.tfvars":       "privileged = null",
+			"production.auto.tfvars": "privileged = true",
+		})
+		obj, errs := terraformObject(t, dir)
+		require.Empty(t, errs, "the value in effect is not null")
+		assert.Equal(t, true, terraformFirstContainer(t, obj)["securityContext"].(map[string]interface{})["privileged"])
+	})
+	t.Run("a later null without a default leaves no earlier value behind", func(t *testing.T) {
+		dir := t.TempDir()
+		writeTerraformFiles(t, dir, map[string]string{
+			"main.tf": terraformPodUsingVars,
+			"variables.tf": vars + `
+variable "privileged" {
+  type     = bool
+  nullable = false
+}
+`,
+			"terraform.tfvars":       "privileged = true",
+			"production.auto.tfvars": "privileged = null",
+		})
+		obj, errs := terraformObject(t, dir)
+		require.NotEmpty(t, errs)
+		assert.Contains(t, errs[0].Error(), "production.auto.tfvars")
+		assert.Contains(t, errs[0].Error(), "not nullable and has no default")
+		assert.NotEqual(t, true, terraformFirstContainer(t, obj)["securityContext"].(map[string]interface{})["privileged"], "the overridden value must not be used")
+	})
 	t.Run("a nullable variable keeps null", func(t *testing.T) {
 		dir := t.TempDir()
 		writeTerraformFiles(t, dir, map[string]string{
