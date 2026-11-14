@@ -130,10 +130,10 @@ func TestGetConfigurationScanManifest_InvalidFilterArguments(t *testing.T) {
 	}{
 		{"unknown status", map[string]any{"status": "failed,broken"}, "status must be a comma-separated list of failed, passed, skipped"},
 		{"empty status item", map[string]any{"status": "failed,"}, "status must be a comma-separated list of failed, passed, skipped"},
-		{"status not a string", map[string]any{"status": []any{"failed"}}, "status argument must be a string"},
+		{"status not a string", map[string]any{"status": []any{"failed"}}, "status must be a string"},
 		{"unknown min severity", map[string]any{"min_severity": "Severe"}, "min_severity must be one of Critical, High, Medium, Low"},
 		{"negligible does not apply to controls", map[string]any{"min_severity": "Negligible"}, "min_severity must be one of Critical, High, Medium, Low"},
-		{"min severity not a string", map[string]any{"min_severity": 3}, "min_severity argument must be a string"},
+		{"min severity not a string", map[string]any{"min_severity": 3}, "min_severity must be a string"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -162,12 +162,4 @@ func TestGetConfigurationScanManifest_ResourceStillReturnsEverything(t *testing.
 	var got storagev1beta1.WorkloadConfigurationScan
 	require.NoError(t, json.Unmarshal([]byte(contents[0].(mcp.TextResourceContents).Text), &got))
 	assert.Equal(t, configScanFixture().Spec, got.Spec)
-}
-
-func TestFilterScannedControls_DoesNotModifyInput(t *testing.T) {
-	controls := configScanFixture().Spec.Controls
-	out := filterScannedControls(controls, scannedControlFilter{statuses: map[string]bool{"failed": true}})
-	assert.Len(t, out, 3)
-	assert.Len(t, controls, 6)
-	assert.Equal(t, configScanFixture().Spec.Controls, controls)
 }

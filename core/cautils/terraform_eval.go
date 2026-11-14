@@ -187,14 +187,28 @@ var base64DecodeFunc = function.New(&function.Spec{
 	},
 })
 
+// lengthFunc follows Terraform's length (internal/lang/funcs.LengthFunc): it
+// counts the characters of a string and the elements or attributes of any
+// collection or structural value. go-cty's stdlib.Length rejects objects, and
+// an HCL object literal ({ a = ... }), a local built from one and an untyped
+// variable default are all objects.
 var lengthFunc = function.New(&function.Spec{
 	Params: []function.Parameter{{Name: "value", Type: cty.DynamicPseudoType, AllowDynamicType: true}},
 	Type:   function.StaticReturnType(cty.Number),
 	Impl: func(args []cty.Value, _ cty.Type) (cty.Value, error) {
-		if args[0].Type() == cty.String {
+		ty := args[0].Type()
+		switch {
+		case ty == cty.String:
 			return stdlib.Strlen(args[0])
+		case ty.IsObjectType():
+			return cty.NumberIntVal(int64(len(ty.AttributeTypes()))), nil
+		case ty.IsTupleType():
+			return cty.NumberIntVal(int64(len(ty.TupleElementTypes()))), nil
+		case ty.IsListType() || ty.IsMapType() || ty.IsSetType():
+			return args[0].Length(), nil
+		default:
+			return cty.UnknownVal(cty.Number), fmt.Errorf("argument must be a string, a collection type, or a structural type")
 		}
-		return stdlib.Length(args[0])
 	},
 })
 

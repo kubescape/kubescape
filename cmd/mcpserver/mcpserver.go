@@ -14,7 +14,6 @@ import (
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
@@ -118,6 +117,35 @@ func mcpRequiredStringArg(arguments map[string]any, name string) (string, *mcp.C
 	return s, nil
 }
 
+// mcpBoolArg reads an optional boolean tool argument. Like mcpStringArg, a JSON
+// null is treated as absent.
+func mcpBoolArg(arguments map[string]any, name string) (bool, *mcp.CallToolResult) {
+	raw, ok := arguments[name]
+	if !ok || raw == nil {
+		return false, nil
+	}
+	b, ok := raw.(bool)
+	if !ok {
+		return false, mcpToolError(ErrCodeInvalidArgument, fmt.Sprintf("%s argument must be a boolean", name), map[string]any{"argument": name})
+	}
+	return b, nil
+}
+
+// mcpIntArg reads an optional integer tool argument (JSON numbers arrive as
+// float64). It reports whether the argument was set; a JSON null is treated as
+// absent.
+func mcpIntArg(arguments map[string]any, name string) (int, bool, *mcp.CallToolResult) {
+	raw, ok := arguments[name]
+	if !ok || raw == nil {
+		return 0, false, nil
+	}
+	f, ok := raw.(float64)
+	if !ok || f != float64(int(f)) {
+		return 0, false, mcpToolError(ErrCodeInvalidArgument, fmt.Sprintf("%s argument must be an integer", name), map[string]any{"argument": name})
+	}
+	return int(f), true, nil
+}
+
 // jsonMarshal is a package-level var so tests can inject marshal failures.
 var jsonMarshal = json.Marshal
 
@@ -148,6 +176,10 @@ type KubescapeMcpserver struct {
 	scanSem        *semaphore.Weighted
 	scanCtxMu      sync.Mutex
 	scanCtxs       map[string]*scanCtxState
+
+	// storageToolList holds storage's read tools; see storageTools.
+	storageToolsOnce sync.Once
+	storageToolList  []server.ServerTool
 
 	// policyReady is closed once the startup policy load has finished. It is
 	// nil for a server that was given its policyGetter directly, which is
@@ -361,109 +393,11 @@ func (ksServer *KubescapeMcpserver) toolHandler(name string) server.ToolHandlerF
 }
 
 func createVulnerabilityToolsAndResources(ksServer *KubescapeMcpserver) {
-	// Tool to list vulnerability manifests
-	listManifestsTool := mcp.NewTool(
-		"list_vulnerability_manifests",
-		mcp.WithDescription("Discover available vulnerability manifests at image and workload levels"),
-		mcp.WithString("namespace",
-			mcp.Description("Filter by namespace (optional)"),
-		),
-		mcp.WithString("level",
-			mcp.Description("Type of vulnerability manifests to list"),
-			mcp.Enum("image", "workload", "both"),
-		),
-		mcp.WithString("continue",
-			mcp.Description("Optional Kubernetes continuation token for pagination"),
-		),
-	)
-
-	ksServer.s.AddTool(listManifestsTool, ksServer.toolHandler(listManifestsTool.Name))
-
-	listVulnerabilitiesTool := mcp.NewTool(
-		"list_vulnerabilities_in_manifest",
-		mcp.WithDescription("List the vulnerabilities in a given manifest, one entry per CVE and affected package, most severe first. Returns a page of results (see limit/offset) with the total count; long text fields are left out unless include_details is true."),
-		mcp.WithString("namespace",
-			mcp.Description("Filter by namespace (optional)"),
-		),
-		mcp.WithString("manifest_name",
-			mcp.Required(),
-			mcp.Description("Name of the manifest to list vulnerabilities from"),
-		),
-		mcp.WithString("min_severity",
-			mcp.Description("Minimum severity to include: Critical, High, Medium, Low, Negligible (optional; by default every severity, including unclassified ones, is returned)"),
-		),
-		mcp.WithBoolean("fixable_only",
-			mcp.Description("Only return vulnerabilities that have a fixed version (optional, default false)"),
-		),
-		mcp.WithBoolean("include_details",
-			mcp.Description("Include description, CVSS, URLs, advisories and data source for each entry (optional, default false; makes the response much larger)"),
-		),
-		mcp.WithNumber("limit",
-			mcp.Description("Maximum number of entries to return (optional, default 100, maximum 500)"),
-		),
-		mcp.WithNumber("offset",
-			mcp.Description("Number of entries to skip; pass the previous response's next_offset to get the next page (optional, default 0)"),
-		),
-	)
-
-	ksServer.s.AddTool(listVulnerabilitiesTool, ksServer.toolHandler(listVulnerabilitiesTool.Name))
-
-	listVulnerabilityMatchesForCVE := mcp.NewTool(
-		"list_vulnerability_matches_for_cve",
-		mcp.WithDescription("List all vulnerability matches for a given CVE in a given manifest"),
-		mcp.WithString("namespace",
-			mcp.Description("Filter by namespace (optional)"),
-		),
-		mcp.WithString("manifest_name",
-			mcp.Required(),
-			mcp.Description("Name of the manifest to list vulnerabilities from"),
-		),
-		mcp.WithString("cve_id",
-			mcp.Required(),
-			mcp.Description("ID of the CVE to list matches for"),
-		),
-	)
-
-	ksServer.s.AddTool(listVulnerabilityMatchesForCVE, ksServer.toolHandler(listVulnerabilityMatchesForCVE.Name))
-
-	listSBOMsTool := mcp.NewTool(
-		"list_sboms",
-		mcp.WithDescription("Discover the image SBOMs stored in the cluster, without their content. Use list_sbom_packages to read the packages of one."),
-		mcp.WithString("namespace",
-			mcp.Description("Filter by namespace (optional, default all namespaces)"),
-		),
-		mcp.WithString("continue",
-			mcp.Description("Optional Kubernetes continuation token for pagination"),
-		),
-	)
-
-	ksServer.s.AddTool(listSBOMsTool, ksServer.toolHandler(listSBOMsTool.Name))
-
-	listSBOMPackagesTool := mcp.NewTool(
-		"list_sbom_packages",
-		mcp.WithDescription("List the packages in an image SBOM (name, version, type, purl, licenses), sorted by name. Returns a page of results (see limit/offset) with the total count. Use name or package_type to look for specific packages."),
-		mcp.WithString("namespace",
-			mcp.Description("Namespace of the SBOM (optional, default kubescape)"),
-		),
-		mcp.WithString("sbom_name",
-			mcp.Required(),
-			mcp.Description("Name of the SBOM, as returned by list_sboms"),
-		),
-		mcp.WithString("name",
-			mcp.Description("Only packages whose name contains this text, case-insensitive (optional)"),
-		),
-		mcp.WithString("package_type",
-			mcp.Description("Only packages of this type, for example deb, rpm, apk, npm, python, go-module, java-archive (optional)"),
-		),
-		mcp.WithNumber("limit",
-			mcp.Description("Maximum number of packages to return (optional, default 100, max 500)"),
-		),
-		mcp.WithNumber("offset",
-			mcp.Description("Number of packages to skip; pass the previous response's next_offset to get the next page (optional, default 0)"),
-		),
-	)
-
-	ksServer.s.AddTool(listSBOMPackagesTool, ksServer.toolHandler(listSBOMPackagesTool.Name))
+	// The read tools on stored data are storage's (storage_tools.go). They
+	// dispatch through toolHandler and CallTool like every other tool.
+	for _, t := range ksServer.storageTools() {
+		ksServer.s.AddTool(t.Tool, ksServer.toolHandler(t.Tool.Name))
+	}
 
 	vulnerabilityManifestTemplate := mcp.NewResourceTemplate(
 		"kubescape://vulnerability-manifests/{namespace}/{manifest_name}",
@@ -477,40 +411,6 @@ func createVulnerabilityToolsAndResources(ksServer *KubescapeMcpserver) {
 }
 
 func createConfigurationsToolsAndResources(ksServer *KubescapeMcpserver) {
-	// Tool to list configuration manifests
-	listConfigsTool := mcp.NewTool(
-		"list_configuration_security_scan_manifests",
-		mcp.WithDescription("Discover available security configuration scan results at workload level (this returns a list of manifests, not the scan results themselves, to get the scan results, use the get_configuration_security_scan_manifest tool)"),
-		mcp.WithString("namespace",
-			mcp.Description("Filter by namespace (optional; all namespaces by default). A workload's scan is stored in the workload's namespace; scans of cluster-scoped resources are in 'kubescape'"),
-		),
-		mcp.WithString("continue",
-			mcp.Description("Optional Kubernetes continuation token for pagination"),
-		),
-	)
-
-	ksServer.s.AddTool(listConfigsTool, ksServer.toolHandler(listConfigsTool.Name))
-
-	getConfigDetailsTool := mcp.NewTool(
-		"get_configuration_security_scan_manifest",
-		mcp.WithDescription("Get details of a specific security configuration scan result. Most controls in a result usually passed; set status to \"failed\" to get only the controls that need fixing."),
-		mcp.WithString("namespace",
-			mcp.Description("Namespace of the manifest, as returned by list_configuration_security_scan_manifests (optional; if omitted, the manifest is looked up by name in every namespace)"),
-		),
-		mcp.WithString("manifest_name",
-			mcp.Required(),
-			mcp.Description("Name of the configuration manifest to get details for (get this from the list_configuration_security_scan_manifests tool)"),
-		),
-		mcp.WithString("status",
-			mcp.Description("Only return controls with these statuses, comma-separated: failed, passed, skipped (optional; by default every control is returned)"),
-		),
-		mcp.WithString("min_severity",
-			mcp.Description("Only return controls at or above this severity: Critical, High, Medium or Low (optional)"),
-		),
-	)
-
-	ksServer.s.AddTool(getConfigDetailsTool, ksServer.toolHandler(getConfigDetailsTool.Name))
-
 	listConfigSummariesTool := mcp.NewTool(
 		"list_configuration_security_scan_summaries",
 		mcp.WithDescription("List configuration scan results per resource: the failed controls (ID and severity) and the number of controls by status. Summaries are stored on every install; the full manifests behind get_configuration_security_scan_manifest are stored only when continuous scanning is enabled. kind, name and workload_namespace identify the scanned resource; for RBAC subjects the exact name is not stored, so name_label gives the name as a label value instead (at most 63 characters, may differ from the real name). Use list_controls for what a control checks."),
@@ -540,34 +440,6 @@ func createConfigurationsToolsAndResources(ksServer *KubescapeMcpserver) {
 }
 
 func createRuntimeToolsAndResources(ksServer *KubescapeMcpserver) {
-	// Tool to list container profiles
-	listContainerProfilesTool := mcp.NewTool(
-		"list_container_profiles",
-		mcp.WithDescription("Discover available container profiles at workload level (this returns a list of profiles, not the profile results themselves, to get the profile results, use the get_container_profile tool)"),
-		mcp.WithString("namespace",
-			mcp.Description("Filter by namespace (optional)"),
-		),
-		mcp.WithString("continue",
-			mcp.Description("Optional Kubernetes continuation token for pagination"),
-		),
-	)
-
-	ksServer.s.AddTool(listContainerProfilesTool, ksServer.toolHandler(listContainerProfilesTool.Name))
-
-	getContainerProfileTool := mcp.NewTool(
-		"get_container_profile",
-		mcp.WithDescription("Get details of a specific container profile"),
-		mcp.WithString("namespace",
-			mcp.Description("Namespace of the profile, as returned by list_container_profiles (optional; if omitted, the profile is looked up by name in every namespace)"),
-		),
-		mcp.WithString("profile_name",
-			mcp.Required(),
-			mcp.Description("Name of the container profile to get details for (get this from the list_container_profiles tool)"),
-		),
-	)
-
-	ksServer.s.AddTool(getContainerProfileTool, ksServer.toolHandler(getContainerProfileTool.Name))
-
 	getConfigurationDriftTool := mcp.NewTool(
 		"get_configuration_drift",
 		mcp.WithDescription("Get configuration drift patches (e.g. readOnlyRootFilesystem, drop capabilities) by comparing a workload's runtime ContainerProfile against its static manifest. Useful for suggesting security posture hardening."),
@@ -818,6 +690,9 @@ func (ksServer *KubescapeMcpserver) ReadContainerProfileResource(ctx context.Con
 
 // CallTool executes the named MCP tool with the supplied arguments.
 func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, arguments map[string]any) (*mcp.CallToolResult, error) {
+	if res, ok, err := ksServer.callStorageTool(ctx, name, arguments); ok {
+		return res, err
+	}
 	switch name {
 	case "run_rbac_security_scan":
 		namespace, err := mcpScanNamespace(arguments)
@@ -982,339 +857,6 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		}
 		responseBytes := v.([]byte)
 		return mcp.NewToolResultText(string(responseBytes)), nil
-	case "list_vulnerability_manifests":
-		namespace, toolErr := mcpStringArg(arguments, "namespace")
-		if toolErr != nil {
-			return toolErr, nil
-		}
-		if namespace == "" {
-			namespace = metav1.NamespaceAll
-		}
-		level, toolErr := mcpStringArg(arguments, "level")
-		if toolErr != nil {
-			return toolErr, nil
-		}
-		if level == "" {
-			level = "both"
-		}
-
-		result := map[string]any{
-			"vulnerability_manifests": map[string]any{},
-		}
-
-		// Get workload-level manifests
-		labelSelector := ""
-		switch level {
-		case "workload":
-			labelSelector = "kubescape.io/context=filtered"
-		case "image":
-			labelSelector = "kubescape.io/context=non-filtered"
-		}
-
-		continueToken, toolErr := mcpStringArg(arguments, "continue")
-		if toolErr != nil {
-			return toolErr, nil
-		}
-
-		client, ksErr := ksServer.getKsClient()
-		if ksErr != nil {
-			return mcpToolError(ErrCodeK8sClientError, fmt.Sprintf("failed to connect to Kubernetes cluster: %v", ksErr), nil), nil
-		}
-
-		listOpts := metav1.ListOptions{Limit: 100, Continue: continueToken}
-		if labelSelector != "" {
-			listOpts.LabelSelector = labelSelector
-		}
-		chunk, err := client.VulnerabilityManifests(namespace).List(ctx, listOpts)
-		if err != nil {
-			return nil, err
-		}
-
-		if chunk.GetContinue() != "" {
-			result["continue"] = chunk.GetContinue()
-		}
-
-		var manifests v1beta1.VulnerabilityManifestList
-		manifests.Items = chunk.Items
-
-		logger.L().Info(fmt.Sprintf("Found %d manifests", len(manifests.Items)))
-
-		vulnerabilityManifests := []map[string]any{}
-		for _, manifest := range manifests.Items {
-			isImageLevel := manifest.Annotations[helpersv1.WlidMetadataKey] == ""
-			manifestMap := map[string]any{
-				"type":                    "workload",
-				"namespace":               manifest.Namespace,
-				"manifest_name":           manifest.Name,
-				"image-level":             isImageLevel,
-				"workload-level":          !isImageLevel,
-				"image-id":                manifest.Annotations[helpersv1.ImageIDMetadataKey],
-				"image-tag":               manifest.Annotations[helpersv1.ImageTagMetadataKey],
-				"workload-id":             manifest.Annotations[helpersv1.WlidMetadataKey],
-				"workload-container-name": manifest.Annotations[helpersv1.ContainerNameMetadataKey],
-				"resource_uri": fmt.Sprintf("kubescape://vulnerability-manifests/%s/%s",
-					manifest.Namespace, manifest.Name),
-			}
-			vulnerabilityManifests = append(vulnerabilityManifests, manifestMap)
-		}
-		result["vulnerability_manifests"].(map[string]any)["manifests"] = vulnerabilityManifests
-
-		// Add template information
-		result["available_templates"] = map[string]string{
-			"vulnerability_manifest_cve_list":    "kubescape://vulnerability-manifests/{namespace}/{manifest_name}/cve_list",
-			"vulnerability_manifest_cve_details": "kubescape://vulnerability-manifests/{namespace}/{manifest_name}/cve_details/{cve_id}",
-		}
-
-		content, err := json.Marshal(result)
-		if err != nil {
-			return nil, fmt.Errorf("failed to marshal result: %w", err)
-		}
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{
-				mcp.TextContent{
-					Type: "text",
-					Text: string(content),
-				},
-			},
-		}, nil
-	case "list_vulnerabilities_in_manifest":
-		namespaceStr, toolErr := mcpStringArg(arguments, "namespace")
-		if toolErr != nil {
-			return toolErr, nil
-		}
-		if namespaceStr == "" {
-			namespaceStr = "kubescape"
-		}
-		manifestNameStr, toolErr := mcpRequiredStringArg(arguments, "manifest_name")
-		if toolErr != nil {
-			return toolErr, nil
-		}
-		listOpts, toolErr := parseVulnerabilityListOptions(arguments)
-		if toolErr != nil {
-			return toolErr, nil
-		}
-		client, ksErr := ksServer.getKsClient()
-		if ksErr != nil {
-			return mcpToolError(ErrCodeK8sClientError, fmt.Sprintf("failed to connect to Kubernetes cluster: %v", ksErr), nil), nil
-		}
-		manifest, err := client.VulnerabilityManifests(namespaceStr).Get(ctx, manifestNameStr, metav1.GetOptions{})
-		if err != nil {
-			return nil, fmt.Errorf("failed to get vulnerability manifest: %w", err)
-		}
-		responseJson, err := json.Marshal(listVulnerabilities(manifest.Spec.Payload.Matches, listOpts))
-		if err != nil {
-			return nil, fmt.Errorf("failed to marshal cve list: %w", err)
-		}
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{
-				mcp.TextContent{
-					Type: "text",
-					Text: string(responseJson),
-				},
-			},
-		}, nil
-	case "list_vulnerability_matches_for_cve":
-		namespaceStr, toolErr := mcpStringArg(arguments, "namespace")
-		if toolErr != nil {
-			return toolErr, nil
-		}
-		if namespaceStr == "" {
-			namespaceStr = "kubescape"
-		}
-		manifestNameStr, toolErr := mcpRequiredStringArg(arguments, "manifest_name")
-		if toolErr != nil {
-			return toolErr, nil
-		}
-		cveIDStr, toolErr := mcpRequiredStringArg(arguments, "cve_id")
-		if toolErr != nil {
-			return toolErr, nil
-		}
-		client, ksErr := ksServer.getKsClient()
-		if ksErr != nil {
-			return mcpToolError(ErrCodeK8sClientError, fmt.Sprintf("failed to connect to Kubernetes cluster: %v", ksErr), nil), nil
-		}
-		manifest, err := client.VulnerabilityManifests(namespaceStr).Get(ctx, manifestNameStr, metav1.GetOptions{})
-		if err != nil {
-			return nil, fmt.Errorf("failed to get vulnerability manifest: %w", err)
-		}
-		match := []v1beta1.Match{}
-		for _, m := range manifest.Spec.Payload.Matches {
-			if m.Vulnerability.ID == cveIDStr {
-				match = append(match, m)
-			}
-		}
-		responseJson, err := json.Marshal(match)
-		if err != nil {
-			return nil, fmt.Errorf("failed to marshal cve details: %w", err)
-		}
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{
-				mcp.TextContent{
-					Type: "text",
-					Text: string(responseJson),
-				},
-			},
-		}, nil
-	case "list_sboms":
-		namespaceStr, toolErr := mcpStringArg(arguments, "namespace")
-		if toolErr != nil {
-			return toolErr, nil
-		}
-		if namespaceStr == "" {
-			namespaceStr = metav1.NamespaceAll
-		}
-		continueToken, toolErr := mcpStringArg(arguments, "continue")
-		if toolErr != nil {
-			return toolErr, nil
-		}
-		client, ksErr := ksServer.getKsClient()
-		if ksErr != nil {
-			return mcpToolError(ErrCodeK8sClientError, fmt.Sprintf("failed to connect to Kubernetes cluster: %v", ksErr), nil), nil
-		}
-		chunk, err := client.SBOMSyfts(namespaceStr).List(ctx, metav1.ListOptions{Limit: 100, Continue: continueToken})
-		if err != nil {
-			return mcpToolError(classifyScanError(err), fmt.Sprintf("failed to list SBOMs: %v", err), nil), nil
-		}
-		responseJson, err := json.Marshal(sbomListResponse{SBOMs: listSBOMEntries(chunk.Items), Continue: chunk.GetContinue()})
-		if err != nil {
-			return nil, fmt.Errorf("failed to marshal SBOM list: %w", err)
-		}
-		return mcp.NewToolResultText(string(responseJson)), nil
-	case "list_sbom_packages":
-		namespaceStr, toolErr := mcpStringArg(arguments, "namespace")
-		if toolErr != nil {
-			return toolErr, nil
-		}
-		if namespaceStr == "" {
-			namespaceStr = "kubescape"
-		}
-		sbomNameStr, toolErr := mcpRequiredStringArg(arguments, "sbom_name")
-		if toolErr != nil {
-			return toolErr, nil
-		}
-		listOpts, toolErr := parseSBOMPackageListOptions(arguments)
-		if toolErr != nil {
-			return toolErr, nil
-		}
-		client, ksErr := ksServer.getKsClient()
-		if ksErr != nil {
-			return mcpToolError(ErrCodeK8sClientError, fmt.Sprintf("failed to connect to Kubernetes cluster: %v", ksErr), nil), nil
-		}
-		sbom, err := client.SBOMSyfts(namespaceStr).Get(ctx, sbomNameStr, metav1.GetOptions{})
-		if err != nil {
-			return mcpToolError(classifyScanError(err), fmt.Sprintf("failed to get SBOM: %v", err), nil), nil
-		}
-		responseJson, err := json.Marshal(listSBOMPackages(sbom, listOpts))
-		if err != nil {
-			return nil, fmt.Errorf("failed to marshal SBOM packages: %w", err)
-		}
-		return mcp.NewToolResultText(string(responseJson)), nil
-	case "list_configuration_security_scan_manifests":
-		// Scans of namespaced workloads are stored in the workload's own
-		// namespace, so no namespace means every namespace.
-		namespaceStr, toolErr := mcpStringArg(arguments, "namespace")
-		if toolErr != nil {
-			return toolErr, nil
-		}
-		if namespaceStr == "" {
-			namespaceStr = metav1.NamespaceAll
-		}
-		continueToken, toolErr := mcpStringArg(arguments, "continue")
-		if toolErr != nil {
-			return toolErr, nil
-		}
-		client, ksErr := ksServer.getKsClient()
-		if ksErr != nil {
-			return mcpToolError(ErrCodeK8sClientError, fmt.Sprintf("failed to connect to Kubernetes cluster: %v", ksErr), nil), nil
-		}
-
-		chunk, err := client.WorkloadConfigurationScans(namespaceStr).List(ctx, metav1.ListOptions{Limit: 100, Continue: continueToken})
-		if err != nil {
-			return nil, err
-		}
-
-		var manifests v1beta1.WorkloadConfigurationScanList
-		manifests.Items = chunk.Items
-		logger.L().Info(fmt.Sprintf("Found %d configuration manifests", len(manifests.Items)))
-		configManifests := []map[string]any{}
-		for _, manifest := range manifests.Items {
-			item := map[string]any{
-				"namespace":     manifest.Namespace,
-				"manifest_name": manifest.Name,
-				"resource_uri":  fmt.Sprintf("kubescape://configuration-manifests/%s/%s", manifest.Namespace, manifest.Name),
-			}
-			configManifests = append(configManifests, item)
-		}
-		result := map[string]any{
-			"configuration_manifests": map[string]any{
-				"manifests": configManifests,
-			},
-			"available_templates": map[string]string{
-				"configuration_manifest_details": "kubescape://configuration-manifests/{namespace}/{manifest_name}",
-			},
-		}
-		if chunk.GetContinue() != "" {
-			result["continue"] = chunk.GetContinue()
-		}
-		content, err := json.Marshal(result)
-		if err != nil {
-			return nil, fmt.Errorf("failed to marshal result: %w", err)
-		}
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{
-				mcp.TextContent{
-					Type: "text",
-					Text: string(content),
-				},
-			},
-		}, nil
-	case "get_configuration_security_scan_manifest":
-		namespaceStr, toolErr := mcpStringArg(arguments, "namespace")
-		if toolErr != nil {
-			return toolErr, nil
-		}
-		manifestNameStr, toolErr := mcpRequiredStringArg(arguments, "manifest_name")
-		if toolErr != nil {
-			return toolErr, nil
-		}
-		controlFilter, toolErr := parseScannedControlFilter(arguments)
-		if toolErr != nil {
-			return toolErr, nil
-		}
-		client, ksErr := ksServer.getKsClient()
-		if ksErr != nil {
-			return mcpToolError(ErrCodeK8sClientError, fmt.Sprintf("failed to connect to Kubernetes cluster: %v", ksErr), nil), nil
-		}
-		if namespaceStr == "" {
-			scans, err := client.WorkloadConfigurationScans(metav1.NamespaceAll).List(ctx, nameSelector(manifestNameStr))
-			if err != nil {
-				return nil, fmt.Errorf("failed to find configuration manifest: %w", err)
-			}
-			found := make([]metav1.ObjectMeta, len(scans.Items))
-			for i := range scans.Items {
-				found[i] = scans.Items[i].ObjectMeta
-			}
-			if namespaceStr, toolErr = pickNamespace("configuration manifest", manifestNameStr, found); toolErr != nil {
-				return toolErr, nil
-			}
-		}
-		manifest, err := client.WorkloadConfigurationScans(namespaceStr).Get(ctx, manifestNameStr, metav1.GetOptions{})
-		if err != nil {
-			return nil, fmt.Errorf("failed to get configuration manifest: %w", err)
-		}
-		manifest.Spec.Controls = filterScannedControls(manifest.Spec.Controls, controlFilter)
-		responseJson, err := json.Marshal(manifest)
-		if err != nil {
-			return nil, fmt.Errorf("failed to marshal configuration manifest: %w", err)
-		}
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{
-				mcp.TextContent{
-					Type: "text",
-					Text: string(responseJson),
-				},
-			},
-		}, nil
 	case "list_configuration_security_scan_summaries":
 		namespaceStr, toolErr := mcpStringArg(arguments, "namespace")
 		if toolErr != nil {
@@ -1345,105 +887,6 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 			return nil, fmt.Errorf("failed to marshal configuration scan summaries: %w", err)
 		}
 		return mcp.NewToolResultText(string(responseJson)), nil
-	case "list_container_profiles":
-		namespace, toolErr := mcpStringArg(arguments, "namespace")
-		if toolErr != nil {
-			return toolErr, nil
-		}
-		if namespace == "" {
-			namespace = metav1.NamespaceAll
-		}
-		continueToken, toolErr := mcpStringArg(arguments, "continue")
-		if toolErr != nil {
-			return toolErr, nil
-		}
-		client, ksErr := ksServer.getKsClient()
-		if ksErr != nil {
-			return mcpToolError(ErrCodeK8sClientError, fmt.Sprintf("failed to connect to Kubernetes cluster: %v", ksErr), nil), nil
-		}
-
-		chunk, err := client.ContainerProfiles(namespace).List(ctx, metav1.ListOptions{Limit: 100, Continue: continueToken})
-		if err != nil {
-			return nil, err
-		}
-
-		var profiles v1beta1.ContainerProfileList
-		profiles.Items = chunk.Items
-		logger.L().Info(fmt.Sprintf("Found %d container profiles", len(profiles.Items)))
-		containerProfilesList := []map[string]any{}
-		for _, profile := range profiles.Items {
-			item := map[string]any{
-				"namespace":    profile.Namespace,
-				"profile_name": profile.Name,
-				"resource_uri": fmt.Sprintf("kubescape://container-profiles/%s/%s", profile.Namespace, profile.Name),
-			}
-			containerProfilesList = append(containerProfilesList, item)
-		}
-		result := map[string]any{
-			"container_profiles": map[string]any{
-				"profiles": containerProfilesList,
-			},
-			"available_templates": map[string]string{
-				"container_profile_details": "kubescape://container-profiles/{namespace}/{profile_name}",
-			},
-		}
-		if chunk.GetContinue() != "" {
-			result["continue"] = chunk.GetContinue()
-		}
-		content, err := json.Marshal(result)
-		if err != nil {
-			return nil, fmt.Errorf("failed to marshal result: %w", err)
-		}
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{
-				mcp.TextContent{
-					Type: "text",
-					Text: string(content),
-				},
-			},
-		}, nil
-	case "get_container_profile":
-		namespaceStr, toolErr := mcpStringArg(arguments, "namespace")
-		if toolErr != nil {
-			return toolErr, nil
-		}
-		profileNameStr, toolErr := mcpRequiredStringArg(arguments, "profile_name")
-		if toolErr != nil {
-			return toolErr, nil
-		}
-		client, ksErr := ksServer.getKsClient()
-		if ksErr != nil {
-			return mcpToolError(ErrCodeK8sClientError, fmt.Sprintf("failed to connect to Kubernetes cluster: %v", ksErr), nil), nil
-		}
-		if namespaceStr == "" {
-			profiles, err := client.ContainerProfiles(metav1.NamespaceAll).List(ctx, nameSelector(profileNameStr))
-			if err != nil {
-				return nil, fmt.Errorf("failed to find container profile: %w", err)
-			}
-			found := make([]metav1.ObjectMeta, len(profiles.Items))
-			for i := range profiles.Items {
-				found[i] = profiles.Items[i].ObjectMeta
-			}
-			if namespaceStr, toolErr = pickNamespace("container profile", profileNameStr, found); toolErr != nil {
-				return toolErr, nil
-			}
-		}
-		profile, err := client.ContainerProfiles(namespaceStr).Get(ctx, profileNameStr, metav1.GetOptions{})
-		if err != nil {
-			return nil, fmt.Errorf("failed to get container profile: %w", err)
-		}
-		responseJson, err := json.Marshal(profile)
-		if err != nil {
-			return nil, fmt.Errorf("failed to marshal container profile: %w", err)
-		}
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{
-				mcp.TextContent{
-					Type: "text",
-					Text: string(responseJson),
-				},
-			},
-		}, nil
 	case "get_configuration_drift":
 		namespaceStr, toolErr := mcpStringArg(arguments, "namespace")
 		if toolErr != nil {

@@ -40,6 +40,11 @@ var typedResourceGVK = map[string]struct{ apiVersion, kind string }{
 	"kubernetes_role_binding":         {"rbac.authorization.k8s.io/v1", "RoleBinding"},
 	"kubernetes_cluster_role":         {"rbac.authorization.k8s.io/v1", "ClusterRole"},
 	"kubernetes_cluster_role_binding": {"rbac.authorization.k8s.io/v1", "ClusterRoleBinding"},
+
+	"kubernetes_role_v1":                 {"rbac.authorization.k8s.io/v1", "Role"},
+	"kubernetes_role_binding_v1":         {"rbac.authorization.k8s.io/v1", "RoleBinding"},
+	"kubernetes_cluster_role_v1":         {"rbac.authorization.k8s.io/v1", "ClusterRole"},
+	"kubernetes_cluster_role_binding_v1": {"rbac.authorization.k8s.io/v1", "ClusterRoleBinding"},
 }
 
 // pluralOverrides maps an HCL block label to the K8s array field name it must
@@ -97,10 +102,25 @@ var resourceMetaBlocks = map[string]bool{
 	"connection":  true,
 }
 
+var fieldInitialisms = map[string]string{
+	"id":   "ID",
+	"ip":   "IP",
+	"ipc":  "IPC",
+	"ips":  "IPs",
+	"pid":  "PID",
+	"uri":  "URI",
+	"urls": "URLs",
+	"uuid": "UUID",
+}
+
 func snakeToCamel(s string) string {
 	parts := strings.Split(s, "_")
 	for i := 1; i < len(parts); i++ {
 		if parts[i] == "" {
+			continue
+		}
+		if initialism, ok := fieldInitialisms[parts[i]]; ok {
+			parts[i] = initialism
 			continue
 		}
 		parts[i] = strings.ToUpper(parts[i][:1]) + parts[i][1:]

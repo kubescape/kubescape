@@ -1,0 +1,11 @@
+# a real name beside "" still authorizes get of that secret.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: empty-and-named-secret-reader
+  namespace: build
+rules:
+- apiGroups: [""]
+  resources: ["secrets"]
+  resourceNames: ["", "builder-token"]
+  verbs: ["get"]

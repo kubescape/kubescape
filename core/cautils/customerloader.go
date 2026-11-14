@@ -5,9 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
+	"syscall"
 
 	"github.com/google/uuid"
 	v1 "github.com/kubescape/backend/pkg/client/v1"
@@ -49,6 +52,13 @@ const (
 	accessKeyEnvVar                 string = AccessKeyEnvVar
 	cloudApiUrlEnvVar               string = CloudApiUrlEnvVar
 	cloudReportUrlEnvVar            string = CloudReportUrlEnvVar
+)
+
+var (
+	// ErrConfigFileNotRegular is returned when a configuration file is not a regular file.
+	ErrConfigFileNotRegular = errors.New("configuration file is not a regular file")
+	// ErrConfigFileTooLarge is returned when a configuration file exceeds the maximum allowed size.
+	ErrConfigFileTooLarge = errors.New("configuration file exceeds maximum size limit")
 )
 
 func ConfigFileFullPath() string { return getter.GetDefaultPath(configFileName + ".json") }
@@ -349,8 +359,8 @@ func (c *ClusterConfig) updateConfigEmptyFieldsFromCredentialsSecret(ctx context
 }
 
 func existsConfigFile() bool {
-	_, err := os.ReadFile(ConfigFileFullPath())
-	return err == nil
+	info, err := os.Stat(ConfigFileFullPath())
+	return err == nil && !info.IsDir() && info.Mode().IsRegular()
 }
 
 // chmod is a package-level indirection so tests can simulate a chmod failure
@@ -454,10 +464,52 @@ func (c *ClusterConfig) updateConfigData(configMap *corev1.ConfigMap) {
 		}
 	}
 }
-func loadConfigFromFile(configObj *ConfigObj) error {
-	dat, err := os.ReadFile(ConfigFileFullPath())
+
+// readBoundedConfigFile opens path for reading, verifies that it is a regular file,
+// and reads at most GetMaxFileSize() bytes.
+func readBoundedConfigFile(path string) ([]byte, error) {
+	if strings.TrimSpace(path) == "" {
+		return nil, os.ErrNotExist
+	}
+	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK, 0)
 	if err != nil {
-		return nil // no config file
+		return nil, err
+	}
+	defer func() { _ = f.Close() }()
+
+	info, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if info.IsDir() {
+		return nil, fmt.Errorf("%q is a directory, not a file: %w", path, ErrConfigFileNotRegular)
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("%w: %q", ErrConfigFileNotRegular, path)
+	}
+
+	limit := GetMaxFileSize()
+	if info.Size() > limit {
+		return nil, fmt.Errorf("%w: %q exceeds the %d byte limit", ErrConfigFileTooLarge, path, limit)
+	}
+
+	data, err := io.ReadAll(io.LimitReader(f, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > limit {
+		return nil, fmt.Errorf("%w: %q exceeds the %d byte limit", ErrConfigFileTooLarge, path, limit)
+	}
+	return data, nil
+}
+
+func loadConfigFromFile(configObj *ConfigObj) error {
+	dat, err := readBoundedConfigFile(ConfigFileFullPath())
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil // no config file
+		}
+		return err
 	}
 	return readConfig(dat, configObj)
 }
@@ -487,9 +539,12 @@ func SetServicesConfigPath(path string) func() {
 }
 
 func loadUrlsFromFile(obj *ConfigObj) error {
-	dat, err := os.ReadFile(servicesConfigPath)
+	dat, err := readBoundedConfigFile(servicesConfigPath)
 	if err != nil {
-		return nil // no config file
+		if errors.Is(err, os.ErrNotExist) {
+			return nil // no config file
+		}
+		return err
 	}
 	services, err := servicediscovery.GetServices(
 		servicediscoveryv2.NewServiceDiscoveryStreamV2(dat),

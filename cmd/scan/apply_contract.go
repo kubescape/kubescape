@@ -21,12 +21,20 @@ import (
 // while flags Cobra marked as changed retain ordinary CLI precedence. Failure
 // gates are different: an explicit runner value is a floor that the contract
 // may tighten, but never weaken.
-func loadAndApplyScanContract(cmd *cobra.Command, scanInfo *cautils.ScanInfo, path, name string) (*contractv1alpha1.SelectedContract, error) {
+func loadAndApplyScanContract(cmd *cobra.Command, scanInfo *cautils.ScanInfo, path, name string, allowSections []string) (*contractv1alpha1.SelectedContract, error) {
 	if path == "" {
 		if name != "" {
 			return nil, fmt.Errorf("--contract requires --scan-contract")
 		}
+		if len(allowSections) > 0 || commandFlagChanged(cmd, "contract-allow") {
+			return nil, fmt.Errorf("--contract-allow requires --scan-contract")
+		}
 		return nil, nil
+	}
+
+	allowedMap, err := parseContractAllowlist(allowSections)
+	if err != nil {
+		return nil, err
 	}
 
 	selected, err := contractv1alpha1.LoadFile(path, contractv1alpha1.LoadOptions{
@@ -38,16 +46,25 @@ func loadAndApplyScanContract(cmd *cobra.Command, scanInfo *cautils.ScanInfo, pa
 	if err != nil {
 		return nil, err
 	}
-	if err := validateContractRunnerConflicts(selected, scanInfo); err != nil {
+
+	allowedSections, deniedSections := partitionContractSections(selected.Contract, allowedMap)
+	for _, section := range deniedSections {
+		logSkippedContractSection(section)
+	}
+
+	effectiveContract := filterContractSections(selected.Contract, allowedMap)
+
+	if err := validateContractRunnerConflicts(&contractv1alpha1.SelectedContract{Contract: effectiveContract}, scanInfo); err != nil {
 		return nil, err
 	}
 	if err := validateExplicitRunnerGateFloors(cmd, scanInfo); err != nil {
 		return nil, err
 	}
 
-	applyContractOrdinarySettings(cmd, scanInfo, selected.Contract)
-	gateResolution := applyContractGateFloors(cmd, scanInfo, selected.Contract)
-	scanInfo.ScanContract = newScanContractMetadata(cmd, selected, path, scanInfo, gateResolution)
+	applyContractOrdinarySettings(cmd, scanInfo, effectiveContract)
+	gateResolution := applyContractGateFloors(cmd, scanInfo, effectiveContract)
+	scanInfo.ScanContract = newScanContractMetadata(cmd, selected, path, scanInfo, gateResolution, allowedSections, deniedSections, effectiveContract)
+	selected.Contract = effectiveContract
 	return selected, nil
 }
 
@@ -239,6 +256,10 @@ func logIgnoredWeakerGate(field string, ignored bool) {
 	if ignored {
 		logger.L().Info("Scan contract gate cannot weaken the explicit CLI floor", helpers.String("field", field))
 	}
+}
+
+func logSkippedContractSection(section string) {
+	logger.L().Info("Skipping contract section not permitted by --contract-allow", helpers.String("section", section))
 }
 
 func contractPolicyIdentifiers(selected *contractv1alpha1.SelectedContract) []cautils.PolicyIdentifier {

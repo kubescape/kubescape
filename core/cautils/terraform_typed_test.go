@@ -35,6 +35,15 @@ func TestSnakeToCamel(t *testing.T) {
 		{"empty segment from double underscore is skipped", "host__alias", "hostAlias"},
 		{"trailing underscore segment is dropped", "trailing_", "trailing"},
 		{"leading and trailing underscores are dropped", "_init_container_", "InitContainer"},
+		{"host pid initialism", "host_pid", "hostPID"},
+		{"host ipc initialism", "host_ipc", "hostIPC"},
+		{"host ip initialism", "host_ip", "hostIP"},
+		{"plural ips initialism", "external_ips", "externalIPs"},
+		{"multi-word ip initialism", "load_balancer_ip", "loadBalancerIP"},
+		{"urls initialism", "non_resource_urls", "nonResourceURLs"},
+		{"id initialism", "volume_id", "volumeID"},
+		{"initialism as first word stays lowercase", "ip_families", "ipFamilies"},
+		{"word containing an initialism is not changed", "pid_limit", "pidLimit"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -232,6 +241,101 @@ resource "kubernetes_foo_bar" "unsupported" {
 	assert.Equal(t, "Deployment", manifests[3]["kind"])
 	assert.Equal(t, json.Number("2"), manifests[3]["replicas"])
 	assert.Equal(t, map[string]interface{}{"name": "legacy-web"}, manifests[3]["metadata"])
+}
+
+func TestExtractTypedResourcesInitialismFields(t *testing.T) {
+	src := `
+resource "kubernetes_pod_v1" "host" {
+  spec {
+    host_pid = true
+    host_ipc = true
+    container {
+      name = "app"
+      port {
+        container_port = 80
+        host_ip        = "0.0.0.0"
+      }
+    }
+  }
+}
+`
+	manifests, errs := extractTypedResources(parseTypedHCL(t, src), &hcl.EvalContext{})
+
+	require.Empty(t, errs)
+	require.Len(t, manifests, 1)
+	spec, ok := manifests[0]["spec"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, true, spec["hostPID"])
+	assert.Equal(t, true, spec["hostIPC"])
+	ports := spec["containers"].([]interface{})[0].(map[string]interface{})["ports"].([]interface{})
+	assert.Equal(t, "0.0.0.0", ports[0].(map[string]interface{})["hostIP"])
+}
+
+func TestExtractTypedResourcesVersionedRBAC(t *testing.T) {
+	src := `
+resource "kubernetes_role_v1" "reader" {
+  metadata {
+    namespace = "apps"
+  }
+  rule {
+    api_groups = [""]
+    resources  = ["secrets"]
+    verbs      = ["get", "list"]
+  }
+}
+
+resource "kubernetes_role_binding_v1" "reader" {
+  metadata {
+    namespace = "apps"
+  }
+  role_ref {
+    api_group = "rbac.authorization.k8s.io"
+    kind      = "Role"
+    name      = "reader"
+  }
+  subject {
+    kind      = "ServiceAccount"
+    name      = "ci"
+    namespace = "apps"
+  }
+}
+
+resource "kubernetes_cluster_role_v1" "admin" {
+}
+
+resource "kubernetes_cluster_role_binding_v1" "admin" {
+}
+`
+	manifests, errs := extractTypedResources(parseTypedHCL(t, src), &hcl.EvalContext{})
+
+	require.Empty(t, errs)
+	require.Len(t, manifests, 4)
+
+	assert.Equal(t, map[string]interface{}{
+		"apiVersion": "rbac.authorization.k8s.io/v1",
+		"kind":       "Role",
+		"metadata":   map[string]interface{}{"name": "reader", "namespace": "apps"},
+		"rules": []interface{}{
+			map[string]interface{}{
+				"apiGroups": []interface{}{""},
+				"resources": []interface{}{"secrets"},
+				"verbs":     []interface{}{"get", "list"},
+			},
+		},
+	}, manifests[0])
+
+	assert.Equal(t, map[string]interface{}{
+		"apiVersion": "rbac.authorization.k8s.io/v1",
+		"kind":       "RoleBinding",
+		"metadata":   map[string]interface{}{"name": "reader", "namespace": "apps"},
+		"roleRef":    map[string]interface{}{"apiGroup": "rbac.authorization.k8s.io", "kind": "Role", "name": "reader"},
+		"subjects": []interface{}{
+			map[string]interface{}{"kind": "ServiceAccount", "name": "ci", "namespace": "apps"},
+		},
+	}, manifests[1])
+
+	assert.Equal(t, "ClusterRole", manifests[2]["kind"])
+	assert.Equal(t, "ClusterRoleBinding", manifests[3]["kind"])
 }
 
 func TestExtractTypedResourcesSkipsInvalidBlocks(t *testing.T) {

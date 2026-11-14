@@ -51,13 +51,32 @@ deny contains msga if {
 	}
 }
 
-# resourceNames is deliberately not consulted. It narrows the grant to named
-# pods, but the labels being rewritten belong to the named pod itself, so a
-# restricted entry still lets that pod be adopted as a service backend.
+# resourceNames is not required to be empty: narrowing the grant to named
+# pods still allows rewriting the status of the named pod. However, an
+# entry naming only "" or "*" admits no object, because requests on existing
+# objects carry their real name, "" is never that name, and resourceNames has no
+# wildcard. An omitted, null, or empty resourceNames list is unrestricted.
 modifies_pod_status(rule) if {
 	core_api_group(rule)
 	targets_subresource(rule, "pods/status")
 	update_patch_or_wildcard(rule.verbs)
+	admits_objects(rule)
+}
+
+# An omitted, null, or empty resourceNames list is unrestricted.
+admits_objects(rule) if object.get(rule, "resourceNames", null) == null
+
+admits_objects(rule) if {
+	names := rule.resourceNames
+	names != null
+	count(names) == 0
+}
+
+admits_objects(rule) if {
+	names := rule.resourceNames
+	names != null
+	some name in names
+	not name in {"", "*"}
 }
 
 # RBAC has no "pods/*" form, so a wildcard that reaches a subresource is

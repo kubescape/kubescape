@@ -709,6 +709,15 @@ func TestGitHubActionsPrinter_StepSummaryPrePopulatedWithinSafetyMargin(t *testi
 		"must not append anything when remaining capacity is within the safety margin")
 }
 
+func TestGitHubActionsActionPrintNilReport(t *testing.T) {
+	gp := NewGitHubActionsPrinter()
+	session := &cautils.OPASessionObj{Report: nil}
+	assert.NotPanics(t, func() {
+		err := gp.ActionPrint(context.Background(), session, nil)
+		assert.Error(t, err)
+	})
+}
+
 func TestGitHubActionsPrinter_StepSummaryOversized(t *testing.T) {
 	origWD, err := os.Getwd()
 	require.NoError(t, err)

@@ -465,6 +465,21 @@ func TestSortHTMLControlsBySeverityName_DeterministicOrdering(t *testing.T) {
 	assert.Equal(t, "C-0004", sorted[4].GetID())
 }
 
+func TestHtmlPrinter_ActionPrint_NilReport(t *testing.T) {
+	ctx := context.Background()
+	out := filepath.Join(t.TempDir(), "report.html")
+
+	hp := NewHtmlPrinter(false)
+	require.NoError(t, hp.SetWriter(ctx, out))
+
+	session := &cautils.OPASessionObj{Report: nil}
+	assert.NotPanics(t, func() {
+		err := hp.ActionPrint(ctx, session, nil)
+		assert.Error(t, err)
+		assert.Equal(t, "failed to print results, missing data", err.Error())
+	})
+}
+
 // TestHtmlPrinter_ActionPrint_ValidHTMLTableStructure ensures that rendered HTML reports
 // have balanced table tags (<tbody> matching </tbody>, <table> matching </table>, <tr> matching </tr>)
 // and contain no duplicate </tr> tags or stray </div> tags.

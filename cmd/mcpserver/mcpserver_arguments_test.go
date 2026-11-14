@@ -110,7 +110,7 @@ func TestRegisteredStorageToolsDispatchToTheirDeclaredNames(t *testing.T) {
 			name: "list CVE matches", tool: "list_vulnerability_matches_for_cve",
 			arguments: map[string]any{"namespace": "security", "manifest_name": "nginx", "cve_id": "CVE-2026-1000"},
 			assertJSON: func(t *testing.T, value any) {
-				matches := value.([]any)
+				matches := value.(map[string]any)["matches"].([]any)
 				require.Len(t, matches, 1)
 				vulnerability := matches[0].(map[string]any)["vulnerability"].(map[string]any)
 				assert.Equal(t, "CVE-2026-1000", vulnerability["id"])

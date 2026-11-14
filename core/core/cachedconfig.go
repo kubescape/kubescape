@@ -12,6 +12,9 @@ import (
 var ErrInvalidCachedConfig = errors.New("cached configuration is invalid")
 
 func (ks *Kubescape) SetCachedConfig(setConfig *metav1.SetConfig) error {
+	if setConfig == nil {
+		return errors.New("uninitialized set parameters")
+	}
 	tenant := cautils.GetTenantConfig(ks.Context(), "", "", "", "", nil)
 
 	if setConfig.Account != "" {
@@ -43,6 +46,9 @@ func getNormalizedKey(key string) string {
 
 // View cached configurations
 func (ks *Kubescape) ViewCachedConfig(viewConfig *metav1.ViewConfig) error {
+	if viewConfig == nil {
+		viewConfig = &metav1.ViewConfig{}
+	}
 	tenant := cautils.GetTenantConfig(ks.Context(), "", "", "", "", kubernetesAPIFunc()) // change k8sinterface
 	configObj := tenant.GetConfigObj()
 

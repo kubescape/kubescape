@@ -477,3 +477,214 @@ func TestContractDrivenAndFlagOnlySettingsAreEquivalent(t *testing.T) {
 	assert.Equal(t, ks.captured.FailCoverageThreshold, contractInfo.FailCoverageThreshold)
 	assert.Equal(t, ks.captured.FailOnDegradedConfig, contractInfo.FailOnDegradedConfig)
 }
+
+func TestContractAllowRequiresContractFile(t *testing.T) {
+	cmd := GetScanCommand(&contractCaptureKubescape{})
+	root := &cobra.Command{Use: "kubescape", SilenceErrors: true, SilenceUsage: true}
+	root.AddCommand(cmd)
+	root.SetArgs([]string{"scan", ".", "--contract-allow", "policy"})
+
+	err := root.Execute()
+	require.EqualError(t, err, "--contract-allow requires --scan-contract")
+}
+
+func TestScanContractRejectsInvalidAllowSection(t *testing.T) {
+	tests := []struct {
+		name    string
+		allow   string
+		wantErr string
+	}{
+		{
+			name:    "unknown section",
+			allow:   "invalid",
+			wantErr: `unsupported section "invalid" in --contract-allow (supported: policy, scope, evaluation, failure, output)`,
+		},
+		{
+			name:    "empty string",
+			allow:   "",
+			wantErr: `unsupported section "" in --contract-allow (supported: policy, scope, evaluation, failure, output)`,
+		},
+		{
+			name:    "empty token in list",
+			allow:   "policy,",
+			wantErr: `unsupported section "" in --contract-allow (supported: policy, scope, evaluation, failure, output)`,
+		},
+		{
+			name:    "mixed valid and invalid",
+			allow:   "policy,bogus",
+			wantErr: `unsupported section "bogus" in --contract-allow (supported: policy, scope, evaluation, failure, output)`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, _, err := executeCapturedScan(t, `
+      policy:
+        frameworks: [nsa]`, ".", "--contract-allow", tt.allow)
+			require.EqualError(t, err, tt.wantErr)
+		})
+	}
+}
+
+func TestScanContractAllowEmptyAllowsAllSections(t *testing.T) {
+	body := `
+      policy:
+        frameworks: [nsa]
+      scope:
+        includeNamespaces: [payments]`
+
+	_, _, err := executeCapturedScan(t, body, ".", "--contract-allow", "")
+	require.EqualError(t, err, `unsupported section "" in --contract-allow (supported: policy, scope, evaluation, failure, output)`)
+}
+
+func TestScanContractAllowOmittedAllowsAllSections(t *testing.T) {
+	body := `
+      policy:
+        frameworks: [nsa]
+      scope:
+        includeNamespaces: [payments]`
+
+	scanInfo, _, err := executeCapturedScan(t, body, ".")
+
+	require.ErrorIs(t, err, errContractScanReached)
+	require.NotNil(t, scanInfo)
+
+	assert.Equal(t, "payments", scanInfo.IncludeNamespaces)
+	assert.Equal(t, []string{"policy", "scope"}, scanInfo.ScanContract.AllowedSections)
+	assert.Nil(t, scanInfo.ScanContract.DeniedSections)
+}
+
+func TestScanContractAppliesOnlyAllowedSections(t *testing.T) {
+	body := `
+      policy:
+        frameworks: [nsa]
+        controlsVersion: v2.0.307
+      scope:
+        includeNamespaces: [payments, shared]
+      evaluation:
+        scanTimeout: 2m
+        controlTimeout: 30s
+      output:
+        formats: [json, sarif]
+        omitRawResources: true
+      failure:
+        severityAtLeast: high
+        complianceBelow: 80`
+
+	scanInfo, policies, err := executeCapturedScan(t, body, ".", "--contract-allow", "policy,output")
+
+	require.ErrorIs(t, err, errContractScanReached)
+	require.NotNil(t, scanInfo)
+
+	// Allowed sections are applied
+	assert.Equal(t, "v2.0.307", scanInfo.ControlsVersion)
+	require.Equal(t, []cautils.PolicyIdentifier{{Identifier: "nsa", Kind: apisv1.KindFramework}}, policies)
+	assert.Equal(t, "json,sarif", scanInfo.Format)
+	assert.True(t, scanInfo.OmitRawResources)
+
+	// Denied sections are skipped
+	assert.Empty(t, scanInfo.IncludeNamespaces)
+	assert.Equal(t, time.Duration(0), scanInfo.ScanTimeout)
+	assert.Equal(t, time.Duration(0), scanInfo.ControlTimeout)
+	assert.Empty(t, scanInfo.FailThresholdSeverity)
+	assert.Equal(t, float32(0), scanInfo.ComplianceThreshold)
+
+	// Provenance captures allowed and denied sections accurately
+	provenance := scanInfo.ScanContract
+	require.NotNil(t, provenance)
+	assert.Equal(t, []string{"policy", "output"}, provenance.AllowedSections)
+	assert.Equal(t, []string{"scope", "evaluation", "failure"}, provenance.DeniedSections)
+
+	require.NotNil(t, provenance.Effective)
+	assert.NotNil(t, provenance.Effective.Policy)
+	assert.NotNil(t, provenance.Effective.Output)
+	assert.Nil(t, provenance.Effective.Scope)
+	assert.Nil(t, provenance.Effective.Evaluation)
+	assert.Nil(t, provenance.Effective.Failure)
+	assert.Nil(t, provenance.GateResolution)
+}
+
+func TestScanContractAllowRepeatedFlagAndCaseInsensitive(t *testing.T) {
+	body := `
+      policy:
+        frameworks: [nsa]
+      scope:
+        includeNamespaces: [payments]
+      output:
+        formats: [json]`
+
+	scanInfo, _, err := executeCapturedScan(t, body, ".", "--contract-allow", "Policy", "--contract-allow", "SCOPE")
+
+	require.ErrorIs(t, err, errContractScanReached)
+	require.NotNil(t, scanInfo)
+
+	assert.Equal(t, "payments", scanInfo.IncludeNamespaces)
+	assert.Equal(t, []string{"policy", "scope"}, scanInfo.ScanContract.AllowedSections)
+	assert.Equal(t, []string{"output"}, scanInfo.ScanContract.DeniedSections)
+}
+
+func TestScanContractControlsVersionBypassAllowedWhenPolicyDenied(t *testing.T) {
+	body := `
+      policy:
+        frameworks: [nsa]
+        controlsVersion: v2.0.307
+      output:
+        formats: [json]`
+
+	// When policy is denied, controlsVersion is not applied, so --use-default does not conflict
+	scanInfo, _, err := executeCapturedScan(t, body, ".", "--use-default", "--contract-allow", "output")
+	require.ErrorIs(t, err, errContractScanReached)
+	require.NotNil(t, scanInfo)
+	assert.Empty(t, scanInfo.ControlsVersion)
+	assert.Equal(t, []string{"output"}, scanInfo.ScanContract.AllowedSections)
+	assert.Equal(t, []string{"policy"}, scanInfo.ScanContract.DeniedSections)
+
+	// When policy is allowed, controlsVersion conflicts with --use-default
+	_, _, err = executeCapturedScan(t, body, ".", "--use-default", "--contract-allow", "policy,output")
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "policy.controlsVersion cannot be used with --use-default")
+}
+
+func TestScanContractAllowFailureSection(t *testing.T) {
+	body := `
+      policy:
+        frameworks: [nsa]
+      failure:
+        severityAtLeast: high
+        complianceBelow: 80`
+
+	// When failure is allowed
+	scanInfo, _, err := executeCapturedScan(t, body, ".", "--contract-allow", "failure", "--severity-threshold", "medium")
+	require.ErrorIs(t, err, errContractScanReached)
+	require.NotNil(t, scanInfo)
+	assert.Equal(t, "medium", scanInfo.FailThresholdSeverity)
+	assert.Equal(t, float32(80), scanInfo.ComplianceThreshold)
+	require.NotNil(t, scanInfo.ScanContract)
+	assert.Equal(t, []string{"failure"}, scanInfo.ScanContract.AllowedSections)
+	assert.Equal(t, []string{"policy"}, scanInfo.ScanContract.DeniedSections)
+	require.NotNil(t, scanInfo.ScanContract.GateResolution)
+
+	// When failure is denied, explicit CLI failure flags are still recorded in Effective.Failure,
+	// while the denied contract values (e.g. complianceBelow) are excluded.
+	scanInfo, _, err = executeCapturedScan(t, body, ".", "--contract-allow", "policy", "--severity-threshold", "medium")
+	require.ErrorIs(t, err, errContractScanReached)
+	require.NotNil(t, scanInfo)
+	assert.Equal(t, "medium", scanInfo.FailThresholdSeverity) // CLI flag alone
+	assert.Equal(t, float32(0), scanInfo.ComplianceThreshold) // contract failure gate was skipped!
+	require.NotNil(t, scanInfo.ScanContract)
+	assert.Equal(t, []string{"policy"}, scanInfo.ScanContract.AllowedSections)
+	assert.Equal(t, []string{"failure"}, scanInfo.ScanContract.DeniedSections)
+	assert.Nil(t, scanInfo.ScanContract.GateResolution)
+	require.NotNil(t, scanInfo.ScanContract.Effective)
+	require.NotNil(t, scanInfo.ScanContract.Effective.Failure)
+	assert.Equal(t, "medium", *scanInfo.ScanContract.Effective.Failure.SeverityAtLeast)
+	assert.Nil(t, scanInfo.ScanContract.Effective.Failure.ComplianceBelow)
+
+	// When failure is denied and no explicit CLI failure flags are set, Effective.Failure is nil
+	scanInfo, _, err = executeCapturedScan(t, body, ".", "--contract-allow", "policy")
+	require.ErrorIs(t, err, errContractScanReached)
+	require.NotNil(t, scanInfo)
+	require.NotNil(t, scanInfo.ScanContract)
+	require.NotNil(t, scanInfo.ScanContract.Effective)
+	assert.Nil(t, scanInfo.ScanContract.Effective.Failure)
+}

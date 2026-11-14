@@ -114,7 +114,7 @@ func (pp *PolicyReportPrinter) PrintNextSteps() {
 }
 
 func (pp *PolicyReportPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
-	if opaSessionObj == nil {
+	if opaSessionObj == nil || opaSessionObj.Report == nil {
 		return fmt.Errorf("failed to write results in PolicyReport format: no data provided")
 	}
 

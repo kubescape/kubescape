@@ -15,7 +15,7 @@ import (
 
 // ScanFormats and ImageScanFormats are derived from printer.AllFormats and
 // printer.ImageFormats to keep a single source of truth — see printresults.go
-// for why the two lists differ (not every printer supports image scans, e.g. CSV).
+// for why the two lists differ (not every printer supports image scans, e.g. github-actions).
 var (
 	ScanFormats      = printer.AllFormats
 	ImageScanFormats = printer.ImageFormats
@@ -207,8 +207,11 @@ func ValidateCommonScanFlags(cmd *cobra.Command, scanInfo *cautils.ScanInfo, sup
 	}
 	if scanInfo.ScanImages && scanInfo.ScanType != cautils.ScanTypeImage {
 		for _, format := range strings.Split(scanInfo.Format, ",") {
-			if strings.TrimSpace(format) == printer.GitLabSASTFormat {
+			switch strings.TrimSpace(format) {
+			case printer.GitLabSASTFormat:
 				return fmt.Errorf("gitlab-sast requires separate posture and image scans; use json or sarif for a combined scan with --scan-images")
+			case printer.GitLabCodeQualityFormat:
+				return fmt.Errorf("gitlab-codequality cannot carry image vulnerabilities; use json or sarif for a combined scan with --scan-images")
 			}
 		}
 	}

@@ -206,7 +206,15 @@ func pathRelativeToRoot(root *os.Root, path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	rel, err := filepath.Rel(root.Name(), resolved)
+	rootPath, err := filepath.Abs(root.Name())
+	if err != nil {
+		return "", err
+	}
+	rootPath, err = filepath.EvalSymlinks(rootPath)
+	if err != nil {
+		return "", err
+	}
+	rel, err := filepath.Rel(rootPath, resolved)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
 		return "", fmt.Errorf("path %q is outside the opened source root", path)
 	}

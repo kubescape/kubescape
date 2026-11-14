@@ -1,0 +1,11 @@
+# watch is authorized with the empty name and returns every secret.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: empty-name-secret-watcher
+  namespace: build
+rules:
+- apiGroups: [""]
+  resources: ["secrets"]
+  resourceNames: [""]
+  verbs: ["watch"]

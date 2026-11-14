@@ -304,3 +304,21 @@ func TestGetFileStringWithRootRejectsPathReplacement(t *testing.T) {
 	_, err = h.GetFileString(manifest)
 	require.Error(t, err, "the rooted fixer read must reject an outside symlink installed after path validation")
 }
+
+func TestGetFileStringWithRelativeRootName(t *testing.T) {
+	base := t.TempDir()
+	workspace := filepath.Join(base, "workspace")
+	require.NoError(t, os.Mkdir(workspace, 0o700))
+	manifest := filepath.Join(workspace, "deploy.yaml")
+	require.NoError(t, os.WriteFile(manifest, []byte("inside"), 0o600))
+
+	t.Chdir(base)
+	root, err := os.OpenRoot("workspace")
+	require.NoError(t, err)
+	defer root.Close()
+	h := &FixHandler{sourceRoot: root}
+
+	content, err := h.GetFileString(manifest)
+	require.NoError(t, err)
+	assert.Equal(t, "inside", content)
+}

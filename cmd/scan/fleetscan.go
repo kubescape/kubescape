@@ -61,6 +61,9 @@ func validateKubeContextsSupported(cmd *cobra.Command, scanInfo *cautils.ScanInf
 	if err := validateRetries(cmd, scanInfo); err != nil {
 		return err
 	}
+	if err := validateParallel(cmd, scanInfo); err != nil {
+		return err
+	}
 	if len(scanInfo.KubeContexts) == 0 {
 		return nil
 	}
@@ -102,15 +105,11 @@ func validateKubeContextsSupported(cmd *cobra.Command, scanInfo *cautils.ScanInf
 type fleetRunner func(ctx context.Context, scanInfo *cautils.ScanInfo, ks meta.IKubescape, policyIdentifiers []cautils.PolicyIdentifier) (*resultshandling.ResultsHandler, error)
 
 // fleetScan runs run once for every context in baseScanInfo.KubeContexts,
-// sequentially, writing one report per context. It's the --kube-contexts
+// writing one report per context. It's the --kube-contexts
 // entry point shared by every scan subcommand that supports fleet mode.
 //
-// Contexts are scanned one at a time, not concurrently: k8sinterface's
-// process-global connection state (K8SConfig, clientConfigAPI,
-// clusterContextName) has no locking around it, confirmed by go test -race
-// while working on #3237 — running two contexts' scans concurrently would
-// race on that state regardless of cautils.EnterClusterContext, which only
-// makes *sequential* context switches safe.
+// In one process contexts are scanned one at a time: k8sinterface keeps one current context and API list per process.
+// With --parallel above 1, each context is scanned in its own process instead.
 //
 // One context failing (connection error, threshold breach, degraded policy
 // inputs, etc.) does not stop the remaining contexts from being attempted:
@@ -481,31 +480,43 @@ func fleetScan(baseScanInfo cautils.ScanInfo, ks meta.IKubescape, policyIdentifi
 	// A plain --kube-contexts run keeps its memory profile: each context's
 	// results are released as soon as that context is done, exactly as before.
 	wantFleetReport := fleetReportRequested(baseScanInfo.FleetReport)
+	keepClusters := wantFleetReport || baseScanInfo.FleetChildResult != ""
 
 	var failed []string
 	incomplete := false
 	var clusters []fleet.ClusterResult
-	if wantFleetReport {
+	if keepClusters {
 		clusters = make([]fleet.ClusterResult, 0, len(baseScanInfo.KubeContexts))
 	}
-	for _, kubeContext := range baseScanInfo.KubeContexts {
-		outputPath := outputPaths[kubeContext]
+	var outcomes []fleetOutcome
+	if baseScanInfo.KubeContextParallel > 1 {
+		outcomes = scanFleetInProcesses(ks.Context(), &baseScanInfo, outputPaths)
+	}
+	for i, kubeContext := range baseScanInfo.KubeContexts {
+		var outcome fleetOutcome
+		if outcomes != nil {
+			outcome = outcomes[i]
+		} else {
+			outputPath := outputPaths[kubeContext]
+			logger.L().Info("fleet scan: scanning context", helpers.String("context", kubeContext), helpers.String("output", outputPath))
+			results, elapsed, attempts, err := scanFleetContext(kubeContext, outputPath, &baseScanInfo, ks, policyIdentifiers, run)
+			outcome = fleetOutcome{scanned: results != nil, attempts: attempts, err: err}
+			if keepClusters {
+				outcome.cluster = newClusterResult(kubeContext, results, err, elapsed)
+				outcome.cluster.Attempts = attempts
+			}
+		}
+		attempts, err := outcome.attempts, outcome.err
 
-		logger.L().Info("fleet scan: scanning context", helpers.String("context", kubeContext), helpers.String("output", outputPath))
-
-		results, elapsed, attempts, err := scanFleetContext(kubeContext, outputPath, &baseScanInfo, ks, policyIdentifiers, run)
-
-		if wantFleetReport {
-			cluster := newClusterResult(kubeContext, results, err, elapsed)
-			cluster.Attempts = attempts
-			clusters = append(clusters, cluster)
+		if keepClusters {
+			clusters = append(clusters, outcome.cluster)
 		}
 
 		if err != nil {
 			if attempts > 1 {
 				err = fmt.Errorf("%w (after %d attempts)", err, attempts)
 			}
-			if results == nil || !isGateFailure(err) {
+			if !outcome.scanned || !isGateFailure(err) {
 				incomplete = true
 			}
 			failed = append(failed, fmt.Sprintf("%s: %s", kubeContext, err))
@@ -513,6 +524,10 @@ func fleetScan(baseScanInfo cautils.ScanInfo, ks meta.IKubescape, policyIdentifi
 			continue
 		}
 		logger.L().Success("fleet scan: context completed", helpers.String("context", kubeContext))
+	}
+
+	if baseScanInfo.FleetChildResult != "" {
+		writeFleetChildResult(baseScanInfo.FleetChildResult, clusters)
 	}
 
 	var fleetReportErr error

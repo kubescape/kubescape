@@ -446,6 +446,8 @@ func NewPrinter(ctx context.Context, printFormat string, scanInfo *cautils.ScanI
 		return printerv2.NewSARIFPrinter(scanInfo.ShowSecrets)
 	case printer.GitLabSASTFormat:
 		return printerv2.NewGitLabSASTPrinter(scanInfo.ShowSecrets)
+	case printer.GitLabCodeQualityFormat:
+		return printerv2.NewGitLabCodeQualityPrinter(scanInfo.ShowSecrets)
 	case printer.GitHubActionsFormat:
 		return printerv2.NewGitHubActionsPrinter()
 	case printer.CycloneDXFormat:
@@ -477,8 +479,8 @@ func ValidatePrinter(scanType cautils.ScanTypes, scanContext cautils.ScanningCon
 		}
 		return false, fmt.Errorf("format \"%s\" is not supported for image scanning", printFormat)
 	}
-	if printFormat == printer.SARIFFormat || printFormat == printer.GitLabSASTFormat || printFormat == printer.GitHubActionsFormat {
-		// SARIF, GitLab SAST and GitHub Actions resolve file locations, so they only apply to local files
+	if printFormat == printer.SARIFFormat || printFormat == printer.GitLabSASTFormat || printFormat == printer.GitLabCodeQualityFormat || printFormat == printer.GitHubActionsFormat {
+		// SARIF, GitLab SAST, GitLab Code Quality and GitHub Actions resolve file locations, so they only apply to local files
 		switch scanContext {
 		case cautils.ContextDir, cautils.ContextFile, cautils.ContextGitLocal, cautils.ContextGitRemote:
 			return false, nil

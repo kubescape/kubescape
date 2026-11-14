@@ -98,6 +98,16 @@ func TestSetWriterUsesSharedOutputResolution(t *testing.T) {
 			},
 		},
 		{
+			name:       "gitlab-codequality",
+			format:     baseprinter.GitLabCodeQualityFormat,
+			baseName:   gitLabCodeQualityOutputFile,
+			newPrinter: func() setWriterPrinter { return NewGitLabCodeQualityPrinter(false) },
+			writerName: func(p setWriterPrinter) string { return p.(*GitLabCodeQualityPrinter).writer.Name() },
+			closeWriter: func(p setWriterPrinter) error {
+				return p.(*GitLabCodeQualityPrinter).CloseWriter()
+			},
+		},
+		{
 			name:       "cyclonedx",
 			format:     baseprinter.CycloneDXFormat,
 			baseName:   cyclonedxOutputFile,

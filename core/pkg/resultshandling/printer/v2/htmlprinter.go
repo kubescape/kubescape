@@ -167,7 +167,8 @@ func sortHTMLControlsBySeverityName(controlSummaries map[string]reportsummary.Co
 }
 
 func (hp *HtmlPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
-	if opaSessionObj == nil && len(imageScanData) == 0 {
+	hasReport := opaSessionObj != nil && opaSessionObj.Report != nil
+	if !hasReport && len(imageScanData) == 0 {
 		return fmt.Errorf("failed to print results, missing data")
 	}
 
@@ -195,7 +196,7 @@ func (hp *HtmlPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.O
 	var resourceTableView ResourceTableView
 	var imageScanSummary *imageprinter.ImageScanSummary
 	var coverageData *HTMLCoverageData
-	if opaSessionObj != nil {
+	if hasReport {
 		resourceTableView = buildResourceTableView(opaSessionObj, hp.showSecrets)
 		coverageData = buildHTMLCoverageData(opaSessionObj)
 	}

@@ -15,6 +15,8 @@ deny contains msga if {
 	rolebinding.roleRef.name == role.metadata.name
 	is_same_namespace(role, rolebinding)
 	rule := role.rules[p]
+	admits_objects(rule)
+
 	subject := rolebinding.subjects[k]
 	is_same_subjects(subjectVector, subject)
 	rule_path := sprintf("relatedObjects[%d].rules[%d]", [i, p])
@@ -42,6 +44,26 @@ deny contains msga if {
 			"externalObjects": subjectVector,
 		},
 	}
+}
+
+# An omitted, null, or empty resourceNames list is unrestricted. Narrowing
+# the grant to named service accounts still allows minting tokens for the named
+# account. However, an entry naming only "" or "*" admits no object, because
+# requests carry the target service account name, "" is never valid, and
+# resourceNames has no wildcard.
+admits_objects(rule) if object.get(rule, "resourceNames", null) == null
+
+admits_objects(rule) if {
+	names := rule.resourceNames
+	names != null
+	count(names) == 0
+}
+
+admits_objects(rule) if {
+	names := rule.resourceNames
+	names != null
+	some name in names
+	not name in {"", "*"}
 }
 
 is_same_namespace(role, rolebinding) if {

@@ -76,20 +76,51 @@ func getCacheFilePath(clusterName, resourceName string) (string, error) {
 	return getCacheFilePathForVersion(clusterName, resourceName, hostSensorCacheFormatVersion)
 }
 
+// sanitizeCacheKeyComponent strips path separators and directory traversal elements
+// so the component is safe to use as part of a cache filename without escaping the cache root (CWE-22).
+func sanitizeCacheKeyComponent(component, defaultVal string) string {
+	cleaned := strings.ReplaceAll(component, "/", "_")
+	cleaned = strings.ReplaceAll(cleaned, "\\", "_")
+	cleaned = strings.ReplaceAll(cleaned, ":", "_")
+	for strings.Contains(cleaned, "..") {
+		cleaned = strings.ReplaceAll(cleaned, "..", "_")
+	}
+	for strings.Contains(cleaned, "__") {
+		cleaned = strings.ReplaceAll(cleaned, "__", "_")
+	}
+	cleaned = strings.Trim(cleaned, "_ \t\r\n")
+	if cleaned == "" || cleaned == "." {
+		return defaultVal
+	}
+	return cleaned
+}
+
 func getCacheFilePathForVersion(clusterName, resourceName, version string) (string, error) {
 	dir, err := getCacheDir()
 	if err != nil {
 		return "", err
 	}
 
-	safeClusterName := strings.ReplaceAll(clusterName, "/", "_")
-	safeClusterName = strings.ReplaceAll(safeClusterName, ":", "_")
-	safeClusterName = strings.ReplaceAll(safeClusterName, "\\", "_")
-	if safeClusterName == "" {
-		safeClusterName = "default"
+	safeClusterName := sanitizeCacheKeyComponent(clusterName, "default")
+	safeResourceName := sanitizeCacheKeyComponent(resourceName, "unknown")
+	safeVersion := sanitizeCacheKeyComponent(version, hostSensorCacheFormatVersion)
+
+	filename := fmt.Sprintf("%s-%s-%s-%s.json.gz", safeClusterName, clusterIdentity(), safeResourceName, safeVersion)
+	if filepath.Base(filename) != filename {
+		return "", fmt.Errorf("invalid host-sensor cache filename: %q", filename)
 	}
 
-	return filepath.Join(dir, fmt.Sprintf("%s-%s-%s-%s.json.gz", safeClusterName, clusterIdentity(), resourceName, version)), nil
+	targetPath := filepath.Join(dir, filename)
+
+	// Enforce strict path containment: target path must reside strictly inside cache dir
+	cleanDir := filepath.Clean(dir)
+	cleanPath := filepath.Clean(targetPath)
+	rel, err := filepath.Rel(cleanDir, cleanPath)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+		return "", fmt.Errorf("host-sensor cache path %q traverses outside cache directory %q", targetPath, dir)
+	}
+
+	return cleanPath, nil
 }
 
 // removeLegacyCacheEntry deletes a pre-partial-tracking v1 entry best-effort:

@@ -73,6 +73,7 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	var scanInfo cautils.ScanInfo
 	var scanContractPath string
 	var scanContractName string
+	var scanContractAllow []string
 	var fleetConfigPath string
 	var selectedContract *contractv1alpha1.SelectedContract
 	var gitCloneDepth = cautils.DefaultGitCloneDepth
@@ -93,10 +94,11 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 				return fmt.Errorf("--scan-contract is supported for posture scans, not image scans")
 			}
 			var err error
-			selectedContract, err = loadAndApplyScanContract(cmd, &scanInfo, scanContractPath, scanContractName)
+			selectedContract, err = loadAndApplyScanContract(cmd, &scanInfo, scanContractPath, scanContractName, scanContractAllow)
 			if err != nil {
 				return err
 			}
+			fleetInvocation = fleetCommandLine{cmd: cmd, args: args}
 			if err := applyFleetConfig(cmd, &scanInfo, fleetConfigPath); err != nil {
 				return err
 			}
@@ -259,6 +261,7 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 
 	scanCmd.PersistentFlags().StringVar(&scanContractPath, "scan-contract", "", "Path to an explicit repository scan contract")
 	scanCmd.PersistentFlags().StringVar(&scanContractName, "contract", "", "Named contract to select; defaults to spec.defaultContract")
+	scanCmd.PersistentFlags().StringArrayVar(&scanContractAllow, "contract-allow", nil, "Comma-separated list of contract sections allowed to take effect: policy, scope, evaluation, failure, output (defaults to all)")
 
 	scanCmd.PersistentFlags().StringVarP(&scanInfo.AccountID, "account", "", "", "Kubescape SaaS account ID. Default will load account ID from cache")
 	scanCmd.PersistentFlags().StringVarP(&scanInfo.AccessKey, "access-key", "", "", "Kubescape SaaS access key. Default will load access key from cache")
@@ -384,6 +387,9 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 
 	scanCmd.PersistentFlags().StringVar(&fleetConfigPath, "fleet-config", "", "Path to a fleet config file (kind FleetConfig) with the contexts to scan and where the reports go: contexts, output, fleetReport, referenceCluster and retries. A flag given on the command line overrides the same setting in the file.")
 
+	scanCmd.PersistentFlags().IntVar(&scanInfo.KubeContextParallel, "parallel", 1, "With --kube-contexts, how many contexts to scan at once. Above 1, each context is scanned in its own kubescape process, since one process can only talk to one cluster at a time.")
+	scanCmd.PersistentFlags().StringVar(&scanInfo.FleetChildResult, "fleet-child-result", "", "Internal: where a --parallel child process writes its context's result for the parent.")
+	_ = scanCmd.PersistentFlags().MarkHidden("fleet-child-result") // #nosec G104 -- flag defined on this command; MarkHidden only errors for an unknown flag
 	scanCmd.PersistentFlags().IntVar(&scanInfo.KubeContextRetries, "retries", 2, "With --kube-contexts, how many more times to try a cluster whose API server never answered, waiting 2s, then 4s, doubling up to 30s between attempts. A cluster that answered with an error, or whose scan was cancelled, is not retried. 0 disables retries.")
 
 	scanCmd.PersistentFlags().StringVar(&scanInfo.ReferenceCluster, "reference-cluster", "", "With --fleet-report, the kube context whose findings the other clusters are read against, so the combined report shows what that cluster found on every control they disagree on. Must be one of --kube-contexts. Without it the report simply says where the clusters disagree.")

@@ -94,18 +94,40 @@ deny contains msga if {
 # a resourceNames restriction.
 #
 # list and watch return whole Secret objects, data included, so they reveal a
-# token just as get does.
+# token just as get does. A list or watch across the collection is authorized
+# with the empty name, so resourceNames: [""] grants them, and "*" includes
+# those verbs so it grants them too.
 #
-# get, update and patch address a secret by name, so a narrowed entry still
-# authorizes them against the named secret, and that secret may well be a
-# service account token secret. A narrowed list or watch is authorized too when
-# the request carries a metadata.name field selector for the named secret, which
-# reads that secret the same way. Only top-level create carries no object name
-# when the authorizer runs, so a narrowed entry never authorizes it; reporting it
-# there would flag a permission the subject does not hold.
-token_verbs(rule) := {"get", "list", "watch", "update", "patch", "*"} if not unrestricted_rule(rule)
-
+# get, update and patch address a secret by name. An entry that names a real
+# secret still authorizes them against that secret, and the secret may be a
+# service account token secret. "" is never a secret's name, so an entry whose
+# resourceNames lists only "" does not authorize those verbs. A narrowed list
+# or watch is also authorized when the request carries a metadata.name field
+# selector for a named secret, which reads that secret the same way.
+#
+# Only an unrestricted entry reports create. A plain create is authorized with
+# the empty name, including when resourceNames lists "", but creating a secret
+# does not return the token. The read that would is matched on its own verb.
+# Reporting create for a narrowed entry would flag a permission that does not
+# hand the subject a token.
 token_verbs(rule) := {"get", "list", "watch", "create", "update", "patch", "*"} if unrestricted_rule(rule)
+
+token_verbs(rule) := {"get", "list", "watch", "update", "patch", "*"} if {
+	not unrestricted_rule(rule)
+	names_a_secret(rule)
+}
+
+token_verbs(rule) := {"list", "watch", "*"} if {
+	not unrestricted_rule(rule)
+	not names_a_secret(rule)
+}
+
+# A non-empty resourceNames entry is a real secret. "" is the name a collection
+# request is authorized with, not the name of an object.
+names_a_secret(rule) if {
+	some name in object.get(rule, "resourceNames", [])
+	name != ""
+}
 
 targets_secrets(rule) if {
 	core_api_group(rule)

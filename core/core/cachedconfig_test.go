@@ -565,3 +565,28 @@ func TestDeleteCachedConfig_SelectiveKeyDeletion(t *testing.T) {
 		})
 	}
 }
+
+func TestSetCachedConfig_NilParam(t *testing.T) {
+	ks := NewKubescape(context.Background())
+	err := ks.SetCachedConfig(nil)
+	assert.Error(t, err)
+	assert.Equal(t, "uninitialized set parameters", err.Error())
+}
+
+func TestViewCachedConfig_NilParam(t *testing.T) {
+	isolateCachedConfigTest(t)
+
+	originalConnected := k8sinterface.IsConnectedToCluster()
+	k8sinterface.SetConnectedToCluster(false)
+	t.Cleanup(func() { k8sinterface.SetConnectedToCluster(originalConnected) })
+
+	originalKubernetesAPIFunc := kubernetesAPIFunc
+	kubernetesAPIFunc = func() *k8sinterface.KubernetesApi { return nil }
+	t.Cleanup(func() { kubernetesAPIFunc = originalKubernetesAPIFunc })
+
+	ks := NewKubescape(context.Background())
+	assert.NotPanics(t, func() {
+		err := ks.ViewCachedConfig(nil)
+		assert.NoError(t, err)
+	})
+}

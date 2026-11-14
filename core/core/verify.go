@@ -76,11 +76,19 @@ func (ks *Kubescape) rescanForVerification(ctx context.Context, req verifyRescan
 		verifyScanInfoHook(scanInfo)
 	}
 
-	report, err := ks.ScanToReport(ctx, scanInfo, cautils.BuildPolicyIdentifiers(req.ControlIDs, apisv1.KindControl))
+	scanner, err := ks.NewLocalScanner(scanInfo, cautils.BuildPolicyIdentifiers(req.ControlIDs, apisv1.KindControl))
 	if err != nil {
 		return verifyRescanResult{}, err
 	}
-	return verifyRescanResult{ReportJSON: report.JSON, Degraded: report.Degraded}, nil
+	result, err := scanner.Scan(ctx, LocalInput{})
+	if err != nil {
+		return verifyRescanResult{}, err
+	}
+	reportJSON, err := result.JSON()
+	if err != nil {
+		return verifyRescanResult{}, err
+	}
+	return verifyRescanResult{ReportJSON: reportJSON, Degraded: result.Degraded}, nil
 }
 
 // verificationItems are the findings the fixer remediated, each once, and how

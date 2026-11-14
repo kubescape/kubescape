@@ -319,6 +319,56 @@ resource "kubernetes_deployment_v1" "app" {
 	assert.Equal(t, []interface{}{"--port", "8080"}, container["args"])
 }
 
+// Terraform's length counts an object's attributes, and an HCL object literal,
+// a local built from one and an untyped variable default are objects.
+func TestTerraformDirectory_GetWorkloads_LengthOfObjects(t *testing.T) {
+	dir := t.TempDir()
+	writeTerraformFiles(t, dir, map[string]string{
+		"main.tf": `
+variable "ports" {
+  default = { http = 80, https = 443 }
+}
+
+locals {
+  zones = { a = "eu-west-1a", b = "eu-west-1b", c = "eu-west-1c" }
+}
+
+resource "kubernetes_deployment_v1" "app" {
+  metadata {
+    name = "web"
+    annotations = {
+      ports = tostring(length(var.ports))
+      set   = tostring(length(toset(["a", "b", "a"])))
+      tuple = tostring(length(["a", 1]))
+    }
+  }
+  spec {
+    replicas = length(local.zones)
+    template {
+      metadata {}
+      spec {
+        container {
+          name  = "web"
+          image = "nginx:1.27"
+        }
+      }
+    }
+  }
+}
+`,
+	})
+
+	workloads, errs := NewTerraformDirectory(dir).GetWorkloads(dir)
+	require.Empty(t, errs)
+	wls := workloads[filepath.Join(dir, "main.tf")]
+	require.Len(t, wls, 1)
+	obj := wls[0].GetObject()
+
+	assert.Equal(t, json.Number("3"), obj["spec"].(map[string]interface{})["replicas"])
+	assert.Equal(t, map[string]interface{}{"ports": "2", "set": "2", "tuple": "2"},
+		obj["metadata"].(map[string]interface{})["annotations"])
+}
+
 func TestTerraformDirectory_GetWorkloads_VariableTypes(t *testing.T) {
 	dir := t.TempDir()
 	writeTerraformFiles(t, dir, map[string]string{

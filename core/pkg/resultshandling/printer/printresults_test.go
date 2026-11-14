@@ -388,6 +388,22 @@ func TestHasOutputExt(t *testing.T) {
 	}
 }
 
+func TestCsvImageCompanionPath(t *testing.T) {
+	tests := []struct {
+		in   string
+		want string
+	}{
+		{"results.csv", "results-vulnerabilities.csv"},
+		{filepath.Join("out", "report.csv"), filepath.Join("out", "report-vulnerabilities.csv")},
+		{filepath.Join("out.d", "report"), filepath.Join("out.d", "report-vulnerabilities.csv")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.in, func(t *testing.T) {
+			assert.Equal(t, tt.want, CsvImageCompanionPath(tt.in))
+		})
+	}
+}
+
 func TestResolveOutputFile(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -638,6 +654,7 @@ func TestDefaultBaseNameForFormat(t *testing.T) {
 	assert.Equal(t, "sbom", DefaultBaseNameForFormat(SPDXFormat))
 	assert.Equal(t, "exceptions", DefaultBaseNameForFormat(ExceptionsFormat))
 	assert.Equal(t, "github-actions", DefaultBaseNameForFormat(GitHubActionsFormat))
+	assert.Equal(t, "gl-code-quality-report", DefaultBaseNameForFormat(GitLabCodeQualityFormat))
 	assert.Equal(t, "report", DefaultBaseNameForFormat(JsonFormat))
 	assert.Equal(t, "report", DefaultBaseNameForFormat(PrettyFormat))
 	assert.Equal(t, "report", DefaultBaseNameForFormat("unknown"))

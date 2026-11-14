@@ -1228,3 +1228,21 @@ func TestSetUseArtifactsFrom_SkipsOversizedAndNonRegularFiles(t *testing.T) {
 		assert.Contains(t, elevatedScanInfo.UseFrom, oversizedFile)
 	})
 }
+
+func TestScanInfo_NilReceiverMethods(t *testing.T) {
+	var scanInfo *ScanInfo
+
+	assert.NotPanics(t, func() {
+		assert.Equal(t, ContextCluster, scanInfo.GetScanningContext())
+		assert.Equal(t, "", scanInfo.GetInputFiles())
+		assert.Equal(t, []string{}, scanInfo.Formats())
+		assert.Nil(t, scanInfo.EvidenceFlagWarnings())
+		assert.Equal(t, "", scanInfo.GetKubeconfigPath())
+		assert.Equal(t, k8sinterface.GetContextName(), scanInfo.GetClusterContextName())
+		assert.Equal(t, DefaultGitCloneDepth, scanInfo.EffectiveGitCloneDepth())
+		policy := scanInfo.GetWholeClusterPolicy()
+		assert.NotEmpty(t, policy)
+		scanInfo.Cleanup()
+		scanInfo.AddCleanup(func() {})
+	})
+}

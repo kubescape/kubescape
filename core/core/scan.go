@@ -278,6 +278,9 @@ func validateAndResolvePrinters(scanInfo *cautils.ScanInfo, traverseDirs bool) (
 				return nil, fmt.Errorf("output path collision: formats %q and %q both resolve to %q; specify distinct output paths or use format-specific file extensions", existing, format, path)
 			}
 			resolvedPaths[path] = format
+			if format == printer.CsvFormat && scanInfo.ScanImages {
+				resolvedPaths[printer.CsvImageCompanionPath(path)] = format
+			}
 		}
 
 		if usesPrettyPrinter {
@@ -877,6 +880,10 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo, policyIdentifiers []cautil
 // mid-operation ks.Context() read could observe a different deadline than
 // the one that started the operation, or an already-restored/canceled one.
 func (ks *Kubescape) ScanContext(ctx context.Context, scanInfo *cautils.ScanInfo, policyIdentifiers []cautils.PolicyIdentifier) (scanResult *resultshandling.ResultsHandler, scanErr error) {
+	if scanInfo == nil {
+		return nil, errors.New("uninitialized scan parameters")
+	}
+
 	var (
 		interfaces             componentInterfaces
 		getters                cautils.Getters
@@ -1559,8 +1566,12 @@ func collectAndProcessResourcesWithStreaming(ctx context.Context, resourceHandle
 	// reads of scanData cannot race a producer write regardless of what the
 	// producer does later — the invariant is enforced by ordering rather than by
 	// a comment in the resource handler.
-	deps := resources.NewRegoDependenciesData(k8sinterface.GetK8sConfig(), clusterName)
-	exceptionRecorder, shutdownRecorder := newSecurityExceptionEventRecorder(ctx)
+	k8sConfig := k8sinterface.GetK8sConfig()
+	if scanInfo.NoClusterAccess {
+		k8sConfig = nil
+	}
+	deps := resources.NewRegoDependenciesData(k8sConfig, clusterName)
+	exceptionRecorder, shutdownRecorder := scanExceptionRecorder(ctx, scanInfo)
 	if shutdownRecorder != nil {
 		defer shutdownRecorder()
 	}

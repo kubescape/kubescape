@@ -443,6 +443,28 @@ func TestGetOutputPrintersCollisionReturnsError(t *testing.T) {
 	assert.Contains(t, err.Error(), "output path collision")
 }
 
+func TestValidateAndResolvePrinters_CsvImageCompanionMustNotOverwriteInputs(t *testing.T) {
+	dir := t.TempDir()
+	output := filepath.Join(dir, "results.csv")
+	baseline := filepath.Join(dir, "results-vulnerabilities.csv")
+	require.NoError(t, os.WriteFile(baseline, []byte("{}"), 0o600))
+
+	scanInfo := &cautils.ScanInfo{
+		ScanType:   cautils.ScanTypeFramework,
+		Format:     printer.CsvFormat,
+		Output:     output,
+		Baseline:   baseline,
+		ScanImages: true,
+	}
+	_, err := validateAndResolvePrinters(scanInfo, false)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "would overwrite baseline report")
+
+	scanInfo.ScanImages = false
+	_, err = validateAndResolvePrinters(scanInfo, false)
+	assert.NoError(t, err)
+}
+
 // A collision must be rejected before any writer is opened: opening an output
 // file truncates it, so detecting the collision afterwards would empty a report
 // left by a previous run.
@@ -2524,4 +2546,26 @@ func TestScanImageContext_EarlyValidationRejectsCollisionBeforeScan(t *testing.T
 		// Assert existing patterns were retained
 		assert.Contains(t, scanInfo.InputPatterns, "existing-manifest.yaml", "pre-existing input patterns must be preserved")
 	})
+}
+
+func TestScan_NilScanInfoReturnsError(t *testing.T) {
+	ks := NewKubescape(context.Background())
+	res, err := ks.Scan(nil, nil)
+	assert.Error(t, err)
+	assert.EqualError(t, err, "uninitialized scan parameters")
+	assert.Nil(t, res)
+}
+
+func TestScanContext_NilScanInfoReturnsError(t *testing.T) {
+	ks := NewKubescape(context.Background())
+	res, err := ks.ScanContext(context.Background(), nil, nil)
+	assert.Error(t, err)
+	assert.EqualError(t, err, "uninitialized scan parameters")
+	assert.Nil(t, res)
+
+	var nilKS *Kubescape
+	res, err = nilKS.ScanContext(context.Background(), nil, nil)
+	assert.Error(t, err)
+	assert.EqualError(t, err, "uninitialized scan parameters")
+	assert.Nil(t, res)
 }

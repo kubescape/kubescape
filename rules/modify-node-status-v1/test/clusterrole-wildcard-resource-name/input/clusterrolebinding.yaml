@@ -1,0 +1,13 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: wildcard-resource-name-node-status-writer-crb
+subjects:
+- kind: ServiceAccount
+  name: node-tuner
+  namespace: platform
+roleRef:
+  kind: ClusterRole
+  name: wildcard-resource-name-node-status-writer
+  apiGroup: rbac.authorization.k8s.io
+

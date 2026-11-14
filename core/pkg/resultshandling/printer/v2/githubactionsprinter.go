@@ -84,7 +84,7 @@ func (gp *GitHubActionsPrinter) SetWriter(ctx context.Context, outputFile string
 // configuration scans are supported: image findings have no manifest location
 // to anchor an annotation to.
 func (gp *GitHubActionsPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
-	if opaSessionObj == nil {
+	if opaSessionObj == nil || opaSessionObj.Report == nil {
 		return fmt.Errorf("github-actions output is only supported for configuration scanning: image findings have no manifest location to annotate")
 	}
 

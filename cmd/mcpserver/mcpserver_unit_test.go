@@ -49,18 +49,18 @@ func TestCallToolValidation(t *testing.T) {
 		expectToolError bool
 	}{
 		{name: "unknown tool", server: ksServer, tool: "missing", arguments: map[string]any{}, wantError: "unknown tool", expectToolError: false},
-		{name: "vulnerability namespace type", server: ksServer, tool: "list_vulnerability_manifests", arguments: map[string]any{"namespace": 42}, wantError: "namespace argument must be a string", expectToolError: true},
-		{name: "CVE list requires manifest", server: ksServer, tool: "list_vulnerabilities_in_manifest", arguments: map[string]any{}, wantError: "manifest_name argument is required", expectToolError: true},
-		{name: "CVE list manifest type", server: ksServer, tool: "list_vulnerabilities_in_manifest", arguments: map[string]any{"manifest_name": 42}, wantError: "manifest_name argument must be a string", expectToolError: true},
-		{name: "CVE match requires ID", server: ksServer, tool: "list_vulnerability_matches_for_cve", arguments: map[string]any{"manifest_name": "manifest"}, wantError: "cve_id argument is required", expectToolError: true},
-		{name: "CVE match ID type", server: ksServer, tool: "list_vulnerability_matches_for_cve", arguments: map[string]any{"manifest_name": "manifest", "cve_id": 42}, wantError: "cve_id argument must be a string", expectToolError: true},
-		{name: "configuration namespace type", server: ksServer, tool: "list_configuration_security_scan_manifests", arguments: map[string]any{"namespace": true}, wantError: "namespace argument must be a string", expectToolError: true},
-		{name: "configuration continue type", server: ksServer, tool: "list_configuration_security_scan_manifests", arguments: map[string]any{"continue": true}, wantError: "continue argument must be a string", expectToolError: true},
-		{name: "configuration get requires name", server: ksServer, tool: "get_configuration_security_scan_manifest", arguments: map[string]any{}, wantError: "manifest_name argument is required", expectToolError: true},
-		{name: "profile namespace type", server: ksServer, tool: "list_container_profiles", arguments: map[string]any{"namespace": true}, wantError: "namespace argument must be a string", expectToolError: true},
-		{name: "profile continue type", server: ksServer, tool: "list_container_profiles", arguments: map[string]any{"continue": true}, wantError: "continue argument must be a string", expectToolError: true},
-		{name: "profile get requires name", server: ksServer, tool: "get_container_profile", arguments: map[string]any{}, wantError: "profile_name argument is required", expectToolError: true},
-		{name: "profile name type", server: ksServer, tool: "get_container_profile", arguments: map[string]any{"profile_name": 42}, wantError: "profile_name argument must be a string", expectToolError: true},
+		{name: "vulnerability namespace type", server: ksServer, tool: "list_vulnerability_manifests", arguments: map[string]any{"namespace": 42}, wantError: "namespace must be a string", expectToolError: true},
+		{name: "CVE list requires manifest", server: ksServer, tool: "list_vulnerabilities_in_manifest", arguments: map[string]any{}, wantError: "manifest_name is required", expectToolError: true},
+		{name: "CVE list manifest type", server: ksServer, tool: "list_vulnerabilities_in_manifest", arguments: map[string]any{"manifest_name": 42}, wantError: "manifest_name must be a string", expectToolError: true},
+		{name: "CVE match requires ID", server: ksServer, tool: "list_vulnerability_matches_for_cve", arguments: map[string]any{"manifest_name": "manifest"}, wantError: "cve_id is required", expectToolError: true},
+		{name: "CVE match ID type", server: ksServer, tool: "list_vulnerability_matches_for_cve", arguments: map[string]any{"manifest_name": "manifest", "cve_id": 42}, wantError: "cve_id must be a string", expectToolError: true},
+		{name: "configuration namespace type", server: ksServer, tool: "list_configuration_security_scan_manifests", arguments: map[string]any{"namespace": true}, wantError: "namespace must be a string", expectToolError: true},
+		{name: "configuration continue type", server: ksServer, tool: "list_configuration_security_scan_manifests", arguments: map[string]any{"continue": true}, wantError: "continue must be a string", expectToolError: true},
+		{name: "configuration get requires name", server: ksServer, tool: "get_configuration_security_scan_manifest", arguments: map[string]any{}, wantError: "manifest_name is required", expectToolError: true},
+		{name: "profile namespace type", server: ksServer, tool: "list_container_profiles", arguments: map[string]any{"namespace": true}, wantError: "namespace must be a string", expectToolError: true},
+		{name: "profile continue type", server: ksServer, tool: "list_container_profiles", arguments: map[string]any{"continue": true}, wantError: "continue must be a string", expectToolError: true},
+		{name: "profile get requires name", server: ksServer, tool: "get_container_profile", arguments: map[string]any{}, wantError: "profile_name is required", expectToolError: true},
+		{name: "profile name type", server: ksServer, tool: "get_container_profile", arguments: map[string]any{"profile_name": 42}, wantError: "profile_name must be a string", expectToolError: true},
 
 		{name: "vulnerability list kubernetes error", server: ksErrorServer, tool: "list_vulnerability_manifests", arguments: map[string]any{}, wantError: "simulated list error", expectToolError: false},
 		{name: "configuration list kubernetes error", server: ksErrorServer, tool: "list_configuration_security_scan_manifests", arguments: map[string]any{}, wantError: "simulated list error", expectToolError: false},
@@ -140,7 +140,7 @@ func TestCallToolWithStorageResources(t *testing.T) {
 			name: "filter vulnerability matches", tool: "list_vulnerability_matches_for_cve",
 			arguments: map[string]any{"namespace": "security", "manifest_name": "nginx-manifest", "cve_id": "CVE-2026-0002"},
 			assertJSON: func(t *testing.T, value any) {
-				matches := value.([]any)
+				matches := value.(map[string]any)["matches"].([]any)
 				require.Len(t, matches, 1)
 				assert.Equal(t, "CVE-2026-0002", matches[0].(map[string]any)["vulnerability"].(map[string]any)["id"])
 			},

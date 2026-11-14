@@ -1,0 +1,11 @@
+# update is authorized with the secret's real name, and "" is never that name.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: empty-name-secret-updater
+  namespace: build
+rules:
+- apiGroups: [""]
+  resources: ["secrets"]
+  resourceNames: [""]
+  verbs: ["update"]

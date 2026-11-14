@@ -1,6 +1,7 @@
 package cautils
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -300,6 +301,28 @@ func Test_GetDefaultNS(t *testing.T) {
 	assert.Equal(t, "my-namespace", c.GetDefaultNS())
 }
 
+func Test_existsConfigFile(t *testing.T) {
+	t.Run("missing file returns false", func(t *testing.T) {
+		useTemporaryConfigStore(t)
+		assert.False(t, existsConfigFile())
+	})
+
+	t.Run("directory returns false", func(t *testing.T) {
+		useTemporaryConfigStore(t)
+		fullPath := ConfigFileFullPath()
+		require.NoError(t, os.MkdirAll(fullPath, 0o700))
+		assert.False(t, existsConfigFile())
+	})
+
+	t.Run("regular file returns true", func(t *testing.T) {
+		useTemporaryConfigStore(t)
+		fullPath := ConfigFileFullPath()
+		require.NoError(t, os.MkdirAll(filepath.Dir(fullPath), 0o700))
+		require.NoError(t, os.WriteFile(fullPath, []byte("{}"), 0o600))
+		assert.True(t, existsConfigFile())
+	})
+}
+
 func Test_loadConfigFromFile(t *testing.T) {
 	t.Run("no file present returns nil without touching configObj", func(t *testing.T) {
 		useTemporaryConfigStore(t)
@@ -334,6 +357,30 @@ func Test_loadConfigFromFile(t *testing.T) {
 
 		assert.Error(t, loadConfigFromFile(&ConfigObj{}))
 	})
+
+	t.Run("oversized file returns ErrConfigFileTooLarge", func(t *testing.T) {
+		useTemporaryConfigStore(t)
+		t.Setenv("KUBESCAPE_MAX_FILE_SIZE", "100")
+
+		fullPath := ConfigFileFullPath()
+		require.NoError(t, os.MkdirAll(filepath.Dir(fullPath), 0o700))
+		require.NoError(t, os.WriteFile(fullPath, bytes.Repeat([]byte(" "), 150), 0o600))
+
+		err := loadConfigFromFile(&ConfigObj{})
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrConfigFileTooLarge)
+	})
+
+	t.Run("directory returns ErrConfigFileNotRegular", func(t *testing.T) {
+		useTemporaryConfigStore(t)
+
+		fullPath := ConfigFileFullPath()
+		require.NoError(t, os.MkdirAll(fullPath, 0o700))
+
+		err := loadConfigFromFile(&ConfigObj{})
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrConfigFileNotRegular)
+	})
 }
 
 func useTemporaryServicesConfigPath(t *testing.T, path string) {
@@ -364,6 +411,27 @@ func Test_loadUrlsFromFile(t *testing.T) {
 		require.NoError(t, loadUrlsFromFile(configObj))
 		assert.Equal(t, "https://api.example.com", configObj.CloudAPIURL)
 		assert.Equal(t, "https://report.example.com", configObj.CloudReportURL)
+	})
+
+	t.Run("oversized file returns ErrConfigFileTooLarge", func(t *testing.T) {
+		servicesPath := filepath.Join(t.TempDir(), "services.json")
+		useTemporaryServicesConfigPath(t, servicesPath)
+		t.Setenv("KUBESCAPE_MAX_FILE_SIZE", "100")
+		require.NoError(t, os.WriteFile(servicesPath, bytes.Repeat([]byte(" "), 150), 0o600))
+
+		err := loadUrlsFromFile(&ConfigObj{})
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrConfigFileTooLarge)
+	})
+
+	t.Run("directory returns ErrConfigFileNotRegular", func(t *testing.T) {
+		servicesPath := filepath.Join(t.TempDir(), "services_dir")
+		require.NoError(t, os.MkdirAll(servicesPath, 0o700))
+		useTemporaryServicesConfigPath(t, servicesPath)
+
+		err := loadUrlsFromFile(&ConfigObj{})
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrConfigFileNotRegular)
 	})
 }
 
