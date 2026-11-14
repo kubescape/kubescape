@@ -853,3 +853,87 @@ func TestMdSortedControls_DeterministicTieBreakByID(t *testing.T) {
 		assert.Equal(t, "z-key-remediation", sorted[5].GetRemediation())
 	}
 }
+
+func TestMdEscapeCell_NeutralizesLineBreaks(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "plain string without special characters",
+			input: "clean-value",
+			want:  "clean-value",
+		},
+		{
+			name:  "escapes pipe character",
+			input: "foo|bar",
+			want:  "foo\\|bar",
+		},
+		{
+			name:  "neutralizes CRLF into space",
+			input: "line1\r\nline2",
+			want:  "line1 line2",
+		},
+		{
+			name:  "neutralizes LF into space",
+			input: "line1\nline2",
+			want:  "line1 line2",
+		},
+		{
+			name:  "neutralizes CR into space",
+			input: "line1\rline2",
+			want:  "line1 line2",
+		},
+		{
+			name:  "neutralizes combination of pipes and newlines with surrounding whitespace",
+			input: "  prefix|middle\r\n## Heading\n[link](https://evil.com)  ",
+			want:  "prefix\\|middle ## Heading [link](https://evil.com)",
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.want, mdEscapeCell(tt.input))
+		})
+	}
+}
+
+func TestMarkdownPrinter_ActionPrint_NeutralizesNewlinesInTableCells(t *testing.T) {
+	session := mdSessionFixture()
+
+	// Inject a resource name containing a newline and markdown heading injection
+	injectedResourceID := "apps/v1/Deployment/default/injected"
+	injectedWorkload := localworkload.NewLocalWorkload(map[string]interface{}{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment\n| evil | evil |",
+		"metadata": map[string]interface{}{
+			"name":      "nginx\n\n## Injected Heading\n[Malicious](https://example.com)",
+			"namespace": "default\r\ninjected-ns",
+		},
+		"spec": map[string]interface{}{},
+	})
+	session.AllResources[injectedResourceID] = injectedWorkload
+	session.ResourcesResult[injectedResourceID] = resourcesresults.Result{
+		ResourceID: injectedResourceID,
+		AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+			{ControlID: mdControlID1, Name: "Privileged container", Status: apis.StatusInfo{InnerStatus: apis.StatusFailed}},
+		},
+	}
+	failedStatus := &apis.StatusInfo{InnerStatus: apis.StatusFailed}
+	ctrl := session.Report.SummaryDetails.Controls[mdControlID1]
+	ctrl.Append(failedStatus, injectedResourceID)
+	session.Report.SummaryDetails.Controls[mdControlID1] = ctrl
+
+	out := mdRunActionPrint(t, session)
+
+	// Verify that table cells do not break out into newlines
+	assert.NotContains(t, out, "\n## Injected Heading\n", "newline injection must not produce a freestanding heading")
+	assert.Contains(t, out, "nginx  ## Injected Heading [Malicious](https://example.com)", "newlines within resource name must be collapsed into spaces")
+	assert.Contains(t, out, "Deployment \\| evil \\| evil \\|", "pipe characters and newlines within kind must be safely escaped")
+	assert.Contains(t, out, "default injected-ns", "CRLF in namespace must be collapsed into space")
+}
