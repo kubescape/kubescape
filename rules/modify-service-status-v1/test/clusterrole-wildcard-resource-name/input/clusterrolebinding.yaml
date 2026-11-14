@@ -1,0 +1,13 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: wildcard-resource-name-service-status-writer-crb
+subjects:
+- kind: ServiceAccount
+  name: payments-operator
+  namespace: payments
+roleRef:
+  kind: ClusterRole
+  name: wildcard-resource-name-service-status-writer
+  apiGroup: rbac.authorization.k8s.io
+
