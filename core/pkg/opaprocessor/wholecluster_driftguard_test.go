@@ -97,7 +97,7 @@ func ruleIsCrossNamespaceCandidate(t *testing.T, rule *reporthandling.PolicyRule
 	if rule == nil {
 		return false
 	}
-	if rule.RuleLanguage != "" && rule.RuleLanguage != reporthandling.RegoLanguage {
+	if rule.RuleLanguage != "" && rule.RuleLanguage != reporthandling.RegoLanguage && rule.RuleLanguage != reporthandling.RegoLanguage2 {
 		return false
 	}
 	if _, aggregated := rule.Attributes["resourcesAggregator"]; aggregated {
@@ -245,6 +245,11 @@ allow {
 	ns == "default"
 }`,
 			Match: match("HTTPRoute"),
+		}, true},
+		{"rego lowercase language tag is evaluated", reporthandling.PolicyRule{
+			RuleLanguage: reporthandling.RegoLanguage2,
+			Rule:         crossRef,
+			Match:        match("HTTPRoute", "Service"),
 		}, true},
 	}
 	for _, tt := range tests {
