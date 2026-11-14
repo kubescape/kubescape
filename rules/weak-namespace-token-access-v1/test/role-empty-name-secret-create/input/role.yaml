@@ -1,0 +1,11 @@
+# create with resourceNames [""] is authorized, but it does not return the token.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: empty-name-secret-creator
+  namespace: build
+rules:
+- apiGroups: [""]
+  resources: ["secrets"]
+  resourceNames: [""]
+  verbs: ["create"]
