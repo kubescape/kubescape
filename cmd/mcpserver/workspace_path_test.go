@@ -194,3 +194,110 @@ func TestWorkspaceRootRejectsPathReplacedByOutsideSymlink(t *testing.T) {
 	_, err = readRemediationReportWithRoot(resolved, root)
 	require.Error(t, err, "report_path reads must use the same anchored root")
 }
+
+func TestOpenFileUnderRoot_RelativeRoot(t *testing.T) {
+	origWD, err := os.Getwd()
+	require.NoError(t, err)
+	defer func() { _ = os.Chdir(origWD) }()
+
+	tempDir := t.TempDir()
+	require.NoError(t, os.Chdir(tempDir))
+
+	workspace := "test-workspace"
+	require.NoError(t, os.Mkdir(workspace, 0o700))
+	manifest := filepath.Join(workspace, "manifest.yaml")
+	require.NoError(t, os.WriteFile(manifest, []byte("kind: Pod\n"), 0o600))
+
+	// Open root with a relative path
+	root, err := os.OpenRoot(workspace)
+	require.NoError(t, err)
+	defer root.Close()
+
+	// Access via relative path
+	f, err := openFileUnderRoot(root, manifest)
+	require.NoError(t, err, "openFileUnderRoot must succeed with relative os.Root")
+	require.NoError(t, f.Close())
+
+	// Access via absolute path
+	absManifest, err := filepath.Abs(manifest)
+	require.NoError(t, err)
+	f, err = openFileUnderRoot(root, absManifest)
+	require.NoError(t, err, "openFileUnderRoot must succeed with absolute path on relative os.Root")
+	require.NoError(t, f.Close())
+
+	// Outside file must still be rejected
+	outside := filepath.Join(tempDir, "outside.yaml")
+	require.NoError(t, os.WriteFile(outside, []byte("kind: Secret\n"), 0o600))
+	_, err = openFileUnderRoot(root, outside)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, pathcontainment.ErrPathEscapesWorkspace)
+}
+
+func TestOpenFileUnderRoot_SymlinkedRoot(t *testing.T) {
+	tempDir := t.TempDir()
+	realWorkspace := filepath.Join(tempDir, "real-workspace")
+	require.NoError(t, os.Mkdir(realWorkspace, 0o700))
+	manifest := filepath.Join(realWorkspace, "manifest.yaml")
+	require.NoError(t, os.WriteFile(manifest, []byte("kind: Pod\n"), 0o600))
+
+	symlinkWorkspace := filepath.Join(tempDir, "symlink-workspace")
+	if err := os.Symlink(realWorkspace, symlinkWorkspace); err != nil {
+		t.Skipf("symlinks not supported: %v", err)
+	}
+
+	root, err := os.OpenRoot(symlinkWorkspace)
+	require.NoError(t, err)
+	defer root.Close()
+
+	// Path through real workspace
+	f, err := openFileUnderRoot(root, manifest)
+	require.NoError(t, err, "openFileUnderRoot must resolve symlinked root")
+	require.NoError(t, f.Close())
+
+	// Path through symlink workspace
+	symlinkManifest := filepath.Join(symlinkWorkspace, "manifest.yaml")
+	f, err = openFileUnderRoot(root, symlinkManifest)
+	require.NoError(t, err, "openFileUnderRoot must resolve symlinked path under symlinked root")
+	require.NoError(t, f.Close())
+}
+
+func TestOpenFileUnderRoot_RejectsReplacedWorkspaceRoot(t *testing.T) {
+	tempDir := t.TempDir()
+	workDir := filepath.Join(tempDir, "work")
+	require.NoError(t, os.Mkdir(workDir, 0o700))
+
+	oldReport := filepath.Join(workDir, "report.json")
+	require.NoError(t, os.WriteFile(oldReport, []byte(`{"content":"old"}`), 0o600))
+
+	root, err := os.OpenRoot(workDir)
+	require.NoError(t, err)
+	defer root.Close()
+
+	oldDir := filepath.Join(tempDir, "old")
+	if err := os.Rename(workDir, oldDir); err != nil {
+		t.Skipf("renaming open directory not supported: %v", err)
+	}
+
+	newDir := filepath.Join(tempDir, "new")
+	require.NoError(t, os.Mkdir(newDir, 0o700))
+	newReport := filepath.Join(newDir, "report.json")
+	require.NoError(t, os.WriteFile(newReport, []byte(`{"content":"new"}`), 0o600))
+
+	if err := os.Symlink(newDir, workDir); err != nil {
+		t.Skipf("symlinks not supported: %v", err)
+	}
+
+	// Canonical request for new/report.json must be rejected because root holds the old directory descriptor
+	_, err = openFileUnderRoot(root, newReport)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, pathcontainment.ErrPathEscapesWorkspace)
+
+	// Requesting via work/report.json must also be rejected rather than opening old/report.json
+	_, err = openFileUnderRoot(root, filepath.Join(workDir, "report.json"))
+	require.Error(t, err)
+	assert.ErrorIs(t, err, pathcontainment.ErrPathEscapesWorkspace)
+
+	// Ensure readRemediationReportWithRoot does not silently return the old report
+	_, err = readRemediationReportWithRoot(filepath.Join(workDir, "report.json"), root)
+	require.Error(t, err)
+}
