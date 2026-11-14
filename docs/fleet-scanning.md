@@ -30,12 +30,14 @@ another, and then:
 | `--reference-cluster <ctx>` | With `--fleet-report`, the context the other clusters are compared against. Must be one of `--kube-contexts`. | - |
 | `--retries <n>` | How many more times to try a cluster whose API server never answered. `0` disables retries. | `2` |
 | `--fleet-config <path>` | Read the fleet settings from a file instead. See [fleet config file](#fleet-config-file). | - |
+| `--parallel <n>` | How many contexts to scan at once. Above `1`, each context is scanned in its own Kubescape process. See [scanning in parallel](#scanning-in-parallel). | `1` |
 | `--fail-coverage-below <float>` | Also used as the coverage floor for the fleet score: a cluster scanned with less coverage is left out of it. | `0` |
 | `--scan-timeout <duration>` | Limits each scan attempt of each cluster. An attempt that runs out of time is `cancelled` and is not retried. | - |
 
 `--kube-contexts` works with `kubescape scan` (security view), `scan framework`,
-`scan control` and `scan workload`. Contexts are scanned one at a time, and one
-cluster failing never stops the others from being scanned.
+`scan control` and `scan workload`. Contexts are scanned one at a time unless
+you set `--parallel`, and one cluster failing never stops the others from being
+scanned.
 
 ## Fleet config file
 
@@ -200,8 +202,9 @@ clusters that were scanned.
 
 ## Performance
 
-Clusters are scanned one after another, so a fleet scan takes about as long as
-its clusters' scans added together.
+By default clusters are scanned one after another, so a fleet scan takes about
+as long as its clusters' scans added together. See
+[scanning in parallel](#scanning-in-parallel) to scan several at once.
 
 Memory depends on whether a fleet report is written. Without `--fleet-report`,
 each cluster's results are released once its own report is written, so memory
@@ -231,3 +234,45 @@ To reproduce them, from `cmd/scan`:
 go test -c -o scan.test .
 /usr/bin/time -v ./scan.test -test.run '^$' -test.bench 'BenchmarkFleetScan/report=true/clusters=10$' -test.benchtime 1x
 ```
+
+### Scanning in parallel
+
+`--parallel <n>` scans up to `n` contexts at the same time:
+
+```bash
+kubescape scan framework nsa \
+  --kube-contexts prod,staging,dr \
+  --output report.json --format json \
+  --fleet-report fleet.json \
+  --parallel 3
+```
+
+One Kubescape process can only talk to one cluster at a time, so above `1` each
+context is scanned by its own Kubescape process, started from the same command.
+The reports, the fleet report, the summary and the exit code are the same as
+with `--parallel 1`.
+
+It helps most when the clusters are slow to answer, for example across a
+network. Measured against 10 fake clusters with 200 pods each and 200 ms added
+to every API request:
+
+| `--parallel` | Time   |
+|--------------|--------|
+| 1            | 76.5 s |
+| 4            | 23.8 s |
+| 10           | 8.7 s  |
+
+Without the added latency the same 10 clusters took about 7 seconds one at a
+time and about 5.5 seconds with `--parallel 10`, since a fake cluster on the
+same machine answers at once and the scan is then limited by CPU.
+
+Things to keep in mind:
+
+- each process peaks at about 225 MiB, so `--parallel n` adds up to `n` times
+  that on top of the main process
+- each process loads the policies on its own
+- each process's log goes to a temporary file that is deleted when the run
+  ends, but a failed cluster's error is still shown at the end of the run
+- Ctrl-C stops every process, and the clusters not finished are `cancelled`
+- `--parallel` is set on the command line only; the fleet config file has no
+  field for it
