@@ -672,6 +672,52 @@ func TestFileWatcherReconcilesWhenTheQueueOverflowed(t *testing.T) {
 	assert.Contains(t, w.dirs, filepath.Join(root, "late"), "a directory whose events were dropped is watched")
 }
 
+// For a single file, reconciling after dropped deliveries checks its directory:
+// the directory's removal may have been dropped, and the backend's watch went
+// with the directory.
+func TestFileWatcherReconcilesASingleFilesDirectory(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a directory that was replaced is watched again", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		file := filepath.Join(dir, "app.yaml")
+		write(t, file, "kind: Pod\n")
+		w, err := newFileWatcher(file, FileWatcherOptions{}) // no goroutine runs: the test drives it
+		require.NoError(t, err)
+		defer w.fs.Close()
+		w.maxQueued = 0 // every delivery is dropped
+
+		// The backend lost the directory's watch, and the removal that said so
+		// was dropped.
+		require.NoError(t, w.fs.Remove(w.dir))
+		w.enqueue(backendItem{event: fsnotify.Event{Name: w.dir, Op: fsnotify.Remove}})
+
+		require.NoError(t, w.drainQueue(context.Background()))
+		assert.Contains(t, w.fs.WatchList(), w.dir, "the file's directory is no longer watched")
+		assert.Len(t, w.changes, 1, "dropped deliveries signal a change")
+	})
+
+	t.Run("a directory that is gone ends the watch", func(t *testing.T) {
+		t.Parallel()
+		dir := filepath.Join(t.TempDir(), "parent")
+		file := filepath.Join(dir, "app.yaml")
+		write(t, file, "kind: Pod\n")
+		w, err := newFileWatcher(file, FileWatcherOptions{})
+		require.NoError(t, err)
+		defer w.fs.Close()
+		w.maxQueued = 0
+
+		require.NoError(t, os.RemoveAll(dir))
+		w.enqueue(backendItem{event: fsnotify.Event{Name: w.dir, Op: fsnotify.Remove}})
+
+		err = w.drainQueue(context.Background())
+		require.Error(t, err, "the watch carried on without its directory")
+		assert.Contains(t, err.Error(), "removed or renamed")
+		assert.Len(t, w.changes, 1, "the loss is signalled")
+	})
+}
+
 func TestFileWatcherRelevantFile(t *testing.T) {
 	t.Parallel()
 	w := &FileWatcher{opts: FileWatcherOptions{Exclude: func(path string, isDir bool) bool {

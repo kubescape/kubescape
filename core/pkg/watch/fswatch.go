@@ -435,7 +435,20 @@ func (w *FileWatcher) handleError(failure error) error {
 // has lost its watch without a Remove event reaching us, which is why what the
 // backend says it watches decides, and not what was recorded.
 func (w *FileWatcher) reconcile() error {
-	if w.file == "" {
+	if w.file != "" {
+		// The removal of the file's directory may be among what was lost, and
+		// the backend drops its watch with the directory, so it is watched again
+		// from a clean state, as every directory is below. If it cannot be, the
+		// watch ends, as when the removal is seen.
+		_ = w.fs.Remove(w.dir) // absent is fine
+		if err := w.fs.Add(w.dir); err != nil {
+			w.notify(w.file)
+			if errors.Is(err, fs.ErrNotExist) {
+				return fmt.Errorf("watch %q: its directory was removed or renamed", w.file)
+			}
+			return limitError(w.dir, err)
+		}
+	} else {
 		live := make(map[string]struct{})
 		for _, path := range w.fs.WatchList() {
 			live[path] = struct{}{}
