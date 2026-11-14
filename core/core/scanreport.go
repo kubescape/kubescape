@@ -7,6 +7,7 @@ import (
 
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/pkg/remediationverify"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling"
 )
 
 // ScanReport is the report of a completed scan, held in memory.
@@ -51,23 +52,27 @@ type ScanReport struct {
 // scan that completed. An error from ScanContext is returned as it is, so what it
 // wraps, a context's error for one, can still be found in it.
 func (ks *Kubescape) ScanToReport(ctx context.Context, scanInfo *cautils.ScanInfo, policyIdentifiers []cautils.PolicyIdentifier) (*ScanReport, error) {
+	results, err := ks.scanLocal(ctx, scanInfo, policyIdentifiers)
+	if err != nil {
+		return nil, err
+	}
+	coverage := &results.GetData().ScanCoverage
+	reportJSON, err := remediationverify.ReportJSON(results.GetResults(), coverage)
+	if err != nil {
+		return nil, fmt.Errorf("failed to serialize the scan report: %w", err)
+	}
+	return &ScanReport{JSON: reportJSON, Degraded: coverage.Degraded}, nil
+}
+
+// scanLocal is the scan behind ScanToReport and LocalScanner: it refuses what
+// cannot be returned as an in-memory result, scans a copy of scanInfo through
+// ScanContext and returns the results, never nil, with no results handled.
+func (ks *Kubescape) scanLocal(ctx context.Context, scanInfo *cautils.ScanInfo, policyIdentifiers []cautils.PolicyIdentifier) (*resultshandling.ResultsHandler, error) {
 	if scanInfo == nil {
 		return nil, errors.New("scan info is required")
 	}
-	if scanInfo.DryRun {
-		return nil, errors.New("a dry run collects nothing, so there is no report to return")
-	}
-	if scanInfo.EncryptionEnabled {
-		// The scan encrypts the sensitive fields of its results in place, so the
-		// report would come back unreadable.
-		return nil, errors.New("an encrypted scan cannot be returned as an in-memory report")
-	}
-
-	if scanInfo.ScanImages {
-		// ScanContext records an image scan's failure for the results handler to
-		// report and returns no error, and this report holds posture results only,
-		// so a failed image scan would come back as a report that looks complete.
-		return nil, errors.New("an image scan cannot be returned as an in-memory report")
+	if err := refuseUnreportable(scanInfo); err != nil {
+		return nil, err
 	}
 
 	scan := scanInfo.CloneForContext("", "")
@@ -80,7 +85,7 @@ func (ks *Kubescape) ScanToReport(ctx context.Context, scanInfo *cautils.ScanInf
 	// ScanInfo, which for the caller's, shared by scans that run at once, would
 	// be a write.
 	if scan.GetScanningContext() == cautils.ContextCluster {
-		return nil, errors.New("only a scan of local inputs can be returned as an in-memory report")
+		return nil, unsupportedScan("only a scan of local inputs can be returned as an in-memory report")
 	}
 
 	results, err := ks.ScanContext(ctx, scan, policyIdentifiers)
@@ -90,10 +95,36 @@ func (ks *Kubescape) ScanToReport(ctx context.Context, scanInfo *cautils.ScanInf
 	if results == nil || results.GetData() == nil {
 		return nil, errors.New("the scan returned no results")
 	}
-	coverage := &results.GetData().ScanCoverage
-	reportJSON, err := remediationverify.ReportJSON(results.GetResults(), coverage)
-	if err != nil {
-		return nil, fmt.Errorf("failed to serialize the scan report: %w", err)
-	}
-	return &ScanReport{JSON: reportJSON, Degraded: coverage.Degraded}, nil
+	return results, nil
 }
+
+// refuseUnreportable refuses the settings that make a scan's result unfit to
+// be returned in memory.
+func refuseUnreportable(scanInfo *cautils.ScanInfo) error {
+	if scanInfo.DryRun {
+		return unsupportedScan("a dry run collects nothing, so there is no report to return")
+	}
+	if scanInfo.EncryptionEnabled {
+		// The scan encrypts the sensitive fields of its results in place, so the
+		// report would come back unreadable.
+		return unsupportedScan("an encrypted scan cannot be returned as an in-memory report")
+	}
+	if scanInfo.ScanImages {
+		// ScanContext records an image scan's failure for the results handler to
+		// report and returns no error, and this report holds posture results only,
+		// so a failed image scan would come back as a report that looks complete.
+		return unsupportedScan("an image scan cannot be returned as an in-memory report")
+	}
+	return nil
+}
+
+// ErrUnsupportedScan is what a scan that cannot be returned in memory is
+// refused with: a cluster scan, an image scan, a dry run or an encrypted scan.
+var ErrUnsupportedScan = errors.New("unsupported scan")
+
+type unsupportedScanError string
+
+func unsupportedScan(reason string) error { return unsupportedScanError(reason) }
+
+func (e unsupportedScanError) Error() string        { return string(e) }
+func (e unsupportedScanError) Is(target error) bool { return target == ErrUnsupportedScan }

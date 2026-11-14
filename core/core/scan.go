@@ -1566,8 +1566,12 @@ func collectAndProcessResourcesWithStreaming(ctx context.Context, resourceHandle
 	// reads of scanData cannot race a producer write regardless of what the
 	// producer does later — the invariant is enforced by ordering rather than by
 	// a comment in the resource handler.
-	deps := resources.NewRegoDependenciesData(k8sinterface.GetK8sConfig(), clusterName)
-	exceptionRecorder, shutdownRecorder := newSecurityExceptionEventRecorder(ctx)
+	k8sConfig := k8sinterface.GetK8sConfig()
+	if scanInfo.NoClusterAccess {
+		k8sConfig = nil
+	}
+	deps := resources.NewRegoDependenciesData(k8sConfig, clusterName)
+	exceptionRecorder, shutdownRecorder := scanExceptionRecorder(ctx, scanInfo)
 	if shutdownRecorder != nil {
 		defer shutdownRecorder()
 	}
