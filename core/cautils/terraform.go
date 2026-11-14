@@ -225,22 +225,24 @@ func collectVariableDefaults(body hcl.Body, defaults map[string]cty.Value, decla
 		}
 		name := block.Labels[0]
 		attrSchema := &hcl.BodySchema{
-			Attributes: []hcl.AttributeSchema{{Name: "default"}, {Name: "type"}},
+			Attributes: []hcl.AttributeSchema{{Name: "default"}, {Name: "type"}, {Name: "nullable"}},
 		}
 		attrContent, _, _ := block.Body.PartialContent(attrSchema)
 		variable := newTerraformVariable(attrContent.Attributes["type"])
+		if attr, ok := attrContent.Attributes["nullable"]; ok {
+			if val, diags := attr.Expr.Value(nil); !diags.HasErrors() && val.Type() == cty.Bool && val.IsKnown() && !val.IsNull() {
+				variable.nonNullable = val.False()
+			}
+		}
+		if attr, ok := attrContent.Attributes["default"]; ok {
+			if val, diags := attr.Expr.Value(nil); !diags.HasErrors() {
+				if val, err := variable.convert(val); err == nil {
+					defaults[name] = val
+					variable.defaultVal = val
+				}
+			}
+		}
 		declared[name] = variable
-		attr, ok := attrContent.Attributes["default"]
-		if !ok {
-			continue
-		}
-		val, diags := attr.Expr.Value(nil)
-		if diags.HasErrors() {
-			continue
-		}
-		if val, err := variable.convert(val); err == nil {
-			defaults[name] = val
-		}
 	}
 }
 
