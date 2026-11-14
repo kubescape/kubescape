@@ -194,3 +194,69 @@ func TestWorkspaceRootRejectsPathReplacedByOutsideSymlink(t *testing.T) {
 	_, err = readRemediationReportWithRoot(resolved, root)
 	require.Error(t, err, "report_path reads must use the same anchored root")
 }
+
+func TestOpenFileUnderRoot_RelativeRoot(t *testing.T) {
+	origWD, err := os.Getwd()
+	require.NoError(t, err)
+	defer func() { _ = os.Chdir(origWD) }()
+
+	tempDir := t.TempDir()
+	require.NoError(t, os.Chdir(tempDir))
+
+	workspace := "test-workspace"
+	require.NoError(t, os.Mkdir(workspace, 0o700))
+	manifest := filepath.Join(workspace, "manifest.yaml")
+	require.NoError(t, os.WriteFile(manifest, []byte("kind: Pod\n"), 0o600))
+
+	// Open root with a relative path
+	root, err := os.OpenRoot(workspace)
+	require.NoError(t, err)
+	defer root.Close()
+
+	// Access via relative path
+	f, err := openFileUnderRoot(root, manifest)
+	require.NoError(t, err, "openFileUnderRoot must succeed with relative os.Root")
+	require.NoError(t, f.Close())
+
+	// Access via absolute path
+	absManifest, err := filepath.Abs(manifest)
+	require.NoError(t, err)
+	f, err = openFileUnderRoot(root, absManifest)
+	require.NoError(t, err, "openFileUnderRoot must succeed with absolute path on relative os.Root")
+	require.NoError(t, f.Close())
+
+	// Outside file must still be rejected
+	outside := filepath.Join(tempDir, "outside.yaml")
+	require.NoError(t, os.WriteFile(outside, []byte("kind: Secret\n"), 0o600))
+	_, err = openFileUnderRoot(root, outside)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, pathcontainment.ErrPathEscapesWorkspace)
+}
+
+func TestOpenFileUnderRoot_SymlinkedRoot(t *testing.T) {
+	tempDir := t.TempDir()
+	realWorkspace := filepath.Join(tempDir, "real-workspace")
+	require.NoError(t, os.Mkdir(realWorkspace, 0o700))
+	manifest := filepath.Join(realWorkspace, "manifest.yaml")
+	require.NoError(t, os.WriteFile(manifest, []byte("kind: Pod\n"), 0o600))
+
+	symlinkWorkspace := filepath.Join(tempDir, "symlink-workspace")
+	if err := os.Symlink(realWorkspace, symlinkWorkspace); err != nil {
+		t.Skipf("symlinks not supported: %v", err)
+	}
+
+	root, err := os.OpenRoot(symlinkWorkspace)
+	require.NoError(t, err)
+	defer root.Close()
+
+	// Path through real workspace
+	f, err := openFileUnderRoot(root, manifest)
+	require.NoError(t, err, "openFileUnderRoot must resolve symlinked root")
+	require.NoError(t, f.Close())
+
+	// Path through symlink workspace
+	symlinkManifest := filepath.Join(symlinkWorkspace, "manifest.yaml")
+	f, err = openFileUnderRoot(root, symlinkManifest)
+	require.NoError(t, err, "openFileUnderRoot must resolve symlinked path under symlinked root")
+	require.NoError(t, f.Close())
+}

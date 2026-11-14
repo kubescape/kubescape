@@ -43,7 +43,19 @@ func openFileUnderRoot(root *os.Root, path string) (*os.File, error) {
 	if err != nil {
 		return nil, fmt.Errorf("cannot resolve path: %w", err)
 	}
-	rel, err := filepath.Rel(root.Name(), abs)
+	resolved, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		return nil, err
+	}
+	rootPath, err := filepath.Abs(root.Name())
+	if err != nil {
+		return nil, fmt.Errorf("cannot resolve workspace root: %w", err)
+	}
+	rootPath, err = filepath.EvalSymlinks(rootPath)
+	if err != nil {
+		return nil, fmt.Errorf("cannot resolve workspace root: %w", err)
+	}
+	rel, err := filepath.Rel(rootPath, resolved)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
 		return nil, fmt.Errorf("%w: %q", pathcontainment.ErrPathEscapesWorkspace, path)
 	}
