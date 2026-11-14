@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/open-policy-agent/opa/v1/ast"
 	"github.com/stretchr/testify/assert"
@@ -57,7 +58,11 @@ var sameNamespaceReviewed = map[string]string{
 func regoReadsNamespaceField(t *testing.T, name, src string) bool {
 	t.Helper()
 	module, err := ast.ParseModuleWithOpts(name, src, ast.ParserOptions{RegoVersion: ast.RegoV1})
-	require.NoError(t, err, "parse %s", name)
+	if err != nil {
+		var v0Err error
+		module, v0Err = ast.ParseModuleWithOpts(name, src, ast.ParserOptions{RegoVersion: ast.RegoV0})
+		require.NoError(t, v0Err, "parse %s (tried v1: %v, v0: %v)", name, err, v0Err)
+	}
 
 	found := false
 	ast.WalkRefs(module, func(ref ast.Ref) bool {
@@ -89,6 +94,12 @@ func isString(term *ast.Term, want string) bool {
 // namespace-partitioned streaming splits those objects just the same.
 func ruleIsCrossNamespaceCandidate(t *testing.T, rule *reporthandling.PolicyRule) bool {
 	t.Helper()
+	if rule == nil {
+		return false
+	}
+	if rule.RuleLanguage != "" && rule.RuleLanguage != reporthandling.RegoLanguage {
+		return false
+	}
 	if _, aggregated := rule.Attributes["resourcesAggregator"]; aggregated {
 		return false
 	}
@@ -96,13 +107,19 @@ func ruleIsCrossNamespaceCandidate(t *testing.T, rule *reporthandling.PolicyRule
 }
 
 // uncoveredCandidates returns, sorted, the candidate control IDs that are
-// neither whole-cluster controls nor recorded as reviewed.
+// neither whole-cluster controls nor recorded as reviewed. Duplicate candidates
+// are deduplicated.
 func uncoveredCandidates(candidates []string, wholeCluster func(string) bool, reviewed map[string]string) []string {
+	seen := make(map[string]struct{})
 	var uncovered []string
 	for _, id := range candidates {
 		if _, ok := reviewed[id]; ok || wholeCluster(id) {
 			continue
 		}
+		if _, dup := seen[id]; dup {
+			continue
+		}
+		seen[id] = struct{}{}
 		uncovered = append(uncovered, id)
 	}
 	sort.Strings(uncovered)
@@ -150,6 +167,11 @@ func TestWholeClusterClassification_PinnedLibraryHasNoUnreviewedCandidates(t *te
 	for _, id := range []string{"C-0261", "C-0266", "C-0267", "C-0272", "C-0302"} {
 		assert.Contains(t, candidates, id, "detector no longer recognises %s as a cross-namespace candidate", id)
 		assert.True(t, controlRequiresWholeClusterInput(controls[id]), "%s must be a whole-cluster control", id)
+	}
+
+	// Stale controls must not linger in sameNamespaceReviewed.
+	for id := range sameNamespaceReviewed {
+		assert.Contains(t, controls, id, "control %s in sameNamespaceReviewed does not exist in pinned regolibrary", id)
 	}
 }
 
@@ -203,9 +225,27 @@ deny contains msga if {
 		}, true},
 		{"metadata.namespace only, single kind", reporthandling.PolicyRule{Rule: sameNamespaceOnly, Match: match("Pod")}, false},
 		{"already aggregated", reporthandling.PolicyRule{
-			Rule: crossRef, Match: match("HTTPRoute", "Service"),
-			Attributes: map[string]interface{}{"resourcesAggregator": "x"},
+			PortalBase: armotypes.PortalBase{
+				Attributes: map[string]interface{}{"resourcesAggregator": "x"},
+			},
+			Rule:  crossRef,
+			Match: match("HTTPRoute", "Service"),
 		}, false},
+		{"cel rule is skipped", reporthandling.PolicyRule{
+			RuleLanguage: reporthandling.CELLanguage,
+			Rule:         "object.spec.replicas > 1",
+			Match:        match("Deployment"),
+		}, false},
+		{"rego v0 syntax without rego.v1", reporthandling.PolicyRule{
+			Rule: `package armo_builtins
+default allow = false
+allow {
+	ref := input[_].spec.rules[_].backendRefs[_]
+	ns := ref.namespace
+	ns == "default"
+}`,
+			Match: match("HTTPRoute"),
+		}, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -213,8 +253,8 @@ deny contains msga if {
 		})
 	}
 
-	// "C-UNCOVERED" is neither whole-cluster nor reviewed: it must be reported.
+	// "C-UNCOVERED" is neither whole-cluster nor reviewed: it must be reported, and duplicate candidates deduplicated.
 	wholeCluster := func(id string) bool { return id == "C-COVERED" }
-	got := uncoveredCandidates([]string{"C-UNCOVERED", "C-COVERED", "C-REVIEWED"}, wholeCluster, map[string]string{"C-REVIEWED": "same namespace"})
+	got := uncoveredCandidates([]string{"C-UNCOVERED", "C-UNCOVERED", "C-COVERED", "C-REVIEWED"}, wholeCluster, map[string]string{"C-REVIEWED": "same namespace"})
 	assert.Equal(t, []string{"C-UNCOVERED"}, got)
 }
