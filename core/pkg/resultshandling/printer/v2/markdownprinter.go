@@ -440,8 +440,14 @@ func mdStatusLabel(status apis.IStatus) string {
 	}
 }
 
+// mdEscapeCell neutralizes pipe delimiters and line breaks (\r\n, \n, \r)
+// so table cell contents cannot break out of Markdown table rows (CWE-150).
 func mdEscapeCell(s string) string {
-	return strings.ReplaceAll(s, "|", "\\|")
+	s = strings.ReplaceAll(s, "|", "\\|")
+	s = strings.ReplaceAll(s, "\r\n", " ")
+	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.ReplaceAll(s, "\r", " ")
+	return strings.TrimSpace(s)
 }
 
 func mdBlockquote(s string) string {
@@ -509,9 +515,5 @@ func mdWriteCoverageSection(w io.Writer, opaSessionObj *cautils.OPASessionObj) e
 }
 
 func mdEscapeTableCell(s string) string {
-	s = mdEscapeCell(s)
-	s = strings.ReplaceAll(s, "\r\n", " ")
-	s = strings.ReplaceAll(s, "\n", " ")
-	s = strings.ReplaceAll(s, "\r", " ")
-	return strings.TrimSpace(s)
+	return mdEscapeCell(s)
 }
