@@ -2525,3 +2525,25 @@ func TestScanImageContext_EarlyValidationRejectsCollisionBeforeScan(t *testing.T
 		assert.Contains(t, scanInfo.InputPatterns, "existing-manifest.yaml", "pre-existing input patterns must be preserved")
 	})
 }
+
+func TestScan_NilScanInfoReturnsError(t *testing.T) {
+	ks := NewKubescape(context.Background())
+	res, err := ks.Scan(nil, nil)
+	assert.Error(t, err)
+	assert.EqualError(t, err, "uninitialized scan parameters")
+	assert.Nil(t, res)
+}
+
+func TestScanContext_NilScanInfoReturnsError(t *testing.T) {
+	ks := NewKubescape(context.Background())
+	res, err := ks.ScanContext(context.Background(), nil, nil)
+	assert.Error(t, err)
+	assert.EqualError(t, err, "uninitialized scan parameters")
+	assert.Nil(t, res)
+
+	var nilKS *Kubescape
+	res, err = nilKS.ScanContext(context.Background(), nil, nil)
+	assert.Error(t, err)
+	assert.EqualError(t, err, "uninitialized scan parameters")
+	assert.Nil(t, res)
+}

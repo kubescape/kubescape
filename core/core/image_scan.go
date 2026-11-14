@@ -1309,6 +1309,13 @@ func resolveLocalImageTarget(image string) (string, bool) {
 // scan, the report covers succeeded images, and the returned error keeps the
 // exit code non-zero. Thresholds are evaluated over succeeded scans only.
 func (ks *Kubescape) ScanImageContext(ctx context.Context, imgScanInfo *ksmetav1.ImageScanInfo, scanInfo *cautils.ScanInfo) (bool, error) {
+	if imgScanInfo == nil {
+		return false, errors.New("uninitialized image scan parameters")
+	}
+	if scanInfo == nil {
+		return false, errors.New("uninitialized scan parameters")
+	}
+
 	images := imgScanInfo.Images
 	if len(images) == 0 {
 		return false, fmt.Errorf("no image provided to scan")

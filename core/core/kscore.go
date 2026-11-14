@@ -9,10 +9,16 @@ type Kubescape struct {
 }
 
 func (ks *Kubescape) Context() context.Context {
+	if ks == nil || ks.Ctx == nil {
+		return context.Background()
+	}
 	return ks.Ctx
 }
 
 func (ks *Kubescape) SetContext(ctx context.Context) {
+	if ks == nil {
+		return
+	}
 	ks.Ctx = ctx
 }
 

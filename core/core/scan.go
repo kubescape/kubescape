@@ -877,6 +877,10 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo, policyIdentifiers []cautil
 // mid-operation ks.Context() read could observe a different deadline than
 // the one that started the operation, or an already-restored/canceled one.
 func (ks *Kubescape) ScanContext(ctx context.Context, scanInfo *cautils.ScanInfo, policyIdentifiers []cautils.PolicyIdentifier) (scanResult *resultshandling.ResultsHandler, scanErr error) {
+	if scanInfo == nil {
+		return nil, errors.New("uninitialized scan parameters")
+	}
+
 	var (
 		interfaces             componentInterfaces
 		getters                cautils.Getters
