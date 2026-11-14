@@ -497,6 +497,15 @@ func TestActionPrint_ControlViewShowEvidenceKeepsPassedResourcesHidden(t *testin
 	assert.NotContains(t, out, "passed-deploy")
 }
 
+func TestPrettyPrinter_ActionPrint_NilReport(t *testing.T) {
+	pp, _ := newControlViewPrettyPrinter(t, false)
+	session := &cautils.OPASessionObj{Report: nil}
+	assert.NotPanics(t, func() {
+		err := pp.ActionPrint(context.Background(), session, nil)
+		assert.NoError(t, err)
+	})
+}
+
 // TestActionPrint_ControlViewShowEvidenceDoesNotLeakEnvValue guards the new
 // route into evidence output. -E reaches attachAssistedRemediation without -v
 // now, so the C-0012 plaintext credential must still be redacted on that route.

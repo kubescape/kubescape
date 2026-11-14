@@ -466,6 +466,16 @@ func TestBuildPolicyReports_DoesNotDuplicateEmittedClusterResourceControls(t *te
 	assert.Equal(t, "role not applicable", clusterReport.Results[0].Properties["skipReason"])
 }
 
+func TestPolicyReportActionPrintNilReport(t *testing.T) {
+	pp := NewPolicyReportPrinter()
+	session := &cautils.OPASessionObj{Report: nil}
+	assert.NotPanics(t, func() {
+		err := pp.ActionPrint(context.Background(), session, nil)
+		assert.Error(t, err)
+		assert.Equal(t, "failed to write results in PolicyReport format: no data provided", err.Error())
+	})
+}
+
 // TestBuildPolicyReports_RetainsClusterVerdictAndEmitsSkippedControlOnTimeout asserts that
 // when an earlier-scope cluster resource verdict (Pass or Fail) is retained, but the control summary
 // is marked skipped/not-evaluated due to a later scope timeout, the cluster verdict is preserved AND

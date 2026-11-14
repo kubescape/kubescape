@@ -129,7 +129,7 @@ func (jp *JunitPrinter) PrintNextSteps() {
 func (jp *JunitPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
 	var junitResult *JUnitTestSuites
 
-	if opaSessionObj != nil {
+	if opaSessionObj != nil && opaSessionObj.Report != nil {
 		junitResult = testsSuites(opaSessionObj)
 		if len(imageScanData) > 0 {
 			imageResult := imageTestsSuites(imageScanData)
