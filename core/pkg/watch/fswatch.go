@@ -104,14 +104,19 @@ type FileWatcher struct {
 
 	// queue holds what the backend delivered, in order, for run to handle.
 	// pump, a goroutine of its own, keeps reading the backend's channels into
-	// it, because run also calls the backend's Add and Remove: on Windows
-	// those wait for fsnotify's reader thread, which blocks delivering events
-	// once the Events buffer is full, so with run as the only reader a burst
-	// of events during an Add left each waiting on the other.
-	qmu    sync.Mutex
-	queue  []backendItem
-	queued chan struct{} // capacity one: the queue may have items
-	pumped chan struct{} // closed once pump has exited
+	// it until the backend is closed, because run also calls the backend's Add
+	// and Remove: on Windows those wait for fsnotify's reader thread, which
+	// blocks delivering events once the Events buffer is full, so with run as
+	// the only reader a burst of events during an Add left each waiting on the
+	// other. The queue keeps at most maxQueued deliveries; past that pump drops
+	// them, never blocks, and sets overflowed, and run then reconciles as for
+	// the backend's own overflow.
+	qmu        sync.Mutex
+	queue      []backendItem
+	overflowed bool          // deliveries were dropped since run last took the queue
+	maxQueued  int           // most deliveries the queue keeps
+	queued     chan struct{} // capacity one: the queue may have items
+	pumped     chan struct{} // closed once pump has exited
 
 	mu  sync.Mutex
 	err error // why it ended, if not asked to; set before changes is closed
@@ -152,15 +157,16 @@ func newFileWatcher(root string, opts FileWatcherOptions) (*FileWatcher, error) 
 		return nil, limitError(abs, err)
 	}
 	w := &FileWatcher{
-		root:    abs,
-		opts:    opts,
-		fs:      backend,
-		dirs:    make(map[string]struct{}),
-		pending: make(map[string]struct{}),
-		changes: make(chan struct{}, 1),
-		done:    make(chan struct{}),
-		queued:  make(chan struct{}, 1),
-		pumped:  make(chan struct{}),
+		root:      abs,
+		opts:      opts,
+		fs:        backend,
+		dirs:      make(map[string]struct{}),
+		pending:   make(map[string]struct{}),
+		changes:   make(chan struct{}, 1),
+		done:      make(chan struct{}),
+		queued:    make(chan struct{}, 1),
+		pumped:    make(chan struct{}),
+		maxQueued: defaultMaxQueued,
 	}
 
 	if info.IsDir() {
@@ -182,7 +188,7 @@ func newFileWatcher(root string, opts FileWatcherOptions) (*FileWatcher, error) 
 
 func (w *FileWatcher) start(ctx context.Context) {
 	ctx, w.cancel = context.WithCancel(ctx)
-	go w.pump(ctx)
+	go w.pump()
 	go w.run(ctx)
 }
 
@@ -194,17 +200,21 @@ type backendItem struct {
 	closed string
 }
 
+// defaultMaxQueued is how many deliveries the queue keeps for run. A burst
+// beyond it while run is busy is dropped, and run reconciles once instead.
+const defaultMaxQueued = 4096
+
 // pump moves what the backend delivers into the queue, in order, so the
-// backend is never left waiting for run (see queue). It ends when ctx is done
-// or both backend channels are closed.
-func (w *FileWatcher) pump(ctx context.Context) {
+// backend is never left waiting for run (see queue). It does not stop with the
+// watcher's context: run may still be in the backend's Add or Remove then,
+// which on Windows needs the events drained. It ends once the backend's
+// channels are closed, which run does on its way out before waiting for it.
+func (w *FileWatcher) pump() {
 	defer close(w.pumped)
 	events, failures := w.fs.Events, w.fs.Errors
 	for events != nil || failures != nil {
 		var item backendItem
 		select {
-		case <-ctx.Done():
-			return
 		case event, ok := <-events:
 			if !ok {
 				events, item = nil, backendItem{closed: "event"}
@@ -218,23 +228,55 @@ func (w *FileWatcher) pump(ctx context.Context) {
 				item = backendItem{err: failure}
 			}
 		}
-		w.qmu.Lock()
-		w.queue = append(w.queue, item)
-		w.qmu.Unlock()
-		select {
-		case w.queued <- struct{}{}:
-		default:
-		}
+		w.enqueue(item)
 	}
 }
 
-// takeQueue returns what pump queued since the last call.
-func (w *FileWatcher) takeQueue() []backendItem {
+// enqueue adds item to the queue without ever blocking. Past maxQueued an
+// event or error is dropped and overflowed set; the close of a channel is
+// always kept, so run still learns the backend stopped.
+func (w *FileWatcher) enqueue(item backendItem) {
+	w.qmu.Lock()
+	if item.closed == "" && len(w.queue) >= w.maxQueued {
+		w.overflowed = true
+	} else {
+		w.queue = append(w.queue, item)
+	}
+	w.qmu.Unlock()
+	select {
+	case w.queued <- struct{}{}:
+	default:
+	}
+}
+
+// takeQueue returns what pump queued since the last call, and whether it
+// dropped anything meanwhile.
+func (w *FileWatcher) takeQueue() ([]backendItem, bool) {
 	w.qmu.Lock()
 	defer w.qmu.Unlock()
-	items := w.queue
-	w.queue = nil
-	return items
+	items, overflowed := w.queue, w.overflowed
+	w.queue, w.overflowed = nil, false
+	return items, overflowed
+}
+
+// drainQueue handles what pump queued, stopping between items once ctx is
+// done. Dropped deliveries are handled as the backend's own overflow: the
+// registrations are brought back in line with the tree, and a change is
+// signalled. Its error ends the watcher.
+func (w *FileWatcher) drainQueue(ctx context.Context) error {
+	items, overflowed := w.takeQueue()
+	for _, item := range items {
+		if ctx.Err() != nil {
+			return nil
+		}
+		if err := w.handleItem(item); err != nil {
+			return err
+		}
+	}
+	if overflowed && ctx.Err() == nil {
+		return w.handleError(fsnotify.ErrEventOverflow)
+	}
+	return nil
 }
 
 // handleItem handles one thing the backend delivered. Its error ends the
@@ -294,10 +336,8 @@ func (w *FileWatcher) run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-w.queued:
-			for _, item := range w.takeQueue() {
-				if err = w.handleItem(item); err != nil {
-					return
-				}
+			if err = w.drainQueue(ctx); err != nil {
+				return
 			}
 		case <-w.settleC:
 			if err = w.settled(); err != nil {
