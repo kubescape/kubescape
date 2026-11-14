@@ -1,6 +1,7 @@
 package scan
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,11 +12,104 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var validContractSectionsMap = map[string]struct{}{
+	"policy":     {},
+	"scope":      {},
+	"evaluation": {},
+	"failure":    {},
+	"output":     {},
+}
+
+// parseContractAllowlist validates and parses the allowed contract sections.
+// Returns nil if no allowlist was provided.
+func parseContractAllowlist(rawSections []string) (map[string]bool, error) {
+	if len(rawSections) == 0 {
+		return nil, nil
+	}
+	allowed := make(map[string]bool)
+	for _, raw := range rawSections {
+		for _, part := range strings.Split(raw, ",") {
+			token := strings.TrimSpace(part)
+			if token == "" {
+				return nil, fmt.Errorf("unsupported section \"\" in --contract-allow (supported: policy, scope, evaluation, failure, output)")
+			}
+			lower := strings.ToLower(token)
+			if _, ok := validContractSectionsMap[lower]; !ok {
+				return nil, fmt.Errorf("unsupported section %q in --contract-allow (supported: policy, scope, evaluation, failure, output)", part)
+			}
+			allowed[lower] = true
+		}
+	}
+	return allowed, nil
+}
+
+// partitionContractSections divides declared contract sections into allowed and denied sets.
+// Both returned slices preserve canonical section ordering.
+func partitionContractSections(contract contractv1alpha1.Contract, allowedMap map[string]bool) ([]string, []string) {
+	if allowedMap == nil {
+		return selectedContractSections(contract), nil
+	}
+	allowed := make([]string, 0, 5)
+	var denied []string
+
+	checkSection := func(name string, exists bool) {
+		if !exists {
+			return
+		}
+		if allowedMap[name] {
+			allowed = append(allowed, name)
+		} else {
+			denied = append(denied, name)
+		}
+	}
+
+	checkSection("policy", contract.Policy != nil)
+	checkSection("scope", contract.Scope != nil)
+	checkSection("evaluation", contract.Evaluation != nil)
+	checkSection("failure", contract.Failure != nil)
+	checkSection("output", contract.Output != nil)
+
+	return allowed, denied
+}
+
+// filterContractSections returns a copy of the contract with denied sections nilled out.
+func filterContractSections(contract contractv1alpha1.Contract, allowedMap map[string]bool) contractv1alpha1.Contract {
+	if allowedMap == nil {
+		return contract
+	}
+	filtered := contract
+	if !allowedMap["policy"] {
+		filtered.Policy = nil
+	}
+	if !allowedMap["scope"] {
+		filtered.Scope = nil
+	}
+	if !allowedMap["evaluation"] {
+		filtered.Evaluation = nil
+	}
+	if !allowedMap["failure"] {
+		filtered.Failure = nil
+	}
+	if !allowedMap["output"] {
+		filtered.Output = nil
+	}
+	return filtered
+}
+
 // newScanContractMetadata captures the resolution that has already happened
 // at the CLI boundary. The final policy identifiers and effective-run digest
 // are filled in by cautils when the scan session is constructed, because that
 // is where the actual policy selection is known for every scan subcommand.
-func newScanContractMetadata(cmd *cobra.Command, selected *contractv1alpha1.SelectedContract, path string, scanInfo *cautils.ScanInfo, gates *reporthandlingv2.ScanContractGateResolution) *reporthandlingv2.ScanContractMetadata {
+func newScanContractMetadata(
+	cmd *cobra.Command,
+	selected *contractv1alpha1.SelectedContract,
+	path string,
+	scanInfo *cautils.ScanInfo,
+	gates *reporthandlingv2.ScanContractGateResolution,
+	allowedSections []string,
+	deniedSections []string,
+	effectiveContract contractv1alpha1.Contract,
+) *reporthandlingv2.ScanContractMetadata {
 	if selected == nil {
 		return nil
 	}
@@ -28,10 +122,11 @@ func newScanContractMetadata(cmd *cobra.Command, selected *contractv1alpha1.Sele
 		DigestSchema:            selected.DigestSchema,
 		ContractDigest:          selected.ContractDigest,
 		Source:                  safeScanContractSource(path),
-		AllowedSections:         selectedContractSections(selected.Contract),
-		Effective:               resolvedContractSettings(cmd, selected.Contract, scanInfo),
+		AllowedSections:         allowedSections,
+		DeniedSections:          deniedSections,
+		Effective:               resolvedContractSettings(cmd, effectiveContract, scanInfo),
 		GateResolution:          gates,
-		OrdinaryCLIOverrides:    ordinaryCLIOverrides(cmd, selected.Contract, scanInfo),
+		OrdinaryCLIOverrides:    ordinaryCLIOverrides(cmd, effectiveContract, scanInfo),
 	}
 	return metadata
 }
