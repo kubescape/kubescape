@@ -110,8 +110,12 @@ func TestPrepareAndCloseOutput_AreNoOpsForStdoutAndNil(t *testing.T) {
 }
 
 func TestGetPrinterWriterNoFallback_StillTightensPermissions(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX permission bits are not modeled on Windows")
+	}
 	path := filepath.Join(t.TempDir(), "report.json")
-	require.NoError(t, os.WriteFile(path, []byte("old"), 0o644))
+	require.NoError(t, os.WriteFile(path, []byte("old"), 0o600))
+	require.NoError(t, os.Chmod(path, 0o644))
 
 	f, err := GetPrinterWriterNoFallback(path)
 	require.NoError(t, err)
@@ -119,7 +123,5 @@ func TestGetPrinterWriterNoFallback_StillTightensPermissions(t *testing.T) {
 
 	info, err := os.Stat(path)
 	require.NoError(t, err)
-	if runtime.GOOS != "windows" {
-		assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
-	}
+	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
 }
