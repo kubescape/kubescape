@@ -300,6 +300,52 @@ func TestBaselineSeesRenamesWhenAScanTookAPolicyFallback(t *testing.T) {
 	}
 }
 
+// Only a policy fallback is a reason to pair across a rename. Here the frontend's
+// C-0013 has a second, rule-level failure in the later scan, so the evidence detail
+// of the control differs and the engine refuses to compare any of its findings,
+// the one whose evidence is the renamed backend among them. No scan took a
+// fallback, and that refusal stands.
+func TestClassifyKeepsARenamedFindingThatNoFallbackMadeIncomparable(t *testing.T) {
+	t.Parallel()
+	const backendMoved = "moved-backend.yaml::apps/v1::default::Deployment::backend"
+	two := loadScan(t, "two_files")
+	backendID := two.resourcesAt("b.yaml")[0]["resourceID"].(string)
+	base := two.evidencePointsAt(t, "/frontend", "runAsNonRoot", backendID)
+	head := base.withRuleLevelFailure(t, "/frontend", "C-0013").renamed(t, "b.yaml", "moved-backend.yaml")
+
+	result := classifyDocs(t, completeScan(t, base), completeScan(t, head))
+	require.Len(t, result.Renames, 1)
+
+	pointingAtBackend := 0
+	for _, change := range result.Incomparable {
+		if change.ControlID == "C-0013" && (change.EvidenceResourceID == backendInB || change.EvidenceResourceID == backendMoved) {
+			assert.NotEmpty(t, change.Reason)
+			pointingAtBackend++
+		}
+	}
+	assert.Equal(t, 2, pointingAtBackend, "both sides of the finding stay incomparable")
+	for _, change := range result.Existing {
+		assert.False(t, change.ControlID == "C-0013" && change.ResourceID == frontendInA, "a finding the engine would not compare was paired: %+v", change)
+	}
+}
+
+// A fallback is not the only gap when the same scan also read a resource type in
+// part: the engine's refusal could be down to either, so it stands.
+func TestBaselineDoesNotPairWhenTheFallbackIsNotTheOnlyGap(t *testing.T) {
+	t.Parallel()
+	baseline := NewBaseline()
+	observe(t, baseline, completeScan(t, loadScan(t, "two_files")))
+
+	moved := withPolicyFallback(completeScan(t, loadScan(t, "two_files").renamed(t, "a.yaml", "renamed.yaml")))
+	moved["scanCoverage"].(map[string]any)["partialGVRPulls"] = []any{map[string]any{"gvr": "apps/v1/deployments", "selector": "app=x", "error": "timeout"}}
+	result := observe(t, baseline, moved).Result
+	require.NotNil(t, result)
+	require.Equal(t, []Rename{{From: frontendInA, To: frontendMoved}}, result.Renames)
+
+	assert.Zero(t, renamedOn(result.Renamed, frontendMoved), "nothing is paired")
+	assert.NotZero(t, findingsOn(result.Incomparable, frontendInA), "the earlier findings stay incomparable")
+}
+
 // The same for a finding whose evidence is a renamed resource. With the fallback
 // in the baseline, the frontend's finding, which did not change, was reported
 // resolved: an all-clear for a finding that is still there.

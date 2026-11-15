@@ -87,10 +87,10 @@ func classify(base, head *snapshot, options diff.Options) (*Result, error) {
 	// finding new, or gone, on that scan's word alone, so one side of a finding
 	// that moved with a renamed resource, or whose evidence did, can be
 	// Incomparable while the other is removed, resolved or new. Paired, it is in
-	// both scans all the same. So the incomparable findings under a renamed
-	// identity are offered for pairing too, and those left unpaired go back to
-	// Incomparable with their reason.
-	earlier, later, incomparable := renamedIncomparable(renames, changes.Incomparable)
+	// both scans all the same. So the findings under a renamed identity that the
+	// fallback, and nothing else, made incomparable are offered for pairing too,
+	// and those left unpaired go back to Incomparable with their reason.
+	earlier, later, incomparable := renamedIncomparable(renames, changes.Incomparable, base, head)
 	renamed, removed, added := pairRenamed(renames, concatChanges(comparison.Removed, earlier), concatChanges(changes.New, later))
 	removed, earlier = splitIncomparable(removed)
 	existing, resolved, added := pairEvidenceRenamed(renames, concatChanges(changes.Resolved, earlier), added)
@@ -307,10 +307,18 @@ func pairChanged(renames []Rename, resolved, added []diff.ControlChange) (change
 	return changed, stillResolved, stillNew
 }
 
-// renamedIncomparable takes out of the incomparable findings those on a renamed
-// resource, or with a renamed resource as evidence: earlier holds the ones under
-// the identity it had, later the ones under the identity it has.
-func renamedIncomparable(renames []Rename, incomparable []diff.ControlChange) (earlier, later, rest []diff.ControlChange) {
+// renamedIncomparable takes out of the incomparable findings those that a policy
+// fallback alone made incomparable, on a renamed resource or with one as
+// evidence: earlier holds the ones under the identity it had, later the ones
+// under the identity it has.
+//
+// An earlier finding is one the engine would not call resolved because of a gap
+// in the head scan's coverage, and a later one is one it would not call new
+// because of a gap in the base scan's. Either is taken only when that scan's gap
+// is a policy fallback and nothing else. Any other cause, a resource type not
+// read in full, evidence of another level of detail, a control not evaluated,
+// stays as the engine decided it.
+func renamedIncomparable(renames []Rename, incomparable []diff.ControlChange, base, head *snapshot) (earlier, later, rest []diff.ControlChange) {
 	if len(renames) == 0 {
 		return nil, nil, incomparable
 	}
@@ -320,11 +328,11 @@ func renamedIncomparable(renames []Rename, incomparable []diff.ControlChange) (e
 	}
 	for _, change := range incomparable {
 		switch {
-		case change.Reason == "":
-			rest = append(rest, change) // not told apart from the others below
-		case from[change.ResourceID] || from[change.EvidenceResourceID]:
+		case (from[change.ResourceID] || from[change.EvidenceResourceID]) &&
+			change.Reason == diff.ReasonHeadCoverageDegraded && head.onlyPolicyFallback:
 			earlier = append(earlier, change)
-		case to[change.ResourceID] || to[change.EvidenceResourceID]:
+		case (to[change.ResourceID] || to[change.EvidenceResourceID]) &&
+			change.Reason == diff.ReasonBaseCoverageDegraded && base.onlyPolicyFallback:
 			later = append(later, change)
 		default:
 			rest = append(rest, change)
