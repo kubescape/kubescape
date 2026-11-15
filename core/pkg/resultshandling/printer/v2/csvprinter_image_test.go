@@ -212,3 +212,19 @@ func TestActionPrint_Csv_ScanImagesRefusesCompanionAliasingPostureReport(t *test
 		})
 	}
 }
+
+func TestActionPrint_Csv_ImageScan_NilReportFallback(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "images-nil-report.csv")
+	f, err := os.Create(path)
+	require.NoError(t, err)
+
+	cp := NewCsvPrinter(false)
+	cp.writer = f
+	session := &cautils.OPASessionObj{Report: nil}
+	require.NoError(t, cp.ActionPrint(context.Background(), session, mdImageScanDataFixture()))
+	require.NoError(t, cp.CloseWriter())
+
+	records := csvReadRecords(t, path)
+	require.Len(t, records, 4)
+	assert.Equal(t, csvImageHeader, records[0])
+}

@@ -121,6 +121,17 @@ func TestGitLabCodeQuality_RejectsImageScans(t *testing.T) {
 	assert.ErrorContains(t, cp.ActionPrint(context.Background(), cautils.NewOPASessionObjMock(), images), "--scan-images")
 }
 
+func TestGitLabCodeQuality_NilReportDoesNotPanic(t *testing.T) {
+	session := gitLabSessionFixture(t, "C-0057", 8.0)
+	session.Report = nil
+
+	cp := NewGitLabCodeQualityPrinter(false)
+	require.NotPanics(t, func() {
+		err := cp.ActionPrint(context.Background(), session, nil)
+		assert.ErrorContains(t, err, "only supported for configuration scanning")
+	})
+}
+
 func TestCodeQualitySeverity(t *testing.T) {
 	for _, tc := range []struct {
 		scoreFactor float32

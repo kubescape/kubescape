@@ -235,6 +235,24 @@ func TestMarkdownPrinter_ActionPrint_NilReport(t *testing.T) {
 	assert.NoError(t, err, "nil Report must not panic")
 }
 
+func TestMarkdownPrinter_ActionPrint_NilReportImageScanFallback(t *testing.T) {
+	tmp, err := os.CreateTemp("", "md-nil-report-*.md")
+	require.NoError(t, err)
+	defer func() {
+		assert.NoError(t, tmp.Close())
+		assert.NoError(t, os.Remove(tmp.Name()))
+	}()
+
+	mp := NewMarkdownPrinter()
+	mp.writer = tmp
+	session := &cautils.OPASessionObj{Report: nil}
+	require.NoError(t, mp.ActionPrint(context.TODO(), session, mdImageScanDataFixture()))
+
+	raw, err := os.ReadFile(tmp.Name())
+	require.NoError(t, err)
+	assert.Contains(t, string(raw), "# Kubescape Image Scan Report")
+}
+
 func TestMarkdownPrinter_ActionPrint_Header(t *testing.T) {
 	out := mdRunActionPrint(t, mdSessionFixture())
 

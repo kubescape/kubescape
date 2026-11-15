@@ -78,12 +78,8 @@ func (pp *PdfPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OP
 	var err error
 
 	switch {
-	case opaSessionObj != nil:
-		var summaryDetails *reportsummary.SummaryDetails
-		if opaSessionObj.Report != nil {
-			summaryDetails = &opaSessionObj.Report.SummaryDetails
-		}
-		outBuff, err = pp.generatePdf(summaryDetails, opaSessionObj, imageScanData)
+	case opaSessionObj != nil && opaSessionObj.Report != nil:
+		outBuff, err = pp.generatePdf(&opaSessionObj.Report.SummaryDetails, opaSessionObj, imageScanData)
 	case len(imageScanData) > 0:
 		outBuff, err = pp.generateImagePdf(imageScanData)
 	default:
