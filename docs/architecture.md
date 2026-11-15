@@ -199,8 +199,8 @@ Kubescape uses Custom Resources to store scan results:
 | `VulnerabilityManifestSummary` | Aggregated vulnerability summaries |
 | `WorkloadConfigurationScan` | Misconfiguration scan results |
 | `WorkloadConfigurationScanSummary` | Aggregated configuration summaries |
-| `ApplicationProfile` | Runtime behavior profiles |
-| `NetworkNeighborhood` | Observed network connections |
+| `ContainerProfile` | Observed container runtime behavior (processes, files, network) |
+| `GeneratedNetworkPolicy` | Network policies generated from observed traffic |
 
 #### 5. Node Agent (Runtime Security)
 
