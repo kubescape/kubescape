@@ -480,6 +480,30 @@ func TestHtmlPrinter_ActionPrint_NilReport(t *testing.T) {
 	})
 }
 
+func TestHtmlPrinter_ActionPrint_NilReportFallbackToImageScan(t *testing.T) {
+	ctx := context.Background()
+	out := filepath.Join(t.TempDir(), "report.html")
+
+	hp := NewHtmlPrinter(false)
+	require.NoError(t, hp.SetWriter(ctx, out))
+
+	session := &cautils.OPASessionObj{Report: nil}
+	imageScanData := []cautils.ImageScanData{buildSeverityExceptionImageScanData()}
+
+	require.NoError(t, hp.ActionPrint(ctx, session, imageScanData))
+	require.NoError(t, hp.CloseWriter())
+
+	raw, err := os.ReadFile(out)
+	require.NoError(t, err)
+	html := string(raw)
+
+	assert.Contains(t, html, "Images scanned:")
+	assert.Contains(t, html, "test-image:latest")
+	assert.Contains(t, html, "Vulnerabilities:")
+	assert.Contains(t, html, "CVE-KEPT")
+	assert.NotContains(t, html, "Summary:")
+}
+
 // TestHtmlPrinter_ActionPrint_ValidHTMLTableStructure ensures that rendered HTML reports
 // have balanced table tags (<tbody> matching </tbody>, <table> matching </table>, <tr> matching </tr>)
 // and contain no duplicate </tr> tags or stray </div> tags.

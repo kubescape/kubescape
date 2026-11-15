@@ -1780,6 +1780,38 @@ func TestSARIFActionPrintNilReport(t *testing.T) {
 	})
 }
 
+func TestSARIFActionPrint_NilReportFallbackToImageScan(t *testing.T) {
+	sp := NewSARIFPrinter(false)
+	tmp, err := os.CreateTemp("", "sarif-nil-image-*.json")
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_ = tmp.Close()
+		_ = os.Remove(tmp.Name())
+	})
+	sp.writer = tmp
+
+	session := &cautils.OPASessionObj{Report: nil}
+	imageScanData := []cautils.ImageScanData{buildSeverityExceptionImageScanData()}
+
+	require.NoError(t, sp.ActionPrint(context.Background(), session, imageScanData))
+
+	raw, err := os.ReadFile(tmp.Name())
+	require.NoError(t, err)
+
+	var report sarif.Report
+	require.NoError(t, json.Unmarshal(raw, &report))
+	require.Len(t, report.Runs, 1, "SARIF report must contain a run for the scanned image")
+	require.NotNil(t, report.Runs[0].Tool.Driver)
+	assert.Equal(t, "Kubescape", report.Runs[0].Tool.Driver.Name)
+
+	var ruleIDs []string
+	for _, rule := range report.Runs[0].Tool.Driver.Rules {
+		ruleIDs = append(ruleIDs, rule.ID)
+	}
+	assert.Contains(t, ruleIDs, "CVE-KEPT-pkg-CVE-KEPT")
+	assert.NotEmpty(t, report.Runs[0].Results)
+}
+
 // TestSARIFMultipleImageRunsHaveDistinctCategories pins what GitHub Code Scanning
 // requires of a file with several runs: since July 2025 it rejects an upload in
 // which two runs share a tool and a category. Every image run has the same driver
