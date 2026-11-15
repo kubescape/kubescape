@@ -209,6 +209,20 @@ func TestKubectlGetCommand(t *testing.T) {
 			path:     `metadata.labels."it's"`,
 			want:     `kubectl get pod demo -n default -o jsonpath='{.metadata.labels.it\'\''s}'`,
 		},
+		{
+			name:       "a relative kubeconfig with a leading hyphen is emitted",
+			resource:   kubectlWorkload("v1", "Pod", "demo", "default"),
+			kubeconfig: "-dev.yaml",
+			path:       "spec.hostNetwork",
+			want:       "kubectl get pod demo -n default --kubeconfig -dev.yaml -o jsonpath='{.spec.hostNetwork}'",
+		},
+		{
+			name:     "a context with a leading hyphen is emitted",
+			resource: kubectlWorkload("v1", "Pod", "demo", "default"),
+			context:  "-prod",
+			path:     "spec.hostNetwork",
+			want:     "kubectl get pod demo -n default --context -prod -o jsonpath='{.spec.hostNetwork}'",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -236,11 +250,10 @@ func TestKubectlGetCommand(t *testing.T) {
 		{"a context containing a carriage return", kubectlWorkload("v1", "Pod", "demo", "default"), kubectlCluster{context: "prod\rrm -rf /"}, "spec.hostNetwork"},
 		{"a context containing a control char", kubectlWorkload("v1", "Pod", "demo", "default"), kubectlCluster{context: "prod\x1b[2K"}, "spec.hostNetwork"},
 		{"a context containing a null byte", kubectlWorkload("v1", "Pod", "demo", "default"), kubectlCluster{context: "prod\x00extra"}, "spec.hostNetwork"},
-		{"a context starting with a hyphen", kubectlWorkload("v1", "Pod", "demo", "default"), kubectlCluster{context: "--raw=/evil"}, "spec.hostNetwork"},
 		{"a kubeconfig containing a newline", kubectlWorkload("v1", "Pod", "demo", "default"), kubectlCluster{kubeconfig: "/path/config\nmalicious"}, "spec.hostNetwork"},
 		{"a kubeconfig containing a carriage return", kubectlWorkload("v1", "Pod", "demo", "default"), kubectlCluster{kubeconfig: "/path/config\rmalicious"}, "spec.hostNetwork"},
 		{"a kubeconfig containing a control char", kubectlWorkload("v1", "Pod", "demo", "default"), kubectlCluster{kubeconfig: "/path/config\x07"}, "spec.hostNetwork"},
-		{"a kubeconfig starting with a hyphen", kubectlWorkload("v1", "Pod", "demo", "default"), kubectlCluster{kubeconfig: "-v=9"}, "spec.hostNetwork"},
+		{"a kubeconfig containing a null byte", kubectlWorkload("v1", "Pod", "demo", "default"), kubectlCluster{kubeconfig: "/path/config\x00extra"}, "spec.hostNetwork"},
 	}
 	for _, tt := range refused {
 		t.Run("no command for "+tt.name, func(t *testing.T) {
@@ -403,6 +416,11 @@ func TestIsSafeShellArg(t *testing.T) {
 		"~/.kube/config",
 		"dev cluster",
 		"a@b:c",
+		"-dev.yaml",
+		"-prod",
+		"-flag",
+		"--context",
+		"-o",
 	}
 	for _, s := range safe {
 		assert.True(t, isSafeShellArg(s), "expected safe: %q", s)
@@ -410,9 +428,6 @@ func TestIsSafeShellArg(t *testing.T) {
 
 	unsafe := []string{
 		"",
-		"-flag",
-		"--context",
-		"-o",
 		"foo\nbar",
 		"foo\rbar",
 		"foo\r\nbar",
