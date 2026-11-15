@@ -178,6 +178,24 @@ func TestDeduplicateExceptionsScopeContainment(t *testing.T) {
 			wantNames: []string{"cloud-1"},
 		},
 		{
+			name:      "overlapping framework patterns keep the secondary alternatives",
+			cloud:     armotypes.PosturePolicy{ControlID: "C-0001", FrameworkName: "CIS.*"},
+			crd:       armotypes.PosturePolicy{ControlID: "C-0001", FrameworkName: "CIS.*|NSA"},
+			wantNames: []string{"cloud-1", "crd-1"},
+		},
+		{
+			name:      "identical framework patterns are covered",
+			cloud:     armotypes.PosturePolicy{ControlID: "C-0001", FrameworkName: "CIS.*|NSA"},
+			crd:       armotypes.PosturePolicy{ControlID: "C-0001", FrameworkName: "CIS.*|NSA"},
+			wantNames: []string{"cloud-1"},
+		},
+		{
+			name:      "case-sensitive regex escapes are distinct scopes",
+			cloud:     armotypes.PosturePolicy{ControlID: "C-0001", FrameworkName: "\\d+"},
+			crd:       armotypes.PosturePolicy{ControlID: "C-0001", FrameworkName: "\\D+"},
+			wantNames: []string{"cloud-1", "crd-1"},
+		},
+		{
 			name:      "cloud framework pattern does not cover an unrelated framework",
 			cloud:     armotypes.PosturePolicy{ControlID: "C-0001", FrameworkName: "MIT.*"},
 			crd:       armotypes.PosturePolicy{ControlID: "C-0001", FrameworkName: "NSA"},
