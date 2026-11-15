@@ -81,7 +81,7 @@ func (cp *GitLabCodeQualityPrinter) SetWriter(ctx context.Context, outputFile st
 }
 
 func (cp *GitLabCodeQualityPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
-	if opaSessionObj == nil {
+	if opaSessionObj == nil || opaSessionObj.Report == nil {
 		return fmt.Errorf("gitlab-codequality output is only supported for configuration scanning: image findings have no repository file to anchor to")
 	}
 	if len(imageScanData) > 0 {

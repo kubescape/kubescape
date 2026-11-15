@@ -102,12 +102,32 @@ type FileWatcher struct {
 	cancel context.CancelFunc
 	done   chan struct{} // closed once the goroutine has exited
 
+	// queue holds what the backend delivered, in order, for run to handle.
+	// pump, a goroutine of its own, keeps reading the backend's channels into
+	// it until the backend is closed, because run also calls the backend's Add
+	// and Remove: on Windows those wait for fsnotify's reader thread, which
+	// blocks delivering events once the Events buffer is full, so with run as
+	// the only reader a burst of events during an Add left each waiting on the
+	// other. The queue keeps at most maxQueued deliveries; past that pump drops
+	// them, never blocks, and sets overflowed, and run then reconciles as for
+	// the backend's own overflow.
+	qmu        sync.Mutex
+	queue      []backendItem
+	overflowed bool          // deliveries were dropped since run last took the queue
+	maxQueued  int           // most deliveries the queue keeps
+	queued     chan struct{} // capacity one: the queue may have items
+	pumped     chan struct{} // closed once pump has exited
+
 	mu  sync.Mutex
 	err error // why it ended, if not asked to; set before changes is closed
 
 	// signalHook, when set by a test, is called with the path behind each signal
 	// before signals are coalesced.
 	signalHook func(path string)
+
+	// addWatch is the backend's Add as rewatchDir calls it. A test replaces it
+	// to make it fail the way one backend's does.
+	addWatch func(path string) error
 }
 
 // NewFileWatcher starts watching root, a file or a directory, until ctx is done.
@@ -141,13 +161,17 @@ func newFileWatcher(root string, opts FileWatcherOptions) (*FileWatcher, error) 
 		return nil, limitError(abs, err)
 	}
 	w := &FileWatcher{
-		root:    abs,
-		opts:    opts,
-		fs:      backend,
-		dirs:    make(map[string]struct{}),
-		pending: make(map[string]struct{}),
-		changes: make(chan struct{}, 1),
-		done:    make(chan struct{}),
+		root:      abs,
+		opts:      opts,
+		fs:        backend,
+		dirs:      make(map[string]struct{}),
+		pending:   make(map[string]struct{}),
+		changes:   make(chan struct{}, 1),
+		done:      make(chan struct{}),
+		queued:    make(chan struct{}, 1),
+		pumped:    make(chan struct{}),
+		maxQueued: defaultMaxQueued,
+		addWatch:  backend.Add,
 	}
 
 	if info.IsDir() {
@@ -169,7 +193,108 @@ func newFileWatcher(root string, opts FileWatcherOptions) (*FileWatcher, error) 
 
 func (w *FileWatcher) start(ctx context.Context) {
 	ctx, w.cancel = context.WithCancel(ctx)
+	go w.pump()
 	go w.run(ctx)
+}
+
+// backendItem is one thing the backend delivered: an event, an error, or the
+// unexpected close of one of its channels (closed names it).
+type backendItem struct {
+	event  fsnotify.Event
+	err    error
+	closed string
+}
+
+// defaultMaxQueued is how many deliveries the queue keeps for run. A burst
+// beyond it while run is busy is dropped, and run reconciles once instead.
+const defaultMaxQueued = 4096
+
+// pump moves what the backend delivers into the queue, in order, so the
+// backend is never left waiting for run (see queue). It does not stop with the
+// watcher's context: run may still be in the backend's Add or Remove then,
+// which on Windows needs the events drained. It ends once the backend's
+// channels are closed, which run does on its way out before waiting for it.
+func (w *FileWatcher) pump() {
+	defer close(w.pumped)
+	events, failures := w.fs.Events, w.fs.Errors
+	for events != nil || failures != nil {
+		var item backendItem
+		select {
+		case event, ok := <-events:
+			if !ok {
+				events, item = nil, backendItem{closed: "event"}
+			} else {
+				item = backendItem{event: event}
+			}
+		case failure, ok := <-failures:
+			if !ok {
+				failures, item = nil, backendItem{closed: "error"}
+			} else {
+				item = backendItem{err: failure}
+			}
+		}
+		w.enqueue(item)
+	}
+}
+
+// enqueue adds item to the queue without ever blocking. Past maxQueued an
+// event or error is dropped and overflowed set; the close of a channel is
+// always kept, so run still learns the backend stopped.
+func (w *FileWatcher) enqueue(item backendItem) {
+	w.qmu.Lock()
+	if item.closed == "" && len(w.queue) >= w.maxQueued {
+		w.overflowed = true
+	} else {
+		w.queue = append(w.queue, item)
+	}
+	w.qmu.Unlock()
+	select {
+	case w.queued <- struct{}{}:
+	default:
+	}
+}
+
+// takeQueue returns what pump queued since the last call, and whether it
+// dropped anything meanwhile.
+func (w *FileWatcher) takeQueue() ([]backendItem, bool) {
+	w.qmu.Lock()
+	defer w.qmu.Unlock()
+	items, overflowed := w.queue, w.overflowed
+	w.queue, w.overflowed = nil, false
+	return items, overflowed
+}
+
+// drainQueue handles what pump queued, stopping between items once ctx is
+// done. Dropped deliveries are handled as the backend's own overflow: the
+// registrations are brought back in line with the tree, and a change is
+// signalled. Its error ends the watcher.
+func (w *FileWatcher) drainQueue(ctx context.Context) error {
+	items, overflowed := w.takeQueue()
+	for _, item := range items {
+		if ctx.Err() != nil {
+			return nil
+		}
+		if err := w.handleItem(item); err != nil {
+			return err
+		}
+	}
+	if overflowed && ctx.Err() == nil {
+		return w.handleError(fsnotify.ErrEventOverflow)
+	}
+	return nil
+}
+
+// handleItem handles one thing the backend delivered. Its error ends the
+// watcher.
+func (w *FileWatcher) handleItem(item backendItem) error {
+	switch {
+	case item.closed != "":
+		return fmt.Errorf("watch: the %s channel was closed unexpectedly", item.closed)
+	case item.err != nil:
+		return w.handleError(item.err)
+	default:
+		return w.handle(item.event)
+	}
 }
 
 // Changes returns the channel on which a change is signalled. It is closed when
@@ -206,6 +331,7 @@ func (w *FileWatcher) run(ctx context.Context) {
 		w.err = err
 		w.mu.Unlock()
 		w.cancel()
+		<-w.pumped
 		close(w.changes)
 		close(w.done)
 	}()
@@ -214,20 +340,8 @@ func (w *FileWatcher) run(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case event, ok := <-w.fs.Events:
-			if !ok {
-				err = errors.New("watch: the event channel was closed unexpectedly")
-				return
-			}
-			if err = w.handle(event); err != nil {
-				return
-			}
-		case failure, ok := <-w.fs.Errors:
-			if !ok {
-				err = errors.New("watch: the error channel was closed unexpectedly")
-				return
-			}
-			if err = w.handleError(failure); err != nil {
+		case <-w.queued:
+			if err = w.drainQueue(ctx); err != nil {
 				return
 			}
 		case <-w.settleC:
@@ -326,7 +440,16 @@ func (w *FileWatcher) handleError(failure error) error {
 // has lost its watch without a Remove event reaching us, which is why what the
 // backend says it watches decides, and not what was recorded.
 func (w *FileWatcher) reconcile() error {
-	if w.file == "" {
+	if w.file != "" {
+		// The removal of the file's directory may be among what was lost, and
+		// the backend drops its watch with the directory, so it is watched again
+		// from a clean state, as every directory is below. If it cannot be, the
+		// watch ends, as when the removal is seen.
+		if err := w.rewatchDir(); err != nil {
+			w.notify(w.file)
+			return err
+		}
+	} else {
 		live := make(map[string]struct{})
 		for _, path := range w.fs.WatchList() {
 			live[path] = struct{}{}
@@ -349,6 +472,34 @@ func (w *FileWatcher) reconcile() error {
 	}
 	w.notify(w.root)
 	return nil
+}
+
+// rewatchAttempts is how many times rewatchDir adds the directory of a single
+// file while it is still there.
+const rewatchAttempts = 5
+
+// rewatchDir watches the single file's directory again from a clean state.
+// fs.ErrNotExist from the backend's Add does not always mean the directory is
+// gone: on kqueue, Add lists the directory and fails with it when an entry goes
+// between the listing and its stat. So it ends the watch, as a seen removal
+// does, only once the directory itself is gone; while the directory is there,
+// the Add is tried again, a bounded number of times. Any other failure ends the
+// watch at once.
+func (w *FileWatcher) rewatchDir() error {
+	var err error
+	for attempt := 0; attempt < rewatchAttempts; attempt++ {
+		_ = w.fs.Remove(w.dir) // absent is fine
+		if err = w.addWatch(w.dir); err == nil {
+			return nil
+		}
+		if !errors.Is(err, fs.ErrNotExist) {
+			return limitError(w.dir, err)
+		}
+		if _, statErr := os.Stat(w.dir); errors.Is(statErr, fs.ErrNotExist) {
+			return fmt.Errorf("watch %q: its directory was removed or renamed", w.file)
+		}
+	}
+	return fmt.Errorf("watch %q: its directory could not be watched again: %w", w.file, err)
 }
 
 // settled registers the directories that appeared since the backend last

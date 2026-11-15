@@ -453,6 +453,17 @@ func controlDefinitelyOutOfScope(report *scanReport, controlID string) bool {
 	return len(report.SummaryDetails.Controls) > 0 && !summaryContainsControl(report, controlID)
 }
 
+// ReasonBaseCoverageDegraded and ReasonHeadCoverageDegraded are the reasons a
+// failure is Incomparable when a gap in the base or the head report's scan
+// coverage could account for it (coverageGapAffects): the head failure may not
+// be new, or the base failure may not be resolved. Which gap it was, a policy
+// fallback or a resource type that was not read in full, the report's
+// scanCoverage says.
+const (
+	ReasonBaseCoverageDegraded = "base report has degraded scan coverage, so the head failure cannot be classified as new"
+	ReasonHeadCoverageDegraded = "head report has degraded scan coverage, so an absent failure is not a conclusive resolution"
+)
+
 func absentNewFailureRisk(report *scanReport, controlID string) string {
 	for _, control := range report.ScanCoverage.NotEvaluatedControls {
 		if control.ControlID == controlID {
@@ -460,7 +471,7 @@ func absentNewFailureRisk(report *scanReport, controlID string) string {
 		}
 	}
 	if coverageGapAffects(report.ScanCoverage, controlID) {
-		return "base report has degraded scan coverage, so the head failure cannot be classified as new"
+		return ReasonBaseCoverageDegraded
 	}
 	return ""
 }
@@ -498,7 +509,7 @@ func absentResolutionRisk(report *scanReport, controlID string) string {
 		}
 	}
 	if coverageGapAffects(report.ScanCoverage, controlID) {
-		return "head report has degraded scan coverage, so an absent failure is not a conclusive resolution"
+		return ReasonHeadCoverageDegraded
 	}
 	return ""
 }

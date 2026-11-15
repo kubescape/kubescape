@@ -170,6 +170,124 @@ func TestReweightComplianceScores_TimedOutControlCountsAsFailed(t *testing.T) {
 	assert.Less(t, opaSessionObj.Report.SummaryDetails.ComplianceScore, float32(100))
 }
 
+func TestReweightComplianceScores_UnscoredControlDoesNotCorruptComplianceScore(t *testing.T) {
+	passScore := float32(100)
+
+	opaSessionObj := cautils.NewOPASessionObjMock()
+	opaSessionObj.Report.SummaryDetails.Controls = reportsummary.ControlSummaries{
+		"C-PASS":     reportsummary.ControlSummary{ControlID: "C-PASS", ComplianceScore: &passScore},
+		"C-UNSCORED": reportsummary.ControlSummary{ControlID: "C-UNSCORED"}, // nil ComplianceScore -> GetComplianceScore() returns -1
+		"C-SLOW":     reportsummary.ControlSummary{ControlID: "C-SLOW"},
+	}
+
+	opap := NewOPAProcessor(opaSessionObj, resources.NewRegoDependenciesDataMock(), "test", "", "", false, nil)
+	opap.TimedOutControls["C-SLOW"] = "control evaluation timed out"
+
+	opap.reweightComplianceScores()
+
+	// The unscored control must not subtract its -1 sentinel from the compliance sum.
+	// 100 / 3 = 33.333336 (not (100 - 1) / 3 = 33.0).
+	assert.InDelta(t, float32(100.0/3.0), opaSessionObj.Report.SummaryDetails.ComplianceScore, 0.001)
+}
+
+func TestReweightComplianceScores_AllUnscoredControlsYieldZeroComplianceScore(t *testing.T) {
+	opaSessionObj := cautils.NewOPASessionObjMock()
+	opaSessionObj.Report.SummaryDetails.Controls = reportsummary.ControlSummaries{
+		"C-UNSCORED-1": reportsummary.ControlSummary{ControlID: "C-UNSCORED-1"}, // nil ComplianceScore -> GetComplianceScore() returns -1
+		"C-UNSCORED-2": reportsummary.ControlSummary{ControlID: "C-UNSCORED-2"},
+		"C-SLOW":       reportsummary.ControlSummary{ControlID: "C-SLOW"},
+	}
+
+	opap := NewOPAProcessor(opaSessionObj, resources.NewRegoDependenciesDataMock(), "test", "", "", false, nil)
+	opap.TimedOutControls["C-SLOW"] = "control evaluation timed out"
+
+	opap.reweightComplianceScores()
+
+	// Unscored controls must yield a score of 0 rather than a negative score (-2 / 3 = -0.666).
+	assert.Equal(t, float32(0), opaSessionObj.Report.SummaryDetails.ComplianceScore)
+}
+
+func TestReweightComplianceScores_FrameworkUnscoredControlDoesNotCorruptComplianceScore(t *testing.T) {
+	passScore := float32(80)
+
+	cPass := reportsummary.ControlSummary{ControlID: "C-PASS", ComplianceScore: &passScore}
+	cUnscored := reportsummary.ControlSummary{ControlID: "C-UNSCORED"} // nil ComplianceScore -> GetComplianceScore() returns -1
+	cSlow := reportsummary.ControlSummary{ControlID: "C-SLOW"}
+
+	opaSessionObj := cautils.NewOPASessionObjMock()
+	opaSessionObj.Report.SummaryDetails.Controls = reportsummary.ControlSummaries{
+		"C-PASS":     cPass,
+		"C-UNSCORED": cUnscored,
+		"C-SLOW":     cSlow,
+	}
+	opaSessionObj.Report.SummaryDetails.Frameworks = []reportsummary.FrameworkSummary{
+		{
+			Name: "NSA",
+			Controls: reportsummary.ControlSummaries{
+				"C-PASS":     cPass,
+				"C-UNSCORED": cUnscored,
+				"C-SLOW":     cSlow,
+			},
+		},
+	}
+
+	opap := NewOPAProcessor(opaSessionObj, resources.NewRegoDependenciesDataMock(), "test", "", "", false, nil)
+	opap.TimedOutControls["C-SLOW"] = "control evaluation timed out"
+
+	opap.reweightComplianceScores()
+
+	// 80 / 3 = 26.666668 (not (80 - 1) / 3 = 26.333334).
+	assert.InDelta(t, float32(80.0/3.0), opaSessionObj.Report.SummaryDetails.Frameworks[0].ComplianceScore, 0.001)
+}
+
+func TestReweightComplianceScores_FrameworkAllUnscoredControlsYieldZeroComplianceScore(t *testing.T) {
+	cUnscored := reportsummary.ControlSummary{ControlID: "C-UNSCORED"}
+	cSlow := reportsummary.ControlSummary{ControlID: "C-SLOW"}
+
+	opaSessionObj := cautils.NewOPASessionObjMock()
+	opaSessionObj.Report.SummaryDetails.Controls = reportsummary.ControlSummaries{
+		"C-UNSCORED": cUnscored,
+		"C-SLOW":     cSlow,
+	}
+	opaSessionObj.Report.SummaryDetails.Frameworks = []reportsummary.FrameworkSummary{
+		{
+			Name: "NSA",
+			Controls: reportsummary.ControlSummaries{
+				"C-UNSCORED": cUnscored,
+				"C-SLOW":     cSlow,
+			},
+		},
+	}
+
+	opap := NewOPAProcessor(opaSessionObj, resources.NewRegoDependenciesDataMock(), "test", "", "", false, nil)
+	opap.TimedOutControls["C-SLOW"] = "control evaluation timed out"
+
+	opap.reweightComplianceScores()
+
+	assert.Equal(t, float32(0), opaSessionObj.Report.SummaryDetails.Frameworks[0].ComplianceScore)
+}
+
+func TestReweightComplianceScores_NilControlSafety(t *testing.T) {
+	opaSessionObj := cautils.NewOPASessionObjMock()
+	// Controls map has key "C-ORPHAN" with nil summary in Frameworks
+	opaSessionObj.Report.SummaryDetails.Controls = reportsummary.ControlSummaries{}
+	opaSessionObj.Report.SummaryDetails.Frameworks = []reportsummary.FrameworkSummary{
+		{
+			Name: "NSA",
+			Controls: reportsummary.ControlSummaries{
+				"C-ORPHAN": reportsummary.ControlSummary{ControlID: "C-OTHER"}, // GetControl for C-ORPHAN will return nil
+			},
+		},
+	}
+
+	opap := NewOPAProcessor(opaSessionObj, resources.NewRegoDependenciesDataMock(), "test", "", "", false, nil)
+	opap.TimedOutControls["C-SLOW"] = "control evaluation timed out"
+
+	assert.NotPanics(t, func() {
+		opap.reweightComplianceScores()
+	})
+}
+
 func TestVerifyWholeClusterControl_ControlTimeout(t *testing.T) {
 	deployment := mocks.MockDevelopmentWithHostpath()
 

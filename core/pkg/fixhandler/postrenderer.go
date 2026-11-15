@@ -5,7 +5,21 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode"
 )
+
+// isSafeScriptPath validates that a directory path can be safely emitted into
+// generated shell and batch script templates. It rejects newlines, carriage
+// returns, control characters, and double quotes, which could break out of
+// command comments or variable assignments in bash or cmd.exe batch scripts.
+func isSafeScriptPath(path string) bool {
+	for _, r := range path {
+		if r == '"' || r == '\n' || r == '\r' || r == 0 || unicode.IsControl(r) {
+			return false
+		}
+	}
+	return true
+}
 
 // shQuote escapes a string for safe usage in POSIX shells (bash) by wrapping in single quotes
 // and escaping existing single quotes as '\”.
@@ -57,8 +71,30 @@ func EmitPostRenderer(kustomizeDir, outputDir string) error {
 	if kustomizeDir == "" {
 		return fmt.Errorf("kustomize directory cannot be empty")
 	}
+	if !isSafeScriptPath(kustomizeDir) {
+		return fmt.Errorf("kustomize directory %q contains unsafe characters", kustomizeDir)
+	}
 	if outputDir == "" {
 		return fmt.Errorf("output directory cannot be empty")
+	}
+	if !isSafeScriptPath(outputDir) {
+		return fmt.Errorf("output directory %q contains unsafe characters", outputDir)
+	}
+
+	cleanKustDir, err := filepath.Abs(kustomizeDir)
+	if err != nil {
+		cleanKustDir = kustomizeDir
+	}
+	if !isSafeScriptPath(cleanKustDir) {
+		return fmt.Errorf("resolved kustomize directory %q contains unsafe characters", cleanKustDir)
+	}
+
+	cleanOutputDir, err := filepath.Abs(outputDir)
+	if err != nil {
+		cleanOutputDir = outputDir
+	}
+	if !isSafeScriptPath(cleanOutputDir) {
+		return fmt.Errorf("resolved output directory %q contains unsafe characters", cleanOutputDir)
 	}
 
 	if err := os.MkdirAll(outputDir, 0755); err != nil {
@@ -70,11 +106,6 @@ func EmitPostRenderer(kustomizeDir, outputDir string) error {
 		return fmt.Errorf("failed to open output directory %q: %w", outputDir, err)
 	}
 	defer root.Close()
-
-	cleanKustDir, err := filepath.Abs(kustomizeDir)
-	if err != nil {
-		cleanKustDir = kustomizeDir
-	}
 
 	kustBaseName := filepath.Base(cleanKustDir)
 

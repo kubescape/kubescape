@@ -359,6 +359,12 @@ func TestCsvSafeCell_Diff(t *testing.T) {
 		{name: "line feed is neutralized", in: "\n=1+1", want: "'\n=1+1"},
 		{name: "dde payload is neutralized", in: "=cmd|' /C calc'!A0", want: "'=cmd|' /C calc'!A0"},
 		{name: "leading pipe is not a formula prefix", in: "|table", want: "|table"},
+		{name: "leading space before equals is neutralized", in: " =1+1", want: "' =1+1"},
+		{name: "leading multiple spaces before at is neutralized", in: "   @SUM(A1)", want: "'   @SUM(A1)"},
+		{name: "leading space before plus is neutralized", in: "  +1", want: "'  +1"},
+		{name: "leading space before minus is neutralized", in: "  -1", want: "'  -1"},
+		{name: "spaces only unchanged", in: "   ", want: "   "},
+		{name: "spaces before plain text unchanged", in: "  pod-name", want: "  pod-name"},
 	}
 
 	for _, tc := range cases {

@@ -1,6 +1,7 @@
 package list
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -77,6 +78,9 @@ func GetListCmd(ks meta.IKubescape) *cobra.Command {
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if ks == nil {
+				return errors.New("uninitialized kubescape interface")
+			}
 
 			if err := flagValidationList(&listPolicies); err != nil {
 				return err

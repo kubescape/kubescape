@@ -316,7 +316,56 @@ func TestPrometheusActionPrint_CombinedScanEmitsBothPostureAndImageMetrics(t *te
 func TestPrometheusActionPrint_MissingDataReturnsError(t *testing.T) {
 	promPrinter := NewPrometheusPrinter(false)
 	err := promPrinter.ActionPrint(context.Background(), nil, nil)
-	assert.Error(t, err)
+	assert.EqualError(t, err, "failed to print results, missing data")
+}
+
+func TestPrometheusActionPrint_NilReportFallbackToImageScan(t *testing.T) {
+	session := &cautils.OPASessionObj{}
+	imageData := []cautils.ImageScanData{
+		{
+			Image:    "test-image:latest",
+			Platform: "linux/amd64",
+			Matches: match.NewMatches(match.Match{
+				Package: grypepkg.Package{ID: "pkg-1", Name: "openssl", Version: "3.0.0"},
+				Vulnerability: vulnerability.Vulnerability{
+					Metadata: &vulnerability.Metadata{ID: "CVE-2026-0001", Severity: "High"},
+					Fix:      vulnerability.Fix{Versions: []string{"3.0.1"}, State: "Fixed"},
+				},
+			}),
+		},
+	}
+
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+
+	promPrinter := NewPrometheusPrinter(false)
+	promPrinter.writer = w
+
+	err = promPrinter.ActionPrint(context.Background(), session, imageData)
+	require.NoError(t, err)
+
+	require.NoError(t, w.Close())
+	got, err := io.ReadAll(r)
+	require.NoError(t, err)
+	require.NoError(t, r.Close())
+	output := string(got)
+
+	// Image metrics must be present.
+	assert.Contains(t, output, "kubescape_image_count_cve")
+	assert.Contains(t, output, `image="test-image:latest",platform="linux/amd64",severity="High"`)
+
+	// Posture metrics must not be emitted when posture report/results are absent.
+	assert.NotContains(t, output, "kubescape_cluster_complianceScore")
+	assert.NotContains(t, output, "kubescape_cluster_coverage_score")
+	assert.NotContains(t, output, "kubescape_cluster_count_resources")
+	assert.NotContains(t, output, "kubescape_cluster_count_control")
+}
+
+func TestPrometheusActionPrint_NilReportNoDataReturnsError(t *testing.T) {
+	promPrinter := NewPrometheusPrinter(false)
+	session := &cautils.OPASessionObj{}
+	err := promPrinter.ActionPrint(context.Background(), session, nil)
+	assert.EqualError(t, err, "failed to print results, missing data")
 }
 
 func TestSetResourcesCountersFromCatalog_DeterministicOrder(t *testing.T) {

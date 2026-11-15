@@ -1,0 +1,13 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: pv-patch-b
+rules:
+- apiGroups: [""]
+  resources: ["persistentvolumes"]
+  resourceNames: ["unrelated"]
+  verbs: ["patch"]
+- apiGroups: [""]
+  resources: ["persistentvolumes"]
+  resourceNames: ["b"]
+  verbs: ["patch"]

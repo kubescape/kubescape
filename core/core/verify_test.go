@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -890,7 +891,7 @@ func TestFix_VerifyControlsConfigOverride(t *testing.T) {
 		assert.Equal(t, override, (*calls)[0].ControlsInputs)
 		log := readLog()
 		assert.Contains(t, log, "in place of the one the report records")
-		assert.Contains(t, log, recorded)
+		assert.Contains(t, log, fmt.Sprintf("%q", recorded))
 	})
 	t.Run("it is the way out when the recorded file is gone", func(t *testing.T) {
 		reportPath, dir := setup(t, filepath.Join(t.TempDir(), "gone.json"))

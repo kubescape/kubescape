@@ -28,6 +28,65 @@ func TestPostRenderer_Validation(t *testing.T) {
 	err = EmitPostRenderer(tmp, "")
 	assert.Error(t, err, "Empty outputDir must return error")
 	assert.Contains(t, err.Error(), "output directory cannot be empty")
+
+	unsafePaths := []string{
+		"path\"with\"quotes",
+		"path\nwith\nnewline",
+		"path\rwith\rcarriage_return",
+		"path\x00with\x00null",
+		"path\x1bwith\x1bescape",
+	}
+
+	for _, unsafe := range unsafePaths {
+		err = EmitPostRenderer(unsafe, tmp)
+		assert.Error(t, err, "Unsafe kustomizeDir %q must return error", unsafe)
+		assert.Contains(t, err.Error(), "contains unsafe characters")
+
+		err = EmitPostRenderer(tmp, unsafe)
+		assert.Error(t, err, "Unsafe outputDir %q must return error", unsafe)
+		assert.Contains(t, err.Error(), "contains unsafe characters")
+	}
+}
+
+func TestPostRenderer_Validation_ResolvedPath(t *testing.T) {
+	tempParent := t.TempDir()
+	unsafeDir := filepath.Join(tempParent, "unsafe\"dir")
+	if err := os.Mkdir(unsafeDir, 0755); err != nil {
+		t.Skipf("skipping test: filesystem does not allow directory names with quotes: %v", err)
+	}
+
+	origWd, err := os.Getwd()
+	require.NoError(t, err)
+	defer func() {
+		_ = os.Chdir(origWd)
+	}()
+
+	require.NoError(t, os.Chdir(unsafeDir))
+
+	outDir := filepath.Join(tempParent, "output")
+
+	// 1. Relative kustomizeDir (".") inherits unsafe quote from current working directory
+	err = EmitPostRenderer(".", outDir)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "contains unsafe characters")
+	assert.Contains(t, err.Error(), "resolved kustomize directory")
+
+	// Verify output directory was not created
+	_, err = os.Stat(outDir)
+	assert.True(t, os.IsNotExist(err), "output directory must not be created when resolved kustomize path is unsafe")
+
+	// 2. Relative outputDir ("output") inherits unsafe quote from current working directory
+	safeKustDir := filepath.Join(tempParent, "kust")
+	require.NoError(t, os.Mkdir(safeKustDir, 0755))
+
+	err = EmitPostRenderer(safeKustDir, "output")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "contains unsafe characters")
+	assert.Contains(t, err.Error(), "resolved output directory")
+
+	// Verify unsafe resolved directory was not created inside unsafeDir
+	_, err = os.Stat(filepath.Join(unsafeDir, "output"))
+	assert.True(t, os.IsNotExist(err), "relative output directory must not be created when resolved output path is unsafe")
 }
 
 func TestPostRenderer_ScriptGenerationAndPermissions(t *testing.T) {

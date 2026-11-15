@@ -39,6 +39,10 @@ func GetPatchCmd(ks meta.IKubescape) *cobra.Command {
 		Example: patchCmdExamples,
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if ks == nil {
+				return errors.New("uninitialized kubescape interface")
+			}
+
 			applyRegistryCredentialsFromEnv(cmd, &patchInfo)
 
 			if cmd.Flags().Changed("tag") {

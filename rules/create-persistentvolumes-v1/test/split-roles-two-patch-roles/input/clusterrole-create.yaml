@@ -1,0 +1,13 @@
+# The create is narrowed to a and b. Two other ClusterRoles bound to the same
+# subject carry the patches, one for each name, and the second role also has a
+# patch rule that reaches neither name. Only the rules that make the create
+# reachable are evidence.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: pv-create
+rules:
+- apiGroups: [""]
+  resources: ["persistentvolumes"]
+  resourceNames: ["a", "b"]
+  verbs: ["create"]

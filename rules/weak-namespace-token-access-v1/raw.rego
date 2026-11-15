@@ -105,12 +105,14 @@ deny contains msga if {
 # or watch is also authorized when the request carries a metadata.name field
 # selector for a named secret, which reads that secret the same way.
 #
-# Only an unrestricted entry reports create. A plain create is authorized with
-# the empty name, including when resourceNames lists "", but creating a secret
-# does not return the token. The read that would is matched on its own verb.
-# Reporting create for a narrowed entry would flag a permission that does not
-# hand the subject a token.
-token_verbs(rule) := {"get", "list", "watch", "create", "update", "patch", "*"} if unrestricted_rule(rule)
+# A create on secrets is not reported as token access: creating a
+# kubernetes.io/service-account-token secret does not return the
+# controller-generated token; a usable read path (get, list, or watch) is also
+# needed. That read is matched on its own verb. Both an unrestricted create and
+# a create narrowed to resourceNames: [""] permit the same create operation
+# (authorized with the empty name), and neither hands the subject a token without
+# a read grant.
+token_verbs(rule) := {"get", "list", "watch", "update", "patch", "*"} if unrestricted_rule(rule)
 
 token_verbs(rule) := {"get", "list", "watch", "update", "patch", "*"} if {
 	not unrestricted_rule(rule)

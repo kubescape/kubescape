@@ -64,10 +64,12 @@ func (jp *JsonPrinter) Score(score float32) {
 func (jp *JsonPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
 	var err error
 
-	if opaSessionObj != nil {
+	if opaSessionObj != nil && opaSessionObj.Report != nil {
 		err = printConfigurationsScanning(opaSessionObj, imageScanData, jp)
 	} else if len(imageScanData) > 0 {
 		err = printImageScanning(imageScanData, jp)
+	} else if opaSessionObj != nil {
+		err = printConfigurationsScanning(opaSessionObj, imageScanData, jp)
 	} else {
 		err = fmt.Errorf("no data provided")
 	}

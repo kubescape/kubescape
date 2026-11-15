@@ -98,7 +98,9 @@ func TestFix_OutputPatchEqualsTheFixedCopy(t *testing.T) {
 	require.NoError(t, ks.Fix(&metav1.FixInfo{ReportFile: reportPath, OutputPatch: patchPath}))
 
 	gitApplyIn(t, clean, patchPath)
-	assert.Equal(t, fileContent(t, filepath.Join(outputDir, "deploy.yaml")), fileContent(t, filepath.Join(clean, "deploy.yaml")),
+	fixedOutput := strings.ReplaceAll(fileContent(t, filepath.Join(outputDir, "deploy.yaml")), "\r\n", "\n")
+	patchedCopy := strings.ReplaceAll(fileContent(t, filepath.Join(clean, "deploy.yaml")), "\r\n", "\n")
+	assert.Equal(t, fixedOutput, patchedCopy,
 		"the patch and --output-dir are the same fix")
 }
 

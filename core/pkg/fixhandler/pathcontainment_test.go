@@ -322,3 +322,78 @@ func TestGetFileStringWithRelativeRootName(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "inside", content)
 }
+
+func TestGetFileStringWithSymlinkedRoot(t *testing.T) {
+	skipOnWindowsSymlink(t)
+
+	base := t.TempDir()
+	workspace := filepath.Join(base, "real-workspace")
+	require.NoError(t, os.Mkdir(workspace, 0o700))
+	manifest := filepath.Join(workspace, "deploy.yaml")
+	require.NoError(t, os.WriteFile(manifest, []byte("inside"), 0o600))
+
+	symlinkRoot := filepath.Join(base, "symlink-workspace")
+	require.NoError(t, os.Symlink(workspace, symlinkRoot))
+
+	outside := t.TempDir()
+	outsideManifest := filepath.Join(outside, "victim.yaml")
+	require.NoError(t, os.WriteFile(outsideManifest, []byte("outside"), 0o600))
+
+	symlinkToOutside := filepath.Join(workspace, "symlink-outside.yaml")
+	require.NoError(t, os.Symlink(outsideManifest, symlinkToOutside))
+
+	t.Run("absolute symlink root", func(t *testing.T) {
+		root, err := os.OpenRoot(symlinkRoot)
+		require.NoError(t, err)
+		defer root.Close()
+		h := &FixHandler{sourceRoot: root}
+
+		// In-root manifest is readable via real path
+		content, err := h.GetFileString(manifest)
+		require.NoError(t, err)
+		assert.Equal(t, "inside", content)
+
+		// In-root manifest is readable via symlink path
+		contentSymlink, err := h.GetFileString(filepath.Join(symlinkRoot, "deploy.yaml"))
+		require.NoError(t, err)
+		assert.Equal(t, "inside", contentSymlink)
+
+		// Access outside root is rejected
+		_, err = h.GetFileString(outsideManifest)
+		require.Error(t, err, "accessing a path outside the opened root must be rejected")
+		assert.Contains(t, err.Error(), "outside the opened source root")
+
+		// In-root symlink pointing outside is rejected
+		_, err = h.GetFileString(symlinkToOutside)
+		require.Error(t, err, "symlink pointing outside the root must be rejected")
+		assert.Contains(t, err.Error(), "outside the opened source root")
+	})
+
+	t.Run("relative symlink root", func(t *testing.T) {
+		t.Chdir(base)
+		root, err := os.OpenRoot("symlink-workspace")
+		require.NoError(t, err)
+		defer root.Close()
+		h := &FixHandler{sourceRoot: root}
+
+		// In-root manifest is readable via real path
+		content, err := h.GetFileString(manifest)
+		require.NoError(t, err)
+		assert.Equal(t, "inside", content)
+
+		// In-root manifest is readable via relative symlink path
+		contentSymlink, err := h.GetFileString(filepath.Join("symlink-workspace", "deploy.yaml"))
+		require.NoError(t, err)
+		assert.Equal(t, "inside", contentSymlink)
+
+		// Access outside root is rejected
+		_, err = h.GetFileString(outsideManifest)
+		require.Error(t, err, "accessing a path outside the opened root must be rejected")
+		assert.Contains(t, err.Error(), "outside the opened source root")
+
+		// In-root symlink pointing outside is rejected
+		_, err = h.GetFileString(symlinkToOutside)
+		require.Error(t, err, "symlink pointing outside the root must be rejected")
+		assert.Contains(t, err.Error(), "outside the opened source root")
+	})
+}

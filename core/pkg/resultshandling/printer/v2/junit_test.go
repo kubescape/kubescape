@@ -1531,6 +1531,38 @@ func TestJunitActionPrintNilReport(t *testing.T) {
 	})
 }
 
+func TestJunitActionPrint_NilReport_FallbackToImageScan(t *testing.T) {
+	jp := NewJunitPrinter(false)
+	tmp, err := os.CreateTemp(t.TempDir(), "junit-image-fallback-*.xml")
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_ = tmp.Close()
+	})
+	jp.writer = tmp
+
+	session := &cautils.OPASessionObj{Report: nil}
+	imageScanData := []cautils.ImageScanData{buildSeverityExceptionImageScanData()}
+
+	require.NoError(t, jp.ActionPrint(context.Background(), session, imageScanData))
+	require.NoError(t, tmp.Close())
+
+	raw, err := os.ReadFile(tmp.Name())
+	require.NoError(t, err)
+
+	var got JUnitTestSuites
+	require.NoError(t, xml.Unmarshal(raw, &got))
+	assert.Equal(t, "Kubescape Image Scanning", got.Name)
+	require.Len(t, got.Suites, 1)
+	assert.Equal(t, "test-image:latest", got.Suites[0].Name)
+	assert.Greater(t, len(got.Suites[0].TestCases), 0)
+
+	var caseNames []string
+	for _, tc := range got.Suites[0].TestCases {
+		caseNames = append(caseNames, tc.Name)
+	}
+	assert.Contains(t, caseNames, "CVE-KEPT (pkg-CVE-KEPT)")
+}
+
 func TestJunitActionPrintMissingResourceNoPanic(t *testing.T) {
 	session := cautils.NewOPASessionObjMock()
 

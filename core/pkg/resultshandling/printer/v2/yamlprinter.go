@@ -53,10 +53,12 @@ func (yp *YamlPrinter) Score(score float32) {
 func (yp *YamlPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
 	var err error
 
-	if opaSessionObj != nil {
+	if opaSessionObj != nil && opaSessionObj.Report != nil {
 		err = printConfigurationsScanningYaml(opaSessionObj, imageScanData, yp)
 	} else if len(imageScanData) > 0 {
 		err = printImageScanningYaml(imageScanData, yp)
+	} else if opaSessionObj != nil {
+		err = printConfigurationsScanningYaml(opaSessionObj, imageScanData, yp)
 	} else {
 		err = fmt.Errorf("no data provided")
 	}

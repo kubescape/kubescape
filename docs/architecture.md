@@ -18,7 +18,10 @@ Both modes share core scanning logic but differ in how they collect data and rep
 The Kubescape CLI is a standalone binary that performs security assessments on-demand.
 
 <div align="center">
-    <img src="img/ks-cli-arch.png" width="600" alt="CLI Architecture Diagram">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="img/ks-cli-arch-dark.svg">
+      <img src="img/ks-cli-arch-light.svg" width="800" alt="Kubescape CLI architecture: inputs (cluster, manifests, Git, images) flow into the OPA, Grype/Syft and Copacetic engines, which produce console, JSON/SARIF, HTML/PDF and JUnit output">
+    </picture>
 </div>
 
 ### Core Components
@@ -154,7 +157,10 @@ For patching vulnerable images, Kubescape uses [Copacetic](https://github.com/pr
 The Kubescape Operator provides continuous security monitoring within the cluster.
 
 <div align="center">
-    <img src="img/ks-operator-arch.png" width="600" alt="Operator Architecture Diagram">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="img/ks-operator-arch-dark.svg">
+      <img src="img/ks-operator-arch-light.svg" width="800" alt="Kubescape operator architecture: the Operator triggers Node Agent, Kubevuln and Kubescape, which write results to Storage, read by Prometheus and Kubernetes API clients">
+    </picture>
 </div>
 
 ### Components
@@ -193,8 +199,8 @@ Kubescape uses Custom Resources to store scan results:
 | `VulnerabilityManifestSummary` | Aggregated vulnerability summaries |
 | `WorkloadConfigurationScan` | Misconfiguration scan results |
 | `WorkloadConfigurationScanSummary` | Aggregated configuration summaries |
-| `ApplicationProfile` | Runtime behavior profiles |
-| `NetworkNeighborhood` | Observed network connections |
+| `ContainerProfile` | Observed container runtime behavior (processes, files, network) |
+| `GeneratedNetworkPolicy` | Network policies generated from observed traffic |
 
 #### 5. Node Agent (Runtime Security)
 
