@@ -427,6 +427,50 @@ spec:
 	assert.NotContains(t, output, "stale-all-yaml", "source all.yaml must NOT overwrite Helm stdin")
 }
 
+// renderer.bat runs with delayed expansion, where ! and ^ in a value can be taken
+// as syntax, and passes paths to PowerShell, where [ ] are wildcards. A kustomize
+// directory whose name has any of them, legal on Windows, must still build with
+// its patches. A stand-in kustomize prints the workspace it was given.
+func TestPostRenderer_WindowsSpecialCharacterDirectories(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("renderer.bat runs on Windows only")
+	}
+	bin := t.TempDir()
+	fakeKustomize := "@echo off\r\ntype \"%~2\\kustomization.yaml\"\r\ndir /b \"%~2\"\r\n"
+	require.NoError(t, os.WriteFile(filepath.Join(bin, "kustomize.bat"), []byte(fakeKustomize), 0o600))
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	for _, name := range []string{"plain", "with space", "pct%dir", "amp&dir", "bang!dir", "caret^dir", "[br]dir", "mix!^%[x]dir"} {
+		t.Run(name, func(t *testing.T) {
+			// Only the kustomize directory gets the name. t.TempDir would put it in the
+			// path of renderer.bat as well, which cmd cannot start from such a path.
+			base, err := os.MkdirTemp("", "kubescape-renderer")
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = os.RemoveAll(base) })
+			kustDir := filepath.Join(base, name)
+			require.NoError(t, os.MkdirAll(kustDir, 0o755))
+			kustomization := "apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nresources:\n  - base.yaml\npatches:\n  - path: p0.yaml\n"
+			require.NoError(t, os.WriteFile(filepath.Join(kustDir, "kustomization.yaml"), []byte(kustomization), 0o600))
+			require.NoError(t, os.WriteFile(filepath.Join(kustDir, "p0.yaml"), []byte("x: 1\n"), 0o600))
+			outDir := filepath.Join(filepath.Dir(kustDir), "out")
+			require.NoError(t, EmitPostRenderer(kustDir, outDir))
+
+			batPath := filepath.Join(outDir, "renderer.bat")
+			cmd := exec.Command(batPath)
+			cmd.Stdin = strings.NewReader("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: a\n")
+			output, err := cmd.CombinedOutput()
+			require.NoError(t, err, "%s", output)
+
+			var copied bool
+			for _, line := range strings.Split(string(output), "\n") {
+				copied = copied || strings.TrimSpace(line) == "p0.yaml"
+			}
+			assert.Contains(t, string(output), "patches:", "the patches were not taken from %s", kustDir)
+			assert.True(t, copied, "p0.yaml was not copied from %s:\n%s", kustDir, output)
+		})
+	}
+}
+
 func TestPostRenderer_WindowsExecution(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		t.Skip("Skipping Windows batch execution test on non-Windows")
