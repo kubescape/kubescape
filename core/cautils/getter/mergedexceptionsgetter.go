@@ -288,8 +288,11 @@ func (m *scopeMatcher) covers(primary, crd string) bool {
 		return true
 	}
 	// Matching the text of a secondary pattern does not cover its alternatives.
-	// Compare against a concrete value only when the secondary scope is literal.
-	if regexp.QuoteMeta(crd) != crd {
+	// Compare against a concrete value only when the secondary scope is literal. A
+	// dot is taken as literal: framework names have them (cis-v1.10.0,
+	// cis-eks-t1.2.0), and a name that only had dots to tell it from a pattern
+	// could never be covered, not even by the same name in another case.
+	if withoutDots := strings.ReplaceAll(crd, ".", ""); regexp.QuoteMeta(withoutDots) != withoutDots {
 		return false
 	}
 	return strings.EqualFold(primary, crd) || m.processor.RegexCompareControlID(primary, crd)
