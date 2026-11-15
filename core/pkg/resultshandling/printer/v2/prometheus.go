@@ -94,7 +94,9 @@ func (pp *PrometheusPrinter) generateImagePrometheusFormat(imageScanData []cauti
 func (pp *PrometheusPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
 	var metrics *Metrics
 
-	if opaSessionObj != nil {
+	hasPosture := opaSessionObj != nil && (opaSessionObj.Report != nil || len(opaSessionObj.ResourcesResult) > 0)
+
+	if hasPosture {
 		var summaryDetails *reportsummary.SummaryDetails
 		if opaSessionObj.Report != nil {
 			summaryDetails = &opaSessionObj.Report.SummaryDetails
