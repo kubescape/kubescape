@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -500,6 +501,277 @@ func TestFileWatcherOnASingleFile(t *testing.T) {
 
 		write(t, file, "kind: Pod\nmetadata:\n  name: x\n")
 		rec.waitFor(t, file, is(file))
+	})
+}
+
+// The watcher registers new directories (fsnotify Add and Remove) from the
+// goroutine that reads fsnotify's Events. On Windows Add and Remove wait for
+// fsnotify's reader thread, which blocks delivering events once the Events
+// buffer (50) is full, so a burst of events while a directory is registered
+// must not leave each waiting on the other: Close would never return.
+func TestFileWatcherSurvivesAnEventBurstWhileRegisteringDirectories(t *testing.T) {
+	root := t.TempDir()
+	w, err := newFileWatcher(root, FileWatcherOptions{})
+	require.NoError(t, err)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	w.start(ctx)
+
+	stop := make(chan struct{})
+	burst := make(chan struct{})
+	go func() {
+		defer close(burst)
+		for i := 0; ; i++ {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			dir := filepath.Join(root, fmt.Sprintf("d%03d", i%200))
+			_ = os.MkdirAll(dir, 0o755)
+			for j := 0; j < 5; j++ {
+				_ = os.WriteFile(filepath.Join(dir, fmt.Sprintf("f%d.yaml", j)), []byte("kind: Pod"), 0o600)
+			}
+		}
+	}()
+	time.Sleep(time.Second)
+	close(stop)
+	<-burst
+
+	closed := make(chan struct{})
+	go func() {
+		_ = w.Close()
+		close(closed)
+	}()
+	select {
+	case <-closed:
+	case <-time.After(10 * time.Second):
+		t.Fatal("Close did not return: the watcher's goroutine is stuck")
+	}
+}
+
+// Close while a burst is still going must not hang either: the pump keeps
+// draining fsnotify until the backend is closed, so a run that is in Add or
+// Remove when the context is cancelled can still get out.
+func TestFileWatcherClosesDuringAnEventBurst(t *testing.T) {
+	root := t.TempDir()
+	w, err := newFileWatcher(root, FileWatcherOptions{})
+	require.NoError(t, err)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	w.start(ctx)
+
+	stop := make(chan struct{})
+	burst := make(chan struct{})
+	go func() {
+		defer close(burst)
+		for i := 0; ; i++ {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			dir := filepath.Join(root, fmt.Sprintf("d%03d", i%200))
+			_ = os.MkdirAll(dir, 0o755)
+			for j := 0; j < 5; j++ {
+				_ = os.WriteFile(filepath.Join(dir, fmt.Sprintf("f%d.yaml", j)), []byte("kind: Pod"), 0o600)
+			}
+		}
+	}()
+	defer func() {
+		close(stop)
+		<-burst
+	}()
+	time.Sleep(300 * time.Millisecond)
+
+	closed := make(chan struct{})
+	go func() {
+		_ = w.Close()
+		close(closed)
+	}()
+	select {
+	case <-closed:
+	case <-time.After(10 * time.Second):
+		t.Fatal("Close did not return while events were still arriving")
+	}
+}
+
+// pump outlives the watcher's context: when Close cancels it, run may still be
+// in the backend's Add or Remove, which on Windows needs events drained to
+// return. pump stops only once the backend is closed, which run does on its
+// way out.
+func TestFileWatcherPumpDrainsUntilTheBackendCloses(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	w, err := newFileWatcher(root, FileWatcherOptions{}) // only pump runs: the test drives it
+	require.NoError(t, err)
+	go w.pump()
+
+	// events that arrive after the watcher's context ended are still drained
+	write(t, filepath.Join(root, "a.yaml"), "kind: Pod")
+	require.Eventually(t, func() bool {
+		w.qmu.Lock()
+		defer w.qmu.Unlock()
+		return len(w.queue) > 0
+	}, 5*time.Second, 10*time.Millisecond, "pump stopped draining the backend")
+	select {
+	case <-w.pumped:
+		t.Fatal("pump stopped before the backend was closed")
+	default:
+	}
+
+	require.NoError(t, w.fs.Close())
+	select {
+	case <-w.pumped:
+	case <-time.After(5 * time.Second):
+		t.Fatal("pump did not stop once the backend was closed")
+	}
+}
+
+// The queue never blocks pump and never grows past maxQueued: beyond it events
+// and errors are dropped and the overflow is recorded, while the close of a
+// backend channel is always kept.
+func TestFileWatcherQueueDropsPastItsCap(t *testing.T) {
+	t.Parallel()
+	w := &FileWatcher{maxQueued: 2, queued: make(chan struct{}, 1)}
+	for i := 0; i < 5; i++ {
+		w.enqueue(backendItem{event: fsnotify.Event{Name: fmt.Sprintf("f%d.yaml", i), Op: fsnotify.Write}})
+	}
+	w.enqueue(backendItem{err: errors.New("read failed")})
+	w.enqueue(backendItem{closed: "event"})
+
+	items, overflowed := w.takeQueue()
+	assert.True(t, overflowed)
+	require.Len(t, items, 3)
+	assert.Equal(t, "f0.yaml", items[0].event.Name)
+	assert.Equal(t, "f1.yaml", items[1].event.Name)
+	assert.Equal(t, "event", items[2].closed, "the close of a channel is never dropped")
+
+	items, overflowed = w.takeQueue()
+	assert.Empty(t, items)
+	assert.False(t, overflowed, "taking the queue clears the overflow")
+}
+
+// Dropped deliveries are handled like the backend's own overflow: what they
+// would have shown is found by reconciling, and a change is signalled.
+func TestFileWatcherReconcilesWhenTheQueueOverflowed(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	w, err := newFileWatcher(root, FileWatcherOptions{}) // no goroutine runs: the test drives it
+	require.NoError(t, err)
+	defer w.fs.Close()
+	w.maxQueued = 1
+
+	// a directory made while its events were dropped
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "late"), 0o750))
+	w.enqueue(backendItem{event: fsnotify.Event{Name: filepath.Join(root, "a.txt"), Op: fsnotify.Write}})
+	w.enqueue(backendItem{event: fsnotify.Event{Name: filepath.Join(root, "late"), Op: fsnotify.Create}})
+	require.Empty(t, w.changes)
+
+	require.NoError(t, w.drainQueue(context.Background()))
+	assert.Len(t, w.changes, 1, "dropped deliveries signal a change")
+	assert.Contains(t, w.dirs, filepath.Join(root, "late"), "a directory whose events were dropped is watched")
+}
+
+// For a single file, reconciling after dropped deliveries checks its directory:
+// the directory's removal may have been dropped, and the backend's watch went
+// with the directory.
+func TestFileWatcherReconcilesASingleFilesDirectory(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a directory that was replaced is watched again", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		file := filepath.Join(dir, "app.yaml")
+		write(t, file, "kind: Pod\n")
+		w, err := newFileWatcher(file, FileWatcherOptions{}) // no goroutine runs: the test drives it
+		require.NoError(t, err)
+		defer w.fs.Close()
+		w.maxQueued = 0 // every delivery is dropped
+
+		// The backend lost the directory's watch, and the removal that said so
+		// was dropped.
+		require.NoError(t, w.fs.Remove(w.dir))
+		w.enqueue(backendItem{event: fsnotify.Event{Name: w.dir, Op: fsnotify.Remove}})
+
+		require.NoError(t, w.drainQueue(context.Background()))
+		assert.Contains(t, w.fs.WatchList(), w.dir, "the file's directory is no longer watched")
+		assert.Len(t, w.changes, 1, "dropped deliveries signal a change")
+	})
+
+	t.Run("a directory that is gone ends the watch", func(t *testing.T) {
+		t.Parallel()
+		dir := filepath.Join(t.TempDir(), "parent")
+		file := filepath.Join(dir, "app.yaml")
+		write(t, file, "kind: Pod\n")
+		w, err := newFileWatcher(file, FileWatcherOptions{})
+		require.NoError(t, err)
+		defer w.fs.Close()
+		w.maxQueued = 0
+
+		require.NoError(t, os.RemoveAll(dir))
+		w.enqueue(backendItem{event: fsnotify.Event{Name: w.dir, Op: fsnotify.Remove}})
+
+		err = w.drainQueue(context.Background())
+		require.Error(t, err, "the watch carried on without its directory")
+		assert.Contains(t, err.Error(), "removed or renamed")
+		assert.Len(t, w.changes, 1, "the loss is signalled")
+	})
+
+	// On kqueue, Add lists the directory and fails with fs.ErrNotExist when an
+	// entry of it goes between the listing and its stat. siblingGone fails the
+	// way that does, failures times, and then adds for real.
+	siblingGone := func(w *FileWatcher, failures int) *int {
+		calls := 0
+		w.addWatch = func(path string) error {
+			calls++
+			if calls <= failures {
+				sibling := filepath.Join(path, "sibling.yaml")
+				return fmt.Errorf("%q: %w", sibling, &fs.PathError{Op: "lstat", Path: sibling, Err: fs.ErrNotExist})
+			}
+			return w.fs.Add(path)
+		}
+		return &calls
+	}
+
+	t.Run("a sibling that goes while the directory is watched again does not end it", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		file := filepath.Join(dir, "app.yaml")
+		write(t, file, "kind: Pod\n")
+		w, err := newFileWatcher(file, FileWatcherOptions{})
+		require.NoError(t, err)
+		defer w.fs.Close()
+		w.maxQueued = 0
+		calls := siblingGone(w, 2)
+
+		w.enqueue(backendItem{event: fsnotify.Event{Name: filepath.Join(dir, "sibling.yaml"), Op: fsnotify.Remove}})
+
+		require.NoError(t, w.drainQueue(context.Background()), "the watch ended though its directory is there")
+		assert.Equal(t, 3, *calls, "the Add is tried again while the directory is there")
+		assert.Contains(t, w.fs.WatchList(), w.dir)
+		assert.Len(t, w.changes, 1, "dropped deliveries signal a change")
+	})
+
+	t.Run("a directory that is there but cannot be watched again ends it with that failure", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		file := filepath.Join(dir, "app.yaml")
+		write(t, file, "kind: Pod\n")
+		w, err := newFileWatcher(file, FileWatcherOptions{})
+		require.NoError(t, err)
+		defer w.fs.Close()
+		w.maxQueued = 0
+		calls := siblingGone(w, rewatchAttempts)
+
+		w.enqueue(backendItem{event: fsnotify.Event{Name: filepath.Join(dir, "sibling.yaml"), Op: fsnotify.Remove}})
+
+		err = w.drainQueue(context.Background())
+		require.Error(t, err)
+		assert.Equal(t, rewatchAttempts, *calls, "the attempts are bounded")
+		assert.Contains(t, err.Error(), "could not be watched again")
+		assert.NotContains(t, err.Error(), "removed or renamed", "the directory is still there")
+		assert.Len(t, w.changes, 1)
 	})
 }
 
