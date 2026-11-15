@@ -72,6 +72,33 @@ func TestGetInterfaces_StopsWhenTheDeadlineHasAlreadyPassed(t *testing.T) {
 	assert.Empty(t, clientset.Actions(), "the version check takes no context, so it must not run once the deadline has passed")
 }
 
+// TestGetInterfaces_StopsWhenDeadlineExpiresDuringClusterConnection pins that an in-flight cluster connection
+// stops promptly when the context deadline expires, without waiting for the slow connection to finish.
+func TestGetInterfaces_StopsWhenDeadlineExpiresDuringClusterConnection(t *testing.T) {
+	orig := kubernetesAPIFunc
+	connected := make(chan struct{})
+	kubernetesAPIFunc = func() *k8sinterface.KubernetesApi {
+		// Simulate a hanging / slow cluster connection
+		<-connected
+		return nil
+	}
+	t.Cleanup(func() {
+		close(connected)
+		kubernetesAPIFunc = orig
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	start := time.Now()
+	_, err := getInterfaces(ctx, &cautils.ScanInfo{}, nil)
+	elapsed := time.Since(start)
+
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	assert.ErrorContains(t, err, "scan stopped while connecting to the cluster")
+	assert.Less(t, elapsed, 1*time.Second, "must abort promptly when deadline expires during connection")
+}
+
 // TestGetInterfaces_StopsWhenTheDeadlinePassesDuringTenantSetup pins that setup stops before the host sensor and cloud provider lookups.
 func TestGetInterfaces_StopsWhenTheDeadlinePassesDuringTenantSetup(t *testing.T) {
 	clientset := fakeCluster(t)
