@@ -231,6 +231,12 @@ var replaceFunc = function.New(&function.Spec{
 type terraformVariable struct {
 	ty       cty.Type
 	defaults *typeexpr.Defaults
+	// nonNullable is set by nullable = false. Terraform then replaces a null
+	// value with the default, and rejects it when there is none
+	// (PrepareFinalInputVariableValue).
+	nonNullable bool
+	// defaultVal is the converted default, cty.NilVal without one.
+	defaultVal cty.Value
 }
 
 func newTerraformVariable(typeAttr *hcl.Attribute) terraformVariable {
@@ -310,6 +316,7 @@ func terraformVarFiles(dir string) []string {
 
 func applyTerraformVarFiles(parser *hclparse.Parser, dir, workspaceDir string, declared map[string]terraformVariable, values map[string]cty.Value) []error {
 	var errs []error
+	setBy := map[string]string{} // variable → the file whose value is in effect
 	for _, f := range terraformVarFiles(dir) {
 		if workspaceDir != "" && !pathcontainment.IsPathContained(workspaceDir, f) {
 			logger.L().Warning("Skipping Terraform variable file outside workspace root", helpers.String("path", f), helpers.String("workspace", workspaceDir))
@@ -352,7 +359,29 @@ func applyTerraformVarFiles(parser *hclparse.Parser, dir, workspaceDir string, d
 				continue
 			}
 			values[name] = val
+			setBy[name] = f
 		}
+	}
+	// nullable = false applies to the value in effect, after later files have
+	// overridden earlier ones, as in Terraform (PrepareFinalInputVariableValue):
+	// a null gives the default, and is rejected when there is none. A rejected
+	// variable is left unset rather than keeping a value the null overrode.
+	names := make([]string, 0, len(setBy))
+	for name := range setBy {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		variable := declared[name]
+		if !values[name].IsNull() || !variable.nonNullable {
+			continue
+		}
+		if variable.defaultVal != cty.NilVal {
+			values[name] = variable.defaultVal
+			continue
+		}
+		delete(values, name)
+		errs = append(errs, fmt.Errorf("%s: variable %q: the variable is not nullable and has no default, so it may not be set to null", setBy[name], name))
 	}
 	return errs
 }
