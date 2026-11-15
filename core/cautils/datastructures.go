@@ -115,6 +115,7 @@ type OPASessionObj struct {
 	ListedGVRs            map[string]bool                    // queried <apigroup/apiversion/resource> -> listed at least once without a rule field selector
 	NamespaceSummaries    NamespaceSummaries                 // per-namespace compliance rollup, see BuildNamespaceSummaries
 	PolicyDegradations    []PolicyDegradation                // policy inputs (control configurations, exceptions) served from a fallback
+	ZeroScoredControls    map[string]struct{}                // controls the compliance score counts as 0 (timed out or failed); set by the OPA processor, kept by any recompute
 	SkippedManifests      []SkippedManifest                  // manifest files skipped during loading (invalid YAML, missing kind, etc.)
 	SessionID             string                             // SessionID
 	Policies              []reporthandling.Framework         // list of frameworks to scan
