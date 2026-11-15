@@ -480,6 +480,31 @@ func TestHtmlPrinter_ActionPrint_NilReport(t *testing.T) {
 	})
 }
 
+func TestHtmlPrinter_ActionPrint_NilReport_FallbackToImageScan(t *testing.T) {
+	ctx := context.Background()
+	out := filepath.Join(t.TempDir(), "image-fallback.html")
+
+	hp := NewHtmlPrinter(false)
+	require.NoError(t, hp.SetWriter(ctx, out))
+	t.Cleanup(func() { _ = hp.CloseWriter() })
+
+	session := &cautils.OPASessionObj{Report: nil}
+	imageScanData := []cautils.ImageScanData{buildSeverityExceptionImageScanData()}
+
+	require.NoError(t, hp.ActionPrint(ctx, session, imageScanData))
+	require.NoError(t, hp.CloseWriter())
+
+	raw, err := os.ReadFile(out)
+	require.NoError(t, err)
+	htmlContent := string(raw)
+	assert.NotEmpty(t, htmlContent)
+	assert.Contains(t, htmlContent, "Images scanned:")
+	assert.Contains(t, htmlContent, "test-image:latest")
+	assert.Contains(t, htmlContent, "Vulnerabilities:")
+	assert.Contains(t, htmlContent, "CVE-KEPT")
+	assert.NotContains(t, htmlContent, "Summary:")
+}
+
 // TestHtmlPrinter_ActionPrint_ValidHTMLTableStructure ensures that rendered HTML reports
 // have balanced table tags (<tbody> matching </tbody>, <table> matching </table>, <tr> matching </tr>)
 // and contain no duplicate </tr> tags or stray </div> tags.
