@@ -493,7 +493,7 @@ func TestDiff_UnreadableReportKeepsLoaderError(t *testing.T) {
 		require.Error(t, err)
 		assert.NotErrorIs(t, err, diff.ErrMixedReportKinds)
 		assert.Contains(t, err.Error(), "loading base report")
-		assert.Contains(t, err.Error(), "no such file or directory")
+		assert.ErrorIs(t, err, os.ErrNotExist)
 	})
 
 	t.Run("missing head file", func(t *testing.T) {
@@ -505,7 +505,7 @@ func TestDiff_UnreadableReportKeepsLoaderError(t *testing.T) {
 		require.Error(t, err)
 		assert.NotErrorIs(t, err, diff.ErrMixedReportKinds)
 		assert.Contains(t, err.Error(), "loading head report")
-		assert.Contains(t, err.Error(), "no such file or directory")
+		assert.ErrorIs(t, err, os.ErrNotExist)
 	})
 
 	t.Run("truncated base file", func(t *testing.T) {

@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -479,9 +480,11 @@ func TestCreateIntermediateScanFile_LocationAndPermissions(t *testing.T) {
 	assert.True(t, strings.HasSuffix(base, ".json"), "expected .json suffix in %q", base)
 
 	// Verify permissions are 0600 (owner read-write only)
-	info, err := os.Stat(path)
-	require.NoError(t, err)
-	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm(), "file permissions must be 0600")
+	if runtime.GOOS != "windows" {
+		info, err := os.Stat(path)
+		require.NoError(t, err)
+		assert.Equal(t, os.FileMode(0o600), info.Mode().Perm(), "file permissions must be 0600")
+	}
 }
 
 // TestCreateIntermediateScanFile_LeavesUserWorkingDirectoryUntouched guards against
@@ -528,6 +531,9 @@ func TestCreateIntermediateScanFile_LeavesUserWorkingDirectoryUntouched(t *testi
 // TestCreateIntermediateScanFile_WorksInReadOnlyWorkingDirectory verifies that
 // patch intermediate file creation succeeds even if the current working directory is read-only.
 func TestCreateIntermediateScanFile_WorksInReadOnlyWorkingDirectory(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping read-only directory test on Windows")
+	}
 	if os.Geteuid() == 0 {
 		t.Skip("skipping read-only directory test when running as root")
 	}
