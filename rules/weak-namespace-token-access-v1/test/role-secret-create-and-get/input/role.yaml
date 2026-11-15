@@ -1,0 +1,11 @@
+# create alongside get yields a usable token: create the token secret and read the minted token back.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: secret-creator-and-reader
+  namespace: build
+rules:
+- apiGroups: [""]
+  resources: ["secrets"]
+  verbs: ["create", "get"]
+
