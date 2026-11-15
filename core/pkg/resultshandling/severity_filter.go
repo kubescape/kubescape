@@ -94,7 +94,9 @@ func recomputeSummaryDetails(sessionObj *cautils.OPASessionObj) {
 	var complianceSum float32
 	count := 0
 	for _, ctrl := range summary.Controls {
-		complianceSum += ctrl.GetComplianceScore()
+		if score := ctrl.GetComplianceScore(); score > 0 {
+			complianceSum += score
+		}
 		count++
 	}
 	if count > 0 {
@@ -108,7 +110,9 @@ func recomputeSummaryDetails(sessionObj *cautils.OPASessionObj) {
 		fCount := 0
 		for id, ctrl := range summary.Frameworks[i].Controls {
 			if _, ok := summary.Controls[id]; ok {
-				fSum += ctrl.GetComplianceScore()
+				if score := ctrl.GetComplianceScore(); score > 0 {
+					fSum += score
+				}
 				fCount++
 			}
 		}
