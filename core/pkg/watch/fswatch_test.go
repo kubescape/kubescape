@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -715,6 +716,62 @@ func TestFileWatcherReconcilesASingleFilesDirectory(t *testing.T) {
 		require.Error(t, err, "the watch carried on without its directory")
 		assert.Contains(t, err.Error(), "removed or renamed")
 		assert.Len(t, w.changes, 1, "the loss is signalled")
+	})
+
+	// On kqueue, Add lists the directory and fails with fs.ErrNotExist when an
+	// entry of it goes between the listing and its stat. siblingGone fails the
+	// way that does, failures times, and then adds for real.
+	siblingGone := func(w *FileWatcher, failures int) *int {
+		calls := 0
+		w.addWatch = func(path string) error {
+			calls++
+			if calls <= failures {
+				sibling := filepath.Join(path, "sibling.yaml")
+				return fmt.Errorf("%q: %w", sibling, &fs.PathError{Op: "lstat", Path: sibling, Err: fs.ErrNotExist})
+			}
+			return w.fs.Add(path)
+		}
+		return &calls
+	}
+
+	t.Run("a sibling that goes while the directory is watched again does not end it", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		file := filepath.Join(dir, "app.yaml")
+		write(t, file, "kind: Pod\n")
+		w, err := newFileWatcher(file, FileWatcherOptions{})
+		require.NoError(t, err)
+		defer w.fs.Close()
+		w.maxQueued = 0
+		calls := siblingGone(w, 2)
+
+		w.enqueue(backendItem{event: fsnotify.Event{Name: filepath.Join(dir, "sibling.yaml"), Op: fsnotify.Remove}})
+
+		require.NoError(t, w.drainQueue(context.Background()), "the watch ended though its directory is there")
+		assert.Equal(t, 3, *calls, "the Add is tried again while the directory is there")
+		assert.Contains(t, w.fs.WatchList(), w.dir)
+		assert.Len(t, w.changes, 1, "dropped deliveries signal a change")
+	})
+
+	t.Run("a directory that is there but cannot be watched again ends it with that failure", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		file := filepath.Join(dir, "app.yaml")
+		write(t, file, "kind: Pod\n")
+		w, err := newFileWatcher(file, FileWatcherOptions{})
+		require.NoError(t, err)
+		defer w.fs.Close()
+		w.maxQueued = 0
+		calls := siblingGone(w, rewatchAttempts)
+
+		w.enqueue(backendItem{event: fsnotify.Event{Name: filepath.Join(dir, "sibling.yaml"), Op: fsnotify.Remove}})
+
+		err = w.drainQueue(context.Background())
+		require.Error(t, err)
+		assert.Equal(t, rewatchAttempts, *calls, "the attempts are bounded")
+		assert.Contains(t, err.Error(), "could not be watched again")
+		assert.NotContains(t, err.Error(), "removed or renamed", "the directory is still there")
+		assert.Len(t, w.changes, 1)
 	})
 }
 

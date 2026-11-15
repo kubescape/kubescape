@@ -124,6 +124,10 @@ type FileWatcher struct {
 	// signalHook, when set by a test, is called with the path behind each signal
 	// before signals are coalesced.
 	signalHook func(path string)
+
+	// addWatch is the backend's Add as rewatchDir calls it. A test replaces it
+	// to make it fail the way one backend's does.
+	addWatch func(path string) error
 }
 
 // NewFileWatcher starts watching root, a file or a directory, until ctx is done.
@@ -167,6 +171,7 @@ func newFileWatcher(root string, opts FileWatcherOptions) (*FileWatcher, error) 
 		queued:    make(chan struct{}, 1),
 		pumped:    make(chan struct{}),
 		maxQueued: defaultMaxQueued,
+		addWatch:  backend.Add,
 	}
 
 	if info.IsDir() {
@@ -440,13 +445,9 @@ func (w *FileWatcher) reconcile() error {
 		// the backend drops its watch with the directory, so it is watched again
 		// from a clean state, as every directory is below. If it cannot be, the
 		// watch ends, as when the removal is seen.
-		_ = w.fs.Remove(w.dir) // absent is fine
-		if err := w.fs.Add(w.dir); err != nil {
+		if err := w.rewatchDir(); err != nil {
 			w.notify(w.file)
-			if errors.Is(err, fs.ErrNotExist) {
-				return fmt.Errorf("watch %q: its directory was removed or renamed", w.file)
-			}
-			return limitError(w.dir, err)
+			return err
 		}
 	} else {
 		live := make(map[string]struct{})
@@ -471,6 +472,34 @@ func (w *FileWatcher) reconcile() error {
 	}
 	w.notify(w.root)
 	return nil
+}
+
+// rewatchAttempts is how many times rewatchDir adds the directory of a single
+// file while it is still there.
+const rewatchAttempts = 5
+
+// rewatchDir watches the single file's directory again from a clean state.
+// fs.ErrNotExist from the backend's Add does not always mean the directory is
+// gone: on kqueue, Add lists the directory and fails with it when an entry goes
+// between the listing and its stat. So it ends the watch, as a seen removal
+// does, only once the directory itself is gone; while the directory is there,
+// the Add is tried again, a bounded number of times. Any other failure ends the
+// watch at once.
+func (w *FileWatcher) rewatchDir() error {
+	var err error
+	for attempt := 0; attempt < rewatchAttempts; attempt++ {
+		_ = w.fs.Remove(w.dir) // absent is fine
+		if err = w.addWatch(w.dir); err == nil {
+			return nil
+		}
+		if !errors.Is(err, fs.ErrNotExist) {
+			return limitError(w.dir, err)
+		}
+		if _, statErr := os.Stat(w.dir); errors.Is(statErr, fs.ErrNotExist) {
+			return fmt.Errorf("watch %q: its directory was removed or renamed", w.file)
+		}
+	}
+	return fmt.Errorf("watch %q: its directory could not be watched again: %w", w.file, err)
 }
 
 // settled registers the directories that appeared since the backend last
