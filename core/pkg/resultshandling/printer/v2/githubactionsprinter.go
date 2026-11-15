@@ -87,6 +87,9 @@ func (gp *GitHubActionsPrinter) ActionPrint(ctx context.Context, opaSessionObj *
 	if opaSessionObj == nil || opaSessionObj.Report == nil {
 		return fmt.Errorf("github-actions output is only supported for configuration scanning: image findings have no manifest location to annotate")
 	}
+	if len(imageScanData) > 0 {
+		return fmt.Errorf("github-actions cannot carry image vulnerabilities; use json or sarif for a combined scan with --scan-images")
+	}
 
 	annotations, belowThreshold := gp.collectAnnotations(ctx, opaSessionObj)
 
