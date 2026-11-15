@@ -196,8 +196,34 @@ func isLegacyIngressBackendPortField(path, name string) bool {
 	return true
 }
 
+func isIngressBackendServicePortNumberField(path, name string) bool {
+	if name != "number" {
+		return false
+	}
+	if !strings.HasSuffix(path, "backend.service.port") {
+		return false
+	}
+	if strings.Contains(path, "kubernetes_") && !strings.Contains(path, "kubernetes_ingress") {
+		return false
+	}
+	return true
+}
+
+func isBackendServicePortBlock(path, blockType string) bool {
+	if blockType != "port" {
+		return false
+	}
+	if !strings.HasSuffix(path, "backend.service") {
+		return false
+	}
+	if strings.Contains(path, "kubernetes_") && !strings.Contains(path, "kubernetes_ingress") {
+		return false
+	}
+	return true
+}
+
 func isConvertiblePortField(path, name string) bool {
-	return isNetworkPolicyPortField(path, name) || isLegacyIngressBackendPortField(path, name)
+	return isNetworkPolicyPortField(path, name) || isLegacyIngressBackendPortField(path, name) || isIngressBackendServicePortNumberField(path, name)
 }
 
 func attributeValueFor(path, name string, val interface{}) interface{} {
@@ -236,6 +262,10 @@ func hclBodyToMap(body *hclsyntax.Body, evalCtx *hcl.EvalContext, errs *[]error,
 
 	for _, blockType := range order {
 		blocks := grouped[blockType]
+		if isBackendServicePortBlock(path, blockType) {
+			out["port"] = hclBodyToMap(blocks[0].Body, evalCtx, errs, path+"."+blockType)
+			continue
+		}
 		field := fieldNameFor(blockType)
 
 		if len(blocks) > 1 || repeatableBlocks[blockType] {
@@ -247,6 +277,12 @@ func hclBodyToMap(body *hclsyntax.Body, evalCtx *hcl.EvalContext, errs *[]error,
 			continue
 		}
 		out[field] = hclBodyToMap(blocks[0].Body, evalCtx, errs, path+"."+blockType)
+	}
+
+	if strings.HasSuffix(path, ".path") && strings.HasPrefix(path, "kubernetes_ingress_v1") {
+		if pt, has := out["pathType"]; !has || pt == nil {
+			out["pathType"] = "ImplementationSpecific"
+		}
 	}
 
 	return out

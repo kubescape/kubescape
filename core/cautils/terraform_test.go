@@ -52,6 +52,70 @@ resource "kubernetes_pod_v1" "example" {
 	assert.Equal(t, "net.ipv4.ip_local_port_range", sysctls[0].(map[string]interface{})["name"])
 }
 
+func TestTerraformDirectory_GetWorkloads_NetworkPolicyAndIngress(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "main.tf")
+	require.NoError(t, os.WriteFile(path, []byte(`
+resource "kubernetes_network_policy_v1" "np" {
+  metadata {
+    name      = "test-np"
+    namespace = "default"
+  }
+  spec {
+    pod_selector {
+      match_labels = {
+        app = "backend"
+      }
+    }
+    policy_types = ["Ingress"]
+    ingress {
+      ports {
+        port     = 8080
+        protocol = "TCP"
+      }
+    }
+  }
+}
+
+resource "kubernetes_ingress_v1" "ing" {
+  metadata {
+    name      = "test-ing"
+    namespace = "default"
+  }
+  spec {
+    tls {
+      hosts = ["example.com"]
+    }
+    rule {
+      host = "example.com"
+      http {
+        path {
+          path      = "/api"
+          path_type = "Prefix"
+          backend {
+            service {
+              name = "backend-service"
+              port {
+                number = 8080
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+`), 0o600))
+
+	workloads, errs := NewTerraformDirectory(dir).GetWorkloads(dir)
+	require.Empty(t, errs)
+	require.Len(t, workloads[path], 2)
+
+	kinds := []string{workloads[path][0].GetKind(), workloads[path][1].GetKind()}
+	assert.Contains(t, kinds, "NetworkPolicy")
+	assert.Contains(t, kinds, "Ingress")
+}
+
 func TestTerraformDirectory_GetWorkloads(t *testing.T) {
 	td := NewTerraformDirectory("testdata/terraform")
 	workloads, errs := td.GetWorkloads("testdata/terraform")
