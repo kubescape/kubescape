@@ -103,6 +103,7 @@ var resourceMetaBlocks = map[string]bool{
 }
 
 var fieldInitialisms = map[string]string{
+	"api":  "API",
 	"id":   "ID",
 	"ip":   "IP",
 	"ipc":  "IPC",

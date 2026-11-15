@@ -42,6 +42,8 @@ func TestSnakeToCamel(t *testing.T) {
 		{"multi-word ip initialism", "load_balancer_ip", "loadBalancerIP"},
 		{"urls initialism", "non_resource_urls", "nonResourceURLs"},
 		{"id initialism", "volume_id", "volumeID"},
+		{"api initialism", "downward_api", "downwardAPI"},
+		{"api as first word stays lowercase", "api_groups", "apiGroups"},
 		{"initialism as first word stays lowercase", "ip_families", "ipFamilies"},
 		{"word containing an initialism is not changed", "pid_limit", "pidLimit"},
 	}
@@ -269,6 +271,49 @@ resource "kubernetes_pod_v1" "host" {
 	assert.Equal(t, true, spec["hostIPC"])
 	ports := spec["containers"].([]interface{})[0].(map[string]interface{})["ports"].([]interface{})
 	assert.Equal(t, "0.0.0.0", ports[0].(map[string]interface{})["hostIP"])
+}
+
+// A downward API volume is downwardAPI in the pod spec. Controls key on it: the
+// mount security rule exempts a mount of one as read-only by volume.downwardAPI,
+// so under another name the mount was reported as writable.
+func TestExtractTypedResourcesDownwardAPIVolume(t *testing.T) {
+	src := `
+resource "kubernetes_pod_v1" "info" {
+  spec {
+    container {
+      name  = "app"
+      image = "nginx"
+      volume_mount {
+        name       = "podinfo"
+        mount_path = "/etc/podinfo"
+      }
+    }
+    volume {
+      name = "podinfo"
+      downward_api {
+        items {
+          path = "labels"
+          field_ref {
+            field_path = "metadata.labels"
+          }
+        }
+      }
+    }
+  }
+}
+`
+	manifests, errs := extractTypedResources(parseTypedHCL(t, src), &hcl.EvalContext{})
+
+	require.Empty(t, errs)
+	require.Len(t, manifests, 1)
+	spec, ok := manifests[0]["spec"].(map[string]interface{})
+	require.True(t, ok)
+	volumes, ok := spec["volumes"].([]interface{})
+	require.True(t, ok)
+	require.Len(t, volumes, 1)
+	volume := volumes[0].(map[string]interface{})
+	assert.Contains(t, volume, "downwardAPI")
+	assert.NotContains(t, volume, "downwardApi")
 }
 
 func TestExtractTypedResourcesVersionedRBAC(t *testing.T) {
