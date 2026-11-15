@@ -1,0 +1,13 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: null-resourcenames-pod-creator-crb
+subjects:
+- kind: ServiceAccount
+  name: null-rn-pod-sa
+  namespace: ci
+roleRef:
+  kind: ClusterRole
+  name: null-resourcenames-pod-creator
+  apiGroup: rbac.authorization.k8s.io
+
