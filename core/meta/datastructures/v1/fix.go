@@ -2,6 +2,7 @@ package v1
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"strings"
 
@@ -179,6 +180,24 @@ func (f *FixInfo) ValidateVerify() error {
 	}
 	if f.OutputPatch != "" {
 		return errors.New("--verify cannot be combined with --output-patch: the manifests are not changed, so a rescan would find every finding as it was")
+	}
+	return nil
+}
+
+// ValidateControlSelection refuses empty or whitespace-only control identifiers in IncludeControls or SkipControls.
+func (f *FixInfo) ValidateControlSelection() error {
+	for _, selection := range []struct {
+		flag     string
+		controls []string
+	}{
+		{"--include-controls", f.IncludeControls},
+		{"--skip-controls", f.SkipControls},
+	} {
+		for _, control := range selection.controls {
+			if strings.TrimSpace(control) == "" {
+				return fmt.Errorf("%s contains an empty control identifier", selection.flag)
+			}
+		}
 	}
 	return nil
 }

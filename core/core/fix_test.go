@@ -593,6 +593,17 @@ func TestFix_EmptyReportFileRefused(t *testing.T) {
 	assert.EqualError(t, err, "uninitialized fix parameters")
 }
 
+func TestFix_ControlSelectionValidation(t *testing.T) {
+	ks := &Kubescape{Ctx: context.Background()}
+	err := ks.Fix(&metav1.FixInfo{ReportFile: "report.json", IncludeControls: []string{""}})
+	require.Error(t, err)
+	assert.EqualError(t, err, "--include-controls contains an empty control identifier")
+
+	err = ks.Fix(&metav1.FixInfo{ReportFile: "report.json", SkipControls: []string{"   "}})
+	require.Error(t, err)
+	assert.EqualError(t, err, "--skip-controls contains an empty control identifier")
+}
+
 func TestFix_BasePathValidation(t *testing.T) {
 	dir := t.TempDir()
 	reportPath := buildFixableReport(t, dir)

@@ -240,18 +240,5 @@ func validateOutputPatch(fixInfo *metav1.FixInfo, flagPassed bool) error {
 }
 
 func validateControlSelection(fixInfo *metav1.FixInfo) error {
-	for _, selection := range []struct {
-		flag     string
-		controls []string
-	}{
-		{"--include-controls", fixInfo.IncludeControls},
-		{"--skip-controls", fixInfo.SkipControls},
-	} {
-		for _, control := range selection.controls {
-			if strings.TrimSpace(control) == "" {
-				return fmt.Errorf("%s contains an empty control identifier", selection.flag)
-			}
-		}
-	}
-	return nil
+	return fixInfo.ValidateControlSelection()
 }
