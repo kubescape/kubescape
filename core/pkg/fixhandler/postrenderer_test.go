@@ -28,6 +28,24 @@ func TestPostRenderer_Validation(t *testing.T) {
 	err = EmitPostRenderer(tmp, "")
 	assert.Error(t, err, "Empty outputDir must return error")
 	assert.Contains(t, err.Error(), "output directory cannot be empty")
+
+	unsafePaths := []string{
+		"path\"with\"quotes",
+		"path\nwith\nnewline",
+		"path\rwith\rcarriage_return",
+		"path\x00with\x00null",
+		"path\x1bwith\x1bescape",
+	}
+
+	for _, unsafe := range unsafePaths {
+		err = EmitPostRenderer(unsafe, tmp)
+		assert.Error(t, err, "Unsafe kustomizeDir %q must return error", unsafe)
+		assert.Contains(t, err.Error(), "contains unsafe characters")
+
+		err = EmitPostRenderer(tmp, unsafe)
+		assert.Error(t, err, "Unsafe outputDir %q must return error", unsafe)
+		assert.Contains(t, err.Error(), "contains unsafe characters")
+	}
 }
 
 func TestPostRenderer_ScriptGenerationAndPermissions(t *testing.T) {
