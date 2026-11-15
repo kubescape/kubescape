@@ -1,0 +1,10 @@
+# A plain create needs no patch, so the finding stands on the create alone and
+# the patch the subject also holds elsewhere is not added as evidence.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: pv-create
+rules:
+- apiGroups: [""]
+  resources: ["persistentvolumes"]
+  verbs: ["create"]
