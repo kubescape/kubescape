@@ -423,7 +423,10 @@ Kubescape can run in two modes:
 The CLI is a standalone tool that scans clusters, files, and images on-demand.
 
 <div align="center">
-    <img src="docs/img/ks-cli-arch.png" width="600" alt="CLI Architecture">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="docs/img/ks-cli-arch-dark.svg">
+      <img src="docs/img/ks-cli-arch-light.svg" width="800" alt="Kubescape CLI architecture: inputs (cluster, manifests, Git, images) flow into the OPA, Grype/Syft and Copacetic engines, which produce console, JSON/SARIF, HTML/PDF and JUnit output">
+    </picture>
 </div>
 
 **Key Components:**
@@ -437,7 +440,10 @@ The CLI is a standalone tool that scans clusters, files, and images on-demand.
 For continuous monitoring, deploy the Kubescape operator via Helm.
 
 <div align="center">
-    <img src="docs/img/ks-operator-arch.png" width="600" alt="Operator Architecture">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="docs/img/ks-operator-arch-dark.svg">
+      <img src="docs/img/ks-operator-arch-light.svg" width="800" alt="Kubescape operator architecture: the Operator triggers Node Agent, Kubevuln and Kubescape, which write results to Storage, read by Prometheus and Kubernetes API clients">
+    </picture>
 </div>
 
 **Additional Capabilities:**
