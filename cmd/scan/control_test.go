@@ -123,3 +123,11 @@ func TestControlCmdHasCoverageFlag(t *testing.T) {
 	flag := controlCmd.InheritedFlags().Lookup("fail-coverage-below")
 	assert.NotNil(t, flag, "scan control should inherit --fail-coverage-below from scan persistent flags")
 }
+
+func TestGetControlCmd_NilKubescape(t *testing.T) {
+	scanInfo := cautils.ScanInfo{}
+	cmd := getControlCmd(nil, &scanInfo)
+	require.NotNil(t, cmd)
+	err := cmd.RunE(cmd, []string{"C-0001"})
+	require.EqualError(t, err, "uninitialized kubescape interface")
+}

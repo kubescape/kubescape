@@ -2,6 +2,7 @@ package scan
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/kubescape/backend/pkg/versioncheck"
@@ -51,6 +52,10 @@ func installTelemetry(cmd *cobra.Command, ks meta.IKubescape, scanInfo *cautils.
 
 func wrapWithTelemetry(run func(*cobra.Command, []string) error, ks meta.IKubescape, scanInfo *cautils.ScanInfo) func(*cobra.Command, []string) error {
 	return func(cmd *cobra.Command, args []string) (runErr error) {
+		if ks == nil {
+			return errors.New("uninitialized kubescape interface")
+		}
+
 		// The bare `scan` command delegates to the framework scan, so a wrapped
 		// command can invoke another. Only the outermost one owns the lifecycle.
 		if telemetry.Active() {

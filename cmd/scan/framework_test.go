@@ -164,3 +164,11 @@ func summarizeCustomRules(t *testing.T, dir string) *reportsummary.SummaryDetail
 
 	return summaryDetails
 }
+
+func TestGetFrameworkCmd_NilKubescape(t *testing.T) {
+	scanInfo := cautils.ScanInfo{}
+	cmd := getFrameworkCmd(nil, &scanInfo)
+	require.NotNil(t, cmd)
+	err := cmd.RunE(cmd, []string{"nsa"})
+	require.EqualError(t, err, "uninitialized kubescape interface")
+}

@@ -2019,3 +2019,37 @@ func TestGetScanCommand_GitCloneDepthReachesScanInfo(t *testing.T) {
 		})
 	}
 }
+
+func TestGetScanCommand_NilKubescape(t *testing.T) {
+	cmd := GetScanCommand(nil)
+	require.NotNil(t, cmd)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+	err := cmd.Execute()
+	require.EqualError(t, err, "uninitialized kubescape interface")
+}
+
+func TestGetScanCommand_Subcommands_NilKubescape(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{name: "scan bare", args: []string{}},
+		{name: "scan framework", args: []string{"framework", "nsa"}},
+		{name: "scan control", args: []string{"control", "C-0001"}},
+		{name: "scan workload", args: []string{"workload", "Deployment/test"}},
+		{name: "scan image", args: []string{"image", "nginx"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd := GetScanCommand(nil)
+			require.NotNil(t, cmd)
+			cmd.SilenceUsage = true
+			cmd.SilenceErrors = true
+			cmd.SetArgs(tt.args)
+			err := cmd.Execute()
+			require.EqualError(t, err, "uninitialized kubescape interface")
+		})
+	}
+}

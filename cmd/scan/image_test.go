@@ -955,3 +955,11 @@ func TestGetScanCommand_ImageScanAllowsEnvWholeClusterPolicy(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, mockKubescape.imgScanInfo, "image scan should proceed when whole-cluster-policy is only configured via environment")
 }
+
+func TestGetImageCmd_NilKubescape(t *testing.T) {
+	scanInfo := cautils.ScanInfo{}
+	cmd := getImageCmd(nil, &scanInfo)
+	require.NotNil(t, cmd)
+	err := cmd.RunE(cmd, []string{"nginx:1.27"})
+	require.EqualError(t, err, "uninitialized kubescape interface")
+}

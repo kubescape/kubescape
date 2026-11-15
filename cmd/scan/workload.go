@@ -72,6 +72,9 @@ func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comma
 			return validateWorkloadArgs(args, scanInfo)
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if ks == nil {
+				return errors.New("uninitialized kubescape interface")
+			}
 			if err := validateWorkloadArgs(args, scanInfo); err != nil {
 				return err
 			}

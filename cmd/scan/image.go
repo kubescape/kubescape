@@ -51,6 +51,10 @@ func getImageCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Command 
 			return validateImageArgs(args)
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if ks == nil {
+				return errors.New("uninitialized kubescape interface")
+			}
+
 			ctx, cancel := deriveTimeoutContext(scanInfo, ks)
 			defer cancel()
 

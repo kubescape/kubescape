@@ -135,3 +135,13 @@ func TestRootCmd_PersistentPreRunE_KubeContext(t *testing.T) {
 	assert.Equal(t, "test-cluster-context", rootInfo.KubeContext)
 	assert.Equal(t, "test-cluster-context", k8sinterface.GetContextName())
 }
+
+func TestRootCmd_NilKubescape(t *testing.T) {
+	cmd := getRootCmd(nil, "v3.0.0", "abc1234", "2026-01-01")
+	require.NotNil(t, cmd)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+	cmd.SetArgs([]string{"scan"})
+	err := cmd.Execute()
+	require.EqualError(t, err, "uninitialized kubescape interface")
+}

@@ -2,6 +2,7 @@ package scan
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -57,6 +58,9 @@ func getControlCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comman
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if ks == nil {
+				return errors.New("uninitialized kubescape interface")
+			}
 			if scanInfo.FilePath != "" && len(args) > 1 {
 				return fmt.Errorf("usage: use either --file-path or positional input paths, not both")
 			}
