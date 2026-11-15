@@ -36,6 +36,9 @@ var scanCmdExamples = fmt.Sprintf(`
   # Scan manifest files, leaving test fixtures and generated output out of the scan
   %[1]s scan . --exclude-path 'test/**' --exclude-path '*.generated.yaml'
 
+  # Scan kubernetes manifest files again whenever they change
+  %[1]s scan ./manifests --watch
+
   # Scan and save the results in the JSON format
   %[1]s scan --format json --output results.json
 
@@ -75,6 +78,7 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	var scanContractName string
 	var scanContractAllow []string
 	var fleetConfigPath string
+	var watchMode bool
 	var selectedContract *contractv1alpha1.SelectedContract
 	var gitCloneDepth = cautils.DefaultGitCloneDepth
 	scanInfo.GitCloneDepth = &gitCloneDepth
@@ -161,6 +165,11 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if watchMode {
+				if err := validateWatchFlags(cmd, &scanInfo, args); err != nil {
+					return err
+				}
+			}
 			if err := shared.ValidateCommonScanFlags(cmd, &scanInfo, shared.ScanFormats); err != nil {
 				return err
 			}
@@ -203,6 +212,9 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 				// The invocation is valid from this point on. Runtime and result-gate
 				// failures should not print command usage.
 				cmd.SilenceUsage = true
+				if watchMode {
+					return watchSecurityScan(cmd, ks, &scanInfo, policyIdentifiers)
+				}
 				return securityScan(scanInfo, ks, policyIdentifiers)
 			}
 
@@ -227,6 +239,9 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 				// failures should not print command usage.
 				cmd.SilenceUsage = true
 
+				if watchMode {
+					return watchSecurityScan(cmd, ks, &scanInfo, policyIdentifiers)
+				}
 				if err := securityScan(scanInfo, ks, policyIdentifiers); err != nil {
 					return err
 				}
@@ -400,6 +415,7 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	scanCmd.PersistentFlags().StringVar(&scanInfo.BaselineGranularity, "baseline-granularity", "evidence", "With --baseline, comparison unit: evidence or control.")
 
 	scanCmd.Flags().StringVar(&scanInfo.FilePath, "file-path", "", "Path to the YAML file.")
+	scanCmd.Flags().BoolVar(&watchMode, "watch", false, "Scan the given files or directories, then scan again whenever they change, and say which findings are new, resolved or unchanged, until interrupted. Local manifests only: not for a cluster, an image scan or a remote repository, and not with --format, --output, --baseline or the threshold flags")
 
 	scanCmd.AddCommand(getControlCmd(ks, &scanInfo))
 	scanCmd.AddCommand(getFrameworkCmd(ks, &scanInfo))

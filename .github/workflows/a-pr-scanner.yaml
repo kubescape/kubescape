@@ -112,3 +112,6 @@ jobs:
 
       - name: Test Windows partitionstore disk errors
         run: go test -v -count=1 ./core/pkg/resourcehandler/partitionstore -run '^TestIsDiskFull_WindowsErrors$'
+
+      - name: Test Windows file watcher
+        run: go test -v -count=1 ./core/pkg/watch -run '^TestFileWatcher'
