@@ -121,14 +121,15 @@ func (cp *CsvPrinter) Score(score float32) {
 // cluster-wide skipped or unevaluated controls. A missing session or posture
 // report returns an error instead of reading a nil report.
 func (cp *CsvPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) (err error) {
-	if opaSessionObj == nil && len(imageScanData) > 0 {
+	hasReport := opaSessionObj != nil && opaSessionObj.Report != nil
+	if !hasReport && len(imageScanData) > 0 {
 		if err := writeImageScanCSV(cp.writer, imageScanData); err != nil {
 			return err
 		}
 		printer.LogOutputFile(cp.writer.Name())
 		return nil
 	}
-	if opaSessionObj == nil || opaSessionObj.Report == nil {
+	if !hasReport {
 		return fmt.Errorf("no data provided for CSV output")
 	}
 

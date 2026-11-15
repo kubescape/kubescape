@@ -64,3 +64,25 @@ func TestJsonPrinter_ImageScan_ReportsEveryImage(t *testing.T) {
 		assert.Contains(t, ids, "CVE-KEPT")
 	}
 }
+
+func TestJsonPrinter_ImageScan_NilReportFallback(t *testing.T) {
+	tmp, err := os.CreateTemp("", "json-nil-report-*.json")
+	require.NoError(t, err)
+	defer func() {
+		assert.NoError(t, tmp.Close())
+		assert.NoError(t, os.Remove(tmp.Name()))
+	}()
+
+	jp := NewJsonPrinter()
+	jp.writer = tmp
+	session := &cautils.OPASessionObj{Report: nil}
+	imageScanData := []cautils.ImageScanData{buildSeverityExceptionImageScanData()}
+
+	require.NoError(t, jp.ActionPrint(context.Background(), session, imageScanData))
+
+	raw, err := os.ReadFile(tmp.Name())
+	require.NoError(t, err)
+	var doc map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(raw, &doc))
+	assert.Contains(t, doc, "matches")
+}

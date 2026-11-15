@@ -527,3 +527,29 @@ func TestActionPrint_PdfWithScanCoverage(t *testing.T) {
 	assert.Contains(t, content, "C-0010")
 	assert.Contains(t, content, "cronjobs API unavailable")
 }
+
+func TestPdfPrinter_ActionPrint_NilReportFallbackToImageScan(t *testing.T) {
+	outputPath := filepath.Join(t.TempDir(), "image-fallback.pdf")
+	pp := NewPdfPrinter()
+	require.NoError(t, pp.SetWriter(context.Background(), outputPath))
+	t.Cleanup(func() { _ = pp.CloseWriter() })
+
+	session := &cautils.OPASessionObj{Report: nil}
+	images := []cautils.ImageScanData{
+		{Image: "clean-image:latest", Matches: match.NewMatches()},
+	}
+
+	require.NoError(t, pp.ActionPrint(context.Background(), session, images))
+	require.NoError(t, pp.CloseWriter())
+
+	raw, err := os.ReadFile(outputPath)
+	require.NoError(t, err)
+	assert.NotEmpty(t, raw)
+}
+
+func TestPdfPrinter_ActionPrint_NilReportNoData(t *testing.T) {
+	pp := NewPdfPrinter()
+	session := &cautils.OPASessionObj{Report: nil}
+	err := pp.ActionPrint(context.Background(), session, nil)
+	assert.ErrorContains(t, err, "failed to print results, missing data")
+}

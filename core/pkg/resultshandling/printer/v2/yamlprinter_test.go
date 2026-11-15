@@ -377,3 +377,25 @@ func TestPrintConfigurationsScanningYaml_NilReportReturnsError(t *testing.T) {
 	assert.Error(t, err)
 	assert.EqualError(t, err, "no data provided for YAML output")
 }
+
+func TestYamlPrinter_ImageScan_NilReportFallback(t *testing.T) {
+	tmp, err := os.CreateTemp("", "yaml-nil-report-*.yaml")
+	require.NoError(t, err)
+	defer func() {
+		assert.NoError(t, tmp.Close())
+		assert.NoError(t, os.Remove(tmp.Name()))
+	}()
+
+	yp := NewYamlPrinter()
+	yp.writer = tmp
+	session := &cautils.OPASessionObj{Report: nil}
+	imageScanData := []cautils.ImageScanData{buildSeverityExceptionImageScanData()}
+
+	require.NoError(t, yp.ActionPrint(context.Background(), session, imageScanData))
+
+	raw, err := os.ReadFile(tmp.Name())
+	require.NoError(t, err)
+	var doc map[string]interface{}
+	require.NoError(t, yaml.Unmarshal(raw, &doc))
+	assert.Contains(t, doc, "matches")
+}
