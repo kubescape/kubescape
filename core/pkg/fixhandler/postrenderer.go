@@ -81,6 +81,22 @@ func EmitPostRenderer(kustomizeDir, outputDir string) error {
 		return fmt.Errorf("output directory %q contains unsafe characters", outputDir)
 	}
 
+	cleanKustDir, err := filepath.Abs(kustomizeDir)
+	if err != nil {
+		cleanKustDir = kustomizeDir
+	}
+	if !isSafeScriptPath(cleanKustDir) {
+		return fmt.Errorf("resolved kustomize directory %q contains unsafe characters", cleanKustDir)
+	}
+
+	cleanOutputDir, err := filepath.Abs(outputDir)
+	if err != nil {
+		cleanOutputDir = outputDir
+	}
+	if !isSafeScriptPath(cleanOutputDir) {
+		return fmt.Errorf("resolved output directory %q contains unsafe characters", cleanOutputDir)
+	}
+
 	if err := os.MkdirAll(outputDir, 0755); err != nil {
 		return fmt.Errorf("failed to create post-renderer directory %q: %w", outputDir, err)
 	}
@@ -90,11 +106,6 @@ func EmitPostRenderer(kustomizeDir, outputDir string) error {
 		return fmt.Errorf("failed to open output directory %q: %w", outputDir, err)
 	}
 	defer root.Close()
-
-	cleanKustDir, err := filepath.Abs(kustomizeDir)
-	if err != nil {
-		cleanKustDir = kustomizeDir
-	}
 
 	kustBaseName := filepath.Base(cleanKustDir)
 
