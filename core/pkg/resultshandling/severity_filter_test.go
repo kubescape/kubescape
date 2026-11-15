@@ -334,6 +334,35 @@ func TestApplySeverityFilters_RecomputesComplianceScore(t *testing.T) {
 	assert.Equal(t, float32(10), s.Report.SummaryDetails.ComplianceScore)
 }
 
+func TestApplySeverityFilters_UnscoredControlDoesNotCorruptComplianceScore(t *testing.T) {
+	controls := map[string]reportsummary.ControlSummary{
+		"C-critical-1": makeCompliantControl("C-critical-1", scoreCritical, 100),
+		"C-critical-2": makeControl("C-critical-2", scoreCritical), // nil ComplianceScore -> GetComplianceScore() returns -1
+	}
+	s := makeSessionWithControls(controls)
+
+	ApplySeverityFilters(s, "critical", "")
+
+	require.Len(t, s.Report.SummaryDetails.Controls, 2)
+	// The unscored control must not subtract its -1 sentinel from the compliance sum.
+	// 100 / 2 = 50.0 (not (100 - 1) / 2 = 49.5).
+	assert.Equal(t, float32(50), s.Report.SummaryDetails.ComplianceScore)
+}
+
+func TestApplySeverityFilters_AllUnscoredControlsYieldZeroComplianceScore(t *testing.T) {
+	controls := map[string]reportsummary.ControlSummary{
+		"C-critical-1": makeControl("C-critical-1", scoreCritical), // nil ComplianceScore -> GetComplianceScore() returns -1
+		"C-critical-2": makeControl("C-critical-2", scoreCritical),
+	}
+	s := makeSessionWithControls(controls)
+
+	ApplySeverityFilters(s, "critical", "")
+
+	require.Len(t, s.Report.SummaryDetails.Controls, 2)
+	// Unscored controls must yield a score of 0 rather than negative score (-1.0).
+	assert.Equal(t, float32(0), s.Report.SummaryDetails.ComplianceScore)
+}
+
 func TestApplySeverityFilters_DoesNotRecomputeRiskScore(t *testing.T) {
 	controls := map[string]reportsummary.ControlSummary{
 		"C-low":      {ControlID: "C-low", ScoreFactor: scoreLow, Score: 90},
@@ -384,6 +413,52 @@ func TestApplySeverityFilters_RecomputesFrameworkComplianceScores(t *testing.T) 
 		"framework score must be recomputed over retained framework controls")
 	assert.Equal(t, float32(0), s.Report.SummaryDetails.Frameworks[1].ComplianceScore,
 		"framework with no retained controls must score 0")
+}
+
+func TestApplySeverityFilters_FrameworkUnscoredControlDoesNotCorruptComplianceScore(t *testing.T) {
+	c1 := makeCompliantControl("C-high-1", scoreHigh, 80)
+	c2 := makeControl("C-high-2", scoreHigh) // nil ComplianceScore -> GetComplianceScore() returns -1
+	controls := map[string]reportsummary.ControlSummary{
+		"C-high-1": c1,
+		"C-high-2": c2,
+	}
+	s := makeSessionWithControls(controls)
+	s.Report.SummaryDetails.Frameworks = []reportsummary.FrameworkSummary{
+		{
+			Name: "NSA",
+			Controls: reportsummary.ControlSummaries{
+				"C-high-1": c1,
+				"C-high-2": c2,
+			},
+		},
+	}
+
+	ApplySeverityFilters(s, "high", "")
+
+	require.Len(t, s.Report.SummaryDetails.Frameworks[0].Controls, 2)
+	// 80 / 2 = 40.0 (not (80 - 1) / 2 = 39.5).
+	assert.Equal(t, float32(40), s.Report.SummaryDetails.Frameworks[0].ComplianceScore)
+}
+
+func TestApplySeverityFilters_FrameworkAllUnscoredControlsYieldZeroComplianceScore(t *testing.T) {
+	c1 := makeControl("C-high-1", scoreHigh) // nil ComplianceScore -> GetComplianceScore() returns -1
+	controls := map[string]reportsummary.ControlSummary{
+		"C-high-1": c1,
+	}
+	s := makeSessionWithControls(controls)
+	s.Report.SummaryDetails.Frameworks = []reportsummary.FrameworkSummary{
+		{
+			Name: "NSA",
+			Controls: reportsummary.ControlSummaries{
+				"C-high-1": c1,
+			},
+		},
+	}
+
+	ApplySeverityFilters(s, "high", "")
+
+	require.Len(t, s.Report.SummaryDetails.Frameworks[0].Controls, 1)
+	assert.Equal(t, float32(0), s.Report.SummaryDetails.Frameworks[0].ComplianceScore)
 }
 
 func TestApplySeverityFilters_RecomputesControlsSeverityCounters(t *testing.T) {
