@@ -54,6 +54,10 @@ type snapshot struct {
 	// skippedManifests is set when the scan could not load a manifest it found:
 	// the resources in it are absent from the scan, though their files are there.
 	skippedManifests bool
+	// onlyPolicyFallback is set when a policy input came from a fallback and the
+	// coverage has no other gap that could hide a failure: the scan read every
+	// resource type in full and loaded every manifest.
+	onlyPolicyFallback bool
 }
 
 // newSnapshot canonicalizes a report and describes its resources.
@@ -75,6 +79,10 @@ func newSnapshot(reportJSON []byte) (*snapshot, error) {
 		return nil, fmt.Errorf("read the scan coverage: %w", err)
 	}
 	snap.skippedManifests = coverage.ScanCoverage != nil && len(coverage.ScanCoverage.SkippedManifests) > 0
+	if c := coverage.ScanCoverage; c != nil {
+		snap.onlyPolicyFallback = len(c.PolicyDegradations) > 0 &&
+			len(c.FailedGVRPulls) == 0 && len(c.PartialGVRPulls) == 0 && len(c.SkippedManifests) == 0
+	}
 
 	var doc struct {
 		Resources []struct {

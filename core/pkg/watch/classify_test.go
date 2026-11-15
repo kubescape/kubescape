@@ -217,6 +217,31 @@ func (d scanDoc) evidencePointsAt(t *testing.T, resourceSuffix, pathPart, eviden
 	return doc
 }
 
+// withRuleLevelFailure adds to a control of a resource a failed rule that reports
+// no path, as a rule with rule-level evidence does.
+func (d scanDoc) withRuleLevelFailure(t *testing.T, resourceSuffix, controlID string) scanDoc {
+	t.Helper()
+	doc := decodeScan(t, d.encode(t))
+	changed := 0
+	for _, raw := range doc["results"].([]any) {
+		result := raw.(map[string]any)
+		if !strings.HasSuffix(result["resourceID"].(string), resourceSuffix) {
+			continue
+		}
+		for _, control := range result["controls"].([]any) {
+			c := control.(map[string]any)
+			if c["controlID"] != controlID {
+				continue
+			}
+			rules, _ := c["rules"].([]any)
+			c["rules"] = append(rules, map[string]any{"name": "rule-level-only", "status": "failed", "subStatus": ""})
+			changed++
+		}
+	}
+	require.NotZero(t, changed, "%s has no control %s", resourceSuffix, controlID)
+	return doc
+}
+
 // withControlPassing makes a control pass on a resource, as fixing what it found
 // does: no failed rule, no evidence.
 func (d scanDoc) withControlPassing(t *testing.T, resourceSuffix, controlID string) scanDoc {
