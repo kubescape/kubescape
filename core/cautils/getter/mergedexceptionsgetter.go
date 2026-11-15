@@ -287,15 +287,38 @@ func (m *scopeMatcher) covers(primary, crd string) bool {
 	if primary == crd || primary == "*" {
 		return true
 	}
-	// Matching the text of a secondary pattern does not cover its alternatives.
-	// Compare against a concrete value only when the secondary scope is literal. A
-	// dot is taken as literal: framework names have them (cis-v1.10.0,
-	// cis-eks-t1.2.0), and a name that only had dots to tell it from a pattern
-	// could never be covered, not even by the same name in another case.
-	if withoutDots := strings.ReplaceAll(crd, ".", ""); regexp.QuoteMeta(withoutDots) != withoutDots {
-		return false
+
+	// If the secondary scope is literal (no regex metacharacters at all),
+	// compare against it directly. Case-folding applies to literal names.
+	if regexp.QuoteMeta(crd) == crd {
+		if strings.EqualFold(primary, crd) {
+			return true
+		}
+		return m.processor.RegexCompareControlID(primary, crd)
 	}
-	return strings.EqualFold(primary, crd) || m.processor.RegexCompareControlID(primary, crd)
+
+	// When the secondary scope contains dots, it is ambiguous: it may be a literal
+	// framework name containing dots (e.g. cis-v1.10.0) or a regex where unescaped
+	// dots match any character (e.g. cis.v1.10.0 matching cis+v1+10+0).
+	// A scope whose only metacharacters are dots has no other regex escapes (like \d or [a-z]).
+	if withoutDots := strings.ReplaceAll(crd, ".", ""); regexp.QuoteMeta(withoutDots) == withoutDots {
+		// An identical scope in another case (e.g. CIS-v1.10.0 vs cis-v1.10.0) covers itself.
+		if strings.EqualFold(primary, crd) {
+			return true
+		}
+		if strings.HasSuffix(primary, ".*") {
+			prefix := strings.TrimSuffix(primary, ".*")
+			if regexp.QuoteMeta(prefix) == prefix &&
+				strings.HasPrefix(strings.ToLower(crd), strings.ToLower(prefix)) {
+				// Verify that all dots in crd occur within the wildcard portion (after prefix).
+				if firstDot := strings.Index(crd, "."); firstDot >= len(prefix) {
+					return true
+				}
+			}
+		}
+	}
+
+	return false
 }
 
 // designatorDedupKey identifies the entire resource constraint. JSON preserves

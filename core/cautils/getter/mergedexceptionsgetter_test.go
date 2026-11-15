@@ -414,3 +414,19 @@ func TestScopeMatcherAgreesWithProcessor(t *testing.T) {
 		})
 	}
 }
+
+func TestScopeMatcherCoversDotOnlyRegexes(t *testing.T) {
+	matcher := newScopeMatcher()
+	// An escaped-dot primary does not cover a dot-only secondary regex because the secondary matches names like cis-v1-10-0.
+	assert.False(t, matcher.covers("cis\\.v1.*", "cis.v1.10.0"))
+	// A character-class primary does not cover a dot-only secondary regex because the secondary matches names like cis+v1+10+0.
+	assert.False(t, matcher.covers("cis[-_.]v1[-_.]10[-_.]0", "cis.v1.10.0"))
+	// A trailing * quantifier in regex (unlike .*) does not act as a prefix wildcard, so it does not cover the secondary regex.
+	assert.False(t, matcher.covers("cis-*", "cis-eks-t1.2.0"))
+	// A wildcard primary that covers all characters (including hyphens and underscores) covers the dot-only regex.
+	assert.True(t, matcher.covers("cis.*", "cis.v1.10.0"))
+	// A prefix pattern that does not constrain the dotted part covers it.
+	assert.True(t, matcher.covers("cis-.*", "cis-eks-t1.2.0"))
+	// An identical scope covers itself.
+	assert.True(t, matcher.covers("CIS-v1.10.0", "cis-v1.10.0"))
+}

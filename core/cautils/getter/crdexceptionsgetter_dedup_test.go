@@ -208,6 +208,24 @@ func TestDeduplicateExceptionsScopeContainment(t *testing.T) {
 			wantNames: []string{"cloud-1", "crd-1"},
 		},
 		{
+			name:      "escaped-dot primary pattern does not cover dot-only CRD pattern",
+			cloud:     armotypes.PosturePolicy{ControlID: "C-0001", FrameworkName: "cis\\.v1.*"},
+			crd:       armotypes.PosturePolicy{ControlID: "C-0001", FrameworkName: "cis.v1.10.0"},
+			wantNames: []string{"cloud-1", "crd-1"},
+		},
+		{
+			name:      "character-class primary pattern does not cover dot-only CRD pattern",
+			cloud:     armotypes.PosturePolicy{ControlID: "C-0001", FrameworkName: "cis[-_.]v1[-_.]10[-_.]0"},
+			crd:       armotypes.PosturePolicy{ControlID: "C-0001", FrameworkName: "cis.v1.10.0"},
+			wantNames: []string{"cloud-1", "crd-1"},
+		},
+		{
+			name:      "trailing-star quantifier primary pattern does not cover dot-only CRD pattern",
+			cloud:     armotypes.PosturePolicy{ControlID: "C-0001", FrameworkName: "cis-*"},
+			crd:       armotypes.PosturePolicy{ControlID: "C-0001", FrameworkName: "cis-eks-t1.2.0"},
+			wantNames: []string{"cloud-1", "crd-1"},
+		},
+		{
 			name:      "case-sensitive regex escapes are distinct scopes",
 			cloud:     armotypes.PosturePolicy{ControlID: "C-0001", FrameworkName: "\\d+"},
 			crd:       armotypes.PosturePolicy{ControlID: "C-0001", FrameworkName: "\\D+"},
