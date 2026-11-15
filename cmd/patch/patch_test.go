@@ -583,3 +583,14 @@ func TestGetPatchCmd_WhitespaceFlags(t *testing.T) {
 		assert.Equal(t, "output-path is required when output-mode is local", err.Error())
 	})
 }
+
+func TestGetPatchCmd_NilKubescape(t *testing.T) {
+	cmd := GetPatchCmd(nil)
+	assert.NotNil(t, cmd)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+	cmd.SetArgs([]string{"--image", "nginx:1.22"})
+
+	err := cmd.Execute()
+	require.EqualError(t, err, "uninitialized kubescape interface")
+}

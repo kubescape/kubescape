@@ -553,3 +553,16 @@ func TestGetListCmd_ControlFilterFlagsWithSingularTarget(t *testing.T) {
 	assert.Equal(t, "NSA", recorder.received.ControlFilters.Framework)
 	assert.Equal(t, "container", recorder.received.ControlFilters.Search)
 }
+
+func TestGetListCmd_NilKubescape(t *testing.T) {
+	cmd := GetListCmd(nil)
+	assert.NotNil(t, cmd)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"frameworks"})
+
+	err := cmd.Execute()
+	require.EqualError(t, err, "uninitialized kubescape interface")
+}
