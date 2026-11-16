@@ -716,3 +716,22 @@ func TestWatchRoots(t *testing.T) {
 		})
 	}
 }
+
+// The scan reads .kubescapeignore on every run, so the watch follows it: an edit
+// to it is scanned, and a directory it no longer excludes is watched.
+func TestWatchSecurityScanFollowsTheIgnoreFile(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, cautils.IgnoreFileName), "extra/\n")
+	writeFile(t, filepath.Join(dir, "pod.yaml"), podManifest("web", false))
+	writeFile(t, filepath.Join(dir, "extra", "api.yaml"), podManifest("api", false))
+	out, stop := startSecurityWatch(t, localWatchScanInfo(t, dir))
+	out.waitFor(t, "Initial scan complete: 1 failing control(s) on 1 resource(s)")
+
+	writeFile(t, filepath.Join(dir, cautils.IgnoreFileName), "# nothing excluded\n")
+	out.waitFor(t, "1 new, 0 resolved") // the scan now reads extra/api.yaml
+
+	writeFile(t, filepath.Join(dir, "extra", "api.yaml"), podManifest("api", true))
+	out.waitFor(t, "0 new, 1 resolved") // and a change in extra/ is seen
+
+	require.NoError(t, stop())
+}

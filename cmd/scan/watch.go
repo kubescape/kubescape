@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -119,7 +120,7 @@ func watchSecurityScan(cmd *cobra.Command, ks interface{ Context() context.Conte
 	return runWatch(ks.Context(), watchConfig{
 		Roots: roots,
 		Exclude: func(root string) (func(string, bool) bool, error) {
-			filter, err := cautils.NewScanPathFilter(root, scanInfo.ExcludePaths, !scanInfo.NoIgnoreFile)
+			filter, err := newReloadingFilter(root, scanInfo.ExcludePaths, !scanInfo.NoIgnoreFile)
 			if err != nil {
 				return nil, err
 			}
@@ -140,6 +141,59 @@ func watchSecurityScan(cmd *cobra.Command, ks interface{ Context() context.Conte
 		Out:    cmd.OutOrStdout(),
 		ErrOut: cmd.ErrOrStderr(),
 	})
+}
+
+// reloadingFilter is the scan's path filter for a watched root, made again when
+// the root's ignore file changes: the scan reads that file on every run, so the
+// watch has to exclude what the next scan excludes, not what the first one did.
+type reloadingFilter struct {
+	root          string
+	patterns      []string
+	useIgnoreFile bool
+	ignoreFile    string
+
+	mu      sync.Mutex
+	version string // the ignore file's size and modification time when filter was made
+	filter  *cautils.PathFilter
+}
+
+func newReloadingFilter(root string, patterns []string, useIgnoreFile bool) (*reloadingFilter, error) {
+	f := &reloadingFilter{root: root, patterns: patterns, useIgnoreFile: useIgnoreFile}
+	if useIgnoreFile {
+		f.ignoreFile = filepath.Join(cautils.IgnoreRoot(root), cautils.IgnoreFileName)
+	}
+	f.version = f.ignoreFileVersion()
+	filter, err := cautils.NewScanPathFilter(root, patterns, useIgnoreFile)
+	if err != nil {
+		return nil, err
+	}
+	f.filter = filter
+	return f, nil
+}
+
+func (f *reloadingFilter) ignoreFileVersion() string {
+	if f.ignoreFile == "" {
+		return ""
+	}
+	info, err := os.Stat(f.ignoreFile)
+	if err != nil {
+		return "absent"
+	}
+	return fmt.Sprintf("%d %d", info.Size(), info.ModTime().UnixNano())
+}
+
+// Excluded is (*cautils.PathFilter).Excluded with the filter made again first if
+// the ignore file changed. A file that cannot be read or parsed as it is now, as
+// in the middle of an edit, leaves the previous filter in place.
+func (f *reloadingFilter) Excluded(path string, isDir bool) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if version := f.ignoreFileVersion(); version != f.version {
+		if filter, err := cautils.NewScanPathFilter(f.root, f.patterns, f.useIgnoreFile); err == nil {
+			f.filter, f.version = filter, version
+		}
+	}
+	return f.filter.Excluded(path, isDir)
 }
 
 // watchScanOf takes from a scan's result what a watch needs of it. The report is

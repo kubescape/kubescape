@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -1122,4 +1123,30 @@ func TestFileWatcherErrIsSetBeforeChangesCloses(t *testing.T) {
 		require.Error(t, w.Err(), "the channel closed before the reason was set")
 		_ = w.Close()
 	}
+}
+
+// The scan reads its exclusions from the root's ignore file on every run, so an
+// edit to it is a change, and a directory it no longer excludes is watched from
+// then on.
+func TestFileWatcherWatchesWhatTheIgnoreFileNoLongerExcludes(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	extra := filepath.Join(root, "extra")
+	write(t, filepath.Join(extra, "api.yaml"), "kind: Pod\n")
+	var excluded atomic.Bool
+	excluded.Store(true)
+	w, err := newFileWatcher(root, FileWatcherOptions{Exclude: func(path string, isDir bool) bool {
+		return excluded.Load() && isDir && path == extra
+	}})
+	require.NoError(t, err)
+	defer w.fs.Close()
+	require.NotContains(t, w.dirs, extra)
+
+	excluded.Store(false)
+	ignoreFile := filepath.Join(root, cautils.IgnoreFileName)
+	write(t, ignoreFile, "# nothing excluded\n")
+	require.NoError(t, w.handle(fsnotify.Event{Name: ignoreFile, Op: fsnotify.Write}))
+
+	assert.Contains(t, w.dirs, extra, "a directory the ignore file no longer excludes is not watched")
+	assert.Len(t, w.changes, 1, "an edit to the ignore file is signalled")
 }
