@@ -342,6 +342,20 @@ func TestHelmValueOptions_MergeValues(t *testing.T) {
 	assert.Equal(t, "v1.2.3", image["tag"])
 	assert.Equal(t, "myrepo/app", image["repository"])
 	assert.EqualValues(t, 5, merged["replicaCount"])
+
+	t.Run("merges file values preserving protected path separators", func(t *testing.T) {
+		tempDir := t.TempDir()
+		valFile := filepath.Join(tempDir, "config.txt")
+		err := os.WriteFile(valFile, []byte("custom-config-content"), 0600)
+		assert.NoError(t, err)
+
+		opts := HelmValueOptions{
+			FileValues: []string{"custom=" + valFile},
+		}
+		merged, err := opts.MergeValues()
+		assert.NoError(t, err)
+		assert.Equal(t, "custom-config-content", merged["custom"])
+	})
 }
 
 // TestLoadResourcesFromHelmCharts_WithOverrides confirms that user-supplied --set values
