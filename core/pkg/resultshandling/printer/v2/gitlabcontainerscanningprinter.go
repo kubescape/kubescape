@@ -79,16 +79,25 @@ func (cp *GitLabContainerScanningPrinter) ActionPrint(ctx context.Context, _ *ca
 		Version:         gitLabSASTReportVersion,
 		Vulnerabilities: []gitLabContainerVulnerability{},
 	}
-	seen := make(map[string]struct{})
+	seen := make(map[string]int)
+	fixes := make(map[string][]string)
 	for i := range imageScanData {
 		data := &imageScanData[i]
+		image := normalizeImageRef(data.Image)
 		operatingSystem := imageOperatingSystem(data)
 		for _, cve := range extractCVEs(data.Matches, data.Image, nil) {
-			vulnerability := toGitLabContainerVulnerability(data.Image, data.Platform, operatingSystem, cve)
-			if _, duplicate := seen[vulnerability.ID]; duplicate {
+			vulnerability := toGitLabContainerVulnerability(image, data.Platform, operatingSystem, cve)
+			if idx, duplicate := seen[vulnerability.ID]; duplicate {
+				if len(cve.FixVersions) > 0 {
+					merged := mergeFixVersions(fixes[vulnerability.ID], cve.FixVersions)
+					fixes[vulnerability.ID] = merged
+					report.Vulnerabilities[idx].Solution = gitLabSolution(cve.Package, merged)
+				}
 				continue
 			}
-			seen[vulnerability.ID] = struct{}{}
+			seen[vulnerability.ID] = len(report.Vulnerabilities)
+			fixes[vulnerability.ID] = mergeFixVersions(nil, cve.FixVersions)
+			vulnerability.Solution = gitLabSolution(cve.Package, fixes[vulnerability.ID])
 			report.Vulnerabilities = append(report.Vulnerabilities, vulnerability)
 		}
 	}
@@ -122,13 +131,75 @@ func (cp *GitLabContainerScanningPrinter) ActionPrint(ctx context.Context, _ *ca
 }
 
 func imageOperatingSystem(data *cautils.ImageScanData) string {
-	if data.Context.Distro == nil {
-		return gitLabUnknownOperatingSystem
+	osName := gitLabUnknownOperatingSystem
+	if data.Context.Distro != nil {
+		if name := strings.TrimSpace(data.Context.Distro.String()); name != "" {
+			osName = name
+		}
 	}
-	if name := strings.TrimSpace(data.Context.Distro.String()); name != "" {
-		return name
+	if data.Platform != "" {
+		return fmt.Sprintf("%s (%s)", osName, data.Platform)
 	}
-	return gitLabUnknownOperatingSystem
+	return osName
+}
+
+// normalizeImageRef appends the default ":latest" tag to untagged image references
+// (e.g. "nginx" -> "nginx:latest", "localhost:5000/app" -> "localhost:5000/app:latest").
+// This ensures GitLab's location parser identifies the image tag component and does
+// not generate empty-component fingerprint collisions across untagged images.
+func normalizeImageRef(image string) string {
+	image = strings.TrimSpace(image)
+	if image == "" {
+		return image
+	}
+	ref := image
+	if at := strings.Index(ref, "@"); at != -1 {
+		ref = ref[:at]
+	}
+	slash := strings.LastIndex(ref, "/")
+	if slash != -1 {
+		ref = ref[slash+1:]
+	}
+	if !strings.Contains(ref, ":") {
+		if at := strings.Index(image, "@"); at != -1 {
+			return image[:at] + ":latest" + image[at:]
+		}
+		return image + ":latest"
+	}
+	return image
+}
+
+func mergeFixVersions(existing, added []string) []string {
+	seen := make(map[string]struct{}, len(existing)+len(added))
+	var result []string
+	for _, v := range existing {
+		v = strings.TrimSpace(v)
+		if v == "" {
+			continue
+		}
+		if _, ok := seen[v]; !ok {
+			seen[v] = struct{}{}
+			result = append(result, v)
+		}
+	}
+	for _, v := range added {
+		v = strings.TrimSpace(v)
+		if v == "" {
+			continue
+		}
+		if _, ok := seen[v]; !ok {
+			seen[v] = struct{}{}
+			result = append(result, v)
+		}
+	}
+	return result
+}
+
+func gitLabSolution(pkg string, fixVersions []string) string {
+	if len(fixVersions) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("Upgrade %s to version %s.", pkg, strings.Join(fixVersions, ", "))
 }
 
 func toGitLabContainerVulnerability(image, platform, operatingSystem string, cve imageprinter.CVE) gitLabContainerVulnerability {
@@ -138,11 +209,12 @@ func toGitLabContainerVulnerability(image, platform, operatingSystem string, cve
 		description += fmt.Sprintf(" Scanned platform: %s.", platform)
 	}
 
-	vulnerability := gitLabContainerVulnerability{
+	return gitLabContainerVulnerability{
 		ID:          gitLabImageVulnerabilityID(image, cve.Package, cve.Version, cve.ID, platform),
 		Name:        truncateRunes(fmt.Sprintf("%s in %s %s", cve.ID, cve.Package, cve.Version), gitLabMaxNameLength),
 		Description: description,
 		Severity:    severity,
+		Solution:    gitLabSolution(cve.Package, cve.FixVersions),
 		Identifiers: []gitLabIdentifier{gitLabAdvisoryIdentifier(cve.ID)},
 		Location: gitLabContainerLocation{
 			Dependency:      gitLabDependency{Package: gitLabPackage{Name: cve.Package}, Version: cve.Version},
@@ -150,10 +222,6 @@ func toGitLabContainerVulnerability(image, platform, operatingSystem string, cve
 			Image:           image,
 		},
 	}
-	if len(cve.FixVersions) > 0 {
-		vulnerability.Solution = fmt.Sprintf("Upgrade %s to version %s.", cve.Package, strings.Join(cve.FixVersions, ", "))
-	}
-	return vulnerability
 }
 
 func truncateRunes(value string, limit int) string {
