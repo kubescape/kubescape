@@ -170,7 +170,7 @@ func mdWriteSummaryTable(w io.Writer, controls []reportsummary.ControlSummary) e
 		ew.printf("| %s | %s | %s | %s | %d | %d |\n",
 			apis.ControlSeverityToString(ctrl.GetScoreFactor()),
 			mdEscapeCell(ctrl.GetName()),
-			ctrl.GetID(),
+			mdEscapeCell(ctrl.GetID()),
 			mdStatusLabel(ctrl.GetStatus()),
 			lists.Failed(),
 			lists.Passed(),
@@ -503,7 +503,7 @@ func mdWriteCoverageSection(w io.Writer, opaSessionObj *cautils.OPASessionObj) e
 				reason = "not evaluated"
 			}
 			ew.printf("| %s | %s | %s |\n",
-				sc.controlID,
+				mdEscapeTableCell(sc.controlID),
 				mdEscapeTableCell(name),
 				mdEscapeTableCell(reason),
 			)

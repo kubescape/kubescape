@@ -937,3 +937,35 @@ func TestMarkdownPrinter_ActionPrint_NeutralizesNewlinesInTableCells(t *testing.
 	assert.Contains(t, out, "Deployment \\| evil \\| evil \\|", "pipe characters and newlines within kind must be safely escaped")
 	assert.Contains(t, out, "default injected-ns", "CRLF in namespace must be collapsed into space")
 }
+
+func TestMarkdownPrinter_ActionPrint_NeutralizesNewlinesInControlIDs(t *testing.T) {
+	session := mdSessionFixture()
+
+	injectedControlID := "C-0099\r\n| evil |"
+	ctrl := reportsummary.ControlSummary{
+		ControlID:   injectedControlID,
+		Name:        "Injected Control Name",
+		ScoreFactor: 1.0,
+		StatusInfo:  apis.StatusInfo{InnerStatus: apis.StatusPassed},
+	}
+	session.Report.SummaryDetails.Controls[injectedControlID] = ctrl
+
+	session.ScanCoverage = cautils.ScanCoverage{
+		CoverageScore:     80,
+		TotalControls:     10,
+		EvaluatedControls: 8,
+		Degraded:          true,
+		NotEvaluatedControls: []cautils.NotEvaluatedControl{
+			{
+				ControlID: "C-0088\r\n| leaked",
+			},
+		},
+	}
+
+	out := mdRunActionPrint(t, session)
+
+	assert.NotContains(t, out, "C-0099\r\n")
+	assert.NotContains(t, out, "C-0088\r\n")
+	assert.Contains(t, out, "C-0099 \\| evil \\|")
+	assert.Contains(t, out, "C-0088 \\| leaked")
+}
