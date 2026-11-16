@@ -77,7 +77,7 @@ require (
 	github.com/package-url/packageurl-go v0.1.7
 	github.com/project-copacetic/copacetic v0.15.0
 	github.com/prometheus/common v0.73.1
-	github.com/quay/claircore v1.6.2
+	github.com/quay/claircore v1.6.3
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
 	github.com/schollz/progressbar/v3 v3.19.1
 	github.com/secure-systems-lab/go-securesystemslib v0.11.1
