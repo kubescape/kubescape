@@ -99,17 +99,21 @@ func (ks *Kubescape) Diff(diffInfo *metav1.DiffInfo) (newFailures int, err error
 }
 
 func writeVulnerabilityDiff(diffInfo *metav1.DiffInfo, cs *diff.VulnerabilityChangeSet) (newVulnerabilities int, err error) {
-	var write func(io.Writer, *diff.VulnerabilityChangeSet) error
+	var write func(io.Writer) error
 	switch diffInfo.Format {
 	case printer.PrettyFormat:
-		write = diff.PrintVulnerabilityPretty
+		write = func(w io.Writer) error { return diff.PrintVulnerabilityPretty(w, cs) }
 	case printer.JsonFormat:
-		write = diff.PrintVulnerabilityJSON
+		write = func(w io.Writer) error { return diff.PrintVulnerabilityJSON(w, cs) }
 	case printer.YamlFormat:
-		write = diff.PrintVulnerabilityYAML
+		write = func(w io.Writer) error { return diff.PrintVulnerabilityYAML(w, cs) }
+	case printer.MarkdownFormat:
+		write = func(w io.Writer) error { return diff.PrintVulnerabilityMarkdown(w, cs, diffInfo.SeverityThreshold) }
+	case printer.JunitResultFormat:
+		write = func(w io.Writer) error { return diff.PrintVulnerabilityJUnit(w, cs, diffInfo.SeverityThreshold) }
 	default:
-		return 0, fmt.Errorf("format %q is not supported for image vulnerability reports, supported formats: %s, %s, %s",
-			diffInfo.Format, printer.PrettyFormat, printer.JsonFormat, printer.YamlFormat)
+		return 0, fmt.Errorf("format %q is not supported for image vulnerability reports, supported formats: %s",
+			diffInfo.Format, strings.Join([]string{printer.PrettyFormat, printer.JsonFormat, printer.YamlFormat, printer.MarkdownFormat, printer.JunitResultFormat}, ", "))
 	}
 
 	var w io.Writer = os.Stdout
@@ -127,7 +131,7 @@ func writeVulnerabilityDiff(diffInfo *metav1.DiffInfo, cs *diff.VulnerabilityCha
 		}()
 	}
 
-	if err := write(w, cs); err != nil {
+	if err := write(w); err != nil {
 		return 0, fmt.Errorf("writing vulnerability diff: %w", err)
 	}
 	return diff.NewVulnerabilitiesAtOrAbove(cs, diffInfo.SeverityThreshold), nil

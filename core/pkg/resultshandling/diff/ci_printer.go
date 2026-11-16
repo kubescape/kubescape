@@ -167,7 +167,7 @@ func writeMarkdownFindings(ew *errWriter, title string, changes []ControlChange)
 func markdownEscape(value string) string {
 	value = strings.ReplaceAll(value, "\\", "\\\\")
 	value = strings.ReplaceAll(value, "|", "\\|")
-	value = strings.ReplaceAll(value, "\n", " ")
+	value = strings.NewReplacer("\r\n", " ", "\r", " ", "\n", " ").Replace(value)
 	value = strings.TrimSpace(value)
 	if value == "" {
 		return "-"
@@ -190,6 +190,10 @@ func PrintJUnit(w io.Writer, cs *ChangeSet, threshold string) error {
 		},
 	}
 	suites.Suites = nonEmptyJUnitSuites(suites.Suites)
+	return writeDiffJUnit(w, suites)
+}
+
+func writeDiffJUnit(w io.Writer, suites diffJUnitSuites) error {
 	data, err := xml.MarshalIndent(suites, "", "  ")
 	if err != nil {
 		return err
