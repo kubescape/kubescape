@@ -17,6 +17,7 @@ import (
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/cautils/getter"
 	metav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer/csvsafe"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/utils"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/maruel/natural"
@@ -417,38 +418,15 @@ func yamlControlsFormat(entries []metav1.ControlListEntry, writers ...io.Writer)
 	return err
 }
 
-// csvFormulaPrefixes contains the characters spreadsheets treat as the start of
-// an executable formula or command payload if placed at the start of a cell.
-// Leading whitespace is included too, since a cell starting with a newline or
-// carriage return can still execute a formula on its first non-blank line.
-const csvFormulaPrefixes = "=+-@\t\r\n"
-
 // csvSafeCell neutralizes a cell against spreadsheet formula injection (CWE-1236)
-// by prepending a single quote, the standard mitigation: spreadsheets treat a
-// leading apostrophe as literal text and do not execute or display it, while
-// other CSV consumers see an inert string. Leading whitespace (spaces, tabs,
-// newlines, carriage returns) is handled so formulas prefixed with whitespace
-// cannot bypass the prefix check.
+// by delegating to csvsafe.SafeCell.
 func csvSafeCell(cell string) string {
-	if cell == "" {
-		return cell
-	}
-	if strings.ContainsRune(csvFormulaPrefixes, rune(cell[0])) {
-		return "'" + cell
-	}
-	trimmed := strings.TrimLeft(cell, " \t\r\n\v\f")
-	if trimmed != "" && strings.ContainsRune("=+-@", rune(trimmed[0])) {
-		return "'" + cell
-	}
-	return cell
+	return csvsafe.SafeCell(cell)
 }
 
 // csvSafeRow applies csvSafeCell across every cell of a CSV row.
 func csvSafeRow(row []string) []string {
-	for i := range row {
-		row[i] = csvSafeCell(row[i])
-	}
-	return row
+	return csvsafe.SafeRow(row)
 }
 
 // csvListFormat formats and writes policy names as CSV to the destination writer.
