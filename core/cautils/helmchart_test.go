@@ -498,6 +498,17 @@ func TestLoadResourcesFromHelmCharts_WorkspaceContainment(t *testing.T) {
 		}
 	})
 
+	t.Run("file-values empty subkey parse error is rejected", func(t *testing.T) {
+		insideFile := filepath.Join(ws, "safe.yaml")
+		require.NoError(t, os.WriteFile(insideFile, []byte("key: inside\n"), 0o600))
+		defer os.Remove(insideFile)
+
+		valOpts := HelmValueOptions{FileValues: []string{"a.=" + insideFile + ",b=" + outsideValues}}
+		_, _, _, err := LoadResourcesFromHelmChartsFiltered(context.TODO(), chartPath, valOpts, nil, nil, ws)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed parsing --set-file data")
+	})
+
 	t.Run("file-values relative path escaping workspace is rejected", func(t *testing.T) {
 		escapingRel := filepath.Join("..", "..", "outside.yaml")
 		valOpts := HelmValueOptions{FileValues: []string{"custom=" + escapingRel}}

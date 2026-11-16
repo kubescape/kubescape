@@ -131,7 +131,7 @@ func loadResourcesFromHelmCharts(ctx context.Context, basePath string, valueOpts
 			var escapeErr error
 			var pathsFound int
 			dest := map[string]interface{}{}
-			_ = strvals.ParseIntoFile(fv, dest, func(rs []rune) (interface{}, error) {
+			if err := strvals.ParseIntoFile(fv, dest, func(rs []rune) (interface{}, error) {
 				pathsFound++
 				filePath := string(rs)
 				if filePath != "" && !pathcontainment.IsPathContained(workspaceDir, filePath) {
@@ -139,9 +139,11 @@ func loadResourcesFromHelmCharts(ctx context.Context, basePath string, valueOpts
 					return nil, escapeErr
 				}
 				return "", nil
-			})
-			if escapeErr != nil {
-				return nil, nil, nil, escapeErr
+			}); err != nil {
+				if escapeErr != nil {
+					return nil, nil, nil, escapeErr
+				}
+				return nil, nil, nil, fmt.Errorf("failed parsing --set-file data %q: %w", fv, err)
 			}
 			if pathsFound == 0 {
 				parts := strings.SplitN(fv, "=", 2)

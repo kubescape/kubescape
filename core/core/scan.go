@@ -761,7 +761,7 @@ func validateScanOutputSafety(outputFile string, scanInfo *cautils.ScanInfo, tra
 		var collisionErr error
 		var pathsFound int
 		dest := map[string]interface{}{}
-		_ = strvals.ParseIntoFile(setFile, dest, func(rs []rune) (interface{}, error) {
+		if err := strvals.ParseIntoFile(setFile, dest, func(rs []rune) (interface{}, error) {
 			pathsFound++
 			filePath := string(rs)
 			if filePath != "" {
@@ -771,9 +771,11 @@ func validateScanOutputSafety(outputFile string, scanInfo *cautils.ScanInfo, tra
 				}
 			}
 			return "", nil
-		})
-		if collisionErr != nil {
-			return collisionErr
+		}); err != nil {
+			if collisionErr != nil {
+				return collisionErr
+			}
+			return fmt.Errorf("failed parsing --set-file data %q: %w", setFile, err)
 		}
 		if pathsFound == 0 {
 			parts := strings.SplitN(setFile, "=", 2)

@@ -1071,6 +1071,29 @@ func TestGetOutputPrinters_OutputSafetyRejectsExceptionsAndConfigOverwrite(t *te
 		assert.Equal(t, content, got)
 	})
 
+	t.Run("Helm set-file parse error is rejected before writer setup", func(t *testing.T) {
+		dir := t.TempDir()
+		safeFile := filepath.Join(dir, "safe.txt")
+		reportFile := filepath.Join(dir, "report.txt")
+		require.NoError(t, os.WriteFile(safeFile, content, 0o600))
+		require.NoError(t, os.WriteFile(reportFile, content, 0o600))
+
+		scanInfo := &cautils.ScanInfo{
+			ScanType:          cautils.ScanTypeRepo,
+			Format:            printer.PrettyFormat,
+			Output:            reportFile,
+			HelmSetFileValues: []string{"a.=" + safeFile + ",b=" + reportFile},
+		}
+
+		printers, err := GetOutputPrinters(scanInfo, context.Background(), "test-cluster")
+		require.ErrorContains(t, err, "failed parsing --set-file data")
+		assert.Nil(t, printers)
+
+		got, err := os.ReadFile(reportFile)
+		require.NoError(t, err)
+		assert.Equal(t, content, got)
+	})
+
 	t.Run("image archive input collision", func(t *testing.T) {
 		dir := t.TempDir()
 		imgTar := filepath.Join(dir, "image.tar.json")
