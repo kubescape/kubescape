@@ -102,7 +102,10 @@ func (pp *PrettyPrinter) PrintImageScan(imageScanData []cautils.ImageScanData) e
 }
 
 func (pp *PrettyPrinter) ActionPrint(_ context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
-	if opaSessionObj != nil && opaSessionObj.Report != nil {
+	hasReport := opaSessionObj != nil && opaSessionObj.Report != nil
+	hasImages := len(imageScanData) > 0
+
+	if hasReport {
 		if isPrintSeparatorType(pp.scanType) {
 			fmt.Fprintf(pp.writer, "\n%s\n\n",
 				gchalk.WithAnsi256(238).Bold(strings.Repeat("─", 50)))
@@ -134,20 +137,19 @@ func (pp *PrettyPrinter) ActionPrint(_ context.Context, opaSessionObj *cautils.O
 
 		pp.printScanCoverage(opaSessionObj.ScanCoverage)
 
-		// When writing to Stdout, we aren’t really writing to an output file,
-		// so no need to print that we are
-		if pp.writer.Name() != os.Stdout.Name() {
-			printer.LogOutputFile(pp.writer.Name())
-		}
-
 		pp.printAttackTracks(opaSessionObj)
 	}
 
-	if len(imageScanData) > 0 {
+	if hasImages {
 		if err := pp.PrintImageScan(imageScanData); err != nil {
 			return err
 		}
 	}
+
+	if (hasReport || hasImages) && pp.writer != nil {
+		printer.LogOutputFile(pp.writer.Name())
+	}
+
 	return nil
 }
 
