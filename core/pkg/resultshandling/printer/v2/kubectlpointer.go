@@ -117,6 +117,22 @@ type kubectlCluster struct {
 	context    string
 }
 
+// isSafeShellArg reports whether a cluster flag argument (kubeconfig path or
+// context name) can safely be emitted on a shell command line. It rejects
+// strings containing newlines, carriage returns, control characters, null
+// bytes, or leading hyphens that could split commands or inject flags.
+func isSafeShellArg(s string) bool {
+	if s == "" || strings.HasPrefix(s, "-") {
+		return false
+	}
+	for _, r := range s {
+		if unicode.IsControl(r) || r == '\n' || r == '\r' || r == 0 {
+			return false
+		}
+	}
+	return true
+}
+
 // kubectlGetCommand returns the command that prints the field at path on the
 // cluster. cluster names the one the scan ran against, so the command reads the
 // same one even when it is not the current context. It reports false when the resource or the path cannot be put on a
@@ -143,9 +159,15 @@ func kubectlGetCommand(resource workloadinterface.IMetadata, cluster kubectlClus
 		words = append(words, "-n", namespace)
 	}
 	if cluster.kubeconfig != "" {
+		if !isSafeShellArg(cluster.kubeconfig) {
+			return "", false
+		}
 		words = append(words, "--kubeconfig", shellWord(cluster.kubeconfig))
 	}
 	if cluster.context != "" {
+		if !isSafeShellArg(cluster.context) {
+			return "", false
+		}
 		words = append(words, "--context", shellWord(cluster.context))
 	}
 	words = append(words, "-o", "jsonpath="+shellQuote(expr))

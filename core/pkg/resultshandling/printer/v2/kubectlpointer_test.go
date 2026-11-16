@@ -223,18 +223,31 @@ func TestKubectlGetCommand(t *testing.T) {
 	refused := []struct {
 		name     string
 		resource *workloadinterface.Workload
+		cluster  kubectlCluster
 		path     string
 	}{
-		{"a name that is not a plain name", kubectlWorkload("v1", "Pod", "demo; rm -rf /", "default"), "spec.hostNetwork"},
-		{"a namespace that is not a plain name", kubectlWorkload("v1", "Pod", "demo", "default $(id)"), "spec.hostNetwork"},
-		{"a kind that is not a plain name", kubectlWorkload("v1", "Po d", "demo", "default"), "spec.hostNetwork"},
-		{"an API group that is not a plain name", kubectlWorkload("apps;x/v1", "Deployment", "demo", "default"), "spec.hostNetwork"},
-		{"a malformed path", kubectlWorkload("v1", "Pod", "demo", "default"), "spec.containers[*].image"},
-		{"an empty path", kubectlWorkload("v1", "Pod", "demo", "default"), ""},
+		{"a name that is not a plain name", kubectlWorkload("v1", "Pod", "demo; rm -rf /", "default"), kubectlCluster{}, "spec.hostNetwork"},
+		{"a namespace that is not a plain name", kubectlWorkload("v1", "Pod", "demo", "default $(id)"), kubectlCluster{}, "spec.hostNetwork"},
+		{"a kind that is not a plain name", kubectlWorkload("v1", "Po d", "demo", "default"), kubectlCluster{}, "spec.hostNetwork"},
+		{"an API group that is not a plain name", kubectlWorkload("apps;x/v1", "Deployment", "demo", "default"), kubectlCluster{}, "spec.hostNetwork"},
+		{"a malformed path", kubectlWorkload("v1", "Pod", "demo", "default"), kubectlCluster{}, "spec.containers[*].image"},
+		{"an empty path", kubectlWorkload("v1", "Pod", "demo", "default"), kubectlCluster{}, ""},
+		{"a context containing a newline", kubectlWorkload("v1", "Pod", "demo", "default"), kubectlCluster{context: "prod\nrm -rf /"}, "spec.hostNetwork"},
+		{"a context containing a carriage return", kubectlWorkload("v1", "Pod", "demo", "default"), kubectlCluster{context: "prod\rrm -rf /"}, "spec.hostNetwork"},
+		{"a context containing a control char", kubectlWorkload("v1", "Pod", "demo", "default"), kubectlCluster{context: "prod\x1b[2K"}, "spec.hostNetwork"},
+		{"a context containing a null byte", kubectlWorkload("v1", "Pod", "demo", "default"), kubectlCluster{context: "prod\x00extra"}, "spec.hostNetwork"},
+		{"a context starting with a double hyphen", kubectlWorkload("v1", "Pod", "demo", "default"), kubectlCluster{context: "--raw=/evil"}, "spec.hostNetwork"},
+		{"a context starting with a single hyphen", kubectlWorkload("v1", "Pod", "demo", "default"), kubectlCluster{context: "-prod"}, "spec.hostNetwork"},
+		{"a kubeconfig containing a newline", kubectlWorkload("v1", "Pod", "demo", "default"), kubectlCluster{kubeconfig: "/path/config\nmalicious"}, "spec.hostNetwork"},
+		{"a kubeconfig containing a carriage return", kubectlWorkload("v1", "Pod", "demo", "default"), kubectlCluster{kubeconfig: "/path/config\rmalicious"}, "spec.hostNetwork"},
+		{"a kubeconfig containing a control char", kubectlWorkload("v1", "Pod", "demo", "default"), kubectlCluster{kubeconfig: "/path/config\x07"}, "spec.hostNetwork"},
+		{"a kubeconfig containing a null byte", kubectlWorkload("v1", "Pod", "demo", "default"), kubectlCluster{kubeconfig: "/path/config\x00extra"}, "spec.hostNetwork"},
+		{"a kubeconfig starting with a double hyphen", kubectlWorkload("v1", "Pod", "demo", "default"), kubectlCluster{kubeconfig: "--kubeconfig=/etc/evil"}, "spec.hostNetwork"},
+		{"a kubeconfig starting with a single hyphen", kubectlWorkload("v1", "Pod", "demo", "default"), kubectlCluster{kubeconfig: "-dev.yaml"}, "spec.hostNetwork"},
 	}
 	for _, tt := range refused {
 		t.Run("no command for "+tt.name, func(t *testing.T) {
-			got, ok := kubectlGetCommand(tt.resource, kubectlCluster{}, tt.path)
+			got, ok := kubectlGetCommand(tt.resource, tt.cluster, tt.path)
 			assert.False(t, ok)
 			assert.Empty(t, got)
 		})
@@ -381,4 +394,38 @@ func TestResourceTableKubectlPointers(t *testing.T) {
 		assert.NotContains(t, out, "kubectl")
 		assert.Contains(t, out, "(line ", "a file scan keeps its line numbers")
 	})
+}
+
+func TestIsSafeShellArg(t *testing.T) {
+	safe := []string{
+		"minikube",
+		"cluster-1",
+		"my_context",
+		"context.domain",
+		"/path/to/kubeconfig",
+		"~/.kube/config",
+		"dev cluster",
+		"a@b:c",
+	}
+	for _, s := range safe {
+		assert.True(t, isSafeShellArg(s), "expected safe: %q", s)
+	}
+
+	unsafe := []string{
+		"",
+		"-flag",
+		"--context",
+		"-o",
+		"-dev.yaml",
+		"-prod",
+		"foo\nbar",
+		"foo\rbar",
+		"foo\r\nbar",
+		"foo\x00bar",
+		"foo\x1b[2Kbar",
+		"foo\tbar",
+	}
+	for _, s := range unsafe {
+		assert.False(t, isSafeShellArg(s), "expected unsafe: %q", s)
+	}
 }
