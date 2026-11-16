@@ -609,6 +609,12 @@ func TestValidatePrinter(t *testing.T) {
 			expectErr: nil,
 		},
 		{
+			name:      "policyreport format for image scan should not return error",
+			scanType:  cautils.ScanTypeImage,
+			format:    printer.PolicyReportFormat,
+			expectErr: nil,
+		},
+		{
 			name:      "github-actions format for image scan should return error",
 			scanType:  cautils.ScanTypeImage,
 			format:    printer.GitHubActionsFormat,

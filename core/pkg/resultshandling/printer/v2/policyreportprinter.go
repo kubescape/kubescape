@@ -2,9 +2,12 @@ package printer
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"sort"
+	"strconv"
 	"strings" // required for sanitizeDNS1123Subdomain / sanitizeLabelValue (Builder, ToLower, TrimRight)
 	"time"
 
@@ -12,6 +15,7 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -31,6 +35,12 @@ const (
 	policyReportResultPass = "pass"
 	policyReportResultFail = "fail"
 	policyReportResultSkip = "skip"
+
+	policyReportTypeLabel          = "kubescape.io/report-type"
+	policyReportTypeImage          = "image-vulnerabilities"
+	policyReportImageAnnotation    = "kubescape.io/image"
+	policyReportPlatformAnnotation = "kubescape.io/platform"
+	policyReportImageCategory      = "Image Vulnerability"
 
 	// Limits the apiserver enforces on the two fields these reports derive from a cluster name.
 	maxPolicyReportNameLength       = validation.DNS1123SubdomainMaxLength
@@ -53,9 +63,10 @@ type policyReport struct {
 }
 
 type policyReportMeta struct {
-	Name      string            `json:"name"`
-	Namespace string            `json:"namespace,omitempty"`
-	Labels    map[string]string `json:"labels,omitempty"`
+	Name        string            `json:"name"`
+	Namespace   string            `json:"namespace,omitempty"`
+	Labels      map[string]string `json:"labels,omitempty"`
+	Annotations map[string]string `json:"annotations,omitempty"`
 }
 
 type policyReportScope struct {
@@ -114,11 +125,22 @@ func (pp *PolicyReportPrinter) PrintNextSteps() {
 }
 
 func (pp *PolicyReportPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
-	if opaSessionObj == nil || opaSessionObj.Report == nil {
+	hasPosture := opaSessionObj != nil && opaSessionObj.Report != nil
+	if !hasPosture && len(imageScanData) == 0 {
 		return fmt.Errorf("failed to write results in PolicyReport format: no data provided")
 	}
 
-	reports := buildPolicyReports(opaSessionObj)
+	var reports []policyReport
+	var clusterName string
+	timestamp := time.Now().UTC()
+	if hasPosture {
+		reports = buildPolicyReports(opaSessionObj)
+		clusterName = scanContextName(opaSessionObj)
+		if generated := opaSessionObj.Report.ReportGenerationTime; !generated.IsZero() {
+			timestamp = generated
+		}
+	}
+	reports = append(reports, buildImagePolicyReports(imageScanData, clusterName, timestamp)...)
 	if len(reports) == 0 {
 		logger.L().Ctx(ctx).Warning("no results to report in PolicyReport format")
 	}
@@ -344,6 +366,118 @@ func buildPolicyReports(opaSessionObj *cautils.OPASessionObj) []policyReport {
 	}
 
 	return reports
+}
+
+func buildImagePolicyReports(imageScanData []cautils.ImageScanData, clusterName string, timestamp time.Time) []policyReport {
+	if len(imageScanData) == 0 {
+		return nil
+	}
+	reportTime := metav1.NewTime(timestamp)
+	resultTimestamp := *reportTime.ProtoTime()
+
+	reports := make([]policyReport, 0, len(imageScanData))
+	for i := range imageScanData {
+		scan := &imageScanData[i]
+		cves := extractCVEs(scan.Matches, scan.Image, scan.VexStatuses)
+
+		var summary policyReportSummary
+		results := make([]policyReportResult, 0, len(cves))
+		for _, cve := range cves {
+			result := imageVulnerabilityResult(cve, scan.Platform, resultTimestamp)
+			if result.Result == policyReportResultSkip {
+				summary.Skip++
+			} else {
+				summary.Fail++
+			}
+			results = append(results, result)
+		}
+
+		labels := policyReportLabels(clusterName)
+		labels[policyReportTypeLabel] = policyReportTypeImage
+		annotations := map[string]string{policyReportImageAnnotation: scan.Image}
+		if scan.Platform != "" {
+			annotations[policyReportPlatformAnnotation] = scan.Platform
+		}
+
+		reports = append(reports, policyReport{
+			APIVersion: policyReportAPIVersion,
+			Kind:       clusterPolicyReportKind,
+			Metadata: policyReportMeta{
+				Name:        imagePolicyReportName(clusterName, scan.Image, scan.Platform),
+				Labels:      labels,
+				Annotations: annotations,
+			},
+			Results: results,
+			Summary: summary,
+		})
+	}
+	return reports
+}
+
+func imageVulnerabilityResult(cve imageprinter.CVE, platform string, timestamp metav1.Timestamp) policyReportResult {
+	result := policyReportResultFail
+	if cve.VexStatus == "not_affected" || cve.VexStatus == "fixed" {
+		result = policyReportResultSkip
+	}
+
+	severity := cve.Severity
+	if severity == "" {
+		severity = apis.SeverityUnknownString
+	}
+
+	properties := map[string]string{
+		"image":   cve.Image,
+		"package": cve.Package,
+	}
+	if cve.Version != "" {
+		properties["installedVersion"] = cve.Version
+	}
+	if cve.FixedState != "" {
+		properties["fixState"] = cve.FixedState
+	}
+	fix := "no fix available"
+	if len(cve.FixVersions) > 0 {
+		fixedVersions := strings.Join(cve.FixVersions, ", ")
+		properties["fixedVersions"] = fixedVersions
+		fix = "fixed in " + fixedVersions
+	}
+	if platform != "" {
+		properties["platform"] = platform
+	}
+	if cve.KEVKnown {
+		properties["knownExploited"] = strconv.FormatBool(cve.KEV)
+	}
+	if cve.EPSS != nil {
+		properties["epss"] = imageprinter.FormatEPSS(cve.EPSS)
+	}
+	if cve.VexStatus != "" {
+		properties["vexStatus"] = cve.VexStatus
+	}
+	if cve.VexJustification != "" {
+		properties["vexJustification"] = cve.VexJustification
+	}
+
+	return policyReportResult{
+		Source:     policyReportSource,
+		Policy:     cve.ID,
+		Rule:       cve.Package,
+		Category:   policyReportImageCategory,
+		Severity:   mapPolicyReportSeverity(severity),
+		Result:     result,
+		Message:    fmt.Sprintf("%s severity vulnerability in %s %s, %s", severity, cve.Package, cve.Version, fix),
+		Timestamp:  timestamp,
+		Properties: properties,
+	}
+}
+
+func imagePolicyReportName(clusterName, image, platform string) string {
+	digest := sha256.Sum256([]byte(image + "\x00" + platform))
+	hash := hex.EncodeToString(digest[:5])
+	ref := sanitizeDNS1123Subdomain(image, validation.DNS1123LabelMaxLength-len("image--")-len(hash))
+	if ref == "" {
+		return policyReportName(clusterName, "image-"+hash)
+	}
+	return policyReportName(clusterName, "image-"+ref+"-"+hash)
 }
 
 // policyReportName builds the metadata.name for a report. A cluster name reaches us from a
