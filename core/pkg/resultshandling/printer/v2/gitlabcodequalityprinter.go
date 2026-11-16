@@ -180,13 +180,41 @@ func toCodeQualityIssue(ctl reportsummary.IControlSummary, ac *resourcesresults.
 		Content:     codeQualityContent{Body: codeQualityBody(ctl, ac, resource, showSecrets)},
 		Categories:  []string{gitLabCodeQualityCategory},
 		Severity:    codeQualitySeverity(ctl.GetScoreFactor()),
-		Fingerprint: gitLabVulnerabilityID(controlID, resourceID, filePath),
+		Fingerprint: codeQualityFingerprint(controlID, resource, resourceID, filePath),
 		EngineName:  gitLabCodeQualityEngine,
 		Location: codeQualityLocation{
 			Path:  filePath,
 			Lines: codeQualityLines{Begin: line},
 		},
 	}
+}
+
+// codeQualityFingerprint identifies a finding by its control, the resource's API
+// group, kind, namespace and name, and its file. The group is part of a resource's
+// identity (networking.k8s.io and projectcalico.org both have a NetworkPolicy), and
+// its version is not: moving to another version of the API is the same resource.
+// GitLab matches a merge request's report with
+// the target branch's by fingerprint alone, so it must not change while those stay
+// the same. The scan's resource ID is not used for that: it hashes the workload
+// path, which holds the document's index in its file for a plain manifest, so a
+// document added above the resource changed it, and the absolute path for a Helm
+// or Kustomize resource, which follows the runner's build directory. The ID is
+// used only when the resource itself is not known.
+func codeQualityFingerprint(controlID string, resource workloadinterface.IMetadata, resourceID, filePath string) string {
+	identity := resourceID
+	if resource != nil {
+		identity = apiGroup(resource.GetApiVersion()) + "/" + resource.GetKind() + "/" + resource.GetNamespace() + "/" + resource.GetName()
+	}
+	return gitLabVulnerabilityID(controlID, identity, filePath)
+}
+
+// apiGroup returns the group of an apiVersion: "apps" for apps/v1, and "" for the
+// core group's v1.
+func apiGroup(apiVersion string) string {
+	if group, _, found := strings.Cut(apiVersion, "/"); found {
+		return group
+	}
+	return ""
 }
 
 func codeQualityLine(opaSessionObj *cautils.OPASessionObj, resolver *locationresolver.PathLocationResolver, ac *resourcesresults.ResourceAssociatedControl, resourceID string) int {

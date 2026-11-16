@@ -40,7 +40,6 @@ func codeQualityReportFor(t *testing.T, session *cautils.OPASessionObj) ([]codeQ
 
 func TestGitLabCodeQuality_MapsFailedControlToIssue(t *testing.T) {
 	const controlID = "C-0057"
-	resourceID := "apps/v1/Deployment/default/demo"
 
 	origWD, err := os.Getwd()
 	require.NoError(t, err)
@@ -57,7 +56,7 @@ func TestGitLabCodeQuality_MapsFailedControlToIssue(t *testing.T) {
 	assert.Equal(t, []string{"Security"}, issue.Categories)
 	assert.Equal(t, "major", issue.Severity)
 	assert.Equal(t, "kubescape", issue.EngineName)
-	assert.Equal(t, gitLabVulnerabilityID(controlID, resourceID, "deploy.yaml"), issue.Fingerprint)
+	assert.Equal(t, gitLabVulnerabilityID(controlID, "apps/Deployment/default/demo", "deploy.yaml"), issue.Fingerprint)
 	assert.Equal(t, "deploy.yaml", issue.Location.Path)
 	assert.Equal(t, 13, issue.Location.Lines.Begin)
 
@@ -74,6 +73,110 @@ func TestGitLabCodeQuality_FingerprintIsStableAcrossRuns(t *testing.T) {
 	require.Len(t, first, 1)
 	require.Len(t, second, 1)
 	assert.Equal(t, first[0].Fingerprint, second[0].Fingerprint)
+}
+
+// sessionWithWorkloadPath keys the fixture's resource the way a scan does: by the
+// LocalWorkload's own ID, which hashes the workload path ("<file>:<document index>"
+// for a plain manifest, the absolute file path for a Helm or Kustomize resource).
+func sessionWithWorkloadPath(t *testing.T, workloadPath string) *cautils.OPASessionObj {
+	t.Helper()
+	const fixtureID = "apps/v1/Deployment/default/demo"
+	session := gitLabSessionFixture(t, "C-0057", 8.0)
+
+	lw, ok := session.AllResources[fixtureID].(*localworkload.LocalWorkload)
+	require.True(t, ok)
+	lw.SetPath(workloadPath)
+	id := lw.GetID()
+
+	result := session.ResourcesResult[fixtureID]
+	result.ResourceID = id
+	session.ResourcesResult = map[string]resourcesresults.Result{id: result}
+	session.ResourceSource[id] = session.ResourceSource[fixtureID]
+	delete(session.ResourceSource, fixtureID)
+	delete(session.AllResources, fixtureID)
+	session.AllResources[id] = lw
+	return session
+}
+
+// GitLab compares a merge request's report with the target branch's by fingerprint
+// only, so the same control failing on the same resource in the same file must keep
+// its fingerprint, or the widget lists it as both new and resolved.
+func TestGitLabCodeQuality_FingerprintFollowsTheResourceNotItsWorkloadPath(t *testing.T) {
+	tests := []struct {
+		name          string
+		before, after string
+	}{
+		// a document added above the resource in the same file
+		{name: "document index", before: "deploy.yaml:0", after: "deploy.yaml:1"},
+		// a Helm or Kustomize resource scanned from another build directory
+		{name: "checkout directory", before: "/builds/a1b2c3/0/group/project/deploy.yaml", after: "/builds/x9y8z7/1/group/project/deploy.yaml"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			before, _ := codeQualityReportFor(t, sessionWithWorkloadPath(t, tc.before))
+			after, _ := codeQualityReportFor(t, sessionWithWorkloadPath(t, tc.after))
+
+			require.Len(t, before, 1)
+			require.Len(t, after, 1)
+			require.Equal(t, before[0].Location.Path, after[0].Location.Path)
+			assert.Equal(t, before[0].Fingerprint, after[0].Fingerprint)
+		})
+	}
+}
+
+// A different control, resource or file is a different finding.
+func TestCodeQualityFingerprintTellsFindingsApart(t *testing.T) {
+	deployment := func(namespace, name string) *localworkload.LocalWorkload {
+		return localworkload.NewLocalWorkload(map[string]interface{}{
+			"apiVersion": "apps/v1",
+			"kind":       "Deployment",
+			"metadata":   map[string]interface{}{"name": name, "namespace": namespace},
+		})
+	}
+	base := codeQualityFingerprint("C-0057", deployment("default", "demo"), "id", "deploy.yaml")
+
+	for name, other := range map[string]string{
+		"control":   codeQualityFingerprint("C-0046", deployment("default", "demo"), "id", "deploy.yaml"),
+		"name":      codeQualityFingerprint("C-0057", deployment("default", "other"), "id", "deploy.yaml"),
+		"namespace": codeQualityFingerprint("C-0057", deployment("prod", "demo"), "id", "deploy.yaml"),
+		"file":      codeQualityFingerprint("C-0057", deployment("default", "demo"), "id", "other.yaml"),
+	} {
+		assert.NotEqual(t, base, other, name)
+	}
+	assert.Equal(t, gitLabVulnerabilityID("C-0057", "id", "deploy.yaml"),
+		codeQualityFingerprint("C-0057", nil, "id", "deploy.yaml"), "without the resource, the scan's ID is used")
+}
+
+// The API group is part of a resource's identity and its version is not: two
+// NetworkPolicies of the same name in one file, from networking.k8s.io and from
+// projectcalico.org, are two findings, and a move to another version of the API is
+// the same one.
+func TestCodeQualityFingerprintTakesTheAPIGroupNotTheVersion(t *testing.T) {
+	policy := func(apiVersion string) *localworkload.LocalWorkload {
+		return localworkload.NewLocalWorkload(map[string]interface{}{
+			"apiVersion": apiVersion,
+			"kind":       "NetworkPolicy",
+			"metadata":   map[string]interface{}{"name": "demo", "namespace": "default"},
+		})
+	}
+	fingerprint := func(apiVersion string) string {
+		return codeQualityFingerprint("C-0260", policy(apiVersion), "id", "policies.yaml")
+	}
+
+	assert.NotEqual(t, fingerprint("networking.k8s.io/v1"), fingerprint("projectcalico.org/v3"), "another group is another resource")
+	assert.Equal(t, fingerprint("projectcalico.org/v3"), fingerprint("projectcalico.org/v1"), "another version is the same resource")
+	assert.NotEqual(t, fingerprint("v1"), fingerprint("networking.k8s.io/v1"), "the core group is a group of its own")
+}
+
+func TestAPIGroup(t *testing.T) {
+	for apiVersion, want := range map[string]string{
+		"v1":                   "",
+		"apps/v1":              "apps",
+		"networking.k8s.io/v1": "networking.k8s.io",
+		"":                     "",
+	} {
+		assert.Equal(t, want, apiGroup(apiVersion), apiVersion)
+	}
 }
 
 func TestGitLabCodeQuality_CleanScanWritesEmptyArray(t *testing.T) {
