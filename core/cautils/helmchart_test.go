@@ -621,3 +621,69 @@ func TestIsStaticTemplate_OversizedFileTreatedAsNonStatic(t *testing.T) {
 	assert.ErrorIs(t, err, ErrHelmTemplateTooLarge)
 	assert.False(t, static)
 }
+
+func TestParseHelmFileValuePaths_WindowsPaths(t *testing.T) {
+	tests := []struct {
+		name          string
+		input         string
+		expectedPaths []string
+		expectErr     bool
+	}{
+		{
+			name:          "single Windows path with backslashes",
+			input:         `valKey=C:\Users\runneradmin\AppData\Local\Temp\secret.txt`,
+			expectedPaths: []string{`C:\Users\runneradmin\AppData\Local\Temp\secret.txt`},
+		},
+		{
+			name:          "comma-separated Windows paths",
+			input:         `k1=C:\dir\file1.txt,k2=C:\dir\file2.txt`,
+			expectedPaths: []string{`C:\dir\file1.txt`, `C:\dir\file2.txt`},
+		},
+		{
+			name:          "Windows path with escaped comma",
+			input:         `custom=C:\dir\a\,b.txt`,
+			expectedPaths: []string{`C:\dir\a,b.txt`},
+		},
+		{
+			name:          "Windows path with trailing whitespace",
+			input:         `custom=C:\dir\val.txt `,
+			expectedPaths: []string{`C:\dir\val.txt `},
+		},
+		{
+			name:          "Windows paths in brace list",
+			input:         `custom={C:\dir\f1.txt,C:\dir\f2.txt}`,
+			expectedPaths: []string{`C:\dir\f1.txt`, `C:\dir\f2.txt`},
+		},
+		{
+			name:          "UNC Windows network path",
+			input:         `unc=\\server\share\file.txt`,
+			expectedPaths: []string{`\\server\share\file.txt`},
+		},
+		{
+			name:          "Unix path without backslashes",
+			input:         `k1=/ws/dir/file1.yaml,k2=/ws/dir/file2.yaml`,
+			expectedPaths: []string{`/ws/dir/file1.yaml`, `/ws/dir/file2.yaml`},
+		},
+		{
+			name:      "empty subkey parse error is rejected",
+			input:     `a.=/ws/safe,b=C:\dir\report.txt`,
+			expectErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var gotPaths []string
+			err := ParseHelmFileValuePaths(tt.input, func(p string) error {
+				gotPaths = append(gotPaths, p)
+				return nil
+			})
+			if tt.expectErr {
+				assert.Error(t, err)
+			} else {
+				require.NoError(t, err)
+				assert.Equal(t, tt.expectedPaths, gotPaths)
+			}
+		})
+	}
+}

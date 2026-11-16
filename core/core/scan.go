@@ -40,7 +40,6 @@ import (
 	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	"github.com/kubescape/opa-utils/resources"
 	"go.opentelemetry.io/otel"
-	"helm.sh/helm/v3/pkg/strvals"
 	"k8s.io/client-go/kubernetes"
 )
 
@@ -758,34 +757,11 @@ func validateScanOutputSafety(outputFile string, scanInfo *cautils.ScanInfo, tra
 		}
 	}
 	for _, setFile := range scanInfo.HelmSetFileValues {
-		var collisionErr error
-		var pathsFound int
-		dest := map[string]interface{}{}
-		if err := strvals.ParseIntoFile(setFile, dest, func(rs []rune) (interface{}, error) {
-			pathsFound++
-			filePath := string(rs)
-			if filePath != "" {
-				if err := checkFile("Helm set-file", filePath); err != nil {
-					collisionErr = err
-					return nil, err
-				}
-			}
-			return "", nil
-		}); err != nil {
-			if collisionErr != nil {
-				return collisionErr
-			}
-			return fmt.Errorf("failed parsing --set-file data %q: %w", setFile, err)
-		}
-		if pathsFound == 0 {
-			parts := strings.SplitN(setFile, "=", 2)
-			filePath := setFile
-			if len(parts) == 2 {
-				filePath = parts[1]
-			}
-			if err := checkFile("Helm set-file", filePath); err != nil {
-				return err
-			}
+		err := cautils.ParseHelmFileValuePaths(setFile, func(filePath string) error {
+			return checkFile("Helm set-file", filePath)
+		})
+		if err != nil {
+			return err
 		}
 	}
 

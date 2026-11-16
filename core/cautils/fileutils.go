@@ -115,6 +115,74 @@ func LoadResourcesFromHelmChartsFiltered(ctx context.Context, basePath string, v
 	return loadResourcesFromHelmCharts(ctx, basePath, valueOpts, excludedChartDirectories, filter, workspaceOpt...)
 }
 
+// ProtectHelmPathSeparators escapes backslashes that do not precede Helm syntax delimiters
+// (',', '{', '}', '[', ']', '=', '.') so that native Windows path separators (e.g. C:\dir\file.txt)
+// are preserved across strvals decoding rather than being consumed as escape prefixes.
+func ProtectHelmPathSeparators(s string) string {
+	var sb strings.Builder
+	runes := []rune(s)
+	n := len(runes)
+	for i := 0; i < n; i++ {
+		r := runes[i]
+		if r == '\\' {
+			if i+1 < n {
+				next := runes[i+1]
+				switch next {
+				case ',', '{', '}', '[', ']', '=', '.':
+					sb.WriteRune(r)
+					sb.WriteRune(next)
+					i++
+					continue
+				}
+			}
+			sb.WriteString(`\\`)
+			continue
+		}
+		sb.WriteRune(r)
+	}
+	return sb.String()
+}
+
+// ParseHelmFileValuePaths decodes file paths from a Helm FileValues or --set-file expression,
+// preserving native Windows path separators while supporting Helm syntax such as
+// comma-separated values, brace lists ({path1,path2}), and escaped commas.
+// The callback fn is invoked for each decoded file path.
+func ParseHelmFileValuePaths(fv string, fn func(filePath string) error) error {
+	var callbackErr error
+	var pathsFound int
+	dest := map[string]interface{}{}
+	protected := ProtectHelmPathSeparators(fv)
+	if err := strvals.ParseIntoFile(protected, dest, func(rs []rune) (interface{}, error) {
+		pathsFound++
+		filePath := string(rs)
+		if filePath != "" {
+			if err := fn(filePath); err != nil {
+				callbackErr = err
+				return nil, err
+			}
+		}
+		return "", nil
+	}); err != nil {
+		if callbackErr != nil {
+			return callbackErr
+		}
+		return fmt.Errorf("failed parsing --set-file data %q: %w", fv, err)
+	}
+	if pathsFound == 0 {
+		parts := strings.SplitN(fv, "=", 2)
+		filePath := fv
+		if len(parts) == 2 {
+			filePath = parts[1]
+		}
+		if filePath != "" {
+			if err := fn(filePath); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 func loadResourcesFromHelmCharts(ctx context.Context, basePath string, valueOpts HelmValueOptions, excludedChartDirectories []string, filter *PathFilter, workspaceOpt ...string) (map[string][]workloadinterface.IMetadata, map[string]Chart, []string, error) {
 	var workspaceDir string
 	if len(workspaceOpt) > 0 {
@@ -128,32 +196,14 @@ func loadResourcesFromHelmCharts(ctx context.Context, basePath string, valueOpts
 			}
 		}
 		for _, fv := range valueOpts.FileValues {
-			var escapeErr error
-			var pathsFound int
-			dest := map[string]interface{}{}
-			if err := strvals.ParseIntoFile(fv, dest, func(rs []rune) (interface{}, error) {
-				pathsFound++
-				filePath := string(rs)
-				if filePath != "" && !pathcontainment.IsPathContained(workspaceDir, filePath) {
-					escapeErr = fmt.Errorf("%w: Helm file-values file %q outside workspace root", pathcontainment.ErrPathEscapesWorkspace, filePath)
-					return nil, escapeErr
+			err := ParseHelmFileValuePaths(fv, func(filePath string) error {
+				if !pathcontainment.IsPathContained(workspaceDir, filePath) {
+					return fmt.Errorf("%w: Helm file-values file %q outside workspace root", pathcontainment.ErrPathEscapesWorkspace, filePath)
 				}
-				return "", nil
-			}); err != nil {
-				if escapeErr != nil {
-					return nil, nil, nil, escapeErr
-				}
-				return nil, nil, nil, fmt.Errorf("failed parsing --set-file data %q: %w", fv, err)
-			}
-			if pathsFound == 0 {
-				parts := strings.SplitN(fv, "=", 2)
-				filePath := fv
-				if len(parts) == 2 {
-					filePath = parts[1]
-				}
-				if filePath != "" && !pathcontainment.IsPathContained(workspaceDir, filePath) {
-					return nil, nil, nil, fmt.Errorf("%w: Helm file-values file %q outside workspace root", pathcontainment.ErrPathEscapesWorkspace, filePath)
-				}
+				return nil
+			})
+			if err != nil {
+				return nil, nil, nil, err
 			}
 		}
 	}
