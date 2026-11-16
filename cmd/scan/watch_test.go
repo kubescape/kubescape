@@ -741,6 +741,25 @@ func TestWatchOutlivesAnInitialScanThatAManifestEditMends(t *testing.T) {
 	}
 }
 
+func TestWatchRecoversFromInvalidKustomizeResource(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "kustomization.yaml"), `apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+- pod.yaml
+`)
+	pod := filepath.Join(dir, "pod.yaml")
+	writeFile(t, pod, "apiVersion: v1\nkind: [unclosed\n")
+	out, stop := startSecurityWatchOutput(t, localWatchScanInfo(t, dir))
+
+	out.waitFor(t, "the watch waits for a change")
+	writeFile(t, pod, podManifest("web", false))
+	out.waitFor(t, "Initial scan complete: 1 failing control(s) on 1 resource(s)")
+	writeFile(t, pod, podManifest("web", true))
+	out.waitFor(t, "0 new, 1 resolved")
+	require.NoError(t, stop())
+}
+
 // startSecurityWatchOutput is startSecurityWatch with the command's error output
 // written to the same lines as its output.
 func startSecurityWatchOutput(t *testing.T, info *cautils.ScanInfo) (out *lines, stop func() error) {

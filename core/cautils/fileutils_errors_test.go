@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -230,6 +231,37 @@ resources:
 	assert.Equal(t, dir, name)
 	assert.Contains(t, err.Error(), "failed to render Kustomize resources")
 	assert.Contains(t, err.Error(), "missing-deployment.yaml")
+	assert.ErrorIs(t, err, ErrManifestsNotLoaded)
+}
+
+func TestLoadResourcesFromKustomizeDirectoryMissingHelmIsFatal(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	dir := filepath.Join(kustomizeTestdataPath(), "helm")
+
+	_, _, err := LoadResourcesFromKustomizeDirectory(context.Background(), dir)
+
+	require.Error(t, err)
+	var executableError *exec.Error
+	require.ErrorAs(t, err, &executableError)
+	assert.NotErrorIs(t, err, ErrManifestsNotLoaded)
+}
+
+func TestLoadResourcesFromKustomizeDirectoryUnstartableHelmIsFatal(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("a missing shebang interpreter is a Unix executable-start failure")
+	}
+	bin := t.TempDir()
+	interpreter := filepath.Join(bin, "missing-interpreter")
+	require.NoError(t, os.WriteFile(filepath.Join(bin, "helm"), []byte("#!"+interpreter+"\n"), 0o700))
+	t.Setenv("PATH", bin)
+
+	_, _, err := LoadResourcesFromKustomizeDirectory(context.Background(), filepath.Join(kustomizeTestdataPath(), "helm"))
+
+	require.Error(t, err)
+	var pathError *os.PathError
+	require.ErrorAs(t, err, &pathError)
+	assert.Equal(t, "fork/exec", pathError.Op)
+	assert.NotErrorIs(t, err, ErrManifestsNotLoaded)
 }
 
 func TestLoadResourcesFromKustomizeDirectoryNoopsForPlainDirectory(t *testing.T) {

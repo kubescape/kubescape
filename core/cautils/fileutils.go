@@ -10,6 +10,7 @@ import (
 	"io"
 	"maps"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"runtime"
@@ -745,7 +746,16 @@ func loadKustomizeDirectory(ctx context.Context, basePath string) (map[string][]
 	kustomizeDirectoryName := getKustomizeDirectoryName(newBasePath)
 
 	if len(errs) > 0 {
-		err := fmt.Errorf("failed to render Kustomize resources from %q: %w", newBasePath, errors.Join(errs...))
+		cause := errors.Join(errs...)
+		// Manifest edits can repair a failed build, but cannot install or make
+		// executable the Helm command used by Kustomize's built-in inflator.
+		var executableError *exec.Error
+		var pathError *os.PathError
+		if !errors.As(cause, &executableError) &&
+			!(errors.As(cause, &pathError) && pathError.Op == "fork/exec") {
+			cause = fmt.Errorf("%w: %w", ErrManifestsNotLoaded, cause)
+		}
+		err := fmt.Errorf("failed to render Kustomize resources from %q: %w", newBasePath, cause)
 		logger.L().Ctx(ctx).Error("Rendering yaml from Kustomize failed", helpers.Error(err))
 		return nil, kustomizeDirectoryName, nil, err
 	}
