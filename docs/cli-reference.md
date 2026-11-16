@@ -825,7 +825,7 @@ kubescape scan image <image>:<tag> [<image>:<tag>...] [flags]
 | Flag | Description |
 |------|-------------|
 | `--exceptions <path>` | Path to exceptions file. Targets are matched per image, so one file can carry rules for every image in the run |
-| `-f, --format <format>` | Output format: `pretty-printer`, `json`, `junit`, `prometheus`, `pdf`, `html`, `sarif`, `gitlab-sast`, `yaml`, `csv`, `markdown`, `cyclonedx-json`, `spdx-json` — see [CSV export](image-scanning.md#csv-export) |
+| `-f, --format <format>` | Output format: `pretty-printer`, `json`, `junit`, `prometheus`, `pdf`, `html`, `sarif`, `gitlab-sast`, `yaml`, `csv`, `markdown`, `cyclonedx-json`, `spdx-json`, `policyreport` — see [CSV export](image-scanning.md#csv-export) |
 | `--image-scan-concurrency <n>` | Number of images scanned in parallel (default `1`) |
 | `-p, --password <pass>` | Registry password |
 | `--platform <platform>` | OCI platform to scan, for example `linux/amd64`, `linux/arm64/v8`, or `windows/amd64`. Applies to every image in the run |
@@ -853,6 +853,13 @@ and `spdx-json` emit a JSON array with one document per image (a single image
 keeps the bare document shape), while the table, HTML, PDF, markdown, CSV,
 SARIF, GitLab SAST, JUnit and Prometheus outputs report every image in one
 document.
+
+`policyreport` writes one `ClusterPolicyReport` per image, with one result per
+vulnerability. Each report is labeled `kubescape.io/report-type:
+image-vulnerabilities` and annotated with the image reference, so a cluster
+scan with `--scan-images` lists image findings next to its posture reports in
+Policy Reporter. A VEX status of `not_affected` or `fixed` is reported as
+`skip`.
 
 GitLab reports require separate posture and image scans. Combining
 `--scan-images` with `--format gitlab-sast` is rejected because a SAST artifact
