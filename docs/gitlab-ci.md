@@ -112,9 +112,14 @@ Kubescape severities map to Code Quality severities as Critical → `critical`, 
 
 Report Image Vulnerabilities with Container Scanning
 
-The `gitlab-container-scanning` format writes image vulnerabilities as a GitLab Container Scanning report, so they appear in the merge request security widget and the vulnerability report next to GitLab's own container scanning results. Each finding names the image, its operating system and the vulnerable package, and carries the upgrade path when a fix is available.
+The `gitlab-container-scanning` format writes image vulnerabilities as a GitLab Container Scanning report, so they appear in the merge request security widget and the vulnerability report next to GitLab's own container scanning results (GitLab Ultimate tier required; the security widget and vulnerability report are not available on Free or Premium tiers). Each finding names the image, its operating system and the vulnerable package, and carries the upgrade path when a fix is available.
+
+The image being scanned (for example, `$CI_REGISTRY_IMAGE:$CI_COMMIT_SHA`) must already exist in the registry, built and pushed by an earlier job in your pipeline.
 
 ```yaml
+stages:
+  - scan
+
 scan_container:
   stage: scan
   image: alpine:latest

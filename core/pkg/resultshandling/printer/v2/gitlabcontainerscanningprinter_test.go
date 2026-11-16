@@ -89,7 +89,7 @@ func TestGitLabContainerScanningPrinter(t *testing.T) {
 	assert.Equal(t, "ghsa", negligible.Identifiers[0].Type)
 
 	arm := report.Vulnerabilities[2]
-	assert.Equal(t, gitLabUnknownOperatingSystem, arm.Location.OperatingSystem)
+	assert.Equal(t, "Unknown (linux/arm64)", arm.Location.OperatingSystem)
 	assert.Contains(t, arm.Description, "Scanned platform: linux/arm64.")
 	assert.NotEqual(t, critical.ID, arm.ID, "platform variants are tracked separately")
 }
@@ -99,8 +99,8 @@ func TestGitLabContainerScanningPrinter_CollapsesDuplicateFindings(t *testing.T)
 		Image: "app:1.0",
 		Matches: match.NewMatches(
 			containerScanningMatch("ALAS-2024-0003", "", "curl", "/usr/bin"),
-			containerScanningMatch("CVE-2024-0002", "High", "zlib", "/lib/a"),
-			containerScanningMatch("CVE-2024-0002", "High", "zlib", "/lib/b"),
+			containerScanningMatch("CVE-2024-0002", "High", "zlib", "/lib/a", "1.2.13"),
+			containerScanningMatch("CVE-2024-0002", "High", "zlib", "/lib/b", "1.2.14"),
 		),
 	}})
 
@@ -110,6 +110,82 @@ func TestGitLabContainerScanningPrinter_CollapsesDuplicateFindings(t *testing.T)
 	assert.Equal(t, "Package curl version 1.0.0 is affected by ALAS-2024-0003 (severity: Unknown).", report.Vulnerabilities[0].Description)
 	assert.Equal(t, "alas", report.Vulnerabilities[0].Identifiers[0].Type)
 	assert.Equal(t, "CVE-2024-0002 in zlib 1.0.0", report.Vulnerabilities[1].Name)
+	assert.Equal(t, "Upgrade zlib to version 1.2.13, 1.2.14.", report.Vulnerabilities[1].Solution, "fix versions from duplicate findings are merged")
+}
+
+func TestGitLabContainerScanningPrinter_UntaggedImagesNormalized(t *testing.T) {
+	report := printContainerScanning(t, []cautils.ImageScanData{
+		{
+			Image: "nginx",
+			Matches: match.NewMatches(
+				containerScanningMatch("CVE-2024-0001", "High", "openssl", "a", "3.3.2"),
+			),
+		},
+		{
+			Image: "redis",
+			Matches: match.NewMatches(
+				containerScanningMatch("CVE-2024-0001", "High", "openssl", "a", "3.3.2"),
+			),
+		},
+	})
+
+	require.Len(t, report.Vulnerabilities, 2)
+	assert.Equal(t, "nginx:latest", report.Vulnerabilities[0].Location.Image)
+	assert.Equal(t, gitLabImageVulnerabilityID("nginx:latest", "openssl", "1.0.0", "CVE-2024-0001", ""), report.Vulnerabilities[0].ID)
+
+	assert.Equal(t, "redis:latest", report.Vulnerabilities[1].Location.Image)
+	assert.Equal(t, gitLabImageVulnerabilityID("redis:latest", "openssl", "1.0.0", "CVE-2024-0001", ""), report.Vulnerabilities[1].ID)
+}
+
+func TestNormalizeImageRef(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"nginx", "nginx:latest"},
+		{"redis", "redis:latest"},
+		{"library/nginx", "library/nginx:latest"},
+		{"docker.io/library/nginx", "docker.io/library/nginx:latest"},
+		{"localhost:5000/app", "localhost:5000/app:latest"},
+		{"registry.example.com/team/app", "registry.example.com/team/app:latest"},
+		{"nginx:1.25", "nginx:1.25"},
+		{"nginx:latest", "nginx:latest"},
+		{"localhost:5000/app:v1", "localhost:5000/app:v1"},
+		{"nginx@sha256:abc", "nginx:latest@sha256:abc"},
+		{"nginx:1.0@sha256:abc", "nginx:1.0@sha256:abc"},
+		{"", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			assert.Equal(t, tt.want, normalizeImageRef(tt.input))
+		})
+	}
+}
+
+func TestGitLabContainerScanningPrinter_MultiPlatformDistinctFingerprints(t *testing.T) {
+	report := printContainerScanning(t, []cautils.ImageScanData{
+		{
+			Image:    "app:1.0",
+			Platform: "linux/amd64",
+			Context:  grypepkg.Context{Distro: distro.New(distro.Alpine, "3.20.1", "")},
+			Matches:  match.NewMatches(containerScanningMatch("CVE-2024-0001", "High", "openssl", "a")),
+		},
+		{
+			Image:    "app:1.0",
+			Platform: "linux/arm64",
+			Context:  grypepkg.Context{Distro: distro.New(distro.Alpine, "3.20.1", "")},
+			Matches:  match.NewMatches(containerScanningMatch("CVE-2024-0001", "High", "openssl", "a")),
+		},
+	})
+
+	require.Len(t, report.Vulnerabilities, 2)
+	amd := report.Vulnerabilities[0]
+	arm := report.Vulnerabilities[1]
+
+	assert.Equal(t, "alpine 3.20.1 (linux/amd64)", amd.Location.OperatingSystem)
+	assert.Equal(t, "alpine 3.20.1 (linux/arm64)", arm.Location.OperatingSystem)
+	assert.NotEqual(t, amd.Location.OperatingSystem, arm.Location.OperatingSystem, "platform distinguishes GitLab location fingerprint")
+	assert.NotEqual(t, amd.ID, arm.ID)
 }
 
 func TestGitLabContainerScanningPrinter_BoundsLongNames(t *testing.T) {
