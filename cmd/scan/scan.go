@@ -165,6 +165,10 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if ks == nil {
+				return errors.New("uninitialized kubescape interface")
+			}
+
 			if watchMode {
 				if err := validateWatchFlags(cmd, &scanInfo, args); err != nil {
 					return err
@@ -495,6 +499,9 @@ func setSecurityViewScanInfo(args []string, scanInfo *cautils.ScanInfo) []cautil
 // instead of being stashed on the shared ks, so it can't be observed or
 // clobbered by another operation sharing the same *Kubescape instance.
 func deriveTimeoutContext(scanInfo *cautils.ScanInfo, ks meta.IKubescape) (context.Context, func()) {
+	if ks == nil {
+		return context.Background(), func() {}
+	}
 	if scanInfo.ScanTimeout <= 0 {
 		return ks.Context(), func() {}
 	}

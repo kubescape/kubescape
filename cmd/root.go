@@ -73,7 +73,11 @@ func getRootCmd(ks meta.IKubescape, ksVersion, ksCommit, ksDate string) *cobra.C
 			if err := initLoggerLevel(cmd); err != nil {
 				return err
 			}
-			if err := initEnvironment(ks.Context()); err != nil {
+			ctx := cmd.Context()
+			if ks != nil && ks.Context() != nil {
+				ctx = ks.Context()
+			}
+			if err := initEnvironment(ctx); err != nil {
 				return err
 			}
 			initCacheDir(cmd)

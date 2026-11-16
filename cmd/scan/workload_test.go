@@ -1288,3 +1288,11 @@ func TestGetWorkloadCmd_NamespaceResolution(t *testing.T) {
 		assert.Contains(t, err.Error(), "invalid workload name")
 	})
 }
+
+func TestGetWorkloadCmd_NilKubescape(t *testing.T) {
+	scanInfo := cautils.ScanInfo{}
+	cmd := getWorkloadCmd(nil, &scanInfo)
+	require.NotNil(t, cmd)
+	err := cmd.RunE(cmd, []string{"Deployment/test"})
+	require.EqualError(t, err, "uninitialized kubescape interface")
+}
