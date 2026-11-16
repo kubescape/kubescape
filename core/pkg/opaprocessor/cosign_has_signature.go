@@ -44,8 +44,14 @@ func hasSignatureBundle(ctx context.Context, ref name.Digest, digest v1.Hash, op
 		return false
 	}
 	for _, bundle := range bundles {
-		if isCosignSignStatement(bundle.GetDsseEnvelope().GetPayload(), digest) {
-			return true
+		envelope := bundle.GetDsseEnvelope()
+		if !isCosignSignStatement(envelope.GetPayload(), digest) {
+			continue
+		}
+		for _, signature := range envelope.GetSignatures() {
+			if len(signature.GetSig()) > 0 {
+				return true
+			}
 		}
 	}
 	return false
