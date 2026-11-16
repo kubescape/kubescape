@@ -489,6 +489,7 @@ func TestGetImageCmd_RunE_ForwardsMixedTarballAndRegistryImages(t *testing.T) {
 }
 
 func TestGetImageCmd_RunE_RejectsPostureFlags(t *testing.T) {
+	trueVal := true
 	testCases := []struct {
 		name     string
 		scanInfo cautils.ScanInfo
@@ -643,6 +644,36 @@ func TestGetImageCmd_RunE_RejectsPostureFlags(t *testing.T) {
 			name:     "file-path is rejected",
 			scanInfo: cautils.ScanInfo{FilePath: "manifests/app.yaml"},
 			wantErr:  "--file-path is not supported for image scans: an image scan evaluates vulnerabilities, not local manifest files",
+		},
+		{
+			name:     "host-scan is rejected",
+			scanInfo: cautils.ScanInfo{HostSensorEnabled: cautils.NewBoolPtr(&trueVal)},
+			wantErr:  "--host-scan is not supported for image scans: an image scan evaluates vulnerabilities, not cluster host nodes",
+		},
+		{
+			name:     "print-attack-tree is rejected",
+			scanInfo: cautils.ScanInfo{PrintAttackTree: true},
+			wantErr:  "--print-attack-tree is not supported for image scans: an image scan evaluates vulnerabilities, not posture attack paths",
+		},
+		{
+			name:     "enable-rego-prints is rejected",
+			scanInfo: cautils.ScanInfo{EnableRegoPrint: true},
+			wantErr:  "--enable-rego-prints is not supported for image scans: an image scan evaluates vulnerabilities, not Rego rules",
+		},
+		{
+			name:     "enable-streaming is rejected",
+			scanInfo: cautils.ScanInfo{EnableStreaming: true},
+			wantErr:  "--enable-streaming is not supported for image scans: an image scan evaluates vulnerabilities, not cluster resource streaming",
+		},
+		{
+			name:     "cluster-name is rejected",
+			scanInfo: cautils.ScanInfo{CustomClusterName: "my-cluster"},
+			wantErr:  "--cluster-name is not supported for image scans: an image scan evaluates vulnerabilities, not Kubernetes clusters",
+		},
+		{
+			name:     "labels-to-copy is rejected",
+			scanInfo: cautils.ScanInfo{LabelsToCopy: []string{"app"}},
+			wantErr:  "--labels-to-copy is not supported for image scans: an image scan evaluates vulnerabilities, not Kubernetes workload labels",
 		},
 	}
 
@@ -817,6 +848,51 @@ func TestGetScanCommand_RejectsPostureFlagsOnImageScan(t *testing.T) {
 			args:    []string{"image", "--api-versions", "apps/v1", "nginx:1.27"},
 			wantErr: "--api-versions is not supported for image scans: an image scan evaluates vulnerabilities, not Helm charts",
 		},
+		{
+			name:    "host-scan flag",
+			args:    []string{"image", "--host-scan", "nginx:1.27"},
+			wantErr: "--host-scan is not supported for image scans: an image scan evaluates vulnerabilities, not cluster host nodes",
+		},
+		{
+			name:    "host-scan=false flag",
+			args:    []string{"image", "--host-scan=false", "nginx:1.27"},
+			wantErr: "--host-scan is not supported for image scans: an image scan evaluates vulnerabilities, not cluster host nodes",
+		},
+		{
+			name:    "print-attack-tree flag",
+			args:    []string{"image", "--print-attack-tree", "nginx:1.27"},
+			wantErr: "--print-attack-tree is not supported for image scans: an image scan evaluates vulnerabilities, not posture attack paths",
+		},
+		{
+			name:    "enable-rego-prints flag",
+			args:    []string{"image", "--enable-rego-prints", "nginx:1.27"},
+			wantErr: "--enable-rego-prints is not supported for image scans: an image scan evaluates vulnerabilities, not Rego rules",
+		},
+		{
+			name:    "whole-cluster-policy flag",
+			args:    []string{"image", "--whole-cluster-policy", "skip", "nginx:1.27"},
+			wantErr: "--whole-cluster-policy is not supported for image scans: an image scan evaluates vulnerabilities, not whole-cluster controls",
+		},
+		{
+			name:    "whole-cluster-policy flag with default value",
+			args:    []string{"image", "--whole-cluster-policy", "projected", "nginx:1.27"},
+			wantErr: "--whole-cluster-policy is not supported for image scans: an image scan evaluates vulnerabilities, not whole-cluster controls",
+		},
+		{
+			name:    "enable-streaming flag",
+			args:    []string{"image", "--enable-streaming", "nginx:1.27"},
+			wantErr: "--enable-streaming is not supported for image scans: an image scan evaluates vulnerabilities, not cluster resource streaming",
+		},
+		{
+			name:    "cluster-name flag",
+			args:    []string{"image", "--cluster-name", "my-cluster", "nginx:1.27"},
+			wantErr: "--cluster-name is not supported for image scans: an image scan evaluates vulnerabilities, not Kubernetes clusters",
+		},
+		{
+			name:    "labels-to-copy flag",
+			args:    []string{"image", "--labels-to-copy", "app,team", "nginx:1.27"},
+			wantErr: "--labels-to-copy is not supported for image scans: an image scan evaluates vulnerabilities, not Kubernetes workload labels",
+		},
 	}
 
 	for _, tc := range testCases {
@@ -848,4 +924,34 @@ func TestGetImageCmd_RunE_RejectsViewFlag(t *testing.T) {
 	err = cmd.RunE(cmd, []string{"nginx:1.27"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "--view is not supported for image scans: an image scan evaluates vulnerabilities, not posture views")
+}
+
+func TestGetImageCmd_RunE_RejectsWholeClusterPolicyFlag(t *testing.T) {
+	mockKubescape := &imageScanCaptureKubescape{}
+	scanInfo := cautils.ScanInfo{}
+
+	cmd := getImageCmd(mockKubescape, &scanInfo)
+	parentCmd := &cobra.Command{Use: "scan"}
+	parentCmd.PersistentFlags().StringVarP(&scanInfo.Format, "format", "f", "pretty-printer", "")
+	parentCmd.PersistentFlags().StringVar((*string)(&scanInfo.WholeClusterPolicy), "whole-cluster-policy", string(cautils.WholeClusterPolicyProjected), "")
+	parentCmd.AddCommand(cmd)
+
+	err := parentCmd.ParseFlags([]string{"--whole-cluster-policy", "skip"})
+	require.NoError(t, err)
+
+	err = cmd.RunE(cmd, []string{"nginx:1.27"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "--whole-cluster-policy is not supported for image scans: an image scan evaluates vulnerabilities, not whole-cluster controls")
+	assert.Nil(t, mockKubescape.imgScanInfo, "image scanner must not be invoked when --whole-cluster-policy is passed")
+}
+
+func TestGetScanCommand_ImageScanAllowsEnvWholeClusterPolicy(t *testing.T) {
+	t.Setenv("KUBESCAPE_WHOLE_CLUSTER_POLICY", "skip")
+	mockKubescape := &imageScanCaptureKubescape{}
+	cmd := GetScanCommand(mockKubescape)
+	cmd.SetArgs([]string{"image", "nginx:1.27"})
+
+	err := cmd.Execute()
+	require.NoError(t, err)
+	require.NotNil(t, mockKubescape.imgScanInfo, "image scan should proceed when whole-cluster-policy is only configured via environment")
 }
