@@ -56,7 +56,7 @@ func GetDiffCmd(ks meta.IKubescape) *cobra.Command {
 		Short: "Compare two Kubescape scan JSON reports and show what changed",
 		Long: `Compare a base scan report against a head scan report to surface new failures, resolved issues, unchanged evidence, and results that cannot be compared safely. By default, failed rules and paths are compared so regressions inside an already-failing control are detected.
 
-Image scan reports ("scan image --format json") are compared by vulnerability instead: a CVE is identified by its ID, package and package type, so upgrading a package that still carries the same CVE counts as unchanged. Findings from a multi-image report are pooled across all its images, so --fail-on-new does not flag a CVE that spreads to another image when any base image already had it. Image reports support the pretty-printer, json, yaml, markdown and junit formats; markdown and junit list the new vulnerabilities that meet --severity-threshold, and both reports must be of the same kind.`,
+Image scan reports ("scan image --format json") are compared by vulnerability instead: a CVE is identified by its ID, package and package type, so upgrading a package that still carries the same CVE counts as unchanged. Findings from a multi-image report are pooled across all its images, so --fail-on-new does not flag a CVE that spreads to another image when any base image already had it. Image reports support the pretty-printer, json, yaml, markdown, junit and sarif formats; markdown, junit and sarif list the new vulnerabilities that meet --severity-threshold, and both reports must be of the same kind.`,
 		Example: diffCmdExamples,
 		Args: func(cmd *cobra.Command, args []string) error {
 			if len(args) != 2 {
