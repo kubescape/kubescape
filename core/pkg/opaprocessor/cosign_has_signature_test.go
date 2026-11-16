@@ -16,6 +16,7 @@ import (
 
 	"github.com/google/go-containerregistry/pkg/registry"
 	"github.com/sigstore/cosign/v3/pkg/types"
+	protodsse "github.com/sigstore/protobuf-specs/gen/pb-go/dsse"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -81,6 +82,33 @@ func Test_has_signature_SigstoreBundle(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			assert.Equal(t, tt.want, has_signature(context.Background(), tt.img))
+		})
+	}
+}
+
+func Test_has_signature_BundleEnvelopeSignatures(t *testing.T) {
+	server := httptest.NewServer(registry.New(registry.Logger(log.New(io.Discard, "", 0))))
+	t.Cleanup(server.Close)
+	repo := strings.TrimPrefix(server.URL, "http://") + "/test/envelope"
+	signer, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+
+	for _, tt := range []struct {
+		name       string
+		signatures []*protodsse.Signature
+		want       bool
+	}{
+		{name: "empty signature list"},
+		{name: "empty sig", signatures: []*protodsse.Signature{{}}},
+		{name: "second sig has bytes", signatures: []*protodsse.Signature{{}, {Sig: []byte{1}}}, want: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			img := pushRandomImage(t, repo)
+			bundle := newSignedBundle(t, img, signer, nil, types.CosignSignPredicateType)
+			bundle.GetDsseEnvelope().Signatures = tt.signatures
+			writeBundle(t, img, bundle)
+
+			assert.Equal(t, tt.want, has_signature(context.Background(), img.String()))
 		})
 	}
 }
