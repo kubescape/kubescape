@@ -91,12 +91,23 @@ func recomputeSummaryDetails(sessionObj *cautils.OPASessionObj) {
 	}
 	summary := &sessionObj.Report.SummaryDetails
 
+	// A control that timed out or failed counts as 0, as the processor's
+	// reweighting counted it, whatever partial score it carries: the filtered
+	// report must not score higher than the full one for the same controls.
+	scored := func(id string, ctrl reportsummary.IControlSummary) float32 {
+		if _, zero := sessionObj.ZeroScoredControls[id]; zero {
+			return 0
+		}
+		if score := ctrl.GetComplianceScore(); score > 0 {
+			return score
+		}
+		return 0
+	}
+
 	var complianceSum float32
 	count := 0
-	for _, ctrl := range summary.Controls {
-		if score := ctrl.GetComplianceScore(); score > 0 {
-			complianceSum += score
-		}
+	for id, ctrl := range summary.Controls {
+		complianceSum += scored(id, &ctrl)
 		count++
 	}
 	if count > 0 {
@@ -110,9 +121,7 @@ func recomputeSummaryDetails(sessionObj *cautils.OPASessionObj) {
 		fCount := 0
 		for id, ctrl := range summary.Frameworks[i].Controls {
 			if _, ok := summary.Controls[id]; ok {
-				if score := ctrl.GetComplianceScore(); score > 0 {
-					fSum += score
-				}
+				fSum += scored(id, &ctrl)
 				fCount++
 			}
 		}

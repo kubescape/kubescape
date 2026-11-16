@@ -2217,6 +2217,10 @@ func (opap *OPAProcessor) reweightComplianceScores() {
 	if len(notEvaluated) == 0 {
 		return
 	}
+	opap.ZeroScoredControls = make(map[string]struct{}, len(notEvaluated))
+	for ctrlID := range notEvaluated {
+		opap.ZeroScoredControls[ctrlID] = struct{}{}
+	}
 	var sum float32
 	var count int
 	for ctrlID := range opap.Report.SummaryDetails.Controls {

@@ -630,3 +630,26 @@ func TestFrameworkScopedSeverityCounters(t *testing.T) {
 	assert.Zero(t, s.Report.SummaryDetails.ControlsSeverityCounters.HighSeverityCounter)
 	assert.Zero(t, s.Report.SummaryDetails.ResourcesSeverityCounters.HighSeverityCounter)
 }
+
+// A control the processor counted as 0 (it timed out or failed) stays at 0 when the
+// filter recomputes the scores, whether or not the filter removed other controls.
+func TestApplySeverityFilters_KeepsZeroScoredControlsAtZero(t *testing.T) {
+	hundred := float32(100)
+	session := cautils.NewOPASessionObjMock()
+	session.Report.SummaryDetails.Controls = reportsummary.ControlSummaries{
+		"C-0001": {ControlID: "C-0001", ScoreFactor: scoreHigh, ComplianceScore: &hundred},
+		"C-0002": {ControlID: "C-0002", ScoreFactor: scoreHigh, ComplianceScore: &hundred},
+		"C-0003": {ControlID: "C-0003", ScoreFactor: scoreLow, ComplianceScore: &hundred},
+	}
+	session.Report.SummaryDetails.Frameworks = []reportsummary.FrameworkSummary{{
+		Name:     "fw",
+		Controls: session.Report.SummaryDetails.Controls,
+	}}
+	session.ZeroScoredControls = map[string]struct{}{"C-0002": {}}
+
+	ApplySeverityFilters(session, "high", "") // removes C-0003 only
+
+	require.Len(t, session.Report.SummaryDetails.Controls, 2)
+	assert.Equal(t, float32(50), session.Report.SummaryDetails.ComplianceScore)
+	assert.Equal(t, float32(50), session.Report.SummaryDetails.Frameworks[0].ComplianceScore)
+}
