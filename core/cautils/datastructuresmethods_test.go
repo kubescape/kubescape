@@ -478,3 +478,163 @@ func TestIsRuleKubescapeVersionCompatible_UnparseableBuildNumberAndInvalidUntil(
 	assert.False(t, isRuleKubescapeVersionCompatible(
 		"r", map[string]any{"useUntilKubescapeVersion": "not-a-version"}, "not-a-version", make(map[string]struct{})))
 }
+
+func TestNormalizeSemVer(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"1.0.0", "v1.0.0"},
+		{"v1.0.0", "v1.0.0"},
+		{"1.2.3-rc.1", "v1.2.3-rc.1"},
+		{"v1.2.3-rc.1", "v1.2.3-rc.1"},
+		{"", ""},
+		{"not-a-version", "not-a-version"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			assert.Equal(t, tt.want, normalizeSemVer(tt.input))
+		})
+	}
+}
+
+func TestIsRuleKubescapeVersionCompatible_WithoutVPrefix(t *testing.T) {
+	tests := []struct {
+		name        string
+		attributes  map[string]interface{}
+		buildNumber string
+		want        bool
+	}{
+		{
+			name:        "useFrom without v prefix is respected when build is older",
+			attributes:  map[string]interface{}{"useFromKubescapeVersion": "1.0.132"},
+			buildNumber: "v1.0.130",
+			want:        false,
+		},
+		{
+			name:        "useFrom without v prefix is respected when build is older without v",
+			attributes:  map[string]interface{}{"useFromKubescapeVersion": "1.0.132"},
+			buildNumber: "1.0.130",
+			want:        false,
+		},
+		{
+			name:        "useFrom without v prefix matches build version",
+			attributes:  map[string]interface{}{"useFromKubescapeVersion": "1.0.132"},
+			buildNumber: "v1.0.132",
+			want:        true,
+		},
+		{
+			name:        "useFrom without v prefix matches build version without v",
+			attributes:  map[string]interface{}{"useFromKubescapeVersion": "1.0.132"},
+			buildNumber: "1.0.132",
+			want:        true,
+		},
+		{
+			name:        "useFrom without v prefix matches newer build",
+			attributes:  map[string]interface{}{"useFromKubescapeVersion": "1.0.132"},
+			buildNumber: "v1.0.135",
+			want:        true,
+		},
+		{
+			name:        "useUntil without v prefix allows older build",
+			attributes:  map[string]interface{}{"useUntilKubescapeVersion": "1.0.134"},
+			buildNumber: "v1.0.130",
+			want:        true,
+		},
+		{
+			name:        "useUntil without v prefix allows older build without v",
+			attributes:  map[string]interface{}{"useUntilKubescapeVersion": "1.0.134"},
+			buildNumber: "1.0.130",
+			want:        true,
+		},
+		{
+			name:        "useUntil without v prefix excludes matching build",
+			attributes:  map[string]interface{}{"useUntilKubescapeVersion": "1.0.134"},
+			buildNumber: "v1.0.134",
+			want:        false,
+		},
+		{
+			name:        "useUntil without v prefix excludes matching build without v",
+			attributes:  map[string]interface{}{"useUntilKubescapeVersion": "1.0.134"},
+			buildNumber: "1.0.134",
+			want:        false,
+		},
+		{
+			name:        "useUntil without v prefix excludes newer build",
+			attributes:  map[string]interface{}{"useUntilKubescapeVersion": "1.0.134"},
+			buildNumber: "v1.0.135",
+			want:        false,
+		},
+		{
+			name:        "useUntil without v prefix excludes empty local build",
+			attributes:  map[string]interface{}{"useUntilKubescapeVersion": "1.0.134"},
+			buildNumber: "",
+			want:        false,
+		},
+		{
+			name: "both bounds without v prefix in range",
+			attributes: map[string]interface{}{
+				"useFromKubescapeVersion":  "1.0.132",
+				"useUntilKubescapeVersion": "1.0.134",
+			},
+			buildNumber: "v1.0.133",
+			want:        true,
+		},
+		{
+			name: "both bounds without v prefix in range with build without v",
+			attributes: map[string]interface{}{
+				"useFromKubescapeVersion":  "1.0.132",
+				"useUntilKubescapeVersion": "1.0.134",
+			},
+			buildNumber: "1.0.133",
+			want:        true,
+		},
+		{
+			name: "both bounds without v prefix below range",
+			attributes: map[string]interface{}{
+				"useFromKubescapeVersion":  "1.0.132",
+				"useUntilKubescapeVersion": "1.0.134",
+			},
+			buildNumber: "v1.0.130",
+			want:        false,
+		},
+		{
+			name: "both bounds without v prefix above range",
+			attributes: map[string]interface{}{
+				"useFromKubescapeVersion":  "1.0.132",
+				"useUntilKubescapeVersion": "1.0.134",
+			},
+			buildNumber: "v1.0.135",
+			want:        false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isRuleKubescapeVersionCompatible("test-rule", tt.attributes, tt.buildNumber, make(map[string]struct{}))
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestIsRuleKubescapeVersionCompatible_NoWarningForValidSemverWithoutV(t *testing.T) {
+	f, err := os.Create(filepath.Join(t.TempDir(), "log"))
+	require.NoError(t, err)
+	defer f.Close()
+	prev := logger.L().GetWriter()
+	logger.L().SetWriter(f)
+	defer logger.L().SetWriter(prev)
+
+	attributes := map[string]any{
+		"useFromKubescapeVersion":  "1.0.130",
+		"useUntilKubescapeVersion": "1.0.135",
+	}
+	assert.True(t, isRuleKubescapeVersionCompatible("valid-rule", attributes, "1.0.132", make(map[string]struct{})))
+
+	require.NoError(t, f.Sync())
+	b, err := os.ReadFile(f.Name())
+	require.NoError(t, err)
+	assert.NotContains(t, string(b), "invalid useFromKubescapeVersion")
+	assert.NotContains(t, string(b), "invalid useUntilKubescapeVersion")
+}
