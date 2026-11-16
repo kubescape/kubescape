@@ -752,7 +752,7 @@ func loadKustomizeDirectory(ctx context.Context, basePath string) (map[string][]
 		var executableError *exec.Error
 		var pathError *os.PathError
 		if !errors.As(cause, &executableError) &&
-			!(errors.As(cause, &pathError) && pathError.Op == "fork/exec") {
+			(!errors.As(cause, &pathError) || pathError.Op != "fork/exec") {
 			cause = fmt.Errorf("%w: %w", ErrManifestsNotLoaded, cause)
 		}
 		err := fmt.Errorf("failed to render Kustomize resources from %q: %w", newBasePath, cause)

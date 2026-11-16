@@ -252,7 +252,9 @@ func TestLoadResourcesFromKustomizeDirectoryUnstartableHelmIsFatal(t *testing.T)
 	}
 	bin := t.TempDir()
 	interpreter := filepath.Join(bin, "missing-interpreter")
-	require.NoError(t, os.WriteFile(filepath.Join(bin, "helm"), []byte("#!"+interpreter+"\n"), 0o700))
+	helmPath := filepath.Join(bin, "helm")
+	require.NoError(t, os.WriteFile(helmPath, []byte("#!"+interpreter+"\n"), 0o600))
+	require.NoError(t, os.Chmod(helmPath, 0o700))
 	t.Setenv("PATH", bin)
 
 	_, _, err := LoadResourcesFromKustomizeDirectory(context.Background(), filepath.Join(kustomizeTestdataPath(), "helm"))
