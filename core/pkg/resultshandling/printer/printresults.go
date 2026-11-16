@@ -16,27 +16,28 @@ import (
 var INDENT = "   "
 
 const (
-	PrettyFormat            string = "pretty-printer"
-	JsonFormat              string = "json"
-	JunitResultFormat       string = "junit"
-	PrometheusFormat        string = "prometheus"
-	PdfFormat               string = "pdf"
-	HtmlFormat              string = "html"
-	SARIFFormat             string = "sarif"
-	GitLabSASTFormat        string = "gitlab-sast"
-	GitLabCodeQualityFormat string = "gitlab-codequality"
-	GitHubActionsFormat     string = "github-actions"
-	YamlFormat              string = "yaml"
-	CsvFormat               string = "csv"
-	MarkdownFormat          string = "markdown"
-	CycloneDXFormat         string = "cyclonedx-json"
-	SPDXFormat              string = "spdx-json"
-	PolicyReportFormat      string = "policyreport"
-	ExceptionsFormat        string = "exceptions"
+	PrettyFormat                  string = "pretty-printer"
+	JsonFormat                    string = "json"
+	JunitResultFormat             string = "junit"
+	PrometheusFormat              string = "prometheus"
+	PdfFormat                     string = "pdf"
+	HtmlFormat                    string = "html"
+	SARIFFormat                   string = "sarif"
+	GitLabSASTFormat              string = "gitlab-sast"
+	GitLabCodeQualityFormat       string = "gitlab-codequality"
+	GitLabContainerScanningFormat string = "gitlab-container-scanning"
+	GitHubActionsFormat           string = "github-actions"
+	YamlFormat                    string = "yaml"
+	CsvFormat                     string = "csv"
+	MarkdownFormat                string = "markdown"
+	CycloneDXFormat               string = "cyclonedx-json"
+	SPDXFormat                    string = "spdx-json"
+	PolicyReportFormat            string = "policyreport"
+	ExceptionsFormat              string = "exceptions"
 )
 
 // AllFormats lists every output format kubescape can emit.
-var AllFormats = []string{PrettyFormat, JsonFormat, JunitResultFormat, PrometheusFormat, PdfFormat, HtmlFormat, SARIFFormat, GitLabSASTFormat, GitLabCodeQualityFormat, GitHubActionsFormat, YamlFormat, CsvFormat, MarkdownFormat, CycloneDXFormat, SPDXFormat, PolicyReportFormat, ExceptionsFormat}
+var AllFormats = []string{PrettyFormat, JsonFormat, JunitResultFormat, PrometheusFormat, PdfFormat, HtmlFormat, SARIFFormat, GitLabSASTFormat, GitLabCodeQualityFormat, GitLabContainerScanningFormat, GitHubActionsFormat, YamlFormat, CsvFormat, MarkdownFormat, CycloneDXFormat, SPDXFormat, PolicyReportFormat, ExceptionsFormat}
 
 // ImageFormats lists formats whose printers support image-scan data. A format
 // must not be advertised as image-scan-capable unless its printer actually
@@ -44,7 +45,7 @@ var AllFormats = []string{PrettyFormat, JsonFormat, JunitResultFormat, Prometheu
 //
 // CycloneDXFormat and SPDXFormat are the inverse: they encode the SBOM that
 // only exists on image scans, so they are image-scan-only (see ValidatePrinter).
-var ImageFormats = []string{PrettyFormat, JsonFormat, JunitResultFormat, PrometheusFormat, PdfFormat, HtmlFormat, SARIFFormat, GitLabSASTFormat, YamlFormat, CsvFormat, MarkdownFormat, CycloneDXFormat, SPDXFormat, PolicyReportFormat}
+var ImageFormats = []string{PrettyFormat, JsonFormat, JunitResultFormat, PrometheusFormat, PdfFormat, HtmlFormat, SARIFFormat, GitLabSASTFormat, GitLabContainerScanningFormat, YamlFormat, CsvFormat, MarkdownFormat, CycloneDXFormat, SPDXFormat, PolicyReportFormat}
 
 const (
 	JsonOutputExt         = ".json"
@@ -149,6 +150,8 @@ func DefaultBaseNameForFormat(format string) string {
 		return "github-actions"
 	case GitLabCodeQualityFormat:
 		return "gl-code-quality-report"
+	case GitLabContainerScanningFormat:
+		return "gl-container-scanning-report"
 	default:
 		return "report"
 	}
@@ -159,23 +162,24 @@ func DefaultBaseNameForFormat(format string) string {
 // than re-deriving it, so a format can never resolve to a path its printer
 // does not write. Every entry in AllFormats is covered.
 var FormatOutputExt = map[string]string{
-	PrettyFormat:            PrettyOutputExt,
-	JsonFormat:              JsonOutputExt,
-	JunitResultFormat:       JunitOutputExt,
-	PrometheusFormat:        PrometheusOutputExt,
-	PdfFormat:               PdfOutputExt,
-	HtmlFormat:              HtmlOutputExt,
-	SARIFFormat:             SARIFOutputExt,
-	GitLabSASTFormat:        JsonOutputExt,
-	GitLabCodeQualityFormat: JsonOutputExt,
-	YamlFormat:              YamlOutputExt,
-	CsvFormat:               CsvOutputExt,
-	MarkdownFormat:          MarkdownOutputExt,
-	CycloneDXFormat:         CycloneDXOutputExt,
-	SPDXFormat:              SPDXOutputExt,
-	PolicyReportFormat:      PolicyReportOutputExt,
-	ExceptionsFormat:        ExceptionsOutputExt,
-	GitHubActionsFormat:     GitHubActionsOutExt,
+	PrettyFormat:                  PrettyOutputExt,
+	JsonFormat:                    JsonOutputExt,
+	JunitResultFormat:             JunitOutputExt,
+	PrometheusFormat:              PrometheusOutputExt,
+	PdfFormat:                     PdfOutputExt,
+	HtmlFormat:                    HtmlOutputExt,
+	SARIFFormat:                   SARIFOutputExt,
+	GitLabSASTFormat:              JsonOutputExt,
+	GitLabCodeQualityFormat:       JsonOutputExt,
+	GitLabContainerScanningFormat: JsonOutputExt,
+	YamlFormat:                    YamlOutputExt,
+	CsvFormat:                     CsvOutputExt,
+	MarkdownFormat:                MarkdownOutputExt,
+	CycloneDXFormat:               CycloneDXOutputExt,
+	SPDXFormat:                    SPDXOutputExt,
+	PolicyReportFormat:            PolicyReportOutputExt,
+	ExceptionsFormat:              ExceptionsOutputExt,
+	GitHubActionsFormat:           GitHubActionsOutExt,
 }
 
 type IPrinter interface {

@@ -615,6 +615,27 @@ func TestValidatePrinter(t *testing.T) {
 			expectErr: nil,
 		},
 		{
+			name:      "gitlab-container-scanning format for image scan should not return error",
+			scanType:  cautils.ScanTypeImage,
+			format:    printer.GitLabContainerScanningFormat,
+			expectErr: nil,
+		},
+		{
+			name:        "gitlab-container-scanning format for posture scan without images should return error",
+			scanType:    cautils.ScanTypeCluster,
+			scanContext: cautils.ContextCluster,
+			format:      printer.GitLabContainerScanningFormat,
+			expectErr:   errors.New("format \"gitlab-container-scanning\" is only supported for image scanning"),
+		},
+		{
+			name:        "gitlab-container-scanning format for posture scan with images should not return error",
+			scanType:    cautils.ScanTypeCluster,
+			scanContext: cautils.ContextCluster,
+			format:      printer.GitLabContainerScanningFormat,
+			scanImages:  true,
+			expectErr:   nil,
+		},
+		{
 			name:      "github-actions format for image scan should return error",
 			scanType:  cautils.ScanTypeImage,
 			format:    printer.GitHubActionsFormat,

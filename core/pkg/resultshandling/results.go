@@ -448,6 +448,8 @@ func NewPrinter(ctx context.Context, printFormat string, scanInfo *cautils.ScanI
 		return printerv2.NewGitLabSASTPrinter(scanInfo.ShowSecrets)
 	case printer.GitLabCodeQualityFormat:
 		return printerv2.NewGitLabCodeQualityPrinter(scanInfo.ShowSecrets)
+	case printer.GitLabContainerScanningFormat:
+		return printerv2.NewGitLabContainerScanningPrinter()
 	case printer.GitHubActionsFormat:
 		return printerv2.NewGitHubActionsPrinter()
 	case printer.CycloneDXFormat:
@@ -488,11 +490,11 @@ func ValidatePrinter(scanType cautils.ScanTypes, scanContext cautils.ScanningCon
 			return false, fmt.Errorf("format \"%s\" is only supported when scanning local files", printFormat)
 		}
 	}
-	if (printFormat == printer.CycloneDXFormat || printFormat == printer.SPDXFormat) && (len(scanImages) == 0 || !scanImages[0]) {
+	if (printFormat == printer.CycloneDXFormat || printFormat == printer.SPDXFormat || printFormat == printer.GitLabContainerScanningFormat) && (len(scanImages) == 0 || !scanImages[0]) {
 		return false, fmt.Errorf("format \"%s\" is only supported for image scanning", printFormat)
 	}
 	switch printFormat {
-	case printer.JsonFormat, printer.HtmlFormat, printer.JunitResultFormat, printer.PrometheusFormat, printer.PdfFormat, printer.YamlFormat, printer.CsvFormat, printer.MarkdownFormat, printer.PolicyReportFormat, printer.ExceptionsFormat, printer.CycloneDXFormat, printer.SPDXFormat:
+	case printer.JsonFormat, printer.HtmlFormat, printer.JunitResultFormat, printer.PrometheusFormat, printer.PdfFormat, printer.YamlFormat, printer.CsvFormat, printer.MarkdownFormat, printer.PolicyReportFormat, printer.ExceptionsFormat, printer.CycloneDXFormat, printer.SPDXFormat, printer.GitLabContainerScanningFormat:
 		return false, nil
 	default:
 		return true, nil
