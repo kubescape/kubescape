@@ -709,6 +709,24 @@ func TestWatchSecurityScanWatchesWhatAKustomizationInputRenders(t *testing.T) {
 	require.NoError(t, stop())
 }
 
+// The kustomization itself is watched as well when its directory is: kustomize
+// also accepts it under the extensionless name Kustomization, and an edit to it
+// is an edit to the input.
+func TestWatchSecurityScanWatchesAnExtensionlessKustomization(t *testing.T) {
+	dir := t.TempDir()
+	kustomization := filepath.Join(dir, "Kustomization")
+	writeFile(t, kustomization, "apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nresources:\n- pod.yaml\n")
+	writeFile(t, filepath.Join(dir, "pod.yaml"), podManifest("web", false))
+	writeFile(t, filepath.Join(dir, "api.yaml"), podManifest("api", false))
+	out, stop := startSecurityWatch(t, localWatchScanInfo(t, kustomization))
+
+	out.waitFor(t, "Initial scan complete: 1 failing control(s) on 1 resource(s)")
+	writeFile(t, kustomization, "apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nresources:\n- pod.yaml\n- api.yaml\n")
+	out.waitFor(t, "1 new, 0 resolved")
+
+	require.NoError(t, stop())
+}
+
 func TestWatchRoots(t *testing.T) {
 	dir := t.TempDir()
 	file := filepath.Join(dir, "pod.yaml")
