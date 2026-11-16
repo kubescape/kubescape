@@ -1925,7 +1925,7 @@ kind: Service
 metadata:
   name: my-service
   labels:
-    content: {{ .Values.myval }}
+    content: {{ if kindIs "slice" .Values.myval }}{{ index .Values.myval 0 }}{{ else }}{{ .Values.myval }}{{ end }}
 spec:
   ports:
   - port: 80
@@ -2001,6 +2001,140 @@ spec:
 		outYaml, err := resMap.AsYaml()
 		require.NoError(t, err)
 		assert.Contains(t, string(outYaml), "INSIDE_FILE_VAL")
+	})
+
+	t.Run("rejects brace-list FileValues with external path", func(t *testing.T) {
+		outDir := t.TempDir()
+		sugg := HelmFixSuggestion{
+			Resource: &reporthandling.Resource{
+				Object: map[string]interface{}{
+					"apiVersion": "v1",
+					"kind":       "Service",
+					"metadata": map[string]interface{}{
+						"name":   "my-service",
+						"labels": map[string]interface{}{"content": "OUTSIDE_FILE_VAL"},
+					},
+					"spec": map[string]interface{}{
+						"ports": []interface{}{
+							map[string]interface{}{"port": 80},
+						},
+					},
+				},
+			},
+			ChartPath:       chartDir,
+			AllowedBasePath: allowedBase,
+			HelmValueOptions: cautils.HelmValueOptions{
+				FileValues: []string{fmt.Sprintf("myval={%s,%s}", insideFile, outsideFile)},
+			},
+			FixPaths: []armotypes.FixPath{{Path: "metadata.labels.patched", Value: "true"}},
+		}
+
+		res, err := EmitKustomizePatch([]HelmFixSuggestion{sugg}, outDir)
+		require.NoError(t, err)
+		assert.Empty(t, res.EmittedResources)
+		require.Len(t, res.SkippedResources, 1)
+		assert.Contains(t, res.SkippedResources[0].Reason, "file-values file")
+		assert.Contains(t, res.SkippedResources[0].Reason, "outside allowed base path")
+	})
+
+	t.Run("rejects comma-separated FileValues with external path", func(t *testing.T) {
+		outDir := t.TempDir()
+		sugg := HelmFixSuggestion{
+			Resource: &reporthandling.Resource{
+				Object: map[string]interface{}{
+					"apiVersion": "v1",
+					"kind":       "Service",
+					"metadata": map[string]interface{}{
+						"name":   "my-service",
+						"labels": map[string]interface{}{"content": "OUTSIDE_FILE_VAL"},
+					},
+					"spec": map[string]interface{}{
+						"ports": []interface{}{
+							map[string]interface{}{"port": 80},
+						},
+					},
+				},
+			},
+			ChartPath:       chartDir,
+			AllowedBasePath: allowedBase,
+			HelmValueOptions: cautils.HelmValueOptions{
+				FileValues: []string{fmt.Sprintf("k1=%s,myval=%s", insideFile, outsideFile)},
+			},
+			FixPaths: []armotypes.FixPath{{Path: "metadata.labels.patched", Value: "true"}},
+		}
+
+		res, err := EmitKustomizePatch([]HelmFixSuggestion{sugg}, outDir)
+		require.NoError(t, err)
+		assert.Empty(t, res.EmittedResources)
+		require.Len(t, res.SkippedResources, 1)
+		assert.Contains(t, res.SkippedResources[0].Reason, "file-values file")
+		assert.Contains(t, res.SkippedResources[0].Reason, "outside allowed base path")
+	})
+
+	t.Run("accepts brace-list FileValues with internal paths", func(t *testing.T) {
+		insideFile2 := filepath.Join(allowedBase, "inside-second.txt")
+		require.NoError(t, os.WriteFile(insideFile2, []byte("SECOND_VAL\n"), 0600))
+
+		outDir := t.TempDir()
+		sugg := HelmFixSuggestion{
+			Resource: &reporthandling.Resource{
+				Object: map[string]interface{}{
+					"apiVersion": "v1",
+					"kind":       "Service",
+					"metadata": map[string]interface{}{
+						"name":   "my-service",
+						"labels": map[string]interface{}{"content": "INSIDE_FILE_VAL"},
+					},
+					"spec": map[string]interface{}{
+						"ports": []interface{}{
+							map[string]interface{}{"port": 80},
+						},
+					},
+				},
+			},
+			ChartPath:       chartDir,
+			AllowedBasePath: allowedBase,
+			HelmValueOptions: cautils.HelmValueOptions{
+				FileValues: []string{fmt.Sprintf("myval={%s,%s}", insideFile, insideFile2)},
+			},
+			FixPaths: []armotypes.FixPath{{Path: "metadata.labels.patched", Value: "true"}},
+		}
+
+		res, err := EmitKustomizePatch([]HelmFixSuggestion{sugg}, outDir)
+		require.NoError(t, err)
+		require.Len(t, res.EmittedResources, 1)
+	})
+
+	t.Run("rejects malformed FileValues syntax", func(t *testing.T) {
+		outDir := t.TempDir()
+		sugg := HelmFixSuggestion{
+			Resource: &reporthandling.Resource{
+				Object: map[string]interface{}{
+					"apiVersion": "v1",
+					"kind":       "Service",
+					"metadata": map[string]interface{}{
+						"name": "my-service",
+					},
+					"spec": map[string]interface{}{
+						"ports": []interface{}{
+							map[string]interface{}{"port": 80},
+						},
+					},
+				},
+			},
+			ChartPath:       chartDir,
+			AllowedBasePath: allowedBase,
+			HelmValueOptions: cautils.HelmValueOptions{
+				FileValues: []string{"a.=" + insideFile},
+			},
+			FixPaths: []armotypes.FixPath{{Path: "metadata.labels.patched", Value: "true"}},
+		}
+
+		res, err := EmitKustomizePatch([]HelmFixSuggestion{sugg}, outDir)
+		require.NoError(t, err)
+		assert.Empty(t, res.EmittedResources)
+		require.Len(t, res.SkippedResources, 1)
+		assert.Contains(t, res.SkippedResources[0].Reason, "failed parsing --set-file data")
 	})
 }
 
