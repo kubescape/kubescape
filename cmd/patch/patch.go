@@ -62,6 +62,13 @@ func GetPatchCmd(ks meta.IKubescape) *cobra.Command {
 				}
 				scanInfo.Format = shared.NormalizeScanFormats(scanInfo.Format)
 			}
+			if cmd.Flags().Changed("output") {
+				trimmedOutput := strings.TrimSpace(scanInfo.Output)
+				if trimmedOutput == "" {
+					return errors.New("output file path cannot be empty")
+				}
+				scanInfo.Output = trimmedOutput
+			}
 			if err := shared.ValidateImageScanInfo(&scanInfo); err != nil {
 				return err
 			}

@@ -594,3 +594,77 @@ func TestGetPatchCmd_NilKubescape(t *testing.T) {
 	err := cmd.Execute()
 	require.EqualError(t, err, "uninitialized kubescape interface")
 }
+
+type capturePatchKubescape struct {
+	mocks.MockIKubescape
+	capturedPatchInfo *metav1.PatchInfo
+	capturedScanInfo  *cautils.ScanInfo
+}
+
+func (c *capturePatchKubescape) Patch(patchInfo *metav1.PatchInfo, scanInfo *cautils.ScanInfo) (bool, error) {
+	c.capturedPatchInfo = patchInfo
+	c.capturedScanInfo = scanInfo
+	return false, nil
+}
+
+func TestPatchCmd_OutputFlagValidation(t *testing.T) {
+	t.Run("rejects_empty_output", func(t *testing.T) {
+		mock := &capturePatchKubescape{}
+		cmd := GetPatchCmd(mock)
+		cmd.SetArgs([]string{"--image", "nginx:1.23", "--output", ""})
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.Equal(t, "output file path cannot be empty", err.Error())
+		assert.Nil(t, mock.capturedScanInfo)
+	})
+
+	t.Run("rejects_whitespace_output", func(t *testing.T) {
+		mock := &capturePatchKubescape{}
+		cmd := GetPatchCmd(mock)
+		cmd.SetArgs([]string{"--image", "nginx:1.23", "--output", "   "})
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.Equal(t, "output file path cannot be empty", err.Error())
+		assert.Nil(t, mock.capturedScanInfo)
+	})
+
+	t.Run("rejects_empty_short_flag", func(t *testing.T) {
+		mock := &capturePatchKubescape{}
+		cmd := GetPatchCmd(mock)
+		cmd.SetArgs([]string{"--image", "nginx:1.23", "-o", ""})
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.Equal(t, "output file path cannot be empty", err.Error())
+		assert.Nil(t, mock.capturedScanInfo)
+	})
+
+	t.Run("rejects_whitespace_short_flag", func(t *testing.T) {
+		mock := &capturePatchKubescape{}
+		cmd := GetPatchCmd(mock)
+		cmd.SetArgs([]string{"--image", "nginx:1.23", "-o", " \t "})
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.Equal(t, "output file path cannot be empty", err.Error())
+		assert.Nil(t, mock.capturedScanInfo)
+	})
+
+	t.Run("accepts_and_trims_valid_output", func(t *testing.T) {
+		mock := &capturePatchKubescape{}
+		cmd := GetPatchCmd(mock)
+		cmd.SetArgs([]string{"--image", "nginx:1.23", "--output", "  report.json  "})
+		err := cmd.Execute()
+		require.NoError(t, err)
+		require.NotNil(t, mock.capturedScanInfo)
+		assert.Equal(t, "report.json", mock.capturedScanInfo.Output)
+	})
+
+	t.Run("omitted_output_flag_is_accepted", func(t *testing.T) {
+		mock := &capturePatchKubescape{}
+		cmd := GetPatchCmd(mock)
+		cmd.SetArgs([]string{"--image", "nginx:1.23"})
+		err := cmd.Execute()
+		require.NoError(t, err)
+		require.NotNil(t, mock.capturedScanInfo)
+		assert.Equal(t, "", mock.capturedScanInfo.Output)
+	})
+}

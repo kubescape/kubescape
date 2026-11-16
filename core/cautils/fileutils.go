@@ -46,6 +46,10 @@ var (
 	// while another supported loader examines the same input.
 	ErrNoManifestFiles = errors.New("no YAML or JSON manifest files found")
 
+	// ErrManifestsNotLoaded is wrapped by the error for manifest files that were
+	// found but could not be read or parsed.
+	ErrManifestsNotLoaded = errors.New("failed to load one or more manifests")
+
 	// unrenderedHelmTemplateReason marks a chart template skipped because its chart was not rendered.
 	unrenderedHelmTemplateReason = "unrendered Helm template: its chart was not rendered"
 
@@ -1228,7 +1232,7 @@ func LoadResourcesFromFilesFiltered(ctx context.Context, input, rootPath string,
 	workloads, loadSkips, loadErrs := loadFiles(rootPath, files)
 	skips = append(skips, loadSkips...)
 	if len(loadErrs) > 0 {
-		loadErr := fmt.Errorf("failed to load one or more manifests from %q: %w", input, errors.Join(loadErrs...))
+		loadErr := fmt.Errorf("%w from %q: %w", ErrManifestsNotLoaded, input, errors.Join(loadErrs...))
 		// Directory and glob scans have historically been best effort. Keep the
 		// valid resources from mixed inputs, but make the skipped files visible.
 		// An explicitly requested file, or an input with no usable resources,
