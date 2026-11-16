@@ -21,6 +21,10 @@ import (
 	"k8s.io/apimachinery/pkg/version"
 )
 
+// ErrNoScannableResources is wrapped by the error for a local input that has
+// files, but no Kubernetes object in them.
+var ErrNoScannableResources = errors.New("no scannable Kubernetes resources found")
+
 // FileResourceHandler handle resources from files and URLs
 type FileResourceHandler struct{}
 
@@ -775,7 +779,7 @@ func getResourcesFromInput(ctx context.Context, path string, helmValueOpts cauti
 	// Successful renderers already exclude their owned raw inputs. Preserve all
 	// remaining sources, even when their Kubernetes identities match.
 	if len(workloads) == 0 {
-		return "", nil, nil, allSkips, fmt.Errorf("no scannable Kubernetes resources found for input %q", path)
+		return "", nil, nil, allSkips, fmt.Errorf("%w for input %q", ErrNoScannableResources, path)
 	}
 
 	inputRoot := repoRoot
