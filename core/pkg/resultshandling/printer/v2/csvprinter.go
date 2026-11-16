@@ -13,6 +13,7 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer/csvsafe"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
 	reporthandling "github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
@@ -61,44 +62,15 @@ func NewCsvPrinter(showSecrets bool) *CsvPrinter {
 	return &CsvPrinter{showSecrets: showSecrets}
 }
 
-// csvFormulaPrefixes are the leading characters that make a spreadsheet
-// application (Excel, LibreOffice Calc, Google Sheets) interpret a cell as a
-// formula rather than text. Several values written below are taken from the
-// scanned manifests and so are attacker-influenced: a Deployment named
-// "=cmd|' /C calc'!A0", a namespace, a source path or a fix value all reach the
-// CSV verbatim. Opening such a report would execute the payload in the
-// analyst's spreadsheet (CSV injection / formula injection, CWE-1236). Leading
-// whitespace is included too: a cell beginning with a newline or carriage
-// return can still carry a formula on its first non-blank line.
-const csvFormulaPrefixes = "=+-@\t\r\n"
-
-// csvSafeCell neutralizes a cell against spreadsheet formula injection by
-// prepending a single quote, the standard mitigation: spreadsheets treat a
-// leading apostrophe as "the rest of this cell is literal text" and do not
-// display it, while other CSV consumers see an inert character instead of an
-// executable formula. Leading whitespace (spaces, tabs, newlines, carriage
-// returns) is handled so formulas prefixed with whitespace cannot bypass
-// the prefix check.
+// csvSafeCell neutralizes a cell against spreadsheet formula injection (CWE-1236)
+// by delegating to csvsafe.SafeCell.
 func csvSafeCell(cell string) string {
-	if cell == "" {
-		return cell
-	}
-	if strings.ContainsRune(csvFormulaPrefixes, rune(cell[0])) {
-		return "'" + cell
-	}
-	trimmed := strings.TrimLeft(cell, " \t\r\n\v\f")
-	if trimmed != "" && strings.ContainsRune("=+-@", rune(trimmed[0])) {
-		return "'" + cell
-	}
-	return cell
+	return csvsafe.SafeCell(cell)
 }
 
 // csvSafeRow applies csvSafeCell to every cell of a data row.
 func csvSafeRow(row []string) []string {
-	for i := range row {
-		row[i] = csvSafeCell(row[i])
-	}
-	return row
+	return csvsafe.SafeRow(row)
 }
 
 func (cp *CsvPrinter) SetWriter(ctx context.Context, outputFile string) error {
