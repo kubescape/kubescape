@@ -158,6 +158,18 @@ func TestRunPSS_FlagValidation(t *testing.T) {
 		err := runPSS(ctx, flags, nil)
 		assert.ErrorContains(t, err, "--namespace (-n) is required")
 	})
+
+	t.Run("cluster mode with whitespace namespace", func(t *testing.T) {
+		flags := &pssFlags{level: "Restricted", format: "pretty-printer", namespace: "   "}
+		err := runPSS(ctx, flags, nil)
+		assert.ErrorContains(t, err, "--namespace (-n) is required")
+	})
+
+	t.Run("whitespace output flag", func(t *testing.T) {
+		flags := &pssFlags{level: "Restricted", format: "pretty-printer", output: "   "}
+		err := runPSS(ctx, flags, []string{"some/file.yaml"})
+		assert.EqualError(t, err, "--output requires a file path")
+	})
 }
 
 func TestRunPSS_LocalFiles(t *testing.T) {
@@ -552,4 +564,73 @@ spec:
 			assert.NotEmpty(t, buf.String())
 		})
 	}
+}
+
+func TestPSSCmd_RejectsEmptyOrWhitespaceOutput(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		arg  string
+	}{
+		{name: "empty output", arg: ""},
+		{name: "spaces only", arg: "   "},
+		{name: "tab and newline", arg: "\t\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := getPSSCmd()
+			cmd.SilenceErrors = true
+			cmd.SilenceUsage = true
+			cmd.SetArgs([]string{"some/file.yaml", "-o", tc.arg})
+			err := cmd.Execute()
+			require.Error(t, err)
+			assert.EqualError(t, err, "--output requires a file path")
+		})
+	}
+}
+
+func TestPSSCmd_RejectsWhitespaceNamespaceInClusterMode(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		arg  string
+	}{
+		{name: "empty namespace", arg: ""},
+		{name: "spaces only", arg: "   "},
+		{name: "tab only", arg: "\t"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := getPSSCmd()
+			cmd.SilenceErrors = true
+			cmd.SilenceUsage = true
+			cmd.SetArgs([]string{"-n", tc.arg})
+			err := cmd.Execute()
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "--namespace (-n) is required when scanning a live cluster")
+		})
+	}
+}
+
+func TestPSSCmd_TrimsWhitespaceAroundOutput(t *testing.T) {
+	tmpDir := t.TempDir()
+	manifest := filepath.Join(tmpDir, "pod.yaml")
+	require.NoError(t, os.WriteFile(manifest, []byte(`
+apiVersion: v1
+kind: Pod
+metadata:
+  name: test-pod
+spec:
+  containers:
+  - name: c1
+    image: nginx
+`), 0o600))
+
+	outputPath := filepath.Join(tmpDir, "output.json")
+	cmd := getPSSCmd()
+	cmd.SilenceErrors = true
+	cmd.SilenceUsage = true
+	cmd.SetArgs([]string{manifest, "-f", "json", "-o", "  " + outputPath + "  "})
+	_ = cmd.Execute()
+
+	assert.FileExists(t, outputPath)
+	data, err := os.ReadFile(outputPath)
+	require.NoError(t, err)
+	assert.Contains(t, string(data), `"test-pod"`)
 }
