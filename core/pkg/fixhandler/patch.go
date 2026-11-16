@@ -63,7 +63,7 @@ func (h *FixHandler) BuildPatch(ctx context.Context, resourcesToFix []ResourceFi
 		if err := ctx.Err(); err != nil {
 			return nil, fmt.Errorf("patch export cancelled: %w", err)
 		}
-		original, err := readManifest(source)
+		original, err := h.GetFileString(source)
 		if err != nil {
 			failures = append(failures, fmt.Errorf("failed to fix file %s: %w", source, err))
 			continue
@@ -128,6 +128,12 @@ func changedResources(ctx context.Context, source, original string, fixes []Reso
 		}
 	}
 	return changed, nil
+}
+
+// PatchNames maps each manifest to the slash-separated path its section of the
+// patch carries.
+func (h *FixHandler) PatchNames(resourcesToFix []ResourceFixInfo) (map[string]string, error) {
+	return h.patchNames(resourcesToFix)
 }
 
 // patchNames maps each manifest to the slash-separated path its section of the

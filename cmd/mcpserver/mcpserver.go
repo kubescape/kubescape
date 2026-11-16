@@ -577,6 +577,23 @@ func withControlIDsProperty(desc string) mcp.ToolOption {
 	}
 }
 
+// withOptionalControlIDsProperty adds control_ids to the tool schema as an optional
+// property that accepts either a comma-separated string or an array of strings.
+func withOptionalControlIDsProperty(desc string) mcp.ToolOption {
+	return func(t *mcp.Tool) {
+		t.InputSchema.Properties["control_ids"] = map[string]any{
+			"anyOf": []any{
+				map[string]any{"type": "string"},
+				map[string]any{
+					"type":  "array",
+					"items": map[string]any{"type": "string"},
+				},
+			},
+			"description": desc,
+		}
+	}
+}
+
 func (ksServer *KubescapeMcpserver) ReadResource(ctx context.Context, request mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
 	uri := request.Params.URI
 
@@ -807,6 +824,62 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 			}
 			code := classifyScanError(err)
 			msg := fmt.Sprintf("failed to compute remediation: %v", err)
+			return mcpToolError(code, msg, nil), nil
+		}
+		return mcp.NewToolResultText(string(v.([]byte))), nil
+	case "suggest_fix":
+		path, toolErr := mcpStringArg(arguments, "path")
+		if toolErr != nil {
+			return toolErr, nil
+		}
+		reportPath, toolErr := mcpStringArg(arguments, "report_path")
+		if toolErr != nil {
+			return toolErr, nil
+		}
+		basePath, toolErr := mcpStringArg(arguments, "base_path")
+		if toolErr != nil {
+			return toolErr, nil
+		}
+		switch {
+		case path == "" && reportPath == "":
+			return mcpToolError(ErrCodeInvalidArgument, "path argument is required and cannot be empty, unless report_path is supplied instead (exactly one of path or report_path is required)", map[string]any{"argument": "path"}), nil
+		case path != "" && reportPath != "":
+			return mcpToolError(ErrCodeInvalidArgument, "path and report_path are mutually exclusive; supply exactly one", map[string]any{"argument": "report_path"}), nil
+		case path != "" && basePath != "":
+			return mcpToolError(ErrCodeInvalidArgument, "base_path applies only with report_path", map[string]any{"argument": "base_path"}), nil
+		}
+		workspaceRoot, closeWorkspaceRoot, err := ksServer.openWorkspaceRoot()
+		if err != nil {
+			return mcpToolError(ErrCodeInvalidArgument, fmt.Sprintf("cannot open workspace root: %v", err), nil), nil
+		}
+		defer closeWorkspaceRoot()
+		if reportPath, toolErr = ksServer.containToWorkspace("report_path", reportPath); toolErr != nil {
+			return toolErr, nil
+		}
+		if basePath, toolErr = ksServer.containToWorkspace("base_path", basePath); toolErr != nil {
+			return toolErr, nil
+		}
+		var controlIDs []string
+		if rawControlIDs, hasControlIDs := arguments["control_ids"]; hasControlIDs && rawControlIDs != nil {
+			controlIDs, toolErr = parseControlIDs(rawControlIDs, hasControlIDs)
+			if toolErr != nil {
+				return toolErr, nil
+			}
+		}
+		key := suggestFixKey(path, reportPath, basePath, controlIDs)
+		v, err := ksServer.doScanChan(ctx, key, func(scanCtx context.Context) (interface{}, error) {
+			if reportPath != "" {
+				return runSuggestFixFromReport(scanCtx, reportPath, basePath, controlIDs, workspaceRoot)
+			}
+			return ksServer.runSuggestFix(scanCtx, path, controlIDs, workspaceRoot)
+		})
+		if err != nil {
+			var inputErr *remediationInputError
+			if errors.As(err, &inputErr) {
+				return mcpToolError(ErrCodeInvalidArgument, inputErr.Error(), nil), nil
+			}
+			code := classifyScanError(err)
+			msg := fmt.Sprintf("failed to suggest fix: %v", err)
 			return mcpToolError(code, msg, nil), nil
 		}
 		return mcp.NewToolResultText(string(v.([]byte))), nil
@@ -1148,6 +1221,7 @@ func registerTools(ksServer *KubescapeMcpserver) {
 	createIaCScanningTools(ksServer)
 	createIaCControlScanningTool(ksServer)
 	createRemediationTools(ksServer)
+	createSuggestFixTools(ksServer)
 	createVerifyRemediationTools(ksServer)
 	createControlScanningTools(ksServer)
 	createWorkloadScanningTools(ksServer)

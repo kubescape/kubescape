@@ -23,7 +23,7 @@ type diffLine struct {
 	oldLine, newLine int
 }
 
-// unifiedDiff returns the unified diff that turns oldContent into newContent
+// UnifiedDiff returns the unified diff that turns oldContent into newContent
 // for the file at name, in the form `git apply` and `patch -p1` accept, or ""
 // when the two are equal. name is a slash-separated path relative to the
 // directory the patch is applied from; it is given the a/ and b/ prefixes.
@@ -33,7 +33,7 @@ type diffLine struct {
 // reproduces the file byte for byte. The diff is not guaranteed to be the
 // shortest one: the line diff is cut off after a short time on very large
 // inputs, which costs size, never correctness.
-func unifiedDiff(name, oldContent, newContent string) string {
+func UnifiedDiff(name, oldContent, newContent string) string {
 	if oldContent == newContent {
 		return ""
 	}
@@ -49,6 +49,10 @@ func unifiedDiff(name, oldContent, newContent string) string {
 		writeHunk(&out, hunk)
 	}
 	return out.String()
+}
+
+func unifiedDiff(name, oldContent, newContent string) string {
+	return UnifiedDiff(name, oldContent, newContent)
 }
 
 // diffLines runs a line diff and numbers every line of the result.
