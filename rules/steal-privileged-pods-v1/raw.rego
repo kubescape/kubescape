@@ -190,7 +190,7 @@ update_patch_or_wildcard(verbs) if verbs[_] in {"update", "patch", "*"}
 # definedness alone would read resourceNames: [] as scoped and skip a subject
 # that in fact holds unrestricted access.
 unrestricted_rule(rule) if {
-	count(object.get(rule, "resourceNames", [])) == 0
+	count(resource_names(rule)) == 0
 }
 
 pairs_with(role, rolebinding) if {
@@ -260,3 +260,12 @@ is_same_subject_vector(subjectVector, other) if {
 	object.get(subjectVector, "namespace", "") == object.get(other, "namespace", "")
 	object.get(subjectVector, "apiGroup", "") == object.get(other, "apiGroup", "")
 }
+
+# resource_names is a rule's resourceNames with an absent or null list read as
+# the empty list. Kubernetes treats all three alike: ResourceNameMatches matches
+# as soon as the list is empty, so the rule is not narrowed to named objects.
+# Counting a null list directly is undefined and would drop the rule instead.
+resource_names(rule) := names if {
+	names := object.get(rule, "resourceNames", [])
+	names != null
+} else := []

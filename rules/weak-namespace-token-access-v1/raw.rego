@@ -127,7 +127,7 @@ token_verbs(rule) := {"list", "watch", "*"} if {
 # A non-empty resourceNames entry is a real secret. "" is the name a collection
 # request is authorized with, not the name of an object.
 names_a_secret(rule) if {
-	some name in object.get(rule, "resourceNames", [])
+	some name in resource_names(rule)
 	name != ""
 }
 
@@ -155,7 +155,7 @@ core_api_group(rule) if rule.apiGroups[_] in {"", "*"}
 # definedness alone (not rule.resourceNames) would treat resourceNames: [] as
 # scoped and skip a subject that in fact holds unrestricted access.
 unrestricted_rule(rule) if {
-	count(object.get(rule, "resourceNames", [])) == 0
+	count(resource_names(rule)) == 0
 }
 
 # Only RoleBindings outside the privileged namespaces are in scope, the same
@@ -229,3 +229,12 @@ is_same_subjects(subjectVector, subject) if {
 	object.get(subjectVector, "namespace", "") == object.get(subject, "namespace", "")
 	object.get(subjectVector, "apiGroup", "") == object.get(subject, "apiGroup", "")
 }
+
+# resource_names is a rule's resourceNames with an absent or null list read as
+# the empty list. Kubernetes treats all three alike: ResourceNameMatches matches
+# as soon as the list is empty, so the rule is not narrowed to named objects.
+# Counting a null list directly is undefined and would drop the rule instead.
+resource_names(rule) := names if {
+	names := object.get(rule, "resourceNames", [])
+	names != null
+} else := []
