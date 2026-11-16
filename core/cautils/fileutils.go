@@ -115,15 +115,68 @@ func LoadResourcesFromHelmChartsFiltered(ctx context.Context, basePath string, v
 	return loadResourcesFromHelmCharts(ctx, basePath, valueOpts, excludedChartDirectories, filter, workspaceOpt...)
 }
 
-// ProtectHelmPathSeparators escapes backslashes that do not precede Helm syntax delimiters
+// ProtectHelmPathSeparators escapes backslashes in the value portions of Helm key=value expressions
+// (and within brace lists {path1,path2}) that do not precede Helm syntax delimiters
 // (',', '{', '}', '[', ']', '=', '.') so that native Windows path separators (e.g. C:\dir\file.txt)
 // are preserved across strvals decoding rather than being consumed as escape prefixes.
+// Backslashes in keys (such as `my\ key` or `my\,key`) are preserved verbatim according to Helm key syntax.
 func ProtectHelmPathSeparators(s string) string {
 	var sb strings.Builder
 	runes := []rune(s)
 	n := len(runes)
+	inKey := true
+	afterEqual := false
+	inBraces := false
+
 	for i := 0; i < n; i++ {
 		r := runes[i]
+		if inKey {
+			if r == '\\' {
+				// Escape sequence in key (e.g. `\ `, `\,`, `\=`, `\.`, `\[`, `\\`).
+				// Preserve the backslash and the escaped rune verbatim without doubling.
+				sb.WriteRune(r)
+				if i+1 < n {
+					sb.WriteRune(runes[i+1])
+					i++
+				}
+				continue
+			}
+			if r == '=' {
+				sb.WriteRune(r)
+				inKey = false
+				afterEqual = true
+				inBraces = false
+				continue
+			}
+			sb.WriteRune(r)
+			continue
+		}
+
+		// We are in a value portion.
+		if afterEqual {
+			afterEqual = false
+			if r == '{' {
+				inBraces = true
+				sb.WriteRune(r)
+				continue
+			}
+		}
+
+		if inBraces {
+			if r == '}' {
+				sb.WriteRune(r)
+				inBraces = false
+				continue
+			}
+		} else {
+			if r == ',' {
+				// Top-level unescaped comma ends the value and begins the next key.
+				sb.WriteRune(r)
+				inKey = true
+				continue
+			}
+		}
+
 		if r == '\\' {
 			if i+1 < n {
 				next := runes[i+1]
@@ -138,6 +191,7 @@ func ProtectHelmPathSeparators(s string) string {
 			sb.WriteString(`\\`)
 			continue
 		}
+
 		sb.WriteRune(r)
 	}
 	return sb.String()

@@ -356,6 +356,21 @@ func TestHelmValueOptions_MergeValues(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, "custom-config-content", merged["custom"])
 	})
+
+	t.Run("merges file values preserving key escapes and path separators", func(t *testing.T) {
+		tempDir := t.TempDir()
+		valFile := filepath.Join(tempDir, "config.txt")
+		err := os.WriteFile(valFile, []byte("custom-config-content"), 0600)
+		assert.NoError(t, err)
+
+		opts := HelmValueOptions{
+			FileValues: []string{`my\ key=` + valFile},
+		}
+		merged, err := opts.MergeValues()
+		assert.NoError(t, err)
+		assert.Equal(t, "custom-config-content", merged["my key"])
+		assert.Nil(t, merged[`my\ key`])
+	})
 }
 
 // TestLoadResourcesFromHelmCharts_WithOverrides confirms that user-supplied --set values
@@ -698,6 +713,62 @@ func TestParseHelmFileValuePaths_WindowsPaths(t *testing.T) {
 				require.NoError(t, err)
 				assert.Equal(t, tt.expectedPaths, gotPaths)
 			}
+		})
+	}
+}
+
+func TestProtectHelmPathSeparators(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "key escape with space is preserved",
+			input:    `my\ key=/tmp/value`,
+			expected: `my\ key=/tmp/value`,
+		},
+		{
+			name:     "key escape with space and Windows value path",
+			input:    `my\ key=C:\dir\file.txt`,
+			expected: `my\ key=C:\\dir\\file.txt`,
+		},
+		{
+			name:     "key escape with comma",
+			input:    `my\,key=C:\dir\file.txt`,
+			expected: `my\,key=C:\\dir\\file.txt`,
+		},
+		{
+			name:     "key escape with equal",
+			input:    `my\=key=C:\dir\file.txt`,
+			expected: `my\=key=C:\\dir\\file.txt`,
+		},
+		{
+			name:     "multiple comma-separated entries with key escapes and Windows paths",
+			input:    `k1=C:\a\b.txt,k2\ key=C:\c\d.txt`,
+			expected: `k1=C:\\a\\b.txt,k2\ key=C:\\c\\d.txt`,
+		},
+		{
+			name:     "brace list with Windows paths and subsequent key escape",
+			input:    `k1={C:\a\b.txt,C:\e\f.txt},k2\ key=C:\c\d.txt`,
+			expected: `k1={C:\\a\\b.txt,C:\\e\\f.txt},k2\ key=C:\\c\\d.txt`,
+		},
+		{
+			name:     "escaped comma in value is preserved",
+			input:    `k1=C:\dir\a\,b.txt,k2=C:\dir\c.txt`,
+			expected: `k1=C:\\dir\\a\,b.txt,k2=C:\\dir\\c.txt`,
+		},
+		{
+			name:     "UNC network path",
+			input:    `unc=\\server\share\file.txt`,
+			expected: `unc=\\\\server\\share\\file.txt`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ProtectHelmPathSeparators(tt.input)
+			assert.Equal(t, tt.expected, got)
 		})
 	}
 }
