@@ -35,6 +35,7 @@ func TestValidateScanFormat(t *testing.T) {
 		{"junit is supported for image scanning", "junit", ImageScanFormats, false},
 		{"csv is supported for image scanning", "csv", ImageScanFormats, false},
 		{"policyreport is supported for image scanning", "policyreport", ImageScanFormats, false},
+		{"gitlab-container-scanning is supported for image scanning", "gitlab-container-scanning", ImageScanFormats, false},
 		{"github-actions is not supported for image scanning", "github-actions", ImageScanFormats, true},
 		{"uppercase single format is accepted", "JSON", ScanFormats, false},
 		{"mixed-case comma-separated formats with whitespace", " JSON , Yaml,SARIF ", ScanFormats, false},

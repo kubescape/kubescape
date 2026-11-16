@@ -409,7 +409,7 @@ func TestGetOutputPrintersReturnsExplicitSetupErrorsForEveryFormat(t *testing.T)
 	for _, format := range printer.AllFormats {
 		t.Run(format, func(t *testing.T) {
 			scanType := cautils.ScanTypeControl
-			if format == printer.CycloneDXFormat || format == printer.SPDXFormat {
+			if format == printer.CycloneDXFormat || format == printer.SPDXFormat || format == printer.GitLabContainerScanningFormat {
 				scanType = cautils.ScanTypeImage
 			}
 			scanInfo := &cautils.ScanInfo{

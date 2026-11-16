@@ -110,6 +110,30 @@ scan_code_quality:
 
 Kubescape severities map to Code Quality severities as Critical → `critical`, High → `major`, Medium → `minor`, and Low → `info`. Each finding carries a fingerprint built from the control, the resource's API group, kind, namespace and name, and the file, so GitLab tracks it across pipelines and only reports it as new when one of those changes. Moving the resource within its file, or scanning from another checkout directory, does not change it. Like `gitlab-sast`, the format only covers local file, directory and repository scans, and resources with no path inside the repository are left out with a warning. Image vulnerabilities have no file to anchor to, so `--scan-images` and `scan image` are rejected with this format.
 
+Report Image Vulnerabilities with Container Scanning
+
+The `gitlab-container-scanning` format writes image vulnerabilities as a GitLab Container Scanning report, so they appear in the merge request security widget and the vulnerability report next to GitLab's own container scanning results. Each finding names the image, its operating system and the vulnerable package, and carries the upgrade path when a fix is available.
+
+```yaml
+scan_container:
+  stage: scan
+  image: alpine:latest
+  variables:
+    KUBESCAPE_REGISTRY_USERNAME: $CI_REGISTRY_USER
+    KUBESCAPE_REGISTRY_PASSWORD: $CI_REGISTRY_PASSWORD
+  script:
+    - apk add --no-cache bash curl gcompat
+    - curl -s https://raw.githubusercontent.com/kubescape/kubescape/master/install.sh | /bin/bash
+    - export PATH=$PATH:$HOME/.kubescape/bin
+    - kubescape scan image "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHA" --format gitlab-container-scanning --output gl-container-scanning-report.json
+  artifacts:
+    when: always
+    reports:
+      container_scanning: gl-container-scanning-report.json
+```
+
+The `KUBESCAPE_REGISTRY_USERNAME` and `KUBESCAPE_REGISTRY_PASSWORD` variables let Kubescape pull the image from the project's private container registry without putting the job token on the command line. The format also works with `kubescape scan --scan-images`, in which case it reports only the image vulnerabilities; write posture findings with `gitlab-sast` or `gitlab-codequality` from a separate scan. Grype's Negligible severity is reported as `Info`, an image without a detectable operating system is reported as `Unknown`, and each vulnerability keeps a stable identifier so dismissals carry over between pipelines.
+
 Troubleshooting
 
 kubescape: command not found

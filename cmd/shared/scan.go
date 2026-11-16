@@ -220,7 +220,7 @@ func ValidateCommonScanFlags(cmd *cobra.Command, scanInfo *cautils.ScanInfo, sup
 	if scanInfo.ScanType != cautils.ScanTypeImage && !scanInfo.ScanImages {
 		for _, format := range strings.Split(scanInfo.Format, ",") {
 			f := strings.TrimSpace(format)
-			if f == printer.CycloneDXFormat || f == printer.SPDXFormat {
+			if f == printer.CycloneDXFormat || f == printer.SPDXFormat || f == printer.GitLabContainerScanningFormat {
 				return fmt.Errorf("format %q requires scanned images: add --scan-images, or run %q to scan an image directly", f, cautils.ExecName()+" scan image")
 			}
 		}
