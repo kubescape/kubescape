@@ -153,6 +153,27 @@ func getImageCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Command 
 			if scanInfo.FilePath != "" || commandFlagChanged(cmd, "file-path") {
 				return fmt.Errorf("--file-path is not supported for image scans: an image scan evaluates vulnerabilities, not local manifest files")
 			}
+			if scanInfo.HostSensorEnabled.Get() != nil || commandFlagChanged(cmd, "host-scan") {
+				return fmt.Errorf("--host-scan is not supported for image scans: an image scan evaluates vulnerabilities, not cluster host nodes")
+			}
+			if scanInfo.PrintAttackTree || commandFlagChanged(cmd, "print-attack-tree") {
+				return fmt.Errorf("--print-attack-tree is not supported for image scans: an image scan evaluates vulnerabilities, not posture attack paths")
+			}
+			if scanInfo.EnableRegoPrint || commandFlagChanged(cmd, "enable-rego-prints") {
+				return fmt.Errorf("--enable-rego-prints is not supported for image scans: an image scan evaluates vulnerabilities, not Rego rules")
+			}
+			if commandFlagChanged(cmd, "whole-cluster-policy") {
+				return fmt.Errorf("--whole-cluster-policy is not supported for image scans: an image scan evaluates vulnerabilities, not whole-cluster controls")
+			}
+			if scanInfo.EnableStreaming || commandFlagChanged(cmd, "enable-streaming") {
+				return fmt.Errorf("--enable-streaming is not supported for image scans: an image scan evaluates vulnerabilities, not cluster resource streaming")
+			}
+			if scanInfo.CustomClusterName != "" || commandFlagChanged(cmd, "cluster-name") {
+				return fmt.Errorf("--cluster-name is not supported for image scans: an image scan evaluates vulnerabilities, not Kubernetes clusters")
+			}
+			if len(scanInfo.LabelsToCopy) > 0 || commandFlagChanged(cmd, "labels-to-copy") {
+				return fmt.Errorf("--labels-to-copy is not supported for image scans: an image scan evaluates vulnerabilities, not Kubernetes workload labels")
+			}
 			if err := shared.ValidateImageScanAnonymization(scanInfo); err != nil {
 				return err
 			}
