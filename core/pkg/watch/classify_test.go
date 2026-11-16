@@ -573,6 +573,33 @@ func TestClassifyRenamesAreNotLookedForWhenAResourceCannotBeIdentified(t *testin
 	assert.NotZero(t, findingsOn(result.Incomparable, frontendInA)+findingsOn(result.Incomparable, frontendMoved))
 }
 
+func TestClassifyRenamesAreNotLookedForWhenAResultFreeResourceCannotBeIdentified(t *testing.T) {
+	t.Parallel()
+	base := loadScan(t, "two_files")
+	// Remove all results for the backend so it is completely result-free.
+	backendID := base.resourcesAt("b.yaml")[0]["resourceID"].(string)
+	var keptResults []any
+	for _, raw := range base["results"].([]any) {
+		result := raw.(map[string]any)
+		if result["resourceID"] != backendID {
+			keptResults = append(keptResults, result)
+		}
+	}
+	base["results"] = keptResults
+
+	// The backend's resource no longer says which file it came from.
+	for _, resource := range base.resourcesAt("b.yaml") {
+		delete(resource, "source")
+	}
+	head := decodeScan(t, base.encode(t)).renamed(t, "a.yaml", "renamed.yaml")
+
+	result := classifyDocs(t, base, head)
+
+	assert.Empty(t, result.Renames, "an unidentified result-free resource must prevent rename detection")
+	assert.Empty(t, result.Renamed)
+	assert.Contains(t, strings.Join(result.Warnings, "\n"), "renamed files were not looked for")
+}
+
 func TestClassifyChangedFinding(t *testing.T) {
 	t.Parallel()
 	base := loadScan(t, "two_files")

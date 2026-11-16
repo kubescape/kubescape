@@ -72,16 +72,28 @@ func newSnapshot(reportJSON []byte) (*snapshot, error) {
 		keys:   make(map[objectKey]int, len(report.Resources)),
 	}
 
-	var coverage struct {
+	var original struct {
 		ScanCoverage *cautils.ScanCoverage `json:"scanCoverage"`
+		Resources    []struct {
+			ResourceID string         `json:"resourceID"`
+			Source     map[string]any `json:"source"`
+			Object     map[string]any `json:"object"`
+		} `json:"resources"`
 	}
-	if err := json.Unmarshal(reportJSON, &coverage); err != nil {
+	if err := json.Unmarshal(reportJSON, &original); err != nil {
 		return nil, fmt.Errorf("read the scan coverage: %w", err)
 	}
-	snap.skippedManifests = coverage.ScanCoverage != nil && len(coverage.ScanCoverage.SkippedManifests) > 0
-	if c := coverage.ScanCoverage; c != nil {
+	snap.skippedManifests = original.ScanCoverage != nil && len(original.ScanCoverage.SkippedManifests) > 0
+	if c := original.ScanCoverage; c != nil {
 		snap.onlyPolicyFallback = len(c.PolicyDegradations) > 0 &&
 			len(c.FailedGVRPulls) == 0 && len(c.PartialGVRPulls) == 0 && len(c.SkippedManifests) == 0
+	}
+	for _, resource := range original.Resources {
+		relativePath, _ := resource.Source["relativePath"].(string)
+		if resource.ResourceID == "" || Identity(relativePath, resource.Object) == "" {
+			snap.unidentified = true
+			break
+		}
 	}
 
 	var doc struct {
