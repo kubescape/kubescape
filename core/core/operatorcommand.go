@@ -88,6 +88,11 @@ func WaitForOperatorCommands(ctx context.Context, dyn dynamic.Interface, ns stri
 			}
 			obj, err := dyn.Resource(operatorCommandGVR).Namespace(ns).Get(ctx, name, metav1.GetOptions{})
 			if err != nil {
+				if isTransientAPIError(err) {
+					// Keep polling: a brief API-server hiccup should not fail a command the operator is still running.
+					logger.L().Debug("transient error reading operator command, retrying", helpers.String("name", name), helpers.Error(err))
+					return false, nil
+				}
 				return false, fmt.Errorf("failed to get operator command %s: %w", name, err)
 			}
 			if st, _, _ := unstructured.NestedBool(obj.Object, "status", "started"); st {
@@ -144,4 +149,14 @@ func operatorCommandLabel(obj *unstructured.Unstructured) string {
 		return name
 	}
 	return fmt.Sprintf("%s (%s)", cmd.CommandName, name)
+}
+
+// isTransientAPIError reports whether err is a temporary API-server condition
+// that is worth retrying rather than failing the wait.
+func isTransientAPIError(err error) bool {
+	return apierrors.IsServerTimeout(err) ||
+		apierrors.IsTimeout(err) ||
+		apierrors.IsTooManyRequests(err) ||
+		apierrors.IsServiceUnavailable(err) ||
+		apierrors.IsInternalError(err)
 }

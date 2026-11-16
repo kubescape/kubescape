@@ -13,6 +13,7 @@ import (
 	"github.com/armosec/armoapi-go/apis"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -199,4 +200,45 @@ func TestWaitForOperatorCommands_CancelMidWait(t *testing.T) {
 
 	err = WaitForOperatorCommands(ctx, dyn, "kubescape", names, 5*time.Second)
 	require.ErrorIs(t, err, context.Canceled)
+}
+
+func TestWaitForOperatorCommands_RetriesTransientGetErrors(t *testing.T) {
+	shortPollInterval(t)
+	dyn := newFakeOperatorCommandClient(t)
+	names, err := CreateOperatorCommands(context.Background(), dyn, "kubescape",
+		apis.Commands{Commands: []apis.Command{{CommandName: apis.TypeRunKubescape}}})
+	require.NoError(t, err)
+	setOperatorCommandStatus(t, dyn, "kubescape", names[0], map[string]interface{}{"started": true, "completed": true})
+
+	// Fail the first two reads with transient errors, then let the real object through.
+	var calls int32
+	dyn.PrependReactor("get", "operatorcommands", func(action clienttesting.Action) (bool, runtime.Object, error) {
+		switch atomic.AddInt32(&calls, 1) {
+		case 1:
+			return true, nil, apierrors.NewServerTimeout(operatorCommandGVR.GroupResource(), "get", 1)
+		case 2:
+			return true, nil, apierrors.NewTooManyRequests("slow down", 1)
+		}
+		return false, nil, nil
+	})
+
+	require.NoError(t, WaitForOperatorCommands(context.Background(), dyn, "kubescape", names, 5*time.Second))
+	assert.GreaterOrEqual(t, atomic.LoadInt32(&calls), int32(3))
+}
+
+func TestWaitForOperatorCommands_FailsOnNonTransientGetError(t *testing.T) {
+	shortPollInterval(t)
+	dyn := newFakeOperatorCommandClient(t)
+	names, err := CreateOperatorCommands(context.Background(), dyn, "kubescape",
+		apis.Commands{Commands: []apis.Command{{CommandName: apis.TypeRunKubescape}}})
+	require.NoError(t, err)
+
+	dyn.PrependReactor("get", "operatorcommands", func(action clienttesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewForbidden(operatorCommandGVR.GroupResource(), names[0], fmt.Errorf("no access"))
+	})
+
+	err = WaitForOperatorCommands(context.Background(), dyn, "kubescape", names, 5*time.Second)
+	require.Error(t, err)
+	assert.True(t, apierrors.IsForbidden(err))
+	assert.Contains(t, err.Error(), names[0])
 }
