@@ -97,9 +97,24 @@ func (ksServer *KubescapeMcpserver) runIaCScanControlsReport(ctx context.Context
 	}
 	path = resolvedPath
 
-	policyIdentifiers, err := iacControlPolicyIdentifiers(path, controlIDs)
-	if err != nil {
-		return nil, err
+	var policyIdentifiers []cautils.PolicyIdentifier
+	hasControls := false
+	for _, id := range controlIDs {
+		if strings.TrimSpace(id) != "" {
+			hasControls = true
+			break
+		}
+	}
+	if hasControls {
+		var err error
+		policyIdentifiers, err = iacControlPolicyIdentifiers(path, controlIDs)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		policyIdentifiers = []cautils.PolicyIdentifier{
+			{Kind: apisv1.KindFramework, Identifier: "allcontrols"},
+		}
 	}
 	fileHandler := resourcehandler.NewFileResourceHandler()
 	scanData, processErr, err := executeScan(ctx, ksServer, scanRequest{
