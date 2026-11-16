@@ -541,6 +541,117 @@ resource "kubernetes_cluster_role_binding_v1" "admin" {
 	assert.Equal(t, "ClusterRoleBinding", manifests[3]["kind"])
 }
 
+func TestExtractTypedResourcesServiceAccountAndHostAliases(t *testing.T) {
+	src := `
+resource "kubernetes_default_service_account" "my_custom_label" {
+  metadata {
+    namespace = "kube-system"
+  }
+  automount_service_account_token = false
+  secret {
+    name = "default-token"
+  }
+  image_pull_secret {
+    name = "regcred"
+  }
+}
+
+resource "kubernetes_default_service_account_v1" "default_v1" {
+  metadata {
+    name = "custom-default"
+  }
+  secret {
+    name = "s1"
+  }
+  secret {
+    name = "s2"
+  }
+}
+
+resource "kubernetes_service_account_v1" "app" {
+  metadata {
+    name = "app"
+  }
+  secret {
+    name = "app-token"
+  }
+  image_pull_secret {
+    name = "app-cred"
+  }
+}
+
+resource "kubernetes_pod_v1" "pod_with_host_aliases" {
+  spec {
+    host_aliases {
+      ip        = "127.0.0.1"
+      hostnames = ["local.dev"]
+    }
+    container {
+      name  = "app"
+      image = "nginx"
+    }
+    volume {
+      name = "sec-vol"
+      secret {
+        secret_name = "pod-secret"
+      }
+    }
+  }
+}
+`
+	manifests, errs := extractTypedResources(parseTypedHCL(t, src), &hcl.EvalContext{})
+
+	require.Empty(t, errs)
+	require.Len(t, manifests, 4)
+
+	// 1. kubernetes_default_service_account maps to v1/ServiceAccount with secrets and imagePullSecrets arrays
+	assert.Equal(t, "v1", manifests[0]["apiVersion"])
+	assert.Equal(t, "ServiceAccount", manifests[0]["kind"])
+	assert.Equal(t, map[string]interface{}{"name": "default", "namespace": "kube-system"}, manifests[0]["metadata"],
+		"default service account must default metadata.name to 'default' even when Terraform label differs")
+	assert.Equal(t, false, manifests[0]["automountServiceAccountToken"])
+	assert.Equal(t, []interface{}{
+		map[string]interface{}{"name": "default-token"},
+	}, manifests[0]["secrets"], "single secret block must encode as secrets array")
+	assert.Equal(t, []interface{}{
+		map[string]interface{}{"name": "regcred"},
+	}, manifests[0]["imagePullSecrets"], "single image_pull_secret block must encode as imagePullSecrets array")
+
+	// 2. kubernetes_default_service_account_v1 maps to v1/ServiceAccount with multiple secrets
+	assert.Equal(t, "v1", manifests[1]["apiVersion"])
+	assert.Equal(t, "ServiceAccount", manifests[1]["kind"])
+	assert.Equal(t, map[string]interface{}{"name": "custom-default"}, manifests[1]["metadata"])
+	assert.Equal(t, []interface{}{
+		map[string]interface{}{"name": "s1"},
+		map[string]interface{}{"name": "s2"},
+	}, manifests[1]["secrets"], "multiple secret blocks must preserve all entries in secrets array")
+
+	// 3. kubernetes_service_account_v1 maps single secret and image_pull_secret to arrays
+	assert.Equal(t, "v1", manifests[2]["apiVersion"])
+	assert.Equal(t, "ServiceAccount", manifests[2]["kind"])
+	assert.Equal(t, []interface{}{
+		map[string]interface{}{"name": "app-token"},
+	}, manifests[2]["secrets"])
+	assert.Equal(t, []interface{}{
+		map[string]interface{}{"name": "app-cred"},
+	}, manifests[2]["imagePullSecrets"])
+
+	// 4. Pod with host_aliases and volume.secret: host_aliases becomes array, volume.secret remains an object
+	podSpec := manifests[3]["spec"].(map[string]interface{})
+	assert.Equal(t, []interface{}{
+		map[string]interface{}{
+			"ip":        "127.0.0.1",
+			"hostnames": []interface{}{"local.dev"},
+		},
+	}, podSpec["hostAliases"], "single host_aliases block must encode as array")
+
+	volumes := podSpec["volumes"].([]interface{})
+	require.Len(t, volumes, 1)
+	vol := volumes[0].(map[string]interface{})
+	assert.Equal(t, map[string]interface{}{"secretName": "pod-secret"}, vol["secret"],
+		"volume.secret must remain a nested object and not be converted to secrets array")
+}
+
 func TestExtractTypedResourcesSkipsInvalidBlocks(t *testing.T) {
 	cases := []struct {
 		name string
