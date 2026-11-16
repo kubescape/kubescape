@@ -151,7 +151,7 @@ names_overlap(create_rule, patch_rule) if {
 }
 
 # Kubernetes treats an absent and an empty resourceNames alike: neither narrows.
-unnamed(rule) if count(object.get(rule, "resourceNames", [])) == 0
+unnamed(rule) if count(resource_names(rule)) == 0
 
 names_an_object(rule) if {
 	name := rule.resourceNames[_]
@@ -189,15 +189,11 @@ can_approve_signers(role) if {
 }
 
 dangerous_signer_names(rule) if {
-    not rule.resourceNames
+    count(resource_names(rule)) == 0
 }
 
 dangerous_signer_names(rule) if {
-    count(rule.resourceNames) == 0
-}
-
-dangerous_signer_names(rule) if {
-    signer := rule.resourceNames[_]
+    signer := resource_names(rule)[_]
     signer in {
         "kubernetes.io/kube-apiserver-client",
         "kubernetes.io/*",
@@ -292,3 +288,12 @@ is_same_subjects(subjectVector, subject) if {
 	object.get(subjectVector, "namespace", "") == object.get(subject, "namespace", "")
 	object.get(subjectVector, "apiGroup", "") == object.get(subject, "apiGroup", "")
 }
+
+# resource_names is a rule's resourceNames with an absent or null list read as
+# the empty list. Kubernetes treats all three alike: ResourceNameMatches matches
+# as soon as the list is empty, so the rule is not narrowed to named objects.
+# Counting a null list directly is undefined and would drop the rule instead.
+resource_names(rule) := names if {
+	names := object.get(rule, "resourceNames", [])
+	names != null
+} else := []

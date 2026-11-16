@@ -1,0 +1,14 @@
+# resourceNames: null narrows nothing, the same as leaving it out.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: pod-stealer
+rules:
+- apiGroups: [""]
+  resources: ["pods"]
+  resourceNames: null
+  verbs: ["delete"]
+- apiGroups: [""]
+  resources: ["nodes"]
+  resourceNames: null
+  verbs: ["patch"]

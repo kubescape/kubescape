@@ -88,11 +88,11 @@ effective_verbs(rule) := {verb |
 	grants_named_requests(rule)
 }
 
-grants_unnamed_requests(rule) if count(object.get(rule, "resourceNames", [])) == 0
+grants_unnamed_requests(rule) if count(resource_names(rule)) == 0
 
 grants_unnamed_requests(rule) if "" in rule.resourceNames
 
-grants_named_requests(rule) if count(object.get(rule, "resourceNames", [])) == 0
+grants_named_requests(rule) if count(resource_names(rule)) == 0
 
 grants_named_requests(rule) if {
 	some name in rule.resourceNames
@@ -141,3 +141,12 @@ is_same_subjects(subjectVector, subject) if {
 	object.get(subjectVector, "namespace", "") == object.get(subject, "namespace", "")
 	object.get(subjectVector, "apiGroup", "") == object.get(subject, "apiGroup", "")
 }
+
+# resource_names is a rule's resourceNames with an absent or null list read as
+# the empty list. Kubernetes treats all three alike: ResourceNameMatches matches
+# as soon as the list is empty, so the rule is not narrowed to named objects.
+# Counting a null list directly is undefined and would drop the rule instead.
+resource_names(rule) := names if {
+	names := object.get(rule, "resourceNames", [])
+	names != null
+} else := []

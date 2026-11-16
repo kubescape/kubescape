@@ -18,7 +18,7 @@ deny contains msga if {
 
 	# a rule restricted to named roles/clusterroles cannot be used to escalate to an arbitrary role/clusterrole
 	# (an omitted or explicitly empty resourceNames list is unrestricted)
-	count(object.get(rule, "resourceNames", [])) == 0
+	count(resource_names(rule)) == 0
 
 	subject := rolebinding.subjects[k]
 	is_same_subjects(subjectVector, subject)
@@ -82,3 +82,12 @@ is_same_subjects(subjectVector, subject) if {
 	object.get(subjectVector, "namespace", "") == object.get(subject, "namespace", "")
 	object.get(subjectVector, "apiGroup", "") == object.get(subject, "apiGroup", "")
 }
+
+# resource_names is a rule's resourceNames with an absent or null list read as
+# the empty list. Kubernetes treats all three alike: ResourceNameMatches matches
+# as soon as the list is empty, so the rule is not narrowed to named objects.
+# Counting a null list directly is undefined and would drop the rule instead.
+resource_names(rule) := names if {
+	names := object.get(rule, "resourceNames", [])
+	names != null
+} else := []
