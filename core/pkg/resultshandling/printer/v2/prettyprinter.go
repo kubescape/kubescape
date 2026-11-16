@@ -168,6 +168,10 @@ func (pp *PrettyPrinter) printHeader(opaSessionObj *cautils.OPASessionObj) {
 		cautils.InfoDisplay(pp.writer, fmt.Sprintf("\nSecurity posture overview for repo: '%s'\n\n", strings.Join(pp.inputPatterns, ", ")))
 	case cautils.ScanTypeWorkload:
 		cautils.InfoDisplay(pp.writer, "Workload security posture overview for:\n")
+		if opaSessionObj == nil || opaSessionObj.SingleResourceScan == nil {
+			cautils.SimpleDisplay(pp.writer, "\nIn this overview, Kubescape shows you a summary of the security posture of a workload, including key controls that apply to its configuration, and the vulnerability status of the container image.\n\n\n")
+			return
+		}
 		ns := opaSessionObj.SingleResourceScan.GetNamespace()
 		var rows []table.Row
 		if ns != "" {

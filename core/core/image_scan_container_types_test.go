@@ -419,3 +419,20 @@ func TestBuildWorkloadImageScanJobsOrdersAndKeepsPlatformVariants(t *testing.T) 
 		{containerTypesEphemeralImage, "", false},
 	}, got)
 }
+
+func TestCollectImageScanTargets_NilSingleResourceScanDoesNotPanic(t *testing.T) {
+	scanData := &cautils.OPASessionObj{}
+	scanData.SingleResourceScan = nil
+
+	targets, creds, errs := collectImageScanTargets(cautils.ScanTypeWorkload, scanData, context.Background(), cautils.ContextFile, nil, "")
+	assert.Empty(t, targets.ToSlice())
+	assert.Empty(t, creds)
+	assert.Empty(t, errs)
+}
+
+func TestCollectImageScanTargets_NilScanDataDoesNotPanic(t *testing.T) {
+	targets, creds, errs := collectImageScanTargets(cautils.ScanTypeWorkload, nil, context.Background(), cautils.ContextFile, nil, "")
+	assert.Empty(t, targets.ToSlice())
+	assert.Empty(t, creds)
+	assert.Empty(t, errs)
+}

@@ -580,3 +580,17 @@ func TestPrintGroupedResources_DeterministicNamespaceOrder(t *testing.T) {
 		assert.True(t, idxGamma < idxZebra, "gamma must appear before zebra")
 	}
 }
+
+func TestActionPrint_WorkloadScanNilSingleResourceScanDoesNotPanic(t *testing.T) {
+	pp, read := newControlViewPrettyPrinter(t, true)
+	pp.scanType = cautils.ScanTypeWorkload
+	pp.SetMainPrinter()
+
+	session := controlViewAssistedRemediationSession()
+	session.SingleResourceScan = nil
+
+	require.NoError(t, pp.ActionPrint(context.Background(), session, nil))
+	out := read()
+	assert.Contains(t, out, "Workload security posture overview")
+	assert.Contains(t, out, "In this overview, Kubescape shows you a summary")
+}
