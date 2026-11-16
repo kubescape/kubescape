@@ -63,6 +63,11 @@ func useTrustedRoot(t *testing.T, tm root.TrustedMaterial) {
 // since v3 with --tlog-upload=false. A nil cert makes it a key-signed bundle.
 func attachBundle(t *testing.T, img, subject name.Digest, signer *ecdsa.PrivateKey, cert *x509.Certificate, predicateType string) {
 	t.Helper()
+	writeBundle(t, img, newSignedBundle(t, subject, signer, cert, predicateType))
+}
+
+func newSignedBundle(t *testing.T, subject name.Digest, signer *ecdsa.PrivateKey, cert *x509.Certificate, predicateType string) *protobundle.Bundle {
+	t.Helper()
 	statement := []byte(fmt.Sprintf(
 		`{"_type":"https://in-toto.io/Statement/v1","subject":[{"name":%q,"digest":{"sha256":%q}}],"predicateType":%q,"predicate":{}}`,
 		subject.Context().String(), strings.TrimPrefix(subject.DigestStr(), "sha256:"), predicateType))
@@ -76,7 +81,7 @@ func attachBundle(t *testing.T, img, subject name.Digest, signer *ecdsa.PrivateK
 	} else {
 		material.Content = &protobundle.VerificationMaterial_PublicKey{PublicKey: &protocommon.PublicKeyIdentifier{}}
 	}
-	bundle, err := protojson.Marshal(&protobundle.Bundle{
+	return &protobundle.Bundle{
 		MediaType:            "application/vnd.dev.sigstore.bundle.v0.3+json",
 		VerificationMaterial: material,
 		Content: &protobundle.Bundle_DsseEnvelope{DsseEnvelope: &protodsse.Envelope{
@@ -84,9 +89,14 @@ func attachBundle(t *testing.T, img, subject name.Digest, signer *ecdsa.PrivateK
 			PayloadType: "application/vnd.in-toto+json",
 			Signatures:  []*protodsse.Signature{{Sig: sig}},
 		}},
-	})
+	}
+}
+
+func writeBundle(t *testing.T, img name.Digest, bundle *protobundle.Bundle) {
+	t.Helper()
+	data, err := protojson.MarshalOptions{EmitDefaultValues: true}.Marshal(bundle)
 	require.NoError(t, err)
-	require.NoError(t, ociremote.WriteAttestationNewBundleFormat(img, bundle, types.CosignSignPredicateType))
+	require.NoError(t, ociremote.WriteAttestationNewBundleFormat(img, data, types.CosignSignPredicateType))
 }
 
 // TestVerify_SigstoreBundle covers images signed in the Sigstore bundle

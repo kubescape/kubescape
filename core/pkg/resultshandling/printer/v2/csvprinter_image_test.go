@@ -105,10 +105,10 @@ func TestActionPrint_Csv_ImageScanNeutralizesFormulaInjection(t *testing.T) {
 	})
 
 	require.Len(t, records, 2)
-	assert.Equal(t, "'=evil/image:v1", records[1][0])
-	assert.Equal(t, "'@pkg", records[1][4])
-	assert.Equal(t, "'+1", records[1][5])
-	assert.Equal(t, "'-2", records[1][7])
+	assert.Equal(t, "text: =evil/image:v1", records[1][0])
+	assert.Equal(t, "text: @pkg", records[1][4])
+	assert.Equal(t, "text: +1", records[1][5])
+	assert.Equal(t, "text: -2", records[1][7])
 }
 
 func TestActionPrint_Csv_ScanImagesWritesCompanionFile(t *testing.T) {

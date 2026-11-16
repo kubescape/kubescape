@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -77,6 +78,9 @@ func CreateOperatorCommands(ctx context.Context, dyn dynamic.Interface, ns strin
 // reporting status.error fails the wait immediately.
 func WaitForOperatorCommands(ctx context.Context, dyn dynamic.Interface, ns string, names []string, timeout time.Duration) error {
 	started := map[string]bool{}
+	// unread holds, for a command whose last read failed with a transient error,
+	// that error: the wait cannot say what happened to it.
+	unread := map[string]error{}
 	pending := make(map[string]struct{}, len(names))
 	for _, n := range names {
 		pending[n] = struct{}{}
@@ -90,11 +94,14 @@ func WaitForOperatorCommands(ctx context.Context, dyn dynamic.Interface, ns stri
 			if err != nil {
 				if isTransientAPIError(err) {
 					// Keep polling: a brief API-server hiccup should not fail a command the operator is still running.
+					// The other commands are still read, so a failure one of them reports is not held up.
 					logger.L().Debug("transient error reading operator command, retrying", helpers.String("name", name), helpers.Error(err))
-					return false, nil
+					unread[name] = err
+					continue
 				}
 				return false, fmt.Errorf("failed to get operator command %s: %w", name, err)
 			}
+			delete(unread, name)
 			if st, _, _ := unstructured.NestedBool(obj.Object, "status", "started"); st {
 				started[name] = true
 			}
@@ -128,8 +135,21 @@ func WaitForOperatorCommands(ctx context.Context, dyn dynamic.Interface, ns stri
 			}
 		}
 		msg := fmt.Sprintf("timed out after %s waiting for operator commands: still pending: %s", timeout, strings.Join(stillPending, ", "))
+		var unreadErrs []string
+		for _, n := range stillPending {
+			if readErr, ok := unread[n]; ok {
+				unreadErrs = append(unreadErrs, fmt.Sprintf("%s: %v", n, readErr))
+			}
+		}
+		if len(unreadErrs) > 0 {
+			msg = fmt.Sprintf("%s; last error reading %s", msg, strings.Join(unreadErrs, "; "))
+		}
 		if len(startedNames) > 0 {
 			return fmt.Errorf("%s; started: %s", msg, strings.Join(startedNames, ", "))
+		}
+		if len(unreadErrs) > 0 {
+			// Their status could not be read, so whether they started is not known.
+			return errors.New(msg)
 		}
 		return fmt.Errorf("%s; none of them started: the operator may be down or too old to execute OperatorAPI commands; check the operator pod in namespace %s", msg, ns)
 	}

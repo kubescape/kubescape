@@ -19,7 +19,7 @@
     }
   ],
   "ruleDependencies": [],
-  "description": "determines which service accounts are annotated to assume a cloud provider IAM identity, through EKS IAM roles for service accounts or GKE Workload Identity, so that compromising a pod using the service account also exposes the cloud account behind it",
-  "remediation": "Only annotate service accounts with a cloud provider IAM identity where the workload genuinely needs it, scope the underlying IAM role or GCP service account to the minimum required permissions, and avoid sharing such service accounts between workloads.",
+  "description": "determines which service accounts are annotated to assume a cloud provider IAM identity, through EKS IAM roles for service accounts, GKE Workload Identity, or Azure Workload Identity, so that compromising a pod using the service account also exposes the cloud account behind it",
+  "remediation": "Only annotate service accounts with a cloud provider IAM identity where the workload genuinely needs it, scope the underlying IAM role, GCP service account, or Azure client identity to the minimum required permissions, and avoid sharing such service accounts between workloads.",
   "ruleQuery": "armo_builtins"
 }

@@ -26,9 +26,6 @@ import (
 // resource and end up on a shell command line.
 var kubectlName = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9._-]*[A-Za-z0-9])?$`)
 
-// shellWordSafe matches a word that needs no quoting in a POSIX shell.
-var shellWordSafe = regexp.MustCompile(`^[A-Za-z0-9._/@:=+-]+$`)
-
 // isClusterScan reports whether the scan read its resources from a live
 // cluster, as opposed to manifest files, a Helm chart or a repository.
 func isClusterScan(opaSessionObj *cautils.OPASessionObj) bool {
@@ -80,15 +77,6 @@ func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
-// shellWord returns s as it can be written on a command line: bare when that is
-// safe, quoted otherwise.
-func shellWord(s string) string {
-	if shellWordSafe.MatchString(s) {
-		return s
-	}
-	return shellQuote(s)
-}
-
 // kubectlResource names a kind the way kubectl accepts it: the lower-case kind,
 // followed by the API group when there is one, as in deployment.apps. The core
 // group has no group part. It reports false when either part is not a plain
@@ -119,10 +107,11 @@ type kubectlCluster struct {
 
 // isSafeShellArg reports whether a cluster flag argument (kubeconfig path or
 // context name) can safely be emitted on a shell command line. It rejects
-// strings containing newlines, carriage returns, control characters, null
-// bytes, or leading hyphens that could split commands or inject flags.
+// strings containing newlines, carriage returns, control characters, or null
+// bytes that could disrupt terminal output. Leading hyphens are permitted
+// because arguments are emitted using --flag=<shell-quoted-value> syntax.
 func isSafeShellArg(s string) bool {
-	if s == "" || strings.HasPrefix(s, "-") {
+	if s == "" {
 		return false
 	}
 	for _, r := range s {
@@ -162,13 +151,13 @@ func kubectlGetCommand(resource workloadinterface.IMetadata, cluster kubectlClus
 		if !isSafeShellArg(cluster.kubeconfig) {
 			return "", false
 		}
-		words = append(words, "--kubeconfig", shellWord(cluster.kubeconfig))
+		words = append(words, "--kubeconfig="+shellQuote(cluster.kubeconfig))
 	}
 	if cluster.context != "" {
 		if !isSafeShellArg(cluster.context) {
 			return "", false
 		}
-		words = append(words, "--context", shellWord(cluster.context))
+		words = append(words, "--context="+shellQuote(cluster.context))
 	}
 	words = append(words, "-o", "jsonpath="+shellQuote(expr))
 	return strings.Join(words, " "), true

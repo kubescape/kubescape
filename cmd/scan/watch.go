@@ -13,6 +13,7 @@ import (
 
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/core"
+	"github.com/kubescape/kubescape/v4/core/pkg/resourcehandler"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/diff"
 	"github.com/kubescape/kubescape/v4/core/pkg/watch"
 	"github.com/spf13/cobra"
@@ -359,10 +360,13 @@ func (s *watchSession) scanOnce(ctx context.Context) error {
 		return ctx.Err() // cut short by the end of the watch: not a scan, and not reported
 	}
 	if scanErr != nil && first {
-		// A first scan that fails is a watch that was set up wrong, such as policies
-		// that cannot be loaded, and not one a change to a manifest would mend.
-		s.cancel(fmt.Errorf("the initial scan failed: %w", scanErr))
-		return scanErr
+		if !isInputError(scanErr) {
+			// A first scan that fails is a watch that was set up wrong, such as policies
+			// that cannot be loaded, and not one a change to a manifest would mend.
+			s.cancel(fmt.Errorf("the initial scan failed: %w", scanErr))
+			return scanErr
+		}
+		return fmt.Errorf("the initial scan found nothing it could scan yet, so the watch waits for a change: %w", scanErr)
 	}
 	observation, err := s.baseline.Observe(reportJSON, scanErr, diff.Options{Granularity: diff.GranularityEvidence})
 	if err != nil {
@@ -370,6 +374,16 @@ func (s *watchSession) scanOnce(ctx context.Context) error {
 	}
 	s.report(scan, observation)
 	return nil
+}
+
+// isInputError reports whether a scan failed on what it was given to read: no
+// manifest yet, one that does not parse, or no Kubernetes object in the files.
+// An edit to a manifest mends each of them, so the watch keeps watching, even
+// when the first scan is the one that failed.
+func isInputError(err error) bool {
+	return errors.Is(err, cautils.ErrNoManifestFiles) ||
+		errors.Is(err, cautils.ErrManifestsNotLoaded) ||
+		errors.Is(err, resourcehandler.ErrNoScannableResources)
 }
 
 // report says what a scan found, in terms of the baseline it was compared with.

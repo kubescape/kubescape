@@ -32,8 +32,10 @@ var typedResourceGVK = map[string]struct{ apiVersion, kind string }{
 	"kubernetes_secret_v1":            {"v1", "Secret"},
 	"kubernetes_namespace":            {"v1", "Namespace"},
 	"kubernetes_namespace_v1":         {"v1", "Namespace"},
-	"kubernetes_service_account":      {"v1", "ServiceAccount"},
-	"kubernetes_service_account_v1":   {"v1", "ServiceAccount"},
+	"kubernetes_service_account":            {"v1", "ServiceAccount"},
+	"kubernetes_service_account_v1":         {"v1", "ServiceAccount"},
+	"kubernetes_default_service_account":    {"v1", "ServiceAccount"},
+	"kubernetes_default_service_account_v1": {"v1", "ServiceAccount"},
 	"kubernetes_job":                  {"batch/v1", "Job"},
 	"kubernetes_job_v1":               {"batch/v1", "Job"},
 	"kubernetes_cron_job":             {"batch/v1", "CronJob"},
@@ -66,9 +68,11 @@ var pluralOverrides = map[string]string{
 	"port":                  "ports",
 	"toleration":            "tolerations",
 	"host_alias":            "hostAliases",
+	"host_aliases":          "hostAliases",
 	"rule":                  "rules",
 	"path":                  "paths",
 	"subject":               "subjects",
+	"image_pull_secret":     "imagePullSecrets",
 	"image_pull_secrets":    "imagePullSecrets",
 	"match_expressions":     "matchExpressions",
 	"volume_claim_template": "volumeClaimTemplates",
@@ -82,7 +86,8 @@ var pluralOverrides = map[string]string{
 var repeatableBlocks = map[string]bool{
 	"container": true, "init_container": true, "volume": true, "volume_mount": true,
 	"env": true, "env_from": true, "port": true, "ports": true, "toleration": true,
-	"host_alias": true, "rule": true, "subject": true, "image_pull_secrets": true,
+	"host_alias": true, "host_aliases": true, "rule": true, "subject": true,
+	"image_pull_secret": true, "image_pull_secrets": true,
 	"match_expressions": true, "volume_claim_template": true, "http_header": true,
 	"sysctl": true, "ingress": true, "egress": true, "from": true, "to": true,
 	"path": true, "tls": true,
@@ -226,6 +231,15 @@ func isConvertiblePortField(path, name string) bool {
 	return isNetworkPolicyPortField(path, name) || isLegacyIngressBackendPortField(path, name) || isIngressBackendServicePortNumberField(path, name)
 }
 
+func isServiceAccountSecretBlock(path, blockType string) bool {
+	if blockType != "secret" {
+		return false
+	}
+	return (strings.HasPrefix(path, "kubernetes_service_account") ||
+		strings.HasPrefix(path, "kubernetes_default_service_account")) &&
+		strings.Count(path, ".") == 1
+}
+
 // isServiceTargetPortField reports whether name is a Service port's
 // target_port. The provider declares it as a string and turns it into a number
 // or a name with intstr.Parse when it builds the Service.
@@ -275,6 +289,12 @@ func isStringTypedNumberField(path, name string) bool {
 }
 
 func attributeValueFor(path, name string, val interface{}) interface{} {
+	// The provider keeps the security context IDs in strings so that "" can
+	// leave them unset: it sets runAsUser, runAsGroup and fsGroup only from a
+	// non-empty value.
+	if s, ok := val.(string); ok && s == "" && isSecurityContextIDField(path, name) {
+		return nil
+	}
 	if s, ok := val.(string); ok && (isConvertiblePortField(path, name) || isStringTypedNumberField(path, name)) && isDigitOnly(s) {
 		return json.Number(canonicalizeNumericString(s))
 	}
@@ -296,7 +316,14 @@ func hclBodyToMap(body *hclsyntax.Body, evalCtx *hcl.EvalContext, errs *[]error,
 			*errs = append(*errs, fmt.Errorf("%s: attribute %q: %w", path, name, diags))
 			continue
 		}
-		out[attributeNameFor(name)] = attributeValueFor(path, name, ctyToGo(val))
+		value := attributeValueFor(path, name, ctyToGo(val))
+		if value == nil {
+			// Terraform treats an argument set to null as if it were not there,
+			// and so does the provider; leaving it in the manifest as null makes
+			// a rule read the field as set.
+			continue
+		}
+		out[attributeNameFor(name)] = value
 	}
 
 	grouped := map[string][]*hclsyntax.Block{}
@@ -315,8 +342,13 @@ func hclBodyToMap(body *hclsyntax.Body, evalCtx *hcl.EvalContext, errs *[]error,
 			continue
 		}
 		field := fieldNameFor(blockType)
+		isRepeatable := len(blocks) > 1 || repeatableBlocks[blockType]
+		if isServiceAccountSecretBlock(path, blockType) {
+			field = "secrets"
+			isRepeatable = true
+		}
 
-		if len(blocks) > 1 || repeatableBlocks[blockType] {
+		if isRepeatable {
 			var arr []interface{}
 			for _, b := range blocks {
 				arr = append(arr, hclBodyToMap(b.Body, evalCtx, errs, path+"."+blockType))
@@ -354,7 +386,14 @@ func hclResourceBodyToMap(body *hclsyntax.Body, evalCtx *hcl.EvalContext, errs *
 			*errs = append(*errs, fmt.Errorf("%s: attribute %q: %w", path, name, diags))
 			continue
 		}
-		out[attributeNameFor(name)] = attributeValueFor(path, name, ctyToGo(val))
+		value := attributeValueFor(path, name, ctyToGo(val))
+		if value == nil {
+			// Terraform treats an argument set to null as if it were not there,
+			// and so does the provider; leaving it in the manifest as null makes
+			// a rule read the field as set.
+			continue
+		}
+		out[attributeNameFor(name)] = value
 	}
 
 	grouped := map[string][]*hclsyntax.Block{}
@@ -372,8 +411,13 @@ func hclResourceBodyToMap(body *hclsyntax.Body, evalCtx *hcl.EvalContext, errs *
 	for _, blockType := range order {
 		blocks := grouped[blockType]
 		field := fieldNameFor(blockType)
+		isRepeatable := len(blocks) > 1 || repeatableBlocks[blockType]
+		if isServiceAccountSecretBlock(path, blockType) {
+			field = "secrets"
+			isRepeatable = true
+		}
 
-		if len(blocks) > 1 || repeatableBlocks[blockType] {
+		if isRepeatable {
 			var arr []interface{}
 			for _, b := range blocks {
 				arr = append(arr, hclBodyToMap(b.Body, evalCtx, errs, path+"."+blockType))
@@ -418,7 +462,11 @@ func extractTypedResources(body hcl.Body, evalCtx *hcl.EvalContext) ([]map[strin
 			meta = map[string]interface{}{}
 		}
 		if _, has := meta["name"]; !has {
-			meta["name"] = block.Labels[1]
+			if block.Labels[0] == "kubernetes_default_service_account" || block.Labels[0] == "kubernetes_default_service_account_v1" {
+				meta["name"] = "default"
+			} else {
+				meta["name"] = block.Labels[1]
+			}
 		}
 		obj["metadata"] = meta
 

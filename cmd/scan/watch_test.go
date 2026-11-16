@@ -735,3 +735,53 @@ func TestWatchSecurityScanFollowsTheIgnoreFile(t *testing.T) {
 
 	require.NoError(t, stop())
 }
+
+// A first scan that fails on its input (no manifest yet, one that does not parse, no
+// Kubernetes object yet) is mended by an edit to a manifest, so it does not end the
+// watch: the first scan that succeeds after the edit is the initial one.
+func TestWatchOutlivesAnInitialScanThatAManifestEditMends(t *testing.T) {
+	for name, content := range map[string]string{
+		"no manifest yet":                  "",
+		"the only manifest does not parse": "apiVersion: v1\nkind: [unclosed\n  - : :\n",
+		"no Kubernetes object yet":         "todo: write the pod\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			if content != "" {
+				writeFile(t, filepath.Join(dir, "pod.yaml"), content)
+			}
+			out, stop := startSecurityWatchOutput(t, localWatchScanInfo(t, dir))
+
+			out.waitFor(t, "the watch waits for a change")
+			writeFile(t, filepath.Join(dir, "pod.yaml"), podManifest("web", false))
+			out.waitFor(t, "Initial scan complete: 1 failing control(s) on 1 resource(s)")
+			require.NoError(t, stop())
+		})
+	}
+}
+
+// startSecurityWatchOutput is startSecurityWatch with the command's error output
+// written to the same lines as its output.
+func startSecurityWatchOutput(t *testing.T, info *cautils.ScanInfo) (out *lines, stop func() error) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	ks := core.NewKubescape(ctx)
+	out = newLines()
+	scanCmd := &cobra.Command{}
+	scanCmd.SetOut(out)
+	scanCmd.SetErr(out)
+	done := make(chan error, 1)
+	go func() { done <- watchSecurityScan(scanCmd, ks, info, readOnlyRootFilesystem) }()
+	stop = func() error {
+		cancel()
+		select {
+		case err := <-done:
+			return err
+		case <-time.After(waitLimit):
+			t.Fatal("the watch did not stop")
+			return nil
+		}
+	}
+	t.Cleanup(func() { cancel() })
+	return out, stop
+}

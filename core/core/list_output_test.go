@@ -99,7 +99,7 @@ func TestCSVControlsConfigFormat_RendersStructuredRows(t *testing.T) {
 }
 
 // TestCsvSafeCell_List verifies that cells starting with spreadsheet formula
-// prefix characters (=, +, -, @, \t, \r, \n) are prepended with a single quote.
+// prefix characters (=, +, -, @, \t, \r, \n) receive a visible text prefix.
 func TestCsvSafeCell_List(t *testing.T) {
 	cases := []struct {
 		name string
@@ -108,19 +108,19 @@ func TestCsvSafeCell_List(t *testing.T) {
 	}{
 		{name: "empty stays empty", in: "", want: ""},
 		{name: "plain text is unchanged", in: "demo", want: "demo"},
-		{name: "equals is neutralized", in: "=1+1", want: "'=1+1"},
-		{name: "plus is neutralized", in: "+1", want: "'+1"},
-		{name: "minus is neutralized", in: "-1", want: "'-1"},
-		{name: "at sign is neutralized", in: "@SUM(A1)", want: "'@SUM(A1)"},
-		{name: "tab is neutralized", in: "\tcmd", want: "'\tcmd"},
-		{name: "carriage return is neutralized", in: "\rcmd", want: "'\rcmd"},
-		{name: "line feed is neutralized", in: "\n=1+1", want: "'\n=1+1"},
-		{name: "dde payload is neutralized", in: "=cmd|' /C calc'!A0", want: "'=cmd|' /C calc'!A0"},
+		{name: "equals is neutralized", in: "=1+1", want: "text: =1+1"},
+		{name: "plus is neutralized", in: "+1", want: "text: +1"},
+		{name: "minus is neutralized", in: "-1", want: "text: -1"},
+		{name: "at sign is neutralized", in: "@SUM(A1)", want: "text: @SUM(A1)"},
+		{name: "tab is neutralized", in: "\tcmd", want: "text: \tcmd"},
+		{name: "carriage return is neutralized", in: "\rcmd", want: "text: \rcmd"},
+		{name: "line feed is neutralized", in: "\n=1+1", want: "text: \n=1+1"},
+		{name: "dde payload is neutralized", in: "=cmd|' /C calc'!A0", want: "text: =cmd|' /C calc'!A0"},
 		{name: "leading pipe is not a formula prefix", in: "|table", want: "|table"},
-		{name: "leading space before equals is neutralized", in: " =1+1", want: "' =1+1"},
-		{name: "leading multiple spaces before at is neutralized", in: "   @SUM(A1)", want: "'   @SUM(A1)"},
-		{name: "leading space before plus is neutralized", in: "  +1", want: "'  +1"},
-		{name: "leading space before minus is neutralized", in: "  -1", want: "'  -1"},
+		{name: "leading space before equals is neutralized", in: " =1+1", want: "text:  =1+1"},
+		{name: "leading multiple spaces before at is neutralized", in: "   @SUM(A1)", want: "text:    @SUM(A1)"},
+		{name: "leading space before plus is neutralized", in: "  +1", want: "text:   +1"},
+		{name: "leading space before minus is neutralized", in: "  -1", want: "text:   -1"},
 		{name: "spaces only unchanged", in: "   ", want: "   "},
 		{name: "spaces before plain text unchanged", in: "  pod-name", want: "  pod-name"},
 	}
@@ -148,10 +148,10 @@ func TestCSVListFormat_NeutralizesFormulaInjection(t *testing.T) {
 	records := readCSVRecords(t, out)
 	require.Len(t, records, 6)
 	assert.Equal(t, []string{"name"}, records[0])
-	assert.Equal(t, []string{"'=cmd|' /C calc'!A0"}, records[1])
-	assert.Equal(t, []string{"'@SUM(A1)"}, records[2])
-	assert.Equal(t, []string{"'+nsa"}, records[3])
-	assert.Equal(t, []string{"'-mitre"}, records[4])
+	assert.Equal(t, []string{"text: =cmd|' /C calc'!A0"}, records[1])
+	assert.Equal(t, []string{"text: @SUM(A1)"}, records[2])
+	assert.Equal(t, []string{"text: +nsa"}, records[3])
+	assert.Equal(t, []string{"text: -mitre"}, records[4])
 	assert.Equal(t, []string{"normal-policy"}, records[5])
 }
 
@@ -171,7 +171,7 @@ func TestCSVControlsFormat_NeutralizesFormulaInjection(t *testing.T) {
 	records := readCSVRecords(t, out)
 	require.Len(t, records, 2)
 	assert.Equal(t, []string{"id", "name", "frameworks"}, records[0])
-	assert.Equal(t, []string{"'+C-0001", "'=cmd|' /C calc'!A0", "'@NSA;-MITRE"}, records[1])
+	assert.Equal(t, []string{"text: +C-0001", "text: =cmd|' /C calc'!A0", "text: @NSA;-MITRE"}, records[1])
 }
 
 func TestCSVControlsConfigFormat_NeutralizesFormulaInjection(t *testing.T) {
@@ -193,11 +193,11 @@ func TestCSVControlsConfigFormat_NeutralizesFormulaInjection(t *testing.T) {
 	require.Len(t, records, 2)
 	assert.Equal(t, []string{"name", "title", "values", "controls", "description"}, records[0])
 	assert.Equal(t, []string{
-		"'=secretParam",
-		"'@dangerousTitle",
-		"'+evilVal1;val2",
-		"'-C-0001",
-		"'=calc()",
+		"text: =secretParam",
+		"text: @dangerousTitle",
+		"text: +evilVal1;val2",
+		"text: -C-0001",
+		"text: =calc()",
 	}, records[1])
 }
 

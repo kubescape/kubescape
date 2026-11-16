@@ -166,7 +166,7 @@ func TestKubectlGetCommand(t *testing.T) {
 			resource: kubectlWorkload("v1", "Pod", "demo", "default"),
 			context:  "minikube",
 			path:     "spec.hostNetwork",
-			want:     "kubectl get pod demo -n default --context minikube -o jsonpath='{.spec.hostNetwork}'",
+			want:     "kubectl get pod demo -n default --context='minikube' -o jsonpath='{.spec.hostNetwork}'",
 		},
 		{
 			name:       "the kubeconfig the scan was given",
@@ -174,28 +174,56 @@ func TestKubectlGetCommand(t *testing.T) {
 			kubeconfig: "/home/me/.kube/prod.yaml",
 			context:    "prod",
 			path:       "spec.hostNetwork",
-			want:       "kubectl get pod demo -n default --kubeconfig /home/me/.kube/prod.yaml --context prod -o jsonpath='{.spec.hostNetwork}'",
+			want:       "kubectl get pod demo -n default --kubeconfig='/home/me/.kube/prod.yaml' --context='prod' -o jsonpath='{.spec.hostNetwork}'",
 		},
 		{
 			name:       "a kubeconfig path with a space or a quote is quoted for the shell",
 			resource:   kubectlWorkload("v1", "Pod", "demo", "default"),
 			kubeconfig: "/home/my user/it's.yaml",
 			path:       "spec.hostNetwork",
-			want:       `kubectl get pod demo -n default --kubeconfig '/home/my user/it'\''s.yaml' -o jsonpath='{.spec.hostNetwork}'`,
+			want:       `kubectl get pod demo -n default --kubeconfig='/home/my user/it'\''s.yaml' -o jsonpath='{.spec.hostNetwork}'`,
 		},
 		{
-			name:     "a context that is a plain word list needs no quotes",
+			name:     "a context that is a plain word list is quoted for the shell",
 			resource: kubectlWorkload("v1", "Pod", "demo", "default"),
 			context:  "arn:aws:eks:us-east-1:123456789012:cluster/prod",
 			path:     "spec.hostNetwork",
-			want:     "kubectl get pod demo -n default --context arn:aws:eks:us-east-1:123456789012:cluster/prod -o jsonpath='{.spec.hostNetwork}'",
+			want:     "kubectl get pod demo -n default --context='arn:aws:eks:us-east-1:123456789012:cluster/prod' -o jsonpath='{.spec.hostNetwork}'",
 		},
 		{
 			name:     "a context with a space is quoted",
 			resource: kubectlWorkload("v1", "Pod", "demo", "default"),
 			context:  "my cluster",
 			path:     "spec.hostNetwork",
-			want:     "kubectl get pod demo -n default --context 'my cluster' -o jsonpath='{.spec.hostNetwork}'",
+			want:     "kubectl get pod demo -n default --context='my cluster' -o jsonpath='{.spec.hostNetwork}'",
+		},
+		{
+			name:     "a context starting with a hyphen is accepted via --context= syntax",
+			resource: kubectlWorkload("v1", "Pod", "demo", "default"),
+			context:  "-prod",
+			path:     "spec.hostNetwork",
+			want:     "kubectl get pod demo -n default --context='-prod' -o jsonpath='{.spec.hostNetwork}'",
+		},
+		{
+			name:     "a context starting with double hyphens is accepted via --context= syntax",
+			resource: kubectlWorkload("v1", "Pod", "demo", "default"),
+			context:  "--raw=/evil",
+			path:     "spec.hostNetwork",
+			want:     "kubectl get pod demo -n default --context='--raw=/evil' -o jsonpath='{.spec.hostNetwork}'",
+		},
+		{
+			name:       "a kubeconfig starting with a hyphen is accepted via --kubeconfig= syntax",
+			resource:   kubectlWorkload("v1", "Pod", "demo", "default"),
+			kubeconfig: "-dev.yaml",
+			path:       "spec.hostNetwork",
+			want:       "kubectl get pod demo -n default --kubeconfig='-dev.yaml' -o jsonpath='{.spec.hostNetwork}'",
+		},
+		{
+			name:       "a kubeconfig starting with double hyphens is accepted via --kubeconfig= syntax",
+			resource:   kubectlWorkload("v1", "Pod", "demo", "default"),
+			kubeconfig: "--kubeconfig=/etc/evil",
+			path:       "spec.hostNetwork",
+			want:       "kubectl get pod demo -n default --kubeconfig='--kubeconfig=/etc/evil' -o jsonpath='{.spec.hostNetwork}'",
 		},
 		{
 			name:     "a label key is escaped for kubectl",
@@ -236,14 +264,10 @@ func TestKubectlGetCommand(t *testing.T) {
 		{"a context containing a carriage return", kubectlWorkload("v1", "Pod", "demo", "default"), kubectlCluster{context: "prod\rrm -rf /"}, "spec.hostNetwork"},
 		{"a context containing a control char", kubectlWorkload("v1", "Pod", "demo", "default"), kubectlCluster{context: "prod\x1b[2K"}, "spec.hostNetwork"},
 		{"a context containing a null byte", kubectlWorkload("v1", "Pod", "demo", "default"), kubectlCluster{context: "prod\x00extra"}, "spec.hostNetwork"},
-		{"a context starting with a double hyphen", kubectlWorkload("v1", "Pod", "demo", "default"), kubectlCluster{context: "--raw=/evil"}, "spec.hostNetwork"},
-		{"a context starting with a single hyphen", kubectlWorkload("v1", "Pod", "demo", "default"), kubectlCluster{context: "-prod"}, "spec.hostNetwork"},
 		{"a kubeconfig containing a newline", kubectlWorkload("v1", "Pod", "demo", "default"), kubectlCluster{kubeconfig: "/path/config\nmalicious"}, "spec.hostNetwork"},
 		{"a kubeconfig containing a carriage return", kubectlWorkload("v1", "Pod", "demo", "default"), kubectlCluster{kubeconfig: "/path/config\rmalicious"}, "spec.hostNetwork"},
 		{"a kubeconfig containing a control char", kubectlWorkload("v1", "Pod", "demo", "default"), kubectlCluster{kubeconfig: "/path/config\x07"}, "spec.hostNetwork"},
 		{"a kubeconfig containing a null byte", kubectlWorkload("v1", "Pod", "demo", "default"), kubectlCluster{kubeconfig: "/path/config\x00extra"}, "spec.hostNetwork"},
-		{"a kubeconfig starting with a double hyphen", kubectlWorkload("v1", "Pod", "demo", "default"), kubectlCluster{kubeconfig: "--kubeconfig=/etc/evil"}, "spec.hostNetwork"},
-		{"a kubeconfig starting with a single hyphen", kubectlWorkload("v1", "Pod", "demo", "default"), kubectlCluster{kubeconfig: "-dev.yaml"}, "spec.hostNetwork"},
 	}
 	for _, tt := range refused {
 		t.Run("no command for "+tt.name, func(t *testing.T) {
@@ -312,7 +336,7 @@ func TestKubectlPointers(t *testing.T) {
 // then: not for a file scan, and not without --show-evidence.
 func TestResourceTableKubectlPointers(t *testing.T) {
 	const fixPath = "spec.template.spec.containers[0].securityContext.privileged"
-	const want = "  kubectl get deployment.apps demo -n default --context minikube -o jsonpath='{.spec.template.spec.containers[0].securityContext.privileged}'"
+	const want = "  kubectl get deployment.apps demo -n default --context='minikube' -o jsonpath='{.spec.template.spec.containers[0].securityContext.privileged}'"
 
 	// The session is the file-scan one the line-number tests use, turned into a
 	// cluster scan: its resources lose their manifest and the metadata says so.
@@ -353,8 +377,8 @@ func TestResourceTableKubectlPointers(t *testing.T) {
 		t.Cleanup(func() { k8sinterface.SetClusterContextName(previous) })
 
 		out := renderResourceTable(t, clusterSession(t), true)
-		assert.Contains(t, out, "--context minikube")
-		assert.NotContains(t, out, "--context ambient")
+		assert.Contains(t, out, "--context='minikube'")
+		assert.NotContains(t, out, "--context='ambient'")
 	})
 
 	t.Run("the deprecated context field is not read", func(t *testing.T) {
@@ -366,7 +390,7 @@ func TestResourceTableKubectlPointers(t *testing.T) {
 		s.Metadata.ContextMetadata.ClusterContextMetadata = nil
 		s.Metadata.ClusterMetadata.ContextName = "deprecated"
 		out := renderResourceTable(t, s, true)
-		assert.Contains(t, out, "--context ambient", "without a recorded context the global one is the fallback")
+		assert.Contains(t, out, "--context='ambient'", "without a recorded context the global one is the fallback")
 		assert.NotContains(t, out, "deprecated")
 	})
 
@@ -379,7 +403,7 @@ func TestResourceTableKubectlPointers(t *testing.T) {
 		require.NoError(t, f.Close())
 		out, err := os.ReadFile(f.Name())
 		require.NoError(t, err)
-		assert.Contains(t, string(out), "--kubeconfig /home/me/prod.yaml --context minikube")
+		assert.Contains(t, string(out), "--kubeconfig='/home/me/prod.yaml' --context='minikube'")
 	})
 
 	t.Run("a cluster scan without --show-evidence", func(t *testing.T) {
@@ -406,6 +430,12 @@ func TestIsSafeShellArg(t *testing.T) {
 		"~/.kube/config",
 		"dev cluster",
 		"a@b:c",
+		"-dev.yaml",
+		"-prod",
+		"-flag",
+		"--context",
+		"-o",
+		"--raw=/evil",
 	}
 	for _, s := range safe {
 		assert.True(t, isSafeShellArg(s), "expected safe: %q", s)
@@ -413,11 +443,6 @@ func TestIsSafeShellArg(t *testing.T) {
 
 	unsafe := []string{
 		"",
-		"-flag",
-		"--context",
-		"-o",
-		"-dev.yaml",
-		"-prod",
 		"foo\nbar",
 		"foo\rbar",
 		"foo\r\nbar",
