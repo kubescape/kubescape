@@ -24,6 +24,9 @@ func TestValidateCommonScanFlags_GitLabMixedScan(t *testing.T) {
 		{name: "combined Code Quality", format: "gitlab-codequality", scanImages: true, wantError: true},
 		{name: "Code Quality among formats", format: "sarif, gitlab-codequality", scanImages: true, wantError: true},
 		{name: "Code Quality posture only", format: "gitlab-codequality"},
+		{name: "combined GitHub Actions", format: "github-actions", scanImages: true, wantError: true},
+		{name: "GitHub Actions among formats", format: "sarif, github-actions", scanImages: true, wantError: true},
+		{name: "GitHub Actions posture only", format: "github-actions"},
 		{name: "combined SARIF", format: "sarif", scanImages: true},
 		{name: "combined JSON", format: "json", scanImages: true},
 	} {
