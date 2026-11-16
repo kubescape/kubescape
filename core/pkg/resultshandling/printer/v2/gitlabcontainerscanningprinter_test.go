@@ -134,6 +134,20 @@ func TestTruncateRunes(t *testing.T) {
 	assert.Equal(t, "éé…", truncateRunes("éééé", 3))
 }
 
+func TestGitLabContainerScanningPrinter_ExploitDetails(t *testing.T) {
+	exploited := containerScanningMatch("CVE-2024-0009", "Critical", "openssl", "a", "3.3.2")
+	exploited.Vulnerability.Metadata.KnownExploited = []vulnerability.KnownExploited{{CVE: "CVE-2024-0009"}}
+	exploited.Vulnerability.Metadata.EPSS = []vulnerability.EPSS{{CVE: "CVE-2024-0009", EPSS: 0.5, Percentile: 0.9}}
+
+	report := printContainerScanning(t, []cautils.ImageScanData{{Image: "app:1.0", Matches: match.NewMatches(exploited)}})
+
+	require.Len(t, report.Vulnerabilities, 1)
+	assert.Equal(t, map[string]gitLabDetail{
+		"kev":  {Name: "Known exploited (CISA KEV)", Type: "value", Value: true},
+		"epss": {Name: "EPSS exploit probability", Type: "text", Value: "50.0% (90th)"},
+	}, report.Vulnerabilities[0].Details)
+}
+
 func TestGitLabContainerScanningPrinter_CleanImageWritesEmptyList(t *testing.T) {
 	output := filepath.Join(t.TempDir(), "report.json")
 	cp := NewGitLabContainerScanningPrinter()

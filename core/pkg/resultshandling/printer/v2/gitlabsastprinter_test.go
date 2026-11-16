@@ -740,3 +740,47 @@ func TestGitLabSASTPrintConfigurationScan_NilResourceDoesNotPanic(t *testing.T) 
 	assert.NotContains(t, string(raw), `"solution"`,
 		"solution key must be omitted from JSON when resource is absent from AllResources")
 }
+
+func TestGitLabImageScan_ExploitDetails(t *testing.T) {
+	exploited := match.Match{
+		Package: grypepkg.Package{ID: "pkg-1", Name: "openssl", Version: "3.0.0"},
+		Vulnerability: vulnerability.Vulnerability{
+			Metadata: &vulnerability.Metadata{
+				ID:             "CVE-2026-0001",
+				Severity:       "Critical",
+				KnownExploited: []vulnerability.KnownExploited{{CVE: "CVE-2026-0001"}},
+				EPSS:           []vulnerability.EPSS{{CVE: "CVE-2026-0001", EPSS: 0.639, Percentile: 0.99}},
+			},
+		},
+	}
+	notExploited := match.Match{
+		Package: grypepkg.Package{ID: "pkg-2", Name: "zlib", Version: "1.3"},
+		Vulnerability: vulnerability.Vulnerability{
+			Metadata: &vulnerability.Metadata{ID: "CVE-2026-0002", Severity: "Low"},
+		},
+	}
+	withoutMetadata := match.Match{
+		Package:       grypepkg.Package{ID: "pkg-3", Name: "musl", Version: "1.2"},
+		Vulnerability: vulnerability.Vulnerability{Reference: vulnerability.Reference{ID: "GHSA-aaaa-bbbb-cccc"}},
+	}
+
+	report := gitLabImageReportFor(t, []cautils.ImageScanData{{
+		Image:   "nginx:1.25",
+		Matches: match.NewMatches(exploited, notExploited, withoutMetadata),
+	}})
+	require.Len(t, report.Vulnerabilities, 3)
+
+	byID := map[string]gitLabVulnerability{}
+	for _, v := range report.Vulnerabilities {
+		byID[v.Identifiers[0].Value] = v
+	}
+
+	assert.Equal(t, map[string]gitLabDetail{
+		"kev":  {Name: "Known exploited (CISA KEV)", Type: "value", Value: true},
+		"epss": {Name: "EPSS exploit probability", Type: "text", Value: "63.9% (99th)"},
+	}, byID["CVE-2026-0001"].Details)
+	assert.Equal(t, map[string]gitLabDetail{
+		"kev": {Name: "Known exploited (CISA KEV)", Type: "value", Value: false},
+	}, byID["CVE-2026-0002"].Details)
+	assert.Nil(t, byID["GHSA-aaaa-bbbb-cccc"].Details, "unknown KEV status must not be reported as false")
+}

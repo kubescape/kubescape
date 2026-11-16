@@ -42,6 +42,7 @@ type gitLabContainerVulnerability struct {
 	Solution    string                  `json:"solution,omitempty"`
 	Identifiers []gitLabIdentifier      `json:"identifiers"`
 	Location    gitLabContainerLocation `json:"location"`
+	Details     map[string]gitLabDetail `json:"details,omitempty"`
 }
 
 type gitLabContainerLocation struct {
@@ -149,6 +150,7 @@ func toGitLabContainerVulnerability(image, platform, operatingSystem string, cve
 			OperatingSystem: operatingSystem,
 			Image:           image,
 		},
+		Details: gitLabExploitDetails(cve),
 	}
 	if len(cve.FixVersions) > 0 {
 		vulnerability.Solution = fmt.Sprintf("Upgrade %s to version %s.", cve.Package, strings.Join(cve.FixVersions, ", "))
