@@ -40,6 +40,7 @@ import (
 	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	"github.com/kubescape/opa-utils/resources"
 	"go.opentelemetry.io/otel"
+	"helm.sh/helm/v3/pkg/strvals"
 	"k8s.io/client-go/kubernetes"
 )
 
@@ -757,11 +758,28 @@ func validateScanOutputSafety(outputFile string, scanInfo *cautils.ScanInfo, tra
 		}
 	}
 	for _, setFile := range scanInfo.HelmSetFileValues {
-		for _, item := range strings.Split(setFile, ",") {
-			parts := strings.SplitN(item, "=", 2)
-			filePath := strings.TrimSpace(item)
+		var collisionErr error
+		var pathsFound int
+		dest := map[string]interface{}{}
+		_ = strvals.ParseIntoFile(setFile, dest, func(rs []rune) (interface{}, error) {
+			pathsFound++
+			filePath := string(rs)
+			if filePath != "" {
+				if err := checkFile("Helm set-file", filePath); err != nil {
+					collisionErr = err
+					return nil, err
+				}
+			}
+			return "", nil
+		})
+		if collisionErr != nil {
+			return collisionErr
+		}
+		if pathsFound == 0 {
+			parts := strings.SplitN(setFile, "=", 2)
+			filePath := setFile
 			if len(parts) == 2 {
-				filePath = strings.TrimSpace(parts[1])
+				filePath = parts[1]
 			}
 			if err := checkFile("Helm set-file", filePath); err != nil {
 				return err

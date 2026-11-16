@@ -1024,6 +1024,53 @@ func TestGetOutputPrinters_OutputSafetyRejectsExceptionsAndConfigOverwrite(t *te
 		assert.Equal(t, content, got)
 	})
 
+	t.Run("Helm set-file escaped comma", func(t *testing.T) {
+		dir := t.TempDir()
+		fileWithComma := filepath.Join(dir, "a,b.txt")
+		require.NoError(t, os.WriteFile(fileWithComma, content, 0o600))
+
+		setFileVal := "custom=" + strings.ReplaceAll(fileWithComma, ",", "\\,")
+		scanInfo := &cautils.ScanInfo{
+			ScanType:          cautils.ScanTypeRepo,
+			Format:            printer.PrettyFormat,
+			Output:            fileWithComma,
+			HelmSetFileValues: []string{setFileVal},
+		}
+
+		printers, err := GetOutputPrinters(scanInfo, context.Background(), "test-cluster")
+		require.ErrorContains(t, err, "would overwrite Helm set-file")
+		assert.Nil(t, printers)
+
+		got, err := os.ReadFile(fileWithComma)
+		require.NoError(t, err)
+		assert.Equal(t, content, got)
+	})
+
+	t.Run("Helm set-file whitespace preservation", func(t *testing.T) {
+		dir := t.TempDir()
+		fileWithSpace := filepath.Join(dir, "val.txt ")
+		require.NoError(t, os.WriteFile(fileWithSpace, content, 0o600))
+		reportFile := filepath.Join(dir, "report.txt")
+		if err := os.Link(fileWithSpace, reportFile); err != nil {
+			t.Skipf("skipping hardlink test: %v", err)
+		}
+
+		scanInfo := &cautils.ScanInfo{
+			ScanType:          cautils.ScanTypeRepo,
+			Format:            printer.PrettyFormat,
+			Output:            reportFile,
+			HelmSetFileValues: []string{"custom=" + fileWithSpace},
+		}
+
+		printers, err := GetOutputPrinters(scanInfo, context.Background(), "test-cluster")
+		require.ErrorContains(t, err, "would overwrite Helm set-file")
+		assert.Nil(t, printers)
+
+		got, err := os.ReadFile(fileWithSpace)
+		require.NoError(t, err)
+		assert.Equal(t, content, got)
+	})
+
 	t.Run("image archive input collision", func(t *testing.T) {
 		dir := t.TempDir()
 		imgTar := filepath.Join(dir, "image.tar.json")

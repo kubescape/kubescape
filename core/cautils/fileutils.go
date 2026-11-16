@@ -31,6 +31,7 @@ import (
 	"github.com/valyala/fastjson"
 	"gopkg.in/yaml.v3"
 	helmchartutil "helm.sh/helm/v3/pkg/chartutil"
+	"helm.sh/helm/v3/pkg/strvals"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -127,13 +128,29 @@ func loadResourcesFromHelmCharts(ctx context.Context, basePath string, valueOpts
 			}
 		}
 		for _, fv := range valueOpts.FileValues {
-			for _, item := range strings.Split(fv, ",") {
-				parts := strings.SplitN(item, "=", 2)
+			var escapeErr error
+			var pathsFound int
+			dest := map[string]interface{}{}
+			_ = strvals.ParseIntoFile(fv, dest, func(rs []rune) (interface{}, error) {
+				pathsFound++
+				filePath := string(rs)
+				if filePath != "" && !pathcontainment.IsPathContained(workspaceDir, filePath) {
+					escapeErr = fmt.Errorf("%w: Helm file-values file %q outside workspace root", pathcontainment.ErrPathEscapesWorkspace, filePath)
+					return nil, escapeErr
+				}
+				return "", nil
+			})
+			if escapeErr != nil {
+				return nil, nil, nil, escapeErr
+			}
+			if pathsFound == 0 {
+				parts := strings.SplitN(fv, "=", 2)
+				filePath := fv
 				if len(parts) == 2 {
-					filePath := strings.TrimSpace(parts[1])
-					if filePath != "" && !pathcontainment.IsPathContained(workspaceDir, filePath) {
-						return nil, nil, nil, fmt.Errorf("%w: Helm file-values file %q outside workspace root", pathcontainment.ErrPathEscapesWorkspace, filePath)
-					}
+					filePath = parts[1]
+				}
+				if filePath != "" && !pathcontainment.IsPathContained(workspaceDir, filePath) {
+					return nil, nil, nil, fmt.Errorf("%w: Helm file-values file %q outside workspace root", pathcontainment.ErrPathEscapesWorkspace, filePath)
 				}
 			}
 		}
