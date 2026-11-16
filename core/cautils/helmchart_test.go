@@ -454,6 +454,32 @@ func TestLoadResourcesFromHelmCharts_WorkspaceContainment(t *testing.T) {
 		assert.ErrorIs(t, err, pathcontainment.ErrPathEscapesWorkspace)
 	})
 
+	t.Run("file-values file outside workspace is rejected", func(t *testing.T) {
+		valOpts := HelmValueOptions{FileValues: []string{"custom=" + outsideValues}}
+		_, _, _, err := LoadResourcesFromHelmChartsFiltered(context.TODO(), chartPath, valOpts, nil, nil, ws)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, pathcontainment.ErrPathEscapesWorkspace)
+	})
+
+	t.Run("file-values comma-separated with outside file is rejected", func(t *testing.T) {
+		insideFile := filepath.Join(ws, "inside.yaml")
+		require.NoError(t, os.WriteFile(insideFile, []byte("key: value\n"), 0o600))
+		defer os.Remove(insideFile)
+
+		valOpts := HelmValueOptions{FileValues: []string{"k1=" + insideFile + ",k2=" + outsideValues}}
+		_, _, _, err := LoadResourcesFromHelmChartsFiltered(context.TODO(), chartPath, valOpts, nil, nil, ws)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, pathcontainment.ErrPathEscapesWorkspace)
+	})
+
+	t.Run("file-values relative path escaping workspace is rejected", func(t *testing.T) {
+		escapingRel := filepath.Join("..", "..", "outside.yaml")
+		valOpts := HelmValueOptions{FileValues: []string{"custom=" + escapingRel}}
+		_, _, _, err := LoadResourcesFromHelmChartsFiltered(context.TODO(), chartPath, valOpts, nil, nil, ws)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, pathcontainment.ErrPathEscapesWorkspace)
+	})
+
 	t.Run("chart with escaping symlink is rejected", func(t *testing.T) {
 		tempWS := t.TempDir()
 		chartDir := filepath.Join(tempWS, "chart")

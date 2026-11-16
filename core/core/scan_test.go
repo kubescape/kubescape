@@ -1001,6 +1001,29 @@ func TestGetOutputPrinters_OutputSafetyRejectsExceptionsAndConfigOverwrite(t *te
 		assert.Equal(t, content, got)
 	})
 
+	t.Run("Helm set-file comma-separated", func(t *testing.T) {
+		dir := t.TempDir()
+		file1 := filepath.Join(dir, "file1.txt")
+		file2 := filepath.Join(dir, "file2.txt")
+		require.NoError(t, os.WriteFile(file1, content, 0o600))
+		require.NoError(t, os.WriteFile(file2, content, 0o600))
+
+		scanInfo := &cautils.ScanInfo{
+			ScanType:          cautils.ScanTypeRepo,
+			Format:            printer.PrettyFormat,
+			Output:            file2,
+			HelmSetFileValues: []string{"k1=" + file1 + ",k2=" + file2},
+		}
+
+		printers, err := GetOutputPrinters(scanInfo, context.Background(), "test-cluster")
+		require.ErrorContains(t, err, "would overwrite Helm set-file")
+		assert.Nil(t, printers)
+
+		got, err := os.ReadFile(file2)
+		require.NoError(t, err)
+		assert.Equal(t, content, got)
+	})
+
 	t.Run("image archive input collision", func(t *testing.T) {
 		dir := t.TempDir()
 		imgTar := filepath.Join(dir, "image.tar.json")

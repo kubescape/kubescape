@@ -757,13 +757,15 @@ func validateScanOutputSafety(outputFile string, scanInfo *cautils.ScanInfo, tra
 		}
 	}
 	for _, setFile := range scanInfo.HelmSetFileValues {
-		parts := strings.SplitN(setFile, "=", 2)
-		filePath := setFile
-		if len(parts) == 2 {
-			filePath = parts[1]
-		}
-		if err := checkFile("Helm set-file", filePath); err != nil {
-			return err
+		for _, item := range strings.Split(setFile, ",") {
+			parts := strings.SplitN(item, "=", 2)
+			filePath := strings.TrimSpace(item)
+			if len(parts) == 2 {
+				filePath = strings.TrimSpace(parts[1])
+			}
+			if err := checkFile("Helm set-file", filePath); err != nil {
+				return err
+			}
 		}
 	}
 

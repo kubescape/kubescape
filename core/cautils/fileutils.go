@@ -126,6 +126,17 @@ func loadResourcesFromHelmCharts(ctx context.Context, basePath string, valueOpts
 				return nil, nil, nil, fmt.Errorf("%w: Helm values file %q outside workspace root", pathcontainment.ErrPathEscapesWorkspace, vf)
 			}
 		}
+		for _, fv := range valueOpts.FileValues {
+			for _, item := range strings.Split(fv, ",") {
+				parts := strings.SplitN(item, "=", 2)
+				if len(parts) == 2 {
+					filePath := strings.TrimSpace(parts[1])
+					if filePath != "" && !pathcontainment.IsPathContained(workspaceDir, filePath) {
+						return nil, nil, nil, fmt.Errorf("%w: Helm file-values file %q outside workspace root", pathcontainment.ErrPathEscapesWorkspace, filePath)
+					}
+				}
+			}
+		}
 	}
 
 	helmDirectories, discoveryErrs := listHelmChartDirs(basePath, filter)
