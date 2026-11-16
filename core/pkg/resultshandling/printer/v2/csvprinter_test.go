@@ -1277,7 +1277,7 @@ func TestActionPrint_Csv_PreserveNotEvaluatedWhenResourceRowSkippedWithInherited
 
 // TestCsvSafeCell covers the spreadsheet formula-injection guard: any cell that
 // begins with a character a spreadsheet reads as the start of a formula must be
-// prefixed with a single quote, and everything else must be left untouched.
+// prefixed with visible text, and everything else must be left untouched.
 func TestCsvSafeCell(t *testing.T) {
 	cases := []struct {
 		name string
@@ -1286,19 +1286,19 @@ func TestCsvSafeCell(t *testing.T) {
 	}{
 		{name: "empty stays empty", in: "", want: ""},
 		{name: "plain text is unchanged", in: "demo", want: "demo"},
-		{name: "equals is neutralized", in: "=1+1", want: "'=1+1"},
-		{name: "plus is neutralized", in: "+1", want: "'+1"},
-		{name: "minus is neutralized", in: "-1", want: "'-1"},
-		{name: "at sign is neutralized", in: "@SUM(A1)", want: "'@SUM(A1)"},
-		{name: "tab is neutralized", in: "\tcmd", want: "'\tcmd"},
-		{name: "carriage return is neutralized", in: "\rcmd", want: "'\rcmd"},
-		{name: "line feed is neutralized", in: "\n=1+1", want: "'\n=1+1"},
-		{name: "dde payload is neutralized", in: "=cmd|' /C calc'!A0", want: "'=cmd|' /C calc'!A0"},
+		{name: "equals is neutralized", in: "=1+1", want: "text: =1+1"},
+		{name: "plus is neutralized", in: "+1", want: "text: +1"},
+		{name: "minus is neutralized", in: "-1", want: "text: -1"},
+		{name: "at sign is neutralized", in: "@SUM(A1)", want: "text: @SUM(A1)"},
+		{name: "tab is neutralized", in: "\tcmd", want: "text: \tcmd"},
+		{name: "carriage return is neutralized", in: "\rcmd", want: "text: \rcmd"},
+		{name: "line feed is neutralized", in: "\n=1+1", want: "text: \n=1+1"},
+		{name: "dde payload is neutralized", in: "=cmd|' /C calc'!A0", want: "text: =cmd|' /C calc'!A0"},
 		{name: "leading pipe is not a formula prefix", in: "|table", want: "|table"},
-		{name: "leading space before equals is neutralized", in: " =1+1", want: "' =1+1"},
-		{name: "leading multiple spaces before at is neutralized", in: "   @SUM(A1)", want: "'   @SUM(A1)"},
-		{name: "leading space before plus is neutralized", in: "  +1", want: "'  +1"},
-		{name: "leading space before minus is neutralized", in: "  -1", want: "'  -1"},
+		{name: "leading space before equals is neutralized", in: " =1+1", want: "text:  =1+1"},
+		{name: "leading multiple spaces before at is neutralized", in: "   @SUM(A1)", want: "text:    @SUM(A1)"},
+		{name: "leading space before plus is neutralized", in: "  +1", want: "text:   +1"},
+		{name: "leading space before minus is neutralized", in: "  -1", want: "text:   -1"},
 		{name: "spaces only unchanged", in: "   ", want: "   "},
 		{name: "spaces before plain text unchanged", in: "  pod-name", want: "  pod-name"},
 	}
@@ -1390,13 +1390,13 @@ func TestActionPrint_Csv_NeutralizesFormulaInjection(t *testing.T) {
 	for _, row := range records[1:] {
 		if row[1] == testControlID1 {
 			found = true
-			assert.Equal(t, "'"+injectedName, row[4], "resource name must be neutralized")
-			assert.Equal(t, "'"+injectedPath, row[12], "source path must be neutralized")
+			assert.Equal(t, "text: "+injectedName, row[4], "resource name must be neutralized")
+			assert.Equal(t, "text: "+injectedPath, row[12], "source path must be neutralized")
 		}
 		if row[1] == skippedControlID {
 			foundSkipped = true
-			assert.Equal(t, "'"+injectedSkippedName, row[0], "skipped control name must be neutralized")
-			assert.Equal(t, "'"+injectedSkippedReason, row[10], "skipped control reason must be neutralized")
+			assert.Equal(t, "text: "+injectedSkippedName, row[0], "skipped control name must be neutralized")
+			assert.Equal(t, "text: "+injectedSkippedReason, row[10], "skipped control reason must be neutralized")
 		}
 	}
 	require.True(t, found, "expected the injected resource row")
