@@ -159,7 +159,13 @@ func startWatcher(t *testing.T, root string, opts FileWatcherOptions) (*FileWatc
 	w.start(ctx)
 	t.Cleanup(func() {
 		cancel()
-		<-w.done
+		// Bounded: a test that failed because the watcher is stuck runs this
+		// too, and must end and report its own failure, not hang here.
+		select {
+		case <-w.done:
+		case <-time.After(waitTimeout):
+			t.Error("the watcher did not stop after its context was cancelled")
+		}
 	})
 	return w, rec
 }
