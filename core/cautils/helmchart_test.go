@@ -342,6 +342,35 @@ func TestHelmValueOptions_MergeValues(t *testing.T) {
 	assert.Equal(t, "v1.2.3", image["tag"])
 	assert.Equal(t, "myrepo/app", image["repository"])
 	assert.EqualValues(t, 5, merged["replicaCount"])
+
+	t.Run("merges file values preserving protected path separators", func(t *testing.T) {
+		tempDir := t.TempDir()
+		valFile := filepath.Join(tempDir, "config.txt")
+		err := os.WriteFile(valFile, []byte("custom-config-content"), 0600)
+		assert.NoError(t, err)
+
+		opts := HelmValueOptions{
+			FileValues: []string{"custom=" + valFile},
+		}
+		merged, err := opts.MergeValues()
+		assert.NoError(t, err)
+		assert.Equal(t, "custom-config-content", merged["custom"])
+	})
+
+	t.Run("merges file values preserving key escapes and path separators", func(t *testing.T) {
+		tempDir := t.TempDir()
+		valFile := filepath.Join(tempDir, "config.txt")
+		err := os.WriteFile(valFile, []byte("custom-config-content"), 0600)
+		assert.NoError(t, err)
+
+		opts := HelmValueOptions{
+			FileValues: []string{`my\ key=` + valFile},
+		}
+		merged, err := opts.MergeValues()
+		assert.NoError(t, err)
+		assert.Equal(t, "custom-config-content", merged["my key"])
+		assert.Nil(t, merged[`my\ key`])
+	})
 }
 
 // TestLoadResourcesFromHelmCharts_WithOverrides confirms that user-supplied --set values
@@ -454,6 +483,69 @@ func TestLoadResourcesFromHelmCharts_WorkspaceContainment(t *testing.T) {
 		assert.ErrorIs(t, err, pathcontainment.ErrPathEscapesWorkspace)
 	})
 
+	t.Run("file-values file outside workspace is rejected", func(t *testing.T) {
+		valOpts := HelmValueOptions{FileValues: []string{"custom=" + outsideValues}}
+		_, _, _, err := LoadResourcesFromHelmChartsFiltered(context.TODO(), chartPath, valOpts, nil, nil, ws)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, pathcontainment.ErrPathEscapesWorkspace)
+	})
+
+	t.Run("file-values comma-separated with outside file is rejected", func(t *testing.T) {
+		insideFile := filepath.Join(ws, "inside.yaml")
+		require.NoError(t, os.WriteFile(insideFile, []byte("key: value\n"), 0o600))
+		defer os.Remove(insideFile)
+
+		valOpts := HelmValueOptions{FileValues: []string{"k1=" + insideFile + ",k2=" + outsideValues}}
+		_, _, _, err := LoadResourcesFromHelmChartsFiltered(context.TODO(), chartPath, valOpts, nil, nil, ws)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, pathcontainment.ErrPathEscapesWorkspace)
+	})
+
+	t.Run("file-values brace list with outside file is rejected", func(t *testing.T) {
+		insideFile := filepath.Join(ws, "inside-brace.yaml")
+		require.NoError(t, os.WriteFile(insideFile, []byte("key: value\n"), 0o600))
+		defer os.Remove(insideFile)
+
+		valOpts := HelmValueOptions{FileValues: []string{"custom={" + insideFile + "," + outsideValues + "}"}}
+		_, _, _, err := LoadResourcesFromHelmChartsFiltered(context.TODO(), chartPath, valOpts, nil, nil, ws)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, pathcontainment.ErrPathEscapesWorkspace)
+	})
+
+	t.Run("file-values exact path preserves whitespace and rejects outside symlink", func(t *testing.T) {
+		insideFile := filepath.Join(ws, "val.yaml")
+		require.NoError(t, os.WriteFile(insideFile, []byte("key: inside\n"), 0o600))
+		defer os.Remove(insideFile)
+
+		symlinkWithSpace := filepath.Join(ws, "val.yaml ")
+		if err := os.Symlink(outsideValues, symlinkWithSpace); err == nil {
+			defer os.Remove(symlinkWithSpace)
+			valOpts := HelmValueOptions{FileValues: []string{"custom=" + symlinkWithSpace}}
+			_, _, _, err := LoadResourcesFromHelmChartsFiltered(context.TODO(), chartPath, valOpts, nil, nil, ws)
+			require.Error(t, err)
+			assert.ErrorIs(t, err, pathcontainment.ErrPathEscapesWorkspace)
+		}
+	})
+
+	t.Run("file-values empty subkey parse error is rejected", func(t *testing.T) {
+		insideFile := filepath.Join(ws, "safe.yaml")
+		require.NoError(t, os.WriteFile(insideFile, []byte("key: inside\n"), 0o600))
+		defer os.Remove(insideFile)
+
+		valOpts := HelmValueOptions{FileValues: []string{"a.=" + insideFile + ",b=" + outsideValues}}
+		_, _, _, err := LoadResourcesFromHelmChartsFiltered(context.TODO(), chartPath, valOpts, nil, nil, ws)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed parsing --set-file data")
+	})
+
+	t.Run("file-values relative path escaping workspace is rejected", func(t *testing.T) {
+		escapingRel := filepath.Join("..", "..", "outside.yaml")
+		valOpts := HelmValueOptions{FileValues: []string{"custom=" + escapingRel}}
+		_, _, _, err := LoadResourcesFromHelmChartsFiltered(context.TODO(), chartPath, valOpts, nil, nil, ws)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, pathcontainment.ErrPathEscapesWorkspace)
+	})
+
 	t.Run("chart with escaping symlink is rejected", func(t *testing.T) {
 		tempWS := t.TempDir()
 		chartDir := filepath.Join(tempWS, "chart")
@@ -557,4 +649,126 @@ func TestIsStaticTemplate_OversizedFileTreatedAsNonStatic(t *testing.T) {
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrHelmTemplateTooLarge)
 	assert.False(t, static)
+}
+
+func TestParseHelmFileValuePaths_WindowsPaths(t *testing.T) {
+	tests := []struct {
+		name          string
+		input         string
+		expectedPaths []string
+		expectErr     bool
+	}{
+		{
+			name:          "single Windows path with backslashes",
+			input:         `valKey=C:\Users\runneradmin\AppData\Local\Temp\secret.txt`,
+			expectedPaths: []string{`C:\Users\runneradmin\AppData\Local\Temp\secret.txt`},
+		},
+		{
+			name:          "comma-separated Windows paths",
+			input:         `k1=C:\dir\file1.txt,k2=C:\dir\file2.txt`,
+			expectedPaths: []string{`C:\dir\file1.txt`, `C:\dir\file2.txt`},
+		},
+		{
+			name:          "Windows path with escaped comma",
+			input:         `custom=C:\dir\a\,b.txt`,
+			expectedPaths: []string{`C:\dir\a,b.txt`},
+		},
+		{
+			name:          "Windows path with trailing whitespace",
+			input:         `custom=C:\dir\val.txt `,
+			expectedPaths: []string{`C:\dir\val.txt `},
+		},
+		{
+			name:          "Windows paths in brace list",
+			input:         `custom={C:\dir\f1.txt,C:\dir\f2.txt}`,
+			expectedPaths: []string{`C:\dir\f1.txt`, `C:\dir\f2.txt`},
+		},
+		{
+			name:          "UNC Windows network path",
+			input:         `unc=\\server\share\file.txt`,
+			expectedPaths: []string{`\\server\share\file.txt`},
+		},
+		{
+			name:          "Unix path without backslashes",
+			input:         `k1=/ws/dir/file1.yaml,k2=/ws/dir/file2.yaml`,
+			expectedPaths: []string{`/ws/dir/file1.yaml`, `/ws/dir/file2.yaml`},
+		},
+		{
+			name:      "empty subkey parse error is rejected",
+			input:     `a.=/ws/safe,b=C:\dir\report.txt`,
+			expectErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var gotPaths []string
+			err := ParseHelmFileValuePaths(tt.input, func(p string) error {
+				gotPaths = append(gotPaths, p)
+				return nil
+			})
+			if tt.expectErr {
+				assert.Error(t, err)
+			} else {
+				require.NoError(t, err)
+				assert.Equal(t, tt.expectedPaths, gotPaths)
+			}
+		})
+	}
+}
+
+func TestProtectHelmPathSeparators(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "key escape with space is preserved",
+			input:    `my\ key=/tmp/value`,
+			expected: `my\ key=/tmp/value`,
+		},
+		{
+			name:     "key escape with space and Windows value path",
+			input:    `my\ key=C:\dir\file.txt`,
+			expected: `my\ key=C:\\dir\\file.txt`,
+		},
+		{
+			name:     "key escape with comma",
+			input:    `my\,key=C:\dir\file.txt`,
+			expected: `my\,key=C:\\dir\\file.txt`,
+		},
+		{
+			name:     "key escape with equal",
+			input:    `my\=key=C:\dir\file.txt`,
+			expected: `my\=key=C:\\dir\\file.txt`,
+		},
+		{
+			name:     "multiple comma-separated entries with key escapes and Windows paths",
+			input:    `k1=C:\a\b.txt,k2\ key=C:\c\d.txt`,
+			expected: `k1=C:\\a\\b.txt,k2\ key=C:\\c\\d.txt`,
+		},
+		{
+			name:     "brace list with Windows paths and subsequent key escape",
+			input:    `k1={C:\a\b.txt,C:\e\f.txt},k2\ key=C:\c\d.txt`,
+			expected: `k1={C:\\a\\b.txt,C:\\e\\f.txt},k2\ key=C:\\c\\d.txt`,
+		},
+		{
+			name:     "escaped comma in value is preserved",
+			input:    `k1=C:\dir\a\,b.txt,k2=C:\dir\c.txt`,
+			expected: `k1=C:\\dir\\a\,b.txt,k2=C:\\dir\\c.txt`,
+		},
+		{
+			name:     "UNC network path",
+			input:    `unc=\\server\share\file.txt`,
+			expected: `unc=\\\\server\\share\\file.txt`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ProtectHelmPathSeparators(tt.input)
+			assert.Equal(t, tt.expected, got)
+		})
+	}
 }

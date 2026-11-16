@@ -752,6 +752,19 @@ func (o HelmValueOptions) CapabilityOptions() HelmCapabilityOptions {
 	}
 }
 
+// protectHelmFileValues applies the same path protection as ParseHelmFileValuePaths
+// so that Helm's strvals parser reads the exact paths validated by containment and collision checks.
+func protectHelmFileValues(values []string) []string {
+	if len(values) == 0 {
+		return values
+	}
+	protected := make([]string, len(values))
+	for i, fv := range values {
+		protected[i] = ProtectHelmPathSeparators(fv)
+	}
+	return protected
+}
+
 // MergeValues parses and merges the user-supplied value overrides using Helm's own
 // merger (the same code path used by `helm install -f ... --set ...`). The resulting
 // map is the final user-supplied values that should be merged over the chart defaults.
@@ -760,7 +773,7 @@ func (o HelmValueOptions) MergeValues() (map[string]any, error) {
 		ValueFiles:   o.ValueFiles,
 		Values:       o.Values,
 		StringValues: o.StringValues,
-		FileValues:   o.FileValues,
+		FileValues:   protectHelmFileValues(o.FileValues),
 	}
 	return opts.MergeValues(helmgetter.All(cli.New()))
 }

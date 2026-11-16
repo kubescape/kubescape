@@ -31,6 +31,7 @@ import (
 	"github.com/valyala/fastjson"
 	"gopkg.in/yaml.v3"
 	helmchartutil "helm.sh/helm/v3/pkg/chartutil"
+	"helm.sh/helm/v3/pkg/strvals"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -114,6 +115,128 @@ func LoadResourcesFromHelmChartsFiltered(ctx context.Context, basePath string, v
 	return loadResourcesFromHelmCharts(ctx, basePath, valueOpts, excludedChartDirectories, filter, workspaceOpt...)
 }
 
+// ProtectHelmPathSeparators escapes backslashes in the value portions of Helm key=value expressions
+// (and within brace lists {path1,path2}) that do not precede Helm syntax delimiters
+// (',', '{', '}', '[', ']', '=', '.') so that native Windows path separators (e.g. C:\dir\file.txt)
+// are preserved across strvals decoding rather than being consumed as escape prefixes.
+// Backslashes in keys (such as `my\ key` or `my\,key`) are preserved verbatim according to Helm key syntax.
+func ProtectHelmPathSeparators(s string) string {
+	var sb strings.Builder
+	runes := []rune(s)
+	n := len(runes)
+	inKey := true
+	afterEqual := false
+	inBraces := false
+
+	for i := 0; i < n; i++ {
+		r := runes[i]
+		if inKey {
+			if r == '\\' {
+				// Escape sequence in key (e.g. `\ `, `\,`, `\=`, `\.`, `\[`, `\\`).
+				// Preserve the backslash and the escaped rune verbatim without doubling.
+				sb.WriteRune(r)
+				if i+1 < n {
+					sb.WriteRune(runes[i+1])
+					i++
+				}
+				continue
+			}
+			if r == '=' {
+				sb.WriteRune(r)
+				inKey = false
+				afterEqual = true
+				inBraces = false
+				continue
+			}
+			sb.WriteRune(r)
+			continue
+		}
+
+		// We are in a value portion.
+		if afterEqual {
+			afterEqual = false
+			if r == '{' {
+				inBraces = true
+				sb.WriteRune(r)
+				continue
+			}
+		}
+
+		if inBraces {
+			if r == '}' {
+				sb.WriteRune(r)
+				inBraces = false
+				continue
+			}
+		} else {
+			if r == ',' {
+				// Top-level unescaped comma ends the value and begins the next key.
+				sb.WriteRune(r)
+				inKey = true
+				continue
+			}
+		}
+
+		if r == '\\' {
+			if i+1 < n {
+				next := runes[i+1]
+				switch next {
+				case ',', '{', '}', '[', ']', '=', '.':
+					sb.WriteRune(r)
+					sb.WriteRune(next)
+					i++
+					continue
+				}
+			}
+			sb.WriteString(`\\`)
+			continue
+		}
+
+		sb.WriteRune(r)
+	}
+	return sb.String()
+}
+
+// ParseHelmFileValuePaths decodes file paths from a Helm FileValues or --set-file expression,
+// preserving native Windows path separators while supporting Helm syntax such as
+// comma-separated values, brace lists ({path1,path2}), and escaped commas.
+// The callback fn is invoked for each decoded file path.
+func ParseHelmFileValuePaths(fv string, fn func(filePath string) error) error {
+	var callbackErr error
+	var pathsFound int
+	dest := map[string]interface{}{}
+	protected := ProtectHelmPathSeparators(fv)
+	if err := strvals.ParseIntoFile(protected, dest, func(rs []rune) (interface{}, error) {
+		pathsFound++
+		filePath := string(rs)
+		if filePath != "" {
+			if err := fn(filePath); err != nil {
+				callbackErr = err
+				return nil, err
+			}
+		}
+		return "", nil
+	}); err != nil {
+		if callbackErr != nil {
+			return callbackErr
+		}
+		return fmt.Errorf("failed parsing --set-file data %q: %w", fv, err)
+	}
+	if pathsFound == 0 {
+		parts := strings.SplitN(fv, "=", 2)
+		filePath := fv
+		if len(parts) == 2 {
+			filePath = parts[1]
+		}
+		if filePath != "" {
+			if err := fn(filePath); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 func loadResourcesFromHelmCharts(ctx context.Context, basePath string, valueOpts HelmValueOptions, excludedChartDirectories []string, filter *PathFilter, workspaceOpt ...string) (map[string][]workloadinterface.IMetadata, map[string]Chart, []string, error) {
 	var workspaceDir string
 	if len(workspaceOpt) > 0 {
@@ -124,6 +247,17 @@ func loadResourcesFromHelmCharts(ctx context.Context, basePath string, valueOpts
 		for _, vf := range valueOpts.ValueFiles {
 			if !pathcontainment.IsPathContained(workspaceDir, vf) {
 				return nil, nil, nil, fmt.Errorf("%w: Helm values file %q outside workspace root", pathcontainment.ErrPathEscapesWorkspace, vf)
+			}
+		}
+		for _, fv := range valueOpts.FileValues {
+			err := ParseHelmFileValuePaths(fv, func(filePath string) error {
+				if !pathcontainment.IsPathContained(workspaceDir, filePath) {
+					return fmt.Errorf("%w: Helm file-values file %q outside workspace root", pathcontainment.ErrPathEscapesWorkspace, filePath)
+				}
+				return nil
+			})
+			if err != nil {
+				return nil, nil, nil, err
 			}
 		}
 	}
