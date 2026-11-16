@@ -261,11 +261,36 @@ func TestGitHubActionsPrinter_SkipsResourcesWithoutFilePath(t *testing.T) {
 // image findings have no manifest location to anchor an annotation to.
 func TestGitHubActionsPrinter_RejectsImageScanData(t *testing.T) {
 	gp := NewGitHubActionsPrinter()
+	images := []cautils.ImageScanData{{Image: "nginx:1.23"}}
 
-	err := gp.ActionPrint(context.Background(), nil, []cautils.ImageScanData{{}})
-
+	// Standalone image scan with nil session
+	err := gp.ActionPrint(context.Background(), nil, images)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "only supported for configuration scanning")
+
+	// Standalone image scan with nil report
+	sessionWithNilReport := &cautils.OPASessionObj{Report: nil}
+	err = gp.ActionPrint(context.Background(), sessionWithNilReport, images)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "only supported for configuration scanning")
+
+	// Combined scan: configuration scan + image scan
+	session := ghSessionFixture(t, "C-0057", 9.0)
+	tmp, err := os.CreateTemp("", "github-actions-combined-*.txt")
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		assert.NoError(t, tmp.Close())
+		assert.NoError(t, os.Remove(tmp.Name()))
+	})
+	gp.writer = tmp
+
+	err = gp.ActionPrint(context.Background(), session, images)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "github-actions cannot carry image vulnerabilities; use json or sarif for a combined scan with --scan-images")
+
+	raw, err := os.ReadFile(tmp.Name())
+	require.NoError(t, err)
+	assert.Empty(t, raw, "a partial report must not appear when combined scan is rejected")
 }
 
 // TestGitHubActionsPrinter_EmitsOnlyHighAndCritical pins the severity filter
