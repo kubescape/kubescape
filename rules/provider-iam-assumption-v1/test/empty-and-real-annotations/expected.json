@@ -1,0 +1,32 @@
+[
+    {
+        "alertMessage": "ServiceAccount: app is assigned the GCP service account app@project.iam.gserviceaccount.com",
+        "failedPaths": [
+            "metadata.annotations[iam.gke.io/gcp-service-account]"
+        ],
+        "reviewPaths": [
+            "metadata.annotations[iam.gke.io/gcp-service-account]"
+        ],
+        "deletePaths": null,
+        "fixPaths": [],
+        "ruleStatus": "",
+        "packagename": "armo_builtins",
+        "alertScore": 3,
+        "alertObject": {
+            "k8sApiObjects": [
+                {
+                    "apiVersion": "v1",
+                    "kind": "ServiceAccount",
+                    "metadata": {
+                        "annotations": {
+                            "eks.amazonaws.com/role-arn": "",
+                            "iam.gke.io/gcp-service-account": "app@project.iam.gserviceaccount.com"
+                        },
+                        "name": "app",
+                        "namespace": "data"
+                    }
+                }
+            ]
+        }
+    }
+]

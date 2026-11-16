@@ -20,6 +20,11 @@ deny contains msga if {
 
 	identity := sa.metadata.annotations[provider.annotation]
 
+	# An empty or blank value, as a chart renders when no identity is
+	# configured, names nothing: the EKS and Azure webhooks inject credentials
+	# only for a non-empty value, and GKE maps no GCP service account.
+	trim_space(identity) != ""
+
 	failedPath := sprintf("metadata.annotations[%s]", [provider.annotation])
 
 	msga := {
