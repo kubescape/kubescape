@@ -463,6 +463,28 @@ func TestDiff_ImageReportsCompareVulnerabilities(t *testing.T) {
 		assert.Equal(t, 1, count)
 	})
 
+	t.Run("writes markdown for a pull request comment", func(t *testing.T) {
+		output := filepath.Join(t.TempDir(), "diff.md")
+		count, err := ks.Diff(&metav1.DiffInfo{BaseFile: base, HeadFile: head, Format: "markdown", Output: output, SeverityThreshold: "high"})
+		require.NoError(t, err)
+		assert.Equal(t, 1, count)
+		content, err := os.ReadFile(output)
+		require.NoError(t, err)
+		assert.Contains(t, string(content), "| High | CVE-NEW-HIGH | curl | 1.0 | apk | 2.0 |")
+		assert.NotContains(t, string(content), "CVE-NEW-LOW")
+	})
+
+	t.Run("writes junit with one failure per new vulnerability", func(t *testing.T) {
+		output := filepath.Join(t.TempDir(), "diff.xml")
+		count, err := ks.Diff(&metav1.DiffInfo{BaseFile: base, HeadFile: head, Format: "junit", Output: output})
+		require.NoError(t, err)
+		assert.Equal(t, 2, count)
+		content, err := os.ReadFile(output)
+		require.NoError(t, err)
+		assert.Contains(t, string(content), `tests="2" failures="2"`)
+		assert.Contains(t, string(content), `name="CVE-NEW-HIGH (curl 1.0)"`)
+	})
+
 	t.Run("rejects a format the vulnerability diff cannot write", func(t *testing.T) {
 		_, err := ks.Diff(&metav1.DiffInfo{BaseFile: base, HeadFile: head, Format: "sarif"})
 		require.Error(t, err)

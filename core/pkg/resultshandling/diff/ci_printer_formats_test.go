@@ -296,6 +296,8 @@ func TestMarkdownEscape_NormalizesEmptyAndWhitespace(t *testing.T) {
 	assert.Equal(t, "-", markdownEscape(""))
 	assert.Equal(t, "-", markdownEscape(" \n\t "))
 	assert.Equal(t, "a b", markdownEscape("a\nb"))
+	assert.Equal(t, "a b", markdownEscape("a\rb"))
+	assert.Equal(t, "a b", markdownEscape("a\r\nb"))
 	assert.Equal(t, `a\\b`, markdownEscape(`a\b`))
 	assert.Equal(t, `a\|b`, markdownEscape(`a|b`))
 }
