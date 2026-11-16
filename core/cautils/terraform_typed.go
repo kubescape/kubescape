@@ -289,6 +289,12 @@ func isStringTypedNumberField(path, name string) bool {
 }
 
 func attributeValueFor(path, name string, val interface{}) interface{} {
+	// The provider keeps the security context IDs in strings so that "" can
+	// leave them unset: it sets runAsUser, runAsGroup and fsGroup only from a
+	// non-empty value.
+	if s, ok := val.(string); ok && s == "" && isSecurityContextIDField(path, name) {
+		return nil
+	}
 	if s, ok := val.(string); ok && (isConvertiblePortField(path, name) || isStringTypedNumberField(path, name)) && isDigitOnly(s) {
 		return json.Number(canonicalizeNumericString(s))
 	}
@@ -310,7 +316,14 @@ func hclBodyToMap(body *hclsyntax.Body, evalCtx *hcl.EvalContext, errs *[]error,
 			*errs = append(*errs, fmt.Errorf("%s: attribute %q: %w", path, name, diags))
 			continue
 		}
-		out[attributeNameFor(name)] = attributeValueFor(path, name, ctyToGo(val))
+		value := attributeValueFor(path, name, ctyToGo(val))
+		if value == nil {
+			// Terraform treats an argument set to null as if it were not there,
+			// and so does the provider; leaving it in the manifest as null makes
+			// a rule read the field as set.
+			continue
+		}
+		out[attributeNameFor(name)] = value
 	}
 
 	grouped := map[string][]*hclsyntax.Block{}
@@ -373,7 +386,14 @@ func hclResourceBodyToMap(body *hclsyntax.Body, evalCtx *hcl.EvalContext, errs *
 			*errs = append(*errs, fmt.Errorf("%s: attribute %q: %w", path, name, diags))
 			continue
 		}
-		out[attributeNameFor(name)] = attributeValueFor(path, name, ctyToGo(val))
+		value := attributeValueFor(path, name, ctyToGo(val))
+		if value == nil {
+			// Terraform treats an argument set to null as if it were not there,
+			// and so does the provider; leaving it in the manifest as null makes
+			// a rule read the field as set.
+			continue
+		}
+		out[attributeNameFor(name)] = value
 	}
 
 	grouped := map[string][]*hclsyntax.Block{}
