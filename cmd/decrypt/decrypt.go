@@ -54,6 +54,9 @@ func getMaxReportSize(flagVal int64) (int64, error) {
 // device nodes, or directories). O_NONBLOCK ensures that opening a FIFO without a writer
 // fails or returns immediately rather than blocking the process indefinitely.
 func openReport(path string) (*os.File, error) {
+	if strings.TrimSpace(path) == "" {
+		return nil, errors.New("report file path cannot be empty")
+	}
 	file, err := os.OpenFile(filepath.Clean(path), os.O_RDONLY|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		return nil, err
@@ -126,6 +129,11 @@ standard output and can be redirected to a file.`,
 		Example: decryptCmdExamples,
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			reportPath := strings.TrimSpace(args[0])
+			if reportPath == "" {
+				return errors.New("report file path cannot be empty")
+			}
+
 			if cmd.Flags().Changed("max-report-size") && maxReportSize <= 0 {
 				return fmt.Errorf("invalid --max-report-size %d: must be greater than 0", maxReportSize)
 			}
@@ -134,9 +142,9 @@ standard output and can be redirected to a file.`,
 				return err
 			}
 
-			data, err := readReportFile(args[0], limit)
+			data, err := readReportFile(reportPath, limit)
 			if err != nil {
-				return fmt.Errorf("failed to read report %q: %w", args[0], err)
+				return fmt.Errorf("failed to read report %q: %w", reportPath, err)
 			}
 
 			decrypted, err := reportcrypto.DecryptReportFromEnv(data)
