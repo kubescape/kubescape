@@ -119,11 +119,10 @@ type kubectlCluster struct {
 
 // isSafeShellArg reports whether a cluster flag argument (kubeconfig path or
 // context name) can safely be emitted on a shell command line. It rejects
-// empty strings and strings containing newlines, carriage returns, control
-// characters, or null bytes, preventing command line tampering and terminal
-// control injection while permitting valid values like hyphen-prefixed paths or names.
+// strings containing newlines, carriage returns, control characters, null
+// bytes, or leading hyphens that could split commands or inject flags.
 func isSafeShellArg(s string) bool {
-	if s == "" {
+	if s == "" || strings.HasPrefix(s, "-") {
 		return false
 	}
 	for _, r := range s {
