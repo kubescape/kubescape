@@ -242,3 +242,45 @@ func TestWaitForOperatorCommands_FailsOnNonTransientGetError(t *testing.T) {
 	assert.True(t, apierrors.IsForbidden(err))
 	assert.Contains(t, err.Error(), names[0])
 }
+
+// A read that keeps failing with a transient error until the timeout leaves the
+// command's status unknown: the timeout says what the error was, and doesn't
+// claim that the command never started.
+func TestWaitForOperatorCommands_TimeoutReportsAPersistentTransientError(t *testing.T) {
+	shortPollInterval(t)
+	dyn := newFakeOperatorCommandClient(t)
+	names, err := CreateOperatorCommands(context.Background(), dyn, "kubescape",
+		apis.Commands{Commands: []apis.Command{{CommandName: apis.TypeRunKubescape}}})
+	require.NoError(t, err)
+	setOperatorCommandStatus(t, dyn, "kubescape", names[0], map[string]interface{}{"started": true})
+	dyn.PrependReactor("get", "operatorcommands", func(action clienttesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewServiceUnavailable("etcdserver: leader changed")
+	})
+
+	err = WaitForOperatorCommands(context.Background(), dyn, "kubescape", names, 300*time.Millisecond)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "etcdserver: leader changed")
+	assert.NotContains(t, err.Error(), "none of them started")
+}
+
+// A transient error reading one command doesn't hold up the others: a failure
+// another command reports is still seen.
+func TestWaitForOperatorCommands_TransientErrorDoesNotHideAnotherCommandsFailure(t *testing.T) {
+	shortPollInterval(t)
+	dyn := newFakeOperatorCommandClient(t)
+	names, err := CreateOperatorCommands(context.Background(), dyn, "kubescape",
+		apis.Commands{Commands: []apis.Command{{CommandName: apis.TypeRunKubescape}, {CommandName: apis.TypeScanImages}}})
+	require.NoError(t, err)
+	setOperatorCommandStatus(t, dyn, "kubescape", names[1], map[string]interface{}{
+		"started": true, "completed": true, "error": map[string]interface{}{"message": "scan failed: boom"}})
+	dyn.PrependReactor("get", "operatorcommands", func(action clienttesting.Action) (bool, runtime.Object, error) {
+		if action.(clienttesting.GetAction).GetName() == names[0] {
+			return true, nil, apierrors.NewTooManyRequests("slow down", 1)
+		}
+		return false, nil, nil
+	})
+
+	err = WaitForOperatorCommands(context.Background(), dyn, "kubescape", names, 500*time.Millisecond)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "scan failed: boom")
+}
