@@ -1406,15 +1406,15 @@ func validateChartAndValuesContainment(chartPath, allowedBasePath string, valueO
 		}
 	}
 	for _, fv := range valueOpts.FileValues {
-		for _, item := range strings.Split(fv, ",") {
-			parts := strings.SplitN(item, "=", 2)
-			if len(parts) == 2 {
-				filePath := parts[1]
-				resolvedFP, err := filepath.EvalSymlinks(filePath)
-				if err != nil || !isPathContained(allowedBasePath, resolvedFP) {
-					return fmt.Errorf("file-values file %q is outside allowed base path %q", filePath, allowedBasePath)
-				}
+		err := cautils.ParseHelmFileValuePaths(fv, func(filePath string) error {
+			resolvedFP, err := filepath.EvalSymlinks(filePath)
+			if err != nil || !isPathContained(allowedBasePath, resolvedFP) {
+				return fmt.Errorf("file-values file %q is outside allowed base path %q", filePath, allowedBasePath)
 			}
+			return nil
+		})
+		if err != nil {
+			return err
 		}
 	}
 	return nil
