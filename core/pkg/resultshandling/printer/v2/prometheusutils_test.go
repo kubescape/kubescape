@@ -670,3 +670,90 @@ func TestSetComplianceScores_NilSummaryDetails(t *testing.T) {
 	assert.Empty(t, m.listFrameworks)
 	assert.Empty(t, m.listControls)
 }
+
+func TestEscapePrometheusLabelValue(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "plain string unchanged",
+			input:    "nginx-deployment",
+			expected: "nginx-deployment",
+		},
+		{
+			name:     "escapes backslash",
+			input:    `foo\bar`,
+			expected: `foo\\bar`,
+		},
+		{
+			name:     "escapes double quote",
+			input:    `foo"bar`,
+			expected: `foo\"bar`,
+		},
+		{
+			name:     "escapes newline",
+			input:    "foo\nbar",
+			expected: `foo\nbar`,
+		},
+		{
+			name:     "neutralizes CRLF to escaped newline",
+			input:    "foo\r\nbar",
+			expected: `foo\nbar`,
+		},
+		{
+			name:     "neutralizes bare carriage return to escaped newline",
+			input:    "foo\rbar",
+			expected: `foo\nbar`,
+		},
+		{
+			name:     "neutralizes multiple CR and CRLF sequences",
+			input:    "line1\r\nline2\rline3\nline4",
+			expected: `line1\nline2\nline3\nline4`,
+		},
+		{
+			name:     "neutralizes CRLF with quotes and backslashes",
+			input:    "name=\"evil\"\r\nkubescape_score 100",
+			expected: `name=\"evil\"\nkubescape_score 100`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := escapePrometheusLabelValue(tt.input)
+			assert.Equal(t, tt.expected, got)
+			assert.NotContains(t, got, "\r", "output must never contain raw carriage returns")
+		})
+	}
+}
+
+func TestPrometheusMetrics_CarriageReturnNeutralization(t *testing.T) {
+	m := &Metrics{
+		listResources: []mResources{
+			{
+				apiVersion: "v1",
+				kind:       "Pod",
+				namespace:  "default\r\ninjected",
+				name:       "my-pod\rfake-line",
+				path:       "manifests/pod\r\n.yaml",
+				withPath:   true,
+			},
+		},
+		listImages: []mImageVulnerability{
+			{
+				image:    "my-image:latest\r\nmalicious",
+				platform: "linux/amd64",
+				severity: "High",
+				cveCount: 1,
+			},
+		},
+	}
+
+	output := m.String()
+	assert.NotContains(t, output, "\r", "prometheus metrics output must not contain raw carriage returns")
+	assert.Contains(t, output, `namespace="default\ninjected"`)
+	assert.Contains(t, output, `name="my-pod\nfake-line"`)
+	assert.Contains(t, output, `path="manifests/pod\n.yaml"`)
+	assert.Contains(t, output, `image="my-image:latest\nmalicious"`)
+}
