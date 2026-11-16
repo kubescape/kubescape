@@ -6,6 +6,8 @@
 #
 # Never add a pull_request trigger. The job mints an OIDC token that the hub
 # trusts for this repository, and it must not run on code from a fork.
+# Scheduled runs trigger on forks by default; the job is guarded with an
+# explicit repository check so it runs only on the upstream repository.
 
 name: Publish OSPS Baseline results
 on:
@@ -17,6 +19,7 @@ permissions: {}
 
 jobs:
   publish:
+    if: github.repository == 'kubescape/kubescape'
     name: Publish to grc.store
     permissions:
       # Needed to check out the repository and run the scanner against it.
