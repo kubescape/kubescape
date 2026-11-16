@@ -8,6 +8,7 @@ import (
 	"github.com/hashicorp/hcl/v2/hclsyntax"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	networkingv1 "k8s.io/api/networking/v1"
 )
 
 // parseTypedHCL parses HCL source and returns the *hclsyntax.Body the typed
@@ -165,6 +166,27 @@ func TestAttributeValueFor(t *testing.T) {
 			attrName: "service_port",
 			in:       "08080",
 			want:     json.Number("8080"),
+		},
+		{
+			name:     "quoted numeric number in ingress v1 backend service port converts to json.Number",
+			path:     "kubernetes_ingress_v1.web.spec.rules.http.paths.backend.service.port",
+			attrName: "number",
+			in:       "8080",
+			want:     json.Number("8080"),
+		},
+		{
+			name:     "quoted numeric number with leading zero in ingress v1 backend service port canonicalizes",
+			path:     "kubernetes_ingress_v1.web.spec.rules.http.paths.backend.service.port",
+			attrName: "number",
+			in:       "080",
+			want:     json.Number("80"),
+		},
+		{
+			name:     "named port in ingress v1 backend service port preserved as string",
+			path:     "kubernetes_ingress_v1.web.spec.rules.http.paths.backend.service.port",
+			attrName: "name",
+			in:       "http",
+			want:     "http",
 		},
 		{
 			name:     "named service_port in legacy ingress backend preserved as string",
@@ -777,4 +799,242 @@ resource "kubernetes_network_policy_v1" "np_v1" {
 		require.NoError(t, err, "manifest %d must marshal cleanly to valid JSON without error", i)
 		assert.NotEmpty(t, data)
 	}
+}
+
+func TestExtractTypedResourcesIngressBackendServicePortAndPathType(t *testing.T) {
+	src := `
+resource "kubernetes_ingress_v1" "ing" {
+  metadata {
+    name = "my-ingress"
+  }
+  spec {
+    tls {
+      hosts       = ["example.com"]
+      secret_name = "example-tls"
+    }
+    default_backend {
+      service {
+        name = "default-svc"
+        port {
+          number = 443
+        }
+      }
+    }
+    rule {
+      host = "example.com"
+      http {
+        path {
+          path      = "/api"
+          path_type = "Prefix"
+          backend {
+            service {
+              name = "api-svc"
+              port {
+                number = 8080
+              }
+            }
+          }
+        }
+        path {
+          path = "/quoted"
+          backend {
+            service {
+              name = "quoted-svc"
+              port {
+                number = "8443"
+              }
+            }
+          }
+        }
+        path {
+          path = "/named"
+          backend {
+            service {
+              name = "named-svc"
+              port {
+                name = "http"
+              }
+            }
+          }
+        }
+        path {
+          path      = "/null-type"
+          path_type = null
+          backend {
+            service {
+              name = "null-type-svc"
+              port {
+                number = 80
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+`
+	manifests, errs := extractTypedResources(parseTypedHCL(t, src), &hcl.EvalContext{})
+	require.Empty(t, errs)
+	require.Len(t, manifests, 1)
+
+	obj := manifests[0]
+	assert.Equal(t, "networking.k8s.io/v1", obj["apiVersion"])
+	assert.Equal(t, "Ingress", obj["kind"])
+
+	spec, ok := obj["spec"].(map[string]interface{})
+	require.True(t, ok)
+
+	// Single tls block must be converted to an array.
+	tlsSlice, ok := spec["tls"].([]interface{})
+	require.True(t, ok, "spec.tls must be a slice")
+	require.Len(t, tlsSlice, 1)
+
+	// default_backend service port must be an object, not a slice or named ports.
+	defBackend, ok := spec["defaultBackend"].(map[string]interface{})
+	require.True(t, ok)
+	defSvc, ok := defBackend["service"].(map[string]interface{})
+	require.True(t, ok)
+	assert.NotContains(t, defSvc, "ports", "service port must not be pluralized to ports")
+	defPort, ok := defSvc["port"].(map[string]interface{})
+	require.True(t, ok, "default backend service port must be an object")
+	assert.Equal(t, json.Number("443"), defPort["number"])
+
+	// rules and paths
+	rules, ok := spec["rules"].([]interface{})
+	require.True(t, ok)
+	require.Len(t, rules, 1)
+
+	httpRule, ok := rules[0].(map[string]interface{})["http"].(map[string]interface{})
+	require.True(t, ok)
+	paths, ok := httpRule["paths"].([]interface{})
+	require.True(t, ok, "http.paths must be a slice")
+	require.Len(t, paths, 4)
+
+	// Path 0: explicit path_type = "Prefix", numeric literal port
+	p0, ok := paths[0].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "Prefix", p0["pathType"], "explicit pathType must be preserved")
+	b0, ok := p0["backend"].(map[string]interface{})
+	require.True(t, ok)
+	svc0, ok := b0["service"].(map[string]interface{})
+	require.True(t, ok)
+	assert.NotContains(t, svc0, "ports", "service port must not be pluralized to ports")
+	port0, ok := svc0["port"].(map[string]interface{})
+	require.True(t, ok, "service port must be an object")
+	assert.Equal(t, json.Number("8080"), port0["number"])
+
+	// Path 1: omitted path_type defaults to ImplementationSpecific, quoted numeric port
+	p1, ok := paths[1].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "ImplementationSpecific", p1["pathType"], "omitted pathType must default to ImplementationSpecific")
+	b1, ok := p1["backend"].(map[string]interface{})
+	require.True(t, ok)
+	svc1, ok := b1["service"].(map[string]interface{})
+	require.True(t, ok)
+	assert.NotContains(t, svc1, "ports")
+	port1, ok := svc1["port"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, json.Number("8443"), port1["number"], "quoted numeric port must be normalized to json.Number")
+
+	// Path 2: omitted path_type defaults to ImplementationSpecific, named port
+	p2, ok := paths[2].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "ImplementationSpecific", p2["pathType"])
+	b2, ok := p2["backend"].(map[string]interface{})
+	require.True(t, ok)
+	svc2, ok := b2["service"].(map[string]interface{})
+	require.True(t, ok)
+	port2, ok := svc2["port"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "http", port2["name"], "named port must be preserved as string")
+
+	// Path 3: explicit path_type = null defaults to ImplementationSpecific
+	p3, ok := paths[3].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "ImplementationSpecific", p3["pathType"], "null pathType must default to ImplementationSpecific")
+	b3, ok := p3["backend"].(map[string]interface{})
+	require.True(t, ok)
+	svc3, ok := b3["service"].(map[string]interface{})
+	require.True(t, ok)
+	port3, ok := svc3["port"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, json.Number("80"), port3["number"])
+
+	// Verify serialization and ReadFile
+	data, err := json.Marshal(obj)
+	require.NoError(t, err)
+
+	workloads, err := ReadFile(data, JSON_FILE_FORMAT)
+	require.NoError(t, err, "Ingress manifest must deserialize via ReadFile cleanly")
+	require.Len(t, workloads, 1)
+	assert.Equal(t, "Ingress", workloads[0].GetKind())
+
+	// Verify unmarshaling into typed networkingv1.Ingress
+	var typedIng networkingv1.Ingress
+	err = json.Unmarshal(data, &typedIng)
+	require.NoError(t, err, "Ingress manifest must unmarshal cleanly into networkingv1.Ingress")
+	assert.Equal(t, int32(443), typedIng.Spec.DefaultBackend.Service.Port.Number)
+	require.Len(t, typedIng.Spec.Rules[0].HTTP.Paths, 4)
+	assert.Equal(t, int32(8080), typedIng.Spec.Rules[0].HTTP.Paths[0].Backend.Service.Port.Number)
+	assert.Equal(t, int32(8443), typedIng.Spec.Rules[0].HTTP.Paths[1].Backend.Service.Port.Number)
+	assert.Equal(t, "http", typedIng.Spec.Rules[0].HTTP.Paths[2].Backend.Service.Port.Name)
+	assert.Equal(t, int32(80), typedIng.Spec.Rules[0].HTTP.Paths[3].Backend.Service.Port.Number)
+	require.NotNil(t, typedIng.Spec.Rules[0].HTTP.Paths[3].PathType)
+	assert.Equal(t, networkingv1.PathTypeImplementationSpecific, *typedIng.Spec.Rules[0].HTTP.Paths[3].PathType)
+}
+
+func TestExtractTypedResourcesIngressPathTypeNull(t *testing.T) {
+	src := `
+resource "kubernetes_ingress_v1" "ing_null_path_type" {
+  metadata {
+    name = "null-path-type"
+  }
+  spec {
+    rule {
+      http {
+        path {
+          path      = "/test"
+          path_type = null
+          backend {
+            service {
+              name = "test-svc"
+              port {
+                number = 80
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+`
+	manifests, errs := extractTypedResources(parseTypedHCL(t, src), &hcl.EvalContext{})
+	require.Empty(t, errs)
+	require.Len(t, manifests, 1)
+
+	spec, ok := manifests[0]["spec"].(map[string]interface{})
+	require.True(t, ok)
+	rules, ok := spec["rules"].([]interface{})
+	require.True(t, ok)
+	httpRule, ok := rules[0].(map[string]interface{})["http"].(map[string]interface{})
+	require.True(t, ok)
+	paths, ok := httpRule["paths"].([]interface{})
+	require.True(t, ok)
+	require.Len(t, paths, 1)
+
+	p0, ok := paths[0].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "ImplementationSpecific", p0["pathType"], "null pathType must default to ImplementationSpecific")
+
+	data, err := json.Marshal(manifests[0])
+	require.NoError(t, err)
+
+	var typedIng networkingv1.Ingress
+	err = json.Unmarshal(data, &typedIng)
+	require.NoError(t, err, "Ingress manifest with null pathType must unmarshal cleanly into networkingv1.Ingress")
+	require.Len(t, typedIng.Spec.Rules[0].HTTP.Paths, 1)
+	require.NotNil(t, typedIng.Spec.Rules[0].HTTP.Paths[0].PathType)
+	assert.Equal(t, networkingv1.PathTypeImplementationSpecific, *typedIng.Spec.Rules[0].HTTP.Paths[0].PathType)
 }
