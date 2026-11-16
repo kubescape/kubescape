@@ -226,8 +226,56 @@ func isConvertiblePortField(path, name string) bool {
 	return isNetworkPolicyPortField(path, name) || isLegacyIngressBackendPortField(path, name) || isIngressBackendServicePortNumberField(path, name)
 }
 
+// isServiceTargetPortField reports whether name is a Service port's
+// target_port. The provider declares it as a string and turns it into a number
+// or a name with intstr.Parse when it builds the Service.
+func isServiceTargetPortField(path, name string) bool {
+	if name != "target_port" {
+		return false
+	}
+	if !strings.HasSuffix(path, ".port") && path != "port" {
+		return false
+	}
+	if strings.Contains(path, "kubernetes_") && !strings.HasPrefix(path, "kubernetes_service") {
+		return false
+	}
+	return true
+}
+
+// isHandlerPortField reports whether name is the port of an http_get or
+// tcp_socket handler, as used by container probes and lifecycle hooks. Like
+// target_port, the provider declares it as a string and parses it with
+// intstr.Parse.
+func isHandlerPortField(path, name string) bool {
+	if name != "port" {
+		return false
+	}
+	return strings.HasSuffix(path, ".http_get") || strings.HasSuffix(path, ".tcp_socket") ||
+		path == "http_get" || path == "tcp_socket"
+}
+
+// isSecurityContextIDField reports whether name is a user or group ID in a pod
+// or container security_context. The provider declares these as strings, so
+// that 0 can be told apart from unset, and parses them with strconv.ParseInt;
+// terraform show and imported configurations write them quoted.
+func isSecurityContextIDField(path, name string) bool {
+	switch name {
+	case "run_as_user", "run_as_group", "fs_group":
+		return strings.HasSuffix(path, ".security_context") || path == "security_context"
+	}
+	return false
+}
+
+// isStringTypedNumberField covers the provider's string-typed fields that hold
+// a number: int-or-string ports, where a value made of digits only is a port
+// number and anything else a port name, as intstr.Parse reads it, and the
+// security context IDs.
+func isStringTypedNumberField(path, name string) bool {
+	return isServiceTargetPortField(path, name) || isHandlerPortField(path, name) || isSecurityContextIDField(path, name)
+}
+
 func attributeValueFor(path, name string, val interface{}) interface{} {
-	if s, ok := val.(string); ok && isConvertiblePortField(path, name) && isDigitOnly(s) {
+	if s, ok := val.(string); ok && (isConvertiblePortField(path, name) || isStringTypedNumberField(path, name)) && isDigitOnly(s) {
 		return json.Number(canonicalizeNumericString(s))
 	}
 	return val
