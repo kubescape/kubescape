@@ -1494,7 +1494,11 @@ func readYamlFile(yamlFile []byte) (yamlObjs []workloadinterface.IMetadata, err 
 			parseErrs = append(parseErrs, fmt.Errorf("document %d: %w", i+1, unmarshalErr))
 			continue
 		}
-		j := convertYamlToJson(t)
+		j, conversionErr := convertYamlToJson(t)
+		if conversionErr != nil {
+			parseErrs = append(parseErrs, fmt.Errorf("document %d: %w", i+1, conversionErr))
+			continue
+		}
 		if j == nil {
 			continue
 		}
@@ -1878,7 +1882,7 @@ func restoreTypedListItemTypeMeta(list *unstructured.UnstructuredList, listKind 
 	}
 }
 
-func convertYamlToJson(i any) any {
+func convertYamlToJson(i any) (any, error) {
 	switch x := i.(type) {
 	case map[any]any:
 		m2 := make(map[string]any, len(x))
@@ -1892,9 +1896,16 @@ func convertYamlToJson(i any) any {
 			default:
 				keyStr = fmt.Sprintf("%v", k)
 			}
-			m2[keyStr] = convertYamlToJson(v)
+			if _, exists := m2[keyStr]; exists {
+				return nil, fmt.Errorf("YAML keys collide after conversion to JSON key %q", keyStr)
+			}
+			converted, err := convertYamlToJson(v)
+			if err != nil {
+				return nil, fmt.Errorf("key %q: %w", keyStr, err)
+			}
+			m2[keyStr] = converted
 		}
-		return m2
+		return m2, nil
 	case map[string]any:
 		// Recurse into values: yaml.v3 decodes a nested mapping with a
 		// non-string key (e.g. `1:` or an unquoted YAML 1.1 `on:`) as
@@ -1902,16 +1913,24 @@ func convertYamlToJson(i any) any {
 		// would otherwise survive and break json.Marshal when OPA builds its
 		// input (issue #2833).
 		for k, v := range x {
-			x[k] = convertYamlToJson(v)
+			converted, err := convertYamlToJson(v)
+			if err != nil {
+				return nil, fmt.Errorf("key %q: %w", k, err)
+			}
+			x[k] = converted
 		}
-		return x
+		return x, nil
 	case []any:
 		for i, v := range x {
-			x[i] = convertYamlToJson(v)
+			converted, err := convertYamlToJson(v)
+			if err != nil {
+				return nil, fmt.Errorf("index %d: %w", i, err)
+			}
+			x[i] = converted
 		}
-		return x
+		return x, nil
 	}
-	return i
+	return i, nil
 }
 
 // removedButRealKinds are built-in Kubernetes kinds the bundled client-go scheme
