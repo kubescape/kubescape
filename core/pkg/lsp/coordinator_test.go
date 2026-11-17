@@ -357,6 +357,63 @@ func TestNothingIsPublishedForADocumentClosedDuringAScan(t *testing.T) {
 	assert.Empty(t, h.barrier(), "and publishes nothing for the closed one")
 }
 
+func TestNothingIsPublishedForADocumentClosedAndReopenedDuringAScan(t *testing.T) {
+	var target, staying string
+	proceed := make(chan struct{})
+	scan := newFakeScan(func(int, []string) (scanFindings, error) {
+		return findingsFor(true, map[string][]protocol.Diagnostic{target: {diag("stale")}, staying: {diag("kept")}}), nil
+	})
+	scan.gate = func(int) <-chan struct{} { return proceed }
+	h := newHarness(t, scan, true)
+	target, staying = h.file("target.yaml"), h.file("staying.yaml")
+
+	h.save(staying)
+	h.waitScan()
+
+	// Close target and immediately reopen it with the same version (1).
+	d, _ := h.docs.close(target)
+	h.c.closed(d)
+	assert.Equal(t, uriFromPath(target), string(h.nextPublish().URI), "the close's own empty list")
+
+	h.docs.open(uriFromPath(target), target, 1)
+	close(proceed)
+
+	p := h.nextPublish()
+	assert.Equal(t, uriFromPath(staying), string(p.URI), "the scan serves the staying document")
+	assert.Equal(t, []string{"kept"}, messages(p))
+	assert.Empty(t, h.barrier(), "and publishes nothing for the reopened document whose scan belongs to a prior lifecycle")
+}
+
+func TestSymlinkAndRealFileOpenConcurrentlyTrackVersionsIndependently(t *testing.T) {
+	var realFile string
+	scan := newFakeScan(func(int, []string) (scanFindings, error) {
+		return findingsFor(true, map[string][]protocol.Diagnostic{realFile: {diag("vuln")}}), nil
+	})
+	h := newHarness(t, scan, true)
+	realFile = h.file("real.yaml")
+	symFile := filepath.Join(h.dir, "symlink.yaml")
+	require.NoError(t, os.Symlink(realFile, symFile))
+
+	// Open both real and symlink documents with different versions.
+	h.docs.open(uriFromPath(realFile), realFile, 1)
+	h.docs.open(uriFromPath(symFile), symFile, 2)
+
+	h.save(realFile)
+
+	got := map[string]int32{}
+	gotMsgs := map[string][]string{}
+	for range 2 {
+		p := h.nextPublish()
+		name := filepath.Base(mustPath(t, string(p.URI)))
+		v, ok := p.Version.Get()
+		require.True(t, ok)
+		got[name] = v
+		gotMsgs[name] = messages(p)
+	}
+	assert.Equal(t, map[string]int32{"real.yaml": 1, "symlink.yaml": 2}, got)
+	assert.Equal(t, map[string][]string{"real.yaml": {"vuln"}, "symlink.yaml": {"vuln"}}, gotMsgs)
+}
+
 func TestSeveralDocumentsEachGetTheirOwnDiagnostics(t *testing.T) {
 	var a, b string
 	scan := newFakeScan(func(int, []string) (scanFindings, error) {
