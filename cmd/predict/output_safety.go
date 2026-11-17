@@ -13,6 +13,7 @@ import (
 // writeOutput truncates its destination, so an alias otherwise destroys input
 // without making the prediction fail.
 func validatePSSOutput(output string, paths []string, stdin io.Reader) error {
+	output = strings.TrimSpace(output)
 	if output == "" {
 		return nil
 	}

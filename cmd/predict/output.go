@@ -25,6 +25,7 @@ const outputDirPerm = 0o750
 func writeOutput(result pss.NamespaceResult, format, outputFile string, verbose bool, out ...io.Writer) (retErr error) {
 	var w io.Writer
 	var f *os.File
+	outputFile = strings.TrimSpace(outputFile)
 	if outputFile != "" {
 		if dir, _ := filepath.Split(outputFile); dir != "" {
 			if err := os.MkdirAll(dir, outputDirPerm); err != nil {

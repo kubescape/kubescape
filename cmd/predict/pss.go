@@ -2,6 +2,7 @@ package predict
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -85,6 +86,13 @@ this namespace?" — without touching the cluster's admission configuration.`,
 			cmd.SilenceUsage = true
 			flags.stdin = cmd.InOrStdin()
 			flags.stdout = cmd.OutOrStdout()
+			if cmd.Flags().Changed("output") {
+				trimmed := strings.TrimSpace(flags.output)
+				if trimmed == "" {
+					return errors.New("--output requires a file path")
+				}
+				flags.output = trimmed
+			}
 			return runPSS(cmd.Context(), flags, args)
 		},
 	}
@@ -126,12 +134,21 @@ func runPSS(ctx context.Context, flags *pssFlags, args []string) error {
 		return fmt.Errorf("unsupported format %q; supported: %s", flags.format, strings.Join(pssFormats, ", "))
 	}
 
+	if flags.output != "" {
+		trimmed := strings.TrimSpace(flags.output)
+		if trimmed == "" {
+			return errors.New("--output requires a file path")
+		}
+		flags.output = trimmed
+	}
+
 	// Determine mode: cluster vs. local
 	isClusterMode := len(args) == 0
 
 	var result pss.NamespaceResult
 
 	if isClusterMode {
+		flags.namespace = strings.TrimSpace(flags.namespace)
 		if flags.namespace == "" {
 			return fmt.Errorf("--namespace (-n) is required when scanning a live cluster (no file paths provided)")
 		}
@@ -156,6 +173,7 @@ func runPSS(ctx context.Context, flags *pssFlags, args []string) error {
 		if err != nil {
 			return err
 		}
+		flags.namespace = strings.TrimSpace(flags.namespace)
 		namespace := flags.namespace // may be empty for local scans
 		if namespace != "" {
 			workloads = slices.DeleteFunc(workloads, func(w pss.LocalWorkload) bool {
