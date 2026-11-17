@@ -1412,3 +1412,70 @@ func TestAnchorInputsKeepsRootsApart(t *testing.T) {
 		})
 	}
 }
+
+func TestGetResources_MultiInputPartialFailureRecoversValidManifests(t *testing.T) {
+	dir := t.TempDir()
+	validYaml := filepath.Join(dir, "pod.yaml")
+	require.NoError(t, os.WriteFile(validYaml, []byte("apiVersion: v1\nkind: Pod\nmetadata:\n  name: my-pod\nspec:\n  containers:\n  - name: c\n    image: nginx\n"), 0o600))
+
+	brokenChartDir := filepath.Join(dir, "brokenchart")
+	require.NoError(t, os.MkdirAll(filepath.Join(brokenChartDir, "templates"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(brokenChartDir, "Chart.yaml"), []byte("apiVersion: v2\nname: broken\nversion: 0.1.0\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(brokenChartDir, "templates", "sa.yaml"), []byte("apiVersion: v1\nkind: ServiceAccount\nmetadata:\n  name: {{ required \"missing\" .Values.nonexistent }}\n"), 0o600))
+
+	match := reporthandling.RuleMatchObjects{
+		APIGroups:   []string{""},
+		APIVersions: []string{"v1"},
+		Resources:   []string{"pods"},
+	}
+	framework := *mockFramework("test-framework", []reporthandling.Control{
+		mockControl("test-control", []reporthandling.PolicyRule{
+			mockRule("test-rule", []reporthandling.RuleMatchObjects{match}, ""),
+		}),
+	})
+
+	// Multi-input scan: one valid manifest, one broken chart
+	scanInfo := &cautils.ScanInfo{
+		InputPatterns: []string{brokenChartDir, validYaml},
+	}
+	session := cautils.NewOPASessionObj(context.Background(), []reporthandling.Framework{framework}, nil, scanInfo, nil)
+
+	_, allResources, _, _, err := NewFileResourceHandler().GetResources(context.Background(), session, scanInfo)
+	require.NoError(t, err, "multi-input scan must not fail when at least one input is valid")
+	require.NotEmpty(t, allResources, "valid manifests must be loaded despite broken chart")
+
+	var names []string
+	for _, res := range allResources {
+		names = append(names, res.GetName())
+	}
+	assert.Contains(t, names, "my-pod")
+
+	// Verify broken chart is recorded in SkippedManifests
+	require.NotEmpty(t, session.SkippedManifests)
+	foundSkip := false
+	for _, sk := range session.SkippedManifests {
+		if strings.Contains(sk.Path, "brokenchart") {
+			foundSkip = true
+			break
+		}
+	}
+	assert.True(t, foundSkip, "broken chart must be recorded in SkippedManifests")
+}
+
+func TestGetResources_SingleBrokenInputFailsPromptly(t *testing.T) {
+	dir := t.TempDir()
+	brokenChartDir := filepath.Join(dir, "brokenchart")
+	require.NoError(t, os.MkdirAll(filepath.Join(brokenChartDir, "templates"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(brokenChartDir, "Chart.yaml"), []byte("apiVersion: v2\nname: broken\nversion: 0.1.0\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(brokenChartDir, "templates", "sa.yaml"), []byte("apiVersion: v1\nkind: ServiceAccount\nmetadata:\n  name: {{ required \"missing\" .Values.nonexistent }}\n"), 0o600))
+
+	// Single input that fails must still return error promptly
+	scanInfo := &cautils.ScanInfo{
+		InputPatterns: []string{brokenChartDir},
+	}
+	session := cautils.NewOPASessionObj(context.Background(), nil, nil, scanInfo, nil)
+
+	_, _, _, _, err := NewFileResourceHandler().GetResources(context.Background(), session, scanInfo)
+	require.Error(t, err, "single broken input must return error")
+	assert.ErrorIs(t, err, cautils.ErrHelmRenderFailed)
+}

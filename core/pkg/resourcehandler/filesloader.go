@@ -41,6 +41,7 @@ func (fileHandler *FileResourceHandler) GetResources(ctx context.Context, sessio
 	// load resources from all input paths
 	mappedResources := map[string][]workloadinterface.IMetadata{}
 	var inputs []loadedInput
+	var inputErrors []error
 	for path := range scanInfo.InputPatterns {
 		var input loadedInput
 		var skipped []cautils.SkippedManifest
@@ -61,12 +62,27 @@ func (fileHandler *FileResourceHandler) GetResources(ctx context.Context, sessio
 		}
 		sessionObj.SkippedManifests = append(sessionObj.SkippedManifests, skipped...)
 		if err != nil {
+			if len(scanInfo.InputPatterns) > 1 {
+				logger.L().Ctx(ctx).Warning("failed to load input path, skipping",
+					helpers.String("path", scanInfo.InputPatterns[path]),
+					helpers.Error(err))
+				sessionObj.SkippedManifests = append(sessionObj.SkippedManifests, cautils.SkippedManifest{
+					Path:   scanInfo.InputPatterns[path],
+					Reason: fmt.Sprintf("failed to load input: %v", err),
+				})
+				inputErrors = append(inputErrors, fmt.Errorf("input %q: %w", scanInfo.InputPatterns[path], err))
+				continue
+			}
 			return nil, allResources, nil, nil, err
 		}
 		if len(input.workloads) == 0 {
 			continue
 		}
 		inputs = append(inputs, input)
+	}
+
+	if len(inputs) == 0 && len(inputErrors) > 0 {
+		return nil, allResources, nil, nil, errors.Join(inputErrors...)
 	}
 
 	anchorInputs(ctx, inputs)
