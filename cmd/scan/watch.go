@@ -78,12 +78,17 @@ type localScannerFactory interface {
 // watchRoots are the files and directories to watch for the scan's inputs. A
 // glob input, as in ./manifests/*.yaml, is not a path that can be watched: it is
 // watched through the directory the scanner lists it from, and a directory that
-// several inputs share is watched once.
+// several inputs share is watched once. A kustomization or a Terraform file is
+// rendered with the rest of its directory (the resources and patches it lists,
+// the other .tf and .tfvars files), so it is watched through that directory too.
 func watchRoots(inputs []string) []string {
 	roots := make([]string, 0, len(inputs))
 	seen := make(map[string]struct{}, len(inputs))
 	for _, input := range inputs {
 		root, _ := cautils.GlobInputRoot(input)
+		if cautils.IsKustomizeFile(root) || cautils.IsTerraformFile(root) {
+			root = filepath.Dir(root)
+		}
 		key := filepath.Clean(root)
 		if abs, err := filepath.Abs(root); err == nil {
 			key = abs

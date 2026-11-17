@@ -794,6 +794,7 @@ func TestFileWatcherRelevantFile(t *testing.T) {
 		{"DEPLOY.YAML", true}, {"Deploy.Yml", true}, {"a.b.yaml", true},
 		{".hidden.yaml", true}, // a hidden manifest is still one a scan loads
 		{"kustomization.yaml", true},
+		{"Kustomization", true}, // the extensionless name kustomize accepts
 		// Terraform and Helm files a directory scan renders
 		{"main.tf", true}, {"terraform.tfvars", true}, {"prod.auto.tfvars", true},
 		{"terraform.tfvars.json", true}, {"_helpers.tpl", true},

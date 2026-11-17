@@ -650,12 +650,13 @@ func (w *FileWatcher) skipDir(path string) bool {
 // extension the scan loader goes by, so editors' backup, swap and temporary
 // files (name~, .name.swp, name.tmp, #name#) are out already, being named with
 // another extension; what is left to rule out is an Emacs lock file, which is a
-// link named like the file it guards.
+// link named like the file it guards. The one manifest without an extension is a
+// kustomization named Kustomization, which kustomize accepts.
 func (w *FileWatcher) relevantFile(path string) bool {
 	if strings.HasPrefix(filepath.Base(path), ".#") {
 		return false
 	}
-	if !cautils.IsYaml(path) && !cautils.IsJson(path) && !isTerraformOrHelmFile(path) {
+	if !cautils.IsYaml(path) && !cautils.IsJson(path) && !cautils.IsKustomizeFile(path) && !isTerraformOrHelmFile(path) {
 		return false
 	}
 	return w.opts.Exclude == nil || !w.opts.Exclude(path, false)

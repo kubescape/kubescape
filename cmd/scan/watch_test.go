@@ -693,6 +693,40 @@ func TestWatchSecurityScanWatchesGlobInputs(t *testing.T) {
 	})
 }
 
+// A kustomization given as the input is rendered with the resources it lists, so
+// a change to one of them is a change to the input.
+func TestWatchSecurityScanWatchesWhatAKustomizationInputRenders(t *testing.T) {
+	dir := t.TempDir()
+	kustomization := filepath.Join(dir, "kustomization.yaml")
+	writeFile(t, kustomization, "apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nresources:\n- pod.yaml\n")
+	writeFile(t, filepath.Join(dir, "pod.yaml"), podManifest("web", false))
+	out, stop := startSecurityWatch(t, localWatchScanInfo(t, kustomization))
+
+	out.waitFor(t, "Initial scan complete: 1 failing control(s) on 1 resource(s)")
+	writeFile(t, filepath.Join(dir, "pod.yaml"), podManifest("web", true))
+	out.waitFor(t, "0 new, 1 resolved")
+
+	require.NoError(t, stop())
+}
+
+// The kustomization itself is watched as well when its directory is: kustomize
+// also accepts it under the extensionless name Kustomization, and an edit to it
+// is an edit to the input.
+func TestWatchSecurityScanWatchesAnExtensionlessKustomization(t *testing.T) {
+	dir := t.TempDir()
+	kustomization := filepath.Join(dir, "Kustomization")
+	writeFile(t, kustomization, "apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nresources:\n- pod.yaml\n")
+	writeFile(t, filepath.Join(dir, "pod.yaml"), podManifest("web", false))
+	writeFile(t, filepath.Join(dir, "api.yaml"), podManifest("api", false))
+	out, stop := startSecurityWatch(t, localWatchScanInfo(t, kustomization))
+
+	out.waitFor(t, "Initial scan complete: 1 failing control(s) on 1 resource(s)")
+	writeFile(t, kustomization, "apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nresources:\n- pod.yaml\n- api.yaml\n")
+	out.waitFor(t, "1 new, 0 resolved")
+
+	require.NoError(t, stop())
+}
+
 func TestWatchRoots(t *testing.T) {
 	dir := t.TempDir()
 	file := filepath.Join(dir, "pod.yaml")
@@ -709,6 +743,9 @@ func TestWatchRoots(t *testing.T) {
 		{name: "a nested glob is watched through its literal prefix", inputs: []string{filepath.Join(dir, "*", "prod", "*.yaml")}, want: []string{dir}},
 		{name: "a shared directory is watched once", inputs: []string{filepath.Join(dir, "*.yaml"), filepath.Join(dir, "*.json"), dir}, want: []string{dir}},
 		{name: "inputs in different directories are all watched", inputs: []string{file, filepath.Join(dir, "sub", "*.yaml")}, want: []string{file, filepath.Join(dir, "sub")}},
+		{name: "a kustomization is watched through its directory", inputs: []string{filepath.Join(dir, "overlay", "kustomization.yaml")}, want: []string{filepath.Join(dir, "overlay")}},
+		{name: "a Terraform file is watched through its directory", inputs: []string{filepath.Join(dir, "infra", "main.tf")}, want: []string{filepath.Join(dir, "infra")}},
+		{name: "a kustomization next to a watched directory is watched once", inputs: []string{dir, filepath.Join(dir, "kustomization.yaml")}, want: []string{dir}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
