@@ -9,6 +9,7 @@ package lsp
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"time"
 
@@ -244,7 +245,27 @@ func (s *server) DidOpen(_ context.Context, params *protocol.DidOpenTextDocument
 		return nil
 	}
 	s.docs.open(string(item.URI), path, item.Version)
+	// A document can open with changes that aren't saved yet, as when an editor
+	// restores one after a restart. Its lines aren't the file's, so it is left
+	// as it is until it is saved, like a document changed since its last save.
+	if !matchesDisk(path, item.Text) {
+		s.docs.change(path, item.Version)
+	}
 	return nil
+}
+
+// matchesDisk reports whether text is what the file at path holds. A byte order
+// mark, which editors leave out of the text they send, and Windows line endings
+// don't count as differences.
+func matchesDisk(path, text string) bool {
+	data, err := readBounded(path)
+	if err != nil {
+		return false
+	}
+	normalize := func(s string) string {
+		return strings.ReplaceAll(strings.TrimPrefix(s, "\ufeff"), "\r\n", "\n")
+	}
+	return normalize(string(data)) == normalize(text)
 }
 
 func (s *server) DidChange(_ context.Context, params *protocol.DidChangeTextDocumentParams) error {
