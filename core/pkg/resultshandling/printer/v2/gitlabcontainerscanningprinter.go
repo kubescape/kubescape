@@ -42,6 +42,7 @@ type gitLabContainerVulnerability struct {
 	Solution    string                  `json:"solution,omitempty"`
 	Identifiers []gitLabIdentifier      `json:"identifiers"`
 	Location    gitLabContainerLocation `json:"location"`
+	Details     map[string]gitLabDetail `json:"details,omitempty"`
 }
 
 type gitLabContainerLocation struct {
@@ -221,6 +222,7 @@ func toGitLabContainerVulnerability(image, platform, operatingSystem string, cve
 			OperatingSystem: operatingSystem,
 			Image:           image,
 		},
+		Details: gitLabExploitDetails(cve),
 	}
 }
 

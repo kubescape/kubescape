@@ -86,16 +86,23 @@ type gitLabVendor struct {
 }
 
 type gitLabVulnerability struct {
-	ID          string             `json:"id"`
-	Category    string             `json:"category,omitempty"`
-	Name        string             `json:"name,omitempty"`
-	Message     string             `json:"message,omitempty"`
-	Description string             `json:"description,omitempty"`
-	Severity    string             `json:"severity,omitempty"`
-	Scanner     gitLabScannerRef   `json:"scanner"`
-	Location    gitLabLocation     `json:"location"`
-	Identifiers []gitLabIdentifier `json:"identifiers"`
-	Solution    string             `json:"solution,omitempty"`
+	ID          string                  `json:"id"`
+	Category    string                  `json:"category,omitempty"`
+	Name        string                  `json:"name,omitempty"`
+	Message     string                  `json:"message,omitempty"`
+	Description string                  `json:"description,omitempty"`
+	Severity    string                  `json:"severity,omitempty"`
+	Scanner     gitLabScannerRef        `json:"scanner"`
+	Location    gitLabLocation          `json:"location"`
+	Identifiers []gitLabIdentifier      `json:"identifiers"`
+	Solution    string                  `json:"solution,omitempty"`
+	Details     map[string]gitLabDetail `json:"details,omitempty"`
+}
+
+type gitLabDetail struct {
+	Name  string `json:"name"`
+	Type  string `json:"type"`
+	Value any    `json:"value"`
 }
 
 type gitLabScannerRef struct {
@@ -276,7 +283,22 @@ func toGitLabImageVulnerability(image, platform string, cve imageprinter.CVE) gi
 			},
 		},
 		Identifiers: []gitLabIdentifier{gitLabAdvisoryIdentifier(cve.ID)},
+		Details:     gitLabExploitDetails(cve),
 	}
+}
+
+func gitLabExploitDetails(cve imageprinter.CVE) map[string]gitLabDetail {
+	details := make(map[string]gitLabDetail, 2)
+	if cve.KEVKnown {
+		details["kev"] = gitLabDetail{Name: "Known exploited (CISA KEV)", Type: "value", Value: cve.KEV}
+	}
+	if cve.EPSS != nil {
+		details["epss"] = gitLabDetail{Name: "EPSS exploit probability", Type: "text", Value: imageprinter.FormatEPSS(cve.EPSS)}
+	}
+	if len(details) == 0 {
+		return nil
+	}
+	return details
 }
 
 // gitLabAdvisoryIdentifier types a vulnerability ID by its prefix. Grype reports
