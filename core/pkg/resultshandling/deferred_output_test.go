@@ -47,11 +47,17 @@ func TestPrinters_KeepOldFileUntilActionPrintThenReplaceIt(t *testing.T) {
 
 				// ActionPrint with no data fails in most printers, but only after
 				// it has cleared the old report, so no old bytes can survive a
-				// shorter new one.
+				// shorter new one. Printers that validate before PrepareOutput
+				// preserve the existing file when no data is provided.
 				_ = p.ActionPrint(ctx, nil, nil)
 				got, err = os.ReadFile(path)
 				require.NoError(t, err)
-				assert.NotContains(t, string(got), old, "ActionPrint must replace the old report")
+				switch format {
+				case printer.GitLabContainerScanningFormat, printer.PolicyReportFormat:
+					assert.Equal(t, old, string(got), "no-data ActionPrint must keep the old report")
+				default:
+					assert.NotContains(t, string(got), old, "ActionPrint must replace the old report")
+				}
 				_ = ClosePrinter(p)
 			})
 		}

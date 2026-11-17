@@ -314,8 +314,10 @@ func CloseOutput(f *os.File) error {
 	opened, statErr := f.Stat()
 	closeErr := f.Close()
 	if statErr == nil {
-		// Only remove the path if it still names the file we created.
-		if onDisk, err := os.Stat(path); err == nil && os.SameFile(opened, onDisk) {
+		// Only remove the path if it still names the file we created and is
+		// still empty. A non-zero size means something wrote to it after we
+		// opened it, so keep the file rather than destroy content.
+		if onDisk, err := os.Stat(path); err == nil && os.SameFile(opened, onDisk) && opened.Size() == 0 {
 			_ = os.Remove(path)
 		}
 	}

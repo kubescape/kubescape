@@ -83,11 +83,11 @@ func (cp *GitLabContainerScanningPrinter) SetWriter(ctx context.Context, outputF
 }
 
 func (cp *GitLabContainerScanningPrinter) ActionPrint(ctx context.Context, _ *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
-	if err := printer.PrepareOutput(cp.writer); err != nil {
-		return err
-	}
 	if len(imageScanData) == 0 {
 		return fmt.Errorf("gitlab-container-scanning output requires scanned images: run %q or add --scan-images", cautils.ExecName()+" scan image")
+	}
+	if err := printer.PrepareOutput(cp.writer); err != nil {
+		return err
 	}
 
 	startedAt := time.Now().UTC()

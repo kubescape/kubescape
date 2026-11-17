@@ -125,12 +125,12 @@ func (pp *PolicyReportPrinter) PrintNextSteps() {
 }
 
 func (pp *PolicyReportPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
-	if err := printer.PrepareOutput(pp.writer); err != nil {
-		return err
-	}
 	hasPosture := opaSessionObj != nil && opaSessionObj.Report != nil
 	if !hasPosture && len(imageScanData) == 0 {
 		return fmt.Errorf("failed to write results in PolicyReport format: no data provided")
+	}
+	if err := printer.PrepareOutput(pp.writer); err != nil {
+		return err
 	}
 
 	var reports []policyReport

@@ -72,6 +72,22 @@ func TestCloseOutput_KeepsAFileItCreatedOnceItWasPrepared(t *testing.T) {
 	assert.Equal(t, "report", string(got))
 }
 
+// If another writer wrote content to the file we created before CloseOutput
+// runs, we must keep the file even though we never called PrepareOutput.
+func TestCloseOutput_KeepsACreatedFileWhenAnotherWriterAddedContent(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "report.json")
+
+	f, err := GetPrinterWriterNoFallback(path)
+	require.NoError(t, err)
+	// A second handle writes content to the same path before we close.
+	require.NoError(t, os.WriteFile(path, []byte("written by other"), 0o600))
+	require.NoError(t, CloseOutput(f))
+
+	got, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.Equal(t, "written by other", string(got))
+}
+
 // If the path was replaced by another file in the meantime, CloseOutput must
 // not delete that file.
 func TestCloseOutput_DoesNotRemoveAReplacedPath(t *testing.T) {
