@@ -482,3 +482,20 @@ users: [{name: u, user: {token: t}}]
 	require.Nil(t, s.call("shutdown", nil)["error"])
 	assert.Zero(t, apiRequests.Load(), "the cluster was never asked anything")
 }
+
+// A manifest elsewhere in the workspace that doesn't parse is left as it is; it
+// doesn't hold back the diagnostics of the others.
+func TestAManifestThatDoesNotParseDoesNotHoldBackTheOthers(t *testing.T) {
+	s := startSessionWith(t, scanWith(realScanner(t)), nil)
+	s.start()
+	broken, _ := s.manifest("broken.yaml")
+	require.NoError(t, os.WriteFile(broken, []byte("kind: Pod\n  : : not yaml [\n"), 0o600))
+	path, uri := s.manifest("pod.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(podManifest("web", false)), 0o600))
+	s.open(uri, 1)
+	s.notify("textDocument/didSave", map[string]any{"textDocument": map[string]any{"uri": uri}})
+
+	ds := s.diagnostics()["diagnostics"].([]any)
+	require.Len(t, ds, 1)
+	assert.Equal(t, "C-0017", ds[0].(map[string]any)["code"])
+}
