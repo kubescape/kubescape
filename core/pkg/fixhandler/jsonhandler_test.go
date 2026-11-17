@@ -135,3 +135,64 @@ func TestApplyFixToFileContentPreservesTheSourceFormat(t *testing.T) {
 	assert.Contains(t, fixedYAML, "allowPrivilegeEscalation: false")
 	assert.Error(t, json.Unmarshal([]byte(fixedYAML), &map[string]any{}), "the YAML path must not emit JSON")
 }
+
+// podWithALargeInteger is a JSON Pod with inline objects and an integer above
+// 2^53, which a float64 can't hold. Re-encoding the file rewrites its layout
+// and rounds the integer, though the fix touches neither.
+const podWithALargeInteger = `{
+  "apiVersion": "v1",
+  "kind": "Pod",
+  "metadata": {"name": "first", "generation": 9007199254740993},
+  "spec": {"containers": [{"name": "c", "image": "nginx"}]}
+}
+`
+
+func TestApplyChangesKeepsWhatTheFixDoesNotTouchInAJSONManifest(t *testing.T) {
+	baseDir := t.TempDir()
+	source := writeManifest(t, baseDir, "pod.json", podWithALargeInteger)
+
+	count, errs := outputDirHandler(baseDir, "").ApplyChanges(context.Background(), []ResourceFixInfo{imageFix(source, "pod.json", 0)})
+
+	require.Empty(t, errs)
+	assert.Equal(t, 1, count)
+	assert.Equal(t, strings.Replace(podWithALargeInteger, `"image": "nginx"`, `"image": "nginx:1.25"`, 1), readText(t, source))
+}
+
+func TestBuildPatchKeepsWhatTheFixDoesNotTouchInAJSONManifest(t *testing.T) {
+	baseDir := t.TempDir()
+	source := writeManifest(t, baseDir, "pod.json", podWithALargeInteger)
+
+	result, err := patchHandler(baseDir, "").BuildPatch(context.Background(), []ResourceFixInfo{imageFix(source, "pod.json", 0)})
+
+	require.NoError(t, err)
+	var removed, added []string
+	for _, line := range strings.Split(result.Patch, "\n") {
+		switch {
+		case strings.HasPrefix(line, "---"), strings.HasPrefix(line, "+++"):
+		case strings.HasPrefix(line, "-"):
+			removed = append(removed, line[1:])
+		case strings.HasPrefix(line, "+"):
+			added = append(added, line[1:])
+		}
+	}
+	assert.Equal(t, []string{`  "spec": {"containers": [{"name": "c", "image": "nginx"}]}`}, removed, "the patch:\n%s", result.Patch)
+	assert.Equal(t, []string{`  "spec": {"containers": [{"name": "c", "image": "nginx:1.25"}]}`}, added)
+}
+
+// A field a fix adds can't be written into JSON in place, so the file is
+// re-encoded then, and stays JSON.
+func TestApplyFixToFileContentReEncodesAJSONManifestWhenAFixAddsAField(t *testing.T) {
+	const expression = `select(di==0) | .spec.containers[0].securityContext.privileged |= false`
+	fixes := []ResourceFixInfo{{
+		Resource:        podResource("first"),
+		YamlExpressions: map[string]armotypes.FixPath{expression: {}},
+	}}
+
+	fixed, err := applyFixToFileContent(context.Background(), "/tmp/pod.json", podWithALargeInteger, fixes)
+
+	require.NoError(t, err)
+	var decoded map[string]any
+	require.NoError(t, json.Unmarshal([]byte(fixed), &decoded), "the fixed file must still parse as JSON:\n%s", fixed)
+	container := decoded["spec"].(map[string]any)["containers"].([]any)[0].(map[string]any)
+	assert.Equal(t, map[string]any{"privileged": false}, container["securityContext"])
+}
