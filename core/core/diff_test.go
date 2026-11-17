@@ -632,6 +632,62 @@ func TestDiff_VulnerabilityDiffHonorsWriter(t *testing.T) {
 	assert.Contains(t, buf.String(), "CVE-NEW-HIGH")
 }
 
+func TestDiff_VulnerabilityDiffDefaultFormat(t *testing.T) {
+	base := writeReport(t, imageReportBase)
+	head := writeReport(t, imageReportHead)
+
+	ks := NewKubescape(context.Background())
+	var buf bytes.Buffer
+	count, err := ks.Diff(&metav1.DiffInfo{
+		BaseFile: base,
+		HeadFile: head,
+		Writer:   &buf,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, 2, count)
+	assert.Contains(t, buf.String(), "New vulnerabilities")
+	assert.Contains(t, buf.String(), "CVE-NEW-HIGH")
+}
+
+func TestDiff_FormatNormalization(t *testing.T) {
+	t.Run("vulnerability diff normalizes uppercase format", func(t *testing.T) {
+		base := writeReport(t, imageReportBase)
+		head := writeReport(t, imageReportHead)
+
+		ks := NewKubescape(context.Background())
+		var buf bytes.Buffer
+		count, err := ks.Diff(&metav1.DiffInfo{
+			BaseFile: base,
+			HeadFile: head,
+			Format:   "  JSON  ",
+			Writer:   &buf,
+		})
+		require.NoError(t, err)
+		assert.Equal(t, 2, count)
+		assert.Contains(t, buf.String(), `"id": "CVE-NEW-HIGH"`)
+	})
+
+	t.Run("posture diff normalizes uppercase format", func(t *testing.T) {
+		base := writeReport(t, `{"results":[],"summaryDetails":{"controls":{}}}`)
+		head := writeReport(t, `{
+			"results":[{"resourceID":"res1","controls":[{"controlID":"C-HIGH","name":"High","status":{"status":"failed"}}]}],
+			"summaryDetails":{"controls":{"C-HIGH":{"scoreFactor":7.0}}}
+		}`)
+
+		ks := NewKubescape(context.Background())
+		var buf bytes.Buffer
+		count, err := ks.Diff(&metav1.DiffInfo{
+			BaseFile: base,
+			HeadFile: head,
+			Format:   " JSON ",
+			Writer:   &buf,
+		})
+		require.NoError(t, err)
+		assert.Equal(t, 1, count)
+		assert.Contains(t, buf.String(), `"controlID": "C-HIGH"`)
+	})
+}
+
 func TestDiff_OutputSafety(t *testing.T) {
 	const baseContent = `{"results":[],"summaryDetails":{"controls":{}}}`
 	const headContent = `{"results":[{"resourceID":"res1","controls":[{"controlID":"C-HIGH","name":"High","status":{"status":"failed"}}]}],"summaryDetails":{"controls":{"C-HIGH":{"scoreFactor":7.0}}}}`

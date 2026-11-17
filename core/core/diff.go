@@ -19,6 +19,11 @@ func (ks *Kubescape) Diff(diffInfo *metav1.DiffInfo) (newFailures int, err error
 		return 0, errors.New("uninitialized diff parameters")
 	}
 
+	diffInfo.Format = strings.ToLower(strings.TrimSpace(diffInfo.Format))
+	if diffInfo.Format == "" {
+		diffInfo.Format = printer.PrettyFormat
+	}
+
 	if outputFile, explicit := diffOutputPath(diffInfo.Format, diffInfo.Output); explicit {
 		if err := validateDiffOutputSafety(outputFile, diffInfo.BaseFile, diffInfo.HeadFile); err != nil {
 			return 0, err
