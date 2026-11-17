@@ -176,8 +176,19 @@ func normalizeImageRef(image string) string {
 			if local {
 				return image + ":latest"
 			}
-			return scheme + ":" + normalizeImageRef(rest)
+			return scheme + ":" + withDefaultTag(rest)
 		}
+	}
+	return withDefaultTag(image)
+}
+
+// withDefaultTag adds the "latest" tag to an image reference that has none, before
+// its digest if it has one. It looks up no source scheme: it is also given what
+// follows a daemon or registry scheme, where "dir:latest" and "registry:2" are
+// images named like a scheme, not another scheme.
+func withDefaultTag(image string) string {
+	if image == "" {
+		return image
 	}
 	ref := image
 	if at := strings.Index(ref, "@"); at != -1 {
