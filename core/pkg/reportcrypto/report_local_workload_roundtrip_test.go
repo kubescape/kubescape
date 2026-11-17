@@ -597,3 +597,42 @@ func TestEncryptedMixedEnvelopeReportRoundTrip(t *testing.T) {
 		assert.Equal(t, wantKinds, kinds, stage)
 	}
 }
+
+// A User or Group subject carries the apiGroup of RBAC, so the ID made from it
+// and its file-scanned bindings starts with their "path=" one. The subject has
+// no sourcePath of its own, and its ID is restored from its related objects.
+func TestEncryptedFileScanRBACSubjectWithAnAPIGroupRoundTrip(t *testing.T) {
+	for _, kind := range []string{"User", "Group"} {
+		t.Run(kind, func(t *testing.T) {
+			subject := objectsenvelopes.NewRegoResponseVectorObject(map[string]any{
+				"apiGroup": "rbac.authorization.k8s.io",
+				"kind":     kind,
+				"name":     "jane@acme.example",
+				"relatedObjects": []any{
+					map[string]any{
+						"apiVersion": "rbac.authorization.k8s.io/v1",
+						"kind":       "RoleBinding",
+						"sourcePath": "/home/alice/acme-repo/rbac.yaml:1",
+						"metadata":   map[string]any{"name": "read-pods", "namespace": "default"},
+						"subjects":   []any{map[string]any{"apiGroup": "rbac.authorization.k8s.io", "kind": kind, "name": "jane@acme.example"}},
+						"roleRef":    map[string]any{"apiGroup": "rbac.authorization.k8s.io", "kind": "Role", "name": "pod-reader"},
+					},
+					map[string]any{
+						"apiVersion": "rbac.authorization.k8s.io/v1",
+						"kind":       "Role",
+						"sourcePath": "/home/alice/acme-repo/rbac.yaml:0",
+						"metadata":   map[string]any{"name": "pod-reader", "namespace": "default"},
+					},
+				},
+			})
+			originalID := subject.GetID()
+			require.True(t, strings.HasPrefix(originalID, "path="), originalID)
+
+			decryptedJSON, err := reportcrypto.DecryptReport(encryptedReport(t, subject), []byte(exceptionTestMasterKey))
+
+			require.NoError(t, err)
+			decryptedID, _, _ := soleResource(t, decryptedJSON)
+			assert.Equal(t, originalID, decryptedID)
+		})
+	}
+}
