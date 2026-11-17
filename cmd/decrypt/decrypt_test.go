@@ -686,3 +686,70 @@ func TestDecryptCommandRejectsDirectory(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "is a directory, not a file")
 }
+
+func TestDecryptCommandRejectsEmptyOrWhitespacePath(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		path string
+	}{
+		{name: "empty string", path: ""},
+		{name: "spaces only", path: "   "},
+		{name: "tabs and newlines", path: "\t\n\r"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := GetDecryptCommand()
+			err := cmd.RunE(cmd, []string{tc.path})
+			require.Error(t, err)
+			assert.EqualError(t, err, "report file path cannot be empty")
+		})
+	}
+}
+
+func TestOpenReportRejectsEmptyOrWhitespacePath(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		path string
+	}{
+		{name: "empty string", path: ""},
+		{name: "spaces only", path: "   "},
+		{name: "tabs and newlines", path: "\t\n\r"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			file, err := openReport(tc.path)
+			assert.Nil(t, file)
+			require.Error(t, err)
+			assert.EqualError(t, err, "report file path cannot be empty")
+		})
+	}
+}
+
+func TestDecryptCommandTrimsWhitespaceAroundPath(t *testing.T) {
+	dek, err := reportcrypto.GenerateDEK()
+	require.NoError(t, err)
+	masterKey := []byte("12345678901234567890123456789012")
+	wrappedDEK, err := reportcrypto.WrapReportKey(reportcrypto.UnboundReportKey(dek), masterKey)
+	require.NoError(t, err)
+
+	report := map[string]any{
+		"metadata": map[string]any{
+			"encryptionMetadata": map[string]any{
+				"encryptedDEK": wrappedDEK,
+			},
+		},
+	}
+	data, err := json.Marshal(report)
+	require.NoError(t, err)
+
+	dir := t.TempDir()
+	reportPath := filepath.Join(dir, "report.json")
+	require.NoError(t, os.WriteFile(reportPath, data, 0o600))
+
+	t.Setenv("KUBESCAPE_MASTER_KEY", string(masterKey))
+
+	cmd := GetDecryptCommand()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	err = cmd.RunE(cmd, []string{"  " + reportPath + "  "})
+	require.NoError(t, err)
+	assert.NotEmpty(t, out.String())
+}
