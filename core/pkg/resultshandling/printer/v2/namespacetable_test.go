@@ -2,6 +2,7 @@ package printer
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 
 	"github.com/kubescape/kubescape/v4/core/cautils"
@@ -19,10 +20,10 @@ func TestPrintNamespaceSummaries_Empty(t *testing.T) {
 
 func TestPrintNamespaceSummaries_Rendering(t *testing.T) {
 	tests := []struct {
-		name      string
-		summaries cautils.NamespaceSummaries
-		expected  []string
-		notExpect []string
+		name         string
+		summaries    cautils.NamespaceSummaries
+		expectedRows []string
+		notExpect    []string
 	}{
 		{
 			name: "valid compliance scores format with percentage",
@@ -49,14 +50,11 @@ func TestPrintNamespaceSummaries_Rendering(t *testing.T) {
 					ResourceCount:        8,
 				},
 			},
-			expected: []string{
-				"NAMESPACE",
-				"COMPLIANCE SCORE",
-				"NON-COMPLIANT CONTROLS",
-				"RESOURCES",
-				"production", "85%", "3/20", "15",
-				"staging", "100%", "0/20", "10",
-				"kube-system", "0%", "20/20", "8",
+			expectedRows: []string{
+				"| NAMESPACE | COMPLIANCE SCORE | NON-COMPLIANT CONTROLS | RESOURCES |",
+				"| production | 85% | 3/20 | 15 |",
+				"| staging | 100% | 0/20 | 10 |",
+				"| kube-system | 0% | 20/20 | 8 |",
 			},
 			notExpect: []string{
 				"-1%",
@@ -80,14 +78,23 @@ func TestPrintNamespaceSummaries_Rendering(t *testing.T) {
 					TotalControls:        5,
 					ResourceCount:        2,
 				},
+				{
+					Namespace:            "negative-near-zero-ns",
+					ComplianceScore:      -0.25,
+					NonCompliantControls: 2,
+					TotalControls:        5,
+					ResourceCount:        4,
+				},
 			},
-			expected: []string{
-				"uncalculated-ns", "N/A", "0/0", "5",
-				"negative-fraction-ns", "N/A", "1/5", "2",
+			expectedRows: []string{
+				"| uncalculated-ns | N/A | 0/0 | 5 |",
+				"| negative-fraction-ns | N/A | 1/5 | 2 |",
+				"| negative-near-zero-ns | N/A | 2/5 | 4 |",
 			},
 			notExpect: []string{
 				"-1%",
 				"-0%",
+				"0%",
 			},
 		},
 		{
@@ -108,9 +115,9 @@ func TestPrintNamespaceSummaries_Rendering(t *testing.T) {
 					ResourceCount:        12,
 				},
 			},
-			expected: []string{
-				"default", "N/A", "0/10", "3",
-				"workload-ns", "73%", "4/10", "12",
+			expectedRows: []string{
+				"| default | N/A | 0/10 | 3 |",
+				"| workload-ns | 73% | 4/10 | 12 |",
 			},
 			notExpect: []string{
 				"-1%",
@@ -122,13 +129,20 @@ func TestPrintNamespaceSummaries_Rendering(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			var buf bytes.Buffer
 			printNamespaceSummaries(&buf, tt.summaries)
-			output := buf.String()
+			rawOutput := buf.String()
 
-			for _, exp := range tt.expected {
-				assert.Contains(t, output, exp)
+			var normalizedLines []string
+			for _, line := range strings.Split(rawOutput, "\n") {
+				if trimmed := strings.TrimSpace(line); trimmed != "" {
+					normalizedLines = append(normalizedLines, strings.Join(strings.Fields(trimmed), " "))
+				}
+			}
+
+			for _, expectedRow := range tt.expectedRows {
+				assert.Contains(t, normalizedLines, expectedRow)
 			}
 			for _, notExp := range tt.notExpect {
-				assert.NotContains(t, output, notExp)
+				assert.NotContains(t, rawOutput, notExp)
 			}
 		})
 	}
