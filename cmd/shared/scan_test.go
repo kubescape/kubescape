@@ -840,3 +840,52 @@ func TestValidateCommonScanFlags_SBOMFormats(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateCommonScanFlags_PathFlags(t *testing.T) {
+	flags := []struct {
+		name    string
+		set     func(*cautils.ScanInfo, string)
+		get     func(*cautils.ScanInfo) string
+		wantErr string
+	}{
+		{"output", func(s *cautils.ScanInfo, v string) { s.Output = v }, func(s *cautils.ScanInfo) string { return s.Output }, "output file path cannot be empty"},
+		{"controls-config", func(s *cautils.ScanInfo, v string) { s.ControlsInputs = v }, func(s *cautils.ScanInfo) string { return s.ControlsInputs }, "--controls-config needs a file path"},
+		{"exceptions", func(s *cautils.ScanInfo, v string) { s.UseExceptions = v }, func(s *cautils.ScanInfo) string { return s.UseExceptions }, "--exceptions needs a file path"},
+		{"use-artifacts-from", func(s *cautils.ScanInfo, v string) { s.UseArtifactsFrom = v }, func(s *cautils.ScanInfo) string { return s.UseArtifactsFrom }, "--use-artifacts-from needs a directory path"},
+		{"custom-rules", func(s *cautils.ScanInfo, v string) { s.CustomRules = v }, func(s *cautils.ScanInfo) string { return s.CustomRules }, "--custom-rules needs a path"},
+	}
+
+	for _, f := range flags {
+		for _, ws := range []string{"", "   ", "\t\n"} {
+			t.Run(f.name+"_whitespace", func(t *testing.T) {
+				info := &cautils.ScanInfo{Format: "json"}
+				f.set(info, ws)
+				cmd := &cobra.Command{}
+				cmd.Flags().String(f.name, "", "")
+				require.NoError(t, cmd.Flags().Set(f.name, ws))
+				err := ValidateCommonScanFlags(cmd, info, ScanFormats)
+				require.EqualError(t, err, f.wantErr)
+			})
+		}
+		t.Run(f.name+"_inherited_whitespace", func(t *testing.T) {
+			info := &cautils.ScanInfo{Format: "json"}
+			f.set(info, "   ")
+			parent := &cobra.Command{Use: "parent"}
+			child := &cobra.Command{Use: "child"}
+			parent.AddCommand(child)
+			parent.PersistentFlags().String(f.name, "", "")
+			require.NoError(t, parent.PersistentFlags().Set(f.name, "   "))
+			err := ValidateCommonScanFlags(child, info, ScanFormats)
+			require.EqualError(t, err, f.wantErr)
+		})
+		t.Run(f.name+"_trims_whitespace", func(t *testing.T) {
+			info := &cautils.ScanInfo{Format: "json"}
+			f.set(info, "  path/to/target  ")
+			cmd := &cobra.Command{}
+			cmd.Flags().String(f.name, "", "")
+			require.NoError(t, cmd.Flags().Set(f.name, "  path/to/target  "))
+			require.NoError(t, ValidateCommonScanFlags(cmd, info, ScanFormats))
+			assert.Equal(t, "path/to/target", f.get(info))
+		})
+	}
+}
