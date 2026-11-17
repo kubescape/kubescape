@@ -270,7 +270,7 @@ func (s *server) DidSave(_ context.Context, params *protocol.DidSaveTextDocument
 		return nil
 	}
 	if d, open := s.docs.saved(path); open {
-		coord.saved(path, d.version)
+		coord.saved(d)
 	}
 	return nil
 }

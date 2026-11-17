@@ -133,7 +133,7 @@ func (h *harness) save(path string) {
 	h.t.Helper()
 	d, ok := h.docs.saved(path)
 	require.True(h.t, ok)
-	h.c.saved(path, d.version)
+	h.c.saved(d)
 }
 
 func (h *harness) nextPublish() *protocol.PublishDiagnosticsParams {
@@ -580,4 +580,48 @@ func TestCanonicalKeyFollowsSymlinks(t *testing.T) {
 		t.Skip("symlinks are not available:", err)
 	}
 	assert.Equal(t, canonicalKey(filepath.Join(target, "p.yaml")), canonicalKey(filepath.Join(link, "p.yaml")))
+}
+
+func TestPendingSaveDoesNotBelongToAReopenedDocument(t *testing.T) {
+	for _, dirty := range []bool{false, true} {
+		name := "clean"
+		if dirty {
+			name = "unsaved changes"
+		}
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "pod.yaml")
+			docs := newDocumentStore()
+			docs.open(uriFromPath(path), path, 1)
+			require.True(t, docs.change(path, 2))
+			saved, ok := docs.saved(path)
+			require.True(t, ok)
+			var published []*protocol.PublishDiagnosticsParams
+			c := newCoordinator(docs, []string{filepath.Dir(path)}, func(context.Context, []string) (scanFindings, error) {
+				return findingsFor(true, map[string][]protocol.Diagnostic{path: {diag("disk finding")}}), nil
+			}, func(_ context.Context, p *protocol.PublishDiagnosticsParams) error {
+				published = append(published, p)
+				return nil
+			})
+			c.saved(saved)
+			_, ok = docs.close(path)
+			require.True(t, ok)
+			docs.open(uriFromPath(path), path, 1)
+			if dirty {
+				require.True(t, docs.change(path, 2))
+			}
+
+			// Run the pending scan only after reopening, as if the close and
+			// reopen happened before the save's debounce expired.
+			c.scanOnce(context.Background())
+			if dirty {
+				assert.Empty(t, published, "a previous lifecycle's save cannot authorize disk findings for an unsaved buffer")
+				return
+			}
+			require.Len(t, published, 1, "a clean reopened document still receives disk findings")
+			assert.Equal(t, []string{"disk finding"}, messages(published[0]))
+			version, ok := published[0].Version.Get()
+			require.True(t, ok)
+			assert.Equal(t, int32(1), version)
+		})
+	}
 }
