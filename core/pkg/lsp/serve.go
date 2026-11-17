@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"sync"
 	"time"
 
 	"github.com/kubescape/kubescape/v4/core/core"
@@ -41,7 +42,11 @@ func Serve(ctx context.Context, in io.Reader, out io.Writer, scanner Scanner, op
 // serve is Serve with the scan as a function, for tests.
 func serve(ctx context.Context, in io.Reader, out io.Writer, scan func(context.Context, []string) (scanFindings, error), debounce time.Duration) (int, error) {
 	srv := newServer(scan, debounce)
-	defer srv.close()
+	// The coordinator can be blocked writing diagnostics to a client that stopped
+	// reading, and nothing interrupts that write: the wait for it is bounded, and
+	// made once, so the session still ends.
+	closeServer := sync.OnceFunc(func() { closeWithin(closerFunc(srv.close), closeLimit) })
+	defer closeServer()
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -64,10 +69,10 @@ func serve(ctx context.Context, in io.Reader, out io.Writer, scan func(context.C
 			return code, nil
 		default:
 		}
-		srv.close()
+		closeServer()
 		return srv.codeWithoutExit(), conn.Err()
 	case <-ctx.Done():
-		srv.close()
+		closeServer()
 		return srv.codeWithoutExit(), nil
 	}
 }
@@ -152,4 +157,12 @@ func closeWithin(c io.Closer, limit time.Duration) {
 	case <-done:
 	case <-time.After(limit):
 	}
+}
+
+// closerFunc makes a function that cannot fail an io.Closer, for closeWithin.
+type closerFunc func()
+
+func (f closerFunc) Close() error {
+	f()
+	return nil
 }
