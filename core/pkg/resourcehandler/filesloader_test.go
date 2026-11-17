@@ -1604,10 +1604,10 @@ func TestGetResources_ChartAndFileRoute_EnforcesWorkspaceContainment(t *testing.
 		require.NoError(t, os.WriteFile(outsideFile, []byte("payload\n"), 0o600))
 
 		scanInfo := &cautils.ScanInfo{
-			InputPatterns:  []string{inWsChart},
-			ChartPath:      inWsChart,
-			FilePath:       filepath.Join(inWsChart, "templates", "deployment.yaml"),
-			WorkspaceDir:   wsDir,
+			InputPatterns:     []string{inWsChart},
+			ChartPath:         inWsChart,
+			FilePath:          filepath.Join(inWsChart, "templates", "deployment.yaml"),
+			WorkspaceDir:      wsDir,
 			HelmSetFileValues: []string{"custom=" + outsideFile},
 		}
 		session := cautils.NewOPASessionObj(context.Background(), nil, nil, scanInfo, nil)
