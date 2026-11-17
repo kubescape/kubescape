@@ -2,7 +2,9 @@ package prerequisites
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -43,7 +45,14 @@ func GetPreReqCmd(ks meta.IKubescape) *cobra.Command {
 			if ks != nil && ks.Context() != nil {
 				ctx = ks.Context()
 			}
-			return runPrerequisites(ctx, *kubeconfigPath)
+			path := ""
+			if cmd.Flags().Changed("kubeconfig") {
+				path = strings.TrimSpace(*kubeconfigPath)
+				if path == "" {
+					return errors.New("--kubeconfig requires a file path")
+				}
+			}
+			return runPrerequisites(ctx, path)
 		},
 	}
 
@@ -57,6 +66,7 @@ func GetPreReqCmd(ks meta.IKubescape) *cobra.Command {
 // previously produced false-negative PV results and unsafe Helm recommendations
 // while still exiting 0.
 func runPrerequisites(ctx context.Context, kubeconfigPath string) error {
+	kubeconfigPath = strings.TrimSpace(kubeconfigPath)
 	clientSet, inCluster := buildKubeClient(kubeconfigPath)
 	if clientSet == nil {
 		return fmt.Errorf("could not create kube client")
